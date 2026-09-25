@@ -40,6 +40,7 @@ import { assertSafeTimerDelay } from "../shared/timer-delay.ts";
 import { validateRunArgs } from "./args-validator.ts";
 import {
   closeOutInFlightCalls,
+  dispatchRunCreated,
   finalizeRun,
   handleWorkerError,
   handleWorkerExit,
@@ -347,7 +348,9 @@ function emitPendingRegister(runId: string, deps: LifecycleDeps, spec: RunSpec):
 /**
  * 启动一个 workflow run。
  *
- * 流程：创建 WorkflowRun（running，I1 构造期跳过）+ makeHandlers + 构建 RunRuntime
+ * 流程：创建 WorkflowRun（running，I1 构造期跳过）+ run-created 入队（[Q2/D5]
+ * journal 首帧——dispatchRunCreated 的唯一生产调用点；入队先于 worker 启动，
+ * 落账 await 在 store.save 之后）+ makeHandlers + 构建 RunRuntime
  * （worker+gate+controller）+ assignRuntime（注入 runtime，恢复 I1）+ 注册到
  * deps.runs + store.save。
  *
@@ -378,6 +381,22 @@ export async function runWorkflow(
 
   const run = createRunningRun(runId, spec);
 
+  // [Q2/D5] run-created 正点发射（journal 首帧，唯一生产落点）。入队先于 worker
+  // 启动（竞态结构性消除，L4 A4 附带发现 8 跑 1 实测）：dispatchRunCreated 经
+  // enqueueRunDispatch 同步入队（执行异步），startWorkerGuarded 之后 worker 首个
+  // agent() 的 ask-dispatched 必然排在 created 之后执行——旧实现 created 在
+  // store.save（await 让出事件循环）之后才入队，worker 极快时 ask 帧先入队，在
+  // created 态表外转移被 yielded 吞（丢 6 帧：3×ask-dispatched + 3×ask-settled）。
+  // 修复形态裁决：run-created 入队先行（候选②），候选①「created 态缓冲重放」被
+  // 否——重放 = 靠引导静默补齐时序倒置，与 pump dispatchRunTrigger 的既有裁决
+  // （表外转移 fail-fast 不补投）冲突。await 留在 store.save 之后原位，保持
+  // 「runWorkflow 返回 ⟹ 投影可查」语义不变。
+  // 取舍登记：workerHost.start 抛错路径上 created 帧可能已落 journal（孤儿首帧，
+  // runId 不复用、无 fold 消费方，可接受）；失败 = journal IO 错误，取证面降级
+  // 不阻断创建主链（对齐 SW-DATA-3：error 留痕后继续——此时该 run 的后续事件因
+  // fold 停在 created 而表外转移 fail-fast，事件丢失可归因到本条 error 日志）。
+  const createdDispatch = dispatchRunCreated(run);
+
   // 构造 handlers + runtime（worker + controller）
   const handlers = makeHandlers(run, deps);
   const controller = new AbortController();
@@ -397,6 +416,16 @@ export async function runWorkflow(
 
   await deps.store.save(run);
   deps.log?.("debug", "workflow:lifecycle", "run saved", { runId, status: run.state.status });
+
+  try {
+    await createdDispatch;
+  } catch (err) {
+    const msg = toErrorMessage(err);
+    logger.error(
+      `[workflow] run-created journal dispatch failed (runId=${runId}): ${msg} — ` +
+        "run continues; its event journal stays unseeded (projection falls back to missing state)",
+    );
+  }
 
   // pending-notifications: run 启动 → 注册（runAndWait / actionRun / 未来入口全覆盖）
   deps.log?.("debug", "workflow:lifecycle", "emit pending:register", { runId });

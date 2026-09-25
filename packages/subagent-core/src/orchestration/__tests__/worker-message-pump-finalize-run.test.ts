@@ -325,7 +325,11 @@ describe("budget_limited 终态路径（dispatchAgentCall → finalizeRun）", (
       deps,
       handlers,
     );
-    await flushMicrotasks();
+    // [Q2] flush 40 轮（原 20）：P1b-1 created 引导删除后 run-settled 投递链的
+    // await 边沿数变化，把 finalizeRun coda 尾链（save → 直落 → onRunDone）推出
+    // 20 轮窗口（探针实证：20 轮停在末次 save、40 轮全链走完）——P1b-2 同族先例
+    //（async await 边沿会推出存量 flushMicrotasks 窗口）。
+    await flushMicrotasks(40);
 
     expect(run.state.status).toBe("done");
     expect(run.state.reason).toBe("budget_limited");

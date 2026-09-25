@@ -25,7 +25,10 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SubagentRecord, WorkflowRunRecord, PlanStateView, PlanDocMeta } from '@taiji/shared'
-import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, PLAN_STATE_CUSTOM_TYPE } from '@taiji/shared'
+import { PLAN_STATE_CUSTOM_TYPE } from '@taiji/shared'
+// subagent-record / workflow-record 词表均已收 core 单源（runtime 投影经 core barrel 消费；
+// shared 的 subagent-record 副本仅剩 renderer 消费）
+import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
 import { extractPlanStateFromSessionFile, scanPlanStateEntries, INACTIVE_PLAN_STATE_VIEW } from './plan-state-extractor.js'
 import type { SubagentEngineConfigView, SubagentEnginesFile } from '@zhushanwen/extension-protocol'
 import { SUBAGENTS_ENGINES_FILENAME } from '@zhushanwen/extension-protocol'
@@ -823,7 +826,7 @@ export class SessionRecords {
    * 注释），失效标记透传 + skillNotice 提示（与主链同款，不再静默）。
    *
    * 刻意直接 client.prompt 绕过 dispatcher busy 预检 / BeforeSend hook（对称
-   * promptReload 的绕过模式）：定向消息必须「主 agent 生成中也能发」（设计 §3.3.4
+   * 维护命令直达的绕过模式）：定向消息必须「主 agent 生成中也能发」（设计 §3.3.4
    * 直达目标），且 hook 审核的是主 agent prompt，不适用于 subagent 定向文本。
    */
   async subagentAction(

@@ -178,7 +178,7 @@ cd packages/runtime && npx vitest run test/system-prompt-extension.test.ts test/
 | ⚠️ 长度上限 16000 仅约束 replace | `SYSTEM_PROMPT_MAX_LENGTH`（shared/constants.ts），ConfigService 拒绝超长（ok:false）；append 走 hook 不经 argv 无硬上限，UI 只显示字符数（R3） |
 | ⚠️ 参考区是静态常量不是实时快照 | `DEFAULT_PI_SYSTEM_PROMPT` 是 pi 0.84.1 提取的常量（pi-default-prompt.ts 内含版本标记）；旧「当前生效提示词快照」机制（system-prompt-snapshot.md）已随 builtin→npm 迁移删除，[HISTORICAL] 勿按旧文档找 snapshot testid / `config.getSystemPromptSnapshot` 命令（均已不存在） |
 | ⚠️ corrupted 仅 JSON.parse 失败才置 true | 字段缺失/类型错走 `mergeSystemPromptConfig` 字段级容错（corrupted=false）。只有文件整个不是合法 JSON 才回退默认 + corrupted=true 提示用户 |
-| ⚠️ 全局指令注入受 argv 守卫 | pi 带 `--no-context-files` / `-nc` 启动时 hook 跳过全局 AGENTS.md 注入；subagent 路径靠 argv-mirror 镜像该 flag 保证 opt-out 不被绕过（extensions/subagent-workflow/src/execution/argv-mirror.ts） |
+| ⚠️ 全局指令注入受 argv 守卫 | pi 带 `--no-context-files` / `-nc` 启动时 hook 跳过全局 AGENTS.md 注入，两种形式都判（pi CLI 把 -nc 视为等价短形式）；守卫按各 pi 进程自身 argv 判定——subagent pi 由引擎 CLI 直 spawn（恒定 --no-extensions 基座 + 显式 --extension 白名单），宿主该 flag 不透传其 argv |
 | ⚠️ hook 绝不阻塞 agent | hook 顶层 try/catch 兜底，任何异常返回 `undefined`（放行）+ stderr 诊断。测试注入坏 dataDir 不会让 pi 卡住 |
 | ⚠️ 数据目录双名同根 | 文档/代码中 configDir 与 dataDir 均指 `TAIJI_AGENT_DATA_DIR` 根（dev=`~/.taiji-dev/`，prod=`~/.taiji/`），`system-prompt.json` 两端读到同一文件（extension 经 TAIJI_AGENT_DATA_DIR / PI_CODING_AGENT_DIR 上溯两级解析） |
 

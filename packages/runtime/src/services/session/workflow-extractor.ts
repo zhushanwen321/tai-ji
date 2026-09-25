@@ -7,7 +7,7 @@
  *
  * 数据来源优先级：
  * 1. **自描述 `workflow-record` entry（W17 v1，权威）**：pi-subagent-workflow 每次成功
- *    flush 同步 append 完整 RunSnapshot（customType 常量 = shared WORKFLOW_RECORD_CUSTOM_TYPE，
+ *    flush 同步 append 完整 RunSnapshot（customType 常量 = core WORKFLOW_RECORD_CUSTOM_TYPE，
  *    data = {v:1, snapshot, updatedAt}）。同 runId 多条取最后一条（后者更新）。
  * 2. **legacy 解析（降级兜底）**：无自描述 entry 命中（W17 改造前创建的旧 session）时走
  *    workflow-state-link 指针 entry + state 文件读取。降级表现 = 数据滞后但可用（登记表
@@ -25,7 +25,20 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
+// workflow-record entry 契约（customType / v1 判定）单源 core barrel——壳写点与
+// runtime 投影共用同一词表（原 shared 字面量副本 + 双侧各自 guard 已收敛）。
+import {
+  SNAPSHOT_VERSION,
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  classifyWorkflowRecordEntryData,
+} from '@zhushanwen/subagent-core'
+// RunSnapshot 格式版本（D-5 版本守卫判据）单源 import 自 subagent-core barrel（权威定义
+// orchestration/run-snapshot.ts；extension 侧 jsonl-run-store.ts 留壳消费同一常量）——
+// 无本地字面量副本，runtime 与 extension 的快照格式版本对齐由 workspace 依赖承载。
+// [P3/D6] additive 字段策略：同版本内新增的可选字段（calls[] 条目的 startedAt/
+// lastProgressAt、state.health/outcome/errorCode）读侧无需同步——格式重构（字段改形/
+// 删改）才 bump 版本，additive 面旧读侧按缺省渲染（本文件对缺字段逐项 `??` 缺省，历史
+// run 投影保留）。字段集演进时对照权威源的 projectRunEvents 注释核对（fold 填充面）。
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { isEnoent } from '../../utils/errors.js'
 import { warnOnce } from '../../utils/warn-once.js'
@@ -33,19 +46,15 @@ import type {
   WorkflowRunRecord,
   WorkflowAgentCall,
   WorkflowDoneReason,
+  WorkflowRunOutcome,
+  WorkflowRunStatus,
 } from '@taiji/shared'
 
-/**
- * RunSnapshot 格式版本。版本不匹配跳过（D-5）。
- *
- * 注意：这是 SNAPSHOT_VERSION 的本地副本——跨包依赖方向不允许 runtime import
- * 其他包源码，只能复制字面量。权威源（[u1-move] 随 core 切面迁入 subagent-core）：
- * packages/subagent-core/src/orchestration/run-snapshot.ts 的 SNAPSHOT_VERSION
- * （export const，当前 'wf-run-v2'；extension 侧 jsonl-run-store.ts 留壳 import 消费）。
- * extension 升级格式时必须同步 bump 此处，否则版本守卫会把新快照全部判为不匹配跳过
- * （renderer 侧新 run 无 record，托盘 workflow 面板为空）。
- */
-const SNAPSHOT_VERSION = 'wf-run-v2'
+/** [P3/D6] outcome 词表集合（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunOutcome）。 */
+const WORKFLOW_RUN_OUTCOMES = ['completed', 'failed', 'cancelled'] as const
+
+/** status 合法词表（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunStatus 两态）。 */
+const WORKFLOW_RUN_STATUSES: readonly WorkflowRunStatus[] = ['running', 'done']
 
 /** workflow-state-link entry 的 data 结构（legacy） */
 interface WorkflowStateLinkData {
@@ -69,6 +78,17 @@ interface SnapshotBudget {
   usedTokens: number
   usedCost: number
   totalCallCount?: number
+}
+
+/**
+ * [P3/D6] RunSnapshot.state.calls[] 条目的投影字段面（快照 codec CallSnapshot 的
+ * 读侧子集——本提取器只消费 id 关联键与 fold 派生字段，status/attempts 等聚合权威
+ * 字段不消费（三态直读源是 trace 节点））。
+ */
+interface SnapshotCall {
+  id: number
+  startedAt?: number
+  lastProgressAt?: number
 }
 
 /** RunSnapshot.state.trace[] 节点结构（RunSnapshot 序列化时 strip live 字段） */
@@ -173,23 +193,36 @@ function collectSelfDescribedWorkflowRecords(entries: unknown[]): WorkflowRunRec
 /**
  * 单条 entry → RunSnapshot（type/customType/data/版本/runId 存在性逐层守卫，坏 entry 返回
  * null）。同 runId 后出现的覆盖前面的（entry 顺序 = 时间顺序，后者更新）。
+ *
+ * v1 判定单源 core classifyWorkflowRecordEntryData（reason 词表见其模块注释）；本侧
+ * 保留日志策略与 warnOnce 键去重：missing-v/future-v → warnOnce 留证（版本 skew 可
+ * 观测），wrong-type/no-snapshot → 静默跳过（收敛前行为逐分支保持）。
  */
 function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null {
   if (typeof entry !== 'object' || entry === null) return null
   const e = entry as JsonlCustomEntry
   if (e.type !== 'custom' || e.customType !== WORKFLOW_RECORD_CUSTOM_TYPE) return null
-  const data = e.data
-  if (typeof data !== 'object' || data === null) return null
-  const d = data as Record<string, unknown>
-  if (d.v !== 1) {
-    console.warn(
-      `[workflow-extractor] workflow-record entry schema version '${String(d.v)}' unsupported (expected 1) — ` +
+  const classification = classifyWorkflowRecordEntryData(e.data)
+  if (!classification.ok) {
+    if (classification.reason === 'wrong-type' || classification.reason === 'no-snapshot') return null
+    // missing-v / future-v：warnOnce 去重键取 snapshot.runId + 坏版本值（热路径重扫同一坏
+    // entry 只出声一次；snapshot 缺失/无 runId 回退固定键——该形态本身已无 run 可归因）。
+    // data 此时必为对象（wrong-type 已排除），cast 仅为读取日志键字段。
+    const raw = e.data as Record<string, unknown>
+    const snapForId = raw.snapshot
+    const entryRunId = typeof snapForId === 'object' && snapForId !== null
+      && typeof (snapForId as Record<string, unknown>).runId === 'string'
+      ? ((snapForId as Record<string, unknown>).runId as string)
+      : '(no runId)'
+    warnOnce(
+      `entry-schema:${entryRunId}:${String(raw.v)}`,
+      `[workflow-extractor] workflow-record entry schema version '${String(raw.v)}' unsupported (expected 1) — ` +
         `extension/runtime version skew, skip this entry. Fix: align schema with ` +
         `extensions/universal/subagent-workflow/src/jsonl-run-store.ts (W17 v1).`,
     )
     return null
   }
-  const snapshot = d.snapshot
+  const snapshot = classification.snapshot
   if (typeof snapshot !== 'object' || snapshot === null) return null
   const snap = snapshot as Record<string, unknown>
   // runId 存在性守卫（snapshot 内嵌完整 runId；无 runId 视为坏 entry 跳过）
@@ -306,7 +339,8 @@ function readAndMapSnapshot(runId: string, stateFilePath: string): WorkflowRunRe
 
 /**
  * 已解析 snapshot（state 文件行 / workflow-record entry 内嵌）→ 结构校验 + 版本守卫 +
- * 映射 WorkflowRunRecord。坏结构 / 版本不匹配 → null（跳过该 run）。
+ * 核心必填字段值级守卫 + 映射 WorkflowRunRecord。坏结构 / 版本不匹配 / 核心字段值非法
+ * → null（跳过该 run，warnOnce 留痕）。
  *
  * [W18] 自 legacy readAndMapSnapshot 抽出共用：state 文件路径（legacy）与自描述 entry
  * 路径（stateFilePath = ''）同守卫同映射，两路派生行为一致。
@@ -335,12 +369,14 @@ function mapValidatedSnapshot(runId: string, parsed: unknown, stateFilePath: str
   // extension 先发版（npm-* tag 独立管线）而 app 未跟上时，版本守卫会把新 run 全部
   // 判为不匹配跳过（renderer 侧新 run 无 record，托盘 workflow 面板为空），无日志则该版本漂移不可观测。
   if (snapshot.v !== SNAPSHOT_VERSION) {
-    console.warn(
+    // warnOnce 按 runId/路径去重（热路径反复重扫同一 run 只出声一次，形态对齐上方
+    // state 文件路径的 warnOnce 用法）
+    warnOnce(
+      `snapshot-version:${stateFilePath || 'workflow-record'}:${runId}`,
       `[workflow-extractor] snapshot version '${String(snapshot.v)}' unsupported (expected '${SNAPSHOT_VERSION}') — ` +
         `extension/runtime version skew, skip run ${runId} (${stateFilePath || 'workflow-record entry'}). ` +
-        `Fix: bump SNAPSHOT_VERSION in workflow-extractor.ts to match ` +
-        `packages/subagent-core/src/orchestration/run-snapshot.ts (consumed via ` +
-        `extensions/universal/subagent-workflow/src/jsonl-run-store.ts; see header comment).`,
+        `Fix: align the app runtime with the bundled @zhushanwen/pi-subagent-workflow extension ` +
+        `(SNAPSHOT_VERSION single source: packages/subagent-core/src/orchestration/run-snapshot.ts).`,
     )
     return null
   }
@@ -353,7 +389,90 @@ function mapValidatedSnapshot(runId: string, parsed: unknown, stateFilePath: str
   // 按坏行跳过；数组内的 null 项在 mapSnapshotToRecord 过滤（项级隔离，不弃整个 run）。
   if (!Array.isArray((body.state as Record<string, unknown>).trace)) return null
 
+  // 核心必填字段值级守卫：mapSnapshotToRecord 直接透传的 scriptName/status/startedAt
+  // 消费方按非空/词表/可解析时间语义消费，谎报类型的值（截断写 / 外部覆写产出）会使
+  // record 进入列表但渲染坏行——按坏行跳过该 run 并 warn（对齐上方既有「坏行跳过」
+  // 语义与同文件 collectCallProgress 的值级防御哲学）。
+  const coreIssue = coreProjectionFieldIssue(snapshot)
+  if (coreIssue !== null) {
+    warnOnce(
+      `core-fields:${stateFilePath || 'workflow-record'}:${runId}`,
+      `[workflow-extractor] snapshot core field invalid, run no longer listed: runId=${runId}, ` +
+        `path=${stateFilePath || 'workflow-record entry'}, issue=${coreIssue}`,
+    )
+    return null
+  }
+
   return mapSnapshotToRecord(snapshot, stateFilePath)
+}
+
+/**
+ * 核心必填字段值级守卫（mapSnapshotToRecord 直接透传三字段的校验点）。
+ * 返回首个不合法字段的描述（诊断用）或 null = 全部合法：
+ * - spec.scriptName：非空 string（record 直透，列表/详情展示键）；
+ * - state.status：∈ WorkflowRunStatus 词表（running/done，renderer 状态徽标按词表消费）；
+ * - meta.startedAt：非空 string 且可解析为有限时间（ISO 契约，写点 = subagent-core
+ *   lifecycle.ts 的 meta.startedAt toISOString；非有限时间串 = 损坏数据）。
+ */
+function coreProjectionFieldIssue(snapshot: RunSnapshot): string | null {
+  const spec = snapshot.spec as Record<string, unknown>
+  if (typeof spec.scriptName !== 'string' || spec.scriptName.length === 0) {
+    return `spec.scriptName invalid (${typeof spec.scriptName})`
+  }
+  const state = snapshot.state as Record<string, unknown>
+  if (!(WORKFLOW_RUN_STATUSES as readonly unknown[]).includes(state.status)) {
+    return `state.status invalid (${String(state.status)})`
+  }
+  const meta = snapshot.meta as Record<string, unknown>
+  if (
+    typeof meta.startedAt !== 'string' || meta.startedAt.length === 0
+    || !Number.isFinite(Date.parse(meta.startedAt))
+  ) {
+    return `meta.startedAt invalid (${typeof meta.startedAt})`
+  }
+  return null
+}
+
+/**
+ * [P3/D6] state.calls[] → id → lastProgressAt 投影映射（快照数据不可信，值级守卫
+ * 后收录；calls 条目缺失/坏形只影响对应 ask 的进度字段，不影响 run 投影——坏项
+ * 隔离到项级，对齐 trace 映射的防御哲学）。
+ */
+function collectCallProgress(snapshot: RunSnapshot): Map<number, number> {
+  const progress = new Map<number, number>()
+  const rawCalls = snapshot.state.calls
+  if (!Array.isArray(rawCalls)) return progress
+  for (const raw of rawCalls) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const call = raw as Partial<SnapshotCall>
+    if (typeof call.id !== 'number') continue
+    if (typeof call.lastProgressAt !== 'number' || !Number.isFinite(call.lastProgressAt)) continue
+    progress.set(call.id, call.lastProgressAt)
+  }
+  return progress
+}
+
+/**
+ * [P3/D6] state.health / state.outcome / state.errorCode 值级守卫（additive 读——
+ * 旧快照缺字段返回缺省；字段漂移不炸投影，缺省渲染）。
+ */
+function readRunLevelProjection(snapshot: RunSnapshot): Pick<WorkflowRunRecord, 'health' | 'outcome' | 'errorCode'> {
+  const rawState = snapshot.state as Record<string, unknown>
+  const rawHealth = rawState.health
+  const health =
+    typeof rawHealth === 'object' && rawHealth !== null &&
+    typeof (rawHealth as { lastProgressAt?: unknown }).lastProgressAt === 'number' &&
+    Number.isFinite((rawHealth as { lastProgressAt: number }).lastProgressAt)
+      ? { lastProgressAt: (rawHealth as { lastProgressAt: number }).lastProgressAt }
+      : undefined
+  const rawOutcome = rawState.outcome
+  const outcome =
+    typeof rawOutcome === 'string' && (WORKFLOW_RUN_OUTCOMES as readonly string[]).includes(rawOutcome)
+      ? (rawOutcome as WorkflowRunOutcome)
+      : undefined
+  const rawErrorCode = rawState.errorCode
+  const errorCode = typeof rawErrorCode === 'string' && rawErrorCode.length > 0 ? rawErrorCode : undefined
+  return { health, outcome, errorCode }
 }
 
 /** 映射 RunSnapshot → WorkflowRunRecord（含 trace → agentCalls 映射） */
@@ -361,9 +480,10 @@ function mapSnapshotToRecord(snapshot: RunSnapshot, stateFilePath: string): Work
   // [review 修复 R4] trace 数组内的 null 项按坏项过滤（mapTraceNode 的 node.result
   // 访问对 null 项抛 TypeError）——保留其余合法项，run 本身不跳过（坏项隔离到项级，
   // 上方 Array.isArray 守卫已保证 trace 是数组，?? 仅为函数级防御保留）
+  const callProgress = collectCallProgress(snapshot)
   const agentCalls: WorkflowAgentCall[] = (snapshot.state.trace ?? [])
     .filter((node): node is SnapshotTraceNode => typeof node === 'object' && node !== null)
-    .map(mapTraceNode)
+    .map((node) => mapTraceNode(node, callProgress.get(node.stepIndex)))
 
   return {
     runId: snapshot.runId,
@@ -379,11 +499,12 @@ function mapSnapshotToRecord(snapshot: RunSnapshot, stateFilePath: string): Work
     totalCallCount: snapshot.state.budget?.totalCallCount,
     agentCalls,
     stateFilePath,
+    ...readRunLevelProjection(snapshot),
   }
 }
 
-/** 映射单个 trace 节点 → WorkflowAgentCall */
-function mapTraceNode(node: SnapshotTraceNode): WorkflowAgentCall {
+/** 映射单个 trace 节点 → WorkflowAgentCall（lastProgressAt = [P3/D6] calls[] 合并项，可缺省） */
+function mapTraceNode(node: SnapshotTraceNode, lastProgressAt: number | undefined): WorkflowAgentCall {
   const usage = node.result?.usage
   return {
     id: node.stepIndex,
@@ -400,5 +521,7 @@ function mapTraceNode(node: SnapshotTraceNode): WorkflowAgentCall {
     turns: usage?.turns,
     // 顶层 error 优先于 result.error（顶层 error 是 dispatchAgentCall 写的运行期错误）
     error: node.error ?? node.result?.error,
+    // [P3/D6] 事件边沿投影字段（calls[] 按 id 合并；旧快照缺省 undefined）
+    lastProgressAt,
   }
 }

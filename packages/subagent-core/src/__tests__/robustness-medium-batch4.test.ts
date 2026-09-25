@@ -138,7 +138,10 @@ describe("M4: dispatchAgentCall validates IPC fields before dereferencing", () =
 
       expect(run.state.trace.toArray().length).toBe(0);
       expect(run.state.calls.size).toBe(0);
-      expect(postMessage).not.toHaveBeenCalled();
+      // 加固语义（oe-harden）：callId 合法的畸形载荷回发 error result 收敛 worker 侧
+      // pending（旧行为 = 仅日志不回发，worker 内该 callId 永久悬挂且无墙钟兜底）
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
     } finally {
       restore();
     }
@@ -160,7 +163,8 @@ describe("M4: dispatchAgentCall validates IPC fields before dereferencing", () =
 
       expect(run.state.trace.toArray().length).toBe(0);
       expect(run.state.calls.size).toBe(0);
-      expect(postMessage).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
     } finally {
       restore();
     }
@@ -182,7 +186,8 @@ describe("M4: dispatchAgentCall validates IPC fields before dereferencing", () =
 
       expect(run.state.trace.toArray().length).toBe(0);
       expect(run.state.calls.size).toBe(0);
-      expect(postMessage).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
     } finally {
       restore();
     }
@@ -293,7 +298,8 @@ describe("M4: dispatchWorkflowCall validates IPC fields before dereferencing", (
       );
 
       expect(deps.onWorkflowCall).not.toHaveBeenCalled();
-      expect(postMessage).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
     } finally {
       restore();
     }
@@ -314,7 +320,8 @@ describe("M4: dispatchWorkflowCall validates IPC fields before dereferencing", (
       );
 
       expect(deps.onWorkflowCall).not.toHaveBeenCalled();
-      expect(postMessage).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
     } finally {
       restore();
     }

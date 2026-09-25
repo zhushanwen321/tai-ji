@@ -402,3 +402,84 @@ describe("W2c: postAgentResult 防御（源码结构断言）", () => {
     expect(match![0]).toMatch(/catch \(err\)/);
   });
 });
+
+// ── [加固] malformed 消息回发 error result ──
+//
+// 原 malformed agent-call / workflow-call 仅 logger 后 return：worker 内按 callId 等
+// 待的 pending Promise 永不 resolve（无墙钟兜底覆盖）。加固后 callId 合法（worker 侧
+// 存在对应 pending）即回发可克隆 error result；callId 非法无法定向回发，仅日志。
+
+describe("[加固] malformed 消息回发 error result（worker pending 收敛）", () => {
+  it("malformed agent-call（opts 缺失）+ callId 合法 → 回发 agent-result error result（malformed message dropped）", async () => {
+    const restore = silenceConsoleError();
+    try {
+      const postMessage = vi.fn();
+      const run = makeRunningRun(postMessage);
+
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: 5 } as never, // opts 缺失 = malformed
+        makeDeps(),
+        makeHandlers(),
+      );
+      await flushMicrotasks();
+
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      const posted = postedAt(postMessage, 0);
+      expect(posted.type).toBe("agent-result");
+      expect(posted.callId).toBe(5);
+      expect(posted.result?.content).toBe("");
+      expect(posted.result?.error).toContain("malformed message dropped");
+      expect(posted.cached).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("malformed agent-call + callId 非法 → 无法定向回发（零 postMessage），仅日志", async () => {
+    const restore = silenceConsoleError();
+    try {
+      const postMessage = vi.fn();
+      const run = makeRunningRun(postMessage);
+
+      await handleWorkerMessage(
+        run,
+        { type: "agent-call", callId: "not-a-number" } as never,
+        makeDeps(),
+        makeHandlers(),
+      );
+      await flushMicrotasks();
+
+      expect(postMessage).not.toHaveBeenCalled();
+      const errorCalls = loggerMock.error.mock.calls.map((c) => c[0] as string);
+      expect(errorCalls.some((s) => s.includes("malformed agent-call message"))).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it("malformed workflow-call（args null）+ callId 合法 → 回发 workflow-result error result", async () => {
+    const restore = silenceConsoleError();
+    try {
+      const postMessage = vi.fn();
+      const run = makeRunningRun(postMessage);
+
+      await handleWorkerMessage(
+        run,
+        { type: "workflow-call", callId: 6, name: "sub", args: null },
+        makeDeps(),
+        makeHandlers(),
+      );
+      await flushMicrotasks();
+
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      const posted = postedAt(postMessage, 0);
+      expect(posted.type).toBe("workflow-result");
+      expect(posted.callId).toBe(6);
+      expect(posted.result?.content).toBe("");
+      expect(posted.result?.error).toContain("malformed message dropped");
+    } finally {
+      restore();
+    }
+  });
+});

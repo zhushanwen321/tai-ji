@@ -34,35 +34,6 @@ import { toErrorMessage } from "./error-message.ts";
 const logger = getLogger("subagents");
 
 /**
- * EPIPE 连续失败计数器（record.id → 连续 EPIPE 次数）。
- *
- * 错误处理两半面共用本计数器（合并计数，防 spawn→EPIPE→resume 死循环）：
- *   ① 同步 write 抛错（writeStdinLine throw → interact 热路径 catch 递增）
- *   ② 异步 stream 'error' event（spawn-runner 的 child.stdin.on('error') 递增）
- */
-const epipeConsecutiveFailures = new Map<string, number>();
-
-/** 连续 EPIPE 失败阈值：达到即不再尝试 resume（避免无限 spawn → EPIPE → resume 循环）。 */
-export const EPIPE_FAILURE_THRESHOLD = 2;
-
-/** 递增 recordId 的 EPIPE 连续失败计数，返回递增后的新计数。 */
-export function recordEpipeFailure(recordId: string): number {
-  const count = (epipeConsecutiveFailures.get(recordId) ?? 0) + 1;
-  epipeConsecutiveFailures.set(recordId, count);
-  return count;
-}
-
-/** 成功写入时清零某 record 的 EPIPE 连续失败计数（热路径成功 → 重置）。 */
-export function clearEpipeFailure(recordId: string): void {
-  epipeConsecutiveFailures.delete(recordId);
-}
-
-/** dispose 时清空所有 EPIPE 计数（防跨 session 泄漏）。 */
-export function resetAllEpipeFailures(): void {
-  epipeConsecutiveFailures.clear();
-}
-
-/**
  * 按 UiResponse 形状构造 Pi 原生 extension_ui_response 并写 stdin。
  *
  * SR-5：ack（fire-and-forget）不写 stdin——Pi 对 fire-and-forget method 不期待响应。
@@ -100,7 +71,12 @@ export function sendPromptCommand(
   task: string,
   options?: { streamingBehavior?: "followUp" | "steer" },
 ): void {
-  if (!child.stdin || child.stdin.destroyed) return;
+  if (!child.stdin || child.stdin.destroyed) {
+    // prompt 是 rpc mode 唯一任务驱动通道：投递失败 = 任务不会被驱动，静默返回会让
+    // run 悬挂到退出路径才收敛——warn 留痕（run 收敛依赖子进程 exit/close 兜底）。
+    logger.warn("[subagents] prompt command not delivered: child stdin missing or already destroyed; the run will settle via the child exit path");
+    return;
+  }
   const line = buildPromptCommandFrame(crypto.randomUUID(), {
     message: task,
     ...(options?.streamingBehavior !== undefined ? { streamingBehavior: options.streamingBehavior } : {}),

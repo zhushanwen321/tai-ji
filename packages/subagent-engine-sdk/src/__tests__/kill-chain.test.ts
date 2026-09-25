@@ -251,3 +251,105 @@ describe("abortWithFallback（abort 两级中断编排）", () => {
     expect(child.signals).toEqual([]);
   });
 });
+
+// ============================================================
+// [D9-2 杀伤半径收窄] killPidChain / probePidAlive（run 级 pid 杀链，宿主侧消费）
+// ============================================================
+
+import { killPidChain, probePidAlive } from "../kill-chain.ts";
+
+describe("killPidChain（run 级单 pid 杀链——SIGTERM → grace → SIGKILL，绝不组杀）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    resetLoggerSinkForTests();
+  });
+
+  /** process.kill 打桩：模拟 pid 存活态（alive=false 后 kill(pid, 0) 报 ESRCH）。 */
+  function stubProcessKill(pid: number, state: { alive: boolean; signals: NodeJS.Signals[] }): void {
+    vi.spyOn(process, "kill").mockImplementation(((target: number, signal?: NodeJS.Signals | number) => {
+      if (target !== pid) throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+      if (!state.alive) throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+      if ((signal ?? 0) === 0) return true;
+      state.signals.push(signal as NodeJS.Signals);
+      if (signal === "SIGTERM") state.alive = false; // 假想进程对 SIGTERM 即刻退出
+      return true;
+    }) as typeof process.kill);
+  }
+
+  it("SIGTERM 即达；grace 窗内进程退出 → 不升级 SIGKILL", () => {
+    const state = { alive: true, signals: [] as NodeJS.Signals[] };
+    stubProcessKill(4242, state);
+    killPidChain(4242, { graceMs: SHORT_GRACE_MS, note: "run run-a topology child" });
+    expect(state.signals).toEqual(["SIGTERM"]);
+    vi.advanceTimersByTime(SHORT_GRACE_MS);
+    expect(state.signals).toEqual(["SIGTERM"]); // 已死（kill(0) ESRCH）→ 升级跳过
+  });
+
+  it("grace 窗后仍存活 → 升级 SIGKILL（warn 留痕带 note 与 pid）", () => {
+    const logs = captureSink();
+    const state = { alive: true, signals: [] as NodeJS.Signals[] };
+    // 打桩语义：SIGTERM 不杀（进程不理会信号），SIGKILL 后探针转死。
+    vi.spyOn(process, "kill").mockImplementation(((target: number, signal?: NodeJS.Signals | number) => {
+      if (target !== 5151) throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+      if ((signal ?? 0) === 0) {
+        if (!state.alive) throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+        return true;
+      }
+      state.signals.push(signal as NodeJS.Signals);
+      if (signal === "SIGKILL") state.alive = false;
+      return true;
+    }) as typeof process.kill);
+    killPidChain(5151, { graceMs: SHORT_GRACE_MS, note: "run run-b topology child" });
+    expect(state.signals).toEqual(["SIGTERM"]);
+    vi.advanceTimersByTime(SHORT_GRACE_MS);
+    expect(state.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    const warn = logs.filter((l) => l.level === "warn")[0]?.msg ?? "";
+    expect(warn).toContain("run run-b topology child");
+    expect(warn).toContain("5151");
+  });
+
+  it("已死 pid（kill 即抛 ESRCH）→ 全程 no-op 不抛（信号幂等吞掉）", () => {
+    const logs = captureSink();
+    const state = { alive: false, signals: [] as NodeJS.Signals[] };
+    stubProcessKill(6262, state);
+    expect(() => killPidChain(6262, { graceMs: SHORT_GRACE_MS })).not.toThrow();
+    vi.advanceTimersByTime(SHORT_GRACE_MS);
+    expect(state.signals).toEqual([]);
+    expect(logs.some((l) => l.msg.includes("already dead = expected"))).toBe(true);
+  });
+
+  it("escalation timer unref（回收兜底不阻塞宿主退出）", () => {
+    stubProcessKill(7373, { alive: true, signals: [] });
+    const realSetTimeout = globalThis.setTimeout;
+    const unrefSpy = vi.fn();
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void, ms?: number) => {
+      const t = realSetTimeout(fn, ms);
+      (t as unknown as { unref: () => void }).unref = unrefSpy;
+      return t;
+    }) as typeof setTimeout);
+    killPidChain(7373, { graceMs: SHORT_GRACE_MS });
+    expect(unrefSpy).toHaveBeenCalled();
+  });
+});
+
+describe("probePidAlive（三态存活探针：true / false(ESRCH) / undefined(不可判定保守按存活)）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("kill(pid, 0) 成功 → true；ESRCH → false；EPERM → undefined", () => {
+    vi.spyOn(process, "kill").mockImplementation(((target: number, signal?: NodeJS.Signals | number) => {
+      if (target === 1001) return true;
+      if (target === 1002) throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+      if (target === 1003) throw Object.assign(new Error("operation not permitted"), { code: "EPERM" });
+      return true;
+    }) as typeof process.kill);
+    expect(probePidAlive(1001)).toBe(true);
+    expect(probePidAlive(1002)).toBe(false);
+    expect(probePidAlive(1003)).toBeUndefined();
+  });
+});

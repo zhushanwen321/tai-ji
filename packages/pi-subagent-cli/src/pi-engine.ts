@@ -42,7 +42,6 @@ import { toErrorMessage } from "./error-message.ts";
 import type { AgentCallOpts, EngineHandle, EnginePort, EngineCtxModel, RunContext } from "./port-types.ts";
 import type { PiInvocation } from "./pi-invocation.ts";
 import { getPiInvocation } from "./pi-invocation.ts";
-import { resetAllEpipeFailures } from "./stdin-writer.ts";
 import {
   killAllActiveChildren,
   type SpawnRunCallbacks,
@@ -60,10 +59,10 @@ const PROBE_VERSION_TIMEOUT_MS = 10_000;
 /** PiEngine 构造依赖。 */
 export interface PiEngineDeps {
   /**
-   * 数据根（session 目录 [LEGACY] fallback 与 journal 重放的锚）。来源 = 显式注入
+   * 数据根（journal 重放的锚 + run 前置 fail-fast 校验对象）。来源 = 显式注入
    * 或 env TAIJI_AGENT_DATA_DIR——注意协议 initialize 的 hostInfo.dataRoot 引擎**不
    * 消费**（initialize 仅版本协商 + capabilities 应答）；权威 session 目录也不由
-   * 它推导（ctx.sessionDir 宿主注入，Option C）。两者皆无时 run 报错
+   * 它推导（ctx.sessionDir 宿主注入，Option C）。缺失时 run 报错
    * （resolveEngineDataRootOrThrow 语义，显式报 engine_not_found 附期望路径，不猜
    * cwd）。
    */
@@ -72,17 +71,6 @@ export interface PiEngineDeps {
   probeVersion?: (invocation: PiInvocation) => Promise<string | undefined>;
   /** spawn 执行器（测试注入 fake；缺省 runSpawnOnce）。 */
   spawnRunner?: (params: Parameters<typeof runSpawnOnce>[0], callbacks: SpawnRunCallbacks) => Promise<SpawnRunResult>;
-}
-
-/** subagent session 目录的 [LEGACY] fallback（仅独立运行/测试形态）：旧推导
- *  <dataDir>/subagents/sessions/<encoded(cwd)> 与宿主权威布局
- *  <agentDir>/subagents/<encodeCwd(rootCwd)>/sessions 三处不等价（根/段序/编码），
- *  曾致 session 文件与 .record-binding 落到宿主冷查扫描根之外（Gate B S6 全灭）。
- *  权威 = 宿主注入 ctx.sessionDir（协议化 Option C，宿主 getSubagentSessionDir
- *  单一权威）；本函数只在 ctx.sessionDir 缺省（旧宿主/直构引擎/测试）时兜底。 */
-function resolveSessionDir(dataDir: string, cwd: string): string {
-  const encoded = cwd.replace(/[^a-zA-Z0-9_-]+/g, "_");
-  return path.join(dataDir, "subagents", "sessions", encoded);
 }
 
 /** 数据根解析：显式注入 > env；皆无 → undefined（run/probe 时显式报错）。 */
@@ -125,7 +113,8 @@ export class PiEngine implements EnginePort {
       resume: "native",
       // 现链路 abort = SIGTERM（pi 子进程 trap 后 graceful shutdown）
       interrupt: "kill-only",
-      // argv-mirror 镜像主进程 --approve 等 flag
+      // pi rpc 模式非交互（approval 不经 argv；--approve 是 project-local files
+      // 信任语义，非工具批准），子代理工具执行无需批准回路
       permissionMode: "native",
       // turn limiter + spawn watchdog 估算兑现轮数上限
       maxTurns: true,
@@ -187,14 +176,17 @@ export class PiEngine implements EnginePort {
    * ctx.onHandleReady（→ host/handleReady）；子进程 pid/状态经镜像回调上报。
    * 抛错语义（core PiEngine.run ①）：prepare 期失败 reject，不产生 handle。 */
   async run(task: AgentCallOpts, ctx: RunContext): Promise<{ handle: EngineHandle; outcome: AgentOutcome }> {
-    const dataDir = resolveEngineDataRootOrThrow(this.deps.dataDir);
+    // dataRoot 前置 fail-fast（缺失即 engine_not_found，prepare 期 reject 不产生
+    // handle）。dataDir 本身不参与 sessionDir 推导——session 目录唯一源 = 宿主注入
+    // ctx.sessionDir（Option C）。
+    resolveEngineDataRootOrThrow(this.deps.dataDir);
     // [池抽象降级 2026-09-13] 原 onPoolResolved 恒值声明已随 poolKey 协议面退役删除
     //（journal 固定落 engines/pi/shared/，宿主侧路径构造即终值）。
 
     const cwd = task.cwd ?? process.cwd();
     const spawn = this.deps.spawnRunner ?? runSpawnOnce;
     const result = await spawn(
-      buildRunParams(task, ctx, dataDir, cwd),
+      buildRunParams(task, ctx, cwd),
       buildRunCallbacks(ctx, this.askUserHandler),
     );
     return buildEngineRunResult(ctx.resume?.recordId ?? ctx.taskId, result);
@@ -206,17 +198,14 @@ export class PiEngine implements EnginePort {
    * core，不随迁（deviations 登记）。
    */
   async read(handle: EngineHandle): Promise<SessionView> {
-    const sessionFile = refString(handle.data.sessionRef, "sessionFile");
     const journaled = replayJournalToSessionView(handle, PI_ENGINE_ID);
     if (journaled !== undefined) return journaled;
-    void sessionFile;
     return { engineId: PI_ENGINE_ID, turns: [], source: "outcome-only" };
   }
 
-  /** dispose：全量收割活跃子进程 + 清 EPIPE 计数（幂等）。 */
+  /** dispose：全量收割活跃子进程（幂等）。 */
   async dispose(): Promise<void> {
     killAllActiveChildren();
-    resetAllEpipeFailures();
   }
 
   // ── 反向通道注入面（server 构造后接线 host/askUser） ──
@@ -237,8 +226,8 @@ function resolveEngineDataRootOrThrow(explicit: string | undefined): string {
     "engine_not_found",
     "pi-subagent-cli cannot resolve the engine data root (neither the explicit deps.dataDir nor env TAIJI_AGENT_DATA_DIR is set)",
     "The host must inject TAIJI_AGENT_DATA_DIR into the engine child env (initialize hostInfo.dataRoot is "
-      + "not consumed by this engine). Expected shape: <taiji dataDir> (legacy fallback sessions live "
-      + "under <dataDir>/subagents/sessions/; authoritative sessionDir arrives per-run via ctx.sessionDir).",
+      + "not consumed by this engine). Expected shape: <taiji dataDir>. Note the authoritative sessionDir "
+      + "is injected per-run via ctx.sessionDir and is not derived from the data root.",
   );
 }
 
@@ -251,22 +240,38 @@ function resolveEngineDataRootOrThrow(explicit: string | undefined): string {
 function buildRunParams(
   task: AgentCallOpts,
   ctx: RunContext,
-  dataDir: string,
   cwd: string,
 ): SpawnRunParams {
   const resumeParams = ctx.resume;
   const resumeFile = resolveResumeSessionFile(resumeParams);
+  // [Option C 协议化] session 目录唯一源 = 宿主注入 ctx.sessionDir（宿主
+  // getSubagentSessionDir 推导，恒有值上 wire；server 版本门禁结构性排除旧宿主）。
+  // 缺失 = 宿主接线错误，fail-fast 不猜——自推导目录与宿主布局不等价，产出的
+  // session 文件与 .record-binding 会落到宿主冷查扫描根之外（读取期才暴露）。
+  const sessionDir = ctx.sessionDir;
+  if (sessionDir === undefined || sessionDir === "") {
+    throw missingSessionDirError();
+  }
   return {
     task: task.prompt,
     ...buildRunIdentityParams(task, ctx, resumeParams !== undefined),
     ...buildRunOptionalFlags(task, ctx),
-    // [Option C 协议化] session 目录：宿主注入 ctx.sessionDir 权威优先（宿主
-    // getSubagentSessionDir 推导）；缺省走 [LEGACY] fallback（独立运行/测试形态，
-    // 旧推导与宿主布局不等价——见 resolveSessionDir 注释）。
-    sessionDir: ctx.sessionDir ?? resolveSessionDir(dataDir, cwd),
+    sessionDir,
     cwd,
     ...buildRunResumeFlags(resumeFile),
   };
+}
+
+/** ctx.sessionDir 缺失的具名错误（对齐 resolveEngineDataRootOrThrow 的 fail-fast
+ * 先例：错误码 + 指向恢复动作的 recovery，不静默兜底）。 */
+function missingSessionDirError(): EngineSdkError {
+  return new EngineSdkError(
+    "engine_not_found",
+    "pi-subagent-cli run requires ctx.sessionDir (the authoritative subagent session directory injected by the host per-run), but it is missing on this run's ctx",
+    "The host must derive and inject ctx.sessionDir on every run (host getSubagentSessionDir, wired through the protocol run.params.ctx). "
+      + "The engine does not fall back to a self-derived directory: derived paths sit outside the host's session scan roots, so session files "
+      + "and .record-binding markers would become invisible to host reads. Fix the host wiring, then re-dispatch the run.",
+  );
 }
 
 /** resume 锚点提取：ctx.resume.resume.sessionRef.sessionFile → spawn-args `--session`
@@ -298,7 +303,9 @@ function buildRunIdentityParams(
 function buildRunOptionalFlags(task: AgentCallOpts, ctx: RunContext): Partial<SpawnRunParams> {
   return {
     ...(task.thinkingLevel !== undefined ? { thinkingLevel: task.thinkingLevel } : {}),
-    ...(task.schemaEnv !== undefined ? { schemaEnv: task.schemaEnv } : {}),
+    // [D1 schema 传输归位] schema 本体经 wire task.schema 单字段透传（env 字符串
+    // 不再跨层——PI_WORKFLOW_SCHEMA 值由 spawn-runner 从本体派生）
+    ...(task.schema !== undefined ? { schema: task.schema } : {}),
     ...(task.maxTurns !== undefined ? { maxTurns: task.maxTurns } : {}),
     ...(task.graceTurns !== undefined ? { graceTurns: task.graceTurns } : {}),
     ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
@@ -309,6 +316,9 @@ function buildRunOptionalFlags(task: AgentCallOpts, ctx: RunContext): Partial<Sp
     ...(task.forkSource !== undefined ? { forkSource: task.forkSource } : {}),
     // [F6] 根 session id 透传（relay 归属键 SESSION_ID 权威源；undefined 不挂键）。
     ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
+    // [D2 扩展加载显式化] 孙进程扩展路径集透传（协议 ctx 还原 → spawn-args 逐项拼
+    // --extension；undefined 不挂键 = 不拼）。
+    ...(ctx.extensionPaths !== undefined ? { extensionPaths: ctx.extensionPaths } : {}),
   };
 }
 
@@ -379,6 +389,9 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
     ...(result.error !== undefined ? { error: result.error } : {}),
     ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
     ...(result.sessionFile !== undefined ? { sessionFile: result.sessionFile } : {}),
+    // [D5 诊断引用落账] 失败伴随的 stderr tee 路径透传上协议（spawn-runner 装配，
+    // 判据见 AgentOutcome.stderrTeePath 注释）。
+    ...(result.stderrTeePath !== undefined ? { stderrTeePath: result.stderrTeePath } : {}),
     toolCalls: result.toolCalls.map((tc) => ({
       name: tc.toolName,
       input: tc.args === undefined ? "" : JSON.stringify(tc.args),

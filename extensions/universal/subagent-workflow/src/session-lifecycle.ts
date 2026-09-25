@@ -37,6 +37,7 @@ import { bindNotifyLedgerHost, type NotifyLedgerHost } from "@zhushanwen/subagen
 import { IDENTITY_CUSTOM_TYPE, type SubagentIdentityData } from "@zhushanwen/subagent-core";
 import type { ExecutionMode } from "@zhushanwen/subagent-core";
 import { maybeCleanupExpiredSessionFiles } from "@zhushanwen/subagent-core";
+import { resolvePiSessionScopedDir } from "@zhushanwen/subagent-core";
 import {
   getSubagentService,
   setSubagentService,
@@ -97,13 +98,20 @@ function resolveMainSessionFileById(sessionId: string): string | undefined {
   }
 }
 
-/** workflow 域 per-session state 目录探测（随迁为 module 私有，唯一消费方是随迁块）。 */
+/**
+ * workflow 域 per-session state 目录探测（随迁为 module 私有，唯一消费方是随迁块）。
+ *
+ * [已知限制·登记] slug 锚 process.cwd()（进程 cwd）而非 session cwd：pi CLI 在
+ * 目录 B resume cwd 为 A 的 session 时，新 run 的 state 文件/journal 落 B 的 slug
+ * 目录、旧 run 的在 A——GC/retention sweep（core 同源推导）读不到旧 run 的磁盘
+ * 足迹，兜底失效。主数据不受影响（权威 entry 在 session 文件里，跨 cwd 可重建）。
+ * 布局单源在 core resolvePiSessionScopedDir（workflow-state-root.ts）——修复改锚
+ * 只动 core 单点，本薄消费自动跟随。taiji 桌面场景（spawn cwd 恒等于 session
+ * cwd）不触发，仅裸 pi CLI 的跨目录 resume 触发，故登记不改。
+ */
 function resolveSessionDir(): string {
-  const defaultDir = getAgentDir();
-  const sessionSlug = `--${process.cwd().replace(/^\//, "").replace(/\//g, "-")}--`;
-  // F2：根改 getAgentDir() 派生（实例隔离）；保留 sessionScopedDir 存在则用之的探测语义
-  const sessionScopedDir = path.join(getAgentDir(), "sessions", sessionSlug);
-  return fs.existsSync(sessionScopedDir) ? sessionScopedDir : defaultDir;
+  // F2：agentDir 走 pi SDK 活源注入（实例隔离）；slug + 探测布局单源在 core。
+  return resolvePiSessionScopedDir({ agentDir: getAgentDir() });
 }
 
 // ── 进程级单例（dialog queue；原 index.ts module 级随域搬移） ────────────────────
@@ -190,7 +198,7 @@ export interface SessionLifecycleResult {
   store: JsonlRunStore;
   runs: Map<string, WorkflowRun>;
   sessionDir: string;
-  /** D-008 per-session SAR（需要 ctxModel + subagentService 委托目标） */
+  /** D-008 per-session SAR（subagentService 委托目标） */
   runner: SubprocessAgentRunner;
   /** session 上下文（notifyDone 需要 GuiContext） */
   ctx: ExtensionContext;
@@ -350,45 +358,69 @@ function appendSubagentIdentityEntry(pi: ExtensionAPI): void {
  * 返回 undefined。
  */
 export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext): NotifyLedgerHost | undefined {
+  const ledgerHost: NotifyLedgerHost = {
+    appendLedgerEntry: (customType, data) => {
+      pi.appendEntry(customType, data);
+    },
+    readSessionEntries: () => ctx.sessionManager.getEntries(),
+    isIdle: () => ctx.isIdle(),
+    onAgentSettled: (handler) => {
+      pi.on("agent_settled", handler);
+    },
+    sendDelivery: (message) => {
+      // D5 单通道：唯一发送形态 = sendCustomMessage({triggerTurn:true})，
+      // courier 已在发送前二次复查 isIdle，多通道投递选项已删（D5）。
+      // stale ctx 防御（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：
+      // sendDelivery 经 settled 边沿 / 看门狗 / 恢复重放异步触发——session 替换窗口
+      // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection（E1 同机制）。
+      // stale 静默降级（本条通知不投递，attemptDeliver 按已受理标 sentAt——session
+      // 替换后通知对旧 session 已无意义，与守卫前「留 pending 反复撞 stale 直到账本
+      // 重绑」终局一致），非 stale 错误原样上抛（attemptDeliver 既有 catch 走
+      // settleRejected 留账重试语义不变）。
+      guardStaleCtx(() => pi.sendMessage(message, { triggerTurn: true }), {
+        label: "subagent-workflow:sendDelivery",
+        onStale: (error) =>
+          logger.warn("notify delivery skipped (stale ctx)", {
+            error: toErrorMessage(error),
+          }),
+      });
+    },
+    // abandon 对会话补显形（T4③ 放弃终态）：不唤醒的 display 消息（无 triggerTurn
+    // ——notifyStall 同款形态），让主 agent/用户在会话里看到「通知已放弃」线索。
+    // 与 sendDelivery（triggerTurn 唤醒）分工，通道不复用。
+    sendDisplayMessage: (message) => {
+      guardStaleCtx(() => pi.sendMessage(message), {
+        label: "subagent-workflow:sendDisplayMessage",
+        onStale: (error) =>
+          logger.warn("notify abandon display skipped (stale ctx)", {
+            error: toErrorMessage(error),
+          }),
+      });
+    },
+  };
+  // bind 与 recover 拆独立 try（失败归因不同）：
+  // - bind 失败：槽上无 ledger，消费方（getBoundNotifyLedger）退回内核直发路径；
+  // - recover 失败：bind 已成功、槽上 ledger 仍在，消费方照常走账本路径（重启重放
+  //   缺席，边沿/看门狗仍投新通知）——不得共用 "bind failed" 文案误报。
+  let ledger: ReturnType<typeof bindNotifyLedgerHost>;
   try {
-    const ledgerHost: NotifyLedgerHost = {
-      appendLedgerEntry: (customType, data) => {
-        pi.appendEntry(customType, data);
-      },
-      readSessionEntries: () => ctx.sessionManager.getEntries(),
-      isIdle: () => ctx.isIdle(),
-      onAgentSettled: (handler) => {
-        pi.on("agent_settled", handler);
-      },
-      sendDelivery: (message) => {
-        // D5 单通道：唯一发送形态 = sendCustomMessage({triggerTurn:true})，
-        // courier 已在发送前二次复查 isIdle，多通道投递选项已删（D5）。
-        // stale ctx 防御（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：
-        // sendDelivery 经 settled 边沿 / 看门狗 / 恢复重放异步触发——session 替换窗口
-        // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection（E1 同机制）。
-        // stale 静默降级（本条通知不投递，attemptDeliver 按已受理标 sentAt——session
-        // 替换后通知对旧 session 已无意义，与守卫前「留 pending 反复撞 stale 直到账本
-        // 重绑」终局一致），非 stale 错误原样上抛（attemptDeliver 既有 catch 走
-        // settleRejected 留账重试语义不变）。
-        guardStaleCtx(() => pi.sendMessage(message, { triggerTurn: true }), {
-          label: "subagent-workflow:sendDelivery",
-          onStale: (error) =>
-            logger.warn("notify delivery skipped (stale ctx)", {
-              error: toErrorMessage(error),
-            }),
-        });
-      },
-    };
-    // U4：重放观测已内聚到 ledger 分桶日志（recoveryReplays 桶经 extensionLogger
-    // 通道落盘），此处不再重复打日志。
-    bindNotifyLedgerHost(ledgerHost).recoverFromSession();
-    return ledgerHost;
+    ledger = bindNotifyLedgerHost(ledgerHost);
   } catch (err) {
     logger.warn("[subagents] notify ledger bind failed", {
       reason: toErrorMessage(err),
     });
     return undefined;
   }
+  try {
+    // U4：重放观测已内聚到 ledger 分桶日志（recoveryReplays 桶经 extensionLogger
+    // 通道落盘），此处不再重复打日志。
+    ledger.recoverFromSession();
+  } catch (err) {
+    logger.warn("[subagents] notify ledger recoverFromSession failed (ledger stays bound)", {
+      reason: toErrorMessage(err),
+    });
+  }
+  return ledgerHost;
 }
 
 /**
@@ -506,27 +538,27 @@ async function createSessionRunState(
   // 跑恢复即误杀窗口内存活的 run。条目缺失场景同理门控：磁盘可能有本 session 的
   // running entry（前一轮 adoption 未完成又 reload 的窗口），由下一次**非 reload**
   // 的 session_start（真重启/切换）按既有 kill-9 语义收编。跳过 loadAll 时无从
-  // 证伪健康度：storeHealthy 保持 true（workflow 域可用，可派发新 run）。门控放
-  // 调用点先于条目判断（setupSessionLifecycle 分流处），不进 oncePerProcess 守卫
-  // 内——守卫 Map 是模块级状态 reload 后归零（D9 不提权），靠守卫判 reason 形同虚设。
+  // 证伪健康度：storeHealthy 保持 true（workflow 域可用，可派发新 run）。
   if (!opts.skipRecovery) {
     try {
-      // 崩溃恢复 loadAll 扫 cwd 共享 sessionDir（同 cwd 跨 session 共享）并把 running run
-      // 转 failed 落盘——写非本 session 的 run state 文件属跨 session 副作用，oncePerProcess
-      // 守卫防双跑（u-audit-fix）。第二派发重放首次 Promise：不再落盘、不再 emit。
-      await oncePerProcess(
-        "subagent-workflow:recover-crashed-runs",
-        () =>
-          recoverCrashedRuns(
-            store,
-            runs,
-            "Process killed (kill-9 or crash recovery)",
-            {
-              onRunRecovered: (payload) => {
-                pi.events.emit("pending:unregister", payload);
-              },
-            },
-          ),
+      // [B1 修复] 恢复不挂 oncePerProcess：W17 后 loadAll 只读当前 session 的
+      // entries（本 session 权威面）、save 只写自身 runId 的 state 文件——恢复是
+      // session 级幂等操作，挂进程级守卫会让同进程的后续 session_start（如 /new
+      // 后 /resume 一个上次崩溃退出的 session）重放首次 Promise、跳过 loadAll，
+      // 该 session 的 running 残留既不收编也不进 run 列表。reload 的防误杀由上方
+      // opts.skipRecovery（分流处按 reason 判定）承担，无需进程级守卫。
+      const { loaded, recovered } = await recoverCrashedRuns(
+        store,
+        runs,
+        "Process killed (kill-9 or crash recovery)",
+        {
+          onRunRecovered: (payload) => {
+            pi.events.emit("pending:unregister", payload);
+          },
+        },
+      );
+      logger.debug(
+        `[subagent-workflow] recoverCrashedRuns: loaded=${loaded} recovered=${recovered}`,
       );
     } catch (err) {
       // QMF-4 fix: store.loadAll 失败是关键路径错误，workflow 域将未初始化
@@ -573,10 +605,9 @@ async function tryAdoptExistingSession(
     return undefined;
   }
   // 接管：同引用原地改写（ctx 换新——旧 ctx 已被 invalidate；lastEngine 按当前
-  // config 重置基线）+ runner 刷新 ctxModel。跳过 store/runner 重建（幂等 last-wins）。
+  // config 重置基线）。跳过 store/runner 重建（幂等 last-wins）。
   existing.ctx = ctx;
   existing.lastEngine = lastEngine;
-  existing.runner.updateCtxModel(ctx.model ?? undefined);
   logger.debug(
     `[subagent-workflow] adoption ok (sessionId=${existing.sessionId}, runs=${existing.runs.size})`,
   );
@@ -703,12 +734,10 @@ export async function setupSessionLifecycle(
     skipRecovery: isReload,
   });
 
-  // D-008: per-session SAR（需要 ctxModel 填底 + subagentService 委托目标）。
-  // old: const runner = new SubprocessAgentRunner()（module-level singleton，无 deps）
-  // new: per-session session_start 时创建，经 SessionLifecycleResult 传给组合根。
+  // D-008: per-session SAR（subagentService 委托目标）——per-session session_start
+  // 时创建，经 SessionLifecycleResult 传给组合根。
   const runner = new SubprocessAgentRunner({
     subagentService: service,
-    ctxModel: ctx.model ?? undefined,
   });
 
   return {

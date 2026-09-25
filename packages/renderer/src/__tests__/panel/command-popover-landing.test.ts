@@ -7,7 +7,7 @@
  *
  * 验证按 variant 分支：landing 态（variant='landing'）合并 globalSkills（全局）∪ projectSkills
  * （当前 cwd），skill name 归一化为 /skill:<name>；panel 态用 commandStore + compact，不并入
- * globalSkills。__ 前缀命令过滤（W5 /__taiji_reload__ 准备）。
+ * globalSkills。__ 前缀命令过滤（host 内部命令不显示）。
  *
  * 覆盖三视角：
  * - 构建者（白盒）：items 来源（commandStore vs globalSkills/projectSkills props）、归一化字段
@@ -463,8 +463,8 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
     expect(btns).toHaveLength(7)
   })
 
-  // ── W4：__ 前缀命令过滤（W5 /__taiji_reload__ 准备）──
-  // skill name 以 __ 开头的命令不显示（内部触发命令，W5 reload-orchestrator 用）。
+  // ── W4：__ 前缀命令过滤（host 内部命令不显示）──
+  // skill name 以 __ 开头的命令不显示（内部触发命令）。
   it('L15 landing globalSkills 含 __ 前缀 skill → 不显示（W5 内部命令过滤）', async () => {
     const skillsWithInternal: SkillInfo[] = [
       { id: 'sk-normal', name: 'normal-skill', description: '正常', enabled: true, source: 'agents', effective: true },

@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const childProcessMocks = vi.hoisted(() => ({
   execFileSync: vi.fn(),
@@ -6,21 +9,27 @@ const childProcessMocks = vi.hoisted(() => ({
 }))
 const healthMocks = vi.hoisted(() => ({ isPortInUse: vi.fn() }))
 const windowsMocks = vi.hoisted(() => ({ terminateWindowsProcessTree: vi.fn() }))
+const processControlMocks = vi.hoisted(() => ({
+  getDescendantPids: vi.fn((): number[] => []),
+  killProcessTree: vi.fn(),
+}))
+const pathsMocks = vi.hoisted(() => ({ getDataDir: vi.fn((): string => '') }))
 
 vi.mock('node:child_process', () => childProcessMocks)
 vi.mock('../supervisor/health-checker.js', () => healthMocks)
 vi.mock('../supervisor/windows-process.js', () => windowsMocks)
+vi.mock('../supervisor/process-control.js', () => processControlMocks)
+vi.mock('@taiji/shared/paths', () => pathsMocks)
 
 import { BASE_PORT } from '@taiji/shared'
 import {
   findAvailablePort,
   isSafeToKill,
-  killStaleProcessOnPort,
   parseWindowsListeningPids,
+  reclaimOwnStaleRuntime,
 } from '../supervisor/port-discoverer.js'
 
 const WINDOWS_PLATFORM = () => 'win32' as const
-const WINDOWS_NETSTAT_ROW = 'TCP 0.0.0.0:3310 0.0.0.0:0 LISTENING 101'
 
 describe('Windows port discovery', () => {
   beforeEach(() => {
@@ -30,7 +39,7 @@ describe('Windows port discovery', () => {
   it('parses only TCP LISTENING rows for the exact port and deduplicates PIDs', () => {
     const output = [
       '  TCP    0.0.0.0:3310       0.0.0.0:0       LISTENING       101',
-      '  TCP    [::]:3310          [::]:0          LISTENING       101',
+      '  TCP    [::]:3310          0.0.0.0:0       LISTENING       101',
       '  TCP    127.0.0.1:13310    0.0.0.0:0       LISTENING       202',
       '  TCP    127.0.0.1:3310     127.0.0.1:50000 ESTABLISHED     303',
       '  UDP    0.0.0.0:3310       *:*                            404',
@@ -49,64 +58,160 @@ describe('Windows port discovery', () => {
     expect(childProcessMocks.execFileSync).not.toHaveBeenCalled()
   })
 
-  it('uses tasklist allowlist and terminates after confirming the PID still owns the port', () => {
-    childProcessMocks.execFileSync
-      .mockReturnValueOnce(WINDOWS_NETSTAT_ROW)
-      .mockReturnValueOnce('"node.exe","101","Console","1","20,000 K"')
-      .mockReturnValueOnce(WINDOWS_NETSTAT_ROW)
-
-    killStaleProcessOnPort(3310, WINDOWS_PLATFORM)
-
-    expect(childProcessMocks.execFileSync).toHaveBeenNthCalledWith(
-      2,
-      'tasklist.exe',
-      ['/FI', 'PID eq 101', '/FO', 'CSV', '/NH'],
-      expect.objectContaining({ windowsHide: true }),
-    )
-    expect(childProcessMocks.execFileSync).toHaveBeenNthCalledWith(
-      3,
-      'netstat.exe',
-      ['-ano', '-p', 'tcp'],
-      expect.objectContaining({ windowsHide: true }),
-    )
-    expect(windowsMocks.terminateWindowsProcessTree).toHaveBeenCalledOnce()
-    expect(windowsMocks.terminateWindowsProcessTree).toHaveBeenCalledWith(101)
-  })
-
-  it('does not terminate a process outside the tasklist allowlist', () => {
-    childProcessMocks.execFileSync
-      .mockReturnValueOnce(WINDOWS_NETSTAT_ROW)
-      .mockReturnValueOnce('"postgres.exe","101","Services","0","20,000 K"')
-
-    killStaleProcessOnPort(3310, WINDOWS_PLATFORM)
-
-    expect(childProcessMocks.execFileSync).toHaveBeenCalledTimes(2)
-    expect(windowsMocks.terminateWindowsProcessTree).not.toHaveBeenCalled()
-  })
-
-  it('does not terminate when the PID no longer owns the port before kill', () => {
-    childProcessMocks.execFileSync
-      .mockReturnValueOnce(WINDOWS_NETSTAT_ROW)
-      .mockReturnValueOnce('"node.exe","101","Console","1","20,000 K"')
-      .mockReturnValueOnce('TCP 0.0.0.0:3310 0.0.0.0:0 LISTENING 202')
-
-    killStaleProcessOnPort(3310, WINDOWS_PLATFORM)
-
-    expect(childProcessMocks.execFileSync).toHaveBeenCalledTimes(3)
-    expect(windowsMocks.terminateWindowsProcessTree).not.toHaveBeenCalled()
-  })
-
-  it('does not throw when Windows process queries fail', () => {
-    childProcessMocks.execFileSync.mockImplementation(() => { throw new Error('query failed') })
-    expect(() => killStaleProcessOnPort(3310, WINDOWS_PLATFORM)).not.toThrow()
-    expect(windowsMocks.terminateWindowsProcessTree).not.toHaveBeenCalled()
+  it('allowlists Windows process names via tasklist', () => {
+    childProcessMocks.execFileSync.mockReturnValue('"node.exe","101","Console","1","20,000 K"')
+    expect(isSafeToKill(101, WINDOWS_PLATFORM)).toBe(true)
+    childProcessMocks.execFileSync.mockReturnValue('"postgres.exe","101","Services","0","20,000 K"')
+    expect(isSafeToKill(101, WINDOWS_PLATFORM)).toBe(false)
   })
 })
 
-describe('findAvailablePort', () => {
+const tmpDirs: string[] = []
+
+describe('reclaimOwnStaleRuntime（身份门禁：只杀本数据目录登记的残留 runtime）', () => {
+  const OWN_PID = 4242
+  const INSTANCE_FILE = 'runtime-instance.json'
+  let dataDir: string
+  let deadPids: Set<number>
+  let killCalls: Array<{ pid: number; signal?: string | number }>
+  let killSpy: ReturnType<typeof vi.spyOn>
+
+  // ps 输出按命令区分：isSafeToKill 用 `-o comm=`，getProcessCmdline 用 `-ww -o command=`
+  //（'comm=' 不是 'command=' 的子串——后者 comm 后跟 'a'，可安全按子串分流）。
+  const mockPs = (comm: string, command: string): void => {
+    childProcessMocks.execSync.mockImplementation((cmd: string) => {
+      if (cmd.includes('-o comm=')) return comm
+      if (cmd.includes('-o command=')) return command
+      if (cmd.includes('lsof')) return ''
+      return ''
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    dataDir = mkdtempSync(join(tmpdir(), 'port-reclaim-'))
+    tmpDirs.push(dataDir)
+    pathsMocks.getDataDir.mockReturnValue(dataDir)
+    deadPids = new Set<number>()
+    killCalls = []
+    killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+      killCalls.push({ pid, signal })
+      if ((signal ?? 0) === 0) {
+        if (deadPids.has(pid)) {
+          const err = new Error('esrch') as NodeJS.ErrnoException
+          err.code = 'ESRCH'
+          throw err
+        }
+        return true
+      }
+      if (signal === 'SIGTERM' || signal === 'SIGKILL') deadPids.add(pid)
+      return true
+    }) as never)
+  })
+
+  afterAll(() => {
+    vi.restoreAllMocks()
+  })
+
+  const writeInstanceFile = (pid: number, port: number): void => {
+    writeFileSync(join(dataDir, INSTANCE_FILE), JSON.stringify({ pid, port, startedAt: '2026-09-24T00:00:00.000Z' }))
+  }
+
+  it('无登记文件（首次启动/旧版实例）→ 不杀任何进程', async () => {
+    mockPs('node', 'node whatever')
+    await expect(reclaimOwnStaleRuntime(1)).resolves.toBe(false)
+    expect(killCalls.filter((c) => c.signal && c.signal !== 0)).toEqual([])
+    expect(processControlMocks.killProcessTree).not.toHaveBeenCalled()
+  })
+
+  it('登记 pid 已死 → 不杀任何进程', async () => {
+    writeInstanceFile(OWN_PID, 3310)
+    deadPids.add(OWN_PID)
+    await expect(reclaimOwnStaleRuntime(1)).resolves.toBe(false)
+    expect(killCalls.filter((c) => c.signal && c.signal !== 0)).toEqual([])
+  })
+
+  it('存活但 cmdline 无 runtime 指纹（pid 复用/异主进程）→ 身份门禁拒绝，不杀', async () => {
+    writeInstanceFile(OWN_PID, 3310)
+    mockPs('node', 'node /some/other/server.mjs --port=3310')
+    await expect(reclaimOwnStaleRuntime(1)).resolves.toBe(false)
+    expect(killCalls.filter((c) => c.signal && c.signal !== 0)).toEqual([])
+    expect(processControlMocks.killProcessTree).not.toHaveBeenCalled()
+  })
+
+  it('登记 pid 命中残留 runtime → SIGTERM 前预录后代，root+后代全部 SIGTERM', async () => {
+    writeInstanceFile(OWN_PID, 3310)
+    mockPs('node', `node tsx index.ts --port=3310 --builtin-plugins-dir=/x`)
+    processControlMocks.getDescendantPids.mockReturnValue([11, 22])
+    await expect(reclaimOwnStaleRuntime(1)).resolves.toBe(true)
+    const signals = killCalls.filter((c) => c.signal && c.signal !== 0)
+    // 预录后代先于（或同批）SIGTERM root；后代与 root 都收到 SIGTERM
+    expect(signals.map((c) => c.pid).sort((a, b) => a - b)).toEqual([11, 22, OWN_PID])
+    expect(processControlMocks.getDescendantPids).toHaveBeenCalledWith(OWN_PID)
+    expect(processControlMocks.killProcessTree).not.toHaveBeenCalled()
+  })
+
+  it('SIGTERM 宽限内不退出 → SIGKILL 进程树兜底', async () => {
+    writeInstanceFile(OWN_PID, 3310)
+    mockPs('node', `node tsx index.ts --port=3310 --builtin-plugins-dir=/x`)
+    processControlMocks.getDescendantPids.mockReturnValue([11])
+    // SIGTERM 不标记死亡（顽固进程）
+    killSpy.mockImplementation(((pid: number, signal?: string | number) => {
+      killCalls.push({ pid, signal })
+      if ((signal ?? 0) === 0) return true
+      return true
+    }) as never)
+    await expect(reclaimOwnStaleRuntime(1)).resolves.toBe(true)
+    expect(processControlMocks.killProcessTree).toHaveBeenCalledWith(OWN_PID, [11])
+  })
+
+  it('Windows：tasklist 白名单命中 → taskkill 树杀，不读 cmdline', async () => {
+    writeInstanceFile(OWN_PID, 3310)
+    childProcessMocks.execFileSync.mockReturnValue('"node.exe","4242","Console","1","20,000 K"')
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    try {
+      await expect(reclaimOwnStaleRuntime(1)).resolves.toBe(true)
+      expect(windowsMocks.terminateWindowsProcessTree).toHaveBeenCalledWith(OWN_PID)
+      expect(killCalls.filter((c) => c.signal === 'SIGTERM')).toEqual([])
+    } finally {
+      platformSpy.mockRestore()
+    }
+  })
+})
+
+describe('findAvailablePort（先收割自身残留，占用者一律跳过）', () => {
+  let dataDir: string
+  let deadPids: Set<number>
+
   beforeEach(() => {
     vi.clearAllMocks()
     delete process.env.TAIJI_AGENT_PORT_OFFSET
+    dataDir = mkdtempSync(join(tmpdir(), 'port-find-'))
+    tmpDirs.push(dataDir)
+    pathsMocks.getDataDir.mockReturnValue(dataDir)
+    deadPids = new Set<number>()
+    // isPidAlive 走真实 process.kill 会探到宿主进程空间的无关 pid——钉死为本测试可控语义
+    vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+      if ((signal ?? 0) === 0) {
+        if (deadPids.has(pid)) {
+          const err = new Error('esrch') as NodeJS.ErrnoException
+          err.code = 'ESRCH'
+          throw err
+        }
+        return true
+      }
+      if (signal === 'SIGTERM' || signal === 'SIGKILL') deadPids.add(pid)
+      return true
+    }) as never)
+    childProcessMocks.execSync.mockImplementation((cmd: string) => {
+      if (cmd.includes('lsof')) return ''
+      return ''
+    })
+  })
+
+  afterAll(() => {
+    vi.restoreAllMocks()
+    for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('returns the first port when it is unoccupied', async () => {
@@ -114,9 +219,41 @@ describe('findAvailablePort', () => {
     await expect(findAvailablePort()).resolves.toBe(BASE_PORT)
   })
 
-  it('fails after every candidate remains occupied', async () => {
+  it('身份不符的占用端口被跳过（不清杀），落到段内下一个空闲端口', async () => {
+    healthMocks.isPortInUse.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+    await expect(findAvailablePort(1)).resolves.toBe(BASE_PORT + 1)
+    expect(processControlMocks.killProcessTree).not.toHaveBeenCalled()
+    expect(processControlMocks.getDescendantPids).not.toHaveBeenCalled()
+  })
+
+  it('收割本实例残留后端口释放 → 返回该端口', async () => {
+    writeFileSync(join(dataDir, 'runtime-instance.json'), JSON.stringify({ pid: 4242, port: BASE_PORT, startedAt: 'x' }))
+    childProcessMocks.execSync.mockImplementation((cmd: string) => {
+      if (cmd.includes('-o comm=')) return 'node'
+      if (cmd.includes('-o command=')) return `node tsx index.ts --port=${BASE_PORT} --builtin-plugins-dir=/x`
+      return ''
+    })
+    healthMocks.isPortInUse.mockResolvedValue(false)
+    await expect(findAvailablePort(1)).resolves.toBe(BASE_PORT)
+  })
+
+  it('fails after every candidate remains occupied，错误信息含占用者与恢复动作', async () => {
+    childProcessMocks.execSync.mockImplementation((cmd: string) => {
+      if (cmd.includes('lsof')) return '  777\n'
+      if (cmd.includes('-o command=')) return 'node /other/instance/server.js --port=3311'
+      return 'node'
+    })
     healthMocks.isPortInUse.mockResolvedValue(true)
-    // retryMs 注入 1ms：11 候选全占用时串行复查等待 11×300ms（生产默认）→ 测试压缩，无超时兜底必要
-    await expect(findAvailablePort(1)).rejects.toThrow(`No available port in range ${BASE_PORT}-${BASE_PORT + 10}`)
+    // retryMs 注入 1ms：无收割路径不再产生串行等待，保留参数兼容
+    let caught: Error | undefined
+    try {
+      await findAvailablePort(1)
+    } catch (e) {
+      caught = e as Error
+    }
+    expect(caught).toBeInstanceOf(Error)
+    expect(caught?.message).toContain(`No available port in range ${BASE_PORT}-${BASE_PORT + 10}`)
+    expect(caught?.message).toContain('pid 777')
+    expect(caught?.message).toContain('TAIJI_AGENT_PORT_OFFSET')
   })
 })

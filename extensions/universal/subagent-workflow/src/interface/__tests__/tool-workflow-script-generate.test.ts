@@ -15,7 +15,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { actionGenerate, type ScriptParams, type TextContent, registerWorkflowScriptTool } from "../tool-workflow-script.ts";
+import { actionGenerate, type ScriptParams, type WorkflowScriptExecuteResult, registerWorkflowScriptTool } from "../tool-workflow-script.ts";
+import { captureTool, type CapturedTool } from "./capture-tool.ts";
 import { deleteWorkflow, saveWorkflow } from "@zhushanwen/subagent-core";
 
 // node:fs 只覆写两个写盘函数、其余保持真实——C5② 后被测链经 barrel 拉起完整 core
@@ -41,9 +42,33 @@ function gen(script: string, name = "test-wf"): ScriptParams {
   return { action: "generate", name, script } as ScriptParams;
 }
 
-/** TextContent.text 在 content[0].text。 */
-function textOf(r: TextContent): string {
+/** WorkflowScriptExecuteResult.text 在 content[0].text。 */
+function textOf(r: WorkflowScriptExecuteResult): string {
   return r.content[0]?.text ?? "";
+}
+
+// ── 注册层捕获 helper（fake pi 捕获单点见 capture-tool.ts，此处只留差异面）──
+
+interface ScriptExecuteToolView extends CapturedTool {
+  execute: (
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    onUpdate: unknown,
+    ctx: unknown,
+  ) => Promise<WorkflowScriptExecuteResult>;
+}
+
+/**
+ * 捕获 workflow-script tool（registry 全量 stub：get/loadAll/invalidate——
+ * abort 早退断言要求「零触达 registry」，stub 面必须覆盖全部三个读点）。
+ */
+function captureScriptExecuteTool(
+  registry: Record<string, unknown> = { invalidate: vi.fn() },
+): ScriptExecuteToolView {
+  return captureTool<ScriptExecuteToolView>(
+    (pi) => registerWorkflowScriptTool(pi as never, registry as never, () => false),
+  );
 }
 
 const PI_META_VALID = `/* @pi-meta
@@ -130,53 +155,50 @@ describe("actionGenerate (m0: @pi-meta 认可 + round-trip)", () => {
    */
 
   it("TC1: 合法 @pi-meta → ready + writeFileSync 被调用", () => {
-    const r = actionGenerate(gen(PI_META_VALID), undefined);
+    const r = actionGenerate(gen(PI_META_VALID));
     expect(r.isError).toBeFalsy();
     expect(textOf(r)).toMatch(/ready|generated|test-wf/i);
     expect(mockedWriteFileSync).toHaveBeenCalledTimes(1);
   });
 
   it("TC2: malformed @pi-meta YAML → throw + writeFileSync 未调用 [P-generate-roundtrip]", () => {
-    expect(() => actionGenerate(gen(PI_META_MALFORMED), undefined)).toThrow(
+    expect(() => actionGenerate(gen(PI_META_MALFORMED))).toThrow(
       /cannot be parsed/i,
     );
     expect(mockedWriteFileSync).not.toHaveBeenCalled();
   });
 
   it("TC3: legacy const meta（过渡期）→ ready + writeFileSync 被调用", () => {
-    const r = actionGenerate(gen(LEGACY_CONST_META), undefined);
+    const r = actionGenerate(gen(LEGACY_CONST_META));
     expect(r.isError).toBeFalsy();
     expect(mockedWriteFileSync).toHaveBeenCalledTimes(1);
   });
 
   it("TC4: 无 meta → throw 提及 @pi-meta 新格式", () => {
-    expect(() => actionGenerate(gen(NO_META), undefined)).toThrow(/meta declaration/i);
+    expect(() => actionGenerate(gen(NO_META))).toThrow(/meta declaration/i);
     expect(mockedWriteFileSync).not.toHaveBeenCalled();
   });
 
   it("TC5: @pi-meta 单反斜杠正则 → throw（LLM 高频错）[P-generate-roundtrip]", () => {
-    expect(() => actionGenerate(gen(PI_META_REGEX_SINGLE_BS), undefined)).toThrow(
+    expect(() => actionGenerate(gen(PI_META_REGEX_SINGLE_BS))).toThrow(
       /escape|cannot be parsed/i,
     );
     expect(mockedWriteFileSync).not.toHaveBeenCalled();
   });
 
   it("TC6: ESM import → throw（保留现有行为）", () => {
-    expect(() => actionGenerate(gen(ESM_IMPORT), undefined)).toThrow(/ESM|import/i);
+    expect(() => actionGenerate(gen(ESM_IMPORT))).toThrow(/ESM|import/i);
   });
 
   it("TC7: 无 agent() → throw（保留现有行为）", () => {
-    expect(() => actionGenerate(gen(NO_AGENT), undefined)).toThrow(/agent\(\)/i);
+    expect(() => actionGenerate(gen(NO_AGENT))).toThrow(/agent\(\)/i);
   });
 
-  it("TC8: signal aborted → throw（保留现有行为）", () => {
-    const controller = new AbortController();
-    controller.abort();
-    expect(() => actionGenerate(gen(PI_META_VALID), controller.signal)).toThrow(/abort/i);
-  });
+  // TC8（原 signal aborted 直调用例）已删：abort 前置上移到 execute 入口后，
+  // actionGenerate 不再消费 signal——覆盖见下方「execute 入口 abort 前置」describe。
 
   it("TC9: 缺 name/script 参数 → throw 'generate requires'（防御性，schema 先拦）", () => {
-    expect(() => actionGenerate({ action: "generate" } as ScriptParams, undefined)).toThrow(
+    expect(() => actionGenerate({ action: "generate" } as ScriptParams)).toThrow(
       "generate requires 'name' and 'script' parameters",
     );
   });
@@ -191,7 +213,7 @@ const agent = require("./agent");
 export const foo = 1;
 agent("w");
 `;
-    expect(() => actionGenerate(gen(script), undefined)).toThrow(/ESM 'export'/i);
+    expect(() => actionGenerate(gen(script))).toThrow(/ESM 'export'/i);
   });
 });
 
@@ -201,29 +223,11 @@ describe("actionSave/actionDelete error paths (W4: throw 范式)", () => {
    * throw 置 isError:true（agent-loop.js:453-483 丢弃返回值里的 isError）。
    * 经 registerWorkflowScriptTool 注册层测（mock workflow-files 的 FS 依赖）。
    */
-  interface CapturedTool {
-    execute: (
-      toolCallId: string,
-      params: Record<string, unknown>,
-      signal: AbortSignal | undefined,
-      onUpdate: unknown,
-      ctx: unknown,
-    ) => Promise<TextContent>;
-  }
-  function captureTool(): CapturedTool {
-    const tools: CapturedTool[] = [];
-    const pi = { registerTool: (t: unknown) => tools.push(t as CapturedTool) };
-    // registry 最小 stub：delete 成功路径会调 invalidate（失败路径 throw 前不触达）
-    const registry = { invalidate: vi.fn() };
-    registerWorkflowScriptTool(pi as never, registry as never, () => false);
-    if (!tools[0]) throw new Error("registerWorkflowScriptTool did not register");
-    return tools[0];
-  }
   const ctx = { mode: "tui" as const, hasUI: true };
 
   it("save 失败 → throw 'Save failed: <原因>'（pi catch 后置 isError:true）", async () => {
     vi.mocked(saveWorkflow).mockRejectedValueOnce(new Error("disk full"));
-    const tool = captureTool();
+    const tool = captureScriptExecuteTool();
     await expect(
       tool.execute("id", { action: "save", name: "tmp-wf" }, undefined, undefined, ctx),
     ).rejects.toThrow("Save failed: disk full");
@@ -235,7 +239,7 @@ describe("actionSave/actionDelete error paths (W4: throw 范式)", () => {
     vi.mocked(deleteWorkflow).mockImplementationOnce(() => {
       throw new Error("script is running");
     });
-    const tool = captureTool();
+    const tool = captureScriptExecuteTool();
     await expect(
       tool.execute("id", { action: "delete", name: "tmp-wf" }, undefined, undefined, ctx),
     ).rejects.toThrow("Delete failed: script is running");
@@ -243,9 +247,53 @@ describe("actionSave/actionDelete error paths (W4: throw 范式)", () => {
 
   it("save 成功路径不受影响（ok details 正常返回）", async () => {
     vi.mocked(saveWorkflow).mockResolvedValueOnce("saved tmp-wf");
-    const tool = captureTool();
+    const tool = captureScriptExecuteTool();
     const r = await tool.execute("id", { action: "save", name: "tmp-wf" }, undefined, undefined, ctx);
     expect(r.isError).toBeFalsy();
     expect(r.details).toMatchObject({ action: "save", name: "tmp-wf", ok: true });
   });
+});
+
+describe("execute 入口 abort 前置（P1-2：与 workflow / subagents 两 tool 对称）", () => {
+  /**
+   * abort 检查此前只在 generate（actionGenerate 内）存在，lint/save/delete/list
+   * 四路径漏拦——已统一上移到 execute 入口（tool-shared assertNotAborted 同源）。
+   * 黑盒断言：aborted signal 下五个 action 全部早退，且不触达 registry / core
+   * barrel / 写盘（早退发生在任何副作用之前）。
+   */
+
+  const ctx = { mode: "tui" as const, hasUI: true };
+  // 零触达断言依赖干净计数：前序 describe（save/delete 成功路径）的调用不留痕
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  /** 各 action 的最小合法入参（generate 给齐 name+script：守卫失效时会走完真实 core 管线并写盘，零触达断言随之红）。 */
+  const ACTION_PARAMS: Record<string, Record<string, unknown>> = {
+    generate: { action: "generate", name: "test-wf", script: "// s" },
+    lint: { action: "lint", name: "test-wf" },
+    save: { action: "save", name: "test-wf" },
+    delete: { action: "delete", name: "test-wf" },
+    list: { action: "list" },
+  };
+
+  it.each(Object.keys(ACTION_PARAMS))(
+    "action:%s → throw 'Operation aborted before start'，registry/core 管线零触达",
+    async (action) => {
+      const registry = {
+        get: vi.fn(),
+        loadAll: vi.fn(),
+        invalidate: vi.fn(),
+      };
+      const tool = captureScriptExecuteTool(registry);
+      await expect(
+        tool.execute("id", ACTION_PARAMS[action], AbortSignal.abort(), undefined, ctx),
+      ).rejects.toThrow("Operation aborted before start");
+      expect(registry.get).not.toHaveBeenCalled();
+      expect(registry.loadAll).not.toHaveBeenCalled();
+      expect(registry.invalidate).not.toHaveBeenCalled();
+      expect(mockedWriteFileSync).not.toHaveBeenCalled(); // generate 的 tmp 写盘未发生
+      expect(vi.mocked(saveWorkflow)).not.toHaveBeenCalled();
+      expect(vi.mocked(deleteWorkflow)).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -6,7 +6,7 @@
 //      await 链中）两形态的 running run 都不转 failed；非 reload（startup）现状
 //      恢复语义保持（门控是 reason 驱动的对照组）；
 //   ② D4 接管：adoption 后 sessionState.get(sid) 与 reload 前同一引用（store/runs
-//      不换实例）、ctx 换新、runner 刷新 ctxModel、rebind 后 appendEntry 走新 pi；
+//      不换实例）、ctx 换新、rebind 后 appendEntry 走新 pi；
 //   ③ D4 快照重发保序：经 store per-runId 串行 flush 链（enqueueFlush）重发，窗口
 //      内终态的 run 重发后新 pi 的该 runId 最后一条 entry 恒为终态（done 之后无
 //      更旧状态 entry），loadAll last-ways 读回终态——单测构造按终态/首写路径构造
@@ -37,6 +37,7 @@ import type { CustomEntry, ExtensionContext } from "@earendil-works/pi-coding-ag
 import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core";
 import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run-spec.ts";
@@ -208,7 +209,7 @@ describe("D4 恢复门控：session_start(reason=reload) 不跑 kill-9 恢复", 
       store: store as never,
       runs: new Map([[run.runId, run]]),
       sessionDir: agentDir,
-      runner: { updateCtxModel: vi.fn() } as never,
+      runner: {} as never,
       ctx: ctxOld,
       storeHealthy: true,
     };
@@ -276,8 +277,8 @@ describe("D4 恢复门控：session_start(reason=reload) 不跑 kill-9 恢复", 
 
 // ── ② D4 接管：同引用 + rebind + 快照重发 ─────────────────────────────────────
 
-describe("D4 接管：同引用接管 + ctx 换新 + runner 刷新 ctxModel", () => {
-  it("adoption 返回原条目引用（store/runs 不换实例）、ctx 换新、runner 刷新 ctxModel", async () => {
+describe("D4 接管：同引用接管 + ctx 换新", () => {
+  it("adoption 返回原条目引用（store/runs 不换实例）、ctx 换新", async () => {
     const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const run = makeRun("wf-adopt-1", "running");
     const store = {
@@ -287,7 +288,7 @@ describe("D4 接管：同引用接管 + ctx 换新 + runner 刷新 ctxModel", ()
       dispose: vi.fn(async () => {}),
       loadAll: vi.fn(async () => []),
     };
-    const runner = { updateCtxModel: vi.fn() };
+    const runner = {};
     const existing: SessionLifecycleResult = {
       sessionId: "sess-adopt",
       store: store as never,
@@ -312,11 +313,10 @@ describe("D4 接管：同引用接管 + ctx 换新 + runner 刷新 ctxModel", ()
     // SessionLifecycleResult.ctx 换新 ctx（旧 ctx 已被 invalidate）
     expect(result.ctx).toBe(ctxNew);
     expect(store.rebind).toHaveBeenCalledWith(pi, ctxNew);
-    expect(runner.updateCtxModel).toHaveBeenCalledTimes(1);
   });
 
   it("store rebind 后 appendEntry 走新 pi（旧 pi 不再收权威 entry）", async () => {
-    const { JsonlRunStore, WORKFLOW_RECORD_CUSTOM_TYPE } = await import("../jsonl-run-store.ts");
+    const { JsonlRunStore } = await import("../jsonl-run-store.ts"); // WORKFLOW_RECORD_CUSTOM_TYPE 已收 core（顶部静态 import）
     const entriesOld: CustomEntry[] = [];
     const entriesNew: CustomEntry[] = [];
     const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-adopt-store-"));
@@ -501,7 +501,7 @@ describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移�
       } as never,
       runs: new Map([[run.runId, run]]),
       sessionDir: agentDir,
-      runner: { updateCtxModel: vi.fn() } as never,
+      runner: {} as never,
       ctx: makeFakeCtx("sess-fail-seam"),
       storeHealthy: true,
     };

@@ -534,9 +534,9 @@ describe('skillRegistry (W2 rebuild)', () => {
   })
 })
 
-describe('skill-registry D8-a watcher 归因日志（[skill-reload] 行）', () => {
+describe('skill-registry D8-a watcher 归因日志（[skill-rescan] 行）', () => {
   // G4/S4：watcher 命中必须在 debounce 批边界落一行 `dir= event= affectedSessions=[...]`，
-  // 与 reload-orchestrator 的 decision= 行串因果。fake timers 推进 DEBOUNCE_MS(300)
+  // 与 skill-rescan 归因日志串因果。fake timers 推进 DEBOUNCE_MS(300)
   // 断言批合并（高频编辑不逐事件刷屏）与字段形态。
 
   /** 造一个测试持有的 fake watcher（同 U5 形态：EventEmitter + close stub）。 */
@@ -573,11 +573,11 @@ describe('skill-registry D8-a watcher 归因日志（[skill-reload] 行）', () 
       // 窗口内不逐事件落日志（D8 设计：高频编辑不刷屏）
       expect(logSpy).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(310) // DEBOUNCE_MS=300 + 余量
-      const reloadLines = logSpy.mock.calls.map(c => c.join(' ')).filter(l => l.includes('[skill-reload]'))
+      const reloadLines = logSpy.mock.calls.map(c => c.join(' ')).filter(l => l.includes('[skill-rescan]'))
       // 批合并：3 事件 → 1 行；事件类型 Set 插入序去重（change,add）；affectedSessions 走
       // getSessionCwd 过滤（sid-1 匹配 cwd，sid-2 不匹配）
       expect(reloadLines).toEqual([
-        `[skill-reload] dir=project:${cwd} event=change,add affectedSessions=[sid-1]`,
+        `[skill-rescan] dir=project:${cwd} event=change,add affectedSessions=[sid-1]`,
       ])
     } finally {
       logSpy.mockRestore()
@@ -655,10 +655,10 @@ describe('skill-registry D8-a watcher 归因日志（[skill-reload] 行）', () 
       await reg.initGlobal()
       fakeWatcher.emit('all', 'unlink', join(skillDir, 'gone', 'SKILL.md'))
       await vi.advanceTimersByTimeAsync(310)
-      const reloadLines = logSpy.mock.calls.map(c => c.join(' ')).filter(l => l.includes('[skill-reload]'))
+      const reloadLines = logSpy.mock.calls.map(c => c.join(' ')).filter(l => l.includes('[skill-rescan]'))
       // global 变动影响所有活跃 session（无 cwd 过滤）
       expect(reloadLines).toEqual([
-        `[skill-reload] dir=global event=unlink affectedSessions=[sid-g1,sid-g2]`,
+        `[skill-rescan] dir=global event=unlink affectedSessions=[sid-g1,sid-g2]`,
       ])
     } finally {
       logSpy.mockRestore()

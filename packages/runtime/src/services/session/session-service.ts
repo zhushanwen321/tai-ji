@@ -141,6 +141,16 @@ export const userStoppedMarkStore: UserStoppedMarkStore = {
   },
 }
 
+/**
+ * background 任务完成通知补投触发（bg-task-notify-durability 第二触发面）的内部命令与
+ * per-session 节流窗口。命令名与扩展侧注册（extensions/universal/base-tool-enhance
+ * src/index.ts 的 pi.registerCommand）是跨包字符串契约，字面量锤定不 import（先例
+ * trace-sync 的 /__taiji_get_system_prompt__）——`/__` 双下划线前缀 = 内部命令（前端
+ * internal-command-filter 过滤不显示），两处注释互为指针，改名必须同批。
+ */
+const BG_RECONCILE_COMMAND = '/__taiji_bg_reconcile__'
+const BG_RECONCILE_TRIGGER_THROTTLE_MS = 60_000
+
 export class SessionService implements ISessionService, ILifecycleSessionOps, IDispatcherSessionOps, IScannerSessionOps {
   /**
    * in-flight 恢复注册表已迁 pi-respawn 编排器（u8，D7-③ join 状态 SSOT——自动恢复与
@@ -203,16 +213,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   private modelCapabilityReconciler: ((sessionId: string) => Promise<unknown>) | null = null
 
   /**
-   * W5：message.complete 广播回调（组合根注入 ReloadOrchestrator.onMessageComplete）。
-   * 经 setter 注入（同 setConfigService 模式），避免构造参数环
-   * （orchestrator 依赖 sessionService，sessionService 不能反向依赖 orchestrator 具体类型）。
-   * 未注入时 message.complete 广播无额外副作用（reload 编排不生效）。
-   */
-  private onMessageComplete: ((sessionId: string) => void) | null = null
-  /**
-   * R3：session 删除回调（组合根注入 ReloadOrchestrator.clearPending）。
+   * session 删除回调（组合根注入 terminalService.destroyPty）。
    * 主动 delete（lifecycle.delete）和进程异常退出（onSessionExit）均经 removeSessionEntry
-   * 汇聚触发，清掉 pendingReload 残留（running session 入队后被删，永不发 message.complete）。
+   * 汇聚触发，同步销毁该 session 绑定的 PTY。
    */
   private onSessionDelete: ((sessionId: string) => void) | null = null
   /**
@@ -254,7 +257,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 仍走 broker.broadcast 盲广播。session 销毁时调 bus.clearSession 彻底清理
    * （removeSessionEntry 触发，所有删除路径汇聚处）。
    *
-   * 经 setter 注入（同 setConfigService/setPresetService/setOnMessageComplete 模式），
+   * 经 setter 注入（同 setConfigService/setPresetService/setOnSessionDelete 模式），
    * 避免破坏 SessionService 的 25+ 测试构造调用点。未注入时所有 bus 调用 no-op（this.messageBus?.*）。
    */
   private messageBus: IMessageBus | null = null
@@ -352,6 +355,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   private readonly lastViewedAtBySession = new Map<string, number>()
   /**
+   * background 任务完成通知补投的 per-session 触发节流（bg-task-notify-durability
+   * runtime 触发面）：sessionId → 最近一次发起 `__taiji_bg_reconcile__` 的时间戳。
+   *
+   * 位置先例 = 上方 lastViewedAtBySession（per-sid Map、随实例生命周期生灭、刻意不做
+   * 删除清理——量级每 sid 一个数字，回收态残留条目只影响节流窗口不影响正确性；60s
+   * 内切走再切回属正常节奏，不重复打扰 pi）。写方唯一 = maybeTriggerBgReconcile。
+   */
+  private readonly bgReconcileTriggeredAt = new Map<string, number>()
+  /**
    * 空闲回收占座（idle-pi-reclamation D6-2，u2）。u3 组合根经 setReclaimSeat 注入与
    * reaper/reclaimManagedSession 共享的同实例；缺省 null = 行为不变（ensureActive 无
    * 让路逻辑）——不破坏既有测试构造点（同 setConfigService 的 setter 注入模式）。
@@ -390,13 +402,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   private assembleSubmodules(messageBus?: IMessageBus): void {
     // 子模块注入 this(Facade 半构造时仅存引用,其方法在 Facade 完全构造后才被调用)。
     // registerDeps(S3/D2②):registerSession 装配依赖窄注入——send 闭包对晚期注入状态
-    // (messageBus/onMessageComplete)经 getter 每次调用动态读,与原 Facade 内联闭包捕获
-    // this 的语义逐字等价。
+    // (messageBus)经 getter 每次调用动态读,与原 Facade 内联闭包捕获 this 的语义逐字等价。
     const registerDeps: ISessionRegisterDeps = {
       adapterFactory: this.adapterFactory,
       getMessageBus: () => this.messageBus,
       broadcastGlobal: (msg) => this.broker.broadcast(msg),
-      notifyMessageComplete: (sessionId) => this.onMessageComplete?.(sessionId),
     }
     this.lifecycle = new SessionLifecycle(this, this.pm, this.configStore, this.sessionStore, this.workspaceService, registerDeps, {
       // D4：restore-abort 失败（abort RPC 超时/断链）的强杀收敛兜底——复用 dispatcher.forceQuit
@@ -694,12 +704,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.btwService = btwService
   }
 
-  /** W5：注入 message.complete 回调（组合根绑 ReloadOrchestrator.onMessageComplete）。 */
-  setOnMessageComplete(handler: (sessionId: string) => void): void {
-    this.onMessageComplete = handler
-  }
-
-  /** R3：注入 session 删除回调（组合根绑 ReloadOrchestrator.clearPending）。 */
+  /** session 删除回调注入（组合根绑 terminalService.destroyPty）。 */
   setOnSessionDelete(handler: (sessionId: string) => void): void {
     this.onSessionDelete = handler
   }
@@ -1192,41 +1197,8 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   ): Promise<void> { return this.records.subagentAction(sessionId, action, params) }
 
   /**
-   * W5：session 是否处于可 reload 的空闲态（进程存活且非生成中）。
-   * 供 ReloadOrchestrator 判断 skill 变更时是立即 reload 还是排队。
-   */
-  isSessionIdle(sessionId: string): boolean {
-    const session = this.lifecycle.get(sessionId)
-    return !!session && !session.isGenerating
-  }
-
-  /**
-   * W5：session 是否仍存活（sessions Map 含此 id，进程未退出 / 未被 delete）。
-   * 供 ReloadOrchestrator 检测排队期 session 删除，避免对已死 session 发 reload。
-   */
-  hasSession(sessionId: string): boolean {
-    return this.lifecycle.has(sessionId)
-  }
-
-  /**
-   * W5：向 session 发 `/__taiji_reload__` 触发 pi reload（重扫 skill + 重建 runtime）。
-   * 对称 workflowAction 的转发模式：直接 client.prompt 绕过 dispatcher busy 预检 / hook，
-   * 专用于 internal reload action（builtin extension 注册，不经 LLM）。client 不存在或
-   * prompt 抛错向上抛，由 ReloadOrchestrator 降级 catch（best-effort，不阻塞）。
-   */
-  async promptReload(sessionId: string): Promise<void> {
-    const client = this.pm.getClient(sessionId)
-    if (!client) throw new Error(`Session ${sessionId} not active`)
-    // 维护通道标记（idle-pi-reclamation D1 / R2 接线）：skill 目录任一文件变动会对全部
-    // 活跃 session 触发本 prompt，若计入 touch，skill 开发常态下全部空闲时钟被周期性
-    // 重置、回收饿死且不体现为豁免命中（日志看不到）——maintenance 标记让 RpcClient
-    // 跳过 lastActivityAt 刷新（u1a 的 SendCommandOptions 通道）。
-    await client.prompt('/__taiji_reload__', undefined, undefined, { maintenance: true })
-  }
-
-  /**
    * 退出 plan 模式（D5/E9/E10：PlanModeBar 确认 Popover 后；MF-1-7 编排自 transport
-   * handler 下沉至此，形态对齐 promptReload / workflowAction 的命令编排区）。
+   * handler 下沉至此，形态对齐 workflowAction 的命令编排区）。
    *
    * ① ensureActive 自动恢复 pi（join 语义，本类 ensureActive——崩溃恢复后懒重生未发生
    * 的窗口一步到位，不要求用户先发消息；恢复失败向上抛，由 handler 转 error envelope，
@@ -1249,22 +1221,6 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     const client = await this.ensureActive(sessionId)
     await client.prompt('/plan abort')
     this.onPlanAborted?.(sessionId)
-  }
-
-  /**
-   * U3（composer 四符号 §3.3.5）：reload 完成后失效 commands 快照（slash 列表动态刷新
-   * 链路闭合点）。失效点挂在这里的时机依据（设计 F8）：pi 对 extension 命令
-   * `await _tryExecuteExtensionCommand`（agent-session.js:800），promptReload resolve 即
-   * reload 已完成；而 `session_start(reason='reload')` 事件是 extension-only 不出 stdout
-   * （agent-session.js:2072），runtime 侧不存在可订阅的 reload 完成事件。
-   *
-   * 事件只做失效（对齐 applyContextUpdate 范式）——markDirty 置 dirty + 防抖重拉
-   * get_commands（commands 实例唯一数据写路径），重拉成功后经既有挂钩
-   * fetchCommandsSnapshot 内的 publishCommandsSnapshot 自动广播 session.commands，
-   * 本方法无需额外广播。
-   */
-  handleSessionReloaded(sessionId: string): void {
-    this.projection.getReplicatedStates(sessionId)?.commands.markDirty()
   }
 
   getSummary(sessionId: string): SessionSummary | undefined {
@@ -1550,7 +1506,36 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.projection.getReplicatedStates(sessionId)?.commands.markDirty()
     const client = this.pm.getClient(sessionId)
     if (!client) throw new Error(`session ${sessionId} not active`)
+    this.maybeTriggerBgReconcile(sessionId, client)
     return client.getCommands()
+  }
+
+  /**
+   * background 任务完成通知补投的 runtime 触发（bg-task-notify-durability 第二触发面）。
+   *
+   * 背景：桌面「切走会话再切回」是同进程重新挂接——pi 进程存活、不重发 session_start
+   * （真机实证），扩展侧挂在 session_start 上的维护链在「投递失败但进程存活」场景
+   * （设计 G2 核心场景）永不触发。getCommands 是切回后 renderer 主动拉取的必经查询
+   * （broadcast 与订阅时序竞争的既有补偿点），在此按节流补触发。
+   *
+   * 执行形态：fire-and-forget——不 await（getCommands 延迟敏感，补投结果不阻塞查询）、
+   * 失败只 console.warn（补投失败无害：扩展侧三判据幂等，下次触发重查）。命令通道
+   * `{ maintenance: true }`（SendCommandOptions 维护豁免口的首个用户）——补投不体现
+   * 用户活跃，不得刷新 lastActivityAt 妨碍空闲回收。
+   *
+   * 节流：60s per-session（bgReconcileTriggeredAt Map）。时间戳在发起时记录（对触发
+   * 尝试节流，非对完成节流——fire-and-forget 无完成点）。无待补任务时扩展侧三判据
+   * 早退，零输出零 turn。
+   */
+  private maybeTriggerBgReconcile(sessionId: string, client: IPiEngine): void {
+    const now = Date.now()
+    const last = this.bgReconcileTriggeredAt.get(sessionId)
+    if (last !== undefined && now - last < BG_RECONCILE_TRIGGER_THROTTLE_MS) return
+    this.bgReconcileTriggeredAt.set(sessionId, now)
+    // fire-and-forget：void 前缀表达「不消费结果」，.catch 防 unhandled rejection
+    void client.prompt(BG_RECONCILE_COMMAND, undefined, undefined, { maintenance: true }).catch((err) => {
+      console.warn(`[session-service] bg reconcile trigger failed (sessionId=${sessionId}):`, err)
+    })
   }
 
   /**

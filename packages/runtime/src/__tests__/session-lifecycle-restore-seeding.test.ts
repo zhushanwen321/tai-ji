@@ -44,7 +44,6 @@ function makeRegisterDeps(): ISessionRegisterDeps {
     adapterFactory: vi.fn(() => makeMockAdapter()),
     getMessageBus: vi.fn(() => null),
     broadcastGlobal: vi.fn(),
-    notifyMessageComplete: vi.fn(),
   }
 }
 

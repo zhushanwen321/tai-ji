@@ -1,12 +1,15 @@
 /**
  * reapOrphanPiProcesses 收殓状态机定向测试（CRAP 靶子：killOrphan）。
  *
- * 全依赖注入设计（listProcesses / signal / delay / readSpawnMarkers 均可替换），
- * 零真实进程、零真实等待、零真实 fs。覆盖 killOrphan 处置序列全分支 + 编排层：
+ * 全依赖注入设计（listProcesses / signal / delay / readSpawnMarkers /
+ * readProcessStartTime 均可替换），零真实进程、零真实等待、零真实 fs。覆盖
+ * killOrphan 处置序列全分支 + 编排层：
  * - SIGTERM 时目标已自行退出（ESRCH）→ 幂等按已回收计
  * - SIGTERM 其他错误（EPERM）→ failed
  * - 宽限后探活：已死（ESRCH）→ reaped（SIGTERM 生效）；探活 EPERM 按活着 → SIGKILL 兜底
  * - SIGKILL 成功 / SIGKILL 时已退出（ESRCH）→ reaped；SIGKILL 失败 → failed
+ * - SIGKILL 前 pid 复用复验：lstart 变化 → 跳过 SIGKILL（按已回收计 + warn）；
+ *   lstart 读取失败（null）→ 不阻断照常 SIGKILL
  * - 编排层：无孤儿早退（零 signal 调用）、ps 枚举失败降级 unsupported、Windows 平台跳过
  *
  * argv fixture 为判据 v2 四条合取形态（设计 §6.12：--mode rpc + --no-extensions +
@@ -71,6 +74,8 @@ function makeOptions(script: Array<'ok' | 'esrch' | 'eperm'>, stdout = orphanRow
     signal: signal.fn,
     delay: (ms) => { delays.push(ms); return Promise.resolve() },
     readSpawnMarkers: markers,
+    // SIGKILL 前 pid 复用复验的 ps 依赖注入：null = ps 不可用（防线缺席按现状继续）
+    readProcessStartTime: () => Promise.resolve(null),
   }
   return { options, calls: signal.calls, delays }
 }
@@ -135,6 +140,32 @@ describe('killOrphan 处置序列（单孤儿全分支）', () => {
     expect(result.reaped).toEqual([])
     expect(result.failed).toEqual([4242])
   })
+
+  it('SIGKILL 前 lstart 变化（pid 已复用）→ 跳过 SIGKILL 按已回收计 + warn（防线①补强）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { options, calls } = makeOptions(['ok', 'ok'])
+      // lstart 读取序列：处置起点 1000 → SIGKILL 前复读 2000（变化 = 原孤儿已死、pid 复用）
+      const reads = [1000, 2000]
+      options.readProcessStartTime = () => Promise.resolve(reads.shift() ?? 2000)
+      const result = await reapOrphanPiProcesses(options)
+      expect(result.reaped).toEqual([4242])
+      expect(result.failed).toEqual([])
+      // 未发 SIGKILL（跳过强杀）：全程只有 SIGTERM + 探活两次信号
+      expect(calls.filter((c) => c.signal === 'SIGKILL')).toEqual([])
+      expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('reused between scan and SIGKILL'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('SIGKILL 前 lstart 复读失败（ps 不可用返回 null）→ 不阻断，照常 SIGKILL（防线尽力而为）', async () => {
+    const { options, calls } = makeOptions(['ok', 'ok', 'ok'])
+    options.readProcessStartTime = () => Promise.resolve(null)
+    const result = await reapOrphanPiProcesses(options)
+    expect(result.reaped).toEqual([4242])
+    expect(calls.map((c) => c.signal)).toEqual(['SIGTERM', 0, 'SIGKILL'])
+  })
 })
 
 describe('reapOrphanPiProcesses 编排层', () => {
@@ -158,6 +189,7 @@ describe('reapOrphanPiProcesses 编排层', () => {
       signal: script.fn,
       delay: () => Promise.resolve(),
       readSpawnMarkers: markers,
+      readProcessStartTime: () => Promise.resolve(null),
     }
     const result = await reapOrphanPiProcesses(options)
     expect(result.scanned).toBe(2)

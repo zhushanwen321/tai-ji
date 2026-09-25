@@ -18,6 +18,7 @@ import { join } from "node:path";
 
 import {
   EngineSdkError,
+  killPidChain,
   type AgentCallOpts as SdkAgentCallOpts,
   type AgentOutcome as SdkAgentOutcome,
   type EngineHandleData as SdkEngineHandleData,
@@ -27,6 +28,8 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
+import { getHostServices } from "../../../core/host-services.ts";
+import { getLogger } from "../../../core/logger.ts";
 import { getSubagentSessionDir } from "../../assembly/path-encoding.ts";
 import { assertGateCapabilitiesMatched } from "../common/capability-gate.ts";
 import type {
@@ -81,8 +84,12 @@ function matchCatalogEntry(
   );
 }
 
+const logger = getLogger("remote-engine");
+
 /**
- * cancel 后 run 应答收敛的杀链兜底窗（超时触发 EngineClient.killAll 组杀常驻引擎）。
+ * cancel 后 run 应答收敛的兜底窗（超时 = 本地合成 abort 终态收尾 record + [D9-2]
+ * run 拓扑杀——只杀该 run 的引擎孙进程，引擎宿主与其上其他并发 run 存活；组杀
+ * 引擎的旧路径已退役，全调用面裁决见 killRunTopology 注释块）。
  *
  * 量级校准依据（全局超时原则：兜底窗按被保护对象粒度校准——本窗保护的是
  * 「pi 引擎 cancel 停轮收敛」这一任务级过程，非控制面单请求）：pi 引擎 cancel
@@ -94,6 +101,137 @@ function matchCatalogEntry(
  * 量级对 cancel 帧往返正确），两窗语义自此分离。
  */
 export const CANCEL_SETTLE_KILL_CHAIN_GRACE_MS = 30_000;
+
+/**
+ * [D3 协议版 P6] armed 回执等待窗缺省值：native 引擎 + schema 任务的 run 在本窗内
+ * 未收到引擎 armed 回执 → run fail-fast（合成失败 outcome，错误含双形态恢复指引）。
+ *
+ * 量级依据：armed 在引擎侧是 spawn 成功后立即上报（启动期，非执行期）——正常链路
+ * 到达耗时 = 引擎进程 spawn + 一帧 IPC，秒级以内；10s 覆盖慢宿主/慢磁盘的裕量，
+ * 远小于「schema 链路断掉烧完整 run」的沉没成本（G1 的保险丝语义）。用户通道：
+ * env 覆盖（测试调短窗 + 排障调长窗），TAIJI_SUBAGENT_* 前缀（ENV_WHITELIST_PREFIXES
+ * 白名单——PI_ 前缀在桌面 spawn 链被静默丢弃的教训，见 settled-watchdog 同款注记）。
+ */
+export const ARMED_RECEIPT_TIMEOUT_MS = 10_000;
+
+/** armed 回执等待窗的 env 覆盖通道（>0 毫秒数生效；未设/非法 = 缺省 10s）。 */
+export const ARMED_RECEIPT_TIMEOUT_ENV = "TAIJI_SUBAGENT_ARMED_RECEIPT_TIMEOUT_MS";
+
+/**
+ * 等待窗解析（每次 run 现读，不缓存——测试逐用例改 env 零串扰；非法值 warn 回落
+ * 缺省，对齐 TAIJI_SUBAGENT_IDLE_TIMEOUT_MS 的 LC-7 教训：非法回落必须可见）。
+ */
+function resolveArmedReceiptTimeoutMs(): number {
+  const raw = process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+  if (raw === undefined || raw.trim() === "") return ARMED_RECEIPT_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    logger.warn(
+      `[remote-engine] ${ARMED_RECEIPT_TIMEOUT_ENV}="${raw}" is invalid (expected a positive millisecond number) — ` +
+        `falling back to the default armed-receipt window (${ARMED_RECEIPT_TIMEOUT_MS}ms). ` +
+        `Recovery: set a plain ms value (e.g. 500 for tests) or unset the env.`,
+    );
+    return ARMED_RECEIPT_TIMEOUT_MS;
+  }
+  return parsed;
+}
+
+// ============================================================
+// [D3 协议版 P6] armed 回执等待门（宿主等待侧）
+// ============================================================
+
+/**
+ * armed 回执等待门：native 引擎 + schema 任务的 run 派发后开窗计时，引擎 armed
+ * 事件到达（经 run 事件路由）即收窗；窗满未到 → onTimeout 回调（调用方合成失败
+ * outcome + best-effort cancel）。emulated 引擎 / 无 schema 任务豁免（不建门——
+ * 「武装」概念仅对有孙进程 env/扩展依赖的 native 引擎成立，D3 分流判据 =
+ * capabilities.schemaEnforcement；任务形态判据复用 H1 的 task.schema 声明形态，
+ * 与引擎自查断言同源不同侧）。
+ *
+ * 为什么是「监控信号不与施控同源」：引擎侧武装断言（pi-subagent-cli）是引擎自查，
+ * 断言代码自身失效/被绕过时自查恒绿——宿主侧独立等待窗是第二道防线（F-1 同源
+ * 缴械教训的结构性应用）。
+ */
+interface ArmedReceiptGate {
+  /** run 事件路由喂入点（armed 到达即收窗；其余事件无操作）。 */
+  observe(event: unknown): void;
+  /** 窗满回调（构造后登记——回调需要 run 上下文合成失败 outcome）。 */
+  onTimeout(onFire: () => void): void;
+  /** 收窗（run 终态 settle / 超时触发后调用；幂等）。 */
+  dispose(): void;
+}
+
+function armArmedReceiptGate(
+  capabilities: EngineCapabilities,
+  task: AgentCallOpts,
+): ArmedReceiptGate | undefined {
+  // emulated 豁免（zcode 及 schema-emulation 登记域：引擎侧消费 wire task.schema，
+  // 无武装面，宿主不期待回执、不 fail-fast——D3 防 emulated 误伤）。
+  if (capabilities.schemaEnforcement !== "native") return undefined;
+  // 无 schema 任务豁免（H1 判据：task.schema 声明形态；无声明 = 无武装面）。
+  if (task.schema === undefined) return undefined;
+  let armed = false;
+  let onFire: (() => void) | undefined;
+  const timer = setTimeout(() => {
+    if (!armed) onFire?.();
+  }, resolveArmedReceiptTimeoutMs());
+  return {
+    observe: (event) => {
+      if (armed) return;
+      if (!isArmedEventFrame(event)) return;
+      armed = true;
+      clearTimeout(timer);
+    },
+    onTimeout: (cb) => {
+      onFire = cb;
+    },
+    dispose: () => {
+      clearTimeout(timer);
+    },
+  };
+}
+
+/** 运行时 guard：事件帧是否 armed 回执（wire 载荷 unknown，按 type 窄化，无 any）。 */
+function isArmedEventFrame(event: unknown): boolean {
+  return (
+    typeof event === "object" &&
+    event !== null &&
+    (event as { type?: unknown }).type === "armed"
+  );
+}
+
+/**
+ * run 请求与触发源的竞态合流（单源，两处消费：① armed 回执等待门——窗满合成失败
+ * outcome fail-fast；② cancel 收敛窗——窗满本地合成 abort 终态）：run 应答先到 →
+ * 正常返回；触发源先到 → 合流 resolve 为调用方合成的结果（EnginePort 契约「运行中
+ * 失败不 reject——合成 outcome + 正常 handle」）。败者后续 settle 一律吞掉（settled
+ * 守卫 + run 请求的 then 链恒有 handler，无 unhandled rejection）。
+ *
+ * registerTrigger 两侧实现均为纯登记赋值（ArmedReceiptGate.onTimeout /
+ * AbortWiring.onForceSettle），登记与 run 请求 then 链的先后顺序无可观察差异；
+ * dispose 在 settle 时执行（撤 timer / 摘 listener）。
+ */
+function awaitRunOrTrigger<T>(
+  runRequest: Promise<T>,
+  registerTrigger: (onFire: () => void) => void,
+  disposeTrigger: () => void,
+  synthesize: () => T,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const settle = (settleFn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      disposeTrigger();
+      settleFn();
+    };
+    registerTrigger(() => settle(() => resolve(synthesize())));
+    runRequest.then(
+      (value) => settle(() => resolve(value)),
+      (err) => settle(() => reject(err)),
+    );
+  });
+}
 
 /**
  * cli 形态 EnginePort。构造同步、不 throw（缺包/坏包不在构造期报——descriptor
@@ -199,10 +337,13 @@ export class RemoteEngine implements EnginePort {
   }
 
   /**
-   * 协议 run 映射。task 收窄为引擎面子集（model/schemaEnv/cwd/engineFallback 改挂
-   * run.params.ctx，协议层单列——SDK AgentCallOpts 注释的字段裁决）；事件经 run 作用域
+   * 协议 run 映射。task 收窄为引擎面子集（model/cwd/engineFallback 改挂
+   * run.params.ctx，协议层单列——SDK AgentCallOpts 注释的字段裁决；schema 本体经
+   * wire task.schema 单字段承载，PI_WORKFLOW_SCHEMA env 由引擎侧派生——H1 schema
+   * 传输归位）；事件经 run 作用域
    * 路由分发（event 通知 / streamDelta / poolResolved / handleReady）；abort → cancel
-   * 帧 + 收敛杀链兜底窗（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS，超时杀链）。运行中失败
+   * 帧 + 收敛兜底窗（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS；窗满 = 本地合成终态 +
+   * [D9-2] run 拓扑杀，引擎宿主不动）。运行中失败
    * 不 reject——合成 error outcome + 正常
    * handle 返回（EnginePort 契约：record 必须收尾）；run 帧发出前的失败（连接/握手）
    * reject。childSpawned/childStateChanged 镜像归 EngineClient（协议形态无
@@ -227,24 +368,79 @@ export class RemoteEngine implements EnginePort {
     const runId = ctx.taskId;
     const runParams = buildRunParams(task, ctx, runId);
 
-    const unregister = this.opts.client.registerRunRoute(runId, buildRunRouteHandlers(ctx));
+    // [D3 协议版 P6] armed 回执等待门（native + schema 任务专属；emulated / 无
+    // schema 豁免 = undefined）：事件路由包裹 observe——armed 到达即收窗，窗满未到
+    // 由合流等待器合成失败 outcome（下方 awaitRunOrArmedTimeout）。
+    const armedGate = armArmedReceiptGate(this.opts.manifest.capabilities, task);
+    const route = buildRunRouteHandlers(ctx);
+    if (armedGate !== undefined) {
+      const forwardEvent = route.onEvent;
+      route.onEvent = (event) => {
+        armedGate.observe(event);
+        forwardEvent?.(event);
+      };
+    }
 
-    // abort 分级：cancel 帧 → 等收敛（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS）→ 杀链兜底。
-    const abort = wireAbortSignal(
-      this.opts.client,
-      runId,
-      ctx,
-      this.opts.cancelSettleGraceMs ?? CANCEL_SETTLE_KILL_CHAIN_GRACE_MS,
-    );
+    const unregister = this.opts.client.registerRunRoute(runId, route);
+
+    // abort 分级：cancel 帧 → 等收敛（CANCEL_SETTLE_KILL_CHAIN_GRACE_MS）→ [D9-2]
+    // run 拓扑杀 + 本地合成终态（引擎宿主不动，裁决登记见 killRunTopology 注释块）。
+    // 兜底窗量级两处同源（onAbort 收敛窗 / armed 超时杀链兜底窗）。
+    const killChainGraceMs = this.opts.cancelSettleGraceMs ?? CANCEL_SETTLE_KILL_CHAIN_GRACE_MS;
+    const abort = wireAbortSignal(this.opts.client, runId, ctx, killChainGraceMs);
 
     try {
       // wire 载荷收窄（帧 result unknown → 协议 RunResult 形态）；SDK → core 结构
       // 兼容由 implements EnginePort 在 typecheck 期互证。
-      const result = (await this.opts.client.request("run", runParams)) as {
+      const runRequest = this.opts.client.request("run", runParams) as Promise<{
         handle: SdkEngineHandleData;
         outcome: SdkAgentOutcome;
-      };
-      return { handle: { data: result.handle }, outcome: result.outcome };
+      }>;
+      const armedSettled = armedGate !== undefined
+        ? awaitRunOrTrigger(
+          runRequest,
+          (onFire) => armedGate.onTimeout(onFire),
+          () => armedGate.dispose(),
+          () => {
+            // 窗满 fail-fast（EnginePort 契约：运行中失败不 reject——合成 outcome +
+            // 正常 handle）。best-effort cancel 先行：孙进程可能已在烧 token，宿主
+            // 侧失败不等于引擎侧自停（cancel 受理失败由下方武装的杀链兜底窗承接）。
+            // [加固] 受理失败必须出声：空 catch 吞掉 cancel 失败信号后，兜底窗是否真正接管不可诊断。
+            void this.opts.client.cancelRun(runId, "armed receipt timeout").catch((err: unknown) => {
+              logger.error(
+                `[remote-engine] armed receipt timeout cancel failed for run ${runId}: ` +
+                  `${err instanceof Error ? err.message : String(err)} (kill-chain fallback armed, grace ${killChainGraceMs}ms)`,
+              );
+            });
+            // [加固] 杀链兜底窗真实武装：本合成路径不经过 wireAbortSignal 的 onAbort
+            // （无外部 abort signal），「cancel 受理失败由杀链兜底窗承接」的第二道回收
+            // 此前结构性缺席——cancel 受理成功但引擎不收敛 / 受理失败两种形态都由本
+            // timer 到点 killRunTopology 定点收割（armKillChainFallbackForArmedTimeout
+            // 注释块载裁决）。
+            armKillChainFallbackForArmedTimeout(this.opts.client, ctx, runId, killChainGraceMs, runRequest);
+            logger.warn(
+              `[remote-engine] armed receipt not received within ${resolveArmedReceiptTimeoutMs()}ms ` +
+                `for run ${runId} (native engine, schema task) — failing the run fast`,
+            );
+            return {
+              handle: this.synthesizeHandle(),
+              outcome: armedReceiptTimeoutOutcome(this.id, runId),
+            };
+          },
+        )
+        : runRequest;
+      // [D9-2] 收敛窗合流：引擎应答先到正常返回；窗满先到 = 本地合成 abort 终态 +
+      // run 拓扑杀（wireAbortSignal 窗满回调），晚到的引擎应答由 settled 守卫吞掉。
+      const wireResult = await awaitRunOrTrigger(
+        armedSettled,
+        (onForceSettle) => abort.onForceSettle(onForceSettle),
+        () => abort.dispose(),
+        () => ({
+          handle: this.synthesizeHandle(),
+          outcome: abortedRunOutcome(this.id, runId, undefined),
+        }),
+      );
+      return { handle: { data: wireResult.handle }, outcome: wireResult.outcome };
     } catch (err) {
       if (abort.isCancelSent()) {
         // cancel 后未收敛（杀链已杀）或引擎在 abort 期间报错：合成 abort 终态，不 reject
@@ -329,7 +525,6 @@ interface WireRunParams {
   ctx: {
     cwd?: string;
     model: string | undefined;
-    schemaEnv: string | undefined;
     ctxModel: string | undefined;
     engineFallback: RunContext["engineFallback"];
     streamMode: "stream" | undefined;
@@ -337,6 +532,9 @@ interface WireRunParams {
     /** [Option C] 恒有值（宿主注入 ?? 同源 env 推导）——与 sessionRootId 的
      * "undefined 不上 wire" 不同，本字段派生恒产出字符串。 */
     sessionDir: string;
+    /** [D2 扩展加载显式化] 孙进程显式加载的扩展路径集（HostServices 端口取值；
+     * 宿主未实现端口 = undefined 不上 wire）。 */
+    extensionPaths?: string[];
   };
   resume?: NonNullable<RunContext["resume"]>;
 }
@@ -369,6 +567,16 @@ function deriveHostSubagentSessionDir(): string {
 }
 
 /**
+ * [D2 扩展加载显式化] HostServices.extensionPaths 端口取值（每次 run 现取——
+ * P-C2 惰性求值，扫描/注册期早于 configureCore 的坑不在此复现：buildRunParams
+ * 只在 run 派发时执行）。返回 wire 展开形态（undefined = 端口缺席，不挂键）。
+ */
+function hostExtensionPaths(): { extensionPaths: string[] } | undefined {
+  const paths = getHostServices().extensionPaths?.();
+  return paths !== undefined ? { extensionPaths: paths } : undefined;
+}
+
+/**
  * run 帧 wire 载荷构建。协议 ctx 承载（RunContext 字段映射表）：cwd 取任务声明值
  * （有值才上 wire——缺省不上，引擎侧回退自身进程 cwd；worktree 隔离路径由
  * taskSpecWithModel 合流后必有值）；ctxModel 投影 canonical 词形（provider/id，
@@ -388,7 +596,6 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
       // 改变无 worktree/无显式 cwd 任务的落点。
       ...(task.cwd !== undefined ? { cwd: task.cwd } : {}),
       model: task.model,
-      schemaEnv: ctx.schemaEnv ?? task.schemaEnv,
       ctxModel: ctxModelRef,
       engineFallback: ctx.engineFallback,
       streamMode: ctx.stream !== undefined ? ("stream" as const) : undefined,
@@ -399,6 +606,11 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
       // 缺省同源 env 推导（deriveHostSubagentSessionDir）——恒有值恒上 wire，引擎
       // 据此组装 --session-dir 不自推导（引擎本地推导降级 [LEGACY] fallback）。
       sessionDir: ctx.sessionDir ?? deriveHostSubagentSessionDir(),
+      // [D2 扩展加载显式化] 孙进程扩展路径集走 HostServices 端口（per-host 常量，
+      // 不经 per-run 载荷）：pi 壳双形态注入（taiji 宿主 argv 白名单 / 独立 peerDep
+      // 回退）。端口缺席（zsw 壳 / 未配置）= undefined 不上 wire（协议 additive）；
+      // 在场时空数组也上 wire（显式「无扩展」，引擎侧不拼 --extension）。
+      ...(hostExtensionPaths() ?? {}),
     },
     ...(ctx.resume !== undefined ? { resume: ctx.resume } : {}),
   };
@@ -413,16 +625,109 @@ function buildRunRouteHandlers(ctx: RunContext): RunRoute {
   };
 }
 
-/** abort 接线的运行态句柄（isCancelSent 供 run catch 分支分诊；dispose 归 finally）。 */
+// ============================================================
+// [D9-2 杀伤半径收窄] cancel 收敛兜底的 run 拓扑杀 + 全调用面裁决登记
+// ============================================================
+
+/**
+ * [D9-2 调用面裁决登记（grep 锚：D9-2）] `EngineClient.killAll`（组杀引擎 CLI）
+ * 全调用面逐处判定——本文件只承载①②的收窄后路径；③④及其余引擎级故障面保留
+ * 组杀（豁免判定以本表为权威）：
+ *
+ * | # | 调用面 | 位置 | 判定 |
+ * |---|--------|------|------|
+ * | ① | watchdog no-progress（workflow-dispatch fire → abort → 本阶梯） | wireAbortSignal 收敛窗 | **收窄**到 run 进程拓扑（killRunTopology）——杀半径只及该 run 的引擎孙进程，引擎宿主与同引擎其他并发 run 存活 |
+ * | ② | cancel 收敛兜底（外部 abort → cancel 帧 → 收敛窗超时） | 同上（与①共享同一代码路径） | **同案收窄**到 run 拓扑——cancel 语义是停这一个 run，组杀引擎是无辜面 |
+ * | ③ | dispose（宿主停机 / 引擎退役语义） | engine-client.ts dispose | **保留组杀 + 豁免**：停机时引擎本就该全灭，无「无辜并发 run」要保护 |
+ * | ④ | stdout-wedge 自愈（引擎级 stdout 腿楔死恢复） | engine-client.ts killEngineForStdoutWedge | **保留组杀 + 豁免**：卡死定位在引擎级而非 run 级，本就无 run 级目标 |
+ * | — | 引擎自报故障杀链（data-plane 反向请求 10s 未答判引擎故障） | engine-client.ts failEngine | **保留组杀 + 豁免**（同④族）：故障定位在引擎级（引擎反向通道楔死），无 run 级目标；D9-2 四处枚举外的第五调用面，实施期 grep 枚举补登记 |
+ *
+ * 收窄后语义（①②共享）：收敛窗超时 = 宿主放弃等待引擎应答——本地合成 abort
+ * 终态收尾 record（EnginePort 契约「record 必须收尾」；晚到的引擎应答由 settled
+ * 守卫吞掉，形态同 armed 等待门），同时 best-effort 杀该 run 的引擎孙进程
+ * （mirror 中 recordId 锚定的活子进程，SDK killPidChain 单 pid 杀链）。zcode 等
+ * 常驻 app-server 引擎无 per-run 子进程（镜像零目标）→ 降级为 stall 出声不杀
+ * （ADR-0047 静默 ≠ 卡死；stall 通知通道 = P4 workflow-stall informational 通知，
+ * 由 subagent-workflow 扩展的 journal 尾帧扫描承载，core 不另开第二通知面）。
+ */
+
+/** run 拓扑杀的拓扑锚：一次性 run = runId；续聊 run 的引擎子进程以 resume.recordId 归账（pi 引擎 childSpawned 帧的关联键）。 */
+function runTopologyKey(ctx: RunContext): string {
+  return ctx.resume?.recordId ?? ctx.taskId;
+}
+
+/**
+ * [D9-2 ①②] 收敛窗超时的 run 拓扑杀：只杀该 run 在镜像中的活子进程（SIGTERM →
+ * 5s → SIGKILL 升级，SDK killPidChain），引擎宿主进程不动、其他 run 的子进程不动。
+ *
+ * 零目标分支 = 无 per-run 进程拓扑引擎的降级出口（zcode 常驻 app-server 恒落此；
+ * pi 引擎孙进程未 spawn / 已退出的窄窗同理）——不杀任何进程，warn 出声降级语义：
+ * 组杀引擎是被 D9-2 明令禁止的无辜面，stall 信号由 P4 workflow-stall 通道承载。
+ */
+function killRunTopology(client: EngineClient, ctx: RunContext, reason: string): void {
+  const topologyKey = runTopologyKey(ctx);
+  const live = client.mirror
+    .snapshot()
+    .filter((e) => e.recordId === topologyKey && e.state === "running" && !e.killed);
+  if (live.length === 0) {
+    logger.warn(
+      `[remote-engine] ${reason}; no run-scoped child process to kill for topology '${topologyKey}' — ` +
+        `engine host left untouched (group kill is forbidden for run-scoped recovery, D9-2). ` +
+        `The run is stalled, not stopped: a stall notice is owned by the workflow-stall ` +
+        `notification channel; the host-side record has been force-settled as aborted.`,
+    );
+    return;
+  }
+  logger.warn(
+    `[remote-engine] ${reason}; ` +
+      `killing ${live.length} run-scoped child process(es) (pids: ${live.map((e) => e.pid).join(",")}) — ` +
+      `engine host and other concurrent runs are untouched`,
+  );
+  for (const entry of live) {
+    killPidChain(entry.pid, { note: `run ${ctx.taskId} topology child` });
+  }
+}
+
+/**
+ * [armed 超时路径的杀链兜底（加固）] armed 窗满 fail-fast 合成路径不经过 wireAbortSignal
+ * 的 onAbort（无外部 abort signal），「cancel 帧 → 收敛窗 → killRunTopology」兜底在该
+ * 路径结构性缺席——本 helper 是同款形态的显式武装：graceMs 内引擎侧 run 未自终
+ * （runRequest 无迟到终态应答）→ killRunTopology 定点收割（量级同源 cancelSettleGraceMs）。
+ * timer 撤除点 = runRequest 迟到终态（引擎侧已终态，杀链失去标的）。不挂 AbortWiring：
+ * armed 合成后 run() 经 finally dispose 微任务级返回，挂上会被立即清掉（兜底永不触发）；
+ * 泄漏面 = runRequest 永不 settle 时 timer 到点自耗尽（killRunTopology 的镜像过滤自守卫
+ * 误杀——目标已退即零目标 warn 分支），unref 不阻进程退出。
+ */
+function armKillChainFallbackForArmedTimeout(
+  client: EngineClient, ctx: RunContext, runId: string,
+  graceMs: number, runRequest: Promise<unknown>,
+): void {
+  const timer = setTimeout(
+    () => killRunTopology(client, ctx, `armed receipt timeout kill-chain fallback for run ${runId}`),
+    graceMs,
+  );
+  const clearTimer = (): void => clearTimeout(timer);
+  void runRequest.then(clearTimer, clearTimer);
+  timer.unref();
+}
+
+/**
+ * abort 接线的运行态句柄（isCancelSent 供 run catch 分支分诊；dispose 归 finally；
+ * onForceSettle 供 run 请求在收敛窗超时时本地合成终态——EnginePort「record 必须收尾」
+ * 契约的兑现点，晚到的引擎应答由调用方 settled 守卫吞掉）。
+ */
 interface AbortWiring {
   isCancelSent(): boolean;
+  /** 收敛窗超时回调登记（窗满 = run 请求尚未应答 → 本地合成 abort 终态 + run 拓扑杀）。 */
+  onForceSettle(cb: () => void): void;
   dispose(): void;
 }
 
 /**
  * abort 分级接线：cancel 帧 → 等收敛（graceMs，缺省 CANCEL_SETTLE_KILL_CHAIN_GRACE_MS）
- * → 杀链兜底。signal 已 aborted 则立即进入收敛窗口；dispose 在 run 终态（finally）
- * 标记 settled 并清理 timer / listener。
+ * → 收敛窗超时 = run 拓扑杀（[D9-2] 只杀该 run 的引擎孙进程，引擎宿主不动——全调用面
+ * 裁决见 killRunTopology 注释块）+ 本地合成终态回调。signal 已 aborted 则立即进入收敛
+ * 窗口；dispose 在 run 终态（finally）标记 settled 并清理 timer / listener。
  */
 function wireAbortSignal(
   client: EngineClient,
@@ -433,16 +738,18 @@ function wireAbortSignal(
   let cancelSent = false;
   let settled = false;
   let settleTimer: NodeJS.Timeout | undefined;
+  let forceSettle: (() => void) | undefined;
   const onAbort = (): void => {
     if (cancelSent || settled) return;
     cancelSent = true;
     void client.cancelRun(runId, "abort").catch(() => {
-      // 受理失败由收敛窗口兜底（进程死 → run 请求 reject → 合成终态）。
+      // 受理失败由收敛窗口兜底（本地合成终态 + run 拓扑杀）。
     });
     settleTimer = setTimeout(() => {
-      if (!settled) {
-        void client.killAll(`cancel did not settle within grace for run ${runId}`);
-      }
+      if (settled) return;
+      settled = true;
+      killRunTopology(client, ctx, `cancel did not settle within grace for run ${runId}`);
+      forceSettle?.();
     }, graceMs);
   };
   if (ctx.signal !== undefined) {
@@ -451,6 +758,9 @@ function wireAbortSignal(
   }
   return {
     isCancelSent: () => cancelSent,
+    onForceSettle: (cb) => {
+      forceSettle = cb;
+    },
     dispose: () => {
       settled = true;
       if (settleTimer !== undefined) clearTimeout(settleTimer);
@@ -476,6 +786,32 @@ function transientRunOutcome(engineId: string, err: unknown): SdkAgentOutcome {
   return {
     content: "",
     error: err instanceof Error ? err.message : String(err),
+    exitCode: null,
+    engineId,
+  };
+}
+
+/**
+ * [D3 协议版 P6] armed 回执窗满合成 outcome。文案语义对齐引擎侧武装断言（H3）双形态
+ * 恢复指引；差异点 = 本侧是宿主独立信号（引擎自查之外的监控面），失败含义多一支：
+ * 「引擎版本过旧不上报回执」。exitCode null = cancel/杀链终态族（被信号杀死判据）。
+ */
+function armedReceiptTimeoutOutcome(engineId: string, runId: string): SdkAgentOutcome {
+  return {
+    content: "",
+    error:
+      `[schema-arming] engine_run_failed: no armed receipt from native engine within the ` +
+      `wait window for a schema task (run ${runId}) — the run was failed fast because ` +
+      `continuing could complete with an unvalidated structured output. Either the arming ` +
+      `chain is broken (schema env / grandchild extension never reached the pi grandchild), ` +
+      `or the engine does not report armed receipts (engine package too old to speak the ` +
+      `armed event). Recovery — taiji host form: check the runtime extension-service ` +
+      `diagnostics for the grandchild extension whitelist staging of ` +
+      `@zhushanwen/pi-structured-output. Recovery — standalone pi form: install ` +
+      `@zhushanwen/pi-structured-output (peerDependency) or use a schema-less workflow ` +
+      `instead (drop the schema from the agent call). If engine-side arming assertions pass ` +
+      `but no receipt arrives, upgrade or reinstall the engine package ` +
+      `(@zhushanwen/pi-subagent-cli).`,
     exitCode: null,
     engineId,
   };

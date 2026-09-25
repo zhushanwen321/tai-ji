@@ -101,7 +101,7 @@ session-runner.runSpawn:
 
 改动：
 - `injectors/subagent-list-injector.ts` + `workflow-list-injector.ts`：
-  - 拆为「发现」+「渲染」两层。发现层 `discoverAllAgents` / `discoverAllWorkflows` 返回条目列表（agent / workflow meta）
+  - 拆为「发现」+「渲染」两层。发现层返回条目列表（agent / workflow meta）
   - 渲染层 `formatAgentList` / `formatWorkflowList` 接收已发现列表，输出 XML（不变）
 - 缓存机制：**模块级** `let agentCache` / `let workflowCache`（非按 sessionId 分区的 Map）。设计依据：taiji session-pool 模型——每 pi 子进程 = 一 session = 独立扩展实例，模块级缓存天然 per-session 隔离，无需分区 Map。适用边界：依赖 taiji 部署模型；若未来 pi 支持单进程内多 session 并发，需改为按 sessionId 分区的 Map 并挂入 sessionState
 - 两个 injector 自管缓存生命周期（`session_start` / `before_agent_start` / `session_shutdown` handler 注册在各自 injector 内，不经 `index.ts`）：

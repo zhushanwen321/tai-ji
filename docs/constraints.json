@@ -1619,7 +1619,7 @@
     },
     {
       "id": "C-ext-17",
-      "summary": "非 pi 引擎分支终止链三路径全覆盖：spawn 子进程注册 session-runner spawnedChildren 记账（shutdown 收割兜底）、record AbortController 的 signal wire 到 RunContext.signal（用户 cancel 经 kill-chain 两级）、会话级联挂 dispose() 既有编排（abortRunningControllers → killAllSpawnedChildren）——不留孤儿进程",
+      "summary": "非 pi 引擎分支终止链三路径全覆盖：spawn 子进程注册 session-runner spawnedChildren 记账（shutdown 收割兜底）、record AbortController 的 signal wire 到 RunContext.signal（用户 cancel 经 kill-chain 两级）、会话级联挂 dispose() 既有编排（abortRunningControllers → markAllSpawnedChildrenDead）——不留孤儿进程",
       "scope": [
         "packages/subagent-core/src/execution/subagent-service.ts",
         "packages/subagent-core/src/execution/engine/host/spawned-children.ts",
@@ -2782,7 +2782,7 @@
     },
     {
       "id": "C-ext-23",
-      "summary": "skill reload 非破坏语义四支柱（skill-reload-nondestructive D11）：subagent-workflow 的 session_shutdown 处理必须按 reason 分支，reload 不得触发 dispose/terminate/store 清理；registerEngineDescriptor 同稳定标识覆盖不得 dispose 已实例化单例；host-ui-endpoint 槽的 EngineClient 消费点必须现读（不得构造期固化）；post-reload session_start 必须走 adoption（同 sessionId 接管而非重建）且不得运行 kill-9 恢复。执行方式 = 单测锁定（运行载体 = 包内 vitest，authority 所列测试文件即四支柱锁定落点：reload 分支 / adoption 含恢复门控 / 同标识重注册幂等 / 槽现读路由；「R2 按改动面触发」无独立机器触发器，以 CR 的 scope 匹配近似承载），改 scope 面实现必须同批维持这些测试的断言语义，不得为通过测试弱化断言",
+      "summary": "session 替换/恢复非破坏语义四支柱（原 skill-reload-nondestructive D11；2026-09-25 W5 skill 变更→pi reload 编排退役，pi 侧不再有 reload 触发面，四支柱转为 pi 进程崩溃恢复/session 替换路径的防御性锁定，机制与测试保留）：subagent-workflow 的 session_shutdown 处理必须按 reason 分支，替换/恢复不得触发 dispose/terminate/store 清理；registerEngineDescriptor 同稳定标识覆盖不得 dispose 已实例化单例；host-ui-endpoint 槽的 EngineClient 消费点必须现读（不得构造期固化）；session 重启后 session_start 必须走 adoption（同 sessionId 接管而非重建）且不得运行 kill-9 恢复。执行方式 = 单测锁定（运行载体 = 包内 vitest，authority 所列测试文件即四支柱锁定落点：reload 分支 / adoption 含恢复门控 / 同标识重注册幂等 / 槽现读路由；「R2 按改动面触发」无独立机器触发器，以 CR 的 scope 匹配近似承载），改 scope 面实现必须同批维持这些测试的断言语义，不得为通过测试弱化断言",
       "scope": [
         "extensions/universal/subagent-workflow/src/workflow-events.ts",
         "extensions/universal/subagent-workflow/src/session-lifecycle.ts",
@@ -2961,6 +2961,30 @@
       ]
     },
     {
+      "id": "C-ext-24",
+      "summary": "workflow 派发模型解析全路径形态：裸名（无路径分隔符的模型标识）不解析、解析失败为期望行为（同步拒单并列出清单，零 run 创建零 spawn），报错附全路径用法指引；pi 路由经 resolveModel→assertCanonicalModelRef 前置拒单（D4 终态决策，workflow-architecture-redesign）",
+      "scope": [
+        "extensions/universal/subagent-workflow/**",
+        "packages/subagent-core/src/execution/service/**"
+      ],
+      "authority": [
+        "adr/decisions.md#adr-0075-workflow-域四支柱平移与-schema-通道终态2026-09-21"
+      ],
+      "dimensions": [
+        "extension-api"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "scripts/check-model-references.mjs"
+        },
+        {
+          "type": "review",
+          "agent": "review-extension-api"
+        }
+      ]
+    },
+    {
       "id": "C-proc-27",
       "summary": "非 workspace 结构接线登记（S1，2026-09-24 源自 PR #20 review-findings 组 D 守卫化）：管辖区（packages/ extensions/ resources/plugins/）内含 package.json、但不在 pnpm-workspace.yaml globs 内的包必须在 docs/structure-wiring.json 逐条登记机器管线接线面（CI typecheck 锚点 / 测试装配 script / 发布线成员 / coverage 测量面），登记锚点须在目标文件中真实存在，双向对账（磁盘有而登记无 = 未登记即红；登记有而磁盘无 = 删包残留即红）；豁免清单（测试夹具/内嵌示例）显式登记可审计。新顶层结构第一笔 commit 只做接线与登记——ed6735b47 式「一 commit 三坑」（新包落线时 CI/coverage/守卫面全漏）由本守卫在 commit 时拦截",
       "scope": [
@@ -2983,6 +3007,70 @@
       ]
     },
     {
+      "id": "C-ext-25",
+      "summary": "schema 跨进程只经 wire task.schema 单字段传输：env 预编码形态 schemaEnv 已退役（H1），env 由引擎宿主从 task.schema 派生（pi spawn-args 逐项构造）；resolver 产出侧负断言锁防回流（agent-opts-resolver-schema-prompt.test.ts「schemaEnv 键重现即回归」）；native 直传/emulated 仿真由 schemaEnforcement 能力位分流（D1 终态决策）",
+      "scope": [
+        "packages/subagent-core/src/execution/assembly/**",
+        "packages/subagent-engine-sdk/src/protocol/**",
+        "packages/pi-subagent-cli/src/**"
+      ],
+      "authority": [
+        "adr/decisions.md#adr-0075-workflow-域四支柱平移与-schema-通道终态2026-09-21"
+      ],
+      "dimensions": [
+        "extension-api",
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-ext-26",
+      "summary": "注册操作终局通知必达：workflow run 成功/失败/取消一律出终局通知（C-ext-19 确认式送达在 workflow 域的细化，D7）；终局投影由 run 显式状态机统一裁决（ADR-0074）——persistTerminalProjection 单写点、errorCode/stderrTeePath 从事件流读回，禁止旁路补发第二通知面",
+      "scope": [
+        "extensions/universal/subagent-workflow/**",
+        "packages/subagent-core/src/orchestration/**"
+      ],
+      "authority": [
+        "adr/decisions.md#adr-0075-workflow-域四支柱平移与-schema-通道终态2026-09-21",
+        "adr/decisions.md#adr-0074-workflow-run-显式状态机转移表裁决--事件流权威投影2026-09-21"
+      ],
+      "dimensions": [
+        "extension-api",
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-ext-27",
+      "summary": "extensions 生产码消费 @zhushanwen/subagent-core 只允许主 barrel（裸名 import）与 core package.json exports 登记的子入口（./engine/paths、./engine/engine-discovery-scan、./relay-env、./workflows/*），深路径 import/export-from（含 import type）一律禁止——深路径在 taiji bundle（esbuild exports 解析）/ npm dist（ERR_PACKAGE_PATH_NOT_EXPORTED）/ pi jiti 三形态全部断裂。白名单动态读 core exports（唯一权威源，core 新增子入口自动放行）。tsc 对生产码深路径不拦（extensions/tsconfig.json 的 paths 通配是 fallow 静态分析依赖、优先于 exports 解析），防线只在 ESLint。测试/bench/mocks 文件的深路径是 u-2c 已裁决设计（测试消费符号不塞 barrel，PR #198），经 vitest alias + tsconfig paths 双轨解析，不受本约束管辖；断链信号 = extensions:typecheck 红，修复 = 改 specifier",
+      "scope": [
+        "extensions/**"
+      ],
+      "authority": [
+        "../eslint.config.mjs",
+        "../packages/subagent-core/package.json"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "eslint.config.mjs"
+        }
+      ]
+    },
+    {
       "id": "C-comm-20",
       "summary": "分层例外登记互指机器化（S2②，2026-09-24 源自 PR #20 组 B 的 MF-5-1 形态守卫化）：runtime-layering.md §3「跨切面例外」表行模块集与 check_services_infra_import.py 的 DOCUMENTED_MODULES 集合双向相等——§3 登记了守卫未收录 = 该模块 value import 被误拦；守卫收录了 §3 未登记 = 例外面静默扩大。基线债模块（BASELINE_MODULES）不在对账面（待 ports 收编，收编完成移除；应转正例外则先 §3 登记再移入 DOCUMENTED）。守卫白名单增删 §3 相关成员时必须同步另一侧，同 commit 落地",
       "scope": [
@@ -2999,6 +3087,26 @@
         {
           "type": "machine",
           "hook": "check_layering_registry_sync.py"
+        }
+      ]
+    },
+    {
+      "id": "C-proc-30",
+      "summary": "集成线传播守卫（2026-09-24 dev-0.10.6 打包事故守卫化）：打包（prerelease）/ 集成合并（dev-merge）前必须运行 scripts/check-line-propagation.mjs 且 --target 解析为打包/集成线——常态 = 目标线 worktree 内 --target HEAD；目标 worktree 不存在的挂接分支可在源 worktree 内以分支名变量跑（见 dev-merge skill 1.8 步）；禁把 --target 写死为 'main' 等恒绿字面量——'main' 在任何 worktree 跑都恒绿，接线即空转；硬检查 = 目标线 ⊇ main（git merge-base --is-ancestor main <target>），红灯 block（exit 1 + 缺失提交清单 + 恢复指引 merge main），仅可经 --allow-diverged 一次性越过（不做持久豁免登记）；软提示 = 兄弟 dev-* 线触及目标线共享文件的未传播 commit 清单（commit 总量 + 最老停留天数头条 + 明细），无状态恒常呈报（无本地基线文件）、不阻塞 exit code，裁决粒度 = 线粒度（吸收/暂缓），执行 agent 须将头条摘要呈报用户后才继续；机器只保证 target ⊇ main，「修复滞留兄弟线未进 main」与正常 WIP 在 git 形态上无差别——该残余类主防线 = ADR-0076 纪律① fix 优先回流 main",
+      "scope": [
+        "scripts/check-line-propagation.mjs",
+        ".agents/skills/prerelease/SKILL.md",
+        ".agents/skills/dev-merge/SKILL.md"
+      ],
+      "authority": [
+        "adr/decisions.md#ADR-0076",
+        "../scripts/check-line-propagation.mjs"
+      ],
+      "dimensions": [],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check-line-propagation.mjs"
         }
       ]
     }

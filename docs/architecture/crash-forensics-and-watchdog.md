@@ -113,7 +113,7 @@ pi 崩溃（exit 1）
 
   ```json
   { "ts": "2026-09-12T02:57:03Z", "layer": "pi|runtime|renderer|main|plugin-worker",
-    "event": "crash|unresponsive|auto-respawn|auto-respawn-failed|reload|rolling-restart|rolling-restart-deferred|rolling-restart-forced|shutdown|deleted|reclaimed|memory-relief|reattach-skipped|checkpoint-corrupt|reaped|inbound-frame-dropped|frame-truncated|registry-miss|watermark-daily|trigger-review",
+    "event": "crash|unresponsive|auto-respawn|auto-respawn-failed|reload|rolling-restart|rolling-restart-deferred|rolling-restart-forced|shutdown|deleted|reclaimed|memory-relief|reattach-skipped|checkpoint-corrupt|reaped|reap-failed|inbound-frame-dropped|frame-truncated|registry-miss|watermark-daily|trigger-review",
     "sessionId": "01a06a87-…", "reason": "extension-stale-ctx|sigterm|planned|unclean-exit|warn-tier|trunc-tier|…",
     "exitCode": 1, "rss": 402653184, "heapUsed": 301989888,
     "uptimeSec": 86400, "appVersion": "0.9.16", "piVersion": "0.84.4",
@@ -129,6 +129,7 @@ pi 崩溃（exit 1）
   | deleted | `removeSessionEntry` 汇聚点（session-service.ts:1191——lifecycle.delete 主动删与 onSessionExit 异常退的公共收口，能同时覆盖两类路径的台账记录；行号为 2026-09-12 对齐时点，以符号为锚） | runtime.jsonl |
   | reclaimed | reaper `reclaimManagedSession` 摘除步（idle 设计 D7 预登记的「阶段二台账落地后追加」在此兑现） | runtime.jsonl |
   | reaped | reap-orphan-pi 杀链（v2 判据命中处：组合根注入的 spawn marker 清单 `readSpawnMarkers` + argv 匹配 + ppid===1——v1「--session-dir 精确相等」判据已 marker 化，防误杀三重防线语义不变） | runtime.jsonl |
+  | reap-failed | reap-orphan-pi 杀链的 failed 分支（判据命中但信号处置失败——非 ESRCH 错误；与 reaped 行同 schema 同扩展字段 pid/ppid，处置失败率可机器对账） | runtime.jsonl |
   | plugin-worker crash | plugin-host worker 退出计数器（既有日志点补台账行） | runtime.jsonl |
   | runtime crash / rolling-restart | **main 侧 supervisor** `onRuntimeExit`（含 trigger/退出码/重启决策）——runtime 被 SIGKILL 时自己写不了，supervisor 是唯一在场者；计划内退出码见 D5 | main.jsonl |
   | renderer crash / reload / unresponsive | main 侧 render-process-gone 处理器（C-proc-16 链路）+ 熔断转静态页事件 | main.jsonl |

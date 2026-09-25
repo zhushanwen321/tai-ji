@@ -9,10 +9,8 @@
 
 import type { GuiRenderResult } from "@zhushanwen/extension-protocol";
 import type {
-  AgentUsage,
   AgentUsageTotal,
   ToolCall,
-  ToolCallResult,
   Turn,
   WorktreeHandle,
 } from "@zhushanwen/subagent-engine-sdk";
@@ -365,28 +363,6 @@ export interface DisplayItem {
 // Agent 结果（一次执行的 outcome）
 // ============================================================
 
-/**
- * SDK AgentSessionEvent 的最小可用子集（duck-typed，避免强耦合 SDK 类型）。
- * 由 session-runner 内部消费，驱动累积器和事件翻译。
- */
-export type SdkEvent = {
-  type: string;
-  toolCallId?: string;
-  toolName?: string;
-  args?: unknown;
-  result?: ToolCallResult;
-  isError?: boolean;
-  message?: {
-    usage?: AgentUsage & { cost?: { total: number } };
-    stopReason?: string;
-    errorMessage?: string;
-    /** 消息角色（message_start 事件携带，user/assistant/toolResult/custom）。 */
-    role?: string;
-  };
-  assistantMessageEvent?: { type?: string; delta?: string };
-  reason?: string;
-};
-
 /** 一次 session 执行的完整结果。collectResult 产出，写入 Record.outcome。 */
 export interface AgentResult {
   text: string;
@@ -738,8 +714,6 @@ export interface ExecuteOptions {
   skillPath?: string;
   appendSystemPrompt?: string[];
   schema?: Record<string, unknown>;
-  /** D-A6 bridge: workflow schemaEnv 经 ExecuteOptions 透传到 runSpawn childEnv。 */
-  schemaEnv?: string;
   /**
    * Turn 上限 limiter。显式 0/负 = 显式不限：压过 SPAWN_WATCHDOG_ENV 兑底不挂
    * watchdog（SP-6 参数 > env，U5）；undefined 未传才由 env 兑底。

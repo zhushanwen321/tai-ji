@@ -82,6 +82,12 @@ export interface StartupBackgroundDeps {
    * readSpawnMarkerList(getDataDir()) 闭包；null = 清单缺失/坏 → reap 侧 fail-safe 跳过。
    */
   readSpawnMarkers: () => string[] | null
+  /**
+   * spawn 清单 tmp 残片清扫（加固轮，D6c port 纪律同 readSpawnMarkers）：组合根注入
+   * infra/spawn-markers 的 sweepStaleSpawnMarkerTmpFiles(getDataDir()) 闭包，返回清理数。
+   * 可选成员保证既有测试构造点不破；undefined = 跳过清扫（行为不变）。
+   */
+  sweepSpawnMarkerTmpResidue?: () => number
 }
 
 /** 空闲 pi 回收四旋钮（D4；默认值权威源 = shared/constants DEFAULT_PI_RECLAIM_*）。 */
@@ -301,6 +307,7 @@ function scheduleOrphanReapChain(deps: StartupBackgroundDeps): void {
       dataDir: getDataDir(),
       ownPid: process.pid,
       readSpawnMarkers: deps.readSpawnMarkers,
+      trigger: 'startup-sweep',
     })
       .catch((e) => {
         console.warn('[runtime] orphan pi reap failed unexpectedly:', e)
@@ -312,6 +319,20 @@ function scheduleOrphanReapChain(deps: StartupBackgroundDeps): void {
       .then(() => {
         settleReapChain()
       })
+    // spawn 清单原子写 tmp 残片清扫（>24h 崩溃残留，静默容错见 sweep 函数头注）：挂在
+    // 启动期 sweep 链同一定时器、收殓链 kick-off 之后（同步快操作，不参与收殓硬序，
+    // 不推迟 reapChainDone settle）。实现经 deps 注入（D6c port 纪律），缺省跳过。
+    if (deps.sweepSpawnMarkerTmpResidue) {
+      try {
+        const cleaned = deps.sweepSpawnMarkerTmpResidue()
+        if (cleaned > 0) {
+          console.log(`[runtime] cleaned ${cleaned} stale spawn-marker tmp residue file(s) (beyond 24h retention window)`)
+        }
+      } catch (e) {
+        // best-effort：清扫失败不影响主流程（残片仅是磁盘垃圾，下次启动重试）
+        console.warn('[runtime] spawn-marker tmp residue cleanup failed:', e)
+      }
+    }
   }, ORPHAN_REAP_DELAY_MS)
   // unref：不让收殓定时器独自挂住进程生命周期（正常场景 runtime 长活，仅测试/工具受益）。
   reapTimer.unref()

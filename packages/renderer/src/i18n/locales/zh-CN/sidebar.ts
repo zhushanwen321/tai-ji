@@ -136,6 +136,7 @@ export default {
     terminate: '终止',
     terminateConfirm: '确认终止？',
     pendingHint: '等待执行中',
+    stalledNoProgress: '无进展 {duration}',
     agentsLabel: '{count} 个代理',
     turnsUnit: 'turns',
   },

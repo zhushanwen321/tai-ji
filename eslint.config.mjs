@@ -1,4 +1,22 @@
+import { readFileSync } from 'node:fs';
 import tasteConfig from './taste-lint/vue.mjs';
+
+// [C-ext-27] core exports 子入口白名单——唯一权威源 = core package.json exports，
+// core 新增子入口自动放行（本配置零改动）。regex 负向前瞻表达白名单（不用 group
+// 负向 glob：`*` 不跨目录段、多段子入口的负向排除在本实现不可靠）。
+const coreExports = JSON.parse(
+  readFileSync(new URL('./packages/subagent-core/package.json', import.meta.url), 'utf8'),
+).exports;
+const coreSubentries = Object.keys(coreExports).filter((k) => k !== '.');
+const coreSubentryAllowlist = coreSubentries.map((k) => `@zhushanwen/subagent-core${k.slice(1)}`);
+const coreSubentryRegex = coreSubentries
+  .map((k) => k.slice(2)) // './relay-env' -> 'relay-env'，'./workflows/*' -> 'workflows/*'
+  .map((frag) =>
+    frag.endsWith('*')
+      ? frag.slice(0, -1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // 通配子入口 = 前缀放行
+      : `${frag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, // 精确子入口 = 全匹配锚定
+  )
+  .join('|');
 
 export default [
   ...tasteConfig,
@@ -49,14 +67,15 @@ export default [
       // （设计 D1），src=dist 同字节直发不做 TS 化——同 extensions/**/workflows 先例豁免。
       'packages/subagent-core/workflows/**',
       'extensions/**/examples/**',
-      // zsub/zflow workflow 脚本（.agents/workflows/*.js）：CJS 是 zflow 加载器契约
-      // （module.exports + require，.cjs 后缀不被其发现层扫描），与根 package.json
-      // type:module 的冲突由同目录 package.json {"type":"commonjs"} 解决；
-      // no-require-imports 对其是误报（同 extensions/**/workflows/** 先例）
-      '.agents/workflows/**',
-      // skill 内置 workflow 脚本（pr-lifecycle 入口 + lib.cjs + node 直测 run-tests.js）：
-      // CJS 是 workflow 加载器契约（同上），no-require-imports 对其是误报
+      // skill 内置 workflow 脚本（pr-cr-fix workflows/pr-lifecycle.dwf.ts）：
+      // zcode-workflow facade（declare agent/world 等）只在引擎编译器内成立，
+      // 仓库 eslint 环境下是未定义符号，故豁免
       '.agents/skills/**/workflows/**',
+      // 项目 workflow 脚本（.agents/workflows/pr-lifecycle.js，pi 宿主 workflow 引擎加载）：
+      // $ARGS/log/fail 是引擎注入符号（仓库 eslint 环境下未定义），require() 是该环境
+      // 的 CJS 惯用形态（对齐内置 review-fix-loop-utils.cjs）——与上方 workflow 脚本
+      // 豁免同理由，非项目源码不参与 lint
+      '.agents/workflows/**',
     ],
   },
   // [HISTORICAL] mock 门面文件是所有 domain 的聚合中心（session/chat/config/model/extension/plugin/
@@ -268,6 +287,39 @@ export default [
               importNames: ['saveIndex'],
               message:
                 'store 外禁 import sessions-index 落盘函数（索引是可丢缓存）——索引维护归 RecordStore 内部（H4/G1，D7 守卫分级）',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // [C-ext-27] extensions 生产码消费 @zhushanwen/subagent-core 只允许主 barrel（裸名
+  // import，不经本 patterns 面）与 core exports 登记的子入口——深路径 import（含
+  // import type）在 bundle（esbuild exports 解析）/ npm dist（ERR_PACKAGE_PATH_NOT_
+  // EXPORTED）/ jiti（pi 运行时）三形态全部断裂，而 tsc 不拦：extensions/tsconfig.json
+  // 的 paths 通配（fallow 静态分析依赖，PR #198）优先于 exports 解析，深路径静默
+  // 通过——守卫必须在 import 面直接红灯。测试/bench/mocks 的深路径是 u-2c 已裁决
+  // 设计（测试消费符号不塞 barrel），经 vitest alias + tsconfig paths 双轨解析，
+  // 不受本块限制；断链信号 = extensions:typecheck 红，修复 = 改 specifier。
+  {
+    files: ['extensions/**/src/**/*.ts'],
+    ignores: [
+      'extensions/**/src/**/__tests__/**',
+      'extensions/**/src/**/*.test.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: `^@zhushanwen/subagent-core/(?!${coreSubentryRegex})`,
+              message:
+                'extensions 生产码禁 @zhushanwen/subagent-core 深路径 import（barrel + exports ' +
+                '子入口是唯一消费面，C-ext-27）——深路径在 bundle/npm dist/jiti 三形态全断。' +
+                '恢复：走主 barrel（from "@zhushanwen/subagent-core"）或 exports 已登记子入口' +
+                `（${coreSubentryAllowlist.join('、')}）；` +
+                '确需新子入口 = 在 core package.json exports 登记（semver 决策）后自动放行。',
             },
           ],
         },
@@ -550,11 +602,21 @@ export default [
   {
     files: [
       'packages/subagent-core/src/execution/persistence/execution-record.ts',
-      'packages/subagent-core/src/orchestration/worker-message-pump.ts',
       'packages/subagent-core/src/shared/resource-discovery.ts',
     ],
     rules: {
       'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [workflow 状态机接线 2026-09-22] worker-message-pump.ts 单独提额 1100：P1b-1 起
+  // 该文件承载 run 状态机投递入口（dispatchRunTrigger/journal 落账/终局投影），A2
+  // 修复轮补 errorCode 构造与 ask-retrying 帧后折算 1066——拆分属独立重构任务
+  // （候选轴：run 事件投递族 / ask 编排族），按「微超即提额，保留软上限告警」
+  // 先例（engine-client 650 / event-interpreter 700 同型）过渡。
+  {
+    files: ['packages/subagent-core/src/orchestration/worker-message-pump.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 1100, skipBlankLines: true, skipComments: true }],
     },
   },
   // [H4 record 持久化收敛] record-store 三轴拆分（2026-09-13 落地）：store 保留容器 +
@@ -715,6 +777,17 @@ export default [
     files: ['packages/runtime/src/services/preset-service.ts'],
     rules: {
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // relay-registry.ts 是 relay 子进程注册表的唯一聚合点（握手/spawn/双向泵/断连杀/
+  // pid 文件 + 重启残留扫描兜底）。2026-09-24 孤儿活跃度分级收割入列后统计行越过
+  // 500：orphan 处置与 sweep 同属注册表生命周期职责，拆分归独立重构任务——按
+  // 「微超即提额，保留软上限告警」先例（pi-provider-store 520 / preset-service 520
+  // 同型）提额而非 off，超限即再暴露。
+  {
+    files: ['packages/runtime/src/infra/relay/relay-registry.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 550, skipBlankLines: true, skipComments: true }],
     },
   },
 ];

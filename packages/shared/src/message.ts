@@ -2,6 +2,12 @@ import type { Segment } from './segments'
 // workflow-result 通知的 reason 判据词表镜像（类型级引用：workflow.ts 只导出类型、无运行时值，
 // 镜像表 WORKFLOW_DONE_REASON_OUTCOME 以 Record 穷尽性把增删值收敛到编译期）
 import type { WorkflowDoneReason } from './workflow'
+// notify 通道 customType 词表单源（extension-protocol）：生产侧（壳 sendMessage /
+// subagent-core notifier）与全部消费方 import 同一常量，双侧等值构造性成立
+import {
+  SUBAGENT_BG_NOTIFY_CUSTOM_TYPE,
+  WORKFLOW_RESULT_CUSTOM_TYPE,
+} from '@zhushanwen/extension-protocol'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 
@@ -20,20 +26,23 @@ export type SteerFollowUpMode = 'steer' | 'follow-up'
  *   registry customStart 只构造 entry，不再独立覆写）
  * - runtime mapSessionEntries / entry-tree-builder：对称覆写 display:false（历史链路，方案 Z）
  */
-export const COMPLETE_NOTIFY_CUSTOM_TYPES = new Set(['subagent-bg-notify', 'workflow-result'])
+// 显式 Set<string>：保持既有类型面（成员常量是 as const 字面量类型，缺省推断会
+// 收窄成联合字面量 Set，令消费方 .has(entry.customType: string) 编译期红）
+export const COMPLETE_NOTIFY_CUSTOM_TYPES: Set<string> = new Set([
+  SUBAGENT_BG_NOTIFY_CUSTOM_TYPE,
+  WORKFLOW_RESULT_CUSTOM_TYPE,
+])
 
-/**
- * subagent-directive customType SSOT（composer 四符号 `@` 定向对话）。
- *
- * 用户经 @ subagent chip 发送的定向消息：subagent-workflow extension（/subagents message
- * 命令面）在 deliverMessage 成功后经 pi.sendMessage 落 custom_message entry——
- * customType 即本常量，content=定向文本原文，details={subagentId, slug, direction:'user'}，
- * display:false（false 是 pi TUI 渲染语义；taiji 消费侧另行决定显隐，见
- * parseSubagentDirective 消费点）。留痕进主 agent 上下文但不 triggerTurn（留痕 ≠ 处理）。
- *
- * 与 extension 端写入字符串严格一致（commit 21578c74f），改名需同步 extension + 测试。
- */
-export const SUBAGENT_DIRECTIVE_CUSTOM_TYPE = 'subagent-directive'
+// subagent-directive customType SSOT：经 extension-protocol 单源 re-export（生产侧
+// = 壳 /subagents message 留痕写点，消费侧 = parseSubagentDirective 判型 / runtime
+// display 覆写 / renderer 定向气泡）。
+//
+// 用户经 @ subagent chip 发送的定向消息：subagent-workflow extension（/subagents message
+// 命令面）在 deliverMessage 成功后经 pi.sendMessage 落 custom_message entry——
+// customType 即本常量，content=定向文本原文，details={subagentId, slug, direction:'user'}，
+// display:false（false 是 pi TUI 渲染语义；taiji 消费侧另行决定显隐，见
+// parseSubagentDirective 消费点）。留痕进主 agent 上下文但不 triggerTurn（留痕 ≠ 处理）。
+export { SUBAGENT_DIRECTIVE_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 
 /**
  * 定向消息数据——live 广播（subagent.directive payload 去掉 sessionId）与 reload 聊天流

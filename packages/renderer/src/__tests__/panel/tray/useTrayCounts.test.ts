@@ -167,7 +167,8 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
 
   it('workflow：running 计入进行中，done 落已结束（一次性生命周期 D-2：无 paused 态）', async () => {
     const workflowStore = useWorkflowStore()
-    workflowStore.applyRecords(SID, [
+    // 种数据（applyRecords 已私有化，直写分区 ref）
+    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, [
       makeWorkflow({ runId: 'wf-run', status: 'running' }),
       makeWorkflow({ runId: 'wf-done', status: 'done', reason: 'completed' }),
     ])

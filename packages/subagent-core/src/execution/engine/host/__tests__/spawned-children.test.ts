@@ -10,7 +10,7 @@ import {
   _resetCoreSpawnedChildrenMirrorForTest,
   coreSpawnedChildrenMirror,
   hasLiveProcessHandleCore,
-  killAllSpawnedChildren,
+  markAllSpawnedChildrenDead,
   killRecordChildWithEscalation,
   registerSpawnedChildForRecord,
 } from "../spawned-children.ts";
@@ -48,10 +48,10 @@ describe("core 侧 spawnedChildren 状态镜像（W6；W3 纯镜像形态）", (
     expect(hasLiveProcessHandleCore("sa-a")).toBe(false);
   });
 
-  it("killAllSpawnedChildren：镜像整体置死（失效语义 2+3），返回清理条目数", () => {
+  it("markAllSpawnedChildrenDead：镜像整体置死（失效语义 2+3），返回清理条目数", () => {
     registerSpawnedChildForRecord("sa-a", fakeChild("sa-a"));
     registerSpawnedChildForRecord("sa-b", fakeChild("sa-b"));
-    const killed = killAllSpawnedChildren();
+    const killed = markAllSpawnedChildrenDead();
     expect(killed).toBe(2);
     expect(coreSpawnedChildrenMirror().snapshot()).toEqual([]);
     expect(hasLiveProcessHandleCore("sa-a")).toBe(false);
@@ -59,7 +59,7 @@ describe("core 侧 spawnedChildren 状态镜像（W6；W3 纯镜像形态）", (
   });
 
   it("不存在的 record killAll：返回 0（幂等）", () => {
-    expect(killAllSpawnedChildren()).toBe(0);
+    expect(markAllSpawnedChildrenDead()).toBe(0);
   });
 
   it("同 recordId 重 spawn：镜像覆盖旧句柄（与引擎侧 Map 覆盖语义同构）", () => {

@@ -57,6 +57,7 @@ export default {
     abort: '终止',
     abortConfirm: '确认终止？',
     workflowOpFailed: '工作流操作失败：{msg}',
+    stalledNoProgress: '无进展 {duration}',
     /** 行摘要单位与标签 */
     agentsLabel: '{done}/{total}',
     turnsUnit: 'turns',

@@ -195,7 +195,7 @@ describe("[V2 决策 2/3] 首轮闭环：run 应答 settle（协议形态）", (
     });
 
     // 第二轮：message → Continuation 派发新 run（[H1 U6] 每轮 = 新 run + resume 锚点）
-    const { messageHandler } = await import("../interface/subagent-actions.ts");
+    const { messageHandler } = await import("@zhushanwen/subagent-core");
     await messageHandler(service, { subagentId: handle.subagentId, text: "second round" });
     await vi.waitFor(() => expect(fake.runs).toHaveLength(2));
 

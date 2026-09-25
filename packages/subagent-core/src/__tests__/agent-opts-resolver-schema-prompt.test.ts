@@ -68,7 +68,10 @@ describe("resolveAgentOpts schema prompt wording + M2 content passthrough", () =
     expect(result.opts.thinkingLevel).toBeUndefined();
   });
 
-  it("sets schemaEnv from the provided schema (PI_WORKFLOW_SCHEMA contract)", () => {
+  // H1 schema 传输归位：resolver 产出侧只产 schema 本体——PI_WORKFLOW_SCHEMA env
+  // 预编码值（schemaEnv）退役，env 由引擎侧从 task.schema 派生。产出形态锁：
+  // schemaEnv 键重新出现在产出对象上即回归。
+  it("schema 提供时产出只有 schema 本体、无 schemaEnv 键（H1：env 派生归引擎侧）", () => {
     const schema: Record<string, unknown> = {
       type: "object",
       properties: { n: { type: "number" } },
@@ -76,14 +79,17 @@ describe("resolveAgentOpts schema prompt wording + M2 content passthrough", () =
     const opts: AgentCallOpts = { prompt: "x", schema };
     const result = resolveAgentOpts(opts);
 
-    expect(result.opts.schemaEnv).toBe(JSON.stringify(schema));
+    expect(result.opts.schema).toBe(schema);
+    expect(result.opts).not.toHaveProperty("schemaEnv");
+    expect("schemaEnv" in result.opts).toBe(false);
   });
 
-  it("无 schema 时 schemaEnv undefined", () => {
+  it("无 schema 时产出同样无 schemaEnv 键", () => {
     const opts: AgentCallOpts = { prompt: "x" };
     const result = resolveAgentOpts(opts);
 
-    expect(result.opts.schemaEnv).toBeUndefined();
+    expect(result.opts.schema).toBeUndefined();
+    expect(result.opts).not.toHaveProperty("schemaEnv");
   });
 
   // [U3] 根类型条件化：ASP 文案与 structured-output 工具 description 同源互斥——

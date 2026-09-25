@@ -54,6 +54,11 @@
 // delivery 内核路径（向后兼容旧装配 / 无 ledger 的测试场景）。
 
 import { getLogger } from "../../core/logger.ts";
+import {
+  SUBAGENT_BG_NOTIFY_CUSTOM_TYPE,
+  WORKFLOW_RESULT_CUSTOM_TYPE,
+} from "@zhushanwen/extension-protocol";
+import { collectDeliveredNotifyIds, isPlainObject } from "./notify-ledger-helpers.ts";
 
 /** U4 分桶日志与 index.ts 装配层共用同一具名 logger（getLogger 缓存单例）。 */
 const logger = getLogger("subagents");
@@ -69,11 +74,12 @@ export const NOTIFY_ACK_CUSTOM_TYPE = "subagent-bg-notify-ack";
 export const NOTIFY_ABANDONED_CUSTOM_TYPE = "subagent-bg-notify-abandoned";
 
 /**
- * 送达消息的 customType。notifier.ts / bg-notify-render / index.ts（messageRenderer
- * 注册）同名字符串的单一常量源——本模块不 import notifier（避免循环依赖：
- * notifier.notify → getBoundNotifyLedger），等值由 notify-ledger.test.ts 钉住。
+ * 送达消息的 customType——notify 词表单源（extension-protocol 的
+ * SUBAGENT_BG_NOTIFY_CUSTOM_TYPE）的兼容别名：notifier.ts / bg-notify-render /
+ * 壳 index.ts（messageRenderer 注册）/ shared 集合消费同一常量，历史名保留供
+ * 本包既有消费面（等值锁 = 壳 __tests__/contract.notify-custom-types.test.ts）。
  */
-export const NOTIFY_CUSTOM_TYPE = "subagent-bg-notify";
+export const NOTIFY_CUSTOM_TYPE = SUBAGENT_BG_NOTIFY_CUSTOM_TYPE;
 
 /**
  * 看门狗周期与超时（ms）：主 session 长期无 settled 时的兜底触发面（D5 ②）。
@@ -138,10 +144,11 @@ export interface NotifyAckEntryData {
 /**
  * record 的投递通道选项（[u9] notifyDone 账本化——C-ext-19 迁移）。
  *
- * 背景：workflow 收口通知的送达 customType 是 "workflow-result"（runtime
- * event-interpreter 按该类型识别 run 完成并驱动 W18 workflow-record 失效信号，
- * taiji 完成通知 display 覆写 SSOT 亦按它收录），不能复用 NOTIFY_CUSTOM_TYPE——
- * 值由调用方声明，core 对具体外部通道值不可知（不 import 壳侧常量）。
+ * 背景：workflow 收口通知的送达 customType 是 WORKFLOW_RESULT_CUSTOM_TYPE
+ * （extension-protocol notify 词表单源；runtime event-interpreter 按该类型识别
+ * run 完成并驱动 W18 workflow-record 失效信号，taiji 完成通知 display 覆写 SSOT
+ * 亦按它收录），不能复用 NOTIFY_CUSTOM_TYPE——值由调用方声明（core 不替调用方
+ * 选通道）；abandonItem 的恢复指引分诊按词表常量判型。
  */
 export interface NotifyRecordOptions {
   /**
@@ -173,6 +180,13 @@ export interface NotifyLedgerHost {
   onAgentSettled(handler: () => void): void;
   /** 单通道送达（pi.sendMessage({triggerTurn:true})）。 */
   sendDelivery(message: { customType: string; content: string; display: boolean; details?: unknown }): void;
+  /**
+   * [T4③] 不唤醒的 display 消息（abandon 对会话补显形）：pi.sendMessage 无
+   * triggerTurn——display:true 消息进会话可见，但不唤醒主 agent turn（notifyStall
+   * 同款形态）。可选：缺席（旧 host / 既有测试 mock）时放弃只走 entry + 日志留痕，
+   * 会话内无显形（行为与补显形之前一致）。生产 bind（session-lifecycle.ts）恒实现。
+   */
+  sendDisplayMessage?(message: { customType: string; content: string; display: boolean; details?: unknown }): void;
 }
 
 /** 账面一条通知（entry 持久形态 + 运行时投递状态）。 */
@@ -233,11 +247,7 @@ export interface NotifyLedger {
   dispose(): void;
 }
 
-// ─── entry 形态判定（运行时 guard，无 unsafe cast） ──────────────
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
+// ─── 恢复 / compaction 扫描（isPlainObject guard 在 notify-ledger-helpers.ts） ──
 
 /** 扫 ledger/ack/abandoned 三列 plain custom entry（恢复 / compaction 检查共用）。 */
 function scanSessionLedgerEntries(entries: readonly unknown[]): {
@@ -320,38 +330,35 @@ function batchWrapperMembers(record: unknown): readonly unknown[] | undefined {
   return Array.isArray(members) ? members : undefined;
 }
 
-/** 收集 wanted 集合中已送达（custom_message entry 出现）的 notifyId。
- *  送达 entry 两种形态都匹配：单条 details.notifyId / 批量 details.items[].notifyId
- *  （对齐 courier 合并投递的 details 结构）。[u9] channelTypes = 回执接受域
- *  （默认通道 ∪ 在账条目声明的外部通道）——送达 customType 必须在域内才参与
- *  notifyId 匹配，防止无关 custom_message 的 details 撞键误销账。 */
-function collectDeliveredNotifyIds(
-  entries: readonly unknown[],
-  wanted: Set<string>,
-  channelTypes: ReadonlySet<string>,
-): Set<string> {
-  const delivered = new Set<string>();
-  if (wanted.size === 0) return delivered;
-  for (const entry of entries) {
-    if (!isPlainObject(entry) || entry["type"] !== "custom_message") continue;
-    if (typeof entry["customType"] !== "string" || !channelTypes.has(entry["customType"])) continue;
-    const details = entry["details"];
-    if (!isPlainObject(details)) continue;
-    const notifyId = details["notifyId"];
-    if (typeof notifyId === "string" && wanted.has(notifyId)) {
-      delivered.add(notifyId);
-    }
-    const items = details["items"];
-    if (Array.isArray(items)) {
-      for (const item of items) {
-        if (isPlainObject(item)) {
-          const id = item["notifyId"];
-          if (typeof id === "string" && wanted.has(id)) delivered.add(id);
-        }
-      }
-    }
+// ─── 自包含 helper（原 createNotifyLedger 闭包内，行为零变化） ──────────
+
+/** 同一边沿的多条 pending 合并为一条注入（D5）。合并形态对齐 delivery 内核
+ *  buildBatchPayload：content 以 "\n\n---\n\n" join；details 包装 {batch:true,
+ *  items}（bg-notify-render 的 extractBgNotifyRecord 按 item 顶层字段读取）。
+ *  [u9] 不再携带 customType——送达通道由 deliverBatch 的分组键统一决定。 */
+function mergeItems(batch: NotifyLedgerItem[]): {
+  content: string;
+  display: boolean;
+  details?: unknown;
+} {
+  if (batch.length === 1) {
+    return { content: batch[0]!.content, display: true, details: batch[0]!.record };
   }
-  return delivered;
+  return {
+    content: batch.map((i) => i.content).join("\n\n---\n\n"),
+    display: true,
+    details: { batch: true, items: flattenBatchItems(batch) },
+  };
+}
+
+/** 放弃 warn 的 subagent 标识：优先 record.agent（人可读）；record 形态异常时
+ *  （ledger 对 record 不透明，见 NotifyLedgerEntryData）退回 notifyId（仍可检索）。 */
+function itemLabel(item: NotifyLedgerItem): string {
+  if (isPlainObject(item.record)) {
+    const agent = item.record["agent"];
+    if (typeof agent === "string" && agent.length > 0) return agent;
+  }
+  return item.notifyId;
 }
 
 // ─── 账本实现 ────────────────────────────────────────────────
@@ -597,25 +604,6 @@ export function createNotifyLedger(
     maybeStopWatchdog();
   }
 
-  /** 同一边沿的多条 pending 合并为一条注入（D5）。合并形态对齐 delivery 内核
-   *  buildBatchPayload：content 以 "\n\n---\n\n" join；details 包装 {batch:true,
-   *  items}（bg-notify-render 的 extractBgNotifyRecord 按 item 顶层字段读取）。
-   *  [u9] 不再携带 customType——送达通道由 deliverBatch 的分组键统一决定。 */
-  function mergeItems(batch: NotifyLedgerItem[]): {
-    content: string;
-    display: boolean;
-    details?: unknown;
-  } {
-    if (batch.length === 1) {
-      return { content: batch[0]!.content, display: true, details: batch[0]!.record };
-    }
-    return {
-      content: batch.map((i) => i.content).join("\n\n---\n\n"),
-      display: true,
-      details: { batch: true, items: flattenBatchItems(batch) },
-    };
-  }
-
   /** [u9] 单个发送单元：一批条目（默认通道多条合批 / 其余逐条时为单条）按指定
    *  通道发送，受理成功全批标 sent（attempts 累加），失败留 pending（账已落盘，
    *  下一边沿重试 + 重启恢复兜底）。U4 ②settleRejected 桶：投递尝试被拒按事件次
@@ -641,7 +629,12 @@ export function createNotifyLedger(
    *  warn 恢复指引。放弃后账面摘除（pending/waiting 计数归零、看门狗可停），同
    *  notifyId 被 record 幂等拒绝——「确认不可达」的止损上半场；通知内容本身仍可
    *  经 subagents action:"list" 手动核对（账本 entry 与 result 落盘不受影响）。
-   *  放弃不计入 watchdogReplays 桶（该桶口径 = 实际发生重投的条数）。 */
+   *  放弃不计入 watchdogReplays 桶（该桶口径 = 实际发生重投的条数）。
+   *  对会话补显形：abandoned 后经 sendDisplayMessage 补一条不唤醒的 display 消息
+   *  （customType = NOTIFY_ABANDONED_CUSTOM_TYPE——不在回执接受域
+   *  channelTypes 内，不会被误销账；display:true 无 triggerTurn = 会话可见不唤醒），
+   *  让主 agent/用户在会话里有「通知已放弃」的显形线索（此前只有 plain custom
+   *  entry + 日志，会话流里零痕迹）。host 未实现该方法（旧 mock）时跳过显形。 */
   function abandonItem(item: NotifyLedgerItem): void {
     host.appendLedgerEntry(NOTIFY_ABANDONED_CUSTOM_TYPE, { v: 1, notifyId: item.notifyId } satisfies NotifyAbandonedEntryData);
     items.delete(item.notifyId);
@@ -651,7 +644,7 @@ export function createNotifyLedger(
     // （错误信息必须可操作）：workflow 收口通知（wf-done）的核对对象是 workflow run，
     // subagents list 查不到——workflow tool 的 status action 才是可达的核对路径。
     const recoveryHint =
-      item.deliveryCustomType === "workflow-result"
+      item.deliveryCustomType === WORKFLOW_RESULT_CUSTOM_TYPE
         ? 'workflow action:"status" (workflow runs)'
         : 'subagents action:"list"';
     logger.warn(
@@ -659,17 +652,16 @@ export function createNotifyLedger(
         `${NOTIFY_REDELIVERY_MAX_ATTEMPTS} delivery attempts; verify manually via ${recoveryHint}`,
       { notifyId: item.notifyId, attempts: item.attempts },
     );
+    host.sendDisplayMessage?.({
+      customType: NOTIFY_ABANDONED_CUSTOM_TYPE,
+      content:
+        `Notification abandoned: "${itemLabel(item)}" received no receipt after ` +
+        `${NOTIFY_REDELIVERY_MAX_ATTEMPTS} delivery attempts. ` +
+        `Verify manually via ${recoveryHint}. (notifyId: ${item.notifyId})`,
+      display: true,
+      details: { notifyId: item.notifyId, attempts: item.attempts, abandoned: true },
+    });
     maybeStopWatchdog();
-  }
-
-  /** 放弃 warn 的 subagent 标识：优先 record.agent（人可读）；record 形态异常时
-   *  （ledger 对 record 不透明，见 NotifyLedgerEntryData）退回 notifyId（仍可检索）。 */
-  function itemLabel(item: NotifyLedgerItem): string {
-    if (isPlainObject(item.record)) {
-      const agent = item.record["agent"];
-      if (typeof agent === "string" && agent.length > 0) return agent;
-    }
-    return item.notifyId;
   }
 
   function ensureWatchdog(): void {

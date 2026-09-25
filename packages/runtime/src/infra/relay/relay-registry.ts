@@ -16,8 +16,8 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import type { Socket } from 'node:net'
-import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync, existsSync } from 'node:fs'
-import { basename } from 'node:path'
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync, existsSync, statSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import type { ServerMessage } from '@taiji/shared'
 import {
   RELAY_PROTOCOL_VERSION,
@@ -27,6 +27,12 @@ import {
   RELAY_ENV_SESSION_ID,
   RELAY_ENV_RECORD_ID,
 } from '@zhushanwen/subagent-core/relay-env'
+import {
+  RELAY_FRAME_DIRS,
+  RELAY_FRAME_KINDS,
+  RELAY_REJECT_REASONS,
+  type RelayRejectReason,
+} from '@zhushanwen/subagent-engine-sdk'
 import { killPiProcess } from '@zhushanwen/pi-rpc'
 import { findPiExecutable } from '../pi/find-pi-executable.js'
 import { buildOutboundChildEnv } from '../spawn-env.js'
@@ -38,18 +44,42 @@ import { getRelayChildrenDir, getRelayPidFilePath } from './relay-paths.js'
 
 /** 断连即杀的优雅退出窗口（SIGTERM 后等这么久再 SIGKILL，设计 §4.2）。 */
 export const RELAY_KILL_GRACE_MS = 3_000
+
+/**
+ * 孤儿分级收割（2026-09-24 事故修复）：孤儿判定语义保持（无管理者），处置按活跃度
+ * 分级——tee 镜像最近写入超过 {@link ORPHAN_IDLE_REAP_MS}（静默，纯资源占用）立即
+ * 收割（现状行为）；仍在产出的孤儿登记 pending 延迟收割（重启风暴期「sweep 杀 →
+ * crash-recovery 重派 → 再 sweep 杀」的振荡止血；ADR-0047：静默 ≠ 卡死，活跃产出
+ * 不得判死），延迟有硬上限防无限活。量级为任务级（分钟），与控制面秒级 grace 不可
+ * 互相挪用（超时默认按对象粒度校准）。
+ */
+/** 量级换算基准：1 秒 / 1 分钟的毫秒数（孤儿处置族的阈值定义与日志换算共用）。 */
+const SECOND_MS = 1_000
+const MINUTE_MS = 60_000
+/** 孤儿静默判定阈值（分钟）：tee 镜像最近写入超过该时长视为纯资源占用，立即收割。 */
+const ORPHAN_IDLE_REAP_MINUTES = 5
+const ORPHAN_IDLE_REAP_MS = ORPHAN_IDLE_REAP_MINUTES * MINUTE_MS
+/** pending 孤儿复查间隔。 */
+const ORPHAN_PENDING_RECHECK_MS = 60_000
+/** pending 硬上限（分钟）：活跃孤儿最多延迟这么多再收割（防 tee 持续产出但恢复链已死透）。 */
+const ORPHAN_PENDING_MAX_MINUTES = 30
+const ORPHAN_PENDING_MAX_MS = ORPHAN_PENDING_MAX_MINUTES * MINUTE_MS
 /** 握手超时：连接建立后等第一帧的上限（防半开连接占资源）。 */
 const HANDSHAKE_TIMEOUT_MS = 10_000
 /** spawn 失败时代理看到的退出码（127 = command not found 惯例，走子进程非零退出语义）。 */
 const SPAWN_FAILURE_EXIT_CODE = 127
 /** pid 复用判定的时钟容差（ps lstart 秒级精度 + 调度延迟）。 */
 const PID_REUSE_TOLERANCE_MS = 2_000
+/** 畸形帧日志预览的头部截取长度（足以辨识帧形态，不整行落日志防垃圾刷屏）。 */
+const MALFORMED_FRAME_HEAD_PREVIEW_CHARS = 120
+/** record id 清洗后参与 tee 文件名匹配的长度上限（防异常长 id 撑爆文件名比对）。 */
+const RECORD_ID_MAX_CHARS = 64
 
 // ── 协议帧（runtime 侧视角；握手/数据帧 schema 见设计 §3.1）─────────────
 
 interface RelayHandshakeFrame {
   v: number
-  kind: 'handshake'
+  kind: typeof RELAY_FRAME_KINDS.handshake
   mainSessionId: string
   recordId: string
   argv: string[]
@@ -59,15 +89,22 @@ interface RelayHandshakeFrame {
 
 interface RelayDataFrame {
   v: number
-  kind: 'data'
-  dir: 'down'
+  kind: typeof RELAY_FRAME_KINDS.data
+  dir: typeof RELAY_FRAME_DIRS.down
   b64: string
 }
 
-type InboundFrame = RelayHandshakeFrame | RelayDataFrame
+/** goodbye 预告帧（代理被宿主终止前发出，见 RELAY_FRAME_KINDS.goodbye 注释）。 */
+interface RelayGoodbyeFrame {
+  v: number
+  kind: typeof RELAY_FRAME_KINDS.goodbye
+}
 
-/** runtime → 代理的 reject 帧理由。E-1 代理对 reason='version' 以退出码 10 退出。 */
-export type RelayRejectReason = 'version' | 'identity' | 'duplicate' | 'malformed'
+type InboundFrame = RelayHandshakeFrame | RelayDataFrame | RelayGoodbyeFrame
+
+// reject 帧理由词表已收编 SDK relay-frames（RELAY_REJECT_REASONS 单源）；re-export
+// 维持本文件既有导出面。E-1 代理对 reason='version' 以退出码 10 退出。
+export type { RelayRejectReason }
 
 interface RegisteredEntry {
   conn: Socket
@@ -78,6 +115,21 @@ interface RegisteredEntry {
   tee: RelayTee
   /** up 方向 stdout 字节镜像（pi-relay-<date>-<recordId>.jsonl，架构约定「pi 卡死唯一证据」）。 */
   log: PiSessionLog
+  /** 数据阶段畸形帧丢弃计数（显形面：child exited 日志追加；首帧 warn 后静默累计）。 */
+  droppedDataFrames: number
+  /** 数据阶段畸形帧的连接级首帧告警标记（去重防刷屏）。 */
+  warnedMalformedFrame: boolean
+  /**
+   * goodbye 帧已收到（代理被宿主终止前的预告）：后续 socket close 判定为正常收割
+   * （info 级日志），而非异常断连（warn 级 kill-on-disconnect）。kill 行为不变。
+   */
+  goodbyeReceived: boolean
+  /**
+   * destroyAll 已接管本条目的杀链：close 事件异步于 destroyAll 的 conn.destroy()
+   * （kill await 让出事件循环刻度，close 触发时条目仍在册），无此标记时 close
+   * handler 会对同一 child 重复跑杀链（重复 kill decision 日志 + inflightKills 双登记）。
+   */
+  teardownStarted: boolean
 }
 
 export interface RelayRegistryOptions {
@@ -137,9 +189,10 @@ function endConn(conn: Socket): void {
  * - unrefTimers: true 维持迁移前双 timer unref 形态——kill-on-disconnect / 尾扫 /
  *   destroyAll 都是关停路径，ref'd timer 会拖住 runtime 进程退出；
  * - .catch 兜底维持「杀链必 resolve、永不 reject」契约：close 路径
- *   `void killRelayChild().then(...)` 无 catch。注：killPiProcess 内三处 kill
+ *   `void killRelayChild(...)` fire-and-forget 无 catch。注：killPiProcess 内三处 kill
  *   现已收口 safeKill 吞错（kill 尽力而为语义），promise 结构性必 resolve，本
- *   .catch 从「必要兜底」降级为纵深防御（防未来 kill-chain 新增异步抛出路径）。
+ *   .catch 从「必要兜底」降级为纵深防御（防未来 kill-chain 新增异步抛出路径），
+ *   reject 内容降级 debug 留痕。
  *
  * 迁移删除的防御与理由：迁移前 settleTimer（graceMs+2s 强制 resolve）守护的是
  * 「SIGKILL 后等真实 exit」形态的挂起面；killPiProcess 的 killTimer 在 grace 超时
@@ -150,10 +203,10 @@ function endConn(conn: Socket): void {
  * fire-and-forget（session-lifecycle `void target.kill().catch(...)`）。
  */
 export function killRelayChild(child: ChildProcess, graceMs = RELAY_KILL_GRACE_MS): Promise<void> {
-  return killPiProcess(child, { graceMs, unrefTimers: true }).catch(() => {
+  return killPiProcess(child, { graceMs, unrefTimers: true }).catch((e) => {
     // kill 抛错说明进程已死（exit 事件已/将至）；杀链契约是必 resolve（见头注），
-    // 吞错防 close 路径 unhandled rejection
-    void 0
+    // 吞错防 close 路径 unhandled rejection，debug 留痕使该纵深兜底可观测
+    console.debug('[relay] kill chain rejected (must-resolve contract, safe to ignore):', toErrorMessage(e))
   })
 }
 
@@ -182,14 +235,14 @@ function isHandshakeEnvOwnershipValid(frame: RelayHandshakeFrame): boolean {
 }
 
 /**
- * env 原样使用（身份贯穿/schemaEnv/worktree 标志全在握手帧），剥离 relay env——
+ * env 原样使用（身份归属键与引擎 extras 注入键全在握手帧），剥离 relay env——
  * 孙进程经 pi-invocation 判定三 env 缺失回落直连，防嵌套 relay 时旧值误导。
  *
  * B8 出站接线（docs/architecture/env-propagation-boundary.md §5-U4 / D4）：基座维持帧 env
- * 全量拷贝拓扑（pass-all 前缀 '' 不做白名单过滤——schemaEnv/worktree 标志未在入站
- * 白名单内，过滤即丢语义），五键剥离迁为 extras undefined=显式删除语义；deny 清单由
- * 构建器末步兜底，「叠加 deny 过滤后不多不少」。导出仅供单测直验（handleConnection
- * 全链路已在 relay-registry.test.ts 覆盖）。
+ * 全量拷贝拓扑（pass-all 前缀 '' 不做白名单过滤——帧内的非白名单键如 PI_WORKFLOW_SCHEMA
+ * （引擎自 wire task.schema 就地派生注入）按入站白名单过滤即丢语义），五键剥离迁为
+ * extras undefined=显式删除语义；deny 清单由构建器末步兜底，「叠加 deny 过滤后不多
+ * 不少」。导出仅供单测直验（handleConnection 全链路已在 relay-registry.test.ts 覆盖）。
  */
 export function buildChildEnv(frame: RelayHandshakeFrame): Record<string, string> {
   return buildOutboundChildEnv({
@@ -208,6 +261,19 @@ export function buildChildEnv(frame: RelayHandshakeFrame): Record<string, string
 export class RelayRegistry {
   private readonly entries = new Map<Socket, RegisteredEntry>()
   private readonly recordIdToConn = new Map<string, Socket>()
+  /**
+   * 在途杀链登记（kill-on-disconnect 的 fire-and-forget 修正面）：close 路径的
+   * `void killRelayChild(...)` 不等结果——runtime 若在杀链 grace 期内退出，unref
+   * timer 随进程消亡，SIGTERM 已发但未死透的 child（pi 优雅退出实测可达 15s）无人
+   * 补 SIGKILL，成为下一轮 runtime orphan sweep 的收割对象（2026-09-24 事故 r6 双杀
+   * 形态）。destroyAll 在清完在册条目后等待此集合清空，把关停窗口内的全部杀链
+   * 都收到 SIGKILL 发出承诺再放行 runtime 退出。
+   */
+  private readonly inflightKills = new Set<Promise<void>>()
+  /** pending 孤儿复查 timer（armOrphanRecheck 武装；destroyAll 清除）。 */
+  private orphanRecheckTimer: NodeJS.Timeout | null = null
+  /** 复查 timer 的 sweep 重入守卫。 */
+  private orphanSweepInFlight = false
   private readonly piCommand: string
 
   constructor(private readonly opts: RelayRegistryOptions) {
@@ -290,19 +356,28 @@ export class RelayRegistry {
         handshaked = true
         clearTimeout(handshakeTimer)
         const frame = this.tryParseFrame(line)
-        if (frame === null || frame.kind !== 'handshake') {
-          writeFrame(conn, { kind: 'reject', reason: 'malformed', supported: [RELAY_PROTOCOL_VERSION] })
+        if (frame === null || frame.kind !== RELAY_FRAME_KINDS.handshake) {
+          writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.malformed, supported: [RELAY_PROTOCOL_VERSION] })
           endConn(conn)
           return
         }
         this.registerHandshake(conn, frame)
         return
       }
-      // 握手后：仅消费 down 方向数据帧，其余忽略（代理不发其他 kind）。
+      // 握手后：消费 down 方向数据帧与 goodbye 预告帧，其余忽略。
       // dir==='down' / b64:string 的运行时不变量由 tryParseFrame 的 data 帧形状守卫
-      // 单点定义——畸形帧在解析层已按 null 丢弃，此处不再重复编码该判据
+      // 单点定义——畸形帧在解析层已按 null 丢弃，此处不再重复编码该判据；
+      // null（畸形帧）按连接显形（首帧 warn + 计数，见 noteDroppedDataFrame）
       const frame = this.tryParseFrame(line)
-      if (frame !== null && frame.kind === 'data') {
+      if (frame !== null && frame.kind === RELAY_FRAME_KINDS.goodbye) {
+        const entry = this.entries.get(conn)
+        if (entry !== undefined && !entry.goodbyeReceived) {
+          entry.goodbyeReceived = true
+          console.log(`[relay] goodbye received recordId=${entry.recordId} (host-side normal teardown; subsequent close reaps, not a failure)`)
+        }
+        return
+      }
+      if (frame !== null && frame.kind === RELAY_FRAME_KINDS.data) {
         const entry = this.entries.get(conn)
         if (!entry) return
         const bytes = Buffer.from(frame.b64, 'base64')
@@ -318,8 +393,30 @@ export class RelayRegistry {
           // child stdin 已 destroyed：丢帧降级（子进程生命周期由 exit 帧链路接管），事件回调内无调用方可传播
           console.debug(`[relay] stdin write threw (child stream destroyed) recordId=${entry.recordId}:`, toErrorMessage(e))
         }
+      } else if (frame === null) {
+        this.noteDroppedDataFrame(conn, line)
       }
     })
+  }
+
+  /**
+   * 数据阶段畸形帧的显形入口（握手阶段的 malformed 走 reject 帧显形，与此分阶段）：
+   * 首帧 warn（连接级去重防刷屏，含对端信息与「连接可能假活」提示），后续同连接
+   * 畸形帧只累计 droppedDataFrames（child exited 日志追加减帧计数）。计数与告警
+   * 依赖注册表条目在册——child exit 清理后的残帧丢弃无诊断价值，不计数。
+   */
+  private noteDroppedDataFrame(conn: Socket, line: string): void {
+    const entry = this.entries.get(conn)
+    if (!entry) return
+    entry.droppedDataFrames++
+    if (entry.warnedMalformedFrame) return
+    entry.warnedMalformedFrame = true
+    console.warn(
+      `[relay] malformed data frame dropped recordId=${entry.recordId} ` +
+      `peer=${String(conn.remoteAddress ?? 'unknown')}:${String(conn.remotePort ?? 'unknown')} ` +
+      `len=${line.length} head=${JSON.stringify(line.slice(0, MALFORMED_FRAME_HEAD_PREVIEW_CHARS))} ` +
+      '(data-channel frame loss; connection may look alive while broken — further drops counted in droppedDataFrames)',
+    )
   }
 
   private tryParseFrame(line: string): InboundFrame | null {
@@ -329,7 +426,7 @@ export class RelayRegistry {
       // data 帧形状守卫：b64 缺失/非 string 时 Buffer.from 抛 TypeError，且本调用点在
       // readline 回调内无捕获——畸形帧按 malformed 丢弃（数据阶段仅丢帧不断连，同连接
       // 后续帧仍有效；与握手首帧 malformed 的 reject+断连语义按阶段区分）
-      if (parsed.kind === 'data' && (parsed.dir !== 'down' || typeof parsed.b64 !== 'string')) return null
+      if (parsed.kind === RELAY_FRAME_KINDS.data && (parsed.dir !== RELAY_FRAME_DIRS.down || typeof parsed.b64 !== 'string')) return null
       return parsed
     } catch {
       return null
@@ -338,23 +435,25 @@ export class RelayRegistry {
 
   /** 握手校验（§3.1 版本协商 + §4.1 归属校验）+ 注册 + spawn + 子进程事件挂载。 */
   private registerHandshake(conn: Socket, frame: RelayHandshakeFrame): void {
-    // 版本协商：v > runtime 支持版本 → reject(reason:'version') + 断连（代理退出码 10）
-    if (typeof frame.v !== 'number' || frame.v > RELAY_PROTOCOL_VERSION) {
-      writeFrame(conn, { kind: 'reject', reason: 'version', supported: [RELAY_PROTOCOL_VERSION] })
+    // 版本锁定（严等而非只拒更新版）：协议两侧（relay.mjs 与 registry）同仓同发、
+    // verifiedWith 版本门禁钉死同源——跨版本静默容忍只会把方言漂移推迟到数据阶段
+    // 解析爆炸；严等让漂移在握手即显式失败（代理退出码 10）。
+    if (typeof frame.v !== 'number' || frame.v !== RELAY_PROTOCOL_VERSION) {
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.version, supported: [RELAY_PROTOCOL_VERSION] })
       endConn(conn)
-      console.warn(`[relay] handshake rejected: version v=${String(frame.v)} > supported ${RELAY_PROTOCOL_VERSION}`)
+      console.warn(`[relay] handshake rejected: version v=${String(frame.v)} != supported ${RELAY_PROTOCOL_VERSION}`)
       return
     }
     // 归属校验：字段形状 + env 归属键（防任意本地进程挂载借道 spawn，见两谓词注释）
     if (!hasValidHandshakeFrameShape(frame) || !isHandshakeEnvOwnershipValid(frame)) {
-      writeFrame(conn, { kind: 'reject', reason: 'identity', supported: [RELAY_PROTOCOL_VERSION] })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.identity, supported: [RELAY_PROTOCOL_VERSION] })
       endConn(conn)
       console.warn('[relay] handshake rejected: identity/env validation failed')
       return
     }
     // 同 recordId 重复注册：旧条目可能还活着（异常重连），拒绝新连接防双代理同 id
     if (this.recordIdToConn.has(frame.recordId)) {
-      writeFrame(conn, { kind: 'reject', reason: 'duplicate', supported: [RELAY_PROTOCOL_VERSION] })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.duplicate, supported: [RELAY_PROTOCOL_VERSION] })
       endConn(conn)
       console.warn(`[relay] handshake rejected: duplicate recordId=${frame.recordId}`)
       return
@@ -364,6 +463,10 @@ export class RelayRegistry {
     if (child === undefined) return
 
     const pidFile = getRelayPidFilePath(frame.recordId, this.opts.dataDir)
+    // 接管清理（pid 覆盖泄漏归置）：同 recordId 重派（crash-recovery 等）会覆盖旧 pid
+    // 文件，旧进程自此失去台账登记——无人会再杀它，成为无主泄漏。覆盖前读旧登记，
+    // 旧 pid 活且异于新 pid → 先收割旧进程（与 orphan sweep 同款信号链）。
+    this.reapSupersededPidIfAlive(pidFile, frame.recordId, child.pid ?? null)
     const tee = new RelayTee({
       mainSessionId: frame.mainSessionId,
       recordId: frame.recordId,
@@ -372,7 +475,7 @@ export class RelayRegistry {
     // stdout 磁盘镜像（架构约定：pi stdout 落盘是卡死时唯一证据，relay 子进程同款覆盖）。
     // logger 未初始化（如单测）时是 no-op 写入器，与 rpc-client 的 pi session log 同契约。
     const log = createPiRelayLog(frame.recordId)
-    const entry: RegisteredEntry = { conn, mainSessionId: frame.mainSessionId, recordId: frame.recordId, child, pidFile, tee, log }
+    const entry: RegisteredEntry = { conn, mainSessionId: frame.mainSessionId, recordId: frame.recordId, child, pidFile, tee, log, droppedDataFrames: 0, warnedMalformedFrame: false, goodbyeReceived: false, teardownStarted: false }
     this.entries.set(conn, entry)
     this.recordIdToConn.set(frame.recordId, conn)
     try {
@@ -385,7 +488,7 @@ export class RelayRegistry {
 
     // accept 确认帧：E-1 代理是严格状态机（accept 前不启动字节泵）——必须在 spawn 成功、
     // 条目注册完成后发出，此时 down 帧到来时 entries 已有条目可写入 child.stdin
-    writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: 'accept' })
+    writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: RELAY_FRAME_KINDS.accept })
 
     this.attachRelayChildWiring(entry)
   }
@@ -400,7 +503,10 @@ export class RelayRegistry {
         cwd: frame.cwd,
         env: buildChildEnv(frame),
         stdio: ['pipe', 'pipe', 'pipe'],
-        // 不 detached：与 runtime 同进程组，runtime 崩溃时整组收割是双保险的主腿（§3.3-②）
+        // 不 detached：与 runtime 同进程组。注意：这只在「信号发给整个进程组」时才构成
+        // 收割——当前无组信号发送方（supervisor/端口清杀路径均只 SIGTERM runtime 单进程），
+        // Unix 父死子不亡，child 会 reparent 给 launchd 残活。实际兜底链 = deinit
+        // destroyAll + supervisor stop 的预记录后代清理 + 启动 orphan sweep。
         detached: false,
         windowsHide: true,
       })
@@ -408,7 +514,7 @@ export class RelayRegistry {
       // spawn 同步失败（异常 spawn 形态）表现为「子进程非零退出」——exit 帧 127 + 断连，
       // extension 走既有失败路径（§7 错误表：代理层失败不设独立错误面）
       console.error(`[relay] spawn failed recordId=${frame.recordId}:`, e)
-      writeFrame(conn, { kind: 'exit', code: SPAWN_FAILURE_EXIT_CODE, signal: null })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.exit, code: SPAWN_FAILURE_EXIT_CODE, signal: null })
       endConn(conn)
       return undefined
     }
@@ -428,7 +534,7 @@ export class RelayRegistry {
     })
 
     child.stdout?.on('data', (chunk: Buffer) => {
-      writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: 'data', dir: 'up', b64: chunk.toString('base64') })
+      writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: RELAY_FRAME_KINDS.data, dir: RELAY_FRAME_DIRS.up, b64: chunk.toString('base64') })
       entry.log.write(chunk)
       if (!tee.abandoned) tee.feed(chunk)
     })
@@ -437,7 +543,7 @@ export class RelayRegistry {
     })
     // stderr 只转发不进 tee（extension 的 stderrBuffer 累积语义不变）
     child.stderr?.on('data', (chunk: Buffer) => {
-      writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: 'data', dir: 'up-stderr', b64: chunk.toString('base64') })
+      writeFrame(conn, { v: RELAY_PROTOCOL_VERSION, kind: RELAY_FRAME_KINDS.data, dir: RELAY_FRAME_DIRS.upStderr, b64: chunk.toString('base64') })
     })
     child.stderr?.on('error', (err) => {
       console.debug(`[relay] child stderr stream error recordId=${entry.recordId}:`, err.message)
@@ -447,34 +553,54 @@ export class RelayRegistry {
       // spawn 异步失败（ENOENT 等）：表现为子进程非零退出（exit 帧 127）
       console.error(`[relay] child error recordId=${entry.recordId}:`, err)
       this.cleanupEntry(entry)
-      writeFrame(conn, { kind: 'exit', code: SPAWN_FAILURE_EXIT_CODE, signal: null })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.exit, code: SPAWN_FAILURE_EXIT_CODE, signal: null })
       endConn(conn)
     })
 
     child.once('exit', (code, signal) => {
       // 正常/被杀退出：exit 帧传播 → 关连接 → 清理（tee 销毁、pid 文件删除、注销）
       this.cleanupEntry(entry)
-      writeFrame(conn, { kind: 'exit', code, signal: signal ?? null })
+      writeFrame(conn, { kind: RELAY_FRAME_KINDS.exit, code, signal: signal ?? null })
       endConn(conn)
-      console.log(`[relay] child exited recordId=${entry.recordId} code=${String(code)} signal=${String(signal)}`)
+      // droppedDataFrames：数据阶段畸形帧丢弃计数（首帧已单独 warn）——非 0 说明
+      // 该连接的数据通道有丢帧，配合「连接可能假活」排障归因
+      console.log(`[relay] child exited recordId=${entry.recordId} code=${String(code)} signal=${String(signal)} droppedDataFrames=${entry.droppedDataFrames}`)
     })
 
-    // 断连即杀（§4.2）：socket close 的任何原因（代理死/主 pi 崩溃/extension kill）
+    // 断连即杀（§4.2）：socket close 的任何原因（代理死/主 pi 崩溃/extension kill）。
+    // goodbye 预告已收到的 close = 宿主侧正常收割（agent_settled 后杀代理），child
+    // 照常收割但日志降级为 info——正常路径不产生 warn 噪声（2026-09-24 事故取证：
+    // 64 条 kill-on-disconnect 中 41 条是正常收割，warn 级污染故障统计与 E2 连坐判定）。
     conn.once('close', () => {
       if (!this.entries.has(conn)) return // 已因 child exit 清理，no-op
-      console.warn(`[relay] connection lost, killing child (kill-on-disconnect) recordId=${entry.recordId}`)
-      // 杀链决策日志（crash-resilience §3.3 D6-⑥，E2 归因缺口的直接修复）：主 session
-      // 断连（main pi 崩溃 / 代理丢失 / extension kill）连带杀受托 relay 子进程——
-      // 动作/目标（主 session、recordId、子进程 pid）/原因 字段化单行落盘，E2 型
-      // 「同秒连坐」事件可从此行反查连带关系。
-      console.warn('[relay] kill decision', {
-        action: 'kill_on_disconnect',
-        mainSessionId: entry.mainSessionId,
-        recordId: entry.recordId,
-        childPid: entry.child.pid ?? null,
-        reason: 'relay socket closed while child still alive (main pi died / proxy lost / extension kill)',
-      })
-      void killRelayChild(entry.child).then(() => this.cleanupEntry(entry))
+      // destroyAll 已接管杀链（conn.destroy 的 close 异步落在 kill await 的事件循环
+      // 刻度里，条目此刻仍在册）：杀链/日志全部归 destroyAll，此处 no-op 防重复登记
+      if (entry.teardownStarted) return
+      if (entry.goodbyeReceived) {
+        console.log(`[relay] connection closed after goodbye, reaping child (normal teardown) recordId=${entry.recordId}`)
+      } else {
+        console.warn(`[relay] connection lost, killing child (kill-on-disconnect) recordId=${entry.recordId}`)
+        // 杀链决策日志（crash-resilience §3.3 D6-⑥，E2 归因缺口的直接修复）：主 session
+        // 断连（main pi 崩溃 / 代理丢失 / extension kill）连带杀受托 relay 子进程——
+        // 动作/目标（主 session、recordId、子进程 pid）/原因 字段化单行落盘，E2 型
+        // 「同秒连坐」事件可从此行反查连带关系。
+        console.warn('[relay] kill decision', {
+          action: 'kill_on_disconnect',
+          trigger: 'socket_closed',
+          mainSessionId: entry.mainSessionId,
+          recordId: entry.recordId,
+          childPid: entry.child.pid ?? null,
+          reason: 'relay socket closed while child still alive (main pi died / proxy lost / extension kill)',
+        })
+      }
+      // 清理交还 exit handler（cleanupEntry 幂等且被其无条件复跑）：kill 链 resolve 只代表
+      // SIGKILL 已发出（进程可能仍在 D 状态收尾），此刻注销会把活孤儿提前销账——账面
+      // 与真实进程态一致（真实 exit 才销账），杀链失败时条目留册由尾扫再杀。
+      // 杀链登记 inflightKills：关停窗口内 runtime 退出前由 destroyAll 等待其收尾
+      // （grace 内 SIGKILL 发出承诺），防 unref timer 随进程消亡漏补刀。
+      const killP = killRelayChild(entry.child)
+      this.inflightKills.add(killP)
+      void killP.finally(() => this.inflightKills.delete(killP))
     })
   }
 
@@ -495,40 +621,62 @@ export class RelayRegistry {
 
   /** 关停序列：全部注册子进程杀链 + 关连接（deinitRelayServer 调用）。 */
   async destroyAll(): Promise<void> {
+    if (this.orphanRecheckTimer !== null) {
+      clearInterval(this.orphanRecheckTimer)
+      this.orphanRecheckTimer = null
+    }
     const list = [...this.entries.values()]
     await Promise.allSettled(list.map(async (entry) => {
+      // 先标记再 destroy：close handler 异步触发时据此让路（杀链由本函数唯一负责）
+      entry.teardownStarted = true
       entry.conn.destroy()
       await killRelayChild(entry.child)
       this.cleanupEntry(entry)
     }))
+    // 在册条目已清，但 close 路径触发的在途杀链（kill-on-disconnect fire-and-forget）
+    // 可能仍在 grace 窗口内等 SIGTERM 收敛/补 SIGKILL——等待它们全部收尾再放行，
+    // 防 runtime 退出使 unref timer 消亡而漏补刀（残活 child 成为下轮 sweep 的孤儿）。
+    while (this.inflightKills.size > 0) {
+      await Promise.allSettled([...this.inflightKills])
+    }
   }
 
   /**
    * 重启残留扫描兜底（§3.3-② / §4.2）：runtime 崩溃后 relay-children/ 下的 pid 文件
    * 是孤儿收割依据。判定链：kill -0 死 → 删 stale 文件；活 → ps lstart 比对 pid 文件
    * spawnedAt（进程启动晚于 spawn 记录 + 容差 = pid 复用，无辜进程不杀不删，防误杀）；
-   * 启动时间不晚于记录 → 活孤儿收割（kill 链）；ps 不可用时保守跳过（保留文件下次再扫）
-   * ——误杀无辜进程的代价高于留孤儿。
+   * 启动时间不晚于记录 → 活孤儿，**处置按活跃度分级**（见 ORPHAN_IDLE_REAP_MS 注释：
+   * 静默立即收割，活跃登记 pending 延迟收割）；ps 不可用时保守跳过（保留文件下次再扫）
+   * ——误杀无辜进程的代价高于留孤儿。幂等可重入：deferred 发生时由复查 timer 周期
+   * 重扫（在册 recordId 跳过——本 runtime 在管的不是孤儿）。
    */
   async sweepOrphanChildren(): Promise<void> {
     const dir = getRelayChildrenDir(this.opts.dataDir)
     let files: string[]
     try {
       files = readdirSync(dir)
-    } catch {
+    } catch (e) {
+      // 目录读不到（权限/异常挂载等）：本轮兜底整体失效必须出声，否则重启残留
+      // 孤儿的 pid 文件永久滞留且无任何日志线索
+      console.warn(`[relay] orphan sweep skipped (readdir failed) dir=${dir}:`, toErrorMessage(e))
       return
     }
+    let deferredAny = false
     for (const file of files) {
       if (!file.endsWith('.pid')) continue
       const pidFile = `${dir}/${file}`
       const recordId = basename(file, '.pid')
+      // 本 runtime 在册（正常在管）不是孤儿——复查 timer 重入时排除在册条目
+      if (this.recordIdToConn.has(recordId)) continue
       let pid: number
       let spawnedAt: number
+      let pendingSince: number | undefined
       try {
-        const parsed = JSON.parse(readFileSync(pidFile, 'utf-8')) as { pid?: unknown; spawnedAt?: unknown }
+        const parsed = JSON.parse(readFileSync(pidFile, 'utf-8')) as { pid?: unknown; spawnedAt?: unknown; pendingSince?: unknown }
         if (typeof parsed.pid !== 'number' || typeof parsed.spawnedAt !== 'number') throw new Error('malformed pid file')
         pid = parsed.pid
         spawnedAt = parsed.spawnedAt
+        if (typeof parsed.pendingSince === 'number') pendingSince = parsed.pendingSince
       } catch (e) {
         console.warn(`[relay] stale pid file removed (unreadable) recordId=${recordId}:`, e)
         this.removePidFile(pidFile)
@@ -550,25 +698,151 @@ export class RelayRegistry {
         this.removePidFile(pidFile)
         continue
       }
-      console.warn(`[relay] reaping orphan relay child recordId=${recordId} pid=${String(pid)}`)
-      try {
-        process.kill(pid, 'SIGCONT')
-        process.kill(pid, 'SIGTERM')
-      } catch (e) {
-        // EPERM = 非本进程组（pid 复用的另一形态）：不追杀，保留文件
-        console.warn(`[relay] orphan SIGTERM failed (not reaping) recordId=${recordId}:`, e)
+      // —— 活跃度分级处置（2026-09-24 事故修复）——
+      const teeMtime = this.latestRelayTeeMtimeMs(recordId)
+      const idleMs = teeMtime === null ? Number.POSITIVE_INFINITY : Date.now() - teeMtime
+      if (idleMs > ORPHAN_IDLE_REAP_MS) {
+        // 静默孤儿（或无 tee 证据）：立即收割——纯资源回收，无任务上下文损失
+        this.reapOrphanPid(pidFile, recordId, pid, pendingSince !== undefined ? 'deferred orphan went idle' : 'tee idle (no recent output)')
         continue
+      }
+      // 活跃孤儿：任务仍在推进，立即杀 = 反复中断重派（重启风暴振荡形态）。
+      // 登记 pending 延迟收割；已有 pending 且到硬上限 → 强制收割。
+      deferredAny = true
+      if (pendingSince === undefined) {
+        this.markOrphanPending(pidFile, recordId, pid, idleMs)
+      } else if (Date.now() - pendingSince > ORPHAN_PENDING_MAX_MS) {
+        this.reapOrphanPid(pidFile, recordId, pid, `pending max age exceeded (${Math.round(ORPHAN_PENDING_MAX_MS / MINUTE_MS)}min hard cap)`)
+      }
+      // 仍在产出且未到硬上限：留待下次复查（timer 驱动或下次 runtime 重启的 sweep）
+    }
+    if (deferredAny) this.armOrphanRecheck()
+  }
+
+  /**
+   * 孤儿的 tee 镜像最近写入时间（epoch ms；无任何镜像文件返回 null）。
+   * 活跃度判据 = `pi-relay-<date>-<recordId>.jsonl` 的 mtime（createPiRelayLog 同款
+   * 命名；取全部日期代中最新）。无 tee 证据（跨天清理/测试环境）按「静默」处理，
+   * 维持原 sweep 的立即收割语义——孤儿无产出证据时留着只是资源占用。
+   */
+  private latestRelayTeeMtimeMs(recordId: number | string): number | null {
+    const safeRecordId = String(recordId).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, RECORD_ID_MAX_CHARS)
+    if (safeRecordId.length === 0) return null
+    let best: number | null = null
+    try {
+      const logsDir = join(this.opts.dataDir, 'logs')
+      for (const f of readdirSync(logsDir)) {
+        if (!f.startsWith('pi-relay-') || !f.endsWith(`-${safeRecordId}.jsonl`)) continue
+        const mtime = statSync(join(logsDir, f)).mtimeMs
+        if (best === null || mtime > best) best = mtime
+      }
+    } catch {
+      return null
+    }
+    return best
+  }
+
+  /**
+   * 接管前收割旧登记进程（注册路径调用）：同 recordId 的新 spawn 覆盖 pid 文件前，
+   * 旧登记里活着的旧 pid 是将被台账遗忘的泄漏进程——按 orphan 同款信号链收割。
+   * 新 pid 为 null（spawn 异常形态）或旧登记缺失/已死时 no-op。
+   */
+  private reapSupersededPidIfAlive(pidFile: string, recordId: string, newPid: number | null): void {
+    let oldPid: number
+    let oldSpawnedAt: number
+    try {
+      const parsed = JSON.parse(readFileSync(pidFile, 'utf-8')) as { pid?: unknown; spawnedAt?: unknown }
+      if (typeof parsed.pid !== 'number' || typeof parsed.spawnedAt !== 'number') return
+      oldPid = parsed.pid
+      oldSpawnedAt = parsed.spawnedAt
+    } catch {
+      return // 无旧登记（首注册/已清理）
+    }
+    if (newPid === null || oldPid === newPid || !isPidAlive(oldPid)) return
+    // pid 复用防护（与 sweep 同款判据）：进程比旧登记新 = pid 已被无关进程复用，不杀
+    void this.readProcessStartTime(oldPid).then((procStart) => {
+      if (procStart !== null && procStart > oldSpawnedAt + PID_REUSE_TOLERANCE_MS) return
+      if (!isPidAlive(oldPid)) return
+      console.warn(`[relay] superseded registration: reaping stale pid ${String(oldPid)} before overwriting pid file recordId=${recordId}`)
+      try {
+        process.kill(oldPid, 'SIGCONT')
+        process.kill(oldPid, 'SIGTERM')
+      } catch {
+        return // 杀不动（EPERM 等）：不阻塞新注册，残留交 orphan sweep
       }
       setTimeout(() => {
         try {
-          if (isPidAlive(pid)) process.kill(pid, 'SIGKILL')
-        } catch {
-          // kill 抛错 = 进程已死（ESRCH），正是收割目标状态
-          void 0
+          if (isPidAlive(oldPid)) process.kill(oldPid, 'SIGKILL')
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException)?.code !== 'ESRCH') {
+            // 非 ESRCH（EPERM 等）：没杀掉也不阻塞新注册，残留交 orphan sweep 兜底
+            console.warn(`[relay] superseded pid SIGKILL failed, deferring to orphan sweep pid=${String(oldPid)}:`, toErrorMessage(e))
+          }
+          // ESRCH = 已死（探活到 SIGKILL 之间退出，正是收割目标状态），静默
         }
-        this.removePidFile(pidFile)
       }, RELAY_KILL_GRACE_MS).unref()
+    })
+  }
+
+  /** 活跃孤儿登记 pending（pid 文件写回 pendingSince + 响亮日志；幂等重写无 pending 语义不变）。 */
+  private markOrphanPending(pidFile: string, recordId: string, pid: number, idleMs: number): void {
+    try {
+      const parsed = JSON.parse(readFileSync(pidFile, 'utf-8')) as { pid?: unknown; spawnedAt?: unknown }
+      if (typeof parsed.pid !== 'number' || typeof parsed.spawnedAt !== 'number') return
+      writeFileSync(pidFile, JSON.stringify({ pid: parsed.pid, spawnedAt: parsed.spawnedAt, pendingSince: Date.now() }))
+    } catch {
+      // 写失败（并发覆盖/权限）：保持无 pending 登记，下次 sweep 重新判定
+      return
     }
+    console.warn(
+      `[relay] orphan still active (tee wrote ${Math.round(idleMs / SECOND_MS)}s ago), deferred reap — waiting for recovery chain or idleness recordId=${recordId} pid=${String(pid)} ` +
+      `(idle threshold ${Math.round(ORPHAN_IDLE_REAP_MS / MINUTE_MS)}min, recheck every ${Math.round(ORPHAN_PENDING_RECHECK_MS / SECOND_MS)}s, hard cap ${Math.round(ORPHAN_PENDING_MAX_MS / MINUTE_MS)}min)`,
+    )
+  }
+
+  /** 孤儿收割执行：SIGCONT → SIGTERM → grace 后 SIGKILL + 删 pid 文件（信号链与原 sweep 逐字一致）。 */
+  private reapOrphanPid(pidFile: string, recordId: string, pid: number, reason: string): void {
+    console.warn(`[relay] reaping orphan relay child recordId=${recordId} pid=${String(pid)} (${reason})`)
+    try {
+      process.kill(pid, 'SIGCONT')
+      process.kill(pid, 'SIGTERM')
+    } catch (e) {
+      // EPERM = 非本进程组（pid 复用的另一形态）：不追杀，保留文件
+      console.warn(`[relay] orphan SIGTERM failed (not reaping) recordId=${recordId}:`, e)
+      return
+    }
+    setTimeout(() => {
+      try {
+        if (isPidAlive(pid)) process.kill(pid, 'SIGKILL')
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException)?.code === 'ESRCH') {
+          // kill 抛 ESRCH = 进程已死（探活到 SIGKILL 之间退出），正是收割目标状态
+        } else {
+          // 其他 errno（EPERM 等）：进程没杀掉，台账不销账——保留 pid 文件供下次
+          // sweep 再扫（删文件会把杀不掉的活孤儿从兜底视野里永久销账）
+          console.warn(`[relay] orphan SIGKILL failed, keeping pid file for next sweep recordId=${recordId} pid=${String(pid)}:`, toErrorMessage(e))
+          return
+        }
+      }
+      this.removePidFile(pidFile)
+    }, RELAY_KILL_GRACE_MS).unref()
+  }
+
+  /**
+   * pending 孤儿复查 timer：deferred 存在时武装，周期重扫（幂等 sweep）。unref——
+   * 常驻进程内 timer 不阻止 runtime 退出（退出后 pending 状态在 pid 文件里，下一轮
+   * runtime 启动的 sweep 自然接续）。destroyAll 清除。
+   */
+  private armOrphanRecheck(): void {
+    if (this.orphanRecheckTimer !== null) return
+    this.orphanRecheckTimer = setInterval(() => {
+      if (this.orphanSweepInFlight) return
+      this.orphanSweepInFlight = true
+      void this.sweepOrphanChildren().finally(() => {
+        this.orphanSweepInFlight = false
+      })
+    }, ORPHAN_PENDING_RECHECK_MS)
+    this.orphanRecheckTimer.unref()
   }
 
   /** 读进程启动时间（epoch ms）；失败/平台不支持返回 null。 */

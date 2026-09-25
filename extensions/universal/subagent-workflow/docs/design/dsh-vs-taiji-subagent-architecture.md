@@ -133,7 +133,7 @@ persisted Session（durable，JSONL/SQLite，含 meta.parentSession / origin:'su
 - 孤儿语义：durable Session 跨进程存活，进程内 teardown 只是释放驻期；跨进程正常 shutdown 走 manager-wide drain。
 
 **taiji**：
-- 三道防线（V2 决策 7）：① shutdown hook 显式 `killAllSpawnedChildren`（`index.ts:114-133, 632-642`，SIGTERM/SIGINT/beforeExit + 多信号 guard）；② 子进程 stdin EOF 自杀（免费兜底，piped stdio 下必然生效）；③ 启动孤儿扫描 **deferred**（SP-7，触发条件 = spawn 改 detach，当前不实施）。
+- 三道防线（V2 决策 7）：① shutdown hook 显式 `markAllSpawnedChildrenDead`（`index.ts:114-133, 632-642`，SIGTERM/SIGINT/beforeExit + 多信号 guard）；② 子进程 stdin EOF 自杀（免费兜底，piped stdio 下必然生效）；③ 启动孤儿扫描 **deferred**（SP-7，触发条件 = spawn 改 detach，当前不实施）。
 - 父子联动矩阵（V3 L3 + SP-4 已落地）：fork/new **前置**级联关闭（`session_before_fork`/`session_before_tree` → `disposeAllRecords(reason)` → record 标 `closed{reason:parent-fork/parent-new}` + worktree 清理）→ `recentlyCascaded` 内存数组 → 下一个 loop 的 before_agent_start 注入告知（一次性，60s 超时清空）；compact → 每 loop 注入活跃 subagent 快照（不依赖摘要质量）；session 删除 → EOF 级联 + manifest 残留由 30 天 session-file-gc 收。
 - notifier：完成唤醒挂 `agent_settled`（真空闲），busy 退避 + 上限强制发；dedup 回归纯 id。
 

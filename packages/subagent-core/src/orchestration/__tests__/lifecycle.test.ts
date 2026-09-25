@@ -12,6 +12,10 @@
  * - scheduleTimeBudget：定时器到期 → abortRun(done,time_limited)（用 fake timers）
  * - evictDoneRunsBeyondCap：done run 内存淘汰白名单/排序/tie
  */
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -23,6 +27,9 @@ import {
   terminateRunningRuns,
 } from "../lifecycle.ts";
 import { ArgsValidationError } from "../args-validator.ts";
+import { createRunEventJournal } from "../run-events.ts";
+import { projectRunRegistryState } from "../run-registry.ts";
+import { dispatchRunTrigger, setRunEventJournalDirForTest } from "../worker-message-pump.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -268,6 +275,80 @@ describe("runWorkflow", () => {
     expect(deps.runs.size).toBe(0);
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(deps.eventBus.emit).not.toHaveBeenCalled();
+  });
+
+  // [Q2/D9-1] run-created 正点接线（dispatchRunCreated 唯一生产调用点）：创建期
+  // 校验通过 + run 装配完成后落 journal 首帧——runWorkflow 返回 ⟹ 注册表投影可查
+  //（active，fold 终帧 dispatched）。
+  it("run-created 正点发射：runWorkflow 返回后 journal 首帧落账，投影 = active/dispatched", async () => {
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-run-created-"));
+    setRunEventJournalDirForTest(journalDir);
+    try {
+      const deps = makeDeps();
+      const spec = makeSpec({ args: { pr: 7 } });
+
+      const runId = await runWorkflow(spec, deps);
+
+      const events = await createRunEventJournal(journalDir).scan(runId);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: "run-created",
+        runId,
+        workflowName: "test-wf",
+      });
+      // argsSummary 承载调用参数（injectRunId 的 _runId 引擎字段同序列化——P1b-1
+      // 首帧形态与正点一致的锚定）
+      expect((events[0] as { argsSummary: string }).argsSummary).toContain('"pr":7');
+      const projection = await projectRunRegistryState(createRunEventJournal(journalDir), runId, {
+        activeRunIds: new Set(deps.runs.keys()),
+      });
+      expect(projection.phase).toBe("active");
+      expect(projection.state.lifecycle).toBe("dispatched");
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  // 竞态锁（L4 A4 附带发现：8 跑 1 丢 6 帧）：run-created 入队必须先于
+  // workerHost.start——enqueueRunDispatch 同步入队 + 队列执行序 = 入队序，
+  // worker 首个 agent() 的 ask 帧必然排在 created 之后落账。
+  it("run-created 入队先于 worker.start：start 同步段内首 ask 到达 → journal 帧序 created 先行、零丢帧", async () => {
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-race-"));
+    setRunEventJournalDirForTest(journalDir);
+    try {
+      const deps = makeDeps();
+      const spec = makeSpec();
+      // 模拟 worker 极快的竞态形态：workerHost.start 同步段内首个 agent() 的
+      // ask-dispatched 已到达宿主（修复前此帧在 created 态表外让位被吞）
+      vi.spyOn(deps.workerHost, "start").mockImplementation((startSpec: RunSpec) => {
+        const raceRunId = (startSpec.args as Record<string, unknown>)["_runId"];
+        if (typeof raceRunId === "string") {
+          void dispatchRunTrigger(
+            { runId: raceRunId },
+            { type: "ask-dispatched", taskIndex: 0, agentName: "fast-worker", attempt: 1, ts: Date.now() },
+          ).catch(() => {});
+        }
+        return { postMessage: vi.fn(), terminate: vi.fn(async () => {}) };
+      });
+
+      const runId = await runWorkflow(spec, deps);
+
+      // cancel-requested 作队列尾哨兵：await 它 = 该 run 投递队列排空（ask 帧已落账）。
+      // 带完整 source（spec 含注入后的 _runId）——runId 键投递不携带 terminal 事件。
+      await dispatchRunTrigger(
+        { runId, spec },
+        { type: "cancel-requested", reason: "race-probe" },
+      );
+
+      // 修复前形态：ask-dispatched 先入队先执行 → created 态表外让位吞帧，
+      // journal 只剩 run-created；修复后帧序 created 先行、零丢帧
+      const events = await createRunEventJournal(journalDir).scan(runId);
+      expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "run-settled"]);
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
   });
 
   // OR-1 前移的代价：start 抛错时已挂的 timeBudget timer 会残留（到期对从未注册的

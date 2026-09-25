@@ -844,7 +844,10 @@ describe('ComposerTray 数据面单例（U1：面板不自建实例、开合不�
     const loadWfSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
     // 拉取腿被替身 → 数据直接种入分区（外壳三态与面板行集都读同一分区）
     subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sa-1', status: 'running' })])
-    workflowStore.applyRecords(SID, [makeWorkflow({ runId: 'wf-1', status: 'running' })])
+    // workflow 种数据：applyRecords 已私有化，直写分区 ref
+    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, [
+      makeWorkflow({ runId: 'wf-1', status: 'running' }),
+    ])
 
     mountTray(makeWidgetSource(SID))
     await flushPromises()

@@ -45,7 +45,7 @@
 //     显式接口（R4 兑现，接线 2026-09-13）。
 //   - B-6（roundSupervisor 归属争议）：留壳——boot 分区（initSession）与 dispose 时序
 //     消费在壳、装配闭包 finalizeClosed 经壳转发 late-bound（C-6 天然兼容）；本聚合
-//     经 deps.getRoundSupervisor() 现读（noteRun*/adoptOnProcessDeath）。
+//     零消费（真实消费方在兄弟聚合 workflow-dispatch / chat-rounds，各自 deps 通道）。
 // 4. 只搬不改：方法体除依赖通道替换（this.X → this.deps.getY()）外逐字节保留
 //   （审计 /tmp/r4-move-audit.py）；r0-inventory 清单② A 通道直写 14 处（#12 域
 //   executeAndAwait 1 处 + #14 域 13 处——任务口径 12 处按「#14 域 adopt 三行并 1」
@@ -61,12 +61,14 @@ import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
-import { project, tryTransition } from "../persistence/execution-record.ts";
+import { project } from "../persistence/execution-record.ts";
+// [P1b-1] settle 链收口单点（settleOneShotOutcome workflow origin 分支的终态收口
+// 迁入；execution/service → orchestration import 为既有先例方向——file-run-store）。
+import { settleWorkflowRecord } from "../../orchestration/worker-message-pump.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
-import { registerSpawnedChildForRecord } from "../engine/host/spawned-children.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
@@ -83,8 +85,8 @@ import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import type { RoundSupervisor } from "../round-supervisor/index.ts";
-import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
+// 嵌套深度护栏单点（D-033 共享判据 + MAX_FORK_DEPTH 上限常量同源）。
+import { assertNestingDepthWithinLimit } from "../assembly/session-context-resolver.ts";
 import type { SubagentStream } from "../assembly/stream-sink.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
@@ -98,7 +100,7 @@ import type {
   ExecutionMode,
   ExecutionRecord,
 } from "../assembly/types.ts";
-import { DEFAULT_AGENT_NAME, ForkDepthExceededError } from "../assembly/types.ts";
+import { DEFAULT_AGENT_NAME } from "../assembly/types.ts";
 // [R6/D-R4-4] 跨聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 // [2026-09-13 design-code-sync] MS_PER_SECOND / SECONDS_PER_MINUTE 消费主体
 //（onOneShotSettledWatchdogTimeout）已迁 chat-rounds.ts，本聚合余 PRIORITY_BACKGROUND。
@@ -111,8 +113,8 @@ import { PRIORITY_BACKGROUND } from "./service-constants.ts";
  * - 断言面（assertReady）：execute/executeAndAwait 入口就绪门
  *  （本体在 SessionBaselines，壳转发）。
  * - #1 留壳共享依赖 getter（getStore/getModelService/getNotifyHost/
- *   getPool/getWorktreeManager/getCwd/getRoundSupervisor）：
- *   getter 现读同一实例（B-6 roundSupervisor 留壳、C-6 装配闭包经壳 late-bound）。
+ *   getPool/getWorktreeManager/getCwd）：
+ *   getter 现读同一实例（C-6 装配闭包经壳 late-bound）。
  * - 会话基线 getter（getExecNesting/getSessionRootId）：
  *   initSession 注入的运行时可变态现读（SessionBaselines 经壳 getter 透传）。
  * - R3 聚合显式接口（resolveIdentity/resolveIdentityForEngine/createRecordForMode/
@@ -144,8 +146,6 @@ export interface RunOrchestrationDeps {
   readonly getSessionRootId: () => string | null;
   /** 嵌套身份基线（BC-12 嵌套护栏深度检查）。 */
   readonly getExecNesting: () => ExecutionNestingContext;
-  /** [B-6 留壳] 轮次活性监督器（在途记账/死亡分诊 adoptOnProcessDeath）。 */
-  readonly getRoundSupervisor: () => RoundSupervisor;
   /** [R3 RecordAccess 显式接口] 步骤 1 身份解析（三层：override → agentConfig → 主
    *  agent model；含 pi 未命中跨引擎候选文案）。 */
   readonly resolveIdentity: (
@@ -249,20 +249,8 @@ export class RunOrchestration {
     // [T4② / PS-4] idleTimeoutMs 配置错误在首个副作用前同步 fail-fast（错误含合法范围）。
     this.assertIdleTimeoutMsSafe(opts);
 
-    // 通用嵌套深度护栏（D-033）：嵌套上下文（[D3-⑤] 公共层 ExecutionNestingContext）
-    // 记录所有 subagent 嵌套层级（fork + 非 fork），每层 +1。MAX_FORK_DEPTH 同时限
-    // fork 链与通用嵌套——非 fork 递归虽不累积 session 体积，但耗资源且 LLM 易陷入
-    // 「委派→再委派」死循环。在所有副作用之前拦截，错误直达调用方。
-    // 计数基准：顶层 nestingDepth=0，nestingDepth>MAX 被拒。与 fork 体积护栏（parentForkDepth 检查）
-    // 互补：本护栏更严（计所有嵌套），混合链下先生效；两者共享 MAX_FORK_DEPTH 上限不漂移。
-    // [ALS 断裂修复] current() 内含基线兜底（pi 事件回调模型下 enterWith 不贯穿）。
-    const parentNesting = this.deps.getExecNesting().current();
-    const nestingDepth = parentNesting ? parentNesting.depth + 1 : 0;
-    if (nestingDepth > MAX_FORK_DEPTH) {
-      throw new ForkDepthExceededError(
-        `subagent nesting depth ${nestingDepth} > ${MAX_FORK_DEPTH} (max recursion), refusing to spawn deeper`,
-      );
-    }
+    // 通用嵌套深度护栏（D-033，单源 session-context-resolver）：在所有副作用之前拦截。
+    assertNestingDepthWithinLimit(this.deps.getExecNesting().current());
 
     // mode 固定 background（sync 模式已删除）
     const mode: ExecutionMode = "background";
@@ -327,15 +315,8 @@ export class RunOrchestration {
     // [T4② / PS-4] 与 execute() 同款入口校验（两入口共享 runAndFinalize → armIdleTimer 链）。
     this.assertIdleTimeoutMsSafe(opts);
 
-    // ── BC-12 嵌套护栏：复用 execute() 的嵌套上下文深度检查 ──
-    // [ALS 断裂修复] current() 内含基线兜底（与 execute 同）。
-    const parentNesting = this.deps.getExecNesting().current();
-    const nestingDepth = parentNesting ? parentNesting.depth + 1 : 0;
-    if (nestingDepth > MAX_FORK_DEPTH) {
-      throw new ForkDepthExceededError(
-        `subagent nesting depth ${nestingDepth} > ${MAX_FORK_DEPTH} (max recursion), refusing to spawn deeper`,
-      );
-    }
+    // ── BC-12 嵌套护栏：与 execute() 同款单点检查（session-context-resolver）──
+    assertNestingDepthWithinLimit(this.deps.getExecNesting().current());
 
     // ── 步骤 1: IDENTITY 解析 ──
     const identity = await this.deps.resolveIdentity(opts);
@@ -662,8 +643,6 @@ export class RunOrchestration {
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),
-        // D10 终止链：引擎 spawn 的子进程注册进 spawnedChildren 镜像记账
-        onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),
       };
       const { handle, outcome } = await engine.run(this.taskSpecWithModel(opts, record.model), runCtx);
       record.engineHandle = {
@@ -725,16 +704,13 @@ export class RunOrchestration {
     // 由脚本返回值承载、无 message 对端，留内存 idle 会绑架 hasRunning / 恒挂
     // idle-gc / 被误升级为对话容器 / goal defer 恒挂（设计 D7 四面连带）。自带 CAS
     // 抢锁（承接现状「cancel/dispose 抢先 → 静默跳过」守卫语义）。
+    // [P1b-1] 直写通道删除：closed/cancelled 终态判定不再在本方法直写——收口至
+    // worker-message-pump 的 settleWorkflowRecord 单点（D7 例外族 CAS + finalize 对
+    // 的唯一剩余处）；ask-settled/run-settled 事件面由同文件状态机接线段承载。
     if (record.origin === "workflow") {
-      if (!aborted && result.success) {
-        if (tryTransition(record, "closed", "gc")) {
-          await this.deps.finalizeRecord(record, result, "closed", "gc");
-        }
-      } else {
-        if (tryTransition(record, "closed", aborted ? "cancelled" : "gc")) {
-          await this.deps.finalizeRecord(record, result, "closed", aborted ? "cancelled" : "gc");
-        }
-      }
+      await settleWorkflowRecord(record, result, aborted ? "cancelled" : "gc", {
+        finalizeRecord: (r, closedReason) => this.deps.finalizeRecord(record, r, "closed", closedReason),
+      });
       return;
     }
     // CAS 前置 + 簿记之间无 await（单线程同步段原子——cancel/dispose 抢先判定可靠）。
@@ -807,10 +783,12 @@ export class RunOrchestration {
   ): Promise<AgentResult | undefined> {
     try {
       await this.deps.getPool().acquire(priority, this.effectiveMaxConcurrentFor(record), signal);
-    } catch {
-      // S1: 排队中被 abort（signal.aborted）走 cancelled，与已运行被 abort 一致。
+    } catch (err) {
+      // S1: 排队中被 abort（signal.aborted）走 cancelled，与已运行被 abort 一致；
+      // 非 abort 的池内故障透传原始 err——改写为 new Error("aborted") 会把池内真实
+      // 故障（如池 dispose / 内部异常）误标为 aborted，误导排障方向。
       if (signal?.aborted) return this.deps.finalizeAborted(record);
-      return this.deps.finalizeFailed(record, new Error("aborted"));
+      return this.deps.finalizeFailed(record, err);
     }
     return undefined;
   }

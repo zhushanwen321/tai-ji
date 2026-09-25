@@ -36,14 +36,14 @@ import {
   resolveEngineDataDir,
   spawnEngineChild,
   type AgentEvent,
+  type EngineCapabilities,
   type UiRequest,
   type UiResponse,
 } from "@zhushanwen/subagent-engine-sdk";
 import { killPiProcess } from "@zhushanwen/pi-rpc";
 
-import { mirrorMainProcessFlags, type MirrorFlags } from "./argv-mirror.ts";
 import { registerActiveChild } from "./active-children.ts";
-import { PI_KILL_GRACE_MS } from "./constants.ts";
+import { PI_KILL_GRACE_MS, SCHEMA_ENV_VAR } from "./constants.ts";
 import { getPiInvocation } from "./pi-invocation.ts";
 import { collectOutcome, type CollectedOutcome } from "./output-collector.ts";
 import { toErrorMessage } from "./error-message.ts";
@@ -61,7 +61,7 @@ import {
   type RunEndState,
 } from "./spawn-run-pump.ts";
 import { performGetStateHandshake } from "./get-state-handshake.ts";
-import { clearEpipeFailure, sendPromptCommand } from "./stdin-writer.ts";
+import { sendPromptCommand } from "./stdin-writer.ts";
 import { cleanupTempPrompt, writePromptToTempFile } from "./temp-prompt.ts";
 import { WRAP_UP_HINT } from "./turn-limiter.ts";
 import { applySchemaEnvToChildEnv } from "./spawn-args.ts";
@@ -102,20 +102,6 @@ export interface SpawnRunCallbacks {
   askUser?: (request: UiRequest) => Promise<UiResponse>;
   /** text_delta 分流出口（→ host/streamDelta）。 */
   onDelta?: (delta: string) => void;
-  /**
-   * agent_end（非 willRetry，队列排空）到达：本轮收敛（输出完整即轮终）。不 kill
-   * 子进程（等 agent_settled——pi 的 compact/收尾在 agent_end 后执行）。[H1 U5] 原
-   * chat-session 会话管理器的 settled 相位上报消费已随 registry 删除；本回调保留为
-   * 轮次时序的可观测面（run-spawn-once.integration 断言轮次时序）。
-   */
-  onChatRoundEnd?: () => void;
-  /**
-   * agent_settled（真空闲边界）到达：run 在此 resolve（exit 0 口径）并收割子进程
-   * （runSpawnOnce 内建，见 runSpawnOnce 生命周期注释）。[H1 U5] 原 chat-session
-   * 会话管理器的 idle 相位上报消费已随 registry 删除；本回调保留为轮次时序的
-   * 可观测面。
-   */
-  onChatAgentSettled?: () => void;
 }
 
 /** runSpawnOnce 的入参（协议 RunParams 的引擎侧还原形态）。 */
@@ -134,8 +120,12 @@ export interface SpawnRunParams {
   sessionDir: string;
   /** spawn cwd。 */
   cwd: string;
-  /** schema env JSON 字符串（PI_WORKFLOW_SCHEMA 注入）。 */
-  schemaEnv?: string;
+  /**
+   * [D1 schema 传输归位] 结构化产出 schema 本体（wire task.schema 单字段承载）。
+   * PI_WORKFLOW_SCHEMA env 值由引擎侧从本字段派生（buildChildEnv 内
+   * JSON.stringify），schema 不再以传输态 env 字符串跨层。
+   */
+  schema?: Record<string, unknown>;
   /** hard turn limit。 */
   maxTurns?: number;
   /** soft limit 后宽限轮数（默认 2）。 */
@@ -152,8 +142,13 @@ export interface SpawnRunParams {
   agentTools?: string[];
   /** fork 源 session 文件（--fork）。 */
   forkSource?: string;
-  /** 镜像 flag 覆盖（缺省自动镜像主进程 argv）。 */
-  mirrorFlags?: MirrorFlags;
+  /**
+   * [D2 扩展加载显式化] 孙进程显式加载的扩展路径集（协议 ctx.extensionPaths
+   * 还原）——spawn-args 逐项拼 `--extension`。argv 镜像机制（mirrorMainProcessFlags）
+   * 已废弃：引擎进程由 core spawn（argv 恒无 flag），镜像前提「从主 pi 进程 spawn」
+   * 不存在。缺省 = 不拼 --extension。
+   */
+  extensionPaths?: string[];
   /** resume 目标 session 文件（冷续写：--session 续写原文件）。 */
   resumeSessionFile?: string;
 }
@@ -162,12 +157,24 @@ export interface SpawnRunParams {
 export interface SpawnRunResult extends Omit<CollectedOutcome, "sessionId"> {
   /** 会话头身份（header / get_state 握手回填；全 miss 时 undefined）。 */
   sessionId: string | undefined;
+  /**
+   * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。语义与
+   * 上报判据见 AgentOutcome.stderrTeePath（SDK contract-types——本字段是其引擎侧
+   * 装配源，经 pi-engine toOutcome 透传上协议）。
+   */
+  stderrTeePath?: string;
 }
 
-/** 子进程 env 组装（deny 剥除 + schemaEnv 注入 + relay 归属键重写）。 */
+/** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + relay 归属键重写）。 */
 function buildChildEnv(params: SpawnRunParams): Record<string, string> {
   const extras: Record<string, string | undefined> = {};
-  applySchemaEnvToChildEnv(extras, params.schemaEnv);
+  // [D1 schema 传输归位] env 值派生点：schema 本体的唯一 env 消费点就在此处，
+  // 按数据流最短路径就地派生（JSON.stringify 本体），注入实现沿用
+  // applySchemaEnvToChildEnv（含 E2BIG 上限校验）。
+  applySchemaEnvToChildEnv(
+    extras,
+    params.schema !== undefined ? JSON.stringify(params.schema) : undefined,
+  );
   const childEnv = buildOutboundChildEnv({ parentEnv: process.env, extras });
   // relay 归属键重写（W8/H12）：SESSION_ID/RECORD_ID 在 ENGINE_ENV_DENY_LIST，
   // buildOutboundChildEnv 的 deny 在 extras 之后执行——经 extras 注入会被剥掉
@@ -184,6 +191,113 @@ function buildChildEnv(params: SpawnRunParams): Record<string, string> {
   return childEnv;
 }
 
+// ── [D3 止血版] 武装断言（run 开始后、孙进程 spawn 前；缺席即秒级 fail-fast） ──
+
+/**
+ * 孙进程 schema 强制的唯一必备扩展包（P-C5 白名单起步组成）。与宿主注入侧
+ * （subagent-workflow pi-host `GRANDCHILD_EXTENSION_PKG_SEGMENTS`）是同一契约的
+ * 两端：宿主决定注入什么，本断言验证引擎确实收到——扩白名单时两处同批扩。
+ *
+ * 本常量 = npm 布局包名（错误文案/恢复指引用）；匹配判据 =
+ * {@link SCHEMA_ENFORCEMENT_EXTENSION_SEGS}（与 pi-host 段集同批维护）。
+ */
+const SCHEMA_ENFORCEMENT_EXTENSION_PKG = "@zhushanwen/pi-structured-output";
+
+/**
+ * 断言②匹配段集（契约两端与 pi-host `GRANDCHILD_EXTENSION_PKG_SEGMENTS` 同判据，
+ * 扩白名单时两处同批扩）。两形态别名：
+ *   - `@zhushanwen/pi-structured-output`：npm staged 布局
+ *     `.../node_modules/@zhushanwen/pi-structured-output[/index.js]`。
+ *   - `universal/structured-output`：dev 源码布局 `.../extensions/universal/structured-output`
+ *     （dev 下 taiji 宿主注入 ctx.extensionPaths 即源码目录——只认 npm 布局时
+ *     dev 真机恒判「未武装」秒级 fail-fast，schema 拦截链不可用）。
+ *     选型两段连续匹配（分组名 + 包目录名）防尾段同名误伤，登记见 pi-host 同名常量。
+ */
+const SCHEMA_ENFORCEMENT_EXTENSION_SEGS: readonly (readonly string[])[] = [
+  ["@zhushanwen", "pi-structured-output"],
+  ["universal", "structured-output"],
+];
+
+/** 武装断言的判定输入（纯函数面，测试直构）。 */
+export interface SchemaArmingInput {
+  /** 引擎能力位（协议 EngineCapabilities 词表，D3 分流唯一判据）。 */
+  schemaEnforcement: EngineCapabilities["schemaEnforcement"];
+  /** wire task.schema 声明形态（undefined = 无 schema 任务，无武装面）。 */
+  schema: Record<string, unknown> | undefined;
+  /** 孙进程终态 env（buildChildEnv 产物——断言拼装事实，不是意图）。 */
+  childEnv: Readonly<Record<string, string>>;
+  /** 孙进程 argv（buildSpawnArgs 产物，含 `--extension <path>` 对）。 */
+  spawnArgs: readonly string[];
+}
+
+/**
+ * [D3 止血版] 武装断言：native 引擎 + schema 任务的 run 在孙进程 spawn 前校验
+ * 「schema 强制已武装」，缺席即抛错（宿主侧秒级 fail-fast，错误含按形态的恢复指引）。
+ *
+ * 断言集 ①env 注入 + ②扩展在场（③退化说明见下）。capability 分流（D3 防 emulated
+ * 误伤）：仅 `schemaEnforcement === "native"` 生效——emulated 引擎（zcode 及
+ * schema-emulation 登记域）在引擎侧消费 wire task.schema，无孙进程 env/扩展依赖，
+ * 「武装」概念不适用，直接豁免。分流判据复用协议 EngineCapabilities 词表，不新造机制。
+ *
+ * 断言③（孙进程启动无扩展加载错误）经 P-C1 实施期核实（pi 实装版 0.84.4 dist）：
+ * RPC 命令全集（rpc-types.d.ts 逐一枚举，32 条）无工具清单/扩展加载错误查询面
+ * （get_commands = slash 命令、get_state = RpcSessionState，均不暴露工具/扩展面）；
+ * 且扩展加载失败时 pi 在非交互模式（含 rpc）启动诊断 gate 直接 `process.exit(1)`
+ * （main.js：runtime diagnostics 含 "Failed to load extension" → exit 1），到不了
+ * RPC 服务面。③不可作为主动查询断言，按设计预留路径退化为 ①+②；扩展加载破坏的
+ * 秒级可见性由 pi 自身 exit(1) + 引擎既有 exitCode≠0 失败通路 + stderr tee
+ * （诊断留痕）承接。
+ */
+export function assertSchemaEnforcementArmed(input: SchemaArmingInput): void {
+  if (input.schemaEnforcement !== "native") return;
+  if (input.schema === undefined) return;
+  // ① 派生的 PI_WORKFLOW_SCHEMA 已进孙进程 env（D1 派生点 = buildChildEnv）
+  if ((input.childEnv[SCHEMA_ENV_VAR] ?? "") === "") {
+    throw new Error(
+      `[schema-arming] native schema enforcement is not armed: task.schema is present but ` +
+        `${SCHEMA_ENV_VAR} was not derived into the grandchild env. Failing fast because ` +
+        `continuing would complete with an unvalidated structured output. This is engine-side ` +
+        `derivation drift (the env value must be derived from task.schema in buildChildEnv), ` +
+        `not a host configuration error. Recovery: upgrade or reinstall the engine package ` +
+        `(@zhushanwen/pi-subagent-cli); if it persists after upgrade, inspect the schema ` +
+        `derivation in spawn-runner buildChildEnv / applySchemaEnvToChildEnv.`,
+    );
+  }
+  // ② --extension 列表含 structured-output 包路径（D2 ctx.extensionPaths →
+  //    buildSpawnArgs 拼装的 argv 事实）
+  if (!hasSchemaEnforcementExtension(input.spawnArgs)) {
+    throw new Error(
+      `[schema-arming] native schema enforcement is not armed: task.schema is present but the ` +
+        `grandchild --extension list does not include ${SCHEMA_ENFORCEMENT_EXTENSION_PKG}, so no ` +
+        `tool would validate the structured output (the run would silently complete with an ` +
+        `untrustworthy result). Recovery — taiji host form: check the runtime extension-service ` +
+        `diagnostics for the grandchild extension whitelist staging of ` +
+        `${SCHEMA_ENFORCEMENT_EXTENSION_PKG}. Recovery — standalone pi form: install ` +
+        `${SCHEMA_ENFORCEMENT_EXTENSION_PKG} (peerDependency) or use a schema-less workflow ` +
+        `instead (drop the schema from the agent call).`,
+    );
+  }
+}
+
+/** argv 是否含指向 structured-output 包的 `--extension` 对：路径按 `/`|`\` 分段后
+ * 对 {@link SCHEMA_ENFORCEMENT_EXTENSION_SEGS} 任一段集做连续段匹配（npm staged 与
+ * dev 源码两布局、目录/入口文件两形态都命中；段必须精确，前缀相似目录不误判）。
+ * 与 pi-host 注入侧 isGrandchildExtensionPath 同判据（契约两端）。 */
+function hasSchemaEnforcementExtension(spawnArgs: readonly string[]): boolean {
+  for (let i = 0; i + 1 < spawnArgs.length; i++) {
+    if (spawnArgs[i] !== "--extension") continue;
+    const segs = (spawnArgs[i + 1] ?? "").split(/[\\/]/).filter((s) => s.length > 0);
+    if (
+      SCHEMA_ENFORCEMENT_EXTENSION_SEGS.some((wanted) =>
+        segs.some((_, j) => wanted.every((w, k) => segs[j + k] === w)),
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * 单次 spawn run：spawn pi rpc 子进程 → pump stdout → 收集结果。
  *
@@ -196,8 +310,12 @@ function buildChildEnv(params: SpawnRunParams): Record<string, string> {
  * stderr tee（W11）：实例维度路径 + 懒打开 + 尺寸轮转（超 TAIJI_LOG_MAX_BYTES rename
  * 副本重开）+ 三判据过期清理（同前缀 + pid 已死 + mtime 过期）。失败面全部静默
  * 降级（取证面不拖垮任务主通道——调用方对无 tee 形态 resume 排空防背压）。
+ *
+ * 返回 path（[D5 诊断引用落账] 失败时随终态应答上报宿主的取证文件指针）——路径在
+ * tee 创建时即确定（stderrLogPathFor 纯派生），与懒打开时机无关：零字节 tee（子进程
+ * 未写 stderr）也是合法诊断引用（「无 stderr 产出」本身是证据）。
  */
-function createStderrTee(child: ChildProcess): { close(): void } | undefined {
+function createStderrTee(child: ChildProcess): { path: string; close(): void } | undefined {
   if (child.stderr === null) return undefined;
   let dataDir: string;
   try {
@@ -210,6 +328,18 @@ function createStderrTee(child: ChildProcess): { close(): void } | undefined {
   const logPath = stderrLogPathFor(dataDir, pid);
   let stream: fs.WriteStream | null = null;
   let failed = false;
+  // tee 失败统一留痕（一次性）：tee 是诊断取证面，失败不拖垮任务主通道，但
+  // 「诊断引用可能不可用」必须出声——失败 run 上报的 stderrTeePath 将是空文件/
+  // 缺 tail 的文件，宿主与人工排查需知道取证不可信。
+  const warnTeeFailed = (where: string, err: unknown): void => {
+    if (failed) return;
+    failed = true;
+    logger.warn(
+      `[session-runner] stderr tee ${where} for pid ${pid} at ${logPath}; ` +
+        `stderr capture abandoned, the diagnostic reference reported on failure may be unavailable or truncated`,
+      { detail: toErrorMessage(err) },
+    );
+  };
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {
     if (failed) return;
@@ -217,8 +347,8 @@ function createStderrTee(child: ChildProcess): { close(): void } | undefined {
       if (stream === null) {
         fs.mkdirSync(dirname(logPath), { recursive: true });
         stream = fs.createWriteStream(logPath, { flags: "a" });
-        stream.on("error", () => {
-          failed = true;
+        stream.on("error", (err) => {
+          warnTeeFailed("write stream error", err);
         });
         cleanupSiblingStderrLogs(logPath, process.env);
       }
@@ -227,11 +357,12 @@ function createStderrTee(child: ChildProcess): { close(): void } | undefined {
         stream.end();
         stream = null;
       }
-    } catch {
-      failed = true;
+    } catch (err) {
+      warnTeeFailed("open/write failure", err);
     }
   });
   return {
+    path: logPath,
     close() {
       try {
         stream?.end();
@@ -274,16 +405,15 @@ function buildTranslatorOpts(
     // 也按 0 口径收尾。
     onAgentEnd: () => {
       runEnd.endedCleanly = true;
-      callbacks.onChatRoundEnd?.();
     },
     // agent_settled（真空闲，agent_end 之后、post-run 完成后才 emit）= run 的 resolve
-    // 与收割边界（[H1 U3] D7，[modeless 波2] 唯一语义）：onChatAgentSettled 回调先于
-    // run resolve（run-spawn-once.integration 的轮次时序断言面），resolveChatRun
-    // settle exitPromise（run 应答不等收割），随后 fire-and-forget 杀链收割子进程
-    // ——每轮一进程，续聊 = 新 run + resume 锚点，进程不再保活。
-    onAgentSettled: () => {
+    // 与收割边界（[H1 U3] D7，[modeless 波2] 唯一语义）：resolveChatRun 先 settle
+    // exitPromise（run 应答不等收割——应答 exit 0 口径与 close 信号无关），随后
+    // fire-and-forget 杀链收割子进程——每轮一进程，续聊 = 新 run + resume 锚点，
+    // 进程不再保活。
+    onAgentSettled: (turnsAtSettle) => {
       runEnd.endedCleanly = true;
-      callbacks.onChatAgentSettled?.();
+      runEnd.settledTurnCount = turnsAtSettle;
       runEnd.resolveChatRun?.(0);
       killChild("agent_settled reap");
     },
@@ -298,15 +428,18 @@ export async function runSpawnOnce(
   const startTime = Date.now();
   const modelRef = parseSpawnModelRef(params.model);
 
-  // 1. append-system-prompt 文件（环境块 + wrap-up 提示 + 调用方片段）
-  const tempFile = await writeAppendPromptFile(params);
-
+  // prepare 期校验前置（model 缺失 fail-fast 先于临时文件创建）：writeAppendPromptFile
+  // 会落盘 append-system-prompt 临时文件，校验在后会让 prepare 期失败的 run 泄漏
+  // 临时文件（finally 清理面在 try 内——校验抛错时 tempFile 尚无清理路径）。
   if (modelRef === undefined) {
     throw new Error(
       `[pi-subagent-cli] run requires a canonical model ref ("provider/id") in ctx.model, got: ${JSON.stringify(params.model)}. ` +
         `Recovery: the host must resolve the model before dispatching (run.params.ctx.model); check the engine routing layer.`,
     );
   }
+
+  // 1. append-system-prompt 文件（环境块 + wrap-up 提示 + 调用方片段）
+  const tempFile = await writeAppendPromptFile(params);
 
   try {
     // 2. spawn 参数 + invocation
@@ -319,13 +452,25 @@ export async function runSpawnOnce(
       sessionFile: params.resumeSessionFile,
       forkSource: params.forkSource,
       skillPaths: params.skillPaths,
-      mirrorFlags: params.mirrorFlags ?? mirrorMainProcessFlags(process.argv),
+      extensionPaths: params.extensionPaths,
     });
     const invocation = getPiInvocation(args);
+    const childEnv = buildChildEnv(params);
+    // [D3 止血版 武装断言] run 开始后、孙进程 spawn 前校验武装状态，缺席即抛错
+    // （秒级 fail-fast，host 侧收到含恢复指引的 engine_run_failed）。capability
+    // 字面量与 PiEngine.capabilities().schemaEnforcement（pi-engine.ts，manifest
+    // 同源）一致——引擎能力是进程级事实而非 per-run 参数，不经 run ctx 传递；
+    // 本包是 pi 引擎进程，无第二 capability 源。
+    assertSchemaEnforcementArmed({
+      schemaEnforcement: "native",
+      schema: params.schema,
+      childEnv,
+      spawnArgs: args,
+    });
     const child = spawnEngineChild({
       command: invocation.command,
       args: invocation.args,
-      env: buildChildEnv(params),
+      env: childEnv,
       cwd: params.cwd,
       ...(params.signal !== undefined ? { signal: params.signal } : {}),
     });
@@ -364,6 +509,8 @@ export async function runSpawnOnce(
     // 无消费面（pipe 出来即弃，写满会背压卡死子进程）——tee 到实例维度文件
     // <engineDataDir>/logs/pi-task-stderr-<pid>.log（懒打开 + 尺寸轮转 + 三判据
     // 过期清理）；dataDir 不可解析（宿主未注入且无 fallback）时仅排空防背压。
+    // [D5 诊断引用落账] tee 路径捕获：失败时随终态应答上报宿主（见 collectOutcome
+    // 消费点）。
     const stderrTee = createStderrTee(child);
     if (stderrTee === undefined && child.stderr !== null) {
       child.stderr.resume();
@@ -372,6 +519,21 @@ export async function runSpawnOnce(
     // 3. 镜像上报（childSpawned 先行——未收上报前宿主 = 无句柄）+ 引擎侧记账
     registerActiveChild(params.recordId, child);
     reportChildSpawned(child, params.recordId, callbacks);
+
+    // [D3 协议版 P6] 武装回执上报：武装断言（本函数上方）通过 + 孙进程 spawn 成功
+    //（spawnEngineChild 同步抛错即失败，成功返回 = 「孙进程启动确认」的最强可得
+    // 形态——断言③已按 P-C1 核实退化，扩展加载破坏由 pi exit(1) 通路承接）。
+    // 协议版上报 = 宿主的独立信号源（监控信号不与施控同源）：宿主等待窗据此判定
+    // 武装链路活性，防「断言代码自身失效/被绕过」的自证盲区。仅 schema 任务上报
+    // （本包是 native 引擎，capability 分流已由断言前置；无 schema 任务无武装面，
+    // 上报零语义）。宿主 reducer 对本事件 no-op（C3 第④步），落账归 run 事件 journal。
+    if (params.schema !== undefined) {
+      callbacks.onEvent({
+        type: "armed",
+        schemaEnvVar: SCHEMA_ENV_VAR,
+        extensionPkg: SCHEMA_ENFORCEMENT_EXTENSION_PKG,
+      });
+    }
 
     // 4. UI 请求队列（host/askUser 两阶段等待体注入）
     const enqueueUi = createUiRequestQueue(child, {
@@ -405,12 +567,15 @@ export async function runSpawnOnce(
 
     // 9. 等待退出
     const exitCode = await exitPromise;
-    clearEpipeFailure(params.recordId);
 
     // spawn 'error' 形态（子进程从未运行，典型 ENOENT）：错误事件消息（含 errno
     // code 与命令路径）直接进终态文案——比裸退出码可诊断，且不命中 stale 分诊
     // 词表。exitCode 判定优先（close 已 settle 0 后迟到的 error 事件只留日志，
     // 不产生 success=true + error 并存的自相矛盾终态）。
+    // 成功边界（agent_settled 到达）已按轮清零 record.turnCount（SP-9）——收集前
+    // 以 resolve 时刻快照恢复真实轮数（成功 run 的 outcome.turns/usage.turns 不为
+    // 0）；失败路径 agent_settled 未到达，快照缺省，record 值即真实值。
+    if (runEnd.settledTurnCount !== undefined) record.turnCount = runEnd.settledTurnCount;
     const outcome = collectOutcome(record, {
       startTime,
       success: exitCode === 0,
@@ -421,9 +586,20 @@ export async function runSpawnOnce(
           : `pi child exited with code ${exitCode}`,
       sessionId: identity.sessionId ?? "",
       sessionFile: identity.sessionFile,
-      ...(params.schemaEnv !== undefined ? { schemaExpected: true } : {}),
+      // [F-1 信号解耦] schemaExpected 判定源 = task.schema 声明形态（schema 本体
+      // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响守卫期待。
+      ...(params.schema !== undefined ? { schemaExpected: true } : {}),
     });
-    return { ...outcome, sessionId: identity.sessionId };
+    // [D5 诊断引用落账] 失败时随终态应答上报 stderr tee 路径（引擎应答 failed /
+    // 进程异常退出路径的共同汇聚点 = outcome.error 非空；成功不报——诊断引用只在
+    // 失败语义下有意义）。tee 缺席（无 stderr / dataDir 不可解析 / pid 缺失）= 字段
+    // 缺省，宿主按「无取证指针」消费。
+    const stderrTeePath = outcome.error !== undefined ? stderrTee?.path : undefined;
+    return {
+      ...outcome,
+      ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
+      sessionId: identity.sessionId,
+    };
   } finally {
     if (tempFile !== undefined) await cleanupTempPrompt(tempFile);
   }

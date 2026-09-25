@@ -1,7 +1,7 @@
 // Medium batch 2 — M10（壳侧 interface 守卫段）
 //
 // [u1-move 拆分] 原 robustness-medium-batch2.test.ts 的 M10 describe：读壳侧
-// interface/helpers.ts 源文本做锚定断言。batch2 其余用例（M6/M9/M12，读 core 源文件）
+// workflow-notify.ts 源文本做锚定断言。batch2 其余用例（M6/M9/M12，读 core 源文件）
 // 随主体迁入 @zhushanwen/subagent-core。
 //
 // [u-sw-misc] boundedPrettySerialize 实现已下沉 core shared
@@ -34,7 +34,7 @@ function readSrc(relPath: string): string {
 // 行为级等价（回退输出与旧实现逐字节一致）由 helpers-bounded-serialize.test.ts 锚定。
 
 describe("M10: notifyDone serialization has circular ref protection", () => {
-  const src = readSrc(join("src", "interface", "helpers.ts"));
+  const src = readSrc(join("src", "workflow-notify.ts"));
 
   it("notifyDone serializes scriptResult via boundedPrettySerialize", () => {
     // 调用点：scriptResult 不再直接 JSON.stringify，走 bounded 序列化

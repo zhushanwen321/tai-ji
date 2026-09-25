@@ -12,7 +12,7 @@
  * 会让 workflow 仍 running，资源泄漏）。
  *
  * 流程：
- * 1. registry.get(name) → WorkflowScript（未找到返回 failed）
+ * 1. registry.getPath(name) → WorkflowScript（未找到/不可用（available=false stub）返回 failed；按名解析已退役 D4-1）
  * 2. script.validate（lint 检查）→ 失败抛错（不进 runWorkflow）
  * 3. script.toExecutable → 可执行源
  * 4. 构建 RunSpec + runWorkflow(spec, deps, signal)
@@ -115,6 +115,68 @@ function formatLintErrorSummary(lintResult: LintResult): string {
 }
 
 /**
+ * 可用 workflow 清单 item 模板单源。每项一行起头（可选 [source] 标签 + name +
+ * ":" + description），includeLocation 时追加缩进 location 绝对路径行——按名解析
+ * 已退役，location 是唯一可派发形态。
+ *
+ * 该模板是三个 render 点的共同底座（available filter 与 item 行拼接只许在这里）：
+ * - run 拒单（workflowNotFoundMessage，缺省形态）与 core 内层入口
+ * - 壳 workflow-script lint 的 not-found 清单（缺省形态——与 run 拒单有意统一，
+ *   清单带 location 行，LLM 自纠指引一致）
+ * - 壳 workflow-script list 的 actionList（includeSource:true / includeLocation:false
+ *   ——source 标签保留、分隔符统一为 ":"）。标题与空态文案属调用点语境，不在此。
+ *
+ * 缺省参数组合的输出与历史 run 拒单格式逐字节一致（既有测试锁定）。
+ *
+ * @param opts 两个布尔选项，缺省 includeLocation=true / includeSource=false。
+ *   出现第三个选项的需求时先停下——这层刻意只表达「行内投影裁剪」这一个变化轴。
+ */
+export function formatAvailableWorkflowRefs(
+  all: readonly WorkflowScript[],
+  opts?: { includeLocation?: boolean; includeSource?: boolean },
+): string {
+  const includeLocation = opts?.includeLocation ?? true;
+  const includeSource = opts?.includeSource ?? false;
+  return all
+    .filter((wf) => wf.available)
+    .map((wf) => {
+      const sourceTag = includeSource ? `[${wf.source}] ` : "";
+      const locationLine = includeLocation ? `\n    location: ${wf.path}` : "";
+      return `  - ${sourceTag}${wf.name}: ${wf.meta.description || "(no description)"}${locationLine}`;
+    })
+    .join("\n");
+}
+
+/**
+ * not found 拒单文案单点（runAndWait / executeNestedWorkflow / extension 顶层
+ * workflow tool 共用）：清单来自 registry.loadAll() 现扫快照——调用方最贴近的可
+ * 行动面（脚本嵌套调用时注入面不可达），失败一次即可按 location 自救。
+ */
+export async function workflowNotFoundMessage(name: string, deps: LauncherDeps): Promise<string> {
+  const all = await deps.registry.loadAll();
+  return (
+    `Workflow '${name}' not found. Available (name — use the absolute location path as 'name' when the bare name is rejected):\n` +
+    `${formatAvailableWorkflowRefs(all) || "  (none)"}`
+  );
+}
+
+/**
+ * unavailable 拒单文案单点（runAndWait / executeNestedWorkflow 共用）。
+ *
+ * getPath 命中但 script.available=false（registry stub：文件不可读/不存在竞态/meta
+ * 提取失败——loader never throws 契约）。stub 本身不携带失败原因字段（原因只进
+ * config-loader 日志），故文案给恢复动作而非枚举原因。与 not found（引用非法，
+ * 附可用清单）语义分界：本分支 path 已解析成功，问题在文件侧。
+ */
+function workflowUnavailableMessage(ref: string, path: string): string {
+  return (
+    `Workflow '${ref}' is unavailable: the script file could not be loaded ` +
+    `(resolved location: ${path} — file missing/unreadable, or no valid @pi-meta metadata block). ` +
+    `Recovery: check the file exists and is readable at that location, fix the @pi-meta block if malformed, then retry.`
+  );
+}
+
+/**
  * 从 WorkflowRun 构建 WorkflowRunResult（D-8）。
  *
  * reason 取 run.state.reason（done 时必有，WorkflowRun 不变式 I2 保证），
@@ -213,9 +275,10 @@ async function pollRunToResult(
  *
  * **signal abort**：signal.aborted → abortRun + 返回 reason=aborted。
  *
- * **脚本未找到**：返回 reason=failed（不抛错——编程调用方据 reason 判断）。
+ * **脚本未找到 / 不可用**：返回 reason=failed（不抛错——编程调用方据 reason 判断）。
+ * 不可用 = getPath 命中 available:false 的 stub（文件不可读/不存在竞态/meta 提取失败）。
  *
- * @param name workflow 脚本名（registry.get 查找）
+ * @param name workflow 脚本引用（getPath 查找——绝对路径 + ~/ 展开；未找到返回 failed 附可用清单）
  * @param args 调用参数（worker 内 $ARGS 访问）
  * @param deps LauncherDeps（LifecycleDeps + registry）
  * @param signal 外部 abort signal（可选）
@@ -237,13 +300,26 @@ export async function runAndWait(
   timeoutMs?: number,
   model?: string,
 ): Promise<WorkflowRunResult> {
-  // 1. registry 查找脚本（workflowRef = 绝对路径，S2 路径统一）
+  // 1. registry 查找脚本（workflowRef = 绝对路径，S2 路径统一；按名解析已退役 D4-1）
   const script = await deps.registry.getPath(name);
   if (!script) {
     return {
       status: "done",
       reason: "failed",
-      error: `Workflow '${name}' not found`,
+      error: await workflowNotFoundMessage(name, deps),
+      runId: "",
+    };
+  }
+  // W4c 同案（extension 壳层已修，core 侧补齐）：getPath 对不可读/不存在文件返回
+  // available:false 的 stub（sourceCode 空串）而非 undefined——仅判 !script 会穿透到
+  // validate() 产出误导性 lint 错误（空源码 → "must call agent()/parallel()/pipeline()"），
+  // 掩盖真实原因（文件不可达）。unavailable 与 not found 同走 reason=failed 不抛错
+  //（jsdoc 契约：编程调用方据 reason 判断），文案单点 workflowUnavailableMessage。
+  if (!script.available) {
+    return {
+      status: "done",
+      reason: "failed",
+      error: workflowUnavailableMessage(name, script.path),
       runId: "",
     };
   }
@@ -426,7 +502,7 @@ function toNestedCallResult(
  * 流程（6 步，Step 2-6 的机制细节见各 helper）：
  * 1. 循环检测——name 已在 parentWorkflowChain 中则拒绝（防 A→B→A 死循环）
  * 2. signal 继承——子 run 响应父 run abort（inheritParentSignal）
- * 3. registry.get + lint——失败返回 error result（不抛错，让脚本 soft-fail）
+ * 3. registry.getPath + lint——失败返回 error result（不抛错，让脚本 soft-fail；not found 附可用清单，unavailable 附恢复指引）
  * 4. 构建 RunSpec（共享父 Budget 引用 + parentWorkflowChain 延长）+ runWorkflow
  * 5. pollRunToResult 轮询至 done（复用 runAndWait 的轮询逻辑）
  * 6. 结果转换（toNestedCallResult）
@@ -434,7 +510,7 @@ function toNestedCallResult(
  * 不走 runAndWait：runAndWait 内部构建 RunSpec 不支持 parentWorkflowChain 与 budget
  * 共享引用，故直接构建 spec + runWorkflow + pollRunToResult。
  *
- * @param name 子 workflow 脚本名（registry.get 查找）
+ * @param name 子 workflow 脚本引用（getPath 查找——绝对路径 + ~/ 展开；未找到返回 error result 附可用清单）
  * @param args 调用参数（子 worker 内 $ARGS 访问）
  * @param parentRun 发起嵌套调用的父 WorkflowRun（budget 共享 + 循环链源）
  * @param deps LauncherDeps（与 runAndWait 同一组依赖 + registry）
@@ -463,10 +539,17 @@ export async function executeNestedWorkflow(
   // （含 chokepoint ArgsValidationError）与 not found/lint 早返回均走 finally 移除
   // parentSignal listener——修复原 try 外 runWorkflow 的泄漏路径）。
   try {
-    // Step 3: registry 查找 + lint（失败返回 error result，不抛错）
+    // Step 3: registry 查找 + lint（失败返回 error result，不抛错；not found 附
+    // 可用清单与 location 指引——D4-1 嵌套调用拒单同案补齐，脚本可据清单自救）
     const script = await deps.registry.getPath(name);
     if (!script) {
-      return { content: "", error: `Workflow '${name}' not found` };
+      return { content: "", error: await workflowNotFoundMessage(name, deps) };
+    }
+    // W4c 同案（extension 壳层已修，core 侧补齐）：available:false stub 拒在 lint 前——
+    // 空 sourceCode 穿透 validate() 只会产出误导性 lint 错误，掩盖真实原因（文件不可达，
+    // 恢复动作见文案）。返回 error result 不抛错（与 not found 分支形态一致，脚本 soft-fail）。
+    if (!script.available) {
+      return { content: "", error: workflowUnavailableMessage(name, script.path) };
     }
     const lintResult = script.validate();
     if (!lintResult.valid) {

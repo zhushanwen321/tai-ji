@@ -468,7 +468,7 @@ function parseResult(raw) {
 
 /**
  * aggregator prompt（5.4 裁决段 + 防护规格）：现状 aggregator prompt 函数化 + 追加裁决段。
- * PART 1 写文件（Summary 格式保留，fallback 解析依赖 Must-fix: N）+ PART 2 JSON
+ * PART 1 写文件（Summary 格式保留）+ PART 2 JSON
  * （must_fix_ids/fixes_caution）+ 裁决段（证据裁决/降级保真/采信抽查/裁决自检）+ 防注入
  * （reviewResults wrapUntrusted + 语义声明）。
  */
@@ -514,7 +514,6 @@ function buildAggregatorPrompt({ header, round, max, roundDir, reviewResults, pr
     "```",
     "",
     "Followed by tables of Must-Fix Issues, Suggestions, Infos, and a Conclusion section.",
-    "The format `- Must-fix: N` and `- Suggestions: N` is critical: a fallback parser depends on it.",
     "",
     "─── ADJUDICATION (evidence review, 5.4) ───────────────────",
     "For EACH must-fix issue in the tables, adjudicate the evidence:",
@@ -1390,17 +1389,6 @@ function filterDormantFromRecon(reconSeen, reconEscalate, dormant) {
   return { seen, escalate };
 }
 
-/** 从 aggregated.md 内容回退解析（JSON 无效时的兜底，依赖 "- Must-fix: N" 固定格式）。 */
-function parseAggregatedMd(content) {
-  const mustFixMatch = content.match(/[-*]\s*Must[-_]fix\s*[:：]\s*(\d+)/i);
-  if (!mustFixMatch) return null;
-  const suggestionMatch = content.match(/[-*]\s*Suggestions?\s*[:：]\s*(\d+)/i);
-  return {
-    must_fix: parseInt(mustFixMatch[1], 10),
-    suggestion: suggestionMatch ? parseInt(suggestionMatch[1], 10) : 0,
-  };
-}
-
 /**
  * rfl 仪表（tier-1 §7.5）：run 存储根解析——~/.review-fix-loop/<slug>/<runId>。
  * slug = git toplevel 路径的分隔符替换为 '-'（rev-parse 失败用 cwd——非 git 项目）；
@@ -1548,7 +1536,7 @@ function backfillNote(m) {
   return m === "clean"
     ? "clean-round deterministic backfill: LLM dimensions unavailable (no aggregation on the clean-terminating round)"
     : m === "unverifiable"
-      ? "regression unverifiable: no tracked issues matched this round (aggregator numeric-only fallback?); treat as missing data"
+      ? "regression unverifiable: no tracked issues matched this round (aggregator returned no per-issue data?); treat as missing data"
       : "deterministic backfill: aggregation ran but returned no usable fix score entry";
 }
 
@@ -1961,7 +1949,6 @@ module.exports = {
   findNeedsRedesign,
   parseResult,
   normalizeAggregatorResult,
-  parseAggregatedMd,
   resolveRunRoot,
   computeOrigin,
   recordDormant,

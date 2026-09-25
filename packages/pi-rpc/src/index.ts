@@ -26,7 +26,6 @@ export {
 export type {
   PiMainAgentSpawnOptions,
   PiSubagentSpawnParams,
-  PiMirrorFlags,
   SpawnModelRef,
 } from './spawn-args.ts'
 

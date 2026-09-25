@@ -127,9 +127,8 @@ export interface PiSessionOptions {
  * sendCommand / prompt 的调用方标记（idle-pi-reclamation 设计 D1「维护通道排除」）。
  *
  * maintenance: true 标记本次调用是维护类通道（不体现用户/session 活跃）——RpcClient
- * 不刷新 lastActivityAt。现有唯一维护通道是 promptReload 的 `/__taiji_reload__`
- * prompt（skill 目录变更会对全部活跃 session 触发，计入 touch 会让空闲时钟被周期性
- * 重置、回收饿死且日志不可见）。
+ * 不刷新 lastActivityAt。当前无固定用户（原 promptReload 的 `/__taiji_reload__` 通道随
+ * W5 skill→pi reload 编排退役，2026-09-25），机制保留为维护类内部命令的通用豁免口。
  */
 export interface SendCommandOptions {
   /** 维护类调用：不刷新 RpcClient.lastActivityAt（空闲回收判定不受影响）。 */

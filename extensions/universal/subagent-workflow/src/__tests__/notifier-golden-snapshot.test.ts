@@ -10,7 +10,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDelivery } from "@zhushanwen/session-delivery";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
-import { createNotifier, type BgNotifyRecord, type NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
+import { createNotifier, FAILURE_RECOVERY_TAIL, type BgNotifyRecord, type NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
 import { renderBgNotifyMessage } from "../interface/bg-notify-render.ts";
 
 // 投递内核经通知域窄端口注入（notifier 不再直接 import session-delivery）——
@@ -130,7 +130,7 @@ describe("U3_UNIT notifier golden snapshots (pre-migration freeze)", () => {
     expect(content).toBe('Subagent "w" (sa-ptr-5) cancelled.');
   });
 
-  it("single gc-failed — error message, no pointer", () => {
+  it("single gc-failed — error message + recovery tail, no pointer (no sessionFile)", () => {
     const content = captureNotificationContent({
       id: "sa-ptr-6",
       status: "closed",
@@ -140,10 +140,11 @@ describe("U3_UNIT notifier golden snapshots (pre-migration freeze)", () => {
       startedAt: 1,
       endedAt: 2,
     });
-    expect(content).toBe('Subagent "w" (sa-ptr-6) failed: spawn EPIPE');
+    // 新契约（batch C+D）：failed 通知附恢复指引尾段——期望引用权威常量构造，防文案再漂移
+    expect(content).toBe(`Subagent "w" (sa-ptr-6) failed: spawn EPIPE\n\n${FAILURE_RECOVERY_TAIL}`);
   });
 
-  it("single gc-failed + patchFile — failed takes priority, no patch hint", () => {
+  it("single gc-failed + patchFile — failed takes priority, no patch hint, recovery tail", () => {
     const content = captureNotificationContent({
       id: "sa-ptr-8",
       status: "closed",
@@ -154,7 +155,7 @@ describe("U3_UNIT notifier golden snapshots (pre-migration freeze)", () => {
       startedAt: 1,
       endedAt: 2,
     });
-    expect(content).toBe('Subagent "w" (sa-ptr-8) failed: spawn EPIPE');
+    expect(content).toBe(`Subagent "w" (sa-ptr-8) failed: spawn EPIPE\n\n${FAILURE_RECOVERY_TAIL}`);
   });
 
   it("single closed + patchFile + sessionFile — patch hint + pointer", () => {

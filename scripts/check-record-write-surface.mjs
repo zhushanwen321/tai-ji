@@ -54,7 +54,7 @@ export const WRITE_FN_RE = /\b(writeFinalizedState|writeCancelledState|writeSett
 /** R2 subagent-record custom entry 写形态：同一行 appendEntry + customType 字面量
  *  （appendEntry 是 pi 全局通路，全域禁不可行——按 customType 限定到「写」形态；
  *  读面（失效回调 / 事件类型联合 / 常量定义）不拦，如 runtime event-interpreter
- *  的 onRecordEntriesInvalidated 判别参数与 shared SUBAGENT_RECORD_CUSTOM_TYPE）。 */
+ *  的 onRecordEntriesInvalidated 判别参数与 core barrel 的 SUBAGENT_RECORD_CUSTOM_TYPE）。 */
 export const RECORD_ENTRY_WRITE_RE = /\bappendEntry\b[^\n]*["'`]subagent-record["'`]|["'`]subagent-record["'`][^\n]*\bappendEntry\b/;
 
 /** store 内部（R1+R2 白名单）——唯一写入口本体，含全部合法调用与注释提及。 */

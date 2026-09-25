@@ -98,6 +98,31 @@ describe("spawnEngineChild", () => {
     // （child.stdin end）正常退出——EOF 语义下子进程生命周期完整走通
     expect(exitCode).toBe(0);
   }, 30_000);
+
+  it("abort signal → 完整杀链（SIGCONT 前置 + SIGTERM → grace → SIGKILL）：默认行为子进程被 SIGTERM 终止", async () => {
+    // 接线用例：锁定 abort → 信号终止主路径（默认 SIGTERM 行为的子进程在 grace
+    // 窗内即死，signal 形态 = "SIGTERM"）。SIGKILL 升级语义本体由 kill-chain.test
+    // 承载（30s 真实窗口不在进程级测试里等）；SIGCONT 前置无法从父侧观测信号序列，
+    // 由 spawn.ts 实装注释 + safeKill 幂等包裹保障。
+    const env = buildEngineChildEnv({}, { dataDir: "/d" });
+    const usePosix = process.platform !== "win32";
+    const controller = new AbortController();
+    spawned = spawnEngineChild({
+      command: usePosix ? "/bin/sh" : process.execPath,
+      args: usePosix ? ["-c", "sleep 30"] : ["-e", "setInterval(() => {}, 1000)"],
+      env,
+      signal: controller.signal,
+    });
+    const failure = new Promise<never>((_, reject) => {
+      spawned!.once("error", (err) => reject(new Error(`child spawn failed: ${String(err)}`)));
+    });
+    const exited = new Promise<NodeJS.Signals | null>((resolve) => {
+      spawned!.once("exit", (_code, signal) => resolve(signal));
+    });
+    controller.abort();
+    const exitSignal = await Promise.race([exited, failure]);
+    expect(exitSignal).toBe("SIGTERM");
+  }, 15_000);
 });
 
 describe("armEngineSelfDestruct", () => {

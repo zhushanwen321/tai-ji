@@ -180,11 +180,6 @@ export declare function normalizeAggregatorResult(raw: unknown): {
   scores?: ScoreEntry[];
   [key: string]: unknown;
 };
-export declare function parseAggregatedMd(content: string): {
-  must_fix: number;
-  suggestion: number;
-  [key: string]: unknown;
-};
 export declare function resolveRunRoot(opts: {
   runId?: string;
   cwd?: string;

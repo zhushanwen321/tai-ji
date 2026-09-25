@@ -30,7 +30,13 @@ import { type Static, Type } from "typebox";
 
 import { MAX_TIMER_DELAY_MS, SLUG_MAX_LENGTH, THINKING_ORDER } from "@zhushanwen/subagent-core";
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
-import { assertEntryTimeBudget, assertSlugWithinLimit, runWorkflow } from "@zhushanwen/subagent-core";
+// formatAvailableWorkflowRefs：拒单可用清单单源（core launcher，副本已并入）。
+import {
+  assertEntryTimeBudget,
+  assertSlugWithinLimit,
+  formatAvailableWorkflowRefs,
+  runWorkflow,
+} from "@zhushanwen/subagent-core";
 import {
   acquireReentryGuard,
   REENTRY_BUSY_MESSAGE,
@@ -40,7 +46,6 @@ import {
 import {
   assertNotAborted,
   buildRunSpecFromScript,
-  formatAvailableWorkflowList,
   optionSlugSuffix,
   renderTextResult,
 } from "./tool-shared.ts";
@@ -163,11 +168,12 @@ export async function runSubagentsBatch(
   signal: AbortSignal | undefined,
 ): Promise<SubagentsExecuteResult> {
   // D9：tasks 缺失/空数组 → 入口 throw（pi 只对 execute throw 置 isError:true）。
-  // 文案带 Correct 示例：弱模型照抄即可自纠。
+  // 文案与其他 tool 的必填参数拒单同模板（<subject> requires '<param>' parameter.
+  // Correct: <最小正确调用例>）：本工具无 action，主语用工具名。
   const tasks = params.tasks;
   if (!Array.isArray(tasks) || tasks.length === 0) {
     throw new Error(
-      'tasks is required (non-empty string array). Correct: {"tasks":["...","..."]}',
+      'subagents requires \'tasks\' parameter (non-empty string array). Correct: {"tasks":["...","..."]}',
     );
   }
 
@@ -184,12 +190,13 @@ export async function runSubagentsBatch(
   const time = params.time;
   assertEntryTimeBudget(time);
 
-  // 执行体脚本按内置名解析（与 workflow tool actionRun 同一条链：registry.get 命中
-  // 内置/已保存名；本工具不允许换脚本，故不回落 getPath）。
+  // 执行体脚本按固定内置名解析（registry.get 精确名匹配；脚本名是工具自带常量
+  // FAN_OUT_SCRIPT_NAME 而非用户参数——workflow tool actionRun 的按名解析已退役
+  // 走 getPath 单通道，本工具不允许换脚本，无 getPath 回落需求）。
   const script = await deps.registry.get(FAN_OUT_SCRIPT_NAME);
   if (!script || !script.available) {
     const all = await deps.registry.loadAll();
-    const available = formatAvailableWorkflowList(all);
+    const available = formatAvailableWorkflowRefs(all);
     throw new Error(
       `Built-in workflow '${FAN_OUT_SCRIPT_NAME}' is not available — the subagents tool runs it as its batch body. ` +
       `Recovery: verify the @zhushanwen/subagent-core package ships workflows/${FAN_OUT_SCRIPT_NAME}.js (reinstall/repair it), then retry. ` +
@@ -303,8 +310,6 @@ export function registerSubagentsTool(
       );
     },
 
-    renderResult(result: { content?: Array<{ type: string; text?: string }> }, _options: unknown, _theme: Theme, _context?: unknown) {
-      return renderTextResult(result);
-    },
+    renderResult: renderTextResult,
   });
 }

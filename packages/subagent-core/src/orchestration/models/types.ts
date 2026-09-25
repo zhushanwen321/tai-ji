@@ -69,6 +69,27 @@ export function canRunTransition(from: RunStatus, to: RunStatus): boolean {
   return (VALID_RUN_TRANSITIONS[from] as readonly RunStatus[]).includes(to);
 }
 
+/**
+ * DoneReason 的终止性判定（非正常完成）：通知/文案消费方区分「任务完成」与
+ * 「run 因异常收口」（budget/time 耗尽或 abort 不是任务完成，模型可能把 done
+ * 当成功汇报——防偷懒收尾指令只对终止性 reason 追加）。
+ *
+ * 穷举 switch 无 default：DoneReason 新增成员时 tsc 强制在此显式归类，
+ * 消费方（壳 workflow-notify）不再持有本地词表镜像。
+ */
+export function isTerminalDoneReason(reason: DoneReason): boolean {
+  switch (reason) {
+    case "completed":
+      return false;
+    case "failed":
+    case "aborted":
+    case "invalid_args":
+    case "budget_limited":
+    case "time_limited":
+      return true;
+  }
+}
+
 // ── Agent 调用 ────────────────────────────────────────────────
 
 /**
@@ -91,7 +112,7 @@ export const SLUG_MAX_LENGTH = 35;
  *
  * 终态命名按变化轴裁定为 AgentCallOpts，理由：
  *   - 字段演进的首要驱动轴是「调用方要表达的任务语义」（agent() API 是唯一生产写入方，
- *     合流字段中 prompt/description/skill/skillPath/schemaEnv/thinkingLevel 等多数派
+ *     合流字段中 prompt/description/skill/skillPath/thinkingLevel 等多数派
  *     已是调用方命名）；
  *   - 原 AgentTaskSpec 的中立重命名层（task/slug/effort/persona）与调用方命名是
  *     形式同构、语义同构的假差异（prompt≡task、slug=description 截断、effort≡thinkingLevel、
@@ -180,14 +201,7 @@ export interface AgentCallOpts {
   */
   appendSystemPrompt?: string[];
  /**
-  * Schema JSON for PI_WORKFLOW_SCHEMA env var.
-  * Set by agent-opts-resolver when opts.schema is present (值 = stringifySchemaCached
-  * compact，与 schema 派生等值); passed as env var to activate the structured-output
-  * tool + hook. pi 边界直出时 schema 派生优先、本字段兜底（解耦形态通道，生产不可达）。
-  */
-  schemaEnv?: string;
- /**
- * Per-call 工作目录（ADR-029 决策 1）。传给 child_process.spawn 的 cwd option。
+  * Per-call 工作目录（ADR-029 决策 1）。传给 child_process.spawn 的 cwd option。
  *
  * 用于 worktree 隔离：传入 worktree 绝对路径，spawn 的 pi 子进程绑定到该目录，
  * 其内部的 createAgentSession/ResourceLoader/bash 工具都在该目录运行。
@@ -228,12 +242,16 @@ export interface AgentCallOpts {
  idleTimeoutMs?: number;
  /**
   * 工具 denylist（原 AgentTaskSpec.denyTools 并入，中立新增面）：各引擎做语法映射
-  * （zcode buildZcodeArgv 消费；pi 链路暂无对应面）。无 workflow 写入方，预留形状。
+  * （zcode buildZcodeArgv 消费；pi 链路暂无对应面）。按 ADR-0071「无消费方不进协议」
+  * 对照：源头零写入方（workflow 脚本层无此 API），字段仅作为 zcode 消费端已沉淀的
+  * 透传链保留；删除触发条件 = 下批协议面审计仍零写入方时，随批删除透传链与 zcode 映射。
   */
   denyTools?: string[];
  /**
   * 中立权限模式（原 AgentTaskSpec.permissionMode 并入，预留形状）：映射按各引擎
-  * capabilities.permissionMode。无生产写入方/消费者。
+  * capabilities.permissionMode。按 ADR-0071「无消费方不进协议」对照：源头零写入方
+  * （workflow 脚本层无此 API）且零消费方；删除触发条件 = 下批协议面审计仍零写入方
+  * 时，随批删除本字段与各引擎映射面。
   */
   permissionMode?: string;
 }
@@ -296,6 +314,13 @@ export interface AgentResult {
   durationMs?: number;
  /** True when the pi process exited with code 0. */
   error?: string;
+ /**
+ * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。
+ * 产出侧 = 引擎终态应答 AgentOutcome.stderrTeePath（SDK contract-types，上报判据
+ * 见彼处注释），经 workflow-dispatch outcomeToWorkflowResult 透传到本形态；消费侧
+ * worker-message-pump dispatchAskSettled 读本字段填 ask-settled 事件载荷。
+ */
+  stderrTeePath?: string;
  /**
  * Pi session ID for the subagent process (uuidv7).
  * Present when pi emits a session header (default in --mode json).

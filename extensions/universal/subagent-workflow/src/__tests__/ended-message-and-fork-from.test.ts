@@ -35,7 +35,7 @@ import type { ModelRegistryLike } from "@zhushanwen/subagent-core/execution/asse
 import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/assembly/path-encoding.ts";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
-import { forkFromHandler, messageHandler } from "../interface/subagent-actions.ts";
+import { forkFromHandler, messageHandler } from "@zhushanwen/subagent-core";
 
 const IDENTITY_ENV_KEYS = [
   "PI_SUBAGENT_ROOT_SESSION_ID",

@@ -4,8 +4,15 @@
  * 抽取边界（findings g11a-F1/F2/F3）：
  * - `assertNotAborted` / `optionSlugSuffix` / `renderTextResult`：三处逐字重复的
  *   入口前置与渲染片段（同粒度小函数）。
- * - `buildRunSpecFromScript` / `formatAvailableWorkflowList`：RunSpec 组装字面量与
- *   「可用脚本清单」串——RunSpec 是 core 启动契约，两份字面量漏改即静默丢字段。
+ * - `buildRunSpecFromScript`：RunSpec 组装字面量——RunSpec 是 core 启动契约，
+ *   字面量漏改即静默丢字段。
+ * - `withGuiAttach`：RPC 模式给 details 附加 `__gui__` 的唯一实现（三个 tool 的
+ *   attach 点收敛于此，组件构造回调由调用方提供）。
+ * - `throwPrefixed`：catch 内 `<前缀>: <msg>` 重抛（pi 的 execute-throw 契约，
+ *   toErrorMessage 规整单点）。
+ *
+ * 「可用脚本清单」串不在本文件：已并入 core 单源
+ *（@zhushanwen/subagent-core 的 formatAvailableWorkflowRefs，经 barrel 消费）。
  *
  * **不**把 execute 包成 HOF：reentry-guard.ts 文件头已裁决（HOF 包装会破坏 union
  * 返回类型推断），本文件只放同粒度小函数，guard 的 check → try/finally release
@@ -17,7 +24,10 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
+import type { GuiComponent, GuiContext, GuiRenderResult } from "@zhushanwen/extension-protocol";
+import { guiResult, isGuiCapable } from "@zhushanwen/extension-protocol";
 import type { RunSpec, WorkflowScript } from "@zhushanwen/subagent-core";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { renderTextFallback } from "./format.ts";
 
 /** renderResult 回调的宽入参形态（content 可缺省，由 renderTextFallback 兜底）。 */
@@ -93,17 +103,49 @@ export function buildRunSpecFromScript(
   };
 }
 
+/** withGuiAttach 的 details 约束：已声明 `__gui__?`（三个 tool 的 details union 均满足）。 */
+interface GuiAttachableDetails {
+  __gui__?: GuiRenderResult;
+}
+
 /**
- * 「可用脚本清单」串（无可用项 → 空串，调用方自行补 `|| "  (none)"`）。
+ * GUI attach 单点：RPC 模式（isGuiCapable，仅 mode==="rpc"）下为 details 附加
+ * `__gui__`，其余模式原样返回；details 为 undefined 时原样返回（过载签名区分
+ * 可空/非空入参，非空入参的返回不带 undefined——调用方无需收窄）。
  *
- * 每项两行（name + description，缩进 location 绝对路径）——弱模型按清单里的名字
- * / 路径重试的自救主路径，两个 tool 的文案必须同源。
+ * 组件构造是各 tool 特有逻辑，经 build 回调注入——回调只在 attach 分支被调用
+ * （非 RPC 模式零构造成本）。union 各成员已声明 `__gui__?`，spread + 补字段类型
+ * 安全，无需强转。
  */
-export function formatAvailableWorkflowList(all: readonly WorkflowScript[]): string {
-  return all
-    .filter((wf) => wf.available)
-    .map(
-      (wf) => `  - ${wf.name}: ${wf.meta.description || "(no description)"}\n    location: ${wf.path}`,
-    )
-    .join("\n");
+export function withGuiAttach<Details extends GuiAttachableDetails>(
+  details: Details,
+  ctx: GuiContext | undefined,
+  build: (details: Details) => GuiComponent,
+): Details;
+export function withGuiAttach<Details extends GuiAttachableDetails>(
+  details: Details | undefined,
+  ctx: GuiContext | undefined,
+  build: (details: Details) => GuiComponent,
+): Details | undefined;
+export function withGuiAttach<Details extends GuiAttachableDetails>(
+  details: Details | undefined,
+  ctx: GuiContext | undefined,
+  build: (details: Details) => GuiComponent,
+): Details | undefined {
+  if (!details) return details;
+  if (ctx && isGuiCapable(ctx)) {
+    return { ...details, __gui__: guiResult(build(details)) };
+  }
+  return details;
+}
+
+/**
+ * catch 内重抛单点：`<prefix>: <msg>`（msg 经 toErrorMessage 规整）。
+ *
+ * pi 只对 execute throw 置 isError:true——返回值里的 isError 被 agent-loop 丢弃
+ * （agent-loop.js:453-483），错误一律 throw，本函数是四个 catch 点共享的唯一包装
+ * 形态；前缀是 LLM 可见文案，调用方逐字保持既有形态。
+ */
+export function throwPrefixed(prefix: string, err: unknown): never {
+  throw new Error(`${prefix}: ${toErrorMessage(err)}`);
 }

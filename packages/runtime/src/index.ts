@@ -68,7 +68,6 @@ import { SkillRegistry } from './services/skill-registry.js'
 // [A1 接线] skill 注入映射源（D7 切源）：delivery registry 的 SkillInjector 与
 // dispatcher/records 共用 sessionService 的晚绑定源（见下方 bindSkillMappingSource）。
 import { SkillInjector } from './services/session/skill-injector.js'
-import { ReloadOrchestrator } from './services/session/reload-orchestrator.js'
 import { PluginRegistry } from './services/plugin-service/plugin-registry.js'
 import { PluginService } from './services/plugin-service/plugin-service.js'
 import { GitService } from './services/git-service.js'
@@ -144,7 +143,7 @@ export type {
 import { RUNTIME_PLANNED_EXIT_CODE } from '@taiji/shared'
 // u17（设计 §6.12）：spawn 清单读侧在 infra SSOT（读写同模块）；组合根注入给 services 层
 // （D6c port 纪律——reap/startup-background-init 不直接 import infra）。
-import { readSpawnMarkerList } from './infra/pi/spawn-markers.js'
+import { readSpawnMarkerList, sweepStaleSpawnMarkerTmpFiles } from './infra/pi/spawn-markers.js'
 // A1-2（provider-config-quota 架构）：models.json 寄生字段 → config/providers.json 迁移。
 // 挂载薄包装在独立小模块 run-extras-migration.ts（失败语义 + 返回值契约可单测，
 // 组合根 import 即执行 main() 不可直测）；此处 readExtrasWithFallback 供 QuotaService 双读。
@@ -998,25 +997,16 @@ async function main(): Promise<void> {
     configService,
   })
 
-  // ── W5 ReloadOrchestrator：skill 变动 → 受影响 session pi reload（重扫 skill）────
-  // 依赖 sessionService 窄接口（isSessionIdle/promptReload/hasSession），故在 skillRegistry 之后构造。
-  // 绑定两条链路：
-  //   1. skillRegistry.onChange → onSkillChange（skill 变动触发）
-  //   2. sessionService message.complete 广播 → onMessageComplete（running session 生成完成消费 pending 队）
-  const reloadOrchestrator = new ReloadOrchestrator({ sessionService })
+  // skill rescan（原 W5 reload 编排退役）：SkillRegistry watcher → 重扫缓存 → onChange。
+  // 变更只广播 config.skillCacheInvalidated 让 renderer 菜单失效重拉——slash 菜单与
+  // composer 注入的权威源都是 taiji SkillRegistry（D7 切源），pi 侧不再 reload
+  // （pi 全量 reload 会 invalidate 扩展 ctx + clearExtensionCache 重建全部扩展，曾致
+  // 后台任务完成通知在旧模块世界投递失败，ADR-0050 降级声明覆盖 pi 侧列表滞后）。
   skillRegistry.onChange((event) => {
-    // 既有链路：pi reload（只用 affectedSessionIds 字段）
-    void reloadOrchestrator.onSkillChange(event.affectedSessionIds)
-    // 新增链路：广播 config.skillCacheInvalidated 让 landing 缓存失效重拉
     server.broadcastSkillCacheInvalidated(event.scope, event.cwd)
   })
-  sessionService.setOnMessageComplete((sid) => {
-    void reloadOrchestrator.onMessageComplete(sid)
-  })
-  // R3：session 删除（主动 delete / 进程异常退出）清 pendingReload 残留。
   // Terminal：同步销毁该 session 绑定的 PTY（kill 进程 + 清 ptyMap）。
   sessionService.setOnSessionDelete((sid) => {
-    reloadOrchestrator.clearPending(sid)
     terminalService.destroyPty(sid)
   })
 
@@ -1248,8 +1238,6 @@ async function main(): Promise<void> {
       reapBackgroundTasks: async (s) => {
         await reapSessionBackgroundTasks(getPiAgentDir(), s)
       },
-      // pendingReload 定向清（D3 第 6 步，防御性 no-op）。
-      clearPendingReload: (s) => reloadOrchestrator.clearPending(s),
       // v6 第四案：回收定向清挂起 UI 请求（防 stale pending 在重激活时拉回死表单）。
       // 在 reclaimManagedSession 内挂代际校验通过后的成功分支——并发的取消分支不调，
       // 新进程的活请求不被误清。P2-2 失效链：clear → invalidate 升级（摘除 + 广播失效帧，
@@ -1351,7 +1339,7 @@ async function main(): Promise<void> {
       // server.stop 之后、closeLogger 之前（杀链期间的日志与 stderr tee 要经 logger
       // 落盘，closeLogger 先行则现场丢失）。引擎池的物理宿主在 pi 进程内（registry
       // 是进程级 globalThis 状态）：server.stop 的 destroyAll 向全部 pi 发 SIGTERM →
-      // pi 侧 extension 收割钩子 killAllSpawnedChildren 先 disposeEngines（杀 zcode
+      // pi 侧 extension 收割钩子 markAllSpawnedChildrenDead 先 disposeEngines（杀 zcode
       // appserver 常驻进程，D6①「SIGTERM 先发会丢 close 帧」顺序由该入口保证）再杀
       // per-record children。runtime 进程注册表当前恒空（无引擎注册），本步骤在场 =
       // 设计钉死的序列位置与打点完整性；未来引擎宿主迁移 runtime 侧时此处是杀链接线点。
@@ -1509,6 +1497,8 @@ async function main(): Promise<void> {
     },
     // u17 判据 v2：spawn 清单读取（infra 读侧经 port 注入；闭包绑定组合根同源 getDataDir()）
     readSpawnMarkers: () => readSpawnMarkerList(getDataDir()),
+    // 加固轮：spawn 清单 tmp 残片清扫（infra 实现经 port 注入，同上闭包形态）
+    sweepSpawnMarkerTmpResidue: () => sweepStaleSpawnMarkerTmpFiles(getDataDir()),
   })
 
   // ── u5（crash-forensics-and-watchdog D3）：reattach 编排 ─────────────────────

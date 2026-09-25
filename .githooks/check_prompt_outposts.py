@@ -129,11 +129,12 @@ OUTPOST_CALLSITES = [
     ),
     (
         "services/session/session-service.ts",
-        "prompt('/__taiji_reload__', undefined, undefined, { maintenance: true })",
+        "client.prompt(BG_RECONCILE_COMMAND, undefined, undefined, { maintenance: true })",
         "internal",
         "exempt",
-        "promptReload 内部命令（无参字面命令）；idle-pi-reclamation D1 起带 maintenance"
-        " 标记——维护通道不刷新 RpcClient 空闲时钟（skill 变更风暴不污染回收判定）",
+        "bg-notify redelivery 触发命令（无参字面命令，[2026-09-25] 替换退役的"
+        " /__taiji_reload__ 条目）；带 maintenance 标记——激活触发不刷新 RpcClient"
+        " 空闲时钟（频繁切会话不污染回收判定）",
     ),
     (
         "services/session/trace-sync.ts",

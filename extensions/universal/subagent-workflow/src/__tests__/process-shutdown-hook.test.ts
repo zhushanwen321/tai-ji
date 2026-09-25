@@ -2,10 +2,10 @@
  * [V2 决策 7 防线 i] process 级 shutdown hook 测试。
  *
  * 验证 index.ts factory 注册 process.on SIGTERM/SIGINT/beforeExit，handler 触发时
- * 调 killAllSpawnedChildren 收割全部活子进程，且 idempotent（多信号叠加只收割一次）。
+ * 调 markAllSpawnedChildrenDead 清空镜像记账，且 idempotent（多信号叠加只触发一次）。
  *
  * mock 策略（对齐 wave0-package-structure.test.ts）：
- *   - killAllSpawnedChildren → vi.fn（避免真实 kill + 可断言调用）
+ *   - markAllSpawnedChildrenDead → vi.fn（避免真实镜像清空 + 可断言调用）
  *   - process.on → spy + mockImplementation 捕获 handler（不真实注册，防 listener 泄漏）
  *   - process.kill → spy mock（SIGINT handler re-raise 会 kill 自身，必须拦截防杀测试 runner）
  *   - process.removeListener → spy（断言 SIGINT re-raise 前先摘除自身 listener）
@@ -15,17 +15,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // [W3 改写] mock 目标随符号迁移更换：原 inproc session-runner（engines/pi/）随 W3
-// 删件消亡，killAllSpawnedChildren 收敛到 engine/host/spawned-children.ts 公共面
+// 删件消亡，markAllSpawnedChildrenDead 收敛到 engine/host/spawned-children.ts 公共面
 //（宿主收割入口 = 镜像整体置死），index.ts 经 core barrel re-export 消费。mock 该深
 // 路径模块（spread actual 保其余导出，镜像其他消费方不受影响），barrel re-export
 // 命中同一物理模块 → factory 引用点被替换。
-const killAllSpawnedChildrenMock = vi.fn();
+const markAllSpawnedChildrenDeadMock = vi.fn();
 vi.mock("@zhushanwen/subagent-core/execution/engine/host/spawned-children.ts", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@zhushanwen/subagent-core/execution/engine/host/spawned-children.ts")>();
   return {
     ...actual,
-    killAllSpawnedChildren: (...args: unknown[]) => killAllSpawnedChildrenMock(...(args as [string?])),
+    markAllSpawnedChildrenDead: () => markAllSpawnedChildrenDeadMock(),
   };
 });
 
@@ -55,7 +55,7 @@ describe("[V2 决策 7 防线 i] process 级 shutdown hook", { timeout: 30000 },
   // hook 显式 timeout：describe 级 { timeout } 不传播给 hook（vitest 4 行为），
   // 动态 import("../index.ts") 大模块图在全量并行高负载下偶发超默认 10s
   beforeEach(async () => {
-    killAllSpawnedChildrenMock.mockReset();
+    markAllSpawnedChildrenDeadMock.mockReset();
     for (const k of Object.keys(registered)) delete registered[k];
 
     // 捕获 process.on 注册的 handler（不真实注册到全局 process，避免 listener 跨用例泄漏）。
@@ -90,10 +90,10 @@ describe("[V2 决策 7 防线 i] process 级 shutdown hook", { timeout: 30000 },
     expect(registered["beforeExit"]).toBeDefined();
   });
 
-  it("SIGTERM handler 触发时调 killAllSpawnedChildren(\"SIGTERM\") + process.exitCode = 0", () => {
+  it("SIGTERM handler 触发时调 markAllSpawnedChildrenDead() + process.exitCode = 0", () => {
     resetGuard();
     registered["SIGTERM"]!("SIGTERM");
-    expect(killAllSpawnedChildrenMock).toHaveBeenCalledWith("SIGTERM");
+    expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledWith();
     expect(process.exitCode).toBe(0);
   });
 
@@ -101,8 +101,8 @@ describe("[V2 决策 7 防线 i] process 级 shutdown hook", { timeout: 30000 },
     resetGuard();
     const beforeExitCode = process.exitCode;
     registered["SIGINT"]!("SIGINT");
-    // 收割（SIGTERM 信号收割全部活子进程）
-    expect(killAllSpawnedChildrenMock).toHaveBeenCalledWith("SIGTERM");
+    // 镜像记账清空（无参——函数不发任何进程信号）
+    expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledWith();
     // re-raise：先摘除自身 listener（防递归），再向自身重发 SIGINT（无 listener → Node 默认终止）
     expect(removeListenerSpy).toHaveBeenCalledWith("SIGINT", registered["SIGINT"]);
     expect(killSpy).toHaveBeenCalledWith(process.pid, "SIGINT");
@@ -110,10 +110,10 @@ describe("[V2 决策 7 防线 i] process 级 shutdown hook", { timeout: 30000 },
     expect(process.exitCode).toBe(beforeExitCode);
   });
 
-  it("beforeExit handler 触发时调 killAllSpawnedChildren 但不 process.kill（自然退出）", () => {
+  it("beforeExit handler 触发时调 markAllSpawnedChildrenDead 但不 process.kill（自然退出）", () => {
     resetGuard();
     registered["beforeExit"]!();
-    expect(killAllSpawnedChildrenMock).toHaveBeenCalledWith("SIGTERM");
+    expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledWith();
     expect(killSpy).not.toHaveBeenCalled();
   });
 
@@ -122,15 +122,15 @@ describe("[V2 决策 7 防线 i] process 级 shutdown hook", { timeout: 30000 },
     registered["SIGTERM"]!("SIGTERM");
     registered["SIGINT"]!("SIGINT");
     registered["beforeExit"]!();
-    expect(killAllSpawnedChildrenMock).toHaveBeenCalledTimes(1);
+    expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledTimes(1);
   });
 
   it("idempotent：session_shutdown 已收割后，process 级 handler 不重复 kill", () => {
     // 模拟 session_shutdown 先触发（resetGuard 后先收割一次），再 process 信号到达。
     resetGuard();
     registered["beforeExit"]!();
-    expect(killAllSpawnedChildrenMock).toHaveBeenCalledTimes(1);
+    expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledTimes(1);
     registered["SIGTERM"]!("SIGTERM");
-    expect(killAllSpawnedChildrenMock).toHaveBeenCalledTimes(1);
+    expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledTimes(1);
   });
 });

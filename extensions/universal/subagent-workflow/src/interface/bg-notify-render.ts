@@ -28,12 +28,11 @@ import { CLOSED_REASONS } from "@zhushanwen/subagent-core";
 import type { ClosedReason, ExecutionOutcome } from "@zhushanwen/subagent-core";
 import {
   firstLineSanitized,
-  padToVisible,
   shortId,
   statusGlyph,
   type ThemeLike,
-  truncLine,
 } from "./format.ts";
+import { padToVisible, truncLine } from "./tui-kit.ts";
 
 /** agent 名最大显示宽度。 */
 const AGENT_MAX_WIDTH = 40;

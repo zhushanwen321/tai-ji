@@ -1,7 +1,7 @@
 // golden-replay.pi.test.ts —— pi 引擎 golden 回放层（conformance 免 LLM 默认 CI 层，
 // 设计 §3.3.8 两层结构的第一层）。锚定物 = 统一 AgentEvent 序列（onEvent 出口 / journal
-// 落盘形态）——pi 的完整翻译链（parseSpawnLine → handleSdkEvent）闭包在 session-runner
-// 的 spawn 状态里，conformance 以「翻译产物」为契约锚点（journal/record 消费的正是它）。
+// 落盘形态）——pi 的完整翻译链闭包在引擎包 pi-subagent-cli 的 spawn 状态里，
+// conformance 以「翻译产物」为契约锚点（journal/record 消费的正是它）。
 //
 // 覆盖：C3 不变量（流式口径）+ journal 往返保真（replayJournal === golden 序列）+
 // parseSpawnLine 对实录行形态的回归（pi parser 的纯函数面）。

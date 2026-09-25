@@ -41,6 +41,8 @@
 import type { ServerMessage, ServerMessageType } from '@taiji/shared'
 import type { FileChange } from '@taiji/shared'
 import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES } from '@taiji/shared'
+// subagent-record / workflow-record 词表单源 core（与 subagent-extractor/event-adapter 同源消费）
+import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
 import { CompactionNotifier } from './event-interpreter-compaction.js'
 import { LlmWindowSampler } from './event-interpreter-gen-stats.js'
 import { PingProbe } from './event-interpreter-ping.js'
@@ -53,6 +55,8 @@ export { ABORT_STALL_CONVERGENCE_WINDOW_MS } from './event-interpreter-settled-d
 export { PING_INTERVAL_MS, PING_FAIL_THRESHOLD, PING_WARN_FAIL_COUNT } from './event-interpreter-ping.js'
 import { toErrorMessage } from '../../utils/errors.js'
 import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
+// notify 通道 customType 词表单源（extension-protocol，与壳写点同源）
+import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE, WORKFLOW_RESULT_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 import type { IFileChangeDiff } from '../ports/file-change-diff.js'
 import type {
   ForceQuitSource,
@@ -1238,10 +1242,10 @@ export class EventInterpreter {
     // record 状态迁移点（register / run flush）已 append 自描述 entry（entry_appended
     // 主信号先于本事件到达），此处失效用于主信号丢失时的双保险收敛。
     if (SUBAGENT_TOOL_NAMES.has(toolName)) {
-      this.opts.onRecordEntriesInvalidated?.(this.sessionId, 'subagent-record')
+      this.opts.onRecordEntriesInvalidated?.(this.sessionId, SUBAGENT_RECORD_CUSTOM_TYPE)
     }
     if (WORKFLOW_TOOL_NAMES.has(toolName)) {
-      this.opts.onRecordEntriesInvalidated?.(this.sessionId, 'workflow-record')
+      this.opts.onRecordEntriesInvalidated?.(this.sessionId, WORKFLOW_RECORD_CUSTOM_TYPE)
     }
   }
 
@@ -1369,8 +1373,8 @@ export class EventInterpreter {
    */
   private handleSubagentBgNotify(msg: ServerMessage): void {
     const payload = msg.payload as { customType?: string } | undefined
-    if (payload?.customType !== 'subagent-bg-notify') return
-    this.opts.onRecordEntriesInvalidated?.(this.sessionId, 'subagent-record')
+    if (payload?.customType !== SUBAGENT_BG_NOTIFY_CUSTOM_TYPE) return
+    this.opts.onRecordEntriesInvalidated?.(this.sessionId, SUBAGENT_RECORD_CUSTOM_TYPE)
   }
 
   /**
@@ -1379,8 +1383,8 @@ export class EventInterpreter {
    */
   private handleWorkflowResult(msg: ServerMessage): void {
     const payload = msg.payload as { customType?: string } | undefined
-    if (payload?.customType !== 'workflow-result') return
-    this.opts.onRecordEntriesInvalidated?.(this.sessionId, 'workflow-record')
+    if (payload?.customType !== WORKFLOW_RESULT_CUSTOM_TYPE) return
+    this.opts.onRecordEntriesInvalidated?.(this.sessionId, WORKFLOW_RECORD_CUSTOM_TYPE)
   }
 
   // ── compaction 生命周期编排已迁 CompactionNotifier（event-interpreter-compaction.ts，T4）──

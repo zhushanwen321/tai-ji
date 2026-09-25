@@ -54,10 +54,10 @@ import type { ExecutionRecord } from "./types.ts";
 
 const logger = getLogger("subagents");
 
-/** 失败通知的恢复指引尾段（[T2-③/LC-1] 可达性语义——失败原因 + 恢复指引必须可达宿主）。 */
-const FAILURE_RECOVERY_TAIL =
-  "Recovery: re-send your message (action:'message') to continue — the conversation " +
-  "context is preserved (session file intact), or use action:'close' to discard it.";
+// [T2-③/LC-1] 失败恢复指引尾段：定义在 notify/notifier.ts（notifier 与本文件
+// 互相消费——尾段放 notifier 侧保持依赖方向单一：本文件已 import notifier）。
+import { FAILURE_RECOVERY_TAIL } from "../notify/notifier.ts";
+export { FAILURE_RECOVERY_TAIL };
 
 /** [U4 / §3.2.3] reopen 降级首轮的历史摘要 prompt（模板单点，单测锁定 §3.2.3 摘要
  *  来源契约：binding 快照域 task/agent/round/totalTokens/turns + 上一轮 result）。

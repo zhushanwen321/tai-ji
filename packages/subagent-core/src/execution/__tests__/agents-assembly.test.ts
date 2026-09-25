@@ -2,13 +2,13 @@
 //
 // discoverAgents 装配函数测试（sink 设计 U2 / A6 / u-core-agent 验收②）。
 //
-// 等值对照口径：fixture 目录下，discoverAgents 产出与 pi 壳现装配循环
-// （subagent-list-injector.discoverAllAgents）产出「同序同名同字段」。
-// pi 壳装配循环无法直接 import 进 core 测试（core 对 pi-coding-agent /
+// 等值对照口径：fixture 目录下，discoverAgents 产出与 pi 壳注入器装配
+// （subagent-list-injector 经工厂 assemble 槽委托本函数，U11 单源）产出「同序同名同字段」。
+// pi 壳装配无法直接 import 进 core 测试（core 对 pi-coding-agent /
 // pi-extension-logger 零运行时触点——vitest.config 头注红线），故 oracle 在
-// 测试内按 pi 循环逐句同构复刻，但全部消费 core 既有原语
+// 测试内按壳侧装配循环逐句同构复刻，但全部消费 core 既有原语
 // （discoverResources + parseResourceMeta 严格层 + sortByCodepoint）——
-// 这正是 pi 循环消费的同一批 core 原语（pi 的 parseAgentFrontmatter 内部即
+// 这正是壳侧装配消费的同一批 core 原语（frontmatter 解析即
 // parseResourceMeta(content, "agent") 投影）。oracle 与被测实现走不同解析路径
 // （严格层 vs parseAgentProfile 宽容层），非自证。
 //
@@ -35,7 +35,7 @@ import {
 import type { DiscoveryRoot } from "../../core/host-services.ts";
 import { discoverAgents } from "../assembly/agents-assembly.ts";
 
-// ── oracle：pi 壳 discoverAllAgents 装配循环的逐句同构（消费同一批 core 原语）──
+// ── oracle：pi 壳 agent 装配循环的逐句同构（消费同一批 core 原语）──
 
 async function piAssemblyOracle(
   workspaceRoot: string,
@@ -49,7 +49,7 @@ async function piAssemblyOracle(
     if (!resource.available) continue;
     const content = getCachedFileContent(resource.path);
     if (content === null) continue; // pi: catch → logger.error → skip
-    // pi parseAgentFrontmatter 的投影面（parseResourceMeta 严格层）
+    // pi 壳 frontmatter 解析的投影面（parseResourceMeta 严格层）
     const meta = parseResourceMeta(content, "agent");
     if (meta && meta.kind === "agent") {
       agentMap.set(meta.name, {
@@ -162,7 +162,7 @@ maxTurns: 2
 gamma body`,
     );
 
-    const hostRoots: DiscoveryRoot[] = [{ dir: hostRoot, source: "project-host" }];
+    const hostRoots: DiscoveryRoot[] = [{ dir: hostRoot, source: "project-agents" }];
     const [actual, oracle] = await Promise.all([
       discoverAgents(workspaceRoot, hostRoots),
       piAssemblyOracle(workspaceRoot, hostRoots),

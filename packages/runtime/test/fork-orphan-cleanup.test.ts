@@ -149,7 +149,6 @@ function makeLifecycle(opts: MakeOpts = {}) {
     },
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
 
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)

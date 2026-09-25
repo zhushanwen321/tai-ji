@@ -10,7 +10,7 @@
 // 4. manifest 路径存在性校验：声明的路径不存在 → 该包发现失败，不 fallback
 // 5. 废弃 discovery.json：扫描路径完全由代码内推导，无外部依赖
 //
-// 优先级（低→高）：user .pi/agent → user .agents → npm global → npm dev → ext-paths(TAIJI_EXTENSION_PATHS/dev-link) → project .pi → project .pi/.tmp(仅workflow) → project-host(宿主注入槽) → project .agents
+// 优先级（低→高）：user .pi/agent → user .agents → npm global → npm dev → ext-paths(TAIJI_EXTENSION_PATHS/dev-link) → project .pi → project .pi/.tmp(仅workflow) → project .agents
 
 import * as fsSync from "node:fs";
 import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
@@ -53,6 +53,13 @@ export interface DiscoveredResource {
   source: ResourceSource;
   /** 是否可用（manifest 校验失败的包整体标 false） */
   available: boolean;
+  /**
+   * 不可用原因（P5 D4-3 invalid 具名上报的数据通道）：available=false 时由发现层
+   * 填充（如 manifest 声明路径不存在），消费方（resource-list-injector）据此渲染
+   * `invalid: [{path, reason}]` 形态的上报，损坏资源不再静默跳过。available=true
+   * 时恒缺席。
+   */
+  reason?: string;
 }
 
 /** 资源来源层级 */
@@ -64,10 +71,6 @@ export type ResourceSource =
   | "user-extension-paths"
   | "project-pi"
   | "project-pi-tmp"
-  // project-host（W2②）：宿主注入的项目级根（如 zsw 的 <ws>/.zcode/agents）。
-  // 序位刻意压在 project-agents 之下——zsw 现语义项目 .agents > .zcode，
-  // project-host 承接 zcode 项目根，project-agents 仍是项目级最高逃生门。
-  | "project-host"
   | "project-agents";
 
 /** 扫描配置 */
@@ -77,9 +80,8 @@ export interface ScanConfig {
   /** 项目根目录（findWorkspaceRoot 推导结果） */
   workspaceRoot: string;
   /** 宿主注入的发现根（DiscoveryRoot.dir 已含 kind 末级目录与安装布局，
-   *  source 为宿主语义标签——pi 壳 = user-pi/npm/npm-dev 三根，zsw 壳可另注入
-   *  project-host 等）。buildScanTargets 按标签填充对应槽位，宿主未提供某标签
-   *  根时该槽位条目整体缺席。
+   *  source 为宿主语义标签——pi 壳 = user-pi/npm/npm-dev 三根）。buildScanTargets
+   *  按标签填充对应槽位，宿主未提供某标签根时该槽位条目整体缺席。
    *  同标签多根语义（W2④）：同标签多条目依注入序全部保留、同序位依次扫描——
    *  宿主（zsw）把「目录 symlink 展开目标 + 本体根」按注入序注入同标签，core
    *  合并 last-writer-wins 下靠后者胜，本体根必须注入在展开目标之后（本体胜，
@@ -100,12 +102,11 @@ const MACHINE_SOURCES: ReadonlySet<ResourceSource> = new Set<ResourceSource>([
   "user-extension-paths",
   "project-pi",
   "project-pi-tmp",
-  "project-host",
   "project-agents",
 ]);
 
 /** 判断 source 是否属于机器源（安装拓扑常态，同名重复降 debug）。
- *  导出仅为测试穷举断言用（封闭 9 值枚举 × 分级边界）。 */
+ *  导出仅为测试穷举断言用（封闭 8 值枚举 × 分级边界）。 */
 export function isMachineSource(source: ResourceSource): boolean {
   return MACHINE_SOURCES.has(source);
 }
@@ -231,40 +232,30 @@ export function getCachedFileContent(filePath: string): string | null {
   return getCachedFile(filePath)?.content ?? null;
 }
 
-// [perf] 解析结果缓存（KV-cache 稳定性改造）：外层 key = parse 函数身份，内层 key =
-// path，value = { mtimeMs, parsed }。key 含 parse 身份是正确性要求——同一 path 可能被
-// 不同 parse（agent frontmatter vs workflow meta）解析，单层 path key 会跨 parse 类型
-// 互相污染缓存（先 parse 的结果被 as T 断言返回）。用普通 Map 而非 WeakMap：
-// clearFileCache 需全量清空（测试隔离），WeakMap 不可遍历；parse 函数均为模块级
-// 常量，强引用无泄漏。复用 getCachedFile 的 mtime 判变——mtime 未变时跳过 parse
-// （frontmatter YAML 解析是重建发现时最大的可省 CPU 项）。parse 的确定性结果（含
-// null，如 frontmatter 非法）均可缓存：同一 content 必然解析出同一结果。失效与
-// mtimeCache 同步（clearFileCache）。
-const parsedCache = new Map<
-  (content: string) => unknown,
-  Map<string, { mtimeMs: number; parsed: unknown }>
->();
+// [perf] 解析结果缓存（KV-cache 稳定性改造）：key = path，value = { mtimeMs, parsed }。
+// 单层 path key 的前提：isTargetFile 按 kind 判扩展名互斥（agents=.md / workflows=.js|.mjs），
+// 同一 path 恒由同一 parse（agent frontmatter vs workflow meta）处理，不存在跨 parse
+// 类型污染。用普通 Map 而非 WeakMap：clearFileCache 需全量清空（测试隔离），WeakMap
+// 不可遍历；parse 函数均为模块级常量，强引用无泄漏。复用 getCachedFile 的 mtime 判变
+// ——mtime 未变时跳过 parse（frontmatter YAML 解析是重建发现时最大的可省 CPU 项）。
+// parse 的确定性结果（含 null，如 frontmatter 非法）均可缓存：同一 content 必然解析出
+// 同一结果。失效与 mtimeCache 同步（clearFileCache）。
+const parsedCache = new Map<string, { mtimeMs: number; parsed: unknown }>();
 
 /**
  * mtime 级解析结果缓存：mtime 未变返回缓存 parsed，变则经 getCachedFile 取 content
- * 重新 parse 并缓存。文件不存在/不可读 → null（并驱逐条目）。缓存按 parse 函数隔离
- * ——同一 path 的不同 parse 互不污染。
+ * 重新 parse 并缓存。文件不存在/不可读 → null（并驱逐条目）。
  */
 export function getCachedParsed<T>(filePath: string, parse: (content: string) => T): T | null {
   const file = getCachedFile(filePath);
-  let perParse = parsedCache.get(parse);
   if (!file) {
-    perParse?.delete(filePath);
+    parsedCache.delete(filePath);
     return null;
   }
-  if (!perParse) {
-    perParse = new Map();
-    parsedCache.set(parse, perParse);
-  }
-  const entry = perParse.get(filePath);
+  const entry = parsedCache.get(filePath);
   if (entry && entry.mtimeMs === file.mtimeMs) return entry.parsed as T;
   const parsed = parse(file.content);
-  perParse.set(filePath, { mtimeMs: file.mtimeMs, parsed });
+  parsedCache.set(filePath, { mtimeMs: file.mtimeMs, parsed });
   return parsed;
 }
 
@@ -273,7 +264,7 @@ export function clearFileCache(): void {
   mtimeCache.clear();
   workspaceRootCache.clear();
   manifestCache.clear();
-  for (const perParse of parsedCache.values()) perParse.clear();
+  parsedCache.clear();
 }
 
 export function findWorkspaceRoot(cwd?: string): string {
@@ -431,8 +422,14 @@ async function processPackage(
       const absPath = resolve(pkgDir, relPath);
       const fileStat = await stat(absPath).catch(() => null);
       if (!fileStat) {
-        // manifest 声明的路径不存在 → 记录失败占位（路径存在性校验）
-        results.push({ path: absPath, source: "npm", available: false });
+        // manifest 声明的路径不存在 → 记录失败占位（路径存在性校验），
+        // reason 具名（P5 D4-3：消费方渲染 invalid 上报，不再静默）
+        results.push({
+          path: absPath,
+          source: "npm",
+          available: false,
+          reason: "manifest declared path not found",
+        });
         continue;
       }
 
@@ -533,6 +530,57 @@ function readExtensionPaths(): string[] {
   return [...new Set(paths)];
 }
 
+// ── 约定根单源推导 ───────────────────────────────────────────
+//
+// buildScanTargets 的 4 个硬编码槽与壳空态 roots 提示清单（barrel 导出
+// conventionRootDirs）共用同一组单根推导——约定根增删/挪位只改这一组函数，
+// 消费方禁止复刻 join 字面（壳 resource-list-injector 曾有 4 join 复刻 +
+// 「须与彼处同步改」注释，收敛于此）。宿主注入根（discoveryRoots 槽）与
+// TAIJI_EXTENSION_PATHS 不属于约定根：前者归宿主槽位决策，后者是 taiji
+// 内部 dev-link 通道、非 agent 自救面（壳提示清单刻意不列）。
+
+/** user 级约定根 ~/.agents/{kind}/（homedir 推导）。 */
+function userAgentsConventionRoot(kind: ResourceKind): string {
+  return join(homedir(), ".agents", kind);
+}
+
+/** project 级约定根 <workspaceRoot>/.pi/{kind}/。 */
+function projectPiConventionRoot(workspaceRoot: string, kind: ResourceKind): string {
+  return join(workspaceRoot, ".pi", kind);
+}
+
+/** project 级 tmp 约定根 <workspaceRoot>/.pi/{kind}/.tmp/（仅 workflow generate 产物）。 */
+function projectPiTmpConventionRoot(workspaceRoot: string, kind: ResourceKind): string {
+  return join(workspaceRoot, ".pi", kind, ".tmp");
+}
+
+/** project 级约定根 <workspaceRoot>/.agents/{kind}/。 */
+function projectAgentsConventionRoot(workspaceRoot: string, kind: ResourceKind): string {
+  return join(workspaceRoot, ".agents", kind);
+}
+
+/**
+ * 约定根路径集合（有序：user-agents → project-pi → project-pi-tmp（仅
+ * includeTmp）→ project-agents，相对序与 buildScanTargets 各槽的优先级序一致）。
+ *
+ * 壳 resource-list-injector 的空态 roots 提示清单消费本导出做纯投影（宿主
+ * 注入根现取 + 本集合拼接），路径决策全在 core——壳侧不再持有任何 join 字面。
+ */
+export function conventionRootDirs(
+  config: Pick<ScanConfig, "kind" | "workspaceRoot" | "includeTmp">,
+): string[] {
+  const { kind, workspaceRoot, includeTmp } = config;
+  const roots = [
+    userAgentsConventionRoot(kind),
+    projectPiConventionRoot(workspaceRoot, kind),
+  ];
+  if (includeTmp) {
+    roots.push(projectPiTmpConventionRoot(workspaceRoot, kind));
+  }
+  roots.push(projectAgentsConventionRoot(workspaceRoot, kind));
+  return roots;
+}
+
 /**
  * 构建所有扫描源（按优先级低→高排列）。
  *
@@ -551,7 +599,6 @@ function readExtensionPaths(): string[] {
  */
 function buildScanTargets(config: ScanConfig): ScanTarget[] {
   const { kind, workspaceRoot, hostRoots, includeTmp } = config;
-  const home = homedir();
 
   // 同标签多条目依注入序全部保留（W2④ 列表语义）：宿主把「展开目标 + 本体根」
   // 按注入序注入同标签，core 同序位依次扫描；本体靠后 → last-writer-wins 本体胜。
@@ -567,10 +614,10 @@ function buildScanTargets(config: ScanConfig): ScanTarget[] {
   const targets: ScanTarget[] = [];
   // 1. user .pi/agent/{kind}/（宿主注入，pi 壳 source "user-pi"）
   targets.push(...hostTargets("user-pi"));
-  // 2. user .agents/{kind}/（硬编码根 = homedir 推导 + 宿主可选注入合并，硬编码
-  //    本体根后置 → 注入的展开目标在前、本体在后，last-writer-wins 本体胜）
+  // 2. user .agents/{kind}/（约定根单源推导 + 宿主可选注入合并，本体
+  //    根后置 → 注入的展开目标在前、本体在后，last-writer-wins 本体胜）
   targets.push(...hostTargets("user-agents"));
-  targets.push({ dir: join(home, ".agents", kind), source: "user-agents", enabled: true });
+  targets.push({ dir: userAgentsConventionRoot(kind), source: "user-agents", enabled: true });
   // 3. npm global: <agentDir>/npm/node_modules/*/<pkg>/（宿主注入，pi 壳 source "npm"）
   targets.push(...hostTargets("npm"));
   // 4. npm dev symlink: <agentDir>/extensions/*/<pkg>/（宿主注入，pi 壳 source "npm-dev"）
@@ -582,26 +629,21 @@ function buildScanTargets(config: ScanConfig): ScanTarget[] {
     ...readExtensionPaths().map((dir) => ({ dir, source: "user-extension-paths" as const, enabled: true })),
   );
   // 5. project .pi/{kind}/
-  targets.push({ dir: join(workspaceRoot, ".pi", kind), source: "project-pi", enabled: true });
+  targets.push({ dir: projectPiConventionRoot(workspaceRoot, kind), source: "project-pi", enabled: true });
 
   // 6. project .pi/{kind}/.tmp/（仅 workflow）
   if (includeTmp) {
     targets.push({
-      dir: join(workspaceRoot, ".pi", kind, ".tmp"),
+      dir: projectPiTmpConventionRoot(workspaceRoot, kind),
       source: "project-pi-tmp",
       enabled: true,
     });
   }
 
-  // 6.5 project host 根（宿主注入，W2②）：承接宿主自有项目级布局（如 zsw 的
-  //     <ws>/.zcode/agents）。序位在 project-agents 之下（.agents 是项目级最高
-  //     逃生门）；未注入该标签时槽位缺席（与 user-pi/npm/npm-dev 同语义）。
-  targets.push(...hostTargets("project-host"));
-
-  // 7. project .agents/{kind}/（硬编码根 + 宿主可选注入合并，本体根后置同槽 2）
+  // 7. project .agents/{kind}/（约定根单源推导 + 宿主可选注入合并，本体根后置同槽 2）
   targets.push(...hostTargets("project-agents"));
   targets.push({
-    dir: join(workspaceRoot, ".agents", kind),
+    dir: projectAgentsConventionRoot(workspaceRoot, kind),
     source: "project-agents",
     enabled: true,
   });

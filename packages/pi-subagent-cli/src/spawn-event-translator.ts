@@ -46,8 +46,12 @@ export interface SdkTranslatorOpts {
   abort: () => void;
   /** agent_end（非 willRetry）到达：turn 已终态、轮收敛（不 kill，收割等 agent_settled）。 */
   onAgentEnd?: () => void;
-  /** agent_settled（真空闲）到达：run resolve 点 + 轮收割边界。 */
-  onAgentSettled?: () => void;
+  /**
+   * agent_settled（真空闲）到达：run resolve 点 + 轮收割边界。入参 = resolve 时刻
+   * 的真实轮数快照——收集面（collectOutcome）在 resolve 后的微任务延续中读轮数，
+   * 快照先行传出，防止下方「按轮清零」把成功 run 的 outcome.turns 腐化成 0。
+   */
+  onAgentSettled?: (turnsAtSettle: number) => void;
 }
 
 /** tool_execution_start → tool_start（toolCallId 在册时寄存 args 供 end 回填）。 */
@@ -148,10 +152,12 @@ function handleAgentSettled(
   // 真空闲边界（agent_end 之后、post-run 完成后才 emit——pi agent-session
   // _runAgentPrompt finally 块）= run 的 resolve 与收割点：turn 计数与 limiter
   // 标志按轮重置（SP-9 对齐：续聊轮独立预算，maxTurns 不跨轮累计）。
+  // 轮数快照必须先于清零传出（opts.onAgentSettled 内部 settle exitPromise），
+  // 否则收集面读到的成功 run 轮数恒为 0。
   if (opts.onAgentSettled !== undefined) {
+    opts.onAgentSettled(record.turnCount);
     record.turnCount = 0;
     limiter.reset();
-    opts.onAgentSettled();
   }
 }
 

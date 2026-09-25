@@ -3,7 +3,8 @@
 // 覆盖（impl-plan §2.2 必写死条目）：
 //   同步成员形态映射（capabilities 直读 / listModels 四态 / validateModel 三态与
 //   成员不实现）/ run 帧映射（task 子集收窄 + ctx 承载）/ RunContext 反向通道映射 /
-//   abort → cancel + 收敛杀链兜底窗（窗口内收敛与超时杀链两路 + 兜底窗量级常量锚）/
+//   abort → cancel + 收敛兜底窗（窗口内收敛、超时本地合成终态 + [D9-2] run 拓扑杀
+//   半径/零拓扑降级两路 + 兜底窗量级常量锚）/
 //   read dataDir 必填 / 运行中失败合成 outcome vs prepare 期失败 reject 的分界。
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -14,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EngineClient } from "../engine-client.ts";
 import {
+  ARMED_RECEIPT_TIMEOUT_ENV,
+  ARMED_RECEIPT_TIMEOUT_MS,
   CANCEL_SETTLE_KILL_CHAIN_GRACE_MS,
   RemoteEngine,
   type RemoteEngineManifestSnapshot,
@@ -22,10 +25,12 @@ import { SubagentStream } from "../../../assembly/stream-sink.ts";
 import { getSubagentSessionDir } from "../../../assembly/path-encoding.ts";
 import { isProcessAlive } from "../pid-file.ts";
 import { getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
+import { getLogger as coreGetLogger } from "../../../../core/logger.ts";
 import {
   _resetHostUiRequestEndpointForTest,
   setHostUiRequestEndpoint,
 } from "../../host/host-ui-endpoint.ts";
+import { configureCore, resetCoreForTests } from "../../../../core/host-services.ts";
 
 const FAKE_ENGINE = fileURLToPath(new URL("./__fixtures__/fake-engine.mjs", import.meta.url));
 
@@ -72,6 +77,8 @@ afterEach(() => {
   vi.useRealTimers();
   // [D3 槽现读] host/askUser 应答端经 host-ui-endpoint 槽注入——用例后清空防串扰
   _resetHostUiRequestEndpointForTest();
+  // [D2] extensionPaths 注入用例 configureCore 的宿主配置，用例后复位防串扰
+  resetCoreForTests();
 });
 
 interface Fixture {
@@ -198,18 +205,16 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
 });
 
 describe("RemoteEngine run 帧映射", () => {
-  it("task 子集收窄（model/schemaEnv/cwd/engineFallback 改挂 ctx）+ ctxModel 投影 provider/id", async () => {
+  it("task 子集收窄（model/cwd/engineFallback 改挂 ctx）+ ctxModel 投影 provider/id", async () => {
     const { engine, cleanup } = makeEngine();
     const { ctx, events } = makeCtx({
       ctxModel: { id: "glm-5.1", name: "GLM", provider: "zai", reasoning: true },
-      schemaEnv: "ctx-schema-env",
       engineFallback: { from: "pi", reason: "probe-failed" },
     });
     const task = {
       prompt: "do things",
       model: "zai/glm-4.6",
       cwd: "/tmp/w2-cwd",
-      schemaEnv: "task-schema-env",
       engine: "pi",
       timeoutMs: 1_000,
       returnMeta: true,
@@ -218,22 +223,23 @@ describe("RemoteEngine run 帧映射", () => {
       worktree: true,
     };
     const result = await engine.run(task, ctx);
-    // 宿主自持字段（engine/timeoutMs/returnMeta）与双写字段（model/schemaEnv/cwd）不进 task 帧
+    // 宿主自持字段（engine/timeoutMs/returnMeta）与双写字段（model/cwd）不进 task 帧
     const wire = extractRunParams(events);
     expect(wire.task).toMatchObject({ prompt: "do things", maxTurns: 5, description: "desc-x", worktree: true });
     expect(wire.task).not.toHaveProperty("model");
     expect(wire.task).not.toHaveProperty("engine");
     expect(wire.task).not.toHaveProperty("timeoutMs");
     expect(wire.task).not.toHaveProperty("returnMeta");
-    expect(wire.task).not.toHaveProperty("schemaEnv");
     expect(wire.task).not.toHaveProperty("cwd");
     expect(wire.ctx).toMatchObject({
       cwd: "/tmp/w2-cwd",
       model: "zai/glm-4.6",
-      schemaEnv: "ctx-schema-env", // ctx 优先于 task（协议层单列，不双写）
       ctxModel: "zai/glm-5.1",
       engineFallback: { from: "pi", reason: "probe-failed" },
     });
+    // H1：schemaEnv wire 字段退役——schema 本体只经 task.schema 承载，ctx 不得重现该键
+    expect(wire.task).not.toHaveProperty("schemaEnv");
+    expect(wire.ctx).not.toHaveProperty("schemaEnv");
     expect(wire.ctx).not.toHaveProperty("streamMode"); // 无 stream → 缺省（JSON 序列化丢 undefined 键）
     expect(result.outcome.content).toBe("fake-content-run-1");
     expect(result.handle.data.engineId).toBe("fake");
@@ -312,6 +318,43 @@ describe("RemoteEngine run 帧映射", () => {
     }
   });
 
+  it("[D2] HostServices.extensionPaths 端口 → wire ctx.extensionPaths 逐字保真；端口缺席 → 无该键；空数组显式上 wire", async () => {
+    // 正向：宿主端口在场（pi 壳双形态注入源）→ wire ctx 逐字保真（pi 引擎侧逐项
+    // 拼 --extension）
+    configureCore({
+      dataRoot: () => dataDir,
+      log: () => {},
+      extensionPaths: () => ["/staged/@zhushanwen/pi-structured-output"],
+    });
+    const withPaths = makeEngine();
+    const { ctx: ctxP, events: eventsP } = makeCtx();
+    await withPaths.engine.run({ prompt: "p" }, ctxP);
+    expect(extractRunParams(eventsP).ctx.extensionPaths).toEqual([
+      "/staged/@zhushanwen/pi-structured-output",
+    ]);
+    await withPaths.cleanup();
+
+    // 空数组 = 显式「无扩展」声明——上 wire（区别于端口缺席的键不存在）
+    configureCore({
+      dataRoot: () => dataDir,
+      log: () => {},
+      extensionPaths: () => [],
+    });
+    const emptyPaths = makeEngine();
+    const { ctx: ctxE, events: eventsE } = makeCtx();
+    await emptyPaths.engine.run({ prompt: "p" }, ctxE);
+    expect(extractRunParams(eventsE).ctx.extensionPaths).toEqual([]);
+    await emptyPaths.cleanup();
+
+    // 负向：端口缺席（宿主未实现 / 未 configureCore）→ wire ctx 不出现该键
+    resetCoreForTests();
+    const bare = makeEngine();
+    const { ctx: ctxB, events: eventsB } = makeCtx();
+    await bare.engine.run({ prompt: "p" }, ctxB);
+    expect(extractRunParams(eventsB).ctx).not.toHaveProperty("extensionPaths");
+    await bare.cleanup();
+  });
+
   it("handleReady → RunContext 回调（运行中句柄回填；[池抽象降级] poolResolved 通道已退役）", async () => {
     const readies: Array<{ sessionRef: Record<string, string> }> = [];
     const { engine, cleanup } = makeEngine(undefined, {
@@ -364,7 +407,7 @@ describe("abort 分级（cancel 帧 + 收敛杀链兜底窗）", () => {
     expect(CANCEL_SETTLE_KILL_CHAIN_GRACE_MS).toBe(30_000);
   });
 
-  it("cancel 未收敛（注入短兜底窗）→ 杀链 → run 合成 abort 终态（不 reject，EnginePort 契约）", async () => {
+  it("[D9-2] cancel 未收敛（注入短兜底窗）→ 本地合成 abort 终态（不 reject）+ 零拓扑降级 stall 出声不杀（引擎宿主存活）", async () => {
     const controller = new AbortController();
     const { engine, client, cleanup } = makeEngine(
       undefined,
@@ -375,12 +418,71 @@ describe("abort 分级（cancel 帧 + 收敛杀链兜底窗）", () => {
     const runPromise = engine.run({ prompt: "p" }, ctx);
     await waitForReady(client); // abort 抢在连接完成前会打断握手重建循环——先等 ready
     const enginePid = client.enginePid!;
+    // 该 run 无 per-run 进程拓扑（镜像零目标——zcode 常驻 app-server 的恒定形态）。
+    // spy 目标 = core logger（remote-engine.ts 的留痕载体），非 SDK logger。
+    const warnSpy = vi.spyOn(coreGetLogger("remote-engine"), "warn");
     controller.abort();
-    const result = await runPromise; // 注入 500ms 兜底窗超时 → 杀链 → 合成终态
+    const result = await runPromise; // 注入 500ms 兜底窗超时 → 本地合成终态（record 必须收尾）
     expect(result.outcome.error).toContain("engine_run_failed");
     expect(result.outcome.error).toContain("aborted before terminal answer");
     expect(result.outcome.exitCode).toBeNull();
-    await waitForTrue(() => isProcessAlive(enginePid) === false); // 杀链已执行
+    // [D9-2] 降级出声：无 run 级杀目标 → 不组杀引擎，stall 语义 warn（通知通道 = workflow-stall）
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("no run-scoped child process to kill"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("stall"));
+    warnSpy.mockRestore();
+    expect(client.currentState).toBe("ready"); // 引擎宿主存活（组杀退役）
+    expect(isProcessAlive(enginePid)).toBe(true);
+    await cleanup();
+  }, 20_000);
+
+  it("[D9-2] run 拓扑杀半径：cancel 未收敛 → 仅该 run 的引擎孙进程被杀，同引擎邻接 run 与其孙进程存活、引擎宿主存活", async () => {
+    const controller = new AbortController();
+    // 每 run 各 spawn 一个孙进程（recordId "@runId" = per-run 归账锚）后长 delay
+    // 不应答——run A 在收敛窗超时（300ms）后被宿主强制收尾 + 拓扑杀，run B（不
+    // abort）随后正常应答，三者存活面构成半径断言。
+    const { engine, client, cleanup } = makeEngine(
+      undefined,
+      {
+        args: [
+          FAKE_ENGINE,
+          "--run-actions",
+          JSON.stringify([{ op: "spawnGrandchild", recordId: "@runId" }, { op: "delay", ms: 1200 }]),
+        ],
+      },
+      { cancelSettleGraceMs: 300 },
+    );
+    const { ctx: ctxA } = makeCtx({ signal: controller.signal });
+    ctxA.taskId = "run-a";
+    const runA = engine.run({ prompt: "wedged" }, ctxA);
+    const { ctx: ctxB } = makeCtx();
+    ctxB.taskId = "run-b";
+    const runB = engine.run({ prompt: "healthy" }, ctxB);
+
+    // 两路孙进程均已上报镜像（childSpawned 反向通道落账 = 杀目标的确定性同步点）
+    await waitForTrue(() => client.mirror.snapshot().filter((e) => e.state === "running").length >= 2);
+    const childA = client.mirror.snapshot().find((e) => e.recordId === "run-a");
+    const childB = client.mirror.snapshot().find((e) => e.recordId === "run-b");
+    expect(childA).toBeDefined();
+    expect(childB).toBeDefined();
+    await waitForReady(client);
+    const enginePid = client.enginePid!;
+
+    controller.abort();
+    const resultA = await runA; // 收敛窗超时 → 本地合成 abort 终态 + run 拓扑杀
+    expect(resultA.outcome.error).toContain("aborted before terminal answer");
+    expect(resultA.outcome.exitCode).toBeNull();
+
+    // 半径断言①：目标 run 的孙进程被杀（真实 SIGTERM → 进程消亡）
+    await waitForTrue(() => isProcessAlive(childA!.pid) === false);
+    // 半径断言②：邻接 run 正常完成（真实结果，非 engine_crashed 连带）
+    const resultB = await runB;
+    expect(resultB.outcome.error).toBeUndefined();
+    expect(resultB.outcome.content).toBe("fake-content-run-b");
+    // 半径断言③：邻接 run 的孙进程存活
+    expect(isProcessAlive(childB!.pid)).toBe(true);
+    // 半径断言④：引擎宿主存活（组杀退役）
+    expect(client.currentState).toBe("ready");
+    expect(isProcessAlive(enginePid)).toBe(true);
     await cleanup();
   }, 20_000);
 });
@@ -514,4 +616,183 @@ describe("read / probe / dispose 门面（[H1 U6] interact 断言随 interact �
     expect(echo.message).toContain('"confirmed":true');
     await cleanup();
   });
+});
+
+// ── [D3 协议版 P6] armed 回执等待门（宿主独立信号源；引擎侧自查断言之外的第二道
+//    防线——监控信号不与施控同源）。fake 引擎经 argv 通道驱动：--caps-override 模拟
+//    native 应答（schemaEnforcement 非 gate 位，不触发 gate 拒），--run-actions 播放
+//    armed / delay 动作。等待窗经 env 调短（量级常量锚定用例持有缺省值）。
+
+const ARMED_EVENT = {
+  type: "armed",
+  schemaEnvVar: "PI_WORKFLOW_SCHEMA",
+  extensionPkg: "@zhushanwen/pi-structured-output",
+} as const;
+
+function makeNativeEngineActions(
+  manifestCaps: Partial<RemoteEngineManifestSnapshot["capabilities"]> = {},
+  runActions: ReadonlyArray<Record<string, unknown>>,
+  engineOverrides: Partial<ConstructorParameters<typeof RemoteEngine>[0]> = {},
+) {
+  return makeEngine(
+    { capabilities: { ...FAKE_MATCHED_CAPS, schemaEnforcement: "native", ...manifestCaps } },
+    {
+      args: [
+        FAKE_ENGINE,
+        "--caps-override",
+        JSON.stringify({ schemaEnforcement: "native" }),
+        "--run-actions",
+        JSON.stringify(runActions),
+      ],
+    },
+    engineOverrides,
+  );
+}
+
+describe("armed 回执等待门（[D3 协议版 P6]）", () => {
+  it("常量锚：等待窗缺省 10s + env 通道名（量级按启动期回执校准，env 供测试/排障覆盖）", () => {
+    expect(ARMED_RECEIPT_TIMEOUT_MS).toBe(10_000);
+    expect(ARMED_RECEIPT_TIMEOUT_ENV).toBe("TAIJI_SUBAGENT_ARMED_RECEIPT_TIMEOUT_MS");
+  });
+
+  it("native + schema 任务：窗内收到 armed → run 正常收敛，armed 事件照常转发 ctx.onEvent", async () => {
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "8000";
+    const { engine, cleanup } = makeNativeEngineActions(undefined, [
+      { op: "emit", event: ARMED_EVENT },
+    ]);
+    const { ctx, events } = makeCtx();
+    try {
+      const result = await engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
+      expect(result.outcome.error).toBeUndefined();
+      expect(result.outcome.content).toBe("fake-content-run-1");
+      expect(events.some((e) => (e as { type?: string }).type === "armed")).toBe(true);
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      await cleanup();
+    }
+  }, 20_000);
+
+  it("native + schema 任务：窗满无回执 → 合成失败 outcome fail-fast（不 reject），错误含双形态恢复指引 + 旧引擎支", async () => {
+    // 等待窗（500ms）< 引擎 run 应答时延（5s delay）：fail-fast 返回发生在 run 应答
+    // 之前 = 「秒级失败」时序的直接证明（G1：断链 run 不得烧完整时长）。
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "500";
+    const { engine, cleanup } = makeNativeEngineActions(undefined, [
+      { op: "delay", ms: 5000 },
+    ]);
+    const { ctx } = makeCtx();
+    try {
+      const startedAt = Date.now();
+      const result = await engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
+      expect(Date.now() - startedAt).toBeLessThan(4000); // 远小于 5s 应答时延
+      const error = result.outcome.error ?? "";
+      expect(error).toContain("[schema-arming]");
+      expect(error).toContain("armed receipt");
+      // 双形态恢复指引（对齐 H3 文案语义）+ 协议版新增的旧引擎支
+      expect(error).toContain("extension-service");
+      expect(error).toContain("install @zhushanwen/pi-structured-output (peerDependency)");
+      expect(error).toContain("schema-less workflow");
+      expect(error).toContain("engine package too old");
+      // cancel 帧已发（合成失败不等于引擎自停）+ exitCode null = cancel/杀链终态族
+      expect(result.outcome.exitCode).toBeNull();
+      expect(result.handle.data.v).toBe(1);
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      await cleanup();
+    }
+  }, 20_000);
+
+  it("emulated 引擎豁免：schema 任务、窗满无回执也不 fail-fast（run 照常收敛）", async () => {
+    // 缺省 manifest/应答 = emulated；run 应答时延（1.2s）> 等待窗（400ms）——若门
+    // 未豁免必合成失败，本用例断言成功即豁免的构造性证明。
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+    const { engine, cleanup } = makeEngine(undefined, {
+      args: [FAKE_ENGINE, "--run-actions", JSON.stringify([{ op: "delay", ms: 1200 }])],
+    });
+    const { ctx } = makeCtx();
+    try {
+      const result = await engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
+      expect(result.outcome.error).toBeUndefined();
+      expect(result.outcome.content).toBe("fake-content-run-1");
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      await cleanup();
+    }
+  }, 20_000);
+
+  it("native + 无 schema 任务豁免：不建门，无回执不 fail-fast（H1 判据 = task.schema 声明形态）", async () => {
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+    const { engine, cleanup } = makeNativeEngineActions(undefined, [
+      { op: "delay", ms: 1200 },
+    ]);
+    const { ctx } = makeCtx();
+    try {
+      const result = await engine.run({ prompt: "p" }, ctx);
+      expect(result.outcome.error).toBeUndefined();
+      expect(result.outcome.content).toBe("fake-content-run-1");
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      await cleanup();
+    }
+  }, 20_000);
+
+  // ── [加固] armed 超时 fail-fast 路径的杀链兜底窗 ──
+  // 该路径不经过 wireAbortSignal 的 onAbort（无外部 abort signal），cancel 受理失败 /
+  // 引擎不收敛两种形态的唯一回收 = 合成回调内武装的杀链兜底 timer（grace 同源
+  // cancelSettleGraceMs）。
+
+  it("[加固] armed 窗满 fail-fast + cancel 受理失败 → error 留痕 + 杀链兜底窗武装（grace 到点触发零拓扑 stall warn）", async () => {
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+    const { engine, client, cleanup } = makeNativeEngineActions(undefined, [
+      { op: "delay", ms: 5000 },
+    ], { cancelSettleGraceMs: 300 });
+    const { ctx } = makeCtx();
+    const coreLogger = coreGetLogger("remote-engine");
+    const warnSpy = vi.spyOn(coreLogger, "warn");
+    const errorSpy = vi.spyOn(coreLogger, "error");
+    const cancelSpy = vi.spyOn(client, "cancelRun").mockRejectedValue(new Error("cancel channel wedged"));
+    try {
+      const result = await engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
+      expect(result.outcome.error).toContain("armed receipt"); // fail-fast 合成（既有语义不变）
+      // ① cancel 受理失败出声（原空 catch 吞信号）
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("armed receipt timeout cancel failed"));
+      // ② 杀链兜底 timer 武装并在 grace（300ms）到点触发：零拓扑（本 run 无孙进程）
+      //    → killRunTopology stall 降级 warn，reason 带 armed 特征（区别于 cancel 路径）
+      await waitForTrue(() => warnSpy.mock.calls.some((c) => String(c[0]).includes("armed receipt timeout kill-chain fallback")));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("no run-scoped child process to kill"));
+      expect(client.currentState).toBe("ready"); // 引擎宿主不动（组杀禁令不因兜底路径破例）
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+      cancelSpy.mockRestore();
+      await cleanup();
+    }
+  }, 20_000);
+
+  it("[加固] armed 窗满 fail-fast + 引擎不收敛 → 杀链兜底到点定点收割该 run 孙进程（引擎宿主存活）", async () => {
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+    // run 受理后 spawn 孙进程（armed 永不到达——actions 无 emit）再长 delay 不应答：
+    // armed 合成 + cancel 帧（受理成功但 CANCEL_SETTLES 缺省 0 不收敛）后孙进程仍活着，
+    // 唯一回收者 = 武装的杀链兜底 timer（grace 500ms）→ killPidChain 定点收割。
+    const { engine, client, cleanup } = makeNativeEngineActions(undefined, [
+      { op: "spawnGrandchild", recordId: "@runId" },
+      { op: "delay", ms: 10_000 },
+    ], { cancelSettleGraceMs: 500 });
+    const { ctx } = makeCtx();
+    try {
+      const runPromise = engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
+      // 孙进程上报镜像（childSpawned 反向通道落账 = 杀目标的确定性同步点）
+      await waitForTrue(() => client.mirror.snapshot().some((e) => e.recordId === "run-1" && e.state === "running"));
+      const child = client.mirror.snapshot().find((e) => e.recordId === "run-1");
+      expect(child).toBeDefined();
+      const result = await runPromise;
+      expect(result.outcome.error).toContain("armed receipt"); // fail-fast 先于引擎应答（delay 10s）
+      // 兜底窗到点 → 该 run 孙进程被真实 SIGTERM（宿主与其他拓扑不动）
+      await waitForTrue(() => isProcessAlive(child!.pid) === false);
+      expect(client.currentState).toBe("ready");
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      await cleanup();
+    }
+  }, 20_000);
 });

@@ -1,0 +1,7 @@
+---
+'@zhushanwen/extension-protocol': minor
+'@zhushanwen/subagent-core': patch
+'@zhushanwen/pi-subagent-workflow': patch
+---
+
+Single-source the notify-channel custom_message customType vocabulary in the protocol package (new exports: WORKFLOW_RESULT_CUSTOM_TYPE, SUBAGENT_BG_NOTIFY_CUSTOM_TYPE, SUBAGENT_DIRECTIVE_CUSTOM_TYPE — values unchanged, byte-identical). Producers and consumers now import the same constants instead of mirrored string literals that had zero cross-side anchoring: the shell's completion-notify sender, messageRenderer registration, and directive-entry writer; subagent-core's NOTIFY_CUSTOM_TYPE (compat alias) and the abandoned-notification recovery-hint channel check; the shared COMPLETE_NOTIFY_CUSTOM_TYPES set is now assembled from the constants (with SUBAGENT_DIRECTIVE_CUSTOM_TYPE re-exported), and runtime's event-interpreter / subagent-extractor plus core's notify-summary compare against them. A conformance test in the shell locks the three values and forbids local re-definitions at the producer sites. Also folded into the shell: the fourth GUI attach point now goes through the shared withGuiAttach helper (returns a new object instead of in-place mutation, byte-equivalent payloads), and the in-flight reporter creation plus setInFlightListener wiring moved from the factory root into setupWorkflowDomain (index.ts passes no wiring; behavior unchanged).

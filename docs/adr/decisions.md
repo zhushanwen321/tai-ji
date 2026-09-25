@@ -70,6 +70,14 @@ engine-protocol v1 的演进纪律从「头注承诺 + 人工记忆」落为成�
 
 **minor 协商触发条件（任一命中重开裁决；条件不到不加协商位）**：① 出现本仓之外发布的引擎适配层（第三方作者或独立 npm 分发/版本节奏）；② 单宿主需同时挂载跨协议代差引擎且无法同批升级；③ 出现「需宿主确认才可启用」的运行时可变能力（能力位从静态 manifest 变动态协商的真实需求）。
 
+判据 1-5 是宿主→引擎字段归属判据，不适用于引擎→宿主上报（引擎→宿主新增帧/事件按上述演进政策与反向通道关联键总纲裁决）。权威源 [subagent-engine-protocolization.md](../architecture/subagent-engine-protocolization.md) §3.3「协议演进宪法」。
+
+### ADR-0074 workflow run 显式状态机：转移表裁决 + 事件流权威投影（2026-09-21）
+workflow run 生命周期治理（`packages/subagent-core/src/orchestration/run-events.ts`）四件套：① `RunLifecycle` 6 态显式状态机（`created/dispatched/running/settling/terminal/interrupted`），`transition` 纯函数 + `RUN_TRANSITIONS` 转移表是唯一裁决面——表外转移 fail-fast（`IllegalTransitionError` 让位 + debug 留痕），禁止直写状态字段；约束由 API 形态结构性承载（对外只暴露 query + transition 唯一入口），非 grep 守卫型、不设独立约束登记。② 事件流 journal（`RunEventJournal`，`<agentDir>/workflow-state/<runId>.events.jsonl`）是 run 态权威投影源——注册表投影 = journal fold 四相（missing/active/terminal/interrupted），文件 mtime 推导退役；abandon 是终局化动作（中断的 run 留痕后归入 terminal 相），非静默丢失。③ 终局诊断引用（stderrTeePath）随 ask-settled 落账事件流、终局投影从事件流读回——不引入第二写点、不扩 run-settled 载荷。④ run 级恢复场景的杀伤半径收窄（D9-2）：watchdog no-progress 与 cancel 收敛兜底两类调用面从全量组杀 `killAll` 收窄为 `killRunTopology` 定点收割（只杀该 run 锚定的引擎孙进程，引擎宿主与同引擎并发 run 存活；零拓扑引擎降级为 stall 出声不杀——ADR-0047 静默 ≠ 卡死）；dispose（停机全灭）/ stdout-wedge（引擎级腿楔死）/ failEngine（引擎级故障，反向通道楔死）三调用面豁免保留组杀——故障定位在引擎级而非 run 级，本无 run 级目标。排障姿势见 [TROUBLESHOOTING.md](../TROUBLESHOOTING.md) §21。
+
+### ADR-0075 workflow 域四支柱平移与 schema 通道终态（2026-09-21）
+workflow/subagent 域对 pi 边界四支柱（ADR-0064）的同构落地与 schema 传输终态：① **确认式送达平移**——注册操作的终局通知必达，workflow run 成功/失败/取消一律出终局通知（持久账本 + 幂等键，C-ext-19 在 workflow 域的细化）；② **生效回执平移**——schema 强制武装回执：`armed` 事件是引擎自查断言之外的独立信号源（监控信号不与施控同源），宿主等待窗内未收到即 fail-fast；仅 native 引擎、仅 schema 任务上报，emulated 引擎恒不上报（契约义务权威源 [engine-development-guide](../extensions/subagents/engine-development-guide.md) §6 `armed` 行）；③ **契约显式化**——schema 跨进程只经 wire `task.schema` 单字段传输（env 预编码形态 `schemaEnv` 已退役，env 由引擎宿主从 task.schema 派生，resolver 产出侧负断言锁防回流）；扩展加载显式化（`ctx.extensionPaths` 白名单收窄落壳侧 pi-host，argv 镜像机制退役）。**schema 通道终态**：native schema 链保留直传（宿主对 parsedOutput 不做二次校验）、emulated 仿真为退出通道，由 `schemaEnforcement` 能力位声明分流。登记 C-ext-24 / C-ext-25 / C-ext-26。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）
@@ -148,6 +156,9 @@ config 层 skill/agent 加载 = 强制目录（桥接层硬编码注入，不可
 ### ADR-0051 项目 skill 目录 .agents/skills
 skill 路径按 cwd 解析（getSkillPaths(cwd)），项目自用 skill 归 `.agents/skills/`，跨项目通用归 `~/.agents/`。
 
+### ADR-0076 集成线传播纪律与守卫：fix 优先回流 main（2026-09-24）
+多条 dev-x.x.x 集成线数周并行下，修复跨线传播不再靠人记，两条纪律：① **fix 优先回流 main**——修复当日 cherry-pick / merge 回 main，不滞留开发线过夜是默认；滞留须自知守卫不保证兜底（见下残余类）。② **打包 / 集成合并前跑传播守卫**（`scripts/check-line-propagation.mjs`）——硬检查红灯必须消除（merge main）或显式 `--allow-diverged` 一次性越过，红灯静默放行即违纪律。守卫两级语义：硬检查 = 目标线 ⊇ main（`git merge-base --is-ancestor main <target>`，挂接常态 = 目标线 worktree 内 `--target HEAD`——目标 worktree 不存在的挂接分支可在源 worktree 内以分支名变量跑，见 dev-merge skill 1.8 步；禁 'main' 等恒绿字面量）；软提示 = 兄弟 dev-* 线触及目标线共享文件的未传播 commit 清单（总量 + 最老停留天数头条 + 明细，无状态恒常呈报、无本地基线文件），裁决粒度 = 线粒度（吸收 / 暂缓），挂接 skill 的执行 agent 须将头条摘要呈报用户后才继续。**残余类诚实声明**：「修复滞留兄弟线、main 与目标线均无」在 git 形态上与正常 WIP 无差别，守卫只软提示不保证拦截——该类主防线 = 纪律①。**P6 裁决（2026-09-25 用户确认）**：硬检查维持 block（红灯 exit 1 + 一次性 `--allow-diverged` 越过，越过决定呈报用户）——正常运转下红灯是罕见态（纪律①保证打包线通常 ⊇ main），罕见态多一步显式动作的成本可控，warn 形态会把守卫的机器保证退化为提示。登记 C-proc-30。
+
 ## 前端交互结构
 
 ### ADR-0056 / ADR-0057 Composer Staging 双层
@@ -161,6 +172,8 @@ key = UI 档位（含 max），value = 发 pi 的实际 level（max → xhigh）
 
 ### ADR-0050 slash/skill 候选源按 variant 分支（skill 段与 slash 段 skill 项均 = taiji registry）
 skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location 取 `SkillInfo.sourcePath`），新鲜度由 `config.skillCacheInvalidated` 广播链即时驱动，不依赖 pi reload 往返；panel 态 project skill 的 cwd = sessionStore 投影的 session cwd（landing 维持 `flow.currentCwd`）。slash 段仍走 registry 声明 ∪ pi 真源合并（panel 另注入 compact），panel 态 slash 段的 skill 项**换源保留**（0.10.1 首版「过滤 skill 项、panel 的 skill 段是唯一 skill 入口」的双入口消除二次修订推翻）：pi 真源 skill 命令（reload 才刷新的滞后快照）仍剔除，registry 源 skill 项以 `/skill:<name>` 形态补入（与 landing 单列形态同构、同一追加函数）。行首 `/` 与行中 `/` skill 段双入口共存——跨入口防双插由 selectedSkillNames 已选标记（S-2）承担，不依赖入口裁剪。用户可感知后果两条：①panel `/` 浮层 slash 段列 registry 源 skill 项（首版不列致行首 `/` 肌肉记忆下 session 发起后 skill 不可见，属回归）；②taiji 独有目录（taiji 扫描集含、pi 扫描集不含，如 `~/.taiji/skills`）的 skill 进面板候选与注入，但 pi `/skill:` 命令注册表与 system prompt skills 段不含——模型不可自主调用 taiji 独有 skill（pi 只认自己扫的目录）。扫描集语义差：pi 扫 `cwd/.pi/skills`（taiji project 扫描集已补齐对齐）；taiji 独有目录不反向追齐，属既定语义差。
+[2026-09-25 退役延伸] W5 skill 变更→pi reload 编排整体退役：两态 skill 候选与 composer 注入既已全部以 taiji SkillRegistry 为权威源（即时生效），pi 全量 reload（invalidate 扩展 ctx + clearExtensionCache 重建全部扩展，曾致后台任务完成通知在旧模块世界投递失败）在 skill 场景无净收益，触发链删除（reload-orchestrator / promptReload / `/__taiji_reload__`）。pi 侧 `/skill:` 注册表与 system prompt skills 段冻结在 pi spawn 时点（spawn 传 skillPaths 基线不变），新 skill 需新开 session 生效——本 ADR「模型不可自主调用 taiji 独有 skill」的降级扩展为「pi 侧 skill 视图统一滞后到 spawn 时点」。
+[2026-09-25 补投机制落点] W5 退役的配套收口：后台 bash 任务完成通知原为「单次尽力投递」（投递失败永久丢失，曾致 AI 空等已完成的任务）。补投 = 双触发面（pi 进程构造的 session_start 链 + runtime 激活链 getCommands 发 `/__taiji_bg_reconcile__` 维护命令，per-session 60s 节流）跑同一扫描：registry 严格终态（isTerminalState ∧ exited 时 reason≠killed）∧ 会话无送达痕迹（background-bash 消息）∧ 无补投标记（`background-bash:reconciled` plain entry，appendEntry 同步入账）→ 合并单条 steer 消息 + 同步写标记。幂等三配套（await 兼容规格 / in-flight 单飞守卫 / 同步标记）源于两个已核实事实：桌面激活对账 handler 多次派发（startup+resume 双派发）、pi 桥接层丢弃 sendMessage promise。V2-R/V3a/V3b 真机全链 PASS。实现 extensions/universal/base-tool-enhance/src/background/（judgement/pending-reconcile/notify）。
 
 ### ADR-0028 / ADR-0029 / ADR-0030（digest）搜索域内聚（0028/0029 部分有效）
 多源聚合（命令/文件/会话/recents）收敛于 `core/src/domain/new-task-search/`（search.ts 编排 + match-engine + file-match 单一管线复用于 composer # 与 SearchModal）；mock 反向依赖生产类型，生产类型归 domain types.ts。登记 C-state-07。

@@ -49,7 +49,9 @@ import { toErrorMessage } from "../../core/error-message.ts";
 import { getLogger } from "../../core/logger.ts";
 
 import { bestEffort } from "../assembly/best-effort.ts";
-import { tryTransition } from "../persistence/execution-record.ts";
+// [P1b-1] settle 链收口单点（finalizeFailed/finalizeAborted workflow origin 分支的
+// 终态收口迁入；execution/service → orchestration import 为既有先例方向）。
+import { settleWorkflowRecord } from "../../orchestration/worker-message-pump.ts";
 import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
 // [u7a 生产补挂] 批量 dispose 收敛点推最新在途计数（D5 出口——engine 域叶子模块，
 // 本模块不得被 inflight-snapshot 反向依赖，import 方向单向安全）。
@@ -219,7 +221,7 @@ export class RecordLifecycle {
     }
     // [u7a 生产补挂] 批量 dispose 收敛点推一次终态快照（绝对计数语义下循环内逐条推
     // 与收敛后单推等价，单推省 N-1 次同步派发）。此刻镜像已由上方 kill/disarm 全量
-    // 清零（壳 dispose 链的 killAllSpawnedChildren 更先行——两清零路径正交幂等）。
+    // 清零（壳 dispose 链的 markAllSpawnedChildrenDead 更先行——两清零路径正交幂等）。
     notifyInFlightChanged();
     return count;
   }
@@ -549,10 +551,14 @@ export class RecordLifecycle {
     // [D7 例外族] workflow origin 失败 = 立即终态化（维持现状——workflow agent 结果
     // 由脚本返回值承载，留内存 idle 会绑架 hasRunning / 恒挂 idle-gc / 被误升级 /
     // goal defer 恒挂，设计 D7 四面连带；§1.4 out-of-scope）。
+    // [P1b-1] 直写通道删除：closed/gc 终态判定收口至 worker-message-pump 的
+    // settleWorkflowRecord 单点（与 settleOneShotOutcome 同款；ask-settled/run-settled
+    // 事件面由 pump 状态机接线段承载——静默吞失败路径（workflow-dispatch catch 等
+    // 多调用方）经本方法自动接入同一收口）。
     if (record.origin === "workflow") {
-      if (tryTransition(record, "closed", "gc")) {
-        await this.finalizeRecord(record, failedResult, "closed", "gc");
-      }
+      await settleWorkflowRecord(record, failedResult, "gc", {
+        finalizeRecord: (r, closedReason) => this.finalizeRecord(record, r, "closed", closedReason),
+      });
       return failedResult;
     }
     // CAS 前置：cancel/dispose 抢先 settle（status 已离 running）则跳过簿记。
@@ -569,10 +575,13 @@ export class RecordLifecycle {
    */
   async finalizeAborted(record: ExecutionRecord): Promise<AgentResult> {
     const cancelledResult: AgentResult = { text: "", turns: record.turnCount, durationMs: Date.now() - record.startedAt, success: false, error: "cancelled by user", sessionId: record.id, toolCalls: [] };
+    // [P1b-1] 直写通道删除：workflow origin 的 cancelled 终态化收口至
+    // settleWorkflowRecord 单点（run 域 cancel 语义的 journal 落账 =
+    // cancel-requested → 合成 run-settled(cancelled)，由 finalizeRun 单写点承载）。
     if (record.origin === "workflow") {
-      if (tryTransition(record, "closed", "cancelled")) {
-        await this.finalizeRecord(record, cancelledResult, "closed", "cancelled");
-      }
+      await settleWorkflowRecord(record, cancelledResult, "cancelled", {
+        finalizeRecord: (r, closedReason) => this.finalizeRecord(record, r, "closed", closedReason),
+      });
       return cancelledResult;
     }
     this.cancelBackground(record);
