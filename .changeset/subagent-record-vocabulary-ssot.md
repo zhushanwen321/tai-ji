@@ -1,3 +1,4 @@
+---
 '@zhushanwen/subagent-core': minor
 ---
 
