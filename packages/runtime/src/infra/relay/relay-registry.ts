@@ -53,11 +53,17 @@ export const RELAY_KILL_GRACE_MS = 3_000
  * 不得判死），延迟有硬上限防无限活。量级为任务级（分钟），与控制面秒级 grace 不可
  * 互相挪用（超时默认按对象粒度校准）。
  */
-const ORPHAN_IDLE_REAP_MS = 5 * 60_000
+/** 量级换算基准：1 秒 / 1 分钟的毫秒数（孤儿处置族的阈值定义与日志换算共用）。 */
+const SECOND_MS = 1_000
+const MINUTE_MS = 60_000
+/** 孤儿静默判定阈值（分钟）：tee 镜像最近写入超过该时长视为纯资源占用，立即收割。 */
+const ORPHAN_IDLE_REAP_MINUTES = 5
+const ORPHAN_IDLE_REAP_MS = ORPHAN_IDLE_REAP_MINUTES * MINUTE_MS
 /** pending 孤儿复查间隔。 */
 const ORPHAN_PENDING_RECHECK_MS = 60_000
-/** pending 硬上限：活跃孤儿最多延迟这么多再收割（防 tee 持续产出但恢复链已死透）。 */
-const ORPHAN_PENDING_MAX_MS = 30 * 60_000
+/** pending 硬上限（分钟）：活跃孤儿最多延迟这么多再收割（防 tee 持续产出但恢复链已死透）。 */
+const ORPHAN_PENDING_MAX_MINUTES = 30
+const ORPHAN_PENDING_MAX_MS = ORPHAN_PENDING_MAX_MINUTES * MINUTE_MS
 /** 握手超时：连接建立后等第一帧的上限（防半开连接占资源）。 */
 const HANDSHAKE_TIMEOUT_MS = 10_000
 /** spawn 失败时代理看到的退出码（127 = command not found 惯例，走子进程非零退出语义）。 */
@@ -66,6 +72,8 @@ const SPAWN_FAILURE_EXIT_CODE = 127
 const PID_REUSE_TOLERANCE_MS = 2_000
 /** 畸形帧日志预览的头部截取长度（足以辨识帧形态，不整行落日志防垃圾刷屏）。 */
 const MALFORMED_FRAME_HEAD_PREVIEW_CHARS = 120
+/** record id 清洗后参与 tee 文件名匹配的长度上限（防异常长 id 撑爆文件名比对）。 */
+const RECORD_ID_MAX_CHARS = 64
 
 // ── 协议帧（runtime 侧视角；握手/数据帧 schema 见设计 §3.1）─────────────
 
@@ -704,7 +712,7 @@ export class RelayRegistry {
       if (pendingSince === undefined) {
         this.markOrphanPending(pidFile, recordId, pid, idleMs)
       } else if (Date.now() - pendingSince > ORPHAN_PENDING_MAX_MS) {
-        this.reapOrphanPid(pidFile, recordId, pid, `pending max age exceeded (${Math.round(ORPHAN_PENDING_MAX_MS / 60_000)}min hard cap)`)
+        this.reapOrphanPid(pidFile, recordId, pid, `pending max age exceeded (${Math.round(ORPHAN_PENDING_MAX_MS / MINUTE_MS)}min hard cap)`)
       }
       // 仍在产出且未到硬上限：留待下次复查（timer 驱动或下次 runtime 重启的 sweep）
     }
@@ -718,7 +726,7 @@ export class RelayRegistry {
    * 维持原 sweep 的立即收割语义——孤儿无产出证据时留着只是资源占用。
    */
   private latestRelayTeeMtimeMs(recordId: number | string): number | null {
-    const safeRecordId = String(recordId).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)
+    const safeRecordId = String(recordId).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, RECORD_ID_MAX_CHARS)
     if (safeRecordId.length === 0) return null
     let best: number | null = null
     try {
@@ -765,15 +773,20 @@ export class RelayRegistry {
       setTimeout(() => {
         try {
           if (isPidAlive(oldPid)) process.kill(oldPid, 'SIGKILL')
-        } catch {
-          // ESRCH = 已死（目标状态）；其他 errno 交 orphan sweep 兜底
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException)?.code !== 'ESRCH') {
+            // 非 ESRCH（EPERM 等）：没杀掉也不阻塞新注册，残留交 orphan sweep 兜底
+            console.warn(`[relay] superseded pid SIGKILL failed, deferring to orphan sweep pid=${String(oldPid)}:`, toErrorMessage(e))
+          }
+          // ESRCH = 已死（探活到 SIGKILL 之间退出，正是收割目标状态），静默
         }
       }, RELAY_KILL_GRACE_MS).unref()
     })
   }
 
   /** 活跃孤儿登记 pending（pid 文件写回 pendingSince + 响亮日志；幂等重写无 pending 语义不变）。 */
-  private markOrphanPending(pidFile: string, recordId: string, pid: number, idleMs: number): void {    try {
+  private markOrphanPending(pidFile: string, recordId: string, pid: number, idleMs: number): void {
+    try {
       const parsed = JSON.parse(readFileSync(pidFile, 'utf-8')) as { pid?: unknown; spawnedAt?: unknown }
       if (typeof parsed.pid !== 'number' || typeof parsed.spawnedAt !== 'number') return
       writeFileSync(pidFile, JSON.stringify({ pid: parsed.pid, spawnedAt: parsed.spawnedAt, pendingSince: Date.now() }))
@@ -782,8 +795,8 @@ export class RelayRegistry {
       return
     }
     console.warn(
-      `[relay] orphan still active (tee wrote ${Math.round(idleMs / 1000)}s ago), deferred reap — waiting for recovery chain or idleness recordId=${recordId} pid=${String(pid)} ` +
-      `(idle threshold ${Math.round(ORPHAN_IDLE_REAP_MS / 60_000)}min, recheck every ${Math.round(ORPHAN_PENDING_RECHECK_MS / 1000)}s, hard cap ${Math.round(ORPHAN_PENDING_MAX_MS / 60_000)}min)`,
+      `[relay] orphan still active (tee wrote ${Math.round(idleMs / SECOND_MS)}s ago), deferred reap — waiting for recovery chain or idleness recordId=${recordId} pid=${String(pid)} ` +
+      `(idle threshold ${Math.round(ORPHAN_IDLE_REAP_MS / MINUTE_MS)}min, recheck every ${Math.round(ORPHAN_PENDING_RECHECK_MS / SECOND_MS)}s, hard cap ${Math.round(ORPHAN_PENDING_MAX_MS / MINUTE_MS)}min)`,
     )
   }
 
