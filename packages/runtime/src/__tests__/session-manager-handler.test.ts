@@ -1150,4 +1150,28 @@ describe('SessionManagerHandler', () => {
     })
   })
 
+  // ─── notify-once once 日志（D6 兼容矩阵象限2 观测信号：无 notifyId 不 arm →
+  //     每进程只记一条降级陈述，混装象限的观测入口）──────────────────────────────
+  describe('notify-once once 日志：无 notifyId 降级陈述每进程只记一条', () => {
+    it('两次无 notifyId 的 send → console.info 恰 1 次', async () => {
+      // once 额度是 handler 模块级布尔（组合根单例），既有用例已命中消费；
+      // vi.resetModules + 动态重导入取得全新模块实例，断言不依赖用例执行顺序。
+      vi.resetModules()
+      const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+      try {
+        const { SessionManagerHandler: FreshHandler } = await import('../transport/session-manager-handler.js')
+        const handler = new FreshHandler(makeMockOptions())
+
+        await handler.handle('req-log-1', 'sid-parent', 'send', { sessionId: 's1', prompt: 'a' })
+        await handler.handle('req-log-2', 'sid-parent', 'send', { sessionId: 's1', prompt: 'b' })
+
+        expect(info).toHaveBeenCalledTimes(1)
+        expect(info).toHaveBeenCalledWith(expect.stringContaining('send arrived without a valid notifyId'))
+        expect(info).toHaveBeenCalledWith(expect.stringContaining('log once'))
+      } finally {
+        info.mockRestore()
+      }
+    })
+  })
+
 })

@@ -61,7 +61,7 @@ function bashMsg(id: string, over: Partial<Message> = {}): Message {
   })
 }
 
-/** 隐藏完成通知（subagent-bg-notify / workflow-result，display:false——生产端覆写形态） */
+/** 隐藏完成通知（subagent-bg-notify / workflow-result / managed-session-notify，display:false——生产端覆写形态） */
 function notifyMsg(id: string, customType = 'subagent-bg-notify'): Message {
   return makeMsg({ id, role: 'system', customType, display: false, content: '' })
 }
@@ -474,11 +474,12 @@ describe('groupRenderInput 分组规则 v2 —— R2 隐藏完成通知 = turn �
     expect(t2.assistants.map((m) => m.id)).toEqual(['a2'])
   })
 
-  it('R2 常量源：workflow-result 同属 COMPLETE_NOTIFY_CUSTOM_TYPES（shared SSOT，无第二份判定）', () => {
+  it('R2 常量源：workflow-result / managed-session-notify 同属 COMPLETE_NOTIFY_CUSTOM_TYPES（shared SSOT，无第二份判定）', () => {
     const items = toRenderItems([
       makeMsg({ id: 'u1', role: 'user', content: 'q' }),
       makeMsg({ id: 'a1', role: 'assistant', content: 'r' }),
       notifyMsg('n1', 'workflow-result'),
+      notifyMsg('n2', 'managed-session-notify'),
       makeMsg({ id: 'a2', role: 'assistant', content: '续跑' }),
     ])
     expect(turnOf(items[1]).trigger).toBe('bg-notify')

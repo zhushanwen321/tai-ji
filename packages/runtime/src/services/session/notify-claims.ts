@@ -511,15 +511,15 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
       if (r.state === 'armed' || r.state === 'injected') {
         // 类①：claim 悬挂（respawn 窗 / 受理回执丢失）→ 转 orphaned 保提示
         if (age >= ttlMs) {
-          const hadWatch = r.watchId !== undefined
+          const watchId = r.watchId
           const snapshot = view(r)
           orphan(r)
           orphaned.push(snapshot)
-          if (hadWatch) {
+          if (watchId !== undefined) {
             respondOrphaned.push({
               parentSid: r.parentSid,
               notifyId: r.notifyId,
-              watchId: r.watchId!,
+              watchId,
               sessionId: r.sessionId,
               kind: r.kind,
               payload: { type: 'orphaned' },

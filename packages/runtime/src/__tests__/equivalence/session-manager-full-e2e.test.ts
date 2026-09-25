@@ -17,6 +17,10 @@
  *  （零 respond）→ settle 兑现腿经同一写回通道 respond（设计 §4-9；faux 轨零 token）
  * - U9-S4 晚 respond catch-up：watch 到达时 claim 已 fulfilled → 立即快照 respond（D4）
  * - U9-S5 fail-closed 静默：watch 查无 claim → 立即 respond 'cancelled'（不携 sessionId，D-4）
+ * - U9-D1 死亡收口：子会话意外退出 → watch 挂等 claim 恰收一条 reason:'exited'
+ *  （携 exitCode/stderrTail + deathSeq/fulfillsN），destroy 迟到二次发声幂等（notify-once
+ *  D5「死亡也通知恰一次」第一承诺的执行面）
+ * - U9-D2 死亡词形分派：cause=delete → reason:'deleted'（不携退出现场字段）
  *
  * 环境约定照抄 equivalence 族（pi-fixture.ts）：真实 spawn（禁 mock 子进程）。faux LLM 轨
  * （L2.5 翻轨）：跨进程通道闭环（extension 工具 → ui_request → runtime 翻译/路由/处理 →
@@ -37,7 +41,7 @@ import { translate } from '../../infra/pi/event-adapter.js'
 import { EventInterpreter } from '../../services/session/event-interpreter.js'
 import { createClaimLedger } from '../../services/session/notify-claims.js'
 import type { ClaimLedger } from '../../services/session/notify-claims.js'
-import { SessionManagerHandler, deliverRespondTargets } from '../../transport/session-manager-handler.js'
+import { SessionManagerHandler, deliverRespondTargets, collectStderrTail } from '../../transport/session-manager-handler.js'
 import type { SessionManagerHandlerOptions } from '../../transport/session-manager-handler.js'
 import {
   agentSidecarPath,
@@ -448,6 +452,12 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
   //   ② U9-S5 的「查无 claim」以 claims.clearSession 构造（等价 D8-v1 runtime 重启内存
   //     账本全失形态），非真实 runtime 重启；
   //   ③ lifetime watch 开表后刻意不喂（fire-and-forget 悬 promise = P1 已知无害）。
+  //   ④ U9-D1/D2 的死亡收口腿由测试直调 claims.onSessionDeath + deliverRespondTargets +
+  //     clearSession（组合根 index.ts speakSessionDeath 同函数同序三步）——faux 轨无真实
+  //     子 pi 进程可 kill（同①困境：进程死亡事件边界在组合根 pm.onSessionExit，不在本
+  //     文件可触碰面），exit 现场以 pm 上报形态注入 extra（stderrTail 经真实 collectStderrTail）；
+  //     被测面 = 死亡批分流 → 词形映射（toWatchRespondPayload cause 分派 exited/deleted +
+  //     退出现场附加）→ watch 写回通道闭环 + 发声幂等。
   it('U9-S3 watch 开表挂等：marker 通道 watch → handler deferred → settle 兑现 respond', { timeout: 80_000 }, async () => {
     const w = await openClaimWatchChain()
     try {
@@ -517,6 +527,83 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
       expect(watchResponds, 'fail-closed 应立即回写').toHaveLength(1)
       // 无 claim 可回带 → 不携 sessionId（D-4）；extension 侧折叠静默 unregister 收口
       expect(JSON.parse(watchResponds[0]?.value ?? 'null')).toEqual({ reason: 'cancelled' })
+    } finally {
+      await w.fx.dispose().catch(() => {})
+      w.cleanup()
+    }
+  })
+
+  // ── 死亡收口（notify-once D5「死亡也通知恰一次」执行面；装配偏离见上方偏离登记④）────
+  // 两用例共用前置 = openClaimWatchChain + 开表挂等（claim 经真实 handler wait 路由登记
+  // watch 槽），死亡腿按组合根 speakSessionDeath 同函数同序三步直调（onSessionDeath →
+  // deliverRespondTargets → clearSession），被测对象是死亡批 → 词形映射 → watch 写回通道
+  // 的端到端闭环（账本内环语义由 notify-claims.test.ts / notify-claims-state.test.ts 覆盖）。
+  it('U9-D1 死亡收口：子会话意外退出 → watch 挂等 claim 恰收一条 reason:exited（携 exitCode/stderrTail），destroy 迟到二次发声幂等', { timeout: 80_000 }, async () => {
+    const w = await openClaimWatchChain()
+    try {
+      // 1. 开表挂等：真实通道入站 → handler wait 路由登记 watch 槽（U9-S3 同款，零 respond）
+      await w.feedUiRequest(w.watchEvent)
+      expect(w.responds.filter((r) => r.requestId === w.watchRequestId), 'deferred 阶段不应有 respond').toHaveLength(0)
+
+      // 2. 子会话进程意外退出 → 死亡收口三步（偏离登记④）：「session 不在内存」腿 =
+      //    fake SessionService.getSession 恒 undefined 的生产同判形态；退出现场 exitCode/
+      //    stderrTail 以 pm.onSessionExit 上报形态注入，stderrTail 经真实 collectStderrTail
+      const stderr = 'pi exited: Fatal error in extension handler\n  at onExit (...)\n'
+      const batch = w.claims.onSessionDeath(w.result.childId, 'exit')
+      expect(batch.targets, 'watch 挂等的 claim 应进死亡 respond 批').toHaveLength(1)
+      deliverRespondTargets(w.claims, batch.targets, w.handler.watchRespond, {
+        sessionFilePath: w.result.childJsonl,
+        exitCode: 1,
+        stderrTail: collectStderrTail(stderr),
+      })
+      w.claims.clearSession(w.result.childId)
+
+      // 3. 恰一条经真实通道回写的 death respond：词形 exited + deathSeq/fulfillsN + 退出现场三件
+      const watchResponds = w.responds.filter((r) => r.requestId === w.watchRequestId)
+      expect(watchResponds, '死亡收口应恰有一条 respond').toHaveLength(1)
+      expect(JSON.parse(watchResponds[0]?.value ?? 'null')).toMatchObject({
+        reason: 'exited',
+        sessionId: w.result.childId,
+        deathSeq: 1,
+        fulfillsN: 1,
+        exitCode: 1,
+        stderrTail: collectStderrTail(stderr),
+      })
+
+      // 4. destroy 迟到二次发声：死亡腿重放对已销账账本空批空转（组合根 speakSessionDeath
+      //    幂等——「重复调用空批空转」），watch 通道不再收第二条
+      const replay = w.claims.onSessionDeath(w.result.childId, 'exit')
+      expect(replay.terminated, '重放应空批（死亡已销账）').toHaveLength(0)
+      deliverRespondTargets(w.claims, replay.targets, w.handler.watchRespond)
+      w.claims.clearSession(w.result.childId)
+      expect(w.responds.filter((r) => r.requestId === w.watchRequestId), 'destroy 迟到不得二次发声').toHaveLength(1)
+      expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)).toBeUndefined()
+    } finally {
+      await w.fx.dispose().catch(() => {})
+      w.cleanup()
+    }
+  })
+
+  it('U9-D2 死亡词形分派：managed 删除（cause=delete）→ watch 恰收 reason:deleted（不携退出现场）', { timeout: 80_000 }, async () => {
+    const w = await openClaimWatchChain()
+    try {
+      // 1. 开表挂等（同 U9-D1）
+      await w.feedUiRequest(w.watchEvent)
+
+      // 2. 组合根 delete 汇聚点（subscribeSessionDeathDisposition 'delete' → speakSessionDeath
+      //    同函数同序，偏离登记④）：无退出现场 extra——delete 腿不携 exitCode/stderrTail
+      const batch = w.claims.onSessionDeath(w.result.childId, 'delete')
+      expect(batch.targets, 'watch 挂等的 claim 应进死亡 respond 批').toHaveLength(1)
+      deliverRespondTargets(w.claims, batch.targets, w.handler.watchRespond)
+      w.claims.clearSession(w.result.childId)
+
+      // 3. 词形分派：cause=delete → reason:'deleted'（toWatchRespondPayload cause 分派单点）
+      const watchResponds = w.responds.filter((r) => r.requestId === w.watchRequestId)
+      expect(watchResponds, 'delete 死亡应恰有一条 respond').toHaveLength(1)
+      const payload = JSON.parse(watchResponds[0]?.value ?? 'null')
+      expect(payload).toMatchObject({ reason: 'deleted', sessionId: w.result.childId, deathSeq: 1, fulfillsN: 1 })
+      expect(payload.exitCode, 'delete 词形不携退出现场').toBeUndefined()
+      expect(payload.stderrTail, 'delete 词形不携退出现场').toBeUndefined()
     } finally {
       await w.fx.dispose().catch(() => {})
       w.cleanup()

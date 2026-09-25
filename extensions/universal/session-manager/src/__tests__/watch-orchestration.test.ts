@@ -199,8 +199,8 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		const result = (await runTool(h, "send_to_session", {
 			sessionId: "child-1",
 			prompt: "go",
-		})) as { isError?: boolean; content: Array<{ text: string }> };
-		expect(result.isError).toBeUndefined();
+		})) as { content: Array<{ text: string }> };
+		expect(Object.hasOwn(result, "isError")).toBe(false);
 		expect(JSON.parse(result.content[0].text)).toEqual({ queued: true, willNotify: true });
 	});
 

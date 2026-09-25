@@ -675,15 +675,21 @@ async function main(): Promise<void> {
   const resolveSessionFile = (sid: string): string | undefined =>
     sessionService.getSummary(sid)?.sessionFile ?? sessionService.getSession(sid)?.sessionFilePath ?? undefined
 
-  /** crash exit → respawn 终态期间的退出现场 stash（熔断发声时携回 exitCode/stderrTail/transcript） */
+  /** crash exit → respawn 终态期间的退出现场 stash（熔断发声时携回 exitCode/stderrTail/transcript）。
+   *  技术簿记 W24-EX-C（data-source-registry.md §4⑧），非 GUI 数据；消费点清理路径 =
+   *  speakSessionDeath 死亡发声消费 delete + onRespawnFate 'recovered' 复活分支丢弃 delete。 */
   const pendingExitDeaths = new Map<string, { exitCode: number | null; stderrTail?: string; sessionFilePath?: string }>()
   /** 同步 exit 链的销毁腿标记（本回调与 removeSessionEntry 同 tick；forceQuit 等异步到达的销毁不带标 → 发声）。
    *  消费点核销（审查 unreasonable#3 同步核）：pm.onSessionExit 仅组合根本腿 + SessionService
    *  清理腿两个订阅者（RT-4#1 逐回调隔离必达）、两侧同图同判（getSession ≡ lifecycle.get）——
    *  view 在册 ⇒ 同 tick 的 removeSessionEntry 销毁回调必经销毁扇出消费，无 suppressedDeaths
-   *  同型滞留面；forceQuit/delete 等不经 exit 链的销毁本就不带标。 */
+   *  同型滞留面；forceQuit/delete 等不经 exit 链的销毁本就不带标。
+   *  技术簿记 W24-EX-C（data-source-registry.md §4⑧），非 GUI 数据；消费点清理路径 =
+   *  setOnSessionDestroyed 销毁回调 exitChainLegs.delete 查过即消。 */
   const exitChainLegs = new Set<string>()
-  /** 非终局杀静默标记（session-lifecycle 'delete'/'suppress' 处置 → 销毁回调查过即消） */
+  /** 非终局杀静默标记（session-lifecycle 'delete'/'suppress' 处置 → 销毁回调查过即消）。
+   *  技术簿记 W24-EX-C（data-source-registry.md §4⑧），非 GUI 数据；消费点清理路径 =
+   *  setOnSessionDestroyed 销毁回调查过即消（suppressedDeaths.delete）。 */
   const suppressedDeaths = new Set<string>()
 
   // TTL 清扫消费环（D7：respondOrphaned 同步应答防孤儿 promise）。**注册先于 ClaimLedger
@@ -696,6 +702,9 @@ async function main(): Promise<void> {
     runClaimSweep(claimLedger, respondWatch)
   }, CLAIM_SWEEP_INTERVAL_MS)
   claimSweepTimer.unref?.()
+  // @data-owner #45（data-source-registry.md）：session-manager 通知债权账本（notify-once
+  // U2）——内部 Map 族（records 主账 + bySession/byParent 索引 + settle/death/undelivered
+  // 计数器）为 runtime 内存态，唯一写入口 = ClaimLedger 方法族，空值语义与已知代价见主表 #45。
   const claimLedger = createClaimLedger({ sweepIntervalMs: CLAIM_SWEEP_INTERVAL_MS })
 
   /**
@@ -725,18 +734,19 @@ async function main(): Promise<void> {
   // 非 agent-managed session 无债权记录，短路文件 I/O；outcome = session_end 终态
   //（无 entry/null → completed，与原回流口径一致）。
   subscribeAgentSettledIn(agentSettledListeners)((sid) => {
-    const view = sessionService.getSession(sid)
-    // 打标字段不在 IManagedSessionView 公开面（session-lifecycle 写入）——原回流 readMarker 同款收窄读法
-    const marker = view as { spawnSource?: 'user' | 'agent'; parentAgentSessionId?: string } | undefined
-    const managed = marker !== undefined && marker.spawnSource === 'agent' && marker.parentAgentSessionId !== undefined
-    const outcomePath = managed ? view?.sessionFilePath : undefined
+    const summary = sessionService.getSummary(sid)
+    // managed 判定与 handler isOwnedBy 同源同判（SessionSummary 已投影 spawnSource/
+    // parentAgentSessionId）——session-internal 打标字段改名时此处随类型报错；原
+    // `view as {...}` 收窄读法在字段改名时静默全灭，已删。
+    const managed = summary?.spawnSource === 'agent' && summary?.parentAgentSessionId !== undefined
+    const outcomePath = managed ? summary?.sessionFile : undefined
     const outcome = outcomePath
       ? sessionStore.extractSessionOutcome(outcomePath)
       : null
     const batch = claimLedger.settle(sid, outcome)
     if (batch.targets.length > 0) {
       deliverRespondTargets(claimLedger, batch.targets, respondWatch, {
-        sessionFilePath: view?.sessionFilePath ?? resolveSessionFile(sid),
+        sessionFilePath: summary?.sessionFile ?? resolveSessionFile(sid),
       })
     }
   })

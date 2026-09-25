@@ -14,8 +14,11 @@
  * 以导出函数形态供组合根 index.ts 共用（settle/death/TTL 清扫腿），保证映射单点。
  *
  * [架构备注，PR #189 review] 本 handler 承载业务编排（归属校验 / list 过滤 / history
- * tailTurns 截断），与 transport「纯路由」定义有偏差；迁移 services/session/（interface
- * 经 ports 暴露）是既定方向、待后续 wave。当前留在 transport 与 Quota/Preset handler
+ * tailTurns 截断；notify-once 导出助手 collectStderrTail / toWatchRespondPayload /
+ * deliverRespondTargets / runClaimSweep 供组合根 index.ts 反向 import 共用，及
+ * node:crypto randomUUID 的 lifetimeNotifyId 生成），与 transport「纯路由」定义有偏差；
+ * 迁移 services/session/（interface 经 ports 暴露）是既定方向、待后续 wave——助手与
+ * node:crypto 依赖随迁，组合根消费面同步消失。当前留在 transport 与 Quota/Preset handler
  * 先例一致。
  */
 import { randomUUID } from 'node:crypto'
@@ -533,7 +536,7 @@ export class SessionManagerHandler {
         .sendChecked({
           payload: { kind: 'text', content: prompt },
           // notifyId 穿 envelope additive meta（D2）：delivery 内核 onSettled delivered
-          // 回执读 meta 完成 armed→injected 受理锚定（P9 帧序保证先于 settled 帧）；
+          // 回执读 meta 完成 armed→injected 受理锚定（P9 帧序保证先于 settled 帧，PS-53）；
           // parentSid 同携（回执侧无须反查归属）。rejected 回执 → 投递失败腿 disarm。
           ...(armed ? { meta: { notifyId: armedNotifyId, parentSid: parentSessionId } } : {}),
         })

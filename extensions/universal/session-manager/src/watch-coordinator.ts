@@ -88,8 +88,15 @@ export interface WatchCoordinator {
 
 export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordinator {
 	const { pi } = deps;
-	/** label 缓存（sessionId → label）：正常路径文案 label 的数据源（D9 label 两路径之一） */
+	/** label 缓存（sessionId → label）：正常路径文案 label 的数据源（D9 label 两路径之一）。
+	 *  @data-owner #1（data-source-registry.md）：label 数据在扩展进程的只读消费副本，
+	 *  权威源仍是 pi sessionName（登记表主表 #1），本缓存无回写；写方 = noteLabel 单点
+	 *  回填（create 入参 / list 结果），生命周期随 coordinator 实例（pi 进程级）。 */
 	const labels = new Map<string, string>();
+	/** 死亡新闻槽 (sessionId, deathSeq) 去重集合（ADR-0074 关键被否④的槽键消解机制）：
+	 *  技术簿记 W24-EX-C（data-source-registry.md §4⑧），非 GUI 数据——键单调不重放、
+	 *  槽位消费一次即终局，无消费点清理（集合容量 = 进程生命周期内死亡事件数），生命周期
+	 *  随 coordinator 实例（pi 进程级）。 */
 	const deathSlots = new Set<string>();
 	let queue: QueuedRespond[] = [];
 	let flushTimer: ReturnType<typeof setTimeout> | undefined;
