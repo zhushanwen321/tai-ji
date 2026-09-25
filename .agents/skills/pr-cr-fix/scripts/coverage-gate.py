@@ -188,7 +188,7 @@ def run_coverage(pkg_dir: Path, flat_layout: bool = False) -> tuple[bool, str]:
 
     TAIJI_SKIP_REAL_PI=1 与 CI 同口径（TEST-STRATEGY §4 双轨设计）：真实 pi 子进程用例
     不在覆盖率测量目标内（慢且环境敏感，插桩开销下必超时），走 mock 双轨即可。
-    reportsDirectory 显式钉死：防包级 vitest.config 覆盖默认输出位置。
+    reportsDirectory 显式固定：防包级 vitest.config 覆盖默认输出位置。
     flat_layout（resources/plugins 插件包，包根平铺：index.ts 在包根、测试在
     __tests__/）：include= 整包 + exclude __tests__；workspace 包维持 src/ 档。
     """
