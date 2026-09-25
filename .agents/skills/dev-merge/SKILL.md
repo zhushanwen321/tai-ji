@@ -19,7 +19,7 @@ description: >-
 
 ## 流程
 
-**调用约束**：cwd 必须在待合并 feat worktree 根目录（脚本靠 `git rev-parse --show-toplevel` 定位源 worktree）。脚本路径用 `"$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh"` 动态拼**当前 worktree 内的副本**——禁止写死某个 worktree 目录的绝对路径（会随该 worktree cleanup 过期），也禁止 `.agents/skills/...` 相对路径写法（bash cwd 不跨调用持久）。当前分支不含本 skill 文件时（极旧 base），从任意含该文件的 worktree 复制脚本后调用。
+**调用约束**：cwd 必须在待合并 feat worktree 根目录（脚本靠 `git rev-parse --show-toplevel` 定位源 worktree）。脚本路径用 `"$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh"` 动态拼**当前 worktree 内的副本**——禁止写死某个 worktree 目录的绝对路径（会随该 worktree cleanup 过期），也禁止 `.agents/skills/...` 相对路径写法（bash cwd 不跨调用持久）。skill 实体在 workspace 根共享（ADR-0074），任意 worktree 经 symlink 同路径可达，不存在「分支不含 skill 文件」情形。
 
 ### 第 1 步：处理未提交改动（AI 决策，脚本不代劳）
 

@@ -18,8 +18,8 @@ description: >-
 - taiji git worktree 中，当前分支相对 main 有 commits（`git log main..HEAD` 非空）
 - 有 GitHub CLI（`gh`）认证
 - 全局安装 fallow（`npm i -g fallow`，实测 2.88.2）——阶段 1.5 度量门禁依赖
-- pi 环境走路径 1（原生 workflow）：完整生命周期 = workflow 工具 `action:"run"` + `name=<repo 根>/.agents/workflows/pr-lifecycle.js 绝对路径>`（按名解析已退役，裸名一律 not_found——从 `<available_workflows>` 清单的 location 取路径；脚本随 git 分发）+ args；只跑 review+fix 循环（不进门禁、不开 PR）时用内置 `review-fix-loop`
-- zcode 环境走路径 2（原生 workflow）：完整生命周期 = `CreateWorkflow` 以 `path` 指向本仓自带的 `.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts`（随 git 分发）+ args；只跑 review+fix 循环（不进门禁、不开 PR）时用全局 saved workflow `review-fix-loop`（`~/.zcode/workflows/`，无需额外安装）
+- pi 环境走路径 1（原生 workflow）：完整生命周期 = workflow 工具 `action:"run"` + `name=<repo 根>/.agents/workflows/pr-lifecycle.js 绝对路径>`（按名解析已退役，裸名一律 not_found——从 `<available_workflows>` 清单的 location 取路径；实体在 workspace 根共享，ADR-0074）+ args；只跑 review+fix 循环（不进门禁、不开 PR）时用内置 `review-fix-loop`
+- zcode 环境走路径 2（原生 workflow）：完整生命周期 = `CreateWorkflow` 以 `path` 指向本仓自带的 `.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts`（实体在 workspace 根共享，ADR-0074）+ args；只跑 review+fix 循环（不进门禁、不开 PR）时用全局 saved workflow `review-fix-loop`（`~/.zcode/workflows/`，无需额外安装）
 
 ## 调用约定
 
@@ -79,11 +79,11 @@ gh pr create --repo zhushanwen321/tai-ji \
 
 ### 1.4 [OPTIONAL] skill YAML 规范校验
 
-修改了 `.agents/skills/` 时，PR 创建前运行本 skill 内置校验脚本：
+本会话修改过实体 skill 文件（`<workspace 根>/.agents/skills/` 下任意文件——skill 已脱离 git 跟踪，PR diff 不再包含 skill 改动，改用会话内改动事实作为触发判据）时，PR 创建前运行本 skill 内置校验脚本：
 
 ```bash
 # 校验 skill SKILL.md 的 frontmatter（name/description 必填，description 双引号包裹或块标量）
-python3 .agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py <skill-paths>
+python3 <workspace 根>/.agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py <skill-paths>
 ```
 
 ## 阶段 1.5：度量快照 + Gate-1.5（硬门禁）[MANDATORY]

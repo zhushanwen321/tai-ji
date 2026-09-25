@@ -19,7 +19,7 @@ description: >-
 
 ## 前置条件
 
-- **`WS_ROOT` 变量约定**：`WS_ROOT` = workspace root（bare repo 模式，含 `.bare/`，所有 worktree 均为其直接子目录）。**动态推导，不写死路径**：`WS_ROOT="$(git worktree list | head -1 | awk '{print $1}' | xargs dirname)"`（worktree list 首行是 main worktree，其父目录即 workspace root；在任意 worktree 内执行均可）。`.agents` 只存在于各 worktree 内、**`$WS_ROOT` 本身没有 `.agents`**——skill 脚本一律经 `cd $WS_ROOT/main && bash .agents/skills/merge/scripts/<脚本>` 调用（main worktree 恒存在不可删），禁止 `cd $WS_ROOT` 后直接相对调用
+- **`WS_ROOT` 变量约定**：`WS_ROOT` = workspace root（bare repo 模式，含 `.bare/`，所有 worktree 均为其直接子目录）。**动态推导，不写死路径**：`WS_ROOT="$(git worktree list | head -1 | awk '{print $1}' | xargs dirname)"`（worktree list 首行是 main worktree，其父目录即 workspace root；在任意 worktree 内执行均可）。`.agents` 实体在 **`$WS_ROOT` 本身**（workspace 根单一实体，各 worktree 经 symlink 共享，ADR-0074）——skill 脚本一律经 `bash "$WS_ROOT/.agents/skills/merge/scripts/<脚本>"` 绝对路径调用（实体恒存在），禁止写死某个 worktree 内的 `.agents` 路径
 - feature 分支有已创建的 PR
 - GitHub CLI 已认证
 
