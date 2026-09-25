@@ -1,6 +1,5 @@
 export default {
   sendFailed: 'Failed to send message: {msg}',
-  supplementSendFailed: 'Failed to send supplement: {msg}',
   nextTurnSendFailed: 'Failed to send next turn: {msg}',
   stopFailed: 'Failed to stop: {msg}',
   compactFailed: 'Failed to compact: {msg}',

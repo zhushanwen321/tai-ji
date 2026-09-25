@@ -19,7 +19,7 @@
  * abort：调 api.chat.abort（方法存在，中断流转 DEFERRED G-025）。
  */
 import type { Segment, ServerMessage } from '@taiji/shared'
-import { segmentsToPrompt, restoreRevokedDraft } from '@taiji/shared'
+import { segmentsToPrompt, restoreRevokedDraft, markerLiteral } from '@taiji/shared'
 import {
   subscribeSession,
   clearSubscription,
@@ -496,19 +496,27 @@ function handleSessionThinkingLevelSet(
 /**
  * [crash-resilience T4 回流修复] 恢复窗口过渡态的「新回合开始」收口 gate。
  *
- * 缺陷（Gate B A7 真机）：恢复窗口（respawnPending）内用户发消息 → runtime 侧用户消息
- * 触发的惰性恢复（ensureRestored join）先于 D7 自动恢复 timer 完成 → timer fire 时
- * 「already active/restoring — skip auto respawn」→ session.restored 帧永不发布
- * （restored 只由 attemptRespawn 自身执行的成功路径发布，惰性恢复成功路径不发布）。
- * 前端过渡态原本只等 restored/restoreFailed/30s 超时收口 → 超时后回落 dead 终态页，
- * 而 session 实际已恢复、消息已获回复——用户被迫手动「重新打开」。
+ * 本 gate 的覆盖子态（msg-pipeline-debloat D3 后）：惰性恢复跨 D7 自动恢复 timer fire
+ * 完成——attemptRespawn fire 时复查 isRestoring 让位裸 return（early return 不置
+ * attemptInFlight），timer 已被 fire 回调删除、失败计数 0 → facade 尾部三信号门控皆
+ * miss，restored 帧不发（D7-41 登记的判据残余洞）→ 本 gate 是该子态唯一收口。
+ *
+ * 有帧子态（三信号任一命中）无需本 gate：restored 帧恒先于 message_start（facade 尾部
+ * 同步发布，早于新 pi 处理用户消息），收口已由 useMessageEffects.handleSessionRestored
+ * 完成；帧已收口后 message_start 再到达时，本 gate 的 isRespawnPending 守卫使二次收口
+ * no-op（handleSessionRestored 自身无该守卫，不插双条靠的是「帧恒先于 message_start」
+ * 时序 + 本守卫）。
+ *
+ * 缺陷史（Gate B A7 真机，防御对象）：恢复窗口（respawnPending）内用户发消息 → 惰性
+ * 恢复（ensureRestored join）先于 D7 timer 完成 → timer fire 让位 → 无 restored 帧 →
+ * 前端过渡态只等 restored/restoreFailed/30s 超时收口 → 超时后回落 dead 终态页，而
+ * session 实际已恢复、消息已获回复——用户被迫手动「重新打开」。
  *
  * 收口信号 = 恢复窗口内该 session 的 message.message_start 到达：新 pi 已在处理用户
  * 消息，「恢复完成」事实成立（恢复窗口订阅自 exited 时建立，恢复后的帧必经本 handler）。
  * 执行与 useMessageEffects.handleSessionRestored 同构的收口：清过渡态 + T4 恢复提示条
- * （复用 respawnRestored 文案）+ dead 复位。幂等：restored 帧若仍到达（消息晚于 D7
- * 恢复完成的时序），其 handler 的 isRespawnPending 守卫使二次收口 no-op，不插双条。
- * 30s 超时 timer 到期时分区已清 → no-op 自清，无需跨模块取消。
+ * （复用 respawnRestored 文案）+ dead 复位。30s 超时 timer 到期时分区已清 → no-op
+ * 自清，无需跨模块取消。
  */
 function consumeRespawnWindowOnTurnStart(
   sid: string,
@@ -705,7 +713,7 @@ export function createUseChat(deps: UseChatDeps) {
     // 与 extension TAG 正则（u-[0-9a-fA-F-]{36}）+ segments.json clientUuid key 严格一致。
     // [u3b] 本标记只服务 msg-id-mapper 映射回填（D8：与内核出站裸标记双标记共存，已登记）；
     // 投递身份的裸标记由内核出站侧统一附加。
-    const markedPromptText = needsBackfill ? `${promptText}\n<!--taiji:msg:${clientUuid}-->` : promptText
+    const markedPromptText = needsBackfill ? `${promptText}\n${markerLiteral(clientUuid)}` : promptText
     // 图片走路径模式（对齐 pi TUI）：路径已在 promptText 里（segmentsToText 产出裸路径），
     // LLM 自己调 read 工具读。不传 images base64 字段。
     // [u3b/D1] 统一提交：chatApi.send → chatApi.submitDelivery——lane 判定移交 runtime 内核，

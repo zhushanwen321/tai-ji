@@ -1,6 +1,5 @@
 export default {
   sendFailed: '消息发送失败：{msg}',
-  supplementSendFailed: '补充消息发送失败：{msg}',
   nextTurnSendFailed: '下轮消息发送失败：{msg}',
   stopFailed: '停止失败：{msg}',
   compactFailed: '压缩失败：{msg}',

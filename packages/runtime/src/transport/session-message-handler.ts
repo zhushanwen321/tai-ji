@@ -991,8 +991,8 @@ export class SessionMessageHandler {
     // （P6 断言④回执真实化）。sent=true（abort_bash 已发出且 pi 确认取消）→ reply
     // message.status{aborted}；sent=false（守卫短路：无 bash 在跑且无孤儿标记，或
     // abort_bash 发送失败）→ 不得谎报 aborted，走 error envelope（renderer useChat.abortBash
-    // catch → stopFailed toast 兜底）。终态经 message.bashResult{cancelled:true} 广播推回
-    // （dispatcher.abortBash 兑底），不依赖 reply。
+    // catch → stopFailed toast 兜底）。兜底终态经独立帧 message.bashAborted 广播推回
+    // （msg-pipeline-debloat D4-3 帧类型化，dispatcher.abortBash 兜底广播），不依赖 reply。
     const abortBashSid = msg.payload.sessionId
     const abortResult = await this.ctx.sessionService.abortBash(abortBashSid)
     if (!abortResult.sent) {
