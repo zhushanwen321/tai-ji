@@ -4,7 +4,7 @@
  * emit('event', arg1, arg2) 中 handler 极易混淆参数顺序。
  * 必须改为 emit('event', { arg1, arg2 })。
  *
- * 参考：CLAUDE.md 关键规则 #1
+ * 参考：项目 AGENTS.md 关键规则 1（emit 只传单个 payload 对象）
  */
 export default {
   meta: {

@@ -716,8 +716,9 @@ export interface Message {
   /**
    * live-only 消息标记（conversation-turn-attribution D4）：该消息在 pi session 文件中
    * 无对应 entry（如 stream_warn 非终结提示——pi 静默卡死健康警告 / busy 拒绝等，见
-   * ADR-0078），重开 session 后不存在。唯一写入点 = 消息
-   * 创建处（registry stream_warn handler）；分组层据此归为 turn 内 notice（不切断 turn），
+   * ADR-0078），重开 session 后不存在。写入点两处 = core effects registry 的
+   * stream_warn handler 与 store.appendRespawnNotice（respawn 恢复提示条）；
+   * 分组层据此归为 turn 内 notice（不切断 turn），
    * 不参与「live ≡ reload」等价性断言。
    */
   liveOnly?: boolean
