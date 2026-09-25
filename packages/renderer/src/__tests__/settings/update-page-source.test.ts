@@ -145,6 +145,6 @@ describe('UpdatePage 更新来源三选控件', () => {
     expect(wrapper.find('[data-testid="select-update-source"]').text()).toContain('自动（推荐）')
     expect(toastMock.error).toHaveBeenCalledTimes(1)
     // module 统一失败反馈：saveFailed toast 透传 IPC 错误文案（{reason} 插值）
-    expect(toastMock.error).toHaveBeenCalledWith('保存失败: write failed')
+    expect(toastMock.error).toHaveBeenCalledWith('保存失败：write failed')
   })
 })
