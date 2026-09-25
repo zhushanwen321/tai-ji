@@ -347,8 +347,6 @@ interface RuntimeState {
   segmentsByEntry: Map<string, Segment[]>
   /** rebuild 判定「已送达」的条目 id：重建条目抑制真实投递，只做记账（tombstone 判重锚）。 */
   suppressed: Set<string>
-  /** 内核在途条目数镜像（onChange 维护；port.hasPendingMessages 的同步数据源）。 */
-  inFlightCount: number
   /**
    * 持有期出站交接等待者集合（MF-1-9 事件化）：waitDeliverable 挂起的 resolver。
    * 边沿到达（notifyWaiters）→ 全部唤醒复核持有终态；dispose/endRevokeHold 等内部
@@ -680,20 +678,6 @@ export function createSessionDeliveryRegistry(
     markSessionActive(sessionId)
   }
 
-  /**
-   * 无标记出站条目（agent 通路：session_manager send / 完成回流——出站文本原样不改）在受理时点
-   * 落地记账：agent 通路无标记身份、无回执锚点，v1 记账口径恰在受理时点（D9⑤ 显式例外），
-   * 此处保持等价，防在途条目永挂（污染 hasPendingMessages 与回收豁免判定）。
-   */
-  function confirmMarkerlessAccepted(state: RuntimeState, handle: DeliveryHandleV2, text: string): void {
-    if (extractMarkerIds(text).length > 0) return
-    const hit = handle
-      .entriesFull()
-      .active.find((e) => e.state === 'queued' && extractMarkerIds(payloadText(e.payload)).length === 0
-        && payloadText(e.payload) === text)
-    if (hit) handle.confirmDelivered(hit.id)
-  }
-
   // ── pi 事件订阅：送达回执 + compaction_end 触发点 ────────────────────────
 
   /** 订阅当前 pi 句柄的事件流（幂等；句柄变更 = pi 被回收/崩溃后 respawn → 触发点④）。 */
@@ -971,7 +955,9 @@ export function createSessionDeliveryRegistry(
     void submitToKernel(sessionId, rt, { id, text: withDeliveryMarker(text, id), lane: 'direct' })
   }
 
-  /** 内核提交（submit/收养/重建共用）：出站文本已含标记，条目 id 显式传入（判重锚 D5②）。 */
+  /** 内核提交（submit/收养/重建共用）：出站文本已含标记，条目 id 显式传入（判重锚 D5②）。
+   *  回执锚恒申报 'marker'（D1 申报制）：withDeliveryMarker 在本层手里，出站文本尾附
+   *  裸标记，送达以 message_end 回执命中为准（两阶段回执正规路径）。 */
   async function submitToKernel(
     sessionId: string,
     rt: SessionRuntime,
@@ -983,7 +969,7 @@ export function createSessionDeliveryRegistry(
       ...(args.intent !== undefined && { intent: args.intent }),
     }
     try {
-      await rt.handle.sendChecked(message, { id: args.id, lane: args.lane })
+      await rt.handle.sendChecked(message, { id: args.id, lane: args.lane, receiptAnchor: 'marker' })
     } catch (e) {
       onDeliveryFailure(sessionId, rt, args.id, e)
     }
@@ -1060,9 +1046,8 @@ export function createSessionDeliveryRegistry(
         const s = viewOf(sessionId)
         return !!s && !s.isGenerating && !s.isCompacting && !s.isBashRunning
       },
-      // D9② 真值化（旧实现恒 false，busy gate 半瞎）：内核在途条目数（未拿送达回执的投递）
-      // ——同步签名可得，供 gate 判「pi 槽位尚有未落地投递」而不重复堆叠。
-      hasPendingMessages: () => state.inFlightCount > 0,
+      // 在途判定已收归内核自持（D2 自镜像拆除：busy gate 内查 active 表，port 不再
+      // 承担 hasPendingMessages 同步数据源）。
       subscribeSettled: (cb) =>
         deps.subscribeAgentSettled((sid) => {
           if (sid === sessionId) cb()
@@ -1084,7 +1069,6 @@ export function createSessionDeliveryRegistry(
             behavior: toStreamingBehavior(intent),
             ...(i === 0 && images !== undefined && images.length > 0 ? { images } : {}),
           }, part.id)
-          confirmMarkerlessAccepted(state, handle, part.text)
         }
         return { accepted: true }
       },
@@ -1097,7 +1081,6 @@ export function createSessionDeliveryRegistry(
       submitted: new Map(),
       segmentsByEntry: new Map(),
       suppressed: new Set(),
-      inFlightCount: 0,
       holdWaiters: new Set(),
       piCompactingBlocked: false,
       revoking: false,
@@ -1125,11 +1108,10 @@ export function createSessionDeliveryRegistry(
     // 同一对象上补 handle 字段（Object.assign 返回 target 本身——state 与 rt 必须同源，
     // port 闭包持有 state，任何拷贝都会让后续写入不可见）
     const rt: SessionRuntime = Object.assign(state, { handle })
-    // 在途镜像（port.hasPendingMessages 的同步数据源）+ segments 快照剪枝（MF-1-2 防泄漏：
-    // 条目离场 = 终态 delivered/cancelled 或重建清场，requeue 不离场故快照跨回收轮保留）
+    // segments 快照剪枝（MF-1-2 防泄漏：条目离场 = 终态 delivered/cancelled 或重建清场，
+    // requeue 不离场故快照跨回收轮保留）。在途镜像半边已随 D2 拆除（内核 busy gate 内查）。
     handle.onChange(() => {
       const active = handle.entriesFull().active
-      state.inFlightCount = active.filter((e) => e.state === 'in-flight').length
       if (state.segmentsByEntry.size > 0) {
         const activeIds = new Set(active.map((e) => e.id))
         for (const id of state.segmentsByEntry.keys()) {
@@ -1201,9 +1183,11 @@ export function createSessionDeliveryRegistry(
       // 受理口径（D9⑤ 锁定）：submit 同步返回受理回执（lane + 条目态），不等底层受理——
       // 内核 sendChecked 的 settle 时点与送达正交（受理 ≠ 送达，调用方不被投递阻塞）。
       // 失败（受理失败 / 重试耗尽）经 fail-fast 出口广播 + 日志（条目由内核拒绝或转 failed）。
-      void rt.handle.sendChecked(message, { id, lane }).catch((e: unknown) =>
-        onDeliveryFailure(sessionId, rt, id, e),
-      )
+      // 回执锚恒申报 'marker'（D1 申报制）：出站文本尾附裸标记（withDeliveryMarker 在
+      // 本层手里），送达以 message_end 回执命中为准，受理后维持 in-flight 等回执。
+      void rt.handle
+        .sendChecked(message, { id, lane, receiptAnchor: 'marker' })
+        .catch((e: unknown) => onDeliveryFailure(sessionId, rt, id, e))
       return { clientUuid: id, state: entryStateOf(rt, id) ?? 'queued', lane }
     },
     async cancel(sessionId, clientUuid) {

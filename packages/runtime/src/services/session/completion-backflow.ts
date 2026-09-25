@@ -18,7 +18,7 @@
  * constructor 内的 exit 清理腿（removeSessionEntry 删 session 内存态）——否则 exit 事件到达时
  * getSession 查不到 spawnSource/parentAgentSessionId，失败回流静默失效。
  */
-import type { DeliveryHandle } from '@zhushanwen/session-delivery'
+import type { DeliveryHandleV2 } from '@zhushanwen/session-delivery'
 import type { IManagedSessionView } from './types.js'
 
 /** 回流通知的 status 值域（以运行时可得的标志为准，语义在测试中固化）：
@@ -45,8 +45,9 @@ export interface CompletionBackflowDeps {
   subscribeSessionExit(cb: (sessionId: string, code: number | null, stderr: string) => void): () => void
   /** 读 session_end 终态（settled 前 turn-end 副作用已写入；无 session_end entry 返回 null） */
   getSessionOutcome(sessionFilePath: string): 'done' | 'error' | 'stopped' | null
-  /** 父 session 的 delivery handle（sd-u5 注册表；同父 session 与 send 排队共用单例） */
-  getDelivery(parentSessionId: string): DeliveryHandle
+  /** 父 session 的 delivery handle（sd-u5 注册表；同父 session 与 send 排队共用单例）。
+   *  V2 面（DeliverySubmitOptions 第二参）为 D1 回执锚申报所需。 */
+  getDelivery(parentSessionId: string): DeliveryHandleV2
 }
 
 export interface CompletionBackflow {
@@ -121,7 +122,11 @@ export function createCompletionBackflow(deps: CompletionBackflowDeps): Completi
       sessionFilePath: marker.sessionFilePath,
       ...extra,
     })
-    deps.getDelivery(marker.parentAgentSessionId).send({ payload: { kind: 'text', content } })
+    // D1 申报制：回流通知出站文本不附裸标记（无回执锚点），申报 'acceptance' = 受理
+    // 即落地（缺省 'marker' 会让该条目永挂 in-flight，死锁形态复发——接入义务见 ADR-0074）
+    deps
+      .getDelivery(marker.parentAgentSessionId)
+      .send({ payload: { kind: 'text', content } }, { receiptAnchor: 'acceptance' })
   }
 
   // 完成回流：agent_settled（run 级联结束）→ 查打标 → outcome 映射 status → 投父

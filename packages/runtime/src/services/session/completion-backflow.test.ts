@@ -251,9 +251,10 @@ describe('U6_EXIT_FAILBACK 进程 exit 失败回流：pi 死了也要通知父 a
 describe('U6_SINGLETON_REUSE 同父 session 的 send 排队与回流共用同一 handle', () => {
   it('U5 send 排队先建 handle → 回流经 registry.getOrCreateDelivery 拿到同一引用', async () => {
     const h = makeHarness()
-    // U5 路径：agent 经 send_to_session 排队（idle 立即投）——建立父 session 的 handle
+    // U5 路径：agent 经 send_to_session 排队（idle 立即投）——建立父 session 的 handle。
+    // 申报形态与生产 session-manager-handler 对齐（D1：agent 通路无标记出站报 'acceptance'）
     const u5Handle = h.registry.getOrCreateDelivery(h.parent.id)
-    await u5Handle.sendChecked({ payload: { kind: 'text', content: 'hello from agent' } })
+    await u5Handle.sendChecked({ payload: { kind: 'text', content: 'hello from agent' } }, { receiptAnchor: 'acceptance' })
     expect(h.client.prompt).toHaveBeenCalledTimes(1)
 
     // 父跑完第一条（sendChecked 的 D7 置位 isGenerating=true）→ 父 settled 后 idle；

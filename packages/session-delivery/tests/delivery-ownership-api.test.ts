@@ -408,8 +408,9 @@ describe('u1-api tombstone 判重（D5②）', () => {
     const port = makeMockPort()
     const handle = createDelivery(port)
 
-    handle.send(textMsg('same'))
-    handle.send(textMsg('same')) // 同内容、无 id、无 dedupe 配置 → 都投
+    // 申报 acceptance（受理即落地）：焦点是判重语义，避免首条 in-flight 挂住 gate
+    handle.send(textMsg('same'), { receiptAnchor: 'acceptance' })
+    handle.send(textMsg('same'), { receiptAnchor: 'acceptance' }) // 同内容、无 id、无 dedupe 配置 → 都投
     expect(port.sendCalls).toHaveLength(2)
 
     handle.dispose()

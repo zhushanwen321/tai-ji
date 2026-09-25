@@ -40,16 +40,16 @@ describe('u1-adopt P-adopt 变体 1：内核有在途共存（自有回收条目
     expect(port.sendCalls[1]!.msg.payload.content).toBe('own user msg')
 
     // ── 重放步骤 3：外来无标记文本收养（subagent notifyDone 形态，新 clientUuid）──
+    // D2 后内核在途内查：own-1 in-flight 未拿回执时 gate 关，收养条目留队（不往 pi 堆叠）
     handle.send(textMsg('notify: subagent task done'), { id: 'u-adopt-1', lane: 'direct' })
-    expect(handle.entriesFull().active.map((e) => (e.state === 'in-flight' ? e.id : null))).toContain(
-      'u-adopt-1',
-    )
-    // idle 内核下收养条目立即投递（第 3 次 port.send，无滞留）
+    expect(handle.entriesFull().active.some((e) => e.id === 'u-adopt-1')).toBe(true)
+    expect(port.sendCalls).toHaveLength(2) // 在途未清 → 收养条目未投
+
+    // ── 重放步骤 4：own 条目回执到达（message_end 标记命中）→ gate 开 → 收养条目续投 ──
+    expect(handle.confirmDelivered('u-own-1')).toBe(true)
+    handle.flush()
     expect(port.sendCalls).toHaveLength(3)
     expect(port.sendCalls[2]!.msg.payload.content).toBe('notify: subagent task done')
-
-    // ── 重放步骤 4：两条先后拿到送达回执（message_end 标记命中）──
-    expect(handle.confirmDelivered('u-own-1')).toBe(true)
     expect(handle.confirmDelivered('u-adopt-1')).toBe(true)
 
     // 终态：全部 delivered，tombstone 可判重

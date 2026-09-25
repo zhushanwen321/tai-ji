@@ -42,7 +42,8 @@
  * （send/sendChecked 的 opts.id 命中即吞）。条目 id = opts.id ?? 内部生成；未传
  * id 的消息不参与幂等判重（v1「无 dedupe 配置不去重」语义保持）。
  *
- * 其余 v1 机制逐条保持：busy gate（isIdle + hasPendingMessages 双条件）、backoff
+ * 其余 v1 机制逐条保持：busy gate（isIdle + 内核在途内查双条件——hasPendingMessages
+ * 自镜像四件套已按 msg-pipeline-debloat D2 拆除，busy 判定内查 active 表）、backoff
  * 有限重试、合批窗口、dedupe LRU、30s watchdog、dispose 语义（丢弃不触发
  * onSettled、checked 挂账 reject）。depth() 口径保持 v1 = 尚未受理的消息数
  * （受理转 in-flight 后不计；「在途未确认」数经 entriesFull() 全量视图消费）。
@@ -93,6 +94,20 @@ export interface DeliverySubmitOptions {
   id?: string
   /** 投递车道（D1）：适配器判定后传入记录；缺省 'direct'（既有调用方语义）。 */
   lane?: DeliveryLane
+  /**
+   * 送达回执锚申报（msg-pipeline-debloat D1 申报制）：提交方声明本条目的送达判定锚。
+   * - 'marker'（缺省）= 出站文本尾附裸标记、送达以 message_end 回执命中为准
+   *   （用户消息主通路语义）；受理后维持 in-flight 等回执。
+   * - 'acceptance' = 无回执锚点条目（agent 通路：完成回流 / session_manager send /
+   *   notifier 通知——出站文本原样不改），port.send 受理成功即落 delivered 终态
+   *   （「受理 = 送达」是唯一可判事实，v1 记账口径 / D9⑤ 显式例外）。
+   *
+   * 缺省 'marker' 是刻意的保守取向：无标记提交点漏申报的代价 = 复发已知死锁形态
+   * （in-flight 永挂、gate 恒关，有全链诊断可查，可见）；误申报 'acceptance' 的代价
+   * = 静默丢送达确认语义（更隐蔽）。两害取可见者。新增无标记投递来源必须显式申报
+   * 'acceptance' 并登记来源清单（ADR-0074 词条）。
+   */
+  receiptAnchor?: 'marker' | 'acceptance'
 }
 
 /**
@@ -189,11 +204,14 @@ interface CheckedWaiter {
 
 /**
  * 内核条目：DeliveryEntry + 实现私有字段。msg 为原始消息引用（合批构造 /
- * onSettled 回调身份源）；cancelRequested 为 in-flight 撤销两段式的待收回标记。
+ * onSettled 回调身份源）；cancelRequested 为 in-flight 撤销两段式的待收回标记；
+ * receiptAnchor 为提交方申报的送达回执锚（D1 申报制，沿 opts.id/opts.lane 持久化
+ * 先例直达内部字段——不进 DeliveryEntry 条目视图 DTO，投影面零扩散）。
  */
 interface KernelEntry extends DeliveryEntry {
   msg: DeliveryMessage
   cancelRequested: boolean
+  receiptAnchor: 'marker' | 'acceptance'
 }
 
 function isThenable(v: unknown): v is Promise<SendReceipt | void> {
@@ -285,20 +303,6 @@ function safeIsIdle(port: DeliveryPort, onFault?: (err: unknown) => void): boole
     // session 已关闭等异常 → 视为不可发送
     onFault?.(err)
     return false
-  }
-}
-
-// ─── busy 判定（isIdle + hasPendingMessages 双条件，G4）────
-// 旧 scheduler gate 为 !isIdle() || hasPendingMessages()；内核单判 isIdle 会把
-// 「idle 但 pi 队列尚有消息未注入」误判为可投，提前投递与迁移前不等价。
-function isBusy(port: DeliveryPort, onFault?: (err: unknown) => void): boolean {
-  if (!safeIsIdle(port, onFault)) return true
-  try {
-    return port.hasPendingMessages()
-  } catch (err) {
-    // 探测异常（session 关闭等）→ 保守视为 busy 不投
-    onFault?.(err)
-    return true
   }
 }
 
@@ -430,12 +434,24 @@ export function createDelivery(
   function warnProbeFault(err: unknown): void {
     if (probeFaultWarned) return
     probeFaultWarned = true
-    warn('port busy probe (isIdle/hasPendingMessages) threw; conservatively treating as busy', err)
+    warn('port busy probe (isIdle) threw; conservatively treating as busy', err)
   }
 
-  /** isBusy(port) 的 handle 内包装：挂接降级留痕钩子。 */
+  /**
+   * busy 判定（isIdle + 在途内查双条件，G4；msg-pipeline-debloat D2 拆除自镜像后
+   * 内核自持事实）：!isIdle（pi 正忙）或 active 表存在 in-flight 条目（已受理未拿
+   * 送达回执的投递在途）→ busy 不投。单判 isIdle 会把「idle 但在途投递未终态」
+   * 误判为可投，提前堆叠与迁移前不等价。内查同表遍历先例 = depth()。
+   */
   function isBusySafe(): boolean {
-    return isBusy(port, warnProbeFault)
+    if (!safeIsIdle(port, warnProbeFault)) return true
+    return hasInFlightEntries()
+  }
+
+  /** 内核在途条目内查（D2）：active 表的 in-flight 成员存在性（O(n)，同 depth() 口径）。 */
+  function hasInFlightEntries(): boolean {
+    for (const e of active) if (e.state === 'in-flight') return true
+    return false
   }
 
   /** 活跃条目是否仍在册（出站批/迟到回执守卫：已 cancel/drain/dispose 的条目不在）。 */
@@ -643,6 +659,13 @@ export function createDelivery(
       changed = true
     }
     if (changed) notifyChange()
+    // D1 申报制：acceptance 条目受理即落地——无回执锚点条目的「受理 = 送达」是唯一
+    // 可判事实（提交方申报，内核零 pi 知识零正则），直接终态化（confirmDelivered 幂等，
+    // 对已被先行终结的条目 no-op），不进 in-flight 等回执（永挂源构造性消除）。
+    for (const e of batch) {
+      if (disposed) break
+      if (e.receiptAnchor === 'acceptance') confirmDelivered(e.id)
+    }
     pump()
   }
 
@@ -751,7 +774,7 @@ export function createDelivery(
     // 错误重试 timer 不在此列——inFlight 时上面已提前 return）
     clearBackoffTimer()
 
-    // busy gate（isIdle + hasPendingMessages 双条件）
+    // busy gate（isIdle + 内核在途内查双条件，D2）
     if (isBusySafe() && attempt < cfg.backoff.max) {
       if (port.subscribeSettled) {
         // 有订阅装配：busy 消息由 settled 边沿驱动，退避强发不启动（与事件驱动
@@ -815,6 +838,7 @@ export function createDelivery(
       sendAttempts: 0,
       msg,
       cancelRequested: false,
+      receiptAnchor: opts?.receiptAnchor ?? 'marker',
     }
     active.push(entry)
     activeIndex.set(entry.id, entry)

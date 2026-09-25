@@ -77,8 +77,6 @@ export interface DeliveryPort {
   supportedPayloads: readonly DeliveryPayload['kind'][]
   /** 主 agent 是否空闲。 */
   isIdle(): boolean
-  /** 是否有排队中的消息。 */
-  hasPendingMessages(): boolean
   /**
    * 投递消息（intent → pi 参数的翻译在适配器内部）。
    * 返回受理回执（U2 扩展位）：显式 `{accepted:false}` = 受理失败（内核按发送失败

@@ -286,9 +286,11 @@ export class SessionManagerHandler {
       return { error: 'target session is not managed by this agent' }
     }
     try {
+      // D1 申报制：agent 通路出站文本不附裸标记（无回执锚点），申报 'acceptance' = 受理
+      // 即落地（缺省 'marker' 会让该条目永挂 in-flight，死锁形态复发——接入义务见 ADR-0074）
       await this.opts.delivery
         .getOrCreateDelivery(sessionId)
-        .sendChecked({ payload: { kind: 'text', content: prompt } })
+        .sendChecked({ payload: { kind: 'text', content: prompt } }, { receiptAnchor: 'acceptance' })
       return { queued: true }
     } catch (e) {
       return { error: toErrorMessage(e), hint: SEND_UNREACHABLE_HINT }

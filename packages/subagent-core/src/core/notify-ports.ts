@@ -57,8 +57,6 @@ export interface DeliveryPort {
   supportedPayloads: readonly DeliveryPayload["kind"][];
   /** 主 agent 是否空闲（gate 投递时机）。 */
   isIdle(): boolean;
-  /** 是否有排队中的消息。 */
-  hasPendingMessages(): boolean;
   /** 投递消息。返回受理回执或 void（扩展位——旧实现返回 void 兼容）。
    *  settle 契约（与 session-delivery DeliveryPort.send 一致）：返回 promise 时实现
    *  必须 settle——内核按控制面粒度设有界兜底，超时按发送失败收口（迟到原请求与
@@ -84,10 +82,25 @@ export interface DeliveryConfig {
   warn?: (msg: string, err?: unknown) => void;
 }
 
+/**
+ * 提交选项转写（与 session-delivery 的 DeliverySubmitOptions 消费面字段结构兼容——
+ * 手工转写契约，上游增删字段须同步本类型，结构兼容由 pi-host 注入点 typecheck 守护）。
+ */
+export interface DeliverySubmitOptions {
+  /** 合批窗口判定覆盖。 */
+  merge?: boolean;
+  /**
+   * 送达回执锚申报（D1 申报制转写）：'marker' = 等裸标记回执（缺省）；'acceptance' =
+   * 无回执锚点条目（notifier 通知出站文本无标记），受理即落 delivered 终态。
+   * 无标记提交点漏申报 = 死锁形态复发（in-flight 永挂、gate 恒关）。
+   */
+  receiptAnchor?: "marker" | "acceptance";
+}
+
 /** 投递句柄（notifier 消费面：send / flush / dispose——诊断面 depth 等不入端口）。 */
 export interface DeliveryHandle {
   /** 唯一常规入口（合批窗口 + 空闲零延迟立即投）。 */
-  send(msg: DeliveryMessage, opts?: { merge?: boolean }): void;
+  send(msg: DeliveryMessage, opts?: DeliverySubmitOptions): void;
   /** 强制投递尝试（shutdown flush 等）。 */
   flush(): void;
   /** 销毁（清队列 + 清 timer + 退订）。 */

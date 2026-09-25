@@ -314,7 +314,6 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       // 未注入 isIdle → 视为 idle（不 gate，向后兼容旧 host）
       return true;
     },
-    hasPendingMessages: () => false, // notifier 不关心 hasPendingMessages
     // D8（must-fix #4）：settled 边沿驱动装配——内核 busy 入队后由 settled 事件唤醒
     // flush（watch-dog 兜底事件丢失），替代无订阅时的退避轮询。host 只注入原生订阅
     // 能力；disposed 标志包装（兑现退订语义——pi.on 返回 void 且无 off）在此完成。
@@ -403,16 +402,21 @@ export function createNotifier(host: NotifierHost): BgNotifier {
     notifyLogger.warn("notify ledger not bound, falling back to delivery kernel path (at-most-once)", {
       notifyId,
     });
-    handle.send({
-      payload: {
-        kind: "custom",
-        customType: NOTIFY_CUSTOM_TYPE,
-        content,
-        display: true,
-        details,
+    // D1 申报制：通知出站文本不附裸标记（无回执锚点），申报 'acceptance' = 受理即落地
+    // （缺省 'marker' 会让条目永挂 in-flight，死锁形态复发——新增无标记提交点须同样申报）
+    handle.send(
+      {
+        payload: {
+          kind: "custom",
+          customType: NOTIFY_CUSTOM_TYPE,
+          content,
+          display: true,
+          details,
+        },
+        dedupeKey: notifyId,
       },
-      dedupeKey: notifyId,
-    });
+      { receiptAnchor: "acceptance" },
+    );
     return true;
   }
 

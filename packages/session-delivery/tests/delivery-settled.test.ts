@@ -49,11 +49,10 @@ describe('A3-settled subscribeSettled 事件驱动路径', () => {
     handle.dispose()
   })
 
-  it('hasPendingMessages=true 时 settled 复核不通过（G4 双条件 gate）', () => {
+  it('内核存在 in-flight 条目时 settled 复核不通过（G4 双条件 gate；D2 拆除后在途判定内查 active 表）', () => {
     let settledCb: (() => void) | undefined
     const port = makeMockPort({
       isIdle: () => true,
-      hasPendingMessages: () => true,
       subscribeSettled: (cb) => {
         settledCb = cb
         return () => { settledCb = undefined }
@@ -61,12 +60,20 @@ describe('A3-settled subscribeSettled 事件驱动路径', () => {
     })
     const handle = createDelivery(port, { busyPolicy: 'retry-force' })
 
+    // 制造内核在途：首条受理转 in-flight（缺省 marker 申报，等回执未确认）
+    const first = handle.send(textMsg('在途一条'))
+    const firstId = first.kind === 'accepted' ? first.id : undefined
+
     handle.send(textMsg('hello'))
-    expect(port.sendCalls).toHaveLength(0) // idle 但 pi 队列未排空 → 不投
+    expect(port.sendCalls).toHaveLength(1) // idle 但在途未终态 → 不投
 
     settledCb!()
-    expect(port.sendCalls).toHaveLength(0) // 边沿复核 hasPendingMessages 仍 true → 留队
+    expect(port.sendCalls).toHaveLength(1) // 边沿复核在途未清 → 留队
     expect(handle.depth()).toBe(1)
+
+    handle.confirmDelivered(firstId!) // 送达回执 → 在途清零 → 边沿复核通过
+    settledCb!()
+    expect(port.sendCalls).toHaveLength(2)
 
     handle.dispose()
   })

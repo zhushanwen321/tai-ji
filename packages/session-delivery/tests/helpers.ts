@@ -13,23 +13,18 @@ export function makeMockPort(
 ): DeliveryPort & {
   sendCalls: { msg: DeliveryMessage; intent: DeliveryIntent }[]
   idle: boolean
-  pendingMessages: boolean
   supportedPayloads: readonly ('text' | 'custom')[]
 } {
   const sendCalls: { msg: DeliveryMessage; intent: DeliveryIntent }[] = []
   let idle = true
-  let pendingMessages = false
   const supportedPayloads: ('text' | 'custom')[] = ['text', 'custom']
 
   const port = {
     sendCalls,
     get idle() { return idle },
     set idle(v: boolean) { idle = v },
-    get pendingMessages() { return pendingMessages },
-    set pendingMessages(v: boolean) { pendingMessages = v },
     get supportedPayloads() { return overrides?.supportedPayloads ?? supportedPayloads },
     isIdle: () => overrides?.isIdle?.() ?? idle,
-    hasPendingMessages: () => overrides?.hasPendingMessages?.() ?? pendingMessages,
     send: vi.fn((msg: DeliveryMessage, intent: DeliveryIntent) => {
       sendCalls.push({ msg, intent })
       return overrides?.send?.(msg, intent) ?? undefined

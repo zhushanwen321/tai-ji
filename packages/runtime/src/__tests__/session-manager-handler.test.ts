@@ -156,10 +156,14 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 's1', prompt: 'hello' })
 
-      // 走 sessionId 单例注册表取 handle，sendChecked 收到 text payload
+      // 走 sessionId 单例注册表取 handle，sendChecked 收到 text payload + D1 申报（agent
+      // 通路无标记出站，'acceptance' = 受理即落地）
       expect(delivery.getOrCreateDelivery).toHaveBeenCalledWith('s1')
       const handle = (delivery.getOrCreateDelivery as ReturnType<typeof vi.fn>).mock.results[0].value as { sendChecked: ReturnType<typeof vi.fn> }
-      expect(handle.sendChecked).toHaveBeenCalledWith({ payload: { kind: 'text', content: 'hello' } })
+      expect(handle.sendChecked).toHaveBeenCalledWith(
+        { payload: { kind: 'text', content: 'hello' } },
+        { receiptAnchor: 'acceptance' },
+      )
       // respond {queued: true}（sd-u5：不再出现 {blocked, rejected}）
       expect(opts.sendExtensionUiResponse).toHaveBeenCalledWith(
         'sid-parent',

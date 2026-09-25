@@ -36,7 +36,6 @@ function makePort(): DeliveryPort {
   return {
     supportedPayloads: ["custom"],
     isIdle: () => true,
-    hasPendingMessages: () => false,
     send: () => {},
   };
 }

@@ -229,7 +229,6 @@ describe("createPiNotifyDomainPorts.createDelivery（透传 session-delivery）"
     const fakePort = {
       supportedPayloads: ["text"] as const,
       isIdle: () => true,
-      hasPendingMessages: () => false,
       send: () => undefined,
     };
     const fakeConfig = { intent: "after-run" as const };

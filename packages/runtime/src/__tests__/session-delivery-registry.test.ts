@@ -223,10 +223,11 @@ describe('u2 两阶段回执接线（D2）', () => {
     expect(full.tombstones[0]).toMatchObject({ id, state: 'delivered' })
   })
 
-  it('无标记消息（agent 通路 sendChecked）受理即记账：不永挂 in-flight', async () => {
+  it('无标记消息（agent 通路 sendChecked，D1 申报 acceptance）受理即记账：不永挂 in-flight', async () => {
     const h = makeHarness()
     const handle = h.registry.getOrCreateDelivery('s1')
-    await handle.sendChecked({ payload: { kind: 'text', content: 'notify: 子代理完成' } })
+    // session-manager send 同形：无标记出站 + 'acceptance' 申报（受理即落地）
+    await handle.sendChecked({ payload: { kind: 'text', content: 'notify: 子代理完成' } }, { receiptAnchor: 'acceptance' })
     const full = h.registry.entries('s1')!
     expect(h.client.prompt).toHaveBeenCalledWith('notify: 子代理完成', undefined, 'steer')
     expect(full.active).toHaveLength(0)
@@ -666,9 +667,10 @@ describe('delivery.resync 用户重试（§3.4 重试钮）：failed → queued 
     const handle = h.registry.getOrCreateDelivery('s1')
     const id = 'u-20000001-0000-4000-8000-000000000001'
     // failed 只能由非 checked 批次产生（checked 条目入口即拦 reject，不落 failed）——
-    // agent 通路经 handle.send 提交（completion-backflow 同形）。内核 backoff 默认
-    // ms=100 / max=50 → 第 51 次尝试转 failed（§3.4 重试耗尽行）。
-    handle.send({ payload: { kind: 'text', content: '重试我' } }, { id })
+    // agent 通路经 handle.send 提交（completion-backflow 同形，D1 申报 'acceptance'：
+    // 无标记出站的受理即落地语义）。内核 backoff 默认 ms=100 / max=50 → 第 51 次尝试
+    // 转 failed（§3.4 重试耗尽行）。
+    handle.send({ payload: { kind: 'text', content: '重试我' } }, { id, receiptAnchor: 'acceptance' })
     await h.flush()
     for (let i = 0; i < 60; i += 1) await vi.advanceTimersByTimeAsync(100)
     await h.flush()
@@ -770,5 +772,54 @@ describe('segments 快照（MF-1-2）：提交快照持有与回草稿返回', (
 
     const outcome = await h.registry.cancel('s1', id)
     expect(outcome.cancelled).toBe(false) // 已 delivered 不可撤
+  })
+})
+
+// ── S1 死锁复现（msg-pipeline-debloat D1 申报制）：≥2 条无标记条目同批永挂 in-flight ──
+// 七环链条（设计 §2.3）：agent 通路两条无标记消息父 session 忙时排队 → settled 边沿
+// 合批 flush → splitComposed 无标记整条退化投递受理 → confirmMarkerlessAccepted 对
+// joined 文本精确等值反查 miss（joined ≠ 任何单条）→ confirmDelivered 永不调用 →
+// in-flight 恒挂 → hasPendingMessages 恒 true → busy gate 恒关 → queued 投递永不执行。
+// 修复（D1 申报制）：acceptance 条目受理即落地，链条第 5 环构造性消失。
+
+describe('S1 死锁复现（D1 申报制）：无标记合批受理即落地 + gate 复开', () => {
+  it('连续两条无标记消息同批投递 → 条目达 delivered 终态且后续 queued 消息正常投出', async () => {
+    // 父 session 生成中（agent 通路回流排队的前置）
+    const h = makeHarness({ view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } } })
+    // agent 通路两条无标记消息（completion-backflow 回流 / session_manager send 同形：
+    // 直拿 handle 提交，出站文本不附裸标记，D1 申报 'acceptance'——漏申报 = 缺省 marker
+    // 永挂，本测试即申报丢失的行为锁）
+    const handle = h.registry.getOrCreateDelivery('s1')
+    handle.send({ payload: { kind: 'text', content: 'subagent A 完成' } }, { receiptAnchor: 'acceptance' })
+    handle.send({ payload: { kind: 'text', content: 'subagent B 完成' } }, { receiptAnchor: 'acceptance' })
+    await h.flush()
+    expect(h.promptCalls).toHaveLength(0) // 父 session 忙：内核排队不入槽
+
+    // 父 session 生成结束 → settled 边沿 → busy 复核通过 → doSend 把全部 queued 锁一批
+    applySessionOccupancyTransition(h.view, null, 'idle')
+    h.emitSettled()
+    await h.flush()
+    expect(h.promptCalls).toHaveLength(1)
+    const composed = h.promptCalls[0]![0] as string
+    expect(composed).toContain('subagent A 完成')
+    expect(composed).toContain('subagent B 完成')
+    expect(extractMarkerIds(composed)).toEqual([]) // 批内无标记（死锁前提成立）
+
+    // 断言①（旧代码红灯形态：joined 文本反查 miss → 两条永挂 in-flight）
+    const full = h.registry.entries('s1')!
+    expect(full.active).toHaveLength(0)
+    expect(full.tombstones.filter((t) => t.state === 'delivered')).toHaveLength(2)
+
+    // 断言② gate 复开（旧代码红灯形态：hasPendingMessages 恒 true → busy gate 恒关 →
+    // scheduleFlush 只排 watchdog，queued 消息永不执行）。用 send 路径锁 gate——
+    // checked 直投不经 busy gate，锁不住死锁第 7 环。
+    // 先收口第一批投递开启的 turn（deliverOne 置 dispatching = turn 开始的生产语义）
+    applySessionOccupancyTransition(h.view, null, 'idle')
+    h.emitSettled()
+    await h.flush()
+    handle.send({ payload: { kind: 'text', content: '后续 queued 消息' } }, { receiptAnchor: 'acceptance' })
+    await h.flush()
+    expect(h.promptCalls).toHaveLength(2)
+    expect(h.promptCalls[1]![0]).toContain('后续 queued 消息')
   })
 })
