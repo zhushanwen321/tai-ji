@@ -839,8 +839,9 @@ export function __clearUnhandledFrameTypeWarnForTest(): void {
  * 非 message.* 或未注册的 message.* type 直接 no-op（等价原 applyChunk 的 default return）。
  * [RD-1#9] 未注册 type 的 no-op 在 dev 下补一次/类型 warn（协议漂移零痕迹 → 可见）。
  *
- * 单帧异常隔离（RD-1#5）：handler 抛错仅记录不逆传（调用链上游 coalescer/events 各有
- * 隔离，但半执行帧的状态残留不能靠上游兜）；终态帧异常补 finalizeSession 收口——
+ * 单帧异常隔离（RD-1#5）：handler 抛错仅记录不逆传（上游 useChat 接线点 try/catch 已
+ * 隔离订阅回调侧的故障扩散，但半执行帧的状态残留不能靠上游兜）；终态帧异常补
+ * finalizeSession 收口——
  * 理由：非终态帧（delta/queue_update 等）半执行后下一帧自然继续，强行收口反而误杀
  * 进行中的流；终态帧的收口是 handler 的最后一步，被截断 = 永久卡 streaming，且
  * finalizeSession 幂等（handler 已收口则 no-op），补调安全。
@@ -877,7 +878,7 @@ export function dispatchMessageEvent(
       ctx.finalizeSession(sessionId, reason, errorText)
     } catch (finalizeError) {
       // best-effort 降级：安全网自身失败时放弃收口仅记录——不得让安全网成为新异常源
-      // （再抛会逆传到 events/coalescer 上游，把单帧故障放大成消费面崩溃）。
+      // （再抛会沿 useChat 订阅回调逆传，把单帧故障放大成消费面崩溃）。
       console.error(`[effects] finalize safety net also failed for ${msg.type} (sid=${sessionId}):`, finalizeError)
     }
   }

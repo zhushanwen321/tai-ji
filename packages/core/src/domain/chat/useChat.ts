@@ -656,7 +656,7 @@ export function createUseChat(deps: UseChatDeps) {
    * 统一提交编排器：把 segments 转成 promptText 并经 delivery.submit 提交（u3b/D1）。
    *
    * 调用方负责：appendUser / pendingSend 等乐观状态编排已上提至 submitNewMessage
-   * （send/steer/followUp/editAndResend 四通路共享）。submitSegments 只管「文本化 +
+   * （send/followUp/editAndResend 三通路共享）。submitSegments 只管「文本化 +
    * 提交」核心步骤：
    *   1. segmentsToPrompt（pi prompt 文本，原文保真，image 段产出裸路径）
    *   2. 写 segments.json sidecar（clientUuid 关联，重开时回填 badge）——仅非纯文本消息
@@ -1068,7 +1068,7 @@ export function createUseChat(deps: UseChatDeps) {
       await submitNewMessage(sessionId, segments, promptText)
       return true
     } catch (e) {
-      // [W2] 错误处理策略与 send/steer/followUp/abort 对齐：toast + 不 throw。
+      // [W2] 错误处理策略与 send/followUp/abort 对齐：toast + 不 throw。
       // 消费侧 Turn.vue submitEdit 无 try/catch，不 throw 避免其产生 unhandled rejection（错误已通过 toast 消化）。
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.sendFailed', { msg }))

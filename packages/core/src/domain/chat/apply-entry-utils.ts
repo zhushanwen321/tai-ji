@@ -3,7 +3,7 @@
  *
  * 本文件承载三件套的共享底层：工具产出归一（normalizePiToolResult / stripAnsi）、
  * 确定性派生与 Record 守卫（toMs / isLooseRecord / isPlainRecord）、reducer 簇共用
- * 类型与常量（PiToolResultBody / CLIENT_MSG_ID_TYPE）。reducer 本体在 apply-entry.ts，
+ * 类型（PiToolResultBody）。reducer 本体在 apply-entry.ts，
  * message body 转换群在 apply-entry-convert.ts；整体职责叙事见 apply-entry.ts 文件头。
  *
  * 本模块群自包含约束（runtime tsup 打包 / renderer vite 消费双重入口）：本模块群
@@ -16,9 +16,6 @@ import type { PiMessageBody } from '@taiji/shared'
 export interface PiToolResultBody extends PiMessageBody {
   role: 'toolResult'
 }
-
-/** msg-id-mapper extension 写入的 customType 常量（与 extension 端字符串严格一致）。 */
-export const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
 
 // ── entryStates 条目级截断（crash-resilience §3.3 D6-⑧ / u7-memory-governance）──────
 
