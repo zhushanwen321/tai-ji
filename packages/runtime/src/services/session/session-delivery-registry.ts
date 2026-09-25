@@ -26,7 +26,7 @@
  * SessionService.setDeliveryRegistry 后置注入消费方（MessageDispatcher / RevokeOrchestrator）
  * ——依赖在构造签名/setter 上可见，无进程内活动槽（装配槽范式已退役）。
  */
-import { createDelivery } from '@zhushanwen/session-delivery'
+import { createDelivery, DeliveryReclaimError } from '@zhushanwen/session-delivery'
 import type {
   DeliveryEntriesFull,
   DeliveryEntryState,
@@ -195,12 +195,6 @@ const RECONCILE_MIN_INTERVAL_MS = 200
 const LOCAL_ID_TIME_RADIX = 36
 /** 日志中 payload 预览的截断长度（整段消息不进日志）。 */
 const LOG_PAYLOAD_PREVIEW_CHARS = 60
-/**
- * 内核「用户主动回收」对挂起 sendChecked waiter 的 reject 文案前缀契约（delivery.ts：
- * cancel → `delivery cancelled: <id>`、drain → `delivery drained`）。用户回收不是投递
- * 失败，不得进 message.error 广播面（§3.4 / V9 / V11）。
- */
-const KERNEL_RECLAIM_REJECT_PREFIXES = ['delivery cancelled', 'delivery drained'] as const
 
 /** pi 0.84.4 prompt() busy 类确定性拒绝原文（PS-22/PS-23 探针锁守卫，pi 版本 bump 时探针红 =
  *  文案漂移，须同步本常量；识别函数是 D6 错误分类的迁移落点——内核适配器 catch 面）。 */
@@ -977,22 +971,24 @@ export function createSessionDeliveryRegistry(
 
   /**
    * 判定 reject 是否源于**用户主动回收**（cancel / drain）——双信号一致判据，缺一不成立：
-   * ① reject 文案命中内核 cancel/drain 契约前缀（KERNEL_RECLAIM_REJECT_PREFIXES）；
+   * ① reject 是内核回收错误类（DeliveryReclaimError，delivery.ts cancel/drain 的 waiter
+   *    reject 专用类型；[HISTORICAL] 文案前缀匹配形态曾被文案调整击穿致 dispose 错分，
+   *    禁止回退到字符串判别）；
    * ② 条目已不在 active 且 tombstone 终态 = cancelled（cancel/drain 已终结该条目）。
-   * 刻意取「双信号」而非单信号：契约文案漂移或终态被后续操作改写时，判据退回「按真实
-   * 失败处理」——宁可多播一个错误，不可吞掉真失败（受理失败 / 重试耗尽必须仍可见）。
+   * 刻意取「双信号」而非单信号：终态被后续操作改写时，判据退回「按真实失败处理」——
+   * 宁可多播一个错误，不可吞掉真失败（受理失败 / 重试耗尽必须仍可见）。
    */
-  function isUserReclaimRejection(rt: SessionRuntime, id: string, message: string): boolean {
-    if (!KERNEL_RECLAIM_REJECT_PREFIXES.some((prefix) => message.startsWith(prefix))) return false
+  function isUserReclaimRejection(rt: SessionRuntime, id: string, e: unknown): boolean {
+    if (!(e instanceof DeliveryReclaimError)) return false
     const full = rt.handle.entriesFull()
-    if (full.active.some((e) => e.id === id)) return false
+    if (full.active.some((entry) => entry.id === id)) return false
     return full.tombstones.some((t) => t.id === id && t.state === 'cancelled')
   }
 
   /** 投递终态失败（受理失败 / 重试耗尽）：日志 + 用户可见面（老协议无帧消费时的兜底通道）。 */
   function onDeliveryFailure(sessionId: string, rt: SessionRuntime, id: string, e: unknown): void {
     const message = e instanceof Error ? e.message : String(e)
-    if (isUserReclaimRejection(rt, id, message)) {
+    if (isUserReclaimRejection(rt, id, e)) {
       // 用户撤销 / forceQuit 回收：语义是「文本回草稿」（V9/V11），条目已被内核终结，
       // 此处的 waiter reject 只是挂起 promise 的收尾——弹错误气泡与语义矛盾，只记日志。
       warn('delivery reclaimed by user (cancel/drain), no error surfaced, sid=', sessionId, 'id=', id, message)

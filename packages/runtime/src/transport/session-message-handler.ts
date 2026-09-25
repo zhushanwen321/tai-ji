@@ -1150,7 +1150,12 @@ export class SessionMessageHandler {
       await this.ctx.sessionService.compact(compactId, msg.payload.customInstructions)
     } catch (e) {
       // compact 失败：dispatcher.compact 已广播 session.compacted(error)（流式通知），此处补请求级 error envelope。
-      return this.ctx.sendError(ws, 'compact_failed', toErrorMessage(e), msg.id, { sessionId: compactId })
+      // 分类码（msg-pipeline-debloat D4-2）：busy 预检拒绝的错误携带 code='compact_busy'
+      //（dispatcher 抛出，对话流内联呈现已由 stream_warn 编排）；其余（pi 层失败——interpreter
+      // 对话流呈现 / ensureActive 恢复失败——session 状态面呈现）归 'compact_failed'。
+      // renderer 据分类码路由 toast 抑制（CompactErrorCode SSOT，未知码保守回退 toast）。
+      const code = (e as { code?: string }).code === 'compact_busy' ? 'compact_busy' : 'compact_failed'
+      return this.ctx.sendError(ws, code, toErrorMessage(e), msg.id, { sessionId: compactId })
     }
     // compact 成功：dispatcher.compact 已广播 session.compacted（流式通知，无 id），此处补请求级 ack。
     return this.ctx.reply(ws, msg.id, 'session.compacted', { sessionId: compactId, status: 'compacted' })

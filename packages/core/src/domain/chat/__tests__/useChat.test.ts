@@ -24,7 +24,6 @@ import { effectScope, nextTick, toRaw } from 'vue'
 import { segmentsToText, textToSegments } from '@taiji/shared'
 import type { Message, Segment, ServerMessage } from '@taiji/shared'
 import { createChatStore } from '../store'
-import { getExecutingBash as getExecutingBashForTest } from '../bash-effects'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
 import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
 import type { UseChatDeps } from '../useChat'
@@ -330,13 +329,12 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('compact transport/busy 级失败（compaction_end 未到达）：toast 兜底（MF-1）', async () => {
+  it('compact transport 级失败（envelope 无分类码，如 pending 超时）：toast 兜底', async () => {
     const f = makeFixture()
-    // transport/busy 级失败：RPC 未达 pi / dispatcher busy 预检拒绝 → compaction_end 不发 →
-    // interpreter 不参与 → 零用户反馈（违反 AGENTS.md 规则 #3）
-    f.chatApi.compact.mockRejectedValueOnce(new Error('RPC 超时'))
+    // transport 级失败：RPC 未达 runtime（pending sweep 超时 / WS 断连 rejectAll）→
+    // 无 runtime 分类码 → runtime 侧呈现未发生 → toast 兜底（AGENTS.md 规则 #3）
+    f.chatApi.compact.mockRejectedValueOnce(Object.assign(new Error('request timeout after 66000ms'), { code: 'timeout' }))
     await f.useChat.compact('s15')
-    // manualCompactionState 仍 false（compaction_end 未到达）→ catch toast 兜底
     expect(f.toast.error).toHaveBeenCalledTimes(1)
     expect(f.toast.error).toHaveBeenCalledWith(
       expect.stringContaining('composable.compactFailed')
@@ -344,17 +342,48 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('compact compaction 级失败（compaction_end 先于 RPC reject 到达）：catch 不 toast（MF-1）', async () => {
+  it('compact busy 预检拒绝（envelope 分类码 compact_busy）：抑制 toast，对话流呈现由 runtime stream_warn 编排', async () => {
     const f = makeFixture()
-    // 模拟 pi 时序：compact() 失败时先 emit compaction_end 后 throw（agent-session.js catch 块）
-    f.chatApi.compact.mockImplementationOnce(() => {
-      f.emit('s16', msg('s16', 'session.compacted', { error: '上下文压缩失败' }))
-      return Promise.reject(new Error('上下文压缩失败'))
-    })
-    await f.useChat.compact('s16')
-    // compaction 级失败：interpreter 经 compaction_end{errorMessage} → message.error 进对话流（确定可见）
-    // catch 不 toast（避免与 interpreter 双提示）
+    // runtime dispatcher.compact busy 预检 throw 带 code（D4-2）→ handler envelope 透传 →
+    // catch 见分类码 → 抑制 toast（对话流 system 提示由 stream_warn 广播承担，非本 catch 职责）
+    f.chatApi.compact.mockRejectedValueOnce(Object.assign(new Error('Cannot compact while agent generating'), { code: 'compact_busy' }))
+    await f.useChat.compact('s15b')
     expect(f.toast.error).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('compact pi 层失败（envelope 分类码 compact_failed）：抑制 toast，interpreter 对话流呈现', async () => {
+    const f = makeFixture()
+    // compact RPC reject 携带分类码 compact_failed：pi 层失败必发 compaction_end{errorMessage}
+    // → interpreter 已编排对话流呈现；ensureActive 失败由 session 状态面呈现。catch 不 toast。
+    f.chatApi.compact.mockRejectedValueOnce(Object.assign(new Error('上下文压缩失败'), { code: 'compact_failed' }))
+    await f.useChat.compact('s16')
+    expect(f.toast.error).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('compact 未知分类码（runtime 未来新增码）：保守回退 toast 兜底（契约边界）', async () => {
+    const f = makeFixture()
+    // 未知分类码：renderer 未升级的协议演进形态——错误可见性优先，保守 toast
+    f.chatApi.compact.mockRejectedValueOnce(Object.assign(new Error('compact cancelled someday'), { code: 'compact_cancelled_future' }))
+    await f.useChat.compact('s16b')
+    expect(f.toast.error).toHaveBeenCalledTimes(1)
+    expect(f.toast.error).toHaveBeenCalledWith(
+      expect.stringContaining('composable.compactFailed')
+    )
+    f.dispose()
+  })
+
+  it('compact 非法形态 reject（code 非字符串 / 无 code 裸 Error）：保守回退 toast 兜底（契约边界）', async () => {
+    const f = makeFixture()
+    // 非法形态：envelope code 非字符串（协议漂移）与无 code 裸 Error（WS 断连 rejectAll /
+    // 本地异常）均无 runtime 分类呈现 → toast 兜底
+    f.chatApi.compact.mockRejectedValueOnce(Object.assign(new Error('weird envelope'), { code: 42 }))
+    await f.useChat.compact('s16c')
+    expect(f.toast.error).toHaveBeenCalledTimes(1)
+    f.chatApi.compact.mockRejectedValueOnce(new Error('ws closed'))
+    await f.useChat.compact('s16c')
+    expect(f.toast.error).toHaveBeenCalledTimes(2)
     f.dispose()
   })
 
@@ -746,14 +775,13 @@ describe('subagent.directive 广播消费', () => {
   })
 })
 
-// ── ①b toast 抑制（timeout-slow-flow-wallclock D2/r4 极性修正）────────────────
+// ── sendBash toast 抑制（msg-pipeline-debloat D4-2 分类码路由）────────────────
 //
-// 极性（§7 useChat 行为权威表述）：executingBash 是「命令执行中」瞬时态（bashStart 置 /
-// bashResult·markBashError 清），「已收合成终态」= getExecutingBash 查询为空（取反）——
-// 为空 → 抑制 bashFailed toast（气泡终态是权威呈现面）；非空（命令仍在执行 = env backstop
-// 先到形态）→ 不抑制（toast 是唯一提示）。
-describe('sendBash ①b toast 抑制（D2 极性：空→抑制 / 非空→不抑制）', () => {
-  it('终态帧先于 error envelope 到达（executingBash 为空）→ 抑制 bashFailed toast，气泡终态是权威面', async () => {
+// 判别式：error envelope 携带 runtime 分类码 'message_blocked'（bash handler 对 blocked
+// 失败落的码，错误气泡已广播）→ 抑制 toast；transport 级（pending 超时 / 断连，机械码
+// 或无码）→ 保守 toast 兜底（错误可见性优先）。
+describe('sendBash toast 抑制（D4-2 分类码：message_blocked→抑制 / 无码→兜底）', () => {
+  it('error envelope 携带分类码 message_blocked → 抑制 bashFailed toast，错误气泡是权威面', async () => {
     const f = makeFixture()
     // bash RPC 挂起：手动控制 reject 时机（模拟 runtime 先广播合成终态帧、后回 error envelope）
     let rejectBash: (e: unknown) => void = () => {}
@@ -768,15 +796,14 @@ describe('sendBash ①b toast 抑制（D2 极性：空→抑制 / 非空→不�
       command: 'sleep 3700', output: '命令执行超过 1 小时，已停止等待……', exitCode: null,
       cancelled: false, truncated: false, excludeFromContext: false, timestamp: 1724000000001,
     }))
-    expect(getExecutingBashForTest('b1')).toBeUndefined()
-    // error envelope（blocked → 'Bash execution failed'）此时刻达
-    rejectBash(new Error('Bash execution failed'))
+    // error envelope（blocked → 分类码 message_blocked + 错误气泡已广播）此时刻达
+    rejectBash(Object.assign(new Error('Bash execution failed'), { code: 'message_blocked' }))
     await sending
     expect(f.toast.error).not.toHaveBeenCalled()
     f.dispose()
   })
 
-  it('终态帧未到达（executingBash 非空 = env backstop 先到形态）→ 不抑制，toast 是唯一提示', async () => {
+  it('pending 超时 reject（机械码 timeout = runtime 呈现未发生）→ toast 是唯一提示', async () => {
     const f = makeFixture()
     let rejectBash: (e: unknown) => void = () => {}
     f.chatApi.bash.mockImplementation(
@@ -785,20 +812,19 @@ describe('sendBash ①b toast 抑制（D2 极性：空→抑制 / 非空→不�
     const sending = f.useChat.sendBash('b2', 'sleep 3700', false)
     // bashStart 到达（命令确实在 runtime 执行中），bashResult 未到（runtime 3600s 未到点）
     f.emit('b2', msg('b2', 'message.bashStart', { command: 'sleep 3700', excludeFromContext: false, timestamp: 1724000000000 }))
-    expect(getExecutingBashForTest('b2')).toBeDefined()
-    // renderer backstop（3660s 或中间态 65s）先 reject
-    rejectBash(new Error('request timeout after 3660000ms'))
+    // renderer backstop（3660s 或中间态 65s）先 reject（pending 机械码 timeout）
+    rejectBash(Object.assign(new Error('request timeout after 3660000ms'), { code: 'timeout' }))
     await sending
     expect(f.toast.error).toHaveBeenCalledTimes(1)
     expect(f.toast.error).toHaveBeenCalledWith(expect.stringContaining('request timeout after 3660000ms'))
     f.dispose()
   })
 
-  it('命令从未到达 runtime（executingBash 从未置位）→ 抑制 toast（无终态可呈现，行为归 deviations 登记）', async () => {
+  it('无分类码 reject（WS 断连 rejectAll 形态）→ 保守回退 toast 兜底（契约边界）', async () => {
     const f = makeFixture()
     f.chatApi.bash.mockRejectedValue(new Error('transport unavailable (ws not open)'))
     await f.useChat.sendBash('b3', 'echo hi', false)
-    expect(f.toast.error).not.toHaveBeenCalled()
+    expect(f.toast.error).toHaveBeenCalledTimes(1)
     f.dispose()
   })
 })

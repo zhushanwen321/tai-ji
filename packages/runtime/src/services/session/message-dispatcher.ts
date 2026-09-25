@@ -630,10 +630,17 @@ export class MessageDispatcher {
           : 'agent generating'
       const errMsg = `Cannot compact while ${reason}`
       console.warn(`[message-dispatcher] compact preemptive reject (busy), sid=${sessionId}, reason=${reason}`)
-      // 零广播：不广播 session.compacted{error}。预检在 RPC 前，pi 未发 compaction_start，interpreter 不参与；
-      // 错误经 throw → session-message-handler error envelope → useChat compact catch（MF-1：busy/transport 级失败
-      // compaction_end 未到达 → catch toast 兜底；compaction 级失败由 interpreter 进对话流，catch 不 toast）。
-      throw new Error(errMsg)
+      // 对话流内联呈现（msg-pipeline-debloat D4-2）：busy 拒绝的可见面从 renderer toast
+      // 改为对话流 system 提示条目——走 message.stream_warn（非终结性提示通道：仅追加
+      // system 消息、不调 finalizeSession，正在流式的 turn 不受影响；runtime 自产提示、
+      // pi 无 entry 的正确入流形态）。不能用 message.error——其终态 effect 会把生成中的
+      // assistant 误收口为 error。renderer catch 见 compact_busy 分类码抑制 toast，双呈现
+      // 不叠加。零生命周期广播不变：不广播 session.compacted{error}（预检在 RPC 前，pi
+      // 未发 compaction_start，interpreter 状态机不参与）。
+      this.messageBus?.publish(sessionId, { type: 'message.stream_warn', payload: { sessionId, content: errMsg } })
+      // throw 扁平错误携带分类码（WorktreeService 同款 Object.assign 模式）→ handler
+      // error envelope 原样透传 → renderer catch 按分类码路由（抑制 toast）。
+      throw Object.assign(new Error(errMsg), { code: 'compact_busy' })
     }
 
     // [RT-4#10] 预检与置位原子化：预检通过后立即写 'compacting-start'（原语义 = 只在 pi

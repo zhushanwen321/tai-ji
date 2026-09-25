@@ -92,10 +92,9 @@ describe('useChat.sendBash / abortBash', () => {
     expect(toastError).not.toHaveBeenCalled()
   })
 
-  it('T5: reject 且合成终态已收（bashStart→bashResult 已到达）→ toast 抑制 + sendBash resolve', async () => {
-    // runtime 超时链路时序：bashStart 置位 → 合成终态帧（诚实文案）清 executingBash →
-    // error envelope（'Bash execution failed'）最后到达触发本 catch。用户已在气泡看到
-    // 终态（三步指引），「失败」toast 冗余且误导（命令可能仍在运行）→ ①b 抑制。
+  it('T5: error envelope 携带分类码 message_blocked（bash handler blocked 失败，错误气泡已广播）→ toast 抑制 + sendBash resolve', async () => {
+    // D4-2 分类码路由：bash reject 携带 runtime 分类码 'message_blocked'（错误气泡呈现
+    // 已由 runtime 编排），再弹「失败」toast 冗余且误导 → 抑制。
     let rejectBash: (e: unknown) => void = () => {}
     apiMock.bash.mockImplementation(() => new Promise((_resolve, reject) => { rejectBash = reject }))
     const { sendBash } = useChat()
@@ -103,14 +102,14 @@ describe('useChat.sendBash / abortBash', () => {
     const sending = sendBash('s-term', 'sleep 3700', false)
     emitBashStart('s-term', 'sleep 3700')
     emitBashResult('s-term', 'sleep 3700', '命令执行超过 1 小时，已停止等待——命令可能仍在后台运行。……')
-    rejectBash(new Error('Bash execution failed'))
+    rejectBash(Object.assign(new Error('Bash execution failed'), { code: 'message_blocked' }))
     await expect(sending).resolves.toBe(false) // 不 throw（错误已消化，与 send/abort 同策略）；[R2-A5] 失败返回 false
 
     expect(apiMock.bash).toHaveBeenCalledOnce()
     expect(toastError).not.toHaveBeenCalled()
   })
 
-  it('T5b: reject 且终态未到（仅 bashStart，executingBash 非空 = backstop 先到）→ toastError 被调', async () => {
+  it('T5b: pending 超时 reject（机械码 timeout = runtime 呈现未发生）→ toastError 被调', async () => {
     // env 逃生门形态：renderer backstop（3660s）先于 runtime 3600s 判死，气泡无终态，
     // toast 是唯一提示（D5 不变量收窄的已知接受行为）→ 不抑制。
     let rejectBash: (e: unknown) => void = () => {}
@@ -119,7 +118,7 @@ describe('useChat.sendBash / abortBash', () => {
 
     const sending = sendBash('s-inflight', 'sleep 3700', false)
     emitBashStart('s-inflight', 'sleep 3700')
-    rejectBash(new Error('request timeout after 3660000ms'))
+    rejectBash(Object.assign(new Error('request timeout after 3660000ms'), { code: 'timeout' }))
     await expect(sending).resolves.toBe(false)
 
     expect(apiMock.bash).toHaveBeenCalledOnce()

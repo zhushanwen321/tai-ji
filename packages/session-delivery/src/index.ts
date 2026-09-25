@@ -28,3 +28,8 @@ export {
   type DeliveryWarnSink,
   type DeliveryConfigWithWarn,
 } from './delivery.js'
+
+export {
+  // 用户回收错误类（D4-1）：cancel/drain 对挂起 waiter 的 reject，消费方 instanceof 判别
+  DeliveryReclaimError,
+} from './errors.js'

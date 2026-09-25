@@ -10,6 +10,9 @@ export type {
   CommandSourceInfo,
   DefaultModelSource,
   WorktreeErrorCode, WorktreeUnknownErrorCode, WorktreeEnvelopeCode,
+  // session.compact 失败分类码（msg-pipeline-debloat D4-2）：runtime handler 落码 +
+  // core useChat toast 抑制判别跨包共用
+  CompactErrorCode,
   TerminalConfig, TerminalErrorCode, TerminalUnknownErrorCode, TerminalEnvelopeCode,
   SkillCacheScope, SkillCacheInvalidatedPayload,
   SessionTraceHeaderPayload, SessionTraceMalformedLine, SessionTraceSessionEndPayload,

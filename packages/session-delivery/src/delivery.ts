@@ -49,6 +49,7 @@
  * （受理转 in-flight 后不计；「在途未确认」数经 entriesFull() 全量视图消费）。
  */
 
+import { DeliveryReclaimError } from './errors.js'
 import { LruSet } from './lru.js'
 import type {
   DeliveryConfig,
@@ -1040,12 +1041,12 @@ export function createDelivery(
         notifyChange()
         return { kind: 'reclaim-requested', entry: snapshot(e) }
       }
-      rejectWaitersOf(e, new Error(`delivery cancelled: ${id}`))
+      rejectWaitersOf(e, new DeliveryReclaimError('cancelled', id))
       finalizeEntry(e, 'cancelled')
       return { kind: 'cancelled', entry: snapshot(e) }
     }
     // queued（含出站批次中）/failed：本地终结（× 移除 failed 同路径）
-    rejectWaitersOf(e, new Error(`delivery cancelled: ${id}`))
+    rejectWaitersOf(e, new DeliveryReclaimError('cancelled', id))
     finalizeEntry(e, 'cancelled')
     return { kind: 'cancelled', entry: snapshot(e) }
   }
@@ -1070,7 +1071,7 @@ export function createDelivery(
     })
     // 挂起中的 checked 不留永久 pending
     for (const w of checkedPending) {
-      w.reject(new Error('delivery drained'))
+      w.reject(new DeliveryReclaimError('drained'))
     }
     checkedPending.length = 0
     stopWatchdog()

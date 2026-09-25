@@ -931,6 +931,23 @@ export type WorktreeUnknownErrorCode = 'worktree_failed'
 /** envelope code 字段的完整联合（业务码 + 兜底） */
 export type WorktreeEnvelopeCode = WorktreeErrorCode | WorktreeUnknownErrorCode
 
+/**
+ * session.compact RPC 失败的分类码（msg-pipeline-debloat D4-2，runtime ↔ renderer 契约 SSOT）。
+ *
+ * 产生点：session-message-handler.handleSessionCompact 的 error envelope——
+ * - compact_busy：dispatcher.compact busy 预检拒绝（压缩/bash/生成互斥，throw 扁平错误
+ *   携带 code，handler 原样透传）。
+ * - compact_failed：compact 执行失败（pi 层失败——interpreter 已编排对话流呈现；
+ *   ensureActive 恢复失败——session 状态面呈现）。
+ *
+ * 消费点：core useChat 的 compact/sendBash toast 抑制判别——envelope 携带分类码 =
+ * runtime 已编排用户可见呈现（对话流内联 / 状态面），抑制全局错误 toast。
+ *
+ * 新增分类码必须在此登记（编译器强制两端同步）；未登记/未知 code 在 renderer 侧
+ * 保守回退为 toast 兜底（错误可见性优先）。
+ */
+export type CompactErrorCode = 'compact_busy' | 'compact_failed'
+
 export type ServerMessageType =
   | 'session.created' | 'session.deleted' | 'session.deletedByCwd' | 'config.sessions' | 'session.history' | 'session.switched'
   | 'session.compacting' | 'session.compacted' | 'session.renamed' | 'session.forkNotice' | 'session.skillNotice' | 'session.handoffStarted' | 'session.handoffComplete' | 'session.handoffAborted' | 'session.setProject'
