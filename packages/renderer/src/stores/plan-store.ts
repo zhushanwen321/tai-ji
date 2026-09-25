@@ -149,6 +149,15 @@ export const PLAN_REVIEW_DEGRADED_STABLE_MS = 2_000
 export const PLAN_REVIEW_ACK_FALLBACK_MS = 10_000
 
 /**
+ * 活动补拉冷却（新 session 首拉窗口的丢帧补偿，2026-09-25 真机缺陷）：同一 session 的
+ * assistant 消息活动触发 reconcileOnAssistantMessage 补拉的最小间隔。量级对齐
+ * PLAN_REVIEW_ACK_FALLBACK_MS（投影链路时延冗余）取半——补拉是「状态可能已刷新」的
+ * 对账而非异常恢复，频率上限取「每 turn 至多一次」的近似（turn 内多条 assistant 消息
+ * 合并），避免长对话 session 每条消息一拉。
+ */
+export const PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS = 5_000
+
+/**
  * 冷拉对账「pending 在场」真值的再入店缝（store 禁 import store 铁律的合规绕行——
  * extension-ui registry 的唯一写入方 useExtensionUI 注册 sink；本 store 只广播事实，
  * registry 呈现 ready 由 sink 落店，respond 的 requestId 定位随之可用）。
@@ -273,6 +282,12 @@ export const usePlanStore = defineStore('plan', () => {
    */
   const frameRevs = new Map<string, number>()
 
+  /**
+   * 活动补拉冷却表（per-sid 上次活动补拉时间戳；新 session 首拉窗口丢帧补偿）。
+   * 语义见 reconcileOnAssistantMessage。清理挂 sessionCleanup 链（与 frameRevs 同批）。
+   */
+  const activityReconcileAt = new Map<string, number>()
+
   // ── 审批窗口 per-session 定时器（D4：2s 稳定窗 + 10s 兜底共 ≤2 个，single-flight 重置不叠加）──
   // 定时器 handle 不进响应式分区（副作用句柄非状态）；epoch 世代在分区内（回调比较防陈旧触发）。
   // 清理与 frameRevs 同挂 sessionCleanup 链（防 session 销毁后定时器空转写幽灵分区）。
@@ -281,6 +296,7 @@ export const usePlanStore = defineStore('plan', () => {
 
   registerSessionCleanup((sid) => {
     frameRevs.delete(sid)
+    activityReconcileAt.delete(sid)
     const stable = stableTimers.get(sid)
     if (stable) {
       clearTimeout(stable.handle)
@@ -423,6 +439,43 @@ export const usePlanStore = defineStore('plan', () => {
         p.loadError = msg
       })
     }
+  }
+
+  /**
+   * 活动信号补拉（2026-09-25 真机缺陷「新 session 发 /plan 状态带不渲染」的丢帧补偿）。
+   *
+   * 缺陷时序（真机双形态实证）：session 创建/载入即首拉（loadPanel 时点）→ 此时
+   * plan-state entry 尚未落盘，冷读 reply = INACTIVE 落分区；随后 runtime 的
+   * session.planState 帧在「订阅建立前送达」（广播早于订阅，AGENTS.md Runtime broadcast
+   * 时序竞争规则的又一实例）或因 runtime 水位竞态未发布——renderer 侧两条腿全断后
+   * **无任何再拉触发点**（无新帧、无切换），view 恒 INACTIVE → 状态带永不渲染，
+   * 需手动切走切回（再次首拉，此时磁盘已就绪）才恢复。
+   *
+   * 补偿锚点 = assistant 消息活动（use-plan-sync 订阅 message.message_start /
+   * message.complete 转发）：/plan 处理写 plan entry 是 turn 的前置动作，必然早于
+   * assistant 消息开始，故活动信号到达时磁盘必已就绪，补拉必得真值（message_start
+   * 取 turn 内最早边沿——长 turn 中状态带在首条消息开始即恢复，不等 turn 收口；
+   * complete 兜底多消息场景）。范式对齐 useCommandSync 补拉闭环（消费侧动作边沿
+   * 触发主动拉取，不依赖 broadcast 可靠性）。
+   *
+   * 双门限频（无定时器、无轮询，纯事件驱动 + 时间戳比较）：
+   * - 非活跃门：分区 view 已活跃时不补——活跃态的状态变化由帧链自持（帧在订阅存续期
+   *   必达，useSessionEvents 契约），补拉无信息增益。
+   * - 冷却门：PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS 内同 sid 不重复补（长对话 session
+   *   每条 assistant 消息都触发时的频率上限）。
+   */
+  function reconcileOnAssistantMessage(sessionId: string): void {
+    if (!sessionId) return
+    const now = Date.now()
+    const last = activityReconcileAt.get(sessionId) ?? 0
+    if (now - last < PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS) return
+    let inactive = false
+    scoped.updateFor(sessionId, (p) => {
+      inactive = p.view?.isActive !== true
+    })
+    if (!inactive) return
+    activityReconcileAt.set(sessionId, now)
+    void loadPlanState(sessionId)
   }
 
   // ── 审批窗口 actions（D4；写入口 = useExtensionUI 挂起漏斗 + 10s 兜底冷拉）──
@@ -650,6 +703,7 @@ export const usePlanStore = defineStore('plan', () => {
     syncFocus,
     applyFrame,
     loadPlanState,
+    reconcileOnAssistantMessage,
     coldReconcilePlanReview,
     setPlanReviewPending,
     markPlanReviewAnswered,

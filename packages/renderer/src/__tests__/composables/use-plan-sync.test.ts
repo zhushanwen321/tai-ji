@@ -287,6 +287,107 @@ describe('WS 帧：状态流转与分区隔离', () => {
   })
 })
 
+// ── 活动补拉：新 session 首拉窗口丢帧补偿（2026-09-25 真机缺陷）──────────────
+
+/**
+ * 缺陷时序（真机双形态实证）：session 创建即首拉 → plan-state entry 未落盘，reply
+ * INACTIVE 落分区 → session.planState 帧早于订阅送达或 runtime 水位竞态未发布 →
+ * 两条腿全断且无再拉触发点 → 状态带永不渲染（需手动切走切回）。补偿锚点 =
+ * assistant 消息活动（message_start = turn 内最早边沿；message.complete 兜底；/plan
+ * 写 entry 是 turn 前置动作，必然早于消息开始，补拉必得真值）。限频双门（非活跃 +
+ * 冷却）内聚 plan-store。
+ */
+describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧补偿', () => {
+  /** assistant 消息活动帧（message_start 首选；payload 形状本 handler 不消费） */
+  function dispatchActivity(sid: string, type: 'message.message_start' | 'message.complete' = 'message.message_start'): void {
+    events.dispatchSession(sid, { type, payload: { sessionId: sid } })
+  }
+
+  it('首拉回 INACTIVE + planState 帧全程未达 → 消息活动触发补拉 → 真值恢复 view', async () => {
+    const host = mountHost('A')
+    await settle()
+    // 首拉 reply = INACTIVE（真机形态：plan-state entry 尚未落盘时冷读）
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
+    await settle()
+    expect(host.plan.view.value?.isActive).toBe(false)
+
+    // session.planState 帧不 dispatch（真机：帧早于订阅送达 / 未发布——两条腿全断）
+
+    // assistant 消息开始（turn 内最早活动信号）→ 补拉发出
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(2) // 首拉 + 补拉
+
+    // 补拉 reply = planning（entry 已落盘后的冷读真值）→ view 恢复活跃
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A') })
+    await settle()
+    expect(host.plan.view.value?.isActive).toBe(true)
+    expect(host.plan.stage.value).not.toBeNull()
+  })
+
+  it('message.complete 同样触发补拉（长 turn 多消息兜底锚点）', async () => {
+    const host = mountHost('A')
+    await settle()
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
+    await settle()
+
+    dispatchActivity('A', 'message.complete')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('冷却门：冷却窗口内的后续活动信号不重复补拉（频率上限）', async () => {
+    const host = mountHost('A')
+    await settle()
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
+    await settle()
+
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(2)
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
+    await settle()
+
+    // 冷却窗口内第二条活动信号：不再补（PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS 未过）
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('非活跃门：view 已被 live 帧点亮时活动信号不触发补拉（活跃态由帧链自持）', async () => {
+    const host = mountHost('A')
+    await settle()
+    dispatchPlanState('A', planStateOf('A')) // live 帧点亮
+    await settle()
+    expect(host.plan.view.value?.isActive).toBe(true)
+
+    dispatchActivity('A')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(1) // 仅首拉，无补拉
+  })
+
+  it('补拉走 updateFor(sid)：焦点 session 的活动信号补拉写自身分区（capturedSid 语义）', async () => {
+    const host = mountHost('A')
+    await settle()
+    resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
+    await settle()
+
+    // 切焦点到 B（A 的订阅退订，A 分区数据保留；后台 session 无消费面=无活动信号转发）
+    host.sidRef.value = 'B'
+    await settle()
+    resolveLatestForSid('B', { sessionId: 'B', planState: planStateOf('B', { isActive: false }) })
+    await settle()
+
+    // 焦点 B 的活动信号正常补拉且只写 B 分区
+    dispatchActivity('B')
+    await settle()
+    expect(commandMock).toHaveBeenCalledTimes(3) // A 首拉 + B 首拉 + B 补拉
+    resolveLatestForSid('B', { sessionId: 'B', planState: planStateOf('B') })
+    await settle()
+    expect(host.plan.view.value?.isActive).toBe(true)
+  })
+})
+
 // ── 评论草稿：per-session 隔离与清理链 ───────────────────────
 
 describe('评论草稿：per-session 隔离与清理链', () => {
