@@ -68,6 +68,7 @@ import { NotifyRateLimiter, registerNotifyRpcHandler } from '../src/services/plu
 import { StatusBarRegistry } from '../src/services/plugin-service/status-bar-registry.js'
 import { asBoundedString, asSafeKey, asString } from '../src/services/plugin-service/validation.js'
 import { PLUGIN_NOTIFY_LIMITS } from '@taiji/shared'
+import type { SendPromptReason } from '@taiji/shared'
 import type { SessionInfo } from '../src/services/plugin-service/plugin-types.js'
 import { PluginService } from '../src/services/plugin-service/plugin-service.js'
 import { createAgentAPI } from '../src/services/plugin-service/plugin-bootstrap.js'
@@ -811,7 +812,7 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
     configSet: ReturnType<typeof vi.fn<(pluginId: string, key: string, value: unknown) => Promise<void>>>
     storageSet: ReturnType<typeof vi.fn<(pluginId: string, key: string, value: unknown, scope: 'global' | 'workspace') => void>>
     sessionDataSet: ReturnType<typeof vi.fn<(sessionId: string, key: string, value: unknown) => void>>
-    messageSent: ReturnType<typeof vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error' }>>>
+    messageSent: ReturnType<typeof vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: SendPromptReason }>>>
     notifySent: ReturnType<typeof vi.fn<(pluginId: string, level: string, message: string) => void>>
     statusBarSet: ReturnType<typeof vi.fn<(pluginId: string, id: string, text: string, options?: Record<string, unknown>) => Promise<void>>>
     viewUpdated: ReturnType<typeof vi.fn<(pluginId: string, viewId: string, guiTree: unknown[]) => void>>
@@ -830,7 +831,7 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
       configSet: vi.fn<(pluginId: string, key: string, value: unknown) => Promise<void>>(),
       storageSet: vi.fn<(pluginId: string, key: string, value: unknown, scope: 'global' | 'workspace') => void>(),
       sessionDataSet: vi.fn<(sessionId: string, key: string, value: unknown) => void>(),
-      messageSent: vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error' }>>(),
+      messageSent: vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: SendPromptReason }>>(),
       notifySent: vi.fn<(pluginId: string, level: string, message: string) => void>(),
       statusBarSet: vi.fn<(pluginId: string, id: string, text: string, options?: Record<string, unknown>) => Promise<void>>(),
       viewUpdated: vi.fn<(pluginId: string, viewId: string, guiTree: unknown[]) => void>(),

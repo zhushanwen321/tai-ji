@@ -169,6 +169,26 @@ export function markerLiteral(bareId: string): string {
 }
 
 /**
+ * sendMessage 回执 reason 词表单点（msg-pipeline-debloat D4-6：原 runtime
+ * message-dispatcher / interfaces / session-api / session-service 与 plugin-sdk 五处
+ * 手写词表收敛至此，消费方一律 import 本类型）。
+ *
+ * 值语义（投递所有权内核架构下受理段实际产出）：
+ * - 'command-missing'：requireCommand 前置校验未命中拒发（命令串不进模型）；
+ * - 'hook-blocked'：BeforeSend hook 拦截；
+ * - 'error'：传输/装配级失败收口（session-api 异常收口、plugin-rpc-setup 装配缺失等）。
+ *
+ * busy/compacting/bash 三退役值已删：「排队取代拒绝」后投递内核对暂不可收时态只排队
+ * 不回拒，运行面只产上述三值。收窄裁决（P7 定案，非 breaking）：plugin-sdk
+ * private:true 不发布 npm（词表非外部发布契约面）+ 运行面只看 blocked/rejected 布尔
+ * （reason 是诊断/文案面，插件不得依赖精确值做行为分支）+ 仓内零处退役值比较。
+ *
+ * 另一语境勿混淆：WS 广播 send.rejected 的 reason（protocol.ts，'busy' | 'compacting'
+ * | 'processing'）是 bash 通道 busy 预检的防御反馈词表，不经本类型。
+ */
+export type SendPromptReason = 'command-missing' | 'hook-blocked' | 'error'
+
+/**
  * 帧条目 preview 截断长度（投递队列展示投影）。runtime transport 与 core mock 轨共用
  * 同值——mock 轨/real 轨帧形态一致（否则 mock 型前端测试的基线会与真机分叉）。
  */

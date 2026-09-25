@@ -36,6 +36,7 @@ import type {
   ProviderId,
   LlmRetryConfig,
   RenameMode,
+  SendPromptReason,
 } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type { SaveAppConfigResult } from './services/app-config-store.js'
@@ -153,9 +154,9 @@ export interface ISessionService {
    * receipt：内核受理回执（delivery.submit reply 消费；hook 否决或装配缺失时缺席）。
    *
    * reason 回执词表（AP-4）：受理段实际产出 'command-missing' | 'hook-blocked'（投递
-   * 内核「排队取代拒绝」后 busy/compacting/bash 拒绝已退役）；词表保留全值集为插件面
-   * 回执契约，与 message-dispatcher.ts 的 SendPromptReason 对齐（interface 层不反向
-   * import service 实现文件——既有内联惯例）；既有布尔消费方按字段兼容不受影响。
+   * 内核「排队取代拒绝」后拒绝路径已退役）；词表单点 = shared SendPromptReason（D4-6
+   * 收敛，busy/compacting/bash 退役值已删——收窄裁决见 shared 定义处），跨包 import
+   * 消费；既有布尔消费方按字段兼容不受影响。
    */
   sendMessage(
     sessionId: string,
@@ -167,7 +168,7 @@ export interface ISessionService {
     blocked: boolean
     rejected?: boolean
     receipt?: DeliverySubmitResult
-    reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+    reason?: SendPromptReason
   }>
 
   // [HISTORICAL] sendSubagentMessage 已删除（composer 四符号设计 D2，marker 半成品通道废弃）：

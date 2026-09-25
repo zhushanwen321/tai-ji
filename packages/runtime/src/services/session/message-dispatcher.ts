@@ -41,6 +41,7 @@ import { toErrorMessage, RpcTimeoutError } from '../../utils/errors.js'
 import { applySessionOccupancyTransition, IDLE_SESSION_OCCUPANCY, userStoppedGate } from './event-interpreter.js'
 import type { SessionDeliveryRegistry, DeliverySubmitResult } from './session-delivery-registry.js'
 import type { DeliveryIntent } from '@zhushanwen/session-delivery'
+import type { SendPromptReason } from '@taiji/shared'
 import { AbortLiveness } from './abort-liveness.js'
 import type { AbortSource } from './abort-liveness.js'
 import { BashDispatcher } from './bash-dispatcher.js'
@@ -51,15 +52,11 @@ import { BashDispatcher } from './bash-dispatcher.js'
 // import abort-liveness（本模块仅内部使用，不再转写）。
 export { resetAbortLivenessForTest } from './abort-liveness.js'
 
-/**
- * sendMessage 回执 reason 词表（plugin-header-action-modal-points D6/AP-4，u5a）：
- * 投递所有权内核架构下受理段实际产出 = 'command-missing'（requireCommand 未命中）与
- * 'hook-blocked'（BeforeSend hook 拦截）两值；busy/compacting/bash 三态已随「排队取代
- * 拒绝」（D5）退役——暂不可收时态由内核持有，不再回拒。词表保留全值集为 interfaces
- * 层插件回执契约（plugin-sdk / plugin-service api/session-api 映射消费兼容），插件不得
- * 依赖 reason 精确值做行为分支（运行面只看 blocked）。
- */
-export type SendPromptReason = 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+// sendMessage 回执 reason 词表 SSOT = shared SendPromptReason（msg-pipeline-debloat
+// D4-6 单点收敛，原 5 处手写词表归一；busy/compacting/bash 退役值收窄裁决与值语义见
+// shared 定义处）。运行面分支只看 blocked——插件/调用方不得依赖 reason 精确值做行为
+// 分支。本类型经 @taiji/shared 出口供 interfaces / session-api / session-service /
+// plugin-sdk 同源消费。
 
 /**
  * requireCommand 未命中的短重试参数（P9 探针定案，impl-plan u-probe 行）：命令可用 gap

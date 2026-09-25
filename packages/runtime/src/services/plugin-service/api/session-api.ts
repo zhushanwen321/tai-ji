@@ -25,6 +25,7 @@ import type { PluginRpcServer } from '../plugin-rpc-server.js'
 import type { PluginRpcClient } from '../plugin-rpc-client.js'
 import type { SessionInfo, Disposable } from '../plugin-types.js'
 import type { IPluginServiceDeps } from '../plugin-types.js'
+import type { SendPromptReason } from '@taiji/shared'
 import type { SessionSummary } from '../../../../../shared/src/session.js'
 import type { IPiEngine } from '../../ports/pi-engine.js'
 import type { EntryInvalidationDispatch } from '../plugin-entry-invalidation-dispatch.js'
@@ -275,12 +276,13 @@ export class ActiveSessionResolver {
 }
 
 /**
- * 插件面 sendMessage 回执（AP-4/D6 词表；reason 与 interfaces.ts ISessionService
- * sendMessage 的联合对齐——插件运行面分支只看 accepted，词表是诊断/文案面）。
+ * 插件面 sendMessage 回执（AP-4/D6；reason = shared SendPromptReason 单点词表
+ * （D4-6 收敛，与 ISessionService.sendMessage 同源）——插件运行面分支只看 accepted，
+ * reason 是诊断/文案面，不得依赖精确值做行为分支）。
  */
 export interface PluginSendReceipt {
   accepted: boolean
-  reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+  reason?: SendPromptReason
 }
 
 /** Session 服务依赖（主线程侧） */
