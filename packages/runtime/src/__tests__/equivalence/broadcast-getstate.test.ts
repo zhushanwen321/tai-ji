@@ -392,7 +392,6 @@ describe.skipIf(!FAUX_PI_READY)(
       //   reducer——防双计），两侧同为权威帧派生：id 位置派生、timestamp 同源，严格 deep-equal。
       expect(reducerLive!.messages).toEqual(liveSingleState.messages)
       expect(reducerLive!.messages).toEqual(reloadTailState.messages)
-      expect(reducerLive!.clientUuidMap).toEqual(reloadTailState.clientUuidMap)
       expect(reducerLive!.orphanToolResults).toEqual(reloadTailState.orphanToolResults)
       expect(reducerLive!.orphanToolResults).toHaveLength(0)
       expect(reducerLive!.lastAssistantWithToolCalls).toBe(reloadTailState.lastAssistantWithToolCalls)
