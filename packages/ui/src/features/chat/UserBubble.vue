@@ -105,7 +105,7 @@
       <MarkdownRenderer v-if="!userSegments.length && typeof turn.user?.content === 'string'" :content="turn.user!.content" :session-id="sessionId" />
       </div>
     </div>
-    <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示；撤回三态路由（D6）。 -->
+    <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示；撤回单入口（D6，路由判定在 core）。 -->
     <div
       v-if="!isEditingThisUser"
       class="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 group-focus-within/user:opacity-100"
@@ -157,7 +157,7 @@ import { ArrowRight, Check, Copy, FileText, Pencil, Undo2 } from '@lucide/vue'
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import { Textarea } from '../../primitives/textarea'
-import { turnStableId, findDeliveryEntry } from '@taiji/core/domain/chat'
+import { turnStableId } from '@taiji/core/domain/chat'
 import type { MessageTurn } from '@taiji/core/domain/chat'
 import type { Segment } from '@taiji/shared'
 import { normalizeContent, needsBoundarySpace, normalizeSegmentOrder } from '@taiji/shared'
@@ -262,24 +262,12 @@ function boundarySpaceBefore(i: number): boolean {
 const { copied, copy } = useCopy()
 const userCopyKey = computed(() => `user-${props.turn.user?.id ?? props.turn.index}`)
 
-/* ── [U5 消息撤回 D6] 统一撤回入口三态路由：在途（cancel）/ 已送达（revokeMessage）/ 生成中置灰 ── */
+/* ── [U5 消息撤回 D6] 撤回单入口：UI 透传 targetId，路由判定（在途 cancel / 已送达回退）
+      只在 core useChat.revokeMessage 单点（内核投影复核分派）；UI 仅用 isActive 谓词做
+      展示态（生成中置灰 + tooltip）。 ── */
 
 /** 撤回 targetId = 消息 id 原样（live 态 `u-<uuid>` clientUuid / 基线重开态 pi entryId，形态分派在 runtime） */
 const revokeTargetId = computed(() => props.turn.user?.id ?? null)
-
-/**
- * 在途判定（D6）：内核投影该条目 state 未 delivered——判定谓词与 useChat.revokeMessage
- * 双态路由共享 findDeliveryEntry 单一实现（[MF-1-4]，投影宿主同源，禁两处内联 find 漂移；
- * 判定形态与 useQueueRows 队列气泡的 deliveryQueueEntries 同源：state !== 'delivered'，
- * 不限 lane：direct 车道投出瞬间同样属「未注入」可 cancel）。投影中无该条目（已 morph 成
- * transcript / 已收敛）= 已送达。
- */
-const isPendingDelivery = computed(() => {
-  const id = revokeTargetId.value
-  if (!id) return false
-  const entry = findDeliveryEntry(props.sessionId, id)
-  return !!entry && entry.state !== 'delivered'
-})
 
 /**
  * 生成中置灰（D2 附带裁决）：isActive = isGenerating ∨ pendingSend 的保守超集——撤回编排
@@ -287,15 +275,11 @@ const isPendingDelivery = computed(() => {
  */
 const isRevokeDisabled = computed(() => chatViewDeps.isActive(props.sessionId))
 
-/** 撤回点击：三态路由——生成中守卫（伪禁用兜底）→ 在途 cancel / 已送达 revokeMessage */
+/** 撤回点击：生成中守卫（伪禁用兜底）→ 单回调透传，路由分派在 core */
 function onRevokeClick(): void {
   const id = revokeTargetId.value
   if (!id || isRevokeDisabled.value) return
-  if (isPendingDelivery.value) {
-    chatViewDeps.onRevokePendingMessage?.(props.sessionId, id)
-  } else {
-    chatViewDeps.onRevokeMessage?.(props.sessionId, id)
-  }
+  chatViewDeps.onRevokeMessage(props.sessionId, id)
 }
 
 /* ── 编辑（= fork）：编辑 user 消息后 fork 新会话 ── */
@@ -347,8 +331,7 @@ async function submitEdit(): Promise<void> {
   // return 忽略——与 Composer isSending 语义对齐，防 editAndResend 与 send 并发覆盖
   // useChat 的 pendingDirectSends（per-sid 单条 Map，后写覆盖前写致 rejected 帧误回滚）。
   // 早退置于 editingUserId=null 之前：编辑态保持、草稿不丢，用户可在提交收口后重试。
-  // （isPendingSend 经 ChatViewDeps 注入，旧壳层未 provide 时不互斥，兼容降级）
-  if (isPendingSend?.(props.sessionId)) return
+  if (isPendingSend(props.sessionId)) return
   editingUserId.value = null
   const segments = rebuildSegmentsWithEditedText(user.content, text)
   await editAndResend(props.sessionId, user.id, segments)

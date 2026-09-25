@@ -70,7 +70,6 @@ export default {
     handoffHint: 'Enter text to send as the first message in the new session (optional)… (⏎ handoff & send, Esc to exit)',
     handoffChip: 'Hand off to new session · your input goes to the new session',
     handoffSend: 'Hand off & send to new session',
-    handoffBusy: 'Reply in progress — wait for it to finish or stop it before handing off',
     handoffExit: 'Exit handoff mode',
     bashPlaceholder: 'Run bash command… (!! prefix excludes from context)',
     // Composer shortcut action table copy feedback (composer-pi-shortcuts decision 4 / §3.5)

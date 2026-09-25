@@ -16,9 +16,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { UserBubble, ChatViewDepsKey } from '@taiji/ui'
-import { getDeliveryProjectionRef } from '@taiji/core/domain/chat'
 import type { MessageTurn } from '@taiji/core/domain/chat'
-import type { DeliveryFrameEntry, Message, Segment } from '@taiji/shared'
+import type { Message, Segment } from '@taiji/shared'
 import { buildSkillMarker, segmentsToPrompt, segmentsToText } from '@taiji/shared'
 import { createMockDeps, mockChatProvide } from './helpers'
 
@@ -443,23 +442,8 @@ describe('[D3] submitEdit 双发锁', () => {
     expect(wrapper.find('textarea').exists()).toBe(false)
   })
 
-  it('未 provide isPendingSend（旧壳层兼容降级）→ 不互斥照常提交', async () => {
-    const editAndResend = vi.fn()
-    const deps = createMockDeps({ editAndResend })
-    delete (deps as { isPendingSend?: unknown }).isPendingSend
-    const wrapper = mount(UserBubble, {
-      props: { turn: makeTurn(), sessionId: 's1', canEdit: true, isSessionEditable: false },
-      global: {
-        provide: { [ChatViewDepsKey as symbol]: deps },
-        stubs: { MarkdownRenderer: true, ImageThumb: true },
-      },
-    })
-    const actions = wrapper.find('.group\\/user .opacity-0')
-    await actions.findAll('button')[1]!.trigger('click')
-    await wrapper.find('textarea').setValue('降级提交')
-    await findSendButton(wrapper).trigger('click')
-    expect(editAndResend).toHaveBeenCalledTimes(1)
-  })
+  // （「未 provide isPendingSend 旧壳层兼容降级」用例随 D6 收敛删除——isPendingSend 改必填后
+  // 缺位场景在类型层不可构造，降级分支已从 submitEdit 删除。）
 })
 
 // ── [MF-2] submitEdit 编辑含命令的消息：prompt 中命令只出现一次 ──
@@ -632,28 +616,18 @@ describe('chat-flow-timestamp U2: UserBubble 行尾时刻（A4）', () => {
   })
 })
 
-// ── [U5 消息撤回 D6] 撤回按钮三态路由（在途 cancel / 已送达 revokeMessage / 生成中置灰）──
-// 判定数据源 = core 内核投影（getDeliveryProjectionRef，测试直接 replaceDeliveryProjection
-// 注入帧数据）+ deps.isActive（生成中态）。断言对象是 ChatViewDeps 两回调的调用分派——
-// RPC 编排（cancel/revoke 的 reply 消费）在 core useChat 测试覆盖，此处锁定 UI 路由判别。
-describe('[U5] UserBubble 撤回三态路由（D6）', () => {
-  const onRevokePendingMessage = vi.fn()
+// ── [U5 消息撤回 D6] 撤回按钮单入口（生成中置灰 + 单回调透传）──
+// D6 收敛后 UI 不做路由判定（在途 cancel / 已送达树内回退的分派在 core useChat.revokeMessage
+// 单点，其投影复核由 core 侧测试覆盖），UI 仅用 isActive 谓词做展示态（置灰 + tooltip）；
+// 此处锁定单回调透传与生成中守卫。
+describe('[U5] UserBubble 撤回单入口（D6）', () => {
   const onRevokeMessage = vi.fn()
 
-  function mountRevokeBubble(projectionEntries: Array<Pick<DeliveryFrameEntry, 'clientUuid' | 'state'> & Partial<DeliveryFrameEntry>>, isActive = false) {
-    // 投影注入：直接写模块级 ref（replaceDeliveryProjection 未在包根导出；ref 可写性与
-    // 生产写方同形——整体替换 Map 触发响应式）
-    const entries: DeliveryFrameEntry[] = projectionEntries.map((e) => ({
-      clientUuid: e.clientUuid,
-      preview: 'preview',
-      state: e.state,
-      lane: e.lane ?? 'steer',
-    }))
-    getDeliveryProjectionRef().value = entries.length === 0 ? new Map() : new Map([['s1', entries]])
+  function mountRevokeBubble(isActive = false) {
     return mount(UserBubble, {
       props: { turn: makeTurn(), sessionId: 's1', canEdit: false, isSessionEditable: false },
       global: {
-        provide: mockChatProvide({ onRevokePendingMessage, onRevokeMessage, isActive: () => isActive }),
+        provide: mockChatProvide({ onRevokeMessage, isActive: () => isActive }),
         stubs: { MarkdownRenderer: true, ImageThumb: true },
       },
     })
@@ -666,52 +640,28 @@ describe('[U5] UserBubble 撤回三态路由（D6）', () => {
   }
 
   beforeEach(() => {
-    onRevokePendingMessage.mockClear()
     onRevokeMessage.mockClear()
-    getDeliveryProjectionRef().value = new Map()
   })
 
-  it('在途（内核投影 state 未 delivered）→ 路由 onRevokePendingMessage（cancel 腿），不触达已送达腿', async () => {
-    const wrapper = mountRevokeBubble([{ clientUuid: 'u1', state: 'queued' }])
-    await revokeButton(wrapper).trigger('click')
-    expect(onRevokePendingMessage).toHaveBeenCalledTimes(1)
-    expect(onRevokePendingMessage).toHaveBeenCalledWith('s1', 'u1')
-    expect(onRevokeMessage).not.toHaveBeenCalled()
-  })
-
-  it('在途含 in-flight（pi 槽位）与 direct 车道投出瞬间——同属未注入层，均路由 cancel 腿', async () => {
-    const wrapper = mountRevokeBubble([{ clientUuid: 'u1', state: 'in-flight', lane: 'direct' }])
-    await revokeButton(wrapper).trigger('click')
-    expect(onRevokePendingMessage).toHaveBeenCalledWith('s1', 'u1')
-  })
-
-  it('已送达（投影无该条目——已 morph 为 transcript）→ 路由 onRevokeMessage（已送达腿）', async () => {
-    const wrapper = mountRevokeBubble([])
+  it('点击撤回 → 单回调 onRevokeMessage 透传 (sessionId, targetId)，路由判定不在 UI', async () => {
+    const wrapper = mountRevokeBubble()
     await revokeButton(wrapper).trigger('click')
     expect(onRevokeMessage).toHaveBeenCalledTimes(1)
     expect(onRevokeMessage).toHaveBeenCalledWith('s1', 'u1')
-    expect(onRevokePendingMessage).not.toHaveBeenCalled()
   })
 
-  it('已送达（投影残留 delivered 条目——D4 惰性残留）→ 同样路由已送达腿', async () => {
-    const wrapper = mountRevokeBubble([{ clientUuid: 'u1', state: 'delivered' }])
-    await revokeButton(wrapper).trigger('click')
-    expect(onRevokeMessage).toHaveBeenCalledWith('s1', 'u1')
-  })
-
-  it('生成中（isActive）→ 置灰（aria-disabled）+ tooltip 文案，点击不触达任何撤回腿（D2 附带裁决）', async () => {
-    const wrapper = mountRevokeBubble([], true)
+  it('生成中（isActive）→ 置灰（aria-disabled）+ tooltip 文案，点击不触达撤回回调（D2 附带裁决）', async () => {
+    const wrapper = mountRevokeBubble(true)
     const btn = revokeButton(wrapper)
     expect(btn.attributes('aria-disabled')).toBe('true')
     // tooltip 文案断言（title = i18n key；测试环境 t 回显 key）
     expect(btn.attributes('title')).toBe('panel.message.revokeGenerating')
     await btn.trigger('click')
-    expect(onRevokePendingMessage).not.toHaveBeenCalled()
     expect(onRevokeMessage).not.toHaveBeenCalled()
   })
 
   it('非生成中 → tooltip 为撤回默认文案（可撤态）', () => {
-    const wrapper = mountRevokeBubble([])
+    const wrapper = mountRevokeBubble()
     expect(revokeButton(wrapper).attributes('title')).toBe('panel.message.revoke')
     expect(revokeButton(wrapper).attributes('aria-disabled')).toBe('false')
   })

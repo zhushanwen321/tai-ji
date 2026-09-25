@@ -353,8 +353,7 @@ const emit = defineEmits<{
 }>()
 
 const deps = useChatViewDeps()
-// isTakeover/setTakeover 为 optional（窗口增强，非所有壳层 provide）：未提供时兜底 false / no-op
-const { isExpanded, collapse, getChangeSetStatus, isActive, isTakeover = () => false, setTakeover } = deps
+const { isExpanded, collapse, getChangeSetStatus, isActive, isTakeover, setTakeover } = deps
 
 /** 最后一条 assistant */
 const lastAssistant = computed(() => {
@@ -448,9 +447,9 @@ const assistantById = computed(() => {
   return m
 })
 
-/** 切换 takeover（展开全部 ↔ 恢复精简），落 store（D6，非本地 ref）。未 provide setTakeover 时 no-op。 */
+/** 切换 takeover（展开全部 ↔ 恢复精简），落 store（D6，非本地 ref）。 */
 function onToggleTakeover(): void {
-  setTakeover?.(turnStableId(props.turn), !takeover.value)
+  setTakeover(turnStableId(props.turn), !takeover.value)
 }
 
 /**

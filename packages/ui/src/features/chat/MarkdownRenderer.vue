@@ -55,7 +55,8 @@
  * - D-5 增量消费（W23）：流式渲染状态机在 useMarkdownStreaming（rAF 节流 + latest-wins 串行 +
  *   前缀段引用恒等缓存 + tail 段每帧重建 + streaming-fence 占位/finalize/粘滞 + 卸载清理）；
  *   壳未提供增量能力时回退 renderMarkdown 全量（等价旧版）
- * - 文件路径/歧义选择经 deps.onFileClick/onAmbiguousSelect/openDrawer 桥接
+ * - 文件路径经 deps.onFileClick/openDrawer 桥接；歧义浮层选中是本组件本地编排
+ *   （onAmbiguousSelect → onFileClick + openDrawer + 清浮层状态）
  * - 代码块复制是 DOM 副作用（v-html 内），ui 内本地处理（base64 解码 data-code + is-copied class）
  * - mermaid 段走 <MermaidRenderer>（经 deps.renderMermaid 渲染 SVG）
  */
@@ -81,7 +82,7 @@ const props = defineProps<{
   /** 相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render D4，双通道取值
    *  props 覆盖优先）：props 供 DetailPane 等静态宿主传打开文件所在目录（④路点击语义）；
    *  缺省（对话流/命令文档零模板传 props）经 deps.sessionCwdOf 拿 session cwd；两者皆缺
-   *  （未知 sid / mock 壳未 provide）→ ④路 preventDefault 无动作（死链无害）。
+   *  （未知 sid）→ ④路 preventDefault 无动作（死链无害）。
    *  注意：本 props 只喂 ④路点击；img 相对 src 重写走 deps env（壳层工厂装配）——drawer
    *  宿主经工厂 override 参数使 env 与本 props 同值（D4 矩阵 drawer 行「两通道同值」）。 */
   resourceBaseDir?: string
@@ -231,9 +232,9 @@ function handleAnchorClick(e: MouseEvent, anchor: Element): void {
   if (!href || !isRelativeHref(href)) return
   e.preventDefault()
   // 基准目录双通道（D4 传值矩阵）：props 覆盖优先（drawer 文件目录语义）；props 缺省
-  // （对话流/命令文档）经 deps.sessionCwdOf 拿 session cwd（可选链容错——mock 壳未
-  // provide 时 undefined）；两者皆缺 → preventDefault + 无动作（死链无害，优于窗口导航走）
-  const base = props.resourceBaseDir ?? deps.sessionCwdOf?.(props.sessionId ?? '')
+  // （对话流/命令文档）经 deps.sessionCwdOf 拿 session cwd；两者皆缺（未知 sid）→
+  // preventDefault + 无动作（死链无害，优于窗口导航走）
+  const base = props.resourceBaseDir ?? deps.sessionCwdOf(props.sessionId ?? '')
   if (base) {
     deps.openDrawer('detail', { filePath: resolveHrefPath(base, href) })
   }
