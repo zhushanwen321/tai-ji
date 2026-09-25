@@ -191,8 +191,8 @@ function isHiddenCompleteNotify(msg: Message): boolean {
 }
 
 /** inline notice 判定（D4 规则 4）：bash 执行记录（有 bashExecution 字段）或 liveOnly
- *  消息（stream_warn 健康警告，无 entry 无 replay 对应物，W2 创建点打标）→ turn 内部语义，
- *  不切断 turn。 */
+ *  消息（stream_warn 非终结提示——pi 静默卡死健康警告 / busy 拒绝等，无 entry 无 replay
+ *  对应物，W2 创建点打标）→ turn 内部语义，不切断 turn。 */
 function isInlineNotice(msg: Message): boolean {
   return msg.bashExecution !== undefined || msg.liveOnly === true
 }

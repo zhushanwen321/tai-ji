@@ -66,7 +66,7 @@ node scripts/verify-scheduler-e2e.cjs
 - **唯一防线入口 = `taijiTestConfig` 工厂**（`test-guard/factory.ts`）：全仓所有 vitest.config.ts 一律经工厂包装，无条件注入 globalSetup + fs-guard（绝对路径注入，不受各包 root 差异影响；防线排最前，用户 setupFiles/globalSetup 追加保留，其余字段只增不改）；根级兜底 vitest.config.ts 同样经工厂包装——从仓库根 cwd 跑 vitest 防线同样生效
 - **漏挂机器守卫**：`scripts/check-vitest-guard.mjs` 静态扫描全部含测试的包根 + test-guard/ + 仓库根兜底 config，校验 config 经工厂包装（特征 = 引用 `test-guard/factory`），漏挂/缺失 exit 1（pre-commit 按路径触发 + CI invariants）；防线元测试收敛在 `test-guard/fs-guard.test.ts`
 - **写删目标约束**：新测试的写删目标必须 `mkdtempSync(join(tmpdir(), ...))` 自建自删，禁止删除 `getSessionsDir()` 等共享推导路径；禁止绕过 guard（restore 原始 fs / 子进程删真实目录）
-- **运行边界 [HISTORICAL]**（2026-09-16 事故）：禁止从包目录外触发 vitest 扫描式跑测——根目录是唯一合法全仓入口（防线齐备）；单包测试固定 `cd <包目录> && npx vitest run`（见上「运行命令（cwd 敏感）」）
+- **运行边界 [HISTORICAL]**（2026-09-16 事故）：禁止从包目录外触发 vitest 扫描式跑测——根目录是唯一合法全仓入口（防线齐备）；单包测试固定 `cd <包目录> && npx vitest run`（见上「运行命令（cwd 敏感）」）。根目录入口指 test-guard 防线覆盖位置，不是可执行全量跑法——根级兜底 config 无各包 environment，DOM 测试从根跑全挂（document is not defined）；全量回归 = 改动面 + 依赖闭包，逐个子包目录跑 `vitest run`
 
 ## 3. 三视角模型 + 渲染 gate DoD [HISTORICAL — 2026-06-27「新建任务」事故]
 
@@ -78,7 +78,7 @@ node scripts/verify-scheduler-e2e.cjs
 | **使用者（黑盒）** | 用户能否完成目标（DOM 可见断言） | **[MANDATORY] 补齐** |
 | **观察者（形态）** | 渲染长什么样（首屏冒烟） | **[MANDATORY] 补齐** |
 
-**四条 MANDATORY 规则**（详见 CLAUDE.md 测试规范#5-#8）：
+**四条 MANDATORY 规则**（SSOT = 本文 §3 三视角纪律 + 项目 AGENTS.md 测试节）：
 
 1. 每条集成/E2E 用例至少一个用户可见断言（`wrapper.find().exists()`/`.text()`/`.html()`）。纯内部断言（`state.value`、`toHaveBeenCalled`）不计 DoD
 2. 集成/E2E 必须mount test-strategy 指定的组件树入口（如 `Panel`），禁止悄悄换更小被测对象。入口无法 mount 时显式说明并降级入口
@@ -145,10 +145,10 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 | 基线 | 描述 | 来源事故 | 守护测试 |
 |------|------|---------|---------|
 | **slash 命令契约** | 输入 `/` → 浮层弹出 → 选中 → chip 插入；session.commands 时序竞争修复 | `2026-06-28-lite-slash-command-fix`（broadcast 早于订阅丢失） | `src/__tests__/useSidebar-get-commands.test.ts`（U1-U3）+ `landing-precreate-session.test.ts`（U4/U5）+ `composer-slash-trigger.test.ts`（U1-U10） |
-| **Session 隔离** | 三层隔离（store 分区/useChat 路由/PaneSessionView 过滤）+ 无 sessionId 消息丢弃 + sendError 带 sessionId | CLAUDE.md 规则#7 | 各 domain/store 单测 |
+| **Session 隔离** | 三层隔离（store 分区/useChat 路由/PaneSessionView 过滤）+ 无 sessionId 消息丢弃 + sendError 带 sessionId | 项目 AGENTS.md 关键规则 7 | 各 domain/store 单测 |
 | **渲染 gate** | mount 顶层容器断言结构元素 DOM 存在（防「测试全绿功能不可用」） | 2026-06-27 事故 | 每功能首屏冒烟用例 |
-| **错误状态重置** | 错误路径必须收口生成状态（否则 UI 卡死）：现行单一入口 = finalizeSession + clearPendingSend / markSessionError（`streamingMessage` 实体已消亡；UI 活跃态 SSOT = isActive = pendingSend ∨ isGenerating，derive-status.ts W1） | CLAUDE.md 规则#3 | useChat 错误路径测试 |
-| **emit 单 payload** | emit 不传多参数 | CLAUDE.md 规则#1 | - |
+| **错误状态重置** | 错误路径必须收口生成状态（否则 UI 卡死）：现行单一入口 = finalizeSession + clearPendingSend / markSessionError（`streamingMessage` 实体已消亡；UI 活跃态 SSOT = isActive = pendingSend ∨ isGenerating，derive-status.ts W1） | 项目 AGENTS.md 关键规则 3 | useChat 错误路径测试 |
+| **emit 单 payload** | emit 不传多参数 | 项目 AGENTS.md 关键规则 1 | - |
 | **runtime broadcast 时序** | session 级 broadcast 早于 renderer 订阅会丢消息；切换/创建 session 后需立即消费的状态必须主动拉取（`session.getCommands` RPC） | `2026-06-28-lite-slash-command-fix` | U1-U3 + U4/U5（见上） |
 | **搜索查询乱序守卫** | useSearch.query 内 loadSeq 自增序列号，await 后 `seq !== loadSeq` 丢弃旧响应；快速连续查询时旧响应晚到不得覆盖新结果（数据错乱=事故） | NFR S-8 `[from: 2026-06-30-search-modal §execution T1.12]` | `packages/core/src/domain/new-task-search/__tests__/search.test.ts`（TC-2 loadSeq 乱序守卫，原 T1.12）+ `packages/core/src/domain/new-task-search/__tests__/file-match.test.ts`（TC-9c~9k file 匹配分级，原 T3.10）|
 | **搜索 slash 命令注入链路** | SearchModal 点击 slash 命令 → commandStore.pendingSlash 一次性通道 → Composer watch 消费 → insertSlashChip 注入 chip。watch 非 immediate（防残留误注入）+ sessionId 过滤（split 不串台）+ 先注入后清除（防读到 null）。commandKind 区分 slash/app（pi 命令名无 / 前缀，不可靠 title 猜测） | `2026-07-01-search-slash-injection`（injectSlash 回调断链 + commandKind 误判） `[from: 2026-07-01-search-slash-injection §plan]` | `src/__tests__/panel/composer-slash-injection.test.ts`（U12-U16,U18，仍在 renderer）+ `packages/core/src/domain/new-task-search/__tests__/search-jump.test.ts`（TC-8 commandKind 分发 / pendingSlash 注入，原 U7-U11）+ `packages/core/src/domain/new-task-search/__tests__/command-store.test.ts`（TC-5 pendingSlash 一次性通道，原 U1-U4）|

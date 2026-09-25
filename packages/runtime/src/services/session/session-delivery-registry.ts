@@ -853,8 +853,6 @@ export function createSessionDeliveryRegistry(
         adopt.push(text)
         continue
       }
-      // 尾附锚（MF-2-1）：文末（trimEnd 后）标记 = 最后一个提取 id——出站标记恒尾附，
-      // 与 withDeliveryMarker 读写同形；其余提取 id 处中部/前部，不构成 rebuild 身份
       // 尾附锚（MF-2-1；口径 msg-pipeline-debloat D5-3/P5 统一 =「剥除标记、不动其他
       // 字符」——文末判定在原文上精确 endsWith，不 trimEnd 吃尾随空白）：出站标记恒尾附
       // （withDeliveryMarker 读写同形），与 shared 撤回切条的严格文末口径一致；其余提取
