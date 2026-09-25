@@ -288,6 +288,12 @@ export const usePlanStore = defineStore('plan', () => {
    */
   const activityReconcileAt = new Map<string, number>()
 
+  /**
+   * 消息边沿观察的帧基准表（per-sid：上一条消息边沿时的 frameRev，活跃冻结检测的进展基准，
+   * 语义见 reconcileOnAssistantMessage）。清理挂 sessionCleanup 链。
+   */
+  const edgeFrameRevs = new Map<string, number>()
+
   // ── 审批窗口 per-session 定时器（D4：2s 稳定窗 + 10s 兜底共 ≤2 个，single-flight 重置不叠加）──
   // 定时器 handle 不进响应式分区（副作用句柄非状态）；epoch 世代在分区内（回调比较防陈旧触发）。
   // 清理与 frameRevs 同挂 sessionCleanup 链（防 session 销毁后定时器空转写幽灵分区）。
@@ -297,6 +303,7 @@ export const usePlanStore = defineStore('plan', () => {
   registerSessionCleanup((sid) => {
     frameRevs.delete(sid)
     activityReconcileAt.delete(sid)
+    edgeFrameRevs.delete(sid)
     const stable = stableTimers.get(sid)
     if (stable) {
       clearTimeout(stable.handle)
@@ -442,39 +449,39 @@ export const usePlanStore = defineStore('plan', () => {
   }
 
   /**
-   * 活动信号补拉（2026-09-25 真机缺陷「新 session 发 /plan 状态带不渲染」的丢帧补偿）。
-   *
-   * 缺陷时序（真机双形态实证）：session 创建/载入即首拉（loadPanel 时点）→ 此时
-   * plan-state entry 尚未落盘，冷读 reply = INACTIVE 落分区；随后 runtime 的
-   * session.planState 帧在「订阅建立前送达」（广播早于订阅，AGENTS.md Runtime broadcast
-   * 时序竞争规则的又一实例）或因 runtime 水位竞态未发布——renderer 侧两条腿全断后
-   * **无任何再拉触发点**（无新帧、无切换），view 恒 INACTIVE → 状态带永不渲染，
-   * 需手动切走切回（再次首拉，此时磁盘已就绪）才恢复。
+   * 活动信号补拉（2026-09-25 真机缺陷「新 session 发 /plan 状态带不渲染」的丢帧补偿，
+   * 同日 F-W3-2「崩溃恢复后阶段指示冻结」扩展为双支路）。
    *
    * 补偿锚点 = assistant 消息活动（use-plan-sync 订阅 message.message_start /
    * message.complete 转发）：/plan 处理写 plan entry 是 turn 的前置动作，必然早于
-   * assistant 消息开始，故活动信号到达时磁盘必已就绪，补拉必得真值（message_start
-   * 取 turn 内最早边沿——长 turn 中状态带在首条消息开始即恢复，不等 turn 收口；
-   * complete 兜底多消息场景）。范式对齐 useCommandSync 补拉闭环（消费侧动作边沿
-   * 触发主动拉取，不依赖 broadcast 可靠性）。
+   * assistant 消息开始，故活动信号到达时磁盘必已就绪，冷拉直读磁盘（runtime
+   * getPlanState 纯磁盘读语义）必得真值。范式对齐 useCommandSync 补拉闭环（消费侧
+   * 动作边沿触发主动拉取，不依赖 broadcast 可靠性）。
    *
-   * 双门限频（无定时器、无轮询，纯事件驱动 + 时间戳比较）：
-   * - 非活跃门：分区 view 已活跃时不补——活跃态的状态变化由帧链自持（帧在订阅存续期
-   *   必达，useSessionEvents 契约），补拉无信息增益。
-   * - 冷却门：PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS 内同 sid 不重复补（长对话 session
-   *   每条 assistant 消息都触发时的频率上限）。
+   * 双支路（共享冷却门）：非活跃支路（fix-C 原语义）= 分区 view 未激活（首拉早于
+   * entry 落盘 / 从未进 plan）→ 补拉。活跃冻结支路（F-W3-2）= view 活跃但 frameRev
+   * 自上一条消息边沿以来无增长 → planState 帧链在该 session 上疑死（真机 6c3 实证：
+   * 消息帧正常到达而 planState 帧全程未达，view 冻结无再拉触发点），冷拉对账磁盘真值；
+   * 帧链恢复（任一 planState 帧到达 → frameRev 增长）后自动静默；首条边沿只立帧基准
+   * 不拉（健康链路上 plan 状态稳定的常态 turn 不产生补拉）。双门限频（无定时器无轮询）：
+   * 冷却门 = PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS 内同 sid 不重复补（长对话每条消息
+   * 都触发的频率上限）；帧进展门 = 活跃支路要求「边沿间 frameRev 零增长」。
    */
   function reconcileOnAssistantMessage(sessionId: string): void {
     if (!sessionId) return
-    const now = Date.now()
-    const last = activityReconcileAt.get(sessionId) ?? 0
-    if (now - last < PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS) return
+    const revNow = frameRevOf(sessionId)
+    const prevRev = edgeFrameRevs.get(sessionId)
+    edgeFrameRevs.set(sessionId, revNow)
     let inactive = false
     scoped.updateFor(sessionId, (p) => {
       inactive = p.view?.isActive !== true
     })
-    if (!inactive) return
-    activityReconcileAt.set(sessionId, now)
+    // 帧进展门：活跃支路要求「边沿间 frameRev 零增长」；非活跃时 frameRev 常为 0，「无进展」无判别力，不适用
+    if (!inactive && (prevRev === undefined || prevRev !== revNow)) return
+    // 冷却门（两支路共用）
+    const last = activityReconcileAt.get(sessionId) ?? 0
+    if (Date.now() - last < PLAN_ACTIVITY_RECONCILE_COOLDOWN_MS) return
+    activityReconcileAt.set(sessionId, Date.now())
     void loadPlanState(sessionId)
   }
 

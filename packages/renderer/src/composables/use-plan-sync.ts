@@ -15,6 +15,8 @@
  * 4. 活动补拉转发（2026-09-25 真机缺陷修复）：message.complete（assistant 消息完成）→
  *    store.reconcileOnAssistantMessage——新 session 首拉窗口「首拉早于 entry 落盘 + 帧
  *    不可靠」双断后的再拉触发点，限频门内聚在 store。
+ * 5. 崩溃恢复对账（F-W3-2）：session.restored 边沿 → store.loadPlanState 冷拉——恢复即
+ *    对账时点，不切焦点也有重确认触发点。
  *
  * 必须在组件 setup 同步调用（内部 useSessionEvents 有 getCurrentInstance 守卫）。
  * 消费方（plan-mode-ux-refactor u-plan-bar 起：PlanModeBar 常驻宿主 + 其右区 PlanReviewBar、
@@ -81,6 +83,13 @@ export function usePlanState(sessionIdRef: Ref<string | null | undefined>): UseP
   // 理前置动作）必然早于 assistant 消息开始，故活动信号到达时磁盘必已就绪。
   onMessage(['message.message_start', 'message.complete'], (_msg, sid) => {
     store.reconcileOnAssistantMessage(sid)
+  })
+  // 链路 5（崩溃恢复对账，F-W3-2）：session.restored 边沿 → 直接冷拉（不走 reconcile
+  // 的冷却/帧进展门——恢复即对账，语义无频次顾虑）。恢复 = 磁盘真值已重写的确定性时点
+  //（pi respawn 重放 entry 落盘），不切焦点也有重确认触发点；restored 帧到达即拉，
+  // 直读磁盘语义必得真值。
+  onMessage('session.restored', (_msg, sid) => {
+    void store.loadPlanState(sid)
   })
 
   // 经 storeToRefs 透出（store 实例属性访问会解包 computed 丢 ref 形态，必须走 storeToRefs）
