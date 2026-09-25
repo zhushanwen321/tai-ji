@@ -70,7 +70,7 @@ import {
 function expectDeterministic(raw: unknown[], entryIds?: string[]): ChatViewState {
   const first = replayEntries(liftHistoryToEntries(raw, entryIds))
   const second = replayEntries(liftHistoryToEntries(raw, entryIds))
-  // 全量 state（messages + clientUuidMap + orphanToolResults + 配对锚点）非消息级抽样
+  // 全量 state（messages + orphanToolResults + 配对锚点）非消息级抽样
   expect(first).toEqual(second)
   // Map 在 toEqual 中按内容比较 ✓；确定性含「无 Date.now/randomUUID 渗入」——
   // 同序列两次产出引用不同但内容全等，是 replay 重建（W21 对账）的构造性依据。
@@ -1373,8 +1373,8 @@ describe('[two-state-convergence U7] subagent-record 轮终翻边 entry 序列�
 // - live：event-adapter 对任意 string customType 产出失效信号（D5 放宽）→ runtime
 //   scanPlanStateEntries 派生 → stateSnapshot('plan') 独立通道——不经 message_end 进对话流
 //   reducer（D1 显式决策：plan 不进 chat reducer）；
-// - reload：get_entries 重放序列含 plan-state entry → reducer case 'custom' 对非
-//   taiji.client-msg-id 早退（no-op），同样零对话流投影。
+// - reload：get_entries 重放序列含 plan-state entry → reducer case 'custom' 纯数据
+//   no-op（跳过语义，D6-4 死簿记删除后对所有 customType 一致），同样零对话流投影。
 // 「live ≡ reload 对话流呈现一致」由「reload 侧多出的 entry 被 reducer 忽略」构造性成立，
 // 本组钉住且断言新旧两种 schema 行为一致（schema 扩展不改对话流——plan 投影走独立通道）。
 describe('plan-state entry：不进对话流，live ≡ reload 构造性（A7）', () => {

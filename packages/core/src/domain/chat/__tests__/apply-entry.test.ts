@@ -701,29 +701,21 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
   })
 
   // ── custom entry（纯数据，不进对话流）─────────────────────────────
-  it('custom entry：taiji.client-msg-id → clientUuidMap 累积', () => {
-    const state = replayEntries([
-      { type: 'custom', id: 'c-1', parentId: null, timestamp: ISO(1), customType: 'taiji.client-msg-id', data: { clientUuid: 'u-1', userEntryId: 'e-user-1' } },
-    ])
+  it('custom entry：纯数据不进对话流——零消息投影、no-op 返回原 state 引用', () => {
+    const initial = createInitialChatViewState()
+    const state = applyEntry(initial, {
+      type: 'custom', id: 'c-1', parentId: null, timestamp: ISO(1), customType: 'taiji.client-msg-id', data: { clientUuid: 'u-1', userEntryId: 'e-user-1' },
+    })
+    expect(state).toBe(initial) // no-op：纯数据 entry 跳过（badge 回填走 runtime 自建 map，D6-4）
     expect(state.messages).toHaveLength(0)
-    expect(state.clientUuidMap.get('e-user-1')).toBe('u-1')
   })
 
-  it('custom entry：data 形状不匹配（缺字段/类型错）→ 跳过不崩溃', () => {
+  it('custom entry：任意 customType / data 形状不匹配（缺字段/类型错）→ 跳过不崩溃', () => {
     const state = replayEntries([
       { type: 'custom', id: 'c-2', parentId: null, timestamp: ISO(2), customType: 'taiji.client-msg-id', data: { clientUuid: 123 } },
       { type: 'custom', id: 'c-3', parentId: null, timestamp: ISO(3), customType: 'other.extension', data: { foo: 'bar' } },
     ])
-    expect(state.clientUuidMap.size).toBe(0)
     expect(state.messages).toHaveLength(0)
-  })
-
-  it('custom entry：同 userEntryId 冲突 later-wins', () => {
-    const state = replayEntries([
-      { type: 'custom', id: 'c-4', parentId: null, timestamp: ISO(4), customType: 'taiji.client-msg-id', data: { clientUuid: 'u-a', userEntryId: 'e-x' } },
-      { type: 'custom', id: 'c-5', parentId: null, timestamp: ISO(5), customType: 'taiji.client-msg-id', data: { clientUuid: 'u-b', userEntryId: 'e-x' } },
-    ])
-    expect(state.clientUuidMap.get('e-x')).toBe('u-b')
   })
 
   // ── label entry ──────────────────────────────────────────────────
@@ -826,7 +818,7 @@ describe('applyEntry —— 确定性（D5 纯函数断言）', () => {
     ]
   }
 
-  it('同 entry 序列两次喂入 → state 全等（messages/clientUuidMap/orphan 全部）', () => {
+  it('同 entry 序列两次喂入 → state 全等（messages/orphan 全部）', () => {
     const a = replayEntries(mixedSequence())
     const b = replayEntries(mixedSequence())
     expect(a).toEqual(b)
