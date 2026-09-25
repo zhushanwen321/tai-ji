@@ -15,13 +15,14 @@ import { vi } from 'vitest'
 import type { SettingsTransport } from '../domain/settings/transport'
 
 /**
- * 覆盖面宽松签名：键集仍与 SettingsTransport 编译期对齐（漏键/错键即报错），值只要求是函数——
- * 测试 vi.fn() 桩的返回形状常是宽化 mock（如 () => Promise<void>），逐签名强校验会把桩
- * 类型噪音当契约错误。契约漂移检测由下方 `const transport: SettingsTransport` 全量字面量
- * 承担（新 seam 方法缺失/改名在此报错）。
+ * 覆盖面签名：键集与实参表逐签名对齐（漏键/错键/实参错型即报错），返回值保持宽松——
+ * 测试 vi.fn() 桩的返回形状常是宽化 mock（如 () => Promise<void> 顶替真实 reply 形状），
+ * 返回强校验会把桩类型噪音当契约错误。实参表校验堵住「实参错型的假绿桩」（桩签名与
+ * seam 方法对不上时编译期即红，而非测试静默通过）；契约漂移检测由下方
+ * `const transport: SettingsTransport` 全量字面量承担（新 seam 方法缺失/改名在此报错）。
  */
 export type SettingsTransportStubOverrides = {
-  [K in keyof SettingsTransport]?: (...args: never[]) => unknown
+  [K in keyof SettingsTransport]?: (...args: Parameters<SettingsTransport[K]>) => unknown
 }
 
 /** 构造全量 SettingsTransport 桩（逐方法中性默认 + 按需覆盖）。 */

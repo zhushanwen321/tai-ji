@@ -919,6 +919,7 @@ export type ServerMessageType =
   // 0=真实测量值），与 context.update 的无值编码纪律同源。
   | 'session.stats_update'
   | 'config.providers' | 'config.providerUpdated' | 'config.discoveredModels' | 'config.defaults'
+  | 'config.toolPermissionsSaved'
   | 'config.providerCatalogsRefreshed'
   | 'config.scopedModels'
   | 'config.scannedSkills' | 'config.skillUpdated' | 'config.skillDeleted'
@@ -2153,12 +2154,18 @@ export interface ServerMessageMapBase {
     // 行形状 SSOT = ConnectionTestResultRow（下方导出，4 处手写重复收编）。
     results?: ConnectionTestResultRow[]
   }
-  // config.providerUpdated：setProvider/deleteProvider reply（settings-message-handler.ts:37/51/65）。
-  // 三种 shape：setProvider 成功 { saved: true }；deleteProvider { providerId, deleted: true }；
-  // setProvider 首启用 fallback { providerId }（统一并集，字段均 optional 除共性外）。
+  // config.providerUpdated：provider 域四个 mutation 的 reply，发送点在 provider-message-handler.ts
+  // （setProvider/deleteProvider/toggleProviderEnabled/removeProviderByKind）。
+  // providerId 必需：四个发送点均携带；它同时是 setProvider mutation 契约 echo-value 的回显字段
+  // （mutation-reply-contract.test.ts MUTATION_RPC_REGISTRY 登记，必需不 optional）。
+  // deleted 仅删除族（deleteProvider/removeProviderByKind）携带。
   // quotaAutoEnabled：setProvider 新建分支自动开启 coding-plan 额度显示成功（quota-auto-enable.ts，
   // 「新增即默认同意」）——前端据此 toast（与导入路径 quotaAutoEnabled 同语义：写成功才报）。
-  'config.providerUpdated': { providerId?: string; saved?: boolean; deleted?: boolean; quotaAutoEnabled?: boolean }
+  'config.providerUpdated': { providerId: string; deleted?: boolean; quotaAutoEnabled?: boolean }
+  // config.toolPermissionsSaved：setToolPermissions reply（tool-permissions-message-handler）。
+  // 工具权限是 app 级配置（appConfig 的 toolPermissions 键），与 provider 无关——不再借用
+  // config.providerUpdated 通道（该通道的 providerId 已升级为必需回显字段）。
+  'config.toolPermissionsSaved': { saved: boolean }
   // config.skillUpdated：setSkill reply（settings-message-handler.ts:86 reply { skill, success: true }）。
   'config.skillUpdated': { skill: SkillInfo; success: boolean }
   // config.skillDeleted：deleteSkill reply（settings-message-handler.ts:93 reply { skillId, success: true }）。
@@ -2514,7 +2521,7 @@ export interface ReplyPayloadMap {
   'config.removeProviderByKind': void   // wave4：reply config.providerUpdated（同 deleteProvider 模式）
   'config.setSkill': void         // reply config.skillUpdated
   'config.setSkillDirs': void     // reply config.skillDirs
-  'config.setToolPermissions': void // reply config.providerUpdated（settings-message-handler.ts:65）
+  'config.setToolPermissions': void // reply config.toolPermissionsSaved { saved }（tool-permissions-message-handler）
   'extension.cancelInstall': void // reply extension.installCancelled
   'extension.finishInstall': void // reply config.extensions
   'extension.install': void       // reply config.extensions

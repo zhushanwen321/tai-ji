@@ -872,7 +872,29 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     expect(flagById.get('xiaomi')).toBeUndefined()
   })
 
-  it('merge 语义：保留既有 extras 字段域（authMethod）与既有 quota 字段，只写 enabled + fetcher', async () => {
+  it('merge 语义：既有 quota.enabled（手动关闭 false）→ 不覆盖不复活，extras 与 quota 原样保留', async () => {
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({ _sourceName: 'kimi-main', baseUrl: 'https://api.kimi.com/coding', apiKey: 'sk-plain' }),
+    ]))
+    const store = fakeExtrasStore({ authMethod: 'api_key', quota: { enabled: false, credentialSource: 'provider' } })
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['kimi-main'], undefined, store)
+
+    expect(store.modify).toHaveBeenCalledTimes(1)
+    // 守卫（quota-auto-enable.ts）：quota.enabled 已有值（含手动关闭 false）→ 原样返回，
+    // 不覆盖不复活（对齐 provider-config-helper「用户已有 enabled 决定 → 不覆盖不复活」用例）
+    const current: ProviderExtras = { authMethod: 'api_key', quota: { enabled: false, credentialSource: 'provider' } }
+    const written = store.modify.mock.calls[0][1](current)
+    expect(written).toBe(current)
+    expect(written.quota).toEqual({ enabled: false, credentialSource: 'provider' })
+    // 守卫拦截 = 未发生真实写入 → 结果条目不置 quotaAutoEnabled（前端不 toast 不实报告）
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+  })
+
+  it('merge 语义：quota 仅有 credentialSource（无 enabled 键）→ 写 enabled+fetcher 且保留 credentialSource 与 extras 字段域', async () => {
     vi.mocked(parseProviders).mockReturnValue(result([
       fp({ _sourceName: 'kimi-main', baseUrl: 'https://api.kimi.com/coding', apiKey: 'sk-plain' }),
     ]))
@@ -883,9 +905,13 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     await applyImport(prev.importId, ['kimi-main'], undefined, store)
 
     expect(store.modify).toHaveBeenCalledTimes(1)
-    const written = store.modify.mock.calls[0][1]({ authMethod: 'api_key', quota: { enabled: false, credentialSource: 'provider' } })
-    expect(written.authMethod).toBe('api_key')
+    // 锁 merge 保留字段域：无 enabled 键（守卫放行）→ spread 保留 quota 其余字段
+    // （credentialSource）与 extras 字段域（authMethod），只写 enabled+fetcher。
+    // enabled 在类型上必填，运行时缺键形态（磁盘 JSON）按本文件既有 unknown 断言构造
+    const current = { authMethod: 'api_key', quota: { credentialSource: 'provider' } } as unknown as ProviderExtras
+    const written = store.modify.mock.calls[0][1](current)
     expect(written.quota).toEqual({ enabled: true, fetcher: 'kimi-coding', credentialSource: 'provider' })
+    expect(written.authMethod).toBe('api_key')
   })
 
   it('未注入 store（第 4 参缺省）→ 跳过写入，导入主语义不受影响', async () => {

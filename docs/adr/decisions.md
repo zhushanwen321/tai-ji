@@ -88,7 +88,7 @@ pi CustomMessage 的 `display:false`（如 goal/todo context 提醒）三路透�
 chat messages 用 shallowRef(Map)（`core/domain/chat/store.ts`），所有更新必须「新对象 → 新数组 → Map.set」不可变写法——直接 mutate 字段不触发响应式，属反模式。isGenerating 从 messages 派生（单一真相源 + 增量跟踪缓存）。
 
 ### ADR-0065 mutation reply 生效值契约
-改状态 RPC 先判「后端会不会变换请求值」：经 pi（model.switch/setThinkingLevel）→ 禁乐观写，reply 生效值是唯一写 store 路径，协议 reply 生效字段类型必需；本地存储（preset CRUD）→ 允许乐观写 + reply 权威覆盖 + 失败回滚。机器强制两层：协议具名 XxxMutationReply interface + `mutation-reply-contract.test.ts` MUTATION_RPC_REGISTRY（新 mutation 不登记即测试红）。登记 C-pi-15。
+改状态 RPC 先判「后端会不会变换请求值」：经 pi（model.switch/setThinkingLevel）→ 禁乐观写，reply 生效值是唯一写 store 路径，协议 reply 生效字段类型必需；本地存储（preset CRUD）→ 允许乐观写 + reply 权威覆盖 + 失败回滚。机器强制两层：协议 reply 类型层（生效/回显字段必需不 optional，复用既有形状）+ `mutation-reply-contract.test.ts` MUTATION_RPC_REGISTRY（echo-value/exempt 两张清单的机器镜像与唯一登记处，新 mutation 不登记即测试红；reply 契约升级为 payload 消费型时须同步把条目改 echo-value/effective-value 并登记 replyKey + effectiveFields，ack-exempt 登记与 void 类型锁定互为校验）。现行锚点：config.setProvider = echo-value（reply `config.providerUpdated`，providerId 必需回显，quotaAutoEnabled optional 供 toast）。登记 C-pi-15。
 
 ## 包拓扑与分层
 

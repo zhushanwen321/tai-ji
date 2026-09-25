@@ -193,9 +193,18 @@ describe('kimiFetcher', () => {
     }
   })
 
-  it('数值字段无法解析为数值（非数值串/布尔/嵌套对象）→ parse；limits 元素非对象 → parse', async () => {
+  it('数值字段无法解析为数值（非数值串/空串/空白串/布尔/嵌套对象）→ parse；limits 元素非对象 → parse', async () => {
     expect(await fetchOk(kimiFetcher, {
       limits: [{ detail: { limit: 'abc' } }],
+      usage: {},
+    })).toEqual({ ok: false, reason: 'parse' })
+    // 空串/空白串：numericField trim 后为空 → undefined（空串非合法 wire 数值，等同漂移）
+    expect(await fetchOk(kimiFetcher, {
+      limits: [{ detail: { limit: '' } }],
+      usage: {},
+    })).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(kimiFetcher, {
+      limits: [{ detail: { limit: '   ' } }],
       usage: {},
     })).toEqual({ ok: false, reason: 'parse' })
     expect(await fetchOk(kimiFetcher, {

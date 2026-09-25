@@ -26,11 +26,14 @@ import { SCOPED_MODEL_CORE_TOKEN } from './impl-token'
  * on* 返回取消函数（记录被调）。
  */
 function makeRecordingTransport() {
+  // 表 = 触发端宽签名：各用例以字面载荷手动触发，载荷形状由下方调用点 + store 断言对齐
   const handlers: Record<string, (arg0: unknown, arg1?: unknown) => void> = {}
   const unsubs: Array<() => void> = []
-  // register 返回 vi.fn：外层可断言订阅注册次数；调用时存 handler + 返回 unsub spy
-  const register = (name: string) => vi.fn((h: (a: unknown, b?: unknown) => void) => {
-    handlers[name] = h
+  // register 返回 vi.fn：外层可断言订阅注册次数；调用时存 handler + 返回 unsub spy。
+  // 注册端 never[] 参数 = 反变全接受，与 SettingsTransport 全部 on* 槽位兼容
+  //（宽化的 (a: unknown, ...) 会被槽位真实签名拒绝——overrides 实参表逐签名校验）。
+  const register = (name: string) => vi.fn((h: (...args: never[]) => void) => {
+    handlers[name] = h as unknown as (arg0: unknown, arg1?: unknown) => void
     const unsub = vi.fn(() => {})
     unsubs.push(unsub)
     return unsub
