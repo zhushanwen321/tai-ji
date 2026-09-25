@@ -71,7 +71,7 @@ task prompt 中必须包含：
 ## Agent-facing 表面 checklist（条件触发）
 
 > 当变更命中 agent-facing 表面时，除上面的接口审查外，**额外**逐项核对本清单。
-> 完整审查方法论走 `meta-prompt-creator` skill（`flow/review.md` + `review/rubric-<carrier>.md`，快速审查走 P0）；
+> 完整审查方法论走 `meta-prompt-guidance` skill（`flow/review.md` + `review/rubric-<carrier>.md`，快速审查走 P0）；
 > pi 专属格式契约见 `docs/extensions/agent-authoring-guide.md`。本清单只列必查的 P0 要点 + pi 专属补充项。
 
 **触发条件**（任一命中即激活，否则跳过本节）：
@@ -82,7 +82,7 @@ task prompt 中必须包含：
 - `**/workflows/*.js`（workflow `meta.description`）
 - 任何含 frontmatter `description`/`tools`/`color` 的 `.md`
 
-### 通用检查（走 meta-prompt-creator rubric P0）
+### 通用检查（走 meta-prompt-guidance rubric P0）
 
 - [ ] **agent.md**：身份声明一句话 / 任务完成约束一句话 / **防递归约束在前 3 条**（`rubric-agent-prompt.md` 维度 1-3）/ 绝对路径要求 / 输出防废话
 - [ ] **registerTool description**：调用条件精确到场景（非功能说明）/ 反模式枚举（≥2 低风险 ≥4 高风险）/ 能力边界声明（`rubric-tool-description.md` 维度 1-3）
