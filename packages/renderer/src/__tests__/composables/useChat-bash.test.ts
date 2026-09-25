@@ -73,7 +73,7 @@ function emitBashStart(sid: string, command: string): void {
   emit({ type: 'message.bashStart', payload: { sessionId: sid, command, excludeFromContext: false, timestamp: 1724000000000 } })
 }
 
-/** bashResult 真实终态帧（command 恒非空——空命令 + cancelled 是 abortBash 哨兵专用形态） */
+/** bashResult 真实终态帧（abortBash 兜底终态已独立为 message.bashAborted 帧，msg-pipeline-debloat D4-3） */
 function emitBashResult(sid: string, command: string, output: string): void {
   emit({
     type: 'message.bashResult',
@@ -124,9 +124,9 @@ describe('useChat.sendBash / abortBash', () => {
 
     expect(apiMock.bash).toHaveBeenCalledOnce()
     expect(toastError).toHaveBeenCalledOnce()
-    // 收尾：哨兵帧（command:'' + cancelled:true，abortBash 兜底广播形态）清 executingBash，
+    // 收尾：bashAborted 帧（abortBash 兜底终态独立帧，msg-pipeline-debloat D4-3）清 executingBash，
     // 防 bash-effects 模块级 Map 残留泄漏到后续用例（resetChatModuleState 不清该 Map）
-    emit({ type: 'message.bashResult', payload: { sessionId: 's-inflight', command: '', output: '', exitCode: null, cancelled: true, truncated: false, excludeFromContext: false, timestamp: 1724000000002 } })
+    emit({ type: 'message.bashAborted', payload: { sessionId: 's-inflight', timestamp: 1724000000002 } })
   })
 
   it('T6: abortBash 透传参数给 chatApi.abortBash', async () => {

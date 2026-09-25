@@ -964,7 +964,7 @@ export type ServerMessageType =
   | 'message.message_start' | 'message.text_delta' | 'message.thinking_delta'
   | 'message.thinking_start' | 'message.thinking_end'
   | 'message.tool_call_start' | 'message.tool_call_end'
-  | 'message.bashStart' | 'message.bashResult'
+  | 'message.bashStart' | 'message.bashResult' | 'message.bashAborted'
   | 'message.complete' | 'message.error' | 'message.status'
   | 'context.update'
   // composer-gen-stats（D4）：生成指标帧——双发送点同形：
@@ -2338,7 +2338,8 @@ export interface ServerMessageMapBase {
   }
   // message.bashResult：bash 执行结束广播（含 output/exitCode/cancelled 等终态字段）。
   // exitCode 用 number|null：pi 返回 number|undefined，runtime 广播时统一 `?? null` 防 JSON 丢值。
-  // cancelled=true 也可能是 abortBash 触发的兜底终态（与 abort 广播 message.complete{aborted} 对称）。
+  // cancelled=true 是真实 abort 结果（pi bash-executor abort 返回 cancelled 而非 throw，
+  // 与 pi recordBashResult 落盘同位同值）。
   'message.bashResult': {
     sessionId: string
     command: string
@@ -2350,6 +2351,14 @@ export interface ServerMessageMapBase {
     timestamp: number
     /** pi truncated 时的完整输出文件路径（前端按需读取全文） */
     fullOutputPath?: string
+  }
+  // message.bashAborted：abortBash 兜底终态（msg-pipeline-debloat D4-3 独立帧化，原哨兵形态
+  // bashResult{command:''} 退役）。abort_bash 无论 pi 是否确认都广播——前端只清 executingBash
+  // 执行态（UI 中止态），无 pi 文件对应物不产 entry；真实 abort 结果仍经 message.bashResult
+  // {cancelled:true} 照常发布（sendBash await 返回路径），与本帧职责正交。
+  'message.bashAborted': {
+    sessionId: string
+    timestamp: number
   }
   // pi CustomMessage 注入（扩展经 pi.sendMessage 向对话流注入结构化通知，如 subagent-bg-notify）。
   // event-adapter 把 pi message_start{role:'custom', customType, content, details} 翻译为此帧。
@@ -2682,7 +2691,8 @@ export interface ReplyPayloadMap {
   'git.unstage': void             // reply message.status
   'message.abort': void           // reply message.status
   // message.bash / message.abortBash：reply message.status（sent/rejected/aborted ack）。
-  // bash 是 fire-and-forget 型——实际结果经 message.bashStart/bashResult 广播通道推回（不走 reply）。
+  // bash 是 fire-and-forget 型——实际结果经 message.bashStart/bashResult 广播通道推回
+  //（abortBash 的兜底终态走 message.bashAborted，不走 reply）。
   'message.bash': void             // reply message.status
   'message.abortBash': void        // reply message.status
   'message.send': void            // reply message.status

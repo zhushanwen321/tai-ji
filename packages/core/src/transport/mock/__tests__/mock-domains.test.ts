@@ -289,7 +289,7 @@ describe('mock chat domain', () => {
     expect(types[types.length - 1]).toBe('message.complete')
   })
 
-  it('bash：happy path exitCode 0 + abortBash 推 cancelled', async () => {
+  it('bash：happy path exitCode 0 + abortBash 推 message.bashAborted 兜底终态', async () => {
     const frames: ServerMessageUnion[] = []
     const un = chat.streamSubscribe('s-bash', (m) => frames.push(m))
     await chat.bash('s-bash', 'ls')
@@ -298,7 +298,8 @@ describe('mock chat domain', () => {
     expect(result.output).toBe('(mock) ls')
     expect(result.exitCode).toBe(0)
     await chat.abortBash('s-bash')
-    await waitFor(() => frames.filter((m) => m.type === 'message.bashResult').length >= 2)
+    // 兜底终态走独立帧 message.bashAborted（msg-pipeline-debloat D4-3，与 runtime abortBash 同形）
+    await waitFor(() => frames.some((m) => m.type === 'message.bashAborted'))
     un()
   })
 

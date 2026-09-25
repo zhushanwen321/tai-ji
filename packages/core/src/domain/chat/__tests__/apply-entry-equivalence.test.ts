@@ -383,9 +383,10 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
   })
 
   it('E3: abort 等价（D1 closure——sendBash 解除丢弃后真实 cancelled 结果照常发布 entry 化，两侧同位同值）', () => {
-    // 语义链（dispatcher D1 closure 修订 + bash-effects 哨兵帧分支）：
-    // 用户 abort bash → abortBash 广播哨兵帧 bashResult{command:'', cancelled:true}
-    // → bashResultEffect 只清 executingBash 不产 entry；sendBash await 返回后 token 虽被
+    // 语义链（dispatcher D1 closure 修订 + abortBash 兜底终态独立帧 message.bashAborted，
+    // msg-pipeline-debloat D4-3）：
+    // 用户 abort bash → abortBash 广播 message.bashAborted
+    // → bashAbortedEffect 只清 executingBash 不产 entry；sendBash await 返回后 token 虽被
     // 旋转但**不再跳过**——真实 cancelled 结果（bash-executor abort 返回 cancelled 结果
     // 而非 throw）经双分支发布 → bashResultEffect entry 化。pi 侧 recordBashResult 同数据
     // 落盘 → live/replay 同位（run 级联末）同值，原登记例外①（live 无 / 文件有）消灭。
@@ -421,10 +422,10 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
   it('E3b: transport 抛错例外锁定（收窄后唯一残余分歧——abort 且 await 抛错时 live 无 cancelled entry、pi 独立落盘有）', () => {
     // 语义链（收窄例外，dispatcher catch 分支维持 skip）：abort 后 sendBash await **抛错**
     // （transport 断 / pi 死——与正常 resolve 的 cancelled result 不同路径）→ 无真实数据可
-    // 发布，catch 守卫跳过（哨兵帧已清态）。pi 进程若独立存活仍 recordBashResult 落盘 →
+    // 发布，catch 守卫跳过（bashAborted 帧已清态）。pi 进程若独立存活仍 recordBashResult 落盘 →
     // 重开侧多一条 cancelled bash 记录。触发条件「abort 且 transport 抛错」——比原例外①
     // 「任何 abort」窄，登记 data-source-registry #7。
-    // live 侧：无 bash entry（哨兵帧不产 entry、catch 无数据）
+    // live 侧：无 bash entry（bashAborted 帧不产 entry、catch 无数据）
     const liveState = replayEntries([
       { type: 'message', id: 'u-1', parentId: null, timestamp: ts(1000), message: { role: 'user', content: [{ type: 'text', text: '跑个长命令' }], timestamp: 1000 } },
       { type: 'message', id: undefined, parentId: null, timestamp: ts(2000), message: { role: 'assistant', content: [{ type: 'text', text: '执行中' }], timestamp: 2000 } },

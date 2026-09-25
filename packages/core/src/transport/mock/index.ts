@@ -912,18 +912,11 @@ const chatImpl = {
 
   async abortBash(sessionId: string): Promise<void> {
     await sleep(TIMING.ack)
+    // 兜底终态走独立帧 message.bashAborted（msg-pipeline-debloat D4-3，与 runtime
+    // BashDispatcher.abortBash 同形）——原 bashResult{command:''} 哨兵形态已退役。
     emit(sessionId, {
-      type: 'message.bashResult',
-      payload: {
-        sessionId,
-        command: '',
-        output: '',
-        exitCode: null,
-        cancelled: true,
-        truncated: false,
-        excludeFromContext: false,
-        timestamp: Date.now(),
-      },
+      type: 'message.bashAborted',
+      payload: { sessionId, timestamp: Date.now() },
     })
   },
 

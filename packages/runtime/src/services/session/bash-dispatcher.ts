@@ -131,11 +131,10 @@ export class BashDispatcher {
    *
    * 生命周期：bashStart 广播（开始，执行中反馈——前端 ephemeral executingBash 态，不建消息）
    * → pi bash RPC → bashResult 广播（终态，双分支延迟如上）。
-   * 返回 { blocked: true } 有四种形态（一致性审查 SG-A1 修订——catch abort skip 是 D1 新增分支）：
+   * 返回 { blocked: true } 有三种形态（一致性审查 SG-A1 修订——catch abort skip 是 D1 新增分支）：
    * 预检拒绝（send.rejected 已广播）、执行失败（message.error + 错误 bashResult 终态帧均已广播）、
-   * catch abort skip（**不广播**——abortBash 已抢先收口广播哨兵帧，token 不匹配即跳过，D1 收窄
-   * 后唯一残余例外⑤）、空命令哨兵不变式早退（**不广播**——程序不变式守卫非用户可见错误，见方法头；
-   * 实施审查 SG-2：调用方对后两种形态的 ack 文案失真已知，归 bash 互斥专项）。
+   * catch abort skip（**不广播**——abortBash 已抢先收口广播 message.bashAborted 帧，token 不匹配
+   * 即跳过，D1 收窄后唯一残余例外⑤）。
    * 调用方（session-message-handler）据此走对应 ack 路径，与 sendMessage 的返回语义对称。
    */
   async sendBash(
@@ -143,17 +142,6 @@ export class BashDispatcher {
     command: string,
     excludeFromContext?: boolean,
   ): Promise<{ blocked: boolean; rejected?: boolean }> {
-    // ── 哨兵不变式守卫（D1 closure，实施审查 S-2 上移至真正入口）──
-    // bash-effects 哨兵帧判定 command === '' && cancelled（识别 abortBash 兜底广播、只清态不产
-    // entry）。真实帧 command 恒非空是「约定」——空命令在此早退使其升级为结构性不变式：入口
-    // 不可能发出 command === '' 的 bash，两类帧永不混淆。程序不变式守卫（UI `!` 解析必出非空
-    // 命令，正常不可达）：不广播 send.rejected / message.error（非用户可见错误，广播会以失真
-    // 文案打扰），仅 console.warn 留痕；blocked 返回值仅为类型完备。
-    if (command === '') {
-      console.warn(`[bash-dispatcher] sendBash: empty command rejected (sentinel invariant), sid=${sessionId}`)
-      return { blocked: true }
-    }
-
     // ── ensureActive(必要时 restore)──
     // [时序不变量 timeout-tick-parity] 必须保持 HEAD 内联 try/await/catch 形态：
     // 任何 Promise 组合子（async 包装 / .catch 链）都会使衍生 promise 在 resolve 路径
@@ -239,7 +227,7 @@ export class BashDispatcher {
    * sendBash 成功收口（try 体）：abort 抢收口守卫 warn + 终态数据构造 + 双分支延迟发布。
    *
    * [W1 → D1 closure 修订] abort 抢收口守卫：await 期间若 abortBash 被调用，它已广播
-   * 哨兵帧（command:''，bash-effects 只清 executingBash 不产 entry）并旋转 token。旧逻辑
+   * message.bashAborted 帧（bash-effects 只清 executingBash 不产 entry）并旋转 token。旧逻辑
    * 在此静默丢弃真实结果——但 pi 侧 recordBashResult 对 cancelled 无分支照常落盘
    * （bash-executor abort 返回 cancelled 结果而非 throw），丢弃导致 live 无记录、重开多出
    * 一条（登记例外①）。哨兵帧与真实帧职责正交（一个只清态、一个产 entry，均幂等），
@@ -408,8 +396,8 @@ export class BashDispatcher {
   /**
    * 取消进行中的 bash 执行（pi abort_bash）。
    *
-   * 与 abort() 对称：失败不 throw（console.error 兑底），finally 兑底广播 bashResult{cancelled:true}
-   * 终态——与 abort 广播 message.complete{aborted} 对称，前端据 bashResult 收口 isBashRunning 态。
+   * 与 abort() 对称：失败不 throw（console.error 兑底），finally 兑底广播 message.bashAborted
+   * 独立帧——与 abort 广播 message.complete{aborted} 对称，前端据 bashAborted 收口 isBashRunning 态。
    *
    * 返回 sent = abort_bash 是否真的发出且 pi 确认（P6 断言④回执真实化）：调用方
    * （session-message-handler）据此决定回执——sent=true 才回 message.status{aborted}，
@@ -428,7 +416,7 @@ export class BashDispatcher {
     // 两态皆无（空闲 session 的重复/误触取消）→ 短路 { sent: false }，由调用方回执真实化。
     if (!activeSession?.isBashRunning && !activeSession?.orphanBashRunning) return { sent: false }
     // sent = abort_bash 是否发出且 pi 确认（sendCommand 对 success:false reject，resolve =
-    // pi 已执行 abort）。失败不提前 return：兑底 cancelled 哨兵广播必须照发（T8b 既有契约）。
+    // pi 已执行 abort）。失败不提前 return：兑底 bashAborted 广播必须照发（T8b 既有契约）。
     let sent = true
     try {
       await client.abortBash()
@@ -454,22 +442,18 @@ export class BashDispatcher {
         activeSession.bashRunToken = `abort_${Date.now()}_${randomTokenSuffix()}`
       }
     }
-    // 兑底终态：无论 pi 是否响应 abort_bash，都广播 cancelled=true 的 bashResult。
-    // pi 卡死时不发任何事件，靠这条让前端 isBashRunning 复位（与 abort 广播 message.complete 同理）。
-    const cancelMsg = {
-      type: 'message.bashResult' as const,
+    // 兑底终态（独立帧 message.bashAborted，msg-pipeline-debloat D4-3）：无论 pi 是否响应
+    // abort_bash 都广播——pi 卡死时不发任何事件，靠这条让前端清 executingBash（UI 中止态，
+    // 与 abort 广播 message.complete 同理）。真实 abort 结果由 sendBash await 返回后经
+    // bashResult{cancelled:true} 照常发布（与 pi 落盘一致），与本帧职责正交。
+    const abortMsg = {
+      type: 'message.bashAborted' as const,
       payload: {
         sessionId,
-        command: '',
-        output: '',
-        exitCode: null,
-        cancelled: true,
-        truncated: false,
-        excludeFromContext: false,
         timestamp: Date.now(),
       },
     }
-    this.bus?.publish(sessionId, cancelMsg)
+    this.bus?.publish(sessionId, abortMsg)
     return { sent }
   }
 }

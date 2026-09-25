@@ -333,7 +333,8 @@ describe('MessageStream 共存钉扎（W5T1，streaming turn + bash 消息双挂
  * - bashStart 帧置位 → ActivityStrip bash 行出现，行内 = i18n 前缀（zh locale「正在执行」）+
  *   elapsed mono meta；命令原文不内联、在悬停详情（方案 A，见 ActivityStrip.vue 组件头注
  *   [notice-family-phrase-detail 方案 A]——长命令会把横线挤成残端，故短语化）
- * - bashResult 到达（abort 哨兵帧 command:''+cancelled:true 只清执行态不产 entry）→ 行消失
+ * - bashAborted 到达（abortBash 兜底终态独立帧 message.bashAborted，msg-pipeline-debloat
+ *   D4-3；只清执行态不产 entry）→ 行消失
  * - 行位于 Virtualizer 之外（文档流），空消息 session 也可见——不依赖 virtua 渲染窗口（T10/gap3/
  *   W5T1 依赖本文件的 Virtualizer stub 才能在 happy-dom 下渲染，本用例有无该 mock 均可跑）
  *
@@ -341,12 +342,12 @@ describe('MessageStream 共存钉扎（W5T1，streaming turn + bash 消息双挂
  * bashResultEffect 哨兵分支均不解构使用 ctx，传最小 fake ctx 即可驱动真实 effect 代码路径。
  */
 describe('MessageStream executing bash 瞬时行（[u6a] ActivityStrip bash 行）', () => {
-  /** 最小 fake ctx：两个帧 handler 的目标分支都不触碰 ctx 字段（哨兵分支在解构后短路） */
+  /** 最小 fake ctx：两个帧 handler 的目标分支都不触碰 ctx 字段（bashAborted 分支不使用 ctx） */
   const fakeCtx = { messages: undefined, applyEntryFrame: undefined } as unknown as MessageEffectContext
 
-  /** 清残留（模块级 Map 跨用例共享，哨兵帧幂等清除） */
+  /** 清残留（模块级 Map 跨用例共享，bashAborted 帧幂等清除） */
   function clearExecutingBash(sid: string): void {
-    bashEffects['message.bashResult']?.(fakeCtx, sid, { command: '', cancelled: true })
+    bashEffects['message.bashAborted']?.(fakeCtx, sid, { sessionId: sid, timestamp: 0 })
   }
 
   beforeEach(() => {
@@ -387,8 +388,8 @@ describe('MessageStream executing bash 瞬时行（[u6a] ActivityStrip bash 行�
     await new Promise((r) => setTimeout(r, 260))
     expect(document.querySelector('[data-testid="activity-strip-detail-body-bash"]')?.textContent).toBe('npm test')
 
-    // bashResult 到达（abort 哨兵帧：只清执行态不产 entry）→ 行消失，无残留 spinner
-    bashEffects['message.bashResult']?.(fakeCtx, sid, { command: '', cancelled: true })
+    // bashAborted 到达（abort 兜底终态帧：只清执行态不产 entry）→ 行消失，无残留 spinner
+    bashEffects['message.bashAborted']?.(fakeCtx, sid, { sessionId: sid, timestamp: 0 })
     await nextTick()
     expect(wrapper.find('[data-testid="activity-strip"]').exists()).toBe(false)
 

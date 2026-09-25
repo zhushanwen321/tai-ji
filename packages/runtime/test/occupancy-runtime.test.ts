@@ -450,7 +450,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
     expect(frames.every((f) => f.turn === 'generating')).toBe(true) // turn 维度不被 bash 挂点改写
   })
 
-  it('#11 abortBash → bash=false（成败皆兜底，cancelled 哨兵帧保留）', async () => {
+  it('#11 abortBash → bash=false（成败皆兜底，bashAborted 兜底终态帧保留）', async () => {
     const { dispatcher, publish } = makeDispatcher({
       session: makeMockSession({
         isBashRunning: true, bashRunToken: 'bash_1_abc',
@@ -460,7 +460,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
     await dispatcher.abortBash('s1')
     const frames = occupancyFrames(publish)
     expect(frames).toEqual([{ sessionId: 's1', turn: 'idle', compacting: false, bash: false }])
-    expect(frameTypes(publish)).toContain('message.bashResult')
+    expect(frameTypes(publish)).toContain('message.bashAborted')
   })
 
   it('#6 兜底：compact transport 失败 → finally 复位 compacting=false（compaction_end 不到达时）', async () => {

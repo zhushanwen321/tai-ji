@@ -18,7 +18,7 @@
  * - sendBash start → bus.publish(message.bashStart)
  * - sendBash success → bus.publish(message.bashResult)
  * - sendBash error → bus.publish(message.bashResult + message.error)
- * - abortBash cancelled → bus.publish(message.bashResult{cancelled:true})
+ * - abortBash → bus.publish(message.bashAborted)（D4-3 兜底终态独立帧）
  * - compact（M4 事件驱动）→ 零 compaction 广播（busy/start/fail/summary/success 各路径，生命周期归 interpreter）
  * - messageBus undefined → no crash（null-safety）
  *
@@ -253,15 +253,15 @@ describe('message-dispatcher bus integration', () => {
 
   // ── abortBash path ──
 
-  it('abortBash cancelled → bus.publish(message.bashResult{cancelled:true})', async () => {
+  it('abortBash → bus.publish(message.bashAborted)（D4-3 兜底终态独立帧）', async () => {
     const session = makeMockSession({ isBashRunning: true, bashRunToken: 'bash_123_abc' })
     const { dispatcher, messageBus } = makeMocks({ session })
     await dispatcher.abortBash('s1')
-    const bashResultCall = messageBus.publish.mock.calls.find(
-      (c: any[]) => c[1].type === 'message.bashResult',
+    const bashAbortedCall = messageBus.publish.mock.calls.find(
+      (c: any[]) => c[1].type === 'message.bashAborted',
     )
-    expect(bashResultCall).toBeDefined()
-    expect(bashResultCall![1].payload.cancelled).toBe(true)
+    expect(bashAbortedCall).toBeDefined()
+    expect(bashAbortedCall![1].payload).toMatchObject({ sessionId: 's1' })
   })
 
   // ── compact paths ──

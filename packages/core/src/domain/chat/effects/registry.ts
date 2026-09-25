@@ -74,7 +74,7 @@ import {
 import { findLastAssistantIndex, findToolCallOwner } from '../chunk-processor'
 import { commitMessages, REASON_FALLBACK_ERROR_TEXT, terminalMessagePatch } from '../mutations'
 import { truncateToolCall } from '../truncate-tool-output'
-import { bashStartEffect, bashResultEffect } from '../bash-effects'
+import { bashStartEffect, bashResultEffect, bashAbortedEffect } from '../bash-effects'
 import { applyEntryFrameWithOverlay } from './entry-overlay'
 import { isDevMode } from '../../../platform/dev-mode'
 // [投递所有权内核 u3b] message_end(user) 送达回执（内核标记 id 匹配，C-data-08 修订方向）
@@ -609,9 +609,12 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
 
   // ── Bash 执行（W1 fix-chat-flow-order：bashStart 写 ephemeral executingBash 不建消息项；
   //    bashResult 构造 bashExecution entry 走 applyEntryFrame——reducer 唯一入流通道，
-  //    dispatcher 双分支延迟使帧时序构造性对齐 pi 落盘。实现提取于 bash-effects.ts 避免本文件超行）──
+  //    dispatcher 双分支延迟使帧时序构造性对齐 pi 落盘；bashAborted 为 abortBash 兜底终态
+  //    独立帧（msg-pipeline-debloat D4-3），只清执行态不产 entry。实现提取于 bash-effects.ts
+  //    避免本文件超行）──
   'message.bashStart': bashStartEffect,
   'message.bashResult': bashResultEffect,
+  'message.bashAborted': bashAbortedEffect,
 
   // ── pi CustomMessage 注入（扩展向对话流注入结构化通知）──
   'message.customStart': (ctx, sid, payload) => {

@@ -6,8 +6,9 @@
  *   case 消费的 PiEntry 结构，经 applyEntryFrame 喂 per-session reducer state。
  * - 使用者（黑盒）：bashResult 后 messages ref 出现 complete 态 bashExecution system 消息
  *   （用户可见行为）；bashStart 不建消息项。
- * - 观察者（形态）：executingBash 置/清成对（bashStart 置 / bashResult·markBashError 清），
- *   abortBash 合成哨兵帧（command:'' + cancelled:true）只清执行态不产 entry。
+ * - 观察者（形态）：executingBash 置/清成对（bashStart 置 / bashResult·bashAborted·
+ *   markBashError 清），abortBash 兜底终态帧（message.bashAborted，msg-pipeline-debloat
+ *   D4-3 独立帧化）只清执行态不产 entry。
  *
  * 等价性断言（entry 序 vs 手工重放）归 W6，此处只锁 entry 形态与 reducer 喂入。
  */
@@ -18,6 +19,7 @@ import type { Message, PiEntry } from '@taiji/shared'
 import {
   bashStartEffect,
   bashResultEffect,
+  bashAbortedEffect,
   getExecutingBash,
   markBashError,
   findLastStreamingBashIndex,
@@ -131,13 +133,29 @@ describe('bashResultEffect：bashExecution entry 化（reducer 唯一入流通�
     expect(getExecutingBash('s1')).toBeUndefined()
   })
 
-  it('abortBash 合成哨兵帧（command:"" + cancelled:true）只清执行态，不产 entry（不渲染空命令卡片）', () => {
+  it('bashAborted 帧端到端（abortBash 兜底终态，wire 形态 { sessionId, timestamp }）：只清执行态，不产 entry（UI 中止态，无空命令卡片）', () => {
     const { ctx, messages, entryStates } = createTestCtx()
     dispatch(bashStartEffect, ctx, 's1', { command: 'sleep 999', excludeFromContext: false })
-    dispatch(bashResultEffect, ctx, 's1', bashResultPayload({ command: '', output: '', exitCode: null, cancelled: true }))
+    // wire 载荷与 runtime BashDispatcher.abortBash 广播形态逐字段一致（shared
+    // ServerMessageMap['message.bashAborted']）——产生侧锁在 runtime
+    // message-dispatcher-bash.test.ts T8/T8b，本侧按同一 shared 契约消费；
+    // UI 中止态 = ActivityStrip 瞬时执行行消失（renderer MessageStream-bash.test.ts 锁）。
+    dispatch(bashAbortedEffect, ctx, 's1', { sessionId: 's1', timestamp: 1724000000001 })
 
     expect(messages.value.get('s1')?.value ?? []).toHaveLength(0)
     expect(entryStates.get('s1')).toBeUndefined()
+    expect(getExecutingBash('s1')).toBeUndefined()
+  })
+
+  it('D4-3 边界：真实 cancelled bashResult（command 非空）照常 entry 化——哨兵形态判别删除后不误吞真实 abort 结果', () => {
+    const { ctx, messages } = createTestCtx()
+    dispatch(bashStartEffect, ctx, 's1', { command: 'sleep 5', excludeFromContext: false })
+    dispatch(bashResultEffect, ctx, 's1', bashResultPayload({ command: 'sleep 5', output: '部分输出', exitCode: null, cancelled: true }))
+
+    const list = messages.value.get('s1')?.value ?? []
+    expect(list).toHaveLength(1)
+    expect(list[0].bashExecution?.command).toBe('sleep 5')
+    expect(list[0].bashExecution?.cancelled).toBe(true)
     expect(getExecutingBash('s1')).toBeUndefined()
   })
 
