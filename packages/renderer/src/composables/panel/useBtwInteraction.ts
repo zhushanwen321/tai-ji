@@ -32,7 +32,7 @@ export interface BtwBarRequest {
   dialog?: UiDialogRequest
 }
 
-/** 降档表单选项（本地同形，renderer 不反向依赖 extension-protocol——PlanReviewComment 惯例） */
+/** 降档表单选项（形状对齐 extension-protocol 的 PlanReviewComment——契约已直引，本地收窄仅为降档最小渲染面） */
 export interface BtwBarOption {
   label: string
   description?: string
@@ -385,7 +385,7 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     if (other.length > 0) answers[`${key}__other`] = other
   }
 
-  /** plan 审批降档回传（PlanReviewResponse 本地同形；revise 单行意见 = 降档契约登记面） */
+  /** plan 审批降档回传（payload 形状 = extension-protocol PlanReviewResponse 判别联合——契约直引，手工序列化走 respond 通道；revise 单行意见 = 降档契约登记面） */
   function submitPlan(decision: 'approve' | 'revise'): void {
     const payload =
       decision === 'approve'

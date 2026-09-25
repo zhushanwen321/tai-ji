@@ -60,7 +60,7 @@ const ACTIVE_VIEW: PlanStateView = {
   requirement: '重构 auth 模块',
   templateName: null,
   skills: ['tech-design', 'dev-flow'],
-  reviewState: 'awaiting',
+  state: 'reviewing',
 }
 
 // ── handles 清单 ────────────────────────────────────────────────
