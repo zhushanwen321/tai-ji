@@ -2155,7 +2155,7 @@ async function main() {
     assert.strictEqual(res.proposals, 5);
     const prompt = t.agentCalls[0].prompt;
     assertIncludes(prompt, 'simplifyMode=report 发起');
-    assertIncludes(prompt, '确认断点完整保留');
+    assertIncludes(prompt, '人工确认环节完整保留');
     assert.ok(fs.existsSync(path.join(t.root, 'run-dir', 'simplify-report.md')));
   });
 
