@@ -5,6 +5,7 @@
   },
   "include": [
     "src/__tests__/api/rpc-type-pairing.test.ts",
+    "src/__tests__/composables/mirror-guard-markdown-types.test.ts",
     "src/__tests__/helpers/quota-state-stub.ts",
     "src/__tests__/api/events-safe-forEach.test.ts",
     "src/__tests__/useSidebar-get-commands.test.ts",

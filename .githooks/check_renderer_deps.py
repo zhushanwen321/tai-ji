@@ -41,10 +41,15 @@ PACKAGE_JSON = RENDERER_ROOT / 'package.json'
 
 # 豁免的 import（无需在 package.json 声明）
 BUILTIN_EXEMPT = {
-    # node 内置（tsup/electron external）
-    'path', 'fs', 'crypto', 'os', 'url', 'util', 'events', 'stream',
-    'http', 'https', 'net', 'tls', 'zlib', 'buffer', 'child_process',
-    'worker_threads', 'module', 'process',
+    # node 内置全集（tsup/electron external；逐个补丁式维护曾两次漏项——
+    # node:fs、node:vm 均曾误报，改为一次登记 Node.js builtin 模块全集）
+    'assert', 'async_hooks', 'buffer', 'child_process', 'cluster',
+    'console', 'constants', 'crypto', 'dgram', 'diagnostics_channel',
+    'dns', 'domain', 'events', 'fs', 'http', 'http2', 'https',
+    'inspector', 'module', 'net', 'os', 'path', 'perf_hooks', 'process',
+    'punycode', 'querystring', 'readline', 'repl', 'stream',
+    'string_decoder', 'timers', 'tls', 'trace_events', 'tty', 'url',
+    'util', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib',
     # workspace 内部包
     '@taiji/shared',
 }
