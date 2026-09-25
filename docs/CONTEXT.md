@@ -206,7 +206,7 @@ plan 模式流程的单一显式状态契约（状态散落三处 → 任意两�
 
 ### selfReview（自审结论）
 
-agent 提交计划审批（submit-review）前的自审摘要，审批交互的硬门参数（D9）：每次 submit-review 必带非空 selfReview（**无豁免**，含修订后重挂——自审对象是新版本文档），缺失/空被拒收并附纠偏指令。门语义三层边界：存在性（非空必填）= 结构保证；防照抄（文档已变而 selfReview 与上次逐字节相同 → 拒收）= 启发式；语义级新鲜度（自审是否真的对着新文档做了）= 提示词纪律（Phase C.5 自审清单），机器不可判。单字段双角色：E3 会话重启重挂的回传源（steer 携带上轮全文，指示原样回传不重新思考——豁免只在「自审内容」，过门义务不豁免）+ 防照抄比较基线。有界 4KB（写侧单点截断，UTF-8 码点界安全）。投影面止于审批请求帧（`PlanReviewRequest.selfReview` → `extension.ui_request`）：不进 `PlanStateView` / `session.planState` 帧；entry 持久字段 = `plan-state.selfReview`。
+agent 提交计划审批（submit-review）前的自审摘要，审批交互的硬门参数（D9）：每次 submit-review 必带非空 selfReview（**无豁免**，含修订后重挂——自审对象是新版本文档），缺失/空被拒收并附纠偏指令。门语义三层边界：存在性（非空必填）= 结构保证；防照抄（文档已变而 selfReview 与上次逐字节相同 → 拒收）= 启发式；语义级新鲜度（自审是否真的对着新文档做了）= 提示词纪律（Phase C.5 自审清单），机器不可判。单字段双角色：E3 会话重启重挂的回传源（仅独立 pi/TUI 形态——该形态自动重挂是唯一恢复路径，steer 携带上轮全文，指示原样回传不重新思考，豁免只在「自审内容」、过门义务不豁免；taiji GUI 宿主 E3 不自动重挂，恢复走 renderer degraded 按钮由用户触发重提，重提时正常过门）+ 防照抄比较基线。有界 4KB（写侧单点截断，UTF-8 码点界安全）。投影面止于审批请求帧（`PlanReviewRequest.selfReview` → `extension.ui_request`）：不进 `PlanStateView` / `session.planState` 帧；entry 持久字段 = `plan-state.selfReview`。
 
 **代码映射**: `packages/extension-protocol/src/extensions/plan/review-contract.ts`（截断/上限权威）+ `core/types.ts`（`PlanReviewRequest.selfReview`）；消费面勾销锚 = 同目录 `consumers.md`。
 
