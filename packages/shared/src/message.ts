@@ -118,6 +118,14 @@ export function parseRespawnNoticeVariant(details: unknown): PiRespawnNoticeVari
 }
 
 /**
+ * uuid 字符结构单点（8-4-4-4-12 hex）：下方三个标记正则形态（MSG_ID_TAG_RE /
+ * MSG_ID_TAG_BARE_RE / BARE_UUID_RE）的 uuid 段全部由本串构造——uuid 模式段禁止在
+ * 本仓他处手写（[MF-1-11]；PS-26 探针锁定全仓单处手写体，msg-id-mapper extension
+ * 的同构正则属「extension 独立发布不依赖 shared」登记豁免，不在收敛面）。
+ */
+const MSG_ID_UUID_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+/**
  * 投递身份标记正则（`<!--taiji:msg:<uuid>-->` 全文匹配 SSOT，双形态）：
  * `u-<uuid>`（renderer 气泡 id 写入面，msg-id-mapper TAG_MATCH 同构）与裸 `<uuid>`
  * （内核出站标记形态，刻意不被 msg-id-mapper 剥离——出站身份必须存活进 transcript
@@ -125,11 +133,46 @@ export function parseRespawnNoticeVariant(details: unknown): PiRespawnNoticeVari
  * 追加裸形态）首个命中即正确值。
  *
  * 捕获组：1 = 可选 `u-` 前缀；2 = 裸 uuid。i 旗标 + 小写字符类等价覆盖大写十六进制，
- * 消费方统一 toLowerCase 归一。/i 无 lastIndex 状态，模块级单例可安全跨消费方共享。
+ * 消费方统一 toLowerCase 归一。无 /g 无 lastIndex 状态，模块级单例可安全跨消费方共享。
  * （收敛自 core user-delivery.ts 与 runtime skill-notice-publisher.ts 两份已漂移手写体。）
  */
-export const MSG_ID_TAG_RE =
-  /<!--taiji:msg:(u-)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-->/i
+export const MSG_ID_TAG_RE = new RegExp(`<!--taiji:msg:(u-)?(${MSG_ID_UUID_SEGMENT})-->`, 'i')
+
+/**
+ * 裸形态标记正则（uuid 双形态中只认裸 `<uuid>`，DEFER 判定专用——**不是投递身份判定
+ * 正则**，后者 = runtime session-delivery-registry 的 DELIVERY_MARKER_ID_RE，复合
+ * `m-` 收养条目形态；严格/宽松二分见 ADR-0077）。捕获组 1 = 裸 uuid。
+ *
+ * 消费方（core apply-entry-convert 的 DEFER_FLUSH_MARKER_RE 面 / runtime
+ * entry-tree-builder 的 deferId 提取）一律 import 本常量：uuid 段与 MSG_ID_TAG_RE
+ * 同源（MSG_ID_UUID_SEGMENT 单点），无独立派生器、无双侧同步纪律。
+ * id 空间互斥语义：uuid 字符集不含字母 u，结构上不命中 `u-` 前缀标记（反之 TAG_MATCH
+ * 不命中裸标记）——锚定 PS-26 探针行为断言。
+ */
+export const MSG_ID_TAG_BARE_RE = new RegExp(`<!--taiji:msg:(${MSG_ID_UUID_SEGMENT})-->`, 'i')
+
+/**
+ * 裸 uuid 全串锚定正则（8-4-4-4-12 hex，i 旗标）。消费方 = runtime revoke-orchestrator
+ * 的 targetId 形态分派（撤回 U8 保号子形态锚）：与 pi entryId 的 8 位 hex 形态构造性
+ * 区分（无连字符不匹配）。uuid 结构与 MSG_ID_TAG_RE 同源（MSG_ID_UUID_SEGMENT 单点），
+ * 禁单侧漂移。
+ */
+export const BARE_UUID_RE = new RegExp(`^${MSG_ID_UUID_SEGMENT}$`, 'i')
+
+/**
+ * 出站投递标记字面量唯一构造点（`<!--taiji:msg:<裸 id>-->`，msg-pipeline-debloat D5-6）。
+ * 内核尾附（withDeliveryMarker）、对账 needle、尾附锚文末判定等消费方统一经本函数构造，
+ * 禁手拼字面量。入参 = 裸 id 形态（`u-` 前缀由调用方先剥——runtime bareMarkerId）。
+ */
+export function markerLiteral(bareId: string): string {
+  return `<!--taiji:msg:${bareId}-->`
+}
+
+/**
+ * 帧条目 preview 截断长度（投递队列展示投影）。runtime transport 与 core mock 轨共用
+ * 同值——mock 轨/real 轨帧形态一致（否则 mock 型前端测试的基线会与真机分叉）。
+ */
+export const DELIVERY_PREVIEW_MAX_CHARS = 80
 /** 消息生命周期状态（steer/followup 解耦后 pending 不再进消息流——m4 清理）。 */
 export type MessageStatus = 'streaming' | 'complete' | 'error'
 export type ToolCallStatus = 'running' | 'completed' | 'error' | 'end_not_received'

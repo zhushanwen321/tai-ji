@@ -41,7 +41,7 @@ import type {
   UiLocale,
   Segment,
 } from '@taiji/shared'
-import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS } from '@taiji/shared'
+import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
 import { fixtureProviders, fixtureSkills, fixtureAgents, fixtureExtensions, toCandidate } from './settings-data'
 import { MOCK_MODELS, mockModelToInfo, FILE_CANDIDATES } from './composer-data'
@@ -291,8 +291,9 @@ const cancelled = new Set<string>()
 /** 运行中的 setTimeout 句柄，resolve 后自动移除，避免 Set 无限增长 */
 // taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock 定时器句柄集合
 const timers = new Set<ReturnType<typeof setTimeout>>()
-/** session.delivery mock 帧的 preview 截断长度（展示投影字段，非全文——与真实 runtime 帧同语义） */
-const DELIVERY_PREVIEW_MAX_CHARS = 80
+// session.delivery mock 帧的 preview 截断长度（展示投影字段，非全文——与真实 runtime 帧同语义）。
+// 值 SSOT = @taiji/shared DELIVERY_PREVIEW_MAX_CHARS（msg-pipeline-debloat D5-5 下沉：
+// runtime transport 与本 mock 同源同值，原「注释互指」双定义删除）。
 
 /**
  * 已广播 in-flight 投递条目、且流式序列尚未走完的 session（abort 终态帧依据）。

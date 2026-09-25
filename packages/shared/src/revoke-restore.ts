@@ -1,17 +1,22 @@
 /**
- * 撤回草稿还原纯函数族（message revoke 设计 §3.3 D7——本文件是两层切条规则的 SSOT）。
+ * 草稿还原纯函数族（message revoke 设计 §3.3 D7 两层切条规则 + msg-pipeline-debloat
+ * D5-2 剥除统一——本文件是 stripDeliveryMarkers 的唯一实现 SSOT）。
  *
  * 输入形态（session.revokeMessage reply 的 content）= transcript user entry 原文，含投递
  * 裸标记：单条逐段投递形态 = `原文\n<!--taiji:msg:<uuid>-->`（内核 withDeliveryMarker 恒
- * 尾附，已核实 session-delivery-registry.ts:191）；splitComposed 拆分失败的降级整批形态 =
- * 各条已带标记的文本以 `\n\n---\n\n` 连接（buildBatchPayload BATCH_SEP，同文件:148）。
+ * 尾附）；splitComposed 拆分失败的降级整批形态 = 各条已带标记的文本以 `\n\n---\n\n` 连接
+ * （buildBatchPayload BATCH_SEP）。
  *
- * 标记解析与 shared/message.ts 的 MSG_ID_TAG_RE 同源（source 派生，双形态 u-/裸 uuid）——
- * 标记形态漂移时两处同时红，不另造第二份正则。
+ * 剥除语义（三口径统一后的唯一口径，msg-pipeline-debloat D5-3 / P5）：**剥除标记、不动
+ * 其他字符**——剥标记本体与其紧邻的单个前导换行（内核 `${text}\n<!--tag-->` 连接产物），
+ * 用户原文自身的尾随换行与一切其他字符保留（不 trimEnd，回草稿尾换行不丢）。
  *
- * 与 runtime session-delivery-topic.ts 的同名函数（preview/cancel 草稿面：replace + trimEnd）
- * 语义差异是有意的：本文件目标是「撤回原文精确恢复」——只剥标记本体与其紧邻的单个前导
- * 换行（内核连接产物），用户原文自身的尾随换行保留；trimEnd 会误剥用户尾换行。
+ * 标记体取宽松 `[^>]*` 形态（ADR-0077 形态二分：判定严格 / 剥除宽松——严格 uuid 形态会
+ * 漏剥 m- 收养条目标记与残缺/历史形态标记留下脏文本，与 runtime transport 旧版宽松剥除
+ * 语义一致，统一实现不收严）。身份判定（提取/回执对账/rebuild 分派）不受本函数影响，
+ * 仍归 runtime DELIVERY_MARKER_ID_RE 严格判据。消费方：本文件撤回草稿还原 + runtime
+ * transport（队列 preview / delivery.cancel / drain 回草稿，经 session-delivery-topic
+ * 再导出）。
  */
 import { MSG_ID_TAG_RE } from './message'
 
@@ -23,10 +28,12 @@ const DRAFT_JOINER = '\n\n'
 
 /**
  * 标记 + 紧邻单个前导换行的全局正则（每次调用新建：/g 形态有 lastIndex 状态，
- * 模块级单例跨消费方共享不安全——与 MSG_ID_TAG_RE 的「无 /g 可共享」注记对齐）。
+ * 模块级单例跨消费方共享不安全）。标记体 = 宽松 `[^>]*`（剥除面授权形态，ADR-0077），
+ * 本仓剥除正则的唯一手写体（PS-26 探针登记豁免面之外的身份判定正则均由
+ * message.ts MSG_ID_UUID_SEGMENT 构造，与此处无关）。
  */
 function markerWithLeadingNewlineRe(): RegExp {
-  return new RegExp(`\\n?${MSG_ID_TAG_RE.source}`, 'gi')
+  return new RegExp('\\n?<!--taiji:msg:[^>]*-->', 'gi')
 }
 
 /** 标记本体全局正则（MSG_ID_TAG_RE 同 source；matchAll 定位用，每次调用新建，理由同上）。 */
@@ -35,10 +42,10 @@ function markerRe(): RegExp {
 }
 
 /**
- * 剥除全部投递裸标记（单条形态主导路径：剥后即用户原文）。
+ * 剥除全部投递标记（草稿还原 / 队列 preview 共用唯一实现，见文件头）。
  *
  * 剥除单位 = 标记本体 + 紧邻的单个前导换行（内核 `${text}\n<!--tag-->` 的连接换行）。
- * 用户原文以换行结尾时自身的尾换行保留（区别于 preview 面的 trimEnd 语义，见文件头）。
+ * 用户原文以换行结尾时自身的尾换行保留（P5 口径：剥除不动其他字符，不 trimEnd）。
  */
 export function stripDeliveryMarkers(text: string): string {
   return text.replace(markerWithLeadingNewlineRe(), '')

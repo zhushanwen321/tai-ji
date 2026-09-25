@@ -2,7 +2,8 @@
  * 撤回草稿还原纯函数测试（U5，设计 §3.3 D7 两层规则——revoke-restore.ts 为 SSOT）。
  *
  * 覆盖：
- * - stripDeliveryMarkers：单条剥标记（裸 uuid / u- 前缀双形态）+ 用户尾换行保留 + 无标记原样；
+ * - stripDeliveryMarkers：单条剥标记（裸 uuid / u- 前缀双形态 + 宽松体 m-/残缺形态，
+ *   ADR-0077 剥除宽松授权）+ 用户尾换行保留 + 无标记原样；
  * - restoreRevokedDraft 层 1 切条：段数、各段内容、第 2..N 段首连接产物剥除、
  *   corner「用户原文以分隔符开头——段首字面保留」、多条空行合并回单草稿；
  * - restoreRevokedDraft 层 2 兜底：混入无标记段 / 内嵌标记形态 / 单标记非末尾 / 无标记
@@ -49,6 +50,13 @@ describe('stripDeliveryMarkers（单条形态主导路径）', () => {
 
   it('无标记文本：原样返回', () => {
     expect(stripDeliveryMarkers('plain text')).toBe('plain text')
+  })
+
+  it('宽松剥除面（ADR-0077 + D5-2 统一）：m- 收养形态 / 残缺形态同样剥净（不收严）', () => {
+    // m- 形态 = agent 通路收养条目的出站标记（adoptText withDeliveryMarker 同尾附），
+    // 严格 uuid 形态会漏剥留下脏文本——统一剥除实现取宽松 `[^>]*` 体
+    expect(stripDeliveryMarkers(`agent 回流原文\n<!--taiji:msg:m-lz3k00-7-->`)).toBe('agent 回流原文')
+    expect(stripDeliveryMarkers(`残缺形态\n<!--taiji:msg:whatever-->`)).toBe('残缺形态')
   })
 })
 

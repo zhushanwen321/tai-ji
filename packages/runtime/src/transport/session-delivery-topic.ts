@@ -24,6 +24,7 @@
  * 且 server 侧 onSessionDestroyed 主动 release（见 SessionMessageHandler.releaseDeliveryTopic）。
  */
 import type { DeliveryFrameEntry, ServerMessage } from '@taiji/shared'
+import { DELIVERY_PREVIEW_MAX_CHARS, stripDeliveryMarkers } from '@taiji/shared'
 import type {
   DeliveryEntriesProjection,
   DeliveryEntry,
@@ -35,13 +36,13 @@ import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 
 /**
- * 帧条目 preview 截断长度。与 core mock 的 DELIVERY_PREVIEW_MAX_CHARS 同值——mock 轨/real 轨
- * 帧形态一致（否则 mock 型前端测试的基线会与真机分叉）。
+ * 剥除投递标记（展示/草稿恢复面）= @taiji/shared 唯一实现（msg-pipeline-debloat D5-2
+ * 统一：shared revoke-restore 的宽松剥除——剥标记本体 + 紧邻单个前导换行，不 trimEnd，
+ * 用户尾换行保留）。本模块再导出维持既有 import 路径（session-message-handler 与
+ * transport 测试面），本地无第二份剥除正则。宽松形态依据 = ADR-0077（判定严格 /
+ * 剥除宽松——m- 收养条目标记与残缺形态同样剥净，统一实现不收严）。
  */
-export const DELIVERY_PREVIEW_MAX_CHARS = 80
-
-/** 投递标记形态（出站裸标记 u2 registry 追加 / core 富内容回填的 u- 形态）：展示面一律剥除。 */
-const DELIVERY_MARKER_RE = /<!--taiji:msg:[^>]*-->/g
+export { stripDeliveryMarkers }
 
 /**
  * 内核条目态 → 帧条目态（D5③：cancelled 不投影）。`DeliveryEntryState` 全键 Record =
@@ -72,15 +73,6 @@ export function frameStateOf(state: DeliveryEntryState): DeliveryFrameEntry['sta
 /** 内核车道 → 帧车道（编译期对齐守卫经 {@link FRAME_LANE_OF} 全键覆盖）。 */
 export function frameLaneOf(lane: DeliveryLane): DeliveryFrameEntry['lane'] {
   return FRAME_LANE_OF[lane]
-}
-
-/**
- * 剥除投递标记（展示/草稿恢复面）：裸标记（u2 registry `withDeliveryMarker` 追加）与
- * core 富内容回填的 `u-<uuid>` 形态都是内部投递元数据，不得进入用户可见文本
- * （队列预览、cancel/drain 回草稿全文）。剥除后 trimEnd 清掉标记前的换行。
- */
-export function stripDeliveryMarkers(text: string): string {
-  return text.replace(DELIVERY_MARKER_RE, '').trimEnd()
 }
 
 /** 帧条目 preview（D5：展示投影字段，**禁止当全文消费**——草稿恢复走 cancel/drain reply 全文）。 */

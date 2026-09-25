@@ -27,7 +27,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SessionMessageHandler, type SessionHandlerContext } from '../session-message-handler.js'
-import { DELIVERY_PREVIEW_MAX_CHARS, SessionDeliveryTopic, deliveryPreview, stripDeliveryMarkers } from '../session-delivery-topic.js'
+import { DELIVERY_PREVIEW_MAX_CHARS } from '@taiji/shared'
+import { SessionDeliveryTopic, deliveryPreview, stripDeliveryMarkers } from '../session-delivery-topic.js'
 import {
   createSessionDeliveryRegistry,
   type SessionDeliveryDeps,
@@ -535,6 +536,21 @@ describe('delivery.cancel（V9/V10：queued 可撤 / 不可撤不谎报）', () 
     expect(frameEntries(h)).toEqual([]) // 撤销后帧同步移除（队列区隐去）
   })
 
+  it('[S5] 带尾换行的排队消息 cancel 回草稿：尾换行保留（D5-3/P5 剥除不动其他字符）', async () => {
+    const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
+    subscribeLive(h)
+
+    // 用户原文以换行结尾（多行输入末尾空行）：内核尾附标记后 cancel → 草稿须保留该尾换行
+    const rawContent = '第一段\n\n'
+    await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: rawContent, clientUuid: UUID_A }), WS)
+    await h.handler.handleSessionMessage(msg('delivery.cancel', { sessionId: SID, clientUuid: UUID_A }), WS)
+
+    const reply = replyOf(h, 'delivery.cancel')
+    expect(reply?.cancelled).toBe(true)
+    expect(reply?.content).toBe(rawContent) // 剥标记与连接换行后 = 原文逐字（含尾换行）
+    expect(reply?.content).not.toContain('taiji:msg')
+  })
+
   it('不可撤（未知 uuid）：cancelled:false + reason，条目不动（§3.4 反馈面，不谎报成功）', async () => {
     const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
     subscribeLive(h)
@@ -652,13 +668,21 @@ describe('delivery 域防御路径', () => {
 // ── 纯函数面（帧 DTO 装配） ───────────────────────────────────────
 
 describe('帧 DTO 装配纯函数', () => {
-  it('stripDeliveryMarkers 剥双形态标记 + 收尾空白（草稿恢复/预览共用）', () => {
+  it('stripDeliveryMarkers 剥标记 + 紧邻连接换行（shared 唯一实现再导出，草稿恢复/预览共用）', () => {
     expect(stripDeliveryMarkers(`你好\n<!--taiji:msg:11111111-1111-4111-8111-111111111111-->`)).toBe('你好')
     expect(stripDeliveryMarkers(`你好\n<!--taiji:msg:${UUID_A}-->`)).toBe('你好')
     expect(stripDeliveryMarkers('无标记')).toBe('无标记')
   })
 
-  it('deliveryPreview 截断 + 剥标记（与 core mock 同窗口值）', () => {
+  it('[S5/P5] 剥除不动其他字符：用户原文尾换行保留（不 trimEnd）；宽松形态剥 m- 收养标记', () => {
+    // cancel/drain 回草稿口径（msg-pipeline-debloat D5-3/P5）：原文自身的尾随换行不丢
+    expect(stripDeliveryMarkers(`首行\n尾行\n\n<!--taiji:msg:${UUID_A}-->`)).toBe('首行\n尾行\n')
+    // 宽松剥除面（ADR-0077）：m- 收养条目标记 / 残缺形态同样剥净（统一实现不收严）
+    expect(stripDeliveryMarkers(`agent 回流\n<!--taiji:msg:m-lz3k00-7-->`)).toBe('agent 回流')
+    expect(stripDeliveryMarkers(`残缺\n<!--taiji:msg:whatever-->`)).toBe('残缺')
+  })
+
+  it('deliveryPreview 截断 + 剥标记（值 SSOT = @taiji/shared DELIVERY_PREVIEW_MAX_CHARS）', () => {
     expect(DELIVERY_PREVIEW_MAX_CHARS).toBe(80)
     expect(deliveryPreview(`  ${'y'.repeat(200)}  `)).toBe('y'.repeat(80))
     expect(deliveryPreview(`hi\n<!--taiji:msg:whatever-->`)).toBe('hi')

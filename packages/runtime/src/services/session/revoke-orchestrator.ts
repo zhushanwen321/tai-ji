@@ -17,7 +17,7 @@
  * 撤回信号广播腿经 deps.notifyEntryInvalidation（MessageDispatcher.submitToKernel
  * 构造注入收编同款，[MF-1-7] 原进程内活动槽 activeRevocationSignalNotifier 已删除）。
  */
-import { MSG_ID_TAG_RE, TAIJI_NAV_COMMAND } from '@taiji/shared'
+import { BARE_UUID_RE, MSG_ID_TAG_RE, TAIJI_NAV_COMMAND } from '@taiji/shared'
 import type { SessionRevokeMessageReply } from '@taiji/shared'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
@@ -31,7 +31,7 @@ import type { SystemCommandOutcome } from './message-dispatcher.js'
 /**
  * msg-id-mapper custom entry 的 customType（双侧同构字面量：SSOT 在 extension 源码 +
  * infra/pi/entry-tree-builder.ts 的同名私有常量——本编排领地不含 entry-tree-builder，
- * 按 DEFER_MARKER_RE 双侧同构先例自持；形态变更须三侧同步，禁单侧修改）。
+ * 自持；形态变更须三侧同步，禁单侧修改）。
  */
 const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
 
@@ -43,13 +43,9 @@ const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
  */
 export const REVOKED_SIGNAL_CUSTOM_TYPE = 'taiji:revoked'
 
-/**
- * 裸 uuid 形态判别（[消息撤回 U8] 保号子形态的分派锚）：结构同 MSG_ID_TAG_RE 捕获组 2 的
- * 裸 uuid 段（8-4-4-4-12 hex）全串锚定——与 pi entryId 的 8 位 hex 形态构造性区分（无连字符
- * 不匹配）。[双侧同构字面量] uuid 结构须与 shared message.ts MSG_ID_TAG_RE 的 uuid 段同步，
- * 禁单侧修改。
- */
-const BARE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+// 裸 uuid 形态判别（[消息撤回 U8] 保号子形态的分派锚）= @taiji/shared BARE_UUID_RE
+// （msg-pipeline-debloat D5-1 收敛：uuid 结构与 MSG_ID_TAG_RE 同源单点构造，原手写体
+// 双侧同步纪律随之消灭）。与 pi entryId 的 8 位 hex 形态构造性区分（无连字符不匹配）。
 
 /** 编排依赖（窄注入，测试可 mock；组合根在 session-service 装配）。 */
 export interface RevokeOrchestratorDeps {

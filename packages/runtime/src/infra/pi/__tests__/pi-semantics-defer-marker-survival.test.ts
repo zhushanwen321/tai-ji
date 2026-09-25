@@ -14,9 +14,11 @@
  * 确认出队的可达性锚点（data-governance round2 MF-1）。
  *
  * 断言方式：静态直读 node_modules 实装 dist（pi-coding-agent / pi-agent-core）+ taiji
- * 侧标记正则 SSOT 源码（shared message.ts MSG_ID_TAG_RE——DEFER 两侧正则已由其 source
- * 派生，[MF-1-11]；core/runtime 两侧另断言 uuid 模式段手写体零残留）与 extension
- * msg-id-mapper 源码的互斥行为验证，同 pi-semantics-turn-usage-model.test.ts 范式。dist
+ * 侧标记正则 SSOT 源码（shared message.ts 的 MSG_ID_UUID_SEGMENT 单点——DEFER 两侧
+ * 生产方 core apply-entry-convert / runtime entry-tree-builder 直接 import 该模块导出的
+ * MSG_ID_TAG_BARE_RE，[MF-1-11 → msg-pipeline-debloat D5-1]；另断言 uuid 模式段手写体
+ * 全仓单处 + core/runtime 零残留）与 extension msg-id-mapper 源码的互斥行为验证，同
+ * pi-semantics-turn-usage-model.test.ts 范式。dist
  * 或源文件不可达时 skip 不 fail；不进 REAL_PI_TESTS 分池。pi 升级后红 = transform 面扩大
  * （steer 通路出现 input hook）或落盘/事件改写，先复核 PS-26 锚点再更新登记。
  *
@@ -114,31 +116,27 @@ describe.skipIf(SKIP_REASON !== '')(
     })
 
     it('taiji 两侧标记正则互斥（行为验证）：裸 uuid 不被 msg-id-mapper TAG_MATCH 命中，u- 标记不被 DEFER_FLUSH_MARKER_RE 命中', () => {
-      // [MF-1-11] DEFER 两侧正则已改由 shared MSG_ID_TAG_RE.source 派生（uuid 段禁手写），
-      // 字面量提取对象改为 SSOT 本体（源码即 SSOT，防探针内复制字面量漂移）；裸形态在
-      // 探针内独立重建（与生产派生同款形态选择，不 import 生产函数保持探针独立性）。
+      // [MF-1-11 → msg-pipeline-debloat D5-1] uuid 段 SSOT = shared message.ts 的
+      // MSG_ID_UUID_SEGMENT 单处字面量，三形态正则（MSG_ID_TAG_RE / MSG_ID_TAG_BARE_RE /
+      // BARE_UUID_RE）全部由其构造；core/runtime 派生器已删（直接 import shared 常量）。
+      // 探针保持源码直读（不 import 生产模块，独立性不变）：提取 segment 重建裸形态正则，
+      // 行为断言与生产消费方（DEFER_FLUSH_MARKER_RE / DEFER_MARKER_RE）等价。
       const sharedSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'shared', 'src', 'message.ts'), 'utf-8')
       const coreSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'core', 'src', 'domain', 'chat', 'apply-entry-convert.ts'), 'utf-8')
       const rtSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'runtime', 'src', 'infra', 'pi', 'entry-tree-builder.ts'), 'utf-8')
       const extSrc = readFileSync(join(REPO_ROOT as string, 'extensions', 'taiji', 'msg-id-mapper', 'src', 'index.ts'), 'utf-8')
-      const msgIdTagDef = /export const MSG_ID_TAG_RE =\s*\/(.+?)\/([a-z]*)/.exec(sharedSrc)
+      const segmentDef = /const MSG_ID_UUID_SEGMENT = '(.+?)'/.exec(sharedSrc)
       const tagMatchDef = /const TAG_MATCH = \/(.+?)\/([a-z]*)\r?\n/.exec(extSrc)
-      expect(msgIdTagDef, 'shared MSG_ID_TAG_RE 字面量提取失败——复核 packages/shared/src/message.ts').not.toBeNull()
+      expect(segmentDef, 'shared MSG_ID_UUID_SEGMENT 字面量提取失败——复核 packages/shared/src/message.ts').not.toBeNull()
       expect(tagMatchDef, 'extension TAG_MATCH 字面量提取失败——复核 msg-id-mapper/src/index.ts').not.toBeNull()
-      // 裸形态重建：剥可选 u- 前缀捕获组 → 裸 uuid 升为捕获组 1（与生产 deriveBareMsgIdTagRe
-      // 同锚 <!--taiji:msg:(u-)?( / )-->；SSOT 形态漂移在此红，两侧生产 fail-fast 同步红）
-      const ssotBody = msgIdTagDef![1]
-      const head = '<!--taiji:msg:(u-)?('
-      const tail = ')-->'
-      expect(
-        ssotBody.startsWith(head) && ssotBody.endsWith(tail) && ssotBody.length > head.length + tail.length,
-        'MSG_ID_TAG_RE source 形态漂移——两侧裸形态派生锚失效（core/runtime deriveBareMsgIdTagRe 会 fail-fast），复核 shared message.ts',
-      ).toBe(true)
-      const deferRe = new RegExp(`<!--taiji:msg:(${ssotBody.slice(head.length, ssotBody.length - tail.length)})-->`, msgIdTagDef![2])
+      // [MF-1-11] uuid 模式段手写体全仓单处：shared message.ts 只允许 MSG_ID_UUID_SEGMENT
+      // 一处（出现 2 次 = 三形态外又冒出手写体新病灶）；core/runtime 零残留（残留 =
+      // 派生器回退或新病灶）
+      expect(sharedSrc.match(/\[0-9a-f\]\{8\}/g)?.length, 'shared message.ts uuid 模式段手写体超出 MSG_ID_UUID_SEGMENT 单点').toBe(1)
+      expect(/\[0-9a-f\]\{8\}/.test(coreSrc), 'core apply-entry-convert 残留手写 uuid 模式段——D5-1 SSOT 回退').toBe(false)
+      expect(/\[0-9a-f\]\{8\}/.test(rtSrc), 'runtime entry-tree-builder 残留手写 uuid 模式段——D5-1 SSOT 回退').toBe(false)
+      const deferRe = new RegExp(`<!--taiji:msg:(${segmentDef![1]})-->`, 'i')
       const tagMatchRe = new RegExp(tagMatchDef![1], tagMatchDef![2])
-      // [MF-1-11] 两侧生产定义 uuid 模式段手写体零残留（残留 = 派生化回退或新病灶）
-      expect(/\[0-9a-f\]\{8\}/.test(coreSrc), 'core apply-entry-convert 残留手写 uuid 模式段——MF-1-11 派生化回退').toBe(false)
-      expect(/\[0-9a-f\]\{8\}/.test(rtSrc), 'runtime entry-tree-builder 残留手写 uuid 模式段——MF-1-11 派生化回退').toBe(false)
       // TAG_STRIP（msg-id-mapper 的剥离正则）必须仍是 u- 前缀形态（input hook 只剥 u- 标记的依据）
       expect(
         /const TAG_STRIP = \/<!--taiji:msg:u-\[0-9a-fA-F-\]\{36\}-->\/g/.test(extSrc),

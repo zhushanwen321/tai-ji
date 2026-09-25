@@ -319,8 +319,9 @@ describe('u2 对账器三分处置（D3）', () => {
 // ── 假标记字面量身份判据（MF-1-1 B2 判据收敛 + MF-2-1 尾附锚收窄） ──────────────
 // 两轮判据收敛的回归面：① MF-1-1 把宽松手写 BARE_MARKER_RE（`[^>]*` 任意内容）收敛为
 // SSOT 双形态（uuid / m-），非合法形态不再构成投递身份；② MF-2-1 把 rebuild 判定锚从
-// 「全文提取 id」收窄为「出站尾附锚」（trimEnd 后文末标记）——文本中部/前部的合法形态
-// 标记字面量（用户从 transcript 复制等）不重建投递，堵在途回收窗口「真 id own 重投 +
+// 「全文提取 id」收窄为「出站尾附锚」（原文文末精确 endsWith——msg-pipeline-debloat
+// D5-3/P5 口径统一后不再 trimEnd）——文本中部/前部的合法形态标记字面量（用户从
+// transcript 复制等）不重建投递，堵在途回收窗口「真 id own 重投 +
 // 假 id rebuild 重投」的双重投递；无身份承接的外来文本保持收养通道（不丢弃）。
 describe('假标记字面量身份判据（MF-1-1 B2 / MF-2-1 尾附锚收窄）', () => {
   it('非合法形态标记（not-a-uuid）：extractMarkerIds 不认，假标记文本走收养通道，不以假 id 重建投递', async () => {
@@ -387,6 +388,24 @@ describe('假标记字面量身份判据（MF-1-1 B2 / MF-2-1 尾附锚收窄）
     // 无身份承接不丢弃：收养以新本地 id 正常投递
     expect(h.promptCalls).toHaveLength(1)
     expect(h.promptCalls[0]![0]).toContain('的外来文本')
+  })
+
+  it('[D5-3/P5] 文末判定 = 原文精确 endsWith（不 trimEnd）：标记后带尾随空白不构成尾附锚 → 收养', async () => {
+    const h = makeHarness({ transcript: [] })
+    h.registry.getOrCreateDelivery('s1')
+    // 出站标记恒尾附（withDeliveryMarker 读写同形）——标记之后还有字符（尾随换行）的文本
+    // 不是出站形态；口径统一「剥除标记、不动其他字符」后判定不再 trimEnd 吃尾随空白，
+    // 该形态归收养通道（新 id 正常投递），不以该 id rebuild 重投
+    const markerId = '3b555555-5555-4555-8555-555555555555'
+    const text = `疑似孤儿\n<!--taiji:msg:${markerId}-->\n`
+    h.setCleared({ steering: [text], followUp: [] })
+    await h.registry.reconcile('s1', 'pi-restored')
+    await h.flush()
+    const full = h.registry.entries('s1')!
+    expect([...full.active, ...full.tombstones].some((e) => e.id === markerId)).toBe(false)
+    // 不丢弃：收养以新本地 id 正常投递
+    expect(h.promptCalls).toHaveLength(1)
+    expect(h.promptCalls[0]![0]).toContain('疑似孤儿')
   })
 })
 

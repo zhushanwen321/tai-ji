@@ -37,7 +37,7 @@ import type {
   DeliveryPayload,
 } from '@zhushanwen/session-delivery'
 import type { Segment } from '@taiji/shared'
-import { MSG_ID_TAG_RE } from '@taiji/shared'
+import { markerLiteral, MSG_ID_TAG_RE } from '@taiji/shared'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
 import { LateBoundSkillSource, SkillInjector } from './skill-injector.js'
@@ -228,7 +228,7 @@ export function bareMarkerId(id: string): string {
 
 /** 出站文本尾附裸标记（D2；扩展 input hook 不剥离，随文本进 transcript 成为逐消息身份）。 */
 export function withDeliveryMarker(text: string, id: string): string {
-  return `${text}\n<!--taiji:msg:${bareMarkerId(id)}-->`
+  return `${text}\n${markerLiteral(bareMarkerId(id))}`
 }
 
 /**
@@ -480,14 +480,14 @@ export function createSessionDeliveryRegistry(
     return parts
   }
 
-  /** 标记 id → 已提交记录（裸形态优先，兼容 u- 原文形态）。 */
+  /**
+   * 标记 id → 已提交记录。submitted 表键恒 = bareMarkerId(record.id)（两处写入点同构：
+   * `submitted.set(bareMarkerId(id), { id, text })`），直查即完备——原「逐条比对 record.id」
+   * 兜底循环不可达（record.id 为裸形态时键即其自身、直查必中；u- 形态时与裸 markerId
+   * 永不相等），随审计候选 15 删除。
+   */
   function findSubmittedByMarker(state: RuntimeState, markerId: string): SubmittedRecord | undefined {
-    const direct = state.submitted.get(markerId)
-    if (direct) return direct
-    for (const record of state.submitted.values()) {
-      if (record.id === markerId) return record
-    }
-    return undefined
+    return state.submitted.get(markerId)
   }
 
   /** 条目是否仍在册（未终态）：持有期被撤销/终结 → 放弃投递（撤销只终结未受理条目）。 */
@@ -831,7 +831,7 @@ export function createSessionDeliveryRegistry(
     const texts = await readTranscriptUserTexts(sessionId, rt)
     const requeue: string[] = []
     for (const entry of aged) {
-      const needle = `<!--taiji:msg:${bareMarkerId(entry.id)}-->`
+      const needle = markerLiteral(bareMarkerId(entry.id))
       if (texts !== null && texts.some((t) => t.includes(needle))) {
         rt.handle.confirmDelivered(entry.id)
         rt.submitted.delete(bareMarkerId(entry.id))
@@ -852,9 +852,9 @@ export function createSessionDeliveryRegistry(
    * - ② rebuild：带标记但内核无记录（runtime 重启 reattach，判重表已清空）→ 先按标记对
    *   transcript 全量扫描判 delivered（已进 transcript 不重建投递），未进才重建条目重投。
    *   rebuild 身份判据 = 出站尾附锚（MF-2-1）：出站标记恒尾附（withDeliveryMarker 写侧
-   *   同形），仅 trimEnd 后处于文末的提取 id 构成 rebuild 身份——文本中部/前部的合法形态
-   *   标记字面量（用户从 transcript 复制的文本等）不重建投递，堵在途回收窗口「真 id own
-   *   重投 + 假 id rebuild 重投」的双重投递；
+   *   同形），仅处于原文文末的提取 id 构成 rebuild 身份（D5-3/P5 口径：不 trimEnd）——
+   *   文本中部/前部的合法形态标记字面量（用户从 transcript 复制的文本等）不重建投递，
+   *   堵在途回收窗口「真 id own 重投 + 假 id rebuild 重投」的双重投递；
    * - ③ adopt：无身份承接的外来文本（无标记的 subagent notifyDone / scheduler 提醒等存量
    *   注入，或标记字面量全部非尾附锚）→ 收养：以新 id 入内核 FIFO 正常投递，不丢弃、不
    *   原样回塞。
@@ -877,9 +877,12 @@ export function createSessionDeliveryRegistry(
       }
       // 尾附锚（MF-2-1）：文末（trimEnd 后）标记 = 最后一个提取 id——出站标记恒尾附，
       // 与 withDeliveryMarker 读写同形；其余提取 id 处中部/前部，不构成 rebuild 身份
-      const trimmed = text.trimEnd()
+      // 尾附锚（MF-2-1；口径 msg-pipeline-debloat D5-3/P5 统一 =「剥除标记、不动其他
+      // 字符」——文末判定在原文上精确 endsWith，不 trimEnd 吃尾随空白）：出站标记恒尾附
+      // （withDeliveryMarker 读写同形），与 shared 撤回切条的严格文末口径一致；其余提取
+      // id 处中部/前部，不构成 rebuild 身份
       const tailMarker = markers[markers.length - 1]!
-      const tailAnchored = trimmed.endsWith(`<!--taiji:msg:${tailMarker}-->`)
+      const tailAnchored = text.endsWith(markerLiteral(tailMarker))
       let dispatched = false
       let reclaimTarget = false
       for (const bare of markers) {
@@ -933,7 +936,7 @@ export function createSessionDeliveryRegistry(
   async function transcriptHasMarker(sessionId: string, rt: SessionRuntime, id: string): Promise<boolean> {
     const texts = await readTranscriptUserTexts(sessionId, rt)
     if (texts === null) return false
-    const needle = `<!--taiji:msg:${bareMarkerId(id)}-->`
+    const needle = markerLiteral(bareMarkerId(id))
     return texts.some((t) => t.includes(needle))
   }
 
@@ -1296,7 +1299,7 @@ export function createSessionDeliveryRegistry(
           continue
         }
         if (activeStateById.has(id)) continue
-        const needle = `<!--taiji:msg:${bareMarkerId(id)}-->`
+        const needle = markerLiteral(bareMarkerId(id))
         if (texts !== null && texts.some((t) => t.includes(needle))) deduped.push(id)
         else warn('resync: unknown uuid not in kernel nor transcript (kept on renderer), sid=', sessionId, id)
       }
