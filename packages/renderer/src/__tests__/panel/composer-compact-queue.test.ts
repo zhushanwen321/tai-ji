@@ -14,7 +14,7 @@
  *
  * 策略（对齐 composer-bash-mode.test.ts 结构范本）：
  * - 真 pinia + 真 chatStore（occupancy 投影驱动发送位与 sessionPhase）
- * - 真 QueueBubble / 真 useQueueRows（DOM 断言面）+ mock useChat（spy 化 send/steer/...）
+ * - 真 QueueBubble / 真 useQueueRows（DOM 断言面）+ mock useChat（spy 化 send/...）
  * - mock '@/api/domains/delivery'（cancel/resync RPC 断言面）+ useToast（断言 toastError）
  * - mock ComposerInput（emit input 设 draft + emit keydown Enter 触发 onSend；expose
  *   setText/getSegments 供撤销回草稿断言）
@@ -31,10 +31,9 @@ import { getDeliveryProjectionRef } from '@taiji/core'
 import type { DeliveryFrameEntry } from '@taiji/core'
 import { useChatStore } from '@/stores/chat'
 
-// ── mock useChat（spy 化 send / steer / followUp / compact）+ useToast + delivery 域 ──
+// ── mock useChat（spy 化 send / followUp / compact）+ useToast + delivery 域 ──
 const chatApiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
   followUp: vi.fn(() => Promise.resolve()),
   abort: vi.fn(() => Promise.resolve()),
   compact: vi.fn(() => Promise.resolve()),
@@ -63,7 +62,7 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   resetNewTaskFlow: vi.fn(),
 }))
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: chatApiMock.send, steer: chatApiMock.steer, streamSubscribe: vi.fn(() => () => {}) },
+  chat: { send: chatApiMock.send, streamSubscribe: vi.fn(() => () => {}) },
   model: { switchModel: vi.fn() },
   session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
   composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
@@ -163,7 +162,6 @@ describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦�
 
     // 统一提交：占用期不再本地判定车道（lane 归内核），提交链与 idle 同路径
     expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('hello'))
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
     // 输入已清空（clearInput → ComposerInput.clear）
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
     // DOM：发送位为 queue 态（时钟角标按钮）

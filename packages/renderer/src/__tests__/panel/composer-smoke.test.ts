@@ -104,7 +104,6 @@ vi.mock('@/composables/useExtensionUI', () => ({
 // ── useChat / useToast / @/api / stores mock（Composer 的 chat RPC + 队列 flush）──
 const chatApiMock = vi.hoisted(() => ({
   send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
   followUp: vi.fn(() => Promise.resolve()),
   abort: vi.fn(() => Promise.resolve()),
   compact: vi.fn(() => Promise.resolve()),
@@ -122,7 +121,7 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => toastMock,
 }))
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: chatApiMock.send, steer: chatApiMock.steer },
+  chat: { send: chatApiMock.send },
   model: { switchModel: vi.fn() },
   session: { setThinkingLevel: vi.fn() },
   composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },

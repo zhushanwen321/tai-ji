@@ -37,7 +37,6 @@ const apiMock = vi.hoisted(() => {
     getHistory: vi.fn(() => Promise.resolve([])),
     abort: vi.fn(() => Promise.resolve()),
     compact: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
     followUp: vi.fn(() => Promise.resolve()),
   }
 })
@@ -50,7 +49,6 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     getHistory: apiMock.getHistory,
     abort: apiMock.abort,
     compact: apiMock.compact,
-    steer: apiMock.steer,
     followUp: apiMock.followUp,
   },
   session: {

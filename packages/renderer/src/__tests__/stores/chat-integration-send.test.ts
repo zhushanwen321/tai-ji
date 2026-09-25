@@ -35,7 +35,6 @@ const apiMock = vi.hoisted(() => {
     getHistory: vi.fn(() => Promise.resolve([])),
     abort: vi.fn(() => Promise.resolve()),
     compact: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
     followUp: vi.fn(() => Promise.resolve()),
   }
 })
@@ -48,7 +47,6 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     getHistory: apiMock.getHistory,
     abort: apiMock.abort,
     compact: apiMock.compact,
-    steer: apiMock.steer,
     followUp: apiMock.followUp,
   },
   file: {
@@ -174,7 +172,7 @@ describe('T1.5 send 提交失败回滚', () => {
     const chat = useChatStore()
     const { send } = useChat()
     apiMock.submitDelivery.mockRejectedValueOnce(new Error('ws disconnected'))
-    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）；
+    // [W2] send 失败不再 throw（与 followUp/abort 对齐：clearPendingSend + toast，不 throw）；
     // 失败信号经返回值传递（false = RPC 失败，调用方据此恢复草稿）
     await expect(send('s-fail', textToSegments('hello'))).resolves.toBe(false)
     // clearPendingSend：isActive 恢复 false（无 streaming entity + 无 pendingSend）
@@ -210,7 +208,7 @@ describe('T5.1 editAndResend pendingSend 对称', () => {
     const userMsg = chat.getMessages('s-edit-fail').find((m) => m.role === 'user')!
     apiMock.submitDelivery.mockRejectedValueOnce(new Error('ws disconnected'))
     const { editAndResend } = useChat()
-    // [W2] editAndResend 失败不再 throw（与 steer/followUp/abort 对齐）；false = RPC 失败信号
+    // [W2] editAndResend 失败不再 throw（与 followUp/abort 对齐）；false = RPC 失败信号
     await expect(editAndResend('s-edit-fail', userMsg.id, textToSegments('text'))).resolves.toBe(false)
     // 失败后 pendingSend 被清（isActive=false，无 streaming）
     expect(chat.isActive('s-edit-fail')).toBe(false)

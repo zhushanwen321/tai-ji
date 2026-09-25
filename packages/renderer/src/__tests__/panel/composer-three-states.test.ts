@@ -3,16 +3,16 @@
  *
  * 锁定 fix-state-tearing 的 UI 层核心：
  * - u3c/D1 统一提交：busy 时 Enter / 点发送位 → 调 send（lane 判定归 runtime 内核；
- *   曾有的「busy Enter 本地转 steer」B 策略已退役，防回归锁见 [u3c/D1] 用例内注释）
+ *   曾有的「busy Enter 本地转 steer」B 策略已随统一提交退役）
  * - T2.5：busy 时停止按钮始终可见（isActive 驱动 v-if="isActive"）
  * - T9.14：Composer 三态渲染回归（idle=发送按钮 / sending=spinner / busy=停止按钮）
  *
  * 策略：
  * - 真实 chat store（测的就是 store 的派生 isActive 行为）
- * - mock useChat（send/steer/abort/followUp/compact/editAndResend），保留 spy 断言调用
+ * - mock useChat（send/abort/followUp/compact/editAndResend），保留 spy 断言调用
  * - mock useNewTaskFlow（landing 态 submitFirstMessage）
  * - 子组件 stub（CommandPopover 保留 slot，其余空 div）
- * - ComposerInput mock：defineExpose + emit keydown/input（用于触发 Enter → steer）
+ * - ComposerInput mock：defineExpose + emit keydown/input（用于触发 Enter 提交）
  *
  * 运行：npx vitest run src/__tests__/panel/composer-three-states.test.ts
  */
@@ -22,10 +22,9 @@ import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
 
-// ── mock useChat（spy 化 send/steer/abort）──
+// ── mock useChat（spy 化 send/abort）──
 const chatApiMock = {
   send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
   followUp: vi.fn(() => Promise.resolve()),
   abort: vi.fn(() => Promise.resolve()),
   compact: vi.fn(() => Promise.resolve()),
@@ -174,9 +173,6 @@ describe('[u3c/D1] busy 时 Enter → 统一提交（B 策略本地转 steer 已
     await flushPromises()
 
     expect(chatApiMock.send).toHaveBeenCalledWith(sid, textToSegments('补充内容'))
-    // 防回归锁（全文件唯一一处 steer 负断言）：busy Enter 曾本地转 steer（B 策略），
-    // 随 u3b/D1 退役（lane 判定归内核）——此处防 renderer 侧 steer 路由回归
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
   })
 })
 
