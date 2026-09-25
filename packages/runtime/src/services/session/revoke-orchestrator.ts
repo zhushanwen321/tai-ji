@@ -111,8 +111,6 @@ interface TreeSnapshot {
 interface ActiveChain {
   /** 回溯链上的 entry.id 集合（活跃路径投影——谓词按此集合判定，非字符串包含）。 */
   ids: Set<string>
-  /** 链自然终止形态（终止于根）= null；expectedParentId === null 时的完备性判定锚。 */
-  terminalParentId: string | null
   /** false = parentId 指向缺失 entry / 环（数据断链）——校验不可信，按 nav-failed 处理。 */
   complete: boolean
 }
@@ -149,16 +147,14 @@ function walkActiveChain(snapshot: TreeSnapshot): ActiveChain {
   const ids = new Set<string>()
   let cur = snapshot.leafId
   while (cur !== null) {
-    if (ids.has(cur)) return { ids, terminalParentId: null, complete: false } // parentId 环（数据异常）
+    if (ids.has(cur)) return { ids, complete: false } // parentId 环（数据异常）
     const entry = snapshot.byId.get(cur)
-    if (!entry) return { ids, terminalParentId: null, complete: false } // parentId 悬空（断链）
+    if (!entry) return { ids, complete: false } // parentId 悬空（断链）
     ids.add(cur)
     cur = entry.parentId
   }
   // cur === null = 链自然终止（初始 leafId 为空的空 session，或根 entry parentId=null）。
-  // 终止形态即 terminalParentId = null——「非 null parentId 指向缺失 entry」已在循环内
-  // 返回 complete=false，此处无需再区分。
-  return { ids, terminalParentId: null, complete: true }
+  return { ids, complete: true }
 }
 
 /** user message entry → transcript 原文（含投递裸标记，raw 不剥——⑦ D7 分界裁定：剥标记与整批切条在 renderer）。 */
@@ -186,13 +182,15 @@ function endsWithMarkerFor(text: string, bareId: string): boolean {
 /**
  * ③ 定位目标 entryId（targetId 双形态分派）。原前提「renderer 消息 id 两空间互斥使分派
  * 构造性可靠」被 U8 保号削弱：外来条目 clientUuid 可为裸 uuid 形态（chat store appendUser
- * 无前缀校验），其投递裸标记恰以裸 uuid 落在 transcript——uuid 形态目标（`u-` 前缀或裸
- * uuid 子形态）统一进双通道分派收编，仅 pi entryId（8 位 hex）保持直用：
- * - uuid 形态（`u-` 前缀 live 态 clientUuid / U8 保号裸 uuid）→ 双通道：a) msg-id-mapper
- *   custom entry 映射（富消息；裸 uuid 目标现无映射 entry——mapper 只写 u- 形态，扫过即
- *   miss，兜未来映射面扩展）；b) miss 时 user entry 文本裸标记末尾锚 + uuid ===
- *   bareMarkerId(targetId) 校验（纯文本消息无映射 entry 的主导形态；裸 uuid 经
- *   bareMarkerId 恒等归一后同样命中）。双通道均 miss → null（调用方回 no-mapping）。
+ * 无前缀校验），其投递裸标记恰以裸 uuid 落在 transcript——uuid 形态目标统一进分派收编，
+ * 仅 pi entryId（8 位 hex）保持直用：
+ * - `u-` 前缀形态（live 态 clientUuid）→ 双通道：a) msg-id-mapper custom entry 映射
+ *   （富消息；mapper 只写 u- 形态 clientUuid）；b) miss 时 user entry 文本裸标记末尾锚 +
+ *   uuid === bareMarkerId(targetId) 校验（纯文本消息无映射 entry 的主导形态）。
+ *   双通道均 miss → null（调用方回 no-mapping）。
+ * - 裸 uuid 子形态（U8 保号）→ 仅通道 b：mapper 只写 u- 形态，custom entry 映射对裸
+ *   uuid 恒 miss（审计候选 1 删除该恒 miss 兜底——通道 b 的末尾锚经 bareMarkerId 恒等
+ *   归一同样命中，行为不变）。
  * - 其余形态（基线/重开态 pi entryId，8 位 hex）→ 直接用作 entryId（⑤ 活跃路径校验兜底
  *   语义错误目标——不在全文件即 no-mapping）；content 尽力查取（目标非 user message 时空串）。
  */
@@ -200,7 +198,7 @@ function locateTarget(
   snapshot: TreeSnapshot,
   targetId: string,
 ): { entryId: string; content: string } | null {
-  if (targetId.startsWith('u-') || BARE_UUID_RE.test(targetId)) {
+  if (targetId.startsWith('u-')) {
     // 通道 a：custom entry 映射（customType 过滤 + data 形状守卫——entry-tree-builder 同款防御）
     for (const entry of snapshot.byId.values()) {
       if (entry.customType !== CLIENT_MSG_ID_TYPE) continue
@@ -211,6 +209,8 @@ function locateTarget(
         // 映射指向的 entry 不在文件（数据断链）→ 落通道 b 继续（b 同样扫不到即 miss）
       }
     }
+  }
+  if (targetId.startsWith('u-') || BARE_UUID_RE.test(targetId)) {
     // 通道 b：裸标记末尾锚（uuid 双形态归一——MSG_ID_TAG_RE 捕获组 2 恒裸形态）
     const bare = bareMarkerId(targetId)
     for (const entry of snapshot.byId.values()) {
@@ -224,11 +224,16 @@ function locateTarget(
   return { entryId: targetId, content: direct ? userEntryText(direct) : '' }
 }
 
-/** ① 空闲判定（D8 busy 触发面：isStreaming / isCompacting / settling / isBashRunning）。 */
+/**
+ * ① 空闲判定（D8 busy 触发面：turn 活跃 / compacting / settling / bash）。
+ * [审计候选 13] 收敛为 occupancy 三维公式：isGenerating/isCompacting/isBashRunning 三布尔
+ * 与 occupancy 同源同点写入（applySessionOccupancyTransition 转移表每行 flags+patch 原子派生，
+ * C-data-19 禁绕开直写），四路 OR 与三维公式等价——留一份判定式，不留第二份镜像。
+ */
 function isOccupiedForRevoke(view: IManagedSessionView | undefined): boolean {
   if (!view) return false // 无视图（测试/异常装配）按空闲——与 holdReasonOf 同款宽容，后续 ensureActive 失败可见
-  const occ = view.occupancy ?? { turn: 'idle' as const }
-  return view.isGenerating || view.isCompacting || view.isBashRunning || occ.turn !== 'idle'
+  const occ = view.occupancy ?? { turn: 'idle' as const, compacting: false, bash: false }
+  return occ.turn !== 'idle' || occ.compacting || occ.bash
 }
 
 export class RevokeOrchestrator {
@@ -348,10 +353,11 @@ export class RevokeOrchestrator {
         warn(`nav-failed: target still on active path after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}`)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }
-      const parentReached =
-        expectedParentId === null ? post.terminalParentId === null : post.ids.has(expectedParentId)
+      // parentReached：expectedParentId === null（目标是根）时活跃链自然终止即达成
+      // （complete 已在上一步判定）；否则按 entry.id 集合判定。
+      const parentReached = expectedParentId === null || post.ids.has(expectedParentId)
       if (!parentReached) {
-        warn(`nav-failed: expected parent not reached after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}, terminalParentId=${post.terminalParentId}`)
+        warn(`nav-failed: expected parent not reached after rewind, sid=${sessionId}, targetId=${targetId}, entryId=${located.entryId}, expectedParentId=${expectedParentId}`)
         this.invalidateDerived(sessionId)
         return { sessionId, revoked: false, error: 'nav-failed' }
       }

@@ -34,7 +34,6 @@ vi.mock('@/composables/logic/markdown', () => ({
 vi.mock('@/composables/logic/markdown-incremental', () => ({
   createIncrementalRenderCache: () => ({ boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 }),
   renderIncremental: (...args: unknown[]) => mockRenderIncremental(...(args as [string, unknown, unknown, unknown])),
-  shouldFinalizeStreamingFence: () => true,
   STREAMING_FENCE_SILENCE_MS: 200,
 }))
 vi.mock('@/composables/logic/mermaid', () => ({

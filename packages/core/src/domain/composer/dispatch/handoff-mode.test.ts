@@ -479,12 +479,11 @@ describe('asStagingAction', () => {
     expect(deps.exitStagingMode).toHaveBeenCalledTimes(1)
   })
 
-  it('send(text) 调 handleHandoffSend（忽略传入的 staging 参数，内部自取 getStagingConfig）', async () => {
+  it('send(text) 调 handleHandoffSend（内部自取 getStagingConfig，审计候选 10 后无 staging 透传参）', async () => {
     const { deps, api } = setup()
     api.enterHandoffMode('src-1')
 
-    // 传入 staging 参数应被忽略（handleHandoffSend 内部调 deps.getStagingConfig）
-    await api.asStagingAction().send('hello', { modelOverride: 'ignored' })
+    await api.asStagingAction().send('hello')
 
     expect(deps.handoff).toHaveBeenCalledWith('src-1', 'hello', {})
     expect(deps.getStagingConfig).toHaveBeenCalled()

@@ -124,7 +124,8 @@ function makeHarness(opts: HarnessOptions = {}) {
       ? { blocked: false, modifiedContent: opts.hookModifiedContent }
       : { blocked: false }
   })
-  const dispatcher = new MessageDispatcher(svc, pm, workspaceService, messageBus, registry)
+  const dispatcher = new MessageDispatcher(svc, pm, workspaceService, messageBus)
+  dispatcher.setDeliveryRegistry(registry)
   dispatcher.setSendMessageHook(hookMock)
   const flush = async (): Promise<void> => {
     for (let i = 0; i < 40; i += 1) await Promise.resolve()

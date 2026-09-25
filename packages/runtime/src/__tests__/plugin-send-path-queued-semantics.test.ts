@@ -80,8 +80,8 @@ function makeHarness() {
     { getClient: () => client as unknown as IPiEngine } as unknown as IProcessManager,
     { record: vi.fn() } as unknown as WorkspaceService,
     ({ publish: (_sid: string, msg: ServerMessage) => published.push(msg) }) as unknown as IMessageBus,
-    registry,
   )
+  dispatcher.setDeliveryRegistry(registry)
   // 插件 RPC 表：捕获注册的 handler（真注册函数，非 mock）
   const handlers = new Map<string, (params: Record<string, unknown>) => Promise<unknown>>()
   const rpcServer = {

@@ -101,8 +101,6 @@ export interface DeliveryPort {
 export interface DeliveryConfig {
   /** 默认意图：'interrupt-at-turn-boundary'（D3）。 */
   intent?: DeliveryIntent
-  /** busy 策略：唯一档 'retry-force'（settled 边沿驱动 flush + 退避达上限强发）。 */
-  busyPolicy?: 'retry-force'
   /** 合批窗口（ms）：0 = 关；>0 = 滑动窗口合批。 */
   mergeWindowMs?: number
   /** 合批依赖谓词（D4 must-fix #1）。true 时 send() 走合批窗口，false/缺省时立即投。

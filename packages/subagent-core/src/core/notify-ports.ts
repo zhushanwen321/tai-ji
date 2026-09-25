@@ -74,8 +74,6 @@ export interface DeliveryPort {
 /** 投递工厂 options（notifier 实际消费的字段集；其余策略字段未入端口面）。 */
 export interface DeliveryConfig {
   intent?: DeliveryIntent;
-  /** 唯一档 'retry-force'（settled 边沿驱动 flush + 退避达上限强发；与 session-delivery 镜像一致）。 */
-  busyPolicy?: "retry-force";
   /** 合批窗口（ms）：0 = 关；>0 = 滑动窗口合批。 */
   mergeWindowMs?: number;
   /** 合批依赖谓词（禁止用 isIdle 代替——D4 must-fix 语义）。 */

@@ -293,7 +293,8 @@ describe('MessageDispatcher occupancy 挂点', () => {
       getMessageBus: () => ({ publish } as unknown as IMessageBus),
     })
     cleanupRegistry = () => registry.disposeAll()
-    const dispatcher = new MessageDispatcher(svc, pm, workspace, { publish } as unknown as IMessageBus, registry)
+    const dispatcher = new MessageDispatcher(svc, pm, workspace, { publish } as unknown as IMessageBus)
+    dispatcher.setDeliveryRegistry(registry)
     return { dispatcher, session, svc, pm, publish, promptFn, bashFn, abortFn, compactFn, client, seq, registry }
   }
 
@@ -508,7 +509,8 @@ describe('MessageDispatcher occupancy 挂点', () => {
       getMessageBus: () => null,
     })
     cleanupRegistry = () => registry.disposeAll()
-    const dispatcher = new MessageDispatcher(svc, { getClient: vi.fn(() => client) } as unknown as IProcessManager, workspace, undefined, registry)
+    const dispatcher = new MessageDispatcher(svc, { getClient: vi.fn(() => client) } as unknown as IProcessManager, workspace, undefined)
+    dispatcher.setDeliveryRegistry(registry)
     await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery()
     await dispatcher.abort('s1')

@@ -30,7 +30,6 @@ import {
   toRenderItemsIncremental,
   createTurnRenderCache,
   turnStableId,
-  groupTurns,
 } from '../message-turns'
 import type { RenderItem, TurnRenderCache } from '../message-turns'
 import { useSessionScopedState } from '../../../foundation/use-session-scoped-state'
@@ -650,7 +649,6 @@ describe('groupRenderInput 分组规则 v2 —— 纯函数等价性（W6 等价
     const msgs = richFixture()
     const snapshot = JSON.parse(JSON.stringify(msgs))
     expect(toRenderItems(msgs)).toEqual(toRenderItems(msgs))
-    expect(groupTurns(msgs)).toEqual(groupTurns(msgs))
     // 交叉组合也稳定：forceWorking 双态各自两次调用一致
     expect(toRenderItems(msgs, true)).toEqual(toRenderItems(msgs, true))
     expect(JSON.parse(JSON.stringify(msgs))).toEqual(snapshot) // 输入不可变（纯函数）

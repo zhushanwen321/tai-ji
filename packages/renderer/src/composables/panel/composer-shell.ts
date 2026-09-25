@@ -102,8 +102,7 @@ export interface ShellInputInstance {
   insertImageBadge: (path: string, fileName: string, displayName: string, needsMigrate?: boolean) => void
   removeImageChip: (chipId: string) => void
   clearSlashQueryText: () => void
-  clearHashQueryText: () => void
-  /** # query 段清除（session 语义，expose 别名 = clearHashQueryText） */
+  /** # query 段清除（session 语义；ComposerInput expose 别名 = dom-core 的 clearHashQueryText） */
   clearSessionQueryText: () => void
   clearDollarFileQueryText: () => void
   clearSubagentQueryText: () => void
@@ -175,7 +174,7 @@ export function useComposerShell(params: ComposerShellParams) {
   const settingsStore = getSettingsStore()
   const flow = useNewTaskFlow()
   const { info: toastInfo, error: toastError } = useToast()
-  const { send, steer, followUp, abort, compact, sendBash } = useChat()
+  const { send, followUp, abort, compact, sendBash } = useChat()
   const { handoff: handoffAction, abortHandoff: abortHandoffAction } = useHandoffActions(sessionIdRef)
   const { switchModel, setThinkingLevel } = useModel()
   const sidebar = useSidebar()
@@ -246,7 +245,7 @@ export function useComposerShell(params: ComposerShellParams) {
   })
 
   // ── 输入历史导航（↑/↓ shell 风格，core input/history）──
-  const { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsing, isBrowsingFor, getSavedDraft } =
+  const { handleArrowUp, handleArrowDown, resetBrowsing, isBrowsingFor, getSavedDraft } =
     useComposerHistory(sessionIdRef, {
       getText: () => inputRef.value?.getText() ?? '',
       setText: (text, caretPosition) => inputRef.value?.setText(text, caretPosition),
@@ -363,19 +362,12 @@ export function useComposerShell(params: ComposerShellParams) {
   const isBashMode = composerBash.isBashMode
 
   // ── 提交动作（core dispatch/submit）──
-  // onSteer 产物不再解构/导出（Enter 路由收口在统一分发器 onSend，renderer 零消费方）。
-  // steer / restoreSegments 保留注入：core ComposerSubmitDeps 仍声明为必填 deps（供其内部
-  // onSteer 消费），随 core 侧 onSteer 退役同批摘除——单侧摘除即 TS 必填报错。
   const { onFollowUp, onAbort } = useComposerSubmit({
     hasInput,
-    isActive,
-    draft,
     inputRef,
     sessionIdRef,
     clearInput,
-    restoreInput,
     restoreSegments,
-    steer,
     followUp,
     abort,
   })
@@ -430,7 +422,6 @@ export function useComposerShell(params: ComposerShellParams) {
   //    staging.send > landing（含 bash）> bash > /compact > send（统一 submit））──
   const { onSend } = useComposerSend({
     staging: { hasActiveStaging: staging.hasActiveStaging, send: staging.send, activeStaging: staging.activeStaging },
-    getStagingConfig,
     canSend,
     hasInput,
     draft,
@@ -543,7 +534,6 @@ export function useComposerShell(params: ComposerShellParams) {
     currentThinkingLevel,
     currentThinkingLevelMap,
     currentSupportedLevels,
-    localThinkingLevel,
     /**
      * 「切换中」只读真值（U4）：`{ kind, sessionId, target } | null`。
      * 消费侧（Composer.vue）**必须判 sessionId 等值**再显示/禁用（切走 session 后不得残留旧面板态）。
@@ -551,14 +541,10 @@ export function useComposerShell(params: ComposerShellParams) {
     switching,
     onModelSelect: onModelSelectUi,
     onThinkingSelect: onThinkingSelectUi,
-    enterStagingMode,
-    exitStagingMode,
-    getStagingConfig,
     // history
     handleArrowUp,
     handleArrowDown,
     resetBrowsing,
-    isBrowsing,
     isBrowsingFor,
     getSavedDraft,
     // context chips
@@ -569,16 +555,9 @@ export function useComposerShell(params: ComposerShellParams) {
     onDragOver,
     onDragLeave,
     onDrop,
-    // restore
-    clearInput,
-    restoreInput,
-    restoreSegments,
     // fork / handoff / staging
-    fork,
-    handoff,
     staging,
     // bash
-    composerBash,
     isBashMode,
     // submit
     onFollowUp,
@@ -595,8 +574,6 @@ export function useComposerShell(params: ComposerShellParams) {
     sendRoute,
     sendButtonState,
     // 派生状态
-    hasInput,
-    canSend,
     canSubmit,
     // 视觉
     boxClass,

@@ -216,33 +216,19 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     expect(chat.isActive('s-fail')).toBe(false)
   })
 
-  it('[u3c/D1] steer 在空窗期走统一提交（不再经 message.steer 通道）', async () => {
-    const chat = useChatStore()
-    const { send, steer } = useChat()
-    await send('s-steer', textToSegments('first')) // 置 pendingSend，isActive=true
-    expect(chat.isGenerating('s-steer')).toBe(false)
-    await steer('s-steer', textToSegments('补充'))
-    expect(apiMock.submitDelivery).toHaveBeenCalledTimes(2)
-    expect(apiMock.steer).not.toHaveBeenCalled()
-  })
+  // [审计候选 8] useChat.steer 已随 message.steer 协议腿退役删除——其统一提交 / 非活跃早退 /
+  // 乐观气泡用例随被测符号移除；followUp 通路契约由下方用例承接。
 
-  it('steer 非活跃时早退（不提交）', async () => {
-    const { steer } = useChat()
-    await steer('s-idle', textToSegments('补充'))
-    expect(apiMock.submitDelivery).not.toHaveBeenCalled()
-  })
-
-  it('[u3c/D1] steer/followUp 各自统一提交并生成自己的乐观气泡（pendingBuffer 腿退役）', async () => {
+  it('[u3c/D1] followUp 统一提交并生成自己的乐观气泡（空窗期）', async () => {
     const chat = useChatStore()
-    const { send, steer, followUp } = useChat()
+    const { send, followUp } = useChat()
     await send('s-pending', textToSegments('first'))
-    await steer('s-pending', textToSegments('steer 内容'))
     await followUp('s-pending', textToSegments('followup 内容'))
-    // 三条各自经统一提交（内核判 lane）；每条都有乐观气泡入流。[B1 退役] 前身「pendingBuffer
+    // 两条各自经统一提交（内核判 lane）；每条都有乐观气泡入流。[B1 退役] 前身「pendingBuffer
     // 不暂存」哨兵已删：分区本尊随计数腿删除，无暂存由缺字段结构性保证。
-    expect(apiMock.submitDelivery).toHaveBeenCalledTimes(3)
+    expect(apiMock.submitDelivery).toHaveBeenCalledTimes(2)
     const users = chat.getMessages('s-pending').filter((m) => m.role === 'user')
-    expect(users).toHaveLength(3)
+    expect(users).toHaveLength(2)
   })
 
   it('abort 乐观清 pendingSend（W4：失败路径不残留）', async () => {
@@ -296,19 +282,6 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     expect(chat.pendingSend.has('s-normal')).toBe(false)
     // streaming entity 仍存在（未被 pendingSend timer 误清）
     expect(chat.isGenerating('s-normal')).toBe(true)
-  })
-
-  it('[u3c/D1] steer 提交失败回滚乐观副作用 + toast 提示（不留孤儿气泡，不 unhandled reject）', async () => {
-    const chat = useChatStore()
-    const { send, steer } = useChat()
-    await send('s-rollback', textToSegments('first'))
-    const before = chat.getMessages('s-rollback').length
-    apiMock.submitDelivery.mockRejectedValueOnce(new Error('ws disconnected'))
-    // 不抛（错误已消化：乐观气泡/dispatching 占位/inflight 占位回滚 + toast 提示）
-    // [D2] steer 返回值契约：提交失败 return false（成功 true）
-    await expect(steer('s-rollback', textToSegments('补充'))).resolves.toBe(false)
-    // 回滚恰一条（第一个气泡仍在，第二个被 truncateFrom 移除），无孤儿
-    expect(chat.getMessages('s-rollback')).toHaveLength(before)
   })
 
   it('[u3c/D1] followUp 提交失败回滚乐观副作用 + toast 提示', async () => {

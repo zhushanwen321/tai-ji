@@ -312,7 +312,8 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
       getMessageBus: () => null,
     })
     cleanupRegistry = () => deliveryRegistry.disposeAll()
-    const dispatcher = new MessageDispatcher(svc, pm, { record: vi.fn() } as unknown as WorkspaceService, { publish } as unknown as IMessageBus, deliveryRegistry)
+    const dispatcher = new MessageDispatcher(svc, pm, { record: vi.fn() } as unknown as WorkspaceService, { publish } as unknown as IMessageBus)
+    dispatcher.setDeliveryRegistry(deliveryRegistry)
     return {
       dispatcher, session, publish, abortFn, persistSessionOutcome, deliveryRegistry,
       markAtPrompt: () => markAtPrompt,

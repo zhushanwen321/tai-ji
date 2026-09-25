@@ -126,8 +126,9 @@ function makeMocks(opts: {
   })
 
   // wave:perf-w09（D1-2）：broker 双写腿已删，dispatcher 只依赖 publish 抽象（4 参构造）；
-  // [MF-1-7] 注册表构造注入（活动槽已退役）
-  const dispatcher = new MessageDispatcher(svc, pm, workspace, messageBus as unknown as IMessageBus, registry)
+  // [MF-1-7] 注册表经 setDeliveryRegistry 后置注入（审计候选 12：构造期注入参已删）
+  const dispatcher = new MessageDispatcher(svc, pm, workspace, messageBus as unknown as IMessageBus)
+  dispatcher.setDeliveryRegistry(registry)
   return { dispatcher, session, promptFn, bashFn, abortFn, abortBashFn, compactFn, svc, pm, messageBus }
 }
 

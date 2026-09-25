@@ -243,12 +243,7 @@ export function createStagingMode<S extends StagingModeSource>(
         enter(stagingSource as StagingModeSource as S)
       },
       exit: () => exit(),
-      /**
-       * send 直接调 handleSend(text)，忽略传入的 staging 参数。
-       * 原因：handleSend 内部已调 deps.getStagingConfig() 取模型/thinking 快照配置，
-       * 其数据源与 useComposerModelThinking.getStagingConfig 相同，外部传参与内部自取等价，
-       * 故不复用 staging 参数（避免 fork/handoff 在 useComposerStaging.send 处重复透传）。
-       */
+      /** send 直接调 handleSend(text)：暂存配置由 handleSend 内部自取 getStagingConfig。 */
       send: async (text) => { await handleSend(text) },
       allowsEmptySend: config.allowsEmptySend,
       handleEsc,

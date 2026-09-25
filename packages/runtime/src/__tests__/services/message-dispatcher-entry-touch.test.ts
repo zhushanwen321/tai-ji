@@ -76,7 +76,8 @@ function makeFixture(attached = true): Fixture {
     getMessageBus: () => bus,
   }
   const registry = createSessionDeliveryRegistry(deps)
-  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus, registry)
+  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
+  dispatcher.setDeliveryRegistry(registry)
   dispatcher.setSendMessageHook(hook)
   return { dispatcher, order, touchActivity, promptFn, ensureActive, hook }
 }

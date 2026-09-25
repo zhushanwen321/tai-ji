@@ -77,7 +77,6 @@ function createDelivery(port: DeliveryPort, options?: DeliveryConfig): DeliveryH
     intent: options?.intent ?? ("interrupt-at-turn-boundary" as const),
     mergeWindowMs: options?.mergeWindowMs ?? 0,
     mergeHoldActive: options?.mergeHoldActive,
-    busyPolicy: options?.busyPolicy ?? ("retry-force" as const),
     backoff: options?.backoff ?? { ms: 100, max: 50 },
     warn: options?.warn ?? ((msg: string, err?: unknown) => { console.warn(`[session-delivery] ${msg}`, err ?? ""); }),
   };

@@ -2,10 +2,10 @@
  * 错误分类迁移（D6）验收测试。
  *
  * 迁移口径：
- * - `classifyPromptRejection` 双字符串映射：**逐字保留**（迁移后由内核适配器
- *   session-delivery-registry.promptWithBusyRetry 消费；dispatcher 侧 re-export 保持既有
- *   import 路径与 PS-22/PS-23 探针锁定面）。registry 侧行为断言见
- *   src/__tests__/session-delivery-registry.test.ts「u2 错误分类迁移（D6）」。
+ * - `classifyPromptRejection` 双字符串映射：**逐字保留**（消费方 = 内核适配器
+ *   session-delivery-registry.promptWithBusyRetry；dispatcher 侧 re-export 已随过度设计
+ *   审计候选 1 删除，本文件改从定义方 session-delivery-registry.js import）。registry 侧行为
+ *   断言见 src/__tests__/session-delivery-registry.test.ts「u2 错误分类迁移（D6）」。
  * - pi busy 类拒绝的处置迁移（compacting → 持有等 compaction_end；processing → occupancy
  *   反转 generating；非 busy → message.error）在本文件锁定。
  * - busy 维度「零 send.rejected + 排队/即时投递」退役断言的唯一归宿 =
@@ -15,9 +15,10 @@
  * 运行：cd packages/runtime && npx vitest run src/__tests__/message-dispatcher-send-rejection.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { MessageDispatcher, classifyPromptRejection } from '../services/session/message-dispatcher.js'
+import { MessageDispatcher } from '../services/session/message-dispatcher.js'
 import { SessionMessageHandler } from '../transport/session-message-handler.js'
 import {
+  classifyPromptRejection,
   createSessionDeliveryRegistry,
   type SessionDeliveryDeps,
 } from '../services/session/session-delivery-registry.js'
@@ -106,7 +107,8 @@ function makeMocks(opts: MockOpts = {}) {
     getMessageBus: () => bus,
   }
   const registry = createSessionDeliveryRegistry(deps, injector)
-  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus, registry)
+  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
+  dispatcher.setDeliveryRegistry(registry)
   const flush = async (): Promise<void> => {
     for (let i = 0; i < 40; i += 1) await Promise.resolve()
   }

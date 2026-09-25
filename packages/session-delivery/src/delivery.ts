@@ -163,7 +163,6 @@ const DEFAULT_CONFIG: Required<
   Omit<DeliveryConfig, 'mergeHoldActive' | 'dedupe' | 'onSettled'>
 > = {
   intent: 'interrupt-at-turn-boundary',
-  busyPolicy: 'retry-force',
   mergeWindowMs: 0,
   backoff: { ms: 100, max: 50 },
   watchdogMs: 30_000,

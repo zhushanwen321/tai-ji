@@ -278,8 +278,8 @@ describe('MessageDispatcher — 写入时机 record', () => {
       pm as unknown as ConstructorParameters<typeof MessageDispatcher>[1],
       workspaceService as unknown as ConstructorParameters<typeof MessageDispatcher>[2],
       bus,
-      registry,
     )
+    dispatcher.setDeliveryRegistry(registry)
 
     const result = await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery(30)
@@ -308,8 +308,8 @@ describe('MessageDispatcher — 写入时机 record', () => {
       pm as unknown as ConstructorParameters<typeof MessageDispatcher>[1],
       workspaceService as unknown as ConstructorParameters<typeof MessageDispatcher>[2],
       bus,
-      registry,
     )
+    dispatcher.setDeliveryRegistry(registry)
 
     // 注册一个会 block 的 hook
     dispatcher.setSendMessageHook(vi.fn().mockResolvedValue({ blocked: true, reason: 'blocked by hook' }))
@@ -339,8 +339,8 @@ describe('MessageDispatcher — 写入时机 record', () => {
       pm as unknown as ConstructorParameters<typeof MessageDispatcher>[1],
       workspaceService as unknown as ConstructorParameters<typeof MessageDispatcher>[2],
       bus,
-      registry,
     )
+    dispatcher.setDeliveryRegistry(registry)
 
     // [u2 受理口径 D9⑤] ensureActive 失败不再同步 reject：消息已受理入内核，
     // 失败经 message.error 广播可见（投递终态失败面），record（三副作用）不执行

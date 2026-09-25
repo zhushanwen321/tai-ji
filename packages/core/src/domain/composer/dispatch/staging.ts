@@ -26,7 +26,6 @@ import { computed, type ComputedRef } from 'vue'
 import type {
   KeyboardEventLike,
   StagingAction,
-  StagingConfig,
   StagingSource,
   StagingType,
 } from '../types'
@@ -62,10 +61,9 @@ export function useComposerStaging(deps: ComposerStagingDeps): {
   /**
    * 发送（经 activeStaging 路由）。非 staging 活跃时返回 false 让调用方走普通 send。
    * @param text draft
-   * @param stagingConfig 模型/thinking 暂存配置
    * @returns true 表示已被 staging 消费（不走普通 send）；false 表示非 staging 态
    */
-  send: (text: string, stagingConfig: StagingConfig) => Promise<boolean>
+  send: (text: string) => Promise<boolean>
   /**
    * Esc 处理：当前 staging 活跃时清空输入 + 退出，返回 true 表示已消费。
    * @returns true 已消费（非 staging 态或非 Escape 返回 false）
@@ -154,10 +152,10 @@ export function useComposerStaging(deps: ComposerStagingDeps): {
   /**
    * 发送：经 activeStaging 路由。非 staging 活跃返回 false 让调用方走普通 send。
    */
-  async function send(text: string, stagingConfig: StagingConfig): Promise<boolean> {
+  async function send(text: string): Promise<boolean> {
     const action = activeStaging.value
     if (!action) return false
-    await action.send(text, stagingConfig)
+    await action.send(text)
     return true
   }
 

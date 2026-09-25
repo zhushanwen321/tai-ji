@@ -157,22 +157,6 @@ function warnUnhandledSessionFrame(type: string, sid: string): void {
   sessionFrameWarn.warn(type, sid)
 }
 
-/** steer 拒绝日志的文本截断长度（前 60 字符足以辨识输入内容，防长文本刷屏） */
-const STEER_WARN_TEXT_PREVIEW_LEN = 60
-
-/**
- * [form-hang-fix 埋点去留裁决：显症状类常驻日志] steer 早退是吞输入类静默失败
- * （调用方 clearInput 已先行，早退返回不恢复即丢输入——历史上多次返工），拒绝路径
- * 必须可观测：每早退一行 warn（sid + 原因 + 文本前 60 字符），不设 dev 门（与
- * warnUnhandledSessionFrame 的观测性 warn 不同类：那是协议漂移探测，这是用户输入
- * 丢失的症状记录）。
- */
-function warnSteerNotConsumed(sid: string, reason: string, text: string): void {
-  console.warn(
-    `[useChat] steer input not consumed (sid=${sid}, reason=${reason}, text="${text.slice(0, STEER_WARN_TEXT_PREVIEW_LEN)}")`,
-  )
-}
-
 /**
  * 重置 useChat 模块级状态（仅供测试隔离）。
  *
@@ -647,7 +631,7 @@ export function ensureStreamSubscription(
  * 全经 UseChatDeps 注入。renderer useChat() 薄包装注入 deps，20 消费方零 churn。
  *
  * @param deps 依赖注入（chatApi/writeSegments/getChatStore/getSessionStore/toast/t）
- * @returns send/steer/followUp/abort/compact/editAndResend/loadMoreHistory/
+ * @returns send/followUp/abort/compact/editAndResend/loadMoreHistory/
  *          hasMoreHistory/disposeSession/sendBash/abortBash
  */
 export function createUseChat(deps: UseChatDeps) {
@@ -740,8 +724,8 @@ export function createUseChat(deps: UseChatDeps) {
   /**
    * [投递所有权内核 u3b / D1+D7] 统一提交编排：appendUser 乐观气泡 → inflight 占位 →
    * ensureStreamSubscription → dispatching 占位 → submitSegments（delivery.submit）。
-   * send / steer / followUp / editAndResend 四通路共享；lane 由 runtime 内核判定，失败
-   * 回滚乐观副作用后原样上抛，由通路各自分型（send toast 不 throw / steer 转 false）。
+   * send / followUp / editAndResend 三通路共享；lane 由 runtime 内核判定，失败
+   * 回滚乐观副作用后原样上抛，由通路各自分型（send toast 不 throw / followUp 转 false）。
    *
    * 返回 clientUuid（= 乐观气泡 id = 内核条目 id），供调用方断言/对账。
    */
@@ -777,7 +761,7 @@ export function createUseChat(deps: UseChatDeps) {
   /**
    * 发送消息：统一 submit（乐观气泡 + delivery.submit）。
    *
-   * [R2-A5 失败信号] 返回值（Promise<boolean>，steer 先例照抄）：true = 提交成功或无事
+   * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事
    * 发生（空输入/空白 prompt 早退——无投递动作、无丢失面，调用方无需恢复）；false =
    * RPC 失败（内部已 toast 消化且乐观副作用已回滚）——调用方（dispatch send）据
    * `=== false`（严格比较——false = RPC 失败需恢复草稿）restoreSegments
@@ -892,51 +876,11 @@ export function createUseChat(deps: UseChatDeps) {
   }
 
   /**
-   * 追加 steer（AI 执行中补充消息）——[u3b/D1] 统一 submit 化。
-   *
-   * 旧实现（message.steer 直发 + pendingBuffer 暂存）已退役：lane 判定移交 runtime 内核，
-   * 本方法与 send 同走乐观气泡 + delivery.submit（内核判 steer 车道 → 气泡 morph 队列条目），
-   * pendingBuffer 计数腿不再存在。
-   *
-   * [D2] 返回值契约保持（Promise<boolean>）：true = 提交成功或无事发生（早退路径无投递
-   * 动作、无错误，调用方无需恢复草稿）；false = RPC 失败（内部已 toast + 回滚乐观副作用，
-   * 不 throw）——调用方（composer/submit.ts onSteer）据 false 恢复草稿（restoreSegments），
-   * 否则 clearInput 已清空的输入静默丢失。
-   *
-   * 显式接收 sessionId：与 send 同理，per-panel 隔离，不读全局 activeId。
-   */
-  async function steer(sessionId: string, segments: Segment[]): Promise<boolean> {
-    const sid = sessionId
-    if (segments.length === 0) {
-      warnSteerNotConsumed(sid, 'empty segments', '')
-      return false
-    }
-    const promptText = segmentsToPrompt(segments)
-    if (!promptText.trim()) {
-      warnSteerNotConsumed(sid, 'blank prompt text', promptText)
-      return false
-    }
-    if (!chat.isActive(sid)) {
-      warnSteerNotConsumed(sid, 'session inactive', promptText)
-      return false
-    }
-
-    try {
-      await submitNewMessage(sid, segments, promptText)
-      return true
-    } catch (e) {
-      const msg = toErrorMessage(e)
-      deps.toast.error(deps.t('composable.supplementSendFailed', { msg }))
-      return false
-    }
-  }
-
-  /**
-   * 追加 follow-up——[u3b/D1] 统一 submit 化（同 steer：内核 queued 车道承接「当前回合
-   * 结束后另起一轮」语义，pendingBuffer 暂存退役）。
+   * 追加 follow-up——[u3b/D1] 统一 submit 化（内核 queued 车道承接「当前回合
+   * 结束后另起一轮」语义）。
    * 非执行中按普通发送处理（避免 Alt+⏎ 死键）。
    *
-   * [R2-A5 失败信号] 返回值（Promise<boolean>，steer 先例照抄）：true = 提交成功或无事
+   * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事
    * 发生（空输入/空白 prompt 早退无丢失面）；false = RPC 失败（内部已 toast + 回滚乐观
    * 副作用，不 throw）——调用方（composer submit.onFollowUp）据 `=== false`
    * restoreSegments 恢复草稿，否则 clearInput 已清空的输入静默丢失。
@@ -1237,7 +1181,6 @@ export function createUseChat(deps: UseChatDeps) {
 
   return {
     send,
-    steer,
     followUp,
     abort,
     compact,

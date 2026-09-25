@@ -13,10 +13,10 @@
  * 与 ui 侧 useChatViewDeps() inject helper 语义对称、自文档化）。
  *
  * 字段绑定来源：
- * - chatStore（getMessages/isActive/isHandingOff/getChangeSetStatus）→ useChatStore
- * - useChat（abortBash/editAndResend）→ createUseChat 薄包装
- * - useTurnExpansion（isExpanded/toggle/collapse）→ turn-expansion store per-session 分区
- * - useSidebar（forkSession/handoff）+ triggerEnterForkMode/triggerEnterHandoffMode → fork/handoff 4 回调
+ * - chatStore（isActive/isHandingOff/getChangeSetStatus/isPendingSend）→ useChatStore
+ * - useChat（abortBash/editAndResend/revokeMessage）→ createUseChat 薄包装
+ * - useTurnExpansion（isExpanded/isTakeover/toggle/collapse/setTakeover）→ turn-expansion store per-session 分区
+ * - triggerEnterForkMode/triggerEnterHandoffMode → forkAsk/handoffAsk 回调
  * - useSideDrawer（open）→ openDrawer
  * - useFileTreeStore（selectFile）→ onFileClick
  * - useFileSearch（load）+ collectFilePaths/collectBasenames → loadFileCandidates + renderMarkdown env
@@ -25,14 +25,12 @@
  * - assistantToMarkdown（messageFormat.ts）→ toMarkdown
  */
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
-import { useI18n } from 'vue-i18n'
 import type { FileNode, Message, Segment } from '@taiji/shared'
 import type { ChatViewDeps } from '@taiji/ui'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useChat } from '@/composables/features/chat/useChat'
 import { useTurnExpansion } from '@/composables/panel/useTurnExpansion'
-import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { useSideDrawer, type SideDrawerTab } from '@/composables/features/drawer/useSideDrawer'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
@@ -42,13 +40,11 @@ import { renderMarkdownSegments } from '@/composables/logic/markdown'
 import {
   createIncrementalRenderCache,
   renderIncremental,
-  shouldFinalizeStreamingFence,
   STREAMING_FENCE_SILENCE_MS,
 } from '@/composables/logic/markdown-incremental'
 import { renderMermaid } from '@/composables/logic/mermaid'
 import { assistantToMarkdown } from '@/composables/logic/messageFormat'
 import { collectBasenames, collectFilePaths } from '@/lib/file-basename'
-import { useToast } from '@/composables/useToast'
 
 /**
  * 装配 ChatViewDeps。
@@ -64,13 +60,10 @@ export function useChatViewDeps(
   sessionId: Ref<string>,
   override?: { resourceBaseDir?: ComputedRef<string | undefined> },
 ): ChatViewDeps {
-  const { t } = useI18n()
-  const { error: toastError } = useToast()
   const chat = useChatStore()
   const sessionStore = useSessionStore()
   const { abortBash, editAndResend, revokeMessage } = useChat()
   const turnExpansion = useTurnExpansion(sessionId)
-  const { forkSession, handoff } = useSidebar()
   const drawer = useSideDrawer()
   const fileTreeStore = useFileTreeStore()
   const { load: loadFileCandidates } = useFileSearch()
@@ -125,7 +118,6 @@ export function useChatViewDeps(
 
   return {
     // ── 数据获取器（读 chatStore 派生状态）──
-    getMessages: (sid: string): Message[] => chat.getMessages(sid),
     isActive: (sid: string): boolean => chat.isActive(sid),
     isHandingOff: (sid: string): boolean => chat.isHandingOff(sid),
     getChangeSetStatus: (sid: string, messageId: string) => chat.getChangeSetStatus(sid, messageId),
@@ -143,47 +135,22 @@ export function useChatViewDeps(
     toggleExpand: (turnKey: string): void => turnExpansion.toggle(turnKey),
     collapse: (turnKey: string): void => turnExpansion.collapse(turnKey),
     setTakeover: (turnKey: string, on: boolean): void => turnExpansion.setTakeover(turnKey, on),
-    abortBash: (sid: string, _messageId?: string): void => {
-      // core abortBash 仅按 session 取消（api-port 单参），不区分消息；ui 接口的 messageId 为兼容占位
+    abortBash: (sid: string): void => {
+      // core abortBash 仅按 session 取消（api-port 单参），不区分消息
       void abortBash(sid)
     },
     editAndResend: (sid: string, messageId: string, segments: Segment[]): void => {
       void editAndResend(sid, messageId, segments)
     },
-    // [U5 消息撤回 D6] 统一撤回入口两条腿：UserBubble 按内核投影三态路由（在途 / 已送达 /
-    // 生成中置灰），两条回调分别落到 useChat.revokeMessage 的在途路由腿（delivery.cancel）
-    // 与已送达腿（session.revokeMessage）——core 侧同一 action 内做投影复核，双入口收敛单编排。
-    onRevokePendingMessage: (sid: string, clientUuid: string): void => {
-      void revokeMessage(sid, clientUuid)
-    },
+    // [U5 消息撤回 D6] 撤回统一单入口：UserBubble 透传 targetId，在途 cancel / 已送达
+    // 树内回退的路由判定只在 core useChat.revokeMessage 单点（内核投影复核分派）。
     onRevokeMessage: (sid: string, targetId: string): void => {
       void revokeMessage(sid, targetId)
-    },
-    /** fork 后台：从指定 assistant 空白 fork，留在原线（includeFrom=true）。失败 toast 反馈。 */
-    onFork: (sid: string, msg: Message): void => {
-      if (!msg) return
-      void forkSession(sid, msg.id, { includeFrom: true }).catch((e: unknown) => {
-        const error = e instanceof Error ? e.message : String(e)
-        toastError(t('panel.message.forkFailed', { error }))
-      })
     },
     /** fork 提问：进 composer fork 模式（发 signal，由 Composer 监听完成 fork+发送） */
     onForkAsk: (sid: string, msg: Message): void => {
       if (!msg) return
       triggerEnterForkMode(sid, msg.id)
-    },
-    /** handoff 后台：runtime 从末条 assistant 提取文档到新 session。失败 toast 反馈。
-     *  streaming 中拦截（与 handoff 模式入口同策略）：源 session 忙时 pi 会拒绝 handoff
-     *  prompt（"Agent is already processing"），提前拦下换友好提示，不打 RPC。 */
-    onHandoff: (sid: string): void => {
-      if (chat.isActive(sid)) {
-        toastError(t('panel.composer.handoffBusy'))
-        return
-      }
-      void handoff(sid).catch((e: unknown) => {
-        const error = e instanceof Error ? e.message : String(e)
-        toastError(t('panel.message.handoffFailed', { error }))
-      })
     },
     /** handoff 备注：进 composer handoff 模式（发 signal） */
     onHandoffAsk: (sid: string, msg: Message): void => {
@@ -195,10 +162,6 @@ export function useChatViewDeps(
     },
     onFileClick: (path: string): void => {
       fileTreeStore.selectFile(path)
-    },
-    onAmbiguousSelect: (path: string): void => {
-      fileTreeStore.selectFile(path)
-      drawer.open('detail', { filePath: path })
     },
 
     // ── 数据加载 ──
@@ -234,7 +197,6 @@ export function useChatViewDeps(
       )
       return { ...result, cache: c }
     },
-    shouldFinalizeStreamingFence,
     streamingFenceSilenceMs: STREAMING_FENCE_SILENCE_MS,
     renderMermaid: (source: string, theme: 'dark' | 'light') => renderMermaid(source, theme),
     toMarkdown: (msg: Message): string => assistantToMarkdown(msg),

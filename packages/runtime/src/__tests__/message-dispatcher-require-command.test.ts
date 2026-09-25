@@ -100,7 +100,8 @@ function makeHarness(opts: HarnessOptions = {}) {
     getMessageBus: () => bus,
   }
   const registry = createSessionDeliveryRegistry(deps, { inject: injectMock } as unknown as SkillInjector)
-  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus, registry)
+  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
+  dispatcher.setDeliveryRegistry(registry)
   dispatcher.setSendMessageHook(hookMock)
   const flush = async (): Promise<void> => {
     for (let i = 0; i < 40; i += 1) await Promise.resolve()

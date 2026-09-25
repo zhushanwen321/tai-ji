@@ -3,8 +3,8 @@
  *
  * 自 markdown.ts 拆出（test-infra-source-simplify R4，2026-09）：渲染管线（markdown-it +
  * shiki 装配、fence/公式/路径识别规则）留在 markdown.ts，本模块只承载增量流式轴——
- * findStableBoundary 行级块扫描 / renderIncremental 前缀缓存协议 / shouldFinalizeStreamingFence
- * 占位 finalize 判定。权威安全网：markdown-incremental.test.ts（9 形态矩阵 + 拼接等价）。
+ * findStableBoundary 行级块扫描 / renderIncremental 前缀缓存协议 / STREAMING_FENCE_SILENCE_MS
+ * finalize 静默阈值。权威安全网：markdown-incremental.test.ts（9 形态矩阵 + 拼接等价）。
  *
  * HTML 块感知（设计 markdown-html-sanitize-render D7，U2）：html:true 后扫描器复刻
  * markdown-it html_block 规则的行间状态机——进入/闭合判定 import 实装常量同源复刻
@@ -569,27 +569,13 @@ export interface IncrementalRenderResult {
 }
 
 /**
- * fence/mermaid 占位转完整渲染的静默阈值（ms）。
+ * fence/mermaid 占位转完整渲染的静默阈值（ms）。finalize 判定 = message complete ∨
+ * token 静默 ≥ 本阈值（判定式收敛在 ui useMarkdownStreaming，审计候选 18：原壳层
+ * shouldFinalizeStreamingFence 谓词注入删除后，本常量是 finalize 唯一注入面）。
  * 08 §5.4 待验证项：无真实用户数据，200 是实施期 A/B 起点（候选 200/300），
  * dev 实测 tuning 后可调——不是结论值。
  */
 export const STREAMING_FENCE_SILENCE_MS = 200
-
-/** 占位转完整渲染的判定输入（W23 组装：消息 complete 态 + 距末 token 静默时长） */
-export interface FenceFinalizeState {
-  /** 消息是否已完成（status 非 streaming） */
-  complete: boolean
-  /** 距上一个 token 到达的静默时长（ms） */
-  silenceMs: number
-}
-
-/**
- * 未闭合 fence 占位是否应转完整渲染：message complete 或 token 静默 ≥ 阈值（08 §3.3.2）。
- * W23 在 rAF 调度层调用；命中后以 finalizeOpenFence:true 调 renderIncremental。
- */
-export function shouldFinalizeStreamingFence(state: FenceFinalizeState): boolean {
-  return state.complete || state.silenceMs >= STREAMING_FENCE_SILENCE_MS
-}
 
 /** 重置前缀缓存（boundary 归零、前缀段清空；nextSegId 故意保留——segId 跨重建单调不减） */
 function resetIncrementalCache(cache: IncrementalRenderCache, env?: MarkdownEnv): void {

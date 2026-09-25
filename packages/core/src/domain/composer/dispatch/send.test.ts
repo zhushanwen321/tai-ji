@@ -19,7 +19,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { computed, ref } from 'vue'
 import { useComposerSend, type ComposerSendDeps } from './send'
 import type { BashCommandExtract } from '../types'
-import type { StagingAction, StagingConfig } from '../types'
+import type { StagingAction } from '../types'
 import type { Segment } from '@taiji/shared'
 
 interface DepsControl {
@@ -41,8 +41,7 @@ interface DepsControl {
 type Spy<T> = T & ReturnType<typeof vi.fn>
 
 interface Spies {
-  stagingSend: Spy<(text: string, staging: StagingConfig) => Promise<boolean>>
-  getStagingConfig: Spy<() => StagingConfig>
+  stagingSend: Spy<(text: string) => Promise<boolean>>
   clearInput: Spy<() => void>
   restoreSegments: Spy<(segments: Segment[]) => void>
   submitFirstMessage: Spy<ComposerSendDeps['flow']['submitFirstMessage']>
@@ -73,7 +72,6 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
   }
   const spies: Spies = {
     stagingSend: vi.fn(async () => ctrl.stagingSendReturn) as unknown as Spies['stagingSend'],
-    getStagingConfig: vi.fn((): StagingConfig => ({})),
     clearInput: vi.fn(() => {}),
     restoreSegments: vi.fn((_segments: Segment[]) => {}),
     submitFirstMessage: vi.fn(async () => {}) as unknown as Spies['submitFirstMessage'],
@@ -96,7 +94,6 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
           : null,
       ),
     },
-    getStagingConfig: spies.getStagingConfig,
     canSend: computed(() => ctrl.canSend),
     hasInput: computed(() => ctrl.hasInput),
     draft: computed(() => ctrl.draft),
@@ -149,7 +146,8 @@ describe('useComposerSend.onSend', () => {
   it('② staging.hasActiveStaging + send 返回 true → 消费 staging，不走普通 send', async () => {
     const { deps, spies } = setup({ hasActiveStaging: true, stagingSendReturn: true })
     await useComposerSend(deps).onSend()
-    expect(spies.stagingSend).toHaveBeenCalledWith('hello', {})
+    // [审计候选 10] send 只透传 text（暂存配置由 staging action 内部自取）
+    expect(spies.stagingSend).toHaveBeenCalledWith('hello')
     expect(spies.send).not.toHaveBeenCalled()
   })
 

@@ -36,7 +36,6 @@ handle.dispose()
 | 策略 | 默认值 | 说明 |
 |------|--------|------|
 | `intent` | `'interrupt-at-turn-boundary'` | turn 边界抢占（F1 教训内化） |
-| `busyPolicy` | `'retry-force'` | settled 边沿驱动 flush + watch-dog 30s 复核；无订阅装配退化退避 {100ms, 50}≈5s 后强制发送 |
 | `mergeWindowMs` | `0` | 关；显式设值启用滑动窗口合批 |
 | `backoff` | `{ ms: 100, max: 50 }` | 退避参数 |
 | `watchdogMs` | `30_000` | watch-dog 复核间隔 |

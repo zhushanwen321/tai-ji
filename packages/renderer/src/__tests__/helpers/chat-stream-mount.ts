@@ -9,31 +9,43 @@
  * mock 工厂与断言共享同一批 vi.fn，与原 vi.hoisted 文件内单例语义一致）。
  *
  * 变体保留未收敛：
- * - MessageStream-truncated-bar.test.ts：23 键版（多 isTakeover/isPendingSend/setTakeover）
+ * - MessageStream-truncated-bar.test.ts：文件内联 vi.hoisted 版（键面与本单例同形维护）
  * - 各文件内联的 virtua/vue 模块 mock（keepMounted/scrollRef props 与渲染循环互为变体）
  */
 import { vi } from 'vitest'
 
-/** 聊天流壳 deps mock 单例（20 键全量默认面，零真 store；测试可断言 vi.fn 调用）。 */
+/** 聊天流壳 deps mock 单例（ChatViewDeps 全字段必填默认面，零真 store；测试可断言 vi.fn 调用）。 */
 export const chatDepsMock = {
-  getMessages: vi.fn(() => []),
   isActive: vi.fn(() => false),
   isHandingOff: vi.fn(() => false),
   getChangeSetStatus: vi.fn(() => undefined),
   isExpanded: vi.fn(() => false),
+  isTakeover: vi.fn(() => false),
+  isPendingSend: vi.fn(() => false),
+  sessionCwdOf: vi.fn(() => undefined),
   toggleExpand: vi.fn(),
   collapse: vi.fn(),
+  setTakeover: vi.fn(),
   abortBash: vi.fn(),
   editAndResend: vi.fn(),
-  onFork: vi.fn(),
+  onRevokeMessage: vi.fn(),
   onForkAsk: vi.fn(),
-  onHandoff: vi.fn(),
   onHandoffAsk: vi.fn(),
   openDrawer: vi.fn(),
   onFileClick: vi.fn(),
-  onAmbiguousSelect: vi.fn(),
   loadFileCandidates: vi.fn(() => Promise.resolve([])),
   renderMarkdown: vi.fn(() => Promise.resolve([])),
+  renderMarkdownIncremental: vi.fn(() =>
+    Promise.resolve({
+      prefixSegments: [],
+      tailSegments: [],
+      stableBoundary: 0,
+      mode: 'incremental' as const,
+      cache: { boundary: 0, prefixText: '', prefixSegments: [], nextSegId: 0 },
+    }),
+  ),
+  // [审计候选 18] 谓词注入收单阈值字段；默认大阈值 = 静默路径不触发（等价原 () => false 默认）
+  streamingFenceSilenceMs: 60_000,
   renderMermaid: vi.fn(() => Promise.resolve({ svg: '' })),
   toMarkdown: vi.fn(() => ''),
 }

@@ -29,7 +29,7 @@
  */
 import type { ComputedRef, Ref } from 'vue'
 import type { Segment } from '@taiji/shared'
-import type { BashCommandExtract, StagingAction, StagingConfig } from '../types'
+import type { BashCommandExtract, StagingAction } from '../types'
 import { segmentsToPrompt } from '@taiji/shared'
 import { toErrorMessage } from '../../../utils/error-message'
 
@@ -80,12 +80,10 @@ export interface ComposerSendDeps {
     /** 是否有任意 staging 活跃（A 阶段：发送前 mode 已开） */
     hasActiveStaging: ComputedRef<boolean>
     /** 经 activeStaging 路由发送；true = 已消费（不走普通 send） */
-    send: (text: string, stagingConfig: StagingConfig) => Promise<boolean>
+    send: (text: string) => Promise<boolean>
     /** 当前活跃的 staging action（null = 普通态），allowsEmptySend 守卫用 */
     activeStaging: ComputedRef<StagingAction | null>
   }
-  /** 取 staging 模型/thinking 暂存配置（ADR-0056，仅 staging 活跃时调） */
-  getStagingConfig: () => StagingConfig
   // ── 守卫 ──
   /** [u3b 语义收窄] 是否可提交（hasInput ∧ ¬isSending）——统一 submit 下占用期发送合法
    *  （内核排队取代拦截/拒绝，D1/D5），守卫只剩空输入与双发锁两类。
@@ -157,15 +155,15 @@ async function routeStaging(deps: ComposerSendDeps): Promise<'blocked' | 'handle
     deps.toastError(deps.t(deps.hasInput.value ? 'panel.composer.sendBusy' : 'panel.composer.sendEmptyHint'))
     return 'blocked'
   }
-  // staging 路由：经 useComposerStaging.send → activeStaging.send。仅在有活跃 staging 时取 staging config
-  // 透传（fork/handoff 内部 handleXxxSend 也自取 deps.getStagingConfig，传参与自取等价故实际被忽略）。
-  // 守卫 hasActiveStaging：非 staging 态不调 getStagingConfig（避免测试 mock 未提供该方法时炸 + 语义清晰）。
+  // staging 路由：经 useComposerStaging.send → activeStaging.send → handleSend（内部自取
+  // getStagingConfig，本层不透传——审计候选 10 删三层死透传参数）。
+  // 守卫 hasActiveStaging：非 staging 态不进入 staging 路由。
   if (deps.staging.hasActiveStaging.value) {
     // [D4-c 迁移] staging 提交载荷从 draft.value 迁 segmentsToPrompt——判定源单一化 +
     // 消除 draft 快照失真窗口（staging 载荷本就是 segments 的序列化，改后判定与载荷同一
     // 表达式）。快照在 staging.send 前（内部消费即可能清 DOM）。
     const segments = deps.inputRef.value?.getSegments() ?? []
-    if (await deps.staging.send(segmentsToPrompt(segments), deps.getStagingConfig())) return 'handled'
+    if (await deps.staging.send(segmentsToPrompt(segments))) return 'handled'
   }
   return 'pass'
 }
@@ -252,7 +250,7 @@ async function sendActiveMessage(deps: ComposerSendDeps, segments: Segment[], te
 }
 
 /**
- * @param deps staging / getStagingConfig / canSend / draft / inputRef /
+ * @param deps staging / canSend / draft / inputRef /
  *   sessionIdRef / variantRef / composerBash / clearInput / restoreSegments /
  *   isSending / flow / localThinkingLevel / send / compact / toastError / t
  *   （Composer.vue 内定义后注入）

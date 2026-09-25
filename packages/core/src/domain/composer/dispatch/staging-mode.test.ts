@@ -383,7 +383,7 @@ describe('fork 形配置：asStagingAction（B 阶段缺省形态）', () => {
     const { instance, forkSessionAsk } = setupFork()
     instance.enter({ srcSessionId: 'src-1', fromMessageId: 'm1' })
 
-    await instance.asStagingAction().send('hi', { modelOverride: 'ignored' })
+    await instance.asStagingAction().send('hi')
 
     expect(forkSessionAsk).toHaveBeenCalledWith('src-1', 'm1', 'hi', {})
     expect(instance.mode.value).toBe(false)

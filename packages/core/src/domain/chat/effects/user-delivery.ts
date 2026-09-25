@@ -29,12 +29,6 @@ import { DEFER_FLUSH_MARKER_RE } from '../apply-entry-convert'
 import { isDevMode } from '../../../platform/dev-mode'
 
 /**
- * [簇 A2 沿用] 内核出站裸标记的显示层剥标记正则——SSOT 在 apply-entry-convert.ts（剥标记
- * 消费点，显示投影同源），本文件 re-export 供 renderer QueueBubble 等显示侧 import。
- */
-export { DEFER_FLUSH_MARKER_RE }
-
-/**
  * [u3b 契约桥] 回执标记提取：SSOT = @taiji/shared 的 MSG_ID_TAG_RE（投递身份标记正则，
  * 双形态 `u-<uuid>` / 裸 `<uuid>`，捕获组 2 = 裸 uuid——本文件原手写体已收敛进该 SSOT，
  * 与 runtime skill-notice-publisher 同源）。只服务送达回执匹配；与显示剥标记
@@ -89,11 +83,6 @@ export function replaceDeliveryProjection(sid: string, entries: DeliveryFrameEnt
   if (entries.length === 0) next.delete(sid)
   else next.set(sid, [...entries])
   deliveryEntriesBySession.value = next
-}
-
-/** 读投影快照（帧数组只读语义：调用方不得原地改写；响应式消费走 getDeliveryProjectionRef）。 */
-export function getDeliveryProjection(sid: string): readonly DeliveryFrameEntry[] {
-  return deliveryEntriesBySession.value.get(sid) ?? []
 }
 
 /**

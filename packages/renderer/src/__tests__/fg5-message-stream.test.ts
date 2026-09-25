@@ -11,7 +11,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
-  groupTurns,
   toRenderItems,
   countThinking,
   countToolCalls,
@@ -20,6 +19,7 @@ import {
 import { useChatStore } from '@/stores/chat'
 import * as mockApi from '@taiji/core/transport/mock'
 import type { Message } from '@taiji/shared'
+import type { MessageTurn } from '@/composables/logic/messageTurns'
 import { textToSegments } from '@taiji/shared'
 
 const NOW = Date.now()
@@ -32,6 +32,14 @@ function assistantMsg(id: string, content: string, extra: Partial<Message> = {})
 }
 function systemMsg(id: string, content: string, extra: Partial<Message> = {}): Message {
   return { id, role: 'system', content, status: 'complete', timestamp: NOW, ...extra }
+}
+
+
+/** groupTurns 死导出已删（审计候选 1）——测试用回合透镜 = toRenderItems 的 turn 项提取。 */
+function groupTurns(messages: Message[]): MessageTurn[] {
+  return toRenderItems(messages)
+    .filter((i): i is { kind: 'turn'; turn: MessageTurn } => i.kind === 'turn')
+    .map((i) => i.turn)
 }
 
 describe('FG5 groupTurns 回合分组', () => {

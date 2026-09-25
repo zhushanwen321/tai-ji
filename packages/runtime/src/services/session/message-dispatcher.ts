@@ -10,9 +10,8 @@
  * 全在注册表/内核侧）。退役面：busy 预检（rejectBusyPrecheck）、send.rejected 广播（budy
  * 类拒绝转译）、markSessionActive 三副作用（迁至注册表 deliverOne 的出站交接点，§3.4+ 表）、
  * skill 注入（迁至同一交接点——注入器所有权随出站交接点走）。保留面：BeforeSend hook
- * （提交前）、入口 touchActivity（idle-pi-reclamation D6-1）、pi busy 类拒绝识别函数
- * （classifyPromptRejection 定义迁至注册表，此处 re-export 保持既有 import 路径与
- * PS-22/23 探针锁定面）。
+ * （提交前）、入口 touchActivity（idle-pi-reclamation D6-1）。pi busy 类拒绝识别函数
+ * classifyPromptRejection 定义与消费均在注册表（session-delivery-registry.ts）。
  * [occupancy D2 拒绝转译] 错误分类迁移后由注册表的出站交接 catch 面消费（D6）。
  * [HISTORICAL] sendSubagentMessage(marker 拼装分支)已删除(composer 四符号设计 D2)——
  * 定向消息改走 session-service.subagentAction 直发 client.prompt,不经本骨架。
@@ -28,9 +27,9 @@
  * pm(getClient / 进程操作)、messageBus(发布,wave:perf-w09 接口收敛——
  * dispatcher 只依赖 publish 抽象,broker 依赖已删除:命令编排消息全部是
  * session 级 push 型,单通道走 bus 定向发布,broadcast 双写腿已收口)。
- * delivery（[MF-1-7 装配收编] 投递注册表）：构造参数可选 + setDeliveryRegistry 后置注入
- * （组合根装配序：注册表创建晚于 SessionService/本类构造，后置注入对齐 setMessageBus
- * 先例）——原进程内活动槽（getActiveDeliveryRegistry）已删除，依赖在签名/setter 可见。
+ * delivery（[MF-1-7 装配收编] 投递注册表）：经 setDeliveryRegistry 后置注入（组合根装配序：
+ * 注册表创建晚于 SessionService/本类构造，后置注入对齐 setMessageBus 先例）——原进程内
+ * 活动槽（getActiveDeliveryRegistry）已删除，依赖在 setter 可见。
  */
 import type { IDispatcherSessionOps } from './session-internal.js'
 import { runDestroyStepIsolated } from './session-entry-removal.js'
@@ -47,16 +46,10 @@ import type { AbortSource } from './abort-liveness.js'
 import { BashDispatcher } from './bash-dispatcher.js'
 
 // abort 阶梯协作类（test-infra-source-simplify T5 抽离）：三级阶梯 + 防重入 + 处置竞态
-// 独立单元在 abort-liveness.ts，本模块持实例并委托；符号 re-export 保持原公开面
-// （abort-liveness 测试与既有 import 方零改动）。
-export { resetAbortLivenessForTest, type AbortSource } from './abort-liveness.js'
-
-/**
- * pi prompt() busy 类确定性拒绝的识别函数（错误分类迁移落点，D6）——定义已迁至内核适配器
- * （session-delivery-registry.ts 的出站交接 catch 面消费），此处 re-export 保持既有 import
- * 路径与 PS-22/PS-23 探针锁定面（pi-semantics-prompt-rejection.test.ts 引本符号名）。
- */
-export { classifyPromptRejection, type PromptRejectionReason } from './session-delivery-registry.js'
+// 独立单元在 abort-liveness.ts，本模块持实例并委托；resetAbortLivenessForTest re-export
+// 保持原公开面（abort-liveness 测试与既有 import 方零改动）。AbortSource 类型消费方直接
+// import abort-liveness（本模块仅内部使用，不再转写）。
+export { resetAbortLivenessForTest } from './abort-liveness.js'
 
 /**
  * sendMessage 回执 reason 词表（plugin-header-action-modal-points D6/AP-4，u5a）：
@@ -111,8 +104,8 @@ export class MessageDispatcher {
   private readonly bash: BashDispatcher
 
   /**
-   * 投递注册表（[MF-1-7 装配收编]）：构造参数可选 + setDeliveryRegistry 后置注入（组合根
-   * 装配序所迫，对齐 messageBus 的双通道先例）。未接线时 submitToKernel 显式失败（不静默）。
+   * 投递注册表（[MF-1-7 装配收编]）：经 setDeliveryRegistry 后置注入（组合根装配序所迫，
+   * 对齐 setMessageBus 后置注入先例）。未接线时 submitToKernel 显式失败（不静默）。
    */
   private delivery?: SessionDeliveryRegistry
 
@@ -121,9 +114,7 @@ export class MessageDispatcher {
     private readonly pm: IProcessManager,
     private readonly workspaceService: WorkspaceService,
     private messageBus?: IMessageBus,
-    delivery?: SessionDeliveryRegistry,
   ) {
-    this.delivery = delivery
     this.abortLiveness = new AbortLiveness({
       getClient: (sessionId) => this.pm.getClient(sessionId),
       persistSessionOutcome: (sessionId, outcome, reason) => this.svc.persistSessionOutcome(sessionId, outcome, reason),
@@ -153,8 +144,8 @@ export class MessageDispatcher {
   }
 
   /**
-   * 后置注入投递注册表（[MF-1-7 装收编] 组合根经 SessionService 同名转发调用；对齐
-   * setMessageBus 后置注入先例——注册表创建晚于本类构造）。幂等覆盖（同实例重复注入无害）。
+   * 后置注入投递注册表（[MF-1-7 装收编] 组合根经 SessionService 同名转发调用；注册表创建
+   * 晚于本类构造，此 setter 是唯一注入通道）。幂等覆盖（同实例重复注入无害）。
    */
   setDeliveryRegistry(registry: SessionDeliveryRegistry): void {
     this.delivery = registry
@@ -344,8 +335,8 @@ export class MessageDispatcher {
   }
 
   /**
-   * 内核提交（提交路径共用）：取构造注入的注册表（[MF-1-7] 组合根 setDeliveryRegistry 装配
-   * 的单例）→ `submit`（受理口径，D9⑤：同步返回受理回执，不等送达）。
+   * 内核提交（提交路径共用）：取 setDeliveryRegistry 装配的注册表（[MF-1-7] 组合根单例）
+   * → `submit`（受理口径，D9⑤：同步返回受理回执，不等送达）。
    *
    * 装配缺失（无注册表 = 组合根未接线）：显式失败（message.error 广播 + 返回 undefined），
    * 不静默丢消息（"失败要出声"）。

@@ -373,7 +373,6 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       intent: "interrupt-at-turn-boundary",    // D3：turn 边界抢占（F1 教训内化）
       mergeWindowMs: 60_000,                   // 滑动窗口合批（继承 MERGE_WINDOW_MS=60s）
       mergeHoldActive: () => host.hasRunningBackground(), // D4 must-fix #1：禁止用 isIdle 代替
-      busyPolicy: "retry-force",               // settled 边沿驱动 + 退避达上限强发
       backoff: { ms: 100, max: 50 },           // 继承 FLUSH_BACKOFF_MS/MAX
       // dedup LRU：语义与旧 DEDUP_TTL_MS=60s **不同**——按 key 永久去重（仅 LRU 逐出后
       // 同 key 可再入）。当前 key 空间（id / id:round，id 每 spawn 唯一）无实际差异；

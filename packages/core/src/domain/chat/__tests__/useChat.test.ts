@@ -28,7 +28,11 @@ import { getExecutingBash as getExecutingBashForTest } from '../bash-effects'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
 import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
 import type { UseChatDeps } from '../useChat'
-import { getDeliveryProjection, replaceDeliveryProjection, resetDeliveryProjectionForTest } from '../effects/user-delivery'
+import { getDeliveryProjectionRef, replaceDeliveryProjection, resetDeliveryProjectionForTest } from '../effects/user-delivery'
+import type { DeliveryFrameEntry } from '../api-port'
+// getDeliveryProjection 快照读口已随过度设计审计候选 1 删除——测试断言经响应式读口组装同款快照。
+const getDeliveryProjection = (sid: string): readonly DeliveryFrameEntry[] =>
+  getDeliveryProjectionRef().value.get(sid) ?? []
 import { historyWindowFromReply } from '../truncated-window'
 import { msg, userEndFrame } from './helpers/fixtures'
 
@@ -209,32 +213,32 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('steer（统一 submit 化）：RPC 失败 → toast + return false（乐观副作用回滚）', async () => {
+  it('followUp（统一 submit 化，原 steer 用例等价转写）：RPC 失败 → toast + return false（乐观副作用回滚）', async () => {
     const f = makeFixture()
     await f.useChat.send('s8', textToSegments('hi'))
     f.emit('s8', msg('s8', 'message.message_start', { messageId: 'a1' }))
     f.chatApi.submitDelivery.mockRejectedValueOnce(new Error('WS断'))
-    await expect(f.useChat.steer('s8', textToSegments('补充'))).resolves.toBe(false)
+    await expect(f.useChat.followUp('s8', textToSegments('补充'))).resolves.toBe(false)
     // 失败回滚：乐观气泡移除 + inflight 不悬空
     expect(f.chatStore.getMessages('s8').filter((m) => m.role === 'user' && m.status !== 'error')).toHaveLength(1)
-    expect(f.chatStore.getInflight('s8')).toBe(1) // 首发的 1；steer 失败回滚后不叠加
+    expect(f.chatStore.getInflight('s8')).toBe(1) // 首发的 1；followUp 失败回滚后不叠加
     await nextTick()
     expect(f.toast.error).toHaveBeenCalled()
     f.dispose()
   })
 
-  it('[D2 / form-hang-fix] steer 返回值契约：失败 false，成功 true，早退 false（输入未被消费）', async () => {
+  // [审计候选 8] 原「steer 返回值契约」用例随 useChat.steer 退役删除——steer 生产通路
+  // 已并入 delivery.submit 统一提交，返回值契约由 followUp 用例承接。
+
+  it('[R2-A5] followUp 返回值契约：失败 false，成功 true', async () => {
     const f = makeFixture()
     await f.useChat.send('s8d2', textToSegments('hi'))
     f.emit('s8d2', msg('s8d2', 'message.message_start', { messageId: 'a1' }))
     // 失败：RPC reject → false
     f.chatApi.submitDelivery.mockRejectedValueOnce(new Error('WS断'))
-    await expect(f.useChat.steer('s8d2', textToSegments('补充'))).resolves.toBe(false)
+    await expect(f.useChat.followUp('s8d2', textToSegments('补充'))).resolves.toBe(false)
     // 成功：RPC resolve → true
-    await expect(f.useChat.steer('s8d2', textToSegments('再补'))).resolves.toBe(true)
-    // 早退：空 segments → false（form-hang-fix 契约收窄——原「无事发生 return true」
-    // 语义废除，早退也是输入未被消费，调用方须恢复/保留）
-    await expect(f.useChat.steer('s8d2', [])).resolves.toBe(false)
+    await expect(f.useChat.followUp('s8d2', textToSegments('再补'))).resolves.toBe(true)
     f.dispose()
   })
 

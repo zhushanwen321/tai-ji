@@ -86,7 +86,6 @@ async function createIncrementalDeps() {
   }
   const deps = createMockChatDeps({
     renderMarkdownIncremental,
-    shouldFinalizeStreamingFence: m.shouldFinalizeStreamingFence,
     streamingFenceSilenceMs: m.STREAMING_FENCE_SILENCE_MS,
   })
   return { m, deps, results }
@@ -239,10 +238,19 @@ describe('W23 ④: complete 消息渲染与旧版全量渲染等价（回归基�
     const { m, deps } = await createIncrementalDeps()
     // streaming 缺省 = complete → 直接完整渲染
     const inc = mountMd({ content }, deps)
+    // legacy 对照：renderMarkdownSegments 全量管线一次性产段（D6 收敛后 ChatViewDeps 无
+    // 「缺增量回退全量」路径，对照侧显式桥接单帧增量返回全量段）
     const legacy = mountMd(
       { content },
       createMockChatDeps({
         renderMarkdown: (source: string) => m.renderMarkdownSegments(source),
+        renderMarkdownIncremental: async (source, cache) => ({
+          prefixSegments: [],
+          tailSegments: await m.renderMarkdownSegments(source),
+          stableBoundary: 0,
+          mode: 'incremental' as const,
+          cache: cache ?? m.createIncrementalRenderCache(),
+        }),
       }),
     )
     await flushRaf()

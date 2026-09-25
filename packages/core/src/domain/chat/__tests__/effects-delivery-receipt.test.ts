@@ -27,7 +27,7 @@ import {
 } from '../effects/registry'
 import {
   replaceDeliveryProjection,
-  getDeliveryProjection,
+  getDeliveryProjectionRef,
   captureMorphSegments,
   resetDeliveryProjectionForTest,
 } from '../effects/user-delivery'
@@ -35,6 +35,10 @@ import type { MessageEffectContext } from '../effect-types'
 import type { DeliveryFrameEntry } from '../api-port'
 import type { Message, Segment } from '@taiji/shared'
 import { userEndFrame } from './helpers/fixtures'
+
+// getDeliveryProjection 快照读口已随过度设计审计候选 1 删除——测试断言经响应式读口组装同款快照。
+const getDeliveryProjection = (sid: string): readonly DeliveryFrameEntry[] =>
+  getDeliveryProjectionRef().value.get(sid) ?? []
 
 const SID = 's-delivery'
 const UUID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301'
