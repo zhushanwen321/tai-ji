@@ -1,10 +1,7 @@
 // coverage-file-gate-exempt: 组合根装配接线面——决策逻辑在注入工厂（btw-line-spawn-options.ts 等，各有直测），本文件新增行是构造注入与回调接线，单测不可达（入口装配）；行为由 validate-runtime-bundle 与 runtime e2e 承载
 import { RuntimeServer } from './transport/server.js'
 import { SessionService } from './services/session/session-service.js'
-import {
-  REVOKED_SIGNAL_CUSTOM_TYPE,
-  setActiveRevocationSignalNotifier,
-} from './services/session/revoke-orchestrator.js'
+import { REVOKED_SIGNAL_CUSTOM_TYPE } from './services/session/revoke-orchestrator.js'
 // BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
 import { BtwService } from './services/session/btw-service.js'
 // 线 spawn options 工厂（buildLineSpawnOptions 决策面的可测提取，见该文件 docstring）。
@@ -901,6 +898,10 @@ async function main(): Promise<void> {
   // [A1 接线] skill 注入映射源与 dispatcher/records 共源（sessionService.skillSource
   // 晚绑定占位——下方 SkillRegistry 构造后 bind，三个注入挂点一份映射源，D7 单权威）。
   new SkillInjector(sessionService.skillMappingSource))
+  // [MF-1-7 装配收编] 投递注册表后置注入 SessionService（转发给 dispatcher 受理腿 + revoke
+  // 编排 getter）——原 getActiveDeliveryRegistry 进程内活动槽已删除，装配经本调用显式流转
+  // （server 启动前完成注入，RPC 到达时注册表必已就绪）。
+  sessionService.setDeliveryRegistry(sessionDelivery)
   // u4（delivery-ownership-kernel D4②）：续跑判定装配——工具压缩（manual）掐断的活跃 turn
   // 在 compaction_end 判定后经内核 FIFO 追加续跑投递（与用户消息同通道，无第二 prompt 发起方）。
   // 投递出口 = sessionDelivery.submit（D1 单一判定源：lane 判定归内核，本模块不直连 pi）。
@@ -946,12 +947,12 @@ async function main(): Promise<void> {
 
   // ── Phase 3: wire cross-service runtime deps ──
   pluginService.setSessionService(sessionService)
-  // [U7 插件镜像重建] 撤回信号广播槽注册（getActiveDeliveryRegistry 同款进程内活动槽
-  // 先例——组合根创建后可读，避免为编排新增 session-service → plugin-service 接线）：
-  // RevokeOrchestrator 派生态失效时点（树回退确认后，与 records 失效腿恒配对）按
-  // (sessionId, 'taiji:revoked') 双匹配命中插件订阅注册表定向 notify（scheduler-manager
+  // [U7 插件镜像重建 + MF-1-7 装配收编] 撤回信号广播腿后置注入（原
+  // setActiveRevocationSignalNotifier 活动槽已删除，经 SessionService setter 显式流转给
+  // revoke 编排）：RevokeOrchestrator 派生态失效时点（树回退确认后，与 records 失效腿恒配对）
+  // 按 (sessionId, 'taiji:revoked') 双匹配命中插件订阅注册表定向 notify（scheduler-manager
   // 据此丢弃累计镜像全量重建）。
-  setActiveRevocationSignalNotifier((sessionId) => {
+  sessionService.setRevocationSignalNotifier((sessionId) => {
     pluginService.notifyEntryInvalidation(sessionId, REVOKED_SIGNAL_CUSTOM_TYPE)
   })
   // GitService：composition root 注入 infra executor（数组参数防注入）+ sessionService（取 cwd）。
@@ -1297,6 +1298,9 @@ async function main(): Promise<void> {
     // 此处延迟解析；未激活（测试/降级）= 无在途子进程，方向安全（宁漏不误杀）。
     hasInflightRelayChildren: (sid) => getActiveRelayRegistry()?.hasByMainSessionId(sid) ?? false,
     // #4 handoff 进行中。#5 delivery 内核有排队投递（completion-backflow 回流）。
+    // [MF-1-6 口径注] hasDeliveryActivity = depth() 口径：只计尚未受理的排队条目，
+    // in-flight（已受理未确认）刻意不计——回收安全由 pi-restored 对账的 transcript 标记
+    // 扫描兜底（registry 侧注释同源，勿在此扩语义）。
     hasHandoffInflight: (sid) => handoffService.hasInflightHandoff(sid),
     hasQueuedDeliveries: (sid) => sessionDelivery.hasDeliveryActivity(sid),
     // #6 最近被查看时间戳（undefined = 从未被查看，不豁免——0 是合法 epoch 不可当哨兵）。

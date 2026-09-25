@@ -1056,8 +1056,9 @@ describe('[U5] useChat.revokeMessage（统一撤回编排）', () => {
     await f.useChat.revokeMessage('sr1', 'u-1')
     expect(f.chatApi.cancelDelivery).toHaveBeenCalledWith('sr1', 'u-1')
     expect(f.chatApi.revokeMessage).not.toHaveBeenCalled()
-    // cancel reply 的 content 已由 runtime 剥标记——原样回填（segments 透传）
-    expect(f.restoreDraft).toHaveBeenCalledWith('sr1', { text: '收回原文', segments: [{ type: 'text', text: '收回原文' }] })
+    // cancel reply 的 content 已由 runtime 剥标记——原样回填（注入通道单值 text 语义，
+    // [MF-1-2] 撤回路径纯文本回草稿，chips 恢复走队列区 restoreToDraft 通道）
+    expect(f.restoreDraft).toHaveBeenCalledWith('sr1', { text: '收回原文' })
     f.dispose()
   })
 

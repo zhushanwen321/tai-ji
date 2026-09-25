@@ -21,7 +21,6 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { MessageDispatcher } from '../../services/session/message-dispatcher.js'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../../services/session/session-delivery-registry.js'
 import type { IDispatcherSessionOps } from '../../services/session/session-internal.js'
@@ -76,14 +75,13 @@ function makeFixture(attached = true): Fixture {
     recordWorkspace: (cwd) => workspace.record(cwd),
     getMessageBus: () => bus,
   }
-  createSessionDeliveryRegistry(deps)
-  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
+  const registry = createSessionDeliveryRegistry(deps)
+  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus, registry)
   dispatcher.setSendMessageHook(hook)
   return { dispatcher, order, touchActivity, promptFn, ensureActive, hook }
 }
 
 afterEach(() => {
-  resetActiveDeliveryRegistryForTest()
 })
 
 describe('MessageDispatcher 入口同步 touch（idle-pi-reclamation D6-1）', () => {

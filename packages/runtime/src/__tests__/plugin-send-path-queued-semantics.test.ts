@@ -21,7 +21,6 @@ import type { PluginRpcServer } from '../services/plugin-service/plugin-rpc-serv
 import { MessageDispatcher } from '../services/session/message-dispatcher.js'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../services/session/session-delivery-registry.js'
 import { applySessionOccupancyTransition } from '../services/session/event-interpreter.js'
@@ -81,6 +80,7 @@ function makeHarness() {
     { getClient: () => client as unknown as IPiEngine } as unknown as IProcessManager,
     { record: vi.fn() } as unknown as WorkspaceService,
     ({ publish: (_sid: string, msg: ServerMessage) => published.push(msg) }) as unknown as IMessageBus,
+    registry,
   )
   // 插件 RPC 表：捕获注册的 handler（真注册函数，非 mock）
   const handlers = new Map<string, (params: Record<string, unknown>) => Promise<unknown>>()
@@ -106,11 +106,9 @@ function makeHarness() {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 afterEach(() => {
   vi.useRealTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 describe('检查点 3：plugin-service 经 dispatcher 的 {queued} 语义透明性', () => {
@@ -128,9 +126,12 @@ describe('检查点 3：plugin-service 经 dispatcher 的 {queued} 语义透明�
     expect(h.published.some((m) => m.type === 'send.rejected')).toBe(false) // ③ 零 send.rejected 帧
     expect(h.registry.entries('s1')?.active[0]?.state).toBe('queued') // 排队承接
 
-    // ② 不丢：compaction 结束 → 内核按 FIFO 投递（含插件消息 + 裸标记身份）
+    // ② 不丢：compaction 结束 → 内核按 FIFO 投递（含插件消息 + 裸标记身份）。
+    // [MF-1-9] 持有等待已事件化：转移后显式触发 hold 解除边沿（生产 = dispatcher bash-end /
+    // compacting-end 转移后经 notifyHoldRelease 驱动）
     applySessionOccupancyTransition(h.view, null, 'compacting-end')
-    await vi.advanceTimersByTimeAsync(600)
+    h.registry.notifyHoldRelease(h.view.id)
+    await vi.advanceTimersByTimeAsync(1)
     await h.flush()
     expect(h.promptCalls).toHaveLength(1)
     expect(h.promptCalls[0]).toContain('插件消息')

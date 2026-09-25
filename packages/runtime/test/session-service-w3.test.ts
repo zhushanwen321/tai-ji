@@ -76,7 +76,6 @@ vi.mock('../src/services/session-history.js', () => ({ getHistoryFromFile: vi.fn
 import { SessionService } from '../src/services/session/session-service.js'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
 } from '../src/services/session/session-delivery-registry.js'
 import { PiConfigStore } from '../src/infra/pi/pi-config-store.js'
 import { PiSessionStore } from '../src/infra/pi/session-store.js'
@@ -211,6 +210,8 @@ function createSetup() {
     recordWorkspace: (cwd) => workspaceService.record(cwd),
     getMessageBus: () => null, // 本文件装置不注入 bus（dispatcher 侧 null-safety 同款）
   })
+  // [MF-1-7] 注册表后置注入 SessionService（活动槽已退役）
+  service.setDeliveryRegistry(deliveryRegistry)
 
   const seedSession = async (opts: { label?: string; sessionFile?: string } = {}) => {
     const piSid = `pi-seed-${++autoId}`
@@ -258,9 +259,8 @@ describe('SessionService · W3 副作用迁移（U7）', () => {
     setup = createSetup()
   })
   afterEach(() => {
-    // [u2] 释放投递内核 timer（30s watchdog / 持有期轮询）并复位活动注册表槽
+    // [u2] 释放投递内核 timer（30s watchdog；持有期轮询已事件化，无轮询 timer）
     setup?.deliveryRegistry.disposeAll()
-    resetActiveDeliveryRegistryForTest()
   })
 
   // ── handleTurnUsageSideEffects（turn_end：label 兜底直写已随 W1 机制删除）──
@@ -448,6 +448,7 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
       recordWorkspace: () => {},
       getMessageBus: () => bus,
     })
+    service2.setDeliveryRegistry(deliveryRegistry2)
     holder.deliveryRegistry = deliveryRegistry2
 
     const piSid = `pi-e2-final-${++autoId}`

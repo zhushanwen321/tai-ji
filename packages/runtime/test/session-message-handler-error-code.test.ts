@@ -25,8 +25,6 @@ function makeHandler(createImpl: ReturnType<typeof vi.fn>, forkImpl?: ReturnType
     forkSession: forkImpl ?? vi.fn().mockResolvedValue({ id: 'forked' }),
     delete: deleteImpl ?? vi.fn().mockResolvedValue(undefined),
     sendMessage: vi.fn().mockResolvedValue({ blocked: false }),
-    steerMessage: vi.fn().mockResolvedValue(undefined),
-    followUpMessage: vi.fn().mockResolvedValue(undefined),
     ensureActive: vi.fn().mockResolvedValue(undefined),
     compact: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),

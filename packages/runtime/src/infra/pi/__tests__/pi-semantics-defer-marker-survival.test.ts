@@ -13,11 +13,12 @@
  * ——pi 落盘文本与 message_end(user) 回流文本都携带标记，core user-delivery ①a 按标记 id
  * 确认出队的可达性锚点（data-governance round2 MF-1）。
  *
- * 断言方式：静态直读 node_modules 实装 dist（pi-coding-agent / pi-agent-core）+ taiji 两侧
- * 标记正则源码（core apply-entry-convert / extension msg-id-mapper）的互斥行为验证，
- * 同 pi-semantics-turn-usage-model.test.ts 范式。dist 或源文件不可达时 skip 不 fail；不进
- * REAL_PI_TESTS 分池。pi 升级后红 = transform 面扩大（steer 通路出现 input hook）或
- * 落盘/事件改写，先复核 PS-26 锚点再更新登记。
+ * 断言方式：静态直读 node_modules 实装 dist（pi-coding-agent / pi-agent-core）+ taiji
+ * 侧标记正则 SSOT 源码（shared message.ts MSG_ID_TAG_RE——DEFER 两侧正则已由其 source
+ * 派生，[MF-1-11]；core/runtime 两侧另断言 uuid 模式段手写体零残留）与 extension
+ * msg-id-mapper 源码的互斥行为验证，同 pi-semantics-turn-usage-model.test.ts 范式。dist
+ * 或源文件不可达时 skip 不 fail；不进 REAL_PI_TESTS 分池。pi 升级后红 = transform 面扩大
+ * （steer 通路出现 input hook）或落盘/事件改写，先复核 PS-26 锚点再更新登记。
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/pi-semantics-defer-marker-survival.test.ts
  */
@@ -113,15 +114,31 @@ describe.skipIf(SKIP_REASON !== '')(
     })
 
     it('taiji 两侧标记正则互斥（行为验证）：裸 uuid 不被 msg-id-mapper TAG_MATCH 命中，u- 标记不被 DEFER_FLUSH_MARKER_RE 命中', () => {
+      // [MF-1-11] DEFER 两侧正则已改由 shared MSG_ID_TAG_RE.source 派生（uuid 段禁手写），
+      // 字面量提取对象改为 SSOT 本体（源码即 SSOT，防探针内复制字面量漂移）；裸形态在
+      // 探针内独立重建（与生产派生同款形态选择，不 import 生产函数保持探针独立性）。
+      const sharedSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'shared', 'src', 'message.ts'), 'utf-8')
       const coreSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'core', 'src', 'domain', 'chat', 'apply-entry-convert.ts'), 'utf-8')
+      const rtSrc = readFileSync(join(REPO_ROOT as string, 'packages', 'runtime', 'src', 'infra', 'pi', 'entry-tree-builder.ts'), 'utf-8')
       const extSrc = readFileSync(join(REPO_ROOT as string, 'extensions', 'taiji', 'msg-id-mapper', 'src', 'index.ts'), 'utf-8')
-      // 提取正则字面量 body + flags 并重建（源码即 SSOT，防探针内复制字面量漂移）
-      const deferDef = /DEFER_FLUSH_MARKER_RE = \/(.+?)\/([a-z]*)\r?\n/.exec(coreSrc)
+      const msgIdTagDef = /export const MSG_ID_TAG_RE =\s*\/(.+?)\/([a-z]*)/.exec(sharedSrc)
       const tagMatchDef = /const TAG_MATCH = \/(.+?)\/([a-z]*)\r?\n/.exec(extSrc)
-      expect(deferDef, 'core DEFER_FLUSH_MARKER_RE 字面量提取失败——复核 apply-entry-convert.ts').not.toBeNull()
+      expect(msgIdTagDef, 'shared MSG_ID_TAG_RE 字面量提取失败——复核 packages/shared/src/message.ts').not.toBeNull()
       expect(tagMatchDef, 'extension TAG_MATCH 字面量提取失败——复核 msg-id-mapper/src/index.ts').not.toBeNull()
-      const deferRe = new RegExp(deferDef![1], deferDef![2])
+      // 裸形态重建：剥可选 u- 前缀捕获组 → 裸 uuid 升为捕获组 1（与生产 deriveBareMsgIdTagRe
+      // 同锚 <!--taiji:msg:(u-)?( / )-->；SSOT 形态漂移在此红，两侧生产 fail-fast 同步红）
+      const ssotBody = msgIdTagDef![1]
+      const head = '<!--taiji:msg:(u-)?('
+      const tail = ')-->'
+      expect(
+        ssotBody.startsWith(head) && ssotBody.endsWith(tail) && ssotBody.length > head.length + tail.length,
+        'MSG_ID_TAG_RE source 形态漂移——两侧裸形态派生锚失效（core/runtime deriveBareMsgIdTagRe 会 fail-fast），复核 shared message.ts',
+      ).toBe(true)
+      const deferRe = new RegExp(`<!--taiji:msg:(${ssotBody.slice(head.length, ssotBody.length - tail.length)})-->`, msgIdTagDef![2])
       const tagMatchRe = new RegExp(tagMatchDef![1], tagMatchDef![2])
+      // [MF-1-11] 两侧生产定义 uuid 模式段手写体零残留（残留 = 派生化回退或新病灶）
+      expect(/\[0-9a-f\]\{8\}/.test(coreSrc), 'core apply-entry-convert 残留手写 uuid 模式段——MF-1-11 派生化回退').toBe(false)
+      expect(/\[0-9a-f\]\{8\}/.test(rtSrc), 'runtime entry-tree-builder 残留手写 uuid 模式段——MF-1-11 派生化回退').toBe(false)
       // TAG_STRIP（msg-id-mapper 的剥离正则）必须仍是 u- 前缀形态（input hook 只剥 u- 标记的依据）
       expect(
         /const TAG_STRIP = \/<!--taiji:msg:u-\[0-9a-fA-F-\]\{36\}-->\/g/.test(extSrc),
@@ -137,6 +154,13 @@ describe.skipIf(SKIP_REASON !== '')(
       // u- 标记：TAG_MATCH 命中（既有映射机制不受影响），DEFER 不命中（id 空间互斥，不误确认）
       expect(uText.match(tagMatchRe)?.[1], 'u- 标记未被 TAG_MATCH 命中——msg-id-mapper 既有机制回归').toBe(`u-${bareUuid}`)
       expect(deferRe.test(uText), 'u- 标记被 DEFER_FLUSH_MARKER_RE 命中——id 空间互斥论证失效，u- 标记会被误当 defer 确认').toBe(false)
+      // [MF-1-11] 等价断言样例集（派生裸形态 ≡ 原手写体行为核对）：entry-tree-builder
+      // test case D1 同款 deferId 提取样例 + i 旗标大写形态 + 畸形标记不命中
+      const d1Uuid = '3f2504e0-4f89-41d3-9a0c-0305e82c3301'
+      expect(`排队消息正文\n<!--taiji:msg:${d1Uuid}-->`.match(deferRe)?.[1]).toBe(d1Uuid)
+      const upper = '3F2504E0-4F89-41D3-9A0C-0305E82C3301'
+      expect(`<!--taiji:msg:${upper}-->`.match(deferRe)?.[1]).toBe(upper)
+      expect('<!--taiji:msg:not-a-uuid-->'.match(deferRe)).toBeNull()
     })
   },
 )

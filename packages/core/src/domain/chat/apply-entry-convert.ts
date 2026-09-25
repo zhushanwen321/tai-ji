@@ -23,6 +23,7 @@ import type {
 } from '@taiji/shared'
 import {
   findSkillDataBlockRange,
+  MSG_ID_TAG_RE,
   parseSkillMarkers,
   parseSkillsFallbackBlocks,
   textToSegments,
@@ -31,7 +32,7 @@ import {
 import { isLooseRecord, isPlainRecord, normalizePiToolResult, truncateEntryToolOutput } from './apply-entry-utils'
 
 /**
- * [簇 A2] defer 队列 flush 投递确认标记正则（SSOT，submitQueuedEntry 附加的形态）。
+ * [簇 A2] defer 队列 flush 投递确认标记正则（submitQueuedEntry 附加的形态）。
  *
  * 裸 uuid v4 形态（entry.id = crypto.randomUUID()，无 u- 前缀）——与 u- 前缀的 clientUuid
  * 标记（submitSegments / msg-id-mapper TAG_MATCH 族，`u-[0-9a-fA-F-]{36}`）id 空间互斥：
@@ -46,8 +47,30 @@ import { isLooseRecord, isPlainRecord, normalizePiToolResult, truncateEntryToolO
  * 层不暴露实现标记，且剥后基线文本 = confirmDelivery overlay 文本，mergeBaselineWithLive
  * 文本去重命中不双计）；② effects/user-delivery ①a 提取 id；③ renderer QueueBubble
  * 快照文本剥标记。三处同 import 本常量，禁复制字面量。
+ *
+ * [MF-1-11] uuid 模式段由 @taiji/shared MSG_ID_TAG_RE.source 派生（uuid 段禁手写，SSOT
+ * 形态变化时本正则自动跟随）：派生时显式剥掉可选 u- 捕获组 → 裸 uuid 升为捕获组 1，
+ * 「只剥裸形态」语义由形态选择显式保留（见 deriveBareMsgIdTagRe）。
  */
-export const DEFER_FLUSH_MARKER_RE = /<!--taiji:msg:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-->/i
+/** 从 MSG_ID_TAG_RE.source 派生裸形态（剥可选 u- 前缀捕获组，裸 uuid 升为捕获组 1）。
+ *  SSOT source 结构漂移（锚文本不匹配）→ fail-fast throw，禁止静默派生错误形态——
+ *  u- 组剥除失败 = 裸正则误吞 u- 标记，id 空间互斥语义破。
+ *  与 runtime entry-tree-builder 的 DEFER_MARKER_RE 派生同构双侧（runtime 不依赖
+ *  @taiji/core 分层边界，helper 各侧内联——uuid 模式文本零复制，锚文本同源 SSOT）。 */
+function deriveBareMsgIdTagRe(): RegExp {
+  const src = MSG_ID_TAG_RE.source
+  const head = '<!--taiji:msg:(u-)?('
+  const tail = ')-->'
+  if (!src.startsWith(head) || !src.endsWith(tail) || src.length <= head.length + tail.length) {
+    throw new Error(
+      'MSG_ID_TAG_RE source 结构漂移：裸形态派生锚失效（期望 <!--taiji:msg:(u-)?(<uuid>)-->），' +
+      '复核 @taiji/shared message.ts 与两侧派生消费方（core apply-entry-convert / runtime entry-tree-builder）',
+    )
+  }
+  return new RegExp(`<!--taiji:msg:(${src.slice(head.length, src.length - tail.length)})-->`, MSG_ID_TAG_RE.flags)
+}
+
+export const DEFER_FLUSH_MARKER_RE = deriveBareMsgIdTagRe()
 
 // ── user 消息 skill 标记反解析（D7 兜底通道，三链路共用 SSOT；R4 升级三形态）────────
 

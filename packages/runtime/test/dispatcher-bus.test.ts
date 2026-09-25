@@ -30,7 +30,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MessageDispatcher } from '../src/services/session/message-dispatcher.js'
 import type { IDispatcherSessionOps } from '../src/services/session/session-internal.js'
 import type { IManagedSessionView } from '../src/services/session/types.js'
-import { createSessionDeliveryRegistry, resetActiveDeliveryRegistryForTest } from '../src/services/session/session-delivery-registry.js'
+import { createSessionDeliveryRegistry } from '../src/services/session/session-delivery-registry.js'
 import type { IMessageBus } from '../src/services/message-bus/message-bus.js'
 import type { IPiEngine, IProcessManager } from '../src/services/ports/pi-engine.js'
 import type { ServerMessage } from '@taiji/shared'
@@ -117,7 +117,7 @@ function makeMocks(opts: {
 
   // [u2 投递所有权内核] 出站交接经内核适配层（dispatcher 只提交；交接异步）——fixture 按真实
   // 装配接内核（recordWorkspace 走 workspace.record，消息总线走同一 messageBus）
-  createSessionDeliveryRegistry({
+  const registry = createSessionDeliveryRegistry({
     getSession: (sid) => svc.getSession(sid),
     ensureActive: svc.ensureActive,
     subscribeAgentSettled: () => () => {},
@@ -125,14 +125,14 @@ function makeMocks(opts: {
     getMessageBus: () => messageBus as unknown as IMessageBus,
   })
 
-  // wave:perf-w09（D1-2）：broker 双写腿已删，dispatcher 只依赖 publish 抽象（4 参构造）
-  const dispatcher = new MessageDispatcher(svc, pm, workspace, messageBus as unknown as IMessageBus)
+  // wave:perf-w09（D1-2）：broker 双写腿已删，dispatcher 只依赖 publish 抽象（4 参构造）；
+  // [MF-1-7] 注册表构造注入（活动槽已退役）
+  const dispatcher = new MessageDispatcher(svc, pm, workspace, messageBus as unknown as IMessageBus, registry)
   return { dispatcher, session, promptFn, bashFn, abortFn, abortBashFn, compactFn, svc, pm, messageBus }
 }
 
 describe('message-dispatcher bus integration', () => {
   beforeEach(() => vi.clearAllMocks())
-  afterEach(() => resetActiveDeliveryRegistryForTest())
 
   // ── sendMessage paths ──
 

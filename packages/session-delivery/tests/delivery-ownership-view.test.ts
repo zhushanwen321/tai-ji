@@ -28,8 +28,8 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     ;(port as { idle: boolean }).idle = false
     handle.send(textMsg('pending'), { id: 'u-4' })
 
-    // 全量视图（无参）
-    const full = handle.entries()
+    // 全量视图（entriesFull）
+    const full = handle.entriesFull()
     expect(full.active.map((e) => e.id)).toEqual(['u-4'])
     expect(full.active[0]).toMatchObject({
       id: 'u-4',
@@ -42,8 +42,8 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     })
     expect(full.tombstones.map((t) => t.id)).toEqual(['u-1', 'u-2', 'u-3'])
 
-    // 投影视图（带参）：活跃全量 + delivered 全部（3 < 默认窗口 50）
-    const proj = handle.entries({})
+    // 投影视图（projection）：活跃全量 + delivered 全部（3 < 默认窗口 50）
+    const proj = handle.projection()
     expect(proj.entries.map((e) => e.id)).toEqual(['u-4', 'u-1', 'u-2', 'u-3'])
     expect(proj.entries.map((e) => e.state)).toEqual<DeliveryEntryState[]>([
       'queued',
@@ -64,13 +64,13 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
       handle.confirmDelivered(`u-${i}`)
     }
 
-    const proj = handle.entries({})
+    const proj = handle.projection()
     expect(proj.entries).toHaveLength(50) // 投影窗口恒 50（DEFAULT_DELIVERED_WINDOW）
     expect(proj.entries.map((e) => e.id)).toEqual(
       Array.from({ length: 50 }, (_, i) => `u-${i + 6}`), // 最近 50 条：u-6..u-55
     )
     // 全量视图 tombstone 不受窗口影响（判重正确性不依赖展示窗口）
-    expect(handle.entries().tombstones).toHaveLength(56)
+    expect(handle.entriesFull().tombstones).toHaveLength(56)
 
     handle.dispose()
   })
@@ -83,9 +83,9 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     handle.send(textMsg('revoked'), { id: 'u-2' })
     handle.cancel('u-2')
 
-    const proj = handle.entries({})
+    const proj = handle.projection()
     expect(proj.entries.map((e) => e.id)).toEqual(['u-1']) // cancelled 不进投影
-    expect(handle.entries().tombstones.map((t) => t.id)).toEqual(['u-2']) // 判重表可见
+    expect(handle.entriesFull().tombstones.map((t) => t.id)).toEqual(['u-2']) // 判重表可见
 
     handle.dispose()
   })
@@ -95,9 +95,9 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     const handle = createDelivery(port)
 
     handle.send(textMsg('m1'), { id: 'u-1' })
-    const full = handle.entries()
+    const full = handle.entriesFull()
     ;(full.active[0] as { state: string }).state = 'failed' // 越权改动快照
-    expect(handle.entries().active[0]!.state).toBe('in-flight') // 内核不受影响（同步受理后的真实态）
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight') // 内核不受影响（同步受理后的真实态）
 
     handle.dispose()
   })
@@ -109,7 +109,7 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     handle.send(textMsg('full body', { dedupeKey: 'k1' }), { id: 'u-1' })
     handle.confirmDelivered('u-1')
 
-    const proj = handle.entries({})
+    const proj = handle.projection()
     expect(proj.entries).toHaveLength(1)
     expect(proj.entries[0]).toMatchObject({
       id: 'u-1',
@@ -271,7 +271,7 @@ describe('u1-view D9⑤ 口径时点：sendChecked 受理即 resolve（送达确
     await vi.advanceTimersByTimeAsync(0)
     expect(resolved).toBe(true) // 受理成功即 resolve
     // 条目仍 in-flight 等送达回执（送达口径的 onSettled 尚未发生）
-    expect(handle.entries().active[0]!.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
 
     await promise
     handle.dispose()
@@ -298,7 +298,7 @@ describe('u1-view D9⑤ 口径时点：sendChecked 受理即 resolve（送达确
 
     await handle.sendChecked(textMsg('m1'), { id: 'u-1' })
     vi.advanceTimersByTime(70_000) // 远超任何窗口
-    expect(handle.entries().active[0]!.state).toBe('in-flight') // 不自动升级 delivered
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight') // 不自动升级 delivered
 
     handle.dispose()
   })
@@ -327,7 +327,7 @@ describe('u1-view v1 机制保持抽查（busy gate / watchdog / dispose）', ()
     idle = true
     vi.advanceTimersByTime(1) // watchdog 第一拍
     expect(port.sendCalls).toHaveLength(1)
-    expect(handle.entries().active[0]!.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
 
     handle.dispose()
   })
@@ -345,8 +345,8 @@ describe('u1-view v1 机制保持抽查（busy gate / watchdog / dispose）', ()
     const pending = handle.sendChecked(textMsg('m3'), { id: 'u-3' })
 
     handle.dispose()
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones).toHaveLength(0) // 随 handle 释放（D5②）
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones).toHaveLength(0) // 随 handle 释放（D5②）
     expect(onSettled).not.toHaveBeenCalled()
     await expect(pending).rejects.toThrow('delivery handle disposed')
     expect(handle.confirmDelivered('u-1')).toBe(false) // disposed 后 no-op

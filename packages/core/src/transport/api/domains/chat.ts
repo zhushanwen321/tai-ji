@@ -13,6 +13,7 @@ import type {
   DeliveryResyncReply,
   DeliverySubmitReply,
   Message,
+  Segment,
   ServerMessageUnion,
 } from '@taiji/shared'
 import {
@@ -120,14 +121,16 @@ export function submitDelivery(
   content: string,
   clientUuid: string,
   images?: Array<{ data: string; mimeType: string }>,
+  segments?: Segment[],
 ): Promise<DeliverySubmitReply> {
-  return sendCommand(
-    'delivery.submit',
-    images
-      ? { sessionId, content, images, clientUuid }
-      : { sessionId, content, clientUuid },
-    RPC_BACKSTOP_TIMEOUT_MS,
-  )
+  const payload = {
+    sessionId,
+    content,
+    clientUuid,
+    ...(images ? { images } : {}),
+    ...(segments && segments.length > 0 ? { segments } : {}),
+  }
+  return sendCommand('delivery.submit', payload, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /**
@@ -155,10 +158,9 @@ export function resyncDelivery(sessionId: string, clientUuids: string[]): Promis
   return sendCommand('delivery.resync', { sessionId, clientUuids }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
-// [u5a 退役] `steer` / `followUp` 客户端封装已删除：u3b 把发送链收敛到 delivery.submit 后二者
-// 在 core/renderer 零活调用方（grep `chat.steer(` / `chat.followUp(`：仅存于退役前的测试与
-// ChatApiPort 声明）。协议侧 `message.steer` / `message.follow_up` 条目暂留——runtime transport
-// 仍暴露该路由（存量调用方透明承接通道，见 shared/protocol.ts 的 u5a 裁决注释）。
+// [MF-1-8 终态] `steer` / `followUp` 客户端封装已删除：u3b 把发送链收敛到 delivery.submit
+// （lane/intent 判定全在 runtime 内核），协议侧 message.steer / message.follow_up 条目已随
+// runtime transport 路由 + dispatcher 转发腿删除同批退役（u5a 退役条件兑现）。
 
 /**
  * 压缩上下文（#6：触发 runtime session.compact）。

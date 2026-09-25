@@ -39,6 +39,7 @@ import type {
   ScannedSkillInfo,
   ScannedAgentInfo,
   UiLocale,
+  Segment,
 } from '@taiji/shared'
 import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
@@ -936,6 +937,7 @@ const chatImpl = {
     text: string,
     clientUuid: string,
     _images?: Array<{ data: string; mimeType: string }>,
+    _segments?: Segment[],
   ): Promise<ServerMessageMap['delivery.submit']> {
     cancelled.delete(sessionId)
     await sleep(TIMING.ack)
@@ -996,9 +998,9 @@ const chatImpl = {
     return { sessionId, deduped: [] }
   },
 
-  // [u5a 退役] `steer` / `followUp` mock 镜像已删除（连同其 queue_update 镜像链，见上方注）：
+  // [u5a/MF-1-8 退役] `steer` / `followUp` mock 镜像已删除（连同其 queue_update 镜像链，见上方注）：
   // u3b 统一 submit 化后 core 编排零调用，u3c 后队列区数据源 = session.delivery 帧，本链
-  // 无任何消费方。协议侧 message.steer / message.follow_up 条目存续原因见 shared/protocol.ts。
+  // 无任何消费方。协议侧 message.steer / message.follow_up 条目已随 runtime 通路删除同批退役。
 
   streamSubscribe(sessionId: string, handler: (msg: ServerMessageUnion) => void): () => void {
     let set = streamHandlers.get(sessionId)

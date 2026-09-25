@@ -13,7 +13,7 @@
  * - existsSync 用真实 node:fs，测试数据用真实存在的 cwd（tmpdir）。
  *
  * 覆盖分类（对应 plan 归属表）：
- * - dispatcher：sendMessage / abort / steerMessage / followUpMessage / compact
+ * - dispatcher：sendMessage / abort / compact（steerMessage/followUpMessage 已随 MF-1-8 退役）
  *   （[HISTORICAL] sendSubagentMessage 已随 marker 通道废弃删除，composer 四符号设计 D2）
  * - lifecycle：create / delete / renameSession / restoreSession
  * - Facade：switchModel / setThinkingLevel / getHistory / hasActiveSession / getRpcClient /
@@ -119,7 +119,6 @@ vi.mock('../src/services/session-history.js', () => ({
 import { SessionService } from '../src/services/session/session-service.js'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
 } from '../src/services/session/session-delivery-registry.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../src/services/session/replicated-states.config.js'
 import { encodeDirectiveText } from '../src/services/session/session-records.js'
@@ -339,6 +338,8 @@ function createSetup(): Setup {
     recordWorkspace: (cwd) => workspaceService.record(cwd),
     getMessageBus: () => messageBus,
   })
+  // [MF-1-7] 注册表后置注入 SessionService（活动槽已退役）
+  service.setDeliveryRegistry(deliveryRegistry)
 
   const mountClient = (sessionId: string, client?: MockClient): MockClient => {
     const c = client ?? makeMockClient()
@@ -523,11 +524,10 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-// [u2] 用例间清理投递内核：释放 30s watchdog / 持有期轮询 timer 并复位活动注册表槽
+// [u2] 用例间清理投递内核：释放 30s watchdog（持有期轮询已事件化，无轮询 timer）
 afterEach(() => {
   lastCreatedSetup?.deliveryRegistry.disposeAll()
   lastCreatedSetup = undefined
-  resetActiveDeliveryRegistryForTest()
 })
 
 // ───────────────────────────────────────────────────────────────────
@@ -684,46 +684,10 @@ describe('SessionService · dispatcher', () => {
       await expect(setup.service.abort('missing')).rejects.toThrow('Session missing not found')
     })
 
-    it('steerMessage 经内核车道投递（pi streamingBehavior=steer，turn 边界注入）', async () => {
-      const client = setup.mountClient('sid-s')
-      await setup.service.steerMessage('sid-s', 'steer me')
-      await flushDelivery()
-      // [u2 内核化] 原直调 client.steer → 内核 submit + 适配层 prompt（steer 语义经
-      // pi 契约原语 streamingBehavior 表达，零绕过）
-      expect(client.prompt).toHaveBeenCalledTimes(1)
-      const [text, , behavior] = client.prompt.mock.calls[0] as unknown as [string, unknown, unknown]
-      expect(text).toContain('steer me')
-      expect(behavior).toBe('steer')
-    })
-
-    it('steerMessage 对未附着 session 不再同步拒投（D1 受理口径；失败经错误面异步广播）', async () => {
-      // [u2 内核化] 原「throws when session not active」来自 getClientOrThrow 前置抛错——
-      // 三路径统一 submit 后该前置校验退役（D1）：投递可达性由 ensureActive（含 restore）承担，
-      // 失败经内核失败出口广播 message.error（错因可见），调用方不被同步阻塞
-      await expect(setup.service.steerMessage('missing', 'x')).resolves.toBeUndefined()
-      await flushDelivery()
-      const err = findBroadcast(setup, 'message.error')
-      expect(err?.payload).toMatchObject({ sessionId: 'missing' })
-      expect(String(err?.payload.message)).toContain('not found') // 错因可见（restore 根因文案）
-    })
-
-    it('followUpMessage 经内核车道投递（pi streamingBehavior=followUp，run 收尾注入）', async () => {
-      const client = setup.mountClient('sid-f')
-      await setup.service.followUpMessage('sid-f', 'follow')
-      await flushDelivery()
-      expect(client.prompt).toHaveBeenCalledTimes(1)
-      const [text, , behavior] = client.prompt.mock.calls[0] as unknown as [string, unknown, unknown]
-      expect(text).toContain('follow')
-      expect(behavior).toBe('followUp')
-    })
-
-    it('followUpMessage 对未附着 session 不再同步拒投（D1 受理口径；失败经错误面异步广播）', async () => {
-      await expect(setup.service.followUpMessage('missing', 'x')).resolves.toBeUndefined()
-      await flushDelivery()
-      const err = findBroadcast(setup, 'message.error')
-      expect(err?.payload).toMatchObject({ sessionId: 'missing' })
-      expect(String(err?.payload.message)).toContain('not found') // 错因可见（restore 根因文案）
-    })
+    // [MF-1-8 退役] steerMessage / followUpMessage 用例已删除：renderer/core 消费方经
+    // delivery.submit 统一提交（u3b 内核化），dispatcher/sessionService 转发腿与协议条目
+    // message.steer / message.follow_up 同批退役——同语义覆盖由 sendMessage（steer 车道）
+    // 与 useChat 提交链测试承接。
   })
 
   describe('compact', () => {

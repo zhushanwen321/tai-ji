@@ -240,21 +240,11 @@ describe('fork 形配置：enter', () => {
 
     expect(deps.log).toEqual(['enterStagingMode'])
     expect(instance.mode.value).toBe(true)
-    expect(instance.modeRef.value).toBe(true)
   })
 
   it('enter 聚焦经 inputRef.focus 可选链（null 不抛错）', () => {
     const { instance } = setupFork()
     expect(() => instance.enter({ srcSessionId: 'src-1', fromMessageId: 'm1' })).not.toThrow()
-  })
-
-  it('modeRef getter 代理 mode ref（enter/exit 联动）', () => {
-    const { instance } = setupFork()
-    expect(instance.modeRef.value).toBe(false)
-    instance.enter({ srcSessionId: 'src-1', fromMessageId: 'm1' })
-    expect(instance.modeRef.value).toBe(true)
-    instance.exit()
-    expect(instance.modeRef.value).toBe(false)
   })
 })
 

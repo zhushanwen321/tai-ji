@@ -654,8 +654,11 @@ export default [
   // 覆盖上方 idle-pi-reclamation 的 off 块——两块语义冲突时以本软上限为准）。
   {
     files: ['packages/runtime/src/services/session/session-service.ts'],
+    // [2026-09-25 架构审查 MF-1-7 装配收编] 投递注册表/撤回信号广播腿改构造-后置注入
+    // （两进程内活动槽删除），Facade 净代码行 659 > 650 → 提额 665（微超即提额先例：
+    // provider-config-helper / engine-client 同型）。提额而非 off：保留软上限告警，超限即再暴露。
     rules: {
-      'max-lines': ['warn', { max: 650, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 665, skipBlankLines: true, skipComments: true }],
     },
   },
   // [HISTORICAL] [u7a 生产补挂 2026-09-12] EngineClient 是引擎协议客户端唯一聚合点

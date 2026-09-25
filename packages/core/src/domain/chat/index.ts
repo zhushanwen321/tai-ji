@@ -22,9 +22,11 @@ export * from './truncate-tool-output'
 export { dispatchMessageEvent } from './effects/registry'
 // [投递所有权内核 u3b] session.delivery 投影消费口（D7——队列区/气泡 morph 单一数据源，
 // u3c QueueBubble 单源化消费）+ 送达回执标记正则（显示层剥标记 import 用）
+// findDeliveryEntry：撤回「在途条目」判定谓词（[MF-1-4] UserBubble / useChat 共享单点）
 export {
   getDeliveryProjection,
   getDeliveryProjectionRef,
+  findDeliveryEntry,
   DEFER_FLUSH_MARKER_RE,
 } from './effects/user-delivery'
 export type { DeliveryFrameEntry, DeliverySubmitReply } from './api-port'

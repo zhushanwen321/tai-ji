@@ -29,19 +29,19 @@ describe('u1-adopt P-adopt 变体 1：内核有在途共存（自有回收条目
 
     // ── 重放步骤 1：自有条目 steer 入槽受理（滞留形态：run 结束无人 drain）──
     handle.send(textMsg('own user msg'), { id: 'u-own-1', lane: 'steer' })
-    expect(handle.entries().active[0]).toMatchObject({ id: 'u-own-1', state: 'in-flight' })
+    expect(handle.entriesFull().active[0]).toMatchObject({ id: 'u-own-1', state: 'in-flight' })
     expect(port.sendCalls).toHaveLength(1)
 
     // ── 重放步骤 2：settled 边沿对账 → clear_queue 收回 → 三分处置 own ──
     // （clear_queue 返回文本含裸标记 → Reconciler 识别 own → requeue 至队首）
     expect(handle.requeue(['u-own-1'])).toBe(1)
-    expect(handle.entries().active[0]!.state).toBe('in-flight') // idle 下已重投受理
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight') // idle 下已重投受理
     expect(port.sendCalls).toHaveLength(2) // 回收重投发生
     expect(port.sendCalls[1]!.msg.payload.content).toBe('own user msg')
 
     // ── 重放步骤 3：外来无标记文本收养（subagent notifyDone 形态，新 clientUuid）──
     handle.send(textMsg('notify: subagent task done'), { id: 'u-adopt-1', lane: 'direct' })
-    expect(handle.entries().active.map((e) => (e.state === 'in-flight' ? e.id : null))).toContain(
+    expect(handle.entriesFull().active.map((e) => (e.state === 'in-flight' ? e.id : null))).toContain(
       'u-adopt-1',
     )
     // idle 内核下收养条目立即投递（第 3 次 port.send，无滞留）
@@ -53,15 +53,15 @@ describe('u1-adopt P-adopt 变体 1：内核有在途共存（自有回收条目
     expect(handle.confirmDelivered('u-adopt-1')).toBe(true)
 
     // 终态：全部 delivered，tombstone 可判重
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones.map((t) => t.id)).toEqual(['u-own-1', 'u-adopt-1'])
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones.map((t) => t.id)).toEqual(['u-own-1', 'u-adopt-1'])
     expect(handle.depth()).toBe(0)
 
     // ── 重放步骤 5：无重复——同 id 收养重放（对账器下轮再看到同文本）被吞 ──
     handle.send(textMsg('notify: subagent task done'), { id: 'u-adopt-1' })
     handle.send(textMsg('own user msg'), { id: 'u-own-1' })
     expect(port.sendCalls).toHaveLength(3) // 零新增投递
-    expect(handle.entries().active).toHaveLength(0)
+    expect(handle.entriesFull().active).toHaveLength(0)
 
     handle.dispose()
   })
@@ -80,8 +80,8 @@ describe('u1-adopt P-adopt 变体 2：无内核在途的纯外来收养', () => 
     const handle = createDelivery(port)
 
     // ── 前置断言：「空闲 + 无在途」起点（两条件触发口径的内核侧对应面）──
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones).toHaveLength(0)
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones).toHaveLength(0)
     expect(handle.depth()).toBe(0)
 
     // ── 重放步骤 1：对账器收回纯外来滞留文本（无标记 → 收养，新 id）──
@@ -91,16 +91,16 @@ describe('u1-adopt P-adopt 变体 2：无内核在途的纯外来收养', () => 
     expect(port.sendCalls).toHaveLength(1)
     expect(port.sendCalls[0]!.msg.payload.content).toBe('notify: subagent task done')
     expect(port.sendCalls[0]!.intent).toBe('interrupt-at-turn-boundary')
-    expect(handle.entries().active[0]).toMatchObject({ id: 'u-adopt-1', state: 'in-flight' })
+    expect(handle.entriesFull().active[0]).toMatchObject({ id: 'u-adopt-1', state: 'in-flight' })
 
     // ── 重放步骤 2：送达回执落定 ──
     expect(handle.confirmDelivered('u-adopt-1')).toBe(true)
-    expect(handle.entries().tombstones[0]).toMatchObject({ id: 'u-adopt-1', state: 'delivered' })
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-adopt-1', state: 'delivered' })
 
     // ── 重放步骤 3：同 id 收养重放被 tombstone 吞（不重复投递）──
     handle.send(textMsg('notify: subagent task done'), { id: 'u-adopt-1' })
     expect(port.sendCalls).toHaveLength(1)
-    expect(handle.entries().active).toHaveLength(0)
+    expect(handle.entriesFull().active).toHaveLength(0)
 
     handle.dispose()
   })
@@ -120,13 +120,13 @@ describe('u1-adopt P-adopt 变体 2：无内核在途的纯外来收养', () => 
     // 收养发生时目标 session busy（对账器在 settled 边沿收回后立即收养的形态）
     handle.send(textMsg('notify: late arrival'), { id: 'u-adopt-2' })
     expect(port.sendCalls).toHaveLength(0) // busy gate 拦下排队
-    expect(handle.entries().active[0]!.state).toBe('queued')
+    expect(handle.entriesFull().active[0]!.state).toBe('queued')
     expect(handle.depth()).toBe(1)
 
     idle = true
     settledCb!() // settled 边沿 → busy 复核通过 → 投递
     expect(port.sendCalls).toHaveLength(1)
-    expect(handle.entries().active[0]!.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
 
     handle.dispose()
   })

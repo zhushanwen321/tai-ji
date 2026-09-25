@@ -75,7 +75,7 @@ import type { IConfigStore } from '../ports/config.js'
 import type { ISessionStore, SessionOutcome } from '../ports/session.js'
 import type { IGitInfoReader } from '../ports/git-info.js'
 import type { IManagedSessionView, ScannedSession, SendMessageHook, SessionOccupancy } from './types.js'
-import type { DeliverySubmitResult } from './session-delivery-registry.js'
+import type { DeliverySubmitResult, SessionDeliveryRegistry } from './session-delivery-registry.js'
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import { SessionLifecycle } from './session-lifecycle.js'
 import { RevokeOrchestrator } from './revoke-orchestrator.js'
@@ -160,6 +160,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * reply。构造点在 dispatcher 之后（sendSystemCommand 依赖其实例），见 assembleSubmodules。
    */
   private revokeOrchestrator!: RevokeOrchestrator
+  /**
+   * [MF-1-7 装配收编] 后置注入槽（组合根创建晚于本类构造，对齐 setMessageBus 先例）：
+   * 原进程内活动槽已删，依赖经本 Facade 流转给 dispatcher 与 revoke 编排；注入前按
+   * 「组合根未接线」显式失败（fail-fast 保持）。
+   */
+  private deliveryRegistry?: SessionDeliveryRegistry
+  private revocationSignalNotifier?: (sessionId: string) => void
   /** 附件存储域（S1 迁出，零耦合子模块——无 Facade 状态依赖，故不注入 this） */
   private readonly attachmentStore = new AttachmentStore()
   /**
@@ -543,6 +550,10 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // 窄接口已接线（U4 曾以 no-op 占位，U6d 交付后核销；session 无激活缓存条目时
       // SessionRecords 侧内部 no-op，冷启动腿已各自接裁剪）。
       invalidateDerivedState: (sessionId) => this.records.invalidateDerivedState(sessionId),
+      // [MF-1-7] 撤回信号广播腿：后置注入槽动态读（未注入时 no-op——对齐原活动槽 null 取值语义）。
+      notifyEntryInvalidation: (sessionId) => this.revocationSignalNotifier?.(sessionId),
+      // [MF-1-7] 投递注册表：后置注入槽动态读（getter 延迟解析——注册表晚于本类构造）。
+      registry: () => this.deliveryRegistry,
       sendSystemCommand: (sid, cmd, req) => this.dispatcher.sendSystemCommand(sid, cmd, req),
     })
 
@@ -809,6 +820,23 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
+   * [MF-1-7 装配收编] 后置注入投递注册表（组合根创建后调用）：转发 dispatcher + 存槽
+   * 供 revoke 编排 getter 动态读；幂等。
+   */
+  setDeliveryRegistry(registry: SessionDeliveryRegistry): void {
+    this.deliveryRegistry = registry
+    this.dispatcher.setDeliveryRegistry(registry)
+  }
+
+  /**
+   * [MF-1-7 装配收编] 后置注入撤回信号广播腿（组合根在 pluginService 就绪后调用）；
+   * 未注入时广播腿 no-op（与原活动槽未注册语义一致）。
+   */
+  setRevocationSignalNotifier(notifier: (sessionId: string) => void): void {
+    this.revocationSignalNotifier = notifier
+  }
+
+  /**
    * [A1 接线] 绑定 skill 注入映射源真源（组合根在 SkillRegistry 构造后调用一次，
    * skill-reload-nondestructive D7）。records/dispatcher 的 SkillInjector 构造期已持
    * skillSource 占位，bind 后共享同源。getter 供组合根为 delivery registry 组装
@@ -908,8 +936,6 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 经 EventInterpreter.onAgentSettled 回调注入（组合根 index.ts）。
    */
   flushPendingBashResults(sessionId: string): void { this.dispatcher.flushPendingBashResults(sessionId) }
-  async steerMessage(sessionId: string, content: string): Promise<void> { return this.dispatcher.steerMessage(sessionId, content) }
-  async followUpMessage(sessionId: string, content: string): Promise<void> { return this.dispatcher.followUpMessage(sessionId, content) }
   async compact(sessionId: string, customInstructions?: string): Promise<void> { return this.dispatcher.compact(sessionId, customInstructions) }
   setSendMessageHook(hook: SendMessageHook): void { this.dispatcher.setSendMessageHook(hook) }
   listPersistedSessions(): SessionGroup[] { return this.scanner.listPersistedSessions() }

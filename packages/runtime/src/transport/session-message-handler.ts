@@ -196,8 +196,6 @@ export class SessionMessageHandler {
     // 不走 error envelope——六码是设计内回执非传输错误。
     'session.revokeMessage': (msg, ws) => this.handleSessionRevokeMessage(msg, ws),
     'message.send': (msg, ws) => this.handleMessageSend(msg, ws),
-    'message.steer': (msg, ws) => this.handleMessageSteer(msg, ws),
-    'message.follow_up': (msg, ws) => this.handleMessageFollowUp(msg, ws),
     'message.abort': (msg, ws) => this.handleMessageAbort(msg, ws),
     'message.bash': (msg, ws) => this.handleMessageBash(msg, ws),
     'message.abortBash': (msg, ws) => this.handleMessageAbortBash(msg, ws),
@@ -959,31 +957,9 @@ export class SessionMessageHandler {
     return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'sent' })
   }
 
-  private async handleMessageSteer(msg: Extract<ClientMessage, { type: 'message.steer' }>, ws: WsType): Promise<void> {
-    const steerSid = msg.payload.sessionId
-    try {
-      await this.ctx.sessionService.steerMessage(steerSid, msg.payload.content)
-      return this.ctx.reply(ws, msg.id, 'message.status', { sessionId: steerSid, status: 'steered' })
-    } catch (e) {
-      // D10/P0-B: 请求级失败走统一 error envelope（区别于 message-dispatcher 的流式 message.error 广播）。
-      return this.reportFailure(ws, msg.id, 'steer_failed', e, { scope: 'message.steer', sessionId: steerSid })
-    }
-  }
-
-  private async handleMessageFollowUp(msg: Extract<ClientMessage, { type: 'message.follow_up' }>, ws: WsType): Promise<void> {
-    const followSid = msg.payload.sessionId
-    try {
-      await this.ctx.sessionService.followUpMessage(followSid, msg.payload.content)
-      return this.ctx.reply(ws, msg.id, 'message.status', { sessionId: followSid, status: 'queued' })
-    } catch (e) {
-      // D10/P0-B: 请求级失败走统一 error envelope（区别于 message-dispatcher 的流式 message.error 广播）。
-      return this.reportFailure(ws, msg.id, 'follow_up_failed', e, { scope: 'message.follow_up', sessionId: followSid })
-    }
-  }
-
   private async handleMessageAbort(msg: Extract<ClientMessage, { type: 'message.abort' }>, ws: WsType): Promise<void> {
     // D(round5-must-fix-1): 必须回复 ack，否则 renderer pending.register(id) 的 Promise 永挂，pendingMap 泄漏无上限。
-    // 与 message.send/steer/follow_up 对称，走 message.status 回复。
+    // 与 message.send 对称，走 message.status 回复。
     const abortSid = msg.payload.sessionId
     await this.ctx.sessionService.abort(abortSid)
     // P2-2 失效链：turn abort 级联解散挂起交互（审批 select / 执行方式 form / ask-user），
@@ -1033,7 +1009,7 @@ export class SessionMessageHandler {
   // 保证 reply 语义（受理确认）落地时 UI 状态已在位。
 
   private async handleDeliverySubmit(msg: Extract<ClientMessage, { type: 'delivery.submit' }>, ws: WsType): Promise<void> {
-    const { sessionId, content, images, clientUuid } = msg.payload
+    const { sessionId, content, images, clientUuid, segments } = msg.payload
     const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
     if (!registry) return
     // 字段校验（协议面防御：clientUuid 是内核判重锚 D5② 与出站标记身份源 D2，缺失即无判重语义）
@@ -1053,6 +1029,13 @@ export class SessionMessageHandler {
     const result = outcome.receipt
     if (!result) {
       return this.ctx.sendError(ws, 'delivery_unsupported', 'delivery registry not available', msg.id, { sessionId })
+    }
+    // segments 快照登记（MF-1-2 / ADR-0043）：受理回执后按 clientUuid 交注册表持有，
+    // cancel/drain 回草稿时随全文返回。快照属提交载荷的旁路登记（不经 sendMessage 链——
+    // hook 只 transform 文本，不感知 segments），仅接受数组形态（JSON 层可写任意形态，同
+    // maxBytes 守卫先例）；条目已终态时注册表侧丢弃（防泄漏）。
+    if (Array.isArray(segments) && segments.length > 0) {
+      registry.attachSegments(sessionId, result.clientUuid, segments)
     }
     // 受理口径（D9⑤）：submit 同步返回（lane + 条目态），不等底层送达——内核 FIFO 无界，
     // 正常路径无拒绝态（send.rejected 退役归 u5；hook 否决发生在受理之前，不构成受理拒绝）。
@@ -1080,10 +1063,13 @@ export class SessionMessageHandler {
     this.deliveryTopic.sync(sessionId)
     // content 剥除出站裸标记（草稿恢复是用户面文本，投递元数据不进输入框；u3c restoreDraft 直取）
     const content = outcome.cancelled && outcome.content !== undefined ? stripDeliveryMarkers(outcome.content) : undefined
+    // segments 快照（MF-1-2）：提交时经 attachSegments 持有的原始 segments，撤销成功才返回
+    // （渲染面按 ADR-0043 Segment[] 整段恢复 chips；无快照的条目不带键 → 纯文本恢复链）
     return this.ctx.reply(ws, msg.id, 'delivery.cancel', {
       clientUuid,
       cancelled: outcome.cancelled,
       ...(content !== undefined ? { content } : {}),
+      ...(outcome.cancelled && outcome.segments !== undefined ? { segments: outcome.segments } : {}),
       ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
     })
   }
@@ -1101,7 +1087,11 @@ export class SessionMessageHandler {
     this.deliveryTopic.sync(sessionId)
     return this.ctx.reply(ws, msg.id, 'delivery.drain', {
       sessionId,
-      entries: drained.map((d) => ({ clientUuid: d.clientUuid, content: stripDeliveryMarkers(d.content) })),
+      entries: drained.map((d) => ({
+        clientUuid: d.clientUuid,
+        content: stripDeliveryMarkers(d.content),
+        ...(d.segments !== undefined ? { segments: d.segments } : {}),
+      })),
     })
   }
 

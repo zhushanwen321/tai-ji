@@ -34,7 +34,7 @@ function setup(over: Partial<{ hasInput: boolean; isActive: boolean; steerReturn
     restoreInput: vi.fn((_text: string) => {}),
     restoreSegments: vi.fn((_segments: Segment[]) => {}),
     steer: vi.fn(async (_sid: string, _segments: Segment[]) => ctrl.steerReturn),
-    followUp: vi.fn(async (_sid: string, _segments: Segment[]) => {}),
+    followUp: vi.fn(async (_sid: string, _segments: Segment[]) => true),
     abort: vi.fn(async (_sid: string) => {}),
   }
   const submit = useComposerSubmit({

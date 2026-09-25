@@ -16,7 +16,6 @@ import { EventInterpreter, applySessionOccupancyTransition } from '../src/servic
 import { MessageDispatcher } from '../src/services/session/message-dispatcher.js'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
 } from '../src/services/session/session-delivery-registry.js'
 import { SessionLifecycle } from '../src/services/session/session-lifecycle.js'
 import { MessageBus } from '../src/services/message-bus/message-bus.js'
@@ -236,7 +235,6 @@ describe('MessageDispatcher occupancy 挂点', () => {
   afterEach(() => {
     cleanupRegistry?.()
     cleanupRegistry = undefined
-    resetActiveDeliveryRegistryForTest()
   })
 
   function makeDispatcher(opts: {
@@ -295,7 +293,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
       getMessageBus: () => ({ publish } as unknown as IMessageBus),
     })
     cleanupRegistry = () => registry.disposeAll()
-    const dispatcher = new MessageDispatcher(svc, pm, workspace, { publish } as unknown as IMessageBus)
+    const dispatcher = new MessageDispatcher(svc, pm, workspace, { publish } as unknown as IMessageBus, registry)
     return { dispatcher, session, svc, pm, publish, promptFn, bashFn, abortFn, compactFn, client, seq, registry }
   }
 
@@ -510,7 +508,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
       getMessageBus: () => null,
     })
     cleanupRegistry = () => registry.disposeAll()
-    const dispatcher = new MessageDispatcher(svc, { getClient: vi.fn(() => client) } as unknown as IProcessManager, workspace)
+    const dispatcher = new MessageDispatcher(svc, { getClient: vi.fn(() => client) } as unknown as IProcessManager, workspace, undefined, registry)
     await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery()
     await dispatcher.abort('s1')

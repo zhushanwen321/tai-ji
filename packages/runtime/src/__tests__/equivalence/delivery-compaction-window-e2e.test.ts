@@ -251,15 +251,15 @@ describe.skipIf(!FAUX_PI_READY)(`delivery compaction window e2e faux pi${FAUX_PI
       // ── 7. 内核条目终态 delivered（送达回执 message_end(user) 标记命中，D2 第二阶段）──
       await waitUntil(
         () => {
-          const full = handle.entries()
+          const full = handle.entriesFull()
           return [CLIENT_UUID_A, CLIENT_UUID_B].every((id) =>
             full.tombstones.some((t) => t.id === id && t.state === 'delivered'),
           )
         },
         STEP_TIMEOUT_MS,
-        () => `内核 tombstone = ${JSON.stringify(handle.entries().tombstones)}`,
+        () => `内核 tombstone = ${JSON.stringify(handle.entriesFull().tombstones)}`,
       )
-      const full = handle.entries()
+      const full = handle.entriesFull()
       expect(full.active, '两条送达后不留活跃条目').toHaveLength(0)
       expect(handle.depth(), '投递完成后内核队列清空').toBe(0)
       for (const id of [CLIENT_UUID_A, CLIENT_UUID_B]) {

@@ -22,7 +22,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   createSessionDeliveryRegistry,
   extractMarkerIds,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../../services/session/session-delivery-registry.js'
 import type { IManagedSessionView } from '../../services/session/types.js'
@@ -81,11 +80,9 @@ function makeHarness(cleared: { steering: string[]; followUp: string[] }) {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 afterEach(() => {
   vi.useRealTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 describe('P-adopt 变体 1：内核有在途共存（自有优先、收养排后、零重复）', () => {

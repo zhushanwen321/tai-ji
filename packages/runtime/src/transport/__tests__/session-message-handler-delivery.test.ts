@@ -30,7 +30,6 @@ import { SessionMessageHandler, type SessionHandlerContext } from '../session-me
 import { DELIVERY_PREVIEW_MAX_CHARS, SessionDeliveryTopic, deliveryPreview, stripDeliveryMarkers } from '../session-delivery-topic.js'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
   type SessionDeliveryRegistry,
 } from '../../services/session/session-delivery-registry.js'
@@ -223,12 +222,10 @@ function frameEntries(h: Harness): ServerMessage<'session.delivery'>['payload'][
 
 beforeEach(() => {
   vi.useFakeTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 // ── 协议面：RPC 认领 ──────────────────────────────────────────────
@@ -424,13 +421,13 @@ describe('帧数据源 = 内核投影视图（D9②：cancelled 不投影 / tomb
     registry.submit(SID, { content: 'msg-A', clientUuid: UUID_A })
     await registry.cancel(SID, UUID_A)
 
-    const entriesSpy = vi.spyOn(handle, 'entries')
+    const projectionSpy = vi.spyOn(handle, 'projection')
     const topic = new SessionDeliveryTopic({ getRegistry: () => registry, getBus: () => bus, nextPushId: () => 'push-t' })
     topic.sync(SID)
 
-    // 投影形态锁定：topic 以 entries(options) 投影视图装配帧（resolveHandle 的存在性判定
-    // 走 registry.entries() 全量视图，故 spy 同时含无参调用——此处只锁投影形态被调用）
-    expect(entriesSpy).toHaveBeenCalledWith({})
+    // 投影形态锁定：topic 以 projection() 投影视图装配帧（[MF-1-13] 拆名后投影专用入口，
+    // 存在性判定走 registry.getDelivery 非创建性查询，不触达全量视图）
+    expect(projectionSpy).toHaveBeenCalled()
     const frames = sent.filter((m) => m.type === 'session.delivery') as ServerMessage<'session.delivery'>[]
     expect(frames).toHaveLength(1)
     // 双视图分流：full 视图有 cancelled tombstone，帧条目为空（cancelled 不投影、不泄漏）

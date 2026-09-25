@@ -50,9 +50,8 @@ interface ComposerSubmitDeps {
   /** 追加 steer（useChat 提供）。[D2] 返回 false = RPC 失败（内部已 toast），调用方恢复草稿。 */
   steer: (sessionId: string, segments: Segment[]) => Promise<boolean>
   /** 追加 follow-up（useChat 提供）。[R2-A5] 契约对齐 steer：false = RPC 失败（内部已
-   *  toast），调用方恢复草稿。类型面 Promise<boolean | void> 为宽兼容槽（useChat 侧契约
-   *  落地前后提供方均可注入），合流后可收窄为 Promise<boolean>。 */
-  followUp: (sessionId: string, segments: Segment[]) => Promise<boolean | void>
+   *  toast），调用方恢复草稿。 */
+  followUp: (sessionId: string, segments: Segment[]) => Promise<boolean>
   /** 停止当前回合（useChat 提供） */
   abort: (sessionId: string) => Promise<void>
 }
@@ -114,7 +113,7 @@ export function useComposerSubmit(deps: ComposerSubmitDeps) {
     // clearInput 会清空 DOM，必须在清空前提取 segments（同 onSteer 快照范式）
     const segments = deps.inputRef.value?.getSegments() ?? []
     deps.clearInput()
-    // 严格比较 false：只认显式失败信号（宽兼容槽下 void 提供方 resolve undefined 不触发恢复）
+    // 严格比较 false：只认显式失败信号
     const delivered = await deps.followUp(deps.sessionIdRef.value!, segments)
     if (delivered === false) deps.restoreSegments(segments)
   }

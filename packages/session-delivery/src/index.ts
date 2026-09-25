@@ -14,7 +14,6 @@ export {
   type DeliveryEntry,
   type DeliveryTombstone,
   type DeliveryEntriesFull,
-  type DeliveryProjectionOptions,
   type DeliveryEntriesProjection,
 } from './types.js'
 

@@ -28,11 +28,11 @@ describe('u1-api confirmDelivered', () => {
 
     handle.send(textMsg('m1'), { id: 'u-1', lane: 'steer' })
     expect(handle.confirmDelivered('u-1')).toBe(true)
-    expect(handle.entries().tombstones).toEqual([
+    expect(handle.entriesFull().tombstones).toEqual([
       { id: 'u-1', state: 'delivered', lane: 'steer', settledAt: expect.any(Number) },
     ])
     expect(handle.confirmDelivered('u-1')).toBe(false) // 幂等：已终态
-    expect(handle.entries().tombstones).toHaveLength(1)
+    expect(handle.entriesFull().tombstones).toHaveLength(1)
 
     handle.dispose()
   })
@@ -108,7 +108,7 @@ describe('u1-api requeue', () => {
     // u-a 在队列（跳过）、u-x 未知（跳过）→ 重排数 0
     expect(handle.requeue(['u-a', 'u-x'])).toBe(0)
     // 队列序不变：A 仍在 B 前
-    expect(handle.entries().active.map((e) => e.id)).toEqual(['u-a', 'u-b'])
+    expect(handle.entriesFull().active.map((e) => e.id)).toEqual(['u-a', 'u-b'])
 
     handle.dispose()
   })
@@ -176,8 +176,8 @@ describe('u1-api cancel', () => {
 
     // 收回失败但 message_end 到达（文本已进 transcript）→ delivered 事实 > cancel 意图
     expect(handle.confirmDelivered('u-1')).toBe(true)
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones[0]).toMatchObject({ id: 'u-1', state: 'delivered' })
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-1', state: 'delivered' })
     expect(onSettled).toHaveBeenCalledWith(expect.anything(), 'delivered')
 
     handle.dispose()
@@ -194,7 +194,7 @@ describe('u1-api cancel', () => {
     // 出站在途（queued）即撤：本地移除 + waiter reject
     expect(handle.cancel('u-1').kind).toBe('cancelled')
     await expect(promise).rejects.toThrow('delivery cancelled: u-1')
-    expect(handle.entries().active).toHaveLength(0)
+    expect(handle.entriesFull().active).toHaveLength(0)
 
     // 迟到的受理回执不炸（条目已不在册）
     sendResolve!()
@@ -218,12 +218,12 @@ describe('u1-api cancel', () => {
     resolvers[0]!() // 第 1 批（u-1）的受理回执迟到到达
     await vi.advanceTimersByTimeAsync(0)
     // 第 1 条已 cancelled 不转移复活；u-2 经 pump 走第 2 批出站在途
-    expect(handle.entries().active.map((e) => e.id)).toEqual(['u-2'])
-    expect(handle.entries().active[0]!.state).toBe('queued')
+    expect(handle.entriesFull().active.map((e) => e.id)).toEqual(['u-2'])
+    expect(handle.entriesFull().active[0]!.state).toBe('queued')
 
     resolvers[1]!() // u-2 受理
     await vi.advanceTimersByTimeAsync(0)
-    expect(handle.entries().active[0]!.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
 
     handle.dispose()
   })
@@ -253,7 +253,7 @@ describe('u1-api drain', () => {
     const handle = createDelivery(port, { backoff: { ms: 1, max: 0 } })
 
     handle.send(textMsg('A'), { id: 'u-a' }) // 立即投 → 受理 in-flight
-    expect(handle.entries().active[0]!.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
 
     idle = false
     handle.send(textMsg('B'), { id: 'u-b' }) // busy 留队
@@ -262,7 +262,7 @@ describe('u1-api drain', () => {
     handle.flush()
     // B+C 合批投出，第 2 次 port.send 抛错 → 零重试上限 → 双双 failed
     vi.advanceTimersByTime(10)
-    expect(handle.entries().active.map((e) => e.state)).toEqual(['in-flight', 'failed', 'failed'])
+    expect(handle.entriesFull().active.map((e) => e.state)).toEqual(['in-flight', 'failed', 'failed'])
 
     const drained = handle.drain()
     expect(drained.map((d) => d.id)).toEqual(['u-a', 'u-b', 'u-c'])
@@ -271,8 +271,8 @@ describe('u1-api drain', () => {
       'B',
       'C',
     ])
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones.map((t) => t.state)).toEqual([
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones.map((t) => t.state)).toEqual([
       'cancelled',
       'cancelled',
       'cancelled',
@@ -303,7 +303,7 @@ describe('u1-api drain', () => {
     // resync 重报同 id：cancelled tombstone 去重
     handle.send(textMsg('A'), { id: 'u-a' })
     expect(port.sendCalls).toHaveLength(callsAfterDrain)
-    expect(handle.entries().active).toHaveLength(0)
+    expect(handle.entriesFull().active).toHaveLength(0)
 
     handle.dispose()
   })
@@ -323,8 +323,8 @@ describe('u1-api drain', () => {
     // 迟到受理：条目已不在册，无转移无炸
     sendResolve!()
     await vi.advanceTimersByTimeAsync(0)
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones[0]).toMatchObject({ id: 'u-1', state: 'cancelled' })
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-1', state: 'cancelled' })
 
     handle.dispose()
   })
@@ -359,8 +359,8 @@ describe('u1-api tombstone 判重（D5②）', () => {
     // 断连重连后 renderer resync 重报同 clientUuid
     handle.send(textMsg('m1'), { id: 'u-1' })
     expect(port.sendCalls).toHaveLength(1) // 不重投
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones).toHaveLength(1)
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones).toHaveLength(1)
 
     handle.dispose()
   })
@@ -371,7 +371,7 @@ describe('u1-api tombstone 判重（D5②）', () => {
 
     handle.send(textMsg('m1'), { id: 'u-1' })
     handle.send(textMsg('m1'), { id: 'u-1' }) // 同 id 重报（活跃条目在册）
-    expect(handle.entries().active).toHaveLength(1)
+    expect(handle.entriesFull().active).toHaveLength(1)
 
     handle.dispose()
   })
@@ -385,7 +385,7 @@ describe('u1-api tombstone 判重（D5②）', () => {
 
     handle.send(textMsg('m1'), { id: 'u-1' }) // resync 重报已撤销消息
     expect(port.sendCalls).toHaveLength(0)
-    expect(handle.entries().active).toHaveLength(0)
+    expect(handle.entriesFull().active).toHaveLength(0)
 
     handle.dispose()
   })
@@ -425,7 +425,7 @@ describe('u1-api tombstone 判重（D5②）', () => {
     }
 
     // 判重表 60 条全量（含最早 10 条——投影窗口只留 50 条完整条目）
-    expect(handle.entries().tombstones).toHaveLength(60)
+    expect(handle.entriesFull().tombstones).toHaveLength(60)
     handle.send(textMsg('m0'), { id: 'u-0' }) // 最早的 id 重报仍被吞
     expect(port.sendCalls).toHaveLength(60)
 

@@ -21,7 +21,6 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../../services/session/session-delivery-registry.js'
 import { createReattachRestore } from '../../services/session/reattach-delivery-trigger.js'
@@ -104,12 +103,10 @@ function makeRegistryHarness() {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 describe('createReattachRestore：restore → 建运行时 → 对账（顺序硬约束）', () => {

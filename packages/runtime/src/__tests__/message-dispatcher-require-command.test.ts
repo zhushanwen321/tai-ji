@@ -28,7 +28,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MessageDispatcher } from '../services/session/message-dispatcher.js'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../services/session/session-delivery-registry.js'
 import type { SkillInjector } from '../services/session/skill-injector.js'
@@ -101,7 +100,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     getMessageBus: () => bus,
   }
   const registry = createSessionDeliveryRegistry(deps, { inject: injectMock } as unknown as SkillInjector)
-  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
+  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus, registry)
   dispatcher.setSendMessageHook(hookMock)
   const flush = async (): Promise<void> => {
     for (let i = 0; i < 40; i += 1) await Promise.resolve()
@@ -116,11 +115,9 @@ const findError = (broadcasts: ServerMessage[]) => broadcasts.find((m) => m.type
 describe('requireCommand 原子校验（D6/u5a：hook 后、内核提交前）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    resetActiveDeliveryRegistryForTest()
   })
   afterEach(() => {
     vi.useRealTimers()
-    resetActiveDeliveryRegistryForTest()
   })
 
   it('校验顺序：hook → getCommands →（命中后）投递腿 prompt；重试全程（未命中）prompt 不调用', async () => {

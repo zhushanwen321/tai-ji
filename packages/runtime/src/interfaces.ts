@@ -412,10 +412,9 @@ export interface ISessionService {
   setOnPlanAborted(handler: (sessionId: string) => void): void
   /** Set thinking level for a session's pi subprocess. Returns pi-effective level (P3: pi clamps unsupported levels). */
   setThinkingLevel(sessionId: string, level: string): Promise<string>
-  /** Steer an actively generating session */
-  steerMessage(sessionId: string, content: string): Promise<void>
-  /** Queue a follow-up message for a session */
-  followUpMessage(sessionId: string, content: string): Promise<void>
+  // [MF-1-8 退役] steerMessage / followUpMessage 已删除：renderer/core 消费方经
+  // delivery.submit 统一提交（u3b），协议侧 message.steer / message.follow_up 条目随
+  // runtime transport 路由 + dispatcher 转发腿删除同批退役（u5a 退役条件兑现）。
 
   // ── wave:runtime-patch ipc-converge-a3 W2：业务持久化写（从 main IPC 迁 WS，安全校验原样搬 TC3）──
   /** 写入粘贴截图（base64→attachments/tmpdir）。安全校验：mimeType image/* + 20MB 上限 + name sanitize */

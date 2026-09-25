@@ -23,14 +23,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TAIJI_NAV_COMMAND } from '@taiji/shared'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../session-delivery-registry.js'
-import {
-  RevokeOrchestrator,
-  resetRevocationSignalNotifierForTest,
-  setActiveRevocationSignalNotifier,
-} from '../revoke-orchestrator.js'
+import { RevokeOrchestrator } from '../revoke-orchestrator.js'
 import { MessageDispatcher } from '../message-dispatcher.js'
 import type { IDispatcherSessionOps } from '../session-internal.js'
 import type { IPiEngine } from '../../ports/pi-engine.js'
@@ -105,9 +100,9 @@ function makeHarness(opts: HarnessOptions = {}) {
   let releaseGate: (() => void) | null = null
   const evictSpy = vi.fn()
   const invalidateSpy = vi.fn()
-  // 撤回信号广播腿经进程内活动槽注入（生产 = 组合根注册 pluginService.notifyEntryInvalidation）
+  // 撤回信号广播腿经 deps.notifyEntryInvalidation 注入（[MF-1-7] 生产 = 组合根注册
+  // pluginService.notifyEntryInvalidation 闭包，经 SessionService setter 流转）
   const signalSpy = vi.fn()
-  setActiveRevocationSignalNotifier(signalSpy)
 
   const client = {
     prompt: vi.fn(async (text: string) => {
@@ -160,6 +155,8 @@ function makeHarness(opts: HarnessOptions = {}) {
     hasRunningWorkflow: opts.hasRunningWorkflow ?? (async () => false),
     evictHistoryRebuildCache: evictSpy,
     invalidateDerivedState: invalidateSpy,
+    notifyEntryInvalidation: (sid: string) => signalSpy(sid),
+    registry: () => registry,
     sendSystemCommand: (sid, commandLine, requireCommand) => dispatcher.sendSystemCommand(sid, commandLine, requireCommand),
   })
 
@@ -190,13 +187,10 @@ function makeHarness(opts: HarnessOptions = {}) {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  resetActiveDeliveryRegistryForTest()
-  resetRevocationSignalNotifierForTest()
 })
 
 /** 标准树：e1(首条 user) → e2(user M，撤回目标) → e3(assistant)，leaf=e3。 */
@@ -694,6 +688,8 @@ describe('错误码边界（D8）', () => {
       hasRunningWorkflow: async () => false,
       evictHistoryRebuildCache: vi.fn(),
       invalidateDerivedState: vi.fn(),
+      notifyEntryInvalidation: vi.fn(),
+      registry: () => h.registry,
       sendSystemCommand: vi.fn(async () => ({ kind: 'sent' as const })),
     })
     // beginRevokeHold 需要 registry（harness 已装配）

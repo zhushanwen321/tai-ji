@@ -12,9 +12,10 @@
  * - ③ b 裸标记通道锚定 entry 文本**末尾位置**命中（恒尾附构造）；
  * - ⑥ 校验谓词按回溯链 **entry.id 集合**判定，禁字符串包含判法。
  *
- * 依赖经构造注入（窄接口）：投递内核注册表经 getActiveDeliveryRegistry() 进程内活动槽
- * 动态读取（MessageDispatcher.submitToKernel 同款先例——组合根创建后可读，避免为编排
- * 新增接线）。
+ * 依赖经构造注入（窄接口）：投递内核注册表经 deps.registry（getter 形态——组合根装配序
+ * 下注册表晚于编排构造，对齐 SessionDeliveryDeps.getMessageBus 同款晚期读取）；
+ * 撤回信号广播腿经 deps.notifyEntryInvalidation（MessageDispatcher.submitToKernel
+ * 构造注入收编同款，[MF-1-7] 原进程内活动槽 activeRevocationSignalNotifier 已删除）。
  */
 import { MSG_ID_TAG_RE, TAIJI_NAV_COMMAND } from '@taiji/shared'
 import type { SessionRevokeMessageReply } from '@taiji/shared'
@@ -22,7 +23,6 @@ import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
 import {
   bareMarkerId,
-  getActiveDeliveryRegistry,
   piContentText,
   type SessionDeliveryRegistry,
 } from './session-delivery-registry.js'
@@ -38,29 +38,10 @@ const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
 /**
  * 撤回失效信号的 customType（双侧同构字面量，域字符串自由域、零 RPC 契约变更）：
  * 与 agent-ext navigateTree 的 LabelEntry label 'taiji:revoked'、scheduler-manager 插件
- * 订阅串三侧同串。组合根经 SessionService 的撤回信号回调把它转
+ * 订阅串三侧同串。组合根经 deps.notifyEntryInvalidation 注入的回调把它转
  * pluginService.notifyEntryInvalidation(sessionId, 本串) 广播给插件 Worker。
  */
 export const REVOKED_SIGNAL_CUSTOM_TYPE = 'taiji:revoked'
-
-// ── 撤回信号广播活动槽（组合根动态注册）─────────────────────────────────────────
-// 进程内活动槽动态读取——getActiveDeliveryRegistry() 同款先例（组合根创建后可读，
-// 避免为编排新增 session-service → plugin-service 接线）。未注册（存量测试构造 /
-// 无插件子系统的装配）时取值 null，invalidateDerived 侧 no-op；进程单例注册一次，
-// 测试经 resetRevocationSignalNotifierForTest 复位（resetActiveDeliveryRegistryForTest
-// 同款纪律）。
-
-let activeRevocationSignalNotifier: ((sessionId: string) => void) | null = null
-
-/** 组合根注册撤回信号广播腿：转 pluginService.notifyEntryInvalidation(sid, REVOKED_SIGNAL_CUSTOM_TYPE)。 */
-export function setActiveRevocationSignalNotifier(notifier: (sessionId: string) => void): void {
-  activeRevocationSignalNotifier = notifier
-}
-
-/** 测试复位（与 resetActiveDeliveryRegistryForTest 同款纪律，afterEach 调用防跨用例泄漏）。 */
-export function resetRevocationSignalNotifierForTest(): void {
-  activeRevocationSignalNotifier = null
-}
 
 /**
  * 裸 uuid 形态判别（[消息撤回 U8] 保号子形态的分派锚）：结构同 MSG_ID_TAG_RE 捕获组 2 的
@@ -94,6 +75,18 @@ export interface RevokeOrchestratorDeps {
    * 必须后置到树回退确认之后，信令前触发是无效失效（重建消费撤回前数据，见④段注释）。
    */
   invalidateDerivedState(sessionId: string): void
+  /**
+   * 撤回信号广播腿（[MF-1-7] 窄注入，取代原 activeRevocationSignalNotifier 活动槽）：
+   * 树回退确认后转 pluginService.notifyEntryInvalidation(sid, REVOKED_SIGNAL_CUSTOM_TYPE)。
+   * 未接线（存量测试构造 / 无插件子系统的装配）时由注入方自降级 no-op。
+   */
+  notifyEntryInvalidation(sessionId: string): void
+  /**
+   * 投递内核注册表读取（[MF-1-7] 窄注入，getter 形态——组合根装配序下注册表晚于编排
+   * 构造；getter 延迟解析，getter 形态对齐 SessionDeliveryDeps.getMessageBus）。
+   * undefined = 组合根未接线 → revokeMessage 显式抛错（fail-fast 语义保持）。
+   */
+  registry(): SessionDeliveryRegistry | undefined
   /** 系统信令入口（⑥——MessageDispatcher.sendSystemCommand，不经 hook / 不经内核）。 */
   sendSystemCommand(
     sessionId: string,
@@ -246,7 +239,7 @@ export class RevokeOrchestrator {
   constructor(private readonly deps: RevokeOrchestratorDeps) {}
 
   async revokeMessage(sessionId: string, targetId: string): Promise<SessionRevokeMessageReply> {
-    const registry = getActiveDeliveryRegistry()
+    const registry = this.deps.registry()
     if (!registry) {
       // 组合根未接线（生产不可达——index.ts 必创建注册表）：显式失败走 error envelope，
       // 不静默降级（「失败要出声」；D8 六码是领域回执不含内部装配错误）
@@ -384,8 +377,9 @@ export class RevokeOrchestrator {
 
   /**
    * 派生态失效 + 撤回信号广播（恒配对入口——全部失效点唯一走此处，结构性杜绝单腿）：
-   * SessionRecords 全量重算腿（invalidateDerivedState）与插件镜像重建腿（活动槽广播
-   * REVOKED_SIGNAL_CUSTOM_TYPE）消费同一「活跃路径已变更」事实，只失效 records 腿会
+   * SessionRecords 全量重算腿（invalidateDerivedState）与插件镜像重建腿（经
+   * deps.notifyEntryInvalidation 注入回调广播 REVOKED_SIGNAL_CUSTOM_TYPE）消费同一
+   * 「活跃路径已变更」事实，只失效 records 腿会
    * 复现 scheduler-manager 面板残留缺陷（插件镜像折叠输入含被撤子树 op）。调用点 =
    * ⑤ 幂等分支 + ⑥ post-signal 三防御分支 + ⑥′ 确认点——均为树回退已确认或防御性
    * 不确定态，广播的镜像重建幂等（重拉经 readEntries 活跃路径过滤，树未回退时收敛到
@@ -393,7 +387,7 @@ export class RevokeOrchestrator {
    */
   private invalidateDerived(sessionId: string): void {
     this.deps.invalidateDerivedState(sessionId)
-    activeRevocationSignalNotifier?.(sessionId)
+    this.deps.notifyEntryInvalidation(sessionId)
   }
 
   /**

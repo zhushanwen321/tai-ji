@@ -96,6 +96,16 @@ export function getDeliveryProjection(sid: string): readonly DeliveryFrameEntry[
   return deliveryEntriesBySession.value.get(sid) ?? []
 }
 
+/**
+ * 撤回「在途条目」判定谓词的单一数据点（[MF-1-4]）：按 clientUuid 查投影条目（无条目 =
+ * undefined）。调用方（UserBubble 三态路由 / useChat.revokeMessage 双态路由）共用本谓词，
+ * 禁再各自内联 `find(e => e.clientUuid === id)`——判定式漂移会让 UI 展示与执行分派分叉。
+ * 返回条目对象非布尔：执行侧（revokeMessage）可细分 state（`state !== 'delivered'` = 在途）。
+ */
+export function findDeliveryEntry(sid: string, clientUuid: string): DeliveryFrameEntry | undefined {
+  return deliveryEntriesBySession.value.get(sid)?.find((e) => e.clientUuid === clientUuid)
+}
+
 /** 投影 ref（u3c QueueBubble 单源化 reactive 消费口；模块级单例，测试 reset 见下方钩子）。 */
 export function getDeliveryProjectionRef(): typeof deliveryEntriesBySession {
   return deliveryEntriesBySession

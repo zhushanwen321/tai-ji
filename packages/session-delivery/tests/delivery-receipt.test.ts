@@ -82,10 +82,10 @@ describe('port.send receipt（U2 回执口径）', () => {
     handle.send(textMsg('m3'))
     // 受理 ≠ 送达：受理成功只转 in-flight，不触发 'delivered' 回调
     expect(onSettled).not.toHaveBeenCalled()
-    expect(handle.entries().active[0]?.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]?.state).toBe('in-flight')
 
     // 送达回执（适配器 confirmDelivered）驱动终态回调
-    expect(handle.confirmDelivered(handle.entries().active[0]!.id)).toBe(true)
+    expect(handle.confirmDelivered(handle.entriesFull().active[0]!.id)).toBe(true)
     expect(onSettled).toHaveBeenCalledTimes(1)
     expect(onSettled.mock.calls[0]?.[1]).toBe('delivered')
 
@@ -99,9 +99,9 @@ describe('port.send receipt（U2 回执口径）', () => {
 
     handle.send(textMsg('m4'))
     expect(onSettled).not.toHaveBeenCalled()
-    expect(handle.entries().active[0]?.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]?.state).toBe('in-flight')
 
-    handle.confirmDelivered(handle.entries().active[0]!.id)
+    handle.confirmDelivered(handle.entriesFull().active[0]!.id)
     expect(onSettled).toHaveBeenCalledTimes(1)
     expect(onSettled.mock.calls[0]?.[1]).toBe('delivered')
 

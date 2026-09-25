@@ -2,7 +2,7 @@
  * createStagingMode —— fork/handoff 两份 staging 模式 composable 的共享行为骨架（D8 泛化）。
  *
  * 背景：fork-mode.ts × handoff-mode.ts 泛化前约 75% 逐字镜像（enter/exit/signal watch 守卫/
- * handleEsc/handleSend 骨架/modeRef getter，设计 §2 例 5），靠注释互证对称、独立漂移。
+ * handleEsc/handleSend 骨架，设计 §2 例 5），靠注释互证对称、独立漂移。
  * 本模块收编两实现的无差异段为单一骨架；useComposerForkMode / useComposerHandoffMode
  * 改为各持一份配置对象消费它（薄包装，公开 API 契约不变，消费方零改动）。
  *
@@ -15,7 +15,7 @@
  * - send 失败 toast 文案 key → config.sendFailedKey
  * - B 阶段（fork 无 inflight 可取消；handoff isInProgress=isHandingOff + abort）→ config.isInProgress / config.abort 可选
  * - 视觉与文案（boxClass 首 token / placeholder / chip 标签与图标）→ config.activeBoxClass 等
- * - exit / signal watch 守卫 / handleEsc / modeRef getter：两实现泛化前逐字同构，骨架固定零配置
+ * - exit / signal watch 守卫 / handleEsc：两实现泛化前逐字同构，骨架固定零配置
  *
  * 新增 staging 模式 = 一份配置对象 + 薄包装（StagingType 枚举 + StagingAction 注册，见 ../types）。
  */
@@ -124,8 +124,6 @@ export interface StagingModeConfig<S extends StagingModeSource> {
 export interface StagingModeInstance<S extends StagingModeSource> {
   /** 模式开关：true 时 composer 顶部显 mode-chip + 视觉，发送走 sendAction */
   mode: Ref<boolean>
-  /** { value: boolean } 包装对象（非 ref，不被 defineExpose 解包；对齐 vm.<mode>.value 访问契约） */
-  modeRef: { readonly value: boolean }
   enter: (source: S) => void
   exit: () => void
   /** 模式派生 class；非活跃返回空串 */
@@ -230,13 +228,6 @@ export function createStagingMode<S extends StagingModeSource>(
     return true
   }
 
-  /** { value: boolean } 包装对象：getter 代理到响应式 mode ref，对齐 vm.<mode>.value 访问契约 */
-  const modeRef = {
-    get value(): boolean {
-      return mode.value
-    },
-  }
-
   /**
    * 包装成 StagingAction（ADR-0057）：mode/enter/exit/handleSend/handleEsc/boxClass/
    * placeholder 收敛为单一策略对象，供 useComposerStaging 聚合路由。
@@ -276,7 +267,6 @@ export function createStagingMode<S extends StagingModeSource>(
 
   return {
     mode,
-    modeRef,
     enter,
     exit,
     boxClass,

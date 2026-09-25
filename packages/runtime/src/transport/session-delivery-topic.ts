@@ -3,9 +3,10 @@
  *
  * 职责两面：
  * 1. **帧 DTO 装配**（D5/D9②）：内核条目 → 协议帧条目 `{clientUuid, preview, state, lane}`。
- *    数据来源**必须是 handle 的投影视图** `entries({})`（D9②/D5③：活跃条目全量 + delivered
+ *    数据来源**必须是 handle 的投影视图** `projection()`（D9②/D5③：活跃条目全量 + delivered
  *    仅最近 deliveredWindow 条完整条目，cancelled 不投影）——全量视图含 tombstone 元数据与
- *    cancelled 记录，直接装配会把判重内部结构泄漏进帧（D9②「双视图分离」正是为此）。
+ *    cancelled 记录，直接装配会把判重内部结构泄漏进帧（D9②「双视图分离」正是为此，
+ *    MF-1-13 拆名后投影专用入口 = projection，误用全量编译期即红）。
  *    投影过滤规则本身归内核（u1），本文件只做形态转换，**不重实现窗口/过滤**（双定义即漂移源）。
  * 2. **变更驱动发布**（D7/G3）：内核 `onChange` 订阅（条目创建/迁移/终态）→ 发布一帧全量快照。
  *    **禁止轮询**——帧是 last-value 语义，每次变更发一帧即收敛；稳态额外成本 = O(1)/变更。
@@ -174,16 +175,16 @@ export class SessionDeliveryTopic {
     }
   }
 
-  /** 内核运行时存在性判定（只读 full 视图查询；undefined = 无运行时，不创建）。 */
+  /** 内核运行时存在性判定（非创建性查询 getDelivery；undefined = 无运行时，不创建——只读装配零副作用）。 */
   private resolveHandle(registry: SessionDeliveryRegistry, sessionId: string): DeliveryHandleV2 | undefined {
-    return registry.entries(sessionId) === undefined ? undefined : registry.getOrCreateDelivery(sessionId)
+    return registry.getDelivery(sessionId)
   }
 
   /** 发布一帧全量快照（投影视图 → 帧 DTO）；bus 缺省静默跳过（与既有 publish 点 null-safe 惯例一致）。 */
   private publish(sessionId: string, handle: DeliveryHandleV2): void {
     const bus = this.deps.getBus()
     if (!bus) return
-    const entries = deliveryFrameEntries(handle.entries({}))
+    const entries = deliveryFrameEntries(handle.projection())
     const frame: ServerMessage<'session.delivery'> = {
       type: 'session.delivery',
       id: this.deps.nextPushId(),

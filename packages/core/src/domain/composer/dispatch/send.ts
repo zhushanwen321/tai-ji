@@ -125,13 +125,11 @@ export interface ComposerSendDeps {
   /** 统一提交（useChat 提供：乐观气泡 + delivery.submit，lane 由 runtime 内核判定——D1）。
    *  [u3b] 原 steer dep（D6 steer 路由终端）与 enqueueCompact dep（defer 入队）随两分支退役。
    *  [R2-A5 失败信号契约] 返回 false = RPC 失败（useChat 内部已 toast + 回滚乐观气泡），
-   *  调用方据此 restoreSegments 恢复草稿（对齐 steer 先例）；true = 已受理。
-   *  类型面 Promise<boolean | void> 是宽兼容槽：boolean 可赋 void 返回位（提供方在
-   *  useChat 侧契约落地前后均可注入），合流后可收窄为 Promise<boolean>。 */
-  send: (sessionId: string, segments: Segment[]) => Promise<boolean | void>
+   *  调用方据此 restoreSegments 恢复草稿（对齐 steer 先例）；true = 已受理。 */
+  send: (sessionId: string, segments: Segment[]) => Promise<boolean>
   /** 压缩上下文（useChat 提供）。[R2-A5 失败信号契约] 同 send：false = RPC 失败（内部
    *  双分型反馈：compaction 级进对话流 / transport 级 toast），调用方恢复草稿。 */
-  compact: (sessionId: string, customInstructions?: string) => Promise<boolean | void>
+  compact: (sessionId: string, customInstructions?: string) => Promise<boolean>
   // ── 反馈 ──
   /** toast 错误（useToast 提供） */
   toastError: (msg: string) => void
@@ -227,8 +225,7 @@ async function sendActiveMessage(deps: ComposerSendDeps, segments: Segment[], te
     // isSending 置位/复位对齐 send 分支形态（双发锁：compact RPC 期间禁止并发提交）
     deps.isSending.value = true
     try {
-      // 严格比较 false：只认显式失败信号——宽兼容槽下 void 提供方（useChat 契约落地前）
-      // resolve undefined，真值判断会把成功发送误判为失败
+      // 严格比较 false：只认显式失败信号，真值判断会把成功发送误判为失败
       const delivered = await deps.compact(sessionId, customInstructions)
       if (delivered === false) deps.restoreSegments(segments)
     } catch (e) {
@@ -242,7 +239,7 @@ async function sendActiveMessage(deps: ComposerSendDeps, segments: Segment[], te
   deps.clearInput()
   deps.isSending.value = true
   try {
-    // 严格比较 false（同 compact 分支）：void 提供方 resolve undefined 不触发恢复
+    // 严格比较 false（同 compact 分支）：只认显式失败信号
     const delivered = await deps.send(sessionId, segments)
     if (delivered === false) deps.restoreSegments(segments)
   } catch (e) {

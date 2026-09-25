@@ -21,7 +21,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MessageDispatcher } from '../message-dispatcher.js'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../session-delivery-registry.js'
 import { applySessionOccupancyTransition, OCCUPANCY_SETTLE_WINDOW_MS, occupancySettleWindow } from '../event-interpreter.js'
@@ -125,7 +124,7 @@ function makeHarness(opts: HarnessOptions = {}) {
       ? { blocked: false, modifiedContent: opts.hookModifiedContent }
       : { blocked: false }
   })
-  const dispatcher = new MessageDispatcher(svc, pm, workspaceService, messageBus)
+  const dispatcher = new MessageDispatcher(svc, pm, workspaceService, messageBus, registry)
   dispatcher.setSendMessageHook(hookMock)
   const flush = async (): Promise<void> => {
     for (let i = 0; i < 40; i += 1) await Promise.resolve()
@@ -140,11 +139,9 @@ function makeHarness(opts: HarnessOptions = {}) {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 afterEach(() => {
   vi.useRealTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 const notice = (reason: SkillNotice['reason'], skills: string[]): SkillNotice => ({ reason, skills })
@@ -311,21 +308,8 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     expect(h.published.filter((m) => m.type !== 'session.occupancy')).toHaveLength(0)
   })
 
-  it('steerMessage / followUpMessage：同走内核提交（注入恰好一次；intent 分型保持）', async () => {
-    const steerHarness = makeHarness()
-    await steerHarness.dispatcher.steerMessage('s1', 'steer 文本')
-    await steerHarness.flush()
-    expect(steerHarness.injectMock).toHaveBeenCalledTimes(1)
-    expect(steerHarness.calls).toEqual(['ensureActive', 'inject', 'prompt', 'record'])
-    expect(steerHarness.promptArgs()[2]).toBe('steer')
-
-
-    const followHarness = makeHarness()
-    await followHarness.dispatcher.followUpMessage('s1', 'followUp 文本')
-    await followHarness.flush()
-    // intent 'after-run' → pi streamingBehavior 'followUp'（F3 语义保持）
-    expect(followHarness.promptArgs()[2]).toBe('followUp')
-  })
+  // [MF-1-8 退役] steerMessage / followUpMessage 转发腿测试已删除：消费方经 delivery.submit
+  // 统一提交（u3b 内核化保持），协议侧 message.steer / message.follow_up 条目同批退役。
 })
 
 /**
@@ -377,8 +361,11 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
     expect(h.client.prompt).not.toHaveBeenCalled()
 
+    // [MF-1-9] 持有等待已事件化：view 维度复位后显式触发边沿（生产 = dispatcher
+    // compacting-end 转移后经 notifyHoldRelease 驱动）
     applySessionOccupancyTransition(h.session, null, 'compacting-end')
-    await vi.advanceTimersByTimeAsync(600)
+    h.registry.notifyHoldRelease('s1')
+    await vi.advanceTimersByTimeAsync(1)
     await h.flush()
     expect(h.client.prompt).toHaveBeenCalledTimes(1) // 压缩结束 → 自动投递
   })

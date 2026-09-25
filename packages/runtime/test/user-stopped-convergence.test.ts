@@ -24,7 +24,6 @@ import { EventInterpreter } from '../src/services/session/event-interpreter.js'
 import { MessageDispatcher } from '../src/services/session/message-dispatcher.js'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
 } from '../src/services/session/session-delivery-registry.js'
 import { RpcTimeoutError } from '../src/utils/errors.js'
 import type { ServerMessage } from '@taiji/shared'
@@ -313,7 +312,7 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
       getMessageBus: () => null,
     })
     cleanupRegistry = () => deliveryRegistry.disposeAll()
-    const dispatcher = new MessageDispatcher(svc, pm, { record: vi.fn() } as unknown as WorkspaceService, { publish } as unknown as IMessageBus)
+    const dispatcher = new MessageDispatcher(svc, pm, { record: vi.fn() } as unknown as WorkspaceService, { publish } as unknown as IMessageBus, deliveryRegistry)
     return {
       dispatcher, session, publish, abortFn, persistSessionOutcome, deliveryRegistry,
       markAtPrompt: () => markAtPrompt,
@@ -342,7 +341,6 @@ describe('MessageDispatcher 置位分型与显式投递清标记', () => {
     vi.useRealTimers()
     cleanupRegistry?.()
     cleanupRegistry = undefined
-    resetActiveDeliveryRegistryForTest()
     userStoppedGate.resetForTest()
   })
 

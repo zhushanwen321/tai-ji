@@ -1,4 +1,5 @@
 import type { Message, Segment, SegmentsMetadataFile } from '@taiji/shared'
+import { MSG_ID_TAG_RE } from '@taiji/shared'
 import type { PiSessionEntry, PiHistoryToolResult, PiSessionCustomEntry } from './pi-protocol.js'
 import { convertPiHistory } from './message-converter.js'
 import { applyEntryEndTimes, computeActivePathEntries, mapSessionEntries } from './session-entry-mapper.js'
@@ -62,13 +63,34 @@ const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
 /**
  * [defer segments 化 / D-A1-2 ③] defer flush 提交确认标记的提取正则——裸 uuid 形态。
  *
- * [双侧同构字面量] 与 core apply-entry-convert 的 DEFER_FLUSH_MARKER_RE（SSOT）同构：
- * runtime 不依赖 @taiji/core（分层边界），同 msg-id-mapper / message-dispatcher 的
- * 标记正则双侧同构先例——两侧禁单侧修改（形态变更 = 回填链断裂，测试锁定互斥性）。
- * 字符集（uuid hex，不含 u-）与 msg-id-mapper TAG_MATCH 的 u- 前缀形态结构互斥——
- * u- 标记帧不被本正则捕获、裸标记不被 TAG_MATCH 捕获。
+ * [MF-1-11] uuid 模式段由 @taiji/shared MSG_ID_TAG_RE.source 派生（uuid 段禁手写，
+ * SSOT 形态变化时本正则自动跟随）：剥可选 u- 捕获组 → 裸 uuid 升为捕获组 1
+ * （buildDeferEntryIdMap match[1] 提取）；SSOT source 结构漂移 → 派生锚 fail-fast。
+ * 与 core apply-entry-convert 的 DEFER_FLUSH_MARKER_RE 同源双侧（runtime 不依赖
+ * @taiji/core 分层边界，helper 各侧内联）——原「双侧同构字面量」惯例升级为「双侧
+ * 同源派生」，SSOT 单侧漂移顾虑消除。字符集（uuid hex，不含 u-）与 msg-id-mapper
+ * TAG_MATCH 的 u- 前缀形态结构互斥——u- 标记帧不被本正则捕获、裸标记不被 TAG_MATCH
+ * 捕获（行为锁定：pi-semantics-defer-marker-survival 探针 + entry-tree-builder D2）。
  */
-const DEFER_MARKER_RE = /<!--taiji:msg:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-->/i
+/** 从 MSG_ID_TAG_RE.source 派生裸形态（剥可选 u- 前缀捕获组，裸 uuid 升为捕获组 1）。
+ *  SSOT source 结构漂移（锚文本不匹配）→ fail-fast throw，禁止静默派生错误形态——
+ *  u- 组剥除失败 = 裸正则误吞 u- 标记，id 空间互斥语义破。
+ *  与 core apply-entry-convert 的 DEFER_FLUSH_MARKER_RE 派生同构双侧（helper 各侧
+ *  内联——uuid 模式文本零复制，锚文本同源 SSOT）。 */
+function deriveBareMsgIdTagRe(): RegExp {
+  const src = MSG_ID_TAG_RE.source
+  const head = '<!--taiji:msg:(u-)?('
+  const tail = ')-->'
+  if (!src.startsWith(head) || !src.endsWith(tail) || src.length <= head.length + tail.length) {
+    throw new Error(
+      'MSG_ID_TAG_RE source 结构漂移：裸形态派生锚失效（期望 <!--taiji:msg:(u-)?(<uuid>)-->），' +
+      '复核 @taiji/shared message.ts 与两侧派生消费方（core apply-entry-convert / runtime entry-tree-builder）',
+    )
+  }
+  return new RegExp(`<!--taiji:msg:(${src.slice(head.length, src.length - tail.length)})-->`, MSG_ID_TAG_RE.flags)
+}
+
+const DEFER_MARKER_RE = deriveBareMsgIdTagRe()
 
 /**
  * 从 customDataEntries 构建 userEntryId → clientUuid 映射（扫 taiji.client-msg-id custom entry）。

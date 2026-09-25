@@ -237,9 +237,11 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 **两类回执（两阶段 receipt）**：①**受理** = pi 收下消息（direct 车道 = prompt 受理；steer 车道 = 文本进入 pi 槽位）；②**送达** = `message_end(user)` 文本命中裸标记 = 消息已写入 transcript（durable）。受理 ≠ 送达：只拿受理的条目停留 `in-flight`，由对账器盯。`sendChecked` 的同步 settle 时点维持**受理口径**（session_manager send 的 `{queued:true}` 契约锚定在受理时点，后移到送达会让 agent 工具调用阻塞至目标 session 当前 turn 结束）——onSettled 记账回调为送达口径，两者显式分离。
 
-**对账器（Reconciler）**：registry 侧组件，在五个触发点（agent_settled / compaction_end / abort 完成 / pi restored / 30s watchdog；`delivery.cancel` 复用同一路径为撤销兜底入口）执行对账，条件 = 「空闲 + pi 槽位非空」，处置 = `clear_queue` 全收后按裸标记**三分**——**reclaim**（内核在途条目回队首重投，保持原相对序）/ **rebuild**（带标记但内核无记录 = runtime 重启 reattach，先按标记对 transcript 全量扫描判 delivered：已送达只重建记账不重投）/ **adopt**（无标记外来文本——notifyDone / scheduler 提醒等存量注入——以新身份入内核 FIFO 正常投递，不丢弃）。pi 只有队列级 `clear_queue` 原语（无条目级撤回），条目级收回以「全收 + 标记识别 + 其余重投」实现。
+**对账器（Reconciler）**：registry 侧组件，在五个触发点（agent_settled / compaction_end / abort 完成 / pi restored / 30s watchdog；`delivery.cancel` 复用同一路径为撤销兜底入口）执行对账，条件 = 「空闲 + pi 槽位非空」，处置 = `clear_queue` 全收后按裸标记**三分**——**reclaim**（内核在册条目回队首重投，保持原相对序）/ **rebuild**（**尾附锚**标记但内核无记录 = runtime 重启 reattach，先按标记对 transcript 全量扫描判 delivered：已送达只重建记账不重投）/ **adopt**（无身份承接的外来文本——notifyDone / scheduler 提醒等存量注入，或标记字面量全部非尾附锚——以新身份入内核 FIFO 正常投递，不丢弃）。pi 只有队列级 `clear_queue` 原语（无条目级撤回），条目级收回以「全收 + 标记识别 + 其余重投」实现。
 
 **裸标记（bare marker）**：出站文本尾附的 `<!--taiji:msg:<uuid>-->`（裸 uuid 形态）作为逐消息身份，随文本进 transcript，供送达回执与判重匹配按 id 精确查找（身份非内容匹配——skill 注入 / BeforeSend 文本改写不影响）。与 msg-id-mapper 的 `u-<uuid>` 前缀标记空间互斥（mapper 只剥 u- 形态且仅覆盖富内容直发通路；裸标记在 steer/followUp 通路不被剥离而存活）——两者正交共存，rich 通路同时携带双标记各司其职。展示层剥离 SSOT = `packages/core/src/domain/chat/apply-entry-convert.ts`（live / reload 同点）。
+
+**投递身份（delivery identity）**：一条出站消息的逐消息身份载体 = 裸标记携带的 id。「这是不是投递身份」的判定权威 = `DELIVERY_MARKER_ID_RE`（`packages/runtime/src/services/session/session-delivery-registry.ts`，shared `MSG_ID_TAG_RE` source 派生的严格 uuid 双形态 ∪ 本地收养条目 `m-<base36>-<seq>` 形态）——uuid 段禁止手写正则，SSOT 形态变化自动跟随。_Avoid_：把任意形似标记的文本当身份（宽松 `[^>]*` 形态仅授权剥除面，判定宽松会让用户文本中的字面假标记产生重复投递）。**出站尾附锚（outbound tail anchor）** = rebuild 重投的附加判据：仅 trimEnd 后处于文末的标记构成 rebuild 身份（出站标记恒尾附，与写侧 `withDeliveryMarker` 读写同形），文本中部/前部的合法形态标记字面量不构成投递身份。判据形态二分裁决：[decisions.md ADR-0077](adr/decisions.md)。
 
 **tombstone 判重锚**：已终态条目（delivered / cancelled）的轻量记录（id / 终态 / lane / settledAt），在 **runtime 存活期内全量保留、不设数量窗口**——`delivery.resync` 断连重报去重与 reattach 收养判重的查询表；cancelled tombstone 防「撤销确认帧在断连窗口丢失 → 已撤销消息被 resync 复活」。判重表栖身 runtime 进程内存、不跨 runtime 重启，reattach（滚动重启后）判重锚回落 **transcript 全量标记扫描**（按重报集/滞留集 uuid 查找，transcript 是唯一跨进程持久事实源）。
 

@@ -117,20 +117,13 @@ export type ClientMessageType =
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：导入 pi 会话
   // 两步流——importCandidates 拉候选列表，import 执行导入；reply 同名（request/reply 同名模式）。
   | 'session.importCandidates' | 'session.import'
-  | 'message.send' | 'message.abort' | 'message.steer' | 'message.follow_up'
+  | 'message.send' | 'message.abort'
   // delivery.*（投递所有权内核 D5，ADR-0046 配对）：renderer 统一提交/单条撤销/全量回收回草稿/
   // 断连重报四 RPC。submit 后内核永不拒绝（排队取代拒绝）。
-  // [u5a 退役裁决] message.steer / message.follow_up / send.rejected 三条目**保留**：
-  // 设计 D5 的目标面是「renderer 停用」+「无第三方消费者」，实测客户端侧已全部收敛
-  // （core useChat.steer/followUp 已内核化走 delivery.submit；send.rejected 的 renderer
-  // handler 随 u3b 删除，零消费方），但 **runtime 侧仍是活消费方**——
-  // ① `transport/session-message-handler.ts` 仍暴露 'message.steer'/'message.follow_up'
-  //    路由（转发 `services/session/message-dispatcher.ts` 的 steerMessage/followUpMessage，
-  //    存量调用方透明承接通道）；
-  // ② `message-dispatcher.ts` reserveBashSlot 仍在 bash busy 时 publish send.rejected
-  //    （bash 通道属设计 §1.3 Out of Scope）。
-  // 删条目 = runtime tsc + 既有测试红，而 runtime transport/services 不在本单元领地。
-  // 退役条件：runtime 侧 transport 路由 + dispatcher 转发腿一并删除时，三条目同 commit 删。
+  // [MF-1-8 退役] message.steer / message.follow_up 条目已删除（u5a 退役条件兑现：runtime
+  // transport 路由 + dispatcher 转发腿同 commit 删除；消费方经 delivery.submit 统一提交）。
+  // [u5a 部分保留] send.rejected 条目仍保留：runtime bash 通道 busy 时 publish（reserveBashSlot，
+  // bash 通道属设计 §1.3 Out of Scope）——renderer handler 已删，frames 面仅此一处生产腿。
   | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
   | 'message.bash' | 'message.abortBash'
   | 'config.getProviders' | 'config.setProvider' | 'config.deleteProvider' | 'config.setToolPermissions'
@@ -584,11 +577,9 @@ export interface ClientMessageMap {
   // 「直达 subagent」目标）——定向消息改走 session.subagentAction(message/start)。
   'message.send': { sessionId: string; content: string; images?: Array<{ data: string; mimeType: string }>; clientUuid?: string }
   'message.abort': { sessionId: string }
-  // [u5a 退役裁决] renderer/core 客户端消费方已清零（core `chat.steer`/`chat.followUp` 客户端
-  // 封装随本单元删除），条目存续原因 = runtime transport 侧存量通路（见上方 ClientMessageType
-  // 段的裁决注释）；runtime 侧通路删除时本条目同 commit 删。
-  'message.steer': { sessionId: string; content: string }
-  'message.follow_up': { sessionId: string; content: string }
+  // [MF-1-8 退役] message.steer / message.follow_up payload 条目已删除：runtime transport
+  // 路由 + dispatcher 转发腿同 commit 删除（u5a 退役条件兑现），消费方经 delivery.submit
+  // 统一提交（lane 由内核判定；追加语义 = intent 字段）。
   // message.bash：composer 直接执行 bash 命令（不经 LLM turn）。command 原样透传 pi bash RPC，
   // excludeFromContext 控制是否进 LLM 上下文（pi bash excludeFromContext 参数，透传不转换）。
   'message.bash': { sessionId: string; command: string; excludeFromContext?: boolean }
@@ -599,14 +590,17 @@ export interface ClientMessageMap {
   // submit，lane 判定单一实现归 runtime 内核）。clientUuid 必填（D2 裸标记身份源 + 判重锚）；
   // images 可选（形态对齐 message.send，D9④ TextPayload.images 协议面）。reply 携带初始
   // lane 与条目态（D5）；同步失败走 error envelope（内核 FIFO 无界，正常路径无拒绝态）。
-  'delivery.submit': { sessionId: string; content: string; images?: Array<{ data: string; mimeType: string }>; clientUuid: string }
+  // segments 可选（ADR-0043 快照）：富消息提交时随 payload 上网，runtime 按 clientUuid
+  // 持有快照——cancel/drain reply 回草稿时原样返回（提交侧不传 = 纯文本恢复，不携带）。
+  'delivery.submit': { sessionId: string; content: string; images?: Array<{ data: string; mimeType: string }>; clientUuid: string; segments?: Segment[] }
   // delivery.cancel：单条撤销（V9/V10）。queued 态立即移除；投递中（在底层通道槽位）走
   // 队列级收回-重投路径（D3 复用对账回收）；已 delivered 或收回失败 = 不可撤（§3.4，
-  // 条目由对账器下轮兜底）。reply 携带全文 + segments 快照（D7/ADR-0043）——renderer
-  // 刷新后从 session.delivery 帧恢复的条目本地无原始 segments，文本回草稿依赖 reply。
+  // 条目由对账器下轮兜底）。reply 携带全文 + segments 快照（D7/ADR-0043）——segments 源 =
+  // 提交时随 delivery.submit 上网的快照（runtime 持有），renderer 刷新后从 session.delivery
+  // 帧恢复的条目本地无原始 segments，chips 回草稿依赖 reply。
   'delivery.cancel': { sessionId: string; clientUuid: string }
   // delivery.drain：forceQuit 全量回收（D10——abort 不清队列，仅 forceQuit drain），V11。
-  // reply 返回全部条目文本（发送序）供草稿恢复，含 segments 快照（D7/ADR-0043）。
+  // reply 返回全部条目文本（发送序）供草稿恢复，含 segments 快照（D7/ADR-0043；快照源同上）。
   'delivery.drain': { sessionId: string }
   // delivery.resync：断连/刷新重连后 renderer 重报本地未确认条目（D5），clientUuid 幂等
   // 去重（内核查 tombstone 判重表，D5②）。reply.deduped = 命中终态判重记录的 uuid（已
@@ -1568,6 +1562,7 @@ export interface DeliveryCancelReply {
   cancelled: boolean
   /** 撤销成功时携带完整文本与 segments 快照（D7/ADR-0043），供文本回输入框草稿（V9）。 */
   content?: string
+  /** 撤销成功时携带原始 segments 快照（提交时随 delivery.submit 上网、runtime 按 clientUuid 持有；rebuild/adopt 等无提交快照的条目不带）。 */
   segments?: Segment[]
   /** cancelled=false 时的人类可读原因。 */
   reason?: string
@@ -1577,6 +1572,7 @@ export interface DeliveryCancelReply {
 export interface DeliveryDrainReplyEntry {
   clientUuid: string
   content: string
+  /** 提交时随 delivery.submit 上网的原始 segments 快照（无提交快照的条目不带）。 */
   segments?: Segment[]
 }
 
@@ -1745,7 +1741,7 @@ export interface ServerMessageMapBase {
   // 语义：操作拒绝，区别于 message.error（流终止）。不进对话流，不翻流式态。
   // [HISTORICAL] 「useChat 收到后回滚 pendingSend + toast」「renderer 按 reason 分型兜底入队」
   // 的消费腿已全部退役（u3b：内核排队取代拒绝）——renderer 零 handler。
-  // [u5a 退役裁决] 条目仍存续：**唯一生产方 = runtime `message-dispatcher.ts` reserveBashSlot**
+  // [u5a 退役裁决] 条目仍存续：**唯一生产方 = runtime `bash-dispatcher.ts` reserveBashSlot**
   // （bash 运行中/压缩中执行 bash 的预检拒绝；bash 通道属设计 §1.3 Out of Scope，本次不动），
   // 用户消息路径的 busy 预检已随 u2 退役（排队取代拒绝）。协议条目与生产方同批删除。
   // reason（session-occupancy-send-closure D2）：'busy' = runtime 预检（generating/bash 忙，存量）；
@@ -2173,13 +2169,15 @@ export interface ServerMessageMapBase {
     preview?: string
   }
   // session.skillNotice：composer 多 skill 注入的发送前处理结果提示广播（composer-multi-skill-injection
-  // D6/D8，范式对齐 session.forkNotice 的 session 级 push）。时机：message-dispatcher 三入口
-  // （sendPrompt/steerMessage/followUpMessage）在 client.prompt/steer/followUp 成功之后，
+  // D6/D8，范式对齐 session.forkNotice 的 session 级 push）。时机：prompt 受理成功之后由发布方
   // 按注入器产出的 notices 逐条发布——消息已真正入队，提示描述的注入形态才成立；prompt 失败
-  // 路径不发（message.error 已覆盖）。renderer（u5）据此呈现 toast + 消息内联提示。
-  // clientUuid：sendPrompt 路径从发送文本中的 `<!--taiji:msg:<uuid>-->` 标记提取（非纯文本消息才有，
-  // 与 pi 侧 msg-id-mapper TAG_MATCH 同款全文正则）；steer/followUp 路径无 sidecar/clientUuid
-  // 链路，字段缺省（类型如实标注可选，u5 消费时按可空处理）。
+  // 路径不发（message.error 已覆盖）。现役发布点共三处，共享 publishSkillNotices
+  // （skill-notice-publisher.ts）：投递内核 deliverOne（session-delivery-registry.ts）与
+  // subagentAction 的 message/start 两分支（session-records.ts）。renderer（u5）据此呈现
+  // toast + 消息内联提示。
+  // clientUuid：由 publishSkillNotices 从发送文本中的 `<!--taiji:msg:<uuid>-->` 标记提取
+  // （MSG_ID_TAG_RE 全文正则）；deliverOne 通路的标记文本命中提取，subagentAction 定向文本
+  // 无该标记，字段缺省（类型如实标注可选，u5 消费时按可空处理）。
   // skills：受影响 skill 名列表（去重，保持首次出现顺序）；marker_malformed 的残缺片段无法
   // 可靠提取 name 时可为空数组。
   'session.skillNotice': {
@@ -2687,9 +2685,7 @@ export interface ReplyPayloadMap {
   // bash 是 fire-and-forget 型——实际结果经 message.bashStart/bashResult 广播通道推回（不走 reply）。
   'message.bash': void             // reply message.status
   'message.abortBash': void        // reply message.status
-  'message.follow_up': void       // reply message.status
   'message.send': void            // reply message.status
-  'message.steer': void           // reply message.status
   'model.switch': ServerMessageMap['model.switched'] // reply model.switched（回执修型 U6：transport 层在
             // model.switch case 消费 switchModel 返回的生效值（session-service 读回 get_state 生效模型）
             // 拆解回填 provider/modelId，对齐 C-pi-13 改状态 RPC 一律回生效值）

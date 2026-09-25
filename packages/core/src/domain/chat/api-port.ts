@@ -11,7 +11,7 @@
  * getHistory 返回类型用内联结构（{ messages; truncated; loadedTurns; totalTurnsEstimate }），
  * 不依赖 chat 域的 HistoryResult（保持 core 平台无关）。
  */
-import type { DeliveryFrameEntry, DeliverySubmitReply, DeliveryCancelReply, Message, SegmentsMetadataEntry, ServerMessageUnion, SessionRevokeMessageReply } from '@taiji/shared'
+import type { DeliveryFrameEntry, DeliverySubmitReply, DeliveryCancelReply, Message, Segment, SegmentsMetadataEntry, ServerMessageUnion, SessionRevokeMessageReply } from '@taiji/shared'
 
 // delivery DTO 具名类型（投递所有权内核 D5，u-contracts 契约）：shared 根入口已收编
 // （u3a 落地），本文件 re-export 供域内消费方沿用既有 import 路径（./api-port）。
@@ -42,12 +42,15 @@ export interface ChatApiPort {
    * 乐观气泡 id（appendUser 产物 `u-<uuid>`），内核条目 id + 出站裸标记身份源（D2）+
    * resync 判重锚（D5②）。reply 携带初始 lane/条目态（受理确认）；权威状态演进经
    * session.delivery 状态帧，不经过本返回值驱动 UI。
+   * segments（MF-1-2 / ADR-0043）：富消息的原始段快照，随 payload 上网由 runtime 按
+   * clientUuid 持有——cancel/drain 回草稿时随全文返回（chips 完整恢复的数据源）。
    */
   submitDelivery(
     sessionId: string,
     content: string,
     clientUuid: string,
     images?: Array<{ data: string; mimeType: string }>,
+    segments?: Segment[],
   ): Promise<DeliverySubmitReply>
   /**
    * subagent 定向消息 / 生命周期操作（session.subagentAction RPC，composer 四符号 `@` 发送分流）。

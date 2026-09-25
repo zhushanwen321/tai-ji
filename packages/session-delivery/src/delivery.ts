@@ -32,9 +32,9 @@
  *   受理成功时点 resolve（session_manager send 的 {queued:true} 契约锚，D9⑤ 锁定），
  *   与 onSettled 送达口径正交。
  *
- * 双视图（D9②/D5③）：entries() 无参 = 全量视图（活跃条目 + 全量 tombstone，对账/
- * 判重消费）；带 DeliveryProjectionOptions = 投影视图（活跃全量 + delivered 最近
- * 50 条完整条目，cancelled 不投影；窗口恒为默认常量）。delivered 完整条目留存上限
+ * 双视图（D9②/D5③）：entriesFull() = 全量视图（活跃条目 + 全量 tombstone，对账/
+ * 判重消费）；projection() = 投影视图（活跃全量 + delivered 最近 50 条完整条目，
+ * cancelled 不投影；窗口恒为默认常量）。delivered 完整条目留存上限
  * = 默认投影窗口 50（tombstone 全量保留不受限——判重正确性不依赖展示窗口）。
  *
  * 判重 tombstone（D5②）：delivered 与 cancelled 都写 tombstone，runtime 存活期内
@@ -45,7 +45,7 @@
  * 其余 v1 机制逐条保持：busy gate（isIdle + hasPendingMessages 双条件）、backoff
  * 有限重试、合批窗口、dedupe LRU、30s watchdog、dispose 语义（丢弃不触发
  * onSettled、checked 挂账 reject）。depth() 口径保持 v1 = 尚未受理的消息数
- * （受理转 in-flight 后不计；「在途未确认」数经 entries() 全量视图消费）。
+ * （受理转 in-flight 后不计；「在途未确认」数经 entriesFull() 全量视图消费）。
  */
 
 import { LruSet } from './lru.js'
@@ -61,7 +61,6 @@ import type {
   DeliveryMessage,
   DeliveryPayload,
   DeliveryPort,
-  DeliveryProjectionOptions,
   DeliveryTombstone,
   SendReceipt,
 } from './types.js'
@@ -120,9 +119,9 @@ export interface DeliveryHandleV2 extends DeliveryHandle {
   send(msg: DeliveryMessage, opts?: DeliverySubmitOptions): DeliverySendResult | void
   sendChecked(msg: DeliveryMessage, opts?: DeliverySubmitOptions): Promise<void>
   /** 全量视图（D9②）：活跃条目（完整字段）+ 全部 tombstone。快照（防御性拷贝）。 */
-  entries(): DeliveryEntriesFull
+  entriesFull(): DeliveryEntriesFull
   /** 投影视图（D9②/D5③）：活跃全量 + delivered 最近 50 条完整条目，cancelled 不投影。 */
-  entries(options: DeliveryProjectionOptions): DeliveryEntriesProjection
+  projection(): DeliveryEntriesProjection
   /**
    * 变更订阅（state topic 装配用）：任何条目创建/迁移/终态触发。返回退订函数。
    * 回调实现不应抛——异常由内核捕获并 warn，不影响其余订阅者与状态机。
@@ -914,7 +913,7 @@ export function createDelivery(
   function depth(): number {
     // 口径保持 v1：尚未被底层通道受理的消息数（等待 gate + 出站批次含重试中）。
     // 已受理的 in-flight 条目不计（所有权已移交 pi 槽位，等回执）；
-    // 「在途未确认」全量经 entries() 消费（D9②）。
+    // 「在途未确认」全量经 entriesFull() 消费（D9②）。
     let n = 0
     for (const e of active) if (e.state === 'queued') n++
     return n
@@ -922,16 +921,15 @@ export function createDelivery(
 
   // ─── v2 所有权 API（D9②③）────────────────────────────────
 
-  function entries(): DeliveryEntriesFull
-  function entries(options: DeliveryProjectionOptions): DeliveryEntriesProjection
-  function entries(options?: DeliveryProjectionOptions): DeliveryEntriesFull | DeliveryEntriesProjection {
-    if (options === undefined) {
-      // 全量视图（对账/判重消费）：活跃条目完整字段 + 全部 tombstone 元数据
-      return {
-        active: active.map(snapshot),
-        tombstones: [...tombstones.values()].map((t) => ({ ...t })),
-      }
+  function entriesFull(): DeliveryEntriesFull {
+    // 全量视图（对账/判重消费）：活跃条目完整字段 + 全部 tombstone 元数据
+    return {
+      active: active.map(snapshot),
+      tombstones: [...tombstones.values()].map((t) => ({ ...t })),
     }
+  }
+
+  function projection(): DeliveryEntriesProjection {
     // 投影视图（D5③）：活跃全量 + delivered 最近 50 条完整条目（deliveredLog 环形
     // 留存上限即 DEFAULT_DELIVERED_WINDOW，投影恒用默认常量）；cancelled 不投影
     // （cancel 即出活跃集且不进 deliveredLog，结构性满足）
@@ -1088,5 +1086,5 @@ export function createDelivery(
     dedupSet?.clear()
   }
 
-  return { send, sendChecked, flush, depth, entries, onChange, confirmDelivered, requeue, cancel, drain, dispose }
+  return { send, sendChecked, flush, depth, entriesFull, projection, onChange, confirmDelivered, requeue, cancel, drain, dispose }
 }

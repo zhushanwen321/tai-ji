@@ -21,7 +21,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   createSessionDeliveryRegistry,
   extractMarkerIds,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../services/session/session-delivery-registry.js'
 import type { IManagedSessionView } from '../services/session/types.js'
@@ -134,12 +133,10 @@ function makeHarness(opts: HarnessOptions = {}) {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 describe('u2 检重与 lane 判定', () => {
@@ -174,9 +171,12 @@ describe('u2 检重与 lane 判定', () => {
     expect(h.promptCalls).toHaveLength(0) // 持有：pi 暂不可收（F10）
     expect(h.registry.entries('s1')?.active[0]?.state).toBe('queued')
 
-    // compaction_end 边沿（经转移原语派生）→ 持有期轮询到期后投递
+    // compaction_end 边沿（经转移原语派生）→ 持有解除边沿唤醒出站交接（[MF-1-9] 事件化：
+    // 生产 = dispatcher compacting-end 转移后 notifyHoldRelease 驱动；pi compaction_end
+    // 事件形态经 watchClient 监听自达）
     applySessionOccupancyTransition(h.view, null, 'compacting-end')
-    await vi.advanceTimersByTimeAsync(600)
+    h.registry.notifyHoldRelease(h.view.id)
+    await vi.advanceTimersByTimeAsync(1)
     await h.flush()
     expect(h.promptCalls).toHaveLength(1)
   })
@@ -313,6 +313,81 @@ describe('u2 对账器三分处置（D3）', () => {
     await h.flush()
     expect(h.client.clearQueue).not.toHaveBeenCalled()
   })
+
+})
+
+// ── 假标记字面量身份判据（MF-1-1 B2 判据收敛 + MF-2-1 尾附锚收窄） ──────────────
+// 两轮判据收敛的回归面：① MF-1-1 把宽松手写 BARE_MARKER_RE（`[^>]*` 任意内容）收敛为
+// SSOT 双形态（uuid / m-），非合法形态不再构成投递身份；② MF-2-1 把 rebuild 判定锚从
+// 「全文提取 id」收窄为「出站尾附锚」（trimEnd 后文末标记）——文本中部/前部的合法形态
+// 标记字面量（用户从 transcript 复制等）不重建投递，堵在途回收窗口「真 id own 重投 +
+// 假 id rebuild 重投」的双重投递；无身份承接的外来文本保持收养通道（不丢弃）。
+describe('假标记字面量身份判据（MF-1-1 B2 / MF-2-1 尾附锚收窄）', () => {
+  it('非合法形态标记（not-a-uuid）：extractMarkerIds 不认，假标记文本走收养通道，不以假 id 重建投递', async () => {
+    const h = makeHarness()
+    h.registry.getOrCreateDelivery('s1')
+    const fake = '用户粘贴的标记字面 <!--taiji:msg:not-a-uuid-->'
+    h.setCleared({ steering: [fake], followUp: [] })
+    await h.registry.reconcile('s1', 'pi-restored')
+    await h.flush()
+    // MF-1-1 修复前：BARE_MARKER_RE 宽松提取 'not-a-uuid' → disposeCleared 以假 id rebuild
+    // 重建投递（同文本可重复投递）。修复后：SSOT 严格 uuid 判据不认假标记 → 无假 id 条目。
+    expect(h.registry.entries('s1')?.active.some((e) => e.id === 'not-a-uuid')).toBe(false)
+    expect(h.registry.entries('s1')?.tombstones.some((t) => t.id === 'not-a-uuid')).toBe(false)
+    // 外来文本不丢：照旧收养（新本地 id 正常投递）
+    expect(h.promptCalls).toHaveLength(1)
+    expect(h.promptCalls[0]![0]).toContain('用户粘贴的标记字面')
+  })
+
+  it('合法形态假标记（uuid 形态中部 + m- 形态尾部）在途回收：真 id own 重投，无假 id 条目', async () => {
+    const h = makeHarness({ view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } } })
+    const realId = 'u-3b111111-1111-4111-8111-111111111111'
+    const fakeUuid = '3b222222-2222-4222-8222-222222222222' // uuid 形态，原文中部
+    const fakeLocal = 'm-lz3k00-7' // m- 形态，原文尾部
+    // 用户文本含「从 transcript 复制」的合法形态标记字面量；出站真标记恒尾附
+    //（withDeliveryMarker），两个假标记均在真标记之前（中部/前部区域）
+    h.registry.submit('s1', {
+      content: `中部引用 <!--taiji:msg:${fakeUuid}--> 记录\n<!--taiji:msg:${fakeLocal}-->`,
+      clientUuid: realId,
+    })
+    await h.flush()
+    const realText = h.promptCalls[0]![0] as string
+    // 提取序 = 出现序：中部 uuid 假标记、原文尾部 m- 假标记、出站尾附真标记
+    expect(extractMarkerIds(realText)).toEqual([fakeUuid, fakeLocal, '3b111111-1111-4111-8111-111111111111'])
+
+    // 在途回收（settled 对账：clear_queue 收回真条目出站文本）
+    applySessionOccupancyTransition(h.view, null, 'idle')
+    h.setCleared({ steering: [realText], followUp: [] })
+    h.emitSettled()
+    await h.flush()
+
+    // 真 id：own 重投（同条目同文本，恰好 1 次重投）
+    expect(h.promptCalls).toHaveLength(2)
+    expect(h.promptCalls[1]![0]).toBe(realText)
+    expect(h.registry.entries('s1')?.active[0]?.id).toBe(realId)
+    // 假 id：不产 rebuild 条目。修复前（全文提取锚）两个假 id 各自 rebuild 真实重投全文
+    //（promptCalls = 4，双重投递）；修复后（尾附锚）中部/前部标记不构成 rebuild 身份。
+    const full = h.registry.entries('s1')!
+    const allIds = [...full.active, ...full.tombstones].map((e) => e.id)
+    expect(allIds).not.toContain(fakeUuid)
+    expect(allIds).not.toContain(fakeLocal)
+  })
+
+  it('含合法形态假标记的外来文本（无身份承接、非尾附）→ 收养通道：不产假 id 条目、不丢弃', async () => {
+    const h = makeHarness({ transcript: [] })
+    h.registry.getOrCreateDelivery('s1')
+    const fakeUuid = '3b444444-4444-4444-8444-444444444444'
+    const fakeLocal = 'm-ab12cd-9'
+    // agent 通路外来文本（无出站真标记）引用合法形态标记字面量：全 miss 且均非尾附锚
+    h.setCleared({ steering: [`引用 <!--taiji:msg:${fakeUuid}--> 与 <!--taiji:msg:${fakeLocal}--> 的外来文本`], followUp: [] })
+    await h.registry.reconcile('s1', 'pi-restored')
+    await h.flush()
+    const full = h.registry.entries('s1')!
+    expect([...full.active, ...full.tombstones].some((e) => e.id === fakeUuid || e.id === fakeLocal)).toBe(false)
+    // 无身份承接不丢弃：收养以新本地 id 正常投递
+    expect(h.promptCalls).toHaveLength(1)
+    expect(h.promptCalls[0]![0]).toContain('的外来文本')
+  })
 })
 
 describe('u2 错误分类迁移（D6）', () => {
@@ -393,7 +468,8 @@ describe('u2 合批拆分（内核合批 → 适配层逐条还原）', () => {
     expect(h.promptCalls).toHaveLength(0)
 
     applySessionOccupancyTransition(h.view, null, 'compacting-end')
-    await vi.advanceTimersByTimeAsync(600)
+    h.registry.notifyHoldRelease(h.view.id)
+    await vi.advanceTimersByTimeAsync(1)
     await h.flush()
     await h.flush()
     // 逐条（非合批）：两条 prompt 调用，各自文本含自身内容与标记
@@ -415,7 +491,8 @@ describe('u2 撤销（cancel）', () => {
     expect(outcome.cancelled).toBe(true)
     expect(outcome.content).toContain('要撤的')
     applySessionOccupancyTransition(h.view, null, 'compacting-end')
-    await vi.advanceTimersByTimeAsync(600)
+    h.registry.notifyHoldRelease(h.view.id)
+    await vi.advanceTimersByTimeAsync(1)
     await h.flush()
     expect(h.promptCalls).toHaveLength(0) // 撤销生效：未投递
   })
@@ -463,7 +540,8 @@ describe('u2 撤销（cancel）', () => {
     expect(outcome.content).toContain('同文本')
 
     applySessionOccupancyTransition(h.view, null, 'compacting-end')
-    await vi.advanceTimersByTimeAsync(600)
+    h.registry.notifyHoldRelease(h.view.id)
+    await vi.advanceTimersByTimeAsync(1)
     await h.flush()
     // 修复前：第二条出站按全文反查命中第一条的已撤销记录 → 被当作已撤销跳过（消息消失）
     expect(h.promptCalls).toHaveLength(1)
@@ -611,10 +689,67 @@ describe('delivery.resync 用户重试（§3.4 重试钮）：failed → queued 
     expect(h.promptCalls).toHaveLength(0) // 持有期不因 resync 抢跑
 
     applySessionOccupancyTransition(h.view, null, 'compacting-end')
-    await vi.advanceTimersByTimeAsync(600)
+    h.registry.notifyHoldRelease(h.view.id)
+    await vi.advanceTimersByTimeAsync(1)
     await h.flush()
     const sent = h.promptCalls[0]?.[0] as string
     h.userMessageEnd(sent) // 送达回执
     await expect(h.registry.resync('s1', [heldId])).resolves.toEqual([heldId])
+  })
+})
+
+// ── MF-1-2 / ADR-0043：segments 快照链路（提交侧 attachSegments 持有 → cancel/drain 随全文返回）──
+
+describe('segments 快照（MF-1-2）：提交快照持有与回草稿返回', () => {
+  const SEGS = [
+    { type: 'file' as const, path: '/tmp/a.ts' },
+    { type: 'text' as const, text: '富消息' },
+  ]
+
+  it('attachSegments 持有 → cancel 随全文返回快照并出册（同 id 不二次返回）', async () => {
+    const h = makeHarness()
+    applySessionOccupancyTransition(h.view, null, 'compacting-start')
+    const id = 'u-70000001-0000-4000-8000-000000000001'
+    h.registry.submit('s1', { content: '富消息', clientUuid: id })
+    h.registry.attachSegments('s1', id, SEGS)
+    await h.flush()
+
+    const outcome = await h.registry.cancel('s1', id)
+    expect(outcome.cancelled).toBe(true)
+    expect(outcome.segments).toEqual(SEGS)
+    // 撤销即出册（R2-A2 同款）：快照不复活
+    const again = await h.registry.cancel('s1', id)
+    expect(again.cancelled).toBe(false)
+  })
+
+  it('drain 返回提交快照：有快照条目携带、无快照条目不带键', () => {
+    const h = makeHarness()
+    applySessionOccupancyTransition(h.view, null, 'compacting-start')
+    const id1 = 'u-70000002-0000-4000-8000-000000000002'
+    const id2 = 'u-70000003-0000-4000-8000-000000000003'
+    h.registry.submit('s1', { content: '带 chips', clientUuid: id1 })
+    h.registry.submit('s1', { content: '纯文本', clientUuid: id2 })
+    h.registry.attachSegments('s1', id1, SEGS)
+
+    const drained = h.registry.drain('s1')
+    expect(drained.map((d) => d.clientUuid)).toEqual([id1, id2])
+    expect(drained[0]?.segments).toEqual(SEGS)
+    expect(drained[1]?.segments).toBeUndefined()
+  })
+
+  it('attachSegments 防御：未知条目 / 终态条目丢弃快照（不持有无消费点的快照）', async () => {
+    const h = makeHarness()
+    // 未知条目：直接登记（未 submit）→ no-op
+    h.registry.attachSegments('s1', 'u-80000001-0000-4000-8000-000000000001', SEGS)
+    // 已终态条目：送达后登记 → no-op（onChange 剪枝同源语义）
+    const id = 'u-80000002-0000-4000-8000-000000000002'
+    h.registry.submit('s1', { content: '先送达', clientUuid: id })
+    await h.flush()
+    const text = h.promptCalls[0]![0] as string
+    h.userMessageEnd(text)
+    h.registry.attachSegments('s1', id, SEGS)
+
+    const outcome = await h.registry.cancel('s1', id)
+    expect(outcome.cancelled).toBe(false) // 已 delivered 不可撤
   })
 })

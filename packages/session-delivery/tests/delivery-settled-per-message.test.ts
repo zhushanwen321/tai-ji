@@ -58,12 +58,12 @@ describe('合批 per-message settled（P1）', () => {
 
     // D9⑤：受理只转 in-flight，不触发 'delivered' 回调
     expect(onSettled).not.toHaveBeenCalled()
-    const active = handle.entries().active
+    const active = handle.entriesFull().active
     expect(active.map((e) => e.state)).toEqual(['in-flight', 'in-flight'])
 
     // per-message 送达口径：confirmDelivered 逐 id 落定，每条各一次、msg 为原始消息
     // 引用（非 composed）
-    const ids = handle.entries().active.map((e) => e.id)
+    const ids = handle.entriesFull().active.map((e) => e.id)
     handle.confirmDelivered(ids[0]!)
     handle.confirmDelivered(ids[1]!)
 
@@ -75,8 +75,8 @@ describe('合批 per-message settled（P1）', () => {
     expect(onSettled.mock.calls[1]![0].dedupeKey).toBe('task-b')
     expect(onSettled.mock.calls[1]![1]).toBe('delivered')
     expect(handle.depth()).toBe(0)
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones).toHaveLength(2)
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones).toHaveLength(2)
 
     handle.dispose()
   })
@@ -131,7 +131,7 @@ describe('合批 per-message settled（P1）', () => {
     // D9⑤：受理不触发回调；条目 in-flight 等待送达回执
     expect(onSettled).not.toHaveBeenCalled()
 
-    const id = handle.entries().active[0]!.id
+    const id = handle.entriesFull().active[0]!.id
     handle.confirmDelivered(id)
     expect(onSettled).toHaveBeenCalledTimes(1)
     expect(onSettled.mock.calls[0]![0]).toBe(msg) // 引用恒等：单条时 msg 即原消息

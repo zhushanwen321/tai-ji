@@ -456,8 +456,9 @@ export function useComposerShell(params: ComposerShellParams) {
    * 空输入（无文本且无 chip）→ restoreSegments 整段恢复（text + image/file/skill/session chip，
    * 与发送失败回滚同通路）；已有输入 → 追加不覆盖：走 composerInjectionStore 单值槽位 +
    * '\n\n' 累积语义（与 useSidebarSessionActions 的 forceQuit 回收同款）——用户正在输入的内容
-   * 不丢（此前 forceQuit 路径已验证的取舍）。无 segments 快照（异常 reply）→ 纯文本落草稿。
-   * 注入通道不携带 segments，追加分支只回文本（已登记 deviations）。
+   * 不丢（此前 forceQuit 路径已验证的取舍）。无 segments 快照（纯文本提交 / rebuild / adopt
+   * 条目，runtime 不带键）→ 纯文本落草稿。注入通道不携带 segments，追加分支只回文本
+   * （已登记 deviations）。
    */
   function restoreToDraft(payload: { text: string; segments?: Segment[] }): void {
     const text = payload.text

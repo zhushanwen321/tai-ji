@@ -152,11 +152,13 @@ describe('T1.4 useChat.send 全链', () => {
     // 2. addPendingSend：isActive=true（空窗期）
     expect(chat.isActive('s-fullchain')).toBe(true)
     // 3. chatApi.submitDelivery 被调（[u3c/D1] 统一提交：图片走路径模式，promptText 二参，
-    // 第三参 clientUuid = 乐观气泡 id；纯文本轮不加标记后缀（最小写入））
+    // 第三参 clientUuid = 乐观气泡 id；纯文本轮不加标记后缀（最小写入）；
+    // [MF-1-2] 纯文本轮 segments 快照不上网（第五参 undefined——与 sidecar 同谓词门控））
     expect(apiMock.submitDelivery).toHaveBeenCalledWith(
       's-fullchain',
       'hello',
       msgs.find((m) => m.role === 'user')!.id,
+      undefined,
       undefined,
     )
     // 4. message_start 到达 → clearPendingSend
@@ -195,7 +197,7 @@ describe('T5.1 editAndResend pendingSend 对称', () => {
     // [u3c/D1] submitDelivery 被调，第三参 clientUuid = 编辑重发的新乐观气泡 id
     // 纯文本轮不加 clientUuid 标记后缀（最小写入，与 send 同通路）
     const resentUserMsg = chat.getMessages('s-edit').filter((m) => m.role === 'user').at(-1)!
-    expect(apiMock.submitDelivery).toHaveBeenCalledWith('s-edit', 'edited text', resentUserMsg.id, undefined)
+    expect(apiMock.submitDelivery).toHaveBeenCalledWith('s-edit', 'edited text', resentUserMsg.id, undefined, undefined)
     // addPendingSend：isActive=true（空窗期）
     expect(chat.isActive('s-edit')).toBe(true)
   })

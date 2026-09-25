@@ -22,10 +22,9 @@
  * sd-u6（完成回流）复用本注册表；session_manager send / completion-backflow / landing 首发
  * 三个既有调用方经注册表 handle（或 sendDirect）零改动承接。
  *
- * 装配槽说明（deviations 登记）：`getActiveDeliveryRegistry()` 是「进程内活动注册表」访问器
- * （与 relay registry `getActiveRelayRegistry()` 同款范式）——MessageDispatcher 经它取投递面，
- * 避免为「dispatcher → 注册表」新增组合根接线（index.ts / session-service.ts 非本单元领地）。
- * 长期方案 = 组合根显式构造注入（u3a/u4 改 index.ts 时收编）。
+ * 装配纪律（MF-1-7 收编后终态）：本注册表由组合根（index.ts）创建后经
+ * SessionService.setDeliveryRegistry 后置注入消费方（MessageDispatcher / RevokeOrchestrator）
+ * ——依赖在构造签名/setter 上可见，无进程内活动槽（装配槽范式已退役）。
  */
 import { createDelivery } from '@zhushanwen/session-delivery'
 import type {
@@ -37,6 +36,8 @@ import type {
   DeliveryMessage,
   DeliveryPayload,
 } from '@zhushanwen/session-delivery'
+import type { Segment } from '@taiji/shared'
+import { MSG_ID_TAG_RE } from '@taiji/shared'
 import type { IPiEngine } from '../ports/pi-engine.js'
 import type { IManagedSessionView } from './types.js'
 import { LateBoundSkillSource, SkillInjector } from './skill-injector.js'
@@ -87,6 +88,11 @@ export interface DeliveryCancelOutcome {
   cancelled: boolean
   /** 撤销成功时返回全文（草稿恢复；segments 切分归上层，ADR-0043） */
   content?: string
+  /**
+   * 撤销成功时返回提交时持有的原始 segments 快照（ADR-0043；delivery.submit 提交侧经
+   * attachSegments 登记的快照）。无快照（纯文本提交 / rebuild / adopt 条目）不带键。
+   */
+  segments?: Segment[]
   reason?: string
 }
 
@@ -102,12 +108,24 @@ export type ReconcileTrigger =
 export interface SessionDeliveryRegistry {
   /** 同 sessionId 复用同一 handle（单例约束） */
   getOrCreateDelivery(sessionId: string): DeliveryHandleV2
+  /**
+   * 非创建性 handle 查询（MF-1-12）：undefined = 该 session 的投递运行时不存在。
+   * 只读装配（session.delivery 帧订阅等）用本入口，禁止「entries 探测 + getOrCreateDelivery」
+   * 双调用绕行——创建性语义只保留给真创建方（getOrCreateDelivery）。
+   */
+  getDelivery(sessionId: string): DeliveryHandleV2 | undefined
   /** 投递入口（D1）：lane 判定 + 裸标记 + 内核提交（受理即回执，不阻塞等待送达） */
   submit(sessionId: string, input: DeliverySubmitInput): DeliverySubmitResult
+  /**
+   * 登记 clientUuid 的原始 segments 快照（MF-1-2 / ADR-0043）：delivery.submit 提交侧
+   * 受理回执后调用（富消息才有快照）。仅当条目仍在册（active）时持有——条目已终态则
+   * 丢弃（防泄漏），cancel/drain 回草稿时随全文返回并出册。rebuild/adopt 条目无快照。
+   */
+  attachSegments(sessionId: string, clientUuid: string, segments: readonly Segment[]): void
   /** 单条撤销（delivery.cancel）：queued 本地移除；投递中走 clear_queue 收回-重投路径 */
   cancel(sessionId: string, clientUuid: string): Promise<DeliveryCancelOutcome>
-  /** 全量回收（delivery.drain，forceQuit 专用）：返回全部条目全文供草稿恢复 + 尽力清空 pi 槽位 */
-  drain(sessionId: string): Array<{ clientUuid: string; content: string }>
+  /** 全量回收（delivery.drain，forceQuit 专用）：返回全部条目全文（含 segments 快照）供草稿恢复 + 尽力清空 pi 槽位 */
+  drain(sessionId: string): Array<{ clientUuid: string; content: string; segments?: Segment[] }>
   /** 断连重报判重（delivery.resync）：返回命中终态判重记录（含 transcript 回执证据）的 uuid */
   resync(sessionId: string, clientUuids: readonly string[]): Promise<string[]>
   /** 内核条目双视图（D9②；帧装配由 u3a 经 handle 投影视图消费） */
@@ -115,8 +133,10 @@ export interface SessionDeliveryRegistry {
   /** port 同款直投（handleCreate 初始 prompt：新 session 必 idle 无竞态，不走内核队列，失败照旧 throw） */
   sendDirect(sessionId: string, content: string): Promise<void>
   /**
-   * 该 sid 的 delivery 内核是否有未终态投递（排队等待 + 在途投递中）。failed 不计——重试
-   * 耗尽的条目等用户处置，计入会让 idle pi 回收饿死（只读查询，回收豁免信号）。
+   * 该 sid 的 delivery 内核是否有未终态投递。**口径 = depth()：只计尚未被底层通道受理的
+   * 排队条目**；in-flight（已受理未确认）与 failed 刻意不计——在途条目由 pi-restored 对账
+   * 的 transcript 标记扫描恢复（D5②/G2），failed 重试耗尽等用户处置，计入会让 idle pi
+   * 回收饿死。只读查询（回收豁免信号 #5 的数据源）。
    */
   hasDeliveryActivity(sessionId: string): boolean
   /** 对账器入口（五触发点共用；内部自行节流与幂等） */
@@ -130,9 +150,17 @@ export interface SessionDeliveryRegistry {
   /**
    * 释放撤回编排的 revoking hold（D2 硬契约：编排 try/finally 全路径必达——含 busy /
    * workflow-running / no-mapping / pi-reclaimed 等全部提前 return；泄漏 = 该 session
-   * 后续提交永久 queued 死轮询）。幂等（无运行时条目时 no-op——dispose 已清场形态）。
+   * 后续提交永久 queued 挂起）。幂等（无运行时条目时 no-op——dispose 已清场形态）。
    */
   endRevokeHold(sessionId: string): void
+  /**
+   * hold 解除边沿输入端口（MF-1-9 事件化）：持有判定读的外部维度（view.isBashRunning /
+   * view.isCompacting）复位后，由**转移执行方**调用本方法唤醒挂起的出站交接等待者
+   * （waitDeliverable 订阅边沿而非 500ms 轮询）。调用点 = dispatcher 的 bash-end /
+   * compacting-end 转移后；settling 边沿经 agent_settled 多播自达、revoking /
+   * piCompactingBlocked 为注册表内部标志自达，无需经本端口。无等待者时幂等 no-op。
+   */
+  notifyHoldRelease(sessionId: string): void
   /** 丢弃单 session 队列（session 删除等场景） */
   dispose(sessionId: string): void
   disposeAll(): void
@@ -140,14 +168,25 @@ export interface SessionDeliveryRegistry {
 
 // ── 常量与纯工具 ─────────────────────────────────────────────
 
-/** 裸标记（D2）：出站恒为裸 uuid 形态；入站兼容 u- 原文形态（renderer 回执正则同款双形态）。 */
-const BARE_MARKER_RE = /<!--taiji:msg:([^>]*)-->/g
+/**
+ * 裸标记提取正则（D2 身份判据，MF-1-1 判据收敛）：双来源合成，除下述两形态外任意标记
+ * 文本（用户粘贴的字面 `<!--taiji:msg:...-->` 等）不构成投递身份（B2：不进 rebuild/
+ * 回执/收养分派——原 BARE_MARKER_RE 手写体 `[^>]*` 宽松放行任意内容，假标记可经
+ * rebuild 路径重复投递）：
+ * ① shared SSOT `MSG_ID_TAG_RE`（source 派生，uuid 段禁手写）：协议层 clientUuid 形态
+ *    （`u-<uuid>` 原文 / 裸 `<uuid>`，捕获组 2 = 恒裸 uuid）；
+ * ② 本地生成条目 id 形态（捕获组 3）：`m-<base36 时间戳>-<序号>`，格式唯一定义点 =
+ *    本文件 genLocalId（agent 通路收养条目 id 非 uuid，出站标记同为投递身份，判据必须
+ *    同收——否则 message_end 回执 miss，条目永挂 in-flight）。
+ */
+const DELIVERY_MARKER_ID_RE = new RegExp(
+  `${MSG_ID_TAG_RE.source}|<!--taiji:msg:(m-[0-9a-z]+-[0-9a-z]+)-->`,
+  `${MSG_ID_TAG_RE.flags}g`,
+)
 /** 协议层 clientUuid 前缀（renderer 乐观气泡 id 形态 `u-<uuid>`；裸标记取其后段）。 */
 const CLIENT_UUID_PREFIX = 'u-'
 /** 内核合批拼接分隔符（@zhushanwen/session-delivery buildBatchPayload "\n\n---\n\n"）。 */
 const BATCH_SEP = '\n\n---\n\n'
-/** 持有期空闲边沿轮询间隔（V2「settled 边沿后 ≤5s 自愈」预算内）。 */
-const HOLD_POLL_MS = 500
 /** 对账 watchdog 间隔（D3 触发点⑤）。 */
 const WATCHDOG_MS = 30_000
 /** 同一 session 两次对账的最小间隔（多触发点同帧到达时合并，防 clear_queue 风暴）。 */
@@ -192,11 +231,15 @@ export function withDeliveryMarker(text: string, id: string): string {
   return `${text}\n<!--taiji:msg:${bareMarkerId(id)}-->`
 }
 
-/** 提取文本中的全部标记 id（裸形态原文；含 u- 前缀的原文形态原样返回）。 */
+/**
+ * 提取文本中的全部投递标记 id（裸 id 形态，MF-1-1 判据收敛）：uuid 形态经捕获组 2 恒
+ * 归一为裸 uuid（双形态原文对账兼容），本地 `m-` 形态经捕获组 3；其余形态不返回（B2）。
+ */
 export function extractMarkerIds(text: string): string[] {
   const out: string[] = []
-  for (const m of text.matchAll(BARE_MARKER_RE)) {
-    if (m[1]) out.push(m[1])
+  for (const m of text.matchAll(DELIVERY_MARKER_ID_RE)) {
+    if (m[2]) out.push(m[2])
+    else if (m[3]) out.push(m[3])
   }
   return out
 }
@@ -226,22 +269,11 @@ export function piContentText(content: unknown): string {
   return text
 }
 
-/** 空闲等待（持有期轮询；fake timers 下由测试推进）。 */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/** 进程内活动注册表（装配槽：dispatcher 取投递面；见文件头「装配槽说明」）。 */
-let activeRegistry: SessionDeliveryRegistry | undefined
-
-/** 取当前进程的活动投递注册表（组合根创建后可用；未创建时 undefined → 调用方降级）。 */
-export function getActiveDeliveryRegistry(): SessionDeliveryRegistry | undefined {
-  return activeRegistry
-}
-
-/** 测试隔离：清空活动注册表槽（对齐 resetChatModuleStateForTest 先例）。生产勿调。 */
-export function resetActiveDeliveryRegistryForTest(): void {
-  activeRegistry = undefined
+/** 边沿唤醒后的复核延迟（一个 macrotask）：边沿源（pi 事件流）的各监听腿（interpreter 的
+ * occupancy 投影置位/复位与注册表内部标志）在同一次事件分发内同步执行完毕后，等待者的
+ * 复核才能看到持有终态——消除「边沿先到、投影后翻」的监听序竞态。 */
+function holdEdgeTick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 // ── 持有判定（D1 唯一判定源） ─────────────────────────────────
@@ -286,8 +318,9 @@ function triggerOfHold(reason: HoldReason | 'compacting-pi'): ReconcileTrigger {
   if (reason === 'compacting' || reason === 'compacting-pi') return 'compaction-end'
   if (reason === 'settling') return 'agent-settled'
   // 'revoking' 归 'abort-idle'（重投触发点族）：revoking 释放后的投递恢复主路径 =
-  // deliverOne 内 waitDeliverable 轮询自行续走（挂起的出站交接继续），此处 reconcile
-  // 只是顺带对账（幂等无害）——撤回期间内核条目已被编排全量 cancel，通常无事可做。
+  // deliverOne 内 waitDeliverable 于 hold 释放边沿自行续走（waitDeliverable 挂起于
+  // holdWaiters，释放边沿到达即续），此处 reconcile 只是顺带对账（幂等无害）——撤回
+  // 期间内核条目已被编排全量 cancel，通常无事可做。
   return 'abort-idle'
 }
 
@@ -306,10 +339,22 @@ interface RuntimeState {
   sessionId: string
   /** 条目 id（裸标记形态为 key）→ 出站全文。 */
   submitted: Map<string, SubmittedRecord>
+  /**
+   * 条目 id → 原始 segments 快照（MF-1-2 / ADR-0043）：delivery.submit 提交侧经
+   * attachSegments 登记（仅 active 条目在册），cancel/drain 回草稿时随全文返回并出册；
+   * 条目离场（终态/清场）时经 onChange 剪除（防泄漏）。rebuild/adopt 条目无快照。
+   */
+  segmentsByEntry: Map<string, Segment[]>
   /** rebuild 判定「已送达」的条目 id：重建条目抑制真实投递，只做记账（tombstone 判重锚）。 */
   suppressed: Set<string>
   /** 内核在途条目数镜像（onChange 维护；port.hasPendingMessages 的同步数据源）。 */
   inFlightCount: number
+  /**
+   * 持有期出站交接等待者集合（MF-1-9 事件化）：waitDeliverable 挂起的 resolver。
+   * 边沿到达（notifyWaiters）→ 全部唤醒复核持有终态；dispose/endRevokeHold 等内部
+   * 标志位变更点同步唤醒（B3：disposed 后等待者不悬挂）。
+   */
+  holdWaiters: Set<() => void>
   /** 最近一次 ensureActive 拿到的 pi 句柄（实例身份 → pi restored 判定）。 */
   client?: IPiEngine
   /**
@@ -321,7 +366,7 @@ interface RuntimeState {
   /**
    * 撤回编排进行中（消息撤回 D2①硬契约）：置位 = 编排最前（入口同步临界区内）、
    * 释放 = 编排 try/finally 全路径（含 busy / no-mapping 等提前 return）。泄漏形态 =
-   * 该 session 后续提交永久 queued 死轮询（恢复通道仅重启 app），故释放契约不可缺。
+   * 该 session 后续提交永久 queued 挂起（恢复通道仅重启 app），故释放契约不可缺。
    * 经 currentHold 第四判定输入生效（piCompactingBlocked 同型，勿复用 compacting
    * 投影通道）；置位/释放入口 = beginRevokeHold / endRevokeHold（互斥自检在置位内）。
    */
@@ -447,7 +492,7 @@ export function createSessionDeliveryRegistry(
 
   /** 条目是否仍在册（未终态）：持有期被撤销/终结 → 放弃投递（撤销只终结未受理条目）。 */
   function stillActive(handle: DeliveryHandleV2, id: string): boolean {
-    return handle.entries().active.some((e) => e.id === id)
+    return handle.entriesFull().active.some((e) => e.id === id)
   }
 
   /** 三副作用置位（prompt 受理成功后，D-18 契约——内核状态机防回退，迟到写无害；§3.4+ 表，V8 验收锁定，禁止遗漏第三项）。 */
@@ -485,16 +530,41 @@ export function createSessionDeliveryRegistry(
     })
   }
 
+  /** 唤醒该 session 全部持有期等待者（边沿到达；幂等——无等待者 no-op）。 */
+  function notifyWaiters(state: RuntimeState): void {
+    for (const wake of [...state.holdWaiters]) wake()
+  }
+
   /**
-   * 等待可投（持有期轮询）：持有期间同时承担**空闲边沿检测**——compacting/settling/bash 的
-   * 结束边沿即对账触发点①②③（本单元无组合根事件挂点，见交付说明 deviations：由持有期轮询
-   * + pi 事件订阅合成）。
+   * 等待下一个 hold 解除边沿（MF-1-9 事件化，取代 500ms 轮询）：挂起 resolver 入
+   * state.holdWaiters，由边沿源唤醒——
+   * - settling：agent_settled 多播（deps.subscribeAgentSettled，ensureSettledSub 常挂）；
+   * - compacting-pi / compacting（pi 侧事实）：watchClient 的 compaction_end 监听 + 句柄
+   *   变更自愈点（piCompactingBlocked 复位处）；
+   * - revoking：endRevokeHold（编排 try/finally 必达）；
+   * - view 维度（bash / compacting 投影）：转移执行方（dispatcher bash-end / compacting-end
+   *   转移后）经 notifyHoldRelease 端口驱动。
+   * 兜底：watchdog（30s）tick 同步唤醒等待者——无边沿装配（退化注册表 / 边沿丢失）退化为
+   * 周期复核，等待者不永久悬挂（B4）。
+   */
+  function waitForHoldEdge(state: RuntimeState): Promise<void> {
+    return new Promise<void>((resolve) => {
+      state.holdWaiters.add(resolve)
+    })
+  }
+
+  /**
+   * 等待可投（持有期边沿驱动）：持有释放边沿到达 → 一拍复核（等边沿源各监听腿同步执行
+   * 完毕）→ 仍持有则继续等下一边沿；释放即以**前一个持有原因**触发对账（触发点①②③，
+   * 原轮询语义保持）。disposed 后等待者不悬挂（B3——边沿唤醒后循环首查 disposed 即返回）。
    */
   async function waitDeliverable(sessionId: string, state: RuntimeState): Promise<void> {
     let reason = currentHold(sessionId, state)
     while (reason !== null) {
       if (state.disposed) return
-      await sleep(HOLD_POLL_MS)
+      await waitForHoldEdge(state)
+      if (state.disposed) return
+      await holdEdgeTick()
       const next = currentHold(sessionId, state)
       if (next === null) void reconcile(sessionId, triggerOfHold(reason))
       reason = next
@@ -618,7 +688,7 @@ export function createSessionDeliveryRegistry(
   function confirmMarkerlessAccepted(state: RuntimeState, handle: DeliveryHandleV2, text: string): void {
     if (extractMarkerIds(text).length > 0) return
     const hit = handle
-      .entries()
+      .entriesFull()
       .active.find((e) => e.state === 'queued' && extractMarkerIds(payloadText(e.payload)).length === 0
         && payloadText(e.payload) === text)
     if (hit) handle.confirmDelivered(hit.id)
@@ -643,6 +713,7 @@ export function createSessionDeliveryRegistry(
       // pi 侧压缩事实随旧进程作废，标记必须随之重置，否则 waitDeliverable 以
       // 'compacting-pi' 永久持有（自愈入口，R2-A1；无标记时重置为幂等无害）。
       state.piCompactingBlocked = false
+      notifyWaiters(state) // 自愈即边沿：唤醒持有期等待者复核（MF-1-9）
     }
     if (typeof client.onEvent !== 'function') {
       // 装配面缺失（部分测试替身）：无事件流 → 送达回执退化为对账器 transcript 扫描，
@@ -655,6 +726,7 @@ export function createSessionDeliveryRegistry(
       if (e.type === 'message_end') confirmByMessageEnd(state, handle, e.message)
       else if (e.type === 'compaction_end') {
         state.piCompactingBlocked = false // pi 侧压缩结束 = 持有释放条件（D6）
+        notifyWaiters(state) // 压缩结束边沿：唤醒持有期等待者（MF-1-9；interpreter 同事件内复位投影）
         void reconcile(sessionId, 'compaction-end')
       }
     })
@@ -752,7 +824,7 @@ export function createSessionDeliveryRegistry(
   /** 在途未确认扫描：有标记条目查 transcript（命中 → delivered；未命中 → 重投）。 */
   async function sweepInFlight(sessionId: string, rt: SessionRuntime): Promise<void> {
     const aged = rt.handle
-      .entries()
+      .entriesFull()
       .active.filter((e) => e.state === 'in-flight' && Date.now() - e.updatedAt > IN_FLIGHT_GRACE_MS)
       .filter((e) => extractMarkerIds(payloadText(e.payload)).length > 0)
     if (aged.length === 0) return
@@ -778,9 +850,14 @@ export function createSessionDeliveryRegistry(
    * 三分处置（D3；判别逻辑在本层——内核保持零 pi 依赖）：
    * - ① own：标记命中内核在册条目 → 重置 queued 至队首（保持原相对序）重投；
    * - ② rebuild：带标记但内核无记录（runtime 重启 reattach，判重表已清空）→ 先按标记对
-   *   transcript 全量扫描判 delivered（已进 transcript 不重建投递），未进才重建条目重投；
-   * - ③ adopt：无标记外来文本（subagent notifyDone / scheduler 提醒等存量注入）→ 收养：
-   *   以新 id 入内核 FIFO 正常投递，不丢弃、不原样回塞。
+   *   transcript 全量扫描判 delivered（已进 transcript 不重建投递），未进才重建条目重投。
+   *   rebuild 身份判据 = 出站尾附锚（MF-2-1）：出站标记恒尾附（withDeliveryMarker 写侧
+   *   同形），仅 trimEnd 后处于文末的提取 id 构成 rebuild 身份——文本中部/前部的合法形态
+   *   标记字面量（用户从 transcript 复制的文本等）不重建投递，堵在途回收窗口「真 id own
+   *   重投 + 假 id rebuild 重投」的双重投递；
+   * - ③ adopt：无身份承接的外来文本（无标记的 subagent notifyDone / scheduler 提醒等存量
+   *   注入，或标记字面量全部非尾附锚）→ 收养：以新 id 入内核 FIFO 正常投递，不丢弃、不
+   *   原样回塞。
    * exclude = delivery.cancel 的目标条目（目标回草稿、其余保持相对序自动重投，§3.1 场景 D）。
    */
   async function disposeCleared(
@@ -798,12 +875,34 @@ export function createSessionDeliveryRegistry(
         adopt.push(text)
         continue
       }
+      // 尾附锚（MF-2-1）：文末（trimEnd 后）标记 = 最后一个提取 id——出站标记恒尾附，
+      // 与 withDeliveryMarker 读写同形；其余提取 id 处中部/前部，不构成 rebuild 身份
+      const trimmed = text.trimEnd()
+      const tailMarker = markers[markers.length - 1]!
+      const tailAnchored = trimmed.endsWith(`<!--taiji:msg:${tailMarker}-->`)
+      let dispatched = false
+      let reclaimTarget = false
       for (const bare of markers) {
         const record = findSubmittedByMarker(rt, bare)
         const id = record?.id ?? bare
-        if (exclude?.has(id)) continue
-        if (record && stillActive(rt.handle, record.id)) own.push(record.id)
-        else rebuild.push({ id, text })
+        if (exclude?.has(id)) {
+          reclaimTarget = true // cancel 目标所在文本整体沉默（回草稿语义，不收养不重投）
+          continue
+        }
+        if (record && stillActive(rt.handle, record.id)) {
+          own.push(record.id)
+          dispatched = true
+          continue
+        }
+        if (bare === tailMarker && tailAnchored) {
+          rebuild.push({ id, text })
+          dispatched = true
+        }
+      }
+      if (!dispatched && !reclaimTarget) {
+        // 全部提取 id 均非尾附锚且无 record 承接：标记字面量不构成投递身份 → 按外来
+        // 文本收养（新 id 正常投递），不丢弃
+        adopt.push(text)
       }
     }
     if (own.length > 0) {
@@ -896,7 +995,7 @@ export function createSessionDeliveryRegistry(
    */
   function isUserReclaimRejection(rt: SessionRuntime, id: string, message: string): boolean {
     if (!KERNEL_RECLAIM_REJECT_PREFIXES.some((prefix) => message.startsWith(prefix))) return false
-    const full = rt.handle.entries()
+    const full = rt.handle.entriesFull()
     if (full.active.some((e) => e.id === id)) return false
     return full.tombstones.some((t) => t.id === id && t.state === 'cancelled')
   }
@@ -919,20 +1018,22 @@ export function createSessionDeliveryRegistry(
 
   // ── 触发点装配（settled 边沿 / watchdog） ───────────────────────────────
 
-  /** settled 边沿订阅（触发点①）：settled → 对账（槽位滞留自愈 V2）+ 内核自身 flush 由内核自持。 */
+  /** settled 边沿订阅（触发点① + MF-1-9 settling hold 解除边沿）：settled → 唤醒持有期等待者（settling 复位已在该事件内落投影）+ 对账（槽位滞留自愈 V2）。 */
   function ensureSettledSub(sessionId: string, state: RuntimeState): void {
     if (state.unsubSettled || state.disposed) return
     state.unsubSettled = deps.subscribeAgentSettled((sid) => {
       if (sid !== sessionId) return
+      notifyWaiters(state)
       void reconcile(sessionId, 'agent-settled')
     })
   }
 
-  /** watchdog（触发点⑤）：定期对账 + 打开 gate 的条目补投（settled 事件丢失 / 边沿漏判兜底）。 */
+  /** watchdog（触发点⑤）：定期对账 + 打开 gate 的条目补投 + 唤醒持有期等待者（settled 事件丢失 / 无边沿装配的兜底复核，B4）。 */
   function ensureWatchdog(sessionId: string, rt: SessionRuntime): void {
     if (rt.watchdog !== undefined || rt.disposed) return
     rt.watchdog = setInterval(() => {
       if (rt.disposed) return
+      notifyWaiters(rt)
       void reconcile(sessionId, 'watchdog')
       rt.handle.flush()
     }, WATCHDOG_MS)
@@ -991,8 +1092,10 @@ export function createSessionDeliveryRegistry(
     const state: RuntimeState = {
       sessionId,
       submitted: new Map(),
+      segmentsByEntry: new Map(),
       suppressed: new Set(),
       inFlightCount: 0,
+      holdWaiters: new Set(),
       piCompactingBlocked: false,
       revoking: false,
       reconciling: false,
@@ -1019,9 +1122,17 @@ export function createSessionDeliveryRegistry(
     // 同一对象上补 handle 字段（Object.assign 返回 target 本身——state 与 rt 必须同源，
     // port 闭包持有 state，任何拷贝都会让后续写入不可见）
     const rt: SessionRuntime = Object.assign(state, { handle })
-    // 在途镜像（port.hasPendingMessages 的同步数据源）
+    // 在途镜像（port.hasPendingMessages 的同步数据源）+ segments 快照剪枝（MF-1-2 防泄漏：
+    // 条目离场 = 终态 delivered/cancelled 或重建清场，requeue 不离场故快照跨回收轮保留）
     handle.onChange(() => {
-      state.inFlightCount = handle.entries().active.filter((e) => e.state === 'in-flight').length
+      const active = handle.entriesFull().active
+      state.inFlightCount = active.filter((e) => e.state === 'in-flight').length
+      if (state.segmentsByEntry.size > 0) {
+        const activeIds = new Set(active.map((e) => e.id))
+        for (const id of state.segmentsByEntry.keys()) {
+          if (!activeIds.has(id)) state.segmentsByEntry.delete(id)
+        }
+      }
     })
     ensureSettledSub(sessionId, state)
     return rt
@@ -1038,15 +1149,37 @@ export function createSessionDeliveryRegistry(
 
   /** 条目态查询（submit 回执用；活跃集 → tombstone）。 */
   function entryStateOf(rt: SessionRuntime, id: string): DeliveryEntryState | undefined {
-    const full = rt.handle.entries()
+    const full = rt.handle.entriesFull()
     const active = full.active.find((e) => e.id === id)
     if (active) return active.state
     return full.tombstones.find((t) => t.id === id)?.state
   }
 
+  /**
+   * 读取条目的 segments 快照引用（MF-1-2 消费前置）：handle.cancel/drain 会在返回前同步
+   * 触发 onChange 剪枝（终态条目离场 → 快照出表），消费方必须**先 peek 持引用、后确认
+   * 成功、再显式出册（segmentsByEntry.delete / 整表 clear）**——cancel 成功即出册，
+   * 失败路径保留快照（条目留守原态，快照随条目存活，可再次撤销取回）。
+   */
+  function peekSegments(rt: SessionRuntime, id: string): Segment[] | undefined {
+    return rt.segmentsByEntry.get(id)
+  }
+
   const registry: SessionDeliveryRegistry = {
     getOrCreateDelivery(sessionId) {
       return ensureRuntime(sessionId).handle
+    },
+    getDelivery(sessionId) {
+      // 非创建性查询（MF-1-12）：无运行时返回 undefined，不引入 watchdog/settled 订阅副作用
+      return runtimes.get(sessionId)?.handle
+    },
+    attachSegments(sessionId, clientUuid, segments) {
+      const rt = runtimes.get(sessionId)
+      if (!rt || segments.length === 0) return
+      // 仅持有仍在册条目的快照：受理回执与登记之间条目已终态（直投极速完成等竞态）时
+      // 丢弃——终态条目不可 cancel，快照无消费点，持留即泄漏
+      if (!rt.handle.entriesFull().active.some((e) => e.id === clientUuid)) return
+      rt.segmentsByEntry.set(clientUuid, [...segments])
     },
     submit(sessionId, input) {
       const rt = ensureRuntime(sessionId)
@@ -1073,11 +1206,13 @@ export function createSessionDeliveryRegistry(
     async cancel(sessionId, clientUuid) {
       const rt = runtimes.get(sessionId)
       if (!rt) return { cancelled: false, reason: 'session delivery unknown' }
+      // 先 peek 快照（handle.cancel 的 onChange 剪枝会在终态时出表——引用先持）
+      const segmentsSnapshot = peekSegments(rt, clientUuid)
       const first = rt.handle.cancel(clientUuid)
       if (first.kind === 'cancelled') {
         // 撤销即出册（R2-A2）：判定锚随条目终结清账，防同文本后续条目被反查到死记录
         rt.submitted.delete(bareMarkerId(clientUuid))
-        return { cancelled: true, content: payloadText(first.entry.payload) }
+        return { cancelled: true, content: payloadText(first.entry.payload), ...(segmentsSnapshot !== undefined ? { segments: segmentsSnapshot } : {}) }
       }
       if (first.kind === 'not-found') return { cancelled: false, reason: 'not found' }
       if (first.kind === 'already-final') return { cancelled: false, reason: `already ${first.tombstone.state}` }
@@ -1108,13 +1243,15 @@ export function createSessionDeliveryRegistry(
       const second = rt.handle.cancel(clientUuid)
       if (second.kind === 'cancelled') {
         rt.submitted.delete(bareMarkerId(clientUuid)) // 撤销即出册（R2-A2，同上）
-        return { cancelled: true, content: payloadText(second.entry.payload) }
+        return { cancelled: true, content: payloadText(second.entry.payload), ...(segmentsSnapshot !== undefined ? { segments: segmentsSnapshot } : {}) }
       }
       return { cancelled: false, reason: '已投递不可撤' }
     },
     drain(sessionId) {
       const rt = runtimes.get(sessionId)
       if (!rt) return []
+      // 快照整表引用先持（handle.drain 的 onChange 剪枝会清表——引用先持后再映射）
+      const segmentsSnapshot = new Map(rt.segmentsByEntry)
       const drained = rt.handle.drain()
       rt.submitted.clear()
       // 尽力清空 pi 槽位（D10：forceQuit 才回收；session 即将销毁 → 滞留文本不再收养投递）
@@ -1123,12 +1260,18 @@ export function createSessionDeliveryRegistry(
       if (primitive) {
         void primitive.clearQueue().catch((e: unknown) => warn('drain: clear_queue failed, sid=', sessionId, e))
       }
-      return drained.map((d) => ({ clientUuid: d.id, content: payloadText(d.payload) }))
+      // 条目已全量终结：segments 快照随条目取回后整表清空（MF-1-2 出册纪律）
+      const withSegments = drained.map((d) => {
+        const segments = segmentsSnapshot.get(d.id)
+        return { clientUuid: d.id, content: payloadText(d.payload), ...(segments !== undefined ? { segments } : {}) }
+      })
+      rt.segmentsByEntry.clear()
+      return withSegments
     },
     async resync(sessionId, clientUuids) {
       const rt = runtimes.get(sessionId)
       if (!rt) return []
-      const full = rt.handle.entries()
+      const full = rt.handle.entriesFull()
       const finalIds = new Set(full.tombstones.map((t) => t.id))
       const activeStateById = new Map(full.active.map((e) => [e.id, e.state] as const))
       // 用户重试（§3.4 错误规格表：队列区 failed 行的重试钮 = delivery.resync 单条重报）：
@@ -1160,7 +1303,7 @@ export function createSessionDeliveryRegistry(
       return deduped
     },
     entries(sessionId) {
-      return runtimes.get(sessionId)?.handle.entries()
+      return runtimes.get(sessionId)?.handle.entriesFull()
     },
     sendDirect(sessionId, content) {
       // create 初始 prompt：新 session 必 idle，不传 streamingBehavior（无竞态窗口）、无标记
@@ -1185,12 +1328,22 @@ export function createSessionDeliveryRegistry(
     },
     endRevokeHold(sessionId) {
       const rt = runtimes.get(sessionId)
-      if (rt) rt.revoking = false
+      if (!rt) return
+      rt.revoking = false
+      notifyWaiters(rt) // revoking 复位即边沿：唤醒 revoking 持有期的出站交接等待者（MF-1-9）
+    },
+    notifyHoldRelease(sessionId) {
+      // hold 解除边沿输入端口（MF-1-9）：bash-end / compacting-end 等外部 view 维度复位后
+      // 由转移执行方调用；无运行时（未创建/已 dispose）幂等 no-op
+      const rt = runtimes.get(sessionId)
+      if (!rt) return
+      notifyWaiters(rt)
     },
     dispose(sessionId) {
       const rt = runtimes.get(sessionId)
       if (!rt) return
       rt.disposed = true
+      notifyWaiters(rt) // disposed 后等待者不悬挂（B3：唤醒后循环首查 disposed 即返回）
       rt.unsubClient?.()
       rt.unsubSettled?.()
       if (rt.watchdog !== undefined) clearInterval(rt.watchdog)
@@ -1208,15 +1361,15 @@ export function createSessionDeliveryRegistry(
     rt: SessionRuntime,
     clientUuid: string,
   ): Promise<DeliveryCancelOutcome> {
+    const segmentsSnapshot = peekSegments(rt, clientUuid) // 引用先持（同 cancel 主路径）
     const second = rt.handle.cancel(clientUuid)
     if (second.kind === 'cancelled') {
       rt.submitted.delete(bareMarkerId(clientUuid)) // 撤销即出册（R2-A2，同 cancel 主路径）
-      return { cancelled: true, content: payloadText(second.entry.payload) }
+      return { cancelled: true, content: payloadText(second.entry.payload), ...(segmentsSnapshot !== undefined ? { segments: segmentsSnapshot } : {}) }
     }
     warn('cancel: pi not attached and entry not cancellable, sid=', sessionId, clientUuid)
     return { cancelled: false, reason: '已投递不可撤' }
   }
 
-  activeRegistry = registry
   return registry
 }

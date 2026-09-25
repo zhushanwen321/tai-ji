@@ -19,7 +19,6 @@ import { MessageDispatcher, classifyPromptRejection } from '../services/session/
 import { SessionMessageHandler } from '../transport/session-message-handler.js'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../services/session/session-delivery-registry.js'
 import type { IDispatcherSessionOps } from '../services/session/session-internal.js'
@@ -107,7 +106,7 @@ function makeMocks(opts: MockOpts = {}) {
     getMessageBus: () => bus,
   }
   const registry = createSessionDeliveryRegistry(deps, injector)
-  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus)
+  const dispatcher = new MessageDispatcher(svc, pm, workspace, bus, registry)
   const flush = async (): Promise<void> => {
     for (let i = 0; i < 40; i += 1) await Promise.resolve()
   }
@@ -134,11 +133,9 @@ function occupancyTurns(broadcasts: ServerMessage[]): string[] {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 afterEach(() => {
   vi.useRealTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 describe('classifyPromptRejection —— pi 拒绝原文映射（D6 识别函数，迁移落点 = 内核适配器）', () => {

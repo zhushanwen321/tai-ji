@@ -30,7 +30,6 @@ import type {
   ChatApiPort,
   ChatStoreInstance,
 } from '@taiji/core'
-import type { Segment } from '@taiji/shared'
 import { resetChatModuleStateForTest as resetChatModuleState } from '@taiji/core'
 import { chat as chatApi, session as sessionApi } from '@/api'
 import { useChatStore } from '@/stores/chat'
@@ -51,7 +50,8 @@ const chatApiPort: ChatApiPort = {
   // [u3c/D1] 统一提交入口：乐观气泡后一律走 delivery.submit，lane 由 runtime 内核判定
   // （renderer 只提交不判定）。clientUuid = 乐观气泡 id（appendUser 产物），内核条目 id /
   // 出站标记身份源 / resync 判重锚。
-  submitDelivery: (sid, content, clientUuid, images) => chatApi.submitDelivery(sid, content, clientUuid, images),
+  submitDelivery: (sid, content, clientUuid, images, segments) =>
+    chatApi.submitDelivery(sid, content, clientUuid, images, segments),
   // `@` 定向消息分流（U2b）：实现在 session 域（session.subagentAction RPC），经端口
   // 暴露给 core useChat 发送链路（ChatApiPort 注释）；mock 层 stub 已随 U5 就位。
   // 懒解引用（调用时才读 sessionApi.subagentAction）：部分测试 vi.mock session 域时
@@ -96,8 +96,11 @@ function rendererSubDeps(): EnsureStreamSubDeps {
  * （非 Composer 作用域），restoreToDraft 的 DOM 能力（Composer 壳）不可直取，经注入通道
  * 送入目标 session 的 composer。空输入/追加统一由 Composer 消费面（insertTextAtCursor）
  * 处理——不覆盖用户正在输入的内容；槽位已有 text 时按 forceQuit 先例 '\n\n' 累积。
+ * [MF-1-2] 注入通道为单值 text 语义（四符号体系 path/text/refSessionId 三互斥 schema，
+ * 无 segments 承载位）——本路径纯文本回草稿；chips 完整恢复走队列区 restoreToDraft
+ * （composer-shell 的 restoreSegments 通路，cancel reply 的 segments 快照在该通道消费）。
  */
-function restoreRevokedDraftToComposer(sessionId: string, payload: { text: string; segments?: Segment[] }): void {
+function restoreRevokedDraftToComposer(sessionId: string, payload: { text: string }): void {
   const pendingText = composerInjectionStore.pendingInjection.value?.text
   composerInjectionStore.requestInjection({
     target: 'current',

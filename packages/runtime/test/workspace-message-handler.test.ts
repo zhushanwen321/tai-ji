@@ -16,7 +16,6 @@ import { tmpdir } from 'node:os'
 import type { ClientMessage } from '@taiji/shared'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../src/services/session/session-delivery-registry.js'
 import { flushDelivery } from './helpers/flush-delivery.js'
@@ -30,8 +29,9 @@ function wireDeliveryKernel(deps: {
   ensureActive: unknown
   record: (cwd: string) => void
   bus: unknown
-}): void {
-  createSessionDeliveryRegistry({
+}): ReturnType<typeof createSessionDeliveryRegistry> {
+  // [MF-1-7] 注册表实例返回给调用方，经 dispatcher 构造参数注入（活动槽已退役）
+  return createSessionDeliveryRegistry({
     getSession: (sid) => deps.getSession(sid) as ReturnType<SessionDeliveryDeps['getSession']>,
     ensureActive: deps.ensureActive as SessionDeliveryDeps['ensureActive'],
     subscribeAgentSettled: () => () => {},
@@ -272,15 +272,14 @@ describe('MessageDispatcher — 写入时机 record', () => {
     const pm = { getClient: vi.fn(() => undefined) }
     // wave:perf-w09（D1-2）：dispatcher 4 参（svc/pm/workspace/bus），broker 依赖已删
     const bus = { publish: vi.fn() } as unknown as ConstructorParameters<typeof MessageDispatcher>[3]
+    const registry = wireDeliveryKernel({ getSession: () => activeSession, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
     const dispatcher = new MessageDispatcher(
       svc as unknown as ConstructorParameters<typeof MessageDispatcher>[0],
       pm as unknown as ConstructorParameters<typeof MessageDispatcher>[1],
       workspaceService as unknown as ConstructorParameters<typeof MessageDispatcher>[2],
       bus,
+      registry,
     )
-
-    // [u2 内核化] record 是出站交接的三副作用之一（deliverOne）——按真实装配接内核
-    wireDeliveryKernel({ getSession: () => activeSession, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
 
     const result = await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery(30)
@@ -290,7 +289,6 @@ describe('MessageDispatcher — 写入时机 record', () => {
     expect(workspaceRecord).toHaveBeenCalledTimes(1)
   })
 
-  beforeEach(() => resetActiveDeliveryRegistryForTest())
 
   it('T2.4: hook blocked → record 未被调', async () => {
     const { MessageDispatcher } = await import('../src/services/session/message-dispatcher.js')
@@ -304,17 +302,17 @@ describe('MessageDispatcher — 写入时机 record', () => {
     const pm = { getClient: vi.fn(() => undefined) }
     // wave:perf-w09（D1-2）：dispatcher 4 参（svc/pm/workspace/bus），broker 依赖已删
     const bus = { publish: vi.fn() } as unknown as ConstructorParameters<typeof MessageDispatcher>[3]
+    const registry = wireDeliveryKernel({ getSession: () => undefined, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
     const dispatcher = new MessageDispatcher(
       svc as unknown as ConstructorParameters<typeof MessageDispatcher>[0],
       pm as unknown as ConstructorParameters<typeof MessageDispatcher>[1],
       workspaceService as unknown as ConstructorParameters<typeof MessageDispatcher>[2],
       bus,
+      registry,
     )
 
     // 注册一个会 block 的 hook
     dispatcher.setSendMessageHook(vi.fn().mockResolvedValue({ blocked: true, reason: 'blocked by hook' }))
-
-    wireDeliveryKernel({ getSession: () => undefined, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
 
     const result = await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery(30)
@@ -335,14 +333,14 @@ describe('MessageDispatcher — 写入时机 record', () => {
     const pm = { getClient: vi.fn(() => undefined) }
     // wave:perf-w09（D1-2）：dispatcher 4 参（svc/pm/workspace/bus），broker 依赖已删
     const bus = { publish: vi.fn() } as unknown as ConstructorParameters<typeof MessageDispatcher>[3]
+    const registry = wireDeliveryKernel({ getSession: () => undefined, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
     const dispatcher = new MessageDispatcher(
       svc as unknown as ConstructorParameters<typeof MessageDispatcher>[0],
       pm as unknown as ConstructorParameters<typeof MessageDispatcher>[1],
       workspaceService as unknown as ConstructorParameters<typeof MessageDispatcher>[2],
       bus,
+      registry,
     )
-
-    wireDeliveryKernel({ getSession: () => undefined, ensureActive: svc.ensureActive, record: workspaceRecord, bus })
 
     // [u2 受理口径 D9⑤] ensureActive 失败不再同步 reject：消息已受理入内核，
     // 失败经 message.error 广播可见（投递终态失败面），record（三副作用）不执行

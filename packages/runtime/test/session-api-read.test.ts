@@ -143,10 +143,14 @@ describe('session read API — registerSessionRpcHandlers（AP-4 读面）', () 
     it('按 customType 精确过滤 + 投影五字段形状（type/customType 保留、data 原样、噪声字段剥除）', async () => {
       const taskData = { op: 'toggle', taskId: 'a1b2c3d4', enabled: false }
       fakeClient = createFakeClient({
+        // 线性链式树（真实 pi 全量批形态：每条 entry 挂前一条下，parent 链完整）——
+        // readEntries 投影前有活跃路径过滤（leafId 回溯），fixture 必须让目标条目在
+        // leaf 链上（e-parent 悬空的断链全量批在真实数据中不存在）
         entries: [
-          { id: 'e-msg', timestamp: 't', type: 'message', data: { text: 'hello' } },
-          customEntry('e-task-1', taskData),
-          customEntry('e-other', { op: 'x' }, { customType: 'pi-subagent:record' }),
+          { id: 'e-parent', timestamp: 't', type: 'message', data: { text: 'root' } },
+          { id: 'e-msg', timestamp: 't', type: 'message', data: { text: 'hello' }, parentId: 'e-parent' },
+          customEntry('e-task-1', taskData, { parentId: 'e-msg' }),
+          customEntry('e-other', { op: 'x' }, { customType: 'pi-subagent:record', parentId: 'e-task-1' }),
         ],
         leafId: 'e-other',
       })

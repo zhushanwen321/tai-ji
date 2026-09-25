@@ -29,7 +29,7 @@ describe('u1-state 合法迁移路径', () => {
     handle.send(textMsg('m1'), { id: 'u-1', lane: 'queued' })
     handle.send(textMsg('m2'), { id: 'u-2' })
 
-    const active = handle.entries().active
+    const active = handle.entriesFull().active
     expect(active.map((e) => e.state)).toEqual(['queued', 'queued'])
     expect(active.map((e) => e.lane)).toEqual<DeliveryLane[]>(['queued', 'direct'])
     expect(active[0]!.id).toBe('u-1')
@@ -47,11 +47,11 @@ describe('u1-state 合法迁移路径', () => {
 
     handle.send(textMsg('m1'), { id: 'u-1' })
     // 出站批次在途（port.send 未返回）：条目仍 queued
-    expect(handle.entries().active[0]!.state).toBe('queued')
+    expect(handle.entriesFull().active[0]!.state).toBe('queued')
 
     sendResolve!()
     await vi.advanceTimersByTimeAsync(0)
-    expect(handle.entries().active[0]!.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
 
     handle.dispose()
   })
@@ -61,11 +61,11 @@ describe('u1-state 合法迁移路径', () => {
     const handle = createDelivery(port)
 
     handle.send(textMsg('m1'), { id: 'u-1' })
-    expect(handle.entries().active[0]!.state).toBe('in-flight') // 同步受理
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight') // 同步受理
 
     expect(handle.confirmDelivered('u-1')).toBe(true)
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones).toEqual([
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones).toEqual([
       { id: 'u-1', state: 'delivered', lane: 'direct', settledAt: expect.any(Number) },
     ])
 
@@ -77,17 +77,17 @@ describe('u1-state 合法迁移路径', () => {
     const handle = createDelivery(port)
 
     handle.send(textMsg('m1'), { id: 'u-1' })
-    expect(handle.entries().active[0]!.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
     expect(port.sendCalls).toHaveLength(1)
 
     expect(handle.requeue(['u-1'])).toBe(1)
     // 回收重投：requeue 置回 queued 至队首 → idle gate 复核通过 → 立即重投受理
     expect(port.sendCalls).toHaveLength(2) // 第二次投递 = 回收重投发生
     expect(port.sendCalls[1]!.msg.payload.content).toBe('m1')
-    const entry = handle.entries().active[0]!
+    const entry = handle.entriesFull().active[0]!
     expect(entry.state).toBe('in-flight') // 重投已受理
     expect(entry.sendAttempts).toBe(0) // 回收重置
-    expect(handle.entries().tombstones).toHaveLength(0) // 中间态不产 tombstone
+    expect(handle.entriesFull().tombstones).toHaveLength(0) // 中间态不产 tombstone
 
     handle.dispose()
   })
@@ -105,8 +105,8 @@ describe('u1-state 合法迁移路径', () => {
       kind: 'cancelled',
       entry: { id: 'u-1', state: 'cancelled', payload: { kind: 'text', content: 'queued text' } },
     })
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones[0]).toMatchObject({ id: 'u-1', state: 'cancelled' })
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-1', state: 'cancelled' })
 
     handle.dispose()
   })
@@ -116,20 +116,20 @@ describe('u1-state 合法迁移路径', () => {
     const handle = createDelivery(port)
 
     handle.send(textMsg('m1'), { id: 'u-1' })
-    expect(handle.entries().active[0]!.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
 
     // 首调：标记待收回，条目留守 in-flight（适配器驱动 clear_queue 收回）
     const first = handle.cancel('u-1')
     expect(first.kind).toBe('reclaim-requested')
     expect(first).toMatchObject({ entry: { id: 'u-1', state: 'in-flight' } })
-    expect(handle.entries().active[0]!.state).toBe('in-flight')
-    expect(handle.entries().tombstones).toHaveLength(0)
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
+    expect(handle.entriesFull().tombstones).toHaveLength(0)
 
     // 二调：收回确认 → 终结
     const second = handle.cancel('u-1')
     expect(second.kind).toBe('cancelled')
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones[0]).toMatchObject({ id: 'u-1', state: 'cancelled' })
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-1', state: 'cancelled' })
 
     handle.dispose()
   })
@@ -146,11 +146,11 @@ describe('u1-state 合法迁移路径', () => {
     handle.send(textMsg('m1'), { id: 'u-1' })
     vi.advanceTimersByTime(10) // 首试 + 2 次重试全败 → attempts=3 > max=2
 
-    const entry = handle.entries().active[0]!
+    const entry = handle.entriesFull().active[0]!
     expect(entry.state).toBe('failed')
     expect(entry.sendAttempts).toBe(3)
     expect(entry.settledAt).toBeTypeOf('number')
-    expect(handle.entries().tombstones).toHaveLength(0) // failed 是活跃态，不产 tombstone
+    expect(handle.entriesFull().tombstones).toHaveLength(0) // failed 是活跃态，不产 tombstone
 
     warnSpy.mockRestore()
     handle.dispose()
@@ -171,12 +171,12 @@ describe('u1-state 合法迁移路径', () => {
 
     handle.send(textMsg('m1'), { id: 'u-1' })
     vi.advanceTimersByTime(5)
-    expect(handle.entries().active[0]!.state).toBe('failed')
+    expect(handle.entriesFull().active[0]!.state).toBe('failed')
     expect(port.sendCalls).toHaveLength(1)
 
     expect(handle.requeue(['u-1'])).toBe(1)
     expect(port.sendCalls).toHaveLength(2) // 重投发生
-    const entry = handle.entries().active[0]!
+    const entry = handle.entriesFull().active[0]!
     expect(entry.state).toBe('in-flight') // 重投已受理
     expect(entry.sendAttempts).toBe(0)
     expect(entry.settledAt).toBeUndefined()
@@ -196,12 +196,12 @@ describe('u1-state 合法迁移路径', () => {
 
     handle.send(textMsg('m1'), { id: 'u-1' })
     vi.advanceTimersByTime(5)
-    expect(handle.entries().active[0]!.state).toBe('failed')
+    expect(handle.entriesFull().active[0]!.state).toBe('failed')
 
     const result = handle.cancel('u-1')
     expect(result.kind).toBe('cancelled')
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones[0]).toMatchObject({ id: 'u-1', state: 'cancelled' })
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-1', state: 'cancelled' })
 
     warnSpy.mockRestore()
     handle.dispose()
@@ -212,12 +212,12 @@ describe('u1-state 合法迁移路径', () => {
     const handle = createDelivery(port)
 
     handle.send(textMsg('m1'), { id: 'u-1' })
-    expect(handle.entries().active[0]!.state).toBe('queued') // busy 留队（rebuild 重建形态）
+    expect(handle.entriesFull().active[0]!.state).toBe('queued') // busy 留队（rebuild 重建形态）
 
     // reattach 场景：适配器扫描 transcript 判已 delivered → send 重建 + 直确认
     expect(handle.confirmDelivered('u-1')).toBe(true)
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones[0]).toMatchObject({ id: 'u-1', state: 'delivered' })
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-1', state: 'delivered' })
     expect(port.sendCalls).toHaveLength(0) // 不重投
 
     handle.dispose()
@@ -231,17 +231,17 @@ describe('u1-state 合法迁移路径', () => {
     const handle = createDelivery(port)
 
     handle.send(textMsg('m1'), { id: 'u-1' })
-    expect(handle.entries().active[0]!.state).toBe('queued') // 出站批次在途
+    expect(handle.entriesFull().active[0]!.state).toBe('queued') // 出站批次在途
 
     // message_end 先于 RPC resolve 到达
     expect(handle.confirmDelivered('u-1')).toBe(true)
-    expect(handle.entries().tombstones[0]).toMatchObject({ id: 'u-1', state: 'delivered' })
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-1', state: 'delivered' })
 
     // 迟到的受理回执：条目已终态，无二次转移、无炸
     sendResolve!()
     await vi.advanceTimersByTimeAsync(0)
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones).toHaveLength(1)
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones).toHaveLength(1)
 
     handle.dispose()
   })
@@ -264,8 +264,8 @@ describe('u1-state 非法迁移拒绝', () => {
 
     expect(handle.requeue(['u-1'])).toBe(0)
     expect(port.sendCalls).toHaveLength(1) // 无第二次投递
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones[0]).toMatchObject({ id: 'u-1', state: 'delivered' })
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-1', state: 'delivered' })
 
     handle.dispose()
   })
@@ -279,8 +279,8 @@ describe('u1-state 非法迁移拒绝', () => {
 
     expect(handle.requeue(['u-1'])).toBe(0)
     expect(port.sendCalls).toHaveLength(0)
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones[0]).toMatchObject({ id: 'u-1', state: 'cancelled' })
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones[0]).toMatchObject({ id: 'u-1', state: 'cancelled' })
 
     handle.dispose()
   })
@@ -296,11 +296,11 @@ describe('u1-state 非法迁移拒绝', () => {
 
     handle.send(textMsg('m1'), { id: 'u-1' })
     vi.advanceTimersByTime(5)
-    expect(handle.entries().active[0]!.state).toBe('failed')
+    expect(handle.entriesFull().active[0]!.state).toBe('failed')
 
     expect(handle.confirmDelivered('u-1')).toBe(false)
-    expect(handle.entries().active[0]!.state).toBe('failed') // 状态不变
-    expect(handle.entries().tombstones).toHaveLength(0)
+    expect(handle.entriesFull().active[0]!.state).toBe('failed') // 状态不变
+    expect(handle.entriesFull().tombstones).toHaveLength(0)
 
     warnSpy.mockRestore()
     handle.dispose()
@@ -311,8 +311,8 @@ describe('u1-state 非法迁移拒绝', () => {
     const handle = createDelivery(port)
 
     expect(handle.confirmDelivered('no-such-id')).toBe(false)
-    expect(handle.entries().active).toHaveLength(0)
-    expect(handle.entries().tombstones).toHaveLength(0)
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones).toHaveLength(0)
 
     handle.dispose()
   })
@@ -323,12 +323,12 @@ describe('u1-state 非法迁移拒绝', () => {
 
     handle.send(textMsg('m1'), { id: 'u-1' })
     handle.cancel('u-1')
-    const before = handle.entries().tombstones
+    const before = handle.entriesFull().tombstones
 
     const result = handle.cancel('u-1')
     expect(result.kind).toBe('already-final')
     expect(result).toMatchObject({ tombstone: { id: 'u-1', state: 'cancelled' } })
-    expect(handle.entries().tombstones).toEqual(before)
+    expect(handle.entriesFull().tombstones).toEqual(before)
 
     handle.dispose()
   })

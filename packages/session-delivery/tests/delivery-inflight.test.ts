@@ -226,9 +226,9 @@ describe('A6-inflight port.send 错误重试（D4：失败不丢消息）', () =
     // D9⑤：受理成功只转 in-flight（送达口径回调等 confirmDelivered）
     expect(settled).toEqual([])
     expect(handle.depth()).toBe(0) // 已受理，不计深度
-    expect(handle.entries().active[0]?.state).toBe('in-flight')
+    expect(handle.entriesFull().active[0]?.state).toBe('in-flight')
 
-    expect(handle.confirmDelivered(handle.entries().active[0]!.id)).toBe(true)
+    expect(handle.confirmDelivered(handle.entriesFull().active[0]!.id)).toBe(true)
     expect(settled).toEqual(['delivered'])
 
     warnSpy.mockRestore()
@@ -285,7 +285,7 @@ describe('A6-inflight port.send 错误重试（D4：失败不丢消息）', () =
     // D9⑤：重试后受理成功只转 in-flight
     expect(settled).toEqual([])
 
-    expect(handle.confirmDelivered(handle.entries().active[0]!.id)).toBe(true)
+    expect(handle.confirmDelivered(handle.entriesFull().active[0]!.id)).toBe(true)
     expect(settled).toEqual(['delivered'])
 
     warnSpy.mockRestore()
@@ -306,7 +306,7 @@ describe('A6-inflight onSettled 终态信号', () => {
     // 受理 ≠ 送达：受理成功不回调
     expect(settledCalls).toHaveLength(0)
 
-    const id = handle.entries().active[0]!.id
+    const id = handle.entriesFull().active[0]!.id
     handle.confirmDelivered(id)
     expect(settledCalls).toHaveLength(1)
     expect(settledCalls[0]!.outcome).toBe('delivered')
@@ -352,7 +352,7 @@ describe('A6-inflight onSettled 终态信号', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(settledCalls).toHaveLength(0) // 受理 ≠ 送达
 
-    const id = handle.entries().active[0]!.id
+    const id = handle.entriesFull().active[0]!.id
     handle.confirmDelivered(id)
     expect(settledCalls).toHaveLength(1)
     expect(settledCalls[0]!.outcome).toBe('delivered')

@@ -157,7 +157,7 @@ import { ArrowRight, Check, Copy, FileText, Pencil, Undo2 } from '@lucide/vue'
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import { Textarea } from '../../primitives/textarea'
-import { turnStableId, getDeliveryProjectionRef } from '@taiji/core/domain/chat'
+import { turnStableId, findDeliveryEntry } from '@taiji/core/domain/chat'
 import type { MessageTurn } from '@taiji/core/domain/chat'
 import type { Segment } from '@taiji/shared'
 import { normalizeContent, needsBoundarySpace, normalizeSegmentOrder } from '@taiji/shared'
@@ -268,14 +268,16 @@ const userCopyKey = computed(() => `user-${props.turn.user?.id ?? props.turn.ind
 const revokeTargetId = computed(() => props.turn.user?.id ?? null)
 
 /**
- * 在途判定（D6）：内核投影该条目 state 未 delivered——判定形态与 useQueueRows 队列气泡的
- * deliveryQueueEntries 同源（state !== 'delivered'，不限 lane：direct 车道投出瞬间同样属
- * 「未注入」可 cancel）。投影中无该条目（已 morph 成 transcript / 已收敛）= 已送达。
+ * 在途判定（D6）：内核投影该条目 state 未 delivered——判定谓词与 useChat.revokeMessage
+ * 双态路由共享 findDeliveryEntry 单一实现（[MF-1-4]，投影宿主同源，禁两处内联 find 漂移；
+ * 判定形态与 useQueueRows 队列气泡的 deliveryQueueEntries 同源：state !== 'delivered'，
+ * 不限 lane：direct 车道投出瞬间同样属「未注入」可 cancel）。投影中无该条目（已 morph 成
+ * transcript / 已收敛）= 已送达。
  */
 const isPendingDelivery = computed(() => {
   const id = revokeTargetId.value
   if (!id) return false
-  const entry = getDeliveryProjectionRef().value.get(props.sessionId)?.find((e) => e.clientUuid === id)
+  const entry = findDeliveryEntry(props.sessionId, id)
   return !!entry && entry.state !== 'delivered'
 })
 

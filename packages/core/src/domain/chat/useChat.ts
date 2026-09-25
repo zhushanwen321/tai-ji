@@ -41,7 +41,7 @@ import {
   captureMorphSegments,
   clearDeliveryProjection,
   resetDeliveryProjectionForTest,
-  getDeliveryProjection,
+  findDeliveryEntry,
 } from './effects/user-delivery'
 
 // 类型契约原样迁 use-chat-types.ts（max-lines 行为保持抽取，纯类型零运行时）；
@@ -303,8 +303,9 @@ async function handleRevokeMessage(
   chat: ChatStoreInstance,
   deps: UseChatDeps,
 ): Promise<void> {
-  // D6 路由：内核投影中该条目仍活跃（未 delivered）→ 在途分支
-  const pendingEntry = getDeliveryProjection(sid).find((e) => e.clientUuid === targetId)
+  // D6 路由：内核投影中该条目仍活跃（未 delivered）→ 在途分支（[MF-1-4] 判定谓词与
+  // UserBubble 共享 findDeliveryEntry 单一实现——投影宿主同源，禁两处内联 find 漂移）
+  const pendingEntry = findDeliveryEntry(sid, targetId)
   if (pendingEntry && pendingEntry.state !== 'delivered') {
     await handleCancelPendingDelivery(sid, targetId, deps)
     return
@@ -366,8 +367,11 @@ async function handleCancelPendingDelivery(sid: string, clientUuid: string, deps
     deps.toast.error(deps.t('composable.revokeRestoreContentMissing'))
     return
   }
+  // [MF-1-2] 撤回入口的草稿回填为纯文本：composerInjection 通道是单值 text 语义（四符号
+  // 体系三互斥 schema，无 segments 承载位），chips 完整恢复的通道是队列区 restoreToDraft
+  // （composer-shell，restoreSegments 同款）；本路径保留文本回填不降级可见性。
   try {
-    deps.restoreDraft?.(sid, { text: content, segments: reply.segments })
+    deps.restoreDraft?.(sid, { text: content })
   } catch (e) {
     // best-effort 降级：撤销已在 runtime 完成（条目随 state 帧消失），回填失败只 warn——
     // 重抛破坏 fire-and-forget 契约，用户可从对话流/队列区确认状态后手动复制。
@@ -722,7 +726,15 @@ export function createUseChat(deps: UseChatDeps) {
     // LLM 自己调 read 工具读。不传 images base64 字段。
     // [u3b/D1] 统一提交：chatApi.send → chatApi.submitDelivery——lane 判定移交 runtime 内核，
     // reply 仅受理确认，权威状态演进经 session.delivery 状态帧（handleSessionDelivery 消费）。
-    await deps.chatApi.submitDelivery(sessionId, markedPromptText, clientUuid)
+    // [MF-1-2 / ADR-0043] segments 快照随提交上网（仅富消息——与 sidecar 写入同一 needsBackfill
+    // 谓词门控）：runtime 按 clientUuid 持有，cancel/drain 回草稿时随全文返回（chips 完整恢复）。
+    await deps.chatApi.submitDelivery(
+      sessionId,
+      markedPromptText,
+      clientUuid,
+      undefined,
+      needsBackfill ? segments : undefined,
+    )
   }
 
   /**
@@ -768,7 +780,7 @@ export function createUseChat(deps: UseChatDeps) {
    * [R2-A5 失败信号] 返回值（Promise<boolean>，steer 先例照抄）：true = 提交成功或无事
    * 发生（空输入/空白 prompt 早退——无投递动作、无丢失面，调用方无需恢复）；false =
    * RPC 失败（内部已 toast 消化且乐观副作用已回滚）——调用方（dispatch send）据
-   * `=== false`（严格比较，宽兼容 void 提供方 resolve undefined 不误报）restoreSegments
+   * `=== false`（严格比较——false = RPC 失败需恢复草稿）restoreSegments
    * 恢复草稿。不 throw（W2「内部消化」契约不变）。
    *
    * 流式状态由会话级订阅的事件驱动（message_start→true，complete/error→false），

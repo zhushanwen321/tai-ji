@@ -26,7 +26,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TAIJI_NAV_COMMAND } from '@taiji/shared'
 import {
   createSessionDeliveryRegistry,
-  resetActiveDeliveryRegistryForTest,
   type SessionDeliveryDeps,
 } from '../session-delivery-registry.js'
 import { RevokeOrchestrator } from '../revoke-orchestrator.js'
@@ -121,6 +120,8 @@ function makeProbeHarness(opts: ProbeHarnessOptions = {}) {
   const promptCalls: string[] = []
   const evictSpy = vi.fn()
   const invalidateSpy = vi.fn()
+  // 撤回信号广播腿 spy（[MF-1-7] deps.notifyEntryInvalidation 注入——生产 = pluginService notify 闭包）
+  const signalSpy = vi.fn()
   const workflowRecords = makeWorkflowRecords(opts.workflowRuns ?? [])
 
   // pi 事件流的 mock 订阅槽（送达回执 message_end 经此注入——D2 第二阶段确认通道）
@@ -189,6 +190,8 @@ function makeProbeHarness(opts: ProbeHarnessOptions = {}) {
       (await workflowRecords.getWorkflows(sid)).records.some((r) => r.status === 'running'),
     evictHistoryRebuildCache: evictSpy,
     invalidateDerivedState: invalidateSpy,
+    notifyEntryInvalidation: signalSpy,
+    registry: () => registry,
     sendSystemCommand: (sid, commandLine, requireCommand) => dispatcher.sendSystemCommand(sid, commandLine, requireCommand),
   })
 
@@ -198,7 +201,7 @@ function makeProbeHarness(opts: ProbeHarnessOptions = {}) {
     for (let i = 0; i < 30; i += 1) await Promise.resolve()
   }
   return {
-    view, tree, registry, client, promptCalls, evictSpy, invalidateSpy, revoke, flush,
+    view, tree, registry, client, promptCalls, evictSpy, invalidateSpy, signalSpy, revoke, flush,
     /** 注入一条 pi 事件（送达回执 message_end 等——watchClient 订阅的 mock 通道）。 */
     emitPiEvent: (event: unknown) => piEventHandler?.(event),
     setTree: (entries: unknown[], leafId: string | null) => {
@@ -219,12 +222,10 @@ function makeProbeHarness(opts: ProbeHarnessOptions = {}) {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 afterEach(() => {
   vi.useRealTimers()
-  resetActiveDeliveryRegistryForTest()
 })
 
 /** 标准树：e1(首条 user) → e2(user M，撤回目标) → e3(assistant)，leaf=e3。 */
@@ -300,10 +301,10 @@ describe('A6 信令不污染（探针：transcript 撤回前后对比 + 命令�
     }
     expect(after.entries.length).toBe(before.entries.length + 1)
 
-    // ② session.delivery 投影（session-delivery-topic 的帧数据源 = handle.entries({}) 投影视图）：
+    // ② session.delivery 投影（session-delivery-topic 的帧数据源 = handle.projection() 投影视图）：
     // 命令串零残留。若信令回归走内核 submit 面，命令条目将滞留 active（command 无
     // message_end 回执、永不 delivered）→ 此断言即红（D1 否决记录的「僵尸条目」形态）
-    const projectionEntries = h.registry.getOrCreateDelivery(SID).entries({}).entries
+    const projectionEntries = h.registry.getOrCreateDelivery(SID).projection().entries
     for (const entry of projectionEntries) {
       expect(JSON.stringify(entry)).not.toContain(TAIJI_NAV_COMMAND)
     }

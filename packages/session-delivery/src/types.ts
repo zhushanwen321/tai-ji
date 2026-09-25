@@ -7,7 +7,7 @@
  * - 判别联合 payload：适配器声明 supportedPayloads 能力
  *
  * v2 增量（投递所有权内核，设计 .tmp/tech-design/delivery-ownership-kernel.md）：
- * 条目状态机/lane/条目双形态（活跃条目 + tombstone）/entries() 双视图；行为实现在
+ * 条目状态机/lane/条目双形态（活跃条目 + tombstone）/entriesFull()+projection() 双视图；行为实现在
  * 本包 src/delivery.ts。lane 字面量中的 'steer' 是投递车道语义名（设计 §1.1 术语表
  * /D1），非 pi API 词汇——intent → 底层参数的翻译在适配器内部，本包只记录车道，
  * 零依赖纪律对 lane 不破例。
@@ -211,11 +211,12 @@ export interface DeliveryTombstone {
   settledAt: number
 }
 
-// ─── entries() 双视图（D9②）──────────────────────────────────
+// ─── 条目双视图（D9②）──────────────────────────────────
 
 /**
  * 全量视图（D9②）：对账器与判重消费。活跃条目（完整字段）+ 全部 tombstone 元数据。
  * 消费方：Reconciler 判别在途集（runtime registry 侧）、resync 判重、reattach 收养判定。
+ * 访问入口 = handle.entriesFull()（MF-1-13 拆名：与投影视图分开命名，误用编译期可查）。
  */
 export interface DeliveryEntriesFull {
   active: readonly DeliveryEntry[]
@@ -223,17 +224,11 @@ export interface DeliveryEntriesFull {
 }
 
 /**
- * 投影视图选项（D9②/D5③）。当前无可调字段：投影窗口恒为默认常量 50
- * （delivery.ts DEFAULT_DELIVERED_WINDOW）；展示窗口不参与判重正确性（判重查
- * tombstone 全量表）。参数位保留以维持调用方 `entries({})` 形态稳定，多余属性
- * 结构性拒绝。
- */
-export type DeliveryProjectionOptions = Record<string, never>
-
-/**
  * 投影视图（D9②/D5③）：session.delivery 帧装配用。活跃条目（queued/in-flight/failed）
  * 全量 + delivered 最近 50 条完整条目；稳态体积有界 ≤ 50 + 活跃条目数。
  * 装配（帧 DTO 转换）归 runtime transport 侧（u3a），内核只产出本视图。
+ * 访问入口 = handle.projection()；投影窗口恒为默认常量 50，无参数位（与全量视图
+ * entriesFull() 拆名为两个具名方法——双视图误用编译期即红，不靠注释纪律维持）。
  */
 export interface DeliveryEntriesProjection {
   entries: readonly DeliveryEntry[]

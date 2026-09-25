@@ -6,7 +6,7 @@
  * re-export 全部类型，domain/chat/index.ts 与 __tests__ 的既有 `from './useChat'`
  * 消费零改动。
  */
-import type { Segment, SessionViewSnapshot } from '@taiji/shared'
+import type { SessionViewSnapshot } from '@taiji/shared'
 import type { ChatApiPort, WriteSegmentsFn } from './api-port'
 import type { ChatStoreInstance } from './store'
 
@@ -68,7 +68,8 @@ export interface UseChatDeps {
   /**
    * [U5 消息撤回 D7] 撤回 reply 的草稿回填注入（壳层 composer 输入区能力）。optional：
    * 未注入时撤回成功链路跳过回填（重拉照做）——core 不绑 DOM，回填能力只能来自壳。
-   * segments 缺省（撤回原文恒纯文本，restoreRevokedDraft 产物）。
+   * payload 仅 text：撤回回填走 composerInjection 单值文本通道（[MF-1-2] 注入 schema 无
+   * segments 承载位）；chips 完整恢复通道 = 队列区 restoreToDraft（QueueRowsDeps.restoreDraft）。
    */
-  restoreDraft?: (sessionId: string, payload: { text: string; segments?: Segment[] }) => void
+  restoreDraft?: (sessionId: string, payload: { text: string }) => void
 }
