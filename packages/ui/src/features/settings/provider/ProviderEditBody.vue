@@ -159,7 +159,7 @@
           :model-value="form.authHeader"
           data-testid="auth-header-switch"
           :aria-label="t('settings.providerEdit.fieldAuthHeader')"
-          @update:model-value="form.authHeader = $event as boolean"
+          @update:model-value="onAuthHeaderChange"
         />
       </div>
 
@@ -456,6 +456,14 @@ function confirmAuthSwitch(): void {
   } else if (target === 'oauth') {
     emit('oauthLogin')
   }
+}
+
+// reka Switch 的 update:modelValue payload 是宽联合，先运行时守卫收窄再进表单写入
+// （对齐 ModelListSection onCtxSelect/onStrategySelect 的 unknown+guard 范式），不用模板
+// as 断言把非法 payload 直接放行。
+function onAuthHeaderChange(value: unknown): void {
+  if (typeof value !== 'boolean') return
+  form.authHeader = value
 }
 
 // ModelListSection 经 MODEL_LIST_DEPS_KEY typed seam 拿到模型 CRUD module（C4：原

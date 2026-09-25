@@ -20,7 +20,7 @@
         <SettingRow :label="t('settings.system.appearance')" :desc="t('settings.system.appearanceDesc')">
           <Select
             :model-value="system.theme"
-            @update:model-value="emit('update', { theme: $event as SystemSettings['theme'] })"
+            @update:model-value="onThemeSelect"
           >
             <SelectTrigger class="h-8 w-[200px] px-2 text-xs">
               <SelectValue />
@@ -35,7 +35,7 @@
         <SettingRow :label="t('settings.system.fontSize')" :desc="t('settings.system.fontSizeDesc')">
           <Select
             :model-value="system.fontSize ?? 'medium'"
-            @update:model-value="emit('update', { fontSize: $event as SystemSettings['fontSize'] })"
+            @update:model-value="onFontSizeSelect"
           >
             <SelectTrigger class="h-8 w-[200px] px-2 text-xs">
               <SelectValue />
@@ -90,7 +90,7 @@
         >
           <Select
             :model-value="system.fontScales?.[region.key] ?? DEFAULT_FONT_SCALES[region.key]"
-            @update:model-value="onRegionScale(region.key, $event as FontScaleTier)"
+            @update:model-value="onRegionScaleSelect(region.key, $event)"
           >
             <SelectTrigger class="h-8 w-[200px] px-2 text-xs" :data-testid="`appearance-fs-${region.key}-trigger`">
               <SelectValue />
@@ -147,7 +147,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
-import type { SystemSettings, FontScaleTier } from '@taiji/core'
+import type { SystemSettings, FontScaleTier, ThemeMode } from '@taiji/core'
 import { DEFAULT_FONT_SCALES } from '@taiji/core'
 import type { TerminalConfig } from '@taiji/shared'
 import { TAIJI_THEMES, resolveTaijiTheme, type TaijiTheme } from '@/composables/useTaijiThemes'
@@ -164,6 +164,41 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { info: toastInfo, error: toastError } = useToast()
+
+// ── Select payload 运行时守卫 ──
+// reka Select 的 update:modelValue payload 是宽联合（AcceptableValue），先运行时守卫收窄
+// 再 emit（对齐 ModelListSection onCtxSelect/onStrategySelect 的 unknown+guard 范式），
+// 不用模板 as 断言把非法 payload 直接放行。成员校验用 some 严格相等比较，不做强转。
+const THEME_MODES: readonly ThemeMode[] = ['light', 'dark', 'system']
+const FONT_SIZE_OPTIONS: readonly NonNullable<SystemSettings['fontSize']>[] = ['small', 'medium', 'large']
+const FONT_SCALE_TIERS: readonly FontScaleTier[] = ['small', 'medium', 'large', 'xlarge']
+
+function isThemeMode(v: unknown): v is ThemeMode {
+  return typeof v === 'string' && THEME_MODES.some((m) => m === v)
+}
+
+function isFontSize(v: unknown): v is NonNullable<SystemSettings['fontSize']> {
+  return typeof v === 'string' && FONT_SIZE_OPTIONS.some((o) => o === v)
+}
+
+function isFontScaleTier(v: unknown): v is FontScaleTier {
+  return typeof v === 'string' && FONT_SCALE_TIERS.some((tier) => tier === v)
+}
+
+function onThemeSelect(value: unknown): void {
+  if (!isThemeMode(value)) return
+  emit('update', { theme: value })
+}
+
+function onFontSizeSelect(value: unknown): void {
+  if (!isFontSize(value)) return
+  emit('update', { fontSize: value })
+}
+
+function onRegionScaleSelect(region: 'sidebar' | 'chat' | 'drawer', value: unknown): void {
+  if (!isFontScaleTier(value)) return
+  onRegionScale(region, value)
+}
 
 // ── 太极主题（即时切换：写 store + 同步 DOM） ──
 const currentTheme = computed<TaijiTheme>(() => resolveTaijiTheme(props.system))

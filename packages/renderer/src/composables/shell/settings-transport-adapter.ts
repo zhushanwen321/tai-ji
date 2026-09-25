@@ -4,7 +4,7 @@
  * core 域内只依赖 SettingsTransport 接口（transport.ts），不感知 WS/transport 实现。
  * 本 adapter 在 bootstrapSettingsCore provideSettingsTransport 时构造，逐方法转发
  * @/api 门面的 config/model/extension/settings/quota/preset/usage/session 八元导出——
- * 经门面即继承 VITE_MOCK 三元切换（mock 模式 settings 域走 core/transport/mock fixture，
+ * 经门面即继承 VITE_MOCK mock/real 切换（mock 模式 settings 域走 core/transport/mock fixture，
  * 与全应用其它域一致；过度设计审计修复 u17，裁决 3）。real adapter（本文件）与
  * mock adapter（core/transport/mock 体系）共同证明 seam 真实——[C3] mock 侧已补齐
  * settings 字段读写 + usage 域，mock 模式全 seam 可用。
