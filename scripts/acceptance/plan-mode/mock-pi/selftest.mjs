@@ -5,6 +5,8 @@
  * 覆盖：
  *   marker-literal-drift  marker 字面量镜像与 extension-protocol 源文件比对（防漂移）
  *   basic-commands        命令应答族（ok / error envelope / get_messages data.messages）
+ *   get-state             get_state 应答（create 链 fatal 字段集 + switch_session 后 sessionFile 回报；
+ *                         字段集对齐 pi 实装 dist/modes/rpc/rpc-mode.js:347-362）
  *   plan-review-flow      prompt → agent_start → plan-state 落盘 → 审批 select 挂起
  *   select-delay-1500     select 登记延迟参数化（1.5s 形态可构造，S3 稳定窗靶向）
  *   abort-dissolve        abort 解散 + 现版 cancelled 形态不落盘（F1 机制面）
@@ -13,6 +15,8 @@
  *   boundary-frames       空载荷 / 非法形态 / 超限 / error envelope 帧族逐项性质断言
  *   select-response-chain respond 后落盘改态 + 第二 select 挂起（F5 构造链）
  *   install-restore       文件级置换 install/restore 往返 + 三证恢复（假 bin 目录 + stub 真 pi）
+ *   install-restore-bin-name  非 pi 文件名往返（--bin-name pi-darwin-arm64——runtime 解析
+ *                         `resources/pi/pi-<platform>-<arch>` 的真实形态；回执 binName 回推 + 同目录兄弟文件不动）
  *
  * 运行：node scripts/acceptance/plan-mode/mock-pi/selftest.mjs
  * 退出码：0 = 全绿；1 = 任一用例红。
@@ -139,6 +143,7 @@ async function main() {
   try {
     await caseMarkerDrift();
     await caseBasicCommands(work);
+    await caseGetState(work);
     await casePlanReviewFlow(work);
     await caseSelectDelay(work);
     await caseAbortDissolve(work);
@@ -147,6 +152,7 @@ async function main() {
     await caseBoundaryFrames(work);
     await caseSelectResponseChain(work);
     await caseInstallRestore(work);
+    await caseInstallRestoreBinName(work);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -191,6 +197,43 @@ async function caseBasicCommands(work) {
     mp.send({ id: 'c4', type: 'switch_session', sessionPath: join(work, 'session-a.jsonl') });
     const r4 = await mp.waitFor((f) => f.id === 'c4' && f.type === 'response');
     assert$('basic-commands/switch-session', r4.success === true, 'switch_session ack');
+  } finally {
+    mp.close();
+  }
+}
+
+async function caseGetState(work) {
+  // 窗口③阻塞根因回归：runtime create 链 readBackCreateState 恒经 get_state，
+  // error envelope → sendCommand reject → safeDestroy + create 失败。
+  const sessionPath = join(work, 'session-state.jsonl');
+  const mp = new MockProc(writeConfig(work, { scenario: 'plan-review-pending', sessionPath }));
+  try {
+    mp.send({ id: 'g1', type: 'get_state' });
+    const r1 = await mp.waitFor((f) => f.id === 'g1' && f.type === 'response');
+    assert$('get-state/success-reply', r1.success === true && r1.command === 'get_state',
+      `success reply, command=${r1.command}（create 链入口）`);
+    assert$('get-state/session-id', typeof r1.data?.sessionId === 'string' && r1.data.sessionId.length > 0,
+      `sessionId=${r1.data?.sessionId}（缺失 = readBackCreateState fatal）`);
+    assert$('get-state/session-file', r1.data?.sessionFile === sessionPath,
+      `sessionFile=${r1.data?.sessionFile}（config 预设路径，rpc-client/attach 断言 I1 消费）`);
+    assert$('get-state/model-from-argv', r1.data?.model?.provider === 'stub' && r1.data?.model?.id === 'model',
+      `model=${JSON.stringify(r1.data?.model)}（--model stub/model argv 解析）`);
+
+    // 字段集对齐实装 rpc-mode.js:347-362（12 字段；model/sessionFile 已由上两条单独断言）
+    const d = r1.data ?? {};
+    const rest = ['thinkingLevel', 'isStreaming', 'isCompacting', 'steeringMode', 'followUpMode', 'sessionId', 'sessionName', 'autoCompactionEnabled', 'messageCount', 'pendingMessageCount'];
+    const missing = rest.filter((k) => !(k in d));
+    assert$('get-state/field-set', missing.length === 0 && typeof d.thinkingLevel === 'string' && typeof d.isStreaming === 'boolean' && typeof d.messageCount === 'number',
+      `实装 12 字段齐备（messageCount=${d.messageCount}, thinkingLevel=${d.thinkingLevel}）`);
+
+    // switch_session 后 get_state 回报新路径 + sessionId 稳定（attach 断言比对形态）
+    const switched = join(work, 'session-switched.jsonl');
+    mp.send({ id: 's1', type: 'switch_session', sessionPath: switched });
+    await mp.waitFor((f) => f.id === 's1' && f.type === 'response');
+    mp.send({ id: 'g2', type: 'get_state' });
+    const r2 = await mp.waitFor((f) => f.id === 'g2' && f.type === 'response');
+    assert$('get-state/after-switch', r2.success === true && r2.data?.sessionFile === switched && r2.data?.sessionId === r1.data?.sessionId,
+      `switch 后 sessionFile=${r2.data?.sessionFile}，sessionId 稳定`);
   } finally {
     mp.close();
   }
@@ -380,6 +423,39 @@ async function caseInstallRestore(work) {
   const realVer = spawnSync(join(binDir, 'pi'), ['--version'], { encoding: 'utf-8' });
   assert$('install-restore/real-restored', realVer.stdout.includes('REAL_PI_STUB') && lstatSync(join(binDir, 'pi')).isSymbolicLink(),
     `恢复后 --version = ${JSON.stringify(realVer.stdout.trim())} 且 symlink 形态还原`);
+}
+
+async function caseInstallRestoreBinName(work) {
+  // B1 修复验证：非 pi 文件名往返（runtime 实际解析 apps/electron/resources/pi/pi-<platform>-<arch>）
+  const binDir = join(work, 'bin-arch');
+  mkdirSync(binDir, { recursive: true });
+  const stubPi = join(binDir, 'real-pi-stub.mjs');
+  writeFileSync(stubPi, '#!/usr/bin/env node\nprocess.stdout.write("0.84.4-stub REAL_PI_STUB\\n");\n');
+  chmodSync(stubPi, 0o755);
+  const archName = 'pi-darwin-arm64';
+  symlinkSync('real-pi-stub.mjs', join(binDir, archName));
+  symlinkSync('real-pi-stub.mjs', join(binDir, 'pi')); // 同目录兄弟文件——置换必须不碰
+  const configPath = join(work, 'mock-cfg-arch', 'active-config.json');
+
+  const inst = spawnSync(process.execPath, [join(SCRIPT_DIR, 'install-mock-pi.mjs'),
+    '--bin-dir', binDir, '--bin-name', archName, '--config', configPath, '--scenario', 'plan-review-pending'], { encoding: 'utf-8' });
+  assert$('install-restore-bin-name/install', inst.status === 0 && existsSync(join(binDir, `${archName}.bak`)) && !existsSync(join(binDir, 'pi.bak')),
+    `install exit=${inst.status}，目标 = ${archName}（移为 ${archName}.bak），未误伤兄弟 pi`);
+  const wrapVer = spawnSync(join(binDir, archName), ['--version'], { encoding: 'utf-8' });
+  assert$('install-restore-bin-name/wrapper-active-sibling-untouched', wrapVer.stdout.includes('mock-pi')
+    && lstatSync(join(binDir, archName)).isSymbolicLink() === false
+    && lstatSync(join(binDir, 'pi')).isSymbolicLink() === true,
+    `置换后 ${archName} --version = ${JSON.stringify(wrapVer.stdout.trim())}，兄弟 pi 仍为 symlink`);
+
+  // restore 不传 --bin-name——按回执 binName 回推目标名（install/restore 对偶）
+  const rest = spawnSync(process.execPath, [join(SCRIPT_DIR, 'restore-mock-pi.mjs'),
+    '--bin-dir', binDir, '--config', configPath], { encoding: 'utf-8' });
+  const threeProofs = (rest.stdout.match(/证[①②③123] PASS/g) ?? []).length;
+  assert$('install-restore-bin-name/restore-3proofs-by-receipt', rest.status === 0 && /三证齐/.test(rest.stdout) && threeProofs === 3,
+    `restore exit=${rest.status}（binName=${archName} 由回执回推），三证 PASS×${threeProofs}`);
+  const realVer = spawnSync(join(binDir, archName), ['--version'], { encoding: 'utf-8' });
+  assert$('install-restore-bin-name/real-restored', realVer.stdout.includes('REAL_PI_STUB') && lstatSync(join(binDir, archName)).isSymbolicLink(),
+    `恢复后 ${archName} --version = ${JSON.stringify(realVer.stdout.trim())} 且 symlink 形态还原`);
 }
 
 main().catch((e) => {

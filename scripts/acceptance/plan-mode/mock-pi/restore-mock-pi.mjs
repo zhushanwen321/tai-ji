@@ -3,12 +3,15 @@
  * mock pi 卸载器——**三证恢复**（S12 验收纪律：symlink 还原 + `--version` 真实输出 + `ls -l` 形态）。
  *
  * 三证（缺一不算恢复，全部 PASS 才 exit 0）：
- * 证① symlink 还原：`pi.bak` 移回 `pi`，且 lstat 形态/链接目标与安装回执一致；
- * 证② `--version` 真实输出：`<bin>/pi --version` 输出非空且不含 mock 标记；
- * 证③ `ls -l` 形态核对：捕获 `ls -l <bin>/pi` 原样输出（symlink `->` 目标形态）留证。
+ * 证① symlink 还原：`<bin-name>.bak` 移回 `<bin-name>`，且 lstat 形态/链接目标与安装回执一致；
+ * 证② `--version` 真实输出：`<bin>/<bin-name> --version` 输出非空且不含 mock 标记；
+ * 证③ `ls -l` 形态核对：捕获 `ls -l <bin>/<bin-name>` 原样输出（symlink `->` 目标形态）留证。
+ *
+ * 目标名解析（B1 修复）：`--bin-name` 显式指定 > 安装回执 binName（与 install 对偶）> 缺省 'pi'；
+ * 目标目录 `--bin-dir` 同 install（缺省 `<repo>/node_modules/.bin`）。
  *
  * 用法：
- *   node scripts/acceptance/plan-mode/mock-pi/restore-mock-pi.mjs [--bin-dir <dir>] [--config <path>]
+ *   node scripts/acceptance/plan-mode/mock-pi/restore-mock-pi.mjs [--bin-dir <dir>] [--bin-name pi-darwin-arm64] [--config <path>]
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -24,6 +27,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--bin-dir') out.binDir = resolve(argv[++i]);
+    else if (a === '--bin-name') out.binName = argv[++i];
     else if (a === '--config') out.configPath = resolve(argv[++i]);
     else throw new Error(`restore-mock-pi: unknown arg: ${a}`);
   }
@@ -34,13 +38,14 @@ const args = parseArgs(process.argv.slice(2));
 const binDir = args.binDir ?? resolve(SCRIPT_DIR, '..', '..', '..', '..', 'node_modules', '.bin');
 const configPath = args.configPath ?? join(os.homedir(), '.taiji-dev', 'mock-pi', 'active-config.json');
 const receiptPath = join(dirname(configPath), 'install-receipt.json');
-const piPath = join(binDir, 'pi');
-const bakPath = join(binDir, 'pi.bak');
 
 let receipt = null;
 if (existsSync(receiptPath)) {
   receipt = JSON.parse(readFileSync(receiptPath, 'utf-8'));
 }
+const binName = args.binName ?? receipt?.binName ?? 'pi';
+const piPath = join(binDir, binName);
+const bakPath = join(binDir, `${binName}.bak`);
 
 const proofs = [];
 function proof(n, pass, evidence) {

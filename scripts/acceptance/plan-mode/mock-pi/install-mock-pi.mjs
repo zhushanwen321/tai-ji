@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 /**
- * mock pi 安装器——`node_modules/.bin/pi` 文件级置换（AGENTS.md 验收构造纪律）。
+ * mock pi 安装器——pi 可执行文件文件级置换（AGENTS.md 验收构造纪律）。
+ *
+ * 目标文件名可参数化（B1 修复）：runtime 的 find-pi-executable 解析链在 dev 下可能命中
+ * `apps/electron/resources/pi/pi-<platform>-<arch>`（prepare 产物）而非 `node_modules/.bin/pi`，
+ * 故目标由 `--bin-dir` + `--bin-name` 组合指定（缺省 `<repo>/node_modules/.bin/pi` 保持向后兼容）；
+ * 真实解析目标以 dev-instance.log / find-pi-executable 实证为准。
  *
  * 动作：
  * 1. 写 active config（scenario + 参数覆盖）到 `~/.taiji-dev/mock-pi/active-config.json`
  *    （或 `--config` 指定；`TAIJI_` 前缀 env 可穿透，但 config 文件是权威参数源）；
- * 2. `<bin-dir>/pi`（原 symlink）移为 `<bin-dir>/pi.bak`；
+ * 2. `<bin-dir>/<bin-name>`（原文件/符号链接）移为 `<bin-dir>/<bin-name>.bak`；
  * 3. 写 wrapper（`#!/usr/bin/env node` + 注入 TAIJI_MOCK_PI_CONFIG + import mock-pi.mjs）；
- * 4. 落安装回执（restore 三证恢复比对用）。
+ * 4. 落安装回执（含 binName——restore 三证恢复比对与目标名回推用）。
  *
  * S12 恢复纪律（README 同步）：验收窗结束必须 restore-mock-pi.mjs 三证恢复——
  * symlink 还原 + `--version` 真实输出 + `ls -l` 形态核对，三证齐才算恢复。
@@ -15,7 +20,7 @@
  * 用法：
  *   node scripts/acceptance/plan-mode/mock-pi/install-mock-pi.mjs \
  *     [--scenario select-delay-1500ms] [--params '{"selectRegisterDelayMs":1500}'] \
- *     [--bin-dir <dir>] [--config <path>]
+ *     [--bin-dir <dir>] [--bin-name pi-darwin-arm64] [--config <path>]
  */
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
@@ -33,6 +38,7 @@ function parseArgs(argv) {
     if (a === '--scenario') out.scenario = argv[++i];
     else if (a === '--params') out.params = JSON.parse(argv[++i]);
     else if (a === '--bin-dir') out.binDir = resolve(argv[++i]);
+    else if (a === '--bin-name') out.binName = argv[++i];
     else if (a === '--config') out.configPath = resolve(argv[++i]);
     else if (a === '--session-path') out.sessionPath = argv[++i];
     else throw new Error(`install-mock-pi: unknown arg: ${a}`);
@@ -42,9 +48,10 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2));
 const binDir = args.binDir ?? resolve(SCRIPT_DIR, '..', '..', '..', '..', 'node_modules', '.bin');
+const binName = args.binName ?? 'pi';
 const configPath = args.configPath ?? join(os.homedir(), '.taiji-dev', 'mock-pi', 'active-config.json');
-const piPath = join(binDir, 'pi');
-const bakPath = join(binDir, 'pi.bak');
+const piPath = join(binDir, binName);
+const bakPath = join(binDir, `${binName}.bak`);
 const receiptPath = join(dirname(configPath), 'install-receipt.json');
 
 if (!existsSync(MOCK_PI)) throw new Error(`install-mock-pi: mock-pi.mjs missing: ${MOCK_PI}`);
@@ -85,7 +92,7 @@ chmodSync(piPath, 0o755);
 // 4. 回执（restore 比对原始形态）
 mkdirSync(dirname(receiptPath), { recursive: true });
 writeFileSync(receiptPath, `${JSON.stringify({
-  binDir, piPath, bakPath, configPath,
+  binDir, binName, piPath, bakPath, configPath,
   originalTarget: original?.symlink ?? null,
   originalWasSymlink: Boolean(original?.symlink),
   installedAt: new Date().toISOString(),
@@ -93,7 +100,7 @@ writeFileSync(receiptPath, `${JSON.stringify({
 
 console.log(`[install-mock-pi] scenario=${args.scenario} params=${JSON.stringify(args.params)}`);
 console.log(`[install-mock-pi] config:  ${configPath}`);
-console.log(`[install-mock-pi] wrapper: ${piPath} (original -> ${bakPath})`);
+console.log(`[install-mock-pi] wrapper: ${piPath} (original -> ${bakPath}, bin-name=${binName})`);
 console.log(`[install-mock-pi] receipt: ${receiptPath}`);
 console.log('[install-mock-pi] S12 恢复纪律：验收窗结束必须 restore-mock-pi.mjs 三证恢复（symlink 还原 + --version 真实输出 + ls -l 形态）');
 

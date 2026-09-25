@@ -16,6 +16,7 @@
  * argv：容忍真实 pi 的全部 flag（--mode rpc / --model / --extension …，一律忽略+stderr 留痕）；
  * `--version` 输出 mock 版本；`--config <path>` 指定 active config（缺省见 scenario.mjs）。
  */
+import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 
 import * as frames from './lib/frames.mjs';
@@ -31,11 +32,16 @@ if (argv.includes('--version') || argv.includes('-v')) {
   process.exit(0);
 }
 let configArg;
+let modelArg;
 const ignoredFlags = [];
 for (let i = 0; i < argv.length; i += 1) {
   const a = argv[i];
   if (a === '--config') {
     configArg = argv[i + 1];
+    i += 1;
+  } else if (a === '--model') {
+    // get_state.model 的真值来源（runtime spawn 恒传 --model provider/modelId）
+    modelArg = argv[i + 1];
     i += 1;
   } else {
     ignoredFlags.push(a);
@@ -53,6 +59,9 @@ let sessionPath = typeof config.sessionPath === 'string' ? config.sessionPath : 
 let pendingSelectId = null;
 let aborted = false;
 const messageLog = []; // get_messages 历史（assistant/user 文本留痕）
+// 进程生命周期内稳定的 session id（实装 = uuidv7，core/session-manager.js createSessionId；
+// runtime readBackCreateState 消费，缺失 = create 链 fatal「pi did not return a session ID」）
+const sessionId = randomUUID();
 
 function send(frame) {
   process.stdout.write(`${JSON.stringify(frame)}\n`);
@@ -182,6 +191,39 @@ function handleAbort(cmd) {
   })();
 }
 
+// ── get_state 快照（create/attach 链恒经的恒定状态面）─────────────────
+// 字段集对齐 pi 实装 0.84.4 dist/modes/rpc/rpc-mode.js:347-362（12 字段）。runtime 消费：
+// - sessionId：readBackCreateState（session-lifecycle.ts），缺失 = create 链 fatal；
+// - sessionFile：attach 断言 I1 / 崩溃取证（rpc-client getState）——switch_session 绑定后
+//   回报绑定路径，未绑定时省略 key（pi 首次 flush 前 session 路径未定，JSON 序列化丢
+//   undefined key 与实装同构）；
+// - model{provider,id} + thinkingLevel：restore-seeding 播种 + 标量投影（replicated-states
+//   .config 'required' 空值语义——缺失 = 协议异常退避重拉，故给非空 stub）。
+// 无真值来源的字段用 stub 常量（steeringMode/followUpMode = 实装缺省值，见
+// dist/core/settings-manager.js getSteeringMode/getFollowUpMode）。
+function buildState() {
+  return {
+    ...(typeof modelArg === 'string' && modelArg.includes('/') ? { model: splitModelArg(modelArg) } : {}),
+    thinkingLevel: 'high', // stub：实装 = 所选模型默认档，mock 不按模型推导
+    isStreaming: false,
+    isCompacting: false,
+    steeringMode: 'one-at-a-time',
+    followUpMode: 'one-at-a-time',
+    ...(sessionPath ? { sessionFile: sessionPath } : {}),
+    sessionId,
+    sessionName: null,
+    autoCompactionEnabled: true,
+    messageCount: messageLog.length,
+    pendingMessageCount: 0,
+  };
+}
+
+/** `--model provider/modelId` → pi Model 的 {provider,id} 子集（首个 '/' 分割，modelId 可再含 '/'）。 */
+function splitModelArg(arg) {
+  const slash = arg.indexOf('/');
+  return { provider: arg.slice(0, slash), id: arg.slice(slash + 1) };
+}
+
 // ── 命令路由 ────────────────────────────────────────────────────────
 function handleCommand(line) {
   if (line && typeof line === 'object' && (line.type === 'extension_ui_response' || (!line.type && 'id' in line && ('value' in line || 'confirmed' in line || 'cancelled' in line)))) {
@@ -209,6 +251,9 @@ function handleCommand(line) {
       return;
     case 'set_model':
       send(frames.responseOk(line.id, 'set_model'));
+      return;
+    case 'get_state':
+      send(frames.responseOk(line.id, 'get_state', buildState()));
       return;
     case 'get_available_models':
       send(frames.responseOk(line.id, 'get_available_models', { models: config.models ?? [] }));
