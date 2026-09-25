@@ -865,6 +865,15 @@ describe('coding-plan 额度显示自动开启（新增即默认同意，quota-a
     expect(b.extras.getExtrasSync('zai-coding-cn')?.quota).toBeUndefined()
   })
 
+  it('带前后空白的 env 占位串 → 不自动开启（isPlaintextCredential 函数内 trim 后仍命中 $ 前缀；调用点防线②只同视空串、不剥非空值空白）', async () => {
+    const { svc, extras } = makeAutoEnableService()
+
+    const res = await svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: ' $MY_KEY ' })
+
+    expect(res.quotaAutoEnabled).toBeUndefined()
+    expect(extras.getExtrasSync('zai-coding-cn')?.quota).toBeUndefined()
+  })
+
   it('cookie 类 preset（xiaomi-token-plan-cn → mimo）→ 不自动开启（无 cookie 可复用）', async () => {
     const { svc, extras } = makeAutoEnableService()
 

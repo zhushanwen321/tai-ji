@@ -73,7 +73,7 @@
             class="mt-[9px]"
             :aria-label="t('settings.providerEdit.reasoningLabel')"
             :title="t('settings.providerEdit.reasoningTitle')"
-            @update:model-value="deps.newModel.reasoning = $event as boolean"
+            @update:model-value="deps.newModel.reasoning = $event"
           />
         </div>
         <Button class="h-8 shrink-0 px-3 text-[12px]" @click="$emit('addModel')">{{ t('settings.providerEdit.addBtn') }}</Button>
@@ -130,7 +130,7 @@
           <div class="flex w-[80px] justify-center">
             <Select
               :model-value="m.contextWindow"
-              @update:model-value="deps.updateCtx(m, $event as number)"
+              @update:model-value="onCtxSelect(m, $event)"
             >
               <SelectTrigger class="h-7 w-[72px] px-1.5 py-0 text-[11px]">
                 <SelectValue placeholder="—" />
@@ -144,7 +144,7 @@
           <div class="flex w-24 justify-center">
             <Select
               :model-value="deps.getStrategyFromMap(m.thinkingLevelMap)"
-              @update:model-value="deps.pickStrategy(m, $event as ThinkingStrategy)"
+              @update:model-value="onStrategySelect(m, $event)"
             >
               <SelectTrigger class="h-7 w-[88px] px-1.5 py-0 text-[11px]">
                 <SelectValue placeholder="—" />
@@ -200,6 +200,7 @@ import CompatEditor from '../compat/CompatEditor.vue'
 import {
   CONTEXT_OPTIONS,
   THINKING_STRATEGIES,
+  type LocalModel,
   type ThinkingStrategy,
 } from '@taiji/core'
 import { useModelListDeps } from '../injection-keys'
@@ -247,4 +248,19 @@ const providerApi = computed(() => unref(deps.providerApi))
 const isCompatExpanded = (modelId: string): boolean => unref(deps.expandedCompat).has(modelId)
 /** model 级 api 优先，缺失回退 provider 级 api（compat 字段集 + 预设按钮按此过滤） */
 const resolveApi = (modelApi?: string): string | undefined => modelApi || providerApi.value
+
+// reka Select 的 update:modelValue payload 是宽联合（AcceptableValue），先运行时守卫收窄
+// 再进 module 写入（对齐 useQuotaConfigure.selectType 的 unknown+guard 范式），不用模板
+// as 断言把非法 payload 直接放行。不做 Number(value) 强转——NaN 会伪装成合法上下文值。
+const onCtxSelect = (m: LocalModel, value: unknown): void => {
+  if (typeof value !== 'number') return
+  deps.updateCtx(m, value)
+}
+
+const onStrategySelect = (m: LocalModel, value: unknown): void => {
+  if (typeof value !== 'string') return
+  const strategy: ThinkingStrategy | undefined = thinkingStrategies.find((s) => s.key === value)?.key
+  if (!strategy) return
+  deps.pickStrategy(m, strategy)
+}
 </script>

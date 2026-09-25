@@ -977,3 +977,73 @@ describe('R4 补口：类型 Select / compat providerApi', () => {
     expect(wrapper.find('.compat-editor').text()).toContain('settings.compat.essential')
   })
 })
+
+// ══ 场景 ⑪：行级模型 Select 守卫透传（onCtxSelect / onStrategySelect）════════
+
+/**
+ * ModelListSection 行级 Select 的 update:modelValue payload 是 reka 宽联合，组件以运行时
+ * 守卫收窄后才进 core module（ModelListSection onCtxSelect / onStrategySelect，typeof 收窄
+ * + 成员校验）。本组断言**组件级**透传：真实用户交互（开下拉 → 点选项）后守卫把合法值
+ * 放行进 module → 行视图显示更新 → save payload 落盘。守卫早退分支（非 number / 非法策略
+ * key）属 reka 内部不变量——Select 只会 emit 已注册 option 的 value，正常交互不可达，
+ * 不强行锁（core 层 updateCtx/pickStrategy 行为已由 provider-edit-models.test.ts 直接单测）。
+ *
+ * 三视角：
+ * - 黑盒用户视角（主）：点选后行内 Select trigger 显示更新（128K / 策略文案），保存后
+ *   payload 携带新值（用户最终持久化数据）。
+ * - 构建者白盒（佐证）：payload 的 contextWindow / thinkingLevelMap 是 updateCtx/pickStrategy
+ *   写入 localModels 后经 buildModelsPayload 回传的结果，透传链路端到端可证。
+ * - 观察者形态：全部 DOM / payload 断言，无组件内部 spy。
+ */
+describe('行级模型 Select：ctx / 策略守卫透传', () => {
+  /** reka Select 交互（happy-dom 需显式 pointer 事件；同场景⑩ pickSelectOption 模式） */
+  async function pickSelectOption(triggerEl: HTMLElement, label: string): Promise<void> {
+    triggerEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    triggerEl.click()
+    await flushPromises()
+    const target = Array.from(document.body.querySelectorAll('[role="option"]'))
+      .find((el): el is HTMLElement => (el.textContent ?? '').includes(label))
+    expect(target).toBeTruthy()
+    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+    target!.click()
+    await flushPromises()
+  }
+
+  it('行内 ctx Select 选 128K → trigger 显示更新；策略 Select 选 On/Off → payload 双字段落盘', async () => {
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+
+    // 行级两个 combobox（ctx + 策略）；排除 CodingPlanSection 的 quota-type-select
+    const rowCombos = wrapper.findAll('button[role="combobox"]')
+      .filter((c) => c.attributes('data-testid') !== 'quota-type-select')
+    expect(rowCombos.length).toBe(2)
+    const ctxTrigger = rowCombos[0]!
+    const strategyTrigger = rowCombos[1]!
+
+    // ctx：override 条目出厂未设 contextWindow → trigger 显示占位符
+    expect(ctxTrigger.text()).toBe('—')
+
+    // 点选 128K → 行视图显示更新（用户可见）
+    await pickSelectOption(ctxTrigger.element as HTMLElement, '128K')
+    expect(ctxTrigger.text()).toBe('128K')
+
+    // 策略：t() mock 返回 key → 选项与 trigger 文案即 i18n key
+    await pickSelectOption(strategyTrigger.element as HTMLElement, 'composable.thinkingStrategy.onOff')
+    expect(strategyTrigger.text()).toBe('composable.thinkingStrategy.onOff')
+
+    // 改名称制造 dirty → 保存 → payload 携带守卫放行后的双字段（透传进 module 的落盘证据）
+    await wrapper.find('[data-testid="provider-edit-name"]').setValue('Renamed')
+    await wrapper.find('[data-testid="provider-save-btn"]').trigger('click')
+    await flushPromises()
+
+    const models = savePayload().models as Array<{
+      id: string
+      contextWindow?: number
+      thinkingLevelMap?: Record<string, string | null>
+    }>
+    const row = models.find((m) => m.id === 'my-glm-alias')
+    expect(row).toBeTruthy()
+    expect(row!.contextWindow).toBe(128000)
+    expect(row!.thinkingLevelMap).toEqual({ off: 'off', high: 'high', minimal: null, low: null, medium: null })
+  })
+})
