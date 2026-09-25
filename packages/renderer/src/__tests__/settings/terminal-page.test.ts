@@ -17,6 +17,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToast } from '@/composables/useToast'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import type { TerminalConfig } from '@taiji/shared'
 
 function defaultConfig(): TerminalConfig {
@@ -58,6 +60,7 @@ beforeEach(() => {
   toasts.value = []
   configMock.getTerminalConfig.mockClear()
   configMock.setTerminalConfig.mockClear()
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 
 afterEach(() => {

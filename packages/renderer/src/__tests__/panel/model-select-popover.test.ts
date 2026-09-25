@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ModelInfo } from '@taiji/shared'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsStore, createSettingsStore } from '@taiji/core'
 import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
 
 const MODELS: ModelInfo[] = [
@@ -28,7 +28,7 @@ const MODELS: ModelInfo[] = [
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   document.body.innerHTML = ''
 })
 

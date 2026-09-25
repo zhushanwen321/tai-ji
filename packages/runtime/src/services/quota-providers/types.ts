@@ -60,9 +60,34 @@ export function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /** shape guard 共享谓词：可选字段缺失（undefined）合法放行，存在则必须匹配 kind
- * （RT-7#5 字段级 guard 语义——防 `"500"` 等字符串数值被静默接受产错数据）。 */
+ * （RT-7#5 字段级 guard 语义——防 `"500"` 等字符串数值被静默接受产错数据）。
+ * 仅用于 wire 形态已实测稳定的字段；数值字段用 isOptionalNumericField（见下）。 */
 export function isOptionalField(v: unknown, kind: 'number' | 'string' | 'boolean'): boolean {
   return v === undefined || typeof v === kind
+}
+
+/**
+ * wire 数值取值归一：number 或数值串 → 有限 number；其余 → undefined。
+ *
+ * RT-7#5 语义修正（2026-09-24 实测）：「字符串数值 = 类型漂移」的假想与真实 wire 不符——
+ * api.kimi.com/coding/v1/usages 的 limit/used/remaining 以字符串数值下发（`"100"`），
+ * bigmodel.cn quota/limit 的 nextResetTime 以 number epoch-ms 下发。按纯 number 收紧的
+ * guard 会拒真响应归 parse（额度查询恒「获取失败」）。真正的漂移是**无法解析为数值**
+ * （`"abc"` / true / 对象）——由本函数返回 undefined 时 guard 拒收（归 parse）承担。
+ */
+export function numericField(v: unknown): number | undefined {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : undefined
+  }
+  return undefined
+}
+
+/** shape guard 谓词：可选 wire 数值字段——缺失合法放行（该窗口不可知），存在则必须可解析
+ * 为有限数值（number / 数值串），否则归 parse（类型漂移）。 */
+export function isOptionalNumericField(v: unknown): boolean {
+  return v === undefined || numericField(v) !== undefined
 }
 
 /**

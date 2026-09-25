@@ -16,13 +16,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { BuiltinProviderTemplate, ProviderInfo } from '@taiji/shared'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsTransport, provideSettingsStore, createSettingsStore } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const configMock = vi.hoisted(() => ({
   onProviders: vi.fn(() => () => {}),
   // 门面签名 { providers, scopedModels }（settings-lifecycle 解构消费）；裸数组解构得 undefined
   listProviders: vi.fn(async () => ({ providers: [], scopedModels: undefined })),
-  setProvider: vi.fn(async () => {}),
+  setProvider: vi.fn(async () => ({})),
   deleteProvider: vi.fn(async () => {}),
   // wave4 C1/IF3：toggle 持久化走 toggleProviderEnabled（写 enabledModels 白名单），删除按 kind 走 removeProviderByKind
   toggleProviderEnabled: vi.fn(async () => {}),
@@ -86,12 +87,14 @@ const PROVIDERS: ProviderInfo[] = [
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   configMock.setProvider.mockClear()
   configMock.deleteProvider.mockClear()
   configMock.toggleProviderEnabled.mockClear()
   configMock.removeProviderByKind.mockClear()
   configMock.setDefaultModel.mockClear()
+  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映）
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 
 afterEach(() => {

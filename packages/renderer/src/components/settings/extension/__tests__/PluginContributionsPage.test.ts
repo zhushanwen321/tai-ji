@@ -16,8 +16,9 @@
  *   - vi.mock('@/api') 把 config/extension 门面替成可控 mock（ExtensionPage/InstallFlow 依赖）
  *   - vi.mock('@/api/domains/settings') 避免 electronAPI 缺失（chooseDirectory/SystemPage 依赖；
  *     settings 组件已收编走该 seam，不再直取 lib/ipc 原始模块）
- *   - providePlatform + provideSettingsTransport + pinia（SettingsModal 打开时刷新 providers）
- *   - global.provide 注入 SETTINGS_TOAST_KEY/USE_QUOTA_CONFIGURE_KEY/SETTINGS_CONFIG_API_KEY
+ *   - providePlatform + provideSettingsTransport + pinia（SettingsModal 打开时刷新 providers；
+ *     SourceImportSection 的 detectSources 走 seam，由 vitest-settings-transport-setup 默认桩兜底）
+ *   - global.provide 注入 SETTINGS_TOAST_KEY/QUOTA_CONFIGURE_FACTORY_KEY
  *   - global.stubs 把 LoadPaths/ExtensionInstallFlow/ExtensionList 重子组件 stub 掉（聚焦入口 + 子页）
  *   - global.provide PluginSettingsDataSourceKey mock 数据源（TC1/TC2 组件测试）
  */
@@ -28,17 +29,16 @@ import {
   providePlatform,
   provideSettingsTransport,
   __resetPlatformForTesting,
-  __resetSettingsStoreForTesting,
-  __resetSettingsTransportForTesting,
   ContributionRegistry,
   InternalEventBus,
   MountPointRegistry,
   type SettingsTransport,
+  provideSettingsStore,
+  createSettingsStore,
 } from '@taiji/core'
 import {
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
-  SETTINGS_CONFIG_API_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
 } from '@taiji/ui/features/settings'
 import {
   PluginSettingsDataSourceKey,
@@ -53,7 +53,7 @@ vi.mock('@/api', () => ({
     listProviders: vi.fn(async () => ({ providers: [] })),
     // SettingsModal → ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
     refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [] })),
-    setProvider: vi.fn(async () => undefined),
+    setProvider: vi.fn(async () => ({})),
     setSkillDirs: vi.fn(async () => undefined),
     setAgentDirs: vi.fn(async () => undefined),
     setExtensionDirs: vi.fn(async () => undefined),
@@ -109,32 +109,12 @@ vi.mock('@/api/domains/settings', () => ({
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import PluginContributionsPage from '@/components/settings/extension/PluginContributionsPage.vue'
 import { toContributionInfos } from '@/composables/shell/useExtensionHostBridge'
-import { makeQuotaStateStub } from '@/__tests__/helpers/quota-state-stub'
+import { makeQuotaModuleStub } from '@taiji/core/testing'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
-/** 构造最小 SettingsTransport stub（订阅返回 noop 取消函数，请求返回空）。 */
+/** 构造 SettingsTransport stub（[C3] 共享工厂：全 seam 方法面中性默认）。 */
 function stubTransport(): SettingsTransport {
-  const noopUnsub = (): void => {}
-  return {
-    listProviders: async () => ({ providers: [] }),
-    listModels: async () => [],
-    setProvider: async () => undefined,
-    setScopedModels: async () => [],
-    discoverModels: async () => ({ success: true, models: [] }),
-    setSkillDirs: async () => undefined,
-    setAgentDirs: async () => undefined,
-    setExtensionDirs: async () => undefined,
-    onProviders: () => noopUnsub,
-    onModels: () => noopUnsub,
-    onSkills: () => noopUnsub,
-    onAgents: () => noopUnsub,
-    onExtensions: () => noopUnsub,
-    onSkillDirs: () => noopUnsub,
-    onAgentDirs: () => noopUnsub,
-    onExtensionDirs: () => noopUnsub,
-    onDefaults: () => noopUnsub,
-    onSystemPrompt: () => noopUnsub,
-    onTerminalConfig: () => noopUnsub,
-  }
+  return makeSettingsTransportStub()
 }
 
 /** mock 数据源：builtin statusline/tasks 插件 + 贡献可用性（statusbar/sidebar.tab 注册=可用，slash 未注册=置灰+原因）。 */
@@ -185,18 +165,16 @@ function makeDataSource(): PluginSettingsDataSource {
 function settingsModalProvides() {
   return {
     [SETTINGS_TOAST_KEY as symbol]: { error: vi.fn(), info: vi.fn(), warning: vi.fn() },
-    // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaStateStub 的
-    // QuotaConfigureState 返回标注承担（v2 漏成员即编译错）。
-    [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
-    [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
+    // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
+    // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
+    [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
   }
 }
 
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetPlatformForTesting()
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
+  provideSettingsStore(createSettingsStore())
   providePlatform({
     kind: 'mock',
     storage: {

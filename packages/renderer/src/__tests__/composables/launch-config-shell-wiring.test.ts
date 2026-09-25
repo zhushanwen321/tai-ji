@@ -108,7 +108,12 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
 
 import { useNewTaskFlow, resetNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { supportedLevelsOf } from '@/composables/features/new-task/supported-levels'
-import { createSessionFlow, getSettingsStore } from '@taiji/core'
+import {
+  createSessionFlow,
+  getSettingsStore,
+  provideSettingsTransport,
+} from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import {
   __resetLastUsedModelForTesting,
   recordLastUsedModel,
@@ -117,6 +122,16 @@ import {
 } from '@taiji/core/domain/composer'
 import { usePresetStore } from '@/stores/preset'
 import Composer from '@/components/panel/Composer.vue'
+
+// [C3] preset 域调用经 SettingsTransport seam 桩注入（usePiPresets.loadPresets 的数据源探针；
+// 替换原 '@/api' 门面 preset mock 的消费面）。
+beforeEach(() => {
+  provideSettingsTransport(makeSettingsTransportStub({
+    listPresets: presetApiMock.list,
+    getDefaultPreset: presetApiMock.getDefault,
+    setDefaultPreset: presetApiMock.setDefault,
+  }))
+})
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
   return { id: 'ns', label: 'L', cwd: '/x', status: 'idle', lastActiveAt: 1, modelId: '', ...over }

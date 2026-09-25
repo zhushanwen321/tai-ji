@@ -11,11 +11,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { providePlatform, __resetPlatformForTesting } from '../../../platform/port'
 import {
   provideSettingsTransport,
-  __resetSettingsTransportForTesting,
-  type SettingsTransport,
+  createSettingsTransportSlot,
 } from '../transport'
-import { __resetSettingsStoreForTesting, getSettingsStore } from '../settings-store'
-import { useSettings } from '../settings-lifecycle'
+import { makeFakeTransport } from './helpers/fake-transport'
+import { createSettingsStore, getSettingsStore, provideSettingsStore } from '../settings-store'
+import { createSettingsLifecycle } from '../settings-lifecycle'
 import { InMemoryStorage } from './helpers/in-memory-storage'
 import { SYSTEM_KEY } from '../system-storage'
 import type { ProviderInfo, SkillInfo, AgentInfo, ExtensionInfo } from '@taiji/shared'
@@ -26,24 +26,20 @@ import { SCOPED_MODEL_CORE_TOKEN } from './impl-token'
  * on* 返回取消函数（记录被调）。
  */
 function makeRecordingTransport() {
+  // 表 = 触发端宽签名：各用例以字面载荷手动触发，载荷形状由下方调用点 + store 断言对齐
   const handlers: Record<string, (arg0: unknown, arg1?: unknown) => void> = {}
   const unsubs: Array<() => void> = []
-  // register 返回 vi.fn：外层可断言订阅注册次数；调用时存 handler + 返回 unsub spy
-  const register = (name: string) => vi.fn((h: (a: unknown, b?: unknown) => void) => {
-    handlers[name] = h
+  // register 返回 vi.fn：外层可断言订阅注册次数；调用时存 handler + 返回 unsub spy。
+  // 注册端 never[] 参数 = 反变全接受，与 SettingsTransport 全部 on* 槽位兼容
+  //（宽化的 (a: unknown, ...) 会被槽位真实签名拒绝——overrides 实参表逐签名校验）。
+  const register = (name: string) => vi.fn((h: (...args: never[]) => void) => {
+    handlers[name] = h as unknown as (arg0: unknown, arg1?: unknown) => void
     const unsub = vi.fn(() => {})
     unsubs.push(unsub)
     return unsub
   })
-  const transport: SettingsTransport = {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    listModels: vi.fn(async () => []),
-    setProvider: vi.fn(async () => {}),
-    setScopedModels: vi.fn(async () => [] as string[]),
-    discoverModels: vi.fn(async () => ({ success: true })),
-    setSkillDirs: vi.fn(async () => {}),
-    setAgentDirs: vi.fn(async () => {}),
-    setExtensionDirs: vi.fn(async () => {}),
+  // [C3] 请求/动作默认值由共享工厂提供（seam 方法面全覆盖）；on* 用 register 包装记录 handler
+  const transport = makeFakeTransport({
     onProviders: register('providers'),
     onModels: register('models'),
     onSkills: register('skills'),
@@ -55,7 +51,7 @@ function makeRecordingTransport() {
     onDefaults: register('defaults'),
     onSystemPrompt: register('systemPrompt'),
     onTerminalConfig: register('terminalConfig'),
-  }
+  })
   return { transport, handlers, unsubs }
 }
 
@@ -65,11 +61,13 @@ function provideBase() {
   return storage
 }
 
+/** 每用例新生命周期实例（unsubs/initialized 收进闭包，实例即隔离）。 */
+let lifecycle: ReturnType<typeof createSettingsLifecycle>
+
 beforeEach(() => {
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
   __resetPlatformForTesting()
-  useSettings().resetSettingsInit()
+  provideSettingsStore(createSettingsStore())
+  lifecycle = createSettingsLifecycle()
 })
 
 describe('init 幂等守卫', () => {
@@ -77,7 +75,7 @@ describe('init 幂等守卫', () => {
     provideBase()
     const { transport } = makeRecordingTransport()
     provideSettingsTransport(transport)
-    const { init } = useSettings()
+    const { init } = lifecycle
     await init()
     await init()
     expect(transport.onProviders).toHaveBeenCalledTimes(1)
@@ -97,7 +95,7 @@ describe('init 幂等守卫', () => {
     provideBase()
     const { transport } = makeRecordingTransport()
     provideSettingsTransport(transport)
-    const { init, dispose } = useSettings()
+    const { init, dispose } = lifecycle
     await init()
     dispose()
     await init()
@@ -110,7 +108,7 @@ describe('11 条订阅注册 + handler 写 store', () => {
     provideBase()
     const { transport, handlers } = makeRecordingTransport()
     provideSettingsTransport(transport)
-    const { init } = useSettings()
+    const { init } = lifecycle
     await init()
     const store = getSettingsStore()
 
@@ -161,7 +159,7 @@ describe('system 初始化（IF3）', () => {
     storage.set(SYSTEM_KEY, JSON.stringify({ theme: 'light', locale: 'en-US' }))
     const { transport } = makeRecordingTransport()
     provideSettingsTransport(transport)
-    const { init } = useSettings()
+    const { init } = lifecycle
     await init()
     const store = getSettingsStore()
     expect(store.system.value.theme).toBe('light')
@@ -175,7 +173,7 @@ describe('system 初始化（IF3）', () => {
     provideBase()
     const { transport } = makeRecordingTransport()
     provideSettingsTransport(transport)
-    const { init } = useSettings()
+    const { init } = lifecycle
     await init()
     const store = getSettingsStore()
     expect(store.system.value.theme).toBe('dark')
@@ -191,7 +189,7 @@ describe('refreshProviders 分支', () => {
       providers: [{ id: 'p1' as ProviderId, name: 'P1', apiKeySet: false, status: 'connected', models: [] }],
     })
     provideSettingsTransport(transport)
-    const { refreshProviders } = useSettings()
+    const { refreshProviders } = lifecycle
     await refreshProviders()
     const store = getSettingsStore()
     expect(store.providers.value).toHaveLength(1)
@@ -206,7 +204,7 @@ describe('refreshProviders 分支', () => {
       scopedModels: ['openai/gpt-4o', 'deepseek/v3'],
     })
     provideSettingsTransport(transport)
-    const { refreshProviders } = useSettings()
+    const { refreshProviders } = lifecycle
     await refreshProviders()
     const store = getSettingsStore()
     expect(store.scopedModels.value).toEqual(['openai/gpt-4o', 'deepseek/v3'])
@@ -221,7 +219,7 @@ describe('refreshProviders 分支', () => {
     provideSettingsTransport(transport)
     const store = getSettingsStore()
     store.scopedModels.value = ['openai/gpt-4o']
-    const { refreshProviders } = useSettings()
+    const { refreshProviders } = lifecycle
     await refreshProviders()
     // undefined 不覆盖（对齐 onProviders handler 的守卫语义），由广播通道兜底推回
     expect(store.scopedModels.value).toEqual(['openai/gpt-4o'])
@@ -233,7 +231,7 @@ describe('refreshProviders 分支', () => {
     ;(transport.listProviders as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('net'))
     provideSettingsTransport(transport)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const { refreshProviders } = useSettings()
+    const { refreshProviders } = lifecycle
     await expect(refreshProviders()).resolves.toBeUndefined()
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
@@ -248,7 +246,7 @@ describe('refreshModels 分支', () => {
       { id: 'm1', name: 'M1', providerId: 'p1', providerName: 'P1' },
     ])
     provideSettingsTransport(transport)
-    const { refreshModels } = useSettings()
+    const { refreshModels } = lifecycle
     await refreshModels()
     const store = getSettingsStore()
     expect(store.models.value).toHaveLength(1)
@@ -261,7 +259,7 @@ describe('refreshModels 分支', () => {
     ;(transport.listModels as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('net'))
     provideSettingsTransport(transport)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const { refreshModels } = useSettings()
+    const { refreshModels } = lifecycle
     await expect(refreshModels()).resolves.toBeUndefined()
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
@@ -273,7 +271,7 @@ describe('dispose 清理', () => {
     provideBase()
     const { transport, unsubs } = makeRecordingTransport()
     provideSettingsTransport(transport)
-    const { init, dispose } = useSettings()
+    const { init, dispose } = lifecycle
     await init()
     expect(unsubs.length).toBe(11)
     dispose()
@@ -282,10 +280,10 @@ describe('dispose 清理', () => {
 })
 
 describe('transport 未注入 fail-fast', () => {
-  it('init 前未 provideSettingsTransport → throw 含 getSettingsTransport', async () => {
-    provideBase()
-    const { init } = useSettings()
-    await expect(init()).rejects.toThrow('getSettingsTransport')
+  it('未 provideSettingsTransport → 新 slot get() throw 含 getSettingsTransport', () => {
+    // 不碰默认 slot（行为用例已向其注入），用独立 slot 断言 fail-fast 文案
+    const slot = createSettingsTransportSlot()
+    expect(() => slot.get()).toThrow('getSettingsTransport')
   })
 })
 
@@ -304,7 +302,7 @@ describe('RD-3#10: init 失败可重试（成功后才置 initialized，失败�
     })
     const { transport, unsubs } = makeRecordingTransport()
     provideSettingsTransport(transport)
-    const { init } = useSettings()
+    const { init } = lifecycle
 
     // 首次 init 失败（reject），订阅已注册但被回滚（unsub 被调）
     await expect(init()).rejects.toThrow('storage read failed')
@@ -332,7 +330,7 @@ describe('A4: onProviders 推送 scopedModels 时 store 更新', () => {
     provideBase()
     const { transport, handlers } = makeRecordingTransport()
     provideSettingsTransport(transport)
-    const { init } = useSettings()
+    const { init } = lifecycle
     await init()
     const store = getSettingsStore()
     expect(store.scopedModels.value).toEqual([])
@@ -351,7 +349,7 @@ describe('A4: onProviders 推送 scopedModels 时 store 更新', () => {
     provideBase()
     const { transport, handlers } = makeRecordingTransport()
     provideSettingsTransport(transport)
-    const { init } = useSettings()
+    const { init } = lifecycle
     await init()
     const store = getSettingsStore()
 

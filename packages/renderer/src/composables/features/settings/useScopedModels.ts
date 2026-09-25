@@ -12,8 +12,8 @@
  * 依赖方向：@taiji/shared 类型 + @/api(config) + settingsStore。
  */
 import { computed } from 'vue'
-import { getSettingsStore } from '@taiji/core'
-import { config } from '@/api'
+import { getSettingsStore, getSettingsTransport } from '@taiji/core'
+import { optimisticUpdate, refCell } from '@taiji/core/foundation/optimistic-update'
 import type { ScopedRenderItem, SelectableModel } from '@taiji/ui/features/settings'
 
 // 防重入：setScopedModels 是整列表覆写，in-flight 期间的新触发会拿含乐观值的快照当 old，
@@ -72,21 +72,18 @@ export function useScopedModels() {
     return result
   })
 
-  // ── 操作函数（乐观更新 + 失败回滚 + rethrow）──
+  // ── 操作函数（乐观更新协议：失败回滚 + rethrow）──
   // 回滚后 rethrow：调用方（ProviderPage）统一反馈 inline error + toast，此处不做 UI 副作用。
 
-  /** 公共 mutation 管线：busy 守卫 → 乐观写 next → RPC → 写回权威值 / 回滚 rethrow。 */
+  /** 公共 mutation 管线：busy 守卫 → 协议化乐观写 next → RPC → 写回权威值 / 回滚 rethrow。 */
   async function mutateScoped(next: string[]): Promise<void> {
     if (scopedMutationInFlight) return
-    const old = [...settingsStore.scopedModels.value]
     scopedMutationInFlight = true
-    settingsStore.scopedModels.value = next
     try {
-      const result = await config.setScopedModels(next)
+      const result = await optimisticUpdate(refCell(settingsStore.scopedModels), next, (applied) =>
+        getSettingsTransport().setScopedModels(applied),
+      )
       settingsStore.scopedModels.value = result
-    } catch (e) {
-      settingsStore.scopedModels.value = old
-      throw e
     } finally {
       scopedMutationInFlight = false
     }

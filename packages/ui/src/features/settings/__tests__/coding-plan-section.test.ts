@@ -1,37 +1,42 @@
 /**
- * CodingPlanSection 组件测试（契约 v2 重写 —— coding-plan-quota-config-ux §7.4 方案 B）。
+ * CodingPlanSection 组件测试（契约 v2 —— coding-plan-quota-config-ux §7.4 方案 B；C1 seam 改打
+ * QuotaConfigureModule 接口）。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi，禁 node:test）。
  * 运行命令：cd packages/ui && npx vitest run src/features/settings/__tests__/coding-plan-section.test.ts
  *
+ * C1 后的测试面：组件经 QUOTA_CONFIGURE_MODULE_KEY 直接持有 module 实例（无 props / 无 emits），
+ * 故用例在 module 接口上布置状态（view / draft 透镜）、在 module 接口上验收写动作
+ * （selectType / setEnabled / saveAndTest / 草稿直写）——interface is the test surface。
+ * 断言的用户可见形态（DOM testid / 文案 / 置灰）与重构前完全一致。
+ *
  * 覆盖设计条款（每条用例名标注断言的是哪一条）：
  * ① D8（§6.9）未选类型态：只渲染类型下拉 + 说明，无开关 / 凭证区 / 按钮 / 结果块
  * ② D1（§6.2）单按钮置灰矩阵 + 字段级提示白名单（§7.4：'type' 结构性不进提示渲染）
- * ③ D3（§6.4）凭证来源分段控件：provider 项按 providerCredentialAvailable 置 disabled，切换 emit
- * ④ §7.4 跨区块时序两套 provider 凭据文案（providerCredentialPendingSave 区分）
+ * ③ D3（§6.4）凭证来源分段控件：provider 项按 providerAvailable 置 disabled，切换写草稿
+ * ④ §7.4 跨区块时序两套 provider 凭据文案（providerWarning 分档）
  * ⑤ D7（§6.8）去掩码：输入框只放草稿，不回填掩码；「已配置 / 必填」为独立标记
- * ⑤b §7.4 徽标取值规则：徽标与字段级提示同源（readiness.missing），磁盘原始标记（provider.quota
- *    下的 cookieSet / apiKeySet / workspace）不再经 prop 传入，也不能越权点亮「已配置」（反向用例）
- * ⑤d §7 残留 11 专属 Key 适用性：authKinds 不含 api-key（如 ['oauth']）→ 不渲染凭证来源控件
- * ⑤c 定向复审三条探针（真实 DOM 回归守卫）：① 类型切换后徽标与专属 Key 占位不得出现「已配置」
- *    语义；② preset 未命中不出现「已配置」徽标；③ preset 未命中渲染「重选类型」指引且参数区不渲染
+ * ⑤b §7.4 徽标取值规则：徽标与字段级提示同源（readiness.missing），磁盘原始标记不能越权点亮
+ * ⑤d §7 残留 11 专属 Key 适用性：exclusiveApplicable=false → 不渲染凭证来源控件
+ * ⑤c 定向复审三条探针（真实 DOM 回归守卫）
  * ⑥ §5.2 路径 3/4 失败态文案 + cookie 变体（unauthorized / no-credential / no-subscription）
- * ⑦ D2（§6.3）单按钮触发 saveAndTest emit
- * 附带保留：B-3 used/limit 双轨窗口、「查看上次成功数据」折叠、workspace 块事件上抛
+ * ⑦ D2（§6.3）单按钮触发 saveAndTest
+ * 附带保留：B-3 used/limit 双轨窗口、「查看上次成功数据」折叠、workspace 块输入直写
  *
  * 三视角（项目红线：每条用例至少一个用户可见 DOM 断言）：
  *  - 观察者（首屏冒烟）：未选类型态 / 置灰态 / 分段控件 / 窗口双轨的渲染 gate
  *  - 使用者（黑盒）：按钮置灰与可点、提示文案、切换来源、失败态与折叠交互
- *  - 构建者（白盒）：readiness.missing / providerCredentialAvailable / providerCredentialPendingSave
- *    props → DOM 分支的映射
+ *  - 构建者（白盒）：view/draft 透镜 → DOM 分支的映射，写动作 → module 接口回写
  *
- * 组件纯展示（状态在 useQuotaConfigure），直接 mount 传 props，无 transport/pinia 依赖。
  * i18n 经 ui vitest.setup mock：t() 返回 key（命名参数 append 到末尾），故断言 key 而非中文文案。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { NormalizedQuotaRow } from '@taiji/shared'
+import type { QuotaConfigureModule, QuotaFailureKind, QuotaTestStatus } from '@taiji/core'
 import CodingPlanSection from '../coding-plan/CodingPlanSection.vue'
+import { QUOTA_CONFIGURE_MODULE_KEY } from '../injection-keys'
+import { makeQuotaModuleStub } from '@taiji/core/testing'
 
 /** 三窗口 fixture：5h 带绝对量（requests）、周仅 pct、月 ∞（pct=null 隐藏） */
 const ROW_WITH_ABS: NormalizedQuotaRow = {
@@ -44,9 +49,12 @@ const ROW_WITH_ABS: NormalizedQuotaRow = {
 }
 
 let wrapper: ReturnType<typeof mount> | null = null
+/** 当前用例的 module 桩（写动作断言经它） */
+let quota: QuotaConfigureModule
 
 beforeEach(() => {
   vi.clearAllMocks()
+  quota = makeQuotaModuleStub({ state: 'ready' })
 })
 afterEach(() => {
   wrapper?.unmount()
@@ -55,33 +63,24 @@ afterEach(() => {
 })
 
 /**
- * 最小 props（纯展示组件，状态全由父注入）。
- * 默认 = 「已选 api-key 类类型且齐备」的常规态；各用例按需覆盖单项。
- * authKinds 必传（prop 无默认值）：凭证来源分段控件由 supportsExclusiveCredential(authKinds)
- * 门控（§7 残留 11），这里给 ['api-key'] 才能让 D3 用例拥有控件。
+ * mount CodingPlanSection（module 实例经注入 seam 提供；attachTo 供 portal 查询）。
+ * 默认桩态 = 「已选 api-key 类类型且齐备」的常规态；各用例先改 quota 再 mount。
  */
-function mountSection(props: Record<string, unknown>): ReturnType<typeof mount> {
+function mountSection(): ReturnType<typeof mount> {
   return mount(CodingPlanSection, {
-    props: {
-      fetcherId: 'zhipu',
-      enabled: true,
-      cookieInput: '',
-      apiKeyInput: '',
-      credentialSource: 'provider',
-      providerCredentialAvailable: true,
-      readiness: { ready: true, missing: [] },
-      testStatus: 'idle',
-      testErrorMsg: '',
-      quotaRow: null,
-      lastFetchAt: null,
-      isCookieAuth: false,
-      configuring: false,
-      configureErrorMsg: '',
-      authKinds: ['api-key'],
-      ...props,
+    global: {
+      provide: {
+        [QUOTA_CONFIGURE_MODULE_KEY]: quota,
+      },
     },
     attachTo: document.body,
   })
+}
+
+/** 布置失败态（test 透镜）：分档 + cookie 形态 + 兜底消息 */
+function arrangeFailure(kind: QuotaFailureKind, opts: { cookieAuth?: boolean; message?: string; status?: QuotaTestStatus } = {}): void {
+  quota.test.value.status = opts.status ?? 'error'
+  quota.test.value.failure = { kind, cookieAuth: opts.cookieAuth ?? false, message: opts.message ?? '' }
 }
 
 /** 单按钮（唯一主动作） */
@@ -90,12 +89,12 @@ const SAVE_TEST = '[data-testid="quota-save-test-btn"]'
 // ══ ① D8：未选类型态 ═══════════════════════════════════════════════════════
 
 describe('① D8 未选类型态：只渲染下拉 + 一句说明', () => {
-  it('fetcherId 为空 → 渲染类型下拉与 quotaTypeFirstHint，且不渲染开关/凭证区/按钮/结果块', async () => {
-    wrapper = mountSection({
-      fetcherId: undefined,
-      // 契约里未选类型的 readiness 恒为 { ready:false, missing:['type'] }（§7.2 伪码第一分支）
-      readiness: { ready: false, missing: ['type'] },
-    })
+  it('type.undetermined → 渲染类型下拉与 quotaTypeFirstHint，且不渲染开关/凭证区/按钮/结果块', async () => {
+    // 契约里未选类型的 readiness 恒为 { ready:false, missing:['type'] }（module 派生）
+    quota.view.value.type.selected = undefined
+    quota.view.value.type.undetermined = true
+    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    wrapper = mountSection()
     await flushPromises()
 
     // 用户可见：下拉仍在（区块对所有 provider 显示）+ 说明文案
@@ -115,10 +114,10 @@ describe('① D8 未选类型态：只渲染下拉 + 一句说明', () => {
   })
 
   it('未选类型时 missing=["type"] 不产生字段级提示（白名单三键之外无文案，§7.4）', async () => {
-    wrapper = mountSection({
-      fetcherId: undefined,
-      readiness: { ready: false, missing: ['type'] },
-    })
+    quota.view.value.type.selected = undefined
+    quota.view.value.type.undetermined = true
+    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-missing-cookie"]').exists()).toBe(false)
@@ -131,7 +130,9 @@ describe('① D8 未选类型态：只渲染下拉 + 一句说明', () => {
 
 describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩阵', () => {
   it('readiness.ready=false → 按钮 disabled 且渲染 quotaReadyHint 旁注', async () => {
-    wrapper = mountSection({ readiness: { ready: false, missing: ['cookie'] }, isCookieAuth: true })
+    quota.view.value.readiness = { ready: false, missing: ['cookie'] }
+    quota.view.value.credential.form = 'cookie'
+    wrapper = mountSection()
     await flushPromises()
 
     const btn = wrapper.find<HTMLButtonElement>(SAVE_TEST)
@@ -144,7 +145,8 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   })
 
   it('readiness.ready=true → 按钮可点且不渲染置灰旁注（两个态同一个按钮，动作合一）', async () => {
-    wrapper = mountSection({ readiness: { ready: true, missing: [] }, isCookieAuth: true })
+    quota.view.value.credential.form = 'cookie'
+    wrapper = mountSection()
     await flushPromises()
 
     const btn = wrapper.find<HTMLButtonElement>(SAVE_TEST)
@@ -153,7 +155,8 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   })
 
   it('configuring=true → 按钮禁用且文案切 quotaSaveAndTestRunning（进行中不可重复提交）', async () => {
-    wrapper = mountSection({ readiness: { ready: true, missing: [] }, configuring: true })
+    quota.view.value.configuring = true
+    wrapper = mountSection()
     await flushPromises()
 
     const btn = wrapper.find<HTMLButtonElement>(SAVE_TEST)
@@ -162,11 +165,10 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   })
 
   it('missing=["cookie"]（cookie 类）→ 字段下方渲染 quotaMissingCookie 提示', async () => {
-    wrapper = mountSection({
-      isCookieAuth: true,
-      fetcherId: 'mimo',
-      readiness: { ready: false, missing: ['cookie'] },
-    })
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'mimo'
+    quota.view.value.readiness = { ready: false, missing: ['cookie'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const hint = wrapper.find('[data-testid="quota-missing-cookie"]')
@@ -178,10 +180,9 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   })
 
   it('missing=["apiKey"]（来源=专属 Key）→ 专属 Key 输入下方渲染 quotaMissingApiKey 提示', async () => {
-    wrapper = mountSection({
-      credentialSource: 'exclusive',
-      readiness: { ready: false, missing: ['apiKey'] },
-    })
+    quota.draft.value.credentialSource = 'exclusive'
+    quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-exclusive-key-block"]').exists()).toBe(true)
@@ -192,12 +193,11 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   })
 
   it('missing=["workspace"]（资源维度类型）→ workspace 输入下方渲染 quotaMissingWorkspace 提示', async () => {
-    wrapper = mountSection({
-      needsWorkspace: true,
-      fetcherId: 'opencode-go',
-      isCookieAuth: true,
-      readiness: { ready: false, missing: ['workspace'] },
-    })
+    quota.view.value.workspace.required = true
+    quota.view.value.type.selected = 'opencode-go'
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.readiness = { ready: false, missing: ['workspace'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const hint = wrapper.find('[data-testid="quota-missing-workspace"]')
@@ -206,12 +206,11 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   })
 
   it('missing 同时含多键 → 逐键各渲染自己的提示（不写兜底循环，§7.4 显式白名单）', async () => {
-    wrapper = mountSection({
-      isCookieAuth: true,
-      fetcherId: 'opencode-go',
-      needsWorkspace: true,
-      readiness: { ready: false, missing: ['cookie', 'workspace'] },
-    })
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'opencode-go'
+    quota.view.value.workspace.required = true
+    quota.view.value.readiness = { ready: false, missing: ['cookie', 'workspace'] }
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-missing-cookie"]').text()).toBe(
@@ -225,10 +224,10 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   it("missing 含 'type'（preset 未命中）→ 走 D8 同形态：三键提示与参数区按钮全不渲染（'type' 结构性无文案）", async () => {
     // 草稿有值但不在预设表（历史数据 / 手工编辑 providers.json）是「有值 + missing=['type']」的
     // 唯一可达来源；readiness 该分支与「未选类型」同形态（§7.2），UI 必须同样收起到下拉 + 说明。
-    wrapper = mountSection({
-      fetcherId: 'legacy-unknown',
-      readiness: { ready: false, missing: ['type'] },
-    })
+    quota.view.value.type.selected = 'legacy-unknown'
+    quota.view.value.type.undetermined = true
+    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-missing-cookie"]').exists()).toBe(false)
@@ -239,11 +238,11 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   })
 })
 
-// ══ ③ D3：凭证来源分段控件 ═════════════════════════════════════════════════
+// ══ ③ D3：凭证来源分段控件 ═══════════════════════════════════════════════════
 
 describe('③ D3 凭证来源分段控件（api-key 类专用）', () => {
-  it('providerCredentialAvailable=true → provider 项可点；exclusive 项也可点', async () => {
-    wrapper = mountSection({ providerCredentialAvailable: true })
+  it('providerAvailable=true → provider 项可点；exclusive 项也可点', async () => {
+    wrapper = mountSection()
     await flushPromises()
 
     const providerBtn = wrapper.find<HTMLButtonElement>('[data-testid="quota-source-provider-btn"]')
@@ -256,11 +255,10 @@ describe('③ D3 凭证来源分段控件（api-key 类专用）', () => {
     expect(exclusiveBtn.text()).toContain('settings.providerEdit.quotaSourceExclusive')
   })
 
-  it('providerCredentialAvailable=false → provider 项置 disabled（无可用凭据不能选它），exclusive 项仍可点', async () => {
-    wrapper = mountSection({
-      providerCredentialAvailable: false,
-      readiness: { ready: false, missing: ['apiKey'] },
-    })
+  it('providerAvailable=false → provider 项置 disabled（无可用凭据不能选它），exclusive 项仍可点', async () => {
+    quota.view.value.credential.providerAvailable = false
+    quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const providerBtn = wrapper.find<HTMLButtonElement>('[data-testid="quota-source-provider-btn"]')
@@ -270,19 +268,22 @@ describe('③ D3 凭证来源分段控件（api-key 类专用）', () => {
     ).toBe(false)
   })
 
-  it("点 exclusive 项 → emit update:credentialSource('exclusive')；选中态渲染专属 Key 输入块", async () => {
-    wrapper = mountSection({ credentialSource: 'provider' })
+  it('点 exclusive 项 → 草稿来源写为 exclusive；选中态渲染专属 Key 输入块 + 来源说明', async () => {
+    wrapper = mountSection()
     await flushPromises()
 
     // 未选 exclusive 时不渲染专属 Key 输入块
     expect(wrapper.find('[data-testid="quota-exclusive-key-block"]').exists()).toBe(false)
 
     await wrapper.find('[data-testid="quota-source-exclusive-btn"]').trigger('click')
-    expect(wrapper.emitted('update:credentialSource')?.at(-1)).toEqual(['exclusive'])
+    // 写动作回写草稿（D3：随 saveAndTest 落盘）
+    expect(quota.draft.value.credentialSource).toBe('exclusive')
 
     // 父组件回流后（credentialSource='exclusive'）渲染专属 Key 块 + 来源说明
     wrapper.unmount()
-    wrapper = mountSection({ credentialSource: 'exclusive' })
+    quota.draft.value.credentialSource = 'exclusive'
+    quota.view.value.credential.sourceHint = 'exclusive'
+    wrapper = mountSection()
     await flushPromises()
     expect(wrapper.find('[data-testid="quota-exclusive-key-block"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="quota-source-hint"]').text()).toBe(
@@ -290,29 +291,28 @@ describe('③ D3 凭证来源分段控件（api-key 类专用）', () => {
     )
   })
 
-  it("点 provider 项（可用时）→ emit update:credentialSource('provider')；aria-pressed 表达当前选择", async () => {
-    wrapper = mountSection({ credentialSource: 'exclusive', providerCredentialAvailable: true })
+  it('点 provider 项（可用时）→ 草稿来源写为 provider；aria-pressed 表达当前选择', async () => {
+    quota.draft.value.credentialSource = 'exclusive'
+    wrapper = mountSection()
     await flushPromises()
 
     const providerBtn = wrapper.find('[data-testid="quota-source-provider-btn"]')
     expect(providerBtn.attributes('aria-pressed')).toBe('false')
     await providerBtn.trigger('click')
-    expect(wrapper.emitted('update:credentialSource')?.at(-1)).toEqual(['provider'])
+    expect(quota.draft.value.credentialSource).toBe('provider')
   })
 
-  it('来源说明按凭据形态分叉：oauth 就绪 → OAuth 文案；否则 API Key 文案', async () => {
-    wrapper = mountSection({
-      credentialSource: 'provider',
-      authKinds: ['api-key', 'oauth'],
-      oauthReady: true,
-    })
+  it('来源说明按 module 分档渲染：providerOauth → OAuth 文案；providerApiKey → API Key 文案', async () => {
+    quota.view.value.credential.sourceHint = 'providerOauth'
+    wrapper = mountSection()
     await flushPromises()
     expect(wrapper.find('[data-testid="quota-source-hint"]').text()).toBe(
       'settings.providerEdit.quotaSourceProviderOauthHint',
     )
 
     wrapper.unmount()
-    wrapper = mountSection({ credentialSource: 'provider', authKinds: ['api-key'], oauthReady: false })
+    quota.view.value.credential.sourceHint = 'providerApiKey'
+    wrapper = mountSection()
     await flushPromises()
     expect(wrapper.find('[data-testid="quota-source-hint"]').text()).toBe(
       'settings.providerEdit.quotaSourceProviderApiKeyHint',
@@ -320,21 +320,22 @@ describe('③ D3 凭证来源分段控件（api-key 类专用）', () => {
   })
 
   it('cookie 类不渲染分段控件（来源只对 api-key 类有意义）', async () => {
-    wrapper = mountSection({ isCookieAuth: true, fetcherId: 'mimo' })
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'mimo'
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-credential-source"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="quota-cookie-block"]').exists()).toBe(true)
   })
 
-  it("⑤d authKinds 不含 api-key 且非 cookie（如 ['oauth']）→ 分段控件与专属 Key 块都不渲染（§7 残留 11）", async () => {
+  it('⑤d exclusiveApplicable=false（如 auth=[oauth]）→ 分段控件与专属 Key 块都不渲染（§7 残留 11）', async () => {
     // UI 不得显示 runtime 不会采用的选项：auth=['oauth'] 时 runtime 的 resolveCredential
-    // 不收窄 exclusive（supportsExclusiveCredential=false），UI 必须同判据。
-    wrapper = mountSection({
-      fetcherId: 'oauth-only',
-      authKinds: ['oauth'],
-      credentialSource: 'exclusive',
-    })
+    // 不收窄 exclusive（supportsExclusiveCredential=false），module 判定同源，UI 只管渲染。
+    quota.view.value.credential.exclusiveApplicable = false
+    quota.draft.value.credentialSource = 'exclusive'
+    quota.view.value.type.selected = 'oauth-only'
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-credential-source"]').exists()).toBe(false)
@@ -343,13 +344,16 @@ describe('③ D3 凭证来源分段控件（api-key 类专用）', () => {
     expect(wrapper.find('[data-testid="quota-enabled-switch"]').exists()).toBe(true)
   })
 
-  it("⑤d authKinds=['api-key'] / ['api-key','oauth'] → 分段控件仍渲染（防回归：门控不得藏掉 api-key 类）", async () => {
-    wrapper = mountSection({ fetcherId: 'zhipu', authKinds: ['api-key'] })
+  it('⑤d exclusiveApplicable=true → 分段控件仍渲染（防回归：门控不得藏掉 api-key 类）', async () => {
+    quota.view.value.type.selected = 'zhipu'
+    wrapper = mountSection()
     await flushPromises()
     expect(wrapper.find('[data-testid="quota-credential-source"]').exists()).toBe(true)
 
     wrapper.unmount()
-    wrapper = mountSection({ fetcherId: 'kimi-coding', authKinds: ['api-key', 'oauth'], credentialSource: 'exclusive' })
+    quota.view.value.type.selected = 'kimi-coding'
+    quota.draft.value.credentialSource = 'exclusive'
+    wrapper = mountSection()
     await flushPromises()
     expect(wrapper.find('[data-testid="quota-credential-source"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="quota-exclusive-key-block"]').exists()).toBe(true)
@@ -359,13 +363,12 @@ describe('③ D3 凭证来源分段控件（api-key 类专用）', () => {
 // ══ ④ §7.4：Provider 凭据不可用的两套文案 ═══════════════════════════════════
 
 describe('④ §7.4 跨区块时序：provider 凭据不可用的两套文案', () => {
-  it('pendingSave=false（草稿也空）→ 「还没有可用的 API Key，请先填写，或改用专属 Key」', async () => {
-    wrapper = mountSection({
-      credentialSource: 'provider',
-      providerCredentialAvailable: false,
-      providerCredentialPendingSave: false,
-      readiness: { ready: false, missing: ['apiKey'] },
-    })
+  it("providerWarning='missing'（草稿也空）→ 「还没有可用的 API Key，请先填写，或改用专属 Key」", async () => {
+    quota.draft.value.credentialSource = 'provider'
+    quota.view.value.credential.providerAvailable = false
+    quota.view.value.credential.providerWarning = 'missing'
+    quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const warn = wrapper.find('[data-testid="quota-provider-credential-warning"]')
@@ -373,13 +376,12 @@ describe('④ §7.4 跨区块时序：provider 凭据不可用的两套文案', 
     expect(warn.text()).toBe('settings.providerEdit.quotaProviderCredentialMissing')
   })
 
-  it('pendingSave=true（表单已填但未保存 provider）→ 「已填写 API Key，保存 provider 配置后即可查询」', async () => {
-    wrapper = mountSection({
-      credentialSource: 'provider',
-      providerCredentialAvailable: false,
-      providerCredentialPendingSave: true,
-      readiness: { ready: false, missing: ['apiKey'] },
-    })
+  it("providerWarning='pendingSave'（表单已填但未保存 provider）→ 「已填写 API Key，保存 provider 配置后即可查询」", async () => {
+    quota.draft.value.credentialSource = 'provider'
+    quota.view.value.credential.providerAvailable = false
+    quota.view.value.credential.providerWarning = 'pendingSave'
+    quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const warn = wrapper.find('[data-testid="quota-provider-credential-warning"]')
@@ -388,19 +390,21 @@ describe('④ §7.4 跨区块时序：provider 凭据不可用的两套文案', 
     expect(warn.text()).not.toBe('settings.providerEdit.quotaProviderCredentialMissing')
   })
 
-  it('providerCredentialAvailable=true → 不渲染该警告（有凭据时无话可说）', async () => {
-    wrapper = mountSection({ credentialSource: 'provider', providerCredentialAvailable: true })
+  it('providerWarning=null → 不渲染该警告（有凭据时无话可说）', async () => {
+    quota.draft.value.credentialSource = 'provider'
+    quota.view.value.credential.providerAvailable = true
+    quota.view.value.credential.providerWarning = null
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-provider-credential-warning"]').exists()).toBe(false)
   })
 
   it('来源=exclusive 时不渲染 provider 警告（改走专属 Key 提示）', async () => {
-    wrapper = mountSection({
-      credentialSource: 'exclusive',
-      providerCredentialAvailable: false,
-      readiness: { ready: false, missing: ['apiKey'] },
-    })
+    quota.draft.value.credentialSource = 'exclusive'
+    quota.view.value.credential.providerAvailable = false
+    quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-provider-credential-warning"]').exists()).toBe(false)
@@ -412,12 +416,10 @@ describe('④ §7.4 跨区块时序：provider 凭据不可用的两套文案', 
 
 describe('⑤ D7 去掩码：输入框只放草稿，「已配置」是独立标记', () => {
   it('cookie 已配置但草稿为空 → 输入框为空（不回填掩码），旁边标 quotaConfiguredBadge', async () => {
-    wrapper = mountSection({
-      isCookieAuth: true,
-      fetcherId: 'mimo',
-      cookieInput: '',
-      readiness: { ready: true, missing: [] },
-    })
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'mimo'
+    quota.draft.value.cookie = ''
+    wrapper = mountSection()
     await flushPromises()
 
     const input = wrapper.find<HTMLTextAreaElement>('[data-testid="quota-cookie-input"]')
@@ -431,11 +433,10 @@ describe('⑤ D7 去掩码：输入框只放草稿，「已配置」是独立标
   })
 
   it('cookie 未配置 → 标 quotaRequiredBadge（必填），与「已配置」互斥', async () => {
-    wrapper = mountSection({
-      isCookieAuth: true,
-      fetcherId: 'mimo',
-      readiness: { ready: false, missing: ['cookie'] },
-    })
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'mimo'
+    quota.view.value.readiness = { ready: false, missing: ['cookie'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const block = wrapper.find('[data-testid="quota-cookie-block"]').text()
@@ -444,11 +445,9 @@ describe('⑤ D7 去掩码：输入框只放草稿，「已配置」是独立标
   })
 
   it('专属 Key 已配置但草稿为空 → 输入框为空 + quotaApiKeySetPlaceholder（不回填密文）', async () => {
-    wrapper = mountSection({
-      credentialSource: 'exclusive',
-      apiKeyInput: '',
-      readiness: { ready: true, missing: [] },
-    })
+    quota.draft.value.credentialSource = 'exclusive'
+    quota.draft.value.apiKey = ''
+    wrapper = mountSection()
     await flushPromises()
 
     const input = wrapper.find<HTMLInputElement>('[data-testid="quota-apikey-input"]')
@@ -460,7 +459,10 @@ describe('⑤ D7 去掩码：输入框只放草稿，「已配置」是独立标
   })
 
   it('用户输入草稿 → 渲染的 value 即草稿原文（屏幕即真相）', async () => {
-    wrapper = mountSection({ isCookieAuth: true, fetcherId: 'mimo', cookieInput: 'raw-cookie-value' })
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'mimo'
+    quota.draft.value.cookie = 'raw-cookie-value'
+    wrapper = mountSection()
     await flushPromises()
 
     expect(
@@ -471,18 +473,16 @@ describe('⑤ D7 去掩码：输入框只放草稿，「已配置」是独立标
 
 // ══ ⑤b §7.4：徽标与 readiness 同源（反向用例） ══════════════════════════════
 
-describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不再经 prop 传入，徽标只认 readiness）', () => {
+describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不参与，徽标只认 readiness）', () => {
   it('反向：missing 含 cookie（类型切换后归属失效）→ 徽标「必填」，与字段提示同屏一致', async () => {
     // 复现 D5 的核心场景：已保存 MiMo cookie，用户把类型改成 opencode-go（同为 cookie 类）后
-    // 旧 cookie 归属失效 → readiness 报 ['cookie']。磁盘标记（provider.quota.cookieSet）自 §7 残留 7
-    // 起不再作为 prop 传入，徽标唯一来源是 readiness.missing；若改回读磁盘标记就会与下方
-    // 「这里必须填」提示同屏矛盾（S7 反例）。
-    wrapper = mountSection({
-      isCookieAuth: true,
-      fetcherId: 'opencode-go',
-      needsWorkspace: true,
-      readiness: { ready: false, missing: ['cookie', 'workspace'] },
-    })
+    // 旧 cookie 归属失效 → readiness 报 ['cookie']。徽标唯一来源是 readiness.missing；若改回读
+    // 磁盘标记就会与下方「这里必须填」提示同屏矛盾（S7 反例）。
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'opencode-go'
+    quota.view.value.workspace.required = true
+    quota.view.value.readiness = { ready: false, missing: ['cookie', 'workspace'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const cookieBlock = wrapper.find('[data-testid="quota-cookie-block"]')
@@ -495,12 +495,11 @@ describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不再经 pr
   })
 
   it('反向：missing 含 apiKey（类型切换后旧专属 Key 失效）→ 徽标「必填」', async () => {
-    wrapper = mountSection({
-      credentialSource: 'exclusive',
-      apiKeyInput: '',
-      fetcherId: 'minimax',
-      readiness: { ready: false, missing: ['apiKey'] },
-    })
+    quota.draft.value.credentialSource = 'exclusive'
+    quota.draft.value.apiKey = ''
+    quota.view.value.type.selected = 'minimax'
+    quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const keyBlock = wrapper.find('[data-testid="quota-exclusive-key-block"]')
@@ -512,13 +511,12 @@ describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不再经 pr
   })
 
   it('反向：missing 含 workspace（草稿被清空）→ 徽标「必填」（D13 屏幕即真相）', async () => {
-    wrapper = mountSection({
-      isCookieAuth: true,
-      fetcherId: 'opencode-go',
-      needsWorkspace: true,
-      workspaceInput: '',
-      readiness: { ready: false, missing: ['workspace'] },
-    })
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'opencode-go'
+    quota.view.value.workspace.required = true
+    quota.draft.value.workspace = ''
+    quota.view.value.readiness = { ready: false, missing: ['workspace'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const wsBlock = wrapper.find('[data-testid="quota-workspace-block"]')
@@ -530,17 +528,16 @@ describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不再经 pr
   })
 })
 
-// ══ ⑤c 定向复审探针（三条复现路径转正为回归守卫） ═════════════════════════
+// ══ ⑤c 定向复审探针（三条复现路径转正为回归守卫） ═════════════════════════════
 
 describe('⑤c 定向复审探针：三条复现路径的真实 DOM 锁定', () => {
   it('探针①：类型已变（D5 旧专属 Key 归属失效）+ 草稿空 → 字段块内无任何「已配置」语义（徽标与占位）', async () => {
-    wrapper = mountSection({
-      credentialSource: 'exclusive',
-      // 磁盘仍有旧专属 Key（provider.quota.apiKeySet=true），readiness 因 typeChanged 判定该归属失效
-      apiKeyInput: '',
-      fetcherId: 'minimax',
-      readiness: { ready: false, missing: ['apiKey'] },
-    })
+    quota.draft.value.credentialSource = 'exclusive'
+    // 磁盘仍有旧专属 Key，readiness 因 typeChanged 判定该归属失效
+    quota.draft.value.apiKey = ''
+    quota.view.value.type.selected = 'minimax'
+    quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const block = wrapper.find('[data-testid="quota-exclusive-key-block"]')
@@ -560,12 +557,12 @@ describe('⑤c 定向复审探针：三条复现路径的真实 DOM 锁定', () 
   })
 
   it('探针②：preset 未命中 + exclusive + 磁盘无 Key → 不出现「已配置」徽标（未判定不得被读成已配置）', async () => {
-    wrapper = mountSection({
-      fetcherId: 'legacy-unknown',
-      credentialSource: 'exclusive',
-      apiKeyInput: '',
-      readiness: { ready: false, missing: ['type'] },
-    })
+    quota.view.value.type.selected = 'legacy-unknown'
+    quota.view.value.type.undetermined = true
+    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    quota.draft.value.credentialSource = 'exclusive'
+    quota.draft.value.apiKey = ''
+    wrapper = mountSection()
     await flushPromises()
 
     // 类型未定 ⇒ 专属 Key 块整体不渲染；整区块文本不得含「已配置」
@@ -576,10 +573,10 @@ describe('⑤c 定向复审探针：三条复现路径的真实 DOM 锁定', () 
   })
 
   it('探针③：preset 未命中 → 渲染「重选类型」指引，且参数区不渲染（与 D8 同形态）', async () => {
-    wrapper = mountSection({
-      fetcherId: 'legacy-unknown',
-      readiness: { ready: false, missing: ['type'] },
-    })
+    quota.view.value.type.selected = 'legacy-unknown'
+    quota.view.value.type.undetermined = true
+    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    wrapper = mountSection()
     await flushPromises()
 
     const hint = wrapper.find('[data-testid="quota-no-type-hint"]')
@@ -594,19 +591,10 @@ describe('⑤c 定向复审探针：三条复现路径的真实 DOM 锁定', () 
 
 // ══ ⑥ §5.2：失败态文案与 cookie 变体 ═══════════════════════════════════════
 
-describe('⑥ §5.2 失败路径文案（reason 透传 + cookie 变体）', () => {
-  /** 失败态 fixture：给定 reason / authKinds */
-  function mountFail(reason: string, opts: Record<string, unknown> = {}): ReturnType<typeof mount> {
-    return mountSection({
-      testStatus: 'error',
-      testFailReason: reason,
-      testErrorMsg: '',
-      ...opts,
-    })
-  }
-
+describe('⑥ §5.2 失败路径文案（module 归一分档 + cookie 变体）', () => {
   it('unauthorized + api-key 类 → quotaFetchFailUnauthorized（给「发起一次对话刷新」动作）', async () => {
-    wrapper = mountFail('unauthorized', { authKinds: ['api-key'] })
+    arrangeFailure('unauthorized', { cookieAuth: false })
+    wrapper = mountSection()
     await flushPromises()
 
     const msg = wrapper.find('[data-testid="quota-error-msg"]').text()
@@ -616,7 +604,9 @@ describe('⑥ §5.2 失败路径文案（reason 透传 + cookie 变体）', () =
   })
 
   it('unauthorized + cookie 类 → quotaFetchFailUnauthorizedCookie（改指「重新复制 Cookie」）', async () => {
-    wrapper = mountFail('unauthorized', { authKinds: ['cookie'], isCookieAuth: true })
+    arrangeFailure('unauthorized', { cookieAuth: true })
+    quota.view.value.credential.form = 'cookie'
+    wrapper = mountSection()
     await flushPromises()
 
     const msg = wrapper.find('[data-testid="quota-error-msg"]').text()
@@ -624,7 +614,8 @@ describe('⑥ §5.2 失败路径文案（reason 透传 + cookie 变体）', () =
   })
 
   it('no-credential + api-key 类 → quotaFetchFailNoCredential（指向两个可填位置）', async () => {
-    wrapper = mountFail('no-credential', { authKinds: ['api-key'] })
+    arrangeFailure('no-credential', { cookieAuth: false })
+    wrapper = mountSection()
     await flushPromises()
 
     const msg = wrapper.find('[data-testid="quota-error-msg"]').text()
@@ -633,7 +624,9 @@ describe('⑥ §5.2 失败路径文案（reason 透传 + cookie 变体）', () =
   })
 
   it('no-credential + cookie 类 → quotaFetchFailNoCredentialCookie（重贴 Cookie，非填 API Key）', async () => {
-    wrapper = mountFail('no-credential', { authKinds: ['cookie'], isCookieAuth: true })
+    arrangeFailure('no-credential', { cookieAuth: true })
+    quota.view.value.credential.form = 'cookie'
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-error-msg"]').text()).toContain(
@@ -644,7 +637,9 @@ describe('⑥ §5.2 失败路径文案（reason 透传 + cookie 变体）', () =
   })
 
   it('no-subscription + cookie 类 → 既有两可文案（Cookie 变体先例，S5）', async () => {
-    wrapper = mountFail('no-subscription', { authKinds: ['cookie'], isCookieAuth: true })
+    arrangeFailure('no-subscription', { cookieAuth: true })
+    quota.view.value.credential.form = 'cookie'
+    wrapper = mountSection()
     await flushPromises()
 
     const msg = wrapper.find('[data-testid="quota-error-msg"]').text()
@@ -652,7 +647,8 @@ describe('⑥ §5.2 失败路径文案（reason 透传 + cookie 变体）', () =
   })
 
   it('no-subscription + api-key 类 → 非 cookie 文案（与 cookie 变体可区分）', async () => {
-    wrapper = mountFail('no-subscription', { authKinds: ['api-key'] })
+    arrangeFailure('no-subscription', { cookieAuth: false })
+    wrapper = mountSection()
     await flushPromises()
 
     const msg = wrapper.find('[data-testid="quota-error-msg"]').text()
@@ -660,30 +656,34 @@ describe('⑥ §5.2 失败路径文案（reason 透传 + cookie 变体）', () =
     expect(msg).not.toContain('settings.providerEdit.quotaFetchFailNoSubscriptionCookie')
   })
 
-  it('network / parse / not_configured → 各自专属文案（逐键断言，不回退通用文案）', async () => {
-    wrapper = mountFail('network')
+  it('network / parse / not-configured → 各自专属文案（逐键断言，不回退通用文案）', async () => {
+    arrangeFailure('network')
+    wrapper = mountSection()
     await flushPromises()
     expect(wrapper.find('[data-testid="quota-error-msg"]').text()).toContain(
       'settings.providerEdit.quotaFetchFailNetwork',
     )
 
     wrapper.unmount()
-    wrapper = mountFail('parse')
+    arrangeFailure('parse')
+    wrapper = mountSection()
     await flushPromises()
     expect(wrapper.find('[data-testid="quota-error-msg"]').text()).toContain(
       'settings.providerEdit.quotaFetchFailParse',
     )
 
     wrapper.unmount()
-    wrapper = mountFail('not_configured')
+    arrangeFailure('not-configured')
+    wrapper = mountSection()
     await flushPromises()
     expect(wrapper.find('[data-testid="quota-error-msg"]').text()).toContain(
       'settings.providerEdit.quotaFetchFailNotConfigured',
     )
   })
 
-  it('无 reason → 回退 testErrorMsg；无旧数据时不渲染「查看上次成功数据」入口', async () => {
-    wrapper = mountSection({ testStatus: 'error', testFailReason: null, testErrorMsg: 'boom' })
+  it('generic 分档 → 回退 module 兜底消息；无旧数据时不渲染「查看上次成功数据」入口', async () => {
+    arrangeFailure('generic', { message: 'boom' })
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-error-msg"]').text()).toContain('boom')
@@ -693,13 +693,13 @@ describe('⑥ §5.2 失败路径文案（reason 透传 + cookie 变体）', () =
 
 // ══ ⑦ D2：单按钮触发 saveAndTest ═══════════════════════════════════════════
 
-describe('⑦ D2 保存与测试合一：点击单按钮 emit saveAndTest', () => {
-  it('齐备时点击 quota-save-test-btn → emit saveAndTest 一次（无独立保存/测试按钮）', async () => {
-    wrapper = mountSection({ readiness: { ready: true, missing: [] } })
+describe('⑦ D2 保存与测试合一：点击单按钮触发 module saveAndTest', () => {
+  it('齐备时点击 quota-save-test-btn → saveAndTest 一次（无独立保存/测试按钮）', async () => {
+    wrapper = mountSection()
     await flushPromises()
 
     await wrapper.find(SAVE_TEST).trigger('click')
-    expect(wrapper.emitted('saveAndTest')).toHaveLength(1)
+    expect(quota.saveAndTest).toHaveBeenCalledTimes(1)
     // 合四为一：四个旧按钮 testid 全部不存在
     expect(wrapper.find('[data-testid="quota-save-apikey-btn"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="quota-save-cookie-btn"]').exists()).toBe(false)
@@ -712,11 +712,10 @@ describe('⑦ D2 保存与测试合一：点击单按钮 emit saveAndTest', () =
 
 describe('B-3 额度显示双轨（used/limit + pct）', () => {
   it('成功态窗口行显示千分位绝对量 + pct 双轨', async () => {
-    wrapper = mountSection({
-      testStatus: 'success',
-      quotaRow: ROW_WITH_ABS,
-      lastFetchAt: Date.now() - 60_000,
-    })
+    quota.test.value.status = 'success'
+    quota.test.value.row = ROW_WITH_ABS
+    quota.test.value.lastFetchAt = Date.now() - 60_000
+    wrapper = mountSection()
     await flushPromises()
 
     const windows = wrapper.find('[data-testid="quota-result-windows"]')
@@ -731,17 +730,16 @@ describe('B-3 额度显示双轨（used/limit + pct）', () => {
   })
 
   it('无绝对量数据 → 维持 pct 单轨不显示 used-of', async () => {
-    wrapper = mountSection({
-      testStatus: 'success',
-      quotaRow: {
-        label: 'Zhipu Plan',
-        wins: [
-          { pct: 55, resetSec: 100 },
-          { pct: null, resetSec: null },
-          { pct: null, resetSec: null },
-        ],
-      },
-    })
+    quota.test.value.status = 'success'
+    quota.test.value.row = {
+      label: 'Zhipu Plan',
+      wins: [
+        { pct: 55, resetSec: 100 },
+        { pct: null, resetSec: null },
+        { pct: null, resetSec: null },
+      ],
+    }
+    wrapper = mountSection()
     await flushPromises()
 
     const windows = wrapper.find('[data-testid="quota-result-windows"]')
@@ -750,17 +748,16 @@ describe('B-3 额度显示双轨（used/limit + pct）', () => {
   })
 
   it('计费单位三分支：tokens / credits 渲染各自 i18n 标签', async () => {
-    wrapper = mountSection({
-      testStatus: 'success',
-      quotaRow: {
-        label: 'Mixed Plans',
-        wins: [
-          { pct: 24, used: 1204, limit: 5000, unit: 'tokens', resetSec: null },
-          { pct: 41, used: 30, limit: 100, unit: 'credits', resetSec: null },
-          { pct: 55, used: 1, limit: 2, unit: null, resetSec: null },
-        ],
-      },
-    })
+    quota.test.value.status = 'success'
+    quota.test.value.row = {
+      label: 'Mixed Plans',
+      wins: [
+        { pct: 24, used: 1204, limit: 5000, unit: 'tokens', resetSec: null },
+        { pct: 41, used: 30, limit: 100, unit: 'credits', resetSec: null },
+        { pct: 55, used: 1, limit: 2, unit: null, resetSec: null },
+      ],
+    }
+    wrapper = mountSection()
     await flushPromises()
 
     const text = wrapper.find('[data-testid="quota-result-windows"]').text()
@@ -772,13 +769,10 @@ describe('B-3 额度显示双轨（used/limit + pct）', () => {
 
 describe('B-3 失败态「查看上次成功数据」折叠', () => {
   it('失败态初始不展示旧数据，展开后显示旧值 + 数据截至标注', async () => {
-    wrapper = mountSection({
-      testStatus: 'error',
-      testFailReason: 'unauthorized',
-      testErrorMsg: '',
-      quotaRow: ROW_WITH_ABS,
-      lastFetchAt: Date.now() - 3_600_000,
-    })
+    arrangeFailure('unauthorized', { cookieAuth: false })
+    quota.test.value.row = ROW_WITH_ABS
+    quota.test.value.lastFetchAt = Date.now() - 3_600_000
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-result"]').exists()).toBe(false)
@@ -794,86 +788,86 @@ describe('B-3 失败态「查看上次成功数据」折叠', () => {
   })
 })
 
-describe('workspace 地址块（needsWorkspace 条件渲染 + 输入上抛）', () => {
-  it('cookie 类 + needsWorkspace → 渲染块；输入上抛 update:workspaceInput', async () => {
-    wrapper = mountSection({
-      isCookieAuth: true,
-      fetcherId: 'opencode-go',
-      needsWorkspace: true,
-      readiness: { ready: false, missing: ['workspace'] },
-    })
+describe('workspace 地址块（required 条件渲染 + 输入直写草稿）', () => {
+  it('cookie 类 + workspace.required → 渲染块；输入直写 draft.workspace', async () => {
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'opencode-go'
+    quota.view.value.workspace.required = true
+    quota.view.value.readiness = { ready: false, missing: ['workspace'] }
+    wrapper = mountSection()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="quota-workspace-block"]').exists()).toBe(true)
     await wrapper.find('[data-testid="quota-workspace-input"]').setValue('wrk_123')
-    expect(wrapper.emitted('update:workspaceInput')?.at(-1)).toEqual(['wrk_123'])
+    expect(quota.draft.value.workspace).toBe('wrk_123')
   })
 
-  it('needsWorkspace=false → 不渲染 workspace 块', async () => {
-    wrapper = mountSection({ isCookieAuth: true, needsWorkspace: false })
+  it('workspace.required=false → 不渲染 workspace 块', async () => {
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.workspace.required = false
+    wrapper = mountSection()
     await flushPromises()
     expect(wrapper.find('[data-testid="quota-workspace-block"]').exists()).toBe(false)
   })
 })
 
-// ══ R4 review 增量补口：事件上抛分支（开关 / 输入草稿 / 重选类型 / 更新 Cookie）════════════
+// ══ 交互补口：写动作与草稿直写分支（开关 / 输入草稿 / 重选类型 / 更新 Cookie）════════════
 
 /**
- * R4 coverage Gate 复跑实测的 6 条未覆盖行，全部是事件 handler 分支：开关 update:enabled、
- * cookie / 专属 Key 草稿输入、「更新 Cookie」清空、onSelectFetcher 守卫 + 上抛。此前只有
- * 渲染断言没有交互断言——handler 未被调用 = 「输入上抛 → 父组件写草稿」链路的回归盲区。
+ * 交互分支此前只有渲染断言没有交互断言——handler 未被调用 = 「输入 → module」链路的回归盲区。
+ * C1 后验收点从 emits 换成 module 接口回写（interface is the test surface）。
  */
-describe('R4 补口：事件上抛分支（开关 / 输入草稿 / 重选类型 / 更新 Cookie）', () => {
-  it('拨动启用开关 → emit update:enabled(false)（D4 纯配置位上抛，$event === true 布尔窄化）', async () => {
-    wrapper = mountSection({ enabled: true })
+describe('交互补口：写动作与草稿直写（开关 / 输入草稿 / 重选类型 / 更新 Cookie）', () => {
+  it('拨动启用开关 → setEnabled(false)（D4 纯配置位，$event === true 布尔窄化）', async () => {
+    wrapper = mountSection()
     await flushPromises()
 
     const sw = wrapper.find('[data-testid="quota-enabled-switch"]')
     expect(sw.exists()).toBe(true)
     await sw.trigger('click')
-    // reka Switch 点击翻转 true → false，窄化后上抛 false（非原始 unknown）
-    expect(wrapper.emitted('update:enabled')?.at(-1)).toEqual([false])
+    // reka Switch 点击翻转 true → false，窄化后交 module setEnabled（非原始 unknown）
+    expect(quota.setEnabled).toHaveBeenCalledWith(false)
   })
 
-  it('cookie 草稿输入 → emit update:cookieInput（D7 草稿即真相，原文上抛父组件）', async () => {
-    wrapper = mountSection({ isCookieAuth: true, fetcherId: 'mimo' })
+  it('cookie 草稿输入 → 直写 draft.cookie（D7 草稿即真相，原文入草稿）', async () => {
+    quota.view.value.credential.form = 'cookie'
+    quota.view.value.type.selected = 'mimo'
+    wrapper = mountSection()
     await flushPromises()
 
     await wrapper.find('[data-testid="quota-cookie-input"]').setValue('draft-cookie')
-    expect(wrapper.emitted('update:cookieInput')?.at(-1)).toEqual(['draft-cookie'])
+    expect(quota.draft.value.cookie).toBe('draft-cookie')
   })
 
-  it('专属 Key 草稿输入 → emit update:apiKeyInput（密文不回显，只上抛草稿原文）', async () => {
-    wrapper = mountSection({ credentialSource: 'exclusive' })
+  it('专属 Key 草稿输入 → 直写 draft.apiKey（密文不回显，只写草稿原文）', async () => {
+    quota.draft.value.credentialSource = 'exclusive'
+    wrapper = mountSection()
     await flushPromises()
 
     await wrapper.find('[data-testid="quota-apikey-input"]').setValue('sk-draft')
-    expect(wrapper.emitted('update:apiKeyInput')?.at(-1)).toEqual(['sk-draft'])
+    expect(quota.draft.value.apiKey).toBe('sk-draft')
   })
 
-  it('失败态点「更新 Cookie」→ emit update:cookieInput(\'\')（清空草稿引导重贴，非清盘）', async () => {
-    wrapper = mountSection({
-      testStatus: 'error',
-      testFailReason: 'unauthorized',
-      authKinds: ['cookie'],
-      isCookieAuth: true,
-      cookieInput: 'stale-cookie',
-    })
+  it('失败态点「更新 Cookie」→ 清空 draft.cookie（清空草稿引导重贴，非清盘）', async () => {
+    arrangeFailure('unauthorized', { cookieAuth: true })
+    quota.view.value.credential.form = 'cookie'
+    quota.draft.value.cookie = 'stale-cookie'
+    wrapper = mountSection()
     await flushPromises()
 
     await wrapper.find('[data-testid="quota-update-cookie-btn"]').trigger('click')
-    expect(wrapper.emitted('update:cookieInput')?.at(-1)).toEqual([''])
+    expect(quota.draft.value.cookie).toBe('')
   })
 
-  it('类型下拉重选 → onSelectFetcher 守卫放行字符串并 emit update:fetcherId', async () => {
-    wrapper = mountSection({
-      fetcherId: undefined,
-      readiness: { ready: false, missing: ['type'] },
-      fetcherOptions: [
-        { value: 'alpha', label: 'Alpha Plan' },
-        { value: 'beta', label: 'Beta Plan' },
-      ],
-    })
+  it('类型下拉重选 → selectType 收到选中值（非字符串守卫在 module 内）', async () => {
+    quota.view.value.type.selected = undefined
+    quota.view.value.type.undetermined = true
+    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    quota.view.value.type.options = [
+      { value: 'alpha', label: 'Alpha Plan' },
+      { value: 'beta', label: 'Beta Plan' },
+    ]
+    wrapper = mountSection()
     await flushPromises()
 
     // reka Select 触发器 pointerdown 打开（happy-dom 需显式 dispatch，同 renderer
@@ -885,11 +879,21 @@ describe('R4 补口：事件上抛分支（开关 / 输入草稿 / 重选类型 
 
     const target = Array.from(document.body.querySelectorAll('[role="option"]'))
       .find((el): el is HTMLElement => (el.textContent ?? '').includes('Beta Plan'))
-    expect(target).toBeTruthy()
-    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-    target!.click()
+    if (!target) throw new Error('Beta Plan 选项未渲染')
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+    target.click()
     await flushPromises()
 
-    expect(wrapper.emitted('update:fetcherId')?.at(-1)).toEqual(['beta'])
+    expect(quota.selectType).toHaveBeenCalledWith('beta')
+  })
+})
+
+// ══ DI 失败语义（C1 seam）═══════════════════════════════════════════════════
+
+describe('DI 失败语义：module 缺失 = 接线错误，loud fail', () => {
+  it('未提供 QUOTA_CONFIGURE_MODULE_KEY → 抛出可诊断错误（不渲染空壳伪装功能正常）', () => {
+    expect(() => mount(CodingPlanSection, { attachTo: document.body })).toThrow(
+      /QUOTA_CONFIGURE_MODULE_KEY/,
+    )
   })
 })

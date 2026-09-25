@@ -7,15 +7,19 @@
  */
 
 import type { ProviderQuotaFetcher, QuotaAuthKind, QuotaFetchOutcome, QuotaWindow } from './types.js'
-import { INFINITE_WIN, fetchQuotaJson, isOptionalField, isRecord } from './types.js'
+import { INFINITE_WIN, fetchQuotaJson, isOptionalField, isOptionalNumericField, isRecord, numericField } from './types.js'
 
 const FETCH_TIMEOUT_MS = 5000
 const PERCENT_SCALE = 100
 const MS_PER_SEC = 1000
 
+/** wire 数值字段（limit/used/remaining）：实测以字符串数值下发（`"100"`），历史形态为 number。 */
+type KimiWireNumber = number | string
+
 interface KimiLimitDetail {
-  limit?: number
-  remaining?: number
+  limit?: KimiWireNumber
+  used?: KimiWireNumber
+  remaining?: KimiWireNumber
   resetTime?: string
 }
 
@@ -24,8 +28,9 @@ interface KimiLimit {
 }
 
 interface KimiUsage {
-  limit?: number
-  used?: number
+  limit?: KimiWireNumber
+  used?: KimiWireNumber
+  remaining?: KimiWireNumber
   resetTime?: string
 }
 
@@ -34,12 +39,13 @@ interface KimiApiResponse {
   usage?: KimiUsage
 }
 
-/** limits[].detail 形态：limit/remaining 可选 number、resetTime 可选 string（5h 窗口字段）。 */
+/** limits[].detail 形态：limit/used/remaining 可选 wire 数值、resetTime 可选 string（5h 窗口字段）。 */
 function isKimiLimitDetail(v: unknown): boolean {
   if (!isRecord(v)) return false
   return (
-    isOptionalField(v.limit, 'number') &&
-    isOptionalField(v.remaining, 'number') &&
+    isOptionalNumericField(v.limit) &&
+    isOptionalNumericField(v.used) &&
+    isOptionalNumericField(v.remaining) &&
     isOptionalField(v.resetTime, 'string')
   )
 }
@@ -54,8 +60,9 @@ function isKimiLimitEntry(v: unknown): boolean {
 function isKimiUsage(v: unknown): boolean {
   if (!isRecord(v)) return false
   return (
-    isOptionalField(v.limit, 'number') &&
-    isOptionalField(v.used, 'number') &&
+    isOptionalNumericField(v.limit) &&
+    isOptionalNumericField(v.used) &&
+    isOptionalNumericField(v.remaining) &&
     isOptionalField(v.resetTime, 'string')
   )
 }
@@ -64,7 +71,11 @@ function isKimiUsage(v: unknown): boolean {
  * JSON 边界轻量 shape guard：只校验决策分支依赖的字段类型（limits 数组迭代判定、
  * usage 对象解构）。字段缺失是合法业务态（→ no-subscription / 该窗口不可知），字段
  * 类型漂移归 parse（RT-7#5：guard 收到字段级——防 `{"limits":"abc"}` 时 string.length
- * truthy 绕过 no-subscription 检查、防 `"500"` 等字符串数值被 Number() 静默接受产错数据）。
+ * truthy 绕过 no-subscription 检查）。
+ *
+ * wire 形态实测锚点（2026-09-24，api.kimi.com/coding/v1/usages 真响应）：数值字段以字符串
+ * 数值下发（`"100"`）、`detail` 提供 `used` 而非 `remaining`——数值可解析性由
+ * isOptionalNumericField 判定（拒 `"abc"` 类漂移归 parse），字符串数值是合法 wire 形态。
  */
 function isKimiResponse(v: unknown): v is KimiApiResponse {
   if (!isRecord(v)) return false
@@ -75,11 +86,6 @@ function isKimiResponse(v: unknown): v is KimiApiResponse {
   }
   if (o.usage !== undefined && !isKimiUsage(o.usage)) return false
   return true
-}
-
-/** 数值字段取值（guard 已拒类型漂移，此处只区分「在的 number」与「缺失」）。 */
-function optionalNumber(v: unknown): number | undefined {
-  return typeof v === 'number' ? v : undefined
 }
 
 /** ISO 时间戳 → 剩余秒 */
@@ -101,31 +107,41 @@ function requestsWindow(limit: number, used: number, resetSec: number | null): Q
     : INFINITE_WIN
 }
 
-/** 5h 滚动窗口（limit − remaining 折算 used）。RT-7#5：used 计算需 limit/remaining
- * 齐备，任一缺失该窗口不可知 → INFINITE_WIN（pct:null 整行隐藏）——原 `Number(x ?? 0)`
- * 折叠会让 remaining 缺失时 used=limit，产出 100% 假耗尽。 */
+/**
+ * 窗口 used 解析（实测 wire 形态 + RT-7#5 语义合一）：显式 `used` 优先（实测 limits[].detail /
+ * usage 均提供 limit/used，无 remaining），缺失时用 `limit − remaining` 折算（remaining 形态
+ * 端点），两者皆缺 = 不可知 → undefined——不产 used=limit 的 100% 假耗尽、也不产 pct=0 假未用。
+ */
+function resolveUsed(limit: number | undefined, used: number | undefined, remaining: number | undefined): number | undefined {
+  if (used !== undefined) return used
+  if (limit !== undefined && remaining !== undefined) return limit - remaining
+  return undefined
+}
+
+/** 5h 滚动窗口（detail 字段）。limit/used 不可知 → INFINITE_WIN（pct:null 整行隐藏）。 */
 function buildWin5h(data: KimiApiResponse): QuotaWindow {
   const winDetail = data?.limits?.[0]?.detail
-  const winLimit = optionalNumber(winDetail?.limit)
-  const winRemaining = optionalNumber(winDetail?.remaining)
-  if (winLimit === undefined || winRemaining === undefined) return INFINITE_WIN
+  const winLimit = numericField(winDetail?.limit)
+  const winUsed = resolveUsed(winLimit, numericField(winDetail?.used), numericField(winDetail?.remaining))
+  if (winLimit === undefined || winUsed === undefined) return INFINITE_WIN
   return requestsWindow(
     winLimit,
-    winLimit - winRemaining,
+    winUsed,
     winDetail?.resetTime ? isoResetRemaining(winDetail.resetTime) : null,
   )
 }
 
-/** 每日/周窗口（usage 字段，绝对量直出）。RT-7#5：used 缺失而 limit 在时不再产 pct=0
- * 假未用——任一字段缺失该窗口不可知 → INFINITE_WIN。 */
+/** 每日/周窗口（usage 字段，绝对量直出）。limit/used 不可知 → INFINITE_WIN（RT-7#5：不再产
+ * pct=0 假未用）。 */
 function buildWinWk(data: KimiApiResponse): QuotaWindow {
-  const dailyLimit = optionalNumber(data?.usage?.limit)
-  const dailyUsed = optionalNumber(data?.usage?.used)
+  const usage = data?.usage
+  const dailyLimit = numericField(usage?.limit)
+  const dailyUsed = resolveUsed(dailyLimit, numericField(usage?.used), numericField(usage?.remaining))
   if (dailyLimit === undefined || dailyUsed === undefined) return INFINITE_WIN
   return requestsWindow(
     dailyLimit,
     dailyUsed,
-    data?.usage?.resetTime ? isoResetRemaining(data.usage.resetTime) : null,
+    usage?.resetTime ? isoResetRemaining(usage.resetTime) : null,
   )
 }
 

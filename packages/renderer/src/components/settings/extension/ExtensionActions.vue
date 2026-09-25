@@ -64,9 +64,10 @@ import { Trash2, Loader2, AlertCircle, ArrowUpCircle } from '@lucide/vue'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { extension as extensionApi } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import type { ExtensionItem } from '@taiji/core'
 import { getSettingsStore } from '@taiji/core'
+import { runOptimisticUpdate } from '@taiji/core/foundation/optimistic-update'
 import { useToast } from '@/composables/useToast'
 
 defineProps<{ ext: ExtensionItem }>()
@@ -95,7 +96,8 @@ const uninstallDialogOpen = computed({
 })
 
 /** 启用开关 → 乐观更新 store（开关即时滑动）+ extension.toggle 持久化。
- * 乐观：先改 store，UI 立即反应；失败回滚 store + 报错。
+ * 编排走乐观更新协议（runOptimisticUpdate，apply/rollback/commit 三步，失败回滚后 rethrow），
+ * 本地只把 rethrow 的错误映射到既有错误面（error ref），不手写 try/catch 回滚。
  * 广播回来时权威值覆盖 store（幂等：若值一致无副作用）。 */
 async function onToggle(ext: ExtensionItem, enabled: boolean) {
   if (toggling.value.has(ext.name)) return
@@ -104,16 +106,22 @@ async function onToggle(ext: ExtensionItem, enabled: boolean) {
   const next = new Set(toggling.value)
   next.add(ext.name)
   toggling.value = next
-  // 乐观：立即改 store
-  const old = settingsStore.setExtensionEnabled(ext.name, enabled)
   try {
-    const reply = await extensionApi.toggle(ext.name, enabled)
+    // apply 内经 setExtensionEnabled（协议原语，返回旧值）顺带捕获回滚快照
+    let old = false
+    const reply = await runOptimisticUpdate({
+      apply: () => {
+        old = settingsStore.setExtensionEnabled(ext.name, enabled)
+      },
+      rollback: () => {
+        settingsStore.setExtensionEnabled(ext.name, old)
+      },
+      commit: () => getSettingsTransport().toggleExtension(ext.name, enabled),
+    })
     // RPC reply 命中 pending 被 routeInbound 吞掉、不触发 onExtensions 全局订阅，
     // 故手动用 reply 的权威扫描结果刷新列表（替代不可靠的广播）。乐观值与权威值一致时幂等。
     settingsStore.extensions.value = reply.extensions
   } catch (e) {
-    // 回滚
-    settingsStore.setExtensionEnabled(ext.name, old)
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
     const after = new Set(toggling.value)
@@ -129,7 +137,7 @@ async function onConfirmUninstall() {
   uninstalling.value = true
   const name = confirmTarget.value
   try {
-    await extensionApi.uninstall(name)
+    await getSettingsTransport().uninstallExtension(name)
     confirmTarget.value = ''
     toastInfo(t('settings.extension.uninstalledToast'))
   } catch (e) {
@@ -148,7 +156,7 @@ async function onUpgrade(name: string) {
   next.add(name)
   upgrading.value = next
   try {
-    await extensionApi.upgrade(name)
+    await getSettingsTransport().upgradeExtension(name)
     toastInfo(t('settings.extension.upgradedToast'))
   } catch (e) {
     error.value = e instanceof Error

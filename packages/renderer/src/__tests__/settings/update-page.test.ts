@@ -13,12 +13,12 @@
  *  - vi.mock('@/api/domains/settings') 捕获 getProxyConfig/getUpdateSettings/setUpdateSettings 等
  *  - vi.mock('@/composables/useToast') 隔离 toast（失败用例断言 error 被调）
  *  - vi.mock('@/composables/features/settings/useAppUpdate')（UpdateCheckCard 唯一外部依赖，
- *    同 system-page-update.test.ts 的 mock 结构）
+ *    工厂注入真实控制器 createAppUpdateController + 内存 ipc，同 system-page-update.test.ts）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/update-page.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { cardTestState, checkForUpdateMock, performDownloadMock, performInstallMock, openFallbackUrlMock, settingsMock, toastMock, useAppUpdateCardModule, settingsApiModule, toastMockModule } from '@/__tests__/helpers/update-card-mock'
+import { resetCardUpdateHarness, settingsMock, toastMock, useAppUpdateCardModule, settingsApiModule, toastMockModule } from '@/__tests__/helpers/update-card-mock'
 import { mount, flushPromises } from '@vue/test-utils'
 
 // __APP_VERSION__ 在 vitest-i18n-setup.ts 全局 stub（'0.0.0-test'）
@@ -46,13 +46,7 @@ beforeEach(() => {
   settingsMock.getProxyConfig.mockResolvedValue({ mode: 'system', httpProxy: '', httpsProxy: '' })
   settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: false })
   settingsMock.setUpdateSettings.mockResolvedValue(undefined)
-  Object.assign(cardTestState, {
-    state: 'idle',
-    latestRelease: null,
-    errorMessage: '',
-    percent: 0,
-    releaseNotesHtml: '',
-  })
+  resetCardUpdateHarness()
 })
 
 afterEach(() => {
@@ -129,7 +123,10 @@ describe('UpdatePage 自动更新卡', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('data-state')).toBe('unchecked')
     expect(toastMock.error).toHaveBeenCalledTimes(1)
-    expect(toastMock.error).toHaveBeenCalledWith('write failed')
+    // module 统一失败反馈：saveFailed toast 透传 IPC 错误文案（{reason} 插值）
+    expect(toastMock.error).toHaveBeenCalledWith('保存失败：write failed')
+    // 失败回滚路径无成功反馈（saved toast 仅在写成功出现）
+    expect(toastMock.info).not.toHaveBeenCalled()
   })
 
   it('预下载开关回填不回归：preDownload true → switch-pre-download 为开', async () => {
@@ -139,6 +136,78 @@ describe('UpdatePage 自动更新卡', () => {
     const sw = wrapper.find('[data-testid="switch-pre-download"]')
     expect(sw.exists()).toBe(true)
     expect(sw.attributes('data-state')).toBe('checked')
+  })
+
+  it('切换成功反馈：写成功后出现 saved toast（setting-field module 统一形态）', async () => {
+    wrapper = mount(UpdatePage)
+    await flushPromises()
+    await wrapper.find('[data-testid="switch-auto-update"]').trigger('click')
+    await flushPromises()
+    expect(settingsMock.setUpdateSettings).toHaveBeenCalledTimes(1)
+    expect(toastMock.info).toHaveBeenCalledWith('更新设置已保存')
+  })
+})
+
+// ── load 失败契约（RD-4#8，样板 = subagent-engine-section.test.ts）：失败默认值不冒充已存值 ──
+describe('UpdatePage load 失败契约（RD-4#8）', () => {
+  it('getUpdateSettings reject → loadError 常驻提示 + 可落盘控件禁用 + 默认值不发写请求', async () => {
+    settingsMock.getUpdateSettings.mockRejectedValue(new Error('ipc down'))
+    wrapper = mount(UpdatePage)
+    await flushPromises()
+    // 常驻提示 + 重试入口
+    expect(wrapper.find('[data-testid="update-page-load-error"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('读取失败，显示的是默认值')
+    expect(wrapper.find('[data-testid="update-page-load-retry"]').exists()).toBe(true)
+    // 可落盘控件禁用（Switch disabled attribute + Select disabled prop + 保存按钮）
+    expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="switch-pre-download"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.findComponent({ name: 'Select' }).props('disabled')).toBe(true)
+    expect(wrapper.find('[data-testid="btn-save-proxy"]').attributes('disabled')).toBeDefined()
+    // 禁用态下 click 不发写请求（默认值明确不可操作）
+    await wrapper.find('[data-testid="switch-auto-update"]').trigger('click')
+    await flushPromises()
+    expect(settingsMock.setUpdateSettings).not.toHaveBeenCalled()
+  })
+
+  it('getProxyConfig reject → 同样归并置 loadError（组级 loadAll 任一失败即置位）', async () => {
+    settingsMock.getProxyConfig.mockRejectedValue(new Error('proxy read failed'))
+    wrapper = mount(UpdatePage)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="update-page-load-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="btn-save-proxy"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('RD-4#8：重试成功 → loadError 清除 + 控件恢复 + 权威值回填', async () => {
+    settingsMock.getUpdateSettings.mockRejectedValue(new Error('ipc down'))
+    wrapper = mount(UpdatePage)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="update-page-load-error"]').exists()).toBe(true)
+
+    // 重试：mock 改成功，权威值 autoUpdate=true
+    settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
+    await wrapper.find('[data-testid="update-page-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="update-page-load-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="btn-save-proxy"]').attributes('disabled')).toBeUndefined()
+    // 权威值回填：开关从占位 false 前进到已存 true
+    expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('data-state')).toBe('checked')
+  })
+
+  it('RD-4#8：重试仍失败 → loadError 保持 + 控件保持禁用', async () => {
+    settingsMock.getUpdateSettings.mockRejectedValue(new Error('ipc down'))
+    wrapper = mount(UpdatePage)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="update-page-load-error"]').exists()).toBe(true)
+
+    settingsMock.getUpdateSettings.mockRejectedValue(new Error('ipc down again'))
+    await wrapper.find('[data-testid="update-page-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="update-page-load-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="btn-save-proxy"]').attributes('disabled')).toBeDefined()
   })
 })
 

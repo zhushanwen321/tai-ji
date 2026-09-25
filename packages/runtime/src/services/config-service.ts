@@ -238,7 +238,7 @@ export class ConfigService implements IConfigService {
     return checkEnvVarsImpl(names)
   }
 
-  async setProvider(providerId: string, data: SetProviderInput): Promise<{ newDefault?: { provider: ProviderId; modelId: string } }> {
+  async setProvider(providerId: string, data: SetProviderInput): Promise<{ newDefault?: { provider: ProviderId; modelId: string }; quotaAutoEnabled?: boolean }> {
     return setProviderImpl(this.configStore, this.authStorage, this.providerExtrasStore, this.credentialWriter, providerId, data)
   }
 
@@ -538,7 +538,7 @@ export class ConfigService implements IConfigService {
   async applyImportProviders(importId: string, selectedIds: string[]): Promise<{ result: ProviderImportResult } | { error: { code: string; message: string } }> {
     // 第 4 参：providers.json 写通道——导入即默认同意的 coding-plan 额度显示自动开启
     // （api-key 类 preset + 明文 key 才写 quota.enabled；条件与写入语义见
-    // provider-importer.matchAutoEnablePreset）。未注入（部分测试）时 importer 跳过写入。
+    // services/quota-auto-enable.ts，与 setProvider 新增分支共用）。未注入（部分测试）时 importer 跳过写入。
     return applyImportImpl(importId, selectedIds, this.credentialWriter, this.providerExtrasStore)
   }
 

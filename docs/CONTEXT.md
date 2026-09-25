@@ -255,6 +255,17 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 
 ---
 
+## Settings 域
+
+### 乐观更新协议
+「乐观写本地 → await 持久化 → 失败回滚后 rethrow」的唯一实现（`packages/core/src/foundation/optimistic-update.ts`，提供 `runOptimisticUpdate`/`optimisticUpdate`/`refCell` 三形态）；错误映射到既有错误面（toast / actionError / saveError 标志）由调用方或字段 module 承接。RPC 设置项字段编排（`setting-field` module）与 settings 域全部乐观写现场均收编于此协议。**Avoid**：手写 prev/rollback 快照样板、组件内 try/catch 回滚、置标志式失败语义。
+
+### 动作错误来源标签（ActionErrorSource）
+provider-edit 域动作错误的归属判定机制：每条动作错误带 source 标签（save/headers/discover/models），清除与归属按 source 判定。**Avoid**：比对错误展示文案判定归属（i18n 运行时值不稳定，locale 切换后失效——曾致旧错误滞留的真 bug）。
+
+### 组级 load 归并（loadError）
+字段组（`setting-field` 的 `SettingFieldGroup`）任一字段 loader 失败即整组置 loadError：控件禁用 + 常驻提示 + 重试，加载失败时默认值明确标注为默认而非已存值（RD-4#8 契约），全部 loader 成功后复位。**Avoid**：逐字段独立 try/catch 后按默认值静默渲染、console.warn 冒充已存值。
+
 ## v3 UI 结构术语（2026-06 重构）
 
 > 以下术语由 v3-demo 设计稿确立。原规范源 `docs/page-design/archive/v3/architecture-and-terminology.html` 已随 v3 视觉稿于 2026-08-02 被 v6 取代删除（归档说明见 `docs/architecture/v3-specs/README.md`，其指认本章节为术语/拓扑定义载体）；当前视觉 SSOT = `docs/DESIGN.md`。

@@ -27,6 +27,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import * as events from '@taiji/core/transport/api'
 import type { ServerMessage } from '@taiji/shared'
 import type { SkillInfo } from '@taiji/shared'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // ── Composer 路径 mock —— vi.mock factory 必须早于 import ──
 vi.mock('@/composables/features/chat/useChat', () => ({
@@ -67,6 +69,8 @@ import { useSessionStore } from '@/stores/session'
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // [C3] 打 seam：P7 断言 getProjectSkills 拉取参数（getProjectSkillsMock 可控）
+  provideSettingsTransport(makeSettingsTransportStub({ getProjectSkills: getProjectSkillsMock }))
 })
 
 // ─────────────────────── W 组：Composer wiring（真实 ComposerInput + stub CommandPopover） ───────────────────────

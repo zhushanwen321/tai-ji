@@ -54,6 +54,11 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
  * 值为目录（递归收 .ts，排除 __tests__/test）或精确文件。
  */
 const DOC_MODULE_MAP = {
+  // coding-plan-quota 设计（v3-specs）：符号面 = runtime services（quota-auto-enable /
+  // provider-config-helper / quota-service 的 getCached / quota-providers 的 QUOTA_FETCHERS）
+  // + shared paths（getDataDir）。§1.1 与「共享包适配点」章节的 statusline 参考源符号
+  // （getAgentDir）与占位形态叙述（${ENV_VAR}）非本仓符号，不带反引号书写（书写约定见头部）。
+  'docs/architecture/v3-specs/coding-plan-quota/design.md': ['packages/runtime/src/services', 'packages/shared/src/paths.ts'],
   'docs/architecture/zcode-session-db-isolation.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts', 'scripts/zcode-session-db-cleanup.mjs'],
   // replay port 设计（subagent 完成回收在新架构上的重放移植）：M1/M2 落点在
   // pi-subagent-cli，M3 落点在 subagent-core execution（watchdog 复用 settled-watchdog

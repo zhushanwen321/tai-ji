@@ -19,7 +19,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToast } from '@/composables/useToast'
-import { DEFAULT_SYSTEM } from '@taiji/core'
+import { DEFAULT_SYSTEM, provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import type { TerminalConfig } from '@taiji/shared'
 
 function defaultConfig(): TerminalConfig {
@@ -40,6 +41,7 @@ const configMock = vi.hoisted(() => ({
   setTerminalConfig: vi.fn((cfg: TerminalConfig) => Promise.resolve({ config: cfg, corrupted: false })),
 }))
 
+// [C3] 终端配置读写经 SettingsTransport seam 桩注入（补充 @/api 遗留 mock，组件已不直连门面）
 vi.mock('@/api', () => ({
   project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
   config: configMock,
@@ -61,6 +63,7 @@ beforeEach(() => {
   toasts.value = []
   configMock.getTerminalConfig.mockClear()
   configMock.setTerminalConfig.mockClear()
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 
 afterEach(() => {

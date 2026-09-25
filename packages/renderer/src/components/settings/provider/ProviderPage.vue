@@ -226,7 +226,7 @@
       @oauth-login="onQuickSetupOAuthLogin"
     />
     <!-- OAuth 授权对话框（wave-oauth-infra T7 产出，四态）。QuickSetup 与编辑体凭证区共用
-         同一 useProviderOAuth 状态机（useProviderPageOauth 内单实例 → auth.* listener 不重复注册） -->
+         同一 useProviderOAuth 状态机（ProviderPage 单实例 → auth.* listener 不重复注册） -->
     <OAuthDialog
       v-if="oauthDialogInfo"
       :open="oauth.state.value.open"
@@ -243,7 +243,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, provide, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, AlertTriangle, Settings, Trash2 } from '@lucide/vue'
 import { useProviderCatalogsStale } from '@/composables/features/settings/useProviderCatalogsStale'
@@ -253,11 +253,9 @@ import { Switch } from '@/components/ui/switch'
 import { PopoverTrigger } from '@/components/ui/popover'
 import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
 import type { BuiltinProviderTemplate, ProviderInfo, ProviderStatus, SetProviderData, ProviderId } from '@taiji/shared'
-import { config } from '@/api'
-import { getSettingsStore } from '@taiji/core'
+import { getSettingsStore, getSettingsTransport } from '@taiji/core'
 import { useQuotaStore } from '@/stores/quota'
 import { useProviderImport } from '@/composables/features/settings/useProviderImport'
-import { useQuotaConfigure } from '@/composables/features/model/useQuotaConfigure'
 import { useToast } from '@/composables/useToast'
 import {
   ProviderEditBody,
@@ -267,19 +265,19 @@ import {
   ProviderQuickSetup,
   OAuthDialog,
   ScopedModelSection,
-  SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
 } from '@taiji/ui/features/settings'
-import { useProviderPageOauth } from '@/composables/features/settings/useProviderPageOauth'
+import { useProviderOAuth } from '@/composables/features/settings/useProviderOAuth'
 import { useApiKeyAutoEnable } from '@/composables/features/settings/useApiKeyAutoEnable'
+import { useQuotaAutoEnableNotice } from '@/composables/features/settings/useQuotaAutoEnableNotice'
 import { useAccordionGuard } from '@/composables/features/settings/useAccordionGuard'
 import { useScopedModels } from '@/composables/features/settings/useScopedModels'
 import { authBadgeClass, authBadgeTextKey } from './provider-badge'
 
-// ui 包组件 renderer 侧依赖经 provide/inject 注入（ui 零 renderer import 铁律）
-provide(USE_QUOTA_CONFIGURE_KEY, useQuotaConfigure)
+// ui 包组件 renderer 侧依赖由 AppShell 级 useSettingsShell 统一 provide（SETTINGS_TOAST_KEY /
+// QUOTA_CONFIGURE_FACTORY_KEY 已在壳层注入 SettingsModal 全子树，此处不再组件级重复 provide）
 const toast = useToast()
-provide(SETTINGS_TOAST_KEY, toast)
+// [C3] settings 域 transport 只经 SettingsTransport seam（禁直连 @/api 门面 / 禁深 import transport 域）
+const transport = getSettingsTransport()
 
 // Scoped Models 白名单（乐观更新 + 失败回滚；RPC 失败 rethrow 由下方包装 handler 统一反馈）
 const { scopedRenderItems, selectableModels, addScopedModels, removeScopedModel, moveScopedModel } = useScopedModels()
@@ -307,7 +305,7 @@ const { catalogsStale, refreshCatalogs } = useProviderCatalogsStale()
 
 onMounted(async () => {
   try {
-    builtinProviders.value = await config.listBuiltinProviders()
+    builtinProviders.value = await transport.listBuiltinProviders()
   } catch {
     // 拉取失败静默降级（Picker 渲染空列表），不阻断页面
     toast.error(t('settings.provider.builtinTemplate.fetchFailed'))
@@ -341,7 +339,7 @@ const existingAuthMethod = computed(() => {
     ?? (oauth.oauthPresent.value.has(tpl.id) ? ('oauth' as const) : undefined)
 })
 
-/** QuickSetup 保存 → config.setProvider（方案 B 占位 data），成功后关闭 + toast */
+/** QuickSetup 保存 → SettingsTransport.setProvider（[C3] 与编辑体保存合流同一 seam 方法），成功后关闭 + toast */
 async function onQuickSetupSave({
   providerId,
   data,
@@ -350,13 +348,14 @@ async function onQuickSetupSave({
   data: SetProviderData
 }): Promise<void> {
   try {
-    await config.setProvider(providerId as ProviderId, data)
+    const res = await transport.setProvider(providerId, data)
     showQuickSetup.value = false
     selectedTemplate.value = null
     // apikey 模式（plaintext 填值 / env '$VAR' 引用）保存后：被禁用的 provider 自动启用
     // （oauth/ambient 分支 data.apiKey 无值不触发；新建 runtime ensure 已启用 → no-op）
     await afterApiKeySave(providerId, Boolean(data.apiKey))
     toast.info(t('settings.provider.builtinTemplate.toastSuccess', { name: data.name ?? providerId }))
+    notifyQuotaAutoEnabled(res?.quotaAutoEnabled, data.name ?? providerId)
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e))
   }
@@ -382,7 +381,7 @@ const defaultProviderId = computed(() => settingsStore.defaultModel.value?.split
 // 变更后自动对账默认模型（reconcileDefaultModelAfterProviderChange + getDefaultModel 兜底）并广播
 // config.defaults。前端消费广播：默认模型实际发生变化（非用户主动 default-set）时 toast 告知。
 const lastDefaultModel = ref(settingsStore.defaultModel.value)
-const unsubscribeDefaults = config.onDefaultsWithSource(({ defaultModel, source }) => {
+const unsubscribeDefaults = transport.onDefaultsWithSource(({ defaultModel, source }) => {
   const prev = lastDefaultModel.value
   lastDefaultModel.value = defaultModel
   if (!defaultModel || defaultModel === prev || source === 'default-set') return
@@ -390,11 +389,11 @@ const unsubscribeDefaults = config.onDefaultsWithSource(({ defaultModel, source 
 })
 onUnmounted(unsubscribeDefaults)
 
-/** P2：pill 点击选择默认模型 → config.setDefaultModel（状态经 onDefaults 广播推回，无需本地乐观更新） */
+/** P2：pill 点击选择默认模型 → setDefaultModel（状态经 onDefaults 广播推回，无需本地乐观更新） */
 async function onSetDefaultModel({ modelId, provider }: { modelId: string; provider: ProviderId }): Promise<void> {
   actionError.value = ''
   try {
-    await config.setDefaultModel(provider, modelId)
+    await transport.setDefaultModel(provider, modelId)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     actionError.value = msg
@@ -418,9 +417,15 @@ const {
   onBodyCancel,
 } = useAccordionGuard(NEW_ID)
 
-// ── OAuth 编排（B-1：QuickSetup 与编辑体凭证区共用单实例状态机，提取见 useProviderPageOauth）──
+// ── OAuth 编排（B-1：QuickSetup 与编辑体凭证区共用单实例状态机，[C4·尾项] 合并后单 module）──
+const oauth = useProviderOAuth({
+  builtinProviders,
+  providers: computed(() => props.providers),
+  selectedTemplate,
+  expandedId,
+  newId: NEW_ID,
+})
 const {
-  oauth,
   isOauthSupported,
   hasOauthPresence,
   quickSetupOauthAuthorized,
@@ -428,13 +433,7 @@ const {
   onEditOauthLogin,
   onEditOauthLogout,
   onQuickSetupOauthLogin: startQuickSetupOauth,
-} = useProviderPageOauth({
-  builtinProviders,
-  providers: computed(() => props.providers),
-  selectedTemplate,
-  expandedId,
-  newId: NEW_ID,
-})
+} = oauth
 
 /** 删除目标 + 删除中 */
 const deleteTarget = ref<ProviderInfo | null>(null)
@@ -498,12 +497,15 @@ const { toggling, onToggleEnabled, afterApiKeySave } = useApiKeyAutoEnable({
   providers: () => props.providers,
   setActionError: msg => { actionError.value = msg },
 })
+const { notifyQuotaAutoEnabled } = useQuotaAutoEnableNotice()
 
-/** 编辑体保存成功 → 收起展开行；本次写入了 apikey 且该 provider 被禁用 → 自动启用（afterApiKeySave） */
-async function onEditSaved(payload?: { wroteApiKey: boolean }): Promise<void> {
+/** 编辑体保存成功 → 收起展开行；本次写入了 apikey 且该 provider 被禁用 → 自动启用（afterApiKeySave）；
+ * 新建分支额度显示自动开启写成功 → toast（useQuotaAutoEnableNotice，与 QuickSetup 路径同语义） */
+async function onEditSaved(payload?: { wroteApiKey: boolean; quotaAutoEnabled?: boolean }): Promise<void> {
   const savedId = expandedId.value
   onBodySaved()
   if (payload?.wroteApiKey && savedId) await afterApiKeySave(savedId, true)
+  notifyQuotaAutoEnabled(payload?.quotaAutoEnabled, savedId ? (props.providers.find(p => p.id === savedId)?.name ?? savedId) : undefined)
 }
 
 // ── 删除/移除（wave4 IF3：按 ProviderInfo.kind 走 removeProviderByKind） ──
@@ -516,7 +518,7 @@ async function confirmDelete() {
   try {
     // wave4：按 kind 调 removeProviderByKind（catalog 清凭据/custom 删条目）。
     // kind 缺失兼容 'custom'（wave2 聚合层保证 listProviders 返回的 ProviderInfo 已标 kind）。
-    await config.removeProviderByKind(target.id, target.kind ?? 'custom')
+    await transport.removeProviderByKind(target.id, target.kind ?? 'custom')
     // MF-3：同步清理 oauth 内存态（runtime 已清 auth.json 凭据），防重开 QuickSetup 误默认 oauth。
     oauth.clearOAuthPresence(target.id)
     if (settingsStore.defaultModel.value.startsWith(`${target.id}/`)) {

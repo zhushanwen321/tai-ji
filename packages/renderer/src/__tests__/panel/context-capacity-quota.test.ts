@@ -66,14 +66,14 @@ vi.mock('@/i18n', () => ({
 
 import ContextCapacityPopover from '@/components/panel/ContextCapacityPopover.vue'
 import { useSessionStore } from '@/stores/session'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsStore, createSettingsStore } from '@taiji/core'
 import { useQuotaStore } from '@/stores/quota'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
 import * as events from '@taiji/core/transport/api'
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   vi.clearAllMocks()
 })
 

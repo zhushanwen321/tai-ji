@@ -14,7 +14,7 @@
  *   - 范围切换 30 天↔全部（窗口外 6 月数据出现）
  *
  * mock 策略：
- *   - vi.mock('@taiji/core/transport/api/domains/usage')（同 UsagePage.test.ts）
+ *   - SettingsTransport seam 桩（[C3]，同 UsagePage.test.ts）
  *   - ResizeObserver / clientWidth 全局补丁（UsageDailyChart 真实渲染需要）
  *   - vi.useFakeTimers 固定 2026-08-25：range>0 的日期窗口与 30 天断言确定性
  */
@@ -22,14 +22,18 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import { mount, flushPromises } from '@vue/test-utils'
 import type { UsageRow, UsageStatsResult } from '@taiji/shared'
 
-vi.mock('@taiji/core/transport/api/domains/usage', () => ({
-  getUsageStats: vi.fn(),
-}))
+// [C3] getUsageStats 经 SettingsTransport seam 桩注入（替换原 domains/usage 模块 mock）
+const getUsageStats = vi.hoisted(() => vi.fn())
 
 import UsagePage from '@/components/settings/usage/UsagePage.vue'
-import { getUsageStats } from '@taiji/core/transport/api/domains/usage'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
 const mockedGetUsageStats = vi.mocked(getUsageStats)
+
+beforeEach(() => {
+  provideSettingsTransport(makeSettingsTransportStub({ getUsageStats }))
+})
 
 /* ── DOM 环境补丁：ResizeObserver + clientWidth（图表真实渲染） ── */
 const clientWidthDesc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')

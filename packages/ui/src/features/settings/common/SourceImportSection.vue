@@ -114,10 +114,8 @@ import { useI18n } from 'vue-i18n'
 import type { CheckboxCheckedState as CheckedState } from 'reka-ui'
 import { CheckCircle2 } from '@lucide/vue'
 
-import { useSettingsConfigApi } from '../injection-keys'
+import { getSettingsTransport } from '@taiji/core'
 import type { SourceDetectResult, ProviderSource, AgentSource } from '@taiji/shared'
-
-const configApi = useSettingsConfigApi()
 
 const props = defineProps<{
   /** 资源类型，决定渲染哪些候选源 */
@@ -142,7 +140,10 @@ const error = ref(false)
 
 onMounted(async () => {
   try {
-    detectedSources.value = await (configApi.detectSources() as Promise<SourceDetectResult[]>)
+    // [C3] 经 SettingsTransport seam 直取（detectSources 是 seam 已有方法；ui→core 合法依赖
+    // 方向）。未注入时 fail-fast 抛错由下方 catch 归入错误态渲染；renderer 测试环境由
+    // vitest-settings-transport-setup 默认桩兜底。
+    detectedSources.value = await getSettingsTransport().detectSources()
   } catch {
     error.value = true
   } finally {

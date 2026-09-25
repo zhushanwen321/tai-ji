@@ -38,12 +38,24 @@ vi.mock('../../provider-catalog.js', () => ({
   isCatalogProvider: vi.fn(() => false),
 }))
 
+// mock @taiji/shared：仅把 matchQuotaPreset 包成 spy（委托真实实现，其余导出原样透传，默认
+// 行为不变）。用途：auto-enable describe 的 requiresWorkspace 第四条件单测注入合成 preset——
+// 真实 preset 表中该分支不可达（唯一 requiresWorkspace 声明者 opencode-go 是 cookie 类，
+// 在 auth 条件先行返回），见下文对应用例注释。
+vi.mock('@taiji/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/shared')>()
+  return { ...actual, matchQuotaPreset: vi.fn(actual.matchQuotaPreset) }
+})
+
 // ── import（在 mock 之后，拿到 mock 版本）──────────────────────────
 import { previewImport, applyImport } from '../provider-importer.js'
 import { isCatalogProvider } from '../../provider-catalog.js'
 import { parseProviders } from '../provider-parser.js'
 import { getProviderNames, upsertProvider } from '../../../infra/pi/pi-provider-store.js'
 import { _resetCacheForTest } from '../preview-cache.js'
+import { matchAutoEnablePreset } from '../../quota-auto-enable.js'
+import { matchQuotaPreset } from '@taiji/shared'
+import type { QuotaPreset } from '@taiji/shared'
 import type { ProviderExtras } from '../../provider-extras-store.js'
 import type { ParsedProvider, ParseResult } from '../provider-parser.js'
 
@@ -801,6 +813,38 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     expect(store.modify).not.toHaveBeenCalled()
   })
 
+  it('组1 custom：requiresWorkspace preset（opencode-go）+ 明文 key 不自动开启——资源维度 fetcher 需 workspace 配置，导入侧不越权代开', async () => {
+    // 命中链：name 'opencode' 词边界命中 opencode-go preset（requiresWorkspace 唯一声明者）。
+    // 该用例锁导入链路端到端行为；注意 opencode-go 是 cookie 类，判定在 auth 条件先行返回，
+    // requiresWorkspace 分支本身由下一条 matchAutoEnablePreset 单测锁定。
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({ _sourceName: 'my-opencode', name: 'my opencode relay', apiKey: 'sk-plain' }),
+    ]))
+    const store = fakeExtrasStore()
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['my-opencode'], undefined, store)
+
+    expect(store.modify).not.toHaveBeenCalled()
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+  })
+
+  it('matchAutoEnablePreset 第四条件单测：api-key 类 preset 带 requiresWorkspace → undefined（对照组：去掉标记返回 preset）', () => {
+    // 真实 preset 表中 requiresWorkspace 唯一声明者 opencode-go 是 cookie 类，走 auth 条件
+    // 先行返回——第四条件对现网 preset 不可达，须注入合成 preset（api-key 类 + requiresWorkspace）
+    // 才能触达 quota-auto-enable.ts 的 `if (preset.requiresWorkspace) return undefined` 分支。
+    // 对照组证明 mock 生效且阻断仅来自 requiresWorkspace：删掉该分支时对照返回值翻转、用例变红。
+    const base = { fetcher: 'synthetic', label: 'Synthetic', auth: ['api-key'] as const, match: {} }
+    vi.mocked(matchQuotaPreset)
+      .mockReturnValueOnce({ ...base, requiresWorkspace: true } satisfies QuotaPreset)
+      .mockReturnValueOnce({ ...base } satisfies QuotaPreset)
+
+    expect(matchAutoEnablePreset({ baseUrl: 'https://synthetic.example' }, 'plaintext')).toBeUndefined()
+    expect(matchAutoEnablePreset({ baseUrl: 'https://synthetic.example' }, 'plaintext')).toEqual({ ...base })
+  })
+
   it.each(['env', 'command'] as const)('组1 custom：%s 占位凭证不自动开启（quota 凭证链不解占位，开了只会查询失败）', async (credentialType) => {
     vi.mocked(parseProviders).mockReturnValue(result([
       fp({
@@ -872,7 +916,29 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     expect(flagById.get('xiaomi')).toBeUndefined()
   })
 
-  it('merge 语义：保留既有 extras 字段域（authMethod）与既有 quota 字段，只写 enabled + fetcher', async () => {
+  it('merge 语义：既有 quota.enabled（手动关闭 false）→ 不覆盖不复活，extras 与 quota 原样保留', async () => {
+    vi.mocked(parseProviders).mockReturnValue(result([
+      fp({ _sourceName: 'kimi-main', baseUrl: 'https://api.kimi.com/coding', apiKey: 'sk-plain' }),
+    ]))
+    const store = fakeExtrasStore({ authMethod: 'api_key', quota: { enabled: false, credentialSource: 'provider' } })
+
+    const prev = previewImport('pi')
+    if (!('importId' in prev)) throw new Error('preview should succeed')
+    const applyOut = await applyImport(prev.importId, ['kimi-main'], undefined, store)
+
+    expect(store.modify).toHaveBeenCalledTimes(1)
+    // 守卫（quota-auto-enable.ts）：quota.enabled 已有值（含手动关闭 false）→ 原样返回，
+    // 不覆盖不复活（对齐 provider-config-helper「用户已有 enabled 决定 → 不覆盖不复活」用例）
+    const current: ProviderExtras = { authMethod: 'api_key', quota: { enabled: false, credentialSource: 'provider' } }
+    const written = store.modify.mock.calls[0][1](current)
+    expect(written).toBe(current)
+    expect(written.quota).toEqual({ enabled: false, credentialSource: 'provider' })
+    // 守卫拦截 = 未发生真实写入 → 结果条目不置 quotaAutoEnabled（前端不 toast 不实报告）
+    if (!('result' in applyOut)) throw new Error('apply should succeed')
+    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+  })
+
+  it('merge 语义：quota 仅有 credentialSource（无 enabled 键）→ 写 enabled+fetcher 且保留 credentialSource 与 extras 字段域', async () => {
     vi.mocked(parseProviders).mockReturnValue(result([
       fp({ _sourceName: 'kimi-main', baseUrl: 'https://api.kimi.com/coding', apiKey: 'sk-plain' }),
     ]))
@@ -883,9 +949,13 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     await applyImport(prev.importId, ['kimi-main'], undefined, store)
 
     expect(store.modify).toHaveBeenCalledTimes(1)
-    const written = store.modify.mock.calls[0][1]({ authMethod: 'api_key', quota: { enabled: false, credentialSource: 'provider' } })
-    expect(written.authMethod).toBe('api_key')
+    // 锁 merge 保留字段域：无 enabled 键（守卫放行）→ spread 保留 quota 其余字段
+    // （credentialSource）与 extras 字段域（authMethod），只写 enabled+fetcher。
+    // enabled 在类型上必填，运行时缺键形态（磁盘 JSON）按本文件既有 unknown 断言构造
+    const current = { authMethod: 'api_key', quota: { credentialSource: 'provider' } } as unknown as ProviderExtras
+    const written = store.modify.mock.calls[0][1](current)
     expect(written.quota).toEqual({ enabled: true, fetcher: 'kimi-coding', credentialSource: 'provider' })
+    expect(written.authMethod).toBe('api_key')
   })
 
   it('未注入 store（第 4 参缺省）→ 跳过写入，导入主语义不受影响', async () => {

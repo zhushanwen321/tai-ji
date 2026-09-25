@@ -110,8 +110,8 @@ import {
   fmtInt,
   fmtPct,
   totalTokens,
-} from './aggregate'
-import type { AggMetrics } from './aggregate'
+} from '@taiji/core'
+import type { AggMetrics } from '@taiji/core'
 
 const { t } = useI18n()
 

@@ -3,7 +3,7 @@
  *
  * 验证 useSettingsShell 壳接入后 SettingsModal 能渲染关键 DOM（AGENTS.md 测试规范 §8）：
  * mount SettingsModal(open=true)，providePlatform(in-memory) + provideSettingsTransport(stub)
- * + provide 3 ui 注入 key stub + mock @/api 门面（避免 WS），断言：
+ * + provide ui 注入 key stub + mock @/api 门面（避免 WS），断言：
  *   ① Dialog 内容渲染（标题 + 导航）
  *   ② provider 导航项存在（settings-nav-provider）
  *   ③ 默认 provider 页区渲染（ProviderPage 表单区）
@@ -21,14 +21,13 @@ import {
   providePlatform,
   provideSettingsTransport,
   __resetPlatformForTesting,
-  __resetSettingsStoreForTesting,
-  __resetSettingsTransportForTesting,
   type SettingsTransport,
+  provideSettingsStore,
+  createSettingsStore,
 } from '@taiji/core'
 import {
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
-  SETTINGS_CONFIG_API_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
 } from '@taiji/ui/features/settings'
 
 // @/api 门面 mock：所有 config/extension/model/settings 域返回空/resolved，避免 WS 调用。
@@ -37,7 +36,7 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
     listProviders: vi.fn(async () => ({ providers: [] })),
     // SettingsModal → ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
     refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [] })),
-    setProvider: vi.fn(async () => undefined),
+    setProvider: vi.fn(async () => ({})),
     setSkillDirs: vi.fn(async () => undefined),
     setAgentDirs: vi.fn(async () => undefined),
     setExtensionDirs: vi.fn(async () => undefined),
@@ -87,36 +86,15 @@ vi.mock('@/lib/ipc', () => ({
 
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import SettingsResourcePage from '@/components/settings/resource/SettingsResourcePage.vue'
-import { makeQuotaStateStub } from '../helpers/quota-state-stub'
+import { makeQuotaModuleStub } from '@taiji/core/testing'
 import type { SkillDirConfig } from '@taiji/shared'
 import { useToast } from '@/composables/useToast'
 import { getSettingsStore } from '@taiji/core'
+import { makeSettingsTransportStub, type SettingsTransportStubOverrides } from '../helpers/settings-transport-stub'
 
-/** 构造最小 SettingsTransport stub（订阅返回 noop 取消函数，请求返回空；可按用例覆写成员）。 */
-function stubTransport(overrides: Partial<SettingsTransport> = {}): SettingsTransport {
-  const noopUnsub = (): void => {}
-  return {
-    listProviders: async () => ({ providers: [] }),
-    listModels: async () => [],
-    setProvider: async () => undefined,
-    setScopedModels: async () => [],
-    discoverModels: async () => ({ success: true, models: [] }),
-    setSkillDirs: async () => undefined,
-    setAgentDirs: async () => undefined,
-    setExtensionDirs: async () => undefined,
-    onProviders: () => noopUnsub,
-    onModels: () => noopUnsub,
-    onSkills: () => noopUnsub,
-    onAgents: () => noopUnsub,
-    onExtensions: () => noopUnsub,
-    onSkillDirs: () => noopUnsub,
-    onAgentDirs: () => noopUnsub,
-    onExtensionDirs: () => noopUnsub,
-    onDefaults: () => noopUnsub,
-    onSystemPrompt: () => noopUnsub,
-    onTerminalConfig: () => noopUnsub,
-    ...overrides,
-  }
+/** 构造 SettingsTransport stub（[C3] 共享工厂：全 seam 方法面中性默认，可按用例覆写成员）。 */
+function stubTransport(overrides: SettingsTransportStubOverrides = {}): SettingsTransport {
+  return makeSettingsTransportStub(overrides)
 }
 
 /** 提供最小 in-memory KVStorage（满足 PlatformPort.storage 形状）。 */
@@ -132,8 +110,7 @@ function inMemoryStorage() {
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetPlatformForTesting()
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
+  provideSettingsStore(createSettingsStore())
 })
 
 // 懒加载语义测试断言 document.activeElement，用例间必须卸载 teleport 到 body 的挂载件
@@ -154,10 +131,9 @@ describe('SettingsModal 首屏冒烟（AC12 渲染 gate）', () => {
       global: {
         provide: {
           [SETTINGS_TOAST_KEY as symbol]: { error: vi.fn(), info: vi.fn(), warning: vi.fn() },
-          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaStateStub 的
-          // QuotaConfigureState 返回标注承担（v2 漏成员即编译错）。
-          [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
-          [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
+          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
+          // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
+          [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
         },
       },
     })
@@ -192,10 +168,9 @@ describe('SettingsModal 懒加载挂载即 open 的 open 语义（W31 review maj
       global: {
         provide: {
           [SETTINGS_TOAST_KEY as symbol]: { error: vi.fn(), info: vi.fn(), warning: vi.fn() },
-          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaStateStub 的
-          // QuotaConfigureState 返回标注承担（v2 漏成员即编译错）。
-          [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
-          [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
+          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
+          // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
+          [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
         },
       },
     })
@@ -229,10 +204,9 @@ describe('SettingsModal onUpdateSkillDirs 错误反馈（W2 D10，原 settings-m
       global: {
         provide: {
           [SETTINGS_TOAST_KEY as symbol]: { error: (m: string) => useToast().error(m), info: (m: string) => useToast().info(m), warning: (m: string) => useToast().warning(m) },
-          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaStateStub 的
-          // QuotaConfigureState 返回标注承担（v2 漏成员即编译错）。
-          [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
-          [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
+          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
+          // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
+          [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
         },
       },
     })
@@ -275,8 +249,7 @@ describe('SettingsModal 路径保存失败回弹（RD-4#1：失败强制回弹 U
       global: {
         provide: {
           [SETTINGS_TOAST_KEY as symbol]: { error: (m: string) => useToast().error(m), info: (m: string) => useToast().info(m), warning: (m: string) => useToast().warning(m) },
-          [USE_QUOTA_CONFIGURE_KEY]: () => makeQuotaStateStub(),
-          [SETTINGS_CONFIG_API_KEY as symbol]: { detectSources: vi.fn(async () => []) },
+          [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
         },
       },
     })

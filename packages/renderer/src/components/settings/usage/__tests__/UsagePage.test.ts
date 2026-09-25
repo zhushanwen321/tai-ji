@@ -16,7 +16,7 @@
  * mock 策略（对齐 PluginContributionsPage.test.ts 装配方式）：
  *   - vue-i18n 由 vitest.config.ts setupFiles（vitest-i18n-setup.ts）全局 mock，
  *     t() 从 zh-CN locale 取值，无需在测试里 app.use(i18n)
- *   - vi.mock('@taiji/core/transport/api/domains/usage') 替掉 WS RPC 门面（onMounted 即拉数据）
+ *   - SettingsTransport seam 桩（[C3] 测试打 seam）替掉 WS RPC 门面（onMounted 即拉数据）
  *   - 仅 stub UsageDailyChart（内部用 ResizeObserver，happy-dom 无实现）；其余子组件
  *     （UsageLedger/UsageDetailTable 等）真实渲染，保证 testid 断言来自真实聚合管线
  */
@@ -24,14 +24,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { UsageRow, UsageStatsResult } from '@taiji/shared'
 
-vi.mock('@taiji/core/transport/api/domains/usage', () => ({
-  getUsageStats: vi.fn(),
-}))
+// [C3] getUsageStats 经 SettingsTransport seam 桩注入（替换原 domains/usage 模块 mock）
+const getUsageStats = vi.hoisted(() => vi.fn())
 
 import UsagePage from '@/components/settings/usage/UsagePage.vue'
-import { getUsageStats } from '@taiji/core/transport/api/domains/usage'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
 const mockedGetUsageStats = vi.mocked(getUsageStats)
+
+beforeEach(() => {
+  provideSettingsTransport(makeSettingsTransportStub({ getUsageStats }))
+})
 
 /** 构造 n 天前的本地日期串（YYYY-MM-DD）。页面默认 range=30 按当天滚动构造窗口，写死日期会在 30 天后滑出窗口静默变红——测试日期一律相对当天。 */
 function daysAgo(n: number): string {

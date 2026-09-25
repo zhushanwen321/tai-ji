@@ -50,8 +50,8 @@ taiji 作为 Electron 桌面应用，**直接以 npm 依赖形式引入该包即
 | `shared/quota-providers/src/registry.ts` | 合并声明式配置 + 内置 fetcher，按 mtime 缓存重载 |
 | `shared/quota-providers/src/cache.ts` | TTL 缓存（2min）+ Promise.allSettled 并发拉取 + 原子磁盘写入 |
 | `shared/quota-providers/src/config.ts` | `providers.json` 加载器（声明 token-plans / search-tools 列表） |
-| `shared/quota-providers/src/secrets.ts` | `${ENV_VAR}` 占位符解析 |
-| `shared/quota-providers/src/paths.ts` | 路径基于 `getAgentDir()`（pi 用 `~/.pi/agent/`）派生 |
+| `shared/quota-providers/src/secrets.ts` | ${ENV_VAR} 占位符解析 |
+| `shared/quota-providers/src/paths.ts` | 路径基于 getAgentDir()（pi 用 `~/.pi/agent/`）派生 |
 
 **关键设计点**：
 - `Promise.allSettled` 模式：单 provider 失败不影响其他；失败保留旧缓存值不覆盖为 null
@@ -247,9 +247,10 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
 ]
 ```
 
-**自动关联逻辑**（现行两条路径）：
+**自动关联逻辑**（现行三条路径）：
 - **设置页手动路径**：Provider 编辑体的额度配置面板按 `match` 规则自动回填查询类型默认值（`useQuotaConfigure` 的 preset fallback）；开关默认关，由「保存并测试」或开关显式落盘（D4：enabled 是用户同意位）。
-- **导入自动开启（导入即默认同意，用户可关闭）**：从其他 agent 导入 provider（W2）时，runtime 侧对「本次真实落盘（imported）+ 按 baseUrl/name 命中 api-key 类 preset + 凭证为明文」的条目自动写 providers.json extras `quota { enabled: true, fetcher }`（`provider-importer.matchAutoEnablePreset`）。fetcher 显式落盘——catalog provider（如 zai-coding-cn 孤儿凭据）无 models.json 条目，查询侧的 baseUrl/name 自动匹配读不到定义。cookie 类（mimo / opencode-go）与 env/command 占位凭证不自动开启（查询条件不齐备）；skipped（同名冲突）条目不动，不覆盖既存配置。
+- **导入自动开启（导入即默认同意，用户可关闭）**：从其他 agent 导入 provider（W2）时，runtime 侧对「本次真实落盘（imported）+ 按 baseUrl/name 命中 api-key 类 preset + 凭证为明文」的条目自动写 providers.json extras `quota { enabled: true, fetcher }`（`services/quota-auto-enable.ts`）。fetcher 显式落盘——catalog provider（如 zai-coding-cn 孤儿凭据）无 models.json 条目，查询侧的 baseUrl/name 自动匹配读不到定义。cookie 类（mimo / opencode-go）与 env/command 占位凭证不自动开启（查询条件不齐备）；skipped（同名冲突）条目不动，不覆盖既存配置。
+- **新增自动开启（新增即默认同意，用户可关闭）**：QuickSetup / 自定义新建 provider（`setProvider` 新建分支）同语义自动开启（`provider-config-helper.autoEnableQuotaDisplayOnCreate`，判定 + 落盘与导入路径共用 quota-auto-enable.ts）。匹配输入取内置模板身份（catalog 的 baseUrl/name——QuickSetup 刻意不回传模板 baseUrl，data.name 是可改展示名）或 data/合并值（custom）；仅明文 apiKey 且凭据有落盘路径（catalog + 无 credentialWriter 时不适用，对齐导入「failed 不自动开启」）。**用户已有 enabled 决定（含手动关闭）不覆盖不复活**（「默认同意」只对从无决定的新配置生效）；成功随 `config.providerUpdated` reply 回传 `quotaAutoEnabled` 供前端 toast（写成功才报，不实报告禁止）。
 
 #### 2.2.2 Provider 配置扩展（数据模型）
 
@@ -291,7 +292,7 @@ export interface ProviderInfo {
 | RPC 暴露 | `quota.fetch(providerId)` 主动查询并返回最新额度（hover 触发）；`quota.getCached(providerId)` 读缓存不发起请求（浮层首屏快速展示）|
 | 错误兜底 | 单 provider 失败不影响其他；凭证缺失返回 null（前端不显 coding-plan 区）；超时 5s（opencode-go 8s）|
 
-**共享包适配点**：当前共享包的 paths.ts 基于 `getAgentDir()`（pi 用 `~/.pi/agent/`）。taiji 集成时需要：
+**共享包适配点**：当前共享包的 paths.ts 基于 getAgentDir()（pi 用 `~/.pi/agent/`）。taiji 集成时需要：
 - 给共享包加 `setAgentDir(dir: string)` 注入函数（推荐提 PR 到 taiji-pi-extensions）
 - 或本仓库临时 fork，把 paths.ts 改成参数化（方案 B 的退化版）
 
@@ -401,7 +402,7 @@ grid-template-columns: 32px 1fr 32px 52px;
 | **P1** | runtime QuotaService + RPC 协议 + quota store | P0 |
 | **P2** | Settings UI：内置预设表 + ProviderEditModal 额度查询 Section | P1 |
 | **P3** | Composer hover 浮层：ModelSelectPopover 外层包 HoverCard | P1（数据） + 现有 HoverCard 组件 |
-| **P4** | 自动关联：导入即默认同意（api-key 类 preset + 明文凭证，runtime 自动开启）+ 设置页类型默认回填（见 §2.2.1） | P2 |
+| **P4** | 自动关联：导入 / 新增即默认同意（api-key 类 preset + 明文凭证，runtime 自动开启，quota-auto-enable.ts）+ 设置页类型默认回填（见 §2.2.1） | P2 |
 
 P3 可以与 P2 并行（数据通路打通后，UI 两处独立）。
 

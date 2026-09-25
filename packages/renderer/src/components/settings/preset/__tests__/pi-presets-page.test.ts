@@ -21,6 +21,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { PiLaunchPreset } from '@taiji/shared'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
 /** mock preset API（update 是「是否落盘」的唯一可观测量）。 */
 const presetMock = vi.hoisted(() => ({
@@ -77,6 +79,15 @@ beforeEach(() => {
   presetMock.update.mockImplementation((p: PiLaunchPreset) => Promise.resolve(p))
   const { toasts } = useToast()
   toasts.value = []
+  // [C3] preset 域调用经 SettingsTransport seam 桩注入（逐名映射）
+  provideSettingsTransport(makeSettingsTransportStub({
+    listPresets: presetMock.list,
+    getDefaultPreset: presetMock.getDefault,
+    setDefaultPreset: presetMock.setDefault,
+    createPreset: presetMock.create,
+    updatePreset: presetMock.update,
+    removePreset: presetMock.remove,
+  }))
 })
 
 afterEach(() => {

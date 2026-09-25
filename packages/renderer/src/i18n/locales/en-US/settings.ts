@@ -64,6 +64,8 @@ export default {
     title: 'Subagent Engine',
     label: 'Default engine',
     desc: 'Execution engine for subagent dispatch; takes effect after reopening the session',
+    saved: 'Saved',
+    saveFailed: 'Save failed: {reason}',
     loadErrorHint: 'Failed to load; showing defaults',
     loadErrorRetry: 'Retry',
   },
@@ -123,6 +125,7 @@ export default {
     defaultPill: 'Default',
     defaultAutoUpdated: 'Default model auto-updated to {model}',
     autoEnabledToast: 'API Key configured, {name} enabled automatically',
+    quotaAutoEnabledToast: 'Auto-enabled Coding Plan quota display for "{name}" — turn it off in Settings',
     modelsCount: '{count} models',
     editTitle: 'Edit provider',
     deleteTitle: 'Delete provider',
@@ -866,7 +869,9 @@ export default {
     worktreeRootDirPlaceholder: '~/worktrees',
     browse: 'Browse',
     browseComingSoon: 'Browse dialog coming in a future update — type the path manually for now',
-    loadFailed: 'Some worktree settings failed to load, check network or restart: {details}',
+    // RD-4#8: persistent load-error hint (defaults are not saved values) + retry
+    loadErrorHint: 'Failed to load; showing defaults',
+    loadErrorRetry: 'Retry',
     setupScript: 'Setup Script',
     setupScriptHint: 'Script to execute after worktree creation (relative to repo root), leave empty to skip',
     setupScriptPlaceholder: 'e.g. custom-hooks/setup-worktree.sh',
@@ -922,6 +927,13 @@ export default {
     updateSourceGitcode: 'GitCode',
     currentVersionLabel: 'Current Version',
     channelHint: 'stable channel · restart the app for the update to take effect',
+    // Module-standard toasts for the three update-settings fields (autoUpdate/preDownload/updateSource)
+    // after the setting-field migration; the saved/saveFailed keys above stay proxy-form-specific
+    updateSettingsSaved: 'Update settings saved',
+    updateSettingsSaveFailed: 'Save failed: {reason}',
+    // RD-4#8: load-failure persistent hint + retry
+    loadErrorHint: 'Failed to load; showing defaults',
+    loadErrorRetry: 'Retry',
   },
   // ── Compat editor (CompatEditor / CompatField) ──
   compat: {

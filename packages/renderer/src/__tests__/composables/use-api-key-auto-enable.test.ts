@@ -10,13 +10,15 @@
  * - onToggleEnabled 手动开关链路回归（wave4 C1 搬迁）：防重入（toggling 命中 no-op）；
  *   disable 且 defaultModel 承载该 provider → defaultModel 清空
  *
- * mock 策略：vi.mock('@/api')（toggleProviderEnabled）+ partial mock '@taiji/core'
+ * mock 策略：SettingsTransport seam 桩（[C3] 测试打 seam）捕获 toggleProviderEnabled + partial mock '@taiji/core'
  * （getSettingsStore → stub）+ '@/i18n'（t 返回 key 本身）+ '@/composables/useToast'。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-api-key-auto-enable.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { ProviderInfo } from '@taiji/shared'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const configMock = vi.hoisted(() => ({
   toggleProviderEnabled: vi.fn(async () => {}),
@@ -30,10 +32,7 @@ const settingsStoreStub = vi.hoisted(() => ({
 
 const toastMock = vi.hoisted(() => ({ info: vi.fn(), error: vi.fn() }))
 
-vi.mock('@/api', () => ({
-  config: configMock,
-  default: { config: configMock },
-}))
+// [C3] toggleProviderEnabled 经 SettingsTransport seam 桩注入（替换原 @/api 门面 mock）
 
 vi.mock('@taiji/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@taiji/core')>()),
@@ -79,6 +78,7 @@ beforeEach(() => {
   settingsStoreStub.setProviderEnabled.mockReset()
   settingsStoreStub.setProviderEnabled.mockReturnValue(true)
   providers = [{ ...DISABLED_PROVIDER }]
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 
 describe('afterApiKeySave 判定矩阵', () => {

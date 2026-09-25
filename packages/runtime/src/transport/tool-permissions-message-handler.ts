@@ -26,7 +26,7 @@ export class ToolPermissionsMessageHandler {
           this.ctx.sendError(ws, result.code ?? 'app_config_io_error', result.error ?? 'unknown error', msg.id)
           return true
         }
-        this.ctx.reply(ws, msg.id, 'config.providerUpdated', { saved: true })
+        this.ctx.reply(ws, msg.id, 'config.toolPermissionsSaved', { saved: true })
         return true
       }
       default:

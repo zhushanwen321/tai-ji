@@ -1,14 +1,17 @@
 /**
- * WorktreePage 测试（RD-4#6 保存失败透传 runtime 文案 + RD-4#7 前端范围/非空校验）。
+ * WorktreePage 测试（RD-4#6 保存失败透传 runtime 文案 + RD-4#7 前端范围/非空校验 + RD-4#8 加载失败语义）。
  *
  * 覆盖：
  *  - 加载：getWorktreeTimeout 等 5 个 getter 拉取 → timeout input 显示加载值。
+ *  - #8 加载失败（有意行为修正：一次性 toast → 常驻禁用 + 重试）：任一 getter reject →
+ *    常驻 loadError 块显形 + 控件禁用 + 无一次性 toast；retry 成功 → 提示消失 + 控件恢复。
  *  - #7 timeout 越界（>3600 / <=0）：blur → inline error + 不发 RPC + 回滚加载值。
  *  - #7 timeout 合法：blur → setWorktreeTimeout 被调。
  *  - #7 defaultBaseBranch 空串：blur → inline error + 不发 RPC + 回滚。
  *  - #6 保存失败透传：setWorktreeRootDir reject → toastError 含 runtime 精确文案（reason）。
  *
- * mock 策略：vi.mock('@taiji/core/transport/api/domains/settings') 替换 10 个 worktree API；
+ * mock 策略：SettingsTransport seam 桩（makeSettingsTransportStub + provideSettingsTransport，
+ *  [C3] 测试打 seam 不 mock 路由链）替换 10 个 worktree API；
  *  i18n 经 vitest-i18n-setup 全局解析 zh-CN。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/worktree-page.test.ts
@@ -16,6 +19,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import { useToast } from '@/composables/useToast'
 
 const settingsMock = vi.hoisted(() => ({
@@ -31,7 +36,7 @@ const settingsMock = vi.hoisted(() => ({
   setDefaultBaseBranch: vi.fn(() => Promise.resolve({ baseBranch: 'origin/main' })),
 }))
 
-vi.mock('@taiji/core/transport/api/domains/settings', () => settingsMock)
+// [C3] 10 个 worktree API 经 SettingsTransport seam 桩注入（替换原 domains/settings 模块 mock）
 
 import WorktreePage from '@/components/settings/worktree/WorktreePage.vue'
 
@@ -47,6 +52,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   useToast().toasts.value = []
   vi.clearAllMocks()
+  provideSettingsTransport(makeSettingsTransportStub(settingsMock))
 })
 
 afterEach(() => {
@@ -62,6 +68,40 @@ describe('WorktreePage 加载', () => {
 
     expect(settingsMock.getWorktreeTimeout).toHaveBeenCalledTimes(1)
     expect(($('[data-testid="worktree-timeout-input"]').element as HTMLInputElement).value).toBe('60')
+  })
+})
+
+describe('WorktreePage RD-4#8 加载失败（有意行为修正：一次性 toast → 常驻禁用 + 重试）', () => {
+  it('getWorktreeTimeout reject → 常驻 loadError 块显形 + 控件禁用（默认值不再冒充已存值可保存）', async () => {
+    settingsMock.getWorktreeTimeout.mockRejectedValueOnce(new Error('ws down'))
+    wrapper = mount(WorktreePage, { attachTo: document.body })
+    await flushPromises()
+
+    // 常驻错误块 + 重试入口（对照 System sections 的 RD-4#8 形态）
+    expect($('[data-testid="worktree-load-error"]').exists()).toBe(true)
+    expect($('[data-testid="worktree-load-retry"]').exists()).toBe(true)
+    // 全部输入控件禁用（含加载成功字段的控件——组级归并）
+    expect($('[data-testid="worktree-timeout-input"]').attributes('disabled')).toBeDefined()
+    expect($('[data-testid="worktree-root-dir-input"]').attributes('disabled')).toBeDefined()
+    expect($('[data-testid="worktree-base-branch-input"]').attributes('disabled')).toBeDefined()
+    // 有意行为修正的核心断言：不再一次性 toast（RD-4#8：误显的默认值会随用户操作直接落盘）
+    const { toasts } = useToast()
+    expect(toasts.value.some((toast) => toast.type === 'error')).toBe(false)
+  })
+
+  it('retry → getter 重拉成功 → loadError 消失 + 控件恢复可用 + 显示加载值', async () => {
+    settingsMock.getWorktreeTimeout.mockRejectedValueOnce(new Error('ws down'))
+    wrapper = mount(WorktreePage, { attachTo: document.body })
+    await flushPromises()
+    expect($('[data-testid="worktree-load-error"]').exists()).toBe(true)
+
+    await $('[data-testid="worktree-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="worktree-load-error"]').exists()).toBe(false)
+    const input = $('[data-testid="worktree-timeout-input"]')
+    expect(input.attributes('disabled')).toBeUndefined()
+    expect((input.element as HTMLInputElement).value).toBe('60')
   })
 })
 

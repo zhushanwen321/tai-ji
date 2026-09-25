@@ -14,7 +14,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import UsageDetailTable from '../UsageDetailTable.vue'
-import { newMetrics, accumulate, type AggMetrics } from '../aggregate'
+import { newMetrics, accumulate, type AggMetrics } from '@taiji/core'
 
 /** 构造单 provider 分组（含 1 个 model 行）。 */
 function group(pid: string, input: number, model: string): {

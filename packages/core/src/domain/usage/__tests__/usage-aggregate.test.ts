@@ -1,8 +1,8 @@
 /**
- * aggregate.ts 纯函数单测（用量统计增量覆盖 gate）。
+ * usage-aggregate.ts 纯函数单测（用量统计增量覆盖 gate，随 aggregate 下沉 core 域）。
  *
  * 测试框架：vitest（禁 node:test）。
- * 运行命令：cd packages/renderer && npx vitest run src/components/settings/usage/__tests__/aggregate.test.ts
+ * 运行命令：cd packages/core && npx vitest run src/domain/usage/__tests__/usage-aggregate.test.ts
  *
  * 覆盖范围（格式化边界 + 聚合边界）：
  *   - fmtUSD / fmtCompact / niceMax 的全分支数值边界
@@ -35,7 +35,7 @@ import {
   aggregateProjects,
   aggregateCacheMix,
   aggregateDetailGroups,
-} from '../aggregate'
+} from '../usage-aggregate'
 
 /** 构造单条用量行。 */
 function makeRow(overrides: Partial<UsageRow> = {}): UsageRow {
@@ -295,7 +295,7 @@ describe('aggregateProjects', () => {
     ]
     const r = aggregateProjects(rows, noFilter())
     expect(r.map((p) => p.name)).toEqual(['big', 'small'])
-    expect(Object.keys(r[0].provs).sort()).toEqual(['p1', 'p2'])
+    expect(Object.keys(r[0].provs ?? {}).sort()).toEqual(['p1', 'p2'])
     // 空数组边界
     expect(aggregateProjects([], noFilter())).toEqual([])
   })

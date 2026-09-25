@@ -12,19 +12,18 @@
  * mock 策略：mock 工厂 / fixtures / mount 编排经 __tests__/helpers/system-page-mount
  *  共享（与 system-page-smart-context.test.ts 的公共样板提取）；vi.mock 注册留在本文件
  *  （hoisting 约束），用例断言与特定覆写保留在各自 describe。
- *  settings store 用 @taiji/core 的 getSettingsStore() 单例（模块级 store，
- *  providers/models 是 ref，测试直接写 .value 注入 fixture），
- *  beforeEach 经 __resetSettingsStoreForTesting 重置避免跨用例残留。
+ *  settings store 经 provideSettingsStore(createSettingsStore()) 每用例注入全新实例
+ *  （providers/models 是 ref，测试直接写 .value 注入 fixture，无跨用例残留）。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/system-page-rename-model.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { __resetSettingsStoreForTesting } from '@taiji/core'
+import { provideSettingsStore, createSettingsStore } from '@taiji/core'
 import {
   settingsApiMocks,
-  settingsApiModule,
+  provideSettingsApiMocks,
   toastModule,
   commandStoreModule,
   ipcModule,
@@ -33,7 +32,7 @@ import {
   seedStore,
 } from '../helpers/system-page-mount'
 
-vi.mock('@taiji/core/transport/api/domains/settings', () => settingsApiModule())
+// [C3] settings API mock 经 SettingsTransport seam 注入（provideSettingsApiMocks，见 beforeEach）
 vi.mock('@/composables/useToast', () => toastModule())
 vi.mock('@/composables/features/command/useCommandStore', () => commandStoreModule())
 vi.mock('@/lib/ipc', () => ipcModule())
@@ -42,7 +41,7 @@ vi.mock('@/lib/ipc', () => ipcModule())
 //（Gate A R4②）。mount 慢是集成测试固有成本而非挂起，放宽本文件超时作资源竞争容差。
 vi.setConfig({ testTimeout: 20_000 })
 
-// 工厂引用 helper 单例（mock 模块与断言共享同一 mock fn 实例）
+// 工厂引用 helper 单例（seam 桩与断言共享同一 mock fn 实例）
 const settingsMock = settingsApiMocks
 
 let wrapper: Awaited<ReturnType<typeof mountSystemPage>> | null = null
@@ -54,8 +53,9 @@ async function mountPage(): Promise<void> {
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   resetSettingsApiMocks(settingsMock)
+  provideSettingsApiMocks()
 })
 
 afterEach(() => {

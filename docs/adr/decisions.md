@@ -88,7 +88,7 @@ pi CustomMessage 的 `display:false`（如 goal/todo context 提醒）三路透�
 chat messages 用 shallowRef(Map)（`core/domain/chat/store.ts`），所有更新必须「新对象 → 新数组 → Map.set」不可变写法——直接 mutate 字段不触发响应式，属反模式。isGenerating 从 messages 派生（单一真相源 + 增量跟踪缓存）。
 
 ### ADR-0065 mutation reply 生效值契约
-改状态 RPC 先判「后端会不会变换请求值」：经 pi（model.switch/setThinkingLevel）→ 禁乐观写，reply 生效值是唯一写 store 路径，协议 reply 生效字段类型必需；本地存储（preset CRUD）→ 允许乐观写 + reply 权威覆盖 + 失败回滚。机器强制两层：协议具名 XxxMutationReply interface + `mutation-reply-contract.test.ts` MUTATION_RPC_REGISTRY（新 mutation 不登记即测试红）。登记 C-pi-15。
+改状态 RPC 先判「后端会不会变换请求值」：经 pi（model.switch/setThinkingLevel）→ 禁乐观写，reply 生效值是唯一写 store 路径，协议 reply 生效字段类型必需；本地存储（preset CRUD）→ 允许乐观写 + reply 权威覆盖 + 失败回滚。机器强制两层：协议 reply 类型层（生效/回显字段必需不 optional，复用既有形状）+ `mutation-reply-contract.test.ts` MUTATION_RPC_REGISTRY（echo-value/exempt 两张清单的机器镜像与唯一登记处，新 mutation 不登记即测试红；reply 契约升级为 payload 消费型时须同步把条目改 echo-value/effective-value 并登记 replyKey + effectiveFields，ack-exempt 登记与 void 类型锁定互为校验）。现行锚点：config.setProvider = echo-value（reply `config.providerUpdated`，providerId 必需回显，quotaAutoEnabled optional 供 toast）。登记 C-pi-15。
 
 ## 包拓扑与分层
 
@@ -185,6 +185,15 @@ widget 推送从「每 30s 无条件全量」改为**任务集指纹跳推**（�
 
 ### ADR-0073 expectTurn 源元数据通路与直发门终态通道（2026-09-22 设计裁决）
 表单提交型「是否有 turn 跟随」的判别权归扩展作者显式声明：`uiFormInteract` options 增 `expectTurn?: boolean`（缺省 true 全兼容存量），五段通路 = 声明（scheduler 命令路径传 `expectTurn:false`）→ marker select options JSON 携带 → event-adapter `tryTranslateFormSelect` 单点**条件落键**（仅显式 false 落键、undefined 省键；legacy 归一分支不透传——旧 npm 包结构上不可能携带）→ `ExtensionUIRequest` 加员（`toExtensionUIRequest` typeof 守卫）→ respond 分型严格双条件 `result≠null && expectTurn===false → clearPendingSend`（`=== false` 显式判定禁 truthy，undefined 走桥接 = fail-safe；双侧类型守卫把脏值挡在帧外走桥接）。效果：/schedule 提交即时收尾（真机 91ms/48ms 两轮实测，不再命中 30s 兜底）；ask-user/plan 桥接零改动。连带裁决：D4a——plain dialog 应答收尾锚点落壳层 transport `sendPiResponse`（**先于 delivered 检查**即 clearPendingSend，cancel/提交/断连三型应答终局统一收尾（ADR-0072 收口条目）；**两通路相位分叉属有意设计**——form 通路分型锚点在 delivered 之后（`useExtensionUI.respond` 未送达即 return，锚点不可达，未送达期间维持 busy），plain 恒清在 delivered 之前（「意图先于送达」），重审 = 两通路收尾语义统一化提案出现时整体重审，勿单独判其一为 bug；原 ui 队列落点结构性不可达 store，chat-view-deps 反向依赖禁令）；D5——timeout warn 去 dev 门（store timeout 分支恒发；该残余已由 renderer console 落盘管道解决（renderer-console-<date>.log，落地 4f85d2964/7dfe760bf；重开 = 用户 2026-09-22 裁决，30s 兜底 warn 生产可取证——warn/error 级经 main 侧 console-message 监听落盘，排障取 <dataDir>/logs/ 即得））；30s 兜底 timer 保留（语义收窄为真异常回收层）。已知边界：plain dialog 提交面（/permission 命令族）pi select API 无元数据通道、每次提交命中 30s 兜底的挂账已由通路级即时收尾解决（sendPiResponse 应答终局无条件清 pendingSend——pi select 无元数据位的缺口由通路默认值「无 turn 收尾」绕开，非交互形态迁移：CompanionBand → FormOverlay 方案已否（错层反例：用交互形态重构解决收尾语义缺陷）；论证与已知失真登记见 ADR-0072 收口条目）；/session-pick 系 tui 注册门源 RPC 模式不可触发。同批终态通道：composer 直发门读 ShellInputInstance expose 的 `getInputElement()`（禁回退 `$el`——dev 构建模板首注释使 `$el` 为注释节点、门恒 false 的 W1 F-1 教训，[HISTORICAL] 钉死于 command-popover-keyboard.ts）。实施 = form-submit-busy-convergence 七单元（43ca4df7b…0f1ac2dce）+ F-1 修复 3227df0bd；设计文档 `.tmp/tech-design/form-submit-busy-convergence.md`（过程产物）。
+
+### ADR-0074 settings 域 transport seam 按通道分工（2026-09-25 架构审查裁决）
+「settings 域只经 SettingsTransport seam 访问」的边界按**通道**划分而非一刀切：WS 通道（provider/model/skill/agent/system 配置面）必须进 seam（real/mock 双 adapter 证明）；Electron main 通道（update/proxy/directory 等走 `@/api/domains/settings` IPC 的面）登记豁免，不强行纳入 seam 类型面——全部收编会把无 mock 需求的 IPC 通道强行套上双 adapter 形态，收益为零。transport.ts 头注即登记处；读到「seam 收口」时不得把 main 通道二次「收编」进 seam。
+
+### ADR-0075 i18n 文案不作状态判定依据（2026-09-25 架构审查裁决）
+任何「按展示文案判定状态/归属」的模式在 locale 切换后失效（文案是运行时渲染值，不是稳定判据）。settings 编辑体动作错误的归属/清除按 source 标签（ActionErrorSource，见 CONTEXT.md 词条）判定；本条为可复用否决条目，其他域出现文案比对模式时按本条否决。
+
+### ADR-0076 seam 与注入通道二选一（2026-09-25 架构审查裁决，反转 W3「ui 依赖一律注入」决议）
+方法已在 SettingsTransport seam 上时，ui 包组件直取 seam（ui→core 合法依赖方向），不再经 provide/inject 复刻第二条注入通道——双通道是对同一方法的双轨复刻（假接缝）。本次以删除 `SETTINGS_CONFIG_API_KEY`（detectSources 注入通道）落地；保留的注入 key（SETTINGS_TOAST_KEY/QUOTA_CONFIGURE_FACTORY_KEY/SETTINGS_CHOOSE_DIRECTORY_KEY）承载的是 seam 之外的真实依赖（壳层 toast、工厂装配、Electron dialog），不适用本条。
 
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 

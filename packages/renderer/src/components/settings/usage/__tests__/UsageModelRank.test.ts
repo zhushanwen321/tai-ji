@@ -14,8 +14,8 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import UsageModelRank from '../UsageModelRank.vue'
-import { newMetrics, accumulate } from '../aggregate'
-import type { AggMetrics, PerModelEntry } from '../aggregate'
+import { newMetrics, accumulate } from '@taiji/core'
+import type { AggMetrics, PerModelEntry } from '@taiji/core'
 
 function metrics(input: number, cost = 0): AggMetrics {
   const u = newMetrics()

@@ -27,7 +27,7 @@ import ModeDeclarationRow from '@/components/panel/ModeDeclarationRow.vue'
 import MessageStream from '@/components/panel/MessageStream.vue'
 import { useSessionStore } from '@/stores/session'
 import { usePresetStore } from '@/stores/preset'
-import { __resetPresetAutoLoadForTest } from '@/composables/features/settings/usePiPresets'
+import { createPresetAutoLoad } from '@/composables/features/settings/usePiPresets'
 import type { PiLaunchPreset } from '@taiji/shared'
 
 // ── ws 连接态受控 ref（MessageStream 挂载会安装 preset 自动加载单例；测试保持 disconnected，
@@ -60,6 +60,16 @@ vi.mock('virtua/vue', async () => {
   }
 })
 vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
+// ── preset 自动加载容器逐用例换新：MessageStream setup 的 installPresetAutoLoad()
+//    调用点不变，路由到每用例新容器（createPresetAutoLoad 实例即隔离），单例 watch
+//    状态不跨用例残留（本文件保持 disconnected 不触发 RPC；加载点行为由
+//    use-pi-presets.test.ts 覆盖）。
+const presetAutoLoadSlot = vi.hoisted(() => ({ install: () => {} }))
+vi.mock('@/composables/features/settings/usePiPresets', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/composables/features/settings/usePiPresets')>()
+  return { ...actual, installPresetAutoLoad: () => presetAutoLoadSlot.install() }
+})
+
 vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => ({ editAndResend: vi.fn(), loadMoreHistory: vi.fn(), hasMoreHistory: () => false }),
   resetChatModuleState: vi.fn(),
@@ -110,7 +120,7 @@ function mountRow(sessionId = 's1') {
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetPresetAutoLoadForTest()
+  presetAutoLoadSlot.install = createPresetAutoLoad().install
   if (wsMock.ref) wsMock.ref.value = 'disconnected'
   const presetStore = usePresetStore()
   presetStore.setPresets([])

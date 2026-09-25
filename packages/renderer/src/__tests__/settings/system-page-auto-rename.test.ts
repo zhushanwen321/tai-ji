@@ -20,7 +20,7 @@
  *  - update 透传：Section 的 update 事件原样透传为容器 update。
  *
  * mock 策略：
- *  - vi.mock('@taiji/core/transport/api/domains/settings') 捕获 getAutoRenameEnabled / setAutoRenameEnabled。
+ *  - SettingsTransport seam 桩（[C3] 测试打 seam）捕获 getAutoRenameEnabled / setAutoRenameEnabled。
  *  - vi.mock('@/composables/useToast') 隔离 toast 全局副作用。
  *  - vi.mock('@/lib/ipc') mock listSystemSounds（容器用例挂 SystemSoundSection onMounted 调用）。
  *  - vi.mock('@/composables/features/settings/useAuthedModelGroups') 部分注入（importOriginal 保
@@ -32,21 +32,23 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import type { SystemSettings } from '@taiji/core'
+import { provideSettingsTransport, type SystemSettings } from '@taiji/core'
+import type { RenameMode } from '@taiji/shared'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import SystemAutoRenameSection from '@/components/settings/system/SystemAutoRenameSection.vue'
 import SystemPage from '@/components/settings/system/SystemPage.vue'
 import SystemAppearanceSection from '@/components/settings/system/SystemAppearanceSection.vue'
 import SystemSoundSection from '@/components/settings/system/SystemSoundSection.vue'
 import SystemShortcutSection from '@/components/settings/system/SystemShortcutSection.vue'
 
-/** mock 捕获 auto-rename / rename-model / rename-mode / smart-context API 调用。vi.hoisted 保证在 vi.mock 工厂执行前就绪。 */
+/** mock 捕获 auto-rename / rename-model / rename-mode / smart-context API 调用（经 seam 桩注入）。 */
 const settingsMock = vi.hoisted(() => ({
   getAutoRenameEnabled: vi.fn(() => Promise.resolve({ enabled: true })),
   setAutoRenameEnabled: vi.fn(() => Promise.resolve({ enabled: true })),
   getRenameModel: vi.fn(() => Promise.resolve({ model: '' })),
   setRenameModel: vi.fn(() => Promise.resolve({ model: '' })),
   getRenameMode: vi.fn(() => Promise.resolve({ mode: 'first-stop' })),
-  setRenameMode: vi.fn((mode: string) => Promise.resolve({ mode })),
+  setRenameMode: vi.fn((mode: RenameMode) => Promise.resolve({ mode })),
   // SystemPage 现挂 SystemSmartContextSection（onMounted 读全量配置）——缺导出会告警
   getSmartContextConfig: vi.fn(() =>
     Promise.resolve({ enabled: true, compactModel: '', reminderThresholds: [200_000, 400_000, 600_000], excludedModels: [] }),
@@ -66,23 +68,8 @@ const authedGroups = vi.hoisted(() => ({
   groups: [] as Array<{ providerId: string; providerName: string; models: Array<{ value: string; label: string }> }>,
 }))
 
-vi.mock('@taiji/core/transport/api/domains/settings', () => ({
-  getAutoRenameEnabled: settingsMock.getAutoRenameEnabled,
-  setAutoRenameEnabled: settingsMock.setAutoRenameEnabled,
-  getRenameModel: settingsMock.getRenameModel,
-  setRenameModel: settingsMock.setRenameModel,
-  getRenameMode: settingsMock.getRenameMode,
-  setRenameMode: settingsMock.setRenameMode,
-  getSmartContextConfig: settingsMock.getSmartContextConfig,
-  setSmartContextEnabled: settingsMock.setSmartContextEnabled,
-  setSmartContextCompactModel: settingsMock.setSmartContextCompactModel,
-  setSmartContextThresholds: settingsMock.setSmartContextThresholds,
-  setSmartContextExcludedModels: settingsMock.setSmartContextExcludedModels,
-  // stores/settings → '@/api' → mock/index 转发引用 real 域的 getSystem/updateSystem，
-  // 工厂缺导出会在模块加载时抛 "No export defined"；本测试不消费，给空实现即可
-  getSystem: vi.fn(() => Promise.resolve({})),
-  updateSystem: vi.fn(() => Promise.resolve()),
-}))
+// [C3] auto-rename / rename-model / rename-mode / smart-context 读写经 SettingsTransport seam 桩注入
+//（makeSettingsTransportStub + provideSettingsTransport，见 beforeEach，替换原 domains/settings 模块 mock）
 
 vi.mock('@/composables/useToast', () => ({
   // info 走共享 toastMock 捕获（分流断言用）；error/warning 仅隔离副作用
@@ -154,6 +141,7 @@ beforeEach(() => {
   settingsMock.setRenameMode.mockImplementation((mode: string) => Promise.resolve({ mode }))
   authedGroups.groups = []
   toastMock.info.mockClear()
+  provideSettingsTransport(makeSettingsTransportStub(settingsMock))
 })
 
 afterEach(() => {
@@ -164,7 +152,7 @@ afterEach(() => {
 
 describe('SystemAutoRenameSection 会话自动重命名开关', () => {
   it('mount 后 DOM 含 auto-rename Switch', async () => {
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     const sw = wrapper.find('[data-testid="setting-auto-rename-session"]')
     expect(sw.exists()).toBe(true)
@@ -172,7 +160,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
 
   it('mount 后 DOM 含 rename model Select 且加载已配置模型', async () => {
     settingsMock.getRenameModel.mockResolvedValue({ model: 'zai-coding-cn/glm-5.3' })
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     expect(wrapper.find('[data-testid="setting-rename-model"]').exists()).toBe(true)
     expect(settingsMock.getRenameModel).toHaveBeenCalled()
@@ -180,7 +168,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
 
   it('getAutoRenameEnabled 返回 true 时 Switch 为开', async () => {
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: true })
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     const sw = wrapper.find('[data-testid="setting-auto-rename-session"]')
     expect(sw.attributes('data-state')).toBe('checked')
@@ -188,7 +176,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
 
   it('getAutoRenameEnabled 返回 false 时 Switch 为关', async () => {
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: false })
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     const sw = wrapper.find('[data-testid="setting-auto-rename-session"]')
     expect(sw.attributes('data-state')).toBe('unchecked')
@@ -196,7 +184,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
 
   it('切换 Switch 触发 setAutoRenameEnabled', async () => {
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: true })
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     const sw = wrapper.find('[data-testid="setting-auto-rename-session"]')
     // reka-ui Switch 通过 click 切换并 emit update:model-value
@@ -207,7 +195,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
   })
 
   it('mount 后 DOM 含 rename-mode Select 且 getRenameMode 被调用', async () => {
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     expect(wrapper.find('[data-testid="setting-rename-mode"]').exists()).toBe(true)
     expect(settingsMock.getRenameMode).toHaveBeenCalled()
@@ -215,14 +203,14 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
 
   it('getRenameMode 返回 first-prompt 时 trigger 显示「首次请求时」', async () => {
     settingsMock.getRenameMode.mockResolvedValue({ mode: 'first-prompt' })
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     const trigger = wrapper.find('[data-testid="setting-rename-mode"]')
     expect(trigger.text()).toContain('首次请求时')
   })
 
   it('下拉含三模式选项；点选 agent 自主命名 → setRenameMode 收到 "agent-tool"', async () => {
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
 
     // reka-ui SelectContent 仅 open 时挂载（teleport 到 body），happy-dom 需显式 dispatch
@@ -252,7 +240,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
     // UI 必须显示 reply 生效值（首轮回复完成），而非乐观更新的请求值（防本地与实际漂移）
     settingsMock.getRenameMode.mockResolvedValue({ mode: 'first-prompt' })
     settingsMock.setRenameMode.mockResolvedValue({ mode: 'first-stop' })
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
 
     const trigger = wrapper.find('[data-testid="setting-rename-mode"]').element as HTMLElement
@@ -291,7 +279,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
         ],
       },
     ]
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
 
     const trigger = wrapper.find('[data-testid="setting-rename-model"]').element as HTMLElement
@@ -314,7 +302,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
   })
 
   it('renameModeHint 说明开关依赖：自动生成需开关开启，agent 自主命名不受限', async () => {
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     // D1 正交契约的用户可见边界：flag 只门控自动路径，agent-tool 工具面不受门控
     const text = wrapper.text()
@@ -324,7 +312,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
 
   it('开关关 + 切自动模式 → 成功 toast 提示需开启开关（不承诺已生效）', async () => {
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: false })
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
 
     const trigger = wrapper.find('[data-testid="setting-rename-mode"]').element as HTMLElement
@@ -346,7 +334,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
 
   it('auto-rename 开关关闭时 mode Select 仍可用（agent-tool 不受 flag 门控）', async () => {
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: false })
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     const trigger = wrapper.find('[data-testid="setting-rename-mode"]')
     expect(trigger.attributes('disabled')).toBeUndefined()
@@ -354,7 +342,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
 
   it('RD-4#8：读取失败 → 常驻提示 + Switch 禁用（不把默认「开」当已存值）', async () => {
     settingsMock.getAutoRenameEnabled.mockRejectedValue(new Error('ws down'))
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     expect(wrapper.find('[data-testid="auto-rename-load-error"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('读取失败')
@@ -364,7 +352,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
 
   it('RD-4#8：重试成功后清除提示 + Switch 恢复可用', async () => {
     settingsMock.getAutoRenameEnabled.mockRejectedValueOnce(new Error('ws down'))
-    wrapper = mount(SystemAutoRenameSection, { props: { system: systemFixture() } })
+    wrapper = mount(SystemAutoRenameSection)
     await flushPromises()
     expect(wrapper.find('[data-testid="auto-rename-load-error"]').exists()).toBe(true)
 

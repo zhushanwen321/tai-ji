@@ -1,58 +1,123 @@
 /**
- * UpdateCheckCard / UpdatePage 测试共享 mock 单例（Wave C r2-01 useAppUpdate + settings 脚手架收敛）。
+ * UpdateCheckCard / UpdatePage / UpdateButton 测试共享的 update controller 装配单源。
  *
- * settings/update-page.test.ts、update-page-source.test.ts、system-page-update.test.ts
- * 三文件曾逐字复制 UpdateCheckCard 的 mock 脚手架：testState 单例、动作 mock 四连、
- * useAppUpdate composable 工厂、settings domain + toast 捕获层。收敛到本 helper 单源；
- * vi.mock 注册留在测试文件（mock 是文件作用域，工厂经顶层 import 转发本 helper 导出——
- * 同 sidebar-mount.ts 先例）。
+ * 组件测试统一消费真实控制器：createAppUpdateController({ ipc: createMemoryAppUpdateIpc() })
+ * （同 composables/useAppUpdate*.test.ts 形态）：state 恒为 UpdateAppState 全 6 字段真形状，
+ * 动作断言走内存 adapter 的 vi.fn，state 摆置用 Object.assign 直改 controller.state
+ * （B1：全部 state 断言对象必须是真实控制器产出的 state）。
  *
- * vitest 按测试文件隔离模块图：各单例在每个测试文件内是独立实例（文件内 beforeEach
- * 重置与断言共享同一批 vi.fn，与原 vi.hoisted 文件内单例语义一致）。
+ * 注入方式（六个组件测试文件同构）：
+ *   vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
+ * 工厂经 vi.importActual 保留真实模块导出，只重写 useAppUpdate 单例入口返回 harness
+ * 控制器的消费面。注意本 helper 禁止顶层 import 被 mock 的路径：vi.mock 工厂在测试文件的
+ * helper import 绑定初始化前就会因该 import 被触发（TDZ），故 controller 的创建收进 async
+ * 工厂内（vi.importActual 取真实 createAppUpdateController，此时尚在模块 setup 阶段，早于
+ * 任何 beforeEach，resetCardUpdateHarness 前必然就绪）。
  *
- * 变体保留未收敛（非逐字同构，收敛需改 mock 面）：
- * - update-page-source.test.ts 的 useAppUpdate 工厂（performDownload/performInstall/
- *   openFallbackUrl 内联 vi.fn，不经单例）
- * - composables/useAppUpdate.test.ts / .pending / .manual-channel / .visibility 四文件的
- *   hoisted 块（键集合 / 泛型签名 / 回调捕获机制互异）
- * - components/UpdateButton.test.ts 与 .w3-acceptance 的 testState（shape 不同）
+ * vitest 按测试文件隔离模块图：harness 在每个测试文件内是独立单例（beforeEach 经
+ * resetCardUpdateHarness 复位，与原 vi.hoisted 文件内单例语义一致）。
  */
-import { reactive } from 'vue'
 import { vi } from 'vitest'
-import type { UpdateState } from '@taiji/shared'
+import type { LatestReleaseInfo } from '@taiji/shared'
+import type { AppUpdateControllerInternal } from '@/composables/features/settings/useAppUpdate'
+import type { UpdateAppState } from '@/composables/features/settings/use-app-update-state'
+import { createMemoryAppUpdateIpc } from './update-ipc-mock'
+import type { MemoryAppUpdateIpc } from './update-ipc-mock'
 
-/** UpdateCheckCard 消费的 useAppUpdate 单例 state（测试经 Object.assign 改写驱动分支渲染）。 */
-export const cardTestState = reactive({
-  state: 'idle' as UpdateState,
-  latestRelease: null as { version: string; htmlUrl: string; releaseNotes: string } | null,
+/** 内存 ipc + 真实 controller 的文件级装配（state 摆置与 ipc 断言统一经此取用） */
+export interface CardUpdateHarness {
+  ipc: MemoryAppUpdateIpc
+  controller: AppUpdateControllerInternal
+}
+
+let harness: CardUpdateHarness | null = null
+
+/** 取本测试文件的 controller 装配（由 useAppUpdateCardModule 工厂创建，见模块头注释时序说明） */
+export function getCardUpdateHarness(): CardUpdateHarness {
+  if (!harness) {
+    throw new Error(
+      'update-card-mock: harness not initialized — vi.mock(\'@/composables/features/settings/useAppUpdate\', () => useAppUpdateCardModule()) must run first (module setup phase).',
+    )
+  }
+  return harness
+}
+
+/** UpdateAppState 缺省态（全 6 字段，含 errorSuggestion） */
+const IDLE_STATE: UpdateAppState = {
+  state: 'idle',
+  latestRelease: null,
   errorMessage: '',
+  errorSuggestion: '',
   percent: 0,
   releaseNotesHtml: '',
-})
+}
 
-/** 动作 mock 四连（update-page / system-page-update 全量消费；source 仅消费 checkForUpdate）。 */
-export const checkForUpdateMock = vi.fn(() => Promise.resolve())
-export const performDownloadMock = vi.fn(() => Promise.resolve())
-export const performInstallMock = vi.fn(() => Promise.resolve())
-export const openFallbackUrlMock = vi.fn(() => Promise.resolve())
-
-/** '@/composables/features/settings/useAppUpdate' mock 工厂（update-page / system-page-update 同构面）。 */
-export function useAppUpdateCardModule() {
+/** 构造测试用 LatestReleaseInfo（真实契约 shape，composables/useAppUpdate.test.ts 同款） */
+export function makeCardRelease(version: string): LatestReleaseInfo {
   return {
-    useAppUpdate: () => ({
-      state: cardTestState,
-      checkForUpdate: checkForUpdateMock,
-      performDownload: performDownloadMock,
-      performInstall: performInstallMock,
-      openFallbackUrl: openFallbackUrlMock,
-      initAutoCheck: vi.fn(),
-      restorePendingUpdate: vi.fn(),
-      restorePreloadedUpdate: vi.fn(),
-    }),
+    version,
+    tagName: `v${version}`,
+    releaseNotes: '',
+    publishedAt: '2026-07-01T00:00:00Z',
+    htmlUrl: 'https://example.com/release',
+    assets: {},
   }
 }
 
-/** '@/api/domains/settings' 捕获层单例（update-page / update-page-source 同构面；beforeEach 逐键重置）。 */
+/**
+ * 复位 harness：state 归 idle 缺省 + ipc vi.fn 清调用记录并重设默认 resolve 值
+ * （各用例按需 mockResolvedValue 覆盖）。controller.flags（errorHandled/pendingRestored）
+ * 不复位：组件测试不经 fireError/restore 链置位它们，且 AppUpdateController 不暴露
+ * container——需要操纵 flags 的用例走 composables 侧 per-beforeEach 新建控制器形态。
+ */
+export function resetCardUpdateHarness(): void {
+  const { ipc, controller } = getCardUpdateHarness()
+  Object.assign(controller.state, IDLE_STATE)
+  ipc.checkForUpdate.mockReset()
+  ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
+  ipc.updateDownload.mockReset()
+  ipc.updateDownload.mockResolvedValue({ downloaded: true })
+  ipc.updateInstall.mockReset()
+  ipc.updateInstall.mockResolvedValue({ triggerRestart: true })
+  ipc.openUpdateFallbackUrl.mockReset()
+  ipc.openUpdateFallbackUrl.mockResolvedValue(undefined)
+  ipc.getPreloaded.mockReset()
+  ipc.getPreloaded.mockResolvedValue(null)
+  ipc.getPendingUpdate.mockReset()
+  ipc.getPendingUpdate.mockResolvedValue(null)
+  ipc.getLaunchResult.mockReset()
+  ipc.getLaunchResult.mockResolvedValue(null)
+  ipc.getUpdateSettings.mockReset()
+  ipc.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: false })
+}
+
+/** '@/composables/features/settings/useAppUpdate' mock 工厂（真实 controller 面替换单例入口） */
+export async function useAppUpdateCardModule() {
+  const actual = await vi.importActual<
+    typeof import('@/composables/features/settings/useAppUpdate')
+  >('@/composables/features/settings/useAppUpdate')
+  if (!harness) {
+    const ipc = createMemoryAppUpdateIpc()
+    harness = { ipc, controller: actual.createAppUpdateController({ ipc }) }
+  }
+  return {
+    ...actual,
+    useAppUpdate: () => {
+      const { controller } = getCardUpdateHarness()
+      return {
+        state: controller.state,
+        checkForUpdate: controller.checkForUpdate,
+        performDownload: controller.performDownload,
+        performInstall: controller.performInstall,
+        openFallbackUrl: controller.openFallbackUrl,
+        initAutoCheck: controller.initAutoCheck,
+      }
+    },
+  }
+}
+
+/** '@/api/domains/settings' 捕获层单例（update-page / update-page-source 同构面；beforeEach 逐键重置）。
+ *  该 mock 是登记的设计形态（u18/裁决 4-B：settings 域 Electron IPC 的稳定 vi.mock 目标），保留。 */
 export const settingsMock = {
   getProxyConfig: vi.fn(() => Promise.resolve({ mode: 'system', httpProxy: '', httpsProxy: '' })),
   setProxyConfig: vi.fn(() => Promise.resolve()),
@@ -61,14 +126,14 @@ export const settingsMock = {
   setUpdateSettings: vi.fn(() => Promise.resolve()),
 }
 
-/** '@/composables/useToast' 捕获层单例（update-page / update-page-source 同构面）。 */
+/** '@/composables/useToast' 捕获层单例（update-page / update-page-source 同构面） */
 export const toastMock = {
   info: vi.fn(),
   error: vi.fn(),
   warning: vi.fn(),
 }
 
-/** '@/api/domains/settings' mock 工厂（转发 settingsMock 单例）。 */
+/** '@/api/domains/settings' mock 工厂（转发 settingsMock 单例） */
 export function settingsApiModule() {
   return {
     getProxyConfig: settingsMock.getProxyConfig,
@@ -79,7 +144,7 @@ export function settingsApiModule() {
   }
 }
 
-/** '@/composables/useToast' mock 工厂（转发 toastMock 单例）。 */
+/** '@/composables/useToast' mock 工厂（转发 toastMock 单例） */
 export function toastMockModule() {
   return {
     useToast: () => toastMock,

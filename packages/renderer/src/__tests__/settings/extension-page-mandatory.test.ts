@@ -16,6 +16,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ExtensionItem } from '@taiji/core'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 const extensionMock = vi.hoisted(() => ({
   fetchRecommended: vi.fn(() => Promise.resolve([])),
@@ -99,6 +101,20 @@ beforeEach(() => {
   // 清空全局 toasts（useToast 是模块级单例，跨用例共享）
   const { toasts } = useToast()
   toasts.value = []
+  // [C3] extension 域调用经 SettingsTransport seam 桩注入（旧名→seam 域前缀名逐名映射）
+  provideSettingsTransport(makeSettingsTransportStub({
+    fetchRecommendedExtensions: extensionMock.fetchRecommended,
+    toggleExtension: extensionMock.toggle,
+    installExtension: extensionMock.install,
+    installExtensionDir: extensionMock.installDir,
+    installExtensionGitRepository: extensionMock.installGitRepository,
+    finishExtensionInstall: extensionMock.finishInstall,
+    cancelExtensionInstall: extensionMock.cancelInstall,
+    uninstallExtension: extensionMock.uninstall,
+    upgradeExtension: extensionMock.upgrade,
+    setExtensionAutoUpgrade: extensionMock.setAutoUpgrade,
+    onExtensions: extensionMock.onExtensions,
+  }))
 })
 
 afterEach(() => {

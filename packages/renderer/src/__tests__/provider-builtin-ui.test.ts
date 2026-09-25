@@ -24,6 +24,8 @@ import type { BuiltinProviderTemplate } from '@taiji/shared'
 import { ProviderTemplatePicker as Picker, ProviderQuickSetup as QuickSetup } from '@taiji/ui/features/settings'
 import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
 import { useToast } from '@/composables/useToast'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from './helpers/settings-transport-stub'
 
 // t7 需 mock @/api：listBuiltinProviders 返回空数组（不阻塞页面），setProvider 桩。
 // vi.mock 被 vitest 提升到 import 之前，保证 ProviderPage import 时 @/api 已 mock。
@@ -31,7 +33,7 @@ const configMock = vi.hoisted(() => ({
   listBuiltinProviders: vi.fn(async () => [] as BuiltinProviderTemplate[]),
   // ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
   refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [] })),
-  setProvider: vi.fn(async () => {}),
+  setProvider: vi.fn(async () => ({})),
   // apikey 自动启用链路（useApiKeyAutoEnable）：写 enabledModels 白名单
   toggleProviderEnabled: vi.fn(async () => {}),
   onProviders: vi.fn(() => () => {}),
@@ -114,6 +116,8 @@ beforeEach(() => {
   // 集成链路用例需从零计数断言 setProvider/toggleProviderEnabled 调用次数
   configMock.setProvider.mockClear()
   configMock.toggleProviderEnabled.mockClear()
+  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映）
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 afterEach(() => {
   wrapper?.unmount()
