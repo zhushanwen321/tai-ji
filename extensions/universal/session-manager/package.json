@@ -7,6 +7,9 @@
   "pi": {
     "extensions": [
       "./index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "taiji": {
@@ -23,6 +26,7 @@
   "files": [
     "index.ts",
     "src/",
+    "skills/",
     "README.md"
   ],
   "scripts": {
