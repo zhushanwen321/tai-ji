@@ -666,7 +666,8 @@ async function main(): Promise<void> {
   // `new SessionService` 的 exit 清理腿（按订阅序分发，本腿排前才能读到 session 内存态）。
   // 前向引用（sessionService/sessionStore）为 createAdapter 同款「声明在后、调用在运行期」模式。
   //
-  // watch 应答写回（D7① boolean 传导）：按发起方 parentSid 直发其 pi pending 表；
+  // watch 应答写回（D7① boolean 传导）：按发起方 parentSid 直发，true = 已写入发起方 pi 进程 stdin
+  //（非 pi 侧消费确认；语义锚见 session-manager-handler WatchRespondFn JSDoc）；
   // client 缺失/写入失败 → false（计 respond 失败 → orphaned + undelivered 计数）。
   const respondWatch = (parentSid: string, watchId: string, payload: SessionManagerWatchRespondPayload): boolean =>
     sessionService.getRpcClient(parentSid)?.sendExtensionUiResponse(watchId, JSON.stringify(payload), 'select') ?? false

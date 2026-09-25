@@ -507,7 +507,8 @@ export class RuntimeServer implements IMessageBroker {
       sendExtensionUiResponse: (sessionId, requestId, response, method) => {
         // requestId 只在发起方 pi 进程的 pending 表有效——按 sessionId 直发，
         // 不能遍历找「第一个可用 client」（多 active session 会错发 → 发起方 select 挂到超时）。
-        // D7① boolean 传导：rpc-client 返回值透传（是否写进发起方 pending 表），
+        // D7① boolean 传导：rpc-client 返回值透传（true = 已写入发起方 pi 进程 stdin，
+        // 非 pi 侧消费确认；语义锚见 session-manager-handler WatchRespondFn JSDoc），
         // `?.` 缺失分支（client 不在）显式归 false 计入 respond 失败（watch 回执 → orphaned）。
         return this.sessionService.getRpcClient(sessionId)?.sendExtensionUiResponse(requestId, response, method) ?? false
       },

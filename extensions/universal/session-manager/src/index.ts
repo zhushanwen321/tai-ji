@@ -71,11 +71,11 @@ const SELECT_TIMEOUT_MS: Record<Exclude<SessionManagerAction, "watch">, number> 
 /**
  * 通过 select 通道向 runtime handler 发送 session 管理请求（传输核走 protocol 的
  * callMarkerRpc 原语，D8）。回包为 handler respond 的 JSON 字符串（value 恒 raw）；
-	 * 失败四态（cancelled/timeout/channel-error/non-json）由 executeTool 统一 throw——
-	 * pi agent-loop 仅在 execute throw 时置 isError:true，返回值里的 isError 字段被丢弃
-	 * （pi-agent-core dist/agent-loop.js:453-483 executePreparedToolCall：正常 return
-	 * 硬编码 isError:false、catch 置 true——0.84.4 实读 :468/:470-476；语义登记 PS-56）。
-	 * 通道异常与非 JSON 回包的留痕由原语经注入的 log 承担。
+ * 失败四态（cancelled/timeout/channel-error/non-json）由 executeTool 统一 throw——
+ * pi agent-loop 仅在 execute throw 时置 isError:true，返回值里的 isError 字段被丢弃
+ * （pi-agent-core dist/agent-loop.js:453-483 executePreparedToolCall：正常 return
+ * 硬编码 isError:false、catch 置 true——0.84.4 实读 :468/:470-476；语义登记 PS-56）。
+ * 通道异常与非 JSON 回包的留痕由原语经注入的 log 承担。
  */
 function callSessionManager(
 	ctx: ExtensionContext,
@@ -117,10 +117,10 @@ function asResultRecord(v: unknown): Record<string, unknown> | undefined {
 /**
  * 统一的 execute 包装：调用 select 通道并解析结果。
  * 返回标准 AgentToolResult 形状；select 取消/超时/异常/非 JSON 回包是错误路径，
-	 * 必须 throw（extension-conventions「禁止错误成功模式」——pi 契约里 execute 只有
-	 * throw 才被置 isError:true，返回值携带 isError 字段会被 agent-loop 丢弃
-	 * （agent-loop.js:453-483，PS-56），ask-user/scheduler/session-reader 的 W4 throw
-	 * 范式同款；调用方 agent 需能区分成功与失败以决定重试/放弃）。
+ * 必须 throw（extension-conventions「禁止错误成功模式」——pi 契约里 execute 只有
+ * throw 才被置 isError:true，返回值携带 isError 字段会被 agent-loop 丢弃
+ * （agent-loop.js:453-483，PS-56），ask-user/scheduler/session-reader 的 W4 throw
+ * 范式同款；调用方 agent 需能区分成功与失败以决定重试/放弃）。
  */
 async function executeTool(
 	ctx: ExtensionContext,
