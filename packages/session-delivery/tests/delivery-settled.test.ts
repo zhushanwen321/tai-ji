@@ -15,7 +15,7 @@ describe('A3-settled subscribeSettled 事件驱动路径', () => {
         return () => { settledCb = undefined }
       },
     })
-    const handle = createDelivery(port, { busyPolicy: 'retry-force' })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('hello'))
     expect(port.sendCalls).toHaveLength(0)
@@ -37,7 +37,7 @@ describe('A3-settled subscribeSettled 事件驱动路径', () => {
         return () => { settledCb = undefined }
       },
     })
-    const handle = createDelivery(port, { busyPolicy: 'retry-force' })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('hello'))
     expect(port.sendCalls).toHaveLength(0)
@@ -58,7 +58,7 @@ describe('A3-settled subscribeSettled 事件驱动路径', () => {
         return () => { settledCb = undefined }
       },
     })
-    const handle = createDelivery(port, { busyPolicy: 'retry-force' })
+    const handle = createDelivery(port)
 
     // 制造内核在途：首条受理转 in-flight（缺省 marker 申报，等回执未确认）
     const first = handle.send(textMsg('在途一条'))
@@ -113,7 +113,6 @@ describe('A3-settled watch-dog: settled 丢失场景下 30s 复核恢复', () =>
       },
     })
     const handle = createDelivery(port, {
-      busyPolicy: 'retry-force',
       watchdogMs: 30_000,
       backoff: { ms: 100, max: 500 }, // 若退避仍错误启动，500 拍 = 50s 不会强发
     })
@@ -142,7 +141,6 @@ describe('A3-settled watch-dog: settled 丢失场景下 30s 复核恢复', () =>
       },
     })
     const handle = createDelivery(port, {
-      busyPolicy: 'retry-force',
       watchdogMs: 30_000,
       backoff: { ms: 100, max: 500 },
     })
@@ -160,7 +158,6 @@ describe('A3-settled watch-dog: settled 丢失场景下 30s 复核恢复', () =>
       isIdle: () => false,
     })
     const handle = createDelivery(port, {
-      busyPolicy: 'retry-force',
       backoff: { ms: 100, max: 5 },
     })
 
@@ -183,7 +180,6 @@ describe('A3-settled watch-dog: settled 丢失场景下 30s 复核恢复', () =>
       },
     })
     const handle = createDelivery(port, {
-      busyPolicy: 'retry-force',
       backoff: { ms: 100, max: 5 }, // 若退避仍启动，5s 内必强发
     })
 

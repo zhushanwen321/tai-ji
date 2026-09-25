@@ -12,7 +12,7 @@ describe('A1-migration 搬迁: gate 拒绝→退避重试→达上限强发', ()
   it('主 agent busy 时 flush 退避，idle 后才发送', () => {
     const port = makeMockPort()
     port.idle = false
-    const handle = createDelivery(port, { busyPolicy: 'retry-force' })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('hello'))
     expect(port.sendCalls).toHaveLength(0)
@@ -33,7 +33,6 @@ describe('A1-migration 搬迁: gate 拒绝→退避重试→达上限强发', ()
     const port = makeMockPort()
     port.idle = false
     const handle = createDelivery(port, {
-      busyPolicy: 'retry-force',
       backoff: { ms: 100, max: 50 },
     })
 
@@ -50,7 +49,6 @@ describe('A1-migration 搬迁: gate 拒绝→退避重试→达上限强发', ()
   it('#10 isIdle=true + 内核在途条目未终态 → 视为 busy 不立即投（G4 等价 gate；D2 拆除后 pending 判定内查 active 表）', () => {
     const port = makeMockPort()
     const handle = createDelivery(port, {
-      busyPolicy: 'retry-force',
       backoff: { ms: 100, max: 5 },
     })
 
@@ -125,7 +123,7 @@ describe('A1-migration 搬迁: dispose 短路', () => {
     vi.useFakeTimers()
     const port = makeMockPort()
     port.idle = false
-    const handle = createDelivery(port, { busyPolicy: 'retry-force' })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('hello'))
     handle.dispose()

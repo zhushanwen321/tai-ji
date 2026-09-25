@@ -24,7 +24,7 @@ describe('A6-inflight in-flight 防重: 单 handle 至多一个 flush 在途', (
       },
     })
 
-    const handle = createDelivery(port, { busyPolicy: 'retry-force' })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('msg1'))
     expect(port.sendCalls).toHaveLength(1)
@@ -53,7 +53,7 @@ describe('A6-inflight in-flight 防重: 单 handle 至多一个 flush 在途', (
       },
     })
 
-    const handle = createDelivery(port, { busyPolicy: 'retry-force' })
+    const handle = createDelivery(port)
 
     handle.send(textMsg('msg1'))
     expect(port.sendCalls).toHaveLength(1)
@@ -130,7 +130,7 @@ describe('A6-inflight sendChecked', () => {
     const port = makeMockPort({
       isIdle: () => false,
     })
-    const handle = createDelivery(port, { busyPolicy: 'retry-force' })
+    const handle = createDelivery(port)
 
     await expect(handle.sendChecked(textMsg('hello'))).resolves.toBeUndefined()
     expect(port.sendCalls).toHaveLength(1) // busy 分支也触达 port.send
