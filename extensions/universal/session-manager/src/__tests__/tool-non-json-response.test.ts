@@ -5,7 +5,8 @@
 // isError）——runtime 协议漂移对 agent 不可辨。D8
 // （docs/architecture/ext-simplify-17-shared-extraction.md §3.3，有意微变）统一为
 // 对齐 plugin-bridge 形态：logger.error 留痕（callMarkerRpc 原语经注入的 log 承担）
-// + 错误路径 throw（W4 范式：pi agent-loop 仅在 execute throw 时置 isError:true）。
+// + 错误路径 throw（W4 范式：pi agent-loop 仅在 execute throw 时置 isError:true——
+// pi-agent-core dist/agent-loop.js:453-483，语义登记 PS-56）。
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 

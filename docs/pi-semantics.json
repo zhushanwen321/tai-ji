@@ -1209,5 +1209,22 @@
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-select-long-pending.test.ts"
     },
     "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-56",
+    "claim": "pi agent-loop 对工具 execute 返回值的错误标记约定：正常路径 return { result, isError: false }（isError 硬编码 false——execute 返回值携带的 isError 字段被丢弃，不参与判定），仅 execute throw 时 catch 分支置 isError:true 并以 createErrorToolResult(error.message) 作为 result。承重（W4 throw 范式）：pi extension 的工具错误路径必须 throw 才能对 agent 呈现 isError:true——session-manager 6 工具（callSessionManager 失败四态 cancelled/timeout/channel-error/non-json + channel {error} respond）、ask-user/scheduler/session-reader 同款；若扩展改在返回值上携带 isError 字段，agent-loop 丢弃之，错误退化为「错误标成功」（agent 无法区分成败以决定重试/放弃，违反 extension-conventions「禁止错误成功模式」）。pi 升级时重验：executePreparedToolCall 正常 return 是否仍硬编码 isError:false、catch 是否仍置 true 并经 createErrorToolResult 包装",
+    "piAnchor": [
+      {
+        "pkg": "pi-agent-core",
+        "distPath": "dist/agent-loop.js",
+        "symbol": "executePreparedToolCall 正常 return / catch 分支",
+        "note": ":452-483 函数体——:468 正常 return { result, isError: false }（硬编码 false，execute 返回值携带的 isError 字段被丢弃）；:470-476 catch 分支 :474 result = createErrorToolResult(error.message)、:475 isError: true"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-tool-error-flag.test.ts"
+    },
+    "verifiedWith": "0.84.4"
   }
 ]

@@ -1,5 +1,7 @@
 // tool-error-handling.test.ts — U5-A4: null/undefined returns → cancelled throw; exceptions → propagate;
-// {error} respond → throw（W4 throw 范式：pi agent-loop 仅在 execute throw 时置 isError:true）
+// {error} respond → throw（W4 throw 范式：pi agent-loop 仅在 execute throw 时置 isError:true——
+// pi-agent-core dist/agent-loop.js:453-483 executePreparedToolCall 正常 return 硬编码 isError:false；
+// 语义登记 PS-56）
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import registerExtension from "../index.ts";
