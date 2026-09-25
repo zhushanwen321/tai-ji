@@ -29,7 +29,6 @@ import {
 import type { ChatStoreInstance } from './store'
 import { historyWindowFromReply } from './truncated-window'
 import { disposeImageCacheForSession } from './image-cache'
-import { createMessageCoalescer } from './delta-coalescer'
 import { getExecutingBash } from './bash-effects'
 import { toErrorMessage } from '../../utils/error-message'
 import type { EnsureStreamSubDeps, SessionStoreLike, UseChatDeps } from './use-chat-types'
@@ -93,17 +92,6 @@ const REVOKE_ERROR_TOAST_KEYS: Record<RevokeMessageErrorCode, string> = {
  */
 // taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：会话级流订阅表（ADR-0049 例外：全局 sid 协调器模块级 Map，上方注释已述）
 const streamSubscriptions = new Map<string, () => void>()
-
-/**
- * D-2 token 合帧器（W12，perf 07 §3.3.1 (7)）：模块级单例（与 streamSubscriptions 同模式）。
- *
- * 为什么模块级而非 per-subscription 实例：合帧窗口跨 sid 共享同一个 microtask
- * （异 sid 各自独立缓冲 key，互不阻塞），且 dispatch 闭包随消息携带（buffer 记首条的），
- * coalescer 自身不绑定 store 实例——多 fixture/多 store 场景天然安全。
- * 生命周期：enqueue 于 streamSubscribe 回调（下方）、flush(sid) 于 disposeSession（收口兜底）、
- * clear 于 resetChatModuleStateForTest（测试隔离）。
- */
-const coalescer = createMessageCoalescer()
 
 // [u4d-truncated-ui] [HISTORICAL] W4/N1 的 historyTruncatedSessions（ref<Set>，尾读截断
 // →「加载更多」显隐）已退役：截断事实的 SSOT 迁为 chat store 截断窗口状态（truncated-window.ts，
@@ -181,9 +169,6 @@ export function resetChatModuleStateForTest(): void {
     }
   }
   streamSubscriptions.clear()
-  // D-2：清 coalescer 待刷缓冲——残留 buffer 会把上一用例 fixture 的 dispatch 闭包
-  // （指向已 dispose 的 store）带进下一用例的 microtask flush，跨 fixture 污染。
-  coalescer.clear()
   // [u4d] 截断窗口状态随 chat store per-instance，无需模块级 reset
   // MF-1：清 manual compact 标记（测试间不 reset 会泄漏到下一用例）
   manualCompactionState.clear()
@@ -560,16 +545,24 @@ export function ensureStreamSubscription(
     // applyMessageEvent 内部经 effect 注册表执行该 type 的全部副作用（chunk 状态更新
     // + finalizeSession 收口），useChat 不再自己 switch message.*。message.* 处理完即 return，
     // 下方 session.* 分支仅处理跨 store 事件（compacting/renamed 等）。
-    // [D-2/W12] text/thinking delta 经 coalescer microtask 合帧（同 sid 同 type 保序合并）；
-    // 非 delta 消息在 coalescer 内先 flush 该 sid 缓冲再同步 dispatch（终态即时，保序）。
-    // 只改 message.* 分发路径，订阅编排（streamSubscriptions/subscribeSession）不动。
+    // message.* 帧直推 store（原 D-2/W12 coalescer 合帧层已删：P6 门真机 242 delta
+    // enqueue=commit、批大小恒 1，合帧窗口结构性零命中——合帧不产生行为差异，纯空转）。
+    // dispatch 错误隔离（RD-1#5，自原 coalescer 非 delta 分支下沉）：applyMessageEvent
+    // 链路（→ effects registry）抛错不得沿订阅回调逆传炸掉本 handler（否则后续流式帧
+    // 全部丢失），仅 warn 记录后半执行帧，后续帧正常处理。
     if (msg.type.startsWith('message.')) {
-      // [crash-resilience T4 回流修复] 恢复窗口收口 gate（enqueue 前——同步于流式帧处理
+      // [crash-resilience T4 回流修复] 恢复窗口收口 gate（dispatch 前——同步于流式帧处理
       // 之前插 T4 提示条，保证条目在 assistant 气泡之前；非 message_start 帧 no-op）
       if (msg.type === 'message.message_start') {
         consumeRespawnWindowOnTurnStart(sid, chat, sessionStore, deps)
       }
-      coalescer.enqueue(sid, msg, (m) => chat.applyMessageEvent(sid, m))
+      try {
+        chat.applyMessageEvent(sid, msg)
+      } catch (e) {
+        // best-effort 降级策略：单帧副作用失败仅 warn 落盘，不逆传中断订阅回调——
+        // 后续流式帧继续消费（对齐 useChat 其余 best-effort catch 同一取舍）。
+        console.warn(`[useChat] dispatch failed for session ${sid} (${msg.type}) — this frame's side effects may be partial:`, e)
+      }
       return
     }
     // session.* → 跨 store 协调（sessionStore.applySnapshot / occupancy 投影），
@@ -1169,9 +1162,6 @@ export function createUseChat(deps: UseChatDeps) {
       unsub()
       streamSubscriptions.delete(sessionId)
     }
-    // D-2：收口兜底——unsub 后不会再有新消息入缓冲，把该 sid 残留 delta 落地后再删分区。
-    // 用 flush(sid) 而非 flushAll：其他 session 的合并窗口不应被本 session 的销毁提前打断。
-    coalescer.flush(sessionId)
     // [u4d] 截断窗口状态由下方 chat.disposeSession 内统一清理（store 分区），无需单独清
     manualCompactionState.delete(sessionId) // MF-1：清 manual compact 标记
     // [投递所有权内核 u3b] 清内核投影 + morph 段（session 已销毁，帧/回执不再有意义）
@@ -1226,8 +1216,6 @@ export function invalidateStreamSubscription(sessionId: string): void {
     unsub()
     streamSubscriptions.delete(sessionId)
   }
-  // 收口兜底（对齐 disposeSession）：unsub 后不会再有新消息入缓冲，残留 delta 落地显示
-  coalescer.flush(sessionId)
   // invalidateSubscription（非 clearSubscription）：额外清 in-flight 去重条目，防 respawn 后
   // 首次 ensureStreamSubscription 复用死 Promise 而不重发 subscribe RPC
   invalidateSubscription(sessionId)
