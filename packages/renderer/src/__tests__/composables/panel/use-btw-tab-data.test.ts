@@ -200,6 +200,47 @@ describe('未读计数与视口清除（D8 终态表「未读」行）', () => {
     await settle(w)
     expect(text(w, 'unread')).toBe('1')
   })
+
+  it('多线并发增长按 vid 各自归属 delta，不串计（vid 路由锚）', async () => {
+    btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
+    const w = mountHost(SID_A)
+    await settle(w)
+    const chat = useChatStore()
+
+    // 一次各写两条/一条：t1 delta 2、t2 delta 1，Σ = 3
+    chat.setMessages('btw:t1', [msg('a1'), msg('a2')])
+    chat.setMessages('btw:t2', [msg('b1')])
+    await settle(w)
+    expect(text(w, 'unread')).toBe('3')
+  })
+
+  it('各 tab 不串区：A 主线增长只计 A 分区，切到 B 归零、B 线计 B，切回 A 保留（D7③ 后台累计）', async () => {
+    btwMock.list.mockImplementation((sid: string) =>
+      Promise.resolve(sid === SID_A ? [{ vid: 'btw:ta' }] : [{ vid: 'btw:tb' }]),
+    )
+    const w = mountHost(SID_A)
+    await settle(w)
+    const chat = useChatStore()
+
+    chat.setMessages('btw:ta', [msg('a1'), msg('a2')])
+    await settle(w)
+    expect(text(w, 'unread')).toBe('2')
+
+    // 切到 B：B 分区零未读（A 线的分区隔离，不串区）
+    await w.setProps({ sid: SID_B })
+    await settle(w)
+    expect(text(w, 'unread')).toBe('0')
+
+    // B 自己的线计自己
+    chat.setMessages('btw:tb', [msg('b1')])
+    await settle(w)
+    expect(text(w, 'unread')).toBe('1')
+
+    // 切回 A：切走期间分区保留，未读仍在（D7③ 线后台运行、分区继续累计）
+    await w.setProps({ sid: SID_A })
+    await settle(w)
+    expect(text(w, 'unread')).toBe('2')
+  })
 })
 
 describe('回收提醒消费接线（D1 renderer 半边：reclaimImminent 两路解析点 → badge 待处理聚合）', () => {
