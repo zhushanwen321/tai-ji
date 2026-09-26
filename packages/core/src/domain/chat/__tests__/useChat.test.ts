@@ -329,7 +329,7 @@ describe('createUseChat factory 行为', () => {
     // interpreter 不参与 → 零用户反馈（违反 AGENTS.md 规则 #3）
     f.chatApi.compact.mockRejectedValueOnce(new Error('RPC 超时'))
     await f.useChat.compact('s15')
-    // manualCompactionState 仍 false（compaction_end 未到达）→ catch toast 兜底
+    // 消化标记未置已消化（compaction_end 未到达）→ catch toast 兜底
     expect(f.toast.error).toHaveBeenCalledTimes(1)
     expect(f.toast.error).toHaveBeenCalledWith(
       expect.stringContaining('composable.compactFailed')
@@ -341,7 +341,7 @@ describe('createUseChat factory 行为', () => {
     const f = makeFixture()
     // 模拟 pi 时序：compact() 失败时先 emit compaction_end 后 throw（agent-session.js catch 块）
     // compaction_end 经 stdout 先于 RPC error reply 到达 → session.compacted handler 先 set
-    // manualCompactionState=true → catch 见 ended=true → 不 toast（interpreter 已进对话流提示）
+    // compaction_end 到达即置已消化 → catch 见 ended=true → 不 toast（interpreter 已进对话流提示）
     f.chatApi.compact.mockImplementationOnce(() => {
       f.emit('s16', msg('s16', 'session.compacted', { error: '上下文压缩失败' }))
       return Promise.reject(new Error('上下文压缩失败'))
@@ -1217,13 +1217,16 @@ describe('subagent.directive 广播消费', () => {
   })
 })
 
-// ── ①b toast 抑制（timeout-slow-flow-wallclock D2/r4 极性修正）────────────────
+// ── ①b toast 抑制（timeout-slow-flow-wallclock D2/r4 极性修正 / D6 统一正向标记）────
 //
-// 极性（§7 useChat 行为权威表述）：executingBash 是「命令执行中」瞬时态（bashStart 置 /
-// bashResult·markBashError 清），「已收合成终态」= getExecutingBash 查询为空（取反）——
-// 为空 → 抑制 bashFailed toast（气泡终态是权威呈现面）；非空（命令仍在执行 = env backstop
-// 先到形态）→ 不抑制（toast 是唯一提示）。
-describe('sendBash ①b toast 抑制（D2 极性：空→抑制 / 非空→不抑制）', () => {
+// 极性（§7 useChat 行为权威表述，D6 收敛后）：bash reject 呈现消歧走 reject-digest 原语
+//（key='bash'，与 compact 同一原语）——终态帧处理点（bashResultEffect·markBashError）与
+//「已消化」置位同点，catch 见已消化 → 抑制 bashFailed toast（气泡终态是权威呈现面）；
+// 未消化（transport 级失败 / 终态帧延迟）→ toast 兜底是唯一提示。
+// [D6 行为变更声明] transport 级失败（bashStart 从未广播）原反查把「executingBash 为空」
+// 误读为「已消化」而静默，统一正向标记后 isDigestConsumed=false → toast 兜底（与 compact
+// transport 级同构）——第三个用例的断言随此行为变更翻转。
+describe('sendBash ①b toast 抑制（D6 消化标记：已消化→抑制 / 未消化→兜底）', () => {
   it('终态帧先于 error envelope 到达（executingBash 为空）→ 抑制 bashFailed toast，气泡终态是权威面', async () => {
     const f = makeFixture()
     // bash RPC 挂起：手动控制 reject 时机（模拟 runtime 先广播合成终态帧、后回 error envelope）
@@ -1265,11 +1268,35 @@ describe('sendBash ①b toast 抑制（D2 极性：空→抑制 / 非空→不�
     f.dispose()
   })
 
-  it('命令从未到达 runtime（executingBash 从未置位）→ 抑制 toast（无终态可呈现，行为归 deviations 登记）', async () => {
+  it('命令从未到达 runtime（无终态帧）→ toast 兜底（D6 行为变更：原反查误判已消化而静默，统一后与 compact transport 级同构）', async () => {
     const f = makeFixture()
     f.chatApi.bash.mockRejectedValue(new Error('transport unavailable (ws not open)'))
     await f.useChat.sendBash('b3', 'echo hi', false)
+    expect(f.toast.error).toHaveBeenCalledTimes(1)
+    expect(f.toast.error).toHaveBeenCalledWith(expect.stringContaining('transport unavailable'))
+    f.dispose()
+  })
+
+  it('reject 后 finally 收口：上一轮已消化残留不误抑制下一轮 transport 失败判定（单槽收口锚）', async () => {
+    const f = makeFixture()
+    // 第一轮：终态帧先到（已消化）→ reject 抑制
+    let rejectBash: (e: unknown) => void = () => {}
+    f.chatApi.bash.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectBash = reject }),
+    )
+    const first = f.useChat.sendBash('b4', 'sleep 3700', false)
+    f.emit('b4', msg('b4', 'message.bashStart', { command: 'sleep 3700', excludeFromContext: false, timestamp: 1724000000000 }))
+    f.emit('b4', msg('b4', 'message.bashResult', {
+      command: 'sleep 3700', output: '超时停止', exitCode: null,
+      cancelled: false, truncated: false, excludeFromContext: false, timestamp: 1724000000001,
+    }))
+    rejectBash(new Error('Bash execution failed'))
+    await first
     expect(f.toast.error).not.toHaveBeenCalled()
+    // 第二轮：transport 失败（无任何帧）——上一轮残留若未收口会误抑制，finally 收口后正常兜底
+    f.chatApi.bash.mockRejectedValueOnce(new Error('transport unavailable (ws not open)'))
+    await f.useChat.sendBash('b4', 'echo hi', false)
+    expect(f.toast.error).toHaveBeenCalledTimes(1)
     f.dispose()
   })
 })
