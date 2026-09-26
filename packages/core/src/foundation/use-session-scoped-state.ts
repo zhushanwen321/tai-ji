@@ -18,8 +18,10 @@
  * - `update(updater)`：操作当前 sid 分区（先确保分区存在）；null sid 时 no-op
  *   （null current 是每次新建的临时默认实例，对其修改不持久，避免污染任何真实分区）
  * - `updateFor(targetSid, updater)`：显式指定 sid 分区操作（不读 sid.value 实时值）。
- *   用于 WS handler 捕获订阅时 sid，防切 sid 后旧消息写入新分区（M1 竞态修复）
- * - `cleanup(sid)`：从 Map 移除指定 sid 分区（下次访问重新 init）
+ *   用于 WS handler 捕获订阅时 sid，防切 sid 后旧消息写入新分区（M1 竞态修复）；
+ *   对已删分区 no-op（防迟到写复活已销毁 session 的分区——僵尸写回，D-B2-1）
+ * - `cleanup(sid)`：从 Map 移除指定 sid 分区并记入 deletedSids（下次访问重新 init；
+ *   重新 init 时出列，此后 updateFor 恢复写入——删除后同 id 重建不丢写）
  * - 切 sid 不丢旧数据（Map 保留），切回恢复
  *
  * 例外登记（ADR-0049 §例外清单）：不采用本工厂的 per-session 状态（全局 sid
@@ -119,25 +121,37 @@ export function useSessionScopedState<T>(
   // per-instance Map：每个 useSessionScopedState 调用建自己的分区表
   const partitions = new Map<string, T>()
 
+  // 已删 sid 登记表：cleanup 时记入，updateFor 对表内 sid no-op（迟到写不得复活已删
+  // 分区——「删后又被 updateFor 复活」的僵尸写回是消费方抑制表对抗的工厂缺陷根源，
+  // D-B2-1 把拦截收进工厂单点）。出列规则：同 sid 分区被重新 init 时摘除
+  //（getOrCreatePartition 实际重建点）——删除后同 id 重建（重导入等边缘形态）不丢写。
+  // 条目随工厂实例存活，增长上界 = 实例生命周期内删除过的 session 数，可忽略。
+  const deletedSids = new Set<string>()
+
   // 分区结构版本号：Map 增删时 bump，让 current computed 感知非响应式 Map 的变化。
   // 必要性：triggerSessionCleanups → cleanup(sid) 删除 Map 分区后，current computed 需重算
   // 才能重新 init（W5 AC-8 契约）。Map 本身非响应式，computed 只依赖 sid.value 会命中缓存，
   // 故用 version ref 作为 computed 的额外依赖，cleanup 时 bump 触发失效。
   const version = ref(0)
 
-  /** 按 sid 查分区，不存在则惰性 init 并写入 */
+  /** 按 sid 查分区，不存在则惰性 init 并写入；重建点即 deletedSids 出列点（新生命周期） */
   function getOrCreatePartition(id: string): T {
     let p = partitions.get(id)
     if (!p) {
+      deletedSids.delete(id)
       p = init()
       partitions.set(id, p)
     }
     return p
   }
 
-  /** cleanup 该实例 Map 中的指定 sid 分区（bump version 让 current computed 失效重算） */
+  /**
+   * cleanup 该实例 Map 中的指定 sid 分区（bump version 让 current computed 失效重算），
+   * 并记入 deletedSids：updateFor 的迟到写被工厂拦截，不复活分区（D-B2-1）。
+   */
   function cleanup(id: string): void {
     partitions.delete(id)
+    deletedSids.add(id)
     version.value += 1
   }
 
@@ -181,6 +195,10 @@ export function useSessionScopedState<T>(
    * 写入「消息所属 sid」的分区。即使 session 切换后退订是异步的（watch flush:pre），
    * 旧 sid 的迟到消息也只会写入旧 sid 分区，不污染新 sid 分区——从结构上消除竞态。
    *
+   * 已删分区 no-op（D-B2-1）：分区被 cleanup 后，迟到的 RPC resolve / 广播不得把分区
+   * 僵尸式写回（updateFor 会重建分区，形成已销毁 session 的泄漏条目）。拦截在 getOrCreatePartition
+   * 之前——本函数不触发重建，出列只发生在真正的重建点（current/update 路径的重新 init）。
+   *
    * 与 update 的区别：update 读 sid.value（当前值），用于 UI 操作（用户主动操作当前 session）；
    * updateFor 读参数 sid（订阅时捕获值），用于 WS handler（消息属于固定 sid）。
    *
@@ -188,6 +206,7 @@ export function useSessionScopedState<T>(
    * @param updater 分区操作函数
    */
   function updateFor(targetSid: string, updater: (state: T) => void): void {
+    if (deletedSids.has(targetSid)) return
     const partition = getOrCreatePartition(targetSid)
     updater(partition)
   }
@@ -220,6 +239,7 @@ export function useSessionScopedState<T>(
     cleanup,
     _clearAllForTest: () => {
       partitions.clear()
+      deletedSids.clear()
       version.value += 1
     },
   }

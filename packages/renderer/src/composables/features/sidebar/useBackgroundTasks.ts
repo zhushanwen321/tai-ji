@@ -20,10 +20,10 @@
  * 空表广播不清位，由 tasks 非空的自愈拍清位）与断连提示条（S6）。拉取失败保留分区缓存不降级
  * （下次切入/refresh/重连自愈）。
  *
- * 生命周期：session 销毁经 registerSessionCleanup 挂进 useSidebar.deleteSession 编排——
- * 清分区 + 抑制在途写入（迟到的 RPC resolve / 广播不得把已销毁 session 的分区僵尸式写回：
- * updateFor 会重建分区，形成泄漏条目）。抑制条目有界（BG-7 / D6 #2）：迟到写入源
- * （物理订阅 + 在途 RPC）全部枯竭后自动释放，Set 不随销毁次数只增不减。
+ * 生命周期：session 销毁由 useSessionScopedState 工厂自动注册进 useSidebar.deleteSession
+ * 编排——清分区并记 deletedSids（迟到的 RPC resolve / 广播不得把已销毁 session 的分区
+ * 僵尸式写回：updateFor 对已删分区 no-op，D-B2-1 把拦截收进工厂单点，本模块不自养
+ * 抑制簿记；同 sid 分区被重新 init 后出列，删除后同 id 重建不丢写）。
  *
  * 切走 session 后旧 sid 订阅释放（refCount--），其分区停更、切回时由拉取腿兜底刷新
  *（C6：广播只做增量刷新，拉取是唯一真相入口）。
@@ -33,7 +33,7 @@ import type { ComputedRef, Ref } from 'vue'
 import * as events from '@taiji/core/transport/api'
 import { getState } from '@taiji/core/transport/ws-client'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
-import { registerSessionCleanup, useSessionScopedState } from '@/composables/useSessionScopedState'
+import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 
@@ -99,8 +99,6 @@ function releaseBroadcastSubscription(sid: string): void {
   if (existing.count <= 0) {
     existing.unsub()
     sidSubscriptions.delete(sid)
-    // 广播迟到源枯竭：若在途 RPC 也已 settle，抑制使命完成（BG-7 有界化）
-    releaseSuppressionIfIdle(sid)
   }
 }
 
@@ -108,7 +106,7 @@ function releaseBroadcastSubscription(sid: string): void {
 //
 // 「同 key 复用 / settle 即清 / 引用比对防误删」生命周期收编于 createInflightDedup
 // （D9 共享原语，state-truth-sync §3.3）；本模块保留快照消费形态（各实例消费
-// ListReplySnapshot 写各自分区）与迟到写入源的抑制释放编排（下方 requestSharedList）。
+// ListReplySnapshot 写各自分区）。
 
 // @data-owner #25
 const listFetchDedup = createInflightDedup<ListReplySnapshot | null>()
@@ -134,33 +132,12 @@ function parseListReply(raw: unknown): ListReplySnapshot | null {
   return null
 }
 
-// ── 已销毁 session 抑制表（迟到写入不得僵尸式重建分区，参照 useContextUsage）──
-
-// @data-owner #25
-const suppressedSids = new Set<string>()
-
-/**
- * 抑制条目有界化释放（BG-7 / D6 #2）：该 sid 的全部迟到写入源枯竭（物理订阅已退订 +
- * 在途 RPC 已 settle）后移除抑制登记——防已销毁 session 的 sid 永久滞留（只增不减）。
- * 移除后该 sid 无任何写入路径可达（订阅退订后广播不再投递、RPC settle 后无 resolve），
- * 分区不会被僵尸式重建，语义与抑制期间等价。
- */
-function releaseSuppressionIfIdle(sid: string): void {
-  if (!sidSubscriptions.has(sid) && !listFetchDedup.has(sid)) suppressedSids.delete(sid)
-}
-
 /** 测试隔离钩子：清空全部模块级簿记（用例间残留防污染）。生产代码禁止调用。 */
 export function __resetBackgroundTasksForTest(): void {
   for (const { unsub } of sidSubscriptions.values()) unsub()
   sidSubscriptions.clear()
   broadcastListeners.clear()
   listFetchDedup.clear()
-  suppressedSids.clear()
-}
-
-/** 测试观察钩子：抑制表当前成员（BG-7 有界性断言用）。生产代码禁止调用。 */
-export function __suppressedSidsForTest(): readonly string[] {
-  return [...suppressedSids]
 }
 
 export interface UseBackgroundTasksReturn {
@@ -198,9 +175,9 @@ export function useBackgroundTasks(sessionIdRef: Ref<string | null | undefined>)
   }
 
   /** 实例分区写入 listener：写「消息所属 sid」（capturedSid）分区，非当前视图 sid 也合法
-   *  （分区写入与视图无关；视图显示由 current 按 sidRef 派生）。 */
+   *  （分区写入与视图无关；视图显示由 current 按 sidRef 派生）。已删 sid 的迟到广播由
+   *  工厂 deletedSids 拦截（updateFor no-op）。 */
   const listener: BroadcastListener = (sid, tasks, corrupted) => {
-    if (suppressedSids.has(sid)) return
     scoped.updateFor(sid, (p) => applySnapshot(p, tasks, corrupted))
   }
   broadcastListeners.add(listener)
@@ -215,7 +192,7 @@ export function useBackgroundTasks(sessionIdRef: Ref<string | null | undefined>)
    * 是当下 registry 全量快照，后到写赢）；下一拍广播 / 下次切入重拉自愈，不做 recency 对账。
    */
   function requestSharedList(sid: string): Promise<ListReplySnapshot | null> {
-    const { promise } = listFetchDedup.run(sid, () =>
+    return listFetchDedup.run(sid, () =>
       backgroundTaskApi
         .list(sid)
         .then((raw): ListReplySnapshot | null => parseListReply(raw))
@@ -224,21 +201,12 @@ export function useBackgroundTasks(sessionIdRef: Ref<string | null | undefined>)
           console.debug('[background-tasks] list failed, keep cached partition', sid, err)
           return null
         }),
-    )
-    // RPC 迟到源枯竭 → 尝试释放抑制（BG-7 有界化）。必须延迟一个 macrotask：本回调与
-    // factory 的 settle 清理都先于 fetchInto 挂在 promise 上的消费回调执行（promise 回调
-    // 按注册序），此处同步释放会让「销毁后迟到 resolve」通过消费回调的抑制检查（微任务
-    // 窗口内 Set 已清）→ 僵尸写回。macrotask 排到本 settle 派生的全部消费微任务之后，语义精确。
-    // （promise 恒 resolve：上游 catch 已吞错，finally 链无 unhandled rejection 面）
-    void promise.finally(() => {
-      setTimeout(() => releaseSuppressionIfIdle(sid), 0)
-    })
-    return promise
+    ).promise
   }
 
   function fetchInto(sid: string): Promise<void> {
     return requestSharedList(sid).then((reply) => {
-      if (suppressedSids.has(sid)) return
+      // 已删 sid 的迟到 resolve 由工厂 deletedSids 拦截（updateFor no-op，D-B2-1）
       scoped.updateFor(sid, (p) => {
         if (reply) {
           applySnapshot(p, reply.tasks, reply.corrupted)
@@ -266,10 +234,7 @@ export function useBackgroundTasks(sessionIdRef: Ref<string | null | undefined>)
   // 拉取腿（C6）：每次进入 sid 视图无条件重拉（immediate 覆盖首挂载；切走期间广播已退订，
   // 分区缓存可能过期，不能依赖缓存不拉——对齐 useContextUsage D3 恢复腿语义）。
   watch(normalizedSid, (sid) => {
-    if (sid) {
-      suppressedSids.delete(sid) // 重新进入 = 新生命周期，解除清理抑制
-      void fetchInto(sid)
-    }
+    if (sid) void fetchInto(sid)
   }, { immediate: true })
 
   // 重连恢复腿（S6）：runtime 重启/WS 断连后 ring 为空（重放无补偿），列表停留旧缓存——
@@ -280,16 +245,10 @@ export function useBackgroundTasks(sessionIdRef: Ref<string | null | undefined>)
     if (s === 'connected') void refresh()
   })
 
-  // cleanup 编排：session 销毁（useSidebar.deleteSession → triggerSessionCleanups）时
-  // 清分区 + 抑制迟到写入（在途 RPC resolve / 退订前的广播）。分区删除本身已由
-  // useSessionScopedState 自动注册（幂等），这里补抑制表簿记。
-  const unregisterCleanup = registerSessionCleanup((sid) => {
-    scoped.cleanup(sid)
-    suppressedSids.add(sid)
-  })
-
+  // cleanup 编排：session 销毁（useSidebar.deleteSession → triggerSessionCleanups）时的
+  // 分区删除与僵尸写回拦截（deletedSids）均由 useSessionScopedState 自动注册承载
+  //（D-B2-1），本模块无自有簿记需登记。
   onScopeDispose(() => {
-    unregisterCleanup()
     broadcastListeners.delete(listener)
     // 释放本实例持有的订阅引用（watch 维护的 acquire/release 在卸载后不再触发，此处按
     // 卸载时刻的 sid 补一次 release；旧 sid 已在切换时释放过）

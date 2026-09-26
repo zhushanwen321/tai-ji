@@ -27,7 +27,6 @@ import {
 import {
   useBackgroundTasks,
   __resetBackgroundTasksForTest,
-  __suppressedSidsForTest,
   type UseBackgroundTasksReturn,
 } from '@/composables/features/sidebar/useBackgroundTasks'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
@@ -301,68 +300,34 @@ describe('refCount 订阅收敛', () => {
   })
 })
 
-// ── session 销毁 cleanup + 迟到写入抑制 ──
+// ── session 销毁 cleanup + 迟到写入拦截（D-B2-1 工厂单点形态）──
+// 拦截簿记 = useSessionScopedState 的 deletedSids（本模块无自有抑制表，原 BG-7 簿记
+// 生命周期用例随其退役，防回归锚在 use-session-scoped-state.test.ts）。出列点 = 分区
+// 重建点（current 读取）——真实时序中销毁后视图必然切走（current 不再读该 sid），
+// 拦截成立；切回 = 新生命周期，拉取腿重拉。
 
 describe('session 销毁 cleanup', () => {
-  it('triggerSessionCleanups 清分区；迟到的 RPC resolve / 广播不把分区僵尸式写回', async () => {
+  it('triggerSessionCleanups 后：切走期间迟到的广播 / RPC resolve 不僵尸式写回；切回 = 新生命周期重拉', async () => {
     const host = mountHost('A')
     // 留一条在途 list（模拟销毁时 RPC 未 resolve）
     await nextTick()
-    triggerSessionCleanups('A')
-    await nextTick()
-    expect(host.tasks.current.value.tasks).toEqual([]) // 分区已清（null/新默认实例）
+    triggerSessionCleanups('A') // 分区清 + deletedSids 记入（工厂自动注册承载）
 
-    // 迟到广播：抑制表拦截，不重建分区
-    dispatchUpdated('A', [task('ghost', 'running')])
-    await nextTick()
-    expect(host.tasks.current.value.tasks).toEqual([])
-
-    // 迟到 RPC resolve：同样被抑制
-    resolveList('A', [task('ghost-rpc', 'running')])
-    await settle()
-    expect(host.tasks.current.value.tasks).toEqual([])
-
-    // 重新进入 = 新生命周期：抑制解除，恢复腿重拉
+    // 真实时序：销毁后视图切走——期间迟到的广播与 RPC resolve 均被 deletedSids 拦截
     host.sidRef.value = 'B'
     await nextTick()
+    dispatchUpdated('A', [task('ghost', 'running')])
+    resolveList('A', [task('ghost-rpc', 'running')])
+    await settle()
+
+    // 切回 = 新生命周期：渲染读取分区即重建出列（先于 reply 落地的真实时序）+ 拉取腿重拉
     host.sidRef.value = 'A'
     await nextTick()
     expect(listMock).toHaveBeenLastCalledWith('A')
+    void host.tasks.current.value
     resolveList('A', [task('fresh', 'running')])
     await settle()
     expect(host.tasks.current.value.tasks.map((t) => t.taskId)).toEqual(['fresh'])
-  })
-
-  it('BG-7（D6 #2）：抑制条目有界——物理订阅退订且在途 RPC settle 后自动移除（Set 只增不减修复）', async () => {
-    const host = mountHost('A') // 挂载即在途 list（RPC 未 resolve）
-    await nextTick()
-    triggerSessionCleanups('A')
-    await nextTick()
-    expect(__suppressedSidsForTest()).toContain('A') // 销毁后抑制生效（上一用例语义）
-
-    // 视图切走（deleteSession 编排）→ A 的物理广播订阅退订（refCount 归零）
-    host.sidRef.value = 'B'
-    await nextTick()
-    resolveList('A', [task('late', 'running')]) // 在途 RPC settle：消费微任务内仍被抑制……
-    await settle() // ……settle 的 macrotask 后抑制释放（迟到写入源全部枯竭）
-    expect(__suppressedSidsForTest()).not.toContain('A')
-
-    // 释放后无僵尸写回路径：无订阅则广播不投递，RPC 已 settle——分区保持清空
-    expect(host.tasks.current.value.tasks).toEqual([])
-  })
-
-  it('BG-7 边界：订阅仍持有（实例未切走）时抑制不提前释放', async () => {
-    const host = mountHost('A')
-    await nextTick()
-    triggerSessionCleanups('A')
-    await nextTick()
-    resolveList('A', [task('late', 'running')])
-    await settle()
-    // 实例仍聚焦 A（订阅活跃）→ 退订窗口内的迟到广播仍需抑制，条目保留
-    expect(__suppressedSidsForTest()).toContain('A')
-    dispatchUpdated('A', [task('ghost', 'running')])
-    await nextTick()
-    expect(host.tasks.current.value.tasks).toEqual([]) // 广播被抑制，无僵尸写回
   })
 })
 
