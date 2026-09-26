@@ -25,18 +25,9 @@ function makePi() {
 
 type CtxMock = ReturnType<typeof makeCtx>;
 function makeCtx() {
-  const onCompleteFns: Array<() => void> = [];
-  const onErrorFns: Array<(e: Error) => void> = [];
-
   return {
     sessionManager: { getSessionId: () => "test-session", getEntries: () => [] as unknown[] },
     ui: { notify: vi.fn() },
-    compact: vi.fn((opts: { onComplete?: () => void; onError?: (e: Error) => void }) => {
-      if (opts.onComplete) onCompleteFns.push(opts.onComplete);
-      if (opts.onError) onErrorFns.push(opts.onError);
-    }),
-    _onCompleteFns: onCompleteFns,
-    _onErrorFns: onErrorFns,
   };
 }
 
@@ -99,92 +90,22 @@ describe("handlePlanComplete", () => {
     setupFsMock("## 实现步骤\n1. Step one\n2. Step two");
   });
 
-  describe("compact isolation", () => {
-    it("execute mode: goalInit deferred to onComplete, then goal steer on success (D2 时序——goal entry 在压缩后世界创建)", () => {
-      const goalInit = attachGoalInit(() => true);
-
-      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "execute");
-
-      expect(outcome).toBeUndefined(); // compact 档 outcome 在回调内产生，不进同步返回值
-      expect(ctx.compact).toHaveBeenCalledOnce();
-      expect(goalInit).not.toHaveBeenCalled(); // 压缩完成前不创建 goal entry
-
-      ctx._onCompleteFns[0]();
-
-      expect(goalInit).toHaveBeenCalledWith(
-        "Execute plan: /tmp/plan.md",
-        undefined,
-        ctx,
-        "plan",
-        [
-          "All 2 steps of plan executed and verified",
-          "1. Step one",
-          "2. Step two",
-        ],
-      );
-      expect(pi.sendMessage).toHaveBeenCalledWith(...executionNotice(expect.stringContaining("Goal tracking is active via /goal")));
-      expect(ctx.ui.notify).not.toHaveBeenCalled();
-    });
-
-    it("execute mode (compact, bridge unmounted): onComplete sends degraded direct-execution steer, no goalInit", () => {
-      // execute 档整合 goal 桥：桥未挂载（goal-unavailable）→ 降级为直接执行指引
-      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "execute");
-      ctx._onCompleteFns[0]();
-
-      const steer = lastSteer(pi);
-      expect(steer).toContain("Goal tracking was not started (goal-unavailable)");
-      expect(steer).toContain("subagents"); // 降级后仍指到 auto-parallel 直接执行
-      expect(steer).toContain("current session");
-    });
-
-    it("skill mode (compact): onComplete steer carries the skill entry path (D10 skillEntryPath 通路)", () => {
-      const goalInit = attachGoalInit(() => true);
-      const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
-
-      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "skill:dev-flow", skillEntryPath);
-      ctx._onCompleteFns[0]();
-
-      expect(goalInit).not.toHaveBeenCalled();
-      const steer = lastSteer(pi);
-      expect(steer).toContain("skill:dev-flow"); // Execution mode 行透传 execMode
-      expect(steer).toContain("dev-flow"); // 指引按名加载
-      expect(steer).toContain("/tmp/fixtures/skills/dev-flow/SKILL.md"); // 路径读取指引（skillEntryPath = 入口文件路径，直接透传）
-    });
-
-    it("onError (execute mode, init-refused): compact-failure notify + degraded steer + warning notify, no /goal promise", () => {
-      attachGoalInit(() => false); // goalInit 返回 false：已有 active goal
-
-      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "execute");
-      ctx._onErrorFns[0](new Error("compact failed"));
-
-      const notifyTexts = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
-      expect(notifyTexts.some((t) => t.includes("Compact failed"))).toBe(true);
-      expect(notifyTexts.some((t) => t.includes("init-refused"))).toBe(true);
-
-      const steer = lastSteer(pi);
-      expect(steer).toContain("Goal tracking was not started (init-refused)");
-      expect(steer).toContain("/goal clear"); // 恢复动作
-      expect(steer).not.toContain("Goal tracking is active via /goal"); // 承诺不再无凭据发出
-    });
-  });
-
-  describe("direct isolation", () => {
+  describe("direct delivery", () => {
     it("execute mode success: returns outcome synchronously, goal steer, no notify", () => {
       attachGoalInit(() => true);
 
-      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "execute");
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
 
       expect(outcome).toEqual({ started: true });
       expect(pi.sendMessage).toHaveBeenCalledWith(...executionNotice(expect.stringContaining("Goal tracking is active via /goal")));
-      expect(ctx.compact).not.toHaveBeenCalled();
       expect(ctx.ui.notify).not.toHaveBeenCalled();
     });
 
-    it("skill mode (direct): returns undefined, steer with skill entry path (steer 文案含 skillEntryPath，D10)", () => {
+    it("skill mode: returns undefined, steer with skill entry path (steer 文案含 skillEntryPath，D10)", () => {
       attachGoalInit(() => true);
       const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
 
-      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "skill:dev-flow", skillEntryPath);
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "skill:dev-flow", skillEntryPath);
 
       expect(outcome).toBeUndefined();
       const steer = lastSteer(pi);
@@ -197,7 +118,7 @@ describe("handlePlanComplete", () => {
       attachGoalInit(() => true);
       const looseEntryPath = "/tmp/fixtures/skills/loose-tool.md";
 
-      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "skill:loose-tool", looseEntryPath);
+      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "skill:loose-tool", looseEntryPath);
 
       const steer = lastSteer(pi);
       expect(steer).toContain("/tmp/fixtures/skills/loose-tool.md"); // 文件路径本身
@@ -208,28 +129,18 @@ describe("handlePlanComplete", () => {
     it("skill mode without skillEntryPath falls back to name-only guidance (防御形态)", () => {
       attachGoalInit(() => true);
 
-      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "skill:dev-flow");
+      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "skill:dev-flow");
 
       const steer = lastSteer(pi);
       expect(steer).toContain("load the dev-flow skill");
       expect(steer).not.toContain("SKILL.md");
     });
-
-    it("unknown isolation value falls through to direct delivery instead of silently dropping the choice (D1 防御形态)", () => {
-      attachGoalInit(() => true);
-
-      handlePlanComplete(pi as never, ctx as never, makeActiveState(), "tree", "execute");
-
-      expect(pi.sendMessage).toHaveBeenCalledWith(...executionNotice(expect.stringContaining("Goal tracking is active via /goal")));
-      expect(ctx.compact).not.toHaveBeenCalled();
-      expect(ctx.ui.notify).not.toHaveBeenCalledWith(expect.stringContaining("/tree"), "info");
-    });
   });
 
   // goal 桥五个失败出口 → GoalBridgeOutcome 五值（D2）
-  describe("tryGoalInit failure exits (execute mode, direct isolation)", () => {
+  describe("tryGoalInit failure exits (execute mode)", () => {
     it("goal-unavailable: bridge not mounted → degraded steer + warning notify", () => {
-      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "execute");
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
 
       expect(outcome).toEqual({ started: false, reason: "goal-unavailable" });
       const steer = lastSteer(pi);
@@ -242,7 +153,7 @@ describe("handlePlanComplete", () => {
       attachGoalInit(() => true);
       fsMock.readFileSync.mockImplementation(() => { throw new Error("ENOENT: plan.md"); });
 
-      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "execute");
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
 
       expect(outcome).toEqual({ started: false, reason: "plan-unreadable" });
       expect(lastSteer(pi)).toContain("Check that the plan file exists");
@@ -253,7 +164,7 @@ describe("handlePlanComplete", () => {
       attachGoalInit(() => true);
       setupFsMock("# Plan\n\nProse without any numbered list.");
 
-      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "execute");
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
 
       expect(outcome).toEqual({ started: false, reason: "no-steps" });
       expect(lastSteer(pi)).toContain("Implementation Steps");
@@ -263,7 +174,7 @@ describe("handlePlanComplete", () => {
     it("init-refused: goalInit returns false (active goal exists)", () => {
       attachGoalInit(() => false);
 
-      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "execute");
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
 
       expect(outcome).toEqual({ started: false, reason: "init-refused" });
       expect(lastSteer(pi)).toContain("/goal clear");
@@ -273,7 +184,7 @@ describe("handlePlanComplete", () => {
     it("internal-error: goalInit throws → outcome carries detail, notify includes it, does not propagate", () => {
       attachGoalInit(() => { throw new Error("goalInit exploded"); });
 
-      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "execute");
+      const outcome = handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
 
       expect(outcome).toEqual({ started: false, reason: "internal-error", detail: "goalInit exploded" });
       expect(lastSteer(pi)).toContain("Goal tracking was not started (internal-error)");

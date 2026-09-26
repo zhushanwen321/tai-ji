@@ -52,7 +52,7 @@ const PHASE_B_SECTION =
 const PHASE_D_SECTION =
   `## Phase D: Completion\n` +
   `1. Ask user to review the complete plan.\n` +
-  `2. Call plan tool (complete) with isolation method (compact/direct).\n` +
+  `2. Call plan tool (complete).\n` +
   `3. After plan complete: when plan-exec skills are detected, the user picks an execution method in the completion dialog — up to 2 detected plan-exec skills (Execute via skill: <name>), Execute (goal tracking integrated when available), or Not now (stay in plan mode). When NO plan-exec skill is detected, no dialog appears and the plan executes directly.`;
 
 /**

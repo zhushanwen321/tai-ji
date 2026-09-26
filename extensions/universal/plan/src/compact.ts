@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import { basename } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent, SessionBeforeTreeEvent } from "@earendil-works/pi-coding-agent";
-import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import type { GoalInitFn } from "@zhushanwen/pi-goal";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
@@ -297,58 +297,19 @@ function deliverExecutionNotice(
 }
 
 /**
- * complete 的 isolation 分发（D1 后仅 compact | direct，两档都投递执行通知）。
+ * complete 后的执行通知投递（plan-mode-audit-remediation D-B1-6：执行前压缩档
+ * 砍除——原 compact | direct 两档分发退化为单一直接投递路径）。
  *
- * 返回值：execMode=execute 且 isolation=direct 时同步返回 goalInit 的 outcome
- * （executeComplete 写进 result content 与 details）；其余情形返回 undefined——
- * skill 档无 goalInit，compact 档 goalInit 在 onComplete 回调内执行（goal 状态
- * entry 须在压缩后的世界里创建，提前到 compact 前有被压缩边界丢弃的风险，时序
- * 不动——设计 §6.2 D2），该档 result 已返回，失败报告走 steer + notify 通道。
+ * 返回值：execMode=execute 时同步返回 goalInit 的 outcome（executeComplete 写进
+ * result content 与 details）；skill 档无 goalInit，返回 undefined——该档 result
+ * 已返回，失败报告走 steer + notify 通道。
  */
 export function handlePlanComplete(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: PlanState,
-  isolation: string,
   execMode: string,
   skillEntryPath?: string,
 ): GoalBridgeOutcome | undefined {
-  const planFilePath = state.planFilePath;
-
-  switch (isolation) {
-    case "compact": {
-      ctx.compact({
-        customInstructions: `Plan file: ${planFilePath}. Read plan and execute implementation.`,
-        // E1 同构崩溃点（crash-resilience D1）：onComplete/onError 由 compact 内部
-        // Promise 链异步调用、不在 pi runner emit() 的 try/catch 内——压缩进行中用户
-        // 切换/重载 session 后，回调触碰捕获的 pi/ctx 命中 stale 同步抛错即杀 pi 进程。
-        // 守卫 stale 静默降级（执行消息不投递，用户可手动 Read plan 文件执行），非
-        // stale 错误原样上抛。plan 未注入代际计数器（低频路径），分诊依赖 PS-30 门禁
-        // 守卫的 stale 文案兜底（D1 降级语义声明的合法形态）。
-        onComplete: () => {
-          guardStaleCtx(() => {
-            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
-          }, {
-            label: "plan:compact-onComplete",
-            onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
-          });
-        },
-        onError: (_error: Error) => {
-          guardStaleCtx(() => {
-            ctx.ui.notify("Compact failed, continuing without isolation.", "warning");
-            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
-          }, {
-            label: "plan:compact-onError",
-            onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
-          });
-        },
-      });
-      return undefined;
-    }
-
-    case "direct":
-    default: {
-      return deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
-    }
-  }
+  return deliverExecutionNotice(pi, ctx, state.planFilePath, execMode, skillEntryPath);
 }

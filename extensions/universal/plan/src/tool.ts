@@ -79,14 +79,13 @@ interface EnterDetails {
 interface CompleteDetails {
   action: "complete";
   planFilePath: string;
-  isolation: string;
   execMode: string;
   /**
    * 执行方式的选定来源（D7②）：'headless' = 无 UI 默认 execute；'no-exec-skills' =
    * 无 plan-exec 技能直通（不挂执行方式表单）；'dialog' = 表单/选择器选定。
    */
   execModeSource?: "headless" | "no-exec-skills" | "dialog";
-  /** D2：direct 档 goalInit 的同步结果；compact 档在 onComplete 回调内执行，不进 result */
+  /** D2：execute 档 goalInit 的同步结果；skill 档无 goalInit，不进 result */
   goalOutcome?: GoalBridgeOutcome;
 }
 
@@ -246,7 +245,7 @@ function renderPlanResult(
       const direct = details.execModeSource === "no-exec-skills"
         ? fg("dim", "  无 plan-exec 技能，直接执行（未弹执行方式表单）") + NL
         : "";
-      const info = fg("dim", `  isolation: ${details.isolation} · 工具集已恢复`);
+      const info = fg("dim", "  工具集已恢复");
       return new Text(header + body + direct + info, 0, 0);
     }
 
@@ -1159,7 +1158,6 @@ async function executeComplete(
   // phase 删除后该 persist 与上一条 entry 完全重复，随死状态一并移除——
   // 最终态由下方 resetPlanState 的终态 entry 权威记录。
   const planFilePath = state.planFilePath;
-  const isolation = (params.isolation as string) ?? "direct";
 
   // exec_chosen（D1）：dispatching --exec_chosen--> completed（选定执行方式并派发，终态）。
   // 副作用内联在转移成功后；ok:false（reset 介入等异常格）→ 不派发不落盘的降级出口
@@ -1174,8 +1172,8 @@ async function executeComplete(
   // Restore full tool set
   restoreFullToolSet(pi);
 
-  // Execute completion handler (compact setup + steer/goalInit delivery)
-  const goalOutcome = handlePlanComplete(pi, ctx, state, isolation, chosenMode, choice.skillEntryPath);
+  // Execute completion handler (steer/goalInit delivery)
+  const goalOutcome = handlePlanComplete(pi, ctx, state, chosenMode, choice.skillEntryPath);
 
   // 终局 reset（D3 连带段）：terminal 传 'completed'——防 reset 覆写 completed 终态
   const updatedState = resetPlanState(pi, sessions, sessionId, ctx, "completed");
@@ -1187,7 +1185,6 @@ async function executeComplete(
     details: {
       action: "complete",
       planFilePath: displayPath,
-      isolation,
       execMode: chosenMode,
       execModeSource: choice.pickedBy,
       goalOutcome,
@@ -1220,11 +1217,6 @@ export function registerPlanTool(
       templateName: Type.Optional(Type.String({ description: "Template name (for select-template)" })),
       fileName: Type.Optional(Type.String({ description: "Document file name to register (for register-doc, e.g. 'design.md')" })),
       sourceSkill: Type.Optional(Type.String({ description: "Name of the mounted skill that produced this document (for register-doc; omit in template flow)" })),
-      isolation: Type.Optional(
-        StringEnum(["compact", "direct"], {
-          description: "Isolation mode for plan execution (for complete action)",
-        }),
-      ),
       selfReview: Type.Optional(
         Type.String({
           description:
@@ -1259,7 +1251,7 @@ export function registerPlanTool(
       "4. Self-review (coverage / assumptions / completeness / acceptance), fix issues, then\n" +
       "   plan(action='submit-review', selfReview='<your self-review conclusions>') — user reviews in the review UI or conversation\n" +
       "5. Address revision comments (rewrite + re-register), redo the self-review for the revised documents, re-submit until approved\n" +
-      "6. plan(action='complete', isolation='compact') — choose the execution method and exit plan mode\n" +
+      "6. plan(action='complete') — choose the execution method and exit plan mode\n" +
       "\n" +
       "When the user asks to re-submit the plan review (e.g. a re-submit notice), call plan(action='submit-review', selfReview='...') immediately — carry back your previous self-review verbatim when the documents are unchanged.\n" +
       "\n" +

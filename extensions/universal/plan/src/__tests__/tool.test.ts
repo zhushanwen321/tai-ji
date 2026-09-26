@@ -289,13 +289,12 @@ describe("registerPlanTool", () => {
       return ((pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0]) as Record<string, unknown>;
     }
 
-    it("rejects isolation='tree' at the schema level: enum is exactly compact|direct (D1 / V3①)", async () => {
+    it("schema carries no isolation field (D-B1-6: compact|direct 两档分发砍除，单一直接投递路径)", async () => {
       const { pi } = setup();
       const parameters = registeredTool(pi).parameters as {
-        properties: { isolation: { enum: string[] } };
+        properties: Record<string, unknown>;
       };
-      expect(parameters.properties.isolation.enum).toEqual(["compact", "direct"]);
-      expect(parameters.properties.isolation.enum).not.toContain("tree");
+      expect(parameters.properties.isolation).toBeUndefined();
     });
 
     it("does not advance when user picks Not now — later 边（dispatching→approved）+ later 文案，不进解散文案桶（A9 反向）", async () => {
@@ -406,7 +405,7 @@ describe("registerPlanTool", () => {
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       const res = await exec({ action: "complete" });
       expect(res.details.execMode).toBe("execute");
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "execute", undefined);
     });
 
     it("headless (!hasUI) defaults to execute without any select (D4 三路分流第 1 路)", async () => {
@@ -418,7 +417,7 @@ describe("registerPlanTool", () => {
       expect(ctx.ui.select).not.toHaveBeenCalled(); // 不进任何 select（noOp 软门修复）
       expect(detectExecSkills).not.toHaveBeenCalled(); // 选择已预定，跳过 skill 扫描
       expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "execute", undefined);
     });
 
     it("detected plan-exec skills lead the option set (first + second) and map to skill:<name> with skillEntryPath (D10 重排)", async () => {
@@ -444,7 +443,7 @@ describe("registerPlanTool", () => {
       expect(res.details.action).toBe("complete");
       expect(res.details.execMode).toBe("skill:dev-flow");
       // skillEntryPath 数据通路：CompleteChoiceOutcome → handlePlanComplete（steer 文案的路径来源）
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "skill:dev-flow", skillEntryPath);
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "skill:dev-flow", skillEntryPath);
     });
 
     it("D7② 空集直通（TUI）：无 plan-exec 技能不挂任何选择器，直接走执行派发链 + 文案明示", async () => {
@@ -461,7 +460,7 @@ describe("registerPlanTool", () => {
       expect(res.content[0].text).toContain("No plan-exec skill was detected");
       expect(res.content[0].text).toContain("executed directly");
       // 复用既有执行派发链（goal 桥/直执 steer）+ 终局 completed
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "execute", undefined);
       const entries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1] as { state?: string });
       expect(entries.at(-1)?.state).toBe("completed");
     });
@@ -470,8 +469,8 @@ describe("registerPlanTool", () => {
       const { exec, ctx } = setup();
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReturnValue({ started: false, reason: "no-steps" });
-      const res = await exec({ action: "complete", isolation: "direct" });
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
+      const res = await exec({ action: "complete" });
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "execute", undefined);
       expect(res.content[0].text).toContain("Goal tracking was not started (no-steps)");
       expect(res.content[0].text).toContain("Implementation Steps"); // 恢复动作
       expect(res.details.goalOutcome).toEqual({ started: false, reason: "no-steps" });
@@ -481,7 +480,7 @@ describe("registerPlanTool", () => {
       const { exec, ctx } = setup();
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReturnValue({ started: true });
-      const res = await exec({ action: "complete", isolation: "direct" });
+      const res = await exec({ action: "complete" });
       expect(res.content[0].text).toContain("Goal tracking started via /goal");
       expect(res.details.goalOutcome).toEqual({ started: true });
     });
@@ -490,11 +489,11 @@ describe("registerPlanTool", () => {
       const { exec, ctx } = setup();
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
-      const res = await exec({ action: "complete", isolation: "compact" });
+      const res = await exec({ action: "complete" });
       expect(res.content[0].text).toMatch(/^Plan approved\. File: /);
       expect(res.content[0].text).not.toContain("Goal tracking");
       expect(res.details.goalOutcome).toBeUndefined();
-      expect(res.details.isolation).toBe("compact");
+      expect(res.details.isolation).toBeUndefined(); // isolation 字段随 D-B1-6 两档分发砍除退役
     });
   });
 
@@ -561,7 +560,7 @@ describe("registerPlanTool", () => {
       const skillOption = options.find((o) => o.label === "Execute via skill: dev-flow");
       expect(skillOption?.description).toBe("Deliver a plan via dev-flow.");
       expect(res.details.execMode).toBe("skill:dev-flow");
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "skill:dev-flow", skillEntryPath);
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "skill:dev-flow", skillEntryPath);
     });
 
     it("timeout via undefined resolve (signal not aborted) folds to 归口②外部解散（构造点④，review_aborted→approved）", async () => {
@@ -657,7 +656,7 @@ describe("registerPlanTool", () => {
       expect(res.details.execModeSource).toBe("no-exec-skills");
       expect(res.content[0].text).toContain("No plan-exec skill was detected");
       expect(detectExecSkills).toHaveBeenCalled(); // 仍现扫（直通判定依赖检测，不是跳过检测）
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "direct", "execute", undefined);
+      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "execute", undefined);
       vi.unstubAllEnvs();
     });
 

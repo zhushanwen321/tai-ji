@@ -158,10 +158,10 @@ describe("handlePlanComplete — goalInit slot 第 5 参数为新形态 string[]
     return expectSingleLineArray(goalInitMock.mock.calls[0][4]);
   }
 
-  it("direct isolation: 3 步 plan → 总述 + 3 条 preview", () => {
+  it("直接投递：3 步 plan → 总述 + 3 条 preview", () => {
     fsMock.readFileSync.mockReturnValue(makePlanContent(["Step A", "Step B", "Step C"]));
 
-    handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "execute");
+    handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
 
     expect(getCriteriaArg()).toEqual([
       "All 3 steps of plan executed and verified",
@@ -171,24 +171,11 @@ describe("handlePlanComplete — goalInit slot 第 5 参数为新形态 string[]
     ]);
   });
 
-  it("compact isolation: onComplete 后 goalInit 收到同形态数组", () => {
-    fsMock.readFileSync.mockReturnValue(makePlanContent(["Step one", "Step two"]));
-
-    handlePlanComplete(pi as never, ctx as never, makeActiveState(), "compact", "execute");
-    ctx._onCompleteFns[0]();
-
-    expect(getCriteriaArg()).toEqual([
-      "All 2 steps of plan executed and verified",
-      "1. Step one",
-      "2. Step two",
-    ]);
-  });
-
   it("12 步 plan → 数组长度固定 4（1 总述 + 3 preview），不再按 8 条上限截断", () => {
     const steps = Array.from({ length: 12 }, (_, i) => `Step ${i + 1}`);
     fsMock.readFileSync.mockReturnValue(makePlanContent(steps));
 
-    handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "execute");
+    handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
 
     const items = getCriteriaArg();
     expect(items).toHaveLength(4);
@@ -199,7 +186,7 @@ describe("handlePlanComplete — goalInit slot 第 5 参数为新形态 string[]
   it("CRLF plan 文件 → 每条 criteria 仍单行不含 \\r \\n", () => {
     fsMock.readFileSync.mockReturnValue("## 实现步骤\r\n1. Step one\r\n2. Step two\r\n3. Step three");
 
-    handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "execute");
+    handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
 
     expect(getCriteriaArg()).toEqual([
       "All 3 steps of plan executed and verified",
@@ -212,7 +199,7 @@ describe("handlePlanComplete — goalInit slot 第 5 参数为新形态 string[]
   it("0 步 plan → tryGoalInit 提前退出，goalInit 不被调用", () => {
     (fsMock.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue("## Overview\nNo numbered steps here.");
 
-    handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "execute");
+    handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
 
     expect(goalInitMock).not.toHaveBeenCalled();
     // steer 仍发出（执行流程不因 goal 缺席中断）——custom message 三要素 + steer options（A6）
