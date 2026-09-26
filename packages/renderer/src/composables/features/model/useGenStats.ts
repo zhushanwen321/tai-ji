@@ -7,11 +7,15 @@
  *   GenStatsFrame 本体（§3.4：null = 从未收到合法帧；status 字段已删——unknown 与
  *   「ok 但字段全 null」渲染均为「—」，无消费方）；字段级无值由帧内 null 表达（D4 编码纪律）。
  * - 订阅：只订 session.stats_update，handler 用第二参数 sid 写「消息所属 sid」分区
- *   （updateFor，不读当前 sid 实时值）；
- * - 前端兜底（D4 纵深防御）：帧内 model 缺省 → 丢弃（所有 live 推帧路径均有 model，缺省即
- *   异常）；帧内 model 与该 session 当前 modelId 不匹配 → 丢弃（后端 sid→modelKey 映射
- *   任意空窗产生的脏帧从「覆盖显示」降级为「无害丢弃」）。恢复腿 reply 不经此校验
- *   （RPC 主动拉取语义，modelId 由 runtime 侧降级链权威解析）。
+ *   （updateFor，不读当前 sid 实时值），帧无条件落地——纯显示，不做归属比对（A4/S18：
+ *   帧归属判定权威在 runtime，见下方「帧归属契约」）；
+ * - 帧归属契约（A4/S18 上移，plan-mode-audit-remediation）：帧内 model 字段 = runtime
+ *   权威解析的「该 session 当前模型」复合 key（gen-stats-service 三写一清映射 + D4 条件
+ *   回写 + MF9 帧序 + 恢复腿降级链共同保证「发给某 sid 的帧归属该 sid 当前模型」）。
+ *   本 composable 曾在消费侧本地比对 frame.model 与当前 modelId（genStatsModelMatches
+ *   尾段兜底）——信息在产生处已传递、消费处重复推断，且尾段规则对 Model.id 自含 '/'
+ *   的 openrouter 系（"vendor/model"）失配、会丢弃合法帧（S18 登记债）。现删除消费侧
+ *   推断，runtime 帧即真相。
  * - 恢复腿：切入 sid 视图无条件拉 session.getGenStats（架构约定 #7 时序竞争）；RPC 失败
  *   保留分区缓存不降级；
  * - in-flight 去重：模块级 createInflightDedup 表（D9 共享原语收编，meta 携带发起时刻
@@ -61,31 +65,15 @@ export function __clearInFlightGenStatsForTest(): void {
   inflightGenStatsFetch.clear()
 }
 
-/**
- * 帧内 model 与该 session 当前 modelId 的匹配判定（D4 前端兜底的比对规则）。
- *
- * 帧 model 语义已锚定 PS-25（docs/pi-semantics.json）：AssistantMessage.model = 请求侧
- * Model.id（pi 模型注册表的模型 id；非 responseModel——那是 provider 实际报告的响应模型，
- * 仅 openai-completions 在路由结果 ≠ 请求 id 时才有，不采）。本函数是 modelKey 语义的
- * 第二个消费端实现（runtime splitModelKey/broadcastModel 为第一个）：runtime 推帧的
- * payload.model 恒为**复合 id** "provider/<Model.id>"（gen-stats-service snapshot 的
- * model 字段 = modelKey，与 currentModelId 同域同构，D6 #14 注释更正——曾误记为
- * Model.id 本体）→ 双形态兼容：① 精确相等（主路径：两侧同为复合 id 直接同域比对）；
- * ② 复合 id 取最后一段 '/' 后缀相等（防御性兜底：currentModelId 或帧缺 provider 段的
- * 旧形态/裸 Model.id 输入）。
- * 其余（真正他模型帧）才丢弃。已知局限（归 S18）：Model.id 自身含 '/'（openrouter 系
- * "vendor/model"）时尾段失配 → 合法帧被无害丢弃，修复须把归属判定上移 runtime（帧内带
- * 结构化归属标记，view-ready），renderer 退化为纯显示——在此之前本函数是兜底权威。
- */
-export function genStatsModelMatches(frameModel: string, currentModelId: string): boolean {
-  if (frameModel === currentModelId) return true
-  const slash = currentModelId.lastIndexOf('/')
-  return slash >= 0 && frameModel === currentModelId.slice(slash + 1)
-}
-
 export function useGenStats(
   sessionIdRef: Ref<string | null | undefined>,
-  modelIdRef?: Ref<string | null | undefined>,
+  /**
+   * 已退役（A4/S18 归属上移 runtime）：帧归属判定权威在 gen-stats-service（帧 model 字段
+   * = runtime 权威解析的复合 modelKey），renderer 不再本地比对。参数签名保留——生产调用方
+   * GenStatsTriggers.vue 仍按双参形态传 props.modelId，删参会破坏其编译；该调用方与
+   * Composer 下传链的 prop 清理属 composable 之外，随调用方后续清扫一并移除。
+   */
+  _modelIdRef?: Ref<string | null | undefined>,
 ): UseGenStatsReturn {
   /** null 归一：useSessionScopedState 契约要求 Ref<string|null>（null=无活跃 session） */
   const normalizedSid = computed(() => sessionIdRef.value ?? null)
@@ -100,17 +88,14 @@ export function useGenStats(
    */
   const bookkeeping = createFrameBookkeeping()
 
-  // ── 订阅（D4）：只订 session.stats_update；handler 用第二参数 sid（消息所属 session）写分区 ──
+  // ── 订阅（D4）：只订 session.stats_update；handler 用第二参数 sid（消息所属 session）写分区。
+  // 帧无条件落地（纯显示，A4/S18）：归属判定权威在 runtime 推帧侧（帧 model = 权威复合
+  // modelKey），renderer 不再做 model 缺省/匹配校验——消费侧重复推断曾对 openrouter 系
+  // （Model.id 自含 '/'）尾段失配、丢弃合法帧，见文件头「帧归属契约」。
   const onMessage = useSessionEvents(sessionIdRef)
   onMessage('session.stats_update', (msg, sid) => {
     const payload = msg.payload
-    // 前端兜底 ①：model 缺省的 live 帧丢弃（所有 live 推帧路径均有 modelKey，缺省即异常）
-    if (!payload.model) return
-    // 前端兜底 ②：帧内 model ≠ 该 session 当前 modelId → 丢弃（脏映射空窗的脏帧无害化）。
-    // renderer 侧 modelId 未知（空/undefined）时无法判定不匹配，放行（保守丢弃会误杀合法帧）
-    const currentModel = modelIdRef?.value
-    if (currentModel && !genStatsModelMatches(payload.model, currentModel)) return
-    // 合法帧落地：bump recency 序号（applyReply 的 skip 判定基准）
+    // 帧落地：bump recency 序号（applyReply 的 skip 判定基准）
     bookkeeping.bumpSeq(sid)
     scoped.updateFor(sid, (p) => {
       p.frame = payload

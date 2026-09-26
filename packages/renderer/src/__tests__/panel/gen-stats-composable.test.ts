@@ -24,7 +24,6 @@ import {
 } from '@/composables/useSessionScopedState'
 import {
   useGenStats,
-  genStatsModelMatches,
   __clearInFlightGenStatsForTest,
   type UseGenStatsReturn,
 } from '@/composables/features/model/useGenStats'
@@ -161,18 +160,17 @@ describe('帧 handler：写入分区与 model 校验兜底', () => {
     expect(host.gen.current.value?.ttft).toEqual({ current: 820, day: 900, d7: 1100, d30: 1300 })
   })
 
-  it('帧内 model 与当前 modelId 不匹配 → 丢弃（分区保持 null）', async () => {
+  it('帧内 model 与 renderer 当前 modelId 不匹配 → 仍落地（A4/S18 纯显示：归属权威在 runtime 推帧侧）', async () => {
     const host = mountHost('A', 'prov-a/m1')
     await settle()
 
-    // 脏映射空窗的脏帧：session 已切 m2，旧模型 m1 的帧到达 → 无害丢弃
     dispatchFrame('A', genFrame('A', { model: 'prov-b/m2' }))
     await settle()
 
-    expect(host.gen.current.value).toBeNull()
+    expect(host.gen.current.value?.model).toBe('prov-b/m2')
   })
 
-  it('帧内 model 缺省 → 丢弃（live 推帧路径均有 model，缺省即异常）', async () => {
+  it('帧内 model 缺省 → 仍落地（A4/S18 纯显示：renderer 不做缺省/匹配校验）', async () => {
     const host = mountHost('A', 'prov-a/m1')
     await settle()
 
@@ -181,7 +179,7 @@ describe('帧 handler：写入分区与 model 校验兜底', () => {
     dispatchFrame('A', noModel)
     await settle()
 
-    expect(host.gen.current.value).toBeNull()
+    expect(host.gen.current.value).not.toBeNull()
   })
 
   it('帧内 model 为裸 id、当前 modelId 为复合 id（后缀段相等）→ 接受（帧 model 格式待验证检查点的双形态兼容）', async () => {
@@ -204,13 +202,6 @@ describe('帧 handler：写入分区与 model 校验兜底', () => {
     expect(host.gen.current.value?.model).toBe('prov-b/m2')
   })
 
-  it('genStatsModelMatches：精确相等 / 复合后缀相等 / 其余不匹配', () => {
-    expect(genStatsModelMatches('prov-a/m1', 'prov-a/m1')).toBe(true)
-    expect(genStatsModelMatches('m1', 'prov-a/m1')).toBe(true)
-    expect(genStatsModelMatches('prov-a/m1', 'prov-a/m2')).toBe(false)
-    expect(genStatsModelMatches('m2', 'prov-a/m1')).toBe(false)
-    expect(genStatsModelMatches('m1', 'm1-extra')).toBe(false)
-  })
 })
 
 // ── 恢复腿（RPC + in-flight 去重 + recency 守卫）────────────

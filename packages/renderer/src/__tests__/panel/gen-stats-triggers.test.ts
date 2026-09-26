@@ -122,14 +122,14 @@ describe('双触发器渲染（黑盒 DOM）', () => {
     expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe('—')
   })
 
-  it('脏帧（帧内 model 与当前 modelId 不匹配）→ 不覆盖显示，保持「—」', async () => {
+  it('帧内 model 与 renderer 当前 modelId 不匹配 → 仍落地显示（A4/S18 纯显示：归属权威在 runtime）', async () => {
     const wrapper = mountTriggers()
     await flushPromises()
 
     pushSessionMsg('s1', { type: 'session.stats_update', payload: genFrame('s1', { model: 'prov-b/m2' }) })
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="genstats-speed-value"]').text()).toBe('—')
+    expect(wrapper.find('[data-testid="genstats-speed-value"]').text()).not.toBe('—')
   })
 
   // ── 命中率语义色三档（≥80 success / 50–80 warn / <50 danger；null 中性）──
