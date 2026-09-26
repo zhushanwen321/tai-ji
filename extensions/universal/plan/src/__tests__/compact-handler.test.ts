@@ -34,7 +34,9 @@ function makeCtx() {
 function makeActiveState(): PlanState {
   return {
     isActive: true,
-    planFilePath: "/tmp/plan.md",
+    // 生产真实形态（enter.ts：<project>/.tmp/plans/<slug>/plan.md）——合成单层路径会让
+    // slug 派生类消费面（buildPlanSlug 取 basename）在测试数据上失真
+    planFilePath: "/tmp/test-project/.tmp/plans/login-page/plan.md",
     requirement: "Add login page",
     templateName: "default",
   };
@@ -220,11 +222,23 @@ describe("registerPlanEventHandlers", () => {
     registerPlanEventHandlers(pi as never, sessions);
     const handlers = captureHandlers();
 
-    const result = await handlers["session_before_compact"]({}, makeCtx() as never);
-    const r = result as { compaction: { summary: string } };
+    // preparation 直取（SDK 类型非可选）——event 按真实形态携带
+    const result = await handlers["session_before_compact"](
+      { preparation: { firstKeptEntryId: "entry-9", tokensBefore: 4321 } },
+      makeCtx() as never,
+    );
+    const r = result as { compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number } };
 
-    expect(r.compaction.summary).toContain("Plan content here");
-    expect(r.compaction.summary).toContain("Add login page");
+    // 输出等价锚（活路径去重组：compact/tree 两挂点 summary 公共主体段抽函数，
+    // 拼接产物与抽函数前逐字节一致）
+    expect(r.compaction.summary).toBe(
+      "Plan mode active. Plan file: /tmp/test-project/.tmp/plans/login-page/plan.md\n\n" +
+      "## Plan Content\nPlan content here\n\n" +
+      "Requirement: Add login page" +
+      "\nPlan was in progress — review and continue.",
+    );
+    expect(r.compaction.firstKeptEntryId).toBe("entry-9");
+    expect(r.compaction.tokensBefore).toBe(4321);
   });
 
   it("session_before_compact (inactive): returns empty object {}", async () => {
@@ -245,8 +259,12 @@ describe("registerPlanEventHandlers", () => {
     const result = await handlers["session_before_tree"]({}, makeCtx() as never);
     const r = result as { summary: { summary: string } };
 
-    expect(r.summary.summary).toContain("Plan content here");
-    expect(r.summary.summary).toContain("/tmp/plan.md");
+    // 输出等价锚：与 compact 挂点共用主体段（同逐字节口径）
+    expect(r.summary.summary).toBe(
+      "Plan mode active. Plan file: /tmp/test-project/.tmp/plans/login-page/plan.md\n\n" +
+      "## Plan Content\nPlan content here\n\n" +
+      "Read the plan file and execute the implementation.",
+    );
   });
 
   it("session_before_tree (inactive): returns empty object {}", async () => {

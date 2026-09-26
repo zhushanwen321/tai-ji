@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -38,7 +39,7 @@ import {
   persistPlanState,
   resetPlanState,
 } from "./state.js";
-import { listTemplates, loadTemplate } from "./templates.js";
+import { listTemplates } from "./templates.js";
 import { updatePlanWidget } from "./widget.js";
 
 const logger = getLogger("pi-plan");
@@ -119,11 +120,6 @@ interface SubmitReviewDetails {
   /** gui = taiji 形态挂 PLAN_REVIEW_MARKER select；text = 独立 pi 软门（E8） */
   channel: "gui" | "text";
   docsCount: number;
-  /**
-   * 重提交无变化信号：false = 本次提交与上次 submit-review 之间无任何 register-doc
-   * （警告行已追加到 result 文本）。正常提交不携带该字段（缺失 = 无警告）。
-   */
-  changed?: false;
 }
 
 /** 审阅闭环的失败出口（E5/E6/取消/门拒收）——details 与 content 文本都带恢复动作 */
@@ -134,8 +130,6 @@ interface ReviewErrorDetails {
     | "inactive"
     /** malformed（E5 垃圾数据）——引导重挂 */
     | "bad-response"
-    /** unknown-decision（D3①）——宿主/扩展版本不匹配指引，不再引导重挂（防再入循环） */
-    | "version-mismatch"
     /** 自审硬门拒收（D9①）：selfReview 缺失/空 */
     | "no-self-review"
     /** 防照抄启发式拒收（D9①）：文档已变而 selfReview 与上次逐字节相同 */
@@ -202,11 +196,9 @@ function withUnchangedWarning(text: string, unchangedResubmit: boolean): string 
   return unchangedResubmit ? `${text}\n${UNCHANGED_RESUBMIT_WARNING}` : text;
 }
 
-/** submit-review details 构造：警告命中时附 changed=false（正常提交字段缺失） */
-function submitReviewDetails(channel: "gui" | "text", docsCount: number, unchangedResubmit: boolean): SubmitReviewDetails {
-  return unchangedResubmit
-    ? { action: "submit-review", channel, docsCount, changed: false }
-    : { action: "submit-review", channel, docsCount };
+/** submit-review details 构造（重提交无变化信号只走 result 文本警告行，无 details 字段） */
+function submitReviewDetails(channel: "gui" | "text", docsCount: number): SubmitReviewDetails {
+  return { action: "submit-review", channel, docsCount };
 }
 
 // ── renderResult ───────────────────────────────────────────────────
@@ -395,12 +387,15 @@ function executeEnter(
  * - 合并视图与注入段同源：两轨都以 ctx.cwd 为 projectRoot 调 listTemplates
  *   （注入段经 PlanPromptInput.projectRoot 由命令层显式传入，不从 planFilePath
  *   逆推层级）——模型看到什么清单就能选中什么（含用户级/项目级投放）。
+ * - 单次扫描复用（C1 去重）：清单查找与内容读取共用同一次扫描产物（胜者 path
+ *   直读，不经 loadTemplate 二次扫描；读取行为等价——utf-8、失败 null）。
  * - content 全文直达模型可见通道（现状全文放 details 不进模型，选完没骨架——
  *   §2.2 第二处错位收口）；details 不再携带全文（零消费方，避免双份持久化）。
  * - 错名报错带可用名字清单：模型当场从报错自愈，无需任何查询 action（D3）。
  * - --template 直传防御：模板已由用户指定并全文内嵌注入，select-template 是
  *   画蛇添足——报错不带三源清单（直传文件不在清单里，清单会误导改选内置
- *   模板、偏离用户意图）。
+ *   模板、偏离用户意图）。判定信号 = templateProvided（独立布尔字段，双字段
+ *   合并后形态）。
  */
 function executeSelectTemplate(
   pi: ExtensionAPI,
@@ -412,7 +407,7 @@ function executeSelectTemplate(
   if (!templateName) {
     throw new Error("templateName is required for select-template");
   }
-  if (state.templateProvidedPath !== undefined) {
+  if (state.templateProvided === true) {
     throw new Error("template was provided via --template, write the plan following the file above");
   }
   const templates = listTemplates({ projectRoot: projectDir });
@@ -420,7 +415,14 @@ function executeSelectTemplate(
   if (!winner) {
     throw new Error(`Template not found: ${templateName}. Available: ${templates.map((t) => t.name).join(", ")}`);
   }
-  const content = loadTemplate(templateName, { projectRoot: projectDir });
+  // 胜者内容直读（单次扫描复用）：原经 loadTemplate 内部再调 listTemplates 的
+  // 二次扫描删除；读取行为与 loadTemplate 等价（readFileSync utf-8 / 失败 null）
+  let content: string | null;
+  try {
+    content = fs.readFileSync(winner.path, "utf-8");
+  } catch {
+    content = null;
+  }
   if (content === null) {
     throw new Error(`Template not readable: ${winner.path}`);
   }
@@ -730,7 +732,7 @@ async function executeSubmitReview(
           unchangedResubmit,
         ),
       }],
-      details: submitReviewDetails("text", state.docs.length, unchangedResubmit),
+      details: submitReviewDetails("text", state.docs.length),
     };
   }
 
@@ -802,17 +804,20 @@ async function executeSubmitReview(
   }
   const envelope = parsePlanReviewResponse(parsed);
   if (!envelope.ok) {
+    // unknown-decision（已知形状、未知值域）与 malformed 同款 bad-response 出口（条目 7
+    // 降级：独立 version-mismatch 报错删除）——原子发版（Q-4）下「新扩展 + 旧宿主」不可达，
+    // 唯一窗口 = dev-link 版本错开，该窗口恢复动作 = dev-link 重新对齐版本后重试。
+    // warn 留痕版本错配信号：生产环境出现 = 错配组合真实可达的反证，重审本条删除
+    //（候选替代 = 恢复独立 version-mismatch 不引导重挂出口）。
     if (envelope.code === "unknown-decision") {
-      // D3①：已知形状、未知值域 = 版本错配信号（R2），不是垃圾——降级文案不引导重挂
-      //（防「重挂 → 同样错配 → 再重挂」再入循环，兼覆盖 R2 反方向错配）
-      logger.warn("plan: submit-review response decision out of domain", { decision: envelope.decision });
-      return reviewErrorResult(
-        "version-mismatch",
-        "The review response carries an unknown decision — the taiji host and this plan extension are version-mismatched. Do NOT call submit-review again (it will fail the same way). Tell the user to upgrade taiji (or align the plan extension version) and wait for their instructions. Do not implement any changes.",
+      logger.warn(
+        "plan: submit-review response decision out of domain (possible host/extension version mismatch — re-align versions via dev-link, then retry)",
+        { decision: envelope.decision },
       );
+    } else {
+      // malformed（E5 垃圾数据判据）：形状不合法按解析失败同款处理，引导重挂
+      logger.warn("plan: submit-review select response shape invalid (malformed)");
     }
-    // malformed（E5 垃圾数据判据）：形状不合法按解析失败同款处理，引导重挂
-    logger.warn("plan: submit-review select response shape invalid (malformed)");
     return reviewErrorResult(
       "bad-response",
       "The review response does not match the PlanReviewResponse shape. No action was taken — call plan(action='submit-review', selfReview='...') again to re-hang the review for the user.",
@@ -867,7 +872,7 @@ async function executeSubmitReview(
             unchangedResubmit,
           ),
         }],
-        details: submitReviewDetails("gui", state.docs.length, unchangedResubmit),
+        details: submitReviewDetails("gui", state.docs.length),
       };
     }
 

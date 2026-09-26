@@ -33,7 +33,6 @@ vi.mock("../templates.js", () => ({
 
 vi.mock("../compact.js", () => ({
   handlePlanComplete: vi.fn(),
-  detectGoalCapability: vi.fn(() => false),
   GOAL_FAILURE_RECOVERY: {},
 }));
 
@@ -185,6 +184,27 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     await exec({ action: "enter", requirement: "first round" });
     const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
     expect(lastEntry.state).toBe("planning");
+    expect(lastEntry.isActive).toBe(true);
+  });
+
+  it("坏数据格（isActive=false 且 state 落活跃族）：enter 按转移 ok:false 落穿，不归一不重试（坏格自愈分支已删，C1 行为变更组——仅坏格可达，行为差锚）", async () => {
+    const { exec, pi, sessions } = setup();
+    // 手改 session 文件可达的坏格：isActive=false 却残留活跃族 state（reviewing）
+    sessions.set("test-session", {
+      ...DEFAULT_PLAN_STATE,
+      isActive: false,
+      state: "reviewing",
+    });
+
+    await exec({ action: "enter", requirement: "on a corrupt cell" });
+
+    // 落穿：不归一 idle 再进——state 保持坏值（reviewing --enter--> 非 ok），进入副作用
+    // 照常（isActive=true 已置、persist 携带现值）
+    const state = sessions.get("test-session") as PlanState;
+    expect(state.isActive).toBe(true);
+    expect(state.state).toBe("reviewing");
+    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
+    expect(lastEntry.state).toBe("reviewing");
     expect(lastEntry.isActive).toBe(true);
   });
 });

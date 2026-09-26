@@ -2,15 +2,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { buildPlanModePrompt } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
 import type { PlanSessionMap, PlanState } from "./state.js";
 import { applyPlanEvent, capPlanRequirement, clearRoundFields, getPlanState, persistPlanState, PLAN_MODE_TOOLS } from "./state.js";
 import { updatePlanWidget } from "./widget.js";
-
-const logger = getLogger("pi-plan");
 
 export const MAX_SLUG_LENGTH = 30;
 
@@ -49,6 +46,13 @@ export function resolveSkills(pi: ExtensionAPI, requested: string[]): SkillResol
     } else {
       resolved.push({ name, skillPath });
     }
+  }
+  // 空请求 = 同族 fail-fast（「--skills 给了但没给名字」）：返回 ok:false + 全量
+  // available + 空 missing（报错器据此走「no skill names followed it」文案）——
+  // slash 空 --skills 报错材料复用本函数产出（枚举单源）；既有调用方均先判非空才调，
+  // 该分支不影响其契约
+  if (requested.length === 0) {
+    return { ok: false, available, missing: [] };
   }
   return missing.length > 0 ? { ok: false, available, missing } : { ok: true, resolved };
 }
@@ -108,26 +112,29 @@ export function activatePlanMode(
   state.planFilePath = planFilePath;
   // state/entry/plan 帧侧 requirement 64KB 封顶（帧有界前提）；prompt 仍用未封顶全文直达模型
   state.requirement = capPlanRequirement(requirement);
-  // --template 直传：templateName = 去扩展名 basename（GUI / /plan status 展示）；
-  // 直传事实另落 templateProvidedPath（select-template 防御的判定信号，D7）
-  state.templateName = input.template ? path.basename(input.template.absPath, ".md") : "";
-  state.templateProvidedPath = input.template?.absPath;
+  // --template 直传：templateName = 去扩展名 basename（GUI / /plan status 展示，值域不变）；
+  // 直传事实落独立布尔字段 templateProvided（select-template 防御的判定信号，D7——
+  // 双字段合并后的形态，双向版本错配登记见 PlanState.templateProvided 注释）
+  if (input.template) {
+    state.templateName = path.basename(input.template.absPath, ".md");
+    state.templateProvided = true;
+  } else {
+    state.templateName = "";
+    delete state.templateProvided;
+  }
   state.skills = skills.map((s) => s.name);
   state.docs = [];
   // 新轮次重置：per-round 字段随进入失效（D4 单函数出口，与 resetPlanState 同源——
   // 跨轮残留会误触新鲜度门 / 渲染上一轮降级文案（C-U2 同型残留））
   clearRoundFields(state);
 
-  // 状态写走 transition()（D1 'enter' 边：idle|completed|exited → planning 新一轮）。
-  // 不一致格降级（isActive=false 且 state 落活跃族——仅坏数据/旧映射残留可达，P-6 单写入方
-  // 下正常不可达）：按 isActive 推断归一到 idle 再进（与读侧兜底同构），坏数据不拒绝用户
-  // 的进入意图；正常路径一律经 applyPlanEvent 单通道。
-  const entered = applyPlanEvent(state, "enter");
-  if (!entered.ok) {
-    logger.warn("plan: enter normalized inconsistent lifecycle state", { from: state.state });
-    state.state = "idle";
-    applyPlanEvent(state, "enter");
-  }
+  // 状态写走 transition()（D1 'enter' 边：idle|终态
+  // --enter--> planning 新一轮）。不一致格 isActive=false 且 state 落活跃族
+  //（仅坏数据/旧映射残留可达，P-6 单写入方下正常不可达）按 ok:false 落穿：不归一、不重试，
+  // 后续副作用照常（persist 携带现值）——原「归一 idle 再进」自愈分支已随
+  // plan-mode-audit-remediation 批次 3 删除（行为变更仅坏数据格可达，V5 对账归垃圾格口径）；
+  // 正常路径恒单通道 applyPlanEvent。
+  applyPlanEvent(state, "enter");
 
   persistPlanState(pi, state);
   updatePlanWidget(ctx, state);

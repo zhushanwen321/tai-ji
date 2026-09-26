@@ -304,7 +304,14 @@ function handleEnterPlanMode(
   // --skills E1 校验（互斥已判过后，走到这里 templatePath 必为 undefined）
   const requested = parsed.skills ?? [];
   if (parsed.skills !== undefined && requested.length === 0) {
-    reportUnknownSkills(pi, { ok: false, available: pi.getCommands().filter((c) => c.source === "skill").map((c) => c.name), missing: [] });
+    // 空 --skills 报错复用 resolveSkills 单源（C1 去重：空请求 → ok:false + 全量
+    // available + 空 missing，报错文案不变）。TS 无法静态收窄「空请求恒 ok:false」，
+    // 运行时 fail-fast 承载该不变量（tool.ts switch default 不可达断言同风格）
+    const failed = resolveSkills(pi, requested);
+    if (failed.ok) {
+      throw new Error("plan: empty --skills must fail skill resolution (invariant)");
+    }
+    reportUnknownSkills(pi, failed);
     return;
   }
   let resolved: SkillRef[] = [];

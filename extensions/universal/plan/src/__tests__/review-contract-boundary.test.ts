@@ -19,7 +19,6 @@ vi.mock("../compact.js", async () => {
   const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../compact.js")>("../compact.js");
   return {
     handlePlanComplete: vi.fn(),
-    detectGoalCapability: vi.fn(() => false),
     GOAL_FAILURE_RECOVERY,
   };
 });
@@ -185,12 +184,12 @@ describe("契约经 executeSubmitReview 消费面落地", () => {
     expect(isPlanReviewRequest(payload)).toBe(true);
   });
 
-  it("未知 decision 经消费面 → review-error 'version-mismatch'（不引导重挂）；malformed → 'bad-response'（引导重挂）", async () => {
+  it("条目 7 降级：unknown decision 与 malformed 同款出口 → 'bad-response' 引导重挂；非 JSON → 同款（值域外分源仅 warn 留痕差异）", async () => {
     const a = setup();
     (a.ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify({ decision: "explain" }));
     const unknownRes = await a.exec({ action: "submit-review", selfReview: "fresh." });
-    expect(unknownRes.details).toEqual({ action: "review-error", reason: "version-mismatch" });
-    expect(unknownRes.content[0].text).not.toContain("re-hang");
+    expect(unknownRes.details).toEqual({ action: "review-error", reason: "bad-response" });
+    expect(unknownRes.content[0].text).toContain("re-hang");
 
     const b = setup();
     (b.ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify({ decision: "revise", comments: "bad" }));

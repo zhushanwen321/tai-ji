@@ -12,6 +12,15 @@ import { PLAN_CONTEXT_CUSTOM_TYPE, getPlanState } from "./state.js";
 
 const logger = getLogger("pi-plan");
 
+/**
+ * compact / tree 两挂点共用的 summary 主体段（重复构造去重：两挂点均为真实 SDK 挂点
+ * 全部保留，去重的只是公共主体——尾段各自不同，compact 档带 requirement + 进行中提示，
+ * tree 档带执行指令）。
+ */
+function buildPlanSummaryBody(planFilePath: string, planContent: string): string {
+  return `Plan mode active. Plan file: ${planFilePath}\n\n## Plan Content\n${planContent}\n\n`;
+}
+
 export function registerPlanEventHandlers(
   pi: ExtensionAPI,
   sessions: PlanSessionMap,
@@ -20,8 +29,6 @@ export function registerPlanEventHandlers(
     const sessionId = ctx.sessionManager.getSessionId();
     const state = getPlanState(sessions, sessionId, ctx);
     if (!state.isActive) return {};
-
-    const prep = event.preparation;
 
     // Read plan file content for recovery after compact
     const planContent = readPlanFileSafe(state.planFilePath);
@@ -32,12 +39,13 @@ export function registerPlanEventHandlers(
     return {
       compaction: {
         summary:
-          `Plan mode active. Plan file: ${state.planFilePath}\n\n` +
-          `## Plan Content\n${planContent}\n\n` +
+          buildPlanSummaryBody(state.planFilePath, planContent) +
           `Requirement: ${state.requirement}` +
           progressNote,
-        firstKeptEntryId: prep?.firstKeptEntryId,
-        tokensBefore: prep?.tokensBefore,
+        // SDK 类型非可选（pi 0.84.4 dist types.d.ts SessionBeforeCompactEvent.preparation:
+        // CompactionPreparation，firstKeptEntryId/tokensBefore 均必有）——直取不容错
+        firstKeptEntryId: event.preparation.firstKeptEntryId,
+        tokensBefore: event.preparation.tokensBefore,
       },
     };
   });
@@ -51,10 +59,7 @@ export function registerPlanEventHandlers(
 
     return {
       summary: {
-        summary:
-          `Plan mode active. Plan file: ${state.planFilePath}\n\n` +
-          `## Plan Content\n${planContent}\n\n` +
-          `Read the plan file and execute the implementation.`,
+        summary: buildPlanSummaryBody(state.planFilePath, planContent) + "Read the plan file and execute the implementation.",
       },
     };
   });
@@ -87,18 +92,12 @@ const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");
 
 /**
  * goal 桥的单一断言点：goal 扩展挂在 globalThis slot 上的编程式接口（发现 7——
- * 此前 detectGoalCapability / tryGoalInit 两处 inline 断言收敛于此；
  * 桥通道从 pi API 对象挂载迁到 slot：pi 0.84.4 per-extension API 隔离使
  * pi.__goalInit 形态跨扩展恒不可见，slot 是 C-ext-06 惯例的进程级共享形态）。
  */
 function getGoalInit(): GoalInitFn | undefined {
   const fn = Reflect.get(globalThis, GOAL_INIT_SLOT_KEY);
   return typeof fn === "function" ? (fn as GoalInitFn) : undefined;
-}
-
-/** Detect whether goal extension is available via its programming interface */
-export function detectGoalCapability(): boolean {
-  return getGoalInit() !== undefined;
 }
 
 /**
@@ -260,7 +259,7 @@ function deliverExecutionNotice(
   skillEntryPath?: string,
 ): GoalBridgeOutcome | undefined {
   // execute 档整合 goal 桥：tryGoalInit 内部含 goal-unavailable gate（goal 未挂载走
-  // started:false 降级），无需前置 detectGoalCapability 探测
+  // started:false 降级），无需前置探测
   const outcome = execMode === "execute" ? tryGoalInit(planFilePath, ctx) : undefined;
 
   let modeHint: string;

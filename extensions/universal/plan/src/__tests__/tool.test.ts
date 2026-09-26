@@ -21,7 +21,6 @@ vi.mock("../compact.js", async () => {
   const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../compact.js")>("../compact.js");
   return {
     handlePlanComplete: vi.fn(),
-    detectGoalCapability: vi.fn(() => false),
     GOAL_FAILURE_RECOVERY,
   };
 });
@@ -45,7 +44,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { UI_FORM_MARKER } from "@zhushanwen/extension-protocol";
 
-import { detectGoalCapability, handlePlanComplete } from "../compact.js";
+import { handlePlanComplete } from "../compact.js";
 import { detectExecSkills } from "../exec-skills.js";
 import type { PlanAbortControllers } from "../state.js";
 import { DEFAULT_PLAN_STATE } from "../state.js";
@@ -182,7 +181,7 @@ describe("registerPlanTool", () => {
         planFilePath: "/tmp/test-project/.tmp/plans/retro/plan.md",
         requirement: "retro",
         templateName: "retro-template",
-        templateProvidedPath: "/tmp/test-project/docs/retro-template.md",
+        templateProvided: true,
       });
       const error = await exec({ action: "select-template", templateName: "retro-template" }).then(
         () => new Error("expected rejection"),
@@ -272,9 +271,8 @@ describe("registerPlanTool", () => {
   // --- complete ---
   describe("complete", () => {
     beforeEach(() => {
-      // detectGoalCapability 不在 complete 链上消费（execute 档 tryGoalInit 内部自理
-      // goal-unavailable 降级）；goal outcome 用例经 handlePlanComplete mock 构造结果
-      (detectGoalCapability as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      // goal outcome 用例经 handlePlanComplete mock 构造结果（execute 档 tryGoalInit
+      // 在 compact.ts 内部自理 goal-unavailable 降级，不在本文件消费面）
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReset();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReset();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([]);
@@ -501,7 +499,6 @@ describe("registerPlanTool", () => {
   describe("complete via taiji form channel", () => {
     beforeEach(() => {
       vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
-      (detectGoalCapability as ReturnType<typeof vi.fn>).mockReturnValue(false);
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReset();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReset();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([]);

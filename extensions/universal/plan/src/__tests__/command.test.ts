@@ -193,7 +193,7 @@ describe("registerPlanCommand", () => {
       planFilePath: "/tmp/test-project/.tmp/plans/implement-user-auth/plan.md",
       requirement: "Implement User Auth",
       templateName: "",
-      templateProvidedPath: undefined,
+      templateProvided: undefined,
       skills: [],
       docs: [],
       state: "planning",
@@ -348,7 +348,7 @@ describe("registerPlanCommand", () => {
           isActive: true,
           requirement: "retro meeting",
           templateName: "retro-template",
-          templateProvidedPath: "/tmp/test-project/docs/retro-template.md",
+          templateProvided: true,
           skills: [],
         }),
       );
@@ -370,7 +370,7 @@ describe("registerPlanCommand", () => {
 
       expect(pi.appendEntry).toHaveBeenCalledWith(
         "plan-state",
-        expect.objectContaining({ isActive: true, templateName: "retro template", templateProvidedPath: spacedAbs }),
+        expect.objectContaining({ isActive: true, templateName: "retro template", templateProvided: true }),
       );
       const prompt = sentMessage();
       expect(prompt).toContain(spacedAbs);

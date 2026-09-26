@@ -19,10 +19,15 @@ vi.mock("../compact.js", async () => {
   const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../compact.js")>("../compact.js");
   return {
     handlePlanComplete: vi.fn(),
-    detectGoalCapability: vi.fn(() => false),
     GOAL_FAILURE_RECOVERY,
   };
 });
+
+// 条目 7 降级锚：unknown-decision 的版本错配 warn 留痕经 extension-logger，捕获断言要点
+const { loggerWarn } = vi.hoisted(() => ({ loggerWarn: vi.fn() }));
+vi.mock("@zhushanwen/pi-extension-logger", () => ({
+  getLogger: () => ({ warn: loggerWarn, error: vi.fn() }),
+}));
 
 vi.mock("../widget.js", () => ({
   updatePlanWidget: vi.fn(),
@@ -351,7 +356,7 @@ describe("turn abort 级联（execute signal → 挂起 select 解散，MF-1-8�
 });
 
 describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）", () => {
-  it("首次 submit-review：无警告行、details 无 changed 字段", async () => {
+  it("首次 submit-review：无警告行，details 仅 channel/docsCount", async () => {
     const { exec } = setupActive();
     const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
 
@@ -372,7 +377,7 @@ describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）",
     expect(lastEntry.lastSubmitReviewDocsFingerprint).toBe("design.md:2");
   });
 
-  it("未 register-doc 重提交：result 末行追加警告 + details.changed=false", async () => {
+  it("未 register-doc 重提交：result 末行追加警告，details 不携带信号字段", async () => {
     const { exec, pi } = setupActive();
     await exec({ action: "submit-review", selfReview: SELF_REVIEW });
     // 未改文档的重提交（E3 同值回传形态）不触防照抄门（指纹未变）
@@ -384,13 +389,13 @@ describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）",
     );
     // 追加为末行（追加一行契约）
     expect(res.content[0].text.split("\n").at(-1)).toMatch(/^Note: no documents changed/);
-    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1, changed: false });
+    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1 });
     // 重提交不改写快照基线：指纹仍是上次值（docs 确实没变）
     const lastEntry = persistedEntries(pi).at(-1)!;
     expect(lastEntry.lastSubmitReviewDocsFingerprint).toBe("design.md:1");
   });
 
-  it("gui 分支（revise 后未改文档重提交）同样追加警告 + changed=false", async () => {
+  it("gui 分支（revise 后未改文档重提交）同样追加警告，details 不携带信号字段", async () => {
     vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
     const { exec, ctx } = setupActive();
     const comments = [{ quote: "第二节", comment: "补失败分支" }];
@@ -407,7 +412,7 @@ describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）",
     expect(second.content[0].text).toContain(
       "Note: no documents changed since the last submit-review",
     );
-    expect(second.details).toEqual({ action: "submit-review", channel: "gui", docsCount: 1, changed: false });
+    expect(second.details).toEqual({ action: "submit-review", channel: "gui", docsCount: 1 });
   });
 });
 
@@ -499,7 +504,7 @@ describe("decision 消费（taiji 形态）", () => {
     expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("D3① unknown decision（合法 JSON、值域外）→ version-mismatch 降级：版本不匹配指引，不引导重挂（防再入循环）", async () => {
+  it("条目 7 降级：unknown decision（合法 JSON、值域外）→ 落 malformed 同款 bad-response 引导重挂 + warn 留痕版本错配信号", async () => {
     const { exec, ctx, pi } = setupTaiji();
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       JSON.stringify({ decision: "nonsense" }),
@@ -507,11 +512,18 @@ describe("decision 消费（taiji 形态）", () => {
 
     const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
 
-    expect(res.details).toEqual({ action: "review-error", reason: "version-mismatch" });
-    expect(res.content[0].text).toContain("version-mismatched");
-    // 双分源语义相反：不引导重挂（重挂会同样错配循环）
-    expect(res.content[0].text).not.toContain("re-hang");
-    expect(res.content[0].text).toContain("Do NOT call submit-review again");
+    // 独立 version-mismatch 出口已删（原子发版不可达，唯一窗口 dev-link 版本错开）：
+    // 应答与 malformed 同款出口（报错返回、引导重挂）
+    expect(res.details).toEqual({ action: "review-error", reason: "bad-response" });
+    expect(res.content[0].text).toContain("re-hang");
+    // warn 留痕要点：decision 值域外 + 可能宿主/扩展版本错配 + 对齐动作
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining("decision out of domain"),
+      expect.objectContaining({ decision: "nonsense" }),
+    );
+    expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining("version mismatch"), expect.anything());
+    expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining("dev-link"), expect.anything());
+    // 垃圾/错配数据不进流
     expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 

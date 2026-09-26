@@ -1,11 +1,7 @@
 import type {
-  BeforeAgentStartEvent,
-  BeforeAgentStartEventResult,
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-
-import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { registerPlanCommand } from "./command.js";
 import { registerPlanEventHandlers } from "./compact.js";
@@ -21,20 +17,6 @@ import {
 } from "./state.js";
 import { registerPlanTool } from "./tool.js";
 import { updatePlanWidget } from "./widget.js";
-
-const logger = getLogger("pi-plan");
-
-/**
- * D9 引导文案（约 60 token）：仅在 taiji 宿主注入。plan 模式是只读子集（读代码、产
- * 文档、不改源码），进入它不是危险操作——agent 可在合适时机**自行进入**（plan-mode-
- * agent-enter U1 后 enter 是 tool action，无需用户确认；用户随时可经 PlanModeBar 退出）。
- */
-const PLAN_MODE_SUGGESTION_PROMPT =
-  "\n\n" +
-  "When the user's request involves large-scale refactoring, cross-module changes, or other high-risk modifications, " +
-  "proactively enter plan mode yourself by calling plan(action='enter', requirement='<the task>', skills=[...relevant skills]). " +
-  "Plan mode is read-only for source code: you explore and write plan documents, then the user reviews before implementation. " +
-  "Do not ask for permission to enter — entering plan mode is safe and reversible (the user can exit anytime).";
 
 export default function planExtension(pi: ExtensionAPI) {
   // Per-session state cache — keyed by sessionId
@@ -144,36 +126,6 @@ export default function planExtension(pi: ExtensionAPI) {
           { deliverAs: "steer", triggerTurn: true },
         );
       }
-    }
-  });
-
-  // D9：AI 主动建议（轻量引导），仅 taiji 形态注入。
-  // 信号用 TAIJI_AGENT_EXT_LOG 而非 TAIJI_RUNTIME_TOKEN——后者在 SPAWN_ENV 出站
-  // deny list 被强制剥除（C-proc-09），pi 子进程 env 里恒不可见，照抄即引导
-  // 静默失效且诱导实施者动 deny list 造成安全回归；前者由 taiji runtime 对托管
-  // pi 恒注入（rpc-client buildPiOutboundEnv）。独立 pi（信号缺失）不注入——
-  // universal 包语义不变。
-  pi.on("before_agent_start", (event: BeforeAgentStartEvent): BeforeAgentStartEventResult | undefined => {
-    if (process.env.TAIJI_AGENT_EXT_LOG !== "1") return undefined;
-    // Never block the agent loop（system-prompt extension 同款先例）
-    try {
-      return { systemPrompt: event.systemPrompt + PLAN_MODE_SUGGESTION_PROMPT };
-    } catch (error) {
-      const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      // 注入失败只损失一句引导，不值得中断 agent loop——先走 extension-logger 落盘
-      // （~/.pi/agent/logs/ 文件通道，诊断可见）；logger 自身抛错才降级 stderr
-      // （system-prompt logHookFailure 同款形态：logger 首选、stderr 内层兜底）
-      try {
-        logger.warn("plan: before_agent_start injection failed", { error: msg });
-      } catch (nestedErr) {
-        try {
-          process.stderr.write(`[pi-plan] before_agent_start injection log also failed: ${String(nestedErr)}\n`);
-        } catch (finalErr) {
-          // 完全静默：两层兜底都失败时无处可写
-          void finalErr;
-        }
-      }
-      return undefined;
     }
   });
 

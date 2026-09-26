@@ -93,7 +93,7 @@ describe("State persistence", () => {
       planFilePath: ".tmp/plans/test/plan.md",
       requirement: "test requirement",
       templateName: "feature-plan",
-      templateProvidedPath: undefined,
+      templateProvided: undefined,
       skills: ["tech-design"],
       docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 2 }],
       state: "reviewing",
@@ -261,7 +261,7 @@ describe("State persistence", () => {
     const state = reconstructPlanState(mockCtx);
     // D2/D9：重建产物键集 = 四现状 + state/selfReview/resumeHint + skills/docs + 指纹
     //（reviewState/reviewStateSource 不再是内存态字段，仅映射读）
-    expect(Object.keys(state).sort()).toEqual(["docs", "isActive", "lastSubmitReviewDocsFingerprint", "planFilePath", "requirement", "resumeHint", "selfReview", "skills", "state", "templateName", "templateProvidedPath"]);
+    expect(Object.keys(state).sort()).toEqual(["docs", "isActive", "lastSubmitReviewDocsFingerprint", "planFilePath", "requirement", "resumeHint", "selfReview", "skills", "state", "templateName", "templateProvided"]);
     expect(state.isActive).toBe(true);
   });
 
@@ -358,6 +358,31 @@ describe("State persistence", () => {
       },
     } as unknown as ExtensionContext;
     expect(reconstructPlanState(badCtx).resumeHint).toBeUndefined();
+  });
+
+  it("templateProvided 直传标记：新字段直读 + 旧 templateProvidedPath 映射（双字段合并后 entry 级旧字段映射——select-template 直传防御行为等价）", () => {
+    const entryFor = (data: Record<string, unknown>) => ({
+      sessionManager: {
+        getEntries: () => [{ type: "custom", customType: "plan-state", data }],
+      },
+    }) as unknown as ExtensionContext;
+
+    // 新形态直读：templateProvided=true → 直传格（防御拦截源）
+    expect(
+      reconstructPlanState(entryFor({ isActive: true, planFilePath: "/p/plan.md", requirement: "r", templateName: "t", templateProvided: true })).templateProvided,
+    ).toBe(true);
+    // 模板流程格：字段缺失
+    expect(
+      reconstructPlanState(entryFor({ isActive: true, planFilePath: "/p/plan.md", requirement: "r", templateName: "" })).templateProvided,
+    ).toBeUndefined();
+    // 旧双字段形态重放：templateProvidedPath 存在即直传（值不保留——路径无消费方）
+    expect(
+      reconstructPlanState(entryFor({ isActive: true, planFilePath: "/p/plan.md", requirement: "r", templateName: "t", templateProvidedPath: "/x/t.md" })).templateProvided,
+    ).toBe(true);
+    // 垃圾值不进内存态：非 true 直读值与旧字段非 string 一并按模板流程处理
+    expect(
+      reconstructPlanState(entryFor({ isActive: true, planFilePath: "/p/plan.md", requirement: "r", templateName: "", templateProvided: "yes", templateProvidedPath: 42 })).templateProvided,
+    ).toBeUndefined();
   });
 
   it("selfReview 重建读侧 4KB 截断防御（D9③/R3：超长旧 entry 不整段进内存态，E3 回传恒有界）", () => {
@@ -471,7 +496,7 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
       planFilePath: "",
       requirement: "",
       templateName: "",
-      templateProvidedPath: undefined,
+      templateProvided: undefined,
       skills: [],
       docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 2 }],
       state: "exited",

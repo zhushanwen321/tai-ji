@@ -132,6 +132,16 @@ describe("resolveSkills（E1 技能枚举比对，双向剥 skill: 前缀归一�
       expect(resolution.missing).toEqual(["tech-desig"]);
     }
   });
+
+  it("empty request = 同族 fail-fast：ok:false + 全量 available + 空 missing（空 --skills 报错材料复用本函数产出）", () => {
+    const resolution = resolveSkills(pi, []);
+    expect(resolution.ok).toBe(false);
+    if (!resolution.ok) {
+      // missing 空 → 报错器走「no skill names followed it」文案分支；available 同源枚举
+      expect(resolution.missing).toEqual([]);
+      expect(resolution.available).toEqual(["skill:tech-design", "skill:dev-flow", "skill:code review"]);
+    }
+  });
 });
 
 describe("E1 fail-fast via /plan handler", () => {

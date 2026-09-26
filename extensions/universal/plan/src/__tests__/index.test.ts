@@ -15,13 +15,6 @@ vi.mock("../command.js", () => ({ registerPlanCommand: vi.fn() }));
 vi.mock("../compact.js", () => ({ registerPlanEventHandlers: vi.fn() }));
 vi.mock("../widget.js", () => ({ updatePlanWidget: vi.fn() }));
 
-// MF-1-8：注入失败日志必须走 extension-logger（stderr 仅 logger 自身抛错的内层兜底）——
-// 捕获 warn spy 断言落盘通道
-const { loggerWarn } = vi.hoisted(() => ({ loggerWarn: vi.fn() }));
-vi.mock("@zhushanwen/pi-extension-logger", () => ({
-  getLogger: () => ({ warn: loggerWarn, error: vi.fn() }),
-}));
-
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import planExtension from "../index.js";
@@ -327,52 +320,9 @@ describe("session_start hook（E3：按 state 查表恢复）", () => {
   });
 });
 
-describe("before_agent_start hook（D9：taiji 形态引导注入）", () => {
-  const basePrompt = "You are a helpful coding agent.";
-
-  it("no host signal (standalone pi) → undefined, prompt untouched", () => {
+describe("进入引导单源（systemPrompt 注入面已收敛到 tool promptSnippet）", () => {
+  it("before_agent_start 钩子不注册：taiji 宿主注入面与 tool 描述面不再同时含进入引导（C1 行为变更组锚）", () => {
     const { handlers } = setup();
-    const result = handlers.get("before_agent_start")!(
-      { type: "before_agent_start", prompt: "hi", systemPrompt: basePrompt },
-      makeCtx([]),
-    );
-    expect(result).toBeUndefined();
-  });
-
-  it("TAIJI_AGENT_EXT_LOG=1 → appends the plan-mode suggestion (not TAIJI_RUNTIME_TOKEN — 出站 deny list 剥除)", () => {
-    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
-    const { handlers } = setup();
-    const result = handlers.get("before_agent_start")!(
-      { type: "before_agent_start", prompt: "hi", systemPrompt: basePrompt },
-      makeCtx([]),
-    ) as { systemPrompt?: string } | undefined;
-
-    expect(result?.systemPrompt).toContain(basePrompt);
-    // agent 自助进入引导在场（enter action + 无需确认）
-    expect(result?.systemPrompt).toContain("plan(action='enter'");
-    expect(result?.systemPrompt).toContain("Do not ask for permission to enter");
-    // 旧的「建议 + 需确认」措辞已移除（enter 是 tool action，无需确认闸门）
-    expect(result?.systemPrompt).not.toContain("Do NOT enter plan mode without the user's confirmation");
-  });
-
-  it("注入失败（systemPrompt 读取抛错）→ logger.warn 落盘 + 返回 undefined，不阻塞 agent loop（MF-1-8）", () => {
-    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
-    const { handlers } = setup();
-    const evilEvent = {
-      type: "before_agent_start",
-      get systemPrompt(): string {
-        throw new Error("boom");
-      },
-    };
-
-    const result = handlers.get("before_agent_start")!(evilEvent, makeCtx([]));
-
-    // Never block the agent loop：吞错返回 undefined
-    expect(result).toBeUndefined();
-    // 日志走 extension-logger 文件通道（~/.pi/agent/logs/），不再 stderr 直写
-    expect(loggerWarn).toHaveBeenCalledWith(
-      "plan: before_agent_start injection failed",
-      expect.objectContaining({ error: expect.stringContaining("boom") }),
-    );
+    expect(handlers.has("before_agent_start")).toBe(false);
   });
 });

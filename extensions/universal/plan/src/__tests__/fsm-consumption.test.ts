@@ -30,7 +30,6 @@ vi.mock("../compact.js", async () => {
   const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../compact.js")>("../compact.js");
   return {
     handlePlanComplete: vi.fn(),
-    detectGoalCapability: vi.fn(() => false),
     GOAL_FAILURE_RECOVERY,
   };
 });

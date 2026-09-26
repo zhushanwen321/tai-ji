@@ -33,12 +33,19 @@ export interface PlanState {
   requirement: string;
   templateName: string;
   /**
-   * --template 直传标记（D7 select-template 防御的判定信号）：直传进入时 =
-   * 展开后模板文件绝对路径；模板流程进入缺失。templateName 字段两流程共用
-   * （直传存 basename / 选中存模板名），单看它无法区分「已直传」与「已选中」，
-   * 故独立持久化直传事实——重启经 entry 恢复，reset 时随退出失效。
+   * --template 直传标记（D7 select-template 防御的判定信号；templateName/templateProvidedPath
+   * 双字段合并后的独立判定字段——templateName 值域不变，直传事实不再以路径字段持久化）：
+   * true = 直传进入；缺失 = 模板流程（进入与选中共用缺失态，防御只拦直传格）。
+   * 重启经 entry 恢复，reset 时随退出失效。
+   *
+   * 双向版本错配登记（dev-link 窗口可达，生产被 Q-4 原子发版覆盖）：
+   * ① 新扩展读旧 entry（双字段形态）：读侧把 templateProvidedPath 存在映射回本字段
+   *   （readTemplateProvided），直传防御行为等价；
+   * ② 旧扩展读新 entry（单字段形态）：旧读侧对缺失按模板流程降级，直传防御静默少拦
+   *   （不误拦）——恢复动作 = dev-link 重新对齐版本后重试；生产出现该错配 = 原子发版
+   *   被破坏的反证，重审本合并（候选替代 = 恢复 templateProvidedPath 双字段形态）。
    */
-  templateProvidedPath?: string;
+  templateProvided?: boolean;
   /** 挂载技能名清单（--skills 解析产物；模板流程为空数组——挂载声明，reset 时随退出失效） */
   skills: string[];
   /** 产物文档清单（register-doc 登记；reset 时保留——产物 tab 与 isActive 解耦，跨重开留存） */
@@ -245,7 +252,7 @@ export function getPlanState(
 
 export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
   // customType 字面量 'plan-state' 是 runtime 投影链的派生锚点（u1-proj 侧用同字面量
-  // 派生扫描），两侧独立常量，勿改字面量。optional 字段（templateProvidedPath /
+  // 派生扫描），两侧独立常量，勿改字面量。optional 字段（templateProvided /
   // selfReview / resumeHint / lastSubmitReviewDocsFingerprint）为 undefined 时 JSON
   // 序列化自然消失，旧 entry 消费方对该字段惰性（D4 向后兼容）。
   // D2 取代式演进：reviewState / reviewStateSource 停写——新写只落 state / resumeHint /
@@ -255,7 +262,7 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
     planFilePath: state.planFilePath,
     requirement: state.requirement,
     templateName: state.templateName,
-    templateProvidedPath: state.templateProvidedPath,
+    templateProvided: state.templateProvided,
     skills: state.skills,
     docs: state.docs,
     state: state.state,
@@ -324,7 +331,7 @@ export function resetPlanState(
   state.planFilePath = "";
   state.requirement = "";
   state.templateName = "";
-  delete state.templateProvidedPath;
+  delete state.templateProvided;
   state.skills = [];
   // 终态参数（D3 连带段）：默认 'exited'，complete 终局传 'completed'——防 reset 覆写
   // completed（终态两值仅留诊断/审计区分，共享全部终态规则）
@@ -349,11 +356,13 @@ function isPlanStateEntry(entry: SessionEntry): entry is CustomEntry<LegacyPlanE
 
 /**
  * 旧 schema entry data（D2 读方①映射源）：reviewState/reviewStateSource 是已停写的历史字段
- * （取代式演进——新写只落 state/resumeHint/selfReview），只在重建读侧映射消费。
+ * （取代式演进——新写只落 state/resumeHint/selfReview），只在重建读侧映射消费；
+ * templateProvidedPath 是双字段合并前已停写的直传路径字段（读侧映射 readTemplateProvided）。
  */
 type LegacyPlanEntryData = Partial<PlanState> & {
   reviewState?: unknown;
   reviewStateSource?: unknown;
+  templateProvidedPath?: unknown;
 };
 
 /** skills 白名单式读取：数组 + 逐项 string 守卫，垃圾项丢弃（垃圾数据不进内存态） */
@@ -419,9 +428,14 @@ function readDocsFingerprint(data: Partial<PlanState>): string | undefined {
     : undefined;
 }
 
-/** 直传标记白名单式读取：非 string（含缺失）按模板流程处理（D4 字段级降级） */
-function readTemplateProvidedPath(data: Partial<PlanState>): string | undefined {
-  return typeof data.templateProvidedPath === "string" ? data.templateProvidedPath : undefined;
+/**
+ * 直传标记读取（新旧 entry 双形态）：新字段直读（严格 === true，垃圾值按无值）；
+ * 旧 entry 的 templateProvidedPath（合并前已停写路径字段，保留边界「entry 级旧字段映射」）
+ * 存在即直传——直传防御行为等价，双向版本错配登记见 PlanState.templateProvided 注释。
+ */
+function readTemplateProvided(data: LegacyPlanEntryData): boolean | undefined {
+  if (data.templateProvided === true) return true;
+  return typeof data.templateProvidedPath === "string" ? true : undefined;
 }
 
 /**
@@ -436,7 +450,7 @@ function applyPlanStateEntry(state: PlanState, data: LegacyPlanEntryData | undef
   state.planFilePath = entryData.planFilePath ?? "";
   state.requirement = readRequirement(entryData);
   state.templateName = entryData.templateName ?? "";
-  state.templateProvidedPath = readTemplateProvidedPath(entryData);
+  state.templateProvided = readTemplateProvided(entryData);
   state.skills = readSkills(entryData);
   state.docs = readDocs(entryData);
   // 生命周期状态：新字段直读 + 旧 reviewState 映射（isActive 兜底，D2 读方①）
