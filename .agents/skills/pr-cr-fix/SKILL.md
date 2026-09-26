@@ -50,7 +50,7 @@ bash scripts/pr-pre-merge.sh --skip-tests --quiet
 - **非发布改动**（纯注释/类型注解/测试/零行为差重构）→ 跳过，在阶段汇报中列明「包名 + 跳过原因 + 证据」
 - 已删除的包 checker 自动跳过（package.json 读不到）；WARN 本身不清除（事实记录），只 FAIL 才阻塞
 
-changeset 文件随 PR diff 可审可改；type 终判仍在 merge 阶段人工定（与「PR 阶段初判、merge 人工定」SSOT 一致）。缺失 changeset 的后果：merge 时 `changeset version` 不 bump → publish 不发 → bug fix 静默丢失。已知堆积问题：dev-merge（feature→dev）不跑本检查，负担堆积到 dev→main 最终 PR——前移到 dev-merge 是待办优化。
+changeset 文件随 PR diff 可审可改；type 终判仍在 merge 阶段人工定（与「PR 阶段初判、merge 人工定」SSOT 一致）。缺失 changeset 的后果：merge 时 `changeset version` 不 bump → publish 不发 → bug fix 静默丢失。已知堆积问题已清：dev-merge 第 1.6 步 gates 恒跑 `node scripts/changeset-check.mjs`（缺失时 WARN + 起草指令，见 dev-merge SKILL），dev 线 changeset 缺失在合入时点即暴露，dev→main 最终 PR 不再堆积。
 
 ### 1.2 自动生成 PR title 和 body
 
@@ -104,15 +104,15 @@ python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base main
 | verdict | 含义 | 动作 |
 |---------|------|------|
 | `fail` | 有 fail 级 introduced 问题 | **打回**：派 worker 修复 → 重跑本脚本，上限 3 轮；超限停手上报用户 |
-| `warn` | 仅 warn 级 | 放行；`.review/metrics.json` 的 warn + targets 清单由阶段 2 对应 agent 消费 |
+| `warn` | 仅 warn 级 | 放行；`.review/metrics.json` 的 warn + targets 清单随 gates 输出呈报为机器报告（不做逐条 LLM 核查，见「metrics warn 档消费约定」节） |
 | `pass` | 干净 | 放行 |
 
 ### 门禁项分级
 
 - **fail**：introduced 函数圈复杂度 > 15；新增循环依赖；新增无法解析的 import（全部）
-- **warn**（注入阶段 2 review）：introduced 认知复杂度 > 15 / CRAP ≥ 30 / 死代码等 13 类（完整清单见 scripts/metrics-gate.py 的 `WARN_DEAD_CODE_KINDS`）；新增重复块
+- **warn**（降级为机器报告，随 gates 输出呈报）：introduced 认知复杂度 > 15 / CRAP ≥ 30 / 死代码等 13 类（完整清单见 scripts/metrics-gate.py 的 `WARN_DEAD_CODE_KINDS`）；新增重复块
 
-设计理由：fallow audit 无 warn 档、无真实覆盖率时 CRAP 是静态估算（噪声大），metrics-gate 用同一份 audit JSON 显式双轨判定——结构性硬指标 fail，覆盖率相关指标 warn 给阶段 2 消费。
+设计理由：fallow audit 无 warn 档、无真实覆盖率时 CRAP 是静态估算（噪声大），metrics-gate 用同一份 audit JSON 显式双轨判定——结构性硬指标 fail，覆盖率相关指标 warn（机器报告，不做逐条 LLM 核查）。
 
 ## 阶段 1.6：增量覆盖率门禁（Gate-1.6）[MANDATORY]
 

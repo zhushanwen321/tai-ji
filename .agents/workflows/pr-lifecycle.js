@@ -24,7 +24,9 @@
 // 平台差异（宿主 API 形态，语义等价）：
 // - zcode CreateWorkflow path 调用 → pi workflow 工具 action=run + name=<本脚本绝对路径>
 //   （按名解析已退役 D4-1，裸名一律 not_found——发起时从 <available_workflows> 清单的
-//   location 取绝对路径；脚本在项目 .agents/workflows/ = discovery 最高优先源，随 git 分发）
+//   location 取绝对路径；脚本在项目 .agents/workflows/ = discovery 最高优先源。.agents 为
+//   symlink 指向 workspace 根共享实体、已脱离 git 跟踪：跨分支一致性靠源 worktree merge，
+//   恢复通道 = refs/skills-snapshot 快照 ref）
 // - args 对象 → $ARGS 平铺字符串；reviewers/skipSteps 数组 → 逗号分隔字符串
 // - ask<T> 类型合成 schema → 手写 JSON Schema（引擎 ajv 校验）
 // - world.run → async spawn 包装（runCmd，返回 {exitCode, stdout, stderr} 同构；POSIX
@@ -1054,9 +1056,11 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
         if (r.status === "fixed" && inLedger && r.evidence.trim() !== "") {
           it.status = "fixed";
           it.consecutiveUnfixed = 0;
-        } else if (r.status === "regressed") {
+        } else if (r.status === "regressed" && inLedger) {
           // fixAttempts 语义 = 修复失败次数（对齐 pi 版 applyFixAttemptedOutcome）：只在
           // regressed（修了又坏）时 +1；not-fixed（一直没修好）只计 consecutiveUnfixed 走 stuck。
+          // 台账外 regressed 申报按函数头注释三向守卫忽略——否则 deferred/disputed 被翻出
+          // needs-human 收集、绕过 escalate 唯一复活入口、双计 fixAttempts 误触 needs-redesign。
           it.status = "regressed";
           it.fixAttempts += 1;
           it.consecutiveUnfixed += 1;
@@ -1964,7 +1968,7 @@ if (failInfo) {
     // pr-submit 已成功后才失败时 PR 信息不丢（重跑 pr-submit 幂等更新既有 PR，不会重复开）
     ...(prUrl ? { prUrl } : {}),
     skippedSteps: skippedStepsList,
-    recovery: "处置后重新发起本 workflow（pi: workflow 工具 action=run + name=<本脚本绝对路径，取 <available_workflows> 清单的 location>；项目 .agents/workflows/ 随 git 分发）。已被人工接管的 step 在 skipSteps（逗号分隔）中跳过。" +
+    recovery: "处置后重新发起本 workflow（pi: workflow 工具 action=run + name=<本脚本绝对路径，取 <available_workflows> 清单的 location>；脚本经项目 .agents/workflows/ 发现，.agents 为 symlink 共享实体、已脱离 git 跟踪，缺失时从 refs/skills-snapshot 恢复）。已被人工接管的 step 在 skipSteps（逗号分隔）中跳过。" +
       (prUrl ? "PR 已开（" + prUrl + "），重新发起时 pr-submit 幂等更新既有 PR。" : ""),
   };
 }

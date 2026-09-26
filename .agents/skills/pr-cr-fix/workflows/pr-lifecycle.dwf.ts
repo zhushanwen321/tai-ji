@@ -893,9 +893,11 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         if (r.status === "fixed" && inLedger && r.evidence.trim() !== "") {
           it.status = "fixed";
           it.consecutiveUnfixed = 0;
-        } else if (r.status === "regressed") {
+        } else if (r.status === "regressed" && inLedger) {
           // fixAttempts 语义 = 修复失败次数（对齐 pi 版 applyFixAttemptedOutcome）：只在
           // regressed（修了又坏）时 +1；not-fixed（一直没修好）只计 consecutiveUnfixed 走 stuck。
+          // 台账外 regressed 申报按函数头注释三向守卫忽略——否则 deferred/disputed 被翻出
+          // needs-human 收集、绕过 escalate 唯一复活入口、双计 fixAttempts 误触 needs-redesign。
           it.status = "regressed";
           it.fixAttempts += 1;
           it.consecutiveUnfixed += 1;
@@ -1559,8 +1561,12 @@ await step("cr-fix", async () => {
     reviewModeNote = `非常态回退：分支 ${crFixBranch} 非 dev-* 线（未经 dev-merge）→ 回退集 ${picked.length} 维（恒派 ${FALLBACK_ALWAYS_DIMS.join("/")}；触发：${wanted.triggerNote}）`;
     log(`[cr-fix] ${reviewModeNote}`);
   } else {
-    // dev-* 线常态：默认空集，cr-fix step 跳过——分支增量审查已由 dev-merge 承接
-    reviewModeNote = `dev-* 线空集：分支 ${crFixBranch} 匹配 dev-*，默认零 LLM 审查维度（分支审查已由 dev-merge 承接）`;
+    // dev-* 线常态：默认空集，cr-fix step 跳过——分支增量审查已由 dev-merge 承接。
+    // preflight 被跳过（skipSteps 人工接管）时分支从未被读取，披露必须写实义，
+    // 不得伪造「分支匹配 dev-*」的判定依据；行为默认值（此时仍空集）属设计未判定场景。
+    reviewModeNote = crFixBranch
+      ? `dev-* 线空集：分支 ${crFixBranch} 匹配 dev-*，默认零 LLM 审查维度（分支审查已由 dev-merge 承接）`
+      : `cr-fix 空集（判定依据缺省）：分支未判定——preflight 未执行（被 skipSteps 跳过或未达），默认零 LLM 审查维度；如需带审查请显式传 reviewers`;
     skippedSteps.push({ step: "cr-fix", reason: `${reviewModeNote}；机器兜底由 gate-suite / final-gates 承担` });
     log(`[cr-fix] ${reviewModeNote}`);
     return;
@@ -1768,7 +1774,7 @@ const summaryLines = [
     ? `- failedStep: **${fail.step}**${prUrl ? `\n- prUrl: ${prUrl}（PR 已开，处置后重跑 pr-submit 幂等更新）` : ""}`
     : `- prUrl: ${prUrl ?? "（未知）"}\n- cr-fix: ${crFixTerminated ?? "（未执行）"}\n- simplify: ${simplifySummary ?? "（未执行）"}\n- gates: coverage=${gates.coverage} / metrics=${gates.metrics} / premerge=${gates.premerge}`,
   skippedSteps.length ? `- skippedSteps:\n${skippedSteps.map((s) => `  - ${s.step}: ${s.reason}`).join("\n")}` : "- skippedSteps: 无",
-  reviewModeNote ? `- review 判定: ${reviewModeNote}` : "- review 判定: （cr-fix 被显式接管跳过，未做自动判定）",
+  reviewModeNote ? `- review 判定: ${reviewModeNote}` : "- review 判定: （cr-fix 无判定披露——step 被 skipSteps 接管或未产出）",
   fail ? `\n> ${fail.error}` : "\n> push 需用户授权：主 agent 披露上述结果并请求授权后执行 `git push github HEAD:<branch> --force-with-lease`",
 ];
 try {

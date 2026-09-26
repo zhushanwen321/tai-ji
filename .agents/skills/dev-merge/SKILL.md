@@ -46,7 +46,7 @@ node scripts/changeset-check.mjs                  # changeset 完整性：diff �
 ```
 
 - 退出码：quality-gates `0` = 全绿 / `1` = FAIL / `2` = 用法或环境错误；changeset-check `0` = pass/warn/skip（WARN 不阻断）/ `2` = 工具错误。
-- **FAIL（exit 1）**：派 fixer 修复重跑 ≤3 轮——fixer 只修失败输出直接相关的问题、修完自行 commit（显式路径，禁 `git add -A`）、每轮修完重跑脚本验证；3 轮仍 FAIL 停下呈报人工处置，不进后续步骤。
+- **FAIL（exit 1）**：派 fixer 修复后重跑——gates 脚本累计执行 ≤3 次、fixer 最多派发 2 次（fixer 只修失败输出直接相关的问题、修完自行 commit（显式路径，禁 `git add -A`）、每轮修完重跑脚本验证）；预算用尽仍 FAIL 停下呈报人工处置，不进后续步骤。
 - **exit 2**：工具/环境错误不进 fixer 循环，按脚本输出的缺失路径与恢复指引处置。
 - **changeset WARN**：主 agent 按 Gate-1a.5 同款分类逻辑处置（不弹窗问用户）——实质改动（包有对外语义变化）→ 起草 `.changeset/*.md` 且理由列明；非发布改动（纯注释/文档/无对外语义变化的内部整理）→ 跳过起草并列明理由。skip/pass → 无动作，汇报记一句。
 - **base 口径**：`--side dev-merge` = 分支增量（`git merge-base github/main HEAD`，脚本自解析），与第 1.7 步审查对象同口径；禁止传 `--base main`（那是 pr-cr-fix 侧的累积口径，两侧差异有意）。
@@ -59,7 +59,7 @@ node scripts/changeset-check.mjs                  # changeset 完整性：diff �
 
 feature 分支的 diff 完整、上下文集中，是横切维度审查的天然边界——dev-flow 阶段 3 只审「实现 vs 设计」，business-logic / arch-boundary / data-governance 等横切关注点不在其审查范围内（PR #20 实证：走了完整 dev-flow 的 btw/ttft 域终局仍暴露 10 条、5 条 major，登记与覆盖问题全部从 dev-flow 眼皮下漏过）。本步把横切关注点前置到合入点，终局 PR 期只收机器兜底与漏网项。
 
-**触发条件**：分支 diff（`git diff $(git merge-base github/main HEAD)..HEAD --stat`）触及任一非测试源码文件即跑——业务逻辑审查必须有分支边界归属，不设文件数门槛；未触及源码（纯文档/注释外围改动）时在合并汇报记一句跳过理由。
+**触发条件**：分支 diff（`git diff $(git merge-base github/main HEAD)..HEAD --stat`）触及任一非测试源码文件即跑——业务逻辑审查必须有分支边界归属，不设文件数门槛；diff 仅含测试路径与 .md 文档（编排按路径判定，不识别注释级改动）时在合并汇报记一句跳过理由。
 
 **执行**（审查对象 = 分支增量 diff，非全 PR）：
 
