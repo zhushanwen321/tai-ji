@@ -21,8 +21,11 @@
  *   （D1「approved 上 agent 再调 complete → dispatching」）。事件命名裁决：9 事件表无
  *   `complete` 员，本边取「执行确认」语义族最近员 `approve`（用户点确认执行与批准后重选
  *   执行方式同为「确认执行、进入执行方式选择」的决策事件）——消费面接线见 consumers.md。
- * - `approved` 其余转移仅 `exit`；任何非终态（含 idle 缺省）`--exit--> exited`；终态
- *   `--enter--> planning`（新一轮）；`revising` 保留独立态（E3 恢复文案分叉依赖，前提 P-7）。
+ * - `approved` 其余转移仅 `exit`；活跃族非终态 `--exit--> exited`；idle 从未进入，
+ *   exit 非法（防从未进 plan 的会话落噪音 exited entry）；终态 `--enter--> planning`
+ *   （新一轮）；`revising` 保留独立态（E3 恢复文案分叉依赖，前提 P-7）。
+ * - `reviewing --submit--> reviewing`：审批重挂自环（E3 会话重启恢复 / D8「重新提交审批」
+ *   按钮——重提交不推进生命周期，落盘回 reviewing 重挂即等价于旧调用方特判放行形态）。
  *
  * 呈现映射（derivePhase）：用户视角四主态 + idle 缺省——四主态是呈现，不是存储
  * （用户口述模型 = 呈现层，reviewing/dispatching 两个挂起态是崩溃恢复的真实分叉点，
@@ -91,9 +94,9 @@ export type PlanTransitionResult =
  *
  * | state＼event | enter | submit | revise | dismiss | review_aborted | approve | exec_chosen | later | exit |
  * |--------------|-------|--------|--------|---------|----------------|---------|-------------|-------|------|
- * | idle         | planning | — | — | — | — | — | — | — | exited |
+ * | idle         | planning | — | — | — | — | — | — | — | — |
  * | planning     | — | reviewing | — | — | — | — | — | — | exited |
- * | reviewing    | — | — | revising | planning | planning | dispatching | — | — | exited |
+ * | reviewing    | — | reviewing | revising | planning | planning | dispatching | — | — | exited |
  * | revising     | — | reviewing | — | — | — | — | — | — | exited |
  * | approved     | — | — | — | — | — | dispatching | — | — | exited |
  * | dispatching  | — | — | — | — | approved | — | completed | approved | exited |
@@ -101,9 +104,10 @@ export type PlanTransitionResult =
  * | exited       | planning | — | — | — | — | — | — | — | — |
  */
 const TRANSITION_TABLE: Record<PlanLifecycleState, Partial<Record<PlanLifecycleEvent, PlanLifecycleState>>> = {
-  idle: { enter: 'planning', exit: 'exited' },
+  idle: { enter: 'planning' },
   planning: { submit: 'reviewing', exit: 'exited' },
   reviewing: {
+    submit: 'reviewing',
     revise: 'revising',
     dismiss: 'planning',
     review_aborted: 'planning',

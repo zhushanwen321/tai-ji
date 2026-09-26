@@ -17,8 +17,8 @@ const logger = getLogger("pi-plan");
 /**
  * 降级态等待原因（D2 resumeHint，取代旧 reviewStateSource 语义）：'resubmit' =
  * 会话重启（E3）后 agent 尚未重新提交审批。写入点 = index.ts E3 steer 重挂处；
- * 清除点三处（resetPlanState 终态清理组 / activatePlanMode 新轮次重置组 /
- * submit-review 转移落盘时（重挂起点））——不变量：resumeHint 只描述当前降级
+ * 清除 = clearRoundFields 单函数出口（D4 收敛，三处轮次边界调用：resetPlanState /
+ * activatePlanMode / submit-review 重挂起点）——不变量：resumeHint 只描述当前降级
  * 等待的原因，不跨轮残留（缺清除 = 跨 plan run 残留，C-U2 同型缺陷）。字面量与
  * shared PlanStateView.resumeHint 严格一致。
  */
@@ -52,10 +52,10 @@ export interface PlanState {
   /**
    * 上次 submit-review 的 selfReview（D9①④）：单字段双角色——E3 重挂回传源 + 防照抄
    * 比较基线（同值同写点无分歧路径）。写入点 = submit-review 转移落盘（写侧 4KB 截断）；
-   * 清除点 = resetPlanState / activatePlanMode 进入重置组。
+   * 清除 = clearRoundFields（D4 单函数出口）。
    */
   selfReview?: string;
-  /** 降级态等待原因（见 PlanResumeHint）；清除点三处（头注释） */
+  /** 降级态等待原因（见 PlanResumeHint）；清除 = clearRoundFields（D4 单函数出口） */
   resumeHint?: PlanResumeHint;
   /**
    * 上次 submit-review 时的 docs 快照指纹（planDocsFingerprint 产物）。缺失 = 无既往
@@ -99,30 +99,93 @@ export const PLAN_CONTEXT_CUSTOM_TYPE = "plan-context";
 export type PlanSessionMap = Map<string, PlanState>;
 
 /**
- * reset 世代计数器（D3 连带段 epoch 世代判别）——session 级单调递增，替代门闩标记
- * （门闩标记在「规划期退出无挂起 select 时 cancelled 分支不执行」的形态下会跨轮残留、
- * 把下一次外部解散误判为命令解散，已否决）。
+ * D9 宿主分流信号：taiji runtime 对托管 pi 恒注入 TAIJI_AGENT_EXT_LOG=1；
+ * 独立 pi 无此信号 → submit-review 走 E8 文本软门（不发 marker select——
+ * pi TUI 原生渲染 \x00 控制符 title + JSON options 成乱码对话）。
+ * 不用 TAIJI_RUNTIME_TOKEN：它在 SPAWN_ENV 出站 deny list 被强制剥除
+ * （C-proc-09），pi 子进程 env 里恒不可见，照抄即分流静默失效且诱导实施者
+ * 动 deny list 造成安全回归。每次调用时读（不可模块加载时缓存——测试与
+ * 运行中 env 都可能变化）。
  *
- * 三句纪律（D3）：① epoch 是进程内存态，**禁入 PlanState/entry**（reconstructPlanState
- * 白名单重建会把入 entry 的计数归零错位）；② map 缺失值按「未变」处理（`?? 0` 两侧一致
- * ——新 session 首挂捕 0、比较 0）；③ activatePlanMode 不递增——正确性不依赖「enter 时
- * 无挂起 select」的可达性（逐挂起点捕获 epoch 使每个新 select 拿到当时代际，对任何到达序
- * 都正确；enter 若递增反而误伤同轮旧 select 归口）。
+ * [双语义耦合登记，2026-09-20 R1] 本 env 名义语义是扩展日志开关
+ * （extension-logger 见之落盘 INFO，恒注入点 packages/pi-rpc/src/env.ts），本函数
+ * 是第二消费方（宿主分流，submit-review / complete / 引导门三处）——若日志开关
+ * 走向可配置（值不再是恒 '1'），三处分流同帧静默失效，届时必须拆专用宿主信号
+ * env 并纳入恒注入，不得沿用本名。
  *
- * 递增点 = resetPlanState 任何调用路径（含 /plan abort 的 handleAbort、tool executeAbort、
- * complete 终局）。生命周期随 abortControllers 注册表同款做 session_shutdown 内存清理
- * （无正确性依赖——注意 session_start 不清：清掉已递增的槽会让在途归口的世代比较失真）。
+ * export（F-W3-1）：index.ts E3 reviewing 恢复分支复用同一宿主信号做 GUI 分流
+ * （taiji GUI 宿主有 degraded 恢复按钮，不自动重挂审批；独立 pi 无按钮保留 steer）——
+ * 第四消费方，同帧失效约束随登记面扩展。
+ *
+ * 放本叶模块（D-B1-7 随 isTaijiGuiHost 收敛迁入，原 tool.ts）：宿主判定信号与
+ * per-session 注册表/挂起原语同域承载，不经 tool.js 大模块中转。
  */
-export type PlanResetEpochs = Map<string, number>;
-
-/** 归口点判别基线：缺失按 0（纪律②，`?? 0` 两侧一致） */
-export function currentResetEpoch(epochs: PlanResetEpochs, sessionId: string): number {
-  return epochs.get(sessionId) ?? 0;
+export function isTaijiHost(): boolean {
+  return process.env.TAIJI_AGENT_EXT_LOG === "1";
 }
 
-/** reset 即递增（纪律①的写侧唯一出口，resetPlanState 内部调用） */
-function bumpResetEpoch(epochs: PlanResetEpochs, sessionId: string): void {
-  epochs.set(sessionId, currentResetEpoch(epochs, sessionId) + 1);
+/**
+ * taiji GUI 宿主判定（D-B1-7，B5 过渡步——批次 4 askInteractively 原语再收交互分流）：
+ * 三处 `isTaijiHost() && ctx.mode === "rpc"` 复写（submit-review marker select /
+ * complete 执行方式 form / E3 恢复分流）收敛为本谓词单点。mode 收紧 rpc 的理由
+ * 同 isTaijiHost 双语义耦合登记：env 信号只证明 taiji runtime 在上游，宿主没有
+ * marker 路由的形态（TUI / json / print）不发 select。
+ */
+export function isTaijiGuiHost(ctx: ExtensionContext): boolean {
+  return isTaijiHost() && ctx.mode === "rpc";
+}
+
+/**
+ * 挂起 select 的解散来源直传原语（D-B1-2，取代旧世代计数推断）：判别所需信息
+ * 「是不是经 exitPlanMode 入口解散」产生于入口调用点，随挂起闭包直达等待处，
+ * 消费侧不再按世代计数推断。
+ *
+ * 纪律：① dissolvedBy 由 markDissolved **一次赋值**（exitPlanMode 入口打 'self'；
+ * 'external' 留给不经入口的外部解散显式打标，现无打标点——等待处按「非 'self'
+ * 即外部」分派）；② 闭包身份天然携带轮次记忆——每个挂起 select 持有独立来源变量，
+ * 跨轮迟到解散按各自闭包判别，无跨轮残留面；③ 禁入 PlanState/entry（进程内存态，
+ * 随 controllers 注册表同生命周期）。
+ */
+export interface PendingSelect {
+  controller: AbortController;
+  /** 解散来源：undefined = 尚未解散（或外部级联未打标——turn abort 级联只 abort 不打标） */
+  readonly dissolvedBy: "self" | "external" | undefined;
+  /** 一次赋值：解散来源置位（重复调用以末次为准，正常路径仅入口打标一次） */
+  markDissolved(source: "self" | "external"): void;
+}
+
+/**
+ * 挂起 select 的 per-session 注册表（E10；值 = PendingSelect 含解散来源槽位，
+ * 不新建注册表）。生命周期钉死：每次发挂起 select 前 fresh 一个（见 freshPendingSelect），
+ * select settled 即弃；session_start / session_shutdown / exitPlanMode 联动处清理。
+ */
+export type PlanAbortControllers = Map<string, PendingSelect>;
+
+/**
+ * 发挂起 select 前新建 PendingSelect 并登记。禁复用已 abort 的 controller——
+ * pi 实装对已 abort 的 signal 在 createDialogPromise 首行短路立即 resolve undefined，
+ * 复用会让退出后再入 plan 的 submit-review 瞬时静默取消。
+ * pi 实装锚点：dist/modes/rpc/rpc-mode.js:48（0.84.4）——createDialogPromise 首行
+ * `opts?.signal?.aborted` 即 `return Promise.resolve(defaultValue)`，select 的
+ * defaultValue = undefined（E10 生命周期设计依据）。
+ */
+export function freshPendingSelect(
+  controllers: PlanAbortControllers,
+  sessionId: string,
+): PendingSelect {
+  // dissolvedBy 走闭包变量（getter 透出）：markDissolved 即便被解构调用也指向同一存储
+  let dissolvedBy: "self" | "external" | undefined;
+  const pending: PendingSelect = {
+    controller: new AbortController(),
+    get dissolvedBy() {
+      return dissolvedBy;
+    },
+    markDissolved(source) {
+      dissolvedBy = source;
+    },
+  };
+  controllers.set(sessionId, pending);
+  return pending;
 }
 
 /**
@@ -161,30 +224,6 @@ export function capPlanRequirement(requirement: string): string {
  */
 export function planDocsFingerprint(docs: PlanDocMeta[]): string {
   return docs.map((d) => `${d.fileName}:${d.version}`).join("|");
-}
-
-/**
- * 挂起 select 的 per-session AbortController 注册表（E10）。
- * 生命周期钉死：每次发挂起 select 前 fresh 一个（见 freshAbortController），
- * select settled 即弃；session_start / session_shutdown / abort 联动处清理。
- */
-export type PlanAbortControllers = Map<string, AbortController>;
-
-/**
- * 发挂起 select 前新建 controller 并登记。禁复用已 abort 的 controller——
- * pi 实装对已 abort 的 signal 在 createDialogPromise 首行短路立即 resolve undefined，
- * 复用会让退出后再入 plan 的 submit-review 瞬时静默取消。
- * pi 实装锚点：dist/modes/rpc/rpc-mode.js:48（0.84.4）——createDialogPromise 首行
- * `opts?.signal?.aborted` 即 `return Promise.resolve(defaultValue)`，select 的
- * defaultValue = undefined（E10 生命周期设计依据）。
- */
-export function freshAbortController(
-  controllers: PlanAbortControllers,
-  sessionId: string,
-): AbortController {
-  const controller = new AbortController();
-  controllers.set(sessionId, controller);
-  return controller;
 }
 
 /**
@@ -227,6 +266,28 @@ export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
 }
 
 /**
+ * per-round 字段清理单函数（D4 clearRoundFields）：selfReview / resumeHint /
+ * lastSubmitReviewDocsFingerprint 三个「只描述当前 plan 轮次」的字段随轮次边界
+ * （退出 reset / 新轮进入 / submit-review 重挂起点）统一在此清除——三处清除点
+ * 此前各自内联 delete，字段集的「同生命周期」约束靠三处注释互指维持；收敛后
+ * 不变量单点表达：新增 per-round 字段只改本函数（grep `delete state.resumeHint`
+ * 旧触点 = 本函数单出口）。
+ *
+ * executeSubmitReview 调用点随后置位 selfReview / 指纹（重挂起点写新值）——
+ * delete→set 与原「仅 delete resumeHint」的属性终态一致，行为等价。
+ */
+export function clearRoundFields(state: PlanState): void {
+  // selfReview：E3 回传源 + 防照抄比较基线只在本轮内有效，跨轮残留会误触新鲜度门
+  delete state.selfReview;
+  // resumeHint 只描述当前降级等待的原因，不跨轮残留（缺清除 = 跨 plan run 残留，
+  // C-U2 同型缺陷：渲染上一轮「会话已重启」降级文案）
+  delete state.resumeHint;
+  // 指纹快照随轮次失效：新 plan 轮次从「无既往提交」重新计数，首次 submit-review
+  // 不触发无变化警告（docs 虽保留供回看，但不作为检测基线）
+  delete state.lastSubmitReviewDocsFingerprint;
+}
+
+/**
  * Reset plan state to idle, persist, and clean up session cache.
  *
  * 终态矩阵（D5/E10/D3 连带段）：isActive=false + state=terminal（默认 'exited'，complete
@@ -252,14 +313,10 @@ function removeEmptyPlanDir(planFilePath: string): void {
 export function resetPlanState(
   pi: ExtensionAPI,
   sessions: PlanSessionMap,
-  epochs: PlanResetEpochs,
   sessionId: string,
   ctx: ExtensionContext,
   terminal: PlanTerminalState = "exited",
 ): PlanState {
-  // epoch 先递增（D3 连带段）：abort()→reset 同步临界段的归口点必在 reset 后运行，
-  // 世代事实先行置位保证任何中途异常都不会漏递增（S15 同步临界段不变量的另一半）
-  bumpResetEpoch(epochs, sessionId);
   const state = getPlanState(sessions, sessionId, ctx);
   state.isActive = false;
   // 空目录清理必须在 planFilePath 清空之前（路径是唯一的目录推导来源）
@@ -272,13 +329,8 @@ export function resetPlanState(
   // 终态参数（D3 连带段）：默认 'exited'，complete 终局传 'completed'——防 reset 覆写
   // completed（终态两值仅留诊断/审计区分，共享全部终态规则）
   state.state = terminal;
-  // selfReview 随退出失效（E3 回传源 + 比较基线都只在本轮内有效，跨轮残留会误触新鲜度门）
-  delete state.selfReview;
-  // resumeHint 与降级等待同生命周期随退出失效（清除点三处之一）
-  delete state.resumeHint;
-  // 指纹快照随退出失效：approve/abort 后的新 plan 轮次从「无既往提交」重新计数，
-  // 首次 submit-review 不触发无变化警告（docs 虽保留供回看，但不作为检测基线）
-  delete state.lastSubmitReviewDocsFingerprint;
+  // per-round 字段随退出失效（D4 单函数出口，字段语义见 clearRoundFields）
+  clearRoundFields(state);
   persistPlanState(pi, state);
   sessions.delete(sessionId);
   return state;

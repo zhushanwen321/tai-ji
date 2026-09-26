@@ -9,16 +9,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   capPlanRequirement,
   DEFAULT_PLAN_STATE,
-  freshAbortController,
+  freshPendingSelect,
   getPlanState,
   MAX_PLAN_REQUIREMENT_LENGTH,
   persistPlanState,
   type PlanAbortControllers,
-  type PlanResetEpochs,
   type PlanSessionMap,
   type PlanState,
   reconstructPlanState,
   resetPlanState,
+  clearRoundFields,
 } from "../state.js";
 
 describe("PlanState", () => {
@@ -376,10 +376,54 @@ describe("State persistence", () => {
   });
 });
 
+describe("clearRoundFields（D4 per-round 字段清理单函数出口）", () => {
+  /** 构造带全部 per-round 字段残留的状态（上一轮 submit-review + E3 重挂后的形态）。 */
+  function stateWithRoundResidue(): PlanState {
+    return {
+      ...DEFAULT_PLAN_STATE,
+      isActive: true,
+      state: "reviewing",
+      selfReview: "上一轮的 selfReview",
+      resumeHint: "resubmit",
+      lastSubmitReviewDocsFingerprint: "design.md:2",
+      docs: [{ fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 2 }],
+    };
+  }
+
+  it("三字段（selfReview/resumeHint/指纹）一并清除——单出口锚：per-round 字段集只在本函数表达", () => {
+    const state = stateWithRoundResidue();
+    clearRoundFields(state);
+    expect(state.selfReview).toBeUndefined();
+    expect(state.resumeHint).toBeUndefined();
+    expect(state.lastSubmitReviewDocsFingerprint).toBeUndefined();
+  });
+
+  it("非本轮字段不动：isActive/state/docs 等跨轮字段保持原值", () => {
+    const state = stateWithRoundResidue();
+    clearRoundFields(state);
+    expect(state.isActive).toBe(true);
+    expect(state.state).toBe("reviewing");
+    expect(state.docs).toEqual([
+      { fileName: "design.md", absPath: "/p/design.md", sourceSkill: "tech-design", version: 2 },
+    ]);
+  });
+
+  it("幂等：无残留状态上重复调用不抛错、不引入新值", () => {
+    const state = stateWithRoundResidue();
+    clearRoundFields(state);
+    clearRoundFields(state);
+    expect(state.resumeHint).toBeUndefined();
+    // delete 移除键本身（与 persistPlanState 序列化时 undefined 值键自然消失同形态）：
+    // 清理后键集 = 跨轮字段集，per-round 三键不残留
+    expect(Object.keys(state).sort()).toEqual(
+      ["docs", "isActive", "planFilePath", "requirement", "skills", "state", "templateName"],
+    );
+  });
+});
+
 describe("resetPlanState 终态矩阵（D5/E10）", () => {
   function setupActiveSession() {
     const sessions: PlanSessionMap = new Map();
-    const epochs: PlanResetEpochs = new Map();
     const mockCtx = {
       sessionManager: { getEntries: () => [] },
     } as unknown as ExtensionContext;
@@ -396,18 +440,18 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
       lastSubmitReviewDocsFingerprint: "design.md:2",
     });
     const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
-    return { sessions, mockCtx, mockPi, epochs };
+    return { sessions, mockCtx, mockPi };
   }
 
   it("isActive=false + state=terminal(exited) + selfReview/resumeHint/指纹 cleared + skills cleared + docs KEPT", () => {
-    const { sessions, mockCtx, mockPi, epochs } = setupActiveSession();
+    const { sessions, mockCtx, mockPi } = setupActiveSession();
 
-    const state = resetPlanState(mockPi, sessions, epochs, "session-1", mockCtx);
+    const state = resetPlanState(mockPi, sessions, "session-1", mockCtx);
 
     expect(state.isActive).toBe(false);
     // 终态矩阵（D3 连带段）：默认 terminal='exited'
     expect(state.state).toBe("exited");
-    // selfReview/resumeHint 随退出失效（resumeHint 清除点三处之一，S15 断言）
+    // selfReview/resumeHint 随退出失效（clearRoundFields 单函数出口的 reset 调用点，S15 断言）
     expect(state.selfReview).toBeUndefined();
     expect(state.resumeHint).toBeUndefined();
     expect(state.skills).toEqual([]);
@@ -418,9 +462,9 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
   });
 
   it("reset entry persists the terminal matrix and the session cache is cleaned up", () => {
-    const { sessions, mockCtx, mockPi, epochs } = setupActiveSession();
+    const { sessions, mockCtx, mockPi } = setupActiveSession();
 
-    resetPlanState(mockPi, sessions, epochs, "session-1", mockCtx);
+    resetPlanState(mockPi, sessions, "session-1", mockCtx);
 
     expect(mockPi.appendEntry).toHaveBeenCalledWith("plan-state", {
       isActive: false,
@@ -439,8 +483,8 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
   });
 
   it("reset entry persisted → reopen reconstructs docs from it (产物 tab 跨重开留存)", () => {
-    const { sessions, mockCtx, mockPi, epochs } = setupActiveSession();
-    resetPlanState(mockPi, sessions, epochs, "session-1", mockCtx);
+    const { sessions, mockCtx, mockPi } = setupActiveSession();
+    resetPlanState(mockPi, sessions, "session-1", mockCtx);
 
     // 模拟重开：用 reset 落盘的 entry 数据走冷启动重建
     const persisted = (mockPi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
@@ -457,12 +501,12 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
   });
 
   it("fingerprint snapshot is cleared on reset (新 plan 轮次从无既往提交重新计数)", () => {
-    const { sessions, mockCtx, mockPi, epochs } = setupActiveSession();
+    const { sessions, mockCtx, mockPi } = setupActiveSession();
     const active = sessions.get("session-1");
     if (!active) throw new Error("setupActiveSession must seed session-1");
     active.lastSubmitReviewDocsFingerprint = "design.md:2";
 
-    const state = resetPlanState(mockPi, sessions, epochs, "session-1", mockCtx);
+    const state = resetPlanState(mockPi, sessions, "session-1", mockCtx);
 
     // 指纹随退出失效（同 reviewState 同款 delete）；docs 保留不影响——
     // 保留的 docs 不作为下一轮检测基线，reset 后首次 submit-review 不警告
@@ -470,26 +514,13 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
     expect(state.docs).toHaveLength(1);
   });
   it("terminal 参数（D3 连带段）：complete 终局传 'completed' 不被 reset 覆写为 'exited'", () => {
-    const { sessions, mockCtx, mockPi, epochs } = setupActiveSession();
+    const { sessions, mockCtx, mockPi } = setupActiveSession();
 
-    const state = resetPlanState(mockPi, sessions, epochs, "session-1", mockCtx, "completed");
+    const state = resetPlanState(mockPi, sessions, "session-1", mockCtx, "completed");
 
     expect(state.state).toBe("completed");
     const lastEntry = (mockPi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
     expect(lastEntry.state).toBe("completed");
-  });
-
-  it("reset 即递增 epoch（D3：任何调用路径单调递增——归口点世代判别的唯一写侧出口；缺失按 0）", () => {
-    const { sessions, mockCtx, mockPi, epochs } = setupActiveSession();
-    expect(epochs.get("session-1")).toBeUndefined(); // 缺失按「未变」（纪律②）
-
-    resetPlanState(mockPi, sessions, epochs, "session-1", mockCtx);
-    expect(epochs.get("session-1")).toBe(1);
-
-    // 第二次 reset（重建后）继续单调递增（只增不减，无「置位未消费」形态）
-    sessions.set("session-1", { ...DEFAULT_PLAN_STATE, isActive: true, state: "planning" });
-    resetPlanState(mockPi, sessions, epochs, "session-1", mockCtx);
-    expect(epochs.get("session-1")).toBe(2);
   });
 
   describe("空 slug 目录清理（P3-10）", () => {
@@ -515,12 +546,11 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
       const planFilePath = makePlanRoot(false);
       const slugDir = join(planFilePath, "..");
       const sessions: PlanSessionMap = new Map();
-      const epochs: PlanResetEpochs = new Map();
       const mockCtx = { sessionManager: { getEntries: () => [] } } as unknown as ExtensionContext;
       sessions.set("s1", { ...DEFAULT_PLAN_STATE, isActive: true, planFilePath, requirement: "r", templateName: "", skills: [], docs: [] });
       const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
 
-      resetPlanState(mockPi, sessions, epochs, "s1", mockCtx);
+      resetPlanState(mockPi, sessions, "s1", mockCtx);
 
       expect(existsSync(slugDir)).toBe(false);
     });
@@ -529,29 +559,44 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
       const planFilePath = makePlanRoot(true);
       const slugDir = join(planFilePath, "..");
       const sessions: PlanSessionMap = new Map();
-      const epochs: PlanResetEpochs = new Map();
       const mockCtx = { sessionManager: { getEntries: () => [] } } as unknown as ExtensionContext;
       sessions.set("s1", { ...DEFAULT_PLAN_STATE, isActive: true, planFilePath, requirement: "r", templateName: "", skills: [], docs: [] });
       const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
 
-      resetPlanState(mockPi, sessions, epochs, "s1", mockCtx);
+      resetPlanState(mockPi, sessions, "s1", mockCtx);
 
       expect(existsSync(slugDir)).toBe(true);
     });
   });
 });
 
-describe("freshAbortController（E10 生命周期）", () => {
-  it("registers the controller per session and creates a fresh one on each call", () => {
+describe("freshPendingSelect（E10 生命周期 + D-B1-2 dissolvedBy 直传原语）", () => {
+  it("registers the pending select per session and creates a fresh one on each call", () => {
     const controllers: PlanAbortControllers = new Map();
 
-    const first = freshAbortController(controllers, "s1");
+    const first = freshPendingSelect(controllers, "s1");
     expect(controllers.get("s1")).toBe(first);
 
     // 禁复用：第二次调用必须新建（复用已 abort 的 controller 会让 select 瞬时静默取消）
-    const second = freshAbortController(controllers, "s1");
+    const second = freshPendingSelect(controllers, "s1");
     expect(second).not.toBe(first);
     expect(controllers.get("s1")).toBe(second);
+  });
+
+  it("dissolvedBy 缺省 undefined（外部解散不打标——等待处按「非 'self' 即外部」分派）", () => {
+    const controllers: PlanAbortControllers = new Map();
+    const pending = freshPendingSelect(controllers, "s1");
+    expect(pending.dissolvedBy).toBeUndefined();
+  });
+
+  it("markDissolved('self') 一次置位且对同一闭包可读（来源随挂起闭包直达等待处）", () => {
+    const controllers: PlanAbortControllers = new Map();
+    const pending = freshPendingSelect(controllers, "s1");
+    pending.markDissolved("self");
+    expect(pending.dissolvedBy).toBe("self");
+    // 闭包身份天然携带轮次记忆：另一个挂起（新轮次）的来源变量独立，不受前轮打标污染
+    const next = freshPendingSelect(controllers, "s1");
+    expect(next.dissolvedBy).toBeUndefined();
   });
 });
 

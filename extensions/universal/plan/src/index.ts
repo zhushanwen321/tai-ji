@@ -9,14 +9,13 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { registerPlanCommand } from "./command.js";
 import { registerPlanEventHandlers } from "./compact.js";
-import { isTaijiHost } from "./tool.js";
 import {
   type PlanAbortControllers,
-  type PlanResetEpochs,
   type PlanSessionMap,
   PLAN_CONTEXT_CUSTOM_TYPE,
   PLAN_MODE_TOOLS,
   applyPlanEvent,
+  isTaijiGuiHost,
   persistPlanState,
   reconstructPlanState,
 } from "./state.js";
@@ -40,16 +39,14 @@ const PLAN_MODE_SUGGESTION_PROMPT =
 export default function planExtension(pi: ExtensionAPI) {
   // Per-session state cache — keyed by sessionId
   const sessions: PlanSessionMap = new Map();
-  // 挂起 select 的 per-session AbortController（E10：submit-review 审批 + complete
-  // 执行方式选择两处共用注册表；发挂起 select 前 fresh，settled/重建/关闭即弃）
+  // 挂起 select 的 per-session 注册表（E10：submit-review 审批 + complete 执行方式选择
+  // 两处共用；值 = PendingSelect 含解散来源槽位，D-B1-2；发挂起 select 前 fresh，
+  // settled/重建/关闭即弃）
   const abortControllers: PlanAbortControllers = new Map();
-  // reset 世代计数器（D3 连带段归口判别）：进程内存态禁入 entry（纪律①）；
-  // 递增点 = resetPlanState 任何调用路径；session_shutdown 内存清理（纪律见 state.ts）
-  const resetEpochs: PlanResetEpochs = new Map();
 
   // Register tool and command
-  registerPlanTool(pi, sessions, abortControllers, resetEpochs);
-  registerPlanCommand(pi, sessions, abortControllers, resetEpochs);
+  registerPlanTool(pi, sessions, abortControllers);
+  registerPlanCommand(pi, sessions, abortControllers);
 
   // Register compact/tree event handlers
   registerPlanEventHandlers(pi, sessions);
@@ -91,8 +88,8 @@ export default function planExtension(pi: ExtensionAPI) {
         // 用户点击（= 用户输入介入）才重提——agent 侧 submit-review 对 reviewing 降级
         // 态的自环重挂照常放行，恢复触发权归用户。独立 pi（TUI）没有 degraded 按钮，
         // 自动重挂是唯一恢复路径（F8 死路防护），steer 保留。
-        // 分流判定与 executeSubmitReview 的 E8 宿主分流同源（isTaijiHost + mode rpc）。
-        if (!(isTaijiHost() && ctx.mode === "rpc")) {
+        // 分流判定与 executeSubmitReview 的 E8 宿主分流同源（isTaijiGuiHost，D-B1-7）。
+        if (!isTaijiGuiHost(ctx)) {
           // D9④：E3 重挂是唯一「不重新思考」场景——steer 原样回传上轮 selfReview 全文，
           // 豁免只发生在「自审内容」（复用既有结论），不存在绕过「过门义务」的路径
           const carried =
@@ -114,8 +111,8 @@ export default function planExtension(pi: ExtensionAPI) {
         // E3 重挂即落 'resubmit' resumeHint + persist（此处原只发 steer 不落盘，renderer
         // 冷启动扫描的 View 恒无 hint、恒渲染通用文案；落盘后才能渲染「会话已重启，
         // 尚未重新提交」分支）。无条件覆盖既有 hint 为有意——「会话已重启」语义
-        // 优先成立（P3-9 登记）；清除点 = submit-review 重挂起点（清除点三处之一）。
-        // 宿主形态该 hint 即 degraded 分源文案的判定源（无 steer，按钮文案依赖它）。
+        // 优先成立（P3-9 登记）；清除 = submit-review 重挂起点（clearRoundFields 单函数
+        // 出口，D4）。宿主形态该 hint 即 degraded 分源文案的判定源（无 steer，按钮文案依赖它）。
         state.resumeHint = "resubmit";
         persistPlanState(pi, state);
       } else if (state.state === "revising") {
@@ -185,8 +182,5 @@ export default function planExtension(pi: ExtensionAPI) {
     const sessionId = ctx.sessionManager.getSessionId();
     sessions.delete(sessionId);
     abortControllers.delete(sessionId);
-    // epoch 表随 abortControllers 同款内存清理（D3——无正确性依赖；注意 session_start
-    // 不清该表：清掉已递增的槽会让在途归口的世代比较失真）
-    resetEpochs.delete(sessionId);
   });
 }

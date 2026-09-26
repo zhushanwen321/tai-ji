@@ -65,7 +65,6 @@ function activeStateWithDocs(): PlanState {
 function setup(state?: PlanState) {
   const sessions = new Map<string, PlanState>();
   const controllers = new Map<string, AbortController>();
-  const epochs = new Map<string, number>();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<unknown>;
   const pi = {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
@@ -74,7 +73,7 @@ function setup(state?: PlanState) {
     sendMessage: vi.fn(),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
-  registerPlanTool(pi, sessions, controllers, epochs);
+  registerPlanTool(pi, sessions, controllers);
 
   const ctx = {
     sessionId: "test-session",
@@ -91,7 +90,7 @@ function setup(state?: PlanState) {
 
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
     executeFn!("tc0", params, signal, undefined, ctx);
-  return { pi, sessions, ctx, controllers, epochs, exec };
+  return { pi, sessions, ctx, controllers, exec };
 }
 
 /** 构造 docs 非空的激活态并放入 sessions（多数用例的前置） */
@@ -236,7 +235,7 @@ describe("submit-review 宿主分流（TAIJI_AGENT_EXT_LOG）", () => {
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(
       async (_title: string, _options: string[], opts: { signal?: AbortSignal }) => {
         hungSignal = opts.signal;
-        expect(controllers.get("test-session")?.signal).toBe(opts.signal);
+        expect(controllers.get("test-session")?.controller.signal).toBe(opts.signal);
         return undefined;
       },
     );
@@ -293,8 +292,9 @@ describe("E3 降级态用户输入重提（放行语义，F-W3-1 另一半）", 
     // select 应答被正常消费（链路完整走通到 decision 消费段）
     expect(res.details).toMatchObject({ action: "review-dismissed" });
     // 重挂落盘（倒数第二条；最后一条是 dismiss 应答的转移落盘）：reviewing 自环
-    //（状态值不变）+ resumeHint 清除（降级等待解除，清除点三处之三；persistPlanState
-    // 显式携带键，undefined 经 JSON 序列化自然消失——按值语义断言）
+    //（状态值不变）+ resumeHint 清除（降级等待解除，clearRoundFields 单函数出口的
+    // 重挂起点调用点；persistPlanState 显式携带键，undefined 经 JSON 序列化自然消失——
+    // 按值语义断言）
     const entries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1] as Record<string, unknown>);
     expect(entries.at(-2)).toMatchObject({ state: "reviewing" });
     expect(entries.at(-2)?.resumeHint).toBeUndefined();
@@ -326,7 +326,7 @@ describe("turn abort 级联（execute signal → 挂起 select 解散，MF-1-8�
     turn.abort();
     const res = await pending;
 
-    // 归口① epoch 未变（turn abort 无 reset 介入）→ 外部解散：reviewing --review_aborted--> planning
+    // 归口① 非入口解散（turn abort 级联不打标，dissolvedBy 缺省）→ 外部解散：reviewing --review_aborted--> planning
     expect(res.details).toEqual({ action: "review-error", reason: "review-interrupted" });
     // A9 语义：中断 ≠ 批准，result 文本显式禁止实施
     expect(res.content[0].text).toContain("NOT an approval");
@@ -551,7 +551,7 @@ describe("decision 消费（taiji 形态）", () => {
 
     const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
 
-    // epoch 未变（本进程无 reset 介入）→ 外部解散，review_aborted → planning 已落盘
+    // 非入口解散（无 markDissolved 打标）→ 外部解散，review_aborted → planning 已落盘
     expect(res.details).toEqual({ action: "review-error", reason: "review-interrupted" });
     // A9 收紧语义：中断 ≠ 批准——禁止实施、等用户指示（不再引导自动重挂）
     expect(res.content[0].text).toContain("interrupted");
@@ -564,7 +564,7 @@ describe("decision 消费（taiji 形态）", () => {
   });
 });
 
-describe("submit-review 转移落盘（D2 清除点三处之三）", () => {
+describe("submit-review 转移落盘（D4 clearRoundFields 重挂起点调用点）", () => {
   it("重挂起点清 resumeHint（不变量：resumeHint 只描述当前降级等待的原因，不跨轮残留）", async () => {
     // 上一轮 E3 重挂残留 resumeHint='resubmit'；本用例重提交（重挂起新 pending）
     const { exec, pi } = setup({ ...activeStateWithDocs(), state: "reviewing", resumeHint: "resubmit" });

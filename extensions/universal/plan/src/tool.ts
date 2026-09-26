@@ -26,12 +26,13 @@ import type { ExecSkill } from "./exec-skills.js";
 import { t } from "./i18n.js";
 import { formatReviewComments } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
-import type { PlanAbortControllers, PlanResetEpochs, PlanSessionMap, PlanState } from "./state.js";
+import type { PendingSelect, PlanAbortControllers, PlanSessionMap, PlanState, PlanTerminalState } from "./state.js";
 import {
   applyPlanEvent,
-  currentResetEpoch,
+  clearRoundFields,
+  isTaijiGuiHost,
   PLAN_CONTEXT_CUSTOM_TYPE,
-  freshAbortController,
+  freshPendingSelect,
   getPlanState,
   planDocsFingerprint,
   persistPlanState,
@@ -93,7 +94,7 @@ interface CompleteCancelledDetails {
   action: "complete-cancelled";
   /** 原始构造点原因（choice 空/cancel/timeout 折叠 'cancelled'；channel-error / non-json 等透传） */
   reason: string;
-  /** 解散源（epoch 世代判别产物，D3 连带段）：'reset' = 命令解散（reset 已介入，归口 no-op）；'external' = 外部解散（review_aborted 已落盘） */
+  /** 解散源（dissolvedBy 直传判别产物，D-B1-2）：'reset' = 命令解散（exitPlanMode 已介入，归口 no-op）；'external' = 外部解散（review_aborted 已落盘） */
   source: "reset" | "external";
 }
 
@@ -174,35 +175,17 @@ function restoreFullToolSet(pi: ExtensionAPI): void {
   pi.setActiveTools(allToolNames);
 }
 
-/** Relative path from project dir */
-function relativePath(fullPath: string, projectDir: string): string {
-  if (fullPath.startsWith(projectDir)) {
-    return fullPath.slice(projectDir.length + 1);
-  }
-  return fullPath;
-}
-
 /**
- * D9 宿主分流信号：taiji runtime 对托管 pi 恒注入 TAIJI_AGENT_EXT_LOG=1；
- * 独立 pi 无此信号 → submit-review 走 E8 文本软门（不发 marker select——
- * pi TUI 原生渲染 \x00 控制符 title + JSON options 成乱码对话）。
- * 不用 TAIJI_RUNTIME_TOKEN：它在 SPAWN_ENV 出站 deny list 被强制剥除
- * （C-proc-09），pi 子进程 env 里恒不可见，照抄即分流静默失效且诱导实施者
- * 动 deny list 造成安全回归。每次调用时读（不可模块加载时缓存——测试与
- * 运行中 env 都可能变化）。
- *
- * [双语义耦合登记，2026-09-20 R1] 本 env 名义语义是扩展日志开关
- * （extension-logger 见之落盘 INFO，恒注入点 packages/pi-rpc/src/env.ts），本函数
- * 是第二消费方（宿主分流，submit-review / complete / 引导门三处）——若日志开关
- * 走向可配置（值不再是恒 '1'），三处分流同帧静默失效，届时必须拆专用宿主信号
- * env 并纳入恒注入，不得沿用本名。
- *
- * export（F-W3-1）：index.ts E3 reviewing 恢复分支复用同一宿主信号做 GUI 分流
- * （taiji GUI 宿主有 degraded 恢复按钮，不自动重挂审批；独立 pi 无按钮保留 steer）——
- * 第四消费方，同帧失效约束随登记面扩展。
+ * Relative path from project dir。
+ * A2 边界修复：裸 `startsWith` 会把兄弟前缀目录（/a/proj-2 ⊂ /a/proj）误判为项目内
+ * 路径并错切显示路径——仅「projectDir 后紧随路径分隔符」才认定内部路径，其余（含
+ * 全等、前缀不含分隔符边界）原样返回。
  */
-export function isTaijiHost(): boolean {
-  return process.env.TAIJI_AGENT_EXT_LOG === "1";
+function relativePath(fullPath: string, projectDir: string): string {
+  if (!fullPath.startsWith(projectDir)) return fullPath;
+  if (fullPath.length === projectDir.length) return fullPath;
+  if (fullPath[projectDir.length] !== path.sep) return fullPath;
+  return fullPath.slice(projectDir.length + path.sep.length);
 }
 
 /**
@@ -455,28 +438,106 @@ function executeSelectTemplate(
   };
 }
 
+// ── exit 链单入口（D-B1-1）────────────────────────────────────────
+
+/** exit 触发方：'command' = /plan abort 命令路径；'tool' = plan 工具 abort action 路径 */
+export type ExitReason = "command" | "tool";
+
+/** exitPlanMode 的结果（§3.1 终态）：落盘转移结果 + 面向用户的反馈文案 */
+export interface ExitResult {
+  /** 'exit' 转移是否 ok（false = 非活跃格幂等退出——状态值未写；坏格 isActive 清洗例外除外） */
+  moved: boolean;
+  /** 面向用户的反馈文案：成功 = 退出确认（tool 路作 result 文本、command 路作 notify 内容）；ok:false = warn 纠偏文案 */
+  message: string;
+  /** notify 级别：成功 info；ok:false warn（两通道统一 warn 纠偏，D-B1-1 行为变更声明） */
+  level: "info" | "warning";
+}
+
+/** ok:false 分派文案（按格分家，A9 错误即纠偏指令）：idle 常态格 vs 终态格 */
+const EXIT_IDLE_MESSAGE = "No active plan mode.";
+const EXIT_INACTIVE_MESSAGE =
+  "Plan mode is not active (it already completed or exited) — nothing to abort. " +
+  "Do not implement any changes; wait for further user instructions.";
+
+/**
+ * exit 链唯一入口（D-B1-1）：/plan abort（handleAbort）与 plan 工具 abort action
+ * （executeAbort）双路收敛于此，动作清单由入口统一编排（顺序是结构的一部分）：
+ * ① 解散全部挂起 select（markDissolved('self') 一次打标 + controller.abort()——E10
+ *   因果链：abort 触发的 select 解析是微任务，等待处归口必在本函数同步段之后运行，
+ *   打标先行保证归口读到 'self'）；
+ * ② 转移 + 落盘：单守卫 = transition('exit') 合法性（非活跃格全谱：终态格 + idle 删边
+ *   后均 ok:false）——ok:false 跳过状态值写入（completed 终态记录不被 exited 覆写）；
+ *   坏数据格例外（isActive=true 的终态/idle 残留）：仍落一条清洗 entry——isActive=false
+ *   投影复位是用户级恢复通道（免覆写与投影清洗正交可分），state 值按当前态分派
+ *   （终态残留取当前终态值不变、idle 残留落 'exited'，resetPlanState 既有 terminal
+ *   参数直接承载）；
+ * ③ widget 更新 ④ 工具集恢复（单份实现；ok:false 时同样执行——幂等恢复，已恢复则 no-op）
+ * ⑤ 反馈文案。
+ * 守卫极性统一「ok:false → warn + 幂等退出」：退出是用户显式意图，非活跃态下退出
+ * 即目标态；①③④⑤照常（解散残余挂起正是消灭「卡在等待应答」形态的动作）。
+ * 注：ctx 单对象载体（PlanCtx）批次 4 落地，本批按既有注册表直传，动作清单与语义不变。
+ */
+export function exitPlanMode(
+  pi: ExtensionAPI,
+  sessions: PlanSessionMap,
+  controllers: PlanAbortControllers,
+  sessionId: string,
+  ctx: ExtensionContext,
+  state: PlanState,
+  reason: ExitReason,
+): ExitResult {
+  // ① 解散挂起（含 markDissolved）：来源随闭包直达等待处（D-B1-2 直传，旧世代计数机制退役）
+  const pending = controllers.get(sessionId);
+  pending?.markDissolved("self");
+  pending?.controller.abort();
+  controllers.delete(sessionId);
+
+  // ② 转移 + 落盘（ok:false 跳过状态值写入；坏格 isActive=true 清洗例外）
+  const moved = applyPlanEvent(state, "exit");
+  let updatedState = state;
+  if (moved.ok) {
+    updatedState = resetPlanState(pi, sessions, sessionId, ctx, "exited");
+  } else if (state.isActive) {
+    // 坏数据格清洗例外：终态残留（completed/exited）取当前终态值不变；idle 残留落
+    // 'exited'（abort 是用户显式退出意图，exited 是本次动作的真实记录）——活跃态
+    // 在此不可达（exit 边合法不会 ok:false），三元兜底仅满足类型收窄
+    const current = state.state;
+    const terminal: PlanTerminalState = current === "completed" || current === "exited" ? current : "exited";
+    updatedState = resetPlanState(pi, sessions, sessionId, ctx, terminal);
+  }
+
+  // ③ widget 更新 ④ 工具集恢复（幂等：已恢复则 no-op）
+  updatePlanWidget(ctx, updatedState);
+  restoreFullToolSet(pi);
+
+  // ⑤ 反馈
+  if (!moved.ok) {
+    return { moved: false, message: state.state === "idle" ? EXIT_IDLE_MESSAGE : EXIT_INACTIVE_MESSAGE, level: "warning" };
+  }
+  return {
+    moved: true,
+    message: reason === "tool" ? "Plan mode aborted. Full tool access restored." : "Plan mode aborted.",
+    level: "info",
+  };
+}
+
 function executeAbort(
   pi: ExtensionAPI,
   sessions: PlanSessionMap,
-  epochs: PlanResetEpochs,
+  controllers: PlanAbortControllers,
   sessionId: string,
   ctx: ExtensionContext,
   state: PlanState,
 ): ActionResult {
-  // 状态写走 transition()（D1 'exit' 边：任何非终态 → exited）。终态上 ok:false →
-  // 降级 no-op 不落盘、不执行副作用（重复 abort / 终局后 abort 不得覆写 completed 终态）
-  const moved = applyPlanEvent(state, "exit");
-  if (!moved.ok) {
-    return reviewErrorResult(
-      "inactive",
-      "Plan mode is not active (it already completed or exited) — nothing to abort. Do not implement any changes; wait for further user instructions.",
-    );
+  // 单入口接管（D-B1-1）：动作清单（解散/转移落盘/widget/工具集恢复）全在 exitPlanMode
+  // 内；本函数只负责把 ExitResult 投影为 tool result 形态（纠偏文案复用 reason='inactive'
+  // 出口——错误即纠偏指令，A9）
+  const result = exitPlanMode(pi, sessions, controllers, sessionId, ctx, state, "tool");
+  if (!result.moved) {
+    return reviewErrorResult("inactive", result.message);
   }
-  const updatedState = resetPlanState(pi, sessions, epochs, sessionId, ctx, "exited");
-  updatePlanWidget(ctx, updatedState);
-  restoreFullToolSet(pi);
   return {
-    content: [{ type: "text" as const, text: "Plan mode aborted. Full tool access restored." }],
+    content: [{ type: "text" as const, text: result.message }],
     details: { action: "abort" },
   };
 }
@@ -568,14 +629,13 @@ function reviewErrorResult(reason: ReviewErrorDetails["reason"], recovery: strin
  *   PLAN_REVIEW_MARKER select；其余形态（独立 pi / env 泄漏的非 rpc）返回 E8 文本软门。
  * - select 挂 signal（E10），resolve 后：echo 判定先于 parse → canonical 值域解析
  *   （unknown-decision / malformed 双分源）→ 按 decision 消费（approve/revise/dismiss）；
- *   choice===undefined 走归口①（D3 连带段：epoch 世代判别）。
+ *   choice===undefined 走归口①（D-B1-2：dissolvedBy 直传判别）。
  */
 async function executeSubmitReview(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: PlanState,
   sessions: PlanSessionMap,
-  epochs: PlanResetEpochs,
   sessionId: string,
   projectDir: string,
   controllers: PlanAbortControllers,
@@ -631,11 +691,11 @@ async function executeSubmitReview(
     state.lastSubmitReviewDocsFingerprint === fingerprint;
 
   // 状态写走 transition()（D1 'submit' 边：planning|revising → reviewing）。reviewing 重挂
-  //（E3 恢复 / D8「重新提交审批」按钮）是 19 边表外的自环——ok:false 且现值即 reviewing 时
-  // 降级为「不改状态值、照常落盘重挂」（D9④ 该路径必须可用；resumeHint 清除与快照更新同点）；
-  // 其余 ok:false = FSM 合法性兜底，不落盘直接纠偏
+  //（E3 恢复 / D8「重新提交审批」按钮）走 reviewing --submit--> reviewing 自环（D-B1-8
+  // 补边——自环前后落盘产物等价：state 值不变、照常落盘重挂；resumeHint 清除与快照更新
+  // 同点）。其余 ok:false = FSM 合法性兜底，不落盘直接纠偏
   const moved = applyPlanEvent(state, "submit");
-  if (!moved.ok && state.state !== "reviewing") {
+  if (!moved.ok) {
     return reviewErrorResult(
       "out-of-order",
       `The plan is in state '${state.state}' and cannot be submitted for review (it is past the review stage). ` +
@@ -647,18 +707,19 @@ async function executeSubmitReview(
 
   // 挂起 select 前落盘（单一记录点）：state（reviewing）+ selfReview（E3 回传源 + 防照抄
   // 比较基线——单字段双角色，同值同写点无分歧路径）+ 指纹快照（text/gui 两检测分支共用）+
-  // resumeHint 清除（清除点三处之三——不变量：resumeHint 只描述当前降级等待的原因，
-  // 此处即将挂起真审批，残留 'resubmit' 会渲染上一轮「会话已重启」文案，C-U2 同型残留）
-  delete state.resumeHint;
+  // per-round 字段清除（D4 单函数出口——不变量：resumeHint 只描述当前降级等待的原因，
+  // 此处即将挂起真审批，残留 'resubmit' 会渲染上一轮「会话已重启」文案，C-U2 同型残留）；
+  // selfReview / 指纹紧随置位本轮新值（delete→set 属性终态与原仅清 resumeHint 等价）
+  clearRoundFields(state);
   state.selfReview = boundedSelfReview;
   state.lastSubmitReviewDocsFingerprint = fingerprint;
   persistPlanState(pi, state);
 
-  // E8 宿主分流（与下方 resolveCompleteChoice 的 taiji 判定对齐 = isTaijiHost() &&
-  // ctx.mode === 'rpc'）：env 信号只证明 taiji runtime 在上游，mode 非 rpc（env 泄漏
-  // 到独立 pi TUI / json / print）时宿主没有 marker 路由，pi TUI 会把 \x00 title +
-  // JSON options 渲染成乱码对话——不发 select，审批退化为自然语言软门
-  if (!(isTaijiHost() && ctx.mode === "rpc")) {
+  // E8 宿主分流（与下方 resolveCompleteChoice 的 taiji 判定对齐 = isTaijiGuiHost）：
+  // env 信号只证明 taiji runtime 在上游，mode 非 rpc（env 泄漏到独立 pi TUI / json /
+  // print）时宿主没有 marker 路由，pi TUI 会把 \x00 title + JSON options 渲染成乱码
+  // 对话——不发 select，审批退化为自然语言软门
+  if (!isTaijiGuiHost(ctx)) {
     return {
       content: [{
         type: "text" as const,
@@ -674,35 +735,33 @@ async function executeSubmitReview(
     };
   }
 
-  // E10 生命周期钉死：每次发挂起 select 新建 controller（禁复用已 abort 的——
+  // E10 生命周期钉死：每次发挂起 select 新建 PendingSelect（禁复用已 abort 的——
   // pi 对已 abort signal 短路立即 resolve undefined）
-  const controller = freshAbortController(controllers, sessionId);
-  cascadeTurnAbort(controller, signal);
-  // 归口①判别基线：逐挂起点捕获 epoch（D3 世代判别——每个新 select 拿到当时代际）
-  const hangEpoch = currentResetEpoch(epochs, sessionId);
+  const pending = freshPendingSelect(controllers, sessionId);
+  cascadeTurnAbort(pending.controller, signal);
   // selfReview 随 payload 投影（D9③：截断点 = payload 构造单点，透传层不截）
   const payload = JSON.stringify({ docs: state.docs, selfReview: boundedSelfReview } satisfies PlanReviewRequest);
-  const choice = await ctx.ui.select(PLAN_REVIEW_MARKER, [payload], { signal: controller.signal });
-  // select 已 settled，controller 即弃（注册表不留已 settled 的 controller）
+  const choice = await ctx.ui.select(PLAN_REVIEW_MARKER, [payload], { signal: pending.controller.signal });
+  // select 已 settled，注册表条目即弃（不留已 settled 的挂起）
   controllers.delete(sessionId);
 
   if (choice === undefined) {
-    // 归口①（审批 select 无选择解散，D3 连带段两归口点之一）：读-转移-落盘同一同步
-    // 临界段——getPlanState 现值读取（禁闭包快照跨 await 复用）、读-转移-落盘之间无 await
-    // 让出；getPlanState 重建回填不构成判别依赖（epoch 判别为主、transition 合法性
-    // （终态上 ok:false 不落盘）兜底，双保险不同源）
-    const current = getPlanState(sessions, sessionId, ctx);
-    if (currentResetEpoch(epochs, sessionId) !== hangEpoch) {
-      // 命令解散（/plan abort 的 handleAbort / tool executeAbort 的 reset 已介入，终态已
-      // 落盘）→ 归口 no-op，不落盘。文案按判别分源（A9 教训：文案是行为触发面）
+    // 归口①（审批 select 无选择解散，两归口点之一）：解散来源直传判别（D-B1-2）——
+    // exitPlanMode 入口解散时 markDissolved('self') 已随闭包打标（同步先于 abort、
+    // 归口在微任务侧运行时必已置位）→ 命令解散，reset 终态已由入口落盘 → 归口 no-op
+    // 不落盘；非 'self'（undefined——turn abort 级联 / TUI 手动取消不经入口不打标）→
+    // 外部解散。读-转移-落盘同一同步临界段（getPlanState 现值读取，禁闭包快照跨 await
+    // 复用）；状态机守卫（transition 合法性，终态上 ok:false 不落盘）保留为结构兜底
+    if (pending.dissolvedBy === "self") {
+      // 文案按判别分源（A9 教训：文案是行为触发面）
       return reviewErrorResult(
         "cancelled",
         "Plan mode has been exited and the full tool set is restored. This is NOT an approval. Do not implement any changes. Briefly tell the user you have stopped, then wait for further user instructions.",
       );
     }
-    // 外部解散（turn abort 级联 / TUI 手动取消）：reviewing --review_aborted--> planning
-    //（D3 连带段）。取消 ≠ 批准（A9 收紧）：禁止实施、等用户指示（重挂由用户触发——
-    // D8 按钮 / 提示词纪律，不再引导 agent 自动重挂）
+    // 外部解散：reviewing --review_aborted--> planning。取消 ≠ 批准（A9 收紧）：禁止实施、
+    // 等用户指示（重挂由用户触发——D8 按钮 / 提示词纪律，不再引导 agent 自动重挂）
+    const current = getPlanState(sessions, sessionId, ctx);
     const aborted = applyPlanEvent(current, "review_aborted");
     if (aborted.ok) persistPlanState(pi, current);
     return reviewErrorResult(
@@ -766,7 +825,7 @@ async function executeSubmitReview(
     case "approve":
       // approve → 走 complete 流程（执行方式 select 同样挂 signal）；approve 边
       //（reviewing --approve--> dispatching，D5）由 executeComplete 入口的 transition 承载
-      return await executeComplete(pi, ctx, {}, state, sessions, epochs, sessionId, projectDir, controllers, signal);
+      return await executeComplete(pi, ctx, {}, state, sessions, sessionId, projectDir, controllers, signal);
 
     case "dismiss": {
       // D3 搁置（协议级 dismiss 决策，取代「忽略 = 杀 turn」）：reviewing --dismiss--> planning
@@ -889,8 +948,8 @@ type CompleteChoiceOutcome =
       reason: string;
       /** 通道失败补充说明（构造点⑤携带，归口文案拼接） */
       message?: string;
-      /** 挂起点 epoch（逐挂起点捕获，归口② epoch 判别基线） */
-      hangEpoch: number;
+      /** 解散来源判别基线（D-B1-2 直传）：挂起的 PendingSelect，归口按 dissolvedBy 分派 */
+      pending: PendingSelect;
     };
 
 /**
@@ -910,7 +969,6 @@ type CompleteChoiceOutcome =
 async function resolveCompleteChoice(
   ctx: ExtensionContext,
   controllers: PlanAbortControllers,
-  epochs: PlanResetEpochs,
   sessionId: string,
   signal: AbortSignal | undefined,
 ): Promise<CompleteChoiceOutcome> {
@@ -931,13 +989,11 @@ async function resolveCompleteChoice(
 
   // E10：执行方式 select 与 submit-review 审批 select 同为挂起点，同样挂 signal——
   // approve 后的挂起窗口内用户点 PlanModeBar 退出（确认 Popover 后）必须可达（abort → resolve undefined → cancelled）
-  const controller = freshAbortController(controllers, sessionId);
-  cascadeTurnAbort(controller, signal);
-  // 归口②判别基线：逐挂起点捕获 epoch（D3——enter 不递增，每个新 select 拿到当时代际）
-  const hangEpoch = currentResetEpoch(epochs, sessionId);
+  const pending = freshPendingSelect(controllers, sessionId);
+  cascadeTurnAbort(pending.controller, signal);
 
   let chosenLabel: string | undefined;
-  if (isTaijiHost() && ctx.mode === "rpc") {
+  if (isTaijiGuiHost(ctx)) {
     const questionHeader = t("exec.header");
     const question: ChoiceQuestion = {
       type: "choice",
@@ -954,32 +1010,32 @@ async function resolveCompleteChoice(
     const form = await uiFormInteract(
       { mode: ctx.mode, hasUI: ctx.hasUI, ui: { select: ctx.ui.select.bind(ctx.ui) } },
       [question],
-      { signal: controller.signal },
+      { signal: pending.controller.signal },
     );
     controllers.delete(sessionId);
     if (!form.ok) {
       // 构造点③（cancel）与④（timeout）：库层以 signal.aborted 判 cancelled，GUI 用户取消
       // resolve undefined 与超时不可区分——两构造点分开声明、同折 via 'dissolved' reason 'cancelled'
       if (form.reason === "cancelled") {
-        return { kind: "cancelled", via: "dissolved", reason: "cancelled", hangEpoch };
+        return { kind: "cancelled", via: "dissolved", reason: "cancelled", pending };
       }
       if (form.reason === "timeout") {
-        return { kind: "cancelled", via: "dissolved", reason: "cancelled", hangEpoch };
+        return { kind: "cancelled", via: "dissolved", reason: "cancelled", pending };
       }
       // 构造点⑤（channel-error / non-json 等非 ok 其余 reason）：同样 via 'dissolved'
       //（交互通道故障折叠，不炸 turn 也不默认执行）
-      return { kind: "cancelled", via: "dissolved", reason: form.reason, message: form.message, hangEpoch };
+      return { kind: "cancelled", via: "dissolved", reason: form.reason, message: form.message, pending };
     }
     chosenLabel = form.answers[questionHeader];
   } else {
     const labels = execOptions.map((opt) => opt.label);
-    chosenLabel = await ctx.ui.select(t("exec.question"), labels, { signal: controller.signal });
+    chosenLabel = await ctx.ui.select(t("exec.question"), labels, { signal: pending.controller.signal });
     controllers.delete(sessionId);
   }
 
   // 构造点②（choice 空）：无选择解散 → via 'dissolved'
   if (!chosenLabel) {
-    return { kind: "cancelled", via: "dissolved", reason: "cancelled", hangEpoch };
+    return { kind: "cancelled", via: "dissolved", reason: "cancelled", pending };
   }
   const option = execOptions.find((opt) => opt.label === chosenLabel);
   if (!option) {
@@ -1027,7 +1083,6 @@ async function executeComplete(
   params: Record<string, unknown>,
   state: PlanState,
   sessions: PlanSessionMap,
-  epochs: PlanResetEpochs,
   sessionId: string,
   projectDir: string,
   controllers: PlanAbortControllers,
@@ -1055,9 +1110,9 @@ async function executeComplete(
   }
   persistPlanState(pi, state);
 
-  const choice = await resolveCompleteChoice(ctx, controllers, epochs, sessionId, signal);
+  const choice = await resolveCompleteChoice(ctx, controllers, sessionId, signal);
   if (choice.kind === "cancelled") {
-    // 归口②（D3 连带段两归口点之二）：via 判别**先于** epoch 判别（later 是显式选择，
+    // 归口②（两归口点之二）：via 判别**先于**解散源判别（later 是显式选择，
     // 不涉解散源判别）。读-转移-落盘同一同步临界段（禁闭包快照跨 await 复用）
     const current = getPlanState(sessions, sessionId, ctx);
     if (choice.via === "later") {
@@ -1075,8 +1130,9 @@ async function executeComplete(
       };
     }
     const detail = choice.message ? ` (${choice.message})` : "";
-    if (currentResetEpoch(epochs, sessionId) !== choice.hangEpoch) {
-      // 命令解散（/plan abort / tool abort 的 reset 已介入，终态已落盘）→ 归口 no-op，不落盘
+    if (choice.pending.dissolvedBy === "self") {
+      // 命令解散（exitPlanMode 入口打标，reset 终态已由入口落盘）→ 归口 no-op，不落盘
+      //（D-B1-2：dissolvedBy 直传判别取代旧世代计数推断）
       return {
         content: [{
           type: "text" as const,
@@ -1121,9 +1177,8 @@ async function executeComplete(
   // Execute completion handler (compact setup + steer/goalInit delivery)
   const goalOutcome = handlePlanComplete(pi, ctx, state, isolation, chosenMode, choice.skillEntryPath);
 
-  // 终局 reset（D3 连带段）：terminal 传 'completed'——防 reset 覆写 completed 终态；
-  // resetPlanState 任何调用路径即递增 reset epoch（含 complete 终局）
-  const updatedState = resetPlanState(pi, sessions, epochs, sessionId, ctx, "completed");
+  // 终局 reset（D3 连带段）：terminal 传 'completed'——防 reset 覆写 completed 终态
+  const updatedState = resetPlanState(pi, sessions, sessionId, ctx, "completed");
   updatePlanWidget(ctx, updatedState);
 
   const displayPath = relativePath(planFilePath, projectDir);
@@ -1146,11 +1201,14 @@ export function registerPlanTool(
   pi: ExtensionAPI,
   sessions: PlanSessionMap,
   controllers: PlanAbortControllers,
-  epochs: PlanResetEpochs,
 ): void {
   pi.registerTool({
     name: "plan",
     label: "Plan Mode",
+    // 串行声明（D-B1-4）：全部 action 就地突变共享 PlanState，声明串行消除并行交错类
+    //（A1 死锁机理的调度半边）。pi 0.84.4 声明粒度是工具级——同批任一 sequential 工具
+    // 使整批工具顺序执行；单行回退通道 = 移除本声明即回默认并行。
+    executionMode: "sequential",
     description:
       "Manages plan mode lifecycle (enter, template selection, document registration, review, state transitions). " +
       "NOT for writing document content — write documents via the bash tool (e.g. cat heredoc). " +
@@ -1241,13 +1299,13 @@ export function registerPlanTool(
           return executeRegisterDoc(pi, params, state);
 
         case "submit-review":
-          return await executeSubmitReview(pi, ctx, state, sessions, epochs, sessionId, projectDir, controllers, signal, params);
+          return await executeSubmitReview(pi, ctx, state, sessions, sessionId, projectDir, controllers, signal, params);
 
         case "complete":
-          return await executeComplete(pi, ctx, params, state, sessions, epochs, sessionId, projectDir, controllers, signal);
+          return await executeComplete(pi, ctx, params, state, sessions, sessionId, projectDir, controllers, signal);
 
         case "abort":
-          return executeAbort(pi, sessions, epochs, sessionId, ctx, state);
+          return executeAbort(pi, sessions, controllers, sessionId, ctx, state);
       }
     },
   });

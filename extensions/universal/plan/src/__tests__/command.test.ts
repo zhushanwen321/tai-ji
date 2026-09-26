@@ -24,14 +24,14 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { parsePlanArgs, registerPlanCommand, resolveTemplateFile } from "../command.js";
-import { MAX_PLAN_REQUIREMENT_LENGTH, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
+import type { PlanAbortControllers } from "../state.js";
+import { freshPendingSelect, MAX_PLAN_REQUIREMENT_LENGTH, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
 function createMocks() {
   let capturedHandler: (args: string, ctx: ExtensionContext) => Promise<void>;
-  const controllers = new Map<string, AbortController>();
-  const epochs = new Map<string, number>();
+  const controllers: PlanAbortControllers = new Map();
 
   const pi = {
     registerCommand: vi.fn((_name: string, def: { handler: (args: string, ctx: ExtensionContext) => Promise<void> }) => {
@@ -62,7 +62,6 @@ function createMocks() {
     pi,
     ctx,
     controllers,
-    epochs,
     getHandler: () => capturedHandler!,
   };
 }
@@ -76,7 +75,7 @@ describe("registerPlanCommand", () => {
   let pi: ExtensionAPI;
   let ctx: ExtensionContext;
   let handler: (args: string, ctx: ExtensionContext) => Promise<void>;
-  let controllers: Map<string, AbortController>;
+  let controllers: PlanAbortControllers;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -85,7 +84,7 @@ describe("registerPlanCommand", () => {
     ctx = mocks.ctx;
     controllers = mocks.controllers;
     const sessions = new Map();
-    registerPlanCommand(pi, sessions, controllers, mocks.epochs);
+    registerPlanCommand(pi, sessions, controllers);
     handler = mocks.getHandler();
   });
 
@@ -95,38 +94,54 @@ describe("registerPlanCommand", () => {
 
   // --- abort subcommand ---
 
-  it("abort: notifies 'No active plan mode' when idle", async () => {
+  it("abort（idle 常态格）: warn 纠偏文案 + 幂等退出——不落盘、工具集幂等恢复（D-B1-1 单入口守卫极性，原 info no-op 取消）", async () => {
     await handler("abort", ctx);
-    expect((ctx as ReturnType<typeof createMocks>["ctx"]).ui.notify).toHaveBeenCalledWith("No active plan mode.", "info");
-    expect(pi.setActiveTools).not.toHaveBeenCalled();
-  });
-
-  it("abort: resets state and restores tools when active", async () => {
-    // Enter plan mode first — handler uses the sessions map from registerPlanCommand closure
-    await handler("implement user auth", ctx);
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
-    vi.clearAllMocks();
-
-    // Now abort — state is active in the sessions map
-    await handler("abort", ctx);
-
+    expect((ctx as ReturnType<typeof createMocks>["ctx"]).ui.notify).toHaveBeenCalledWith("No active plan mode.", "warning");
+    // ④ 工具集照常幂等恢复（idle 格已是全量，重设全量 = 可观察零变化）
     expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
-    expect((ctx as ReturnType<typeof createMocks>["ctx"]).ui.notify).toHaveBeenCalledWith("Plan mode aborted.", "info");
+    // ② 跳过：idle 删 exit 边后 ok:false 不落盘（无噪音 exited entry）
+    expect(pi.appendEntry).not.toHaveBeenCalled();
   });
 
-  it("abort 联动（E10）：controller.abort() 先于 resetPlanState 的 entry 落盘", async () => {
+  it("abort（终态格 isActive=false）: warn 纠偏指令文案 + 不落盘（V1 ⑤ 幂等退出锚）", async () => {
+    // 注入终态格：上一轮已 complete，缓存重建自 entries（空）→ 直接预置 sessions 难以
+    // 穿透 handler 闭包，改走 entries 注入 completed 残留形态
+    const terminalCtx = {
+      ...ctx,
+      sessionManager: {
+        getSessionId: () => "test-session",
+        getEntries: () => [
+          {
+            type: "custom",
+            customType: "plan-state",
+            data: { isActive: false, state: "completed", planFilePath: "", requirement: "", templateName: "" },
+          },
+        ],
+      },
+    } as unknown as ExtensionContext;
+    await handler("abort", terminalCtx);
+    expect(terminalCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Plan mode is not active"),
+      "warning",
+    );
+    // completed 终态记录不被 exited 覆写（ok:false 跳过状态值写入，isActive=false 非坏格）
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("abort 联动（E10）：controller.abort() 先于 resetPlanState 的 entry 落盘，markDissolved('self') 先行打标", async () => {
     await handler("implement user auth", ctx);
     vi.clearAllMocks();
 
-    // 模拟一个挂起 select 的 controller（submit-review / complete 执行方式两处共用注册表）
-    const controller = new AbortController();
-    const abortSpy = vi.spyOn(controller, "abort");
-    controllers.set("test-session", controller);
+    // 模拟一个挂起 select 的 PendingSelect（submit-review / complete 执行方式两处共用注册表）
+    const pending = freshPendingSelect(controllers, "test-session");
+    const abortSpy = vi.spyOn(pending.controller, "abort");
 
     await handler("abort", ctx);
 
-    // 挂起 select 被 abort（→ resolve undefined → tool execute 已取消分支 → turn 结束 → settled → busy defer 恢复）
-    expect(controller.signal.aborted).toBe(true);
+    // 挂起 select 被 abort（→ resolve undefined → tool execute 归口分支 → turn 结束 → settled → busy defer 恢复）
+    expect(pending.controller.signal.aborted).toBe(true);
+    // D-B1-2：入口解散先打 'self' 标（同步先于 abort，等待处归口按来源直传判别）
+    expect(pending.dissolvedBy).toBe("self");
     // 顺序断言：abort 必须先于 reset entry 落盘（反序 = 挂起 select 无人 resolve → session 卡死）
     const resetCallIndex = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.findIndex(
       (c) => (c[1] as { isActive?: boolean }).isActive === false,

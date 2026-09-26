@@ -2,7 +2,8 @@
  * state-machine.test.ts — plan 生命周期状态机全边表契约测试（D1）。
  *
  * 覆盖义务（U1 验收②）：
- * - transition 全边表穷举：8 状态 × 9 事件 = 72 格逐格断言（合法 19 边 / 非法 53 格），
+ * - transition 全边表穷举：8 状态 × 9 事件 = 72 格逐格断言（合法 19 边 / 非法 53 格；
+ *   边集构成 = 活跃族六态 exit + reviewing submit 重挂自环，idle 无 exit 边），
  *   无效转移返回 `{ ok: false }` 且不携带 next 键（调用方降级语义的结构保证）。
  * - D1 关键边命名锚定（dismiss / review_aborted 双出口 / later / exec_chosen / 终态规则）。
  * - derivePhase 8 存储态 → 5 呈现相位全映射 + 混装格垃圾值降级。
@@ -33,7 +34,7 @@ const EXPECTED_EDGES: Record<PlanLifecycleState, Record<PlanLifecycleEvent, Plan
     approve: null,
     exec_chosen: null,
     later: null,
-    exit: 'exited',
+    exit: null,
   },
   planning: {
     enter: null,
@@ -48,7 +49,7 @@ const EXPECTED_EDGES: Record<PlanLifecycleState, Record<PlanLifecycleEvent, Plan
   },
   reviewing: {
     enter: null,
-    submit: null,
+    submit: 'reviewing',
     revise: 'revising',
     dismiss: 'planning',
     review_aborted: 'planning',
@@ -123,7 +124,7 @@ for (const state of PLAN_LIFECYCLE_STATES) {
 }
 
 describe('D1 状态机边表穷举（8 状态 × 9 事件 = 72 格）', () => {
-  it('穷举基座自检：状态 8 值 / 事件 9 值，展开 72 格，合法 19 边 / 非法 53 格', () => {
+  it('穷举基座自检：状态 8 值 / 事件 9 值，展开 72 格，合法 19 边（活跃族六态 exit + reviewing submit 自环）/ 非法 53 格', () => {
     expect(PLAN_LIFECYCLE_STATES).toHaveLength(8)
     expect(PLAN_LIFECYCLE_EVENTS).toHaveLength(9)
     expect(new Set(PLAN_LIFECYCLE_STATES).size).toBe(8)
@@ -175,15 +176,21 @@ describe('D1 关键边命名锚定（设计原文语义）', () => {
     expect(transition('approved', 'approve')).toEqual({ ok: true, next: 'dispatching' })
   })
 
-  it('任何非终态 --exit--> exited，终态上 exit 非法、--enter--> planning 开新一轮', () => {
-    const nonTerminal: PlanLifecycleState[] = ['idle', 'planning', 'reviewing', 'revising', 'approved', 'dispatching']
+  it('活跃族非终态 --exit--> exited，idle/终态上 exit 非法、终态 --enter--> planning 开新一轮', () => {
+    const nonTerminal: PlanLifecycleState[] = ['planning', 'reviewing', 'revising', 'approved', 'dispatching']
     for (const state of nonTerminal) {
       expect(transition(state, 'exit')).toEqual({ ok: true, next: 'exited' })
     }
+    // idle 从未进入 plan，exit 非法（D-B1-8 删边：防从未进 plan 的会话落噪音 exited entry）
+    expect(transition('idle', 'exit')).toEqual({ ok: false })
     for (const terminal of ['completed', 'exited'] as const) {
       expect(transition(terminal, 'exit')).toEqual({ ok: false })
       expect(transition(terminal, 'enter')).toEqual({ ok: true, next: 'planning' })
     }
+  })
+
+  it('reviewing --submit--> reviewing：审批重挂自环，不推进生命周期（E3 恢复 / D8 重提交）', () => {
+    expect(transition('reviewing', 'submit')).toEqual({ ok: true, next: 'reviewing' })
   })
 
   it('revising 保留独立态：--submit--> reviewing 重挂循环，review_aborted/dismiss 不适用（P-7）', () => {

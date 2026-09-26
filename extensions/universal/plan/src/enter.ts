@@ -7,7 +7,7 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { buildPlanModePrompt } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
 import type { PlanSessionMap, PlanState } from "./state.js";
-import { applyPlanEvent, capPlanRequirement, getPlanState, persistPlanState, PLAN_MODE_TOOLS } from "./state.js";
+import { applyPlanEvent, capPlanRequirement, clearRoundFields, getPlanState, persistPlanState, PLAN_MODE_TOOLS } from "./state.js";
 import { updatePlanWidget } from "./widget.js";
 
 const logger = getLogger("pi-plan");
@@ -84,7 +84,7 @@ export interface ActivatePlanModeOutcome {
  * setActiveTools → 构造 prompt。persist 先于工具收拢，保证「已持久 isActive 但工具未收」
  * 的半进入态不可达（崩溃窗口内重开 session 经 entry 恢复 isActive，session_start hook
  * 会补 setActiveTools）。生命周期写唯一通道 = applyPlanEvent('enter')（D1：idle|终态
- * --enter--> planning 新一轮；activatePlanMode 不递增 reset epoch——纪律③）。
+ * --enter--> planning 新一轮）。
  */
 export function activatePlanMode(
   pi: ExtensionAPI,
@@ -114,11 +114,9 @@ export function activatePlanMode(
   state.templateProvidedPath = input.template?.absPath;
   state.skills = skills.map((s) => s.name);
   state.docs = [];
-  // 新轮次重置：selfReview、resumeHint 与指纹基线随进入失效（与 resetPlanState 对齐——
-  // 清除点三处之二；跨轮残留会误触新鲜度门 / 渲染上一轮降级文案（C-U2 同型残留））
-  delete state.selfReview;
-  delete state.resumeHint;
-  delete state.lastSubmitReviewDocsFingerprint;
+  // 新轮次重置：per-round 字段随进入失效（D4 单函数出口，与 resetPlanState 同源——
+  // 跨轮残留会误触新鲜度门 / 渲染上一轮降级文案（C-U2 同型残留））
+  clearRoundFields(state);
 
   // 状态写走 transition()（D1 'enter' 边：idle|completed|exited → planning 新一轮）。
   // 不一致格降级（isActive=false 且 state 落活跃族——仅坏数据/旧映射残留可达，P-6 单写入方

@@ -56,7 +56,6 @@ function planningState(): PlanState {
 function setup() {
   const sessions = new Map<string, PlanState>();
   const controllers = new Map<string, AbortController>();
-  const epochs = new Map<string, number>();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<unknown>;
   const pi = {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
@@ -66,7 +65,7 @@ function setup() {
     getCommands: vi.fn(() => []),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
-  registerPlanTool(pi, sessions, controllers, epochs);
+  registerPlanTool(pi, sessions, controllers);
 
   const ctx = {
     sessionId: "test-session",

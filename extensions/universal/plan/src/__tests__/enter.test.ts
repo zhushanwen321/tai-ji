@@ -154,7 +154,7 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     expect(res.content[0].text).toContain("(from conversation context)");
   });
 
-  it("新轮次进入：上轮残留的 selfReview/resumeHint/指纹随进入失效（清除点三处之二，D9①防跨轮误触新鲜度门）", async () => {
+  it("新轮次进入：上轮残留的 selfReview/resumeHint/指纹随进入失效（clearRoundFields 单函数出口的 enter 调用点，D9①防跨轮误触新鲜度门）", async () => {
     const { exec, pi, sessions } = setup();
     // 模拟上轮残留：崩溃/bad-response 等绕过 resetPlanState 的路径留下的降级标记与基线
     sessions.set("test-session", {
@@ -169,7 +169,7 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     const res = await exec({ action: "enter", requirement: "new round" });
 
     expect(res.details.action).toBe("enter");
-    // activatePlanMode 新轮次重置组清三字段（与 resetPlanState 对齐）
+    // activatePlanMode 经 clearRoundFields 清三字段（D4 单函数出口，与 resetPlanState 同源）
     const state = sessions.get("test-session") as PlanState;
     expect(state.selfReview).toBeUndefined();
     expect(state.resumeHint).toBeUndefined();

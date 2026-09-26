@@ -47,6 +47,7 @@ import { UI_FORM_MARKER } from "@zhushanwen/extension-protocol";
 
 import { detectGoalCapability, handlePlanComplete } from "../compact.js";
 import { detectExecSkills } from "../exec-skills.js";
+import type { PlanAbortControllers } from "../state.js";
 import { DEFAULT_PLAN_STATE } from "../state.js";
 import { loadTemplate } from "../templates.js";
 import { PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";
@@ -57,8 +58,7 @@ const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "
 
 function setup() {
   const sessions = new Map();
-  const controllers = new Map<string, AbortController>();
-  const epochs = new Map<string, number>();
+  const controllers: PlanAbortControllers = new Map();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<unknown>;
   const pi = {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
@@ -66,7 +66,7 @@ function setup() {
     setActiveTools: vi.fn(),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
-  registerPlanTool(pi, sessions, controllers, epochs);
+  registerPlanTool(pi, sessions, controllers);
 
   const ctx = {
     sessionId: "test-session",
@@ -92,7 +92,7 @@ function setup() {
 
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
     executeFn!("tc0", params, signal, undefined, ctx);
-  return { pi, sessions, controllers, epochs, ctx, exec };
+  return { pi, sessions, controllers, ctx, exec };
 }
 
 describe("registerPlanTool", () => {
@@ -100,6 +100,12 @@ describe("registerPlanTool", () => {
     const { pi } = setup();
     expect(pi.registerTool).toHaveBeenCalledOnce();
     expect((pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0].name).toBe("plan");
+  });
+
+  it("declares executionMode 'sequential'（D-B1-4：action 就地突变共享 PlanState，串行声明消除同批并行交错）", () => {
+    const { pi } = setup();
+    const tool = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0] as { executionMode?: string };
+    expect(tool.executionMode).toBe("sequential");
   });
 
   it("tool description and promptSnippet no longer mention list-template (D1 删链不留兼容通道)", () => {
@@ -334,7 +340,7 @@ describe("registerPlanTool", () => {
       const pending = exec({ action: "complete" }, turn.signal);
       turn.abort();
       const res = await pending;
-      // turn abort 无 reset 介入（epoch 未变）→ 外部解散：dispatching --review_aborted--> approved
+      // turn abort 级联（未经入口，不打标）→ 外部解散：dispatching --review_aborted--> approved
       expect(res.details.action).toBe("complete-cancelled");
       expect(res.details.reason).toBe("cancelled");
       expect(res.details.source).toBe("external");
@@ -353,10 +359,28 @@ describe("registerPlanTool", () => {
       expect(res.details.execMode).toBe("execute");
       expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
       expect(handlePlanComplete).toHaveBeenCalled();
-      expect(res.details.planFilePath).toBeDefined();
+      // 内部路径显示为相对路径（A2 边界判断正向：projectDir 后紧随分隔符才切）
+      expect(res.details.planFilePath).toBe(".tmp/plans/auth/plan.md");
       // 终局落盘：terminal='completed'（防 reset 覆写 completed，D3 连带段）
       const entries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1] as { state?: string; isActive?: boolean });
       expect(entries.at(-1)).toMatchObject({ state: "completed", isActive: false });
+    });
+
+    it("A2 边界锚：兄弟前缀目录（/tmp/test-project-2）不被误切进 /tmp/test-project 的相对路径", async () => {
+      const { exec, ctx, sessions } = setup();
+      sessions.set("test-session", {
+        ...DEFAULT_PLAN_STATE,
+        isActive: true,
+        planFilePath: "/tmp/test-project-2/.tmp/plans/auth/plan.md",
+        requirement: "refactor auth",
+        state: "approved",
+        docs: [{ fileName: "design.md", absPath: "/tmp/test-project-2/.tmp/plans/auth/design.md", sourceSkill: "", version: 1 }],
+      });
+      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
+      const res = await exec({ action: "complete" });
+      // 裸 startsWith 曾把 test-project-2 误吃进 test-project 前缀（错切为 2/.tmp/...）——
+      // 边界判断（分隔符或全等）后兄弟前缀原样显示
+      expect(res.details.planFilePath).toBe("/tmp/test-project-2/.tmp/plans/auth/plan.md");
     });
 
     it("dialog options = skills (max 2) + Execute + Not now, goal bridge availability irrelevant (选项集重排；D7② 有技能才弹表单)", async () => {
@@ -543,7 +567,7 @@ describe("registerPlanTool", () => {
     it("timeout via undefined resolve (signal not aborted) folds to 归口②外部解散（构造点④，review_aborted→approved）", async () => {
       // rpc 模式 GUI 用户取消 resolve undefined，与超时不可区分（signal 未 abort 折叠
       // timeout，库层 callMarkerRpc 判别），构造点③④同折 via 'dissolved' reason='cancelled'。
-      // 无 reset 介入（epoch 未变）→ 外部解散：批准事实保留，文案不得声称已退出
+      // 未经入口解散（不打标）→ 外部解散：批准事实保留，文案不得声称已退出
       const { exec, ctx, pi } = setupGui();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
         { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
@@ -559,17 +583,19 @@ describe("registerPlanTool", () => {
       expect(pi.setActiveTools).not.toHaveBeenCalled();
     });
 
-    it("命令解散（handleAbort 全序列：controller.abort() + reset 介入）→ 归口② no-op（epoch 判别，不落盘）", async () => {
-      // 真实通道注入 = command.ts handleAbort 的因果链：controller.abort() 后 resetPlanState
-      // 同步递增 epoch（同步临界段，无让出点）——归口点在微任务里运行时世代已变
-      const { exec, ctx, controllers, epochs, pi } = setupGui();
+    it("命令解散（handleAbort 全序列：markDissolved('self') + controller.abort() + reset 介入）→ 归口② no-op（dissolvedBy 判别，不落盘）", async () => {
+      // 真实通道注入 = command.ts exitPlanMode 的因果链：markDissolved('self') 与
+      // controller.abort() 后 resetPlanState 同步落盘（同步临界段，无让出点）——归口点
+      // 在微任务里运行时来源已置位
+      const { exec, ctx, controllers, pi } = setupGui();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
         { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
       ]);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-        controllers.get("test-session")?.abort();
-        // 模拟 resetPlanState 的 epoch 递增（命令解散的世代事实）
-        epochs.set("test-session", (epochs.get("test-session") ?? 0) + 1);
+        // 模拟 exitPlanMode 入口动作（真实序列：markDissolved 先于 abort）
+        const pending = controllers.get("test-session");
+        pending?.markDissolved("self");
+        pending?.controller.abort();
         return undefined;
       });
       const res = await exec({ action: "complete" });
@@ -657,9 +683,9 @@ describe("registerPlanTool", () => {
 
   // --- abort ---
   describe("abort", () => {
-    it("resets state and cleans up session — exit 边（任何非终态→exited）", async () => {
+    it("resets state and cleans up session — exit 边（活跃族非终态→exited）", async () => {
       const { exec, pi, sessions } = setup();
-      // Pre-populate a session（工具层 abort 走 resetPlanState——命令层 abort 联动的顺序断言在 command.test.ts）
+      // Pre-populate a session（工具层 abort 走 exitPlanMode 单入口——命令层 abort 联动的顺序断言在 command.test.ts）
       sessions.set("test-session", {
         ...DEFAULT_PLAN_STATE,
         isActive: true,
@@ -682,7 +708,7 @@ describe("registerPlanTool", () => {
       expect(entry.skills).toEqual([]);
     });
 
-    it("终态上 abort → FSM 合法性兜底 no-op（不覆写 completed，不落盘）", async () => {
+    it("终态上 abort → 幂等退出：warn 纠偏 + 不覆写 completed、不落盘 + ④工具集幂等恢复（D-B1-1 守卫极性）", async () => {
       const { exec, pi, sessions } = setup();
       sessions.set("test-session", {
         ...DEFAULT_PLAN_STATE,
@@ -692,9 +718,62 @@ describe("registerPlanTool", () => {
       });
       const res = await exec({ action: "abort" });
       expect(res.details).toEqual({ action: "review-error", reason: "inactive" });
-      // ok:false 不落盘、不执行副作用（completed 终态不被覆写为 exited）
+      expect(res.content[0].text).toContain("Plan mode is not active");
+      // ok:false 不落盘（completed 终态不被覆写为 exited）
       expect(pi.appendEntry).not.toHaveBeenCalled();
-      expect(pi.setActiveTools).not.toHaveBeenCalled();
+      // ④ 工具集照常幂等恢复（D-B1-1：ok:false → ①③④⑤照常，已恢复则 no-op）
+      expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
+    });
+
+    it("idle 常态格 abort → warn 纠偏文案、不落盘（D-B1-1 行为变更：噪音 exited entry 消灭，V1 ⑧ 锚）", async () => {
+      const { exec, pi, sessions } = setup();
+      // idle 常态格：从未进 plan（isActive=false + state='idle'——删 exit 边后 ok:false）
+      sessions.set("test-session", { ...DEFAULT_PLAN_STATE });
+      const res = await exec({ action: "abort" });
+      expect(res.details).toEqual({ action: "review-error", reason: "inactive" });
+      expect(res.content[0].text).toBe("No active plan mode.");
+      // 行为变更核心断言：不落 exited 噪音 entry
+      expect(pi.appendEntry).not.toHaveBeenCalled();
+      // ④ 幂等恢复（idle 格工具集已全量，重设 = 可观察零变化）
+      expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
+      expect(sessions.has("test-session")).toBe(true); // 无 reset（缓存不动）
+    });
+
+    it("坏数据格·终态残留（isActive=true + state=completed）abort → 清洗 entry（终态值不变 + isActive=false，不覆写为 exited）", async () => {
+      const { exec, pi, sessions } = setup();
+      sessions.set("test-session", {
+        ...DEFAULT_PLAN_STATE,
+        isActive: true, // 坏格：伪 active 投影
+        planFilePath: "/tmp/plans/auth/plan.md",
+        state: "completed",
+        docs: [{ fileName: "design.md", absPath: "/tmp/plans/auth/design.md", sourceSkill: "", version: 1 }],
+      });
+      const res = await exec({ action: "abort" });
+      expect(res.details).toEqual({ action: "review-error", reason: "inactive" });
+      // 清洗例外：唯一保留的落盘——isActive 投影复位 + state 取当前终态值（completed 不被 exited 覆写）
+      expect(pi.appendEntry).toHaveBeenCalledWith(
+        "plan-state",
+        expect.objectContaining({ isActive: false, state: "completed" }),
+      );
+      expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
+      expect(sessions.has("test-session")).toBe(false); // 清洗后缓存清理（重开经 entry 恢复正常态）
+    });
+
+    it("坏数据格·idle 残留（isActive=true + state=idle）abort → 清洗 entry（exited + isActive=false）", async () => {
+      const { exec, pi, sessions } = setup();
+      sessions.set("test-session", {
+        ...DEFAULT_PLAN_STATE,
+        isActive: true, // 坏格：'idle' 是值域白名单合法值 + isActive=true → 重开复活伪 active
+        planFilePath: "/tmp/plans/auth/plan.md",
+        state: "idle",
+      });
+      const res = await exec({ action: "abort" });
+      expect(res.details).toEqual({ action: "review-error", reason: "inactive" });
+      // 清洗例外 idle 残留形态：abort 是用户显式退出意图，exited 是本次动作的真实记录
+      expect(pi.appendEntry).toHaveBeenCalledWith(
+        "plan-state",
+        expect.objectContaining({ isActive: false, state: "exited" }),
+      );
     });
   });
 });

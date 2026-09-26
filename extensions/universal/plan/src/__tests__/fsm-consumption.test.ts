@@ -43,7 +43,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { registerPlanCommand } from "../command.js";
 import { detectExecSkills } from "../exec-skills.js";
-import type { PlanState } from "../state.js";
+import type { PlanAbortControllers, PlanState } from "../state.js";
 import { DEFAULT_PLAN_STATE } from "../state.js";
 import { registerPlanTool } from "../tool.js";
 
@@ -65,13 +65,13 @@ function planningState(): PlanState {
 }
 
 /**
- * 组合 harness：tool + command 共享 sessions/controllers/epochs 三注册表
- * （S15 同步临界段等跨入口不变量需要真实共享——归口判别依赖同一 epoch 表）。
+ * 组合 harness：tool + command 共享 sessions/controllers 两注册表
+ * （跨入口解散判别需要真实共享——exitPlanMode 与等待归口经同一 controllers 表传递
+ * dissolvedBy 直传来源，D-B1-2）。
  */
 function setup(initialState?: PlanState) {
   const sessions = new Map<string, PlanState>();
-  const controllers = new Map<string, AbortController>();
-  const epochs = new Map<string, number>();
+  const controllers: PlanAbortControllers = new Map();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<unknown>;
   let commandHandler: (args: string, ctx: ExtensionContext) => Promise<void>;
 
@@ -87,8 +87,8 @@ function setup(initialState?: PlanState) {
     getCommands: vi.fn(() => []),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
-  registerPlanTool(pi, sessions, controllers, epochs);
-  registerPlanCommand(pi as unknown as Parameters<typeof registerPlanCommand>[0], sessions, controllers, epochs);
+  registerPlanTool(pi, sessions, controllers);
+  registerPlanCommand(pi as unknown as Parameters<typeof registerPlanCommand>[0], sessions, controllers);
 
   const ctx = {
     sessionId: "test-session",
@@ -105,7 +105,7 @@ function setup(initialState?: PlanState) {
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
     executeFn!("tc0", params, signal, undefined, ctx);
   return {
-    pi, sessions, controllers, epochs, ctx, exec,
+    pi, sessions, controllers, ctx, exec,
     handleCommand: (args: string) => commandHandler(args, ctx as unknown as ExtensionContext),
   };
 }
@@ -138,22 +138,23 @@ afterEach(() => {
   (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([]);
 });
 
-// ── S15 扩展侧断言族（单测锚定，零 token）──
+// ── dissolvedBy 直传断言组（D-B1-2，单测锚定，零 token）──
 
-describe("S15① abort→reset 同步临界段（无让出点——归口点必在 reset 后运行、epoch 已递增）", () => {
+describe("dissolvedBy① 入口解散同步临界段（markDissolved 先于 abort、无让出点——归口点必读到 'self'）", () => {
   it("挂起审批中 /plan abort：归口①判命令解散 no-op（不落 review_aborted），reset 终态是唯一新落盘", async () => {
     const h = setup(planningState());
     h.ctx.mode = "rpc";
     selectHonoringSignal(h.ctx);
 
-    // exec() 同步推进到 ctx.ui.select 挂起（首个 await 即 select）——挂起点已捕获 epoch 0
+    // exec() 同步推进到 ctx.ui.select 挂起（首个 await 即 select）
     const pending = h.exec({ action: "submit-review", selfReview: SR });
-    // handleAbort 体内无 await：整段（controller.abort() → resetPlanState）同步执行完毕，
-    // abort 触发的 promise 解析是微任务——归口点必在其后运行（同步临界段不变量）
+    // exitPlanMode 体内无 await：整段（markDissolved('self') → controller.abort() →
+    // resetPlanState）同步执行完毕，abort 触发的 promise 解析是微任务——归口点必在其后
+    // 运行、dissolvedBy 已置位（同步临界段不变量）
     void h.handleCommand("abort");
     const res = await pending;
 
-    // 归口①：epoch 已变（reset 介入）→ 命令解散 no-op
+    // 归口①：dissolvedBy === 'self'（入口直传）→ 命令解散 no-op
     expect(res.details).toEqual({ action: "review-error", reason: "cancelled" });
     expect((res as { content: Array<{ text: string }> }).content[0].text).toContain("has been exited");
     // 归口 no-op：无 review_aborted 落盘（不出现把 exited 打回 planning 的 entry）
@@ -161,14 +162,28 @@ describe("S15① abort→reset 同步临界段（无让出点——归口点必�
     expect(all.map((e) => e.state)).toEqual(["reviewing", "exited"]);
   });
 
-  it("反向对照：同形态若 epoch 未变则判外部解散（断言有效性的负向探针对照）", async () => {
+  it("直接断言：exitPlanMode 打标后 PendingSelect.dissolvedBy === 'self'（来源随挂起闭包直达等待处）", async () => {
     const h = setup(planningState());
     h.ctx.mode = "rpc";
     selectHonoringSignal(h.ctx);
 
     const pending = h.exec({ action: "submit-review", selfReview: SR });
-    // 只 abort controller 不做 reset（turn abort 级联形态）——epoch 未变
-    h.controllers.get("test-session")?.abort();
+    // 挂起已登记（PendingSelect 在表内且未打标——外部解散前的缺省形态）
+    const hang = h.controllers.get("test-session");
+    expect(hang?.dissolvedBy).toBeUndefined();
+    void h.handleCommand("abort");
+    expect(hang?.dissolvedBy).toBe("self");
+    await pending;
+  });
+
+  it("反向对照：同形态若仅 controller.abort()（不打标）则判外部解散（断言有效性的负向探针对照）", async () => {
+    const h = setup(planningState());
+    h.ctx.mode = "rpc";
+    selectHonoringSignal(h.ctx);
+
+    const pending = h.exec({ action: "submit-review", selfReview: SR });
+    // 只 abort controller 不经 exitPlanMode（turn abort 级联形态）——不打标，缺省即外部
+    h.controllers.get("test-session")?.controller.abort();
     const res = await pending;
 
     expect(res.details).toEqual({ action: "review-error", reason: "review-interrupted" });
@@ -204,41 +219,40 @@ describe("S15② 新鲜度门拒收后重试仍触发（gate 判定先于一切�
   });
 });
 
-describe("S15③ 跨轮无挂起退出 → 新一轮外部解散正常转移（epoch 无残留回归）", () => {
-  it("上一轮 abort（无挂起 select，epoch 已递增）不污染本轮归口：新一轮外部解散仍走 review_aborted", async () => {
+describe("dissolvedBy② 跨轮无挂起退出 → 新一轮外部解散正常转移（闭包身份天然隔离，无残留回归）", () => {
+  it("上一轮 abort（无挂起 select）不污染本轮归口：新一轮外部解散仍走 review_aborted", async () => {
     const h = setup(planningState());
-    // 第一轮：无挂起 select 的退出（规划期退出——门闩标记会在此形态下残留的病根）
+    // 第一轮：无挂起 select 的退出（规划期退出——旧世代标记机制会在此形态下残留的病根）
     await h.exec({ action: "abort" });
-    expect(h.epochs.get("test-session")).toBe(1);
 
-    // 第二轮：同 turn enter（纪律③：enter 不递增 epoch）→ 登记文档 → 挂新 select → 外部解散
+    // 第二轮：同 turn enter → 登记文档 → 挂新 select → 外部解散（新 PendingSelect，
+    // 闭包来源变量独立于上一轮）
     await h.exec({ action: "enter", requirement: "round two" });
     await h.exec({ action: "register-doc", fileName: "design.md" });
-    expect(h.epochs.get("test-session")).toBe(1); // enter 不递增
     h.ctx.mode = "rpc";
     selectHonoringSignal(h.ctx);
     const turn = new AbortController();
     const pending = h.exec({ action: "submit-review", selfReview: SR }, turn.signal);
-    // execute 的 turn signal 级联解散（外部解散源，cascadeTurnAbort）
+    // execute 的 turn signal 级联解散（外部解散源，cascadeTurnAbort——只 abort 不打标）
     turn.abort();
     const res = await pending;
 
-    // epoch 未变（本轮挂起点捕获 1 == 现值 1）→ 外部解散正常转移，不被误判为命令解散
+    // 新挂起的来源变量未被污染（undefined）→ 外部解散正常转移，不被误判为命令解散
     expect(res.details).toEqual({ action: "review-error", reason: "review-interrupted" });
     const all = entries(h.pi);
     expect(all.at(-1)).toMatchObject({ state: "planning", isActive: true });
   });
 });
 
-describe("S15④ 同 turn enter→挂新 select→外部解散 / 命令解散→归口 no-op（双向）", () => {
-  it("同 turn enter（无 epoch 递增）→ 挂新 select → 外部解散：review_aborted 正常转移", async () => {
+describe("dissolvedBy③ 同 turn enter→挂新 select→外部解散 / 命令解散→归口 no-op（双向）", () => {
+  it("同 turn enter → 挂新 select → 外部解散：review_aborted 正常转移", async () => {
     const h = setup(); // 干净 session
     await h.exec({ action: "enter", requirement: "same turn" });
     await h.exec({ action: "register-doc", fileName: "design.md" });
     h.ctx.mode = "rpc";
     selectHonoringSignal(h.ctx);
     const pending = h.exec({ action: "submit-review", selfReview: SR });
-    h.controllers.get("test-session")?.abort(); // 外部解散
+    h.controllers.get("test-session")?.controller.abort(); // 外部解散（不打标，缺省即外部）
     const res = await pending;
 
     expect(res.details).toEqual({ action: "review-error", reason: "review-interrupted" });
@@ -253,7 +267,7 @@ describe("S15④ 同 turn enter→挂新 select→外部解散 / 命令解散→
     h.ctx.mode = "rpc";
     selectHonoringSignal(h.ctx);
     const pending = h.exec({ action: "submit-review", selfReview: SR });
-    void h.handleCommand("abort"); // 命令解散（abort → reset 同步临界段）
+    void h.handleCommand("abort"); // 命令解散（markDissolved('self') → abort → reset 同步临界段）
     const res = await pending;
 
     expect(res.details).toEqual({ action: "review-error", reason: "cancelled" });
@@ -264,7 +278,7 @@ describe("S15④ 同 turn enter→挂新 select→外部解散 / 命令解散→
   });
 });
 
-describe("S15⑤ resumeHint 三时点清除断言（不变量：只描述当前降级等待的原因，不跨轮残留）", () => {
+describe("resumeHint 三时点清除断言（不变量：只描述当前降级等待的原因，不跨轮残留）", () => {
   it("① reset 清除 / ② enter 进入重置组清除 / ③ submit-review 转移落盘清除", async () => {
     // ① reset
     const a = setup({ ...planningState(), state: "reviewing", resumeHint: "resubmit" });
@@ -343,7 +357,7 @@ describe("六 action 状态写走 transition()（D1 边表接线）", () => {
     expect(h.pi.appendEntry).not.toHaveBeenCalled();
   });
 
-  it("abort：任何非终态 --exit--> exited；select-template/register-doc 无生命周期事件（persist 携带现值）", async () => {
+  it("abort：活跃族非终态 --exit--> exited；select-template/register-doc 无生命周期事件（persist 携带现值）", async () => {
     const h = setup(planningState());
     await h.exec({ action: "select-template", templateName: "feature-plan" });
     await h.exec({ action: "register-doc", fileName: "design.md" });
@@ -352,6 +366,23 @@ describe("六 action 状态写走 transition()（D1 边表接线）", () => {
 
     await h.exec({ action: "abort" });
     expect(entries(h.pi).at(-1)?.state).toBe("exited");
+  });
+
+  it("reviewing 重挂自环（D-B1-8：reviewing --submit--> reviewing）：重提交照常落盘回 reviewing，前后等价，接续 approve 正常", async () => {
+    const h = setup({ ...planningState(), state: "reviewing" });
+    h.ctx.mode = "rpc";
+    // reviewing 态重提交（E3 恢复 steer / D8 重新提交按钮的 agent 侧形态）
+    (h.ctx.ui.select as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(JSON.stringify({ decision: "approve" }))
+      .mockResolvedValueOnce(JSON.stringify({ "Execution method": "Execute" }));
+    const res = await h.exec({ action: "submit-review", selfReview: SR });
+    // 自环锚：旧特判形态（ok:false 且现值 reviewing 放行）与自环形态落盘产物等价——
+    // state 值不变、重挂回 reviewing（单一记录点照常落盘）
+    const states = entries(h.pi).map((e) => e.state);
+    expect(states[0]).toBe("reviewing"); // 重挂落盘（自环 ok:true）
+    expect(states).toContain("dispatching"); // 接续 approve 边正常
+    expect(states.at(-1)).toBe("completed"); // exec_chosen 终局
+    expect(res.details.action).toBe("complete");
   });
 });
 
@@ -378,7 +409,7 @@ describe("CompleteChoiceOutcome via 构造点（D3 连带段：显式枚举，�
     // 挂起窗口内 controller 被 abort（handleAbort 的 controller.abort() 半边 / turn 级联），
     // 无 reset 介入 → uiFormInteract 判 reason='cancelled'
     (h.ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-      h.controllers.get("test-session")?.abort();
+      h.controllers.get("test-session")?.controller.abort();
       return undefined;
     });
     const res = await h.exec({ action: "complete" });
