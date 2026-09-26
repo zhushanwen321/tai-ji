@@ -11,8 +11,11 @@
  *    （name 字段与 package.json.name 精确一致，防改名/误删/错目录）
  * 2. 反向：extensions/{taiji,universal}/ 下每个 @zhushanwen/pi-* 包
  *    必须出现在文件中，directory 与磁盘目录一致
- * 3. 引用：dependsOn.package 为 workspace 内包（@zhushanwen/pi-* / @taiji/*）
- *    时必须可解析（条目、extensions/shared/ 下包、或 packages/ 下包），防悬空引用
+ * 3. 引用（双向）：正向——dependsOn.package 为 workspace 内包（@zhushanwen/pi-* /
+ *    @taiji/*）时必须可解析（条目、extensions/shared/ 下包、或 packages/ 下包），
+ *    防悬空引用；反向——包 package.json dependencies/peerDependencies 声明的
+ *    @zhushanwen/* / @taiji/* 包必须登记进该条目 dependsOn，防漏登记
+ *    （ADR-0074/C-ext-24 依赖登记方向机器防线）
  * 4. 分组：包必须在 taiji/（taiji 集成）或 universal/（独立通用）分组下；
  *    package.json 的 taiji.role 必须与所在分组一致；role=taiji 的包必须在
  *    mandatory-extensions.json（taiji 集成包随应用打包，见 docs/extensions/extension-conventions.md）
@@ -107,6 +110,41 @@ for (const entry of entries) {
       if (!entryNames.has(name) && !sharedNames.has(name) && !packageNames.has(name)) {
         fail(`条目 ${entry.name} 的 dependsOn 引用无法解析: ${name}`)
       }
+    }
+  }
+}
+
+// ── 3b. 反向：package.json 声明的内部依赖必须登记进 dependsOn ──────
+// 正向（检查项 3）只防「登记了不存在的包」，防不了「真实依赖不登记」——依赖
+// 漏登记会让 ADR-0074/C-ext-24 的「依赖登记方向」只剩 review 兜底（extensions
+// 未经登记即可消费共享包/他包，绕过登记审计面）。反向闭环 = dependencies/
+// peerDependencies 声明的 @zhushanwen/* / @taiji/* 包必须出现在该条目
+// dependsOn，漏登记即红（type 不限：package/optional/runtime 均为合法登记形态）。
+const internalDep = (name) => name?.startsWith('@zhushanwen/') || name?.startsWith('@taiji/')
+const reverseCheckTargets = [
+  ...diskPackages,
+  ...scanPackageDirs(SHARED_DIR).map((p) => ({ ...p, directory: `extensions/shared/${p.dir}` })),
+]
+for (const pkg of reverseCheckTargets) {
+  if (!internalDep(pkg.name)) continue
+  const entry = entries.find((e) => e.name === pkg.name)
+  if (!entry) {
+    // 分组包缺条目已由检查项 2 报过，不重复计数；shared 库缺条目此前无检查
+    // 覆盖（检查项 2 只扫分组目录）——包存在却无条目 = 依赖图节点缺失，
+    // 其 dependsOn 无处登记，在此一并拦截
+    if (pkg.directory.startsWith('extensions/shared/')) {
+      fail(`shared 库 ${pkg.name}（${pkg.directory}）无 extension-dependencies.json 条目（依赖图节点缺失，无法登记其 dependsOn）`)
+    }
+    continue
+  }
+  const registered = new Set((entry.dependsOn ?? []).map((d) => d.package))
+  const declared = [
+    ...Object.keys(pkg.pkg.dependencies ?? {}),
+    ...Object.keys(pkg.pkg.peerDependencies ?? {}),
+  ].filter(internalDep)
+  for (const dep of declared) {
+    if (!registered.has(dep)) {
+      fail(`包 ${pkg.name} 的 package.json 依赖 ${dep} 未登记进该条目 dependsOn（依赖漏登记，见 docs/extensions/extension-conventions.md「Extension 依赖管理」）`)
     }
   }
 }

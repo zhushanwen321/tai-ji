@@ -34,6 +34,21 @@
           "package": "@zhushanwen/session-delivery",
           "type": "package",
           "reason": "代码层静态 import createDelivery/DeliveryHandle/DeliveryPort（src/execution/notifier.ts top-level import，投递内核装配），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/subagent-core",
+          "type": "package",
+          "reason": "代码层静态 import boundedPrettySerialize/getBoundNotifyLedger/WorkflowRun/LauncherDeps 等（src/interface/helpers.ts、src/interface/commands.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-subagent-cli",
+          "type": "runtime",
+          "reason": "代码层零 import——引擎包安装位：package.json dependencies 声明使引擎发现扫描器（src/host/pi-host.ts engineRoots 根 1「宿主包自身 node_modules」）能从本包 node_modules 枚举到引擎包；缺失时该发现根为空目录，pi 宿主的引擎发现依赖其余两根（<agentDir>/npm/node_modules 与 dev extensions 位）"
+        },
+        {
+          "package": "@zhushanwen/zcode-subagent-cli",
+          "type": "runtime",
+          "reason": "代码层零 import——引擎包安装位（同 pi-subagent-cli 条目：engineRoots 根 1 供引擎发现扫描器枚举）；缺失时 zcode 引擎在 pi 宿主不可发现，依赖其余两根"
         }
       ]
     },
@@ -66,6 +81,11 @@
           "package": "@zhushanwen/pi-pending-notifications",
           "type": "package",
           "reason": "代码层静态 import countActiveFromEntries（src/adapters/event-handlers/agent-end.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/adapters/goal-control-adapter.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -77,6 +97,11 @@
           "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import guiComponent/guiResult/TreeItem 等 GUI 类型与构造函数（src/model.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/handlers.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -108,6 +133,11 @@
           "package": "@zhushanwen/pi-llm-shared",
           "type": "package",
           "reason": "top-level 静态 import readUiLocale（src/i18n.ts，经 ./ui-locale 子路径出口，ui-preferences.json locale 读取单点），缺失即模块加载抛 Cannot find module"
+        },
+        {
+          "package": "@zhushanwen/pi-exec-skills",
+          "type": "package",
+          "reason": "代码层静态 import resolveSkills/SkillResolution（src/enter.ts top-level re-export，export { resolveSkills } from \"@zhushanwen/pi-exec-skills\"，ADR-0074 执行门禁单源）与 detectExecSkills/ExecSkill（src/tool.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -129,6 +159,11 @@
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import toErrorMessage（src/index.ts top-level import，ext-simplify-18 D1 采用批），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/channel-registry-register.ts、src/channel-handler.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -140,6 +175,11 @@
           "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import scanPendingEntries/applyPendingDiff（src/state.ts top-level import，ext-simplify-13 E6 差集规则单点委托），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -156,6 +196,11 @@
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import oncePerProcess/isRecord/toErrorMessage（src/index.ts、config.ts、pipeline.ts、ast/analyzer.ts、ast/loader.ts、classifier/classifier.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/production.ts、src/footer-provider.ts、src/pipeline.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -177,6 +222,11 @@
           "package": "@zhushanwen/pi-llm-shared",
           "type": "package",
           "reason": "top-level 静态 import readUiLocale（src/i18n.ts，经 ./ui-locale 子路径出口，ui-preferences.json locale 读取单点），缺失即模块加载抛 Cannot find module"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/ack-provider.ts、src/replay.ts、src/runtime.ts 等 top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -193,6 +243,11 @@
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import isRecord 排数组严版（src/llm.ts top-level import，extractUserPromptText/extractFinalText/extractMessageText 三消费点）与 isEnoentError（src/pure.ts top-level import，ext-simplify-18 D3），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger/setPiHandle（src/index.ts、src/llm.ts、src/landing.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -273,12 +328,24 @@
     {
       "name": "@zhushanwen/pi-system-prompt",
       "directory": "extensions/taiji/system-prompt",
-      "dependsOn": []
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
     },
     {
       "name": "@zhushanwen/pi-msg-id-mapper",
       "directory": "extensions/taiji/msg-id-mapper",
-      "dependsOn": []
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
     },
     {
       "name": "@zhushanwen/pi-system-prompt-trace",
@@ -288,6 +355,11 @@
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import isRecord（src/types.ts、src/baseline.ts top-level import，ext-simplify-18 D2 采用批），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import setPiHandle（src/index.ts）与 getLogger（src/trace.ts）（ top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -356,6 +428,11 @@
           "package": "@zhushanwen/pi-pending-notifications",
           "type": "optional",
           "reason": "运行时经 EventBus emit pending:register/pending:unregister + pi.sendMessage 完成通知（代码层零 import，经 notify.ts 模块级 pi 引用投递）；未加载时通知链路缺失但 bash 后台功能完整（D16 peer 门槛：package.json peerDependencies 声明 optional 版本门槛 workspace:*，发布时解析为实际版本；pi 0.84.1 核实时点无已加载 extensions 枚举 API、后续版本未重验，运行时检测降级为静态声明）"
+        },
+        {
+          "package": "@zhushanwen/extension-protocol",
+          "type": "package",
+          "reason": "代码层静态 import readOutputTail/getProcessStartTimeSec/killProcessTree/pidStartMatchesRegistered/trimTerminalEntries/isPidAlive 等（src/background/ 下 output-tail.ts/spawn-background.ts/task-store.ts/poller.ts/pending-reconcile.ts top-level import，后台任务原语复用 extension-protocol background-task 出口），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -377,6 +454,27 @@
           "package": "@zhushanwen/pi-file-lock",
           "type": "package",
           "reason": "代码层静态 import withFileLockSync（src/config.ts top-level import，saveConfig 锁内原子写互斥），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
+    },
+    {
+      "name": "@zhushanwen/pi-ext-guards",
+      "directory": "extensions/shared/ext-guards",
+      "dependsOn": []
+    },
+    {
+      "name": "@zhushanwen/pi-extension-logger",
+      "directory": "extensions/shared/extension-logger",
+      "dependsOn": []
+    },
+    {
+      "name": "@zhushanwen/pi-file-lock",
+      "directory": "extensions/shared/file-lock",
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

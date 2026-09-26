@@ -449,7 +449,7 @@ describe('Extension Upgrade', () => {
         nextPushId: vi.fn().mockReturnValue('push_1'),
         sessionService: { getRpcClient: vi.fn().mockReturnValue(undefined) },
         extensionService,
-        extensionTimeoutMgr: { isBridgeRequest: vi.fn().mockReturnValue(false), clearTimeout: vi.fn() },
+        extensionTimeoutMgr: { isBridgeRequest: vi.fn().mockReturnValue(false), removeRequest: vi.fn() },
       }
       return { ctx, cap }
     }

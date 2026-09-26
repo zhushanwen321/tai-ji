@@ -203,7 +203,7 @@ export function sendExtensionUIResponse(sessionId: string, requestId: string, me
 /**
  * 拉取指定 session 的 pending UI 请求（切换 session 后重新订阅时调用）。
  * runtime 返回 session 级只读快照（非破坏，多次拉取幂等，与 session.commands 快照语义同构）；
- * respond 后 runtime 侧 removePendingRequest 收缩快照。前端按 requestId 去重，
+ * respond 后 runtime 侧 removeRequest 收缩快照。前端按 requestId 去重，
  * 因实时 extension.ui_request 帧可能已入队同一请求（详见 useExtensionUI push 处 dedup）。
  */
 export async function getPendingRequests(sessionId: string): Promise<ExtensionUIRequest[]> {

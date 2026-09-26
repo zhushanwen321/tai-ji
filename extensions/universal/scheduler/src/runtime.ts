@@ -299,7 +299,7 @@ export class SchedulerRuntime {
     // 「B dispatch 先切 Y → 对账持 A 旧记录把 Y 静默切回」的交错（Y 从未生效、全序列
     // 无报错，G4 被绕过）。恢复执行时 await 完成，保证恢复 setModel 完成后 dispatch 循环
     // 才开 setModel；更广的「任意两个 setModel 不并发」由模型 op 串行队列（modelOpChain）
-    // 结构保证——含 turn_end 恢复 fire-and-forget 挂点，dispatch 模型分支排在其后。
+    // 结构保证——含 agent_settled 恢复 fire-and-forget 挂点，dispatch 模型分支排在其后。
     // 无未决记录的绝大多数 tick 同步返回、不引入 microtask 断点——dispatch 的同步段
     // 契约（in-flight 守卫在 tickScheduler() 未 await 时同步可见）保持不变。
     const reconciling = this.reconcileModelSwitch()
@@ -415,7 +415,7 @@ export class SchedulerRuntime {
         skipped = true
       } else {
         // 模型 op 串行段（MF-2 收口，互斥窗口全程覆盖「setModel 起步 → 记录创建」）：
-        // 前序模型 op（turn_end 恢复 / 前序 dispatch 切换 / 错误路径恢复）可能仍在途——
+        // 前序模型 op（agent_settled 恢复 / 前序 dispatch 切换 / 错误路径恢复）可能仍在途——
         // 排队等待期间未决记录与当前模型均可能变化，禁止按排队前快照盲切（旧快照的
         // expectedModelRef 会把恢复锚点记错），串行段内重新校验后再切换。后来的需切模型
         // 任务同样排队、出队时重新校验命中互斥 skip——双记录叠写 / 两个 setModel 并发
@@ -630,8 +630,8 @@ export class SchedulerRuntime {
    * 执行恢复（切回会话期望模型）并关闭未决记录（在途标记生命周期收口）：
    * 当前模型已等于期望（用户已手动切回）→ 清记录不动作；setModel(原) false →
    * restore-failed 终态（日志含恢复动作：会话停留在任务模型，需手动切回）+ 清记录。
-   * 记录先关后恢复——防 await setModel 期间 turn_end 与 tick 对账并发重入。
-   * 恢复 setModel 本体经模型 op 串行队列（serializeModelOp，MF-2）：turn_end 挂点的
+   * 记录先关后恢复——防 await setModel 期间 agent_settled 与 tick 对账并发重入。
+   * 恢复 setModel 本体经模型 op 串行队列（serializeModelOp，MF-2）：agent_settled 挂点的
    * fire-and-forget 调用由此变为安全——在途恢复持队，后续任何 setModel 发起点
    * （dispatch 切换 / 对账恢复）排队等待，两个 setModel 并发结构性不可能（完成顺序
    * 不定 → turn 静默跑错模型的交错被消除）。「当前 == 期望」复核移入串行段：排队

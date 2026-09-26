@@ -87,15 +87,13 @@ export class ExtensionMessageHandler {
     const { sessionId: extSid, requestId, method, result: extResult } = msg.payload
 
     if (this.ctx.extensionTimeoutMgr.isBridgeRequest(requestId)) {
-      this.ctx.extensionTimeoutMgr.removeBridgeRequest(requestId)
-      this.ctx.extensionTimeoutMgr.removePendingRequest(extSid, requestId)
+      this.ctx.extensionTimeoutMgr.removeRequest(requestId)
       return
     }
 
     const client = this.ctx.sessionService.getRpcClient(extSid)
     if (!client) {
-      this.ctx.extensionTimeoutMgr.clearTimeout(requestId)
-      this.ctx.extensionTimeoutMgr.removePendingRequest(extSid, requestId)
+      this.ctx.extensionTimeoutMgr.removeRequest(requestId)
       return this.ctx.sendError(ws, 'handler_error', `No active session for extension response: ${extSid}`, msg.id, { sessionId: extSid })
     }
     // M1/RT-1#4：sendRaw 返 false（pi 进程不在/已退出或 stdin 写失败）时该应答已无法
@@ -104,8 +102,7 @@ export class ExtensionMessageHandler {
     // error envelope 上行（无 msg.id 的 fire-and-forget，renderer 经 route-inbound D6b
     // onSessionError 兜底进消息流 + toast，用户作答不再石沉大海）。
     const delivered = client.sendExtensionUiResponse(requestId, extResult ?? null, method)
-    this.ctx.extensionTimeoutMgr.clearTimeout(requestId)
-    this.ctx.extensionTimeoutMgr.removePendingRequest(extSid, requestId)
+    this.ctx.extensionTimeoutMgr.removeRequest(requestId)
     if (!delivered) {
       return this.ctx.sendError(
         ws,

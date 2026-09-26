@@ -3004,7 +3004,7 @@
     },
     {
       "id": "C-ext-24",
-      "summary": "命令/技能获取统一走 @zhushanwen/pi-exec-skills 共享包（extensions/shared/exec-skills/，ADR-0074）：detectExecSkills 自研扫描直读磁盘 = 发现（技能热装即时可见），resolveSkills = 执行门禁（pi.getCommands 过滤 source==='skill' 确认 pi 实际认得）；禁止各扩展自扫 skill 目录或直用 pi 注册表快照（getCommands 启动加载集，reload 才刷新）形成第二实现。机器执行点 = 依赖登记方向（extensions 对共享包的 dependsOn 经 check-extension-dependencies.mjs 校验悬空引用）；pi bump 的目录/overrides 语义漂移由 pi-semantics PS-53 探针族重验兜住",
+      "summary": "命令/技能获取统一走 @zhushanwen/pi-exec-skills 共享包（extensions/shared/exec-skills/，ADR-0074）：detectExecSkills 自研扫描直读磁盘 = 发现（技能热装即时可见），resolveSkills = 执行门禁（pi.getCommands 过滤 source==='skill' 确认 pi 实际认得）；禁止各扩展自扫 skill 目录或直用 pi 注册表快照（getCommands 启动加载集，reload 才刷新）形成第二实现。机器执行点 = check-extension-dependencies.mjs 依赖登记双向校验——反向：包 package.json dependencies/peerDependencies 声明的 @zhushanwen/* / @taiji/* 包必须登记进 extension-dependencies.json 该条目 dependsOn，漏登记即红（含 extensions/shared/ 库的条目存在性）；正向：dependsOn 引用的 workspace 内包必须可解析，悬空引用即红；pi bump 的目录/overrides 语义漂移由 pi-semantics PS-53 探针族重验兜住",
       "scope": [
         "extensions/**"
       ],

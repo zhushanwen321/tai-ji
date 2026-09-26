@@ -5,7 +5,7 @@
  * 覆盖：
  *   create                 独立测试项目目录生成（SKILL.md + 清理标记）
  *   frontmatter            pi parseFrontmatter 解析：plan-exec 严格 === true + description 必填门
- *   detect-positive        真实 detectExecSkills（extensions/universal/plan/src/exec-skills.ts）命中 fixture 技能
+ *   detect-positive        真实 detectExecSkills（extensions/shared/exec-skills/src/exec-skills.ts）命中 fixture 技能
  *   detect-negative-untrusted   untrusted 项目跳过项目级根（④）→ 不命中
  *   detect-negative-no-marker   无 plan-exec 标记的兄弟技能 → 不命中
  *   dry-run-create         生成 dry-run 零落盘 + 动作清单
@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 
 import { parseFrontmatter } from '@earendil-works/pi-coding-agent';
 
-import { detectExecSkills, hasPlanExecMarker } from '../../../../extensions/universal/plan/src/exec-skills.ts';
+import { detectExecSkills, hasPlanExecMarker } from '../../../../extensions/shared/exec-skills/src/exec-skills.ts';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_TOOL = join(SCRIPT_DIR, 'fixture-skill.mjs');

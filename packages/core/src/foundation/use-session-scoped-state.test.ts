@@ -6,6 +6,8 @@
  * - current 按 sid 查分区
  * - update(updater) 操作当前分区
  * - cleanup(sid) 移除分区
+ * - D-B2-1：cleanup 后 updateFor 对已删分区 no-op（迟到写拦截）+ 重新 init 出列后
+ *   updateFor 恢复写入（删后同 id 重建不丢写）
  * - 切 sid 后 current 切分区（不丢旧数据，切回恢复）
  * - null sid 返回默认实例不写 Map（防 null key 污染）
  * - registerSessionCleanup / triggerSessionCleanups 注册触发机制
@@ -147,6 +149,43 @@ describe('W1 useSessionScopedState: Map 分区工厂', () => {
     // 再次访问 a → 重新 init，状态重置
     expect(result.current.value).toEqual({ n: 0 })
     expect(init).toHaveBeenCalledTimes(2)
+  })
+
+  it('D-B2-1：cleanup 后 updateFor 对已删分区 no-op（迟到写不复活分区）', () => {
+    const init = vi.fn(() => ({ v: 0 }))
+    const sid = ref<string | null>('late-write')
+    const { result } = runWithScope(() => useSessionScopedState(sid, init))
+
+    void result.current.value // 建立 'late-write' 分区
+    result.update((s) => { s.v = 42 })
+    expect(init).toHaveBeenCalledTimes(1)
+
+    // session 销毁（cleanup：分区删除 + deletedSids 记入）后，迟到的 RPC resolve /
+    // 广播经 updateFor 到达：拦截 no-op，不重建分区、不写入
+    result.cleanup('late-write')
+    result.updateFor('late-write', (s) => { s.v = 99 })
+    expect(init).toHaveBeenCalledTimes(1) // updateFor 未触发分区重建
+
+    // 佐证迟到写未落地：current 路径读分区 = 重建点，新实例从初始值开始（而非 99）
+    expect(result.current.value.v).toBe(0)
+    expect(init).toHaveBeenCalledTimes(2)
+  })
+
+  it('D-B2-1 出列规则锚：cleanup 后经 current 重新 init，updateFor 恢复写入落新分区', () => {
+    const sid = ref<string | null>('reborn')
+    const { result } = runWithScope(() => useSessionScopedState(sid, () => ({ v: 0 })))
+
+    void result.current.value
+    result.update((s) => { s.v = 1 })
+    result.cleanup('reborn')
+
+    // 重建点即出列点：current 路径重新 init（update 路径共享 getOrCreatePartition 单点，
+    // 出列行为同构），同 sid 删除后重建（重导入等边缘形态）进入新生命周期
+    expect(result.current.value.v).toBe(0)
+
+    // 出列后 updateFor 恢复写入：删后同 id 重建不丢写
+    result.updateFor('reborn', (s) => { s.v = 42 })
+    expect(result.current.value.v).toBe(42)
   })
 
   it('切 sid 不丢旧数据，切回恢复（AC-2 隐含契约）', () => {
