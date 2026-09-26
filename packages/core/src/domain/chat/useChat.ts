@@ -1445,7 +1445,8 @@ export function createUseChat(deps: UseChatDeps) {
  *   UI 卡「进行中…」而回复实际已生成。
  *
  * 与 disposeSession 的区别：session 仍存在（dead 占位 UI 可「重新打开」），只失效订阅，
- * 不清 chat store 分区/截断窗口状态/manualCompaction 等业务状态。
+ * 不清 chat store 分区/截断窗口状态等业务状态（reject 消化标记的清理在
+ * disposeSession 的 clearDigestSession，本函数不动）。
  */
 export function invalidateStreamSubscription(sessionId: string): void {
   const unsub = streamSubscriptions.get(sessionId)

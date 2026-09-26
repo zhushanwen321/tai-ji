@@ -21,9 +21,9 @@ import type { PlanLifecycleState } from './state-machine'
 
 /**
  * plan-state entry 的 customType（pi appendEntry custom entry 判别键）。磁盘形态冻结：
- * 扩展写侧 persistPlanState 以同字面量落盘（两侧独立表达式，值域单源在本常量），
- * runtime 投影链（plan-state-extractor / session-records）经包出口消费——改字面量即
- * 历史会话全部失联，禁改。
+ * 扩展写侧 persistPlanState 以同字面量落盘（两侧独立表达式——值的权威登记处在本常量，
+ * 写侧字面量不经本常量派生，改字面量须两侧同改），runtime 投影链（plan-state-extractor /
+ * session-records）经包出口消费——改字面量即历史会话全部失联，禁改。
  */
 export const PLAN_STATE_CUSTOM_TYPE = 'plan-state'
 

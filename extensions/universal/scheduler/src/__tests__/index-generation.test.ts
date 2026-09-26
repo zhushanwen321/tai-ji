@@ -69,8 +69,7 @@ vi.mock('../runtime.js', async (importOriginal) => {
 })
 
 import schedulerExtension from '../index.js'
-
-const TICK_INTERVAL_MS = 30_000
+import { TICK_INTERVAL_MS } from '../runtime.js'
 
 /**
  * 最小 fake pi：与 index-session-start.test.ts 同款，覆盖 factory 消费的 API 面

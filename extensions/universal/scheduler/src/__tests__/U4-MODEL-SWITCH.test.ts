@@ -32,10 +32,8 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
 }))
 
 import { MockSchedulerBackend } from './mock-backend.js'
-import { SchedulerRuntime, type SchedulerModelOps } from '../runtime.js'
+import { TICK_INTERVAL_MS, SchedulerRuntime, type SchedulerModelOps } from '../runtime.js'
 import type { ScheduledTask } from '../types.js'
-
-const TICK_INTERVAL_MS = 30_000
 const ORIG = 'prov-a/model-1'
 const TASK_M = 'prov-b/model-2'
 const OTHER_M = 'prov-c/model-3'

@@ -101,8 +101,11 @@ function getGoalInit(): GoalInitFn | undefined {
 }
 
 /**
- * 从 plan 文件路径推导 goal slug（kebab-case；无有效字符时 fallback）。
- * 仅 widget 标题 + history 展示用，不注入 prompt。
+ * goal 桥侧 slug（仅 widget 标题 + history 展示用，不注入 prompt）。生产输入恒为
+ * <project>/.tmp/plans/<slug>/plan.md（enter.ts 构造，basename 恒 plan.md）→ 恒返回
+ * 'plan'——正则链与 fallback 只防「planFilePath 非生产形态」的通用输入，正常路径
+ * 不可达。若需区分度（改取路径中 requirement slug 段）属 goal 桥侧跨包展示语义
+ * 变更，须单独裁决后实施，裁决前保持现状。
  */
 function buildPlanSlug(planFilePath: string): string {
   const stem = basename(planFilePath)

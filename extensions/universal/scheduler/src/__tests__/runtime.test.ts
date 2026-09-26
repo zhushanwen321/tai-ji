@@ -11,7 +11,7 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
 }))
 
 import { MockSchedulerBackend } from './mock-backend.js'
-import { SchedulerRuntime } from '../runtime.js'
+import { TICK_INTERVAL_MS, SchedulerRuntime } from '../runtime.js'
 
 // MockSchedulerBackend 零 FS 副作用：runtime 不再触碰 store，无需 mock store.js。
 
@@ -515,7 +515,6 @@ describe('SchedulerRuntime', () => {
   // 自停；其他错误 → warn "tick error" 继续调度。修复前 tick 内异常无人接住 →
   // unhandledRejection → pi 主进程 exit 1。
   describe('tick 错误分诊（F2）', () => {
-    const TICK_INTERVAL_MS = 30_000
 
     beforeEach(() => {
       vi.useFakeTimers()
@@ -589,7 +588,6 @@ describe('SchedulerRuntime', () => {
   //   clearExtensionCache 后 jiti 重 import 全新模块环境，旧闭包的模块级代数冻结不再递增，
   //   只剩文案能识别 stale；模块级方案的装配级验证见 index-generation.test.ts factory 重跑用例）
   describe('G1: 代际检测分诊（S9）', () => {
-    const TICK_INTERVAL_MS = 30_000
     let staleFlag: boolean
     let genRuntime: SchedulerRuntime
 

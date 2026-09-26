@@ -16,7 +16,9 @@ const logger = getLogger('scheduler')
 
 const MAX_TASKS = 50
 const RATE_LIMIT_PER_MINUTE = 6
-// 导出：ack 写盘自检复用同一节奏常量（禁新造魔数），值 = tick 间隔。
+// tick 间隔（30s）。导出供测试 import 复用（fake timers 推进量与生产节奏同源——禁
+// 测试本地重造 30_000 魔数，改值即测试锚同步漂移）；ack 写盘自检为事件驱动
+//（message_start / turn_end 挂点触发 maybeStartAck），不引用本常量。
 export const TICK_INTERVAL_MS = 30_000
 const DEFAULT_EXPIRY_DAYS = 7
 const DEFAULT_EXPIRY_MS = DEFAULT_EXPIRY_DAYS * MS_PER_DAY // 7 days

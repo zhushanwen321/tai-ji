@@ -16,8 +16,8 @@
  * 行为语义（per key × session 单槽，重复发起覆盖上一轮）：
  * - markDigestInitiated：RPC 发出前置 false（新一次发起重置上一轮残留）；
  * - markDigestConsumed：终态帧到达置 true——仅在未决条目存在时置位（「不污染」守卫：
- *   auto-compaction 等非本原语发起路径的终态帧不置位，承接 manualCompactionState
- *   has 守卫既有语义）；
+ *   auto-compaction 等非本原语发起路径的终态帧不置位，承接原 compact 正向标记的
+ *   has 守卫既有语义——该状态已随本收敛退役，git 可追溯）；
  * - isDigestConsumed：reject catch 处判定——true = 错误已被对话流呈现 → 抑制 toast；
  *   false = 无终态可呈现（transport 级失败 / 终态帧延迟）→ toast 兜底。
  *

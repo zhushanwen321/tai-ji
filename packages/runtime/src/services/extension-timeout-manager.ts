@@ -51,6 +51,12 @@ export class ExtensionTimeoutManager {
   /**
    * 挂起单表：sessionId → (requestId → entry)。唯一存储结构——
    * 登记写表，清理摘 entry。
+   *
+   * 命名债：类名与消费方字段名（extensionTimeoutMgr）保留历史超时语义，现职责 =
+   * 挂起请求登记处（本文件头注「生命周期管理（无超时）」口径，超时链已整体删除）。
+   * 改名横跨 19+ 消费方，设计 D-B2-2 裁决只收敛方法名（clearTimeout 族 →
+   * removeRequest，已落地），类名/字段名留后续清理批（候选形态 = 职责名如
+   * PendingRequestRegistry），非本设计义务。
    */
   private requests = new Map<string, Map<string, PendingRequestEntry>>()
 

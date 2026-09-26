@@ -155,10 +155,6 @@ export function useSessionScopedState<T>(
     version.value += 1
   }
 
-  // current computed：按 sid.value 查分区
-  // null sid 时返回 init() 默认实例但不写入 Map——防 null 作为 key 污染分区表，
-  // 且对 null 实例的修改不持久（每次 computed 重算新建），不泄漏到真实 session。
-  // computed 缓存特性保证同一次 null 期间多次访问拿到同一实例（init 仅在重算时调）。
   // current computed：按 sid.value 查分区。
   // 依赖 version：cleanup 移除分区后 bump version，computed 失效，下次访问重算 → 重新 init。
   // null sid 时返回 init() 默认实例但不写入 Map——防 null 作为 key 污染分区表，
