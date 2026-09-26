@@ -1,20 +1,22 @@
 /**
- * U4_MODEL_SWITCH：dispatch 模型切换（设计 D3 修订版）验收
+ * U4_MODEL_SWITCH：dispatch 模型切换（设计 D3 修订版 + D1 归属简化）验收
  *
- * 覆盖设计 §3.3 D3 的五块机制（探针 P-MODEL 修订后语义）：
+ * 覆盖设计 §3.3 D-B4-4 D1 的五块机制（D1 终态：agent_settled + isIdle 复核拆 turnIndex
+ * 归属状态机——原 turnIndex 归属：4 状态字段 + 6 事件挂点 + customType 前缀匹配）：
  * - 切换：dispatchTaskInner 在 sendMessage 前 setModel（busy 亦生效——本层不做 idle 检查）
- * - 归属与恢复：message_start customType 前缀匹配 + run 窗口内 turnIndex 序态关联；
- *   turn_end(dispatchedTurnIndex) + isIdle 复核推迟；agent_end 封口 run 窗口；
- *   agent_settled 封口 + awaiting-restore 即时兑现（恢复延迟从最长 1 tick 收敛到事件即时）
+ * - 恢复：agent_settled（run 完全落定）+ isIdle 复核是唯一事件通道——idle 即恢复；
+ *   非 idle（settled 与用户新 run 交错）转 awaiting-restore 推迟，tick 重入 idle 兑现；
+ *   不挂 agent_end（end 后可能有自动续跑 turn，恢复只认 settled）
  * - 互斥：切换在途时其他需切模型任务 skip + pending 留待下 tick 重试
- * - 串行化（MF-2）：turn_end 恢复在途 / 切换 setModel 在途未建记录窗口内，后继需切模型
+ * - 串行化（MF-2）：settled 恢复在途 / 切换 setModel 在途未建记录窗口内，后继需切模型
  *   任务的 setModel 排队等前序模型 op 完成（任意两个 setModel 不并发、双记录不叠写）
- * - 对账兜底：严格先于同 tick dispatch 循环；在途标记 2 tick 过期强制开放；未决记录守卫
- *   （无记录时模型漂移 = 用户自主行为不动作）
+ * - 对账兜底（时间平抑红线登记见 runtime.ts MODEL_SWITCH_RECONCILE_TICKS）：严格先于同
+ *   tick dispatch 循环；在途标记 2 tick 过期强制开放（agent_settled 丢失的兜底路径）；
+ *   未决记录守卫（无记录时模型漂移 = 用户自主行为不动作）
  * - 降级与接管副作用：setModel false 不阻塞 dispatch；sendMessage 抛错 catch 先恢复；
  *   模型语义异常只走日志（不进持久化词表）
  *
- * 事件注入：直接调用 runtime 的 handle* 事件入口（index.ts 的 pi.on 只做转发）。
+ * 事件注入：直接调用 runtime 的 handleRunSettled（index.ts 的 pi.on 只做转发）。
  * tick：fake timers 驱动真实 interval（对齐 runtime.test.ts F2 形态）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -60,7 +62,7 @@ class ModelOpsMock implements SchedulerModelOps {
   }
 }
 
-/** 纯 microtask 冲刷：handleTurnEnd 的恢复是 fire-and-forget async，断言前等待其 await 链完成 */
+/** 纯 microtask 冲刷：handleRunSettled 的恢复是 fire-and-forget async，断言前等待其 await 链完成 */
 async function flushAsync(): Promise<void> {
   for (let i = 0; i < 5; i++) await Promise.resolve()
 }
@@ -69,11 +71,6 @@ async function flushAsync(): Promise<void> {
  * 跨多个 await 边界（≥8 轮），固定 5 轮会卡在结算中途误报未完成。 */
 async function flushAsyncRounds(rounds: number): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve()
-}
-
-/** dispatch 注入的 custom message 形状（P-MODEL-④ 实测 payload） */
-function dispatchCustomMessage(): Record<string, unknown> {
-  return { role: 'custom', customType: 'pi-scheduler:dispatched', content: 'job', display: true, timestamp: 0 }
 }
 
 describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
@@ -102,27 +99,20 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
     return runtime.addTask(prompt, { mode: 'interval', intervalMs: 600_000 }, { model })
   }
 
-  /** 事件序注入（P-MODEL-④ 实测序态）：agent_start → turn_start(n) → message_start(custom) → turn_end(n) */
-  function injectDispatchTurn(turnIndex: number): void {
-    runtime.handleAgentStart()
-    runtime.handleTurnStart(turnIndex)
-    runtime.handleMessageStart(dispatchCustomMessage())
-    runtime.handleTurnEnd(turnIndex)
-  }
-
-  describe('切换与归属恢复', () => {
-    it('task.model ≠ 当前 → setModel(目标) + 归属 turn 结束后恢复(原)', async () => {
+  describe('切换与 settled 恢复', () => {
+    it('task.model ≠ 当前 → setModel(目标)；agent_settled + idle 即恢复(原)，重复 settled 不二次恢复', async () => {
       task = await addModelTask('job', TASK_M)
       const ok = await runtime.dispatchTask(task)
       expect(ok).toBe(true)
       expect(ops.setModelCalls).toEqual([TASK_M])
 
-      injectDispatchTurn(0)
+      // run 完全落定（agent_settled）+ idle：唯一事件通道立即兑现，无需推进 tick
+      runtime.handleRunSettled()
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
 
-      // 记录已清：重复 turn_end 不二次恢复
-      runtime.handleTurnEnd(0)
+      // 记录已清：重复 settled 不二次恢复
+      runtime.handleRunSettled()
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
     })
@@ -133,141 +123,26 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(ok).toBe(true)
       expect(ops.setModelCalls).toEqual([])
 
-      injectDispatchTurn(0)
+      runtime.handleRunSettled()
       await flushAsync()
       expect(ops.setModelCalls).toEqual([])
     })
 
-    it('turn_end 非 idle → 推迟（无立即恢复），tick 重入 idle 即兑现', async () => {
+    it('settled 非 idle（与用户新 run 交错）→ 转 awaiting-restore 推迟，tick 重入 idle 兑现', async () => {
       task = await addModelTask('job', TASK_M)
       await runtime.dispatchTask(task)
-
-      // 用户长 run 在途（非 idle）：turn_end 只推迟
-      ops.idle = false
-      injectDispatchTurn(0)
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // run 沉降后 tick 重入：恢复兑现
-      ops.idle = true
-      runtime.startScheduler()
-      await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS)
-      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
-    })
-
-    it('agent_settled 即时兑现：awaiting-restore + idle → 不等 tick 立即恢复', async () => {
-      task = await addModelTask('job', TASK_M)
-      await runtime.dispatchTask(task)
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // 用户长 run 在途：turn_end 推迟为 awaiting-restore
-      ops.idle = false
-      injectDispatchTurn(0)
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // run 完全沉降（agent_settled）：立即恢复，无需推进 30s tick
-      ops.idle = true
-      runtime.handleRunSettled()
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
-    })
-
-    it('agent_settled 与用户新 run 交错（非 idle）→ 不动作，tick 兜底仍兑现', async () => {
-      task = await addModelTask('job', TASK_M)
-      await runtime.dispatchTask(task)
-
-      ops.idle = false
-      injectDispatchTurn(0)
-      await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M])
 
       // settled 事件处理时用户已开始新 run（isIdle false）：不能切（会把新 run 模型换掉）
+      ops.idle = false
       runtime.handleRunSettled()
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M])
 
-      // 兜底不变：后续 tick 重入 idle 仍恢复
+      // 兜底不变：后续 tick 重入 idle 仍恢复（awaiting-restore 无窗口过期）
       ops.idle = true
       runtime.startScheduler()
       await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS)
-      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
-    })
-
-    it('agent_end 纯封口不恢复（只有 settled 兑现）：awaiting-restore 态下 end 后仍不动作', async () => {
-      task = await addModelTask('job', TASK_M)
-      await runtime.dispatchTask(task)
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // 构造 awaiting-restore：归属 turn_end 时非 idle（用户长 run 在途）→ 推迟
-      ops.idle = false
-      runtime.handleAgentStart()
-      runtime.handleTurnStart(0)
-      runtime.handleMessageStart(dispatchCustomMessage())
-      runtime.handleTurnEnd(0)
-      ops.idle = true
-      // run 末尾 agent_end：纯封口——end 后可能仍有自动续跑 turn（retry/compaction/
-      // queued continuation），此时切回会把续跑 turn 的模型换掉
-      runtime.handleRunClosed()
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // 对照：同一状态下 agent_settled 立即兑现（a 段不动作 ≠ 状态机卡死）
-      runtime.handleRunSettled()
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
-    })
-
-    it('in-flight 态（归属 turn_end 未到达）settled 不动作：归属异常归 tick 对账', async () => {
-      task = await addModelTask('job', TASK_M)
-      await runtime.dispatchTask(task)
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // in-flight + idle：settled 不动 in-flight（turn_end 丢失的强制开放归 2-tick 对账）
-      ops.idle = true
-      runtime.handleRunSettled()
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // 归属 turn_end 到达后既有通道正常恢复
-      injectDispatchTurn(0)
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
-    })
-
-    it('非匹配事件不触发恢复：非 custom / 非前缀 / turnIndex 不匹配 / run 窗口封口', async () => {
-      task = await addModelTask('job', TASK_M)
-      await runtime.dispatchTask(task)
-
-      // a) 非 custom message（assistant 形状）不归属
-      runtime.handleAgentStart()
-      runtime.handleTurnStart(0)
-      runtime.handleMessageStart({ role: 'assistant', provider: 'p', model: 'm', content: [], timestamp: 0 })
-      runtime.handleTurnEnd(0)
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // b) customType 非 pi-scheduler: 前缀不归属
-      runtime.handleMessageStart({ role: 'custom', customType: 'other-ext:thing', content: '', display: true, timestamp: 0 })
-      runtime.handleTurnEnd(0)
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // c) 前缀命中但 turnIndex 不匹配（归属 0，结束 1）
-      runtime.handleMessageStart(dispatchCustomMessage())
-      runtime.handleTurnEnd(1)
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // d) run 窗口封口（agent_end/agent_settled）后陈旧索引失效
-      runtime.handleRunClosed()
-      runtime.handleTurnEnd(0)
-      await flushAsync()
-      expect(ops.setModelCalls).toEqual([TASK_M])
-
-      // sanity：封口后新 run 的正常归属仍可恢复（封口只清陈旧索引，不杀记录）
-      injectDispatchTurn(0)
-      await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
     })
 
@@ -278,7 +153,7 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
 
       // 模拟恢复期 setModel 失败（无可用 key 等）
       ops.setModelResult = false
-      injectDispatchTurn(0)
+      runtime.handleRunSettled()
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
       const warnText = loggerMock.warn.mock.calls.map(c => String(c[0])).join('\n')
@@ -296,7 +171,7 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       await runtime.dispatchTask(task)
       ops.currentRef = ORIG // 用户手动切回
 
-      injectDispatchTurn(0)
+      runtime.handleRunSettled()
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M]) // 无恢复调用
     })
@@ -324,8 +199,8 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(okC).toBe(true)
       expect(backend.sentMessages).toHaveLength(2)
 
-      // A 结算（turn_end + idle 恢复）后 B 重试成功
-      injectDispatchTurn(0)
+      // A 结算（settled + idle 恢复）后 B 重试成功
+      runtime.handleRunSettled()
       await flushAsync()
       const okRetry = await runtime.dispatchTask(taskB)
       expect(okRetry).toBe(true)
@@ -460,7 +335,7 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(internal.pendingModelSwitch!.targetModelRef).toBe(TASK_M)
 
       // A 结算后 B 重试成功（系统收敛，目标模型生效）
-      injectDispatchTurn(0)
+      runtime.handleRunSettled()
       await flushAsync()
       const okRetry = await runtime.dispatchTask(taskB)
       expect(okRetry).toBe(true)
@@ -493,15 +368,15 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(taskB.lastStatus).toBe('success')
 
       // B 的恢复链路随后正常闭环
-      injectDispatchTurn(0)
+      runtime.handleRunSettled()
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG, OTHER_M, ORIG])
     })
   })
 
   describe('模型 op 串行化（MF-2 回归）', () => {
-    it('turn_end 恢复在途时新需切模型任务 dispatch → 新 setModel 排队等恢复完成（先恢复后切换）', async () => {
-      // MF-2 回归：handleTurnEnd 的恢复是 fire-and-forget（先同步清记录再 await setModel(原)）。
+    it('settled 恢复在途时新需切模型任务 dispatch → 新 setModel 排队等恢复完成（先恢复后切换）', async () => {
+      // MF-2 回归：handleRunSettled 的恢复是 fire-and-forget（先同步清记录再 await setModel(原)）。
       // 修复前恢复在途窗口内 pendingModelSwitch 已为 null → 新 dispatch 的互斥检查放行，
       // setModel(目标) 与在途 setModel(原) 并发、完成顺序不定（恢复后完成则该任务 turn
       // 静默跑错模型）。修复后恢复持模型 op 队列，后继 setModel 排队等其完成。
@@ -519,12 +394,12 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       vi.spyOn(ops, 'setModelByRef').mockImplementation(async (ref: string) => {
         ops.setModelCalls.push(ref)
         if (ops.setModelResult) ops.currentRef = ref
-        if (ref === ORIG) await restoreGate // turn_end 恢复挂起在「已发起未完成」态
+        if (ref === ORIG) await restoreGate // settled 恢复挂起在「已发起未完成」态
         return ops.setModelResult
       })
 
-      // A 的 turn 正常结束且 idle → fire-and-forget 恢复启动并挂起
-      injectDispatchTurn(0)
+      // A 的 run 完全落定且 idle → fire-and-forget 恢复启动并挂起
+      runtime.handleRunSettled()
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG])
       // 记录已同步清（先关后恢复不变）——修复前正是这个窗口放行了并发 setModel
@@ -558,17 +433,17 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       expect(backend.sentMessages).toHaveLength(2)
 
       // B 的恢复链路随后正常闭环（终态回 ORIG）
-      injectDispatchTurn(0)
+      runtime.handleRunSettled()
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M, ORIG, OTHER_M, ORIG])
     })
   })
 
   describe('对账兜底', () => {
-    it('在途标记超过 2 tick 未关闭 → 强制开放并对账恢复（事件丢失路径）', async () => {
+    it('agent_settled 丢失：在途标记超过 2 tick 未关闭 → 强制开放并对账恢复（事件丢失路径）', async () => {
       task = await addModelTask('job', TASK_M)
       await runtime.dispatchTask(task)
-      // 无任何事件注入（恢复回调永不执行）
+      // 无任何事件注入（settled 恢复通道不触发）
 
       runtime.startScheduler()
       await vi.advanceTimersByTimeAsync(TICK_INTERVAL_MS) // tick1: ticksOpen=1
@@ -598,8 +473,8 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       const warnText = loggerMock.warn.mock.calls.map(c => String(c[0])).join('\n')
       expect(warnText).toContain('model switch failed')
 
-      // 无未决记录：事件归属不建立、turn_end 无恢复
-      injectDispatchTurn(0)
+      // 无未决记录：settled 不动作（切换失败 = 无恢复对象）
+      runtime.handleRunSettled()
       await flushAsync()
       expect(ops.setModelCalls).toEqual([TASK_M])
     })
