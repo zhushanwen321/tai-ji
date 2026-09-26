@@ -52,7 +52,7 @@ import { detectExecSkills } from "@zhushanwen/pi-exec-skills";
 
 import { handlePlanComplete } from "../compact.js";
 import { createPlanCtx, DEFAULT_PLAN_STATE } from "../state.js";
-import { loadTemplate } from "../templates.js";
+import { listTemplates } from "../templates.js";
 import { PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";
 import { updatePlanWidget } from "../widget.js";
 
@@ -149,11 +149,13 @@ describe("registerPlanTool", () => {
     });
 
     it("content carries the winner file's full text and details has no content field (D7 全文通道唯一化)", async () => {
-      const { exec } = setup();
+      const { exec, ctx } = setup();
       const res = await exec({ action: "select-template", templateName: "feature-plan" });
       const text = res.content[0].text;
-      // 全文到达模型可见通道（对照 loadTemplate 的胜者内容，运行机用户级遮蔽时同样成立）
-      const winnerContent = loadTemplate("feature-plan");
+      // 全文到达模型可见通道（对照同参数合并视图胜者 path 的直读——与生产侧同一次
+      // 扫描语义，运行机用户级遮蔽时两轨拿同一胜者，断言同样成立）
+      const winner = listTemplates({ projectRoot: ctx.cwd }).find((t) => t.name === "feature-plan");
+      const winnerContent = winner ? fs.readFileSync(winner.path, "utf-8") : null;
       expect(winnerContent).not.toBeNull();
       expect(text).toContain(`<template>\n${winnerContent}\n</template>`);
       // details 收窄：仅 action + templateName，全文不再双份持久化

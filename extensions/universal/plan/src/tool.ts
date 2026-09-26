@@ -421,7 +421,7 @@ function executeEnter(
  *   （注入段经 PlanPromptInput.projectRoot 由命令层显式传入，不从 planFilePath
  *   逆推层级）——模型看到什么清单就能选中什么（含用户级/项目级投放）。
  * - 单次扫描复用（C1 去重）：清单查找与内容读取共用同一次扫描产物（胜者 path
- *   直读，不经 loadTemplate 二次扫描；读取行为等价——utf-8、失败 null）。
+ *   直读——utf-8、失败 null）。
  * - content 全文直达模型可见通道（现状全文放 details 不进模型，选完没骨架——
  *   §2.2 第二处错位收口）；details 不再携带全文（零消费方，避免双份持久化）。
  * - 错名报错带可用名字清单：模型当场从报错自愈，无需任何查询 action（D3）。
@@ -448,8 +448,7 @@ function executeSelectTemplate(
   if (!winner) {
     throw new Error(`Template not found: ${templateName}. Available: ${templates.map((t) => t.name).join(", ")}`);
   }
-  // 胜者内容直读（单次扫描复用）：原经 loadTemplate 内部再调 listTemplates 的
-  // 二次扫描删除；读取行为与 loadTemplate 等价（readFileSync utf-8 / 失败 null）
+  // 胜者内容直读（单次扫描复用——readFileSync utf-8 / 失败 null）
   let content: string | null;
   try {
     content = fs.readFileSync(winner.path, "utf-8");

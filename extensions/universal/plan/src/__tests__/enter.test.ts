@@ -27,7 +27,6 @@ vi.mock("node:fs", () => ({
 // Mock templates（enter 的 buildPlanModePrompt 走 listTemplates；单测不扫真实模板目录）
 vi.mock("../templates.js", () => ({
   listTemplates: vi.fn(() => []),
-  loadTemplate: vi.fn(() => null),
   formatAvailablePlans: vi.fn(() => ""),
 }));
 
