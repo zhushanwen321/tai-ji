@@ -937,7 +937,7 @@ describe("index assembly fork (D1)", () => {
     const pi = createMockPi();
     await loadExtension(pi, SCHEMA);
 
-    // setupWorkflowHook 注册 tool_execution_end + turn_end 两个 handler
+    // setupWorkflowHook 注册 tool_execution_end / turn_end 各一个 handler（D2 单 listener 契约）
     const registeredEvents = pi.on.mock.calls.map((c) => c[0]);
     expect(registeredEvents).toContain("tool_execution_end");
     expect(registeredEvents).toContain("turn_end");

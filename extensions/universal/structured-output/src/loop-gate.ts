@@ -1,5 +1,10 @@
 /**
- * 有界失败闸门（D3，U2 / M2）——G2「失败必有界」的执行体。
+ * 有界失败闸门 + steer 记账——双闸门合一状态机（D2 单状态机）+ G2「失败必有界」执行体。
+ *
+ * 状态归属（D2 单状态机）：软 steer（workflow-hook 的重试提醒）与硬杀（本文件的
+ * 同签名失败 terminal）共用 WorkflowGate 一份状态——terminal 单字段单写，turn_end
+ * 守卫链与硬杀幂等短路读同一份事实；若拆成两个状态机，terminal 双写就需要跨对象
+ * 回调同步，漏接线即 steer 与硬杀失步（单状态机使失步在结构上不可能）。
  *
  * 通道选型（设计 §6.3；pi 0.84.1 实装，登记 PS-20）：
  *   参数层失败（事故主形态）在 pi-ai validateToolArguments 抛错（validation.js:272-273）、
@@ -8,8 +13,9 @@
  *   的计数通道是 tool_execution_end 事件（sequential/parallel 两路径的 immediate
  *   分支均 emitToolExecutionEnd：agent-loop.js:277/:318/:348/:358）。
  *
- * 状态机：
- *   - 只统计 name=structured-output 的 isError 事件；其他工具的成功/失败均忽略。
+ * 硬杀侧转移（onToolExecEnd 的 gate 段）：
+ *   - 只统计 name=structured-output 的 isError 事件；其他工具的成功/失败均忽略
+ *     （toolName 过滤在装配层，见 workflow-hook.setupWorkflowHook）。
  *   - 错误签名归一化（审查项#7 签名哈希化）：截掉 "Received arguments:" 起的实参
  *     回显后，提取错误字段/路径 token 集合排序哈希为签名——集合不变 = 模型无进展
  *     （重复同一批字段错误），集合变化（含缩小 = 渐进修复）= 模型在推进。旧 500c
@@ -29,12 +35,21 @@
  *     写日志（stderr + appendEntry 双通道，含 §5.2 形态 b 恢复指引）后
  *     ctx.abort()（停当前 turn，截断 token 燃烧窗口）+ ctx.shutdown() 优雅终止
  *     子进程（RPC mode 在 agent_settled 后 exit），并武装 15s 兜底硬退 timer
- *    （R3 F-2 bounded teardown，覆盖 pi 挂死不 settle 的异常态）。
+ *    （R3 F-2 bounded teardown，覆盖 pi 挂死不 settle 的异常态；副作用序列见
+ *     runTerminalTeardown，装配层在 newlyTerminal 时调用）。
  *   - 成功调用清零（模型走通即无循环）。
  *
- * 与 workflow-hook 的关系：terminal 态经 onTerminal 回调标记 RetryState.terminal，
- * turn_end hook 据此不再 steer（防御性保留——shutdown 正常生效时进程已终止，
- * 该分支是 shutdown 失败路径下的保险）。
+ * steer 侧转移（onToolExecEnd 的记账段 + onTurnEnd，转移表锁定于 retry-state.test.ts）：
+ *   - 失败：soCallCount++ / lastSchemaError 记录（turn_end steer 的回灌文案原料）。
+ *   - 成功：soSucceededEver=true（终态，后续 turn_end 不再干预）。
+ *   - onTurnEnd 仅重置 steer 侧（soCallCount=0 / hookRetryCount++ / lastSchemaError=null），
+ *     **不触碰硬杀侧连续失败计数**——跨 turn 的同签名计数连续性是「3 轮各失败 1 次
+ *     仍会 terminal」的等价前提（characterization-hook ③ 锁定）。
+ *
+ * 与 workflow-hook 的关系：本文件导出状态机与 terminal 副作用链（runTerminalTeardown），
+ * 装配唯一入口在 workflow-hook.setupWorkflowHook（单状态机单 listener：每个事件至多
+ * 一个 listener，同一 tool_execution_end 内先 steer 记账后硬杀计数——与合一前两
+ * listener 的注册顺序一致）。
  *
  * 诚实边界（设计 §6.3）：闸门只终止「同签名无进展」这一种循环形态；签名不断
  * 变化的长尾低效不触发闸门，仍由 workflow 层 maxTurns 兜底。
@@ -43,21 +58,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { guardStaleCtx, isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
-import { isToolExecutionEndEvent } from "./schema-guards.js";
-import {
-	extractToolErrorText,
-	SIGNATURE_MAX_CHARS,
-	truncateText,
-} from "./text-primitives.js";
+import { SIGNATURE_MAX_CHARS, truncateText } from "./text-primitives.js";
 
 type PiAPI = ExtensionAPI;
 
-// 依赖方向说明：本模块 → text-primitives（共享叶节点，导出复用勿复制）。原先经
-// workflow-hook 取 extractToolErrorText 构成的模块环已破除——双方互引的纯函数/常量
-// 下沉到 text-primitives，依赖图单向（loop-gate → text-primitives ← workflow-hook）。
-
-/** 与 tool-definition.ts 的 TOOL_NAME 对应。 */
-const TOOL_NAME = "structured-output";
+// 依赖方向说明：本模块 → text-primitives（共享叶节点，导出复用勿复制），依赖图单向
+//（workflow-hook → loop-gate → text-primitives；D2 后装配层 workflow-hook 消费本模块
+// 的状态机与 terminal 副作用链，本模块不反向依赖装配层）。
 
 /** 连续同签名失败阈值（设计 §6.3：对齐 qwen-code 的 3；workflow 子进程单用途短会话，更快失败更省）。 */
 export const MAX_CONSECUTIVE_FAILURES = 3;
@@ -337,26 +344,65 @@ export function normalizeErrorSignature(errorText: string): string {
 }
 
 /**
- * structured-output 失败循环闸门状态机（纯逻辑，可单测）。
+ * structured-output 双闸门合一状态机（D2 单状态机；纯逻辑，可单测）。
  *
- * 转移表（loop-gate.test.ts 锁定）：
- *   - onToolExecEnd(false)            → 计数/签名清零（成功短路）
- *   - onToolExecEnd(true, text)       → 签名同：计数++；签名异：计数=1（新一轮连续从此失败起算）
- *   - 计数达 MAX_CONSECUTIVE_FAILURES → terminal=true（不可逆；此后任何输入不再变化）
+ * 状态分区（一个对象、一份 terminal 事实）：
+ *   - steer 侧（workflow-hook turn_end 消费）：soCallCount / soSucceededEver /
+ *     hookRetryCount / lastSchemaError。
+ *   - 硬杀侧：lastSignature / consecutiveFailures / lastErrorText。
+ *   - 共享终态：terminal——硬杀触发后置位（不可逆，仅 reset() 可清），turn_end
+ *     守卫链据此停 steer，硬杀计数据此幂等短路。
+ *
+ * 转移表（loop-gate.test.ts / retry-state.test.ts 锁定）：
+ *   onToolExecEnd(hasError, errorText?)（每事件一次，先记账后计数——与合一前两
+ *   listener 的注册顺序一致）：
+ *   - steer 记账段（不受 terminal 短路影响：terminal 后迟到的失败仍记录，闸门自身
+ *     幂等，重复事件无害）：
+ *     - (!hasError)            → soCallCount++ / soSucceededEver=true
+ *     - (hasError, errorText)  → soCallCount++ / lastSchemaError=errorText ?? 通用提示
+ *   - 硬杀计数段（terminal 后幂等短路，任何输入不再变化）：
+ *     - onToolExecEnd(false)   → 计数/签名清零（成功短路）
+ *     - onToolExecEnd(true)    → 签名同：计数++；签名异：计数=1（新一轮连续从此失败起算）
+ *     - 计数达 MAX_CONSECUTIVE_FAILURES → terminal=true（返回 newlyTerminal=true，
+ *       装配层据此触发 runTerminalTeardown）
+ *   onTurnEnd()（仅当 turn_end 判定要 steer 且发送成功时由装配层调用）：
+ *     → soCallCount=0 / hookRetryCount++ / lastSchemaError=null；硬杀侧字段一律不动
+ *     （跨 turn 同签名计数连续性，见文件头注释 steer 侧转移段）。
  */
-export class LoopGate {
-	terminal = false;
+export class WorkflowGate {
+	// ── steer 侧 ──────────────────────────────────────────────
+	soCallCount = 0;
+	soSucceededEver = false;
+	hookRetryCount = 0;
+	lastSchemaError: string | null = null;
+	// ── 硬杀侧 ────────────────────────────────────────────────
 	private lastSignature: string | null = null;
 	consecutiveFailures = 0;
 	/** 最近一次失败的原始终态文本（截断后），供 terminal 日志引用。 */
 	lastErrorText: string | null = null;
+	// ── 共享终态（单字段单写：硬杀计数段置位，两闸门读同一份）──────
+	terminal = false;
 
-	/** 记录一次 structured-output tool 执行结果。hasError = event.isError === true。 */
+	/**
+	 * 记录一次 structured-output tool 执行结果。hasError = event.isError === true。
+	 * 返回硬杀侧形态（装配层只消费 newlyTerminal）；steer 决策不经返回值表达——
+	 * turn_end 时刻由 shouldSkipSteer 按状态字段推导（tool_execution_end 时刻无
+	 * 消费者，返回值携带只是死字段）。
+	 */
 	onToolExecEnd(hasError: boolean, errorText?: string): {
 		terminal: boolean;
 		/** 仅在「本次调用触发 terminal」时为 true（幂等：terminal 后恒 false）。 */
 		newlyTerminal: boolean;
 	} {
+		// steer 记账段（先于硬杀段：与合一前两 listener 的注册顺序一致；无 terminal 短路）
+		this.soCallCount++;
+		if (!hasError) {
+			this.soSucceededEver = true;
+		} else {
+			this.lastSchemaError = errorText ?? "structured-output call failed";
+		}
+
+		// 硬杀计数段（terminal 幂等短路在最前：置位后成功/失败都不再变化）
 		if (this.terminal) return { terminal: true, newlyTerminal: false };
 
 		if (!hasError) {
@@ -381,6 +427,28 @@ export class LoopGate {
 			return { terminal: true, newlyTerminal: true };
 		}
 		return { terminal: false, newlyTerminal: false };
+	}
+
+	/**
+	 * turn 收尾（仅当要 steer 且发送成功时调用）：重置本 turn 计数、累计重试次数、
+	 * 清空错误。硬杀侧字段不动——成功路径之外的连续失败计数跨 turn 连续。
+	 */
+	onTurnEnd(): void {
+		this.soCallCount = 0;
+		this.hookRetryCount++;
+		this.lastSchemaError = null;
+	}
+
+	/** 全字段归零（当前无调用方；保留作状态机完整契约——含 D2 合一后的硬杀侧字段）。 */
+	reset(): void {
+		this.soCallCount = 0;
+		this.soSucceededEver = false;
+		this.hookRetryCount = 0;
+		this.lastSchemaError = null;
+		this.lastSignature = null;
+		this.consecutiveFailures = 0;
+		this.lastErrorText = null;
+		this.terminal = false;
 	}
 
 	/** 当前归一化签名（字段集合哈希或 fallback 前缀；无失败史时 null；测试与日志用）。 */
@@ -462,7 +530,7 @@ export function armForceExitTeardown(): void {
  *   - appendEntry：session JSONL 持久化记录（事后排查通道，不进 LLM 上下文）
  * 两者内容同源，指引文案逐字对齐设计 §5.2。
  */
-function writeTerminatedLog(pi: PiAPI, gate: LoopGate): void {
+function writeTerminatedLog(pi: PiAPI, gate: WorkflowGate): void {
 	const lastError = gate.lastErrorText ?? "(no error text)";
 	const stderrLines = [
 		`[structured-output gate] Terminated: the same validation error occurred ${MAX_CONSECUTIVE_FAILURES} times consecutively; shutting down this single-purpose workflow subprocess.`,
@@ -489,56 +557,36 @@ function writeTerminatedLog(pi: PiAPI, gate: LoopGate): void {
 	}
 }
 
-export interface LoopGateOptions {
-	/** terminal 触发时的回调（index.ts 用于标记 RetryState.terminal，hook 据此停 steer）。 */
-	onTerminal?: () => void;
-}
-
 /**
- * 注册 tool_execution_end 闸门监听（仅 workflow 模式装配，见 index.ts）。
+ * terminal 触发时的副作用链（装配层在 gate.onToolExecEnd 返回 newlyTerminal 时调用，
+ * 见 workflow-hook.setupWorkflowHook）。
  *
- * terminal 触发时序（R3 F-2 bounded teardown）：onTerminal 回调（同步，先标记
- * hook 状态）→ 写日志（stderr + appendEntry 双通道，R3 F-3）→ ctx.abort()（中止
- * 当前 agent 操作——截断「shutdown 请求后当前 turn 的 bash/read/流式继续跑、模型
- * 继续烧 token」的窗口，~25s 实测窗口在 abort 后即止）→ ctx.shutdown()（RPC mode
- * 置 shutdownRequested，agent_settled 后进程 exit(0)，父进程走「子进程结束但未
- * 产出 structured-output」的既有失败路径）→ armForceExitTeardown()（15s 兜底硬退，
- * 覆盖 pi 挂死不 settle 的异常态；方案依据见该函数注释）。
+ * 时序（R3 F-2 bounded teardown）：写日志（stderr + appendEntry 双通道，R3 F-3）→
+ * ctx.abort()（中止当前 agent 操作——截断「shutdown 请求后当前 turn 的 bash/read/
+ * 流式继续跑、模型继续烧 token」的窗口，~25s 实测窗口在 abort 后即止）→
+ * ctx.shutdown()（RPC mode 置 shutdownRequested，agent_settled 后进程 exit(0)，
+ * 父进程走「子进程结束但未产出 structured-output」的既有失败路径）→
+ * armForceExitTeardown()（15s 兜底硬退，覆盖 pi 挂死不 settle 的异常态；方案依据
+ * 见该函数注释）。
  */
-export function setupLoopGate(pi: PiAPI, options: LoopGateOptions = {}): LoopGate {
-	const gate = new LoopGate();
-
-	pi.on("tool_execution_end", async (event: unknown, ctx: ExtensionContext) => {
-		if (!isToolExecutionEndEvent(event)) return;
-		if (event.toolName !== TOOL_NAME) return;
-
-		const outcome = gate.onToolExecEnd(
-			event.isError === true,
-			extractToolErrorText(event.result),
-		);
-		if (!outcome.newlyTerminal) return;
-
-		options.onTerminal?.();
-		writeTerminatedLog(pi, gate);
-		// stale ctx 防御（crash-resilience D1）：abort/shutdown 均在 pi assertActive 面
-		// （PS-30，runner.js createContext）——session 替换窗口触发 terminal 时无人接的
-		// 同步 throw 会经 async handler 变 rejected Promise 杀 pi 进程。stale 静默跳过
-		// 优雅退出（此时进程的存在意义已随 session 替换消失），armForceExitTeardown 的
-		// 15s 硬退兜底保持武装——自清理语义不丢。非 stale 错误原样上抛（守卫不吞真实 bug）。
-		guardStaleCtx(() => {
-			ctx.abort();
-			ctx.shutdown();
-		}, {
-			label: "structured-output:terminal-teardown",
-			onStale: (error) => {
-				process.stderr.write(
-					`[structured-output gate] terminal teardown skipped (stale ctx, session replaced): `
-						+ `${toErrorMessage(error)}; force-exit timer stays armed.\n`,
-				);
-			},
-		});
-		armForceExitTeardown();
+export function runTerminalTeardown(pi: PiAPI, gate: WorkflowGate, ctx: ExtensionContext): void {
+	writeTerminatedLog(pi, gate);
+	// stale ctx 防御（crash-resilience D1）：abort/shutdown 均在 pi assertActive 面
+	// （PS-30，runner.js createContext）——session 替换窗口触发 terminal 时无人接的
+	// 同步 throw 会经 async handler 变 rejected Promise 杀 pi 进程。stale 静默跳过
+	// 优雅退出（此时进程的存在意义已随 session 替换消失），armForceExitTeardown 的
+	// 15s 硬退兜底保持武装——自清理语义不丢。非 stale 错误原样上抛（守卫不吞真实 bug）。
+	guardStaleCtx(() => {
+		ctx.abort();
+		ctx.shutdown();
+	}, {
+		label: "structured-output:terminal-teardown",
+		onStale: (error) => {
+			process.stderr.write(
+				`[structured-output gate] terminal teardown skipped (stale ctx, session replaced): `
+					+ `${toErrorMessage(error)}; force-exit timer stays armed.\n`,
+			);
+		},
 	});
-
-	return gate;
+	armForceExitTeardown();
 }

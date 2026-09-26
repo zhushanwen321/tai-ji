@@ -11,7 +11,7 @@
 
 /**
  * 闸门签名侧截断上限：① normalizeErrorSignature fallback 分支（提取不到字段 token 的
- * 非校验类错误文本降级为裸前缀做等值比较，消费方 loop-gate）；② LoopGate.lastErrorText
+ * 非校验类错误文本降级为裸前缀做等值比较，消费方 loop-gate）；② WorkflowGate.lastErrorText
  * （terminal 日志引用，不进模型上下文，消费方 loop-gate）。与 steer 回灌错误块上限
  * （STEER_ERROR_MAX_CHARS）语义独立（F5 拆分：签名只做比较原料、可随实现演化；steer
  * 是模型可见文本预算），两上限不共享数值演化。

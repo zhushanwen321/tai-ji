@@ -1,11 +1,11 @@
 // 测试框架：vitest（从 vitest 导入 describe/it/expect/vi）
 // 运行命令：npx vitest run tests/loop-gate.test.ts
 //
-// LoopGate 闸门单测（D3/U2）——两层：
-//   1. 纯状态机（LoopGate 类直调）：同签名计数递增 / 签名变化清零 / 成功清零 /
-//      terminal 幂等 / 归一化函数契约
-//   2. setupLoopGate 装配层（mock pi）：第 3 次同签名触发 terminal + shutdown +
-//      appendEntry 日志 + onTerminal 回调；非 structured-output 工具失败不计入。
+// WorkflowGate 硬杀侧单测（D3/U2 + D2 合一状态机）——两层：
+//   1. 纯状态机（WorkflowGate 类直调）：同签名计数递增 / 签名变化清零 / 成功清零 /
+//      terminal 幂等 / 归一化函数契约（steer 侧转移表见 retry-state.test.ts）
+//   2. setupWorkflowHook 装配层（mock pi，D2 唯一装配入口）：第 3 次同签名触发
+//      terminal + shutdown + appendEntry 日志；非 structured-output 工具失败不计入。
 //
 // 三视角：构建者白盒（状态机字段断言）+ 使用者黑盒（emit 驱动后断言 shutdown/
 // appendEntry 可见副作用）+ 形态（日志文案含 §5.2 指引）。
@@ -13,13 +13,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-	LoopGate,
+	WorkflowGate,
 	MAX_CONSECUTIVE_FAILURES,
 	normalizeErrorSignature,
-	setupLoopGate,
 	TEARDOWN_FORCE_EXIT_MS,
 	armForceExitTeardown,
 } from "../src/loop-gate.js";
+import { setupWorkflowHook } from "../src/workflow-hook.js";
 import { STALE_CTX_MARKER } from "@zhushanwen/pi-ext-guards";
 
 import {
@@ -46,9 +46,9 @@ afterEach(() => {
 
 // ── 纯状态机（构建者白盒）──────────────────────────────────────
 
-describe("LoopGate state machine (D3)", () => {
+describe("WorkflowGate state machine (D3, hard-kill side of the D2 unified machine)", () => {
 	it("① 同签名计数递增：连续同签名失败 1→2 未达阈值不 terminal", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		const err = 'Validation failed for tool "structured-output":\n  - magic: must be equal to constant';
 		expect(gate.onToolExecEnd(true, err)).toEqual({ terminal: false, newlyTerminal: false });
 		expect(gate.consecutiveFailures).toBe(1);
@@ -58,7 +58,7 @@ describe("LoopGate state machine (D3)", () => {
 	});
 
 	it("② 签名变化清零：不同错误文本 → 计数重起（新签名从此失败起算 1）", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		gate.onToolExecEnd(true, "error A");
 		expect(gate.consecutiveFailures).toBe(1);
 		// 签名变化：上一签名计数作废，新签名连续计数从本次失败起算
@@ -71,7 +71,7 @@ describe("LoopGate state machine (D3)", () => {
 	});
 
 	it("③ 第 3 次同签名触发 terminal（newlyTerminal 恰一次），此后幂等", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		gate.onToolExecEnd(true, "same error");
 		gate.onToolExecEnd(true, "same error");
 		expect(gate.onToolExecEnd(true, "same error")).toEqual({ terminal: true, newlyTerminal: true });
@@ -83,7 +83,7 @@ describe("LoopGate state machine (D3)", () => {
 	});
 
 	it("④ 成功调用清零：失败×2 → 成功 → 失败×2 仍未 terminal，第 3 次失败才触发", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		gate.onToolExecEnd(true, "same error");
 		gate.onToolExecEnd(true, "same error");
 		gate.onToolExecEnd(false);
@@ -100,7 +100,7 @@ describe("LoopGate state machine (D3)", () => {
 	});
 
 	it("⑥ 无错误文本时降级通用提示并参与签名计数", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		gate.onToolExecEnd(true);
 		gate.onToolExecEnd(true);
 		expect(gate.onToolExecEnd(true)).toEqual({ terminal: true, newlyTerminal: true });
@@ -187,9 +187,9 @@ describe("normalizeErrorSignature", () => {
 
 // ── 签名哈希化的闸门级验收（审查项#7）──────────────────────────
 
-describe("LoopGate signature hashing (progressive-fix acceptance)", () => {
+describe("WorkflowGate signature hashing (progressive-fix acceptance)", () => {
 	it("渐进修复（字段集合缩小）→ 每步新签名计数重起，不触发 terminal；停止修复后第 3 次同签名才 terminal", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		let fields = [...ALL_FIELDS];
 		// 渐进修复链：40 → 30 个字段，每步集合缩小 = 新签名 = 连续计数重起，永不及 3
 		for (let i = 0; i < 10; i++) {
@@ -210,7 +210,7 @@ describe("LoopGate signature hashing (progressive-fix acceptance)", () => {
 	});
 
 	it("同集合不同实参 → 同签名计数递增（实参变化不等于进展——归一化语义保留）", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		gate.onToolExecEnd(true, paramLayerErrorText("  - alpha: must be string", '{"alpha":1}'));
 		gate.onToolExecEnd(true, paramLayerErrorText("  - alpha: must be string", '{"alpha":"totally different echo"}'));
 		expect(gate.consecutiveFailures).toBe(2);
@@ -253,7 +253,7 @@ describe("required 渐进修复签名区分（F1 回归：bullet 路径位仅含
 	});
 
 	it("闸门级：三步演化序列每步计数重起，不触发 terminal（误杀回归）", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		expect(gate.onToolExecEnd(true, requiredError(REQUIRED_FIELDS)))
 			.toEqual({ terminal: false, newlyTerminal: false });
 		expect(gate.consecutiveFailures).toBe(1);
@@ -286,7 +286,7 @@ describe("required 渐进修复签名区分（F1 回归：bullet 路径位仅含
 	});
 
 	it("同缺失集合重复 3 次（模型没修任何字段）→ 仍触发 terminal（闸门有界语义不变）", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		const err = requiredError(REQUIRED_FIELDS);
 		gate.onToolExecEnd(true, err);
 		gate.onToolExecEnd(true, err);
@@ -316,7 +316,7 @@ describe("additionalProperties 渐进删除签名区分（AP 回归：D4 默认�
 	});
 
 	it("三多余字段逐个删除：三步互异签名计数重起，不触发 terminal（误杀回归）", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		// 模拟真实演化：{summary, confidence, extra} → 删 extra → 删 confidence
 		expect(gate.onToolExecEnd(true, apError({ summary: "s", confidence: 0.9, extra: true })))
 			.toEqual({ terminal: false, newlyTerminal: false });
@@ -338,7 +338,7 @@ describe("additionalProperties 渐进删除签名区分（AP 回归：D4 默认�
 	});
 
 	it("同一多余字段反复失败（keys 集合不变）→ 同签名第 3 次仍触闸（闸门保护不丢失）", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		// keys 恒为 {summary}，仅值变化——不算进展，既有「值变化 ≠ 进展」语义在 AP 场景保留
 		gate.onToolExecEnd(true, apError({ summary: "wrong" }));
 		gate.onToolExecEnd(true, apError({ summary: "still wrong" }));
@@ -383,7 +383,7 @@ function apErrorAt(path: string, args: Record<string, unknown>): string {
 
 describe("嵌套 AP keys 下钻（R4-F2：路径位 a / a.b / list.0）", () => {
 	it("一层嵌套逐删字段：每步互异签名计数重起，不触发 terminal（误杀回归）", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		// 模型在 a 里删多余字段：{keep, extra1, extra2} → {keep, extra1} → {keep}
 		expect(gate.onToolExecEnd(true, apErrorAt("a", { a: { keep: 1, extra1: 2, extra2: 3 } })))
 			.toEqual({ terminal: false, newlyTerminal: false });
@@ -405,7 +405,7 @@ describe("嵌套 AP keys 下钻（R4-F2：路径位 a / a.b / list.0）", () => 
 	});
 
 	it("同一嵌套多余字段反复失败 → 同签名第 3 次仍触闸（闸门有界语义在嵌套层保留）", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		const err = apErrorAt("a", { a: { keep: "wrong" } });
 		gate.onToolExecEnd(true, err);
 		gate.onToolExecEnd(true, err);
@@ -536,7 +536,7 @@ describe("echo keys 分桶（并集恒定陷阱回归）", () => {
 	});
 
 	it("① 核心回归：6 required 字段每轮修 1 个（缺失缩小 + keys 增大），每步新签名计数重起不触闸", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		for (let fixed = 0; fixed < 5; fixed++) {
 			expect(gate.onToolExecEnd(true, progressiveRequiredError(fixed)))
 				.toEqual({ terminal: false, newlyTerminal: false });
@@ -568,7 +568,7 @@ describe("echo keys 分桶（并集恒定陷阱回归）", () => {
 		expect(s2).not.toBe(s3); // keys 桶变化 → 新签名
 		expect(s1).not.toBe(s3);
 		// 闸门级：三步计数重起不触闸
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		for (const r of [r1, r2, r3]) {
 			expect(gate.onToolExecEnd(true, r)).toEqual({ terminal: false, newlyTerminal: false });
 			expect(gate.consecutiveFailures).toBe(1);
@@ -576,7 +576,7 @@ describe("echo keys 分桶（并集恒定陷阱回归）", () => {
 	});
 
 	it("④ 同错反复（混合形态）：两类桶 token 恒同 → 第 3 次仍触闸（闸门有界语义保留）", () => {
-		const gate = new LoopGate();
+		const gate = new WorkflowGate();
 		const err = mixedRequiredApError(["f1"], { f2: 2, extra: 1 });
 		gate.onToolExecEnd(true, err);
 		gate.onToolExecEnd(true, err);
@@ -595,16 +595,15 @@ describe("echo keys 分桶（并集恒定陷阱回归）", () => {
 	});
 });
 
-// ── 装配层（setupLoopGate + mock pi：使用者黑盒 + 形态）───────────
+// ── 装配层（setupWorkflowHook + mock pi：使用者黑盒 + 形态）───────────
 
-describe("setupLoopGate assembly (via mock pi)", () => {
-	it("第 3 次同签名失败 → abort+shutdown 恰一次（abort 先行）+ 双通道日志 + onTerminal 恰一次", async () => {
+describe("setupWorkflowHook assembly (via mock pi)", () => {
+	it("第 3 次同签名失败 → abort+shutdown 恰一次（abort 先行）+ 双通道日志", async () => {
 		vi.useFakeTimers(); // terminal 武装 15s 兤底硬退 timer——fake 掉避免真实 timer 泄漏
 		const pi = createMockPi();
-		const onTerminal = vi.fn();
 		// R3 F-3：stderr 通道可见性——SW spawn 管道转发 stderr 时主进程可见（此处锁 SO 侧写入行为）
 		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-		setupLoopGate(pi, { onTerminal });
+		setupWorkflowHook(pi, SCHEMA);
 
 		const ev = failedToolEndWith(paramLayerErrorText("  - magic: must be equal to constant", '{"magic":"nope"}'));
 		await pi.emit("tool_execution_end", ev);
@@ -617,7 +616,6 @@ describe("setupLoopGate assembly (via mock pi)", () => {
 		expect(pi.ctx.shutdown).toHaveBeenCalledTimes(1);
 		expect(pi.ctx.abort.mock.invocationCallOrder[0]!)
 			.toBeLessThan(pi.ctx.shutdown.mock.invocationCallOrder[0]!);
-		expect(onTerminal).toHaveBeenCalledTimes(1);
 
 		// 形态：appendEntry 持久化记录（session JSONL 通道，不进 LLM 上下文）
 		expect(pi.appendEntry).toHaveBeenCalledTimes(1);
@@ -628,17 +626,16 @@ describe("setupLoopGate assembly (via mock pi)", () => {
 		expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("[structured-output gate] Terminated"));
 		expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("👉"));
 
-		// 第 4 次失败不重复 abort / shutdown / 日志 / 回调（幂等）
+		// 第 4 次失败不重复 abort / shutdown / 日志（幂等）
 		await pi.emit("tool_execution_end", ev);
 		expect(pi.ctx.abort).toHaveBeenCalledTimes(1);
 		expect(pi.ctx.shutdown).toHaveBeenCalledTimes(1);
 		expect(pi.appendEntry).toHaveBeenCalledTimes(1);
-		expect(onTerminal).toHaveBeenCalledTimes(1);
 	});
 
 	it("非 structured-output 工具的失败不计入（bash 失败 ×5 无 shutdown）", async () => {
 		const pi = createMockPi();
-		setupLoopGate(pi);
+		setupWorkflowHook(pi, SCHEMA);
 
 		for (let i = 0; i < 5; i++) {
 			await pi.emit("tool_execution_end", failedToolEndWith("exit code 1", "bash"));
@@ -649,7 +646,7 @@ describe("setupLoopGate assembly (via mock pi)", () => {
 
 	it("成功调用清零：失败×2 → 成功 → 失败×2 不触发 shutdown", async () => {
 		const pi = createMockPi();
-		setupLoopGate(pi);
+		setupWorkflowHook(pi, SCHEMA);
 
 		const err = paramLayerErrorText("  - count: must be number", "{}");
 		await pi.emit("tool_execution_end", failedToolEndWith(err));
@@ -662,7 +659,7 @@ describe("setupLoopGate assembly (via mock pi)", () => {
 
 	it("非合法事件形态（缺 isError/toolName 字段）安全忽略", async () => {
 		const pi = createMockPi();
-		setupLoopGate(pi);
+		setupWorkflowHook(pi, SCHEMA);
 		await pi.emit("tool_execution_end", { type: "tool_execution_end" });
 		await pi.emit("tool_execution_end", null);
 		expect(pi.ctx.shutdown).not.toHaveBeenCalled();
@@ -702,6 +699,59 @@ describe("terminal bounded teardown（R3 F-2）", () => {
 	});
 });
 
+// ── D2 双闸门合一等价断言（单状态机交互时序锁）─────────────────
+//
+// 等价口径：WorkflowGate 单状态机对「steer 记账 + 硬杀计数」双闸门的外部可观测行为，
+// 与两闸门分立状态机时逐条一致。以下断言锁定四个关键交互点——每条行为同时被
+// characterization-hook ③/⑦/④ 以黑盒形态锁定，此处为状态机级直接锚。
+
+describe("D2 双闸门合一等价（单状态机交互时序锁）", () => {
+	it("跨 turn 同签名计数连续：3 turn 各失败 1 次（每 turn steer 后 onTurnEnd）→ 第 3 轮失败即 terminal（onTurnEnd 不清硬杀计数）", () => {
+		const gate = new WorkflowGate();
+		for (let turn = 0; turn < 2; turn++) {
+			gate.onToolExecEnd(true, "same error");
+			gate.onTurnEnd(); // steer 发送成功后的重置（只清 steer 侧字段）
+		}
+		expect(gate.terminal).toBe(false);
+		// 第 3 轮失败：硬杀计数达 3（跨 turn 连续）→ terminal，抢在 steer 重试上限之前
+		//（characterization-hook ③ 的状态机级锚：拦截者从 hookRetryCount 上限变为 terminal）
+		expect(gate.onToolExecEnd(true, "same error")).toEqual({ terminal: true, newlyTerminal: true });
+		expect(gate.hookRetryCount).toBe(2); // steer 侧重试预算每 turn 照常累计
+		expect(gate.soCallCount).toBe(1); // steer 侧调用计数随上一轮 onTurnEnd 归零后重计
+		expect(gate.terminal).toBe(true);
+	});
+
+	it("steer 预算与硬杀计数互不干扰：3 turn 各不同签名失败 → 永不 terminal，hookRetryCount 独立累计", () => {
+		const gate = new WorkflowGate();
+		gate.onToolExecEnd(true, "error A");
+		gate.onTurnEnd();
+		gate.onToolExecEnd(true, "error B");
+		gate.onTurnEnd();
+		gate.onToolExecEnd(true, "error C");
+		gate.onTurnEnd();
+		expect(gate.terminal).toBe(false); // 签名各异 → 硬杀计数每轮重起，不触闸
+		expect(gate.hookRetryCount).toBe(3); // steer 预算独立累计（装配层守卫第 5 条停 steer）
+	});
+
+	it("成功清零对两侧同步：同一成功事件同时置 soSucceededEver 终态并清硬杀计数", () => {
+		const gate = new WorkflowGate();
+		gate.onToolExecEnd(true, "same error");
+		gate.onToolExecEnd(true, "same error");
+		gate.onToolExecEnd(false);
+		expect(gate.soSucceededEver).toBe(true); // steer 侧：成功终态（后续 turn_end 不再干预）
+		expect(gate.consecutiveFailures).toBe(0); // 硬杀侧：计数清零（模型走通即无循环）
+		expect(gate.signature).toBeNull();
+	});
+
+	it("装配级单 listener 契约：tool_execution_end / turn_end 各注册恰一个 handler（合一前 tool_execution_end 有两个）", async () => {
+		const pi = createMockPi();
+		setupWorkflowHook(pi, SCHEMA);
+		const byEvent = (event: string) => pi.on.mock.calls.filter((c) => c[0] === event).length;
+		expect(byEvent("tool_execution_end")).toBe(1);
+		expect(byEvent("turn_end")).toBe(1);
+	});
+});
+
 // ── 端到端装配（index.ts workflow 模式整体分岔）─────────────────
 
 describe("index assembly: gate wired into workflow mode", () => {
@@ -737,7 +787,8 @@ describe("index assembly: gate wired into workflow mode", () => {
 
 // ── terminal teardown 的 stale ctx 守卫分支（crash-resilience D1）──────────
 //
-// 接入点形态（loop-gate.ts setupLoopGate）：优雅退出（abort+shutdown）被 guardStaleCtx
+// 接入点形态（workflow-hook.ts setupWorkflowHook 的 tool_execution_end listener →
+// loop-gate.ts runTerminalTeardown）：优雅退出（abort+shutdown）被 guardStaleCtx
 // 包裹，本接入点未注入 isCtxStale 代际检查——stale 分诊完全依赖错误文案兜底（pi
 // assertActive 抛错文案含 STALE_CTX_MARKER，PS-30 门禁守卫）。三态锁定：
 //   ① stale（文案分诊）→ 跳过优雅退出（shutdown 不被调）+ 15s force-exit timer 仍武装
@@ -765,7 +816,7 @@ describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 		pi.ctx.abort.mockImplementation(() => {
 			throw new Error(`ExtensionAPI is ${STALE_CTX_MARKER} (assertActive)`);
 		});
-		setupLoopGate(pi);
+		setupWorkflowHook(pi, SCHEMA);
 
 		await driveToTerminal(pi);
 		// terminal 标记与日志在守卫之前完成（闸门状态机不受 stale 窗口影响）
@@ -788,7 +839,7 @@ describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 		const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
 		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 		const pi = createMockPi();
-		setupLoopGate(pi);
+		setupWorkflowHook(pi, SCHEMA);
 
 		await driveToTerminal(pi);
 		// 优雅退出照常（R3 F-2 时序：abort 停当前 turn → shutdown 请求优雅退出）
@@ -815,7 +866,7 @@ describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 		pi.ctx.abort.mockImplementation(() => {
 			throw new Error("real bug: not a stale error");
 		});
-		setupLoopGate(pi);
+		setupWorkflowHook(pi, SCHEMA);
 
 		const ev = failedToolEndWith(GATE_ERROR);
 		await pi.emit("tool_execution_end", ev);
