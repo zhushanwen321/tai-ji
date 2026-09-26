@@ -6,11 +6,10 @@ import type {
 import { registerPlanCommand } from "./command.js";
 import { registerPlanEventHandlers } from "./compact.js";
 import {
-  type PlanAbortControllers,
-  type PlanSessionMap,
   PLAN_CONTEXT_CUSTOM_TYPE,
   PLAN_MODE_TOOLS,
   applyPlanEvent,
+  createPlanCtx,
   isTaijiGuiHost,
   persistPlanState,
   reconstructPlanState,
@@ -19,29 +18,28 @@ import { registerPlanTool } from "./tool.js";
 import { updatePlanWidget } from "./widget.js";
 
 export default function planExtension(pi: ExtensionAPI) {
-  // Per-session state cache — keyed by sessionId
-  const sessions: PlanSessionMap = new Map();
-  // 挂起 select 的 per-session 注册表（E10：submit-review 审批 + complete 执行方式选择
-  // 两处共用；值 = PendingSelect 含解散来源槽位，D-B1-2；发挂起 select 前 fresh，
-  // settled/重建/关闭即弃）
-  const abortControllers: PlanAbortControllers = new Map();
+  // 单 ctx 对象（D-B4-3）：states（per-session 生命周期态缓存）+ controllers（挂起
+  // select 注册表——E10：submit-review 审批 + complete 执行方式选择两处共用；值 =
+  // PendingSelect 含解散来源槽位，D-B1-2；发挂起 select 前 fresh，settled/重建/关闭
+  // 即弃）两表收敛 + dissolveAll 解散方法（exitPlanMode 入口经它打 'self' 标）
+  const planCtx = createPlanCtx();
 
   // Register tool and command
-  registerPlanTool(pi, sessions, abortControllers);
-  registerPlanCommand(pi, sessions, abortControllers);
+  registerPlanTool(pi, planCtx);
+  registerPlanCommand(pi, planCtx);
 
   // Register compact/tree event handlers
-  registerPlanEventHandlers(pi, sessions);
+  registerPlanEventHandlers(pi, planCtx.states);
 
   // Reconstruct state on session start
   pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
     const sessionId = ctx.sessionManager.getSessionId();
     const state = reconstructPlanState(ctx);
-    sessions.set(sessionId, state);
+    planCtx.states.set(sessionId, state);
     // session 重建即弃旧 controller：挂起 select 只存在于 tool execute 进行中的
     // turn，pi 重生后不可能有存活的 select；残留的已 abort controller 禁止复用
     // （发起新挂起 select 会 fresh 新建，此处删除是防御性清理）
-    abortControllers.delete(sessionId);
+    planCtx.controllers.delete(sessionId);
     updatePlanWidget(ctx, state);
     // If plan mode was active, re-restrict tools to the plan-mode set (includes bash — file-write constraints come from the injected plan mode prompt)
     if (state.isActive) {
@@ -132,7 +130,7 @@ export default function planExtension(pi: ExtensionAPI) {
   // Clean up on session end
   pi.on("session_shutdown", async (_event: unknown, ctx: ExtensionContext) => {
     const sessionId = ctx.sessionManager.getSessionId();
-    sessions.delete(sessionId);
-    abortControllers.delete(sessionId);
+    planCtx.states.delete(sessionId);
+    planCtx.controllers.delete(sessionId);
   });
 }

@@ -33,17 +33,22 @@ vi.mock("../widget.js", () => ({
   updatePlanWidget: vi.fn(),
 }));
 
-// Mock exec-skills（D10 检测）：审批用例不扫真实目录，skill 选项恒空
-vi.mock("../exec-skills.js", () => ({
-  detectExecSkills: vi.fn(() => []),
-}));
+// Mock 执行方式检测（D10）：审批用例不扫真实目录，skill 选项恒空。
+// importActual 展开：只覆写 detectExecSkills，其余导出（含 enter.ts re-export 的
+// resolveSkills 执行门禁）走真实现——mock 罩全模块会把它一并变 undefined
+vi.mock("@zhushanwen/pi-exec-skills", async () => {
+  const actual = await vi.importActual<typeof import("@zhushanwen/pi-exec-skills")>(
+    "@zhushanwen/pi-exec-skills",
+  );
+  return { ...actual, detectExecSkills: vi.fn(() => []) };
+});
 
 import { handlePlanComplete } from "../compact.js";
-import { detectExecSkills } from "../exec-skills.js";
 import { PLAN_REVIEW_MARKER } from "@zhushanwen/extension-protocol";
+import { detectExecSkills } from "@zhushanwen/pi-exec-skills";
 import type { PlanDocMeta } from "@zhushanwen/extension-protocol";
 import type { PlanState } from "../state.js";
-import { DEFAULT_PLAN_STATE, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
+import { createPlanCtx, DEFAULT_PLAN_STATE, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 import { PLAN_ACTIONS, registerPlanTool } from "../tool.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
@@ -68,8 +73,8 @@ function activeStateWithDocs(): PlanState {
 }
 
 function setup(state?: PlanState) {
-  const sessions = new Map<string, PlanState>();
-  const controllers = new Map<string, AbortController>();
+  // 单 ctx 对象（D-B4-3）：sessions/controllers 别名 = planCtx 两表（同对象），用例断言不变
+  const planCtx = createPlanCtx();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<unknown>;
   const pi = {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
@@ -78,7 +83,7 @@ function setup(state?: PlanState) {
     sendMessage: vi.fn(),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
-  registerPlanTool(pi, sessions, controllers);
+  registerPlanTool(pi, planCtx);
 
   const ctx = {
     sessionId: "test-session",
@@ -91,11 +96,11 @@ function setup(state?: PlanState) {
     ui: { select: vi.fn(), notify: vi.fn() },
   };
 
-  if (state) sessions.set("test-session", state);
+  if (state) planCtx.states.set("test-session", state);
 
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
     executeFn!("tc0", params, signal, undefined, ctx);
-  return { pi, sessions, ctx, controllers, exec };
+  return { pi, sessions: planCtx.states, ctx, controllers: planCtx.controllers, exec };
 }
 
 /** 构造 docs 非空的激活态并放入 sessions（多数用例的前置） */

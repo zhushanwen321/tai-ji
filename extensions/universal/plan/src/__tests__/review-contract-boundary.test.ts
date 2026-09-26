@@ -24,7 +24,14 @@ vi.mock("../compact.js", async () => {
 });
 
 vi.mock("../widget.js", () => ({ updatePlanWidget: vi.fn() }));
-vi.mock("../exec-skills.js", () => ({ detectExecSkills: vi.fn(() => []) }));
+// importActual 展开：只覆写 detectExecSkills（不扫真实目录），其余导出（含 enter.ts
+// re-export 的 resolveSkills 执行门禁）走真实现——mock 罩全模块会把它一并变 undefined
+vi.mock("@zhushanwen/pi-exec-skills", async () => {
+  const actual = await vi.importActual<typeof import("@zhushanwen/pi-exec-skills")>(
+    "@zhushanwen/pi-exec-skills",
+  );
+  return { ...actual, detectExecSkills: vi.fn(() => []) };
+});
 
 import {
   isPlanReviewRequest,
@@ -36,7 +43,7 @@ import {
 } from "@zhushanwen/extension-protocol";
 
 import type { PlanState } from "../state.js";
-import { DEFAULT_PLAN_STATE } from "../state.js";
+import { createPlanCtx, DEFAULT_PLAN_STATE } from "../state.js";
 import { registerPlanTool } from "../tool.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "ask_user", "write", "edit"];
@@ -53,8 +60,7 @@ function planningState(): PlanState {
 }
 
 function setup() {
-  const sessions = new Map<string, PlanState>();
-  const controllers = new Map<string, AbortController>();
+  const planCtx = createPlanCtx();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<unknown>;
   const pi = {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
@@ -64,7 +70,7 @@ function setup() {
     getCommands: vi.fn(() => []),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
-  registerPlanTool(pi, sessions, controllers);
+  registerPlanTool(pi, planCtx);
 
   const ctx = {
     sessionId: "test-session",
@@ -75,7 +81,7 @@ function setup() {
     sessionManager: { getSessionId: () => "test-session", getEntries: () => [] },
     ui: { select: vi.fn(), notify: vi.fn() },
   };
-  sessions.set("test-session", planningState());
+  planCtx.states.set("test-session", planningState());
 
   const exec = (params: Record<string, unknown>) => executeFn!("tc0", params, undefined, undefined, ctx);
   return { pi, ctx, exec };

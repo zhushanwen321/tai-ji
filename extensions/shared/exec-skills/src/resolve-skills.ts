@@ -36,6 +36,12 @@ export function normalizeSkillName(name: string): string {
  * 执行门禁：pi.getCommands() 过滤 source === "skill" 枚举比对。比对前双向剥
  * `skill:` 前缀归一：resolved/missing 用归一后的短名；available 维持枚举原形态
  * （错误信息里可直接复制为 pi 命令）。
+ *
+ * 空请求 = 同族 fail-fast（「--skills 给了但没给名字」）：返回 ok:false + 全量
+ * available + 空 missing——available 正是调用方报错文案的恢复动作输入（错误 →
+ * 可用清单 → 重试闭环），missing 空让报错器走「没有给技能名」分支。自 plan 包
+ * enter.ts 迁入（plan-mode-audit-remediation 批次 4②b）：该分支是 slash 空
+ * `--skills` 报错复用单源的活契约，非死防御；既有调用方先判非空才调的，行为不受影响。
  */
 export function resolveSkills(pi: ExtensionAPI, requested: string[]): SkillResolution {
   const skillCommands = pi.getCommands().filter((c) => c.source === "skill");
@@ -51,6 +57,9 @@ export function resolveSkills(pi: ExtensionAPI, requested: string[]): SkillResol
     } else {
       resolved.push({ name, skillPath });
     }
+  }
+  if (requested.length === 0) {
+    return { ok: false, available, missing: [] };
   }
   return missing.length > 0 ? { ok: false, available, missing } : { ok: true, resolved };
 }

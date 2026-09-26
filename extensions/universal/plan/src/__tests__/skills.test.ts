@@ -18,7 +18,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { parsePlanArgs, registerPlanCommand } from "../command.js";
 import { resolveSkills } from "../enter.js";
-import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
+import { createPlanCtx, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
@@ -148,7 +148,6 @@ describe("E1 fail-fast via /plan handler", () => {
   let pi: ExtensionAPI;
   let ctx: ExtensionContext;
   let handler: (args: string, ctx: ExtensionContext) => Promise<void>;
-  let controllers: Map<string, AbortController>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -176,8 +175,7 @@ describe("E1 fail-fast via /plan handler", () => {
         theme: { fg: (_t: string, text: string) => text },
       },
     } as unknown as ExtensionContext;
-    controllers = new Map();
-    registerPlanCommand(pi, new Map(), controllers, new Map());
+    registerPlanCommand(pi, createPlanCtx());
     handler = capturedHandler!;
   });
 

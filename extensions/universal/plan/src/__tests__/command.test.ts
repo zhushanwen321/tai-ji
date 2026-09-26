@@ -25,13 +25,13 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { parsePlanArgs, registerPlanCommand, resolveTemplateFile } from "../command.js";
 import type { PlanAbortControllers } from "../state.js";
-import { freshPendingSelect, MAX_PLAN_REQUIREMENT_LENGTH, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
+import { createPlanCtx, freshPendingSelect, MAX_PLAN_REQUIREMENT_LENGTH, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
 function createMocks() {
   let capturedHandler: (args: string, ctx: ExtensionContext) => Promise<void>;
-  const controllers: PlanAbortControllers = new Map();
+  const planCtx = createPlanCtx();
 
   const pi = {
     registerCommand: vi.fn((_name: string, def: { handler: (args: string, ctx: ExtensionContext) => Promise<void> }) => {
@@ -61,7 +61,8 @@ function createMocks() {
   return {
     pi,
     ctx,
-    controllers,
+    planCtx,
+    controllers: planCtx.controllers,
     getHandler: () => capturedHandler!,
   };
 }
@@ -83,8 +84,7 @@ describe("registerPlanCommand", () => {
     pi = mocks.pi;
     ctx = mocks.ctx;
     controllers = mocks.controllers;
-    const sessions = new Map();
-    registerPlanCommand(pi, sessions, controllers);
+    registerPlanCommand(pi, mocks.planCtx);
     handler = mocks.getHandler();
   });
 

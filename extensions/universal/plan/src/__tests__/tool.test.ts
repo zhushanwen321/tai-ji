@@ -25,11 +25,16 @@ vi.mock("../compact.js", async () => {
   };
 });
 
-// Mock exec-skills（D10 检测）：单测里不扫真实目录（~/.agents/skills 等本机路径），
-// skill 选项用例显式注入 fixture；专用 exec-skills.test.ts 覆盖真实扫描
-vi.mock("../exec-skills.js", () => ({
-  detectExecSkills: vi.fn(() => []),
-}));
+// Mock 执行方式检测（D10）：单测里不扫真实目录（~/.agents/skills 等本机路径），
+// skill 选项用例显式注入 fixture；专用 exec-skills.test.ts 覆盖真实扫描。
+// importActual 展开：只覆写 detectExecSkills，其余导出（含 enter.ts re-export 的
+// resolveSkills 执行门禁）走真实现——mock 罩全模块会把它一并变 undefined
+vi.mock("@zhushanwen/pi-exec-skills", async () => {
+  const actual = await vi.importActual<typeof import("@zhushanwen/pi-exec-skills")>(
+    "@zhushanwen/pi-exec-skills",
+  );
+  return { ...actual, detectExecSkills: vi.fn(() => []) };
+});
 
 // Mock widget (imported by abort)
 vi.mock("../widget.js", () => ({
@@ -43,11 +48,10 @@ import { join } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { UI_FORM_MARKER } from "@zhushanwen/extension-protocol";
+import { detectExecSkills } from "@zhushanwen/pi-exec-skills";
 
 import { handlePlanComplete } from "../compact.js";
-import { detectExecSkills } from "../exec-skills.js";
-import type { PlanAbortControllers } from "../state.js";
-import { DEFAULT_PLAN_STATE } from "../state.js";
+import { createPlanCtx, DEFAULT_PLAN_STATE } from "../state.js";
 import { loadTemplate } from "../templates.js";
 import { PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";
 import { updatePlanWidget } from "../widget.js";
@@ -56,8 +60,8 @@ import { updatePlanWidget } from "../widget.js";
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
 function setup() {
-  const sessions = new Map();
-  const controllers: PlanAbortControllers = new Map();
+  // 单 ctx 对象（D-B4-3）：sessions/controllers 别名 = planCtx 两表（同对象），用例断言不变
+  const planCtx = createPlanCtx();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<unknown>;
   const pi = {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
@@ -65,7 +69,7 @@ function setup() {
     setActiveTools: vi.fn(),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
-  registerPlanTool(pi, sessions, controllers);
+  registerPlanTool(pi, planCtx);
 
   const ctx = {
     sessionId: "test-session",
@@ -80,7 +84,7 @@ function setup() {
 
   // 默认前置：已批准态（approved --approve--> dispatching 重选执行方式，consumers.md §三B）——
   // complete 的审批闸口（D1 边表）要求先过 review 流程；用例可在返回后覆写 sessions
-  sessions.set("test-session", {
+  planCtx.states.set("test-session", {
     ...DEFAULT_PLAN_STATE,
     isActive: true,
     planFilePath: "/tmp/test-project/.tmp/plans/auth/plan.md",
@@ -91,7 +95,7 @@ function setup() {
 
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
     executeFn!("tc0", params, signal, undefined, ctx);
-  return { pi, sessions, controllers, ctx, exec };
+  return { pi, planCtx, sessions: planCtx.states, controllers: planCtx.controllers, ctx, exec };
 }
 
 describe("registerPlanTool", () => {
@@ -597,7 +601,7 @@ describe("registerPlanTool", () => {
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete-cancelled");
       expect(res.details.reason).toBe("cancelled");
-      expect(res.details.source).toBe("reset");
+      expect(res.details.source).toBe("self");
       expect(res.content[0].text).toContain("has been exited");
       expect(res.content[0].text).toContain("full tool set is restored");
       // 归口 no-op：不追加任何落盘（reset 已由命令侧落终态）——最后一条仍是入函数时的 dispatching

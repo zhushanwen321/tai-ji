@@ -7,7 +7,7 @@ import type {
   PlanLifecycleState,
   PlanTransitionResult,
 } from "@zhushanwen/extension-protocol";
-import { PLAN_LIFECYCLE_STATES, transition, truncateSelfReview } from "@zhushanwen/extension-protocol";
+import { readLifecycleState, readResumeHint, transition, truncateSelfReview } from "@zhushanwen/extension-protocol";
 import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
@@ -193,6 +193,44 @@ export function freshPendingSelect(
   };
   controllers.set(sessionId, pending);
   return pending;
+}
+
+/**
+ * 单 ctx 对象（D-B4-3，批次 4 注册表签名收敛）：既有 per-session Map 注册表从散参签名
+ * （sessions + controllers 两表逐层直传）收敛为本载体——states（per-session 生命周期态
+ * 缓存）+ controllers（挂起 select 注册表，值 = PendingSelect 含解散来源槽位）两表收敛，
+ * 「解散挂起 select」做成其方法（dissolveAll——exitPlanMode 入口打 'self'；'external'
+ * 留给不经入口的外部解散显式打标）。widget.ts 无 per-session 存量（直调 ctx.ui.*），
+ * 不在收敛面——GUI 侧呈现态是 renderer 派生投影。
+ */
+export interface PlanCtx {
+  /** per-session 生命周期态缓存（收敛前的 sessions 表） */
+  states: PlanSessionMap;
+  /** 挂起 select 注册表（E10，值 = PendingSelect 含解散来源槽位） */
+  controllers: PlanAbortControllers;
+  /**
+   * 解散全部挂起 select：markDissolved 一次打标 + controller.abort（E10 因果链：打标
+   * 先行保证等待归口读到来源）+ 注册表清空（不留已 dissolved 的条目）。单活跃 session
+   * 不变量下（pi 进程同时只有一个活跃 session；session_start/shutdown 联动清理）与
+   * 「按 sessionId 解散单条」等价，全表遍历 + clear 是方法语义的自然形态。
+   */
+  dissolveAll(source: "self" | "external"): void;
+}
+
+/** 组合根入口（index.ts）：创建空注册表并装配解散方法 */
+export function createPlanCtx(): PlanCtx {
+  const planCtx: PlanCtx = {
+    states: new Map(),
+    controllers: new Map(),
+    dissolveAll(source) {
+      for (const pending of planCtx.controllers.values()) {
+        pending.markDissolved(source);
+        pending.controller.abort();
+      }
+      planCtx.controllers.clear();
+    },
+  };
+  return planCtx;
 }
 
 /**
@@ -385,26 +423,10 @@ function readDocs(data: Partial<PlanState>): PlanDocMeta[] {
 }
 
 /**
- * 生命周期状态读取（D2 读方①，旧字段映射归一点）：
- * ① 新字段直读（值域守卫：PLAN_LIFECYCLE_STATES 之外的垃圾值按缺失处理，落映射）；
- * ② 旧 entry 无 state 时映射 reviewState（awaiting→reviewing / revising→revising /
- *    无→planning|idle 按 isActive）。
+ * 生命周期状态与 resumeHint 读取（D2 读方①）：readLifecycleState / readResumeHint 直引
+ * extension-protocol legacy-entries（D-B4-1 映射单源下沉——runtime 读方②同引一份，原本地
+ * 拷贝删除；映射契约断言面 = protocol 包内 legacy-entries.test.ts）。
  */
-function readLifecycleState(data: LegacyPlanEntryData, isActive: boolean): PlanLifecycleState {
-  const raw = data.state;
-  if (typeof raw === "string" && (PLAN_LIFECYCLE_STATES as readonly string[]).includes(raw)) {
-    return raw as PlanLifecycleState;
-  }
-  if (data.reviewState === "awaiting") return "reviewing";
-  if (data.reviewState === "revising") return "revising";
-  return isActive ? "planning" : "idle";
-}
-
-/** resumeHint 读取：新字段直读 + 旧 reviewStateSource 同义映射（D2 读方①），域外值按无值 */
-function readResumeHint(data: LegacyPlanEntryData): PlanResumeHint | undefined {
-  if (data.resumeHint === "resubmit") return "resubmit";
-  return data.reviewStateSource === "resubmit" ? "resubmit" : undefined;
-}
 
 /**
  * selfReview 白名单式读取 + 有界防御：非 string（含缺失）归无值；读侧同样 4KB 截断

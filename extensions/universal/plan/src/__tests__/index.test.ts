@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// index.ts 只做装配：mock 掉子模块注册函数，只捕获 pi.on 的 hook 与 controllers 注册表
+// index.ts 只做装配：mock 掉子模块注册函数，只捕获 pi.on 的 hook 与 planCtx 注册表
 vi.mock("../tool.js", () => ({
   registerPlanTool: vi.fn(
-    (_pi: unknown, _sessions: unknown, controllers: Map<string, AbortController>) => {
-      captured.controllers = controllers;
+    (_pi: unknown, planCtx: { controllers: Map<string, AbortController> }) => {
+      captured.planCtx = planCtx;
     },
   ),
   PLAN_MODE_TOOLS: ["read", "bash", "grep", "find", "ls", "plan", "ask_user"],
@@ -20,7 +20,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import planExtension from "../index.js";
 import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
-const captured: { controllers?: Map<string, AbortController> } = {};
+const captured: { planCtx?: { controllers: Map<string, AbortController> } } = {};
 
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
@@ -56,7 +56,7 @@ function planStateEntry(data: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  captured.controllers = undefined;
+  captured.planCtx = undefined;
   vi.stubEnv("TAIJI_AGENT_EXT_LOG", "");
 });
 
@@ -260,11 +260,11 @@ describe("session_start hook（E3：按 state 查表恢复）", () => {
     const ctx = makeCtx([]);
     // 同进程 reload 场景：注册表里残留旧 controller——hook 重建 session 时必须清掉
     // （残留的已 abort controller 禁止复用：发起新挂起 select 会 fresh 新建，此处是防御清理）
-    captured.controllers!.set("test-session", new AbortController());
+    captured.planCtx!.controllers.set("test-session", new AbortController());
 
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
-    expect(captured.controllers!.has("test-session")).toBe(false);
+    expect(captured.planCtx!.controllers.has("test-session")).toBe(false);
   });
 
   it("active without pending review (in progress) → no reminder", async () => {

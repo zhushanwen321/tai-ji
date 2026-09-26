@@ -3,6 +3,13 @@ import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+// 技能执行门禁（resolveSkills + SkillResolution）单源在 ADR-0074 共享包
+// @zhushanwen/pi-exec-skills（plan-mode-audit-remediation 批次 4②b 迁入，含空请求
+// fail-fast 契约）；经此处 re-export 维持既有消费路径（tool.ts / command.ts / 测试
+// import "./enter.js"）不动
+export { resolveSkills } from "@zhushanwen/pi-exec-skills";
+export type { SkillResolution } from "@zhushanwen/pi-exec-skills";
+
 import { buildPlanModePrompt } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
 import type { PlanSessionMap, PlanState } from "./state.js";
@@ -10,52 +17,6 @@ import { applyPlanEvent, capPlanRequirement, clearRoundFields, getPlanState, per
 import { updatePlanWidget } from "./widget.js";
 
 export const MAX_SLUG_LENGTH = 30;
-
-/** E1 技能解析结果：ok=false 时携带缺失项与可用清单（fail-fast 回复的材料） */
-export type SkillResolution =
-  | { ok: true; resolved: SkillRef[] }
-  | { ok: false; available: string[]; missing: string[] };
-
-/**
- * 技能名归一：剥掉 pi 命令命名空间前导 `skill:` 前缀，得到自然技能名。
- * pi.getCommands() 枚举 skill 类命令时 name 带 `skill:` 前缀（如 `skill:tech-design`），
- * 这是 pi 的实现细节，不得泄漏到输入面——slash `--skills` 与 plan(enter) 的 skills 参数
- * 都用自然技能名。枚举侧与输入侧双向剥前缀后比对，兼容两种形态。
- */
-export function normalizeSkillName(name: string): string {
-  return name.startsWith("skill:") ? name.slice("skill:".length) : name;
-}
-
-/**
- * E1 校验：pi.getCommands() 过滤 source === "skill" 枚举比对（技能枚举与路径
- * 经 pi 取得，不自扫描目录——D2）。比对前双向剥 `skill:` 前缀归一：resolved/missing
- * 用归一后的短名；available 维持枚举原形态（错误信息里可直接复制为 pi 命令）。
- * slash 命令与 plan(enter) tool 两入口共用（自 command.ts 迁入 enter.ts）。
- */
-export function resolveSkills(pi: ExtensionAPI, requested: string[]): SkillResolution {
-  const skillCommands = pi.getCommands().filter((c) => c.source === "skill");
-  const byShortName = new Map(skillCommands.map((c) => [normalizeSkillName(c.name), c.sourceInfo.path]));
-  const available = skillCommands.map((c) => c.name);
-  const resolved: SkillRef[] = [];
-  const missing: string[] = [];
-  for (const raw of requested) {
-    const name = normalizeSkillName(raw);
-    const skillPath = byShortName.get(name);
-    if (skillPath === undefined) {
-      missing.push(name);
-    } else {
-      resolved.push({ name, skillPath });
-    }
-  }
-  // 空请求 = 同族 fail-fast（「--skills 给了但没给名字」）：返回 ok:false + 全量
-  // available + 空 missing（报错器据此走「no skill names followed it」文案）——
-  // slash 空 --skills 报错材料复用本函数产出（枚举单源）；既有调用方均先判非空才调，
-  // 该分支不影响其契约
-  if (requested.length === 0) {
-    return { ok: false, available, missing: [] };
-  }
-  return missing.length > 0 ? { ok: false, available, missing } : { ok: true, resolved };
-}
 
 /** 进入 plan 模式的归一入参（slash 命令与 plan(enter) tool 两入口共用） */
 export interface ActivatePlanModeInput {

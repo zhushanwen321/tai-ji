@@ -8,7 +8,7 @@ import { activatePlanMode, resolveSkills } from "./enter.js";
 import type { SkillResolution } from "./enter.js";
 import type { SkillRef } from "./prompts.js";
 import { exitPlanMode } from "./tool.js";
-import type { PlanAbortControllers, PlanSessionMap, PlanState } from "./state.js";
+import type { PlanCtx, PlanState } from "./state.js";
 import { PLAN_CONTEXT_CUSTOM_TYPE, getPlanState } from "./state.js";
 
 /** /plan 参数解析产物：requirement = 最早 flag 标记前的自由文本；skills / templatePath 为 undefined = 未提供对应 flag */
@@ -96,8 +96,7 @@ export function resolveTemplateFile(raw: string, projectDir: string): TemplateFi
 
 export function registerPlanCommand(
   pi: ExtensionAPI,
-  sessions: PlanSessionMap,
-  controllers: PlanAbortControllers,
+  planCtx: PlanCtx,
 ): void {
   pi.registerCommand("plan", {
     description:
@@ -118,11 +117,11 @@ export function registerPlanCommand(
     handler: async (args: string, ctx: ExtensionContext) => {
       const trimmed = args.trim();
       const sessionId = ctx.sessionManager.getSessionId();
-      const state = getPlanState(sessions, sessionId, ctx);
+      const state = getPlanState(planCtx.states, sessionId, ctx);
 
       // Subcommand: abort
       if (trimmed === "abort") {
-        await handleAbort(pi, sessions, controllers, sessionId, ctx, state);
+        await handleAbort(pi, planCtx, sessionId, ctx, state);
         return;
       }
 
@@ -164,7 +163,7 @@ export function registerPlanCommand(
       }
 
       // Enter plan mode
-      handleEnterPlanMode(pi, sessions, sessionId, ctx, state, args);
+      handleEnterPlanMode(pi, planCtx, sessionId, ctx, state, args);
     },
   });
 }
@@ -177,13 +176,12 @@ export function registerPlanCommand(
  */
 async function handleAbort(
   pi: ExtensionAPI,
-  sessions: PlanSessionMap,
-  controllers: PlanAbortControllers,
+  planCtx: PlanCtx,
   sessionId: string,
   ctx: ExtensionContext,
   state: PlanState,
 ): Promise<void> {
-  const result = exitPlanMode(pi, sessions, controllers, sessionId, ctx, state, "command");
+  const result = exitPlanMode(pi, planCtx, sessionId, ctx, state, "command");
   ctx.ui.notify(result.message, result.level);
 }
 
@@ -262,7 +260,7 @@ function reportTemplateFlagError(pi: ExtensionAPI, problem: string): void {
 /** Handle entering plan mode */
 function handleEnterPlanMode(
   pi: ExtensionAPI,
-  sessions: PlanSessionMap,
+  planCtx: PlanCtx,
   sessionId: string,
   ctx: ExtensionContext,
   state: PlanState,
@@ -328,7 +326,7 @@ function handleEnterPlanMode(
   // 进入核心收敛到 enter.ts（plan(enter) tool 与 slash 命令共用）；本入口只负责
   // flag 解析/校验（上方）与提示词投递（下方 sendMessage custom message 注入）。
   // state 由 activatePlanMode 就地改 + persist（getPlanState 缓存同一对象）。
-  const { prompt } = activatePlanMode(pi, sessions, sessionId, ctx, {
+  const { prompt } = activatePlanMode(pi, planCtx.states, sessionId, ctx, {
     requirement,
     skills: resolved,
     projectDir: ctx.cwd,

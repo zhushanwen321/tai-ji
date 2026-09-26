@@ -35,15 +35,22 @@ vi.mock("../compact.js", async () => {
 });
 
 vi.mock("../widget.js", () => ({ updatePlanWidget: vi.fn() }));
-vi.mock("../exec-skills.js", () => ({ detectExecSkills: vi.fn(() => []) }));
+// importActual 展开：只覆写 detectExecSkills（不扫真实目录），其余导出（含 enter.ts
+// re-export 的 resolveSkills 执行门禁）走真实现——mock 罩全模块会把它一并变 undefined
+vi.mock("@zhushanwen/pi-exec-skills", async () => {
+  const actual = await vi.importActual<typeof import("@zhushanwen/pi-exec-skills")>(
+    "@zhushanwen/pi-exec-skills",
+  );
+  return { ...actual, detectExecSkills: vi.fn(() => []) };
+});
 
 import { PLAN_REVIEW_MARKER } from "@zhushanwen/extension-protocol";
+import { detectExecSkills } from "@zhushanwen/pi-exec-skills";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { registerPlanCommand } from "../command.js";
-import { detectExecSkills } from "../exec-skills.js";
-import type { PlanAbortControllers, PlanState } from "../state.js";
-import { DEFAULT_PLAN_STATE } from "../state.js";
+import type { PlanState } from "../state.js";
+import { createPlanCtx, DEFAULT_PLAN_STATE } from "../state.js";
 import { registerPlanTool } from "../tool.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "ask_user", "write", "edit"];
@@ -64,13 +71,12 @@ function planningState(): PlanState {
 }
 
 /**
- * 组合 harness：tool + command 共享 sessions/controllers 两注册表
+ * 组合 harness：tool + command 共享单 ctx 对象两注册表
  * （跨入口解散判别需要真实共享——exitPlanMode 与等待归口经同一 controllers 表传递
- * dissolvedBy 直传来源，D-B1-2）。
+ * dissolvedBy 直传来源，D-B1-2；sessions/controllers 别名 = planCtx 两表，D-B4-3）。
  */
 function setup(initialState?: PlanState) {
-  const sessions = new Map<string, PlanState>();
-  const controllers: PlanAbortControllers = new Map();
+  const planCtx = createPlanCtx();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<unknown>;
   let commandHandler: (args: string, ctx: ExtensionContext) => Promise<void>;
 
@@ -86,8 +92,8 @@ function setup(initialState?: PlanState) {
     getCommands: vi.fn(() => []),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as Parameters<typeof registerPlanTool>[0];
-  registerPlanTool(pi, sessions, controllers);
-  registerPlanCommand(pi as unknown as Parameters<typeof registerPlanCommand>[0], sessions, controllers);
+  registerPlanTool(pi, planCtx);
+  registerPlanCommand(pi as unknown as Parameters<typeof registerPlanCommand>[0], planCtx);
 
   const ctx = {
     sessionId: "test-session",
@@ -99,12 +105,12 @@ function setup(initialState?: PlanState) {
     ui: { select: vi.fn(), notify: vi.fn(), setWidget: vi.fn(), setStatus: vi.fn() },
   };
 
-  if (initialState) sessions.set("test-session", initialState);
+  if (initialState) planCtx.states.set("test-session", initialState);
 
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
     executeFn!("tc0", params, signal, undefined, ctx);
   return {
-    pi, sessions, controllers, ctx, exec,
+    pi, planCtx, sessions: planCtx.states, controllers: planCtx.controllers, ctx, exec,
     handleCommand: (args: string) => commandHandler(args, ctx as unknown as ExtensionContext),
   };
 }

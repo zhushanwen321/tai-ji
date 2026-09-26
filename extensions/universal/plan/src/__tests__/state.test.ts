@@ -19,6 +19,7 @@ import {
   reconstructPlanState,
   resetPlanState,
   clearRoundFields,
+  createPlanCtx,
 } from "../state.js";
 
 describe("PlanState", () => {
@@ -622,6 +623,40 @@ describe("freshPendingSelect（E10 生命周期 + D-B1-2 dissolvedBy 直传原�
     // 闭包身份天然携带轮次记忆：另一个挂起（新轮次）的来源变量独立，不受前轮打标污染
     const next = freshPendingSelect(controllers, "s1");
     expect(next.dissolvedBy).toBeUndefined();
+  });
+});
+
+describe("createPlanCtx / dissolveAll（D-B4-3 单 ctx 对象：两表收敛 + 解散方法承载 exitPlanMode 入口动作）", () => {
+  it("两表为空 Map 且独立：states / controllers 各自可读写", () => {
+    const planCtx = createPlanCtx();
+    expect(planCtx.states.size).toBe(0);
+    expect(planCtx.controllers.size).toBe(0);
+    const pending = freshPendingSelect(planCtx.controllers, "s1");
+    expect(planCtx.controllers.get("s1")).toBe(pending);
+  });
+
+  it("dissolveAll：全部挂起 markDissolved 打标 + controller.abort + 注册表清空（exitPlanMode ① 的承载）", () => {
+    const planCtx = createPlanCtx();
+    const abortSpy = vi.fn();
+    const first = freshPendingSelect(planCtx.controllers, "s1");
+    const second = freshPendingSelect(planCtx.controllers, "s2");
+    vi.spyOn(first.controller, "abort").mockImplementation(abortSpy);
+    vi.spyOn(second.controller, "abort").mockImplementation(abortSpy);
+
+    planCtx.dissolveAll("self");
+
+    // 来源随闭包直达等待处（D-B1-2）：打标先于 abort 不可在此直接断言（同步序列），
+    // 但两挂起都必须置位 + 中止；注册表不留已 dissolved 条目
+    expect(first.dissolvedBy).toBe("self");
+    expect(second.dissolvedBy).toBe("self");
+    expect(abortSpy).toHaveBeenCalledTimes(2);
+    expect(planCtx.controllers.size).toBe(0);
+  });
+
+  it("dissolveAll 无挂起时为 no-op（无挂起退出的幂等形态）", () => {
+    const planCtx = createPlanCtx();
+    expect(() => planCtx.dissolveAll("self")).not.toThrow();
+    expect(planCtx.controllers.size).toBe(0);
   });
 });
 

@@ -36,9 +36,15 @@ vi.mock("../compact.js", () => ({
   GOAL_FAILURE_RECOVERY: {},
 }));
 
-vi.mock("../exec-skills.js", () => ({
-  detectExecSkills: vi.fn(() => []),
-}));
+// Mock 执行方式检测（D10）：单测不扫真实目录。importActual 展开：只覆写
+// detectExecSkills，其余导出（含 enter.ts re-export 的 resolveSkills 执行门禁）走
+// 真实现——mock 罩全模块会把它一并变 undefined
+vi.mock("@zhushanwen/pi-exec-skills", async () => {
+  const actual = await vi.importActual<typeof import("@zhushanwen/pi-exec-skills")>(
+    "@zhushanwen/pi-exec-skills",
+  );
+  return { ...actual, detectExecSkills: vi.fn(() => []) };
+});
 
 vi.mock("../widget.js", () => ({
   updatePlanWidget: vi.fn(),
@@ -49,13 +55,12 @@ import * as fs from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { registerPlanTool } from "../tool.js";
-import { type PlanState, DEFAULT_PLAN_STATE, PLAN_MODE_TOOLS } from "../state.js";
+import { type PlanState, createPlanCtx, DEFAULT_PLAN_STATE, PLAN_MODE_TOOLS } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
 function setup(skillCommands: Array<{ name: string; path: string }> = []) {
-  const sessions = new Map();
-  const controllers = new Map<string, AbortController>();
+  const planCtx = createPlanCtx();
   let executeFn: (id: string, p: Record<string, unknown>, sig?: AbortSignal, upd?: unknown, ctx?: unknown) => Promise<{
     content: Array<{ type: string; text: string }>;
     details: { action: string; requirement?: string; skills?: string[] };
@@ -68,7 +73,7 @@ function setup(skillCommands: Array<{ name: string; path: string }> = []) {
     getCommands: vi.fn(() => skillCommands.map((c) => ({ name: c.name, source: "skill", sourceInfo: { path: c.path } }))),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
   } as unknown as ExtensionAPI;
-  registerPlanTool(pi, sessions, controllers, new Map());
+  registerPlanTool(pi, planCtx);
 
   const ctx = {
     sessionId: "test-session",
@@ -82,7 +87,7 @@ function setup(skillCommands: Array<{ name: string; path: string }> = []) {
 
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
     executeFn!("tc0", params, signal, undefined, ctx);
-  return { pi, sessions, ctx, exec };
+  return { pi, sessions: planCtx.states, ctx, exec };
 }
 
 describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1）", () => {

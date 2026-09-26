@@ -86,11 +86,14 @@ describe("resolveSkills（执行门禁：pi 注册表枚举比对，双向剥 sk
     }
   });
 
-  it("empty request resolves to empty list without consulting availability", () => {
+  it("empty request = 同族 fail-fast：ok:false + 全量 available + 空 missing（报错器的恢复动作输入）", () => {
+    // 「--skills 给了但没给名字」：missing 空 → 报错器走「no skill names followed it」
+    // 文案分支；available 同源枚举供报错文案直接列出可复制命令
     const resolution = resolveSkills(makePi(), []);
-    expect(resolution.ok).toBe(true);
-    if (resolution.ok) {
-      expect(resolution.resolved).toEqual([]);
+    expect(resolution.ok).toBe(false);
+    if (!resolution.ok) {
+      expect(resolution.missing).toEqual([]);
+      expect(resolution.available).toEqual(["skill:tech-design", "skill:dev-flow", "skill:code review"]);
     }
   });
 });

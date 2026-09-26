@@ -17,8 +17,8 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 // 对拍锚点直接用 node_modules 实装（pi 0.84.4 dist，AGENTS.md 语义断言约定）
 import { loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
 
-import { detectExecSkills, hasPlanExecMarker, isEnabledByOverrides } from "../exec-skills.js";
-import type { ExecSkill } from "../exec-skills.js";
+import { detectExecSkills, hasPlanExecMarker, isEnabledByOverrides } from "@zhushanwen/pi-exec-skills";
+import type { ExecSkill } from "@zhushanwen/pi-exec-skills";
 
 /** SKILL.md 内容构造（frontmatter 字段按需） */
 function skillMd(opts: {

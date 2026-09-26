@@ -496,6 +496,9 @@ importers:
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
+      '@zhushanwen/pi-exec-skills':
+        specifier: workspace:*
+        version: link:../../shared/exec-skills
       '@zhushanwen/pi-ext-guards':
         specifier: workspace:*
         version: link:../../shared/ext-guards
