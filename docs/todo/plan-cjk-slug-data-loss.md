@@ -1,6 +1,6 @@
 # CJK slug 数据丢失缺陷（plan extension，独立 bug 修复）
 
-状态：缺陷 2 待修（修法已定，待独立立项）；缺陷 3（goal 展示名恒常量）已于 2026-09-27 独立修复——`buildPlanSlug` 改取计划目录名（requirement slug 段），successCriteria 总述恢复计划身份，同批提交。源自 code-overdesign-audit「移交：射程外发现」缺陷 2/3；不在 plan-mode-audit-remediation 设计范围内——该设计只动代码组织，不动业务语义
+状态：缺陷 2 待修（修法已定案，待独立立项）；缺陷 3（goal 展示名恒常量）已于 2026-09-27 独立修复——`buildPlanSlug` 改取计划目录名（requirement slug 段），successCriteria 总述恢复计划身份，同批提交。源自 code-overdesign-audit「移交：射程外发现」缺陷 2/3；不在 plan-mode-audit-remediation 设计范围内——该设计只动代码组织，不动业务语义
 
 ## 问题（缺陷 2）
 
@@ -8,9 +8,9 @@
 
 连带（缺陷 2 未修窗口内）：`extensions/universal/plan/src/execution-notice.ts` 的 `buildPlanSlug` 以目录名为 goal 展示名，中文需求场景（plan.md 直落 `.tmp/plans`）会取到骨架名 `"plans"`——随缺陷 2 修复（目录名保唯一 slug）自然消除，无需独立处理。
 
-## 修复方向（已论证）
+## 修复方向（已定案，2026-09-27 用户裁决）
 
-缺陷 2：slug 无有效 ASCII 片段（空串与 untitled 两种退化形态）时以时间戳/短 hash 保目录唯一（bug 修复，非过度设计议题）。
+缺陷 2：目录名改为「先定名、探测冲突、冲突自动递增」——以需求 slug（空需求沿用 untitled）为 base，目标目录已存在时自动改用 `<base>-2`、`<base>-3` 递增重探；实现须把现行 `mkdirSync(recursive: true)`（对已存在目录静默成功，互覆的直接成因）改为先探测存在或捕获已存在错误再落目录。实际采用的目录名经既有数据流反馈：计划状态记录实际落盘路径（planFilePath），goal 展示名取实际目录名（缺陷 3 修复后形态），无需新增反馈通道。英文语义段可由 agent 顺产（可空），唯一性由递增机制机械保证、不依赖命名。
 
 ## 证据
 
