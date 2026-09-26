@@ -1,5 +1,5 @@
 ---
-description: "数据多源治理审查。检查 pi 文件直写（绝对写规则）、第二写入者、事件直写状态、renderer 派生逻辑、未登记缓存、扩展数据通道合规、登记表同步。"
+description: "数据多源治理审查。检查 pi 文件直写（绝对写规则）、第二写入者、单一事实源、推拉模式、事件直写状态、renderer 派生逻辑、未登记缓存、扩展数据通道合规、登记表同步。"
 name: review-data-governance
 ---
 
@@ -32,29 +32,38 @@ task prompt 中必须包含：
 3. **第二写入者检查**：
    - 是否为已有 GUI 数据新增第二条写路径：事件 handler 直写 store 字段、RPC 回调绕过 owner 直写缓存、新写方写已有缓存/Map。
    - 对照登记表：该数据的唯一写入口是什么，diff 是否绕过了它。绕过 = MUST_FIX。
-4. **事件只做失效检查**：
+4. **单一事实源检查（SSOT + 机器检查）**：
+   - 一份状态写多个介质（文件 + 内存 store + 缓存 + 派生副本等）且无投影声明（谁是权威源、谁是投影、如何同步）= 红灯 MUST_FIX。
+   - 重要事实是否落单一权威登记处并配自动机器检查——能确定性脚本判定的不留给人工/LLM 判断。
+   - 与第二写入者检查同族不同面：第二写入者管「同介质多写方」，本条管「同状态多介质无投影」。
+   - 权威源 = [docs/adr/decisions.md](../../../../docs/adr/decisions.md) ADR-0062（单一数据 owner + 绝对写规则）+ 全局 AGENTS.md 架构偏好「SSOT + 机器检查」。
+5. **推拉模式检查**：
+   - 数据同步以拉为准（缓存优先、磁盘兜底），推送只允许作为可丢弃的性能提示（丢了靠下次拉取自愈，不承载正确性）。
+   - 新增推送通道若承载正确性语义（推送丢失即状态错误、无拉取兜底）= MUST_FIX。
+   - 权威源 = architecture-decay-audit skill 修复原则集（「拉是真理通道，推是性能提示」）。
+6. **事件只做失效检查**：
    - 新增的 pi 事件 handler（event-adapter / event-interpreter / effects）是否直接改状态（应只标 dirty 触发快照重拉）。
    - 合法例外形态（登记在案）：消息流 `applyEntry` reducer、queue 内容的 queue_update 计数对账。例外之外的事件直写 = MUST_FIX。
-5. **renderer 零派生检查**：
+7. **renderer 零派生检查**：
    - renderer（`packages/renderer/`）新增代码是否含派生逻辑：字段 merge、状态归一化（normalize*）、文本匹配对齐、从多个消息/字段推导状态。
    - 派生应上移 runtime/core；renderer 新增的 store 写方法若不由 `applySnapshot` 单入口调用 = MUST_FIX。
    - WS 消息应已是 view-ready DTO；新增 WS 消息若要求 renderer 再加工 = SUGGESTION 起步。
-6. **未登记缓存检查**：
+8. **未登记缓存检查**：
    - 新增模块级 Map / ref / reactive 缓存（session 状态类）是否带 `@data-owner <登记表条目>` 注解，且条目在登记表真实存在。无注解或无条目 = MUST_FIX。
-7. **扩展数据通道检查**（diff 涉及 `extensions/` 时）：
+9. **扩展数据通道检查**（diff 涉及 `extensions/` 时）：
    - 扩展持久化状态是否经 `pi.appendEntry` 自描述 entry（由 pi 写文件）；runtime 消费是否走 `entry_appended` + `get_entries`。
    - 新代码把状态编码进 message/toolCall 让读取方逆向解析 = MUST_FIX；`pi.sendMessage` custom message 用于用户可见通知合法，用于状态记录 = MUST_FIX。
-8. **登记表同步检查**：
+10. **登记表同步检查**：
    - 改了数据流（写路径/缓存/事件消费/派生位置）的 PR 必须同步更新 `data-source-registry.md`；漏更新 = MUST_FIX。
-9. **会话数据落点检查（ADR-0063 I2，MUST）**：
+11. **会话数据落点检查（ADR-0063 I2，MUST）**：
    - diff 中是否出现把**对话/会话内容**（session JSONL、消息、entry、会话拷贝产物）写入 `$TMPDIR` / `os.tmpdir()` / 其他临时目录的路径（`mkdtemp`/`tmpdir`/`/tmp` 与 writeFile/appendFile 组合）。会话内容合法位置只有 sessions 目录（pi 的写目标）与活跃进程内存；临时目录会被 OS 清空、不被 taiji 扫描——放进去 = 慢性数据丢失（2026-07-17 tmp 附着管线曾致 P0 数据丢失静默 40 天）。命中 = MUST_FIX（例外：①测试 fixture 的隔离 session-dir，须带清理断言；②zcode L3 恢复快照读通道——登记例外 data-source-registry §4 ⑰「读快照非存放」〔源库只读零触碰、副本即弃，2026-09-23 MF-1-4 登记〕，命中 `taiji-zcode-snap-` 前缀 mkdtemp 形态先对照该条）。
-10. **pi 行为断言锚点检查（ADR-0063 I4，MUST）**：
+12. **pi 行为断言锚点检查（ADR-0063 I4，MUST）**：
    - diff 中对 pi 内部行为的断言（注释 / 测试断言 / 文档声明「pi 会 / 不会 / 已 / 忽略 / 持久化 …」）是否附 pi-mono 源码锚点（文件 + 行号，本地 clone `~/Code/git-fork/pi-mono-workspace/main/packages/` 只读查阅）。无锚点的臆断（如「pi 已读入内存」——实为永久重绑写目标）= MUST_FIX；有锚点但只覆盖单层消费面（如只查 parse 层漏 index/append 层）= MUST_FIX（MF1 教训：单层「无害」≠ 整体无害）。
-11. **输出审查报告**到 `output` 路径。
+13. **输出审查报告**到 `output` 路径。
 
 ## 严重度判定
 
-数据治理违规 = 架构约束违规，**不允许降级**：pi 文件直写、第二写入者、事件直写状态、renderer 派生、无登记缓存、扩展通道违规、会话数据入 $TMPDIR（I2）、pi 行为断言无锚点（I4）一律 MUST_FIX。仅「WS 消息非 view-ready 但有短期理由」「登记表字段描述不清晰」类可 SUGGESTION。
+数据治理违规 = 架构约束违规，**不允许降级**：pi 文件直写、第二写入者、单一事实源缺失（多介质写无投影声明）、推送承载正确性（违反拉优先）、事件直写状态、renderer 派生、无登记缓存、扩展通道违规、会话数据入 $TMPDIR（I2）、pi 行为断言无锚点（I4）一律 MUST_FIX。仅「WS 消息非 view-ready 但有短期理由」「登记表字段描述不清晰」类可 SUGGESTION。
 
 ## 输出格式
 
@@ -78,7 +87,7 @@ must_fix: <数字>
 | MUST_FIX | session-lifecycle.ts | 88 | pi-file-write | 新增 appendFileSync 直写 session JSONL | 改经 rpc-client.set_session_name，活跃走 RPC / 非活跃走短命 pi 进程 |
 ```
 
-类别包括：pi-file-write / second-writer / event-as-data / renderer-derivation / unregistered-cache / extension-channel / registry-sync / tmpdir-session-data / unanchored-pi-assertion
+类别包括：pi-file-write / second-writer / ssot-projection / push-as-truth / event-as-data / renderer-derivation / unregistered-cache / extension-channel / registry-sync / tmpdir-session-data / unanchored-pi-assertion
 
 优先级：MUST_FIX / SUGGESTION / INFO
 

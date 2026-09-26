@@ -23,7 +23,7 @@ description: >-
 
 ### 第 1 步：处理未提交改动（AI 决策，脚本不代劳）
 
-脚本预检发现未提交的 **tracked** 改动会以 exit 1 停下（merge 预检不查 untracked；cleanup 闸门用 `status --short` 把 tracked + untracked 一并预检——删除动作是显式 `rm -rf`，无 git worktree remove 的内建拒删兜底，脏检查必须前置。[HISTORICAL] 旧版把 untracked 检查留给 git worktree remove 内建兜底，2026-09 半删态事故后前移）。此时**不要**用 `git add -A && git commit` 盲提交：
+脚本预检发现未提交的 **tracked** 改动会以 exit 1 停下（merge 预检不查 untracked；cleanup 门禁用 `status --short` 把 tracked + untracked 一并预检——删除动作是显式 `rm -rf`，无 git worktree remove 的内建拒删兜底，脏检查必须前置。[HISTORICAL] 旧版把 untracked 检查留给 git worktree remove 内建兜底，2026-09 半删态事故后前移）。此时**不要**用 `git add -A && git commit` 盲提交：
 
 - 本次会话产生的改动 → 按全局提交策略正常 commit（完成即提交）
 - 非本次会话产生的改动 → **不提交、不修改、不丢弃**，先询问用户
@@ -36,21 +36,41 @@ description: >-
 
 分支 commit 已是逻辑批次级（或只有个位数笔）→ 跳过本步直接合并，不为仪式感整理。
 
-### 第 1.7 步：合入点横切审查（4+3 维，条件触发）
+### 第 1.6 步：质量门与 changeset 前置（gates，恒跑）
 
-feature 分支的 diff 完整、上下文集中，是横切维度审查的天然边界——dev-flow 阶段 3 只审「实现 vs 设计」，data-governance / test-coverage / arch-boundary / type-safety 四个横切面不在其审查面内（PR #20 实证：走了完整 dev-flow 的 btw/ttft 域终局仍暴露 10 条、5 条 major，登记与覆盖问题全部从 dev-flow 眼皮下漏过）。本步把横切面前置到合入点，终局 PR 期 8 维 loop 只收跨域交互与漏网项（「前置消化 vs 终局兜底」并存关系）。
+机器可判的合入门禁前置到分支边界（审查项唯一主责：质量门与 changeset 归分支边界承担，终局 PR 期只做复核兜底）。cwd = 当前 feat worktree 根，依次跑：
 
-**触发条件（满足其一才跑，小分支不为仪式感审查）**：分支 diff（`git diff $(git merge-base github/main HEAD)..HEAD --stat`）触及 ≥15 个非测试源文件，或触及任一横切敏感面（新 WS 消息/RPC 命令/数据写入点/新顶层目录）。不触发时在合并汇报中记一句跳过理由。
+```bash
+node scripts/quality-gates.mjs --side dev-merge   # 质量门聚合：typecheck 三处 + 增量 coverage（含新增文件机器盲区判定，coverage-file-gate-exempt 可豁免）+ metrics
+node scripts/changeset-check.mjs                  # changeset 完整性：diff 触及 extensions/**/src/** 且包缺 .changeset/*.md → WARN 清单
+```
+
+- 退出码：quality-gates `0` = 全绿 / `1` = FAIL / `2` = 用法或环境错误；changeset-check `0` = pass/warn/skip（WARN 不阻断）/ `2` = 工具错误。
+- **FAIL（exit 1）**：派 fixer 修复重跑 ≤3 轮——fixer 只修失败输出直接相关的问题、修完自行 commit（显式路径，禁 `git add -A`）、每轮修完重跑脚本验证；3 轮仍 FAIL 停下呈报人工处置，不进后续步骤。
+- **exit 2**：工具/环境错误不进 fixer 循环，按脚本输出的缺失路径与恢复指引处置。
+- **changeset WARN**：主 agent 按 Gate-1a.5 同款分类逻辑处置（不弹窗问用户）——实质改动（包有对外语义变化）→ 起草 `.changeset/*.md` 且理由列明；非发布改动（纯注释/文档/无对外语义变化的内部整理）→ 跳过起草并列明理由。skip/pass → 无动作，汇报记一句。
+- **base 口径**：`--side dev-merge` = 分支增量（`git merge-base github/main HEAD`，脚本自解析），与第 1.7 步审查对象同口径；禁止传 `--base main`（那是 pr-cr-fix 侧的累积口径，两侧差异有意）。
+
+**存在性守卫（zcode/pi 两侧通用）**：跑前 `test -f scripts/quality-gates.mjs` 检查脚本存在——脚本随 git 分支传播，skill 实体经 symlink 即时生效，feature 分支未含新脚本 commit 时必然缺失（介质错速）。缺失 → 显式输出「quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露」，继续第 1.7 步；不崩溃、不静默。changeset-check.mjs 缺失同款处置。恢复通道：源 worktree `git merge dev-0.10.5`（或发布后 merge main）主动吸收后重跑。
+
+**宿主分工**：zcode 宿主 = 发起 saved workflow `.agents/workflows/dev-merge-gates.dwf.ts`，一次承载本步 + 第 1.7 步（gates + branch-review 两步前置，存在性守卫内建，失败以 failed 终态返回）；pi 宿主无对应 workflow（dev-merge 使用频率低，不维护双宿主镜像），主 agent 按本步与第 1.7 步手工编排——gates 走上述 node 脚本 + changeset WARN 起草指令，branch-review 走 review-fix-loop。
+
+### 第 1.7 步：合入点横切审查（3+3 维，触及源码即跑）
+
+feature 分支的 diff 完整、上下文集中，是横切维度审查的天然边界——dev-flow 阶段 3 只审「实现 vs 设计」，business-logic / arch-boundary / data-governance 等横切面不在其审查面内（PR #20 实证：走了完整 dev-flow 的 btw/ttft 域终局仍暴露 10 条、5 条 major，登记与覆盖问题全部从 dev-flow 眼皮下漏过）。本步把横切面前置到合入点，终局 PR 期只收机器兜底与漏网项。
+
+**触发条件**：分支 diff（`git diff $(git merge-base github/main HEAD)..HEAD --stat`）触及任一非测试源码文件即跑——业务逻辑审查必须有分支边界归属，不设文件数门槛；未触及源码（纯文档/注释外围改动）时在合并汇报记一句跳过理由。
 
 **执行**（审查对象 = 分支增量 diff，非全 PR）：
 
 1. 约束动态加载：`node scripts/select-constraints.mjs --base $(git merge-base github/main HEAD)` 落 `.review/constraints.md`
-2. 派 4 维 reviewer（agent 定义复用 pr-cr-fix 资产，不另建）：`arch-boundary` / `data-governance` / `test-coverage` / `type-safety`——pi 宿主用 `pi workflow run review-fix-loop --args '{targetType:"git-diff", target:"<merge-base-hash>", batch1:"<选中的 review-<维度>.md 绝对路径，逗号分隔>", autoCommit:true, ...}'`；zcode 宿主用原生 `review-fix-loop` saved workflow（reviewers 传选中的 agent .md 绝对路径子集）
+2. 派恒派 3 维 reviewer（agent 定义复用 pr-cr-fix 资产，不另建）：`business-logic`（含降级策略红线——catch 吞错假成功 / 错误信息可操作 / 用户可见降级必须显形，归 grading-error-policy 类别检查）/ `arch-boundary` / `data-governance`——pi 宿主用 `pi workflow run review-fix-loop --args '{targetType:"git-diff", target:"<merge-base-hash>", batch1:"<选中的 review-<维度>.md 绝对路径，逗号分隔>", autoCommit:true, ...}'`（batch1 点名上述 3 维）；zcode 宿主已由 dev-merge-gates.dwf.ts 的 branch-review 步承载（第 1.6 步一并发起），单独补审时用原生 `review-fix-loop` saved workflow（reviewers 传选中的 agent .md 绝对路径子集）
 3. 触发式追加 3 维：diff 触及打包/构建配置（tsup/electron-builder/CI）→ 加 `electron-build`；触及包结构/发布线（package.json 增删/workspace/changeset 配置）→ 加 `monorepo-impact`；触及 `extensions/**/src/**` → 加 `extension-api`（tool/command schema、SDK 契约、spec 偏差登记与 data-governance 同属 dev-flow 审不到的横切面，且是本仓高频改动面；SDK 签名核对要对照 node_modules dist、成本中等，故不恒派只触发）
-4. business-logic 维度**不进本步**（成本最高、发现密度最低）——分支内语义正确性由 dev-flow 场景验收承载
-5. 终态处置：must-fix 全修后才进第 2 步合并；minor 残余随分支带走（commit message 或 TODO 登记），不阻塞
+4. 终态处置：must-fix 全修后才进第 2 步合并；minor 残余随分支带走（commit message 或 TODO 登记），不阻塞
 
-成本预期 30-50 分钟审查 + 15-30 分钟修复（diff 为单分支增量，远小于终局全量）。
+**CR 门 fail-fast 语义（2026-09-25 裁决）**：第 1.7 步 review-fix-loop 全链强结构化返回——reviewer/fixer/aggregator 任一结构化返回失败即立即终止整个 workflow（review-failure / fix-failure / aggregator-failure 终态 + 恢复指引），无降级完成形态。CR 门读到非 clean/converged 终态 = 环境或模型问题未修，按失败处置（不进合并），恢复动作见 run 返回值 message。
+
+成本随 diff 规模浮动：小分支（≤5 非测试源文件）预计 10-20 分钟，大分支 30-50 分钟审查 + 15-30 分钟修复（diff 为单分支增量，远小于终局全量）。
 
 ### 第 1.8 步：传播守卫前置（目标线 ⊇ main + 兄弟线未传播呈报）
 
@@ -68,8 +88,7 @@ node scripts/check-line-propagation.mjs --target <dev-branch>
 - **硬检查红灯 = block**：按守卫恢复指引在目标线 worktree 内 `git merge main` 后重跑；确有正当理由才可 `--allow-diverged` 一次性越过（打印警示、软提示照常执行），越过决定须呈报用户。
 - **仅分支存在形态红灯的处置**：目标 worktree 不存在时上述恢复指引不可直接执行——block 挡的是第 2 步合并，不挡恢复前置。先经 `worktree-manipulate` 创建目标 worktree（检出既有分支，等价于第 2 步的自动创建）→ 在其中 `git merge main` → 重跑守卫消除红灯后再进第 2 步。
 - **软提示头条摘要呈报用户后才进第 2 步**（流程一等步骤，不是可选日志）：每条兄弟线的 commit 总量 + 最老停留天数；裁决粒度 = **线粒度**（对每条兄弟线回答「吸收 / 暂缓」），不逐条裁决。兄弟线长周期 WIP 每次全量呈报数十条属无状态恒常呈报的稳态，不是异常。
-
-**CR 门 fail-fast 语义（2026-09-25 裁决）**：第 1.7 步 review-fix-loop 全链强结构化返回——reviewer/fixer/aggregator 任一结构化返回失败即立即终止整个 workflow（review-failure / fix-failure / aggregator-failure 终态 + 恢复指引），无降级完成形态。CR 门读到非 clean/converged 终态 = 环境或模型问题未修，按失败处置（不进合并），恢复动作见 run 返回值 message。
+- **兄弟线修改文件交集呈报**：软提示摘要附带交集列——`node scripts/cross-branch-overlap.mjs`（目标 worktree 存在 → cd 目标 worktree 直跑，默认 `--branch HEAD`；目标仅分支存在 → 源 worktree 内 `--branch <dev-branch>`），输出当前线 diff 与各未合并兄弟线 diff 的修改文件交集（确定性计算、恒不阻塞、空交集也是有效结论）。脚本缺失按存在性守卫同款跳过并披露；exit 2 工具错误披露后不阻塞。交集只给线粒度裁决提供重叠证据，不改变「吸收 / 暂缓」的裁决粒度。
 
 ### 第 2 步：合并
 
@@ -111,7 +130,7 @@ cd <workspace>/<dev-branch> && git add <files> && git commit
 bash "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh" cleanup <dev-branch>
 ```
 
-脚本内置安全闸：分支未合并进 dev 拒绝清理（`is_merged` 闸门通过后脚本直接 `git branch -D`，不依赖 `git branch -d`——`-D` 避免依赖 upstream/HEAD 校验的不确定性，已合并与否由 `is_merged` 闸门保证）；源 worktree 有未提交/未跟踪文件时**删除前预检拒绝**（`status --short` 在 git 完好时采集）——**不要擅自 clean**，先看那些文件是什么（来源不明的问用户），确认后由用户/显式决策强删。
+脚本内置安全闸：分支未合并进 dev 拒绝清理（`is_merged` 门禁通过后脚本直接 `git branch -D`，不依赖 `git branch -d`——`-D` 避免依赖 upstream/HEAD 校验的不确定性，已合并与否由 `is_merged` 门禁保证）；源 worktree 有未提交/未跟踪文件时**删除前预检拒绝**（`status --short` 在 git 完好时采集）——**不要擅自 clean**，先看那些文件是什么（来源不明的问用户），确认后由用户/显式决策强删。
 
 **删除语义（显式两步）**：`rm -rf <feat 目录>` + `git worktree prune`，先删目录、后清登记。[HISTORICAL] 旧版用 `git worktree remove`，实验复现证实其内部**先删登记、后删目录**——目录删除失败时留下"登记已失、目录内 git 全废"的半删态，且旧脚本吞掉 stderr、硬编码诊断为"被 untracked 阻止"（空清单 + 不可执行的 clean -fd 指引），2026-09 事故后改为显式两步。中途失败面：`rm -rf` 失败 → 登记与分支均未动，状态完好可排查重试；prune 失败/漏跑 → 目录已删、登记残留，prune 幂等可补跑，无破坏性。
 
@@ -130,6 +149,6 @@ Cannot execute bash commands.
 
 同类陷阱与反模式的完整记录见 merge skill 阶段 7。
 
-例外：脚本 exit 非 0 且**没看到工具层报废错误**（bash 正常返回了脚本输出）时，按失败点分两类——**删目录之前** die（闸门失败：未合并 / 脏 worktree / git 状态读取失败）：目录完好，按脚本输出处置后重跑 cleanup；**rm -rf 目录失败**（die 消息含"登记与分支均未动"）：git 登记与分支完好、dev 侧可诊断，但目录可能已部分残缺（`.git` 文件或不存，目录内 git 不可信、重跑 cleanup 未必可行），排查根因并解除后执行 die 消息里的单命令配方。不要把任何一类失败当成删除已完成。
+例外：脚本 exit 非 0 且**没看到工具层报废错误**（bash 正常返回了脚本输出）时，按失败点分两类——**删目录之前** die（门禁失败：未合并 / 脏 worktree / git 状态读取失败）：目录完好，按脚本输出处置后重跑 cleanup；**rm -rf 目录失败**（die 消息含"登记与分支均未动"）：git 登记与分支完好、dev 侧可诊断，但目录可能已部分残缺（`.git` 文件或不存，目录内 git 不可信、重跑 cleanup 未必可行），排查根因并解除后执行 die 消息里的单命令配方。不要把任何一类失败当成删除已完成。
 
 **半删态兜底**（现行脚本结构上不产生该状态；出现即手工操作或旧产物残留）：识别特征 = worktree 目录还在，但目录内一切 git 命令报 `fatal: not a git repository`，且 `.bare/worktrees/<name>/` 登记已消失（成因：`git worktree remove` 内部先删登记、目录删除中途失败）。处置：从**兄弟 worktree**（不是待删除的目录本身）执行单命令 `git -C <dev> merge-base --is-ancestor <feat-branch> <dev-branch> && git -C <dev> branch -D <feat-branch> && git -C <dev> worktree prune && rm -rf <feat 目录>`（is-ancestor 在链首，未合入即中止、不删任何东西；rm -rf 在链尾，失败即停时目录与分支状态可诊断）。agent 会话 cwd 若还在待删除的目录内，该命令执行后本会话 bash 报废——应作为最后一条 bash 命令，剩余收尾用 read/write 类工具。

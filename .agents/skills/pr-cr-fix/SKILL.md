@@ -153,13 +153,39 @@ renderer 全量阈值（S3-W1 基线-2~3% 重校准：lines 68 / stmts 66 / bran
 
 ## [OPTIONAL] Mutation testing 深检
 
-覆盖率证明「代码被跑过」，mutation score 证明「断言真能抓 bug」——覆盖率高但断言弱的测试抓不住回归。**触发条件**：Gate-1.5 靶子函数补测后验证断言强度 / review-test-coverage 报「弱断言」疑点 / 修 bug 后验证回归测试真能拦截。工具选型、定向跑法与判定参考见 `references/mutation-testing.md`。
+覆盖率证明「代码被跑过」，mutation score 证明「断言真能抓 bug」——覆盖率高但断言弱的测试抓不住回归。**触发条件**：Gate-1.5 靶子函数补测后验证断言强度 / 修 bug 后验证回归测试真能拦截。工具选型、定向跑法与判定参考见 `references/mutation-testing.md`。
 
 ## 阶段 2：review + fix
 
+### 审查维度集：cr-fix 默认空集 + preflight 分支判定
+
+**cr-fix 的 LLM 审查默认维度集为空（空集化）**：分支增量审查由 dev-merge 承接（业务逻辑 / 架构边界 / 数据治理恒派 + 三触发维度 + 质量门 + changeset，见 dev-merge SKILL.md），终局 PR 默认只承担机器兜底 + simplify + 流程合规。维度集判定在 pr-lifecycle 的 preflight step 按分支形态自动做出：
+
+| 分支形态 | 判定 | cr-fix 行为 |
+|---------|------|------------|
+| `dev-*` 线（当前分支名匹配 `dev-*`，dev-merge 的产物线——常态路径） | 默认零 LLM 审查维度 | cr-fix step 跳过，终态披露「分支审查已由 dev-merge 承接」 |
+| 非 `dev-*` 线（feature 直连 main 的非常态路径，未经 dev-merge） | 回退带审查模式 | 回退集 6 agent（见下表），终态逐项披露回退原因 |
+| 任意形态 + 发起方显式传 `reviewers` 参数 | 人工逃生舱 | 按指定维度执行（白名单裁剪，覆盖自动判定） |
+
+**回退集 6 agent = 3 恒派 + 3 触发（路径判定，全部对 `git diff base...HEAD --name-only` 按路径匹配、不做语义判断）**：
+
+| 组 | 维度 | 触发条件 |
+|---|------|---------|
+| 恒派 | business-logic / arch-boundary / data-governance | 无条件派 |
+| 触发 | electron-build | diff 含 `packages/runtime/**`、`apps/electron/**` 或 runtime `package.json` 依赖变更 |
+| 触发 | monorepo-impact | diff 触及任一 workspace 包面（`packages/**`、`apps/**`、`extensions/**`）或根级依赖声明（根/子包 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`） |
+| 触发 | extension-api | diff 含 `extensions/**` |
+
+type-safety / test-coverage 两维度已按设计裁决退役（承接分流：tsc + eslint 机器检查 / coverage-gate 机器门禁 / TEST-STRATEGY.md 领域测试点附录；登记见 docs/constraints.json 现行条目与设计文档 review-pipeline-redesign 决策 4），不再进入任何默认集或回退集。某次合入特别大或涉及合并冲突解时，人工传 `reviewers` 参数加回指定维度。
+
 ### 阶段 1.5 / 1.6 产物消费约定
 
-`.review/metrics.json`（阶段 1.5 必然产出）与 `.review/coverage.json`（阶段 1.6）由以下维度按各自 agent 定义的输入约定消费：review-test-coverage 消费 `targets.high_crap` 靶子清单 + coverage.json 的 `uncovered_files`（实测增量覆盖缺口，优先补测试）+ `files_without_lcov`（未被任何测试加载的新文件——机器盲区定点核查）；review-monorepo-impact 消费 `fail`/`warn` 中的循环依赖条目（不再手工 grep import 链）。其余 6 维不变。
+`.review/metrics.json`（阶段 1.5 必然产出）与 `.review/coverage.json`（阶段 1.6）是机器报告，消费方 = gates 的机器输出（dev-merge 侧由 `scripts/quality-gates.mjs` 聚合呈报，pr-cr-fix 侧由 gate-suite 的 coverage-gate / metrics-gate 输出承载）：
+
+- **metrics warn 档**（含 `targets.high_crap` 靶子清单）降级为机器报告——gates 输出原样呈报清单，不做逐条 LLM 核查（warn 档是启发式信号，逐条核查发现密度低）；需要深查时人工调用 code-overdesign-audit / architecture-decay-audit
+- **coverage.json** 的 `uncovered_files` 与 `files_without_lcov` 由 coverage-gate 自身机器判定（增量 <80% / 文件级门槛 / 无 lcov 记录 → FAIL），修复面走 gate 修复子循环，不经人审维度
+- **循环依赖条目**（metrics fail/warn）由 review-monorepo-impact 消费（仅回退模式派发该维度时）
+
 
 ### 阶段 2 前置：约束动态加载（`.review/constraints.md` 产物）
 
@@ -169,7 +195,7 @@ renderer 全量阈值（S3-W1 基线-2~3% 重校准：lines 68 / stmts 66 / bran
 node scripts/select-constraints.mjs --base main
 ```
 
-按 diff 范围从 `docs/constraints.json`（架构约束登记 SSOT）选择命中约束，落盘 `.review/constraints.md`：scope 为 `global` 的核心不变量每次必载，其余按改动路径前缀命中（只改 renderer 不载 extension 约束）。8 个 review agent 定义均含消费约定——清单中 dimensions 含本维度的条目必须逐条核对，`enforcement: review` 的条目是本维度重点；需要完整表述时 Read「权威源」列指向的文档原文（清单里的 summary 仅导航）。
+按 diff 范围从 `docs/constraints.json`（架构约束登记 SSOT）选择命中约束，落盘 `.review/constraints.md`：scope 为 `global` 的核心不变量每次必载，其余按改动路径前缀命中（只改 renderer 不载 extension 约束）。6 个 review agent 定义均含消费约定——清单中 dimensions 含本维度的条目必须逐条核对，`enforcement: review` 的条目是本维度重点；需要完整表述时 Read「权威源」列指向的文档原文（清单里的 summary 仅导航）。
 
 ### [MANDATORY] 路径选择
 
@@ -179,9 +205,9 @@ node scripts/select-constraints.mjs --base main
 - **zcode 主 agent** → 路径 2（zcode 版 pr-lifecycle 单 workflow 全链）；只跑 review+fix 循环时用全局 saved `review-fix-loop`
 - **无 workflow 能力环境** → 路径 3（手工编排，上限 2 轮）
 
-**review-fix-loop 宿主路由（循环本体）**：只跑 review+fix 循环（不进门禁、不开 PR）时按宿主路由——pi 主 agent 用 **pi 内置版** `review-fix-loop`（subagent-workflow extension 的 workflow 工具，`action:"run"`）；zcode 主 agent 用 **zcode 原生 saved workflow `review-fix-loop`**（全局注册 `~/.zcode/workflows/`，经 CreateWorkflow `saved: { name: "review-fix-loop", args: {...} }` 发起；`args.reviewers` = agent .md 绝对路径数组，等价 pi 版 `batch1`；`base` 等价 `target=main`；**`reviewers` 参数同名异义注意**：saved 版 = agent .md 绝对路径数组（必需），pr-lifecycle 版 = 路径子串白名单（可选，缺省全部 8 维））。这两个「只跑循环」实体之间存在分叉（见下方差异登记表）；**完整 PR 生命周期的循环本体不分叉**——两版 pr-lifecycle 的 cr-fix 内联循环（pi 版 + zcode 版 prl 内联）与 zcode saved 版三镜像同语义，改任一侧须同步另两份。
+**review-fix-loop 宿主路由（循环本体）**：只跑 review+fix 循环（不进门禁、不开 PR）时按宿主路由——pi 主 agent 用 **pi 内置版** `review-fix-loop`（subagent-workflow extension 的 workflow 工具，`action:"run"`）；zcode 主 agent 用 **zcode 原生 saved workflow `review-fix-loop`**（全局注册 `~/.zcode/workflows/`，经 CreateWorkflow `saved: { name: "review-fix-loop", args: {...} }` 发起；`args.reviewers` = agent .md 绝对路径数组，等价 pi 版 `batch1`；`base` 等价 `target=main`；**`reviewers` 参数同名异义注意**：saved 版 = agent .md 绝对路径数组（必需），pr-lifecycle 版 = 路径子串白名单（可选，缺省按 preflight 分支判定——`reviewers` 不传时空集化，见「审查维度集」节））。这两个「只跑循环」实体之间存在分叉（见下方差异登记表）；**完整 PR 生命周期的循环本体不分叉**——两版 pr-lifecycle 的 cr-fix 内联循环（pi 版 + zcode 版 prl 内联）与 zcode saved 版三镜像同语义，改任一侧须同步另两份。
 
-两版 **pr-lifecycle 全链 workflow 语义完全一致**（10 step：preflight / static-gate / pr-meta(含条件 changeset) / skill-yaml / pr-submit / constraints / gate-suite / cr-fix / simplify / final-gates），仅宿主发起形态不同（pi = workflow 工具 action=run + 脚本绝对路径；zcode = CreateWorkflow path 发起）。共用的并行化与数据传递约定（2026-09-20）：review 阶段 **4 个一批分批并行**；聚合（独立 phase）去重合并各维度问题与修复指南（guidance）并按相关性与独立性**分组**；fix 阶段**按组并行派发（同时最多 3 组）**，commit 由循环统一显式路径执行（并行 fixer 不各自 commit）。数据传递 = **文件总线**：各角色产物全部落盘 run 目录（reviewer 报告 / aggregated.md / per-fixer 任务文档 `aggregate-4-fixer-<k>.md`，由循环从聚合分组数据确定性渲染——修复指南随文档直达 fixer），agent 之间不内联传递内容；结构化返回值只承载控制数据（计数/对账/分组 id）。
+两版 **pr-lifecycle 全链 workflow 语义完全一致**（9 step：preflight(含分支形态判定) / static-gate(含条件 skill-yaml 校验) / pr-meta(changeset 复核，缺失时按 Gate-1a.5 原逻辑补起草兜底) / pr-submit / constraints / gate-suite / cr-fix(条件——默认空集跳过或回退集，见「审查维度集」节) / simplify / final-gates），仅宿主发起形态不同（pi = workflow 工具 action=run + 脚本绝对路径；zcode = CreateWorkflow path 发起）。共用的并行化与数据传递约定（2026-09-20）：review 阶段 **4 个一批分批并行**；聚合（独立 phase）去重合并各维度问题与修复指南（guidance）并按相关性与独立性**分组**；fix 阶段**按组并行派发（同时最多 3 组）**，commit 由循环统一显式路径执行（并行 fixer 不各自 commit）。数据传递 = **文件总线**：各角色产物全部落盘 run 目录（reviewer 报告 / aggregated.md / per-fixer 任务文档 `aggregate-4-fixer-<k>.md`，由循环从聚合分组数据确定性渲染——修复指南随文档直达 fixer），agent 之间不内联传递内容；结构化返回值只承载控制数据（计数/对账/分组 id）。
 
 **循环本体行为差异登记表**（作用域 = pi **内置通用** `review-fix-loop` ↔ zcode 循环镜像——只跑 review+fix 循环场景的两个实体间的已知语义分叉，改任一侧前先查此表。**完整 PR 生命周期的 cr-fix 内联循环不分叉**：pi 版 prl 内联 + zcode 版 prl 内联 + zcode saved 三镜像同语义，共同熔断与复活语义：fixAttempts = 修复失败次数（仅 regressed 申报时 +1）、needs-redesign 要求条目 regressed（修了又坏）、deferred 条目跨轮保留台账且唯一复活入口 = reviewer 对注入清单的结构化 escalate 申报）：
 
@@ -210,16 +236,16 @@ node scripts/select-constraints.mjs --base main
 | `name` | 必填，脚本绝对路径 = `<repo 根>/.agents/workflows/pr-lifecycle.js`（从 `<available_workflows>` 清单的 location 取；按名解析已退役，裸名 not_found） |
 | `base` | 可选，门禁/审查基线 ref 名（默认 `main`） |
 | `maxRounds` | 可选，cr-fix 轮次上限（1-50，默认 10） |
-| `reviewers` | 可选，维度白名单（逗号分隔，对 review-*.md 按路径子串匹配裁剪；缺省全部 8 维） |
+| `reviewers` | 可选，维度白名单（逗号分隔，对 review-*.md 按路径子串匹配裁剪；缺省不传 = 按 preflight 分支判定——dev-* 线空集跳过、非 dev 线回退集 6 agent；人工逃生舱见「审查维度集」节） |
 | `simplifyMode` | 可选，`apply` \| `report`（默认 apply） |
 | `skipSteps` | 可选，人工接管逃生舱（逗号分隔 step id，合法值与语义同路径 2） |
 
 - 与路径 2 的 args 语义一一对应，仅承载形态不同（pi = 对象字段 / zcode = CreateWorkflow args）；`reviewers`/`skipSteps` 为逗号分隔字符串
-- workflow 按 `base` 锁 commit hash 后编排全部 10 step，主 agent 一次发起，只做「等终态 → 披露 → 请求 push 授权」
+- workflow 按 `base` 锁 commit hash 后编排全部 9 step，主 agent 一次发起，只做「等终态 → 披露 → 请求 push 授权」
 
 **发起前披露义务 [MANDATORY]**（与路径 2 同款）：告知用户 simplifyMode 默认 **apply**——code-simplify 的「先报告、确认后改」确认断点已被该模式显式覆盖，**A 档（行为不变）高置信简化会在 push 授权之前自动改码并独立 commit**（`refactor: code-simplify — N 项`）；B 档（行为敏感）与低置信项只进报告不落地。用户不接受时传 `simplifyMode: "report"`。
 
-**终态与处置**：return 契约与处置动作与路径 2 完全一致（`status=awaiting-push` 含 `prUrl/terminated/simplify/gates/skippedSteps/nextAction`；`status=failed` 含 `failedStep/error/recovery`，pr-submit 已成功时另含 `prUrl`）——按路径 2「终态映射表」执行：awaiting-push → 逐项披露 skippedSteps + 请求 push 授权；failed → 按 failedStep/error 处置后重新发起（可带 skipSteps 接管已人工裁决的 step）。**断点恢复差异**：pi 无 ResumeWorkflowRun——run 被中断（用户停止/provider 故障/进程退出）与 failed 终态处置后**都重新发起**（cr-fix 重跑 = loop 整体重跑，fix commit 已进 git 历史，已修复问题不再报出，通常 1-2 轮收敛）。中断时若有 gate 子进程在跑（abort 只终止 workflow 线程，不杀 detached 的 gate 子树），重发起前先确认无残留（`pgrep -f "pr-pre-merge|coverage-gate|metrics-gate"`），避免孤儿 gate 与新 run 并发写 `.review/` 读数。
+**终态与处置**：return 契约与处置动作与路径 2 完全一致（`status=awaiting-push` 含 `prUrl/terminated/simplify/gates/skippedSteps/review/nextAction`；`status=failed` 含 `failedStep/error/recovery`，pr-submit 已成功时另含 `prUrl`）——按路径 2「终态映射表」执行：awaiting-push → 逐项披露 skippedSteps + 请求 push 授权；failed → 按 failedStep/error 处置后重新发起（可带 skipSteps 接管已人工裁决的 step）。**断点恢复差异**：pi 无 ResumeWorkflowRun——run 被中断（用户停止/provider 故障/进程退出）与 failed 终态处置后**都重新发起**（cr-fix 重跑 = loop 整体重跑，fix commit 已进 git 历史，已修复问题不再报出，通常 1-2 轮收敛）。中断时若有 gate 子进程在跑（abort 只终止 workflow 线程，不杀 detached 的 gate 子树），重发起前先确认无残留（`pgrep -f "pr-pre-merge|coverage-gate|metrics-gate"`），避免孤儿 gate 与新 run 并发写 `.review/` 读数。
 
 cr-fix 内联循环的熔断语义与路径 2 完全一致：某 agent `mustFix === 0 且 suggestion === 0` 判 clean（修复范围 = 全部等级）；连续 3 轮 must_fix 不降 → `terminated=stuck`；问题经 2 次修复均复发（regressed）→ `terminated=needs-redesign`（fixAttempts 计修复失败次数，not-fixed 由 stuck 防线承接；deferred 条目唯一复活入口 = reviewer 对注入清单的结构化 escalate 申报）；fixer 疑似误报走 `disputed` 申述（file:line 反证，格式非法即 ES3 违规；合法申述豁免 must-fix 记账并随 failed 终态 error 的申述清单带出）；cr-fix `stuck`/`max-rounds`/`needs-redesign`/`needs-human` 一律 failed 人工接管（不放行，语义同路径 2 门禁收紧条款）。
 
@@ -229,7 +255,7 @@ cr-fix 内联循环的熔断语义与路径 2 完全一致：某 agent `mustFix 
 
 **适用条件**：当前主 agent 是 zcode（有 `CreateWorkflow` 工具）。无需任何插件依赖。
 
-pr-lifecycle（`.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts`）把本 skill 的阶段 1（preflight / static gate / pr-meta 含条件 changeset / skill-yaml / pr-submit）→ 阶段 2 前置（constraints）→ 阶段 1.5/1.6（gate-suite：coverage + metrics 聚合门禁）→ 阶段 2（cr-fix：内联循环本体，与全局 saved `review-fix-loop` 及 pi 版 prl 内联三镜像同源，8 维 agent .md）→ code-simplify（simplify step，固化契约见 `agents/simplify-apply.md`）→ 阶段 3a（final-gates 三道联动 + 收尾防线 + e2e 影响面披露）全部编排进单一原生 workflow 脚本（10 step）。**agent 上下文重合度合并约定**（2026-09-24）：两个会话各自必须加载的工作上下文重合高且无独立性要求的合并为一个 agent 一次处理——changeset 与 pr-meta 输入全同（commits + diff stat + changeset 清单）合为一个会话；coverage 与 metrics 失败常同文件同源，gate-suite 每轮聚合两道明细派单个修复会话（同文件多类问题一次修完）。独立视角要求的会话不合并（8 维 reviewer 各自 fresh eyes 读同一份 diff 是 review 的对价）。主 agent 一次发起，只做「等终态 → 披露 → 请求 push 授权」。
+pr-lifecycle（`.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts`）把本 skill 的阶段 1（preflight 含分支形态判定 / static gate 含条件 skill-yaml 校验 / pr-meta = changeset 复核 + PR 元数据起草 / pr-submit）→ 阶段 2 前置（constraints）→ 阶段 1.5/1.6（gate-suite：coverage + metrics 聚合门禁 + PR 规模披露）→ 阶段 2（cr-fix：内联循环本体，与全局 saved `review-fix-loop` 及 pi 版 prl 内联三镜像同源；默认空集跳过，非 dev 线回退集或显式 `reviewers` 时执行）→ code-simplify（simplify step，固化契约见 `agents/simplify-apply.md`）→ 阶段 3a（final-gates 三道联动 + 收尾防线 + e2e 影响面披露）全部编排进单一原生 workflow 脚本（9 step）。**agent 上下文重合度合并约定**（2026-09-24）：两个会话各自必须加载的工作上下文重合高且无独立性要求的合并为一个 agent 一次处理——changeset 与 pr-meta 输入全同（commits + diff stat + changeset 清单）合为一个会话；coverage 与 metrics 失败常同文件同源，gate-suite 每轮聚合两道明细派单个修复会话（同文件多类问题一次修完）。独立视角要求的会话不合并（回退模式下各维度 reviewer 各自 fresh eyes 读同一份 diff 是 review 的对价）。主 agent 一次发起，只做「等终态 → 披露 → 请求 push 授权」。
 
 **发起（CreateWorkflow）**：
 
@@ -238,23 +264,23 @@ CreateWorkflow:
   path: <repo 绝对路径>/.agents/skills/pr-cr-fix/workflows/pr-lifecycle.dwf.ts
   args:
     base: main            # 可选，门禁/审查基线 ref 名
-    reviewers: [...]      # 可选，维度白名单（缺省全部 8 维）
+    reviewers: [...]      # 可选，维度白名单（缺省不传 = preflight 分支判定：dev-* 线空集跳过 / 非 dev 线回退集 6 agent；人工逃生舱见「审查维度集」节）
     maxRounds: 10         # 可选，cr-fix 轮次上限
     simplifyMode: apply   # 可选，apply | report
-    skipSteps: [...]      # 可选，人工接管逃生舱（10 step id）
+    skipSteps: [...]      # 可选，人工接管逃生舱（9 step id）
   name: "PR 生命周期"
 ```
 
-- 脚本 args 白名单 fail-fast（拼错键直接报错不静默回落）；`skipSteps` 合法值 = 十 step id（preflight / static-gate / pr-meta / skill-yaml / pr-submit / constraints / gate-suite / cr-fix / simplify / final-gates），被跳过的 step 终态逐项披露（changeset 已并入 pr-meta——跳过 changeset 判定用 skipSteps 含 pr-meta；coverage 与 metrics 合并为 gate-suite，不可单独跳其一）
+- 脚本 args 白名单 fail-fast（拼错键直接报错不静默回落）；`skipSteps` 合法值 = 九 step id（preflight / static-gate / pr-meta / pr-submit / constraints / gate-suite / cr-fix / simplify / final-gates），被跳过的 step 终态逐项披露（changeset 复核已并入 pr-meta——跳过 changeset 复核用 skipSteps 含 pr-meta；coverage 与 metrics 合并为 gate-suite，不可单独跳其一；skill-yaml 校验已并入 static-gate——跳过 skill-yaml 校验须连带跳过 static-gate，终态披露）
 - run 后台执行，完成通知自动回流（禁止轮询）；中途被停止（用户 / provider 故障 / 进程退出）→ `ResumeWorkflowRun` 续跑（引擎 journal 重放，已完成的 ask 与 world.run 不重付费）
 
 **发起前披露义务 [MANDATORY]**：告知用户 simplifyMode 默认 **apply**——code-simplify 的「先报告、确认后改」确认断点已被该模式显式覆盖（固化契约 `agents/simplify-apply.md`），**A 档（行为不变）高置信简化会在 push 授权之前自动改码并独立 commit**（`refactor: code-simplify — N 项`）；B 档（行为敏感）与低置信项只进报告不落地。用户不接受时传 `simplifyMode: "report"`（完全不改码，断点语义完整保留）。
 
-**终态映射表**（脚本 return 必含 `status`；成功另含 `prUrl/terminated/simplify/gates/skippedSteps/nextAction`；失败另含 `failedStep/error/recovery`）：
+**终态映射表**（脚本 return 必含 `status`；成功另含 `prUrl/terminated/simplify/gates/skippedSteps/review/nextAction`——`review` = cr-fix 维度集判定披露（dev-* 线空集 / 非常态回退 / 人工逃生舱，逐项披露回退原因）；失败另含 `failedStep/error/recovery`）：
 
 | scriptResult.status | 主 agent 动作 |
 |---|---|
-| `awaiting-push` | ① **逐项披露 skippedSteps**（每项 step + reason——被跳过的门禁必须让用户知情后才谈 push）；② 汇报 prUrl / gates（coverage/metrics/premerge）/ terminated / simplify；③ 请求 push 授权。**push 恒 `git push github HEAD:<branch> --force-with-lease`**（与 workflow 内 pr-submit.sh 同构：无条件 `--force-with-lease`，lease 在快进场景无副作用、远端有新提交时安全拒绝）；push 后验证远端 ref（`git rev-parse HEAD github/<branch>` 一致） |
+| `awaiting-push` | ① **逐项披露 skippedSteps**（每项 step + reason——被跳过的门禁必须让用户知情后才谈 push）与 `review` 判定（cr-fix 空集/回退/逃生舱的判定依据）；② 汇报 prUrl / gates（coverage/metrics/premerge）/ terminated / simplify；③ 请求 push 授权。**push 恒 `git push github HEAD:<branch> --force-with-lease`**（与 workflow 内 pr-submit.sh 同构：无条件 `--force-with-lease`，lease 在快进场景无副作用、远端有新提交时安全拒绝）；push 后验证远端 ref（`git rev-parse HEAD github/<branch>` 一致） |
 | `failed` | 按 `failedStep` + `error`（内含恢复指引）处置：gate 修复子循环 3 轮超限 → 人工修复、显式路径 commit 后**重新发起**；gate-suite/final-gates exit 2（工具错误）→ 按输出修复后重新发起；pr-submit exit 2/3/5 → 按 error 指引（远端连通性 / `gh auth status`）后重新发起；cr-fix `stuck`/`max-rounds`/`needs-redesign` → 读 error 中报告路径（`.tmp/review-fix-loop/prl-<hash>/round-N/`）人工判定：**误报 → 重新发起并带 skipSteps 含 `"cr-fix"`（接管，终态逐项披露）；真问题 → 修复 commit 后重新发起**；cr-fix `needs-human` → 按 error 中申述清单（fixer 反证 file:line）逐项裁决（真问题修复 commit 后重新发起，误报带 skipSteps 接管），裁决结论逐项披露 |
 
 **断点恢复语义**：run 被**中断**（非 failed 终态——用户停止 / provider 故障 / 进程退出）→ `ResumeWorkflowRun` 原地续跑（引擎 journal 重放：已完成的确定性 gate 与 ask 零成本重放）；**failed 终态**（gate 超限 / cr-fix 熔断 / 工具错误）→ 处置后**重新发起**（可带 skipSteps 跳过已人工接管的 step）。cr-fix 重跑 = loop 整体重跑（fix commit 已进 git 历史，重跑面向当前 diff，已修复问题不再报出，通常 1-2 轮收敛）。脚本有结构性错误（编译诊断 / 逻辑错）→ 编辑 run 的脚本文件后 `AmendWorkflow`（导入已完成工作为缓存，只重付改动部分）。
@@ -272,14 +298,12 @@ CreateWorkflow:
 
 ##### 派发前：按 diff 选维度（主 agent 自己跑）
 
-按**路径匹配**（不做语义判断——不可审计、漏派无解释），`git diff main...HEAD --name-only` 对照下表。**默认全集、只写明确排除条件**：
+路径 3 与 pr-lifecycle 的 preflight 回退语义对齐：目标维度集 = **6 agent 回退集（3 恒派 + 3 触发路径判定）**，type-safety / test-coverage 已按设计裁决退役不进集。按**路径匹配**（不做语义判断——不可审计、漏派无解释），`git diff main...HEAD --name-only` 对照「审查维度集」节的回退集触发条件表：
 
-| 排除条件（路径匹配，全部不满足才跳过） | 跳过的维度 |
-|---|---|
-| 不含 `packages/runtime/**`、`apps/electron/**`、runtime `package.json` 依赖变更 | electron-build |
-| 不含 `extensions/**` | extension-api |
+- **恒派 3 维**：business-logic / arch-boundary / data-governance 无条件派
+- **触发 3 维**：electron-build（diff 含 `packages/runtime/**`、`apps/electron/**` 或 runtime `package.json` 依赖变更才派）、monorepo-impact（diff 触及任一 workspace 包面或根级依赖声明才派）、extension-api（diff 含 `extensions/**` 才派）
 
-其余 6 维（arch-boundary / business-logic / type-safety / test-coverage / monorepo-impact / data-governance）恒派。electron-build 排除条件刻意收得很紧：`packages/runtime/**` 任何改动（不只打包配置）都保留该维度——runtime 源码的 CJS 兼容违规（`import.meta.url`）是其重要检查项（AGENTS.md 关键规则 12「事故最高发」）。映射表保守取向：宁可多派不漏派。
+electron-build 排除条件刻意收得很紧：`packages/runtime/**` 任何改动（不只打包配置）都保留该维度——runtime 源码的 CJS 兼容违规（`import.meta.url`）是其重要检查项（AGENTS.md 关键规则 12「事故最高发」）。映射表保守取向：宁可多派不漏派。
 
 ##### 第 1 轮
 
@@ -289,7 +313,7 @@ git diff main...HEAD --stat
 node scripts/select-constraints.mjs --base main   # 产出 .review/constraints.md（命中约束清单，reviewer 消费）
 ```
 
-**Step 2 — 并行派 reviewer subagent**：选中维度全派。**并行上限 ≤5**（全局 AGENTS.md subagent 约束），按维度子集数分批（8 维分两批 5+3；不足 5 个一批派完；或按全局规则「一般用 3 个」分三批）。每个 subagent 的 task 必须包含：
+**Step 2 — 并行派 reviewer subagent**：选中维度全派。**并行上限 ≤5**（全局 AGENTS.md subagent 约束），按维度子集数分批（回退集最多 6 维分两批；不足 5 个一批派完；或按全局规则「一般用 3 个」分三批）。每个 subagent 的 task 必须包含：
 
 - worktree cwd（绝对路径，避免 multi-worktree cwd 陷阱）+ 审查 `git diff main...HEAD` 的全部变更
 - focus（见下方「维度 → Agent 映射」表对应审查焦点）
@@ -315,18 +339,18 @@ node scripts/select-constraints.mjs --base main   # 产出 .review/constraints.m
 
 ### 维度 → Agent 映射（三路径共用）
 
-Agent 定义位于本 skill 目录 `agents/review-<维度>.md`（不全局暴露，仅本 skill 内部引用）。
+Agent 定义位于本 skill 目录 `agents/review-<维度>.md`（不全局暴露，仅本 skill 内部引用）。**现行维度集 6 个**（对应回退集成员；dev-* 线常态路径下整集不派发，见「审查维度集」节）：
 
 | 维度 | Agent 实体 | 审查焦点 |
 |------|-----------|---------|
 | 架构边界 | `agents/review-arch-boundary.md` | Electron 分层（main/preload/renderer/shared）、runtime 三层（transport/services/infra）、WS session 隔离、IPC/emit 规范、数据目录隔离、路径白名单动态化、ENV SSOT、Extension vs Plugin 边界、v3 视图拓扑 |
 | 业务逻辑 | `agents/review-business-logic.md` | 逻辑正确性、边界条件、异常路径、回归风险、错误状态重置（isGenerating/streamingMessage）、emit 单 payload、Promise.allSettled、streaming 生命周期、session 双状态、文件持久化与 Store 同步 |
-| 类型安全 | `agents/review-type-safety.md` | 完整类型标注、禁止 any（显式/隐式）、类型守卫、tsc/vue-tsc、Pi* 类型分层约束（仅 infra 层可见） |
 | Electron 打包 | `agents/review-electron-build.md` | tsup 配置（noExternal/Worker entry/CJS 兼容）、electron-builder（files/asarUnpack/symlink）、子进程启动、打包验证三阶段 |
-| 测试覆盖 | `agents/review-test-coverage.md` | 新增逻辑有测试、边缘情况覆盖、vitest 合规（禁 node:test）、领域测试点（session 双状态/Extension vs Plugin/ports 接口） |
 | 扩展接口 | `agents/review-extension-api.md` | Pi 扩展 tool/command schema 完整性、向后兼容性、扩展规范合规（docs/extensions/extension-conventions.md + development-guide.md） |
 | Monorepo 影响 | `agents/review-monorepo-impact.md` | workspace 包间依赖（packages/* + apps/* + extensions/* + extensions/shared/*）、循环依赖、公共 API 变更对下游影响 |
 | 数据治理 | `agents/review-data-governance.md` | pi 文件直写（绝对写规则）、第二写入者、事件直写状态、renderer 零派生、未登记缓存、扩展数据通道（appendEntry/get_entries）、登记表同步。准绳：docs/architecture/data-source-governance.md + data-source-registry.md |
+
+**已退役维度（经设计裁决退役，不再进入任何默认集 / 回退集 / 路径 3 映射表）**：type-safety（tsc + eslint 机器承接，`as` 断言质量侧 renderer/runtime 维持现状承接 = tsc 编译期 + review 人工抽查）、test-coverage（coverage-gate 机器门禁承接 + TEST-STRATEGY.md 领域测试点附录）；分流登记见 docs/constraints.json 现行条目。
 
 Pi Extension 接口契约 checklist（SDK 签名核对 / spec 偏差记录 / schema 一致性 / 类型断言守卫）已并入 `agents/review-extension-api.md`，该 agent 审查时自动覆盖，主 agent 不另行逐条核对。
 
@@ -434,7 +458,7 @@ push 了发布 tag（`v*`/`npm-*`）时必须等 CI 构建完成并验证产物�
 | 派发前凭语义判断跳过维度（不查路径映射表） | 不可审计、漏派无解释 |
 | 阶段 3a 直接跑 vitest 替代 pr-pre-merge.sh | marker 不写 |
 | 未获用户授权就 push | 违反 push 授权约束 |
-| 删/改 pr-cr-fix/agents/ 下的 review agent | 破坏 review 维度完整性 |
+| 删/改 pr-cr-fix/agents/ 下的 review agent（经设计裁决退役的维度除外——以设计文档登记为准，本设计退役 test-coverage / type-safety） | 破坏 review 维度完整性 |
 
 ## 失败恢复
 
@@ -462,16 +486,17 @@ push 了发布 tag（`v*`/`npm-*`）时必须等 CI 构建完成并验证产物�
 ```
 .agents/skills/pr-cr-fix/
 ├── SKILL.md              # 本文件
-├── agents/               # 8 个 review agent 定义 review-<维度>.md + simplify-apply.md（pr-lifecycle simplify step 的 code-simplify 固化契约：覆盖声明 / 引用锚点 / 维护义务；不全局暴露）
+├── agents/               # 6 个 review agent 定义 review-<维度>.md + simplify-apply.md（pr-lifecycle simplify step 的 code-simplify 固化契约：覆盖声明 / 引用锚点 / 维护义务；不全局暴露）
 ├── references/           # 触发场景才 read：coverage-industry-research.md（覆盖率调研）/ cot-leakage.md（CoT Leakage）/ mutation-testing.md（Mutation 深检）
-└── scripts/              # metrics-gate.py / coverage-gate.py（含 --extra-packages）/ validate-skill-yaml.py
-
+├── scripts/              # metrics-gate.py / coverage-gate.py（含 --extra-packages）/ validate-skill-yaml.py
 └── workflows/
     └── pr-lifecycle.dwf.ts  # 路径 2（zcode 原生）PR 全生命周期单 workflow（/* zcode-workflow */ 块声明 args；CreateWorkflow path 调用）
-（演进：zsw 引擎版 pr-lifecycle.js/lib.cjs 已退役（2026-09-24 两版本收敛裁决，git 可追溯）；
-路径 1 的 pi 版全链 workflow 在项目级 `.agents/workflows/pr-lifecycle.js`（pi workflow discovery
-的 project-agents 源，随 git 分发）——其 cr-fix 内联循环与 zcode 版 prl 内联 + 全局 saved
-review-fix-loop.dwf.ts 三镜像同源，改任一侧须同步另两份循环语义）
+
+（zsw 引擎版 pr-lifecycle.js/lib.cjs 已退役（2026-09-24 两版本收敛裁决，git 可追溯）；
+路径 1 的 pi 版全链 workflow 正身位于 workspace 根 `.agents/workflows/pr-lifecycle.js`
+（pi workflow discovery 的 project-agents 源——workspace 根共享实体，各 worktree 经
+symlink 共享、即时生效，不入 git，ADR-0074）——其 cr-fix 内联循环与 zcode 版 prl 内联 +
+全局 saved review-fix-loop.dwf.ts 三镜像同源，改任一侧须同步另两份循环语义）
 ```
 
 ---

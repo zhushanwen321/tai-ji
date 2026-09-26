@@ -1,5 +1,5 @@
 ---
-description: "架构边界审查。检查 Electron 分层、WS session 隔离、IPC 桥接、shared 类型、数据目录隔离、路径白名单动态化、ENV SSOT 等跨层边界。"
+description: "架构边界审查。检查 Electron 分层、WS session 隔离、IPC 桥接、shared 类型、数据目录隔离、路径白名单动态化、ENV SSOT、状态机收敛等跨层边界。"
 name: review-arch-boundary
 ---
 
@@ -33,35 +33,40 @@ task prompt 中必须包含：
    - **infra/**：pi 适配（连接 + 翻译合并），**`Pi*` 类型仅在此层内部可见**，不知道 WS 协议和 session 业务语义
    - 禁止新建 `adapters/` 目录（已合并入 infra）
    - 过渡态：services 仍存在 `Pi*` 泄漏（tree-service/config-service/extension-service）是**已知技术债**（ports 依赖倒置 R3 进行中）→ 标 INFO/SUGGESTION，不标 MUST_FIX；但**新增**代码不应加重泄漏
-4. **WS session 隔离（AGENTS.md 关键规则 #7）**：
+4. **状态机收敛检查（领域状态必须显式状态机）**：变更触及有状态的领域模型（run/record/session/任务/连接等生命周期对象）时核对：
+   - 该状态是否先定义了显式状态机再实现——状态枚举（多维正交拆分，如 lifecycle × outcome）、事件枚举（每个事件有来源与触发点）、合法转移表（state × event → state'，表外转移 fail-fast 不静默吞）
+   - 对外协议是否只暴露 query + `transition(event)` 唯一入口，禁止直写状态字段
+   - 同一域多套状态词表并存、或靠修饰字段（closedReason 之类）区分终态 = 状态机未收敛 = MUST_FIX
+   - 判据源 = 全局 AGENTS.md 架构偏好「领域状态必须显式状态机」裁决 + [docs/adr/decisions.md](../../../../docs/adr/decisions.md) 对应 ADR；此处只列检查形态，判别式全文以权威源为准
+5. **WS session 隔离（AGENTS.md 关键规则 #7）**：
    - 所有 runtime → renderer 消息的 `payload` 是否包含 `sessionId`
    - 缺失 `sessionId` 的消息会被所有 panel 忽略——检查新增的 WS 事件是否漏带
    - `server.ts` 的 `sendError` 是否传入了 `sessionId`
-5. **IPC / emit 规范（关键规则 #1 #2）**：
+6. **IPC / emit 规范（关键规则 #1 #2）**：
    - emit 是否只传单个 payload 对象（禁止 `emit('event', a, b)`）
    - event bus listener 是否用模块级 refCount 防重复注册（split mode 多实例场景）
-6. **数据目录隔离（#1 #2）**：
+7. **数据目录隔离（#1 #2）**：
    - 是否读写 `~/.pi/agent/`（禁止，必须只用 `~/.taiji/`）
    - Extension 数据目录 `~/.taiji/extensions/`（pi extension 存储）vs Plugin 数据目录 `~/.taiji/plugins/`（taiji 插件存储）——两者均不得与 `~/.pi/` 混淆
    - 路径白名单（`allowedPrefixes`）是否硬编码 `~/.taiji` 或 `~/.pi`——必须用 `getConfigDir()` / `getPiAgentDir()` 动态推导（dev 模式目录会变）
-7. **ENV_WHITELIST SSOT（#3）**：
+8. **ENV_WHITELIST SSOT（#3）**：
    - `ENV_WHITELIST_PREFIXES` 是否只在 `packages/shared/src/constants.ts` 定义
    - main/ 和 runtime/ 层是否本地重新定义（禁止，只能 import 扩展）
-8. **Extension vs Plugin 概念区分（context.md 核心术语）**——两者是不同概念，禁止混用：
+9. **Extension vs Plugin 概念区分（context.md 核心术语）**——两者是不同概念，禁止混用：
    - **Extension**（pi extension）：运行在 **pi 子进程内**，用 `ExtensionAPI`，数据存 `~/.taiji/extensions/`，由 `extension-service.ts` 管理
    - **Plugin**（taiji 插件）：运行在 **runtime 的 Worker Thread**，用 agentAPI（非 ExtensionAPI），数据存 `~/.taiji/plugins/`，由 PluginService 管理
    - **Pi Bridge Extension**：插件系统与 pi 引擎的**唯一适配层**（插件系统内部唯一感知 pi 的模块）——变更是否绕过 Bridge 直接访问 pi
-9. **插件系统边界（AGENTS.md 关键规则 #11、context.md「Plugin」）**：
+10. **插件系统边界（AGENTS.md 关键规则 #11、context.md「Plugin」）**：
    - 前端 ↔ 插件系统通信是否经 WS → server → PluginService 路径（禁止前端直连 Worker）
    - WS 命名约定：Client→Server 用点号（`plugin.xxx`），Server→Client 用冒号 camelCase（`plugin:xxx`）
    - sessionData（plugin per-session KV）是否走 Pi Bridge 的 `pi.appendEntry()` 持久化（区别于 PluginStorage 的 global/workspace scope JSON 文件）
-10. **视图层术语（v3 拓扑）**：变更涉及前端时，视图组件应遵循 v3 拓扑（术语定义 `docs/CONTEXT.md`「v3 UI 结构术语」章节；原 v3 设计稿已删，git 可追溯）：
+11. **视图层术语（v3 拓扑）**：变更涉及前端时，视图组件应遵循 v3 拓扑（术语定义 `docs/CONTEXT.md`「v3 UI 结构术语」章节；原 v3 设计稿已删，git 可追溯）：
     - L0/L1 结构：**Sidebar**（持久容器）/ **Workspace**（chat view 容器）/ **Overview**（L1 独立 Region，多会话鸟瞰）/ **Search Modal**（⌘K Overlay）
     - **Panel 5 zone**：panel-header / message-stream / progress-zone / composer / git-zone
     - **Side Drawer**（原 Side Inspector）：Panel 联动多 tab 抽屉（文件/终端/子Agent/浏览器），非运行时状态面板
     - **Statusline**：Input Toolbar / Session Strip / Global Statusbar
     - 旧术语（Drawer→SideInspector 中间态、Focus Mode、PanelGrid、Pane*、sidecar）已过时——以 context.md 为准（原 terminology.md 已删除：R1-R3 已落地进代码，R4/R5 被 v3 推翻，git 可追溯）。发现代码引用过时术语标 INFO。
-11. **输出审查报告**到 `output` 路径。
+12. **输出审查报告**到 `output` 路径。
 
 ## 输出格式
 
@@ -85,7 +90,7 @@ must_fix: <数字>
 | MUST_FIX | server.ts | 88 | session-isolation | 新增 WS 事件 payload 缺 sessionId | payload 加 sessionId 字段 |
 ```
 
-类别包括：electron-layering / runtime-three-layer / session-isolation / ipc-emit / data-dir-isolation / path-whitelist / env-whitelist-ssot / shared-type / extension-vs-plugin / v3-topology
+类别包括：electron-layering / runtime-three-layer / state-machine-convergence / session-isolation / ipc-emit / data-dir-isolation / path-whitelist / env-whitelist-ssot / shared-type / extension-vs-plugin / v3-topology
 
 优先级：MUST_FIX / SUGGESTION / INFO
 

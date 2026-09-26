@@ -8,8 +8,7 @@
 
 **何时跑**（不进默认 gate——全量 mutation 太慢，一个中型包 10-30 分钟）：
 1. Gate-1.5 `targets.high_crap` 靶子的函数已补测试后，验证断言强度
-2. review-test-coverage 报告「弱断言」疑点（覆盖了但可疑）
-3. 修复 bug 后验证回归测试真能拦住（mutant = 人为重引入 bug，测试必须杀掉）
+2. 修复 bug 后验证回归测试真能拦住（mutant = 人为重引入 bug，测试必须杀掉）
 
 **定向跑法**（只突变指定文件，非全包）：
 
@@ -22,4 +21,4 @@ EOF
 npx stryker run
 ```
 
-判定参考：mutation score ≥ 60% 可接受、≥ 80% 良好；存活的 mutant 逐个看——要么断言缺（补），要么等价变异（记录豁免）。产出不进 `.review/`（临时深检，结论写进 test-coverage 维度报告即可）。
+判定参考：mutation score ≥ 60% 可接受、≥ 80% 良好；存活的 mutant 逐个看——要么断言缺（补），要么等价变异（记录豁免）。产出不进 `.review/`（临时深检，结论写进当次补测的 commit/PR 描述即可）。
