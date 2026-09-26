@@ -288,7 +288,7 @@ CreateWorkflow:
 **门禁语义映射声明（两版 pr-lifecycle 相对路径 3 手工流程的四处收紧/承接，均非降级）**：
 
 1. **修复范围收紧**：cr-fix 循环修复全部等级（must-fix + suggestion）且 clean 判定要求 suggestion 同为 0——严于路径 3「SUGGESTION 顺手修、INFO 忽略」。
-2. **real-pi 移出**（2026-09-15 e2e 执行准则，SSOT = AGENTS.md「测试」节）：final-gates 的 test:runtime 由 pr-pre-merge.sh 内置 `TAIJI_SKIP_REAL_PI=1` 只跑 unit 轨（与 CI test-runtime job 同口径），real-pi 等价性用例不在 PR/merge 承接——移到开发阶段按改动面跑（tech-design e2e 影响面评估 + dev-flow 验收计划表圈定，机器对账入口 = `node scripts/select-affected-e2e.mjs --base <base>`，SSOT = `docs/testing/e2e-map.json`）。final-gates 不设 real-pi 凭证预检、不解析输出 skip 标记：skip 标记是 unit 轨的预期输出，不构成失败。
+2. **real-pi 移出**（2026-09-15 e2e 执行准则，SSOT = AGENTS.md「测试」节）：final-gates 的 test:runtime 由 pr-pre-merge.sh 内置 `TAIJI_SKIP_REAL_PI=1` 只跑 unit 轨（与 CI test-runtime job 同口径），real-pi 等价性用例不在 PR/merge 承接——移到开发阶段按改动范围跑（tech-design e2e 影响面评估 + dev-flow 验收计划表圈定，机器对账入口 = `node scripts/select-affected-e2e.mjs --base <base>`，SSOT = `docs/testing/e2e-map.json`）。final-gates 不设 real-pi 凭证预检、不解析输出 skip 标记：skip 标记是 unit 轨的预期输出，不构成失败。
 3. **stuck 收紧为 failed**：`stuck`/`max-rounds`/`needs-redesign`/`needs-human` 一律 failed 人工接管（两版 pr-lifecycle 同语义）。对照「只跑循环」实体（pi 内置 review-fix-loop / zcode saved）的放行语义（`terminated ∈ {clean, converged, stuck}` 均可进阶段 3，stuck 的「误报可人工 ack」处置见失败恢复表只跑循环行）——全链路径下该放行语义不存在：接管必须经 skipSteps 逃生舱，且终态逐项披露保证知情。
 4. **Gate-3 三分量承接**：`pr_exists` = pr-submit step done；`premerge.result == "PASS"` = final-gates step done；`local_ahead_of_origin == 0` 由 push 动作本身达成（push 后验证远端 ref）。
 
@@ -388,11 +388,11 @@ bash scripts/pr-pre-merge.sh --test-result <PASS|FAIL> --quiet
 
 **e2e 影响面披露（非门禁）**：Gate-3a 通过后跑 `node scripts/select-affected-e2e.mjs --base <base>`，向用户披露本次 diff 影响的 e2e 资产（受影响 rule 清单 + 各自运行命令，SSOT = `docs/testing/e2e-map.json`）。PR/merge 门禁不跑真实 LLM e2e（见下方「real-pi 测试分工」），此披露只保证「哪些 e2e 面被本次改动触及、由开发阶段承接」对用户可见，不阻塞流程。
 
-**real-pi 测试分工 [MANDATORY]**：CI 不跑 real-pi 测试（ci.yml test-runtime 显式设 `TAIJI_SKIP_REAL_PI=1`，只跑凭证无关子集）；**PR/merge 门禁同样不跑**（2026-09-15 e2e 执行准则，SSOT = AGENTS.md「测试」节）——3a 的 `test:runtime` 以 `TAIJI_SKIP_REAL_PI=1` 只跑 unit 轨，与 CI 完全同口径（skip 标记属预期输出，不是验收缺口）。真实 pi 等价性用例（live ≡ reload 基线，SSOT 见 TEST-STRATEGY.md「等价性测试双轨」）在**开发阶段按改动面**执行：清单由 tech-design 设计文档的 e2e 影响面评估圈定、dev-flow 验收计划表承接，空载串行跑（跨包并发会饱和 CPU 使真实 LLM 轮次延迟越过事件预算）；涉及 pi 协议链路 / entry reducer / replicated-states 失效收敛的改动，开发期跑对应子集，不进 PR/merge。
+**real-pi 测试分工 [MANDATORY]**：CI 不跑 real-pi 测试（ci.yml test-runtime 显式设 `TAIJI_SKIP_REAL_PI=1`，只跑凭证无关子集）；**PR/merge 门禁同样不跑**（2026-09-15 e2e 执行准则，SSOT = AGENTS.md「测试」节）——3a 的 `test:runtime` 以 `TAIJI_SKIP_REAL_PI=1` 只跑 unit 轨，与 CI 完全同口径（skip 标记属预期输出，不是验收缺口）。真实 pi 等价性用例（live ≡ reload 基线，SSOT 见 TEST-STRATEGY.md「等价性测试双轨」）在**开发阶段按改动范围**执行：清单由 tech-design 设计文档的 e2e 影响面评估圈定、dev-flow 验收计划表承接，空载串行跑（跨包并发会饱和 CPU 使真实 LLM 轮次延迟越过事件预算）；涉及 pi 协议链路 / entry reducer / replicated-states 失效收敛的改动，开发期跑对应子集，不进 PR/merge。
 
 ### 本地验证缩窄声明（CI 承接）
 
-本流程下**未被 diff 触及的包本地测试 0 遍**（原「1.1/3a 无条件三线全量」已取消）。承接证据：CI 四个 test job 覆盖全部测试线——test-runtime / test-renderer（含全量 thresholds）/ test-main / test-extensions（`pnpm extensions:test` 跑全部 pi-* 包）。**real-pi 无例外承接方**：CI skip、本地 3a 也以 `TAIJI_SKIP_REAL_PI=1` 只跑 unit 轨——real-pi 由开发阶段按改动面承接（见「real-pi 测试分工」）。被 diff 触及的包测试恰 2 遍（1.6 插桩 + 3a 插桩终值；runtime 线 = 1.6 插桩 + 3a 无插桩专项，物理不可合并）。
+本流程下**未被 diff 触及的包本地测试 0 遍**（原「1.1/3a 无条件三线全量」已取消）。承接证据：CI 四个 test job 覆盖全部测试线——test-runtime / test-renderer（含全量 thresholds）/ test-main / test-extensions（`pnpm extensions:test` 跑全部 pi-* 包）。**real-pi 无例外承接方**：CI skip、本地 3a 也以 `TAIJI_SKIP_REAL_PI=1` 只跑 unit 轨——real-pi 由开发阶段按改动范围承接（见「real-pi 测试分工」）。被 diff 触及的包测试恰 2 遍（1.6 插桩 + 3a 插桩终值；runtime 线 = 1.6 插桩 + 3a 无插桩专项，物理不可合并）。
 
 ### 3b — push（需用户授权）
 

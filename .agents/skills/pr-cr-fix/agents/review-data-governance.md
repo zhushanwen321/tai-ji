@@ -58,7 +58,7 @@ task prompt 中必须包含：
 11. **会话数据落点检查（ADR-0063 I2，MUST）**：
    - diff 中是否出现把**对话/会话内容**（session JSONL、消息、entry、会话拷贝产物）写入 `$TMPDIR` / `os.tmpdir()` / 其他临时目录的路径（`mkdtemp`/`tmpdir`/`/tmp` 与 writeFile/appendFile 组合）。会话内容合法位置只有 sessions 目录（pi 的写目标）与活跃进程内存；临时目录会被 OS 清空、不被 taiji 扫描——放进去 = 慢性数据丢失（2026-07-17 tmp 附着管线曾致 P0 数据丢失静默 40 天）。命中 = MUST_FIX（例外：①测试 fixture 的隔离 session-dir，须带清理断言；②zcode L3 恢复快照读通道——登记例外 data-source-registry §4 ⑰「读快照非存放」〔源库只读零触碰、副本即弃，2026-09-23 MF-1-4 登记〕，命中 `taiji-zcode-snap-` 前缀 mkdtemp 形态先对照该条）。
 12. **pi 行为断言锚点检查（ADR-0063 I4，MUST）**：
-   - diff 中对 pi 内部行为的断言（注释 / 测试断言 / 文档声明「pi 会 / 不会 / 已 / 忽略 / 持久化 …」）是否附 pi-mono 源码锚点（文件 + 行号，本地 clone `~/Code/git-fork/pi-mono-workspace/main/packages/` 只读查阅）。无锚点的臆断（如「pi 已读入内存」——实为永久重绑写目标）= MUST_FIX；有锚点但只覆盖单层消费面（如只查 parse 层漏 index/append 层）= MUST_FIX（MF1 教训：单层「无害」≠ 整体无害）。
+   - diff 中对 pi 内部行为的断言（注释 / 测试断言 / 文档声明「pi 会 / 不会 / 已 / 忽略 / 持久化 …」）是否附 pi-mono 源码锚点（文件 + 行号，本地 clone `~/Code/git-fork/pi-mono-workspace/main/packages/` 只读查阅）。无锚点的臆断（如「pi 已读入内存」——实为永久重绑写目标）= MUST_FIX；有锚点但只覆盖单层消费方（如只查 parse 层漏 index/append 层）= MUST_FIX（MF1 教训：单层「无害」≠ 整体无害）。
 13. **输出审查报告**到 `output` 路径。
 
 ## 严重度判定

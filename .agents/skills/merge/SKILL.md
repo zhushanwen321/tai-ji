@@ -105,7 +105,7 @@ git push github HEAD --force-with-lease
 **机械校验（重组后必须全过）：**
 1. **终态字节级一致**：`diff <(git diff "$BASE" <旧HEAD>) <(git diff "$BASE" <新HEAD>)` 必须为空——stat 一致不代表内容一致，这是防重组丢 hunk 的核心护栏（备份分支在此刻仍指向旧 HEAD）
 2. `git range-diff "$BASE" <旧HEAD> <新HEAD>` 核对逐笔映射，无意外消失/新增的笔
-3. 对最终态跑一次受影响域测试（增量口径，按本次改动面）
+3. 对最终态跑一次受影响域测试（增量口径，按本次改动范围）
 4. 每笔 message 符合 conventional 风格且单 type
 
 ### 阶段 1: 本地验证
@@ -116,9 +116,9 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pre-merge-check.sh "$WS_RO
 
 阶段 1 调用项目内 pre-merge-check.sh（依赖安装、类型检查、lint、测试、构建，以及第 5 步 Git 状态检查——有未提交变更或未推送 commits 会 FAIL 阻塞合并）。脚本自包含在项目 skill 目录内，不依赖全局脚本。
 
-**测试步骤 = unit 轨**（`TAIJI_SKIP_REAL_PI=1 pnpm test`，与 CI runtime job 同口径）。**merge 门禁不跑 e2e**——e2e / 真实进程 / 真实 LLM 用例只在开发阶段按改动面跑（清单由 tech-design 的 e2e 影响面评估 + dev-flow 验收计划表圈定），执行准则 SSOT = AGENTS.md「测试」节。GitHub CI 同样从不跑 e2e（`TAIJI_SKIP_REAL_PI=1` + 无凭证注入 + 无 darwin pi binary）。
+**测试步骤 = unit 轨**（`TAIJI_SKIP_REAL_PI=1 pnpm test`，与 CI runtime job 同口径）。**merge 门禁不跑 e2e**——e2e / 真实进程 / 真实 LLM 用例只在开发阶段按改动范围跑（清单由 tech-design 的 e2e 影响面评估 + dev-flow 验收计划表圈定），执行准则 SSOT = AGENTS.md「测试」节。GitHub CI 同样从不跑 e2e（`TAIJI_SKIP_REAL_PI=1` + 无凭证注入 + 无 darwin pi binary）。
 
-**[HISTORICAL] real-pi 失败归因纪律（2026-09-15 事故，禁止盲目重试）**：事故前 premerge 曾全量并发扫并跑了真实 LLM 等价性用例，`send-queue-e2e` 120s 事件超时——根因是跨包并发饱和 CPU 使真实轮次延迟越过预算，不是代码缺陷（junit 的 seen types 显示 LLM 在推进）。处置是结构性的：门禁只跑单测、e2e 移出 merge/PR；若开发期按改动面跑 e2e 失败，先读 `packages/runtime/test-results/vitest-junit.xml` 的 failure 详情（seen types 区分「LLM 在推进但慢」与「真死锁」），禁止不经归因就直接重试，禁止放宽断言或膨胀预算换绿灯。
+**[HISTORICAL] real-pi 失败归因纪律（2026-09-15 事故，禁止盲目重试）**：事故前 premerge 曾全量并发扫并跑了真实 LLM 等价性用例，`send-queue-e2e` 120s 事件超时——根因是跨包并发饱和 CPU 使真实轮次延迟越过预算，不是代码缺陷（junit 的 seen types 显示 LLM 在推进）。处置是结构性的：门禁只跑单测、e2e 移出 merge/PR；若开发期按改动范围跑 e2e 失败，先读 `packages/runtime/test-results/vitest-junit.xml` 的 failure 详情（seen types 区分「LLM 在推进但慢」与「真死锁」），禁止不经归因就直接重试，禁止放宽断言或膨胀预算换绿灯。
 
 ℹ️ **pnpm workspace 单步安装**：项目使用 pnpm workspace（`packages/* + apps/*`），`pnpm install` 一次装完所有依赖，无需手动 cd 子目录。如果 pre-merge-check.sh 未自动处理依赖安装，需手动执行：
 

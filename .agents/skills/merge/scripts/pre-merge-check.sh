@@ -315,7 +315,7 @@ fi
 # ── 步骤 3: 单元测试（unit 轨：凭证无关子集，与 CI runtime job 同口径）──
 #
 # [e2e 执行准则]（SSOT = AGENTS.md「测试」节）：e2e / 真实进程 / 真实 LLM 用例只在
-# 开发阶段按改动面跑（清单由 tech-design 的 e2e 影响面评估 + dev-flow 验收计划表
+# 开发阶段按改动范围跑（清单由 tech-design 的 e2e 影响面评估 + dev-flow 验收计划表
 # 圈定，空载串行执行）；**merge / PR 门禁一律不跑 e2e**。本步骤以 TAIJI_SKIP_REAL_PI=1
 # 固化该口径：runtime real-pi 等价性池（真实 `pi --mode rpc` + 真实 LLM turn）在此
 # 自跳。历史根因（2026-09-15 send-queue-e2e 120s 超时事故）：全仓递归并发扫会饱和

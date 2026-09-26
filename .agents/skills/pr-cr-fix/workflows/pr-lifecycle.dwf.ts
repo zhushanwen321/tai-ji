@@ -1749,7 +1749,7 @@ await step("final-gates", async () => {
   // 本次改动触及、由开发阶段承接」对用户可见；脚本失败仅记 WARN 不阻塞
   const e2e = await world.run("node", ["scripts/select-affected-e2e.mjs", "--base", base]);
   if (e2e.exitCode === 0) {
-    log(`[final-gates] e2e 影响面披露（非门禁；受影响资产由开发阶段按改动面承接）：\n${tailLines(e2e.stdout, 40)}`);
+    log(`[final-gates] e2e 影响面披露（非门禁；受影响资产由开发阶段按改动范围承接）：\n${tailLines(e2e.stdout, 40)}`);
   } else {
     log(`[final-gates] WARN: select-affected-e2e.mjs exit ${e2e.exitCode}——披露跳过（非门禁，不阻塞）：\n${tailLines(e2e.stderr || e2e.stdout, 10)}`);
   }

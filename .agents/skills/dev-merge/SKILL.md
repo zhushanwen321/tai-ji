@@ -57,7 +57,7 @@ node scripts/changeset-check.mjs                  # changeset 完整性：diff �
 
 ### 第 1.7 步：合入点横切审查（3+3 维，触及源码即跑）
 
-feature 分支的 diff 完整、上下文集中，是横切维度审查的天然边界——dev-flow 阶段 3 只审「实现 vs 设计」，business-logic / arch-boundary / data-governance 等横切面不在其审查面内（PR #20 实证：走了完整 dev-flow 的 btw/ttft 域终局仍暴露 10 条、5 条 major，登记与覆盖问题全部从 dev-flow 眼皮下漏过）。本步把横切面前置到合入点，终局 PR 期只收机器兜底与漏网项。
+feature 分支的 diff 完整、上下文集中，是横切维度审查的天然边界——dev-flow 阶段 3 只审「实现 vs 设计」，business-logic / arch-boundary / data-governance 等横切关注点不在其审查范围内（PR #20 实证：走了完整 dev-flow 的 btw/ttft 域终局仍暴露 10 条、5 条 major，登记与覆盖问题全部从 dev-flow 眼皮下漏过）。本步把横切关注点前置到合入点，终局 PR 期只收机器兜底与漏网项。
 
 **触发条件**：分支 diff（`git diff $(git merge-base github/main HEAD)..HEAD --stat`）触及任一非测试源码文件即跑——业务逻辑审查必须有分支边界归属，不设文件数门槛；未触及源码（纯文档/注释外围改动）时在合并汇报记一句跳过理由。
 
@@ -65,7 +65,7 @@ feature 分支的 diff 完整、上下文集中，是横切维度审查的天然
 
 1. 约束动态加载：`node scripts/select-constraints.mjs --base $(git merge-base github/main HEAD)` 落 `.review/constraints.md`
 2. 派恒派 3 维 reviewer（agent 定义复用 pr-cr-fix 资产，不另建）：`business-logic`（含降级策略红线——catch 吞错假成功 / 错误信息可操作 / 用户可见降级必须显形，归 grading-error-policy 类别检查）/ `arch-boundary` / `data-governance`——pi 宿主用 `pi workflow run review-fix-loop --args '{targetType:"git-diff", target:"<merge-base-hash>", batch1:"<选中的 review-<维度>.md 绝对路径，逗号分隔>", autoCommit:true, ...}'`（batch1 点名上述 3 维）；zcode 宿主已由 dev-merge-gates.dwf.ts 的 branch-review 步承载（第 1.6 步一并发起），单独补审时用原生 `review-fix-loop` saved workflow（reviewers 传选中的 agent .md 绝对路径子集）
-3. 触发式追加 3 维：diff 触及打包/构建配置（tsup/electron-builder/CI）→ 加 `electron-build`；触及包结构/发布线（package.json 增删/workspace/changeset 配置）→ 加 `monorepo-impact`；触及 `extensions/**/src/**` → 加 `extension-api`（tool/command schema、SDK 契约、spec 偏差登记与 data-governance 同属 dev-flow 审不到的横切面，且是本仓高频改动面；SDK 签名核对要对照 node_modules dist、成本中等，故不恒派只触发）
+3. 触发式追加 3 维：diff 触及打包/构建配置（tsup/electron-builder/CI）→ 加 `electron-build`；触及包结构/发布线（package.json 增删/workspace/changeset 配置）→ 加 `monorepo-impact`；触及 `extensions/**/src/**` → 加 `extension-api`（tool/command schema、SDK 契约、spec 偏差登记与 data-governance 同属 dev-flow 审不到的横切关注点，且是本仓高频改动范围；SDK 签名核对要对照 node_modules dist、成本中等，故不恒派只触发）
 4. 终态处置：must-fix 全修后才进第 2 步合并；minor 残余随分支带走（commit message 或 TODO 登记），不阻塞
 
 **CR 门 fail-fast 语义（2026-09-25 裁决）**：第 1.7 步 review-fix-loop 全链强结构化返回——reviewer/fixer/aggregator 任一结构化返回失败即立即终止整个 workflow（review-failure / fix-failure / aggregator-failure 终态 + 恢复指引），无降级完成形态。CR 门读到非 clean/converged 终态 = 环境或模型问题未修，按失败处置（不进合并），恢复动作见 run 返回值 message。
@@ -132,7 +132,7 @@ bash "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/dev-merge.sh" cl
 
 脚本内置安全闸：分支未合并进 dev 拒绝清理（`is_merged` 门禁通过后脚本直接 `git branch -D`，不依赖 `git branch -d`——`-D` 避免依赖 upstream/HEAD 校验的不确定性，已合并与否由 `is_merged` 门禁保证）；源 worktree 有未提交/未跟踪文件时**删除前预检拒绝**（`status --short` 在 git 完好时采集）——**不要擅自 clean**，先看那些文件是什么（来源不明的问用户），确认后由用户/显式决策强删。
 
-**删除语义（显式两步）**：`rm -rf <feat 目录>` + `git worktree prune`，先删目录、后清登记。[HISTORICAL] 旧版用 `git worktree remove`，实验复现证实其内部**先删登记、后删目录**——目录删除失败时留下"登记已失、目录内 git 全废"的半删态，且旧脚本吞掉 stderr、硬编码诊断为"被 untracked 阻止"（空清单 + 不可执行的 clean -fd 指引），2026-09 事故后改为显式两步。中途失败面：`rm -rf` 失败 → 登记与分支均未动，状态完好可排查重试；prune 失败/漏跑 → 目录已删、登记残留，prune 幂等可补跑，无破坏性。
+**删除语义（显式两步）**：`rm -rf <feat 目录>` + `git worktree prune`，先删目录、后清登记。[HISTORICAL] 旧版用 `git worktree remove`，实验复现证实其内部**先删登记、后删目录**——目录删除失败时留下"登记已失、目录内 git 全废"的半删态，且旧脚本吞掉 stderr、硬编码诊断为"被 untracked 阻止"（空清单 + 不可执行的 clean -fd 指引），2026-09 事故后改为显式两步。中途失败情形：`rm -rf` 失败 → 登记与分支均未动，状态完好可排查重试；prune 失败/漏跑 → 目录已删、登记残留，prune 幂等可补跑，无破坏性。
 
 **`OK:` 输出 = 全部完成的权威证明**（worktree 与分支都已删）。此后不要再调用任何 bash——包括 `git worktree list` / `git log` 复核确认。直接输出合并总结收尾。
 

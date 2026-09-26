@@ -1,5 +1,5 @@
 ---
-description: "测试覆盖与测试形态审查。检查 SDK 契约测试覆盖义务、vitest 框架纪律、三视角完整性、配置单一解析点的回归锚等测试面。"
+description: "测试覆盖与测试形态审查。检查 SDK 契约测试覆盖义务、vitest 框架纪律、三视角完整性、配置单一解析点的回归锚等测试清单。"
 name: review-test-coverage
 ---
 
