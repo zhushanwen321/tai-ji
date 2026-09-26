@@ -167,6 +167,14 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 - **守卫**：`check_subagent_channels.py` 拦截白名单外的 `"--model"` 字面量（pre-commit + CI，行级豁免须给职责定性注释）；全等裁决不通过时 start 同步期拒单并给纠错候选
 - **约束登记**：[docs/constraints.json](../constraints.json) C-ext-19；能力档位同理由 C-pi-12 禁本地推断（只消费注册表下发的 supportedLevels）
 
+## 命令/技能获取 [MANDATORY]
+
+扩展域内任何「发现可执行 skill / 校验技能可用」一律走共享包 `@zhushanwen/pi-exec-skills`（`extensions/shared/exec-skills/`）：`detectExecSkills` 自研扫描直读磁盘 = **发现**（表单列出可用技能，技能热装即时可见，无 reload 滞后）；`resolveSkills` = **执行门禁**（pi 注册表 `pi.getCommands()` 过滤 `source === "skill"` 确认 pi 实际认得，注入前把关）——扫描与门禁两段消费语义闭环，**禁止各扩展自扫 skill 目录或直用 pi 注册表快照形成第二实现**。
+
+- **原因**：`pi.getCommands()` 返回 resource loader 的启动加载集（reload 才刷新的滞后快照）——发现面用它会让新装技能不可见；执行面它才是权威（快照滞后只造成「刚装技能本 turn 门禁拒绝」，重试即过）
+- **守卫**：依赖登记方向经 `check-extension-dependencies.mjs` 校验（dependsOn 悬空引用即红）；pi bump 的目录/overrides 语义漂移由共享包对拍测试兜住（[docs/pi-semantics.json](../pi-semantics.json) PS-53 探针）
+- **约束登记**：[docs/constraints.json](../constraints.json) C-ext-24
+
 ## 扩展安装红线 [强制]
 
 **所有扩展必须通过 npm 包（`pi install`）加载，禁止通过本地目录（`~/.pi/agent/extensions/`）加载，dev 环境测试除外。**

@@ -390,6 +390,17 @@
           "reason": "代码层静态 import getLogger/setPiHandle（src/index.ts top-level import——轮询日志走共享 logger 双通道：error 落 pi.appendEntry 持久化 + TAIJI_AGENT_DEBUG/TAIJI_AGENT_EXT_LOG 文件日志，不依赖 pi 不捕获的 extension stderr），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
+    },
+    {
+      "name": "@zhushanwen/pi-exec-skills",
+      "directory": "extensions/shared/exec-skills",
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger（src/exec-skills.ts top-level import，降级留痕 warn 单点），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
     }
   ]
 }
