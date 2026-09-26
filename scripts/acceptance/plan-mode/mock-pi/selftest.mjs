@@ -134,7 +134,6 @@ function writeConfig(dir, config) {
   return p;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isPlanReviewSelect = (f) => f.type === 'extension_ui_request' && f.method === 'select' && String(f.title).includes('TAIJI_PLAN_REVIEW');
 const isUiFormSelect = (f) => f.type === 'extension_ui_request' && f.method === 'select' && String(f.title).includes('TAIJI_UI_FORM');
 

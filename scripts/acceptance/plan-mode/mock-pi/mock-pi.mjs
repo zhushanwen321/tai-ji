@@ -21,7 +21,7 @@ import { createInterface } from 'node:readline';
 
 import * as frames from './lib/frames.mjs';
 import { loadConfig, loadScenario } from './lib/scenario.mjs';
-import { appendPlanStateEntry, appendRawEntry } from './lib/session-writer.mjs';
+import { appendPlanStateEntry } from './lib/session-writer.mjs';
 
 const MOCK_PI_VERSION = 'mock-pi 0.1.0 (taiji acceptance)';
 

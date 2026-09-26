@@ -22,17 +22,25 @@ import type { PlanDocMeta, PlanReviewRequest, PlanReviewResponse } from '../../c
 /** selfReview 上限：4KB（UTF-8 字节）。超限即截（全文可要求 agent 贴对话流，R3）。 */
 export const PLAN_SELF_REVIEW_MAX_BYTES = 4096
 
+// UTF-8 码位边界（编码标准值）：码位 ≤ 边界值时占对应字节数
+const UTF8_1_BYTE_CP_MAX = 0x7f
+const UTF8_2_BYTE_CP_MAX = 0x7ff
+const UTF8_3_BYTE_CP_MAX = 0xffff
+
+/* eslint-disable no-magic-numbers -- UTF-8 变长编码字节数 1-4 与代理对步进 2 为编码标准值，同 state.ts 64KB 换算常数先例 */
 function utf8ByteLengthOfCodePoint(cp: number): number {
-  if (cp <= 0x7f) return 1
-  if (cp <= 0x7ff) return 2
-  if (cp <= 0xffff) return 3
+  if (cp <= UTF8_1_BYTE_CP_MAX) return 1
+  if (cp <= UTF8_2_BYTE_CP_MAX) return 2
+  if (cp <= UTF8_3_BYTE_CP_MAX) return 3
   return 4
 }
+/* eslint-enable no-magic-numbers */
 
 /**
  * selfReview 写侧单点截断：按 UTF-8 字节预算截到**完整码点边界**（多字节字符不截半，
  * 无替换字符噪音）。预算内原样返回；不追加省略号（消费方渲染时自行提示截断）。
  */
+/* eslint-disable no-magic-numbers -- UTF-8 代理对占 2 个 UTF-16 码元、BMP 内占 1（编码标准值），同 state.ts 64KB 换算常数先例 */
 export function truncateSelfReview(text: string): string {
   let bytes = 0
   let i = 0
@@ -42,10 +50,11 @@ export function truncateSelfReview(text: string): string {
     const size = utf8ByteLengthOfCodePoint(cp)
     if (bytes + size > PLAN_SELF_REVIEW_MAX_BYTES) break
     bytes += size
-    i += cp > 0xffff ? 2 : 1
+    i += cp > UTF8_3_BYTE_CP_MAX ? 2 : 1
   }
   return text.slice(0, i)
 }
+/* eslint-enable no-magic-numbers */
 
 // ── 入站 request 帧守卫（PLAN_REVIEW_MARKER select options[0] = PlanReviewRequest JSON）──
 

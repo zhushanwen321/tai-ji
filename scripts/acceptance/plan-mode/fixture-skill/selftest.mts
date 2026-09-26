@@ -20,7 +20,7 @@ import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseFrontmatter } from '@earendil-works/pi-coding-agent';
@@ -28,7 +28,6 @@ import { parseFrontmatter } from '@earendil-works/pi-coding-agent';
 import { detectExecSkills, hasPlanExecMarker } from '../../../../extensions/universal/plan/src/exec-skills.ts';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(SCRIPT_DIR, '..', '..', '..', '..');
 const FIXTURE_TOOL = join(SCRIPT_DIR, 'fixture-skill.mjs');
 const SKILL_NAME = 'fixture-exec-skill';
 
