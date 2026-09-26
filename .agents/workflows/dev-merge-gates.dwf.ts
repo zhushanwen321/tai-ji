@@ -421,7 +421,6 @@ async function main(): Promise<Record<string, unknown>> {
     const runDir = `${REPORT_ROOT}/${topic}`;
     const records: DmgRecord[] = [];
     const dimCounters = new Map<string, number>();
-    const baselineDirt = new Set(await dirtyFiles()); // 发起时既有脏文件（第 1 步应已清理；残留不归罪 fixer）
 
     function finishBr(terminated: DmgBrResult["terminated"], rounds: number, message: string): DmgBrResult {
       const disputedRecs = records.filter((r) => r.status === "disputed");
@@ -645,13 +644,14 @@ async function main(): Promise<Record<string, unknown>> {
         }
         log(`[branch-review] 组 ${g.name} 已提交（${files.length} 文件）：${msg}`);
       }
-      // 止损检查：既有脏文件（baselineDirt）之外出现新脏文件 = 有改动未申报未提交
+      // 止损检查（与 gates / changeset 止损同口径，统一绝对判定）：工作区存在任何脏文件
+      // （含 untracked）即中止——untracked 的存在本身需要人判定去留（纳入跟踪 / 删除 /
+      // gitignore），不设「发起前既有文件豁免」；来源归因（fixer 产生还是发起前遗留）交人工判断
       const nowDirt = await dirtyFiles();
-      const newDirt = nowDirt.filter((f) => !baselineDirt.has(f));
-      if (newDirt.length > 0) {
+      if (nowDirt.length > 0) {
         throw new TerminalError(
           "fix-failure",
-          `fixer 返回后存在未申报且未提交的改动：\n${newDirt.join("\n")}\n人工检查后显式路径 commit（补进对应 fix 叙事）或还原，再重新发起本 workflow`,
+          `fixer 返回后存在未申报且未提交的改动：\n${nowDirt.join("\n")}\n人工检查后判定每项去留：fixer 产物显式路径 commit（补进对应 fix 叙事）、发起前遗留文件判定纳入跟踪 / 还原 / 删除，再重新发起本 workflow`,
         );
       }
     }
