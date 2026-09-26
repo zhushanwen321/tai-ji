@@ -322,10 +322,10 @@ describe('②③ badge 待处理态 + 终态机四行（D8 SSOT 表）', () => {
     expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
   })
 
-  it('行2/3 撤回·失效：requestsInvalidated → 条撤下 + 待处理清 + 行内「请求已失效」，可关闭', async () => {
+  it('行2/3 撤回·失效（dialog 族）：requestsInvalidated → 条撤下 + 待处理清 + 行内「请求已失效」，可关闭', async () => {
     const w = mountPanel(MAIN)
     await settle(w)
-    emitUIRequest(VID, formFrame('r-inv', '将失效的问题？'))
+    emitUIRequest(VID, dialogFrame('r-inv'))
     await settle(w)
     expect(w.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
 
@@ -354,6 +354,21 @@ describe('②③ badge 待处理态 + 终态机四行（D8 SSOT 表）', () => {
     setBtwReclaimReminder(VID, false)
     await settle(w)
     expect(w.find('[data-testid="btw-thread-pending"]').exists()).toBe(false)
+  })
+
+  it('快照镜像重挂：已入快照的 store 族挂起不被修剪误伤（条与待处理保留、无失效提示）', async () => {
+    const w = mountPanel(MAIN)
+    await settle(w)
+    emitUIRequest(VID, formFrame('r-alive', '仍在处理的问题？'))
+    await settle(w)
+
+    w.unmount() // 快照 mock 保持镜像 store 现态 = runtime 存活且认识该请求
+    const w2 = mountPanel(MAIN)
+    await settle(w2)
+
+    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(true)
+    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
+    expect(w2.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
   })
 
   it('提交回路：投递失败（未送达）保持挂起可重试；重投成功才出账', async () => {
@@ -510,7 +525,7 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
     expect((again.element as HTMLInputElement).value).toBe('')
   })
 
-  it('失效终结同样清草稿：切走期间 requestsInvalidated → 切回无表单 + 行内失效提示；重建为空', async () => {
+  it('失效终结同样清草稿：切走期间 requestsInvalidated → 切回无表单、条撤下即失效反馈（store 族无行内提示）；重建为空', async () => {
     const w = mountPanel(MAIN)
     await settle(w)
     emitUIRequest(VID, formFrame('r-d7x', '将失效草稿？'))
@@ -518,11 +533,12 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
     await w.find('[data-testid="btw-form-text"]').setValue('未提交草稿')
     await nextTick()
 
-    // 切走期间失效（撤下 + 草稿终结清理）
+    // 切走期间失效（撤下 + 草稿终结清理）。store 族失效的行内反馈 = 条撤下
+    // （extensionUIStore removeRequest）——失效行内提示是 dialog 族（FIFO）的失效支
     emitInvalidated(VID, ['r-d7x'], 'turn-aborted')
     await settle(w)
     expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
-    expect(w.find('[data-testid="btw-request-expired"]').exists()).toBe(true)
+    expect(w.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
 
     // 同 requestId 重建（簿记幂等重入）→ 输入为空（终结草稿不残留）
     emitUIRequest(VID, formFrame('r-d7x', '将失效草稿？'))
@@ -530,62 +546,5 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
     const again = w.find('[data-testid="btw-form-text"]')
     expect(again.exists()).toBe(true)
     expect((again.element as HTMLInputElement).value).toBe('')
-    // 新请求顶掉失效提示（入账支已清）
-    expect(w.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
-  })
-})
-
-describe('D8 失效支两路收口：快照修剪路（重启后遗留挂起首次对账 → 行内失效提示）', () => {
-  // 场景（A6b）：runtime 重启后 pending 内存表清零，进程死亡切面恒空清单不广播失效帧——
-  // 事件路结构性不可达；本地遗留挂起须由 retainOnly 对账差集（快照修剪路）补失效。
-  it('store 族遗留 + 快照空（runtime 重启）：重挂对账 → 条撤下 + 待处理清 + 行内「请求已失效」', async () => {
-    const w = mountPanel(MAIN)
-    await settle(w)
-    emitUIRequest(VID, formFrame('r-left', '遗留问题？'))
-    await settle(w)
-    expect(w.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
-
-    extMock.getPendingRequests.mockResolvedValue([]) // 重启后权威快照为空
-    w.unmount() // 重挂 = 首次对账（subscribe retainOnly 差集；模块簿记跨挂载存活）
-    const w2 = mountPanel(MAIN)
-    await settle(w2)
-
-    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
-    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(false)
-    const notice = w2.find('[data-testid="btw-request-expired"]')
-    expect(notice.exists()).toBe(true)
-    expect(notice.text()).toContain('请求已失效')
-  })
-
-  it('dialog 族遗留（仅模块簿记，不经 store）+ 快照空：重挂对账 → 确认条撤下 + 行内失效提示', async () => {
-    const w = mountPanel(MAIN)
-    await settle(w)
-    emitUIRequest(VID, dialogFrame('r-left-dlg'))
-    await settle(w)
-    expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(true)
-
-    extMock.getPendingRequests.mockResolvedValue([])
-    w.unmount()
-    const w2 = mountPanel(MAIN)
-    await settle(w2)
-
-    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
-    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(false)
-    expect(w2.find('[data-testid="btw-request-expired"]').exists()).toBe(true)
-  })
-
-  it('正例保护：快照仍含的请求不置提示（镜像快照重挂 → 条与待处理保留、无失效提示）', async () => {
-    const w = mountPanel(MAIN)
-    await settle(w)
-    emitUIRequest(VID, formFrame('r-alive', '仍在处理的问题？'))
-    await settle(w)
-
-    w.unmount() // 快照 mock 保持镜像 store 现态 = runtime 存活且认识该请求
-    const w2 = mountPanel(MAIN)
-    await settle(w2)
-
-    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(true)
-    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
-    expect(w2.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
   })
 })

@@ -29,8 +29,8 @@
  *   hooks.evictVirtualKeys 枚举 getBtwVirtualIdsByMain → disposeBtwLinePartitions →
  *   clearBtwVirtualKeyMapping）+ 关线腿（本文件 reconcile 出册同拍 dispose）。
  *
- * D8 终态机簿记（badge「待处理」态 + 挂起请求生命周期四张表）在
- * `./btw-pending-bookkeeping`（纯状态域，store 层 stores/btw-replay 直接消费）；本文件持有
+ * D8 终态机簿记（badge「待处理」态 + 挂起请求生命周期三张表）在
+ * `./btw-pending-bookkeeping`（纯状态域）；本文件持有
  * 其**订阅壳与 transport 半边**——`ensureBtwPendingBookkeeping`（bus 'ui-request' /
  * 'requests-invalidated' / state 帧三订阅 → 簿记入账/失效薄委托）与 `respondBtwDialog`
  * （dialog 族应答，送达才出队出账）。BtwPanel 线列表主数据仍是面板自身拉取（M3-a 形态），
@@ -70,8 +70,6 @@ import {
   invalidateBtwRequests,
   isBtwDialogRequest,
   isBtwPending,
-  noteBtwRequestResolved,
-  registerBtwPendingRequest,
   removeBtwDialogReq,
   setBtwReclaimReminder,
 } from '@/composables/panel/btw-pending-bookkeeping'
@@ -194,9 +192,10 @@ export function ensureBtwPendingBookkeeping(): void {
   const offUiRequest = bus.on('ui-request', (e) => {
     const sid = e.sessionId
     if (!sid || !isBtwVirtualId(sid) || !isBtwDialogRequest(e)) return
-    registerBtwPendingRequest(sid, e.request.requestId)
+    // 新请求顶掉既有失效提示（清除支之一：表单重新可达，提示失义）
+    clearBtwExpiredNotice(sid)
     const r = e.request as { form?: unknown; planReview?: unknown }
-    if (r.form === true || r.planReview === true) return // store 族载荷在 extensionUIStore（本簿记只记 id）
+    if (r.form === true || r.planReview === true) return // store 族载荷在 extensionUIStore，不经本簿记
     enqueueBtwDialogReq(sid, convertToDialogRequest(e))
   })
   const offInvalidated = bus.on('requests-invalidated', (e) => {
@@ -233,7 +232,6 @@ export function respondBtwDialog(
     : dialogTransport.sendPluginResponse(target.requestId, result)
   if (!delivered) return false // 保持挂起（transport 已 toast），连接恢复后可重投
   removeBtwDialogReq(vid, requestId)
-  noteBtwRequestResolved(vid, requestId)
   return true
 }
 
@@ -469,8 +467,8 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
 
 /**
  * 接线 drawer 面板的交互表面（BtwPanel setup 同步调用）：
- * - 失效行内提示读取/关闭（终态机失效支，badge 清 + 撤下 + 提示三路合并收口
- *   （事件 / 快照对账 / 回放悬空）的提示半边）；
+ * - 失效行内提示读取/关闭（终态机失效支——事件帧失效一路的提示半边，badge 清 + 撤下
+ *   同源于 invalidateBtwRequests 单入口）；
  * - 第四面状态区（setStatus/setWidget 的 per-session 源读 vid 分区；inject 缺失静默空态；
  *   toolbar/tab-bar 无 session 帧不在路由面——V4⑤ 结论）；
  * - 运行期错误边界：onErrorCaptured 绑定调用方组件实例（BtwPanel），Guard 子组件为全部

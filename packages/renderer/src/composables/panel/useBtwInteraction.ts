@@ -18,7 +18,7 @@ import { computed, watch, type Ref } from 'vue'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import type { DialogRequest as UiDialogRequest } from '@taiji/ui/extension-host'
 import { btwBarDrafts, emptyBtwBarDraft, useExtensionUI, type BtwBarDraft } from '@/composables/useExtensionUI'
-import { firstBtwDialogReq, noteBtwRequestResolved } from '@/composables/panel/btw-pending-bookkeeping'
+import { firstBtwDialogReq } from '@/composables/panel/btw-pending-bookkeeping'
 import { ensureBtwPendingBookkeeping, respondBtwDialog } from '@/composables/panel/useBtwTabData'
 
 /** 确认条当前活动请求（按 receivedAt 与 store 族/dialog 族合并排序取最早——多请求并发呈现有序） */
@@ -301,8 +301,9 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     return a.form?.allowCancel !== false
   })
 
-  /** 应答出口（三 kind 共用；送达才出账——未送达保持挂起可重试、草稿随挂起保留，D8 提交回路契约；
-   *  终结即清本请求草稿分键（D7⑤） */
+  /** 应答出口（三 kind 共用；送达才出队——未送达保持挂起可重试、草稿随挂起保留，D8 提交回路契约；
+   *  终结即清本请求草稿分键（D7⑤）。store 族挂起出队在 extensionUIStore（ui.respond 内
+   *  removeRequest），badge 派生公式随之自动回落，无需第二簿记出账 */
   function respondActive(result: boolean | string | null): void {
     const a = active.value
     const vid = vidRef.value
@@ -310,7 +311,6 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     const key = `${vid}:${a.requestId}`
     if (a.kind === 'dialog') { if (respondBtwDialog(vid, a.requestId, result)) btwBarDrafts.delete(key); return }
     if (ui.respond(a.requestId, result)) {
-      noteBtwRequestResolved(vid, a.requestId)
       btwBarDrafts.delete(key)
     }
   }

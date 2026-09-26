@@ -37,13 +37,8 @@ import {
 import {
   isBtwPending,
   invalidateBtwRequests,
-  invalidateBtwStaleFromSnapshot,
   btwExpiredNoticeOf,
-  clearBtwExpiredNotice,
   firstBtwDialogReq,
-  markBtwStaleInteractiveFromReplay,
-  BTW_EXPIRED_REASON_SNAPSHOT_PRUNED,
-  BTW_EXPIRED_REASON_REPLAY_DANGLING,
 } from '@/composables/panel/btw-pending-bookkeeping'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { dispatchGlobal, dispatchSession } from '@taiji/core/transport/api'
@@ -370,7 +365,7 @@ describe('线终结分区处置（M4-a 消费面：reconcile 出册同拍 dispos
   })
 })
 
-describe('失效支单入口（两路写入收口：事件路薄委托 + 快照修剪路共用 invalidateBtwRequests）', () => {
+describe('失效支与 badge 派生（事件帧失效一路：dialog FIFO 出队 + 行内提示置位）', () => {
   /** 经真实 bus 入账一条挂起 dialog 族请求（confirm——簿记五类之一） */
   function seedPending(vid: string, requestId: string): void {
     ensureBtwPendingBookkeeping()
@@ -381,32 +376,28 @@ describe('失效支单入口（两路写入收口：事件路薄委托 + 快照�
     } as never)
   }
 
-  it('快照修剪路：簿记有、keepIds 无 → 失效提示置位 + 待处理出账 + dialog 载荷撤下', () => {
+  it('badge 派生公式三分量：dialog 族挂起经 FIFO 分量点亮；store 族挂起经 extensionUIStore 分量点亮；各自出账后熄灭', () => {
+    // dialog 族（confirm → FIFO 载荷）：id 镜像删除后不丢点亮（badge 派生 FIFO 分量回归锚）
     seedPending('btw:t1', 'r1')
     expect(isBtwPending('btw:t1')).toBe(true)
     expect(firstBtwDialogReq('btw:t1')).toBeDefined()
+    invalidateBtwRequests('btw:t1', ['r1'], 'turn-aborted')
+    expect(isBtwPending('btw:t1')).toBe(false)
 
-    invalidateBtwStaleFromSnapshot('btw:t1', new Set(['other-id']), BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
-
-    expect(btwExpiredNoticeOf('btw:t1')).toBe(BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
-    expect(isBtwPending('btw:t1')).toBe(false) // 挂起簿记出账（badge 待处理随之清）
-    expect(firstBtwDialogReq('btw:t1')).toBeUndefined() // dialog 渲染载荷同步撤下
-  })
-
-  it('正例保护：快照仍含的请求不置提示、保持挂起；未知 vid / 空簿记 no-op', () => {
-    seedPending('btw:t2', 'r2')
-
-    invalidateBtwStaleFromSnapshot('btw:t2', new Set(['r2']), BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
-    expect(btwExpiredNoticeOf('btw:t2')).toBeNull() // 快照仍含 → 不置提示
+    // store 族（form → extensionUIStore 分区载荷）
+    const store = useExtensionUIStore()
+    store.addRequest('btw:t2', {
+      sessionId: 'btw:t2',
+      requestId: 'form-1',
+      method: 'select',
+      form: true,
+    })
     expect(isBtwPending('btw:t2')).toBe(true)
-
-    // 未知 vid / 空簿记：no-op 不抛、无副作用
-    expect(() => invalidateBtwStaleFromSnapshot('btw:t-none', new Set(), BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)).not.toThrow()
-    expect(() => invalidateBtwRequests('btw:t-none', ['x'], 'turn-aborted')).not.toThrow()
-    expect(btwExpiredNoticeOf('btw:t-none')).toBeNull()
+    store.removeRequest('btw:t2', 'form-1')
+    expect(isBtwPending('btw:t2')).toBe(false)
   })
 
-  it('事件路与修剪路同函数收口：invalidated 事件置位后，修剪差集空不覆盖既有提示', () => {
+  it('事件路：invalidated 帧命中 dialog 族挂起 → 行内提示置位 + FIFO 载荷撤下 + badge 熄灭', () => {
     seedPending('btw:t3', 'r3')
     getExtensionBus().emit({
       kind: 'requests-invalidated',
@@ -415,97 +406,36 @@ describe('失效支单入口（两路写入收口：事件路薄委托 + 快照�
       reason: 'turn-aborted',
     } as never)
     expect(btwExpiredNoticeOf('btw:t3')).toBe('turn-aborted')
-    expect(isBtwPending('btw:t3')).toBe(false)
-
-    // 簿记已空 → 修剪差集为空 → 既有提示不被覆盖/清除
-    invalidateBtwStaleFromSnapshot('btw:t3', new Set(), BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
-    expect(btwExpiredNoticeOf('btw:t3')).toBe('turn-aborted')
+    expect(firstBtwDialogReq('btw:t3')).toBeUndefined() // dialog 渲染载荷同步撤下
+    expect(isBtwPending('btw:t3')).toBe(false) // FIFO 出队后 badge 派生自动回落
   })
-})
 
-describe('回放对账路（markBtwStaleInteractiveFromReplay：持久层悬空交互请求 toolCall → 失效提示）', () => {
-  /**
-   * 回放投影音形的 assistant 消息（apply-entry-convert collectToolCallPart 构造形态）：
-   * 悬空 toolCall = 无 output 字段（fillHostToolCall 只对已闭合 toolCall 无条件回填
-   * `output: string`，空串也算闭合——V8 已接受面「悬空调用定格 completed 无产出」）。
-   * **红线（上轮教训）**：主用例禁止 seed 簿记伪造前提——整机杀重启后簿记恒为空。
-   */
-  function replayedAssistantMsg(id: string, toolName: string, closedOutput?: string): Message {
-    return {
-      id,
-      role: 'assistant',
-      content: '',
-      status: 'complete',
-      timestamp: 0,
-      toolCalls: [
-        {
-          id: `${id}-tc`,
-          toolName,
-          input: {},
-          status: 'completed',
-          startTime: 0,
-          ...(closedOutput !== undefined && { output: closedOutput }),
-        },
-      ],
-    }
-  }
+  it('stale 守卫：requestIds 与 FIFO 无交集时零副作用（无关帧不置提示不撤载荷）', () => {
+    seedPending('btw:t4', 'r4')
 
-  /** 经真实 bus 入账一条挂起 dialog 族请求（存活挂起守卫的簿记半边） */
-  function seedPending(vid: string, requestId: string): void {
-    ensureBtwPendingBookkeeping()
+    // 无关帧：无交集 → no-op
     getExtensionBus().emit({
-      kind: 'ui-request',
-      sessionId: vid,
-      request: { requestId, method: 'confirm', title: '允许执行？', message: 'm' },
+      kind: 'requests-invalidated',
+      sessionId: 'btw:t4',
+      requestIds: ['other-id'],
+      reason: 'turn-aborted',
     } as never)
-  }
+    expect(btwExpiredNoticeOf('btw:t4')).toBeNull()
+    expect(isBtwPending('btw:t4')).toBe(true)
+    expect(firstBtwDialogReq('btw:t4')).toBeDefined()
 
-  it('整机重启形态（红线）：簿记为空 + 投影含悬空 ask_user toolCall → 提示置位，无簿记出账', () => {
-    // 不 seedPending：模拟整机杀重启后首轮回放（模块簿记与 runtime pending 同时清零）
-    markBtwStaleInteractiveFromReplay('btw:replay-1', [
-      { id: 'u1', role: 'user', content: '帮我查下', status: 'complete', timestamp: 0 },
-      replayedAssistantMsg('a1', 'ask_user'),
-    ])
-
-    expect(btwExpiredNoticeOf('btw:replay-1')).toBe(BTW_EXPIRED_REASON_REPLAY_DANGLING)
-    expect(isBtwPending('btw:replay-1')).toBe(false) // 只写提示不出账（簿记本来就没账可出）
+    // 未知 vid / 空 FIFO：no-op 不抛、无副作用
+    expect(() => invalidateBtwRequests('btw:t-none', ['x'], 'turn-aborted')).not.toThrow()
+    expect(btwExpiredNoticeOf('btw:t-none')).toBeNull()
   })
 
-  it('名单窄而准：悬空普通工具（bash）不置提示；闭合的交互请求（output 已回填）不置提示', () => {
-    markBtwStaleInteractiveFromReplay('btw:replay-2', [replayedAssistantMsg('a2', 'bash')])
-    expect(btwExpiredNoticeOf('btw:replay-2')).toBeNull()
+  it('清除支：新请求顶掉既有失效提示（表单重新可达）', () => {
+    seedPending('btw:t5', 'r5')
+    invalidateBtwRequests('btw:t5', ['r5'], 'turn-aborted')
+    expect(btwExpiredNoticeOf('btw:t5')).toBe('turn-aborted')
 
-    // 闭合 = output 有值（空串也算闭合——fillHostToolCall 无条件回填 string）
-    markBtwStaleInteractiveFromReplay('btw:replay-3', [replayedAssistantMsg('a3', 'ask_user', '')])
-    expect(btwExpiredNoticeOf('btw:replay-3')).toBeNull()
-  })
-
-  it('存活挂起守卫：簿记/store 族仍有该线挂起请求 = 请求尚待应答，悬空只是未闭合 → 不置提示', () => {
-    // 簿记半边：agent ask_user 提问帧已到达（dialog 族入簿记），用户此刻才打开线触发回放
-    seedPending('btw:replay-4', 'live-1')
-    markBtwStaleInteractiveFromReplay('btw:replay-4', [replayedAssistantMsg('a4', 'ask_user')])
-    expect(btwExpiredNoticeOf('btw:replay-4')).toBeNull()
-
-    // store 族半边（form/planReview 分区）同样短路
-    const store = useExtensionUIStore()
-    store.addRequest('btw:replay-5', {
-      sessionId: 'btw:replay-5',
-      requestId: 'live-form-1',
-      method: 'select',
-      form: true,
-    })
-    markBtwStaleInteractiveFromReplay('btw:replay-5', [replayedAssistantMsg('a5', 'schedule')])
-    expect(btwExpiredNoticeOf('btw:replay-5')).toBeNull()
-  })
-
-  it('幂等：重复回放重复置位同值不翻动；dismiss 后同痕迹重放仍可再置', () => {
-    const msgs = [replayedAssistantMsg('a6', 'plan')]
-    markBtwStaleInteractiveFromReplay('btw:replay-6', msgs)
-    expect(btwExpiredNoticeOf('btw:replay-6')).toBe(BTW_EXPIRED_REASON_REPLAY_DANGLING)
-    clearBtwExpiredNotice('btw:replay-6')
-
-    // 用户 dismiss 后再次回放（同持久痕迹）→ 重新置位（痕迹仍在文件里，提示语义仍成立）
-    markBtwStaleInteractiveFromReplay('btw:replay-6', msgs)
-    expect(btwExpiredNoticeOf('btw:replay-6')).toBe(BTW_EXPIRED_REASON_REPLAY_DANGLING)
+    seedPending('btw:t5', 'r6') // 新请求到达 → 顶掉提示
+    expect(btwExpiredNoticeOf('btw:t5')).toBeNull()
+    expect(isBtwPending('btw:t5')).toBe(true)
   })
 })
