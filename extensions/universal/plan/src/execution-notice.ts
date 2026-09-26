@@ -7,7 +7,7 @@
  * keepRecentTokens 近端原文保留），本扩展不再接管压缩摘要。
  */
 import * as fs from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
@@ -51,14 +51,14 @@ function getGoalInit(): GoalInitFn | undefined {
 
 /**
  * goal 桥侧 slug（仅 widget 标题 + history 展示用，不注入 prompt）。生产输入恒为
- * <project>/.tmp/plans/<slug>/plan.md（enter.ts 构造，basename 恒 plan.md）→ 恒返回
- * 'plan'——正则链与 fallback 只防「planFilePath 非生产形态」的通用输入，正常路径
- * 不可达。若需区分度（改取路径中 requirement slug 段）属 goal 桥侧跨包展示语义
- * 变更，须单独裁决后实施，裁决前保持现状。
+ * <project>/.tmp/plans/<slug>/plan.md（enter.ts 构造）——展示名取目录名（requirement
+ * slug 段，2026-09-27 用户裁决；docs/todo/plan-cjk-slug-data-loss.md 缺陷 3 同源修复）。
+ * kebab 链对 enter slug 幂等，只防 planFilePath 非生产形态的通用输入；提取为空回
+ * "plan-execution"。中文需求且缺陷 2（enter 期目录唯一性）未修的窗口内，plan.md 直落
+ * .tmp/plans 使本函数取到骨架名 "plans"——该形态随缺陷 2 修复消除。
  */
 function buildPlanSlug(planFilePath: string): string {
-  const stem = basename(planFilePath)
-    .replace(/\.md$/i, "")
+  const stem = basename(dirname(planFilePath))
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
@@ -88,12 +88,12 @@ function truncatePreview(text: string): string {
  * 从 plan 步骤构造可检查的 successCriteria（plan 完成 = 所有步骤执行并验证）。
  * goal 的 complete 判定会对照本字段逐条做证据审计。
  *
- * 形态固定：1 条总述 `All N steps of <basename> executed and verified`
+ * 形态固定：1 条总述 `All N steps of <plan slug> executed and verified`
  * + 前 PREVIEW_COUNT 条 step preview（编号前缀、单条截断 ≤PREVIEW_MAX_CHARS），
  * 合计 ≤4 条（goal schema maxItems:8），每条单行不含 \r\n。
  */
 export function buildPlanSuccessCriteria(planFilePath: string, tasks: string[]): string[] {
-  const planName = toSingleLine(basename(planFilePath).replace(/\.md$/i, ""));
+  const planName = toSingleLine(buildPlanSlug(planFilePath));
   const items = [`All ${tasks.length} steps of ${planName} executed and verified`];
   const previews = tasks
     .slice(0, PREVIEW_COUNT)
