@@ -1470,8 +1470,8 @@ export interface PlanDocMeta {
  * 恒携带 `state`：新 entry 直读，旧 entry（reviewState 字段族，磁盘数据真实跨版本）由归一点
  * 完成映射（awaiting→reviewing / revising→revising / 无→planning|idle 按 isActive）——映射
  * 只存在于 entry 读取侧，本契约不携带旧字段（plan-mode-audit-remediation 批次 3 条目 1：
- * renderer 混装格兜底映射随 deprecated 双字段删除；旧 entry → 新 View 等价对契约 fixture =
- * `__tests__/fixtures/plan-state-entries.ts`）。
+ * renderer 混装格兜底映射随 deprecated 双字段删除；映射实现单源 = extension-protocol
+ * legacy-entries，D-B4-1 下沉，契约断言面 = 其包内 legacy-entries.test.ts）。
  *
  * resumeHint（D2）：降级态等待原因——仅 E3 重挂时落 'resubmit'，清除点三处
  * （resetPlanState / 进入重置组 / submit-review 转移落盘）；不变量：只描述当前降级

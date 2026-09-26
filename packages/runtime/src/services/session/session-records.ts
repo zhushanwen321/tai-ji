@@ -25,10 +25,13 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SubagentRecord, WorkflowRunRecord, PlanStateView, PlanDocMeta } from '@taiji/shared'
-import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, PLAN_STATE_CUSTOM_TYPE } from '@taiji/shared'
+import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
 import { extractPlanStateFromSessionFile, scanPlanStateEntries, INACTIVE_PLAN_STATE_VIEW } from './plan-state-extractor.js'
+// PLAN_STATE_CUSTOM_TYPE canonical = extension-protocol legacy-entries（D-B4-1 从 shared
+// constants 迁出——plan-state entry 契约与 legacy 读取同域单源；包依赖，与下方 engines
+// 契约同引法）
 import type { SubagentEngineConfigView, SubagentEnginesFile } from '@zhushanwen/extension-protocol'
-import { SUBAGENTS_ENGINES_FILENAME } from '@zhushanwen/extension-protocol'
+import { SUBAGENTS_ENGINES_FILENAME, PLAN_STATE_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（见 shared/src/index.ts L32 注释），
 // Node 端从子路径 import
 import { getDataDir } from '@taiji/shared/paths'

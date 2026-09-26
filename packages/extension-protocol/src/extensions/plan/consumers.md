@@ -33,6 +33,7 @@
 - U2：`prompts.ts:138` 注释「PlanReviewDecision 收敛为 'approve' | 'revise'」随 D3 加员过时（现为三键值域）——同 commit 修正。✅（U2：prompts.ts `formatReviewComments` 注释改写为三键值域 + 各分支去向）
 - U4b：`useExtensionUI.ts` 的 `pickPlanFields` 白名单加 selfReview（热帧 `toExtensionUIRequest` 与冷补 `getPendingRequests` **两条入店路径**都过，契约测试覆盖两路径的 selfReview 存在性——防「切回 session 有自审行、实时挂起无」半残形态）；plan-store/useExtensionUI 头注释过时陈述（「renderer 不依赖 extension-protocol」）修正。→ ✅（U4b：`pickPlanFields`（planReview + selfReview 白名单，非 string 不入店）接线 toExtensionUIRequest；双入店路径契约测试 = use-extension-ui-plan-review.test.ts「pickPlanFields 白名单 selfReview 双入店路径契约」族（热帧/热帧负向/冷补）；两文件头注释已改述 direct-import regime）
 - U3b：`tryTranslatePlanReviewSelect` 透传 selfReview（截断在扩展写侧——上限与截断 canonical = `review-contract.ts` 的 `PLAN_SELF_REVIEW_MAX_BYTES` / `truncateSelfReview`）——✅（`event-adapter.ts` 条件落键 + `event-adapter-plan-review-marker.test.ts` 帧携带/缺席/空串/超限边界，U3b）。
+- u-b4-protocol（plan-mode-audit-remediation D-B4-1）：读方①② 的 lifecycle/resumeHint 映射单源下沉本目录 `legacy-entries.ts`（`readLifecycleState` / `readResumeHint` + `PLAN_STATE_CUSTOM_TYPE` 常量从 shared constants 迁入；barrel 已出）——上表 ① 的 state.ts 本地实现与 ② 的 extractor 内联拷贝均删除、改直引；renderer 读方③ 兜底已随批次 3 条目 1 删除不在收敛面。原 shared fixture 等价表（`LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS`）与双套平行断言删除，映射契约唯一断言面 = 本目录 `legacy-entries.test.ts`。✅（u-b4-protocol）
 
 ## 三、状态机接线（D1 消费面）
 

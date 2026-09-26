@@ -15,9 +15,9 @@
  *    旧字段 reviewState/reviewStateSource 已随批次 3 条目 1（plan-mode-audit-remediation）
  *    退出契约——映射只存在于 entry 读取侧归一点，View 不再携带旧字段（混装格 renderer
  *    兜底映射同批删除）。
- *    旧格式重放回归锚（V5：旧格式会话重放三侧逐字段一致）用
- *    __tests__/fixtures/plan-state-entries.ts 的 LEGACY_AWAITING_PLAN_STATE_ENTRY
- *    （含 awaiting reviewState、无 reviewStateSource 的升级前落盘形态）
+ *    旧格式重放回归锚（V5：旧格式会话重放三侧逐字段一致）的映射契约断言面 =
+ *    extension-protocol 包内 legacy-entries.test.ts（D-B4-1 下沉后唯一断言面；原 shared
+ *    fixture 等价表已随下沉删除，V5 验收按其登记形态构造旧 entry）
  *  - PlanDocMeta 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 跨包同形：
  *    devDependency 引对侧做编译期 AssertExact 双向断言（单侧改字段即红），
  *    另保留字面量绝对锚点断言防两侧同步漂移。devDep 不构成运行时反向依赖
@@ -45,8 +45,6 @@ import type {
 } from '../protocol'
 // 对侧同形契约源：跨包断言的另一半（devDependency，仅类型消费）
 import type { PlanDocMeta as ProtocolPlanDocMeta, PlanLifecycleState } from '@zhushanwen/extension-protocol'
-// 旧 entry 重放回归锚（升级前落盘形态：awaiting reviewState + 无 reviewStateSource）
-import { LEGACY_AWAITING_PLAN_STATE_ENTRY } from './fixtures/plan-state-entries'
 
 // ── 编译期类型断言辅助（同 gen-stats.test.ts / protocol-seq.test.ts 模式）──
 
@@ -197,17 +195,6 @@ describe('session.planState 帧登记', () => {
     } else {
       expect.unreachable('判别联合收窄失败')
     }
-  })
-})
-
-describe('旧 entry 重放回归锚（LEGACY_AWAITING_PLAN_STATE_ENTRY 形态锁）', () => {
-  it('fixture 保真：旧 entry 含 awaiting reviewState 且无 reviewStateSource 键（升级前落盘形态）', () => {
-    const data = LEGACY_AWAITING_PLAN_STATE_ENTRY.data
-    expect(data.reviewState).toBe('awaiting')
-    expect('reviewStateSource' in data).toBe(false)
-    // 旧格式重放回归锚（V5）：归一点按该形态映射 state=reviewing 且不透出旧字段——
-    // 断言落 runtime plan-state-extractor / 扩展 reconstructPlanState 各自测试
-    //（等价对表 LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS 驱动）
   })
 })
 

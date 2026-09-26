@@ -7,8 +7,9 @@
  * - 派生归一（plan 状态机显式化 D2 读方②）：View 恒携带 state（新 entry 直读 / 旧 entry
  *   经 reviewState 映射 / 无 → planning|idle 按 isActive）、resumeHint 直读或由
  *   reviewStateSource:'resubmit' 同义映射、旧字段（reviewState/reviewStateSource）不透出、
- *   selfReview 不投影（D9③）；U1 fixture 等价断言（LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS）
- *   落本文件（fixture 定契约、断言在此）；
+ *   selfReview 不投影（D9③）；映射实现单源 = extension-protocol legacy-entries（D-B4-1
+ *   下沉），契约断言面 = protocol 包内 legacy-entries.test.ts（原 shared fixture 等价对
+ *   驱动的平行断言随下沉删除，本文件保留派生管道自身行为）；
  * - 多 entry 取最后一条（单例状态，extension reconstructPlanState 逆序取首同构）；
  * - reset entry（isActive=false + skills/reviewState 清空 + docs 保留）派生保留 docs；
  * - 冷路径 extractPlanStateFromSessionFile（ENOENT 缺省 View / 真实临时 JSONL 派生一致）。
@@ -22,7 +23,6 @@ import { mkdtempSync, writeFileSync, rmSync, openSync, closeSync, ftruncateSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
-import { LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS } from '../../../../../shared/src/__tests__/fixtures/plan-state-entries'
 import { INACTIVE_PLAN_STATE_VIEW, extractPlanStateFromSessionFile, scanPlanStateEntries } from '../plan-state-extractor.js'
 
 /** plan-state entry fixture（照 session-records.test.ts entry helper 形态；data 无 v 字段——D4 否决版本轴）。 */
@@ -213,21 +213,6 @@ describe('scanPlanStateEntries：派生', () => {
   it('无 plan-state entry 返回 null（publish 侧跳过 / 冷路径归一缺省 View）', () => {
     expect(scanPlanStateEntries([{ type: 'message', id: 'e1' }, { type: 'custom', customType: 'other', data: {} }])).toBeNull()
   })
-})
-
-describe('D2 派生归一契约（LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS——U1 fixture 定契约、断言在此落位）', () => {
-  it.each(LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS.map((pair) => [pair.entry, pair.expectedView] as const))(
-    '旧 entry → 派生 ≡ expectedView（恒携带 state、旧字段不透出）',
-    (entry, expectedView) => {
-      const view = scanPlanStateEntries([entry])
-      expect(view).not.toBeNull()
-      expect(view).toEqual(expectedView)
-      expect('state' in view!).toBe(true)
-      expect('reviewState' in view!).toBe(false)
-      expect('reviewStateSource' in view!).toBe(false)
-      expect('selfReview' in view!).toBe(false)
-    },
-  )
 })
 
 describe('extractPlanStateFromSessionFile：冷路径', () => {

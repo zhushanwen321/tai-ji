@@ -115,8 +115,9 @@ export {
 } from './extensions/scheduler-create/helpers'
 
 // ── ./extensions/plan：plan 模式生命周期状态机（D1：states/events/transition/derivePhase）+
-// 审阅回传值域契约（D3①⑤/D9③：值域守卫 + error envelope + selfReview 有界截断）——纯数据 +
-// 纯函数零 pi 依赖，pi-plan 扩展（转移接管）/ runtime（派生归一）/ renderer（呈现映射）三层共用；
+// 审阅回传值域契约（D3①⑤/D9③：值域守卫 + error envelope + selfReview 有界截断）+
+// 旧 entry legacy 读取（D-B4-1：lifecycle/resumeHint 映射 + entry customType 常量单源）——
+// 纯数据 + 纯函数零 pi 依赖，pi-plan 扩展（转移接管）/ runtime（派生归一）/ renderer（呈现映射）三层共用；
 // 消费面勾销锚 = src/extensions/plan/consumers.md ──
 export type {
   PlanLifecycleState,
@@ -138,6 +139,11 @@ export {
   isPlanReviewResponse,
   parsePlanReviewResponse,
 } from './extensions/plan/review-contract'
+export {
+  PLAN_STATE_CUSTOM_TYPE,
+  readLifecycleState,
+  readResumeHint,
+} from './extensions/plan/legacy-entries'
 
 // ── ./extensions/ui-form：统一提问表单协议（plan / scheduler / ask-user 三方提问的统一入口：select 通道 + marker + 类型化问题集；设计 ui-presentation-protocol，ask-user / scheduler-create 两定制协议随 u5/u6 迁移退役）──
 export type {
