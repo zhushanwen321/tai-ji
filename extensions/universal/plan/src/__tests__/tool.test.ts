@@ -15,10 +15,10 @@ vi.mock("@earendil-works/pi-ai", () => ({
   StringEnum: (values: readonly string[]) => ({ type: "string", enum: [...values] }),
 }));
 
-// Mock compact.js (statically imported since 06-u1)
-vi.mock("../compact.js", async () => {
+// Mock execution-notice.js (statically imported since 06-u1)
+vi.mock("../execution-notice.js", async () => {
   // GOAL_FAILURE_RECOVERY 与真实实现同文案——completeResultText 在 failure 断言里消费它
-  const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../compact.js")>("../compact.js");
+  const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../execution-notice.js")>("../execution-notice.js");
   return {
     handlePlanComplete: vi.fn(),
     GOAL_FAILURE_RECOVERY,
@@ -50,7 +50,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { UI_FORM_MARKER } from "@zhushanwen/extension-protocol";
 import { detectExecSkills } from "@zhushanwen/pi-exec-skills";
 
-import { handlePlanComplete } from "../compact.js";
+import { handlePlanComplete } from "../execution-notice.js";
 import { createPlanCtx, DEFAULT_PLAN_STATE } from "../state.js";
 import { listTemplates } from "../templates.js";
 import { PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";

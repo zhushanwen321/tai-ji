@@ -26,8 +26,8 @@ vi.mock("@earendil-works/pi-ai", () => ({
   StringEnum: (values: readonly string[]) => ({ type: "string", enum: [...values] }),
 }));
 
-vi.mock("../compact.js", async () => {
-  const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../compact.js")>("../compact.js");
+vi.mock("../execution-notice.js", async () => {
+  const { GOAL_FAILURE_RECOVERY } = await vi.importActual<typeof import("../execution-notice.js")>("../execution-notice.js");
   return {
     handlePlanComplete: vi.fn(),
     GOAL_FAILURE_RECOVERY,

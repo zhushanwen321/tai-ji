@@ -12,7 +12,6 @@ vi.mock("../tool.js", () => ({
   isTaijiHost: () => process.env.TAIJI_AGENT_EXT_LOG === "1",
 }));
 vi.mock("../command.js", () => ({ registerPlanCommand: vi.fn() }));
-vi.mock("../compact.js", () => ({ registerPlanEventHandlers: vi.fn() }));
 vi.mock("../widget.js", () => ({ updatePlanWidget: vi.fn() }));
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";

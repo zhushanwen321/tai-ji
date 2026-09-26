@@ -1,69 +1,24 @@
+/**
+ * plan complete 后的执行通知投递 + goal 桥。
+ *
+ * execute 档经 goal 桥 slot 注册执行跟踪（失败显式化五出口，不阻断执行），
+ * steer 指令承载执行方式裁决（goal 工作流 / skill / 直接执行三形态）。
+ * 压缩/分叉时的 plan 摘要由 pi 内置压缩机制承载（确定性文件操作清单 +
+ * keepRecentTokens 近端原文保留），本扩展不再接管压缩摘要。
+ */
 import * as fs from "node:fs";
 import { basename } from "node:path";
 
-import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent, SessionBeforeTreeEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import type { GoalInitFn } from "@zhushanwen/pi-goal";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { t } from "./i18n.js";
-import type { PlanSessionMap, PlanState } from "./state.js";
-import { PLAN_CONTEXT_CUSTOM_TYPE, getPlanState } from "./state.js";
+import type { PlanState } from "./state.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE } from "./state.js";
 
 const logger = getLogger("pi-plan");
-
-/**
- * compact / tree 两挂点共用的 summary 主体段（重复构造去重：两挂点均为真实 SDK 挂点
- * 全部保留，去重的只是公共主体——尾段各自不同，compact 档带 requirement + 进行中提示，
- * tree 档带执行指令）。
- */
-function buildPlanSummaryBody(planFilePath: string, planContent: string): string {
-  return `Plan mode active. Plan file: ${planFilePath}\n\n## Plan Content\n${planContent}\n\n`;
-}
-
-export function registerPlanEventHandlers(
-  pi: ExtensionAPI,
-  sessions: PlanSessionMap,
-): void {
-  pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx: ExtensionContext) => {
-    const sessionId = ctx.sessionManager.getSessionId();
-    const state = getPlanState(sessions, sessionId, ctx);
-    if (!state.isActive) return {};
-
-    // Read plan file content for recovery after compact
-    const planContent = readPlanFileSafe(state.planFilePath);
-
-    // handler 已有 isActive 门——能走到这里的 plan 必然进行中（D6：phase 删除，原 phase="complete" 分支为死状态）
-    const progressNote = "\nPlan was in progress — review and continue.";
-
-    return {
-      compaction: {
-        summary:
-          buildPlanSummaryBody(state.planFilePath, planContent) +
-          `Requirement: ${state.requirement}` +
-          progressNote,
-        // SDK 类型非可选（pi 0.84.4 dist types.d.ts SessionBeforeCompactEvent.preparation:
-        // CompactionPreparation，firstKeptEntryId/tokensBefore 均必有）——直取不容错
-        firstKeptEntryId: event.preparation.firstKeptEntryId,
-        tokensBefore: event.preparation.tokensBefore,
-      },
-    };
-  });
-
-  pi.on("session_before_tree", async (_event: SessionBeforeTreeEvent, ctx: ExtensionContext) => {
-    const sessionId = ctx.sessionManager.getSessionId();
-    const state = getPlanState(sessions, sessionId, ctx);
-    if (!state.isActive) return {};
-
-    const planContent = readPlanFileSafe(state.planFilePath);
-
-    return {
-      summary: {
-        summary: buildPlanSummaryBody(state.planFilePath, planContent) + "Read the plan file and execute the implementation.",
-      },
-    };
-  });
-}
 
 /** Read plan file: ok=false 是显式信号（GoalBridgeOutcome 的 plan-unreadable 出口消费），消除哨兵字符串比较 */
 type PlanFileContent = { ok: true; content: string } | { ok: false };
@@ -74,12 +29,6 @@ function readPlanFile(planFilePath: string): PlanFileContent {
   } catch {
     return { ok: false };
   }
-}
-
-/** Read plan file, return content or human-readable marker (for prompt embedding) */
-function readPlanFileSafe(planFilePath: string): string {
-  const result = readPlanFile(planFilePath);
-  return result.ok ? result.content : "(plan file could not be read)";
 }
 
 /**

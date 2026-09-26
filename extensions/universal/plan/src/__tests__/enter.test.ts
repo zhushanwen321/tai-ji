@@ -30,7 +30,7 @@ vi.mock("../templates.js", () => ({
   formatAvailablePlans: vi.fn(() => ""),
 }));
 
-vi.mock("../compact.js", () => ({
+vi.mock("../execution-notice.js", () => ({
   handlePlanComplete: vi.fn(),
   GOAL_FAILURE_RECOVERY: {},
 }));

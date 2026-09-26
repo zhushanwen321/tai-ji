@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
-import { extractPlanSteps } from "../compact.js";
+import { extractPlanSteps } from "../execution-notice.js";
 import {
   formatAvailablePlans,
   getBuiltinTemplateDir,

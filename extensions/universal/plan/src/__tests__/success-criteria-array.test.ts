@@ -1,5 +1,5 @@
 /**
- * plan/compact.ts — buildPlanSuccessCriteria 数组形态测试
+ * plan/execution-notice.ts — buildPlanSuccessCriteria 数组形态测试
  *
  * 形态契约（U25）：1 条总述 `All N steps of <basename> executed and verified`
  * + 前 3 条 step preview（编号前缀、单条截断 ≤80 chars），合计 ≤4 条
@@ -11,7 +11,7 @@ vi.mock("node:fs", () => ({
   readFileSync: vi.fn(),
 }));
 
-import { buildPlanSuccessCriteria, handlePlanComplete } from "../compact.js";
+import { buildPlanSuccessCriteria, handlePlanComplete } from "../execution-notice.js";
 import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const fsMock = vi.mocked(await import("node:fs"));
@@ -25,18 +25,9 @@ function makePi() {
 }
 
 function makeCtx() {
-  const onCompleteFns: Array<() => void> = [];
-  const onErrorFns: Array<(e: Error) => void> = [];
-
   return {
     sessionManager: { getSessionId: () => "test-session", getEntries: () => [] as unknown[] },
     ui: { notify: vi.fn() },
-    compact: vi.fn((opts: { onComplete?: () => void; onError?: (e: Error) => void }) => {
-      if (opts.onComplete) onCompleteFns.push(opts.onComplete);
-      if (opts.onError) onErrorFns.push(opts.onError);
-    }),
-    _onCompleteFns: onCompleteFns,
-    _onErrorFns: onErrorFns,
   };
 }
 
@@ -131,7 +122,7 @@ describe("buildPlanSuccessCriteria — 1 总述 + 前 3 条 preview", () => {
 // --- handlePlanComplete → tryGoalInit 端到端 ---
 
 /**
- * goal 桥 slot key——与 compact.ts / goal 侧 index.ts 的字符串一致（本地声明，
+ * goal 桥 slot key——与 execution-notice.ts / goal 侧 index.ts 的字符串一致（本地声明，
  * 不 import 对方包：pi-goal 是 optional peer）。mock 挂 slot 与真实通道同构。
  */
 const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");

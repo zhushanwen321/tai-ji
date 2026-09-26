@@ -22,8 +22,8 @@ import type { ExecSkill } from "@zhushanwen/pi-exec-skills";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
 
-import { GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./compact.js";
-import type { GoalBridgeOutcome } from "./compact.js";
+import { GOAL_FAILURE_RECOVERY, handlePlanComplete } from "./execution-notice.js";
+import type { GoalBridgeOutcome } from "./execution-notice.js";
 import { activatePlanMode, resolveSkills } from "./enter.js";
 import { t } from "./i18n.js";
 import { formatReviewComments } from "./prompts.js";
@@ -922,8 +922,8 @@ async function executeSubmitReview(
 
 /**
  * 执行方式选项（2026-09-21 用户裁决重排）：选项集 = 检测到的 plan-exec skills
- * （root 序前 2 个，label `用技能「name」执行`）+ 普通执行（execute 档——compact 侧
- * 整合 goal 桥与 auto-parallel subagent，见 deliverExecutionNotice）+ 暂不执行
+ * （root 序前 2 个，label `用技能「name」执行`）+ 普通执行（execute 档——经
+ * deliverExecutionNotice 整合 goal 桥与 auto-parallel subagent 委派指导）+ 暂不执行
  * （留在 plan mode）。四段固定结构，UI 文案经 i18n（ui-preferences locale 通道）。
  * 动态构造：skill 项随 complete 时检测产出，label→mode 映射随选项集携带
  * （`skill:<name>` 动态项不进静态表）。
@@ -1104,10 +1104,8 @@ async function resolveCompleteChoice(
 }
 
 /**
- * complete 的 result 正文：direct 档 goalInit 同步完成，追加 goal 结果行（D2）；
- * compact 档 goalInit 在 onComplete 回调内执行、result 已返回，不携带（通道差异
- * 为设计 §6.2 D2 登记的终态）。D7② 直通（no-exec-skills）明示一行——工具结果文案
- * 不得静默吞掉「没弹表单」的事实。
+ * complete 的 result 正文：goalInit 同步完成，追加 goal 结果行（D2）。
+ * D7② 直通（no-exec-skills）明示一行——工具结果文案不得静默吞掉「没弹表单」的事实。
  */
 function completeResultText(
   displayPath: string,

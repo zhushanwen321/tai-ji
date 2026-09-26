@@ -1,6 +1,6 @@
 import { describe, expect,it } from "vitest";
 
-import { extractPlanSteps } from "../compact.js";
+import { extractPlanSteps } from "../execution-notice.js";
 
 describe("extractPlanSteps", () => {
   it("extracts numbered steps from 实现步骤 section", () => {

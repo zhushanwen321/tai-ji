@@ -4,7 +4,6 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { registerPlanCommand } from "./command.js";
-import { registerPlanEventHandlers } from "./compact.js";
 import {
   PLAN_CONTEXT_CUSTOM_TYPE,
   PLAN_MODE_TOOLS,
@@ -27,9 +26,6 @@ export default function planExtension(pi: ExtensionAPI) {
   // Register tool and command
   registerPlanTool(pi, planCtx);
   registerPlanCommand(pi, planCtx);
-
-  // Register compact/tree event handlers
-  registerPlanEventHandlers(pi, planCtx.states);
 
   // Reconstruct state on session start
   pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
