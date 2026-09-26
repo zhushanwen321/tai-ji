@@ -4,8 +4,8 @@
  * 覆盖（impl-plan U4b 验收条款 + S15 renderer 断言族）：
  * - derivePlanStage 重写（derivePhase 单点接线）：① exploring / ② writing（含 revising 归
  *   规划中档）/ ③ reviewing / ③✓ approved（D5 阶段不倒退，F5）
- * - D2 读方③ 兜底映射（resolvePlanLifecycleState：state ?? reviewState 映射 ?? 按 isActive
- *   推断；resolveResumeHint：reviewStateSource:'resubmit' 同义映射）
+ * - state 读侧解析（resolvePlanLifecycleState：归一 View 的 state 直读 + 值域守卫，缺失/
+ *   垃圾落 idle——批次 3 条目 1 删除混装兜底后的声明例外锚；resolveResumeHint：直读）
  * - D4 分支公式单源（derivePlanReviewBarMode）：presence 语义 / 抑制窗 / 稳定窗输入面
  * - 审批窗口机件：已应答标记三路解除（预期后态帧值判定 / 新 pending / 冷拉真值）、迟到旧帧
  *   不解标记、稳定窗 arm/cancel·重置、10s 兑底双源冷拉（失败 → 标记悬挂 + loadError（R7）；
@@ -65,6 +65,7 @@ const BASE_VIEW: PlanStateView = {
   planFilePath: '/data/A/.tmp/plans/auth/plan.md',
   requirement: '重构 auth 模块',
   templateName: 'default',
+  state: 'planning',
 }
 
 const DOC: PlanDocMeta = {
@@ -140,7 +141,6 @@ describe('derivePlanStage：derivePhase 单点接线（consumers.md §三 C）',
     expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC] })).toBe('writing')
     expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC, DOC] })).toBe('writing')
     expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], state: 'revising' })).toBe('writing')
-    expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], reviewState: 'revising' })).toBe('writing')
   })
 
   it('③ 审阅确认 = phase reviewing（state 直读）', () => {
@@ -155,45 +155,46 @@ describe('derivePlanStage：derivePhase 单点接线（consumers.md §三 C）',
     expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], state: 'dispatching' })).toBe('approved')
   })
 
-  it('D2③ 兜底映射（混装格）：state 缺失时 reviewState 映射（awaiting→③），无字段按 isActive 推断', () => {
-    expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], reviewState: 'awaiting' })).toBe('reviewing')
-    // 旧 runtime 错配格：state/reviewState 双缺但 isActive → 推断 planning → 文档档
-    expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC] })).toBe('writing')
+  it('state 缺失格（旧 runtime 混装降级）不外显阶段指示', () => {
+    // 批次 3 条目 1：混装兜底映射删除后，state 缺失落 idle → 阶段不外显（原按 isActive
+    // 推断 planning 的行为已随条目 1 声明的例外退役）
+    const { state: _omitted, ...noStateView } = BASE_VIEW
+    expect(derivePlanStage({ ...noStateView, docs: [DOC] })).toBeNull()
   })
 
   it('isActive=false（退出/执行后 reset 终态）或无 view → null；终态/垃圾 state 不外显', () => {
     expect(derivePlanStage(null)).toBeNull()
-    expect(derivePlanStage({ ...BASE_VIEW, isActive: false })).toBeNull()
+    expect(derivePlanStage({ ...BASE_VIEW, isActive: false, state: 'exited' })).toBeNull()
     expect(derivePlanStage({ ...BASE_VIEW, isActive: false, docs: [DOC], state: 'reviewing' })).toBeNull()
     expect(derivePlanStage({ ...BASE_VIEW, state: 'completed' })).toBeNull()
     expect(derivePlanStage({ ...BASE_VIEW, state: 'exited' })).toBeNull()
-    expect(derivePlanStage({ ...BASE_VIEW, state: 'garbage' as never })).toBe('exploring')
+    // 垃圾 state + isActive=true → 落 idle（条目 1 声明例外：原经 isActive 推断呈 exploring）
+    expect(derivePlanStage({ ...BASE_VIEW, state: 'garbage' as never })).toBeNull()
   })
 })
 
-// ── D2 读方③ 兜底解析（resolvePlanLifecycleState / resolveResumeHint）──
+// ── state 读侧解析（resolvePlanLifecycleState / resolveResumeHint）──
 
-describe('D2 读方③ 兜底映射（state ?? reviewState 映射 ?? 按 isActive 推断）', () => {
-  it('state 直读（恒携带的归一 View）；垃圾 state 值走兜底（不信任外部格式）', () => {
+describe('state 读侧解析（归一 View 直读；缺失/垃圾统一落 idle）', () => {
+  it('state 直读（归一 View 恒携带的值域白名单字段）', () => {
     expect(resolvePlanLifecycleState({ ...BASE_VIEW, state: 'dispatching' })).toBe('dispatching')
-    expect(resolvePlanLifecycleState({ ...BASE_VIEW, state: 'garbage' as never })).toBe('planning')
+    expect(resolvePlanLifecycleState(BASE_VIEW)).toBe('planning')
+    expect(resolvePlanLifecycleState({ ...BASE_VIEW, state: 'exited' })).toBe('exited')
     expect(resolvePlanLifecycleState(null)).toBe('idle')
   })
 
-  it('state 缺失 → reviewState 映射（awaiting→reviewing / revising→revising）', () => {
-    expect(resolvePlanLifecycleState({ ...BASE_VIEW, reviewState: 'awaiting' })).toBe('reviewing')
-    expect(resolvePlanLifecycleState({ ...BASE_VIEW, reviewState: 'revising' })).toBe('revising')
+  it('垃圾 state 值 + isActive=true → idle（条目 1 声明行为例外：原经 isActive 推断呈 planning）', () => {
+    expect(resolvePlanLifecycleState({ ...BASE_VIEW, state: 'garbage' as never })).toBe('idle')
   })
 
-  it('双缺 → 按 isActive 推断（有 plan → planning，无 → idle）', () => {
-    expect(resolvePlanLifecycleState(BASE_VIEW)).toBe('planning')
-    expect(resolvePlanLifecycleState({ ...BASE_VIEW, isActive: false })).toBe('idle')
+  it('state 缺失 → idle（不再按 reviewState 映射 / isActive 推断——混装兜底已删）', () => {
+    const { state: _omitted, ...noStateView } = BASE_VIEW
+    expect(resolvePlanLifecycleState(noStateView)).toBe('idle')
+    expect(resolvePlanLifecycleState({ ...noStateView, isActive: false })).toBe('idle')
   })
 
-  it('resolveResumeHint：resumeHint 直读；旧字段 reviewStateSource:resubmit 同义映射；其余不猜测', () => {
+  it('resolveResumeHint：resumeHint 直读；其余/缺省不猜测来源', () => {
     expect(resolveResumeHint({ ...BASE_VIEW, resumeHint: 'resubmit' })).toBe('resubmit')
-    expect(resolveResumeHint({ ...BASE_VIEW, reviewStateSource: 'resubmit' })).toBe('resubmit')
-    expect(resolveResumeHint({ ...BASE_VIEW, reviewStateSource: 'explain' as never })).toBeUndefined()
     expect(resolveResumeHint(BASE_VIEW)).toBeUndefined()
     expect(resolveResumeHint(null)).toBeUndefined()
   })
@@ -542,15 +543,15 @@ describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
 // ── WS 帧落地（updateFor 分区写）────────────────────────────
 
 describe('applyFrame：updateFor 分区写', () => {
-  it('帧写入指定 sid 分区，不依赖焦点；reviewState 翻转驱动阶段流转', () => {
+  it('帧写入指定 sid 分区，不依赖焦点；state 驱动阶段流转', () => {
     const { store, planView, planStage } = usePlanRefs()
     // 焦点在 B，A 的帧写入 A 分区（B 分区不受影响）
     store.syncFocus('B')
-    store.applyFrame('A', { ...BASE_VIEW, docs: [DOC], reviewState: 'awaiting' })
+    store.applyFrame('A', { ...BASE_VIEW, docs: [DOC], state: 'reviewing' })
     expect(planView.value).toBeNull() // 焦点 B 尚无数据
 
     store.syncFocus('A')
-    expect(planView.value?.reviewState).toBe('awaiting')
+    expect(planView.value?.state).toBe('reviewing')
     expect(planStage.value).toBe('reviewing')
   })
 })
@@ -619,7 +620,7 @@ describe('评论草稿：焦点分区操作与 per-session 隔离', () => {
     store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
     store.addDraftComment(C1)
     store.syncFocus('B')
-    store.applyFrame('B', { ...BASE_VIEW, docs: [DOC], reviewState: 'awaiting' })
+    store.applyFrame('B', { ...BASE_VIEW, docs: [DOC], state: 'reviewing' })
     store.addDraftComment(C2)
 
     triggerSessionCleanups('A')
@@ -633,7 +634,7 @@ describe('评论草稿：焦点分区操作与 per-session 隔离', () => {
     store.syncFocus('B')
     // B 分区不受 A 清理影响
     expect(draftComments.value).toEqual([C2])
-    expect(planView.value?.reviewState).toBe('awaiting')
+    expect(planView.value?.state).toBe('reviewing')
   })
 })
 
@@ -674,7 +675,7 @@ describe('enter 翻转清草稿（§3.5 兜底：新审阅轮 = 干净草稿区�
     store.applyFrame('A', { ...BASE_VIEW, isActive: true })
     store.addDraftComment(C)
 
-    store.applyFrame('A', { ...BASE_VIEW, isActive: true, reviewState: 'awaiting' })
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true, state: 'reviewing' })
     expect(draftComments.value).toEqual([C])
   })
 
@@ -706,7 +707,7 @@ describe('enter 翻转清草稿（§3.5 兜底：新审阅轮 = 干净草稿区�
     // A 审阅中（isActive=true）且已有草稿——若误挂「焦点视图 watch」落点，
     // 从无 view 的 B 切到 A 时焦点 isActive 呈假「无→有」翻转，会误清 A
     store.syncFocus('A')
-    store.applyFrame('A', { ...BASE_VIEW, isActive: true, reviewState: 'awaiting' })
+    store.applyFrame('A', { ...BASE_VIEW, isActive: true, state: 'reviewing' })
     store.addDraftComment(C)
     expect(draftComments.value).toEqual([C])
 

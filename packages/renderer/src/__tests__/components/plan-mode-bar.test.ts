@@ -118,6 +118,7 @@ function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
     planFilePath: '/data/A/.tmp/plans/auth/plan.md',
     requirement: '重构 auth 模块',
     templateName: 'default',
+    state: 'planning', // 真形态基线：归一 View 恒携带 state（批次 3 条目 1 后缺失格落 idle）
     ...overrides,
   }
 }
@@ -217,8 +218,8 @@ describe('承接清单① 常驻挂载订阅（M1 硬约束）', () => {
         planReview: true,
       },
     ])
-    usePlanStore().applyFrame(SID, viewOf({ reviewState: 'awaiting' }))
-    commandMock.mockResolvedValue({ sessionId: SID, planState: viewOf({ reviewState: 'awaiting' }) })
+    usePlanStore().applyFrame(SID, viewOf({ state: 'reviewing' }))
+    commandMock.mockResolvedValue({ sessionId: SID, planState: viewOf({ state: 'reviewing' }) })
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-mode-bar"]').exists()).toBe(true)
@@ -337,7 +338,7 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
   })
 
   it('revising 警示优先：「agent 正在修订文档，退出将中止修订」（GUI 草稿在 revise 提交时已清，警示指 agent 侧）', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'revising' }))
+    const wrapper = await mountBar(viewOf({ state: 'revising' }))
     usePlanStore().addDraftComment({ quote: '引文', comment: '评语' }) // 残留草稿也不改判：revising 优先
     await flushAsync()
     await wrapper.find('[data-testid="plan-mode-bar-exit"]').trigger('click')
@@ -349,7 +350,7 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
   })
 
   it('ready 且有评论草稿 →「N 条评论草稿将丢弃」警示（计数随 drafts）', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     usePlanStore().addDraftComment({ quote: '引文一', comment: '评语一' })
     usePlanStore().addDraftComment({ quote: '引文二', comment: '评语二' })
     await flushAsync()
@@ -363,7 +364,7 @@ describe('左区渲染（常驻：模式名 + 三阶段 + 退出）', () => {
   })
 
   it('确认退出即清草稿（§3.5）：drafts 2 条 → 确认后焦点分区草稿清空', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     usePlanStore().addDraftComment({ quote: '引文一', comment: '评语一' })
     usePlanStore().addDraftComment({ quote: '引文二', comment: '评语二' })
     await flushAsync()
@@ -448,7 +449,7 @@ describe('右区三分支（PlanReviewBar 情境渲染，宿主行内）', () =>
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
   })
 
-  it('隐藏：isActive 且无 reviewState 无挂起（阶段①/②）→ 仅左区，右区无 DOM', async () => {
+  it('隐藏：isActive 且无审阅态无挂起（阶段①/②）→ 仅左区，右区无 DOM', async () => {
     const wrapper = await mountBar(viewOf())
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-mode-bar"]').exists()).toBe(true)
@@ -458,7 +459,7 @@ describe('右区三分支（PlanReviewBar 情境渲染，宿主行内）', () =>
 
 describe('窄窗换行策略（F-R2-2 反重叠回归守卫）', () => {
   it('右区 = grow + flex-wrap（basis max-content）：窄窗放不下整体换行而非收缩覆盖左区', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
     await flushAsync()
 
@@ -575,7 +576,7 @@ describe('D13 视觉/文案合规断言（S13 降级兑现：状态带/审批条
   })
 
   it('D13⑦ 0 草稿不渲染评论计数键（常态归零）；有草稿才出现且计数正确', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-summary"]').exists()).toBe(false)
@@ -588,7 +589,7 @@ describe('D13 视觉/文案合规断言（S13 降级兑现：状态带/审批条
   })
 
   it('D13② 评论计数图标/角标非 warn 色（图标 accent / 角标 neutral，warn 回归异常语义）', async () => {
-    const wrapper = await mountBar(viewOf({ reviewState: 'awaiting' }))
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
     usePlanStore().addDraftComment({ quote: '引文', comment: '评语' })
     await flushAsync()

@@ -272,8 +272,8 @@ const exitError = ref<string | null>(null)
 const exitConfirmOpen = ref(false)
 
 /**
- * revising 判定（D2 读方③：reviewState 分支全部迁移——state 兜底映射读（state ?? reviewState
- * 映射 ?? 按 isActive 推断），不再直读旧字段）。退出确认警示语境（agent 侧修订将中止）。
+ * revising 判定（归一 View 的 state 直读解析，与 PlanDocsPanel 同型）。退出确认警示语境
+ * （agent 侧修订将中止）。
  */
 const isRevising = computed(() => resolvePlanLifecycleState(view.value) === 'revising')
 

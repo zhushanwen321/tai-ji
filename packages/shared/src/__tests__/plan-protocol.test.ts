@@ -7,19 +7,17 @@
  *  - 新 RPC session.getPlanState / session.abortPlan 在 ClientMessageType 联合 +
  *    ClientMessageMap + ReplyPayloadMap 三处登记；getPlanState reply 复用
  *    session.planState 广播 payload（getSubagents 先例），abortPlan 为 ack 型
- *  - PlanStateView 字段与 plan-state entry schema 一致：四必填 + 六 optional——
+ *  - PlanStateView 字段与 plan-state entry schema 一致：四必填 + 四 optional——
  *    optional 性是向后兼容契约（旧 entry 无新字段，前端逐字段判存在降级），
  *    optional 改必填 = 旧 session 重开派生 View 缺字段编译红，本测试机器拦截。
- *    六 optional = D4 四扩展字段（skills/docs/reviewState/reviewStateSource）+
- *    状态机显式化 D2 加员（state/resumeHint）——state 直接引用 extension-protocol 的
- *    PlanLifecycleState（跨包 AssertExact 锁）；reviewState/reviewStateSource 已降级为
- *    只读兼容位（新派生不透出，混装格兜底映射输入）。
- *    reviewStateSource（降级态来源标记，plan-mode-ux-refactor §3.4）在
- *    reviewStateSource 引入前世代的旧 entry 必无（快照 =
- *    LEGACY_AWAITING_PLAN_STATE_ENTRY；含 reviewStateSource 世代快照 =
- *    LegacyPlanStateData——「旧 entry」跨两世代，勿混）——
- *    重放兼容断言用 __tests__/fixtures/plan-state-entries.ts 的旧 entry fixture
- *    （含 awaiting reviewState、无 reviewStateSource，可被后续单元复用导出）
+ *    四 optional = D4 两扩展字段（skills/docs）+ 状态机显式化 D2 加员（state/resumeHint）
+ *    ——state 直接引用 extension-protocol 的 PlanLifecycleState（跨包 AssertExact 锁）。
+ *    旧字段 reviewState/reviewStateSource 已随批次 3 条目 1（plan-mode-audit-remediation）
+ *    退出契约——映射只存在于 entry 读取侧归一点，View 不再携带旧字段（混装格 renderer
+ *    兜底映射同批删除）。
+ *    旧格式重放回归锚（V5：旧格式会话重放三侧逐字段一致）用
+ *    __tests__/fixtures/plan-state-entries.ts 的 LEGACY_AWAITING_PLAN_STATE_ENTRY
+ *    （含 awaiting reviewState、无 reviewStateSource 的升级前落盘形态）
  *  - PlanDocMeta 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 跨包同形：
  *    devDependency 引对侧做编译期 AssertExact 双向断言（单侧改字段即红），
  *    另保留字面量绝对锚点断言防两侧同步漂移。devDep 不构成运行时反向依赖
@@ -47,8 +45,8 @@ import type {
 } from '../protocol'
 // 对侧同形契约源：跨包断言的另一半（devDependency，仅类型消费）
 import type { PlanDocMeta as ProtocolPlanDocMeta, PlanLifecycleState } from '@zhushanwen/extension-protocol'
-// 旧 entry 重放 fixture（升级前落盘形态：awaiting reviewState + 无 reviewStateSource）
-import { LEGACY_AWAITING_PLAN_STATE_ENTRY, LEGACY_AWAITING_PLAN_STATE_VIEW } from './fixtures/plan-state-entries'
+// 旧 entry 重放回归锚（升级前落盘形态：awaiting reviewState + 无 reviewStateSource）
+import { LEGACY_AWAITING_PLAN_STATE_ENTRY } from './fixtures/plan-state-entries'
 
 // ── 编译期类型断言辅助（同 gen-stats.test.ts / protocol-seq.test.ts 模式）──
 
@@ -81,8 +79,8 @@ type _Assert_AbortPlan_reply_key = AssertHasKey<ReplyPayloadMap, 'session.abortP
 // ack 型（状态变化经投影链广播推回，reply 仅确认命令受理——session.forceQuit 同构）
 type _Assert_AbortPlan_reply_void = AssertExact<ReplyPayloadMap['session.abortPlan'], void>
 
-// ── PlanStateView 字段契约：四必填 + 六 optional（optional 性 = 向后兼容契约）──
-type _Assert_View_keys = AssertExact<keyof PlanStateView, 'isActive' | 'planFilePath' | 'requirement' | 'templateName' | 'skills' | 'docs' | 'state' | 'resumeHint' | 'reviewState' | 'reviewStateSource'>
+// ── PlanStateView 字段契约：四必填 + 四 optional（optional 性 = 向后兼容契约）──
+type _Assert_View_keys = AssertExact<keyof PlanStateView, 'isActive' | 'planFilePath' | 'requirement' | 'templateName' | 'skills' | 'docs' | 'state' | 'resumeHint'>
 type _Assert_View_isActive = AssertExact<PlanStateView['isActive'], boolean>
 type _Assert_View_planFilePath = AssertExact<PlanStateView['planFilePath'], string | null>
 type _Assert_View_requirement = AssertExact<PlanStateView['requirement'], string | null>
@@ -91,18 +89,11 @@ type _Assert_View_templateName = AssertExact<PlanStateView['templateName'], stri
 //（改必填会在此 TS2344 红——旧 entry 派生的 View 无新字段，缺字段即兼容破坏）
 type _Assert_View_skills_optional = AssertExact<PlanStateView['skills'], string[] | undefined>
 type _Assert_View_docs_optional = AssertExact<PlanStateView['docs'], PlanDocMeta[] | undefined>
-type _Assert_View_reviewState_optional = AssertExact<PlanStateView['reviewState'], 'awaiting' | 'revising' | undefined>
-type _Assert_View_reviewStateSource_optional = AssertExact<PlanStateView['reviewStateSource'], 'resubmit' | undefined>
 // 状态机显式化 D2 加员（state/resumeHint）的 optional 编码精确断言：state 字段类型**直接
 // 引用 extension-protocol 的 PlanLifecycleState**（跨包相对断言——镜像副本/值域漂移/改必填
-// 任一即红）；resumeHint 与旧字段 reviewStateSource 同值域（取代式演进的映射契约面）
+// 任一即红）；resumeHint 值域 = 'resubmit'
 type _Assert_View_state_optional = AssertExact<PlanStateView['state'], PlanLifecycleState | undefined>
 type _Assert_View_resumeHint_optional = AssertExact<PlanStateView['resumeHint'], 'resubmit' | undefined>
-// 反向锚点：'explain' 交互已删，联合仅 'resubmit'（旧 entry 存量 'explain' 由 runtime 投影
-// 归无值）——若有人把 'explain' 加回联合，下方 @ts-expect-error 无错可压即编译红
-// @ts-expect-error reviewStateSource 不接受已删除的 'explain'
-const _rejectExplainSource: PlanStateView['reviewStateSource'] = 'explain'
-void _rejectExplainSource
 
 // ── PlanDocMeta 四字段（与 extension-protocol core/types PlanDocMeta 同形）──
 // 字面量断言是绝对锚点（防两侧同步漂移）；跨包 AssertExact 是相对断言
@@ -135,8 +126,6 @@ const _planProtocolAssertsEnforced = [
   _enforceTrue<_Assert_View_templateName>(),
   _enforceTrue<_Assert_View_skills_optional>(),
   _enforceTrue<_Assert_View_docs_optional>(),
-  _enforceTrue<_Assert_View_reviewState_optional>(),
-  _enforceTrue<_Assert_View_reviewStateSource_optional>(),
   _enforceTrue<_Assert_View_state_optional>(),
   _enforceTrue<_Assert_View_resumeHint_optional>(),
   _enforceTrue<_Assert_Doc_keys>(),
@@ -152,7 +141,7 @@ void _planProtocolAssertsEnforced
 // ── 运行期测试（payload 可赋值 + 旧/新 schema 两种 View 形态）──────────────────
 
 describe('session.planState 帧登记', () => {
-  it('新 schema View（八字段全量）可构造广播帧', () => {
+  it('新 schema View（state/resumeHint 全量）可构造广播帧', () => {
     const msg: ServerMessage<'session.planState'> = {
       type: 'session.planState',
       seq: 1,
@@ -165,19 +154,19 @@ describe('session.planState 帧登记', () => {
           templateName: 'tech-design',
           skills: ['tech-design', 'dev-flow'],
           docs: [{ fileName: 'design.md', absPath: '/tmp/design.md', sourceSkill: 'tech-design', version: 1 }],
-          reviewState: 'awaiting',
-          reviewStateSource: 'resubmit',
+          state: 'reviewing',
+          resumeHint: 'resubmit',
         },
       },
     }
     expect(msg.payload.planState.isActive).toBe(true)
     expect(msg.payload.planState.skills).toEqual(['tech-design', 'dev-flow'])
     expect(msg.payload.planState.docs?.[0]?.version).toBe(1)
-    expect(msg.payload.planState.reviewState).toBe('awaiting')
-    expect(msg.payload.planState.reviewStateSource).toBe('resubmit')
+    expect(msg.payload.planState.state).toBe('reviewing')
+    expect(msg.payload.planState.resumeHint).toBe('resubmit')
   })
 
-  it('旧 schema View（仅四字段，三扩展字段缺省）可构造——D4 向后兼容', () => {
+  it('旧 schema View（仅四字段，扩展字段缺省）可构造——D4 向后兼容', () => {
     const msg: ServerMessage<'session.planState'> = {
       type: 'session.planState',
       payload: {
@@ -192,7 +181,7 @@ describe('session.planState 帧登记', () => {
     }
     expect(msg.payload.planState.skills).toBeUndefined()
     expect(msg.payload.planState.docs).toBeUndefined()
-    expect(msg.payload.planState.reviewState).toBeUndefined()
+    expect(msg.payload.planState.state).toBeUndefined()
   })
 
   it('ServerMessageUnion 判别联合形态含本帧且 payload 收窄', () => {
@@ -211,33 +200,14 @@ describe('session.planState 帧登记', () => {
   })
 })
 
-describe('旧 entry 重放兼容（reviewStateSource 缺省 = 消费方惰性）', () => {
+describe('旧 entry 重放回归锚（LEGACY_AWAITING_PLAN_STATE_ENTRY 形态锁）', () => {
   it('fixture 保真：旧 entry 含 awaiting reviewState 且无 reviewStateSource 键（升级前落盘形态）', () => {
     const data = LEGACY_AWAITING_PLAN_STATE_ENTRY.data
     expect(data.reviewState).toBe('awaiting')
     expect('reviewStateSource' in data).toBe(false)
-  })
-
-  it('旧 entry 的 View 投影可构造广播帧与 reply——缺字段可赋值（编译期）+ 读值 undefined（运行期）', () => {
-    // LEGACY_AWAITING_PLAN_STATE_VIEW 字面量无 reviewStateSource 键，可赋值给
-    // ServerMessage 帧 payload 与 reply payload = 「旧 View 形态兼容新契约」编译证明；
-    // 消费方惰性 = 字段缺失不炸、读值 undefined（渲染通用降级文案，不猜测来源）
-    const msg: ServerMessage<'session.planState'> = {
-      type: 'session.planState',
-      seq: 1,
-      payload: { sessionId: 's1', planState: LEGACY_AWAITING_PLAN_STATE_VIEW },
-    }
-    const reply: ReplyPayloadMap['session.getPlanState'] = {
-      sessionId: 's1',
-      planState: LEGACY_AWAITING_PLAN_STATE_VIEW,
-    }
-    expect(msg.payload.planState.reviewState).toBe('awaiting')
-    expect(msg.payload.planState.reviewStateSource).toBeUndefined()
-    expect('reviewStateSource' in msg.payload.planState).toBe(false)
-    expect('reviewStateSource' in reply.planState).toBe(false)
-    // 旧 entry 其余字段照常透传（兼容 ≠ 丢弃）
-    expect(msg.payload.planState.isActive).toBe(true)
-    expect(msg.payload.planState.docs?.[0]?.fileName).toBe('plan.md')
+    // 旧格式重放回归锚（V5）：归一点按该形态映射 state=reviewing 且不透出旧字段——
+    // 断言落 runtime plan-state-extractor / 扩展 reconstructPlanState 各自测试
+    //（等价对表 LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS 驱动）
   })
 })
 
@@ -260,10 +230,10 @@ describe('session.getPlanState / session.abortPlan RPC 登记', () => {
         planFilePath: '/tmp/plan.md',
         requirement: null,
         templateName: null,
-        reviewState: 'awaiting',
+        state: 'reviewing',
       },
     }
-    expect(reply.planState.reviewState).toBe('awaiting')
+    expect(reply.planState.state).toBe('reviewing')
   })
 
   it('abortPlan request 仅含 sessionId，reply 为 ack 型 void', () => {

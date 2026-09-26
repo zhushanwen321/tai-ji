@@ -15,7 +15,7 @@
  * - docs 空 / 无 plan 状态 → 空态不渲染主体（D10 联动；isActive=false 且 docs 空同场景——
  *   isActive=false 但 docs 非空仍渲染，D5 终态矩阵「产物 tab 与 isActive 解耦」钉死）
  * - 划选评论草稿（quote 捕获后经 Popover emit → 草稿新增 / 删除；浮条细节归 plan-comment-popover.test.ts）
- * - 修订刷新（G3）：version bump / reviewState 离开 revising → 重新 file.read
+ * - 修订刷新（G3）：version bump / state 离开 revising → 重新 file.read
  * - 草稿回看消费（§3.5，u-review-source-ui）：审批条计数点击 → plan-store 回看请求 →
  *   本面板滚动到草稿列表（挂载补消费 + 已挂载 watch 消费 + consumed 防重滚 + 空草稿 no-op）
  * - D13 合规断言（视觉/文案合规包，S13 降级兑现——本文件锁①③④⑤⑩⑪的面板/浮层侧）：
@@ -389,18 +389,14 @@ describe('PlanDocsPanel 修订刷新（G3）', () => {
     expect(readMock).toHaveBeenLastCalledWith('/data/A/.tmp/plans/auth/design.md', SID)
   })
 
-  it('真形态（View 无 reviewState 键）：state=revising 驱动修订中视觉 + 评论禁用；state 离开 → 重新 file.read', async () => {
-    // 回归契约（真实链路形态）：归一点产出的 View 恒携带 state 且**不透出 reviewState**（D2）
-    // ——直读旧字段会恒 false 致修订中视觉/禁评全族失灵（fix 轮 1 修因）
+  it('真形态（View 携带 state）：state=revising 驱动修订中视觉 + 评论禁用；state 离开 → 重新 file.read', async () => {
+    // 回归契约（真实链路形态）：归一点产出的 View 恒携带 state（批次 3 条目 1 后旧字段已退出契约）
     const wrapper = await mountPanel(viewOf({ state: 'revising' }), { stubCommentPopover: false })
     expect(readMock).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[data-testid="plan-docs-tab-revising"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-docs-meta-revising"]').exists()).toBe(true)
     // 修订中禁评（PlanCommentPopover disabled 同一判定源）
     expect(wrapper.findComponent({ name: 'PlanCommentPopover' }).props('disabled')).toBe(true)
-    // 真形态断言：View 无旧键（fixture 若直塞 reviewState 会掩盖失灵面）
-    expect(usePlanStore().planView.value?.reviewState).toBeUndefined()
-
     usePlanStore().applyFrame(SID, viewOf({ state: 'reviewing' }))
     await flushAsync()
 
@@ -408,20 +404,6 @@ describe('PlanDocsPanel 修订刷新（G3）', () => {
     expect(readMock).toHaveBeenCalledTimes(2)
     expect(wrapper.find('[data-testid="plan-docs-meta-revising"]').exists()).toBe(false)
     expect(wrapper.findComponent({ name: 'PlanCommentPopover' }).props('disabled')).toBe(false)
-  })
-
-  it('旧字段兼容位（混装格兑底）：reviewState 直塞的旧 View 形态仍经 D2③ 映射驱动 revising 判定', async () => {
-    const wrapper = await mountPanel(viewOf({ reviewState: 'revising' }))
-    expect(readMock).toHaveBeenCalledTimes(1)
-    // revising 态视觉：tab 圆点 + meta 提示
-    expect(wrapper.find('[data-testid="plan-docs-tab-revising"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="plan-docs-meta-revising"]').exists()).toBe(true)
-
-    usePlanStore().applyFrame(SID, viewOf({ reviewState: 'awaiting' }))
-    await flushAsync()
-
-    expect(readMock).toHaveBeenCalledTimes(2)
-    expect(wrapper.find('[data-testid="plan-docs-meta-revising"]').exists()).toBe(false)
   })
 })
 

@@ -22,7 +22,7 @@
  * - 事件按**事件 sid** 写入分区（M1 竞态语义：切 session 后旧 sid 迟到事件写旧分区，不污染新分区）
  * - getPendingRequests（切回拉取）保留 RPC 路径（C3）；其应答落 store 前执行**快照差集剔除**
  *   （renderer 侧僵尸表单修剪主算法，§6.2 采用项④ v6.1：不在快照中的旧条目一律移除，
- *   空快照也执行；帧入口超龄过滤仅作兜底）
+ *   空快照也执行）
  *
  * filter 仅用于读取分流 + 入队第二道闸（富交互硬过滤之后）：store 存全量 pending，
  * 多个 composable 实例（Panel 入 overlay 读取、审批条入 planReview 读取——D5）各按
@@ -60,23 +60,6 @@ export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
  * bus 直连（extension-host-dialog C4 对称排除，零重叠契约）。
  */
 export const formFilter: UIRequestFilter = (req) => req.form === true
-
-/**
- * 帧入口兜底超龄阈值（renderer 本地常量，非主算法）。
- *
- * 主算法 = `getPendingRequests` 快照差集剔除（见 subscribe 内 retainOnly 调用点），**不依赖
- * 任何阈值**——renderer 拿不到 runtime 的 `TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS`（env 隔离），
- * 且快照本身就是 runtime 权威 pending 集。本常量只作 `extension_ui_request` 逐帧入口的
- * 兜底（设计 scheduler-trigger-inversion §6.2 采用项④ v6.1）：帧若携带陈旧 `receivedAt`
- *（异常积压 / 未来 runtime 在广播帧上附带入队时间），超龄即丢弃，防极端积压污染 store。
- * 量级对齐 runtime 侧上界默认 6h（人填表窗口远超 6h 已无意义）。
- */
-const FRAME_STALE_MAX_AGE_HOURS = 6
-const MINUTES_PER_HOUR = 60
-const SECONDS_PER_MINUTE = 60
-const MS_PER_SECOND = 1000
-export const FRAME_STALE_MAX_AGE_MS =
-  FRAME_STALE_MAX_AGE_HOURS * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND
 
 // ── planReview 分流（plan 模式状态机显式化 D3/D4/D9，PLAN_REVIEW_MARKER select 通道）──
 
@@ -299,8 +282,8 @@ function pickPlanFields(
  * method 用原始 method（可能超界如 editor）?? kind 兜底（kind 已归一 select/confirm/input）。
  */
 function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIRequest {
-  // receivedAt：优先采信帧携带的数值（异常积压场景可判定超龄），缺失则由本层打戳
-  //（当前 runtime 广播帧不带该键，故常态恒为 Date.now()——兜底判定的输入面）。
+  // receivedAt：优先采信帧携带的数值，缺失则由本层打戳（当前 runtime 广播帧不带该键，
+  // 故常态恒为 Date.now()）——合并排序消费方（useBtwInteraction 确认条最早优先）的时序基准。
   const rawReceivedAt = request.receivedAt
   return {
     sessionId: sid,
@@ -366,16 +349,6 @@ export function useExtensionUI(
         if (raw.form !== true && !isPlanReview) return // C4：富交互标记放行
         const adapted = toExtensionUIRequest(eventSid, raw)
         if (filter && !filter(adapted)) return // filter 第二道闸
-        // 兜底超龄过滤（非主算法）：主算法是 getPendingRequests 快照差集剔除（见下方 .then）；
-        // 此处只防「帧携带陈旧 receivedAt」的极端积压。常态帧收到即打戳（receivedAt ≈ now），
-        // 判定不命中故无行为差异。
-        if (Date.now() - (adapted.receivedAt ?? Date.now()) > FRAME_STALE_MAX_AGE_MS) {
-          console.warn(
-            '[useExtensionUI] 超龄 ui-request 帧已丢弃（兜底过滤，非快照差集主算法）:',
-            adapted.requestId,
-          )
-          return
-        }
         store.addRequest(eventSid, adapted)
         // D4 审批窗口漏斗（入店）：新 planReview pending 登记到达 → 镜像同步（内含解除
         // 已应答标记语义——挂起 = 唯一交互权威、ready 优先于抑制）

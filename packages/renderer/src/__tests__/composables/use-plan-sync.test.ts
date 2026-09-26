@@ -55,6 +55,7 @@ function planStateOf(sid: string, overrides: Partial<PlanStateView> = {}): PlanS
     planFilePath: `/data/${sid}/.tmp/plans/auth/plan.md`,
     requirement: '重构 auth 模块',
     templateName: 'default',
+    state: 'planning', // 真形态基线：归一 View 恒携带 state（批次 3 条目 1 后缺失格落 idle）
     ...overrides,
   }
 }
@@ -209,23 +210,20 @@ describe('首拉：watch immediate', () => {
 // ── WS 帧驱动状态流转（updateFor 分区写）─────────────────────
 
 describe('WS 帧：状态流转与分区隔离', () => {
-  it('帧驱动状态流转（真形态：View 携带 state、无 reviewState 键）：reviewing → ③；revising → ②；planning → ②', async () => {
+  it('帧驱动状态流转（真形态：View 携带 state）：reviewing → ③；revising → ②；planning → ②', async () => {
     const host = mountHost('A')
     await settle()
 
-    // 回归契约（真实链路形态）：归一点产出的 View 恒携带 state、**不透出 reviewState**（D2）
-    // ——fixture 直塞旧键会掩盖「直读旧字段恒失灵」的失灵面
+    // 回归契约（真实链路形态）：归一点产出的 View 恒携带 state（批次 3 条目 1 后旧字段已退出契约）
     dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
     await settle()
     expect(host.plan.stage.value).toBe('reviewing')
     expect(host.plan.view.value?.state).toBe('reviewing')
-    expect(host.plan.view.value?.reviewState).toBeUndefined()
 
     // revising 归 phase 'planning'（derivePhase 单点接线）→ 文档撰写档（②）
     dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'revising' }))
     await settle()
     expect(host.plan.stage.value).toBe('writing')
-    expect(host.plan.view.value?.reviewState).toBeUndefined()
 
     // 修订完成重新提交前的过渡帧（state=planning）——D1 三步推导落回 ②
     dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'planning' }))
@@ -236,7 +234,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
   it('isActive=false 帧驱动 plan 态消失语义（stage → null）', async () => {
     const host = mountHost('A')
     await settle()
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'awaiting' }))
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
     await settle()
     expect(host.plan.stage.value).toBe('reviewing')
 
@@ -251,7 +249,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
     // 本用例断言切焦点后「新焦点分区为空、旧分区数据保留」的可见语义。
     const host = mountHost('A')
     await settle()
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'awaiting' }))
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
     await settle()
     expect(host.plan.stage.value).toBe('reviewing')
 
@@ -264,7 +262,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
     // 切回 A：分区缓存保留（首拉在途也不丢显示）
     host.sidRef.value = 'A'
     await settle()
-    expect(host.plan.view.value?.reviewState).toBe('awaiting')
+    expect(host.plan.view.value?.state).toBe('reviewing')
   })
 
   it('capturedSid 与切焦点竞态：切换的异步退订窗口内旧 sid 迟到帧只写旧 sid 分区', async () => {
@@ -274,7 +272,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
     // 切焦点到 B：watch flush 前向 A 派发迟到帧（useSessionEvents 尚未退订 A，
     // handler 收到的 sid 是订阅时捕获的 'A'，不是当前焦点）
     host.sidRef.value = 'B'
-    dispatchPlanState('A', planStateOf('A', { docs: [DOC], reviewState: 'revising' }))
+    dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'revising' }))
     await settle()
 
     // 焦点 B：迟到 A 帧不污染 B 分区
@@ -284,7 +282,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
     // 切回 A：迟到帧确实写入了 A 分区（而非被丢弃或写错分区）
     host.sidRef.value = 'A'
     await settle()
-    expect(host.plan.view.value?.reviewState).toBe('revising')
+    expect(host.plan.view.value?.state).toBe('revising')
   })
 })
 
@@ -517,7 +515,7 @@ describe('评论草稿：per-session 隔离与清理链', () => {
 
     host.sidRef.value = 'B'
     await settle()
-    dispatchPlanState('B', planStateOf('B', { docs: [DOC], reviewState: 'awaiting' }))
+    dispatchPlanState('B', planStateOf('B', { docs: [DOC], state: 'reviewing' }))
     await settle()
     host.plan.addDraft({ quote: 'q2', comment: 'c2' })
     await settle()
@@ -537,6 +535,6 @@ describe('评论草稿：per-session 隔离与清理链', () => {
     await settle()
     // B 分区不受 A 清理影响
     expect(host.plan.drafts.value).toEqual([{ quote: 'q2', comment: 'c2' }])
-    expect(host.plan.view.value?.reviewState).toBe('awaiting')
+    expect(host.plan.view.value?.state).toBe('reviewing')
   })
 })

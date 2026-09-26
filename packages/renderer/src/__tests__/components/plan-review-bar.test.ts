@@ -28,7 +28,6 @@ import { effectScope } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
-import { LEGACY_AWAITING_PLAN_STATE_VIEW } from '@taiji/shared/__tests__/fixtures/plan-state-entries'
 
 // ── mock ⓪：drawer domain（§3.5 草稿回看 openDrawerTab）——spread actual：import 链
 // （useExtensionUI → chat store → agentcall-lru-linkage）还消费 bindViewedVidPanels 等导出 ──
@@ -230,8 +229,8 @@ describe('PlanReviewBar 分支公式（D4 单源：ready ⇔ 挂起注册表，p
     expect(wrapper.find('[data-testid="plan-review-dismiss"]').exists()).toBe(false)
   })
 
-  it('挂起请求独立触发渲染：state 无值 + 有挂起 → ready（瞬态 race 收敛，交互权威 = 注册表）', async () => {
-    const wrapper = await mountBar(viewOf()) // 无 state / reviewState
+  it('挂起请求独立触发渲染：state 缺失 + 有挂起 → ready（瞬态 race 收敛，交互权威 = 注册表）', async () => {
+    const wrapper = await mountBar(viewOf()) // state 缺失格
     emitPlanReviewRequest('pr-1')
     await flushAsync()
 
@@ -481,10 +480,9 @@ describe('degraded 可行动化（D8：成因分源文案 + [重新提交审批]
     expect(wrapper.find('[data-testid="plan-review-degraded-exit"]').exists()).toBe(false)
   })
 
-  it('其余来源 → 「审批提问未挂起」（不猜测来源）；旧字段 reviewStateSource 同义映射（D2 读方③）', async () => {
+  it('其余来源（resumeHint 缺省）→ 「审批提问未挂起」（不猜测来源）', async () => {
     vi.useFakeTimers()
-    // 旧 entry 缺省（fixture LEGACY_AWAITING_PLAN_STATE_VIEW 无 resumeHint/reviewStateSource）
-    const wrapper = await mountBar({ ...LEGACY_AWAITING_PLAN_STATE_VIEW })
+    const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS)
     await flushAsync()
 
@@ -492,20 +490,6 @@ describe('degraded 可行动化（D8：成因分源文案 + [重新提交审批]
     expect(reason.text()).toContain('审批提问未挂起')
     expect(reason.text()).not.toContain('会话已重启')
     expect(wrapper.find('[data-testid="plan-review-resubmit"]').exists()).toBe(true)
-
-    // 旧字段 reviewStateSource:'resubmit' → resumeHint 同义映射 → resubmit 分源文案
-    usePlanStore().applyFrame(SID, viewOf({ reviewState: 'awaiting', reviewStateSource: 'resubmit' }))
-    await flushAsync()
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS)
-    await flushAsync()
-    expect(wrapper.find('[data-testid="plan-review-degraded-reason"]').text()).toContain('审批提问已随会话重启失效')
-
-    // legacy 'explain' 存量值（交互已删）→ 归通用文案
-    usePlanStore().applyFrame(SID, viewOf({ reviewState: 'awaiting', reviewStateSource: 'explain' as never }))
-    await flushAsync()
-    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS)
-    await flushAsync()
-    expect(wrapper.find('[data-testid="plan-review-degraded-reason"]').text()).toContain('审批提问未挂起')
   })
 
   it('发送失败 → 就近错误行（失败要出声），降级态保留可重试', async () => {

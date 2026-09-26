@@ -82,7 +82,7 @@
         variant="secondary"
         size="sm"
         data-testid="plan-review-revise"
-        :disabled="submitting || drafts.length === 0"
+        :disabled="drafts.length === 0"
         :title="drafts.length === 0 ? t('plan.reviewBar.reviseEmptyDisabled') : undefined"
         @click="submit('revise')"
       >
@@ -97,7 +97,6 @@
         size="sm"
         class="gap-1.5 font-semibold"
         data-testid="plan-review-approve"
-        :disabled="submitting"
         @click="submit('approve')"
       >
         <Check class="size-3" aria-hidden="true" />
@@ -111,7 +110,6 @@
         size="sm"
         data-testid="plan-review-dismiss"
         class="text-neutral-dim hover:bg-surface-hover hover:text-neutral-mid"
-        :disabled="submitting"
         :title="t('plan.reviewBar.dismissTip')"
         @click="submit('dismiss')"
       >
@@ -229,14 +227,13 @@ const mode = computed<PlanReviewBarMode | null>(() =>
   }),
 )
 
-const submitting = ref(false)
 /** 自审结论 Popover 开合（受控，同 PlanModeBar 退出确认形态） */
 const selfReviewOpen = ref(false)
 
 /**
- * 降级态成因文案（D8 分源）：resumeHint==='resubmit'（E3 会话重启后 agent 尚未重提，含旧
- * 字段 reviewStateSource:'resubmit' 的同义映射——D2 读方③）→ 「审批提问已随会话重启失效」；
- * 其余（来源未知/挂起已消亡）→ 「审批提问未挂起」，不猜测来源。
+ * 降级态成因文案（D8 分源）：resumeHint==='resubmit'（E3 会话重启后 agent 尚未重提）
+ * → 「审批提问已随会话重启失效」；其余（来源未知/挂起已消亡）→ 「审批提问未挂起」，
+ * 不猜测来源。
  */
 const degradedReason = computed(() =>
   resolveResumeHint(view.value) === 'resubmit'
@@ -264,18 +261,13 @@ function onViewDrafts(): void {
  */
 function submit(decision: 'approve' | 'revise' | 'dismiss'): void {
   const request: PlanReviewUIRequest | undefined = activeRequest.value
-  if (!request || submitting.value) return
-  submitting.value = true
-  try {
-    const payload: PlanReviewResponse =
-      decision === 'revise'
-        ? { decision, comments: drafts.value.map((d) => ({ quote: d.quote, comment: d.comment })) }
-        : { decision }
-    respond(request.requestId, JSON.stringify(payload))
-    if (decision !== 'dismiss') clearDrafts()
-  } finally {
-    submitting.value = false
-  }
+  if (!request) return
+  const payload: PlanReviewResponse =
+    decision === 'revise'
+      ? { decision, comments: drafts.value.map((d) => ({ quote: d.quote, comment: d.comment })) }
+      : { decision }
+  respond(request.requestId, JSON.stringify(payload))
+  if (decision !== 'dismiss') clearDrafts()
 }
 
 /**

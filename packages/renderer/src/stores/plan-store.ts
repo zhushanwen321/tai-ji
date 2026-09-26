@@ -67,14 +67,14 @@ export type PlanStage =
 /** 审批条分支模式（D4 分支公式输出；null = 不渲染）。 */
 export type PlanReviewBarMode = 'ready' | 'revising' | 'degraded'
 
-// ── D2 读方③ renderer 读侧兜底映射（混装格：state ?? reviewState 映射 ?? 按 isActive 推断）──
+// ── state 读侧解析（归一产物直读；垃圾值域守卫 = 保留边界的「垃圾 state 值防御」落点）──
 
 /**
- * PlanStateView → PlanLifecycleState 兜底解析（与读方① reconstructPlanState 同构）。
- * 新派生恒携带 `state`（D2 读方② 义务）；`state` 缺失 = 旧 runtime extractor 错配格
- * （旧 View 白名单剥未知字段且新 entry 已停写 reviewState），按 reviewState 映射
- * （awaiting→reviewing / revising→revising），仍无则按 isActive 推断（有 plan → planning，
- * 无 → idle）——行为退化为现状而非双盲（R2③）。运行时垃圾 state 值同样落兜底（不信任外部格式）。
+ * PlanStateView → PlanLifecycleState 解析。归一点（runtime extractor）产出的 View 恒携带
+ * `state`（旧 entry 的 reviewState 映射已在 entry 读取侧完成，不进本帧——批次 3 条目 1：
+ * 混装格兜底映射随 deprecated 双字段删除）；缺失/垃圾 state 值统一落 'idle'（不信任外部
+ * 格式）。声明的行为变更例外：垃圾 state 值 + isActive=true 格原经 isActive 推断呈
+ * 'planning'，现落 'idle'（仅手改 session 文件可达的坏数据格）。
  */
 export function resolvePlanLifecycleState(view: PlanStateView | null): PlanLifecycleState {
   if (!view) return 'idle'
@@ -82,19 +82,15 @@ export function resolvePlanLifecycleState(view: PlanStateView | null): PlanLifec
   if (state !== undefined && (PLAN_LIFECYCLE_STATES as readonly string[]).includes(state)) {
     return state
   }
-  if (view.reviewState === 'awaiting') return 'reviewing'
-  if (view.reviewState === 'revising') return 'revising'
-  return view.isActive ? 'planning' : 'idle'
+  return 'idle'
 }
 
 /**
- * resumeHint 解析（D2）：新字段直读；缺失时读旧字段 reviewStateSource（deprecated 只读
- * 兼容位）——`'resubmit'` 同义映射，其余/缺省 = 来源未知（不猜测来源）。
+ * resumeHint 解析（D2）：'resubmit' 直读；其余/缺省 = 来源未知（不猜测来源）。
  */
 export function resolveResumeHint(view: PlanStateView | null): 'resubmit' | undefined {
   if (!view) return undefined
   if (view.resumeHint === 'resubmit') return 'resubmit'
-  if (view.reviewStateSource === 'resubmit') return 'resubmit'
   return undefined
 }
 
@@ -118,7 +114,7 @@ export function derivePlanStage(view: PlanStateView | null): PlanStage | null {
 /**
  * 审批条分支公式（D4 单源——禁止消费方各自拼并集，F1「两个事实源的并集祈祷一致」的反面）：
  * - `ready ⇔ 挂起 planReview 请求存在`（runtime 注册表投影，唯一交互权威；**presence 语义
- *   ——ready 恒优先渲染**，多挂起存量形态不被抑制窗压制）
+ *   ——ready 恒优先渲染**）
  * - 抑制窗（ackMarked）压制一切 state 判定分支（degraded / revising）
  * - `revising ⇔ state=revising`（无挂起、无压制）
  * - `degraded ⇔ state=reviewing ∧ 无挂起 ∧ 稳定窗放行`（稳定窗 = 组合持续 ≥2s 或冷拉真值豁免）
@@ -517,8 +513,7 @@ export const usePlanStore = defineStore('plan', () => {
     scoped.updateFor(sessionId, (p) => {
       p.reviewAckMarked = true
       // 镜像真值不由本函数覆写：reviewPendingKnown 由 useExtensionUI 挂起漏斗按 registry
-      // 现值收口（syncPlanReviewWindow）/冷拉对账真值置位——无条件置 false 会在多挂起异常
-      // 形态（一条应答消费、registry 仍有挂起）把镜像打假（违反漏斗自述不变量）
+      // 现值收口（syncPlanReviewWindow）/冷拉对账真值置位（漏斗单写）
       p.reviewAckEpoch += 1
       const epoch = p.reviewAckEpoch
       const prev = ackTimers.get(sessionId)
@@ -684,7 +679,7 @@ export const usePlanStore = defineStore('plan', () => {
   /**
    * 焦点分区 planReview 挂起镜像（D4 稳定窗输入面的只读透出；**非渲染权威**——审批条
    * presence 判定以 registry（useExtensionUI currentPlanReviewRequests）为唯一交互权威，
-   * 本视图供漏斗一致性断言/诊断读取，多挂起异常形态下必须与 registry 同真）。
+   * 本视图供漏斗一致性断言/诊断读取）。
    */
   const planReviewPendingKnown: ComputedRef<boolean> = computed(
     () => scoped.current.value.reviewPendingKnown,

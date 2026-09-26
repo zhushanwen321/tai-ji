@@ -209,8 +209,8 @@
  * 落占位错误态——不做无 sessionId 白名单降级（.tmp 不在白名单内，二次必失败）。
  *
  * 修订刷新（G3）：刷新键 = 选中文档 absPath + version + 生命周期状态组合——agent 修订重
- * 登记（version bump）或状态离开 revising（D2③ 兑底映射解析，不再直读旧字段 reviewState
- * ——真实链路 View 恒无该键）时键变化 → 重新 file.read；tab 切换
+ * 登记（version bump）或状态离开 revising（resolvePlanLifecycleState 解析归一 View 的
+ * state）时键变化 → 重新 file.read；tab 切换
  * （absPath 变化）同键承载，单一 watch 收口三种触发。loadingPath 标记防并发竞态
  * （CommandDocPanel 同款：异步期间切走丢弃旧结果）。
  *
@@ -306,9 +306,8 @@ const pendingIdle = computed(
 )
 
 /**
- * 修订中（state=revising：tab 圆点 / meta 提示 / 评论按钮禁用）——D2③ 兑底映射解析
- *（resolvePlanLifecycleState，与 PlanModeBar 同型判定）：真实链路 View 恒无 reviewState 键
- *（归一点只作映射输入不透出），直读旧字段会恒 false 致修订中视觉/禁评全族失灵。
+ * 修订中（state=revising：tab 圆点 / meta 提示 / 评论按钮禁用）——归一 View 的 state
+ * 直读解析（resolvePlanLifecycleState，与 PlanModeBar 同型判定）。
  */
 const revising = computed(() => resolvePlanLifecycleState(view.value) === 'revising')
 
