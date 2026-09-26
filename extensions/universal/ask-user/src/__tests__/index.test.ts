@@ -1,5 +1,6 @@
 // src/__tests__/index.test.ts
 // Tests the factory + execute orchestration (FR-1/7/8/9/10/13) with mocked ctx/pi.
+import { getAskUserAnswer, getAskUserOther } from "@zhushanwen/extension-protocol";
 import { describe, expect, it } from "vitest";
 
 import factory from "../index";
@@ -848,4 +849,79 @@ describe("execute — RPC mode (uiFormInteract via select channel)", () => {
 		expect(result.details.cancelled).toBe(true);
 	});
 
+});
+
+// ── 输出等价锚（plan-mode-audit-remediation 批次 3 活路径去重）──
+// protoQuestions 副本对齐：index.ts 的 toProtoQuestions 副本已删，RPC 解码直接以
+// internal Question 调协议 helper。本组断言钉死两种视图在解码 SSOT（getAskUserAnswer /
+// getAskUserOther）下输出逐字一致——proto 视图以字面量充当被删副本的参考实现。
+describe("protoAnswersToResult 解码视图等价锚（internal Question ≡ 旧 protoQuestions 副本）", () => {
+	// internal Question（validateInput 通过后的形态）
+	const internal = [
+		{
+			question: "Which DB?",
+			options: [{ label: "Postgres" }, { label: "SQLite" }],
+		},
+		{
+			question: "Which tools?",
+			header: "Tools",
+			context: "pick many",
+			options: [{ label: "A" }, { label: "B" }],
+			multiSelect: true,
+		},
+	] as const;
+
+	// 被删 toProtoQuestions 的逐字产出形态（副本的参考实现字面量）
+	const protoView = [
+		{
+			header: undefined,
+			question: "Which DB?",
+			context: undefined,
+			options: [
+				{ label: "Postgres", description: undefined },
+				{ label: "SQLite", description: undefined },
+			],
+			multiSelect: undefined,
+			allowOther: true,
+		},
+		{
+			header: "Tools",
+			question: "Which tools?",
+			context: "pick many",
+			options: [
+				{ label: "A", description: undefined },
+				{ label: "B", description: undefined },
+			],
+			multiSelect: true,
+			allowOther: true,
+		},
+	] as const;
+
+	const answerShapes: Record<string, Record<string, string>> = {
+		"single selection": { "Which DB?": "Postgres" },
+		"multi selection (JSON array)": { Tools: JSON.stringify(["B", "A"]) },
+		"multi + other": {
+			Tools: JSON.stringify(["A"]),
+			"Tools__other": "Custom",
+		},
+		"unanswered": {},
+	};
+
+	it.each(Object.entries(answerShapes))(
+		"%s: decode via internal Question ≡ decode via deleted proto copy",
+		(_name, answers) => {
+			internal.forEach((q, i) => {
+				const pq = protoView[i]!;
+				expect(getAskUserAnswer(answers, q)).toEqual(getAskUserAnswer(answers, pq));
+				expect(getAskUserOther(answers, q) ?? null).toEqual(getAskUserOther(answers, pq) ?? null);
+			});
+		},
+	);
+
+	it("decoded values pinned（防双向同错空转）", () => {
+		expect(getAskUserAnswer({ "Which DB?": "Postgres" }, internal[0]!)).toBe("Postgres");
+		expect(getAskUserAnswer({ Tools: JSON.stringify(["B", "A"]) }, internal[1]!)).toEqual(["B", "A"]);
+		expect(getAskUserOther({ "Tools__other": "Custom" }, internal[1]!)).toBe("Custom");
+		expect(getAskUserAnswer({}, internal[0]!)).toBeUndefined();
+	});
 });

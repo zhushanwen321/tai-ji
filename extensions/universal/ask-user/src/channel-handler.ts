@@ -35,12 +35,8 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { AskUserComponent } from "./component";
 import { encodeAnswer } from "./answer-codec";
-import {
-	askUserToFormQuestions,
-	formToAskUserQuestions,
-	formToInternalQuestions,
-} from "./form-adapter";
-import { type AnswerValue, type Result, type ThemeLike } from "./types";
+import { askUserToFormQuestions, formToInternalQuestions } from "./form-adapter";
+import { type AnswerValue, type Question, type Result, type ThemeLike } from "./types";
 
 const logger = getLogger("ask-user");
 
@@ -94,6 +90,10 @@ function payloadToFormQuestions(payload: ChannelRequest["channelPayload"]): Form
  * 内部 Result.answers：key = question 全文，value = 结构化 AnswerValue
  * （selected = option label 数组，other = Other 自由文本）。
  *
+ * 迭代直接走 internal Question[]（formToInternalQuestions 的单次转换产物）——
+ * internal Question 自带编码所需 key（header ?? question）与 multiSelect 语义，
+ * 无需再经 legacy AskUserQuestion[] 中转视图。
+ *
  * proto FormAnswers 契约（@zhushanwen/extension-protocol，choice/text 部分与旧
  * AskUserAnswers 逐字兼容）：
  *   - key = question.header ?? question 全文
@@ -104,19 +104,16 @@ function payloadToFormQuestions(payload: ChannelRequest["channelPayload"]): Form
  * 序列化走 encodeAnswer（answer-codec.ts 是本扩展内的唯一 encode 实现，与协议包解码
  * helper 对齐；renderer 前端组件无法 import extension 包，独立实现对齐同一解码契约）。
  */
-function encodeTuiResultToProto(
-	protoQuestions: AskUserQuestion[],
-	result: Result,
-): FormAnswers {
+function encodeTuiResultToProto(questions: Question[], result: Result): FormAnswers {
 	const answers: FormAnswers = {};
-	for (const pq of protoQuestions) {
-		const av: AnswerValue | undefined = result.answers[pq.question];
+	for (const q of questions) {
+		const av: AnswerValue | undefined = result.answers[q.question];
 		if (av === undefined) continue; // 该问题未答（buildResult 跳过未答）
 		Object.assign(
 			answers,
 			encodeAnswer(av, {
-				key: pq.header ?? pq.question,
-				multiSelect: pq.multiSelect === true,
+				key: q.header ?? q.question,
+				multiSelect: q.multiSelect === true,
 			}),
 		);
 	}
@@ -152,7 +149,7 @@ async function runTuiProtoInteraction(
 	// 显式 undefined 守卫：裸 result.cancelled 对 undefined 会抛 TypeError（W4 修复前
 	// 靠 dialog-queue 兜底为 {cancelled:true}，现源头短路，语义等价且不再依赖兜底）。
 	if (result === null || result === undefined || result.cancelled) return null;
-	return encodeTuiResultToProto(formToAskUserQuestions(formQuestions), result);
+	return encodeTuiResultToProto(questions, result);
 }
 
 /**
