@@ -1,12 +1,12 @@
 /* zcode-workflow
-description: pr-cr-fix 的 zcode 原生版 PR 全生命周期单 workflow（9 step）：发起前检查（含分支
-  形态判定）→ 静态门禁（typecheck+lint，含条件 skill-yaml 校验）→ PR 标题/描述起草 + changeset
-  复核（缺失时按 Gate-1a.5 原逻辑补起草兜底）→ 开 PR → 约束加载 → 覆盖率+度量聚合门禁（含
-  PR 规模披露）→ 条件评审修复循环（cr-fix 默认空集跳过：dev-* 线零 LLM 审查维度——分支审查已
-  由 dev-merge 承接；非 dev 线回退集 6 agent；显式 reviewers 参数为人工逃生舱；循环本体 =
-  内联 review-fix-loop：并行 review → 聚合 → 分组修复 → 对账重审）→ code-simplify → 终局三道
-  门禁 → 停在 awaiting-push 等 push 授权。与 pi 版（workspace 根 .agents/workflows/pr-lifecycle.js，
-  pi workflow 工具按脚本绝对路径发起）为仅有的两个全链实现，语义完全一致。
+description: pr-cr-fix 的 zcode 原生版 PR 全生命周期单 workflow（9 step）：发起前检查 → 静态门禁
+  （typecheck+lint，含条件 skill-yaml 校验）→ PR 标题/描述起草 + changeset 复核（缺失时按
+  Gate-1a.5 原逻辑补起草兜底）→ 开 PR → 约束加载 → 覆盖率+度量聚合门禁（含 PR 规模披露）→
+  条件评审修复循环（cr-fix 代码审查维度默认不派——重语义审查已由 dev-merge 分层承接；显式
+  reviewers 参数是唯一开启方式，流程不读分支名做决策；循环本体 = 内联 review-fix-loop：并行
+  review → 聚合 → 分组修复 → 对账重审）→ code-simplify → 终局三道门禁 → 停在 awaiting-push 等
+  push 授权。与 pi 版（workspace 根 .agents/workflows/pr-lifecycle.js，pi workflow 工具按脚本
+  绝对路径发起）为仅有的两个全链实现，语义完全一致。
 whenToUse: zcode 主 agent 执行 pr-cr-fix skill 的完整 PR 生命周期时发起本 workflow（CreateWorkflow
   path 指向本文件 + args）。只跑 review+fix 循环不进门禁时用全局 saved workflow review-fix-loop。
 args:
@@ -20,7 +20,7 @@ args:
     default: 10
   reviewers:
     type: json
-    description: review 维度白名单（字符串数组，对 .agents/skills/pr-cr-fix/agents/review-*.md 按路径子串匹配裁剪）；缺省不传 = preflight 分支判定（dev-* 线空集跳过 / 非 dev 线回退集 6 agent）；显式传入 = 人工逃生舱
+    description: review 维度白名单（字符串数组，对 .agents/skills/pr-cr-fix/agents/review-*.md 按路径子串匹配裁剪）；缺省不传 = cr-fix 代码审查维度不派（默认，与分支无关）；显式传入 = 按白名单派发审查
   simplifyMode:
     type: string
     description: code-simplify 档位：apply（A 档高置信项自动改码并独立 commit）/ report（只产报告不改码）
@@ -38,20 +38,17 @@ args:
 // pi 版（workspace 根 .agents/workflows/pr-lifecycle.js，pi workflow 工具按脚本绝对
 // 路径发起，见 SKILL.md 路径 1）。两版 cr-fix 内联循环 + zcode saved 版循环 = 三镜像同语义。
 //
-// 9 step 执行序（2026-09-26 审查体系重排：cr-fix 默认维度集空集化——分支增量审查
-// 前移 dev-merge，终局 PR 默认零 LLM 审查维度；preflight 新增分支形态判定；skill-yaml
-// 校验并入 static-gate；pr-meta 退化为 changeset 复核 + 缺失兜底起草）：
-//   preflight(含分支形态判定) → static-gate(含条件 skill-yaml 校验) →
+// 9 step 执行序（2026-09-26 审查体系重排 + 同日二次修正：审查分层——重语义审查前移
+// dev-merge；cr-fix 代码审查维度默认不派且流程不读分支名做决策，显式 reviewers 参数
+// 是唯一开启方式；skill-yaml 校验并入 static-gate；pr-meta 退化为 changeset 复核 +
+// 缺失兜底起草）：
+//   preflight → static-gate(含条件 skill-yaml 校验) →
 //   pr-meta(changeset 复核+缺失兜底) → pr-submit → constraints → gate-suite(含
-//   PR 规模披露) → cr-fix(条件：空集跳过/回退集/显式 reviewers) → simplify(条件) → final-gates
+//   PR 规模披露) → cr-fix(条件：默认不派/显式 reviewers 才派) → simplify(条件) → final-gates
 //
 // cr-fix 维度集判定（与 SKILL.md「审查维度集」节同规则）：
-//   显式 reviewers 参数（人工逃生舱，白名单裁剪）
-//     > 非 dev-* 线（非常态路径，未经 dev-merge）→ 回退集 6 agent（3 恒派
-//       business-logic/arch-boundary/data-governance + 3 触发路径判定
-//       electron-build/monorepo-impact/extension-api），终态逐项披露回退原因
-//     > dev-* 线（常态）→ 空集，cr-fix step 跳过并披露「分支审查已由 dev-merge 承接」
-//   type-safety / test-coverage 已按设计裁决退役，不进任何集合。
+//   默认不派代码审查维度（与分支名无关）——显式 reviewers 参数（白名单裁剪）是唯一
+//   开启方式。type-safety / test-coverage 已按设计裁决退役，不进任何集合。
 //
 // 与 zsw 版的机制差异（语义等价或更强，非降级）：
 // - 断点恢复：zsw 自持 state.json（step 级 --runId resume）→ 引擎 journal（run 被
@@ -160,8 +157,7 @@ let prUrl: string | null = null;
 let crFixTerminated: string | null = null;
 let simplifySummary: string | null = null;
 let failure: { step: string; error: string } | null = null;
-// cr-fix 维度集判定（preflight step 落定）：empty-set = dev-* 线空集跳过；fallback = 非 dev 线回退集
-let crFixMode: "empty-set" | "fallback" = "empty-set";
+// 当前分支名仅作披露（PR 规模展示等），不参与任何行为分流——流程不按分支名做决策
 let crFixBranch = "";
 // cr-fix 是否实际执行（区分「空集/接管跳过」与「跑了但未收敛」——simplify 前置条件用）
 let crFixRan = false;
@@ -1152,32 +1148,7 @@ if (baseLockRes.exitCode !== 0 || baseLockRes.stdout.trim() === "") {
 const baseHash = baseLockRes.stdout.trim();
 
 // ── cr-fix 维度集判定（与 SKILL.md「审查维度集」节同规则；preflight step 落定） ──
-// 回退集 6 agent：3 恒派 + 3 触发（路径判定，对 base...HEAD diff 文件清单做路径匹配，
-// 不做语义判断——保守取向宁可多派不漏派）。type-safety / test-coverage 已按设计裁决退役。
-const FALLBACK_ALWAYS_DIMS = ["business-logic", "arch-boundary", "data-governance"];
-async function resolveFallbackDimensions(): Promise<{ dims: string[]; triggerNote: string }> {
-  const names = await world.run("git", ["diff", `${baseHash}...HEAD`, "--name-only"]);
-  if (names.exitCode !== 0) {
-    throw new Error(`分支形态判定读 diff 失败（exit ${names.exitCode}）：\n${tailLines(names.stderr, 10)}；确认仓库状态后重新发起`);
-  }
-  const files = names.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
-  const hasPrefix = (p: string) => files.some((f) => f.startsWith(p));
-  const triggers: string[] = [];
-  // electron-build：runtime 源码 / electron 壳任意改动（不只打包配置）；runtime package.json
-  // 出现在 diff 内即按依赖变更候选处理（保守多派，不读 diff 内容做精确判定）
-  if (hasPrefix("packages/runtime/") || hasPrefix("apps/electron/")) triggers.push("electron-build");
-  // monorepo-impact：触及任一 workspace 包面或依赖声明（根/子包 package.json、lock、workspace 配置）
-  if (
-    hasPrefix("packages/") || hasPrefix("apps/") || hasPrefix("extensions/") ||
-    files.some((f) => f === "package.json" || f.endsWith("/package.json")) ||
-    files.includes("pnpm-lock.yaml") || files.includes("pnpm-workspace.yaml")
-  ) triggers.push("monorepo-impact");
-  // extension-api
-  if (hasPrefix("extensions/")) triggers.push("extension-api");
-  return { dims: [...FALLBACK_ALWAYS_DIMS, ...triggers], triggerNote: triggers.length > 0 ? triggers.join("/") : "无触发维度" };
-}
-
-// step 1：preflight（仓库根 / 工作区干净 / base..HEAD 非空 / gh 认证 / fallow 可用 / 分支形态判定）
+// step 1：preflight（仓库根 / 工作区干净 / base..HEAD 非空 / gh 认证 / fallow 可用）
 await step("preflight", async () => {
   const failures: string[] = [];
   // 仓库根守卫（对齐 zsw 版 Gate B S1）：workspace 非仓库根时后续全部相对路径脚本
@@ -1195,18 +1166,14 @@ await step("preflight", async () => {
   const fallow = await world.run("fallow", ["--version"]);
   if (fallow.exitCode !== 0) failures.push(`fallow 不可用（${(fallow.stderr || fallow.stdout).trim().split("\n")[0]}）；运行 npm i -g fallow 后重新发起`);
   if (failures.length > 0) throw new Error(`preflight 前置条件未过：\n${failures.map((s) => `- ${s}`).join("\n")}`);
-  // 分支形态判定：当前分支名匹配 dev-* → cr-fix 空集（dev-merge 产物线，分支审查已由
-  // dev-merge 承接）；不匹配 → 非常态路径回退带审查模式。发起方显式 reviewers 参数在
-  // cr-fix step 内覆盖本判定（人工逃生舱优先）。
+  // 读当前分支名仅作披露（gate-suite PR 规模展示等），读取失败降级为空串（披露退化为
+  // 「当前分支」），不做任何行为分流——2026-09-26 用户裁决：流程不按分支名做决策，
+  // cr-fix 代码审查维度是否派发只由发起方显式 reviewers 参数决定。
   const branchRes = await world.run("git", ["branch", "--show-current"]);
-  if (branchRes.exitCode !== 0 || branchRes.stdout.trim() === "") {
-    throw new Error(`读取当前分支名失败（exit ${branchRes.exitCode}）：${branchRes.stderr.trim() || "空输出"}；确认在 git 仓库内且处于分支检出状态后重新发起`);
+  if (branchRes.exitCode === 0 && branchRes.stdout.trim() !== "") {
+    crFixBranch = branchRes.stdout.trim();
   }
-  crFixBranch = branchRes.stdout.trim();
-  crFixMode = /^dev-/.test(crFixBranch) ? "empty-set" : "fallback";
-  const fallbackInfo = crFixMode === "fallback" ? await resolveFallbackDimensions() : null;
   log(`[preflight] base=${base} → ${baseHash.slice(0, 12)}，前置条件全部通过`);
-  log(`[preflight] 分支形态判定：${crFixBranch} ${crFixMode === "empty-set" ? "匹配 dev-* → cr-fix 空集（分支审查已由 dev-merge 承接）" : `非 dev-* 线 → 回退带审查模式（回退集触发：${fallbackInfo?.triggerNote}）`}`);
 });
 
 phase("静态门禁");
@@ -1532,41 +1499,25 @@ await step("gate-suite", async () => {
 });
 
 phase("条件评审修复循环");
-// step 7：cr-fix（内联 review-fix-loop；默认维度集空集化——维度集判定优先级 =
-// 显式 reviewers 参数（人工逃生舱）> preflight 分支形态判定（dev-* 线空集跳过 /
-// 非 dev 线回退集 6 agent）；环境类失败自动重试 1 次）
+// step 7：cr-fix（内联 review-fix-loop；代码审查维度默认不派——重语义审查分层归 dev-merge，
+// 本流程的 LLM 层 = simplify + pr-meta 等流程环节；显式 reviewers 参数是唯一开启方式，
+// 对所有分支一律如此，流程不读分支名做决策；环境类失败自动重试 1 次）
 await step("cr-fix", async () => {
   const relReviewers = (await files.glob(".agents/skills/pr-cr-fix/agents/review-*.md")).sort();
   let picked: string[];
   if (reviewers.length > 0) {
-    // 人工逃生舱优先于自动判定：显式 reviewers 白名单裁剪（对现存 agent 文件按路径子串匹配）
+    // 显式 reviewers 白名单裁剪（对现存 agent 文件按路径子串匹配）
     picked = relReviewers.filter((f) => reviewers.some((kw) => f.includes(kw)));
     if (picked.length === 0) {
       throw new Error(
         `cr-fix 组装失败：显式 reviewers 裁剪后为空（裁剪词：${reviewers.join(",")}；现存维度：${relReviewers.map(dimensionName).join("/")}）。确认裁剪词拼写或修正 reviewers 后重新发起`,
       );
     }
-    reviewModeNote = `人工逃生舱：显式 reviewers 指定 ${picked.length} 维（${picked.map(dimensionName).join("/")}）`;
-    log(`[cr-fix] ${reviewModeNote}`);
-  } else if (crFixMode === "fallback") {
-    // 非常态路径回退带审查模式：回退集 6 agent（3 恒派 + 3 触发，preflight 已判定触发清单）
-    const wanted = await resolveFallbackDimensions();
-    const missing = wanted.dims.filter((d) => !relReviewers.some((f) => dimensionName(f) === d));
-    if (missing.length > 0) {
-      throw new Error(
-        `cr-fix 回退集组装失败：以下维度 agent 定义缺失：${missing.join("/")}（现存：${relReviewers.map(dimensionName).join("/")}）。回退集要求成员齐备后重新发起`,
-      );
-    }
-    picked = relReviewers.filter((f) => wanted.dims.includes(dimensionName(f)));
-    reviewModeNote = `非常态回退：分支 ${crFixBranch} 非 dev-* 线（未经 dev-merge）→ 回退集 ${picked.length} 维（恒派 ${FALLBACK_ALWAYS_DIMS.join("/")}；触发：${wanted.triggerNote}）`;
+    reviewModeNote = `显式 reviewers 指定 ${picked.length} 维（${picked.map(dimensionName).join("/")}）`;
     log(`[cr-fix] ${reviewModeNote}`);
   } else {
-    // dev-* 线常态：默认空集，cr-fix step 跳过——分支增量审查已由 dev-merge 承接。
-    // preflight 被跳过（skipSteps 人工接管）时分支从未被读取，披露必须写实义，
-    // 不得伪造「分支匹配 dev-*」的判定依据；行为默认值（此时仍空集）属设计未判定场景。
-    reviewModeNote = crFixBranch
-      ? `dev-* 线空集：分支 ${crFixBranch} 匹配 dev-*，默认零 LLM 审查维度（分支审查已由 dev-merge 承接）`
-      : `cr-fix 空集（判定依据缺省）：分支未判定——preflight 未执行（被 skipSteps 跳过或未达），默认零 LLM 审查维度；如需带审查请显式传 reviewers`;
+    // 默认不派代码审查维度（与分支名无关）——机器兜底由 gate-suite / final-gates 承担
+    reviewModeNote = "cr-fix 代码审查默认不派（重语义审查已由 dev-merge 分层承接；如需带审查请显式传 reviewers）";
     skippedSteps.push({ step: "cr-fix", reason: `${reviewModeNote}；机器兜底由 gate-suite / final-gates 承担` });
     log(`[cr-fix] ${reviewModeNote}`);
     return;
