@@ -4,14 +4,14 @@
 
 ## 问题
 
-纯中文需求进入 plan 模式时，slug 生成退化为常量 `"untitled"`（`extensions/universal/plan/src/enter.ts:99-101`，行号为 2026-09-25 审计时点）：两轮不同的中文计划写同一个 `<数据目录>/plans/untitled/plan.md`，后者覆盖前者——数据丢失。README 首个示例即中文需求，主场景必踩。
+纯中文需求进入 plan 模式时，slug 生成退化为与需求无关的常量（`extensions/universal/plan/src/enter.ts:64-66`，审计时点行号 :99-101）：纯中文经小写化 + 非法字符折叠 + 去首尾连字符后 slug 为空串，`planDir` 退化为 `<project>/.tmp/plans`（互覆路径 = `<project>/.tmp/plans/plan.md`）；requirement 为空时 slug 为 `"untitled"`。两轮不同中文计划写同一路径后者覆盖前者——数据丢失。README 首个示例即中文需求，主场景必踩。
 
-同族连带（缺陷 3）：`buildPlanSlug` / `buildPlanSuccessCriteria`（`compact.ts:108-152`）在常量上运转——`planFilePath` 唯一赋值点（`enter.ts:105`）恒为 `plan.md`，slug 恒 `"plan"`，goal 显示名无区分度、successCriteria 首条丢 plan 身份信息；现有测试 fixture 用合成路径掩盖了恒等输出。
+同族连带（缺陷 3）：`buildPlanSlug` / `buildPlanSuccessCriteria`（`compact.ts:108-152`）在常量上运转——`planFilePath` 唯一赋值点（`enter.ts:105`）恒为 `plan.md`，slug 恒 `"plan"`，goal 显示名无区分度、successCriteria 首条丢 plan 身份信息。compact-handler.test.ts 的 planFilePath fixture 已于批次 3 条目 6（提交 1f7f1ded5）改为生产真实形态（`<project>/.tmp/plans/<slug>/plan.md`），恒等输出已如实暴露；compact-criteria-array.test.ts 仍用 `/tmp/plan.md` 但仅测数组形态，路径非掩盖面。
 
 ## 修复方向（已论证）
 
-- 缺陷 2：slug 无有效 ASCII 片段时以时间戳/短 hash 保目录唯一（bug 修复，非过度设计议题）
-- 缺陷 3：随缺陷 2 一并修——`buildPlanSlug` 改取 `basename(dirname(planFilePath))`（即 enter 期 slug），successCriteria 恢复 plan 身份信息；同步修测试 fixture 的合成路径
+- 缺陷 2：slug 无有效 ASCII 片段（空串与 untitled 两种退化形态）时以时间戳/短 hash 保目录唯一（bug 修复，非过度设计议题）
+- 缺陷 3：随缺陷 2 一并修——`buildPlanSlug` 改取 `basename(dirname(planFilePath))`（即 enter 期 slug），successCriteria 恢复 plan 身份信息
 
 ## 证据
 

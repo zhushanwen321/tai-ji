@@ -1,6 +1,6 @@
 # D6：RPC reject 呈现裁决三处三形态（低优先级，批次 4）
 
-状态：方向已定（收敛），原语拆分方式待执行期定（2026-09-26 登记，源自 code-overdesign-audit 第三轮扫描 + 用户追问范围核实）
+状态：已定案（2026-09-26）：拆分——消化原语（`packages/core/src/domain/chat/reject-digest.ts`）承载 bash/compact 两消费点，send 保持独立（WS FIFO 归属论证自成体系）；定案记录 = reject-digest.ts 头注（2026-09-26 登记，源自 code-overdesign-audit 第三轮扫描 + 用户追问范围核实）
 
 ## 问题
 
