@@ -115,14 +115,14 @@ function formatLintErrorSummary(lintResult: LintResult): string {
 }
 
 /**
- * 可用 workflow 清单（not found 拒单的自救指引段；D4-1 嵌套调用同案补齐——顶层
- * tool 拒单 2026-09-14 已带清单，此处补齐 runAndWait / executeNestedWorkflow 两个
- * 内层入口的同一缺口）。每项两行（name + description，缩进 location 绝对路径）——
- * 与 extension 侧 tool-shared.formatAvailableWorkflowList 输出形态一致（按名解析
- * 已退役，location 是唯一可派发形态；合并不跨层——本函数住 core，extension 版
- * 依赖 Interface 层文件，层边界即复制边界）。
+ * 可用 workflow 清单（not found 拒单的自救指引段）。每项两行（name + description，
+ * 缩进 location 绝对路径）——按名解析已退役，location 是唯一可派发形态。
+ *
+ * 拒单清单的单一实现：core 内层入口（runAndWait / executeNestedWorkflow）与
+ * extension 顶层 tool（workflow / subagents 的 not found 拒单）共用本函数，
+ * 经 barrel 导出消费——文案两份漏改即自救指引漂移。
  */
-function formatAvailableWorkflowRefs(all: readonly WorkflowScript[]): string {
+export function formatAvailableWorkflowRefs(all: readonly WorkflowScript[]): string {
   return all
     .filter((wf) => wf.available)
     .map(
@@ -132,11 +132,11 @@ function formatAvailableWorkflowRefs(all: readonly WorkflowScript[]): string {
 }
 
 /**
- * not found 拒单文案单点（runAndWait / executeNestedWorkflow 共用）：清单来自
- * registry.loadAll() 现扫快照——调用方最贴近的可行动面（脚本嵌套调用时注入面
- * 不可达），失败一次即可按 location 自救。
+ * not found 拒单文案单点（runAndWait / executeNestedWorkflow / extension 顶层
+ * workflow tool 共用）：清单来自 registry.loadAll() 现扫快照——调用方最贴近的可
+ * 行动面（脚本嵌套调用时注入面不可达），失败一次即可按 location 自救。
  */
-async function workflowNotFoundMessage(name: string, deps: LauncherDeps): Promise<string> {
+export async function workflowNotFoundMessage(name: string, deps: LauncherDeps): Promise<string> {
   const all = await deps.registry.loadAll();
   return (
     `Workflow '${name}' not found. Available (name — use the absolute location path as 'name' when the bare name is rejected):\n` +

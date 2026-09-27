@@ -628,6 +628,7 @@ const ARMED_EVENT = {
 function makeNativeEngineActions(
   manifestCaps: Partial<RemoteEngineManifestSnapshot["capabilities"]> = {},
   runActions: ReadonlyArray<Record<string, unknown>>,
+  engineOverrides: Partial<ConstructorParameters<typeof RemoteEngine>[0]> = {},
 ) {
   return makeEngine(
     { capabilities: { ...FAKE_MATCHED_CAPS, schemaEnforcement: "native", ...manifestCaps } },
@@ -640,6 +641,7 @@ function makeNativeEngineActions(
         JSON.stringify(runActions),
       ],
     },
+    engineOverrides,
   );
 }
 
@@ -723,6 +725,67 @@ describe("armed 回执等待门（[D3 协议版 P6]）", () => {
       const result = await engine.run({ prompt: "p" }, ctx);
       expect(result.outcome.error).toBeUndefined();
       expect(result.outcome.content).toBe("fake-content-run-1");
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      await cleanup();
+    }
+  }, 20_000);
+
+  // ── [加固] armed 超时 fail-fast 路径的杀链兜底窗 ──
+  // 该路径不经过 wireAbortSignal 的 onAbort（无外部 abort signal），cancel 受理失败 /
+  // 引擎不收敛两种形态的唯一回收 = 合成回调内武装的杀链兜底 timer（grace 同源
+  // cancelSettleGraceMs）。
+
+  it("[加固] armed 窗满 fail-fast + cancel 受理失败 → error 留痕 + 杀链兜底窗武装（grace 到点触发零拓扑 stall warn）", async () => {
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+    const { engine, client, cleanup } = makeNativeEngineActions(undefined, [
+      { op: "delay", ms: 5000 },
+    ], { cancelSettleGraceMs: 300 });
+    const { ctx } = makeCtx();
+    const coreLogger = coreGetLogger("remote-engine");
+    const warnSpy = vi.spyOn(coreLogger, "warn");
+    const errorSpy = vi.spyOn(coreLogger, "error");
+    const cancelSpy = vi.spyOn(client, "cancelRun").mockRejectedValue(new Error("cancel channel wedged"));
+    try {
+      const result = await engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
+      expect(result.outcome.error).toContain("armed receipt"); // fail-fast 合成（既有语义不变）
+      // ① cancel 受理失败出声（原空 catch 吞信号）
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("armed receipt timeout cancel failed"));
+      // ② 杀链兜底 timer 武装并在 grace（300ms）到点触发：零拓扑（本 run 无孙进程）
+      //    → killRunTopology stall 降级 warn，reason 带 armed 特征（区别于 cancel 路径）
+      await waitForTrue(() => warnSpy.mock.calls.some((c) => String(c[0]).includes("armed receipt timeout kill-chain fallback")));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("no run-scoped child process to kill"));
+      expect(client.currentState).toBe("ready"); // 引擎宿主不动（组杀禁令不因兜底路径破例）
+    } finally {
+      delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+      cancelSpy.mockRestore();
+      await cleanup();
+    }
+  }, 20_000);
+
+  it("[加固] armed 窗满 fail-fast + 引擎不收敛 → 杀链兜底到点定点收割该 run 孙进程（引擎宿主存活）", async () => {
+    process.env[ARMED_RECEIPT_TIMEOUT_ENV] = "400";
+    // run 受理后 spawn 孙进程（armed 永不到达——actions 无 emit）再长 delay 不应答：
+    // armed 合成 + cancel 帧（受理成功但 CANCEL_SETTLES 缺省 0 不收敛）后孙进程仍活着，
+    // 唯一回收者 = 武装的杀链兜底 timer（grace 500ms）→ killPidChain 定点收割。
+    const { engine, client, cleanup } = makeNativeEngineActions(undefined, [
+      { op: "spawnGrandchild", recordId: "@runId" },
+      { op: "delay", ms: 10_000 },
+    ], { cancelSettleGraceMs: 500 });
+    const { ctx } = makeCtx();
+    try {
+      const runPromise = engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
+      // 孙进程上报镜像（childSpawned 反向通道落账 = 杀目标的确定性同步点）
+      await waitForTrue(() => client.mirror.snapshot().some((e) => e.recordId === "run-1" && e.state === "running"));
+      const child = client.mirror.snapshot().find((e) => e.recordId === "run-1");
+      expect(child).toBeDefined();
+      const result = await runPromise;
+      expect(result.outcome.error).toContain("armed receipt"); // fail-fast 先于引擎应答（delay 10s）
+      // 兜底窗到点 → 该 run 孙进程被真实 SIGTERM（宿主与其他拓扑不动）
+      await waitForTrue(() => isProcessAlive(child!.pid) === false);
+      expect(client.currentState).toBe("ready");
     } finally {
       delete process.env[ARMED_RECEIPT_TIMEOUT_ENV];
       await cleanup();

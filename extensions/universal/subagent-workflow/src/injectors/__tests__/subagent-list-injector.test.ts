@@ -1,9 +1,10 @@
 // subagent-list-injector 单测
 //
 // 两类覆盖：
-// 1. 纯函数（parseAgentFrontmatter / formatAgentList）：P3 正向触发引导语 + 名字约束
-//    + XML 结构 + 转义。discoverAllAgents 依赖文件系统 + resource-discovery，属集成层，
-//    此处聚焦可快速回归的格式化契约（TC5 回归保护）。
+// 1. 纯函数（agent frontmatter 解析直调 core parseResourceMeta / formatAgentList）：
+//    P3 正向触发引导语 + 名字约束 + XML 结构 + 转义。发现路径依赖文件系统 +
+//    resource-discovery，属集成层（顺序契约经 injector handler 驱动），此处聚焦
+//    可快速回归的格式化契约（TC5 回归保护）。
 // 2. session 级缓存行为（TC1-TC4）：mock shared/resource-discovery 的 discoverResources
 //    （vi.hoisted 稳定 spy + vi.mock 工厂闭包）+ getCachedFileContent 返回 fixture，
 //    mock pi.on 捕获三 handler 手动触发；模块级缓存靠 vi.resetModules + 动态 import 重置。
@@ -15,8 +16,9 @@ import type { DiscoveredResource } from "@zhushanwen/subagent-core/shared/resour
 // ——必须先于 barrel import 初始化：barrel 的 re-export 链会触发深路径 mock 工厂，
 // 工厂闭包引用本 helpers 的绑定（helpers 文件头「惰性求值」约束）
 import { createDiscoveryModuleMock, createLoggerModuleMock, createMockCtx, createMockPi, type CapturedHandlers } from "./helpers/injector-test-mocks.ts";
-// C5①：formatAgentList 下沉 core barrel——测试改从 barrel 取实现，guide 用 pi 宿主注入文案
-import { formatAgentList } from "@zhushanwen/subagent-core";
+// C5①：formatAgentList 下沉 core barrel——测试改从 barrel 取实现，guide 用 pi 宿主注入文案；
+// frontmatter 解析契约同源 core（parseResourceMeta IF1，原壳侧薄投影已删）
+import { formatAgentList, parseResourceMeta } from "@zhushanwen/subagent-core";
 
 // ── 稳定 spy：vi.hoisted 保证 resetModules 后引用不变（vi.mock 工厂闭包捕获同一 fn，
 //    故 fresh import 的注入器拿到的 discoverResources === spies.discoverResources，跨
@@ -30,19 +32,19 @@ vi.mock("@zhushanwen/subagent-core/shared/resource-discovery.ts", () => createDi
 vi.mock("@zhushanwen/pi-extension-logger", () => createLoggerModuleMock());
 
 // ── 纯函数测试：静态 import（模块级缓存状态不影响纯函数；与下方缓存 describe 隔离） ──
-import { parseAgentFrontmatter, SUBAGENT_LIST_GUIDE } from "../subagent-list-injector";
+import { SUBAGENT_LIST_GUIDE } from "../subagent-list-injector";
 
-describe("parseAgentFrontmatter", () => {
+describe("agent frontmatter 解析（core parseResourceMeta IF1）", () => {
 	it("解析双引号包裹的 name + description", () => {
 		const md = `---
 name: worker
 description: "编码执行者"
 ---
 body`;
-		expect(parseAgentFrontmatter(md)).toEqual({
+		expect(parseResourceMeta(md, "agent")).toMatchObject({
+			kind: "agent",
 			name: "worker",
 			description: "编码执行者",
-			path: "",
 		});
 	});
 
@@ -51,24 +53,24 @@ body`;
 name: 'reviewer'
 description: '代码审查'
 ---`;
-		expect(parseAgentFrontmatter(md)).toEqual({
+		expect(parseResourceMeta(md, "agent")).toMatchObject({
+			kind: "agent",
 			name: "reviewer",
 			description: "代码审查",
-			path: "",
 		});
 	});
 
 	it("缺 name 或 description 时返回 null", () => {
-		expect(parseAgentFrontmatter("---\nname: worker\n---")).toBeNull();
-		expect(parseAgentFrontmatter("---\ndescription: x\n---")).toBeNull();
+		expect(parseResourceMeta("---\nname: worker\n---", "agent")).toBeNull();
+		expect(parseResourceMeta("---\ndescription: x\n---", "agent")).toBeNull();
 	});
 
 	it("无 frontmatter（不以 --- 开头）返回 null", () => {
-		expect(parseAgentFrontmatter("just markdown")).toBeNull();
+		expect(parseResourceMeta("just markdown", "agent")).toBeNull();
 	});
 
 	it("frontmatter 未闭合（无结束 ---）返回 null", () => {
-		expect(parseAgentFrontmatter("---\nname: worker\ndescription: x")).toBeNull();
+		expect(parseResourceMeta("---\nname: worker\ndescription: x", "agent")).toBeNull();
 	});
 });
 
@@ -327,10 +329,29 @@ describe("subagent-list-injector session 级缓存", () => {
 });
 
 // ──────────────────────────────────────────────────────────────
-// KV-cache 顺序契约：输出按 name 码点序，重建（两次发现）逐字节一致
+// KV-cache 顺序契约：注入段按 name 码点序，重建（两次发现）逐字节一致。
+// 经真实 injector 实例的 handler 驱动（工厂 discover 不再模块导出，顺序契约
+// 直接验证注入面——比裸 entries 断言更端到端）。
 // ──────────────────────────────────────────────────────────────
 
-describe("discoverAllAgents 顺序契约（KV-cache）", () => {
+/** 从注入段提取 <name> 条目出现序（码点序断言用）。 */
+function injectedNames(prompt?: string): string[] {
+	return [...(prompt ?? "").matchAll(/<name>(.*?)<\/name>/g)].map((m) => m[1]);
+}
+
+describe("agent 注入段顺序契约（KV-cache）", () => {
+	let handlers: CapturedHandlers;
+
+	beforeEach(async () => {
+		// resetModules + 动态 import：拿 fresh 工厂实例（闭包缓存重置），setup 后经 handler 驱动
+		vi.resetModules();
+		spies.discoverResources.mockReset();
+		spies.getCachedFileContent.mockReset();
+		handlers = {};
+		const mod = await import("../subagent-list-injector");
+		mod.setupSubagentListInjector(createMockPi(handlers));
+	});
+
 	it("输出按 name 码点序排序，与发现层返回顺序（readdir 枚举序）无关", async () => {
 		const byPath: Record<string, string> = {
 			"/ws/.agents/agents/zeta.md": agentMd("zeta", "z"),
@@ -345,14 +366,14 @@ describe("discoverAllAgents 顺序契约（KV-cache）", () => {
 		]);
 		spies.getCachedFileContent.mockImplementation((p: string) => byPath[p] ?? null);
 
-		const { discoverAllAgents } = await import("../subagent-list-injector");
-		const result = await discoverAllAgents("/ws");
-		// P5 D4-3：discover 返回 { entries, invalids }——agents 走 assemble 路径，invalids 恒空
-		expect(result.invalids).toEqual([]);
-		expect(result.entries.map((a) => a.name)).toEqual(["alpha", "worker", "zeta"]);
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+		const r = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+		// P5 D4-3：agents 走 assemble 路径（core discoverAgents），invalids 恒空——注入段无 invalid 行
+		expect(r?.systemPrompt).not.toContain("<invalid>");
+		expect(injectedNames(r?.systemPrompt)).toEqual(["alpha", "worker", "zeta"]);
 	});
 
-	it("重建（两次发现）输出与渲染结果逐字节一致——目录不变时 session_start/fallback/resume 任意重建等价", async () => {
+	it("重建（两次发现顺序不同）注入段逐字节一致——目录不变时 session_start/fallback/resume 任意重建等价", async () => {
 		const byPath: Record<string, string> = {
 			"/ws/.agents/agents/b.md": agentMd("beta", "b"),
 			"/ws/.agents/agents/a.md": agentMd("alpha", "a"),
@@ -369,12 +390,15 @@ describe("discoverAllAgents 顺序契约（KV-cache）", () => {
 			]);
 		spies.getCachedFileContent.mockImplementation((p: string) => byPath[p] ?? null);
 
-		const { discoverAllAgents } = await import("../subagent-list-injector");
-		const first = await discoverAllAgents("/ws");
-		const second = await discoverAllAgents("/ws");
-		expect(second).toEqual(first);
-		expect(formatAgentList(second.entries, { guide: SUBAGENT_LIST_GUIDE })).toBe(
-			formatAgentList(first.entries, { guide: SUBAGENT_LIST_GUIDE }),
-		);
+		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
+		const first = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		// 重建：shutdown 清缓存 → reload 重新发现（第二次发现顺序漂移）→ 渲染
+		handlers.sessionShutdown!({ type: "session_shutdown", reason: "quit" }, createMockCtx());
+		await handlers.sessionStart!({ type: "session_start", reason: "reload" }, createMockCtx());
+		const second = await handlers.beforeAgentStart!({ systemPrompt: "" }, createMockCtx());
+
+		// 注入段（渲染产物）逐字节一致——强于原 entries 全等 + 渲染等价双断言
+		expect(second?.systemPrompt).toBe(first?.systemPrompt);
 	});
 });

@@ -4,7 +4,7 @@
  * 覆盖 TC1-TC5（hasBackgroundWork 谓词各场景）+ TC9（deriveStatus working 态回归，
  * 走真实 useSessionDerivations 集成路径，验证重构后行为不变）。
  *
- * 用真实 store（setActivePinia + applyRecords 注入数据），不 mock store 方法：
+ * 用真实 store（setActivePinia + 分区 ref 直写注入数据），不 mock store 方法：
  * - TC1-TC5 直测 useBackgroundWork().hasBackgroundWork
  * - TC9 经 useSessionDerivations().derivedStatus 验证 working 态（谓词接入 deriveStatus 回归）
  *
@@ -48,6 +48,18 @@ function makeWorkflow(overrides: Partial<WorkflowRunRecord>): WorkflowRunRecord 
   }
 }
 
+/**
+ * 测试种数据：applyRecords 已从 workflow store 导出面摘除（生产零直写场景），测试经
+ * 分区 ref 直写——不可变替换整 Map（与 partition.apply 等价）触发 shallowRef 响应性。
+ */
+function seedRecords(
+  store: ReturnType<typeof useWorkflowStore>,
+  sid: string,
+  records: WorkflowRunRecord[],
+): void {
+  store.recordsBySession = new Map(store.recordsBySession).set(sid, records)
+}
+
 describe('useBackgroundWork', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -84,14 +96,14 @@ describe('useBackgroundWork', () => {
 
   it('TC2: workflow running → true', () => {
     const wf = useWorkflowStore()
-    wf.applyRecords('s1', [makeWorkflow({ status: 'running' })])
+    seedRecords(wf, 's1', [makeWorkflow({ status: 'running' })])
     const { hasBackgroundWork } = useBackgroundWork()
     expect(hasBackgroundWork('s1')).toBe(true)
   })
 
   it('TC3: workflow running → true（运行中的 run 算未完成）', () => {
     const wf = useWorkflowStore()
-    wf.applyRecords('s1', [makeWorkflow({ status: 'running' })])
+    seedRecords(wf, 's1', [makeWorkflow({ status: 'running' })])
     const { hasBackgroundWork } = useBackgroundWork()
     expect(hasBackgroundWork('s1')).toBe(true)
   })
@@ -100,7 +112,7 @@ describe('useBackgroundWork', () => {
     const sub = useSubagentStore()
     const wf = useWorkflowStore()
     sub.applyRecords('s1', [makeSubagent({ status: 'done' })])
-    wf.applyRecords('s1', [makeWorkflow({ status: 'done' })])
+    seedRecords(wf, 's1', [makeWorkflow({ status: 'done' })])
     const { hasBackgroundWork } = useBackgroundWork()
     expect(hasBackgroundWork('s1')).toBe(false)
   })
@@ -109,7 +121,7 @@ describe('useBackgroundWork', () => {
     const sub = useSubagentStore()
     const wf = useWorkflowStore()
     sub.applyRecords('s1', [makeSubagent({ status: 'failed' })])
-    wf.applyRecords('s1', [makeWorkflow({ status: 'done' })])
+    seedRecords(wf, 's1', [makeWorkflow({ status: 'done' })])
     const { hasBackgroundWork } = useBackgroundWork()
     expect(hasBackgroundWork('s1')).toBe(false)
   })
@@ -123,7 +135,7 @@ describe('useBackgroundWork', () => {
     const sub = useSubagentStore()
     const wf = useWorkflowStore()
     sub.applyRecords('s1', [makeSubagent({ status: 'done' })])
-    wf.applyRecords('s1', [makeWorkflow({ status: 'running' })])
+    seedRecords(wf, 's1', [makeWorkflow({ status: 'running' })])
     const { hasBackgroundWork } = useBackgroundWork()
     expect(hasBackgroundWork('s1')).toBe(true)
   })
@@ -279,11 +291,11 @@ describe('TC9: useSessionDerivations.derivedStatus working 态回归（useBackgr
     const sessionId = 's-tc9b'
 
     // workflow running → working（hasBackgroundWork=true）
-    wf.applyRecords(sessionId, [makeWorkflow({ runId: 'wf-tc9b', status: 'running' })])
+    seedRecords(wf, sessionId, [makeWorkflow({ runId: 'wf-tc9b', status: 'running' })])
     expect(derivedStatus(sessionId).value).toBe('working')
 
     // workflow done → 回落 done
-    wf.applyRecords(sessionId, [makeWorkflow({ runId: 'wf-tc9b', status: 'done' })])
+    seedRecords(wf, sessionId, [makeWorkflow({ runId: 'wf-tc9b', status: 'done' })])
     expect(derivedStatus(sessionId).value).toBe('done')
   })
 })

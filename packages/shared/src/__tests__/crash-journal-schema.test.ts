@@ -2,7 +2,7 @@
  * crash-journal-schema 单测（crash-forensics-and-watchdog.impl-plan.md u1a）。
  *
  * 守护三条验收线：
- * 1. 枚举与设计 §3.3 D1 schema JSON 块逐字一致——event 20 值 / layer 5 值 /
+ * 1. 枚举与设计 §3.3 D1 schema JSON 块逐字一致——event 21 值 / layer 5 值 /
  *    reason 已知值分层登记（下方 DESIGN_REASON_LINE = 设计 reason 行 6 值逐字转录，
  *    IMPLEMENTED_KNOWN_REASONS = 设计行 ∪ 实装 append 调用点静态可枚举值全集；
  *    设计改 schema 时同步改 DESIGN_*；event 枚举不得混入 reason 值 unclean-exit，
@@ -41,6 +41,7 @@ const DESIGN_EVENT_LINE = [
   'reattach-skipped',
   'checkpoint-corrupt',
   'reaped',
+  'reap-failed',
   'inbound-frame-dropped',
   'frame-truncated',
   'registry-miss',
@@ -115,8 +116,8 @@ const DESIGN_TOP_LEVEL_FIELDS = [
 ]
 
 describe('CRASH_JOURNAL_EVENTS（D1 schema event 行）', () => {
-  it('恰 20 值（设计 schema event 行值数）', () => {
-    expect(CRASH_JOURNAL_EVENTS).toHaveLength(20)
+  it('恰 21 值（设计 schema event 行值数）', () => {
+    expect(CRASH_JOURNAL_EVENTS).toHaveLength(21)
   })
 
   it('与设计 event 行集合完全一致（逐值对照，无多无漏）', () => {

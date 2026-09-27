@@ -43,7 +43,6 @@ import { Trace } from "@zhushanwen/subagent-core";
 import type { RunSpec } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
-import { writeRunTerminalManifest } from "@zhushanwen/subagent-core";
 // DEFAULT_STATE_MAX_RUNS / STATE_TTL_MS_ENV 仅测试消费符号（D3 标准不进 barrel），
 // 深路径直取（[Q2] TTL env 常量已自本包迁入 core 单源）
 import {
@@ -93,14 +92,23 @@ function pinMtime(fullPath: string, i: number, base: number): void {
   fs.utimesSync(fullPath, t, t);
 }
 
-/** 写 run 终局投影 manifest（已终局资格的构造面——prune 资格单源锚定）。 */
-async function markTerminal(stateDir: string, runId: string, outcome: "completed" | "failed" | "cancelled" = "completed"): Promise<void> {
-  await writeRunTerminalManifest(stateDir, {
-    id: runId,
-    workflowName: "test-script",
-    outcome,
-    settledAt: 1719500001000,
-  });
+/**
+ * 写 run 终局投影 manifest fixture（已终局资格的构造面——prune 资格单源锚定）。
+ * 直接落磁盘形态（`<runId>.json`，字段契约权威 = subagent-core manifest-store.ts
+ * RunTerminalManifest；该形态本身即本测试的锁定对象，不经 core 写函数以保持
+ * fixture 与被测 prune 判定的读写两侧独立）。
+ */
+function markTerminal(stateDir: string, runId: string, outcome: "completed" | "failed" | "cancelled" = "completed"): void {
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(stateDir, `${runId}.json`),
+    JSON.stringify({
+      id: runId,
+      workflowName: "test-script",
+      outcome,
+      settledAt: 1719500001000,
+    }),
+  );
 }
 
 describe("workflow-state 保留清理（[P1b-2] 终局资格感知）", () => {

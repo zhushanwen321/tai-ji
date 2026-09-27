@@ -49,7 +49,6 @@ import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts"
 // 派发的 timeout+watchdog+外部 signal 三源合流。
 import { mergeRunSignals, type MergedRunSignalHandle } from "../engine/common/run-signals.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
-import { registerSpawnedChildForRecord } from "../engine/host/spawned-children.ts";
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
 import { type EngineRouteResult, routeEngineForHost } from "../engine/routing.ts";
 import type { AgentOutcome } from "../engine/types.ts";
@@ -67,11 +66,12 @@ import {
   type SettledWatchdogFireInfo,
 } from "../lifecycle/settled-watchdog.ts";
 import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
-import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
+// 嵌套深度护栏单点（与 run-orchestration 同源；聚合间零互调不受影响——共同 import
+// 叶子 helper 文件是既有形态，G2 禁的是两聚合互相 import）。
+import { assertNestingDepthWithinLimit } from "../assembly/session-context-resolver.ts";
 import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
 import {
   DEFAULT_AGENT_NAME,
-  ForkDepthExceededError,
   type AgentEvent,
   type AgentResult,
   type ExecuteOptions,
@@ -203,16 +203,11 @@ export class WorkflowDispatch {
     stream?: SubagentStream,
   ): Promise<WorkflowAgentResult> {
     this.deps.assertReady();
-    // 入口校验与嵌套护栏（与 execute/executeAndAwait 同款 BC-12 / T4②）。
+    // 入口校验与嵌套护栏（与 execute/executeAndAwait 同款 BC-12 / T4②；护栏单源
+    // session-context-resolver）。
     const execOpts = workflowCallToExecuteOptions(opts);
     this.deps.assertIdleTimeoutMsSafe(execOpts);
-    const parentNesting = this.deps.getExecNesting().current();
-    const nestingDepth = parentNesting ? parentNesting.depth + 1 : 0;
-    if (nestingDepth > MAX_FORK_DEPTH) {
-      throw new ForkDepthExceededError(
-        `subagent nesting depth ${nestingDepth} > ${MAX_FORK_DEPTH} (max recursion), refusing to spawn deeper`,
-      );
-    }
+    assertNestingDepthWithinLimit(this.deps.getExecNesting().current());
 
     // ── 八步迁移 ①②③：路由 → 预检 → identity（含非 pi 引擎 model 校验）──
     // 全部先于 record 创建与池 acquire（D3 失败零池占用）。agentConfig 取宽松面
@@ -412,11 +407,6 @@ export class WorkflowDispatch {
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),
-        // ⑦ D10 终止链：引擎 spawn 的子进程注册进 spawnedChildren 记账（cancel
-        // SIGTERM / dispose killAll 收割兜底，键 = record.id——[D9-2] 裁决：cancel
-        // 收敛兜底走 run 拓扑杀（mirror recordId 锚定），dispose 豁免保留组杀，
-        // 登记见 remote-engine killRunTopology 注释块）
-        onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),
       };
       // 任务声明：opts 直传（D6 合流——AgentCallOpts 即 EnginePort 任务形状，SAR 同款
       // 零映射），model 覆写为 record 留痕词形（resolveIdentity 解析产物，与

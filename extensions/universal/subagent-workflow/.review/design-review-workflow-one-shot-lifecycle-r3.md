@@ -65,7 +65,7 @@ grep 模式 `pauseRun|resumeRun|paused`，范围 `src/**/__tests__/*.test.ts`（
 | 8 | D-2 落点 1「复用 abortRun 的 transition+save 骨架」两形态均可行 | abortRun（:354-393）骨架存在且 save 为 await ✓；但两形态**行为不同**（abortRun 附带 pending:unregister+onRunDone :388-392） | ✓ 可行 / ✗ 未披露行为差异（→ MF-4） |
 | 9 | D-3「崩溃重建路径同样存在 abort 假 failed 入缓存场景」 | rebuildRuntime（:140-158）→ replaceRuntime → release("terminal") → controller.abort()（run-runtime.ts:82-90）；execute-agent-call.ts:153-155 abort 后 finalizeCall 入缓存 | ✓ 机制存在；但**挪入位置的正确窗口唯一且未定**（→ MF-5） |
 | 10 | S4 场景 D 错误文案「Unknown action "pause". Supported actions: run, status, abort. + 👉」 | pi 核心 `packages/ai/src/utils/validation.ts:298-306`：schema 校验失败 throw `Validation failed for tool "workflow": - /action: ...`，发生在 execute 之前，扩展不可定制 | ✗ 文案不可达（→ MF-3） |
-| 11 | tool-workflow enum :54-67 / runId 描述 :83 / actionLifecycle :556；commands 补全 :76-78；WorkflowsView ViewActions :129-130 / 按键 :433-446 / actionParts :696-698；gui-mappers paused :44/:69 | 逐处读 | ✓（commands 解析 :99/case :101-103 与文档 :83/:105-107 有偏移，SG-4） |
+| 11 | tool-workflow enum :54-67 / runId 描述 :83 / abort 处理函数 :556；commands 补全 :76-78；WorkflowsView ViewActions :129-130 / 按键 :433-446 / actionParts :696-698；gui-mappers paused :44/:69 | 逐处读 | ✓（commands 解析 :99/case :101-103 与文档 :83/:105-107 有偏移，SG-4） |
 | 12 | 检查点 3：executeNestedWorkflow 轮询无 paused 引用 | grep launcher.ts（pollRunToResult/runAndWait/executeNestedWorkflow 路径） | ✓ 无命中，检查点可关闭 |
 | 13 | S7 两路注入可达（process.exit(1) / 顶层 throw） | R2 已核 worker-script-builder eval 内联 + WORKER_TEMPLATE catch→error 链路；本轮复查属实 | ✓（但「在飞时崩溃」构造缺失，→ MF-5） |
 | 14 | 验收素材存在（workflows/chain.js、review-fix-loop.js、README.md） | ls workflows/ | ✓ |

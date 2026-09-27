@@ -61,7 +61,7 @@ import {
   type RunEndState,
 } from "./spawn-run-pump.ts";
 import { performGetStateHandshake } from "./get-state-handshake.ts";
-import { clearEpipeFailure, sendPromptCommand } from "./stdin-writer.ts";
+import { sendPromptCommand } from "./stdin-writer.ts";
 import { cleanupTempPrompt, writePromptToTempFile } from "./temp-prompt.ts";
 import { WRAP_UP_HINT } from "./turn-limiter.ts";
 import { applySchemaEnvToChildEnv } from "./spawn-args.ts";
@@ -102,20 +102,6 @@ export interface SpawnRunCallbacks {
   askUser?: (request: UiRequest) => Promise<UiResponse>;
   /** text_delta 分流出口（→ host/streamDelta）。 */
   onDelta?: (delta: string) => void;
-  /**
-   * agent_end（非 willRetry，队列排空）到达：本轮收敛（输出完整即轮终）。不 kill
-   * 子进程（等 agent_settled——pi 的 compact/收尾在 agent_end 后执行）。[H1 U5] 原
-   * chat-session 会话管理器的 settled 相位上报消费已随 registry 删除；本回调保留为
-   * 轮次时序的可观测面（run-spawn-once.integration 断言轮次时序）。
-   */
-  onChatRoundEnd?: () => void;
-  /**
-   * agent_settled（真空闲边界）到达：run 在此 resolve（exit 0 口径）并收割子进程
-   * （runSpawnOnce 内建，见 runSpawnOnce 生命周期注释）。[H1 U5] 原 chat-session
-   * 会话管理器的 idle 相位上报消费已随 registry 删除；本回调保留为轮次时序的
-   * 可观测面。
-   */
-  onChatAgentSettled?: () => void;
 }
 
 /** runSpawnOnce 的入参（协议 RunParams 的引擎侧还原形态）。 */
@@ -342,6 +328,18 @@ function createStderrTee(child: ChildProcess): { path: string; close(): void } |
   const logPath = stderrLogPathFor(dataDir, pid);
   let stream: fs.WriteStream | null = null;
   let failed = false;
+  // tee 失败统一留痕（一次性）：tee 是诊断取证面，失败不拖垮任务主通道，但
+  // 「诊断引用可能不可用」必须出声——失败 run 上报的 stderrTeePath 将是空文件/
+  // 缺 tail 的文件，宿主与人工排查需知道取证不可信。
+  const warnTeeFailed = (where: string, err: unknown): void => {
+    if (failed) return;
+    failed = true;
+    logger.warn(
+      `[session-runner] stderr tee ${where} for pid ${pid} at ${logPath}; ` +
+        `stderr capture abandoned, the diagnostic reference reported on failure may be unavailable or truncated`,
+      { detail: toErrorMessage(err) },
+    );
+  };
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {
     if (failed) return;
@@ -349,8 +347,8 @@ function createStderrTee(child: ChildProcess): { path: string; close(): void } |
       if (stream === null) {
         fs.mkdirSync(dirname(logPath), { recursive: true });
         stream = fs.createWriteStream(logPath, { flags: "a" });
-        stream.on("error", () => {
-          failed = true;
+        stream.on("error", (err) => {
+          warnTeeFailed("write stream error", err);
         });
         cleanupSiblingStderrLogs(logPath, process.env);
       }
@@ -359,8 +357,8 @@ function createStderrTee(child: ChildProcess): { path: string; close(): void } |
         stream.end();
         stream = null;
       }
-    } catch {
-      failed = true;
+    } catch (err) {
+      warnTeeFailed("open/write failure", err);
     }
   });
   return {
@@ -407,16 +405,15 @@ function buildTranslatorOpts(
     // 也按 0 口径收尾。
     onAgentEnd: () => {
       runEnd.endedCleanly = true;
-      callbacks.onChatRoundEnd?.();
     },
     // agent_settled（真空闲，agent_end 之后、post-run 完成后才 emit）= run 的 resolve
-    // 与收割边界（[H1 U3] D7，[modeless 波2] 唯一语义）：onChatAgentSettled 回调先于
-    // run resolve（run-spawn-once.integration 的轮次时序断言面），resolveChatRun
-    // settle exitPromise（run 应答不等收割），随后 fire-and-forget 杀链收割子进程
-    // ——每轮一进程，续聊 = 新 run + resume 锚点，进程不再保活。
-    onAgentSettled: () => {
+    // 与收割边界（[H1 U3] D7，[modeless 波2] 唯一语义）：resolveChatRun 先 settle
+    // exitPromise（run 应答不等收割——应答 exit 0 口径与 close 信号无关），随后
+    // fire-and-forget 杀链收割子进程——每轮一进程，续聊 = 新 run + resume 锚点，
+    // 进程不再保活。
+    onAgentSettled: (turnsAtSettle) => {
       runEnd.endedCleanly = true;
-      callbacks.onChatAgentSettled?.();
+      runEnd.settledTurnCount = turnsAtSettle;
       runEnd.resolveChatRun?.(0);
       killChild("agent_settled reap");
     },
@@ -431,15 +428,18 @@ export async function runSpawnOnce(
   const startTime = Date.now();
   const modelRef = parseSpawnModelRef(params.model);
 
-  // 1. append-system-prompt 文件（环境块 + wrap-up 提示 + 调用方片段）
-  const tempFile = await writeAppendPromptFile(params);
-
+  // prepare 期校验前置（model 缺失 fail-fast 先于临时文件创建）：writeAppendPromptFile
+  // 会落盘 append-system-prompt 临时文件，校验在后会让 prepare 期失败的 run 泄漏
+  // 临时文件（finally 清理面在 try 内——校验抛错时 tempFile 尚无清理路径）。
   if (modelRef === undefined) {
     throw new Error(
       `[pi-subagent-cli] run requires a canonical model ref ("provider/id") in ctx.model, got: ${JSON.stringify(params.model)}. ` +
         `Recovery: the host must resolve the model before dispatching (run.params.ctx.model); check the engine routing layer.`,
     );
   }
+
+  // 1. append-system-prompt 文件（环境块 + wrap-up 提示 + 调用方片段）
+  const tempFile = await writeAppendPromptFile(params);
 
   try {
     // 2. spawn 参数 + invocation
@@ -567,12 +567,15 @@ export async function runSpawnOnce(
 
     // 9. 等待退出
     const exitCode = await exitPromise;
-    clearEpipeFailure(params.recordId);
 
     // spawn 'error' 形态（子进程从未运行，典型 ENOENT）：错误事件消息（含 errno
     // code 与命令路径）直接进终态文案——比裸退出码可诊断，且不命中 stale 分诊
     // 词表。exitCode 判定优先（close 已 settle 0 后迟到的 error 事件只留日志，
     // 不产生 success=true + error 并存的自相矛盾终态）。
+    // 成功边界（agent_settled 到达）已按轮清零 record.turnCount（SP-9）——收集前
+    // 以 resolve 时刻快照恢复真实轮数（成功 run 的 outcome.turns/usage.turns 不为
+    // 0）；失败路径 agent_settled 未到达，快照缺省，record 值即真实值。
+    if (runEnd.settledTurnCount !== undefined) record.turnCount = runEnd.settledTurnCount;
     const outcome = collectOutcome(record, {
       startTime,
       success: exitCode === 0,

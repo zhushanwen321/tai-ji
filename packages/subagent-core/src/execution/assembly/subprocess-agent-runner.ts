@@ -8,16 +8,12 @@
 // 测试族（service 落点）承接。
 //
 // 保留壳的原因（设计 v3 定形）：唯一装配点 session-lifecycle.ts（D-008 per-session
-// SAR 构造）与 index.ts 的 model_select → updateCtxModel 刷新链零改动——掏空只删
-// run() 内部编排，构造签名与公共面不变。
-//
-// ctxModel dep 保留在构造签名（装配点兼容），但 run() 不再消费——model 解析归
-// service resolveIdentity（W2 迁移清单⑧：ctxModel 孪生守卫放弃迁移，不双轨）。
+// SAR 构造）——掏空只删 run() 内部编排，构造签名与公共面不变。model 解析归
+// service resolveIdentity（W2 迁移清单⑧，不双轨）。
 
 import type { AgentRunner } from "../../orchestration/models/ports.ts";
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
 import type { AgentEvent } from "../../shared/agent-event.ts";
-import type { ModelInfo } from "./model-resolver.ts";
 import type { SubagentStream } from "./stream-sink.ts";
 import type { SubagentService } from "../subagent-service.ts";
 
@@ -32,11 +28,9 @@ import type { SubagentService } from "../subagent-service.ts";
  */
 export const SAR_UNATTACHED_PARENT_RUN_ID = "sar-unattached";
 
-/** SAR 构造参数（签名冻结——session-lifecycle.ts 装配点零改动）。 */
+/** SAR 构造参数（唯一装配点 session-lifecycle.ts）。 */
 export interface SubprocessAgentRunnerDeps {
   subagentService: SubagentService;
-  /** 兼容保留：run() 不消费（model 解析归 service resolveIdentity）。 */
-  ctxModel?: ModelInfo;
 }
 
 /**
@@ -55,21 +49,9 @@ export interface SubprocessAgentRunnerDeps {
  */
 export class SubprocessAgentRunner implements AgentRunner {
   private readonly subagentService: SubagentService;
-  private ctxModel: ModelInfo | undefined;
 
   constructor(deps: SubprocessAgentRunnerDeps) {
     this.subagentService = deps.subagentService;
-    this.ctxModel = deps.ctxModel;
-  }
-
-  /**
-   * 刷新主 agent model 缓存（model_select 事件时由 extension index.ts 调用）。
-   *
-   * [H2 W4] run() 不再消费 ctxModel（model 解析归 service resolveIdentity），
-   * 本方法保留仅为装配链兼容（index.ts 调用不炸）；字段更新不再影响执行路径。
-   */
-  updateCtxModel(model: ModelInfo | undefined): void {
-    this.ctxModel = model;
   }
 
   /** 纯转调 service 统一编排入口（形参原样透传；parentRunId 用直调占位）。 */

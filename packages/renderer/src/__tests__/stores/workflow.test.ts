@@ -2,7 +2,7 @@
  * workflow store 单测 —— state / getters / actions 覆盖。
  *
  * 覆盖：
- * - records 初值空数组 + workflowCount
+ * - records 初值空数组
  * - loadWorkflows 成功写入 records + 失败清空
  * - clearWorkflows 清空 records + 清 agentcall 映射
  * - registerAgentCall / getAgentCallVirtualIdsByMain / clearAgentCallMapping agentcall 清理映射（U7 MUST_FIX 1）
@@ -63,11 +63,22 @@ function makeRecord(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunReco
   }
 }
 
+/**
+ * 测试种数据：applyRecords 已从 store 导出面摘除（生产零直写场景），测试经分区 ref
+ * 直写——不可变替换整 Map（与 partition.apply 等价）触发 shallowRef 响应性。
+ */
+function seedRecords(
+  store: ReturnType<typeof useWorkflowStore>,
+  sid: string,
+  records: WorkflowRunRecord[],
+): void {
+  store.recordsBySession = new Map(store.recordsBySession).set(sid, records)
+}
+
 describe('workflow store', () => {
-  it('初始状态：records 分区空 + workflowCount=0', () => {
+  it('初始状态：records 分区空', () => {
     const store = useWorkflowStore()
     expect(store.getRecordsBySession('sess-1')).toEqual([])
-    expect(store.workflowCount('sess-1')).toBe(0)
   })
 
   it('loadWorkflows 成功写入该 sid 分区', async () => {
@@ -78,14 +89,13 @@ describe('workflow store', () => {
     await store.loadWorkflows('sess-1')
 
     expect(store.getRecordsBySession('sess-1')).toHaveLength(2)
-    expect(store.workflowCount('sess-1')).toBe(2)
   })
 
   it('loadWorkflows 失败时不覆盖现有分区', async () => {
     vi.mocked(sessionApi.getWorkflows).mockRejectedValue(new Error('rpc error'))
 
     const store = useWorkflowStore()
-    store.applyRecords('sess-1', [makeRecord()])
+    seedRecords(store, 'sess-1', [makeRecord()])
     await store.loadWorkflows('sess-1')
 
     // M1 契约：失败不覆盖现有分区数据，设 loadError
@@ -95,7 +105,7 @@ describe('workflow store', () => {
 
   it('clearWorkflows 清空所有分区 + 清 agentcall 映射', () => {
     const store = useWorkflowStore()
-    store.applyRecords('sess-1', [makeRecord()])
+    seedRecords(store, 'sess-1', [makeRecord()])
     // 登记 agentcall 映射（U7 MUST_FIX 1）
     store.registerAgentCall('sess-1', agentCallVirtualId('ac-1'))
     expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
@@ -112,12 +122,12 @@ describe('workflow store', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       const store = useWorkflowStore()
-      store.applyRecords('sess-1', [makeRecord({ runId: 'wf-a' })])
+      seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-a' })])
       vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
       await store.loadWorkflows('sess-1') // strike 1/2：保留分区
       expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
 
-      store.applyRecords('sess-2', [makeRecord({ runId: 'wf-b' })])
+      seedRecords(store, 'sess-2', [makeRecord({ runId: 'wf-b' })])
       vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: true })
       await store.loadWorkflows('sess-2')
       expect(store.oversizeOf('sess-2')).toBe(true)
@@ -135,7 +145,7 @@ describe('workflow store', () => {
       expect(store.oversizeOf('sess-2')).toBe(false)
 
       // strike 簿记已清：重新预置后首次空结果从 strike 1 重新计（保留分区）——漏清则残留 1 直接 2/2 误删空
-      store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
+      seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-keep' })])
       vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
       await store.loadWorkflows('sess-1')
       expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
@@ -170,7 +180,7 @@ describe('workflow store — loadWorkflows 空结果守卫（接线冒烟）', (
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
 
     const store = useWorkflowStore()
-    store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
+    seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-keep' })])
     await store.loadWorkflows('sess-1') // strike 1/2：保留
     expect(store.getRecordsBySession('sess-1')).toHaveLength(1)
     // 接线参数：warn 前缀含 store 传入的 logTag + fetchLabel（文案结构归共享直测）
@@ -190,7 +200,7 @@ describe('workflow store — loadWorkflows 空结果守卫（接线冒烟）', (
 
   it('RPC 失败（catch）→ strike 重置，不让连接故障累计出误清分区', async () => {
     const store = useWorkflowStore()
-    store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
+    seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-keep' })])
 
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false }) // strike 1/2
     await store.loadWorkflows('sess-1')
@@ -205,7 +215,7 @@ describe('workflow store — loadWorkflows 空结果守卫（接线冒烟）', (
 
   it('[RT-4#8] oversize=true：置降级标志 + 保留旧分区（不可用 ≠ 删空，不进 strike 守卫）', async () => {
     const store = useWorkflowStore()
-    store.applyRecords('sess-1', [makeRecord({ runId: 'wf-keep' })])
+    seedRecords(store, 'sess-1', [makeRecord({ runId: 'wf-keep' })])
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: true })
 
     await store.loadWorkflows('sess-1')
@@ -298,8 +308,8 @@ describe('U7 MUST_FIX 1: agentcall 虚拟 key 清理映射', () => {
 describe('workflow store — clearSession（per-session 分区释放，ADR-0049 AC-8）', () => {
   it('清除指定 sid 分区，不影响其他 sid', () => {
     const store = useWorkflowStore()
-    store.applyRecords('session-1', [makeRecord({ runId: 'wf-a' })])
-    store.applyRecords('session-2', [makeRecord({ runId: 'wf-b' })])
+    seedRecords(store, 'session-1', [makeRecord({ runId: 'wf-a' })])
+    seedRecords(store, 'session-2', [makeRecord({ runId: 'wf-b' })])
 
     store.clearSession('session-1')
 
@@ -322,7 +332,7 @@ describe('workflow store — clearSession（per-session 分区释放，ADR-0049 
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [], oversize: false })
 
     // 预置非空分区 → strike 1/2：空结果保留
-    store.applyRecords('session-1', [makeRecord({ runId: 'wf-keep' })])
+    seedRecords(store, 'session-1', [makeRecord({ runId: 'wf-keep' })])
     await store.loadWorkflows('session-1')
     expect(store.getRecordsBySession('session-1')).toHaveLength(1)
 
@@ -332,7 +342,7 @@ describe('workflow store — clearSession（per-session 分区释放，ADR-0049 
 
     // 重新预置非空分区 → 第 1 次空结果必须从 strike 1 重新计（保留分区）。
     // 残留计数场景（clearSession 漏删）此步为 strike 2/2 → 分区被清 → 断言红
-    store.applyRecords('session-1', [makeRecord({ runId: 'wf-keep-2' })])
+    seedRecords(store, 'session-1', [makeRecord({ runId: 'wf-keep-2' })])
     await store.loadWorkflows('session-1')
     expect(store.getRecordsBySession('session-1')).toHaveLength(1)
     expect(store.getRecordsBySession('session-1')[0].runId).toBe('wf-keep-2')

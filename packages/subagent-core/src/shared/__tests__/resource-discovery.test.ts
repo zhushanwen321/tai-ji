@@ -390,10 +390,9 @@ describe("user-extension-paths (TAIJI_EXTENSION_PATHS)", () => {
     }
   });
 
-  it("分级穷举：全部 9 个 ResourceSource 的机器/用户归属与 D3 一致", () => {
+  it("分级穷举：全部 8 个 ResourceSource 的机器/用户归属与 D3 一致", () => {
     // 封闭枚举逐值断言，防止未来新增/修改枚举值时分级边界漂移
-    // （W2② 新增 project-host——项目级宿主注入根，机器源）
-    const machine: ResourceSource[] = ["npm", "npm-dev", "user-extension-paths", "project-pi", "project-pi-tmp", "project-host", "project-agents"];
+    const machine: ResourceSource[] = ["npm", "npm-dev", "user-extension-paths", "project-pi", "project-pi-tmp", "project-agents"];
     const user: ResourceSource[] = ["user-pi", "user-agents"];
     for (const s of machine) expect(isMachineSource(s), `${s} 应为机器源`).toBe(true);
     for (const s of user) expect(isMachineSource(s), `${s} 应为用户源`).toBe(false);
@@ -550,28 +549,6 @@ describe("getCachedParsed（mtime 级解析缓存）", () => {
       clearFileCache();
       getCachedParsed(f, parse);
       expect(parse).toHaveBeenCalledTimes(2); // 缓存被清 → 重新 parse
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    }
-  });
-
-  it("同一 path 的不同 parse 各自独立缓存（缓存键含 parse 身份，防跨 parse 污染）", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "parsed-cache4-"));
-    const f = path.join(dir, "a.md");
-    fs.writeFileSync(f, "shared-content", "utf-8");
-    try {
-      // 模拟真实双 parse 场景：parseAgentFrontmatter vs parseWorkflowMeta 对同一
-      // path（agent 与 workflow 发现源理论上可命中同一路径）各自解析
-      const parseA = (content: string) => ({ kind: "agent" as const, content });
-      const parseW = (content: string) => ({ kind: "workflow" as const, len: content.length });
-      const a1 = getCachedParsed(f, parseA);
-      // 修复前：缓存键只有 path，这里会命中 parseA 的缓存条目并 as T 断言返回
-      // {kind:"agent"}——w1 被污染成错误类型
-      const w1 = getCachedParsed(f, parseW);
-      const a2 = getCachedParsed(f, parseA);
-      expect(a1).toEqual({ kind: "agent", content: "shared-content" });
-      expect(w1).toEqual({ kind: "workflow", len: 14 });
-      expect(a2).toEqual({ kind: "agent", content: "shared-content" });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }

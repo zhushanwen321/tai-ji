@@ -794,7 +794,10 @@ describe('TrayNativePanel 数据面单例（U1：开合不重发首拉 RPC）', 
     const loadSubSpy = vi.spyOn(subagentStore, 'loadSubagents').mockResolvedValue(undefined)
     const loadWfSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
     subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sub-1', status: 'running' })])
-    workflowStore.applyRecords(SID, [makeWorkflow({ runId: 'wf-1', status: 'running' })])
+    // workflow 种数据：applyRecords 已私有化，直写分区 ref
+    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, [
+      makeWorkflow({ runId: 'wf-1', status: 'running' }),
+    ])
 
     wrapper = mount(ShellHarness, { props: { sessionId: SID, open: false } })
     await flushPromises()

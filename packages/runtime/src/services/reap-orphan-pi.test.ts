@@ -330,6 +330,25 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
     expect(res.scanned).toBe(1)
     expect(signal).not.toHaveBeenCalled()
   })
+
+  it('清单合法但为空数组 → 判据③结构性失效 warn（reap 全局失效可诊断），零信号', async () => {
+    // 与「文件缺失/坏」（null 路径，读侧已 warn）区分：清单在但为空 = 最近一次 spawn
+    // 的 staged 集为空，判据③对任何 argv 恒 false——本轮收殓全局失效必须出声。
+    const signal = vi.fn()
+    const res = await reapOrphanPiProcesses({
+      dataDir: DATA_DIR,
+      ownPid: OWN_PID,
+      listProcesses: async () => psStdout([row(511, 1, piCmd(MARKERS[0]))]),
+      signal,
+      readProcessStartTime: async () => null,
+      readSpawnMarkers: () => [],
+    })
+    expect(res.reaped).toEqual([])
+    expect(res.failed).toEqual([])
+    expect(signal).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain('marker list is empty')
+  })
 })
 
 describe('reapOrphanPiProcesses（编排；清单一律注入，与 fs 隔离）', () => {

@@ -83,7 +83,7 @@ export const SETTLED_WATCHDOG_TIMEOUT_MS = 600_000;
  *
  * 对齐既有 keep-alive 无进展检测先例（30min 无进展检测，量级同源）。
  * 刷新面严格限定 stdout pump 解析出的**有效协议事件行**（message_* 与 tool_* 与 turn_end
- * 等 SdkEvent）——LC-9 的 invalid 行（非法 JSON / 缺 type 字段的调试噪音）不刷新，
+ * 等 SDK 事件行）——LC-9 的 invalid 行（非法 JSON / 缺 type 字段的调试噪音）不刷新，
  * 防调试输出续命。v1 不开 env（设计 §6-D9 定案：与 keep-alive 同为纯常量）。
  * [export] 测试可观测。
  */
@@ -299,7 +299,7 @@ export function handoverMidRoundToSettled(recordId: string): void {
  *
  * 未挂载 / 已交棒（收尾段不刷新——刷新会让收尾段失去唯一可收敛形态，D9 被否 (b)
  * 方案的否决理由）/ 已 fire 时 no-op。刷新面由调用方限定在 stdout pump 的合法
- * SdkEvent 行（invalid 行不调用本函数）。
+ * SDK 事件行（invalid 行不调用本函数）。
  */
 export function refreshMidRoundNoProgress(recordId: string): void {
   const entry = armedEntries.get(recordId);

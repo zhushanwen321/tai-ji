@@ -25,7 +25,6 @@ import type {
   ServerMessageMap,
   SessionTraceHeaderPayload,
   SessionTraceMalformedLine,
-  SessionTraceSessionEndPayload,
 } from '@taiji/shared'
 import { parseSessionTraceJsonl } from '@taiji/core/domain/session-trace'
 import { BYTES_PER_MB } from '@taiji/shared'
@@ -52,26 +51,8 @@ export function nextTracePushId(): string {
  */
 export const CURRENT_SYSTEM_PROMPT_CUSTOM_TYPE = 'taiji:current-system-prompt'
 
-/** trace 台账快照（= session.traceEntries WS payload）。 */
-export interface SessionTraceSnapshot {
-  sessionId: string
-  /** 数据通路：rpc（活跃，权威解析）/ file（非活跃或 RPC 失败降级）/ empty（未落盘空态）/ oversize（D5④ 超预检阈值降级）。 */
-  source: 'rpc' | 'file' | 'empty' | 'oversize'
-  /** session JSONL 绝对路径（reveal 按钮数据源；empty 未落盘/路径未知时缺省）。 */
-  filePath?: string | null
-  /** JSONL 首行 header 完整 entry（parentSession 两形态原样透传）；未落盘/首行损坏时缺省。 */
-  header?: SessionTraceHeaderPayload
-  /** entry 全集（不含 header）。RPC 权威解析或文件解析（含 handoff_marker 等自定义行）。 */
-  entries: unknown[]
-  /** 损坏行占位（两路径均产出：文件解析提取行号与原文；RPC 路径补齐 pi 静默跳过的坏行）。 */
-  malformed: SessionTraceMalformedLine[]
-  /** sidecar session_end 终态（两路径都读 sidecar——终态与活跃性正交）。 */
-  sessionEnd?: SessionTraceSessionEndPayload
-  /** 当前叶子 entry id（RPC 路径；增量腿 since 基准）。文件路径无 leaf 概念，缺省。 */
-  leafId?: string | null
-  /** D5④ oversize 降级文案（source='oversize' 时提供，含体积与源文件绝对路径）。 */
-  oversizeMessage?: string
-}
+/** trace 台账快照（= session.traceEntries WS payload；类型单源 = shared 协议载荷）。 */
+export type SessionTraceSnapshot = ServerMessageMap['session.traceEntries']
 
 /**
  * 解析 header 首行原文为完整 entry（路径 A 用）。

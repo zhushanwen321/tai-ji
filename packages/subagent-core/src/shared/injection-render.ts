@@ -52,26 +52,18 @@ export interface InvalidResource {
 	reason: string;
 }
 
-/** reasoning 对象形态（zsw 投影的档位结构）；渲染面仅按 truthy 消费，字段值不进输出 */
-export interface ModelReasoningInfo {
-	variants?: unknown[];
-	defaultVariant?: unknown;
-}
-
 /**
- * 注入段的最小模型投影——pi 与 zsw 两侧数据形态的并集（D-3 + 本仓 provider 补充）：
+ * 注入段的最小模型投影——pi 数据投影（D-3 + 本仓 provider 补充）：
  * id/name 为条目最小必填（缺则无渲染意义），其余字段 optional（红线 5）。
- * - pi 投影：provider/reasoning:boolean/input[]/contextWindow 全给；
- * - zsw 投影：reasoning:{variants} 档位对象、input 缺席；
- * - label 与 reasoning.variants 进类型并集但渲染面暂不消费（宿主按需再扩）。
+ * provider/reasoning:boolean/input[]/contextWindow 全给（pi 投影形态）；
+ * 渲染面消费 provider/reasoning/input/contextWindow。
  */
 export interface ModelEntry {
 	id: string;
 	name: string;
 	provider?: string;
-	label?: string;
 	contextWindow?: number;
-	reasoning?: boolean | ModelReasoningInfo;
+	reasoning?: boolean;
 	input?: string[];
 }
 
@@ -300,8 +292,7 @@ function compareModelEntries(a: ModelEntry, b: ModelEntry): number {
 }
 
 /**
- * 能力标记：reasoning truthy（布尔 true 或对象形态——zsw 的 {variants} 投影）
- * → "reasoning"；input 含 image → "vision"。空则省略 caps 段。
+ * 能力标记：reasoning true → "reasoning"；input 含 image → "vision"。空则省略 caps 段。
  * 红线 5 守卫：input 缺席经 optional chaining 不抛（pi 版此处对 undefined 抛
  * TypeError，本仓 L73 已核实）。
  */

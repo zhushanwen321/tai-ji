@@ -12,7 +12,7 @@
 //      显式参数分支已随 modeless 波 5 派发参数删除退役——续聊资格归 message 面）
 //   4. 未注册 engine id → engine_not_found
 //   5. 引擎分支骨架（record 创建+盖章 / taskSpec 字段 / detached run / done+failed
-//      终态迁移 / spawnedChildren 注册 / abort signal 触达引擎 kill-chain）
+//      终态迁移 / abort signal 触达引擎 kill-chain）
 //   6. U2：probe 兜底两态（默认路由兜底回 pi / 显式 engine 守卫报错）+ JournalWriter
 //      接线（taskId=record.id + onPoolResolved retarget）+ engineHandle 完整回填
 //
@@ -20,8 +20,6 @@
 // execute-nesting.test.ts 同款范式）——非 pi 引擎分支用假 EnginePort（registerEngine
 // 注入），不 spawn 任何进程；fs 用真实 os.tmpdir()（engine 分支的 manifest 落盘无妨）。
 
-import type { ChildProcess } from "node:child_process";
-import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -80,7 +78,6 @@ import { toSubagentRecordEntry } from "../persistence/record-entry.ts";
 // W10（§2.10 ②）：子进程句柄断言改读 core 侧状态镜像（host/spawned-children——
 // 协议化后 spawnedChildren 持有方在引擎进程，core 消费镜像面；判据 pid 同构）。
 import {
-  coreSpawnedChildrenMirror,
   _resetCoreSpawnedChildrenMirrorForTest,
 } from "../engine/host/spawned-children.ts";
 import { SubagentService } from "../subagent-service.ts";
@@ -508,32 +505,15 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     });
   });
 
-  it("[D10] onChildSpawned 注册进 spawnedChildren + cancel abort 后 signal 触达引擎", async () => {
+  it("[D10] cancel abort 后 signal 触达引擎（kill-chain 第一级）", async () => {
     const { service, zcode } = setup(agentDir);
-    class FakeProc extends EventEmitter {
-      pid = 4321;
-      killed = false;
-      kill(sig?: string): boolean {
-        this.killed = true;
-        return sig !== undefined;
-      }
-    }
-    const child = new FakeProc() as unknown as ChildProcess;
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
     await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
-
-    // 引擎经 RunContext.onChildSpawned 上报子进程 → 宿主记账（kill-chain 数据源）
-    zcode.runs[0].ctx.onChildSpawned?.(child);
-    expect(coreSpawnedChildrenMirror().getChildByRecord(handle.subagentId)?.pid).toBe(child.pid);
 
     // cancel → controller.abort → engine 收到的 signal aborted（kill-chain 两级的第一级）
     expect(zcode.runs[0].ctx.signal?.aborted).toBe(false);
     service.cancel(handle.subagentId);
     expect(zcode.runs[0].ctx.signal?.aborted).toBe(true);
-    // 子进程退出后记账按句移除
-    child.emit("close", 0, null);
-    // 按句移除断言（W10 注）：inproc 双模不回灌 childStateChanged，镜像移除由
-    // protocol-blackbox 承载（同 subprocess-agent-runner-routing D10 注）。
   });
 
   // ============================================================

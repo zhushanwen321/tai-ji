@@ -317,7 +317,8 @@ export class SubagentService {
     // 派发经下方 deps 回调编排）。deps 全晚绑定闭包（构造期零求值——#1 留壳共享依赖经 getter
     // 现读同一实例；R3 聚合显式接口直指 recordAccess/recordLifecycle，聚合间零私有
     // 互调 G2）。[B-6] roundSupervisor 留壳（boot/dispose 时序消费在壳 + C-6 装配
-    // 闭包经壳转发 late-bound 天然兼容），聚合经 getter 现读。
+    // 闭包经壳转发 late-bound 天然兼容）；本聚合不消费（真实消费方在
+    // workflow-dispatch / chat-rounds，各自 deps 通道）。
     this.runOrchestration = new RunOrchestration({
       assertReady: () => this.assertReady(),
       getStore: () => this.store,
@@ -328,7 +329,6 @@ export class SubagentService {
       getPool: () => this.pool,
       getSessionRootId: () => this.sessionRootId,
       getExecNesting: () => this.execNesting,
-      getRoundSupervisor: () => this.roundSupervisor,
       resolveIdentity: (opts, pre) => this.recordAccess.resolveIdentity(opts, pre),
       resolveIdentityForEngine: (engine, engineModel, agent, agentConfig, opts) =>
         this.recordAccess.resolveIdentityForEngine(engine, engineModel, agent, agentConfig, opts),

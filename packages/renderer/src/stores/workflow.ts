@@ -177,7 +177,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return getRecordsBySession(sessionId).some((s) => s.status === 'running')
   }
 
-  /** 写入指定 session 的 workflow 列表（不可变写，确保 Map 响应性触发） */
+  /**
+   * 写入指定 session 的 workflow 列表（不可变写，确保 Map 响应性触发）。
+   * store 私有（仅 loadWorkflows 内部消费），不在导出面——分区写权威入口是 loadWorkflows
+   * 拉取，无生产直写场景；计数等派生一律从 recordsOf 分区读侧派生。
+   */
   function applyRecords(sessionId: string, list: WorkflowRunRecord[]): void {
     partition.apply(sessionId, list)
   }
@@ -189,17 +193,6 @@ export const useWorkflowStore = defineStore('workflow', () => {
     loadingBySession.value.delete(sessionId)
     loadErrorBySession.value.delete(sessionId)
     oversizeBySession.value.delete(sessionId)
-  }
-
-  // ── getters ──
-  /**
-   * 响应式视图：指定 session 的 workflow 计数（读取 recordsOf 分区）。
-   * 旧的无参 workflowCount() 已移除（store 拿不到 focusedSessionId，调用方传 sid）；
-   * 原「Sidebar badge 用」消费面随侧栏任务 tab 退役（现行计数面 = composer 任务托盘
-   * useTrayCounts，该处直接从 recordsOf 分区长度派生，不经本函数）。
-   */
-  function workflowCount(sessionId: string): number {
-    return getRecordsBySession(sessionId).length
   }
 
   // ── actions ──
@@ -335,13 +328,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     isLoadingOf,
     loadErrorOf,
     oversizeOf,
-    // getters
-    workflowCount,
-    // per-session 分区读写（ADR-0049 Map 分区派）
+    // per-session 分区读（ADR-0049 Map 分区派；写权威入口 = loadWorkflows 拉取，
+    // applyRecords 为 store 私有）
     recordsOf,
     getRecordsBySession,
     hasRunningWorkflow,
-    applyRecords,
     clearSession,
     // actions
     loadWorkflows,

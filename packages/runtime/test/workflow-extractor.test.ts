@@ -450,25 +450,27 @@ describe('extractWorkflowsFromSessionFile', () => {
       const msg = String(warnSpy.mock.calls[0][0])
       expect(msg).toContain("version 'wf-run-v1' unsupported (expected 'wf-run-v2')")
       expect(msg).toContain('wf-v1')
-      expect(msg).toContain('jsonl-run-store.ts')
+      expect(msg).toContain('extension/runtime version skew')
+      expect(msg).toContain('run-snapshot.ts')
     } finally {
       warnSpy.mockRestore()
     }
   })
 
-  // 三源一致性护栏：wf-run-v* 快照版本字面量分布在 3 个包（跨包依赖方向不允许互相
-  // import 源码），bump 格式版本时任何一处漏改都会静默丢数据：
-  // - 源 1（权威）：packages/subagent-core run-snapshot.ts 的 SNAPSHOT_VERSION——
-  //   漏改不会（它是生产方）。[u1-move] 权威定义随 core 切面从 extension
-  //   jsonl-run-store.ts 抽至 subagent-core，extension 侧留壳改 import 绑定
-  //   （编译期跟随权威源，无字面量可漂移），故守卫字面量处跟随迁移至 core 定义点，
-  //   另以留壳断言防版本字面量在 extension 侧重新本地化分叉
-  // - 源 2（副本）：runtime workflow-extractor.ts 的本地副本——漏改则版本守卫把新快照
-  //   全部判为不匹配跳过（renderer 侧 workflow 列表全空）
-  // - 源 3（消费方）：session-reader（独立发 npm 的 sibling 扩展）两处版本判定——
-  //   discovery/workflows.ts isNew + core/workflow.ts NEW 分支。漏改则 family/workflows
-  //   腿对新 run 静默丢全部 calls sessionFile、workflow overview 对新 run 返 null
-  it('三源一致性：runtime SNAPSHOT_VERSION 副本 + session-reader 两处版本判定与 subagent-core run-snapshot.ts 权威源同步', () => {
+  // 快照版本一致性护栏：wf-run-v* 快照版本的权威定义在 packages/subagent-core
+  // run-snapshot.ts，消费方按依赖方向分两类绑定形态，bump 格式版本时漏改会静默丢数据：
+  // - 权威：packages/subagent-core run-snapshot.ts 的 SNAPSHOT_VERSION（生产方，
+  //   [u1-move] 权威定义随 core 切面从 extension jsonl-run-store.ts 抽至 subagent-core）
+  // - runtime workflow-extractor.ts：barrel import 单源消费（编译期跟随权威源，无
+  //   字面量可漂移）——守卫锁定该形态，回退成本地字面量副本即红（否则版本守卫把
+  //   新快照全部判为不匹配跳过，renderer 侧 workflow 列表全空）
+  // - extension 留壳（jsonl-run-store.ts）：同样 import 绑定 core 权威源，留壳断言
+  //   防版本字面量重新本地化分叉
+  // - session-reader（独立发 npm 的 sibling 扩展，与 core 无依赖方向）：两处字面量
+  //   判定——discovery/workflows.ts isNew + core/workflow.ts NEW 分支。漏改则
+  //   family/workflows 腿对新 run 静默丢全部 calls sessionFile、workflow overview
+  //   对新 run 返 null
+  it('三源一致性：runtime 侧为 barrel import 单源、无本地字面量副本（回退即红），session-reader 两处版本判定与 subagent-core run-snapshot.ts 权威源同步', () => {
     // 源 1（权威）：[u1-move] SNAPSHOT_VERSION 定义迁至 packages/subagent-core
     // （正则捕获到闭引号即止，不受声明尾部 ` as const` 影响）
     const coreSrc = readFileSync(
@@ -496,14 +498,20 @@ describe('extractWorkflowsFromSessionFile', () => {
       'extension jsonl-run-store.ts 出现本地 SNAPSHOT_VERSION 定义——应消费 subagent-core 权威源，禁止在留壳重新分叉版本字面量',
     ).toBeNull()
 
-    // 源 2：runtime 副本与权威源字面量相等
+    // 源 2：runtime 侧为 barrel import 单源消费（与权威源同一物理定义，同步性构造性
+    // 成立），禁止回退成本地字面量副本（脱离单源绑定后版本可静默分叉）
     const rtSrc = readFileSync(
       join(__dirname, '..', 'src', 'services', 'session', 'workflow-extractor.ts'),
       'utf-8',
     )
-    const rtMatch = rtSrc.match(/const SNAPSHOT_VERSION = '([^']+)'/)
-    expect(rtMatch, 'runtime 侧 SNAPSHOT_VERSION 常量字面量未找到').not.toBeNull()
-    expect(rtMatch![1]).toBe(current)
+    expect(
+      rtSrc.match(/import\s*\{[^}]*\bSNAPSHOT_VERSION\b[^}]*\}\s*from\s*'@zhushanwen\/subagent-core'/),
+      'runtime workflow-extractor.ts 不再从 @zhushanwen/subagent-core（barrel）import SNAPSHOT_VERSION——单源消费形态是否变了？',
+    ).not.toBeNull()
+    expect(
+      rtSrc.match(/const\s+SNAPSHOT_VERSION\s*=/),
+      'runtime workflow-extractor.ts 出现本地 SNAPSHOT_VERSION 定义——应消费 subagent-core 权威源，回退成本地字面量副本会被版本守卫静默丢新快照',
+    ).toBeNull()
 
     // 源 3a：session-reader discovery/workflows.ts 的 isNew 判定接受当前版本
     const srDiscoverySrc = readFileSync(

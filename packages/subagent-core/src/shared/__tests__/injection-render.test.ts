@@ -50,7 +50,7 @@ const MODEL_GUIDE = "MODEL-GUIDE";
 const agentOpts: ListFormatOptions = { guide: AGENT_GUIDE };
 const workflowOpts: ListFormatOptions = { guide: WORKFLOW_GUIDE };
 
-/** pi 现调用形态的 agent 数据（discoverAllAgents 输出投影：已按 name 码点序） */
+/** pi 现调用形态的 agent 数据（agent 清单注入投影：已按 name 码点序） */
 const piShapedAgents: AgentEntry[] = [
 	{
 		name: "coder",
@@ -183,23 +183,16 @@ describe("byte-exact parity with pi-sw current formatters", () => {
 // ============================================================
 
 describe("ModelEntry union guards (red-line 5)", () => {
-	it("input undefined 不抛且 caps 无 vision（reasoning 对象形态按 truthy → caps 含 reasoning）", () => {
+	it("input undefined 不抛且 caps 无 vision（reasoning true → caps 含 reasoning）", () => {
 		const entry: ModelEntry = {
 			id: "glm",
 			name: "GLM",
-			reasoning: { variants: ["high", "medium"], defaultVariant: "high" },
-			// input 缺席——zsw 投影形态；pi 版此处抛 TypeError
+			reasoning: true,
+			// input 缺席；pi 版此处抛 TypeError
 		};
 		const out = formatModelList([entry], { guide: MODEL_GUIDE });
 		expect(out).toContain("<caps>reasoning</caps>");
 		expect(out).not.toContain("vision");
-	});
-
-	it("reasoning 空对象形态（无 variants）仍按 truthy 处理 → caps 含 reasoning", () => {
-		const entry: ModelEntry = { id: "glm", name: "GLM", reasoning: {} };
-		expect(formatModelList([entry], { guide: MODEL_GUIDE })).toContain(
-			"<caps>reasoning</caps>",
-		);
 	});
 
 	it("input 空数组：无 vision；reasoning false：无 reasoning → 无 caps 段", () => {
@@ -227,13 +220,6 @@ describe("ModelEntry union guards (red-line 5)", () => {
 		expect(formatModelList([entry], { guide: MODEL_GUIDE })).toContain(
 			"<contextWindow>0</contextWindow>",
 		);
-	});
-
-	it("label 进类型并集但渲染面不消费（输出无 label 内容）", () => {
-		const entry: ModelEntry = { id: "glm", name: "GLM", label: "secret-label" };
-		const out = formatModelList([entry], { guide: MODEL_GUIDE });
-		expect(out).not.toContain("secret-label");
-		expect(out).not.toContain("label");
 	});
 });
 

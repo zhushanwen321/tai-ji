@@ -33,7 +33,6 @@ import {
   type SpawnRunParams,
   type SpawnRunResult,
 } from "../spawn-runner.ts";
-import { resetAllEpipeFailures } from "../stdin-writer.ts";
 
 /**
  * fake pi：rpc 形态子进程。
@@ -121,7 +120,6 @@ function baseParams(): SpawnRunParams {
 afterEach(() => {
   resetLoggerSinkForTests();
   killAllActiveChildren();
-  resetAllEpipeFailures();
   process.argv[1] = argv1Saved ?? "";
   if (rootDir !== undefined && fs.existsSync(rootDir)) {
     fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });

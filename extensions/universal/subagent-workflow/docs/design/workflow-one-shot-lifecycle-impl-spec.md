@@ -74,7 +74,7 @@
 | `WorkflowAction` :54-59 + `WORKFLOW_ACTIONS` :61-67 | 删 `"pause"` / `"resume"`（类型与数组同步） |
 | `runId` 参数描述 :83 | `"Workflow run ID (pause/resume/abort)"` → `"Workflow run ID (abort action)"` |
 | execute case :372-377 | 删 `case "pause"` / `case "resume"` 两分支（default never 穷尽检查自然适配三 action） |
-| `actionLifecycle` :556 起 | pause/resume 分支删除（保留 abort；若函数内 verb 分发依赖 WorkflowAction，随类型收窄同步） |
+| abort 处理函数 :556 起 | pause/resume 分支删除（保留 abort；若函数内 verb 分发依赖 WorkflowAction，随类型收窄同步） |
 | tool description + promptGuidelines :330-342 | ① `- pause/resume/abort: {"action":"pause","runId":"<id>"} (abort optional: ,"error":"<reason>"})` → `- abort: {"action":"abort","runId":"<id>"} (optional: {"error":"<reason>"})`；② 新增一次性语义句（F3 预防性指引）：`Runs are one-shot: there is no pause/resume — to stop a run early use abort; for a fresh result start a new run.` |
 
 **U1-5 `src/interface/commands.ts` + `src/interface/command-actions.ts`**

@@ -34,6 +34,7 @@ import {
 import {
   INITIAL_RUN_STATE,
   createRunEventJournal,
+  foldRunEventFrames,
   transition,
   type RunErrorCode,
   type RunEventJournal,
@@ -84,27 +85,17 @@ export interface RunProjectionOptions {
 /**
  * journal fold：scan 产物逐事件 transition（不传 ctx——run-events.ts fold 契约）。
  *
- * 与 worker-message-pump.foldRunState 同构（scan + 逐帧 transition + 坏帧 warn
- * 保守停）：受 Q2 领地边界约束（pump 唯一触碰区 = 引导补投删除区）未单源化，
- * 后续清理轮收口为共享实现。
+ * 循环体单源 run-events.ts 的 foldRunEventFrames（与 worker-message-pump.foldRunState
+ * 共享同一坏帧失效模式：保守停在最近一致态）；本侧只持注册表域的 warn 文案与 logger。
  */
 function foldEvents(events: readonly WorkflowRunEvent[], runId: string): RunState {
-  let state = INITIAL_RUN_STATE;
-  for (const event of events) {
-    try {
-      state = transition(state, event).state;
-    } catch (err) {
-      // journal 坏链（历史帧与当前表不兼容）：投影失效模式 = 保守停在最近一致态
-      // （warn 留痕不炸投影），与 pump fold / scan 坏行容忍同一精神。
-      logger.warn(
-        `run registry fold stopped at a broken frame (runId=${runId}, lastType=${event.type}): ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      break;
-    }
-  }
-  return state;
+  return foldRunEventFrames(events, (err, lastType) => {
+    logger.warn(
+      `run registry fold stopped at a broken frame (runId=${runId}, lastType=${lastType}): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  });
 }
 
 /**

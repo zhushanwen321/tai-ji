@@ -21,10 +21,9 @@
  * 两实例的真差异经 config 参数化承载：kind（发现种类 + discoveryRoots 宿主槽位）/
  * parse（单文件内容 → entry；workflow 侧 description 截断内聚于其 parse）/ format
  * （entries → XML 注入段；guide 文案差异内聚于各自 format）/ includeTmp（workflow 侧
- * 覆盖 .pi/workflows/.tmp/ generate 产物）/ onParseNull（agent 侧「有 frontmatter 但
- * 解析失败」warn 判据）/ logTag（错误日志前缀，保持既有可检索性）；assemble（agent
- * 侧真差异：装配循环覆写——U11 下沉 core discoverAgents 后工厂不重复装配语义，
- * parse/onParseNull 不参与）。
+ * 覆盖 .pi/workflows/.tmp/ generate 产物）/ logTag（错误日志前缀，保持既有可检索性）；
+ * assemble（agent 侧真差异：装配循环覆写——U11 下沉 core discoverAgents 后工厂不重复
+ * 装配语义，parse 不参与）。
  *
  * model-list-injector 不参与本工厂：数据源是 ModelRegistry 内存快照（真差异，无文件
  * 发现与缓存生命周期），见该文件头注释。
@@ -80,7 +79,7 @@ export interface ResourceListInjectorConfig<TEntry extends ResourceListEntry> {
 	 * 装配循环覆写：提供时工厂 discover 整体委托它（发现→解析→去重→排序 +
 	 * warn/error 口径全归被委托方），工厂不再跑内置装配循环。agent 侧真差异：
 	 * U11（sink 设计）装配算法单源 core discoverAgents（第三宿主免复刻 G3/S5），
-	 * 壳侧收缩为「宿主注入根现取 + 委托」。此时 parse/onParseNull 不参与工厂装配，
+	 * 壳侧收缩为「宿主注入根现取 + 委托」。此时 parse 不参与工厂装配，
 	 * invalids 恒空（core discoverAgents 无 invalid 产出面）。
 	 */
 	assemble?: (workspaceRoot: string) => Promise<TEntry[]>;
@@ -94,8 +93,6 @@ export interface ResourceListInjectorConfig<TEntry extends ResourceListEntry> {
 	format(entries: TEntry[], invalids: readonly InvalidResource[]): string;
 	/** workflow 侧真差异：包含 .pi/workflows/.tmp/（workflow-script generate 产物）。 */
 	includeTmp?: boolean;
-	/** parse 返 null 的旁路处理（agent 侧真差异：仅「有 frontmatter 但解析失败」warn）。 */
-	onParseNull?(filePath: string): void;
 }
 
 /** 工厂产物：setup 注册三 handler；discover 为发现函数（薄模块再导出）。 */
@@ -221,7 +218,6 @@ export function createResourceListInjector<TEntry extends ResourceListEntry>(
 					map.set(entry.name, { ...entry, path: resource.path });
 				} else {
 					invalids.push({ path: resource.path, reason: "no valid resource metadata" });
-					config.onParseNull?.(resource.path);
 				}
 			} catch (err) {
 				// 单个文件读失败不阻断整条清单注入；具名上报（D4-3）+ 日志照记

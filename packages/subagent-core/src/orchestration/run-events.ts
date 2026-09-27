@@ -613,6 +613,33 @@ export function transition(
   return { state: nextState, outputs: rule.outputs };
 }
 
+// ── journal fold 循环（投影侧共享单源）──────────────────────
+
+/**
+ * journal fold 循环（scan 事件流 → 终帧状态，投影侧共享单源）：逐事件 transition
+ * （不传 ctx——fold 契约），坏帧（历史帧与当前转移表不兼容）经 onBrokenFrame 出声
+ * 后保守停在最近一致态，不炸投影——与 scan 侧坏行容忍同一精神。
+ *
+ * 消费方：worker-message-pump（journal 活体 fold，活体缓存 miss 时补投影）与
+ * run-registry（注册表投影 / abandon 终局化）。两处 warn 文案与 logger 各随其域，
+ * 经 onBrokenFrame 注入；循环体与失效模式单源。
+ */
+export function foldRunEventFrames(
+  events: readonly WorkflowRunEvent[],
+  onBrokenFrame: (err: unknown, lastType: string) => void,
+): RunState {
+  let state = INITIAL_RUN_STATE;
+  for (const event of events) {
+    try {
+      state = transition(state, event).state;
+    } catch (err) {
+      onBrokenFrame(err, event.type);
+      break;
+    }
+  }
+  return state;
+}
+
 // ── journal 实装（createRunEventJournal——本模块唯一 IO 边）────
 
 const journalLogger = getLogger("run-event-journal");
@@ -637,11 +664,24 @@ function assertValidRunId(runId: string): void {
 
 const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
 
-/** 坏行判定的最小形状校验：JSON 对象 + type 落在词表内（词表外 = 坏行）。 */
+/**
+ * 坏行判定的最小形状校验：JSON 对象 + type 落在词表内 + ts 有限数值（EventEnvelope
+ * 信封全词表必填——fold 投影的 startedAt/lastProgressAt 派生与注册表新鲜度判据都
+ * 消费它，坏值防污染投影）+ outcome（ask-settled / run-settled 携带）落词表
+ * （其余事件不携带，缺省自然放行）。任一不过 = 坏行。
+ */
 function isWorkflowRunEventLine(value: unknown): value is WorkflowRunEvent {
   if (typeof value !== "object" || value === null) return false;
-  const type = (value as { type?: unknown }).type;
-  return typeof type === "string" && RUN_EVENT_TYPE_SET.has(type);
+  const rec = value as { type?: unknown; ts?: unknown; outcome?: unknown };
+  if (typeof rec.type !== "string" || !RUN_EVENT_TYPE_SET.has(rec.type)) return false;
+  if (typeof rec.ts !== "number" || !Number.isFinite(rec.ts)) return false;
+  if (
+    rec.outcome !== undefined &&
+    !(ALL_RUN_OUTCOMES as readonly string[]).includes(rec.outcome as string)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function isNodeErrorCode(error: unknown, code: string): boolean {

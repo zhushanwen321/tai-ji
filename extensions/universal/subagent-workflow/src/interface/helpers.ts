@@ -45,6 +45,9 @@ const MAX_RESULT_LENGTH = 8000;
  *  的 Script Result 段 bounded 8000，载荷字段是消费方可编程读取的短形态）。 */
 const MAX_RESULT_SUMMARY_LENGTH = 500;
 
+/** 写账失败 error 留痕的 content 摘要截断长度（诊断定位用，非消费契约）。 */
+const RECORD_FAIL_CONTENT_PREVIEW_LENGTH = 200;
+
 /** 毫秒/分钟换算（stall 阈值与文案展示共用，禁魔法数）。 */
 const MS_PER_MINUTE = 60_000;
 
@@ -200,9 +203,12 @@ interface WorkflowNotifyDetails {
  *
  * **内存去重**：notifiedRunIds Set 由调用方（factory/extension instance）持有，
  * 同 runId 的重复收口回调拦截（跨 session_shutdown 等边界防重复）；标记在写账成功
- * （或账本幂等拒绝）后落下——record 抛（reload 窗口 appendEntry assertActive 等）
- * 不标记，异常由 finalizeRun 围栏接住后重复收口可重试，窗口内不永久丢通知；
- * 持久层幂等由账本 notifyId 承接（内存窗口挤出 / 重启后的重复仍被 record 拒绝）。
+ * （或账本幂等拒绝）后落下。**已知丢失面（如实登记）**：record 抛（reload 窗口
+ * appendEntry assertActive 等）= 账本 entry 未写，而 notifyDone 的唯一调用点
+ * onRunDone 每终态恰好一次、recoverFromSession 无源可重放——该终局通知**永久丢失**，
+ * 仅 error 日志留痕（含 notifyId/content 摘要，供事后手工补偿）；根治需 pending-retry
+ * 结构（设计变更，本轮不建，见加固审查报告）。持久层幂等由账本 notifyId 承接
+ * （内存窗口挤出 / 重启后的重复仍被 record 拒绝）。
  *
  * @param pi ExtensionAPI（仅降级路径直发用）
  * @param runId run 标识
@@ -322,13 +328,35 @@ export function notifyDone(
     // 去重窗口挤出或重启恢复后的重复收口，跳过投递）→ ②attemptDeliver（courier
     // 边沿 + isIdle 二次复查，③销账 ④重放在 ledger 内；送达通道经
     // deliveryCustomType 保持 "workflow-result"）。
-    // 内存去重标记在写账**成功后**才落下：record 抛（reload 窗口 appendEntry 命中
-    // assertActive 等）时不标记——异常由 finalizeRun 围栏接住（不崩），账面 entry 未写，
-    // 后续重复收口回调（adoption 快照重发等）可重试写账；提前标记会把「窗口内丢失」
-    // 变成永久丢失（去重阻断 + 账本无 entry 不可重放）。stale ctx 防御由装配层
-    // sendDelivery 内置（session-lifecycle.ts bindLedgerHostAndRecover），此处无需
-    // 重复包裹。
-    if (!ledger.record(details.notifyId, content, details, { deliveryCustomType: WORKFLOW_RESULT_CUSTOM_TYPE })) {
+    // 内存去重标记在写账**成功后**才落下。**已知丢失面（如实登记）**：record 抛
+    // （reload 窗口 appendEntry 命中 assertActive 等）= 账本 entry 未写——onRunDone
+    // 每终态恰好一次（无重复收口可重试）、账本无 entry 则 recoverFromSession 无源
+    // 可重放，该终局通知**永久丢失**；不提前标记只是给进程内的假想重复收口留重试
+    // 通道（防御形态，不改变丢失事实）。留痕与根治面见下方 catch 注释。
+    // stale ctx 防御由装配层 sendDelivery 内置（session-lifecycle.ts
+    // bindLedgerHostAndRecover），此处无需重复包裹。
+    let recorded: boolean;
+    try {
+      recorded = ledger.record(details.notifyId, content, details, {
+        deliveryCustomType: WORKFLOW_RESULT_CUSTOM_TYPE,
+      });
+    } catch (err) {
+      // 写账抛错 = 该终局通知丢失（账面 entry 未写，无重放源）。error 级留痕含
+      // notifyId 与 content 摘要，供事后按 run 手工补偿（从 run journal/manifest
+      // 读取终态）。根治需 pending-retry 结构（设计变更，本轮不建，见加固审查报告）；
+      // 原样上抛保持 finalizeRun 围栏的既有接住链路。
+      logger.error(
+        "workflow completion notice ledger record failed — this terminal notification is LOST (no ledger entry, no replay source); compensate manually from run artifacts",
+        {
+          runId,
+          notifyId: details.notifyId,
+          contentPreview: content.slice(0, RECORD_FAIL_CONTENT_PREVIEW_LENGTH),
+          reason: toErrorMessage(err),
+        },
+      );
+      throw err;
+    }
+    if (!recorded) {
       trackNotifiedRunId(notifiedRunIds, runId);
       return;
     }
@@ -344,10 +372,12 @@ export function notifyDone(
   // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection 崩 pi（E1 同机制）。
   // stale 静默降级（完成通知不投递，用户可从 session 历史 / 工具结果看到 workflow
   // 结果，判定见 stale-ctx-audit.md §4），非 stale 错误原样上抛（守卫不吞真实 bug）。
-  trackNotifiedRunId(notifiedRunIds, runId);
+  // 去重标记在实际发送**之后**落下：非 stale 瞬态发送失败（同步抛错上抛）后进程内
+  // 仍可重试（去重不阻断）；stale 分支由 onStale 补标记保持现语义——stale = 通知对
+  // 旧 session 已无意义，不重试。
   guardStaleCtx(
-    () =>
-      pi.sendMessage(
+    () => {
+      const sent = pi.sendMessage(
         {
           customType: WORKFLOW_RESULT_CUSTOM_TYPE,
           content,
@@ -355,14 +385,19 @@ export function notifyDone(
           details,
         },
         { triggerTurn: true },
-      ),
+      );
+      trackNotifiedRunId(notifiedRunIds, runId);
+      return sent;
+    },
     {
       label: "subagent-workflow:notifyDone",
-      onStale: (error) =>
+      onStale: (error) => {
+        trackNotifiedRunId(notifiedRunIds, runId);
         logger.warn("workflow completion notice delivery skipped (stale ctx)", {
           runId,
           error: toErrorMessage(error),
-        }),
+        });
+      },
     },
   );
 }
@@ -382,9 +417,10 @@ export function notifyDone(
  *   才会重新直发，runId 全局唯一，旧 id 重现概率为零，该边界由 W3TC12 单测
  *   在降级形态下钉死）。
  *
- * 调用点：notifyDone 内部（写账成功/false 后）+ workflow-events onRunDone 回调
- * （notifyDone 之后，幂等二次添加）。notifyDone 抛出（reload 窗口 record 抛等）时
- * 内外都不标记——去重不阻断，重复收口可重试写账（见 notifyDone 账本分支注释）。
+ * 调用点：notifyDone 内部（写账成功/false 后 + 降级直发受理后）+ workflow-events
+ * onRunDone 回调（notifyDone 之后，幂等二次添加）。notifyDone 抛出（reload 窗口
+ * record 抛 / 非 stale 发送失败等）时内外都不标记——进程内的重复收口回调不被去重
+ * 阻断（防御形态；账本路径抛错的已知丢失面登记见 notifyDone 注释）。
  *
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
  * @param runId run 标识

@@ -36,7 +36,6 @@ import type {
   StopReason,
   SubagentToolDetails,
   ToolCall,
-  ToolCallResult,
   Turn,
 } from "../assembly/types.ts";
 
@@ -661,7 +660,7 @@ function stripInternal(tc: InternalToolCall): ToolCall {
  * 聚合所有 turn 的 usageDelta 为完整 usage（含 total + cost）。
  * 全零则返回 undefined（与旧 toUsageTotal 语义一致）。
  *
- * cost 来自 SdkEvent.message.usage.cost.total（message_end 时透传到 usageDelta）。
+ * cost 来自 SDK 事件的 message.usage.cost.total（message_end 时透传到 usageDelta）。
  * 旧 toUsageTotal/session-runner 累积 cost；本重构保留该行为。
  */
 export function getTotalUsage(record: ExecutionRecord): AgentUsageTotal | undefined {
@@ -895,30 +894,6 @@ export function project(record: ExecutionRecord): SubagentToolDetails {
 }
 
 /**
- * 投影到 live 进度快照。elapsedSeconds/currentActivity/eventLog 均现算派生。
- * 供 WorkflowsView 在 agent 运行期间读取实时进度。
- */
-export function projectLiveProgress(record: ExecutionRecord): {
-  status: ExecutionRecord["status"];
-  turns: number;
-  totalTokens: number;
-  elapsedSeconds: number;
-  eventLog: AgentEventLogEntry[];
-  currentActivity: ReturnType<typeof getCurrentActivity>;
-  lastError: string | undefined;
-} {
-  return {
-    status: record.status,
-    turns: record.turnCount,
-    totalTokens: record.totalTokens,
-    elapsedSeconds: computeElapsedSeconds(record),
-    eventLog: getEventLog(record),
-    currentActivity: getCurrentActivity(record),
-    lastError: record.lastError,
-  };
-}
-
-/**
  * 投影到只读快照（TUI list / poll 消费）。
  * 浅拷贝 turns[]，字段标 readonly 阻止 TUI 回写。
  */
@@ -940,136 +915,4 @@ export function snapshot(record: ExecutionRecord): RecordSnapshot {
     error: record.error,
     sessionFile: record.sessionFile,
   };
-}
-
-// ============================================================
-// JSONL → AgentEvent 翻译（从 live/jsonl-to-agent-event 迁入）
-// ============================================================
-
-/** subprocess JSONL 事件（JSON.parse 结果）。duck-typed，对应 SDK SdkEvent。 */
-type JsonlEvent = Record<string, unknown>;
-
-// ── 各 case 翻译器（jsonlToAgentEvent 按 case 分发，每个翻译器单一职责）──
-
-/** tool_execution_start → tool_start。toolName 非字符串归一空串（与原实现一致）。 */
-function translateToolExecutionStart(raw: JsonlEvent): AgentEvent[] {
-  const toolName = typeof raw.toolName === "string" ? raw.toolName : "";
-  return [{ type: "tool_start", toolName, args: raw.args }];
-}
-
-/** tool_execution_end → tool_end。isError 仅在 === true 时成立；result 原样透传。 */
-function translateToolExecutionEnd(raw: JsonlEvent): AgentEvent[] {
-  const toolName = typeof raw.toolName === "string" ? raw.toolName : "";
-  const isError = raw.isError === true;
-  return [{
-    type: "tool_end",
-    toolName,
-    args: raw.args,
-    result: raw.result as ToolCallResult | undefined,
-    isError,
-  }];
-}
-
-/**
- * message_update → thinking_delta / text_delta。
- *   ame.type === "thinking_delta"（delta 非字符串归一空串）
- *   其余 ame（delta 有值）→ text_delta（delta 非字符串 String() 归一）
- *   ame 缺失 / delta 缺失 → 不产出。
- */
-function translateMessageUpdate(raw: JsonlEvent): AgentEvent[] {
-  const ame = raw.assistantMessageEvent as Record<string, unknown> | undefined;
-  if (ame?.type === "thinking_delta") {
-    const delta = typeof ame.delta === "string" ? ame.delta : "";
-    return [{ type: "thinking_delta", delta }];
-  }
-  if (ame !== undefined && ame.delta !== undefined) {
-    const delta = typeof ame.delta === "string" ? ame.delta : String(ame.delta);
-    return [{ type: "text_delta", delta }];
-  }
-  return [];
-}
-
-/**
- * 把一条 JSONL 事件翻译成 AgentEvent。
- *
- * 返回 undefined 表示该事件不映射到任何 AgentEvent（如 session header、message_start），
- * 调用方应跳过。
- *
- * 一个 JSONL 事件可能产出**多条** AgentEvent（message_end 的 usage + error 各一条），
- * 故返回数组。绝大多数情况长度为 0 或 1；message_end 最多 2 条。
- */
-export function jsonlToAgentEvent(raw: JsonlEvent): AgentEvent[] {
-  const type = raw.type;
-
-  switch (type) {
-    case "session":
-    case "message_start":
-    case "turn_start":
-      return [];
-
-    // 工具执行期活性信号（与 pi 侧 spawn-event-translator 的 TOOL_ACTIVITY_EVENT 同
-    // 语义）：不产数据，只驱动宿主无进展守护刷新。
-    case "tool_execution_update":
-      return [{ type: "activity" }];
-
-    case "tool_execution_start":
-      return translateToolExecutionStart(raw);
-
-    case "tool_execution_end":
-      return translateToolExecutionEnd(raw);
-
-    case "message_update":
-      return translateMessageUpdate(raw);
-
-    case "turn_end": {
-      return [{ type: "turn_end" }];
-    }
-
-    case "message_end": {
-      return accumulateMessageEndForRecord(raw);
-    }
-
-    case "compaction_start": {
-      return [{ type: "compaction" }];
-    }
-
-    default:
-      return [];
-  }
-}
-
-/** message_end 翻译：usage 拍平 + stopReason=error/aborted 额外产 error 事件。 */
-function accumulateMessageEndForRecord(raw: JsonlEvent): AgentEvent[] {
-  const events: AgentEvent[] = [];
-  const msg = raw.message as Record<string, unknown> | undefined;
-  const usageRaw = (typeof msg?.usage === "object" && msg.usage !== null) 
-    ? msg.usage as Record<string, unknown> 
-    : undefined;
-
-  if (usageRaw) {
-    const costObj = (typeof usageRaw.cost === "object" && usageRaw.cost !== null)
-      ? usageRaw.cost as Record<string, unknown>
-      : undefined;
-    // MF-3 fix: 显式提取字段 + Number.isFinite 守卫，不使用 spread + as 断言
-    const numOrZero = (v: unknown): number =>
-      typeof v === "number" && Number.isFinite(v) ? v : 0;
-    const usage: AgentUsage = {
-      input: numOrZero(usageRaw.input),
-      output: numOrZero(usageRaw.output),
-      cacheRead: numOrZero(usageRaw.cacheRead),
-      cacheWrite: numOrZero(usageRaw.cacheWrite),
-      cost: typeof costObj?.total === "number" ? costObj.total : undefined,
-    };
-    events.push({ type: "message_end", usage });
-  }
-
-  const stopReason = msg?.stopReason;
-  if (stopReason === "error" || stopReason === "aborted") {
-    const errorMessage = typeof msg?.errorMessage === "string"
-      ? msg.errorMessage
-      : (typeof raw.reason === "string" ? raw.reason : String(stopReason));
-    events.push({ type: "error", message: errorMessage });
-  }
-
-  return events;
 }

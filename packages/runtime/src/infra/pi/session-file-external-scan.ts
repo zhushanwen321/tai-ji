@@ -274,17 +274,16 @@ async function extractExternalMeta(filePath: string): Promise<ExternalSessionMet
 }
 
 /**
- * 异步读 JSONL 首行（4KB 块 + 超长首行续读）。
+ * 异步读 JSONL 首行的唯一实现（4KB 块 + 超长首行续读；外部扫描与导入源共用）。
  *
- * 与 import-service.ts 的 readFirstLineAsync 同模式（本模块为 infra 层，不能反向 import
- * services 层抽共用；两处语义由 D3 二次修订锁定同步）。块内无换行且未读满（文件本身小于
- * 块）按无首行终止处理；块读满仍无换行（首行超长）继续续读——等价于全量读首行的语义。
- * 空文件返回 null。
+ * 块内无换行且未读满（文件本身小于块）按无首行终止处理；块读满仍无换行（首行超长）
+ * 继续续读——等价于全量读首行的语义。空文件返回 null。接收已打开的 FileHandle，
+ * 句柄开闭归调用方（扫描侧复用同一句柄；导入源侧 open → 本函数 → close）。
  *
  * 跨块解码（r1-S2）：块以 Buffer 累积、检测换行时 Buffer.concat 后整体 toString——
  * 逐块 toString 会在多字节 UTF-8 字符（CJK）跨 4KB 块边界时拆出 U+FFFD。
  */
-async function readFirstLineViaHandle(fh: FileHandle): Promise<string | null> {
+export async function readFirstLineViaHandle(fh: FileHandle): Promise<string | null> {
   const buffer = Buffer.alloc(HEADER_CHUNK_BYTES)
   const chunks: Buffer[] = []
   for (;;) {
@@ -292,9 +291,8 @@ async function readFirstLineViaHandle(fh: FileHandle): Promise<string | null> {
     if (bytesRead === 0) {
       return chunks.length > 0 ? Buffer.concat(chunks).toString('utf-8') : null
     }
-    // 换行先在原始 Buffer 上定位（与 import-service 的 readFirstLineAsync 同步：避免逐块
-    // Buffer.concat 的 O(n²) 复制）；换行前内容才入 chunks，最终一次性 concat 解码
-    //（跨块 CJK 多字节字符仍完整）。
+    // 换行先在原始 Buffer 上定位（避免逐块 Buffer.concat 的 O(n²) 复制）；换行前内容
+    // 才入 chunks，最终一次性 concat 解码（跨块 CJK 多字节字符仍完整）。
     const nl = buffer.subarray(0, bytesRead).indexOf('\n'.charCodeAt(0))
     if (nl >= 0) {
       chunks.push(Buffer.from(buffer.subarray(0, nl)))

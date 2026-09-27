@@ -173,10 +173,10 @@ async function partA() {
   );
 
   // ── S5①：discoverAgents 装配（tmp fixture agentDir 作 hostRoot） ──
-  // hostRoots[].source 是封闭 9 值 ResourceSource 枚举（dist/index.d.ts 类型面）；
-  // 第三宿主注入项目级根的设计通道 = "project-host"（zsw <ws>/.zcode/agents 同款）。
+  // hostRoots[].source 是封闭 8 值 ResourceSource 枚举（dist/index.d.ts 类型面）；
+  // 第三宿主注入项目级根走 "project-agents" 标签（序位高于 project-pi 的项目级通道）。
   const workspaceRoot = repoRoot;
-  const entries = await core.discoverAgents(workspaceRoot, [{ dir: agentDir, source: "project-host" }]);
+  const entries = await core.discoverAgents(workspaceRoot, [{ dir: agentDir, source: "project-agents" }]);
   const names = entries.map((e) => e.name);
   check(
     "S5① discoverAgents: t-sink 在列且码点序（a-plain 先于 t-sink）",

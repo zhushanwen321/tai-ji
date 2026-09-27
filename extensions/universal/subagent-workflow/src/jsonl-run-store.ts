@@ -235,8 +235,12 @@ async function loadRunFromStateFile(filePath: string): Promise<WorkflowRun | nul
     const parsed: unknown = JSON.parse(lastLine);
     // D-5: undefined = old format / version mismatch / corrupt shape — skip silently
     return fromRunSnapshot(parsed) ?? null;
-  } catch {
-    // Corrupt/unreadable state file — skip (don't crash loadAll).
+  } catch (err) {
+    // Corrupt/unreadable state file — skip (don't crash loadAll)，降级语义保持；
+    // warn 留证（含文件路径与原因）防静默丢 run 无从归因。
+    logger.warn(
+      `[subagent-workflow] legacy state-link target unreadable, run skipped: ${filePath}: ${toErrorMessage(err)}`,
+    );
     return null;
   }
 }
@@ -573,6 +577,16 @@ export class JsonlRunStore {
         await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
       } catch (err) {
         if (isEnoentError(err)) {
+          // resolve 语义保持（sessionDir 已删场景持久化无意义也无法完成），但按
+          // run 形态分通道留痕：终态快照未落盘是数据损失面（warn 可归因「session
+          // 目录被外部删除」）；running 中间态丢一拍等价崩溃语义（debug 即可，
+          // 日志携带 status 供读上下文归因）。
+          const msg = `state flush skipped, session dir missing (likely externally removed): runId=${runId} status=${run.state.status}`;
+          if (run.state.status !== "running") {
+            logger.warn(`[subagent-workflow] ${msg} (terminal snapshot NOT persisted)`);
+          } else {
+            logger.debug(`[subagent-workflow] ${msg}`);
+          }
           for (const s of settlers) s.resolve();
           return;
         }
@@ -633,6 +647,14 @@ export class JsonlRunStore {
       // state 文件双双缺失——等价崩溃丢失，由 kill-9 恢复兜底。
       if (rollbackFirstWrite) {
         this.writtenOnce.delete(runId);
+      }
+      if (settlers.length === 0) {
+        // 边沿触发路径（事件边沿 flush / resendSnapshots 以空 settlers 入链）：
+        // 错误无 save() 调用方可 reject，enqueueFlush 链尾吞——此处 warn 留证防
+        // 静默丢失。settlers 非空时错误经 reject 传播，不重复留痕。
+        logger.warn(
+          `[subagent-workflow] state flush failed on caller-less flush (edge-triggered/resend, error otherwise swallowed): runId=${runId}: ${toErrorMessage(err)}`,
+        );
       }
       for (const s of settlers) s.reject(err);
     }
@@ -906,8 +928,11 @@ export class JsonlRunStore {
         if (run) runs.push(run);
       }
     } catch (err) {
- // getEntries failed — return what we have (empty).
-      void err;
+      // getEntries failed — 返回已收集结果（空集降级语义保持），但必须 error 留痕：
+      // 静默空集会把 session 文件读故障伪装成「无 run 历史」，恢复无从下手。
+      logger.error(
+        `[subagent-workflow] loadAll: getEntries failed, returning empty run set (degraded). Recovery: check session file readability: ${toErrorMessage(err)}`,
+      );
     }
     return runs;
   }

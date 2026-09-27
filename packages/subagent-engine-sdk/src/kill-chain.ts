@@ -17,13 +17,10 @@
 
 import { getLogger } from "./logger.ts";
 import { toErrorMessage } from "./error-message.ts";
-import { engineTimeoutDetail, STDOUT_TAIL_ECHO_CHARS } from "./protocol/error-codes.ts";
+import { engineTimeoutDetail } from "./protocol/error-codes.ts";
 import type { AgentCallOpts, AgentOutcome } from "./protocol/contract-types.ts";
 
 const logger = getLogger("subagents");
-
-/** STDOUT_TAIL_ECHO_CHARS re-export（core 版同款导出面，调用方免跨模块 import）。 */
-export { STDOUT_TAIL_ECHO_CHARS };
 
 // ============================================================
 // 杀链（SIGTERM → grace → SIGKILL）
@@ -117,7 +114,7 @@ export async function killChain(
  * （zsub 实测经验）——幂等吞掉并 debug 留痕，不阻断杀链语义（对已退进程信号本就是
  * no-op）。收口自 zcode launcher 的内联实现（对齐点②：单一权威）。
  */
-function safeKill(child: KillableChild, signal: NodeJS.Signals): void {
+export function safeKill(child: KillableChild, signal: NodeJS.Signals): void {
   try {
     child.kill(signal);
   } catch (err) {

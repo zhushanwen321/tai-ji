@@ -52,8 +52,8 @@ import type { AgentRunner, LifecycleDeps, WorkerHandlers } from "./models/ports.
 import {
   createRunEventJournal,
   finalRunErrorCodeOf,
+  foldRunEventFrames,
   IllegalTransitionError,
-  INITIAL_RUN_STATE,
   RUN_EVENT_TYPES,
   transition,
   type RunErrorCode,
@@ -76,16 +76,10 @@ import type {
 } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 // [P1b-2] manifest-write 输出动作的写入面（D5 终局投影）：manifest 落
-// <workflow-state>/<runId>.json、.state 收条落 <runId>.jsonl.state（state-marker
-// 同族写函数）。execution/persistence 不回指 orchestration（manifest-store 的
-// run-events 依赖是纯 type import），无循环。
-import { join } from "node:path";
+// <workflow-state>/<runId>.json。execution/persistence 不回指 orchestration
+//（manifest-store 的 run-events 依赖是纯 type import），无循环。
 
 import { writeRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
-// writeRunStateProjection 是 run 域（workflow run）.state 投影的独立原语（与
-// record 域 writeSettledState 分立——R1 写面守卫按域分立语义，store 外直调
-// record 域七名原语被 scripts/check-record-write-surface.mjs 拦截）。
-import { writeRunStateProjection } from "../execution/persistence/state-marker.ts";
 import type { WorkerHandle } from "./worker-handle.ts";
 import { toErrorMessage } from "../core/error-message.ts";
 // [P1b-1] settle 链收口（execution service 三处直写点删除后的单点）+ journal 目录
@@ -484,20 +478,13 @@ function resolveRunEventJournal(): { dir: string; journal: RunEventJournal } {
 async function foldRunState(runId: string): Promise<RunState> {
   const { journal } = resolveRunEventJournal();
   const events = await journal.scan(runId);
-  let state = INITIAL_RUN_STATE;
-  for (const event of events) {
-    try {
-      state = transition(state, event).state;
-    } catch (err) {
-      // journal 坏链（历史帧与当前表不兼容）：投影失效模式 = 保守停在最近一致态
-      // （warn 留痕不炸链），与 scan 侧坏行容忍同一精神。
-      runEventLogger.warn(
-        `run-event journal fold stopped at a broken frame (runId=${runId}, lastType=${event.type}): ${toErrorMessage(err)}`,
-      );
-      break;
-    }
-  }
-  return state;
+  return foldRunEventFrames(events, (err, lastType) => {
+    // journal 坏链（历史帧与当前表不兼容）：投影失效模式 = 保守停在最近一致态
+    // （warn 留痕不炸链），与 scan 侧坏行容忍同一精神。
+    runEventLogger.warn(
+      `run-event journal fold stopped at a broken frame (runId=${runId}, lastType=${lastType}): ${toErrorMessage(err)}`,
+    );
+  });
 }
 
 /**
@@ -546,8 +533,8 @@ async function appendTransition(
     const { journal } = resolveRunEventJournal();
     await journal.append(run.runId, journalEventOf(trigger));
   }
-  // [P1b-2] manifest-write 终局投影：manifest（<runId>.json）+ .state（<runId>.jsonl.state）
-  // 落 outcome/errorCode（D5-④ 输出动作统一——执行面收口在本函数，persistTerminalProjection）。
+  // [P1b-2] manifest-write 终局投影：manifest（<runId>.json）落 outcome/errorCode
+  //（D5-④ 输出动作统一——执行面收口在本函数，persistTerminalProjection）。
   if (outputs.includes("manifest-write")) {
     const projectionDir = resolveRunEventJournal().dir;
     if (projectionDir === "") {
@@ -556,7 +543,7 @@ async function appendTransition(
       // flushMicrotasks 固定 tick 窗口，无注入测试的时序须与 P1b-1 基线逐位同构）。
       runEventLogger.warn(
         "run terminal projection skipped: vitest env without setRunEventJournalDirForTest(dir) — " +
-          "manifest/.state not written (prevents writes to the real workflow-state dir)",
+          "manifest not written (prevents writes to the real workflow-state dir)",
       );
     } else {
       await persistTerminalProjection(run, next, trigger, projectionDir);
@@ -567,11 +554,8 @@ async function appendTransition(
 
 /**
  * manifest-write 输出动作的执行面（[P1b-2] D5 终态投影）：
- * - manifest = `<workflow-state>/<runId>.json`（RunTerminalManifest——「已终局」
- *   单源锚定 = outcome 非空，保留清理资格判定与 Q2 放弃窗终局化的共同读面）；
- * - .state = `<workflow-state>/<runId>.jsonl.state`（writeRunStateProjection——
- *   run 域 .state 投影专用原语，与 record 域 writeSettledState 分立（R1 写面
- *   守卫按域分立语义），挂 run state 文件 stem）。
+ * manifest = `<workflow-state>/<runId>.json`（RunTerminalManifest——「已终局」
+ * 单源锚定 = outcome 非空，保留清理资格判定与 Q2 放弃窗终局化的共同读面）。
  *
  * errorCode 取自 run-settled 事件载荷（失败终局的结构化码）；cancel-requested
  * 合成路径无结构化码（缺省）；abandon-elapsed 行的 interrupted_abandoned 由 Q2
@@ -581,7 +565,7 @@ async function appendTransition(
  *
  * 目录解析复用 journal 同源（resolveRunEventJournal——生产推导
  * resolvePiWorkflowStateDir，测试经 setRunEventJournalDirForTest 注入一次覆盖
- * journal/manifest/.state 三面）；vitest 无注入防线（dir=""）下跳过写入并 warn
+ * journal/manifest 两面）；vitest 无注入防线（dir=""）下跳过写入并 warn
  * 留痕（禁触真实数据目录红线，与 no-op journal 同一防线语义）。
  *
  * 失败处置 = error 留痕不抛（对齐 journal 侧「取证面失败不阻断 coda」：终局
@@ -631,17 +615,6 @@ async function persistTerminalProjection(
   } catch (err) {
     runEventLogger.error(
       `run terminal manifest write failed (runId=${run.runId}): ${toErrorMessage(err)}`,
-    );
-  }
-  const stateOk = writeRunStateProjection(join(dir, `${run.runId}.jsonl`), {
-    endedAt: settledAt,
-    outcome,
-    ...(errorCode !== undefined ? { errorCode } : {}),
-  });
-  if (!stateOk) {
-    // writeRunStateProjection 内部已 error 留痕（含恢复指引）；此处补终局上下文便于归因。
-    runEventLogger.error(
-      `run terminal .state projection not persisted (runId=${run.runId}) — prune eligibility unaffected (manifest is the single-source anchor)`,
     );
   }
 }
@@ -796,7 +769,15 @@ export function dispatchAskDispatched(run: WorkflowRun, callId: number, agentNam
  *  上报判据见 SDK AgentOutcome.stderrTeePath 注释；成功/cancelled 不带）。 */
 export function dispatchAskSettled(run: WorkflowRun, call: AgentCall, aborted: boolean): void {
   const result = call.result;
-  if (!result) return; // AgentCall 状态机前置保证 done ⟹ result；防御性静默
+  if (!result) {
+    // [加固] 防御分支出声（原静默 return）：done ⟹ result 契约被破坏（ask-dispatched
+    // 已落账而 settled 结果缺失），journal 出现无 ask-settled 尾的悬空 ask 序列——warn 留锚点。
+    runEventLogger.warn(
+      `ask-settled dropped: ask-dispatched journaled but settled result missing ` +
+        `(runId=${run.runId}, callId=${call.id}, status=${call.status})`,
+    );
+    return;
+  }
   const outcome: RunOutcome = aborted ? "cancelled" : result.error === undefined ? "completed" : "failed";
   const errorCode: RunErrorCode | undefined =
     outcome === "failed" ? (result.failureKind ?? "unknown") : undefined;
@@ -1235,8 +1216,16 @@ export async function handleWorkerMessage(
   deps: LifecycleDeps,
   handlers: WorkerHandlers,
 ): Promise<void> {
-  // 终态（done）丢弃 stale 消息（P0-1）
-  if (isTerminal(run)) return;
+  // 终态（done）丢弃 stale 消息（P0-1）——[加固] debug 留痕（原静默 return；type 于 M7 校验前自 raw 安全提取）。
+  if (isTerminal(run)) {
+    const type = typeof raw === "object" && raw !== null
+      ? (raw as { type?: unknown }).type
+      : null;
+    logger.debug(
+      `[workflow] stale worker message dropped on terminal run (runId=${run.runId}, type=${JSON.stringify(type)})`,
+    );
+    return;
+  }
 
   // M7: 形状校验——防畸形 IPC 消息（worker 崩溃/发非对象）导致下游 TypeError
   if (typeof raw !== "object" || raw === null) return;
@@ -1342,11 +1331,16 @@ function dispatchAgentCall(
   msg: AgentCallMsg,
   deps: LifecycleDeps,
 ): void {
-  // M4: IPC 字段校验——畸形 agent-call 消息（opts 非对象/缺失、callId 非数字、prompt 缺失）
-  // 不写 trace / 不 postAgentResult——这类消息通常意味着 worker 模块版本不匹配或内存损坏，
-  // 回发结果给 worker 也没意义（worker 可能已崩）。仅记日志，让 worker timeout/exit 路径接管。
+  // M4: IPC 字段校验——畸形 agent-call 消息不写 trace / 不建 call（worker/main 模块
+  // 不匹配疑号）。[加固] callId 合法（worker 侧有对应 pending）时回发可克隆 error
+  // result 让 worker 内 agent() pending 收敛（原仅日志 return = pending 永挂）；callId
+  // 非法无法定向回发，仅日志。
   if (isMalformedAgentCallMsg(msg)) {
     logger.error(`[workflow] malformed agent-call message: callId=${JSON.stringify(msg.callId)}, opts=${JSON.stringify(msg.opts)?.slice(0, MALFORMED_MSG_LOG_PREVIEW_CHARS)}`);
+    if (typeof msg.callId === "number" && Number.isFinite(msg.callId)) {
+      const dropped = "malformed message dropped: agent-call IPC fields invalid (worker/main module mismatch suspected)";
+      postAgentResult(run, msg.callId, { content: "", error: dropped }, false);
+    }
     return;
   }
 
@@ -1609,11 +1603,25 @@ function dispatchWorkflowCall(
   msg: WorkflowCallMsg,
   deps: LifecycleDeps,
 ): void {
-  // M4: IPC 字段校验——畸形 workflow-call 消息
+  // M4: IPC 字段校验——畸形 workflow-call 消息。[加固] callId 合法（worker 侧有对应
+  // pending）时回发可克隆 error result 让 worker 内 workflow() pending 收敛（原仅日志
+  // return = pending 永挂）；callId 非法无法定向回发，仅日志。回发走 try/catch：纯字符串
+  // result 必可克隆，仅通道死（worker 已终）才可能抛，留痕即可。
   if (typeof msg.callId !== "number" || !Number.isFinite(msg.callId) ||
       typeof msg.name !== "string" ||
       typeof msg.args !== "object" || msg.args === null) {
     logger.error(`[workflow] malformed workflow-call message: callId=${JSON.stringify(msg.callId)}, name=${JSON.stringify(msg.name)}`);
+    if (typeof msg.callId === "number" && Number.isFinite(msg.callId)) {
+      try {
+        run.runtime?.worker.postMessage({
+          type: "workflow-result",
+          callId: msg.callId,
+          result: { content: "", error: "malformed message dropped: workflow-call IPC fields invalid (worker/main module mismatch suspected)" },
+        });
+      } catch (err) {
+        logger.error(`[workflow] malformed workflow-call error-reply failed (callId=${msg.callId}): ${toErrorMessage(err)}`);
+      }
+    }
     return;
   }
 
@@ -1769,9 +1777,14 @@ export async function handleWorkerError(
   deps: LifecycleDeps,
   handlers: WorkerHandlers,
 ): Promise<void> {
-  // 与 handleWorkerMessage 对称——终态（done）丢弃 stale error。
-  // 否则终态后到达的 worker error 仍会 workerErrorCount++（污染跨 runtime 计数）。
-  if (isTerminal(run)) return;
+  // 与 handleWorkerMessage 对称——终态（done）丢弃 stale error（否则 workerErrorCount
+  // 被污染）。[加固] debug 留痕（原静默 return）。
+  if (isTerminal(run)) {
+    logger.debug(
+      `[workflow] stale worker error dropped on terminal run (runId=${run.runId}, event=worker-error, message=${JSON.stringify(err.message)})`,
+    );
+    return;
+  }
 
   // [R4-F1] 同代际幂等守卫：worker 崩溃时 error + exit(1) 双事件各派发一次
   // handleWorkerError（onError 先到，exit 非 0 经 handleWorkerExit 委托二次到达）——
@@ -1824,9 +1837,20 @@ export async function handleWorkerExit(
   deps: LifecycleDeps,
   handlers: WorkerHandlers,
 ): Promise<void> {
-  // G-025: stale exit 事件丢弃（handle 已不是当前 runtime 的 worker）
-  if (!handle.isCurrent) return;
-  if (isTerminal(run)) return;
+  // G-025: stale exit 事件丢弃（handle 已不是当前 runtime 的 worker）——[加固] debug
+  // 留痕（原静默 return，丢弃不可观测）。
+  if (!handle.isCurrent) {
+    logger.debug(
+      `[workflow] stale worker exit dropped (runId=${run.runId}, event=worker-exit, code=${code}, handle not current generation)`,
+    );
+    return;
+  }
+  if (isTerminal(run)) {
+    logger.debug(
+      `[workflow] stale worker exit dropped on terminal run (runId=${run.runId}, event=worker-exit, code=${code})`,
+    );
+    return;
+  }
 
   if (code === 0) {
     // 本代际已交付终态消息 → 正常收尾 / 重试退避窗口，no-op（rebuild 负责后续）
