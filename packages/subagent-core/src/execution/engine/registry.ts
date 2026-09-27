@@ -303,7 +303,7 @@ export function registerEngineDescriptor(id: string, descriptor: EngineDescripto
 
 /**
  * [R1 D6③] 对已实例化的引擎单例触发 dispose（触发不等待）。宿主唯一收割入口
- * （session-runner killAllSpawnedChildren）在杀 per-record children 之前调用——
+ * （session-runner markAllSpawnedChildrenDead）在杀 per-record children 之前调用——
  * 常驻进程的回收归引擎 dispose，本函数只负责按序触发。
  *
  * 只遍历 singletons：已实例化才可能持有常驻资源，绝不经 getEngine 实例化未用

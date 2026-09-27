@@ -51,7 +51,7 @@
 | `AgentRunner`, `RunStore`, `WorkerHost`, `WorkerHandlers` | type | 编排层 port 契约（宿主自写 Infra 实现时的契约面） |
 | `registerZcodeEngine(engineDataDir?)` | fn | 把 `zcode` 引擎登记进 registry（组合根调用，幂等、工厂惰性） |
 | `createZcodeEngine(deps)` | fn | zcode 引擎 DI 工厂（测试/宿主注入 `ZcodeEngineDeps`） |
-| `killAllSpawnedChildren(signal?)` | fn | 全量收割记账（宿主 shutdown 钩子消费）：镜像整体置死，返回记账条数；实际终止经协议 cancel/close / EngineClient killAll，本函数不直接发信号（`signal` 参仅为旧签名兼容，已忽略） |
+| `markAllSpawnedChildrenDead()` | fn | 全量收割记账（宿主 shutdown 钩子消费）：镜像整体置死，返回记账条数；实际终止经协议 cancel/close / EngineClient killAll，本函数不直接发任何进程信号 |
 | `CORE_PACKAGE_VERSION` | const | 包版本常量（与 package.json 同步维护） |
 
 ### 语义子入口（双端复用链专用）

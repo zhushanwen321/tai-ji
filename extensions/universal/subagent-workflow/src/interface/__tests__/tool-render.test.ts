@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Component } from "@earendil-works/pi-tui";
 
-import { type RenderContext, renderSubagentCall } from "../tool-render.ts";
+import { type RenderContext, renderSubagentCall, renderSubagentResult } from "../tool-render.ts";
 
 // ── 最小 ThemeLike stub ──
 // renderSubagentCall 只用 theme.fg/bold/dim（都是 (token, text) => string）。
@@ -46,7 +46,6 @@ function renderText(component: Component): string {
 }
 
 const CTX: RenderContext = {
-  state: {} as Record<string, never>,
   invalidate: () => {},
 };
 
@@ -120,5 +119,109 @@ describe("renderSubagentCall — 拍平形态提取（regression for wave 3 flat
   it("args 缺所有字段时不崩（最防御）", () => {
     expect(() => renderSubagentCall({}, makeTheme() as never, CTX)).not.toThrow();
     expect(() => renderSubagentCall(undefined, makeTheme() as never, CTX)).not.toThrow();
+  });
+});
+
+// ============================================================
+// renderSubagentResult — expanded / compact 分支等价（字节级回归锁）
+// ============================================================
+//
+// buildExpandedLines 收敛为「compact + list/fork-from 特例」后的守卫：cancel /
+// start(bg) 分支的 expanded 输出必须与 compact 逐字节相同（同一 render 宽度下
+// 的完整字符串数组相等）；list / fork-from 的既有差异（session 行追加 / 源文件
+// 完整路径 vs basename）锁住不被收敛误伤。
+
+/** renderSubagentResult 的 result 入参形态（经函数签名推导，不依赖 mock 类型桩）。 */
+type RenderResultInput = Parameters<typeof renderSubagentResult>[0];
+
+/** 字节级比较用的渲染宽度（大于全部用例行宽，规避 truncLine 截断差异）。 */
+const BYTE_LOCK_WIDTH = 160;
+
+function renderBoth(details: unknown): { compact: string[]; expanded: string[] } {
+  const result = { content: [{ type: "text", text: "{}" }], details } as RenderResultInput;
+  const theme = makeTheme() as never;
+  const compact = renderSubagentResult(
+    result,
+    { expanded: false, isPartial: false },
+    theme,
+    CTX,
+  ).render(BYTE_LOCK_WIDTH);
+  const expanded = renderSubagentResult(
+    result,
+    { expanded: true, isPartial: false },
+    theme,
+    CTX,
+  ).render(BYTE_LOCK_WIDTH);
+  return { compact, expanded };
+}
+
+describe("renderSubagentResult — expanded 与 compact 的分支关系（字节级）", () => {
+  it("cancel：expanded 输出与 compact 逐字节相同", () => {
+    const details = {
+      action: "cancel",
+      subagentId: "sa-cancel1",
+      sessionFile: null,
+      cancelResponse: { cancelled: true },
+    };
+    const { compact, expanded } = renderBoth(details);
+    expect(expanded).toEqual(compact);
+    expect(expanded.join("\n")).toContain("cancelled ");
+    expect(expanded.join("\n")).toContain("sa-cancel1");
+  });
+
+  it("start(bg)：expanded 输出与 compact 逐字节相同", () => {
+    const details = {
+      action: "start",
+      subagentId: "sa-start1",
+      sessionFile: null,
+      slug: "fix-login",
+      model: undefined,
+      bgResponse: { status: "running", mode: "background", message: "detached" },
+    };
+    const { compact, expanded } = renderBoth(details);
+    expect(expanded).toEqual(compact);
+    expect(expanded.join("\n")).toContain("background: ");
+    expect(expanded.join("\n")).toContain("sa-start1");
+  });
+
+  it("fork-from：expanded 用完整源路径，compact 用 basename 短标签（差异锁定）", () => {
+    const details = {
+      action: "fork-from",
+      subagentId: "sa-new1",
+      sessionFile: null,
+      forkFromResponse: {
+        newSubagentId: "sa-new1",
+        sourceSessionFile: "/tmp/sessions/old-abc.jsonl",
+      },
+    };
+    const { compact, expanded } = renderBoth(details);
+    expect(compact.join("\n")).not.toContain("/tmp/sessions/");
+    expect(compact.join("\n")).toContain("old-abc.jsonl");
+    expect(expanded.join("\n")).toContain("/tmp/sessions/old-abc.jsonl");
+  });
+
+  it("list：expanded 在 compact 之上追加 session 行（差异锁定）", () => {
+    const details = {
+      action: "list",
+      subagentId: null,
+      sessionFile: null,
+      listResponse: {
+        running: 1,
+        items: [{
+          subagentId: "sa-1",
+          agent: "worker",
+          slug: "scan",
+          status: "running",
+          duration: 12,
+          sessionFile: "/tmp/sessions/sa-1.jsonl",
+        }],
+      },
+    };
+    const { compact, expanded } = renderBoth(details);
+    expect(compact.join("\n")).not.toContain("session: ");
+    expect(expanded.join("\n")).toContain("/tmp/sessions/sa-1.jsonl");
+    expect(compact.join("\n")).not.toContain("/tmp/sessions/sa-1.jsonl");
+    // compact 的行是 expanded 的前缀（追加不修改既有行）
+    expect(expanded.slice(0, compact.length)).toEqual(compact);
   });
 });

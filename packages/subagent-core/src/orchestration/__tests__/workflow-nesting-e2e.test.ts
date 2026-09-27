@@ -49,6 +49,9 @@ function makeScript(opts: { valid?: boolean; lintErrorMsg?: string } = {}): Work
   return {
     name: "child-wf",
     path: "/fake/child-wf.js",
+    // available 必填：真实 WorkflowScript 实体恒带 boolean available（registry.toScript
+    // 必设），launcher 的 W4c 守卫按 !script.available 拒单——缺字段会被误判不可用。
+    available: true,
     meta: { name: "child-wf", description: "child workflow", phases: [] },
     toExecutable: () => "const meta = {}; execute() {}",
     validate: (): LintResult => ({

@@ -114,7 +114,7 @@ spawn 单轮是 D-010（`.taiji-harness/subagent-engine-abstraction/decisions.md
 
 **接口层缺口（A 级，两处）**：
 
-- **缺口一：常驻进程无停机面**。EnginePort 无 `dispose/shutdown` 方法。宿主唯一收割器 `killAllSpawnedChildren`（session-runner.ts:351-377）遍历 `spawnedChildren: Map<recordId, ChildProcess>`，**每 record 恰一个 child 的 set 覆盖语义**：共享常驻进程若按任务注册会被重复 SIGTERM，若不注册则 shutdown 后泄漏孤儿 app-server 进程。单任务 abort 若沿用 `proc.abort` → killChain 会**杀死共享进程殃及全部在途任务**。
+- **缺口一：常驻进程无停机面**。EnginePort 无 `dispose/shutdown` 方法。宿主唯一收割器 `markAllSpawnedChildrenDead`（session-runner.ts:351-377）遍历 `spawnedChildren: Map<recordId, ChildProcess>`，**每 record 恰一个 child 的 set 覆盖语义**：共享常驻进程若按任务注册会被重复 SIGTERM，若不注册则 shutdown 后泄漏孤儿 app-server 进程。单任务 abort 若沿用 `proc.abort` → killChain 会**杀死共享进程殃及全部在途任务**。
 - **缺口二：运行中句柄不可达（r2 审查发现）**。`record.engineHandle` 现状在 `await engine.run` resolve 后才回填（subagent-service.ts:1746），而 RunContext 现有回调面（onEvent / onPoolResolved / onChildSpawned，port.ts:43-92）没有任何通道能在 run resolve 前把引擎内部的 sessionRef 传给编排层——运行中 GUI 经 entry 重建 record 时 engineHandle 为 undefined，读取链恒落 ③级 outcome-only（subagent-engine-history.ts:122-129）。
 
 **B 级（引擎目录内部）**：launcher.ts（唯一持有 spawn 权）、parser.ts（stdout 单 JSON 解析）、zcode-engine.ts（run 编排/abort/重试）、constants.ts、golden-sample.ts、registration.ts 需实质改动；preparer.ts（凭据/池）与 reader.ts（node:sqlite 三表 JOIN 读 SessionView，零进程依赖）基本不动。
@@ -205,12 +205,12 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 - 依据：改链路再改声明（C4）；`eventGranularity` 生产零消费方（盘点证实），翻转无下游风险；其余能力位的消费方（assertEngineParamSupport）会在能力未就绪时正确拒绝。
 - 版本语义：capabilities 声明变化属消费方可见语义变化 → core 发 minor 版本。
 
-**D6 停机面 = EnginePort 新增可选 `dispose?(): Promise<void>`，`killAllSpawnedChildren` 编排扩容**（唯一 A 级改动）
-- 选择：①`EnginePort.dispose?()`——引擎释放常驻资源（close 全部会话 → SIGTERM → grace → SIGKILL，幂等）；②registry 重注册同名引擎时先 dispose 旧实例（防泄漏）；③宿主唯一收割入口 `killAllSpawnedChildren` 改为「先遍历 registry dispose 引擎，再杀 per-record children」——**宿主调用点零改动**即覆盖常驻进程回收（zsw shutdown 与 pi 壳 dispose 都走这个入口）。
+**D6 停机面 = EnginePort 新增可选 `dispose?(): Promise<void>`，`markAllSpawnedChildrenDead` 编排扩容**（唯一 A 级改动）
+- 选择：①`EnginePort.dispose?()`——引擎释放常驻资源（close 全部会话 → SIGTERM → grace → SIGKILL，幂等）；②registry 重注册同名引擎时先 dispose 旧实例（防泄漏）；③宿主唯一收割入口 `markAllSpawnedChildrenDead` 改为「先遍历 registry dispose 引擎，再杀 per-record children」——**宿主调用点零改动**即覆盖常驻进程回收（zsw shutdown 与 pi 壳 dispose 都走这个入口）。
 - 常驻进程**不进** `spawnedChildren: Map<recordId, ChildProcess>`（避免 per-record 重复注册/重复 SIGTERM/单任务 abort 误杀全局）；其生命周期完全归引擎 dispose。`onChildSpawned` 对常驻连接不调用（port.ts:88-90 已明文允许「引擎内部不 spawn 进程时不调用」——常驻进程归引擎所有，同理不逐任务注册；契约文案随实施补充一句）。
 - 被否：EnginePort 加必选 dispose（breaking，pi 引擎等所有实现被迫补方法——用可选方法保持向后兼容）；常驻进程注册进 per-record Map（盘点已证语义冲突）。
-- 证据：盘点 §2.3 硬缺口；zsw 壳现役 shutdown 链（runner-core.js → killAllSpawnedChildren）零改动验证（A7 场景）。
-- **子决策①（签名与等待策略）**：dispose 双面——同步面：`killAllSpawnedChildren` 在返回前**先 fire 全部 `session/close` 帧、后同步发出 SIGTERM**（`child.kill()` 为同步系统调用，顺序规定避免 SIGTERM 先发致 close 帧必丢；close 帧不等待应答），保证「调用返回时终止信号已发出」；异步面：`dispose?(): Promise<void>` 走完整序列（close → SIGTERM → grace → SIGKILL）。**异步面的现役消费方为空**——pi 壳 `SubagentService.dispose(): void` 同步（subagent-service.ts:525），zsw `CoreRunner.shutdown()` 虽 async 但不 await killAllSpawnedChildren（runner-core.js:383-388），且两者均受 G4 禁改；grace→SIGKILL 兜底仅在宿主进程存活时生效（zsw daemon shutdown 后若进程继续存活数秒则 grace 链生效，否则仅同步 SIGTERM 面）——此边界如实声明，异步面供未来宿主/测试消费（A7 判据按此口径）。
+- 证据：盘点 §2.3 硬缺口；zsw 壳现役 shutdown 链（runner-core.js → markAllSpawnedChildrenDead）零改动验证（A7 场景）。
+- **子决策①（签名与等待策略）**：dispose 双面——同步面：`markAllSpawnedChildrenDead` 在返回前**先 fire 全部 `session/close` 帧、后同步发出 SIGTERM**（`child.kill()` 为同步系统调用，顺序规定避免 SIGTERM 先发致 close 帧必丢；close 帧不等待应答），保证「调用返回时终止信号已发出」；异步面：`dispose?(): Promise<void>` 走完整序列（close → SIGTERM → grace → SIGKILL）。**异步面的现役消费方为空**——pi 壳 `SubagentService.dispose(): void` 同步（subagent-service.ts:525），zsw `CoreRunner.shutdown()` 虽 async 但不 await markAllSpawnedChildrenDead（runner-core.js:383-388），且两者均受 G4 禁改；grace→SIGKILL 兜底仅在宿主进程存活时生效（zsw daemon shutdown 后若进程继续存活数秒则 grace 链生效，否则仅同步 SIGTERM 面）——此边界如实声明，异步面供未来宿主/测试消费（A7 判据按此口径）。
 - **子决策②（dispose 触发粒度与 pi 壳收益边界）**：pi 壳的 dispose 挂在 session_shutdown（每 session 关闭触发，subagent-service.ts:521-536）——即常驻进程随 session 结束回收。接受该边界：**G1 在 taiji 侧的收益面 = session 生命周期内多任务零冷启动**（每 session 一次进程冷启动，摊薄到 session 内任务数）；zsw daemon 生命周期长，收益完整。被否：跨 session idle 保活常驻进程——违背 dispose = 防泄漏语义，且 pi 壳在 G4 约束下无法感知进程归属，保活即泄漏面。
 - **子决策③（孤儿自愈）——已作废（2026-09 breaking）**：pidfile / HOME 目录锁机制随 D7 HOME 池化删除（appserver-home.ts 整文件删除），HOME 共享后无池目录派生与孤儿回收问题。原文 git 可追溯。
 
@@ -273,7 +273,7 @@ A1/A2/A3/A4/A6/A7 为必过门（真机）；A5 的 ①为回归门、②③为�
 
 | 单元 | 内容 | 文件改动地图 | justification / 验收挂钩 |
 |------|------|-------------|------------------------|
-| W1 停机面 | `dispose?()` 接口 + registry 重注册 dispose + `killAllSpawnedChildren` 编排扩容 + onChildSpawned 契约文案 | port.ts、registry.ts、session-runner.ts（各小改） | 唯一 A 级，先行独立可验（A7 可在旧引擎上先验证编排正确）；其余单元依赖它兜住进程生命周期 |
+| W1 停机面 | `dispose?()` 接口 + registry 重注册 dispose + `markAllSpawnedChildrenDead` 编排扩容 + onChildSpawned 契约文案 | port.ts、registry.ts、session-runner.ts（各小改） | 唯一 A 级，先行独立可验（A7 可在旧引擎上先验证编排正确）；其余单元依赖它兜住进程生命周期 |
 | W2 连接层 | AppServerConnection：NDJSON 帧分发（4 帧型）、请求 id 关联、反向请求应答（D9 常量）、崩溃 onClose、惰性启动/重建、stderr tee 落盘 | 新文件 `engines/zcode/connection.ts` + 单测（fake server fixture 从 zsw 仓移植改造） | 协议层与业务层解耦，fake-server 60+ 用例模式可低成本移植；A6 的基础 |
 | W3 会话层 | create/subscribe/send/终态判定（turn.terminal 权威 + 宽松匹配防洪堤）/read 四层兜底链/close | 新文件 `engines/zcode/session-channel.ts` + golden 帧序列语料（替换 golden-sample.ts） | 旧实现同等层（`_createTurn`/`_fetchFinalResponse`）已验证，逐字级协议断言迁移；A2/A3 的基础 |
 | W4 引擎接线 | launcher 双模式分派（app-server 常驻 / spawn 单轮）、run 重写（事件时序前移）、abort 链（D3）、capabilities（D5）、per-session model 透传（task.model → create 参数）、poolKey='home-appserver' 锚定 + journal 同池 + 凭据刷新 + 目录锁/派生 + pidfile 孤儿自愈（D6③/D7）、**运行中 engineHandle 回填**（RunContext 新增可选 `onHandleReady` 回调 + 编排层回填 record.engineHandle + reportRecordTransition 落 entry，§3.4 不变量 3——chat 域经 subagent-service 接线；**workflow 域 SAR 无需同类回填**：zsw live 消费 onEvent 事件流自足，taskId 非 record id、无运行中 record 读取方，防实施者误扩展） | port.ts（RunContext 增可选回调 onHandleReady）、launcher.ts、zcode-engine.ts、preparer.ts（spawn 池语义保留）、appserver-home.ts（appserver home 引导/刷新/锁/pidfile 孤儿自愈——D7 语义自 preparer.ts 拆出的独立模块，语义等价）、constants.ts、registration.ts、subagent-service.ts（onHandleReady 接线 + engineHandle 回填，core 内部；原「persona-router 调用点」落点已随 persona-router 删除 2026-09-13 作废） | 核心改造单元；A1-A4 的落点；poolKey 锚定不变量（poolDir==HOME==db）保持是 ①级读取零改动的结构前提；运行中回填是 A2-②「中途打开可见快照」的通道支撑（不回填则运行中 GUI 恒落 ③级 outcome-only） |

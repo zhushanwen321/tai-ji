@@ -17,9 +17,11 @@
 // 两步转移，写 manifest（outcome:failed + errorCode:interrupted_abandoned），
 // journal 随之获清理资格（pruneTerminalRunFiles，file-run-store 单源）。
 //
-// 能力边界（D5 权威性分层）：journal 清理执行不落在本模块——已终局 run 的
-// state + journal 成对裁剪在 pruneTerminalRunFiles（file-run-store.ts，与 cap/TTL
-// 同一判定单元）；本模块只负责让 interrupted 「无悬挂态」。
+// 能力边界：终局证据三通道（journal 帧 / state 快照 / manifest）的角色与采信
+// 顺序见 run-events.ts 文件头「终局证据读序」权威声明，此处不重复展开。journal
+// 清理执行不落在本模块——已终局 run 的 state + journal 成对裁剪在
+// pruneTerminalRunFiles（file-run-store.ts，与 cap/TTL 同一判定单元）；本模块
+// 只负责让 interrupted「无悬挂态」。
 //
 // 层归属：Engine。依赖 run-events（状态机 + journal）与 manifest-store（终局投影
 // 写面）；零时钟依赖进纯函数（now/windowMs 显式传参）。
@@ -33,6 +35,7 @@ import {
 } from "../execution/persistence/manifest-store.ts";
 import {
   INITIAL_RUN_STATE,
+  RUN_EVENT_JOURNAL_SUFFIX,
   createRunEventJournal,
   foldRunEventFrames,
   transition,
@@ -257,7 +260,6 @@ export async function abandonElapsedInterruptedRuns(
   const activeRunIds = opts?.activeRunIds;
   if (abandonWindowMs === undefined) return result; // 显式 opt-out：不终局化
 
-  const JOURNAL_SUFFIX = ".events.jsonl";
   let names: string[];
   try {
     names = await readdir(dir);
@@ -270,8 +272,8 @@ export async function abandonElapsedInterruptedRuns(
     return result; // ENOENT = 从未有任何 run 落账，正常空态
   }
   const journalRunIds = names
-    .filter((n) => n.endsWith(JOURNAL_SUFFIX))
-    .map((n) => n.slice(0, -JOURNAL_SUFFIX.length));
+    .filter((n) => n.endsWith(RUN_EVENT_JOURNAL_SUFFIX))
+    .map((n) => n.slice(0, -RUN_EVENT_JOURNAL_SUFFIX.length));
   result.scanned = journalRunIds.length;
 
   for (const runId of journalRunIds) {

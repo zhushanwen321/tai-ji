@@ -54,6 +54,10 @@
 // delivery 内核路径（向后兼容旧装配 / 无 ledger 的测试场景）。
 
 import { getLogger } from "../../core/logger.ts";
+import {
+  SUBAGENT_BG_NOTIFY_CUSTOM_TYPE,
+  WORKFLOW_RESULT_CUSTOM_TYPE,
+} from "@zhushanwen/extension-protocol";
 
 /** U4 分桶日志与 index.ts 装配层共用同一具名 logger（getLogger 缓存单例）。 */
 const logger = getLogger("subagents");
@@ -69,11 +73,12 @@ export const NOTIFY_ACK_CUSTOM_TYPE = "subagent-bg-notify-ack";
 export const NOTIFY_ABANDONED_CUSTOM_TYPE = "subagent-bg-notify-abandoned";
 
 /**
- * 送达消息的 customType。notifier.ts / bg-notify-render / index.ts（messageRenderer
- * 注册）同名字符串的单一常量源——本模块不 import notifier（避免循环依赖：
- * notifier.notify → getBoundNotifyLedger），等值由 notify-ledger.test.ts 钉住。
+ * 送达消息的 customType——notify 词表单源（extension-protocol 的
+ * SUBAGENT_BG_NOTIFY_CUSTOM_TYPE）的兼容别名：notifier.ts / bg-notify-render /
+ * 壳 index.ts（messageRenderer 注册）/ shared 集合消费同一常量，历史名保留供
+ * 本包既有消费面（等值锁 = 壳 __tests__/contract.notify-custom-types.test.ts）。
  */
-export const NOTIFY_CUSTOM_TYPE = "subagent-bg-notify";
+export const NOTIFY_CUSTOM_TYPE = SUBAGENT_BG_NOTIFY_CUSTOM_TYPE;
 
 /**
  * 看门狗周期与超时（ms）：主 session 长期无 settled 时的兜底触发面（D5 ②）。
@@ -138,10 +143,11 @@ export interface NotifyAckEntryData {
 /**
  * record 的投递通道选项（[u9] notifyDone 账本化——C-ext-19 迁移）。
  *
- * 背景：workflow 收口通知的送达 customType 是 "workflow-result"（runtime
- * event-interpreter 按该类型识别 run 完成并驱动 W18 workflow-record 失效信号，
- * taiji 完成通知 display 覆写 SSOT 亦按它收录），不能复用 NOTIFY_CUSTOM_TYPE——
- * 值由调用方声明，core 对具体外部通道值不可知（不 import 壳侧常量）。
+ * 背景：workflow 收口通知的送达 customType 是 WORKFLOW_RESULT_CUSTOM_TYPE
+ * （extension-protocol notify 词表单源；runtime event-interpreter 按该类型识别
+ * run 完成并驱动 W18 workflow-record 失效信号，taiji 完成通知 display 覆写 SSOT
+ * 亦按它收录），不能复用 NOTIFY_CUSTOM_TYPE——值由调用方声明（core 不替调用方
+ * 选通道）；abandonItem 的恢复指引分诊按词表常量判型。
  */
 export interface NotifyRecordOptions {
   /**
@@ -663,7 +669,7 @@ export function createNotifyLedger(
     // （错误信息必须可操作）：workflow 收口通知（wf-done）的核对对象是 workflow run，
     // subagents list 查不到——workflow tool 的 status action 才是可达的核对路径。
     const recoveryHint =
-      item.deliveryCustomType === "workflow-result"
+      item.deliveryCustomType === WORKFLOW_RESULT_CUSTOM_TYPE
         ? 'workflow action:"status" (workflow runs)'
         : 'subagents action:"list"';
     logger.warn(

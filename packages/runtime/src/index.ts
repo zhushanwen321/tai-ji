@@ -1229,7 +1229,7 @@ async function main(): Promise<void> {
       // server.stop 之后、closeLogger 之前（杀链期间的日志与 stderr tee 要经 logger
       // 落盘，closeLogger 先行则现场丢失）。引擎池的物理宿主在 pi 进程内（registry
       // 是进程级 globalThis 状态）：server.stop 的 destroyAll 向全部 pi 发 SIGTERM →
-      // pi 侧 extension 收割钩子 killAllSpawnedChildren 先 disposeEngines（杀 zcode
+      // pi 侧 extension 收割钩子 markAllSpawnedChildrenDead 先 disposeEngines（杀 zcode
       // appserver 常驻进程，D6①「SIGTERM 先发会丢 close 帧」顺序由该入口保证）再杀
       // per-record children。runtime 进程注册表当前恒空（无引擎注册），本步骤在场 =
       // 设计钉死的序列位置与打点完整性；未来引擎宿主迁移 runtime 侧时此处是杀链接线点。

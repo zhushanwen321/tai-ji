@@ -30,19 +30,29 @@ import { getLogger } from "../core/logger.ts";
 // writeRunTerminalManifest）；manifest-store 不回指 orchestration，无环。
 import { readRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
 import type { RunStore } from "./models/ports.ts";
+import { createRunPersistThrottle, type RunPersistThrottle } from "./persist-throttle.ts";
 import { WorkflowRun } from "./models/workflow-run.ts";
+// journal 后缀经 run-events 单源消费（本文件只裁剪/排除 journal 附属文件，不定义后缀词表）。
+import { RUN_EVENT_JOURNAL_SUFFIX } from "./run-events.ts";
 import { SNAPSHOT_VERSION, fromRunSnapshot, toRunSnapshot } from "./run-snapshot.ts";
 
 const logger = getLogger("file-run-store");
 
-/** run 状态目录名（<dataRoot> 下的固定分量）。 */
-const STATE_DIR_NAME = "workflow-state";
+/**
+ * run 状态目录名（<dataRoot> 下的固定分量）。
+ *
+ * 单源导出（barrel 上收）：pi 壳 JsonlRunStore / workflow-events 的
+ * `<sessionDir>/workflow-state` 布局与 core FileRunStore 的
+ * `<dataRoot>/workflow-state` 同名分量——字面量散布时任一侧单独改名即静默
+ * 漂移（store 读写错目录 / stall 判定读不到 journal）。
+ */
+export const STATE_DIR_NAME = "workflow-state";
 
 // ── 磁盘保留（C1，语义对齐 pi jsonl-run-store mtime 裁剪） ─────────
 
 /**
- * 磁盘保留默认上限（OR-5 跨 run 保留修复）：pi 宿主 jsonl-run-store env 通道
- * （getEnvStateMaxRuns）在 env 未设/空时的缺省上限。
+ * 磁盘保留默认上限（OR-5 跨 run 保留修复）：cap env 通道
+ * （{@link resolveStateMaxRuns}）在 env 未设/空时的缺省上限。
  *
  * OR-5 将「STATE_MAX_RUNS opt-in 默认关」（无界累积）改为默认开：跨 run state
  * 文件按 mtime 裁剪到本上限。取值 50 是无真实 run 体积分布数据下的保守值
@@ -50,6 +60,31 @@ const STATE_DIR_NAME = "workflow-state";
  * 误删仍被引用的 run 缓存，故取保守端。
  */
 export const DEFAULT_STATE_MAX_RUNS = 50;
+
+/**
+ * 磁盘保留上限 env 通道（OR-5 ⑥b 默认开的用户旋钮；解析单源见
+ * {@link resolveStateMaxRuns}——pi 宿主 jsonl-run-store 的 retention 轮经
+ * barrel 消费，原壳侧同形实现已收编）：
+ * - 未设/空 → 按默认上限 {@link DEFAULT_STATE_MAX_RUNS} 裁剪（**默认开**——
+ *   OR-5 修复前的 opt-in「默认关」正是跨 run 无界累积缺陷本身）；
+ * - 有限正数 → 上限 = env 值（显式覆盖默认值）；
+ * - 非法值（非有限数/≤0）→ 不清理（显式 opt-out 通道：用户意图不明时不动
+ *   磁盘，对齐 prune 内部「任何失败都不抛」的保守哲学）。
+ *
+ * 用 TAIJI_ 前缀而非 PI_：本 env 是 pi 进程内读的配置 env，taiji 桌面 spawn 链按
+ * ENV_WHITELIST_PREFIXES（只有 TAIJI_ 等）过滤，PI_ 前缀在桌面场景被静默丢弃——
+ * 同 TAIJI_SUBAGENT_IDLE_TIMEOUT_MS 的改名教训。
+ */
+export const STATE_MAX_RUNS_ENV = "TAIJI_SUBAGENT_STATE_MAX_RUNS";
+
+/** 解析保留上限；env 未设/空 → 默认上限，显式非法/≤0 → undefined（不清理）。 */
+export function resolveStateMaxRuns(): number | undefined {
+  const raw = process.env[STATE_MAX_RUNS_ENV];
+  if (raw === undefined || raw === "") return DEFAULT_STATE_MAX_RUNS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
 
 // ── save 节流（OR-5 单 run 快照 O(n²) 主修） ──────────────────
 
@@ -121,9 +156,9 @@ export interface PruneStateDeps {
 //    超期即裁）；mtime 判定锚 = state 文件（run 磁盘足迹的主投影文件）——journal
 //    作为同 stem 附属随 run 成对裁剪，不单独计时；
 // ③ 裁剪执行按 run 粒度成对删 state 文件 + journal（<runId>.events.jsonl，存在才
-//    删）——已终局 run 过保留期后 journal 降级为可清诊断证据（D5 权威性分层）；
-//    manifest（.json 结尾）结构性不在候选，终局持久权威永不随裁（清理后投影回落
-//    manifest 终局面，drawer 投影不消失）；
+//    删）——journal 过保留期降级为可清诊断证据、manifest 结构性不在候选（终局
+//    持久权威永不随裁，清理后投影回落 manifest 终局面）的分层依据 = run-events.ts
+//    文件头「终局证据读序」权威声明；
 // ④ 任何失败不抛（辅助清理降级不拖垮持久化主链）：readdir 失败静默放弃本轮，
 //    manifest 读取按「无资格」降级，单文件 unlink 失败 warn 留证后继续。
 //
@@ -151,8 +186,8 @@ export function resolveStateTtlMs(): number | undefined {
   return parsed;
 }
 
-/** journal 文件后缀（<runId>.events.jsonl）——glob 同族但作为 run 附属成对裁剪，不单独计时。 */
-const JOURNAL_FILE_SUFFIX = ".events.jsonl";
+/** journal 文件后缀（<runId>.events.jsonl）——经 run-events RUN_EVENT_JOURNAL_SUFFIX
+ *  单源消费（glob 同族但作为 run 附属成对裁剪，不单独计时）。 */
 
 /** pruneTerminalRunFiles 的可调项。 */
 export interface PruneTerminalRunFilesOptions {
@@ -197,7 +232,7 @@ export async function pruneTerminalRunFiles(
   }
   // state 文件候选：wf-*.jsonl 且排除 journal（<runId>.events.jsonl——附属，不单独候选）
   const stateNames = names.filter(
-    (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(JOURNAL_FILE_SUFFIX),
+    (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(RUN_EVENT_JOURNAL_SUFFIX),
   );
   result.scanned = stateNames.length;
   if (stateNames.length === 0) return result;
@@ -237,7 +272,7 @@ export async function pruneTerminalRunFiles(
 
   for (const runId of victims) {
     const stateFull = join(stateDir, `${runId}.jsonl`);
-    const journalFull = join(stateDir, `${runId}${JOURNAL_FILE_SUFFIX}`);
+    const journalFull = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
     let prunedState = false;
     for (const full of [stateFull, journalFull]) {
       try {
@@ -287,18 +322,11 @@ export class FileRunStore implements RunStore {
   /** 显式状态目录覆盖（构造注入；见 FileRunStoreOptions.stateDir）。 */
   private readonly stateDirOverride: string | undefined;
 
-  /** save 节流最小间隔（ms），0 = 禁用。 */
-  private readonly saveMinIntervalMs: number;
-  /**
-   * per-runId 上次实际落盘时刻（节流判据）。终态落盘成功即删（终态后 runId 不再
-   * save）；残留条目只出现在「running 中 run 消失（崩溃/宿主弃用）」场景，单条
-   * ~100B 可忽略（对齐 jsonl-run-store chains「每 runId 残留 settled Promise」
-   * 的取舍先例）。时间源 Date.now()（fake timers 下可推进，测试友好）。
-   */
-  private readonly lastSavedAt = new Map<string, number>();
+  /** save 节流（判定 + 记账单点见 persist-throttle.ts；窗口注入见 FileRunStoreOptions.saveMinIntervalMs）。 */
+  private readonly throttle: RunPersistThrottle;
 
   constructor(opts?: FileRunStoreOptions) {
-    this.saveMinIntervalMs = Math.max(0, opts?.saveMinIntervalMs ?? DEFAULT_SAVE_MIN_INTERVAL_MS);
+    this.throttle = createRunPersistThrottle(opts?.saveMinIntervalMs ?? DEFAULT_SAVE_MIN_INTERVAL_MS);
     this.stateDirOverride = opts?.stateDir;
   }
 
@@ -307,22 +335,17 @@ export class FileRunStore implements RunStore {
   }
 
   /**
-   * 快照落盘（OR-5 ⑥a 节流后）：
-   * - 首写（该 runId 尚无落盘记录）永不节流——保证新 run 至少一条快照，
-   *   loadAll 重水合可发现；
-   * - 终态（status 非 running）永不节流——最终状态必落盘，末行即终态快照；
-   * - running 中间态距上次落盘不足 {@link saveMinIntervalMs} → 跳过本次 append
-   *   （状态仍在调用方内存 runs Map，下次落盘带全量最新快照；本文件最后一条
-   *   快照因此最多落后真实状态一个节流窗口——崩溃语义与 jsonl-run-store 去抖
-   *   同源：未落盘的 running 尾部丢失，等价崩溃链由恢复路径收编）。
-   *
-   * 节流判据在落盘成功后才更新（IO 失败不吞下一次重试机会）。
+   * 快照落盘（节流决策经 persist-throttle.ts 单点——五要素矩阵与记账语义的
+   * 期望源在该文件的表驱动单测）：窗口内跳过本次 append（状态仍在调用方内存
+   * runs Map，下次落盘带全量最新快照；本文件最后一条快照因此最多落后真实状态
+   * 一个节流窗口——崩溃语义与 jsonl-run-store 去抖同源：未落盘的 running 尾部
+   * 丢失，等价崩溃链由恢复路径收编）。记账在落盘成功后（IO 失败不吞下一次
+   * 重试机会）。
    */
   async save(run: WorkflowRun): Promise<void> {
     const isTerminal = run.state.status !== "running";
     const now = Date.now();
-    const last = this.lastSavedAt.get(run.runId);
-    if (!isTerminal && last !== undefined && now - last < this.saveMinIntervalMs) {
+    if (!this.throttle.shouldPersist(run.runId, isTerminal, now)) {
       return; // 节流窗口内：跳过本次全量快照 append
     }
     // mkdir recursive 每次 save 前执行：幂等零成本（目录已存在时仅一次 stat），
@@ -331,11 +354,7 @@ export class FileRunStore implements RunStore {
     // toRunSnapshot 补 v 字段（D4 裁决②写入侧）；live strip 已随 [H2 W3] live 字段删除退役
     const line = JSON.stringify(toRunSnapshot(run));
     await appendFile(this.stateFilePath(run.runId), line + "\n", "utf8");
-    if (isTerminal) {
-      this.lastSavedAt.delete(run.runId);
-    } else {
-      this.lastSavedAt.set(run.runId, now);
-    }
+    this.throttle.recordPersisted(run.runId, isTerminal, now);
   }
 
   async loadAll(): Promise<WorkflowRun[]> {
@@ -352,7 +371,7 @@ export class FileRunStore implements RunStore {
       // journal（<runId>.events.jsonl）同为 .jsonl 后缀但是事件流附属文件——不排除
       // 会进逐行 parseLine，事件行全部按损坏快照行逐条 warn（噪音洪泛）。排除先例：
       // pruneTerminalRunFiles 的 stateNames 过滤同款。
-      if (!file.endsWith(".jsonl") || file.endsWith(JOURNAL_FILE_SUFFIX)) continue;
+      if (!file.endsWith(".jsonl") || file.endsWith(RUN_EVENT_JOURNAL_SUFFIX)) continue;
       const run = await this.loadLatestValidLine(join(this.stateDir(), file), file);
       if (run) runs.push(run);
     }
@@ -364,7 +383,7 @@ export class FileRunStore implements RunStore {
    * 判据）。同步形态：sweep 在 session_start 同步链内运行（runReconcileSweep 同步
    * 契约），不能 await loadAll——对单 runId 做同步文件读（对齐 sweep 自身的 sync fs
    * 读先例），逐行解析复用 parseLine（版本衔接 + 形状校验与 loadLatestValidLine
-   * 单源，同步只读不触碰 lastSavedAt 节流记账）。
+   * 单源，同步只读不触碰节流记账）。
    *
    * 判定（宁挂账不失明——误注销活跃 run 是事故方向，判据保守侧取「不可判定」）：
    * - state 文件不存在（ENOENT）→ missing（设计判据「已归档/不存在视同终态」——run 从未

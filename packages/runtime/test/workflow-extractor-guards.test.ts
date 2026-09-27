@@ -13,7 +13,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { scanWorkflowEntries } from '../src/services/session/workflow-extractor.js'
 import { _resetWarnOnceForTest } from '../src/utils/warn-once.js'
-import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@taiji/shared'
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
 
 /** 最小合法快照（过 snapshot 层守卫 + deserializeRun + mapValidatedSnapshot）。 */
 function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, unknown> {

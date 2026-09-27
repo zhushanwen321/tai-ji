@@ -22,6 +22,31 @@
 // 层归属：Engine。状态机核心（词表 + 转移表 + transition）零 IO / 零时钟依赖，
 // 可独立编译测试；journal 实装是本模块唯一 IO 边（node:fs + core logger facade）。
 
+// ── 终局证据读序（权威声明）──────────────────────────────────
+//
+// 「这个 run 终局了吗、怎么死的」在磁盘上有三个通道。各消费方（壳终局调和
+// reconcileRunningFinality / 注册表投影 run-registry / retention
+// pruneTerminalRunFiles）此前在各自注释里局部论述「谁在何时信哪个」，现单点
+// 收口于 journal 帧的定义处（本文件）。三通道角色与采信顺序（降序）：
+//
+// 1. journal run-settled 帧（<runId>.events.jsonl，本文件词表）——最权威。一个
+//    run 恰好一帧、单写者（worker-message-pump 终局 coda）同步落账；活体状态
+//    查询、终局调和、注册表投影一律首选。保留期内恒可信；被 retention 裁剪后
+//    通道消失。
+// 2. state 文件终态快照（<runId>.jsonl 末行 status/reason）——恢复投影。与
+//    journal 双写、天然可能过时（快照必漂移，见 EventEnvelope.ts 注释），仅当
+//    journal 通道缺席（已裁剪）时作降级终局证据（壳 reconcileRunningFinality
+//    的 2) 级读面）。
+// 3. terminal manifest（<runId>.json 的 outcome/errorCode）——终局持久投影，
+//    不承载「怎么死的」的运行时判定。仅两个用途：retention 资格（outcome 非空
+//    = 已终局，pruneTerminalRunFiles 的单源锚定）与 abandon 终局化（run-registry
+//    对 interrupted 超放弃窗写 manifest 才算终局）。journal/state 均被裁剪后，
+//    它是终局事实的最后落点（清理后投影回落 manifest 终局面）。
+//
+// 何时允许信哪个：run 生命周期内（journal 在盘）信 1；1 被裁剪后降级信 2，
+// 再缺席才信 3；retention / abandon 资格判定只信 3（宁保留不误裁——误裁活跃
+// run 是不可恢复事故方向）。
+
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -87,9 +112,40 @@ export type RunErrorCode =
   | "time_limited"
   | "interrupted_abandoned";
 
+// ── DoneReason → RunOutcome 三态映射（与下方 RunErrorCode 映射同族的姊妹单点）──
+
+/**
+ * DoneReason 六因 → RunOutcome 三态的单点映射。
+ *
+ * - completed → completed；aborted → cancelled（cancel-requested 控制事件合成路径
+ *   的终局 outcome 同值——转移表 cancelled 行与本映射构造性一致）；
+ * - failed/budget_limited/time_limited/invalid_args → failed（budget/time 是
+ *   「run 怎么死的」系统层失败；invalid_args 生产不达 finalizeRun——launcher
+ *   参数校验在 run 创建前返回，收录仅为映射穷尽）。
+ *
+ * 消费方：core worker-message-pump 的 dispatchFinalRunSettle（同构判别，aborted
+ * 分支走 cancel-requested 合成不改用本函数——两条路径的 outcome 语义一致）+ 壳
+ * helpers 通知载荷的 outcome 字段（原 extension 侧 mapDoneReasonToOutcome 本地
+ * 镜像已删，经 barrel 消费本单源；漂移信号 = 通知 outcome 与 journal
+ * run-settled 帧 outcome 不一致）。
+ */
+export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
+  switch (reason) {
+    case "completed":
+      return "completed";
+    case "aborted":
+      return "cancelled";
+    case "failed":
+    case "budget_limited":
+    case "time_limited":
+    case "invalid_args":
+      return "failed";
+  }
+}
+
 // ── DoneReason → RunErrorCode 映射（词表语义的同位归属：映射的每个分支都引用
 // 上方词表收录依据；唯一消费方 = worker-message-pump 的 dispatchFinalRunSettle，
-// 与 extension helpers 的 mapDoneReasonToOutcome 同族——同一个 DoneReason 判别）──
+// 与本文件上方 doneReasonToRunOutcome 同族——同一个 DoneReason 判别）──
 
 /**
  * DoneReason → RunErrorCode 的单点映射。
@@ -168,9 +224,9 @@ export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
  * 事件公共信封字段：墙钟时间戳（Date.now() epoch ms）。
  *
  * D5 载荷表未列 ts，但快照投影（calls[].startedAt / lastProgressAt 派生）与
- * 注册表新鲜度判据都要求事件自带时间——投影只消费事件流（「快照 + 事件流双写
- * 时快照必然漂移、权威必须在事件流」），没有 ts 的 journal 无法支撑投影，故
- * 信封层统一携带。
+ * 注册表新鲜度判据都要求事件自带时间——投影只消费事件流（快照与事件流双写时
+ * 快照必然漂移；三通道采信顺序见本文件头部「终局证据读序」权威声明），没有
+ * ts 的 journal 无法支撑投影，故信封层统一携带。
  */
 export interface EventEnvelope {
   ts: number;
@@ -310,9 +366,9 @@ export interface RunEventJournal {
   /**
    * 顺序扫描某 run 的全部事件（写入序）。消费方：快照投影（startedAt /
    * lastProgressAt 派生）、注册表投影（事件流停止 = 待恢复态判读）、恢复对账。
-   * 终局后过保留期的清理（cap + TTL）不改变 scan 语义——清理后返回剩余诊断
-   * 证据，终局权威回落 manifest 的 outcome/errorCode（journal 权威性按 run
-   * 生命周期分两段，D5）。
+   * 终局后过保留期的清理（cap + TTL）不改变 scan 语义——清理后返回空流（该
+   * run 的 journal 通道消失），消费方按本文件头部「终局证据读序」权威声明降级
+   * 采信 state 快照 / manifest。
    */
   scan(runId: string): Promise<readonly WorkflowRunEvent[]>;
 }
@@ -645,6 +701,17 @@ export function foldRunEventFrames(
 const journalLogger = getLogger("run-event-journal");
 
 /**
+ * run 事件 journal 文件名尾段（`<runId>.events.jsonl` 的 `.events.jsonl`）。
+ *
+ * 单源导出（barrel 上收）：core 内部全部落/扫点（本文件 journalPath、
+ * file-run-store / run-registry 的成对裁剪与扫描）+ 壳侧镜像消费点
+ * （stall watchdog 的 journal 路径构造、终局通知的 eventsJournalPath、
+ * jsonl-run-store 的 watcher 边沿判定）统一 import 本常量——后缀字面量散布
+ * 多处时任何一侧单独改动都是静默漂移（watcher 失配 / 指针失效）。
+ */
+export const RUN_EVENT_JOURNAL_SUFFIX = ".events.jsonl";
+
+/**
  * runId 白名单：字母数字开头 + [A-Za-z0-9_-]，长度 ≤ 128。
  *
  * 为什么白名单而非黑名单：journal 文件名由 runId 直接拼出（join(dir,
@@ -693,9 +760,9 @@ class FileRunEventJournal implements RunEventJournal {
 
   constructor(private readonly dir: string) {}
 
-  /** journal 文件名：<runId>.events.jsonl（runId 自带 wf- 前缀，渲染名即设计的 wf-<id>.events.jsonl）。 */
+  /** journal 文件名：<runId>.events.jsonl（runId 自带 wf- 前缀，渲染名即设计的 wf-<id>.events.jsonl；后缀经 RUN_EVENT_JOURNAL_SUFFIX 单源）。 */
   private journalPath(runId: string): string {
-    return join(this.dir, `${runId}.events.jsonl`);
+    return join(this.dir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
   }
 
   async append(runId: string, event: WorkflowRunEvent): Promise<void> {

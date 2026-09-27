@@ -5,7 +5,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { adapter, cancelHandler, listHandler, startHandler } from "../interface/subagent-actions.ts";
+import { cancelHandler, listHandler, startHandler } from "@zhushanwen/subagent-core";
+import { adapter } from "../interface/subagent-actions.ts";
 import { SubagentParams } from "../interface/subagent-tool-schema.ts";
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import type {

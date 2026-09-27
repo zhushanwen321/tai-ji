@@ -1,0 +1,5 @@
+---
+'@zhushanwen/pi-subagent-workflow': patch
+---
+
+Symmetrize the abort check across the three tools: the workflow-script tool now honors an aborted AbortSignal at the execute entry for all five actions (previously only generate checked it — lint/save/delete/list ran anyway), with the in-action check removed from actionGenerate (which no longer takes a signal). Also converged the six required-parameter rejection messages onto one template — `<subject> requires '<param>' parameter. Correct: <minimal call example>` — so weaker models can self-correct from a consistent shape: run (dropped the optional args from the example), abort (reordered to match the template), lint/save/delete (gained a Correct example), and subagents tasks (subject now named). New black-box tests lock the five early-exit paths (zero side effects) and the updated copy; the run-finality evidence read order across the three disk channels is now declared once in subagent-core's run-events.ts header, with the four scattered comment sites reduced to pointers.

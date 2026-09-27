@@ -99,22 +99,23 @@ export { setEngineDiscoveryRescanOptions } from "./execution/engine/routing.ts";
 
 // ── 引擎注册 / 发现与进程面（execution/engine）────────────────
 // 组合根 index.ts 接线消费（registerXxx 引擎注册、syncEnginesFile engines 文件
-// 同步、killAllSpawnedChildren session 派生进程兜底清理）。
+// 同步、markAllSpawnedChildrenDead session 派生进程兜底清理）。
 export { syncEnginesFile } from "./execution/engine/engine-discovery.ts";
 // [W11/DoD#5] registerPiEngine（inproc 'pi' 注册）已删；[W3 chat 域收口] chat 域 inproc
 // 引擎（inproc pi 引擎目录）与 SubagentService 自持 DI 实例一并删除——registry 'pi' 由三级发现
 // 装载 cli descriptor，chat 轮次与 run 域同路经协议客户端发往 pi-subagent-cli 引擎进程
 // （G1：pi 引擎单一 CLI 形态，core 壳侧零内建引擎）。
-// [W8 D8 薄壳] killAllSpawnedChildren：扩展 index.ts / zsw runner-core.js 的业务调用点
-// 零改动。语义（[F-7 注释纠偏，如实口径]）= **仅镜像记账**——core 侧 spawnedChildren
-// 镜像整体清空（engine/host/spawned-children.ts 公共面），不发任何进程信号；
+// [W8 D8 薄壳] markAllSpawnedChildrenDead：扩展 index.ts / zsw runner-core.js 的
+// 业务调用点。语义（[F-7 注释纠偏，如实口径]）= **仅镜像记账**——core 侧
+// spawnedChildren 镜像整体清空（engine/host/spawned-children.ts 公共面），
+// 不发任何进程信号（命名即语义：mark 镜像置死，非 kill 进程）；
 // 子进程活在引擎进程内，其回收链 = ① stdin-EOF 自灭（宿主退出 / EngineClient 销毁
 // → 引擎进程 stdin 断源自灭，正常路径）；② disposeEngines()（registry）显式触发全部
 // 已实例化引擎 dispose（cli 形态 = RemoteEngine.dispose → EngineClient 有界收口）——
 // 该入口为宿主 shutdown 链预留，现无生产接线。subagent-workflow 扩展的
 // reapSpawnedChildrenOnShutdown（process hook 调本函数）因此同为镜像置死 no-op，
 // 不构成真实收割（现状登记，workflow 包生产码不动）。
-export { killAllSpawnedChildren } from "./execution/engine/host/spawned-children.ts";
+export { markAllSpawnedChildrenDead } from "./execution/engine/host/spawned-children.ts";
 
 // [W8 D8 兼容公共面薄壳]（设计 §3.6 D8 表）：registerZcodeEngine 确保cli descriptor
 // 注册（vendored 相对定位，失败回退 inproc 过渡）+ engineDataDir 记入；createZcodeEngine
@@ -456,6 +457,9 @@ export type {
 // 原 execution/execute-options-mapper.ts 重复定义已删（改 import 消费，深路径消费者
 // subagent-actions-core 同步切到 models/types 单源）。
 export { SLUG_MAX_LENGTH } from "./orchestration/models/types.ts";
+// isTerminalDoneReason：DoneReason 终止性判定（穷举 switch，词表新增成员 tsc 强制归类）。
+// 壳 workflow-notify 的防偷懒收尾指令按它判定——词表镜像收编 core 单源。
+export { isTerminalDoneReason } from "./orchestration/models/types.ts";
 
 // workflow 脚本资产面：registry 契约 + 实现 / 脚本 lint / 文件落盘（save / delete）
 // + skill 路径缓存清理——组合根装配与 workflow 工具面消费。
@@ -510,24 +514,61 @@ export type {
 // u-2c 删 ./* 通配后深路径仅测试侧 vitest alias 可解析，生产消费必须走 barrel。
 // pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪单源（[Q2 / D5 清理规则①②]——
 // manifest 资格 + cap + TTL + journal 成对删）；resolveStateTtlMs / STATE_TTL_MS_ENV /
-// DEFAULT_STATE_TTL_MS：TTL env 通道单源（[P1b-2] 引入、[Q2] 自 pi 宿主迁入）。
-// pi 宿主 jsonl-run-store 的 retention 维护轮生产消费（barrel 先例同上）。
+// DEFAULT_STATE_TTL_MS：TTL env 通道单源（[P1b-2] 引入、[Q2] 自 pi 宿主迁入）；
+// resolveStateMaxRuns / STATE_MAX_RUNS_ENV：cap env 通道单源（自 pi 宿主壳收编——
+// 原壳侧 getEnvStateMaxRuns 同形实现删除）。pi 宿主 jsonl-run-store 的 retention
+// 维护轮生产消费（barrel 先例同上）。
+// [C3 常量上收] STATE_DIR_NAME：pi 壳 workflow-events / jsonl-run-store 的
+// `<sessionDir>/workflow-state` 与 core `<dataRoot>/workflow-state` 同名分量单源
+// ——壳侧字面量改 import 消费，防布局分量漂移。
 export {
   DEFAULT_SAVE_MIN_INTERVAL_MS,
   DEFAULT_STATE_MAX_RUNS,
   DEFAULT_STATE_TTL_MS,
+  STATE_DIR_NAME,
+  STATE_MAX_RUNS_ENV,
   STATE_TTL_MS_ENV,
   FileRunStore,
   pruneTerminalRunFiles,
+  resolveStateMaxRuns,
   resolveStateTtlMs,
   type PruneTerminalRunFilesOptions,
   type PruneTerminalRunFilesResult,
 } from "./orchestration/file-run-store.ts";
 
+// resolvePiSessionScopedDir：pi 宿主 sessionDir 布局（cwd slug + existsSync 探测）
+// 的单一权威源——pi 壳 session-lifecycle 的 resolveSessionDir 经 opts.agentDir
+// 注入 pi SDK 活源 getAgentDir() 薄消费（原壳侧同形手写已删，收敛单源防漂移）；
+// resolvePiWorkflowStateDir 为其 workflow-state 后缀派生，core 读侧装配经相对
+// 路径消费，不需要 barrel 面。
+export { resolvePiSessionScopedDir } from "./execution/assembly/workflow-state-root.ts";
+
+// RunPersistThrottle：RunStore 两 adapter（FileRunStore / pi 壳 JsonlRunStore）
+// 共享的落盘节流决策单点（判定五要素 + 记账时机）——收编前两侧平行实现无共享
+// 测试锚定（B3 单侧修复实证独立演化风险）。壳生产消费必须走 barrel（深路径
+// 仅测试侧 vitest alias 可解析）。
+export {
+  createRunPersistThrottle,
+  type RunPersistThrottle,
+} from "./orchestration/persist-throttle.ts";
+
 // run 级终局投影 manifest（[P1b-2 / D5]）读写原语：「已终局」单源锚定（outcome
 // 非空）。消费全在 core 内部深路径（run-registry abandon 终局化 /
 // worker-message-pump finalizeRun / file-run-store pruneTerminalRunFiles 资格
 // 判定），壳零消费——按 D3 判定标准不进 barrel。
+
+// ── workflow-record entry 契约（词表/guard 收敛单源）──────────
+// customType / entry schema 版本 / v1 判定分类：壳 jsonl-run-store（写点 +
+// loadAll 重建）与 runtime workflow-extractor（entry 扫描投影）共用的 entry 层
+// 契约单源（收敛前壳与 shared 各持一份字面量、v1 guard 壳/runtime 双实现）。
+// classify 无 IO 无日志——日志策略（warn/warnOnce/静默）留消费方；snapshot 层
+// 解码仍在 run-snapshot.ts codec（entry 层 v 与 snapshot 层 v 两级独立版本）。
+export {
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_RECORD_ENTRY_VERSION,
+  classifyWorkflowRecordEntryData,
+  type WorkflowRecordEntryClassification,
+} from "./orchestration/workflow-record-entry.ts";
 
 // ── 快照 codec（U8 / D4）──────────────────────────────────────
 // WorkflowRun ↔ 落盘快照的单一投影：版本常量沿用 pi "wf-run-v2"（存量逐字节
@@ -544,9 +585,17 @@ export {
 
 // [P3/D6] run 事件 journal 读面（宿主 store fold 投影的数据源——journal scan 的
 // 坏行容忍与日志语义单源；生产源码只从 barrel 消费 core 符号先例同上）。
+// [C3 常量上收] RUN_EVENT_JOURNAL_SUFFIX / ALL_RUN_OUTCOMES / RunOutcome /
+// doneReasonToRunOutcome：壳侧曾本地镜像 journal 后缀与 DoneReason→RunOutcome
+// 映射（无机器守卫、漂移即静默失配）——经 barrel 单源后壳改 import 消费；
+// 词表与映射的语义锚点注释见 run-events.ts 对应定义。
 export {
+  ALL_RUN_OUTCOMES,
   createRunEventJournal,
+  doneReasonToRunOutcome,
+  RUN_EVENT_JOURNAL_SUFFIX,
   type RunEventJournal,
+  type RunOutcome,
   type WorkflowRunEvent,
 } from "./orchestration/run-events.ts";
 
@@ -601,8 +650,11 @@ export {
 // 深路径通配），故出 barrel。发现链辅助（C5b）：findWorkspaceRoot（project 源根
 // 定位）、getCachedParsed/getCachedFileContent（mtime 缓存读取）——getCachedFileContent
 // 生产消费在 core 内部 3 处（agents-assembly / config-loader / workflow-script-registry-impl）；
-// 壳侧测试 mock 引用不计，深路径同样不可达。
+// 壳侧测试 mock 引用不计，深路径同样不可达。conventionRootDirs（约定根路径
+// 集合，buildScanTargets 硬编码槽同源单推导）：壳 resource-list-injector 空态
+// roots 提示清单消费，杜绝壳侧复刻 join 字面。
 export {
+  conventionRootDirs,
   discoverResources,
   findWorkspaceRoot,
   getCachedFileContent,

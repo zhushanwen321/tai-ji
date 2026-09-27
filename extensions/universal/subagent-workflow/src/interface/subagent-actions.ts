@@ -1,25 +1,19 @@
 // src/interface/subagent-actions.ts
 //
-// subagent tool 六 action 的 pi adapter 壳（sink 设计 D6② 消费收缩）。
+// subagent tool 六 action 的 TUI/GUI 渲染壳（sink 设计 D6② 消费收缩）。
 //
 // 领域内核（入参校验 / message 拒绝文案分流 / fork-from 拒绝链 / 终态映射 /
-// list 投影）已下沉 core @zhushanwen/subagent-core/execution/assembly/subagent-actions-core——
-// ⛔4 行为快照等值锚定见 core __tests__/subagent-actions-core.test.ts（期望值硬编码自
-// 本文件迁移前实测输出，含错误文案逐字锚）。本壳按设计仅保留三类职责：
-//   1. core 调用面 re-export：六 handler + 领域类型（签名不变，消费方零改动）
-//   2. 参数提取：位于 subagent-tool.ts executeSubagent（action 路由 / listParam /
-//      cancelParam 解包 / skillPath-cwd 路径检查），本次收缩零改动
-//   3. TUI/GUI 渲染：adapter / buildGuiComponent（pi TUI 渲染族按设计留壳）
+// list 投影）在 core @zhushanwen/subagent-core/execution/assembly/subagent-actions-core，
+// 六 handler + 领域类型消费方经 core barrel import；行为快照等值锚定见 core
+// __tests__/subagent-actions-core.test.ts（期望值硬编码自迁移前实测输出，含错误
+// 文案逐字锚）。参数提取位于 subagent-tool.ts executeSubagent（action 路由 /
+// listParam / cancelParam 解包 / skillPath-cwd 路径检查）。本壳只做渲染：
+// adapter（领域对象 → {content, details}）+ buildGuiComponent（GUI 协议组件）。
 //
 // content（JSON 字符串）给 LLM，details（SubagentToolResult）给 renderResult，同源同处生成。
 
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
-import {
-  guiComponent,
-  type GuiContext,
-  guiResult,
-  isGuiCapable,
-} from "@zhushanwen/extension-protocol";
+import { guiComponent, type GuiContext } from "@zhushanwen/extension-protocol";
 
 import type {
   CancelHandlerResult,
@@ -32,37 +26,7 @@ import type {
 } from "@zhushanwen/subagent-core";
 import { mapRunIcon, mapRunStatus } from "./gui-mappers.ts";
 import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
-
-// ============================================================
-// core 领域内核 re-export（pi 消费面符号与收缩前一致，经 core barrel 统一消费）
-// ============================================================
-
-export {
-  cancelHandler,
-  closeHandler,
-  endedMessageGuard,
-  forkFromHandler,
-  listHandler,
-  mapExternalState,
-  messageHandler,
-  recordToListItem,
-  startHandler,
-} from "@zhushanwen/subagent-core";
-
-export type {
-  CancelHandlerInput,
-  CancelHandlerResult,
-  CloseHandlerInput,
-  CloseHandlerResult,
-  ForkFromHandlerInput,
-  ForkFromHandlerResult,
-  ListHandlerInput,
-  ListHandlerResult,
-  MessageHandlerInput,
-  MessageHandlerResult,
-  StartHandlerInput,
-  StartHandlerResult,
-} from "@zhushanwen/subagent-core";
+import { withGuiAttach } from "./tool-shared.ts";
 
 // ============================================================
 // 渲染层常量 / 类型（pi TUI 渲染族，按设计留壳）
@@ -76,8 +40,9 @@ function assertNever(value: never): string {
 /**
  * action ↔ domain 配对的承重类型（替代三处松散 `as`）。
  * 调用方必须传匹配的 {action, domain}——TS 在调用点校验，错配编译报错。
+ * export：gui-mode-dispatch.test.ts 经 type-only import 消费（RPC/TUI 模式分发契约）。
  */
-type AdapterInput =
+export type AdapterInput =
   | { action: "start"; domain: StartHandlerResult }
   | { action: "list"; domain: ListHandlerResult }
   | { action: "cancel"; domain: CancelHandlerResult }
@@ -128,10 +93,13 @@ export function adapter(
     detailsBase = { action: "start", subagentId: d.subagentId, sessionFile: d.sessionFile ?? null, slug: d.slug, model: d.model, bgResponse: d.response };
   }
 
-  // GUI 协议：RPC 模式下附加结构化渲染数据（union 各成员已声明 __gui__?，无需强转）
-  const details: SubagentToolResult = ctx && isGuiCapable(ctx)
-    ? { ...detailsBase, __gui__: guiResult(buildGuiComponent(input, result)) }
-    : detailsBase;
+  // GUI 协议：RPC 模式下附加结构化渲染数据（attach 单点在 tool-shared；组件构造
+  // 用 input/result 而非 detailsBase——与 adapter 领域对象同源）
+  const details: SubagentToolResult = withGuiAttach(
+    detailsBase,
+    ctx,
+    () => buildGuiComponent(input, result),
+  );
 
   // [W3 修复] list action 追加 reminder text block：LLM 调 list 时提醒不要轮询。
   // reminder 作为第二个 text block（独立追加，不污染 details/JSON schema）。

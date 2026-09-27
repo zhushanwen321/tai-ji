@@ -38,6 +38,7 @@ import {
   type TransitionTrigger,
   type WorkflowRunEvent,
 } from "../run-events.ts";
+import { ALL_DONE_REASONS, isTerminalDoneReason } from "../models/types.ts";
 
 // ── 样本事件（覆盖全部 7 个 type；路径值均为 fixture 假路径）────
 
@@ -756,5 +757,36 @@ describe("journal 实装（createRunEventJournal，临时目录自建自删）",
     // 未发生穿越副作用
     expect(existsSync(join(dir, "evil.events.jsonl"))).toBe(false);
     expect(existsSync(join(tmpdir(), "evil.events.jsonl"))).toBe(false);
+  });
+});
+
+// ── DoneReason 终止性判定（词表语义单点；消费方 = 壳 workflow-notify 防偷懒收尾指令）──
+
+describe("isTerminalDoneReason", () => {
+  it("全词表表驱动：completed 唯一非终止性，其余成员均为终止性", () => {
+    const expected: Record<string, boolean> = {
+      completed: false,
+      failed: true,
+      aborted: true,
+      invalid_args: true,
+      budget_limited: true,
+      time_limited: true,
+    };
+    // ALL_DONE_REASONS 是词表 SSOT——遍历它而非本地重抄，词表增删成员时本用例自适应
+    for (const reason of ALL_DONE_REASONS) {
+      expect(isTerminalDoneReason(reason)).toBe(expected[reason]);
+    }
+  });
+
+  it("期望表与词表零差集（词表新增成员时本用例红——强制在此显式归类）", () => {
+    const expectedMembers = [
+      "completed",
+      "failed",
+      "aborted",
+      "invalid_args",
+      "budget_limited",
+      "time_limited",
+    ];
+    expect([...ALL_DONE_REASONS].sort()).toEqual([...expectedMembers].sort());
   });
 });

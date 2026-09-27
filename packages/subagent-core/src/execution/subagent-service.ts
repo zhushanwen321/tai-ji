@@ -30,9 +30,9 @@ import { setHostUiRequestEndpoint } from "./engine/host/host-ui-endpoint.ts";
 // spawnedChildren 状态镜像公共面（engine/host/spawned-children.ts）——子进程活在
 // 引擎进程内，本模块只做镜像记账（终止意图位），实际终止经协议 interact cancel/close。
 // [R4] killRecordChildWithEscalation / registerSpawnedChildForRecord 消费已随 run 域迁
-// service/run-orchestration.ts + workflow-dispatch.ts——壳内剩 killAllSpawnedChildren
+// service/run-orchestration.ts + workflow-dispatch.ts——壳内剩 markAllSpawnedChildrenDead
 //（dispose 收割兜底）。
-import { killAllSpawnedChildren } from "./engine/host/spawned-children.ts";
+import { markAllSpawnedChildrenDead } from "./engine/host/spawned-children.ts";
 // [R4] 引擎路由/registry/model-validation/engine-sdk 消费已随 run 域与 workflow 族迁
 // 两个聚合文件——壳内零消费。
 import { ManifestStore } from "./persistence/manifest-store.ts";
@@ -816,7 +816,7 @@ export class SubagentService {
     // [R0/C1 孤儿进程修复] 先 abort running controllers + kill spawned children，再 dispose 资源。
     // abortRunningControllers 需要在 disposeAllRecords archive 之前执行（archive 后 store 找不到 record）。
     this.store.abortRunningControllers();
-    killAllSpawnedChildren();
+    markAllSpawnedChildrenDead();
     // [H1 U2/U6] Continuation 实例全量清理（路由注销面已随 interact 面退役）——
     // dispose 后容器不应再收 message。
     // [R4 / C-4 兑现 / 2026-09-13 接线] 原直调 this.continuations.clear() 的跨聚合写边

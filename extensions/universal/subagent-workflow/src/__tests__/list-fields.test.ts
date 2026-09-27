@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { recordToListItem } from "../interface/subagent-actions.ts";
+import { recordToListItem } from "@zhushanwen/subagent-core";
 import type { SubagentRecord } from "@zhushanwen/subagent-core";
 
 // ── SubagentRecord stub 工厂（最小合法 record） ──

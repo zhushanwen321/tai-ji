@@ -6,9 +6,9 @@
 // `<dataRoot>/workflow-state`（zcode 宿主布局）读 workflow run state，而 pi 宿主真实
 // 落盘 = JsonlRunStore 的 `<sessionDir>/workflow-state/<runId>.jsonl`——两目录生产不
 // 相交 → findStateByIdSync 恒 missing → sweep 按终态补注销**活跃 run**；WorkflowRun
-// GC 恒空转。修复后装配点传 resolvePiWorkflowStateDir()（execution/workflow-state-root.ts，
-// 与 extensions/universal/subagent-workflow/src/session-lifecycle.ts resolveSessionDir
-// 同规则重写）。
+// GC 恒空转。修复后装配点传 resolvePiWorkflowStateDir()（execution/workflow-state-root.ts
+// ——pi 宿主 sessionDir 布局单源 resolvePiSessionScopedDir 的 workflow-state 后缀
+// 派生，壳 session-lifecycle.resolveSessionDir 薄消费同一单源）。
 //
 // 本套件用 mkdtemp 真实目录布局（非 mock fs）证明四件事：
 //   ① resolvePiWorkflowStateDir 探测语义两分支（sessionScopedDir 存在/不存在）；
@@ -34,7 +34,7 @@ import { startIdleGc } from "../persistence/idle-gc.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { runPendingReconcileSweepForService } from "../round-supervisor/service-binding.ts";
 import type { RoundSupervisorBinding } from "../round-supervisor/service-binding.ts";
-import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
+import { resolvePiSessionScopedDir, resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const GC_INTERVAL_MS = 60 * 60 * 1000;
@@ -54,7 +54,8 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
-/** 与 session-lifecycle.resolveSessionDir 同规则的 cwd-slug（测试构造期望布局用）。 */
+/** 与生产单源 resolvePiSessionScopedDir 同规则的 cwd-slug（独立 mirror 构造期望
+ * 布局用——不 import 生产推导，保断言独立性）。 */
 function slugOf(cwd: string): string {
   return `--${cwd.replace(/^\//, "").replace(/\//g, "-")}--`;
 }
@@ -88,7 +89,48 @@ function makeRun(
   );
 }
 
-describe("resolvePiWorkflowStateDir 探测语义（session-lifecycle resolveSessionDir 同规则）", () => {
+describe("resolvePiSessionScopedDir（sessionDir 布局单源低阶导出，不带 workflow-state 后缀）", () => {
+  it("sessionScopedDir 存在 → 返回 <agentDir>/sessions/<slug>（实例隔离布局）", () => {
+    const cwd = path.join(tmpDir, "proj"); // 形式 cwd（不要求真实存在）
+    const agentDir = path.join(tmpDir, "agent");
+    const sessionScopedDir = path.join(agentDir, "sessions", slugOf(cwd));
+    fs.mkdirSync(sessionScopedDir, { recursive: true });
+    expect(resolvePiSessionScopedDir({ agentDir, cwd })).toBe(sessionScopedDir);
+  });
+
+  it("sessionScopedDir 不存在 → 回退 agentDir 根（JsonlRunStore 首写 mkdir 的根布局）", () => {
+    const agentDir = path.join(tmpDir, "agent");
+    fs.mkdirSync(agentDir, { recursive: true });
+    expect(resolvePiSessionScopedDir({ agentDir, cwd: path.join(tmpDir, "fresh-proj") })).toBe(agentDir);
+  });
+
+  it("agentDir 缺省（无 opts）→ PI_CODING_AGENT_DIR env 通道，cwd 缺省 process.cwd()", () => {
+    const agentDir = path.join(tmpDir, "agent-env");
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    // 断言对探测两分支均成立：命中 → sessions/<slug> 在该树下，未命中 → 树根本身。
+    // 真实 process.cwd() 的探测结果不受控（本机可能存在同名目录），不做分支级断言。
+    expect(resolvePiSessionScopedDir().startsWith(agentDir)).toBe(true);
+  });
+
+  it("agentDir 缺省且 env 为空串 → homedir 自推锚定（~/.pi/agent 树下）", () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "");
+    const defaultAgentRoot = path.join(os.homedir(), ".pi", "agent");
+    // 只读断言（不写真实 homedir）：探测两分支都在缺省锚定树下即证明 env 空 →
+    // homedir 回落；分支级探测语义已由上方注入用例覆盖。
+    expect(resolvePiSessionScopedDir().startsWith(defaultAgentRoot)).toBe(true);
+  });
+
+  it("resolvePiWorkflowStateDir 是其 workflow-state 纯后缀派生（同参一致）", () => {
+    const cwd = path.join(tmpDir, "proj2");
+    const agentDir = path.join(tmpDir, "agent2");
+    fs.mkdirSync(path.join(agentDir, "sessions", slugOf(cwd)), { recursive: true });
+    expect(resolvePiWorkflowStateDir({ agentDir, cwd })).toBe(
+      path.join(resolvePiSessionScopedDir({ agentDir, cwd }), "workflow-state"),
+    );
+  });
+});
+
+describe("resolvePiWorkflowStateDir 探测语义（resolvePiSessionScopedDir 后缀派生）", () => {
   it("sessionScopedDir 存在 → 用 <agentDir>/sessions/<slug>/workflow-state（实例隔离布局）", () => {
     const cwd = path.join(tmpDir, "proj"); // 形式 cwd（不要求真实存在）
     const agentDir = path.join(tmpDir, "agent");

@@ -15,7 +15,8 @@ vi.mock('../src/infra/pi/pi-paths.js', async (importOriginal) => {
 })
 
 import { extractSubagentsFromSessionFile, scanSubagentEntries } from '../src/services/session/subagent-extractor.js'
-import { SUBAGENT_RECORD_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
+import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 
 describe('encodeCwd', () => {
   it('encodes Unix cwd path correctly', () => {

@@ -605,7 +605,7 @@ export class EngineClient {
   // ── 收割 / 停机 ──────────────────────────────────────────────────────────
 
   /**
-   * 宿主收割入口（D8 killAllSpawnedChildren 落点）：组杀引擎 CLI（POSIX 负 pid 组杀 /
+   * 宿主收割入口（D8 markAllSpawnedChildrenDead 落点）：组杀引擎 CLI（POSIX 负 pid 组杀 /
    * Windows taskkill /T /F）+ 镜像整体置死 + pidfile 清理。在途请求以 engine_crashed
    * 失败。「零残留」断言范围 = 一代子进程 + 组内后代（引擎自身 detached 后代不覆盖，
    * impl-plan §7.2 R9-1 / 设计 §3.9 已接受代价）。

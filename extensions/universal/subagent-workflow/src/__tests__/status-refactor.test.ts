@@ -19,7 +19,7 @@ import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/su
 import { completeRecord, createRecord, tryTransition } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
 import { createNotifier } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
 import type { BgNotifyRecord, BgNotifier, NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
-import { mapExternalState } from "../interface/subagent-actions.ts";
+import { mapExternalState } from "@zhushanwen/subagent-core";
 import { statusGlyph } from "../interface/format.ts";
 import type { ClosedReason, ExecutionRecord, ExecutionStatus } from "@zhushanwen/subagent-core";
 

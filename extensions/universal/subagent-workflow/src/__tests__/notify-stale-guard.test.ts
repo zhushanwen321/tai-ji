@@ -1,7 +1,7 @@
 // src/__tests__/notify-stale-guard.test.ts
 //
 // stale ctx 守卫接入单测（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：
-// - notifyDone（interface/helpers.ts）：[u9 账本化] 主路径走 ledger（courier 装配层
+// - notifyDone（workflow-notify.ts）：[u9 账本化] 主路径走 ledger（courier 装配层
 //   sendDelivery 已内置 stale 防御）；本组用例覆盖的是 ledger 未 bind 的降级直发
 //   分支——pi.sendMessage 经 guardStaleCtx 包裹后 stale 错误（含 PS-30 分诊词）静默
 //   降级不外抛；非 stale 错误原样上抛（同一错误实例，守卫不吞真实 bug）；正常路径
@@ -19,7 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { STALE_CTX_MARKER } from "@zhushanwen/pi-ext-guards";
 
-import { notifyDone } from "../interface/helpers.ts";
+import { notifyDone } from "../workflow-notify.ts";
 import { bindLedgerHostAndRecover } from "../session-lifecycle.ts";
 
 /** pi 实装 stale 文案的完整形态（E1 崩溃堆栈原文，探针 PS-30 守卫其稳定性）。 */

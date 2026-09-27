@@ -18,28 +18,15 @@ import { describe, expect, it, vi } from "vitest";
 import { SLUG_MAX_LENGTH } from "@zhushanwen/subagent-core";
 import { REENTRY_BUSY_MESSAGE, type ReentryGuardRef } from "../reentry-guard.ts";
 import { registerWorkflowTool } from "../tool-workflow.ts";
+import { captureTool, type CapturedTool } from "./capture-tool.ts";
 
-// ── capture helper ──
+// ── capture helper（fake pi 捕获单点见 capture-tool.ts；此处只留差异面：注册实参）──
 
-interface CapturedTool {
-  name: string;
-  execute: (
-    toolCallId: string,
-    params: Record<string, unknown>,
-    signal: AbortSignal | undefined,
-    onUpdate: unknown,
-    ctx: unknown,
-  ) => Promise<unknown>;
-}
-
-function captureTool(deps: unknown, reentryRef: ReentryGuardRef): CapturedTool {
-  const tools: CapturedTool[] = [];
-  const pi = { registerTool: (t: unknown) => tools.push(t as CapturedTool) };
-  registerWorkflowTool(pi as never, deps as never, reentryRef);
-  if (!tools[0] || tools[0].name !== "workflow") {
-    throw new Error("registerWorkflowTool did not register the workflow tool");
-  }
-  return tools[0];
+function captureWorkflowTool(deps: unknown, reentryRef: ReentryGuardRef): CapturedTool {
+  return captureTool(
+    (pi) => registerWorkflowTool(pi as never, deps as never, reentryRef),
+    "workflow",
+  );
 }
 
 /** 最小 LauncherDeps stub：被测路径只触 registry / runs（C5③ 起 actionRun 先查
@@ -72,7 +59,7 @@ function makeScript(parameters?: object): Record<string, unknown> {
 
 describe("W4b: workflow tool 错误路径 throw 语义", () => {
   it("not_found：abort 目标 runId 不存在 → throw（pi catch 后置 isError:true）", async () => {
-    const tool = captureTool(makeDeps(), { isProcessing: false });
+    const tool = captureWorkflowTool(makeDeps(), { isProcessing: false });
     await expect(
       tool.execute("id", { action: "abort", runId: "no-such-run" }, undefined, undefined, {}),
     ).rejects.toThrow(
@@ -98,7 +85,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
         loadAll: vi.fn().mockResolvedValue([]),
       },
     });
-    const tool = captureTool(deps, { isProcessing: false });
+    const tool = captureWorkflowTool(deps, { isProcessing: false });
     await expect(
       tool.execute("id", { action: "run", name: "/tmp/no-such-workflow.js" }, undefined, undefined, {}),
     ).rejects.toThrow("Workflow '/tmp/no-such-workflow.js' not found.");
@@ -109,7 +96,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
 
   it("reentry-busy：guard 占用 → throw REENTRY_BUSY_MESSAGE，且 guard 状态不被污染", async () => {
     const guard: ReentryGuardRef = { isProcessing: true };
-    const tool = captureTool(makeDeps(), guard);
+    const tool = captureWorkflowTool(makeDeps(), guard);
     await expect(
       tool.execute("id", { action: "status" }, undefined, undefined, {}),
     ).rejects.toThrow(REENTRY_BUSY_MESSAGE);
@@ -130,7 +117,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
         ),
       },
     });
-    const tool = captureTool(deps, { isProcessing: false });
+    const tool = captureWorkflowTool(deps, { isProcessing: false });
     await expect(
       tool.execute(
         "id",
@@ -157,7 +144,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
         ),
       },
     });
-    const tool = captureTool(deps, { isProcessing: false });
+    const tool = captureWorkflowTool(deps, { isProcessing: false });
     const longSlug = "a".repeat(SLUG_MAX_LENGTH + 1);
     await expect(
       tool.execute(
@@ -185,7 +172,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
         ),
       },
     });
-    const tool = captureTool(deps, { isProcessing: false });
+    const tool = captureWorkflowTool(deps, { isProcessing: false });
     // LLM 对「跑久一点」完全可能生成 1e12——超 2^31-1 的典型形态（schema Type.Number
     // 直通无上界，用户入口 fail-fast 不依赖 lifecycle 内层 assertSafeTimerDelay）
     await expect(
@@ -221,7 +208,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
           ),
         },
       });
-      const tool = captureTool(deps, { isProcessing: false });
+      const tool = captureWorkflowTool(deps, { isProcessing: false });
       await expect(
         tool.execute(
           "id",
@@ -239,7 +226,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
   it("throw 后 reentry guard 经 finally 正常释放（成功路径回归）", async () => {
     // abort not_found throw 穿透 execute try/finally：guard 必须复位，否则后续命令全部 busy
     const guard: ReentryGuardRef = { isProcessing: false };
-    const tool = captureTool(makeDeps(), guard);
+    const tool = captureWorkflowTool(makeDeps(), guard);
     await expect(
       tool.execute("id", { action: "abort", runId: "no-such-run" }, undefined, undefined, {}),
     ).rejects.toThrow(/not found/);

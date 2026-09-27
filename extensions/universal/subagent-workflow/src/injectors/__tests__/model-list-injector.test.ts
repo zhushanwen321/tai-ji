@@ -46,6 +46,17 @@ describe("formatModelList", () => {
 		expect(out).toContain("</available_provider_models>");
 	});
 
+	it("guide 文案全量锚定：骨架 + 引导语 + 条目模板测试内硬编码快照（改写 MODEL_LIST_GUIDE 即红灯）", () => {
+		// 本文件其余用例与 engine-section-stability 的 guide 消费均为结构断言/
+		// 同源插值（guide 文案两侧一致变化，恒绿）——guide 文本锁在此处单点
+		const out = formatModelList([
+			entry({ provider: "p", id: "m", name: "N" }),
+		], { guide: MODEL_LIST_GUIDE });
+		expect(out).toBe(
+			`\n\n<available_provider_models>\nThe following models are available (auth-configured). Use these ids when delegating via the subagent/workflow \`model\` param ("provider/modelId" format) to match the task (e.g. vision models for screenshots, strong reasoners for architecture). Do NOT switch the main conversation model mid-session — per-call model override on delegates only (switching the main model is cache-hostile); use the /model command only when the user explicitly asks to change it.\n  <model><id>p/m</id><name>N</name><caps>reasoning</caps><contextWindow>200000</contextWindow></model>\n</available_provider_models>`,
+		);
+	});
+
 	it("input 含 image 时 caps 加 vision；无能力时省略 caps 段", () => {
 		const out = formatModelList([
 			entry({ id: "vision-m", input: ["text", "image"] }),

@@ -29,7 +29,8 @@ import { Trace } from "@zhushanwen/subagent-core/orchestration/models/trace.ts";
 import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run-spec.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
 import { mkCtx, mkPi } from "@zhushanwen/subagent-core/orchestration/__tests__/test-mocks.ts";
-import { JsonlRunStore, WORKFLOW_RECORD_CUSTOM_TYPE } from "../jsonl-run-store.ts";
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
+import { JsonlRunStore } from "../jsonl-run-store.ts";
 
 const EDGE_DEBOUNCE_MS = 20;
 

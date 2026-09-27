@@ -38,7 +38,8 @@ import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 // SNAPSHOT_VERSION 随 c721646f1 codec 迁 core 后壳模块不再 re-export，改从 barrel 消费
 import { SNAPSHOT_VERSION } from "@zhushanwen/subagent-core";
-import { JsonlRunStore, WORKFLOW_RECORD_CUSTOM_TYPE } from "../jsonl-run-store.ts";
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
+import { JsonlRunStore } from "../jsonl-run-store.ts";
 import { mkCtx, mkPi } from "@zhushanwen/subagent-core/testing/orchestration/__tests__/test-mocks.ts";
 
 function makeSpec(): RunSpec {

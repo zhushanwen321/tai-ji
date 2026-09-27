@@ -43,13 +43,14 @@ import { Trace } from "@zhushanwen/subagent-core";
 import type { RunSpec } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
-// DEFAULT_STATE_MAX_RUNS / STATE_TTL_MS_ENV 仅测试消费符号（D3 标准不进 barrel），
-// 深路径直取（[Q2] TTL env 常量已自本包迁入 core 单源）
+// DEFAULT_STATE_MAX_RUNS / STATE_MAX_RUNS_ENV / STATE_TTL_MS_ENV 仅测试消费符号，
+// 深路径直取（[Q2] env 常量与解析已单源 core file-run-store，壳侧本地定义删除）
 import {
   DEFAULT_STATE_MAX_RUNS,
+  STATE_MAX_RUNS_ENV,
   STATE_TTL_MS_ENV,
 } from "@zhushanwen/subagent-core/orchestration/file-run-store.ts";
-import { JsonlRunStore, STATE_MAX_RUNS_ENV } from "../jsonl-run-store.ts";
+import { JsonlRunStore } from "../jsonl-run-store.ts";
 
 function makeSpec(): RunSpec {
   return {

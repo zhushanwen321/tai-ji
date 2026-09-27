@@ -84,46 +84,61 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-// DEFAULT_SAVE_MIN_INTERVAL_MS / DEFAULT_STATE_MAX_RUNS 保留深路径：core barrel
-// 刻意不导出（exports 面即 semver 契约，见 subagent-core src/index.ts 头注），壳侧
-// barrel 消费（DEFAULT_* 已进 core barrel——u-2c 删 ./* 通配后深路径 tsc 不可解析）
+// DEFAULT_SAVE_MIN_INTERVAL_MS 经 core barrel 消费
+// （u-2c 删 ./* 通配后深路径 tsc 不可解析，barrel 是壳侧唯一消费通道）；
+// RUN_EVENT_JOURNAL_SUFFIX / STATE_DIR_NAME 同理经 barrel 单源（C3 常量上收：
+// journal 后缀与 workflow-state 目录分量原为本地镜像，漂移即 watcher 失配 /
+// store 读写错目录，现编译期跟随 core）；createRunPersistThrottle = entry
+// append 节流决策单点（原与 core FileRunStore 平行的五要素判定收编，B3 单侧
+// 修复实证独立演化风险）。
 import {
   DEFAULT_SAVE_MIN_INTERVAL_MS,
-  DEFAULT_STATE_MAX_RUNS,
+  RUN_EVENT_JOURNAL_SUFFIX,
+  STATE_DIR_NAME,
+  createRunPersistThrottle,
+  type RunPersistThrottle,
 } from "@zhushanwen/subagent-core";
 import { getLogger } from "@zhushanwen/subagent-core";
 
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import {
+  closeOutInFlightCalls,
   SNAPSHOT_VERSION,
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_RECORD_ENTRY_VERSION,
+  classifyWorkflowRecordEntryData,
   createRunEventJournal,
   fromRunSnapshot,
   projectRunEvents,
   toRunSnapshot,
+  type DoneReason,
   type RunEventJournal,
+  type RunOutcome,
   type RunSnapshot,
+  type RunStore,
   type WorkflowRunEvent,
 } from "@zhushanwen/subagent-core";
 // [Q2 / D5 清理规则] retention 维护单源（core 消费，barrel 导出）：
 // - pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪（manifest 资格 + cap + TTL +
 //   journal 成对删）——本模块 P1b-2 的本地资格感知实现已收口于此；
 // - abandonElapsedInterruptedRuns：interrupted 放弃窗终局化（D5 规则③，无悬挂态）；
-// - resolveStateTtlMs：TTL env 解析单源（常量随迁 core）。
+// - resolveStateTtlMs / resolveStateMaxRuns：TTL 与 cap 的 env 解析单源（常量与
+//   解析都在 core file-run-store.ts，经 barrel 消费）。
 import {
   abandonElapsedInterruptedRuns,
   pruneTerminalRunFiles,
+  resolveStateMaxRuns,
   resolveStateTtlMs,
 } from "@zhushanwen/subagent-core";
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── Workflow-record self-describing entry (W17, D4) ─────────
-
-/**
- * 自描述 workflow record entry 的 customType（W17 [D4]）。命名对齐 W16 的
- * `subagent-record`（连字符风格）。写点字面量与本常量的等值由
- * __tests__/jsonl-run-store-session-file.test.ts 断言钉住（消费方引用本常量，勿用裸字符串）。
- */
-export const WORKFLOW_RECORD_CUSTOM_TYPE = "workflow-record";
+//
+// customType / entry schema 版本 / v1 判定已收 core
+// orchestration/workflow-record-entry.ts 单源（本模块原本地常量与 v1 guard
+// 判定删除，改经 barrel 消费——词表漂移结构性不可达）；本模块保留：写点
+// data 组装（toWorkflowRecordEntryData）、loadAll 重建的日志策略与 snapshot
+// 层解码（SNAPSHOT_VERSION guard + fromRunSnapshot——不在词表收敛范围）。
 
 /**
  * `workflow-record` entry 的 data schema（v1）。
@@ -136,7 +151,7 @@ export const WORKFLOW_RECORD_CUSTOM_TYPE = "workflow-record";
 // 模块内类型（不导出：无外部消费方，fallow unused_types/private_type_leaks 双轨判定；
 // 运行侧 workflow-extractor 的同形结构独立定义，见其注释）。
 interface WorkflowRecordEntryData {
-  /** schema 版本（W17 起 v1）。消费方按 v 判别解析，不认识的版本跳过而非猜测。 */
+  /** schema 版本（W17 起 v1，常量单源 core WORKFLOW_RECORD_ENTRY_VERSION）。消费方按 v 判别解析，不认识的版本跳过而非猜测。 */
   v: 1;
   /** 完整 RunSnapshot（与同次 flush 写入 state 文件的内容是同一份，不二次序列化）。 */
   snapshot: RunSnapshot;
@@ -146,7 +161,7 @@ interface WorkflowRecordEntryData {
 
 /** 已序列化快照 → 自描述 entry data（doFlush 消费同一 snapshot，保证 entry 与 state 文件一致）。 */
 function toWorkflowRecordEntryData(snapshot: RunSnapshot): WorkflowRecordEntryData {
-  return { v: 1, snapshot, updatedAt: new Date().toISOString() };
+  return { v: WORKFLOW_RECORD_ENTRY_VERSION, snapshot, updatedAt: new Date().toISOString() };
 }
 
 // ── Serialization → core codec（下沉收口 D4）──────────────────
@@ -171,12 +186,33 @@ function toWorkflowRecordEntryData(snapshot: RunSnapshot): WorkflowRecordEntryDa
  */
 function collectRecordRun(entry: CustomEntry, entryIndex: number, recordRuns: Map<string, WorkflowRun>): boolean {
   if (entry.customType !== WORKFLOW_RECORD_CUSTOM_TYPE) return false;
-  // v1 entry guard：schema 版本不认识 → 跳过（不猜测解析）
-  const data = entry.data as WorkflowRecordEntryData | undefined;
-  if (data?.v !== 1 || !data.snapshot) return true;
+  // v1 entry guard：判定单源 core classifyWorkflowRecordEntryData（reason 词表与
+  // 分支语义见其模块注释），日志策略留本侧。版本可见性分层（D4 裁决③宿主侧落地）：
+  // future-v（显式版本号非 1 = 未来版本，升级前装旧版读取属正常降级）→ 静默跳过；
+  // wrong-type/missing-v（data 非对象或 v 缺失——写点恒定 v:1，缺失即形态损坏：
+  // 半写/手改）→ warn 留证，对齐 SO-DATA-2 的 per-entry 损坏留证口径（两种形态
+  // 共用同一文案与原实现一致：原判定 `data?.v === undefined` 同样一并覆盖）。
+  const classification = classifyWorkflowRecordEntryData(entry.data);
+  if (!classification.ok) {
+    if (classification.reason === "future-v") return true; // 静默跳过（不猜测解析）
+    if (classification.reason === "no-snapshot") {
+      logger.warn(
+        `[subagent-workflow] workflow-record entry #${entryIndex} malformed (v1 without snapshot), skipped run rebuild`,
+      );
+      return true;
+    }
+    // wrong-type / missing-v
+    logger.warn(
+      `[subagent-workflow] workflow-record entry #${entryIndex} malformed (missing v), skipped run rebuild`,
+    );
+    return true;
+  }
+  // ok = v1 且 snapshot truthy；snapshot 解码留在本侧（codec 形状校验不抛，
+  // 损坏走 undefined 返回的 warn 分支）。
+  const snapshot = classification.snapshot as RunSnapshot;
   try {
-    if (data.snapshot.v === SNAPSHOT_VERSION) {
-      const run = fromRunSnapshot(data.snapshot);
+    if (snapshot.v === SNAPSHOT_VERSION) {
+      const run = fromRunSnapshot(snapshot);
       if (run) {
         recordRuns.set(run.runId, run); // 后写覆盖 = 最后一条 entry 胜出
       } else {
@@ -224,8 +260,8 @@ function collectEntrySources(entries: SessionEntry[]): {
   return { recordRuns, pointers };
 }
 
-/** 旧 link 指针指向的 state 文件读取：末行 JSON 解析重建。损坏/不可读/版本不匹配
- *  返回 null（单文件失败不阻断其余 run 重建；D-5 静默跳过语义保持）。 */
+/** 旧 link 指针 / 终局调和共用的 state 文件读取：末行 JSON 解析重建。损坏/不可读/
+ *  版本不匹配返回 null（单文件失败不阻断其余 run 重建；D-5 静默跳过语义保持）。 */
 async function loadRunFromStateFile(filePath: string): Promise<WorkflowRun | null> {
   try {
     const content = await fs.promises.readFile(filePath, "utf8");
@@ -237,11 +273,28 @@ async function loadRunFromStateFile(filePath: string): Promise<WorkflowRun | nul
     return fromRunSnapshot(parsed) ?? null;
   } catch (err) {
     // Corrupt/unreadable state file — skip (don't crash loadAll)，降级语义保持；
-    // warn 留证（含文件路径与原因）防静默丢 run 无从归因。
+    // warn 留证（含文件路径与原因）防静默丢 run 无从归因。消费方 = 旧 link 指针
+    // 通道与终局调和（reconcileRunningFinality）。
     logger.warn(
-      `[subagent-workflow] legacy state-link target unreadable, run skipped: ${filePath}: ${toErrorMessage(err)}`,
+      `[subagent-workflow] state snapshot file unreadable, run rebuild/skip: ${filePath}: ${toErrorMessage(err)}`,
     );
     return null;
+  }
+}
+
+/**
+ * [终局调和] journal `run-settled` 帧的 RunOutcome 三态 → DoneReason（completed/
+ * failed 同名直取；cancelled → aborted——与 core doneReasonToRunOutcome 正向映射
+ * 互逆；outcome 类型经 core barrel 直引 RunOutcome）。
+ */
+function runSettledOutcomeToDoneReason(outcome: RunOutcome): DoneReason {
+  switch (outcome) {
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "aborted";
   }
 }
 
@@ -252,9 +305,8 @@ async function loadRunFromStateFile(filePath: string): Promise<WorkflowRun | nul
 // 全部在 core pruneTerminalRunFiles（file-run-store.ts）；interrupted 放弃窗终局化
 // （D5 规则③，无悬挂态）在 core abandonElapsedInterruptedRuns（run-registry.ts）。
 // 本面只保留触发点（新 run 首写的冷路径——每个新 run 进场做一轮完整 retention
-// 维护）与宿主侧 cap env 解析（getEnvStateMaxRuns——cap env 双实现为存量格局，
-// 与 core FileRunStore envName 通道同形）。TTL 常量/env 解析已随收口迁入 core
-// （resolveStateTtlMs 单源）。
+// 维护）；cap / TTL 的 env 解析同样单源 core（resolveStateMaxRuns /
+// resolveStateTtlMs，经 barrel 消费）。
 
 // ── JsonlRunStore ────────────────────────────────────────────
 
@@ -279,36 +331,9 @@ const DEFAULT_SAVE_DEBOUNCE_MS = 200;
  */
 const DEFAULT_EVENT_EDGE_DEBOUNCE_MS = 1000;
 
-/**
- * 磁盘保留清理的上限 env（OR-5 ⑥b 默认开）：workflow-state 目录内 run state
- * 文件上限。
- *
- * 解析语义与 core FileRunStore envName 通道一致（两实现面单源 {@link
- * DEFAULT_STATE_MAX_RUNS}）：
- * - 未设/空 → 按默认上限 {@link DEFAULT_STATE_MAX_RUNS} 裁剪（**默认开**——
- *   OR-5 修复前的 opt-in「默认关」正是跨 run 无界累积缺陷本身）；
- * - 有限正数 → 上限 = env 值（显式覆盖默认值）；
- * - 非法值（非有限数/≤0）→ 不清理（显式 opt-out 通道：用户意图不明时不动
- *   磁盘，对齐 prune 内部「任何失败都不抛」的保守哲学）。
- *
- * 用 TAIJI_ 前缀而非 PI_：本 env 是 pi 进程内读的配置 env，taiji 桌面 spawn 链按
- * ENV_WHITELIST_PREFIXES（只有 TAIJI_ 等）过滤，PI_ 前缀在桌面场景被静默丢弃——
- * 同 TAIJI_SUBAGENT_IDLE_TIMEOUT_MS 的改名教训（lifecycle-manager.ts）。
- */
-export const STATE_MAX_RUNS_ENV = "TAIJI_SUBAGENT_STATE_MAX_RUNS";
-
-/** 解析保留上限；env 未设/空 → 默认上限，显式非法/≤0 → undefined（不清理）。 */
-function getEnvStateMaxRuns(): number | undefined {
-  const raw = process.env[STATE_MAX_RUNS_ENV];
-  if (raw === undefined || raw === "") return DEFAULT_STATE_MAX_RUNS;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
-  return parsed;
-}
-
-/** journal 文件后缀（<runId>.events.jsonl）——watcher 边沿判定的字面单源
- *  （retention 裁剪判定在 core pruneTerminalRunFiles，journal 作为 run 附属成对裁）。 */
-const JOURNAL_FILE_SUFFIX = ".events.jsonl";
+/** journal 文件后缀（<runId>.events.jsonl）——watcher 边沿判定消费 core barrel
+ *  单源 RUN_EVENT_JOURNAL_SUFFIX（retention 裁剪判定在 core pruneTerminalRunFiles，
+ *  journal 作为 run 附属成对裁）。 */
 
 /**
  * per-runId 去抖批。窗口内 N 次 save 合并：latestRun 保留最新聚合引用
@@ -353,7 +378,25 @@ interface JsonlRunStoreOptions {
   watchJournalEdges?: boolean;
 }
 
-export class JsonlRunStore {
+/**
+ * RunStore port 的 pi 宿主 Infra 实现（session 锚定：权威 entry 落 pi session
+ * JSONL，state 文件是性能缓存）。port 契约类型经 core barrel（RunStore 三方法
+ * save / loadAll / stateFilePath，models/ports.ts）——implements 显式化后签名
+ * 漂移（如返回类型收窄、方法改名）由 tsc 在本类拦截，不再靠约定对齐。
+ *
+ * 本类的五个 interface 面（方法分组索引，便于按消费场景定位）：
+ * 1. **port 面**（RunStore 契约）：save / loadAll / stateFilePath——组合根装配
+ *    LifecycleDeps.store 的注入面；
+ * 2. **adoption 面**（skill-reload 接管）：rebind + resendSnapshots——post-reload
+ *    session_start 就地重绑 entry 写入源并重发权威快照；
+ * 3. **生命周期面**：dispose + flushPendingSaves——shutdown 收尾 / 测试与排查的
+ *    主动冲刷；
+ * 4. **测试通道**：simulateJournalEdgeForTest——fake timers 下驱动 journal 边沿
+ *    调度链（真实 watcher 不可控）；
+ * 5. **词表导出**：无（customType / entry schema 版本已收 core
+ *    workflow-record-entry.ts 单源，本模块不再导出词表常量）。
+ */
+export class JsonlRunStore implements RunStore {
   private readonly sessionDir: string;
   /**
    * workflow-record entry 的 appendEntry 源。store 对 pi 的唯一消费面是 doFlush 的
@@ -363,8 +406,8 @@ export class JsonlRunStore {
   private pi?: Pick<ExtensionAPI, "appendEntry">;
   private ctx?: ExtensionContext;
   private readonly saveDebounceMs: number;
-  /** workflow-record entry append 节流最小间隔（ms），0 = 禁用。 */
-  private readonly entryAppendMinIntervalMs: number;
+  /** workflow-record entry append 节流（判定 + 记账单点见 core persist-throttle.ts）。 */
+  private readonly entryThrottle: RunPersistThrottle;
   /** [P3/D6] 事件边沿 flush 防抖窗口（ms）。 */
   private readonly eventEdgeDebounceMs: number;
   /**
@@ -391,13 +434,6 @@ export class JsonlRunStore {
   /** 本实例已至少成功发起过一次 flush 的 runId（冷/热路径判据）。 */
   private readonly writtenOnce = new Set<string>();
   /**
-   * per-runId 上次 workflow-record entry append 时刻（节流判据，时间源 Date.now()——
-   * fake timers 下可推进）。终态 append 后删（终态后 runId 不再 save）；残留条目
-   * 只出现在 running 中 run 消失场景，单条可忽略（对齐 core FileRunStore.lastSavedAt
-   * 的取舍先例）。
-   */
-  private readonly lastEntryAppendAt = new Map<string, number>();
-  /**
    * per-runId 串行 flush 链。同 runId 的 flush 排队顺序执行（排队不跳过——
    * 跳过会丢最新状态且打破后写覆盖前写的单调性），不同 runId 互不阻塞。
    * 链条目 settle 后不清理：runId 数量有界、生命周期短于 store，惰性清理
@@ -412,17 +448,16 @@ export class JsonlRunStore {
     this.pi = opts.pi;
     this.ctx = opts.ctx;
     this.saveDebounceMs = opts.saveDebounceMs ?? DEFAULT_SAVE_DEBOUNCE_MS;
-    this.entryAppendMinIntervalMs = Math.max(
-      0,
+    this.entryThrottle = createRunPersistThrottle(
       opts.entryAppendMinIntervalMs ?? DEFAULT_SAVE_MIN_INTERVAL_MS,
     );
     this.eventEdgeDebounceMs = Math.max(0, opts.eventEdgeDebounceMs ?? DEFAULT_EVENT_EDGE_DEBOUNCE_MS);
     this.watchJournalEdges = opts.watchJournalEdges ?? true;
   }
 
-  /** State directory: <sessionDir>/workflow-state/ */
+  /** State directory: <sessionDir>/workflow-state/（目录分量经 core barrel STATE_DIR_NAME 单源） */
   private get stateDir(): string {
-    return path.join(this.sessionDir, "workflow-state");
+    return path.join(this.sessionDir, STATE_DIR_NAME);
   }
 
   /** State file path for a given runId. */
@@ -602,34 +637,29 @@ export class JsonlRunStore {
       const journalEvents = await this.readJournalEvents(runId);
       const rawSnapshot = toRunSnapshot(run);
       const snapshot = journalEvents.length > 0 ? projectRunEvents(rawSnapshot, journalEvents) : rawSnapshot;
-      await fs.promises.writeFile(filePath, JSON.stringify(snapshot) + "\n", "utf8");
-      // W17 [D4]：成功 flush 同步 append 自描述 workflow-record entry（同一份 snapshot，
-      // entry 与 state 文件内容一致）。pi 文件是 workflow 数据持久化权威（loadAll 优先
-      // 从 entry 重建），state 文件降级纯性能缓存。pi 未注入（测试）时跳过。
-      // [B-1] entry append 节流（语义对齐 core FileRunStore.save OR-5 ⑥a）：running
-      // 中间态距上次 append 不足间隔 → 跳过（pi session JSONL append-only，节流前
-      // 每次 flush 全量 append 累积单 run O(n²) 磁盘）；终态永不节流（最终状态必进
-      // pi 权威文件）；间隔 0 禁用。判据在 append 成功后更新——本调用点位于 writeFile
-      // 成功之后，writeFile 抛错时判据不更新，不吞下一次重试机会。
+      // [B3 顺序反转] 权威优先：workflow-record entry（W17 权威通道）先写，state
+      // 文件（性能缓存）后写。原顺序（state 先写）在 appendEntry 同步抛错
+      // （assertActive/磁盘满）且为该 run 最后一次 flush 时，留下「state 新、entry
+      // 缺」的残余形态——loadAll 只认 entry，run 对重启不可见，「等价崩溃丢失由
+      // kill-9 恢复兜底」的论证不成立（恢复链不读 state 文件）。反转后两种失败
+      // 形态都无害：appendEntry 失败 → entry 与 state 双缺（等价崩溃丢失，冷路径
+      // 回滚后重试）；appendEntry 成功 + writeFile 失败 → 权威 entry 已落，state
+      // 停在旧快照（读序 entry > state 文件，读侧无损失）。
+      // [B-1] entry append 节流（决策单点 = core persist-throttle.ts，与
+      // FileRunStore.save 共享同一五要素矩阵：pi session JSONL append-only，节流前
+      // 每次 flush 全量 append 累积单 run O(n²) 磁盘；终态永不节流（最终状态必进
+      // pi 权威文件）；间隔 0 禁用。记账在 append 成功后——writeFile 随后失败
+      // 不回退判据：entry 已成功落账是既成事实，重试的 writeFile 无需重复 append）。
       const isTerminal = run.state.status !== "running";
       const now = Date.now();
-      const lastAppendAt = this.lastEntryAppendAt.get(runId);
-      if (
-        this.entryAppendMinIntervalMs <= 0 ||
-        isTerminal ||
-        lastAppendAt === undefined ||
-        now - lastAppendAt >= this.entryAppendMinIntervalMs
-      ) {
+      if (this.entryThrottle.shouldPersist(runId, isTerminal, now)) {
         this.pi?.appendEntry(
           WORKFLOW_RECORD_CUSTOM_TYPE,
           toWorkflowRecordEntryData(snapshot),
         );
-        if (isTerminal) {
-          this.lastEntryAppendAt.delete(runId);
-        } else {
-          this.lastEntryAppendAt.set(runId, now);
-        }
+        this.entryThrottle.recordPersisted(runId, isTerminal, now);
       }
+      await fs.promises.writeFile(filePath, JSON.stringify(snapshot) + "\n", "utf8");
       // OR-5 ⑥b 磁盘保留维护（默认开 → [Q2] core 单源收口 + abandon 接线）：新 run
       // state 文件首写成功后触发（rollbackFirstWrite 即 save() 冷路径传入的
       // isFirstWrite——「本实例首次写该 runId」≈ 新文件落盘时刻，每个 run 只清一次，
@@ -644,7 +674,9 @@ export class JsonlRunStore {
       // 冷路径立即重试」——不再有旧指针形态下「热路径永不写 entry → run 对重启
       // 不可见」的窗口）。堵住首写失败后还得等去抖窗的恢复延迟。
       // 残余窗口（已知接受）：回滚后若再无任何 save（随即崩溃/退出），entry 与
-      // state 文件双双缺失——等价崩溃丢失，由 kill-9 恢复兜底。
+      // state 文件双双缺失——等价崩溃丢失，由 kill-9 恢复兜底。[B3 顺序反转]后
+      // 该形态是唯一残余（appendEntry 失败 → 双缺）；「state 新而 entry 缺」的
+      // 变体已随反转消除（writeFile 失败时 entry 已先落权威）。
       if (rollbackFirstWrite) {
         this.writtenOnce.delete(runId);
       }
@@ -715,8 +747,8 @@ export class JsonlRunStore {
       for (const runId of this.activeRuns.keys()) this.scheduleEventEdgeFlush(runId);
       return;
     }
-    if (!filename.endsWith(JOURNAL_FILE_SUFFIX)) return;
-    const runId = filename.slice(0, -JOURNAL_FILE_SUFFIX.length);
+    if (!filename.endsWith(RUN_EVENT_JOURNAL_SUFFIX)) return;
+    const runId = filename.slice(0, -RUN_EVENT_JOURNAL_SUFFIX.length);
     if (!this.activeRuns.has(runId)) return; // 非本实例活跃 run（终局/跨实例）不触发
     this.scheduleEventEdgeFlush(runId);
   }
@@ -750,7 +782,7 @@ export class JsonlRunStore {
    * 同一调度链；真实 watcher 接线另有 real-timers 集成用例覆盖。
    */
   simulateJournalEdgeForTest(runId: string): void {
-    this.onJournalDirEvent(`${runId}${JOURNAL_FILE_SUFFIX}`);
+    this.onJournalDirEvent(`${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
   }
 
   /**
@@ -774,7 +806,7 @@ export class JsonlRunStore {
         `[subagent-workflow] state retention: interrupted-abandon sweep failed: ${toErrorMessage(err)}`,
       );
     }
-    const maxRuns = getEnvStateMaxRuns();
+    const maxRuns = resolveStateMaxRuns();
     if (maxRuns === undefined) return; // cap opt-out：显式非法值整轮不清理（既有语义）
     try {
       await pruneTerminalRunFiles(
@@ -847,7 +879,7 @@ export class JsonlRunStore {
    * 原地改写 entry 写入源与 ctx——store 实例跨 reload 存活（D2 槽），在飞去抖批与
    * per-runId 串行 flush 链持有 this，原地改写对后续 flush 天然可见（不遍历对象图
    * 重绑：闭包引用不可枚举，漏一处 = 恢复后随机 assertActive 抛——设计被否项）。
-   * writtenOnce / lastEntryAppendAt / pending / chains 全部保留（接管而非重建）。
+   * writtenOnce / entry 节流记账 / pending / chains 全部保留（接管而非重建）。
    *
    * [skill-reload D5] 换入的 appendEntry 源包 guardStaleCtx：下一次 reload 窗口
    * （invalidate → adoption rebind 完成之间，通常 <1s）in-flight flush 触碰已 stale
@@ -908,6 +940,16 @@ export class JsonlRunStore {
  *    返回 undefined → 跳过，不做兼容迁移）。
  * 2. 旧 `workflow-state-link` 指针 entry 兼容读取（优先级低——存量 run 不静默
  *    丢失，父文档 #9 踩坑）：entry 未覆盖的 runId 经指针读 state 文件最后行。
+ * 3. [终局调和] entry 重建出的 running run 与磁盘终局证据对账（见
+ *    {@link reconcileRunningFinality}）——修复「实际已终局的 run 因终态 entry
+ *    缺失/过时被恢复链误标 failed」的错误语义。
+ *
+ * [已知限制·登记] 恢复域 = 本 session 的 entry 集：崩溃后用户不再 resume 原
+ * session（同 cwd 开新 session 继续）时，原 session 的遗留 run 对新 session 的
+ * loadAll/恢复链不可见——无 failed 记录、无 UI 痕迹，仅磁盘层兜底（journal 7 天
+ * abandon 写 manifest、state 文件 30 天 TTL/cap 裁剪）。跨 session 收编需要引入
+ * 共享 stateDir 的孤儿扫描 + 跨 session 写入语义，与 W17 session 锚定设计相悖，
+ * 收益面（用户主动放弃的 session）有限，故登记不改。
  *
  * 需要 ctx（构造时注入）——无 ctx 时返回空（测试或非 Pi 环境下）。
  */
@@ -917,6 +959,15 @@ export class JsonlRunStore {
     try {
       const entries = this.ctx.sessionManager.getEntries();
       const { recordRuns, pointers } = collectEntrySources(entries);
+
+      // 3) 终局调和：entry 是「最后一次成功 append」的快照，journal 终局帧与
+      // GC 终局化可能新于它——running 态先对账再交恢复链（对账采纳终局的 run
+      // 不再被 recoverCrashedRuns 转 failed）。
+      for (const run of recordRuns.values()) {
+        if (run.state.status === "running") {
+          await this.reconcileRunningFinality(run);
+        }
+      }
 
       // 1) 自描述 entry 重建（优先——pi 文件是持久化权威）
       runs.push(...recordRuns.values());
@@ -935,5 +986,65 @@ export class JsonlRunStore {
       );
     }
     return runs;
+  }
+
+  // ── [终局调和] running 快照的磁盘终局对账 ──────────────────────
+
+  /**
+   * [终局调和] 把 entry 重建出的 running run 按磁盘终局证据收编为正确终态。
+   *
+   * 动机（两个已证实的误判面，修复 A1/A2）：
+   * 1. **journal 终局先于终态 entry 落账**：pump 的终局 coda 落账顺序是 journal
+   *   （appendFileSync 同步）→ saveRunBestEffort 写终态 entry（best-effort 不
+   *   重试）。终态 entry 写失败（ENOSPC 等）后，任何一次进程退出都会让
+   *   recoverCrashedRuns 把实际 completed 的 run 误标 failed——D5 明文「权威在
+   *   事件流」，恢复读路径却只看快照 entry，权威声明与读路径分叉。
+   * 2. **idle-GC 双轨**：core GC（FileRunStore 通道）终局化只写 state 文件不改
+   *   entry，resume 后恢复链从 entry 读到 running 再次转 failed，覆盖 GC 终局。
+   *
+   * 证据读序的权威声明 = core orchestration/run-events.ts 文件头「终局证据读序」
+   * （journal run-settled 帧 > state 终态快照 > manifest，此处不重复展开）。本
+   * 调和取前两级：无证据时保持 running，交 recoverCrashedRuns 按崩溃语义收编
+   * （两通道皆失守的极旧 run 按 failed 收编，语义可接受）。
+   *
+   * 调和只走 running→done（转移表唯一合法边），终局内容（reason/error）取自
+   * 证据源；in-flight calls 收口对齐 recoverCrashedRuns 的收编动作。调和自身
+   * 任何异常降级为保持 running（增强面不阻断 loadAll 主链），warn 留证。
+   */
+  private async reconcileRunningFinality(run: WorkflowRun): Promise<void> {
+    try {
+      // 1) journal run-settled 帧（尾向扫描取最后一帧——单帧契约下的防御性读取）
+      const events = await this.readJournalEvents(run.runId);
+      for (let i = events.length - 1; i >= 0; i--) {
+        const ev = events[i];
+        if (ev?.type !== "run-settled") continue;
+        const reason = runSettledOutcomeToDoneReason(ev.outcome);
+        if (reason !== "completed") {
+          run.state.error =
+            ev.reason ??
+            `finality reconciled from journal: outcome=${ev.outcome} code=${ev.errorCode ?? "unknown"}`;
+        }
+        run.transition("done", reason);
+        closeOutInFlightCalls(run);
+        logger.warn(
+          `[subagent-workflow] finality reconciliation: run ${run.runId} adopted terminal state from journal run-settled (outcome=${ev.outcome}) — snapshot entry was stale (still running)`,
+        );
+        return;
+      }
+      // 2) state 文件终态快照（GC 终局化通道 / 终态 entry append 失败的旁路证据）
+      const stateRun = await loadRunFromStateFile(this.filePathFor(run.runId));
+      if (stateRun?.state.status === "done" && stateRun.state.reason !== undefined) {
+        run.state.error = stateRun.state.error;
+        run.transition("done", stateRun.state.reason);
+        closeOutInFlightCalls(run);
+        logger.warn(
+          `[subagent-workflow] finality reconciliation: run ${run.runId} adopted terminal state from state-file snapshot (reason=${stateRun.state.reason}) — snapshot entry was stale (still running)`,
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        `[subagent-workflow] finality reconciliation failed, run stays running for crash-recovery (runId=${run.runId}): ${toErrorMessage(err)}`,
+      );
+    }
   }
 }

@@ -16,9 +16,10 @@
 // - TAIJI_SUBAGENT_SPAWN_WATCHDOG_MS = session-runner.ts SPAWN_WATCHDOG_ENV
 // - TAIJI_SUBAGENT_RUN_WATCHDOG_MS   = launcher.ts RUN_WATCHDOG_ENV
 // - TAIJI_SUBAGENT_IDLE_TIMEOUT_MS   = lifecycle-manager.ts IDLE_TIMEOUT_ENV
-// - TAIJI_SUBAGENT_STATE_MAX_RUNS    = jsonl-run-store.ts STATE_MAX_RUNS_ENV
-//   （B1 磁盘保留清理，非 watchdog 但同为「默认关、显式设置才启用」的 opt-in
-//   配置，测试默认语义基线同样是「未设」，故并入同一净化）
+// - TAIJI_SUBAGENT_STATE_MAX_RUNS    = core file-run-store.ts STATE_MAX_RUNS_ENV
+//   （B1 磁盘保留清理，非 watchdog 但同为 opt-in 配置；env 名与解析单源 core
+//   file-run-store.ts，壳测试经深路径消费，默认语义基线仍是「未设」）
+
 const WATCHDOG_ENV_KEYS = [
   "TAIJI_SUBAGENT_SPAWN_WATCHDOG_MS",
   "TAIJI_SUBAGENT_RUN_WATCHDOG_MS",

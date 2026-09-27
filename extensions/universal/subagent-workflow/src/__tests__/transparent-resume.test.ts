@@ -44,7 +44,7 @@ import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/persist
 import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/assembly/path-encoding.ts";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
-import { forkFromHandler, messageHandler, closeHandler } from "../interface/subagent-actions.ts";
+import { forkFromHandler, messageHandler, closeHandler } from "@zhushanwen/subagent-core";
 
 const IDENTITY_ENV_KEYS = [
   "PI_SUBAGENT_ROOT_SESSION_ID",

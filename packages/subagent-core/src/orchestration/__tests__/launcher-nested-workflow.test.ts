@@ -40,6 +40,9 @@ function makeScript(opts: { valid?: boolean; lintErrorMsg?: string } = {}): Work
   return {
     name: "child-wf",
     path: "/fake/child-wf.js",
+    // available 必填：真实 WorkflowScript 实体恒带 boolean available（registry.toScript
+    // 必设），launcher 的 W4c 守卫按 !script.available 拒单——缺字段会被误判不可用。
+    available: true,
     meta: { name: "child-wf", description: "child workflow", phases: [] },
     toExecutable: () => "const meta = {}; execute() {}",
     validate: (): LintResult => ({
@@ -56,6 +59,27 @@ function makeScript(opts: { valid?: boolean; lintErrorMsg?: string } = {}): Work
           ],
     }),
   } as unknown as WorkflowScript;
+}
+
+/**
+ * 构造 registry 的 available:false stub（对齐 workflow-script-registry-impl.toScript
+ * 读盘失败分支 + config-loader.toCachedMeta 失败分支的实装形态）：sourceCode 空串、
+ * meta 空壳（name=stem, description="", phases=[]）、不携带失败原因字段。
+ * validate 用 spy——W4c 用例断言 unavailable 分支在 lint 前短路（不穿透 validate）。
+ */
+function makeUnavailableStub(): { script: WorkflowScript; validate: ReturnType<typeof vi.fn> } {
+  const validate = vi.fn((): LintResult => ({ valid: true, findings: [] }));
+  const script = {
+    name: "unreachable-wf",
+    source: "saved",
+    path: "/fake/unreachable-wf.js",
+    sourceCode: "",
+    meta: { name: "unreachable-wf", description: "", phases: [] },
+    available: false,
+    validate,
+    toExecutable: () => "",
+  } as unknown as WorkflowScript;
+  return { script, validate };
 }
 
 /**
@@ -199,6 +223,27 @@ describe("executeNestedWorkflow", () => {
     // E8：早返回也走 finally——Step 2 注册的 listener 被移除（原实现泄漏）
     expect(addSpy).toHaveBeenCalledTimes(1);
     expect(removeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // W4c core 侧补齐：getPath 对不可读/不存在文件返回 available:false 的 stub（非
+  // undefined）——仅判 !script 会穿透 validate() 产出误导性 lint 错误
+  //（空源码 → "must call agent()/parallel()/pipeline()"），掩盖真实原因。
+  it("W4c: available=false stub → unavailable 拒单（lint 前短路，附恢复指引）", async () => {
+    const { script, validate } = makeUnavailableStub();
+    const parent = makeParentRun();
+    const deps = makeDeps({ script });
+
+    const result = await executeNestedWorkflow("/fake/unreachable-wf.js", {}, parent, deps);
+
+    expect(result.content).toBe("");
+    // 文案与 not found 分支区分：不可用 ≠ 未找到，且附文件侧恢复动作
+    expect(result.error).toContain("is unavailable");
+    expect(result.error).toContain("/fake/unreachable-wf.js"); // 透出解析后位置
+    expect(result.error).toContain("check the file exists"); // 恢复指引
+    expect(result.error).not.toContain("not found");
+    // unavailable 分支在 lint 前短路：不穿透 validate、不启动 run
+    expect(validate).not.toHaveBeenCalled();
+    expect(runWorkflow).not.toHaveBeenCalled();
   });
 
   it("returns error result on lint failure", async () => {
@@ -645,5 +690,30 @@ describe("runAndWait model 透传", () => {
     await runAndWait("child-wf", {}, deps);
     const spec = vi.mocked(runWorkflow).mock.calls[0]![0] as RunSpec;
     expect(spec.model).toBeUndefined();
+  });
+});
+
+// ── runAndWait unavailable stub 拒单（W4c core 补齐）──
+// 契约：与「脚本未找到」同族——返回 reason=failed 不抛错（jsdoc：编程调用方据
+// reason 判断）；与 not found 的差别只在 error 文案（不可用附文件侧恢复指引，
+// 不附可用清单——path 已解析成功，问题在文件侧）。
+describe("runAndWait unavailable stub 拒单（W4c）", () => {
+  it("available=false stub → reason=failed 不抛错（lint 前短路，附恢复指引）", async () => {
+    const { script, validate } = makeUnavailableStub();
+    const deps = makeDeps({ script });
+
+    const result = await runAndWait("/fake/unreachable-wf.js", {}, deps);
+
+    expect(result.status).toBe("done");
+    expect(result.reason).toBe("failed");
+    expect(result.runId).toBe("");
+    // 文案与 not found 分支区分：不可用 ≠ 未找到，且附文件侧恢复动作
+    expect(result.error).toContain("is unavailable");
+    expect(result.error).toContain("/fake/unreachable-wf.js"); // 透出解析后位置
+    expect(result.error).toContain("check the file exists"); // 恢复指引
+    expect(result.error).not.toContain("not found");
+    // unavailable 分支在 lint 前短路：不穿透 validate、不启动 run
+    expect(validate).not.toHaveBeenCalled();
+    expect(runWorkflow).not.toHaveBeenCalled();
   });
 });

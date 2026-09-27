@@ -37,6 +37,7 @@ import { COLD_LOOKUP_SCAN_LIMIT } from "../assembly/cold-lookup.ts";
 import * as stateMarker from "../persistence/state-marker.ts";
 import type { PiLike } from "../notify/notify-host.ts";
 import { RecordStore } from "../persistence/record-store.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
 import type { ClosedReason, ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 import { RoundSupervisor, ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS, type SupervisorCandidateRecord } from "./index.ts";
 import {
@@ -353,7 +354,7 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
   /** pi.appended 中 customType=subagent-record 的终态 entry 载荷。 */
   function subagentEntries(pi: ReturnType<typeof makePi> | null): Array<Record<string, unknown>> {
     return (pi?.appended ?? [])
-      .filter((a) => a.customType === "subagent-record")
+      .filter((a) => a.customType === SUBAGENT_RECORD_CUSTOM_TYPE)
       .map((a) => a.data as Record<string, unknown>);
   }
 

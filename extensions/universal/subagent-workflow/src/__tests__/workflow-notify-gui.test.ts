@@ -17,7 +17,7 @@ import {
   MAX_NOTIFIED_RUN_IDS,
   notifyDone,
   trackNotifiedRunId,
-} from "../interface/helpers.ts";
+} from "../workflow-notify.ts";
 
 /** notifyDone details 内联镜像（helpers.ts WorkflowNotifyDetails 已去 export 为模块私有）。 */
 type WorkflowNotifyDetails = {

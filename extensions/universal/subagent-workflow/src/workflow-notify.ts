@@ -1,5 +1,5 @@
 /**
- * Workflow Extension — Interface helpers
+ * Workflow Extension — workflow 域通知生产
  *
  * notifyDone(pi, runId, run, notified) — run 完成时发 completion notification
  * （[u9 账本化] 经 core NotifyLedger 四步生命周期，C-ext-19；未 bind 降级直发）。
@@ -8,12 +8,22 @@
  * errorCode 与证据指针、取消亦通知——载荷 outcome/errorCode/resultSummary/
  * artifactsDir/eventsJournalPath（details 层，content 追加指针段）。
  *
- * 层归属：Interface（依赖 Pi SDK + Engine WorkflowRun 模型）。
+ * 层归属：workflow 域（与 workflow-events.ts / workflow-stall-watchdog.ts 同层；
+ * 唯一生产消费方 = workflow-events.ts。原名 interface/helpers.ts，2026-09-24
+ * 名实归位——内容自始是通知生产而非 interface 注册面杂项）。
+ *
+ * 事件注册面：setupNotifyLedgerCompactionGuard（pi compaction 事件的 ledger
+ * 补写守卫——notify 账本的家内事务，随跨域 handler 迁出从 workflow-events.ts
+ * 装配 seam 原样搬入；注册时点仍由 setupWorkflowDomain 在原位调用）。
  */
 
 import { join } from "node:path";
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  SessionCompactEvent,
+} from "@earendil-works/pi-coding-agent";
 import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
@@ -21,8 +31,15 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 // （u-core-atomic 逐字平移，输出与原本地实现字节一致；本地实现已删）。
 // getBoundNotifyLedger：core 通知账本消费入口（bindNotifyLedgerHost 在
 // session-lifecycle.ts session_start 装配；未 bind 时降级直发，见 notifyDone 注释）。
-import { boundedPrettySerialize, getBoundNotifyLedger } from "@zhushanwen/subagent-core";
-import type { DoneReason, WorkflowRun } from "@zhushanwen/subagent-core";
+import {
+  boundedPrettySerialize,
+  doneReasonToRunOutcome,
+  getBoundNotifyLedger,
+  isTerminalDoneReason,
+  RUN_EVENT_JOURNAL_SUFFIX,
+  type RunOutcome,
+} from "@zhushanwen/subagent-core";
+import type { WorkflowRun } from "@zhushanwen/subagent-core";
 
 // 模块级 logger（与 session-lifecycle.ts / index.ts 同 component 名）
 const logger = getLogger("subagents");
@@ -31,11 +48,11 @@ import {
   guiComponent,
   type GuiContext,
   type GuiRenderResult,
-  guiResult,
-  isGuiCapable,
+  WORKFLOW_RESULT_CUSTOM_TYPE,
 } from "@zhushanwen/extension-protocol";
-import { mapRunIcon, mapRunStatus } from "./gui-mappers.ts";
-import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
+import { mapRunIcon, mapRunStatus } from "./interface/gui-mappers.ts";
+import { ID_PREVIEW_LENGTH } from "./interface/id-preview.ts";
+import { withGuiAttach } from "./interface/tool-shared.ts";
 
 // ── 常量 ─────────────────────────────────────────────────────
 
@@ -54,15 +71,13 @@ const MS_PER_MINUTE = 60_000;
 /** [D6-2] stall 阈值缺省（分钟）：20 分钟（对齐 zcode 语义）。 */
 const WORKFLOW_STALL_THRESHOLD_MINUTES = 20;
 
-/** [D7] run 事件 journal 的文件名形态（core run-events P1a 钉死：`<runId>.events.jsonl`
- *  ——runId 即 generateRunId 的 wf- 前缀产物，渲染名 = 设计 D5 的 wf-<id>.events.jsonl；
- *  core 未从 barrel 导出文件名推导，本地镜像 + 上述锚点注释（漂移信号 = journal
- *  指针失效，core 命名变更时同批改）。 */
-const RUN_EVENTS_JOURNAL_SUFFIX = ".events.jsonl";
-
-/** [D7] 事件 journal 文件名（run store 旁，artifactsDir 内）。 */
+/**
+ * [D7] 事件 journal 文件名（run store 旁，artifactsDir 内）：`<runId>.events.jsonl`
+ * （runId 即 generateRunId 的 wf- 前缀产物，渲染名 = 设计 D5 的 wf-<id>.events.jsonl；
+ * 后缀经 core barrel 单源 RUN_EVENT_JOURNAL_SUFFIX，core 命名变更时编译期同步）。
+ */
 function runEventsJournalPath(artifactsDir: string, runId: string): string {
-  return join(artifactsDir, `${runId}${RUN_EVENTS_JOURNAL_SUFFIX}`);
+  return join(artifactsDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
 }
 
 /**
@@ -74,13 +89,12 @@ function runEventsJournalPath(artifactsDir: string, runId: string): string {
  */
 export const WORKFLOW_DONE_NOTIFY_ID_PREFIX = "wf-done:";
 
-/**
- * workflow 收口通知的送达 customType。保持与账本化前一致：runtime
- * event-interpreter 按该类型识别 run 完成并驱动 W18 workflow-record 失效信号
- * （session.workflows 增量广播），taiji 完成通知 display 覆写 SSOT
- * （COMPLETE_NOTIFY_CUSTOM_TYPES）亦按它收录——不可复用 subagent-bg-notify 通道。
- */
-const WORKFLOW_RESULT_CUSTOM_TYPE = "workflow-result";
+// workflow 收口通知的送达 customType 经 extension-protocol 单源
+// （WORKFLOW_RESULT_CUSTOM_TYPE，与 shared/runtime/core 消费侧同源）：runtime
+// event-interpreter 按该类型识别 run 完成并驱动 W18 workflow-record 失效信号
+// （session.workflows 增量广播），taiji 完成通知 display 覆写 SSOT
+// （COMPLETE_NOTIFY_CUSTOM_TYPES）亦按它收录——不可复用 subagent-bg-notify 通道。
+// 等值/单源锁 = src/__tests__/contract.notify-custom-types.test.ts。
 
 /**
  * notifiedRunIds 去重窗口大小。
@@ -90,33 +104,10 @@ const WORKFLOW_RESULT_CUSTOM_TYPE = "workflow-result";
  */
 export const MAX_NOTIFIED_RUN_IDS = 1000;
 
-/**
- * [D7] run 终局 outcome 三态（core run-events ALL_RUN_OUTCOMES 词表镜像——barrel
- * 未导出该类型，本地封闭字面量联合 + 上方映射函数注释锚定；漂移信号 = journal
- * run-settled 帧出现词表外值时 core 自有用例先红）。
- */
-type RunOutcome = "completed" | "failed" | "cancelled";
-
-/**
- * [D7] DoneReason 六因 → RunOutcome 三态。与 core worker-message-pump 的
- * dispatchFinalRunSettle 同构映射（budget_limited/time_limited 是 run 怎么死的
- * 系统层失败 = failed；aborted 经 cancel-requested 控制事件 = cancelled）。core
- * 不能 import extension（workflow-state-root.ts 头注同款分层约束），双侧注释互指
- * ——漂移信号 = 通知 outcome 与 journal run-settled 帧 outcome 不一致。
- */
-function mapDoneReasonToOutcome(reason: DoneReason): RunOutcome {
-  switch (reason) {
-    case "completed":
-      return "completed";
-    case "failed":
-    case "budget_limited":
-    case "time_limited":
-    case "invalid_args":
-      return "failed";
-    case "aborted":
-      return "cancelled";
-  }
-}
+// [D7] run 终局 outcome 三态 + DoneReason 六因 → 三态映射：经 core barrel 单源
+// （RunOutcome / doneReasonToRunOutcome，run-events 定义——词表语义与映射依据的
+// 权威注释在 core 侧；漂移信号 = journal run-settled 帧出现词表外值时 core 自有
+// 用例先红）。原本地镜像类型 + mapDoneReasonToOutcome 已删。
 
 /**
  * [D7] 失败终局的结构化码提取：最后一个失败 call 的 failureKind
@@ -238,8 +229,9 @@ export function notifyDone(
 
  // 终止性原因（非正常完成）追加防偷懒收尾指令——budget/time 耗尽或 abort 不是任务完成，
  // 模型可能把 "done" 当成功汇报（F3 偷懒完成）。收尾三步骤与 turn-limiter WRAP_UP_MESSAGE 对齐。
-  const TERMINAL_REASONS = new Set(["budget_limited", "time_limited", "aborted", "failed", "circular"]);
-  if (run.state.reason && TERMINAL_REASONS.has(run.state.reason)) {
+ // 判定经 core isTerminalDoneReason 单源（穷举 switch，DoneReason 新增成员 tsc 强制归类）；
+ // 原本地 Set 镜像已删（其幽灵成员 "circular" 不在 core 词表——镜像漂移实证）。
+  if (run.state.reason !== undefined && isTerminalDoneReason(run.state.reason)) {
     parts.push("");
     parts.push(
       "This is NOT task completion. Summarize what was DONE and VERIFIED, list what remains " +
@@ -279,7 +271,7 @@ export function notifyDone(
 
   // 送达通道保持 "workflow-result"（runtime W18 失效信号 + taiji display 覆写 SSOT
   // 按该类型识别；迁移不改变消息类型与文案字节，只改变投递可靠性机制）
-  const details: WorkflowNotifyDetails = {
+  const baseDetails: WorkflowNotifyDetails = {
     runId,
     name,
     status: run.state.status,
@@ -288,39 +280,40 @@ export function notifyDone(
     notifyId: `${WORKFLOW_DONE_NOTIFY_ID_PREFIX}${runId}`,
     // [D7] 终局必达载荷：outcome 恒有（done ⟹ reason 有值，I2 不变式；防御缺省
     // completed 兜底只在异常形态生效）；errorCode/resultSummary/指针按终局形态。
-    outcome: mapDoneReasonToOutcome(run.state.reason ?? "completed"),
+    outcome: doneReasonToRunOutcome(run.state.reason ?? "completed"),
   };
   if (run.state.reason === "failed") {
     const errorCode = extractFailureErrorCode(run);
-    if (errorCode !== undefined) details.errorCode = errorCode;
+    if (errorCode !== undefined) baseDetails.errorCode = errorCode;
   }
   if (run.state.reason === "completed" && run.state.scriptResult !== undefined && run.state.scriptResult !== null) {
-    details.resultSummary = boundedPrettySerialize(run.state.scriptResult, MAX_RESULT_SUMMARY_LENGTH);
+    baseDetails.resultSummary = boundedPrettySerialize(run.state.scriptResult, MAX_RESULT_SUMMARY_LENGTH);
   }
   if (artifactsDir !== undefined && eventsJournalPath !== undefined) {
-    details.artifactsDir = artifactsDir;
-    details.eventsJournalPath = eventsJournalPath;
+    baseDetails.artifactsDir = artifactsDir;
+    baseDetails.eventsJournalPath = eventsJournalPath;
   }
 
-  // GUI 协议：RPC 模式下附加结构化渲染数据
-  if (ctx && isGuiCapable(ctx)) {
+  // GUI 协议：RPC 模式下附加结构化渲染数据。attach 经 interface 层单点 withGuiAttach
+  // （第四处 GUI 点收敛，返回新对象替代就地 mutation——details 为本函数局部对象，
+  // 下游 record/sendMessage 均经返回值消费，无人依赖 mutation 副作用，字节等价）。
+  // label 对齐 buildWorkflowGui 的格式：name + slug + runId 前 8 字符（I#3）；
+  // 非 RPC 模式 build 回调不执行（零构造成本）。
+  const details = withGuiAttach(baseDetails, ctx, () => {
     const reason = run.state.reason;
     const statusStr = `${run.state.status}${reason ? ` (${reason})` : ""}`;
-    // label 对齐 buildWorkflowGui 的格式：name + slug + runId 前 8 字符（I#3）
     const slug = run.spec.slug;
     const label = [name, slug, runId.slice(0, ID_PREVIEW_LENGTH)]
       .filter(Boolean)
       .join(" ");
-    details.__gui__ = guiResult(
-      guiComponent("list-tree", {
-        items: [{
-          label,
-          status: mapRunStatus(statusStr),
-          icon: mapRunIcon(statusStr),
-        }],
-      }),
-    );
-  }
+    return guiComponent("list-tree", {
+      items: [{
+        label,
+        status: mapRunStatus(statusStr),
+        icon: mapRunIcon(statusStr),
+      }],
+    });
+  });
 
   const ledger = getBoundNotifyLedger();
   if (ledger) {
@@ -505,3 +498,33 @@ export const WORKFLOW_STALL_THRESHOLD_MS = WORKFLOW_STALL_THRESHOLD_MINUTES * MS
 
 /** [D6-2] stall 通知的送达 customType（新通道值——W18 失效信号互斥，见 notifyStall）。 */
 export const WORKFLOW_STALL_CUSTOM_TYPE = "workflow-stall";
+
+// ── notify 域事件注册（跨域 handler 迁入） ────────────────────────────────────
+
+/**
+ * compaction 后 notify ledger 补写守卫（注册 pi 的 session compaction 事件）。
+ *
+ * [U2 P-B4 降级] compaction 对 custom entry 保留行为实装未验证——检测 ledger/ack
+ * entry 被 compaction 清除时按内存态补写（notify-ledger compactionCheck；未清除则
+ * no-op）。内存态在 compaction 后仍活着，作为补写源；重启后的权威仍是两列 entry
+ * 差集（内存不承担销账职责）。
+ *
+ * 归 notify 域：守卫对象是 NotifyLedger 的账面完整性（getBoundNotifyLedger 的
+ * 家内事务），与 workflow 域事件族装配零数据耦合。由 setupWorkflowDomain 在
+ * 原注册位置调用（pi.on 注册顺序逐位不变，
+ * workflow-events-registration-order.test.ts 锁定）。
+ */
+export function setupNotifyLedgerCompactionGuard(pi: ExtensionAPI): void {
+  pi.on("session_compact", (_event: SessionCompactEvent, _ctx: ExtensionContext) => {
+    try {
+      const rewritten = getBoundNotifyLedger()?.compactionCheck() ?? 0;
+      if (rewritten > 0) {
+        logger.warn(`[subagents] notify ledger entries lost to compaction; rewrote ${rewritten} from memory`);
+      }
+    } catch (err) {
+      logger.warn("[subagents] notify ledger compactionCheck failed", {
+        reason: toErrorMessage(err),
+      });
+    }
+  });
+}

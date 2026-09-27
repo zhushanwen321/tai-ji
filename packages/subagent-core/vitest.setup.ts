@@ -16,10 +16,10 @@
 // - TAIJI_SUBAGENT_SPAWN_WATCHDOG_MS = session-runner.ts SPAWN_WATCHDOG_ENV
 // - TAIJI_SUBAGENT_RUN_WATCHDOG_MS   = launcher.ts RUN_WATCHDOG_ENV
 // - TAIJI_SUBAGENT_IDLE_TIMEOUT_MS   = lifecycle-manager.ts（裸字面量 :59，包内无 env 名常量）
-// - TAIJI_SUBAGENT_STATE_MAX_RUNS    = 留壳件 jsonl-run-store.ts STATE_MAX_RUNS_ENV
-//   （extensions/universal/subagent-workflow/src/jsonl-run-store.ts:430；B1 磁盘保留
-//   清理，非 watchdog 但同为「默认关、显式设置才启用」的 opt-in 配置）——本包无
-//   消费方，净化为防御性继承（宿主 shell export 隔离）
+// - TAIJI_SUBAGENT_STATE_MAX_RUNS    = core file-run-store.ts STATE_MAX_RUNS_ENV
+//   （B1 磁盘保留清理，非 watchdog 但同为 opt-in 配置；env 名与解析单源 core
+//   file-run-store.ts，壳测试经深路径消费）
+
 const WATCHDOG_ENV_KEYS = [
   "TAIJI_SUBAGENT_SPAWN_WATCHDOG_MS",
   "TAIJI_SUBAGENT_RUN_WATCHDOG_MS",

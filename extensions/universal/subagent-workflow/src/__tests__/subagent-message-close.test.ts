@@ -21,7 +21,8 @@ import { createRecord } from "@zhushanwen/subagent-core/execution/persistence/ex
 import { EngineError } from "@zhushanwen/subagent-core/execution/engine/common/errors.ts";
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import type { ExecutionRecord } from "@zhushanwen/subagent-core";
-import { adapter, closeHandler, mapExternalState, messageHandler } from "../interface/subagent-actions.ts";
+import { closeHandler, mapExternalState, messageHandler } from "@zhushanwen/subagent-core";
+import { adapter } from "../interface/subagent-actions.ts";
 
 /** 构造测试用 record（modeless：无 chatMode 字段——「模式」不是 record 状态，
  *  空闲即可续聊；status / closedReason / engine 变体由各用例显式 override）。 */

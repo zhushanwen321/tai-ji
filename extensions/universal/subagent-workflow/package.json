@@ -25,7 +25,11 @@
     "src/index.ts",
     "src/jsonl-run-store.ts",
     "src/session-lifecycle.ts",
+    "src/model-events.ts",
+    "src/subagents-events.ts",
     "src/workflow-events.ts",
+    "src/workflow-stall-watchdog.ts",
+    "src/workflow-notify.ts",
     "src/host/",
     "src/injectors/",
     "src/interface/"
@@ -87,6 +91,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.9",
+    "@zhushanwen/subagent-engine-sdk": "workspace:*",
     "vitest": "^4.1.8"
   }
 }
