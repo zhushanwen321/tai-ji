@@ -167,6 +167,14 @@ export function startIdleGc(
   workflowRuns?: WorkflowRunGcStore,
   sessionFace?: WorkflowRunGcSessionFace,
 ): () => void {
+  // 启动可观测行（debug 级：core facade 无 info 方法，debug 仅在
+  // TAIJI_AGENT_DEBUG=1 时落盘——排障时开该 env；W2 D3 真机链教训：timer
+  // 轮询本身无日志，env 未达时表现为「静默零动作」，与扫描面空载不可区分，
+  // 只能靠此行裁决 interval 实际值与读侧 store 注入形态）。
+  logger.debug(
+    `[subagents] GC: idle-gc timer started (interval=${resolveWorkflowRunGcIntervalMs()}ms, ` +
+      `ttl=${resolveWorkflowRunIdleTtlMs()}ms, workflowRuns=${workflowRuns !== undefined ? "injected" : "default"})`,
+  );
   const timer = setInterval(() => {
     const now = Date.now();
     // [U5/D4] 扫描面 = 全部内存 record（listAllInMemory）——判据 isResumable 已改

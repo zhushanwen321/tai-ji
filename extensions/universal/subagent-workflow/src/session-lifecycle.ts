@@ -30,6 +30,7 @@ import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/ex
 import { getOrCreateChannelRegistry } from "@zhushanwen/subagent-core";
 import { DialogGlobalQueue } from "@zhushanwen/subagent-core";
 import { syncEnginesFile } from "@zhushanwen/subagent-core";
+import { createPiHostRunEnumeration } from "@zhushanwen/subagent-core";
 import { createUiRequestHandlerForMode } from "@zhushanwen/subagent-core";
 import {
   getModelConfigService,
@@ -298,7 +299,13 @@ function createOrReuseServices(pi: ExtensionAPI, ctx: ExtensionContext): Service
 
   // S-2: 启动 idle record GC 定时器（30 天 TTL，每小时检查一次）。
   // 注册 setInterval 属进程级副作用——oncePerProcess 守卫防双跑（u-audit-fix）。
-  oncePerProcess("subagent-workflow:start-gc-timer", () => service.startGcTimer());
+  // workflow-run 读侧 store 由本壳注入：agentDir 用 pi SDK 活源 getAgentDir()
+  // （与 resolveSessionDir 同源，pi 升级自动跟随），core 不从 env/cwd/sessionFile
+  // 猜 pi 布局（两条推导路径均已在 W2 D3 真机链实证会错位——pi 的 session 池与
+  // run state slug 树是两棵相对位置不定的树，见 core pi-host-run-store.ts 头注）。
+  oncePerProcess("subagent-workflow:start-gc-timer", () =>
+    service.startGcTimer(createPiHostRunEnumeration(getAgentDir)),
+  );
 
   return { service, modelService, reused };
 }

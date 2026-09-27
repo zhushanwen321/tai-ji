@@ -4,17 +4,20 @@
 //
 // 为什么存在：pi 宿主 workflow 域的 run state 真实落盘 = JsonlRunStore 的
 // `<sessionDir>/workflow-state/<runId>.jsonl`，sessionDir 布局推导（slug + 探测）
-// 的单一权威源在本文件（resolvePiSessionScopedDir）。core 读侧装配点
-// （round-supervisor 的注册对账 sweep、idle-gc 的 WorkflowRun GC）曾用
-// FileRunStore 缺省根 `<dataRoot>/workflow-state`（zcode 宿主布局）——两目录
-// 生产不相交，读侧恒 ENOENT：sweep 把活跃 run 判 missing 补注销（误注销活跃
-// run），WorkflowRun GC 恒空转。
+// 的单一权威源在本文件（resolvePiSessionScopedDir）。
 //
 // 分层约束：core 不能 import extension——pi 壳 extensions/universal/
 // subagent-workflow/src/session-lifecycle.ts 的 resolveSessionDir() 薄消费本
 // 文件：经 opts.agentDir 注入 pi SDK 活源 getAgentDir()（pi 升级自动跟随）；
 // core 缺省 agentDir 锚定自推，供引擎侧 / zsw 等无 pi SDK 环境消费。agentDir
 // 双源是有意差异，slug + 探测布局恒单源。
+//
+// 消费面边界 [MANDATORY]：本推导锚「调用方进程自身 env/cwd」——只在 pi 进程
+// 内调用才与写侧落盘一致（pi 壳 resolveSessionDir、pi 进程内的注册对账
+// sweep）。runtime 进程侧的读面禁用本推导：pi 出站 env（PI_CODING_AGENT_DIR）
+// 与 pi cwd 均 pi 子进程私有，runtime 侧推导恒错位（可见信号 = 读侧恒空转，
+// 2026-09-27 W2 D3 场景 3 定位）；runtime 侧读面走 pi-host-run-store（主
+// session 文件同源枚举，不读 env/cwd）。
 //
 // core 缺省 agentDir 推导锚定 pi 实装版 0.84.4 dist config.js getAgentDir：
 // `process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent")`

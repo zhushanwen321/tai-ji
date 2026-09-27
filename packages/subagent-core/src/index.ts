@@ -613,6 +613,11 @@ export { getSubagentRecordsDir } from "./execution/assembly/path-encoding.ts";
 // 路径消费，不需要 barrel 面。
 export { resolvePiSessionScopedDir } from "./execution/assembly/workflow-state-root.ts";
 
+// createPiHostRunEnumeration：pi 宿主 workflow-run GC 的读侧枚举 store（agentDir
+// 活源 + 全 session 目录）。消费方 = pi 壳 session-lifecycle 的 startGcTimer
+// 装配点（跨包消费，需 barrel 面）；见 pi-host-run-store.ts 头注的分层边界。
+export { createPiHostRunEnumeration } from "./execution/assembly/pi-host-run-store.ts";
+
 // run 级终局投影 manifest（[P1b-2 / D5]）读写原语：「已终局」单源锚定（outcome
 // 非空）。消费全在 core 内部深路径（run-registry abandon 终局化 /
 // worker-message-pump finalizeRun / file-run-store pruneTerminalRunFiles 资格

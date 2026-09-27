@@ -67,7 +67,7 @@ import { FileRunStore } from "../../orchestration/file-run-store.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { NotifyHost, PiLike } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
-import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
+import type { WorkflowRunGcStore } from "../persistence/idle-gc.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type { AgentResult, ClosedReason, ExecutionRecord, StopReason } from "../assembly/types.ts";
 
@@ -262,19 +262,19 @@ export class RecordLifecycle {
   private stopIdleGc: (() => void) | undefined;
 
   /** 启动 idle record GC 定时器（session_start 调用，幂等）。
-   *  [W4] WorkflowRun store（FileRunStore）同批纳入：running 且 startedAt 超 30 天
-   *  锚窗的 run 终态化归档（收编件数按 run 的 session 归属区分，见 idle-gc.ts
-   *  头注）。宿主未 configureCore 时 loadAll 抛错由 idle-gc 内部吞掉（单轮跳过）。
-   *  [F-1 修复] stateDir 与 pi 壳 JsonlRunStore 落盘布局同源
-   *  （resolvePiWorkflowStateDir → <sessionDir>/workflow-state/）——缺省 dataRoot 根
-   *  与 pi 生产落盘不相交，WorkflowRun GC 曾恒空转（W4 引入的装配错位）。
-   *  [W2/V1 D3 same-session 四件直落] 直落面惰性 getter 注入——pi/主 session 文件
-   *  运行时可变，每次回收现读（对齐本聚合 deps 晚绑定纪律）。 */
-  startGcTimer(): void {
+   *  record 面：resumable record 超 30 天 TTL 回收（idle-gc.ts）。
+   *  workflow 面：超龄 run 终局化收编（件数按 run 的 session 归属区分，见
+   *  idle-gc.ts 头注）。读侧 store 分层：pi 宿主由壳注入 createPiHostRunEnumeration
+   *  （agentDir 活源 + 全 session 枚举——pi 布局是壳的领地知识，core 不从
+   *  env/cwd/sessionFile 猜，见 pi-host-run-store.ts 头注）；未注入 = zcode 宿主
+   *  形态，FileRunStore 缺省 dataRoot 根布局。
+   *  宿主未 configureCore 时 loadAll 抛错由 idle-gc 内部吞掉（单轮跳过）。
+   *  直落面惰性 getter 注入——pi/主 session 文件运行时可变，每次回收现读。 */
+  startGcTimer(workflowRuns?: WorkflowRunGcStore): void {
     if (this.stopIdleGc) return;
     this.stopIdleGc = startIdleGc(
       this.deps.getStore(),
-      new FileRunStore({ stateDir: resolvePiWorkflowStateDir() }),
+      workflowRuns ?? new FileRunStore(),
       {
         sessionFile: this.deps.getMainSessionFile,
         appendEntry: () => (customType: string, data: unknown) => this.deps.getPi()?.appendEntry(customType, data),

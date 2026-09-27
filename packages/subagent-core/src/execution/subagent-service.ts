@@ -567,9 +567,11 @@ export class SubagentService {
   }
 
   /** 启动 idle record GC 定时器（session_start 调用，幂等）。本体已迁 RecordLifecycle
-   *  （stopIdleGc 句柄为聚合唯一写者字段）；壳纯转发，对外签名不变。 */
-  startGcTimer(): void {
-    this.recordLifecycle.startGcTimer();
+   *  （stopIdleGc 句柄为聚合唯一写者字段）；壳纯转发。workflowRuns 注入 =
+   *  pi 宿主的读侧枚举 store（壳用 pi SDK getAgentDir 活源构造；缺省 = zcode
+   *  dataRoot 布局，见 record-lifecycle.startGcTimer 头注）。 */
+  startGcTimer(workflowRuns?: import("./persistence/idle-gc.ts").WorkflowRunGcStore): void {
+    this.recordLifecycle.startGcTimer(workflowRuns);
   }
 
   /** 停止 idle record GC 定时器（dispose 编排消费点）。壳纯转发。 */
