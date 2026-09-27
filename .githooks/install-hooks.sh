@@ -2031,21 +2031,24 @@ else
 fi
 
 # ============================================================================
-# subagent-engine-sdk typecheck（协议演进宪法 D11 机器锁的执行点，workflow-architecture-redesign P7）
-#   staged 命中 packages/subagent-engine-sdk/** 时触发：pnpm --filter
-#   @zhushanwen/subagent-engine-sdk run typecheck（tsc --noEmit）。
-#   D11 的 C3 事件词表双向锁 / C4 task/ctx 双写禁令锁 / C2 能力位必填锁全部是
-#   SDK 包内编译期断言（contract-types.ts + contract-closure.test.ts）——无本执行点
-#   则锁为纸面（CI typecheck job 此前只覆盖 frontend/runtime/shared/extensions，
-#   「8 种」事件词表文档漂移无守卫存活至今即实证）。守卫路径自身变更不触发
-#   （typecheck 断言在 SDK 包内自持，由 SDK staged 必然连带触发）。
+# subagent-engine-sdk + subagent-core typecheck（协议演进宪法 D11 机器锁 + C-proc-23
+#   词表锁的执行点，workflow-architecture-redesign P7）
+#   staged 命中 packages/subagent-engine-sdk/ 或 packages/subagent-core/ 时触发：
+#   两包各跑 tsc --noEmit。
+#   SDK 侧锁：D11 的 C3 事件词表双向锁 / C4 task/ctx 双写禁令锁 / C2 能力位必填锁，
+#   全部是 SDK 包内编译期断言（contract-types.ts + contract-closure.test.ts）。
+#   core 侧锁：C-proc-23 四张词表锁的镜像面——SDK SSOT ↔ core 镜像类型双向可赋值 +
+#   engine-manifest 两表键集互等，断言在 packages/subagent-core/src/execution/engine/
+#   client/__tests__/protocol-closure.test.ts，只在 core 包 typecheck 下生效（SDK 类型
+#   改动只编译 SDK 恒绿，core 锚点不在其 include 内；缺 core 侧执行点则镜像锁为纸面）。
+#   守卫路径自身变更不触发（typecheck 断言在两包内自持，由包 staged 必然连带触发）。
 #   触发面用 pathspec 清单式（与相邻段同款；天然含 staged 删除，删除不构成风险敞口）。
 #   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
-SDK_TYPECHECK_STAGED=$(git diff --cached --name-only -- packages/subagent-engine-sdk/)
-if echo "$SDK_TYPECHECK_STAGED" | grep -q "^packages/subagent-engine-sdk/"; then
-    print_section "[subagent-engine-sdk typecheck]"
+SDK_CORE_TYPECHECK_STAGED=$(git diff --cached --name-only -- packages/subagent-engine-sdk/ packages/subagent-core/)
+if echo "$SDK_CORE_TYPECHECK_STAGED" | grep -qE "^packages/(subagent-engine-sdk|subagent-core)/"; then
+    print_section "[subagent-engine-sdk + subagent-core typecheck]"
     if ! (cd packages/subagent-engine-sdk && npx tsc --noEmit 2>&1); then
         echo ""
         echo -e "${RED}[ERROR] subagent-engine-sdk typecheck 失败——协议演进宪法编译期锁（C3 词表 / C4 双写禁令 / C2 必填）检出漂移${NC}"
@@ -2053,9 +2056,16 @@ if echo "$SDK_TYPECHECK_STAGED" | grep -q "^packages/subagent-engine-sdk/"; then
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] subagent-engine-sdk typecheck 通过（协议宪法编译期锁在案）${NC}"
+    if ! (cd packages/subagent-core && npx tsc --noEmit 2>&1); then
+        echo ""
+        echo -e "${RED}[ERROR] subagent-core typecheck 失败——C-proc-23 引擎协议词表锁 core 侧锚点检出漂移（SDK SSOT ↔ core 镜像类型双向可赋值 / 能力位两表键集互等）${NC}"
+        echo -e "${YELLOW}[INFO] 断言本体：packages/subagent-core/src/execution/engine/client/__tests__/protocol-closure.test.ts + src/execution/engine/engine-manifest.ts（CONSERVATIVE_CAPABILITIES / CAPABILITY_ENUMS 两表）；SDK 与 core 任一侧漏同步即在此红，按上方 ✗ 明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] subagent-engine-sdk + subagent-core typecheck 通过（协议宪法 + C-proc-23 词表锁在案）${NC}"
 else
-    echo -e "${GREEN}[OK] 无 SDK 变更，跳过 subagent-engine-sdk typecheck${NC}"
+    echo -e "${GREEN}[OK] 无 SDK / subagent-core 变更，跳过双侧 typecheck${NC}"
 fi
 
 # ============================================================================
@@ -2079,6 +2089,66 @@ if echo "$MODEL_REF_STAGED" | grep -qE "^extensions/.*\.md$|^packages/runtime/sr
     echo -e "${GREEN}[OK] pi 资产模型引用漂移守卫通过（D8 机器守卫在案）${NC}"
 else
     echo -e "${GREEN}[OK] 无 extensions .md / 快照变更，跳过模型引用漂移守卫${NC}"
+fi
+
+# ============================================================================
+# vitest 红线：测试文件 node:test import 拦截（review-pipeline-redesign 决策 4）
+#   docs/TEST-STRATEGY.md vitest 红线（禁 node:test）的机器承接分两半：
+#   非测试文件面 = eslint.config.mjs 的 no-restricted-syntax 两块（core 域 selector 追加 +
+#   全仓独立块）；测试文件面 = 本段 grep——taste-lint/base.mjs 的全局 ignores 把
+#   **/*.test.ts / **/*.spec.ts / **/__tests__/**/*.ts 三模式整体排除出 eslint 管线
+#   （global-ignores 硬语义，配置块无法复活），故测试文件面由 pre-commit 承载
+#   （「不在 eslint 管线的面用 pre-commit 承载」惯例，与「tsx --test 归红线文档不进 lint」
+#   同构）。本段文件面与该 ignores 三模式对齐：*.test.* / *.spec.* 后缀 case +
+#   __tests__/ 目录 case（ignores 的目录口径限 .ts，case 对齐该面；后缀 case 比 ignores
+#   后缀模式宽出的 .tsx/.mts/... 属无害超集——违规 import 无论如何该拦）。无豁免类目。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+NODE_TEST_HITS=""
+for f in $STAGED_FILES; do
+    case "$f" in
+        *.test.ts|*.test.tsx|*.test.mts|*.test.cts|*.test.mjs|*.test.cjs|*.test.js|*.spec.ts|*.spec.tsx|*.spec.mts|*.spec.mjs|*.spec.js)
+            ;;
+        __tests__/*.ts|*/__tests__/*.ts)
+            ;;
+        *)
+            continue
+            ;;
+    esac
+    [ -f "$f" ] || continue
+    hits=$(grep -nE "from ['\"]node:test['\"]|require\(['\"]node:test['\"]\)" "$f" 2>/dev/null || true)
+    if [ -n "$hits" ]; then
+        while IFS= read -r line; do
+            NODE_TEST_HITS="${NODE_TEST_HITS}  ${f}:${line}\n"
+        done <<< "$hits"
+    fi
+done
+if [ -n "$NODE_TEST_HITS" ]; then
+    print_section "[vitest 红线 node:test 拦截]"
+    echo -e "${RED}[ERROR] 测试文件禁止 node:test（测试框架统一 vitest）:${NC}"
+    echo -e "$NODE_TEST_HITS"
+    echo -e "${YELLOW}[FIX] 改用 vitest（import { test } from 'vitest'）；红线规范见 docs/TEST-STRATEGY.md${NC}"
+    echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+    exit 1
+fi
+
+# ============================================================================
+# [oe-assert 粗网] code-overdesign-audit pre-commit 断言（review-pipeline-redesign 决策 5）
+#   三断言（新增无调用方导出 no-reference / 新增单实现接口 single-impl / 新增纯转发方法
+#   pass-through）拦新增投机复杂度，目标单次提交 <10s。本仓 ports / SDK 契约 interface 的
+#   「接口先立、单实现常态」合法形态与 oe-exempt 豁免标记说明见 .githooks/oe-assert.sh
+#   头部注释区（部署副本特化）。卸载 = 删本段 + 删 .githooks/oe-assert.sh。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    print_section "[oe-assert 过度设计粗网]"
+    if [ ! -f ".githooks/oe-assert.sh" ]; then
+        echo -e "${RED}[ERROR] 找不到 .githooks/oe-assert.sh（调用行在位而脚本本体缺失）${NC}"
+        exit 1
+    fi
+    bash ".githooks/oe-assert.sh" # oe-audit-assert
 fi
 
 # ============================================================================
@@ -2191,8 +2261,9 @@ echo -e "  ${GREEN}[+]${NC} e2e-map SSOT 结构校验（登记表 + 调度脚本
 echo -e "  ${GREEN}[+]${NC} CI vitest 目标非空守卫（ci.yml/守卫变更时触发：vitest run 目标逐个 list 干跑非空，G2）"
 echo -e "  ${GREEN}[+]${NC} hook 脚本反模式守卫（install-hooks.sh 变更时触发：VAR=\$(cmd)+EXIT=\$? 组合拦截，G3）"
 echo -e "  ${GREEN}[+]${NC} review-fix-loop 双实现锁步守卫（workflows 变更时触发：pi/zcode 调度结果 + 池/阈值常量对账）"
-echo -e "  ${GREEN}[+]${NC} subagent-engine-sdk typecheck（SDK 变更时触发：协议演进宪法 D11 编译期机器锁 C3 词表 / C4 双写禁令 / C2 必填）"
+echo -e "  ${GREEN}[+]${NC} subagent-engine-sdk + subagent-core typecheck（两包变更时触发：D11 编译期机器锁 C3 词表 / C4 双写禁令 / C2 必填 + C-proc-23 词表锁 core 侧镜像锚点）"
 echo -e "  ${GREEN}[+]${NC} pi 资产模型引用漂移守卫（extensions .md / 快照变更时触发：D8 agent 资产 model 声明 vs builtin-providers 快照 diff）"
+echo -e "  ${GREEN}[+]${NC} oe-assert 过度设计粗网（code-overdesign-audit 三断言：no-reference / single-impl / pass-through，oe-exempt 豁免标记）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

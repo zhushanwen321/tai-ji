@@ -496,6 +496,37 @@ export default [
           selector: 'NewExpression[callee.name="WebSocket"]',
           message: 'core 包禁止 new WebSocket——经 PlatformPort.webSocket.create 创建',
         },
+        // [vitest 红线机器化，review-pipeline-redesign 决策 4] node:test import 在 core 域
+        // 的条目落本块 selector 数组内（flat config 同规则 ID 后块整条覆盖前块——独立新块
+        // 会静默拆掉上方 WebSocket 红线，双向探针实证见设计 §3.3 决策 4 v6-v9 演化）。
+        // 本块只拦非测试文件的 node:test import——ESLint 全局 ignores（taste-lint/base.mjs）硬排除
+        // *.test.ts / *.spec.ts / __tests__ 下 .ts，本块对这类文件结构性不可达；测试文件的拦截
+        // 由 pre-commit 生成模板 grep 段承载（.githooks/install-hooks.sh，设计 v10 载体重定）。
+        {
+          selector: "ImportDeclaration[source.value='node:test']",
+          message: '禁止 node:test——测试框架统一 vitest（docs/TEST-STRATEGY.md 红线）',
+        },
+      ],
+    },
+  },
+  // [vitest 红线机器化，review-pipeline-redesign 决策 4] 全仓（core src 除外）node:test
+  // import 拦截。与上方 core 块同规则 ID 但生效域不相交（ignores 让位），flat config 覆盖
+  // 语义下互不拆除。本块对 *.test.*/*.spec.*/__tests__ 测试文件不可达（全局 ignores 硬排除），
+  // 测试文件面由 pre-commit grep 段承载（设计 v10）。tsx --test 是 CLI 形态
+  // 无 import specifier，不进 lint 拦截面（由 docs/TEST-STRATEGY.md vitest 红线承载）。
+  // [no-unsafe-cast 扩展评估（决策 4 as 断言面）2026-09-26] renderer/runtime 不扩展该规则——
+  // 实测存量命中 143 处/75 文件，且前端 ESLint 为 --max-warnings=0 口径（warn 级也阻断），
+  // 采纳即全仓 pre-commit 红灾；放弃依据与重审触发登记见设计文档 §3.3 决策 4（review-pipeline-redesign）。
+  {
+    files: ['**/*.{ts,tsx,mts,cts,vue,js,mjs,cjs}'],
+    ignores: ['packages/core/src/**'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "ImportDeclaration[source.value='node:test']",
+          message: '禁止 node:test——测试框架统一 vitest（docs/TEST-STRATEGY.md 红线）',
+        },
       ],
     },
   },

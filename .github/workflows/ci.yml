@@ -99,6 +99,13 @@ jobs:
       - name: TypeCheck - subagent-engine-sdk
         run: pnpm --filter @zhushanwen/subagent-engine-sdk run typecheck
 
+      # C-proc-23 引擎协议词表锁 core 侧锚点执行点：SDK SSOT ↔ core 镜像类型双向可赋值
+      # + engine-manifest 能力位两表键集互等，断言在 protocol-closure.test.ts（编译期）。
+      # SDK 类型改动只编译 SDK 恒绿，缺本步则 core 镜像锁为纸面（与 pre-commit 双侧
+      # typecheck 段同口径）。
+      - name: TypeCheck - subagent-core
+        run: pnpm --filter @zhushanwen/subagent-core run typecheck
+
       - name: TypeCheck - pi extensions
         run: pnpm extensions:typecheck
 

@@ -7,7 +7,7 @@
       "summary": "一句话摘要（仅导航）",
       "scope": "global 或路径 glob 数组（仅支持 <prefix>/** 前缀通配与精确路径；global = 每次 CR 必载）",
       "authority": "权威源文档（相对 docs/ 的路径，可含 #锚点；约束内容只活在这里）",
-      "dimensions": "可选。关联 pr-cr-fix review 维度（arch-boundary/business-logic/data-governance/electron-build/extension-api/monorepo-impact/test-coverage/type-safety），软映射",
+      "dimensions": "可选。关联 pr-cr-fix review 维度（arch-boundary/business-logic/data-governance/electron-build/extension-api/monorepo-impact），软映射（test-coverage/type-safety 已随 agent 退役移除）",
       "enforcement": "数组。{type:machine, hook:<.githooks/ 或 scripts/ 下脚本>} | {type:review, agent:<pr-cr-fix agent>} | {type:none}"
     },
     "consumers": [
@@ -112,13 +112,12 @@
         "adr/decisions.md#ADR-0037"
       ],
       "dimensions": [
-        "type-safety",
         "arch-boundary"
       ],
       "enforcement": [
         {
           "type": "review",
-          "agent": "review-type-safety"
+          "agent": "review-arch-boundary"
         }
       ]
     },
@@ -343,8 +342,7 @@
         "../packages/core/src/domain/chat/message-turns.ts"
       ],
       "dimensions": [
-        "data-governance",
-        "test-coverage"
+        "data-governance"
       ],
       "enforcement": [
         {
@@ -570,8 +568,7 @@
         "architecture/runtime-layering.md"
       ],
       "dimensions": [
-        "arch-boundary",
-        "type-safety"
+        "arch-boundary"
       ],
       "enforcement": [
         {
@@ -684,12 +681,12 @@
         "adr/decisions.md#ADR-0046"
       ],
       "dimensions": [
-        "type-safety"
+        "arch-boundary"
       ],
       "enforcement": [
         {
           "type": "review",
-          "agent": "review-type-safety"
+          "agent": "review-arch-boundary"
         }
       ]
     },
@@ -824,13 +821,13 @@
         "adr/decisions.md#ADR-0043"
       ],
       "dimensions": [
-        "type-safety",
+        "business-logic",
         "data-governance"
       ],
       "enforcement": [
         {
           "type": "review",
-          "agent": "review-type-safety"
+          "agent": "review-business-logic"
         }
       ]
     },
@@ -892,8 +889,7 @@
         "architecture/runtime-layering.md"
       ],
       "dimensions": [
-        "arch-boundary",
-        "type-safety"
+        "arch-boundary"
       ],
       "enforcement": [
         {
@@ -932,13 +928,13 @@
         "adr/decisions.md#ADR-0029"
       ],
       "dimensions": [
-        "type-safety",
+        "arch-boundary",
         "monorepo-impact"
       ],
       "enforcement": [
         {
           "type": "review",
-          "agent": "review-type-safety"
+          "agent": "review-arch-boundary"
         }
       ]
     },
@@ -1076,13 +1072,12 @@
         "extensions/extension-conventions.md"
       ],
       "dimensions": [
-        "test-coverage",
         "extension-api"
       ],
       "enforcement": [
         {
           "type": "review",
-          "agent": "review-test-coverage"
+          "agent": "review-extension-api"
         }
       ]
     },
@@ -1195,9 +1190,7 @@
       "authority": [
         "../AGENTS.md"
       ],
-      "dimensions": [
-        "test-coverage"
-      ],
+      "dimensions": [],
       "enforcement": [
         {
           "type": "none"
@@ -1369,13 +1362,11 @@
         "TEST-STRATEGY.md",
         "../AGENTS.md"
       ],
-      "dimensions": [
-        "test-coverage"
-      ],
+      "dimensions": [],
       "enforcement": [
         {
-          "type": "review",
-          "agent": "review-test-coverage"
+          "type": "machine",
+          "hook": "eslint.config.mjs"
         }
       ]
     },
@@ -1389,13 +1380,10 @@
       "authority": [
         "TEST-STRATEGY.md"
       ],
-      "dimensions": [
-        "test-coverage"
-      ],
+      "dimensions": [],
       "enforcement": [
         {
-          "type": "review",
-          "agent": "review-test-coverage"
+          "type": "none"
         }
       ]
     },
@@ -1705,12 +1693,12 @@
         "adr/decisions.md#ADR-0064"
       ],
       "dimensions": [
-        "type-safety"
+        "business-logic"
       ],
       "enforcement": [
         {
           "type": "review",
-          "agent": "review-type-safety"
+          "agent": "review-business-logic"
         }
       ]
     },
@@ -1974,17 +1962,12 @@
         "architecture/state-truth-sync-architecture.md#d1resolvelaunchconfig-单一解析模块c1-核心选定"
       ],
       "dimensions": [
-        "data-governance",
-        "test-coverage"
+        "data-governance"
       ],
       "enforcement": [
         {
           "type": "review",
           "agent": "review-data-governance"
-        },
-        {
-          "type": "review",
-          "agent": "review-test-coverage"
         }
       ]
     },
@@ -2031,13 +2014,12 @@
         "adr/decisions.md#ADR-0065"
       ],
       "dimensions": [
-        "type-safety",
-        "test-coverage"
+        "business-logic"
       ],
       "enforcement": [
         {
           "type": "review",
-          "agent": "review-type-safety"
+          "agent": "review-business-logic"
         }
       ]
     },
@@ -2056,7 +2038,7 @@
       ],
       "dimensions": [
         "arch-boundary",
-        "test-coverage"
+        "business-logic"
       ],
       "enforcement": [
         {
@@ -2526,8 +2508,7 @@
         "../packages/renderer/src/components/panel/DetailPane.vue"
       ],
       "dimensions": [
-        "arch-boundary",
-        "type-safety"
+        "arch-boundary"
       ],
       "enforcement": [
         {
@@ -2861,8 +2842,7 @@
         "../packages/subagent-engine-sdk/src/protocol/engine-protocol.ts"
       ],
       "dimensions": [
-        "business-logic",
-        "type-safety"
+        "business-logic"
       ],
       "enforcement": [
         {
@@ -2883,13 +2863,12 @@
         "../packages/subagent-engine-sdk/src/protocol/contract-types.ts"
       ],
       "dimensions": [
-        "type-safety",
-        "test-coverage"
+        "arch-boundary"
       ],
       "enforcement": [
         {
-          "type": "review",
-          "agent": "review-type-safety"
+          "type": "machine",
+          "hook": "install-hooks.sh §subagent-engine-sdk + subagent-core typecheck（任一包 staged 命中即触发，SDK 与 core 双侧各跑 tsc --noEmit——SDK 侧 C3/C4/C2 + core 侧本约束镜像锚点 protocol-closure.test.ts）+ ci.yml typecheck job 双侧步骤"
         }
       ]
     },

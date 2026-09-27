@@ -235,73 +235,62 @@ fi
 
 # ── Step 5: changeset 完整性检查（WARNING 级别，不阻断）
 # 检测：改了 extensions/ 发布包但无对应 changeset → 提醒（不发版的改动可忽略）
+# [review-pipeline-redesign 决策 7] 判定逻辑唯一实装 = scripts/changeset-check.mjs；
+# 本函数只做调用、文案行透传（--json 的 lines 字段，文案单源在该脚本）与 RESULTS 簿记。
 check_changeset() {
     log "▸ Step: changeset check"
-
-    # 只在 feature 分支（有 main 可对比）时检查
-    if ! git rev-parse --verify main >/dev/null 2>&1 && ! git rev-parse --verify github/main >/dev/null 2>&1; then
-        log "  ↷ skip（找不到 main 分支，无法对比）"
-        RESULTS+=("SKIP changeset-check 0s (no main)")
-        return 0
+    local cs_json
+    if ! cs_json="$(node scripts/changeset-check.mjs --json)"; then
+        log "  ✗ changeset-check 工具错误："
+        log "  $cs_json"
+        RESULTS+=("FAIL changeset-check 0s (tool error)")
+        write_result_marker "FAIL"
+        exit 2
     fi
-
-    # 找出改了 src/ 的 extension 包（只改 docs/test/examples 的不算）
-    local changed_pkgs=()
-    while IFS= read -r file; do
-        # 提取包目录。三种布局：旧扁平 extensions/<name>/、2026-08-22 分组后的
-        # extensions/<group>/<name>/（group ∈ shared|taiji|universal）。
-        # [HISTORICAL] 曾只特判 shared/ 一个分组，universal/ taiji/ 下的包全被
-        # 漏检（extensions/universal/ 无 package.json 整组被跳过，WARN 少报 6 包）
-        local pkg_dir
-        pkg_dir=$(echo "$file" | grep -oE '^extensions/((shared|taiji|universal)/[^/]+|[^/]+)/' | sed 's:/$::' || true)
-        [ -z "$pkg_dir" ] && continue
-
-        # 只关心改了 src/ 的（排除 README、docs、examples、workflows）；已删除的
-        # 包（如 quota-providers 移除）读不到 package.json 会在下方自然跳过
-        echo "$file" | grep -qE '^extensions/((shared|taiji|universal)/[^/]+|[^/]+)/src/' || continue
-
-        # 读 package.json 的 name 字段
-        local pkg_name
-        pkg_name=$(node -p "require('./$pkg_dir/package.json').name" 2>/dev/null || echo "")
-        [ -z "$pkg_name" ] && continue
-
-        # 去重
-        local found=0
-        for p in "${changed_pkgs[@]:-}"; do [ "$p" = "$pkg_name" ] && found=1 && break; done
-        [ "$found" = "0" ] && changed_pkgs+=("$pkg_name")
-    done < <(git diff main...HEAD --name-only 2>/dev/null || git diff github/main...HEAD --name-only 2>/dev/null)
-
-    if [ "${#changed_pkgs[@]}" -eq 0 ]; then
-        log "  ✓ 无 extension src/ 改动，跳过 changeset 检查"
-        RESULTS+=("PASS changeset-check 0s (no ext changes)")
-        return 0
+    # 一次 node 调用渲染：首行 = "status changed_n missing_n" 元数据，其余行 = 文案行
+    local rendered first_line rest line status changed_n missing_n
+    if ! rendered="$(node -e '
+const j = JSON.parse(require("fs").readFileSync(0, "utf8"));
+console.log(j.status + " " + j.changed.length + " " + j.missing.length);
+for (const l of j.lines) console.log(l);
+' <<< "$cs_json")"; then
+        log "  ✗ changeset-check 渲染失败（产物非 JSON）："
+        log "  $cs_json"
+        RESULTS+=("FAIL changeset-check 0s (unparseable)")
+        write_result_marker "FAIL"
+        exit 2
     fi
-
-    # 收集 changeset 文件中声明的包名
-    local declared_pkgs
-    # 支持单引号和双引号两种 changeset frontmatter 格式（@changesets/cli 默认生成单引号）
-    declared_pkgs=$(grep -rhE "['\"]@" .changeset/*.md 2>/dev/null | grep -oE "['\"]@[^'\"]+['\"]" | tr -d "'\"" | sort -u || echo "")
-
-    # 找出改了但没声明 changeset 的包
-    local missing=()
-    for pkg in "${changed_pkgs[@]}"; do
-        if ! echo "$declared_pkgs" | grep -qF "$pkg"; then
-            missing+=("$pkg")
-        fi
-    done
-
-    if [ "${#missing[@]}" -eq 0 ]; then
-        log "  ✓ 所有改动的 extension 包都有 changeset（${#changed_pkgs[@]} 个包）"
-        RESULTS+=("PASS changeset-check 0s (${#changed_pkgs[@]} pkgs)")
-    else
-        log "  ⚠ ${#missing[@]} 个 extension 改了 src/ 但无 changeset："
-        for pkg in "${missing[@]}"; do
-            log "    - $pkg"
-        done
-        log "  如需发布，运行: pnpm changeset"
-        log "  如是纯文档/测试/重构改动无需发布，可忽略此警告"
-        RESULTS+=("WARN changeset-check 0s (${#missing[@]} missing)")
+    first_line="${rendered%%$'\n'*}"
+    rest=""
+    [[ "$rendered" == *$'\n'* ]] && rest="${rendered#*$'\n'}"
+    read -r status changed_n missing_n <<< "$first_line"
+    if [ -n "$rest" ]; then
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            log "  $line"
+        done <<< "$rest"
     fi
+    case "$status" in
+        skip)
+            RESULTS+=("SKIP changeset-check 0s (no main)")
+            ;;
+        pass)
+            if [ "$changed_n" = "0" ]; then
+                RESULTS+=("PASS changeset-check 0s (no ext changes)")
+            else
+                RESULTS+=("PASS changeset-check 0s (${changed_n} pkgs)")
+            fi
+            ;;
+        warn)
+            RESULTS+=("WARN changeset-check 0s (${missing_n} missing)")
+            ;;
+        *)
+            log "  ✗ changeset-check 输出不可解析：$cs_json"
+            RESULTS+=("FAIL changeset-check 0s (unparseable)")
+            write_result_marker "FAIL"
+            exit 2
+            ;;
+    esac
 }
 check_changeset
 

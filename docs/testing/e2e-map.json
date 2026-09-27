@@ -688,7 +688,7 @@
     },
     {
       "id": "E2E-BATCH-04",
-      "summary": "S4 中途停止：派发后 workflow abort → run 终态 aborted + 通知到达 + 无孤儿 pi 子进程",
+      "summary": "S4 中途停止：派发后 workflow abort → run 终态 cancelled + 通知到达 + 无孤儿成员任务子进程",
       "scope": [
         "extensions/universal/subagent-workflow/src/**",
         "packages/subagent-core/workflows/fan-out.js",
@@ -715,7 +715,7 @@
       "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-s4-abort-no-orphan.spec.ts（双凭证门 = env + 本机 provider 凭证，缺一 skip 不 fail；空载串行）。剧本化包装：bash .tmp/dev-flow/w1-run-record-journal-authority.acceptance/batch-rerun.sh（W1 D3 verify 载体，含 build 前置 + 三 spec 串行 + 产物落 batch/，.tmp 不入 git）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收口）：S4 中途停止 → aborted + 通知照达 + 无孤儿 pi 子进程；W1 新介质锚 = 收编幂等与死字节断言。 R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现面），孤儿进程 ps 核对为通过条件之一（设计 S4）； 真机已过：done(aborted) 通知照达 + 零孤儿进程。"
+      "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收口）：S4 中途停止 → cancelled + 通知照达 + 无孤儿成员任务子进程；W1 新介质锚 = 收编幂等与死字节断言。 R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现面），成员任务子进程 ps 核对为通过条件之一（设计 S4）；断言锚 = 成员保活 sleep 进程——引擎宿主是连接级常驻（armEngineSelfDestruct 无 run 结束判据、D9-2 禁 run 级杀引擎），abort 后存活是设计行为不数孤儿（2026-09-26 W1 验收定稿；per-run 退出形态另行立项）。真机已过：done(cancelled) 通知照达 + 零成员任务残留。"
     },
     {
       "id": "E2E-BATCH-05",

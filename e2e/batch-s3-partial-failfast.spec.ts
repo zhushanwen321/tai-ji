@@ -294,8 +294,12 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
    *  busy-retry：上一场景的 wf-done 通知（triggerTurn）唤醒的 turn 可能仍在跑，
    *  此时 message.send 的 RPC 回执成功但 pi 层 prompt 失败被静默丢弃（runtime 日志
    *  'Agent is already processing'——r3 实测 S3b 证据，sessionTail 空白佐证）。
-   *  判定：短探测窗内无 message.complete 且发送后新增日志含 busy 拒绝 → 等待后
-   *  重发；末轮用全预算窗，仍无 complete 按原超时断言红。 */
+   *  判定窗两段式，总判定窗恒为 timeoutMs（自 send 起算，与末尾超时断言口径一致）：
+   *  前 BUSY_PROBE_MS 探测窗仅用于 busy 识别——窗内 complete 即返回；窗内出现 busy
+   *  拒绝 → settle 后重发；窗内无 complete 且无 busy 拒绝 = prompt 已被接受、turn
+   *  健康在途（message.complete 仅在 agent_end 广播——runtime event-adapter.ts
+   *  handleAgentEnd，真实 LLM 调工具的 turn 常超探测窗，r6 实测 20.1s 误判证据），
+   *  继续等满总判定窗，全预算到期仍无 complete 才落 diag + 超时断言红。 */
   async function sendAndWaitTurn(content: string, tag: string, timeoutMs: number): Promise<void> {
     const s = shared!
     const BUSY_PROBE_MS = 20_000
@@ -303,6 +307,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     const MAX_ATTEMPTS = 4
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       const sendId = `${tag}-${attempt}`
+      const sendAt = Date.now()
       const logsBefore = readRuntimeLogs(s.dataDir).length
       const sendReply = await wsRoundTrip(s.port, {
         type: 'message.send',
@@ -311,24 +316,33 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
       }, sendId, 30_000)
       expect(sendReply.type, `${tag} message.send 应被接受`).not.toBe('error')
       s.sub.events.length = 0
-      const done = await waitUntil(
+      // 探测窗：仅用于 busy 识别——turn 健康在途时不在此判红
+      const probeDone = await waitUntil(
         () => s.sub.events.filter((e) => e.type === 'message.complete').length > 0,
-        attempt === MAX_ATTEMPTS ? timeoutMs : BUSY_PROBE_MS,
+        BUSY_PROBE_MS,
       )
-      if (done) return
+      if (probeDone) return
       const busyRejected = readRuntimeLogs(s.dataDir).slice(logsBefore).includes('Agent is already processing')
-      if (attempt < MAX_ATTEMPTS && busyRejected) {
+      if (busyRejected && attempt < MAX_ATTEMPTS) {
         console.warn(`[batch-s3] ${tag} 撞 busy turn（prompt 被静默丢弃），${BUSY_SETTLE_MS}ms 后重发（${attempt}/${MAX_ATTEMPTS}）`)
         await new Promise((resolve) => setTimeout(resolve, BUSY_SETTLE_MS))
         continue
       }
-      writeDiag(`batch-s3-${tag}-turn.json`, {
-        seen: [...new Set(s.sub.events.map((e) => String(e.type)))],
-        runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
-        busyRejected,
-        consoleErrors: s.consoleCap.errors,
-      })
-      expect(done, `${tag} 主 turn 未在 ${timeoutMs}ms 内 message.complete（查 diag）`).toBe(true)
+      // 无 busy 拒绝（或末轮 busy 无重发名额）：prompt 已被接受/预算已尽 → 以剩余总判定窗等待
+      const remainMs = Math.max(0, timeoutMs - (Date.now() - sendAt))
+      const done = await waitUntil(
+        () => s.sub.events.filter((e) => e.type === 'message.complete').length > 0,
+        remainMs,
+      )
+      if (!done) {
+        writeDiag(`batch-s3-${tag}-turn.json`, {
+          seen: [...new Set(s.sub.events.map((e) => String(e.type)))],
+          runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
+          busyRejected,
+          consoleErrors: s.consoleCap.errors,
+        })
+        expect(done, `${tag} 主 turn 未在 ${timeoutMs}ms 内 message.complete（查 diag）`).toBe(true)
+      }
       return
     }
   }

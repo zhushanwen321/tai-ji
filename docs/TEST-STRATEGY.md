@@ -390,3 +390,16 @@ pi 边界可靠性设计的测试面落地（2026-08-27 事故对 → 四支柱�
 **裁决三：根 `pnpm test` 包级并发预算——默认已最优，不调**。10 核机 4 重包对照实测（2026-09-15）：默认并发 31.6s < concurrency=2 的 32.9s < 串行 35.3s——并发膨胀（zcode 求和 +15%）被包间进程启动/IO 重叠收益抵消还有余。CI 不经此路径（走 `--filter <pkg> exec vitest run --shard=` 按包分 job）。
 
 `[HISTORICAL]` 案例锚（扫描根锚错层）：zcode capabilities 零消费方守卫的 `srcRoot` 上跳 5 级落到 **workspace 父目录**，实际扫所有兄弟 worktree 全部 .ts（3.1s 且耗时随兄弟 worktree 文件量漂移）；修正为本包 src 后 4ms。对照：renderer i18n 两个守卫在 `__tests__/i18n` 子目录（深 2 层），5 级跳恰好落仓库根（正确）。规则：目录内 walk 扫描的根推导层数必须按「测试文件实际深度」核对，禁止从别包抄跳层数；改完用负向探针（植入消费点确认变红）验证守卫仍有效。
+
+## 附录：taiji 领域测试点清单
+
+> 用途：写测试与审测试时的领域级检查清单——diff 触及下列领域对象时，对应测试点须有覆盖。本清单承载「该测什么」的领域语义，与另两处承接面互补：review-business-logic 的边界条件检查（代码级：边界输入处理逻辑是否正确）、coverage-gate 行覆盖（机器级：边缘分支是否被测试触达）。
+
+| # | 领域测试点 | 要测什么 |
+|---|-----------|---------|
+| 1 | session 双状态 | 活跃（pi 进程实时通信）vs 非活跃（JSONL 文件解析）两条路径都要覆盖 |
+| 2 | Extension vs Plugin | 两者是独立概念——pi Extension（子进程内，ExtensionAPI）和 Plugin（Worker Thread，agentAPI）的测试不应混淆；Pi Bridge 的转发逻辑需独立测试 |
+| 3 | ports 接口 | services 定义、infra 实现的 ports 接口（IPiEngine/IConfigStore/IModelSource 等）应有 mock 实现的 vitest（验证 service 行为不依赖 infra） |
+| 4 | PiXxx 类型翻译 | infra 层的 pi 事件→内部事件翻译（PiTranslatedEvent）、pi 历史→Message[] 翻译需独立测试 |
+
+> 原第 5 项（TaskNode / TaskTree 树形引擎节点状态转换、嵌套、fork/clone/navigate）随树形引擎退役消亡（docs/CONTEXT.md 词条登记），现行 subagent 测试面见 docs/extensions/subagents/architecture.md §5。
