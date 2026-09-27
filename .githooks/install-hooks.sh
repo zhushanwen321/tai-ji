@@ -1977,6 +1977,25 @@ else
 fi
 
 # ============================================================================
+# e2e 防漏登记门禁（--staged）：暂存文件落在 e2e-map 看护目录内但无任何 rule 覆盖 → 拦截
+#   防的形态：新增 e2e 测试/资产文件但漏改 e2e-map.json——上方结构校验段只在登记表自身
+#   被 staged 时触发，拦不住这个形态（登记表没动 → 条件不满足 → 什么都不查）。
+#   无条件运行：watched roots 的并集只存在于 e2e-map.json（脚本内 watchedRoots 推导），
+#   bash 侧复刻目录判断必然漂移成第二份事实源；非看护文件的提交脚本零命中静默通过。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+if [ ! -f "scripts/select-affected-e2e.mjs" ]; then
+    echo -e "${RED}[ERROR] 找不到 scripts/select-affected-e2e.mjs（守卫脚本被删除）${NC}"
+    exit 1
+fi
+if ! node scripts/select-affected-e2e.mjs --staged; then
+    echo -e "${RED}[ERROR] e2e 防漏登记未通过——按上方明细在 docs/testing/e2e-map.json 登记后重试提交${NC}"
+    echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+    exit 1
+fi
+
+# ============================================================================
 # CI vitest 目标非空守卫（G2）
 #   staged 命中 ci.yml / 守卫脚本 / 其单测时触发：scripts/check-ci-vitest-targets.mjs
 #   解析 .github/workflows/ci.yml 全部 `vitest run` 调用（含经 package.json script 一层
