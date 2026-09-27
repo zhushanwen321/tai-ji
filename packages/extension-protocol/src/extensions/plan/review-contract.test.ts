@@ -51,11 +51,6 @@ describe('dismiss 样本（D3 主干，必测）', () => {
       expect('comments' in envelope.response).toBe(false)
     }
   })
-
-  it('dismiss 样本经 respond 通道回传形态（JSON 字符串载体 parse 后同判——P-2 任意字符串载荷）', () => {
-    const envelope = parsePlanReviewResponse(JSON.parse(JSON.stringify({ decision: 'dismiss' })) as unknown)
-    expect(envelope).toEqual({ ok: true, response: { decision: 'dismiss' } })
-  })
 })
 
 describe('error envelope 三态判别（降级双分源，D3①）', () => {

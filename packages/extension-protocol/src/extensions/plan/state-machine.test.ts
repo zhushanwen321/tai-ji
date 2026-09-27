@@ -3,7 +3,7 @@
  *
  * 覆盖义务（U1 验收②）：
  * - transition 全边表穷举：8 状态 × 9 事件 = 72 格逐格断言（合法 19 边 / 非法 53 格；
- *   边集构成 = 活跃族六态 exit + reviewing submit 重挂自环，idle 无 exit 边），
+ *   边集构成 = 活跃族五态 exit + reviewing submit 重挂自环，idle 无 exit 边），
  *   无效转移返回 `{ ok: false }` 且不携带 next 键（调用方降级语义的结构保证）。
  * - D1 关键边命名锚定（dismiss / review_aborted 双出口 / later / exec_chosen / 终态规则）。
  * - derivePhase 8 存储态 → 5 呈现相位全映射 + 混装格垃圾值降级。
@@ -124,7 +124,7 @@ for (const state of PLAN_LIFECYCLE_STATES) {
 }
 
 describe('D1 状态机边表穷举（8 状态 × 9 事件 = 72 格）', () => {
-  it('穷举基座自检：状态 8 值 / 事件 9 值，展开 72 格，合法 19 边（活跃族六态 exit + reviewing submit 自环）/ 非法 53 格', () => {
+  it('穷举基座自检：状态 8 值 / 事件 9 值，展开 72 格，合法 19 边（活跃族五态 exit + reviewing submit 自环）/ 非法 53 格', () => {
     expect(PLAN_LIFECYCLE_STATES).toHaveLength(8)
     expect(PLAN_LIFECYCLE_EVENTS).toHaveLength(9)
     expect(new Set(PLAN_LIFECYCLE_STATES).size).toBe(8)

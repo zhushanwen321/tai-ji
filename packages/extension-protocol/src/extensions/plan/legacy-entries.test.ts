@@ -27,6 +27,10 @@ describe('readLifecycleState：新字段直读', () => {
       expect(readLifecycleState({ state }, false)).toBe(state)
     }
   })
+
+  it('state 合法即直读优先，reviewState 不参与（legacy-entries.ts:42-45 直读分支先于映射返回）', () => {
+    expect(readLifecycleState({ state: 'idle', reviewState: 'awaiting' }, true)).toBe('idle')
+  })
 })
 
 describe('readLifecycleState：旧 entry 映射（原 5 对等价契约的映射分支）', () => {
@@ -37,6 +41,7 @@ describe('readLifecycleState：旧 entry 映射（原 5 对等价契约的映射
 
   it("reviewState 'revising' → revising（等价对样本 ① 的映射腿）", () => {
     expect(readLifecycleState({ reviewState: 'revising' }, true)).toBe('revising')
+    expect(readLifecycleState({ reviewState: 'revising' }, false)).toBe('revising')
   })
 
   it('无 state 无 reviewState：isActive 兜底 planning | idle（等价对样本 ③/④）', () => {
