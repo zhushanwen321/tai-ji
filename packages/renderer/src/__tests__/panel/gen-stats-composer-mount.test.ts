@@ -1,8 +1,9 @@
 /**
- * Composer 挂载点测试 —— composer-gen-stats u4 Gate A（挂载点 + DOM 顺序）。
+ * Composer 挂载点测试 —— composer-gen-stats u4 Gate A（挂载点 + DOM 顺序）+ composer-genstats-ttft U4。
  *
  * 验收：GenStatsTriggers 挂载于 Composer.vue composer-bar 的 ContextCapacityPopover 之前
- * （位于上下文容量左侧）。
+ * （位于上下文容量左侧）；组件内三触发器顺序 = TTFT · 速度 · 缓存（TTFT 在速度左侧，
+ * composer-genstats-ttft 设计 §3.1）。
  *
  * 策略（照 composer-three-states.test.ts 既有 mock 模式）：
  * - Composer 真实渲染；GenStatsTriggers 不 stub（真渲染，含 title/触发器 DOM）；
@@ -109,19 +110,41 @@ describe('Composer 挂载 GenStatsTriggers（Gate A：挂载点 + 左侧顺序�
     expect(preceding).toBeTruthy()
   })
 
-  it('双触发器在 Composer 真实挂载下渲染（null 初值显「—」）', () => {
+  it('DOM 顺序：TTFT 触发器位于速度触发器左侧（composer-genstats-ttft §3.1 组件内顺序 TTFT · 速度 · 缓存）', () => {
     const wrapper = mount(Composer, { props: { sessionId: 's1', variant: 'panel' as const }, global: { stubs } })
+    const ttftBtn = wrapper.find('[title="首字延迟 TTFT"]')
+    const speedBtn = wrapper.find('[title="TOKEN 速度"]')
+    const cacheBtn = wrapper.find('[title="缓存命中率"]')
+    expect(ttftBtn.exists()).toBe(true)
+    expect(speedBtn.exists()).toBe(true)
+    expect(cacheBtn.exists()).toBe(true)
+    // 速度视角：TTFT 带 PRECEDING 位 = TTFT 在速度左侧
+    const ttftPrecedes =
+      speedBtn.element.compareDocumentPosition(ttftBtn.element) & Node.DOCUMENT_POSITION_PRECEDING
+    expect(ttftPrecedes).toBeTruthy()
+    // 缓存视角：速度带 PRECEDING 位 = 速度在缓存左侧（三段顺序链 TTFT → 速度 → 缓存）
+    const speedPrecedes =
+      cacheBtn.element.compareDocumentPosition(speedBtn.element) & Node.DOCUMENT_POSITION_PRECEDING
+    expect(speedPrecedes).toBeTruthy()
+  })
+
+  it('三触发器在 Composer 真实挂载下渲染（null 初值显「—」）', () => {
+    const wrapper = mount(Composer, { props: { sessionId: 's1', variant: 'panel' as const }, global: { stubs } })
+    expect(wrapper.find('[title="首字延迟 TTFT"]').exists()).toBe(true)
     expect(wrapper.find('[title="TOKEN 速度"]').exists()).toBe(true)
     expect(wrapper.find('[title="缓存命中率"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="genstats-ttft-value"]').text()).toBe('—')
     expect(wrapper.find('[data-testid="genstats-speed-value"]').text()).toBe('—')
     expect(wrapper.find('[data-testid="genstats-cache-value"]').text()).toBe('—')
   })
 
-  it('landing（sessionId=null 未开始）隐藏速度/缓存命中率/上下文容量，不显「—」横线占位', () => {
+  it('landing（sessionId=null 未开始）隐藏 TTFT/速度/缓存命中率/上下文容量，不显「—」横线占位', () => {
     const wrapper = mount(Composer, { props: { sessionId: null, variant: 'landing' as const }, global: { stubs } })
-    // 三项数据位全部不渲染（而非渲染后显「—」）
+    // 四项数据位全部不渲染（而非渲染后显「—」）；TTFT 与速度/缓存同一条 v-if="sessionId" 判据
+    expect(wrapper.find('[title="首字延迟 TTFT"]').exists()).toBe(false)
     expect(wrapper.find('[title="TOKEN 速度"]').exists()).toBe(false)
     expect(wrapper.find('[title="缓存命中率"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="genstats-ttft-value"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="genstats-speed-value"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="stub-context-capacity"]').exists()).toBe(false)
     // 同条工具带上的非数据位不受影响：模型/思考档位选择器仍然可见

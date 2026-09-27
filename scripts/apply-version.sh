@@ -200,6 +200,18 @@ for (const line of fs.readFileSync(CHANGED_LIST_FILE, 'utf8').split('\n').filter
   changedMap[name] = type;
 }
 
+// 人工 type 与 changeset 声明的背离告警（stderr，不拦截）：人工 --changed 是权威
+//（「人工决策、脚本机械执行」边界），但背离通常意味着看错了声明文件或多文件冲突，
+// 必须出声让人工复核，不静默按人工值执行。
+for (const [name, humanType] of Object.entries(changedMap)) {
+  const declTypes = [...new Set(
+    changesets.filter(cs => cs.decls.some(d => d.name === name)).flatMap(cs => cs.decls.filter(d => d.name === name).map(d => d.type)),
+  )];
+  if (declTypes.length > 0 && !declTypes.includes(humanType)) {
+    console.error(`警告：包 ${name} 人工 type=${humanType} 与 changeset 声明 [${declTypes.join(', ')}] 不一致（按人工 type 执行，请确认非误填）`);
+  }
+}
+
 // --- 读 DEPENDENTS pkg-name 列表 ---
 const dependentNames = [];
 for (const name of fs.readFileSync(DEPS_LIST_FILE, 'utf8').split('\n').filter(Boolean)) {
@@ -368,6 +380,32 @@ function consumableChangesets() {
   return changesets.filter(cs => cs.decls.length > 0 && cs.decls.every(d => allBumped.has(d.name)));
 }
 
+// --- 版本字面量双源同步（subagent-core CORE_PACKAGE_VERSION）---
+// @zhushanwen/subagent-core 的 src/index.ts 导出 CORE_PACKAGE_VERSION 字面量，与
+// package.json version 构成登记双源（check-subagent-core-closure.mjs 检查项 0 守卫
+// 一致性）。apply-version 必须同步更新字面量，否则每次 bump 该包后闭包守卫红灯、
+// 人工手改——守卫是兜底，工具一次做对才是终态。
+const CORE_PKG = '@zhushanwen/subagent-core';
+const CORE_INDEX_REL = 'packages/subagent-core/src/index.ts';
+const coreLiteralPending = () => allBumped.has(CORE_PKG);
+function syncCoreVersionLiteral(touched) {
+  if (!coreLiteralPending()) return;
+  const abs = path.join(ROOT, CORE_INDEX_REL);
+  if (!fs.existsSync(abs)) {
+    console.error(`警告：${CORE_INDEX_REL} 不存在（CORE_PACKAGE_VERSION 锚点被移动？请同步 check-subagent-core-closure.mjs 与 apply-version.sh 的路径登记）`);
+    return;
+  }
+  const raw = fs.readFileSync(abs, 'utf8');
+  const newVer = plan[CORE_PKG].newVer;
+  const updated = raw.replace(/(export const CORE_PACKAGE_VERSION = ")([^"]+)(")/, `$1${newVer}$3`);
+  if (updated === raw) {
+    console.error(`警告：${CORE_INDEX_REL} 未匹配到 CORE_PACKAGE_VERSION 字面量（声明形态变化？请人工核对后同步为 ${newVer}）`);
+    return;
+  }
+  fs.writeFileSync(abs, updated);
+  touched.push(CORE_INDEX_REL);
+}
+
 // ===================== 执行 / dry-run =====================
 const out = [];
 out.push(DRY_RUN ? '=== DRY RUN（不写文件） ===' : '=== 执行版本 bump ===');
@@ -390,6 +428,10 @@ out.push('将消费的 .changeset/*.md：');
 if (consumable.length === 0) out.push('  (none)');
 for (const cs of consumable) out.push(`  .changeset/${cs.file}`);
 out.push('');
+if (coreLiteralPending()) {
+  out.push(`将同步版本字面量：${CORE_INDEX_REL} CORE_PACKAGE_VERSION → ${plan[CORE_PKG].newVer}`);
+  out.push('');
+}
 
 if (DRY_RUN) {
   out.push('（dry-run：未写任何 package.json，未改任何 CHANGELOG.md，未删任何 .changeset）');
@@ -410,6 +452,8 @@ for (const name of Object.keys(plan)) {
   fs.writeFileSync(clAbs, clOut);
   touchedFiles.push(path.relative(ROOT, clAbs));
 }
+// 版本字面量双源同步（subagent-core CORE_PACKAGE_VERSION，见上方登记注释）
+syncCoreVersionLiteral(touchedFiles);
 // 删除已消费 changeset
 for (const cs of consumable) {
   fs.unlinkSync(path.join(changesetDir, cs.file));

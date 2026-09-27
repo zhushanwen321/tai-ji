@@ -58,6 +58,7 @@ import {
   SUBAGENT_BG_NOTIFY_CUSTOM_TYPE,
   WORKFLOW_RESULT_CUSTOM_TYPE,
 } from "@zhushanwen/extension-protocol";
+import { collectDeliveredNotifyIds, isPlainObject } from "./notify-ledger-helpers.ts";
 
 /** U4 分桶日志与 index.ts 装配层共用同一具名 logger（getLogger 缓存单例）。 */
 const logger = getLogger("subagents");
@@ -246,11 +247,7 @@ export interface NotifyLedger {
   dispose(): void;
 }
 
-// ─── entry 形态判定（运行时 guard，无 unsafe cast） ──────────────
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
+// ─── 恢复 / compaction 扫描（isPlainObject guard 在 notify-ledger-helpers.ts） ──
 
 /** 扫 ledger/ack/abandoned 三列 plain custom entry（恢复 / compaction 检查共用）。 */
 function scanSessionLedgerEntries(entries: readonly unknown[]): {
@@ -333,38 +330,35 @@ function batchWrapperMembers(record: unknown): readonly unknown[] | undefined {
   return Array.isArray(members) ? members : undefined;
 }
 
-/** 收集 wanted 集合中已送达（custom_message entry 出现）的 notifyId。
- *  送达 entry 两种形态都匹配：单条 details.notifyId / 批量 details.items[].notifyId
- *  （对齐 courier 合并投递的 details 结构）。[u9] channelTypes = 回执接受域
- *  （默认通道 ∪ 在账条目声明的外部通道）——送达 customType 必须在域内才参与
- *  notifyId 匹配，防止无关 custom_message 的 details 撞键误销账。 */
-function collectDeliveredNotifyIds(
-  entries: readonly unknown[],
-  wanted: Set<string>,
-  channelTypes: ReadonlySet<string>,
-): Set<string> {
-  const delivered = new Set<string>();
-  if (wanted.size === 0) return delivered;
-  for (const entry of entries) {
-    if (!isPlainObject(entry) || entry["type"] !== "custom_message") continue;
-    if (typeof entry["customType"] !== "string" || !channelTypes.has(entry["customType"])) continue;
-    const details = entry["details"];
-    if (!isPlainObject(details)) continue;
-    const notifyId = details["notifyId"];
-    if (typeof notifyId === "string" && wanted.has(notifyId)) {
-      delivered.add(notifyId);
-    }
-    const items = details["items"];
-    if (Array.isArray(items)) {
-      for (const item of items) {
-        if (isPlainObject(item)) {
-          const id = item["notifyId"];
-          if (typeof id === "string" && wanted.has(id)) delivered.add(id);
-        }
-      }
-    }
+// ─── 自包含 helper（原 createNotifyLedger 闭包内，行为零变化） ──────────
+
+/** 同一边沿的多条 pending 合并为一条注入（D5）。合并形态对齐 delivery 内核
+ *  buildBatchPayload：content 以 "\n\n---\n\n" join；details 包装 {batch:true,
+ *  items}（bg-notify-render 的 extractBgNotifyRecord 按 item 顶层字段读取）。
+ *  [u9] 不再携带 customType——送达通道由 deliverBatch 的分组键统一决定。 */
+function mergeItems(batch: NotifyLedgerItem[]): {
+  content: string;
+  display: boolean;
+  details?: unknown;
+} {
+  if (batch.length === 1) {
+    return { content: batch[0]!.content, display: true, details: batch[0]!.record };
   }
-  return delivered;
+  return {
+    content: batch.map((i) => i.content).join("\n\n---\n\n"),
+    display: true,
+    details: { batch: true, items: flattenBatchItems(batch) },
+  };
+}
+
+/** 放弃 warn 的 subagent 标识：优先 record.agent（人可读）；record 形态异常时
+ *  （ledger 对 record 不透明，见 NotifyLedgerEntryData）退回 notifyId（仍可检索）。 */
+function itemLabel(item: NotifyLedgerItem): string {
+  if (isPlainObject(item.record)) {
+    const agent = item.record["agent"];
+    if (typeof agent === "string" && agent.length > 0) return agent;
+  }
+  return item.notifyId;
 }
 
 // ─── 账本实现 ────────────────────────────────────────────────
@@ -610,25 +604,6 @@ export function createNotifyLedger(
     maybeStopWatchdog();
   }
 
-  /** 同一边沿的多条 pending 合并为一条注入（D5）。合并形态对齐 delivery 内核
-   *  buildBatchPayload：content 以 "\n\n---\n\n" join；details 包装 {batch:true,
-   *  items}（bg-notify-render 的 extractBgNotifyRecord 按 item 顶层字段读取）。
-   *  [u9] 不再携带 customType——送达通道由 deliverBatch 的分组键统一决定。 */
-  function mergeItems(batch: NotifyLedgerItem[]): {
-    content: string;
-    display: boolean;
-    details?: unknown;
-  } {
-    if (batch.length === 1) {
-      return { content: batch[0]!.content, display: true, details: batch[0]!.record };
-    }
-    return {
-      content: batch.map((i) => i.content).join("\n\n---\n\n"),
-      display: true,
-      details: { batch: true, items: flattenBatchItems(batch) },
-    };
-  }
-
   /** [u9] 单个发送单元：一批条目（默认通道多条合批 / 其余逐条时为单条）按指定
    *  通道发送，受理成功全批标 sent（attempts 累加），失败留 pending（账已落盘，
    *  下一边沿重试 + 重启恢复兜底）。U4 ②settleRejected 桶：投递尝试被拒按事件次
@@ -687,16 +662,6 @@ export function createNotifyLedger(
       details: { notifyId: item.notifyId, attempts: item.attempts, abandoned: true },
     });
     maybeStopWatchdog();
-  }
-
-  /** 放弃 warn 的 subagent 标识：优先 record.agent（人可读）；record 形态异常时
-   *  （ledger 对 record 不透明，见 NotifyLedgerEntryData）退回 notifyId（仍可检索）。 */
-  function itemLabel(item: NotifyLedgerItem): string {
-    if (isPlainObject(item.record)) {
-      const agent = item.record["agent"];
-      if (typeof agent === "string" && agent.length > 0) return agent;
-    }
-    return item.notifyId;
   }
 
   function ensureWatchdog(): void {

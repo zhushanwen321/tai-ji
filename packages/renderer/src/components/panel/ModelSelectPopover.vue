@@ -7,7 +7,7 @@
     表现层已抽为 ModelPickerPanel（架构审查 D4）——本组件保留 Popover 壳 + trigger + 数据源
     （settingsStore.models → groups + providerFilter/enabled 兜底过滤）与 select 语义。
   -->
-  <Popover v-model:open="open">
+  <Popover v-model:open="canOpen">
     <!-- 默认 trigger（PopoverTriggerButton）。调用方可传 #trigger slot 自定义触发器
          （如 ProviderPage 默认 pill），此时调用方需自行包 <PopoverTrigger as-child>。 -->
     <slot name="trigger">
@@ -17,8 +17,10 @@
         :show-chevron="props.variant !== 'icon'"
         :title="props.variant === 'icon' ? currentName : t('panel.modelSelect.switchModel')"
       >
+        <!-- U4：切换中显示转圈（停止态切模型要先 ensureActive 拉活，1–2s 可见反馈） -->
+        <LoaderCircle v-if="switching" class="size-[13px] shrink-0 animate-spin" />
         <!-- fit L2 图标态：只留图标，模型全名进 title / popover（信息不丢） -->
-        <Boxes v-if="props.variant === 'icon'" class="size-4" />
+        <Boxes v-else-if="props.variant === 'icon'" class="size-4" />
         <span v-else class="truncate">{{ currentName }}</span>
       </PopoverTriggerButton>
     </slot>
@@ -36,7 +38,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Boxes } from '@lucide/vue'
+import { Boxes, LoaderCircle } from '@lucide/vue'
 import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/popover'
 import type { ModelInfo } from '@/api'
 import type { ProviderId } from '@taiji/shared'
@@ -53,6 +55,12 @@ const props = withDefaults(defineProps<{
   /** 限定展示的 provider 分组（ProviderPage 默认 pill 传 [p.id]，只列该供应商模型） */
   providerFilter?: ProviderId[]
   /**
+   * U4「切换中」：true 时 trigger 显示转圈并**忽略开合与点选**（禁用重复点击；并发两条
+   * model.switch 在飞会让回执乱序与 session.modelId 双写竞争）。读条件由调用方判
+   * sessionId 等值后传入（本组件不感知 session）。
+   */
+  switching?: boolean
+  /**
    * 触发器形态（u6b fit 轴）：`text` = 模型名文本（默认）；`icon` = 纯图标
    * （fit L2 图标化，模型全名进 title 与 popover）。调用方传 `#trigger` slot 时本 prop 无效。
    */
@@ -60,12 +68,18 @@ const props = withDefaults(defineProps<{
 }>(), {
   selected: '',
   providerFilter: undefined,
+  switching: false,
   variant: 'text',
 })
 
 const { t } = useI18n()
 const settingsStore = getSettingsStore()
 const open = ref(false)
+// U4：切换中禁止开合（内联处理，避免侵入 ui 包 PopoverTriggerButton 的 props 面）
+const canOpen = computed({
+  get: () => open.value,
+  set: (v: boolean) => { open.value = props.switching ? false : v },
+})
 
 /**
  * 拆出裸 modelId：selected 可能是 "provider/modelId" 复合串

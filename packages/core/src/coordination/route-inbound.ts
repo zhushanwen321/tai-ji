@@ -369,6 +369,12 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   // session 通道 + crossSession 通道（ViewHostStore / DialogRequestQueue 按 per-session 分区）
   'plugin:uiRequest': { crossSession: true },
   'plugin:viewUpdate': { crossSession: true },
+  // plugin-header-action-modal-points（AP-1/AP-2）：两条帧 payload 同样由 runtime 广播注入
+  // sessionId，但消费方是全局单例（plugin-modal-slot 槽镜像 / HeaderActionStore 徽标镜像，
+  // 经 MessageBusBridge PLUGIN_HANDLERS 归一）——漏声明则帧只进 session 通道、bridge
+  // （onGlobal/onCrossSession 双订阅）永收不到：modal 槽恒 null 开不了层、徽标恒空。
+  'plugin:modalState': { crossSession: true },
+  'plugin:headerActionUpdate': { crossSession: true },
 }
 
 // ── configureRouteInbound（IF4） ───────────────────────────────────

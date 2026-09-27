@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import { parseSessionContent } from '../core/parser.js'
+import { parseSessionContent } from '@zhushanwen/session-core'
 import type { SessionRef, WorkflowRef } from '../core/family.js'
 import { extractSessionIdFromFilename } from './subagents.js'
 

@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-permission",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "description": "Pi permission extension — four permission modes (yolo/auto/approve/strict) with three-layer pipeline (AST + rules + AI classifier).",
   "type": "module",
   "main": "src/index.ts",

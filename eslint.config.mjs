@@ -67,13 +67,9 @@ export default [
       // （设计 D1），src=dist 同字节直发不做 TS 化——同 extensions/**/workflows 先例豁免。
       'packages/subagent-core/workflows/**',
       'extensions/**/examples/**',
-      // zsub/zflow workflow 脚本（.agents/workflows/*.js）：CJS 是 zflow 加载器契约
-      // （module.exports + require，.cjs 后缀不被其发现层扫描），与根 package.json
-      // type:module 的冲突由同目录 package.json {"type":"commonjs"} 解决；
-      // no-require-imports 对其是误报（同 extensions/**/workflows/** 先例）
-      '.agents/workflows/**',
-      // skill 内置 workflow 脚本（pr-lifecycle 入口 + lib.cjs + node 直测 run-tests.js）：
-      // CJS 是 workflow 加载器契约（同上），no-require-imports 对其是误报
+      // skill 内置 workflow 脚本（pr-cr-fix workflows/pr-lifecycle.dwf.ts）：
+      // zcode-workflow facade（declare agent/world 等）只在引擎编译器内成立，
+      // 仓库 eslint 环境下是未定义符号，故豁免
       '.agents/skills/**/workflows/**',
     ],
   },
@@ -365,6 +361,16 @@ export default [
     files: ['packages/renderer/src/components/settings/SystemPage.vue'],
     rules: {
       'max-lines': 'off',
+    },
+  },
+  // Composer.vue：M3-b btw 入口集成净增 6 代码行（506 > 500 微超）——btw 逻辑本体已全部
+  // 外置（tray/ComposerBtwButton.vue 子组件 + panel/useBtwTabData 簿记 + panel/useBtwInteraction
+  // 编排），组件内仅剩入口声明行（prop / import / 模板一行），无自然拆分线。对齐
+  // pi-provider-store「微超即提额，保留软上限告警」先例（508→520 同型），拆分归独立重构任务。
+  {
+    files: ['packages/renderer/src/components/panel/Composer.vue'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
   // [HISTORICAL] ConfigService 是 config 域唯一聚合点（settings-message-handler 全部 config.* case 的
@@ -743,6 +749,18 @@ export default [
     files: ['packages/subagent-core/src/execution/engine/client/engine-client.ts'],
     rules: {
       'max-lines': ['warn', { max: 650, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [HISTORICAL] PluginService 是插件子系统唯一聚合点（注册表/激活器/Worker 宿主/
+  // RPC/贡献清理的编排中心），E2 修复（togglePlugin disable/enable 腿补
+  // plugin:statusChange 广播）入列时净代码行 510 > 500。两腿广播与既有 producer
+  // （hot-reload 回调 / crashed 腿）同址同构，抽 helper 或独立模块只省微弱行数且
+  // 拆散三路广播的对称性——微超即提额先例（session-service 650 / engine-client 650
+  // 同型）。提额而非 off：保留 555 软上限告警，超限即再暴露。
+  {
+    files: ['packages/runtime/src/services/plugin-service/plugin-service.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 555, skipBlankLines: true, skipComments: true }],
     },
   },
   // preset-service 是 pi-presets.json 读盘 coerce 家族唯一入口（presets 逐项 / prompt 段级 /

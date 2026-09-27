@@ -1,5 +1,11 @@
 # @zhushanwen/zcode-subagent-cli
 
+## 0.4.1
+
+### Patch Changes
+
+- 43a50ae2e: Design-code-sync round 1 fixes on the zcode engine side: dangling reference cleanup, message purity, and error-mapping split.
+
 ## 0.4.0
 
 ### Minor Changes

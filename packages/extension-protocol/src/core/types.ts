@@ -94,6 +94,27 @@ export interface GuiComponentProps {
     sections?: GuiComponent[][]
   }
 
+  /**
+   * 操作按钮栏——GuiComponent 协议首个交互原语（设计 AP-3）。
+   * 点击经宿主壳 provide 的执行器走既有命令链（commandRegistry.execute → WS
+   * plugin.executeCommand），协议不新增回调通道（设计 §3.3 D2）。
+   * 未含此 type 的旧宿主自动降级 ansi-text 可读文本，PROTOCOL_VERSION 不 bump
+   * （设计 §3.3 D8，降级契约 P5）。
+   */
+  'action-bar': {
+    items: {
+      id: string
+      label: string
+      /** 视觉档位：只保留当前唯一实际消费的 danger（删除按钮）；更多档位有真实消费方时再加 */
+      kind?: 'danger'
+      disabled?: boolean
+      /** 缺省 = 纯展示项（不可点、弱化样式） */
+      commandId?: string
+      /** 只许标量：args 原样传给插件 handler，禁嵌套对象防无 schema 结构化旁路（设计 AP-3 校验） */
+      args?: Record<string, string | number | boolean>
+    }[]
+  }
+
   /** 自定义组件——逃生口（仅限内置 extension 编译期注册） */
   'custom': {
     component: string

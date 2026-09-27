@@ -42,6 +42,10 @@ import { normalizeContent, segmentsToText, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, PI_RE
 import type { PiRespawnNoticeVariant } from '@taiji/shared'
 import type { RetryState, QueueState, FinalizeReason } from './store-types'
 import { isDevMode } from '../../platform/dev-mode'
+// [btw-question D5/AU1] 查看态豁免源：drawer 域公开 barrel（AC10 包名单层放行；drawer
+// 域不回指 chat，无域间环）。装配进 LruEvictDeps.viewedVids——evictIfNeeded 入口对
+// viewed 中非虚拟成员（正在查看的 btw 线）刷新 recency，查看中不落阈值驱逐。
+import { getViewedVids } from '@taiji/core/domain/drawer'
 
 /**
  * pendingBuffer 单项（m1 数据层，steer/follow-up 暂存）。
@@ -294,14 +298,15 @@ function restoreRespawnNotices(partition: Message[], merged: Message[]): Message
  * 构造 chat 域全部 state + actions。factory 模式与归位历史见 ./README.md。
  * 内部用 onScopeDispose（清 timer），调用方需在 effectScope 上下文内执行本 factory。
  *
- * [B9 agentcall LRU 联动] options.agentCallEvictionsOf：主 session LRU 驱逐时查询应联动
- * 释放的 agentcall 虚拟分区（豁免已由实现侧应用）。renderer 装配点
+ * [B9 agentcall LRU 联动] options.agentCallEvictionsOf：主 session 或 btw 分区 LRU 驱逐时
+ * 查询应联动释放的 agentcall 虚拟分区（豁免已由实现侧应用；形参 = 被驱逐 sid 原形态——
+ * 主会话 mainSid / btw 线 vid，D9③/M2-c 两形态共用同一回调）。renderer 装配点
  * （stores/chat.ts → composables/features/chat/agentcall-lru-linkage.ts）注入 workflow
  * store 映射 ∖ viewedVids 组合查询；缺省不联动（core 单测 / 无装配环境保持旧行为）。
  * 依赖方向：core 不 import renderer store，回调经参数注入（对齐 LruEvictDeps 模式）。
  */
 export interface ChatStoreOptions {
-  /** [B9] 查询主 session 名下应联动释放的 agentcall virtualId（豁免已应用）；见 LruEvictDeps.agentCallEvictionsOf */
+  /** [B9] 查询被驱逐 sid（mainSid / btw 线 vid）名下应联动释放的 agentcall virtualId（豁免已应用）；见 LruEvictDeps.agentCallEvictionsOf */
   agentCallEvictionsOf?: (mainSid: string) => string[]
 }
 
@@ -563,6 +568,9 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     },
     // [B9] agentcall 联动驱逐查询（renderer 装配注入；缺省空数组 = 不联动）
     options.agentCallEvictionsOf,
+    // [D5/AU1] 查看态豁免源（drawer control getViewedVids）：evictIfNeeded 入口对
+    // viewed 中非虚拟成员（正在查看的 btw 线）刷新 recency → 查看中不落阈值驱逐
+    getViewedVids,
   )
   /** W3 H3：LRU 驱逐（阈值触发）/ 显式驱逐（带虚拟 key）/ [M7] 单虚拟 key 删除 */
   function evictIfNeeded(): void { lruEvictIfNeeded(lruEvictDeps) }

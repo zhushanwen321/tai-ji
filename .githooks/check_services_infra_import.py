@@ -25,9 +25,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SERVICES_ROOT = PROJECT_ROOT / "packages/runtime/src/services"
 
-# 受控例外：文档登记四类 + 现状基线（见 docstring）
-ALLOWED_MODULES = {
-    # 文档登记（runtime-layering「跨切面例外」）
+# 受控例外分两个语义集合（S2②：集合拆分使「文档登记 ↔ runtime-layering §3 表行」可机器对账，
+# 对账器 = check-layering-registry-sync.py，双向漂移即红——MF-5-1 形态的守卫化收口）：
+# DOCUMENTED_MODULES = runtime-layering.md §3「跨切面例外」表登记的模块（增删须同步 §3 表）
+# BASELINE_MODULES = 现状基线债（不在 §3 表，待 ports 收编，见 docstring）
+DOCUMENTED_MODULES = {
+    # 文档登记（runtime-layering「跨切面例外」§3 表行 ①②③③b-③f）
     "logger",
     "pi-paths",
     "git-status-parser",
@@ -42,6 +45,30 @@ ALLOWED_MODULES = {
     # reject），2026-09-11 随 E 组恢复链落地列入（同 crash-journal 裁决：port 只增加无意义
     # 间接层）
     "mem-pressure",
+    # crash-correlation：崩溃时刻机器面只读取证查询（crash-forensics-and-watchdog 设计 D10，
+    # 2026-09-20 连坐崩溃实证后落地），mem-pressure 同款横切关注点——无业务语义、无状态、
+    # 只读（ps 进程表 + log show 系统日志，spawn-env-boundary 白名单豁免的同族只读探测）、
+    # best-effort 永不 reject（无 sink 不采样）；session-service pi crash 台账行消费
+    # captureMachinePiDigest（同 mem-pressure 由 D 系列消费先例）
+    # 登记同步见 docs/architecture/runtime-layering.md §3 ③f
+    "crash-correlation",
+    # git-repo-resolver（2026-09-17）：无状态只读 walk-up 路径解析（fs 只读遍历，无副作用、
+    # 查询不 reject），同 mem-pressure 裁决形态——IGitRepoResolver port 已存在且注入可用，
+    # value import 仅为注入缺省实例服务（repo-observer sharedRepoObserver 单例 +
+    # git-state-service fallback 两处构造点），为此定义 factory port 只增加无意义间接层。
+    # 登记同步见 docs/architecture/runtime-layering.md §3 ③d
+    "git-repo-resolver",
+    # argv-redact（2026-09-19，模式体系 argv 脱敏）：kernel 类纯函数（无状态、无 IO、无副作用，
+    # 纯字符串/数组遮蔽），services 侧消费方仅 reap-orphan-pi 的 crash journal 摘要出口——
+    # 「日志回显前蔽值」属 logger 类横切关注点，与 crash-journal / mem-pressure 同裁决形态：
+    # 为它定义 port 只会增加无意义间接层（遮蔽是写日志的前置纯变换，非可替换的 IO 能力）。
+    "argv-redact",
+# 登记同步见 docs/architecture/runtime-layering.md §3 ③e
+    
+}
+
+# 现状基线债（不在 §3 表；每项的裁决注释保留原位，待 ports 收编后移除）
+BASELINE_MODULES = {
     # 现状基线（2026-08-22，待专项治理收编或正式豁免）
     "session-file-utils",
     "session-entry-mapper",
@@ -59,18 +86,10 @@ ALLOWED_MODULES = {
     # terminal-service / plugin-host-process 消费 buildOutboundChildEnv 组装子进程 env
     # （env-propagation-boundary 设计 C-proc-09），同族随 R3 收编
     "spawn-env",
-    # git-repo-resolver（2026-09-17）：无状态只读 walk-up 路径解析（fs 只读遍历，无副作用、
-    # 查询不 reject），同 mem-pressure 裁决形态——IGitRepoResolver port 已存在且注入可用，
-    # value import 仅为注入缺省实例服务（repo-observer sharedRepoObserver 单例 +
-    # git-state-service fallback 两处构造点），为此定义 factory port 只增加无意义间接层
-    "git-repo-resolver",
-    # argv-redact（2026-09-19，模式体系 argv 脱敏）：kernel 类纯函数（无状态、无 IO、无副作用，
-    # 纯字符串/数组遮蔽），services 侧消费方仅 reap-orphan-pi 的 crash journal 摘要出口——
-    # 「日志回显前蔽值」属 logger 类横切关注点，与 crash-journal / mem-pressure 同裁决形态：
-    # 为它定义 port 只会增加无意义间接层（遮蔽是写日志的前置纯变换，非可替换的 IO 能力）。
-    # 登记同步见 docs/architecture/runtime-layering.md §3 ③e
-    "argv-redact",
 }
+
+# 守卫判定用并集（行为与拆分前一致）
+ALLOWED_MODULES = DOCUMENTED_MODULES | BASELINE_MODULES
 
 # value import 行（import { X } from '...infra/...'；import type 豁免）
 IMPORT_RE = re.compile(r"""^\s*import\s+\{[^}]*\}\s+from\s+['"]([^'"]*infra/[^'"]+)['"]""", re.MULTILINE)

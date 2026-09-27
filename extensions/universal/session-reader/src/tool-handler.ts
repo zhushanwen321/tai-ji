@@ -4,16 +4,18 @@
  * 分层约定（同 scheduler/cw-tool）：本文件零 pi 依赖——agentDir 作参数注入，
  * 不调用 getAgentDir()，可完全单测；pi 注册与 getAgentDir() 调用在 index.ts。
  *
- * 按 action 分发到 11 条路径，串联 M1 core（parser/tree/turns/render）+ M2 discovery
+ * 按 action 分发到 11 条路径，串联基座解析（session-core parse）+ M1 core（tree/turns/render）+ M2 discovery
  *（find/subagents）+ doctor 的环境判定与根表渲染（u8，discovery/env）。content 给 LLM
  * 读（人类可读摘要），details 供程序化消费/测试断言。
  *
  * 域模块拆分（max-lines 拆分轮机械提取，零行为变更，result-action.ts 先例同型）：
  *   result-action.ts（result）/ doctor.ts（doctor + SessionReadSignals）/
  *   search-across.ts（search 管线 + u12 跨会话）/ extract.ts（extract 预设）/
- *   no-match.ts（F1 自检行）/ handler-utils.ts（pad/err/stripHash/requireStr/
- *   SESSION_ID_PREFIX_LEN/turn 索引解析低层小工具）。
- * 本模块保留公共类型、定位解析（resolveSessionId）、各 action 编排与共享渲染；
+ *   tool-format.ts（各 action 输出文本渲染 + 错误面 message + F2 消歧与
+ *   find 零匹配包装）/ no-match.ts（F1 自检行）/ zcode-anchor-classify.ts（entry
+ *   兜底归因的 entry 级纯判定）/ handler-utils.ts（pad/err/
+ *   stripHash/requireStr/SESSION_ID_PREFIX_LEN/turn 索引解析低层小工具）。
+ * 本模块保留公共类型、定位解析（resolveSessionId）、zcode 读链与各 action 编排；
  * 域模块符号不经此 re-export——从所属域模块直接 import（唯一例外 SessionReadSignals：
  * 本模块 re-export 供 index.ts 生产消费）。
  *
@@ -23,38 +25,43 @@
  * 例外：F2 多匹配与 F1 find 零匹配「不视为错误」，返回消歧/提示结果而非抛错。
  */
 import { existsSync } from 'node:fs'
-import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
+import { getLogger } from '@zhushanwen/pi-extension-logger'
+import { convertZcodeTranscript, openZcodeSessionDb } from '@zhushanwen/zcode-session-source'
 import {
+  buildSessionFileIndex,
   findSessions,
   type MatchedSession,
   type SessionMetadataEntry,
   type SessionMetadataProvider,
 } from './discovery/find.js'
-import { resolveSessionRoots, type SessionRoot } from './discovery/roots.js'
+import { resolveSessionRoots } from './discovery/roots.js'
 import { readSessionHeaderIdSync } from './discovery/session-header.js'
+import { findZcodeEntryAnchor, type ZcodeAnchor } from './discovery/entry-anchor.js'
+import {
+  listZcodeManifests,
+  readZcodeManifest,
+  type ZcodeAnchorMissingReason,
+} from './discovery/zcode-manifest.js'
+import { assertZcodeDbPathAllowed } from './discovery/whitelist.js'
 import {
   buildFamilyFromFs,
   listRecordManifests,
   type RecordManifest,
 } from './discovery/subagents.js'
 import { readRunSnapshot, resolveWorkflows } from './discovery/workflows.js'
-import { parseSessionFile, type Entry, type ParseResult } from './core/parser.js'
+import {
+  parseSessionContent,
+  parseSessionFile,
+  type ParseResult,
+} from '@zhushanwen/session-core'
 import { parseRunSnapshot, renderWorkflowOverview, type WorkflowOverview } from './core/workflow.js'
 import { buildTreeView } from './core/tree.js'
 import { segmentTurns } from './core/turns.js'
-import {
-  renderOutline,
-  renderExpand,
-  renderDetail,
-  formatBytesMarker,
-  type OutlineOptions,
-  type OutlineResult,
-  type EntryBrief,
-  type ToolResultSummaryEntry,
-} from './core/render.js'
+import { renderOutline, renderExpand, renderDetail, type OutlineOptions } from './core/render.js'
 import type { Family, SessionRef, WorkflowRef } from './core/family.js'
 import { doResult } from './result-action.js'
 
@@ -95,10 +102,40 @@ import {
   extractUserMessages,
   type ExtractWhat,
 } from './extract.js'
+// 同轮拆分的渲染域模块（format* 纯函数簇，含 zcode 错误面 message 与
+// zcodeReadErrorMessage 错误映射）：运行时依赖方向本模块 → tool-format，
+// tool-format 对本模块仅 type import（ToolResult），无循环。
+import {
+  disambiguate,
+  entryReadableText,
+  findNoMatch,
+  formatDetailText,
+  formatExpandText,
+  formatFamilyText,
+  formatFindContent,
+  formatOutlineTail,
+  formatSaIdAmbiguous,
+  formatSaIdNotFound,
+  formatSessionGc,
+  formatZcodeAnchorMissing,
+  formatZcodeParamInvalid,
+  formatZcodeRecordNotFound,
+  formatZcodeSessionNotFound,
+  isToolResultSummary,
+  zcodeReadErrorMessage,
+} from './tool-format.js'
 import { doDoctor, type SessionReadSignals } from './doctor.js'
+// entry 兜底归因的 entry 级判定（同目录域模块，零 I/O 纯函数，复杂度偿还提取）。
+import { firstIncompleteAnchorReason } from './zcode-anchor-classify.js'
 
 // SessionReadSignals re-export 是生产链（index.ts 工具注册消费），非测试兼容转发。
 export type { SessionReadSignals }
+
+// zcode 读链的结构化日志（「事后排查」通道：degradations 留痕 / L2-L3 恢复成功 /
+// anchor-missing 归因——§3.4 可观测性 + P2 降级隔离契约 F13，均不进 LLM 可见面）。
+// pi handle 由 index.ts 初始化时 setPiHandle 注入（appendEntry 通道）；未注入时
+// warn/error 降级文件日志，双开关缺省 no-op（纯 pi 独立用户零行为影响）。
+const logger = getLogger('session-reader')
 
 // ---------------------------------------------------------------------------
 // 公共类型（与 index.ts 的 TypeBox schema 对齐）
@@ -156,39 +193,31 @@ export interface ToolResult {
 }
 
 // ---------------------------------------------------------------------------
-// 小工具
-// ---------------------------------------------------------------------------
-
-/** formatDate 日期段（月/日）补零宽度。 */
-const DATE_FIELD_WIDTH = 2
-
-function formatDate(ms: number): string {
-  if (!ms) return ''
-  const d = new Date(ms)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(DATE_FIELD_WIDTH, '0')}-${String(
-    d.getDate(),
-  ).padStart(DATE_FIELD_WIDTH, '0')}`
-}
-
-/** shortCwd 保留的目录末段数。 */
-const SHORT_CWD_SEGMENTS = 2
-
-/** cwd 取末两段缩短显示（完整 cwd 在 details 里）。 */
-function shortCwd(cwd: string): string {
-  const parts = cwd.split('/').filter(Boolean)
-  return parts.slice(-SHORT_CWD_SEGMENTS).join('/')
-}
-
-// ---------------------------------------------------------------------------
 // resolveSessionId：片段 → 完整 id（design §3.4 resolveSessionId 辅助）
 // ---------------------------------------------------------------------------
 
 export type ResolveResult =
-  | { kind: 'ok'; sessionId: string; fileName: string }
+  | {
+      kind: 'ok'
+      sessionId: string
+      /**
+       * 内容源路径。pi = session .jsonl 绝对路径；zcode 路由命中（非 family）= 会话库
+       * .sqlite 绝对路径（loadParsed 按 zcodeAnchor 分流，safeParse 不会以此路径开
+       * JSONL）；zcode family 路由 = rootSessionId 反查的 .jsonl 路径（反查未命中为
+       * 空串——仅作树构建 sessionFile 用途，buildExecutionTree 侧归一为 undefined）。
+       */
+      fileName: string
+      /**
+       * zcode 锚（U9 路由命中时在场）：内容加载走 zcode 读链（白名单闸 →
+       * openZcodeSessionDb → convertZcodeTranscript），pi 路径恒 undefined——
+       * 可选字段不改变既有消费方的 pi 行为（toEqual 语义下 undefined 键不可见）。
+       */
+      zcodeAnchor?: ZcodeAnchor
+    }
   | { kind: 'multi'; query: string; candidates: MatchedSession[] }
 
 // readSessionHeaderIdSync（同步读首行 header 取 id，resolveSessionId 形态①/②消费）
-// 在 discovery/session-header.ts（D5 单源，sync 4KB 版原样搬入）。
+// 在 discovery/session-header.ts（基座 readFirstJsonlLineSync 的谓词/降级薄包装，G2 单源）。
 
 /** ~ 前缀（home 目录简写），与 expandHome 配套避免 magic number。 */
 const HOME_TILDE_PREFIX = '~/'
@@ -231,13 +260,159 @@ async function resolveSessionId(
     return resolveBySessionPath(session)
   }
 
-  // ② sa-id 前缀 → record manifest 精确反查
+  // ② sa-id 前缀 → zcode 路由（§3.5 定位链，U9）前置，pi 现路径零改动地在其中承接
   if (session.startsWith('sa-')) {
-    return resolveByRecordId(session, agentDir, prefetchedManifests)
+    return resolveSaIdRoute(session, agentDir, prefetchedManifests, action, liveSessionDir)
+  }
+
+  // §3.4 第 0 段：sess_ 形态 id 无第一梯队直读入口（agent 从不持有 sess id，F14；
+  // 且无 zcode 候选发现，D6）→ zcode_param_invalid。pi 的 session id 是 uuid（无
+  // sess_ 前缀），此检测只改变错误输入的错误面文案。
+  if (session.startsWith('sess_')) {
+    throw err(formatZcodeParamInvalid(session))
   }
 
   // ③ 其余：findSessions 透传 source/liveSessionDir 沿用 F1/F2
   return resolveByFragment(session, agentDir, source, liveSessionDir)
+}
+
+/**
+ * sa- 形态的路由前置（U9，design §3.5 三层定位链；**不加任何工具参数**，D4——
+ * 判别源 = manifest 自带 engine 字段）：
+ *
+ * ① zcode manifest 直读（`readZcodeManifest`，文件名由 sa-id 确定性推出，窄 walk
+ *   命中即止）：`{kind:'zcode'}` → zcode 读链；`{kind:'anchor-missing'}` →
+ *   `zcode_anchor_missing`。
+ * ② `{kind:'not-zcode'}` → **pi 现路径零改动承接**：pi manifest 有命中即走既有
+ *   `resolveByRecordId`（engine 缺省/'pi' 形态，行为与今天逐字节一致）。
+ * ③ pi 无命中（今天此处直接 ES2）→ entry 兜底（§3.5 第②层，仅 liveSessionDir 内，
+ *   越界显式失败）：命中 → zcode 读链；未命中 → `zcode_record_not_found` + 👉
+ *  （§3.4：sa-id 语境的统一错误面——F14 agent 唯一持有的 id 就是 sa-id，指引动作
+ *   覆盖除 find 指针外的全部恢复路径（find 按 §3.4 刻意不保留）。
+ */
+async function resolveSaIdRoute(
+  session: string,
+  agentDir: string,
+  prefetchedManifests: RecordManifest[] | undefined,
+  action: SessionReadAction,
+  liveSessionDir: string | undefined,
+): Promise<ResolveResult> {
+  const zm = await readZcodeManifest(agentDir, session)
+  if (zm.kind === 'anchor-missing') {
+    // 归因进结构化日志不进 LLM 可见面（§3.4）：reason 逐键归因（missing-engineHandle /
+    // missing-sessionRef / missing-sessionId / missing-dbPath，见 zcode-manifest.ts）
+    logger.warn('zcode manifest anchor-missing', { saId: session, reason: zm.reason })
+    throw err(formatZcodeAnchorMissing(session))
+  }
+  if (zm.kind === 'zcode') {
+    return resolveZcodeRoute(session, zm.anchor, agentDir, action, liveSessionDir)
+  }
+  // not-zcode：pi manifest 命中 → 现路径（同一 manifests 传入，不二次扫描）
+  const manifests = prefetchedManifests ?? (await listRecordManifests(agentDir))
+  if (manifests.some((m) => m.id === session)) {
+    return resolveByRecordId(session, agentDir, manifests)
+  }
+  // entry 兜底（§3.5 第②层）：候选 = liveSessionDir 内主 session 文件（第一梯队
+  // 只在 liveSessionDir 内做，根内全扫不做——越界显式失败）
+  const candidates = await liveSessionCandidateFiles(agentDir, liveSessionDir)
+  const anchor = await findZcodeEntryAnchor(candidates, session)
+  if (anchor === undefined) {
+    // 兜底失败的两类归因（§3.4 第 0 段，场景 5 ②）：候选里有该 sa-id 的 record entry
+    // 但锚不完整 → zcode_anchor_missing（缺失键名进结构化日志——engineHandle 整体
+    // 缺席/缺 sessionId/缺 dbPath 归因不同）；完全无该 sa-id → zcode_record_not_found。
+    // findZcodeEntryAnchor 契约是「锚或 not-found」不分归因，分类只在罕见失败路径补
+    // 一次形态判定。
+    const incomplete = await classifyIncompleteEntryAnchor(candidates, session)
+    if (incomplete !== undefined) {
+      logger.warn('zcode entry anchor incomplete', { saId: session, reason: incomplete })
+      throw err(formatZcodeAnchorMissing(session))
+    }
+    throw err(formatZcodeRecordNotFound())
+  }
+  return resolveZcodeRoute(session, anchor, agentDir, action, liveSessionDir)
+}
+
+/**
+ * 候选文件里该 sa-id 的 `subagent-record` entry 若「在场但锚不完整」，返回缺失归因
+ *（§3.4 zcode_anchor_missing 的 entry 形态触发 + 日志归因；记录完全不在场返回
+ * undefined）。entry 级判定（五关过滤 + D5 engine 判别 + 锚完整性链）在
+ * zcode-anchor-classify.ts 的 firstIncompleteAnchorReason，本函数只做文件扫描 I/O
+ *（读失败跳过该文件，首个命中归因即终止扫描）。
+ */
+async function classifyIncompleteEntryAnchor(
+  candidateFiles: readonly string[],
+  saId: string,
+): Promise<ZcodeAnchorMissingReason | undefined> {
+  for (const file of candidateFiles) {
+    let content: string
+    try {
+      content = await readFile(file, 'utf8')
+    } catch {
+      continue
+    }
+    const reason = firstIncompleteAnchorReason(parseSessionContent(content).entries, saId)
+    if (reason !== undefined) return reason
+  }
+  return undefined
+}
+
+/** liveSessionDir 内的主 session 文件（entry 兜底候选；无 live 信号 → 空集=越界失败）。 */
+async function liveSessionCandidateFiles(
+  agentDir: string,
+  liveSessionDir: string | undefined,
+): Promise<string[]> {
+  if (liveSessionDir === undefined || liveSessionDir === '') return []
+  const roots = await resolveSessionRoots({ agentDir, liveSessionDir })
+  return roots.filter((r) => r.kind === 'live').flatMap((r) => r.files.map((f) => f.path))
+}
+
+/**
+ * zcode 锚 → ResolveResult（路由命中后的 action 分叉）：
+ * - family：以**发起 session（rootSessionId）**为家族视图入口——zcode 会话无 JSONL
+ *   文件，buildFamilyFromFs 的 byId 索引查不到锚 sessionId；zcode 节点按 rootSessionId
+ *   挂载（D5-1），rootSessionId 视图即「该 subagent 的后代与关联」（§3.4 指引语义）。
+ *   rootSessionId 取自 `listZcodeManifests` 枚举（readZcodeManifest 直读信号只携带锚，
+ *   不携带 rootSessionId——family 是低频 action，枚举一次可接受）。fileName 按完整
+ *   rootSessionId 反查其 .jsonl 路径回填（MF-1 链路：recursive 树 main root 填
+ *   sessionFile 后才能读到该 session 自身发起的 workflow run）；反查未命中（文件已
+ *   GC）回退空串（buildExecutionTree 侧归一为 undefined，树退化为无 sessionFile
+ *   root，不伪造路径）。
+ * - 其余 action：sessionId = 锚会话 id、fileName = 锚库路径（内容源），zcodeAnchor
+ *   在场使 loadParsed 分流到 zcode 读链。
+ */
+async function resolveZcodeRoute(
+  saId: string,
+  anchor: ZcodeAnchor,
+  agentDir: string,
+  action: SessionReadAction,
+  liveSessionDir: string | undefined,
+): Promise<ResolveResult> {
+  if (action === 'family') {
+    const zcodeNodes = await listZcodeManifests(agentDir)
+    const rootSessionId = zcodeNodes.find((n) => n.id === saId)?.rootSessionId
+    // 枚举未含该 id（直读命中与枚举之间 manifest 被迁移的极端窗口）→ 退回锚 sessionId，
+    // 后续 byId 查不到走既有 not-found 错误面（不静默伪造家族）
+    if (rootSessionId === undefined) {
+      return { kind: 'ok', sessionId: anchor.sessionId, fileName: '' }
+    }
+    const rootFile = await findSessionFileById(rootSessionId, agentDir, liveSessionDir)
+    return { kind: 'ok', sessionId: rootSessionId, fileName: rootFile ?? '' }
+  }
+  return { kind: 'ok', sessionId: anchor.sessionId, fileName: anchor.dbPath, zcodeAnchor: anchor }
+}
+
+/**
+ * 按完整 session id 反查其 .jsonl 路径（zcode family 路由回填 fileName 用）。
+ * 单次根扫描建 id→path 索引（u12 既有管线，同 id 多根取 mtime 新者）；未命中
+ *（文件已 GC / 根外）→ undefined，调用方自行降级。
+ */
+async function findSessionFileById(
+  sessionId: string,
+  agentDir: string,
+  liveSessionDir: string | undefined,
+): Promise<string | undefined> {
+  const index = await buildSessionFileIndex({ agentDir, liveSessionDir })
+  return index.get(sessionId)?.path
 }
 
 /** 形态①：绝对路径 / ~ 前缀 → 展开后读首行 header，sessionId=header 真实 id（文件名仅定位）。 */
@@ -319,54 +494,77 @@ async function resolveByFragment(
   return { kind: 'multi', query: session, candidates: matches }
 }
 
-/** ES1（SESSION_FILE_GC）：sa-id 恰 1 命中但 sessionFile 不存在（GC/未写入）。含 manifest 元数据 + 👉。 */
-function formatSessionGc(record: RecordManifest): string {
-  return (
-    `subagent "${record.id}" 的 session 文件不存在（可能已被 GC 或未写入）：\n` +
-    `  rootSessionId: ${record.rootSessionId}\n` +
-    `  agentName: ${record.agentName ?? '(未记录)'}\n` +
-    `  sessionFile: ${record.sessionFile}\n` +
-    `👉 改用 session_read { action:"family" } 查该 subagent 的后代，或换一个 completed subagent 重试。`
-  )
+// ---------------------------------------------------------------------------
+// zcode 读链（U9，design §3.5：白名单闸在开库前——dbPath 来自 session 数据不可信）
+// ---------------------------------------------------------------------------
+
+/**
+ * zcode 锚 → ParseResult（既有 turns/render 管线的统一内容入口）。
+ *
+ * 检查顺序三段递进（§3.4，实现与测试双锚定）：第 1 段存在性 → 第 2 段路径闸
+ * （whitelist.ts）→ 第 3 段开库与查询（四级恢复阶梯 + schema 已知集闸门在
+ * openZcodeSessionDb 单点）。读库发生在 ext 进程内（§3.5 关键论断），不经 taiji。
+ */
+async function loadZcodeParsed(anchor: ZcodeAnchor, agentDir: string): Promise<ParseResult> {
+  assertZcodeDbPathAllowed(anchor.dbPath, agentDir)
+  let handle: Awaited<ReturnType<typeof openZcodeSessionDb>>
+  try {
+    handle = await openZcodeSessionDb(anchor.dbPath)
+  } catch (e) {
+    throw err(zcodeReadErrorMessage(e, agentDir))
+  }
+  try {
+    // 恢复成功不再是静默事件（§3.4 硬要求）：结构化日志（恢复方式 + db 路径），不进
+    // LLM 可见面。用 warn 而非 debug——L2/L3 是恢复降级路径，语义表 warn=内部降级与
+    // 失败（appendEntry 持久化）；debug 缺省 no-op 会让恢复成功重新变回静默事件。
+    if (handle.via !== 'L1-direct') {
+      logger.warn('zcode session db recovered via recovery ladder', {
+        dbPath: anchor.dbPath,
+        via: handle.via,
+      })
+    }
+    const row = handle.db.getSessionRow(anchor.sessionId)
+    if (row === undefined) {
+      throw err(formatZcodeSessionNotFound())
+    }
+    const transcript = handle.db.getSessionTranscript(anchor.sessionId)
+    const normalized = convertZcodeTranscript(transcript, {
+      id: anchor.sessionId,
+      title: row.title,
+      timeCreated: row.timeCreated,
+    })
+    if (normalized.degradations.length > 0) {
+      // P2 契约（F13）：明细只进日志；压缩点以 custom entry 形态在 detail 可见
+      logger.warn('zcode session conversion degraded', {
+        sessionId: anchor.sessionId,
+        dbPath: anchor.dbPath,
+        degradations: normalized.degradations,
+      })
+    }
+    // ParseResult 形状对齐：zcode 库读无「文件字节/坏行」概念（strict Entry 树已由
+    // converter 保证），totalBytes/skippedLines 恒 0
+    return { entries: normalized.entries, totalBytes: 0, skippedLines: 0, lastLinePartial: false }
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('[zcode_')) throw e // 本函数产出的错误面原样传播
+    throw err(zcodeReadErrorMessage(e, agentDir))
+  } finally {
+    handle.dispose()
+  }
 }
 
-/** ES2（SA_ID_NO_MATCH）：sa-id 无精确匹配（可能仍在运行 / 片段输入）。 */
-function formatSaIdNotFound(saId: string): string {
-  return (
-    `subagent "${saId}" 无匹配 record（若刚启动，record 可能尚未落盘）。` +
-    `\n👉 用 session_read { action:"family" } 查活跃/已完成的 subagent；` +
-    `若是片段输入，请用完整 sa- id 或 action:"find" 重试。`
-  )
-}
-
-/** ES2（SA_ID_AMBIGUOUS）：sa-id 多 manifest 命中（数据异常，record.id 应唯一）。 */
-function formatSaIdAmbiguous(saId: string, records: RecordManifest[]): string {
-  return (
-    `subagent "${saId}" 匹配 ${records.length} 个 record（数据异常，record.id 应唯一）：\n` +
-    records
-      .map((r) => `  ${r.id} (root=${r.rootSessionId} file=${r.sessionFile})`)
-      .join('\n') +
-    `\n👉 用 session_read { action:"family" } 或完整 session uuid 重试。`
-  )
-}
-
-/** 消歧提示的 uuid 片段长度（比短显略长，引导输入更长片段消歧）。 */
-const HINT_ID_PREFIX_LEN = 12
-
-/** F2 多匹配消歧结果（不抛错，返回候选 + 👉）。 */
-function disambiguate(query: string, candidates: MatchedSession[]): ToolResult {
-  const lines = candidates.map(
-    (m, i) =>
-      `  ${i + 1}. ${m.sessionId} · ${formatDate(m.mtime)}${m.firstMessagePreview ? ' · ' + m.firstMessagePreview : ''}`,
-  )
-  const hint =
-    candidates[0] !== undefined
-      ? `（如 ${candidates[0].sessionId.slice(0, HINT_ID_PREFIX_LEN)}）`
-      : ''
-  const text =
-    `${candidates.length} 个匹配 "${query}"：\n${lines.join('\n')}\n` +
-    `👉 用更长的 uuid 片段${hint}，或 action:"find" 加 cwd 过滤。`
-  return { content: [{ type: 'text', text }], details: { ambiguous: true, candidates } }
+/**
+ * 内容加载统一入口：zcode 路由命中 → zcode 读链（agentDir 供白名单派生，F11）；pi →
+ * 既有 safeParse（行为零改动）。各 do* 的 safeParse(resolved.fileName) 消费点统一换
+ * 此函数（pi 输出逐字节不变——zcodeAnchor 缺省即原路径）。
+ */
+async function loadParsed(
+  resolved: Extract<ResolveResult, { kind: 'ok' }>,
+  agentDir: string,
+): Promise<ParseResult> {
+  if (resolved.zcodeAnchor !== undefined) {
+    return loadZcodeParsed(resolved.zcodeAnchor, agentDir)
+  }
+  return safeParse(resolved.fileName)
 }
 
 // ---------------------------------------------------------------------------
@@ -383,237 +581,12 @@ async function safeParse(fileName: string): Promise<ParseResult> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 文本渲染（content）
-// ---------------------------------------------------------------------------
-
-/**
- * find 分组渲染的单组数据（u10，design 2026-09-10 §6.7 子决策 2）。
- * main 组恒在 groups 首位（置顶），编号跨组连续。
- */
-interface FindGroup {
-  source: 'main' | 'subagent'
-  /** 配额切片后实际展示的候选 */
-  shown: MatchedSession[]
-  /** 溢出：该组命中数 > shown.length（+1 探测；溢出时精确总数未知，只知更多） */
-  overflow: boolean
-}
-
-/**
- * find 输出渲染（u10 分组版，design §5.1 形态 + §6.7 子决策 2/3 精确规格）：
- *
- * - 按 source 分组、main 段置顶（subagent 噪声不淹没目标），组头标注各组命中数，
- *   组内编号跨组连续（§5.1 示例：subagent 段从 main 段末尾续号）。
- * - 候选行打印完整 sessionId（废除 8 字符截断——agent 拿到截断 id 无法粘回做精确调用，
- *   §3.2 失败模式 D）。SESSION_ID_PREFIX_LEN 常量本体与 result 通路不动（§6.7 范围声明）。
- * - 每条 main 候选附一行可直接复制执行的 outline 调用串（↳，§6.7 子决策 3）；
- *   subagent 候选不附（噪声不配指针）。
- * - 候选行末段文本：标题优先（u11，name 来自 SessionManager.listAll，§5.1 形态
- *   「… · 福耀玻璃深度研究」），无标题回退首消息预览（现状行为）。
- * - truncated 按**合并总量**（命中总数 vs 实际输出数）计算，由调用方传入，此处只负责标注。
- * - subagent 段超配额折叠为一行展开提示（加 source:"subagent" 查看）；main 段溢出
- *   仅在组头标注（规格的折叠提示只针对 subagent）。
- */
-function formatFindContent(query: string, groups: FindGroup[], truncated: boolean): string {
-  const shown = groups.flatMap((g) => g.shown)
-  const head = `${shown.length} session(s) matched "${query}"${
-    truncated ? ` (truncated, showing first ${shown.length})` : ''
-  }`
-  const lines: string[] = []
-  let index = 0
-  for (const g of groups) {
-    lines.push('')
-    if (g.overflow && g.shown.length === 0) {
-      // main 占满配额、subagent 有命中但 0 条展示（§6.7：「subagent 段为 0 条仅显示计数」；
-      // 命中总数须全量深读首条 user 才能精确计数，recent 形态下 IO 不可接受，只报有命中）
-      lines.push(`${g.source}（有命中未显示——展示配额已被 main 占满）：`)
-    } else if (g.overflow) {
-      lines.push(`${g.source}（>${g.shown.length} 条命中，显示前 ${g.shown.length} 条）：`)
-    } else {
-      lines.push(`${g.source}（${g.shown.length} 条命中）：`)
-    }
-    for (const m of g.shown) {
-      index += 1
-      const parts = [`${index}. ${m.sessionId}`, formatDate(m.mtime)]
-      if (m.cwd) parts.push(shortCwd(m.cwd))
-      if (m.name) parts.push(m.name)
-      else if (m.firstMessagePreview) parts.push(m.firstMessagePreview)
-      lines.push(`  ${parts.join(' · ')}`)
-      if (g.source === 'main') {
-        lines.push(`     ↳ session_read { action:"outline", session:"${m.sessionId}" }`)
-      }
-    }
-    if (g.overflow && g.source === 'subagent') {
-      lines.push('  … 另有 subagent 命中未显示。👉 加 source:"subagent" 查看')
-    }
-  }
-  return `${head}\n${lines.join('\n')}`
-}
-
-/**
- * outline 尾段（stats 摘要行 + truncated 提示）。E7/D3 行渲染统一：行主体 = result.lines
- *（renderOutline 返回的渲染行，预算度量与展示同一份），行格式知识只在 core/render.ts 的
- * formatLine 一处，tool-handler 不再重建行格式；本函数只拼 stats 尾段（skippedLines 由
- * doOutline 用 ParseResult 覆盖后再渲染）。doOutline/doExport 同一拼装
- * （`lines.join('\n')` + 本尾段），两 action 输出一致 by construction。
- */
-function formatOutlineTail(r: OutlineResult): string {
-  const tail = [
-    `${r.stats.totalTurns} turns · ${r.stats.totalEntries} entries · ~${r.tokenEstimate} tokens${
-      r.stats.skippedLines > 0 ? ` · ${r.stats.skippedLines} skipped lines` : ''
-    }`,
-    r.truncated ? `[还有 ${r.truncated} 轮未显示，用 detail 的 turns 参数看指定 turn 范围]` : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
-  return tail
-}
-
-function formatExpandText(turn: string, entries: EntryBrief[]): string {
-  const lines = entries.map(
-    (e) =>
-      `  [${e.index}] ${e.type}${e.role ? '/' + e.role : ''} ${e.brief}${
-        e.omittedBytes > 0 ? ' ' + formatBytesMarker(e.omittedBytes) : ''
-      }`,
-  )
-  return `${turn}\n${lines.join('\n')}`
-}
-
-/** 从 message.content 提取可读文本（text/thinking 块；toolCall 留 name 占位）。 */
-function messageReadableText(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    return content
-      .map((b) => {
-        if (b && typeof b === 'object') {
-          const o = b as Record<string, unknown>
-          if (o.type === 'text' && typeof o.text === 'string') return o.text
-          if (o.type === 'thinking' && typeof o.thinking === 'string') return `[thinking] ${o.thinking}`
-          if (o.type === 'toolCall')
-            return `[toolCall: ${typeof o.name === 'string' ? o.name : '?'}]`
-        }
-        return ''
-      })
-      .filter(Boolean)
-      .join('\n')
-  }
-  return ''
-}
-
-/**
- * ToolResultSummaryEntry 判别（Entry.type 是宽 string，TS 无法靠 === 判别联合，须显式谓词收窄）。
- */
-function isToolResultSummary(
-  e: Entry | ToolResultSummaryEntry,
-): e is ToolResultSummaryEntry {
-  return e.type === 'toolResultSummary'
-}
-
-/**
- * 从 message.content 提取可读文本（text/thinking 块；toolCall 留 name 占位）。
- * v2 O3：接受 Entry | ToolResultSummaryEntry，toolResultSummary 返摘要文本（doExport full 用）。
- */
-function entryReadableText(e: Entry | ToolResultSummaryEntry): string {
-  if (isToolResultSummary(e)) {
-    return `${e.summary} (共 ${e.totalLines} 行，前 3 行：${e.headLines})`
-  }
-  const msg = e.message
-  if (msg !== undefined) {
-    if (msg.role === 'toolResult') return `[toolResult] ${messageReadableText(msg.content)}`
-    return messageReadableText(msg.content)
-  }
-  if (e.type === 'compaction')
-    return `[compaction] ${typeof e.summary === 'string' ? e.summary : JSON.stringify(e.summary ?? '')}`
-  if (e.type === 'custom') return `[custom:${e.customType ?? '?'}]`
-  return `[${e.type}]`
-}
-
-function formatDetailText(
-  range: { start: number; end: number },
-  entries: Array<Entry | ToolResultSummaryEntry>,
-): string {
-  const head = `turns ${rangeLabel(range)} · ${entries.length} entries`
-  const body = entries
-    .map((e) => {
-      if (isToolResultSummary(e)) {
-        // v2 O3：摘要态渲染（summary + 头 3 行 + 看全文提示）
-        return `---\ntoolResultSummary (${e.id.slice(0, SESSION_ID_PREFIX_LEN)})\n${e.summary}\n     │ 共 ${e.totalLines} 行，前 3 行：${e.headLines}\n     │ （+ includeToolResult:true 看全文）`
-      }
-      const role = e.message ? `/${e.message.role}` : ''
-      return `---\n${e.type}${role} (${e.id.slice(0, SESSION_ID_PREFIX_LEN)})\n${entryReadableText(e)}`
-    })
-    .join('\n')
-  return `${head}\n${body}`
-}
-
-/**
- * family subagents 行的 task 摘要截断宽度（D2②：LLM 判断「哪个 subagent 分支相关」所需
- * 的信息量，信息密度对齐 find 的 firstMessagePreview；探针 P4 输出量级锚点）。
- */
-const FAMILY_TASK_RENDER_LIMIT = 60
-
-/**
- * task → 单行摘要：压平空白（task 原文可含换行，换行会破坏 family 输出的行结构）后截断。
- */
-function familyTaskSummary(task: string): string {
-  const flat = task.replace(/\s+/g, ' ').trim()
-  return flat.length <= FAMILY_TASK_RENDER_LIMIT ? flat : flat.slice(0, FAMILY_TASK_RENDER_LIMIT) + '…'
-}
-
-/**
- * subagents 行富字段展示（ext-simplify-04 D2②）：status 终态短标签 + agent 名 + task 摘要。
- * 富字段来自 manifest/identity 组装（SubagentRef，不经 enrichRefs——已删除）；孤儿
- *（cleanedUp）只标 [已清理]，不再展开摘要（已清理即终局，文件 GC 后无深读入口）。
- */
-function formatSubagentLine(s: Family['subagents'][number]): string {
-  const base = `  ${s.sessionId.slice(0, SESSION_ID_PREFIX_LEN)} root=${s.rootSessionId.slice(0, SESSION_ID_PREFIX_LEN)} slug=${s.slug}`
-  if (s.cleanedUp) return `${base} [已清理]`
-  const parts: string[] = []
-  if (s.status) parts.push(`[${s.status}]`)
-  if (s.agentName) parts.push(s.agentName)
-  if (s.task) parts.push(`· ${familyTaskSummary(s.task)}`)
-  return parts.length > 0 ? `${base} ${parts.join(' ')}` : base
-}
-
-function formatFamilyText(f: Family): string {
-  const lines: string[] = []
-  lines.push(`root: ${f.root.sessionId} (${formatDate(f.root.mtime)})`)
-  if (f.parents.length)
-    lines.push(`parents: ${f.parents.map((p) => p.sessionId.slice(0, SESSION_ID_PREFIX_LEN)).join(', ')}`)
-  if (f.forks.length)
-    lines.push(`forks: ${f.forks.map((p) => p.sessionId.slice(0, SESSION_ID_PREFIX_LEN)).join(', ')}`)
-  if (f.subagents.length)
-    lines.push(`subagents:\n${f.subagents.map(formatSubagentLine).join('\n')}`)
-  if (f.workflows.length)
-    lines.push(
-      `workflows:\n${f.workflows
-        .map((w) => `  ${w.runId} (${w.calls.length} calls)`)
-        .join('\n')}`,
-    )
-  return lines.join('\n')
-}
-
 // ===========================================================================
 // 各 action 实现
 // ===========================================================================
 
 /** find action 的默认匹配数上限。 */
 const FIND_DEFAULT_LIMIT = 20
-
-/**
- * find 零匹配：F1 自检行（u9）。计数取本次实扫（无 options 恒实扫——根扫描无缓存，
- * doctor 缓存机已删除，ext-simplify-04 U3），完整信号包保证 [live] 根（最高优先级）
- * 计数可见。
- *
- * E1（ext-simplify-04 §3 D1）：roots 由 doFind 预解析传入——与匹配用同一次实扫
- * （调用方保证无 options），不再独立第三次全量扫盘。
- */
-function findNoMatch(query: string, roots: SessionRoot[]): ToolResult {
-  return {
-    content: [{ type: 'text', text: formatNoMatch(query, roots) }],
-    details: { matches: [], truncated: false },
-  }
-}
 
 /**
  * find：按片段/名称/recent 定位 session（design §3.4 find）。零匹配不抛，返回提示。
@@ -794,7 +767,7 @@ async function doOutline(
     liveSessionDir,
   )
   if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
-  const { entries, totalBytes, skippedLines } = await safeParse(resolved.fileName)
+  const { entries, totalBytes, skippedLines } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
   const opts: OutlineOptions = {
@@ -805,7 +778,7 @@ async function doOutline(
   // 覆盖 stats.totalBytes：render 用 parsedBytes（leaf entry JSON 字节和）近似，
   // 此处用 ParseResult.totalBytes（原始文件字节数，design §3.4 stats.totalBytes 语义）
   result.stats.totalBytes = totalBytes
-  // [D8d] skippedLines 同模式覆盖：parser 已检测坏行计数（render 签名不含 ParseResult 恒 0），
+  // [D8d] skippedLines 同模式覆盖：解析层（session-core parseSessionFile）已检测坏行计数（render 签名不含 ParseResult 恒 0），
   // 有检测必有报告——静默跳过行对调用方不可见 = 数据完整性缺口
   result.stats.skippedLines = skippedLines
   // E7 行渲染统一：行主体 = result.lines（renderOutline 渲染行），handler 只拼 stats 尾段
@@ -831,7 +804,7 @@ async function doExpand(
   )
   if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
   const turnIdx = parseTurnIndex(requireStr(params.turn, 'turn', 'expand'))
-  const { entries } = await safeParse(resolved.fileName)
+  const { entries } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
   const turn = turns.find((t) => t.index === turnIdx)
@@ -864,7 +837,7 @@ async function doDetail(
   )
   if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
   const range = parseTurnsRange(requireStr(params.turns, 'turns', 'detail'))
-  const { entries } = await safeParse(resolved.fileName)
+  const { entries } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
   const max = turns.length - 1
@@ -923,7 +896,7 @@ async function doSearch(
   if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
   const scope = params.scope ?? 'all'
   const limit = params.limit ?? SEARCH_DEFAULT_LIMIT
-  const { entries } = await safeParse(resolved.fileName)
+  const { entries } = await loadParsed(resolved, agentDir)
   const tree = buildTreeView(entries)
   const turns = segmentTurns(entries, new Set(tree.leafPath))
   const regex = compilePattern(pattern)
@@ -970,7 +943,7 @@ async function doExport(
     text = formatFamilyText(family)
     label = 'family'
   } else if (format === 'full') {
-    const { entries } = await safeParse(resolved.fileName)
+    const { entries } = await loadParsed(resolved, agentDir)
     const tree = buildTreeView(entries)
     const turns = segmentTurns(entries, new Set(tree.leafPath))
     const det = renderDetail(turns, {
@@ -987,7 +960,7 @@ async function doExport(
       .join('\n')
     label = 'full'
   } else {
-    const { entries } = await safeParse(resolved.fileName)
+    const { entries } = await loadParsed(resolved, agentDir)
     const tree = buildTreeView(entries)
     const turns = segmentTurns(entries, new Set(tree.leafPath))
     const result = renderOutline(turns, tree, {
@@ -1054,7 +1027,7 @@ async function doExtract(
     liveSessionDir,
   )
   if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
-  const { entries } = await safeParse(resolved.fileName)
+  const { entries } = await loadParsed(resolved, agentDir)
   // extract 遍历全量 entry（含旁支/压缩历史），与 outline/expand/detail 的 leaf 视图不同：
   // 素材提取要全量（design §2.3 实测全量 519 toolCall / 26 user / 515 toolResult），
   // 用 leafPath 过滤会漏掉旁支素材。turn 标注是全量分段 index（含 compaction 周期 + 旁支
@@ -1357,18 +1330,41 @@ export async function handleSessionRead(
       return doExtract(params, agentDir, signals.liveSessionDir)
     case 'workflow':
       return doWorkflow(params, agentDir, signals.liveSessionDir)
-    case 'result':
+    case 'result': {
       // per-call 构造注入面（仅剩 tool-handler 文件私有 helper，纯函数经 handler-utils
       // 直接 import——ext-simplify-04 E5）：resolveSessionId 包装把信号包中的
       // liveSessionDir 闭包进解析调用（ResultActionDeps 接口签名固定 5 参，包装保持
       // 同形、末位补传），result 的片段形态与 find/outline 消费同一 roots
       //（sa-/绝对路径分支在 resolveSessionId 内不受影响）。
+      // U9 zcode 路由：deps.safeParse 只认 fileName 字符串，而 zcode 内容源是库——
+      // per-call Map 按 fileName（=锚库路径）携带锚，safeParse 包装分流到 zcode 读链
+      //（pi 路径 Map 未命中 → 原样 safeParse，行为零变化）。
+      const zcodeByFile = new Map<string, ZcodeAnchor>()
       return doResult(params, agentDir, {
-        resolveSessionId: (rawSession, action, ad, source, prefetchedManifests) =>
-          resolveSessionId(rawSession, action, ad, source, prefetchedManifests, signals.liveSessionDir),
+        resolveSessionId: async (rawSession, action, ad, source, prefetchedManifests) => {
+          const resolved = await resolveSessionId(
+            rawSession,
+            action,
+            ad,
+            source,
+            prefetchedManifests,
+            signals.liveSessionDir,
+          )
+          if (resolved.kind === 'ok' && resolved.zcodeAnchor !== undefined) {
+            zcodeByFile.set(resolved.fileName, resolved.zcodeAnchor)
+          }
+          return resolved
+        },
         disambiguate,
-        safeParse,
+        safeParse: (fileName) => {
+          const anchor = zcodeByFile.get(fileName)
+          if (anchor !== undefined) {
+            return loadZcodeParsed(anchor, agentDir)
+          }
+          return safeParse(fileName)
+        },
       })
+    }
     case 'doctor':
       return doDoctor(params, signals)
     default: {

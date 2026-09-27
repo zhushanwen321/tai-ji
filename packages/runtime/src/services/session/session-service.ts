@@ -29,6 +29,7 @@
  * 文件头**;本文件保留公开 wrapper（调用面与测试锁定面不变）。
  */
 import { existsSync } from 'node:fs'
+import { isBtwVirtualId } from '@taiji/shared'
 import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type {
@@ -42,6 +43,7 @@ import type { SessionTraceSnapshot } from './trace-sync.js'
 import { SessionRecords } from './session-records.js'
 import type { OversizeAwareResult } from './session-records.js'
 import { SessionModelControl } from './session-model-control.js'
+import { isModelInRegistry, providerHasCredential, resolveActivateTimeoutMs } from './session-model-guards.js'
 import { SessionHistoryReader } from './history-rebuild-cache.js'
 import type { HistoryFileReadResult, HistoryWindowResult } from '../session-history.js'
 import { resolveSkillPaths, resolveExtensionPaths, resolveReplaceSystemPrompt, resolveLaunchPresetOptions } from './launch-params.js'
@@ -51,12 +53,11 @@ import { buildSessionSummary } from './session-summary.js'
 import { createProjectionBusView } from './projection-bus-view.js'
 // D1 台账（crash-forensics §3.3 D1）：crash / deleted 事件的 runtime 侧双写源。
 import { getCrashJournal } from '../../infra/crash-journal.js'
-// D3 checkpoint（crash-forensics §3.3 D3，u4）：活跃 session 清单持续交接——attach /
-// respawn（经 registerSession 汇聚）/ detach / reclaim 四类生命周期事件处增量维护。
-import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
-// D5 在途镜像（crash-forensics §3.3 D5，u7b API + 偏差 #20 生命周期接线）：attach 预置 0 /
-// detach、reclaim 摘除——挂点与 checkpoint 同点位（同一收敛面，无双写）。
-import { inflightMirror } from './inflight-mirror.js'
+import { captureMachinePiDigest } from '../../infra/crash-correlation.js'
+// crash-forensics 台账挂点域（D1 detailDigest 格式化 + D3 checkpoint / D5 mirror 的
+// attach 预置与 reclaim 摘除，§3.3）：实现迁 crash-forensics-hooks.ts（行为保持抽取，
+// max-lines 门禁），本 Facade 保留调用点。
+import { buildCrashDetailDigest, dropCrashLedgersOnReclaim, registerCrashLedgerAttachHooks } from './crash-forensics-hooks.js'
 // main（file-lock-unification reaper 下沉，D2 触发面 A）：removeSessionEntry 汇聚点收殓
 // 孤儿后台任务——[T8 有限拆分 2026-09] 调用点随销毁收敛链编排迁入 session-entry-removal.ts
 // （模块单例直接 import，语义不变），本 Facade 不再消费。
@@ -77,6 +78,9 @@ import type { IManagedSessionView, ScannedSession, SendMessageHook, SessionOccup
 import type { WorkspaceService } from '../workspace/workspace-service.js'
 import { SessionLifecycle } from './session-lifecycle.js'
 import type { ReclaimSessionDeps } from './session-lifecycle.js'
+// B3 ensure 链分支（btw-question M2-b 授权）：ensureActive 对 btw vid 转自建附着编排。
+// type-only（本文件对 btw-service 零 value 依赖，无环——btw-service 不反向 import 本文件）。
+import type { BtwService } from './btw-service.js'
 // [T8 有限拆分 2026-09] removeSessionEntry 销毁收敛链编排（顺序约束 SSOT，含文件头收敛
 // 说明）——行为保持抽取，本 Facade 保留公开 wrapper（测试 spyOn 锁定面）。
 import { SessionEntryRemovalOrchestrator, runDestroyStepIsolated } from './session-entry-removal.js'
@@ -181,6 +185,19 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   private presetService: PresetService | null = null
   /**
+   * BtwService 引用（组合根注入，btw-question B3 裁决 + M2-b）：ensureActive 对 btw vid
+   * 转自建附着编排（restore 腿 findScannedSession 只扫 sessions/，btw 线目录不在其扫描面
+   * ——V5 核实结论；D1⑥ 回收后续问的附着入口）。经 setter 注入（同 setConfigService
+   * 模式，避免破坏现有测试构造点）；未注入时 btw vid fall through 既有 restore 链
+   *（存量测试零变更，对 btw vid 的失败形态与注入前一致）。
+   */
+  /**
+   * btw 能力注入（组合根 setBtwService 晚于构造）。ensureProcess 必选（ensureActive 主链
+   * 必经）；getLine 可选（btw vid 离线尾读的线文件解析增强——缺失时 historyReader 的
+   * resolve 返回 undefined，尾读按异常态 warn 空页，主链不受影响）。
+   */
+  private btwService: (Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>) | null = null
+  /**
    * U6：能力对账回调（组合根绑 modelService.reconcileModelCapabilities，附着路径调用）。
    */
   private modelCapabilityReconciler: ((sessionId: string) => Promise<unknown>) | null = null
@@ -214,6 +231,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 列表语义允许多方注册，既有注入方（PluginService）行为不变，逐个隔离异常。
    */
   private readonly onSessionDestroyedHandlers: Array<(summary: SessionSummary) => void> = []
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] session 激活回调列表（relay ②）。触发点 =
+   * transport 层 session.switch 成功分支（含自动 restore）经 notifySessionActivated。
+   * 追加式列表（D6a 同款）：显式禁单槽——setOnSessionCreated 单槽是反面教材（其注释已写
+   * 「二次调用会覆盖」），PluginService 的 didActivate 投递与未来其他消费方互不挤占。
+   */
+  private readonly onSessionActivatedHandlers: Array<(summary: SessionSummary) => void> = []
+
   /**
    * plan 退出失效回调（P2-2 失效链；MF-1-7 编排下沉）：abortPlan 发出 '/plan abort'
    * 成功后上抛，transport 层（server.ts setServices 注册）消费——摘除 runtime pending
@@ -402,16 +427,28 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     // 模型控制域（S6 迁出至 session-model-control.ts）：deps 窄注入——session 定位经
     // lifecycle 只读面、实例失效经 projection、trace 补拉经 traceSync（全部既有公有面）。
     this.modelControl = new SessionModelControl({
-      pm: this.pm,
       getSession: (sessionId) => this.lifecycle.get(sessionId),
       getReplicatedStates: (sessionId) => this.projection.getReplicatedStates(sessionId),
       syncTraceEntries: (sessionId, trigger) => this.traceSync.syncTraceEntries(sessionId, trigger),
+      // U2：停止态/回收态切换先经 ensureActive 拉活或 join 同一 in-flight；
+      // 上界 15s（`TAIJI_SESSION_ACTIVATE_TIMEOUT_MS` 可调，≤0 = 不限时逃生门）。
+      ensureActive: (sessionId) => this.ensureActive(sessionId),
+      activateTimeoutMs: resolveActivateTimeoutMs(process.env),
+      // `Model not found` 三型分型的两判（configService 晚期注入 → 闭包内每次调用动态读；
+      // 未注入 / listProviders 抛错时 fail-open，宁可落双因文案也不误报更「确定」的码）。
+      isModelRegistered: (provider, modelId) => isModelInRegistry(this.configService, provider, modelId),
+      hasProviderCredential: (provider) => providerHasCredential(this.configService, provider),
     })
     // history 读编排域（S6 迁出至 history-rebuild-cache.ts）：deps 窄注入——pm（活跃判定
     // + RPC client）与 sessionStore（重建/尾读/全量文件读转换链），无私有状态耦合。
+    // [btw-question 重载链修复] resolveBtwThreadFile：btw vid 离线尾读的线文件解析，查
+    // BtwService 注册表（rebuildFromDisk 启动重建的内存投影）。late-bound 闭包——btwService
+    // 在组合根晚于本构造（setBtwService 注入），未注入（存量测试构造）时 resolve 返回
+    // undefined → btw 尾读 warn 空页，主会话路径零影响。
     this.historyReader = new SessionHistoryReader({
       pm: this.pm,
       sessionStore: this.sessionStore,
+      resolveBtwThreadFile: (vid) => this.btwService?.getLine?.(vid)?.sessionFilePath,
     })
     // 状态投影域（S5 迁出至 session-state-projection.ts）：deps 窄注入——session 查询经
     // lifecycle（Map 所有者）只读面，messageBus 经 getter 每次调用动态读（setter 晚期注入
@@ -468,47 +505,14 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
         this.modelCapabilityReconciler(sessionId).catch(() => { /* 降级吞错：附着主链路优先 */ })
       }
     })
-    // D3 checkpoint（crash-forensics §3.3 D3，u4）attach / respawn 成功挂点：onSessionRegistered
-    // 是 create / restore（含自动 respawn 与惰性恢复）/ fork 三入口的注册汇聚点（session-lifecycle
-    // registerSession 在 sessions.set 之后同步直发），**一个挂点覆盖四类事件中的全部「附着」
-    // 形态**——respawn 成功即 pi 重新附着，无需在 restore 链路另设挂点（单一收敛点 = 无双写）。
-    // 元数据取既有读面：filePath/occupancy 来自 lifecycle 条目，lastActivityAt 取 pi client
-    // 空闲信号（u1a，attach 瞬间读不到则用本模块时钟兜底），lastViewedAt 取 per-sid 查看表。
-    // 台账/checkpoint 都是旁路设施，本订阅体自带异常隔离（异常不外抛——否则会打断
-    // registerSession 主链，把旁路故障放大成创建/恢复失败）。
-    this.lifecycle.onSessionRegistered((sessionId) => {
-      try {
-        const session = this.lifecycle.get(sessionId)
-        const occupancy = session?.occupancy
-        getRuntimeCheckpointStore().upsertSession({
-          sessionId,
-          filePath: session?.sessionFilePath ?? null,
-          activityAt: this.pm.getClient(sessionId)?.lastActivityAt,
-          viewedAt: this.getSessionLastViewedAt(sessionId),
-          occupancy: occupancy && (occupancy.turn !== 'idle' || occupancy.compacting || occupancy.bash)
-            ? 'occupied'
-            : 'idle',
-        })
-      } catch (e: unknown) {
-        // best-effort 降级：checkpoint 是崩溃恢复的旁路设施，写入异常绝不外抛——
-        // 外抛会打断 registerSession 主链，把旁路故障放大成创建/恢复失败。
-        console.error(`[session-service] checkpoint attach update failed (sessionId=${sessionId}):`, e)
-      }
-    })
-    // D5 mirror 预置 0（crash-forensics §3.3 D5，偏差 #20 接线）：五 spawn 形态（新 session /
-    // respawn / reattach / lazy restore / fork）的条目建立腿——与上一挂点同一 registerSession
-    // 收敛面（fork 产生新 sessionId，同点覆盖），一挂点覆盖全部附着形态。presetZero = 新
-    // reporting epoch（inFlight=0 + 清 hasEverReported，不触碰 injected——spawn 装配顺序
-    // 无关，语义见 inflight-mirror.ts 文件头）。独立第二订阅而非并入 checkpoint 订阅体：
-    // 两个旁路设施各自 best-effort 异常隔离，故障日志可归因、互不放大。
-    this.lifecycle.onSessionRegistered((sessionId) => {
-      try {
-        inflightMirror.presetZero(sessionId)
-      } catch (e: unknown) {
-        // best-effort 降级：mirror 是 errs 判别的旁路设施，预置异常绝不外抛——
-        // 外抛会打断 registerSession 主链，把旁路故障放大成创建/恢复失败。
-        console.error(`[session-service] mirror preset failed (sessionId=${sessionId}):`, e)
-      }
+    // D3 checkpoint + D5 mirror 的 attach 挂点（crash-forensics §3.3）：订阅体迁
+    // crash-forensics-hooks.ts（行为保持抽取，语义注释见该模块）。注册位置/时序不变：
+    // 排在 reconciler 订阅之后，函数内先 checkpoint 后 mirror，与迁移前两订阅的
+    // 注册顺序逐一等价（上方「播种 → record 注册 → 对账」顺序契约不受影响）。
+    registerCrashLedgerAttachHooks(this.lifecycle, {
+      getSession: (sessionId) => this.lifecycle.get(sessionId),
+      activityAt: (sessionId) => this.pm.getClient(sessionId)?.lastActivityAt,
+      viewedAt: (sessionId) => this.getSessionLastViewedAt(sessionId),
     })
     this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus, new SkillInjector(this.skillSource))
     this.scanner = new SessionScanner(this, this.sessionStore, this.gitInfoReader)
@@ -586,6 +590,11 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
           sessionId,
           exitCode: code,
           detailDigest: buildCrashDetailDigest(code, stderr),
+          // D10（crash-correlation）：崩溃时刻机器面 taiji 家族 pi 幸存者摘要——跨实例
+          // 连坐归因的 ledger 视图（2026-09-20 连坐崩溃实证：本 session 四次 SIGTERM 死亡
+          // 均为机器级扫杀连坐，runtime 侧 exit code 143 无从归因，机器面快照是关键证据）。
+          // best-effort：ps 失败返回空串（字段全可空语义），不阻塞死亡清理链。
+          machinePiDigest: captureMachinePiDigest(),
         })
       })
       runDestroyStepIsolated('adapter.detach', sessionId, () => {
@@ -676,6 +685,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.presetService = presetService
   }
 
+  /**
+   * 注入 BtwService（组合根在 BtwService 构造后、server.start 前调用，M2-b/B2 授权接线）。
+   * ensureActive 的 btw 分支依赖——窄面只取 ensureProcess（alive → markActivity 直返；
+   * 回收/死亡 → spawn→switch→附着断言 reattach）。
+   */
+  setBtwService(btwService: Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>): void {
+    this.btwService = btwService
+  }
+
   /** W5：注入 message.complete 回调（组合根绑 ReloadOrchestrator.onMessageComplete）。 */
   setOnMessageComplete(handler: (sessionId: string) => void): void {
     this.onMessageComplete = handler
@@ -698,6 +716,30 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    */
   setOnSessionDestroyed(handler: (summary: SessionSummary) => void): void {
     this.onSessionDestroyedHandlers.push(handler)
+  }
+
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] 注入 session 激活回调（relay ③ 注册侧）。
+   * 追加式注册（D6a 同款，非覆盖）——禁改写为 setOnSessionCreated 式单槽。
+   */
+  onSessionActivated(handler: (summary: SessionSummary) => void): void {
+    this.onSessionActivatedHandlers.push(handler)
+  }
+
+  /**
+   * [plugin-header-action-modal-points AP-4/u5a] session 激活通知（relay ②，唯一触发点 =
+   * session-message-handler 的 session.switch 成功分支，含自动 restore）。回调逐个隔离
+   * 异常（notifySessionCreated 同款 best-effort 降级），不阻断 switch 主流程。
+   */
+  notifySessionActivated(summary: SessionSummary): void {
+    for (const handler of this.onSessionActivatedHandlers) {
+      try {
+        handler(summary)
+      } catch (e: unknown) {
+        // 降级策略（best-effort）：激活投递异常不阻断 switch 主流程，仅落日志供排查。
+        console.error(`[session-service] onSessionActivated listener error (sessionId=${summary.id}):`, e)
+      }
+    }
   }
 
   /**
@@ -820,7 +862,17 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     return this.lifecycle.forkSession(srcSessionId, fromPiEntryId, includeFrom, label, opts)
   }
 
-  async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string): Promise<{ blocked: boolean; rejected?: boolean }> { return this.dispatcher.sendMessage(sessionId, content, images, clientUuid) }
+  async sendMessage(
+    sessionId: string,
+    content: string,
+    images?: Array<{ data: string; mimeType: string }>,
+    clientUuid?: string,
+    requireCommand?: string,
+  ): Promise<{
+    blocked: boolean
+    rejected?: boolean
+    reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+  }> { return this.dispatcher.sendMessage(sessionId, content, images, clientUuid, requireCommand) }
   // [HISTORICAL] sendSubagentMessage（marker 半成品通道）已删除（composer 四符号设计 D2）：
   // base64 隐藏注释前缀在 extension 侧零消费方，且经主 agent 转发违背
   // 「直达 subagent」目标——定向消息改走 subagentAction(message/start)。
@@ -961,30 +1013,13 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 七步最小摘除编排——进程处置语义收口在 Map 所有者（D3），Facade 只做一行委托。
    * 返回 false = 未回收（占座被占 / 最终豁免拦截 / 代际校验取消）。
    *
-   * D3 checkpoint（u4）reclaim 成功挂点：回收**不是销毁**（removeSessionEntry 刻意不经
-   * 此路径），但该 session 已摘出活跃 Map → 不再属「活跃 session 清单」，从 checkpoint
-   * 摘除条目（文件本身不删——删除属主在 main 退出链与 u5 reattach 编排）。挂 ok 分支：
-   * 未回收路径零改动，防误摘（与 reclaimed 台账行同抑制语义）。
+   * D3 checkpoint + D5 mirror reclaim 成功摘除挂点：挂 ok 分支（未回收路径零改动、
+   * 防误摘，与 reclaimed 台账行同抑制语义）——实现迁 crash-forensics-hooks.ts
+   * （dropCrashLedgersOnReclaim，行为保持抽取，语义注释见该模块）。
    */
   async reclaimSession(sessionId: string, deps: ReclaimSessionDeps): Promise<boolean> {
     const reclaimed = await this.lifecycle.reclaimManagedSession(sessionId, deps)
-    if (reclaimed) {
-      try {
-        getRuntimeCheckpointStore().removeSession(sessionId)
-      } catch (e: unknown) {
-        // best-effort 降级：摘除条目失败不影响回收主流程（回收已完成的事实不变）。
-        console.error(`[session-service] checkpoint reclaim removal failed (sessionId=${sessionId}):`, e)
-      }
-      // D5 mirror（偏差 #20 接线）：回收 ≠ 销毁（刻意不经 removeSessionEntry 汇聚点）但该
-      // session 已摘出活跃清单，mirror 条目与 checkpoint 同语义同步摘除；恢复后经预置 0
-      // 重建（新 reporting epoch）。挂 ok 分支：未回收路径零改动，防误摘（与 checkpoint 同型）。
-      try {
-        inflightMirror.dropSession(sessionId)
-      } catch (e: unknown) {
-        // best-effort 降级：摘除条目失败不影响回收主流程（回收已完成的事实不变）。
-        console.error(`[session-service] mirror reclaim removal failed (sessionId=${sessionId}):`, e)
-      }
-    }
+    if (reclaimed) dropCrashLedgersOnReclaim(sessionId)
     return reclaimed
   }
 
@@ -1015,6 +1050,15 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 迁入 pi-respawn 编排器（ensureRestored，join 状态单一所有者）。
    */
   async ensureActive(sessionId: string): Promise<IPiEngine> {
+    // [btw-question B3 裁决] btw 线的 ensure 链走自建附着编排：alive → markActivity 直返；
+    // 闲置回收/进程死亡 → spawn→switch→附着断言 reattach（D1⑥ 回收后续问）。restore 腿
+    //（findScannedSession 只扫 sessions/）对 btw vid 构造性失败（V5 核实结论），故分支
+    // 先于既有 getClient/restore 链。附着失败 BtwError 原样上抛——message.send 路径由
+    // dispatcher.ensureActiveOrBroadcast 收口为 message.error（错误文案含恢复指引），
+    // 不静默。未注入 btwService（存量测试构造）→ fall through 零变更。
+    if (this.btwService !== null && isBtwVirtualId(sessionId)) {
+      return await this.btwService.ensureProcess(sessionId)
+    }
     const existing = this.pm.getClient(sessionId)
     // 纵深防御（pi-exit-notification-and-respawn §6.6）：上游清理（onSessionExit）出现竞态时
     // processes Map 可能残留已死 client——视同无 client 走下方 restoreSession（其内部对
@@ -1575,24 +1619,3 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 }
 
-// ── D1 台账 helper（crash-forensics §3.3 D1 防漏设计①）───────────────────────
-
-/** 台账 detailDigest 内嵌上限（设计 D1：「末 10 行 stderr 摘要内嵌（≤2KB）」）。 */
-const CRASH_DETAIL_DIGEST_MAX_CHARS = 2048
-
-/**
- * crash 事件的 detailDigest：stderr 尾部摘要截断内嵌（取尾不取头——崩溃根因通常在输出末尾，
- * 与 rpc-client getStderrTail 的尾部形态同向）。stderr 为空（信号死亡无输出）时兜底一行
- * 退出形态描述——digest 恒非空，崩溃行的最小归因信息不因 stderr 缺失而全空。
- */
-function buildCrashDetailDigest(code: number | null, stderr: string | undefined): string {
-  const tail = (stderr ?? '').trim()
-  const digest = tail
-    || (code === null
-      ? 'process died by signal (no stderr captured)'
-      : `process exited with code ${code} (no stderr captured)`)
-  // 超限取尾部（保留最接近崩溃现场的输出），换行结构原样保留
-  return digest.length > CRASH_DETAIL_DIGEST_MAX_CHARS
-    ? digest.slice(-CRASH_DETAIL_DIGEST_MAX_CHARS)
-    : digest
-}

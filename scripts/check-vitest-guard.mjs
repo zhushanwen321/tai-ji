@@ -52,8 +52,9 @@ const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, '..')
 // 缺省根由脚本位置推导（不依赖 cwd）；位置参数仅供 fixture 自测覆盖目标根
 const targetRoot = path.resolve(process.argv[2] ?? DEFAULT_ROOT)
 
-/** 扫描根（相对目标根）与排除的目录段 */
-const SCAN_ROOTS = ['packages', 'extensions', 'apps']
+/** 扫描根（相对目标根）与排除的目录段。resources 含 builtin 插件测试（vitest.config
+ *  同经 taijiTestConfig 包装），纳入守卫面防「新插件 config 漏挂防线」静默。 */
+const SCAN_ROOTS = ['packages', 'extensions', 'apps', 'resources']
 const EXCLUDED_DIR_NAMES = new Set(['node_modules', 'dist', 'test-results'])
 const TEST_SUFFIXES = ['.test.ts', '.test.mjs']
 

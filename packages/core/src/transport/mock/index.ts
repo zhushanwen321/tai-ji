@@ -2,7 +2,7 @@
  * Mock 门面 —— 与 @/api 同接口签名，VITE_MOCK=true 时由 api/index 注入。
  *
  * [G4 类型锚定] 同接口不再靠注释承诺：session/chat/config/model/plugin/composer/workspace/
- * quota/project/preset 十域对象显式标注 real 域导出类型（XDomain = typeof real 域模块），
+ * quota/project/preset/btw 十一域对象显式标注 real 域导出类型（XDomain = typeof real 域模块），
  * 并配 AssertExact<DomainParamsExact<...>> 逐方法比较 Parameters 元组全等——real 域加参/改签名时
  * mock 侧缺参/少参/多参/错型直接 tsc 编译失败。锚定范围与未锚定域（settings/extension/
  * search/git/file）的理由登记见下方「[G4 类型锚定]」注释块与 docs/TEST-STRATEGY.md §5。
@@ -66,7 +66,7 @@ import * as wsClient from '../ws-client'
 // ② AssertExact<DomainParamsExact<...>> —— 可赋值性抓不到「少可选参」（少参函数可赋给多参函数类型），
 //    须逐方法比较 Parameters 元组全等（identity）。断言别名 export：未导出的 unused 类型
 //    别名会被 lint no-unused-vars 拦截（tsc 侧本包未开 noUnusedLocals，不设防）。
-// 已锚定：session/chat/config/model/plugin/composer/workspace/quota/project/preset（10 域）。
+// 已锚定：session/chat/config/model/plugin/composer/workspace/quota/project/preset/btw（11 域）。
 // 未锚定（mock 保真度登记见 docs/TEST-STRATEGY.md §5）：settings（7 成员子集转发器，
 // real 是 40+ 方法全域）/ extension（onExtensions 宽类型为登记过的有意偏差，W08 收口）/
 // search（real 侧无单源 domain，编排归 useSearchModalDeps）/ git、file（独立 mock 文件，
@@ -81,6 +81,7 @@ import type * as realWorkspaceDomain from '../api/domains/workspace'
 import type * as realQuotaDomain from '../api/domains/quota'
 import type * as realProjectDomain from '../api/domains/project'
 import type * as realPresetDomain from '../api/domains/preset'
+import type * as realBtwDomain from '../api/domains/btw'
 
 /** real 域形状单点（mock 锚定源；散函数模块的 namespace 类型即域接口） */
 export type SessionDomain = typeof realSessionDomain
@@ -93,6 +94,7 @@ export type WorkspaceDomain = typeof realWorkspaceDomain
 export type QuotaDomain = typeof realQuotaDomain
 export type ProjectDomain = typeof realProjectDomain
 export type PresetDomain = typeof realPresetDomain
+export type BtwDomain = typeof realBtwDomain
 
 /** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对） */
 type PlainTuple<T extends unknown[]> = { [K in keyof T]: T[K] }
@@ -1730,3 +1732,51 @@ const presetImpl = {
 // [G4] 参数全等断言：mock preset 任一方法少参/多参/错型在此行编译失败
 export type PresetDomainParamsExact = AssertExact<DomainParamsExact<PresetDomain, typeof presetImpl>>
 export const preset: PresetDomain = presetImpl
+
+// ── btw 域 mock（btw-question D6，M2-a）─────────────────────────────────────
+// in-memory 线注册表（mainSid → 有序 vid 列表）：create 建线 / list 枚举 / remove 关线，
+// 与 real 域同接口（门面三元要求两侧同构）。vid 形态 = `btw:<piSessionId>` 两段式——生产方
+// 工厂 SSOT = shared virtual-session-id.ts 的 btwVirtualId；mock 不校验值域、不依赖工厂，
+// 字面形态仅驱动 UI 状态机（注册表按 mainSid 分区，多主会话互不串）。
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock btw 线注册表
+const mockBtwThreads = new Map<string, string[]>()
+let mockBtwSeq = 0
+
+const btwImpl = {
+  /**
+   * 建线：vid 递增 + 登记进 mainSid 名下。mock 无 pi fork 面，forkState 恒 'full'（分支①）
+   * ——truncated/none 两支的真实三分叉归 runtime BtwService（M1-b），显式登记非静默丢弃。
+   */
+  async create(mainSid: string): Promise<ServerMessageMap['btw.create']> {
+    await sleep(TIMING.ack)
+    mockBtwSeq += 1
+    const vid = `btw:mock-${mockBtwSeq}`
+    const threads = mockBtwThreads.get(mainSid) ?? []
+    threads.push(vid)
+    mockBtwThreads.set(mainSid, threads)
+    return { vid, mainSid, forkState: 'full' }
+  },
+
+  /** 线枚举：该 mainSid 名下全量线列表（map 新对象——mock 惯例 fixture 快照隔离）。 */
+  async list(mainSid: string): Promise<ServerMessageMap['btw.list']['threads']> {
+    await sleep(TIMING.ack)
+    return (mockBtwThreads.get(mainSid) ?? []).map((vid) => ({ vid }))
+  },
+
+  /** 关线：命中即移除；未命中 no-op resolve（mock 不模拟失败——v1 永远成功口径；
+   *  真实 runtime 对未知 vid 的语义由 M2-b handler 裁决，此处不预设）。 */
+  async remove(vid: string): Promise<void> {
+    await sleep(TIMING.ack)
+    for (const threads of mockBtwThreads.values()) {
+      const idx = threads.indexOf(vid)
+      if (idx !== -1) {
+        threads.splice(idx, 1)
+        return
+      }
+    }
+  },
+}
+
+// [G4] 参数全等断言：mock btw 任一方法少参/多参/错型在此行编译失败
+export type BtwDomainParamsExact = AssertExact<DomainParamsExact<BtwDomain, typeof btwImpl>>
+export const btw: BtwDomain = btwImpl

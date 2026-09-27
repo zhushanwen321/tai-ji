@@ -24,6 +24,7 @@
  * （键吞掉，无报错无 toast 噪音）。
  */
 import { watch, type Ref } from 'vue'
+import { modelSwitchToastKey } from './model-switch-toast'
 import { normalizeContent, type Message, type ModelInfo, type ProviderId } from '@taiji/shared'
 import { normalizeSupportedLevels } from '@taiji/core/domain/composer'
 import { findLastAssistantMessage } from '@taiji/core'
@@ -137,6 +138,11 @@ function hasSelectionInFocusedEditor(): boolean {
  * 构建命令动作表处理器（composer-keydown 分发链「动作表」分支消费；返回签名与
  * commandPopoverRef.handleKeydown 同构：true = 事件已消费/拦截，false = 未消费放行）。
  */
+/** 失败 toast 的 key 解析（单点映射 + 交给注入的 toast 接口翻译；见 model-switch-toast.ts）。 */
+function tkey(err: unknown): string {
+  return modelSwitchToastKey(err)
+}
+
 export function useComposerShortcutActions(
   deps: ComposerShortcutActionDeps,
 ): (e: KeyboardEvent) => boolean {
@@ -176,11 +182,14 @@ export function useComposerShortcutActions(
     const next = startIdx < 0 ? levels[0] : levels[(startIdx + 1) % levels.length]
     if (isBuiltSession()) thinkingIntent = next
     void deps.onThinkingSelect(next).catch((err: unknown) => {
-      // 决策 8 reject 清：连按步进从真值重新起算。
-      // 设计 §3.3 RPC 失败规格：console.warn + 无 toast（chip 由回执真值保持旧值，UI 不说谎）；
-      // 拒绝处理器吞掉 rejection 防止 unhandled rejection
+      // 决策 8 reject 清：连按步进从真值重新起算（**意图清理是功能必需**——故键盘路径收原始
+      // core 函数而非壳层包装：包装不外抛，rejection 到不了这里）。
       thinkingIntent = null
+      // U4 提示规格（model-switch-live-provider-sync §3.4/D7，本轮改写）：键盘循环是用户显式动作，
+      // 失败必须闭环提示——与 UI 路径共用 `modelSwitchToastKey` 单点映射（每条路径恰一个 toast 点；
+      // 壳层包装不参与键盘路径，故不存在双 toast）。console.warn 保留为诊断细节。
       console.warn('[composer-shortcut] thinking level cycle RPC failed:', err)
+      deps.toast.error(tkey(err))
     })
   }
 
@@ -202,9 +211,10 @@ export function useComposerShortcutActions(
     void deps
       .onModelSelect({ provider: next.providerId, modelId: next.id })
       .catch((err: unknown) => {
-        // 同上：RPC 失败规格 console.warn + 无 toast，防 unhandled rejection
+        // 同上（U4）：意图清理 + console.warn 诊断 + 一次用户可见 toast（单点映射）。
         modelIntent = null
         console.warn('[composer-shortcut] model cycle RPC failed:', err)
+        deps.toast.error(tkey(err))
       })
   }
 

@@ -361,11 +361,19 @@ const RUN_ID = () => "rfl-e2e-" + Date.now() + "-" + Math.floor(Math.random() * 
  * cwd（WorkerHost 的 new Worker 默认继承主进程 cwd）——测试主线程 process.chdir(repo)
  * 后再 runAndWait，脚本内 execFileSync("git", ...) 即作用于本仓。
  */
+/**
+ * 测试内全部 git 子进程统一 env：显式钉 LC_ALL=C，使 git 自身报错文案跨系统
+ * locale 恒为英文（macOS LANG 未设时 git gettext 回落系统中文，空仓
+ * `git rev-parse HEAD` 输出「未知的版本或路径」→ MF-1-1b 的 'unknown revision
+ * 断言在中文 locale 下失真）。只钉 git 子进程输出语言，断言语义不变。
+ */
+const gitEnv = (): NodeJS.ProcessEnv => ({ ...process.env, LC_ALL: "C" });
+
 function makeTmpGitRepo(): string {
   const repo = mkdtempSync(join(tmpdir(), "rfl-e2e-git-"));
-  execFileSync("git", ["init", "-q"], { cwd: repo, timeout: 10_000 });
-  execFileSync("git", ["config", "user.email", "rfl-e2e@test.local"], { cwd: repo, timeout: 10_000 });
-  execFileSync("git", ["config", "user.name", "rfl-e2e"], { cwd: repo, timeout: 10_000 });
+  execFileSync("git", ["init", "-q"], { cwd: repo, timeout: 10_000, env: gitEnv() });
+  execFileSync("git", ["config", "user.email", "rfl-e2e@test.local"], { cwd: repo, timeout: 10_000, env: gitEnv() });
+  execFileSync("git", ["config", "user.name", "rfl-e2e"], { cwd: repo, timeout: 10_000, env: gitEnv() });
   return repo;
 }
 
@@ -1089,10 +1097,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         expect(outcome.totalFixed).toBe(1);
 
         // commit message 格式（batch/round/计数插值，与 planUnifiedCommit 单测同锚）
-        const subject = execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd: repo, encoding: "utf-8", timeout: 10_000 }).trim();
+        const subject = execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() }).trim();
         expect(subject).toBe("fix: review batch 1 round 1 — 1 must-fix + 0 suggestion");
         // staged 集合 ≡ 去重后存在的 affected_files（误报路径被过滤，未炸整次 git add）
-        const committed = execFileSync("git", ["show", "--name-only", "--pretty=", "HEAD"], { cwd: repo, encoding: "utf-8", timeout: 10_000 })
+        const committed = execFileSync("git", ["show", "--name-only", "--pretty=", "HEAD"], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() })
           .split("\n").map((s) => s.trim()).filter(Boolean).sort();
         expect(committed).toEqual(["src/a.ts", "src/b.ts"]);
         // fixImpactFiles 不做存在性过滤（收集层语义：声称触碰即进 recheck 观察面）
@@ -1154,7 +1162,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         // 无 commit 产生（add 失败在 commit 之前；空仓 HEAD 仍不存在）
         let revParseErr = "";
         try {
-          execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, timeout: 10_000 });
+          execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, timeout: 10_000, env: gitEnv() });
         } catch (e) {
           revParseErr = String(e);
         }

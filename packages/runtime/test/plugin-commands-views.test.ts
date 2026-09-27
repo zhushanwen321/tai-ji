@@ -271,16 +271,18 @@ describe('createViewsApi（worker 侧）', () => {
     client.attach(port)
   })
 
-  it('update 发 plugin.views.update RPC（pluginId/viewId/guiTree）', async () => {
+  it('update 发 plugin.views.update RPC（pluginId/viewId/guiTree/sessionId）', async () => {
     const api = createViewsApi(client, 'p1')
     const guiTree = [{ type: 'label', props: { text: 'hi' } }] as never[]
 
-    const updatePromise = api.update('view1', guiTree as never)
-    const sent = port.messages[0] as { id: number; method: string; params: { pluginId: string; viewId: string; guiTree: unknown[] } }
+    const updatePromise = api.update('view1', guiTree as never, { sessionId: 's1' })
+    const sent = port.messages[0] as { id: number; method: string; params: { pluginId: string; viewId: string; guiTree: unknown[]; sessionId: string } }
     expect(sent.method).toBe('plugin.views.update')
     expect(sent.params.pluginId).toBe('p1')
     expect(sent.params.viewId).toBe('view1')
     expect(sent.params.guiTree).toEqual(guiTree)
+    // [D1/u5b] sessionId 显式必填（E15）
+    expect(sent.params.sessionId).toBe('s1')
 
     // 模拟主线程响应（fire-and-forget：resolve 后不等待）
     client.handleResponse({ jsonrpc: '2.0', id: sent.id, result: { updated: true } })
@@ -367,10 +369,9 @@ describe('PluginService 接线（commands/views RPC）', () => {
     expect(wrapper.response.result).toEqual(['view-x'])
   })
 
-  it('ES2: views.update 无活跃 session → 广播丢弃 + warning 含 pluginId/viewId', async () => {
+  it('[D1/u5b] views.update 缺 sessionId → INVALID_SESSION_ID 拒绝，不走活跃会话猜测', async () => {
     const broadcastFn = vi.fn()
-    // 不传 sessionService → activeSessionResolver.resolve() 返回 undefined
-    const { rpcServer } = wiredService({ broadcastFn })
+    const { rpcServer, port } = wiredService({ broadcastFn })
 
     await rpcServer.dispatch('w1', {
       jsonrpc: '2.0',
@@ -379,11 +380,12 @@ describe('PluginService 接线（commands/views RPC）', () => {
       params: { pluginId: 'p1', viewId: 'v1', guiTree: [] },
     })
 
+    // 旧 ES2「无活跃 session 丢弃 + warning」路径已删除（D1 被否④）：缺 sessionId 是
+    // 插件作者错误，显式 INVALID_SESSION_ID 拒绝 + 零广播（不猜测不投递）
+    const wrapper = port.messages[0] as { response: { error?: { code?: string; message?: string } } }
+    expect(wrapper.response.error?.code).toBe('INVALID_SESSION_ID')
+    expect(wrapper.response.error?.message).toContain('sessionId')
     expect(broadcastFn).not.toHaveBeenCalled()
-    expect(warnSpy).toHaveBeenCalled()
-    const warnMsg = warnSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n')
-    expect(warnMsg).toContain('p1')
-    expect(warnMsg).toContain('v1')
   })
 
   it('commands.register 经完整接线 → broadcastFn 收 plugin:commandRegistered', async () => {

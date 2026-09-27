@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseSessionContent, parseSessionFile } from '../core/parser.js'
-import type { Entry } from '../core/parser.js'
+import { parseSessionContent, parseSessionFile, type Entry } from '@zhushanwen/session-core'
 import { REAL_SESSION, HAS_REAL_SESSION } from './real-data.js'
 
 /** 构造单行 JSONL entry 字符串 */

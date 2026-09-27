@@ -5,6 +5,7 @@
 // - core/                  通用协议层（所有 extension 共用：GuiComponent + 布局原语 + 传输编码 + 双模 widget helper）
 // - extensions/            有运行时定制逻辑的 extension（marker + helper）
 //   - ask-user/            富交互（select 通道 + marker）
+//   - scheduler/           scheduler 任务条目契约 + 折叠器 + 时间格式化（扩展与插件同源单实现，零 pi/node 依赖）
 //   - scheduler-create/    scheduler 创建确认共享资产（类型 + 形状/时间折叠守卫）
 //   - ui-form/             统一提问表单协议（类型 + marker + 交互 helper + 守卫）
 // - pending-entries        pending 事件流差集核心（纯算法，落盘形态语义）
@@ -69,6 +70,34 @@ export {
   getAskUserOther,
   isAskUserQuestion,
 } from './extensions/ask-user/helpers'
+
+// ── ./extensions/scheduler：scheduler 任务条目契约 + 折叠器 + 时间格式化（扩展与插件同源单实现；entry 实现在 extensions/universal/scheduler，写侧经 /schedule 扩展命令，本分组只承载纯契约与纯函数）──
+export type {
+  ScheduleSpec,
+  TaskKind,
+  TaskStatus,
+  ScheduledTask,
+  ExecutionRecord,
+  TaskSnapshot,
+  SchedulerEntryOp,
+} from './extensions/scheduler/types'
+export {
+  TASK_ENTRY_TYPE,
+  HISTORY_LIMIT,
+  appendExecutionRecord,
+  snapshotToTask,
+} from './extensions/scheduler/types'
+export type { SchedulerEntryLike, ReplayFoldOptions } from './extensions/scheduler/replay'
+export { replayFoldEntries } from './extensions/scheduler/replay'
+export {
+  MS_PER_DAY,
+  MS_PER_HOUR,
+  MS_PER_MINUTE,
+  MS_PER_SECOND,
+  formatDuration,
+  formatSchedule,
+  formatRelativeTime,
+} from './extensions/scheduler/format'
 
 // ── ./extensions/scheduler-create：scheduler 创建确认的共享资产（定制交互 helper 已随统一表单协议退役；ScheduleDraft/FormResult 类型 + 形状/时间折叠守卫；实现在 extensions/universal/scheduler——交互入口 uiFormInteract，runtime event-adapter 保留 legacy 分支至退役窗口）──
 export type {

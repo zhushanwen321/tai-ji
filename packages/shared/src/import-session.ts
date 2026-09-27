@@ -66,6 +66,9 @@ export type ImportWarning = 'sidecar_failed' | 'conversion_degraded' | 'conversi
  * - L2 无语义丢弃 → `dropped_transient`
  * - L3 保真损失 → `truncated_output` / `compaction_unlinked`
  * - L4 未知/漂移 → `unclassified`（同时升 `conversion_unclassified` warning 码）
+ *
+ * 与 `@zhushanwen/session-core` 的 `ImportDegradation` 结构等价（基座零依赖不反向
+ * import shared，两侧字段逐一同步，消费点类型检查拦截漂移）。
  */
 export interface ImportDegradation {
   /** 降级码（五值闭集，语义见各行） */

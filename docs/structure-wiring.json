@@ -1,0 +1,23 @@
+{
+  "$comment": "非 workspace 结构接线登记表（SSOT）。管辖区内（packages/ extensions/ resources/plugins/）含 package.json、但不在 pnpm-workspace.yaml globs 内的包必须逐条登记各机器管线接线面；workspace 标准成员不需要条目（workspace + coverage-gate 前缀默认接线）。新顶层结构第一笔 commit 只做接线与登记（S1，源自 PR #20 review-findings 分析组 D：ed6735b47 一 commit 三坑——新包落线时 CI/coverage/守卫面全漏）。机器对账 = scripts/check-structure-wiring.mjs（pre-commit + CI invariants 挂载），改本文件后跑 `node scripts/check-structure-wiring.mjs` 自检。字段：typecheckAnchor = .github/workflows/ci.yml 中覆盖该包的 step 名（文本锚点）；testScript = 根 package.json scripts 键（无测试装配填 null）；publish = true 时包名必须出现在 release-npm.yml 与 release-npm-dev.yml 两份发布线；coverage = true 时包根前缀必须在 coverage-gate.py PKG_PREFIXES 测量面内。exempt = 显式豁免清单（测试夹具/内嵌示例等非独立结构，豁免本身可审计）。",
+  "nonWorkspacePackages": {
+    "resources/plugins/scheduler-manager": {
+      "reason": "builtin taiji plugin（plugin system 直载装配，不入 pnpm workspace；vitest 防线经根 test:resources-plugins --config 指入）",
+      "typecheckAnchor": "TypeCheck - builtin plugins (resources)",
+      "testScript": "test:resources-plugins",
+      "publish": false,
+      "coverage": true
+    },
+    "resources/plugins/statusline": {
+      "reason": "builtin taiji plugin（同上；无测试装配——纯展示插件，typecheck 由 resources/plugins 统一 tsconfig 的 */index.ts 通配覆盖）",
+      "typecheckAnchor": "TypeCheck - builtin plugins (resources)",
+      "testScript": null,
+      "publish": false,
+      "coverage": false
+    }
+  },
+  "exempt": {
+    "packages/runtime/src/plugins/demo": "src 内嵌 demo 插件（plugin system 示例载荷，非独立结构）",
+    "packages/runtime/test/fixtures/plugins/hello-world": "测试夹具（vitest fs-guard 白名单域内，非独立结构）"
+  }
+}

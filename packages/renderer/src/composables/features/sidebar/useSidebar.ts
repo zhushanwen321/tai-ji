@@ -27,8 +27,8 @@
  * 命名收尾（2026-09-03 dev-merge dev-0.9.14）：本文件由 useSidebar.ts 重命名接管原名——
  * main 侧 2026-08-31 已独立完成同一 strangler 收尾（af96fa94c），两侧合并时采纳其终态命名。
  *
- * 未来替换挂载实现：P4 挂载实际以 core bootstrap.ts 的 registerMountPoints 四挂载点注册表
- * 落地（sidebar.tab / panel.header / composer.toolbar / statusbar，无 'sessions' 挂载点）；
+ * 未来替换挂载实现：P4 挂载实际以 core bootstrap.ts 的 registerMountPoints 五挂载点注册表
+ * 落地（sidebar.tab / panel.header / composer.toolbar / statusbar / modal，无 'sessions' 挂载点）；
  * 如需替换挂载实现，走该注册表（packages/core/src/bootstrap.ts），勿另起壳侧入口。
  */
 import type { ComputedRef } from 'vue'
@@ -58,6 +58,9 @@ import { useFileTree } from '@/composables/features/file-tree/useFileTree'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
+// [M4-a / btw-question D4 消费面①] deleteSession 级联的前端腿：枚举/处置/清映射三函数
+//（与 m7/agentcall 的 evictVirtualKeys 先例同构，登记结构在 useBtwTabData）。
+import { getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChat, ensureStreamSubscription } from '@/composables/features/chat/useChat'
 import { invalidateStatusCache } from '@/composables/features/chat/useSessionDerivations'
@@ -155,6 +158,13 @@ export function useSidebar() {
       for (const acsVirtualId of workflowStore.getAgentCallVirtualIdsByMain(sid)) {
         chat.evictVirtualKey(acsVirtualId)
       }
+      // [M4-a / btw-question D4 消费面① + D9④ 清派生键] deleteSession 级联的前端腿：
+      // **枚举先于清映射**（顺序约束）——主会话名下全部 btw 线逐线处置（vid 分区 +
+      // 派生 subagent/agentcall 键 + 两 store 记录分区，单入口幂等），随后清反查表
+      //（主已删，映射无意义）。runtime 半边（杀线进程 + 删线目录）在 session-lifecycle
+      // 的级联支线；失效腿（闲置回收/进程亡）不进本路径——分区保留待重载链回填（D9④）。
+      for (const btwVid of getBtwVirtualIdsByMain(sid)) disposeBtwLinePartitions(btwVid)
+      clearBtwVirtualKeyMapping(sid)
     },
     clearAgentCallMapping: (sid) => useWorkflowStore().clearAgentCallMapping(sid),
     disposeChat: (sid) => useChat().disposeSession(sid),

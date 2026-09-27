@@ -17,6 +17,8 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { PiEntry, ServerMessage, ServerMessageMap, SubagentRecord } from '@taiji/shared'
+import { isSubagentVirtualId, extractBtwPiSessionId, extractMainSessionId } from '@taiji/shared'
+import { isVirtualKeyOf } from '@taiji/core'
 
 const storeMocks = vi.hoisted(() => ({
   markSessionError: vi.fn(),
@@ -188,5 +190,38 @@ describe('handleRuntimeUnavailable（T5 runtime 崩溃清理接线）', () => {
 
     expect(storeMocks.finalizeAllStreaming).toHaveBeenCalledWith('disconnect')
     expect(storeMocks.clearAllPending).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('[B1 / btw-question D9③] 生产半边：onSubagentEntries 对 btw 线 vid 的键中段翻译', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const entries: PiEntry[] = [
+    {
+      type: 'message',
+      parentId: null,
+      timestamp: '2026-09-22T00:00:00.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'line derived' }], timestamp: 1 },
+    },
+  ]
+
+  it('① 线 vid 输入 → subagent:<线piSid>:<s> 三段键（不 throw）+ ② 命中 M4-a 清理前缀谓词（闭环）', () => {
+    const vid = 'btw:line-fx-b1'
+    expect(() => effects.onSubagentEntries!(vid, 'rec-b1', entries)).not.toThrow()
+
+    const key = 'subagent:line-fx-b1:rec-b1'
+    expect(storeMocks.applySubagentEntries).toHaveBeenCalledWith(key, entries)
+    expect(isSubagentVirtualId(key)).toBe(true)
+    expect(extractMainSessionId(key)).toBe('line-fx-b1') // 中段 = 线 piSessionId（M1-a 约定）
+    // ② 清理闭环：该键命中 disposeBtwLinePartitions 使用的同一前缀谓词
+    //（isVirtualKeyOf(key, owner) —— owner = extractBtwPiSessionId(vid)）
+    expect(isVirtualKeyOf(key, extractBtwPiSessionId(vid))).toBe(true)
+  })
+
+  it('③ 非 btw 输入零变化回归（直译不翻译）', () => {
+    effects.onSubagentEntries!('s-plain', 'rec-9', entries)
+    expect(storeMocks.applySubagentEntries).toHaveBeenCalledWith('subagent:s-plain:rec-9', entries)
   })
 })

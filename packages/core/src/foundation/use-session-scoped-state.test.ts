@@ -11,7 +11,7 @@
  * - registerSessionCleanup / triggerSessionCleanups 注册触发机制
  * - C-1 条件注册守卫三分支（有 scope dispose 反注册 / 无 scope 不 warn 不抛 /
  *   无 scope 时 cleanup 保留在注册表 = 前提 2）
- * - C-1 census 静态锁（全仓非测试调用点清单 = 14 处实测快照，清单外新调用点即红）
+ * - C-1 census 静态锁（全仓非测试调用点清单 = 16 处实测快照，清单外新调用点即红）
  *
  * 运行：cd packages/core && npx vitest run src/foundation/use-session-scoped-state.test.ts
  * 禁止 node:test / tsx --test。
@@ -346,8 +346,8 @@ describe('C-1 census 静态锁（守卫后误调用的唯一入口拦，新调�
   const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'test-results'])
 
   /**
-   * 实测快照（console-noise-triage §2 前提 3 census + C-1 实施期复测自校验，两期均 = 14）：
-   * 14 个文件各 1 处非测试调用点（泛型 10 / 裸括号 4）；含模块级 2 处
+   * 实测快照（console-noise-triage §2 前提 3 census 机制 + C-1 实施期复测自校验）：
+   * 16 个文件各 1 处非测试调用点（泛型 12 / 裸括号 4）；含模块级 2 处
    * （drawer/control.ts + useSessionTrace.ts，即 CDP 捕获的恒现 2 条 warn 源头）。
    * 清单外出现新调用点（新文件，或已有文件内第 2 处）即红 → 审阅其 scope 上下文。
    * 锁的是「误调用类」的入口边界：守卫后无 scope 误调用零运行时信号（观测损失已登记）。
@@ -355,6 +355,7 @@ describe('C-1 census 静态锁（守卫后误调用的唯一入口拦，新调�
   const CENSUS_SNAPSHOT: Record<string, number> = {
     'packages/core/src/domain/drawer/control.ts': 1,
     'packages/dom-core/src/composer/input/history.ts': 1,
+    'packages/renderer/src/components/panel/BtwPanel.vue': 1,
     'packages/renderer/src/components/panel/MessageStream.vue': 1,
     'packages/renderer/src/components/panel/tray/TrayNativePanel.vue': 1,
     'packages/renderer/src/composables/features/file-tree/useGitStatus.ts': 1,
@@ -363,6 +364,7 @@ describe('C-1 census 静态锁（守卫后误调用的唯一入口拦，新调�
     'packages/renderer/src/composables/features/sidebar/useBackgroundTasks.ts': 1,
     'packages/renderer/src/composables/features/trace/useSessionTrace.ts': 1,
     'packages/renderer/src/composables/panel/composer-shell.ts': 1,
+    'packages/renderer/src/composables/panel/useBtwTabData.ts': 1,
     'packages/renderer/src/composables/panel/useCompactQueue.ts': 1,
     'packages/renderer/src/composables/panel/useSkillNoticeStream.ts': 1,
     'packages/renderer/src/stores/plan-store.ts': 1,
@@ -401,7 +403,7 @@ describe('C-1 census 静态锁（守卫后误调用的唯一入口拦，新调�
     return out
   }
 
-  it('全仓非测试调用点清单 = 14 处实测快照（清单外新调用点即红）', () => {
+  it('全仓非测试调用点清单 = 16 处实测快照（清单外新调用点即红）', () => {
     expect(collectCallSites()).toEqual(CENSUS_SNAPSHOT)
   })
 

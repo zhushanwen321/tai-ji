@@ -1,5 +1,11 @@
 # @zhushanwen/subagent-core
 
+## 0.11.1
+
+### Patch Changes
+
+- 43a50ae2e: listModels now maps a dynamic empty catalog to null instead of surfacing an error (B1), and round-idle bookkeeping writes the derived manifest projection so reloaded runs observe the manifest without waiting for the next full rebuild (B2). Also recalibrates the D2 latency threshold for instrumented-load runs.
+
 ## 0.11.0
 
 ### Minor Changes

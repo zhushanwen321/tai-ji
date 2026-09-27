@@ -85,13 +85,33 @@ describe("callLLM", () => {
 		expect(result).toEqual({ ok: false, error: "user aborted", stopReason: "aborted" });
 	});
 
-	it("TC3 stopReason=stop（正常）→ 不受 stopReason 检查影响，ok:true 提取文本", async () => {
+	it("TC3 stopReason=stop（正常）→ ok:true 提取文本 + 终态 stopReason 透传", async () => {
 		const ctx = makeCtx({ ok: true, apiKey: "k" });
 		mockComplete.mockResolvedValue({ stopReason: "stop", content: [{ type: "text", text: "  hello  " }] });
 
 		const result = await callLLM(ctx, { model: makeModel(), systemPrompt: "s", messages: [] });
 
+		expect(result).toEqual({ ok: true, content: "hello", stopReason: "stop" });
+	});
+
+	it("TC3b stopReason=length（预算截断）→ ok:true + stopReason 透传（调用方区分截断与正常空文本的数据源）", async () => {
+		const ctx = makeCtx({ ok: true, apiKey: "k" });
+		// reasoning 模型 thinking 吃光预算的真实形态：stopReason=length、text 块为空
+		mockComplete.mockResolvedValue({ stopReason: "length", content: [] });
+
+		const result = await callLLM(ctx, { model: makeModel(), systemPrompt: "s", messages: [] });
+
+		expect(result).toEqual({ ok: true, content: "", stopReason: "length" });
+	});
+
+	it("TC3c stopReason 缺省（faux/自定义 provider 形态）→ 字段不带（additive 缺省语义，既有消费方零影响）", async () => {
+		const ctx = makeCtx({ ok: true, apiKey: "k" });
+		mockComplete.mockResolvedValue({ content: [{ type: "text", text: "hello" }] });
+
+		const result = await callLLM(ctx, { model: makeModel(), systemPrompt: "s", messages: [] });
+
 		expect(result).toEqual({ ok: true, content: "hello" });
+		expect("stopReason" in result).toBe(false);
 	});
 
 	it("usage 透传：resp.usage 存在 → ok:true 结果透出该对象（additive，设计 §3.3 ②）", async () => {

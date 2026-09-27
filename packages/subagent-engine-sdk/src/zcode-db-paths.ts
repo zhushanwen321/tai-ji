@@ -3,10 +3,11 @@
 // zcode 会话库路径段常量 SSOT（纯常量模块，零 import——同 constants.ts 纪律）。
 //
 // 为什么在 SDK（契约根）而非 zcode-subagent-cli：路径段是「引擎写侧（zcode-cli
-// db-path.ts 构造 spawn env / handle.dbPath / 读取白名单）」与「宿主读侧（runtime
-// zcode-import/sqlite-access.ts 的 import allowlist）」之间的跨侧契约——两侧必须
-// 同源推导，禁止各自拼字符串漂移（同 paths.ts 头注的收编理由）。引擎包只依赖 SDK
-// （W5 边界），runtime 侧的共同依赖只能是 SDK 而非引擎包；此前两侧各持同形字面量、
+// db-path.ts 构造 spawn env / handle.dbPath / 读取白名单）」与「宿主读侧
+// （zcode-session-source src/sqlite-access.ts 的 import allowlist，runtime 经其消费）」
+// 之间的跨侧契约——两侧必须同源推导，禁止各自拼字符串漂移（同 paths.ts 头注的收编
+// 理由）。引擎包只依赖 SDK
+// （W5 边界），读侧的共同依赖只能是 SDK 而非引擎包；此前两侧各持同形字面量、
 // 靠 parity 测试文本比对防漂移，本模块收编为单源后两侧 import 同一常量。
 //
 // 为什么不并入 paths.ts：paths.ts 是 engineId 参数化的通用引擎布局；本模块是 zcode

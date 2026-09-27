@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { RelayTee, TEE_MAX_CONSECUTIVE_FAILURES, TEE_TOOL_RESULT_MAX_BYTES } from '../../../infra/relay/relay-tee.js'
 import type { ServerMessage } from '@taiji/shared'
-import { subagentVirtualId } from '@taiji/shared'
+import { subagentVirtualId, isSubagentVirtualId, extractMainSessionId } from '@taiji/shared'
 
 function createTee() {
   const published: Array<{ sid: string; msg: ServerMessage }> = []
@@ -215,5 +215,33 @@ describe('RelayTee 大 payload 截断', () => {
     ])
     const entry = entryFrames(published)[0].entries[0] as unknown as { message: { role: string; content: Array<{ type: string; text: string }> } }
     expect(entry.message.content[0].text).toBe(big)
+  })
+})
+
+describe('[B1 / btw-question D9③] 生产半边：btw 线归属的键中段翻译（M1-a 键中段位约定）', () => {
+  it('mainSessionId=btw vid：构造不 throw；键 = subagent:<线piSid>:<recordId>（vid 不入键、三段式）；bus 路由键保持 vid', () => {
+    const published: Array<{ sid: string; msg: ServerMessage }> = []
+    const publish = vi.fn((sid: string, msg: ServerMessage) => { published.push({ sid, msg }) })
+    const vid = 'btw:line-rt-b1'
+    expect(() => new RelayTee({ mainSessionId: vid, recordId: 'rec-b1', publish })).not.toThrow()
+    const tee = new RelayTee({ mainSessionId: vid, recordId: 'rec-b1', publish })
+    feedLines(tee, [
+      { type: 'message_start' },
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hi' } },
+    ])
+    const deltas = deltaFrames(published)
+    expect(deltas).toHaveLength(1)
+    // ① 三段键、不 throw，与 shared 工厂按线 piSessionId 构造逐字一致（INVAR-1.1 键契约闭环）
+    expect(deltas[0].sessionId).toBe(subagentVirtualId('line-rt-b1', 'rec-b1'))
+    expect(isSubagentVirtualId(deltas[0].sessionId)).toBe(true)
+    // ② 清理前缀 owner 面：中段 = 线 piSessionId（renderer disposeBtwLinePartitions 按
+    //    isVirtualKeyOf(key, extractBtwPiSessionId(vid)) 前缀命中——owner 同源即闭环）
+    expect(extractMainSessionId(deltas[0].sessionId)).toBe('line-rt-b1')
+    // D9 路由键不变：bus publish 第一参仍是线 vid（分区路由），仅键中段翻译
+    expect(published[0].sid).toBe(vid)
+    // entry 帧同理：路由键 vid、payload 归属 vid（路由键 ≠ 键中段，两面解耦）
+    feedLines(tee, [{ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }], timestamp: 1 } }])
+    const entries = entryFrames(published)
+    expect(entries[0].sessionId).toBe(vid)
   })
 })

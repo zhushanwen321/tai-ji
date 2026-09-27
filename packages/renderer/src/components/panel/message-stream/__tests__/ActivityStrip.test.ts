@@ -139,7 +139,7 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     wrapper.unmount()
   })
 
-  it('bash →「正在执行」+ mono 命令文本（executingBash props 注入）', async () => {
+  it('bash →「正在执行」+ elapsed meta（方案 A：命令不内联，悬停详情承载）', async () => {
     const wrapper = await mountStrip({
       occupancy: { turn: 'idle', compacting: false, bash: false },
       executingBash: { command: 'pnpm test', startedAt: Date.now() },
@@ -148,9 +148,28 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     expect(row.exists()).toBe(true)
     const text = wrapper.find('[data-testid="activity-strip-text-bash"]')
     expect(text.text()).toContain('正在执行')
-    expect(text.text()).toContain('pnpm test')
+    // elapsed mono meta（同键同参：startedAt=now → 已 0s）
+    expect(text.text()).toContain(t('panel.message.executingBashElapsed', { elapsed: '0s' }))
+    // 命令原文不再内联（长命令挤没横线的根因摘除）
+    expect(row.text()).not.toContain('pnpm test')
     expect(row.find('svg').exists()).toBe(true)
     wrapper.unmount()
+  })
+
+  it('bash 行悬停 → 详情含完整命令（方案 A HoverCard，portal 挂 body）', async () => {
+    const wrapper = await mountStrip({
+      occupancy: { turn: 'idle', compacting: false, bash: false },
+      executingBash: { command: 'pnpm test', startedAt: Date.now() },
+    })
+    await wrapper.find('[data-testid="activity-strip-text-bash"]').trigger('pointerenter')
+    await new Promise((r) => setTimeout(r, 260))
+    const detailBody = document.querySelector('[data-testid="activity-strip-detail-body-bash"]')
+    expect(detailBody?.textContent).toBe('pnpm test')
+    expect(document.querySelector('[data-testid="activity-strip-detail-bash"]')?.textContent).toContain(
+      t('panel.message.bashCommandLabel'),
+    )
+    wrapper.unmount()
+    document.querySelector('[data-testid="activity-strip-detail-bash"]')?.remove()
   })
 
   it('turn=dispatching →「思考中…」行（occupancy 权威投影，替代原 TurnMeta 占位）', async () => {
@@ -280,13 +299,11 @@ describe('ActivityStrip · 横线分隔行族（压缩中降级 + D3 增强规�
     const spinner = bashRow.find('.animate-spin')
     expect(spinner.classes()).toContain('size-[13px]')
     expect(spinner.attributes('stroke-width')).toBe('2.2')
-    // 主文案 text-sm/fg/550；命令保持 mono text-xs
+    // 主文案 text-sm/fg/550；方案 A 后无内联命令（命令在悬停详情），行内仅短语 + elapsed meta
     const main = bashRow.find('[data-testid="activity-strip-text-bash"] > span')
     expect(main.classes()).toContain('text-[length:var(--text-sm)]')
     expect(main.classes()).toContain('font-[550]')
-    const command = bashRow.find('[data-testid="activity-strip-text-bash"] .font-mono')
-    expect(command.text()).toBe('pnpm test')
-    expect(command.classes()).toContain('text-[length:var(--text-xs)]')
+    expect(bashRow.find('[data-testid="activity-strip-text-bash"] .font-mono').exists()).toBe(true)
     wrapper.unmount()
 
     // thinking 行：同款结构（渐隐线 + 13px spinner + text-sm 主文案），无 chip
@@ -459,7 +476,8 @@ describe('ActivityStrip × MessageStream 集成 · 迁移收口（P4）', () => 
     await nextTick()
     const bashRow = wrapper.find('[data-testid="activity-strip-row-bash"]')
     expect(bashRow.exists()).toBe(true)
-    expect(wrapper.find('[data-testid="activity-strip-text-bash"]').text()).toContain('pnpm lint')
+    // 方案 A：命令原文不内联（悬停详情承载），行内只有「正在执行」+ elapsed
+    expect(wrapper.find('[data-testid="activity-strip-text-bash"]').text()).not.toContain('pnpm lint')
     // 旧渲染点清理：原 executing-bash-notice testid 不应再出现（行已迁 ActivityStrip）
     expect(wrapper.find('[data-testid="executing-bash-notice"]').exists()).toBe(false)
 
@@ -493,13 +511,16 @@ describe('ActivityStrip × MessageStream 集成 · 迁移收口（P4）', () => 
 })
 
 describe('ActivityStrip · i18n key 完整（P5）', () => {
-  /** 五个文案 key：compacting 手动/自动 + 待发 chip、bash、thinking（ActivityStrip 唯一新增消费面） */
+  /** 文案 key：compacting 手动/自动 + 待发 chip、bash、thinking + 方案 A 新增两键（elapsed meta /
+ *  * 悬停详情标题）在 zh/en locale 均定义 */
   const KEYS: Array<[string, string, string]> = [
     ['panel.message.compressing', "compressing: '压缩中'", "compressing: 'Compacting'"],
     ['panel.message.autoCompressing', "autoCompressing: '正在自动压缩上下文'", "autoCompressing: 'Auto-compacting context…'"],
     ['panel.message.compactingQueueChip', "compactingQueueChip: '待发 {count}'", "compactingQueueChip: '{count} queued'"],
     ['panel.message.executingBash', "executingBash: '正在执行'", "executingBash: 'Running'"],
     ['panel.message.dispatching', "dispatching: '思考中…'", "dispatching: 'Thinking…'"],
+    ['panel.message.executingBashElapsed', "executingBashElapsed: '已 {elapsed}'", "executingBashElapsed: '{elapsed} elapsed'"],
+    ['panel.message.bashCommandLabel', "bashCommandLabel: '完整命令'", "bashCommandLabel: 'Command'"],
   ]
 
   it('compressing/autoCompressing/compactingQueueChip/executingBash/dispatching 在 zh/en locale 均定义', () => {

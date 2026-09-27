@@ -104,6 +104,9 @@ async function mountContainer() {
         // plan tab 内容面板（plan 模式重设计 u1-docs-panel）：PlanDocsPanel 起真面板内含
         // RPC/订阅副作用，接线断言面 stub 同其余桌面面板
         PlanDocsPanel: DesktopStub('PlanDocsPanel', 'plan-docs-panel'),
+        // btw tab 内容面板（btw-question D7 M3-a）：真面板内含 btw.list/create 门面副作用，
+        // 接线断言面 stub 同其余桌面面板
+        BtwPanel: DesktopStub('BtwPanel', 'btw-panel'),
       },
     },
   })
@@ -478,5 +481,44 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     expect(events.length).toBeGreaterThan(0)
     window.removeEventListener('taiji:splitter-layout', onLayout)
+  }, 60_000)
+})
+
+// btw tab 接线（btw-question D7，M3-a）：v-if chain 加分支 + 面板常驻注入（与 plan 同款
+// ——tab 激活即渲染，面板自渲染线列表空态，不经 DrawerPanel 空态 fallback）
+describe('PanelContainer btw tab 接线（btw-question D7 M3-a）', () => {
+  it('btw tab 激活 → 注入 BtwPanel（常驻容器）；btw tab 按钮常驻（第 10 员）；既有 9 tab 无回归', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-btw-wire')
+    openDrawerTab('btw')
+
+    const wrapper = await mountContainer()
+    await nextTick()
+
+    // 面板注入（内部线列表/空态/fork pill 归 BtwPanel 自身单测）
+    expect(wrapper.find('[data-testid="btw-panel"]').exists()).toBe(true)
+    // 常驻注入语义：面板存在时空态 fallback 不渲染（与 plan 同款）
+    expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
+    // btw tab 按钮随 SideDrawerTab 第 10 员常驻（DrawerPanel TabMeta）
+    expect(wrapper.find('[data-testid="drawer-tab-btw"]').exists()).toBe(true)
+    // 既有 9 tab 无回归
+    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan']) {
+      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
+    }
+  }, 60_000)
+
+  it('切走 tab（git）→ btw 面板卸载（v-if chain 互斥）', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-btw-switch')
+    openDrawerTab('btw')
+
+    const wrapper = await mountContainer()
+    await nextTick()
+    expect(wrapper.find('[data-testid="btw-panel"]').exists()).toBe(true)
+
+    setDrawerTab('git')
+    await nextTick()
+    expect(wrapper.find('[data-testid="btw-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
   }, 60_000)
 })

@@ -18,7 +18,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { SessionMessageHandler, type SessionHandlerContext } from '../session-message-handler.js'
 import { ImportServiceError, type ImportService } from '../../services/session/import-service.js'
-import { zcodeImportDbAllowlist } from '../../services/session/zcode-import/sqlite-access.js'
+import { zcodeImportDbAllowlist } from '@zhushanwen/zcode-session-source'
 import { getDataDir } from '@taiji/shared/paths'
 import type { ISessionService } from '../../interfaces.js'
 import type { ClientMessage, ImportCandidatesReply, ImportReply } from '@taiji/shared'

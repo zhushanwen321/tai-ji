@@ -1,5 +1,19 @@
+// coverage-file-gate-exempt: 组合根装配接线面——决策逻辑在注入工厂（btw-line-spawn-options.ts 等，各有直测），本文件新增行是构造注入与回调接线，单测不可达（入口装配）；行为由 validate-runtime-bundle 与 runtime e2e 承载
 import { RuntimeServer } from './transport/server.js'
 import { SessionService } from './services/session/session-service.js'
+// BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
+import { BtwService } from './services/session/btw-service.js'
+// 线 spawn options 工厂（buildLineSpawnOptions 决策面的可测提取，见该文件 docstring）。
+import { createBtwLineSpawnOptionsFactory } from './services/session/btw-line-spawn-options.js'
+import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
+import { scanDegradedFlag } from './infra/pi/session-file-utils.js'
+// D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧在
+// btw-line-spawn-options 工厂——getMigrationGate 经下方 createBtwLineSpawnOptionsFactory 接线）。
+// [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入面（session-lifecycle）。
+import { getMigrationGate, setBtwCascadeOps } from './services/session/session-lifecycle.js'
+// [M4-a] 线终结的插件 sessionData 真删清理（onLineTerminated 扇出，与主会话 delete B5 段同源）。
+import { clearRemovedSessionData } from './services/plugin-service/session-data-store.js'
+import { findPiExecutable } from './infra/pi/find-pi-executable.js'
 import { GenStatsService } from './services/session/gen-stats-service.js'
 import { createSessionDeliveryRegistry } from './services/session/session-delivery-registry.js'
 import { createCompletionBackflow } from './services/session/completion-backflow.js'
@@ -14,7 +28,7 @@ import type { IProviderCredentialResolver } from './services/ports/provider-cred
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
-import { BASE_PORT, MAX_PORT } from '@taiji/shared'
+import { BASE_PORT, MAX_PORT, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import { initLogger, closeLogger, logger, captureMemorySnapshot, formatMemoryWatermarkLine, MEMORY_WATERMARK_INTERVAL_MS } from './infra/logger.js'
@@ -89,9 +103,9 @@ import { ImportService } from './services/session/import-service.js'
 import { ExternalFileImportSource } from './services/session/import-source-external-file.js'
 import { ZcodeImportSource } from './services/session/import-source-zcode.js'
 import type { SessionImportSource } from './services/session/import-source.js'
-// zcode 源默认库 = 宿主 HOME 下 zcode 会话库动态推导（sqlite-access 内重声明，与引擎包
-// db-path.ts 同语义；runtime 不依赖引擎包）
-import { hostZcodeDbPath } from './services/session/zcode-import/sqlite-access.js'
+// zcode 源默认库 = 宿主 HOME 下 zcode 会话库动态推导（zcode-session-source 与引擎包
+// db-path.ts 同源 SDK 常量，session-reader-shared-core U10 起唯一承载）
+import { hostZcodeDbPath } from '@zhushanwen/zcode-session-source'
 import { WorkspaceService } from './services/workspace/workspace-service.js'
 import { WorkspaceDetector } from './services/worktree/workspace-detector.js'
 // D8-1（perf W29）：后台初始化序列（listen 后执行）——独立模块承载使「migrateBuiltin →
@@ -660,6 +674,10 @@ async function main(): Promise<void> {
       fileChangeDiff,
       onExtensionUIRequest: (requestId, sid, method, payload) => {
         server.registerExtensionTimeout(sid, requestId, method, payload)
+        // [BU2 / D1 闲置豁免生产通道·置位推送] btw 线（sid=vid）的挂起交互请求 →
+        // setPendingInteraction(true)（豁免不计闲置）；解除 = 终态派生（respond/expired/失效
+        // 清空中转 pending 表 → BtwService.idleTick 经 hasPendingUiRequests 见空即解除）。
+        if (isBtwVirtualId(sid)) btwService.setPendingInteraction(sid, true)
       },
       // session-manager 请求路由：fire-and-forget 调 server.handleSessionManagerRequest
       //（由 SessionManagerHandler 异步处理并回写 pi response）。
@@ -764,6 +782,10 @@ async function main(): Promise<void> {
       // 调用发生在 session 创建后，引用恒就绪）。
       onRecordEntriesInvalidated: (sid, customType) => {
         sessionService.invalidateRecordEntries(sid, customType)
+        // AP-4（U2）：plugin 订阅腿——custom entry 失效信号按 (sessionId, customType)
+        // 双匹配订阅注册表，命中者定向 notify 对应 Worker；无订阅者零开销。
+        // record 三族早退门在 invalidateRecordEntries 内部保留，本腿不受扰。
+        pluginService.notifyEntryInvalidation(sid, customType)
       },
       // [reload-closeout D2] 送达水位对账腿（agent_settled，fire-and-forget）：重跑 record
       // 派生管线，发布门 = 已发布快照水位——守卫/发布门处丢的帧下轮触发必补发（回调
@@ -1049,6 +1071,99 @@ async function main(): Promise<void> {
   // 只有 S14 场景能发现。删除链侧保证只在 extras 条目确认清除后调用（防幽灵标记）。
   configService.setQuotaStateCleaner((providerId) => quotaService.clearProviderState(providerId))
 
+  // ── BtwService（btw-question D1/D2/D3 + B2 授权接线，M2-b）──
+  // 六项依赖按 BtwServiceDeps docstring 归位组合根：线进程复用同一 pm（出站 env 经
+  // rpc-client start → buildOutboundChildEnv 统一武装，C-proc-09，无新增进程创建点）；
+  // registerSession 走 SessionService 的 lifecycle 兼容委托（hidden:true 透传 = active
+  // 腿防线）；源文件解析 = 活跃 ?? 扫盘（与 resolveSessionFilePath 同源）；pi 二进制与
+  // pm 同 effectiveRoot 锚点。
+  /**
+   * [BU3 / D1 回收提醒 runtime 半边] reclaimImminent 翻转广播：置位（onWillReclaim，提前
+   * 1 拍窗口）与清除（onThreadStateChanged：回收发生/用户续问/进程亡/挂起交互置位）同发
+   * 该主会话线列表 state 帧（typeKey 'btw'，双通道同 payload——共用 buildBtwThreadListPayload
+   * 防漂移）。best-effort：失败留痕不打断回收主链（恢复通道 = btw.list RPC 拉取兜底）。
+   * renderer 消费半边已接线（useBtwTabData setBtwReclaimReminder，数据源 reclaimImminent）。
+   */
+  const publishBtwThreadList = (vid: string): void => {
+    const rec = btwService.getLine(vid)
+    if (!rec) return
+    try {
+      messageBus.publish(rec.mainSid, {
+        type: 'btw.list',
+        id: server.nextPushId(),
+        payload: buildBtwThreadListPayload(btwService, rec.mainSid),
+      })
+    } catch (e) {
+      // best-effort：提醒广播失败不打断回收主链（恢复通道 = btw.list RPC 拉取兜底），留痕可归因
+      console.error(`[btw] reclaim-reminder broadcast failed (vid=${vid}) — pull fallback via btw.list RPC remains available:`, e)
+    }
+  }
+  const btwService = new BtwService({
+    processes: pm,
+    // 线 launch 快照组装（preset 回落链 / skillPaths 回落 / 模型终态语义的决策面
+    // 在 btw-line-spawn-options.ts，直测见其同名单测；此处仅窄面接线）。
+    buildLineSpawnOptions: createBtwLineSpawnOptionsFactory({
+      migrationGate: getMigrationGate,
+      findScannedSession: (sid) => sessionService.findScannedSession(sid),
+      getLaunchPresetOptions: (presetId, cwd) => sessionService.getLaunchPresetOptions(presetId, cwd),
+      getSkillPaths: (cwd) => sessionService.getSkillPaths(cwd),
+      getExtensionPaths: (cwd) => sessionService.getExtensionPaths(cwd),
+      getReplaceSystemPrompt: () => sessionService.getReplaceSystemPrompt(),
+    }),
+    registerSession: (id, client, cwd, label, sessionFilePath, hidden) =>
+      sessionService.initializeManagedSession(id, client, cwd, label, sessionFilePath, hidden),
+    resolveMainSessionFile: (mainSid) =>
+      sessionService.getSession(mainSid)?.sessionFilePath ?? sessionService.findScannedSession(mainSid)?.filePath,
+    resolvePiCommand: () => findPiExecutable(effectiveRoot),
+    // [M4-a / D9④ 单入口终结扇出] 线终结（级联 / 批内直删 / btw.remove 三路同经 closeLine）的
+    // lifecycle 收尾：planned kill 抑制 exit 回调，Map 条目/总线分区/插件数据不自清——
+    // 在此镜像主会话 delete 的收尾序（detach → removeSessionEntry → 插件 sessionData 真删）。
+    // 冷线（从未注册）getSession 空 → 三步全幂等零动作；失效腿（闲置回收）不经过本回调。
+    onLineTerminated: (vid) => {
+      if (!sessionService.getSession(vid)) return
+      sessionService.detachSession(vid)
+      sessionService.removeSessionEntry(vid)
+      clearRemovedSessionData(vid)
+    },
+    // [BU3 / D1 回收提醒] 提前 1 拍窗口置位 → 广播；清除侧同经 onThreadStateChanged 广播。
+    onWillReclaim: publishBtwThreadList,
+    onThreadStateChanged: publishBtwThreadList,
+    // [BU2 / D1 闲置豁免派生解除] 交互中转 pending 快照（respond/expired/失效三终态共同
+    // 落点；与上方主 idle reaper 豁免 #8 同款 server 薄委托先例）。
+    hasPendingUiRequests: (vid) => server.getPendingUiRequests(vid).length > 0,
+    // [BU5] 孤儿补账扫描降级闸：本轮 sessions 扫描不可信 → 补账跳过改下次启动重试。
+    isSessionScanDegraded: () => scanDegradedFlag.last,
+    // [BU6 / V6·⑤a] D9⑤ 行为契约注入生产 trace（运行期可达；oracle 对账单测层见
+    // btw-contract-inject.test.ts，system-prompt-trace 对账/豁免结论见本轮 deviations）。
+    traceContractInjection: (t) => {
+      logger.info(`[btw] contract injection: vid=${t.vid} round=${t.round} carrier=${t.carrier} contract=${t.contract}`)
+    },
+  })
+  // B3 ensure 链分支（D1⑥/V5 回收后续问）：ensureActive 对 btw vid 转 ensureProcess。
+  sessionService.setBtwService(btwService)
+  // [M4-a / btw-question D4 消费面① + D9④ + D5] 级联接线 + 启动孤儿补账（M1-b 备忘清偿）：
+  // ① delete/deleteByCwd 的级联支线经模块槽注入（BtwService 两原语结构性满足窄接口）；
+  // ② 孤儿补账先于重建——先清「主会话已不存在」的线目录（崩溃恢复对齐主删即删；
+  //    退出/闲置回收不删），rebuildFromDisk 只登记在场主线（裁决⑧ 重启可复原）。
+  //    同步执行：纯 btw 根目录扫描 + 主解析（sessions/ 扫描 TTL 缓存，首次扫描本就即将发生），
+  //    须在 WS listen 前完成——首个 session.delete 到达时注册表/目录已对账。
+  setBtwCascadeOps(btwService)
+  const btwOrphansReconciled = btwService.reconcileOrphanThreadDirs()
+  const btwLinesRebuilt = btwService.rebuildFromDisk().length
+  if (btwOrphansReconciled > 0 || btwLinesRebuilt > 0) {
+    console.log(`[btw] startup reconcile: orphans removed=${btwOrphansReconciled}, lines rebuilt=${btwLinesRebuilt}`)
+  }
+  /**
+   * btw.create 主会话解析（handler ctx，BtwRoutingDeps.resolveMain）：活跃腿携带主 turn
+   * 活跃信号（分支③ pill 增强）；扫盘腿（冷主会话）无可读占用态恒 false。
+   */
+  const resolveBtwMain = (mainSid: string): { cwd: string; mainTurnActive: boolean } | undefined => {
+    const active = sessionService.getSession(mainSid)
+    if (active) return { cwd: active.cwd, mainTurnActive: active.isGenerating }
+    const scanned = sessionService.findScannedSession(mainSid)
+    return scanned ? { cwd: scanned.cwd, mainTurnActive: false } : undefined
+  }
+
   const tServicesReady = performance.now()
   server.setServices(sessionService, configService, modelService, {
     extension: extensionService,
@@ -1080,6 +1195,9 @@ async function main(): Promise<void> {
     // u8（reply 通路对称接线）：reply 超限错误 envelope 的恢复指引携带 session 文件实路径，
     // 与上方 MessageBus（push 通路）共用同一 resolveSessionFilePath resolver 实例。
     replyGuardResolver: resolveSessionFilePath,
+    // btw 线三帧路由（btw-question M2-b，B1/B2 授权接线）：BtwService 窄面 + 主会话解析
+    // 注入 BtwMessageHandler（assembleOptionalHandlers 装配 → buildRoutes 展开 handles）。
+    btw: { service: btwService, resolveMain: resolveBtwMain },
   })
 
   // ── u3b（idle-pi-reclamation）：空闲 pi 进程回收装配 ──
@@ -1195,6 +1313,10 @@ async function main(): Promise<void> {
     // 回收拍。timer 已 unref，此 stop 是显式收口双保险（先取消先例同上）。
     shutdownStep('stop-idle-reaper')
     idleReaperHandle?.stop()
+    // [M4-a / M2-b 备忘清偿] btw 闲置扫描定时器收口（timer 已 unref 不阻塞退出，此处显式
+    // stop 是与上方 idle-reaper 同款的收口双保险；shutdown 后不再有回收拍）。线会话文件
+    // **不删**（退出不删，D5 裁决⑧）；线进程由下方 server.stop → destroyAll 统一杀（同一 pm）。
+    btwService.dispose()
     console.log(`\n[runtime] received ${signal}, shutting down...`)
     try {
       shutdownStep('flush-stores')

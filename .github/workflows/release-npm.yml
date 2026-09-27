@@ -64,6 +64,16 @@ jobs:
       - name: Build session-delivery
         run: pnpm --filter @zhushanwen/session-delivery build
 
+      # session 读取共享基座两包（session-reader-shared-core 实施，impl-plan U5）：
+      # session-core 是 zcode-session-source 的 workspace 依赖（converter 消费 Entry 类型），
+      # 构建顺序必须在前；两者都是 @zhushanwen/pi-session-reader 的 value dep，reader
+      # 新版本上 registry 前两包必须已发布（changeset 闭包，见 AGENTS.md 发布闭包时序）。
+      - name: Build session-core
+        run: pnpm --filter @zhushanwen/session-core build
+
+      - name: Build zcode-session-source
+        run: pnpm --filter @zhushanwen/zcode-session-source build
+
       # G2 构建入口显式化（docs/design/npm-publish-surface-guard.md §3.3 D4）：subagent-core
       # 双档产物由显式步骤保证——此前发布流程中唯一构建入口是 smoke 副作用（仅档 1
       # build），dist.bundle/（自包含 vendoring 档）无任何入口，tarball 缺货零报警
@@ -129,6 +139,8 @@ jobs:
           echo "This includes:" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/extension-protocol\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/session-delivery\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@zhushanwen/session-core\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@zhushanwen/zcode-session-source\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/pi-*\` extensions (publishes TS source, no build)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Pre-publish gates: extensions typecheck + \`@zhushanwen/subagent-core\` dist smoke (build + CJS require + golden replay, D9-②) + publish surface guard (files whitelist ↔ built artifacts, C-proc-11)" >> "$GITHUB_STEP_SUMMARY"

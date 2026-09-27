@@ -25,6 +25,12 @@ vi.mock('@taiji/core/domain/drawer', () => ({
   openSubagent: openSubagentMock,
 }))
 
+// prefix 走 i18n（覆盖包级「t 返回 key」默认 mock）：断言渲染的是 zh 文案而非裸 key 透出
+vi.mock('vue-i18n', async () => {
+  const { i18nMock } = await import('../../../__tests__/helpers/i18n-mock')
+  return i18nMock({ 'panel.message.subagent': '子代理' })
+})
+
 /** 构造真实形态的 subagent ToolCall（顶层拍平 input） */
 function makeSubagent(over: Partial<ToolCall> = {}): ToolCall {
   return {
@@ -53,8 +59,8 @@ describe('BlockSubagent: 标题行渲染（顶层 input 拍平字段）', () => 
       props: { tool: makeSubagent(), sessionId: 's1' },
     })
     const text = wrapper.text()
-    // subagent prefix 文案（大写 S，CSS uppercase 已移除改为首字母大写文字）
-    expect(text).toContain('Subagent')
+    // subagent prefix 文案来自 i18n 键（t('panel.message.subagent') → zh「子代理」）
+    expect(text).toContain('子代理')
     // agent 名（顶层 input.agent，非默认值）
     expect(text).toContain('researcher')
     // slug（顶层 input.slug）

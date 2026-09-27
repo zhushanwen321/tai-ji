@@ -11,7 +11,7 @@ import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import type { ServerMessageUnion } from '@taiji/shared'
 import * as events from '../../api/events'
 import * as mock from '../index'
-import { __clearTimers, setMockE2E, setMockTiming, resetMockTiming, session, chat, config, model, extension, plugin, composer, search, settings, workspace, quota, project, preset } from '../index'
+import { __clearTimers, setMockE2E, setMockTiming, resetMockTiming, session, chat, config, model, extension, plugin, composer, search, settings, workspace, quota, project, preset, btw } from '../index'
 import type { Timing } from '../run-send-stream'
 import { file } from '../file'
 import { git, fixtureGitStatus } from '../git'
@@ -586,9 +586,33 @@ describe('mock workspace / quota / project / preset domain', () => {
 // ── 门面导出与 real/whats 通道 ──────────────────────────────────────────────
 describe('mock 门面导出', () => {
   it('导出齐备（facade 三元消费方逐项存在）', () => {
-    for (const key of ['session', 'chat', 'config', 'model', 'extension', 'plugin', 'composer', 'search', 'settings', 'workspace', 'quota', 'project', 'preset'] as const) {
+    for (const key of ['session', 'chat', 'config', 'model', 'extension', 'plugin', 'composer', 'search', 'settings', 'workspace', 'quota', 'project', 'preset', 'btw'] as const) {
       expect(mock[key]).toBeDefined()
     }
     expect(typeof mock.setMockE2E).toBe('function')
+  })
+})
+
+// ── mock btw 域（btw-question D6，M2-a）─────────────────────────────────────
+describe('mock btw 域（D6 3 控制帧）', () => {
+  it('create：vid 形态 btw:* + mainSid 回显 + forkState 恒 full（mock 无 fork 面，显式登记偏差）', async () => {
+    const r = await btw.create('btw-main-a')
+    expect(r.vid).toMatch(/^btw:/)
+    expect(r.mainSid).toBe('btw-main-a')
+    expect(r.forkState).toBe('full')
+  })
+
+  it('list 按 mainSid 分区枚举 + remove 后即消失 + 跨主会话隔离 + 未命中 vid no-op', async () => {
+    const first = await btw.create('btw-main-b')
+    const second = await btw.create('btw-main-b')
+    expect(first.vid).not.toBe(second.vid)
+    expect((await btw.list('btw-main-b')).map((t) => t.vid)).toEqual([first.vid, second.vid])
+    // 隔离：另一主会话无线（注册表按 mainSid 分区，不串台）
+    expect(await btw.list('btw-main-c')).toEqual([])
+    // 关线生效
+    await btw.remove(first.vid)
+    expect((await btw.list('btw-main-b')).map((t) => t.vid)).toEqual([second.vid])
+    // 未命中 vid 不抛（mock v1 不模拟失败口径）
+    await expect(btw.remove('btw:ghost')).resolves.toBeUndefined()
   })
 })

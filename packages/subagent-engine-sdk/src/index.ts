@@ -37,8 +37,9 @@ export * from "./node-executor.ts";
 // stderr tee 轮转/清理单源（前缀参数化；两引擎包的 logs/stderr-rotation.ts 为薄包装）。
 export * from "./logs/stderr-rotation.ts";
 
-// zcode 会话库路径段常量单源（MF-1-2 收编）：zcode 引擎写侧（db-path.ts）与 runtime
-// 读侧（zcode-import/sqlite-access.ts）的跨侧路径契约，两侧 import 同一常量。
+// zcode 会话库路径段常量单源（MF-1-2 收编）：zcode 引擎写侧（db-path.ts）与
+// zcode-session-source 读侧（src/sqlite-access.ts，runtime 经其消费）的跨侧路径契约，
+// 两侧 import 同一常量。
 export * from "./zcode-db-paths.ts";
 
 // relay 通道 env 名与协议常量 SSOT（round1-reuse R9：core ./relay-env 子入口与 pi

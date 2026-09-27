@@ -80,6 +80,58 @@ export const SESSION_NOT_FOUND = 'SESSION_NOT_FOUND'
 export const RESTORE_FAILED = 'RESTORE_FAILED'
 
 /**
+ * 会话激活失败（无码错误的统一包装）。
+ *
+ * model-switch-live-provider-sync U2：停止态/回收态 session 的模型切换与档位设置先走
+ * `ensureActive`（拉起或 join 引擎）——激活阶段抛出的**无码**错误统一包此码；
+ * 既有语义码（SESSION_NOT_FOUND / MODEL_NOT_CONFIGURED / RESTORE_FAILED /
+ * BUILTIN_EXTENSIONS_MISSING）一律**原样透传**（设计 §3.4 优先级规则：避免把「未配模型」
+ * 「打包产物断链」误报成「会话无法恢复」）。
+ */
+export const SESSION_ACTIVATE_FAILED = 'SESSION_ACTIVATE_FAILED'
+
+/**
+ * 会话激活超时（RPC 边界上界，`TAIJI_SESSION_ACTIVATE_TIMEOUT_MS`，默认 15s）。
+ *
+ * 超时只终止 RPC 等待（前端 toast 指引重试），**不取消后台恢复**——join 语义保留。
+ * 触发条件与恢复动作见设计 §3.4 错误规格表「激活超时」行 / §3.6「激活的等待上界」行。
+ */
+export const SESSION_ACTIVATE_TIMEOUT = 'SESSION_ACTIVATE_TIMEOUT'
+
+/**
+ * pi 报 `Model not found` 且模型**不在** taiji 注册表（配置已被删/改名）。
+ * 用户面：「该模型已不存在，请重新选择」。
+ */
+export const MODEL_NOT_FOUND = 'MODEL_NOT_FOUND'
+
+/**
+ * pi 报 `Model not found`、模型**在**注册表内，但 provider **无凭据**。
+ * 用户面：「该 provider 未配置凭据，请到设置填写 API Key」。
+ * 不重载既有 MODEL_NOT_CONFIGURED——后者含义是「session 未配默认模型」（引导去设置选默认模型）。
+ */
+export const PROVIDER_CREDENTIAL_MISSING = 'PROVIDER_CREDENTIAL_MISSING'
+
+/**
+ * pi 报 `Model not found`、模型在注册表、凭据齐备——即运行中进程的模型快照尚未同步（新配置刚写入、
+ * 等待 provider-live-sync 扩展刷新）**或**配置里含使 pi 拒载的坏内容（两因不机器可分）。
+ *
+ * 用户面 = **双因文案**：「若刚改过配置，请稍等两秒重试；若持续失败，请到设置页检查 provider 配置」
+ * （设计 D11：不做 taiji 侧模型配置合法性判定，pi 自身 `getError()` 全文落运行日志作为机器证据）。
+ */
+export const ENGINE_MODEL_MISSING = 'ENGINE_MODEL_MISSING'
+
+/**
+ * pi `set_model` RPC 的「模型未找到」错误文本前缀（pi 0.84.4 实装唯一可用判据）。
+ *
+ * 权威源：`node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-mode.js:371`
+ * `return error(id, "set_model", `Model not found: ${provider}/${modelId}`)`；RpcClient 对
+ * `success:false` 帧 `reject(new Error(res.error))`（`infra/pi/rpc-client.ts:624`）——即错误
+ * **无 code 字段**，只能按文本前缀分类（分类结果再经 taiji 注册表/凭据两判，见 U2）。
+ * pi 版本升级后此文本变更即分类失守，受 C-proc-08 探针守卫（docs/pi-semantics.json PS-xx）。
+ */
+export const PI_MODEL_NOT_FOUND_PREFIX = 'Model not found:'
+
+/**
  * pi RPC 命令超时错误（D3a pi 半死自愈：超时判别收口为类型）。
  *
  * [arch] 定义在 utils（services/infra 共享中立层）：services 层（message-dispatcher）

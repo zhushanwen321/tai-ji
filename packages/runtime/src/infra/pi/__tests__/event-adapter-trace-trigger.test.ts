@@ -72,13 +72,34 @@ describe('withTraceTrigger 组合注册不互相覆盖（session-trace A33 回�
     ])
   })
 
-  it('trace 腿独立于 main 腿：entry_appended 非 record customType 时 main 走 noop，trace-trigger 仍追加', () => {
+  it('trace 腿独立于 main 腿：entry_appended 非 record customType 时 main 产出失效事件，trace-trigger 仍追加在后', () => {
+    // 放宽（D5「失效转发的三段链路」①）：任何 custom entry 均产出失效信号，
+    // 「避免无关 entry 触发拉取」由派发层订阅者存在性守住（原三字面量过滤删除）。
+    // 组合语义不变：main 腿产失效事件不拖累 trace 腿——trace 视图仍需感知
+    // extension appendEntry 触发追赶拉取；main 产物在前、trace-trigger 追加在后。
     const events = translate(
       { type: 'entry_appended', entry: { type: 'custom', customType: 'demo:other' } } as unknown as PiEntryAppendedEvent,
       SID,
     )
-    // 组合语义：main handler 的过滤（只对 record customType 产失效信号）不拖累
-    // trace 腿——trace 视图仍需感知 extension appendEntry 触发追赶拉取
+    expect(events).toEqual([
+      { kind: 'record-entry-appended', customType: 'demo:other' },
+      { kind: 'trace-trigger', trigger: 'entry_appended' },
+    ])
+  })
+
+  it('放宽：非 record customType（如 pi-scheduler:task）产出失效事件且 customType 正确透传', () => {
+    const events = translate(
+      { type: 'entry_appended', entry: { type: 'custom', customType: 'pi-scheduler:task' } } as unknown as PiEntryAppendedEvent,
+      SID,
+    )
+    expect(events[0]).toEqual({ kind: 'record-entry-appended', customType: 'pi-scheduler:task' })
+  })
+
+  it('放宽边界：customType 非 string（extension 第三方脏数据）→ main 走 noop，trace-trigger 仍追加', () => {
+    const events = translate(
+      { type: 'entry_appended', entry: { type: 'custom', customType: 42 } } as unknown as PiEntryAppendedEvent,
+      SID,
+    )
     expect(events).toEqual([{ kind: 'noop' }, { kind: 'trace-trigger', trigger: 'entry_appended' }])
   })
 

@@ -196,3 +196,56 @@ describe('DrawerPanel (plan tab，plan 模式重设计 u1-drawer-tab)', () => {
     expect(empty.text()).toContain('plan.drawer.planHint')
   })
 })
+
+// btw tab（btw-question D7，M3-a 第 10 员）：tabs 加第 10 个 TabMeta（key='btw'，i18n key
+// 落 btw 域文件 btw.drawer.*，icon 用 MessagesSquare）。内容面板由壳层（PanelContainer）
+// slot 注入 BtwPanel（面板单元落地前本组件空态 fallback 承载），延续留壳 slot 模式。
+describe('DrawerPanel (btw tab，btw-question D7 M3-a)', () => {
+  it('btw tab 按钮 DOM 存在（10 tab 常驻，既有 9 tab 无回归）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps() })
+    expect(wrapper.find('[data-testid="drawer-tab-btw"]').exists()).toBe(true)
+    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan']) {
+      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
+    }
+  })
+
+  it('btw tab 标题引用 btw 域 i18n key（title 属性 = tab.label）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps() })
+    // ui 包测试环境的 vue-i18n mock 返回 key 本身（DrawerPanel.test 文件头 mock 策略），
+    // title 断言即「label 引用了 btw.drawer.tabBtw key」（双侧 key 对齐归 locale-sync-check）
+    expect(wrapper.find('[data-testid="drawer-tab-btw"]').attributes('title')).toBe('btw.drawer.tabBtw')
+  })
+
+  it('btw tab icon 为 MessagesSquare（svg 在按钮内渲染，icon 体系注册生效）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps() })
+    expect(wrapper.find('[data-testid="drawer-tab-btw"] svg').exists()).toBe(true)
+  })
+
+  it('btw tab 点击 emit set-tab btw', async () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps() })
+    await wrapper.find('[data-testid="drawer-tab-btw"]').trigger('click')
+    expect(wrapper.emitted('set-tab')).toEqual([['btw']])
+  })
+
+  it('activeTab=btw：应用选中样式（bg-surface-hover，drawer L1 icon tab 登记例外形态）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'btw' }) })
+    expect(wrapper.find('[data-testid="drawer-tab-btw"]').classes()).toContain('bg-surface-hover')
+  })
+
+  it('btw 无内容面板 slot：空态 fallback 渲染 btw 域 i18n key（t mock 返回 key，断言 key 引用）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'btw' }) })
+    const empty = wrapper.find('[data-testid="drawer-widget-empty"]')
+    expect(empty.exists()).toBe(true)
+    expect(empty.text()).toContain('btw.drawer.noThread')
+    expect(empty.text()).toContain('btw.drawer.threadHint')
+  })
+
+  it('btw tab 有内容 slot 注入 → 替换空态（C2 合同：BtwPanel 注入后不双渲染）', () => {
+    const wrapper = mount(DrawerPanel, {
+      props: baseProps({ activeTab: 'btw' }),
+      slots: { default: '<div data-testid="btw-panel-stub" />' },
+    })
+    expect(wrapper.find('[data-testid="btw-panel-stub"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
+  })
+})

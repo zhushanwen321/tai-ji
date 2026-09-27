@@ -142,6 +142,11 @@ export type ClientMessageType =
   | 'plugin.config.get' | 'plugin.config.set'
   | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync'
+  // plugin.dismissModal：宿主 UI 发起的 plugin modal 关闭上报（plugin-header-action-modal-points
+  // AP-2 关①；renderer PluginModalHost 经 useExtensionHostBridge 门面发送）。runtime 校验
+  // (pluginId, modalId, epoch) 三元组与当前槽匹配（陈旧 epoch → 忽略 + 日志）后广播
+  // plugin:modalState{closed, reason} + notify 插件 plugin.ui.modalClosed。
+  | 'plugin.dismissModal'
   | 'file.read'
   | 'file.tree' | 'file.tree.expand' | 'file.search' | 'file.search.cwd'
   | 'git.diff'
@@ -204,6 +209,13 @@ export type ClientMessageType =
   // rollingRestart.status（crash-forensics-and-watchdog §3.3 D5，u7b）：滚动重启状态只读查询
   // （无参数；reply 与 request 同名——session.subscribe 模式）。状态机实现在 u7c。
   | 'rollingRestart.status'
+  // btw.*（btw-question 设计 D6，M2-a 协议根节点）：btw 旁路线 3 个控制帧——
+  // create（建线 + fork 主会话当前进度）/ list { mainSid }（主会话名下线枚举）/
+  // remove（关线销毁，单线级联）。ack 必回（ReplyPayloadMap 三帧全登记）。
+  // 发送复用 message.send（sessionId = btw vid）、帧族复用 message.*——**不设 btw.send /
+  // btw.close**（D6 被否项：与 message.send 双轨重复 / 与 remove 职责重叠；
+  // __tests__/protocol.test.ts 负向守卫锁定「恰好 3 帧、无 send/close」）。
+  | 'btw.create' | 'btw.list' | 'btw.remove'
 
 // ── Payload 类型定义 ────────────────────────────────────────────
 
@@ -337,6 +349,52 @@ export type BatchDeleteResult = {
  * package.json startupConfig.content / runtime rename-session-config.ts 镜像）。
  */
 export type RenameMode = 'first-prompt' | 'first-stop' | 'agent-tool'
+
+// ── plugin modal/headerAction 帧载荷（plugin-header-action-modal-points AP-1/AP-2）──
+
+/**
+ * plugin modal 关闭原因词表（AP-2 单点：宿主/插件/runtime 三类发起方共用此闭集）。
+ * 本处是唯一权威定义——core extension-host/types.ts type-only import + re-export 本类型
+ * （shared 不依赖 core；消费方经 @taiji/shared 或 @taiji/core 引用同一份）。
+ */
+export type PluginModalClosedReason =
+  | 'dismissed'
+  | 'session-switched'
+  | 'host-overlay'
+  | 'replaced'
+  | 'plugin-gone'
+
+/**
+ * plugin modal 开合帧载荷（AP-2；'plugin:modalState'，S→C 全局广播 transient 帧）。
+ * payload = 调用参数原文（可缺省）——title/width 的解析与 fallback 在 renderer
+ *（单一解析源，runtime 不读声明）；sessionId 必带（仅作 payload 归属信息，
+ * 路由键 = 全局广播）。epoch = 单调递增槽代数（同 (pluginId,modalId) 重复 open 与
+ * replaced 均递增）。
+ */
+export interface PluginModalStatePayload {
+  pluginId: string
+  modalId: string
+  sessionId: string
+  title?: string
+  width?: 'sm' | 'md' | 'lg'
+  state: 'open' | 'closed'
+  epoch: number
+  reason?: PluginModalClosedReason
+}
+
+/**
+ * headerAction 运行时更新帧载荷（AP-1；'plugin:headerActionUpdate'）。必带 sessionId
+ * ——渲染端按 (sessionId, headerActionId) 写对应会话分区；badge ≤4 字符的截断由
+ * 渲染端承担，帧面存原文（全文进 tooltip）。
+ */
+export interface HeaderActionUpdatePayload {
+  pluginId: string
+  headerActionId: string
+  sessionId: string
+  badge?: string
+  tooltip?: string
+  disabled?: boolean
+}
 
 // ── ClientMessage discriminated union ───────────────────────────
 
@@ -581,6 +639,16 @@ export interface ClientMessageMap {
   'plugin.config.set': { pluginId: string; key: string; value: unknown }
   'plugin.uiResponse': { requestId: string; result: unknown }
   'plugin.mountPoints.sync': { mountPoints: string[] }
+  // plugin.dismissModal：宿主侧关闭上报（AP-2 关①）。epoch = 渲染端所展示层的槽代数
+  //（陈旧 epoch 的 dismiss 被 runtime 忽略——「关闭在途→立即重开」序列下不误关新层）；
+  // reason 是 PluginModalClosedReason 闭集的宿主子集（实际由宿主发起的只有前三者，
+  // replaced/plugin-gone 由 runtime 侧产生；帧面按单点词表全集登记，越界值 runtime 拒收）。
+  'plugin.dismissModal': {
+    pluginId: string
+    modalId: string
+    epoch: number
+    reason: PluginModalClosedReason
+  }
   'file.read': { path: string; sessionId?: string }
   'file.tree': { sessionId: string }
   'file.tree.expand': { sessionId: string; path: string }
@@ -760,6 +828,15 @@ export interface ClientMessageMap {
   // rollingRestart.status（crash-forensics-and-watchdog §3.3 D5，u7b）：只读查询，无参数
   //（全局状态，非 session 级）。reply 见 ServerMessageMap['rollingRestart.status']。
   'rollingRestart.status': Record<string, never>
+  // ── btw.*（btw-question D6 控制帧，M2-a）──
+  // ack 必回：三帧在 ReplyPayloadMap 全登记（create/list payload 消费型、remove ack 型）；
+  // 失败走统一 error envelope（错误契约 D10）。
+  /** btw.create：在主会话 mainSid 名下创建一条 btw 线（runtime BtwService fork 主会话当前进度）。 */
+  'btw.create': { mainSid: string }
+  /** btw.list：枚举主会话 mainSid 名下的 btw 线（drawer btw 面板线列表数据源，D4 关联枚举读）。 */
+  'btw.list': { mainSid: string }
+  /** btw.remove：关线销毁（单线级联——线进程 + 派生资源；主删级联走 session.delete，不走本帧）。 */
+  'btw.remove': { vid: string }
 }
 
 // ClientMessage 由 ClientMessageMap 直接派生：每个 type 字面量映射到
@@ -900,6 +977,16 @@ export type ServerMessageType =
   // 迟到批准对已删 pending noop 幂等（旧版前端未消费此帧时无异常回退，P-11）。
   | 'plugin:permissionRequestExpired'
   | 'plugin:viewUpdate'
+  // plugin:modalState：plugin modal 开合帧（plugin-header-action-modal-points AP-2）。
+  // runtime showModal/hideModal/dismissModal 仲裁后全局广播（槽与层都是全局单例，
+  // sessionId 仅作 payload 归属信息、不经 per-session 通道）；帧类 = transient/不入
+  // ring（经 broker 全局广播直发，不经 message-bus publish，重连重放不回放陈旧开/关；
+  // renderer 另以 lastEpoch 丢弃 epoch < lastEpoch 的乱序入帧兜底）。
+  | 'plugin:modalState'
+  // plugin:headerActionUpdate：headerAction 可变字段（badge/tooltip/disabled）下行帧
+  //（AP-1）。必带 sessionId——渲染端按 (sessionId, headerActionId) 写对应会话分区；
+  // 经 broker 全局广播直发（同上不入 ring）。
+  | 'plugin:headerActionUpdate'
   | 'extension:widget' | 'extension:widgetGui' | 'extension:status' | 'extension:notify'
   | 'extension:setEditorText'
   | 'message.compactionSummary' | 'message.branchSummary'
@@ -980,6 +1067,12 @@ export type ServerMessageType =
   // 启动 reattach 高水位延迟推送（Server→Client 冒号 camelCase；进入单发 + 缓解退出单发，
   // payload 见 ReattachDeferredPayload）。
   | 'reattach:deferred'
+  // btw.*（btw-question D6）：3 个控制帧的 RPC reply（同名 request/reply——session.subscribe /
+  // session.import 同款模式）。其中 btw.list 兼作线列表状态广播载体（state topic，typeKey 'btw'，
+  // publish 于主会话 bus——btw.create / btw.remove 成功后 handler 广播全量线列表，重连经
+  // stateSnapshot 恢复；登记见 message-bus.ts TOPIC_TABLE / STATE_TYPE_KEY_MAP）。btw.create /
+  // btw.remove 是纯 RPC reply（走 reply 通道不经 publish，不入 TOPIC_TABLE——session.subscribe 同族）。
+  | 'btw.create' | 'btw.list' | 'btw.remove'
 
 /** skill 缓存失效广播的作用域：global=全局 skill 变动，project=某项目 cwd 的 skill 变动。 */
 export type SkillCacheScope = 'global' | 'project'
@@ -1255,6 +1348,32 @@ export interface WatchdogMemoryPressurePayload {
   criticalPercent: number
 }
 
+// ── btw.*（btw-question D6）payload 辅助类型 ──────────────────────────────
+
+/**
+ * btw 线创建时的 fork 快照状态（D3 源状态三分支 → btw.create reply 的创建期 pill 数据源）。
+ * 仅线创建时一次性携带（快照元信息不持久化，跨重启重开不回填 pill——D3 pill 口径）。
+ */
+export type BtwForkState =
+  | 'full'       // 分支①：源已落盘 → 全树 fork（含分支）
+  | 'truncated'  // 分支③：源含进行中 turn → entry 级截断快照（pill 注明半截）
+  | 'none'       // 分支②：源不存在/为空 → 回落无 fork 新建 spawn（pill「无快照」，不静默）
+
+/**
+ * btw 线列表条目（btw.list reply / 状态广播共用）。刻意最小：只带线 vid——
+ * forkState 是创建期一次性元信息，不进列表（进列表会在跨重启重开时回填 pill，违背 D3 口径）。
+ */
+export interface BtwThreadInfo {
+  /** 线虚拟 id（`btw:<piSessionId>` 两段式；工厂 SSOT = shared virtual-session-id.ts 的 btwVirtualId）。 */
+  vid: string
+  /**
+   * 回收提醒态（D1「回收前」提醒窗口，提前 1 拍置位；回收发生/用户续问后清）——
+   * runtime 置位/清除 + renderer useBtwTabData.syncReclaimReminders 消费（badge 待处理
+   * 数据源，读方按 `=== true` 判定）。**可选字段防破坏既有消费**（缺省 = 无提醒）。
+   */
+  reclaimImminent?: boolean
+}
+
 /**
  * # ServerMessageMap —— Runtime → Client payload 类型映射
  *
@@ -1421,6 +1540,12 @@ export interface ServerMessageMapBase {
     guiTree: unknown[]
     updatedAt: number
   }
+  // plugin:modalState：plugin modal 开合帧（AP-2；runtime 仲裁后全局广播，transient 直发
+  // 不入 ring）。payload 契约见 PluginModalStatePayload（上方类型定义）。
+  'plugin:modalState': PluginModalStatePayload
+  // plugin:headerActionUpdate：headerAction 可变字段下行帧（AP-1；必带 sessionId，
+  // 渲染端按 (sessionId, headerActionId) 写会话分区）。payload 契约见 HeaderActionUpdatePayload。
+  'plugin:headerActionUpdate': HeaderActionUpdatePayload
   // plugin:uiRequest：plugin dialog 交互请求下行（runtime UiRequestQueue 广播回调生产，
   // payload 注入当前活跃 sessionId 后经 bus.publish 定向发布，无活跃 session 时回退全局广播）。
   // requestId 必带（前端 message-bus-bridge.parseUiRequest 缺失即丢弃整条）；method/title 等
@@ -2142,6 +2267,15 @@ export interface ServerMessageMapBase {
   // deferred：启动 reattach 高水位延迟推送（u5 生产；renderer useRollingRestartStatus
   // 消费——高压延迟横幅腿；active 进入/缓解退出两态，字段语义见 payload 类型）。
   'reattach:deferred': ReattachDeferredPayload
+
+  // ── btw.*（btw-question D6 控制帧 reply；btw.list 兼作状态广播）──
+  /** btw.create reply：新建线的 vid + 归属主会话 + fork 快照状态（创建期 pill 数据源）。 */
+  'btw.create': { vid: string; mainSid: string; forkState: BtwForkState }
+  /** btw.list reply / 状态广播同形（state topic typeKey 'btw'，publish 于 mainSid 会话）：
+   *  最新线列表全量快照（last-value 覆盖式，重连/切回构造性恢复）。 */
+  'btw.list': { mainSid: string; threads: BtwThreadInfo[] }
+  /** btw.remove reply：ack 回显被关线 vid（ReplyPayloadMap 登记 void，消费侧不读 payload）。 */
+  'btw.remove': { vid: string }
 }
 
 /**
@@ -2302,6 +2436,9 @@ export interface ReplyPayloadMap {
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']
   'plugin.mountPoints.sync': ServerMessageMap['pong']
+  // plugin.dismissModal → reply 'pong' {}（fire-and-forget ack；关闭的权威反馈 =
+  // plugin:modalState{closed} 广播 + plugin.ui.modalClosed notify，不走本 reply）
+  'plugin.dismissModal': ServerMessageMap['pong']
   'workspace.listRecent': ServerMessageMap['workspace.recentList']
   'workspace.record': ServerMessageMap['workspace.recentList']
   'project.load': ServerMessageMap['project.loaded']
@@ -2456,6 +2593,11 @@ export interface ReplyPayloadMap {
   'terminal.resize': ServerMessageMap['terminal.ack']
   'terminal.spawn': ServerMessageMap['terminal.ack']
   'terminal.write': ServerMessageMap['terminal.ack']
+
+  // ── btw.*（btw-question D6 控制帧，M2-a）：ack 必回，三帧全部登记 ──
+  'btw.create': ServerMessageMap['btw.create'] // payload 消费型：vid + mainSid + forkState
+  'btw.list': ServerMessageMap['btw.list']     // payload 消费型：threads 线枚举
+  'btw.remove': void                           // ack 型：关线完成即 resolve（wire reply btw.remove 回显 vid）
 }
 
 /**

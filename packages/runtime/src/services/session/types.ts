@@ -383,6 +383,23 @@ export type PiTranslatedEvent =
       /** gen-stats：样本 provider（AssistantMessage.provider = 请求侧 model.provider，PS-25 锚定，缺省 null 同上） */
       provider: string | null
     }
+  /**
+   * LLM 请求起算锚点（composer-genstats-ttft，pi turn_start 到达翻译——已移出 NULL_EVENTS）。
+   * interpreter 挂 LlmWindowSampler.onRequestStart()：记 requestStartedAt = Date.now()，同步清
+   * ttftMs / firstOutputAt（重锚清除不变量：残留生命周期严格限本请求，与既有窗口锚一致）。
+   * 窗口构成（设计 §3.2，pi 0.84.4 实装时序）：turn_start 在 prepareNextTurn 之后 emit → 原生
+   * auto-compaction 不含在窗口；工具执行亦不含（工具后下一轮 turn_start 重新起算）；turn_start
+   * 后的 steering 注入段计入（通常毫秒级，接受）。
+   */
+  | { kind: 'llm-request-start'; sessionId: string }
+  /**
+   * LLM 请求窗口首个输出信号（composer-genstats-ttft，pi text_start / thinking_start /
+   * toolcall_start 三子类型翻译——单点收无 delta 兜底：pi-ai 0.84.4 全族流式实现凡产 delta
+   * 必先产对应 *_start，兜底不存在服务对象）。interpreter 挂 LlmWindowSampler.onFirstOutput()：
+   * 幂等 first-wins（已有 firstOutputAt 直接 return），ttftMs = firstOutputAt − requestStartedAt；
+   * 信号先于锚点到达（不可能序，防御）无锚直接 return 不产值。
+   */
+  | { kind: 'llm-first-output'; sessionId: string }
   /** extension setStatus —— interpreter 路由到 server.handleStatusSetUpdate + 转发 WS。 */
   | { kind: 'status-set'; sessionId: string; key: string; text: string; textRaw?: string }
   /** extension setStatus 对应的 WS 帧（interpreter 转发）。 */
@@ -407,13 +424,16 @@ export type PiTranslatedEvent =
   | { kind: 'subagent-stream'; sessionId: string; recordId: string; lines: string[] | undefined }
   /**
    * 自描述 record entry 到达的失效信号（W18，D4）——pi entry_appended（extension appendEntry
-   * 路径，message entry 不发射）经 adapter customType 过滤后仅对 subagent-record / workflow-record /
-   * plan-state 产出（第三员为 plan 模式重设计 D1② 扩容）。interpreter 据此触发
+   * 路径，message entry 不发射）。customType 历史上是三字面量 union（subagent-record /
+   * workflow-record / plan-state，第三员为 plan 模式重设计 D1② 扩容）；已放宽为 string
+   * （D5「失效转发的三段链路」②）：任何 custom entry 均产出失效信号，「避免无关 entry
+   * 触发拉取」由派发层订阅者存在性守住，record 三族消费方 invalidateRecordEntries
+   * 内部早退门保留、行为不变。interpreter 据此触发
    * onRecordEntriesInvalidated（组合根注入 sessionService
    * .invalidateRecordEntries：markDirty → 防抖 get_entries(since) 增量重拉 → entry 扫描写入
    * 派生缓存）。事件 payload 不进任何数据缓存（ReplicatedState「事件只做失效」不变量）。
    */
-  | { kind: 'record-entry-appended'; customType: 'subagent-record' | 'workflow-record' | 'plan-state' }
+  | { kind: 'record-entry-appended'; customType: string }
   /**
    * compaction 生命周期开始（pi compaction_start{reason}）—— interpreter 编排：
    * 广播 session.compacting{reason} + isCompacting 置位经 occupancy 转移原语
@@ -476,6 +496,10 @@ export interface GenStatsSample {
    * 真缺闭/缺起（pi 崩溃断连 / runtime
    * 中途启动丢 message_start）→ null，速度样本跳过） */
   durationMs: number | null
+  /** gen-stats：TTFT 首字延迟（composer-genstats-ttft，本请求窗口内首个输出信号时刻 −
+   * llm-request-start 锚点时刻；无配对锚点 / 窗口内无输出信号即结束（错误 / 断连）/ image 等
+   * 无内容流输出形态 → null，service 侧跳过 ttft 落盘，禁 ?? 0） */
+  ttftMs: number | null
   /** 样本模型 id（AssistantMessage.model 运行时字段，缺省 null；D2 探针待验证真实性） */
   model: string | null
   /** 样本 provider（AssistantMessage.provider 运行时字段，缺省 null） */

@@ -7,7 +7,7 @@
 
 ## 问题背景
 
-pi 宿主层（`ExtensionAPI` / `ExtensionContext`）**不提供 logger 接口**。Extension 跑在 pi 主进程内（in-process，非子进程），其 `console.*` 输出直接进 pi 主进程的 stdout/stderr。在 TUI alternate-screen 模式下，raw stderr **越过渲染层污染 input 区**，且 pi 既不捕获也不落盘 extension 的 console 输出。
+pi 宿主层（`ExtensionAPI` / `ExtensionContext`）**不提供 logger 接口**。Extension 跑在 pi 主进程内（in-process，非子进程），其 `console.*` 输出直接进 pi 主进程的 stdout/stderr。在 TUI alternate-screen 模式下，raw stderr **越过渲染层污染 input 区**，且 pi 既不捕获也不落盘 extension 的 console/stderr 输出——`process.stderr.write` 直写同一落点：taiji 托管形态下唯一落盘链是 runtime `rpc-client` 把 extension stderr 转发进宿主日志，独立 pi 用户形态下零落盘。
 
 历史上各 extension 的日志做法不统一：
 - `subagent-workflow`：59 处裸 `console.*`（error 29 / warn 25 / debug 5），直接污染 TUI
@@ -28,7 +28,7 @@ pi 宿主层（`ExtensionAPI` / `ExtensionContext`）**不提供 logger 接口**
 
 ### 关键约束
 
-1. **禁止裸 `console.*`**——raw stderr 在 TUI 下污染 input 区，且不落盘
+1. **禁止裸 `console.*` 与 `process.stderr.write` 单通道日志**——raw stderr 在 TUI 下污染 input 区，且 pi 不捕获 extension stderr（落盘语义见「问题背景」），日志一律走 `@zhushanwen/pi-extension-logger`。仅两种形态允许 stderr 直出：logger 自身故障的终极兜底（`system-prompt/src/index.ts` 先例）；terminal 态日志的「stderr 直出 + appendEntry 持久化」双通道（`structured-output/src/loop-gate.ts` `writeTerminatedLog` 先例——持久化由 appendEntry 承担，stderr 只为 taiji tee 即时可见）。存量 stderr 单通道未迁移点：`cache-probe/src/index.ts`、`ext-guards` stale-ctx 降级（`src/index.ts`）——新增代码不得仿写，待后续收敛
 2. **`notify` 只给用户操作反馈**——诊断信息不用 notify（会刷屏），走 `logger.warn`/`error`
 3. **tool error 不需要额外 notify**——pi 原生 tool result 已在对话流里显示给用户和 AI，再 notify 是冗余
 4. **hook block reason 不走 logger**——直接 `return { block: true, reason }`，pi 自动作为 tool error 回灌 AI

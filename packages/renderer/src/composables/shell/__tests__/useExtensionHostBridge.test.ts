@@ -13,13 +13,25 @@
  * M17 wave2 追加（D5：废弃 sidebar 动态 view 发现，getViews 纯静态）：
  * M17w2-TC1 widget 推送不进 L2 tab 清单（getViewIds 对照仍含）/
  * M17w2-TC2 静态声明 view 经 registerContribution 出现在 getViews。
+ * u4b 追加（test-coverage SG-2 补防线）：E13 四态判定 resolveHeaderActionAvailability
+ * 纯函数直测（store 命中 / registry 命中 / unregistered / unknown 四态）+
+ * E3 executeCommand 语义 wiring 测试（缺失命令 → execute 出声 + 返 false 供置灰）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, nextTick } from 'vue'
-import { EXTENSION_BRIDGE_TYPES, InternalEventBus, MessageBusBridge, providePlatform, registerMountPoints, scanContributions, type ContributionRegistry } from '@taiji/core'
+import { EXTENSION_BRIDGE_TYPES, InternalEventBus, MessageBusBridge, providePlatform, registerMountPoints, scanContributions, type ContributionRegistry, ActivationManager, CommandRegistry } from '@taiji/core'
 import type { InternalEvent } from '@taiji/core'
 import { dispatchCrossSession, dispatchGlobal } from '@taiji/core/transport/api'
-import { createWsPluginMessageSource, initExtensionHostBridge, __testing } from '../useExtensionHostBridge'
+import {
+  createWsPluginMessageSource,
+  getExtensionBus,
+  initExtensionHostBridge,
+  resolveHeaderActionAvailability,
+  HEADER_ACTIONS_SOURCE_KEY,
+  __testing,
+  type CommandPartitionReader,
+  type HeaderActionsSource,
+} from '../useExtensionHostBridge'
 import {
   DIALOG_REQUEST_SOURCE_KEY,
   UI_RESPONSE_TRANSPORT_KEY,
@@ -447,7 +459,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(transportSendSpy).toHaveBeenCalledTimes(1)
     expect(transportSendSpy).toHaveBeenCalledWith({
       type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar'] },
+      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar', 'modal'] },
     })
   })
 
@@ -467,7 +479,109 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(transportSendSpy).toHaveBeenCalledTimes(2)
     expect(transportSendSpy).toHaveBeenLastCalledWith({
       type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar'] },
+      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar', 'modal'] },
     })
+  })
+})
+
+describe('u4b E13 四态判定 resolveHeaderActionAvailability（纯函数直测，test-coverage SG-2）', () => {
+  /** 独立 CommandRegistry（无激活声明 → ensureActivated 恒 no-op，对齐生产 trigger 适配） */
+  function makeRegistry(commandIds: string[]): CommandRegistry {
+    const registry = new CommandRegistry({
+      bus: new InternalEventBus(),
+      activationManager: new ActivationManager({ trigger: { ensureActivated: async () => {} } }),
+      executor: { execute: async () => {} },
+    })
+    for (const id of commandIds) registry.registerCommand({ id, title: id, pluginId: 'demo-plugin' })
+    return registry
+  }
+
+  /** 会话命令分区读取面 stub（E13 只消费 getCommands，结构契约见 CommandPartitionReader） */
+  const readerOf = (names: string[]): CommandPartitionReader => ({
+    getCommands: () => names.map((name) => ({ name })),
+  })
+
+  it('① 会话命令分区命中 → registered（pi getCommands 产物主路径）', () => {
+    expect(resolveHeaderActionAvailability(readerOf(['pi.cmd', 'other']), makeRegistry([]), 's1', 'pi.cmd'))
+      .toBe('registered')
+  })
+
+  it('② 分区未命中但 CommandRegistry 命中 → registered（scheduler-manager.open 主路径——其命令名非 pi slash 命令）', () => {
+    expect(resolveHeaderActionAvailability(readerOf(['other']), makeRegistry(['scheduler-manager.open']), 's1', 'scheduler-manager.open'))
+      .toBe('registered')
+  })
+
+  it('③ 分区非空但两源皆无 → unregistered（E2 禁用清理后灰置的主路径）', () => {
+    expect(resolveHeaderActionAvailability(readerOf(['other']), makeRegistry([]), 's1', 'gone.open'))
+      .toBe('unregistered')
+  })
+
+  it('④ 分区为空 → unknown（未拉取/恢复窗口的保守判定，不拦入口）', () => {
+    expect(resolveHeaderActionAvailability(readerOf([]), makeRegistry([]), 's1', 'any.open'))
+      .toBe('unknown')
+  })
+})
+
+describe('u4b E3 executeCommand 语义（HeaderActionsSource wiring，test-coverage SG-2）', () => {
+  let bridge: MessageBusBridge | null = null
+
+  afterEach(() => {
+    bridge?.dispose()
+    bridge = null
+  })
+
+  /** 装配真实 bridge，取 HEADER_ACTIONS_SOURCE_KEY provide 值（error 出声走 shared bus） */
+  function initHeaderActionsSource(): HeaderActionsSource {
+    const provided: Array<{ key: unknown; value: unknown }> = []
+    const app = {
+      provide(key: unknown, value: unknown) {
+        provided.push({ key, value })
+        return app
+      },
+    }
+    initExtensionHostBridge(app as never)
+    const handles = __testing.lastInitHandles
+    if (!handles) throw new Error('initExtensionHostBridge 未写入 __testing.lastInitHandles')
+    bridge = handles.bridge
+    void simulateBootstrapRegistration()
+    const source = provided.find((p) => p.key === HEADER_ACTIONS_SOURCE_KEY)?.value as
+      | HeaderActionsSource
+      | undefined
+    if (!source) throw new Error('HEADER_ACTIONS_SOURCE_KEY 未 provide')
+    return source
+  }
+
+  it('缺失命令：execute 仍发起且 ERR6 error 事件出声 + 返回 false 供组件置灰（禁静默 no-op）', () => {
+    const source = initHeaderActionsSource()
+
+    const errors: Array<{ source: string; message: string }> = []
+    const off = getExtensionBus().on('error', (e) => errors.push({ source: e.source, message: e.message }))
+
+    expect(source.executeCommand('missing.open')).toBe(false)
+    // ERR6 出声：CommandRegistry.execute 内部 emit error 事件（不静默丢弃）
+    expect(errors).toEqual([{ source: 'CommandRegistry', message: 'command not found: missing.open' }])
+    off()
+  })
+
+  it('已注册命令：返回 true + 无 error 事件（置灰解除）', () => {
+    const source = initHeaderActionsSource()
+    const handles = __testing.lastInitHandles!
+    const errors: Array<{ source: string; message: string }> = []
+    const off = getExtensionBus().on('error', (e) => errors.push({ source: e.source, message: e.message }))
+
+    // 经 external 声明 + plugin-status-change active 重放注册（handlePluginBack 路径）
+    handles.contributions.registerContribution({
+      pluginId: 'demo-plugin',
+      contributionId: 'demo.open',
+      type: 'command',
+      placement: 'panel.header',
+      available: false,
+      command: { title: 'Demo' },
+    })
+    getExtensionBus().emit({ kind: 'plugin-status-change', pluginId: 'demo-plugin', status: 'active' })
+
+    expect(source.executeCommand('demo.open')).toBe(true)
+    expect(errors).toEqual([])
+    off()
   })
 })

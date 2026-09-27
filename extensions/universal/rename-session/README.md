@@ -115,7 +115,7 @@ rename 是 best-effort 副作用，任何失败静默跳过、绝不阻断 agent
 | 11 | `skip: empty prompt` | message_end handler（`firstPrompt skip: empty prompt`） | user message 载荷无文本（理论不发生） |
 | 12 | `tool renamed to "<title>"` | rename_session 工具 execute | agent-tool 路径落库成功（`setSessionName` 之后打出，无防覆盖前缀） |
 
-另有两条**非 debug 常开**日志（无条件经 `logger.warn` 落 appendEntry entry）：`rename LLM call failed`（`logger.warn(msg, { error })` 形态，error 详情在结构化 data 字段；超时时 llm-shared callLLM 内部的 extractText 将空错误文本归一为 `unknown error`——extension 侧 `result.error ?? "unknown error"` 只兜 null/undefined，空串兜底发生在 llm-shared 层）、`model not available, skipping`（选模失败）。handler 侧日志 message 带 `t=<ISO时间>` 与 `turnIndex`；llm 侧带 `t=<ISO时间>`、无 turnIndex。
+另有三条**非 debug 常开**日志（无条件经 `logger.warn` 落 appendEntry entry，任意环境可 `grep "rename-session:log" <session.jsonl>` 排障）：`rename LLM call failed`（`logger.warn(msg, { error })` 形态，error 详情在结构化 data 字段；超时时 llm-shared callLLM 内部的 extractText 将空错误文本归一为 `unknown error`——extension 侧 `result.error ?? "unknown error"` 只兜 null/undefined，空串兜底发生在 llm-shared 层）、`model not available, skipping`（选模失败）、`title empty after clean, skipping rename`（调用成功但标题清洗后为空，结构化 data 含 `model` / `stopReason` / `raw`(≤100 码点标题候选预览)——`stopReason=length` 表示输出预算被 thinking 吃尽，是上调 `maxTokens` 常量的数据信号）。handler 侧日志 message 带 `t=<ISO时间>` 与 `turnIndex`；llm 侧带 `t=<ISO时间>`、无 turnIndex。文件日志通道（`<agentDir>/logs/`）需 `TAIJI_AGENT_DEBUG=1`，独立 pi 用户排障优先 grep session 文件（无需复跑）。
 
 ## E2E 验收
 

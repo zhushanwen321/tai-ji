@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildFamilyIndex, resolveFamily } from '../core/family.js'
-import type { Entry } from '../core/parser.js'
+import type { Entry } from '@zhushanwen/session-core'
 
 // ---- fixture 常量（映射 design §3.3 D-7 Q1 真实场景）----
 const ROOT = '019fe620' // 家族根（无 parentSession）

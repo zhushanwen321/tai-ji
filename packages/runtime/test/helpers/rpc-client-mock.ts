@@ -142,6 +142,9 @@ export function loggerModule() {
     // u5b D6-④：rpc-client crash 链（writePiCrashLog）读内存快照（rpc-client.ts:717）——
     // mock 面随源码 import 面同步，缺导出会在触发 crash 路径的用例（如 bash abortBash）炸 undefined
     captureMemorySnapshot: () => ({ rss: 1, heapUsed: 2, heapTotal: 3, external: 4 }),
+    // D10：crash-correlation 采样门——测试 sink 恒关（不采样，无 log show 副作用），
+    // 需要验证接线本身的用例在各自文件内覆写为 true
+    isPiCrashLogEnabled: () => false,
   }
 }
 

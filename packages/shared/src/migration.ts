@@ -168,6 +168,14 @@ export interface ProviderImportedItem {
   status: 'imported' | 'skipped' | 'failed'
   reason?: string
   quotaAutoEnabled?: boolean
+  /**
+   * 该 provider 导入过程中产生的**用户可见告警**（U6②：写侧丢弃的非法模型项等）。
+   *
+   * 与 preview 侧 per-provider `warnings` 同族语义：`status: 'imported'` 但有告警时，
+   * UI 应展示「已导入，但 N 个模型项因 id 非法被跳过」——静默丢弃违反 P0「故障要响亮」。
+   * 可选字段，向后兼容（旧消费方无此字段行为不变）。
+   */
+  warnings?: string[]
 }
 
 /**

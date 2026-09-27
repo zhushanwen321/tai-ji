@@ -121,6 +121,10 @@
   --z-popover: 10;
   --z-overlay: 20;
   --z-modal: 1000;
+  /* 用户待决确认层（CompanionBand ui-request band 的 expanded 档）：须浮于 modal 之上
+     （AP-2 规则③——plugin modal 打开期间新到的 ui-request 叠在其上，用户待决优先）。
+     1100 对齐「高于 modal」既有档位（PopoverContent 等嵌套弹层 z-[1100]）。 */
+  --z-dialog: 1100;
   --bash-output-max-height: 240px;
   /* 展开块统一限高（消费域 = BlockScrollBox：thinking 展开区 / bash 凹槽输出区 / 非 bash
      工具输出区；与 --bash-output-max-height 同量级、消费域独立互不替代）。

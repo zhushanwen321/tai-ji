@@ -135,3 +135,50 @@ export function encodeCwd(cwd: string): string {
 export function getSubagentSessionDir(mainCwd: string): string {
   return join(getPiAgentDir(), 'subagents', encodeCwd(mainCwd), 'sessions')
 }
+
+/**
+ * btw 线会话根目录：`<piAgentDir>/btw/`（btw-question D2）。
+ *
+ * **目录即关联的持久载体**：`btw/<encodeCwd>/<mainSid>/` 三层布局编码「主会话 → btw 线」
+ * 关联（无 sidecar 第二持久面）；不落 `sessions/` 扫描面 ⇒ SessionScanner 磁盘腿构造性
+ * 不可见（G4 防线之一，与 active 腿 hidden:true 注册、历史腿不记工作区历史并列）。
+ * 线会话文件由 pi 写入（fork 链路 / 首 flush 自建），宿主对线目录的写面 = 扫描重建
+ *（只读）+ 通用 outcome sidecar（`.jsonl.meta.json`，onSessionExit/persistSessionOutput
+ * 终态链对 btw 线同样生效；显式关线只删 .jsonl，sidecar 残留由主删级联 / 启动孤儿补账
+ * 兜底清理）+ 删（主删级联 / 显式关线 / 启动孤儿补账——归 M4-a），零直写红线适用。
+ *
+ * subagent 先例同构：`pi-paths.ts` subagents/ 独立目录（`getSubagentSessionDir`）。
+ */
+export function getBtwSessionsRoot(): string {
+  return join(getPiAgentDir(), 'btw')
+}
+
+/**
+ * pi 会话 id 合法值域判定（pi `assertValidSessionId` 同款正则，
+ * dist/core/session-manager.js:15-19 正则字面量 :16，verifiedWith 0.84.4；登记 pi-semantics PS-52）：
+ * 首尾字母数字，中间允许 `[A-Za-z0-9._-]`。真 sid 永不含 `:` ⇒ 本校验同时挡住
+ * btw vid 误传（`btw:<sid>` 含冒号必拒——vid 是 runtime/前端路由 key，不直传目录层）。
+ */
+export function isPiSessionId(id: string): boolean {
+  return PI_SESSION_ID_PATTERN.test(id)
+}
+
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
+
+/**
+ * btw 线会话目录：`<piAgentDir>/btw/<encodeCwd(mainCwd)>/<mainSid>/`（btw-question D2 布局）。
+ *
+ * 该目录同时是：pi `--session-dir` / `PI_CODING_AGENT_SESSION_DIR` 的落点值、
+ * 启动注册表扫描重建的遍历单元、主删级联的删除单元。
+ *
+ * mainSid 校验 fail-fast（路径注入防线）：必须是合法 pi 会话 id 形态——挡空串 /
+ * 路径分隔符 / `..` / 冒号（vid 误传）等一切非单层目录名输入。
+ */
+export function getBtwThreadDir(mainCwd: string, mainSid: string): string {
+  if (!isPiSessionId(mainSid)) {
+    throw new Error(
+      `[btw] getBtwThreadDir: mainSid 非法（须为 pi 会话 id 形态，禁路径分隔符/冒号），收到 "${mainSid}"`,
+    )
+  }
+  return join(getBtwSessionsRoot(), encodeCwd(mainCwd), mainSid)
+}

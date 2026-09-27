@@ -1,7 +1,7 @@
 // RemoteEngine 测试（W2）：cli 形态 EnginePort 门面（fake 引擎 CLI）。
 //
 // 覆盖（impl-plan §2.2 必写死条目）：
-//   同步成员形态映射（capabilities 直读 / listModels 三态 / validateModel 三态与
+//   同步成员形态映射（capabilities 直读 / listModels 四态 / validateModel 三态与
 //   成员不实现）/ run 帧映射（task 子集收窄 + ctx 承载）/ RunContext 反向通道映射 /
 //   abort → cancel + 收敛兜底窗（窗口内收敛、超时本地合成终态 + [D9-2] run 拓扑杀
 //   半径/零拓扑降级两路 + 兜底窗量级常量锚）/
@@ -159,9 +159,15 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
     void cleanup;
   });
 
-  it("listModels() 三态：省略 modelCatalog → null（buildCoreAlignedHint）；显式 [] → []（buildEmptyModelsHint）；数组原样", async () => {
+  it("listModels() 四态：省略 modelCatalog → null；dynamic:true+[] → null（无静态枚举面，B1）；dynamic:false+[] → []（显式空清单）；静态非空 → 原样", async () => {
     const omitted = makeEngine({ modelCatalog: undefined });
     expect(omitted.engine.listModels()).toBeNull();
+    const nullForm = makeEngine({ modelCatalog: null });
+    expect(nullForm.engine.listModels()).toBeNull(); // null 合法等价省略
+    // B1 缺陷根因用例：dynamic:true 声明清单运行期动态发现，静态空目录 ≠ 无模型——
+    // 不得映射为 []（那会走 buildEmptyModelsHint「no credentialed models」误导拒绝派发）
+    const dynamicEmpty = makeEngine({ modelCatalog: { dynamic: true, models: [] } });
+    expect(dynamicEmpty.engine.listModels()).toBeNull();
     const explicitEmpty = makeEngine({ modelCatalog: { dynamic: false, models: [] } });
     expect(explicitEmpty.engine.listModels()).toEqual([]);
     const listed = makeEngine();
@@ -169,9 +175,7 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
       { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
       { id: "mimo-v2.5-pro", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.5-pro" },
     ]);
-    const nullForm = makeEngine({ modelCatalog: null });
-    expect(nullForm.engine.listModels()).toBeNull(); // null 合法等价省略
-    await Promise.all([omitted, explicitEmpty, listed, nullForm].map((f) => f.cleanup()));
+    await Promise.all([omitted, nullForm, dynamicEmpty, explicitEmpty, listed].map((f) => f.cleanup()));
   });
 
   it("validateModel 成员不实现：manifest 省略 → typeof validateModel === 'undefined'（消费方跳过校验恒放行）", () => {

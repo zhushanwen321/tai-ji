@@ -1,4 +1,4 @@
-import type { Entry } from './parser.js'
+import type { Entry } from '@zhushanwen/session-core'
 import { BYTES_PER_KB } from './units.js'
 import { extractToolCalls, formatToolCallSummary, type ToolCallInfo } from './toolcall.js'
 import type { Turn } from './turns.js'

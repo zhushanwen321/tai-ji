@@ -6,9 +6,9 @@
  *   message.toolCalls 顶层字段从未存在——v1 render.ts 读 toolCalls 恒返 [] 是 O1 要修的 bug。
  * - arguments 始终是 object（10 工具 100%）；string 形态做 JSON.parse 兜底（失败返 {}），防御历史/异类实现。
  * - toolResult.message 自带 toolName + toolCallId（515/515，全部匹配 toolCall.id），
- *   parser.ts 已 additive 透出这两个字段，O2/O3 据此精确关联取参数。
+ *   Entry 接口（session-core 基座）已 additive 透出这两个字段，O2/O3 据此精确关联取参数。
  */
-import type { Entry } from './parser.js'
+import type { Entry } from '@zhushanwen/session-core'
 import { BYTES_PER_KB } from './units.js'
 
 // ---------------------------------------------------------------------------

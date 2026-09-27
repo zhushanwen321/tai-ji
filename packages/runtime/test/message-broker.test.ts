@@ -13,7 +13,7 @@
  * 测试策略：直接构造 broker，注入 mock 的 ClientPool（含 mock ws）和 BrokerServices，
  * 不依赖真实 WebSocket / ConnectionManager。
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { WebSocket } from 'ws'
 import type { ClientPool, BrokerServices, ServerMessageBroker as BrokerType } from '../src/transport/message-broker.js'
 
@@ -166,6 +166,65 @@ describe('ServerMessageBroker L6 (broadcast 单次 stringify)', () => {
     expect(sent1).toBe(sent2)
     // 且可反序列化回原 msg
     expect(JSON.parse(sent1 as string)).toEqual(msg)
+  })
+})
+
+describe('ServerMessageBroker broadcast 哨兵豁免清单（AP-2）', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** 构造单 client broker + console.warn spy */
+  async function buildWithWarnSpy() {
+    const { ServerMessageBroker } = await import('../src/transport/message-broker.js')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const ws = makeMockWs()
+    const broker = new ServerMessageBroker({ clients: new Set([ws]) }, mockServices)
+    return { broker, ws, warnSpy }
+  }
+
+  it.each([
+    'plugin:modalState',
+    'plugin:headerActionUpdate',
+  ] as const)('豁免帧 %s：payload 带 sessionId 的全局广播不触发哨兵告警，帧照常下发', async (type) => {
+    const { broker, ws, warnSpy } = await buildWithWarnSpy()
+    const msg = {
+      type,
+      id: 'push_exempt',
+      payload: { pluginId: 'p1', sessionId: 's1', state: 'open', epoch: 1 },
+    } as unknown as Parameters<BrokerType['broadcast']>[0]
+
+    expect(() => broker.broadcast(msg)).not.toThrow()
+
+    expect(warnSpy).not.toHaveBeenCalled()
+    expect(vi.mocked(ws.send)).toHaveBeenCalledTimes(1)
+  })
+
+  it('清单外帧 payload 带 sessionId 仍触发哨兵告警（豁免不漏放宽）', async () => {
+    const { broker, warnSpy } = await buildWithWarnSpy()
+    const msg = {
+      type: 'session.list',
+      id: 'push_guard',
+      payload: { groups: [], sessionId: 's1' },
+    } as unknown as Parameters<BrokerType['broadcast']>[0]
+
+    broker.broadcast(msg)
+
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0][0])).toContain('use IMessageBus.publish instead')
+  })
+
+  it('豁免帧 payload 无 sessionId（异常构造）不触发告警（哨兵本就只看 sessionId 存在性）', async () => {
+    const { broker, warnSpy } = await buildWithWarnSpy()
+    const msg = {
+      type: 'plugin:modalState',
+      id: 'push_nosid',
+      payload: { pluginId: 'p1', state: 'open', epoch: 1 },
+    } as unknown as Parameters<BrokerType['broadcast']>[0]
+
+    broker.broadcast(msg)
+
+    expect(warnSpy).not.toHaveBeenCalled()
   })
 })
 

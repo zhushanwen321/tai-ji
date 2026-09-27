@@ -38,6 +38,8 @@ export type { ChatStoreInstance, ChatStoreReaders, ChatStoreOps } from './store'
 // w6 chat-ui-and-shell：chat 域纯逻辑（turn 分组/摘要）迁入
 export * from './message-turns'
 export * from './turn-aggregates'
+// [btw-question D8 失效支·回放对账路] 悬空交互请求判定（投影层纯谓词，2026-09-23 上移自 renderer）
+export * from './btw-dangling-requests'
 export * from './summarize-turn'
 export * from './trace-window'
 

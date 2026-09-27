@@ -8,6 +8,9 @@
  * 运行期测试验证 payload 可赋值和 WorktreeErrorCode 值。
  */
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type {
   ClientMessageMap,
   ServerMessageMapBase,
@@ -17,6 +20,8 @@ import type {
   BackgroundTaskEndReason,
   BackgroundTaskKillReason,
   BackgroundTaskRegistryEntry,
+  BtwForkState,
+  BtwThreadInfo,
 } from '../src/protocol'
 
 // ── 编译期类型断言辅助 ─────────────────────────────────────────
@@ -355,5 +360,116 @@ describe('backgroundTask RegistryEntry 镜像形状（D9）', () => {
     }
     expect(signaled.exitCode).toBeNull()
     expect('exitCode' in runningEntry).toBe(false)
+  })
+})
+
+// ── btw.* 3 控制帧（btw-question 设计 D6，M2-a 协议根节点）────────────────
+//
+// 三帧 = btw.create / btw.list { mainSid } / btw.remove，ack 必回；**不设 btw.send /
+// btw.close**（D6 被否项）。登记完整性断言分两层：
+// ① 源码区段扫描（运行期，vitest 强制）——本文件位于包根 __tests__/（不在 tsconfig
+//    include 内），类型断言不被 tsc 执行，扫描断言才是机器守卫本体；
+// ② 类型级断言（同文件风格，typecheck 覆盖到时自动生效）。
+
+const PROTOCOL_TS = resolve(fileURLToPath(import.meta.url), '..', '..', 'src', 'protocol.ts')
+const PROTOCOL_SOURCE = readFileSync(PROTOCOL_TS, 'utf8')
+
+/** 提取顶层声明区段：type 联合到首个行首 export；interface 到首个行首 }（嵌套闭合均缩进，不命中） */
+function extractBlock(anchor: string): string {
+  const anchorIdx = PROTOCOL_SOURCE.indexOf(anchor)
+  if (anchorIdx === -1) throw new Error(`protocol.ts 未找到锚点 "${anchor}"——声明位置变动，请同步本测试`)
+  const endMarker = anchor.startsWith('export interface') ? '\n}' : '\nexport '
+  const endIdx = PROTOCOL_SOURCE.indexOf(endMarker, anchorIdx)
+  if (endIdx === -1) throw new Error(`protocol.ts 区段 "${anchor}" 未找到结束标记`)
+  return PROTOCOL_SOURCE.slice(anchorIdx, endIdx)
+}
+
+// ── 类型级断言（style 同上文 AssertHasKey；typecheck 覆盖到即编译期生效）──
+type _Assert_Client_btwCreate = AssertHasKey<ClientMessageMap, 'btw.create'>
+type _Assert_Client_btwList = AssertHasKey<ClientMessageMap, 'btw.list'>
+type _Assert_Client_btwRemove = AssertHasKey<ClientMessageMap, 'btw.remove'>
+type _Assert_Server_btwCreate = AssertHasKey<ServerMessageMapBase, 'btw.create'>
+type _Assert_Server_btwList = AssertHasKey<ServerMessageMapBase, 'btw.list'>
+type _Assert_Server_btwRemove = AssertHasKey<ServerMessageMapBase, 'btw.remove'>
+type _Assert_Reply_btwCreate = AssertHasKey<ReplyPayloadMap, 'btw.create'>
+type _Assert_Reply_btwList = AssertHasKey<ReplyPayloadMap, 'btw.list'>
+type _Assert_Reply_btwRemove = AssertHasKey<ReplyPayloadMap, 'btw.remove'>
+/** D6 负向（类型层）：key 存在则求值 true，下面赋 false 编译错 */
+type IsClientKey<K extends string> = K extends keyof ClientMessageMap ? true : false
+const _no_btw_send: IsClientKey<'btw.send'> = false
+const _no_btw_close: IsClientKey<'btw.close'> = false
+
+describe('btw.* 3 帧登记完整性（D6，M2-a）', () => {
+  const clientBlock = extractBlock('export type ClientMessageType =')
+  const clientMapBlock = extractBlock('export interface ClientMessageMap {')
+  const serverMapBlock = extractBlock('export interface ServerMessageMapBase {')
+  const replyMapBlock = extractBlock('export interface ReplyPayloadMap {')
+
+  it('ClientMessageType 恰好 3 个 btw.* 帧（create / list / remove）', () => {
+    const frames = [...clientBlock.matchAll(/\'(btw\.[a-zA-Z]+)\'/g)].map((m) => m[1])
+    expect([...new Set(frames)].sort()).toEqual(['btw.create', 'btw.list', 'btw.remove'])
+  })
+
+  it('D6 负向守卫：不设 btw.send / btw.close（发送复用 message.send、销毁复用 btw.remove）', () => {
+    for (const block of [clientBlock, clientMapBlock, replyMapBlock]) {
+      expect(block).not.toMatch(/\'btw\.(send|close)\'/)
+    }
+  })
+
+  it('BtwThreadInfo 含可选 reclaimImminent（D1 回收提醒数据源；可选防破坏既有消费——BU3 runtime 半）', () => {
+    const block = extractBlock('export interface BtwThreadInfo {')
+    expect(block).toMatch(/vid: string/)
+    expect(block).toMatch(/reclaimImminent\?: boolean/)
+  })
+
+  it('三帧在 ClientMessageMap / ServerMessageMapBase / ReplyPayloadMap 全登记（ack 必回）', () => {
+    for (const frame of ['btw.create', 'btw.list', 'btw.remove']) {
+      const pattern = new RegExp(`'${frame.replace('.', '\\.')}'`)
+      expect(clientMapBlock, `ClientMessageMap 缺 ${frame}`).toMatch(pattern)
+      expect(serverMapBlock, `ServerMessageMapBase 缺 ${frame}（reply type）`).toMatch(pattern)
+      expect(replyMapBlock, `ReplyPayloadMap 缺 ${frame}（ack 必回）`).toMatch(pattern)
+    }
+  })
+
+  it('request payload 形状：create/list 只带 mainSid、remove 只带 vid', () => {
+    const createPayload: ClientMessageMap['btw.create'] = { mainSid: 's-main' }
+    expect(createPayload.mainSid).toBe('s-main')
+    const listPayload: ClientMessageMap['btw.list'] = { mainSid: 's-main' }
+    expect(Object.keys(listPayload)).toEqual(['mainSid'])
+    const removePayload: ClientMessageMap['btw.remove'] = { vid: 'btw:pi-1' }
+    expect(Object.keys(removePayload)).toEqual(['vid'])
+  })
+
+  it('reply payload 形状：create 带 vid/mainSid/forkState（三值域）、list 带 threads、remove 回显 vid', () => {
+    const states: BtwForkState[] = ['full', 'truncated', 'none']
+    expect(states).toHaveLength(3)
+    const createReply: ServerMessageMapBase['btw.create'] = { vid: 'btw:pi-1', mainSid: 's-main', forkState: 'none' }
+    expect(createReply.forkState).toBe('none')
+    const threads: BtwThreadInfo[] = [{ vid: 'btw:pi-1' }]
+    const listReply: ServerMessageMapBase['btw.list'] = { mainSid: 's-main', threads }
+    expect(listReply.threads[0].vid).toBe('btw:pi-1')
+    const removeReply: ServerMessageMapBase['btw.remove'] = { vid: 'btw:pi-1' }
+    expect(removeReply.vid).toBe('btw:pi-1')
+  })
+
+  it('ReplyPayloadMap：create/list payload 消费型、remove ack 型 void', () => {
+    const createReply: ReplyPayloadMap['btw.create'] = { vid: 'btw:pi-1', mainSid: 's-main', forkState: 'full' }
+    expect(createReply.vid).toBe('btw:pi-1')
+    const listReply: ReplyPayloadMap['btw.list'] = { mainSid: 's-main', threads: [] }
+    expect(listReply.threads).toEqual([])
+    const removeAck: ReplyPayloadMap['btw.remove'] = undefined as void
+    expect(removeAck).toBeUndefined()
+  })
+
+  it('forkState 回显型：分支三态在 ServerMessageMapBase create reply 内联可达（pill 数据源）', () => {
+    for (const forkState of ['full', 'truncated', 'none'] as const) {
+      const reply: ServerMessageMapBase['btw.create'] = { vid: 'v', mainSid: 'm', forkState }
+      expect(reply.forkState).toBe(forkState)
+    }
+  })
+
+  it('类型层负向常量恒 false（key 若出现，typecheck 报错；运行期仅标记已使用）', () => {
+    expect(_no_btw_send).toBe(false)
+    expect(_no_btw_close).toBe(false)
   })
 })

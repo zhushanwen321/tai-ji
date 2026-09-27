@@ -1,3 +1,4 @@
+<!-- split-justified: composer 容器域（发送四态 + steer/followUp/defer 统一路由 + staging 优先 + 子组件装配——composer-shell 迁移后的视觉壳与面板装配汇聚点，多轨特性天然在同一容器接线） -->
 <template>
   <!--
     容器组件 · composer（panel/spec.md zone ④，draft-composer-states）。
@@ -124,9 +125,16 @@
         :data-slot-tray="density.slots.tray"
         class="composer-bar flex flex-nowrap items-center justify-end gap-0 px-2.5 pb-2 mt-1"
       >
-        <!-- 左簇：+ 添加内容（序 0，不退化；spec §1 ①）/ 任务托盘（序 4 聚合形态随密度）/ 插件 toolbar（序 3） -->
+        <!-- 左簇：+ 添加内容（序 0，不退化；spec §1 ①）/ btw 旁路提问（序 0，退化序登记见
+             use-composer-bar-density COMPOSER_BTW_BUTTON_DEGRADATION_ORDER）/ 任务托盘
+             （序 4 聚合形态随密度）/ 插件 toolbar（序 3） -->
         <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-0.5">
           <AddMenuPopover @select="onAddSelect" />
+          <!-- btw 入口（btw-question D7，M3-b）：`+` 之后、托盘之前。show-btw 实例开关
+               （false 不出按钮——drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口）；
+               无 session 不出（与托盘同判据，badge 数据面需主会话）。点击 = openDrawerTab('btw')，
+               badge = useBtwTabData 聚合 Σ unread（清除 = 线内容进视口）。 -->
+          <ComposerBtwButton v-if="showBtw && sessionId" :session-id="sessionId" />
           <!-- 任务托盘（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D1：`+` 之后、composer.toolbar 之前）。
                landing 态隐藏与 GenStatsTriggers / ContextCapacityPopover 同判据（无 session 无任务面）。
                aggregated = 序 4：托盘整体收为单入口（层叠图标 + 运行数）→ 面板内分段展示。
@@ -197,15 +205,16 @@
             :data-testid="density.slots.model === 'merged' ? 'composer-model-merged' : undefined"
             :class="composerModelGroupClass(density.slots.model === 'merged', density.fit.modelThinking === 'simplified')"
           >
-            <!-- 模型（spec §2b：click 出模型切换 popover） -->
+            <!-- 模型（spec §2b：click 出模型切换 popover；U4 切换中态 + fit L2 图标态） -->
             <ModelSelectPopover
               :selected="currentModelId"
+              :switching="isSwitching"
               :variant="density.fit.modelThinking === 'iconic' ? 'icon' : 'text'"
               @select="onModelSelect"
             />
             <span v-if="density.slots.model === 'merged'" aria-hidden="true" :class="MERGED_CHIP_SEPARATOR_CLASS" />
             <!-- 思考等级（spec §2c：click 出档位 popover；level 从 session 透传；reasoning 决定可用档集） -->
-            <ThinkingLevelPopover :level="currentThinkingLevel" :level-map="currentThinkingLevelMap" :supported-levels="currentSupportedLevels" :icon-only="density.fit.modelThinking === 'iconic'" @select="onThinkingSelect" />
+            <ThinkingLevelPopover :level="currentThinkingLevel" :level-map="currentThinkingLevelMap" :supported-levels="currentSupportedLevels" :switching="isSwitching" :icon-only="density.fit.modelThinking === 'iconic'" @select="onThinkingSelect" />
           </div>
 
           <!-- 发送位四态（u6b / D6 表「发送位」列·序 0 不退化）：staging（fork/handoff，含 streaming 中）→
@@ -285,6 +294,7 @@ import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/p
 import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'
 import AddMenuPopover from './AddMenuPopover.vue'
+import ComposerBtwButton from './tray/ComposerBtwButton.vue'
 import ComposerTray from './tray/ComposerTray.vue'
 import CommandPopover from './CommandPopover.vue'
 import ContextCapacityPopover from './ContextCapacityPopover.vue'
@@ -320,8 +330,10 @@ const props = withDefaults(
   defineProps<{
     sessionId: string | null
     variant?: 'panel' | 'landing'
+    /** btw 入口实例开关（D7，M3-b）：false 不出按钮（drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口；不传默认 true，主 panel 零改动） */
+    showBtw?: boolean
   }>(),
-  { variant: 'panel' },
+  { variant: 'panel', showBtw: true },
 )
 
 const { t } = useI18n()
@@ -346,10 +358,7 @@ const projectSkillsCwd = computed<string | null>(() => {
 })
 const { projectSkills } = useProjectSkills(projectSkillsCwd) // W3 ADR-0051：当前 cwd 项目 skill（两态接线见上）
 const { globalSkills } = useGlobalSkills() // W4 FR-5：全局 skill（skill 段两态共用）
-const isActive = computed(() => {
-  if (!props.sessionId) return false
-  return chatStore.isActive(props.sessionId)
-})
+const isActive = computed(() => (props.sessionId ? chatStore.isActive(props.sessionId) : false))
 
 /** #13 retry/queue 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应） */
 const retryState = computed(() => (props.sessionId ? chatStore.getRetryState(props.sessionId) : undefined))
@@ -364,6 +373,16 @@ const shellInputRef = inputRef as Ref<ShellInputInstance | null>
 const shellInputHolder = { ref: shellInputRef }
 
 const sessionIdRef = computed(() => props.sessionId)
+
+/**
+ * U4「切换中」（设计 §5.1 U4 语义②③）：core 的 `switching` 是**每实例**瞬态真值，
+ * 但读条件必须判 `sessionId` 等值——split 面板/切 session 后不得残留旧面板的「切换中」，
+ * 也不得误禁新 session 的 chip；语义③ = **任一在飞即禁全部模型/档位 chip**（防两条
+ * 切换 RPC 并发 → 回执乱序与 `session.modelId` 双写竞争），故两个 chip 共用同一布尔。
+ */
+const isSwitching = computed(
+  () => switching.value !== null && switching.value.sessionId === sessionIdRef.value,
+)
 
 // [compact-defer-composer-queue u1] defer 行四出口（行数约束拆出 useDeferQueueRows，逻辑零改动）
 const { deferEntries, deferChip, deferHint, onRemoveDefer } = useDeferQueueRows(sessionIdRef)
@@ -429,6 +448,7 @@ const {
   currentThinkingLevel,
   currentThinkingLevelMap,
   currentSupportedLevels,
+  switching,
   onModelSelect,
   onThinkingSelect,
   handleArrowUp,
