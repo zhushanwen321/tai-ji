@@ -130,6 +130,12 @@ describe("relay 变体 C-帧词表：relay.mjs 内嵌帧字面量与 relay-frame
     );
   });
 
+  it("goodbye 预告帧构造（宿主终止预告）：kind 与 SSOT goodbye 一致", () => {
+    expect(source).toMatch(
+      new RegExp(`kind:\\s*["']${RELAY_FRAME_KINDS.goodbye}["']`),
+    );
+  });
+
   it("reject reason 语义键（代理对 version 退出码 10 的行为耦合）在 SSOT 词表内", () => {
     // 代理侧对 reject 只统一处理（非零退出），不逐 reason 分支——但 E-1 的
     // version→10 耦合登记在 SSOT 注释里，词表成员变更时此断言强制人工复核。

@@ -6,6 +6,7 @@
 // close 收尾时三路全 miss = 应响亮报错的异常信号，warn 留痕不自动认领。
 
 import type { ChildProcess } from "node:child_process";
+import os from "node:os";
 
 import { isBrokenPipeError } from "@zhushanwen/pi-rpc";
 import { getLogger, pumpNdjsonLines } from "@zhushanwen/subagent-engine-sdk";
@@ -28,8 +29,14 @@ const logger = getLogger("session-runner");
 /** 无效 stdout 行的日志截断长度（够诊断、不刷屏）。 */
 const INVALID_LINE_LOG_CHARS = 160;
 
-/** 信号退出码合成值（close 无 code 只有 signal 时按 128+ 约定折算非零）。 */
+/** 信号退出码合成基值（close 无 code 只有 signal 时按 POSIX 128+signo 约定折算非零）。 */
 const SIGNAL_EXIT_CODE_BASE = 128;
+
+/** 信号名 → 编号（SIGTERM=15 等）。os.constants.signals 反查；未知信号回退 0（保持裸 128 口径）。 */
+function signalNumberOf(signal: NodeJS.Signals): number {
+  const signals = os.constants.signals as Record<string, number>;
+  return signals[signal] ?? 0;
+}
 
 /**
  * child 'error' 事件（spawn 失败——子进程从未运行）的收尾退出码。POSIX
@@ -212,13 +219,15 @@ function reportChildExited(
   });
 }
 
-/** close 退出码口径：轮终主动收割 = 0；其余 signal 退出按 128+ 折算（异常判据）。 */
+/** close 退出码口径：轮终主动收割 = 0；其余 signal 退出按 POSIX 128+signo 折算（异常判据）。 */
 function normalizeExitCode(
   endedCleanly: boolean,
   code: number | null,
   signal: NodeJS.Signals | null,
 ): number {
-  return endedCleanly ? 0 : code ?? (signal !== null ? SIGNAL_EXIT_CODE_BASE : 0);
+  return endedCleanly
+    ? 0
+    : code ?? (signal !== null ? SIGNAL_EXIT_CODE_BASE + signalNumberOf(signal) : 0);
 }
 
 /**

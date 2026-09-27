@@ -33,6 +33,9 @@
  *   dir="down"（代理 stdin → runtime → 真实 pi stdin）/ "up"（→ 代理 stdout）/
  *   "up-stderr"（→ 代理 stderr）。方向以「数据流向真实 pi」为参照：下行 = 流向 pi。
  * - 退出帧 {"kind":"exit","code":C,"signal":S} → 代理以相同 code/signal 退出
+ * - goodbye 帧 {"v":1,"kind":"goodbye"}（代理 → runtime，收到宿主 SIGTERM/SIGINT 时）：
+ *   正常收割预告——runtime 据此把后续 socket close 判定为正常 teardown（kill 行为不变，
+ *   仅日志分级），无预告的 close 保持异常断连语义（kill-on-disconnect warn）
  * - socket 断（close/error/EOF）→ 退出码 12：socket 是代理的生命线，断 = runtime
  *   崩溃等场景下 extension 侧感知「子进程死亡」的机制（崩溃矩阵②），不自杀会变孤儿。
  *
@@ -63,6 +66,8 @@ const RELAY_EXIT_CODES = {
 const CONNECT_RETRY_DELAY_MS = 200;
 /** 退出前等待 stderr/stdout flush 的兜底上限（毫秒）：pipe 写是异步的，process.exit 会丢未 flush 数据。 */
 const FLUSH_TIMEOUT_MS = 1000;
+/** goodbye 帧写出后等待 flush 的兜底上限（毫秒）：runtime 已死等形态下 write 回调永不到达。 */
+const GOODBYE_FLUSH_TIMEOUT_MS = 500;
 
 const stdin = process.stdin;
 const stdout = process.stdout;
@@ -86,6 +91,42 @@ process.on("uncaughtException", (err) => {
     `uncaught exception: ${err instanceof Error ? err.stack : String(err)}`,
   );
 });
+
+// 宿主终止预告（goodbye 帧）：宿主（extension/引擎）收割代理发 SIGTERM/SIGINT——
+// 这通常发生在 agent_settled 后的正常收割，与宿主崩溃在 runtime 侧同表现为 socket
+// close。被终止前先向 runtime 发 goodbye 预告帧，runtime 据此把 close 判定为正常
+// teardown（info 级日志），异常断连才保留 warn 级 kill-on-disconnect。注册 handler 后
+// Node 不再执行信号默认终止，发帧（含 flush 等待）后自行按 128+signo 退出，对宿主侧
+// 的退出码口径（spawn close 折算 143）保持一致。
+process.on("SIGTERM", () => hostTerminate("SIGTERM"));
+process.on("SIGINT", () => hostTerminate("SIGINT"));
+
+/** 宿主信号终止：best-effort 发 goodbye → 等 flush（有界）→ 按 128+signo 退出。 */
+function hostTerminate(sig) {
+  if (exiting) return;
+  exiting = true;
+  const signum = os.constants.signals[sig];
+  const exitCode = 128 + (typeof signum === "number" ? signum : 0);
+  const die = () => process.exit(exitCode);
+  try {
+    if (sock !== null && !sock.destroyed && handshakeAccepted) {
+      // write 回调 = 帧已离开写缓冲；兜底超时防 runtime 已死时回调永不到达。
+      const timer = setTimeout(die, GOODBYE_FLUSH_TIMEOUT_MS);
+      timer.unref();
+      sock.write(
+        JSON.stringify({ v: RELAY_PROTOCOL_VERSION, kind: "goodbye" }) + "\n",
+        () => {
+          clearTimeout(timer);
+          die();
+        },
+      );
+      return;
+    }
+  } catch {
+    // socket 已坏（runtime 先死等形态）：无预告通道，直接按信号口径退出
+  }
+  die();
+}
 
 main();
 

@@ -381,15 +381,18 @@ describe("relay agent CLI (relay.mjs)", () => {
     expect(res.stdout).toEqual(upBytes);
   });
 
-  it("exit frame signal propagation → close(null, SIGTERM)", { timeout: 10_000 }, async () => {
+  it("exit frame signal → exit-code folding close(143, null)（SIGTERM handler 抢占信号自终止）", { timeout: 10_000 }, async () => {
     const socketPath = makeSocketPath();
     const rt = await startFakeRuntime(socketPath);
     const child = spawnRelay({ socketPath, sessionId: "s", recordId: "r" });
     await rt.handshakePromise;
     rt.send({ kind: "exit", signal: "SIGTERM" });
     const res = await waitForExit(child);
-    expect(res.signal).toBe("SIGTERM");
-    expect(res.code).toBeNull();
+    // batch B 注册 SIGTERM/SIGINT handler 后，exitByFrame 的 process.kill 自杀信号被
+    // Node 截获（不再内核默认终止），同步的 process.exit(128+signo) 先行——close 形态
+    // 从 (null, SIGTERM) 折算为 (143, null)，与宿主 spawn 侧退出码口径一致。
+    expect(res.code).toBe(143);
+    expect(res.signal).toBeNull();
   });
 
   it("socket closed by runtime → exit 12", { timeout: 10_000 }, async () => {

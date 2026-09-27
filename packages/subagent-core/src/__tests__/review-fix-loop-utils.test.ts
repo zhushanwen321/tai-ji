@@ -7,7 +7,7 @@
 //（review-fix-loop.js 经 workerData.scriptPath 定位 require），测试的不是死代码副本。
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -44,6 +44,9 @@ import {
   parseResult,
   normalizeAggregatorResult,
   parseAggregatedMd,
+  recoverFromReportFile,
+  parsePorcelainPaths,
+  computeDegradedCommitSet,
   resolveRunRoot,
   computeOrigin,
   recordDormant,
@@ -1797,6 +1800,11 @@ describe("D2 三模板静态段逐字节相同（动态段起点标记之前）"
       "return [] when there is no previous round to reconcile; on later rounds",
       "every previous issue_id must have a status entry.",
       "",
+      "Report header: the FIRST two lines of your report file MUST be:",
+      "- Must-fix: <N>",
+      "- Suggestions: <N>",
+      "(N = your JSON counts; a fallback parser depends on this exact format)",
+      "",
       "",
     ].join("\n"));
   });
@@ -1821,6 +1829,56 @@ describe("D3 R1 空数组说明 + 修复建议必填列（T9 连带）", () => {
     for (const p of [r1, r2, scoped]) {
       expect(p.split(ROUND_CONTEXT_MARKER)[0]).toContain("'Fix suggestion' column");
     }
+  });
+});
+
+// ── U1：reviewer 报告计数行约定（设计 §3.4.1，弱通道采信源前提）──
+// 计数行段 = 结构化通道断链时 recoverFromReportFile 经 parseAggregatedMd 从
+// 报告恢复计数的采信源。三模板经共享静态段覆盖（计数行段在 ROUND CONTEXT
+// 标记之前——同 run 跨轮缓存前缀稳定依赖此，设计 §4 e2e 影响面结论）；
+// fallow 是独立 prompt 构造（buildFallowReviewCall 在 review-fix-loop.js
+// 脚本内部、非 utils 导出），用源文本锚定断言（字面量随 prompt 变更同步）。
+describe("U1 reviewer 报告计数行约定（fallback parser 采信源）", () => {
+  const COUNT_LINE_SECTION = [
+    "Report header: the FIRST two lines of your report file MUST be:",
+    "- Must-fix: <N>",
+    "- Suggestions: <N>",
+    "(N = your JSON counts; a fallback parser depends on this exact format)",
+  ].join("\n");
+
+  it("U1 三模板静态段（ROUND CONTEXT 标记之前）含完整计数行段", () => {
+    const args = { reviewPrompt: "rp", reviewInstruction: "ri" };
+    const r1 = buildR1ReviewPrompt({ header: "h", roundDir: "/d", reportFile: "r", ...args });
+    const r2 = buildR2ReviewPrompt({ header: "h", round: 2, max: 10, roundDir: "/d", reportFile: "r", aggPath: "/a", fixResult: null, knownRemaining: [], dormant: [], ...args });
+    const scoped = buildScopedRecheckPrompt({ header: "h", round: 2, max: 10, roundDir: "/d", reportFile: "r", modifiedFiles: [], affectedFiles: [], aggPath: "/a", fixResult: null, ...args });
+    for (const p of [r1, r2, scoped]) {
+      expect(p.split(ROUND_CONTEXT_MARKER)[0]).toContain(COUNT_LINE_SECTION);
+    }
+  });
+
+  it("U1 fallow 独立段含同款计数行约定；「未安装」分支为带冒号固定格式行", () => {
+    const src = readFileSync(join(__dirname, "..", "..", "workflows", "review-fix-loop.js"), "utf8");
+    const start = src.indexOf("function buildFallowReviewCall(");
+    expect(start).toBeGreaterThanOrEqual(0); // 函数漂移守卫：改名/移动即红
+    const end = src.indexOf("\nfunction ", start + 1);
+    const fnSrc = src.slice(start, end < 0 ? undefined : end);
+    for (const line of COUNT_LINE_SECTION.split("\n")) {
+      expect(fnSrc).toContain(line);
+    }
+    // 「未安装」分支给带冒号固定格式行（匹配 parseAggregatedMd 正则
+    // Must[-_]fix\s*[:：]）；旧无冒号形态不得回归
+    expect(fnSrc).toContain("- Must-fix: 0");
+    expect(fnSrc).toContain("- Suggestions: 0");
+    expect(fnSrc).not.toContain("must_fix=0, suggestion=0");
+  });
+
+  it("U1 计数行格式与 parseAggregatedMd 契约一致（fallback parser 可恢复）", () => {
+    // 「未安装」分支的报告形态
+    expect(parseAggregatedMd("- Must-fix: 0\n- Suggestions: 0\n(fallow not installed)"))
+      .toEqual({ must_fix: 0, suggestion: 0 });
+    // 通用模板形态（计数行在报告头部两行）
+    expect(parseAggregatedMd("- Must-fix: 3\n- Suggestions: 5\nbody"))
+      .toEqual({ must_fix: 3, suggestion: 5 });
   });
 });
 
@@ -2809,5 +2867,137 @@ describe("planReviewerOrder（固定 3 + 动态 1 双批调度）", () => {
     const plan = planReviewerOrder(ALL, { pkgCount: 5, churnLines: 3000 });
     expect(names(plan.slowBatch)).toContain("review-business-logic");
     expect(names(plan.slowBatch)).not.toContain("review-monorepo-impact");
+  });
+});
+
+// ── 弱格式通道（设计 §3.4.2）：recoverFromReportFile / parsePorcelainPaths /
+//    computeDegradedCommitSet ───────────────────────────────────────────
+
+describe("recoverFromReportFile（reviewer 腿弱通道计数恢复）", () => {
+  const parseMd = parseAggregatedMd;
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "rfl-recover-"));
+  });
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+  const readFile = (p: string, enc: BufferEncoding) => readFileSync(p, enc);
+
+  it("命中：报告文件含固定格式行 → 计数 + report_file 路径返回", () => {
+    writeFileSync(join(tmpDir, "reviewer.md"), "# Report\n- Must-fix: 2\n- Suggestions: 5\n", "utf-8");
+    const out = recoverFromReportFile({ roundDir: tmpDir, reportName: "reviewer", readFile, parseMd });
+    expect(out).toEqual({ must_fix: 2, suggestion: 5, report_file: join(tmpDir, "reviewer.md") });
+  });
+
+  it("命中（无 Suggestions 行）→ suggestion 兜底 0（parseAggregatedMd 同构语义）", () => {
+    writeFileSync(join(tmpDir, "agent.md"), "- Must-fix: 1\nbody", "utf-8");
+    expect(recoverFromReportFile({ roundDir: tmpDir, reportName: "agent", readFile, parseMd }))
+      .toEqual({ must_fix: 1, suggestion: 0, report_file: join(tmpDir, "agent.md") });
+  });
+
+  it("未命中：文件缺失 → null（A4 场景——报告通道也断，调用方维持终判 review-failure）", () => {
+    expect(recoverFromReportFile({ roundDir: tmpDir, reportName: "ghost", readFile, parseMd })).toBeNull();
+  });
+
+  it("未命中：文件在但无固定格式行 → null（不猜——决策 1 的模糊解析被否）", () => {
+    writeFileSync(join(tmpDir, "agent.md"), "# Report\n| id | severity |\n|---|---|\n| MF-1 | critical |\n", "utf-8");
+    expect(recoverFromReportFile({ roundDir: tmpDir, reportName: "agent", readFile, parseMd })).toBeNull();
+  });
+
+  it("未命中：readFile 抛非 ENOENT 错误（权限等）→ null 不上抛（弱通道不炸主流程）", () => {
+    const boom = (): string => { throw new Error("EACCES"); };
+    expect(recoverFromReportFile({ roundDir: tmpDir, reportName: "x", readFile: boom, parseMd })).toBeNull();
+  });
+
+  it("fallow「未安装」分支格式（U1 改造后带冒号形态）→ 同一 parser 命中（P4 复用断言）", () => {
+    writeFileSync(join(tmpDir, "fallow-scan.md"), "fallow not installed\n- Must-fix: 0\n- Suggestions: 0\n", "utf-8");
+    expect(recoverFromReportFile({ roundDir: tmpDir, reportName: "fallow-scan", readFile, parseMd }))
+      .toEqual({ must_fix: 0, suggestion: 0, report_file: join(tmpDir, "fallow-scan.md") });
+  });
+});
+
+describe("parsePorcelainPaths（基线快照路径集解析）", () => {
+  it("普通形态：XY 状态码 + 路径（含空格路径不截断）", () => {
+    expect(parsePorcelainPaths(" M src/a.ts\n?? new file.ts\nA  staged.ts\n")).toEqual([
+      "src/a.ts", "new file.ts", "staged.ts",
+    ]);
+  });
+
+  it("rename 形态取 new 路径（旧路径被替换，diff 报新路径）", () => {
+    expect(parsePorcelainPaths("R  old/name.ts -> new/name.ts")).toEqual(["new/name.ts"]);
+  });
+
+  it("带引号转义路径剥引号还原（core.quotepath 非 ASCII 形态）", () => {
+    expect(parsePorcelainPaths('?? "\u4e2d\u6587/\u76ee\u5f55/\u6587\u4ef6.ts"')).toEqual(["中文/目录/文件.ts"]);
+  });
+
+  it("带引号但转义畸形（\\q 非 JSON 转义）→ 保原样（含引号整串，路径级比对可容忍）", () => {
+    expect(parsePorcelainPaths('?? "\\q"')).toEqual(['"\\q"']);
+  });
+
+  it("带引号的合法 JSON 转义 → 剥引号解析（\\b 在 JSON 是合法转义 = backspace；畸形用例的对照组）", () => {
+    // 修正前任：原畸形样例 "\\broken" 实为合法 JSON（\b = U+0008），JSON.parse 成功，
+    // 期望「保原样」必然红；真正畸形形态是 \q / \x 等未定义转义
+    expect(parsePorcelainPaths('?? "\\broken"')).toEqual(["\broken"]);
+  });
+
+  it("空输入/短行 → 空数组", () => {
+    expect(parsePorcelainPaths("")).toEqual([]);
+    expect(parsePorcelainPaths(null)).toEqual([]);
+    expect(parsePorcelainPaths("??\n")).toEqual([]);
+  });
+});
+
+describe("computeDegradedCommitSet（降级兜底差集）", () => {
+  const execOf = (trackedOut: string, untrackedOut: string) => (cmd: string): string => {
+    if (cmd.startsWith("git diff --name-only")) return trackedOut;
+    if (cmd.startsWith("git ls-files --others")) return untrackedOut;
+    throw new Error("unexpected cmd: " + cmd);
+  };
+
+  it("差集 =（tracked ∪ untracked）− 基线；untracked 新文件形态并入", () => {
+    const out = computeDegradedCommitSet({
+      prevHead: "abc123",
+      baselinePaths: ["user-wip.ts"],
+      exec: execOf("src/fix-a.ts\nuser-wip.ts", "brand-new.ts\nuser-wip.ts"),
+    });
+    expect(out.sort()).toEqual(["brand-new.ts", "src/fix-a.ts"]);
+  });
+
+  it("部分重叠形态：修复同时触及干净文件与基线内文件 → 差集只含前者（路径粒度收窄的已接受取舍）", () => {
+    const out = computeDegradedCommitSet({
+      prevHead: "abc123",
+      baselinePaths: ["shared/touched-by-both.ts"],
+      exec: execOf("clean/fix-only.ts\nshared/touched-by-both.ts", ""),
+    });
+    expect(out).toEqual(["clean/fix-only.ts"]);
+  });
+
+  it("prevHead 空（空仓首 commit 前）→ tracked 侧空集，untracked 照常", () => {
+    const out = computeDegradedCommitSet({
+      prevHead: "",
+      baselinePaths: [],
+      exec: execOf("SHOULD-NOT-APPEAR.ts", "u.ts"),
+    });
+    expect(out).toEqual(["u.ts"]);
+  });
+
+  it("git 探测失败 → 对应侧空集不炸（对齐 prevHead try/catch 置空惯例）", () => {
+    const out = computeDegradedCommitSet({
+      prevHead: "abc123",
+      baselinePaths: [],
+      exec: (): string => { throw new Error("not a git repository"); },
+    });
+    expect(out).toEqual([]);
+  });
+
+  it("差集空（全部改动在基线内）→ 空数组（调用方走分支 2：跳过 + WARN）", () => {
+    const out = computeDegradedCommitSet({
+      prevHead: "abc123",
+      baselinePaths: ["a.ts", "b.ts"],
+      exec: execOf("a.ts", "b.ts"),
+    });
+    expect(out).toEqual([]);
   });
 });

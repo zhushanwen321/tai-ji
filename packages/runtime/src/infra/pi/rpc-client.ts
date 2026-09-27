@@ -348,6 +348,18 @@ export class RpcClient implements IPiEngine {
     // logger 未初始化时（如单元测试）返回 no-op 写入器，无副作用。
     if (this.options.sessionId) {
       this.piSessionLog = createPiSessionLog(this.options.sessionId)
+      // respawn 边界行：同 session 的 pi 进程可能多次 spawn（runtime 重启后 restore /
+      // 崩溃重拉），tee 是 append 模式，无边界行时无法从文件内区分代际——排障时
+      // 「崩溃前最后输出」与「重启后首输出」会混读（2026-09-24 事故取证的实测痛点）。
+      // 下划线前缀 type 与 pi 自身事件命名空间区分，消费方按未知类型忽略。
+      this.piSessionLog.write(
+        JSON.stringify({
+          type: '_spawn_boundary',
+          ts: new Date().toISOString(),
+          runtimePid: process.pid,
+          sessionId: this.options.sessionId,
+        }) + '\n',
+      )
     }
 
     const proc = this.proc

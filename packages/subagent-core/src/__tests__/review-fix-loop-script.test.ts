@@ -21,6 +21,10 @@ import vm from "node:vm";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+// F-1 前缀契约锁定（决策 3 守卫）：脚本 worker 沙箱无法 import 引擎包、只能内联
+// 字面量，等值性守卫只能落在测试侧——devDep import 引擎 SSOT 常量做双侧防漂移
+import { DETERMINISTIC_SCHEMA_FAILURE_PREFIX } from "@zhushanwen/pi-subagent-cli";
+
 const WORKFLOW_SOURCE = readFileSync(
   join(__dirname, "..", "..", "workflows", "review-fix-loop.js"),
   "utf8",
@@ -704,5 +708,96 @@ describe("review-fix-loop.js fixerDocPath + groupCalls（fixer 文件总线渲�
       expect(captured[0].reportPath).toBe("");
       expect(captured[0].caution).toEqual([]);
     });
+  });
+});
+
+// ── 弱格式通道（设计 §3.4.2）：summarizeDegradedTrigger 纯函数直测 + 前缀契约锁定 ──
+// 行为级接线（触发点 a/b、记账五消费点、ES3 豁免、非确定性 error 终判）由
+// subagent-workflow 侧 review-fix-loop-e2e mock 轨覆盖（真实 worker 全链）；
+// 本文件覆盖循环体外的纯函数与「字面量 ↔ 引擎常量」的等值契约（常量已顶部 import）。
+describe("review-fix-loop.js summarizeDegradedTrigger（降级 WARN 触发摘要）", () => {
+  function loadSummarize(): (raw: unknown) => string {
+    // 函数声明语句的完成值是 undefined——尾部补引用表达式取回（loadBuildRemaining 同款）
+    const src = [extractFn("summarizeDegradedTrigger"), "summarizeDegradedTrigger"].join("\n");
+    return vm.runInNewContext(src, {}) as (raw: unknown) => string;
+  }
+
+  it("error 优先：raw.error 原样开头（F-1 前缀 + failureKind 分类段不被吞）", () => {
+    const summarize = loadSummarize();
+    const err = DETERMINISTIC_SCHEMA_FAILURE_PREFIX + " failureKind=schema_mismatch; turns=2";
+    expect(summarize({ error: err, value: "ignored" })).toBe(err);
+  });
+
+  it("头 240 字符截断：长 error 前缀完整保留（前缀 40 字符 ≪ 240，截断只切尾）", () => {
+    const summarize = loadSummarize();
+    const long = DETERMINISTIC_SCHEMA_FAILURE_PREFIX + " " + "x".repeat(500);
+    expect(summarize({ error: long })).toHaveLength(240);
+    expect(summarize({ error: long }).startsWith(DETERMINISTIC_SCHEMA_FAILURE_PREFIX)).toBe(true);
+  });
+
+  it("无 error → 取 raw.value 头 240 字符（触发点 b 拼接文本形态——仅作线索）", () => {
+    const summarize = loadSummarize();
+    const text = "Round 1 report body text without schema envelope " + "y".repeat(300);
+    expect(summarize({ value: text })).toHaveLength(240);
+    expect(summarize({ value: text }).startsWith("Round 1 report")).toBe(true);
+  });
+
+  it("value 非字符串（对象形态）→ JSON.stringify 后截断；null/undefined → 空串", () => {
+    const summarize = loadSummarize();
+    expect(summarize({ value: { foo: "bar" } })).toBe('{"foo":"bar"}');
+    expect(summarize({ value: null })).toBe("");
+    expect(summarize(undefined)).toBe("");
+    expect(summarize("raw-string")).toBe("");
+  });
+
+  it("error 非字符串（数字等 truthy 值）→ 不走 error 分支，回落 value（防 String(error) 意外形态）", () => {
+    const summarize = loadSummarize();
+    expect(summarize({ error: 42, value: "fallback" })).toBe("fallback");
+  });
+});
+
+describe("review-fix-loop.js F-1 前缀契约锁定（决策 3 守卫，双侧防漂移）", () => {
+  it("脚本触发判据字面量与引擎 DETERMINISTIC_SCHEMA_FAILURE_PREFIX 逐字等值", () => {
+    // worker 沙箱无法 import 引擎包（脚本只能内联字面量）；引擎侧（pi-subagent-cli
+    // output-collector 以该常量开头构造 error）或脚本侧任一变更未同步对方，此断言即红
+    expect(WORKFLOW_SOURCE).toContain(
+      "const DETERMINISTIC_SCHEMA_FAILURE_PREFIX_LITERAL = "
+      + JSON.stringify(DETERMINISTIC_SCHEMA_FAILURE_PREFIX) + ";",
+    );
+  });
+
+  it("字面量单一声明 + 恰好两处使用（reviewer 触发点 a / fixer 触发点 a）——防第二处内联漂移", () => {
+    expect(WORKFLOW_SOURCE.split("DETERMINISTIC_SCHEMA_FAILURE_PREFIX_LITERAL").length - 1).toBe(3);
+    // 两处使用都必须是 includes 判据形态（error 分支内的触发条件）
+    expect(
+      WORKFLOW_SOURCE.match(/raw\.error\.includes\(DETERMINISTIC_SCHEMA_FAILURE_PREFIX_LITERAL\)/g)?.length,
+    ).toBe(2);
+  });
+});
+
+describe("review-fix-loop.js degraded 透出锚点（三落点字段防移除）", () => {
+  it("run 返回体透出 degradedRounds（shorthand）", () => {
+    const returnBlock = WORKFLOW_SOURCE.slice(WORKFLOW_SOURCE.lastIndexOf("return {"));
+    expect(returnBlock).toContain("degradedRounds,");
+  });
+
+  it("clean 分支 message 构造直接拼 degradedRoundsSuffix（clean 路径不赋值 finalMessage，旁路即丢后缀）", () => {
+    const returnBlock = WORKFLOW_SOURCE.slice(WORKFLOW_SOURCE.lastIndexOf("return {"));
+    expect(returnBlock).toContain('issue(s) fixed total." + degradedRoundsSuffix');
+  });
+
+  it("后缀附加点先于 needs-human 改道判定（改道后 message 走 finalMessage，后缀须已落入）", () => {
+    const suffixAt = WORKFLOW_SOURCE.indexOf("const degradedRoundsSuffix = ");
+    const escalateAt = WORKFLOW_SOURCE.indexOf("terminated = \"needs-human\";");
+    expect(suffixAt).toBeGreaterThan(-1);
+    expect(escalateAt).toBeGreaterThan(suffixAt);
+    // 附加实现形态：成功类终态把后缀落进 finalMessage（改道构造的输入）
+    expect(WORKFLOW_SOURCE).toContain("finalMessage += (finalMessage ? \"\" : \"All batches clean.\") + degradedRoundsSuffix;");
+  });
+
+  it("max-rounds 触顶 finalMessage 含分号诊断段构造（degraded 计数 + last trigger）", () => {
+    expect(WORKFLOW_SOURCE).toContain(
+      '"；degraded: " + degradedRoundKeys.size + " round(s), last trigger: " + lastDegradedTrigger',
+    );
   });
 });

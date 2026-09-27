@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import * as net from 'node:net'
 import { mkdtemp, mkdir, writeFile, readFile, rm, writeFile as writeFileAsync } from 'node:fs/promises'
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { initRelayServer, deinitRelayServer, isRelayServerActive, getActiveRelaySocketPath, getActiveRelayRegistry } from '../../../infra/relay/relay-server.js'
@@ -250,6 +250,17 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     expect(agent.rejectFrames().map((r) => r.reason)).toContain('version')
   })
 
+  // 版本严等锁定：落后版本同样拒绝（协议两侧同仓同发，跨版本静默容忍只会把方言
+  // 漂移推迟到数据阶段解析爆炸；握手即显式失败）
+  t('握手校验：v 落后 → reject reason=version + 断连', async () => {
+    await startServer()
+    const agent = new TestAgent(getActiveRelaySocketPath()!)
+    await agent.opened
+    agent.send(validHandshake({ v: RELAY_PROTOCOL_VERSION - 1 }))
+    await agent.waitForClosed()
+    expect(agent.rejectFrames().map((r) => r.reason)).toContain('version')
+  })
+
   t('握手校验：归属缺失（空 mainSessionId）→ reject reason=identity + 断连', async () => {
     await startServer()
     const agent = new TestAgent(getActiveRelaySocketPath()!)
@@ -457,6 +468,70 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     }
   })
 
+  // goodbye 预告（2026-09-24 事故取证修复）：宿主正常收割（agent_settled 后杀代理）
+  // 先发 goodbye 再断开——runtime 侧把 close 判定为正常 teardown：child 照常收割
+  // （marker 仍出现），但不产生 warn 级 kill-on-disconnect 与 kill decision 决策行
+  // （正常路径不污染故障统计）。无预告断连的 warn 语义由上例锁定。
+  t('goodbye 预告：断开前发 goodbye → child 仍被收割，但无 warn 级 kill-on-disconnect 日志', async () => {
+    await startServer()
+    const marker = join(workDir, 'sigterm-marker-goodbye')
+    const agent = new TestAgent(getActiveRelaySocketPath()!)
+    await agent.opened
+    const hs = validHandshake({ argv: [fakePi, 'hang'] })
+    const ready = join(workDir, 'ready-marker-goodbye')
+    ;(hs.env as Record<string, string>).TAIJI_TEST_SIGTERM_MARKER = marker
+    ;(hs.env as Record<string, string>).TAIJI_TEST_READY_MARKER = ready
+    agent.send(hs)
+    await waitFor(() => existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file written')
+    await waitFor(() => existsSync(ready), 30_000, 'fake-pi ready (SIGTERM handler registered)')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      agent.send({ v: 1, kind: 'goodbye' })
+      agent.destroy()
+      await waitFor(() => existsSync(marker), 30_000, 'SIGTERM marker (reaped after goodbye)')
+      await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file cleaned after reap')
+      // 无 warn 级断连告警与 kill decision 决策行（正常收割不产生故障噪声）
+      expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('kill-on-disconnect'))).toBe(false)
+      expect(warnSpy.mock.calls.some(([msg]) => msg === '[relay] kill decision')).toBe(false)
+      // 正常 teardown 的 info 级留痕（goodbye received + reaped）
+      expect(logSpy.mock.calls.some(([msg]) => String(msg).includes('goodbye received recordId=rec-1'))).toBe(true)
+      expect(logSpy.mock.calls.some(([msg]) => String(msg).includes('reaping child (normal teardown) recordId=rec-1'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+      logSpy.mockRestore()
+    }
+  })
+
+  // destroyAll 与 close handler 双杀链去重（2026-09-24 预防加固）：conn.destroy 的
+  // close 事件异步落在 destroyAll 的 kill await 刻度里，条目此刻仍在册——无
+  // teardownStarted 标记时 close handler 会对同一 child 重复跑杀链（重复 kill
+  // decision 日志 + inflightKills 双登记）。
+  t('destroyAll 接管杀链：close 不重复打 kill decision，child 仍被收割', async () => {
+    await startServer()
+    const marker = join(workDir, 'sigterm-marker-destroyall')
+    const ready = join(workDir, 'ready-marker-destroyall')
+    const agent = new TestAgent(getActiveRelaySocketPath()!)
+    await agent.opened
+    const hs = validHandshake({ argv: [fakePi, 'hang'] })
+    ;(hs.env as Record<string, string>).TAIJI_TEST_SIGTERM_MARKER = marker
+    ;(hs.env as Record<string, string>).TAIJI_TEST_READY_MARKER = ready
+    agent.send(hs)
+    await waitFor(() => existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file written')
+    await waitFor(() => existsSync(ready), 30_000, 'fake-pi ready (SIGTERM handler registered)')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await getActiveRelayRegistry()!.destroyAll()
+      await waitFor(() => existsSync(marker), 30_000, 'SIGTERM marker (child reaped by destroyAll)')
+      // close handler 对同一 child 不重复杀链（无 kill decision / kill-on-disconnect warn）
+      expect(warnSpy.mock.calls.some(([msg]) => msg === '[relay] kill decision')).toBe(false)
+      expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('kill-on-disconnect'))).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
+    agent.destroy()
+  })
+
   // 2026-09-04 runtime 整机崩溃事故回归：对端 FIN 后本端 conn 自动 end()
   // （allowHalfOpen=false 默认）——destroyed=false 但 writableEnded=true，子进程
   // stdout 后续 data 回调里 writeFrame 同步抛 writeAfterFIN（EPIPE），逃逸即
@@ -654,6 +729,55 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       await startServer()
       await waitFor(() => existsSync(marker), 30_000, 'orphan reaped by sweep')
       await waitFor(() => !existsSync(pidFile), 30_000, 'orphan pid file removed')
+    })
+
+    // 分级处置（2026-09-24 事故修复）：孤儿判定保持，处置按 tee 活跃度分级——
+    // 静默孤儿（无 tee 证据含）立即收割（上一用例锁定）；仍在产出的活跃孤儿
+    // 登记 pending 延迟收割，tee 静默到期后补杀。
+    t('活跃孤儿（tee 近期有写入）→ defer（pendingSince 登记，不杀）；tee 静默后 → 补杀', async () => {
+      const marker = join(workDir, 'orphan-marker-active')
+      const orphan = join(workDir, 'orphan-active.mjs')
+      await writeFile(orphan, [
+        "import { writeFileSync } from 'node:fs'",
+        `writeFileSync(${JSON.stringify(join(workDir, 'orphan-active-boot.json'))}, 'booted')`,
+        "process.on('SIGTERM', () => {",
+        `  writeFileSync(${JSON.stringify(marker)}, 'reaped')`,
+        '  process.exit(0)',
+        '})',
+        'setTimeout(() => {}, 60000)',
+        '',
+      ].join('\n'))
+      const { spawn } = await import('node:child_process')
+      const child = spawn(process.execPath, [orphan], { stdio: 'ignore' })
+      await waitFor(() => existsSync(join(workDir, 'orphan-active-boot.json')), 30_000, 'orphan booted')
+      // 活跃形态：tee 镜像文件刚写入（mtime = 现在 → idleMs ≈ 0 < 阈值）
+      const recordId = 'rec-active'
+      const pidFile = getRelayPidFilePath(recordId, dataDir)
+      await writeFileAsync(pidFile, JSON.stringify({ pid: child.pid, spawnedAt: Date.now() }))
+      const logsDir = join(dataDir, 'logs')
+      mkdirSync(logsDir, { recursive: true })
+      const teeFile = join(logsDir, `pi-relay-${new Date().toISOString().slice(0, 10)}-${recordId}.jsonl`)
+      writeFileSync(teeFile, '{"type":"message_update"}\n')
+      await startServer()
+      const registry = getActiveRelayRegistry()
+      if (registry === null || registry === undefined) throw new Error('registry not active')
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        await registry.sweepOrphanChildren()
+        // 活跃孤儿被 defer：未杀（marker 不出现）+ pendingSince 已登记 + warn 留痕
+        expect(existsSync(marker)).toBe(false)
+        const pending = JSON.parse(readFileSync(pidFile, 'utf-8')) as { pendingSince?: number }
+        expect(typeof pending.pendingSince).toBe('number')
+        expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('deferred reap'))).toBe(true)
+      } finally {
+        warnSpy.mockRestore()
+      }
+      // tee 静默到期（mtime 回拨到 10 分钟前）→ 再次 sweep 补杀
+      const stale = new Date(Date.now() - 10 * 60_000)
+      utimesSync(teeFile, stale, stale)
+      await registry.sweepOrphanChildren()
+      await waitFor(() => existsSync(marker), 30_000, 'deferred orphan reaped after going idle')
+      await waitFor(() => !existsSync(pidFile), 30_000, 'deferred orphan pid file removed')
     })
 
     t('children 目录读不到（readdir 失败）→ warn 出声 + 不抛（本轮 sweep 跳过）', async () => {

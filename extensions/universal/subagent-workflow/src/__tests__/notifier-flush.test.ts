@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDelivery } from "@zhushanwen/session-delivery";
 import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
-import { createNotifier, type BgNotifier, type NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
+import { createNotifier, FAILURE_RECOVERY_TAIL, type BgNotifier, type NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
 
 // 投递内核经通知域窄端口注入（notifier 不再直接 import session-delivery）——
 // 本文件全部用例依赖真实内核语义（isIdle gate 退避 / 60s 合批 / dedup LRU /
@@ -329,7 +329,7 @@ describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile �
 		expect(sentContent()).toBe('Subagent "w" (sa-ptr-5) cancelled.');
 	});
 
-	it("gc-failed（closed + closedReason=gc + error 有值）→ 不追加指针行", () => {
+	it("gc-failed（closed + closedReason=gc + error 有值）→ failed 文案 + 恢复指引尾段 + 指针行", () => {
 		notifier.notify({
 			id: "sa-ptr-6", status: "closed", closedReason: "gc", agent: "w",
 			error: "spawn EPIPE",
@@ -337,7 +337,11 @@ describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile �
 			startedAt: 1, endedAt: 2,
 		});
 
-		expect(sentContent()).toBe('Subagent "w" (sa-ptr-6) failed: spawn EPIPE');
+		// 新契约（batch C+D）：failed 通知附恢复指引尾段——期望引用权威常量构造，防文案再漂移
+		expect(sentContent()).toBe(
+			`Subagent "w" (sa-ptr-6) failed: spawn EPIPE\n\n${FAILURE_RECOVERY_TAIL}` +
+			"\n\nFull transcript: /tmp/sessions/child-6.jsonl",
+		);
 	});
 
 	it("[review 修复] gc-failed + patchFile 并存 → failed 文案优先（失败轮也会写 patchFile，patch 提示不可达）", () => {
@@ -352,7 +356,10 @@ describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile �
 			startedAt: 1, endedAt: 2,
 		});
 
-		expect(sentContent()).toBe('Subagent "w" (sa-ptr-8) failed: spawn EPIPE');
+		expect(sentContent()).toBe(
+			`Subagent "w" (sa-ptr-8) failed: spawn EPIPE\n\n${FAILURE_RECOVERY_TAIL}` +
+			"\n\nFull transcript: /tmp/sessions/child-8.jsonl",
+		);
 	});
 
 	it("[U3][D6 显式取舍] parent-shutdown 合成关闭 + patchFile 并存 → failed 文案优先（patch 提示不可达）", () => {
@@ -365,7 +372,9 @@ describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile �
 			startedAt: 1, endedAt: 2,
 		});
 
-		expect(sentContent()).toBe('Subagent "w" (sa-u3-ps) failed: closed due to parent-shutdown');
+		expect(sentContent()).toBe(
+			`Subagent "w" (sa-u3-ps) failed: closed due to parent-shutdown\n\n${FAILURE_RECOVERY_TAIL}`,
+		);
 	});
 
 	it("[U3] details payload 物化 outcome：closed 入参缺省时按 deriveOutcome 兑底填充", () => {

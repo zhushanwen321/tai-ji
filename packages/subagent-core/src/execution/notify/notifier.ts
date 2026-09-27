@@ -201,6 +201,21 @@ export interface NotifierHost {
 }
 
 /**
+ * 失败通知的恢复指引尾段（[T2-③/LC-1] 可达性语义——失败原因 + 恢复指引必须可达宿主）。
+ * 定义于本模块（notify 域）：conversation-continuation（轮失败 error 构造）与本模块的
+ * failed 通知文案共同消费——单一权威禁散改。
+ * [勿重做警示] 失败通知与恢复轮完成通知之间存在时序窗：主 agent 若在窗口内改判
+ * 「亲自接管」并同时重发 message，会产生并行恢复轮 + 重复劳动（2026-09-24 事故 S1
+ * 实测形态）——接管前必须先 list 确认无在跑恢复轮。
+ */
+export const FAILURE_RECOVERY_TAIL =
+  "Recovery: re-send your message (action:'message') to continue — the conversation " +
+  "context is preserved (session file intact), or use action:'close' to discard it. " +
+  "If you decide to take over the work yourself instead, first run action:'list' to check " +
+  "whether a resumed round is already running for this subagent — do not redo work that a " +
+  "recovery round may have already started or finished.";
+
+/**
  * 将 BgNotifyRecord 格式化为 LLM 可读的 notification content。
  *
  * 模块内唯一消费方是下方 createNotifier 的 notify()（预格式化后传 delivery.send，
@@ -228,7 +243,9 @@ function buildLlmContent(record: BgNotifyRecord): string {
         return `Subagent "${agent}" (${id}) cancelled.`;
       }
       if (outcome === "failed") {
-        return `Subagent "${agent}" (${id}) failed: ${record.error}`;
+        // [LC-1 补口] failed 通知带上恢复指引尾段（此前仅轮失败 error 携带，通知侧
+        // 丢失——主 agent 收到裸 error 无恢复路径，误判「任务全损」改判亲自重做）
+        return `Subagent "${agent}" (${id}) failed: ${record.error}\n\n${FAILURE_RECOVERY_TAIL}${transcriptPointer}`;
       }
       // 成功完成或通用结束：展示结果。
       // [C-2] close 收口提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
