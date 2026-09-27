@@ -12,12 +12,16 @@
 // mock 面对齐 index-session-start.test.ts（jsonl-run-store + lifecycle.terminate）；
 // 其余走真实装配（service 单例槽注入 fake，与该文件同一模式）。
 //
-// 装载成本分层：subagentsExtension（index.ts 全图）只在「组合根接线」describe 装载
-//（局部 beforeEach 动态 import）；reporter 重试用例被测对象是 createInFlightReporter
-// 单模块，不付全图重求值。重试语义用 fake timers 确定性驱动（重试 timer 走
-// setTimeout；select 为 stub 立即返回，无真实超时计时），消除对真实时序的依赖。
+// 装载成本分层 [组 5a 瘦身 2026-09-27]：模块图静态加载一次，beforeEach 显式重置
+// oncePerProcess 守卫 Map + 通知账本 + Service 单例槽（与 resetModules 重建等价）；
+// subagentsExtension（index.ts 全图）不再每用例动态 import 重求值。reporter 重试
+// 用例被测对象是 createInFlightReporter 单模块（静态图内缓存命中）。重试语义用
+// fake timers 确定性驱动（重试 timer 走 setTimeout；select 为 stub 立即返回，无真实
+// 超时计时），消除对真实时序的依赖。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { _resetOncePerProcessForTest } from "@zhushanwen/pi-ext-guards";
 
 const { mockStoreLoadAll, mockStoreDispose } = vi.hoisted(() => ({
   mockStoreLoadAll: vi.fn(async () => []),
@@ -60,6 +64,9 @@ import {
   isSubagentInFlightReport,
 } from "@zhushanwen/extension-protocol";
 import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
+// 通知账本重置导出（beforeEach 显式清空；session_start 装配链按 ctx entries 重水合）
+import { _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
+import subagentsExtension from "../index.ts";
 
 process.setMaxListeners(50);
 
@@ -112,10 +119,11 @@ function injectFakeServices(): void {
 }
 
 beforeEach(() => {
-  vi.resetModules();
   vi.clearAllMocks();
   mockStoreLoadAll.mockResolvedValue([]);
   resetLifecycleSlots();
+  _resetOncePerProcessForTest();
+  _resetNotifyLedgerForTest();
   injectFakeServices();
 });
 
@@ -124,13 +132,6 @@ afterEach(() => {
 });
 
 describe("组合根接线：初始上报时点（u7a 验收）", () => {
-  let subagentsExtension: typeof import("../index.ts").default;
-
-  // index.ts 全图装载只在本 describe 付（被测对象 = 组合根接线本身）
-  beforeEach(async () => {
-    subagentsExtension = (await import("../index.ts")).default;
-  });
-
   function mount(): { pi: ExtensionAPI; handlers: Map<string, (event: unknown, ctx: ExtensionContext) => unknown> } {
     const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
     const noop = (): void => undefined;

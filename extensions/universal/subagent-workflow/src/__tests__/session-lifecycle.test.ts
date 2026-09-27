@@ -122,36 +122,52 @@ vi.mock("../interface/commands.ts", () => ({
   registerWorkflowsCommand: vi.fn(),
 }));
 
-// ── import 被测模块 ──
+// ── import 被测模块（模块图静态加载一次，beforeEach 显式重置模块级状态） ──
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 // [W2/V4 D6] 直落断言消费的 protocol SSOT（customType 常量 + status 映射单点）
 import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
-import { STALE_CTX_MARKER } from "@zhushanwen/pi-ext-guards";
+import { STALE_CTX_MARKER, _resetOncePerProcessForTest } from "@zhushanwen/pi-ext-guards";
 import { IDENTITY_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
 import { ENV_ROOT_CWD, getSubagentRecordsDir, resolvePiSessionScopedDir, STATE_DIR_NAME } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
 // 保留窗口 env 通道仅测试消费，深路径直取（对齐 retention 测试先例）
 import { STATE_TTL_MS_ENV } from "@zhushanwen/subagent-core/orchestration/file-run-store.ts";
+// 通知账本重置导出（beforeEach 显式清空，对齐 index-session-start 先例）
+import { _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import type { SessionLifecycleDeps } from "../session-lifecycle.ts";
+import { bindLedgerHostAndRecover, setupSessionLifecycle } from "../session-lifecycle.ts";
+import subagentsExtension from "../index.ts";
+// 组 6 域隔离条的调用断言面；vi.mock 已在文件顶部拦截同路径（同一 mock 实例）。
+import { registerSubagentTool } from "../interface/subagent-tool.ts";
+// 组 1「new 分支」/ 组 3 观察面：单例访问器 + 双 Service 假类（mock 实例，与被测
+// 装配消费同一模块图——模块图单实例后静态引用即被测引用）。
+import {
+  ModelConfigService,
+  setModelConfigService,
+  setSubagentService,
+  SubagentService,
+} from "@zhushanwen/subagent-core";
 
-// resetModules 每用例重新加载 index.ts 副本，factory 体内的 process 信号 hook
-//（SIGTERM/SIGINT/beforeExit 收割防线）随之叠加注册——本文件挂载用例超 Node 默认
-// listener 阈值 10 触发误报警告，抬高上限（生产单副本恒 3 个 listener，无此形态）。
+// factory 体内的 process 信号 hook（SIGTERM/SIGINT/beforeExit 收割防线）按 factory
+// 调用叠加注册——本文件 5 次 factory 调用（组 2×3 + 组 6×2）计 15 个 listener，超
+// Node 默认阈值 10 触发误报警告，抬高上限（生产单 factory 恒 3 个 listener）。
 process.setMaxListeners(50);
 
-// session_start 的六项跨 session 副作用操作经 oncePerProcess 守卫（u-audit-fix），
-// 守卫 Map 是模块级状态：beforeEach resetModules + 动态 import 每用例取新鲜模块实例，
-// 否则首用例消费 key 后，后续用例的 loadAll 失败 / kill-9 恢复链静默旁路
-//（storeHealthy 恒 true 等断言失真）。组 1 用例内动态 import setupSessionLifecycle；
-// 组 1「new 分支」用例的 setter/instanceof 断言同样须取当用例动态图的 barrel 实例——
-// mock 的 vi.fn 随模块图重建，静态引用属首载图，断言会读到另一实例的空 calls。
-let subagentsExtension: typeof import("../index.ts").default;
-
 // ── helpers ──
+
+/** 重置双 Service 单例槽（本文件访问器已被 mock 拦截，槽位正常路径不写入；重置是
+ *  防线外兜底——防真实 service-bootstrap 经其他导入面写槽后跨用例泄漏，与
+ *  index-session-start 先例同款）。 */
+function resetLifecycleSlots(): void {
+  for (const key of ["@zhushanwen/pi-subagents.service", "@zhushanwen/pi-subagents.model-service"]) {
+    const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
+    if (slot) slot.current = null;
+  }
+}
 
 interface EntryRecord {
   customType: string;
@@ -272,11 +288,25 @@ async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Prom
   return { pi, entries, lazyDeps, workflowRun };
 }
 
-beforeEach(async () => {
-  vi.resetModules();
+// [组 5a 瘦身] 模块图静态加载一次（文件顶部 import），beforeEach 显式重置全部被
+// 用例消费的模块级状态，与旧「resetModules + 动态 import 全图重求值」等价：
+//   ① oncePerProcess 守卫 Map（ext-guards 模块级）——session_start 的六项跨 session
+//      副作用（worktree-scan / retention-maintenance-round 等）都经它单次放行；不清则
+//      首个挂载/装配用例消费 key 后，后续用例的 scan 断言 / 组 4 维护轮 / kill-9 恢复
+//      链静默旁路（storeHealthy 恒 true 等断言失真）。
+//   ② 通知账本（core notify-ledger 模块级）——恢复链按 ctx entries 重水合，残留会让
+//      账本跨用例带账。
+//   ③ 双 Service 单例槽（globalThis Symbol）——resetLifecycleSlots 兜底清空。
+//   ④ mock 调用记录——vi.clearAllMocks()（mock 工厂仅创建一次，调用记录逐用例清）。
+// 生产代码的模块级可变状态核对结论：cachedMainSessionFile（session-lifecycle.ts）
+// 每次 session_start 无条件刷新，无重置必要；workflow 域 sessionState/lsRef 等为
+// per-factory 闭包状态，随每次 mount 新建，无跨用例泄漏面。
+beforeEach(() => {
   vi.clearAllMocks();
   mockStoreLoadAll.mockResolvedValue([]);
-  subagentsExtension = (await import("../index.ts")).default;
+  resetLifecycleSlots();
+  _resetOncePerProcessForTest();
+  _resetNotifyLedgerForTest();
 });
 
 afterEach(() => {
@@ -287,7 +317,6 @@ afterEach(() => {
 
 describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   it("deps.worktreeManager 注入 fake：session_start 恰好 scan 一次（ADR-035 reaper 一行行为一个注入点）", async () => {
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi } = createFakePi();
     const fakeWtm = { scan: vi.fn(async () => {}) };
     const deps: SessionLifecycleDeps = { worktreeManager: fakeWtm };
@@ -299,7 +328,6 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   });
 
   it("deps.createServices 注入 fake：装配走注入工厂，其 service 供 manifest 恢复与 SAR 委托", async () => {
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi } = createFakePi();
     const fakeService = {
       recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
@@ -328,35 +356,27 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   });
 
   it("默认 createServices（访问器槽为 null）→ new 分支：双 Service 构造 + 双 set 各恰一次 + init 无条件执行（D8）", async () => {
-    // module mock 的访问器槽恒 null（getSubagentService/getModelConfigService），
-    // deps 不注入 createServices → 走默认 createOrReuseServices 的 new 半边
+    // createServices（访问器槽为 null）→ 走默认 createOrReuseServices 的 new 半边
     // （existing-??-new）。设计 §3.1「单例语义保持」+ §3.6 D8：仅 !existing 时
     // set；initModel/initSession 无条件执行——existingService === null ⟹
     // reused === false（createOrReuseServices 的 reused 仅由 existing 派生，无
     // 任何「跳过 init」分支），故构造 + 双 set 即 reused=false 的构造性证据。
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi } = createFakePi();
 
     await setupSessionLifecycle(pi, createFakeCtx("session-new-1"), {});
 
     // 双 set 各恰一次，写入的是新构造实例（mock 类被实例化 = new 分支发生）。
-    // 断言目标取当用例动态图的 barrel 实例（与被测 setupSessionLifecycle 消费同一
-    // mock 实例——vi.mock 子路径解析归一到 barrel re-export 的同一物理模块，但
-    // vi.fn 随模块图重建，静态引用属首载图会读到空 calls）。
-    const {
-      ModelConfigService: ModelConfigServiceOfRun,
-      setModelConfigService: setModelConfigServiceOfRun,
-      setSubagentService: setSubagentServiceOfRun,
-      SubagentService: SubagentServiceOfRun,
-    } = await import("@zhushanwen/subagent-core");
-    const setSubagentCalls = vi.mocked(setSubagentServiceOfRun).mock.calls;
-    const setModelCalls = vi.mocked(setModelConfigServiceOfRun).mock.calls;
+    // 断言目标 = 静态导入的 mock 实例（与被测 setupSessionLifecycle 消费同一模块
+    // 图——模块图单实例后静态引用即被测引用，vi.mock 子路径解析归一到 barrel
+    // re-export 的同一物理模块）。
+    const setSubagentCalls = vi.mocked(setSubagentService).mock.calls;
+    const setModelCalls = vi.mocked(setModelConfigService).mock.calls;
     expect(setSubagentCalls).toHaveLength(1);
     expect(setModelCalls).toHaveLength(1);
     const svc = setSubagentCalls[0]?.[0];
     const modelSvc = setModelCalls[0]?.[0];
-    expect(svc).toBeInstanceOf(SubagentServiceOfRun);
-    expect(modelSvc).toBeInstanceOf(ModelConfigServiceOfRun);
+    expect(svc).toBeInstanceOf(SubagentService);
+    expect(modelSvc).toBeInstanceOf(ModelConfigService);
     // init 无条件执行（D8）：new 实例的 initModel/initSession 仍被调（与
     // existing 分支共用同一行接线代码）
     expect(svc?.initSession).toHaveBeenCalledTimes(1);
@@ -364,7 +384,6 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   });
 
   it("deps.createRunStore 注入 fake：loadAll 成功 → storeHealthy=true，runs 重水合", async () => {
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi } = createFakePi();
     const doneRun = makeRun("wf-seam-done", "done");
     const fakeStore = makeFakeStore(vi.fn(async () => [doneRun]));
@@ -380,7 +399,6 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   });
 
   it("store.loadAll 失败 → result.storeHealthy=false（MF-1 fail-fast 语义经 result 回传）", async () => {
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi } = createFakePi();
     const fakeStore = makeFakeStore(vi.fn(async () => {
       throw new Error("disk corruption");
@@ -393,7 +411,6 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   });
 
   it("kill-9 恢复：running run 转 done,failed + pending:unregister appendEntry 直落（不经 emit）+ save 落盘", async () => {
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi, entries, emits } = createFakePi();
     // 通知发送面 spy 化：守卫「中断 run 不产生 workflow-result 完成通知」（[W2 场景 4]
     // 断言——收编路径无通知回调，构造性成立；若未来壳侧装配误把 onRunDone 接进恢复
@@ -442,7 +459,6 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     vi.stubEnv("PI_SUBAGENT_DEPTH", "2");
     vi.stubEnv("PI_SUBAGENT_FORK_DEPTH", "1");
     vi.stubEnv("PI_SUBAGENT_WORKTREE", "true");
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi, entries } = createFakePi();
 
     await setupSessionLifecycle(pi, createFakeCtx(), {});
@@ -481,7 +497,6 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     vi.stubEnv("PI_SUBAGENT_PARENT_RECORD_ID", undefined);
     vi.stubEnv("PI_SUBAGENT_FORK_DEPTH", undefined);
     vi.stubEnv("PI_SUBAGENT_WORKTREE", undefined);
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi, entries } = createFakePi();
 
     await setupSessionLifecycle(pi, createFakeCtx(), {});
@@ -505,7 +520,6 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   it("worktree scan 抛错不阻断 session_start（装配后续步骤仍执行）", async () => {
     // 吸收自 session-start-reaper.test.ts；阻断观察 = 装配后续步骤（ADR-035
     // manifest 恢复接线）仍执行——scan 抛错被「失败记日志不阻断」兜住。
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi } = createFakePi();
     const fakeService = {
       initSession: vi.fn(),
@@ -529,9 +543,10 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
       })) as unknown as SessionLifecycleDeps["createServices"],
     };
 
-    await expect(
-      setupSessionLifecycle(pi, createFakeCtx(), deps),
-    ).resolves.toBeDefined();
+    const result = await setupSessionLifecycle(pi, createFakeCtx(), deps);
+    // 装配结果回传面：storeHealthy 默认真 + sessionId 回显（scan 抛错不吞装配结果）
+    expect(result.storeHealthy).toBe(true);
+    expect(result.sessionId).toBe("session-seam-1");
 
     expect(fakeService.recoverManifestTmpFiles).toHaveBeenCalledTimes(1);
   });
@@ -541,12 +556,11 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     // 参数，现行生产 = initSession.mainSessionFile 值直传，断言意图不变）。
     // initSession 接线住默认 createOrReuseServices（deps.createServices 注入会绕过
     // 它）——走默认装配 + barrel set 调用观察（组 1「new 分支」用例同款手法）。
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi } = createFakePi();
 
     await setupSessionLifecycle(pi, createFakeCtx("session-mf-1"), {});
 
-    const { setSubagentService } = await import("@zhushanwen/subagent-core");
+    // stub agentDir 下按 sessionId 解析未命中 → 回退 ctx.sessionManager.getSessionFile()
     const svc = vi.mocked(setSubagentService).mock.calls[0]?.[0] as
       | { initSession: ReturnType<typeof vi.fn> }
       | undefined;
@@ -561,7 +575,6 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     // [S5] 用例隐含依赖「测试进程 env 无 PI_SUBAGENT_SELF_RECORD_ID」——在 pi subagent
     // 进程内跑测试（该 env 已注入）必红。显式 stub 隔离，不依赖外层环境。
     vi.stubEnv("PI_SUBAGENT_SELF_RECORD_ID", "");
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi, entries } = createFakePi();
 
     await setupSessionLifecycle(pi, createFakeCtx(), {});
@@ -633,15 +646,14 @@ describe("streamSink ctx.mode 守卫 — 运行时行为（FR-1/FR-2/AC-1/AC-2�
     mockInitSession: ReturnType<typeof vi.fn>;
     ctx: ExtensionContext & { ui?: { setWidget: ReturnType<typeof vi.fn> } | undefined };
   }> {
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi } = createFakePi();
     const ctx = createFakeCtx("session-stream-1", mode);
     await setupSessionLifecycle(pi, ctx, {
       worktreeManager: { scan: vi.fn(async () => {}) },
     });
     // initSession 参数观察面：module mock 的 SubagentService 假类实例（访问器槽被
-    // mock 恒 null → new 分支），取当用例动态图的 barrel set 调用。
-    const { setSubagentService } = await import("@zhushanwen/subagent-core");
+    // mock 恒 null → new 分支），取静态导入的 barrel set 调用（与被测装配同一 mock
+    // 实例）。
     const svc = vi.mocked(setSubagentService).mock.calls[0]?.[0] as
       | { initSession: ReturnType<typeof vi.fn> }
       | undefined;
@@ -664,9 +676,7 @@ describe("streamSink ctx.mode 守卫 — 运行时行为（FR-1/FR-2/AC-1/AC-2�
     const { mockInitSession } = await runDefaultAssembly("rpc");
 
     const initArg = mockInitSession.mock.calls[0]?.[0] as { streamSink: unknown };
-    expect(initArg.streamSink).toBeDefined();
-    expect(typeof initArg.streamSink).toBe("object");
-    expect(typeof (initArg.streamSink as { setWidget: unknown }).setWidget).toBe("function");
+    expect(initArg.streamSink).toEqual({ setWidget: expect.any(Function) });
   });
 
   it("rpc mode：streamSink.setWidget 转发到 ctx.ui.setWidget（绑定真实方法）", async () => {
@@ -764,7 +774,6 @@ describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点�
     seedTerminalRecordFootprint(recordsDir, "sa-maint-expired", 40, 35);
     seedTerminalRecordFootprint(recordsDir, "sa-maint-inwindow", 10, 5);
 
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi } = createFakePi();
     await setupSessionLifecycle(pi, createFakeCtx("session-maint-1"), {});
 
@@ -787,7 +796,6 @@ describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点�
     seedTerminalRunFootprint(stateDir, "wf-maint-first", 40, 35);
     seedTerminalRecordFootprint(recordsDir, "sa-maint-first", 40, 35);
 
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi } = createFakePi();
 
     // 第一派发：兜底触发点执行首轮（首轮足迹被裁 = 触发真实发生）
@@ -842,11 +850,10 @@ describe("sendDelivery stale ctx 守卫（bindLedgerHostAndRecover seam，出自
     return { pi, sendMessage };
   }
 
-  /** 每用例动态 import 取当用例模块图的 bindLedgerHostAndRecover 并装配（对齐
-   *  本文件 resetModules 惯例——静态引用属首载图）。ctx 走 createFakeCtx：其
-   *  sessionManager.getEntries 恒空数组（恢复扫描零重放）、isIdle 恒 true。 */
+  /** 每用例取静态导入的 bindLedgerHostAndRecover 装配（模块图单实例，静态引用即
+   *  被测实例）。ctx 走 createFakeCtx：其 sessionManager.getEntries 恒空数组（恢复
+   *  扫描零重放）、isIdle 恒 true。 */
   async function bindHost(sendMessageImpl?: (...args: unknown[]) => void) {
-    const { bindLedgerHostAndRecover } = await import("../session-lifecycle.ts");
     const { pi, sendMessage } = makeLedgerPi(sendMessageImpl);
     const host = bindLedgerHostAndRecover(pi, createFakeCtx("session-stale-guard-1"));
     return { host, sendMessage };
@@ -898,7 +905,6 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     // [B1 回归] 恢复曾挂 oncePerProcess（进程级单次），同进程第二个 session_start
     // 重放首次 Promise、跳过 loadAll——被 /resume 的崩溃 session 残留 run 不被收编。
     // 修复后恢复是 session 级幂等操作：同一模块实例连续两次装配，第二次照常收编。
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const mkDeps = (runs: WorkflowRunType[]): SessionLifecycleDeps => ({
       createServices: (() => ({
         service: {
@@ -973,7 +979,6 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     // 健康无关。观察面迁移：本文件 interface 层 module mock 下断言 mock 调用
     //（原文件无 interface mock、以 pi.registerTool 捕获 "subagent"），断言意图
     // 不变：store 不健康时 factory 入口的 subagent 域注册仍执行。
-    const { registerSubagentTool } = await import("../interface/subagent-tool.ts");
     expect(vi.mocked(registerSubagentTool)).toHaveBeenCalled();
   });
 });
@@ -992,7 +997,6 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
 
 describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + manifest 物化", () => {
   it("crashed run（有注册无终态）经恢复链收编；双重启零重复追加", async () => {
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     // 真实 store（绕开文件顶部 module mock）+ core journal 写者 + pump journal 目录注入
     const { JsonlRunStore: RealJsonlRunStore } =
       await vi.importActual<typeof import("../jsonl-run-store.ts")>("../jsonl-run-store.ts");

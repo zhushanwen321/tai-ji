@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { parseSessionContent, parseSessionFile, type Entry } from '@zhushanwen/session-core'
-import { REAL_SESSION, HAS_REAL_SESSION } from './real-data.js'
 
 /** 构造单行 JSONL entry 字符串 */
 function line(obj: Record<string, unknown>): string {
@@ -157,14 +159,37 @@ describe('parseSessionContent', () => {
 })
 
 describe('parseSessionFile', () => {
-  it.skipIf(!HAS_REAL_SESSION)('真实 session 019e6c96：1204 entries / 0 skipped / 非 partial', async () => {
-    const result = await parseSessionFile(REAL_SESSION)
+  it('磁盘文件全量解析：entries 数 = 行数 / 0 skipped / 非 partial / totalBytes 与内容一致', async () => {
+    // mkdtemp 自建自删的 fixture 文件（不读本机真实数据目录）：session header +
+    // 10 条链式 message 的最小行集，验证「文件读取 → 逐行解析」回路的完整性与计数字段
+    const dir = await mkdtemp(join(tmpdir(), 'parser-file-'))
+    try {
+      const lines = [
+        line({ type: 'session', id: 's1', parentId: null, cwd: '/x' }),
+        ...Array.from({ length: 10 }, (_, i) =>
+          line({
+            type: 'message',
+            id: `m${i}`,
+            parentId: i === 0 ? 's1' : `m${i - 1}`,
+            message: {
+              role: i % 2 === 0 ? 'user' : 'assistant',
+              content: [{ type: 'text', text: `text ${i}` }],
+            },
+          }),
+        ),
+      ]
+      const content = lines.join('\n') + '\n'
+      const path = join(dir, 'fixture-session.jsonl')
+      await writeFile(path, content)
 
-    expect(result.entries).toHaveLength(1204)
-    expect(result.skippedLines).toBe(0)
-    expect(result.lastLinePartial).toBe(false)
-    // 5.4MB 量级
-    expect(result.totalBytes).toBeGreaterThan(5_000_000)
-    // 5.6MB 全量解析在并发/高负载下可能超 vitest 默认 5s，显式放宽
-  }, 60000)
+      const result = await parseSessionFile(path)
+
+      expect(result.entries).toHaveLength(11)
+      expect(result.skippedLines).toBe(0)
+      expect(result.lastLinePartial).toBe(false)
+      expect(result.totalBytes).toBe(Buffer.byteLength(content, 'utf8'))
+    } finally {
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
 })

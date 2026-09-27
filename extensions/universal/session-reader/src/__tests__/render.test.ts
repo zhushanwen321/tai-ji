@@ -1,11 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { renderOutline, renderExpand, renderDetail, type ToolResultSummaryEntry } from '../core/render.js'
-import { parseSessionFile, type Entry } from '@zhushanwen/session-core'
+import type { Entry } from '@zhushanwen/session-core'
 import type { Turn } from '../core/turns.js'
 import type { TreeView } from '../core/tree.js'
-import { buildTreeView } from '../core/tree.js'
-import { segmentTurns } from '../core/turns.js'
-import { REAL_SESSION, HAS_REAL_SESSION } from './real-data.js'
 
 // ---- 构造助手 ----
 
@@ -203,25 +200,32 @@ describe('renderOutline', () => {
     expect(noBranch.lines).toEqual(['T000 · hi'])
   })
 
-  it.skipIf(!HAS_REAL_SESSION)('8. 真实 019e6c96：outline tokenEstimate <= 1500 + assistantBrief/toolSummary 非空（v2 O1）', async () => {
-    // v2 O1：加 assistantBrief + 修 toolSummary bug 后 outline 变长，阈值 600→1500（design §3.3 D4）
-    const parsed = await parseSessionFile(REAL_SESSION)
-    const tree = buildTreeView(parsed.entries)
-    const turns = segmentTurns(parsed.entries, new Set(tree.leafPath))
-    const result = renderOutline(turns, tree, { budget: 2000 })
+  it('8. 多 turn outline：tokenEstimate <= 1500 + assistantBrief/toolSummary 非空 + stats 完整（v2 O1）', () => {
+    // v2 O1：加 assistantBrief + 修 toolSummary bug 后 outline 行含结论与工具聚合，
+    // 阈值 1500（design §3.3 D4）。3 turn 合成数据，每 turn 带 toolCall + toolResult
+    const turns = [0, 1, 2].map((i) =>
+      turn(
+        i,
+        [
+          uEntry(`U${i}`, `问题 ${i}`),
+          aEntry(`A${i}`, `结论 ${i}`, [{ name: 'bash' }, { name: 'read' }]),
+          tEntry(`T${i}`, 'output'),
+        ],
+        { userEntry: uEntry(`U${i}`, `问题 ${i}`) },
+      ),
+    )
+    const result = renderOutline(turns, emptyTree(), { budget: 2000 })
 
-    expect(result.turns.length).toBe(32)
+    expect(result.turns.length).toBe(3)
     expect(result.tokenEstimate).toBeLessThanOrEqual(1500)
-    // v2 O1 验证：assistant 结论行存在（非空）+ toolSummary 显示真实工具（修 v1 恒空 bug）
+    // v2 O1 验证：assistant 结论行存在（非空）+ toolSummary 显示工具（修 v1 恒空 bug）
     expect(result.turns.some((b) => b.assistantBrief !== '')).toBe(true)
     expect(result.turns.some((b) => b.toolSummary !== '')).toBe(true)
     // stats 完整性
-    expect(result.stats.totalTurns).toBe(32)
-    // totalEntries 近似（leaf+branch+orphan）不含 session header（segmentTurns 规则1 跳过）；
-    // 工具层仅覆盖 stats.totalBytes 与 skippedLines（ParseResult 无 totalEntries 字段）。M1 验量级。
-    expect(result.stats.totalEntries).toBeGreaterThan(1000)
-    // 5.6MB 全量解析在并发/高负载下可能超 vitest 默认 5s，显式放宽
-  }, 60000)
+    expect(result.stats.totalTurns).toBe(3)
+    // totalEntries 近似（leaf+branch+orphan）不含 session header（segmentTurns 规则1 跳过）
+    expect(result.stats.totalEntries).toBeGreaterThan(0)
+  })
 })
 
 describe('renderExpand', () => {

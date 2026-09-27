@@ -5,14 +5,14 @@
  * - 本模块顶层 `export const PI_PATH = detectPi()`——which/where pi 探测，命令形态与生产代码
  *   `src/infra/pi/process-manager.ts`（isWindows ? 'where pi' : 'which pi'）完全一致；
  *   探测失败返回 null。
- * - 本模块顶层 `export const REAL_PI_READY` / `REAL_PI_SKIP_REASON = detectRealPiSkipReason()`——
- *   pi binary **与 LLM 凭证**双探测（凭证按 pi 实际解析链：env API key / auth.json stored 条目 /
- *   models.json providers apiKey）。CI 无凭证环境若只判 PI_PATH 会 fail 而非 skip（pi binary
- *   经 pnpm PATH 在 CI 可达）——这是等价性基线双轨的机制基础（见 TEST-STRATEGY.md §4）。
- * - 引用方一律 `describe.skipIf(!REAL_PI_READY)` 包裹「真实 spawn + 真实 LLM turn」用例——
- *   binary 或凭证缺席的环境（如 CI）skip 而非 fail；skip 理由注入 describe 名 + 模块加载时
- *   console.warn（双通道显式可见）。
- * - 纯 mock / fixture 重放用例（不发起 LLM 调用）不依赖 REAL_PI_READY，无条件执行——
+ * - REAL 轨（真实 LLM turn）门控在 `./real-pi-gate.ts`（binary + LLM 凭证双探测，凭证按 pi
+ *   实际解析链：env API key / auth.json stored 条目 / models.json providers apiKey）。CI 无凭证
+ *   环境若只判 PI_PATH 会 fail 而非 skip（pi binary 经 pnpm PATH 在 CI 可达）——这是等价性
+ *   基线双轨的机制基础（见 TEST-STRATEGY.md §4）。
+ * - 真实 spawn + 真实 LLM turn 用例一律 import real-pi-gate 并 `describe.skipIf(!REAL_PI_READY)`
+ *   包裹——binary 或凭证缺席的环境（如 CI）skip 而非 fail；skip 理由注入 describe 名 + 模块
+ *   加载时 console.warn（双通道显式可见）。
+ * - 纯 mock / fixture 重放用例（不发起 LLM 调用）不 import real-pi-gate，无条件执行——
  *   CI 继续覆盖凭证无关子集。
  * - 禁止 mock pi 子进程（vi.mock('node:child_process') 形态）——本测试族的价值就在真实子进程。
  *
@@ -40,18 +40,19 @@
  *
  * agent dir 隔离（凭证可见、扩展不可见）：spawn 时注入 PI_CODING_AGENT_DIR 指向 mkdtemp 临时
  * agent dir，只原样拷贝凭证类文件（auth.json / models.json / models-store.json，清单以 pi 0.84.1
- * 实装读取面为准，见 copyCredentialFiles 注释）。不拷 settings.json、不放 extensions/ 子目录——
+ * 实装读取面为准，见 real-pi-gate.ts 的 copyCredentialFiles 注释）。不拷 settings.json、不放
+ * extensions/ 子目录——
  * 否则用户全局扩展集（settings.json packages/extensions 清单的 npm 扩展 + <agentDir>/extensions/
  * 自动发现）会随子进程加载，其 appendEntry 调用发射 entry_appended 事件，击穿
  * pi-protocol-contract D5 负向断言（全程 0 条 entry_appended）；且等价性基线不应随用户机器的
- * 全局扩展集漂移。探测与 spawn 同源不变量：探测读真实 agentDir（piAgentDir()），spawn 把同一
- * 目录的凭证文件原样拷贝进临时 dir，pi 实际读到的凭证与探测判定内容逐字节一致。
+ * 全局扩展集漂移。探测与 spawn 同源不变量：探测读真实 agentDir（real-pi-gate 的 piAgentDir()），
+ * spawn 把同一目录的凭证文件原样拷贝进临时 dir，pi 实际读到的凭证与探测判定内容逐字节一致。
  * settings.json 缺失安全（settings-manager loadFromStorage 空 content 返回 {}，不报错不创建）。
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
@@ -124,7 +125,7 @@ export interface PiFixtureOptions {
   /**
    * faux LLM 轨（L2.5）：提供该字段（含空数组——用例全程无 LLM turn 的场景）即启用
    * 凭证无关装配，与真实 LLM 通道的差异（其余行为逐字节一致）：
-   * - 凭证门不要求 REAL_PI_READY（FAUX_PI_READY 即可）；跳过 copyCredentialFiles（空临时
+   * - 凭证门不要求 REAL 门（FAUX_PI_READY 即可）；跳过凭证文件拷贝（空临时
    *   agentDir——faux auth 恒无凭据，空目录是凭证无关的直接证明）；
    * - model 强制 FAUX_MODEL（'faux/faux-1'，覆盖 options.model——结构上排除误指定真实模型）；
    * - 步骤 JSON 写入临时 agentDir，--extension 注入 ../fixtures/faux-llm-ext.ts，
@@ -189,151 +190,14 @@ function detectPi(): string | null {
   }
 }
 
-/** 模块顶层探测结果（skip-if-no-pi 契约的唯一引用点，见文件头注释；本模块内部消费，不导出） */
-const PI_PATH: string | null = detectPi()
+/** 模块顶层探测结果（skip-if-no-pi 契约的唯一引用点，见文件头注释；FAUX 门控与 real-pi-gate 消费） */
+export const PI_PATH: string | null = detectPi()
 
 // ==================== 真实 LLM 凭证探测（等价性基线双轨，goal-audit 问题 1 修复） ====================
-
-/**
- * 强制跳过真实 pi（LLM turn）用例的 env 开关（'1' / 'true' 生效）。
- * CI test-runtime job 显式设置——把「CI 只跑凭证无关子集」从隐式事实（CI 恰好无 ~/.pi）
- * 变为显式声明；本机也可用它模拟无凭证环境验证 skip 语义。双轨说明见 TEST-STRATEGY.md §4。
- */
-const FORCE_SKIP_REAL_PI_ENV = 'TAIJI_SKIP_REAL_PI'
-
-/** DEFAULT_MODEL 的 provider id（pi 模型 id 形态 `<provider>/<modelId>`，'/' 前缀段） */
-const DEFAULT_PROVIDER = DEFAULT_MODEL.split('/')[0]!
-
-/** 真实 agent 目录（凭证所在 + 全局扩展所在）：与 pi config.js getAgentDir() 同规则
- * （dist/config.js:412-418）——PI_CODING_AGENT_DIR 覆盖 → ~/.pi/agent。角色是「拷贝源 +
- * 探测源」：凭证探测读它；spawnPiFixture 把其中凭证文件原样拷进临时 agent dir（探测与 pi
- * 实读同源，见文件头「agent dir 隔离」）。本目录里的扩展不随子进程加载。 */
-function piAgentDir(): string {
-  const envDir = process.env['PI_CODING_AGENT_DIR']
-  if (envDir && envDir.trim() !== '') return envDir
-  return join(homedir(), '.pi', 'agent')
-}
-
-/**
- * 需要带入隔离 agent dir 的凭证类文件（pi 0.84.1 实装读取清单，逐项依据 dist 实现行号）：
- * - auth.json：stored 凭证（dist/config.js:428-430 getAuthPath；dist/core/auth-storage.js:17
- *   默认路径 join(getAgentDir(), 'auth.json')）
- * - models.json：自定义 provider/模型定义与 providers[].apiKey（dist/config.js:424-426
- *   getModelsPath；dist/core/model-runtime.js:76 默认路径）
- * - models-store.json：动态 provider catalog 缓存（dist/core/models-store.js:29 默认路径，
- *   model-runtime.js:80 落在 models.json 同目录）；条目经 FileAuthStorageBackend 存储、可能含
- *   key，属凭证类；缺失安全（parse 空 content 返回 {}），存在则拷以保证 catalog 与真实环境一致。
- * 刻意不带入：settings.json（global packages/extensions 清单是 npm 扩展注入源，缺失安全——
- * dist/core/settings-manager.js loadFromStorage 空 content 返回 {}）、extensions/（全局扩展
- * 自动发现目录，dist/core/package-manager.js addAutoDiscoveredResources join(globalBaseDir,
- * 'extensions')）、skills/prompts/themes/tools/bin/sessions（等价性协议用例不涉及）。
- */
-const CREDENTIAL_FILE_NAMES = ['auth.json', 'models.json', 'models-store.json'] as const
-
-/** 把真实 agentDir 中的凭证文件原样拷入临时 agentDir（存在才拷；探测已保证至少一份在位）。 */
-function copyCredentialFiles(sourceAgentDir: string, targetAgentDir: string): void {
-  for (const name of CREDENTIAL_FILE_NAMES) {
-    const source = join(sourceAgentDir, name)
-    if (!existsSync(source)) continue
-    copyFileSync(source, join(targetAgentDir, name))
-  }
-}
-
-/** provider 的 env API key 变量名（pi-ai env-api-keys.ts 映射表同形态：
- * 大写 + '-'→'_' + '_API_KEY' 后缀，如 xiaomi-token-plan-cn → XIAOMI_TOKEN_PLAN_CN_API_KEY）。 */
-function providerEnvApiKey(provider: string): string {
-  return `${provider.toUpperCase().replaceAll('-', '_')}_API_KEY`
-}
-
-interface ReadJsonResult {
-  data?: unknown
-  /** 文件不可读/不可解析时的错误（进 skip 理由，格式问题不静默） */
-  error?: string
-}
-
-function readJsonFile(path: string): ReadJsonResult {
-  try {
-    return { data: JSON.parse(readFileSync(path, 'utf-8')) }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
-/**
- * 真实 pi（LLM turn）用例可用性探测：null = 就绪；非 null = skip 理由。
- *
- * 探测链对齐 pi 实际凭证解析（pi-mono auth-storage.ts hasAuth / model-registry 的静态 source）：
- * 1. env API key（environment source）
- * 2. `<agentDir>/auth.json` 的 provider 条目含非空 key（stored source，主路径——
- *    DEFAULT_MODEL 走 pi 内置 provider，本机凭证即此形态）
- * 3. `<agentDir>/models.json` providers[provider].apiKey（models_json_key source，补充路径）
- * OAuth 型凭证（token 刷新依赖 pi 运行时交互）不判定可用——只认静态可读的 api_key 形态。
- * 探测只读文件与 env，不发起网络请求，不触碰凭证值本身。
- */
-function detectRealPiSkipReason(): string | null {
-  if (!PI_PATH) return 'pi binary not found（which/where pi 未命中）'
-
-  const forced = process.env[FORCE_SKIP_REAL_PI_ENV]
-  if (forced === '1' || forced === 'true') {
-    return `env ${FORCE_SKIP_REAL_PI_ENV}=${forced}（等价性基线双轨：本环境只跑凭证无关子集，完整基线含真实 LLM turn 跑在开发机，见 TEST-STRATEGY.md §4）`
-  }
-
-  const agentDir = piAgentDir()
-  const checked: string[] = []
-
-  // 1) env API key
-  const envKey = providerEnvApiKey(DEFAULT_PROVIDER)
-  const envValue = process.env[envKey]
-  if (envValue && envValue.trim() !== '') return null
-  checked.push(`env ${envKey}`)
-
-  // 2) auth.json provider 条目（stored source，主路径）
-  const authPath = join(agentDir, 'auth.json')
-  const auth = readJsonFile(authPath)
-  if (auth.data !== undefined) {
-    const cred = (auth.data as Record<string, unknown>)[DEFAULT_PROVIDER]
-    if (typeof cred === 'object' && cred !== null) {
-      const key = (cred as { key?: unknown }).key
-      if (typeof key === 'string' && key.trim() !== '') return null
-      checked.push(`${authPath} 的 "${DEFAULT_PROVIDER}" 条目缺非空 key`)
-    } else {
-      checked.push(`${authPath} 无 "${DEFAULT_PROVIDER}" 条目`)
-    }
-  } else {
-    checked.push(`${authPath}（${auth.error ?? '不存在或不可读'}）`)
-  }
-
-  // 3) models.json providers[provider].apiKey（models_json_key source）
-  const modelsPath = join(agentDir, 'models.json')
-  const models = readJsonFile(modelsPath)
-  if (models.data !== undefined) {
-    const providers = (models.data as { providers?: unknown }).providers
-    const entry =
-      typeof providers === 'object' && providers !== null
-        ? (providers as Record<string, unknown>)[DEFAULT_PROVIDER]
-        : undefined
-    const apiKey = typeof entry === 'object' && entry !== null ? (entry as { apiKey?: unknown }).apiKey : undefined
-    if (typeof apiKey === 'string' && apiKey.trim() !== '') return null
-    checked.push(`${modelsPath} providers."${DEFAULT_PROVIDER}".apiKey`)
-  } else {
-    checked.push(`${modelsPath}（${models.error ?? '不存在或不可读'}）`)
-  }
-
-  return `pi 凭证不可用：DEFAULT_MODEL "${DEFAULT_MODEL}" 需要 provider "${DEFAULT_PROVIDER}" 的 API key，已探测 ${checked.join('；')} 均未命中。真实 LLM turn 用例 skip（mock / fixture 重放子集照跑），完整等价性基线请在凭证在位的开发机运行（TEST-STRATEGY.md §4 等价性双轨）`
-}
-
-/** 凭证探测结果（模块顶层，真实 pi 用例 skip 判定的唯一引用点）：
- * null = binary + 凭证双就绪；非 null = skip 理由（binary 缺席 / 凭证缺失 / env 强制三态可分辨）。 */
-export const REAL_PI_SKIP_REASON: string | null = detectRealPiSkipReason()
-
-/** 真实 pi（LLM turn）用例可运行。引用方一律 `describe.skipIf(!REAL_PI_READY)`
- * （取代只判 binary 的旧 `!PI_PATH` 条件——pi binary 在 CI 可达但凭证不可达）。 */
-export const REAL_PI_READY: boolean = REAL_PI_SKIP_REASON === null
-
-if (!REAL_PI_READY) {
-  // skip 理由显式可见：模块加载时输出（每个引用文件一次）+ describe 名注入（见各测试文件）
-  console.warn(`[equivalence] 真实 pi（LLM turn）用例 skip：${REAL_PI_SKIP_REASON}`)
-}
+// REAL 轨门控与凭证拷贝通道已整体迁至 ./real-pi-gate.ts（独立模块——探测读本机真实
+// ~/.pi/agent 凭证文件，拆出后只有显式 import real-pi-gate 的加载链才触发读取，
+// faux 轨（本文件全部现役消费方）运行零真实凭证接触）。pi-fixture 仅在 spawnPiFixture
+// 的 real 分支按需动态 import 该模块；新增真实 LLM 文件的门控引用约定见 real-pi-gate.ts 头注。
 
 // ==================== faux LLM 轨（凭证无关：真 pi 进程 + 真 extension 加载 + 假 LLM） ====================
 
@@ -409,9 +273,14 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
       `pi binary not found (which/where pi) —— equivalence 用例必须以 describe.skipIf(${fauxMode ? '!FAUX_PI_READY' : '!REAL_PI_READY'}) 包裹`,
     )
   }
-  if (!fauxMode && !REAL_PI_READY) {
+  // real 轨门控与凭证拷贝按需加载（见文件头 REAL 迁移说明）：faux 轨不 import real-pi-gate，
+  // 零真实凭证读取；real 轨在此显式加载，探测产物仅此分支消费。
+  const realGate = fauxMode ? null : await import('./real-pi-gate.js')
+  if (realGate && !realGate.REAL_PI_READY) {
     // describe.skipIf 已挡住正常路径；此处兜底防新用例漏包 skip 条件时以含理由的错误暴露
-    throw new Error(`real pi unavailable：${REAL_PI_SKIP_REASON} —— 真实 pi 用例必须以 describe.skipIf(!REAL_PI_READY) 包裹`)
+    throw new Error(
+      `real pi unavailable：${realGate.REAL_PI_SKIP_REASON} —— 真实 pi 用例必须以 describe.skipIf(!REAL_PI_READY) 包裹`,
+    )
   }
   // faux 轨 model 值域守卫（PiFixtureOptions.model 注释）：undefined = FAUX_MODEL；
   // null = 不拼 --model（entry 恢复用例）；字符串必须 'faux/' 前缀——真实模型 id 直接
@@ -446,8 +315,8 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
     const scriptPath = join(agentDir, 'faux-responses.json')
     writeFileSync(scriptPath, JSON.stringify(options.fauxResponses))
     fauxScriptEnv = { TAIJI_FAUX_SCRIPT: scriptPath }
-  } else {
-    copyCredentialFiles(piAgentDir(), agentDir)
+  } else if (realGate) {
+    realGate.copyCredentialFiles(realGate.piAgentDir(), agentDir)
   }
   const args = ['--mode', 'rpc', '--session-dir', sessionDir]
   if (model) args.push('--model', model)

@@ -15,7 +15,7 @@
 //
 // 本文件用 InstrumentedRuntime（继承真实 SchedulerRuntime，记录构造参 isCtxStale）
 // 捕获注入回调与装配事实。InstrumentedRuntime 全部行为继承父类，不影响装配链本身
-// （F1 停旧 timer 等行为由 index-session-start.test.ts U4 锚定，此处不重复）。
+// （F1 停旧 timer 等行为由本文件 F1 describe 锚定，此处不重复）。
 // steer 直投模型（scheduler-steer-direct-dispatch）：装配点不再创建 delivery handle，
 // runtime 构造收 backend + isCtxStale? + modelOps? 三参（U4：modelOps 缺省 = 无模型
 // 切换能力降级）。
@@ -33,7 +33,9 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
   setPiHandle: vi.fn(),
 }))
 
-// 与 index-session-start.test.ts 同款（MF-3）：mock 掉 importer，装配路径仍被调用、FS 副作用为零。
+// MF-3：session_start 会真实执行 importLegacyStore(ctx.cwd, ...)，触碰用户真实 FS
+// （~/.pi/agent/scheduler/... 的 renameSync/existsSync 探测）。mock 掉 importer
+// 模块，装配路径仍被调用、FS 副作用为零。
 vi.mock('../importer.js', () => ({ importLegacyStore: vi.fn(() => vi.fn()) }))
 
 // u-p2b 接线断言：index.ts 的 refreshWidget 必须走结构化/双模入口 `setSchedulerWidget`
@@ -69,11 +71,14 @@ vi.mock('../runtime.js', async (importOriginal) => {
 })
 
 import schedulerExtension from '../index.js'
+import { TASK_ENTRY_TYPE } from '../types.js'
 
 const TICK_INTERVAL_MS = 30_000
+/** 与 index.ts 的 WIDGET_KEEPALIVE_INTERVAL_MS 同值（常量不导出，测试锚定同值）。 */
+const KEEPALIVE_INTERVAL_MS = 10 * 60 * 1000
 
 /**
- * 最小 fake pi：与 index-session-start.test.ts 同款，覆盖 factory 消费的 API 面
+ * 最小 fake pi：覆盖 factory 消费的 API 面
  * （on 捕获事件 handler 供手动触发；registerTool/registerCommand/sendMessage/appendEntry 兜底）。
  */
 function createMockPi(): {
@@ -193,5 +198,103 @@ describe('G1: index.ts 代际接线（S9）', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+// ── F1: session_start 停旧 runtime（crash-fix U4）──
+// session_start 多发/重入时先停上一代 runtime 的 tick interval：dispatch 的 await sendMessage
+// 窗口与 session 替换交错时，旧 session_shutdown 可能永远等不到 → 旧 30s tick timer 泄漏 →
+// 下一 tick 的 refreshWidget 访问 stale ctx.ui 抛错 → unhandledRejection → pi 主进程 exit 1。
+// F1 在 session_start 开头幂等 stopScheduler，从源头消灭。
+//
+// 行为断言口径（验收 U4）：观测面 = refreshWidget 的推送调用序列（本文件 mock 环境下
+// refreshWidget 走 setSchedulerWidgetMock，与真实 ctx.ui.setWidget 同一调用序列）。widget
+// 推送修正（D1 指纹跳推 + D2 保活底线帧）后每次 tick 不再必然推帧——任务集静态期间零推送、
+// 空任务集恒零推送，故注入非空任务集、以「跨 10min 保活窗口必推一帧」作为「该 runtime 的
+// timer 是否还在 tick」的行为观测面（保活帧间隔与 index.ts WIDGET_KEEPALIVE_INTERVAL_MS
+// 同值 10min）。F1 缺失时旧 timer 跨窗口必多推一帧，即被捕获。
+describe('F1: session_start 停旧 runtime（crash-fix U4）', () => {
+  const BASE = Date.parse('2026-01-01T00:00:00Z')
+
+  /**
+   * 构造远期到期的启用任务 upsert entry（owner = sessionFile，避免 fork owner 过滤）；
+   * nextRunAt 取 BASE + 1h，测试时间窗（分钟级）内无 dispatch 噪音，任务集保持静态。
+   */
+  function taskEntry(sessionFile: string) {
+    return {
+      type: 'custom',
+      customType: TASK_ENTRY_TYPE,
+      data: {
+        op: 'upsert',
+        taskId: 'aaaa1111',
+        ownerSessionFile: sessionFile,
+        task: {
+          id: 'aaaa1111',
+          name: 'keepalive probe',
+          prompt: 'probe prompt',
+          kind: 'recurring',
+          schedule: { mode: 'interval', intervalMs: 3_600_000 },
+          enabled: true,
+          createdAt: BASE,
+          nextRunAt: BASE + 3_600_000,
+          runCount: 0,
+          history: [],
+        },
+      },
+    }
+  }
+
+  /** 同 createFakeCtx，但注入非空任务集（保活帧只在非空任务集时推送，见上方口径注释）。 */
+  function createFakeCtxWithTasks(sessionFile: string): ExtensionContext {
+    return {
+      cwd: '/test-index-session-start',
+      isIdle: () => true,
+      hasPendingMessages: () => false,
+      ui: { setWidget: vi.fn() },
+      sessionManager: {
+        getEntries: () => [taskEntry(sessionFile)],
+        getSessionFile: () => sessionFile,
+      },
+    } as unknown as ExtensionContext
+  }
+
+  beforeEach(() => {
+    isCtxStaleCaptures.length = 0
+    runtimeInstances.length = 0
+    setSchedulerWidgetMock.mockClear()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(BASE))
+  })
+
+  afterEach(() => {
+    for (const rt of runtimeInstances) {
+      rt.stopScheduler()
+    }
+    vi.useRealTimers()
+  })
+
+  it('U4: 双 session_start 后旧 timer 已停——跨保活窗口只有新 runtime 推帧', async () => {
+    const { pi, events } = createMockPi()
+    schedulerExtension(pi)
+    const sessionStart = events.get('session_start')
+    expect(sessionStart).toBeDefined()
+
+    // 第一次 session_start：runtime1 + timer1 启动，初始渲染 1 次
+    sessionStart!({ type: 'session_start', reason: 'startup' }, createFakeCtxWithTasks('/test/session-1.json'))
+    expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(1)
+
+    // 前置因果锚点：静置越过保活窗口，timer1 推一帧保活帧（排除「timer 从未启动」的假绿；
+    // 也锁定跳推行为——窗口内其余 tick 零推送）
+    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS + TICK_INTERVAL_MS)
+    expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(2)
+
+    // 第二次 session_start（session 替换）：F1 在装配新 runtime 前停掉 timer1
+    sessionStart!({ type: 'session_start', reason: 'new_session' }, createFakeCtxWithTasks('/test/session-2.json'))
+    expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(3) // runtime2 初始渲染（实例态重置，首帧必推）
+
+    // 行为断言（验收口径）：再静置一个保活窗口，只有 runtime2 的 timer 触发推送——恰 +1；
+    // F1 缺失时 timer1/timer2 都活着，此处为 +2
+    await vi.advanceTimersByTimeAsync(KEEPALIVE_INTERVAL_MS + TICK_INTERVAL_MS)
+    expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(4)
   })
 })

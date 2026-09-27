@@ -1,6 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
-import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -12,14 +11,13 @@ import {
 
 import { parseRunSnapshot, renderWorkflowOverview } from '../core/workflow.js'
 import { extractCallSessionFiles, readRunSnapshot, resolveWorkflows } from '../discovery/workflows.js'
-import { REAL_AGENT_DIR } from './real-data.js'
 
 // ============================================================
 // fixture（结构对齐真实 wf-state 探针数据）
 // ============================================================
 
 /**
- * NEW 格式 fixture（对齐 ~/.pi/agent/workflow-state/wf-1785762350110-d297tr.jsonl）。
+ * NEW 格式 fixture（快照字段形态 = pi-subagent-workflow 写侧落盘契约）。
  * runId 故意写成 'wf-ignore' 验证 parseRunSnapshot 用参数透传不读 snapshot.runId。
  */
 const NEW_SNAPSHOT_FIXTURE = {
@@ -619,39 +617,50 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
 })
 
 // ============================================================
-// 真实数据守卫（~/.pi/agent/workflow-state，CI 无本机数据时 skipIf 跳过）
+// readRunSnapshot + parseRunSnapshot 磁盘回路（fixture）：快照形态已由
+// NEW_SNAPSHOT_FIXTURE / OLD_SNAPSHOT_FIXTURE 单源锚定，此处补「wf-state 落盘 →
+// 读回 → 解析」的端到端回路断言
 // ============================================================
 
-const REAL_WF_NEW = join(REAL_AGENT_DIR, 'workflow-state', 'wf-1785762350110-d297tr.jsonl')
-const REAL_WF_OLD = join(REAL_AGENT_DIR, 'workflow-state', 'wf-skip-ok.jsonl')
-const HAS_REAL_WF_NEW = existsSync(REAL_WF_NEW)
-const HAS_REAL_WF_OLD = existsSync(REAL_WF_OLD)
+describe('readRunSnapshot + parseRunSnapshot 磁盘回路（fixture）', () => {
+  let tmpDir: string | undefined
 
-describe.skipIf(!HAS_REAL_WF_NEW)('真实数据守卫 - NEW wf-state（wf-1785762350110-d297tr）', () => {
-  it('TC-w5-real-new-guard：readRunSnapshot+parseRunSnapshot 类型化 NEW 真实快照', async () => {
-    const snap = await readRunSnapshot(REAL_WF_NEW)
+  afterEach(async () => {
+    if (tmpDir !== undefined) {
+      await rm(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('TC-w5-disk-new-guard：NEW 快照落盘读回，类型化为 wf-run-v1 overview', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'wf-disk-new-'))
+    const wfPath = join(tmpDir, 'wf-new.jsonl')
+    await writeFile(wfPath, JSON.stringify(NEW_SNAPSHOT_FIXTURE) + '\n')
+
+    const snap = await readRunSnapshot(wfPath)
     expect(snap).not.toBeUndefined()
-    const overview = parseRunSnapshot(snap, 'wf-1785762350110-d297tr', REAL_WF_NEW)
+    const overview = parseRunSnapshot(snap, 'wf-disk-new', wfPath)
     expect(overview).not.toBeNull()
     expect(overview!.version).toBe('wf-run-v1')
     expect(overview!.steps.length).toBeGreaterThanOrEqual(1)
-    // call 的 sessionFile 是真实绝对 .jsonl 路径（跳转入口）
+    // call 的 sessionFile 是绝对 .jsonl 路径（跳转入口）
     expect(overview!.steps[0].sessionFile).toMatch(/\.jsonl$/)
     expect(overview!.steps[0].sessionFile!.startsWith('/')).toBe(true)
     expect(overview!.steps[0].sessionId).toBeTruthy()
-  }, 30000)
-})
+  })
 
-describe.skipIf(!HAS_REAL_WF_OLD)('真实数据守卫 - OLD wf-state（wf-skip-ok）', () => {
-  it('TC-w5-real-old-guard：readRunSnapshot+parseRunSnapshot 尽力解析 OLD 真实快照', async () => {
-    const snap = await readRunSnapshot(REAL_WF_OLD)
+  it('TC-w5-disk-old-guard：OLD 快照落盘读回，尽力解析为 legacy overview', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'wf-disk-old-'))
+    const wfPath = join(tmpDir, 'wf-old.jsonl')
+    await writeFile(wfPath, JSON.stringify(OLD_SNAPSHOT_FIXTURE) + '\n')
+
+    const snap = await readRunSnapshot(wfPath)
     expect(snap).not.toBeUndefined()
-    const overview = parseRunSnapshot(snap, 'wf-skip-ok', REAL_WF_OLD)
+    const overview = parseRunSnapshot(snap, 'wf-skip-ok', wfPath)
     expect(overview).not.toBeNull()
     expect(overview!.version).toBe('legacy')
     expect(overview!.status).toBe('running')
     expect(overview!.script).toBe('workflow-wf-skip-ok') // name 映射
-    // OLD callCache value 无 sessionFile（探针 112 文件 0 sessionFile）
+    // OLD callCache value 无 sessionFile → step 无跳转入口
     expect(overview!.steps[0].sessionFile).toBeUndefined()
-  }, 30000)
+  })
 })

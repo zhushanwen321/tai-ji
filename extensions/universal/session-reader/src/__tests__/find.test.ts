@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
 import { findSessions } from '../discovery/find.js'
-import { REAL_AGENT_DIR, HAS_E6, HAS_REAL_SUBAGENTS_DIR, REAL_DATA_TIMEOUT_MS } from './real-data.js'
+import { FIX_E6 } from './fixtures.js'
 
 /**
  * 建一个假 session 文件：首行 header（type=session，含 id/cwd/parentSession），
@@ -534,61 +534,21 @@ describe('findSessions', () => {
       // B 不入选（uuid 命中短路，不走 task 匹配）
       expect(matches.some((m) => m.sessionId === idB)).toBe(false)
     })
-
-    it.skipIf(!HAS_REAL_SUBAGENTS_DIR)(
-      'TC-u5-real-data-guard：find codex source:subagent 命中（本机有 codex 相关 subagent task）',
-      async () => {
-        const { matches, truncated } = await findSessions('codex', REAL_AGENT_DIR, {
-          source: 'subagent',
-          limit: 50,
-        })
-        expect(matches.length).toBeGreaterThan(0)
-        expect(matches.every((m) => m.source === 'subagent')).toBe(true)
-        expect(typeof truncated).toBe('boolean')
-      },
-      REAL_DATA_TIMEOUT_MS,
-    )
   })
 
-  it.skipIf(!HAS_E6)('真实数据：e6c96 匹配 019e6c96 开头的 session', async () => {
-    const { matches } = await findSessions('e6c96', REAL_AGENT_DIR)
+  it('uuid 片段命中候选补全元数据：fileName/mtime/sizeBytes 真实值（019e6c96 锚）', async () => {
+    // 2 条 session、恰 1 条 id 含片段 'e6c96'：uuid 片段路径命中后仍补读元数据字段。
+    // 命中文件按真实 pi 落盘命名（<id>.jsonl），fileName 断言含该 id
+    await makeSession(slugDir, { name: `${FIX_E6}.jsonl`, id: FIX_E6, cwd: '/demo' })
+    await makeSession(slugDir, { name: 'other.jsonl', id: '019ffff-cccc-dddd', cwd: '/demo' })
+
+    const { matches } = await findSessions('e6c96', agentDir)
     expect(matches.length).toBeGreaterThan(0)
-    expect(matches.some((m) => m.sessionId.startsWith('019e6c96'))).toBe(true)
-    // 真实值校验
     const hit = matches.find((m) => m.sessionId.startsWith('019e6c96'))!
     expect(hit.fileName).toContain('019e6c96')
     expect(hit.mtime).toBeGreaterThan(0)
     expect(hit.sizeBytes).toBeGreaterThan(0)
-  }, REAL_DATA_TIMEOUT_MS)
-
-  it.skipIf(!HAS_E6)("真实数据：recent 返回最近 N 个，mtime 倒序，truncated=true", async () => {
-    const { matches, truncated } = await findSessions('recent', REAL_AGENT_DIR, { limit: 5 })
-    expect(matches.length).toBeGreaterThan(0)
-    expect(matches.length).toBeLessThanOrEqual(5)
-    // mtime 倒序
-    for (let i = 1; i < matches.length; i++) {
-      expect(matches[i - 1].mtime).toBeGreaterThanOrEqual(matches[i].mtime)
-    }
-    // 真实 session 文件远多于 5 → 截断
-    expect(truncated).toBe(true)
-  }, REAL_DATA_TIMEOUT_MS)
-
-  it.skipIf(!HAS_REAL_SUBAGENTS_DIR)(
-    "真实数据：source:'subagent' 能找到 completed subagent（§7 场景 1 find 部分）",
-    async () => {
-      const { matches } = await findSessions('recent', REAL_AGENT_DIR, {
-        source: 'subagent',
-        limit: 5,
-      })
-      expect(matches.length).toBeGreaterThan(0)
-      // 全部 source==='subagent'，fileName 在 subagents/ 目录下
-      for (const m of matches) {
-        expect(m.source).toBe('subagent')
-        expect(m.fileName).toContain('subagents')
-      }
-    },
-    REAL_DATA_TIMEOUT_MS,
-  )
+  })
 })
 
 // ============================================================

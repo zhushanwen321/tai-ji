@@ -6,8 +6,14 @@
  * - 3 tool + 2 command 注册正确
  * - pi.__workflowRun 可用
  * - 目录结构符合三层架构
+ *
+ * [装载模型] 模块图（index.js 全图）beforeAll 静态加载一次，factory 对同一 mock api
+ * 执行一次，6 用例共享同一份注册记录断言。各用例断言均为存在性形态（toContain /
+ * toBeDefined / length 下界），无「从零只有自己注册项」的隔离性断言，共享一份记录
+ * 不改变任何断言语义。factory 幂等（D2b 稳定标识等价保留单例），单次执行即注册面
+ * 全集。
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 // Mock the ExtensionAPI
 function createMockExtensionAPI() {
@@ -42,76 +48,48 @@ function createMockExtensionAPI() {
   return { api, tools, commands, eventHandlers, messageRenderers };
 }
 
-// [HISTORICAL] 2026-09-15 对齐 PR #185 口径：describe 级 30s timeout 豁免——首次
-// `await import("../../index.js")` 拉起整个 extension 模块图（模块加载重），整包满
-// 并行高负载下偶发超 vitest 默认 testTimeout，属模块加载 headroom 而非用例逻辑耗时。
 describe("wave-0: package structure merge", { timeout: 30000 }, () => {
-  // [B6] `await import("../../index.js")` 首次加载会拉起整个 extension 模块图（含
-  //  orchestration/execution/interface 三层），全量跑时偶发超 vitest 默认 5s testTimeout（flaky）。
-  //  describe 级 30s timeout 覆盖本块所有 test（模块加载仅首 test 付一次成本，后续复用缓存）。
-  it("AC-1.1: registers 3 tools (subagent + workflow + workflow-script)", async () => {
+  // 共享注册记录：beforeAll 装载模块图 + factory 执行一次（全图重 + factory 幂等，
+  // 单次执行即全集；[B6]/[HISTORICAL] 30s timeout 豁免随装载点保留）。
+  const mounted: ReturnType<typeof createMockExtensionAPI> = createMockExtensionAPI();
+
+  beforeAll(async () => {
     const mod = await import("../../index.js");
-    const factory = mod.default;
-    expect(factory).toBeDefined();
-    expect(typeof factory).toBe("function");
+    expect(mod.default).toBeDefined();
+    expect(typeof mod.default).toBe("function");
+    mod.default(mounted.api);
+  });
 
-    const { api, tools } = createMockExtensionAPI();
-    factory(api);
-
+  it("AC-1.1: registers 3 tools (subagent + workflow + workflow-script)", () => {
     // 3 tools: subagent (from subagents) + workflow + workflow-script (from workflow)
-    expect(tools).toContain("subagent");
-    expect(tools).toContain("workflow");
-    expect(tools).toContain("workflow-script");
-    expect(tools.length).toBeGreaterThanOrEqual(3);
+    expect(mounted.tools).toContain("subagent");
+    expect(mounted.tools).toContain("workflow");
+    expect(mounted.tools).toContain("workflow-script");
+    expect(mounted.tools.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("AC-1.1: registers 2 commands (subagents + workflows)", async () => {
-    const mod = await import("../../index.js");
-    const factory = mod.default;
-    const { api, commands } = createMockExtensionAPI();
-    factory(api);
-
-    expect(commands).toContain("subagents");
-    expect(commands).toContain("workflows");
-    expect(commands.length).toBeGreaterThanOrEqual(2);
+  it("AC-1.1: registers 2 commands (subagents + workflows)", () => {
+    expect(mounted.commands).toContain("subagents");
+    expect(mounted.commands).toContain("workflows");
+    expect(mounted.commands.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("AC-1.1: registers subagent-bg-notify message renderer", async () => {
-    const mod = await import("../../index.js");
-    const factory = mod.default;
-    const { api, messageRenderers } = createMockExtensionAPI();
-    factory(api);
-
-    expect(messageRenderers).toContain("subagent-bg-notify");
+  it("AC-1.1: registers subagent-bg-notify message renderer", () => {
+    expect(mounted.messageRenderers).toContain("subagent-bg-notify");
   });
 
-  it("AC-1.1: sets pi.__workflowRun", async () => {
-    const mod = await import("../../index.js");
-    const factory = mod.default;
-    const { api } = createMockExtensionAPI();
-    factory(api);
-
-    expect(api.__workflowRun).toBeDefined();
-    expect(typeof api.__workflowRun).toBe("function");
+  it("AC-1.1: sets pi.__workflowRun", () => {
+    expect(mounted.api.__workflowRun).toBeDefined();
+    expect(typeof mounted.api.__workflowRun).toBe("function");
   });
 
-  it("session_start handler registers SubagentService and ModelConfigService", async () => {
-    const mod = await import("../../index.js");
-    const factory = mod.default;
-    const { api, eventHandlers } = createMockExtensionAPI();
-    factory(api);
-
-    expect(eventHandlers["session_start"]).toBeDefined();
-    expect(eventHandlers["session_start"].length).toBeGreaterThanOrEqual(1);
+  it("session_start handler registers SubagentService and ModelConfigService", () => {
+    expect(mounted.eventHandlers["session_start"]).toBeDefined();
+    expect(mounted.eventHandlers["session_start"].length).toBeGreaterThanOrEqual(1);
   });
 
-  it("session_shutdown handler disposes resources", async () => {
-    const mod = await import("../../index.js");
-    const factory = mod.default;
-    const { api, eventHandlers } = createMockExtensionAPI();
-    factory(api);
-
-    expect(eventHandlers["session_shutdown"]).toBeDefined();
-    expect(eventHandlers["session_shutdown"].length).toBeGreaterThanOrEqual(1);
+  it("session_shutdown handler disposes resources", () => {
+    expect(mounted.eventHandlers["session_shutdown"]).toBeDefined();
+    expect(mounted.eventHandlers["session_shutdown"].length).toBeGreaterThanOrEqual(1);
   });
 });

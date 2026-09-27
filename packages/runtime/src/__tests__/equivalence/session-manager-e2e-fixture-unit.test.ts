@@ -45,8 +45,10 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     // 错误消息里的同名文案会造成自匹配假红。
     const importShape = /import\s*\{[^{}]*\bspawnPiFixture\b[^{}]*\}\s*from\s*['"][^'"]*pi-fixture(\.js)?['"]/
     // 轨道判定的 import 信号（同款「整句结构」匹配，防裸标识符自匹配）：REAL_PI_READY =
-    // 真实 LLM 轨门控；FAUX_PI_READY = faux 轨门控（凭证无关）。
-    const realReadyShape = /import\s*\{[^{}]*\bREAL_PI_READY\b[^{}]*\}\s*from\s*['"][^'"]*pi-fixture(\.js)?['"]/
+    // 真实 LLM 轨门控（SSOT 在 real-pi-gate.ts，历史形态自 pi-fixture import 亦兼容）；
+    // FAUX_PI_READY = faux 轨门控（凭证无关）。
+    const realReadyShape =
+      /import\s*\{[^{}]*\bREAL_PI_READY\b[^{}]*\}\s*from\s*['"][^'"]*(pi-fixture|real-pi-gate)(\.js)?['"]/
     const fauxReadyShape = /import\s*\{[^{}]*\bFAUX_PI_READY\b[^{}]*\}\s*from\s*['"][^'"]*pi-fixture(\.js)?['"]/
     const consumers: string[] = []
     /** 纯 faux 轨文件（有 FAUX 门控、无 REAL 门控 → 无真实 LLM turn 用例，豁免登记） */

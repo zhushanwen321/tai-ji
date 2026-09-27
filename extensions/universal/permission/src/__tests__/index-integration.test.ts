@@ -12,7 +12,7 @@
  * 用 PI_CODING_AGENT_DIR 指向临时目录，写入 controlled permission.json，
  * 让 loadAndWatchConfig 读到指定 mode。mock pi 对象记录 handler 调用。
  */
-import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -21,6 +21,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import permissionExtension from "../index.js";
 import { FOOTER_HANDSHAKE_KEY, REQUEST_RENDER_KEY } from "../footer-provider.js";
+
+// migrateLegacyConfig 包 spy 计数（透传真实实现，行为零改变）：迁移接线用例的
+// 操作级去重断言（双派发 spy = 1）经此观测，文件面断言（mtime/内容不变）同源有效。
+const { spyMigrateLegacyConfig } = vi.hoisted(() => ({
+	spyMigrateLegacyConfig: vi.fn(),
+}));
+
+vi.mock("@zhushanwen/pi-llm-shared", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@zhushanwen/pi-llm-shared")>();
+	spyMigrateLegacyConfig.mockImplementation((agentDir: string, oldRel: string, newRel: string) =>
+		actual.migrateLegacyConfig(agentDir, oldRel, newRel));
+	return { ...actual, migrateLegacyConfig: spyMigrateLegacyConfig };
+});
 
 // ──────────────────────── mock pi ────────────────────────
 
@@ -276,24 +289,43 @@ function getPermissionHandler(calls: MockPiCalls): (args: string, ctx: unknown) 
 }
 
 describe("W8 /permission rule 命令集成", () => {
-	it("headless（json）→ notify 降级提示，不改 config", async () => {
+	it("headless（json）→ rule 参数走 rule 路径：notify 降级提示，config 字节不变", async () => {
 		writeConfig("yolo");
+		const configBefore = readFileSync(CONFIG_PATH, "utf-8");
 		const { pi, calls } = createMockPi();
 		permissionExtension(pi);
 		const handler = getPermissionHandler(calls);
-		const ctx = makeCtx("json");
+		// notify spy 注入 ctx（commands.test.ts 同款 vi.fn 形态）：headless 降级提示的可观测面
+		const notify = vi.fn();
+		const ctx = {
+			mode: "json",
+			cwd: "/tmp",
+			ui: {
+				notify,
+				select(): Promise<string | undefined> {
+					return Promise.resolve(undefined);
+				},
+				custom(): Promise<unknown> {
+					return Promise.resolve(undefined);
+				},
+			},
+			signal: undefined,
+		};
 		// 不应抛错
-		await handler("rule", ctx);
-	});
+		await expect(handler("rule", ctx)).resolves.toBeUndefined();
 
-	it("permission handler 分流：rule 参数走 rule 路径（headless 降级）", async () => {
-		writeConfig("yolo");
-		const { pi, calls } = createMockPi();
-		permissionExtension(pi);
-		const handler = getPermissionHandler(calls);
-		const ctx = makeCtx("json");
-		// rule 参数应走 headless 降级（notify）
-		await expect(handler("rule", ctx)).resolves.not.toThrow();
+		// 分流断言：warning 文案只产自 rule 编辑器的 headless 分支（editRulesViaOverlay），
+		// 同步路径（mode 切换/status）只发 info——命中即证明「rule 参数走了 rule 路径」。
+		// 第二次 notify = 编辑器返回 undefined 后的 no-changes 提示。
+		expect(notify).toHaveBeenCalledTimes(2);
+		expect(notify).toHaveBeenNthCalledWith(
+			1,
+			expect.stringContaining("not available in headless mode"),
+			"warning",
+		);
+		expect(notify).toHaveBeenNthCalledWith(2, "[pi-permission] No changes applied.", "info");
+		// 降级路径不得改 config（编辑器未打开、save 未触发）：字节级不变
+		expect(readFileSync(CONFIG_PATH, "utf-8")).toBe(configBefore);
 	});
 });
 
@@ -377,6 +409,12 @@ describe("footer line 注册", () => {
 // 迁移经 oncePerProcess 守卫（u-audit-fix 收编原内联 once flag），守卫的模块级 Map
 // 跨用例残留：用 vi.resetModules() + 动态 import 取新鲜模块实例，否则前面用例已触发过
 // session_start，迁移分支永不执行（静默不测）。
+// 末两条为守卫双派发实测（u-audit-fix 探针）：
+//   a) 操作级去重：双派发下 spy migrateLegacyConfig 调用 = 1（warn 在 migrateLegacyConfig
+//      调用点内部，调用 = 1 构造性蕴含 warn ≤ 1，不另设断言）；
+//   b) 文件面：第二次派发后重建的旧文件原样保留、新路径 mtime/内容严格不变；
+//   c) 豁免项防误伤：footer 注册为纯内存初始化（registry.register 同 id 覆盖），不在
+//      包装范围——双派发仍每次执行（pending push ×2）。
 describe("session_start 配置路径迁移接线", () => {
 	const LEGACY_PATH = join(AGENT_DIR, "permission-config.json");
 
@@ -458,5 +496,60 @@ describe("session_start 配置路径迁移接线", () => {
 		const handler = getSessionStartHandler(calls);
 		expect(() => handler({}, makeCtx("json"))).not.toThrow();
 		expect(existsSync(CONFIG_PATH)).toBe(false); // 迁移不凭空造新配置
+	});
+
+	// ── oncePerProcess 守卫双派发实测（u-audit-fix 探针）──
+	it("双派发下 migrateLegacyConfig 仅执行一次：spy = 1，文件面首次迁移到位、第二次 mtime/内容不变", async () => {
+		// spy 是文件级单例（跨 resetModules 保留计数），前面用例已触发过迁移 → 先清零
+		spyMigrateLegacyConfig.mockClear();
+		// 预置旧路径文件（新路径不存在 → 走 renameSync 迁移分支）
+		rmSync(CONFIG_PATH, { force: true });
+		writeLegacyConfig("strict");
+
+		const extension = await freshExtension();
+		const { pi, calls } = createMockPi();
+		extension(pi);
+		const handler = getSessionStartHandler(calls);
+
+		// 第一次派发：迁移发生（旧文件消失 + 新路径出现，内容来自旧文件）
+		handler({}, makeCtx("json"));
+		expect(existsSync(LEGACY_PATH)).toBe(false);
+		expect(existsSync(CONFIG_PATH)).toBe(true);
+		expect(JSON.parse(readFileSync(CONFIG_PATH, "utf-8")).mode).toBe("strict");
+		const mtimeAfterFirst = statSync(CONFIG_PATH).mtimeMs;
+		const contentAfterFirst = readFileSync(CONFIG_PATH, "utf-8");
+
+		// 第二次派发（factory 二调/handler 累积形态：同一 handler 引用再调）：
+		// 重建旧路径文件模拟外部残留——守卫已消费 key，不得再次触碰任何文件。
+		writeLegacyConfig("yolo");
+		handler({}, makeCtx("json"));
+
+		// 探针 a：操作级去重（spy 透传真实实现，文件面与计数同源）
+		expect(spyMigrateLegacyConfig).toHaveBeenCalledTimes(1);
+		// 探针 b：第二次后重建的旧文件原样保留、新路径 mtime/内容严格不变
+		expect(existsSync(LEGACY_PATH)).toBe(true);
+		expect(statSync(CONFIG_PATH).mtimeMs).toBe(mtimeAfterFirst);
+		expect(readFileSync(CONFIG_PATH, "utf-8")).toBe(contentAfterFirst);
+	});
+
+	it("豁免项防误伤：footer 注册不包装，双派发仍每次执行（pending push ×2）", async () => {
+		writeLegacyConfig("strict");
+
+		const extension = await freshExtension();
+		const { pi, calls } = createMockPi();
+		extension(pi);
+		const handler = getSessionStartHandler(calls);
+
+		handler({}, makeCtx("json"));
+		handler({}, makeCtx("json"));
+
+		// 纯内存初始化（registry.register 同 id 覆盖 / pending push）保持每 session_start
+		// 执行——清单「粒度边界」明令不包装，挂进程级 flag 会杀 session 级语义。
+		const slot = Reflect.get(globalThis, FOOTER_HANDSHAKE_KEY) as {
+			pending: Array<{ id: string; renderer: unknown }>;
+		} | undefined;
+		expect(slot).toBeDefined();
+		expect(slot!.pending.length).toBe(2);
+		expect(slot!.pending[0]!.id).toBe("pi-permission");
 	});
 });

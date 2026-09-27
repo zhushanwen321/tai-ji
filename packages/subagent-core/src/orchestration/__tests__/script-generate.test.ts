@@ -26,7 +26,7 @@ import {
 import { DEFAULT_WORKFLOW_SAVED_DIR, type WorkflowDirOptions } from "../workflow-files.ts";
 
 // ============================================================
-// 样本（构造逻辑对齐 pi 侧 tool-workflow-script-generate.test.ts）
+// 样本（构造逻辑对齐 pi 侧 tool-workflow-script.test.ts）
 // ============================================================
 
 const PI_META_VALID = `/* @pi-meta
