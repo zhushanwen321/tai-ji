@@ -180,24 +180,6 @@ export declare function normalizeAggregatorResult(raw: unknown): {
   scores?: ScoreEntry[];
   [key: string]: unknown;
 };
-export declare function parseAggregatedMd(content: string): {
-  must_fix: number;
-  suggestion: number;
-  [key: string]: unknown;
-};
-// ── 弱格式通道（设计 §3.4.2）：reviewer 计数恢复 + 降级兜底差集 ──
-export declare function recoverFromReportFile(args: {
-  roundDir: string;
-  reportName: string;
-  readFile: (p: string, enc: BufferEncoding) => string;
-  parseMd: (content: string) => { must_fix: number; suggestion: number; [key: string]: unknown };
-}): { must_fix: number; suggestion: number; report_file: string } | null;
-export declare function parsePorcelainPaths(out: string | null | undefined): string[];
-export declare function computeDegradedCommitSet(args: {
-  prevHead: string;
-  baselinePaths: string[] | null | undefined;
-  exec?: (cmd: string) => string;
-}): string[];
 export declare function resolveRunRoot(opts: {
   runId?: string;
   cwd?: string;

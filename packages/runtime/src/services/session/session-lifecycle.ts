@@ -238,8 +238,6 @@ export interface ReclaimSessionDeps {
    * （复用 background-task-reaper 单 session 入口，与 removeSessionEntry 汇聚点同款触发面）。
    */
   reapBackgroundTasks?(sessionId: string): Promise<void>
-  /** pendingReload 定向清（D3 第 6 步）——u3 装配绑 ReloadOrchestrator.clearPending。 */
-  clearPendingReload?(sessionId: string): void
   /**
    * 定向清挂起 UI 请求（v6 第四案纵深防御）——只清属于**被回收代际**的 pending。
    * 挂点 = 下方代际校验通过后的成功分支（`this.get(sessionId) !== session ||
@@ -383,12 +381,6 @@ export class SessionLifecycle implements ISessionRegistry {
         this.registerDeps.getMessageBus()?.publish(sid, msg)
       } else {
         this.registerDeps.broadcastGlobal(msg)
-      }
-      // W5：message.complete 广播后通知 reload-orchestrator（消费 pendingReload 队）。
-      // 覆盖所有 message.complete 路径（event-interpreter turn-end 主路径 + dispatcher abort
-      // 手动广播）。onMessageComplete 未注入时为 no-op。
-      if (msg.type === 'message.complete' && sid) {
-        this.registerDeps.notifyMessageComplete(sid)
       }
     }
     // #8 G1：传 cwd 给 EventAdapter（write added/modified 判定 + agent_end git 对账用）
@@ -1360,10 +1352,8 @@ export class SessionLifecycle implements ISessionRegistry {
         console.warn(`[session-lifecycle] reclaim ${sessionId} cancelled: session was re-created concurrently (generation check, D6-3)`)
         return false
       }
-      // ⑥b 最小摘除：lifecycle sessions Map 删条目 + pendingReload 定向清（防御性 no-op：
-      // pendingReload 有条目 ⇒ session busy ⇒ 恒非回收候选，真发生的窗口极窄）。
+      // ⑥b 最小摘除：lifecycle sessions Map 删条目。
       this.removeEntry(sessionId)
-      deps.clearPendingReload?.(sessionId)
       // v6 第四案：回收定向清挂起 UI 请求（防 stale pending 在重激活时拉回死表单）。
       // 挂代际校验通过后的分支：此处必为被回收的旧代际（新进程存在 ⇒ 上方校验已返回 false），
       // 并发的取消分支不执行本步——新进程的活请求不被误清。

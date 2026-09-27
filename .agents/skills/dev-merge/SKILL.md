@@ -69,7 +69,7 @@ node scripts/check-line-propagation.mjs --target <dev-branch>
 - **仅分支存在形态红灯的处置**：目标 worktree 不存在时上述恢复指引不可直接执行——block 挡的是第 2 步合并，不挡恢复前置。先经 `worktree-manipulate` 创建目标 worktree（检出既有分支，等价于第 2 步的自动创建）→ 在其中 `git merge main` → 重跑守卫消除红灯后再进第 2 步。
 - **软提示头条摘要呈报用户后才进第 2 步**（流程一等步骤，不是可选日志）：每条兄弟线的 commit 总量 + 最老停留天数；裁决粒度 = **线粒度**（对每条兄弟线回答「吸收 / 暂缓」），不逐条裁决。兄弟线长周期 WIP 每次全量呈报数十条属无状态恒常呈报的稳态，不是异常。
 
-**降级 clean 处置条款（CR 门呈报义务）**：第 1.7 步 review-fix-loop 的 run 返回值 message 带 `(degraded: N round(s))` 后缀时（结构化返回链路断、run 降级完成的标记——计数来自 agent 自报汇总行、无 schema 校验、fix 分组退化），执行 agent 须把该后缀与降级轮数 N **呈报用户后才进合并步骤**。降级 clean **不阻塞合并**（降级完成是设计意图），但呈报义务必尽——合并产物出问题时回溯「当时是降级 run」有据可查。
+**CR 门 fail-fast 语义（2026-09-25 裁决）**：第 1.7 步 review-fix-loop 全链强结构化返回——reviewer/fixer/aggregator 任一结构化返回失败即立即终止整个 workflow（review-failure / fix-failure / aggregator-failure 终态 + 恢复指引），无降级完成形态。CR 门读到非 clean/converged 终态 = 环境或模型问题未修，按失败处置（不进合并），恢复动作见 run 返回值 message。
 
 ### 第 2 步：合并
 

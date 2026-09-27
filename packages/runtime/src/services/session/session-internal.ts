@@ -129,8 +129,6 @@ export interface ISessionRegisterDeps {
   getMessageBus(): IMessageBus | null
   /** 全局消息盲广播（broker.broadcast：无 sessionId payload 消息的防御兜底通道）。 */
   broadcastGlobal(msg: ServerMessage): void
-  /** message.complete 广播后通知 reload-orchestrator（未注入时 no-op）。 */
-  notifyMessageComplete(sessionId: string): void
 }
 
 /**

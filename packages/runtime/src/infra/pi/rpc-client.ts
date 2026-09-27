@@ -569,12 +569,12 @@ export class RpcClient implements IPiEngine {
     // 入站 touch（idle-pi-reclamation D1）：任何 stdout 帧（response / 事件 / 迟到丢弃帧）
     // 都证明 pi 在产出，进程非空闲。放在分派前——分支结构变化不影响 touch 语义。
     // 唯一例外（D1 双腿闭合）：解析为「maintenance pending 的 response」的帧不 touch。
-    // promptReload（{ maintenance: true }）的出站腿已在 sendCommand 排除，但其 response
-    // 回程经本入口无条件 touch 会把空闲时钟重置回去——回程回声与出站请求同频（skill
-    // 变更风暴下与 promptReload 一一配对到达），只排除出站腿时回收饿死原样保留，
-    // 故双腿同豁免。事件帧 / 非 maintenance response 的 touch 语义零变化。
+    // 维护通道（{ maintenance: true }）的出站腿已在 sendCommand 排除，但其 response
+    // 回程经本入口无条件 touch 会把空闲时钟重置回去——回程回声与出站请求同频到达，
+    // 只排除出站腿时回收饿死原样保留，故双腿同豁免。事件帧 / 非 maintenance response
+    // 的 touch 语义零变化。
     // 边角（可接受）：迟到 maintenance response——pending 已被超时清理（60s）后到达，
-    // id 命不中 pending → 照旧 touch。超时 60s 后才回的 reload 极罕见，且该边角方向 =
+    // id 命不中 pending → 照旧 touch。超时 60s 后才回的维护响应极罕见，且该边角方向 =
     // 多豁免不误杀（多 touch 一次只推迟回收，不会误杀活跃进程），与「宁漏不误杀」同向。
     const maintenanceResponse = this.pendingRegistry.isMaintenanceResponse(msg)
     if (!maintenanceResponse) {
@@ -714,9 +714,9 @@ export class RpcClient implements IPiEngine {
       this.lastCommandType = type
 
       // 出站 touch（idle-pi-reclamation D1）：sendCommand 是全部出站 RPC 的唯一咽喉。
-      // 唯一例外 = 维护通道（options.maintenance，如 promptReload 的 /__taiji_reload__——
-      // skill 目录变更会对全部活跃 session 触发，计入会让空闲时钟被周期性重置、回收
-      // 饿死且不体现为豁免命中）。touch 在状态检查后：进程已死时无空闲可言。
+      // 唯一例外 = 维护通道（options.maintenance——维护类内部命令不计用户/session 活跃，
+      // 计入会让空闲时钟被周期性重置、回收饿死且不体现为豁免命中）。
+      // touch 在状态检查后：进程已死时无空闲可言。
       if (!options?.maintenance) {
         this._lastActivityAt = Date.now()
       }
@@ -937,8 +937,8 @@ export class RpcClient implements IPiEngine {
     // 帧组装（pi-rpc commands）：images 是 shared 层图片附件形状（无 type 字段），
     // shared→pi ImageContent 的唯一组装点在公共包（pi 私有 type:'image' 不出本层）；
     // 空 images 归一化不传键（避免 pi 收到空数组），与改动前路径完全一致。
-    // options 透传（idle-pi-reclamation D1）：维护通道（promptReload 的 /__taiji_reload__）
-    // 经 prompt 的语义方法形态发起，maintenance 标记直达 sendCommand touch 排除。
+    // options 透传（idle-pi-reclamation D1）：维护通道经 prompt 的语义方法形态发起时，
+    // maintenance 标记直达 sendCommand touch 排除。
     return this.sendCommand('prompt', buildPromptParams({ message: content, images, streamingBehavior }), CMD_TIMEOUT_MS, options)
   }
 

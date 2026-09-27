@@ -287,18 +287,6 @@ export interface ISessionService {
    * setOnPlanAborted 注入，单一出口在 transport 层。
    */
   abortPlan(sessionId: string): Promise<void>
-  /** W5：session 是否空闲（进程存活且非生成中），供 ReloadOrchestrator 判断立即/排队 reload。 */
-  isSessionIdle(sessionId: string): boolean
-  /** W5：session 是否仍存活（未被 delete），供 ReloadOrchestrator 检测排队期删除。 */
-  hasSession(sessionId: string): boolean
-  /** W5：发 `/__taiji_reload__` 触发 pi reload（builtin extension handler 调 ctx.reload）。 */
-  promptReload(sessionId: string): Promise<void>
-  /**
-   * U3（composer 四符号 §3.3.5）：reload 成功后失效 commands 快照（markDirty 防抖重拉
-   * get_commands，经既有挂钩自动广播 session.commands）。供 ReloadOrchestrator 在
-   * promptReload resolve（= reload 完成，设计 F8）后调用；失败路径不调。
-   */
-  handleSessionReloaded(sessionId: string): void
   /** 查询 session 的扩展命令（pi getCommands）。纯查询无副作用，用于 renderer 主动拉取。 */
   getCommands(sessionId: string): Promise<Array<{ name: string; description?: string; source: string }>>
   /**

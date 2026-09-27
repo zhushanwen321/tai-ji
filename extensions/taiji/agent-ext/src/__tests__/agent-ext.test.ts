@@ -3,18 +3,19 @@
  *
  * 复用 system-prompt-trace index-wiring.test.ts 的 Proxy 假体模式：
  * - pi 用 Proxy 假体：捕获 registerCommand 注册的命令定义 + appendEntry 落点
- * - ctx 只需 index.ts 实际消费的字段（reload / getSystemPrompt），
+ * - ctx 只需 index.ts 实际消费的字段（getSystemPrompt），
  *   以 ExtensionCommandContext 最小形状驱动 handler（SDK 双参契约 (args, ctx)）
  * - index.ts 对 @earendil-works/pi-coding-agent 是 type-only import（运行时擦除），
  *   无需 vi.mock SDK 模块
  *
- * 锚定两命令注册面 + handler 行为：
- * - __taiji_reload__（host 触发的 skill/extension 重载内部命令）→ ctx.reload()
+ * 锚定命令注册面 + handler 行为：
  * - __taiji_get_system_prompt__（Trace 视图「现取当前值」通道）→ pi.appendEntry
  *   写 taiji:current-system-prompt custom entry（fullText/charCount/fetchedAt 形状）
  *
  * [HISTORICAL] session tree 导航命令（旧品牌时期命名）及其测试随命令删除一并移除
  * （2026-08-31，桥接对端 runtime 消费端已在 monorepo 时代删除）。
+ * [HISTORICAL] __taiji_reload__ 及其测试随 W5 skill 变更→pi reload 编排退役一并移除
+ * （2026-09-25，消费端已 D7 切源 taiji SkillRegistry，pi 侧列表滞后归 ADR-0050 降级）。
  *
  * 运行：cd extensions/taiji/agent-ext && npx vitest run
  */
@@ -63,20 +64,17 @@ function createWiringHarness(): WiringHarness {
   return { pi, commands, entries };
 }
 
-/** ctx 假体（index.ts 实际消费：reload / getSystemPrompt；vi.fn 捕获调用）。 */
+/** ctx 假体（index.ts 实际消费：getSystemPrompt；vi.fn 捕获调用）。 */
 function createCtx(prompt = "current system prompt"): {
   ctx: ExtensionCommandContext;
-  reload: ReturnType<typeof vi.fn>;
   getSystemPrompt: ReturnType<typeof vi.fn>;
 } {
-  const reload = vi.fn();
   const getSystemPrompt = vi.fn(() => prompt);
   const ctx = {
     cwd: "/home/user/project",
-    reload,
     getSystemPrompt,
   } as unknown as ExtensionCommandContext;
-  return { ctx, reload, getSystemPrompt };
+  return { ctx, getSystemPrompt };
 }
 
 /** 以 SDK 双参契约 (args, ctx) 驱动已注册命令 handler。 */
@@ -98,29 +96,16 @@ async function loadExtension(): Promise<(pi: ExtensionAPI) => void> {
 }
 
 describe("index.ts wiring SDK 契约", () => {
-  it("注册恰好两个命令（__taiji_reload__ / __taiji_get_system_prompt__），各带非空 description", async () => {
+  it("注册恰好一个命令（__taiji_get_system_prompt__），带非空 description", async () => {
     const ext = await loadExtension();
     const h = createWiringHarness();
     ext(h.pi);
-    expect([...h.commands.keys()].sort()).toEqual([
-      "__taiji_get_system_prompt__",
-      "__taiji_reload__",
-    ]);
+    expect([...h.commands.keys()]).toEqual(["__taiji_get_system_prompt__"]);
     for (const def of h.commands.values()) {
       expect(typeof def.description).toBe("string");
       expect(def.description.length).toBeGreaterThan(0);
       expect(typeof def.handler).toBe("function");
     }
-  });
-
-  it("__taiji_reload__ handler → 调 ctx.reload()（host 触发的 skill/extension 重载，无参）", async () => {
-    const ext = await loadExtension();
-    const h = createWiringHarness();
-    ext(h.pi);
-    const { ctx, reload } = createCtx();
-    await runCommand(h, "__taiji_reload__", "", ctx);
-    expect(reload).toHaveBeenCalledTimes(1);
-    expect(reload).toHaveBeenCalledWith();
   });
 
   it("__taiji_get_system_prompt__ → appendEntry 写 taiji:current-system-prompt（fullText/charCount/fetchedAt 形状，不写其他 customType）", async () => {
