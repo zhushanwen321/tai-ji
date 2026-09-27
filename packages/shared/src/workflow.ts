@@ -90,7 +90,8 @@ export type WorkflowRunOutcome = 'completed' | 'failed' | 'cancelled'
  * - usedTokens/totalCallCount：RunSnapshot.state.budget
  * - agentCalls：RunSnapshot.state.trace[] 逐项映射（[P3/D6] 并按 id 合并 state.calls[]
  *   的 lastProgressAt 投影字段）
- * - stateFilePath：主 session JSONL 的 workflow-state-link.data.path
+ * - stateFilePath：v2 = 注册条目 journalPath（run 事件 journal 锚——详情面板「run
+ *   关联持久化文件」展示位）；v1 快照路径恒 ''（workflow-extractor 对空串隐藏）
  */
 export interface WorkflowRunRecord {
   /** run 唯一标识（RunSnapshot.runId） */
@@ -115,7 +116,7 @@ export interface WorkflowRunRecord {
   totalCallCount?: number
   /** agent call 列表（从 state.trace[] 映射） */
   agentCalls: WorkflowAgentCall[]
-  /** workflow-state JSONL 绝对路径（workflow-state-link.data.path） */
+  /** state 路径：v2 = 注册条目 journalPath（详情面板「run 关联持久化文件」展示位）；v1 快照恒 ''（对空串隐藏） */
   stateFilePath: string
   /**
    * [P3/D6] run 级 health（RunSnapshot.state.health，事件 journal fold 投影）。

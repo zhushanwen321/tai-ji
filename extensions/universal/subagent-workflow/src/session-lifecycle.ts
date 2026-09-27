@@ -601,6 +601,14 @@ async function createSessionRunState(
           appendSettledEntry: (customType, data) => {
             pi.appendEntry(customType, data);
           },
+          // [W1 / D4 收编定界分流] v2 注册条目定界供给（loadAll 缓存的 registered
+          // 集）：v2 实体走 journal 收编，v1 快照实体走兼容旧分支（D7 旧会话行为
+          // 完全不变）——定界数据与恢复循环同源（同一次 loadAll 采出）。运行时
+          // 防御式探测：测试 mock store 未实现定界查询时不注入（core 侧未注入 =
+          // 保守走 v1 兼容分支，恢复语义 state 面不变）。
+          ...(typeof store.hasV2RegisteredEntry === "function"
+            ? { isV2RegisteredEntry: (runId: string) => store.hasV2RegisteredEntry(runId) }
+            : {}),
         },
       );
       logger.debug(

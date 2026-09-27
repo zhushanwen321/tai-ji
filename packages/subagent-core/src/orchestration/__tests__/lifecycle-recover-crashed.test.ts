@@ -329,6 +329,8 @@ describe("recoverCrashedRuns — journal 收编接驳（W1 / D4）", () => {
       const appended: Array<{ customType: string; data: unknown }> = [];
       const result = await recoverCrashedRuns(store, new Map(), "Process killed", {
         appendSettledEntry: (customType, data) => appended.push({ customType, data }),
+        // [W1 / D4 收编定界] 本用例锁定 v2 实体收编路径——注入 v2 定界命中
+        isV2RegisteredEntry: () => true,
       });
 
       expect(result.recovered).toBe(1);
@@ -373,7 +375,10 @@ describe("recoverCrashedRuns — journal 收编接驳（W1 / D4）", () => {
       });
       const run = makeRun("wf-adopt-2", { status: "running" });
       const firstStore = makeStore([run]);
-      await recoverCrashedRuns(firstStore.store, new Map(), "Process killed");
+      await recoverCrashedRuns(firstStore.store, new Map(), "Process killed", {
+        // [W1 / D4 收编定界] v2 收编路径锁定用例——注入 v2 定界命中
+        isV2RegisteredEntry: () => true,
+      });
       expect(
         (await createRunEventJournal(journalDir).scan("wf-adopt-2")).filter(
           (e) => e.type === "run-settled",
@@ -393,6 +398,53 @@ describe("recoverCrashedRuns — journal 收编接驳（W1 / D4）", () => {
 
       const events = await createRunEventJournal(journalDir).scan("wf-adopt-2");
       expect(events.filter((e) => e.type === "run-settled")).toHaveLength(1);
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  // [W1 / D4 收编定界分流] 设计 §3.3 D4：v1 快照条目实体（未定界为 v2）走 W1 前
+  // 旁路直改兼容层——不落 journal / manifest / 条目（D7「旧会话行为完全不变」）。
+  it("v1 实体（定界未命中）走兼容旧分支：state 直改 done,failed，journal/条目零写入", async () => {
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-recover-v1-"));
+    setRunEventJournalDirForTest(journalDir);
+    try {
+      // 预置静止 journal（模拟 P1b-1~W1 间有 journal 的存量 v1 run——未定界为 v2）
+      const journal = createRunEventJournal(journalDir);
+      await journal.append("wf-v1-1", {
+        type: "run-created",
+        runId: "wf-v1-1",
+        workflowName: "test-wf",
+        argsSummary: "{}",
+        ts: Date.now(),
+      });
+      await journal.append("wf-v1-1", {
+        type: "ask-dispatched",
+        taskIndex: 0,
+        agentName: "a",
+        attempt: 1,
+        ts: Date.now(),
+      });
+
+      const run = makeRun("wf-v1-1", { status: "running" });
+      const { store, saves } = makeStore([run]);
+      const appended: Array<{ customType: string; data: unknown }> = [];
+      const result = await recoverCrashedRuns(store, new Map(), "Process killed", {
+        appendSettledEntry: (customType, data) => appended.push({ customType, data }),
+        isV2RegisteredEntry: () => false,
+      });
+
+      expect(result.recovered).toBe(1);
+      // state 旁路直改（兼容层语义不变）
+      expect(run.state.status).toBe("done");
+      expect(run.state.reason).toBe("failed");
+      expect(run.state.error).toBe("Process killed");
+      expect(saves).toHaveLength(1);
+      // journal 零新增帧（无 run-settled 收编帧）、条目零回调（无 v2 孤儿 settled）
+      const events = await createRunEventJournal(journalDir).scan("wf-v1-1");
+      expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched"]);
+      expect(appended).toHaveLength(0);
     } finally {
       setRunEventJournalDirForTest(undefined);
       fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });

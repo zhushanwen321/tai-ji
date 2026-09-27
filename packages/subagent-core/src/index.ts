@@ -475,9 +475,14 @@ export {
 // [2026-09-13 barrel 收窄] makeSerializeFailedResult / postBudgetUpdate /
 // resetRebuildFailureInjectionForTest / FinalizeRunOptions 已出公共面（前三者仅
 // 测试深路径消费，后者为定义文件内部类型闭包）。
+// [W1 / D1] buildWorkflowRecord{Registered,Settled}EntryData：v2 条目构造器单源
+// （字段集机器锚点）——壳写点（JsonlRunStore loadAll 收编补写 / recoverCrashedRuns
+// hooks 链）经 barrel 复用同一构造，防字段集手抄漂移成 SubagentTab 空行。
 export {
   finalizeRun,
   closeOutInFlightCalls,
+  buildWorkflowRecordRegisteredEntryData,
+  buildWorkflowRecordSettledEntryData,
 } from "./orchestration/worker-message-pump.ts";
 
 // workflow 领域模型族：run / call / trace / budget / 状态与规格（壳 store 与

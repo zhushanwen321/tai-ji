@@ -344,16 +344,37 @@ export function projectV2Subagent(
     agent: identity.agent,
     slug: identity.slug,
     task: identity.task,
-    // journal 胜出：fold 在场（含事件文件）时由 fold 定态；窗外无 fold 时终态条目兜底
+    // journal 胜出：fold 在场（含事件文件）时由 fold 定态；窗外无 fold 时终态条目兜底。
+    // status 是两态判据不是终局吸收位判据：轮终收条（record-round-idle，v1 权威词
+    // idle 同源）与 reopened（CAS 只接受 idle、不翻 running）都映射 idle；不能用
+    // roundIdle 在场判 idle（round-started 不清 roundIdle），以 lastEvent.type 判。
     status:
       fold !== undefined
-        ? fold.settled !== undefined
+        ? fold.settled !== undefined ||
+          fold.lastEvent?.type === 'record-round-idle' ||
+          fold.lastEvent?.type === 'record-reopened'
           ? 'idle'
           : 'running'
         : settledEntry !== undefined
           ? 'idle'
           : 'running',
-    stopReason: settled?.stopReason ?? roundIdle?.stopReason ?? settledEntry?.stopReason,
+    // 停因供源随 status 判据同构分流（v1 写侧语义延续）：settled 终局停因 → 轮终
+    // 收条停因（lastEvent 为 round-idle 时 roundIdle 即最新收条）→ reopened 窗口
+    // 展示词（事件词表 record-reopened 无停因载荷，由 lastEvent.type 映射——对齐 v1
+    // markReopenedImpl 写 stopReason='reopened'）；在飞（round-started / created /
+    // bound）轮始清点无停因——roundIdle/settledEntry 的旧值不得透传（v1
+    // markRoundStartedImpl 上轮停因随轮始清点 + isOccupied 的 stopReason 子句依赖；
+    // F2-1：第二轮 running + 「completed」矛盾组合即旧值透传所致）。
+    stopReason:
+      fold !== undefined
+        ? settled !== undefined
+          ? settled.stopReason
+          : fold.lastEvent?.type === 'record-round-idle'
+            ? roundIdle?.stopReason
+            : fold.lastEvent?.type === 'record-reopened'
+              ? 'reopened'
+              : undefined
+        : settledEntry?.stopReason,
     turns: settled?.turns ?? roundIdle?.turns ?? settledEntry?.turns,
     totalTokens:
       settled?.totalTokens ?? roundIdle?.totalTokens ?? settledEntry?.totalTokens,
@@ -368,7 +389,14 @@ export function projectV2Subagent(
     stepIndex: identity.stepIndex,
     engine: bound?.engine ?? settledEntry?.engine,
     engineHandle: bound?.engineHandle ?? settledEntry?.engineHandle,
-    result: settledEntry?.result ?? settled?.resultSummary,
+    // result 供源（W1 轮终粒度裁决：record-round-idle 携带 result 摘要锚，承接 v1
+    // U8b 轮终 result 显示信号）：轮终收条晚于终局面（settled 已被 reopened /
+    // round-started 清除，或 roundIdle.seq 更新）时轮终摘要胜出——否则终局面优先
+    // （v2 终态条目全文是 D1 唯一全文落点，摘要锚兜底）。
+    result:
+      roundIdle !== undefined && (settled === undefined || roundIdle.seq > settled.seq)
+        ? roundIdle.resultSummary ?? settledEntry?.result ?? settled?.resultSummary
+        : settledEntry?.result ?? settled?.resultSummary,
   }
 }
 
@@ -434,6 +462,8 @@ export function projectV2Workflow(
     ...(settledEntry !== undefined ? { usedTokens: settledEntry.usedTokens } : {}),
     ...(settledEntry !== undefined ? { totalCallCount: settledEntry.callCount } : {}),
     agentCalls,
+    // v2 无 state 文件锚：stateFilePath 承载注册条目 journalPath（详情面板「run 关联
+    // 持久化文件」展示位）；v1 快照路径恒 ''（workflow-extractor 对空串隐藏）。
     stateFilePath: registered?.journalPath ?? '',
     ...(outcome !== undefined ? { outcome } : {}),
     ...(errorCode !== undefined ? { errorCode } : {}),
@@ -475,7 +505,9 @@ export function initialJournalProjectionSources(): JournalProjectionSources {
  *   完全不变）；
  * - v2 subagent：journal fold 的 record-created.rootSessionId === sessionId 才进
  *   投影（records 目录按 cwd 共享跨会话，rootSessionId 是 record 域 session 归属
- *   权威）；注册/终态条目在 applyEntryBatch 摄入侧按同键过滤；
+ *   权威）；v2 注册条目在 applyEntryBatch 摄入侧按 rootSessionId 过滤；终态条目
+ *   与 journal fold 的会话归属分别信任 append-only 文件同源性（注册先行）与
+ *   record-created.rootSessionId 合并侧过滤（终态条目不携 rootSessionId）；
  * - v2 workflow：注册/终态条目在场（run 域定界）即投影，journal fold 按同 runId
  *   合并（journal 胜出）；
  * - 步骤视图合并（W0 输入换源）：合并快照上跑 mergeWorkflowStepRecords 纯函数。

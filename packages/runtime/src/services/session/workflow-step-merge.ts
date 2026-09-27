@@ -1,11 +1,12 @@
 /**
- * workflow 步骤视图合并投影（W0 / 设计 workflow-step-visibility-data-source D2）。
+ * workflow 步骤视图合并投影（W0 / 设计 workflow-step-visibility-data-source D2；
+ * W1 换源后输入改喂 journal 投影，纯函数本体保留）。
  *
- * 职责：以 workflow 投影的 trace 节点为骨架（stepIndex/phase/agent/task——phase 只在
- * ① workflow-record，P7），subagent 投影（subagent-record entry，迁移即写无节流）按
- * (parentRunId, stepIndex) 圈定候选集后合并——「① 供编排结构，② 供运行时状态」。
- * 消除运行中盲区：workflow-record 的 60s 写入节流不再拖死步骤列表实时性（② 状态每次
- * 迁移即落盘，经既有 entry_appended 失效链触发重拉）。
+ * 职责：以 workflow 投影的 trace 节点为骨架（stepIndex/phase/agent/task），subagent
+ * 投影按 (parentRunId, stepIndex) 圈定候选集后合并——「① 供编排结构，② 供运行时
+ * 状态」。phase 供源两代（W1 D6）：v1 快照 trace 节点自带 phase（停写，兼容读）；
+ * v2 = journal ask-dispatched 载荷 phase（现役——journal-projection fold 恢复 +
+ * projectV2Workflow 透传）。
  *
  * 三条规则（设计 D2）：
  * - R1 状态映射：record 两态（running|idle）× stopReason → 步骤四态
@@ -19,8 +20,10 @@
  *   trace 有而候选无（派发前置失败早退，无 record）→ 维持 ① 原样。
  *
  * 纯函数模块：冷启动（extractWorkflowsFromSessionFile 组合扫描）与实时增量
- * （session-records applyRecordEntries 缓存重合并）共用本函数（D5 冷热同代码）；
- * 合并消费内存中的已解析投影数组，不触碰文件系统（D5 禁双读盘约束）。
+ * （journal-projection.recompute → mergeJournalProjection 内单点跑本函数的
+ * mergeWorkflowStepRecords，W1 D6 换源——session-records 缓存是投影合并快照的镜像）
+ * 共用本函数（D5 冷热同代码）；合并消费内存中的已解析投影数组，不触碰文件系统
+ * （D5 禁双读盘约束）。
  */
 
 import { displayAgentName } from '@zhushanwen/subagent-core'
@@ -248,20 +251,4 @@ function mergeSingleRun(
     return record // 无任何变化：保持原引用（缓存水位 diff 的快速等价路径）
   }
   return { ...record, agentCalls: [...merged, ...appended] }
-}
-
-/**
- * 实时增量路径的缓存重合并（in-place）：subagent 缓存是全量最新投影（增量 merge 后到
- * 覆盖），workflow 缓存的 run 骨架经 mergeWorkflowRecords 更新——两者就位后整体重合并。
- * 冷路径（磁盘全量）等价入口 = extractWorkflowsFromSessionFile 的组合扫描（同一
- * mergeWorkflowStepRecords）。
- */
-export function mergeWorkflowStepsIntoCache(
-  workflows: Map<string, WorkflowRunRecord>,
-  subagents: SubagentRecord[],
-): void {
-  if (workflows.size === 0 || subagents.length === 0) return
-  for (const record of mergeWorkflowStepRecords(Array.from(workflows.values()), subagents)) {
-    workflows.set(record.runId, record)
-  }
 }

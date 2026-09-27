@@ -24,7 +24,6 @@ import { scanSubagentEntries } from '../subagent-extractor.js'
 import { scanWorkflowEntries, scanWorkflowEntriesWithSteps, extractWorkflowsFromSessionFile } from '../workflow-extractor.js'
 import {
   mergeWorkflowStepRecords,
-  mergeWorkflowStepsIntoCache,
   mapStepStatusFromRecord,
 } from '../workflow-step-merge.js'
 import { SessionRecords } from '../session-records.js'
@@ -410,13 +409,16 @@ describe('V3 fixture 重放：冷热同代码（全量重放 ≡ 分波增量合
     // 冷：全量一次（extractWorkflowsFromSessionFile 同款组合扫描）
     const cold = scanWorkflowEntriesWithSteps(allEntries)
 
-    // 热：分波增量（模拟 applyRecordEntries 的 merge + mergeWorkflowStepsIntoCache）
+    // 热：分波增量（W1 换源后实时路径 = journal-projection.recompute 内跑
+    // mergeWorkflowStepRecords——本对拍直测该纯函数，缓存重建语义等价）
     const wfCache = new Map<string, WorkflowRunRecord>()
     const subCache = new Map<string, SubagentRecord>()
     for (const wave of waves) {
       for (const r of scanSubagentEntries(wave)) subCache.set(r.subagentId, r)
       for (const r of scanWorkflowEntries(wave)) wfCache.set(r.runId, r)
-      mergeWorkflowStepsIntoCache(wfCache, Array.from(subCache.values()))
+      for (const r of mergeWorkflowStepRecords(Array.from(wfCache.values()), Array.from(subCache.values()))) {
+        wfCache.set(r.runId, r)
+      }
     }
     const hot = Array.from(wfCache.values())
 

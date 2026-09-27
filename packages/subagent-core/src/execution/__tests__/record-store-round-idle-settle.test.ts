@@ -114,6 +114,24 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(revived.round).toBe(1);
   });
 
+  it("[W1 / D3 表行 4] 轮终帧携带 result 摘要锚（record-settled 同款截断——承接 v1 轮终 result 显示信号）", () => {
+    const record = makeRecord("bg-round-result", { sessionFile });
+    store.register(record);
+
+    const longResult = "x".repeat(260);
+    expect(store.markRoundIdle("bg-round-result", { kind: "success", content: longResult })).toBe(true);
+
+    // record-round-idle 帧的 resultSummary = 截断摘要（200 字 + 省略号，全文不进事件行）
+    const lines = fs
+      .readFileSync(path.join(manifestDir, "bg-round-result.events"), "utf-8")
+      .trim()
+      .split("\n");
+    const idle = lines
+      .map((l) => JSON.parse(l) as { type?: string; resultSummary?: string })
+      .find((e) => e.type === "record-round-idle");
+    expect(idle?.resultSummary).toBe(`${"x".repeat(200)}…`);
+  });
+
   it("失败轮（pi 锚）：收条 reason=failed + lastError + 内存 stopReason=failed + binding 快照在场", () => {
     const record = makeRecord("bg-fail", { sessionFile });
     record.turnCount = 1;

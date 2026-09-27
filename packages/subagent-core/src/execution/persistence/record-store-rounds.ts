@@ -20,7 +20,7 @@ import { getLogger } from "../../core/logger.ts";
 
 import { updateFromEvent } from "./execution-record.ts";
 import { zcodeAnchorBasePath } from "./state-marker.ts";
-import { persistSettleSnapshot } from "./record-store-terminal.ts";
+import { persistSettleSnapshot, summarizeResultForJournal } from "./record-store-terminal.ts";
 import { derivedManifestRecord, recordToSubagent, zcodeRefOf } from "./record-store-rebuild.ts";
 // [W1 / U2a] 事件文件写面接线层（fold 缓存 + 写点幂等判定 + 物化编排）的依赖面：
 // u0 契约层原语（词表/fold/seq 单源）+ terminal 轴载荷构造 + manifest 物化写面。
@@ -252,14 +252,17 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   // ⑨ entry 上报（best-effort 过程面）→ [W1 / D2 停写写点] reportRecordTransition
   // 不再落 v1 快照 entry，只做引擎域回填感知（record-bound 帧）。
   ctx.reportRecordTransition(rec);
-  // [W1 / D3 表行 4] record-round-idle 帧（轮终收条——stopReason + 轮统计快照；
-  // .state 降级为本事件的落盘物化投影，D2 sidecar 裁决表 .state 行）。
+  // [W1 / D3 表行 4] record-round-idle 帧（轮终收条——stopReason + 轮统计快照 +
+  // result 摘要锚；.state 降级为本事件的落盘物化投影，D2 sidecar 裁决表 .state 行）。
+  // 摘要锚与 record-settled 同款截断（summarizeResultForJournal 单源）——承接 v1
+  // 轮终 result 显示信号（U8b），本轮 rec.result 已在②定稿。
   ctx.appendJournalEvent(rec, {
     type: "record-round-idle",
     ts: Date.now(),
     stopReason,
     turns: rec.turnCount,
     totalTokens: rec.totalTokens,
+    resultSummary: summarizeResultForJournal(nextResult),
   });
   // ⑫ [B2] 轮终派生 manifest 投影（session-reader manifest 直读主路径的数据源）：
   // 轮终 record 留内存 idle（U4 翻边），不经任何终态/回收写点——缺本写则 records/
@@ -274,9 +277,11 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
  * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] W4 新态
  * entry = running + error + stopReason=failed + result=∅——status 保持 running，core
  * 机器语义不变（supervisor 接管链照旧），展示面靠 stopReason 子句排除（U6 终态判据
- * isOccupied 消费）；禁 completed 谎报 / closed 直接终局）。归口写点：
- * adoptResumableAfterEngineDeath（run-orchestration——已随 U2b 修复轮迁移）；
- * 监督器 adoptOnProcessDeath 编排留调用方。
+ * isOccupied 消费）；禁 completed 谎报 / closed 直接终局）。归口调用面已随 adopt
+ * 派发链退役：one-shot engine-run 编排不再经本原语收口（原归口调用点随 U2b 修复轮
+ * 移除），现仅测试直调可达（run-orchestration-write-lease.test.ts 用例 2/5 为退役
+ * 与归口语义锚）；监督器 adoptOnProcessDeath 只消费已写入的纳管态、不再经本原语，
+ * 编排留调用方。
  *
  * @returns false = id 不在内存（debug 留痕，无副作用）。
  */

@@ -926,8 +926,10 @@ class FileRunEventJournal implements RunEventJournal {
     const seq = lastSeq + 1;
     const full = { ...event, seq } as WorkflowRunEvent;
     // 为什么同步 append：journal 是取证证据——D9-1 的 host-died 判据 = 事件流
-    // 停止，批写缓冲随进程死亡丢失的恰好是「死前在做什么」的尾部帧；事件频率
-    // 200-400/run 跨分钟级（D5 量级推演），同步追加的微秒级成本不构成吞吐压力，
+    // 停止，批写缓冲随进程死亡丢失的恰好是「死前在做什么」的尾部帧；每 run 事件
+    // 数实测 2-20 条（W1 检查点③，2026-09-26，29 个真实 run journal——设计包
+    // w1-run-record-journal-authority/checkpoint-3-retention-sizing.md，原 D5 量级
+    // 推演 200-400/run 已被实测推翻），同步追加的微秒级成本不构成吞吐压力，
     // 换取「append 返回即达页缓存」的零丢失窗口。接口保持 Promise 形态
     // （RunEventJournal 契约），实装内同步完成——调用方无需感知。
     appendFileSync(this.journalPath(runId), `${JSON.stringify(full)}\n`, "utf8");

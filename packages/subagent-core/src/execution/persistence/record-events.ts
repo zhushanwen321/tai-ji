@@ -209,6 +209,13 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope {
   turns: number;
   /** 轮终时点的累计 token 快照（同上）。 */
   totalTokens: number;
+  /**
+   * 轮终 result 摘要锚（record-settled.resultSummary 同款截断摘要；可选——旧
+   * journal 行与空结果轮缺席）。承接 v1 轮终 result 显示信号（U8b：轮终迁移
+   * 恰翻 result，是「轮终等待续聊」的展示面）——W1 停写 v1 entry 后轮终粒度的
+   * result 断供由本锚补齐（终局全文仍只在 v2 终态条目一次性写，D1）。
+   */
+  resultSummary?: string;
 }
 
 /**

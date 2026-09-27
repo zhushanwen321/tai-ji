@@ -404,6 +404,10 @@ export class SessionRecords {
    * 目录派生：records = `<agentDir>/subagents/<encodeCwd(cwd)>/records`（与
    * core getSubagentRecordsDir 同式）；run journal = 会话文件所在目录的
    * `workflow-state`（pi 壳 JsonlRunStore 同源布局——sessionDir 按探测落位）。
+   * [已知限制·登记] core resolvePiSessionScopedDir 的 slug 只折叠 `/`，pi session
+   * 目录折叠 `/\:`——cwd 含 `:` 或 `\` 时写侧探测落 agentDir 根、本侧推导落 session
+   * 文件目录，run journal 源错位（与壳侧 slug 锚 process.cwd() 而非 session cwd 的
+   * 限制同族，边缘场景登记不改；根治属 core 布局单源）。
    * 会话 meta 不可得（pi 延迟写入 / 测试窄 mock）→ 无 tailer 的 entry-only
    * 降级投影。
    */

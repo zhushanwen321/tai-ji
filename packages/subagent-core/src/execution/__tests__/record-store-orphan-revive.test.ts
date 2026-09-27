@@ -337,6 +337,60 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     return store;
   }
 
+  /** 手工 v2 settled 条目行（D4 双面证据条目面的夹具构造——stopReason 可指定）。 */
+  function appendManualSettledEntry(id: string, stopReason: string): void {
+    v2AppendMainSessionLine(mainFile, "subagent-record", {
+      v: 2,
+      kind: "settled",
+      id,
+      status: "idle",
+      stopReason,
+      endedAt: Date.now(),
+      turns: 0,
+      totalTokens: 0,
+      model: undefined,
+      thinkingLevel: undefined,
+    });
+  }
+
+  // [W1 / D4 双面证据第二面判别] interrupted 族条目 = 「条目面先行写、journal 帧
+  // 缺失」不对称窗口残留（journalAppend fire-and-forget 失败），不构成跳过证据：
+  // 收编放行 → 追加 settled 帧修复 journal（journal 唯一事实源承诺的自愈通道），
+  // 二次重启由 fold settled 拦截不重复。
+  it("夹具A journal 缺 settled 帧 + interrupted 终态条目 → 收编追加帧修复 journal，二次触发不重复", () => {
+    seedCrashedRecord("sa-adopt-orphix");
+    // 崩溃前条目面先行写了一条 interrupted settled（journal 帧因写失败缺失的形态）
+    appendManualSettledEntry("sa-adopt-orphix", "interrupted");
+
+    const captured: unknown[] = [];
+    rebootStore(captured);
+    const events = v2ReadEventLines(recordsDir, "sa-adopt-orphix");
+    // journal 帧修复：record-settled 已追加
+    expect(events.filter((e) => e.type === "record-settled")).toHaveLength(1);
+    // 条目补写跟随收编链（adopted settled，幂等语义见双面证据注释）
+    expect(captured.filter((c) => (c as { data: { kind?: string } }).data?.kind === "settled")).toHaveLength(1);
+
+    // 二次重启：fold 已 settled → 不再追加（幂等）
+    const captured2: unknown[] = [];
+    rebootStore(captured2);
+    expect(
+      v2ReadEventLines(recordsDir, "sa-adopt-orphix").filter((e) => e.type === "record-settled"),
+    ).toHaveLength(1);
+  });
+
+  it("夹具B journal 缺 settled 帧 + 非 interrupted 条目（completed）→ 保持跳过（双面证据成立）", () => {
+    seedCrashedRecord("sa-adopt-final");
+    appendManualSettledEntry("sa-adopt-final", "completed");
+
+    const captured: unknown[] = [];
+    rebootStore(captured);
+    // 非 interrupted 真终态条目在 → 跳过收编，journal 零追加、条目零回调
+    expect(
+      v2ReadEventLines(recordsDir, "sa-adopt-final").filter((e) => e.type === "record-settled"),
+    ).toHaveLength(0);
+    expect(captured).toHaveLength(0);
+  });
+
   it("验收③收编幂等（双重启不重复追加）：record-settled 帧恰一条、终态条目恰一条", async () => {
     seedCrashedRecord("sa-adopt-1");
 
@@ -358,6 +412,41 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     const eventsB = v2ReadEventLines(recordsDir, "sa-adopt-1");
     expect(eventsB.filter((e) => e.type === "record-settled")).toHaveLength(1);
     expect(capturedB).toHaveLength(0);
+  });
+
+  it("夹具C 收编→复活续轮（round-started 清 fold settled）→轮完成前再崩溃→二次收编追加新帧（D4 非 interrupted 谓词复合回归）", () => {
+    const id = "sa-adopt-relock";
+    const rec = seedCrashedRecord(id);
+
+    // 第一次收编（等价 kill -9 重启）：interrupted 收编帧 + 终态条目 + manifest。
+    const first: unknown[] = [];
+    rebootStore(first);
+    expect(v2ReadEventLines(recordsDir, id).filter((e) => e.type === "record-settled")).toHaveLength(1);
+
+    // 用户复活续跑：markResurrected 翻回活态 + markRoundStarted 落轮始帧——fold
+    // settled 被 round-started 清除（record-events.ts fold 转移），旧 interrupted
+    // 终态条目在（stopReason=interrupted-by-restart，中断族不构成跳过证据）。
+    const liveStore = new RecordStore(sessionsDir, undefined, v2CapturePi([]), recordsDir);
+    liveStore.markResurrected(rec, true);
+    expect(liveStore.markRoundStarted(id)).toBe(true);
+    expect(
+      v2ReadEventLines(recordsDir, id).filter((e) => e.type === "record-round-started"),
+    ).toHaveLength(1);
+
+    // 轮完成前再崩溃 → 重启二次收编：旧 any-settled 判定会被首次收编的 interrupted
+    // 条目误拦（实体永停 running 假活态）；非 interrupted 谓词放行 → 追加新
+    // record-settled + settled 条目补写 + manifest 物化。
+    const second: unknown[] = [];
+    rebootStore(second);
+    expect(v2ReadEventLines(recordsDir, id).filter((e) => e.type === "record-settled")).toHaveLength(2);
+    expect(second.filter((c) => (c as { data: { kind?: string } }).data?.kind === "settled")).toHaveLength(1);
+    expect(fs.existsSync(path.join(recordsDir, `${id}.json`))).toBe(true);
+
+    // 三次重启：fold 已 settled（第二次收编帧）→ 幂等零追加。
+    const third: unknown[] = [];
+    rebootStore(third);
+    expect(v2ReadEventLines(recordsDir, id).filter((e) => e.type === "record-settled")).toHaveLength(2);
+    expect(third).toHaveLength(0);
   });
 
   it("验收⑤v2 新路径：重启后 manifest 经收编物化恢复可见（rematerialize 桥接为 v1 兼容专属零依赖）", async () => {

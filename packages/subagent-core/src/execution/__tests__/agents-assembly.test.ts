@@ -20,7 +20,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { configureCore, resetCoreForTests } from "../../core/host-services.ts";
 import type { AgentEntry } from "../../shared/injection-render.ts";
@@ -34,6 +34,18 @@ import {
 } from "../../shared/resource-discovery.ts";
 import type { DiscoveryRoot } from "../../core/host-services.ts";
 import { discoverAgents } from "../assembly/agents-assembly.ts";
+
+// ── 硬编码扫描槽隔离（环境依赖红线）──────────────────────────
+//
+// resource-discovery buildScanTargets 恒扫 ~/.agents/{kind}/（homedir 推导，
+// 无法经 hostRoots 参数关闭）与 TAIJI_EXTENSION_PATHS 源——不隔离时用例读到
+// 本机真实 ~/.agents/agents/ 资产（reviewer-w0-* 验收残留曾致 4 用例环境依赖红）。
+// homedir 指向每用例 mkdtemp 下的空目录，env 源每用例摘除后恢复。
+const homeMock = vi.hoisted(() => ({ current: (): string => "/" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: () => homeMock.current() };
+});
 
 // ── oracle：pi 壳 agent 装配循环的逐句同构（消费同一批 core 原语）──
 
@@ -79,10 +91,14 @@ describe("discoverAgents", () => {
   let outerDir: string;
   let workspaceRoot: string;
   let hostRoot: string;
+  let savedExtensionPaths: string | undefined;
   let logCalls: Array<{ level: string; component: string; message: string; data?: unknown }>;
 
   beforeEach(() => {
     outerDir = fs.mkdtempSync(path.join(os.tmpdir(), "agents-assembly-"));
+    homeMock.current = () => path.join(outerDir, "home");
+    savedExtensionPaths = process.env.TAIJI_EXTENSION_PATHS;
+    delete process.env.TAIJI_EXTENSION_PATHS;
     workspaceRoot = path.join(outerDir, "ws");
     hostRoot = path.join(outerDir, "host", "agents");
     fs.mkdirSync(workspaceRoot, { recursive: true });
@@ -98,6 +114,11 @@ describe("discoverAgents", () => {
   afterEach(() => {
     resetCoreForTests();
     clearFileCache();
+    if (savedExtensionPaths === undefined) {
+      delete process.env.TAIJI_EXTENSION_PATHS;
+    } else {
+      process.env.TAIJI_EXTENSION_PATHS = savedExtensionPaths;
+    }
     fs.rmSync(outerDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 

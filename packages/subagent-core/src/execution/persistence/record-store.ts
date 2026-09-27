@@ -32,7 +32,7 @@
 // | markRoundStarted(id) | 轮始重置（status=running + result 清除） | entry（best-effort） |
 // | markRoundIdle(id, outcome) | 轮末收口（[two-state-convergence U4/D3] 轮终翻边写 idle；簿记全集①-⑫见方法注释；簿记⑦ `.alive` 保留——写权声明跨轮延续，D3a；⑩⑪ A-lite 轮终 stopReason 展示位 + `.state` 收条/binding 快照；⑫ [B2] 轮终派生 manifest 投影） | `.state` 收条 + binding 快照（A-lite）+ 派生 manifest 投影（[B2]，session-reader 直读主路径数据源）+ entry + 注销发射点② |
 // | [collect 退役] markBatchFinalized 原语行已随 sync 批机制删除 |
-// | adoptEngineDeath(id, {error}) | 引擎死亡收养（[U5/D4] error/result/stopReason 三写——W4 新态 running+stopReason=failed；监督器接管编排留调用方） | entry（best-effort） |
+// | adoptEngineDeath(id, {error}) | 引擎死亡收养（[U5/D4] error/result/stopReason 三写——W4 新态 running+stopReason=failed；监督器接管编排留调用方） | 纯内存三写，无持久化面（[W1] 过程 entry 停写；尾部 reportRecordTransition 仅引擎域回填感知，引擎域未变零写入） |
 // | markResurrected(record, wasClosed) | 磁盘终态位翻回活态（acquire-first 三件套 + 内存翻回 + register，单 try 域原子收敛，任一步失败响亮抛错，D3c） | `.alive` 写（writeSync）先 → `.state`/`.finalized`/`.cancelled` 删 + 内存翻回 + register |
 // | acquireWriteLease(sessionFile, id) | store 内部 acquire 动作（writeAliveMarker 唯一包装；spawn 侧 sessionFile 回填挂钩用，D3a 时机①，U2b 消费） | `.alive` 写（失败响亮抛错） |
 //
@@ -108,6 +108,7 @@ import {
   buildAdoptedSettledEntry,
   buildAdoptedSettledEvent,
   collectV2EntryState,
+  isNonInterruptedSettledEvidence,
   settledEntrySourceOf,
   toRegisteredEntryData,
   toSettledEntryData,
@@ -591,8 +592,10 @@ export class RecordStore {
   /**
    * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] W4 新态
    * running + stopReason=failed 交监督器接管，禁 completed 谎报 / closed 直接终局）。
-   * 归口写点：adoptResumableAfterEngineDeath（run-orchestration——已随 U2b 修复轮迁移）；
-   * 监督器 adoptOnProcessDeath 编排留调用方。
+   * 归口调用面已随 adopt 派发链退役：one-shot engine-run 编排不再经本原语收口
+   * （原归口调用点随 U2b 修复轮移除），现仅测试直调可达
+   * （run-orchestration-write-lease.test.ts 用例 2/5 为退役与归口语义锚）；监督器
+   * adoptOnProcessDeath 只消费已写入的纳管态、不再经本原语，编排留调用方。
    *
    * @returns false = id 不在内存（debug 留痕，无副作用）。
    */
@@ -1158,9 +1161,12 @@ export class RecordStore {
    *
    * 幂等机制（双重启不重复追加的构造性保证）：
    * 1. 追加前查双面证据（D4 章程双规则的写侧先行形态）——事件文件 fold 已
-   *    settled / 主 session 终态条目已存在（hasSettledEntry 注入面），任一命中即
-   *    跳过（宁保留不重复：record 侧 manifest 非终局专用——轮终/回收/bound 均写
-   *    running 投影，manifest 在场不构成终态证据，与 run 侧三面证据的差异点）；
+   *    settled / 主 session **非 interrupted** 终态条目已存在（hasSettledEntry 注入
+   *    面，isNonInterruptedSettledEvidence 判别），任一命中即跳过（宁保留不重复：
+   *    record 侧 manifest 非终局专用——轮终/回收/bound 均写 running 投影，manifest
+   *    在场不构成终态证据，与 run 侧三面证据的差异点）。interrupted 族条目不构成
+   *    跳过证据——它是「条目面先行写、journal 帧缺失」不对称窗口的残留，放行收编
+   *    以追加 settled 帧修复 journal（journal 唯一事实源承诺的自愈通道）。
    * 2. 幂等性由「fold 出的当前态是否已终态」判定——收编产物本身是 record-settled
    *    帧，下次重入被第 1 条拦截，事件文件重放不随重启追加增长。
    *
@@ -1206,7 +1212,9 @@ export class RecordStore {
   private adoptV2Orphans(v2State: Map<string, V2EntryState>, rootSessionFilter: string | undefined): void {
     if (this.journalFace === undefined) return; // 事件面未接线：收编不可用（与调用方守卫同判）
     for (const [id, st] of v2State) {
-      if (!st.registered || st.settled) continue;
+      // 定界 = registered ∧ 无「非 interrupted 终态」条目（interrupted 族条目不构成
+      // 跳过证据——journal 帧缺失的不对称窗口残留，放行收编修复 journal，D4）。
+      if (!st.registered || isNonInterruptedSettledEvidence(st)) continue;
       if (rootSessionFilter !== undefined && st.rootSessionId !== rootSessionFilter) continue;
       if (this.records.has(id)) continue; // 内存活 record：在途，不得误杀
       // 活体保护：pi 锚在且异宿主在持（与 v1 段 findForeignLiveInstance 同判）——
@@ -1220,7 +1228,7 @@ export class RecordStore {
       ) {
         continue;
       }
-      this.adoptInterruptedRecord(id, { hasSettledEntry: (checkId) => v2State.get(checkId)?.settled === true });
+      this.adoptInterruptedRecord(id, { hasSettledEntry: (checkId) => isNonInterruptedSettledEvidence(v2State.get(checkId)) });
     }
   }
 

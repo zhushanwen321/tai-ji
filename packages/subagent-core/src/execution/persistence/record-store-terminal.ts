@@ -659,6 +659,9 @@ export function summarizeResultForJournal(result: string | undefined): string | 
 export interface V2EntryState {
   registered: boolean;
   settled: boolean;
+  /** 末条 settled 条目的停因（D4 双面证据第二条的判别输入——interrupted 族条目
+   * 不构成「非 interrupted 终态」跳过证据，收编须放行修复 journal）。 */
+  settledStopReason: StopReason | undefined;
   rootSessionId: string | undefined;
 }
 
@@ -684,17 +687,42 @@ export function collectV2EntryState(content: string): Map<string, V2EntryState> 
     const verdict = classifySubagentRecordEntryData(obj.data);
     if (!verdict.ok && verdict.reason === "v2") {
       const entry = verdict.entry;
-      const prev = out.get(entry.id) ?? { registered: false, settled: false, rootSessionId: undefined };
+      const prev =
+        out.get(entry.id) ?? { registered: false, settled: false, settledStopReason: undefined, rootSessionId: undefined };
       if (entry.kind === "registered") {
         prev.registered = true;
         prev.rootSessionId = entry.rootSessionId;
       } else {
         prev.settled = true;
+        prev.settledStopReason = entry.stopReason;
       }
       out.set(entry.id, prev);
     }
   }
   return out;
+}
+
+/**
+ * interrupted 族停因（StopReason 的中断子族——重启收编语义；与 runtime
+ * workflow-step-merge 的状态映射常量同词表，消费形态不同不共享实体）。
+ */
+const INTERRUPTED_FAMILY_STOP_REASONS: readonly string[] = [
+  "interrupted",
+  "interrupted-by-restart",
+  "interrupted-by-parent",
+];
+
+/**
+ * D4 双面证据第二条的判别（「终态条目已存在且非 interrupted」）：settled 条目
+ * 在场且停因非 interrupted 族才构成跳过证据——interrupted 族条目是「条目面先行
+ * 写、journal 帧缺失」的不对称窗口残留（journalAppend fire-and-forget 失败 /
+ * 局部损坏），不构成跳过证据，收编须放行以追加 settled 帧修复 journal；停因
+ * 缺失（契约外残缺形态）保守计为真终态（宁保留不重复）。
+ */
+export function isNonInterruptedSettledEvidence(st: V2EntryState | undefined): boolean {
+  if (st?.settled !== true) return false;
+  if (st.settledStopReason === undefined) return true;
+  return !INTERRUPTED_FAMILY_STOP_REASONS.includes(st.settledStopReason);
 }
 
 /** 收编产物的 v2 终态条目（fold + 收编停因组装——model/thinkingLevel 收编形态 undefined 诚实缺省：journal 无此数据源）。 */

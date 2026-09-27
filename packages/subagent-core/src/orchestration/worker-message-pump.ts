@@ -945,7 +945,9 @@ export async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneR
 // - 终态条目 = finalizeRun 终局 coda（journal run-settled 帧 + manifest 物化之后，
 //   与物化时机对齐——见 finalizeRun 内注释）。
 // 构造器单源在本段：字段集对照（设计 D1 条目契约表 workflow-record 行）的机器
-// 锚点，壳写点/测试断言复用同一构造（防字段集手抄漂移成 SubagentTab 空行）。
+// 锚点——构造器经 core barrel 导出（index.ts），壳写点（JsonlRunStore loadAll 收编
+// 补写 appendSettledEntryFallback、session-lifecycle 装配的 recoverCrashedRuns
+// hooks 链）与测试断言复用同一构造（防字段集手抄漂移成 SubagentTab 空行）。
 // v1 快照条目的停写与 loadAll 读侧改造归壳批次（批 2 领地）；中间态 v1+v2 并存
 // 时旧读者按版本门跳过 v2（D8 安全）。
 

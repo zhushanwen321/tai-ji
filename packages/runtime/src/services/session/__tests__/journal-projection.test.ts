@@ -320,6 +320,243 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
   it('两源皆缺 → null', () => {
     expect(projectV2Subagent(undefined, undefined, undefined)).toBeNull()
   })
+
+  // [F1-38 轮终形态] v1 语义：轮终翻边写 idle（写侧 markRoundIdle 落 idle + v1
+  // 权威词同源）——v2 投影须延续（轮终等待续聊的 record 不得显示 running，否则
+  // running + stopReason 矛盾组合且可能被用户误 cancel）。
+  it('轮终形态：round-idle 在场、settled 缺席 → idle + roundIdle 统计透传', () => {
+    const fold = {
+      identity: createdEvent('sa-1'),
+      bound: undefined,
+      round: 1,
+      epoch: 0,
+      roundIdle: {
+        type: 'record-round-idle' as const,
+        seq: 3,
+        ts: 2500,
+        stopReason: 'completed' as const,
+        turns: 2,
+        totalTokens: 500,
+      },
+      settled: undefined,
+      lastSeq: 3,
+      lastEvent: {
+        type: 'record-round-idle' as const,
+        seq: 3,
+        ts: 2500,
+        stopReason: 'completed' as const,
+        turns: 2,
+        totalTokens: 500,
+      },
+    }
+    const record = projectV2Subagent(registered, undefined, fold)!
+    expect(record.status).toBe('idle')
+    expect(record.stopReason).toBe('completed')
+    expect(record.turns).toBe(2)
+    expect(record.totalTokens).toBe(500)
+  })
+
+  it('续跑第二轮：round-started 在 round-idle 后 → running（roundIdle 在场不作 idle 判据）', () => {
+    const roundIdle = {
+      type: 'record-round-idle' as const,
+      seq: 3,
+      ts: 2500,
+      stopReason: 'completed' as const,
+      turns: 2,
+      totalTokens: 500,
+    }
+    const fold = {
+      identity: createdEvent('sa-1'),
+      bound: undefined,
+      round: 2,
+      epoch: 0,
+      roundIdle,
+      settled: undefined,
+      lastSeq: 4,
+      lastEvent: { type: 'record-round-started' as const, seq: 4, ts: 3000, round: 2, epoch: 0 },
+    }
+    const record = projectV2Subagent(registered, undefined, fold)!
+    expect(record.status).toBe('running')
+    // [F2-1] 轮始清点：上轮停因不透传（v1 markRoundStartedImpl 清点对齐——running +
+    // 「completed」停因矛盾组合不得出现）
+    expect(record.stopReason).toBeUndefined()
+  })
+
+  it('在飞 + 旧 v2 终态条目在场：stopReason 不透传条目停因（journal 胜出——窗外兜底仅限无 fold）', () => {
+    // 场景：已终态（v2 终态条目已写）→ reopened → round-started——在飞期 roundIdle
+    // 与条目停因都不得泄漏（v1 轮始清点后 stopReason=undefined）
+    const fold = {
+      identity: createdEvent('sa-1'),
+      bound: undefined,
+      round: 1,
+      epoch: 1,
+      roundIdle: {
+        type: 'record-round-idle' as const,
+        seq: 3,
+        ts: 2500,
+        stopReason: 'completed' as const,
+        turns: 2,
+        totalTokens: 500,
+      },
+      settled: undefined,
+      lastSeq: 5,
+      lastEvent: { type: 'record-round-started' as const, seq: 5, ts: 3500, round: 1, epoch: 1 },
+    }
+    const record = projectV2Subagent(registered, settledEntry, fold)!
+    expect(record.status).toBe('running')
+    expect(record.stopReason).toBeUndefined()
+  })
+
+  it('reopened 窗口（重开完成、新轮未始）→ idle（markReopened CAS 只接受 idle、不翻 running）', () => {
+    const fold = {
+      identity: createdEvent('sa-1'),
+      bound: undefined,
+      round: 0,
+      epoch: 1,
+      roundIdle: {
+        type: 'record-round-idle' as const,
+        seq: 3,
+        ts: 2500,
+        stopReason: 'completed' as const,
+        turns: 2,
+        totalTokens: 500,
+      },
+      settled: undefined,
+      lastSeq: 4,
+      lastEvent: { type: 'record-reopened' as const, seq: 4, ts: 3000, epoch: 1, round: 0 },
+    }
+    const record = projectV2Subagent(registered, undefined, fold)!
+    expect(record.status).toBe('idle')
+    // [F2-1] v1 markReopenedImpl 写 stopReason='reopened'——投影同词映射，
+    // 不透传更旧轮的轮终停因
+    expect(record.stopReason).toBe('reopened')
+  })
+
+  it('对拍 v1 冻结路径：v1 快照轮终实体（idle）经 mergeJournalProjection 原样透传', () => {
+    const v1Record: SubagentRecord = {
+      subagentId: 'sa-v1',
+      sessionFile: null,
+      agent: 'worker',
+      slug: 'work',
+      task: 'Do work',
+      status: 'idle',
+      stopReason: 'completed',
+      turns: 2,
+      totalTokens: 500,
+      startedAt: 1000,
+      origin: 'workflow',
+      parentRunId: 'wf-1',
+      stepIndex: 0,
+    }
+    const sources = initialJournalProjectionSources()
+    sources.v1Subagents.set('sa-v1', v1Record)
+    const merged = mergeJournalProjection(sources, 's1')
+    const projected = merged.subagents.get('sa-v1')!
+    expect(projected.status).toBe('idle')
+    expect(projected.stopReason).toBe('completed')
+  })
+
+  // [F2-1] 对拍 v1 冻结路径同形态：轮始清点后的 v1 running 记录无停因（v1 写侧
+  // markRoundStartedImpl rec.stopReason=undefined）——v2 在飞投影同形（不透传旧停因）
+  it('对拍 v1 冻结路径：v1 快照在飞实体（running、轮始清点无停因）原样透传', () => {
+    const v1Record: SubagentRecord = {
+      subagentId: 'sa-v1-flight',
+      sessionFile: null,
+      agent: 'worker',
+      slug: 'work',
+      task: 'Do work',
+      status: 'running',
+      stopReason: undefined,
+      turns: 2,
+      totalTokens: 500,
+      startedAt: 1000,
+      origin: 'workflow',
+      parentRunId: 'wf-1',
+      stepIndex: 0,
+    }
+    const sources = initialJournalProjectionSources()
+    sources.v1Subagents.set('sa-v1-flight', v1Record)
+    const merged = mergeJournalProjection(sources, 's1')
+    const projected = merged.subagents.get('sa-v1-flight')!
+    expect(projected.status).toBe('running')
+    expect(projected.stopReason).toBeUndefined()
+  })
+
+  // [W1 / F1-46 轮终 result] record-round-idle 携带 result 摘要锚（D3 词表裁决①）：
+  // 轮终粒度的 result 断供修复——承接 v1 U8b 轮终 result 显示信号（「轮终等待续聊」
+  // 的展示面），终局全文仍只在 v2 终态条目一次性写（D1）。
+  it('轮终摘要透传：round-idle.resultSummary 在场（无终态条目）→ result 取轮终摘要', () => {
+    const roundIdle = {
+      type: 'record-round-idle' as const,
+      seq: 3,
+      ts: 2500,
+      stopReason: 'completed' as const,
+      turns: 2,
+      totalTokens: 500,
+      resultSummary: '本轮正文摘要',
+    }
+    const fold = {
+      identity: createdEvent('sa-1'),
+      bound: undefined,
+      round: 1,
+      epoch: 0,
+      roundIdle,
+      settled: undefined,
+      lastSeq: 3,
+      lastEvent: roundIdle,
+    }
+    const record = projectV2Subagent(registered, undefined, fold)!
+    expect(record.result).toBe('本轮正文摘要')
+  })
+
+  it('reopened 续跑后的新轮终摘要胜过旧终局条目全文（fresh round-idle 胜出）', () => {
+    const roundIdle = {
+      type: 'record-round-idle' as const,
+      seq: 6,
+      ts: 6000,
+      stopReason: 'completed' as const,
+      turns: 4,
+      totalTokens: 900,
+      resultSummary: 'new round summary',
+    }
+    const fold = {
+      identity: createdEvent('sa-1'),
+      bound: undefined,
+      round: 2,
+      epoch: 1,
+      roundIdle,
+      settled: undefined, // reopened / round-started 已清除 settled
+      lastSeq: 6,
+      lastEvent: roundIdle,
+    }
+    const record = projectV2Subagent(registered, settledEntry, fold)!
+    expect(record.result).toBe('new round summary')
+  })
+
+  it('终局面优先：settled 在场（晚于 round-idle）→ 条目全文 / 终局摘要锚', () => {
+    const fold = {
+      identity: createdEvent('sa-1'),
+      bound: undefined,
+      round: 1,
+      epoch: 0,
+      roundIdle: {
+        type: 'record-round-idle' as const,
+        seq: 2,
+        ts: 2500,
+        stopReason: 'completed' as const,
+        turns: 2,
+        totalTokens: 500,
+        resultSummary: 'stale round summary',
+      },
+      settled: settledRecordEvent({ seq: 3, resultSummary: 'settled summary' }),
+      lastSeq: 3,
+      lastEvent: undefined,
+    }
+    // 无条目：终局摘要锚
+    expect(projectV2Subagent(registered, undefined, fold)!.result).toBe('settled summary')
+    // 条目全文在场：全文优先（D1 唯一全文落点）
+    expect(projectV2Subagent(registered, settledEntry, fold)!.result).toBe('full result text')
+  })
 })
 
 describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {

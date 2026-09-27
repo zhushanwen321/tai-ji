@@ -6,7 +6,8 @@
 //   - entry 重建族（rebuildEntryRecord + readEntry* 域投影 + collectLastRecordEntries
 //     ——含 [W1 / U2b] v1 快照通道版本门：v2 条目与未知版本结构性跳过，零幻影）；
 //   - 身份解析三级优先级（[W1 / U2b] resolveRecordIdentity：事件文件 fold >
-//     binding > manifest，恢复路径身份源裁决单点）；
+//     binding > manifest——纯函数参考实现 + 测试锚定面；现行生产路径 = v2 实体
+//     fold 通道 / v1 实体磁盘重建链，分流依据 W1 D4）；
 //   - manifest 读投影（manifestToSubagent / mapManifestStatus）与写投影（terminal /
 //     batch / derived / legacyManifestStatusFields——session-reader 兼容契约的单点）；
 //   - 内存源投影 recordToSubagent、缓存戳类型与戳校验工具（Stamp / FileCacheEntry 族）。
@@ -570,11 +571,15 @@ export type RecordIdentitySource = "journal-fold" | "binding" | "manifest";
  * 恢复路径解析出的 record 身份域（设计 D2 binding 行裁决：事件文件 fold >
  * binding 兜底（旧数据兼容）> manifest；字段集 = D3 record-created 载荷同集）。
  *
- * 消费方：恢复/收编路径（U2a loadAll 定界与收编入口、U3 投影）解析 record 身份的
- * 单点裁决——三级源由调用方各自读好传入（本函数纯函数无 IO），高级源在场即整体
- * 胜出（冲突字段取高级源值——单写者下冲突仅见于数据损坏，不引入字段级合并的
- * 第二种语义）；高级源缺失/身份域损坏逐级降级；三源皆缺 → undefined（调用方
- * 按无身份处理）。
+ * 消费现状（如实登记）：本三级裁决是纯函数参考实现 + 测试锚定面
+ * （record-store-rebuild-v-gate.test.ts），现行生产路径不经本函数——v2 实体走
+ * fold 通道（record-store 收编/投影直接消费 fold.identity），v1 实体走磁盘重建链
+ * （identity entry > binding > manifest 的内联组装），分流依据设计 D4（收编定界
+ * 按注册条目形态分流）。三级源由调用方各自读好传入（本函数纯函数无 IO），高级源
+ * 在场即整体胜出（冲突字段取高级源值——单写者下冲突仅见于数据损坏，不引入
+ * 字段级合并的第二种语义）；高级源缺失/身份域损坏逐级降级；三源皆缺 →
+ * undefined（调用方按无身份处理）。后续调身份优先级（如 W2 接线）时先立接线
+ * 设计裁决，再让生产路径消费本单点。
  *
  * model/thinkingLevel/sessionFile 不在身份域（fold 的 record-created 不携带，
  * 绑定/引擎域属 bound 事件与 sidecar 面）——组装 IdentityHeaderRecon 基底由
@@ -690,7 +695,8 @@ function identityFromManifestSource(m: ManifestRecord | undefined): ResolvedReco
 }
 
 /**
- * 恢复路径身份解析（三级优先级单点，设计 D2：事件文件 fold > binding > manifest）。
+ * 恢复路径身份解析（三级优先级参考实现，设计 D2：事件文件 fold > binding > manifest）。
+ * 现状：仅测试锚定（生产路径分流见 {@link ResolvedRecordIdentity} 注释的如实登记）。
  * 纯函数：三级源由调用方读好传入；高级源在场即整体胜出（冲突时高级源字段胜出），
  * 缺失/损坏逐级降级，三源皆缺 → undefined。
  */

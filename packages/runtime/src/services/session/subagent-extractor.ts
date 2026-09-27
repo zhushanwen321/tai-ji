@@ -230,7 +230,7 @@ function parseSelfDescribedSubagentRecord(entry: unknown): SubagentRecord | null
   const d = data as Record<string, unknown>
   if (d.v !== 1) {
     // [W1 / D1] v2 条目静默跳过（当前版本，journal 投影消费面——scanV2RecordEntries）；
-    // 仅 future-v（≥3）warn 留证。本扫描器是 v1 快照兼容层（D7 惰性兼容读）。
+    // missing-v / future-v（≥3）warn 留证。本扫描器是 v1 快照兼容层（D7 惰性兼容读）。
     if (d.v !== SUBAGENT_RECORD_ENTRY_VERSION) {
       console.warn(
         `[subagent-extractor] subagent-record entry schema version '${String(d.v)}' unsupported (expected 1) — ` +

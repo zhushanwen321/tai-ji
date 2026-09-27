@@ -10,7 +10,8 @@
 //   |                       | parentRecordId?/depth/mode/startedAt)      |              |
 //   | record-bound          | sessionFile/engine/engineHandle/epoch      | spawn 回填（.record-binding 写点）|
 //   | record-round-started  | round 序号/epoch                           | resumeRound / reopen 后续轮 |
-//   | record-round-idle     | stopReason/轮统计(turns/tokens 快照)       | 轮终 markRoundIdle（.state 写点）|
+//   | record-round-idle     | stopReason/轮统计(turns/tokens 快照)/      | 轮终 markRoundIdle（.state 写点）|
+//   |                       | result 摘要锚?                            |              |
 //   | record-settled        | stopReason/outcome/error?/endedAt/         | archive / markSettled / legacy 终态 |
 //   |                       | 统计终值/result 摘要锚                     |              |
 //   | record-reopened       | epoch 递增/round 归零                      | markReopened |

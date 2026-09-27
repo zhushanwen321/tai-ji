@@ -677,6 +677,26 @@ export default [
       'max-lines': ['warn', { max: 700, skipBlankLines: true, skipComments: true }],
     },
   },
+  // [W1 D4 双面证据判别 2026-09-26] record-store-terminal.ts：终局调和面增补收编
+  // 判据（isNonInterruptedSettledEvidence + interrupted 族词表——F1-34 stopReason
+  // 判别落地）后折算 510 微超 10 行——按「微超即提额」（pi-provider-store
+  // 508>500→520 同型）提额 520 保留软上限告警；terminal 轴再拆属独立重构任务。
+  {
+    files: ['packages/subagent-core/src/execution/persistence/record-store-terminal.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [W1 终态同步 2026-09-26] journal-projection.ts：v2 投影轮终 status 判据（F1-38
+  // 两态派据 + 注释）与轮终 result 仲裁（roundIdle.resultSummary 透传，contested
+  // 裁决①）合并落地后折算 520 微超 20 行——按「微超即提额」提额 540 保留软上限
+  // 告警；投影合并单点再拆属独立重构任务。
+  {
+    files: ['packages/runtime/src/services/session/journal-projection.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
+    },
+  },
   // zcode-engine.ts：zcode app-server 常驻引擎的唯一聚合中心（连接池 + 会话生命周期 +
   // 降级链 + 错误归类）。拆分方向（连接层 / 会话层 / 归类层）属独立重构任务，短期
   // override 避免阻塞。U2 超时收口 + U3 终态 status 分流后与 session-runner 同型提额。

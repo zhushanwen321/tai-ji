@@ -70,8 +70,8 @@ import {
   STATE_DIR_NAME,
   Trace,
   WORKFLOW_RECORD_CUSTOM_TYPE,
-  WORKFLOW_RECORD_ENTRY_VERSION,
   abandonElapsedInterruptedRuns,
+  buildWorkflowRecordSettledEntryData,
   classifyWorkflowRecordEntryData,
   closeOutInFlightCalls,
   fromRunSnapshot,
@@ -389,6 +389,12 @@ export class JsonlRunStore implements RunStore {
    * 不经过 save()。有界性：条目数 = 本实例活跃 run 数，终局即回收。
    */
   private readonly activeRuns = new Map<string, WorkflowRun>();
+  /**
+   * [W1 / D4 收编定界] 最近一次 loadAll 采出的 v2 注册条目 runId 集（崩溃恢复
+   * 收编分流面——{@link hasV2RegisteredEntry} 的数据源）。loadAll 失败/未跑时为
+   * 空集 = 恢复循环保守走 v1 兼容分支（设计 D4：未定界 ≠ v2 实体）。
+   */
+  private lastV2RegisteredRunIds: ReadonlySet<string> = new Set();
   /** [P3/D6] per-runId 事件边沿防抖 timer（固定窗口合并，语义对齐 pending 批）。 */
   private readonly pendingEdgeFlushes = new Map<string, NodeJS.Timeout>();
   /**
@@ -903,12 +909,25 @@ export class JsonlRunStore implements RunStore {
    *
    * 需要 ctx（构造时注入）——无 ctx 时返回空（测试或非 Pi 环境下）。
    */
+  /**
+   * [W1 / D4 收编定界] v2 注册条目定界查询（崩溃恢复收编分流面）：runId 是否被
+   * 最近一次 loadAll 采出的 v2 注册条目定界。session_start 装配点经
+   * recoverCrashedRuns hooks.isV2RegisteredEntry 注入 core——true = v2 实体走
+   * journal 收编；false = v1 快照实体走兼容旧分支（D7 旧会话行为完全不变）。
+   */
+  hasV2RegisteredEntry(runId: string): boolean {
+    return this.lastV2RegisteredRunIds.has(runId);
+  }
+
   async loadAll(): Promise<WorkflowRun[]> {
     if (!this.ctx) return [];
     const runs: WorkflowRun[] = [];
     try {
       const entries = this.ctx.sessionManager.getEntries();
       const { recordRuns, pointers, registered, settledEntries } = collectEntrySources(entries);
+      // [W1 / D4 收编定界] v2 注册条目定界集缓存（崩溃恢复收编分流面的数据源，
+      // 供 hasV2RegisteredEntry 查询）。
+      this.lastV2RegisteredRunIds = new Set(registered.keys());
 
       // 2) v1 兼容层终局调和：v1 entry 是「最后一次成功 append」的快照，journal
       //    终局帧与 GC 终局化可能新于它——running 态先对账再交恢复链。v2 实体不走
@@ -1131,14 +1150,10 @@ export class JsonlRunStore implements RunStore {
   }
 
   /**
-   * 终态条目幂等补写（v2 收编面）：载荷与 core finalizeRun 的终态条目同构
-   * （WorkflowRecordSettledEntryData 契约，字段源 = journal run-settled 帧 + ask
-   * 计数投影）。best-effort：appendEntry 失败留痕不阻断 loadAll（条目是投影锚，
-   * 下次 loadAll 幂等重试）。
-   *
-   * 注：core 的 buildWorkflowRecordSettledEntryData 构造器未入 barrel（生产消费
-   * 必须走 barrel 纪律），本面按 D1 契约就地构造同构载荷；字段集由
-   * jsonl-run-store-session-file.test.ts 的 v2 条目契约用例锚定。
+   * 终态条目幂等补写（v2 收编面）：载荷经 core barrel 的 buildWorkflowRecordSettledEntryData
+   * 构造器单源复用（[W1 / D1] 防字段集手抄漂移——壳写点与 core finalizeRun 写点同一
+   * 构造；字段源 = journal run-settled 帧 + ask 计数投影）。best-effort：appendEntry
+   * 失败留痕不阻断 loadAll（条目是投影锚，下次 loadAll 幂等重试）。
    */
   private appendSettledEntryFallback(
     runId: string,
@@ -1146,19 +1161,15 @@ export class JsonlRunStore implements RunStore {
     events: readonly WorkflowRunEvent[],
   ): void {
     if (!this.pi) return;
-    const reason = runSettledOutcomeToDoneReason(settledEvent.outcome);
-    const data: WorkflowRecordSettledEntryData = {
-      v: WORKFLOW_RECORD_ENTRY_VERSION,
-      kind: "settled",
+    const data = buildWorkflowRecordSettledEntryData({
       runId,
-      status: "done",
-      reason,
+      reason: runSettledOutcomeToDoneReason(settledEvent.outcome),
       outcome: settledEvent.outcome,
       ...(settledEvent.errorCode !== undefined ? { errorCode: settledEvent.errorCode } : {}),
       settledAt: settledEvent.ts,
       callCount: events.filter((e) => e.type === "ask-settled").length,
       usedTokens: 0,
-    };
+    });
     try {
       this.pi.appendEntry(WORKFLOW_RECORD_CUSTOM_TYPE, data);
     } catch (err) {

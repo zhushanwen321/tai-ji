@@ -10,7 +10,7 @@
  *   4. status/bridge/extension-ui 路由到 server（注册超时 / 处理 bridge 请求）
  *   5. subagent/workflow record 失效信号（W18 D4：entry_appended 主信号 + bg-notify/
  *      workflow-result/tool-call-end 兜底信号 → onRecordEntriesInvalidated——事件直写
- *      退役，数据由 sessionService 的 entry 扫描派生缓存承载）
+ *      退役，数据写路径唯一 = journal 投影重算（sessionService 派生缓存是投影快照镜像））
  *
  * 持有的可变态（从 event-adapter 迁来）：
  *   - currentMessageId（message_start 设置，file_changes 挂载目标）
@@ -624,9 +624,12 @@ export interface EventInterpreterOptions {
   /**
    * W18（data-source-governance P3.1）：自描述 record entry 到达 → subagent/workflow/plan
    * 派生缓存失效。组合根注入 sessionService.invalidateRecordEntries——markDirty + 防抖
-   * get_entries(since) 增量重拉，entry 扫描（scanSubagentEntries / scanWorkflowEntries /
-   * scanPlanStateEntries）是派生缓存唯一数据写路径，事件 payload 永不直写缓存
+   * get_entries(since) 增量重拉。数据写路径唯一 = journal 投影重算（[W1 / D6] applyEntryBatch
+   * 双源单点合并，session-records.ts 模块头「数据写路径唯一」同口径；派生 Map 是投影
+   * 合并快照的镜像——syncCacheFromProjection），事件 payload 永不直写缓存
    * （ReplicatedState「事件只做失效」不变量；W12-W18 过渡态例外至此撤销）。
+   * customType 失效信号转发行为不变；record 三族消费方 invalidateRecordEntries 内部
+   * 早退门保留。
    *
    * customType 历史上是三字面量 union，已放宽为 string（D5「失效转发的三段链路」③）：
    * 任何 custom entry 均产出失效信号，「避免无关 entry 触发拉取」由派发层订阅者存在性
@@ -929,7 +932,8 @@ export class EventInterpreter {
         return true
       case 'record-entry-appended':
         // W18：自描述 record entry 到达 → 派生缓存失效（sessionService 防抖增量重拉）。
-        // 事件 payload 不进数据缓存——entry 扫描是唯一数据写路径。
+        // 事件 payload 不进数据缓存——数据写路径唯一 = journal 投影重算（[W1 / D6]，
+        // 上方 onRecordEntriesInvalidated JSDoc 同口径）。
         this.opts.onRecordEntriesInvalidated?.(this.sessionId, ev.customType)
         return true
       default:

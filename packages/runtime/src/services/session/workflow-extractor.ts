@@ -174,10 +174,10 @@ export function scanWorkflowEntries(entries: unknown[]): WorkflowRunRecord[] {
  * 本函数只消费骨架传入的 entries）并按 (parentRunId, stepIndex) 合并——① 供编排
  * 结构（trace 骨架），② 供运行时状态（迁移即写、无节流）。
  *
- * 仅冷启动全量路径使用（extractWorkflowsFromSessionFile 的 scan 注入）；实时增量路径
- * 不经本函数（增量 delta 的候选集不全，改由 session-records 的
- * mergeWorkflowStepsIntoCache 用全量 subagent 缓存重合并——两路共用同一
- * mergeWorkflowStepRecords 纯函数，D5 冷热同代码）。
+ * 仅冷启动全量路径使用（extractWorkflowsFromSessionFile 的 scan 注入）；实时增量
+ * 路径不经本函数（W1 换源后实时路径 = journal-projection.recompute 单点合并——
+ * mergeJournalProjection 内跑 workflow-step-merge 的 mergeWorkflowStepRecords 纯函数，
+ * D5 冷热同代码；session-records 缓存是投影合并快照的镜像）。
  */
 export function scanWorkflowEntriesWithSteps(entries: unknown[]): WorkflowRunRecord[] {
   return mergeWorkflowStepRecords(scanWorkflowEntries(entries), scanSubagentEntries(entries))
@@ -213,8 +213,8 @@ function collectSelfDescribedWorkflowRecords(entries: unknown[]): WorkflowRunRec
  * null）。同 runId 后出现的覆盖前面的（entry 顺序 = 时间顺序，后者更新）。
  *
  * v1 判定单源 core classifyWorkflowRecordEntryData（reason 词表见其模块注释）；本侧
- * 保留日志策略与 warnOnce 键去重：missing-v/future-v → warnOnce 留证（版本 skew 可
- * 观测），wrong-type/no-snapshot → 静默跳过（收敛前行为逐分支保持）。
+ * 保留日志策略与 warnOnce 键去重：missing-v / future-v / unknown-kind → warnOnce
+ * 留证（版本 skew 可观测），wrong-type/no-snapshot/v2 → 静默跳过（收敛前行为逐分支保持）。
  */
 function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null {
   if (typeof entry !== 'object' || entry === null) return null
@@ -224,7 +224,7 @@ function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null 
   if (!classification.ok) {
     if (classification.reason === 'wrong-type' || classification.reason === 'no-snapshot') return null
     // [W1 / D1] v2 条目静默跳过（当前版本，journal 投影消费面——scanV2RecordEntries）；
-    // 仅 missing-v / future-v warnOnce 留证。本扫描器是 v1 快照兼容层（D7 惰性兼容读）。
+    // missing-v / future-v / unknown-kind warnOnce 留证。本扫描器是 v1 快照兼容层（D7 惰性兼容读）。
     if (classification.reason === 'v2') return null
     // warnOnce 去重键取 snapshot.runId + 坏版本值（热路径重扫同一坏
     // entry 只出声一次；snapshot 缺失/无 runId 回退固定键——该形态本身已无 run 可归因）。

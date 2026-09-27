@@ -1705,8 +1705,10 @@ fi
 #   面外的包（如 session-reader）违规只能延迟暴露（阶段 3 一致性审查 P2）——扩为
 #   结构无关的 glob 全域匹配，新增分组/包零维护（同上方 EXTENSION_PKG_FILES
 #   两段式改造的教训：禁止与目录结构耦合的清单式写法）。
-#   scripts/check-record-write-surface.mjs —— grep 门兜底（R1 六名写函数直调 +
-#   R2 subagent-record entry 直写，store 外零命中）。一级拦截 = eslint
+#   scripts/check-record-write-surface.mjs —— grep 门兜底（R1 七名写函数直调 +
+#   R2 subagent-record entry 直写 + R3 workflow-record 三宿主白名单 + R4 v1 投影器
+#   + R5 v1 快照载荷 + R6 死字节 + R7 .events 直写，七族规则与脚本头注释/OK 输出
+#   同口径）。一级拦截 = eslint
 #   no-restricted-imports（eslint.config.mjs subagent-core 块，模块边界级）；
 #   本门拦的是 import 层拦不住的类方法调用（ManifestStore.writeManifest）与
 #   字面量写形态。触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：

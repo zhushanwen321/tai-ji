@@ -130,9 +130,11 @@ export interface SubagentRecord {
    * result 残留的 running 形态只存在于 U4 部署边界旧 entry（runtime 第五归一
    * `running && resumable===true → idle` 承接，two-state-convergence D5）。
    *
-   * 来源：自描述 subagent-record entry（W16 v1，reportRecordTransition 轮终迁移携带
-   * result 字段）；轮终迁移写点对空文本轮写占位（本轮正文 / 错误兜底文本 /
-   * "(no output this round)" / "(empty)"）。首轮未完成前恒 undefined。
+   * 来源（W1 后双形态终态）：v2 record-settled 终态条目一次性写全文（终局写点 =
+   * core settleViaJournal → toSettledEntryData，事件文件只存摘要锚、本字段是全文
+   * 唯一落点）；存量 v1 快照条目兼容读同名字段（W16 写点 reportRecordTransition
+   * 轮终迁移已停写，留 D7 兼容层）。轮终迁移写点对空文本轮写占位（本轮正文 /
+   * 错误兜底文本 / "(no output this round)" / "(empty)"）。首轮未完成前恒 undefined。
    */
   result?: string
   /**

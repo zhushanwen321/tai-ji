@@ -343,7 +343,8 @@ export interface ISessionService {
    * W18（data-source-governance P3.1）：自描述 record entry（subagent-record /
    * workflow-record）失效信号唯一入口（interpreter 经组合根注入；entry_appended 主信号
    * + subagent/workflow 事件兜底信号汇于此）。只做失效（防抖调度），事件 payload 不进
-   * 数据缓存——entry 扫描（get_entries 重拉）是派生缓存唯一数据写路径。
+   * 数据缓存——数据写路径唯一 = journal 投影重算（applyEntryBatch 双源单点合并，
+   * session-records 同口径）。
    */
   invalidateRecordEntries(sessionId: string, customType: string): void
   /**
