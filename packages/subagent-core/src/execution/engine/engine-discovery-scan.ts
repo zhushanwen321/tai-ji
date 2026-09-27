@@ -264,6 +264,9 @@ function buildExplicitDescriptor(
   return {
     id,
     source: "config.json",
+    // L3 显式配置无 manifest 段 → processModel 按缺省归一值（'per-window'），与
+    // manifest 发现路径的解析产物同形（宿主实例管理分流不因发现源分叉）。
+    processModel: "per-window",
     ...(entry.config !== undefined ? { engineConfig: entry.config } : {}),
     descriptor,
   };

@@ -114,3 +114,9 @@ W5/W7 已把自包含件迁入引擎包（pi-subagent-cli / zcode-subagent-cli `
 上方 W6 承接回写节「settled-watchdog」行声称的「W3 重接」**当时失实**（一致性审查批 2 F-2 证实）：W3 实际只重接了热路径续聊轮（`deliverChatMessage` 的 arm 调用点），`kickOffChatRound`（spawn 首轮 + 冷续 resume 轮）内无任何 arm 调用——:1382 注释声称「首轮调用点在 kickOffChatRound 的 run 派发后」不存在，被删的 inproc stdout-pump 是首轮唯一中段守护，协议化后引擎侧 spawn-runner 仅 turn 计数无墙钟 → **首轮 wedged 无熔断**（LC-1 场景①重新敞开）。H9 行「已承接」按当时状态属过度声称。
 
 **修复后真实状态**（本行 supersede 上方 W6 行的承接声明）：`kickOffChatRound` 在 run 派发前（pool acquire 成功后）补 `armMidRoundNoProgress`，与热路径 arm 复用同一守护实例语义（同一 `onHotPathSettledWatchdogTimeout` 处置闭包）；refresh 源核实齐备——首轮 runId 键 `ctx.onEvent` 协议事件行（含 text_delta，引擎侧 spawn-runner 对 text_delta 同时走 onEvent/onDelta 两通道）+ `ctx.onRoundLifecycle` settled 相位交棒（`noteRoundSettledFromProtocol`，首轮 runId 键经同一 handleChatRoundPhase 收敛，本批测试核实生效）。承接测试：`execution/__tests__/chat-round-first-round-watchdog.test.ts`（首轮 arm / 冷续轮静默 30min 熔断 / 中段事件行刷新 / settled 交棒不继承中段计时）。
+
+## settled-watchdog 承接面整体删除（pi-workflow-run-resource-model 决策 6-D9）
+
+本节 supersede 上方 W6 承接回写与一致性审查批 2 两节中 settled-watchdog 行的承接声明：settled-watchdog 本体（`execution/settled-watchdog.ts` 的 arm/disarm/refresh/`refreshFromProtocolEvent`/`noteRoundSettledFromProtocol`/`disarmRoundFromProtocol` 三入口）、chat 域与 workflow 域全部挂载接线（含 `armMidRoundNoProgress`）、承接测试族（`chat-round-first-round-watchdog.test.ts` 等）已按 D9 裁决（2026-09-26 用户裁决：三个防护场景逐一核定全是 bug，兜底只兜无法预测的物理异常）**整体删除，不再存在现行承接机制**。上方两节的承接落点描述仅作当时事实留档（[HISTORICAL]）。
+
+现行状态：轮等待链无守护段——引擎活着但事件不达的场景，chat 轮与 workflow run 均不再自动回收（剩余保护 = 用户显式任务预算的既有 watchdog env 通道）；run 域 resumable 无驱动任务仍归 W4 轮次活性监督器（`execution/round-supervisor/`），与被删的 settled-watchdog 正交、不受本节影响。

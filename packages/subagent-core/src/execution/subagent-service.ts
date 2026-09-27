@@ -42,9 +42,6 @@ import { type NotifyHost, type PiLike, createNotifyHost } from "./notify/notify-
 // [T4④ / PS-5] flush 被门拦时的未投递 pending 落盘账本（persistUndeliveredNotificationsForReplay 消费）
 // [H1 U2] notify 门迁 notifier.ts（Continuation 双闸共用），此处 re-export 保持既有
 // import 路径（测试消费面 `from "../subagent-service.ts"` 不变）。
-// [R4] notifyGateAllowsDelivery 的值消费（kickOffChatRound / onOneShotSettledWatchdog
-// Timeout 双闸）已随 chat 域迁 service/chat-rounds.ts（2026-09-13 接线）——壳内零值
-// 消费，仅保留 re-export（机制不变）。
 export { notifyGateAllowsDelivery } from "./notify/notifier.ts";
 import { getBoundNotifyLedger, NOTIFY_LEDGER_CUSTOM_TYPE } from "./notify/notify-ledger.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "./assembly/path-encoding.ts";
@@ -59,10 +56,6 @@ import {
   runPendingReconcileSweepForService,
 } from "./round-supervisor/service-binding.ts";
 import type { StreamSink, SubagentStream } from "./assembly/stream-sink.ts";
-// [R4] settled-watchdog 全族消费（arm/disarm/refresh）已随 run 域与 workflow 族迁两个
-// 聚合文件，chat 域消费（kickOffChatRound arm / watchdog fire 处置）已迁
-// service/chat-rounds.ts（2026-09-13 接线）；hasLiveProcessHandle
-//（killStaleChildBeforeDispatch）已迁 chat-rounds。
 // [R4] state-marker（writeRecordBinding）已迁 run-orchestration；EngineSdkError/
 // ResumeAnchor（引擎死亡分诊）已迁 run-orchestration。
 import type {
@@ -106,6 +99,11 @@ import {
 // [R4] ResolvedIdentity 的壳内消费（R3 过渡转发签名）已删——type import 随删转发清零。
 import { RecordAccess } from "./service/record-access.ts";
 import { RecordLifecycle } from "./service/record-lifecycle.ts";
+// [U4 pi-workflow-run-resource-model] WorkflowDispatchDeps.reviveMemberRecord 的装配
+// 依赖：冷查重建链（chat message 冷复活同源原语）+ 内存 idle 翻边原语 + 通道产物类型。
+import { coldLookupForAction, type ColdLookupDeps } from "./assembly/cold-lookup.ts";
+import { resurrectClosed } from "./persistence/execution-record.ts";
+import type { MemberReviveOutcome } from "./service/workflow-dispatch.ts";
 // [H3/R4] 域 #6/#7/#12/#14/#15 聚合（run 域执行编排）+ [D-R4-1] 拆分的 workflow 族
 // 聚合（executeWorkflowAgent 派发链）+ [2026-09-13 design-code-sync] 拆出的 chat 域
 // 轮次编排聚合（Continuation 协作面 + kickOffChatRound 族）——聚合组间零互调零
@@ -386,7 +384,9 @@ export class SubagentService {
       assertIdleTimeoutMsSafe: (opts) => this.runOrchestration.assertIdleTimeoutMsSafe(opts),
       getExecNesting: () => this.execNesting,
       getModelService: () => this.modelService,
-      resolveChatEnginePort: () => this.runOrchestration.resolveChatEnginePort(),
+      // [U2 pi-workflow-run-resource-model] 窗口键透传——workflow 成员派发的 piEngine
+      // 注入位携带 parentRunId（见 WorkflowDispatch.routeWorkflowEngine 注释）。
+      resolveChatEnginePort: (windowKey) => this.runOrchestration.resolveChatEnginePort(windowKey),
       resolveIdentity: (opts) => this.recordAccess.resolveIdentity(opts),
       resolveIdentityForEngine: (engine, engineModel, agent, agentConfig, opts) =>
         this.recordAccess.resolveIdentityForEngine(engine, engineModel, agent, agentConfig, opts),
@@ -406,6 +406,7 @@ export class SubagentService {
       finalizeFailed: (record, err) => this.recordLifecycle.finalizeFailed(record, err),
       releaseRoundResources: (record, holdSlot, stream) =>
         this.runOrchestration.releaseRoundResources(record, holdSlot, stream),
+      reviveMemberRecord: (recordId) => this.reviveWorkflowMemberRecord(recordId),
     });
     // #11：注册进程级 observability 单例——inproc UI 请求队列 handleUiRequest（已删） 经
     // globalThis 桥接（notifyMissingHandlerGlobal）调到同一实例，共享
@@ -664,6 +665,50 @@ export class SubagentService {
   //（R4 抽取 + 2026-09-13 design-code-sync 第三文件接线；本体 execution/service/
   // run-orchestration.ts + workflow-dispatch.ts + chat-rounds.ts，[D-R4-1] 拆分边界与
   // 偏差登记见聚合文件头）──
+
+  /**
+   * [U4 pi-workflow-run-resource-model 决策 7] workflow 成员 revive 通道
+   * （WorkflowDispatchDeps.reviveMemberRecord 的壳装配本体，命中路径的「按 recordId
+   * 取 record + revive 持久化」）：
+   * - 内存 getMutable 命中：原生 running（同名并行派发）= inFlight；idle（终态写
+   *   失败等降级形态）经 resurrectClosed 翻回 running（翻边 + 终态遗留位清除单点）
+   *   + register + transition entry 上报持久化；
+   * - 内存 miss（D7 收口即 archive 出内存的主形态）：冷查重建链 coldLookupForAction
+   *   （chat message 冷复活同源——候选谓词 idle 覆盖归档成员，准入守卫 = worktree
+   *   丢失拒绝 + 异进程活实例探针 + 归属/直接父校验，防线零分叉）；rebuild 链内部
+   *   含 markResurrected 翻边、register 与 entry 上报。
+   * 归属校验语义与 message 冷复活一致：workflow 成员与 chat record 同一父链挂接
+   * （createRecordForMode 同源），跨树/跨层成员本就不可达。
+   */
+  private reviveWorkflowMemberRecord(recordId: string): MemberReviveOutcome {
+    const memory = this.store.getMutable(recordId);
+    if (memory !== undefined) {
+      if (memory.status === "running" || !resurrectClosed(memory)) {
+        return { kind: "inFlight", record: memory };
+      }
+      this.store.register(memory);
+      this.store.reportRecordTransition(memory);
+      return { kind: "revived", record: memory };
+    }
+    const rebuilt = coldLookupForAction(this.memberColdLookupDeps, recordId, true);
+    if (rebuilt === undefined) return { kind: "missing" };
+    return { kind: "revived", record: rebuilt };
+  }
+
+  /** [U4] 冷查重建链依赖（record-access.coldLookupDeps 的壳侧等价装配——聚合私有
+   *  字段不可跨文件 import，晚绑定闭包同款形态；includeWorkflow:true 与冷查治理
+   *  口径一致，防 workflow 成员被 origin 过滤滤掉）。 */
+  private readonly memberColdLookupDeps: ColdLookupDeps = {
+    findLightById: (id) => this.store.findLightById(id),
+    collectRecords: (limit, statusFilter, rootFilter) =>
+      this.store.collectRecords(limit, statusFilter, rootFilter, true),
+    register: (record) => this.store.register(record),
+    reportRecordTransition: (record) => this.store.reportRecordTransition(record),
+    markResurrected: (record, wasClosed) => this.store.markResurrected(record, wasClosed),
+    getSessionRootId: () => this.sessionRootId,
+    getBaselineRecordId: () => this.execNesting.baseline()?.recordId ?? undefined,
+  };
+
 
   /** [R4] 域 #6-#15 核心编排聚合实例：run 域执行编排（execute/executeAndAwait 入口、
    *  引擎编排 + adopt 分诊、settleOneShotOutcome 终态收口、pool/worktree 资源）。

@@ -7,9 +7,7 @@
 //
 // [modeless 波1·判据去模式] 判定域 = 全部 running record（保守多管不漏）：轮终
 // idle（有 result）豁免、在途 run / 活进程「该等」——原 chatMode 豁免分支随字段
-// 消亡删除（旧豁免域 = 轮终 idle 机制 + settled-watchdog 两段守护管辖；modeless 下
-// one-shot 与 chat 形态合流，判据按「万物可续」统一）。豁免域仅剩「轮终 idle 有
-// result」（hasResult 子句）。
+// 消亡删除（豁免域仅剩「轮终 idle 有 result」，hasResult 子句承载）。
 //
 // 判据状态源钉死为 record 级（R3 核正）：pi 引擎 poolKey 恒 'shared' 单进程、
 // ensureConnected 被动重建会重填「镜像整体置死」——镜像不能作持续判据；run 终态

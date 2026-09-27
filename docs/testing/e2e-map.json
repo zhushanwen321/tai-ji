@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播守卫）/ MODELREF（extensions 资产模型引用漂移守卫）/ RECORD（record 持久化写面唯一入口守卫）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播守卫）/ MODELREF（extensions 资产模型引用漂移守卫）/ RECORD（record 持久化写面唯一入口守卫）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与守卫脚本轨：review-pipeline 质量门脚本、pre-commit 守卫检测单测、思考档位差分探针、select-affected-e2e 对账脚本）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -688,7 +688,7 @@
     },
     {
       "id": "E2E-BATCH-04",
-      "summary": "S4 中途停止：派发后 workflow abort → run 终态 cancelled + 通知到达 + 无孤儿成员任务子进程",
+      "summary": "S4 中途停止：派发后 workflow abort → run 终态 cancelled + 通知到达 + 无孤儿（成员任务子进程 + 引擎宿主薄壳）",
       "scope": [
         "extensions/universal/subagent-workflow/src/**",
         "packages/subagent-core/workflows/fan-out.js",
@@ -708,6 +708,10 @@
         {
           "kind": "spec",
           "ref": "e2e/batch-s4-abort-no-orphan.spec.ts"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/count-engine-shell-processes.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -715,7 +719,57 @@
       "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-s4-abort-no-orphan.spec.ts（双凭证门 = env + 本机 provider 凭证，缺一 skip 不 fail；空载串行）。剧本化包装：bash .tmp/dev-flow/w1-run-record-journal-authority.acceptance/batch-rerun.sh（W1 D3 verify 载体，含 build 前置 + 三 spec 串行 + 产物落 batch/，.tmp 不入 git）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收口）：S4 中途停止 → cancelled + 通知照达 + 无孤儿成员任务子进程；W1 新介质锚 = 收编幂等与死字节断言。 R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现面），成员任务子进程 ps 核对为通过条件之一（设计 S4）；断言锚 = 成员保活 sleep 进程——引擎宿主是连接级常驻（armEngineSelfDestruct 无 run 结束判据、D9-2 禁 run 级杀引擎），abort 后存活是设计行为不数孤儿（2026-09-26 W1 验收定稿；per-run 退出形态另行立项）。真机已过：done(cancelled) 通知照达 + 零成员任务残留。"
+      "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收口）：S4 中途停止 → cancelled + 通知照达 + 无孤儿成员任务子进程；W1 新介质锚 = 收编幂等与死字节断言。 R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现面），成员任务子进程 ps 核对为通过条件之一（设计 S4）。断言锚（双特征集）：① 成员保活 sleep 进程；② 引擎宿主 pi-subagent-cli 薄壳——pi-workflow-run-resource-model per-window 形态下薄壳随派发窗口生灭（run 收尾 dispose），abort 收口后计数回落基线（2026-09-27 断言升级，原「连接级常驻不数孤儿」裁决随形态切换退役，git 可追溯），计数复用 count-engine-shell-processes.mjs（特征串权威单源，基线差分吸收 zcode 常驻单例与测试进程 cmdline 噪声）。真机已过（升级前形态）：done(cancelled) 通知照达 + 零成员任务残留；升级断言（宿主纳入判定面）的真机复核归 D3 验收批次（A2）。"
+    },
+    {
+      "id": "E2E-BATCH-08",
+      "summary": "V8 同名续写同一子代理：pi workflow 同名 agent() 两次调用 → 同一成员 record 多轮 + session 文件同 id 历史连续（成员复用通道 mock 锁）",
+      "scope": [
+        "packages/subagent-core/src/orchestration/**",
+        "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
+        "packages/subagent-core/src/orchestration/__tests__/member-reuse-pool.test.ts",
+        "packages/subagent-core/src/execution/__tests__/conversation-continuation.test.ts",
+        "packages/subagent-core/workflows/fan-out.js"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "packages/subagent-core/workflows/fan-out.js"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "cd packages/subagent-core && npx vitest run src/orchestration/__tests__/member-reuse-pool.test.ts src/execution/__tests__/conversation-continuation.test.ts",
+      "owner": "packages/subagent-core",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "pi-workflow-run-resource-model §4.1 V8 登记行（2026-09-27 U6）：通过标准 = 同一 record id 多轮、session 文件同 id 历史连续、callId 核对每条独立结果照旧（复用键 = name，对齐 zcode 平台语义；续聊 = revive 拉起，决策 7）。当前登记 = 成员复用通道的 mock 锁（复用池命中/未命中/跨 round 连续 + revive 续写链）+ 能力本体 fan-out（同名 agent() 剧本载体，asset 锚 = 被验能力本体先例同 E2E-BATCH-01）；真机剧本（同名 agent() ×2 真机跑 + record/session 文件核对）未落建，真机复核归 D3 验收批次，落建后同 commit 扩 assets 并翻 layer/serial（翻轨先例 E2E-RENAME-01）。"
+    },
+    {
+      "id": "E2E-BATCH-09",
+      "summary": "V10 域边界 + 回归：外部 message 对 workflow 成员续聊三类拒绝原样 + 断点恢复 / journal 核对 / structured-output 门禁既有测试族全绿",
+      "scope": [
+        "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts",
+        "packages/subagent-core/src/execution/round-supervisor/**",
+        "packages/subagent-core/src/execution/__tests__/subagent-actions-core.test.ts",
+        "packages/subagent-core/src/execution/__tests__/round-supervisor-workflow-origin.test.ts",
+        "packages/subagent-core/src/orchestration/__tests__/lifecycle-recover-crashed.test.ts",
+        "packages/subagent-core/src/execution/__tests__/journal-tail.test.ts",
+        "extensions/universal/structured-output/tests/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/structured-output/tests/loop-gate.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "cd packages/subagent-core && npx vitest run src/execution/__tests__/subagent-actions-core.test.ts src/execution/__tests__/round-supervisor-workflow-origin.test.ts src/orchestration/__tests__/lifecycle-recover-crashed.test.ts src/execution/__tests__/journal-tail.test.ts && cd ../../extensions/universal/structured-output && npx vitest run tests/loop-gate.test.ts",
+      "owner": "packages/subagent-core",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "pi-workflow-run-resource-model §4.1 V10 登记行（2026-09-27 U6）：三类拒绝 = message 对 workflow 成员续聊拒绝（workflow-origin 域边界，subagent-actions-core 拒绝文案 + round-supervisor workflow-origin 判定）、冷复活绕过守卫、agents 数量错配 fail-fast（设计 G7「内部复用通道与外部 message 通道分离」）；回归面 = 断点恢复（lifecycle-recover-crashed）+ journal 核对（journal-tail）+ structured-output 门禁（loop-gate，行为零变化正交红线）。全部零 token mock 轨；真机形态未单列（域边界拒绝行为有既有测试锚，设计核实状态 ✅）。"
     },
     {
       "id": "E2E-BATCH-05",
@@ -927,13 +981,18 @@
       "id": "E2E-RECORD-01",
       "summary": "run/record 写面唯一入口 grep 守卫（ADR-0078 口径 R1-R7：写函数直调 / 两族 entry 写面白名单 / v1 快照投影构造器与载荷形态拒绝 / 死字节拒绝 / .events 直写拒绝）",
       "scope": [
-        "scripts/check-record-write-surface.mjs"
+        "scripts/check-record-write-surface.mjs",
+        "scripts/__tests__/check-record-write-surface.test.mjs"
       ],
       "layer": "L1",
       "assets": [
         {
           "kind": "script",
           "ref": "scripts/check-record-write-surface.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-record-write-surface.test.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -962,6 +1021,128 @@
       "owner": "packages/subagent-core",
       "authority": "docs/architecture/subagent-core-package-extraction.md",
       "note": "R2 态（按改动面 = 改探针自身或 barrel 导出面时跑；fixture 全落 os.tmpdir() 自清理、零 token 零真实 app/pi 进程，实测 47 断言 PASS）。前置链两层构建：subagent-core 的 CJS 产物 noExternal 打包 engine-sdk 的 dist/index.cjs（缺失即 MODULE_NOT_FOUND）→ 先 build engine-sdk 再 build subagent-core → probe——dist 为 gitignored 产物，run 内联构建保证干净环境可复现。本探针同时是 barrel 弱活符号的保留依据（package-extraction.md：maxTurnsToWatchdogMs / loadWorkflowScriptByPath / normalizeWorkflowRef / 原子写三函数等经真实 import 消费——收窄 barrel 前先核对本探针）"
+    },
+    {
+      "id": "E2E-PIPE-01",
+      "summary": "review-pipeline 工程门脚本轨：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本",
+      "scope": [
+        "scripts/quality-gates.mjs",
+        "scripts/changeset-check.mjs",
+        "scripts/cross-branch-overlap.mjs",
+        "scripts/pr-pre-merge.sh"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/quality-gates.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/changeset-check.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/cross-branch-overlap.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/pr-pre-merge.sh"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/quality-gates.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/changeset-check.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/cross-branch-overlap.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "npx vitest run scripts/__tests__/quality-gates.test.mjs scripts/__tests__/changeset-check.test.mjs scripts/__tests__/cross-branch-overlap.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "review-pipeline-redesign §5-U1 三脚本（含双向防拆断言的单测锁定）+ pr-pre-merge 一体化脚本的登记（2026-09-27 补登，脚本随 c5f8aab59 落库）。真实运行形态 = pr-cr-fix / dev-merge 流水线人工触发（quality-gates 依赖 .agents 内 coverage-gate.py 实体，gitignored 不登记为 asset）；本表 run = 零 token vitest 锁定面（52 用例：聚合编排 / base 口径两侧 / 实体缺失报错 / 盲区判定 / changeset 文案对拍 / 交集计算，子进程命令全走依赖注入 fake，临时 git 仓库用例 mkdtemp 自建自删）"
+    },
+    {
+      "id": "E2E-PIPE-02",
+      "summary": "pre-commit 守卫检测核心单测：validate-constraints（constraints.json 结构校验器）+ check-prompt-outposts（prompt 注入哨兵检测核心）",
+      "scope": [
+        "scripts/validate-constraints.mjs",
+        "scripts/__tests__/validate-constraints.test.mjs",
+        "scripts/__tests__/check-prompt-outposts.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/validate-constraints.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/validate-constraints.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-prompt-outposts.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "npx vitest run scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-prompt-outposts.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "pre-commit 守卫的检测核心单测登记（2026-09-27 补登）：守卫自身判定行为机器锁定——误放行让「忘挂注入」回到人责，误拦逼人加豁免瓦解白名单治理。check_prompt_outposts.py 实体在 .agents（不入 git 跟踪），不可登记为 asset，经 test.mjs 子进程 --root 指向 tmp fixture 树覆盖（退出码契约面）"
+    },
+    {
+      "id": "E2E-PIPE-03",
+      "summary": "diff-probe-thinking 思考档位差分探针：registry 计算路径 vs pi-ai 同源函数直调逐模型一致（手工代表集 + builtin-providers.json 全目录）",
+      "scope": [
+        "scripts/diff-probe-thinking.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "probe",
+          "ref": "scripts/diff-probe-thinking.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/diff-probe-thinking.mjs",
+      "owner": "packages/runtime",
+      "authority": "docs/architecture/pi-boundary-reliability.md",
+      "note": "pi-boundary-reliability §3.3 G3 差分探针（对照验证 differential testing：registry 不漂移守卫——computeSupportedLevels 若长出影子逻辑（改写/钳制/默认值偏移），与 pi-ai getSupportedThinkingLevels 直调的差分即红）。零 token 零真实进程（快照语义比对，node registerHooks 加载 TS 源直跑）；mismatch > 0 时报错并指路 model-capability.ts（2026-09-27 实测 1296 models / 0 mismatch）"
+    },
+    {
+      "id": "E2E-PIPE-04",
+      "summary": "select-affected-e2e 对账脚本：diff → 受影响 rules / --check 防漏登记门禁（watched root 内未覆盖文件 exit 1）",
+      "scope": [
+        "scripts/select-affected-e2e.mjs",
+        "scripts/__tests__/select-affected-e2e.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/select-affected-e2e.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/select-affected-e2e.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "npx vitest run scripts/__tests__/select-affected-e2e.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "本表消费者脚本（_meta.consumers）的登记（2026-09-27 补登）：scope/asset 匹配语义、watched roots 推导、--check coverage 判定由 19 用例零 token 锁定；真实运行形态 = 开发期按 diff 选受影响面 + pre-commit --check 门禁（本文件或 e2e-map.json 或 validate 脚本变更时触发，接线 SSOT = .githooks/install-hooks.sh）。changedFiles 排除已删除文件（--diff-filter=d）：删除不产生 coverage 义务，磁盘已不存在的文件不可登记为 asset（validate-e2e-map existsSync 强校验拒绝死资产条目）"
     }
   ]
 }

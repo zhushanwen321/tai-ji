@@ -43,7 +43,6 @@ import { createRecord } from "../persistence/execution-record.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { _resetSettledWatchdogsForTest } from "../lifecycle/settled-watchdog.ts";
 import {
   readRecordBinding,
   updateRecordBinding,
@@ -490,7 +489,6 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与 identityFro
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
@@ -638,7 +636,6 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     service.dispose();
     clearEngines();
     _resetLifecycleState();
-    _resetSettledWatchdogsForTest();
     _resetCoreSpawnedChildrenMirrorForTest();
     // 只读目录先恢复权限再删（⑤用例的绑定写失败面）
     if (readOnlyDir !== undefined) {

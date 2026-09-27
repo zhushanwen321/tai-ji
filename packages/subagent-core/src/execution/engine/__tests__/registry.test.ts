@@ -242,6 +242,10 @@ function makeManifestSnapshot(displayName?: string): EngineManifestSnapshot {
       maxTurns: false,
     },
     modelCatalog: { dynamic: true, models: [{ id: "glm-4.6", canonicalRef: "zai/glm-4.6" }] },
+    // [u5 D6] 本文件用例锁定 registry 单例语义（D2b/双模透明/收割可达）——声明
+    // shared-service 使 descriptor 走单例路径；per-window 代理语义由
+    // registry-window-model.test.ts 承载。
+    processModel: "shared-service",
     ...(displayName !== undefined ? { displayName } : {}),
   };
 }
@@ -288,7 +292,11 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
       args: ["-e", ""],
       capabilities: manifest.capabilities,
       portFactory,
-      manifest: { modelCatalog: manifest.modelCatalog, displayName: manifest.displayName },
+      manifest: {
+        modelCatalog: manifest.modelCatalog,
+        displayName: manifest.displayName,
+        processModel: manifest.processModel,
+      },
     });
     const engine = getEngine("zcode-cli");
     // 两形态透明：上层拿到的是同一个 EnginePort 面；cli 实例 = W2 RemoteEngine
@@ -309,6 +317,7 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
       args: [],
       capabilities: manifest.capabilities,
       portFactory,
+      manifest: { processModel: manifest.processModel },
     });
     // 注册本身不触发 portFactory（descriptor 首次使用才解析——§3.5.3 代理形态）
     expect(portFactory).not.toHaveBeenCalled();
@@ -330,6 +339,7 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
       args: [],
       capabilities: manifest.capabilities,
       portFactory: () => oldPort as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     getEngine("overwrite");
     const newPort = makeRemoteEngine("overwrite", manifest);
@@ -341,6 +351,7 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
       args: [],
       capabilities: { ...manifest.capabilities, maxTurns: true },
       portFactory: () => newPort as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("overwrite")).toBe(newPort);
@@ -369,7 +380,14 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       capabilities: manifest.capabilities,
       portFactory,
       ...(manifest.modelCatalog !== undefined || manifest.displayName !== undefined
-        ? { manifest: { modelCatalog: manifest.modelCatalog, displayName: manifest.displayName } }
+          || manifest.processModel !== undefined
+        ? {
+          manifest: {
+            modelCatalog: manifest.modelCatalog,
+            displayName: manifest.displayName,
+            processModel: manifest.processModel,
+          },
+        }
         : {}),
     });
   }
@@ -424,6 +442,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       args: [],
       capabilities: manifest.capabilities,
       portFactory: () => makeRemoteEngine("cmd-change", manifest) as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("cmd-change")).not.toBe(oldPort);
@@ -443,6 +462,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       args: ["--changed"],
       capabilities: manifest.capabilities,
       portFactory: () => makeRemoteEngine("args-change", manifest) as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("args-change")).not.toBe(oldPort);
@@ -502,6 +522,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       args: [],
       capabilities: manifest.capabilities,
       portFactory: () => makeRemoteEngine("kind-change", manifest) as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("kind-change")).not.toBe(inprocSingleton);
@@ -521,6 +542,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       capabilities: manifest.capabilities,
       packageVersion: "1.2.3",
       portFactory: () => oldPort as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     const singleton = getEngine("ver-same");
 
@@ -532,6 +554,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       capabilities: manifest.capabilities,
       packageVersion: "1.2.3",
       portFactory: secondFactory,
+      manifest: { processModel: manifest.processModel },
     });
     expect(getEngine("ver-same")).toBe(singleton);
     expect(dispose).not.toHaveBeenCalled();
@@ -550,6 +573,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       capabilities: manifest.capabilities,
       packageVersion: "1.2.3",
       portFactory: () => oldPort as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     getEngine("ver-change");
 
@@ -563,6 +587,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       capabilities: manifest.capabilities,
       packageVersion: "1.3.0",
       portFactory: () => newPort as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("ver-change")).toBe(newPort);

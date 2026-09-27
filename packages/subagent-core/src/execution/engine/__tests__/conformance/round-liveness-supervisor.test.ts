@@ -15,7 +15,7 @@
 //     adoptOnProcessDeath → 合并单条通知 + 决策指引（该唤醒）→ 看门狗到期 →
 //     该放弃（giveUp(watchdog-expired)，此时可重派）。
 //   场景二（裁决表 conversation 行）：chatMode record 死亡事件 → 豁免不纳管
-//     （轮终 idle / settled-watchdog 管辖，D2 前置 1）。
+//     （轮终 idle 豁免，D2 前置 1）。
 //   场景三（表 3 行 2/3 × A5 落盘断言）：boot 分区重认领（already-resumable-idle）
 //     vs conversation 豁免；in-flight 直断后的注册残留由对账 sweep **appendEntry
 //     权威落盘**补发（A5「注销落盘可查」的构造性证据——sweep 写法钉死：不经 bus

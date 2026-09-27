@@ -256,21 +256,6 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
     expect(record.status).toBe("running");
     expect(record.result).toBeUndefined();
   });
-
-  it("settle 交棒 = run 应答驱动（D7）：派发后挂中段守护，应答 settle 后轮终守护清空", async () => {
-    await service.chatActions.deliverChatMessage(record, "msg");
-    await vi.waitFor(() => expect(fake.runs.length).toBe(1));
-
-    const { hasSettledWatchdog, getSettledWatchdogPhase } = await import("../lifecycle/settled-watchdog.ts");
-    expect(hasSettledWatchdog(record.id)).toBe(true);
-    expect(getSettledWatchdogPhase(record.id)).toBe("mid-round");
-
-    // [H1 U2 / D7] settle 交棒 = run 应答驱动（onRunSettled 内 noteRoundSettledFromProtocol）：
-    // 应答后轮终簿记完成，两段守护一并清（不残留 armed——收尾段 fire 会对已收敛轮误杀）
-    fake.runs[0]!.settle({ content: "round text" });
-    await vi.waitFor(() => expect(record.round).toBe(2));
-    expect(hasSettledWatchdog(record.id)).toBe(false);
-  });
 });
 
 // ============================================================

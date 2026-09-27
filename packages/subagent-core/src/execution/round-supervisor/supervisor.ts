@@ -11,8 +11,8 @@
 // 不是自动复活任务——主 agent 是唯一决策者（resume 或重派）。
 //
 // 三态判定（判据状态源 = record 级，domain.ts 谓词单源）：
-//  - 该等：有在途 run / 有进程驱动 → 不干预（事件流推进性归 settled-watchdog
-//    中段守护管辖，监督器不重复判定——消两判据并集的第三态缝隙）。
+//  - 该等：有在途 run / 有进程驱动 → 不干预（事件流推进性归 run 自身的应答链
+//    承载，监督器不重复判定——消两判据并集的第三态缝隙）。
 //  - 该唤醒：无产出且无在途 run / 无进程驱动的 running（[U5/D4] 全子集谓词——
 //    resumable 字段退役后 W4 死亡纳管态由「running + 无产出 + 无驱动」识别；run
 //    终态 failed 即驱动死亡证据；镜像置死仅作死亡事件触发信号——判定只消费
@@ -29,7 +29,7 @@
 // records Map 为空），视图化是两形态统一判定的前提。
 //
 // 定时器模型：每纳管 record 至多一个决策看门狗 timer（类实例 Map 记账，挂载/
-// 清除责任内聚——对齐 settled-watchdog / armIdleTimer 的「忘清旧窗」防护先例）。
+// 清除责任内聚——对齐 armIdleTimer 的「忘清旧窗」防护先例）。
 // 看门狗属回收层防挂死兜底（AGENTS.md 规则 19：回收层允许默认有界 opt-out）——
 // 默认 2h（量级依据：通知账本跨 60 分钟完成 3 次投递的事故实测，窗须覆盖
 // 「指引重投 + 主 agent 反应」），env 可覆盖/关闭。
@@ -365,7 +365,7 @@ export class RoundSupervisor {
     this.clearWatchdogTimer(entry);
     if (isSupervisorGiveUpDisabled()) return;
     const windowMs = getSupervisorWatchdogMs();
-    // 常量/env 值入口校验：防越界值静默引入 1ms 溢出语义反转（对齐 settled-watchdog）。
+    // 常量/env 值入口校验：防越界值静默引入 1ms 溢出语义反转（对齐 armIdleTimer）。
     assertSafeTimerDelay(windowMs, "round supervisor decision watchdog");
     const timer = setTimeout(() => {
       entry.timer = undefined;

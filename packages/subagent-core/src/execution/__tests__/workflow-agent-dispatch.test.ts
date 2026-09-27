@@ -22,13 +22,11 @@
 //   7. [H2 W3 must-fix] stream 缺省自构：runWorkflowEngineTask 在 stream 实参缺省时
 //      经 createBackgroundStream 自构（kickOffChatRound 同款策略）——三形态（TUI
 //      widget 接通 / GUI+relay 停发私货 / sink 未注入降级 no-op）+ 内构对象的守护
-//      刷新源（bindWorkflowStreamRefresh 包裹 onDelta）仍生效。
 //
 // 替身形态：pi EnginePort = registerFakePiEngine（协议 seam 替身）；受限引擎
 // （strict-engine）本地构造（预检命中用）；pi = mock（appendEntry 捕获 subagent-record
 // entry、events.emit 捕获 pending 注册/注销、sendMessage 零调用断言）。journal 落盘
-// 经 TAIJI_AGENT_DATA_DIR 指到 tmpdir（测试红线：不触真实数据目录）；守护窗长经
-// _setMidRoundNoProgressWindowMsForTest 注入（秒级，fake timers 驱动）。
+// 经 TAIJI_AGENT_DATA_DIR 指到 tmpdir（测试红线：不触真实数据目录）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -53,16 +51,6 @@ import { SubagentService } from "../subagent-service.ts";
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
 import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
-import {
-  _resetSettledWatchdogsForTest,
-  _setMidRoundNoProgressWindowMsForTest,
-  armMidRoundNoProgress,
-  getMidRoundNoProgressWindowMs,
-  hasSettledWatchdog,
-  isSettledWatchdogDisabled,
-  SETTLED_MID_ROUND_NO_PROGRESS_MS,
-  SETTLED_WATCHDOG_ENV,
-} from "../lifecycle/settled-watchdog.ts";
 import { resetCoreForTests } from "../../core/host-services.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import type { EngineCapabilities } from "../engine/types.ts";
@@ -193,7 +181,6 @@ afterEach(() => {
   }
   openHarnesses.length = 0;
   clearEngines();
-  _resetSettledWatchdogsForTest();
   vi.restoreAllMocks();
   if (prevDataDirEnv === undefined) delete process.env["TAIJI_AGENT_DATA_DIR"];
   else process.env["TAIJI_AGENT_DATA_DIR"] = prevDataDirEnv;
@@ -204,6 +191,25 @@ afterEach(() => {
 // ============================================================
 
 describe("executeWorkflowAgent 注册面", () => {
+  it("[U2 窗口键] piEngine 注入携带 parentRunId——pi 同步短路位是成员 run 的执行体，无键即 WindowScopeEngineError（batch-s4 真机首跑实锤的回归锁）", async () => {
+    const { service, fake } = makeHarness();
+    const runOrchestration = Reflect.get(service, "runOrchestration") as {
+      resolveChatEnginePort: (windowKey?: string) => unknown;
+    };
+    const portSpy = vi.spyOn(runOrchestration, "resolveChatEnginePort");
+
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-win-key");
+    await flush();
+
+    // 装配面契约：routeWorkflowEngine 的 piEngine 注入 = resolveChatEnginePort(parentRunId)
+    //（per-window 引擎经窗口实例解析单点取用，probe 与 run 同实例；shared-service 透传保形）。
+    expect(portSpy).toHaveBeenCalledWith("run-win-key");
+    // 缺省网关下（保守 shared-service 透传）run 仍须可达 fake pi port——键传递不改变既有派发行为
+    expect(fake.runs).toHaveLength(1);
+    fake.runs[0]!.settle({ content: "done" });
+    await pending;
+  });
+
   it("record 带 origin=workflow + parentRunId，pending:register/unregister 配对，taskId 即 record id", async () => {
     const { service, store, pi, fake } = makeHarness();
     const pending = service.executeWorkflowAgent(baseOpts(), "run-42");
@@ -300,89 +306,6 @@ describe("executeWorkflowAgent 池顺序", () => {
     expect(record.closedReason).toBe("cancelled"); // run 域 cancelled 收口
     expect(entries.at(-1)).toMatchObject({ id: record.id, kind: "settled", stopReason: "cancelled" });
     expect(fake.runs).toHaveLength(0); // 零引擎副作用
-  });
-});
-
-// ============================================================
-// 3. 守护（D4/M3 复刻：arm 键 = record.id + 双刷新源 + fire 追注）
-// ============================================================
-
-describe("executeWorkflowAgent no-progress 守护", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    _setMidRoundNoProgressWindowMsForTest(5000);
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("arm 键 = record.id；协议事件（journal.onEvent 包装）刷新窗口；fire 后失败结果追注恢复指引", async () => {
-    const { service, store, fake } = makeHarness();
-    const pending = service.executeWorkflowAgent(baseOpts(), "run-1");
-    await vi.advanceTimersByTimeAsync(0);
-    const run = soleRun(fake);
-    const record = runningRecord(store);
-    expect(run.ctx.taskId).toBe(record.id); // arm 键 = record.id（非占位 taskId）
-
-    // 窗内协议事件（经 observedEvent 包装 → refreshFromProtocolEvent(record.id)）刷新窗口
-    await vi.advanceTimersByTimeAsync(3000);
-    run.emitEvent({ type: "message_start" });
-    await vi.advanceTimersByTimeAsync(3000); // 越过原始 5000ms 窗（已刷新 → 不 fire）
-    expect(run.ctx.signal?.aborted).toBe(false);
-
-    // 无后续事件 → 新窗口到期 fire → abort 送达 engine ctx.signal
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(run.ctx.signal?.aborted).toBe(true);
-
-    // fire 后引擎合成失败 outcome → 失败结果追注恢复指引（fire 追注语义，
-    // 原 SAR noteIfNoProgressFired 符号随编排归一消亡——见设计 D4）
-    run.settle({ error: "engine: aborted" });
-    const result = await pending;
-    expect(result.error).toContain("engine: aborted");
-    expect(result.error).toContain("workflow no-progress watchdog fired");
-    // 恢复指引配对口径（与 message-guard 文案族同款）：fire 后 record 必然终态，
-    // 只查 running 得空列表——必须 includeFinished:true + includeWorkflow:true 成对
-    expect(result.error).toContain("includeFinished:true");
-    expect(result.error).toContain("(add includeWorkflow:true to also see workflow-dispatched subagents)");
-  });
-
-  it("stream.onDelta 同为刷新源（双源缺一不可——纯流式产出也保活）", async () => {
-    const { service, fake } = makeHarness();
-    const stream = new SubagentStream("wf-stream-key", { setWidget: () => {} });
-    const pending = service.executeWorkflowAgent(baseOpts(), "run-1", undefined, undefined, stream);
-    await vi.advanceTimersByTimeAsync(0);
-    const run = soleRun(fake);
-
-    await vi.advanceTimersByTimeAsync(3000);
-    run.emitDelta("chunk"); // stream 反向帧（不经 journal）→ 绑定包装刷新
-    await vi.advanceTimersByTimeAsync(3000); // 越过原始窗口（已刷新 → 不 fire）
-    expect(run.ctx.signal?.aborted).toBe(false);
-
-    await vi.advanceTimersByTimeAsync(5000); // 无后续 delta → fire
-    expect(run.ctx.signal?.aborted).toBe(true);
-    run.settle({ error: "engine: aborted" });
-    const result = await pending;
-    expect(result.error).toContain("workflow no-progress watchdog fired");
-  });
-
-  it("内构 stream（实参缺省）同样保活：emitDelta 经 bindWorkflowStreamRefresh 刷新守护", async () => {
-    // [H2 W3 must-fix] runWorkflowEngineTask 在 stream 实参缺省时自构
-    // createBackgroundStream——内构对象的 onDelta 同样被 bindWorkflowStreamRefresh
-    // 原地包裹（守护双刷新源之二），且 widget flush 与刷新在同一调用点生效。
-    const sink = { setWidget: vi.fn() };
-    const { service, fake } = makeHarness({ streamSink: sink });
-    const pending = service.executeWorkflowAgent(baseOpts(), "run-stream-self");
-    await vi.advanceTimersByTimeAsync(0);
-    const run = soleRun(fake);
-
-    await vi.advanceTimersByTimeAsync(3000);
-    run.emitDelta("chunk"); // 反向帧 → 内构 stream.onDelta（已包裹）→ 刷新
-    await vi.advanceTimersByTimeAsync(3000); // 越过原始窗口（已刷新 → 不 fire）
-    expect(run.ctx.signal?.aborted).toBe(false);
-
-    run.settle({ content: "done" });
-    const result = await pending;
-    expect(result.content).toBe("done");
   });
 });
 
@@ -673,63 +596,6 @@ describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
 
 });
 
-// ── settled-watchdog 原语守护（[H2 W4] 自 subprocess-agent-runner-no-progress-
-//    full-chain.test.ts 迁移——原语不随 SAR.run 掏空退役，守护唯一 arm 点现为
-//    service 派发路径，用例归本文件） ──────────────────────────────
-
-describe("settled-watchdog 原语守护（自 SAR full-chain 测试迁移）", () => {
-  beforeEach(() => {
-    _resetSettledWatchdogsForTest();
-    loggerMock.warn.mockClear();
-    // 宿主 shell export 隔离：守护开关 env 必须处于「未设」基线（空串 = 未设）。
-    vi.stubEnv(SETTLED_WATCHDOG_ENV, "");
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    _resetSettledWatchdogsForTest();
-    resetCoreForTests();
-  });
-
-  it("默认值守护：生产中段窗恒 30min；测试注入不改常量且可复位（防将来重构手滑）", () => {
-    expect(SETTLED_MID_ROUND_NO_PROGRESS_MS).toBe(30 * 60 * 1000);
-    expect(getMidRoundNoProgressWindowMs()).toBe(SETTLED_MID_ROUND_NO_PROGRESS_MS);
-
-    _setMidRoundNoProgressWindowMsForTest(1_500);
-    expect(getMidRoundNoProgressWindowMs()).toBe(1_500);
-    // 注入是覆盖值的读取，不污染常量本体（生产路径读到的默认值不变）。
-    expect(SETTLED_MID_ROUND_NO_PROGRESS_MS).toBe(30 * 60 * 1000);
-
-    _resetSettledWatchdogsForTest();
-    expect(getMidRoundNoProgressWindowMs()).toBe(SETTLED_MID_ROUND_NO_PROGRESS_MS);
-  });
-
-  it("U-B3 env ≤0 的 warn 明示 workflow 域 no-progress 熔断连带失效（只改文案，不动开关语义）", () => {
-    vi.stubEnv(SETTLED_WATCHDOG_ENV, "0");
-    // 惰性首读触发解析 + warn 留痕（本文件 hoisted-mock 了 core/logger——settled-watchdog
-    // 的 logger.warn 进 loggerMock，与原 full-chain 文件的 HostServices.log 捕获等价）。
-    expect(isSettledWatchdogDisabled()).toBe(true);
-    const warn = loggerMock.warn.mock.calls
-      .map((args) => String(args[0]))
-      .find((message) => message.includes(SETTLED_WATCHDOG_ENV));
-    expect(warn).toBeDefined();
-    // 文案必须覆盖 M3 复用同一原语带来的 workflow 域连带后果（修复前只提 chat 域）；
-    // [H2 W5] 挂载点表述随 W4 掏空更新为 service 派发点（原 SAR.run 表述退役）。
-    expect(warn).toContain("workflow");
-    expect(warn).toContain("no-progress");
-    expect(warn).toContain("runWorkflowEngineTask");
-
-    // 开关语义不动：arm 仍 no-op（本条目只补文案与注释，不新增 env、不改行为）。
-    const fired: string[] = [];
-    armMidRoundNoProgress("sa-env-off", {
-      onMidTimeout: () => fired.push("mid"),
-      onSettleTimeout: () => fired.push("settle"),
-    });
-    expect(hasSettledWatchdog("sa-env-off")).toBe(false);
-    expect(fired).toEqual([]);
-  });
-});
-
 // ============================================================
 // 8. [D3 协议版 P6] armed 回执消费落账（observedEvent 拦截 → runId 键投递 → journal）
 // ============================================================
@@ -767,8 +633,10 @@ describe("armed 回执经 observedEvent 落 run 事件 journal（[D3 协议版 P
       await flush();
 
       const events = await createRunEventJournal(journalDir).scan("wf-armed-e2e");
-      expect(events.map((e) => e.type)).toEqual(["run-created", "armed"]);
-      const armed = events[1] as Extract<WorkflowRunEvent, { type: "armed" }>;
+      // member-pool = [U4 成员复用] 派发链首次登记（决策 9 journal 登记事件）——
+      // 与 armed 落账正交，事件序含派发链登记行。
+      expect(events.map((e) => e.type)).toEqual(["run-created", "member-pool", "armed"]);
+      const armed = events[2] as Extract<WorkflowRunEvent, { type: "armed" }>;
       expect(armed.frame).toEqual(armedFrame);
       expect(typeof armed.ts).toBe("number");
     } finally {

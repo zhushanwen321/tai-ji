@@ -8,8 +8,10 @@
 // fallback 三守卫 + model/engine 正交 + workflow 脚本不写死 engine）+ D7（探针分级与
 // 触发时机）+ §3.3.3 错误规格仍然有效。
 //
-// 职责边界：本模块只做「选哪个引擎」的决策（纯路由 + probe 编排），不 spawn、不读
-// 任务正文。三层优先级与守卫的判定规则集中于此单一权威点——上层（SAR）只消费
+// 职责边界：本模块做「选哪个引擎」的决策（纯路由 + probe 编排）与窗口作用域的引擎
+// 实例解析（文件尾「窗口实例状态」段，U2——登记/释放机制本体在 window-instances.ts
+// [U1]，本模块承载 workflow 域挂载点：runId 键表登记处 + probe/get 取用解析单点），
+// 不读任务正文。三层优先级与守卫的判定规则集中于此单一权威点——上层（SAR）只消费
 // routeEngine 的结果，散落的 if engine === ... 分派被结构性排除。
 //
 // probe 触发时机（D7 的落地口径）：路由期触发、结果缓存于引擎实例（probeCache）。
@@ -21,17 +23,31 @@
 // 兜底，重启进程 / 重新注册后重探。
 
 import { getLogger } from "../../core/logger.ts";
+import { toErrorMessage } from "../../core/error-message.ts";
 
 import { EngineError } from "./common/errors.ts";
 import type { EnginePort } from "./port.ts";
 import {
   DEFAULT_ENGINE_ID,
   EngineNotFoundError,
+  engineProcessModelOfDescriptor,
   getEngine,
+  getEngineDescriptor,
   hasEngine,
   listEngines,
   listEnginesByDisplayName,
+  setActiveWindowEngineDisposer,
 } from "./registry.ts";
+// [U2 pi-workflow-run-resource-model] 窗口实例解析段（文件尾「窗口实例状态」段）的
+// 机制依赖：window-instances 是零依赖叶子模块（U1 交付），与 registry/discovery 的
+// 传递闭包无环。
+import {
+  createWindowEngineInstances,
+  isSharedServiceProcessModel,
+  type EngineProcessModel,
+  type WindowEngineInstance,
+  type WindowEngineInstances,
+} from "./window-instances.ts";
 import {
   ensureEngineDiscovered,
   type DiscoverEnginesOptions,
@@ -149,7 +165,17 @@ export interface EngineRouteOptions {
   strict: boolean;
   /** 探针执行体（返回 ProbeReport；引擎实例内部有缓存语义）。 */
   probe: (engineId: string) => Promise<ProbeReport>;
-  /** 引擎获取（缺省 registry.getEngine；测试/SAR 可注入）。 */
+  /**
+   * 引擎获取（缺省 registry.getEngine；测试/SAR 可注入）。
+   *
+   * [U2 pi-workflow-run-resource-model] 窗口实例契约：派发窗口作用域的调用方
+   * （workflow-dispatch.routeWorkflowEngine）注入的取用解析必须与其 probe **同一
+   * 来源同一实例**（probeCache 在实例上；probe 探窗口实例而此处取 registry 单例的
+   * 分叉 = 窗口收尾 dispose 掉探过的实例、真正服务 run 的单例反而常驻——G1 静默
+   * 回归）。下方 `?? getEngine(engineId)` 兜底只服务：未注入调用方（chat 域，窗口
+   * 实例挂载归 U3）与 shared-service 引擎透传（现状保形）。per-window 引擎的
+   * fail-fast 防漏改守卫（连接级成员拒答）归 u5 registry D6 改造。
+   */
   getEngineFn?: (engineId: string) => EnginePort;
   /** 注册表存在性检查（缺省 registry.hasEngine）。 */
   hasEngineFn?: (engineId: string) => boolean;
@@ -447,6 +473,10 @@ export function routeEngineForHost(opts: HostRouteOptions): EngineRouteResult | 
     probe: opts.probe,
     // 本地 pi 恒可用（per-session DI 绑定）——get/has/list 注入同一口径：
     // probe 失败兜底时取本地实例接管，engine_not_found 文案不漏报本地 pi。
+    // [U2] 非 pi 分支：注入位 = 窗口实例改道点（窗口作用域调用方经 getEngineFn
+    // 注入窗口实例解析，per-window 引擎零 registry 触达；见 HostRouteOptions.
+    // getEngineFn 契约注释），`?? getEngine` 兜底只服务未注入调用方与 shared-service
+    // 透传。
     getEngineFn: (engineId) =>
       engineId === DEFAULT_ENGINE_ID ? opts.piEngine : (opts.getEngineFn?.(engineId) ?? getEngine(engineId)),
     hasEngineFn: (engineId) =>
@@ -462,4 +492,210 @@ export function routeEngineForHost(opts: HostRouteOptions): EngineRouteResult | 
       return available.includes(DEFAULT_ENGINE_ID) ? available : [DEFAULT_ENGINE_ID, ...available];
     },
   });
+}
+
+// ============================================================
+// 窗口实例状态（pi-workflow-run-resource-model U2）
+// ============================================================
+//
+// 派发窗口作用域的引擎实例登记与收尾释放。设计权威源：ADR-0079 + 技术设计 §3.1
+// 机制 2/3、§3.3 决策 1/2、§5 U2；登记/释放机制本体 = window-instances.ts（U1），
+// 本段是该机制的 workflow 域挂载点（runId 键表登记处 + 取用解析单点）：
+// - 表生命周期随 run：窗口内首次解析引擎时 get-or-create（懒建，lifecycle 不感知）；
+//   finalizeRun 五步序列末尾统一 dispose（worker-message-pump coda 内调用
+//   disposeWorkflowWindowEngineState——编排侧唯一消费点）。
+// - 取用复用面：probe 与实际 run 必须拿到同一实例（probeCache 在实例上；两通道
+//   分叉 = probe 探的是窗口实例、run 却走 registry 单例——窗口实例收尾 dispose 后
+//   registry 单例反而常驻，G1 静默回归）。消费方（workflow-dispatch 的 probe +
+//   getEngineFn 注入、run-orchestration 的 probe）经 resolveWorkflowWindowEnginePort
+//   单点解析，禁止各自直连 registry。
+//
+// 槽位纪律：globalThis[Symbol.for]（registry 同款）——防 jiti 双路径加载分裂
+//（development-guide §7.5）：收尾释放与 service 层消费方可能经不同模块实例装载，
+// 模块级 Map 会让收尾与登记读不到同一份状态。
+
+/**
+ * 单个 workflow run 窗口的引擎实例状态。两份结构同生共死：
+ * - instances：U1 窗口实例表（dispose 记账与收尾释放的唯一权威，幂等 disposeAll）；
+ * - ports：本窗口已创建的引擎协议本体（engineId → EnginePort，取用复用面）。
+ * 表登记与端口写入只在 resolveWorkflowWindowEnginePort 的创建分支成对发生，不存在
+ * 单边漂移写点。
+ */
+export interface WorkflowWindowEngineState {
+  readonly instances: WindowEngineInstances;
+  readonly ports: Map<string, EnginePort>;
+}
+
+const WORKFLOW_WINDOW_STATES_SLOT_KEY = Symbol.for(
+  "@zhushanwen/pi-subagent-workflow.workflowWindowEngineStates",
+);
+
+function getWorkflowWindowStates(): Map<string, WorkflowWindowEngineState> {
+  // globalThis 无 symbol 索引签名，Reflect 读写（registry getRegistrySlot 同款）。
+  let slot = Reflect.get(globalThis, WORKFLOW_WINDOW_STATES_SLOT_KEY) as
+    | Map<string, WorkflowWindowEngineState>
+    | undefined;
+  if (!slot) {
+    slot = new Map();
+    Reflect.set(globalThis, WORKFLOW_WINDOW_STATES_SLOT_KEY, slot);
+  }
+  return slot;
+}
+
+/**
+ * [D6 覆盖重注册触发的反向通知接线] 「dispose 全部活窗口引擎实例」执行体：经
+ * registry 广播槽登记（setActiveWindowEngineDisposer——registry 不反向 import 本
+ * 模块，零环）。覆盖重注册（引擎包升级换新代码）时对还活着的窗口实例触发 dispose，
+ * 不等窗口收尾；窗口后续任务经窗口解析单点按新 descriptor 重建实例（respawn 用新
+ * 代码）。逐窗口走 disposeWorkflowWindowEngineState（先摘后放 + 失败收集留痕）。
+ */
+let activeWindowDisposerRegistered = false;
+
+function ensureActiveWindowDisposerRegistered(): void {
+  if (activeWindowDisposerRegistered) return;
+  activeWindowDisposerRegistered = true;
+  setActiveWindowEngineDisposer(async () => {
+    const states = getWorkflowWindowStates();
+    for (const runId of [...states.keys()]) {
+      await disposeWorkflowWindowEngineState(
+        runId,
+        "engine-reregistered",
+        "registry overwrite (engine package upgraded) — active window instance disposed",
+      );
+    }
+  });
+}
+
+/** 取（或懒建）一个 run 窗口的引擎实例状态。窗口起点 = 首次引擎解析，非 run 创建。 */
+export function workflowWindowEngineState(runId: string): WorkflowWindowEngineState {
+  ensureActiveWindowDisposerRegistered();
+  const states = getWorkflowWindowStates();
+  let state = states.get(runId);
+  if (!state) {
+    state = { instances: createWindowEngineInstances(), ports: new Map() };
+    states.set(runId, state);
+  }
+  return state;
+}
+
+/**
+ * 窗口引擎实例创建通道的注入缝（进程形态判别 + 不经 registry 的实例创建）。
+ *
+ * 生产缺省 = **真实实现**（u5 网关真实化，ADR-0079 D6/§5 网关真实化升级目标）：
+ * processModelOf 读 manifest 注册期快照（u-foundation 解析面：descriptor.manifest.
+ * processModel，缺省 per-window）；createPort 经 descriptor portFactory 产出不经
+ * registry singletons 缓存的新实例（实例登记与收尾归窗口状态，本通道零 singletons
+ * 触达）。测试可注入替身网关（注入覆盖生产缺省——u2/u3 验收用例形态）。
+ *
+ * 形态判定规则（engineProcessModelOfDescriptor 单源）：cli descriptor 按声明值
+ * （缺省 per-window）；inproc 过渡形态 / 未注册 id → 'shared-service'——前者走
+ * registry 单例路径现状保形，后者经 getEngine 抛既有 EngineNotFoundError（安装指引）。
+ */
+export interface WorkflowWindowEngineGateway {
+  /** 引擎进程形态判别（实例创建之前分流——避免为 shared-service 产出有副作用实例再丢弃）。 */
+  processModelOf(engineId: string): EngineProcessModel;
+  /** per-window 引擎实例创建（必须产出不经 registry singletons 缓存的新实例）。 */
+  createPort(engineId: string): EnginePort;
+}
+
+const productionWorkflowWindowEngineGateway: WorkflowWindowEngineGateway = {
+  processModelOf(engineId: string): EngineProcessModel {
+    return engineProcessModelOfDescriptor(getEngineDescriptor(engineId));
+  },
+  createPort(engineId: string): EnginePort {
+    const descriptor = getEngineDescriptor(engineId);
+    if (descriptor === undefined) {
+      // per-window 创建分支的未注册 id：与透传路径同错误形态（含安装指引）。
+      throw new EngineNotFoundError(engineId, listEngines());
+    }
+    if (descriptor.kind !== "cli") {
+      // inproc 形态被 engineProcessModelOfDescriptor 判 shared-service，创建分支不可达；
+      // 防御保留（创建点出声而非静默半个实例的纪律）。
+      throw new EngineNotFoundError(engineId, listEngines());
+    }
+    // portFactory 闭包每次产出新 EngineClient + RemoteEngine——不经 singletons 缓存，
+    // 实例生命周期归窗口状态（登记进窗口表、收尾统一 dispose）。
+    return descriptor.portFactory();
+  },
+};
+
+const WORKFLOW_WINDOW_GATEWAY_SLOT_KEY = Symbol.for(
+  "@zhushanwen/pi-subagent-workflow.workflowWindowEngineGateway",
+);
+
+/** 宿主/测试注入窗口引擎网关（undefined = 回落生产缺省，保守透传）。 */
+export function setWorkflowWindowEngineGateway(gateway: WorkflowWindowEngineGateway | undefined): void {
+  Reflect.set(globalThis, WORKFLOW_WINDOW_GATEWAY_SLOT_KEY, { current: gateway });
+}
+
+function resolveWorkflowWindowEngineGateway(): WorkflowWindowEngineGateway {
+  const slot = Reflect.get(globalThis, WORKFLOW_WINDOW_GATEWAY_SLOT_KEY) as
+    | { current: WorkflowWindowEngineGateway | undefined }
+    | undefined;
+  return slot?.current ?? productionWorkflowWindowEngineGateway;
+}
+
+/**
+ * 窗口作用域引擎解析单点（probe 通道与 getEngineFn 注入的同一来源）：
+ * - per-window 引擎 + 窗口已知：首触创建（网关 createPort）并登记进 U1 表，后续复用
+ *   同一实例——零 registry 触达；
+ * - shared-service 引擎（或窗口未知——chat 域轮窗口归 U3 接线）：透传 registry
+ *   getEngine 单例路径（现状保形；实例表 register 对该形态 no-op 兜漏判）。
+ */
+export function resolveWorkflowWindowEnginePort(
+  windowRunId: string | undefined,
+  engineId: string,
+): EnginePort {
+  const state = windowRunId !== undefined ? workflowWindowEngineState(windowRunId) : undefined;
+  const cached = state?.ports.get(engineId);
+  if (cached) return cached;
+  const gateway = resolveWorkflowWindowEngineGateway();
+  const processModel = gateway.processModelOf(engineId);
+  if (state !== undefined && !isSharedServiceProcessModel(processModel)) {
+    const port = gateway.createPort(engineId);
+    state.ports.set(engineId, port);
+    const instance: WindowEngineInstance = {
+      engineId,
+      processModel,
+      // 引擎停机面委托 EnginePort.dispose（dispose 请求 → 按进程组终止兜底，P2）。
+      // dispose 缺席的引擎实例无可释放资源，disposeAll 对其 await undefined 即过。
+      dispose: () => port.dispose?.(),
+    };
+    state.instances.register(instance);
+    return port;
+  }
+  return getEngine(engineId);
+}
+
+/**
+ * 收尾释放一个 run 窗口的全部引擎实例（worker-message-pump finalizeRun 五步序列
+ * 末尾的唯一生产调用点）。
+ */
+export async function disposeWorkflowWindowEngineState(
+  runId: string,
+  reason: string,
+  context: string,
+): Promise<void> {
+  const states = getWorkflowWindowStates();
+  const state = states.get(runId);
+  if (state === undefined) return;
+  // 先摘后放：与 U1 disposeAll 的「先清空后遍历」叠加，重复收尾构造性 no-op。
+  states.delete(runId);
+  state.ports.clear();
+  const failures = await state.instances.disposeAll();
+  for (const failure of failures) {
+    logger.error(
+      `[engine-routing] window engine dispose failed (runId=${runId}, reason=${reason}, ` +
+        `context=${context}): ${toErrorMessage(failure)}`,
+    );
+  }
+}
+
+/**
+ * 测试隔离：清空全部窗口状态 + 网关注入（setRunEventJournalDirForTest 同款 teardown
+ * 纪律）。生产禁用——进程内窗口状态是全局状态。
+ */
+export function resetWorkflowWindowEngineStatesForTest(): void {
+  getWorkflowWindowStates().clear();
+  setWorkflowWindowEngineGateway(undefined);
 }

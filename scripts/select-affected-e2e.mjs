@@ -110,7 +110,9 @@ function loadMap() {
 
 function changedFiles(base) {
   try {
-    return execSync(`git diff --name-only ${base}...HEAD`, { cwd: REPO_ROOT, encoding: "utf8" })
+    // --diff-filter=d 排除已删除文件：删除不产生 coverage 义务（磁盘已不存在，
+    // 无法登记——validate-e2e-map 的 existsSync 强校验会拒绝死资产条目）
+    return execSync(`git diff --name-only --diff-filter=d ${base}...HEAD`, { cwd: REPO_ROOT, encoding: "utf8" })
       .split("\n")
       .filter(Boolean);
   } catch {

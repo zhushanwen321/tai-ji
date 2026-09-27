@@ -285,9 +285,25 @@ export interface SessionView {
 // ============================================================
 
 /**
+ * 引擎进程形态（manifest `taiji.subagentEngine.processModel` 声明字面量；设计
+ * pi-workflow-run-resource-model §3.3 决策 3）。语义：
+ *   - 'per-window'：窗口作用域实例——引擎薄壳进程随派发窗口（workflow run /
+ *     chat record 轮次）生灭，窗口内复用、窗口收尾 dispose；
+ *   - 'shared-service'：进程级懒加载单例——薄壳（及所辖重服务）随宿主（taiji）
+ *     存活，跨一切窗口共享。
+ * **不是任务能力字段**——能力字段服务 run 前资格判定，本字段服务宿主的实例
+ * 管理（实例挂窗口还是挂注册表单例），刻意不进 EngineCapabilities（混放会让
+ * 能力协商面——握手应答对照、gate 位——误消费）。缺省 = 'per-window'
+ * （轻壳是引擎适配包的常态，重服务是显式特例），解析侧 engine-manifest.ts 落实。
+ */
+export type EngineProcessModel = "per-window" | "shared-service";
+
+/**
  * 引擎能力声明（11 位）。三级：native / emulated / unsupported。
  * 声明的是本仓 subagent 链路实际接通的能力，不是引擎 RPC 层的理论能力。
  * 同步权威 = manifest（注册期直读）；握手应答仅诊断（§3.3「同步成员清单」）。
+ * 进程形态声明是独立字段（上方 EngineProcessModel——manifest 契约面，不在本
+ * 接口内），两套字段服务不同裁决（任务能力 vs 宿主实例管理）。
  */
 export interface EngineCapabilities {
   /** native: --json-schema/--output-schema/env 注入。 */

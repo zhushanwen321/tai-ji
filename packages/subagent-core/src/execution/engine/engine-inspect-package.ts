@@ -8,13 +8,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { isProtocolVersionCompatible, type ModelCatalogEntry } from "@zhushanwen/subagent-engine-sdk";
+import { isProtocolVersionCompatible, type EngineProcessModel, type ModelCatalogEntry } from "@zhushanwen/subagent-engine-sdk";
 
 import {
   describeValue,
   parseCapabilities,
   parseEnvPrefixes,
   parseModelCatalog,
+  parseProcessModel,
   resolveManifestBin,
 } from "./engine-manifest.ts";
 
@@ -38,6 +39,13 @@ export interface DiscoveredEngine {
   id: string;
   /** 发现源标签（env 名 / 宿主根 source / node-modules / config.json）。 */
   source: string;
+  /**
+   * manifest `processModel` 解析产物（缺省归一 'per-window'；pi-workflow-run-resource-model
+   * §3.3 决策 3）。宿主实例管理分流读位：per-window → 窗口作用域实例；shared-service →
+   * registry 单例（现状路径）。挂在条目级而非 descriptor——descriptor 归注册表消费，
+   * 分流判据属发现产物（接线单元自条目读取）。
+   */
+  processModel: EngineProcessModel;
   /** L3 显式 config（initialize.engineConfig 透传；L1/L2 manifest 发现无此项）。 */
   engineConfig?: Record<string, string>;
   descriptor: CliEngineDescriptor;
@@ -249,6 +257,9 @@ export function inspectEnginePackage(
 
   const displayName = parseOptionalDisplayFields(m, id);
 
+  // ── processModel（可选；缺省 = 'per-window'；非法值 warn 回落——§3.3 决策 3）──
+  const processModel = parseProcessModel(id, m["processModel"]);
+
   // O2 版本面：package.json `version` 盖章进 descriptor（registry 稳定标识比较字段——
   // 包升级触发 dispose 换新实例）。非 string / 空串宽容忽略（版本面缺失只降低标识
   // 灵敏度，不影响装载）。
@@ -259,6 +270,10 @@ export function inspectEnginePackage(
   const manifestSnapshot: RemoteEngineManifestSnapshot = {
     capabilities: caps,
     ...(modelCatalog !== undefined ? { modelCatalog } : {}),
+    // [u5 pi-workflow-run-resource-model] 进程形态声明进注册期快照（registry descriptor
+    // 携带 → 网关 processModelOf / getEngine D6 分流的读取源；缺省 undefined =
+    // 解析缺省 'per-window'）。
+    processModel,
   };
 
   const descriptor = buildManifestCliDescriptor({
@@ -273,7 +288,7 @@ export function inspectEnginePackage(
     manifestSnapshot,
     packageVersion,
   });
-  return { status: "ok", entry: { id, source, descriptor } };
+  return { status: "ok", entry: { id, source, processModel, descriptor } };
 }
 
 /** 可执行探测（X_OK；ENOENT/EACCES/平台不支持 → false）。 */

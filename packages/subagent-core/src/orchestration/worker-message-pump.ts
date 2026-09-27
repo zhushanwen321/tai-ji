@@ -101,6 +101,14 @@ import { toErrorMessage } from "../core/error-message.ts";
 import { tryTransition } from "../execution/persistence/execution-record.ts";
 import { resolvePiWorkflowStateDir } from "../execution/assembly/workflow-state-root.ts";
 import type { AgentResult as ExecutionAgentResult, ExecutionRecord } from "../execution/assembly/types.ts";
+// [U2 pi-workflow-run-resource-model] 窗口实例收尾释放（机制本体在 execution/engine/
+// routing.ts 的窗口实例段——finalizeRun 五步序列末尾消费的唯一编排面）。import 方向
+// orchestration/pump → execution/engine/routing：其传递闭包（registry/discovery/
+// window-instances/logger）不 import orchestration，无循环（同上方 execution/
+// persistence·assembly 既有先例的传递闭包论证）。
+import { disposeWorkflowWindowEngineState } from "../execution/engine/routing.ts";
+// [U4] 成员复用池收尾清空（finalizeRun 内先于 run-settled 帧投递；池不反向 import 本文件防环）。
+import { clearMemberReusePool, type MemberReusePoolIo } from "./member-reuse-pool.ts";
 
 const logger = getLogger("subagents");
 
@@ -343,6 +351,21 @@ export async function finalizeRun(
     });
     return false;
   }
+  // [U4 pi-workflow-run-resource-model] 成员复用池清空（设计 §5「成员关闭 + 池清空 +
+  // 薄壳释放」三事同点；决策 9）：member-pool(clear) 事件必须**先于** run-settled 帧投递
+  // ——终局帧落账后 run 进入 terminal，member-pool 是表外转移 fail-fast，清空就再也进
+  // 不了 journal。有登记才发（空池 run 的 journal 保持零 member-pool 帧）；内存条目
+  // 无论事件成败都释放。失败围栏：IllegalTransitionError 让位 debug（并发终局竞窗 /
+  // 无 journal 注入的测试形态），其余 error 留痕不阻断终局 coda（对齐 SW-DATA-3）。
+  try {
+    await clearMemberReusePool(run.runId, memberReusePoolIo);
+  } catch (err) {
+    if (!(err instanceof IllegalTransitionError)) {
+      logger.error(
+        `[workflow] member reuse pool clear failed (runId=${run.runId}, reason=${doneReason}): ${toErrorMessage(err)}`,
+      );
+    }
+  }
   // [OR-8] 终态收口残留 in-flight call（先收口再落盘——快照不再含 running 节点）
   // [P1b-1] run-settled 事件落账先于 closeOut/save（事件流先于快照投影面）：
   // run-settled 的 journal 终局帧只在本函数发生（终态单写点语义，D7-②）。
@@ -400,6 +423,13 @@ export async function finalizeRun(
       logger.error(`[workflow] onRunDone failed (${options.context}): ${m}`);
     }
   }
+  // [U2 pi-workflow-run-resource-model] 五步序列末尾：窗口实例遍历 dispose（设计
+  // §3.1 机制 3 / §5 U2）。时序红线：必须在 closeOutInFlightCalls **之后**——在途
+  // 调用先收敛（薄壳死时在跑的孙进程丢 trap-flush 写盘的防线）、后释放引擎实例；
+  // 放在 coda 最末（onRunDone 围栏之后）=「五步序列末尾追加」的字面落点。失败
+  // 围栏：单实例 dispose 失败由 disposeAll 收集（本函数统一留痕），不阻断收尾
+  //（此刻 coda 已全部完成，disposeAll 自身构造性不抛——U1 契约）。
+  await disposeWorkflowWindowEngineState(run.runId, doneReason, options.context);
   return true;
 }
 
@@ -414,8 +444,8 @@ export async function finalizeRun(
 //   链收口，record 的 outcome 字段接线归后继批次）；
 // - 其余输出动作 = 声明性语义映射（执行体各居其位，不在本段）：notify =
 //   finalizeRun 既有 onRunDone 链、registry-project = run-registry 投影侧、
-//   kill-run-topology = remote-engine D9-2、journal-cleanup-eligible = prune 资格
-//   自然兑现。
+//   journal-cleanup-eligible = prune 资格自然兑现（kill-run-topology 已随
+//   D9-2 定点杀链删除，决策 6-D1）。
 //
 // 活体态：liveRunStates（模块级 Map）是本进程内的状态缓存，miss 时 fold journal
 // （scan + 逐事件 transition 不传 ctx——run-events.ts fold 契约）。terminal 后删除
@@ -529,11 +559,25 @@ export function runEventJournalPathOf(runId: string): string | undefined {
   return join(dir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
 }
 
+/** [U4] run 事件 journal 只读访问器（成员复用池 fold 重建的读通道，决策 9）——池侧
+ *  不自建 journal 实例，防绕过本文件的单写者纪律与 no-op 测试防线。 */
+export async function scanRunEvents(runId: string): Promise<readonly WorkflowRunEvent[]> {
+  const { journal } = resolveRunEventJournal();
+  return journal.scan(runId);
+}
+
+/** [U4] 成员复用池的 journal 读写注入面（append 走 dispatchRunTrigger 单写者链；
+ *  消费方 = finalizeRun 池清空，workflow-dispatch 分岔侧自持同款装配）。 */
+const memberReusePoolIo: MemberReusePoolIo = {
+  appendEvent: (runId, event) => dispatchRunTrigger({ runId }, event),
+  scanEvents: (runId) => scanRunEvents(runId),
+};
+
 /**
  * journal-append 输出对应的事件本体：触发事件属 journal 词表 → 事件本身；控制事件
  * 触发的终局转移 → 合成 run-settled（run-events.ts 输出动作注释约定——当前唯一合法
- * 控制终局 = cancel-requested；abandon-elapsed 行无 journal-append 输出、host-died /
- * watchdog-fired 非终局，构不到这里）。ts 信封在合成时打点（transition 纯函数契约：
+ * 控制终局 = cancel-requested；abandon-elapsed 行无 journal-append 输出、host-died
+ * 非终局，构不到这里）。ts 信封在合成时打点（transition 纯函数契约：
  * 时钟归调用侧）；seq 由 journal.append 分配（入参即 input 形态）。
  */
 function journalEventOf(trigger: TransitionTrigger): WorkflowRunEventInput {

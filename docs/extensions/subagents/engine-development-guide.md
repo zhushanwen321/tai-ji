@@ -50,9 +50,12 @@
 | `capabilities` | 必需 | 段缺失 = 全保守值 + warn；缺键/坏值 = 该键保守值 + warn；未知键忽略 + warn（`engine-manifest.ts:84-139`；保守值表 `CONSERVATIVE_CAPABILITIES` :32-44） |
 | `envPrefixes` | 可选 | 非法条目（非 `^[A-Za-z0-9_]+$` / 含 `*` / 命中宿主保留前缀 `TAIJI_` 族）丢弃该前缀 + warn，包仍可用（:142-172；保留字 :23） |
 | `modelCatalog` | 可选 | 缺省（不写该字段）、`null`、对象三态在解析后必须保持可区分，解析器不得归并（:182-207）：缺省/`null` = 不注入（宿主侧表现为「无枚举面」——模型校验整体跳过，该形态必须保持可达）；对象 = `{dynamic(缺省 true), models[]}`，models 键缺失/非数组时归一为 `null` + warn；models 数组存在但条目全无效时保留 `{dynamic, models: []}`——`models: []` 是「有枚举面但为空」的作者显式声明，解析器不得代填 |
+| `processModel` | 可选 | 进程形态声明（`EngineProcessModel`，SDK `contract-types.ts`），值域 `per-window` / `shared-service`：缺省（未声明）= `per-window`；非法值 warn 回落 `per-window`，包仍可用（解析权威 = `engine-manifest.ts` `parseProcessModel`，产物挂 `DiscoveredEngine.processModel`）。字段语义见下方「进程形态声明」段 |
 | `displayName` / `description` | 可选 | 形态校验，坏值忽略 + warn（`engine-inspect-package.ts:146-161`） |
 
 包级义务：`package.json` `version` 盖章进 descriptor（registry 稳定标识比较字段——包升级触发 dispose 换新实例，:254-256）。检查产物三态：ok（装载）/ skip（必需字段缺失，warn 跳过）/ unusable（protocol 不兼容、bin 不可执行，标记不可用）（:31-34）。依赖红线：引擎包只依赖 SDK（`@zhushanwen/subagent-engine-sdk`），不依赖 core（[architecture.md](architecture.md) §2.3）；SDK 消费入口仅限其 exports 两入口——`.`（契约根）与 `./protocol`（协议面），深路径 import 不在支持面。包命名与 `taiji.role` 分组约束见 [extension-conventions.md](../extension-conventions.md)。
+
+**进程形态声明（`processModel`）**：该字段服务宿主的实例管理——`per-window` = 薄壳进程随派发窗口（workflow run / chat record 轮次）创建、窗口内复用、窗口收尾释放；`shared-service` = 进程级懒加载单例，随宿主存活、跨一切窗口共享（现役声明：pi = `per-window`，zcode = `shared-service`——其薄壳所辖 app-server 是重服务单例）。缺省 `per-window`：轻壳是引擎适配包的常态，重服务是显式特例——第三方轻壳引擎零声明即获正确行为。该字段**不是任务能力**：能力位（§3）服务 run 前资格判定，进程形态服务实例归属（挂窗口作用域还是挂 registry 单例），混放会让能力协商面（握手应答对照、gate 位）误消费，故独立声明、刻意不进 `capabilities` 11 位。
 
 现役 manifest 完整示例（zcode，与包内 package.json 逐键核对一致）：
 
@@ -62,6 +65,7 @@
     "id": "zcode",
     "bin": "zcode-subagent-cli",
     "protocol": 1,
+    "processModel": "shared-service",
     "envPrefixes": ["ZCODE_"],
     "capabilities": { "schemaEnforcement": "emulated", "steer": "unsupported", "conversation": "cold", "personaInjection": "prompt", "eventGranularity": "stream", "sandbox": "emulated", "sessionRead": "full", "resume": "cold", "interrupt": "kill-only", "permissionMode": "native", "maxTurns": false },
     "modelCatalog": { "dynamic": true, "models": [] },
@@ -88,14 +92,14 @@
 | `read` | SessionView 读取（降级链①级，§8） | handle 有效即可；`dataDir` 必填（存量定位依赖，`methods.ts:172-176`） | 任务级无墙钟（大会话慢读不设限，`remote-engine.ts:272-279`） | 是（纯读） | 引擎抛错 → 宿主降级链②③级承接（§8） |
 | `listModels` | 模型目录诊断 | **宿主现行实装不发协议帧**——RemoteEngine 直读 manifest 快照三态映射（`remote-engine.ts:134-144`）；协议方法保留（`methods.ts:178-186`，`models: null` = 无枚举面） | 同步内存判定，无超时语义。引擎仍须实现并应答（属 9 方法集），宿主现行不调用 | 是 | 无（三态：null / [] / 数组） |
 | `validateModel` | 模型 ref 校验 | manifest 同源判定（`remote-engine.ts:155-182`）；`dynamic:false` 且未命中（含 undefined 查缺省）→ 同步拒 **record 不创建** | 同步内存判定 | 是 | `engine_model_unknown`（同步拒）；`dynamic:true` 放行原样 ref，运行期引擎拒绝 → `engine_model_mismatch`（run 失败 + record 标 failed，`error-codes.ts:15`） |
-| `dispose` | 引擎停机 / 包升级换实例 / 杀链清理 | 收尾阶段；应答 `ok:true` | 控制面：**DISPOSE_GRACE_MS** = 3s（`engine-client.ts:95`，杀链路径 :645） | **是**（协议明文「dispose 幂等」，`methods.ts:14`） | 超时不重试（杀链兜底）；幂等重入无害 |
+| `dispose` | **per-window 引擎随窗口收尾释放**（主触发：workflow finalizeRun 五步序列末尾 / chat 轮 idle 收尾链；cancel 不收敛合成终态兜底同链）/ 引擎停机 / 包升级换实例 / 杀链清理 | 收尾阶段；应答 `ok:true` | 控制面：**DISPOSE_GRACE_MS** = 3s（`engine-client.ts:95`，杀链路径 :645） | **是**（协议明文「dispose 幂等」，`methods.ts:14`） | 超时不重试（杀链兜底）；幂等重入无害 |
 | `ping` | 健康检查 | 连接就绪后任意时点（`engine-client.ts:593-597`） | 任务级（不设墙钟） | 是（`pong:true` 恒定） | **ADR-0047：静默 ≠ 卡死，不据此杀任务**（`methods.ts:14`）——ping 失败仅作诊断信号 |
 
 超时分级的依据：控制面单请求（握手/取消受理/停机）= 秒级具名常量；run/read/ping 等任务级 = 无墙钟——任务执行正常路径禁自带超时，回收层兜底允许默认有界（opt-out），见根 AGENTS.md「超时默认原则」与 [crash-forensics-and-watchdog.md](../../architecture/crash-forensics-and-watchdog.md) 附录 E。zcode 引擎侧双 timer（idle 30min / ceiling 60min，`zcode-subagent-cli/src/constants.ts:113`/:122）即回收层默认有界的实装先例（env 可关）。
 
 **未知正向 method 应答义务（宽容语义②，条文权威 ADR-0071）**：宿主演进可能派出本引擎未知的正向 method（协议 additive 演进的跨代窗口）——引擎**必须回 error 帧 `engine_method_unsupported`**（`engine_` 前缀透传面新码，不进 SDK 消费词表，旧宿主经透传判定原样接收不崩），不得静默挂起/无应答/崩溃。该码当前登记未实装（全仓无消费方，「无消费方不进协议」纪律）：**引擎实装义务与 conformance 用例随下一引擎适配层立项随批带上（立项门槛，非时间窗）**。义务同步登记 = 约束 C-proc-24（scope/触发描述双登记「新引擎适配层立项」触发形态：select-constraints 代码 diff 路径 + 本指南必读路径双保险）。
 
-**run 的事件时序不变量**：事件 emit 完成先于 run resolve（不变量 5——journal 完整性依赖此序，journal 接线面 = workflow 域见 §6：coarse 事件在终态收口处补发，`zcode-engine.ts:900`）——引擎不得在 run 应答发出后再补发该 run 的事件。**进程自灭义务**：stdin 关闭（宿主退出/杀链断管）后引擎进程必须自行退出（SDK `armEngineSelfDestruct` 守卫，`spawn.ts:163`；bin 级 e2e 断言⑤「dispose 幂等 + 进程随 stdin 关闭退出」）——宿主不承诺显式 dispose 每个引擎进程。
+**run 的事件时序不变量**：事件 emit 完成先于 run resolve（不变量 5——journal 完整性依赖此序，journal 接线面 = workflow 域见 §6：coarse 事件在终态收口处补发，`zcode-engine.ts:900`）——引擎不得在 run 应答发出后再补发该 run 的事件。**进程自灭义务**：stdin 关闭（宿主退出/杀链断管）后引擎进程必须自行退出（SDK `armEngineSelfDestruct` 守卫，`spawn.ts:163`；bin 级 e2e 断言⑤「dispose 幂等 + 进程随 stdin 关闭退出」）。**显式 dispose 承诺按进程形态分形**（`processModel`，§1）：per-window 引擎随窗口收尾被宿主显式 dispose（dispose 请求 3s 上界 + 按进程组终止兜底）；shared-service 引擎宿主不承诺逐实例显式 dispose，stdin EOF 自灭链承载宿主停机路径。
 
 ### 2.2 反向通道 6 条（`protocol/reverse-channels.ts:24-55`；超时二分 `engine-protocol.ts:85-92`）
 
@@ -200,7 +204,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | `turn_end` | summary? | turn 闭合（`Turn.closed` 置位的驱动） |
 | `message_end` | usage?（`AgentUsage` 四项 + cost?）+ error? | token 增量上报（§8 usage 聚合的源头） |
 | `compaction` | 无 | 上下文压缩发生 |
-| `activity` | 无 | **纯活性信号**：双侧 reducer no-op、不开 turn、不写状态、不落 journal，只承诺「引擎活跃时周期性出现」——供宿主无进展守护刷新判活（长工具执行期）；节流属生产者实现细节不进协议承诺（:101-108） |
+| `activity` | 无 | **纯活性信号**：双侧 reducer no-op、不开 turn、不写状态、不落 journal，只承诺「引擎活跃时周期性出现」——宿主现行无判活消费方（无进展自动回收守护已删；引擎照常发射，journal 豁免与 no-op 语义不变）；节流属生产者实现细节不进协议承诺（:101-108） |
 | `error` | message | 事件流内错误（不替代 run 终态应答的 error outcome） |
 | `armed` | schemaEnvVar + extensionPkg | **schema 强制武装确认回执**（[D3 协议版 P6]，`contract-types.ts:126`）：native 引擎在启动期武装断言通过 + 孙进程 spawn 成功后上报**一次**（仅 native 引擎、仅 schema 任务；emulated 引擎无孙进程 env/扩展依赖，「武装」概念不适用，恒不上报）。宿主是独立信号源（引擎自查断言之外的第二道防线——监控信号不与施控同源）：native schema 任务的 run 在宿主等待窗内未收到本事件即 fail-fast；载荷 = 已核验的武装事实（env 变量名 + 必备扩展包名），宿主落 run 事件 journal（`RunArmedEvent.frame`） |
 
@@ -232,7 +236,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 **接管点副作用复刻义务**：`onSessionCreated`（`zcode-engine.ts:486-495`）承载两个宿主侧副作用——`rt.activeSessions.add(sessionId)`（TTL sweep 豁免集 + dispose close-fire 目标集；`rt.activeSessions` 全仓唯一调用点即此，:720-729 sweep 消费）与 `ctx.onHandleReady` 回传（sessionRef 同源 `zcodeSessionDbPath`）。**任何「会话确立」的新形态（resume 装载确认等）必须在装载确认时点复刻两者**——漏登记的竞态后果（设计 3（native resume，已裁决未实施）实装推演）：超 30 天高龄会话整轮在途期间不在豁免集，TTL sweep（运行时建立 +50ms defer 触发，`ZCODE_SESSION_SWEEP_DEFER_MS`，`constants.ts:241`）可删其库条目，`persistence:"immediate"` 下对已删行续写行为上游未定义。
 
-**宿主侧轮活性守护（引擎的配合义务）**：宿主 run 域共用 settled-watchdog（`subagent-core/src/execution/lifecycle/settled-watchdog.ts`）两段式守护——中段无进展检测（刷新源 = run 事件通道既有事件，**含 `activity` 变体**：引擎在长工具执行期周期性发 activity 即履行刷新义务，静默 ≠ 卡死 ADR-0047）+ 收尾段固定上界（交棒 = run 应答驱动）。引擎义务由此推出：① 活跃产出期保证事件流不断流（至少 activity）；② 终态应答必须可达（subscribe deliveryKind 缺失则终态事件不达、会话假死——`session-channel.ts:70`）。宿主 idle 回收（`lifecycle/lifecycle-manager.ts` per-record idle timer，`armIdleKeepalive` 轮成功收口翻入保活）在轮间生效，与引擎内 timer 正交。
+**轮终应答可达（引擎的配合义务）**：宿主对轮等待链**无计时守护**（2026-09-26 用户裁决删除无进展自动回收的两段式守护：引擎活着但事件不达的未知场景，chat 轮与 workflow run 均不再自动回收，可能挂起需人工停止；剩余保护 = 用户显式任务预算 watchdog env 通道。进程死亡的正面感知仍事件驱动：exit 事件毫秒级通知宿主、未答请求当场失败，宿主不计时猜死）。引擎义务由此保留：**终态应答必须可达**（subscribe deliveryKind 缺失则终态事件不达、会话假死——`session-channel.ts:70`）；活跃产出期事件流断流不再触发宿主回收，但事件照发对 GUI 实时渲染与 journal 完整性仍是输入。宿主 idle 回收（`lifecycle/lifecycle-manager.ts` per-record idle timer，`armIdleKeepalive` 轮成功收口翻入保活）在轮间生效，与引擎内 timer 正交。
 
 **嵌套派发拒绝义务**：引擎内不得再派发 subagent（无界递归守卫）——SDK `nesting-guard.ts` 引擎侧原语（双层：跨进程 `TAIJI_AGENT_SUBAGENT=1` env 统一标记，宿主 spawn 必达；引擎 adapter 检测到即拒 `nested_spawn_rejected` + 剥离各引擎原生嵌套标记防继承泄漏；进程内 ALS 深度计数单点同一文件）——恢复指引 = 当前任务内直接做，不委派。深层原因：嵌套子 record 挂在父进程内存，父轮末回收经 `disposeAllRecords` 连带收起、父 relay 断开触发 kill-on-disconnect（[architecture.md](architecture.md) §4 嵌套生命周期行）——嵌套子**结构性不能活过父的当前轮**，引擎放行嵌套只会制造必失败任务。
 
@@ -306,7 +310,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | §4 错误码 | `subagent-core/.../engine/common/errors.ts` + SDK `protocol/error-codes.ts` | **封闭枚举 + `DEFAULT_RECOVERY_HINTS` Record 全集编译强制** | — |
 | §5 run 载荷 | `protocol/methods.ts`（`RunParams`/`RunContextParams`）+ `contract-types.ts`（`AgentCallOpts`/`ResumeAnchor`） | 帧级 schema（`protocol-schema.test.ts`/`resume-schema.test.ts`） | C-proc-09（relay 身份键）、[zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md) |
 | §6 事件 | `contract-types.ts`（`AgentEvent`）+ `assembly/types.ts`（语义锚定）+ `journal-wiring.ts` | apply-entry-equivalence 等价测试族（投影变更须补用例） | C-proc-13 |
-| §7 生命周期 | `zcode-subagent-cli/src/session-channel.ts` + `zcode-engine.ts` + `constants.ts`（引擎侧）；`assembly/conversation-continuation.ts`（宿主侧） | conformance 套件；settled-watchdog 活性守护（`lifecycle/settled-watchdog.ts`） | C-proc-09/13、[crash-forensics-and-watchdog.md](../../architecture/crash-forensics-and-watchdog.md) 附录 E |
+| §7 生命周期 | `zcode-subagent-cli/src/session-channel.ts` + `zcode-engine.ts` + `constants.ts`（引擎侧）；`assembly/conversation-continuation.ts`（宿主侧） | conformance 套件 | C-proc-09/13、[crash-forensics-and-watchdog.md](../../architecture/crash-forensics-and-watchdog.md) 附录 E |
 | §8 读取投影 | `zcode-subagent-cli/src/reader.ts` + `parser.ts` + `db-path.ts`（`zcodeDbPathAllowlist` 白名单集合）+ `contract-types.ts`（`SessionView`）+ `session-view-service.ts` | — | C-data-20/22 |
 | §9 env/目录 | `packages/shared/src/constants.ts`（`ENV_WHITELIST_PREFIXES`）+ `spawn-env-contract.ts` + `engine/common/data-dir.ts` + `engine/paths.ts` + SDK `spawn.ts`/`env.ts`（引擎侧 spawn/env 契约） | `check_spawn_env_boundary.py`、路径白名单检查、`check_env_whitelist_sync.py` | [env-propagation-boundary.md](../../architecture/env-propagation-boundary.md)、C-proc-09、C-proc-12、C-ext-20、C-data-22 |
 | §10 可靠性模式 | 本指南自定义（模式源 = 设计 3/4 对抗审查裁决，裁决正文暂在仓外，见头部）；已实现参照 `journal-wiring.ts`（`activity` 豁免的「同通道同失败」判别） | — | — |
@@ -318,7 +322,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 ## 13. 新引擎接入 checklist
 
 1. 读 [architecture.md](architecture.md) §1-§3（拓扑 + 协议面）。
-2. 按 §1 准入形态建包：manifest 必填三字段 + capabilities 必需（缺键即保守值降级）、依赖红线（只依赖 SDK，消费入口仅 `.` 与 `./protocol`）；落点按 §1 发现根选择——入仓引擎放 `packages/`（staging 按 manifest 动态发现、`extraResources` 目录映射，均不写死清单，打包布局改动时同批核对两文件）；GUI icon 经 **ENGINE_ICON_REGISTRY** 单点登记（新引擎加一行，未登记 id 防御回中性圆点，C-ext-18）。
+2. 按 §1 准入形态建包：manifest 必填三字段 + capabilities 必需（缺键即保守值降级）+ `processModel`（缺省 `per-window`；重服务单例引擎显式声明 `shared-service`）、依赖红线（只依赖 SDK，消费入口仅 `.` 与 `./protocol`）；落点按 §1 发现根选择——入仓引擎放 `packages/`（staging 按 manifest 动态发现、`extraResources` 目录映射，均不写死清单，打包布局改动时同批核对两文件）；GUI icon 经 **ENGINE_ICON_REGISTRY** 单点登记（新引擎加一行，未登记 id 防御回中性圆点，C-ext-18）。
 3. 按 §2 实现 9 方法 + 6 反向通道（控制面超时上限记牢；run 无墙钟；conformance 过 + bin 级协议 e2e 五断言）；**未知正向 method 必回 error 帧 `engine_method_unsupported`**（§2.1 应答义务）——该码引擎侧实装与对应 conformance 用例随各引擎适配层立项同批带上。
 4. 按 §3 声明 capabilities（引擎类 + package.json 两镜像同批；头注同批写依据）。
 5. 按 §4 登记错误码（引擎合成码进宿主枚举 + 恢复模板，漏登记编译失败）。
@@ -349,3 +353,4 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | 2026-09-19 | 漂移修复：§1 modelCatalog 归一条件精确化——「声明了对象却无有效 models 时归一 null」有歧义（实装：models 键缺失/非数组才归一 null + warn；数组存在但条目全无效保留 models: []），对齐解析器实装改写 | §1 | 补登——文档单侧漂移，对齐审查发现 |
 | 2026-09-21 | D3 schemaEnforcement 武装回执实施（设计 4 该部分落地）：`armed` 事件变体入 AgentEvent 词表（第 10 种），§6 表新增行 + native 引擎武装确认义务（启动期自查断言 + 孙进程 spawn 成功后上报一次，emulated 恒不上报；宿主等待窗 fail-fast）；§5 schemaEnv 行状态标注同步 | §5 / §6 | workflow-architecture-redesign 交付 |
 | 2026-09-22 | engine-protocol 可扩展性 U6 宽容语义成文：§2.1 增未知正向 method 应答义务（`engine_method_unsupported` 登记未实装，实装 + conformance 用例随下一引擎适配层立项随批带上）、§4 透传面登记码注记、§13 checklist 义务条目；§2 conformance 锁定面 `engine-protocol.ts` 行号引用修正（:24-32 → :14-17，U1 头注重写后漂移）；约束 C-proc-24 触发形态双登记同步 | §2 / §2.1 / §4 / §13 | 约束 C-proc-24 |
+| 2026-09-27 | per-window 进程形态落地随动（pi-workflow-run-resource-model）：§2.1 dispose 行调用时机补窗口收尾释放主触发、进程自灭段「宿主不承诺显式 dispose」绝对式条文按形态分形改写（per-window 窗口收尾必显式 dispose / shared-service 保留原语义）；§6 activity 行消费方描述改写实义（宿主现行无判活消费方）；§7 轮活性守护段改写——无进展自动回收的两段式守护（settled-watchdog）已删，保留终态应答可达义务并登记删除后行为（事件不达不再自动回收）；§12 §7 行门禁列删 settled-watchdog 项 | §2.1 / §6 / §7 / §12 | 补登——实现落地当时漏同步指南 |

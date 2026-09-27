@@ -67,8 +67,6 @@ import { FileRunStore } from "../../orchestration/file-run-store.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { NotifyHost, PiLike } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
-// [W4] 轮次活性监督器三态撤下 + settled watchdog disarm（终态路径防 timer 误触发）。
-import { disarmRoundFromProtocol, disarmSettledWatchdog } from "../lifecycle/settled-watchdog.ts";
 import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type { AgentResult, ClosedReason, ExecutionRecord, StopReason } from "../assembly/types.ts";
@@ -177,11 +175,9 @@ export class RecordLifecycle {
       // 感知打断）。幂等：已 aborted 的 controller.abort() 是 no-op。
       record.controller?.abort();
       // 回收面 ii：杀链记账（SIGTERM + 30s SIGKILL 升级，收敛 T2④同款）。
-      // 回收面 iii：disarm idle timer + settled watchdog（进程回收后 timer 只会误触发）。
+      // 回收面 iii：disarm idle timer（进程回收后 timer 只会误触发）。
       killRecordChildWithEscalation(record.id, `disposeAllRecords (${reason})`);
       disarmIdleTimer(record.id);
-      disarmSettledWatchdog(record.id);
-      disarmRoundFromProtocol(record.id);
       // 在飞轮打断 + 队列清空（Continuation 打断编排的 dispose 侧触发——立即打断
       // 不挂起，排队消息随主 session 分叉作废）。
       this.deps.abortContinuationQueue(record.id);
@@ -400,11 +396,9 @@ export class RecordLifecycle {
    * （不终态化——record 留内存 idle + archived，message 寻回可续聊）。
    */
   async archiveIdleRecord(record: ExecutionRecord): Promise<void> {
-    // [T2④ / LC-2] SIGTERM 被无视时 30s 升级 SIGKILL；settled watchdog 同步撤下。
+    // [T2④ / LC-2] SIGTERM 被无视时 30s 升级 SIGKILL。
     // [W3] 实际终止在引擎进程内（kill 链记账 + abort 驱动）。
     disarmIdleTimer(record.id);
-    disarmSettledWatchdog(record.id);
-    disarmRoundFromProtocol(record.id);
     killRecordChildWithEscalation(record.id, "archiveIdleRecord");
     await this.archiveRecord(record, "close(idle)");
   }
@@ -420,8 +414,6 @@ export class RecordLifecycle {
    */
   async idleTimeoutRecycle(record: ExecutionRecord): Promise<void> {
     disarmIdleTimer(record.id);
-    disarmSettledWatchdog(record.id);
-    disarmRoundFromProtocol(record.id);
     killRecordChildWithEscalation(record.id, "idleTimeoutRecycle");
   }
 
@@ -463,12 +455,9 @@ export class RecordLifecycle {
   private cancelBackground(record: ExecutionRecord): boolean {
     record.controller?.abort();
     // [M6/T2④/LC-2] 显式 kill + disarm：abort 轮级 signal 驱动引擎停轮（cancel 帧 →
-    // grace → 杀链），killRecordChildWithEscalation 保证镜像/残留进程必死；settled
-    // watchdog 撤下（等待窗口随取消终结）。
+    // 收敛窗），killRecordChildWithEscalation 保证镜像/残留进程必死。
     killRecordChildWithEscalation(record.id, "cancelBackground");
     disarmIdleTimer(record.id);
-    disarmSettledWatchdog(record.id);
-    disarmRoundFromProtocol(record.id);
     // 在飞轮打断 + 队列清空（cancel 语义 = 停下这一轮——排队消息随用户显式叫停丢弃；
     // Continuation 实例保留：record 未消亡，续聊经 continuationFor 复用）。
     this.deps.abortContinuationQueue(record.id);

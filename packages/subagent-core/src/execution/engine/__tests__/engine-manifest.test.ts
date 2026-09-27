@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { CONSERVATIVE_CAPABILITIES, parseCapabilities } from "../engine-manifest.ts";
+import { CONSERVATIVE_CAPABILITIES, parseCapabilities, parseProcessModel } from "../engine-manifest.ts";
 import type { EngineCapabilities } from "../types.ts";
 
 const FULL_VALID: EngineCapabilities = {
@@ -41,5 +41,24 @@ describe("parseCapabilities 旧格式 warn 回退（P7 验收 c）", () => {
     const out = parseCapabilities("e1", { ...FULL_VALID, futureAxis: "native" });
     expect(out).toEqual(FULL_VALID);
     expect("futureAxis" in out).toBe(false);
+  });
+});
+
+// processModel 解析（pi-workflow-run-resource-model §3.3 决策 3 / 单元 U0 验收 1）：
+// 进程形态不是任务能力，不走 CAPABILITY_ENUMS 词表——缺省与非法值都归一 'per-window'
+// （宿主实例管理分流读位：per-window → 窗口作用域实例，shared-service → registry 单例）。
+describe("parseProcessModel 缺省回落（U0 验收：缺省按 per-window 分流）", () => {
+  it("缺省（未声明）= per-window；显式两枚举值原样解析", () => {
+    expect(parseProcessModel("e1", undefined)).toBe("per-window");
+    expect(parseProcessModel("e1", "per-window")).toBe("per-window");
+    expect(parseProcessModel("e1", "shared-service")).toBe("shared-service");
+  });
+
+  it("非法值（错别字/非串/空串）= warn 回落 per-window（包仍可用）", () => {
+    expect(parseProcessModel("e1", "per_window")).toBe("per-window");
+    expect(parseProcessModel("e1", "shared")).toBe("per-window");
+    expect(parseProcessModel("e1", 42)).toBe("per-window");
+    expect(parseProcessModel("e1", "")).toBe("per-window");
+    expect(parseProcessModel("e1", null)).toBe("per-window");
   });
 });

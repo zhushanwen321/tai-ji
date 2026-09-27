@@ -1,9 +1,8 @@
 /**
- * BATCH S4 中途停止（E2E-BATCH-04）—— 派发后 workflow abort → run 终态 cancelled + 通知照达 + 无孤儿成员任务子进程。
+ * BATCH S4 中途停止（E2E-BATCH-04）—— 派发后 workflow abort → run 终态 cancelled + 通知照达 + 无孤儿（成员任务子进程 + 引擎宿主薄壳）。
  *
  * 登记：E2E-BATCH-04（docs/testing/e2e-map.json，R2 按改动面 on-diff，serial 空载串行，
- * L3 真实 LLM）。本 spec 是 2026-09-22 丢失剧本的重建产物（W1 介质归位触发义务）
- * ——落 git 跟踪路径、不落 .tmp；e2e-map assets 产物行的回填归 U6 同 commit。
+ * L3 真实 LLM）。
  *
  * 断言语义来源（两段叠加，以 W1 新介质为准）：
  * - 场景编排 = 原始场景 S4（e2e-map E2E-BATCH-04.note）：派发后 workflow abort →
@@ -15,12 +14,10 @@
  *   ② notifyDone 送达恰 1 条（wf-done:<runId> 幂等键——abort 终局通知链不丢）；
  *   ③ workflow-record v2 settled 条目 outcome === journal outcome（journal 唯一事实源
  *      的终态投影面）；
- *   ④ 无孤儿成员任务子进程：abort 收口后成员任务保活进程（sleep）无残留（R0/C1
- *      孤儿进程修复的端到端验收面——abort 先 kill run 拓扑 spawned children 再收口）。
- *      引擎宿主进程不在判定面：现行设计引擎宿主是连接级常驻（armEngineSelfDestruct
- *      自灭判据 = stdin EOF/管道断/反向请求超时，无「run 结束」项；D9-2 裁决 run 级
- *      回收禁杀引擎）——abort 后引擎宿主存活是设计行为，不数孤儿。per-run 退出形态
- *      已另行立项，落地后本断言可升级为「引擎宿主亦退出」。
+ *   ④ 无孤儿：abort 收口后成员任务保活进程（sleep）无残留（R0/C1 孤儿进程修复的
+ *      端到端验收面——abort 先杀 run 拓扑 spawned children 再收口），且引擎宿主
+ *      （pi-subagent-cli 薄壳）一并退出（pi-workflow-run-resource-model per-window
+ *      形态：薄壳随派发窗口生灭，run 收尾 finalizeRun 遍历窗口实例 dispose 杀薄壳）。
  *
  * 可复用登记声明：本 spec 是 E2E-BATCH-04 的可复用真机资产（后续触碰 abort/收口/
  * 引擎进程回收行为面时直接执行本文件，不再重建一次性剧本）。
@@ -33,10 +30,13 @@
  *  （MEMBER_SLEEP_S——派发/abort 两 turn 的真实 LLM 耗时须落在保活窗内；若 abort 时
  *   run 已自然完成（收到 outcome=completed），属保活窗口不足 → 调大 MEMBER_SLEEP_S，
  *   禁止放宽断言）。
- * - 进程核对锚：特征集 = 命令行含 "sleep ${MEMBER_SLEEP_S}"（DISPATCH_PROMPT 指定的
- *   成员保活命令——本 run 派生出的成员任务子进程的直接特征）。引擎宿主（命令行含
- *   'pi-subagent-cli' / '/engines/'）不数：连接级常驻，abort 后存活是设计行为（见头注
- *   断言 ④）。真机首跑若特征不命中（pi bash 工具 spawn 形态变化），校准特征集而非
+ * - 进程核对锚（双特征集，互不重叠）：
+ *   ① 成员保活 = 命令行含 "sleep ${MEMBER_SLEEP_S}"（DISPATCH_PROMPT 指定的成员
+ *     保活命令——本 run 派生出的成员任务子进程的直接特征）。
+ *   ② 引擎宿主薄壳 = scripts/count-engine-shell-processes.mjs（特征串权威单源：
+ *     'pi-subagent-cli' / '/engines/' 并集，从 spawn 实装读取；判定用「派发前基线 →
+ *     收口后复测」差分，zcode 常驻单例与测试进程 cmdline 噪声被基线吸收——脚本头注
+ *     口径）。真机首跑若特征不命中（pi bash 工具 spawn 形态变化），校准特征集而非
  *   删除断言。
  * - 失败归因：writeDiag 落 /tmp/batch-s4-*.json（journal 帧序 + 进程快照 + 日志尾）
  *   + console 抓取 + 全页截图 + <dataDir>/logs/。重试禁令：失败先归因。
@@ -56,7 +56,7 @@ import {
   waitForExtensionsReady,
   type WsFrame,
 } from './fixtures/launch-app-real'
-import { execSync } from 'node:child_process'
+import { execSync, execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -224,8 +224,8 @@ function attachConsoleCapture(page: Page): { all: string[]; errors: string[] } {
   return { all, errors }
 }
 
-/** 成员任务保活进程计数（孤儿核对锚，见头注「进程核对锚」段）。
- *  只数成员保活 sleep 进程，不数引擎宿主（连接级常驻，abort 后存活是设计行为）。 */
+/** 成员任务保活进程计数（孤儿核对锚 ①，见头注「进程核对锚」段）。
+ *  只数成员保活 sleep 进程；引擎宿主薄壳走 countEngineShellProcesses（锚 ②）。 */
 function countMemberSleeperProcesses(): { count: number; lines: string[] } {
   let out = ''
   try {
@@ -241,9 +241,28 @@ function countMemberSleeperProcesses(): { count: number; lines: string[] } {
   return { count: lines.length, lines }
 }
 
+/** 引擎宿主薄壳计数（孤儿核对锚 ②：'pi-subagent-cli' / '/engines/' 特征并集）。
+ *  复用 scripts/count-engine-shell-processes.mjs（特征串权威单源——从引擎 spawn
+ *  实装读取，子进程取 JSON 输出）；宿主判定用基线差分（zcode 常驻单例与测试进程
+ *  cmdline 噪声被基线吸收，脚本头注口径）。 */
+function countEngineShellProcesses(): { count: number; lines: string[] } {
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [path.join(REPO_ROOT, 'scripts', 'count-engine-shell-processes.mjs')],
+      { encoding: 'utf8', timeout: 10_000 },
+    )
+    const parsed = JSON.parse(out) as { count: number; processes: { pid: number; command: string }[] }
+    return { count: parsed.count, lines: parsed.processes.map((p) => `${p.pid} ${p.command}`) }
+  } catch (err) {
+    console.warn(`[batch-s4] 引擎宿主计数不可读（降级 -1 哨兵）：${String(err)}`)
+    return { count: -1, lines: [] }
+  }
+}
+
 // ── S4 主用例 ────────────────────────────────────────────────────────────
 
-test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达 + 无孤儿成员任务子进程', async ({ }, testInfo) => {
+test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达 + 无孤儿（成员任务子进程 + 引擎宿主薄壳）', async ({ }, testInfo) => {
   test.setTimeout(420_000)
 
   // 凭证双门（缺一 skip 不 fail——防全量扫跑烧 token）
@@ -279,9 +298,11 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     const sub = await openListenWs(port, sid)
     listen = sub
 
-    // 进程基线（成员保活进程 spawn 前；正常环境应为 0）
+    // 进程基线（成员保活进程与引擎宿主薄壳 spawn 前；正常环境两者均应为 0）
     const baseline = countMemberSleeperProcesses()
     expect(baseline.count, '进程基线应可读（ps 失败 = -1 哨兵，环境异常 fail-fast）').toBeGreaterThanOrEqual(0)
+    const shellBaseline = countEngineShellProcesses()
+    expect(shellBaseline.count, '引擎宿主薄壳基线应可读（计数脚本失败 = -1 哨兵，环境异常 fail-fast）').toBeGreaterThanOrEqual(0)
 
     // ── turn 1：派发长任务批（成员 bash sleep 保活） ──
     const sendReply = await wsRoundTrip(port, {
@@ -335,6 +356,17 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
       })
     }
     expect(inFlight, `派发后成员保活进程数应 > 基线（在飞证据；特征锚见 diag）`).toBe(true)
+
+    // 引擎宿主薄壳在跑（per-window 在飞证据：窗口内薄壳存活，是收口后可回收的前提）
+    const shellInFlight = await waitUntil(() => countEngineShellProcesses().count > shellBaseline.count, JOURNAL_TIMEOUT_MS)
+    if (!shellInFlight) {
+      writeDiag('batch-s4-engine-shell-not-seen.json', {
+        shellBaseline: shellBaseline.lines,
+        shellCurrent: countEngineShellProcesses().lines,
+        hint: '薄壳特征不命中（pi-subagent-cli / /engines/）——按 count-engine-shell-processes.mjs 头注校准特征集，不删宿主断言',
+      })
+    }
+    expect(shellInFlight, `派发后引擎宿主薄壳数应 > 基线（per-window 在飞证据；特征锚见 diag）`).toBe(true)
     await page.screenshot({ path: testInfo.outputPath('s4-in-flight.png'), fullPage: true })
 
     // ── turn 2：abort ──
@@ -438,10 +470,13 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     expect(thisRunSettled, 'workflow-record v2 settled 条目应存在（abort run 也写终态条目）').toBeDefined()
     expect(thisRunSettled?.['outcome'], 'settled 条目 outcome 应为 cancelled（与 journal run-settled 一致）').toBe('cancelled')
 
-    // ── 断言 A4：无孤儿成员任务子进程（正面对照 = 派发后曾 > 基线） ──
-    // 断言对象 = 成员保活 sleep 进程（run 拓扑 spawned children）：abort 的 kill
-    // 分级先杀 run 拓扑再收口，杀干净后应立即回落基线。引擎宿主不在判定面（连接级
-    // 常驻，头注断言 ④）。diag 带 etime/ppid 供残留时定位 kill 链路。
+    // ── 断言 A4：无孤儿（正面对照 = 派发后两者均曾 > 基线） ──
+    // ① 成员保活 sleep 进程（run 拓扑 spawned children）：abort 的 kill 分级先杀
+    //    run 拓扑再收口，杀干净后应立即回落基线。
+    // ② 引擎宿主 pi-subagent-cli 薄壳：per-window 形态下随派发窗口生灭（run 收尾
+    //    finalizeRun 遍历窗口实例 dispose），收口后同样回落基线（头注断言 ④ 升级面；
+    //    计数复用 count-engine-shell-processes.mjs，基线差分吸收环境噪声）。
+    // diag 带 etime/ppid 供残留时定位 kill 链路。
     const orphanFree = await waitUntil(() => countMemberSleeperProcesses().count <= baseline.count, ORPHAN_GRACE_MS, 1000)
     if (!orphanFree) {
       // countMemberSleeperProcesses 的 lines 是 `ps -axo command=` 纯命令行（无 PID 列）——
@@ -470,12 +505,24 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     }
     expect(orphanFree, `abort 收口后成员保活进程数应回落基线（孤儿窗口 ${ORPHAN_GRACE_MS}ms；残留进程见 diag）`).toBe(true)
 
+    // 断言 A4b：引擎宿主薄壳回落基线（per-window 收尾 dispose——abort 收尾杀薄壳，
+    // 头注断言 ④ 升级面；同窗等待吸收成员任务收尾与薄壳退出的时序差）
+    const shellOrphanFree = await waitUntil(() => countEngineShellProcesses().count <= shellBaseline.count, ORPHAN_GRACE_MS, 1000)
+    if (!shellOrphanFree) {
+      writeDiag('batch-s4-engine-shell-orphans.json', {
+        shellBaseline: shellBaseline.lines,
+        shellCurrent: countEngineShellProcesses().lines,
+        journalEventTypes: frames.map((f) => f['type']),
+      })
+    }
+    expect(shellOrphanFree, `abort 收口后引擎宿主薄壳应退出（计数回落基线，孤儿窗口 ${ORPHAN_GRACE_MS}ms；残留见 diag）`).toBe(true)
+
     await page.screenshot({ path: testInfo.outputPath('s4-aborted.png'), fullPage: true })
     if (consoleCap.errors.length > 0) {
       writeDiag('batch-s4-console-errors.json', { errors: consoleCap.errors.slice(-50) })
       console.warn(`[batch-s4] renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言面）`)
     }
-    console.log(`[batch-s4] PASS：runId=${runId} cancelled 收口、通知照达、零成员任务残留`)
+    console.log(`[batch-s4] PASS：runId=${runId} cancelled 收口、通知照达、零成员任务残留、引擎宿主薄壳已退出`)
   } finally {
     try {
       listen?.ws.close()

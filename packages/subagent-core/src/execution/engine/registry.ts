@@ -25,6 +25,7 @@ import type { ModelCatalogEntry } from "@zhushanwen/subagent-engine-sdk";
 
 import type { EngineCapabilities } from "./types.ts";
 import type { EnginePort } from "./port.ts";
+import type { EngineProcessModel } from "./window-instances.ts";
 
 // core log facade（execution 层统一 "subagents" component，模块顶层缓存惯例）。
 const logger = getLogger("subagents");
@@ -51,6 +52,12 @@ export interface EngineManifestSnapshot {
   modelCatalog?: { dynamic: boolean; models: ModelCatalogEntry[] } | null;
   /** manifest `displayName`（可选，缺省 = id；D4 缺省引擎回落序的排序键）。 */
   displayName?: string;
+  /**
+   * manifest `taiji.subagentEngine.processModel`（U0 / ADR-0079 决策 3）：宿主实例
+   * 管理分流判据。缺省 undefined = 解析缺省 'per-window'（见
+   * engineProcessModelOfDescriptor 的归一规则）。
+   */
+  processModel?: EngineProcessModel;
 }
 
 /** cli 形态 descriptor（目标形态）：引擎 CLI 启动参数 + manifest 快照 + port 装配器。 */
@@ -149,6 +156,12 @@ export class EngineNotFoundError extends Error {
  * id → descriptor（注册表本体）+ id → 惰性单例（getEngine 首次取用创建；重复注册
  * 覆盖时丢弃旧实例）。进程级单例状态，用 globalThis[Symbol.for] 持有防 jiti 双路径
  * 加载分裂（development-guide §7.5），不用模块级 const。
+ *
+ * [D6 改造（ADR-0079）] singletons 只服务 shared-service 引擎（进程级懒加载单例）；
+ * per-window 引擎不进 singletons——窗口实例由窗口对象持有（window-instances 表 +
+ * routing/chat-rounds 的窗口状态），getEngine 对其返回**同步只读代理**（见
+ * readOnlyEngineProxy）。readOnlyProxies 是代理的实现缓存（代理无进程无连接，纯
+ * manifest 快照读——缓存的是快照读取面，不是活实例；descriptor 覆盖重注册时清掉）。
  */
 const ENGINE_REGISTRY_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagent-workflow.engineRegistry");
 
@@ -156,6 +169,7 @@ const ENGINE_REGISTRY_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagent-workflow.en
 interface EngineRegistrySlot {
   descriptors: Map<string, EngineDescriptor>;
   singletons: Map<string, EnginePort>;
+  readOnlyProxies: Map<string, EnginePort>;
 }
 
 function getRegistrySlot(): EngineRegistrySlot {
@@ -163,10 +177,91 @@ function getRegistrySlot(): EngineRegistrySlot {
   // 避免双重断言（同 model-config-service.ts 先例）。
   let slot = Reflect.get(globalThis, ENGINE_REGISTRY_SLOT_KEY) as EngineRegistrySlot | undefined;
   if (!slot) {
-    slot = { descriptors: new Map(), singletons: new Map() };
+    slot = { descriptors: new Map(), singletons: new Map(), readOnlyProxies: new Map() };
     Reflect.set(globalThis, ENGINE_REGISTRY_SLOT_KEY, slot);
   }
   return slot;
+}
+
+/**
+ * descriptor 的进程形态归一（ADR-0079 决策 3 单一权威判定）：
+ *   - cli descriptor：manifest 声明值；未声明 = 缺省 'per-window'（轻壳是常态）；
+ *   - inproc descriptor（过渡期宿主内建工厂）：'shared-service'——inproc 实例本就是
+ *     进程级单例语义，无窗口进程资源可回收，走 registry 单例路径（现状保形）；
+ *   - undefined（id 未注册）：'shared-service'——形态判定不引入新错误形态，调用方
+ *     随后的 getEngine/createPort 抛既有 EngineNotFoundError（含安装指引）。
+ */
+export function engineProcessModelOfDescriptor(
+  descriptor: EngineDescriptor | undefined,
+): EngineProcessModel {
+  if (descriptor === undefined || descriptor.kind !== "cli") return "shared-service";
+  return descriptor.manifest?.processModel ?? "per-window";
+}
+
+/** 按 id 读 descriptor（不实例化——形态判定 / 网关创建通道；未注册返回 undefined）。 */
+export function getEngineDescriptor(id: string): EngineDescriptor | undefined {
+  return getRegistrySlot().descriptors.get(id);
+}
+
+/**
+ * per-window 引擎的 getEngine 代理拒答错误（D6 fail-fast）：连接级成员（probe / run /
+ * read / dispose）对窗口作用域引擎经 getEngine 取用一律拒答——防漏改调用点静默 spawn
+ * 无人收割的薄壳（G1 静默回归）。错误指路窗口实例解析单点（routing.
+ * resolveWorkflowWindowEnginePort / chat 轮轮次解析 / pi-host-binding）。
+ */
+export class WindowScopeEngineError extends Error {
+  /** 结构化错误码（registry 本地面，非引擎协议错误码词表成员）。 */
+  readonly code = "engine_window_scoped";
+  /** 被拒答的引擎 id。 */
+  readonly engineId: string;
+  /** 被拒答的 EnginePort 成员名。 */
+  readonly member: string;
+
+  constructor(engineId: string, member: string) {
+    super(
+      `engine_window_scoped: engine '${engineId}' is a per-window engine — its connection-level ` +
+        `member '${member}()' is not answerable through getEngine (a process spawned here would ` +
+        `be a permanently undisposed orphan). Sync read-only members (capabilities / listModels / ` +
+        `validateModel) read the manifest snapshot directly. Recovery: resolve the engine through ` +
+        `the window-instance resolution point for your dispatch window (workflow run: ` +
+        `resolveWorkflowWindowEnginePort; chat round: ChatRounds.resolveRoundEnginePort) or the ` +
+        `engine gateway injected at the SAR probe/getEngineFn seam.`,
+    );
+    this.name = "WindowScopeEngineError";
+    this.engineId = engineId;
+    this.member = member;
+  }
+}
+
+/**
+ * per-window 引擎的同步只读代理（D6）：构造同步无连接（底层 RemoteEngine 构造不
+ * spawn——§3.5.3 代理形态）；同步只读成员（capabilities / listModels / validateModel）
+ * 直读 manifest 注册期快照——8 处生产调用面的同步只读 3 处零改动兼容；连接级成员
+ * fail-fast（WindowScopeEngineError，指路窗口实例解析）。
+ *
+ * validateModel 的「catalog 省略 = 成员摘除」形态保形：RemoteEngine 构造器对省略
+ * catalog 置 own undefined ——代理同样缺席该成员（消费方 `typeof engine.validateModel
+ * !== "function"` 判定照常跳过校验）。
+ */
+function readOnlyEngineProxy(id: string, descriptor: CliEngineDescriptor): EnginePort {
+  const engine = descriptor.portFactory();
+  const refuse = (member: string): never => {
+    throw new WindowScopeEngineError(id, member);
+  };
+  return {
+    id: engine.id,
+    capabilities: () => engine.capabilities(),
+    probe: () => refuse("probe"),
+    run: () => refuse("run"),
+    read: () => refuse("read"),
+    ...(engine.listModels !== undefined
+      ? { listModels: () => engine.listModels!() }
+      : {}),
+    ...(engine.validateModel !== undefined
+      ? { validateModel: (modelRef: string | undefined) => engine.validateModel!(modelRef) }
+      : {}),
+    dispose: () => refuse("dispose"),
+  };
 }
 
 /** descriptor → port 装配器（两形态透明收敛点：inproc = factory，cli = portFactory）。 */
@@ -234,7 +329,7 @@ function stableDescriptorKey(value: unknown): string {
 }
 
 /**
- * [D2b] 稳定标识等价判定：同 id 重注册时新旧 descriptor 是否「同一引擎」。
+ * [D2b/D6] 稳定标识等价判定：同 id 重注册时新旧 descriptor 是否「同一引擎」。
  *
  * 稳定标识字段集（实施期对照 discovery 写入 CliEngineDescriptor 的实际字段集核定，
  * = 除 portFactory 外的全部字段）：
@@ -277,6 +372,48 @@ function isStableEquivalentDescriptor(
 }
 
 /**
+ * 活跃窗口实例 dispose 的广播槽（D6 覆盖重注册触发的反向通知通道）：窗口实例分散
+ * 在各窗口对象上（workflow run / chat 轮次各自的窗口状态），registry 不反向依赖
+ * 窗口挂载模块（会成环——routing import registry）——窗口状态段（routing.ts）在
+ * 首个窗口创建时把「dispose 全部活窗口实例」经本槽登记，registry 覆盖重注册时
+ * 触发。globalThis[Symbol.for] 槽位纪律（registry 同款）。
+ */
+const ACTIVE_WINDOW_DISPOSER_SLOT_KEY = Symbol.for(
+  "@zhushanwen/pi-subagent-workflow.activeWindowEngineDisposer",
+);
+
+/** 窗口状态段接线口：登记「dispose 全部活窗口引擎实例」的执行体（重复登记覆盖）。 */
+export function setActiveWindowEngineDisposer(
+  disposer: () => Promise<void> | void,
+): void {
+  Reflect.set(globalThis, ACTIVE_WINDOW_DISPOSER_SLOT_KEY, { current: disposer });
+}
+
+/** 触发活窗口实例 dispose（fire-and-forget；异常留痕不阻断注册链）。 */
+function triggerActiveWindowEngineDispose(source: string): void {
+  const slot = Reflect.get(globalThis, ACTIVE_WINDOW_DISPOSER_SLOT_KEY) as
+    | { current?: () => Promise<void> | void }
+    | undefined;
+  const disposer = slot?.current;
+  if (disposer === undefined) return;
+  try {
+    Promise.resolve(disposer()).then(undefined, (err: unknown) => {
+      logger.warn(
+        `[engine-registry] active-window engine dispose rejected (${source}, best-effort continue): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+  } catch (err) {
+    logger.warn(
+      `[engine-registry] active-window engine dispose threw synchronously (${source}, best-effort continue): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
+/**
  * 登记引擎 descriptor（D1 双模注册入口）。inproc（过渡期内建引擎）与 cli（引擎包，
  * portFactory 由发现器装配）两形态。
  *
@@ -297,6 +434,13 @@ export function registerEngineDescriptor(id: string, descriptor: EngineDescripto
   }
   const previous = slot.singletons.get(id);
   if (previous) triggerEngineDispose(previous, `registerEngineDescriptor('${id}') overwrite`);
+  // per-window 代理缓存随 descriptor 替换失效（新 descriptor 的新 manifest 快照）。
+  slot.readOnlyProxies.delete(id);
+  // [D6 待实施要求（ADR-0079）] 覆盖重注册（引擎包升级换新代码）对还活着的窗口实例
+  // 同样触发 dispose，不等窗口收尾——per-window 实例不进 singletons，单例触达不了；
+  // 「升级即换新代码」由本触发 + 窗口后续任务经窗口解析单点按新 descriptor 重建
+  // 共同兑现。触发不等待 + 失败留痕不阻断（同 triggerEngineDispose 纪律）。
+  triggerActiveWindowEngineDispose(`registerEngineDescriptor('${id}') overwrite`);
   slot.descriptors.set(id, descriptor);
   slot.singletons.delete(id);
 }
@@ -306,10 +450,12 @@ export function registerEngineDescriptor(id: string, descriptor: EngineDescripto
  * （session-runner markAllSpawnedChildrenDead）在杀 per-record children 之前调用——
  * 常驻进程的回收归引擎 dispose，本函数只负责按序触发。
  *
- * 只遍历 singletons：已实例化才可能持有常驻资源，绝不经 getEngine 实例化未用
- * 引擎（停机路径反向创建资源违背停机语义）。dispose 后不删单例——幂等与
- * 「dispose 后首个 run 自动重建」由引擎实现承诺（§3.4 不变量 4），registry
- * 不越权管理引擎内部生命周期。
+ * 只遍历 singletons（[D6 改造] = shared-service 引擎；per-window 引擎不进
+ * singletons——其窗口实例的停机回收由 stdin EOF 自灭链承载：宿主退出 → pi 宿主死 →
+ * 薄壳 stdin EOF → 自灭防御机制杀进程组连带孙进程，构造性覆盖全部窗口实例）。
+ * 已实例化才可能持有常驻资源，绝不经 getEngine 实例化未用引擎（停机路径反向创建
+ * 资源违背停机语义）。dispose 后不删单例——幂等与「dispose 后首个 run 自动重建」
+ * 由引擎实现承诺（§3.4 不变量 4），registry 不越权管理引擎内部生命周期。
  */
 export function disposeEngines(): void {
   for (const engine of getRegistrySlot().singletons.values()) {
@@ -318,9 +464,15 @@ export function disposeEngines(): void {
 }
 
 /**
- * 按 id 取引擎代理（两形态透明）。惰性单例：descriptor 首次使用才解析（inproc 工厂
- * / cli portFactory 都是此刻才调用——构造同步、缺包/坏包不在本函数期 throw，§3.5.3
- * 代理形态；cli 形态实例 = W2 RemoteEngine，失败形态是首次协议调用的结构化错误）。
+ * 按 id 取引擎代理（两形态透明；[D6 改造] 按进程形态二分）：
+ *   - shared-service 引擎（含 inproc 过渡形态）：惰性单例（descriptor 首次使用才
+ *     解析——构造同步、缺包/坏包不在本函数期 throw，§3.5.3 代理形态；cli 形态实例
+ *     = W2 RemoteEngine，失败形态是首次协议调用的结构化错误）；
+ *   - per-window 引擎：**不进 singletons**（窗口实例由窗口对象持有——workflow run /
+ *     chat 轮次的窗口状态，取用走窗口实例解析单点），本函数返回同步只读代理
+ *     （readOnlyEngineProxy：同步成员直答 manifest 快照、连接级成员 fail-fast——
+ *     防漏改调用点静默 spawn 无人收割的薄壳 = G1 静默回归）。代理按 id 缓存
+ *     （纯快照读面，无进程资源；descriptor 覆盖重注册时失效重建）。
  */
 export function getEngine(id: string): EnginePort {
   const slot = getRegistrySlot();
@@ -329,6 +481,15 @@ export function getEngine(id: string): EnginePort {
   const descriptor = slot.descriptors.get(id);
   if (!descriptor) {
     throw new EngineNotFoundError(id, listEngines());
+  }
+  // per-window 判定恒含 cli（engineProcessModelOfDescriptor 对 inproc 恒
+  // shared-service）——此处的 kind 窄化是类型层面冗余、语义层面恒真。
+  if (descriptor.kind === "cli" && engineProcessModelOfDescriptor(descriptor) === "per-window") {
+    const proxy = slot.readOnlyProxies.get(id);
+    if (proxy) return proxy;
+    const created = readOnlyEngineProxy(id, descriptor);
+    slot.readOnlyProxies.set(id, created);
+    return created;
   }
   const engine = portFactoryOf(descriptor)();
   slot.singletons.set(id, engine);
@@ -383,4 +544,5 @@ export function clearEngines(): void {
   const slot = getRegistrySlot();
   slot.descriptors.clear();
   slot.singletons.clear();
+  slot.readOnlyProxies.clear();
 }

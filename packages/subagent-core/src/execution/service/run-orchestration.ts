@@ -14,9 +14,9 @@
 //
 // [2026-09-13 design-code-sync 兑现] [G1] 段预留的备选预案（第三文件再拆 Continuation
 // 协作面）落地：本文件折算 845 破 800 零余量锁定线，拆出 chat-rounds.ts（chat 域轮次
-// 编排——Continuation 实例表 + 统一投递入口 + kickOffChatRound 轮次主干 + one-shot
-// settled-watchdog fire 处置 + 轮末收口协作 + SP-5 升级 gate + Continuation 生命周期
-// 显式接口）。两文件零互调零 import（workflow-dispatch 同款形态）：
+// 编排——Continuation 实例表 + 统一投递入口 + kickOffChatRound 轮次主干 + 轮末收口协作
+// + SP-5 升级 gate + Continuation 生命周期显式接口）。两文件零互调零 import
+//（workflow-dispatch 同款形态）：
 //   - 本聚合 → chat-rounds：executeViaEngine 的首轮派发调用点，经 deps 回调
 //     startFirstChatRound（壳装配闭包指 ChatRounds 实例方法；[modeless 波1] 四象限
 //     坍缩后唯一派发路径，kickOffChatRound 回调已删）；
@@ -71,13 +71,16 @@ import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts"
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
-import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
-import { type EngineRouteResult, routeEngineForHost } from "../engine/routing.ts";
+import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
+import {
+  type EngineRouteResult,
+  resolveWorkflowWindowEnginePort,
+  routeEngineForHost,
+} from "../engine/routing.ts";
 import type { AgentOutcome } from "../engine/types.ts";
 // [V2 决策 3] lifecycle-manager：[T4②] DEFAULT_IDLE_TIMEOUT_MS 是 assertIdleTimeoutMsSafe
 // 错误文案的缺省时长基准（[R4] 唯一消费主体随域迁入本聚合）。
 import { DEFAULT_IDLE_TIMEOUT_MS } from "../lifecycle/lifecycle-manager.ts";
-import { disarmRoundFromProtocol } from "../lifecycle/settled-watchdog.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { AgentConfig, ModelInfo, ResolvedModel } from "../assembly/model-resolver.ts";
 import type { NotifyHost } from "../notify/notify-host.ts";
@@ -102,8 +105,6 @@ import type {
 } from "../assembly/types.ts";
 import { DEFAULT_AGENT_NAME } from "../assembly/types.ts";
 // [R6/D-R4-4] 跨聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
-// [2026-09-13 design-code-sync] MS_PER_SECOND / SECONDS_PER_MINUTE 消费主体
-//（onOneShotSettledWatchdogTimeout）已迁 chat-rounds.ts，本聚合余 PRIORITY_BACKGROUND。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
 
 /**
@@ -137,7 +138,7 @@ export interface RunOrchestrationDeps {
   readonly getCwd: () => string;
   /** WorktreeManager（worktree 创建/清理 + FinalizeDeps）。 */
   readonly getWorktreeManager: () => WorktreeManager;
-  /** NotifyHost（pending emit + one-shot watchdog 失败通知 + FinalizeDeps 注销面）。 */
+  /** NotifyHost（pending emit + FinalizeDeps 注销面）。 */
   readonly getNotifyHost: () => NotifyHost;
   /** ConcurrencyPool（DefaultConcurrencyPool 共享池——execute/executeAndAwait/
    *  chat 轮次/引擎任务的并发槽）。 */
@@ -286,7 +287,12 @@ export class RunOrchestration {
       // 恒非空会把一切兜底误判为 model 绑定命中）
       taskModel: opts.model,
       strict: this.deps.getModelService().getGlobalConfig().engineRouting?.strict === true,
-      probe: (engineId) => getEngine(engineId).probe(),
+      // [U2 pi-workflow-run-resource-model] probe 通道经窗口实例解析单点改道（不再
+      // 直连 registry getEngine——惰性单例是薄壳跨窗口常驻的根源）。本入口（GUI 直派
+      // 链）的窗口 = chat record 轮次，其窗口实例挂载归 U3 接线；窗口键 undefined =
+      // 解析单点内透传 registry（shared-service 保形 + per-window 引擎不被创建成
+      // 无人登记的孤儿实例），U3 接线后改为携带轮窗口键。
+      probe: (engineId) => resolveWorkflowWindowEnginePort(undefined, engineId).probe(),
       // [W3] chat 域 pi 路由 = registry cli 形态 port（协议客户端）——inproc DI 实例
       // 随 inproc pi 引擎目录 删除消亡，chat 与 run 域同路（G1 单一 CLI 形态）。
       piEngine: this.resolveChatEnginePort(),
@@ -694,14 +700,6 @@ export class RunOrchestration {
     result: AgentResult,
     aborted: boolean,
   ): Promise<void> {
-    // [轮终 disarm 根修] run 应答到达 = 该轮等待窗终结：撤 mid-round/settled 两段
-    // watch（Continuation 轮由 conversation-continuation 轮终守护自管 disarm/drain
-    // 重挂，不经过本收口）。此前缺失导致正常完成后 armed entry 残留：one-shot settle
-    // 后 record 保持 running-resumable（SP-5），watchdog fire 处置的 status!=='running'
-    // 守卫放行 → 窗口到期误 kill + 误报 failed（2026-09-14 实测「已交付会话残留槽
-    // 被看门狗当 no valid protocol event 清理报 failed」×7+ 的根因）。幂等：无
-    // armed entry 时 no-op。
-    disarmRoundFromProtocol(record.id);
     // [H2 W2 / D7 例外族维持现状（§1.4 out-of-scope）] workflow origin 成功 = 立即
     // 终态化（closed/"gc"）；aborted/失败 = closed+cancelled/gc——workflow agent 结果
     // 由脚本返回值承载、无 message 对端，留内存 idle 会绑架 hasRunning / 恒挂
@@ -763,9 +761,13 @@ export class RunOrchestration {
 
   /** [W3] pi 引擎 port 解析（execute 路由 / runAndFinalize 派发 / ChatRounds 协作回调
    *  三面共用——chat 域经壳装配闭包消费）：registry cli 形态 port，
-   *  未注册 = 不可用 stub（engine_not_found，见 pi-host-binding）。 */
-  resolveChatEnginePort(): EnginePort {
-    return resolveHostPiEnginePort(() => null);
+   *  未注册 = 不可用 stub（engine_not_found，见 pi-host-binding）。
+   *  [U2 pi-workflow-run-resource-model] windowKey（workflow 成员派发 = parentRunId）
+   *  非 undefined 时经窗口实例解析单点取用（per-window 引擎窗口内 get-or-create、
+   *  probe 与 run 同实例、随窗口收尾 dispose）；缺省 = registry 直取（调用方仅同步
+   *  只读消费的既有面保形）。 */
+  resolveChatEnginePort(windowKey?: string): EnginePort {
+    return resolveHostPiEnginePort(() => null, windowKey);
   }
 
   /**

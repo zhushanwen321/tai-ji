@@ -1,11 +1,11 @@
 // run-events.test.ts —— run 事件词表 / 状态机 / journal 的测试（设计 §3.3 D5）。
 //
 // 覆盖：
-// - 词表断言：RUN_EVENT_TYPES 恰好 7 个（无 world-run 族——taiji 脚本 API 面无
-//   子进程调用通道）；ALL_RUN_OUTCOMES 三态正交
-// - 判别联合 exhaustive：switch 全 7 分支、无 default 吞噬（never 穷尽性断言——
+// - 词表断言：RUN_EVENT_TYPES 8 个（D5 词表 7 个 + U4 additive 的 member-pool——
+//   无 world-run 族，taiji 脚本 API 面无子进程调用通道）；ALL_RUN_OUTCOMES 三态正交
+// - 判别联合 exhaustive：switch 全 8 分支、无 default 吞噬（never 穷尽性断言——
 //   编译期由 tsc --noEmit 把关，运行期用样本事件核对分支映射）
-// - 载荷形状：7 类样本事件逐字段断言（ask-settled / run-settled 各含成功与失败
+// - 载荷形状：8 类样本事件逐字段断言（ask-settled / run-settled 各含成功与失败
 //   两形态）
 // - journal 接口形态：最小内存 fake 验证 append/scan 可实现且调用形状成立
 // - 状态机：词表 / 转移表穷尽（全 lifecycle × 全 trigger 组合遍历——表是可枚举
@@ -114,6 +114,23 @@ const armed: WorkflowRunEvent = {
   frame: { engine: "pi", armed: true },
 };
 
+/** [U4] member-pool 样本（register 形态；穷尽遍历与载荷断言共用）。 */
+const memberPoolRegister: WorkflowRunEvent = {
+  type: "member-pool",
+  seq: 4,
+  ts: TS + 15,
+  action: "register",
+  name: "reviewer-security",
+  recordId: "sa-wf-member-1",
+};
+
+const memberPoolClear: WorkflowRunEvent = {
+  type: "member-pool",
+  seq: 9,
+  ts: TS + 200_000,
+  action: "clear",
+};
+
 const runSettledFailed: WorkflowRunEvent = {
   type: "run-settled",
   seq: 8,
@@ -166,6 +183,10 @@ function labelOf(event: WorkflowRunEvent): string {
       return `ask-retrying:${event.taskIndex}:${event.backoffMs}`;
     case "ask-settled":
       return `ask-settled:${event.outcome}:${event.errorCode ?? "none"}`;
+    case "member-pool":
+      return event.action === "register"
+        ? `member-pool:${event.action}:${event.name}`
+        : `member-pool:${event.action}`;
     case "armed":
       return "armed";
     case "run-settled":
@@ -178,13 +199,14 @@ function labelOf(event: WorkflowRunEvent): string {
 // ── 词表 ─────────────────────────────────────────────────────
 
 describe("事件词表（D5）", () => {
-  it("RUN_EVENT_TYPES 恰好 7 个成员（无 world-run 族——脚本 API 面无子进程调用通道）", () => {
+  it("RUN_EVENT_TYPES 恰好 8 个成员（D5 词表 7 个 + U4 member-pool；无 world-run 族——脚本 API 面无子进程调用通道）", () => {
     expect(RUN_EVENT_TYPES).toEqual([
       "run-created",
       "ask-dispatched",
       "ask-executing",
       "ask-retrying",
       "ask-settled",
+      "member-pool",
       "armed",
       "run-settled",
     ]);
@@ -214,13 +236,14 @@ describe("事件词表（D5）", () => {
 // ── 判别联合穷尽性 ───────────────────────────────────────────
 
 describe("判别联合 exhaustive（无 default 吞噬）", () => {
-  it("7 类样本事件各命中唯一分支，标记与预期一致", () => {
+  it("8 类样本事件各命中唯一分支，标记与预期一致", () => {
     const samples: WorkflowRunEvent[] = [
       runCreated,
       askDispatched,
       askExecuting,
       askRetrying,
       askSettledFailed,
+      memberPoolRegister,
       armed,
       runSettledFailed,
     ];
@@ -230,6 +253,7 @@ describe("判别联合 exhaustive（无 default 吞噬）", () => {
       "ask-executing:0:1",
       "ask-retrying:0:1000",
       "ask-settled:failed:engine_crashed",
+      "member-pool:register:reviewer-security",
       "armed",
       "run-settled:failed:engine_crashed",
     ]);
@@ -243,6 +267,7 @@ describe("判别联合 exhaustive（无 default 吞噬）", () => {
       askRetrying,
       askSettledFailed,
       askSettledCompleted,
+      memberPoolRegister,
       armed,
       runSettledFailed,
       runSettledCompleted,
@@ -331,6 +356,23 @@ describe("载荷形状（D5 载荷表）", () => {
     });
   });
 
+  it("[U4] member-pool 登记形态：action / name / recordId；清空形态无 name/recordId", () => {
+    expect(memberPoolRegister).toEqual({
+      type: "member-pool",
+      seq: 4,
+      ts: TS + 15,
+      action: "register",
+      name: "reviewer-security",
+      recordId: "sa-wf-member-1",
+    });
+    expect(memberPoolClear).toEqual({
+      type: "member-pool",
+      seq: 9,
+      ts: TS + 200_000,
+      action: "clear",
+    });
+  });
+
   it("run-settled 失败形态：outcome / errorCode / reason / artifactsDir", () => {
     expect(runSettledFailed).toEqual({
       type: "run-settled",
@@ -392,7 +434,7 @@ describe("RunEventJournal 接口形态（仅类型签名——实装归 journal 
 // 状态机（转移表 + transition 纯函数 + journal 实装）
 // ═══════════════════════════════════════════════════════════
 
-/** 全触发类型（7 journal 事件 + 4 控制事件 = 11，穷尽遍历用）。 */
+/** 全触发类型（8 journal 事件 + 4 控制事件 = 12，穷尽遍历用）。 */
 const ALL_TRIGGER_TYPES: readonly (RunEventType | ControlTriggerType)[] = [
   ...RUN_EVENT_TYPES,
   ...CONTROL_TRIGGER_TYPES,
@@ -405,10 +447,10 @@ const triggerSamples: Record<RunEventType | ControlTriggerType, TransitionTrigge
   "ask-executing": askExecuting,
   "ask-retrying": askRetrying,
   "ask-settled": askSettledFailed,
+  "member-pool": memberPoolRegister,
   armed,
   "run-settled": runSettledFailed,
   "cancel-requested": { type: "cancel-requested", reason: "user abort" },
-  "watchdog-fired": { type: "watchdog-fired", reason: "no progress 10m" },
   "host-died": { type: "host-died" },
   "abandon-elapsed": { type: "abandon-elapsed" },
 };
@@ -448,10 +490,9 @@ describe("状态词表（D5-1 两维正交）", () => {
     ]);
   });
 
-  it("CONTROL_TRIGGER_TYPES 四个控制事件（不属 journal 词表）", () => {
+  it("CONTROL_TRIGGER_TYPES 三个控制事件（不属 journal 词表；watchdog-fired 随 D9 删除）", () => {
     expect(CONTROL_TRIGGER_TYPES).toEqual([
       "cancel-requested",
-      "watchdog-fired",
       "host-died",
       "abandon-elapsed",
     ]);
@@ -460,13 +501,12 @@ describe("状态词表（D5-1 两维正交）", () => {
     }
   });
 
-  it("TRANSITION_OUTPUT_TYPES 六个输出动作标签", () => {
+  it("TRANSITION_OUTPUT_TYPES 五个输出动作标签（kill-run-topology 随 D9-2 杀链删除）", () => {
     expect(TRANSITION_OUTPUT_TYPES).toEqual([
       "journal-append",
       "manifest-write",
       "notify",
       "registry-project",
-      "kill-run-topology",
       "journal-cleanup-eligible",
     ]);
   });
@@ -519,7 +559,7 @@ describe("转移表完整性", () => {
     }
   });
 
-  it("表规模快照：24 行 / 23 个合法 (lifecycle × 事件) 组合 / 43 个表外组合（6 × 11 = 66 全积）", () => {
+  it("表规模快照：24 行 / 23 个合法 (lifecycle × 事件) 组合 / 43 个表外组合（6 × 11 = 66 全积）——U4 member-pool 三自环后、D9 watchdog-fired 三声明行删除后", () => {
     expect(RUN_TRANSITIONS).toHaveLength(24);
     const legalKeys = new Set(RUN_TRANSITIONS.map((r) => `${r.from}|${r.on}`));
     expect(legalKeys.size).toBe(23);
@@ -629,14 +669,6 @@ describe("终局与输出动作语义", () => {
     expect(result.outputs).toContain("manifest-write");
     expect(result.outputs).toContain("journal-cleanup-eligible");
     expect(result.outputs).not.toContain("journal-append");
-  });
-
-  it("watchdog-fired 状态自持（kill 后由 ask-settled 事件证据驱动迁移），输出 kill-run-topology", () => {
-    for (const lifecycle of ["dispatched", "running", "settling"] as const) {
-      const result = transition({ lifecycle }, triggerSamples["watchdog-fired"]);
-      expect(result.state).toEqual({ lifecycle });
-      expect(result.outputs).toEqual(["kill-run-topology"]);
-    }
   });
 
   it("完整事件链 fold：created → dispatched → running（含重试波）→ terminal（run-settled 透传 outcome）", () => {
