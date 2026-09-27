@@ -89,6 +89,8 @@ pi 子进程事件 → infra/pi/event-adapter(翻译) → ServerMessage(WS)
 
 **跨 store 编排在 composable 层（实例）**：⌘K 全局搜索（`useSearch`）聚合 4 源——命令内存（core `command-registry`/`command-store`）+ 文件 WS（core `file-search` 缓存，未命中调 composer domain WS + 超时 race）+ session domain（WS）+ recents（localStorage）。实现位于 core `packages/core/src/domain/new-task-search/`（`search.ts`/`search-jump.ts`/`recents.ts`），2026-09-11 由 renderer 迁入。编排归 composable 非 domain（domain 严格只调 transport+pending，编排跨 store 违反铁律），见 [ADR-0028](adr/decisions.md)。
 
+**workflow/subagent 运行态数据流（W1 介质归位，[ADR-0078](adr/decisions.md)）**：run 与 record 的运行态唯一事实写 = journal 事件流（run `<runId>.events.jsonl` / record `<sa-id>.events`）；主 session JSONL 每实体只写注册 + 终态两条 v2 小条目；state/manifest 是 journal fold 的物化投影（可删可重建）。runtime 读请求只读内存投影——投影由「pi entry 游标 + journal tail」双增量源喂入（`packages/runtime/src/services/session/journal-projection.ts`，同实体冲突 journal 胜出），旧格式会话走 v1 惰性兼容读。崩溃恢复统一「journal 重放 + 收编」（有注册无终态 → interrupted）。
+
 ## 关键状态机
 
 | 状态机 | 状态流 | 来源 |
@@ -98,7 +100,7 @@ pi 子进程事件 → infra/pi/event-adapter(翻译) → ServerMessage(WS)
 | Message streaming | `message_start → text_delta×N → tool_execution_start/end → agent_end` | [STANDARDS.md](STANDARDS.md) §3.3 |
 | NewTaskFlow | 8 态：`idle/landing/dir-popover/branch-popover/dir-dialog/branch-modal/completed/cancelled` | `useNewTaskFlow.ts` |
 | Plugin 生命周期 | `UNLOADED → LOADING → ACTIVATING → ACTIVE → DEACTIVATING → UNLOADED`（+ CRASHED） | [CONTEXT.md](CONTEXT.md)「Plugin」词条 |
-| Workflow run 生命周期 | 6 态 `created → dispatched → running → settling → terminal/interrupted`，`RUN_TRANSITIONS` 显式转移表裁决、表外 fail-fast；事件流 journal（`<runId>.events.jsonl`）为权威投影源 | `subagent-core/src/orchestration/run-events.ts`（[subagents/architecture.md](extensions/subagents/architecture.md) §4） |
+| Workflow run 生命周期 | 6 态 `created → dispatched → running → settling → terminal/interrupted`，`RUN_TRANSITIONS` 显式转移表裁决、表外 fail-fast；事件流 journal（`<runId>.events.jsonl`）为唯一事实源，主 session 每实体只写注册/终态两条 v2 条目（[ADR-0078](adr/decisions.md)） | `subagent-core/src/orchestration/run-events.ts`（[subagents/architecture.md](extensions/subagents/architecture.md) §4） |
 
 ## 共享类型（shared）
 

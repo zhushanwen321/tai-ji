@@ -36,6 +36,10 @@ vi.mock("../persistence/sessions-index.ts", async (importOriginal) => {
 });
 
 import { writeAliveMarker } from "../persistence/alive-store.ts";
+// [W1 / U2a] record 事件文件观察点（u0 契约层 scan/路径原语——被测面独立性）。
+import { createRecordEventJournal, recordEventsPath } from "../persistence/record-events.ts";
+import type { RecordJournalEvent } from "../persistence/record-events.ts";
+import { readStateMarker } from "../persistence/state-marker.ts";
 import { completeRecord, createRecord, projectOutcome, tryTransition } from "../persistence/execution-record.ts";
 import { writeCancelledState, writeFinalizedState, writeSettledState } from "../persistence/state-marker.ts";
 import type { ManifestRecord } from "../persistence/manifest-store.ts";
@@ -1066,7 +1070,7 @@ describe("RecordStore", () => {
   // ============================================================
   // W16 [D4]：subagent-record 自描述 appendEntry 上报（状态迁移点）
   // ============================================================
-  describe("W16 subagent-record 自描述 appendEntry 上报", () => {
+  describe("[W1/D1] subagent-record v2 两条款 appendEntry 上报（W16 v1 快照停写）", () => {
     /** appendEntry 捕获（RecordStorePi 最小实现）。 */
     interface AppendedCall {
       customType: string;
@@ -1090,7 +1094,7 @@ describe("RecordStore", () => {
       return d as Record<string, unknown>;
     }
 
-    it("register：append subagent-record entry，data = v1 + SubagentRecord 完整快照 schema", () => {
+    it("register：append v2 注册条目（kind=registered，身份域字段集；运行态/死字节零携带）", () => {
       const { store, appended } = makeStoreWithPi();
       store.register(makeRecord());
 
@@ -1098,34 +1102,28 @@ describe("RecordStore", () => {
       // 写点字面量与 record-entry.ts 常量等值（钉住双源一致性）
       expect(appended[0]?.customType).toBe(SUBAGENT_RECORD_CUSTOM_TYPE);
       // [E2E 实测教训] 必须先 JSON 序列化再断言：appendEntry 捕获的是内存对象，
-      // undefined 值的键名仍在（旧 27-key 断言因此漏检 recordToSubagent 丢
-      // chatMode 的 bug）；真实 JSONL 会丢 undefined 值键，此处对齐生产行为。
+      // undefined 值的键名仍在；真实 JSONL 会丢 undefined 值键，此处对齐生产行为。
       const data = asEntryData(JSON.parse(JSON.stringify(appended[0]?.data)));
-      // register 时点序列化存活字段（undefined 值字段按生产序列化丢弃）：
-      // chatMode 必须显式在场（one-shot=false）——renderer isDone 判据依赖它。
+      // [W1/D1] v2 注册条目字段集 = 身份与锚点（D1 条目契约表）；turns/status/
+      // eventLog/displayItems 等运行态与死字节零携带（turns 投影停写点）。
       expect(Object.keys(data).sort()).toEqual([
-        "agent", "depth", "displayItems", "eventLog",
-        "id", "mode", "model", "rootSessionId", "round", "slug", "startedAt",
-        "status", "task", "totalTokens", "turns", "v", "worktree",
+        "agent", "depth", "id", "kind", "origin",
+        "rootSessionId", "slug", "startedAt", "task", "v",
       ]);
       expect(data).toMatchObject({
-        v: 1,
+        v: 2,
+        kind: "registered",
         id: "r1",
         agent: "worker",
         task: "t",
-        status: "running",
-        mode: "background",
         startedAt: 1000,
         rootSessionId: "sess-current",
-        turns: 0,
-        totalTokens: 0,
-        model: "m",
-        eventLog: [],
-        displayItems: [],
+        origin: "tool",
+        depth: 0,
       });
     });
 
-    it("archive：append 终态完整快照（result/endedAt/closedReason）；one-shot 生命周期共 2 次 append", () => {
+    it("archive：真终局（endedAt 已冻结）append v2 终态条目；one-shot 生命周期共 2 次 append", () => {
       const { store, appended } = makeStoreWithPi();
       const r = makeRecord();
       store.register(r);
@@ -1136,30 +1134,26 @@ describe("RecordStore", () => {
 
       // 探针基线（单测级）：one-shot 生命周期 = register + archive = 2 次 append
       expect(appended).toHaveLength(2);
-      const data = asEntryData(appended[1]?.data);
+      const data = asEntryData(JSON.parse(JSON.stringify(appended[1]?.data)));
       expect(data).toMatchObject({
-        v: 1,
+        v: 2,
+        kind: "settled",
         id: "r1",
         status: "idle",
-        closedReason: "gc",
+        stopReason: "gc",
         result: "task done",
         endedAt: expect.any(Number) as number,
       });
     });
 
-    it("reportRecordTransition：类外恢复写点上报（chatMode 续轮 round 携带）", () => {
+    it("reportRecordTransition：[W1/D2 停写写点] 零 entry 追加（过程面改走事件文件通道）", () => {
       const { store, appended } = makeStoreWithPi();
       const r = makeRecord({ round: 1 });
       store.reportRecordTransition(r);
 
-      expect(appended).toHaveLength(1);
-      expect(appended[0]?.customType).toBe(SUBAGENT_RECORD_CUSTOM_TYPE);
-      expect(asEntryData(appended[0]?.data)).toMatchObject({
-        v: 1,
-        id: "r1",
-        status: "running",
-        round: 1,
-      });
+      // v1 快照 entry（turns/engineHandle 过程投影）停写——可观测面移交事件文件
+      // （record-bound 帧引擎域感知，record-store-v2-journal.test.ts 覆盖）。
+      expect(appended).toHaveLength(0);
     });
 
     it("pi 未注入（session_start 前）：三写点均安全降级不抛错", () => {
@@ -1278,5 +1272,361 @@ describe("model 水合往返（record-store-rebuild 读侧归一）", () => {
     expect(manifestToSubagent(base)?.model).toBeUndefined();
     expect(manifestToSubagent({ ...base, model: "" })?.model).toBeUndefined();
     expect(manifestToSubagent({ ...base, model: "prov/model-1" })?.model).toBe("prov/model-1");
+  });
+});
+
+// ── [W1 / U2a] v2 写点断言段专属 helper（v2* 前缀防与上文重名）──────
+
+function v2MakeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
+  const base = createRecord("bg-v2", {
+    agent: "worker",
+    model: "m",
+    mode: "background",
+    task: "t",
+    slug: "v2-journal",
+    startedAt: 1000,
+    rootSessionId: "sess-v2",
+  });
+  return { ...base, ...over };
+}
+
+function v2CapturePi(captured: unknown[]): { appendEntry: (customType: string, data: unknown) => void } {
+  return {
+    appendEntry: (customType: string, data: unknown) => {
+      captured.push({ customType, data });
+    },
+  };
+}
+
+function v2ScanEvents(recordsDir: string, id: string): Promise<readonly RecordJournalEvent[]> {
+  return createRecordEventJournal(recordsDir).scan(id);
+}
+
+function v2ReadEventLines(recordsDir: string, id: string): RecordJournalEvent[] {
+  const content = fs.readFileSync(recordEventsPath(recordsDir, id), "utf8");
+  const out: RecordJournalEvent[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    out.push(JSON.parse(trimmed) as RecordJournalEvent);
+  }
+  return out;
+}
+
+describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () => {
+  let rootDir: string;
+  let sessionsDir: string;
+  let recordsDir: string;
+
+  beforeEach(() => {
+    rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-v2-journal-"));
+    sessionsDir = path.join(rootDir, "sessions");
+    recordsDir = path.join(rootDir, "records");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.mkdirSync(recordsDir, { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function makeStore(captured: unknown[] = []): RecordStore {
+    const store = new RecordStore(sessionsDir, undefined, v2CapturePi(captured), recordsDir);
+    return store;
+  }
+
+  it("register → record-created 帧 + v2 注册条目（同点双写：事件是事实、条目是锚）", async () => {
+    const captured: unknown[] = [];
+    const store = makeStore(captured);
+    store.register(
+      v2MakeRecord({ id: "sa-v2-reg", origin: "workflow", parentRunId: "run-1", stepIndex: 2 }),
+    );
+
+    const events = await v2ScanEvents(recordsDir, "sa-v2-reg");
+    const created = events.find((e) => e.type === "record-created");
+    expect(created).toMatchObject({
+      type: "record-created",
+      id: "sa-v2-reg",
+      agent: "worker",
+      origin: "workflow",
+      parentRunId: "run-1",
+      stepIndex: 2,
+      rootSessionId: "sess-v2",
+      depth: 0,
+      mode: "background",
+      startedAt: 1000,
+    });
+
+    // v2 注册条目：身份与锚点，无 turns/engineHandle 等运行态（D1 契约字段集）。
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({
+      customType: "subagent-record",
+      data: {
+        v: 2,
+        kind: "registered",
+        id: "sa-v2-reg",
+        origin: "workflow",
+        parentRunId: "run-1",
+        stepIndex: 2,
+        rootSessionId: "sess-v2",
+        startedAt: 1000,
+      },
+    });
+    // 首行头行形态（D3：无 .jsonl 后缀的自描述补偿）。
+    const firstLine = fs
+      .readFileSync(recordEventsPath(recordsDir, "sa-v2-reg"), "utf8")
+      .split("\n")[0]!;
+    expect(JSON.parse(firstLine)).toEqual({ type: "record-journal", id: "sa-v2-reg" });
+  });
+
+  it("register 幂等：revive / 重启后重注册不重复落 created 帧与注册条目", async () => {
+    const captured: unknown[] = [];
+    const storeA = makeStore(captured);
+    storeA.register(v2MakeRecord({ id: "sa-v2-idem" }));
+
+    // 模拟重启：全新 store 实例（fold 缓存空），同 id register（markResurrected → register 链）。
+    const capturedB: unknown[] = [];
+    const storeB = makeStore(capturedB);
+    storeB.register(v2MakeRecord({ id: "sa-v2-idem" }));
+
+    const events = await v2ScanEvents(recordsDir, "sa-v2-idem");
+    expect(events.filter((e) => e.type === "record-created")).toHaveLength(1);
+    expect(capturedB).toHaveLength(0); // 注册条目不重复写（journal 已有创建帧）
+  });
+
+  it("spawn 回填（reportRecordTransition 引擎域感知）→ record-bound 帧 + bound manifest 物化", async () => {
+    const captured: unknown[] = [];
+    const store = makeStore(captured);
+    const rec = v2MakeRecord({ id: "sa-v2-bound", engine: "pi" });
+    store.register(rec);
+
+    // spawn 应答回填：sessionFile + engineHandle（writeBindingForRecord 之后的
+    // reportRecordTransition 感知链）。
+    const sessionFile = path.join(sessionsDir, "sa-v2-bound.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8"); // 锚定就绪（子文件在盘）
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+
+    const events = await v2ScanEvents(recordsDir, "sa-v2-bound");
+    expect(events.map((e) => e.type)).toEqual(["record-created", "record-bound"]);
+    expect(events[1]).toMatchObject({
+      type: "record-bound",
+      sessionFile,
+      engine: "pi",
+      epoch: 0,
+    });
+
+    // bound manifest 物化（D2 决策 9）：running 投影落 records/<id>.json。
+    const manifestPath = path.join(recordsDir, "sa-v2-bound.json");
+    expect(fs.existsSync(manifestPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(manifestPath, "utf8") as string)).toMatchObject({
+      id: "sa-v2-bound",
+      status: "running",
+      executionStatus: "running",
+      sessionFile,
+    });
+
+    // 引擎域未变的重复 transition：零追加（高频 turns 归约不放大事件面）。
+    store.reportRecordTransition(rec);
+    const eventsAfter = await v2ScanEvents(recordsDir, "sa-v2-bound");
+    expect(eventsAfter).toHaveLength(2);
+  });
+
+  it("markRoundStarted → record-round-started 帧；markRoundIdle → record-round-idle 帧（轮统计快照）", async () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-v2-round" });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-v2-round.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+
+    store.markRoundStarted("sa-v2-round");
+    // 轮内 usage 累积（updateFromEvent 归约的近似——直接写字段等价）。
+    rec.turnCount = 3;
+    rec.totalTokens = 4200;
+    store.markRoundIdle("sa-v2-round", { kind: "success", content: "round output" });
+
+    const events = await v2ScanEvents(recordsDir, "sa-v2-round");
+    expect(events.map((e) => e.type)).toEqual([
+      "record-created",
+      "record-bound",
+      "record-round-started",
+      "record-round-idle",
+    ]);
+    expect(events[2]).toMatchObject({ type: "record-round-started", round: 0, epoch: 0 });
+    expect(events[3]).toMatchObject({
+      type: "record-round-idle",
+      stopReason: "completed",
+      turns: 3,
+      totalTokens: 4200,
+    });
+
+    // .state 物化投影仍在（D2：写点时机不变）——idle 收条。
+    expect(readStateMarker(sessionFile)).toMatchObject({ status: "idle", reason: "completed" });
+  });
+
+  it("markSettled → record-settled 帧 + v2 终态条目；archive 真终局同款（endedAt 判定）", async () => {
+    const captured: unknown[] = [];
+    const store = makeStore(captured);
+    const rec = v2MakeRecord({ id: "sa-v2-settled" });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-v2-settled.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+    rec.result = "final output text";
+
+    store.markSettled(rec, "interrupted");
+
+    let events = await v2ScanEvents(recordsDir, "sa-v2-settled");
+    expect(events.map((e) => e.type)).toEqual([
+      "record-created",
+      "record-bound",
+      "record-settled",
+    ]);
+    expect(events[2]).toMatchObject({
+      type: "record-settled",
+      stopReason: "interrupted",
+      turns: 0,
+      totalTokens: 0,
+    });
+    const settledEntry = captured.at(-1);
+    expect(settledEntry).toMatchObject({
+      customType: "subagent-record",
+      data: {
+        v: 2,
+        kind: "settled",
+        id: "sa-v2-settled",
+        status: "idle",
+        stopReason: "interrupted",
+        sessionFile,
+        result: "final output text",
+      },
+    });
+
+    // 幂等：settled 后重复终局写点（archive 真终局）不再追加——fold settled 守卫。
+    rec.endedAt = Date.now();
+    store.archive(rec);
+    events = await v2ScanEvents(recordsDir, "sa-v2-settled");
+    expect(events.filter((e) => e.type === "record-settled")).toHaveLength(1);
+  });
+
+  it("archive 真终局（completeRecord 已冻结 endedAt）→ record-settled 帧；内存回收（endedAt 未设）零事件", async () => {
+    const captured: unknown[] = [];
+    const store = makeStore(captured);
+    const rec = v2MakeRecord({ id: "sa-v2-arch" });
+    store.register(rec);
+    // completeRecord 桥接形态：冻结终局字段（含 endedAt）。
+    rec.status = "idle";
+    rec.stopReason = "completed";
+    rec.outcome = "completed";
+    rec.endedAt = 12345;
+    rec.result = "done text";
+    rec.turnCount = 2;
+    rec.totalTokens = 300;
+    store.archive(rec);
+
+    const events = await v2ScanEvents(recordsDir, "sa-v2-arch");
+    expect(events.map((e) => e.type)).toEqual(["record-created", "record-settled"]);
+    expect(events[1]).toMatchObject({
+      type: "record-settled",
+      stopReason: "completed",
+      outcome: "completed",
+      endedAt: 12345,
+      turns: 2,
+      totalTokens: 300,
+    });
+    expect(captured.at(-1)).toMatchObject({
+      data: { v: 2, kind: "settled", id: "sa-v2-arch", endedAt: 12345, turns: 2, totalTokens: 300, result: "done text" },
+    });
+
+    // 内存回收形态（markIdleEvicted 前置——endedAt 未设）：零事件零条目。
+    const captured2: unknown[] = [];
+    const store2 = makeStore(captured2);
+    const rec2 = v2MakeRecord({ id: "sa-v2-evict" });
+    store2.register(rec2);
+    store2.archive(rec2);
+    const events2 = await v2ScanEvents(recordsDir, "sa-v2-evict");
+    expect(events2.map((e) => e.type)).toEqual(["record-created"]);
+  });
+
+  it("markReopened → record-reopened 帧（epoch 递增 + round 归零）；重开后 round-started 清除 settled", async () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-v2-reopen" });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-v2-reopen.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+    store.markSettled(rec, "completed");
+
+    const newSessionFile = path.join(sessionsDir, "sa-v2-reopen-2.jsonl");
+    fs.writeFileSync(newSessionFile, '{"type":"session","version":3}\n', "utf8");
+    expect(
+      store.markReopened(rec, { engine: "pi", sessionFile: newSessionFile }),
+    ).toBe(true);
+
+    let events = await v2ScanEvents(recordsDir, "sa-v2-reopen");
+    expect(events.map((e) => e.type)).toEqual([
+      "record-created",
+      "record-bound",
+      "record-settled",
+      "record-reopened",
+    ]);
+    expect(events[3]).toMatchObject({ type: "record-reopened", epoch: 1, round: 0 });
+
+    // 重开后的新轮：round-started 帧（fold 侧清除 settled——可续实体回边）。
+    store.markRoundStarted("sa-v2-reopen");
+    events = await v2ScanEvents(recordsDir, "sa-v2-reopen");
+    expect(events.at(-1)).toMatchObject({ type: "record-round-started", round: 0, epoch: 1 });
+  });
+
+  it("seq 单调递增（record 侧对称断言）：全部事件行 seq 严格递增且自 1 起", async () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-v2-seq" });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-v2-seq.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+    store.markRoundStarted("sa-v2-seq");
+    store.markRoundIdle("sa-v2-seq", { kind: "failed", reason: "boom" });
+    // 下一轮在飞中断：round-started → markSettled（CAS 仅 running 可收口）。
+    store.markRoundStarted("sa-v2-seq");
+    store.markSettled(rec, "interrupted-by-parent");
+
+    const events = v2ReadEventLines(recordsDir, "sa-v2-seq").filter(
+      (e) => (e.type as string) !== "record-journal",
+    );
+    // 事件行（排除头行后 6 条）seq = 1..6 严格递增。
+    expect(events.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(events.map((e) => e.type)).toEqual([
+      "record-created",
+      "record-bound",
+      "record-round-started",
+      "record-round-idle",
+      "record-round-started",
+      "record-settled",
+    ]);
+  });
+
+  it("验收②：主 session 新写 entry 无 eventLog/displayItems 字节", async () => {
+    const captured: unknown[] = [];
+    const store = makeStore(captured);
+    const rec = v2MakeRecord({ id: "sa-v2-bytes" });
+    store.register(rec);
+    store.markRoundIdle("sa-v2-bytes", { kind: "success", content: "r" });
+    rec.endedAt = Date.now();
+    store.archive(rec);
+
+    // 捕获的全部 subagent-record 条目（注册 + 终态）序列化产物不含死字节键。
+    for (const { data } of captured as Array<{ customType: string; data: unknown }>) {
+      if ((data as { kind?: string }).kind === undefined) continue;
+      const serialized = JSON.stringify(data);
+      expect(serialized).not.toContain("eventLog");
+      expect(serialized).not.toContain("displayItems");
+    }
+    // 两条款恰两条（注册 + 终态）——markRoundIdle 等过程写点零条目。
+    expect(captured).toHaveLength(2);
   });
 });

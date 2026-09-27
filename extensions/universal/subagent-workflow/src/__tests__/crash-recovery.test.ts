@@ -19,6 +19,9 @@
 // 从本测试文件（src/__tests__/）相对路径为 ../jsonl-run-store.ts。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // JsonlRunStore mock：mount 用例的 store 可控点（loadAll 由各 test 配置；构造参数
 // 忽略）。dispose/flushPendingSaves：session_shutdown handler 会调 state.store.dispose()
@@ -337,5 +340,143 @@ describe("session_start crash recovery（store.loadAll 路径）", () => {
     //（观察面从 registerSubagentTool module spy 迁移为 pi.registerTool 捕获，
     // 断言意图不变：subagent 域 tool 已注册）
     expect(registeredToolNames).toContain("subagent");
+  });
+});
+
+// ── [W1 / D4] kill-9 收编 fixture（设计 A3 的 L1 部分）────────────────────────
+//
+// 真实链路夹具（非 mock store）：真实 JsonlRunStore（经 importActual 绕开本文件
+// 顶部的 JsonlRunStore module mock——mock 面服务挂载类用例的 store 可控点）+ 真实
+// run journal（core 写者落账）+ setRunEventJournalDirForTest 注入 fixture 目录
+// （真实 dispatchFinalRunSettle 链：状态机裁决 + journal run-settled 落账 + manifest
+// 物化）。验收断言（设计场景 3 的 fixture 化）：
+//   ① journal 尾部有收编 run-settled（failed）；
+//   ② 主 session 条目恰两条（注册 + 终态，v2 形态）；
+//   ③ manifest 物化（outcome=failed，prune 资格单源锚定）；
+//   ④ 双重启不重复追加（幂等：第二次装配 journal 仍一条 run-settled、零条目写）。
+
+describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + manifest 物化", () => {
+  it("crashed run（有注册无终态）经恢复链收编；双重启零重复追加", async () => {
+    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
+    // 真实 store（绕开文件顶部 module mock）+ core journal 写者 + pump journal 目录注入
+    const { JsonlRunStore: RealJsonlRunStore } =
+      await vi.importActual<typeof import("../jsonl-run-store.ts")>("../jsonl-run-store.ts");
+    const { setRunEventJournalDirForTest } = await import(
+      "@zhushanwen/subagent-core/orchestration/worker-message-pump.ts"
+    );
+    const { createRunEventJournal, WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } =
+      await import("@zhushanwen/subagent-core");
+    type CustomEntry = { type: string; customType?: string; data?: unknown; id: string; parentId: null; timestamp: string };
+
+    const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-kill9-"));
+    setRunEventJournalDirForTest(fixtureDir);
+    try {
+      const runId = "wf-kill9-1";
+      const journalPath = path.join(fixtureDir, `${runId}.events.jsonl`);
+      // 崩溃形态 journal：run-created + ask 帧，无 run-settled（进程被 kill-9 的磁盘形态）
+      const journal = createRunEventJournal(fixtureDir);
+      await journal.append(runId, { type: "run-created", runId, workflowName: "kill9", argsSummary: "{}", ts: Date.now() - 60_000 });
+      await journal.append(runId, { type: "ask-dispatched", taskIndex: 0, agentName: "a", attempt: 1, ts: Date.now() - 30_000 });
+
+      // 主 session 面只落注册条目（v2 形态——终态条目缺失即收编补写对象）
+      const entries: CustomEntry[] = [
+        {
+          type: "custom",
+          customType: WORKFLOW_RECORD_CUSTOM_TYPE,
+          data: {
+            v: WORKFLOW_RECORD_ENTRY_VERSION,
+            kind: "registered",
+            runId,
+            workflowName: "kill9",
+            scriptName: "kill9",
+            slug: "kill9",
+            startedAt: Date.now() - 60_000,
+            journalPath,
+          },
+          id: "seed-reg",
+          parentId: null,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      // fake pi：appendEntry 模拟 session JSONL append（捕获 + 落 entries——pi.appendEntry
+      // 的真实语义），events.emit 捕获 pending:unregister
+      const appended: Array<{ t: string; d: unknown }> = [];
+      const { pi: piBase, emits } = createFakePi();
+      const appendEntry = vi.fn((t: string, d: unknown) => {
+        appended.push({ t, d });
+        entries.push({ type: "custom", customType: t, data: d, id: `entry-${entries.length}`, parentId: null, timestamp: new Date().toISOString() });
+      });
+      const pi = Object.assign(piBase, { appendEntry });
+      const ctx = {
+        ...createFakeCtx(),
+        sessionManager: {
+          ...(createFakeCtx() as unknown as { sessionManager: { getEntries: () => unknown[] } }).sessionManager,
+          getEntries: () => [...entries],
+        },
+      } as ExtensionContext;
+
+      const mkDeps = (): SessionLifecycleDeps => ({
+        createServices: (() => ({
+          service: {
+            initSession: vi.fn(),
+            recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
+            startGcTimer: vi.fn(),
+          },
+          modelService: {
+            initModel: vi.fn(),
+            reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),
+          },
+          reused: false,
+        })) as never,
+        worktreeManager: { scan: vi.fn(async () => {}) },
+        createRunStore: () => new RealJsonlRunStore({ sessionDir: fixtureDir, pi, ctx }),
+      });
+
+      // 第一次启动（kill-9 后重启）：running 收编
+      const first = await setupSessionLifecycle(pi, ctx, mkDeps());
+      const run = first.runs.get(runId);
+      expect(run?.state.status).toBe("done");
+      expect(run?.state.reason).toBe("failed");
+      const unregister = emits.find((e) => e.channel === "pending:unregister");
+      expect(unregister).toBeDefined();
+
+      // ① journal 尾部有收编 run-settled（failed）
+      const lines = fs.readFileSync(journalPath, "utf8").split("\n").filter((l) => l.trim());
+      const lastFrame = JSON.parse(lines[lines.length - 1]!) as { type: string; outcome?: string };
+      expect(lastFrame.type).toBe("run-settled");
+      expect(lastFrame.outcome).toBe("failed");
+
+      // ② 主 session 条目恰两条：注册（seed）+ 终态（收编补写）
+      const wfEntries = entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE);
+      expect(wfEntries).toHaveLength(2);
+      expect((wfEntries[0]!.data as { kind?: string }).kind).toBe("registered");
+      expect((wfEntries[1]!.data as { kind?: string }).kind).toBe("settled");
+
+      // ③ manifest 物化（writeRunTerminalManifest 落 <fixtureDir>/<runId>.json）
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(fixtureDir, `${runId}.json`), "utf8"),
+      ) as { id: string; outcome?: string };
+      expect(manifest.id).toBe(runId);
+      expect(manifest.outcome).toBe("failed");
+
+      // ④ 双重启：journal 已终态 → loadAll 直读终局，零重复追加、零条目写
+      appended.length = 0;
+      await setupSessionLifecycle(pi, ctx, mkDeps());
+      const settledFrames = fs
+        .readFileSync(journalPath, "utf8")
+        .split("\n")
+        .filter((l) => l.trim() && (JSON.parse(l) as { type: string }).type === "run-settled");
+      expect(settledFrames).toHaveLength(1);
+      expect(appended.filter((a) => a.t === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(0);
+      expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(2);
+    } finally {
+      // 清 journal 目录注入（恢复 vitest 防线 no-op 形态——防其他测试误写真目录）
+      const { setRunEventJournalDirForTest } = await import(
+        "@zhushanwen/subagent-core/orchestration/worker-message-pump.ts"
+      );
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
   });
 });

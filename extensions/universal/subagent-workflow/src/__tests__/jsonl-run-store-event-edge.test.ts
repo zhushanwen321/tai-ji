@@ -3,13 +3,13 @@
 // [P3/D6] 事件边沿 flush（快照投影增强）单测。
 //
 // 锁定的语义：
-// - fold 投影：每次 flush 经 core projectRunEvents 从同目录 journal 重放——state
-//   文件与 workflow-record entry 的 snapshot 携带 additive 字段（calls[].startedAt/
+// - fold 投影：每次 flush 经 core projectRunEvents 从同目录 journal 增量喂入
+//   （[W1 / D6] tail offset 续读）——state 投影携带 additive 字段（calls[].startedAt/
 //   lastProgressAt、run 级 health、终局 outcome/errorCode）；
-// - 无 journal（旧 run 形态）→ 未富集快照（缺省渲染前提，字节面无新键）；
-// - 事件边沿防抖合并：窗口内 N 次边沿只触发 1 次 flush（固定窗口，entry 计数法）；
-// - entry 通道节流不受边沿 flush 影响（P-C3 写放大控制：边沿 flush 落 state 文件，
-//   entry append 仍受 entryAppendMinIntervalMs 约束）；
+// - 无 journal（旧 run 形态）→ 未富集投影（缺省渲染前提，字节面无新键）；
+// - 事件边沿防抖合并：窗口内 N 次边沿只触发 1 次 flush（固定窗口，writeFile 计数法
+//   ——[W1] 条目通道停写后 flush 计数面收敛到 state 写盘）；
+// - 停写锚定：边沿 flush 零条目写（[W1 / D1] v1 快照通道退役，边沿只落 state 投影）；
 // - fs.watch 真实接线：journal 文件 append（模拟 pump 落账）→ 防抖后 state 文件更新。
 //
 // 时间：真实 timers + 注入小防抖窗口（eventEdgeDebounceMs: 20）——fake timers 不
@@ -23,13 +23,11 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 import { Budget } from "@zhushanwen/subagent-core/orchestration/models/budget.ts";
 import { Trace } from "@zhushanwen/subagent-core/orchestration/models/trace.ts";
 import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run-spec.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
-import { mkCtx, mkPi } from "@zhushanwen/subagent-core/orchestration/__tests__/test-mocks.ts";
-import { WORKFLOW_RECORD_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
+import { mkPi } from "@zhushanwen/subagent-core/orchestration/__tests__/test-mocks.ts";
 import { JsonlRunStore } from "../jsonl-run-store.ts";
 
 const EDGE_DEBOUNCE_MS = 20;
@@ -74,19 +72,11 @@ function readStateSnapshot(tmpDir: string, runId: string): Record<string, unknow
   return JSON.parse(lastLine!) as Record<string, unknown>;
 }
 
-function entrySnapshots(entries: CustomEntry[]): Array<Record<string, unknown>> {
-  return entries
-    .filter((e) => e.type === "custom" && e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)
-    .map((e) => (e.data as { snapshot: Record<string, unknown> }).snapshot);
-}
-
-describe("JsonlRunStore 事件边沿 flush（[P3/D6]）", () => {
+describe("JsonlRunStore 事件边沿 flush（[P3/D6] + [W1] 停写锚定）", () => {
   let tmpDir: string;
-  let entries: CustomEntry[];
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-run-store-edge-"));
-    entries = [];
   });
 
   afterEach(() => {
@@ -94,19 +84,15 @@ describe("JsonlRunStore 事件边沿 flush（[P3/D6]）", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  function makeStore(extra: { entryAppendMinIntervalMs?: number } = {}): JsonlRunStore {
+  function makeStore(): JsonlRunStore {
     return new JsonlRunStore({
       sessionDir: tmpDir,
-      pi: mkPi(entries),
-      ctx: mkCtx(entries),
       eventEdgeDebounceMs: EDGE_DEBOUNCE_MS,
-      ...extra,
     });
   }
 
-  it("fold 投影：journal 事件在 flush 时进入 state 文件与 entry 的 snapshot（additive 字段）", async () => {
-    // entryAppendMinIntervalMs: 0 = 禁用节流（entry append 即 flush 计数/快照镜像面）
-    const store = makeStore({ entryAppendMinIntervalMs: 0 });
+  it("fold 投影：journal 事件在 flush 时进入 state 投影（additive 字段）", async () => {
+    const store = makeStore();
     const runId = "wf-edge-fold";
     await store.save(makeRun(runId)); // 冷路径首写（此刻无 journal → 未富集）
     let snap = readStateSnapshot(tmpDir, runId);
@@ -130,16 +116,12 @@ describe("JsonlRunStore 事件边沿 flush（[P3/D6]）", () => {
       { timeout: 3000, interval: 20 },
     );
     expect(state.health).toEqual({ lastProgressAt: 2000 });
-
-    // entry 通道（节流禁用 = 每 flush 必 append）的 snapshot 与 state 文件一致富集
-    const lastEntry = entrySnapshots(entries).at(-1)!;
-    expect((lastEntry.state as Record<string, unknown>).health).toEqual({ lastProgressAt: 2000 });
     const calls = state.calls as Array<Record<string, unknown>>;
     expect(calls).toEqual([]); // 本 run 无 call 条目——fold 不凭空造 calls
     await store.dispose();
   });
 
-  it("终局 fold：run-settled 帧使终局快照携带 outcome/errorCode", async () => {
+  it("终局 fold：run-settled 帧使终局投影携带 outcome/errorCode", async () => {
     const store = makeStore();
     const runId = "wf-edge-terminal";
     appendJournalEvent(tmpDir, runId, {
@@ -153,51 +135,65 @@ describe("JsonlRunStore 事件边沿 flush（[P3/D6]）", () => {
     expect(state.outcome).toBe("failed");
     expect(state.errorCode).toBe("engine_crashed");
     expect(state.health).toEqual({ lastProgressAt: 9000 });
-    const entrySnap = entrySnapshots(entries).at(-1)!;
-    expect((entrySnap.state as Record<string, unknown>).outcome).toBe("failed");
     await store.dispose();
   });
 
-  it("边沿防抖合并：窗口内多次边沿只触发 1 次 flush（entry 计数法）", async () => {
+  it("边沿防抖合并：窗口内多次边沿只触发 1 次 flush（writeFile 计数法）", async () => {
     // watchJournalEdges: false = 关真实 watcher（防 seam 与真实事件双源各自调度一次——
-    // 设计内语义），本用例隔离验证 seam 驱动的防抖合并逻辑
-    const store = makeStore({ entryAppendMinIntervalMs: 0, watchJournalEdges: false }); // entry append = flush 计数器
+    // 设计内语义），本用例隔离验证 seam 驱动的防抖合并逻辑。
+    // [W1] flush 计数面 = state 写盘（writeFile spy 放行原实现）。
+    const store = new JsonlRunStore({
+      sessionDir: tmpDir,
+      eventEdgeDebounceMs: EDGE_DEBOUNCE_MS,
+      watchJournalEdges: false,
+    });
+    const wfSpy = vi.spyOn(fs.promises, "writeFile");
     const runId = "wf-edge-merge";
     await store.save(makeRun(runId)); // flush #1（冷路径）
+    const baseline = wfSpy.mock.calls.length;
     appendJournalEvent(tmpDir, runId, {
       type: "ask-dispatched", taskIndex: 0, agentName: "a0", attempt: 1, ts: 1000,
     });
     store.simulateJournalEdgeForTest(runId);
     store.simulateJournalEdgeForTest(runId);
     store.simulateJournalEdgeForTest(runId); // 窗口内合并
-    await vi.waitFor(() => expect(entrySnapshots(entries).length).toBe(2), {
+    await vi.waitFor(() => expect(wfSpy.mock.calls.length).toBe(baseline + 1), {
       timeout: 3000, interval: 20,
     });
     // 合并窗口后无第二次边沿 flush（固定窗口不重置 timer，N 次边沿 = 1 次 flush）
     await new Promise((r) => setTimeout(r, EDGE_DEBOUNCE_MS * 4));
-    expect(entrySnapshots(entries).length).toBe(2);
+    expect(wfSpy.mock.calls.length).toBe(baseline + 1);
     await store.dispose();
   });
 
-  it("entry 通道节流不受边沿 flush 影响：边沿后 state 文件已更新、entry 数不变（P-C3）", async () => {
-    const store = makeStore({ entryAppendMinIntervalMs: 60_000 });
-    const runId = "wf-edge-throttle";
-    await store.save(makeRun(runId)); // 首 append（首写永不节流）= 1 条 entry
-    expect(entrySnapshots(entries).length).toBe(1);
+  it("停写锚定：边沿 flush 落 state 投影、零条目写（[W1 / D1]）", async () => {
+    const entries: unknown[] = [];
+    const appendEntry = vi.fn((type: string, data?: unknown) => {
+      entries.push(data);
+      void type;
+    });
+    const store = new JsonlRunStore({
+      sessionDir: tmpDir,
+      pi: mkPi(entries, { appendEntry }),
+      eventEdgeDebounceMs: EDGE_DEBOUNCE_MS,
+    });
+    const runId = "wf-edge-norite";
+    await store.save(makeRun(runId)); // 首写（零条目）
+    expect(appendEntry).not.toHaveBeenCalled();
     appendJournalEvent(tmpDir, runId, {
       type: "ask-dispatched", taskIndex: 0, agentName: "a0", attempt: 1, ts: 1000,
     });
     store.simulateJournalEdgeForTest(runId);
     await vi.waitFor(
       () => {
-        // 边沿 flush 已落 state 文件（rewrite 通道无节流——投影新鲜）
+        // 边沿 flush 已落 state 文件（物化投影通道——投影新鲜）
         const state = readStateSnapshot(tmpDir, runId).state as Record<string, unknown>;
         expect(state.health).toBeDefined();
       },
       { timeout: 3000, interval: 20 },
     );
-    // entry 通道仍在节流窗口内：无新 append（pi session JSONL 不因边沿膨胀）
-    expect(entrySnapshots(entries).length).toBe(1);
+    // [W1 / D1] 红线：pi session JSONL 不因边沿（或任何 flush）膨胀
+    expect(appendEntry).not.toHaveBeenCalled();
     await store.dispose();
   });
 
@@ -219,17 +215,18 @@ describe("JsonlRunStore 事件边沿 flush（[P3/D6]）", () => {
     await store.dispose();
   });
 
-  it("终局后边沿不触发 flush：activeRuns 已回收（快照已终态，无 flush 意义）", async () => {
-    const store = makeStore({ entryAppendMinIntervalMs: 0 });
+  it("终局后边沿不触发 flush：activeRuns 已回收（投影已终态，无 flush 意义）", async () => {
+    const store = makeStore();
+    const wfSpy = vi.spyOn(fs.promises, "writeFile");
     const runId = "wf-edge-done";
     await store.save(makeRun(runId, "done")); // 终态冷路径（activeRuns 不保留）
-    const entryCount = entrySnapshots(entries).length;
+    const baseline = wfSpy.mock.calls.length;
     appendJournalEvent(tmpDir, runId, {
       type: "ask-dispatched", taskIndex: 0, agentName: "a0", attempt: 1, ts: 1000,
     });
     store.simulateJournalEdgeForTest(runId);
     await new Promise((r) => setTimeout(r, EDGE_DEBOUNCE_MS * 4));
-    expect(entrySnapshots(entries).length).toBe(entryCount); // 无新 flush
+    expect(wfSpy.mock.calls.length).toBe(baseline); // 无新 flush
     await store.dispose();
   });
 });

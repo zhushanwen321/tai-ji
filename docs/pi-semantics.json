@@ -342,7 +342,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "sw jsonl-run-store B1 retention（TAIJI_SUBAGENT_STATE_MAX_RUNS opt-in mtime 裁剪）的承重依据——pi 不清理则扩展自担磁盘保留。pi 升级时重验：SessionManager 是否新增自动清理/retention"
+      "note": "扩展侧磁盘保留的承重依据（W1 介质归位后口径，ADR-0078）：pi 不清理则 taiji 自担——journal/record 事件文件经统一保留维护轮清理（fold 终态资格判据 + 默认 30 天保留窗口，state 快照成对删、manifest 永不随裁；cap=50 计数裁剪已废除）。pi 升级时重验：SessionManager 是否新增自动清理/retention"
     },
     "verifiedWith": "0.84.4"
   },

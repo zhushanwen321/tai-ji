@@ -3,7 +3,10 @@
 // [H4 三轴拆分 / 重建与投影轴] RecordStore 的无状态重建与投影纯函数族：
 //   - buildRecord 重建单规则（§3.2.4：identity 基底 + `.state` sidecar 矩阵 → 一律 idle
 //     + stopReason 单源）与 light/full 两分支装配（buildFileCacheEntry）；
-//   - entry 重建族（rebuildEntryRecord + readEntry* 域投影 + collectLastRecordEntries）；
+//   - entry 重建族（rebuildEntryRecord + readEntry* 域投影 + collectLastRecordEntries
+//     ——含 [W1 / U2b] v1 快照通道版本门：v2 条目与未知版本结构性跳过，零幻影）；
+//   - 身份解析三级优先级（[W1 / U2b] resolveRecordIdentity：事件文件 fold >
+//     binding > manifest，恢复路径身份源裁决单点）；
 //   - manifest 读投影（manifestToSubagent / mapManifestStatus）与写投影（terminal /
 //     batch / derived / legacyManifestStatusFields——session-reader 兼容契约的单点）；
 //   - 内存源投影 recordToSubagent、缓存戳类型与戳校验工具（Stamp / FileCacheEntry 族）。
@@ -24,7 +27,8 @@ import { getCurrentActivity, getDisplayItems, getEventLog, markReconstructedStat
 import { readStateMarker } from "./state-marker.ts";
 import type { RecordBinding, StateMarker } from "./state-marker.ts";
 import { readRecordBinding, zcodeAnchorBasePath } from "./state-marker.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE, classifySubagentRecordEntryData } from "./record-entry.ts";
+import type { RecordJournalFoldState } from "./record-events.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 // [U7 / §3.2.6 引擎中立锚] transcriptAnchorOf（cold-lookup 导出接口）：record →
 // transcript 锚的派生单点（显式 transcriptRef 优先 / zcode engineHandle.sessionRef
@@ -42,8 +46,10 @@ import {
 } from "./session-reconstructor.ts";
 import type {
   ClosedReason,
+  ExecutionMode,
   ExecutionRecord,
   ExecutionStatus,
+  RecordOrigin,
   SubagentRecord,
   ZcodeTranscriptRef,
 } from "../assembly/types.ts";
@@ -208,7 +214,34 @@ function asSubagentRecordEntry(o: unknown): { id: string; data: Record<string, u
   return typeof data.id === "string" ? { id: data.id, data } : null;
 }
 
-/** recoverEntryOnlyOrphans 用的 entry 扫描：主 session 全文 → 每 id 末条 record data。 */
+/**
+ * [W1 / U2b] v1 快照通道的版本门（设计 D1「旧读者版本门补齐清单」的 A-17 缺口，
+ * 判定单源 = classifySubagentRecordEntryData）。
+ *
+ * 跳过（结构性不可见——零幻影，D8 中间态「不崩溃不产幻影」的读侧半边）：
+ *   - v2 条目（registered/settled）：v2 实体的状态权威在事件文件 fold（record-
+ *     events.ts），v1 快照通道消费它会产半构造投影（registered 重建出 running 假态、
+ *     settled 丢失 eventLog/displayItems 详情域）；
+ *   - future-v（v > 2）/ unknown-kind（v2 但 kind 越词表）：不认识的版本跳过而非
+ *     猜测（record-entry v1 契约同款纪律）。
+ *
+ * 保留照 v1 读：missing-v。真实写点 W16 起恒写 v（toSubagentRecordEntry），磁盘
+ * 合法数据不存在无 v 形态——missing-v 宽容面只覆盖测试 fixture 的简化形态与
+ * 极端损坏残留（后者的幻影风险由 rebuildEntryRecord 的字段守卫承接）。
+ *
+ * 消费点两层（单谓词单源）：collectLastRecordEntries（行为门——v2 行像不存在，
+ * 「每 id 末条 v1」语义保持）与 rebuildEntryRecord（契约门——导出函数对非 v1
+ * 输入返回 null，与「损坏 entry 返回 null」同款契约）。
+ */
+function isV1SnapshotEntry(data: Record<string, unknown>): boolean {
+  const verdict = classifySubagentRecordEntryData(data);
+  return verdict.ok || verdict.reason === "missing-v";
+}
+
+/** recoverEntryOnlyOrphans 用的 entry 扫描：主 session 全文 → 每 id 末条 record data。
+ *  [W1 / U2b] 版本门内联：v2/未知版本行跳过（isV1SnapshotEntry），v1 兼容路径
+ *  （纯 v1 会话与 v1+v2 混排行）输出与无门时逐字节一致——D7「旧会话行为完全
+ *  不变」的读侧证明义务。 */
 export function collectLastRecordEntries(content: string): Map<string, Record<string, unknown>> {
   const lastById = new Map<string, Record<string, unknown>>();
   for (const line of content.split("\n")) {
@@ -222,7 +255,16 @@ export function collectLastRecordEntries(content: string): Map<string, Record<st
         reason: err instanceof Error ? err.message : String(err),
       });
     }
-    if (entry !== null) lastById.set(entry.id, entry.data);
+    if (entry === null) continue;
+    if (!isV1SnapshotEntry(entry.data)) {
+      // v 门跳过是设计内合法形态（非坏行）：v2 实体归新读者（事件文件 fold 通道，
+      // U3），此处 debug 留痕供「record 为什么不见了」类排障对账。
+      logger.debug("[subagents] entry-only orphan scan: skip non-v1 subagent-record entry", {
+        id: entry.id,
+      });
+      continue;
+    }
+    lastById.set(entry.id, entry.data);
   }
   return lastById;
 }
@@ -345,6 +387,9 @@ export function isEngineHandleShape(
 
 /** entry data 即 SubagentRecord v1 快照——带运行时 guard 重建（taste/no-unsafe-cast）。
  *  损坏 entry（agent/task/startedAt 任一缺失）返回 null，由调用方跳过。
+ *  [W1 / U2b] 版本门（isV1SnapshotEntry 同谓词）：v2/未知版本 data 返回 null——
+ *  导出函数不消费非 v1 形态，防直接调用方（绕过 collectLastRecordEntries）产
+ *  半构造投影；v2 实体重建归事件文件 fold 通道（record-events.ts，U3 消费）。
  *  [U5 E1] 投影白名单扩展（设计 §3.1.3「标记读取通路」）：batchFinalized
  * （[modeless 波3] collectMode 读侧丢弃随字段消亡删除）+ 终态五字段 status/endedAt/closedReason/result/error——原实现硬编码
  *  status:"running" 且不投影终态，E1 重建成员恒被视为 running，「全员终态→补发」
@@ -367,6 +412,7 @@ export function isEngineHandleShape(
  *  字段顺序 = 对象字面量原序（终态/批收集/engine 域以 spread 在原位置展开），
  *  entry 序列化字节形态不变。 */
 export function rebuildEntryRecord(id: string, d: Record<string, unknown>): SubagentRecord | null {
+  if (!isV1SnapshotEntry(d)) return null; // v 门：v2/未知版本不经 v1 快照重建（零幻影）
   const agent = entryStr(d, "agent");
   const task = entryStr(d, "task");
   const startedAt = entryNum(d, "startedAt");
@@ -511,6 +557,149 @@ export function identityFromBinding(binding: RecordBinding | undefined, file: st
     thinkingLevel: binding.thinkingLevel,
     sessionFile: file,
   };
+}
+
+// ============================================================
+// [W1 / U2b] 身份解析三级优先级（事件文件 fold > binding > manifest）
+// ============================================================
+
+/** 身份解析命中源（优先级可观察面——排障对账与测试锚定）。 */
+export type RecordIdentitySource = "journal-fold" | "binding" | "manifest";
+
+/**
+ * 恢复路径解析出的 record 身份域（设计 D2 binding 行裁决：事件文件 fold >
+ * binding 兜底（旧数据兼容）> manifest；字段集 = D3 record-created 载荷同集）。
+ *
+ * 消费方：恢复/收编路径（U2a loadAll 定界与收编入口、U3 投影）解析 record 身份的
+ * 单点裁决——三级源由调用方各自读好传入（本函数纯函数无 IO），高级源在场即整体
+ * 胜出（冲突字段取高级源值——单写者下冲突仅见于数据损坏，不引入字段级合并的
+ * 第二种语义）；高级源缺失/身份域损坏逐级降级；三源皆缺 → undefined（调用方
+ * 按无身份处理）。
+ *
+ * model/thinkingLevel/sessionFile 不在身份域（fold 的 record-created 不携带，
+ * 绑定/引擎域属 bound 事件与 sidecar 面）——组装 IdentityHeaderRecon 基底由
+ * 调用方补齐，本类型只承载三级裁决共有的身份字段。
+ */
+export interface ResolvedRecordIdentity {
+  id: string;
+  agent: string;
+  task: string;
+  slug: string;
+  mode: ExecutionMode;
+  startedAt: number;
+  rootSessionId: string | undefined;
+  parentRecordId: string | undefined;
+  depth: number;
+  origin: RecordOrigin | undefined;
+  parentRunId: string | undefined;
+  stepIndex: number | undefined;
+  /** 命中源（三级优先级判定的结果面）。 */
+  source: RecordIdentitySource;
+}
+
+/** journal 行级解析只校验事件信封（type/seq/ts），身份域载荷解码归本消费方——
+ *  必需标量形状不满足视为 fold 身份不可用，降级下一级（与 identityFromBinding
+ *  「损坏残留不误判成身份」同向）。 */
+
+/** unknown → string | undefined（JSON 值安全读取；entryStr 同形，身份解析节局部）。 */
+function optStr(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+/** unknown → number | undefined（JSON 值安全读取；entryNum 同形）。 */
+function optNum(v: unknown): number | undefined {
+  return typeof v === "number" ? v : undefined;
+}
+
+function identityFromFoldSource(fold: RecordJournalFoldState | undefined): ResolvedRecordIdentity | undefined {
+  const identity = fold?.identity;
+  if (identity === undefined) return undefined; // 残文件/全坏行形态（record-events 注释）
+  if (
+    typeof identity.id !== "string" ||
+    typeof identity.agent !== "string" ||
+    typeof identity.task !== "string" ||
+    typeof identity.slug !== "string" ||
+    typeof identity.startedAt !== "number" ||
+    typeof identity.depth !== "number" ||
+    identity.mode !== "background"
+  ) {
+    logger.debug("[subagents] identity resolve: corrupt record-created identity, falling back", {
+      id: identity.id,
+    });
+    return undefined;
+  }
+  return {
+    id: identity.id,
+    agent: identity.agent,
+    task: identity.task,
+    slug: identity.slug,
+    mode: identity.mode,
+    startedAt: identity.startedAt,
+    // optional 身份域经安全读取（entryStr/entryNum 同款——JSON 值不裸收）
+    rootSessionId: optStr(identity.rootSessionId),
+    parentRecordId: optStr(identity.parentRecordId),
+    depth: identity.depth,
+    origin: identity.origin === "workflow" || identity.origin === "tool" ? identity.origin : undefined,
+    parentRunId: optStr(identity.parentRunId),
+    stepIndex: optNum(identity.stepIndex),
+    source: "journal-fold",
+  };
+}
+
+/** binding 源投影：字段直传（readRecordBinding 读侧已字面量守卫归一，
+ *  identityFromBinding 直传同款信任面）。 */
+function identityFromBindingSource(binding: RecordBinding | undefined): ResolvedRecordIdentity | undefined {
+  if (binding === undefined) return undefined;
+  return {
+    id: binding.recordId,
+    agent: binding.agent,
+    task: binding.task,
+    slug: binding.slug,
+    mode: binding.mode,
+    startedAt: binding.startedAt,
+    rootSessionId: binding.rootSessionId,
+    parentRecordId: binding.parentRecordId,
+    depth: binding.depth,
+    origin: binding.origin,
+    parentRunId: binding.parentRunId,
+    stepIndex: binding.stepIndex,
+    source: "binding",
+  };
+}
+
+/** manifest 源投影（兜底层）：投影语义对齐 manifestToSubagent——task/slug 缺失
+ *  兜底空串、mode 恒 background、depth 恒 0、rootSessionId 空串归 undefined、
+ *  parentRecordId 不采信（manifestToSubagent 同款）、无来源域字段。 */
+function identityFromManifestSource(m: ManifestRecord | undefined): ResolvedRecordIdentity | undefined {
+  if (m === undefined) return undefined;
+  return {
+    id: m.id,
+    agent: m.agentName,
+    task: m.task ?? "",
+    slug: m.slug ?? "",
+    mode: "background",
+    startedAt: m.createdAt,
+    rootSessionId: m.rootSessionId || undefined,
+    parentRecordId: undefined,
+    depth: 0,
+    origin: undefined,
+    parentRunId: undefined,
+    stepIndex: undefined,
+    source: "manifest",
+  };
+}
+
+/**
+ * 恢复路径身份解析（三级优先级单点，设计 D2：事件文件 fold > binding > manifest）。
+ * 纯函数：三级源由调用方读好传入；高级源在场即整体胜出（冲突时高级源字段胜出），
+ * 缺失/损坏逐级降级，三源皆缺 → undefined。
+ */
+export function resolveRecordIdentity(
+  fold: RecordJournalFoldState | undefined,
+  binding: RecordBinding | undefined,
+  manifest: ManifestRecord | undefined,
+): ResolvedRecordIdentity | undefined {
+  return identityFromFoldSource(fold) ?? identityFromBindingSource(binding) ?? identityFromManifestSource(manifest);
 }
 
 /** identity 基底 + sidecar 状态矩阵 → 缓存条目（索引命中与探测重建两分支的公共装配点）。 */

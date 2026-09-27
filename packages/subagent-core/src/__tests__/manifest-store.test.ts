@@ -6,6 +6,12 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ManifestStore } from "../execution/persistence/manifest-store";
+// [W1 / U2a] bound 物化守卫断言的观察面（RecordStore 写点 → records/<id>.json 投影）。
+import { createRecord } from "../execution/persistence/execution-record";
+import { createRecordEventJournal, recordEventsPath } from "../execution/persistence/record-events";
+import type { RecordJournalEvent } from "../execution/persistence/record-events";
+import { RecordStore } from "../execution/persistence/record-store";
+import type { ExecutionRecord } from "../execution/assembly/types";
 
 // [C10] 磁盘满测试需要可控的 fs.promises.rename（拖 ENOSPC/EACCES）。
 // hoisted flag + vi.mock 透传：默认 renameErrorRef.current=null 走真实 rename，
@@ -366,5 +372,119 @@ describe("ManifestStore", () => {
       const tmpFiles = fs.readdirSync(tmpDir).filter((f) => f.includes(".tmp."));
       expect(tmpFiles.length).toBe(0);
     });
+  });
+});
+
+// ── [W1 / U2a] bound 物化守卫段专属 helper（v2* 前缀防重名）────────
+
+function v2ReadEventLines(recordsDir: string, id: string): RecordJournalEvent[] {
+  const content = fs.readFileSync(recordEventsPath(recordsDir, id), "utf8");
+  const out: RecordJournalEvent[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    out.push(JSON.parse(trimmed) as RecordJournalEvent);
+  }
+  return out;
+}
+
+function v2MakeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
+  const base = createRecord("bg-v2", {
+    agent: "worker",
+    model: "m",
+    mode: "background",
+    task: "t",
+    slug: "v2-journal",
+    startedAt: 1000,
+    rootSessionId: "sess-v2",
+  });
+  return { ...base, ...over };
+}
+
+describe("bound 物化守卫三断言（W1 D2 决策 9）", () => {
+  let rootDir: string;
+  let sessionsDir: string;
+  let recordsDir: string;
+
+  beforeEach(() => {
+    rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-v2-bound-guard-"));
+    sessionsDir = path.join(rootDir, "sessions");
+    recordsDir = path.join(rootDir, "records");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.mkdirSync(recordsDir, { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function makeStore(): RecordStore {
+    return new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+  }
+
+  it("断言一（family 不误标）：运行中 record（bound manifest 已写）不被标已清理——manifest 在盘即 running 投影", () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-guard-family" });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-guard-family.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+
+    // 家族扫描前提不变量：manifest 在盘且非 closed/cancelled——running record 的
+    // sessionFile 存活（未被 GC），扫描不产 cleanedUp 误标。
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(recordsDir, "sa-guard-family.json"), "utf8") as string,
+    ) as { status: string; sessionFile: string };
+    expect(manifest.status).toBe("running");
+    expect(fs.existsSync(manifest.sessionFile)).toBe(true);
+  });
+
+  it("断言二（跳过自愈）：锚定未就绪时本轮不写 manifest、下一物化点（轮终）自愈补写", () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-guard-heal" });
+    store.register(rec);
+    // spawn 回填但子 session 文件未落盘（bound 早于首笔写入的窗口）——守卫跳过。
+    const sessionFile = path.join(sessionsDir, "sa-guard-heal.jsonl");
+    rec.sessionFile = sessionFile; // 文件不存在
+    store.reportRecordTransition(rec);
+    expect(fs.existsSync(path.join(recordsDir, "sa-guard-heal.json"))).toBe(false);
+
+    // 事件文件已落 bound 帧（事实源不受守卫影响——守卫只管 manifest 投影）。
+    const events = v2ReadEventLines(recordsDir, "sa-guard-heal");
+    expect(events.some((e) => e.type === "record-bound")).toBe(true);
+
+    // 下一物化点（轮终 markRoundIdle 的 writeDerivedManifest）自愈补写。
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    store.markRoundIdle("sa-guard-heal", { kind: "success", content: "ok" });
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(recordsDir, "sa-guard-heal.json"), "utf8") as string,
+    ) as { executionStatus: string };
+    expect(manifest.executionStatus).toBe("idle");
+  });
+
+  it("断言三（zcode 粒度）：sessionRef 双键在场即物化（会话行级判读，非 dbPath 文件存在级）", () => {
+    const store = makeStore();
+    const rec = v2MakeRecord({ id: "sa-guard-zcode", engine: "zcode" });
+    store.register(rec);
+    // zcode 回填：engineHandle.sessionRef 双键（dbPath 指向不存在的文件——粒度
+    // 断言：不查 dbPath 存在性，bound 产生点晚于引擎会话建立的裁决面）。
+    rec.engineHandle = {
+      sessionRef: { sessionId: "sess-zc-1", dbPath: path.join(rootDir, "nonexistent", "db.sqlite") },
+      poolKey: "shared",
+    };
+    store.reportRecordTransition(rec);
+
+    const manifestPath = path.join(recordsDir, "sa-guard-zcode.json");
+    expect(fs.existsSync(manifestPath)).toBe(true);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8") as string) as {
+      status: string;
+      engine: string;
+      engineHandle: { sessionRef: { sessionId: string; dbPath: string } };
+    };
+    expect(manifest.status).toBe("running");
+    expect(manifest.engine).toBe("zcode");
+    expect(manifest.engineHandle.sessionRef.sessionId).toBe("sess-zc-1");
+    // zcode 分支零探查的直接证据：dbPath 文件不存在仍物化。
+    expect(fs.existsSync(manifest.engineHandle.sessionRef.dbPath)).toBe(false);
   });
 });

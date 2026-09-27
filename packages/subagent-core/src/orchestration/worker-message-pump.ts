@@ -40,6 +40,7 @@
  */
 
 import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
+import { join } from "node:path";
 
 import { getLogger } from "../core/logger.ts";
 
@@ -51,10 +52,12 @@ import type { AgentRunner, LifecycleDeps, WorkerHandlers } from "./models/ports.
 // 为唯一权威实装，本文件是其编排侧唯一消费入口——journal 单写者纪律的物理载体）。
 import {
   createRunEventJournal,
+  doneReasonToRunOutcome,
   finalRunErrorCodeOf,
   foldRunEventFrames,
   IllegalTransitionError,
   RUN_EVENT_TYPES,
+  RUN_EVENT_JOURNAL_SUFFIX,
   transition,
   type RunErrorCode,
   type RunEventJournal,
@@ -64,7 +67,16 @@ import {
   type TransitionResult,
   type TransitionTrigger,
   type WorkflowRunEvent,
+  type WorkflowRunEventInput,
 } from "./run-events.ts";
+// [W1 / D1] v2 条目契约（两族小条目）：customType 同 v1（kind 判别），构造器与
+// 写点在本文件（见「v2 条目接驳」段）。
+import {
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_RECORD_ENTRY_VERSION,
+  type WorkflowRecordRegisteredEntryData,
+  type WorkflowRecordSettledEntryData,
+} from "./workflow-record-entry.ts";
 import { RunRuntime } from "./models/run-runtime.ts";
 import type { RunSpec } from "./models/run-spec.ts";
 import type { WorkerLogEntry } from "./models/types.ts";
@@ -349,6 +361,11 @@ export async function finalizeRun(
     }
   }
   closeOutInFlightCalls(run);
+  // [W1 / D1] v2 终态条目：journal run-settled 帧 + manifest 物化（上方
+  // dispatchFinalRunSettle → appendTransition）之后的条目半边——「物化时机与
+  // 终态条目写点对齐」的接驳点（见 appendWorkflowRecordSettledEntry 注释）。
+  // 独立围栏：条目失败不阻断 save/unregister/onRunDone（投影锚 best-effort）。
+  appendWorkflowRecordSettledEntry(run, deps, doneReason, options.context);
   await saveRunBestEffort(run, deps, options.context);
   deps.log?.("debug", "workflow:worker-message-pump", "run finalized", {
     runId: run.runId,
@@ -440,9 +457,19 @@ export function setRunEventJournalDirForTest(dir: string | undefined): void {
   liveRunStates.clear();
 }
 
-/** 测试防线的 no-op journal：scan 恒空、append 零写（vitest 未显式注入目录时启用）。 */
+/**
+ * 测试防线的 no-op journal：scan 恒空、append 零写（vitest 未显式注入目录时启用）。
+ * append 仍返回含 seq 的完整事件（内存计数分配——接口契约「返回值 = 落盘事件」
+ * 在零写形态下保持形状，调用链不需要感知防线）。
+ */
 class NoopRunEventJournal implements RunEventJournal {
-  async append(): Promise<void> {}
+  private seqCounter = 0;
+
+  async append(_runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent> {
+    this.seqCounter += 1;
+    return { ...event, seq: this.seqCounter } as WorkflowRunEvent;
+  }
+
   async scan(): Promise<readonly WorkflowRunEvent[]> {
     return [];
   }
@@ -488,15 +515,30 @@ async function foldRunState(runId: string): Promise<RunState> {
 }
 
 /**
+ * run 事件 journal 文件绝对路径（journal/manifest/state 同一解析源：生产推导
+ * resolvePiWorkflowStateDir，测试经 setRunEventJournalDirForTest 注入）。
+ *
+ * [W1 / D1] v2 注册条目的 journalPath 锚点字段经本函数寻址（lifecycle.runWorkflow
+ * 写注册条目时消费）——锚点与 journal 实写面同源，防条目指向漂移。vitest 无注入
+ * 防线（dir=""）下返回 undefined = 锚点不可寻址，调用方据此跳过条目写（禁触真实
+ * 数据目录红线，与 no-op journal 同一防线语义）。
+ */
+export function runEventJournalPathOf(runId: string): string | undefined {
+  const { dir } = resolveRunEventJournal();
+  if (dir === "") return undefined;
+  return join(dir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+}
+
+/**
  * journal-append 输出对应的事件本体：触发事件属 journal 词表 → 事件本身；控制事件
  * 触发的终局转移 → 合成 run-settled（run-events.ts 输出动作注释约定——当前唯一合法
  * 控制终局 = cancel-requested；abandon-elapsed 行无 journal-append 输出、host-died /
  * watchdog-fired 非终局，构不到这里）。ts 信封在合成时打点（transition 纯函数契约：
- * 时钟归调用侧）。
+ * 时钟归调用侧）；seq 由 journal.append 分配（入参即 input 形态）。
  */
-function journalEventOf(trigger: TransitionTrigger): WorkflowRunEvent {
+function journalEventOf(trigger: TransitionTrigger): WorkflowRunEventInput {
   if (JOURNAL_EVENT_TYPES.has(trigger.type)) {
-    return trigger as WorkflowRunEvent;
+    return trigger as WorkflowRunEventInput;
   }
   if (trigger.type === "cancel-requested") {
     return {
@@ -858,8 +900,13 @@ function summarizeRetryReason(result: AgentResult): string {
  *  budget_limited/time_limited 是 run 怎么死的系统层失败 = failed，诊断文本进
  *  reason）。errorCode 由 finalRunErrorCodeOf 单点构造（engine crash 族经失败
  *  call 的协议码前缀提取），随事件载荷落 journal 后经 persistTerminalProjection
- *  投影进 manifest/.state（S2「死亡可诊断」的 manifest errorCode 落点）。 */
-async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason): Promise<void> {
+ *  投影进 manifest/.state（S2「死亡可诊断」的 manifest errorCode 落点）。
+ *
+ *  [W1 / D4] 崩溃恢复收编复用：lifecycle.recoverCrashedRuns 对 running 遗留
+ *  run 的 journal 终局化经本函数走同一 dispatch 链（状态机裁决 + manifest 物化）
+ *  ——活体终局与恢复收编的证据落点对称（run-settled 帧 + manifest，不再旁路
+ *  直改）。导出面即为此（原为模块私有）。 */
+export async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason): Promise<void> {
   if (doneReason === "aborted") {
     await dispatchRunTrigger(run, {
       type: "cancel-requested",
@@ -877,6 +924,160 @@ async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason):
     artifactsDir: resolveRunEventJournal().dir,
     ts: Date.now(),
   });
+}
+
+// ── [W1 / D1] v2 条目接驳（两条小条目的 core 写点与构造器单源）──────────────
+//
+// 主 session 的 run 侧条目从「v1 全量快照」收敛为「注册 + 终态两条 v2 小条目」：
+// 运行态数据活在 journal（事实源），条目只是锚（注册 = 身份 + journalPath；终态 =
+// 终局 + 摘要，字段与 run-settled 帧/reason 同源——条目是 journal 的投影锚，不是
+// 第二事实源）。写点归属：
+// - 注册条目 = lifecycle.runWorkflow（run-created journal 落账成功后；经
+//   appendWorkflowRecordRegisteredEntry）；
+// - 终态条目 = finalizeRun 终局 coda（journal run-settled 帧 + manifest 物化之后，
+//   与物化时机对齐——见 finalizeRun 内注释）。
+// 构造器单源在本段：字段集对照（设计 D1 条目契约表 workflow-record 行）的机器
+// 锚点，壳写点/测试断言复用同一构造（防字段集手抄漂移成 SubagentTab 空行）。
+// v1 快照条目的停写与 loadAll 读侧改造归壳批次（批 2 领地）；中间态 v1+v2 并存
+// 时旧读者按版本门跳过 v2（D8 安全）。
+
+/** v2 终态条目摘要的 scriptResult 截断上限（条目要小，全文不进主 session 行）。 */
+const SCRIPT_RESULT_SUMMARY_MAX_CHARS = 200;
+
+/**
+ * v2 注册条目构造（纯函数）。slug 缺省回落 scriptName（u0 契约注释的字面语义）；
+ * startedAt/journalPath 由调用方传入（诞生点时钟 + runEventJournalPathOf 锚点）。
+ */
+export function buildWorkflowRecordRegisteredEntryData(params: {
+  runId: string;
+  scriptName: string;
+  slug?: string;
+  startedAt: number;
+  journalPath: string;
+}): WorkflowRecordRegisteredEntryData {
+  return {
+    v: WORKFLOW_RECORD_ENTRY_VERSION,
+    kind: "registered",
+    runId: params.runId,
+    workflowName: params.scriptName,
+    scriptName: params.scriptName,
+    slug: params.slug ?? params.scriptName,
+    startedAt: params.startedAt,
+    journalPath: params.journalPath,
+  };
+}
+
+/**
+ * v2 终态条目构造（纯函数）。outcome/errorCode/reason 与 dispatchFinalRunSettle
+ * 的 run-settled 帧同源（doneReasonToRunOutcome + finalRunErrorCodeOf 单点映射）；
+ * 摘要三字段（callCount/usedTokens/scriptResult 概要）取终局时点快照。收编场景
+ * （run-registry）无内存聚合——callCount 从 journal ask-settled 帧数推导，
+ * usedTokens 不可推导时传 0（摘要级诚实缺省，不伪造统计）。
+ */
+export function buildWorkflowRecordSettledEntryData(params: {
+  runId: string;
+  reason: DoneReason;
+  outcome: RunOutcome;
+  errorCode?: RunErrorCode;
+  settledAt: number;
+  callCount: number;
+  usedTokens: number;
+  scriptResultSummary?: string;
+}): WorkflowRecordSettledEntryData {
+  return {
+    v: WORKFLOW_RECORD_ENTRY_VERSION,
+    kind: "settled",
+    runId: params.runId,
+    status: "done",
+    reason: params.reason,
+    outcome: params.outcome,
+    ...(params.errorCode !== undefined ? { errorCode: params.errorCode } : {}),
+    settledAt: params.settledAt,
+    callCount: params.callCount,
+    usedTokens: params.usedTokens,
+    ...(params.scriptResultSummary !== undefined ? { scriptResultSummary: params.scriptResultSummary } : {}),
+  };
+}
+
+/** scriptResult（unknown）→ 条目摘要文本：JSON 序列化截断；不可序列化/缺省 = 缺省。 */
+function summarizeScriptResult(scriptResult: unknown): string | undefined {
+  if (scriptResult === undefined) return undefined;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(scriptResult);
+  } catch {
+    return undefined;
+  }
+  if (serialized === undefined) return undefined;
+  return serialized.length > SCRIPT_RESULT_SUMMARY_MAX_CHARS
+    ? `${serialized.slice(0, SCRIPT_RESULT_SUMMARY_MAX_CHARS)}…`
+    : serialized;
+}
+
+/**
+ * v2 注册条目写点（lifecycle.runWorkflow 调用；journalPath 锚点不可寻址时跳过）。
+ * best-effort 围栏：appendEntry 失败留痕不阻断 run 启动主链（条目是投影锚，
+ * journal 事实已在——与 SW-DATA-3 同族的「落盘面尽力」语义）。
+ */
+export function appendWorkflowRecordRegisteredEntry(run: WorkflowRun, deps: LifecycleDeps): void {
+  const journalPath = runEventJournalPathOf(run.runId);
+  if (journalPath === undefined) {
+    runEventLogger.warn(
+      "workflow-record registered entry skipped: journal path not addressable " +
+        "(vitest env without setRunEventJournalDirForTest — entry anchor would dangle)",
+    );
+    return;
+  }
+  const startedAtMs = Date.parse(run.meta.startedAt);
+  const entry = buildWorkflowRecordRegisteredEntryData({
+    runId: run.runId,
+    scriptName: run.spec.scriptName,
+    ...(run.spec.slug !== undefined ? { slug: run.spec.slug } : {}),
+    startedAt: Number.isFinite(startedAtMs) ? startedAtMs : Date.now(),
+    journalPath,
+  });
+  try {
+    deps.appendEntry?.(WORKFLOW_RECORD_CUSTOM_TYPE, entry);
+  } catch (err) {
+    runEventLogger.error(
+      `[workflow] workflow-record registered entry append failed (runId=${run.runId}): ${toErrorMessage(err)}`,
+    );
+  }
+}
+
+/**
+ * v2 终态条目写点（finalizeRun 终局 coda 内调用）。物化时机对齐声明：journal
+ * run-settled 帧（dispatchFinalRunSettle → appendTransition，含 manifest 物化）
+ * 先落账，本条目随后写入——「journal 追加后的统一物化步」的条目半边（D2/D4：
+ * 追加终态事件 → 补写条目 → manifest 已物化，三个投影锚在终局 coda 单点收敛）。
+ * best-effort 围栏（对齐 unregister/onRunDone 的独立 try 哲学：条目失败不吞
+ * 后续步骤）。
+ */
+function appendWorkflowRecordSettledEntry(
+  run: WorkflowRun,
+  deps: LifecycleDeps,
+  doneReason: DoneReason,
+  context: string,
+): void {
+  const errorCode = finalRunErrorCodeOf(run, doneReason);
+  const scriptResultSummary = summarizeScriptResult(run.state.scriptResult);
+  const entry = buildWorkflowRecordSettledEntryData({
+    runId: run.runId,
+    reason: run.state.reason ?? doneReason,
+    outcome: doneReasonToRunOutcome(doneReason),
+    ...(errorCode !== undefined ? { errorCode } : {}),
+    settledAt: Date.now(),
+    callCount: run.state.calls.size,
+    usedTokens: run.state.budget.usedTokens,
+    ...(scriptResultSummary !== undefined ? { scriptResultSummary } : {}),
+  });
+  try {
+    deps.appendEntry?.(WORKFLOW_RECORD_CUSTOM_TYPE, entry);
+  } catch (err) {
+    runEventLogger.error(
+      `[workflow] workflow-record settled entry append failed (${context}, runId=${run.runId}): ${toErrorMessage(err)}`,
+    );
+  }
 }
 
 // ── settle 链收口（execution service 直写点删除后的单点，P1b-1） ─────────────

@@ -42,7 +42,11 @@ import { parseBgNotifyDetails } from '@taiji/shared'
 // notify 通道 customType 词表单源（extension-protocol，与壳写点同源）
 import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 // subagent-record 词表已收 core 单源（runtime 投影经 core barrel 消费；shared 副本仅剩 renderer 消费）
-import { parseEngineHandle, SUBAGENT_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
+import {
+  parseEngineHandle,
+  SUBAGENT_RECORD_CUSTOM_TYPE,
+  SUBAGENT_RECORD_ENTRY_VERSION,
+} from '@zhushanwen/subagent-core'
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { normalizeSubagentStatus } from './subagent-status.js'
 import { isEnoent } from '../../utils/errors.js'
@@ -225,11 +229,15 @@ function parseSelfDescribedSubagentRecord(entry: unknown): SubagentRecord | null
   if (typeof data !== 'object' || data === null) return null
   const d = data as Record<string, unknown>
   if (d.v !== 1) {
-    console.warn(
-      `[subagent-extractor] subagent-record entry schema version '${String(d.v)}' unsupported (expected 1) — ` +
-        `extension/runtime version skew, skip this entry. Fix: align schema with ` +
-        `extensions/universal/subagent-workflow/src/execution/record-entry.ts (W16 v1).`,
-    )
+    // [W1 / D1] v2 条目静默跳过（当前版本，journal 投影消费面——scanV2RecordEntries）；
+    // 仅 future-v（≥3）warn 留证。本扫描器是 v1 快照兼容层（D7 惰性兼容读）。
+    if (d.v !== SUBAGENT_RECORD_ENTRY_VERSION) {
+      console.warn(
+        `[subagent-extractor] subagent-record entry schema version '${String(d.v)}' unsupported (expected 1) — ` +
+          `extension/runtime version skew, skip this entry. Fix: align schema with ` +
+          `packages/subagent-core/src/execution/persistence/record-entry.ts (W1 v2 current).`,
+      )
+    }
     return null
   }
   return projectSelfDescribedSubagentRecord(d)
@@ -718,7 +726,11 @@ function listSubagentJsonlFiles(mainCwd: string): { dir: string; files: string[]
 
   let files: string[]
   try {
-    files = readdirSync(dir).filter((f) => f.endsWith('.jsonl') && !f.endsWith('.finalized'))
+    // [W1 / D3] 后缀白名单结构性忽略 *.events 文件族（record 事件文件无 .jsonl 后缀
+    // ——与 records 目录同 cwd 树相邻，防御性按后缀排除：误读会拿事件行当 session 行）
+    files = readdirSync(dir).filter(
+      (f) => f.endsWith('.jsonl') && !f.endsWith('.finalized') && !f.endsWith('.events'),
+    )
   } catch (e) {
     if (!isEnoent(e)) {
       warnOnce(

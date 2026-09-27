@@ -158,7 +158,11 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
 
     expect(run.state.status).toBe("done");
     expect(deps.store.save).toHaveBeenCalledTimes(1);
-    expect(deps.appendEntry).toHaveBeenCalledTimes(1); // 直落正常发生后才抛
+    // [W1] workflow-record 终态条目（先）+ unregister 直落（后）各恰一次——
+    // onRunDone 抛错不被两条 entry 路径短路
+    expect(
+      deps.appendEntry.mock.calls.filter((c) => c[0] === "pending:unregister"),
+    ).toHaveLength(1);
   });
 
   it("handleWorkerError 超限：直落抛错 → resolve（旧实现裸调 → unhandledRejection）", async () => {

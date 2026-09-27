@@ -82,6 +82,7 @@ import {
 } from "../engine/host/spawned-children.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { ExecuteOptions } from "../assembly/types.ts";
+import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { CTX_MODEL, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
@@ -643,9 +644,15 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     const journalPath = resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId);
     expect(fs.existsSync(journalPath)).toBe(false);
 
-    // 轮终 entry 的 engineHandle：sessionRef 经 onHandleReady 回填，无 journalPath。
-    const entry = lastRecordEntry(pi);
-    expect(entry?.engineHandle).toEqual({
+    // [W1/D2 停写写点→事件面] engineHandle 过程投影改走事件文件：成功轮 modeless
+    // 收口 = markRoundIdle（round-idle 帧 stopReason: completed，不终态化无 settled
+    // 条目）；引擎锚经 record-bound 帧承载（运行中另经 bound manifest 物化可见），
+    // 均无 journalPath 键。
+    const events = scanRecordEventsFor(agentDir, handle.subagentId);
+    expect(events.filter((e) => e.type === "record-round-idle").at(-1)).toMatchObject({
+      stopReason: "completed",
+    });
+    expect(events.filter((e) => e.type === "record-bound").at(-1)?.engineHandle).toEqual({
       sessionRef: { dbPath, sessionId: "sess-1" },
       poolKey: "shared",
     });
@@ -672,7 +679,15 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
       expect(rec?.stopReason).toBe("failed");
     });
 
-    const h = lastRecordEntry(pi)?.engineHandle as Record<string, unknown> | undefined;
+    // [W1/D2·D3] 失败轮 modeless 收口 = markRoundIdle（round-idle 帧 stopReason:
+    // failed，不终态化）——engineHandle 部分回填形态经 record-bound 帧承载。
+    const events = scanRecordEventsFor(agentDir, handle.subagentId);
+    expect(events.filter((e) => e.type === "record-round-idle").at(-1)).toMatchObject({
+      stopReason: "failed",
+    });
+    const h = events.filter((e) => e.type === "record-bound").at(-1)?.engineHandle as
+      | Record<string, unknown>
+      | undefined;
     expect((h?.sessionRef as Record<string, unknown>)?.dbPath).toBe(path.join(agentDir, "sessions.db"));
     expect(h?.poolKey).toBe("shared");
   });
@@ -698,13 +713,16 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
     await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
 
-    // run 尚未 resolve（record 仍 running）：engineHandle 已回填且 entry 已落盘
+    // run 尚未 resolve（record 仍 running）：engineHandle 已回填且 [W1/D2 停写点→
+    // 事件面] record-bound 帧已落事件文件（bound manifest 物化同步可见——运行中
+    // GUI 的锚定通道，不再依赖过程 entry）。
     await vi.waitFor(() => {
-      const entries = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
-      const withHandle = entries.filter(
-        (c) => (c[1] as Record<string, unknown>).engineHandle !== undefined,
-      );
-      expect(withHandle.length).toBeGreaterThan(0);
+      const events = scanRecordEventsFor(agentDir, handle.subagentId);
+      const bound = events.filter((e) => e.type === "record-bound");
+      expect(bound.length).toBeGreaterThan(0);
+      expect(bound[bound.length - 1]).toMatchObject({
+        engineHandle: { sessionRef: { dbPath: ".zcode/cli/db/db.sqlite", sessionId: "sess-live-1" } },
+      });
     });
     const running = service["collectRecords"](10, "running").find((r) => r.id === handle.subagentId);
     // [modeless 波1] chat 域不接 journal——engineHandle 无 journalPath 键
@@ -759,14 +777,13 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
       },
       poolKey: "shared",
     });
-    // 补缺经 entry 持久化（运行中 GUI 经 entry 重建 record 即可见），且 ③ 的
-    // 「无新字段」重复回调不产生第二条写噪（同 sessionFile 恰好一条）。
-    const entries = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
-    const withLateSessionFile = entries.filter(
-      (c) =>
-        ((c[1] as Record<string, unknown>).engineHandle as
-          | { sessionRef?: Record<string, string> }
-          | undefined)?.sessionRef?.["sessionFile"] === LATE_SESSION_FILE,
+    // [W1/D2 停写点→事件面] 补缺经 record-bound 帧落账（引擎域签名变化才追加），
+    // 且 ③ 的「无新字段」重复回调不产生第二条写噪（同 sessionFile 恰好一条 bound）。
+    const boundEvents = scanRecordEventsFor(agentDir, handle.subagentId).filter(
+      (e) => e.type === "record-bound",
+    );
+    const withLateSessionFile = boundEvents.filter(
+      (e) => (e as { engineHandle?: { sessionRef?: Record<string, string> } }).engineHandle?.sessionRef?.["sessionFile"] === LATE_SESSION_FILE,
     );
     expect(withLateSessionFile).toHaveLength(1);
 
@@ -845,6 +862,21 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
   function lastRecordEntry(pi: PiMock): Record<string, unknown> | undefined {
     const calls = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
     return calls.length > 0 ? (calls[calls.length - 1][1] as Record<string, unknown>) : undefined;
+  }
+
+  /** [W1/D3] 读 record 事件文件全部事件行（观察面独立于被测 store）。 */
+  function scanRecordEventsFor(agentDir: string, id: string): Array<Record<string, unknown>> {
+    const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    try {
+      const content = fs.readFileSync(path.join(recordsDir, `${id}.events`), "utf8");
+      return content
+        .split("\n")
+        .filter((l) => l.trim().length > 0)
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .filter((e) => e.type !== "record-journal");
+    } catch {
+      return [];
+    }
   }
 });
 

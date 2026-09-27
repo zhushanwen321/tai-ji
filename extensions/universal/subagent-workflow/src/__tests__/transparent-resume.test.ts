@@ -41,7 +41,7 @@ import { findForeignLiveInstance } from "@zhushanwen/subagent-core/execution/per
 import { resurrectClosed } from "@zhushanwen/subagent-core/execution/persistence/execution-record.ts";
 import { ResurrectDeniedError } from "@zhushanwen/subagent-core/execution/assembly/types.ts";
 import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/persistence/state-marker.ts";
-import { getSubagentSessionDir } from "@zhushanwen/subagent-core/execution/assembly/path-encoding.ts";
+import { getSubagentSessionDir, getSubagentRecordsDir } from "@zhushanwen/subagent-core/execution/assembly/path-encoding.ts";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
 import { forkFromHandler, messageHandler, closeHandler } from "@zhushanwen/subagent-core";
@@ -139,6 +139,21 @@ function writeTombstone(sessionFile: string, id: string): void {
   );
 }
 
+/** [W1 / D3] 读 record 事件文件的帧序列（type；round-started 帧附 `:round`）。
+ *  [W1 / D1] 停写 v1 快照后运行态事实源 = 事件文件——轮次/收口的落账断言改锚
+ *  帧序列；路径推导与 SubagentService 装配同源（getSubagentRecordsDir）。 */
+function readRecordEventFrames(agentDir: string, id: string): string[] {
+  const eventsPath = path.join(getSubagentRecordsDir(agentDir, agentDir), `${id}.events`);
+  const raw = fs.readFileSync(eventsPath, "utf8");
+  return raw
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => {
+      const frame = JSON.parse(l) as { type: string; round?: number };
+      return frame.round !== undefined ? `${frame.type}:${frame.round}` : frame.type;
+    });
+}
+
 /** 写 .alive marker（异进程活实例复检 fixture）。 */
 function writeAliveMarker(sessionFile: string, pid: number, startedAt: number): void {
   fs.writeFileSync(
@@ -227,11 +242,16 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       expect(fake.runs[0].ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
       expect(fake.runs[0].ctx.ctxModel).toMatchObject({ provider: "p", id: "m-1" });
 
-      // subagent-record entry 落盘（register/reportRecordTransition）→ live/reload 视图恢复。
+      // subagent-record v2 注册条目落盘（[W1 / D1] 停写 v1 快照后 entry 面 = 注册/
+      // 终态两条小条目，不承载 status/round 快照位；运行态事实源 = 事件文件）。
+      // 「状态翻 running」的事实落账 = record-round-started 帧（round 从重建值起算）。
       const entries = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
       expect(entries.length).toBeGreaterThan(0);
-      const lastEntry = entries[entries.length - 1][1] as { status?: string; resumable?: boolean; round?: number };
-      expect(lastEntry.status).toBe("running");
+      const lastEntry = entries[entries.length - 1][1] as { v?: number; kind?: string; id?: string };
+      expect(lastEntry).toMatchObject({ v: 2, kind: "registered", id: "sa-d-happy" });
+      const frames = readRecordEventFrames(agentDir, "sa-d-happy");
+      expect(frames).toContain("record-created");
+      expect(frames).toContain("record-round-started:0");
 
       // 重生后的死因语义位已清（不再是 closed 态残留）
       expect(snap?.closedReason).toBeUndefined();
@@ -248,14 +268,16 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       expect(fake.runs[0].ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
     });
 
-    it("完成后第二条完成通知 dedup key 含 round（round 从 0 重建 → key=id:1），不与终态通知互吞", async () => {
+    it("完成后轮次收口落账（round 从 0 重建推进 → 第二轮 key=id:1 的基数成立），不与终态通知互吞", async () => {
       // 结构性验证：notifier dedup key = `${id}:${round}`；重生记录 round 重建为 undefined →
       // 首轮应答 settle 时 settleChatRoundFromResponse 推进 round=(0)+1=1 —— 与旧实例在另一
       // 进程的通知互不可见（notifier 去重集随服务实例重建）。此处驱动协议应答 settle 并断言
-      // entry 携带 round（保证第二轮起 key 正常递增，文档化 spec 第 4 点的行为契约）。
+      // 轮次推进的事实落账（保证第二轮起 key 正常递增，文档化 spec 第 4 点的行为契约）。
       // [W3 契约变更] entry 的 resumable 位原由 inproc doFinalizeRoundToIdle 写 true；协议
       // 形态下轮次 settle 不经 finalize 分流（live 态派生，entry 位不写）——resumable 断言
       // 无对应行为，随原观测点一并废弃。
+      // [W1 / D1·D3] v1 快照 entry 停写后 round 快照位消亡：轮次推进的事实源 = 事件
+      // 文件（record-round-started → record-round-idle 帧序）+ 记录态收口翻边（idle）。
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-notify", rootSessionId: "root-session-cur" });
       writeFinalizedState(file, "disconnected");
 
@@ -267,12 +289,19 @@ describe("[v8.5 D] 透明重生：ended 记录同 id 续写原 session", () => {
       const entries = await vi.waitFor(() => {
         const all = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
         expect(all.length).toBeGreaterThan(0);
-        const last = all[all.length - 1][1] as { round?: number };
-        expect(last.round).toBe(1);
+        // 轮次推进的事实落账：round-started(round 0) 在前、轮终收条 round-idle 在后
+        // ——第二轮 dedup key 的 round 基数（=1）由该记录态派生。
+        const frames = readRecordEventFrames(agentDir, "sa-d-notify");
+        expect(frames).toContain("record-round-started:0");
+        expect(frames).toContain("record-round-idle");
+        expect(frames.indexOf("record-round-idle")).toBeGreaterThan(frames.indexOf("record-round-started:0"));
+        // 收口翻边：轮终后记录态 idle（第二轮起 key 正常递增的记录态前提）
+        expect(service.queries.findRecord("sa-d-notify")?.status).toBe("idle");
         return all;
       });
-      const last = entries[entries.length - 1][1] as { round?: number };
-      expect(last.round).toBe(1);
+      // v2 注册条目在盘（entry 面唯一形态——无 v1 快照、无 round 快照位）
+      const last = entries[entries.length - 1][1] as { v?: number; kind?: string };
+      expect(last).toMatchObject({ v: 2, kind: "registered" });
     });
   });
 

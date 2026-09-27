@@ -120,7 +120,7 @@ function appendedUnregister(deps: ReturnType<typeof makeTracingDeps>): { customT
 // ── finalizeRun 直测 ─────────────────────────────────────────
 
 describe("finalizeRun（D5-② 单写点直测）", () => {
-  it("四步恰好一次且有序：transition → save → pending:unregister 直落 → onRunDone", async () => {
+  it("五步恰好一次且有序：transition → workflow-record 终态条目 → save → pending:unregister 直落 → onRunDone", async () => {
     const run = makeRealRun("wf-fin-1");
     const deps = makeTracingDeps();
 
@@ -130,13 +130,41 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     expect(ok).toBe(true);
     expect(run.state.status).toBe("done");
     expect(run.state.reason).toBe("completed");
-    // 四步各恰好一次
+    // 各步恰好一次
     expect(transitionSpy).toHaveBeenCalledTimes(1);
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     expect(appendedUnregister(deps)).toBeDefined();
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
-    // 顺序：save → 直落 → onRunDone（transition 已同步先行）
-    expect(deps.order).toEqual(["save", "append:pending:unregister", "onRunDone"]);
+    // 顺序：终态条目（journal run-settled 帧之后的物化半边，W1 / D1——
+    // dispatchFinalRunSettle 经 no-op journal 防线零写、无 order 打点）→ save →
+    // 直落 → onRunDone（transition 已同步先行）
+    expect(deps.order).toEqual([
+      "append:workflow-record",
+      "save",
+      "append:pending:unregister",
+      "onRunDone",
+    ]);
+  });
+
+  it("[W1 / D1] v2 终态条目两写点之一：workflow-record settled data 与 run-settled 帧同源", async () => {
+    const run = makeRealRun("wf-fin-v2entry");
+    const deps = makeTracingDeps();
+
+    await finalizeRun(run, deps, "completed", { context: "test" });
+
+    const settled = deps.appendEntry.mock.calls.find((c) => c[0] === "workflow-record");
+    expect(settled).toBeDefined();
+    expect(settled![1]).toMatchObject({
+      v: 2,
+      kind: "settled",
+      runId: "wf-fin-v2entry",
+      status: "done",
+      reason: "completed",
+      outcome: "completed",
+      callCount: 0,
+      usedTokens: 0,
+    });
+    expect(typeof (settled![1] as { settledAt: number }).settledAt).toBe("number");
   });
 
   it("[D4] 直落 entry 三字段：{id, reason, status∈mapReasonToStatus 值域}", async () => {
@@ -194,7 +222,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
       status: "failed",
     });
     expect(deps.onRunDone).not.toHaveBeenCalled();
-    expect(deps.order).toEqual(["save", "append:pending:unregister"]);
+    expect(deps.order).toEqual(["append:workflow-record", "save", "append:pending:unregister"]);
   });
 
   it("transition 抛错（并发 abort 抢先终态化）→ 返回 false，后三步全不执行", async () => {

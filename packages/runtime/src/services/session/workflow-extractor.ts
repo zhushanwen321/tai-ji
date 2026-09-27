@@ -223,7 +223,10 @@ function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null 
   const classification = classifyWorkflowRecordEntryData(e.data)
   if (!classification.ok) {
     if (classification.reason === 'wrong-type' || classification.reason === 'no-snapshot') return null
-    // missing-v / future-v：warnOnce 去重键取 snapshot.runId + 坏版本值（热路径重扫同一坏
+    // [W1 / D1] v2 条目静默跳过（当前版本，journal 投影消费面——scanV2RecordEntries）；
+    // 仅 missing-v / future-v warnOnce 留证。本扫描器是 v1 快照兼容层（D7 惰性兼容读）。
+    if (classification.reason === 'v2') return null
+    // warnOnce 去重键取 snapshot.runId + 坏版本值（热路径重扫同一坏
     // entry 只出声一次；snapshot 缺失/无 runId 回退固定键——该形态本身已无 run 可归因）。
     // data 此时必为对象（wrong-type 已排除），cast 仅为读取日志键字段。
     const raw = e.data as Record<string, unknown>
@@ -236,7 +239,7 @@ function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null 
       `entry-schema:${entryRunId}:${String(raw.v)}`,
       `[workflow-extractor] workflow-record entry schema version '${String(raw.v)}' unsupported (expected 1) — ` +
         `extension/runtime version skew, skip this entry. Fix: align schema with ` +
-        `extensions/universal/subagent-workflow/src/jsonl-run-store.ts (W17 v1).`,
+        `packages/subagent-core/src/orchestration/workflow-record-entry.ts (W1 v2 current).`,
     )
     return null
   }

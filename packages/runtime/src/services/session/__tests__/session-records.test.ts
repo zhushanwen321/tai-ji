@@ -21,6 +21,12 @@ import type { SessionRecordsDeps } from '../session-records.js'
 import { SessionRecords, encodeDirectiveText } from '../session-records.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
 import type { SkillInjector, SkillInjectionResult } from '../skill-injector.js'
+import { extractSubagentsFromSessionFile } from '../subagent-extractor.js'
+import { extractWorkflowsFromSessionFile } from '../workflow-extractor.js'
+import { encodeCwd } from '../../../infra/pi/pi-paths.js'
+
+const extractSubagentsMock = vi.mocked(extractSubagentsFromSessionFile)
+const extractWorkflowsMock = vi.mocked(extractWorkflowsFromSessionFile)
 
 /** 引擎配置组的 getPiAgentDir 重定向目标（hoisted：vi.mock 工厂内引用）。 */
 const piAgentDirRef = vi.hoisted(() => ({ dir: '' }))
@@ -28,6 +34,28 @@ const piAgentDirRef = vi.hoisted(() => ({ dir: '' }))
 vi.mock('../../../infra/pi/pi-paths.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../infra/pi/pi-paths.js')>()
   return { ...actual, getPiAgentDir: () => piAgentDirRef.dir }
+})
+
+// [W1 / D6] 全文读路径 call-through spy（验收③「getWorkflows/getSubagents 不再调全文
+// 读路径」的代码断言载体）：行为保持真实实现（既有测试零影响），仅计数调用——
+// 正常体量会话走 journal 投影不触达；oversize 分流（旧格式兼容路径）触达。
+vi.mock('../subagent-extractor.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../subagent-extractor.js')>()
+  return {
+    ...actual,
+    extractSubagentsFromSessionFile: vi.fn((filePath: string) =>
+      actual.extractSubagentsFromSessionFile(filePath),
+    ),
+  }
+})
+vi.mock('../workflow-extractor.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../workflow-extractor.js')>()
+  return {
+    ...actual,
+    extractWorkflowsFromSessionFile: vi.fn((filePath: string) =>
+      actual.extractWorkflowsFromSessionFile(filePath),
+    ),
+  }
 })
 
 /** get_entries RPC 返回形态（pi GetEntriesResponse：{entries, leafId}）。 */
@@ -1065,5 +1093,245 @@ describe('plan-state 投影（D1③④）', () => {
     expect(planMsgs).toHaveLength(2) // awaiting 基线帧 + 收敛帧，恰一次收敛
     expect((planMsgs[1]![1] as { payload: { planState: Record<string, unknown> } }).payload.planState)
       .toEqual({ isActive: false, planFilePath: null, requirement: null, templateName: null })
+  })
+})
+
+// ── [W1 / D6] journal 投影读侧换源 ────────────────────────────
+//
+// 验收对照：① 旧会话 v1 路径回归（冻结快照对照——getSubagents/getWorkflows 输出与
+// 兼容层 extract*FromSessionFile 全文路径输出逐字段一致）；② v2 会话读投影（journal
+// 胜出仲裁 + 条目摘要合并）；③ 全文读路径不调用断言（正常体量走投影，oversize 分流
+// 才触达兼容路径）；④ 投影驱动信号（journal 事件 → tail 复查 → 投影变更 → publish）。
+
+/** v2 subagent-record 注册条目 entry（W1 D1 契约）。 */
+function subagentRegisteredV2(id: string): Record<string, unknown> {
+  return {
+    type: 'custom', customType: 'subagent-record', id: 'e-r1', parentId: null,
+    timestamp: '2026-09-26T00:00:00Z',
+    data: {
+      v: 2, kind: 'registered', id, agent: 'worker', task: 'Do work', slug: 'work',
+      origin: 'workflow', parentRunId: 'wf-1', stepIndex: 0, rootSessionId: 's1',
+      depth: 0, startedAt: 1000,
+    },
+  }
+}
+
+/** v2 subagent-record 终态条目 entry（载荷与 journal 冲突——断言 journal 胜出）。 */
+function subagentSettledV2(id: string): Record<string, unknown> {
+  return {
+    type: 'custom', customType: 'subagent-record', id: 'e-s1', parentId: null,
+    timestamp: '2026-09-26T00:00:01Z',
+    data: {
+      v: 2, kind: 'settled', id, status: 'idle', stopReason: 'interrupted',
+      endedAt: 3000, turns: 9, totalTokens: 999, model: 'p/m', thinkingLevel: 'low',
+      result: 'full result text',
+    },
+  }
+}
+
+/** v2 workflow-record 注册条目 entry。 */
+function workflowRegisteredV2(runId: string, journalPath: string): Record<string, unknown> {
+  return {
+    type: 'custom', customType: 'workflow-record', id: 'e-w1', parentId: null,
+    timestamp: '2026-09-26T00:00:00Z',
+    data: {
+      v: 2, kind: 'registered', runId, workflowName: 'test-flow', scriptName: 'test-flow',
+      slug: 'tf', startedAt: 1000, journalPath,
+    },
+  }
+}
+
+/** v2 会话世界 fixture：agentDir（records 目录）+ 会话文件（v2 条目）+ run journal 目录。 */
+function makeV2World(cwd: string): {
+  worldDir: string
+  agentDir: string
+  sessionFile: string
+  recordsDir: string
+  runJournalDir: string
+} {
+  const worldDir = mkdtempSync(join(tmpdir(), 'session-records-w1-'))
+  const agentDir = join(worldDir, 'agent')
+  const sessionFile = join(worldDir, 's1.jsonl')
+  const recordsDir = join(agentDir, 'subagents', encodeCwd(cwd), 'records')
+  const runJournalDir = join(worldDir, 'workflow-state')
+  mkdirSync(recordsDir, { recursive: true })
+  mkdirSync(runJournalDir, { recursive: true })
+  return { worldDir, agentDir, sessionFile, recordsDir, runJournalDir }
+}
+
+describe('[W1] 读侧换源：v1 旧会话冻结对照 / v2 读投影 / 全文路径不调用 / 投影驱动信号', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    extractSubagentsMock.mockClear()
+    extractWorkflowsMock.mockClear()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    piAgentDirRef.dir = ''
+  })
+
+  it('旧会话 v1 路径回归：getSubagents/getWorkflows 输出与兼容层全文路径逐字段一致（冻结快照对照）', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'session-records-v1frozen-'))
+    const filePath = join(dir, 'session.jsonl')
+    writeFileSync(filePath, [
+      JSON.stringify(subagentRecordEntry('sa-1', 'running', 'e1', { origin: 'workflow', parentRunId: 'run-1', stepIndex: 0 })),
+      JSON.stringify(workflowRecordEntry('run-1', 'running', 'e2', undefined, [
+        { stepIndex: 0, agent: 'reviewer', task: 't', model: 'default', status: 'running', phase: 'R1' },
+      ])),
+    ].join('\n') + '\n')
+    try {
+      const { records } = makeRecords({
+        sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath, cwd: '/tmp/proj' }]) } as unknown as ISessionStore,
+      })
+      const subagents = await records.getSubagents('s1')
+      const workflows = await records.getWorkflows('s1')
+      // 冻结参照 = 兼容层全文路径对同一文件的真实输出（行为不变的机器对照）
+      expect(subagents).toEqual(extractSubagentsFromSessionFile(filePath))
+      expect(workflows).toEqual(extractWorkflowsFromSessionFile(filePath))
+      expect(subagents.records).toHaveLength(1)
+      expect(workflows.records[0]!.agentCalls[0]).toMatchObject({ agent: 'reviewer', status: 'running' })
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('v2 读投影：journal fold 胜出条目冲突（status/stopReason），条目独有字段（model/result）照常填充', async () => {
+    const cwd = '/tmp/w1-proj'
+    const world = makeV2World(cwd)
+    piAgentDirRef.dir = world.agentDir
+    try {
+      // journal：created（无 settled）→ running；条目：settled(interrupted) → journal 胜出显示 running
+      writeFileSync(join(world.recordsDir, 'sa-1.events'), [
+        JSON.stringify({ type: 'record-journal', id: 'sa-1' }),
+        JSON.stringify({ type: 'record-created', seq: 1, ts: 1000, id: 'sa-1', agent: 'worker', task: 'Do work', slug: 'work', origin: 'workflow', parentRunId: 'wf-1', stepIndex: 0, rootSessionId: 's1', depth: 0, mode: 'bg', startedAt: 1000 }),
+      ].join('\n') + '\n')
+      writeFileSync(world.sessionFile, [
+        JSON.stringify({ type: 'session', id: 's1', cwd }),
+        JSON.stringify(subagentRegisteredV2('sa-1')),
+        JSON.stringify(subagentSettledV2('sa-1')),
+        JSON.stringify(workflowRegisteredV2('wf-1', join(world.runJournalDir, 'wf-1.events.jsonl'))),
+      ].join('\n') + '\n')
+      writeFileSync(join(world.runJournalDir, 'wf-1.events.jsonl'), [
+        JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'test-flow', argsSummary: '', ts: 1000 }),
+        JSON.stringify({ type: 'ask-dispatched', taskIndex: 0, agentName: 'worker', attempt: 1, ts: 1100 }),
+      ].join('\n') + '\n')
+      const { records } = makeRecords({
+        sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: world.sessionFile, cwd }]) } as unknown as ISessionStore,
+      })
+      const subagents = await records.getSubagents('s1')
+      expect(subagents.records).toHaveLength(1)
+      expect(subagents.records[0]).toMatchObject({
+        subagentId: 'sa-1',
+        status: 'running', // journal 胜出（条目 settled idle 不生效）
+        model: 'p/m', // 条目独有字段
+        result: 'full result text',
+        parentRunId: 'wf-1',
+        stepIndex: 0,
+      })
+      const workflows = await records.getWorkflows('s1')
+      expect(workflows.records).toHaveLength(1)
+      expect(workflows.records[0]).toMatchObject({ runId: 'wf-1', status: 'running', scriptName: 'test-flow' })
+      // 步骤视图合并（W0 输入换源）：record 投影 overlay 到 journal 骨架行
+      expect(workflows.records[0]!.agentCalls[0]).toMatchObject({ status: 'running', sessionId: 'sa-1' })
+      // 验收③：正常体量会话零调用全文读路径
+      expect(extractSubagentsMock).not.toHaveBeenCalled()
+      expect(extractWorkflowsMock).not.toHaveBeenCalled()
+    } finally {
+      rmSync(world.worldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('投影驱动信号：journal 追加终态事件 → tail 复查 → 投影变更 publish（subagents 帧 + workflowUpdate 转态信号）', async () => {
+    const cwd = '/tmp/w1-signal'
+    const world = makeV2World(cwd)
+    piAgentDirRef.dir = world.agentDir
+    try {
+      writeFileSync(join(world.recordsDir, 'sa-1.events'), [
+        JSON.stringify({ type: 'record-journal', id: 'sa-1' }),
+        JSON.stringify({ type: 'record-created', seq: 1, ts: 1000, id: 'sa-1', agent: 'worker', task: 'Do work', slug: 'work', origin: 'workflow', parentRunId: 'wf-1', stepIndex: 0, rootSessionId: 's1', depth: 0, mode: 'bg', startedAt: 1000 }),
+      ].join('\n') + '\n')
+      writeFileSync(world.sessionFile, [
+        JSON.stringify(subagentRegisteredV2('sa-1')),
+        JSON.stringify(workflowRegisteredV2('wf-1', join(world.runJournalDir, 'wf-1.events.jsonl'))),
+      ].join('\n') + '\n')
+      writeFileSync(join(world.runJournalDir, 'wf-1.events.jsonl'), [
+        JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'test-flow', argsSummary: '', ts: 1000 }),
+        JSON.stringify({ type: 'ask-dispatched', taskIndex: 0, agentName: 'worker', attempt: 1, ts: 1100 }),
+      ].join('\n') + '\n')
+      const { records, publish } = makeRecords({
+        sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: world.sessionFile, cwd }]) } as unknown as ISessionStore,
+        journalTailerRecheckMs: 50,
+      })
+      const fire = registerSession(records)
+      fire('s1')
+
+      // 冷启动首帧（attach 折叠 → onChange → publish：subagents 帧恰一）
+      await records.getSubagents('s1')
+      let subFrames = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.subagents')
+      expect(subFrames).toHaveLength(1)
+      expect((subFrames[0]![1] as { payload: { subagents: Array<{ status: string }> } }).payload.subagents[0]!.status).toBe('running')
+
+      // journal 追加 record-settled（completed）→ 复查周期拾取 → 投影变更 publish
+      publish.mockClear()
+      writeFileSync(join(world.recordsDir, 'sa-1.events'), [
+        JSON.stringify({ type: 'record-settled', seq: 2, ts: 3000, stopReason: 'completed', endedAt: 3000, turns: 2, totalTokens: 500 }),
+      ].join('\n') + '\n', { flag: 'a' })
+      await vi.advanceTimersByTimeAsync(150)
+
+      subFrames = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.subagents')
+      expect(subFrames).toHaveLength(1)
+      expect((subFrames[0]![1] as { payload: { subagents: Array<{ status: string; stopReason: string }> } }).payload.subagents[0])
+        .toMatchObject({ status: 'idle', stopReason: 'completed' })
+      // 转态信号（stepStatuses running→completed 维度）：record overlay 翻步骤行 → workflowUpdate
+      const wfSignals = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.workflowUpdate')
+      expect(wfSignals).toHaveLength(1)
+      expect((wfSignals[0]![1] as { payload: { update: { runId: string; status: string } } }).payload.update)
+        .toEqual({ runId: 'wf-1', status: 'running', reason: undefined })
+    } finally {
+      rmSync(world.worldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  // [W1 双形态] v2 混沌收敛（原 w18-record-entry-chaos 双形态断言的领地内落点）：
+  // entry 通道整体空转（无 entry_appended 信号 + get_entries 恒空——比「信号被拦截」
+  // 更强的混沌）下，唯一驱动 = bg-notify 兜底失效链（invalidateRecordEntries 即
+  // event-interpreter 经组合根注入的同一入口）→ 投影冷启动 → record 事件文件 fold
+  // （事实源）独立重建，收敛值与信号在位时等价。
+  it('[W1 双形态] v2 混沌：entry 通道整体空转 → 兜底失效触发投影冷启动，journal fold 独立收敛', async () => {
+    const cwd = '/tmp/w1-chaos'
+    const world = makeV2World(cwd)
+    piAgentDirRef.dir = world.agentDir
+    try {
+      // journal：created + settled(completed) 已落盘；会话文件仅注册条目（终态条目缺席）
+      writeFileSync(join(world.recordsDir, 'sa-1.events'), [
+        JSON.stringify({ type: 'record-journal', id: 'sa-1' }),
+        JSON.stringify({ type: 'record-created', seq: 1, ts: 1000, id: 'sa-1', agent: 'worker', task: 'Do work', slug: 'work', origin: 'workflow', parentRunId: 'wf-1', stepIndex: 0, rootSessionId: 's1', depth: 0, mode: 'background', startedAt: 1000 }),
+        JSON.stringify({ type: 'record-settled', seq: 2, ts: 3000, stopReason: 'completed', endedAt: 3000, turns: 2, totalTokens: 500 }),
+      ].join('\n') + '\n')
+      writeFileSync(world.sessionFile, `${JSON.stringify(subagentRegisteredV2('sa-1'))}\n`)
+      // 混沌注入：get_entries 恒空（entry 源两代都不产出）——投影只能来自 journal 源
+      const { records, publish, client } = makeRecords({
+        sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: world.sessionFile, cwd }]) } as unknown as ISessionStore,
+      })
+      client.getEntries.mockResolvedValue({ data: { entries: [], leafId: null } })
+      const fire = registerSession(records)
+      fire('s1')
+
+      // 唯一驱动：bg-notify 兜底失效信号（interpreter 经组合根到达的同一入口）
+      records.invalidateRecordEntries('s1', 'subagent-record')
+      await flushDebounce()
+      expect(client.getEntries).toHaveBeenCalledTimes(1)
+
+      // 收敛断言：journal fold 独立重建（entry 通道空）——帧内容 = 事件文件的权威值
+      const subFrames = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.subagents')
+      expect(subFrames).toHaveLength(1)
+      expect((subFrames[0]![1] as { payload: { subagents: Array<{ subagentId: string; status: string; stopReason: string }> } }).payload.subagents)
+        .toEqual([expect.objectContaining({ subagentId: 'sa-1', status: 'idle', stopReason: 'completed' })])
+      // RPC 读面同源：getSubagents 与已发布帧一致（读请求唯一数据源 = 投影）
+      const rpc = await records.getSubagents('s1')
+      expect(rpc.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'idle', stopReason: 'completed' })
+    } finally {
+      rmSync(world.worldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
   })
 })

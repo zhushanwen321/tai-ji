@@ -304,6 +304,22 @@ describe("runWorkflow", () => {
       });
       expect(projection.phase).toBe("active");
       expect(projection.state.lifecycle).toBe("dispatched");
+      // [W1 / D1] v2 注册条目（两写点之一）：journal 首帧落账成功后经
+      // appendEntry 写主 session——journalPath 锚点指向真实 journal 文件
+      const registered = deps.appendEntry.mock.calls.find((c) => c[0] === "workflow-record");
+      expect(registered).toBeDefined();
+      expect(registered![1]).toMatchObject({
+        v: 2,
+        kind: "registered",
+        runId,
+        workflowName: "test-wf",
+        scriptName: "test-wf",
+        slug: "test-wf",
+      });
+      const regData = registered![1] as { journalPath: string; startedAt: number };
+      expect(regData.journalPath).toBe(path.join(journalDir, `${runId}.events.jsonl`));
+      expect(fs.existsSync(regData.journalPath)).toBe(true);
+      expect(typeof regData.startedAt).toBe("number");
     } finally {
       setRunEventJournalDirForTest(undefined);
       fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });

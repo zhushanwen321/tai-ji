@@ -171,6 +171,20 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
   const manifestPathOf = (id: string): string => path.join(manifestDir, `${id}.json`);
 
+  /** [W1/D3] 事件文件末条事件行（观察面独立于被测 store——直读 .events 文件）。 */
+  const lastJournalEvent = (dir: string, id: string): Record<string, unknown> | undefined => {
+    try {
+      const lines = fs
+        .readFileSync(path.join(dir, `${id}.events`), "utf8")
+        .split("\n")
+        .filter((l) => l.trim().length > 0)
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+      return lines.filter((e) => e.type !== "record-journal").at(-1);
+    } catch {
+      return undefined;
+    }
+  };
+
   const readManifestJson = (id: string): Record<string, unknown> =>
     JSON.parse(fs.readFileSync(manifestPathOf(id), "utf-8")) as Record<string, unknown>;
 
@@ -326,10 +340,9 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(store.markRoundStarted("chat-1")).toBe(true);
       expect(record.status).toBe("running");
       expect(record.result).toBeUndefined();
-      expect(appendEntryMock).toHaveBeenCalledWith(
-        "subagent-record",
-        expect.objectContaining({ id: "chat-1" }),
-      );
+      // [W1/D3 表行 3] 轮始迁移落 record-round-started 帧（v1 entry 过程面上报停写）
+      expect(appendEntryMock).not.toHaveBeenCalled();
+      expect(lastJournalEvent(manifestDir, "chat-1")).toMatchObject({ type: "record-round-started" });
     });
 
     it("[U6/D4 轮始清点族扩字段] 上轮 stopReason 随轮始清除（第 2+ 轮在飞 record 不携带 stale 停因——renderer isOccupied 终态判据 `running && stopReason===undefined` 的直接守卫）", () => {
@@ -372,10 +385,13 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(order).toEqual([]); // ⑦ `.alive` 保留——无 release 动作
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true); // ⑦ 落盘面仍持声明
       expect(unregister).toHaveBeenCalledWith("chat-2", "running"); // ⑧ 发射点②
-      expect(appendEntryMock).toHaveBeenCalledWith(
-        "subagent-record",
-        expect.objectContaining({ id: "chat-2", round: 2, result: "round done" }), // ⑨
-      );
+      // [W1/D3 表行 4] ⑨ 过程面改走事件文件——record-round-idle 帧携带轮统计快照
+      //（result 全文不进事件行，轮结果留在内存/条目；stopReason=completed）。
+      expect(appendEntryMock).not.toHaveBeenCalled();
+      expect(lastJournalEvent(manifestDir, "chat-2")).toMatchObject({
+        type: "record-round-idle",
+        stopReason: "completed",
+      });
     });
 
     it("失败轮：lastError 写原因、result=前值??失败摘要", () => {
@@ -413,11 +429,13 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(store.appendEvent("ev-1", { type: "text_delta", delta: "hi" })).toBe(true);
       expect(record.turns[0]?.text).toBe("hi"); // ⑧ turns 归约
-      expect(appendEntryMock).toHaveBeenCalledTimes(1);
+      // [W1/D2 停写写点] 事件归约后的过渡 entry 上报停写——turn 粒度不进事件文件
+      //（轮统计在轮终 round-idle 帧快照），引擎域未变零追加。
+      expect(appendEntryMock).not.toHaveBeenCalled();
       expect(store.appendEvent("nope", { type: "text_delta", delta: "x" })).toBe(false);
     });
 
-    it("adoptEngineDeath：error/result/stopReason 三写（[U5/D4] stopReason='failed' W4 新态）+ entry；id 不在内存 → false", () => {
+    it("adoptEngineDeath：error/result/stopReason 三写（[U5/D4] stopReason='failed' W4 新态）；[W1/D2] 过程 entry 停写；id 不在内存 → false", () => {
       const record = makeRecord("adopt-1");
       record.result = "partial";
       store.register(record);
@@ -426,10 +444,9 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(store.adoptEngineDeath("adopt-1", { error: "engine crashed" })).toBe(true);
       expect(record.error).toBe("engine crashed"); // ⑩
       expect(record.result).toBeUndefined();
-      expect(appendEntryMock).toHaveBeenCalledWith(
-        "subagent-record",
-        expect.objectContaining({ id: "adopt-1", stopReason: "failed" }),
-      );
+      expect(record.stopReason).toBe("failed"); // 内存三写保真（[U5/D4] W4 新态）
+      // [W1/D2 停写写点] 过程 entry 停写——纳管态留内存（监督器接管/轮终链续写）
+      expect(appendEntryMock).not.toHaveBeenCalled();
       expect(store.adoptEngineDeath("nope", { error: "x" })).toBe(false);
     });
   });

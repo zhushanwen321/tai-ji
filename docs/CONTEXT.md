@@ -119,7 +119,7 @@ subagent 跨 run 续聊时定位既有会话的凭据（引擎中立形态 `Resu
 
 ### Execution Record
 
-subagent 运行状态的单一真源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：内存 record 与磁盘 `session.jsonl` 重建两条通路共用同一 reducer；对外状态两态（`active` / `idle`，ended 随终态概念删除），收口经 `<session>.state` sidecar 标记。
+subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0078](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 快照条目走惰性兼容读）；对外状态两态（`active` / `idle`，ended 随终态概念删除），轮终收尾写 `<session>.state` sidecar 与 manifest（均为物化投影）。
 
 ### ToolCall
 
@@ -254,7 +254,17 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 **命名约定**: "Panel" 统一指 Session 的视口（即代码中的 `Panel` / `PanelLeaf` / `PanelTree`，`packages/renderer/src/stores/panel.ts`），不用于其他含义。
 
 ### Run 事件 journal（workflow 域）
-workflow run 的事件流持久化：`<agentDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），JSONL 逐帧记录 run 生命周期事件（`run-created / ask-dispatched / armed / ask-settled / run-settled` 等）。它是 run 态的**权威投影源**——注册表投影 = journal fold，终局诊断引用从事件流读回（见 [ADR-0074](adr/decisions.md)）。由显式状态机单写点落账，引擎不直接写。
+workflow run 的事件流持久化：`<sessionDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），JSONL 逐行记录 run 生命周期事件（`run-created / ask-dispatched / armed / ask-settled / run-settled` 等，事件行携带单调 seq）。它是 run 态的**唯一事实源**（W1 介质归位，[ADR-0078](adr/decisions.md)）——注册表投影 = journal fold，终局诊断引用从事件流读回（见 [ADR-0074](adr/decisions.md)）。由显式状态机单点写入，引擎不直接写。
+
+### 介质归位（run/record 运行态持久化，W1）
+run 与 record 的运行态数据持久化形态（[ADR-0078](adr/decisions.md)）：**journal 事件流是唯一事实源**——run 侧 = 既有 Run 事件 journal，record 侧 = 新增事件文件 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀，既有 .jsonl 扫描器结构性忽略；首行 `{"type":"record-journal"}` 头行自描述）。子术语：
+
+- **注册条目 / 终态条目**：主 session JSONL 里每实体只写的两条小 entry（v:2，kind 判别 registered/settled，customType 不变）——注册条记身份与锚点（诞生时写；workflow-record 族携带 journalPath 锚点），终态条记终局与摘要（结束时写，含 result 全文与 engineHandle 双键）。旧读者按版本门跳过 v2。
+- **物化投影**：每次都能从 journal 重新算出来的状态写成的落盘文件（run state 快照、run/record manifest）——目的只是让现有读方零改动，删了可重建；不是事实源。`.alive` 是操作租约，同样不计事实源。
+- **journal tail**：从上次读到的位置（offset）继续读新增事件行的增量读取方式（`packages/subagent-core/src/execution/persistence/journal-tail.ts`，run 与 record 两域共用）——runtime 内存投影的增量喂入源之一（另一源 = pi entry 游标）。
+- **收编**：把「有注册记录、无终态记录」的实体判定为 interrupted 终态并补齐记录的动作（本域领域词）——journal 重放后幂等追加终态事件，崩溃恢复与 abandon 终局化同走该入口。
+- **惰性兼容读**：旧格式数据（v1 全量快照 entry）不做一次性迁移，读到的当下按旧格式解析（带失效版本，W4 legacy sunset 统一清理）。
+- **保留窗口**：journal 的显式保留期限（默认 30 天）——窗口内全保留，窗口外的终态实体由统一保留维护轮清理（fold 终态资格判据；cap=50 已废除）。
 
 ### 武装回执（armed，workflow 域）
 schema 强制链的引擎确认信号：native 引擎在启动期武装断言通过 + 孙进程 spawn 成功后上报一次 `armed` 事件（载荷 = env 变量名 + 必备扩展包名）。宿主是独立信号源（监控不与施控同源），等待窗内未收到即 fail-fast。仅 native 引擎、仅 schema 任务；emulated 引擎恒不上报。契约义务见 [engine-development-guide](extensions/subagents/engine-development-guide.md) §6。

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import { parseSessionContent } from '@zhushanwen/session-core'
+import { parseSessionContent, type Entry } from '@zhushanwen/session-core'
 import type { SessionRef, WorkflowRef } from '../core/family.js'
 import { extractSessionIdFromFilename } from './subagents.js'
 
@@ -9,8 +9,13 @@ import { extractSessionIdFromFilename } from './subagents.js'
 // ============================================================
 //
 // 本文件持有 workflow run 的发现与 sessionFile 提取逻辑（IO 适配层）：
-// - resolveWorkflows：读目标 session 的 workflow-state-link custom entry → 每个 link 的
-//   wf-state 文件 → 提 calls 的 sessionFile → SessionRef[]。返回 WorkflowRef[]（family.workflows 腿）。
+// - resolveWorkflows：三档发现链（按 runId 合并，高档条目在即用高档）——
+//   ① v2 journalPath 主源：workflow-record v2 注册条目（journalPath 锚点 → 保留窗口内
+//     读 state 快照提 calls；窗口外 journal+state 成对删 → calls=[] 仅 run 存在性兜底）；
+//   ② v1 快照层：workflow-record v1 快照条目（W17~W1 期间创建的 run——快照是全量的，
+//     直接从 snapshot.calls 提 sessionFile，家族链数据完整）；
+//   ③ 旧指针 fallback：workflow-state-link 指针条目（W17 前的 run，照旧读 link 指向的
+//     wf-state 文件）。
 // - readRunSnapshot：读 wf-state 文件尾向找首个可解析行，返回原始对象（unknown，格式收窄交 core 层）。
 // - extractCallSessionFiles：从快照对象提 calls 的 sessionFile 绝对路径数组（NEW/OLD 双格式）。
 // - sessionRefFromPath：sessionFile 路径 → SessionRef（命中 pathToRef 取完整，否则文件名提取最小 ref）。
@@ -133,13 +138,118 @@ function sessionRefFromPath(path: string, pathToRef: Map<string, SessionRef>): S
   }
 }
 
+// ============================================================
+// workflow-record 条目契约（三档发现链的条目判别——本地字面量 + 测试守卫漂移）
+// ============================================================
+
 /**
- * 读目标 session 文件全文，解析 workflow-state-link custom entries，构造 WorkflowRef[]。
- * 同一 runId 的多个 link（workflow 多次更新产生）按 runId 去重，取最新 link（path 相同）。
+ * `workflow-record` custom entry 的 customType 值。
  *
- * 内部用 readRunSnapshot + extractCallSessionFiles 组合替代原 readWorkflowCallSessionFiles
- *（w5 迁移，行为等价）。**签名与返回值结构（WorkflowRef[]{runId,stateFile,calls:SessionRef[]}）
- * 完全不变**（C-resolveworkflows-signature，保 m1 已冻结交付的消费者）。
+ * 磁盘 JSONL 协议字符串（跨侧契约）：写侧单源 = subagent-core
+ * workflow-record-entry.ts 的 WORKFLOW_RECORD_CUSTOM_TYPE。reader 生产依赖面不引
+ * subagent-core（同 entry-anchor.ts 的协议字面量模式），两侧漂移由 workflow.test.ts
+ * 的跨包断言守卫。
+ */
+const WORKFLOW_RECORD_CUSTOM_TYPE = 'workflow-record'
+
+/** v2 条目 data 的认识版本词表（W1 起 = 2；写侧 WORKFLOW_RECORD_ENTRY_VERSION 同值）。 */
+const WORKFLOW_RECORD_ENTRY_V2 = 2
+
+/**
+ * run journal 文件名尾段（`<runId>.events.jsonl`）。写侧 subagent-core
+ * RUN_EVENT_JOURNAL_SUFFIX 同值——v2 注册条目的 journalPath 锚点推导 state 快照
+ * 路径用（同目录同主名、仅尾段不同），本地持有 + 测试守卫漂移。
+ */
+const RUN_EVENT_JOURNAL_SUFFIX = '.events.jsonl'
+
+/** 单遍扫描 entries 的三档收集结果（档内同 runId 后写覆盖前写，跨档优先级见 resolveWorkflows）。 */
+interface WorkflowEntryTiers {
+  /** ① v2 注册条目：runId → journalPath 锚点（W1+ 的 run）。 */
+  v2ByRunId: Map<string, string>
+  /** ② v1 快照条目：runId → 全量快照对象（W17~W1 期间创建的 run）。 */
+  v1ByRunId: Map<string, unknown>
+  /** ③ 旧指针条目：runId → link path（W17 前的 run）。 */
+  linkByRunId: Map<string, { runId: string; path: string }>
+  /** runId 首见序（输出稳定序——条目在 session 文件中的出现顺序）。 */
+  runIdOrder: string[]
+}
+
+/**
+ * 单遍扫描 entries 按三档形态分桶（纯收集，无 IO）：
+ * - workflow-record v2 注册条目：`v === 2` ∧ `kind === 'registered'` ∧ runId/journalPath
+ *   均非空 string（终态条目不携带 journalPath，非发现链数据源，不收集）；
+ * - workflow-record v1 快照条目：`v === 1` ∧ snapshot 为对象 ∧ `snapshot.runId` 为
+ *   string（runId 在快照内——entry data 顶层无 runId 字段）；
+ * - workflow-state-link 指针条目：现状判别。
+ */
+function collectWorkflowEntryTiers(entries: readonly Entry[]): WorkflowEntryTiers {
+  const tiers: WorkflowEntryTiers = {
+    v2ByRunId: new Map(),
+    v1ByRunId: new Map(),
+    linkByRunId: new Map(),
+    runIdOrder: [],
+  }
+  const seen = new Set<string>()
+  const noteRunId = (runId: string): void => {
+    if (!seen.has(runId)) {
+      seen.add(runId)
+      tiers.runIdOrder.push(runId)
+    }
+  }
+  for (const e of entries) {
+    const data = e.data as Record<string, unknown> | undefined
+    if (e.customType === WORKFLOW_RECORD_CUSTOM_TYPE && data !== undefined) {
+      if (data.v === WORKFLOW_RECORD_ENTRY_V2 && data.kind === 'registered') {
+        const runId = data.runId
+        const journalPath = data.journalPath
+        if (typeof runId === 'string' && runId !== '' && typeof journalPath === 'string' && journalPath !== '') {
+          tiers.v2ByRunId.set(runId, journalPath)
+          noteRunId(runId)
+        }
+      } else if (data.v === 1 && typeof data.snapshot === 'object' && data.snapshot !== null) {
+        const snapshotRunId = (data.snapshot as Record<string, unknown>).runId
+        if (typeof snapshotRunId === 'string' && snapshotRunId !== '') {
+          tiers.v1ByRunId.set(snapshotRunId, data.snapshot)
+          noteRunId(snapshotRunId)
+        }
+      }
+      continue
+    }
+    if (e.customType === 'workflow-state-link') {
+      const runId = data?.runId
+      const path = data?.path
+      if (typeof runId === 'string' && typeof path === 'string') {
+        tiers.linkByRunId.set(runId, { runId, path }) // 后写覆盖前写（取最新 link）
+        noteRunId(runId)
+      }
+    }
+  }
+  return tiers
+}
+
+/**
+ * journalPath（`<stateDir>/<runId>.events.jsonl`）→ 同目录同主名的 state 快照路径
+ * （`<runId>.jsonl`）。尾段不符（形态损坏）→ 空串 = 无快照路径可读（calls 退空，
+ * run 存在性兜底保留）。
+ */
+function journalPathToStateFile(journalPath: string): string {
+  if (!journalPath.endsWith(RUN_EVENT_JOURNAL_SUFFIX)) return ''
+  return journalPath.slice(0, -RUN_EVENT_JOURNAL_SUFFIX.length) + '.jsonl'
+}
+
+/**
+ * 读目标 session 文件全文，按三档发现链构造 WorkflowRef[]（D10 断链修复：W17 前/
+ * W17~W1/W1+ 三类 run 全部有发现通道）。同一 runId 的多条目按 runId 去重取档内
+ * 最新（后写覆盖）；跨档优先级 = v2 注册条目 > v1 快照条目 > 旧指针——一个 run 只
+ * 以一种形态写条目（创建时点决定），跨档同 runId 是坏数据防御，高档在即用高档。
+ *
+ * **签名与返回值结构（WorkflowRef[]{runId,stateFile,calls:SessionRef[]}）完全不变**
+ * （C-resolveworkflows-signature，保 m1 已冻结交付的消费者）。三档的 stateFile 语义：
+ * - v2 档：journalPath 推导的 state 快照路径（窗口外文件已删 → readRunSnapshot
+ *   undefined → calls=[]，run 存在性兜底——与旧链窗外行为同构）；
+ * - v1 档：空串（v1 快照条目不携带 state 路径，快照数据直接从条目提 calls；概览
+ *   消费面 readRunSnapshot('') 自然落「快照不可读」跳过，家族链 calls 不受影响）；
+ * - 旧指针档：link 的 path（现状）。
  */
 export async function resolveWorkflows(
   sessionId: string,
@@ -155,23 +265,40 @@ export async function resolveWorkflows(
     return []
   }
   const { entries } = parseSessionContent(content)
-  const linkByRunId = new Map<string, { runId: string; path: string }>()
-  for (const e of entries) {
-    if (e.customType !== 'workflow-state-link') continue
-    const data = e.data as Record<string, unknown> | undefined
-    const runId = data?.runId
-    const path = data?.path
-    if (typeof runId === 'string' && typeof path === 'string') {
-      linkByRunId.set(runId, { runId, path }) // 后写覆盖前写（取最新 link）
-    }
-  }
+  const tiers = collectWorkflowEntryTiers(entries)
   const workflows: WorkflowRef[] = []
-  for (const { runId, path } of linkByRunId.values()) {
-    const snap = await readRunSnapshot(path)
+  for (const runId of tiers.runIdOrder) {
+    const journalPath = tiers.v2ByRunId.get(runId)
+    if (journalPath !== undefined) {
+      // ① v2 档：journalPath → state 快照（保留窗口内提 calls；窗外成对删 → calls=[]）
+      const stateFile = journalPathToStateFile(journalPath)
+      const snap = stateFile === '' ? undefined : await readRunSnapshot(stateFile)
+      const sessionFiles = snap === undefined ? [] : extractCallSessionFiles(snap)
+      workflows.push({
+        runId,
+        stateFile,
+        calls: sessionFiles.map((sf) => sessionRefFromPath(sf, pathToRef)),
+      })
+      continue
+    }
+    const snapshot = tiers.v1ByRunId.get(runId)
+    if (snapshot !== undefined) {
+      // ② v1 快照档：快照全量在场，直接提 calls（W17~W1 中间档恢复）
+      workflows.push({
+        runId,
+        stateFile: '',
+        calls: extractCallSessionFiles(snapshot).map((sf) => sessionRefFromPath(sf, pathToRef)),
+      })
+      continue
+    }
+    // ③ 旧指针档：现状（link path → wf-state 文件）
+    const link = tiers.linkByRunId.get(runId)
+    if (link === undefined) continue
+    const snap = await readRunSnapshot(link.path)
     const sessionFiles = snap === undefined ? [] : extractCallSessionFiles(snap)
     workflows.push({
-      runId,
-      stateFile: path,
+      runId: link.runId,
+      stateFile: link.path,
       calls: sessionFiles.map((sf) => sessionRefFromPath(sf, pathToRef)),
     })
   }

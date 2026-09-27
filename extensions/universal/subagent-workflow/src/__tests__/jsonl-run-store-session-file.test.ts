@@ -31,7 +31,13 @@ import { Trace } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
 import type { RunSpec } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
-import { WORKFLOW_RECORD_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
+import {
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_RECORD_ENTRY_VERSION,
+  createRunEventJournal,
+  fromRunSnapshot,
+  toRunSnapshot,
+} from "@zhushanwen/subagent-core";
 import { JsonlRunStore } from "../jsonl-run-store.ts";
 import { mkCtx, mkPi } from "@zhushanwen/subagent-core/testing/orchestration/__tests__/test-mocks.ts";
 
@@ -143,6 +149,72 @@ function asRecordData(
   return d as { v: number; snapshot: { runId: string; state: { status: string } } };
 }
 
+/** [W1 / D7] 手工 v1 快照 entry（兼容层夹具：真实 codec 快照 + 存量 v1 信封）。 */
+function v1RecordEntry(run: WorkflowRun): CustomEntry {
+  return {
+    type: "custom",
+    customType: WORKFLOW_RECORD_CUSTOM_TYPE,
+    data: {
+      v: 1,
+      snapshot: toRunSnapshot(run),
+      updatedAt: new Date().toISOString(),
+    },
+    id: `seed-v1-${run.runId}-${Math.random().toString(36).slice(2, 8)}`,
+    parentId: null,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/** [W1 / D1] 手工 v2 注册条目夹具（字段集 = core lifecycle 写点同构）。 */
+function v2RegisteredEntry(runId: string, journalPath: string): CustomEntry {
+  return {
+    type: "custom",
+    customType: WORKFLOW_RECORD_CUSTOM_TYPE,
+    data: {
+      v: WORKFLOW_RECORD_ENTRY_VERSION,
+      kind: "registered",
+      runId,
+      workflowName: "test-script",
+      scriptName: "test-script",
+      slug: "test-script",
+      startedAt: Date.now(),
+      journalPath,
+    },
+    id: `seed-v2-reg-${runId}`,
+    parentId: null,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/** [W1 / D1] 手工 v2 终态条目夹具（kind: settled）。 */
+function v2SettledEntry(runId: string): CustomEntry {
+  return {
+    type: "custom",
+    customType: WORKFLOW_RECORD_CUSTOM_TYPE,
+    data: {
+      v: WORKFLOW_RECORD_ENTRY_VERSION,
+      kind: "settled",
+      runId,
+      status: "done",
+      reason: "completed",
+      outcome: "completed",
+      settledAt: Date.now(),
+      callCount: 1,
+      usedTokens: 0,
+    },
+    id: `seed-v2-settled-${runId}`,
+    parentId: null,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/** [W1 / D4] 向 stateDir 的 journal 文件追加一帧（raw JSONL——模拟 core 写者落账）。 */
+function appendJournalLine(tmpDir: string, runId: string, line: Record<string, unknown>): void {
+  const journalPath = path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`);
+  fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+  fs.appendFileSync(journalPath, `${JSON.stringify(line)}\n`, "utf8");
+}
+
 describe("W1: JsonlRunStore sessionFile 序列化 round-trip", () => {
   let tmpDir: string;
   let store: JsonlRunStore;
@@ -187,27 +259,29 @@ describe("W1: JsonlRunStore sessionFile 序列化 round-trip", () => {
     );
   });
 
-  it("save → loadAll 完整 round-trip: 反序列化后 AgentCall.sessionFile 可读", async () => {
-    // 闭环测试：serialize（save）→ deserialize（loadAll）→ 验证 run.state.calls 的 AgentCall.sessionFile
+  it("save → state 投影 round-trip: sessionFile 经 state 文件快照保留（[W1] 恢复聚合经 journal，call 级详情在投影/锚点面）", async () => {
+    // [W1 / D1] 闭环改写：条目通道停写后 call 级详情的持久化面 = state 物化投影
+    // （可删可重建；步骤级恢复读面 = journalPath 锚点 + runtime 投影）。本用例锁定
+    // 投影往返保真：save → state 文件 → fromRunSnapshot → AgentCall.sessionFile 可读。
     const sessionFilePath = "/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl";
 
-    // mock pi + ctx 共享同一 entries 数组：save 写 pointer entry，loadAll 读同一组 entries
     const entries: CustomEntry[] = [];
-    const mockPi = mkPi(entries);
-    const mockCtx = mkCtx(entries);
-
     const storeWithCtx = new JsonlRunStore({
       sessionDir: tmpDir,
-      pi: mockPi,
-      ctx: mockCtx,
+      pi: mkPi(entries),
+      ctx: mkCtx(entries),
     });
 
     const run = makeRunWithDoneCall();
     await storeWithCtx.save(run);
 
-    const loaded = await storeWithCtx.loadAll();
-    expect(loaded).toHaveLength(1);
-    const restoredCall = loaded[0]!.state.calls.get(0);
+    const raw = fs.readFileSync(
+      path.join(tmpDir, "workflow-state", "run-test-001.jsonl"),
+      "utf8",
+    );
+    const restored = fromRunSnapshot(JSON.parse(raw.trim()));
+    expect(restored).toBeDefined();
+    const restoredCall = restored!.state.calls.get(0);
     expect(restoredCall).toBeDefined();
     expect(restoredCall!.sessionFile).toBe(sessionFilePath);
   });
@@ -453,12 +527,12 @@ describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
     expect(readStateFile(tmpDir, "run-w2tc3b").state.status).toBe("done");
   });
 
-  it("W2TC7: 终态冷路径同步 flush：立即落盘（绕过 timer）+ 终态 workflow-record entry", async () => {
+  it("W2TC7: 终态冷路径同步 flush：立即落盘（绕过 timer）+ 零条目写（[W1] 停写锚定）", async () => {
     const mockPi = mkPi();
     const store7 = new JsonlRunStore({ sessionDir: tmpDir, pi: mockPi });
     const run = makeRunningRun("run-w2tc7");
-    await store7.save(run); // 首写 + entry
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(1);
+    await store7.save(run); // 首写
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
 
     const pHot = store7.save(run); // 热路径批 pending
     run.transition("done", "completed");
@@ -468,14 +542,15 @@ describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
     expect(readStateFile(tmpDir, "run-w2tc7").state.status).toBe("done");
     // 合并的热路径批 Promise 一并 resolved
     await pHot;
-    // 终态冷路径合并批 1 次 flush → 1 条终态 entry（首写 + 终态 = 2 条）
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(2);
+    // [W1 / D1] 停写锚定：全程零 workflow-record entry（恢复权威在 journal，
+    // 条目只剩注册 + 终态两条 v2 小条目，写点不在 save 面）
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
     // advance 后无追加写
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(2);
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
   });
 
-  it("W2TC8: 首写冷路径（跨 session resume）：本 store 实例首 save 立即落盘 + entry", async () => {
+  it("W2TC8: 首写冷路径（跨 session resume）：本 store 实例首 save 立即落盘投影，零条目写", async () => {
     const mockPi = mkPi();
     const storeA = new JsonlRunStore({ sessionDir: tmpDir, pi: mockPi });
     const run = makeRunningRun("run-w2tc8");
@@ -483,15 +558,14 @@ describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
     // 实例 A 首写：status 是 running 也立即落盘（首写判定优先于 status）
     await storeA.save(run);
     expect(readStateFile(tmpDir, "run-w2tc8").state.status).toBe("running");
-    // 首写即写 entry（即使 status 是 running——新 store 实例对该 runId 的首写就落 entry）
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(1);
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
 
     // 实例 B（另一 session 的 store）对同一 runId 再 save：又是一次实例首写
     const storeB = new JsonlRunStore({ sessionDir: tmpDir, pi: mockPi });
     run.state.trace.append(makeTraceNode(9));
     await storeB.save(run);
-    // 跨实例各 1 条 entry（实例级 writtenOnce 判定）
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(2);
+    // 停写锚定：跨实例均零条目；state 投影承载最新状态（trace 2 节点）
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
     expect(readStateFile(tmpDir, "run-w2tc8").state.trace).toHaveLength(2);
   });
 
@@ -548,27 +622,24 @@ describe("W5: 批 settle 与 IO 错误语义", () => {
     expect(readStateFile(tmpDir, "run-w2tc4").state.status).toBe("running");
   });
 
-  it("W2TC4(ES9): 首写失败回滚 writtenOnce——running 中间态 save 重走冷路径补写指针", async () => {
+  it("W2TC4(ES9): 首写失败回滚 writtenOnce——running 中间态 save 重走冷路径补写投影", async () => {
     const mockPi = mkPi();
     const store4 = new JsonlRunStore({ sessionDir: tmpDir, pi: mockPi });
     const run = makeRunningRun("run-w2tc4b");
 
-    // 首写冷路径遇 writeFile EACCES reject。[B3 顺序反转] 后权威 entry 先于 state
-    // 文件写入：appendEntry 已成功落账（1 次）——「state 缺而 entry 有」是读侧无害
-    // 形态（loadAll 读序 entry > state），不再是待补窗口。
+    // 首写冷路径遇 writeFile EACCES reject（state 投影未落）。[W1] 条目通道已停写，
+    // 回滚语义收敛为「下次 save 重走冷路径立即重试投影写」。
     vi.spyOn(fs.promises, "writeFile").mockRejectedValueOnce(
       Object.assign(new Error("permission denied"), { code: "EACCES" }),
     );
     await expect(store4.save(run)).rejects.toThrow("permission denied");
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(1); // 权威 entry 已先落（B3）
+    expect(mockPi.appendEntry).not.toHaveBeenCalled(); // 停写锚定：失败路径亦零条目
 
-    // 恢复 IO 后 running 中间态 save：不经 timer 立即落盘（首写资格已回滚，冷路径重写双通道）
+    // 恢复 IO 后 running 中间态 save：不经 timer 立即落盘（首写资格已回滚，冷路径重写）
     const p = store4.save(run);
     await p; // 冷路径同步 flush 完成
     expect(readStateFile(tmpDir, "run-w2tc4b").state.status).toBe("running");
-    // entry 不重复 append：首写的 appendEntry 已成功（B3 权威先落）且 run 未变，
-    // 重试的 running 中间态按 [B-1] 节流跳过——权威 entry 已是最新快照，无需重复。
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(1);
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
   });
 
   it("W2TC5: ENOENT 静默语义保留——热路径去抖批 mkdir ENOENT resolve 全部批 Promise", async () => {
@@ -599,7 +670,7 @@ describe("W5: 批 settle 与 IO 错误语义", () => {
   });
 });
 
-describe("W6: workflow-record entry 计数（= flush 次数；save 级不放大）", () => {
+describe("W6: flush 次数与停写锚定（save 级不放大）", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -613,18 +684,17 @@ describe("W6: workflow-record entry 计数（= flush 次数；save 级不放大�
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("W2TC6(W17): entry 计数 = flush 次数：首写+终态各 1、中间去抖批合并（N save → 1 entry）、终态 entry 含 done", async () => {
+  it("W2TC6(W1): flush 计数 = 去抖批合并（N save → 1 flush）、全程零条目写、终态投影含 done", async () => {
     const mockPi = mkPi();
-    // entryAppendMinIntervalMs=0 禁用 [B-1] 节流：本用例锁定「去抖批合并 → save 级
-    // 不放大」的 entry 计数语义；running 中间态 append 节流由 jsonl-run-store-throttle.test.ts 锁定
-    const store6 = new JsonlRunStore({ sessionDir: tmpDir, pi: mockPi, entryAppendMinIntervalMs: 0 });
+    const store6 = new JsonlRunStore({ sessionDir: tmpDir, pi: mockPi });
     const run = makeRunningRun("run-w2tc6");
+    const wfSpy = vi.spyOn(fs.promises, "writeFile");
 
-    // 创建首写 flush → 1 条 entry
+    // 创建首写 flush → 1 次写盘
     await store6.save(run);
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(1);
+    expect(wfSpy).toHaveBeenCalledTimes(1);
 
-    // 3 轮 running 中间态：每轮窗口内 2 次 save（热路径批合并）→ 各 1 次 flush → 各 1 条 entry
+    // 3 轮 running 中间态：每轮窗口内 2 次 save（热路径批合并）→ 各 1 次 flush
     for (let i = 1; i <= 3; i++) {
       run.state.trace.append(makeTraceNode(i));
       const p1 = store6.save(run);
@@ -632,15 +702,15 @@ describe("W6: workflow-record entry 计数（= flush 次数；save 级不放大�
       await vi.advanceTimersByTimeAsync(200);
       await Promise.all([p1, p2]);
     }
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(4); // save 级不放大（2 save → 1 flush → 1 entry）
+    expect(wfSpy).toHaveBeenCalledTimes(4); // save 级不放大（2 save → 1 flush）
 
-    // done 终态 flush → 1 条 entry，快照携带终态（验收「entry 序列含终态」）
+    // done 终态 flush → 1 次写盘，投影携带终态
     run.transition("done", "completed");
     await store6.save(run);
-    expect(mockPi.appendEntry).toHaveBeenCalledTimes(5);
-    const calls = mockPi.appendEntry.mock.calls;
-    expect(calls[4]![0]).toBe(WORKFLOW_RECORD_CUSTOM_TYPE);
-    expect(asRecordData(calls[4]![1]).snapshot.state.status).toBe("done");
+    expect(wfSpy).toHaveBeenCalledTimes(5);
+    expect(readStateFile(tmpDir, "run-w2tc6").state.status).toBe("done");
+    // [W1 / D1] 停写锚定：全程零 workflow-record entry
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
   });
 });
 
@@ -882,7 +952,7 @@ describe("W8: 去抖窗口崩溃语义与 timer unref", () => {
     void p;
   });
 
-  it("W2TC13: 去抖窗口崩溃语义：未 flush 的 run 对 loadAll 不可见（丢失边界 = 最后一次成功 flush）", async () => {
+  it("W2TC13: 去抖窗口崩溃语义：未 flush 的中间态对 state 投影不可见（丢失边界 = 最后一次成功 flush）", async () => {
     // mockPi + mockCtx entries 数组模式（对齐 W1 round-trip 用例）
     const entries: CustomEntry[] = [];
     const mockPi = mkPi(entries);
@@ -892,44 +962,40 @@ describe("W8: 去抖窗口崩溃语义与 timer unref", () => {
       sessionDir: tmpDir,
       pi: mockPi,
       ctx: mockCtx,
-      // entryAppendMinIntervalMs=0 禁用 [B-1] 节流：本用例锁定去抖窗口的崩溃丢失边界；
-      // 节流窗口（entry 追加落后真实状态）由 jsonl-run-store-throttle.test.ts 锁定
-      entryAppendMinIntervalMs: 0,
     });
     const run = makeRunningRun("run-w2tc13");
-    await storeA.save(run); // 首写冷路径落盘 + 创建指针
+    await storeA.save(run); // 首写冷路径落盘
 
     // 去抖窗口内「崩溃」：中间态批 pending（不 advance；save Promise 留引用供
     // 对照阶段 await，防 unhandled rejection）
     run.state.trace.append(makeTraceNode(1));
     const pHot = storeA.save(run);
 
-    // 重启恢复：新 store 实例 loadAll 只能看到最后一次成功 flush 的状态
-    const storeB = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
-    const loaded1 = await storeB.loadAll();
-    expect(loaded1).toHaveLength(1);
-    expect(loaded1[0]!.state.trace.toArray()).toHaveLength(1); // 中间态丢失（崩溃窗口 ≤saveDebounceMs 的已接受语义）
+    // 崩溃丢失边界：state 投影停留最后一次成功 flush 的状态（中间态丢失是
+    // 崩溃窗口 ≤saveDebounceMs 的已接受语义——恢复权威在 journal，丢失面只有投影）
+    expect(readStateFile(tmpDir, "run-w2tc13").state.trace).toHaveLength(1);
 
-    // 对照锚点：advance 后（无崩溃）新 loadAll 返回含中间态的最新快照
+    // 对照锚点：advance 后（无崩溃）flush 落盘含中间态的最新投影
     await vi.advanceTimersByTimeAsync(200);
     await pHot; // 热批 flush 落盘完成
-    const loaded2 = await storeB.loadAll();
-    expect(loaded2).toHaveLength(1);
-    expect(loaded2[0]!.state.trace.toArray()).toHaveLength(2);
+    expect(readStateFile(tmpDir, "run-w2tc13").state.trace).toHaveLength(2);
+    // 停写锚定：全程零条目
+    expect(mockPi.appendEntry).not.toHaveBeenCalled();
   });
 });
 
-// ── W17: workflow-record 自描述 entry（D4 收敛：entry > state 文件 > 空）──────
+// ── W17/W1: workflow-record 条目面（[W1 / D1] v1 停写 + v2 注册/终态两写点读面）──
 //
-// 持久化形态从「state 文件 + workflow-state-link 指针 entry」收敛为自描述完整记录：
-// 每次成功 flush append 一条 workflow-record entry（pi 文件 = 持久化权威），state 文件
-// 降级纯性能缓存；旧 link entry 兼容读取（优先级低，存量 run 不静默丢失——#9 踩坑）。
+// [W1] 介质归位后形态：壳 save 零条目写（v1 全量快照停写）；主 session 条目只剩
+// 注册（core lifecycle 写）+ 终态（core finalizeRun 写 / 壳 loadAll 幂等补写）两条
+// v2 小条目；v1 快照 entry 与旧 link 指针保留为兼容读层（D7，夹具喂入）。
 
-describe("W17: workflow-record 自描述 entry 重建（entry > state 文件 > 空）", () => {
+describe("W17/W1: workflow-record 条目面（v1 停写锚定 + v2 收编读面）", () => {
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-store-w17-"));
+    loggerMock.warn.mockClear();
   });
 
   afterEach(() => {
@@ -942,49 +1008,133 @@ describe("W17: workflow-record 自描述 entry 重建（entry > state 文件 > �
     expect(WORKFLOW_RECORD_CUSTOM_TYPE).toBe("workflow-record");
   });
 
-  it("save 落 workflow-record entry 序列：customType + v1 + 完整快照（running → done 终态）", async () => {
+  it("[W1 停写锚定] save（running → done 全程）零 workflow-record entry；state 投影承载终态", async () => {
     const entries: CustomEntry[] = [];
     const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
     const run = makeRunningRun("run-w17-shape");
-    await store.save(run); // 首写 flush → entry 1（running）
+    await store.save(run);
     run.transition("done", "completed");
-    await store.save(run); // 终态 flush → entry 2（done）
+    await store.save(run);
 
-    const wfEntries = entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE);
-    expect(wfEntries).toHaveLength(2);
-
-    const first = asRecordData(wfEntries[0]!.data);
-    expect(first.v).toBe(1);
-    expect(first.snapshot.runId).toBe("run-w17-shape");
-    expect(first.snapshot.state.status).toBe("running");
-
-    const last = asRecordData(wfEntries[1]!.data);
-    expect(last.v).toBe(1);
-    expect(last.snapshot.state.status).toBe("done"); // entry 序列含终态
+    expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(0);
+    expect(readStateFile(tmpDir, "run-w17-shape").state.status).toBe("done");
   });
 
-  it("新 entry 重建用例：loadAll 优先扫 workflow-record——state 文件删除后仍完整重建（纯性能缓存证明）", async () => {
-    const entries: CustomEntry[] = [];
-    const storeA = new JsonlRunStore({
-      sessionDir: tmpDir,
-      pi: mkPi(entries),
-      ctx: mkCtx(entries),
-    });
-    const run = makeRunWithDoneCall();
-    await storeA.save(run);
+  it("[W1 journal 权威] state 文件删除后 loadAll 仍从 journal 重建（journal 唯一事实源证明）", async () => {
+    const runId = "run-w1-journal";
+    const journalPath = path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`);
+    appendJournalLine(tmpDir, runId, { type: "run-created", runId, workflowName: "test-script", argsSummary: "{}", ts: 1000, seq: 1 });
+    appendJournalLine(tmpDir, runId, { type: "ask-settled", taskIndex: 0, attempt: 1, outcome: "completed", durationMs: 5, ts: 2000, seq: 2 });
+    appendJournalLine(tmpDir, runId, { type: "run-settled", outcome: "completed", artifactsDir: tmpDir, ts: 3000, seq: 3 });
+    // state 文件预先存在后删除（模拟缓存清理/丢失）——journal 是唯一残留事实源
+    fs.writeFileSync(path.join(tmpDir, "workflow-state", `${runId}.jsonl`), "{}\n", "utf8");
+    fs.rmSync(path.join(tmpDir, "workflow-state", `${runId}.jsonl`));
 
-    // 删除 state 文件（模拟缓存清理/丢失）——entry 是唯一残留源
-    fs.rmSync(path.join(tmpDir, "workflow-state", "run-test-001.jsonl"));
-
-    const storeB = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
-    const loaded = await storeB.loadAll();
+    const entries: CustomEntry[] = [v2RegisteredEntry(runId, journalPath)];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const loaded = await store.loadAll();
     expect(loaded).toHaveLength(1);
-    expect(loaded[0]!.runId).toBe("run-test-001");
+    expect(loaded[0]!.runId).toBe(runId);
     expect(loaded[0]!.state.status).toBe("done");
-    // 自描述快照完整：AgentCall.sessionFile 等重水合字段在位（不依赖 state 文件）
-    expect(loaded[0]!.state.calls.get(0)!.sessionFile).toBe(
-      "/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl",
+    expect(loaded[0]!.state.reason).toBe("completed");
+    // 终态条目缺失 → 幂等补写恰 1 条（收编条目半边）；载荷与 core finalizeRun 同构
+    const settledEntries = entries.filter(
+      (e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE && (e.data as { kind?: string }).kind === "settled",
     );
+    expect(settledEntries).toHaveLength(1);
+    const data = settledEntries[0]!.data as Record<string, unknown>;
+    expect(data["v"]).toBe(WORKFLOW_RECORD_ENTRY_VERSION);
+    expect(data["kind"]).toBe("settled");
+    expect(data["runId"]).toBe(runId);
+    expect(data["status"]).toBe("done");
+    expect(data["outcome"]).toBe("completed");
+    expect(data["reason"]).toBe("completed");
+    expect(data["settledAt"]).toBe(3000);
+    expect(data["callCount"]).toBe(1); // journal ask-settled 帧数投影
+  });
+
+  it("[W1 收编幂等] 终态条目已在 → 补写跳过；双重启 loadAll 不重复追加", async () => {
+    const runId = "run-w1-idem";
+    const journalPath = path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`);
+    appendJournalLine(tmpDir, runId, { type: "run-created", runId, workflowName: "test-script", argsSummary: "{}", ts: 1000, seq: 1 });
+    appendJournalLine(tmpDir, runId, { type: "run-settled", outcome: "failed", errorCode: "engine_crashed", reason: "boom", artifactsDir: tmpDir, ts: 3000, seq: 2 });
+
+    const entries: CustomEntry[] = [v2RegisteredEntry(runId, journalPath), v2SettledEntry(runId)];
+    const storeA = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const loaded = await storeA.loadAll();
+    expect(loaded[0]!.state.status).toBe("done");
+    expect(loaded[0]!.state.reason).toBe("failed");
+    expect(loaded[0]!.state.error).toBe("boom");
+    // 条目已在：不追加（数量不变）
+    expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(2);
+
+    // 第二次启动（新 store 实例读同一 session 面）：仍恰 2 条，零重复追加
+    const storeB = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    await storeB.loadAll();
+    expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(2);
+  });
+
+  it("[W1 非终局不补写] journal 无 run-settled → running 交恢复链，零条目追加", async () => {
+    const runId = "run-w1-running";
+    const journalPath = path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`);
+    appendJournalLine(tmpDir, runId, { type: "run-created", runId, workflowName: "test-script", argsSummary: "{}", ts: 1000, seq: 1 });
+    appendJournalLine(tmpDir, runId, { type: "ask-settled", taskIndex: 0, attempt: 1, outcome: "completed", durationMs: 5, ts: 2000, seq: 2 });
+
+    const entries: CustomEntry[] = [v2RegisteredEntry(runId, journalPath)];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const loaded = await store.loadAll();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]!.state.status).toBe("running");
+    expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(1);
+  });
+
+  it("[W1 坏行宽容收编] journal 中部坏行 → 跳过 + warn 计数，重建不受阻", async () => {
+    const runId = "run-w1-badline";
+    const journalPath = path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`);
+    appendJournalLine(tmpDir, runId, { type: "run-created", runId, workflowName: "test-script", argsSummary: "{}", ts: 1000, seq: 1 });
+    fs.appendFileSync(journalPath, "{truncated-not-json\n", "utf8"); // 中部坏行
+    appendJournalLine(tmpDir, runId, { type: "run-settled", outcome: "completed", artifactsDir: tmpDir, ts: 3000, seq: 2 });
+
+    const entries: CustomEntry[] = [v2RegisteredEntry(runId, journalPath)];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const loaded = await store.loadAll();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]!.state.status).toBe("done"); // run-settled 帧可解析即终态（与坏行位置无关）
+    expect(loggerMock.warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain("bad journal line");
+  });
+
+  it("[W1 无幻影] 注册条目指向缺失 journal → warn 跳过，loadAll 不产幻影 run", async () => {
+    const runId = "run-w1-missing";
+    const entries: CustomEntry[] = [
+      v2RegisteredEntry(runId, path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`)),
+    ];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    await expect(store.loadAll()).resolves.toEqual([]);
+    expect(loggerMock.warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain(runId);
+  });
+
+  it("[W1 分流] 混合会话：v1 夹具实体（终局调和）与 v2 实体（journal 权威）同批重建互不干扰", async () => {
+    // v1 实体：running entry + journal 终局帧 → 兼容层调和 adopted
+    const v1RunId = "run-mix-v1";
+    appendJournalLine(tmpDir, v1RunId, { type: "run-settled", outcome: "completed", artifactsDir: tmpDir, ts: 500, seq: 9 });
+    // v2 实体：注册条目 + journal 终局 → journal 权威重建
+    const v2RunId = "run-mix-v2";
+    const v2Journal = path.join(tmpDir, "workflow-state", `${v2RunId}.events.jsonl`);
+    appendJournalLine(tmpDir, v2RunId, { type: "run-created", runId: v2RunId, workflowName: "test-script", argsSummary: "{}", ts: 1000, seq: 1 });
+    appendJournalLine(tmpDir, v2RunId, { type: "run-settled", outcome: "failed", reason: "boom", artifactsDir: tmpDir, ts: 2000, seq: 2 });
+
+    const entries: CustomEntry[] = [
+      v1RecordEntry(makeRunningRun(v1RunId)),
+      v2RegisteredEntry(v2RunId, v2Journal),
+    ];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const loaded = await store.loadAll();
+    const byId = new Map(loaded.map((r) => [r.runId, r]));
+    expect(loaded).toHaveLength(2);
+    expect(byId.get(v1RunId)?.state.status).toBe("done"); // v1 兼容层调和
+    expect(byId.get(v1RunId)?.state.reason).toBe("completed");
+    expect(byId.get(v2RunId)?.state.status).toBe("done"); // v2 journal 权威
+    expect(byId.get(v2RunId)?.state.reason).toBe("failed");
   });
 
   it("旧 link 兼容用例：存量 session（workflow-state-link + state 文件，无 workflow-record entry）→ loadAll 经 link 重建", async () => {
@@ -1012,32 +1162,31 @@ describe("W17: workflow-record 自描述 entry 重建（entry > state 文件 > �
     );
   });
 
-  it("读序优先级：同 runId 既有 workflow-record entry 又有旧 link（state 文件为旧 running 快照）→ entry 终态胜出", async () => {
-    const entries: CustomEntry[] = [];
-    const storeA = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
-    const run = makeRunningRun("run-w17-prio");
-    await storeA.save(run); // entry 1（running）+ state 文件（running）
-    run.transition("done", "completed");
-    await storeA.save(run); // entry 2（done）+ state 文件（done）
+  it("[W1 v1 兼容层] 同 runId 既有 v1 快照 entry 又有旧 link（state 文件为旧 running 快照）→ entry 终态胜出", async () => {
+    const runDone = makeRunningRun("run-w17-prio");
+    runDone.transition("done", "completed");
+    const runRunning = makeRunningRun("run-w17-prio");
+    const seedEntries: CustomEntry[] = [
+      v1RecordEntry(runRunning), // entry 1（running）
+      v1RecordEntry(runDone), // entry 2（done）
+    ];
 
-    // 把 state 文件回写为旧 running 快照（从 entry 1 提取完整快照），并 seed 旧 link 指针
+    // 把 state 文件写为旧 running 快照（从 entry 1 提取完整快照），并 seed 旧 link 指针
     const filePath = path.join(tmpDir, "workflow-state", "run-w17-prio.jsonl");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(
       filePath,
-      JSON.stringify(asRecordData(entries[0]!.data).snapshot) + "\n",
+      JSON.stringify(asRecordData(seedEntries[0]!.data).snapshot) + "\n",
       "utf8",
     );
-    const seedEntries: CustomEntry[] = [
-      ...entries,
-      {
-        type: "custom",
-        customType: "workflow-state-link",
-        data: { runId: "run-w17-prio", path: filePath },
-        id: "seed-pointer",
-        parentId: null,
-        timestamp: new Date().toISOString(),
-      },
-    ];
+    seedEntries.push({
+      type: "custom",
+      customType: "workflow-state-link",
+      data: { runId: "run-w17-prio", path: filePath },
+      id: "seed-pointer",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+    });
 
     const storeB = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(seedEntries) });
     const loaded = await storeB.loadAll();
@@ -1046,24 +1195,35 @@ describe("W17: workflow-record 自描述 entry 重建（entry > state 文件 > �
     expect(loaded[0]!.state.status).toBe("done");
   });
 
-  it("entry v guard：v:2 的 workflow-record entry（未来 schema）→ 跳过不崩（对齐 W16 消费约定）", async () => {
-    // snapshot 本身是合法 wf-run-v2 快照，但 entry 层 v=2 ≠ 1 → 整条跳过（不猜测解析）
-    const capture: CustomEntry[] = [];
-    const storeA = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(capture) });
-    await storeA.save(makeRunningRun("run-w17-v2"));
-    const snapshot = asRecordData(capture[0]!.data).snapshot;
-
+  it("entry 形态守卫：v2 但 kind 不在词表（半写/漂移）→ 静默跳过不崩（对齐 future-v 的不猜测解析）", async () => {
     const entries: CustomEntry[] = [
       {
         type: "custom",
         customType: WORKFLOW_RECORD_CUSTOM_TYPE,
-        data: { v: 2, snapshot },
-        id: "seed-future-entry",
+        data: { v: WORKFLOW_RECORD_ENTRY_VERSION, kind: "migrated" },
+        id: "seed-unknown-kind",
         parentId: null,
         timestamp: new Date().toISOString(),
       },
     ];
-    const storeB = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
-    await expect(storeB.loadAll()).resolves.toEqual([]);
+    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    await expect(store.loadAll()).resolves.toEqual([]);
+  });
+
+  it("[W1 seq 单调·壳侧断言] core journal 写者的事件行 seq 严格递增（1 起连续）", async () => {
+    // 壳测试源码直连 core（vitest alias）：用 core journal 写者落 3 帧，读回磁盘行
+    // 断言 seq 单调递增——W2 通知去重键载体的写入侧契约（run-events seq 单写者分配）。
+    const journal = createRunEventJournal(tmpDir);
+    const runId = "run-w1-seq";
+    await journal.append(runId, { type: "run-created", runId, workflowName: "s", argsSummary: "{}", ts: 1000 });
+    await journal.append(runId, { type: "ask-dispatched", taskIndex: 0, agentName: "a", attempt: 1, ts: 2000 });
+    await journal.append(runId, { type: "run-settled", outcome: "completed", artifactsDir: tmpDir, ts: 3000 });
+
+    const raw = fs.readFileSync(path.join(tmpDir, `${runId}.events.jsonl`), "utf8");
+    const seqs = raw
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => (JSON.parse(l) as { seq?: number }).seq);
+    expect(seqs).toEqual([1, 2, 3]);
   });
 });

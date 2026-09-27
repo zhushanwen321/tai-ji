@@ -1,13 +1,19 @@
 /**
  * workflow-record 自描述 entry 的 schema 契约单源（W17 [D4]；词表/guard 收敛
- * 二轮复审候选 2）。
+ * 二轮复审候选 2；W1 [D1] v 升格 2）。
  *
  * 三方消费格局（壳写点 / 壳 loadAll 重建 / runtime 投影扫描）此前各自持有
  * customType 字面量与 v1 判定逻辑（壳 collectRecordRun / runtime
  * parseSelfDescribedWorkflowSnapshot 双实现、shared 另持一份字面量），独立演化
  * 即静默漂移——本模块收敛两件事：
  * 1. customType 与 entry schema 版本常量（版本 bump 单点，写点与读判定同源）；
- * 2. 纯判定函数 classifyWorkflowRecordEntryData——entry data 的 v1 分支分类。
+ * 2. 纯判定函数 classifyWorkflowRecordEntryData——entry data 的 v1/v2 分类。
+ *
+ * 版本谱系：
+ * - v1（W17 起）：全量快照形态 `{v:1, snapshot, updatedAt}`——兼容读面保留
+ *   （D7 惰性兼容读，旧会话行为完全不变；写侧停写归 U1）；
+ * - v2（W1 起，当前版本）：注册 + 终态两条小条目（kind 判别）——运行态数据
+ *   移出主 session JSONL，事实源 = run journal（run-events.ts）。
  *
  * 判定与策略分离：本函数无 IO、无日志。reason 词表是判定结果的结构化输出，
  * 日志策略（何时出声 / 去重键 / 静默）留消费方——壳 per-entry warn 留证与
@@ -21,6 +27,9 @@
  *   非 entry schema 面，壳解码链自有等价校验（fromRunSnapshot）。
  */
 
+import type { DoneReason } from "./models/types.ts";
+import type { RunErrorCode, RunOutcome } from "./run-events.ts";
+
 /**
  * 自描述 workflow record entry 的 customType。命名对齐 `subagent-record`
  * （连字符风格）。写点字面量与常量的等值由壳
@@ -30,11 +39,76 @@
 export const WORKFLOW_RECORD_CUSTOM_TYPE = "workflow-record";
 
 /**
- * `workflow-record` entry 的 data schema 版本（W17 起 v1）。消费方按 v 判别
+ * `workflow-record` entry 的 data schema 版本（W1 起 v2）。消费方按 v 判别
  * 解析，不认识的版本跳过而非猜测；与快照层 SNAPSHOT_VERSION（"wf-run-v2"）
- * 是两级独立版本号。
+ * 是两级独立版本号。v1 全量快照形态随版本门保留为兼容读面（D7）。
+ *
+ * （const 声明 + 字面量初始化使类型收窄为字面量 2，无需 `as const`。）
  */
-export const WORKFLOW_RECORD_ENTRY_VERSION = 1 as const;
+export const WORKFLOW_RECORD_ENTRY_VERSION = 2;
+
+/** v2 条目判别键词表（两族同构：subagent-record v2 同款 registered/settled）。 */
+export const WORKFLOW_RECORD_ENTRY_KINDS = ["registered", "settled"] as const;
+
+export type WorkflowRecordEntryKind = (typeof WORKFLOW_RECORD_ENTRY_KINDS)[number];
+
+/**
+ * v2 注册条目 data（设计 D1 条目契约表 workflow-record 行·注册列）。
+ *
+ * run 创建时写一条：身份 + journal 锚点。journalPath 是 session-reader workflow
+ * 发现链的主源数据基础（D10 断链修复——旧 workflow-state-link 指针在 W17 已停写，
+ * v2 注册条目接续发现通道）；写点接线归 U1。
+ */
+export interface WorkflowRecordRegisteredEntryData {
+  v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
+  kind: "registered";
+  runId: string;
+  /** workflow 名（run journal run-created 帧的 workflowName 同源）。 */
+  workflowName: string;
+  /** 脚本身份名（RunSpec.scriptName——meta.name 或文件名 stem）。 */
+  scriptName: string;
+  /** run 级短标签（RunSpec.slug，≤20 字符；缺省回落 scriptName）。 */
+  slug: string;
+  startedAt: number;
+  /**
+   * journal 绝对路径锚点（`<sessionDir>/workflow-state/<runId>.events.jsonl`）——
+   * v2 条目的 journalPath 锚点字段（任务书 U0 职责 1）；保留窗口内 journal 在盘
+   * 即可按锚点读步骤级家族链，窗口外回落 manifest 摘要级（D10 三档发现链）。
+   */
+  journalPath: string;
+}
+
+/**
+ * v2 终态条目 data（设计 D1 条目契约表 workflow-record 行·终态列）。
+ *
+ * run 终局时写一条（收编幂等补写同一形态，U1 接线）：终局 + 摘要。字段与
+ * run-settled journal 帧同源（条目是 journal 的投影锚，不是第二事实源）。
+ */
+export interface WorkflowRecordSettledEntryData {
+  v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
+  kind: "settled";
+  runId: string;
+  /** 终态收敛词（run 一次性生命周期：终局即 done）。 */
+  status: "done";
+  /** 终态原因（= DoneReason，run.state.reason 同源）。 */
+  reason: DoneReason;
+  /** 终局形态（run-settled 帧 outcome 同源，与 reason 正交维度）。 */
+  outcome: RunOutcome;
+  /** 失败终局的结构化编码（completed/cancelled 缺省）。 */
+  errorCode?: RunErrorCode;
+  settledAt: number;
+  /** 摘要：call 计数（终局 trace 规模）。 */
+  callCount: number;
+  /** 摘要：token 消耗终值（state.budget.usedTokens 同源）。 */
+  usedTokens: number;
+  /** 摘要：脚本结果概要（截断文本——全文不进条目，事件流/manifest 可溯）。 */
+  scriptResultSummary?: string;
+}
+
+/** v2 条目判别联合（判别键 = kind）。 */
+export type WorkflowRecordEntryV2 =
+  | WorkflowRecordRegisteredEntryData
+  | WorkflowRecordSettledEntryData;
 
 /**
  * 判定结果判别联合。
@@ -42,31 +116,51 @@ export const WORKFLOW_RECORD_ENTRY_VERSION = 1 as const;
  * ok = v1 且带 snapshot（snapshot 未经形状校验——truthy 即放行，解码归消费方，
  * 与收敛前壳 `!data.snapshot` / runtime `typeof snapshot !== 'object'` 双实现的
  * 最宽共同判定面一致）。
+ *
+ * reason:"v2" = v2 合法形态（载荷已过 kind 判定，形状校验归消费方解码层）——
+ * **归入 ok:false 是刻意裁决**：ok 的语义是「v1 快照契约可消费」，既有消费方
+ * （壳 collectRecordRun / runtime parseSelfDescribedWorkflowSnapshot）的
+ * `!ok → 跳过` 分支即 v2 的版本门（D8 中间态「不产幻影」的构造性保证——本
+ * 模块不改动它们的领地）；新消费方（U1 壳 loadAll / U3 投影）按
+ * reason === "v2" 取载荷。
  */
 export type WorkflowRecordEntryClassification =
   | { ok: true; snapshot: unknown }
-  | { ok: false; reason: "wrong-type" | "missing-v" | "future-v" | "no-snapshot" };
+  | { ok: false; reason: "v2"; entry: WorkflowRecordEntryV2 }
+  | {
+      ok: false;
+      reason: "wrong-type" | "missing-v" | "future-v" | "no-snapshot" | "unknown-kind";
+    };
 
 /**
- * entry data → v1 分类（纯函数，无 IO 无日志）。
+ * entry data → v1/v2 分类（纯函数，无 IO 无日志）。
  *
- * 分支语义（与收敛前壳/runtime 双实现的判定面逐分支对齐）：
+ * 分支语义（v1 分支与收敛前壳/runtime 双实现的判定面逐分支对齐；v2 分支为
+ * W1 新增）：
  * - wrong-type：data 非对象（截断/半写连对象都不是）；
- * - missing-v：对象但 v 缺失（写点恒定 v:1，缺失即形态损坏）；
- * - future-v：v 有值但非当前版本（含类型漂移如 "1" 字符串——升级前旧版读取
+ * - missing-v：对象但 v 缺失（写点恒定写 v，缺失即形态损坏）；
+ * - future-v：v 有值但非 1/2（含类型漂移如 "1" 字符串——升级前旧版读取
  *   属正常降级）；
- * - no-snapshot：v1 但 snapshot falsy；
+ * - no-snapshot：v1 但 snapshot falsy（v1 专属分支）；
+ * - unknown-kind：v2 但 kind 不在词表内（v2 专属分支）；
+ * - v2：v2 且 kind ∈ {registered, settled}；
  * - ok：v1 且 snapshot truthy。
  */
 export function classifyWorkflowRecordEntryData(data: unknown): WorkflowRecordEntryClassification {
   if (typeof data !== "object" || data === null) {
     return { ok: false, reason: "wrong-type" };
   }
-  const record = data as Record<string, unknown>;
+  const record = data as { v?: unknown; kind?: unknown; snapshot?: unknown };
   if (record.v === undefined) {
     return { ok: false, reason: "missing-v" };
   }
-  if (record.v !== WORKFLOW_RECORD_ENTRY_VERSION) {
+  if (record.v === WORKFLOW_RECORD_ENTRY_VERSION) {
+    if (record.kind === "registered" || record.kind === "settled") {
+      return { ok: false, reason: "v2", entry: data as WorkflowRecordEntryV2 };
+    }
+    return { ok: false, reason: "unknown-kind" };
+  }
+  if (record.v !== 1) {
     return { ok: false, reason: "future-v" };
   }
   if (!record.snapshot) {

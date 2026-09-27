@@ -265,7 +265,14 @@ describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
       expect(run.state.status).toBe("done");
       expect(run.state.reason).toBe("failed");
       expect(deps.onRunDone).toHaveBeenCalledTimes(1);
-      expect(deps.appendEntry).toHaveBeenCalledTimes(1); // 单次 unregister 直落，无重复
+      // [W1] 终局 coda 现含两条 entry（workflow-record 终态条目 + unregister）——
+      // 幂等锚点 = unregister 恰一次（无重复直落），workflow-record 也恰一次
+      expect(
+        deps.appendEntry.mock.calls.filter((c) => c[0] === "pending:unregister"),
+      ).toHaveLength(1);
+      expect(
+        deps.appendEntry.mock.calls.filter((c) => c[0] === "workflow-record"),
+      ).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }

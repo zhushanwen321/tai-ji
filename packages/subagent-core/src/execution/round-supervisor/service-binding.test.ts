@@ -377,13 +377,17 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     });
     expect(h.finalizeClosed).not.toHaveBeenCalled();
 
-    // 终态 entry 落盘（markFinalized → archive → pi.appendEntry）：磁盘 record + 终态语义位
+    // 终态条目落盘（markFinalized → archive → v2 settled 条目经 pi.appendEntry）：
+    // [W1/D1] closedReason 域由 stopReason 表达（D1 终态条目契约），磁盘 record +
+    // 终态语义位一体。
     const entries = subagentEntries(h.pi);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
+      v: 2,
+      kind: "settled",
       id: "bg-disk",
       status: "idle",
-      closedReason: "gc",
+      stopReason: "gc",
       endedAt: expect.any(Number),
       error: expect.stringContaining("safe to re-dispatch"),
     });
@@ -409,7 +413,7 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     const entries = subagentEntries(h.pi);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ id: "bg-disk", status: "idle", closedReason: "gc" });
+    expect(entries[0]).toMatchObject({ v: 2, kind: "settled", id: "bg-disk", status: "idle", stopReason: "gc" });
   });
 
   it("entry 面抛错（pi.appendEntry 炸）→ best-effort 吞掉不向上抛，sidecar 照常落盘", async () => {

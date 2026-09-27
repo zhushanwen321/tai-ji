@@ -7,7 +7,7 @@
  *   1. identity env→appendEntry 重建（类型 13 字段含 1 个 @deprecated，写入 12）
  *   2. notify ledger host 装配 + 重启恢复
  *   3. 双 Service 装配 + initSession（createOrReuseServices 封装，单例语义 D8）
- *   4. GC / manifest tmp 清扫（[U4c/D6] promote 退役）/ 索引重建（[U4c/G1] boot 全量腿）/ worktree 恢复
+ *   4. GC / manifest tmp 清扫（[U4c/D6] promote 退役）/ 索引重建（[U4c/G1] boot 全量腿）/ worktree 恢复 / 保留维护轮兜底（[W1/D5] session_start 触发）
  *   5. per-session run store + kill-9 恢复循环 + evictDoneRunsBeyondCap
  *   6. SAR + engine 基线（经 SessionLifecycleResult 返回，sessionState 写入留在组合根）
  *
@@ -38,6 +38,13 @@ import { IDENTITY_CUSTOM_TYPE, type SubagentIdentityData } from "@zhushanwen/sub
 import type { ExecutionMode } from "@zhushanwen/subagent-core";
 import { maybeCleanupExpiredSessionFiles } from "@zhushanwen/subagent-core";
 import { resolvePiSessionScopedDir } from "@zhushanwen/subagent-core";
+// [W1 / D5] session_start 兜底触发点的统一保留维护轮：入口 + record 域目录锚
+// （getSubagentRecordsDir 布局 + ENV_ROOT_CWD 贯穿 env 名单源）+ state 目录分量
+// 单源 STATE_DIR_NAME——全部经 barrel 消费（壳生产消费纪律）。
+import { runRetentionMaintenanceRound } from "@zhushanwen/subagent-core";
+import { getSubagentRecordsDir } from "@zhushanwen/subagent-core";
+import { ENV_ROOT_CWD } from "@zhushanwen/subagent-core";
+import { STATE_DIR_NAME } from "@zhushanwen/subagent-core";
 import {
   getSubagentService,
   setSubagentService,
@@ -490,6 +497,37 @@ async function runProcessLevelMaintenance(
       reason: toErrorMessage(err),
     });
   }
+
+  // [W1 / D5] session_start 兜底触发：统一保留维护轮（冷启动即清——进程首启
+  // 无任何新写时的清理机会，覆盖「崩溃后重开的会话」历史遗留）。run 域目录锚
+  // = resolveSessionDir 同源（与 JsonlRunStore 落盘同布局）；record 域目录锚 =
+  // getSubagentRecordsDir(agentDir, rootCwd)，rootCwd 推导与 SubagentService 构造点
+  // （SessionBaselines）同式：env 贯穿 ?? ctx.cwd 兜底，env 名单源 ENV_ROOT_CWD——
+  // enc 段不漂移（sessions 与 records 两目录同源不变量）。进程级维护幂等，
+  // oncePerProcess 守卫防双跑；/resume /fork 同进程复用时跳过（record-only 会话
+  // 的持续累积由 record 首写触发点 RecordStore.register 覆盖）。
+  try {
+    await oncePerProcess("subagent-workflow:retention-maintenance-round", async () => {
+      const envRootCwd = process.env[ENV_ROOT_CWD];
+      const rootCwd = envRootCwd && envRootCwd !== "" ? envRootCwd : ctx.cwd;
+      await runRetentionMaintenanceRound(
+        {
+          stateDir: path.join(resolveSessionDir(), STATE_DIR_NAME),
+          recordsDir: getSubagentRecordsDir(agentDir, rootCwd),
+        },
+        {},
+        {
+          warn: (msg) => logger.warn(`[subagent-workflow] ${msg}`),
+          debug: (msg) => logger.debug(`[subagent-workflow] ${msg}`),
+          toMsg: (err: unknown) => toErrorMessage(err),
+        },
+      );
+    });
+  } catch (err) {
+    logger.warn("[subagents] retention maintenance round failed", {
+      reason: toErrorMessage(err),
+    });
+  }
 }
 
 /** createSessionRunState 返回值（随迁块 5 的装配产物）。 */
@@ -554,6 +592,14 @@ async function createSessionRunState(
         {
           onRunRecovered: (payload) => {
             pi.events.emit("pending:unregister", payload);
+          },
+          // [W1 / D4] 收编终态条目补写（恢复链收编的条目半边）：core 在 journal
+          // run-settled 落账后回调本面，v2 终态条目经当前 pi appendEntry 落主
+          // session（注册 + 终态两条 v2 小条目的收编补齐；本 store loadAll 对
+          // 「journal 已终局而条目缺失」形态的幂等补写与此同构）。围栏在 core 消费
+          // 侧（同步抛错 warn 后恢复循环继续，lifecycle.ts hooks 契约）。
+          appendSettledEntry: (customType, data) => {
+            pi.appendEntry(customType, data);
           },
         },
       );

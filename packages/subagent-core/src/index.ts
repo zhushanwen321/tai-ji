@@ -301,6 +301,59 @@ export {
   toSubagentRecordEntry,
 } from "./execution/persistence/record-entry.ts";
 
+// ── W1 [D1/D3/D6]：介质归位契约与 tail 原语（U0 新增行段——既有行零改动，
+// cap 族导出行的删改归 U7）。两族 v2 条目契约（版本常量/kind 词表/classify）+
+// record 事件词表（六类事件 + 行级单调 seq + 首行头行形态）+ journal 读写原语
+// （append 单调分配 seq / scan 宽容解析）+ 域无关 tail 读取器（offset 续读 /
+// 完整行边界 / 坏行宽容 / watch 目录 + 周期复查）。生产消费方（U1 壳写侧 /
+// U2a record 写侧 / U3 runtime 读侧 / U5 清理）一律经 barrel 消费。
+export {
+  SUBAGENT_RECORD_ENTRY_KINDS,
+  SUBAGENT_RECORD_ENTRY_VERSION,
+  classifySubagentRecordEntryData,
+  type SubagentRecordEntryClassification,
+  type SubagentRecordEntryKind,
+  type SubagentRecordEntryV2,
+  type SubagentRecordRegisteredEntryData,
+  type SubagentRecordSettledEntryData,
+} from "./execution/persistence/record-entry.ts";
+export {
+  createRecordEventJournal,
+  foldRecordJournalEvents,
+  INITIAL_RECORD_JOURNAL_FOLD_STATE,
+  isRecordJournalHeader,
+  parseRecordEventFileLine,
+  parseRecordEventLine,
+  RECORD_EVENT_TYPES,
+  recordEventsPath,
+  RECORD_EVENTS_SUFFIX,
+  RECORD_JOURNAL_HEADER_TYPE,
+  type RecordBoundEvent,
+  type RecordCreatedEvent,
+  type RecordEventEnvelope,
+  type RecordEventJournal,
+  type RecordEventType,
+  type RecordJournalEvent,
+  type RecordJournalEventInput,
+  type RecordJournalFoldState,
+  type RecordJournalHeader,
+  type RecordReopenedEvent,
+  type RecordRoundIdleEvent,
+  type RecordRoundStartedEvent,
+  type RecordSettledEvent,
+  toRecordJournalHeader,
+  applyRecordJournalEvent,
+} from "./execution/persistence/record-events.ts";
+export {
+  createJournalDirectoryTailer,
+  readJournalTail,
+  splitCompleteLines,
+  type JournalDirectoryTailer,
+  type JournalDirectoryTailerOptions,
+  type JournalLineParser,
+  type JournalTailChunk,
+} from "./execution/persistence/journal-tail.ts";
+
 // agent-registry 执行消费面：loadByPath 直接加载（@experimental U10 / D6）+
 // parseAgentProfile 宽容解析（无 frontmatter 不拒、name 缺省 stem、返回 body 与
 // 执行字段全量）——执行消费面单点；与严格注入投影（parseResourceMeta）双轨分离
@@ -510,31 +563,43 @@ export type {
 // FileRunStore：RunStore port 的宿主无关文件实现（D2 设计件）——落盘
 // <dataRoot>/workflow-state/<runId>.jsonl，zsw 等无 pi session 设施的宿主装配
 // LifecycleDeps.store 用；pi 壳继续用 session 锚定的 JsonlRunStore。
-// DEFAULT_* 两常量：壳 jsonl-run-store.ts 生产消费（D3 判定进 barrel），
 // u-2c 删 ./* 通配后深路径仅测试侧 vitest alias 可解析，生产消费必须走 barrel。
-// pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪单源（[Q2 / D5 清理规则①②]——
-// manifest 资格 + cap + TTL + journal 成对删）；resolveStateTtlMs / STATE_TTL_MS_ENV /
-// DEFAULT_STATE_TTL_MS：TTL env 通道单源（[P1b-2] 引入、[Q2] 自 pi 宿主迁入）；
-// resolveStateMaxRuns / STATE_MAX_RUNS_ENV：cap env 通道单源（自 pi 宿主壳收编——
-// 原壳侧 getEnvStateMaxRuns 同形实现删除）。pi 宿主 jsonl-run-store 的 retention
-// 维护轮生产消费（barrel 先例同上）。
+// pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪单源（[W1 / D5 清理规则①②]——
+// fold 终态资格 + 保留窗口 + journal 成对删）；resolveStateTtlMs / STATE_TTL_MS_ENV /
+// DEFAULT_STATE_TTL_MS：保留窗口 env 通道单源（[P1b-2] 引入、[W1] 起 run+record
+// 两域统一窗口）。cap 族与节流族导出（数量上限常量 / cap env 通道名与解析函数 /
+// 节流间隔常量与节流器工厂）已随 W1 cap 语义废除与写通道收敛整体退役。
 // [C3 常量上收] STATE_DIR_NAME：pi 壳 workflow-events / jsonl-run-store 的
 // `<sessionDir>/workflow-state` 与 core `<dataRoot>/workflow-state` 同名分量单源
 // ——壳侧字面量改 import 消费，防布局分量漂移。
 export {
-  DEFAULT_SAVE_MIN_INTERVAL_MS,
-  DEFAULT_STATE_MAX_RUNS,
   DEFAULT_STATE_TTL_MS,
   STATE_DIR_NAME,
-  STATE_MAX_RUNS_ENV,
   STATE_TTL_MS_ENV,
   FileRunStore,
   pruneTerminalRunFiles,
-  resolveStateMaxRuns,
   resolveStateTtlMs,
   type PruneTerminalRunFilesOptions,
   type PruneTerminalRunFilesResult,
 } from "./orchestration/file-run-store.ts";
+
+// [W1 / D5] 统一保留维护轮入口：run journal prune + record 事件文件 prune 同轮
+// 幂等扫描 + 判据②候选数日志。三触发点（新 run 首写 / 新 record 事件文件首写 /
+// session_start 兜底）都经此单入口消费——壳生产消费必须走 barrel（深路径仅
+// 测试侧 vitest alias 可解析，barrel 先例同上）。
+export {
+  runRetentionMaintenanceRound,
+  type RetentionMaintenanceInput,
+  type RetentionMaintenanceOptions,
+  type RetentionMaintenanceResult,
+} from "./orchestration/file-run-store.ts";
+
+// [W1 / D5] session_start 兜底触发点的 record 域目录锚（与 SubagentService 构造点
+// 同源同式推导）：getSubagentRecordsDir 给出 records 目录布局，ENV_ROOT_CWD 是
+// rootCwd 贯穿 env 名单源（根进程无 env → ctx.cwd 兜底，与 SessionBaselines 推导
+// 同式——壳侧复制推导式时经此常量锚定 env 名防漂移）。壳生产消费必须走 barrel。
+export { ENV_ROOT_CWD } from "./execution/service/session-baselines.ts";
+export { getSubagentRecordsDir } from "./execution/assembly/path-encoding.ts";
 
 // resolvePiSessionScopedDir：pi 宿主 sessionDir 布局（cwd slug + existsSync 探测）
 // 的单一权威源——pi 壳 session-lifecycle 的 resolveSessionDir 经 opts.agentDir
@@ -542,15 +607,6 @@ export {
 // resolvePiWorkflowStateDir 为其 workflow-state 后缀派生，core 读侧装配经相对
 // 路径消费，不需要 barrel 面。
 export { resolvePiSessionScopedDir } from "./execution/assembly/workflow-state-root.ts";
-
-// RunPersistThrottle：RunStore 两 adapter（FileRunStore / pi 壳 JsonlRunStore）
-// 共享的落盘节流决策单点（判定五要素 + 记账时机）——收编前两侧平行实现无共享
-// 测试锚定（B3 单侧修复实证独立演化风险）。壳生产消费必须走 barrel（深路径
-// 仅测试侧 vitest alias 可解析）。
-export {
-  createRunPersistThrottle,
-  type RunPersistThrottle,
-} from "./orchestration/persist-throttle.ts";
 
 // run 级终局投影 manifest（[P1b-2 / D5]）读写原语：「已终局」单源锚定（outcome
 // 非空）。消费全在 core 内部深路径（run-registry abandon 终局化 /
@@ -568,6 +624,15 @@ export {
   WORKFLOW_RECORD_ENTRY_VERSION,
   classifyWorkflowRecordEntryData,
   type WorkflowRecordEntryClassification,
+} from "./orchestration/workflow-record-entry.ts";
+// [W1 / D1] v2 条目契约增量导出（既有行段零改动）：注册/终态两条小条目的类型面
+// 与 kind 词表——壳 U1 写点 / runtime U3 投影 / session-reader U4 锚链消费。
+export {
+  WORKFLOW_RECORD_ENTRY_KINDS,
+  type WorkflowRecordEntryKind,
+  type WorkflowRecordEntryV2,
+  type WorkflowRecordRegisteredEntryData,
+  type WorkflowRecordSettledEntryData,
 } from "./orchestration/workflow-record-entry.ts";
 
 // ── 快照 codec（U8 / D4）──────────────────────────────────────

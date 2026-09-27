@@ -10,15 +10,21 @@
  * 重复提示比丢失更吵）；run 终局经 noteRunSettled 回收（Set 防泄漏；runId 全局
  * 唯一，漏删不会误报、只构成缓慢累积）。
  *
+ * [W1 / D6] journal 尾读改 offset 增量缓存：进展时间戳源 = core journal-tail
+ * 原语（readJournalTail）的 per-path offset 续读——每 tick 只读上次读后新增的
+ * 字节段（尾帧 ts 取增量内末帧，无新帧沿用缓存值），不再全文 readFileSync
+ * 重放（60s×每 run 的全文读同族放大消除；活动性判据「事件发生间隔」等价可得）。
+ *
  * 误报面（有意接受）：单 ask 长跑期间 journal 无新帧（帧频 = 事件边沿）会触发
  * 提示——文案语义「仍在运行、无需干预、不自动终止」与事实一致（run 确实在跑），
  * 提示不终止进程（对齐 zcode 语义：zcode 对不可 run 级定位的引擎同样只通知不杀）。
  *
  * 零依赖设计：不 import pi SDK / helpers / workflow-events——发送面与数据源经
- * deps 注入，模块可脱离装配面独立测试。
+ * deps 注入，模块可脱离装配面独立测试（journal-tail 原语例外：经 core barrel
+ * 消费的域中立 IO 原语，非装配面依赖）。
  */
 
-import { readFileSync } from "node:fs";
+import { readJournalTail } from "@zhushanwen/subagent-core";
 
 // ── deps 契约（装配侧注入面） ─────────────────────────────────────────────────
 
@@ -38,8 +44,8 @@ export interface StallWatchdogDeps {
   getRunningRuns(): Iterable<StallRunView>;
   /**
    * 读 run 事件 journal 的尾帧 ts（stall 判定的进展时间戳）。**同步 IO**——tick
-   * 周期 60s、run 数量个位数、单文件 ≤100KB（D5 量级预算），同步读的宿主阻塞
-   * <1ms 且让 tick 整体确定性（fake timers 测试下 interval fire 即完成，无跨
+   * 周期 60s、增量读只读新增字节段（W1 起 offset 缓存），同步读的宿主阻塞可忽略
+   * 且让 tick 整体确定性（fake timers 测试下 interval fire 即完成，无跨
    * macrotask 的 IO 等待时序）。
    *
    * 数据源裁决（D6-2 实施期选型，登记）：**事件 journal 尾帧**（D5 权威事件流的
@@ -47,7 +53,8 @@ export interface StallWatchdogDeps {
    * 零依赖）。journal 缺文件（首帧未落）或尾行损坏时返回 undefined，tick 回退
    * run 起点（startedAtMs）。
    *
-   * 可注入覆盖（模块直测用 fake，零 fs）。
+   * 可注入覆盖（模块直测用 fake，零 fs）。缺省实现 = [W1 / D6] offset 增量缓存
+   * 读（readLastProgressCached——per-path offset + 尾帧 ts 缓存）。
    */
   readLastProgress?(journalPath: string): number | undefined;
   /** 发送面（装配侧闭包 resolveCurrentPi + notifyStall）。 */
@@ -74,7 +81,7 @@ export interface StallWatchdog {
   hasNotified(runId: string): boolean;
 }
 
-// ── 内置 journal 尾帧读（deps.readLastProgress 缺省实现） ──────────────────────
+// ── 内置 journal 尾帧读（deps.readLastProgress 缺省实现：offset 增量缓存） ─────
 
 /** journal 帧的信封守卫（EventEnvelope 形态运行时收窄——避免全可选属性的结构断言）。 */
 function isFrameWithTs(frame: unknown): frame is { ts: number } {
@@ -84,32 +91,49 @@ function isFrameWithTs(frame: unknown): frame is { ts: number } {
 }
 
 /**
- * 尾帧形态（core run-events P1a 钉死）：每行一个 JSON 事件、信封含 ts（epoch
- * ms）。坏尾行（半截写入）向前逐行找——journal 是 append-only JSONL，坏行只可
- * 能出现在文件尾。
+ * journal-tail 行解析器（域注入形态）：合法帧返回 `{ts}`；坏行/空行 undefined
+ * （readJournalTail 跳过 + 计数——宽容语义与 tail 契约一致，不卡游标）。
  */
-function readLastJournalTimestamp(journalPath: string): number | undefined {
-  let raw: string;
+function parseFrameTs(line: string): { ts: number } | undefined {
   try {
-    raw = readFileSync(journalPath, "utf8");
+    const frame: unknown = JSON.parse(line);
+    return isFrameWithTs(frame) ? { ts: frame.ts } : undefined;
   } catch {
-    return undefined; // ENOENT = 尚无 journal 帧（run 创建极早/引导补投未跑）
+    return undefined;
   }
-  const lines = raw.split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]?.trim();
-    if (!line) continue;
-    try {
-      const frame: unknown = JSON.parse(line);
-      if (isFrameWithTs(frame)) {
-        return frame.ts;
-      }
-      return undefined;
-    } catch {
-      continue;
-    }
+}
+
+/**
+ * [W1 / D6] 进展时间戳读的 per-path 缓存条目：offset（已读到完整行边界的字节
+ * 偏移）+ lastTs（末帧 ts——增量内无新帧时沿用，等价于「事件发生间隔」判据的
+ * 累积值）。truncated（文件截断/重建）时 readJournalTail 从 0 全量重读，缓存
+ * 整体替换（幂等）；ENOENT 返回空 chunk（nextOffset 0），lastTs 保持 undefined
+ * → tick 回退 startedAtMs。
+ */
+interface ProgressCacheEntry {
+  offset: number;
+  lastTs?: number;
+}
+
+/**
+ * 尾帧 ts 的增量读（deps.readLastProgress 缺省实现）：只读上次读后新增的完整行
+ * （同步 IO；tick 60s 周期下的读量 = 该周期内新增事件字节）。IO 异常（非 ENOENT
+ * 的读错误，如权限）降级为缓存值——informational 面不炸 tick。
+ */
+function readLastProgressCached(
+  journalPath: string,
+  cache: Map<string, ProgressCacheEntry>,
+): number | undefined {
+  const entry = cache.get(journalPath);
+  let chunk;
+  try {
+    chunk = readJournalTail(journalPath, entry?.offset ?? 0, parseFrameTs);
+  } catch {
+    return entry?.lastTs;
   }
-  return undefined;
+  const lastTs = chunk.events.length > 0 ? chunk.events[chunk.events.length - 1]!.ts : entry?.lastTs;
+  cache.set(journalPath, { offset: chunk.nextOffset, lastTs });
+  return lastTs;
 }
 
 const DEFAULT_TICK_MS = 60_000;
@@ -118,7 +142,11 @@ const DEFAULT_TICK_MS = 60_000;
 
 export function createStallWatchdog(deps: StallWatchdogDeps): StallWatchdog {
   const tickMs = deps.tickMs ?? DEFAULT_TICK_MS;
-  const readLastProgress = deps.readLastProgress ?? readLastJournalTimestamp;
+  // [W1 / D6] 缺省进展读 = per-path offset 缓存（实例内状态——同一 watchdog 跨
+  // tick 复用；注入 readLastProgress 时不建缓存，测试面零 fs）。
+  const progressCache = new Map<string, ProgressCacheEntry>();
+  const readLastProgress =
+    deps.readLastProgress ?? ((journalPath: string) => readLastProgressCached(journalPath, progressCache));
   const notified = new Set<string>();
   let timer: ReturnType<typeof setInterval> | undefined;
 

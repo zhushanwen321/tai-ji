@@ -36,6 +36,7 @@ import type {
 } from "../engine/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
+import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelRegistryLike } from "../assembly/model-resolver.ts";
@@ -176,6 +177,19 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     store = (service as unknown as ServiceInternals).store;
   });
 
+  /** [W1/D3] 读 record 事件文件全部事件行（journal 落点 = getSubagentRecordsDir，
+   *  与 manifest 同目录——观察面独立于被测 store）。 */
+  function scanRecordEvents(id: string): Array<Record<string, unknown>> {
+    const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    const file = path.join(recordsDir, `${id}.events`);
+    const content = fs.readFileSync(file, "utf8");
+    return content
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((e) => e.type !== "record-journal");
+  }
+
   afterEach(() => {
     service.dispose();
     clearEngines();
@@ -293,15 +307,14 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     expect(record.engineHandle).toMatchObject({
       sessionRef: { sessionId: "sess_cold_2", dbPath: zcodeDb },
     });
-    // 回填经 store.reportRecordTransition 落 entry（appendEvent 既有 engineHandle
-    // 投影通道——GUI 经 entry 重建 record 即拿到新锚）
-    expect(pi.appendEntry).toHaveBeenCalledWith(
-      "subagent-record",
-      expect.objectContaining({
-        id: record.id,
-        engineHandle: { sessionRef: { sessionId: "sess_cold_2", dbPath: zcodeDb }, poolKey: "shared" },
-      }),
-    );
+    // 回填经 store.reportRecordTransition 感知落 record-bound 帧（[W1/D2 停写写点]
+    // 改写面：engineHandle 过程投影不再落 v1 快照 entry——事件文件是新承载，
+    // zcode 运行窗口锚定经 bound manifest 物化（D2 决策 9）对 GUI 可见）。
+    const boundEvents = scanRecordEvents(record.id);
+    expect(boundEvents.at(-1)).toMatchObject({
+      type: "record-bound",
+      engineHandle: { sessionRef: { sessionId: "sess_cold_2", dbPath: zcodeDb }, poolKey: "shared" },
+    });
 
     zcode.runs[1]!.settle("round two done");
     await vi.waitFor(() => expect(record.round).toBe(2));

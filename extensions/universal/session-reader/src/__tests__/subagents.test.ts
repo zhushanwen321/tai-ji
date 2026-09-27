@@ -10,6 +10,8 @@ import {
   extractSessionIdFromFilename,
   type RecordManifest,
 } from '../discovery/subagents.js'
+import { resolveSessionRoots } from '../discovery/roots.js'
+import { parseSessionHeader, readSessionHeaderFirstLine } from '../discovery/session-header.js'
 import { REAL_AGENT_DIR, REAL_DATA_TIMEOUT_MS } from './real-data.js'
 
 // ---- fixture 常量（uuid 特征，满足 extractSessionIdFromFilename + 互不为子串）----
@@ -676,6 +678,86 @@ describe('U4 buildFamilyFromFs 富化（manifest 主 / P-fallback）', () => {
     expect(ghost!.model).toBeUndefined()
     // 旧 manifest slug 缺失 → 回退 agentName（也缺）→ 空串兜底
     expect(ghost!.slug).toBe('')
+  })
+})
+
+// ============================================================
+// .events 文件族结构性忽略（W1 D3 落点裁决 + 设计检查点④）
+// ============================================================
+//
+// record 事件文件族（<recordsDir>/<sa-id>.events，无 .jsonl 后缀）与 manifest 同目录
+// 同主名。session-reader 的两层兼容形态在此断言：
+// ① 结构性忽略——subagents 树扫描只收 .jsonl，.events 天然不进候选集（D3「无后缀
+//    的结构性收益」：被忽略或被误读两类风险一次排空）；
+// ② 首行头行读者兼容——.events 首行是自描述头行 {"type":"record-journal","id":...}
+//    （写侧 record-events.ts toRecordJournalHeader 契约），session-reader 对未知文件
+//    读首行判 header 时命中非 session header 即忽略（检查点④：零成本兼容——不改
+//    扫描器即可与该文件族共存）。
+
+describe('.events 文件族结构性忽略（W1 D3 / 检查点④）', () => {
+  let dir: string
+
+  beforeEach(async () => {
+    dir = await makeAgentDir()
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  /** 写 record 事件文件（首行头行 + 事件行集，形态对齐写侧 record-events.ts）。 */
+  async function writeEventsFile(slug: string, saId: string): Promise<string> {
+    const recordsDir = join(dir, 'subagents', slug, 'records')
+    await mkdir(recordsDir, { recursive: true })
+    const path = join(recordsDir, `${saId}.events`)
+    const lines = [
+      JSON.stringify({ type: 'record-journal', id: saId }),
+      JSON.stringify({ type: 'record-created', seq: 1, ts: 1, agent: 'dev', task: 't', slug: 's', origin: 'tool', rootSessionId: ROOT, depth: 0, mode: 'sync', startedAt: 1 }),
+      JSON.stringify({ type: 'record-settled', seq: 2, ts: 2, stopReason: 'end_turn', endedAt: 2, turns: 1, totalTokens: 5 }),
+    ]
+    await writeFile(path, lines.join('\n') + '\n')
+    return path
+  }
+
+  it('subagent 树扫描不收 .events：resolveSessionRoots 的 subagent 根 files 含 .jsonl 不含 .events', async () => {
+    await writeMainSession(dir, '--root-cwd--', ROOT, { cwd: '/proj/root' })
+    const subPath = await writeSubagentSession(dir, '--root-cwd--', SUB_REAL, {
+      rootSessionId: ROOT,
+      slug: 'ev-sibling',
+    })
+    await writeEventsFile('--root-cwd--', 'sa-ev-1')
+
+    const roots = await resolveSessionRoots({ agentDir: dir })
+    const subRoot = roots.find((r) => r.kind === 'subagent')
+
+    expect(subRoot).toBeDefined()
+    expect(subRoot!.files.map((f) => f.path)).toContain(subPath)
+    expect(subRoot!.files.some((f) => f.path.endsWith('.events'))).toBe(false)
+  })
+
+  it('首行头行命中非 session header 即忽略：record-journal 头行 → parseSessionHeader 返回 null', async () => {
+    const eventsPath = await writeEventsFile('--root-cwd--', 'sa-ev-1')
+    // 检查点④形态：session-reader 对未知文件读首行判 header，非 session 行 → null
+    //（即使未来通配规则把 .events 收进候选集，该文件也不会被误认成 session）
+    const firstLine = await readSessionHeaderFirstLine(eventsPath)
+    expect(firstLine).toBeDefined()
+    expect(parseSessionHeader(firstLine)).toBeNull()
+  })
+
+  it('家族扫描：.events 与正常 subagent 同目录共存 → 家族正常、不产幻影 subagent 节点', async () => {
+    await writeMainSession(dir, '--root-cwd--', ROOT, { cwd: '/proj/root' })
+    await writeSubagentSession(dir, '--root-cwd--', SUB_REAL, {
+      rootSessionId: ROOT,
+      slug: 'ev-coexist',
+    })
+    await writeEventsFile('--root-cwd--', 'sa-ev-1')
+
+    const family = await buildFamilyFromFs(ROOT, dir)
+
+    // 正常 subagent 在场
+    expect(family.subagents.some((s) => s.sessionId === SUB_REAL)).toBe(true)
+    // .events 的 record id 不进任何集合（无幻影）
+    expect(family.subagents.some((s) => s.sessionId === 'sa-ev-1')).toBe(false)
+    expect(family.subagents.some((s) => s.sessionId.startsWith('sa-ev'))).toBe(false)
   })
 })
 

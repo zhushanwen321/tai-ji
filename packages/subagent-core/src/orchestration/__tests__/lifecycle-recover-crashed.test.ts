@@ -12,6 +12,10 @@
 // - 单 run save 失败不中断其余 run（幂等恢复）；loadAll 失败向上抛
 // - onRunRecovered 同步 throw 被围栏捕获（warn 留痕），不中断其余 run 恢复
 // - evict 步：超 MAX_RETAINED_DONE_RUNS 的 done run 被淘汰（最旧优先）
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { configureCore, resetCoreForTests } from "../../core/host-services.ts";
@@ -19,6 +23,8 @@ import {
   MAX_RETAINED_DONE_RUNS,
   recoverCrashedRuns,
 } from "../lifecycle.ts";
+import { setRunEventJournalDirForTest } from "../worker-message-pump.ts";
+import { createRunEventJournal } from "../run-events.ts";
 import { Budget } from "../models/budget.ts";
 import type { RunStore } from "../models/ports.ts";
 import type { RunSpec } from "../models/run-spec.ts";
@@ -285,5 +291,111 @@ describe("recoverCrashedRuns — evict 步", () => {
     await recoverCrashedRuns(store, runs, "crashed");
 
     expect(runs.size).toBe(2);
+  });
+});
+
+
+// ── [W1 / D4] journal 收编接驳（杀进程恢复链的 core 侧半边）─────────────────
+//
+// recoverCrashedRuns 对 running 遗留 run 先走 dispatchFinalRunSettle（journal
+// run-settled 帧 + manifest 物化，与活体终局同一 dispatch 链）再 state 快照直改
+// ——证据落点对称（此前旁路直改 state、journal 永缺终局帧）。kill-9 完整
+// fixture 断言（含条目恰一条）在 u1-shell 批闭环，本段锁 core 侧接驳行为。
+
+describe("recoverCrashedRuns — journal 收编接驳（W1 / D4）", () => {
+  it("recovered run 的 journal 尾部追加 run-settled(failed) + manifest 物化 + hooks.appendSettledEntry 恰一次", async () => {
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-recover-adopt-"));
+    setRunEventJournalDirForTest(journalDir);
+    try {
+      // 预置 kill-9 形态 journal：run-created + ask-dispatched 落账后进程死亡
+      const journal = createRunEventJournal(journalDir);
+      await journal.append("wf-adopt-1", {
+        type: "run-created",
+        runId: "wf-adopt-1",
+        workflowName: "test-wf",
+        argsSummary: "{}",
+        ts: Date.now(),
+      });
+      await journal.append("wf-adopt-1", {
+        type: "ask-dispatched",
+        taskIndex: 0,
+        agentName: "a",
+        attempt: 1,
+        ts: Date.now(),
+      });
+
+      const run = makeRun("wf-adopt-1", { status: "running" });
+      const { store } = makeStore([run]);
+      const appended: Array<{ customType: string; data: unknown }> = [];
+      const result = await recoverCrashedRuns(store, new Map(), "Process killed", {
+        appendSettledEntry: (customType, data) => appended.push({ customType, data }),
+      });
+
+      expect(result.recovered).toBe(1);
+      // journal 尾部有收编 run-settled（interrupted 终局的 failed 形态，reason 承载
+      // kill 文本——「收编 run-settled(interrupted)」的 outcome 维 = failed）
+      const events = await createRunEventJournal(journalDir).scan("wf-adopt-1");
+      expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "run-settled"]);
+      const settled = events[2] as Extract<
+        import("../run-events.ts").WorkflowRunEvent,
+        { type: "run-settled" }
+      >;
+      expect(settled.outcome).toBe("failed");
+      expect(settled.reason).toBe("Process killed");
+      // manifest 物化（writeRunTerminalManifest 经 dispatch 链的 appendTransition）
+      expect(
+        fs.existsSync(path.join(journalDir, "wf-adopt-1.json")),
+      ).toBe(true);
+      // 条目补写回调恰一次（v2 settled 形态）
+      expect(appended).toHaveLength(1);
+      expect(appended[0]).toMatchObject({
+        customType: "workflow-record",
+        data: expect.objectContaining({ v: 2, kind: "settled", runId: "wf-adopt-1" }),
+      });
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it("双重启幂等：二次恢复时 run 已 done（loadAll 产物终态）→ 不再 dispatch，journal 帧数不增长", async () => {
+    const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-recover-twice-"));
+    setRunEventJournalDirForTest(journalDir);
+    try {
+      // 第一次 kill-9：预置静止 journal 后收编（run-settled 落账恰一帧）
+      const journal = createRunEventJournal(journalDir);
+      await journal.append("wf-adopt-2", {
+        type: "run-created",
+        runId: "wf-adopt-2",
+        workflowName: "test-wf",
+        argsSummary: "{}",
+        ts: Date.now(),
+      });
+      const run = makeRun("wf-adopt-2", { status: "running" });
+      const firstStore = makeStore([run]);
+      await recoverCrashedRuns(firstStore.store, new Map(), "Process killed");
+      expect(
+        (await createRunEventJournal(journalDir).scan("wf-adopt-2")).filter(
+          (e) => e.type === "run-settled",
+        ),
+      ).toHaveLength(1);
+
+      // 「重启」：重水合产物已 done,failed（state 快照已收敛）——恢复循环不进
+      // running 分支，journal 无新增 run-settled
+      const reloaded = makeRun("wf-adopt-2", {
+        status: "done",
+        reason: "failed",
+        completedAt: "2026-08-30T02:00:00.000Z",
+      });
+      const secondStore = makeStore([reloaded]);
+      const result = await recoverCrashedRuns(secondStore.store, new Map(), "Process killed");
+      expect(result.recovered).toBe(0);
+
+      const events = await createRunEventJournal(journalDir).scan("wf-adopt-2");
+      expect(events.filter((e) => e.type === "run-settled")).toHaveLength(1);
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
   });
 });

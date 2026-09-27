@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { getLogger } from "../../core/logger.ts";
 
 import { bestEffort } from "../assembly/best-effort.ts";
-import { writeAtomicFile } from "../../shared/atomic-write.ts";
+import { writeAtomicFile, writeAtomicFileSync } from "../../shared/atomic-write.ts";
 import { isMissingFsError } from "./fs-error.ts";
 import type { ClosedReason, ExecutionStatus } from "../assembly/types.ts";
 // 类型面依赖（D5 终局投影词表单源）——纯 type import，无运行时循环
@@ -287,6 +287,208 @@ export class ManifestStore {
     }
 
     return deleted;
+  }
+}
+
+// ============================================================
+// [W1 / U2a] record 域 manifest 落盘写面（容器 record-store.ts 的写通道实现体）
+// ============================================================
+//
+// 写面语义三档集中（manifest 是物化投影不是事实源——D2）：
+//   - 响亮（终态/持久通道 writeManifestRecordPersisted）：失败 error 日志 + 用户可见
+//     entry——终态投影未落必须可见；
+//   - 不响亮（缓存补缺通道 rematerializeManifestRecord / rebuildManifestRecordIfMissing）：
+//     失败 warn/debug 留痕——缓存补缺失败不构成宿主错误；
+//   - 守卫降级（bound 物化 materializeBoundRecordManifest，见下）：锚定未就绪跳过、
+//     写失败日志跳过不阻塞。
+
+/** manifest 写失败的双通道上报（error 日志给开发者 + entry 给用户，对齐
+ *  writeManifestBestEffort 现状）。 */
+export function reportManifestWriteFailure(
+  id: string,
+  err: unknown,
+  appendEntry?: ((customType: string, data: unknown) => void) | null,
+): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  logger.error(`[subagents] manifest write failed (record=${id}): ${msg}`);
+  appendEntry?.("subagent:manifest-write-failed", { id, error: msg });
+}
+
+/**
+ * manifest 落盘统一通道：dir 提供时 writeAtomicFileSync 同步写（停机竞态构造性
+ * 消灭；与 ManifestStore.writeManifest 字节形态一致——2 空格缩进 JSON，读侧/外部
+ * session-reader 不感知差异）；缺省 fire-and-forget 异步写（仅纯内存测试形态）。
+ * 写失败响亮（见 reportManifestWriteFailure）。
+ */
+export function writeManifestRecordPersisted(
+  manifestStore: ManifestStore | undefined,
+  dir: string | undefined,
+  id: string,
+  manifest: ManifestRecord,
+  appendEntry?: ((customType: string, data: unknown) => void) | null,
+): void {
+  if (dir !== undefined) {
+    try {
+      writeAtomicFileSync(path.join(dir, `${id}.json`), JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES));
+    } catch (err) {
+      reportManifestWriteFailure(id, err, appendEntry);
+    }
+    return;
+  }
+  if (manifestStore !== undefined) {
+    void manifestStore.writeManifest(manifest).catch((err: unknown) => {
+      reportManifestWriteFailure(id, err, appendEntry);
+    });
+  }
+}
+
+/**
+ * [H4 收口 / G1] entry 重物化腿的 manifest 投影补写（record-access 可重连终态
+ * 重物化通道的唯一入口——store 外零 manifest 直写）。manifest 是可丢缓存（D5），
+ * 本函数只做缺员补写：失败 warn 留痕不响亮（缓存补缺失败不构成宿主错误，对齐
+ * 惰性补建通道的降级语义——区别于终态面 writeManifestRecordPersisted 的响亮）；
+ * dir 接线时为同步写（停机窗防护与终态面同源）。
+ */
+export function rematerializeManifestRecord(
+  manifestStore: ManifestStore | undefined,
+  dir: string | undefined,
+  manifest: ManifestRecord,
+): void {
+  const warnFailure = (err: unknown): void => {
+    logger.warn("[subagents] rematerialize manifest write failed (cache backfill)", {
+      detail: { id: manifest.id, error: err instanceof Error ? err.message : String(err) },
+    });
+  };
+  if (dir !== undefined) {
+    try {
+      writeAtomicFileSync(path.join(dir, `${manifest.id}.json`), JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES));
+    } catch (err) {
+      warnFailure(err);
+    }
+    return;
+  }
+  if (manifestStore !== undefined) {
+    void manifestStore.writeManifest(manifest).catch(warnFailure);
+  }
+}
+
+/**
+ * 单 record 的 manifest 惰性补建（boot 全量轮 + 查询面反查 miss 惰性通道共用）。
+ * manifest 已存在 → 跳过；无落点（dir 与 store 均缺省，纯内存测试形态）→ 跳过；
+ * 每 id 每进程至多尝试一次（tried 集合由调用方持有——boot 全量轮与惰性通道共享，
+ * 防重复磁盘写）。写失败 debug 留痕不抛（缓存面，无需动作）。
+ *
+ * @param manifest 已构造好的派生投影（derivedManifestRecord 产物——构造归调用方，
+ *        本函数不依赖投影轴）。
+ * @returns true = 本次实际补写。
+ */
+export function rebuildManifestRecordIfMissing(
+  dir: string | undefined,
+  manifestStore: ManifestStore | undefined,
+  id: string,
+  manifest: ManifestRecord,
+  tried: Set<string>,
+): boolean {
+  if (dir === undefined && manifestStore === undefined) return false;
+  if (tried.has(id)) return false;
+  tried.add(id);
+  if (dir !== undefined) {
+    try {
+      if (fs.existsSync(path.join(dir, `${id}.json`))) return false;
+      writeAtomicFileSync(path.join(dir, `${id}.json`), JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES));
+      return true;
+    } catch (err) {
+      logger.debug("[subagents] rebuildIndexes: manifest rebuild skipped (write failed)", {
+        detail: { id, error: err instanceof Error ? err.message : String(err) },
+      });
+      return false;
+    }
+  }
+  // 缺省降级形态（dir 缺省、store 在，纯内存测试形态外的测试分支）：
+  // 异步写，失败同样静默降级。
+  void manifestStore!.writeManifest(manifest).catch((err: unknown) => {
+    logger.debug("[subagents] rebuildIndexes: manifest rebuild skipped (write failed)", {
+      detail: { id, error: err instanceof Error ? err.message : String(err) },
+    });
+  });
+  return true;
+}
+
+/**
+ * 损坏 manifest 的双通道上报（status 越界 = 数据损坏）：logger.warn 给开发者
+ * （事后排查，appendEntry 持久化，不显 TUI）；appendEntry 给用户（session 内可见，
+ * 即使退出后也能从 session.jsonl 复盘事故原因）。调用方跳过该条而非降级 failed。
+ */
+export function reportInvalidManifestRecord(
+  manifest: ManifestRecord,
+  appendEntry?: ((customType: string, data: unknown) => void) | null,
+): void {
+  logger.warn("[subagents] skip manifest with invalid status", {
+    detail: { id: manifest.id, status: manifest.status },
+  });
+  appendEntry?.("subagent:manifest-invalid-status", {
+    id: manifest.id,
+    status: manifest.status,
+    rootSessionId: manifest.rootSessionId,
+    agentName: manifest.agentName,
+  });
+}
+
+// ============================================================
+// [W1 / D2 决策 9] record-bound 物化写面（record 域）
+// ============================================================
+
+/**
+ * record-bound 时物化一次 running manifest（spawn 回填点，引擎身份已知）。
+ *
+ * 为什么需要：运行中 zcode record 的 sa-id 读取锚定（session-reader 第一层
+ * zcode manifest 定点直读需要 engine + sessionRef 双键）在 v1 时代完全依赖过程
+ * entry 快照（轮终 reportRecordTransition 携带 engineHandle）——W1 停写过程
+ * entry 后该窗口无锚。修复 = record-bound（spawn 回填）物化一次 status=running
+ * 的 manifest，zcode 运行窗口锚定经既有第一层直读命中（零新增介质、「两条条目」
+ * 口径保持——manifest 是物化投影不是条目）。
+ *
+ * 锚定就绪守卫（session-reader 孤儿判定的前提不变量「manifest 写点时
+ * sessionFile 必已在盘」，discovery/subagents.ts 头注）：无守卫的 bound 物化会把
+ * spawn 窗口（bound 早于子 session 首笔写入）内的 running record 被家族扫描误标
+ * 已清理。守卫下的空窗 = spawn → 锚定就绪之间（秒级），该空窗内 v1 路径同样无
+ * 可靠锚（行为对齐非回归）。两分支：
+ *   - pi 分支（sessionFile 有值）：fs 探查文件存在性（零新依赖）——未就绪本轮
+ *     跳过，由下一物化点（轮终/终态）自愈；
+ *   - zcode 分支（无 sessionFile、engineHandle 在场）：**零探查**——bound 的产生
+ *     点就是 spawn 回填，晚于引擎会话建立（sessionRef 双键来自引擎握手，
+ *     getSessionRow 会话行级判读，非 dbPath 文件存在级——core 不新增 zcode 会话
+ *     库依赖边）。
+ *
+ * 写失败降级（D2）：manifest 是投影不是事实源——写失败记日志跳过（不重试阻塞），
+ * 锚定空窗延长但不消失（轮终/终态物化点与终态条目兜底）。区别于终态写面
+ * writeManifestPersisted 的响亮语义：被接管的 v1 路径逐事件自愈，此处物化点稀疏，
+ * 降级语义显式声明。
+ *
+ * @returns true = 已物化；false = 守卫跳过（锚定未就绪/无锚）或写失败降级。
+ */
+export function materializeBoundRecordManifest(
+  dir: string,
+  manifest: ManifestRecord,
+): boolean {
+  if (manifest.sessionFile !== undefined) {
+    // pi 分支守卫：子 session 文件已在盘才物化（家族扫描孤儿判定的前提不变量）。
+    if (!fs.existsSync(manifest.sessionFile)) return false;
+  } else if (manifest.engineHandle === undefined) {
+    // 双缺（spawn 窗口期未确立任何锚）：无锚可物化——静默跳过（非降级，正常空窗）。
+    return false;
+  }
+  try {
+    writeAtomicFileSync(path.join(dir, `${manifest.id}.json`), JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES));
+    return true;
+  } catch (err) {
+    logger.warn(
+      "[subagents] bound manifest materialization failed (projection only — skipped, next materialization point self-heals)",
+      {
+        detail: { id: manifest.id, dir, error: err instanceof Error ? err.message : String(err) },
+      },
+    );
+    return false;
   }
 }
 

@@ -44,7 +44,25 @@ import type { AgentOutcome, EngineCapabilities, EngineHandle } from "../engine/t
 import type { EnginePort, EngineRunResult, RunContext } from "../engine/port.ts";
 import { registerFakePiEngine, FakeRun, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { emptyRegistry } from "./helpers/model-registry-mock.ts";
+import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
+
+
+/** [W1/D3] 读 record 事件文件全部事件行（journal 落点 = getSubagentRecordsDir——
+ *  观察面独立于被测 store；usage-feed 集成块消费）。 */
+function scanRecordEventsFor(agentDir: string, id: string): Array<Record<string, unknown>> {
+  const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+  try {
+    const content = fs.readFileSync(path.join(recordsDir, `${id}.events`), "utf8");
+    return content
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((e) => e.type !== "record-journal");
+  } catch {
+    return [];
+  }
+}
 import { clearEngines, registerEngine } from "../engine/registry.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
@@ -1639,12 +1657,17 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     expect(record.totalTokens).toBe(190); // (100+50+20+10) + (7+3)
     expect(record.turnCount).toBe(1);
 
-    // 轮终 settle → 轮终簿记 entry 携带非零 usage（chat 域轮终不终态——终态 = close）
+    // 轮终 settle → [W1/D3 表行 4] record-round-idle 帧携带非零轮统计快照（chat 域
+    // 轮终不终态——终态 = close；v1 轮终 entry 过程面已停写）。
     fake.runs[0]!.settle({ content: "round one reply" });
     await vi.waitFor(() => expect(record.round).toBe(2));
     expect(record.totalTokens).toBe(190);
-    const roundEntry = entriesFor(record.id).at(-1);
-    expect(roundEntry).toMatchObject({ id: record.id, totalTokens: 190 });
+    await vi.waitFor(() => {
+      const idleEvents = scanRecordEventsFor(agentDir, record.id).filter(
+        (e) => e.type === "record-round-idle",
+      );
+      expect(idleEvents.at(-1)).toMatchObject({ stopReason: "completed", totalTokens: 190 });
+    });
 
     // 跨轮持续：Continuation 轮间共用同一 record 实例，第二轮继续累积
     await service.chatActions.deliverChatMessage(record, "round two");
@@ -1662,9 +1685,16 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     fake.runs[1]!.settle({ content: "round two reply" });
     await vi.waitFor(() => expect(record.round).toBe(3));
     await service["closeSubagent"](record, false);
-    // idle record close = 立即收口落账（同步完成）——收口 entry 落账形态即完成信号。
-    const finalEntry = entriesFor(record.id).at(-1);
-    expect(finalEntry).toMatchObject({ id: record.id, status: "idle", totalTokens: 200, turns: 2 });
+    // idle record close = 立即收口落账（同步完成）。[W1/D3] close 收口（markSettledOut
+    // ——release + manifest 投影）不在 D3 事件表（record 未终局，message 可续）：
+    // 统计终值的持久化锚 = 第二轮 round-idle 帧（200/2），close 本身零新增事件行。
+    const eventsAfterClose = scanRecordEventsFor(agentDir, record.id);
+    expect(eventsAfterClose.filter((e) => e.type === "record-round-idle").at(-1)).toMatchObject({
+      stopReason: "completed",
+      totalTokens: 200,
+      turns: 2,
+    });
+    expect(eventsAfterClose.some((e) => e.type === "record-settled")).toBe(false);
   });
 
   it("pi one-shot：message_end(usage) → totalTokens/turnCount 实时累积；outcome 写入不重置", async () => {
@@ -1704,12 +1734,16 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     expect(record).toBeDefined();
     expect(record!.totalTokens).toBe(42); // 修复前：事件只喂 journal，record 恒 0
 
-    // 非 pi one-shot 一次 run 即轮末收口（Continuation markRoundIdle：idle 翻边 +
-    // entry 落盘；旧 finalizeEngineOutcome closed/gc 终态化已删）
+    // 非 pi one-shot 一次 run 即轮末收口（Continuation markRoundIdle：idle 翻边；
+    // [W1/D3 表行 4] round-idle 帧承载统计快照——旧 finalizeEngineOutcome closed/gc
+    // 终态化已删，v1 轮终 entry 过程面停写）。
     zcode.runs[0]!.settle("done");
     await vi.waitFor(() => expect(record!.status).toBe("idle"));
-    const finalEntry = entriesFor(record!.id).at(-1);
-    expect(finalEntry).toMatchObject({ id: record!.id, status: "idle", totalTokens: 42 });
+    await vi.waitFor(() => {
+      expect(
+        scanRecordEventsFor(agentDir, record!.id).filter((e) => e.type === "record-round-idle").at(-1),
+      ).toMatchObject({ stopReason: "completed", totalTokens: 42 });
+    });
   });
 });
 

@@ -7,8 +7,9 @@
  *   扩容第三族——第二道 customType 早退门 + scanPlanStateEntries 派生 + session.planState
  *   publish diff；[reload-closeout D2] 发布门基线从 merge 变化信号换成已发布快照水位，
  *   守卫/发布门处丢帧 = 水位滞留 → agent_settled / 15s 定时两腿对账补发，稳态零帧）；
- * - 磁盘读侧/动作/引擎配置：getSubagents/getWorkflows/getPlanState（冷启动磁盘扫描，与缓存刷新
- *   共用 scanSubagentEntries/scanWorkflowEntries/scanPlanStateEntries 同一份派生代码，D4）、
+ * - 磁盘读侧/动作/引擎配置：getSubagents/getWorkflows（[W1 / D6] 读请求只读 journal
+ *   投影——entry 游标 + journal tail 双源单点合并，见 journal-projection.ts；v1 巨文件
+ *   会话 oversize 分流走旧格式惰性兼容读路径）、getPlanState（冷启动磁盘扫描不变）、
  *   getSubagentHistory/getAgentCall*（record.sessionFile 直读）、
  *   workflowAction/subagentAction（经扩展 slash command 的生命周期/定向消息操作）、
  *   U7 引擎配置三方法（engines.json/config.json 读写）。
@@ -22,10 +23,10 @@
  * Facade 消费面：对外 9 方法 + invalidateRecordEntries 一行委托（ISessionService 契约
  * 不变，transport/index.ts 组合根经 Facade 委托到达——u-s5 同款形态）。
  */
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, statSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import type { SubagentRecord, WorkflowRunRecord, PlanStateView, PlanDocMeta } from '@taiji/shared'
-import { PLAN_STATE_CUSTOM_TYPE } from '@taiji/shared'
+import { PLAN_STATE_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 // subagent-record / workflow-record 词表均已收 core 单源（runtime 投影经 core barrel 消费；
 // shared 的 subagent-record 副本仅剩 renderer 消费）
 import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
@@ -37,15 +38,16 @@ import { SUBAGENTS_ENGINES_FILENAME } from '@zhushanwen/extension-protocol'
 import { getDataDir } from '@taiji/shared/paths'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import { getHistoryFromFilePath, type HistoryFileReadResult } from '../session-history.js'
-import { extractSubagentsFromSessionFile, scanSubagentEntries } from './subagent-extractor.js'
+import { extractSubagentsFromSessionFile } from './subagent-extractor.js'
 import {
   extractRecordEngine,
   readEngineSubagentHistory,
   DEFAULT_SUBAGENT_ENGINE,
 } from './subagent-engine-history.js'
-import { extractWorkflowsFromSessionFile, scanWorkflowEntries } from './workflow-extractor.js'
-import { mergeWorkflowStepsIntoCache } from './workflow-step-merge.js'
-import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
+import { extractWorkflowsFromSessionFile } from './workflow-extractor.js'
+import { scanRecordFamilyEntriesFromSessionFile } from './session-file-extraction.js'
+import { SessionJournalProjection } from './journal-projection.js'
+import { encodeCwd, getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { discoverAndRegisterEngines } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
 import { isStrictlyUnder } from '../../utils/path-utils.js'
 import type { ISessionStore } from '../ports/session.js'
@@ -69,9 +71,9 @@ import type { SessionRegisteredSource } from './session-state-projection.js'
  * - 失效自愈：游标指向的 entry 不在 pi 当前集合（"Entry not found"，session 文件被外部
  *   改写 / pi 重启）→ 丢 cursor 全量重拉重建（纯派生缓存可随时丢弃，正确性优先）。
  *
- * 数据写路径唯一 = refreshRecordEntries 的 entry 扫描（scanSubagentEntries /
- * scanWorkflowEntries，与冷启动磁盘路径同一份派生代码，D4）；发布经 messageBus
- * stateSnapshot（'subagents' / 'workflows' typeKey，W12 语义延续）。
+ * 数据写路径唯一 = journal 投影重算（[W1 / D6] entry 扫描与 journal fold 在投影内
+ * 单点合并；派生 Map 是投影合并快照的镜像——syncCacheFromProjection）；发布经
+ * messageBus stateSnapshot（'subagents' / 'workflows' typeKey，W12 语义延续）。
  *
  * [reload-closeout D2] 送达水位：published* 三字段 = 已发布快照（发布门基线）。发布判定 =
  * 当前派生快照 vs 已发布快照（逐 record 比对，equals 语义与 merge 域 helpers 同源），
@@ -109,6 +111,11 @@ export interface RecordEntriesCache {
   publishedWorkflows: Map<string, PublishedWorkflowRunState>
   /** [reload-closeout D2] 送达水位：已发布 planState view（null = 从未发布过）。 */
   publishedPlanState: PlanStateView | null
+  /**
+   * [W1 / D6] journal 投影（读请求唯一数据源）：entry 游标 + journal tail 双源
+   * 单点合并。惰性创建（首个失效拉取 / 读 RPC / 对账触达时）；销毁随 cache。
+   */
+  projection: SessionJournalProjection | null
 }
 
 /**
@@ -117,20 +124,18 @@ export interface RecordEntriesCache {
  * 中 trace 逐步落盘，若只比 status/reason（恒 running），GUI 详情的 agentCalls 整个 run
  * 期间收不到任何 reload 触发）。
  *
- * [W0 / D4] 终态计数维度（completed+failed 之和）：步骤级转态的 diff 维度——②
- * subagent-record 迁移（合并投影的状态权威）在 steps 不变时（record-only 成行已计数、
- * ① trace 骨架未 flush）翻转步骤行 running↔终态，仅比 steps 会静默吞掉转态信号（现状
- * 缺陷的根因形态）。等价性论证见设计 D4：派发经 record-only 成行使 steps 变化、转态使
- * 终态计数 ±1、① flush 后结构补全（record-only 行归位 trace 行）两者皆不变——单计数与
- * steps 组合覆盖全部检测需求。结构补全不独立发信号（分组 header 到达搭下一次终态转态
- * 信号或 drawer 重开拉取，设计已知取舍 2）。
+ * [W1 / D6] W0 的 settledSteps 终态计数维度退役，换步骤状态全序列：journal 投影变更
+ * （record 转态 / run 事件边沿）驱动信号后，「steps 不变但步骤行 running↔终态翻转」
+ * 由 stepStatuses 序列差异承载（状态向量覆盖原终态计数的全部检测面且更精确——计数
+ * 对同 run 两步骤互换状态盲，状态序列不盲）。结构补全（phase/agent 补齐、状态不变）
+ * 不独立发信号（分组 header 到达搭下一次终态信号或 drawer 重开拉取，设计已知取舍 2）。
  */
 export interface PublishedWorkflowRunState {
   status: string
   reason?: string
   steps: number
-  /** [W0 / D4] 步骤行终态计数（status ∈ completed|failed 的 agentCalls 条数之和）。 */
-  settledSteps: number
+  /** [W1 / D6] 步骤状态全序列（'|' 连接，位置敏感——步骤级转态的 diff 维度）。 */
+  stepStatuses: string
 }
 
 /** get_entries RPC 响应的域内收窄（u-s4 EntriesSinceResult 同款先例，见 fetchRecordEntriesRound）。 */
@@ -199,6 +204,12 @@ export interface SessionRecordsDeps {
    * 供测试省略）；生产组合根恒接线，缺省时注入退化为 global-only 映射。
    */
   getSessionCwd?(sessionId: string): string | undefined
+  /**
+   * [W1 / D6] journal tailer 周期复查间隔注入面：生产缺省走 u0 tailer 缺省值
+   * （30s，macOS fs.watch 静默丢事件兜底上界）；测试注入短值驱动确定性增量
+   * （fake timers 下 advance 复查周期即续读，不依赖真实 watch 事件时序）。
+   */
+  journalTailerRecheckMs?: number
 }
 
 /** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定）。 */
@@ -241,6 +252,20 @@ export const RECORD_RECONCILE_DOMAIN_SIZE_WARN_THRESHOLD = 10
  */
 export function encodeDirectiveText(text: string): string {
   return text.replace(/\\/g, '\\\\').replace(/\n/g, '\\n')
+}
+
+/**
+ * [W1 / D6] 读 RPC 的旧格式分流闸：会话文件 >32MB = v1 巨文件时代会话（v1 全量
+ * 快照条目膨胀的产物形态）→ 走旧格式惰性兼容读路径（32MB 预检语义专属域）。
+ * stat 失败（含 ENOENT）不分流——投影冷启动的流式扫描对缺文件按空条目处理
+ * （pi 延迟写入窗口），错误分级由下游承载。
+ */
+function isSessionFileOversize(filePath: string): boolean {
+  try {
+    return statSync(filePath).size > READ_PRECHECK_MAX_BYTES
+  } catch {
+    return false
+  }
 }
 
 export class SessionRecords {
@@ -361,9 +386,74 @@ export class SessionRecords {
       publishedSubagents: new Map(),
       publishedWorkflows: new Map(),
       publishedPlanState: null,
+      projection: null,
     }
     this.recordEntriesCaches.set(sessionId, cache)
     return cache
+  }
+
+  /**
+   * [W1 / D6] 取/建 per-session journal 投影（读请求唯一数据源；惰性创建）。
+   *
+   * 冷启动协议（设计 D6「冷启动 = 从头流式读一次，此后全增量」）：
+   * 1. entry 源就位——scanRecordFamilyEntriesFromSessionFile 流式扫描会话文件
+   *    （v1 快照 + v2 注册/终态条目，32MB 扫描上界，超界返回 null 留给兼容路径）；
+   * 2. journal 源 attach——两域目录 tailer 从文件头全量读（offset 续读此后增量）。
+   * 两源幂等、次序不敏感；活跃会话的 get_entries 游标通道继续增量喂 entry 源。
+   *
+   * 目录派生：records = `<agentDir>/subagents/<encodeCwd(cwd)>/records`（与
+   * core getSubagentRecordsDir 同式）；run journal = 会话文件所在目录的
+   * `workflow-state`（pi 壳 JsonlRunStore 同源布局——sessionDir 按探测落位）。
+   * 会话 meta 不可得（pi 延迟写入 / 测试窄 mock）→ 无 tailer 的 entry-only
+   * 降级投影。
+   */
+  private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionJournalProjection {
+    if (cache.projection !== null) return cache.projection
+    const meta = this.deps.sessionStore
+      .scanSessions({ force: true })
+      .find((s) => s.id === sessionId)
+    const cwd = meta?.cwd
+    const projection = new SessionJournalProjection({
+      sessionId,
+      recordsDir: typeof cwd === 'string'
+        ? join(getPiAgentDir(), 'subagents', encodeCwd(cwd), 'records')
+        : undefined,
+      runJournalDir: meta !== undefined ? join(dirname(meta.filePath), 'workflow-state') : undefined,
+      onProjectionChange: () => this.onJournalProjectionChange(sessionId),
+      ...(this.deps.journalTailerRecheckMs !== undefined
+        ? { recheckIntervalMs: this.deps.journalTailerRecheckMs }
+        : {}),
+    })
+    if (meta !== undefined) {
+      const entries = scanRecordFamilyEntriesFromSessionFile(meta.filePath)
+      projection.applyEntryBatch(entries ?? [])
+    }
+    // attach 前落位：冷启动 attach 的 tail 折叠即时触发 onProjectionChange →
+    // onJournalProjectionChange 需读到 cache.projection 才能发布首帧
+    cache.projection = projection
+    projection.attach()
+    this.syncCacheFromProjection(cache, projection)
+    return projection
+  }
+
+  /**
+   * [W1 / D6] journal 源驱动的发布腿（信号形态不动，驱动源换投影变更）：tail 事件
+   * → 投影重算 → 水位 diff → 按差异发布。与 entry 批路径（applyRecordEntries 统一
+   * 发布）共用同一 publishRecordChanges 与送达水位，发布门单点。
+   */
+  private onJournalProjectionChange(sessionId: string): void {
+    const cache = this.recordEntriesCaches.get(sessionId)
+    if (!cache || cache.projection === null) return
+    this.syncCacheFromProjection(cache, cache.projection)
+    if (!this.deps.hasSession(sessionId)) return // 已销毁：不 publish（与 entry 路径同守卫）
+    this.publishRecordChanges(cache, sessionId)
+    this.syncReconcileTimer()
+  }
+
+  /** 派生缓存 ← 投影合并快照（cache.subagents/workflows 的数据写路径唯一 = 投影重算）。 */
+  private syncCacheFromProjection(cache: RecordEntriesCache, projection: SessionJournalProjection): void {
+    cache.subagents = new Map(projection.subagents)
+    cache.workflows = new Map(projection.workflows)
   }
 
   /**
@@ -510,8 +600,8 @@ export class SessionRecords {
       return { entries: inc.data?.entries ?? [], leafId: inc.data?.leafId ?? undefined, fullRebuild: false }
     }
     const full = await client.getEntries() as EntriesSinceResult
-    cache.subagents.clear()
-    cache.workflows.clear()
+    // [W1 / D6] 全量基线重置移驻投影（applyEntryBatch fullRebuild：entry 源两代
+    // 整体重置；journal 源不动——事实源不随 entry 游标自愈重置）
     return { entries: full.data?.entries ?? [], leafId: full.data?.leafId ?? undefined, fullRebuild: true }
   }
 
@@ -539,17 +629,14 @@ export class SessionRecords {
     sessionId: string,
     isFullRebuild: boolean,
   ): void {
-    // 三家族（subagents / workflows / plan）同批扫描 + merge（同一份 entries，零额外 RPC），
-    // merge 语义下沉到下方模块级 merge helper。merge 先于 publish 守卫执行（已销毁
-    // session 也完成缓存 merge，只拦发布——D3 登记卫生债，水位机制下无害：publish 未
-    // 发生 → 水位滞留 → session 恢复后下轮触发补发）。
-    mergeSubagentRecords(cache.subagents, scanSubagentEntries(entries))
-    mergeWorkflowRecords(cache.workflows, scanWorkflowEntries(entries))
-    // [W0 / D2 / D5] 实时增量路径的步骤视图合并：增量 delta 的候选集不全（只含本批
-    // record），故合并不在 scanWorkflowEntries 内做，而在两缓存（workflow 骨架 × 全量
-    // 最新 subagent 投影）就位后整体重合并——与冷路径（extractWorkflowsFromSessionFile
-    // 组合扫描）共用同一 mergeWorkflowStepRecords 纯函数，冷热同代码；重合并幂等。
-    mergeWorkflowStepsIntoCache(cache.workflows, Array.from(cache.subagents.values()))
+    // [W1 / D6] entry 批换投影入口：v1 快照扫描 + v2 条目分类 + journal fold 双源
+    // 单点合并（journal 胜出仲裁）全在投影内完成；步骤视图合并的输入源也从本处
+    // 的两缓存喂入退役（投影合并快照内跑 mergeWorkflowStepRecords——W0 输入换源）。
+    // 已销毁 session 也完成投影 merge，只拦发布（D3 登记卫生债，水位机制下无害：
+    // publish 未发生 → 水位滞留 → session 恢复后下轮触发补发）。
+    const projection = this.ensureProjection(sessionId, cache)
+    projection.applyEntryBatch(entries, { fullRebuild: isFullRebuild })
+    this.syncCacheFromProjection(cache, projection)
     mergePlanState(cache, scanPlanStateEntries(entries), isFullRebuild)
 
     if (!this.deps.hasSession(sessionId)) return // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
@@ -621,14 +708,17 @@ export class SessionRecords {
     // subagent 面板在窗口内不静默返回空）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return { records: [], oversize: false }
-    // [G3] extractor 预检降级：oversize（>32MB）时 records 恒空（extraction 骨架内
-    // console.warn 留痕）。[RT-4#8] oversize 标志随返回值透传（reply payload → renderer
-    // 面板「会话过大，列表不可用」降级提示），不再丢弃——此前「列表不可用」与「无
-    // subagent」同形（面板表现空列表）。每会话首见时补一条 warn（面板 retry 反复拉取
-    // 不刷屏；骨架 warn 逐调用一条，此处去重收敛）。
-    const { records, oversize } = extractSubagentsFromSessionFile(target.filePath)
-    if (oversize) this.warnOversizeOnce(sessionId, 'subagents')
-    return { records, oversize }
+    // [W1 / D6] 读请求只读内存投影；oversize（>32MB = v1 巨文件时代会话）走旧格式
+    // 惰性兼容读路径（32MB 预检语义退役至此专属——extractor 预检在该路径降级空列表
+    // + oversize 标志 + warn，[RT-4#8] 语义原样保留）。
+    if (isSessionFileOversize(target.filePath)) {
+      const { records, oversize } = extractSubagentsFromSessionFile(target.filePath)
+      if (oversize) this.warnOversizeOnce(sessionId, 'subagents')
+      return { records, oversize }
+    }
+    const cache = this.ensureRecordEntriesCache(sessionId)
+    const projection = this.ensureProjection(sessionId, cache)
+    return { records: Array.from(projection.subagents.values()), oversize: false }
   }
 
   /**
@@ -755,18 +845,24 @@ export class SessionRecords {
   }
 
   /**
-   * 获取 session 派生的 workflow 列表（从主 session JSONL 的 workflow-state-link 提取）。
-   * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 workflow 调用时返回空数组。
+   * 获取 session 派生的 workflow 列表。
+   *
+   * [W1 / D6] 读请求只读内存投影（run 骨架经 journal fold + v2 条目定界；v1 快照
+   * 实体走冻结兼容数据）；oversize（>32MB）走旧格式惰性兼容读路径（预检语义专属域，
+   * 与 getSubagents 同款）。
    */
   async getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>> {
     // wave:perf-w26（plan M-3）：路径解析消费方 force 旁路 TTL（与 getSubagents 同理）。
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return { records: [], oversize: false }
-    // [G3] extractor 预检降级：与 getSubagents 同款（oversize → 空列表 + 骨架 warn）。
-    // [RT-4#8] oversize 标志透传（同 getSubagents，不再丢弃）。
-    const { records, oversize } = extractWorkflowsFromSessionFile(target.filePath)
-    if (oversize) this.warnOversizeOnce(sessionId, 'workflows')
-    return { records, oversize }
+    if (isSessionFileOversize(target.filePath)) {
+      const { records, oversize } = extractWorkflowsFromSessionFile(target.filePath)
+      if (oversize) this.warnOversizeOnce(sessionId, 'workflows')
+      return { records, oversize }
+    }
+    const cache = this.ensureRecordEntriesCache(sessionId)
+    const projection = this.ensureProjection(sessionId, cache)
+    return { records: Array.from(projection.workflows.values()), oversize: false }
   }
 
   /**
@@ -896,39 +992,19 @@ export class SessionRecords {
     const cache = this.recordEntriesCaches.get(sessionId)
     if (cache) {
       if (cache.debounceTimer !== null) clearTimeout(cache.debounceTimer)
+      // [W1 / D6] journal 投影随 cache 同批销毁（停两域 tailer 的 watcher 与周期复查）
+      cache.projection?.dispose()
       this.recordEntriesCaches.delete(sessionId)
       this.syncReconcileTimer()
     }
   }
 }
 
-// ── record 家族 merge helpers（applyRecordEntries 拆出：每家族「merge 进派生缓存」一个
-// 副作用单元——数据写路径唯一；[reload-closeout D2] merge 不再返回变化信号，发布门 =
-// 送达水位，diff 在下方 watermark helpers）──
-
-/**
- * subagent 记录 merge 进派生缓存（同 id 后到覆盖）。
- * [reload-closeout D2] 不再返回变化信号——发布判定移驻 subagentsDifferFromPublished
- * （对已发布快照比对；对派生缓存自身比对的 merge 信号对「merge 已对、发布跳丢」形态
- * diff 恒空，是 v1 失明根因）。
- */
-function mergeSubagentRecords(subagents: Map<string, SubagentRecord>, records: SubagentRecord[]): void {
-  for (const record of records) {
-    subagents.set(record.subagentId, record)
-  }
-}
-
-/**
- * workflow 记录 merge 进派生缓存（同 runId 后到覆盖）。
- * [reload-closeout D2] 增量信号不再在 merge 时收集（补发主形态下 fetch 空增量、merge
- * 信号恒空——沿用则无帧可发），信号构造移驻 workflowSignalsAgainstPublished（按水位
- * 差异 run 构造；status/reason/步骤数三维度语义原样保留，见 PublishedWorkflowRunState）。
- */
-function mergeWorkflowRecords(workflows: Map<string, WorkflowRunRecord>, records: WorkflowRunRecord[]): void {
-  for (const record of records) {
-    workflows.set(record.runId, record)
-  }
-}
+// ── record 家族 merge helpers ──
+//
+// [W1 / D6] mergeSubagentRecords / mergeWorkflowRecords 已随读侧换源退役——数据写
+// 路径唯一化为 journal 投影（applyEntryBatch → recompute → syncCacheFromProjection），
+// 「同 id 后到覆盖」语义由投影源持有态承载；plan 家族的 merge helper 保留在下方。
 
 /**
  * plan 派生 merge（单例状态，D1④）：写 cache.planState 基线。
@@ -972,9 +1048,9 @@ function subagentsDifferFromPublished(current: Map<string, SubagentRecord>, publ
 
 /**
  * workflows 水位 diff：按差异 run 构造增量信号（新 run / status / reason / 步骤数 /
- * [W0 / D4] 终态计数任一变化一条——转态在 steps 不变时由终态计数承载信号）。run 消失
- * （fullRebuild 后全集不再含该 run）不构造信号——信号面无删除形态，硬造旧状态帧只会
- * 发 stale 信息；消费端由下次真实变化或冷拉收敛。
+ * [W1 / D6] 步骤状态全序列任一变化一条——journal 投影驱动的转态在 steps 不变时由
+ * stepStatuses 序列承载信号）。run 消失（fullRebuild 后全集不再含该 run）不构造信号
+ * ——信号面无删除形态，硬造旧状态帧只会发 stale 信息；消费端由下次真实变化或冷拉收敛。
  */
 function workflowSignalsAgainstPublished(current: Map<string, WorkflowRunRecord>, published: Map<string, PublishedWorkflowRunState>): WorkflowUpdateSignal[] {
   const updates: WorkflowUpdateSignal[] = []
@@ -982,23 +1058,24 @@ function workflowSignalsAgainstPublished(current: Map<string, WorkflowRunRecord>
     const prev = published.get(runId)
     if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason ||
         prev.steps !== record.agentCalls.length ||
-        prev.settledSteps !== countSettledSteps(record)) {
+        prev.stepStatuses !== stepStatusFingerprint(record)) {
       updates.push({ runId, status: record.status, reason: record.reason })
     }
   }
   return updates
 }
 
-/** [W0 / D4] 步骤行终态计数（completed+failed 之和）——转态的 diff 维度。 */
-function countSettledSteps(record: WorkflowRunRecord): number {
-  let settled = 0
-  for (const call of record.agentCalls) {
-    if (call.status === 'completed' || call.status === 'failed') settled++
+/** [W1 / D6] 步骤状态全序列（'|' 连接，位置敏感）——步骤级转态的 diff 维度（settledSteps 计数的退役替换面）。 */
+function stepStatusFingerprint(record: WorkflowRunRecord): string {
+  let fingerprint = ''
+  for (let i = 0; i < record.agentCalls.length; i++) {
+    if (i > 0) fingerprint += '|'
+    fingerprint += record.agentCalls[i]!.status
   }
-  return settled
+  return fingerprint
 }
 
-/** workflow 水位投影（推进时镜像当前派生 run-state：信号面三字段 + 步骤数 + 终态计数 diff 维度）。 */
+/** workflow 水位投影（推进时镜像当前派生 run-state：信号面三字段 + 步骤数 + 步骤状态序列 diff 维度）。 */
 function projectPublishedWorkflowStates(workflows: Map<string, WorkflowRunRecord>): Map<string, PublishedWorkflowRunState> {
   const projected = new Map<string, PublishedWorkflowRunState>()
   for (const [runId, record] of workflows) {
@@ -1006,7 +1083,7 @@ function projectPublishedWorkflowStates(workflows: Map<string, WorkflowRunRecord
       status: record.status,
       reason: record.reason,
       steps: record.agentCalls.length,
-      settledSteps: countSettledSteps(record),
+      stepStatuses: stepStatusFingerprint(record),
     })
   }
   return projected

@@ -19,21 +19,32 @@
 // workflow run 快照是宿主编排状态，语义归属宿主数据根本身，宿主 configureCore
 // 注入什么就落什么，不引入第二条 env 覆盖链。
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
 import { getHostServices } from "../core/host-services.ts";
 import { getLogger } from "../core/logger.ts";
-// [Q2/D5 清理规则] 已终局资格的单源锚定读面（manifest outcome 非空）。方向
-// orchestration → execution/persistence 为既有先例（worker-message-pump →
-// writeRunTerminalManifest）；manifest-store 不回指 orchestration，无环。
-import { readRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
+// [W1/D5 清理规则] record 事件文件族的枚举与 fold 资格判定（统一保留维护轮的
+// record 域半边）。方向 orchestration → execution/persistence 为既有先例
+// （worker-message-pump → writeRunTerminalManifest）；record-events 不回指
+// orchestration，无环。
+import {
+  createRecordEventJournal,
+  foldRecordJournalEvents,
+  RECORD_EVENTS_SUFFIX,
+  type RecordJournalEvent,
+} from "../execution/persistence/record-events.ts";
 import type { RunStore } from "./models/ports.ts";
-import { createRunPersistThrottle, type RunPersistThrottle } from "./persist-throttle.ts";
 import { WorkflowRun } from "./models/workflow-run.ts";
-// journal 后缀经 run-events 单源消费（本文件只裁剪/排除 journal 附属文件，不定义后缀词表）。
-import { RUN_EVENT_JOURNAL_SUFFIX } from "./run-events.ts";
+// journal 后缀与 fold 循环经 run-events 单源消费（本文件只做候选枚举与成对裁剪，
+// 不定义后缀词表；fold 终态 = W1 D5 清理资格判据）。
+import {
+  createRunEventJournal,
+  foldRunEventFrames,
+  RUN_EVENT_JOURNAL_SUFFIX,
+  type WorkflowRunEvent,
+} from "./run-events.ts";
 import { SNAPSHOT_VERSION, fromRunSnapshot, toRunSnapshot } from "./run-snapshot.ts";
 
 const logger = getLogger("file-run-store");
@@ -48,65 +59,15 @@ const logger = getLogger("file-run-store");
  */
 export const STATE_DIR_NAME = "workflow-state";
 
-// ── 磁盘保留（C1，语义对齐 pi jsonl-run-store mtime 裁剪） ─────────
-
-/**
- * 磁盘保留默认上限（OR-5 跨 run 保留修复）：cap env 通道
- * （{@link resolveStateMaxRuns}）在 env 未设/空时的缺省上限。
- *
- * OR-5 将「STATE_MAX_RUNS opt-in 默认关」（无界累积）改为默认开：跨 run state
- * 文件按 mtime 裁剪到本上限。取值 50 是无真实 run 体积分布数据下的保守值
- * （设计 §11-4：标定待 S-A 验收后复核）——偏大不碍事（有界即达标），偏小会
- * 误删仍被引用的 run 缓存，故取保守端。
- */
-export const DEFAULT_STATE_MAX_RUNS = 50;
-
-/**
- * 磁盘保留上限 env 通道（OR-5 ⑥b 默认开的用户旋钮；解析单源见
- * {@link resolveStateMaxRuns}——pi 宿主 jsonl-run-store 的 retention 轮经
- * barrel 消费，原壳侧同形实现已收编）：
- * - 未设/空 → 按默认上限 {@link DEFAULT_STATE_MAX_RUNS} 裁剪（**默认开**——
- *   OR-5 修复前的 opt-in「默认关」正是跨 run 无界累积缺陷本身）；
- * - 有限正数 → 上限 = env 值（显式覆盖默认值）；
- * - 非法值（非有限数/≤0）→ 不清理（显式 opt-out 通道：用户意图不明时不动
- *   磁盘，对齐 prune 内部「任何失败都不抛」的保守哲学）。
- *
- * 用 TAIJI_ 前缀而非 PI_：本 env 是 pi 进程内读的配置 env，taiji 桌面 spawn 链按
- * ENV_WHITELIST_PREFIXES（只有 TAIJI_ 等）过滤，PI_ 前缀在桌面场景被静默丢弃——
- * 同 TAIJI_SUBAGENT_IDLE_TIMEOUT_MS 的改名教训。
- */
-export const STATE_MAX_RUNS_ENV = "TAIJI_SUBAGENT_STATE_MAX_RUNS";
-
-/** 解析保留上限；env 未设/空 → 默认上限，显式非法/≤0 → undefined（不清理）。 */
-export function resolveStateMaxRuns(): number | undefined {
-  const raw = process.env[STATE_MAX_RUNS_ENV];
-  if (raw === undefined || raw === "") return DEFAULT_STATE_MAX_RUNS;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
-  return parsed;
-}
-
-// ── save 节流（OR-5 单 run 快照 O(n²) 主修） ──────────────────
-
-/**
- * 同一 run 两次快照落盘的最小间隔（ms）。OR-5 单 run O(n²) 主修参数：现状每
- * 次 save 都 append 全量快照（快照体积 O(calls) × save 次数 O(calls)），节流后
- * 落盘次数有界为 ceil(run 时长 / 本间隔)（§11-4 量级推演见 impl-plan 偏差登记：
- * 100-call run 从 ~200 次落盘 / ~50MB 降到 ~17 次 / ~8MB，增量 append diff 需
- * 改造两宿主共享 codec（基线+delta 行 + loadAll 重放 + 版本兼容），收益不抵
- * 复杂度，节流即终案）。取值对齐 jsonl-run-store 去抖同款考量：agent-call 间隔
- * 秒级，60s 窗口把快照次数压到与「分钟级 run 时长」同量级，又不让崩溃窗口
- * （未落盘的 running 尾部丢失，等价崩溃链由恢复路径收编）超出分钟级。
- */
-export const DEFAULT_SAVE_MIN_INTERVAL_MS = 60_000;
+// ── 磁盘保留（C1 → W1 D5 重写：fold 终态 + 保留窗口，废除 cap）─────
+//
+// cap=50 数量截断语义已整体退役（数量上限常量 / env 通道名 / 解析函数三件导出
+// 一并删除）：cap 按 cwd 共享池计数会把别的 session 保留窗口内的 journal 清掉
+// （「窗口内全保留」与「保最新 N 个」互斥，A-8 多 session 分摊互杀）。保留窗口
+// 是唯一资格判据（见下方「统一保留通道」段注释）。
 
 /** FileRunStore 构造参数（全部可选；缺省即生产形态）。 */
 export interface FileRunStoreOptions {
-  /**
-   * save 节流最小间隔（ms）；0 = 禁用节流（每次 save 都落盘）。缺省
-   * {@link DEFAULT_SAVE_MIN_INTERVAL_MS}。测试经此注入小窗口（fake timers 推进）。
-   */
-  saveMinIntervalMs?: number;
   /**
    * [F-1 修复] run 状态目录覆盖。缺省 = `<dataRoot>/workflow-state`（zcode 宿主布局，
    * 见 stateDir()）；pi 宿主的读侧装配点（round-supervisor sweep / idle-gc）必须传
@@ -130,54 +91,56 @@ function isEnoentError(err: unknown): boolean {
 // 匹配 warn 可见性」在此实现——不内聚进 codec，保 pi 侧「v1 存量静默跳过」
 // 语义不被宽容化误读。
 
-// ── 磁盘保留原语（C1，两宿主单源）──────────────────────────
+// ── 磁盘保留原语（C1 → W1 D5 重写：fold 终态 + 保留窗口）──────────
 //
-// retention 语义单源（glob 命中才删 / mtime 升序裁最旧 / 任何失败不抛），日志与
+// retention 语义单源（候选枚举 / fold 终态资格 / 保留窗口 / 任何失败不抛），日志与
 // 错误字符串化经 deps 注入（宿主各自的 logger tag / error 工具保持自治，行为差异
 // 仅 log tag 文案）。
 
-/** pruneTerminalRunFiles 的宿主注入依赖（日志与错误字符串化——tag 前缀由注入方决定）。 */
+/** pruneTerminalRunFiles / runRetentionMaintenanceRound 的宿主注入依赖（日志与错误字符串化——tag 前缀由注入方决定）。 */
 export interface PruneStateDeps {
   /** warn 通道（readdir / unlink 失败留证；清理是旁路维护，失败不抛） */
   warn: (msg: string) => void;
-  /** debug 通道（成功裁剪记录） */
+  /** debug 通道（成功裁剪与候选枚举记录） */
   debug: (msg: string) => void;
   /** error → 可读字符串（core 侧 err.message 兜底 String，宿主可用自有 error 工具） */
   toMsg: (err: unknown) => string;
 }
 
-// ── 已终局 run 的磁盘足迹裁剪单源（[Q2 / D5 清理规则①②]）────────
+// ── 统一保留通道（W1 D5：fold 终态 + 保留窗口，废除 cap）──────────
 //
-// D5 清理规则落地（生产单源，pi 宿主 jsonl-run-store 的 P1b-2 本地实现收口于此）：
-// ① 「已终局」单源锚定 = run 终局投影 manifest（<stateDir>/<runId>.json）的
-//    outcome 非空——manifest 缺失/损坏/无 outcome = 活跃或 interrupted（interrupted
-//    非终局，abandon 终局化写 manifest 后才获资格），一律不裁；
-// ② cap + TTL 双限同限已终局：资格者计入 cap（mtime 升序裁最旧）与 TTL（mtime
-//    超期即裁）；mtime 判定锚 = state 文件（run 磁盘足迹的主投影文件）——journal
-//    作为同 stem 附属随 run 成对裁剪，不单独计时；
-// ③ 裁剪执行按 run 粒度成对删 state 文件 + journal（<runId>.events.jsonl，存在才
-//    删）——journal 过保留期降级为可清诊断证据、manifest 结构性不在候选（终局
-//    持久权威永不随裁，清理后投影回落 manifest 终局面）的分层依据 = run-events.ts
-//    文件头「终局证据读序」权威声明；
-// ④ 任何失败不抛（辅助清理降级不拖垮持久化主链）：readdir 失败静默放弃本轮，
-//    manifest 读取按「无资格」降级，单文件 unlink 失败 warn 留证后继续。
+// W1 D5 清理规则落地（替代 [Q2] 的 manifest 资格 + cap + mtime TTL 三限）：
+// ① 资格判据 = fold 投影为终态（journal 内 run-settled 帧驱动 fold 到 terminal，
+//    含收编产生的 interrupted——收编入口幂等追加终态事件后即获资格）∧ 终态时间
+//    超窗（终态时间 = journal 内终态事件时间戳；防御兜底 = 末条事件时间戳）。
+//    manifest 不再参与资格判定（读序 3 降级为「journal 被裁后的终局投影」与
+//    abandon 终局化载体），结构性不在候选——永不随裁（孤儿判定依赖）；
+// ② 判据②（无终态事件 ∧ 注册超窗 ∧ mtime 超阈值）默认不启用：阈值未实测校准前
+//    只走判据①。其镜像代价（崩溃后永不重开的会话 journal 滞留）经维护轮候选数
+//    日志监控——持续增长 = 启用判据②校准的反向触发信号（设计 D5 显式声明）；
+// ③ 清理对象按 run 粒度成对删 state 文件 + journal（<runId>.events.jsonl，存在才
+//    删）；record 域同判据清 <sa-id>.events 事件文件（manifest 不触碰，其独立
+//    30 天 TTL 归 session-file-gc，孤儿判定窗口不漂移）；
+// ④ 任何失败不抛（辅助清理降级不拖垮主链）：readdir 失败静默放弃本轮该域，单
+//    run 判定失败按「不可判定 → 跳过」降级（宁保留不误裁——误裁活跃 run 是不可
+//    恢复事故方向），单文件 unlink 失败 warn 留证后继续。
 //
-// TTL 常量与 env 通道自 pi 宿主 jsonl-run-store 迁入（[P1b-2] 引入、[Q2] 单源化）：
-// 两宿主共用同一缺省保留期与测试期调低通道。
+// 保留窗口常量与 env 通道沿用 [P1b-2] 引入、[Q2] 单源化的 TAIJI_SUBAGENT_STATE_TTL_MS
+// （两宿主共用同一缺省保留期与测试期调低通道；W1 起为 run+record 两域统一窗口）。
 
-/** 已终局 state 文件的 mtime TTL 缺省值 = 2_592_000_000ms（30 天；D5 清理规则②：run cap + 30 天 mtime TTL，两者同限已终局）。 */
+/** 保留窗口缺省值 = 2_592_000_000ms（30 天；W1 D5：run+record 两域统一保留窗口，窗口内全保留）。 */
 export const DEFAULT_STATE_TTL_MS = 2_592_000_000;
 
 /**
- * 已终局 run 的 mtime TTL env 通道（测试期调低用，形态对齐 cap 通道）：
+ * 保留窗口 env 通道（测试期调低用）：
  * - 未设/空 → 缺省 {@link DEFAULT_STATE_TTL_MS}（默认开）；
- * - 有限正数 → TTL = env 值（测试期调低通道）；
- * - 非法值（非有限数/≤0）→ undefined = 不按 TTL 裁（显式 opt-out，对齐 cap
- *   通道「意图不明不动磁盘」哲学）。
+ * - 有限正数 → 窗口 = env 值（测试期调低通道）；
+ * - 非法值（非有限数/≤0）→ undefined = 不按窗裁（显式 opt-out，「意图不明不动
+ *   磁盘」哲学；窗口是唯一资格判据，opt-out 即整轮不裁，仅保留候选数监控）。
  */
 export const STATE_TTL_MS_ENV = "TAIJI_SUBAGENT_STATE_TTL_MS";
 
-/** 解析已终局 TTL；env 未设/空 → 缺省，显式非法/≤0 → undefined（不按 TTL 裁）。 */
+/** 解析保留窗口；env 未设/空 → 缺省，显式非法/≤0 → undefined（不按窗裁）。 */
 export function resolveStateTtlMs(): number | undefined {
   const raw = process.env[STATE_TTL_MS_ENV];
   if (raw === undefined || raw === "") return DEFAULT_STATE_TTL_MS;
@@ -186,14 +149,9 @@ export function resolveStateTtlMs(): number | undefined {
   return parsed;
 }
 
-/** journal 文件后缀（<runId>.events.jsonl）——经 run-events RUN_EVENT_JOURNAL_SUFFIX
- *  单源消费（glob 同族但作为 run 附属成对裁剪，不单独计时）。 */
-
 /** pruneTerminalRunFiles 的可调项。 */
 export interface PruneTerminalRunFilesOptions {
-  /** run 上限（已终局计入，mtime 升序裁最旧到 cap）。 */
-  cap: number;
-  /** 已终局 mtime TTL（ms）；undefined = 不按 TTL 裁。缺省经 {@link resolveStateTtlMs}。 */
+  /** 保留窗口（ms）；undefined = 不按窗裁（opt-out）。缺省经 {@link resolveStateTtlMs}。 */
   ttlMs?: number;
 }
 
@@ -201,79 +159,82 @@ export interface PruneTerminalRunFilesOptions {
 export interface PruneTerminalRunFilesResult {
   /** 扫描到的 state 文件数（glob 命中、排除 journal）。 */
   scanned: number;
-  /** 资格合格（manifest outcome 非空）的 run 数。 */
+  /** fold 投影为终态的 run 数（无论是否超窗——资格计数）。 */
   eligible: number;
   /** 本次裁剪的 run 数（state 文件计数；journal 同删不计入）。 */
   pruned: number;
+  /**
+   * 判据②反向锚点候选数：无终态 ∧ 注册超窗的 run 数（D5——持续为 0 = 判据②
+   * 关闭期无代价，持续增长 = 启用判据②校准的反向触发信号）。
+   */
+  nonTerminalBeyondWindow: number;
 }
 
-/**
- * 把 state 目录内「已终局且超限」的 run 磁盘足迹（state + journal）裁剪掉
- * （[Q2 / D5 清理规则①②] 生产单源——资格感知语义见上方段落注释）。
- *
- * retention 纪律（glob 命中才删 / mtime 升序裁最旧 / 任何失败不抛）+ 资格过滤
- * （manifest outcome 单源锚定）+ 清理对象（run 粒度成对删 state + journal）。
- * cap 解析（env 通道）归调用方（pi 宿主 getEnvStateMaxRuns 持有 env 通道）。
- */
-/** 资格合格的 run 条目（mtime 判定锚 = state 文件，D5 清理规则②）。 */
-interface PruneEligibleRun {
+/** 单 run 保留判定（fold 投影 + 时间锚提取；判据①资格与判据②候选的公共输入）。 */
+interface RunRetentionAssessment {
   runId: string;
-  stateFull: string;
-  mtimeMs: number;
+  /** fold 投影是否终态（含收编产生的 interrupted——终态事件在 journal 内）。 */
+  terminal: boolean;
+  /** 终态时间（run-settled 帧 ts；防御兜底 = 末条事件 ts）。非终态 = undefined。 */
+  terminalAt: number | undefined;
+  /**
+   * 注册时间（run-created 帧 ts；journal 缺创建帧的存量形态兜底 = state 文件
+   * mtime——判据②候选计数的锚）。
+   */
+  registeredAt: number;
 }
 
 /**
- * 逐 state 文件做资格判定（D5 规则①单源锚定：manifest outcome 非空）+ stat mtime。
- * manifest 读失败/缺失 = 无资格（宁保留不误裁）；stat 失败跳过该 run（并发删除，
- * debug 留痕）。返回资格条目与资格计数（含 stat 失败者——资格与 mtime 可得性正交）。
+ * 单 run 保留判定（D5 判据①的 fold 单源锚定）：scan journal → fold 终态 →
+ * 提取终态/注册时间锚。
+ *
+ * journal 读失败 / fold 停在非终态 = 不获清理资格（宁保留不误裁：误裁活跃 run 是
+ * 不可恢复事故方向；崩溃/损坏 journal 的滞留代价由候选数日志监控，见 D5 判据②）。
+ * 判定失败返回 undefined（不可判定 → 跳过该 run，不阻断本轮）。
  */
-async function collectEligibleTerminalRuns(
+async function assessRunRetention(
   stateDir: string,
-  stateNames: readonly string[],
+  runId: string,
+  stateFull: string,
   deps: PruneStateDeps,
-): Promise<{ runs: PruneEligibleRun[]; eligibleCount: number }> {
-  const runs: PruneEligibleRun[] = [];
-  let eligibleCount = 0;
-  for (const name of stateNames) {
-    const runId = name.slice(0, -".jsonl".length);
-    // 资格判定（D5 规则①单源锚定）：manifest 读失败/缺失 = 无资格（活跃/interrupted
-    // /未终局保护——宁保留不误裁，误裁活跃 run 是不可恢复事故方向）
-    const manifest = await readRunTerminalManifest(stateDir, runId);
-    if (manifest === null) continue;
-    eligibleCount += 1;
-    const stateFull = join(stateDir, name);
+): Promise<RunRetentionAssessment | undefined> {
+  let events: readonly WorkflowRunEvent[];
+  try {
+    events = await createRunEventJournal(stateDir).scan(runId);
+  } catch (err) {
+    // journal 读失败（EACCES/EIO 等，非 ENOENT——ENOENT 是合法空流）= 不可判定
+    deps.debug(`state retention: journal scan failed, skipped ${runId}: ${deps.toMsg(err)}`);
+    return undefined;
+  }
+  const state = foldRunEventFrames(events, (err, lastType) => {
+    // 坏帧（历史帧与当前转移表不兼容）保守停在最近一致态——fold 非终态即不获资格
+    deps.debug(
+      `state retention: broken frame ignored in ${runId} (lastType=${lastType}): ${deps.toMsg(err)}`,
+    );
+  });
+  let settledAt: number | undefined;
+  let registeredAt: number | undefined;
+  let lastEventTs: number | undefined;
+  for (const event of events) {
+    if (event.type === "run-created") registeredAt ??= event.ts;
+    if (event.type === "run-settled") settledAt = event.ts;
+    lastEventTs = event.ts;
+  }
+  const terminal = state.lifecycle === "terminal";
+  // 终态时间 = journal 内终态事件时间戳（run-settled 帧 ts）；「收编无终态事件者
+  // 取末条事件时间戳」——经转移表构造性不可达（terminal 必经 run-settled 帧），
+  // 留防御兜底防未来词表演进破坏该不变量
+  const terminalAt = settledAt ?? (terminal ? lastEventTs : undefined);
+  if (registeredAt === undefined) {
+    // journal 缺创建帧（存量形态 / 手工构造）→ state 文件 mtime 兜底注册时间
     try {
-      runs.push({ runId, stateFull, mtimeMs: (await stat(stateFull)).mtimeMs });
+      registeredAt = (await stat(stateFull)).mtimeMs;
     } catch (err) {
-      // stat 失败（并发删除等）跳过该 run，不阻断本轮（debug——清理是旁路维护）
       deps.debug(`state retention: stat failed, skipped ${stateFull}: ${deps.toMsg(err)}`);
+      return undefined;
     }
   }
-  return { runs, eligibleCount };
-}
-
-/**
- * 裁剪受害者判定（纯函数）：TTL 超期全裁 + mtime 升序保最新 cap 个（其余入 victims）。
- */
-function selectPruneVictims(
-  eligible: readonly PruneEligibleRun[],
-  ttlMs: number | undefined,
-  cap: number,
-  now: number,
-): Set<string> {
-  const victims = new Set<string>();
-  if (ttlMs !== undefined) {
-    for (const e of eligible) {
-      if (now - e.mtimeMs > ttlMs) victims.add(e.runId);
-    }
-  }
-  const survivors = eligible
-    .filter((e) => !victims.has(e.runId))
-    .sort((a, b) => a.mtimeMs - b.mtimeMs);
-  for (const e of survivors.slice(0, Math.max(0, survivors.length - cap))) {
-    victims.add(e.runId);
-  }
-  return victims;
+  return { runId, terminal, terminalAt, registeredAt };
 }
 
 /** 单 run 磁盘足迹成对删（state + journal，存在才删）。返回 state 文件是否删除成功。 */
@@ -297,12 +258,39 @@ async function deleteRunFootprint(
   return prunedState;
 }
 
+/**
+ * 把 state 目录内「fold 终态且超窗」的 run 磁盘足迹（state + journal）裁剪掉
+ * （W1 D5 生产单源——资格语义见上方「统一保留通道」段落注释）。
+ *
+ * retention 纪律（候选枚举 / fold 终态资格 / 保留窗口 / 任何失败不抛）+ 成对删
+ * （state + journal）+ manifest 永不随裁。窗口解析（env 通道）缺省经
+ * {@link resolveStateTtlMs}——窗口是唯一资格判据。
+ * 统一维护轮（runRetentionMaintenanceRound）与直接调用方共用同一实装。
+ */
 export async function pruneTerminalRunFiles(
   stateDir: string,
   options: PruneTerminalRunFilesOptions,
   deps: PruneStateDeps,
 ): Promise<PruneTerminalRunFilesResult> {
-  const result: PruneTerminalRunFilesResult = { scanned: 0, eligible: 0, pruned: 0 };
+  return pruneTerminalRunFootprint(stateDir, options.ttlMs ?? resolveStateTtlMs(), deps);
+}
+
+/**
+ * run 域保留清理实装（pruneTerminalRunFiles 的单源体，统一维护轮同点消费）：
+ * 枚举 state 文件候选 → 逐 run fold 判定 → 终态 ∧ 超窗者成对删（state + journal）。
+ * retentionMs undefined（opt-out）= 整轮不裁（窗口是唯一资格判据），仅保留候选计数。
+ */
+async function pruneTerminalRunFootprint(
+  stateDir: string,
+  retentionMs: number | undefined,
+  deps: PruneStateDeps,
+): Promise<PruneTerminalRunFilesResult> {
+  const result: PruneTerminalRunFilesResult = {
+    scanned: 0,
+    eligible: 0,
+    pruned: 0,
+    nonTerminalBeyondWindow: 0,
+  };
   let names: string[];
   try {
     names = await readdir(stateDir);
@@ -317,21 +305,212 @@ export async function pruneTerminalRunFiles(
     (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(RUN_EVENT_JOURNAL_SUFFIX),
   );
   result.scanned = stateNames.length;
-  if (stateNames.length === 0) return result;
-
-  const { runs: eligible, eligibleCount } = await collectEligibleTerminalRuns(stateDir, stateNames, deps);
-  result.eligible = eligibleCount;
-  if (eligible.length === 0) return result;
 
   const now = Date.now();
-  const ttlMs = options.ttlMs ?? resolveStateTtlMs();
-  const victims = selectPruneVictims(eligible, ttlMs, options.cap, now);
-
-  for (const runId of victims) {
-    if (await deleteRunFootprint(stateDir, runId, deps)) result.pruned += 1;
-    deps.debug(`state retention: pruned terminal run files for ${runId} (state + journal)`);
+  // 候选计数锚：判据②监控不随清理 opt-out 失明（默认窗兜底，仅用于日志面）
+  const windowForCandidates = retentionMs ?? DEFAULT_STATE_TTL_MS;
+  for (const name of stateNames) {
+    const runId = name.slice(0, -".jsonl".length);
+    const assessment = await assessRunRetention(stateDir, runId, join(stateDir, name), deps);
+    if (assessment === undefined) continue;
+    if (assessment.terminal) {
+      result.eligible += 1;
+      if (
+        retentionMs !== undefined &&
+        assessment.terminalAt !== undefined &&
+        now - assessment.terminalAt > retentionMs
+      ) {
+        if (await deleteRunFootprint(stateDir, runId, deps)) result.pruned += 1;
+        deps.debug(`state retention: pruned terminal run files for ${runId} (state + journal)`);
+      }
+    } else if (now - assessment.registeredAt > windowForCandidates) {
+      result.nonTerminalBeyondWindow += 1;
+    }
   }
   return result;
+}
+
+/** record 域保留清理结果（与 run 域同构的计数面）。 */
+export interface PruneTerminalRecordEventFilesResult {
+  /** 扫描到的 *.events 事件文件数。 */
+  scanned: number;
+  /** fold 投影为终态（record-settled 在流内且未被回边清除）的 record 数。 */
+  eligible: number;
+  /** 本次裁剪的事件文件数。 */
+  pruned: number;
+  /** 判据②反向锚点候选数（无终态 ∧ 注册超窗——与 run 域同义）。 */
+  nonTerminalBeyondWindow: number;
+}
+
+/**
+ * record 域保留清理（W1 D5：record 事件文件与 run journal 同判据——fold 终态 +
+ * 窗口）。运行中/非终态永不清（settled 被 reopened/round-started 清除 = 回边续跑，
+ * 保护语义与 fold 投影单源）；manifest（<sa-id>.json）不触碰——其独立 30 天 TTL
+ * 归 session-file-gc（孤儿判定窗口与现状不漂移，设计 D2/D5）。
+ */
+async function pruneTerminalRecordEventFiles(
+  recordsDir: string,
+  retentionMs: number | undefined,
+  deps: PruneStateDeps,
+): Promise<PruneTerminalRecordEventFilesResult> {
+  const result: PruneTerminalRecordEventFilesResult = {
+    scanned: 0,
+    eligible: 0,
+    pruned: 0,
+    nonTerminalBeyondWindow: 0,
+  };
+  let names: string[];
+  try {
+    names = await readdir(recordsDir);
+  } catch (err) {
+    if (!isEnoentError(err)) {
+      deps.warn(`state retention: readdir ${recordsDir} failed: ${deps.toMsg(err)}`);
+    }
+    return result;
+  }
+  const eventNames = names.filter((n) => n.endsWith(RECORD_EVENTS_SUFFIX));
+  result.scanned = eventNames.length;
+
+  const journal = createRecordEventJournal(recordsDir);
+  const now = Date.now();
+  const windowForCandidates = retentionMs ?? DEFAULT_STATE_TTL_MS;
+  for (const name of eventNames) {
+    const id = name.slice(0, -RECORD_EVENTS_SUFFIX.length);
+    let events: readonly RecordJournalEvent[];
+    try {
+      events = await journal.scan(id);
+    } catch (err) {
+      // 非法文件名（assertValidRecordId）/ 读失败 = 不可判定 → 跳过（宁保留不误裁）
+      deps.debug(`state retention: record events scan failed, skipped ${name}: ${deps.toMsg(err)}`);
+      continue;
+    }
+    const fold = foldRecordJournalEvents(events);
+    if (fold.settled !== undefined) {
+      result.eligible += 1;
+      if (retentionMs !== undefined && now - fold.settled.ts > retentionMs) {
+        try {
+          await unlink(join(recordsDir, name));
+          result.pruned += 1;
+          deps.debug(`state retention: pruned terminal record events for ${id}`);
+        } catch (err) {
+          if (!isEnoentError(err)) {
+            deps.warn(`state retention: failed to delete ${join(recordsDir, name)}: ${deps.toMsg(err)}`);
+          }
+        }
+      }
+    } else if (now - (fold.identity?.ts ?? mtimeMsOf(join(recordsDir, name))) > windowForCandidates) {
+      result.nonTerminalBeyondWindow += 1;
+    }
+  }
+  return result;
+}
+
+/** stat mtime（失败返回 NaN——与「永不超窗」比较恒 false，保守不计候选）。 */
+function mtimeMsOf(full: string): number {
+  try {
+    return statSync(full).mtimeMs;
+  } catch {
+    return Number.NaN;
+  }
+}
+
+// ── 统一保留维护轮（W1 D5 执行者——run + record 两域同轮幂等扫描）──
+
+/** 维护轮输入（两域目录锚点，各自可选——undefined = 本轮跳过该域）。
+ *
+ * 为什么可选：三触发点各只天然持有一个域的精确目录锚（壳 run 首写持
+ * `<sessionDir>/workflow-state`、core record 首写持 recordsDir、session_start 兜底
+ * 双域）——强制两域必传会逼出「core 侧反推 pi sessionDir」或「壳侧反推 record
+ * enc 段」两类推导漂移面。每域至少有一个持锚触发点，覆盖面由三触发点并集保证
+ * （幂等整轮，任一触发点缺一域只影响冗余度不影响覆盖）。 */
+export interface RetentionMaintenanceInput {
+  /** run 域状态目录（workflow-state——state 快照 + journal 成对清理）；undefined = 跳过 run 域。 */
+  stateDir?: string;
+  /** record 事件文件目录（records——仅清 *.events，manifest 不触碰）；undefined = 跳过 record 域。 */
+  recordsDir?: string;
+}
+
+/** 维护轮可调项。 */
+export interface RetentionMaintenanceOptions {
+  /** 保留窗口（ms）；undefined = 经 {@link resolveStateTtlMs}（缺省 30 天 + env 调低通道）。 */
+  retentionMs?: number;
+}
+
+/** 维护轮执行结果（两域计数面）。 */
+export interface RetentionMaintenanceResult {
+  run: PruneTerminalRunFilesResult;
+  record: PruneTerminalRecordEventFilesResult;
+}
+
+/** 维护轮缺省日志依赖（core logger facade——宿主未注入 deps 时兜底）。 */
+function defaultRetentionDeps(): PruneStateDeps {
+  return {
+    warn: (msg) => logger.warn(msg),
+    debug: (msg) => logger.debug(msg),
+    toMsg: (err) => (err instanceof Error ? err.message : String(err)),
+  };
+}
+
+/**
+ * 统一保留维护轮（W1 D5 的执行者，修复「有判据无执行者」缺口）：一个幂等整轮
+ * 扫描，run journal prune 与 record 事件文件 prune 同轮完成 + 候选数日志。
+ *
+ * 三触发点（新 run 首写 / 新 record 事件文件首写 / session_start 兜底）都消费本
+ * 入口（接线归 U7）——record-only 会话（只跑 subagents()）经 record 触发与
+ * session_start 兜底覆盖，磁盘不无界累积。幂等：重复触发重入无害（已清文件
+ * ENOENT 静默，判据以盘上事实为准）。
+ *
+ * 任何失败不抛（辅助维护降级）：单域整轮失败 warn 留证后另一域照常执行。
+ * 候选数日志 = 判据②反向锚点（D5）：「无终态 ∧ 注册超窗」计数持续为 0 = 判据②
+ * 关闭期无代价；持续增长 = 启用判据②校准的反向触发信号（磁盘占用实测超配额
+ * 同触发）。
+ */
+export async function runRetentionMaintenanceRound(
+  input: RetentionMaintenanceInput,
+  options: RetentionMaintenanceOptions = {},
+  deps: PruneStateDeps = defaultRetentionDeps(),
+): Promise<RetentionMaintenanceResult> {
+  const retentionMs = options.retentionMs ?? resolveStateTtlMs();
+  let run: PruneTerminalRunFilesResult = {
+    scanned: 0,
+    eligible: 0,
+    pruned: 0,
+    nonTerminalBeyondWindow: 0,
+  };
+  if (input.stateDir !== undefined) {
+    try {
+      run = await pruneTerminalRunFootprint(input.stateDir, retentionMs, deps);
+    } catch (err) {
+      deps.warn(`state retention: run-domain maintenance round failed: ${deps.toMsg(err)}`);
+    }
+  }
+  let record: PruneTerminalRecordEventFilesResult = {
+    scanned: 0,
+    eligible: 0,
+    pruned: 0,
+    nonTerminalBeyondWindow: 0,
+  };
+  if (input.recordsDir !== undefined) {
+    try {
+      record = await pruneTerminalRecordEventFiles(input.recordsDir, retentionMs, deps);
+    } catch (err) {
+      deps.warn(`state retention: record-domain maintenance round failed: ${deps.toMsg(err)}`);
+    }
+  }
+  deps.debug(
+    `state retention: maintenance round done (retentionMs=${retentionMs ?? "opt-out"}): ` +
+      `run{scanned=${run.scanned}, terminal=${run.eligible}, pruned=${run.pruned}, candidates=${run.nonTerminalBeyondWindow}}, ` +
+      `record{scanned=${record.scanned}, terminal=${record.eligible}, pruned=${record.pruned}, candidates=${record.nonTerminalBeyondWindow}}`,
+  );
+  const candidates = run.nonTerminalBeyondWindow + record.nonTerminalBeyondWindow;
+  if (candidates > 0) {
+    deps.warn(
+      `state retention: ${candidates} non-terminal journal(s) registered beyond the retention window ` +
+        `(run=${run.nonTerminalBeyondWindow}, record=${record.nonTerminalBeyondWindow}) — criterion-② candidates; ` +
+        `sustained growth is the signal to calibrate and enable criterion ② (design D5)`,
+    );
+  }
+  return { run, record };
 }
 
 // ── FileRunStore ────────────────────────────────────────────
@@ -339,10 +518,9 @@ export async function pruneTerminalRunFiles(
 /**
  * RunStore port 的宿主无关文件实现（port 见 models/ports.ts）。
  *
- * - save：append-only + 节流——快照行仍全量（崩溃时旧快照仍在，loadAll 取最后
- *   一条有效行恢复到最后一致状态），但同一 running run 两次落盘有最小间隔
- *   （OR-5 ⑥a：节流前每次状态变更都 append 全量快照，快照体积 O(calls) ×
- *   save 次数 O(calls) = 单 run 磁盘 O(n²)；节流参数与语义见 save 注释）。
+ * - save：append-only 全量快照行（崩溃时旧快照仍在，loadAll 取最后一条有效行恢复
+ *   到最后一致状态）。W1 写通道语义收敛后不再自带节流（快照 = journal fold 的
+ *   物化投影，写点收敛归 pump 物化时机，见 save 注释）。
  * - loadAll：扫 <dataRoot>/workflow-state/*.jsonl，每文件从尾向头取第一条形状
  *   有效的快照行；损坏行（JSON.parse 失败 / 形状校验不过 / 版本不匹配）跳过并
  *   warn——单行损坏不拖垮整个 run 的恢复（与 pi 壳 kill-9 恢复同容忍度）。
@@ -367,11 +545,7 @@ export class FileRunStore implements RunStore {
   /** 显式状态目录覆盖（构造注入；见 FileRunStoreOptions.stateDir）。 */
   private readonly stateDirOverride: string | undefined;
 
-  /** save 节流（判定 + 记账单点见 persist-throttle.ts；窗口注入见 FileRunStoreOptions.saveMinIntervalMs）。 */
-  private readonly throttle: RunPersistThrottle;
-
   constructor(opts?: FileRunStoreOptions) {
-    this.throttle = createRunPersistThrottle(opts?.saveMinIntervalMs ?? DEFAULT_SAVE_MIN_INTERVAL_MS);
     this.stateDirOverride = opts?.stateDir;
   }
 
@@ -380,26 +554,18 @@ export class FileRunStore implements RunStore {
   }
 
   /**
-   * 快照落盘（节流决策经 persist-throttle.ts 单点——五要素矩阵与记账语义的
-   * 期望源在该文件的表驱动单测）：窗口内跳过本次 append（状态仍在调用方内存
-   * runs Map，下次落盘带全量最新快照；本文件最后一条快照因此最多落后真实状态
-   * 一个节流窗口——崩溃语义与 jsonl-run-store 去抖同源：未落盘的 running 尾部
-   * 丢失，等价崩溃链由恢复路径收编）。记账在落盘成功后（IO 失败不吞下一次
-   * 重试机会）。
+   * 快照落盘（append-only 全量行）。W1 写通道语义收敛后本 store 不再自带节流
+   * （节流模块已随写通道退役删除）：快照降级为 journal fold 的物化投影，
+   * 写点收敛到「journal 追加后的统一物化步」（pump 物化时机归 U1）——节流层
+   * 与物化时机收敛重复保险，且物化点稀疏化后节流窗口无保护对象。
    */
   async save(run: WorkflowRun): Promise<void> {
-    const isTerminal = run.state.status !== "running";
-    const now = Date.now();
-    if (!this.throttle.shouldPersist(run.runId, isTerminal, now)) {
-      return; // 节流窗口内：跳过本次全量快照 append
-    }
     // mkdir recursive 每次 save 前执行：幂等零成本（目录已存在时仅一次 stat），
     // 且免「构造时预建」——构造时建会在宿主尚未 configureCore 的窗口抛错。
     await mkdir(this.stateDir(), { recursive: true });
     // toRunSnapshot 补 v 字段（D4 裁决②写入侧）；live strip 已随 [H2 W3] live 字段删除退役
     const line = JSON.stringify(toRunSnapshot(run));
     await appendFile(this.stateFilePath(run.runId), line + "\n", "utf8");
-    this.throttle.recordPersisted(run.runId, isTerminal, now);
   }
 
   async loadAll(): Promise<WorkflowRun[]> {

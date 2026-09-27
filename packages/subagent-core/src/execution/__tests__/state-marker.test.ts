@@ -4,7 +4,7 @@
 //
 // 覆盖四层：
 //   1. 写侧（.state 单一权威）：finalized/cancelled 往返、旧名残留清理；
-//   2. 写侧响亮重试（U1 A3 / §3.4）：3 次指数退避（100ms 起）+ 仍失败 logger.error
+//   2. 写侧响亮重试（U1 A3 / §3.4）：3 次重试（[W1 / D6] 零退避——同步睡退役）+ 仍失败 logger.error
 //      响亮暴露返回 false（旧 best-effort 静默语义退役）；
 //   3. 读侧（兼容读）：.state 优先、旧 .finalized / .cancelled 归一、旧名共存优先级
 //   （.cancelled > .finalized，对齐合并前判定分支序）、损坏降级边界；
@@ -44,7 +44,6 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import {
-  _setStateMarkerSleepForTest,
   readRecordBinding,
   readStateMarker,
   statStateStamp,
@@ -75,16 +74,9 @@ function makeBinding(model: string | undefined): Parameters<typeof writeRecordBi
 describe("state-marker", () => {
   let tmpDir: string;
   let sessionFile: string;
-  /** 退避替身记录的延迟序列（fake sleep——免真实等待，可断言指数退避）。 */
-  let sleepDelays: number[];
-
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "state-marker-test-"));
     sessionFile = path.join(tmpDir, "2026-01-01_uuid.jsonl");
-    sleepDelays = [];
-    _setStateMarkerSleepForTest((ms) => {
-      sleepDelays.push(ms);
-    });
     loggerMock.error.mockClear();
     // 基线 = 真实写（个别用例以 mockImplementationOnce/Implementation 注错覆盖）。
     if (actualWriteRef.current === undefined) throw new Error("node:fs mock not initialized");
@@ -92,7 +84,6 @@ describe("state-marker", () => {
   });
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    _setStateMarkerSleepForTest(undefined); // 恢复实装同步等待
     vi.restoreAllMocks();
   });
 
@@ -151,10 +142,10 @@ describe("state-marker", () => {
   });
 
   // ============================================================
-  // 写侧响亮重试（U1 A3 / §3.4：3 次指数退避 100ms 起 + 仍失败 logger.error）
+  // 写侧响亮重试（U1 A3 / §3.4：3 次重试；[W1 / D6] 零退避——主线程零同步睡）
   // ============================================================
   describe("写侧响亮重试", () => {
-    it("暂时性失败 → 指数退避重试后成功：返回 true，无 error 日志", () => {
+    it("暂时性失败 → 零退避重试后成功：返回 true，无 error 日志", () => {
       writeFileSyncMock
         .mockImplementationOnce(() => {
           throw new Error("transient EBUSY");
@@ -165,7 +156,6 @@ describe("state-marker", () => {
 
       expect(writeFinalizedState(sessionFile, "user-close")).toBe(true);
       expect(writeFileSyncMock).toHaveBeenCalledTimes(3); // 初始尝试 + 2 次重试后成功
-      expect(sleepDelays).toEqual([100, 200]); // 指数退避：100ms 起
       expect(loggerMock.error).not.toHaveBeenCalled();
       expect(readStateMarker(sessionFile)).toEqual({ status: "finalized", reason: "user-close" });
     });
@@ -177,7 +167,6 @@ describe("state-marker", () => {
 
       expect(writeCancelledState(sessionFile, 7000)).toBe(false);
       expect(writeFileSyncMock).toHaveBeenCalledTimes(4); // 初始 + 3 次重试
-      expect(sleepDelays).toEqual([100, 200, 400]); // 完整指数退避序列
       expect(loggerMock.error).toHaveBeenCalledTimes(1);
       const msg = String(loggerMock.error.mock.calls[0]?.[0]);
       expect(msg).toMatch(/terminal state marker write failed after retries/);
@@ -186,13 +175,30 @@ describe("state-marker", () => {
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     });
 
+    it("[W1 / D6] 主线程零同步睡：持久失败全程 < 50ms（原指数退避同步睡 ≥ 700ms 必超）", () => {
+      writeFileSyncMock.mockImplementation(() => {
+        throw new Error("ENOSPC: no space left");
+      });
+      const start = Date.now();
+      expect(writeCancelledState(sessionFile, 7000)).toBe(false);
+      expect(Date.now() - start).toBeLessThan(50);
+    });
+
+    it("[W1 / D6] 主线程零同步睡（源码面）：state-marker 无 Atomics.wait / SharedArrayBuffer", () => {
+      const source = fs.readFileSync(
+        path.resolve(import.meta.dirname, "../persistence/state-marker.ts"),
+        "utf8",
+      );
+      expect(source).not.toContain("Atomics.wait");
+      expect(source).not.toContain("SharedArrayBuffer");
+    });
+
     it("writeCancelledState 同款重试语义（终态二态共用 writeStateMarker）", () => {
       writeFileSyncMock.mockImplementationOnce(() => {
         throw new Error("transient");
       });
 
       expect(writeCancelledState(sessionFile, 9000)).toBe(true);
-      expect(sleepDelays).toEqual([100]);
       expect(readStateMarker(sessionFile)).toEqual({ status: "cancelled", endedAt: 9000 });
     });
   });
@@ -360,5 +366,34 @@ describe("state-marker", () => {
       fs.rmSync(`${sessionFile}.finalized`, { force: true });
       expect(statStateStamp(sessionFile)).not.toEqual(withLegacy);
     });
+  });
+});
+
+describe("主线程零同步睡断言（W1 D6：Atomics.wait 退役）", () => {
+  it("state-marker 源码无 Atomics.wait / SharedArrayBuffer（同步睡原语退役）", () => {
+    const source = fs.readFileSync(
+      path.resolve(import.meta.dirname, "../persistence/state-marker.ts"),
+      "utf8",
+    );
+    expect(source).not.toContain("Atomics.wait");
+    expect(source).not.toContain("SharedArrayBuffer");
+  });
+
+  it("写失败重试仍发生（零退避立即连发，重试语义保持）", () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "v2-nosleep-"));
+    try {
+      // 持续失败构造：sessionFile 指向一个已存在普通文件的内部路径（ENOTDIR 恒失败）。
+      const blocker = path.join(tmpRoot, "blocker");
+      fs.writeFileSync(blocker, "not-a-dir", "utf8");
+      const badSessionFile = path.join(blocker, "s.jsonl");
+      const start = Date.now();
+      // writeSettledState 的 .state 落点在非目录下 → 每次 writeFileSync 恒失败 →
+      // 重试 4 次后返回 false。同步睡退役断言：全程 < 50ms（原实现含 700ms 同步退避必超）。
+      const ok = writeSettledState(badSessionFile, { stopReason: "completed" });
+      expect(ok).toBe(false);
+      expect(Date.now() - start).toBeLessThan(50);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
   });
 });

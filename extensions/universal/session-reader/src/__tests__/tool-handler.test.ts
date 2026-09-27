@@ -9,6 +9,7 @@ import {
   type SessionReadParams,
   type SessionReadSignals,
 } from '../tool-handler.js'
+import { setPiHandle } from '@zhushanwen/pi-extension-logger'
 import { type DoctorDetails } from '../doctor.js'
 import { levenshtein } from '../no-match.js'
 import {
@@ -1104,6 +1105,131 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     await expect(
       handleSessionRead({ action: 'outline', session: 'sa-bad' }, { agentDir: dir }),
     ).rejects.toThrow(/读取失败.*首行非合法 session header/)
+  })
+})
+
+describe('sa-id entry 兜底 v2 终态条锚定（W1 D1 版本门补齐，第三层兜底消费面）', () => {
+  // fixture 骨架对齐 zcode-routing.test.ts：root/agent = agentDir、root/live-sessions =
+  // liveSessionDir（entry 兜底候选根）、root/engines/zcode/session-db/db.sqlite = 隔离库
+  // 白名单形态路径（不落文件——正向用例锚命中后进 zcode 读链，在白名单存在性检查处
+  // 产出 zcode_db_unreadable，无需真实 sqlite）。
+  const ISOLATED_DB_SEGMENTS = ['engines', 'zcode', 'session-db', 'db.sqlite']
+  let root: string
+  let agentDir: string
+  let liveDir: string
+  let dbPath: string
+  let appendEntries: ReturnType<typeof vi.fn>
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'tool-handler-v2anchor-'))
+    agentDir = join(root, 'agent')
+    liveDir = join(root, 'live-sessions')
+    await mkdir(agentDir, { recursive: true })
+    await mkdir(liveDir, { recursive: true })
+    dbPath = join(root, ...ISOLATED_DB_SEGMENTS)
+    appendEntries = vi.fn()
+    setPiHandle({ appendEntry: appendEntries } as unknown as Parameters<typeof setPiHandle>[0])
+  })
+  afterEach(async () => {
+    setPiHandle(undefined)
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  /** live session 内追加 subagent-record custom 行（首行 session header）。 */
+  async function writeLiveEntryLine(lineData: Record<string, unknown>): Promise<void> {
+    const path = join(liveDir, 'main.jsonl')
+    await writeFile(
+      path,
+      JSON.stringify({ type: 'session', id: 'live-main-1', cwd: '/proj' }) +
+        '\n' +
+        JSON.stringify({ type: 'custom', customType: 'subagent-record', id: 'e-v2', parentId: null, data: lineData }) +
+        '\n',
+    )
+  }
+
+  /** v2 终态条 data（载荷形态对齐 subagent-core SubagentRecordSettledEntryData）。 */
+  function v2SettledData(opts: { engine?: string; sessionRef?: Record<string, string> } = {}): Record<string, unknown> {
+    const data: Record<string, unknown> = {
+      v: 2,
+      kind: 'settled',
+      id: 'sa-v2-1',
+      status: 'idle',
+      stopReason: 'end_turn',
+      endedAt: 123,
+      turns: 2,
+      totalTokens: 20,
+      model: undefined,
+      thinkingLevel: undefined,
+      result: 'done text',
+    }
+    if (opts.engine !== undefined) data.engine = opts.engine
+    if (opts.sessionRef !== undefined) {
+      data.engineHandle = { sessionRef: opts.sessionRef, poolKey: 'shared' }
+    }
+    return data
+  }
+
+  /** v2 注册条 data（身份域，不携带 engineHandle——非锚源）。 */
+  function v2RegisteredData(): Record<string, unknown> {
+    return {
+      v: 2,
+      kind: 'registered',
+      id: 'sa-v2-1',
+      agent: 'dev',
+      task: 't',
+      slug: 's',
+      origin: 'tool',
+      rootSessionId: 'live-main-1',
+      depth: 0,
+      startedAt: 1,
+    }
+  }
+
+  function logCallsWithReason(reason: string): number {
+    return appendEntries.mock.calls.filter(
+      ([ct, d]) => ct === 'session-reader:log' && (d as { data?: { reason?: string } })?.data?.reason === reason,
+    ).length
+  }
+
+  it('v2 终态条完整锚 → 兜底命中进 zcode 读链（dbPath 白名单内未落盘 → zcode_db_unreadable，非 not_found）', async () => {
+    await writeLiveEntryLine(v2SettledData({ engine: 'zcode', sessionRef: { sessionId: 'sess_v2', dbPath } }))
+    // 锚命中 → resolveZcodeRoute → zcode 读链 → 白名单存在性检查（文件未落盘）
+    // zcode_db_unreadable = 锚定成功的输出级证据（锚未命中此处是 zcode_record_not_found）
+    await expect(
+      handleSessionRead({ action: 'outline', session: 'sa-v2-1' }, { agentDir, liveSessionDir: liveDir }),
+    ).rejects.toThrow('zcode_db_unreadable')
+  })
+
+  it('v2 终态条 engine=zcode 但 sessionRef 缺 dbPath → zcode_anchor_missing + 结构化日志记「缺 dbPath」', async () => {
+    await writeLiveEntryLine(v2SettledData({ engine: 'zcode', sessionRef: { sessionId: 'sess_v2' } }))
+    await expect(
+      handleSessionRead({ action: 'outline', session: 'sa-v2-1' }, { agentDir, liveSessionDir: liveDir }),
+    ).rejects.toThrow('zcode_anchor_missing')
+    // 归因进结构化日志不进 LLM 可见面（§3.4）：firstIncompleteAnchorReason 的 v2 分支
+    //（tool-handler 唯一消费点）产出 missing-dbPath
+    expect(logCallsWithReason('missing-dbPath')).toBeGreaterThanOrEqual(1)
+  })
+
+  it('v2 注册条（kind="registered"）不是锚源 → zcode_record_not_found（不误报 anchor_missing）', async () => {
+    await writeLiveEntryLine(v2RegisteredData())
+    await expect(
+      handleSessionRead({ action: 'outline', session: 'sa-v2-1' }, { agentDir, liveSessionDir: liveDir }),
+    ).rejects.toThrow('zcode_record_not_found')
+    await expect(
+      handleSessionRead({ action: 'outline', session: 'sa-v2-1' }, { agentDir, liveSessionDir: liveDir }),
+    ).rejects.not.toThrow('zcode_anchor_missing')
+  })
+
+  it('v2 终态条 engine 缺省（pi 形态 v2）→ zcode_record_not_found（D5 engine 判别防误归因）', async () => {
+    // pi record 的 v2 终态条：engine 缺省、sessionRef 无 dbPath——不是「zcode 锚不完整」，
+    // 不适用旧版本产物指引；误归因 missing-dbPath → zcode_anchor_missing 即红
+    await writeLiveEntryLine(v2SettledData())
+    await expect(
+      handleSessionRead({ action: 'outline', session: 'sa-v2-1' }, { agentDir, liveSessionDir: liveDir }),
+    ).rejects.toThrow('zcode_record_not_found')
+    await expect(
+      handleSessionRead({ action: 'outline', session: 'sa-v2-1' }, { agentDir, liveSessionDir: liveDir }),
+    ).rejects.not.toThrow('zcode_anchor_missing')
   })
 })
 

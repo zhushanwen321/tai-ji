@@ -32,7 +32,6 @@ import { Trace } from "@zhushanwen/subagent-core/orchestration/models/trace.ts";
 import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run-spec.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
 import { fromRunSnapshot, toRunSnapshot } from "@zhushanwen/subagent-core/orchestration/run-snapshot.ts";
-import { WORKFLOW_RECORD_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
 import { JsonlRunStore } from "../jsonl-run-store.ts";
 import { mkPi } from "@zhushanwen/subagent-core/orchestration/__tests__/test-mocks.ts";
 
@@ -117,16 +116,6 @@ function readStateLine(tmpDir: string, runId: string): string {
     .trim();
 }
 
-/** unknown → workflow-record entry data 的运行时收窄（taste/no-unsafe-cast：先收窄再断言）。 */
-function asRecordData(d: unknown): { v: number; snapshot: Record<string, unknown> } {
-  if (typeof d !== "object" || d === null) throw new Error("entry data is not an object");
-  const rec = d as { v?: unknown; snapshot?: unknown };
-  if (typeof rec.v !== "number" || typeof rec.snapshot !== "object" || rec.snapshot === null) {
-    throw new Error("entry data is not a workflow-record");
-  }
-  return rec as { v: number; snapshot: Record<string, unknown> };
-}
-
 describe("⛔5: 快照往返与实施前逐字节一致（codec 切换 D4）", () => {
   let tmpDir: string;
 
@@ -147,17 +136,15 @@ describe("⛔5: 快照往返与实施前逐字节一致（codec 切换 D4）", (
     expect(readStateLine(tmpDir, "wf-golden-noref")).toBe(GOLDEN_SNAPSHOT_LINE);
   });
 
-  it("workflow-record entry snapshot 与 state 文件同一份字节（W17 不二次序列化）", async () => {
+  it("[W1 停写锚定] save 零条目写：落盘字节只存在于 state 文件（原 entry 镜像面随 v1 停写退役）", async () => {
     const entries: CustomEntry[] = [];
     const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
 
     await store.save(makeDoneRunWithLive("wf-golden-noref", false));
 
-    expect(entries).toHaveLength(1);
-    expect(entries[0]!.customType).toBe(WORKFLOW_RECORD_CUSTOM_TYPE);
-    expect(JSON.stringify(asRecordData(entries[0]!.data).snapshot)).toBe(
-      readStateLine(tmpDir, "wf-golden-noref"),
-    );
+    // [W1 / D1] 条目通道停写：pi session 零 workflow-record entry；投影字节只在 state 文件
+    expect(entries).toHaveLength(0);
+    expect(readStateLine(tmpDir, "wf-golden-noref")).toBe(GOLDEN_SNAPSHOT_LINE);
   });
 
   it("spec.budgetRef 剔除（codec 单源裁决的投影差异）：落盘 = 无 budgetRef 同构形态", async () => {

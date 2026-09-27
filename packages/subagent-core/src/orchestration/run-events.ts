@@ -221,14 +221,25 @@ export const RUN_EVENT_TYPES = [
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
 
 /**
- * 事件公共信封字段：墙钟时间戳（Date.now() epoch ms）。
+ * 事件公共信封字段：行级单调序号 + 墙钟时间戳（Date.now() epoch ms）。
  *
- * D5 载荷表未列 ts，但快照投影（calls[].startedAt / lastProgressAt 派生）与
+ * seq（1 起严格递增，同一 journal 文件内全序；W1 [D1] 起）：同一事件的唯一行
+ * 身份——W2 通知去重键（终态事件身份）的载体 + tail 截断重建后全量重读的 fold
+ * 去重依据（seq ≤ 已见水位的行按重放跳过，见 foldRunEventFrames）。与 record 侧
+ * RecordEventEnvelope（u0）同构——两域 tail 原语（journal-tail.ts）的去重语义
+ * 对称落位。
+ *
+ * ts：D5 载荷表未列，但快照投影（calls[].startedAt / lastProgressAt 派生）与
  * 注册表新鲜度判据都要求事件自带时间——投影只消费事件流（快照与事件流双写时
  * 快照必然漂移；三通道采信顺序见本文件头部「终局证据读序」权威声明），没有
  * ts 的 journal 无法支撑投影，故信封层统一携带。
+ *
+ * [W1 存量兼容读，D7] W1 前的 journal 行无 seq 字段——读取面（scan 解析判定与
+ * fold 守卫）对「缺失 seq」放行（旧行为完全不变）；携带 seq 的行按正整数契约
+ * 校验，坏值 = 坏行。见 isWorkflowRunEventLine 与 foldRunEventFrames 注释。
  */
 export interface EventEnvelope {
+  seq: number;
   ts: number;
 }
 
@@ -347,6 +358,19 @@ export type WorkflowRunEvent =
   | RunArmedEvent
   | RunSettledEvent;
 
+/**
+ * 写侧入参形态：事件去掉 seq（seq 由 journal 单写者分配——单调性的构造性保证，
+ * 调用方无法传错；与 record 侧 RecordJournalEventInput 同构）。DistributiveOmit
+ * 使联合逐成员 Omit（保持判别键窄化能力）。
+ *
+ * 状态机消费面（TransitionTrigger 的事件族）即本形态——seq 是 journal 存储层的
+ * 信封字段，不参与转移裁决；scan 产物（WorkflowRunEvent，含 seq）经结构化子类型
+ * 天然兼容本形态（多余属性在非字面量赋值下合法）。
+ */
+export type WorkflowRunEventInput = DistributiveOmit<WorkflowRunEvent, "seq">;
+
+type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K> : never;
+
 // ── journal 接口形态（仅类型签名——实装归 journal 单元）──────
 
 /**
@@ -359,10 +383,18 @@ export type WorkflowRunEvent =
  */
 export interface RunEventJournal {
   /**
-   * 追加一条事件（JSONL 单行）。runId 显式传参而非从事件取——仅 run-created
+   * 追加一条事件（JSONL 单行），返回落盘的完整事件（含分配的 seq）——调用方据
+   * 此同步构造 v2 终态条目 / 物化投影（同一事件的单点载荷源；与 record 侧
+   * RecordEventJournal.append 契约同构）。入参是无 seq 的 input 形态（seq 分配权
+   * 在 journal 实装内，构造性单调）；runId 显式传参而非从事件取——仅 run-created
    * 携带 runId，目标文件定位不依赖事件形态。
+   *
+   * 单写者约束（W1 起扩容，D4）：合法调用方 = worker-message-pump 的
+   * dispatchRunTrigger（活体链）+ run-registry 的收编入口（恢复链幂等追加终态
+   * 事件）——「收编入口幂等追加 run-settled」是设计 D4 对 append 面的显式扩容，
+   * 除此之外引擎/读侧一律不写。
    */
-  append(runId: string, event: WorkflowRunEvent): Promise<void>;
+  append(runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent>;
   /**
    * 顺序扫描某 run 的全部事件（写入序）。消费方：快照投影（startedAt /
    * lastProgressAt 派生）、注册表投影（事件流停止 = 待恢复态判读）、恢复对账。
@@ -421,7 +453,7 @@ export const INITIAL_RUN_STATE: RunState = { lifecycle: "created" };
  *
  * 为什么独立于 RUN_EVENT_TYPES：控制事件源于用户/宿主/守护/投影判定，不是编排
  * 层事件流的一帧——驱动转移但不直接落 journal。类型层经 TransitionTrigger 并集
- * 区分两个词表；journal.append 的参数类型（WorkflowRunEvent）构造性排除控制
+ * 区分两个词表；journal.append 的参数类型（WorkflowRunEventInput）构造性排除控制
  * 事件，控制终局路径需要落账时由调用侧合成 run-settled（见输出动作注释）。
  */
 export const CONTROL_TRIGGER_TYPES = [
@@ -443,8 +475,8 @@ export type ControlTrigger =
   | { type: "host-died" }
   | { type: "abandon-elapsed" };
 
-/** 转移触发全集 = journal 词表事件 + 控制事件。 */
-export type TransitionTrigger = WorkflowRunEvent | ControlTrigger;
+/** 转移触发全集 = journal 词表事件（input 形态——seq 是存储信封，不参与裁决）+ 控制事件。 */
+export type TransitionTrigger = WorkflowRunEventInput | ControlTrigger;
 
 // ── 输出动作词表（转移的声明性输出，P1b 接线消费）──────────────
 
@@ -672,28 +704,79 @@ export function transition(
 // ── journal fold 循环（投影侧共享单源）──────────────────────
 
 /**
- * journal fold 循环（scan 事件流 → 终帧状态，投影侧共享单源）：逐事件 transition
- * （不传 ctx——fold 契约），坏帧（历史帧与当前转移表不兼容）经 onBrokenFrame 出声
- * 后保守停在最近一致态，不炸投影——与 scan 侧坏行容忍同一精神。
+ * fold 检查点：状态机终帧 + seq 水位。
  *
- * 消费方：worker-message-pump（journal 活体 fold，活体缓存 miss 时补投影）与
- * run-registry（注册表投影 / abandon 终局化）。两处 warn 文案与 logger 各随其域，
- * 经 onBrokenFrame 注入；循环体与失效模式单源。
+ * lastSeq = 已接受事件的最高 seq（增量续读 / tail 截断重建后全量重读的去重依据
+ * ——W2 通知去重键与 fold 幂等共用的行身份载体，D6「重复行的去重归域 fold」的
+ * run 域落点）。全量 fold 与增量 fold（以既有 checkpoint 传入）共用本入口；旧
+ * 格式行（无 seq，W1 前）不推进水位（见 foldRunEventFrames 注释）。
  */
-export function foldRunEventFrames(
+export interface RunEventFoldCheckpoint {
+  state: RunState;
+  lastSeq: number;
+}
+
+/** fold 起点（全量 fold 缺省初值；增量 fold 以既有 checkpoint 传入）。 */
+export const INITIAL_RUN_EVENT_FOLD: RunEventFoldCheckpoint = {
+  state: INITIAL_RUN_STATE,
+  lastSeq: 0,
+};
+
+/**
+ * fold 检查点入口（事件流 + 既有检查点 → 新检查点）：全量 fold 与增量 fold
+ * （tail 续读 / 截断重建后全量重读，以既有 checkpoint 传入）共用本函数——
+ * tail 消费方（壳 stall watchdog / runtime 投影）的增量接续面。
+ *
+ * seq 守卫（幂等语义，与 record 侧 foldRecordJournalEvents 同构）：
+ * - seq ≤ 既有水位的事件行按重放跳过——tail 截断/重建后的幂等全量重读（D6
+ *   原语）靠它构造性去重，重读不产生重复应用；
+ * - seq 跳号（gap）宽容放行——单写者 append-only 下 gap 仅在外部编辑时出现；
+ * - [W1 存量兼容读，D7] W1 前的行无 seq 字段：不跳过、不推进水位（重放去重
+ *   只对携带 seq 的新格式行生效；旧文件混新 append 时「带 seq 的行」仍严格
+ *   递增，去重键语义不受污染）。
+ *
+ * 坏帧（历史帧与当前转移表不兼容）经 onBrokenFrame 出声后保守停在最近一致态，
+ * 不炸投影——与 scan 侧坏行容忍同一精神。warn 文案与 logger 归消费方注入。
+ */
+export function foldRunEventCheckpoint(
   events: readonly WorkflowRunEvent[],
   onBrokenFrame: (err: unknown, lastType: string) => void,
-): RunState {
-  let state = INITIAL_RUN_STATE;
+  initial?: RunEventFoldCheckpoint,
+): RunEventFoldCheckpoint {
+  let checkpoint = initial ?? INITIAL_RUN_EVENT_FOLD;
   for (const event of events) {
+    // 存量行的 seq 运行时缺失（类型必填是写入契约；读取面对缺失放行，见
+    // isWorkflowRunEventLine 注释）——typeof 收窄后统一处理两格式。
+    const seq = event.seq;
+    if (typeof seq === "number" && seq <= checkpoint.lastSeq) {
+      continue;
+    }
     try {
-      state = transition(state, event).state;
+      checkpoint = {
+        state: transition(checkpoint.state, event).state,
+        lastSeq: typeof seq === "number" ? seq : checkpoint.lastSeq,
+      };
     } catch (err) {
       onBrokenFrame(err, event.type);
       break;
     }
   }
-  return state;
+  return checkpoint;
+}
+
+/**
+ * journal fold 循环（事件流 → 终帧状态，投影侧共享单源）：逐事件 transition
+ * （不传 ctx——fold 契约），坏帧保守停在最近一致态。内部委托
+ * foldRunEventCheckpoint（seq 守卫单点），只投影 state——「只要终帧状态」的
+ * 消费面（file-run-store 清理资格 / 注册表投影 / pump 活体 fold）。
+ *
+ * 增量接续（需要水位的 tail 消费方）走 foldRunEventCheckpoint。
+ */
+export function foldRunEventFrames(
+  events: readonly WorkflowRunEvent[],
+  onBrokenFrame: (err: unknown, lastType: string) => void,
+): RunState {
+  return foldRunEventCheckpoint(events, onBrokenFrame).state;
 }
 
 // ── journal 实装（createRunEventJournal——本模块唯一 IO 边）────
@@ -736,12 +819,23 @@ const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
  * 信封全词表必填——fold 投影的 startedAt/lastProgressAt 派生与注册表新鲜度判据都
  * 消费它，坏值防污染投影）+ outcome（ask-settled / run-settled 携带）落词表
  * （其余事件不携带，缺省自然放行）。任一不过 = 坏行。
+ *
+ * [W1 seq 契约] 携带 seq 的行按正整数校验（新写行信封必填）；seq 缺失放行——
+ * W1 前的存量 journal 行无该字段（D7 惰性兼容读，旧 run 的 journal 直接进读源，
+ * 行为完全不变）。运行时缺失与类型必填的张力由 foldRunEventFrames 的 typeof
+ * 收窄承接（读取面单点声明）。
  */
 function isWorkflowRunEventLine(value: unknown): value is WorkflowRunEvent {
   if (typeof value !== "object" || value === null) return false;
-  const rec = value as { type?: unknown; ts?: unknown; outcome?: unknown };
+  const rec = value as { type?: unknown; ts?: unknown; seq?: unknown; outcome?: unknown };
   if (typeof rec.type !== "string" || !RUN_EVENT_TYPE_SET.has(rec.type)) return false;
   if (typeof rec.ts !== "number" || !Number.isFinite(rec.ts)) return false;
+  if (
+    rec.seq !== undefined &&
+    (typeof rec.seq !== "number" || !Number.isSafeInteger(rec.seq) || rec.seq < 1)
+  ) {
+    return false;
+  }
   if (
     rec.outcome !== undefined &&
     !(ALL_RUN_OUTCOMES as readonly string[]).includes(rec.outcome as string)
@@ -755,8 +849,47 @@ function isNodeErrorCode(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === code;
 }
 
+/** 读文件并宽容解析：坏行跳过计数 + 有效事件最大 seq 探测（scan 与 append 分配共用）。 */
+function scanJournalFile(
+  filePath: string,
+): { events: WorkflowRunEvent[]; malformed: number; maxSeq: number } {
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf8");
+  } catch (error) {
+    if (isNodeErrorCode(error, "ENOENT")) return { events: [], malformed: 0, maxSeq: 0 };
+    throw error;
+  }
+  const events: WorkflowRunEvent[] = [];
+  let malformed = 0;
+  let maxSeq = 0;
+  for (const line of content.split("\n")) {
+    if (line.trim().length === 0) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      malformed += 1;
+      continue;
+    }
+    if (isWorkflowRunEventLine(parsed)) {
+      const event = parsed as WorkflowRunEvent;
+      events.push(event);
+      // 存量行 seq 运行时缺失（兼容读）——typeof 守卫下不参与水位探测
+      if (typeof event.seq === "number" && event.seq > maxSeq) maxSeq = event.seq;
+    } else {
+      // 词表外 type（含合法 JSON 但漂移的形态）同样按坏行跳过——scan 的失效
+      // 模式是保守可诊断（跳过 + 计数 + warn），不是炸掉整个投影
+      malformed += 1;
+    }
+  }
+  return { events, malformed, maxSeq };
+}
+
 class FileRunEventJournal implements RunEventJournal {
   private dirEnsured = false;
+  /** runId → 已知末 seq（append 分配基数；跨实例正确性靠首 append 探测文件尾，不靠缓存）。 */
+  private readonly lastSeqByRunId = new Map<string, number>();
 
   constructor(private readonly dir: string) {}
 
@@ -765,51 +898,36 @@ class FileRunEventJournal implements RunEventJournal {
     return join(this.dir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
   }
 
-  async append(runId: string, event: WorkflowRunEvent): Promise<void> {
+  async append(runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent> {
     assertValidRunId(runId);
     if (!this.dirEnsured) {
       // 惰性一次：目录缺失自建（recursive 幂等），scan 侧不建目录（只读）
       mkdirSync(this.dir, { recursive: true });
       this.dirEnsured = true;
     }
+    // seq 分配：末水位 + 1。水位未缓存时探测文件（存在则取有效事件最大 seq）
+    // ——同步 readFileSync 与 append 同一取舍（取证证据，append 返回即达页缓存）；
+    // 与 record 侧 FileRecordEventJournal 的分配纪律同构（W1 前存量行无 seq →
+    // maxSeq=0，新行从 1 起号，「带 seq 的行」保持严格递增）。
+    let lastSeq = this.lastSeqByRunId.get(runId);
+    if (lastSeq === undefined) {
+      lastSeq = scanJournalFile(this.journalPath(runId)).maxSeq;
+    }
+    const seq = lastSeq + 1;
+    const full = { ...event, seq } as WorkflowRunEvent;
     // 为什么同步 append：journal 是取证证据——D9-1 的 host-died 判据 = 事件流
     // 停止，批写缓冲随进程死亡丢失的恰好是「死前在做什么」的尾部帧；事件频率
     // 200-400/run 跨分钟级（D5 量级推演），同步追加的微秒级成本不构成吞吐压力，
     // 换取「append 返回即达页缓存」的零丢失窗口。接口保持 Promise 形态
     // （RunEventJournal 契约），实装内同步完成——调用方无需感知。
-    appendFileSync(this.journalPath(runId), `${JSON.stringify(event)}\n`, "utf8");
+    appendFileSync(this.journalPath(runId), `${JSON.stringify(full)}\n`, "utf8");
+    this.lastSeqByRunId.set(runId, seq);
+    return full;
   }
 
   async scan(runId: string): Promise<readonly WorkflowRunEvent[]> {
     assertValidRunId(runId);
-    let content: string;
-    try {
-      content = readFileSync(this.journalPath(runId), "utf8");
-    } catch (error) {
-      // 文件不存在 = 空 journal（run 未落账 / 已过保留期清理）——与「pi session
-      // 文件延迟写入」同族的缺省语义，消费方按空流处理；其余读错误原样抛出。
-      if (isNodeErrorCode(error, "ENOENT")) return [];
-      throw error;
-    }
-    const events: WorkflowRunEvent[] = [];
-    let malformed = 0;
-    for (const line of content.split("\n")) {
-      if (line.trim().length === 0) continue;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        malformed += 1;
-        continue;
-      }
-      if (isWorkflowRunEventLine(parsed)) {
-        events.push(parsed);
-      } else {
-        // 词表外 type（含合法 JSON 但漂移的形态）同样按坏行跳过——scan 的失效
-        // 模式是保守可诊断（跳过 + 计数 + warn），不是炸掉整个投影
-        malformed += 1;
-      }
-    }
+    const { events, malformed } = scanJournalFile(this.journalPath(runId));
     if (malformed > 0) {
       journalLogger.warn(
         `run-event journal scan：跳过 ${malformed} 个坏行（文件=${this.journalPath(runId)}）`,

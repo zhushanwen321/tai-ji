@@ -335,9 +335,9 @@ async function resolveSaIdRoute(
 /**
  * 候选文件里该 sa-id 的 `subagent-record` entry 若「在场但锚不完整」，返回缺失归因
  *（§3.4 zcode_anchor_missing 的 entry 形态触发 + 日志归因；记录完全不在场返回
- * undefined）。entry 级判定（五关过滤 + D5 engine 判别 + 锚完整性链）在
- * zcode-anchor-classify.ts 的 firstIncompleteAnchorReason，本函数只做文件扫描 I/O
- *（读失败跳过该文件，首个命中归因即终止扫描）。
+ * undefined）。entry 级判定（v1 快照 / v2 终态条双版本门 + D5 engine 判别 + 锚完整
+ * 性链）在 zcode-anchor-classify.ts 的 firstIncompleteAnchorReason，本函数只做文件
+ * 扫描 I/O（读失败跳过该文件，首个命中归因即终止扫描）。
  */
 async function classifyIncompleteEntryAnchor(
   candidateFiles: readonly string[],

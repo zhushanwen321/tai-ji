@@ -2,16 +2,18 @@
 //
 // loadAll entry 源扫描（collectEntrySources + loadRunFromStateFile）定向用例（R2-TC S4）。
 //
-// 防的 bug：loadAll 的多 run 重建 / 损坏 state 文件降级。W17 已覆盖单 run 的 entry 重建、
-// link 兼容与读序优先级；本文件补齐三块未定向覆盖的分支：
-// 1. 多 run 并存（多个 workflow-record entry run + link run 同批重建，无丢失）
+// 防的 bug：loadAll 的多 run 重建 / 损坏 state 文件降级。覆盖三块定向分支：
+// 1. 多 run 并存（多个 entry run + link run 同批重建，无丢失）
 // 2. 损坏 state 文件降级（末行非 JSON / 空文件 / link 指向不存在路径 / link data 缺 runId）
 //    ——单文件失败返回 null 跳过，不崩 loadAll、不阻断同批其余 run 重建
 // 3. 同 runId 多条 record entry 末条胜出在多 run 场景下不串扰
 //
+// [W1 / D7] 夹具形态更新：v1 快照 entry 已停写（壳 save 不再产出），entry run 改为
+// 手工 v1 兼容夹具（真实 toRunSnapshot codec + 存量 v1 信封）；link 通路走真实
+// save 产 state 文件（写点保留——state 是物化投影）。
+//
 // 不 mock collectEntrySources：走 loadAll 真实通路（ctx.sessionManager.getEntries 返回
-// seed entries，loadRunFromStateFile 读真实临时文件）。record entry 一律经真实 save 产出
-//（deserializeRun 的快照 schema 以真实 serializeRun 为准，手工拼快照会绕开 schema 契约）。
+// seed entries，loadRunFromStateFile 读真实临时文件）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -25,9 +27,10 @@ import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
 import type { RunSpec } from "@zhushanwen/subagent-core";
+import { toRunSnapshot, WORKFLOW_RECORD_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import { JsonlRunStore } from "../jsonl-run-store.ts";
-import { mkCtx, mkPi } from "@zhushanwen/subagent-core/testing/orchestration/__tests__/test-mocks.ts";
+import { mkCtx } from "@zhushanwen/subagent-core/testing/orchestration/__tests__/test-mocks.ts";
 
 function makeSpec(): RunSpec {
   return {
@@ -43,19 +46,6 @@ function makeTraceNode(stepIndex: number): ExecutionTraceNode {
   return { stepIndex, agent: "worker", task: "do thing", model: "default", status: "pending" };
 }
 
-/** running → done 的完整生命周期 save（终态快照可被 deserializeRun 重建）。 */
-async function saveDoneRun(
-  sessionDir: string,
-  entries: CustomEntry[],
-  runId: string,
-): Promise<void> {
-  const store = new JsonlRunStore({ sessionDir, pi: mkPi(entries) });
-  const run = makeRunningRun(runId);
-  await store.save(run);
-  run.transition("done", "completed");
-  await store.save(run);
-}
-
 function makeRunningRun(runId: string): WorkflowRun {
   const trace = new Trace();
   trace.append(makeTraceNode(0));
@@ -66,6 +56,29 @@ function makeRunningRun(runId: string): WorkflowRun {
     trace,
     errorLogs: [],
   }, { startedAt: new Date().toISOString() });
+}
+
+/** running → done 的聚合（快照形态可信：经真实 toRunSnapshot codec 产出）。 */
+function makeDoneRun(runId: string): WorkflowRun {
+  const run = makeRunningRun(runId);
+  run.transition("done", "completed");
+  return run;
+}
+
+/** [W1 / D7] 手工 v1 快照 entry（兼容层夹具）。 */
+function v1RecordEntry(run: WorkflowRun): CustomEntry {
+  return {
+    type: "custom",
+    customType: WORKFLOW_RECORD_CUSTOM_TYPE,
+    data: {
+      v: 1,
+      snapshot: toRunSnapshot(run),
+      updatedAt: new Date().toISOString(),
+    },
+    id: `seed-v1-${run.runId}-${Math.random().toString(36).slice(2, 8)}`,
+    parentId: null,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 /** 手工构造旧 workflow-state-link 指针 entry（loadAll 的 link 兼容输入）。 */
@@ -92,10 +105,11 @@ describe("loadAll entry 源扫描：多 run 重建与损坏 state 降级（R2-TC
   });
 
   it("多 run 并存：2 个 entry run + 1 个 link run 同批全部重建（无丢失）", async () => {
-    // run-a/run-b 经真实 save 通路产出终态 entry（快照形态可信）
-    const entries: CustomEntry[] = [];
-    await saveDoneRun(tmpDir, entries, "run-a");
-    await saveDoneRun(tmpDir, entries, "run-b");
+    // run-a/run-b：v1 兼容夹具 entry（快照经真实 codec）
+    const entries: CustomEntry[] = [
+      v1RecordEntry(makeDoneRun("run-a")),
+      v1RecordEntry(makeDoneRun("run-b")),
+    ];
 
     // run-c：旧 link 形态（state 文件完好，无 record entry）
     const storeC = new JsonlRunStore({ sessionDir: tmpDir });
@@ -113,8 +127,7 @@ describe("loadAll entry 源扫描：多 run 重建与损坏 state 降级（R2-TC
   });
 
   it("损坏 state 文件（末行非 JSON）→ 该 run 跳过不崩，同批其余 run（entry run）正常返回", async () => {
-    const entries: CustomEntry[] = [];
-    await saveDoneRun(tmpDir, entries, "run-good");
+    const entries: CustomEntry[] = [v1RecordEntry(makeDoneRun("run-good"))];
 
     const corruptPath = path.join(tmpDir, "workflow-state", "run-corrupt.jsonl");
     fs.mkdirSync(path.dirname(corruptPath), { recursive: true });
@@ -135,9 +148,8 @@ describe("loadAll entry 源扫描：多 run 重建与损坏 state 降级（R2-TC
     const malformedLink = linkEntry("run-bad", emptyPath);
     (malformedLink.data as Record<string, unknown>).runId = undefined; // 缺 runId 的坏指针
 
-    // 对照组：一条合法 record entry run 应正常重建（真实 save 产出）
-    const entries: CustomEntry[] = [];
-    await saveDoneRun(tmpDir, entries, "run-seeded");
+    // 对照组：一条合法 record entry run 应正常重建（v1 兼容夹具）
+    const entries: CustomEntry[] = [v1RecordEntry(makeDoneRun("run-seeded"))];
 
     const seedEntries: CustomEntry[] = [
       ...entries,
@@ -151,15 +163,13 @@ describe("loadAll entry 源扫描：多 run 重建与损坏 state 降级（R2-TC
   });
 
   it("同 runId 多条 record entry 末条胜出（running→done 收敛）+ 另一 run 不受影响（混合批不串扰）", async () => {
-    const entries: CustomEntry[] = [];
-    // run-x：两条 entry（running 中间态 + done 终态），末条胜出
-    const storeX = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
-    const runX = makeRunningRun("run-x");
-    await storeX.save(runX);
-    runX.transition("done", "completed");
-    await storeX.save(runX);
+    // run-x：两条 entry（running 中间态 + done 终态），末条胜出（v1 兼容夹具）
+    const entries: CustomEntry[] = [
+      v1RecordEntry(makeRunningRun("run-x")),
+      v1RecordEntry(makeDoneRun("run-x")),
+    ];
     // run-y：done 终态
-    await saveDoneRun(tmpDir, entries, "run-y");
+    entries.push(v1RecordEntry(makeDoneRun("run-y")));
 
     const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
     const loaded = await store.loadAll();

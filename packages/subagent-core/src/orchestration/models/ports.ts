@@ -41,8 +41,8 @@ export interface AgentRunner {
  * WorkflowRun 持久化 port（写侧语义）。Infra 实现：pi 壳 JsonlRunStore（session
  * 锚定）与 core FileRunStore（宿主数据根锚定，zsw 等无 pi session 设施的宿主）。
  *
- * save 在每次状态变更后持久化整个 WorkflowRun（聚合根）——落盘节流决策经
- * persist-throttle.ts 单点（两实现共享同一五要素矩阵与记账语义）；
+ * save 在每次状态变更后持久化整个 WorkflowRun（聚合根）——W1 写通道语义收敛后
+ * 快照 = journal fold 的物化投影（写点收敛到 journal 追加后的统一物化步）；
  * loadAll 在 session_start 时重水合（D-5：JSONL 不向后兼容旧 session，旧格式返回空）。
  * stateFilePath 返回 run 状态文件的绝对路径（供 overlay/GUI 暴露给用户）。
  *

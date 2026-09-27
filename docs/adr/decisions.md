@@ -78,6 +78,19 @@ workflow run 生命周期治理（`packages/subagent-core/src/orchestration/run-
 ### ADR-0075 workflow 域四支柱平移与 schema 通道终态（2026-09-21）
 workflow/subagent 域对 pi 边界四支柱（ADR-0064）的同构落地与 schema 传输终态：① **确认式送达平移**——注册操作的终局通知必达，workflow run 成功/失败/取消一律出终局通知（持久账本 + 幂等键，C-ext-19 在 workflow 域的细化）；② **生效回执平移**——schema 强制武装回执：`armed` 事件是引擎自查断言之外的独立信号源（监控信号不与施控同源），宿主等待窗内未收到即 fail-fast；仅 native 引擎、仅 schema 任务上报，emulated 引擎恒不上报（契约义务权威源 [engine-development-guide](../extensions/subagents/engine-development-guide.md) §6 `armed` 行）；③ **契约显式化**——schema 跨进程只经 wire `task.schema` 单字段传输（env 预编码形态 `schemaEnv` 已退役，env 由引擎宿主从 task.schema 派生，resolver 产出侧负断言锁防回流）；扩展加载显式化（`ctx.extensionPaths` 白名单收窄落壳侧 pi-host，argv 镜像机制退役）。**schema 通道终态**：native schema 链保留直传（宿主对 parsedOutput 不做二次校验）、emulated 仿真为退出通道，由 `schemaEnforcement` 能力位声明分流。登记 C-ext-24 / C-ext-25 / C-ext-26。
 
+### ADR-0078 run/record 介质归位：journal 唯一事实源 + 两条 v2 条目 + 收编统一（2026-09-26）
+workflow run 与 subagent record 的运行态持久化介质收敛（承接 ADR-0074 的事件流 journal，把「权威投影源」升格为「唯一事实源」）：① **journal 唯一事实写**——run 侧既有 `<sessionDir>/workflow-state/<runId>.events.jsonl`，record 侧新增 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀——既有 .jsonl 扫描器/清理器结构性忽略该文件族；首行 `{"type":"record-journal"}` 头行自描述），两域事件行均携带单调 seq；② **主 session 每实体只写注册 + 终态两条 v2 小条目**（customType 不变、v 升格 2、kind 判别 registered/settled；终态条携带 result 全文与 engineHandle 双键；注册条携带 journalPath 锚点——session-reader workflow 发现链主源）；v1 全量快照 entry（含 eventLog/displayItems 死字节）停写；③ **state/manifest 降级为 journal fold 的物化投影**（可删可重建、读方零改动；.alive 仍是操作租约不计事实源）；record-bound 时物化一次 running manifest（zcode 运行窗口锚定，带锚定就绪守卫与写失败降级）；④ **恢复统一为「journal 重放 + 收编」**——「有注册、无终态」的实体经幂等收编入口补追加终态事件（先查双面证据防重复），recoverCrashedRuns 与 abandon 的终局化同走该入口（证据落点对称）；收编定界按注册条目形态分流：v1 快照实体保留旧纠偏路径为兼容层；⑤ **清理 = 显式保留窗口（默认 30 天）+ fold 终态资格判据，cap=50 废除**（多 session 分摊误清消除），统一保留维护轮承接 run/record 两域，session-file-gc 对 `*.events` 显式忽略；⑥ **runtime 读路径 = 内存投影**（entry 游标 + journal tail 双增量源单点合并，同实体冲突 journal 胜出；32MB 预检与全文重读退役为旧格式惰性兼容读专属；WS 信号形态不动）。写面守卫 `scripts/check-record-write-surface.mjs` 断言面同步（R1-R7：写函数直调 / 两族条目写面白名单 / v1 快照投影构造器与载荷形态拒绝 / 死字节拒绝 / .events 直写拒绝）。条目契约单源 = `packages/subagent-core/src/execution/persistence/record-entry.ts`（subagent-record 族）与 `orchestration/workflow-record-entry.ts`（workflow-record 族）。登记 C-data-20（写面唯一入口口径刷新）。
+
+**v1 兼容层失效版本清单（W4 legacy sunset 统一清理的登记载体，两层失效次序：事件兼容读层 ≥ 词表映射层——后者是 W2 产物）**：
+- 壳 `jsonl-run-store.ts` v1 快照 entry 兼容读（loadAll v1 通道 + reconcileRunningFinality 终局调和旧分支）——只服务 v1 快照条目实体；
+- core `record-store-rebuild.ts` v1 快照解析路径（行为门跳过 v2 后的 v1 残余消费面）；
+- runtime 两 extractor（`workflow-extractor.ts` / `subagent-extractor.ts`）的 v1 分支 + `session-file-extraction.ts` 全文读路径（32MB 预检仅存于此）；
+- core `record-store.ts` `reportSubagentRecord` 的 v1 快照纠偏写点（孤儿纠偏兼容层唯一活写点，写面守卫 R4 白名单登记）；
+- session-reader discovery/workflows 的 v1 快照层与旧 workflow-state-link 指针 fallback（三档发现链的下两档）；
+- `Atomics.wait` 同步睡重试、state-marker 旧值（finalized/cancelled）上行映射等伴随面。
+
+**第六读者失效登记**：`scripts/zcode-session-db-cleanup.mjs`（zcode 引擎存量宿主行清理工具）自持 customType 白名单解析带 `data.v !== 1` 版本门——v1 条目停写后对全部新记录恒跳过、白名单恒空 → 清理面恒空，属**功能性保守降级**（漏清不误删：新记录本来就不落宿主库，白名单空集 = 零删除，语义安全）；该脚本为一次性清理工具，不随 W4 sunset 强制退役，重跑时对存量 v1 数据仍有效。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）

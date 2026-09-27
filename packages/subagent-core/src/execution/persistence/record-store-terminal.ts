@@ -29,6 +29,13 @@ import type { RecordBinding } from "./state-marker.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 import { derivedManifestRecord, hydrateReviveBaseline, recordToSubagent, zcodeRefOf } from "./record-store-rebuild.ts";
 import { findForeignLiveInstance } from "./alive-store.ts";
+import type { RecordJournalEventInput, RecordJournalFoldState } from "./record-events.ts";
+// [W1 / U2a] v2 条目契约与 v2 定界判定（u0 契约层消费）。
+import { SUBAGENT_RECORD_CUSTOM_TYPE, SUBAGENT_RECORD_ENTRY_VERSION, classifySubagentRecordEntryData } from "./record-entry.ts";
+import type {
+  SubagentRecordRegisteredEntryData,
+  SubagentRecordSettledEntryData,
+} from "./record-entry.ts";
 import { ResurrectDeniedError, isPiTranscriptRef } from "../assembly/types.ts";
 import type { ClosedReason, ExecutionRecord, StopReason, SubagentRecord, TranscriptRef } from "../assembly/types.ts";
 
@@ -64,6 +71,13 @@ export interface TerminalCtx {
   writeManifestPersisted: (id: string, manifest: ManifestRecord) => void;
   /** 终态 manifest 落盘（record-store.ts 私有 writeTerminalManifest 注入位）。 */
   writeTerminalManifest: (record: ExecutionRecord) => void;
+  /**
+   * [W1 / D3 表行 5] 终局事件 + v2 终态条目（record-settled 帧，markSettled 写点；
+   * archive 真终局路径同款注入位）。幂等守卫（fold 已 settled 跳过）在被调侧。
+   */
+  settleViaJournal: (record: ExecutionRecord, endedAt: number) => void;
+  /** [W1 / D3] record 事件追加注入位（markReopened 的 record-reopened 帧）。 */
+  appendJournalEvent: (record: ExecutionRecord, input: RecordJournalEventInput) => void;
   notifyChange: () => void;
 }
 
@@ -355,6 +369,10 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
   }
   // ③ manifest 投影（D8 写序 manifest 后；派生投影——非终态如实 legacy running）。
   commitDerivedTransition(record, ctx);
+  // ④ [W1 / D3 表行 5] record-settled 帧 + v2 终态条目（markSettled 是终局写点
+  // 之一——D3 映射表「archive / markSettled / legacy 终态」；幂等守卫在被调侧）。
+  // endedAt 取收口时点（settle 非终态不写 record.endedAt——事件帧的终局时间戳）。
+  ctx.settleViaJournal(record, settledAt);
   return true;
 }
 
@@ -418,6 +436,14 @@ export function markReopenedImpl(record: ExecutionRecord, transcriptRef: Transcr
     );
     return false;
   }
+  // [W1 / D3 表行 6] record-reopened 帧（epoch 递增 + round 归零——binding 持久化
+  // 成功后落账：事件文件与 binding 的 epoch 同源单点，写失败拒绝重开时事件不落）。
+  ctx.appendJournalEvent(record, {
+    type: "record-reopened",
+    ts: Date.now(),
+    epoch: record.epoch ?? 0,
+    round: 0,
+  });
   ctx.reportRecordTransition(record);
   ctx.notifyChange();
   return true;
@@ -527,4 +553,297 @@ export function markSettledOutImpl(record: ExecutionRecord, ctx: TerminalCtx): b
   releaseWriteLeaseImpl(record, ctx);
   commitDerivedTransition(record, ctx);
   return true;
+}
+
+// ============================================================
+// [W1 / U2a] v2 条目构造族 + v2 定界扫描 + 收编组装（纯函数族）
+// ============================================================
+//
+// 变化轴 = 「v2 条目与事件载荷的构造规则」（契约演化集中于此）——终局写点
+// （markSettled/archive/收编）的载荷构造单源。字段集契约单源 = record-entry.ts
+// （u0）；事件词表与 fold 单源 = record-events.ts（u0）。
+
+/** v2 注册条目 data（register 写点；undefined 身份域归一：origin → "tool"、rootSessionId → ""）。 */
+export function toRegisteredEntryData(
+  record: { id: string; agent: string; task: string; slug: string; origin?: string; parentRunId?: string; stepIndex?: number; rootSessionId?: string; parentRecordId?: string; depth: number; startedAt: number },
+): SubagentRecordRegisteredEntryData {
+  return {
+    v: SUBAGENT_RECORD_ENTRY_VERSION,
+    kind: "registered",
+    id: record.id,
+    agent: record.agent,
+    task: record.task,
+    slug: record.slug,
+    origin: record.origin === "workflow" ? "workflow" : "tool",
+    ...(record.parentRunId !== undefined ? { parentRunId: record.parentRunId } : {}),
+    ...(record.stepIndex !== undefined ? { stepIndex: record.stepIndex } : {}),
+    rootSessionId: record.rootSessionId ?? "",
+    ...(record.parentRecordId !== undefined ? { parentRecordId: record.parentRecordId } : {}),
+    depth: record.depth,
+    startedAt: record.startedAt,
+  };
+}
+
+/** v2 终态条目构造载荷（终局写点共用输入面——ExecutionRecord 的统计/终局域字段子集）。 */
+export interface SettledEntrySource {
+  id: string;
+  status: string;
+  stopReason?: StopReason;
+  outcome?: SubagentRecord["outcome"];
+  error?: string;
+  turnCount: number;
+  totalTokens: number;
+  model: string | undefined;
+  thinkingLevel: string | undefined;
+  engine?: string;
+  engineHandle?: SubagentRecord["engineHandle"];
+  sessionFile?: string;
+  result?: string;
+}
+
+/**
+ * ExecutionRecord → SettledEntrySource 映射（终局写点共用：容器终局写点与
+ * face 缺省分支同款消费——条目面独立于事件面工作时载荷构造单源）。
+ */
+export function settledEntrySourceOf(record: ExecutionRecord): SettledEntrySource {
+  return {
+    id: record.id,
+    status: record.status,
+    stopReason: record.stopReason,
+    outcome: record.outcome,
+    error: record.error !== undefined && record.error.length > 0 ? record.error : undefined,
+    turnCount: record.turnCount,
+    totalTokens: record.totalTokens,
+    model: record.model,
+    thinkingLevel: record.thinkingLevel,
+    engine: record.engine,
+    engineHandle: record.engineHandle,
+    sessionFile: record.sessionFile,
+    result: record.result,
+  };
+}
+
+/** v2 终态条目 data（终局写点共用：archive 真终局 / markSettled / 收编幂等补写）。 */
+export function toSettledEntryData(source: SettledEntrySource, endedAt: number): SubagentRecordSettledEntryData {
+  return {
+    v: SUBAGENT_RECORD_ENTRY_VERSION,
+    kind: "settled",
+    id: source.id,
+    status: "idle",
+    stopReason: source.stopReason ?? "interrupted-by-restart",
+    ...(source.outcome !== undefined ? { outcome: source.outcome } : {}),
+    ...(source.error !== undefined ? { error: source.error } : {}),
+    endedAt,
+    turns: source.turnCount,
+    totalTokens: source.totalTokens,
+    model: source.model,
+    thinkingLevel: source.thinkingLevel,
+    ...(source.engine !== undefined ? { engine: source.engine } : {}),
+    ...(source.engineHandle !== undefined ? { engineHandle: source.engineHandle } : {}),
+    ...(source.sessionFile !== undefined ? { sessionFile: source.sessionFile } : {}),
+    ...(source.result !== undefined ? { result: source.result } : {}),
+  };
+}
+
+/** record-settled 帧的 result 摘要锚长度（截断摘要——全文只在 v2 终态条目一次性写）。 */
+const SETTLED_RESULT_SUMMARY_MAX_CHARS = 200;
+
+export function summarizeResultForJournal(result: string | undefined): string | undefined {
+  if (result === undefined || result.length === 0) return undefined;
+  return result.length <= SETTLED_RESULT_SUMMARY_MAX_CHARS
+    ? result
+    : `${result.slice(0, SETTLED_RESULT_SUMMARY_MAX_CHARS)}…`;
+}
+
+/** v2 条目定界状态（registered 定界 + settled 幂等证据）。 */
+export interface V2EntryState {
+  registered: boolean;
+  settled: boolean;
+  rootSessionId: string | undefined;
+}
+
+/**
+ * 主 session 内容 → 每 id 的 v2 条目定界状态（收编双面证据第二条，D4）。
+ * v1 快照行不在本扫描面（v 门跳过——收编定界按注册条目形态分流：v1 实体保留
+ * v1 纠偏循环，D7 兼容层）。判定单源 = classifySubagentRecordEntryData（u2b），
+ * 快过滤与 collectLastRecordEntries 同款（customType 子串）。
+ */
+export function collectV2EntryState(content: string): Map<string, V2EntryState> {
+  const out = new Map<string, V2EntryState>();
+  for (const line of content.split("\n")) {
+    if (!line.includes(SUBAGENT_RECORD_CUSTOM_TYPE)) continue; // 快过滤（绝大多数行不是本类型）
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue; // 截断/异构行跳过（主文件末行可能正被写入）
+    }
+    if (typeof parsed !== "object" || parsed === null) continue;
+    const obj = parsed as Record<string, unknown>;
+    if (obj.type !== "custom" || obj.customType !== SUBAGENT_RECORD_CUSTOM_TYPE) continue;
+    const verdict = classifySubagentRecordEntryData(obj.data);
+    if (!verdict.ok && verdict.reason === "v2") {
+      const entry = verdict.entry;
+      const prev = out.get(entry.id) ?? { registered: false, settled: false, rootSessionId: undefined };
+      if (entry.kind === "registered") {
+        prev.registered = true;
+        prev.rootSessionId = entry.rootSessionId;
+      } else {
+        prev.settled = true;
+      }
+      out.set(entry.id, prev);
+    }
+  }
+  return out;
+}
+
+/** 收编产物的 v2 终态条目（fold + 收编停因组装——model/thinkingLevel 收编形态 undefined 诚实缺省：journal 无此数据源）。 */
+export function buildAdoptedSettledEntry(
+  fold: RecordJournalFoldState,
+  id: string,
+  stopReason: StopReason,
+  now: number,
+): SubagentRecordSettledEntryData {
+  const bound = fold.bound;
+  return {
+    v: SUBAGENT_RECORD_ENTRY_VERSION,
+    kind: "settled",
+    id,
+    status: "idle",
+    stopReason,
+    endedAt: now,
+    turns: fold.roundIdle?.turns ?? 0,
+    totalTokens: fold.roundIdle?.totalTokens ?? 0,
+    model: undefined,
+    thinkingLevel: undefined,
+    ...(bound !== undefined ? { engine: bound.engine } : {}),
+    ...(bound !== undefined ? { engineHandle: bound.engineHandle } : {}),
+    ...(bound !== undefined && bound.sessionFile !== "" ? { sessionFile: bound.sessionFile } : {}),
+  };
+}
+
+/** 收编产物的 record-settled 帧（统计终值取 fold 轮终快照、缺帧诚实 0——判定半边在容器）。 */
+export function buildAdoptedSettledEvent(
+  fold: RecordJournalFoldState,
+  id: string,
+  stopReason: StopReason,
+  now: number,
+): RecordJournalEventInput {
+  return {
+    type: "record-settled",
+    ts: now,
+    stopReason,
+    endedAt: now,
+    turns: fold.roundIdle?.turns ?? 0,
+    totalTokens: fold.roundIdle?.totalTokens ?? 0,
+  };
+}
+
+/** 收编产物的 manifest 投影（derivedManifestRecord 同族形态——身份域取 created 帧、引擎域取 bound 帧、终局域取收编停因）。 */
+export function buildAdoptedManifestProjection(
+  fold: RecordJournalFoldState,
+  id: string,
+  stopReason: StopReason,
+  now: number,
+): ManifestRecord | undefined {
+  const identity = fold.identity;
+  if (identity === undefined) return undefined; // 坏链守卫在容器侧先行（skippedNoIdentity）
+  const bound = fold.bound;
+  return {
+    id,
+    rootSessionId: identity.rootSessionId || "",
+    agentName: identity.agent,
+    status: "running", // legacy 三态投影：无 closedReason → running（executionStatus 承载两态权威词）
+    executionStatus: "idle",
+    createdAt: identity.startedAt,
+    completedAt: now,
+    ...(bound !== undefined && bound.sessionFile !== "" ? { sessionFile: bound.sessionFile } : {}),
+    task: identity.task,
+    slug: identity.slug,
+    ...(bound !== undefined ? { engine: bound.engine } : {}),
+    ...(bound !== undefined ? { engineHandle: bound.engineHandle } : {}),
+  };
+}
+
+// ── [W1 / D3] 事件帧载荷构造与引擎域签名（record-created/bound/settled——容器写
+// ── 点的载荷构造半边；幂等判定与 append 编排留在容器）──────────────
+
+/** record-created 帧载荷（register 写点——D3 表行 1 身份域全量）。 */
+export function buildCreatedEventPayload(
+  record: ExecutionRecord,
+): RecordJournalEventInput {
+  return {
+    type: "record-created",
+    ts: record.startedAt,
+    id: record.id,
+    agent: record.agent,
+    task: record.task,
+    slug: record.slug,
+    origin: record.origin === "workflow" ? "workflow" : "tool",
+    ...(record.parentRunId !== undefined ? { parentRunId: record.parentRunId } : {}),
+    ...(record.stepIndex !== undefined ? { stepIndex: record.stepIndex } : {}),
+    rootSessionId: record.rootSessionId ?? "",
+    ...(record.parentRecordId !== undefined ? { parentRecordId: record.parentRecordId } : {}),
+    depth: record.depth,
+    mode: record.mode,
+    startedAt: record.startedAt,
+  };
+}
+
+/**
+ * 引擎域签名对比（reportRecordTransition 写点——D3 表行 2）。归一形态：pi record
+ * 的 engineHandle 缺省 = 空 sessionRef 桶（落账与对比共用同一归一，避免「record
+ * 缺省 undefined vs 落账归一值」的伪差异把每次过程 transition 都误判为引擎域变化，
+ * 事件面随高频调用放大）。签名三元组 = sessionFile/engine/engineHandle；**epoch
+ * 不参与签名**——epoch 递增由 record-reopened 帧单点承载（D3 表行 6），reopen 后
+ * 的 transition 再落 bound 帧会重复表达同一迁移。
+ */
+export function isBoundSignatureUnchanged(
+  bound: { sessionFile: string; engine: string; engineHandle: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string } } | undefined,
+  sessionFile: string | undefined,
+  engine: string | undefined,
+  engineHandle: ExecutionRecord["engineHandle"],
+): boolean {
+  if (bound === undefined) return false;
+  const normEngine = engine ?? "pi";
+  const normHandle = engineHandle ?? { sessionRef: {}, poolKey: "shared" };
+  return (
+    bound.sessionFile === (sessionFile ?? "") &&
+    bound.engine === normEngine &&
+    JSON.stringify(bound.engineHandle) === JSON.stringify(normHandle)
+  );
+}
+
+/** record-bound 帧载荷（spawn 回填——引擎域归一形态同签名对比）。 */
+export function buildBoundEventPayload(
+  record: ExecutionRecord,
+): RecordJournalEventInput {
+  return {
+    type: "record-bound",
+    ts: Date.now(),
+    sessionFile: record.sessionFile ?? "",
+    engine: record.engine ?? "pi",
+    engineHandle: record.engineHandle ?? { sessionRef: {}, poolKey: "shared" },
+    epoch: record.epoch ?? 0,
+  };
+}
+
+/** record-settled 帧载荷（终局写点——stopReason 缺省 interrupted 保守兜底）。 */
+export function buildSettledEventPayload(
+  record: ExecutionRecord,
+  endedAt: number,
+): RecordJournalEventInput {
+  return {
+    type: "record-settled",
+    ts: endedAt,
+    stopReason: record.stopReason ?? "interrupted",
+    ...(record.outcome !== undefined ? { outcome: record.outcome } : {}),
+    ...(record.error !== undefined && record.error.length > 0 ? { error: record.error } : {}),
+    endedAt,
+    turns: record.turnCount,
+    totalTokens: record.totalTokens,
+    ...(summarizeResultForJournal(record.result) !== undefined
+      ? { resultSummary: summarizeResultForJournal(record.result) }
+      : {}),
+  };
 }

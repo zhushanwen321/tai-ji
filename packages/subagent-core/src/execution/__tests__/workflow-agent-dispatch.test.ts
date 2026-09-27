@@ -298,7 +298,7 @@ describe("executeWorkflowAgent 池顺序", () => {
     expect(result.error).toContain("cancelled"); // 合成 failed result 回脚本
     expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("cancelled"); // run 域 cancelled 收口
-    expect(entries.at(-1)).toMatchObject({ id: record.id, closedReason: "cancelled" });
+    expect(entries.at(-1)).toMatchObject({ id: record.id, kind: "settled", stopReason: "cancelled" });
     expect(fake.runs).toHaveLength(0); // 零引擎副作用
   });
 });
@@ -486,7 +486,9 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     expect(store.getMutable(record.id)).toBeUndefined();
     // 终态 entry（持久化链）携带 origin/closedReason
     const finalEntry = entries.at(-1);
-    expect(finalEntry).toMatchObject({ id: record.id, status: "idle", closedReason: "gc", origin: "workflow" });
+    expect(finalEntry).toMatchObject({ id: record.id, kind: "settled", status: "idle", stopReason: "gc" });
+    // origin 身份域在 v2 注册条目（首条——D1 两条款各承载自己的域）
+    expect(entries[0]).toMatchObject({ id: record.id, kind: "registered", origin: "workflow" });
   });
 
   it("close 路径抢先（user-close 已写 closedReason）→ 静默跳过不覆盖（memory closedReason 不分叉）", async () => {
@@ -525,7 +527,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("cancelled"); // 不漂移为 "gc"（D7 条件含 !aborted）
     const finalEntry = entries.at(-1);
-    expect(finalEntry).toMatchObject({ id: record.id, closedReason: "cancelled" });
+    expect(finalEntry).toMatchObject({ id: record.id, kind: "settled", stopReason: "cancelled" });
     expect(result.content).toBe("done");
   });
 
@@ -664,7 +666,7 @@ describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
     expect(record.status).toBe("idle");
     expect(record.closedReason).toBe("gc");
     expect(store.getMutable(record.id)).toBeUndefined();
-    expect(entries.at(-1)).toMatchObject({ id: record.id, status: "idle", closedReason: "gc" });
+    expect(entries.at(-1)).toMatchObject({ id: record.id, kind: "settled", status: "idle", stopReason: "gc" });
     const supervisor = Reflect.get(service, "roundSupervisor") as { supervisedIds(): string[] };
     expect(supervisor.supervisedIds()).toEqual([]);
   });

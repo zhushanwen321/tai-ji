@@ -39,7 +39,10 @@ import { getLogger } from "../core/logger.ts";
 import { assertSafeTimerDelay } from "../shared/timer-delay.ts";
 import { validateRunArgs } from "./args-validator.ts";
 import {
+  appendWorkflowRecordRegisteredEntry,
+  buildWorkflowRecordSettledEntryData,
   closeOutInFlightCalls,
+  dispatchFinalRunSettle,
   dispatchRunCreated,
   finalizeRun,
   handleWorkerError,
@@ -54,6 +57,7 @@ import { Trace } from "./models/trace.ts";
 import type { DoneReason } from "./models/types.ts";
 import { WorkflowRun } from "./models/workflow-run.ts";
 import type { WorkerHandle } from "./worker-handle.ts";
+import { WORKFLOW_RECORD_CUSTOM_TYPE } from "./workflow-record-entry.ts";
 import { toErrorMessage } from "../core/error-message.ts";
 
 const logger = getLogger("subagents");
@@ -419,6 +423,10 @@ export async function runWorkflow(
 
   try {
     await createdDispatch;
+    // [W1 / D1] v2 注册条目（journal 首帧落账成功后写——锚点语义：条目指向的
+    // journal 此刻已在盘，无悬挂锚）。appendWorkflowRecordRegisteredEntry 内含
+    // best-effort 围栏与 journalPath 可寻址守卫（vitest 防线跳过）。
+    appendWorkflowRecordRegisteredEntry(run, deps);
   } catch (err) {
     const msg = toErrorMessage(err);
     logger.error(
@@ -635,6 +643,12 @@ export interface RecoverCrashedRunsHooks {
    * 容错口径对称。
    */
   onRunRecovered?: (payload: { id: string; reason: string }) => void;
+  /**
+   * [W1 / D1] v2 终态条目补写通道（主 session appendEntry 面；缺省 = 不写条目）。
+   * 收编的 journal 终态事件落账后、state 快照直改前调用——收编产物的条目半边
+   * （D4 序列：追加终态事件 → 补写条目 → 物化）。错误围栏与 onRunRecovered 同款。
+   */
+  appendSettledEntry?: (customType: string, data: unknown) => void;
 }
 
 /**
@@ -696,6 +710,31 @@ export async function recoverCrashedRuns(
     if (run.state.status === "running") {
       // 步骤 2：running → done,failed（顺序对齐 pi：set error → transition → 宿主事件）
       run.state.error = reason;
+      // [W1 / D4] journal 收编先于 state 快照直改（事实源介质归位：run-settled 帧
+      // 经 dispatchFinalRunSettle 走状态机裁决 + manifest 物化——与活体终局同一
+      // dispatch 链，证据落点对称；此前本函数旁路直改 state，journal 永缺终局帧）。
+      // 之后双重启幂等由 adoptInterruptedRun 的 fold-terminal 检查承接（run-registry
+      // 收编入口）。失败围栏：journal IO / 坏链（IllegalTransitionError）留痕后
+      // 继续 state 快照恢复（A-5 语义降级不阻断——快照面照旧收敛 failed）。
+      try {
+        await dispatchFinalRunSettle(run, "failed");
+        hooks?.appendSettledEntry?.(
+          WORKFLOW_RECORD_CUSTOM_TYPE,
+          buildWorkflowRecordSettledEntryData({
+            runId: run.runId,
+            reason: "failed",
+            outcome: "failed",
+            settledAt: Date.now(),
+            callCount: run.state.calls.size,
+            usedTokens: run.state.budget.usedTokens,
+          }),
+        );
+      } catch (err) {
+        const msg = toErrorMessage(err);
+        logger.warn(
+          `[workflow] recoverCrashedRuns journal settle failed for run ${run.runId} (state recovery continues): ${msg}`,
+        );
+      }
       run.transition("done", "failed");
       // [OR-8] 重水合 running 快照可携带 in-flight call（崩溃瞬间的 running 节点）——
       // 终态收口为 cancelled，先收口再落盘

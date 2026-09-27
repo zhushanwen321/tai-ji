@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TRACE_RESULT_MAX_CHARS, Trace } from "@zhushanwen/subagent-core/orchestration/models/trace.ts";
 import { AgentCall } from "@zhushanwen/subagent-core";
 import { Budget } from "@zhushanwen/subagent-core";
+import { fromRunSnapshot } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode, AgentResult, RunSpec } from "@zhushanwen/subagent-core";
 import type { AgentRunner } from "@zhushanwen/subagent-core/orchestration/models/ports.ts";
@@ -356,7 +357,7 @@ describe("W1TC11: jsonl save/load round-trip——落盘裁剪形态 + 重水合
     );
   }
 
-  it("W1TC11: save 落盘 trace 裁剪 + calls[].result 全量；loadAll 回读逐字节一致", async () => {
+  it("W1TC11: save 落盘 trace 裁剪 + calls[].result 全量；state 投影回读逐字节一致（[W1] 停写后投影即 round-trip 面）", async () => {
     const entries: Array<{ type: string; customType?: string; data?: unknown }> = [];
     const mockPi = {
       appendEntry: vi.fn((type: string, data: unknown) => {
@@ -398,10 +399,15 @@ describe("W1TC11: jsonl save/load round-trip——落盘裁剪形态 + 重水合
     // 顶层 calls[].result 字段不裁——全量 10000
     expect(snapshot.state.calls[0]!.result!.content).toHaveLength(10000);
 
-    // loadAll 回读：fromArray 不再裁，与落盘形态逐字节一致（无标记嵌套）
-    const loaded = await store.loadAll();
-    expect(loaded).toHaveLength(1);
-    const restoredContent = loaded[0]!.state.trace.toArray()[0]!.result!.content;
+    // [W1 / D1] 条目通道停写：save 零 workflow-record entry，loadAll 对「只有 state
+    // 投影、无注册条目」的会话返回空（投影可删可重建，非重建源）——round-trip 回读
+    // 面 = state 文件 fromRunSnapshot（call 级详情的持久化投影/恢复面）。
+    expect(entries).toHaveLength(0);
+    const restored = fromRunSnapshot(JSON.parse(raw.trim()));
+    expect(restored).toBeDefined();
+    expect(restored!.runId).toBe("run-trim-001");
+    // fromArray 不再裁，与落盘形态逐字节一致（无标记嵌套）
+    const restoredContent = restored!.state.trace.toArray()[0]!.result!.content;
     expect(restoredContent).toBe(snapshot.state.trace[0]!.result!.content);
     expect(restoredContent.match(/truncated/g)).toHaveLength(1);
   });

@@ -27,7 +27,7 @@
 // 未知 status 永久保留（未来 v3 格式的回滚安全性同构）。
 //
 // 写侧语义（record 持久化收敛 §3.4 / D8 v7）：**权威同步写 + 响亮重试**——写失败
-// 重试 3 次指数退避（100ms 起），仍失败 logger.error 响亮暴露并返回 false（不抛出）。
+// 重试 3 次（零退避立即连发，[W1 / D6] 同步睡退役），仍失败 logger.error 响亮暴露并返回 false（不抛出）。
 // 迁移已完成（D7）：写函数唯一生产调用方 = record-store 内部（意图原语消费返回值）。
 //
 // [UF-1] record 绑定 sidecar（`.record-binding`）同挂本载体族：宿主侧在 record.sessionFile
@@ -71,38 +71,14 @@ const LEGACY_CANCELLED_EXT = ".cancelled";
 
 /** 写失败重试次数（初始尝试之外再试 3 次）。 */
 const STATE_WRITE_RETRY_COUNT = 3;
-/** 指数退避基准：100ms → 200ms → 400ms（磁盘满/权限错通常是暂时状态，立即放弃
- *  会让「同步写必落」在可恢复故障上静默失效）。 */
-const STATE_WRITE_RETRY_BASE_DELAY_MS = 100;
 
-/** 同步退避等待的 SharedArrayBuffer 字长（Atomics.wait 最小载体，单 int32 字）。 */
-const SLEEP_WAIT_INT32_WORDS = 1;
-/** int32 每字 4 字节（Atomics 载体分配换算常数）。 */
-const INT32_BYTES_PER_WORD = 4;
-/** 指数退避底数（100ms → 200ms → 400ms 的倍率来源）。 */
-const BACKOFF_EXPONENT_BASE = 2;
-
-/**
- * 同步 sleep（重试退避用）。Atomics.wait 是 Node 侧标准同步等待原语：不烧 CPU、
- * 不依赖 event loop——写函数运行在同步收尾路径（disposeAllRecords 等同步链），
- * 无法 await。测试经 _setStateMarkerSleepForTest 注入替身（免真实 700ms 等待，
- * 形态对齐 settled-watchdog `_resetSettledWatchdogsForTest` 模块级测试钩子先例）。
- */
-function defaultRetrySleep(ms: number): void {
-  Atomics.wait(
-    new Int32Array(new SharedArrayBuffer(SLEEP_WAIT_INT32_WORDS * INT32_BYTES_PER_WORD)),
-    0,
-    0,
-    ms,
-  );
-}
-
-let retrySleep: (ms: number) => void = defaultRetrySleep;
-
-/** 测试钩子：注入退避替身（fn=undefined 恢复实装）。 */
-export function _setStateMarkerSleepForTest(fn: ((ms: number) => void) | undefined): void {
-  retrySleep = fn ?? defaultRetrySleep;
-}
+// [W1 / D6] 同步退避退役（主线程同步等待原语拆除）：写失败重试改为
+// 立即连发（零退避）——原实现同步睡至多 700ms 会停顿全进程的 session 推送。
+// 重试语义保持（瞬时故障的短窗二连击仍被覆盖）；退避间隔在同步收尾路径
+// （disposeAllRecords 等同步链）无异步等待通道可用，「写挪 worker 线程」形态
+// 的改造成本与 sidecar 写失败本身 <0.1% 的极端场景不匹配（重复保险式过度工程）。
+// 写失败语义不变：重试耗尽 logger.error 响亮 + 返回 false，record 留 running
+// 由 boot 孤儿恢复承接。
 
 // ============================================================
 // 类型
@@ -205,17 +181,14 @@ export function writeSettledState(
 
 /**
  * .state 写入 + 旧名清理（互斥由单文件单状态字段构造性保证）。
- * 响亮重试（§3.4）：初始尝试 + 3 次指数退避重试（100/200/400ms）；仍失败
- * logger.error（终态权威未落必须可见）并返回 false——**不抛出**（收尾路径同步链
- * 不因重试耗尽中断，record 留 running 的处置由意图原语按返回值编排）。
+ * 响亮重试（§3.4）：初始尝试 + 3 次重试（[W1 / D6] 零退避立即连发——同步睡退役，
+ * 见上方重试参数注释）；仍失败 logger.error（终态权威未落必须可见）并返回
+ * false——**不抛出**（收尾路径同步链不因重试耗尽中断，record 留 running 的处置
+ * 由意图原语按返回值编排）。
  */
 function writeStateMarker(sessionFile: string, marker: StateMarker): boolean {
   let lastError: unknown;
   for (let attempt = 0; attempt <= STATE_WRITE_RETRY_COUNT; attempt++) {
-    if (attempt > 0) {
-      // 指数退避：attempt=1 → 100ms、2 → 200ms、3 → 400ms。
-      retrySleep(STATE_WRITE_RETRY_BASE_DELAY_MS * BACKOFF_EXPONENT_BASE ** (attempt - 1));
-    }
     try {
       // 旧名清理放在写成功之后（S12 修复）：读侧 .state 优先，旧名残留无害（仅多一次
       // stat 与「旧名在 .state 缺失/损坏时充当兼容读序兜底」），删除只是 stat 优化非正确性
