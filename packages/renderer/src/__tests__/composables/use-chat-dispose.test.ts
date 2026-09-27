@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useChat disposeSession 测试（W1 / S3）。
  *

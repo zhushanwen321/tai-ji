@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * [W28/D-7.2] projectVisibleRows 投影单测（09 文档 §3.3.2 + §5 D-7.2 验收）。
  *

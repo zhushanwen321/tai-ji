@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * [u6-paging-protocol] 「加载更早」游标翻页测试（D4 中期）。
  *

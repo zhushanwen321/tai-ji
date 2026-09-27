@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * subagent store 单测 —— state / getters / actions 覆盖（数据加载层）。
  *

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useDetailPane composable 单测（detail pane 预览编排）。
  *

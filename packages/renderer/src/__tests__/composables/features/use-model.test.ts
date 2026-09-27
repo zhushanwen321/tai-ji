@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useModel 回执消费测试（U6/C-pi-13，pi-boundary-reliability D3②）。
  *

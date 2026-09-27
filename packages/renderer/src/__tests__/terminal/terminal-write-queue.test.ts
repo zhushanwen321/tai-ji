@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * terminal-write-queue store 测试（Phase 5 V5.1）。
  *

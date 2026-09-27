@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useStreamingPin 单测 —— streaming turn 钉扎驱动逻辑（W3 共存防护 + PR#116 review M3 修复）。
  *

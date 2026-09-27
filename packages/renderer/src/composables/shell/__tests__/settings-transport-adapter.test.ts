@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * settings-transport-adapter 测试（两支合并）：
  *

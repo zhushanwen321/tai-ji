@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * chat store occupancy 投影测试（session-occupancy u5b / D1，验收①）。
  *

@@ -141,6 +141,11 @@ export interface RelayRegistryOptions {
   publish: (sessionId: string, msg: ServerMessage) => void
   /** spawn 命令覆盖（测试注入假 pi；缺省 findPiExecutable(projectRoot)）。 */
   piCommand?: string
+  /**
+   * 孤儿收割杀链的 SIGTERM→SIGKILL 宽限（缺省 RELAY_KILL_GRACE_MS）。测试注入小值
+   * 压缩收割用例的真实等待；生产调用方勿传。
+   */
+  orphanKillGraceMs?: number
 }
 
 /**
@@ -832,7 +837,7 @@ export class RelayRegistry {
         }
       }
       this.removePidFile(pidFile)
-    }, RELAY_KILL_GRACE_MS).unref()
+    }, this.opts.orphanKillGraceMs ?? RELAY_KILL_GRACE_MS).unref()
   }
 
   /**

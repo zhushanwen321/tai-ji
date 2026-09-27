@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useBackgroundWork 谓词测试（CW wave `completion-sound-bg-guard`）。
  *

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useHandoffEffect 单测 —— fast-handoff 全局订阅（agent-driven 模式 wave2 简化版）。
  *

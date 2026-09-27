@@ -190,7 +190,9 @@ describe('D1 台账 session 生命周期事件接线（u1d1）', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'crash-journal-u1d1-del-'))
     const { pm, svc } = await makeEnv()
 
-    await pm.createSession('sid-del', '/project')
+    // startupDelayMs 5：压缩启动确认窗口（本文件 exit 全部由测试在 createSession
+    // 之后手动 emit，恒在窗口外；生产缺省 500ms 不变）
+    await pm.createSession('sid-del', '/project', { startupDelayMs: 5 })
     await svc.initializeManagedSession('sid-del', {} as unknown as IPiEngine, '/project', 'label')
     expect(pm.hasClient('sid-del')).toBe(true)
 
@@ -219,7 +221,7 @@ describe('D1 台账 session 生命周期事件接线（u1d1）', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'crash-journal-u1d1-crash-'))
     const { pm, svc } = await makeEnv()
 
-    await pm.createSession('sid-crash', '/project')
+    await pm.createSession('sid-crash', '/project', { startupDelayMs: 5 })
     await svc.initializeManagedSession('sid-crash', {} as unknown as IPiEngine, '/project', 'label')
 
     // 5s 后自动 respawn 的 restore 内核 mock（真实实现会磁盘扫描，测试只关心事件面）
@@ -252,8 +254,8 @@ describe('D1 台账 session 生命周期事件接线（u1d1）', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'crash-journal-u1d1-destroy-all-'))
     const { pm } = await makeEnv()
 
-    await pm.createSession('sid-a', '/project')
-    await pm.createSession('sid-b', '/project')
+    await pm.createSession('sid-a', '/project', { startupDelayMs: 5 })
+    await pm.createSession('sid-b', '/project', { startupDelayMs: 5 })
     await pm.destroyAll()
     await Promise.resolve()
 
@@ -266,7 +268,7 @@ describe('D1 台账 session 生命周期事件接线（u1d1）', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'crash-journal-u1d1-digest-'))
     const { pm, svc } = await makeEnv()
 
-    await pm.createSession('sid-big', '/project')
+    await pm.createSession('sid-big', '/project', { startupDelayMs: 5 })
     await svc.initializeManagedSession('sid-big', {} as unknown as IPiEngine, '/project', 'label')
     vi.spyOn(svc, 'restoreSession').mockResolvedValue({} as never)
 

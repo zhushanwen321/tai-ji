@@ -208,7 +208,7 @@ describe('runOAuthLogin — 标准 device flow', () => {
         })
       }
       if (url === 'https://auth.x.ai/oauth2/token') {
-        if (polled++ === 0) return jsonResponse({ error: 'slow_down', interval: 1 }, 400)
+        if (polled++ === 0) return jsonResponse({ error: 'slow_down', interval: 0.005 }, 400)
         return jsonResponse({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 })
       }
       return jsonResponse({}, 404)
@@ -280,7 +280,7 @@ describe('runOAuthLogin — openai-codex 非标 device 协议', () => {
         // 起始是 JSON POST
         expect(init?.method).toBe('POST')
         expect(body.client_id).toBe('app_codex')
-        return jsonResponse({ device_auth_id: 'da-1', user_code: 'CODEX-CODE', interval: '1' })
+        return jsonResponse({ device_auth_id: 'da-1', user_code: 'CODEX-CODE', interval: '0.005' })
       }
       if (url === 'https://auth.openai.com/api/accounts/deviceauth/token') {
         if (polled++ === 0) {
@@ -502,7 +502,7 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
   it('openai-codex：二次 exchange 端点 500 → 失败并带 HTTP 状态', async () => {
     mockFetch(async (url) => {
       if (url === 'https://auth.openai.com/api/accounts/deviceauth/usercode') {
-        return jsonResponse({ device_auth_id: 'da-1', user_code: 'CODEX-CODE', interval: '1' })
+        return jsonResponse({ device_auth_id: 'da-1', user_code: 'CODEX-CODE', interval: '0.005' })
       }
       if (url === 'https://auth.openai.com/api/accounts/deviceauth/token') {
         return jsonResponse({ authorization_code: 'authz-code', code_verifier: 'verifier-x' })

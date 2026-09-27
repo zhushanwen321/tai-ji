@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useChat × useCompactQueue 集成单测 —— send.rejected compacting 兜底入队
  * （session-occupancy-send-closure——已删除，git 可追溯——u3-p1-renderer）。

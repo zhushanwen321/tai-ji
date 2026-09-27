@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useForkActions forkFromLastAssistant 错误反馈测试（⌘G 快捷键路径）。
  *

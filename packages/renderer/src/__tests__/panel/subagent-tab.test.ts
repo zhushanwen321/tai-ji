@@ -178,7 +178,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     _resetDrawerForTest()
     // drawer control 是 per-session 分区（sidRef 绑定驱动）：绑定固定 sid 才能让 openSubagent
     // 的写入与 SubagentTab 的 useDrawerControl 读到同一分区（renderer 由 useSideDrawer 顶层
-    // 绑 focusedSessionId，测试直连 core 域同款手法——PanelContainer.test.ts 先例）
+    // 绑 focusedSessionId，测试直连 core 域同款手法——panel-container-drawer-mode.test.ts 先例）
     bindDrawerSessionId(ref(MAIN_SID))
     vi.stubGlobal('ResizeObserver', NoopResizeObserver)
     HTMLElement.prototype.scrollTo = vi.fn()

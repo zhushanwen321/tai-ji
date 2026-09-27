@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * state-tone-lock —— 状态→色档映射全集锁测试（[W2 D8] UI 全集锁）。
  *

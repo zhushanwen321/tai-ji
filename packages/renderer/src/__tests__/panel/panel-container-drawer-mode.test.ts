@@ -21,16 +21,20 @@
  *
  * 控制态经 core drawer 域直连（PanelContainer 自持 bindDrawerSessionId，不消费 useSideDrawer
  * 兼容层——C1）：测试同样直连 core（bindDrawerSessionId + openDrawerTab + _resetDrawerForTest）。
- * 桌面独占面板隔离分两层：静态重面板（GitPanel/CommandDocPanel/BackgroundTaskDetailPanel/
- * PlanDocsPanel/BtwPanel）vi.mock 占位组件（import 期替换——global.stubs 只在渲染期替换，
- * import 期仍加载原模块触发 PanelContainer 整棵依赖图 transform，每文件 ~1.5s）；懒加载
+ * 静态依赖隔离：重面板（GitPanel/CommandDocPanel/BackgroundTaskDetailPanel/PlanDocsPanel/
+ * BtwPanel）与壳层组件（Panel/PanelHeader/ToastContainer/TraceInspector/SubagentTab/
+ * WorkflowTab/StatusBar）vi.mock 占位组件（import 期替换——global.stubs 只在渲染期替换，
+ * import 期仍加载原模块触发 PanelContainer 整棵依赖图 transform，四个 PanelContainer 测试
+ * 文件的用例时间合计被该 transform 主导；壳层组件零 DOM 断言，占位只保挂载点）。懒加载
  * DetailPane/TerminalView（PanelContainer 动态 import，不在静态图内）保留渲染期 stub。
+ * DrawerPanel（@taiji/ui/features/drawer）真实渲染：drawer-panel/tab/空态断言与
+ * header-extra slot 承接都在它身上。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-container-drawer-mode.test.ts
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { mount, enableAutoUnmount } from '@vue/test-utils'
-import { defineComponent, ref, computed, nextTick, reactive } from 'vue'
+import { defineComponent, ref, computed, nextTick, reactive, type Component } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import {
@@ -73,6 +77,36 @@ vi.mock('@/components/panel/BtwPanel.vue', () => ({
   default: { name: 'BtwPanel', template: '<div data-testid="btw-panel" />' },
 }))
 
+// ── 壳层组件 vi.mock（import 期替换，同上砍整图 transform；七个组件在本文件零 DOM 断言，
+// 占位空壳保挂载点即可。Panel 例外：保 testid="panel" + data-panel-id，壳行为用例断言主
+// panel 挂载数量。StatusBar 来自 @taiji/ui/extension-host，mock 路径须与 PanelContainer 的
+// import 说明符一致。DrawerPanel 不 mock——真实渲染承接全部 drawer 断言与 header-extra slot）──
+vi.mock('@/components/panel/Panel.vue', () => ({
+  default: {
+    name: 'Panel',
+    props: { panelId: String, sessionId: { type: String, default: null } },
+    template: '<div data-testid="panel" :data-panel-id="panelId" />',
+  },
+}))
+vi.mock('@/components/panel/PanelHeader.vue', () => ({
+  default: { name: 'PanelHeader', template: '<div />' },
+}))
+vi.mock('@/components/ui/ToastContainer.vue', () => ({
+  default: { name: 'ToastContainer', template: '<div />' },
+}))
+vi.mock('@/components/panel/trace/TraceInspector.vue', () => ({
+  default: { name: 'TraceInspector', template: '<div />' },
+}))
+vi.mock('@/components/panel/SubagentTab.vue', () => ({
+  default: { name: 'SubagentTab', template: '<div />' },
+}))
+vi.mock('@/components/panel/WorkflowTab.vue', () => ({
+  default: { name: 'WorkflowTab', template: '<div />' },
+}))
+vi.mock('@taiji/ui/extension-host', () => ({
+  StatusBar: { name: 'StatusBar', template: '<div />' },
+}))
+
 // ── mock chatStore：unread badge（AC-13）可控消息数 ──
 // PanelContainer 用 chatStore.getMessages(sessionId).length 感知 agent 新消息。
 // vitest 的 vi.mock 工厂无法引用非 hoisted 顶层 import（reactive），故用 hoisted 容器做转发：
@@ -100,30 +134,23 @@ vi.mock('@/stores/chat', () => ({
 // 注册 reader：工厂首次执行（PanelContainer 动态 import）时 read() 已能转发到响应式 Map
 chatMock.registerReader((sid) => reactiveMessages.get(sid) ?? [])
 
-// ── 渲染期 stub（vi.mock 未覆盖的组件）：静态轻组件 Panel + 懒加载 DetailPane/TerminalView
-// （PanelContainer 动态 import 的 v-else-if 互斥分支，不在静态依赖图内，渲染期 stub 即可）──
+// ── 渲染期 stub（vi.mock 未覆盖的组件）：懒加载 DetailPane/TerminalView（PanelContainer
+// 动态 import 的 v-else-if 互斥分支，不在静态依赖图内，渲染期 stub 即可）──
 const DesktopStub = (name: string, testid: string) =>
   defineComponent({
     name,
     template: `<div data-testid="${testid}" />`,
   })
 
-// Panel stub：占位，避免 Panel 内部的 chat/session 依赖
-const PanelStub = defineComponent({
-  name: 'Panel',
-  props: { panelId: String, sessionId: { type: String, default: null } },
-  template: '<div data-testid="panel" :data-panel-id="panelId" />',
-})
-
-async function mountContainer() {
+async function mountContainer(stubOverrides: Record<string, Component> = {}) {
   // 动态 import 让 vi.mock 先生效
   const PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
   return mount(PanelContainer, {
     global: {
       stubs: {
-        Panel: PanelStub,
         DetailPane: DesktopStub('DetailPane', 'detail-panel'),
         TerminalView: DesktopStub('TerminalView', 'terminal-panel'),
+        ...stubOverrides,
       },
     },
   })
@@ -184,6 +211,42 @@ describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）
 
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="panel"]')).toHaveLength(1)
+  }, 60_000)
+})
+
+// 首屏冒烟（TC1）：DrawerPanel 探针 stub 仅本用例覆盖——断言壳派发的 sessionId 落进
+// DrawerPanel props 面；其余用例走真实 DrawerPanel（drawer-panel/tab DOM 断言面）。
+const DrawerPanelProbe = defineComponent({
+  name: 'DrawerPanel',
+  props: {
+    isOpen: Boolean,
+    activeTab: String,
+    docked: Boolean,
+    sessionId: { type: String, default: null },
+  },
+  template:
+    '<div data-testid="drawer-panel" :data-is-open="isOpen" :data-active-tab="activeTab" :data-session-id="sessionId" />',
+})
+
+describe('PanelContainer 首屏冒烟（TC1）', () => {
+  it('drawerOpen=true：resize handle（separator）+ main/drawer 双区域挂载 + DrawerPanel 收到壳派发的 sessionId', async () => {
+    // 先 loadSession 让 panel store 有 focusedSessionId，再 open（分区键为 null 时 open 写入
+    // 的 isOpen 落不到 mount 后 active panel 对应的分区）
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 'sess-tc1')
+    openDrawerTab('git') // 打开 drawer（git tab）
+
+    const wrapper = await mountContainer({ DrawerPanel: DrawerPanelProbe })
+
+    // resize handle 存在（drawer 打开时可拖动调宽，role=separator 键盘可达）
+    const handle = wrapper.find('[data-testid="drawer-resize-handle"]')
+    expect(handle.exists()).toBe(true)
+    expect(handle.attributes('role')).toBe('separator')
+    // main-area + drawer-area 双区域挂载（手写 flex，宽度拆分）
+    expect(wrapper.find('[data-testid="main-area"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="drawer-area"]').exists()).toBe(true)
+    // DrawerPanel 探针收到壳派发的 sessionId（分区键跟随 panel）
+    expect(wrapper.find('[data-testid="drawer-panel"]').attributes('data-session-id')).toBe('sess-tc1')
   }, 60_000)
 })
 

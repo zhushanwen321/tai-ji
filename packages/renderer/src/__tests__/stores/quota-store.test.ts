@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * Quota store 单测。
  *

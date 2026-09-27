@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * RD-5 code-harden 定向回归（P9 收尾批次）。
  *

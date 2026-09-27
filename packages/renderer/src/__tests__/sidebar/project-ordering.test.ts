@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * Project 排序与 reorder 单测（ProjectSwitcher 3A，D7 用户控制序 + drop 密集重排）。
  *

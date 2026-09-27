@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * Chat store 瞬态状态收口回归测试（W3）。
  *

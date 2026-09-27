@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useToast 限流（D7 S3-W4 在列上限）单测。
  *

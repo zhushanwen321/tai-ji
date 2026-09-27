@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * workspaceStore 单测 —— W3 前端改接 workspaceStore。
  *

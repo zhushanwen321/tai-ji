@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useAuthedModelGroups 守卫测试（design scoped-model-extension-candidates T3）。
  *

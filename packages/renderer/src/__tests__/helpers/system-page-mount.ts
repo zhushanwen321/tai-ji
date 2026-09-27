@@ -12,7 +12,7 @@
  * helper 导出）；断言与用例特定 mock 覆写（mockResolvedValue）留在原测试文件。
  */
 import { mount, flushPromises } from '@vue/test-utils'
-import { ref } from 'vue'
+import { ref, type Component } from 'vue'
 import { vi } from 'vitest'
 import type { ProviderInfo, ModelInfo } from '@taiji/shared'
 import { getSettingsStore, type SystemSettings } from '@taiji/core'
@@ -138,6 +138,18 @@ export async function mountSystemPage(): Promise<ReturnType<typeof mount>> {
     props: { system: systemFixture() },
     attachTo: document.body,
   })
+  await flushPromises()
+  return wrapper
+}
+
+/** 直挂单个 system Section（交互断言用例）：SystemPage 全页集成树 = 6 Section +
+ *  UpdateCheckCard 等全量编译，交互断言只关单 Section 时是纯浪费。Section 依赖面 =
+ *  settings API mock + useToast mock + useAuthedModelGroups（真实实现，数据经 seedStore
+ *  注入）；props 契约与全页 mount 一致（system fixture；Section 变更经各自 API 持久化，
+ *  不经 update 事件）。Section 组件同样动态 import（理由同 mountSystemPage）。 */
+export async function mountSystemSection(load: () => Promise<{ default: Component }>): Promise<ReturnType<typeof mount>> {
+  const { default: Section } = await load()
+  const wrapper = mount(Section, { props: { system: systemFixture() } })
   await flushPromises()
   return wrapper
 }

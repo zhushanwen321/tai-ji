@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useChat 单测 —— 流式状态机（AGENTS.md 规则 #3/#7 防护的「UI 卡思考中」失败模式）。
  *

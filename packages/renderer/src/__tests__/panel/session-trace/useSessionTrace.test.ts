@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * A41 per-session trace store 单测（trace-ui，ADR-0049 useSessionScopedState 分区）。
  *

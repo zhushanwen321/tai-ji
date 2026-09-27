@@ -24,7 +24,7 @@
  * 新代码直接 import '@taiji/core/domain/drawer'）。
  *
  * A 已直连 core、仅注释提及（无 import）：PanelContainer.vue（line 19/173 注释）、
- *   PanelContainer.test.ts（注释）、useSearchModal.ts（注释）、stores/panel.ts（注释）、
+ *   panel-container-drawer-mode.test.ts（注释）、useSearchModal.ts（注释）、stores/panel.ts（注释）、
  *   turn-skill-badge.test.ts（注释）。无需迁移。
  * [P4 s5 drawer-widget-removal] 原 B 项（useSidebar.ts consumePendingOpen）已随本 wave 删除
  *   （pendingOpen 机制整体移除）。

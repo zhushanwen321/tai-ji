@@ -19,6 +19,8 @@ const MOCK_BOOTSTRAP = resolve(__dirname, 'fixtures/plugin-bootstrap-process.moc
 const NOOP_ESM_LOADER = resolve(__dirname, 'fixtures/noop-esm-loader.cjs')
 
 const DEFAULT_LOAD_TIMEOUT_MS = 10_000
+/** disconnect 宽限注入值（生产默认 250ms 不变；配套守卫窗口 sleep 等比缩小）。 */
+const TEST_DISCONNECT_GRACE_MS = 50
 
 function createHost(options?: { loadTimeoutMs?: number }): {
   host: PluginHostProcess
@@ -30,6 +32,7 @@ function createHost(options?: { loadTimeoutMs?: number }): {
     // MF-1：sandbox fork 边界断言 execArgv 含 --import；测试用 noop loader 满足契约
     execArgv: ['--import', NOOP_ESM_LOADER],
     loadTimeoutMs: options?.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS,
+    disconnectGraceMs: TEST_DISCONNECT_GRACE_MS,
   })
   return { host, rpc }
 }
@@ -202,8 +205,8 @@ describe('PluginHostProcess', () => {
     // rpcServer 已 unregister：invoke 应报 Worker not found
     await expect(rpc.invoke(processId, 'test.method', {}, 100)).rejects.toThrow(/not found/i)
 
-    // 等待事件传播，terminated 守卫应阻止 crash 回调
-    await new Promise((resolve) => setTimeout(resolve, 150))
+    // 等待事件传播，terminated 守卫应阻止 crash 回调（覆盖 grace 定时器到期后的形态）
+    await new Promise((resolve) => setTimeout(resolve, TEST_DISCONNECT_GRACE_MS + 50))
     expect(crashes.length).toBe(0)
   })
 
@@ -259,7 +262,8 @@ describe('PluginHostProcess', () => {
     await waitFor(() => crashes.length >= 1)
 
     // 等足够时间让后续事件（如额外 exit/disconnect）传播，守卫应阻止重复回调
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    // （sleep 覆盖 grace 定时器到期：到期后幂等守卫必须拦住第二次回调）
+    await new Promise((resolve) => setTimeout(resolve, TEST_DISCONNECT_GRACE_MS + 50))
     expect(crashes.length).toBe(1)
   })
 
@@ -302,7 +306,9 @@ describe('PluginHostProcess', () => {
 
     // 3. 等旧进程晚到的 exit 传播：修复前旧 child 监听残留，exit 会命中新 handle
     //    （健康进程被误标 crashed + crash 回调重复触发）；修复后 createProcess 已
-    //    removeAllListeners 旧 child + handleProcessCrash kill 兜底，不应再有任何影响
+    //    removeAllListeners 旧 child + handleProcessCrash kill 兜底，不应再有任何影响。
+    //    600ms = mock fatalThenExit 的 300ms 退出延迟 + 传播余量（mock 竞态窗口构造
+    //    部件，与 disconnectGraceMs 无关，不可随宽限注入等比缩小）
     await new Promise((resolve) => setTimeout(resolve, 600))
     expect(host.getProcessHandleById(processId)!.status).toBe('active')
     expect(crashes.length).toBe(1)

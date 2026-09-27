@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * workflow store 单测 —— state / getters / actions 覆盖（9 组 describe / 38 用例）。
  *

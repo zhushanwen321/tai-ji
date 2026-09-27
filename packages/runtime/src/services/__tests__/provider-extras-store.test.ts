@@ -66,6 +66,9 @@ describe('TaijiProviderStore', () => {
   })
 
   it('并发 modify 同 provider：最终状态一致无交错（proper-lockfile 串行化 RMW）', async () => {
+    // 并发用例注入小退避下限：锁竞争重试等待从 100ms 级压到 5ms 级（生产默认 100 不变）；
+    // 并发语义断言（串行化、无交错）不受退避时长影响
+    const store = new TaijiProviderStore(file, { lockMinRetryTimeoutMs: 5 })
     // 两个 Promise 同时写同 provider 的不同字段，各自基于 current 增量更新——
     // 锁保证后者在锁内重读到前者的结果，两字段都保留（无交错半写）
     await Promise.all([
@@ -89,6 +92,7 @@ describe('TaijiProviderStore', () => {
   })
 
   it('并发 modify 不同 provider：全部保留', async () => {
+    const store = new TaijiProviderStore(file, { lockMinRetryTimeoutMs: 5 })
     await Promise.all(
       Array.from({ length: 10 }, (_, i) =>
         store.modify(`p${i}`, () => ({ quota: { enabled: true, fetcher: `f${i}` } })),
@@ -306,6 +310,7 @@ describe('TaijiProviderStore', () => {
 
   describe('A4 与 per-provider modify 串行安全', () => {
     it('交错调用 modifyScopedModels 与 modify 同一文件，无丢更新', async () => {
+      const store = new TaijiProviderStore(file, { lockMinRetryTimeoutMs: 5 })
       // 先写入初始数据
       await store.modifyScopedModels(() => ['openai/gpt-4o'])
       await store.modify('openai', () => ({ authMethod: 'api_key' }))
@@ -323,6 +328,7 @@ describe('TaijiProviderStore', () => {
     })
 
     it('高并发交错：多次 modifyScopedModels + 多次 modify，最终状态一致', async () => {
+      const store = new TaijiProviderStore(file, { lockMinRetryTimeoutMs: 5 })
       // 20 个并发操作：10 个 modifyScopedModels 追加 + 10 个 modify 写入不同 provider
       await Promise.all([
         ...Array.from({ length: 10 }, (_, i) =>

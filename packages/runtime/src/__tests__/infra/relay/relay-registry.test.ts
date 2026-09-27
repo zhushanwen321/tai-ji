@@ -36,12 +36,20 @@ class TestAgent {
   private conn!: net.Socket
   private buffer = ''
   readonly opened: Promise<void>
+  /**
+   * server 侧写半关闭的回程 FIN 已达（server conn 默认 allowHalfOpen=false：收到我方
+   * FIN 自动 end 写侧）——此后 runtime 侧所有 writeFrame 必走丢帧 guard 分支。
+   */
+  readonly serverFin: Promise<void>
 
   constructor(private readonly socketPath: string) {
     this.opened = new Promise((resolve, reject) => {
       this.conn = net.connect({ path: socketPath })
       this.conn.once('connect', resolve)
       this.conn.once('error', reject)
+    })
+    this.serverFin = new Promise((resolve) => {
+      this.conn.once('end', () => resolve())
     })
     this.conn.on('data', (d: Buffer) => {
       this.buffer += d.toString('utf-8')
@@ -189,8 +197,8 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     vi.restoreAllMocks()
   })
 
-  async function startServer(): Promise<void> {
-    await initRelayServer({ projectRoot: workDir, dataDir, publish, piCommand: process.execPath })
+  async function startServer(opts?: { orphanKillGraceMs?: number }): Promise<void> {
+    await initRelayServer({ projectRoot: workDir, dataDir, publish, piCommand: process.execPath, orphanKillGraceMs: opts?.orphanKillGraceMs })
   }
 
   t('init：listen + socket 文件创建 + active 状态', async () => {
@@ -547,12 +555,14 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     agent.send(hs)
     await waitFor(() => agent.frames.some((f) => f.kind === 'accept'), 30_000, 'accept frame')
     await waitFor(() => existsSync(ready), 30_000, 'fake-pi streaming')
-    // 收到若干流帧证明字节泵在转发，再半关闭
-    await waitFor(() => agent.dataUp().length > 0, 30_000, 'stream frames flowing')
+    // 收到若干流帧证明字节泵在转发（k=3 留余量防 readline 拆帧与调度抖动），再半关闭
+    await waitFor(() => agent.dataUp().length >= 3, 30_000, 'stream frames flowing')
     agent.halfClose()
     // 修复前：writeFrame 在此处同步抛 EPIPE → uncaughtException → 测试 worker 崩溃；
-    // 修复后：帧被丢弃，进程存活。等足够多 chunk 走过半关闭窗口。
-    await new Promise((r) => setTimeout(r, 500))
+    // 修复后：帧被丢弃，进程存活。半关闭窗口走边界事件锚定：等 server 回程 FIN
+    // （此后 writeFrame 必走丢帧 guard；子进程 10ms 间隔持续输出，guard 回归失效会在
+    // 窗口内下一个 chunk 到达时同步抛出），不再固定 sleep。
+    await agent.serverFin
     // 存活断言：新连接仍可握手注册（进程未崩、注册表未坏）；recordId 覆盖需同步 env 归属键
     const probe = new TestAgent(socketPath)
     await probe.opened
@@ -726,7 +736,9 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       // 孤儿形态：spawn 在「现在」（进程已启动后写记录），runtime 已死（无注册表）
       const pidFile = getRelayPidFilePath('rec-orphan', dataDir)
       await writeFileAsync(pidFile, JSON.stringify({ pid: child.pid, spawnedAt: Date.now() }))
-      await startServer()
+      // grace 100ms：收割杀链 SIGTERM→SIGKILL 窗口压缩（orphan 有 SIGTERM handler 即退，
+      // 不走 SIGKILL），用例只锁「SIGTERM 到达 + 收割完成」语义
+      await startServer({ orphanKillGraceMs: 100 })
       await waitFor(() => existsSync(marker), 30_000, 'orphan reaped by sweep')
       await waitFor(() => !existsSync(pidFile), 30_000, 'orphan pid file removed')
     })
@@ -758,7 +770,8 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       mkdirSync(logsDir, { recursive: true })
       const teeFile = join(logsDir, `pi-relay-${new Date().toISOString().slice(0, 10)}-${recordId}.jsonl`)
       writeFileSync(teeFile, '{"type":"message_update"}\n')
-      await startServer()
+      // grace 100ms 同上：补杀杀链窗口压缩，defer/补杀语义不变
+      await startServer({ orphanKillGraceMs: 100 })
       const registry = getActiveRelayRegistry()
       if (registry === null || registry === undefined) throw new Error('registry not active')
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})

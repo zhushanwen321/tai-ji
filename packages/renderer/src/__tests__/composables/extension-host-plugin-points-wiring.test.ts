@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useExtensionHostBridge 接线测试（plugin-header-action-modal-points u4b）。
  *

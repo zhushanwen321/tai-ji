@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * PR#116 review chat store 层修复回归测试（B1 / B2 / M1 / M2）。
  *

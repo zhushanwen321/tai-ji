@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * fork 分支通知链路单测（V7 代码级断言：角标产生 → 读后清除 → 切会话保持）。
  *
@@ -6,6 +8,11 @@
  * 断言链：session.forkNotice 广播 → registerFork 基线 → groups 广播 diff（active→done）
  * → unreadByBranch 角标产生 + 反馈行追加（RV2）→ clearUnread 清除 → 再次 groups 广播已读态
  * 不回灌（切会话语义：config.sessions 全量广播重放）；非活跃分支角标跨广播保留（ADR-0049）。
+ *
+ * 另含 ForkNotice suppress（btw 流渲染，[M4-a / btw-question D4]，P-invisible 渲染面）：
+ * 线是 fork 产物（header.parentSession 指向源）但「关联只删不显」——fork 反馈行/分支追踪
+ * 状态不进 btw 流。抑制落 useForkNoticeFeed().notices 读口单点（MessageStream 全部消费方
+ * 经此读取）；主会话 feed 行为回归对照在 suppress 用例内。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/effects/use-fork-branch-notify.test.ts
  */
@@ -16,6 +23,7 @@ import * as events from '@taiji/core/transport/api'
 import type { ServerMessage, SessionGroup, SessionSummary } from '@taiji/shared'
 import {
   bindForkNoticeEffect,
+  pushForkNoticeAsk,
   resetForkNoticeFeed,
   useForkNoticeFeed,
 } from '@/composables/effects/useForkNoticeEffect'
@@ -144,5 +152,20 @@ describe('fork 分支角标（V7：产生 → 读后清除 → 切会话保持�
     scope?.stop()
     await nextTick()
     expect(unreadByBranch.value.size).toBe(0)
+  })
+})
+
+describe('ForkNotice suppress（btw 流）', () => {
+  it('notice 推给 btw vid → notices(vid) 构造性空；主会话同型推送照常可见', () => {
+    pushForkNoticeAsk('btw:line-fn-1', 'new-branch-1', '旁路提问预览')
+    pushForkNoticeAsk('main-fn-1', 'new-branch-2', '主分支预览')
+
+    const feed = useForkNoticeFeed()
+    expect(feed.notices('btw:line-fn-1')).toHaveLength(0) // btw 流 suppress（D4）
+    expect(feed.notices('main-fn-1')).toHaveLength(1) // 主会话行为不变（回归对照）
+
+    // suppress 对交互幂等：dismiss/clear 对空表零动作不抛
+    expect(() => feed.dismissNotice('btw:line-fn-1', 1)).not.toThrow()
+    expect(() => feed.clearSession('btw:line-fn-1')).not.toThrow()
   })
 })

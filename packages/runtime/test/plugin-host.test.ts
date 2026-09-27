@@ -109,9 +109,9 @@ describe('PluginHost', { timeout: 30_000 }, () => {
     host.getWorkerInstance(workerId)!.on('exit', (code) => exitCodes.push(code))
 
     await host.terminateWorker(workerId)
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    // exit 事件驱动：等 exit code 1 真实传播（不再固定 sleep 猜时序）
+    await vi.waitFor(() => expect(exitCodes).toEqual([1]), { timeout: 2000 })
 
-    expect(exitCodes).toEqual([1])
     expect(handle.status).toBe('terminated')
     expect(crashes).toEqual([])
     expect(host.getCrashCount('term-trusted')).toBe(0)
@@ -136,9 +136,9 @@ describe('PluginHost', { timeout: 30_000 }, () => {
     host.getWorkerInstance(workerId)!.on('exit', (code) => exitCodes.push(code))
 
     await host.shutdown()
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    // exit 事件驱动：等 exit code 1 真实传播（不再固定 sleep 猜时序）
+    await vi.waitFor(() => expect(exitCodes).toEqual([1]), { timeout: 2000 })
 
-    expect(exitCodes).toEqual([1])
     expect(handle.status).toBe('terminated')
     expect(crashes).toEqual([])
     expect(host.getCrashCount('shutdown-trusted')).toBe(0)
@@ -161,7 +161,9 @@ describe('PluginHost', { timeout: 30_000 }, () => {
     await host.loadPlugin(workerId, 'shutdown-sandbox', '/virtual/plugin', 'sandbox')
 
     await host.shutdown()
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    // sandbox 子进程 SIGTERM→exit 传播 ms 级（getWorkerInstance 仅声明 Worker 形态，
+    // sandbox 无可靠 exit 事件可挂，保留小余量固定等待）
+    await new Promise((resolve) => setTimeout(resolve, 100))
 
     expect(crashes).toEqual([])
   })
@@ -188,6 +190,9 @@ describe('PluginHost', { timeout: 30_000 }, () => {
 
     const worker = host.getWorkerInstance(workerId)!
     const termSpy = vi.spyOn(worker, 'terminate')
+    // exit 监听：幂等守卫断言用（WORKER_MOCK 自然退出 code 0，故只锚事件发生不锁 code 值）
+    const exitCodes: number[] = []
+    worker.on('exit', (code) => exitCodes.push(code))
 
     vi.useFakeTimers()
     try {
@@ -213,8 +218,8 @@ describe('PluginHost', { timeout: 30_000 }, () => {
       vi.useRealTimers()
     }
 
-    // 幂等守卫：本 terminate 触发的 exit(code=1) 不二次 crash（等事件真实传播）
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    // 幂等守卫：本 terminate 触发的 exit 不二次 crash（事件驱动等真实传播）
+    await vi.waitFor(() => expect(exitCodes.length).toBeGreaterThan(0), { timeout: 2000 })
     expect(crashes.length).toBe(1)
     expect(host.getCrashCount('load-timeout')).toBe(1)
 

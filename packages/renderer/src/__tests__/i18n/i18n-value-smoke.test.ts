@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * i18n 翻译值 smoke（原 panel-i18n-p2 / thinking-levels-i18n / w3-i18n-keys 三文件并入——
  * 同质同构：无 mock、直 import locale 模块或 i18n 单例，锁「key 存在 + 翻译值」双语文案）。

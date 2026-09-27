@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * ws-client.send 壳侧 import 冒烟（W4 fast-fail 契约的壳侧定位）。
  *

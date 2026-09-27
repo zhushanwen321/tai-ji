@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useChat.sendBash / abortBash 单测（composer-bash-execute W2 + timeout-slow-flow-wallclock ①b）。
  *

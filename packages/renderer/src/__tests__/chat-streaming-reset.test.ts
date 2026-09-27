@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * Chat store 流式状态复位回归测试（AGENTS.md 规则 #3）。
  *

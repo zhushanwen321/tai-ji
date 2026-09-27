@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useApiKeyAutoEnable composable 单测（apikey 配置完成即自动启用）。
  *
