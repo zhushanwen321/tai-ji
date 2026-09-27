@@ -45,7 +45,7 @@ export interface SubprocessAgentRunnerDeps {
  * 层归属：execution。implements orchestration 层 port。
  *
  * 契约：
- *   - opts 形状不变（AgentCallOpts，含 resolveAgentOpts 填的 skillPath/schemaEnv）
+ *   - opts 形状不变（AgentCallOpts，含 resolveAgentOpts 填的 skillPath/appendSystemPrompt）
  *   - result 形状不变（AgentResult——executeWorkflowAgent 返回类型即 orchestration
  *     AgentResult，零映射）
  *   - 路由失败/预检命中/嵌套超限经 service 同步抛错（§3.4 同步抛错回脚本 + D3

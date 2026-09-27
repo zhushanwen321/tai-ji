@@ -1,6 +1,6 @@
 # Pi Extension 开发约定
 
-> 本文档收录 pi extension 开发的**强约束和关键约定**。
+> 本文档整合自 taiji-pi-extensions 项目的 CLAUDE.md，收录 pi extension 开发的**强约束和关键约定**。
 > 完整开发指南（规范红线 + 进阶模式范例）见 [development-guide.md](./development-guide.md)。
 > 日志现行口径（三层通道）见 [logging-conventions.md](./logging-conventions.md)——development-guide §10 的旧 console 口径已由其收敛。
 > TUI 渲染细节见 [tui-rendering-pitfalls.md](./tui-rendering-pitfalls.md)。
@@ -130,7 +130,7 @@ streamSink: ctx.mode === "rpc"
 
 ## Event handler 消息注入
 
-event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消息，**首选 `pi.sendMessage()` custom message 形态**（custom message 经 pi `convertToLlm` 无条件转 LLM user 消息——对 LLM 与 user message 无差别；`display` 可控、不伪装用户消息归属。语义登记 [pi-semantics.json](../pi-semantics.json) PS-43，锚 pi `dist/core/messages.js:89-96` case "custom"）。`pi.sendUserMessage()` 保留给承载真实用户视角语义的消息；提示词类内容伪装成用户消息的形态已在 2026-09-21 四包改造（smart-context/goal/structured-output/plan）中清除（决策登记 [ADR-0068](../adr/decisions.md)；改造设计原文已删除，git 可追溯）。两者都必须用 pi 通道，不能用 `ctx.sendUserMessage()`：
+event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消息，**首选 `pi.sendMessage()` custom message 形态**（custom message 经 pi `convertToLlm` 无条件转 LLM user 消息——对 LLM 与 user message 无差别；`display` 可控、不伪装用户消息归属）。`pi.sendUserMessage()` 保留给承载真实用户视角语义的消息；提示词类内容伪装成用户消息的形态已在 2026-09-21 四包改造（smart-context/goal/structured-output/plan）中清除（决策登记 [ADR-0068](../adr/decisions.md)；改造设计原文已删除，git 可追溯）。两者都必须用 pi 通道，不能用 `ctx.sendUserMessage()`：
 
 | API | ctx (ExtensionContext) | pi (ExtensionAPI) |
 |-----|----------------------|-------------------|

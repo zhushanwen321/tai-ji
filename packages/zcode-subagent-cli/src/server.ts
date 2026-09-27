@@ -8,7 +8,7 @@
 // 9 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
 // `event` 通知（runId + 单调 seq）外发，onHandleReady/stream 经 host/* 反向请求上抛
 //（[池抽象降级] host/poolResolved 通道已随 poolKey 协议面退役删除）。run.params.task 是 SDK AgentCallOpts 引擎面子集——model/
-// cwd/schemaEnv/engineFallback 从 run.params.ctx 还原进本地 AgentCallOpts/RunContext
+// cwd/engineFallback 从 run.params.ctx 还原进本地 AgentCallOpts/RunContext
 // （与 core RemoteEngine.toSdkTaskSubset 的映射互为镜像）。
 //
 // 反向请求客户端：帧④ {id:"rev-N", method:"host/*", params} 必须应答；每个请求
@@ -215,7 +215,6 @@ export class EngineProtocolServer {
       onEvent: (event: AgentEvent) => this.emitEvent(runId, event),
       ...(ctxModel !== undefined ? { ctxModel } : {}),
       ...(stream !== undefined ? { stream } : {}),
-      ...(ctx.schemaEnv !== undefined ? { schemaEnv: ctx.schemaEnv } : {}),
       ...(ctx.engineFallback !== undefined ? { engineFallback: ctx.engineFallback } : {}),
       // [U6 / §3.2.6 要点 3] resume 锚点透传（宿主 → 引擎的续聊通道：zcode 锚
       // sessionRef {sessionId, dbPath}，引擎侧 resume 读 + 新 session 注入消费）。

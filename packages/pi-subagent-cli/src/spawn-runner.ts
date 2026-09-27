@@ -36,14 +36,14 @@ import {
   resolveEngineDataDir,
   spawnEngineChild,
   type AgentEvent,
+  type EngineCapabilities,
   type UiRequest,
   type UiResponse,
 } from "@zhushanwen/subagent-engine-sdk";
 import { killPiProcess } from "@zhushanwen/pi-rpc";
 
-import { mirrorMainProcessFlags, type MirrorFlags } from "./argv-mirror.ts";
 import { registerActiveChild } from "./active-children.ts";
-import { PI_KILL_GRACE_MS } from "./constants.ts";
+import { PI_KILL_GRACE_MS, SCHEMA_ENV_VAR } from "./constants.ts";
 import { getPiInvocation } from "./pi-invocation.ts";
 import { collectOutcome, type CollectedOutcome } from "./output-collector.ts";
 import { toErrorMessage } from "./error-message.ts";
@@ -134,8 +134,12 @@ export interface SpawnRunParams {
   sessionDir: string;
   /** spawn cwd。 */
   cwd: string;
-  /** schema env JSON 字符串（PI_WORKFLOW_SCHEMA 注入）。 */
-  schemaEnv?: string;
+  /**
+   * [D1 schema 传输归位] 结构化产出 schema 本体（wire task.schema 单字段承载）。
+   * PI_WORKFLOW_SCHEMA env 值由引擎侧从本字段派生（buildChildEnv 内
+   * JSON.stringify），schema 不再以传输态 env 字符串跨层。
+   */
+  schema?: Record<string, unknown>;
   /** hard turn limit。 */
   maxTurns?: number;
   /** soft limit 后宽限轮数（默认 2）。 */
@@ -152,8 +156,13 @@ export interface SpawnRunParams {
   agentTools?: string[];
   /** fork 源 session 文件（--fork）。 */
   forkSource?: string;
-  /** 镜像 flag 覆盖（缺省自动镜像主进程 argv）。 */
-  mirrorFlags?: MirrorFlags;
+  /**
+   * [D2 扩展加载显式化] 孙进程显式加载的扩展路径集（协议 ctx.extensionPaths
+   * 还原）——spawn-args 逐项拼 `--extension`。argv 镜像机制（mirrorMainProcessFlags）
+   * 已废弃：引擎进程由 core spawn（argv 恒无 flag），镜像前提「从主 pi 进程 spawn」
+   * 不存在。缺省 = 不拼 --extension。
+   */
+  extensionPaths?: string[];
   /** resume 目标 session 文件（冷续写：--session 续写原文件）。 */
   resumeSessionFile?: string;
 }
@@ -164,10 +173,16 @@ export interface SpawnRunResult extends Omit<CollectedOutcome, "sessionId"> {
   sessionId: string | undefined;
 }
 
-/** 子进程 env 组装（deny 剥除 + schemaEnv 注入 + relay 归属键重写）。 */
+/** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + relay 归属键重写）。 */
 function buildChildEnv(params: SpawnRunParams): Record<string, string> {
   const extras: Record<string, string | undefined> = {};
-  applySchemaEnvToChildEnv(extras, params.schemaEnv);
+  // [D1 schema 传输归位] env 值派生点：schema 本体的唯一 env 消费点就在此处，
+  // 按数据流最短路径就地派生（JSON.stringify 本体），注入实现沿用
+  // applySchemaEnvToChildEnv（含 E2BIG 上限校验）。
+  applySchemaEnvToChildEnv(
+    extras,
+    params.schema !== undefined ? JSON.stringify(params.schema) : undefined,
+  );
   const childEnv = buildOutboundChildEnv({ parentEnv: process.env, extras });
   // relay 归属键重写（W8/H12）：SESSION_ID/RECORD_ID 在 ENGINE_ENV_DENY_LIST，
   // buildOutboundChildEnv 的 deny 在 extras 之后执行——经 extras 注入会被剥掉
@@ -182,6 +197,90 @@ function buildChildEnv(params: SpawnRunParams): Record<string, string> {
     childEnv[RELAY_ENV_RECORD_ID] = params.recordId;
   }
   return childEnv;
+}
+
+// ── [D3 止血版] 武装断言（run 开始后、孙进程 spawn 前；缺席即秒级 fail-fast） ──
+
+/**
+ * 孙进程 schema 强制的唯一必备扩展包（P-C5 白名单起步组成）。与宿主注入侧
+ * （subagent-workflow pi-host `GRANDCHILD_EXTENSION_PKG_SEGMENTS`）是同一契约的
+ * 两端：宿主决定注入什么，本断言验证引擎确实收到——扩白名单时两处同批扩。
+ */
+const SCHEMA_ENFORCEMENT_EXTENSION_PKG = "@zhushanwen/pi-structured-output";
+
+/** 武装断言的判定输入（纯函数面，测试直构）。 */
+export interface SchemaArmingInput {
+  /** 引擎能力位（协议 EngineCapabilities 词表，D3 分流唯一判据）。 */
+  schemaEnforcement: EngineCapabilities["schemaEnforcement"];
+  /** wire task.schema 声明形态（undefined = 无 schema 任务，无武装面）。 */
+  schema: Record<string, unknown> | undefined;
+  /** 孙进程终态 env（buildChildEnv 产物——断言拼装事实，不是意图）。 */
+  childEnv: Readonly<Record<string, string>>;
+  /** 孙进程 argv（buildSpawnArgs 产物，含 `--extension <path>` 对）。 */
+  spawnArgs: readonly string[];
+}
+
+/**
+ * [D3 止血版] 武装断言：native 引擎 + schema 任务的 run 在孙进程 spawn 前校验
+ * 「schema 强制已武装」，缺席即抛错（宿主侧秒级 fail-fast，错误含按形态的恢复指引）。
+ *
+ * 断言集 ①env 注入 + ②扩展在场（③退化说明见下）。capability 分流（D3 防 emulated
+ * 误伤）：仅 `schemaEnforcement === "native"` 生效——emulated 引擎（zcode 及
+ * schema-emulation 登记域）在引擎侧消费 wire task.schema，无孙进程 env/扩展依赖，
+ * 「武装」概念不适用，直接豁免。分流判据复用协议 EngineCapabilities 词表，不新造机制。
+ *
+ * 断言③（孙进程启动无扩展加载错误）经 P-C1 实施期核实（pi 实装版 0.84.4 dist）：
+ * RPC 命令全集（rpc-types.d.ts 逐一枚举，32 条）无工具清单/扩展加载错误查询面
+ * （get_commands = slash 命令、get_state = RpcSessionState，均不暴露工具/扩展面）；
+ * 且扩展加载失败时 pi 在非交互模式（含 rpc）启动诊断 gate 直接 `process.exit(1)`
+ * （main.js：runtime diagnostics 含 "Failed to load extension" → exit 1），到不了
+ * RPC 服务面。③不可作为主动查询断言，按设计预留路径退化为 ①+②；扩展加载破坏的
+ * 秒级可见性由 pi 自身 exit(1) + 引擎既有 exitCode≠0 失败通路 + stderr tee
+ * （诊断留痕）承接。
+ */
+export function assertSchemaEnforcementArmed(input: SchemaArmingInput): void {
+  if (input.schemaEnforcement !== "native") return;
+  if (input.schema === undefined) return;
+  // ① 派生的 PI_WORKFLOW_SCHEMA 已进孙进程 env（D1 派生点 = buildChildEnv）
+  if ((input.childEnv[SCHEMA_ENV_VAR] ?? "") === "") {
+    throw new Error(
+      `[schema-arming] native schema enforcement is not armed: task.schema is present but ` +
+        `${SCHEMA_ENV_VAR} was not derived into the grandchild env. Failing fast because ` +
+        `continuing would complete with an unvalidated structured output. This is engine-side ` +
+        `derivation drift (the env value must be derived from task.schema in buildChildEnv), ` +
+        `not a host configuration error. Recovery: upgrade or reinstall the engine package ` +
+        `(@zhushanwen/pi-subagent-cli); if it persists after upgrade, inspect the schema ` +
+        `derivation in spawn-runner buildChildEnv / applySchemaEnvToChildEnv.`,
+    );
+  }
+  // ② --extension 列表含 structured-output 包路径（D2 ctx.extensionPaths →
+  //    buildSpawnArgs 拼装的 argv 事实）
+  if (!hasSchemaEnforcementExtension(input.spawnArgs)) {
+    throw new Error(
+      `[schema-arming] native schema enforcement is not armed: task.schema is present but the ` +
+        `grandchild --extension list does not include ${SCHEMA_ENFORCEMENT_EXTENSION_PKG}, so no ` +
+        `tool would validate the structured output (the run would silently complete with an ` +
+        `untrustworthy result). Recovery — taiji host form: check the runtime extension-service ` +
+        `diagnostics for the grandchild extension whitelist staging of ` +
+        `${SCHEMA_ENFORCEMENT_EXTENSION_PKG}. Recovery — standalone pi form: install ` +
+        `${SCHEMA_ENFORCEMENT_EXTENSION_PKG} (peerDependency) or use a schema-less workflow ` +
+        `instead (drop the schema from the agent call).`,
+    );
+  }
+}
+
+/** argv 是否含指向 structured-output 包的 `--extension` 对：路径按 `/`|`\` 分段后
+ * 做 `<scope>/<pkg>` 连续段匹配（目录形态 `.../@zhushanwen/pi-structured-output` 与
+ * 入口文件形态 `.../index.js` 都命中；段必须精确，前缀相似目录不误判）。与 pi-host
+ * 注入侧 isGrandchildExtensionPath 同判据（契约两端）。 */
+function hasSchemaEnforcementExtension(spawnArgs: readonly string[]): boolean {
+  const wanted = SCHEMA_ENFORCEMENT_EXTENSION_PKG.split("/");
+  for (let i = 0; i + 1 < spawnArgs.length; i++) {
+    if (spawnArgs[i] !== "--extension") continue;
+    const segs = (spawnArgs[i + 1] ?? "").split(/[\\/]/).filter((s) => s.length > 0);
+    if (segs.some((_, j) => wanted.every((w, k) => segs[j + k] === w))) return true;
+  }
+  return false;
 }
 
 /**
@@ -319,13 +418,25 @@ export async function runSpawnOnce(
       sessionFile: params.resumeSessionFile,
       forkSource: params.forkSource,
       skillPaths: params.skillPaths,
-      mirrorFlags: params.mirrorFlags ?? mirrorMainProcessFlags(process.argv),
+      extensionPaths: params.extensionPaths,
     });
     const invocation = getPiInvocation(args);
+    const childEnv = buildChildEnv(params);
+    // [D3 止血版 武装断言] run 开始后、孙进程 spawn 前校验武装状态，缺席即抛错
+    // （秒级 fail-fast，host 侧收到含恢复指引的 engine_run_failed）。capability
+    // 字面量与 PiEngine.capabilities().schemaEnforcement（pi-engine.ts，manifest
+    // 同源）一致——引擎能力是进程级事实而非 per-run 参数，不经 run ctx 传递；
+    // 本包是 pi 引擎进程，无第二 capability 源。
+    assertSchemaEnforcementArmed({
+      schemaEnforcement: "native",
+      schema: params.schema,
+      childEnv,
+      spawnArgs: args,
+    });
     const child = spawnEngineChild({
       command: invocation.command,
       args: invocation.args,
-      env: buildChildEnv(params),
+      env: childEnv,
       cwd: params.cwd,
       ...(params.signal !== undefined ? { signal: params.signal } : {}),
     });
@@ -372,6 +483,21 @@ export async function runSpawnOnce(
     // 3. 镜像上报（childSpawned 先行——未收上报前宿主 = 无句柄）+ 引擎侧记账
     registerActiveChild(params.recordId, child);
     reportChildSpawned(child, params.recordId, callbacks);
+
+    // [D3 协议版 P6] 武装回执上报：武装断言（本函数上方）通过 + 孙进程 spawn 成功
+    //（spawnEngineChild 同步抛错即失败，成功返回 = 「孙进程启动确认」的最强可得
+    // 形态——断言③已按 P-C1 核实退化，扩展加载破坏由 pi exit(1) 通路承接）。
+    // 协议版上报 = 宿主的独立信号源（监控信号不与施控同源）：宿主等待窗据此判定
+    // 武装链路活性，防「断言代码自身失效/被绕过」的自证盲区。仅 schema 任务上报
+    // （本包是 native 引擎，capability 分流已由断言前置；无 schema 任务无武装面，
+    // 上报零语义）。宿主 reducer 对本事件 no-op（C3 第④步），落账归 run 事件 journal。
+    if (params.schema !== undefined) {
+      callbacks.onEvent({
+        type: "armed",
+        schemaEnvVar: SCHEMA_ENV_VAR,
+        extensionPkg: SCHEMA_ENFORCEMENT_EXTENSION_PKG,
+      });
+    }
 
     // 4. UI 请求队列（host/askUser 两阶段等待体注入）
     const enqueueUi = createUiRequestQueue(child, {
@@ -421,7 +547,9 @@ export async function runSpawnOnce(
           : `pi child exited with code ${exitCode}`,
       sessionId: identity.sessionId ?? "",
       sessionFile: identity.sessionFile,
-      ...(params.schemaEnv !== undefined ? { schemaExpected: true } : {}),
+      // [F-1 信号解耦] schemaExpected 判定源 = task.schema 声明形态（schema 本体
+      // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响守卫期待。
+      ...(params.schema !== undefined ? { schemaExpected: true } : {}),
     });
     return { ...outcome, sessionId: identity.sessionId };
   } finally {

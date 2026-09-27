@@ -193,8 +193,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     // 过渡态（pending）下发送：UI 半边 = 无本地 dead 拦截，消息走既有发送编排链路发出
     //（runtime 侧 ensureActive join 等恢复完成后送达——该半边已有 runtime 单测）
     const { useChat } = await import('@/composables/features/chat/useChat')
-    // [form-hang-fix] send 契约 Promise<boolean>：正常直发 → true
-    await expect(useChat().send('s-respawn', [{ type: 'text', text: 'hello during recovery' }])).resolves.toBe(true)
+    await expect(useChat().send('s-respawn', [{ type: 'text', text: 'hello during recovery' }])).resolves.toBeUndefined()
     const sentTypes = wsSend.mock.calls.map((args) => (args[0] as { type?: string }).type)
     expect(sentTypes).toContain('message.send')
   })

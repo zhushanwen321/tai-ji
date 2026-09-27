@@ -201,9 +201,8 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     const chat = useChatStore()
     apiMock.send.mockRejectedValueOnce(new Error('network'))
     const { send } = useChat()
-    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）；
-    // [form-hang-fix] send 契约 Promise<boolean>：直发失败已 toast 消化 → true（false 仅属 B 策略）
-    await expect(send('s-fail', textToSegments('hi'))).resolves.toBe(true)
+    // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）
+    await expect(send('s-fail', textToSegments('hi'))).resolves.toBeUndefined()
     expect(chat.pendingSend.has('s-fail')).toBe(false)
     expect(chat.isActive('s-fail')).toBe(false)
   })

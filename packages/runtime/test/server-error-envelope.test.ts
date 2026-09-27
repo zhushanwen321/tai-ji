@@ -31,7 +31,6 @@ function makeMockServices(overrides: Record<string, ReturnType<typeof vi.fn>> = 
     listPersistedSessions: vi.fn().mockReturnValue([]),
     getRpcClient: vi.fn().mockReturnValue(undefined),
     setOnSessionDestroyed: vi.fn(),
-    setOnPlanAborted: vi.fn(),
     restoreSession: vi.fn(),
     create: vi.fn(),
     ...overrides,

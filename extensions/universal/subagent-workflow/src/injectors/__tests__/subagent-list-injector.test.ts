@@ -296,8 +296,8 @@ describe("subagent-list-injector session 级缓存", () => {
 		expect(r?.systemPrompt).not.toContain("worker");
 	});
 
-	it("session_start 发现空列表缓存后 before_agent_start 命中（不重扫，不注入）", async () => {
-		// 空列表是有效缓存态（非 null）：命中后不重扫，formatAgentList([]) 返空串不注入
+	it("session_start 发现空列表缓存后 before_agent_start 命中（不重扫，注入 D4-2 空态段）", async () => {
+		// 空列表是有效缓存态（非 null）：命中后不重扫；空发现经工厂接管渲染空态段
 		spies.discoverResources.mockResolvedValue([]);
 		await handlers.sessionStart!({ type: "session_start", reason: "new" }, createMockCtx());
 		expect(spies.discoverResources).toHaveBeenCalledTimes(1);
@@ -305,9 +305,11 @@ describe("subagent-list-injector session 级缓存", () => {
 		const r1 = await handlers.beforeAgentStart!({ systemPrompt: "base" }, createMockCtx());
 		const r2 = await handlers.beforeAgentStart!({ systemPrompt: "base" }, createMockCtx());
 		expect(spies.discoverResources).toHaveBeenCalledTimes(1);
-		// 空注入：handler 返 void（无 systemPrompt 字段）
-		expect(r1).toBeUndefined();
-		expect(r2).toBeUndefined();
+		// 工厂共用骨架：agents kind 同样空态显式（不再整段消失）
+		expect(r1?.systemPrompt).toContain("<available_subagents>");
+		expect(r1?.systemPrompt).toContain("(none discovered; roots: ");
+		expect(r1?.systemPrompt).toContain("/ws/.agents/agents");
+		expect(r2?.systemPrompt).toBe(r1?.systemPrompt);
 	});
 
 	it("session_start 发现异常不阻断（fail-safe，缓存保持 null，before_agent_start fallback）", async () => {
@@ -344,8 +346,10 @@ describe("discoverAllAgents 顺序契约（KV-cache）", () => {
 		spies.getCachedFileContent.mockImplementation((p: string) => byPath[p] ?? null);
 
 		const { discoverAllAgents } = await import("../subagent-list-injector");
-		const agents = await discoverAllAgents("/ws");
-		expect(agents.map((a) => a.name)).toEqual(["alpha", "worker", "zeta"]);
+		const result = await discoverAllAgents("/ws");
+		// P5 D4-3：discover 返回 { entries, invalids }——agents 走 assemble 路径，invalids 恒空
+		expect(result.invalids).toEqual([]);
+		expect(result.entries.map((a) => a.name)).toEqual(["alpha", "worker", "zeta"]);
 	});
 
 	it("重建（两次发现）输出与渲染结果逐字节一致——目录不变时 session_start/fallback/resume 任意重建等价", async () => {
@@ -369,8 +373,8 @@ describe("discoverAllAgents 顺序契约（KV-cache）", () => {
 		const first = await discoverAllAgents("/ws");
 		const second = await discoverAllAgents("/ws");
 		expect(second).toEqual(first);
-		expect(formatAgentList(second, { guide: SUBAGENT_LIST_GUIDE })).toBe(
-			formatAgentList(first, { guide: SUBAGENT_LIST_GUIDE }),
+		expect(formatAgentList(second.entries, { guide: SUBAGENT_LIST_GUIDE })).toBe(
+			formatAgentList(first.entries, { guide: SUBAGENT_LIST_GUIDE }),
 		);
 	});
 });

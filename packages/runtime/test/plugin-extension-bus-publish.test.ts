@@ -98,8 +98,7 @@ describe('W08: plugin:viewUpdate 经 bus publish（transient）', () => {
     const ws = createMockClient()
     bus.subscribe('s1', ws)
 
-    // [D1/u5b] views.update 按显式 payload.sessionId 归属投递（旧「活跃会话」盖戳已删）
-    await dispatch('plugin.views.update', { pluginId: 'p1', viewId: 'v1', guiTree: [], sessionId: 's1' })
+    await dispatch('plugin.views.update', { pluginId: 'p1', viewId: 'v1', guiTree: [] })
 
     // 订阅者收到（直传）
     expect(ws.sent).toHaveLength(1)
@@ -125,7 +124,7 @@ describe('W08: plugin:viewUpdate 经 bus publish（transient）', () => {
   it('bus 未装配 → 回退全局广播（broadcastFn），消息不丢', async () => {
     const { broadcastFn, dispatch } = wiredPluginService({ sessionService: createActiveSessionStub('s1') })
 
-    await dispatch('plugin.views.update', { pluginId: 'p1', viewId: 'v1', guiTree: [], sessionId: 's1' })
+    await dispatch('plugin.views.update', { pluginId: 'p1', viewId: 'v1', guiTree: [] })
 
     expect(broadcastFn).toHaveBeenCalledTimes(1)
     const [type, payload] = broadcastFn.mock.calls[0] as [string, { sessionId: string; viewId: string }]

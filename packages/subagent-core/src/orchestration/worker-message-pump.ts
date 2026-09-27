@@ -9,6 +9,9 @@
  *    pending:unregister 直落 appendEntry → onRunDone」终态序列的唯一定义点
  *    （D5-② 单点化，收敛原 8 处逐字复制；OR-8 收口步骤与 OR-4/B-4 双围栏内化于
  *    本函数；[reload-closeout D4] unregister 持久化直落权威面，不经 eventBus emit）
+ * 5. [P1b-1] run 事件状态机接线（D5）：dispatchRunTrigger 唯一投递入口（journal
+ *    单写者）+ finalizeRun 的 run-settled/cancel 合成落账 + ask-dispatched/ask-settled
+ *    事件链 + settle 链收口单点 settleWorkflowRecord——见「run 事件状态机接线」段头注
  *
  * 4 个 handle* 路由函数 + 终态化/重建/防御 helper 若干：
  * - handleWorkerMessage(run, raw, deps, handlers) — 路由 agent_call/return/error/log
@@ -44,12 +47,48 @@ import { resolveAgentOpts } from "./agent-opts-resolver.ts";
 import { executeAgentCall } from "./execute-agent-call.ts";
 import { AgentCall } from "./models/agent-call.ts";
 import type { AgentRunner, LifecycleDeps, WorkerHandlers } from "./models/ports.ts";
+// [P1b-1] run 显式状态机（D5）：transition 纯函数 + JSONL 事件 journal（run-events.ts
+// 为唯一权威实装，本文件是其编排侧唯一消费入口——journal 单写者纪律的物理载体）。
+import {
+  createRunEventJournal,
+  IllegalTransitionError,
+  INITIAL_RUN_STATE,
+  RUN_EVENT_TYPES,
+  transition,
+  type RunErrorCode,
+  type RunEventJournal,
+  type RunOutcome,
+  type RunState,
+  type TransitionContext,
+  type TransitionResult,
+  type TransitionTrigger,
+  type WorkflowRunEvent,
+} from "./run-events.ts";
 import { RunRuntime } from "./models/run-runtime.ts";
+import type { RunSpec } from "./models/run-spec.ts";
 import type { WorkerLogEntry } from "./models/types.ts";
 import type { AgentCallOpts, AgentResult, DoneReason, ExecutionTraceNode } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
+// [P1b-2] manifest-write 输出动作的写入面（D5 终局投影）：manifest 落
+// <workflow-state>/<runId>.json、.state 收条落 <runId>.jsonl.state（state-marker
+// 同族写函数）。execution/persistence 不回指 orchestration（manifest-store 的
+// run-events 依赖是纯 type import），无循环。
+import { join } from "node:path";
+
+import { writeRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
+// writeRunStateProjection 是 run 域（workflow run）.state 投影的独立原语（与
+// record 域 writeSettledState 分立——R1 写面守卫按域分立语义，store 外直调
+// record 域七名原语被 scripts/check-record-write-surface.mjs 拦截）。
+import { writeRunStateProjection } from "../execution/persistence/state-marker.ts";
 import type { WorkerHandle } from "./worker-handle.ts";
 import { toErrorMessage } from "../core/error-message.ts";
+// [P1b-1] settle 链收口（execution service 三处直写点删除后的单点）+ journal 目录
+// 解析。import 方向 execution/service → orchestration 为既有先例（file-run-store），
+// 本处是反向的 orchestration → execution/{assembly,persistence}：types 为 type-only、
+// execution-record/workflow-state-root 为叶子模块（无反向依赖），零环。
+import { tryTransition } from "../execution/persistence/execution-record.ts";
+import { resolvePiWorkflowStateDir } from "../execution/assembly/workflow-state-root.ts";
+import type { AgentResult as ExecutionAgentResult, ExecutionRecord } from "../execution/assembly/types.ts";
 
 const logger = getLogger("subagents");
 
@@ -293,6 +332,22 @@ export async function finalizeRun(
     return false;
   }
   // [OR-8] 终态收口残留 in-flight call（先收口再落盘——快照不再含 running 节点）
+  // [P1b-1] run-settled 事件落账先于 closeOut/save（事件流先于快照投影面）：
+  // run-settled 的 journal 终局帧只在本函数发生（终态单写点语义，D7-②）。
+  // aborted → cancel-requested 控制事件驱动终局转移（transition 裁决
+  // terminal(cancelled)），输出执行侧合成 run-settled(cancelled) 落账；其余
+  // doneReason → run-settled（outcome 映射见 dispatchFinalRunSettle）。让位
+  //（IllegalTransitionError = run 已被并发终局，抢先方已落帧）静默；其余失败
+  // error 留痕不阻断 coda（对齐 SW-DATA-3：事件 journal 是取证面，coda 是权威面）。
+  try {
+    await dispatchFinalRunSettle(run, doneReason);
+  } catch (err) {
+    if (!(err instanceof IllegalTransitionError)) {
+      logger.error(
+        `[workflow] run-settled journal dispatch failed (runId=${run.runId}, reason=${doneReason}): ${toErrorMessage(err)}`,
+      );
+    }
+  }
   closeOutInFlightCalls(run);
   await saveRunBestEffort(run, deps, options.context);
   deps.log?.("debug", "workflow:worker-message-pump", "run finalized", {
@@ -329,6 +384,452 @@ export async function finalizeRun(
     }
   }
   return true;
+}
+
+// ── run 事件状态机接线（P1b-1 / D5-④ 唯一入口的编排侧消费） ──────────────
+//
+// run-events.ts 的 transition 是纯函数（裁决归它，只声明「哪些动作应发生」），本段
+// 是输出动作的执行归属点：
+// - journal-append → RunEventJournal.append（触发事件属 journal 词表时 = 事件本体；
+//   控制事件触发的终局转移 = 调用侧合成 run-settled，见 journalEventOf）；
+// - manifest-write → persistTerminalProjection（[P1b-2] 实装）：manifest/.state 落
+//   outcome/errorCode（run 域）；record 域既有写入面 = settleWorkflowRecord（settle
+//   链收口，record 的 outcome 字段接线归后继批次）；
+// - notify / registry-project / kill-run-topology / journal-cleanup-eligible → 后继
+//   单元消费（P4/Q2/Q3），本批执行点预留（无操作）。
+//
+// 活体态：liveRunStates（模块级 Map）是本进程内的状态缓存，miss 时 fold journal
+// （scan + 逐事件 transition 不传 ctx——run-events.ts fold 契约）。terminal 后删除
+// Map 条目 + 转移表 terminal × 任意事件 fail-fast，双重构成「终局后单写者停止向该
+// run append」的纪律守卫（D5-④）。
+
+const runEventLogger = getLogger("run-event-dispatch");
+
+/** run 事件 journal 词表集合（判别「触发事件是否本身落账」；词表 SSOT 在 run-events.ts）。 */
+const JOURNAL_EVENT_TYPES: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
+
+/** run-created 载荷 argsSummary 的截断上限（事件行要小，全文 args 不进 journal）。 */
+const RUN_ARGS_SUMMARY_MAX_CHARS = 256;
+
+/** 本进程内 per-run 活体状态缓存（key = runId；terminal 即删）。 */
+const liveRunStates = new Map<string, RunState>();
+
+/** per-run 投递队列（串行化 dispatchRunTrigger——并发事件链的活体态读取必须串行，
+ *  否则前一链 fold/引导挂起中、后链读到空 Map 各自补投造成状态分叉）。entry =
+ *  永不 reject 的尾 promise（前链失败不阻塞后链）；terminal 时随活体态一并回收。 */
+const runDispatchQueues = new Map<string, Promise<unknown>>();
+
+function enqueueRunDispatch<T>(runId: string, task: () => Promise<T>): Promise<T> {
+  const prev = runDispatchQueues.get(runId) ?? Promise.resolve();
+  const next = prev.then(task, task);
+  runDispatchQueues.set(runId, next.catch(() => {}));
+  return next;
+}
+
+/** journal 实例缓存与测试注入点（生产目录 = run store 旁 workflow-state，惰性解析）。 */
+let runEventJournalDirForTest: string | undefined;
+let cachedJournal: { dir: string; journal: RunEventJournal } | undefined;
+let noopJournalWarned = false;
+
+/** 测试钩子：注入 journal 目录 + 清空活体态缓存（run-events.test 同款 teardown 纪律）。 */
+export function setRunEventJournalDirForTest(dir: string | undefined): void {
+  runEventJournalDirForTest = dir;
+  cachedJournal = undefined;
+  liveRunStates.clear();
+}
+
+/** 测试防线的 no-op journal：scan 恒空、append 零写（vitest 未显式注入目录时启用）。 */
+class NoopRunEventJournal implements RunEventJournal {
+  async append(): Promise<void> {}
+  async scan(): Promise<readonly WorkflowRunEvent[]> {
+    return [];
+  }
+}
+
+function resolveRunEventJournal(): { dir: string; journal: RunEventJournal } {
+  if (runEventJournalDirForTest !== undefined) {
+    cachedJournal ??= {
+      dir: runEventJournalDirForTest,
+      journal: createRunEventJournal(runEventJournalDirForTest),
+    };
+    return cachedJournal;
+  }
+  // 测试防线（「测试禁止触碰真实数据目录」红线）：vitest 环境未显式注入目录时禁写
+  // 真实推导路径——落 no-op journal + 一次性 warn 留痕。生产（无 VITEST env）不受
+  // 影响；断言 journal 的测试必须显式 setRunEventJournalDirForTest(mkdtemp 目录)。
+  if (process.env.VITEST === "true") {
+    if (!noopJournalWarned) {
+      noopJournalWarned = true;
+      runEventLogger.warn(
+        "run-event journal disabled: vitest env without setRunEventJournalDirForTest(dir) — " +
+          "no-op journal active (prevents writes to the real workflow-state dir)",
+      );
+    }
+    return { dir: "", journal: new NoopRunEventJournal() };
+  }
+  const dir = resolvePiWorkflowStateDir();
+  cachedJournal ??= { dir, journal: createRunEventJournal(dir) };
+  return cachedJournal;
+}
+
+/** journal fold：scan + 逐事件 transition（不传 ctx——run-events.ts fold 契约）。 */
+async function foldRunState(runId: string): Promise<RunState> {
+  const { journal } = resolveRunEventJournal();
+  const events = await journal.scan(runId);
+  let state = INITIAL_RUN_STATE;
+  for (const event of events) {
+    try {
+      state = transition(state, event).state;
+    } catch (err) {
+      // journal 坏链（历史帧与当前表不兼容）：投影失效模式 = 保守停在最近一致态
+      // （warn 留痕不炸链），与 scan 侧坏行容忍同一精神。
+      runEventLogger.warn(
+        `run-event journal fold stopped at a broken frame (runId=${runId}, lastType=${event.type}): ${toErrorMessage(err)}`,
+      );
+      break;
+    }
+  }
+  return state;
+}
+
+/**
+ * journal-append 输出对应的事件本体：触发事件属 journal 词表 → 事件本身；控制事件
+ * 触发的终局转移 → 合成 run-settled（run-events.ts 输出动作注释约定——当前唯一合法
+ * 控制终局 = cancel-requested；abandon-elapsed 行无 journal-append 输出、host-died /
+ * watchdog-fired 非终局，构不到这里）。ts 信封在合成时打点（transition 纯函数契约：
+ * 时钟归调用侧）。
+ */
+function journalEventOf(trigger: TransitionTrigger): WorkflowRunEvent {
+  if (JOURNAL_EVENT_TYPES.has(trigger.type)) {
+    return trigger as WorkflowRunEvent;
+  }
+  if (trigger.type === "cancel-requested") {
+    return {
+      type: "run-settled",
+      outcome: "cancelled",
+      ...(trigger.reason !== undefined ? { reason: trigger.reason } : {}),
+      artifactsDir: resolveRunEventJournal().dir,
+      ts: Date.now(),
+    };
+  }
+  throw new Error(
+    `控制事件 ${trigger.type} 的转移输出含 journal-append 但无合成规则` +
+      "（当前唯一合法控制终局 = cancel-requested）——修 RUN_TRANSITIONS 该行或 journalEventOf。",
+  );
+}
+
+async function appendTransition(
+  run: RunDispatchSource,
+  state: RunState,
+  trigger: TransitionTrigger,
+  ctx?: TransitionContext,
+): Promise<TransitionResult> {
+  const { state: next, outputs } = transition(state, trigger, ctx);
+  // 活体态先于 journal（内存权威先推进；取证证据随后落盘）。terminal 删条目 =
+  // 「终局后停止 append」的第一道守卫（第二道 = 表 terminal × 任意事件 fail-fast）；
+  // 投递队列条目同批回收（终局后该 run 无合法后续投递）。
+  if (next.lifecycle === "terminal") {
+    liveRunStates.delete(run.runId);
+    runDispatchQueues.delete(run.runId);
+  } else {
+    liveRunStates.set(run.runId, next);
+  }
+  if (outputs.includes("journal-append")) {
+    const { journal } = resolveRunEventJournal();
+    await journal.append(run.runId, journalEventOf(trigger));
+  }
+  // [P1b-2] manifest-write 终局投影：manifest（<runId>.json）+ .state（<runId>.jsonl.state）
+  // 落 outcome/errorCode（D5-④ 输出动作统一——执行面收口在本函数，persistTerminalProjection）。
+  if (outputs.includes("manifest-write")) {
+    const projectionDir = resolveRunEventJournal().dir;
+    if (projectionDir === "") {
+      // 测试防线（与 no-op journal 同族）：vitest 无注入时禁写真实目录——同步 warn
+      // 后跳过，不进入 async 调用（await 边沿会把终局 coda 尾链推出既有测试的
+      // flushMicrotasks 固定 tick 窗口，无注入测试的时序须与 P1b-1 基线逐位同构）。
+      runEventLogger.warn(
+        "run terminal projection skipped: vitest env without setRunEventJournalDirForTest(dir) — " +
+          "manifest/.state not written (prevents writes to the real workflow-state dir)",
+      );
+    } else {
+      await persistTerminalProjection(run, next, trigger, projectionDir);
+    }
+  }
+  return { state: next, outputs };
+}
+
+/**
+ * manifest-write 输出动作的执行面（[P1b-2] D5 终态投影）：
+ * - manifest = `<workflow-state>/<runId>.json`（RunTerminalManifest——「已终局」
+ *   单源锚定 = outcome 非空，保留清理资格判定与 Q2 放弃窗终局化的共同读面）；
+ * - .state = `<workflow-state>/<runId>.jsonl.state`（writeRunStateProjection——
+ *   run 域 .state 投影专用原语，与 record 域 writeSettledState 分立（R1 写面
+ *   守卫按域分立语义），挂 run state 文件 stem）。
+ *
+ * errorCode 取自 run-settled 事件载荷（失败终局的结构化码）；cancel-requested
+ * 合成路径无结构化码（缺省）；abandon-elapsed 行的 interrupted_abandoned 由 Q2
+ * 注册表单元附着（run-events.ts 转移表注释的词表边界）。
+ *
+ * 目录解析复用 journal 同源（resolveRunEventJournal——生产推导
+ * resolvePiWorkflowStateDir，测试经 setRunEventJournalDirForTest 注入一次覆盖
+ * journal/manifest/.state 三面）；vitest 无注入防线（dir=""）下跳过写入并 warn
+ * 留痕（禁触真实数据目录红线，与 no-op journal 同一防线语义）。
+ *
+ * 失败处置 = error 留痕不抛（对齐 journal 侧「取证面失败不阻断 coda」：终局
+ * coda 的权威推进不因投影 IO 中断；manifest 缺失的下游语义 = prune 保守不裁）。
+ */
+async function persistTerminalProjection(
+  run: RunDispatchSource,
+  state: RunState,
+  trigger: TransitionTrigger,
+  dir: string,
+): Promise<void> {
+  const outcome = state.outcome;
+  if (outcome === undefined) {
+    // transition 构造性保证 terminal ⟹ outcome（run-events.ts）；缺省 = 编程错误，
+    // 防御性留痕后跳过（不写半截投影）。
+    runEventLogger.error(
+      `manifest-write output on non-terminal state (runId=${run.runId}) — skipping projection (check RUN_TRANSITIONS terminal rows)`,
+    );
+    return;
+  }
+  if (run.spec === undefined) {
+    // spec 缺省 = runId 键投递（RunDispatchSource 无 spec 形态，现役唯一生产者
+    // dispatchRunArmedReceipt 只投 armed 自环——非 terminal 行，构不到此处）。终局
+    // 投影的 workflowName 载荷源只有 run.spec，缺省不伪造空名落 manifest（manifest
+    // 是「已终局」单源锚定，写坏即污染 prune 资格判定）——error 留痕后跳过，与上方
+    // non-terminal 防御同款。
+    runEventLogger.error(
+      `manifest-write output on a spec-less run dispatch source (runId=${run.runId}) — skipping projection (runId-keyed dispatch must not carry terminal events; check the caller)`,
+    );
+    return;
+  }
+  const errorCode: RunErrorCode | undefined =
+    trigger.type === "run-settled" ? trigger.errorCode : undefined;
+  const settledAt = Date.now();
+  try {
+    await writeRunTerminalManifest(dir, {
+      id: run.runId,
+      workflowName: run.spec.scriptName,
+      outcome,
+      ...(errorCode !== undefined ? { errorCode } : {}),
+      settledAt,
+    });
+  } catch (err) {
+    runEventLogger.error(
+      `run terminal manifest write failed (runId=${run.runId}): ${toErrorMessage(err)}`,
+    );
+  }
+  const stateOk = writeRunStateProjection(join(dir, `${run.runId}.jsonl`), {
+    endedAt: settledAt,
+    outcome,
+    ...(errorCode !== undefined ? { errorCode } : {}),
+  });
+  if (!stateOk) {
+    // writeRunStateProjection 内部已 error 留痕（含恢复指引）；此处补终局上下文便于归因。
+    runEventLogger.error(
+      `run terminal .state projection not persisted (runId=${run.runId}) — prune eligibility unaffected (manifest is the single-source anchor)`,
+    );
+  }
+}
+
+/**
+ * dispatchRunTrigger 的投递源投影面：WorkflowRun 聚合根结构满足（runId + spec 公有
+ * 字段，存量调用方零改动）。[P6] armed 回执的 runId 键投递
+ * （{@link dispatchRunArmedReceipt}——run 聚合不出 orchestration 层）只带 runId；
+ * spec 缺省形态下 terminal 投影无 workflowName 载荷源（persistTerminalProjection
+ * 守卫跳过）——现役唯一 runId 键生产者只投 armed 自环（非 terminal 行），结构性
+ * 不可达。
+ */
+export interface RunDispatchSource {
+  runId: string;
+  /** terminal 投影（manifest workflowName）的载荷源；runId 键投递（armed 回执）可缺省。 */
+  spec?: RunSpec;
+}
+
+/**
+ * run 事件投递唯一入口（单写者纪律：journal 的全部写入经本函数；引擎/worker 不落账，
+ * D5「单写者 = 宿主侧唯一编排点」）。裁决 = transition 纯函数；表外转移抛
+ * IllegalTransitionError 由调用方分类处置（让位 = 并发终局后的预期迟到事件）。
+ * per-run 投递队列串行化（并发事件链的活体态读取竞态防线——事件 journal 序 =
+ * 调用序）。
+ *
+ * run-created 无引导补投（Q2 正点接线后的终态）：journal 首帧唯一落点 =
+ * {@link dispatchRunCreated}（lifecycle.runWorkflow 宿主派发点调用）。事件到达时
+ * fold 出 created（journal 无 run-created 帧）⟹ 表外转移 fail-fast——事件在
+ * run-created 落账前到达是接线错误，靠引导静默补齐会掩盖时序倒置。
+ */
+export function dispatchRunTrigger(
+  run: RunDispatchSource,
+  trigger: TransitionTrigger,
+  ctx?: TransitionContext,
+): Promise<TransitionResult> {
+  return enqueueRunDispatch(run.runId, () => dispatchRunTriggerInner(run, trigger, ctx));
+}
+
+async function dispatchRunTriggerInner(
+  run: RunDispatchSource,
+  trigger: TransitionTrigger,
+  ctx?: TransitionContext,
+): Promise<TransitionResult> {
+  let state = liveRunStates.get(run.runId);
+  if (state === undefined) state = await foldRunState(run.runId);
+  return appendTransition(run, state, trigger, ctx);
+}
+
+/**
+ * [D3 协议版 P6] armed 回执落账投递（runId 键入口）：引擎 armed 事件在宿主的消费点
+ * 是 workflow-dispatch 的 ask 派发链（observedEvent——record 域），而 run 聚合不出
+ * orchestration 层，故收窄 dispatchRunTrigger 的投递面为本入口（同队列同转移表同
+ * journal，单写者纪律不破）。armed 落 dispatched/running 的自环行（D3 回执窗口横跨
+ * engine 预备段与执行段——每次 schema ask 的回执各一帧，自环语义允许多帧）。
+ * IllegalTransitionError 让位语义同 dispatchRunTrigger（并发终局后的迟到回执 = debug）。
+ */
+export function dispatchRunArmedReceipt(runId: string, frame: unknown): void {
+  void dispatchRunTrigger(
+    { runId },
+    { type: "armed", frame, ts: Date.now() },
+  ).catch((err: unknown) => reportDispatchFailure(runId, err));
+}
+
+/**
+ * `run-created` 正点发射（journal 首帧，Q2 接线后的终态；P1b-1 的 created 引导
+ * 补投分支已随正点接线删除——正点先落则后续触发 fold 出 dispatched，created 态
+ * 构造性不可达，无双帧）。生产调用点唯一 = lifecycle.runWorkflow 宿主派发点
+ * （创建期校验通过 + run 装配完成之后）；载荷 runId/scriptName/args/model 全部
+ * 同源自 run.spec。重复调用 = dispatched × run-created 表外转移 fail-fast
+ * （IllegalTransitionError），构造性排除双帧。
+ */
+export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> {
+  return dispatchRunTrigger(run, {
+    type: "run-created",
+    runId: run.runId,
+    workflowName: run.spec.scriptName,
+    argsSummary: summarizeRunArgs(run.spec.args),
+    ...(run.spec.model !== undefined ? { model: run.spec.model } : {}),
+    ts: Date.now(),
+  });
+}
+
+function summarizeRunArgs(args: Record<string, unknown>): string {
+  const serialized = JSON.stringify(args);
+  return serialized.length > RUN_ARGS_SUMMARY_MAX_CHARS
+    ? `${serialized.slice(0, RUN_ARGS_SUMMARY_MAX_CHARS)}…`
+    : serialized;
+}
+
+/** 投递失败的分类留痕：Illegal = 并发终局后的预期迟到事件（M12 同语义，debug）；
+ *  其余（IO 等）= error 响亮（journal 是取证面，静默丢失 = 事故不可诊断）。 */
+function reportDispatchFailure(runId: string, err: unknown): void {
+  if (err instanceof IllegalTransitionError) {
+    runEventLogger.debug(
+      `run event dispatch yielded (runId=${runId}): ${toErrorMessage(err)}`,
+    );
+    return;
+  }
+  runEventLogger.error(
+    `run event dispatch failed (runId=${runId}): ${toErrorMessage(err)}`,
+  );
+}
+
+/** `ask-dispatched` 落账（脚本 agent() 调用已派发；attempt 恒 1——重试在
+ *  executeAgentCall 内部递归，attempt 递增随终局帧的 call.attempts 落账）。 */
+export function dispatchAskDispatched(run: WorkflowRun, callId: number, agentName: string): void {
+  void dispatchRunTrigger(run, {
+    type: "ask-dispatched",
+    taskIndex: callId,
+    agentName,
+    attempt: 1,
+    ts: Date.now(),
+  }).catch((err: unknown) => reportDispatchFailure(run.runId, err));
+}
+
+/** `ask-settled` 落账（引擎终态应答：call.result；attempt = call.attempts 终局尝试
+ *  序号；signal abort = ask 粒度 cancelled——run 中止连带在途 ask 终止，D5 词表）。 */
+export function dispatchAskSettled(run: WorkflowRun, call: AgentCall, aborted: boolean): void {
+  const result = call.result;
+  if (!result) return; // AgentCall 状态机前置保证 done ⟹ result；防御性静默
+  const outcome: RunOutcome = aborted ? "cancelled" : result.error === undefined ? "completed" : "failed";
+  const errorCode: RunErrorCode | undefined =
+    outcome === "failed" ? (result.failureKind ?? "unknown") : undefined;
+  void dispatchRunTrigger(run, {
+    type: "ask-settled",
+    taskIndex: call.id,
+    attempt: call.attempts,
+    outcome,
+    ...(errorCode !== undefined ? { errorCode } : {}),
+    durationMs: result.durationMs ?? 0,
+    ts: Date.now(),
+  }).catch((err: unknown) => reportDispatchFailure(run.runId, err));
+}
+
+/** `ask-settled`（派发前置失败形态）：resolveAgentOpts 失败 = call 从未 markRunning
+ *  （attempt 恒 1、durationMs 0）；errorCode 恒 unknown（自由文本无词表位，诊断文本
+ *  在 trace/record 面）。 */
+export function dispatchAskSettledFailed(run: WorkflowRun, callId: number): void {
+  void dispatchRunTrigger(run, {
+    type: "ask-settled",
+    taskIndex: callId,
+    attempt: 1,
+    outcome: "failed",
+    errorCode: "unknown",
+    durationMs: 0,
+    ts: Date.now(),
+  }).catch((err: unknown) => reportDispatchFailure(run.runId, err));
+}
+
+/** finalizeRun 的终局事件投递：aborted → cancel-requested 控制事件（合成落账见
+ *  journalEventOf）；其余 → run-settled（DoneReason 六因 → RunOutcome 三态映射：
+ *  budget_limited/time_limited 是 run 怎么死的系统层失败 = failed，诊断文本进
+ *  reason）。errorCode（结构化码）的生产落点待后继单元（doneReason 无结构化码
+ *  词表），journal 词表与合成链路本批已就绪。 */
+async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason): Promise<void> {
+  if (doneReason === "aborted") {
+    await dispatchRunTrigger(run, {
+      type: "cancel-requested",
+      reason: run.state.error,
+    });
+    return;
+  }
+  const outcome: RunOutcome = doneReason === "completed" ? "completed" : "failed";
+  await dispatchRunTrigger(run, {
+    type: "run-settled",
+    outcome,
+    reason: run.state.error ?? doneReason,
+    artifactsDir: resolveRunEventJournal().dir,
+    ts: Date.now(),
+  });
+}
+
+// ── settle 链收口（execution service 直写点删除后的单点，P1b-1） ─────────────
+//
+// D7 例外族（workflow origin record 完成即终态化，设计 §1.4 out-of-scope 维持现状）
+// 的「record 两态机 CAS + finalizeRecord」对收敛到本函数——原
+// run-orchestration.settleOneShotOutcome / record-lifecycle.finalizeFailed /
+// record-lifecycle.finalizeAborted 三处逐字复制删除，grep 断言「settle 链不再各自
+// 直写终态」以本函数为唯一剩余点。
+//
+// 与 run 状态机（上方接线段）的关系：ask-settled 事件面由 pump call 完成链投递
+//（dispatchAskSettled——taskIndex/attempt 取 callId/call.attempts 单源），record
+// 终态化是同一 ask 终局的投影面（ExecutionRecord 两态机 CAS——D5 范围边界明示
+// record 域状态机收敛 out-of-scope，tryTransition 保留）。run 域的 manifest/.state
+// outcome 投影已随 [P1b-2] 实装（persistTerminalProjection）；record 域的
+// ManifestRecord.outcome 字段传参接线归后继批次（record 终态链所在领地）。
+
+/** settleWorkflowRecord 的既有写入面注入（finalizeRecord 归 RecordLifecycle 显式接口，
+ *  经调用方闭包回指——pump 不反向依赖 execution service 聚合）。 */
+export interface WorkflowRecordSettleExec {
+  finalizeRecord: (result: ExecutionAgentResult, closedReason: "gc" | "cancelled") => Promise<void>;
+}
+
+export async function settleWorkflowRecord(
+  record: ExecutionRecord,
+  result: ExecutionAgentResult,
+  closedReason: "gc" | "cancelled",
+  exec: WorkflowRecordSettleExec,
+): Promise<void> {
+  if (tryTransition(record, "closed", closedReason)) {
+    await exec.finalizeRecord(result, closedReason);
+  }
 }
 
 function delay(ms: number): Promise<void> {
@@ -787,7 +1288,8 @@ function dispatchAgentCall(
         : undefined,
   };
 
-  // BL-1：解析 skill/schema → skillPath / schemaEnv / appendSystemPrompt。
+  // BL-1：解析 skill/schema → skillPath / appendSystemPrompt（schema 本体经 wire
+  // task.schema 送达引擎，PI_WORKFLOW_SCHEMA 由引擎侧派生——H1 schema 传输归位）。
   // M2 修正后 resolveAgentOpts 单参数，只处理 schema SO 指令（内容直传）+ skill。
   // agent ref 处理（systemPrompt/model/thinkingLevel）交 resolveIdentity（经
   // getAgentConfig + resolveModel 完整覆盖），消除双重注入与 model 层级混乱。
@@ -804,6 +1306,8 @@ function dispatchAgentCall(
       result: errorResult,
       completedAt: new Date().toISOString(),
     });
+    // [P1b-1] ask-settled(failed) 落账（派发前置失败形态：attempt 恒 1）。
+    dispatchAskSettledFailed(run, msg.callId);
     postAgentResult(run, msg.callId, errorResult, false);
     deps.store.save(run).catch((e: unknown) => {
       logger.error(`[workflow] store.save failed (resolveAgentOpts): ${toErrorMessage(e)}`);
@@ -813,6 +1317,8 @@ function dispatchAgentCall(
 
   const call = new AgentCall(msg.callId, resolved.opts, node);
   run.state.calls.set(msg.callId, call);
+  // [P1b-1] ask-dispatched 落账（编排层事件源，D5 载荷表；taskIndex = callId 单源）。
+  dispatchAskDispatched(run, msg.callId, agentName);
 
   // [GUI 步骤实时可见 2026-09-14] 启动即持久化：trace.append 的 running 节点若等
   // 完成路径（.then/.catch）才随 save 落盘，running 中步骤在权威快照里恒缺席——
@@ -879,6 +1385,10 @@ function dispatchAgentCall(
         return;
       }
       if (call.result) postAgentResult(run, msg.callId, call.result, false);
+      // [P1b-1] ask-settled 落账（引擎终态应答，D5 载荷表；置于 budget 终局检查
+      // 之前——journal 序 = ask-settled 先、budget 的 run-settled 后）。signal abort
+      // = ask 粒度 cancelled（run 中止连带在途 ask 终止）。
+      dispatchAskSettled(run, call, signal.aborted);
       // D-12 regression fix (round-2 #1)：executeAgentCall 内 consume/incrementCallCount
       // 后同步 worker $BUDGET（否则 $BUDGET.spent()/remaining() 恒为 0）
       postBudgetUpdate(run);
@@ -932,6 +1442,9 @@ function dispatchAgentCall(
         result: errorResult,
         completedAt: new Date().toISOString(),
       });
+      // [P1b-1] ask-settled(failed) 落账（executeAgentCall 兜底异常路径——非 Abort
+      // 异常，aborted=false；终局尝试序号 = call.attempts）。
+      dispatchAskSettled(run, call, false);
       postAgentResult(run, msg.callId, errorResult, false);
       // S2: 与 .then 对称——catch 路径也同步 worker $BUDGET（幂等）
       postBudgetUpdate(run);

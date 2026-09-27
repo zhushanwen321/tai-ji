@@ -1,17 +1,5 @@
 # @zhushanwen/pi-goal
 
-## 0.14.7
-
-### Patch Changes
-
-- 43a50ae2e: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.13.0 → @zhushanwen/extension-protocol@0.14.0)
-
-## 0.14.6
-
-### Patch Changes
-
-- 8285841af: Route resume/set prompts through the sendContextMessage port: injected steering prompts now go out as custom messages instead of user messages, so the conversation stream no longer fabricates user bubbles. LLM-visible content is unchanged.
-
 ## 0.14.5
 
 ### Patch Changes

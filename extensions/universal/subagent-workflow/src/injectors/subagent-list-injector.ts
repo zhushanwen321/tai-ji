@@ -77,7 +77,9 @@ export function parseAgentFrontmatter(content: string): AgentEntry | null {
 const injector = createResourceListInjector<AgentEntry>({
 	kind: "agents",
 	logTag: "[subagent-list-injector]",
-	format: (agents) => formatAgentList(agents, { guide: SUBAGENT_LIST_GUIDE }),
+	// agents 段无 invalid 产出面（assemble 路径 invalids 恒空），第二参忽略——
+	// 签名对齐工厂 config.format（P5 D4-3 invalid 上报仅 workflow 域接线）。
+	format: (agents, _invalids) => formatAgentList(agents, { guide: SUBAGENT_LIST_GUIDE }),
 	assemble: (workspaceRoot) =>
 		discoverAgents(
 			workspaceRoot,

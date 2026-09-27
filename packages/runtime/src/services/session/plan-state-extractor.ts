@@ -35,16 +35,6 @@ interface JsonlCustomEntry {
 const BYTES_PER_MB = 1024 * 1024
 
 /**
- * requirement 读侧封顶上限（64KB = 64 * 1024 字节）：与 extension 写侧
- * MAX_PLAN_REQUIREMENT_LENGTH（extensions/universal/plan/src/state.ts）刻意同值——
- * runtime 不 import extensions/ 源码（依赖方向不允许，同 subagent-extractor:194 先例），
- * 跨包对齐靠注释互指。数值用单字面量而非 64 * 1024 乘法形态：乘法操作数仍会被
- * no-magic-numbers 逐个告警，本处以命名 + 注释承载换算语义，不加静默规则豁免
- * （BYTES_PER_MB 的既有豁免注释不在此修复范围）。
- */
-const MAX_PLAN_REQUIREMENT_LENGTH_BYTES = 65_536
-
-/**
  * 「未激活」缺省 View（无 entry / ENOENT / oversize 降级共用，对齐 extension
  * DEFAULT_PLAN_STATE 的 View 域投影）。导出给 SessionRecords 的 publish 归一
  * （全量重建发现 entry 被外部清空 → 缺省 View 发布帧，见 mergePlanState）。
@@ -94,7 +84,8 @@ function parsePlanStateEntry(entry: unknown): PlanStateView | null {
   const view: PlanStateView = {
     isActive: d.isActive === true,
     planFilePath: normalizeNonEmptyString(d.planFilePath),
-    requirement: normalizeNonEmptyString(d.requirement, MAX_PLAN_REQUIREMENT_LENGTH_BYTES),
+    // 64KB 与 extension 写侧 MAX_PLAN_REQUIREMENT_LENGTH 同值（跨包不 import，注释互指）
+    requirement: normalizeNonEmptyString(d.requirement, 64 * 1024),
     templateName: normalizeNonEmptyString(d.templateName),
   }
   applyOptionalPlanFields(view, d)
@@ -125,7 +116,7 @@ function normalizeNonEmptyString(v: unknown, capTo?: number): string | null {
 /**
  * D4 optional 新字段透传（守卫通过才挂键，optional 字段缺省不设、禁显式 undefined 占位）：
  * skills 要求 string[]、docs 逐元素守卫（坏元素过滤）、reviewState 限两字面量、
- * reviewStateSource 仅 'resubmit'（explain 交互已删——漏透传 =
+ * reviewStateSource 限两字面量（降级两源标记，plan-mode-ux-refactor §3.4——漏透传 =
  * 字段在派生处静默丢弃、renderer 恒渲染通用降级文案）。
  */
 function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>): void {

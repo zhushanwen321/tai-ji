@@ -18,7 +18,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { SessionMessageHandler, type SessionHandlerContext } from '../session-message-handler.js'
 import { ImportServiceError, type ImportService } from '../../services/session/import-service.js'
-import { zcodeImportDbAllowlist } from '@zhushanwen/zcode-session-source'
+import { zcodeImportDbAllowlist } from '../../services/session/zcode-import/sqlite-access.js'
 import { getDataDir } from '@taiji/shared/paths'
 import type { ISessionService } from '../../interfaces.js'
 import type { ClientMessage, ImportCandidatesReply, ImportReply } from '@taiji/shared'
@@ -128,7 +128,6 @@ describe('SessionMessageHandler session.importCandidates', () => {
 
     await handler.handleSessionMessage(msg('session.importCandidates', {}), ws)
 
-    // candidates payload 契约无 sessionId 字段（ImportCandidatesRequest）→ envelope 无从带
     expect(ctx.sendError).toHaveBeenCalledWith(ws, 'import_unsupported', 'import service not available', 'msg-1')
     expect(ctx.reply).not.toHaveBeenCalled()
   })
@@ -278,9 +277,7 @@ describe('SessionMessageHandler session.import', () => {
 
     await handler.handleSessionMessage(msg('session.import', { sourcePath: '/ext/a.jsonl', projectId: 'p1' }), ws)
 
-    // C-comm-05：error envelope 第 5 参 details.sessionId 条件传递（本用例 payload 无
-    // sessionId——pi 源可不带 → 收到 undefined，与「有则必带」的实现形态锁定）
-    expect(ctx.sendError).toHaveBeenCalledWith(ws, 'import_unsupported', 'import service not available', 'msg-1', undefined)
+    expect(ctx.sendError).toHaveBeenCalledWith(ws, 'import_unsupported', 'import service not available', 'msg-1')
     expect(ctx.reply).not.toHaveBeenCalled()
     expect(ctx.broadcastSessionList).not.toHaveBeenCalled()
   })
@@ -333,7 +330,6 @@ describe('SessionMessageHandler session.import', () => {
       'import_db_path_forbidden',
       expect.stringContaining('dbPath 不在允许的会话库路径集合内'),
       'msg-1',
-      { sessionId: 'sess_0199abc' },
     )
     expect(svc.importSession).not.toHaveBeenCalled()
     expect(ctx.reply).not.toHaveBeenCalled()
@@ -361,7 +357,6 @@ describe('SessionMessageHandler session.import', () => {
       'import_db_path_forbidden',
       expect.stringContaining('dbPath 不在允许的会话库路径集合内'),
       'msg-1',
-      { sessionId: 'sess_0199abc' },
     )
     expect(svc.importSession).not.toHaveBeenCalled()
   })

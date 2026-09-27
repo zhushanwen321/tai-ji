@@ -74,8 +74,9 @@ export interface CollectResultArgs {
   sessionId: string;
   sessionFile: string | undefined;
   /**
-   * [F-1] 本次执行是否要求结构化产出（schema 或 schemaEnv 任一存在）。
-   * true 且 run 结束仍无有效 parsedOutput 时：结果不得静默 success。
+   * [F-1] 本次执行是否要求结构化产出（判定源 = task.schema 声明形态——schema
+   * 本体存在与否，与 env 派生/注入值不同源）。true 且 run 结束仍无有效
+   * parsedOutput 时：结果不得静默 success。
    */
   schemaExpected?: boolean;
 }

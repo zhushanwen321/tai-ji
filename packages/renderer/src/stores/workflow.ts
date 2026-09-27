@@ -27,7 +27,7 @@
 import { defineStore } from 'pinia'
 import { getCurrentScope, onScopeDispose, ref } from 'vue'
 import type { ComputedRef } from 'vue'
-import type { WorkflowRunRecord } from '@taiji/shared'
+import type { WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
 // 虚拟 session ID 工厂 SSOT 迁至 @taiji/shared/virtual-session-id（跨层协议级约定）。
 // 此处 re-export 保持现有 import 路径向后兼容；本 store body 清理逻辑用本地 import。
 export {
@@ -38,6 +38,55 @@ export {
 } from '@taiji/shared'
 import { session as sessionApi } from '@/api'
 import { createEmptyResultStrikeGuard, createPartitionedRecords } from '../lib/partitioned-session-records'
+
+// ── [P3/D6] health / progress 投影消费（纯函数，drawer WorkflowTab 与托盘面板共用）──
+
+/** 停滞阈值换算因子（15 分钟；具名消 magic number，no-magic-numbers 先例同 jsonl-run-store TTL_DAYS）。 */
+const STALL_THRESHOLD_MINUTES = 15
+const MINUTES_PER_HOUR = 60
+const MS_PER_SECOND = 1000
+
+/**
+ * [P3/D6] UI 停滞判定阈值：running run 距最近事件边沿（health.lastProgressAt）超过
+ * 该窗口即呈现「无进展」信号（G3：卡 15 分钟无事件可判停滞）。与通知侧 20 分钟
+ * 阈值（D6-2，P4 单元）有意分离——UI 提示档先于通知档，两档不共用常量。
+ */
+export const WORKFLOW_STALL_THRESHOLD_MS =
+  STALL_THRESHOLD_MINUTES * MINUTES_PER_HOUR * MS_PER_SECOND
+
+/**
+ * [P3/D6] stalledSince 推导（消费侧单点，不落快照——D6 字段策略）：
+ * running 且 health.lastProgressAt 距 now 超阈值 → 返回停滞起点（= lastProgressAt）；
+ * 其余 → null。health 缺省（旧快照 additive 读）一律 null——无数据不判定停滞
+ * （ADR-0047：静默 ≠ 卡死，缺数据更不是）。
+ */
+export function deriveStalledSince(record: WorkflowRunRecord, nowMs: number): number | null {
+  if (record.status !== 'running') return null
+  const last = record.health?.lastProgressAt
+  if (last === undefined) return null
+  return nowMs - last > WORKFLOW_STALL_THRESHOLD_MS ? last : null
+}
+
+/**
+ * [P3/D6] 单 ask 已执行时长（「每 ask 已执行时长」槽）：running 且 trace.startedAt
+ * 可解析 → now - startedAt；其余（pending/done 或旧快照缺 startedAt）→ null
+ * （槽省略）。done ask 的耗时走既有 durationMs 通道，不经本函数。
+ */
+export function agentCallElapsedMs(call: WorkflowAgentCall, nowMs: number): number | null {
+  if (call.status !== 'running' || call.startedAt === undefined) return null
+  const started = Date.parse(call.startedAt)
+  if (Number.isNaN(started)) return null
+  return Math.max(0, nowMs - started)
+}
+
+/**
+ * [P3/D6] 单 ask 停滞判定：running 且 calls[] 投影的 lastProgressAt 距 now 超阈值。
+ * lastProgressAt 缺省（旧快照）→ false（不判定）。
+ */
+export function agentCallStalled(call: WorkflowAgentCall, nowMs: number): boolean {
+  if (call.status !== 'running' || call.lastProgressAt === undefined) return false
+  return nowMs - call.lastProgressAt > WORKFLOW_STALL_THRESHOLD_MS
+}
 
 export const useWorkflowStore = defineStore('workflow', () => {
   // ── state ──

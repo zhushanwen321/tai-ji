@@ -125,7 +125,8 @@ export class PiEngine implements EnginePort {
       resume: "native",
       // 现链路 abort = SIGTERM（pi 子进程 trap 后 graceful shutdown）
       interrupt: "kill-only",
-      // argv-mirror 镜像主进程 --approve 等 flag
+      // pi rpc 模式非交互（approval 不经 argv；--approve 是 project-local files
+      // 信任语义，非工具批准），子代理工具执行无需批准回路
       permissionMode: "native",
       // turn limiter + spawn watchdog 估算兑现轮数上限
       maxTurns: true,
@@ -298,7 +299,9 @@ function buildRunIdentityParams(
 function buildRunOptionalFlags(task: AgentCallOpts, ctx: RunContext): Partial<SpawnRunParams> {
   return {
     ...(task.thinkingLevel !== undefined ? { thinkingLevel: task.thinkingLevel } : {}),
-    ...(task.schemaEnv !== undefined ? { schemaEnv: task.schemaEnv } : {}),
+    // [D1 schema 传输归位] schema 本体经 wire task.schema 单字段透传（env 字符串
+    // 不再跨层——PI_WORKFLOW_SCHEMA 值由 spawn-runner 从本体派生）
+    ...(task.schema !== undefined ? { schema: task.schema } : {}),
     ...(task.maxTurns !== undefined ? { maxTurns: task.maxTurns } : {}),
     ...(task.graceTurns !== undefined ? { graceTurns: task.graceTurns } : {}),
     ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
@@ -309,6 +312,9 @@ function buildRunOptionalFlags(task: AgentCallOpts, ctx: RunContext): Partial<Sp
     ...(task.forkSource !== undefined ? { forkSource: task.forkSource } : {}),
     // [F6] 根 session id 透传（relay 归属键 SESSION_ID 权威源；undefined 不挂键）。
     ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
+    // [D2 扩展加载显式化] 孙进程扩展路径集透传（协议 ctx 还原 → spawn-args 逐项拼
+    // --extension；undefined 不挂键 = 不拼）。
+    ...(ctx.extensionPaths !== undefined ? { extensionPaths: ctx.extensionPaths } : {}),
   };
 }
 

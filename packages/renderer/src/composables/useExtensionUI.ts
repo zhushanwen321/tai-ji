@@ -32,23 +32,14 @@
  * legacy 归一已上移 runtime（ui-presentation-protocol D7 收口，MF-1-5）：旧 askUser /
  * scheduleCreate marker 帧由 runtime event-adapter 分支直接产出 form:true 统一表单帧
  * （askUser 源含 type 推断映射），本层只消费 view-ready 帧、不再有 renderer 侧归一挂点。
- *
- * btw 侧（btw-question M3-c）：本模块只承载 btw 挂起的失效/修剪收口与 D7⑤ 草稿状态
- * 本体（文件尾）；drawer 内联确认条编排本体（D8 降级路径）拆在
- * panel/useBtwInteraction.ts（单向依赖：编排 → 本模块，无环）。
  */
-import { computed, reactive, watch, onScopeDispose, type Ref } from 'vue'
+import { computed, watch, onScopeDispose, type Ref } from 'vue'
 import type { InternalEvent, DialogRequest } from '@taiji/core'
-import { isBtwVirtualId } from '@taiji/shared'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { notifyUiResponseNotDelivered } from '@/composables/shell/extension-host-dialog'
-import i18n from '@/i18n'
-import { useToast } from '@/composables/useToast'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
-import { useChatStore } from '@/stores/chat'
-import { BTW_EXPIRED_REASON_SNAPSHOT_PRUNED, invalidateBtwStaleFromSnapshot } from '@/composables/panel/btw-pending-bookkeeping'
 
 /** 入队过滤谓词：返回 true 的请求才入队 */
 export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
@@ -143,7 +134,6 @@ export function __resetExtensionBusSubscriptionForTesting(): void {
     invalidatedUnsub()
     invalidatedUnsub = null
   }
-  btwBarDrafts.clear() // 草稿分键表随测试隔离清空（模块级跨用例残留防护）
 }
 
 // ── 挂起请求失效广播订阅（P2-2 失效链，模块级单订阅永驻）──
@@ -163,43 +153,21 @@ function ensureInvalidatedSubscription(): void {
     for (const requestId of e.requestIds) {
       store.removeRequest(e.sessionId, requestId)
     }
-    // D1 invalidated 锚点（form-hang-fix）：runtime 非 respond 终结（reclaimed / plan-aborted /
-    // turn-aborted / session-destroyed 四类触发源）均无后续 turn 预期，pendingSend 等
-    // message_start 必然空等——按帧 sid 收口。clearPendingSend 幂等，与 message_start /
-    // respond 锚点并发竞争无副作用。
-    // chatStore 此处**现取**而非 respond 侧的 setup 捕获：本订阅是模块级单例、生命周期跨
-    // Panel 实例（首个使用者挂上后永驻），setup 捕获会钉死首个实例的上下文；而事件到达
-    // 时点 pinia 必已 active（与上方 useExtensionUIStore() 同模式），现取安全。
-    useChatStore().clearPendingSend(e.sessionId)
-    // D7⑤ 终结清理（失效支）：挂起终结后对应分键草稿即删（切走切回不丢 ≠ 终结后残留）
-    clearBtwBarDrafts(e.sessionId, e.requestIds)
   })
 }
 
-/** dialog level 白名单守卫（ExtensionUIRequest.level 契约面，三值）。 */
-function isDialogLevel(value: unknown): value is 'info' | 'warn' | 'error' {
-  return value === 'info' || value === 'warn' || value === 'error'
-}
-
-/** string[] 守卫（options 契约面）：数组且逐项 string。 */
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(item => typeof item === 'string')
-}
-
 /** dialog 基础展示字段搬运（title/message/options/default/level/prefill）。
- *  DialogRequest 索引签名读原始 payload，值域 unknown，按 ExtensionUIRequest 契约
- *  运行时守卫收窄（isPlanReviewRequest 同范式）：畸形值（非 string / 非 string[] /
- *  越界 level）按无值处理落缺键降级分支，不伪造类型流入渲染层。 */
+ *  DialogRequest 索引签名读原始 payload，值域 unknown，按 ExtensionUIRequest 契约断言收窄。 */
 function pickDialogFields(
   request: DialogRequest,
 ): Partial<Pick<ExtensionUIRequest, 'title' | 'message' | 'options' | 'default' | 'level' | 'prefill'>> {
   return {
     ...(request.title !== undefined ? { title: request.title } : {}),
-    ...(typeof request.message === 'string' ? { message: request.message } : {}),
-    ...(isStringArray(request.options) ? { options: request.options } : {}),
-    ...(typeof request.default === 'string' ? { default: request.default } : {}),
-    ...(isDialogLevel(request.level) ? { level: request.level } : {}),
-    ...(typeof request.prefill === 'string' ? { prefill: request.prefill } : {}),
+    ...(request.message !== undefined ? { message: request.message as string } : {}),
+    ...(request.options !== undefined ? { options: request.options as string[] } : {}),
+    ...(request.default !== undefined ? { default: request.default as string } : {}),
+    ...(request.level !== undefined ? { level: request.level as 'info' | 'warn' | 'error' } : {}),
+    ...(request.prefill !== undefined ? { prefill: request.prefill as string } : {}),
   }
 }
 
@@ -250,10 +218,6 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
     // planReview 标记透传（D5）：DialogRequest 索引签名读原始 payload，守卫后携带进 store——
     // 挂起枚举（currentPlanReviewRequests）依赖该字段识别审批请求。
     ...(request.planReview !== undefined ? { planReview: request.planReview === true } : {}),
-    // expectTurn 源元数据透传（form-submit-busy-convergence D1 段 4）：帧上仅显式 false 落键
-    //（runtime event-adapter 条件落键），undefined 缺键 = 缺省桥接态——按帧原样透传进 store，
-    // respond 分型据其三态判定；非 boolean 值不入帧（守卫即透传闸）。
-    ...(typeof request.expectTurn === 'boolean' ? { expectTurn: request.expectTurn } : {}),
     receivedAt: typeof rawReceivedAt === 'number' ? rawReceivedAt : Date.now(),
   }
 }
@@ -265,9 +229,6 @@ export function useExtensionUI(
   // pending 队列 SSOT 在 store（T2 迁移）：本 composable 只订阅事件写入 store、按 filter 读 store。
   // store.addRequest 含 requestId dedup（T1），无需手写去重。
   const store = useExtensionUIStore()
-  // D1 分型锚点的 chatStore 取用（form-hang-fix）：setup 上下文捕获（对齐上方 extensionUIStore
-  // 模式），respond 事件回调经闭包引用——不在回调内重取。
-  const chatStore = useChatStore()
   // P2-2 失效链订阅（模块级单例；首个使用者挂上后永驻，与 store 生命周期一致）
   ensureInvalidatedSubscription()
 
@@ -334,20 +295,7 @@ export function useExtensionUI(
     // ——本修剪只在快照落地时生效，与「未重订阅的丢帧」同族缺口（§6.2 采用项②）。
     getPendingRequests(sid)
       .then((pendingRequests) => {
-        const keepIds = new Set(pendingRequests.map((r) => r.requestId))
-        const beforeIds = store.getRequestsBySession(sid).map((r) => r.requestId)
-        store.retainOnly(sid, keepIds)
-        // btw 修剪路失效（D8 失效支两路收口之一，与事件路同函数单入口）：runtime 重启后
-        // pending 内存表清零，进程死亡切面恒空清单不广播失效帧（server invalidate 单出口）——
-        // 本地挂起簿记有、权威快照无的 requestId 据本次对账差集补走失效支，遗留挂起转为
-        // 行内「请求已失效」提示。快照仍含的请求不动；主会话 sid 不入（isBtwVirtualId 守卫）；
-        // 触发面 = 本 retainOnly 调用点，不新增轮询。
-        if (isBtwVirtualId(sid)) {
-          invalidateBtwStaleFromSnapshot(sid, keepIds, BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
-        }
-        // D7⑤ 终结清理（快照修剪支）：被剔除的僵尸请求（重附着/回收后 runtime 已清）
-        // 对应分键草稿随之删除——快照剔除 = 失效语义的同族终结点（空集幂等）
-        clearBtwBarDrafts(sid, beforeIds.filter((id) => !keepIds.has(id)))
+        store.retainOnly(sid, new Set(pendingRequests.map((r) => r.requestId)))
         // 补入快照条目（已在分区者由 addRequest requestId dedup 幂等跳过）。
         // M1 竞态修复：addRequest(sid, ...) 用订阅时捕获的 sid（参数）——只写旧 sid 分区，
         // 不读 sessionId.value。即使此响应在 session 切换后到达，也只写入旧 sid 的 Map
@@ -409,45 +357,20 @@ export function useExtensionUI(
    * （M1/RD-3#1：断连期点确认＝应答丢失、弹窗消失、pi 侧 Promise 永挂）+ toast 提示；
    * FormOverlay/审批条保留展示，连接恢复后用户可再次提交重投（同 requestId 幂等——
    * runtime handler 与 pi rpc-mode 对已终结 requestId 均静默忽略重复应答）。
-   *
-   * 返回值（D8 提交回路契约，btw-question M3-c）：true = 应答已送达并出队；false =
-   * 未送达（保持挂起可重试——「重试仅限投递失败态」）或请求已终结（应答丢弃 + 提示
-   * 失效，不静默）。消费方（btw 内联确认条）据此决定待处理簿记是否随应答解除。
    */
-  function respond(requestId: string, result: boolean | string | null): boolean {
+  function respond(requestId: string, result: boolean | string | null): void {
     const sid = sessionId.value
-    if (!sid) return false
+    if (!sid) return
     const target = store.getRequestsBySession(sid).find(r => r.requestId === requestId)
-    if (!target) {
-      // 已终结 requestId 的应答丢弃并提示失效（D8：迟到提交不静默，toast 可见）
-      const t = i18n.global.t as (key: string) => string
-      useToast().error(t('extensionUI.requestExpired'), { sessionId: sid })
-      return false
-    }
+    if (!target) return
     const delivered = sendExtensionUIResponse(target.sessionId, target.requestId, target.method, result)
     if (!delivered) {
       notifyUiResponseNotDelivered(target.sessionId)
-      return false
+      return
     }
     // store.removeRequest 按 requestId 精确移除（不区分 form/dialog），requestId 全局唯一，
     // 故即使本实例 filter 不同也能正确移除。
     store.removeRequest(sid, requestId)
-    // D1 分型锚点（form-hang-fix）：cancel 型（result === null——Esc / 取消按钮 / cancel()
-    // 同链）送达后 pi 无后续 turn 事件预期，pendingSend 等 message_start 必然空等（假忙
-    // 窗口病灶）——送达即收口。提交型（result !== null）不清：pi 起 turn，pendingSend
-    // 桥接「respond 完成 → message_start 到达」窗口并由其正常清除（现状语义，不制造
-    // isActive=false 空窗）。判据严格按 result 是否 null——boolean 型按提交型处理。
-    if (result === null) {
-      chatStore.clearPendingSend(sid)
-    } else if (target.expectTurn === false) {
-      // D1 段 5 + D2 严格双条件（result ≠ null ∧ expectTurn === false）：提交型但源声明
-      // 无 turn 预期（命令 handler 内 select，message_start 永不来）→ 立即收尾，消除
-      // 30s 假忙。判定必须 `=== false` 显式判定——truthy 简化（`!expectTurn`）会把
-      // undefined（存量扩展/断链缺省）也当无 turn、误清 ask-user 桥接（D2 被否谱系）；
-      // true / undefined → 隐式 else，桥接照旧（缺省安全）。
-      chatStore.clearPendingSend(sid)
-    }
-    return true
   }
 
   /** 用户取消（等价 respond(requestId, null)） */
@@ -462,22 +385,3 @@ export function useExtensionUI(
     cancel,
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// btw 内联确认条草稿分键表（D7⑤ 提交态 per-vid 隔离的模块级载体）——确认条编排本体
-// （D8 降级路径：请求合并排序 / 降档表单 / 提交回路）在 panel/useBtwInteraction.ts，
-// 本模块只承载草稿状态本体：终结清理入口挂在本模块失效链（invalidated 订阅）与
-// 快照差集修剪（retainOnly diff）两路，故状态留此与挂起请求生命周期同文件管理。
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** 确认条草稿（四组提交态）——按 `${vid}:${requestId}` 分键保存（D7⑤ per-vid/表单实例双隔离） */
-export type BtwBarDraft = { sel: Record<string, string[]>; text: Record<string, string>; planComment: string; dialogSelect: string; dialogText: string }
-
-export const emptyBtwBarDraft = (): BtwBarDraft => ({ sel: {}, text: {}, planComment: '', dialogSelect: '', dialogText: '' })
-
-// taste:allow-no-data-owner W24-EX（btw-question M3-c 行内豁免，登记表⑧已落定（2026-09-22，阶段 3 审查 U2 修复随批）——EX-A：`btwBarDrafts` 分键草稿 Map，D7⑤ 挂起表单提交态 per-vid 隔离的持久草稿本体）：
-// 确认条草稿分键表（用户输入暂存、终结即删，非 GUI 数据本体；D7⑤ 切走切回不丢的模块级载体）
-export const btwBarDrafts = reactive(new Map<string, BtwBarDraft>())
-
-/** 终结清理：应答送达 / 失效 / 快照修剪三支共用（幂等） */
-export function clearBtwBarDrafts(vid: string, requestIds: readonly string[]): void { for (const rid of requestIds) btwBarDrafts.delete(`${vid}:${rid}`) }

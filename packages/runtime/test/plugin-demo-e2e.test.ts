@@ -99,13 +99,9 @@ function createMockContext(): {
         list: vi.fn(async () => []),
         get: vi.fn(async () => undefined),
         getActive: vi.fn(async () => undefined),
-        sendMessage: vi.fn(async () => ({ accepted: true })),
-        readEntries: vi.fn(async () => ({ entries: [] })),
-        getCommands: vi.fn(async () => []),
+        sendMessage: vi.fn(async () => {}),
         onDidCreateSession: vi.fn(() => ({ dispose: () => {} })),
         onDidDestroySession: vi.fn(() => ({ dispose: () => {} })),
-        onDidActivateSession: vi.fn(() => ({ dispose: () => {} })),
-        onEntriesInvalidated: vi.fn(() => ({ dispose: () => {} })),
       },
       // ── events ────────────────────────────────────────────
       events: {
@@ -134,10 +130,6 @@ function createMockContext(): {
           notifications.push({ level, message })
         }),
         updateStatusBarItem: vi.fn(async () => {}),
-        showModal: vi.fn(async () => ({ opened: true as const, epoch: 1 })),
-        hideModal: vi.fn(async () => ({ closed: false })),
-        updateHeaderAction: vi.fn(async () => ({ updated: true })),
-        onModalClosed: vi.fn(() => ({ dispose: () => {} })),
       },
       // ── agent ─────────────────────────────────────────────
       agent: {

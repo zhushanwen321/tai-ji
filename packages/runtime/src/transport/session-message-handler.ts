@@ -3,15 +3,14 @@
  * Extracted from RuntimeServer to reduce file size.
  */
 import type { WebSocket as WsType } from 'ws'
-import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, SessionSummary } from '@taiji/shared'
+import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import type { ISessionService } from '../interfaces.js'
 import type { HandoffService } from '../services/handoff-service.js'
 import type { ImportService } from '../services/session/import-service.js'
 // zcode 会话库白名单（MF-3-1 wire 帧加固）：值 import——校验在 transport 边界执行，
-// allowlist 推导是 zcode 库路径知识（宿主库/隔离库同文件 SSOT；session-reader-shared-core
-// U10 起唯一承载 = @zhushanwen/zcode-session-source）。
-import { zcodeImportDbAllowlist } from '@zhushanwen/zcode-session-source'
+// allowlist 推导是 zcode-import 域的路径知识（宿主库/隔离库同文件 SSOT）。
+import { zcodeImportDbAllowlist } from '../services/session/zcode-import/sqlite-access.js'
 // BackgroundTaskService（background-task-sidebar D3，u-runtime-rpc）：仅类型 import——
 // 实例由 SessionService 构造器组装（session-service 领地），handler 经 ctx 结构读取消费面。
 import type { BackgroundTaskService } from '../services/background-task/background-task-service.js'
@@ -62,16 +61,11 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    *   （session-records.ts:510，磁盘 JSONL → scanPlanStateEntries 派生）。SessionService
    *   已按 workflowAction 同款形态转发（session-service.ts getWorkflows 转发区）；可选成员
    *   形态对齐 backgroundTasks 先例，缺省仅出现在测试最小 mock 中。
-   * - notifySessionActivated（plugin-header-action-modal-points AP-4/u5a relay ①）：
-   *   session.switch 成功分支投递激活信号（PluginService 注册回调 → didActivate 定向投递）。
-   *   可选链防御与 markSessionViewed 同款——激活投递是旁路信号，最小 mock 缺该成员不应让
-   *   switch 请求失败。
    */
   sessionService: ISessionService & {
     readonly backgroundTasks?: BackgroundTaskRpcPort
     markSessionViewed?(sessionId: string): void
     getPlanState?(sessionId: string): Promise<PlanStateView>
-    notifySessionActivated?(summary: SessionSummary): void
   }
   /** fast-handoff 编排层（session.handoff 路由用）。可选：未注入时该 case 报 unsupported。 */
   handoffService?: HandoffService
@@ -418,7 +412,6 @@ export class SessionMessageHandler {
     }
     const summary = this.ctx.sessionService.getSummary(switchId)
     if (summary) {
-      this.notifySessionActivatedSafe(summary)
       this.ctx.reply(ws, msg.id, 'session.switched', { sessionId: switchId, session: summary })
     } else {
       try {
@@ -427,9 +420,6 @@ export class SessionMessageHandler {
         if (!restored) {
           throw new Error(`Session ${switchId} restored but summary unavailable`)
         }
-        // 自动 restore 分支同投递（AP-4：switch 成功含其自动 restore 路径——冷启动/崩溃恢复
-        // 后的补拉由 didActivate 承接，场景 9「重启后仍正确」）。
-        this.notifySessionActivatedSafe(restored)
         this.ctx.reply(ws, msg.id, 'session.switched', { sessionId: switchId, session: restored })
       } catch (e) {
         const errMsg = toErrorMessage(e)
@@ -440,23 +430,6 @@ export class SessionMessageHandler {
         console.error('[runtime] session.switch auto-restore failed:', errMsg)
         this.ctx.sendError(ws, isENOENT ? 'file_not_found' : 'not_found', userMsg, msg.id, { sessionId: switchId })
       }
-    }
-  }
-
-  /**
-   * relay ①（plugin-header-action-modal-points AP-4/u5a）：switch 成功 → 激活信号投递。
-   * 可选链防御（SessionHandlerContext 注释：最小 mock 缺该成员不失败）+ try/catch（markSessionViewed
-   * 同款——投递失败只损失一次激活信号，绝不拖垮 switch 主流程；reply 语义不变）。
-   * 注册侧链路：session-service.onSessionActivated（追加式回调列表）→ PluginService
-   * sessionEventDispatch.didActivate 定向投递 Worker。
-   */
-  private notifySessionActivatedSafe(summary: SessionSummary): void {
-    try {
-      this.ctx.sessionService.notifySessionActivated?.(summary)
-    } catch (e) {
-      // 降级策略（best-effort）：激活投递只损失一次补拉信号（插件下次失效订阅/激活重试可收敛），
-      // switch 主流程照常（reply 语义不变）；warn 落日志留排查线索（非静默吞，无需豁免）。
-      console.warn('[runtime] session.switch notifySessionActivated failed:', toErrorMessage(e))
     }
   }
 
@@ -613,15 +586,27 @@ export class SessionMessageHandler {
   }
 
   private async handleSessionAbortPlan(msg: Extract<ClientMessage, { type: 'session.abortPlan' }>, ws: WsType): Promise<void> {
-    // D5/E9/E10：PlanModeBar 退出按钮（确认 Popover 后）。编排（ensureActive 自动恢复 +
-    // prompt('/plan abort') + 失效链回调上抛）在 service 层（session-service.ts abortPlan，
-    // MF-1-7 下沉，形态对齐 subagentAction「handler 只透传 payload 字段」）；失效链消费
-    // 单一出口在 server.ts（setOnPlanAborted → invalidatePendingUiRequests）。退出结果经
-    // 投影链 session.planState 广播推回，此处只回 message.status ack（renderer
-    // register<void> 不读 status 值，CL10 宽 string 形态）。
+    // D5/E9/E10：PlanModeBar 退出按钮（确认 Popover 后）。① ensureActive 自动恢复 pi（join 语义，session-service.ts
+    // ensureActive——崩溃恢复后懒重生未发生的窗口一步到位，不要求用户先发消息；恢复失败
+    // → 下方 error envelope，前端呈现 E9 恢复指引）。② client.prompt('/plan abort') 直发：
+    // `/` 前缀 prompt 被 pi 先行执行为 extension command、不产用户消息、streaming 中可用
+    // （主审 R2 复核实证）；pi 实装锚点（0.84.4）：dist/core/agent-session.js:826-833——
+    // prompt 对 `/` 前缀先行尝试 extension command（源码注释明言 execute immediately,
+    // even during streaming），handled 即 return 不产用户消息；命令解析
+    // _tryExecuteExtensionCommand :954。本断言双承重：此写入路径 +
+    // .githooks/check_prompt_outposts.py 豁免条目的依据。刻意绕过 dispatcher busy 预检——照 workflowAction（session-records.ts
+    // workflowAction）先例，审批挂起期 busy defer 会吞掉退出命令（E10 卡死链的入口），直发
+    // 让 extension 侧 abort handler（先 controller.abort 再 resetPlanState）落地。
+    // 退出结果经投影链 session.planState 广播推回（isActive=false），此处只回 message.status
+    // ack（renderer register<void> 不读 status 值，CL10 宽 string 形态）。
     const { sessionId } = msg.payload
     try {
-      await this.ctx.sessionService.abortPlan(sessionId)
+      const client = await this.ctx.sessionService.ensureActive(sessionId)
+      await client.prompt('/plan abort')
+      // P2-2 失效链：/plan abort → extension controller.abort() 解散挂起审批 select，
+      // 响应永不可达——摘除 runtime pending + 广播失效帧（审批挂起中退出后重进 plan，
+      // 僵尸 ready 审批条不再出现）。退出结果经投影链 session.planState 广播推回。
+      this.ctx.invalidatePendingUiRequests(sessionId, 'plan-aborted')
       return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'sent' })
     } catch (e) {
       const errMsg = toErrorMessage(e)
@@ -817,8 +802,6 @@ export class SessionMessageHandler {
     const candidatesSvc = this.ctx.importService
     if (!candidatesSvc) {
       // importService 未注入（理论不可达——组合根必传），防御性报错（对齐 handoffService 惯例）。
-      // 注：candidates payload 契约（ImportCandidatesRequest）无 sessionId 字段，error
-      // envelope 无 sessionId 可带——C-comm-05 仅约束 payload 含 sessionId 的请求。
       return this.ctx.sendError(ws, 'import_unsupported', 'import service not available', msg.id)
     }
     try {
@@ -844,9 +827,7 @@ export class SessionMessageHandler {
     // envelope），随 result 原样透传。
     const importSvc = this.ctx.importService
     if (!importSvc) {
-      // sessionId 条件传递（ImportRequest.sessionId 可选，pi 源可不带）：与 server.ts 主
-      // 分发错误信封同形态，C-comm-05 要求 error envelope 带 sessionId 供前端路由。
-      return this.ctx.sendError(ws, 'import_unsupported', 'import service not available', msg.id, msg.payload.sessionId ? { sessionId: msg.payload.sessionId } : undefined)
+      return this.ctx.sendError(ws, 'import_unsupported', 'import service not available', msg.id)
     }
     // wire 帧 dbPath 白名单（MF-3-1 加固）：dbPath 在 wire 上是任意 WS 客户端可写字段，
     // 仅放行 zcodeImportDbAllowlist(dataDir) 封闭集合（隔离库/宿主库）；缺省 undefined =
@@ -862,7 +843,6 @@ export class SessionMessageHandler {
           'import_db_path_forbidden',
           'dbPath 不在允许的会话库路径集合内：请缺省不传（runtime 动态推导宿主库）后重试',
           msg.id,
-          msg.payload.sessionId ? { sessionId: msg.payload.sessionId } : undefined,
         )
       }
     }

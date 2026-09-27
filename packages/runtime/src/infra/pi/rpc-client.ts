@@ -10,7 +10,6 @@ import { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS } from '@taiji/shared'
 import { buildOutboundChildEnv } from '../spawn-env.js'
 import type { IPiEngine, PiSessionStats, PiCompactionResult, PiBashResult, PiCommandInfo, SendCommandOptions } from '../../services/ports/pi-engine.js'
 import { createPiSessionLog, writePiCrashLog, captureMemorySnapshot, type PiSessionLog, type PiCrashContext } from '../logger.js'
-import { captureMachinePiSnapshotSection, collectUnifiedLogCorrelation } from '../crash-correlation.js'
 // pi 进程 RPC 公共层（@zhushanwen/pi-rpc；设计 docs/architecture/subagent-permanent-session-model.md
 // §3.3.2，G5 收敛）：argv 构造 / LF-only 行分帧 / pending 表（超时分级 + 迟到响应丢弃）/
 // 早期帧缓冲 / 命令帧组装 / 杀链 / 出站 env 组装全部 import 自公共包——本文件保留
@@ -111,7 +110,7 @@ export interface RpcClientOptions {
   noTools?: boolean
   /** 禁用所有 skill，映射 pi `--no-skills`。调用方同时需清空 skillPaths。 */
   noSkills?: boolean
-  /** 禁用 context files（AGENTS.md 自动发现），映射 pi `--no-context-files`。 */
+  /** 禁用 context files（AGENTS.md/CLAUDE.md 自动发现），映射 pi `--no-context-files`。 */
   noContextFiles?: boolean
   /** 覆盖思考级别，映射 pi `--thinking <level>`（注意：非 --thinking-level，附录 A.4）。 */
   thinkingLevel?: ThinkingLevel
@@ -319,7 +318,7 @@ export class RpcClient implements IPiEngine {
 
     // Bun 编译的 bundled pi 用 process.execPath 定位资源（package.json、themes 等），
     // 不依赖 process.cwd() 查找 package.json。因此 spawn cwd 可以安全地设为用户项目目录。
-    // 这样 pi 的初始 session、system prompt、AGENTS.md 查找、bash 工具都基于正确的 cwd。
+    // 这样 pi 的初始 session、system prompt、CLAUDE.md 查找、bash 工具都基于正确的 cwd。
     // Re-verified 2026-08-20 (W6 A-11 探针) on upstream 0.84.1，双形态均不依赖 cwd：
     // - bun binary（打包产物 apps/electron/resources/pi/pi-darwin-arm64）：getPackageDir() =
     //   dirname(process.execPath)（pi 0.84.1 dist config.js isBunBinary 分支）；cwd=/tmp spawn
@@ -660,9 +659,8 @@ export class RpcClient implements IPiEngine {
    * 向 pi stdin 写入一行原始 JSON，不注册 pending、不等 RPC reply。
    *
    * 用于 pi 不回复 `{type:'response'}` 的命令（目前仅 `extension_ui_response`——
-   * pi 0.84.4 dist/modes/rpc/rpc-mode.js:618-625 处理后直接 return，不回 RPC 确认）。
-   * 用 sendCommand 会导致 pending 永不 resolve → 60s CMD_TIMEOUT_MS 后才超时（timer
-   * 泄漏 + 无用等待）。
+   * pi rpc-mode.ts 处理后直接 return，不回 RPC 确认）。用 sendCommand 会导致 pending
+   * 永不 resolve → 60s CMD_TIMEOUT_MS 后才超时（timer 泄漏 + 无用等待）。
    *
    * 注意：调用方自行保证 JSON 格式正确 + 换行符结尾。
    *
@@ -820,45 +818,10 @@ export class RpcClient implements IPiEngine {
         '',
       ].filter(Boolean).join('\n')
       writePiCrashLog(this.options.sessionId, `${header}${this.stderrChunks.join('\n')}`, context)
-      // D10：崩溃关联取证——①同步机器面 pi 快照（同秒连坐的幸存者视图）+ ②异步统一日志
-      // 关联采样（±5s 窗内的 Electron 退出 / 兄弟 pi 死亡 / launchd 信号，fire-and-forget
-      // 完成后补写进同一 pi-crash log，append 语义）。两者内部均以 isPiCrashLogEnabled
-      // 为门（无 sink 不采样），且全捕获不向上抛——观测增强不得影响 exit 主流程。
-      this.appendCrashCorrelationEvidence()
     } catch (crashErr) {
       // best-effort：崩溃日志落盘失败不掩盖/干扰原始崩溃路径（exit code 已由上层消费），仅控制台留痕
       console.error('[rpc] write pi crash log failed:', crashErr)
     }
-  }
-
-  /**
-   * 崩溃关联取证补写（crash-forensics-and-watchdog §3.3 D10，crash-correlation.ts）。
-   *
-   * ①同步：机器面 pi 快照 section（~10ms，ps 枚举 taiji 家族幸存者 + ppid 归属）；
-   * ②异步：统一日志关联采样（darwin-only，±5s 窗，log show 最多 10s）完成后追加写
-   * 同一 pi-crash log——写点在本方法返回后数秒，靠 writePiCrashLog 的 append 语义与
-   * createPiStreamWriter 惰性打开落盘（closeLogger 退出 flush 覆盖晚到的补写）。
-   * 全路径 best-effort：任何失败仅 console 出声（tee 进 runtime 主日志），不抛。
-   */
-  private appendCrashCorrelationEvidence(): void {
-    const sid = this.options.sessionId
-    try {
-      const snapshot = captureMachinePiSnapshotSection(process.pid)
-      if (snapshot) writePiCrashLog(sid, snapshot)
-    } catch (snapshotErr) {
-      // best-effort 降级：快照失败不影响 exit 主流程（exit code 已由上层消费），
-      // 仅 console 留痕（tee 进 runtime 主日志）——对齐 writePiCrashLog 失败处置先例
-      console.error('[rpc] machine pi snapshot failed:', snapshotErr)
-    }
-    void collectUnifiedLogCorrelation(Date.now())
-      .then((section) => {
-        if (section) writePiCrashLog(sid, section)
-      })
-      .catch((correlationErr: unknown) => {
-        // best-effort 降级策略：关联采样失败不影响 exit 主流程（exit code 已由上层消费），
-        // 仅 console 留痕（tee 进 runtime 主日志）——对齐 writePiCrashLog 失败处置先例
-        console.error('[rpc] unified log correlation failed:', correlationErr)
-      })
   }
 
   /** 将收集到的 pi stderr 格式化为可读后缀，附到错误消息末尾 */
@@ -989,21 +952,14 @@ export class RpcClient implements IPiEngine {
     // renderer backstop 引同一常量 + RENDERER_RPC_MARGIN_MS（编译期对齐，恒不先于本层判死）。
     const msg = await this.sendCommand('compact', customInstructions ? { customInstructions } : {}, COMPACT_RPC_TIMEOUT_MS)
     // RT-2#4：形状守卫（bash 式，对照 getAvailableModels）——pi compact 成功响应恒带
-    // CompactionResult 对象（rpc-mode.js:421 success(id,"compact",result)），且三必填字段
-    // 齐备（pi 0.84.4 dist/core/compaction/compaction.d.ts CompactionResult：summary:string /
-    // firstKeptEntryId:string / tokensBefore:number），与 port 契约（services/ports/pi-engine.ts
-    // PiCompactionResult）一致。data 缺失/非对象/缺必填字段 = 协议异常。pi 手动 compact 失败
-    // 另有 compaction_end{errorMessage} 事件编排（dispatcher 零广播注释），不走本返回值——
-    // reject 让协议异常显形而非 undefined 字段渗入消费方。
-    const data = msg.data as Record<string, unknown> | undefined
-    if (
-      typeof data !== 'object' || data === null ||
-      typeof data.summary !== 'string' ||
-      typeof data.firstKeptEntryId !== 'string' ||
-      typeof data.tokensBefore !== 'number'
-    ) {
-      console.warn('[rpc] compact: malformed response from pi (data is not a CompactionResult with summary/firstKeptEntryId/tokensBefore). data=', msg.data)
-      throw new Error('[rpc] compact: malformed response from pi (data is not a CompactionResult with summary/firstKeptEntryId/tokensBefore)')
+    // CompactionResult 对象（rpc-mode.js:419-421 success(id,"compact",result)），data
+    // 缺失/非对象 = 协议异常。pi 手动 compact 失败另有 compaction_end{errorMessage}
+    // 事件编排（dispatcher 零广播注释），不走本返回值——reject 让协议异常显形而非
+    // undefined 字段渗入消费方。
+    const data = msg.data as unknown
+    if (typeof data !== 'object' || data === null) {
+      console.warn('[rpc] compact: malformed response from pi (data is not an object). data=', msg.data)
+      throw new Error('[rpc] compact: malformed response from pi (data is not an object)')
     }
     return data as unknown as PiCompactionResult
   }

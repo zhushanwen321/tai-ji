@@ -40,6 +40,7 @@ import { assertSafeTimerDelay } from "../shared/timer-delay.ts";
 import { validateRunArgs } from "./args-validator.ts";
 import {
   closeOutInFlightCalls,
+  dispatchRunCreated,
   finalizeRun,
   handleWorkerError,
   handleWorkerExit,
@@ -349,7 +350,8 @@ function emitPendingRegister(runId: string, deps: LifecycleDeps, spec: RunSpec):
  *
  * 流程：创建 WorkflowRun（running，I1 构造期跳过）+ makeHandlers + 构建 RunRuntime
  * （worker+gate+controller）+ assignRuntime（注入 runtime，恢复 I1）+ 注册到
- * deps.runs + store.save。
+ * deps.runs + store.save + run-created 正点发射（[Q2/D5] journal 首帧——
+ * dispatchRunCreated 的唯一生产调用点）。
  *
  * @param spec RunSpec（scriptSource 只读；args 会被原地注入 _runId——rfl C2 契约，
  * worker 启动与崩溃重建共用同一 args 对象）
@@ -397,6 +399,23 @@ export async function runWorkflow(
 
   await deps.store.save(run);
   deps.log?.("debug", "workflow:lifecycle", "run saved", { runId, status: run.state.status });
+
+  // [Q2/D5] run-created 正点发射（journal 首帧，唯一生产落点）：宿主派发点 =
+  // 创建期校验（validateRunArgs）通过 + run 装配完成（worker 已启动、runtime 已
+  // 注入、快照已落盘）之后。await 保证「runWorkflow 返回 ⟹ 投影可查」（runId
+  // 一经返回，事件流 fold 即得 dispatched，不再有投影空窗）；失败 = journal IO
+  // 错误，取证面降级不阻断创建主链（对齐 SW-DATA-3：error 留痕后继续——此时该
+  // run 的后续事件因 fold 停在 created 而表外转移 fail-fast，事件丢失可归因到
+  // 本条 error 日志）。
+  try {
+    await dispatchRunCreated(run);
+  } catch (err) {
+    const msg = toErrorMessage(err);
+    logger.error(
+      `[workflow] run-created journal dispatch failed (runId=${runId}): ${msg} — ` +
+        "run continues; its event journal stays unseeded (projection falls back to missing state)",
+    );
+  }
 
   // pending-notifications: run 启动 → 注册（runAndWait / actionRun / 未来入口全覆盖）
   deps.log?.("debug", "workflow:lifecycle", "emit pending:register", { runId });

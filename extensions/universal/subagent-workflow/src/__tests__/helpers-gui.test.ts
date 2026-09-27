@@ -31,13 +31,15 @@ type WorkflowNotifyDetails = {
   __gui__?: GuiRenderResult;
 };
 
-/** 最小 WorkflowRun mock（duck typing，notifyDone 只访问这些字段）。 */
+/** 最小 WorkflowRun mock（duck typing，notifyDone 只访问这些字段；calls 与真实
+ *  RunState 构造期恒有一致——D7 失败终局的 errorCode 提取消费面）。 */
 type RunMock = {
   spec: { scriptName: string; slug?: string };
   state: {
     status: string;
     reason?: string;
     scriptResult?: unknown;
+    calls: Map<number, unknown>;
     trace: { toArray: () => Array<{ stepIndex: number; agent: string; status: string }> };
   };
 };
@@ -59,6 +61,7 @@ function makeRun(overrides: {
       status: overrides.status ?? "done",
       reason: overrides.reason,
       scriptResult: overrides.scriptResult,
+      calls: new Map(),
       trace: {
         toArray: () => overrides.traceNodes ?? [],
       },

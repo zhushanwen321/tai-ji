@@ -76,14 +76,6 @@ export interface RunContext {
    */
   stream?: SubagentStream;
   /**
-   * [P1 pi 回填透传] 调用方已持有的 schema 激活预编码值（AgentCallOpts.schemaEnv 直传
-   * 形态）。生产路径中 resolveAgentOpts 恒耦合产出 schema+schemaEnv（值 = JSON.stringify
-   * (schema)），引擎从 task.schema 派生即可逐字节等值；解耦形态（有 schemaEnv 无
-   * schema）生产不可达、仅见于直构调用，派生无源——本字段是其唯一透交通道。
-   * 引擎在 task.schema 存在时忽略此值（派生优先，设计 §3.3.5 删字段去向）。
-   */
-  schemaEnv?: string;
-  /**
    * [P4 D9①] 引擎 fallback 留痕（probe 失败路由回默认引擎）。路由层（routing.ts）
    * 产出，引擎投影到 outcome.engineFallback（zcode 等无 record 通路的引擎以此留痕；
    * pi 引擎另经 ExecuteOptions 投影进 record）。
@@ -195,9 +187,8 @@ export interface EnginePort {
   /**
    * [U7] 可选面：模型可发现性——引擎自带 provider/model 体系时（如 zcode 的 v2 桌面
    * 登录态），列出当前环境实际可用的模型清单（带凭据校验），供 system prompt 引擎段
-   * 与 GUI 引擎选择器消费。返回 null = 无静态枚举面（省略成员，或清单运行期动态
-   * 发现的引擎在静态目录为空时——modelCatalog dynamic:true 且 models:[] 的 RemoteEngine
-   * 映射，system prompt 落「与主 agent 模型体系一致」声明段）。
+   * 与 GUI 引擎选择器消费。省略/返回 null = 「与主 agent 模型体系一致」（pi 的语义：
+   * system prompt 已有 <available_provider_models> 段，无需引擎再列）。
    * engine-neutral：未来引擎（AcpEngine 等）实现本方法即自动获得注入与展示，宿主
    * 侧零改动。
    */

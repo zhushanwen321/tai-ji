@@ -94,16 +94,13 @@ jobs:
       - name: TypeCheck - shared
         run: pnpm --filter @taiji/shared run typecheck
 
+      # 协议演进宪法 D11 机器锁执行点：C3 事件词表 / C4 双写禁令 / C2 能力位必填
+      # 全部是 SDK 包内编译期断言，缺本步则锁为纸面（与 pre-commit SDK typecheck 段同口径）。
+      - name: TypeCheck - subagent-engine-sdk
+        run: pnpm --filter @zhushanwen/subagent-engine-sdk run typecheck
+
       - name: TypeCheck - pi extensions
         run: pnpm extensions:typecheck
-
-      # builtin taiji 插件（resources/plugins/<name>/index.ts + 装配的 __tests__/）不在
-      # pnpm workspace，不被任何包级 tsconfig include；构建走 esbuild 只剥类型不查类型
-      # ——统一 tsconfig（resources/plugins/tsconfig.json，*/index.ts 通配自动纳新插件）
-      # 是插件源码类型回归的唯一机器拦截点。pnpm exec 显式走根 node_modules 的 tsc
-      # （同 taste-lint step 的防 npx 拉版理由）。
-      - name: TypeCheck - builtin plugins (resources)
-        run: pnpm exec tsc -p resources/plugins
 
   # SDK 类型同步 job 已删除（D28 方向反转，2026-09-05）：plugin-sdk/src/types.ts
   # 现为契约 SSOT，runtime 经 plugin-types 薄壳 re-export 消费——不存在「两份
@@ -260,13 +257,6 @@ jobs:
       - name: Test
         run: pnpm extensions:test
 
-      # builtin taiji 插件（resources/plugins/<name>/）单测：经根 test:resources-plugins
-      # script 走 --config 指入（config root 钉在插件目录，cwd 无关），目标非空由
-      # check-ci-vitest-targets 守卫覆盖；当前成员 scheduler-manager，新插件装配测试后
-      # 在 script 追加同形 --config 段。
-      - name: Test - builtin plugins (resources)
-        run: pnpm test:resources-plugins
-
       # builtin-ext-bundle vitest 套件（scripts/__tests__/builtin-ext-bundle.test.mjs，TC3/TC4/TC7/TC8
       # + checkManifest 6 失败分支）依赖 prepare-builtin-extensions.sh 预产出的 staged 产物
       #（gitignored，fresh checkout 不存在）——先 prepare 再跑。pnpm exec 同 taste-lint step
@@ -296,13 +286,8 @@ jobs:
       # 无测试，tmp mirror × spawnSync 同 check-thinking-levels 惯例，不依赖 staged 产物）。
       # infra-services-import 守卫测试同批追加（R1 评审 MF-1-15：.githooks py 守卫已接线
       # pre-commit 而无测试，tmp mirror × spawnSync python3 同族惯例，不依赖 staged 产物）。
-      # scheduler e2e 判定器单测同批追加（MF-1-13：判定器自错 = e2e 假绿/假红不可辨，
-      # 纯函数族抽至 scripts/lib/scheduler-e2e-judgers.cjs 直测，不依赖 staged 产物）。
-      # render-sampling 管道判定层单测同批追加（MF-1-22：复用管道判定逻辑出错 = 静默
-      # 产物污染，抽取自 scripts/render-sampling/decisions.mjs，jsdom 直测浏览器侧
-      # 同一函数体，不依赖 staged 产物）。
       - name: Test - scripts guards
-        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs
+        run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs
 
   # E2E 视觉回归（mock 轨 visual-chromium）：只跑像素 diff baseline（S2 W3 交付的
   # visual-chromium project，testMatch **/visual/** + chromium.launch + spawn vite @ VITE_MOCK=true）。
@@ -429,8 +414,8 @@ jobs:
       # dist 发布包 files 白名单 ↔ 构建产出双向对齐（幽灵条目 / 产物目录反向覆盖 /
       # 自包含探针 / workspace 依赖发布闭包）。dist 产物被 .gitignore、干净 checkout
       # 上必红，刻意不挂 pre-commit（与 extensions 方向的刻意不对称，设计 D2）——
-      # pre-commit 之外的 CI 面同源拦截（D7 通则，同 D9-① 挂载理由）：先构建 9 包
-      # 10 档再同源直调守卫，漂移在 PR 软拦截而非发布现场硬拦截（两级拦截等级声明
+      # pre-commit 之外的 CI 面同源拦截（D7 通则，同 D9-① 挂载理由）：先构建 7 包
+      # 8 档再同源直调守卫，漂移在 PR 软拦截而非发布现场硬拦截（两级拦截等级声明
       # 见设计 D2）。
       - name: Build dist packages (publish surface guard)
         run: |
@@ -442,10 +427,6 @@ jobs:
           pnpm --filter @zhushanwen/subagent-engine-sdk run build
           pnpm --filter @zhushanwen/pi-subagent-cli run build
           pnpm --filter @zhushanwen/zcode-subagent-cli run build
-          # session-core 是 zcode-session-source 的 workspace 依赖（converter 消费
-          # Entry 类型），构建顺序必须在前——同 release-npm.yml/-dev 构建段形态
-          pnpm --filter @zhushanwen/session-core run build
-          pnpm --filter @zhushanwen/zcode-session-source run build
 
       - name: Publish surface guard (C-proc-11)
         run: node scripts/check-publish-surface.mjs
@@ -453,16 +434,6 @@ jobs:
       # ENV_WHITELIST_PREFIXES SSOT 单一性（与 pre-commit SKIP_ENV_WHITELIST_CHECK 同源）
       - name: ENV whitelist SSOT check
         run: python3 .githooks/check_env_whitelist_sync.py
-
-      # 非 workspace 结构接线对账（S1，PR #20 组 D 守卫化；与 pre-commit 结构接线段同源——
-      # D7 通则：pre-commit 之外的 CI 面同源拦截，防本地 hook 被绕过）
-      - name: Structure wiring check (non-workspace packages)
-        run: node scripts/check-structure-wiring.mjs
-
-      # runtime-layering §3 表行 ↔ 守卫 DOCUMENTED_MODULES 双向对账（S2②，与 pre-commit
-      # 架构约束登记段同源）
-      - name: Layering registry sync check
-        run: python3 .githooks/check_layering_registry_sync.py
 
       # 路径白名单动态化（getConfigDir/getPiAgentDir，与 pre-commit SKIP_PATH_WHITELIST_CHECK 同源）
       - name: Path whitelist check
@@ -579,6 +550,12 @@ jobs:
       - name: pi sync derived anchors guard
         run: node scripts/check-pi-sync.mjs
 
+      # pi 引擎域资产模型引用漂移守卫（workflow-architecture-redesign D8，与 pre-commit
+      # 同源直调）：extensions/ agent 资产 frontmatter model 声明 vs 内置 provider 目录
+      # 快照 diff。CI 无 staged 上下文——脚本本身即全量扫描模式，PR 面等价拦截（D7 通则）。
+      - name: Model reference drift guard (D8)
+        run: node scripts/check-model-references.mjs
+
       # G3 思考档位差分探针（pi-boundary-reliability D7-G3「CI invariants 同步」）：
       # 能力注册表计算路径 vs pi-ai 同源函数直调逐模型比对——防 registry 自身漂移
       #（U6 删 resolveAvailableLevels 后探针改守卫 registry，见脚本头注）。
@@ -638,28 +615,6 @@ jobs:
       # 新包/新 config 漏挂防线在此红灯。
       - name: Vitest test-guard mount guard
         run: node scripts/check-vitest-guard.mjs
-
-      # zcode-session-source bun 驱动双跑（D3 源级双跑，session-reader-shared-core U5，
-      # 与 pre-commit 2h 段同源直调）：pi 扩展宿主是编译版 bun 二进制，bun:sqlite 是
-      # 生产宿主唯一可用 sqlite 驱动——bun 趟只能在有 bun 的环境跑，本地开发者可无
-      # bun（check-bun-driver fail-open 放行），CI 是该路径的兜底覆盖面，故 --require-bun
-      # 把「bun 缺失」翻转为红。版本钉 1.3.8 = P-bun-host 实测版本（设计 D3 重审触发
-      # 条件：bun 大版本升级改变 sqlite 语义须重验探针门后同步此处）。
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.8
-      - name: Bun driver dual-run (zcode-session-source)
-        run: node scripts/check-bun-driver.mjs --require-bun
-
-      # P-bundle 门（session-reader-shared-core 附录 A，D2 生死门）：builtin staged
-      # 产物内 sqlite 驱动探测代码必须保持「运行期解析」形态——esbuild 升级 / 驱动
-      # 实现回改字面量会把 spec 静态化（bundle 成功但 staged 运行期 Cannot find
-      # module，比不拆更糟）。pre-commit 2h-2 段只在 staged 命中 reader 源 /
-      # zcode-session-source 时触发，CI 是免 staged 前提下的兜底覆盖面（D7 通则，
-      # 与 check-bun-driver 同一挂载理由）——CI 无 staged 产物，--rebuild 先重建
-      #（bundle-extensions <1s）再检查。
-      - name: P-bundle gate (staged driver spec runtime-resolved form)
-        run: node scripts/check-pbundle.mjs --rebuild
 
       # G2 CI vitest 目标非空守卫：解析本文件全部 `vitest run` 调用（含经 package.json
       # script 一层间接），逐目标 vitest list --filesOnly 干跑断言收集非空——防「目标被

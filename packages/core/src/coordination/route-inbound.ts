@@ -15,7 +15,7 @@
  *      globalEffect=无 sid + 无 id 的 onGlobalError 兜底（阶段 B 合并，原默认路径
  *      特判删除）
  *
- * session 隔离规则不变（AGENTS.md 关键规则 #7）：session 级消息按 sessionId 路由到 session 通道，
+ * session 隔离规则不变（CLAUDE.md line 98）：session 级消息按 sessionId 路由到 session 通道，
  * 无 sessionId 走 global 通道（config.* 及 model.list 等广播）。两通道互不串扰。
  *
  * seq gap 检测（D7 id/seq 互斥；D1 后协议归 subscription-state）：msg.seq 是 server-push
@@ -369,12 +369,6 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   // session 通道 + crossSession 通道（ViewHostStore / DialogRequestQueue 按 per-session 分区）
   'plugin:uiRequest': { crossSession: true },
   'plugin:viewUpdate': { crossSession: true },
-  // plugin-header-action-modal-points（AP-1/AP-2）：两条帧 payload 同样由 runtime 广播注入
-  // sessionId，但消费方是全局单例（plugin-modal-slot 槽镜像 / HeaderActionStore 徽标镜像，
-  // 经 MessageBusBridge PLUGIN_HANDLERS 归一）——漏声明则帧只进 session 通道、bridge
-  // （onGlobal/onCrossSession 双订阅）永收不到：modal 槽恒 null 开不了层、徽标恒空。
-  'plugin:modalState': { crossSession: true },
-  'plugin:headerActionUpdate': { crossSession: true },
 }
 
 // ── configureRouteInbound（IF4） ───────────────────────────────────

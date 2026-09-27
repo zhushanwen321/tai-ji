@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-session-reader",
-  "version": "0.7.0",
+  "version": "0.6.1",
   "type": "module",
   "main": "index.ts",
   "taiji": {
@@ -20,10 +20,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@zhushanwen/pi-extension-logger": "workspace:*",
-    "@zhushanwen/pi-ext-guards": "workspace:*",
-    "@zhushanwen/session-core": "workspace:*",
-    "@zhushanwen/zcode-session-source": "workspace:*"
+    "@zhushanwen/pi-ext-guards": "workspace:*"
   },
   "devDependencies": {
     "@zhushanwen/subagent-core": "workspace:*",

@@ -8,7 +8,7 @@
  * 锁定：
  * - pi 生效值 ≠ 请求值 → 返回生效值 + 内存缓存（getSummary 投影源）写生效值
  * - get_state 异常形态（thinkingLevel 缺失/非 string）→ 请求值兜底不炸
- * - 无活跃进程 → 先 ensureActive（U2/D7）；激活失败显性化（不再请求值兜底假成功）
+ * - 无活跃进程 → fail-fast 抛 SESSION_NOT_ACTIVE（code-harden RT-4#4，旧「请求值兜底」已废）
  *
  * mock 构造照抄 session-service-w07-bus.test.ts makeEnv（被测方法路径不消费
  * extensionService/sessionStore 等依赖，{} as never 占位）。
@@ -19,6 +19,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { SessionService } from '../services/session/session-service.js'
 import { MessageBus } from '../services/message-bus/message-bus.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../services/session/replicated-states.config.js'
+import { SESSION_NOT_ACTIVE } from '../utils/errors.js'
 import type { IMessageBroker } from '../interfaces.js'
 import type { IPiEngine, IProcessManager } from '../services/ports/pi-engine.js'
 import type { BusClient } from '../services/message-bus/types.js'
@@ -88,12 +89,13 @@ describe('SessionService.setThinkingLevel 返回 pi 生效值（P3）', () => {
     expect(returned).toBe('low')
   })
 
-  it('无活跃进程 → 走 ensureActive 拉活（U2/D7：不再「请求值兜底 + 内存直写」假成功）', async () => {
-    // 无 client 的 session 不存在（本 env 未注册 s1）→ 激活阶段失败显性化：
-    // SESSION_ACTIVATE_FAILED（无码错误包装）或既有码透传，且**不返回请求值**。
+  it('无活跃进程 → fail-fast 抛 SESSION_NOT_ACTIVE（code-harden RT-4#4，不再请求值兜底）', async () => {
     const { svc } = makeEnv(() => 'high', false)
+    // [code-harden RT-4#4] 旧契约「请求值兜底 + 直写」已废：切档位落到回收/崩溃窗口时
+    // 必须报错（恢复动作内嵌错误消息），不得乐观写未生效档位。
     await expect(svc.setThinkingLevel('s1', 'low')).rejects.toMatchObject({
-      code: expect.stringMatching(/^(SESSION_ACTIVATE_FAILED|SESSION_NOT_FOUND)$/),
+      code: SESSION_NOT_ACTIVE,
+      message: expect.stringContaining('重开后可重试'),
     })
   })
 })

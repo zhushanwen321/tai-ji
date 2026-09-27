@@ -1,4 +1,4 @@
-import type { Entry } from '@zhushanwen/session-core'
+import type { Entry } from './parser.js'
 
 /**
  * 一轮对话（design §3.5 算法 3 的分段产物，冻结接口）。

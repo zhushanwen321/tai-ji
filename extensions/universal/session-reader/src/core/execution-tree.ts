@@ -437,9 +437,7 @@ export async function buildExecutionTree(
       sessionId: rootSessionId,
       // MF-1：main root 携带 sessionFile（调用方传入），否则 attachWorkflowChildren 对无
       // sessionFile 节点直接 return，main 自身发起的 workflow run 永远进不了执行树。
-      // falsy 归一为 undefined：调用方的「路径不可得」哨兵是空串（zcode family 路由
-      // 反查未命中），root 节点 details 不携带 sessionFile:"" 这类非路径占位值。
-      sessionFile: mainSessionFile || undefined,
+      sessionFile: mainSessionFile,
       depth: 0,
       rootSessionId,
       children: [],

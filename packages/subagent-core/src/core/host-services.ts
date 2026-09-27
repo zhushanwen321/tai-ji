@@ -45,6 +45,15 @@ export interface HostServices {
     workflows?: DiscoveryRoot[];
     engines?: DiscoveryRoot[];
   };
+  /**
+   * [D2 扩展加载显式化] 孙进程（subagent 任务子进程）显式加载的扩展路径集——
+   * core 侧 remote-engine 组装 run 帧 ctx 时消费，pi 引擎逐项拼 `--extension`。
+   * per-host 常量（非 per-run），故走 HostServices 端口而非 run 载荷。可选端口：
+   * 宿主未实现（zsw 壳 / 测试）= undefined，run 帧 ctx 不上该键（协议 additive）。
+   * pi 壳实现双形态：taiji 宿主形态筛主进程 argv 的 staged 白名单（extension-service
+   * 下发集）；独立 pi 形态解析包自身 optional peerDep sibling。
+   */
+  extensionPaths?(): string[];
 }
 
 /** core 缺省数据根（~/.subagent-core，homedir 推导——禁止写死绝对路径，排查规则）。

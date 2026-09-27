@@ -31,6 +31,9 @@
  * 架构导航见 docs/extensions/subagents/architecture.md §2.1。
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -59,8 +62,8 @@ import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
 // [u7a D5] 在途上报出口类型（实例由组合根创建并接线 setInFlightListener，
 // 本模块只在 session_start / session_shutdown 驱动 attach/detach）。
 import type { InFlightReporter } from "./host/inflight-reporter.ts";
+import { notifyDone, notifyStall, trackNotifiedRunId, WORKFLOW_STALL_THRESHOLD_MS } from "./interface/helpers.ts";
 import { toGuiCtx } from "./interface/gui-mappers.ts";
-import { notifyDone, trackNotifiedRunId } from "./interface/helpers.ts";
 // ═══ session 生命周期装配 seam（bootstrap seam，设计 §3.1/D1） ═══
 import {
   getOrCreateDialogQueue,
@@ -71,6 +74,12 @@ import {
 
 // 模块级 logger（与 index.ts 同 component 名；setPiHandle 注入后自动走 appendEntry）
 const logger = getLogger("subagents");
+
+/**
+ * [D6-2] stall watchdog 的检测周期。检测延迟上界 = 阈值 + 本周期（informational
+ * 提示面，秒级精度无意义——分钟级周期把 tick 空转成本压到可忽略）。
+ */
+const WORKFLOW_STALL_TICK_MS = 60_000;
 
 // ── per-factory 域状态（原 index.ts factory 闭包变量的显式收编） ────────────────
 
@@ -92,6 +101,18 @@ export interface WorkflowDomainState {
    *  旧 deps 对象因此自动解析到新 pi，无需遍历重绑。undefined = setup 未跑过
    *  （makeDeps 只能经 setup 之后的事件链创建，命中即时序异常，fail-fast）。 */
   currentPi: ExtensionAPI | undefined;
+  /**
+   * [D6-2] stall watchdog timer（per-factory 单例）。factory 重跑（reload）先清
+   * 旧再建新（防双 timer 双倍 tick）；session_shutdown 不清——空 sessionState 的
+   * tick 是零成本空转，timer 生命周期随 factory（进程退出由 unref 放行）。
+   */
+  stallTimer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * [D6-2] 已发过 stall 通知的 runId 集（恰好一次的承载面——run 生命周期内一条）。
+   * 挂 domainState（跨 reload 槽存活）：reload 前后同一在飞 run 不重发。终局时经
+   * onRunDone 回收（Set 防泄漏；runId 全局唯一，漏删不会误报、只构成缓慢累积）。
+   */
+  stallNotifiedRunIds: Set<string>;
 }
 
 function createWorkflowDomainState(): WorkflowDomainState {
@@ -102,6 +123,8 @@ function createWorkflowDomainState(): WorkflowDomainState {
     registry: new WorkflowScriptRegistryImpl(),
     sessionState: new Map<string, SessionLifecycleResult>(),
     currentPi: undefined,
+    stallTimer: undefined,
+    stallNotifiedRunIds: new Set<string>(),
   };
 }
 
@@ -123,6 +146,101 @@ function getOrCreateWorkflowDomainState(): WorkflowDomainState {
   }
   return state;
 }
+
+// ── [D6-2] stall watchdog（run 长时间无进展的 informational 通知） ──────────────
+
+/**
+ * 读 run 事件 journal 的尾帧 ts（stall 判定的进展时间戳）。**同步 IO**——tick
+ * 周期 60s、run 数量个位数、单文件 ≤100KB（D5 量级预算），同步读的宿主阻塞
+ * <1ms 且让 tick 整体确定性（fake timers 测试下 interval fire 即完成，无跨
+ * macrotask 的 IO 等待时序）。
+ *
+ * 数据源裁决（D6-2 实施期选型，登记）：**事件 journal 尾帧**（D5 权威事件流的
+ * 信封 ts），不依赖 P3 快照面的 health.lastProgressAt（并行单元在飞，本单元
+ * 零依赖）。journal 缺文件（首帧未落）或尾行损坏时返回 undefined，调用方回退
+ * run 起点（meta.startedAt）。
+ *
+ * 尾帧形态（core run-events P1a 钉死）：每行一个 JSON 事件、信封含 ts（epoch
+ * ms）。坏尾行（半截写入）向前逐行找——journal 是 append-only JSONL，坏行只可
+ * 能出现在文件尾。
+ */
+/** journal 帧的信封守卫（EventEnvelope 形态运行时收窄——避免全可选属性的结构断言）。 */
+function isFrameWithTs(frame: unknown): frame is { ts: number } {
+  if (typeof frame !== "object" || frame === null) return false;
+  const record = frame as Record<string, unknown>;
+  return typeof record["ts"] === "number";
+}
+
+function readLastJournalTimestamp(journalPath: string): number | undefined {
+  let raw: string;
+  try {
+    raw = readFileSync(journalPath, "utf8");
+  } catch {
+    return undefined; // ENOENT = 尚无 journal 帧（run 创建极早/引导补投未跑）
+  }
+  const lines = raw.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]?.trim();
+    if (!line) continue;
+    try {
+      const frame: unknown = JSON.parse(line);
+      if (isFrameWithTs(frame)) {
+        return frame.ts;
+      }
+      return undefined;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * stall 检测单次 tick：扫全部 session 的 running run，对「最近进展早于阈值」且
+ * 本生命周期未通知过的 run 发一次 informational 通知（notifyStall）。全程同步
+ * （journal 同步读 + notifyStall 同步发送）——interval 回调 fire 即完成。
+ *
+ * 恰好一次：stallNotifiedRunIds 标记先于发送落下（发送失败不重试——informational
+ * 不必达，重复提示比丢失更吵）；run 终局经 onRunDone 从集合回收。
+ *
+ * 误报面（有意接受）：单 ask 长跑期间 journal 无新帧（帧频 = 事件边沿）会触发
+ * 提示——文案语义「仍在运行、无需干预、不自动终止」与事实一致（run 确实在跑），
+ * 提示不终止进程（对齐 zcode 语义：zcode 对不可 run 级定位的引擎同样只通知不杀）。
+ */
+function checkStalledRuns(
+  domainState: WorkflowDomainState,
+  sessionState: Map<string, SessionLifecycleResult>,
+): void {
+  let pi: ExtensionAPI;
+  try {
+    pi = resolveCurrentPi();
+  } catch {
+    return; // setup 未跑（resolveCurrentPi 的 fail-fast 语义面向真实消费点；tick 空转即可）
+  }
+  const now = Date.now();
+  for (const st of sessionState.values()) {
+    for (const run of st.runs.values()) {
+      if (run.state.status !== "running") continue;
+      if (domainState.stallNotifiedRunIds.has(run.runId)) continue;
+      // journal 文件名 = <runId>.events.jsonl（runId 自带 wf- 前缀，core run-events
+      // P1a 钉死——RUN_EVENTS_JOURNAL_SUFFIX 本地镜像见下方常量注释）
+      const journalPath = join(st.sessionDir, "workflow-state", `${run.runId}${RUN_EVENTS_JOURNAL_SUFFIX}`);
+      const lastProgressMs =
+        readLastJournalTimestamp(journalPath) ?? Date.parse(run.meta.startedAt);
+      if (!Number.isFinite(lastProgressMs)) continue;
+      const stalledMs = now - lastProgressMs;
+      if (stalledMs < WORKFLOW_STALL_THRESHOLD_MS) continue;
+      domainState.stallNotifiedRunIds.add(run.runId);
+      notifyStall(pi, run.runId, run.spec.scriptName, stalledMs, lastProgressMs);
+    }
+  }
+}
+
+/** journal 文件名尾段（core run-events P1a 钉死 `<runId>.events.jsonl`——runId
+ *  自带 wf- 前缀，渲染名 = 设计 D5 的 wf-<id>.events.jsonl；与 helpers.ts 的
+ *  指针构造同锚——core 未导出文件名推导，本地镜像，漂移信号 = stall 判定恒
+ *  回退 run 起点）。 */
+const RUN_EVENTS_JOURNAL_SUFFIX = ".events.jsonl";
 
 // [skill-reload D3] makeDeps volatile 成员的 pi 现读源。只读槽不创建——本函数被调
 // 时 domainState 必已存在（makeDeps 只能经 setupWorkflowDomain 之后的事件链创建）。
@@ -207,8 +325,25 @@ export function setupWorkflowDomain(
 ): WorkflowDomainHandle {
   const { inflightReporter } = wiring;
   // [skill-reload D2] handle.state 即槽对象本身（不做解构重包装——否则容器每次
-  // factory 重跑新建，调用方拿不到「同一 domain state 引用」的接管前提）。
+  //  factory 重跑新建，调用方拿不到「同一 domain state 引用」的接管前提）。
   const domainState = getOrCreateWorkflowDomainState();
+  // [D6-2] 槽对象跨 reload 存活，可能由旧版本代码创建——新增字段就地补齐，防
+  // reload 后 stallNotifiedRunIds 为 undefined（stallTimer 缺省 undefined 即
+  // 「无 timer」天然安全，无需补齐）。
+  domainState.stallNotifiedRunIds ??= new Set<string>();
+  // [D6-2] stall watchdog 装配：factory 重跑（reload）先清旧 timer 再建新（防双
+  // timer 双倍 tick；通知侧恰好一次另有 stallNotifiedRunIds 兜底）。unref：
+  // informational 面不阻止宿主进程自然退出。tick 全同步（journal 同步读 + 同步
+  // 发送）——无 async 链，无 unhandledRejection 面。
+  if (domainState.stallTimer !== undefined) clearInterval(domainState.stallTimer);
+  domainState.stallTimer = setInterval(() => {
+    try {
+      checkStalledRuns(domainState, sessionState);
+    } catch (err) {
+      logger.warn(`[workflow] stall watchdog tick failed: ${toErrorMessage(err)}`);
+    }
+  }, WORKFLOW_STALL_TICK_MS);
+  domainState.stallTimer.unref();
   // [skill-reload D3] current pi 登记点：factory 每次重跑（reload 后新 factory 持新
   // pi）在此覆盖槽上 volatile 绑定——旧 deps 对象的现读成员（见 makeDeps）自动
   // 路由到新 pi，这是「不做遍历重绑」的登记侧前提。
@@ -258,8 +393,21 @@ export function setupWorkflowDomain(
       // run 引用上不受影响），trackNotifiedRunId 有界化去重窗口，最后裁剪 done run 内存。
       // 本轮 run 的 completedAt 在 transition("done") 时同步设为当前时刻=全局最新，
       // 恒在保留端——结构性保证其不被自身触发的裁剪淘汰，无需 protectRunId。
+      //
+      // [D7] notifyDone 第 6 参注入产物目录指针（<sessionDir>/workflow-state——
+      // journal/manifest/.state 同目录；state.sessionDir 是 sessionState 条目字段，
+      // adoption rebind 换新后自动跟进）。[D6-2] 终局同时回收 stall 已通知标记
+      // （run 已终局，stall 声明生命周期结束；Set 防泄漏）。
       onRunDone: (run: WorkflowRun) => {
-        notifyDone(resolveCurrentPi(), run.runId, run, notifiedRunIds, toGuiCtx(state.ctx));
+        domainState.stallNotifiedRunIds.delete(run.runId);
+        notifyDone(
+          resolveCurrentPi(),
+          run.runId,
+          run,
+          notifiedRunIds,
+          toGuiCtx(state.ctx),
+          join(state.sessionDir, "workflow-state"),
+        );
         trackNotifiedRunId(notifiedRunIds, run.runId);
         const evicted = evictDoneRunsBeyondCap(state.runs, MAX_RETAINED_DONE_RUNS);
         if (evicted > 0) {

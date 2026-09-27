@@ -1,17 +1,5 @@
 # @zhushanwen/pi-subagent-workflow
 
-## 8.14.7
-
-### Patch Changes
-
-- 43a50ae2e: Test hardening: pin git locale and strip ambient relay env in baseline suites so suite results no longer depend on host locale/relay state.
-
-## 8.14.6
-
-### Patch Changes
-
-- 8285841af: Workflow runs finalize their pending-notification unregister by writing the entry directly instead of relying on the event bus, closing the reload window where the emitted unregister could be lost and the entry never recorded.
-
 ## 8.14.5
 
 ### Patch Changes

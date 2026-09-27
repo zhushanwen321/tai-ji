@@ -281,13 +281,15 @@ export class EngineProtocolServer {
       onEvent: (event: AgentEvent) => this.emitEvent(runId, event),
       ...(ctxModel !== undefined ? { ctxModel } : {}),
       ...(stream !== undefined ? { stream } : {}),
-      ...(ctx.schemaEnv !== undefined ? { schemaEnv: ctx.schemaEnv } : {}),
       ...(ctx.engineFallback !== undefined ? { engineFallback: ctx.engineFallback } : {}),
       // [F6] 根 session id 还原（relay 归属键 SESSION_ID 权威源；undefined 不挂键）
       ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
       // [Option C 协议化] 权威 subagent session 目录还原（宿主 getSubagentSessionDir
       // 推导值透传引擎消费——undefined 不挂键，引擎走 [LEGACY] fallback）
       ...(ctx.sessionDir !== undefined ? { sessionDir: ctx.sessionDir } : {}),
+      // [D2 扩展加载显式化] 孙进程扩展路径集还原（undefined 不挂键 = 不拼
+      // --extension，协议 additive 语义）
+      ...(ctx.extensionPaths !== undefined ? { extensionPaths: ctx.extensionPaths } : {}),
       ...(params.resume !== undefined ? { resume: params.resume } : {}),
       onHandleReady: (partial) => {
         void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef });

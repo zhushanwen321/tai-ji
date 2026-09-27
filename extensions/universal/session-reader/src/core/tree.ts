@@ -1,4 +1,4 @@
-import type { Entry } from '@zhushanwen/session-core'
+import type { Entry } from './parser.js'
 
 export interface TreeView {
   /** root → leaf 的 id 序列（pi 重开视角的当前对话线，design D-2） */

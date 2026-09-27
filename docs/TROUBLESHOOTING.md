@@ -9,7 +9,6 @@ Runtime 日志落盘到 `<数据目录>/logs/`（`runtime-YYYY-MM-DD.log`，按�
 | **Electron 主进程** | 终端直接看 | 终端启动 `/Applications/TaiJi.app/Contents/MacOS/TaiJi` 或 `log show --process TaiJi` |
 | **Runtime** | 终端 `[runtime:out]` / `[runtime:err]` 前缀 + `~/.taiji-dev/logs/runtime-*.log` | 同主进程转发 + `~/.taiji/logs/runtime-*.log` |
 | **pi 子进程** | 终端 pi 自身输出 + `~/.taiji-dev/logs/pi-<date>-<sessionId>.jsonl` | `~/.taiji/logs/pi-<date>-<sessionId>.jsonl` + pi 日志目录 `~/.taiji/agent/logs/` |
-| **Renderer console** | `~/.taiji-dev/logs/renderer-console-<date>.log`（renderer 进程 warn/error 泛捕流，main 侧 console-message 监听落盘） | `~/.taiji/logs/renderer-console-<date>.log`（同左） |
 | **升级子系统** | `~/.taiji-dev/update/update-error.log`（JSONL 512KB×2 轮转；失败登记含 errorCode/rawCause/engine/releaseSource，成功登记 source-selection/source-failover/download-success） | `~/.taiji/update/update-error.log`（同左） |
 | **前端 DevTools** | Cmd+Option+I 打开 | 同左 |
 
@@ -120,7 +119,7 @@ grep "node executor probe failed" ~/.taiji/logs/runtime-*.log   # dev 用 ~/.tai
 
 ### 7. bash 工具里启动 Electron 二进制被静默降级纯 node 模式（ELECTRON_RUN_AS_NODE=1）
 
-打包模式下 relay 激活时给主 pi 进程 env 注入 `ELECTRON_RUN_AS_NODE=1`（代理 CLI 复用 Electron 二进制当纯 node 跑所必需），并经握手帧透传给 relay 子进程及后代——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。这是 relay 通道的刻意设计，终端服务不受影响（TerminalService 独立构造 env 已剥离）。**playwright e2e 形态（fail-fast 非静默）[2026-09-22]**：经 subagent bash 跑 `npx playwright test --project=electron*` 时，launch-app fixture 的 `{...process.env}` 把该变量透传给 Playwright 拉起的 Electron → 纯 node 化不认 `--remote-debugging-port=0` → 全部用例 `electron.launch: Process failed to launch!` + `bad option` + exit 9（对照：直接跑 `--version` 打出 `v24.15.0` 而非 `Electron x.y.z` 即此病）。对策 = e2e 运行命令前缀 `env -u ELECTRON_RUN_AS_NODE`（CI 无此变量时 no-op）；pnpm dev 正规链（dev-instance `buildDevEnv` LEAK_ENV_KEYS）已内置剥离不受影响。机制细节见 relay 模块（源码注释待后续批次补齐）。
+打包模式下 relay 激活时给主 pi 进程 env 注入 `ELECTRON_RUN_AS_NODE=1`（代理 CLI 复用 Electron 二进制当纯 node 跑所必需），并经握手帧透传给 relay 子进程及后代——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。这是 relay 通道的刻意设计，终端服务不受影响（TerminalService 独立构造 env 已剥离）。机制细节见 relay 模块（源码注释待后续批次补齐）。
 
 **同根因的第二个症状面（2026-09-19 实测）：playwright electron 轨在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。解除该变量后 mock 轨与 real 轨均可跑通（2026-09-20 实测：electron 轨 64/64 全绿，real 轨为凭证无关的 faux LLM 装配，无需真实 provider）。
 
@@ -286,49 +285,6 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。该形态错误已由 launch 前守卫拦截：`e2e/fixtures/launch-app-real.ts` 的 pre-flight `assertRealRendererBundle`（判据 = mock fixture 标记串命中 assets/*.js，real 构建经死分支摇除零命中）校验产物形态，mock 产物在场即 fail-fast 并给出上面的重建命令。
 
-### 20. 表单/命令提交后状态条假忙约 30s / 非断连期 `[chat] finalizeSession reason=timeout` warn
-
-**现象**：命令路径弹窗（如 `/permission rule`、`/permission model`）**提交**后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（attach 调试可见，含 sid——timeout 分支已无 dev 门，生产 attach 同样可见；生产落 `renderer-console-<date>.log`（`<dataDir>/logs/`），无需 attach）。
-
-**判定**：该形态的常态命中面已全部清零——scheduler 表单走 `expectTurn: false` 声明即时收尾（ADR-0073），plain dialog 提交面已由通路级即时收尾解决（`sendPiResponse` 应答终局无条件清 pendingSend，生产者穷尽论证与落地 commit 见 ADR-0072 收口条目）。**任何提交源命中 30s timeout 均属真异常形态**（pi 僵死 / 协议漂移 / 极端延迟 / 新扩展源未按通道选型实现——选型指引见 development-guide §5.1）。
-
-**排障**：确认提交源类型——plain dialog 命令（band 弹窗）或已声明 `expectTurn: false` 的表单提交后仍命中 30s = turn 信号链断裂（先取 `renderer-console-<date>.log` 确认 warn 落盘形态（含 sid），再按 pi tee 日志 + ping 信号归因）；ask-user/plan 表单提交出现该 warn 说明 turn 未续接（真异常，同上归因）；新 form 扩展源提交命中 = 未声明 `expectTurn: false`（缺省 true 走桥接，发现即补声明）；新命令扩展源需要「提交后开 turn」的应改用 `uiFormInteract` 并声明 expectTurn（裸 select 通路按无 turn 收尾，恒清不桥接）。
-
-### 21. bun 腿测试假绿：`bunx vitest` 不带 `--bun` 静默跑系统 node（2026-09-21）
-
-**症状**：手工跑 zcode-session-source 的 bun:sqlite 腿测试（`bunx vitest run`）全绿，但 bun 驱动语义分支（`get()` 未命中返 null、`close()` 不 checkpoint 等）实际没被测到——整趟跑的是系统 node 的 node:sqlite。
-
-**根因**：vitest 可执行文件的 shebang 是 node，`bunx` 默认按 shebang 用 node 启动它——进程内 `typeof Bun === 'undefined'`，D3 双驱动探测走 node 分支。`bunx` ≠ bun 运行时，必须显式 `--bun` 才把 vitest 本体跑在 bun 下。
-
-**正确做法**：真 bun 腿 = 包目录内 `bunx --bun --no-install vitest run`。该命令已固化在守卫 `scripts/check-bun-driver.mjs`（bun 那一跑由它承担，node 趟由常规 vitest 覆盖；手工验证时可加 `typeof Bun` 探针确认运行时形态）。
-
-### 22. 测试防线被绕过：非 vitest-config 入口执行测试会写真实数据目录（2026-09-22 事故）
-
-**症状**：`~/.taiji/` 下出现测试命名的目录/文件（如 `attachments/att-store-*`——`attachment-store.test.ts` 的用例 sessionId 命名），而测试红线的双层防线（globalSetup 钉死 `TAIJI_AGENT_DATA_DIR` + fs-guard 白名单拦截）本应阻止一切真实目录写入。
-
-**根因**：防线挂在 vitest config（`taijiTestConfig` 工厂）上，**只对经 config 启动的 vitest 进程生效**。绕过形态：`bun test`（Bun 测试运行器自动把 `import from 'vitest'` 映射到 `bun:test`，完全不读 vitest.config）、或任何不经项目 config 的执行方式——此时无 env 钉死（dataDir 解析回真实 `~/.taiji`）、无 fs-guard（拦截不发生）。标准入口已复现验证有效：包目录 `pnpm vitest run` 写入被正确钉到 tmp。
-
-**恢复**：① 按测试命名模式识别垃圾条目（`att-store-*` 等用例 sessionId 命名、tmp 下 `logger-test-*`/`zcode-engine-*` 等本仓 fixture 前缀），核对条目内无用户数据后删除；② 会话数据核查：`agent/sessions/` 在事故时段的修改检查（本次事故会话区零触碰）。tmp 大量残留会让依赖 readdir 的用例超时（实测 21 万条目时 `countSnapshotDirs` 单次 >3.6s）。
-
-**防范**：跑测试只用标准入口——包目录 `pnpm vitest run`、仓库根 vitest（根级兜底 config 同挂防线）、bun 腿只走 `bunx --bun vitest`（守卫同口径）；禁止 `bun test` 执行本项目测试文件。
-
-### 23. runtime 启动即拒绝："fatal: data directory already served by a live runtime instance"
-
-**现象**：runtime 进程启动秒退（exit 1），日志含上述 fatal 与 `live at: 127.0.0.1:<port> (source: ...)` 定位行。
-
-**判定**：同数据目录已有活 runtime 实例（单实例守卫，约束 C-proc-25）。守卫读 `<dataDir>/runtime-instance.json`（runtime 自登记）与 `<dataDir>/runtime.port`（supervisor 通道）候选端口做 TCP 探活，任一可达即拒绝；端口不可达但 instance.json 登记 pid 存活（启动窗口内的预登记实例，probe 通过即登记、早于 listen）同样拒绝——双 runtime 共享数据目录会导致第二实例 reattach 抢管他人 session、退出时 destroyAll + relay kill-on-disconnect 屠杀全部主 pi 与 subagent，拒绝是正确防御。
-
-**排障**：定位行带 `reachable: true`（端口可达）时按 `lsof -i :<port>` 确认持有者——app 正常重启的竞态窗口等旧实例退出后重试即自愈；定位行带 `reachable: false`（pid 存活但未 listen）时先等并发的另一实例完成启动再重试，`ps -p <pid>` 确认其身份；要并行跑第二实例（dev / e2e / 验收脚本）必须给独立 `TAIJI_AGENT_DATA_DIR`（mkdtemp 或 `~/.taiji-dev/instances/<worktree>`），禁止继承 prod 数据目录 env 起 runtime；仅当持有 pid / 端口确认是无关进程（pid 复用占位）时可删 `runtime-instance.json` 后重试。app 正常链路（Electron supervisor）stop 时等旧 runtime 完全退出才 spawn 新实例，不应触发本报错——频繁出现说明有绕过 supervisor 的独立 runtime 在同目录运行。
-
-
-
-### 24. dev 构建下组件实例 `$el` 是注释节点（模板首注释致 Fragment 根）
-
-**现象**：仅在 dev 构建出现的「取不到真实 DOM 元素」类失效——如组件实例 `$el` 为注释节点（nodeType 8），`root === activeElement` / `root.contains(...)` 恒 false；生产构建行为正常（vue 编译剥离模板注释），happy-dom 直挂测试也不暴露（测试态注释被剥离）。
-
-**判定**：Vue 模板顶部有 HTML 注释块时，dev 构建 subTree 根为 Fragment，`instance.$el` 解析为首子注释节点——**任何「实例 → 真实输入根元素」的取法禁止依赖 `$el`**。
-
-**排障**：组件经 `defineExpose` 暴露真实元素 getter（先例 `ComposerInput.getInputElement()`），消费方读 expose 元素、缺失即 fail-closed，禁回退 `$el`（ADR-0073 [HISTORICAL]，事故 = W1 F-1 直发门 dev 全变体静默失效）。
 
 ## 环境变量速查
 

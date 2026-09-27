@@ -52,9 +52,6 @@ session 导入统一入口的多 coding-agent 抽象：一个导入源负责「�
 ### 消息投影（Message Projection）
 源 coding-agent 对单条消息「给谁看」的裁决，与 `role` 是**两个正交维度**：`role` 只表达角色（user/assistant），不表达这条消息是真人输入还是运行时注入。zcode 用四字段（`semantics` / `visibility` / `source` / `synthetic`）联合判定出六种投影策略（`realUserInput` / `visibleAssistant` / `compactSummary` / `providerContextOnly` / `hiddenSynthetic` / `timelineOnly`），导入转换器按策略映射到 pi entry 类型。**教训**：只按 `role` 分派会让源系统的合成消息（提醒/通知/引用回放）冒充用户消息——zcode 全库 user 消息 67% 是合成。完整判据与闭集枚举：[session-import-sources.md §6.1](architecture/session-import-sources.md)。
 
-### 会话读取基座（session-core / zcode-session-source）
-session「发现 → 读取 → 归一化 → 序列化」的零依赖共享实现，两层：`packages/session-core/`（canonical 原语——`NormalizedSession` 归一化模型 `{header, entries, degradations}`、JSONL parse/serialize、首行读取、session/zcode sa-id 工具）与 `packages/zcode-session-source/`（zcode 宿主 SQLite 库只读访问层——sqlite 驱动双形态适配、**四级恢复阶梯**（L1 直开 → L2 immutable 逃逸 → L3 快照 → L4 SqliteUnreadableError）、transcript 转换）。两个消费方：session-reader 扩展（通知链 `session_read` 的 zcode 读链）与 runtime zcode 导入源——同一套实现，禁止各自复制副本。`degradations` 承载无法保真的内容（显式登记，禁止伪造）；sa-id → zcode 会话的路由经 manifest/entry 锚双键（`engine: 'zcode'` + sessionRef）判别，db 路径白名单闸放行。
-
 ### Agent Runtime
 taiji 的后端服务进程（Node.js）。职责：托管 pi 子进程的生命周期、协议翻译（pi stdin/stdout JSON RPC ↔ WebSocket）、session CRUD、配置持久化（provider/skill/agent）、model 查询。是 taiji 唯一的后端，所有业务逻辑和数据持久化都在这里。前端不直接和 pi 通信，前端不做业务决策。
 
@@ -148,7 +145,7 @@ pi 引擎单次工具调用的记录。是数据模型的最小单位（bash、r
 session 的 token 预算。由底层模型决定上限（如 200K tokens），composer 工具条的 `ContextCapacityPopover` 展示用量（hover 出容量 popover，session 通道订阅 `context.update`，`packages/renderer/src/components/panel/Composer.vue`）。Compaction 的触发条件就是 Context Window 接近满。
 
 ### Session Context
-session 的语义内容——对话历史、项目知识（AGENTS.md 等）、skill/agent 注入的提示词。是 agent 能感知到的全部信息。Session Context 的 token 占用量受 Context Window 上限约束。
+session 的语义内容——对话历史、项目知识（CLAUDE.md 等）、skill/agent 注入的提示词。是 agent 能感知到的全部信息。Session Context 的 token 占用量受 Context Window 上限约束。
 
 ### SystemNotice
 前端本地生成/派生的系统提示行，不出自 pi 的对话消息。渲染流转过程的元信息：压缩摘要（compactionSummary）、分支摘要（branchSummary）、pi 崩溃恢复提示条（RespawnNoticeBar 分支）、`@` 定向气泡（subagent directive）。不是 pi 消息的一部分，不参与 Context Window 计算。
@@ -171,7 +168,6 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 - **回传 `FormAnswers = Record<string, string>`**：choice 单选 = label、多选 = `JSON.stringify(labels[])`、Other 文本独立键 `${key}__other`、text 键位 `${key}__other`（与纯 Other 形态同键位）、schedule value = `JSON.stringify(ScheduleFormResult)`。choice/text 部分与 `AskUserAnswers` 逐字兼容——`getAskUserAnswer` / `getAskUserOther` 解码零改动。
 - **wire 通道**：extension 侧统一入口 `uiFormInteract(ctx, form, opts?)`（传输核复用 [Marker RPC](#marker-rpcselectmarker-通道原语2026-09-14) 的 `callMarkerRpc`）以 `UI_FORM_MARKER = '\x00TAIJI_UI_FORM'` 为 select title、`options[0]` 携 `{ formQuestions, allowCancel }` JSON；runtime event-adapter 按 marker 翻译为 `extension.ui_request` 帧（`form: true` + `formQuestions`，逐项 `isFormQuestion` 守卫过滤，全不合法降级普通 select 落 band）；renderer `FormOverlay`（`packages/renderer/src/components/extension/form/`）Panel 内联覆盖 composer 渲染，按问题 type 分派渲染器（ChoiceQuestion / TextQuestion / ScheduleForm）。回包四态判别（`cancelled` / `timeout` / `channel-error` / `non-json`），channel-error 含 **echo 检测**——收包等于发送 payload 时报「宿主过旧需升级」（旧 taiji × 新扩展组合的确定性识别）。
 - **TUI 契约**：`uiFormInteract` 在 TUI 误调抛错——formQuestions 在 TUI 无呈现语义，各 extension 自行渲染（ask-user AskUserComponent / scheduler ScheduleCreateComponent / plan 原生 select），属有意取舍。
-- **turn 预期声明 `expectTurn`**（2026-09-22，ADR-0073）：opts 可选布尔，扩展作者声明「表单提交后是否有 turn 跟随」——缺省 true（桥接 message_start 照旧，存量全兼容）；显式 `false`（command handler 内 select 的源，如 scheduler /schedule）经 event-adapter 条件落键（仅显式 false 落帧）→ respond 严格双条件 `result≠null && expectTurn===false` 即时清 pendingSend（真机 91ms/48ms 两轮实测），不再命中 30s 兜底。
 - **版本偏斜窗口**：旧 ask-user 帧（`askUser` + `askUserQuestions`）/ 旧 scheduler 帧（`scheduleCreate` + `scheduleDraft`）由 runtime event-adapter 的 ASK_USER / SCHEDULE_CREATE marker 分支直接归一为 `form: true` 统一表单帧（askUser 源含 type 推断映射，renderer 只消费 view-ready 帧）。退役窗口终局（新 marker 版三包 npm 发布 + 一个大版本后独立 PR）：event-adapter 的 ASK_USER / SCHEDULE_CREATE legacy 分支、两旧 marker 常量、payload 旧字段（shared/core wire 类型同批）、ask-user channel 旧名注册（`ask_user`）一并清理。
 
 **代码映射**: `packages/extension-protocol/src/extensions/ui-form/`（types/marker/helpers/guards）；消费方 `extensions/universal/{ask-user, scheduler, plan}/src/`；渲染面 `packages/renderer/src/components/extension/form/`。
@@ -182,19 +178,19 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 
 ### 计划模式（Plan Mode）
 
-pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--skills a,b]` 或 `/plan <需求> --template <path>` 进入，agent 限只读工具集（read/bash/grep/find/ls/plan），按挂载技能（AI 自行 read 技能 SKILL.md）或模板流程产出计划文档——模板三源发现（内置 5 + 用户级 `~/.agents/plans/` + 项目级 `.agents/plans/`，同名项目 > 用户 > 内置 last-writer-wins），进入计划态时清单以 `<available-plans>` 段随提示词一次性注入（name + location，模型自选，无查询 action），`select-template` 返回 content 携带胜者文件全文、错名报错自带可用清单；`--template` 直传任意外部 md（与 `--skills` 互斥 fail-fast）时提示词内嵌该文件全文且不注入清单段。文档就绪后 `submit-review` 挂审阅，用户两键裁决（approve 确认执行 / revise 提交评论并要求修订；取消走 dismiss 对话框消散，非批准），approve/abort 退出并恢复工具集；approve 后调 `complete` 时弹出执行方式选择（统一表单协议单 choice 问题）：≤2 个检测到的 plan-exec skill 档（`Execute via skill: <name>`，`plan-exec: true` frontmatter 四根扫描检测，同构 pi loadSkillsFromDir，root 序前 2 个）+ Execute 档（goal 跟踪已整合：可用时先建 goal 跟踪，再按复杂度派发 subagent / 本会话直执）+ 暂不执行（Not now，留在 plan mode）。修订后重写文档须重调 `register-doc`（version+1）。taiji 形态的挂载信号 = `TAIJI_AGENT_EXT_LOG=1`（runtime 对托管 pi 恒注入；marker 交互另需 `ctx.mode === 'rpc'`，env 泄漏到 TUI 等非 rpc 形态回落文本软门）。
+pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--skills a,b]` 或 `/plan <需求> --template <path>` 进入，agent 限只读工具集（read/bash/grep/find/ls/plan），按挂载技能（AI 自行 read 技能 SKILL.md）或模板流程产出计划文档——模板三源发现（内置 5 + 用户级 `~/.agents/plans/` + 项目级 `.agents/plans/`，同名项目 > 用户 > 内置 last-writer-wins），进入计划态时清单以 `<available-plans>` 段随提示词一次性注入（name + location，模型自选，无查询 action），`select-template` 返回 content 携带胜者文件全文、错名报错自带可用清单；`--template` 直传任意外部 md（与 `--skills` 互斥 fail-fast）时提示词内嵌该文件全文且不注入清单段。文档就绪后 `submit-review` 挂审阅，用户三键裁决（确认执行 / 提交评论并要求修订 / 请求进一步解释），approve/abort 退出并恢复工具集；approve 后调 `complete` 时弹出执行方式选择（统一表单协议单 choice 问题）：内置 Develop (auto-parallel)（LLM 自判复杂度）+ 自动检测带 `plan-exec: true` frontmatter 的 skill（四根扫描，同构 pi loadSkillsFromDir）+ goal 档（能力在场时）。修订后重写文档须重调 `register-doc`（version+1）。taiji 形态的挂载信号 = `TAIJI_AGENT_EXT_LOG=1`（runtime 对托管 pi 恒注入）。
 
-**代码映射**: `extensions/universal/plan/src/`（command.ts 命令与 --skills/--template 解析 / tool.ts 六 action（enter / select-template / register-doc / submit-review / complete / abort）/ state.ts 状态 / prompts.ts 提示词四段（模板流程含三源清单注入与直传全文内嵌）/ index.ts hooks）。
+**代码映射**: `extensions/universal/plan/src/`（command.ts 命令与 --skills/--template 解析 / tool.ts 五 action / state.ts 状态 / prompts.ts 提示词四段（模板流程含三源清单注入与直传全文内嵌）/ index.ts hooks）。
 
 ### plan-state entry
 
-计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 五个 optional 字段 `templateProvidedPath`（`--template` 直传标记：直传进入时为展开后模板绝对路径，select-template 防御判据；模板流程缺失）/ `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `reviewState`（`awaiting` 审阅挂起 | `revising` 修订中 | 无值 进行中）/ `lastSubmitReviewDocsFingerprint`（submit-review 重提交指纹快照）/ `reviewStateSource`（D4 兼容态成因：`resubmit` 会话重启待重提交 | 无值 正常，仅描述当前降级等待，submit-review 重挂起时清空；runtime 白名单透传 + 发布水位比较字段）。旧 entry（无新字段）逐字段降级读。runtime 投影链按同字面量派生扫描，前端消费与冷启动首拉共用同一份派生代码。
+计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 五个 optional 字段 `templateProvidedPath`（`--template` 直传标记：直传进入时为展开后模板绝对路径，select-template 防御判据；模板流程缺失）/ `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `reviewState`（`awaiting` 审阅挂起 | `revising` 修订中 | 无值 进行中）/ `lastSubmitReviewDocsFingerprint`（submit-review 重提交指纹快照）/ `reviewStateSource`（D4 兼容态成因：`explain` 请求解释 | `resubmit` 会话重启待重提交 | 无值 正常，仅描述当前降级等待，submit-review 重挂起时清空；runtime 白名单透传 + 发布水位比较字段）。旧 entry（无新字段）逐字段降级读。runtime 投影链按同字面量派生扫描，前端消费与冷启动首拉共用同一份派生代码。
 
 **代码映射**: `extensions/universal/plan/src/state.ts`（schema + 重建/落盘唯一入口）；`packages/extension-protocol/src/core/types.ts` 的 `PlanDocMeta`（产物元数据契约）。
 
 ### PLAN_REVIEW_MARKER
 
-plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `UI_FORM_MARKER` / `GUI_WIDGET_MARKER` 同族 select 通道 marker）：pi-plan 的 `submit-review` 挂审批时以此 marker 为 title 发 `ctx.ui.select`（options[0] = `PlanReviewRequest` JSON：`{ docs }`），runtime event-adapter 按 marker 检测后广播 `extension_ui_request`（planReview 标记，与 form 帧同构分流），前端审批条渲染两键审批而非原始 dialog——marker 控制符 title 落入通用 dialog 会渲染成乱码。回传 `PlanReviewResponse` 判别联合（approve 无评论 / revise 必带 `{ quote, comment }[]`）。
+plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `UI_FORM_MARKER` / `GUI_WIDGET_MARKER` 同族 select 通道 marker）：pi-plan 的 `submit-review` 挂审批时以此 marker 为 title 发 `ctx.ui.select`（options[0] = `PlanReviewRequest` JSON：`{ docs }`），runtime event-adapter 按 marker 检测后广播 `extension_ui_request`（planReview 标记，与 form 帧同构分流），前端审批条渲染三键审批而非原始 dialog——marker 控制符 title 落入通用 dialog 会渲染成乱码。回传 `PlanReviewResponse` 判别联合（approve 无评论 / revise·explain 必带 `{ quote, comment }[]`）。
 
 **代码映射**: `packages/extension-protocol/src/core/markers.ts`（常量）+ `core/types.ts`（payload/decision/comment 契约 SSOT）。
 
@@ -319,7 +315,7 @@ taiji 的运行时状态可视化。现行形态 = 单组件 `StatusBar`（`pack
 > **术语演进（2026-09 核对）**：旧「三区域」模型（Input Toolbar / Session Strip / Global Statusbar）已不成立——窗口底部的独立全局状态栏不存在，global scope 状态项并入 per-panel StatusBar 聚合；原 Input Toolbar 的职责由 composer 内置工具条承载（见下），plugin 另可经 `composer.toolbar` 挂载点贡献视图（ViewHost，`view-id="composer.toolbar"`）。
 
 ### Composer 工具条
-composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：生成指标（`GenStatsTriggers`：速度 t/s + 缓存命中率 + TTFT 首字延迟（首字延迟 = 请求发出 → 首个输出 token 到达，p50 聚合））、上下文容量（`ContextCapacityPopover`，`context.update` 通道）、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件，非 statusline 数据面。
+composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：生成指标（`GenStatsTriggers`：速度 t/s + 缓存命中率）、上下文容量（`ContextCapacityPopover`，`context.update` 通道）、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件，非 statusline 数据面。
 
 > **命中率归因降噪（2026-09-19）**：缓存命中率 `current` 是「本会话最近一次 LLM 请求」的单样本口径，任何一次 total miss 都会显示 0%。已知成因的 0%（会话首请求 `cold-start` / 空闲超 5min provider TTL `idle-expiry` / compaction 后前缀重建 `context-rewrite`）改为渲染成因文案（`cacheRatio.currentMiss`，中性色 + 浮层说明行），未知成因的 0%（如服务端淘汰）**保留原值三档色**——降噪只覆盖预期内 miss，不吞真信号；provider 从未上报 cache 字段时命中率为「无数据」（null，显示「—」）而非 0%。
 

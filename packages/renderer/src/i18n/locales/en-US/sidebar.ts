@@ -138,6 +138,7 @@ export default {
     terminate: 'Terminate',
     terminateConfirm: 'Confirm terminate?',
     pendingHint: 'Waiting to start',
+    stalledNoProgress: 'no progress {duration}',
     agentsLabel: '{count} agents',
     turnsUnit: 'turns',
   },

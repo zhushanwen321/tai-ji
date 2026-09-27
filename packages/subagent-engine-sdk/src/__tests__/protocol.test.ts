@@ -43,7 +43,6 @@ import {
   REVERSE_CHANNELS,
   REVERSE_CHANNEL_TIMEOUT_CLASS,
   type HostChildStateChangedParams,
-  type ReverseChannel,
 } from "../protocol/reverse-channels.ts";
 import {
   ENGINE_ERROR_CODE_PREFIX,
@@ -139,14 +138,8 @@ describe("9 正向方法全集", () => {
     // 类型面锁死：params/result 映射表键集 = 方法全集（缺方法 = 编译失败）
     type _ParamsKeys = AssertMutuallyAssignable<keyof ProtocolParamsMap, ProtocolMethod>;
     type _ResultKeys = AssertMutuallyAssignable<keyof ProtocolResultMap, ProtocolMethod>;
-    // U5 词表锁：ProtocolMethod ⟷ PROTOCOL_METHODS 双向互等——`satisfies readonly
-    // ProtocolMethod[]` 只保常量 ⊆ union，union 加成员不动常量的反向缺口由本断言补上
-    type _MethodConstKeys = AssertMutuallyAssignable<
-      ProtocolMethod,
-      (typeof PROTOCOL_METHODS)[number]
-    >;
-    const keyChecks: [_ParamsKeys, _ResultKeys, _MethodConstKeys] = [true, true, true];
-    expect(keyChecks).toEqual([true, true, true]);
+    const keyChecks: [_ParamsKeys, _ResultKeys] = [true, true];
+    expect(keyChecks).toEqual([true, true]);
   });
 });
 
@@ -161,15 +154,6 @@ describe("6 反向通道全集与超时二分（R9-2；[池抽象降级] 原 hos
       "host/childSpawned",
       "host/childStateChanged",
     ]);
-  });
-
-  it("ReverseChannel ⟷ REVERSE_CHANNELS 双向互等（U5 词表锁：补 satisfies 单向覆盖的反向缺口）", () => {
-    type _ChannelConstKeys = AssertMutuallyAssignable<
-      ReverseChannel,
-      (typeof REVERSE_CHANNELS)[number]
-    >;
-    const lock: [_ChannelConstKeys] = [true];
-    expect(lock).toEqual([true]);
   });
 
   it("二分：数据面 5 通道 10s 超时；人机交互 1 通道不设统一超时", () => {
@@ -303,5 +287,25 @@ describe("run.params.ctx 增量字段（Option C sessionDir：宿主权威 subag
   it("v1 形态（无 sessionDir）零破坏——additive 可选，旧引擎走 [LEGACY] fallback", () => {
     const run: RunParams = { runId: "run-1", task: { prompt: "do" }, ctx: v1Ctx };
     expect(run.ctx.sessionDir).toBeUndefined();
+  });
+});
+
+describe("schema 载体统一（D1：schema 跨进程只经 wire task.schema 单字段）", () => {
+  /** keyof 判定形态 true/false（编译期可锁），供下方退役断言复用。 */
+  type HasKey<T, K extends PropertyKey> = K extends keyof T ? true : false;
+
+  it("RunContextParams 不含 schemaEnv 键（编译期锁——重新引入该字段即编译红）", () => {
+    const retired: AssertMutuallyAssignable<HasKey<RunContextParams, "schemaEnv">, false> = true;
+    expect(retired).toBe(true);
+  });
+
+  it("schema 本体经 task.schema 承载、ctx 不出现 schemaEnv 键（运行时帧形态）", () => {
+    const run: RunParams = {
+      runId: "run-1",
+      task: { prompt: "do", schema: { type: "object" } },
+      ctx: { cwd: "/tmp" },
+    };
+    expect(run.task.schema).toEqual({ type: "object" });
+    expect("schemaEnv" in run.ctx).toBe(false);
   });
 });

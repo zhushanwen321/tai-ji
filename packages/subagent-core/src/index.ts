@@ -32,7 +32,7 @@
 // 0.4.0 = 首个公开发布的收敛收口面（0.3.0 为 2026-08-30 裁决的跳号占位，永不单独
 // 发布；+ minor changeset 收口面落本号）；与 package.json version 的一致性由
 // src/__tests__/smoke.test.ts 动态守护，改版本须两处同步。
-export const CORE_PACKAGE_VERSION = "0.11.1";
+export const CORE_PACKAGE_VERSION = "0.10.5";
 
 // ── 宿主端口接线面（core/）────────────────────────────────────
 // HostServices：dataRoot / log / discoveryRoots 端口 + configureCore 注入；
@@ -242,6 +242,20 @@ export {
   getModelConfigService,
   setModelConfigService,
 } from "./execution/assembly/model-config-service.ts";
+
+// ModelCatalog：pi 引擎模型目录（D8 两层挂点的共享裁决面——workflow tool 创建期
+// 拒单 + workflow-dispatch 派发期对称校验同源消费；extensions 源文件只从 barrel
+// 消费 core 符号，不进 barrel 无法接线，H4 formatEmptyResourceList 同构先例）。
+export {
+  assertModelInCatalog,
+  resolveModelInCatalog,
+  type ModelCatalogEntry,
+  type ModelCatalogMiss,
+  type ModelCatalogMissClassification,
+  type ModelCatalogOptions,
+  type ModelCatalogResolution,
+  type ModelCatalogSource,
+} from "./orchestration/model-catalog.ts";
 
 // notify ledger：宿主通知账本端口（bind / getBound）——组合根装配 + workflow 域消费。
 export {
@@ -496,24 +510,71 @@ export type {
 // LifecycleDeps.store 用；pi 壳继续用 session 锚定的 JsonlRunStore。
 // DEFAULT_* 两常量：壳 jsonl-run-store.ts 生产消费（D3 判定进 barrel），
 // u-2c 删 ./* 通配后深路径仅测试侧 vitest alias 可解析，生产消费必须走 barrel。
-// pruneStateFilesBeyondCap：磁盘 retention 裁剪单源（S4-A7）——壳 jsonl-run-store
-// 的同构私有实现已删，改 import 本函数并注入自身 logger tag / toErrorMessage。
+// pruneStateFilesBeyondCap：cap-only 通用裁剪原语（S4-A7；[Q2] 注记——生产链已切
+// pruneTerminalRunFiles，本函数保留为 FileRunStore 公共方法面与通用原语）。
+// pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪单源（[Q2 / D5 清理规则①②]——
+// manifest 资格 + cap + TTL + journal 成对删）；resolveStateTtlMs / STATE_TTL_MS_ENV /
+// DEFAULT_STATE_TTL_MS：TTL env 通道单源（[P1b-2] 引入、[Q2] 自 pi 宿主迁入）。
+// pi 宿主 jsonl-run-store 的 retention 维护轮生产消费（barrel 先例同上）。
 export {
   DEFAULT_SAVE_MIN_INTERVAL_MS,
   DEFAULT_STATE_MAX_RUNS,
+  DEFAULT_STATE_TTL_MS,
+  STATE_TTL_MS_ENV,
   FileRunStore,
   pruneStateFilesBeyondCap,
+  pruneTerminalRunFiles,
+  resolveStateTtlMs,
+  type PruneTerminalRunFilesOptions,
+  type PruneTerminalRunFilesResult,
 } from "./orchestration/file-run-store.ts";
+
+// run 级终局投影 manifest（[P1b-2 / D5]）：壳 jsonl-run-store 的保留清理资格判定
+// 消费（「已终局」单源锚定 = outcome 非空）——生产源码只从 barrel 消费 core 符号
+//（全仓零深路径 import 先例），不进 barrel 无法接线。
+export {
+  readRunTerminalManifest,
+  writeRunTerminalManifest,
+  type RunTerminalManifest,
+} from "./execution/persistence/manifest-store.ts";
 
 // ── 快照 codec（U8 / D4）──────────────────────────────────────
 // WorkflowRun ↔ 落盘快照的单一投影：版本常量沿用 pi "wf-run-v2"（存量逐字节
 // 可读）、live 字段 strip、更高版本跳过（宿主侧 warn 可见性自决）。
+// [P3/D6] projectRunEvents = 事件 journal fold 投影的唯一推导点（宿主 store
+// flush 时消费——pi 壳 jsonl-run-store.ts；additive 字段策略见函数注释）。
 export {
   fromRunSnapshot,
+  projectRunEvents,
   SNAPSHOT_VERSION,
   toRunSnapshot,
   type RunSnapshot,
 } from "./orchestration/run-snapshot.ts";
+
+// [P3/D6] run 事件 journal 读面（宿主 store fold 投影的数据源——journal scan 的
+// 坏行容忍与日志语义单源；生产源码只从 barrel 消费 core 符号先例同上）。
+export {
+  createRunEventJournal,
+  type RunEventJournal,
+  type WorkflowRunEvent,
+} from "./orchestration/run-events.ts";
+
+// [Q2/D9-1] run 注册表（D5 状态机投影面）：journal fold 投影（活跃/终局/
+// interrupted——mtime 启发式退役后的结构判据）+ interrupted 放弃窗终局化
+// （D5 清理规则③：abandon 写 manifest 后 journal 获清理资格）。pi 宿主
+// jsonl-run-store 的 retention 维护轮生产消费（H4 偏差先例同构：extensions 生产
+// 源码只从 barrel 消费 core 符号，不进 barrel 无法接线）。
+export {
+  abandonElapsedInterruptedRuns,
+  projectRunRegistryEvents,
+  projectRunRegistryState,
+  resolveRunAbandonWindowMs,
+  DEFAULT_RUN_ABANDON_WINDOW_MS,
+  RUN_ABANDON_WINDOW_MS_ENV,
+  type RunRegistryPhase,
+  type RunRegistryProjection,
+  type RunProjectionOptions,
+} from "./orchestration/run-registry.ts";
 
 // run 投影（U7 / D8）：isScriptRunning / runSummary 以 core WorkflowRun 为准的
 // 投影（runSummary 双投影分叉收口）。
@@ -596,9 +657,11 @@ export { normalizeWorkflowRef } from "./shared/agent-ref.ts";
 // （除 id/name 外全字段 optional，红线 5 守卫不抛不渲垃圾）、分段条目预算
 // （码点序排 + 截尾 + 宿主注入兜底指引；models 段无预算永不截，红线 7）、
 // guide 文案宿主注入（core 不内嵌平台文案）。summarizeDescription 随
-// WorkflowEntry 链导出（zsw 侧同口径消费）。
+// WorkflowEntry 链导出（zsw 侧同口径消费）。formatEmptyResourceList 为
+// subagents/workflows 两段的空发现态渲染（D4-2 空注入显式化）。
 export {
   formatAgentList,
+  formatEmptyResourceList,
   formatModelList,
   formatWorkflowList,
   sortByCodepoint,
@@ -606,11 +669,14 @@ export {
 } from "./shared/injection-render.ts";
 export type {
   AgentEntry,
+  InvalidResource,
   ModelEntry,
   WorkflowEntry,
 } from "./shared/injection-render.ts";
 // [2026-09-13 barrel 收窄] ListFormatOptions / ModelListFormatOptions /
 // ModelReasoningInfo 已出公共面（定义文件内部类型闭包或仅测试深路径消费）。
+// InvalidResource 随 P5 D4-3 入公共面（workflow-list-injector 经 barrel 消费——
+// extensions 源文件只从 barrel 消费 core 符号，H4 formatEmptyResourceList 同款先例）。
 
 // ── 原语（U6a）────────────────────────────────────────────────
 // atomic-write：tmp+rename 原子写单一实现（统一 tmp 命名 `.tmp.<pid>.<seq>-<rand>`、

@@ -31,7 +31,7 @@
  * 产出一组中间事件），可变态由 EventInterpreter 持有。
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
-import { EXTENSION_EVENTS, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
+import { EXTENSION_EVENTS, SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE, PLAN_STATE_CUSTOM_TYPE, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
 import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, BRIDGE_MARKER, BRIDGE_METHODS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction, BridgeRequest } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
@@ -45,7 +45,6 @@ import type {
   PiMessageStartEvent,
   PiMessageUpdateEvent,
   PiMessageEndEvent,
-  PiTurnStartEvent,
   PiAgentEndEvent,
   PiToolExecutionStartEvent,
   PiToolExecutionUpdateEvent,
@@ -160,13 +159,7 @@ function handleMessageUpdate(event: PiMessageUpdateEvent, sid: string): PiTransl
     case 'text_delta':
       return deltaUpdateMessage('message.text_delta', sid, sub.delta, sub.contentIndex)
     case 'thinking_start':
-      // composer-genstats-ttft（设计 §3.2 首输出结算）：追加 llm-first-output——既有
-      // message.thinking_start 帧行为不变（单事件可产多 translated event，同 ask-user
-      // extension-ui + broadcast 成对模式）；reasoning 模型 thinking 流常先于 text 流到达。
-      return [
-        { kind: 'message', message: { type: 'message.thinking_start', payload: { sessionId: sid, ...contentIndexAnchor(sub.contentIndex) } } },
-        { kind: 'llm-first-output', sessionId: sid },
-      ]
+      return [{ kind: 'message', message: { type: 'message.thinking_start', payload: { sessionId: sid, ...contentIndexAnchor(sub.contentIndex) } } }]
     case 'thinking_delta':
       // 微项 1（wave:perf-w07）：contentIndex 透传对齐 text_delta——为 D-2 token coalescing（W12
       // DeltaBuffer 合帧）保住 thinking 块的有序插入锚点；renderer 现状 handler 未消费该字段，多余字段无害。
@@ -175,29 +168,16 @@ function handleMessageUpdate(event: PiMessageUpdateEvent, sid: string): PiTransl
       return [{ kind: 'message', message: { type: 'message.thinking_end', payload: { sessionId: sid } } }]
     case 'toolcall_end':
       return handleToolcallEnd(sub)
-    case 'text_start':
-    case 'toolcall_start':
-      // composer-genstats-ttft（设计 §3.2）：原 noop 翻译保留（无前端行为），追加
-      // llm-first-output 首输出信号——纯 tool_call 响应无 text_start，toolcall_start 是
-      // 该形态下唯一首输出子类型。delta 子类型不产（否决表 E：pi-ai 全族流式实现凡产
-      // delta 必先产对应 *_start，interpreter 侧无兜底钩，PS-47 探针守卫）。
-      return [{ kind: 'noop' }, { kind: 'llm-first-output', sessionId: sid }]
-    case 'toolcall_delta': case 'text_end':
+    case 'toolcall_start': case 'toolcall_delta':
+    case 'text_start': case 'text_end':
       return [{ kind: 'noop' }]
     // FR-5 / RT-2#2: streaming error — surface as message.stream_error
     // payload 形状与 protocol 契约对齐：content（人类可读）+ kind（分类，可选）。
     // wire 真实字段 = {reason:'aborted'|'error', error:{errorMessage?}}（PiErrorSubEvent）：
-    // content 读 error.errorMessage（缺失回退 reason），kind 透传 reason（运行时若 pi 新增
-    // reason 值仍如实分类）。
+    // content 读 error.errorMessage（缺失回退 reason——中止场景无 errorMessage，仍可辨因）；
+    // kind 透传 reason，保留 aborted（用户中止）与 error（provider 真错）的语义区分，
+    // 禁止硬编码回 'error'（曾使所有 provider 真错文本永久不显形）。
     case 'error':
-      // aborted（用户中止）降级 noop，不产 stream_error 帧：中止不是流错误——pi 对中止的
-      // 权威收口通路是 message_end/agent_end 携带的 stopReason='aborted'（→ 前端
-      // message.complete{stopReason:'aborted'}，complete 终态非 error）。此处若产帧，前端
-      // finalizeSession('stream_error') 会把主动中止错标为 error 红条，且 errorMessage 缺失时
-      // 原始枚举串 'aborted' 经 content 直进用户可见错误文本。
-      // [HISTORICAL] 本分支曾硬编码 kind='error'，使 provider 真错文本（401/限流/上下文溢出）
-      // 永久不显形——RT-2#2 改读 wire 真实字段后修复。
-      if (sub.reason === 'aborted') return [{ kind: 'noop' }]
       return [{ kind: 'message', message: { type: 'message.stream_error', payload: { sessionId: sid, content: sub.error?.errorMessage ?? sub.reason, kind: sub.reason } } }]
     default:
       console.warn('[EventAdapter] Unhandled message_update sub-type:', subType)
@@ -447,22 +427,6 @@ function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[
     stopReason,
     usage,
   }]
-}
-
-/**
- * turn_start — LLM 请求起算锚点（composer-genstats-ttft，设计 §3.2）。
- *
- * pi 0.84.4 实装（agent-loop.js）：每轮 LLM 请求恰发一次 turn_start——首个请求在
- * runAgentLoop / runAgentLoopContinue 入口（agent_start 后），工具循环后续轮在内层 while
- * 的 prepareNextTurn 之后 emit（原生 auto-compaction 运行在 prepareNextTurn 内、先于本
- * 事件，不含在 TTFT 窗口；工具执行亦不含——工具后下一轮 turn_start 重新起算）。
- * [HISTORICAL] 原在 NULL_EVENTS 丢弃（速度窗口 D1 有意不采此锚点，防 TTFT 敏感度进速度
- * 语义）；ttft 指标落地后移出，翻译为 llm-request-start 中间事件 → interpreter 挂
- * LlmWindowSampler.onRequestStart()。语义前提（turn_start 逐请求 emit / *_start 先于
- * delta）登记 PS-46 / PS-47 探针守卫（pi bump 门禁复验）。
- */
-function handleTurnStart(_event: PiTurnStartEvent, sid: string): PiTranslatedEvent[] {
-  return [{ kind: 'llm-request-start', sessionId: sid }]
 }
 
 /**
@@ -797,10 +761,7 @@ function tryTranslateAskUserSelect(
     method: 'select',              // 仍是 select（复用回传通道）
     form: true,                    // 统一表单帧（legacy 归一上移：marker 命中即 view-ready）
     formQuestions: askUserData.questions.map(toFormQuestion), // AskUserQuestion → FormQuestion type 推断
-    // [MF-1-14] 运行时 boolean 守卫：payload 来自旧版扩展的动态 JSON（parseSelectOptionsPayload
-    // 不验证形状），`?? true` 只挡 null/undefined，非 boolean 形态（如字符串）会穿透类型标注
-    // 直达 FormOverlay——与 questions 的 Array.isArray 同款入口收窄。
-    allowCancel: typeof askUserData.allowCancel === 'boolean' ? askUserData.allowCancel : true,
+    allowCancel: askUserData.allowCancel ?? true,
   }
   return [
     // ★ extension-ui kind 事件：EventInterpreter 据此暂停 watchdog，并通知 server 跟踪请求 + 缓存 pending 请求。
@@ -894,9 +855,6 @@ function tryTranslatePlanReviewSelect(
  * 剔除该项，不废掉整张表单；全不合法（含非 JSON / formQuestions 非数组 / 空数组）返回
  * undefined，由调用方降级普通 select（与既有 marker 守卫失败降级一致，对齐 :856-871
  * ask-user/schedule-create 的兜底模式）。
- *
- * expectTurn 源元数据条件落键透传（form-submit-busy-convergence D1 段 3）：本分支是
- * 唯一活跃表单通路的单点；legacy 两分支（ask-user / schedule-create）不透传——见下方落键注释。
  */
 function tryTranslateFormSelect(
   event: PiExtensionUiRequestEvent,
@@ -904,7 +862,7 @@ function tryTranslateFormSelect(
   requestId: string,
   dialogMethod: ExtensionInteractMethod,
 ): PiTranslatedEvent[] | undefined {
-  const formData = parseSelectOptionsPayload(event) as { formQuestions?: unknown; allowCancel?: boolean; expectTurn?: boolean } | undefined
+  const formData = parseSelectOptionsPayload(event) as { formQuestions?: unknown; allowCancel?: boolean } | undefined
   const rawQuestions = formData?.formQuestions
   if (!Array.isArray(rawQuestions)) {
     return undefined
@@ -919,15 +877,7 @@ function tryTranslateFormSelect(
     method: 'select',              // 仍是 select（复用 respond 回传通道）
     form: true,                    // 标记统一表单富交互，前端据此路由到 FormOverlay（C4 过滤器）
     formQuestions: validQuestions, // 守卫过滤后的合法问题集透传（前端复核守卫收窄，设计 D2）
-    // [MF-1-14] 同 ask-user 分支的运行时 boolean 守卫（payload 为动态 JSON，?? 只挡缺席）
-    allowCancel: typeof formData?.allowCancel === 'boolean' ? formData.allowCancel : true,
-    // expectTurn 条件落键（D1 段 3）：仅显式 false 落 expectTurn:false；undefined/缺省与
-    // 显式 true 皆省键（D2 `=== false` 判定下 true≡undefined 同走桥接，语义等价）——帧上
-    // 永不出现 undefined 值键，存量逐字段断言测试与 pending `{...r,...r.payload}` 解包无需
-    // 适配。严格 `=== false` 兼作类型守卫：非 boolean 不入帧（与 renderer 侧
-    // toExtensionUIRequest 的 typeof === 'boolean' 守卫对齐）。legacy 两分支不透传：旧 npm
-    // 扩展结构上不可能携带该键，透传是投机作用域（设计被否谱系），单点即唯一活跃通路。
-    ...(formData?.expectTurn === false ? { expectTurn: false } : {}),
+    allowCancel: formData?.allowCancel ?? true,
   }
   return [
     // 与 ask-user 分支同构：extension-ui kind 事件使 EventInterpreter 暂停 watchdog，
@@ -1496,24 +1446,31 @@ function handleCompactionEnd(event: PiCompactionEndEvent, _sid: string): PiTrans
 }
 
 /**
- * entry_appended → record-entry-appended 失效信号（W18，D4；customType 放宽为任意 string）。
+ * entry_appended → record-entry-appended 失效信号（W18，D4）。
  *
  * pi 只对 extension appendEntry 发射本事件（agent-session.ts appendEntry 回调唯一发射点，
- * message entry 不发射——W25 契约测试固化）。历史形态只对 subagent-record /
- * workflow-record / plan-state 三族产出失效信号；放宽（D5「失效转发的三段链路」①）后
- * 任何 type==='custom' 且 customType 为 string 的 entry 一律产出失效信号（customType
- * 透传）——「避免无关 entry 触发拉取」的既有约束改由派发层订阅者存在性守住（无订阅者
- * no-op）；record 三族消费方 invalidateRecordEntries 的内部 customType 早退门保留，
- * 非三族 customType 到达即早退，三族既有行为不变（每加一个镜像消费者不再改适配点）。
+ * message entry 不发射——W25 契约测试固化）。customType 过滤：只对 subagent-record /
+ * workflow-record / plan-state 自描述 entry 产出失效信号（interpreter → sessionService
+ * markDirty → 防抖 get_entries 增量重拉，唯一数据写路径；plan-state 第三员为 plan 模式
+ * 重设计 D1① 扩容），其他 custom type（含未来新增的 extension 自有 entry）no-op——
+ * 避免无关 entry 触发拉取。
  *
  * 事件 payload（entry 对象）不进任何数据缓存：失效信号只携带 customType，数据本体由
  * get_entries 权威拉取获得（ReplicatedState「事件只做失效」核心不变量）。
  */
 function handleEntryAppended(event: PiEntryAppendedEvent, _sid: string): PiTranslatedEvent[] {
   const entry = event.entry as { type?: unknown; customType?: unknown } | null
-  // customType typeof 收窄：来源是 extension 第三方代码（对齐 handleMessageStart 先例）
-  if (!entry || entry.type !== 'custom' || typeof entry.customType !== 'string') return [{ kind: 'noop' }]
-  return [{ kind: 'record-entry-appended', customType: entry.customType }]
+  if (!entry || entry.type !== 'custom') return [{ kind: 'noop' }]
+  if (entry.customType === SUBAGENT_RECORD_CUSTOM_TYPE) {
+    return [{ kind: 'record-entry-appended', customType: SUBAGENT_RECORD_CUSTOM_TYPE }]
+  }
+  if (entry.customType === WORKFLOW_RECORD_CUSTOM_TYPE) {
+    return [{ kind: 'record-entry-appended', customType: WORKFLOW_RECORD_CUSTOM_TYPE }]
+  }
+  if (entry.customType === PLAN_STATE_CUSTOM_TYPE) {
+    return [{ kind: 'record-entry-appended', customType: PLAN_STATE_CUSTOM_TYPE }]
+  }
+  return [{ kind: 'noop' }]
 }
 
 /**
@@ -1534,8 +1491,6 @@ function handleAgentSettled(_event: PiAgentSettledEvent, _sid: string): PiTransl
 
 // ── Null-event types (lifecycle events not forwarded to frontend) ──
 // 注意：turn_end 不在此列——它经 handleTurnEndPi 提取 usage 触发 context.update（见 DISPATCHER）。
-// [composer-genstats-ttft] turn_start 已移出此列（原丢弃）——LLM 请求起算锚点，经
-// handleTurnStart 翻译为 llm-request-start（采样锚点，无前端行为）。
 // [W1 fix-chat-flow-order] agent_settled 移出此列（原「taiji 不消费——显式登记忽略」）：
 // bash entry 化（conversation-turn-attribution D2）需要它作「run 级联结束」信号——pi 在
 // _runAgentPrompt 的 finally 先 _flushPendingBashMessages()（agent-session.js:744-756）再
@@ -1544,11 +1499,10 @@ function handleAgentSettled(_event: PiAgentSettledEvent, _sid: string): PiTransl
 // compaction_start/compaction_end 在 M4 移出此列（改事件驱动，interpreter 唯一编排 compaction 生命周期）。
 // agent_start 在 M5 移出此列——其 hook 分支在 translate() 内单独消费（onPiEvent/agent_start hook，
 // 消费方是插件 executeHooks，S1）。若放回 NULL_EVENTS 会被此处 short-circuit，hook 分支不可达。
-// [W18] entry_appended 移出此列——产出失效信号（handleEntryAppended：record 三族派生缓存
-// markDirty → 防抖 get_entries 增量重拉；customType 已从三字面量放宽为任意 string——D5
-// 「失效转发的三段链路」①，「避免无关 entry 触发拉取」由派发层订阅者存在性守住，
-// record 三族消费方 invalidateRecordEntries 内部早退门保留）。
-// （W21 TODO(W18) 锚点在此兑现；message entry 不发射本事件，W25 契约）。
+// [W18] entry_appended 移出此列——对 subagent-record / workflow-record / plan-state
+// customType 产出失效信号（handleEntryAppended：subagent/workflow/plan 派生缓存 markDirty →
+// 防抖 get_entries 增量重拉；plan-state 第三员为 plan 模式重设计 D1① 扩容），
+// 其他 custom type no-op（W21 TODO(W18) 锚点在此兑现；message entry 不发射本事件，W25 契约）。
 // [W21] message_end 移出此列——重构 message entry 喂前端 reducer（handleMessageEnd，实时 feed
 // 权威载体）。pi 上游未来若为常规 message append 补发射 entry_appended：只换喂入源头
 // （entry_appended → entry 构造），reducer 不动。
@@ -1561,6 +1515,7 @@ function handleAgentSettled(_event: PiAgentSettledEvent, _sid: string): PiTransl
 // 该事件正确流入本层，但 taiji 暂不做 live bash 流式 UI 消费（最终 output 经 bash RPC response
 // 全量到达）——显式登记为已知 no-op，防止落入 default 分支被误判为「事件丢失」。
 const NULL_EVENTS = new Set([
+  'turn_start',
   'extension_config', 'extension_ui_response', 'response',
   'bash_execution_update',
 ])
@@ -1615,8 +1570,6 @@ const DISPATCHER = new Map<string, Handler>()
   DISPATCHER.set('tool_execution_start', handleToolExecutionStart as Handler)
   DISPATCHER.set('tool_execution_end', handleToolExecutionEnd as Handler)
   DISPATCHER.set('agent_end', handleAgentEnd as Handler)
-  // [composer-genstats-ttft] turn_start：移出 NULL_EVENTS 后在此注册——采样锚点（无前端行为）
-  DISPATCHER.set('turn_start', handleTurnStart as Handler)
   DISPATCHER.set('turn_end', handleTurnEndPi as Handler)
   DISPATCHER.set('extension_ui_request', handleExtensionUIRequest as Handler)
   DISPATCHER.set('message_start', handleMessageStart as Handler)
@@ -1635,8 +1588,9 @@ const DISPATCHER = new Map<string, Handler>()
   DISPATCHER.set('error', handleError as Handler)
   DISPATCHER.set('compaction_start', handleCompactionStart as Handler)
   DISPATCHER.set('compaction_end', handleCompactionEnd as Handler)
-  // [W18] entry_appended：移出 NULL_EVENTS 后在此注册——custom entry 失效信号
-  // （handleEntryAppended，任意 string customType 透传）；[session-trace A33] 组合追加 trace-trigger
+  // [W18] entry_appended：移出 NULL_EVENTS 后在此注册——subagent-record / workflow-record
+  // 失效信号（handleEntryAppended），其他 custom type no-op；
+  // [session-trace A33] 组合追加 trace-trigger
   DISPATCHER.set('entry_appended', withTraceTrigger(handleEntryAppended as Handler))
   // [W1 fix-chat-flow-order] agent_settled：run 级联结束信号（bash 待落列 flush 触发点，
   // 见 handleAgentSettled 注释）；[session-trace A33] 组合追加 trace-trigger；
@@ -1750,13 +1704,6 @@ export interface PiEventClient {
  */
 export class EventAdapter {
   private unsub: (() => void) | null = null
-  /**
-   * [MF-1-13] 已向用户显形过的 translate 失败原因（stream_warn 去重）。pi 字段漂移通常
-   * 按帧复发（同一畸形事件类型每次出现都炸），逐帧追加提示会刷屏；[ADAPTER-FAIL] 日志
-   * 每帧照记不受此去重影响。生命周期同 adapter（session 绑定期），条目数受限于相异
-   * 失败原因数（个位数级）。
-   */
-  private readonly notifiedTranslateFailures = new Set<string>()
 
   constructor(
     private sessionId: string,
@@ -1778,35 +1725,25 @@ export class EventAdapter {
       // 漂移致 handler 直读炸掉（如 queue_update.steering 非数组、tool_execution_update
       // partialResult.content 数组形态缺位）时异常逃逸进 rpc-client 的 stdout parse catch，
       // 被误记「parse error」，且 listener 循环无隔离使本帧对后续 listener（handoff 的
-      // agent_end 探测）整帧丢失、无用户可见失败。现失败在 adapter 内非终结显形（见
-      // catch 内注释），流继续。
+      // agent_end 探测）整帧丢失、无用户可见失败。现失败在 adapter 内显形为
+      // message.stream_error（content 带原因，前端 finalize 收口 + 文案可见），流继续。
       let events: PiTranslatedEvent[]
       try {
         // PiEventListener 的 event 是 unknown（pi 动态 JSON），断言为 PiEvent 联合翻译。
         events = translate(event as unknown as PiEvent, this.sessionId)
       } catch (err) {
         console.error(`[ADAPTER-FAIL] translate error (isolated; stream continues) sid=${this.sessionId}:`, err)
-        // [MF-1-13] 单帧翻译失败是非终结事件——pi 流继续，本 turn 可能照常成功。不产
-        // message.stream_error（registry handler 对其无条件 finalizeSession('stream_error')
-        // 收口，会把实际成功的 turn 永久标红 + 内容截断，live ≠ reload），改沿 B1
-        // stream_warn 形态显形：前端仅追加 system 提示消息、不调 finalizeSession，
-        // session 保持 streaming 态。同一失败原因只提示一次（去重理由见字段注释）。
-        const reason = err instanceof Error ? err.message : String(err)
-        if (this.notifiedTranslateFailures.has(reason)) {
-          events = []
-        } else {
-          this.notifiedTranslateFailures.add(reason)
-          events = [{
-            kind: 'message',
-            message: {
-              type: 'message.stream_warn',
-              payload: {
-                sessionId: this.sessionId,
-                content: `事件翻译失败，本帧已跳过：${reason}`,
-              },
+        events = [{
+          kind: 'message',
+          message: {
+            type: 'message.stream_error',
+            payload: {
+              sessionId: this.sessionId,
+              content: `事件翻译失败，本帧已跳过：${err instanceof Error ? err.message : String(err)}`,
+              kind: 'adapter',
             },
-          }]
-        }
+          },
+        }]
       }
       if (events.length === 0) return
       // interpret 同步执行（message/status WS 帧即时送出）；
