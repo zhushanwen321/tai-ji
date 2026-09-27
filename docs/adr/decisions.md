@@ -87,7 +87,7 @@ workflow run 与 subagent record 的运行态持久化介质收敛（承接 ADR-
 - runtime 两 extractor（`workflow-extractor.ts` / `subagent-extractor.ts`）的 v1 分支 + `session-file-extraction.ts` 全文读路径（32MB 预检仅存于此）；
 - core `record-store.ts` `reportSubagentRecord` 的 v1 快照纠偏写点（孤儿纠偏兼容层唯一活写点，写面守卫 R4 白名单登记）；
 - session-reader discovery/workflows 的 v1 快照层与旧 workflow-state-link 指针 fallback（三档发现链的下两档）；
-- `Atomics.wait` 同步睡重试、state-marker 旧值（finalized/cancelled）上行映射等伴随面。
+- state-marker 旧值（finalized/cancelled）上行映射等伴随面（`Atomics.wait` 同步睡重试已随 W1 D6 全量退役，无 W4 残余——state-marker.test.ts 断言锁定）。
 
 **第六读者失效登记**：`scripts/zcode-session-db-cleanup.mjs`（zcode 引擎存量宿主行清理工具）自持 customType 白名单解析带 `data.v !== 1` 版本门——v1 条目停写后对全部新记录恒跳过、白名单恒空 → 清理面恒空，属**功能性保守降级**（漏清不误删：新记录本来就不落宿主库，白名单空集 = 零删除，语义安全）；该脚本为一次性清理工具，不随 W4 sunset 强制退役，重跑时对存量 v1 数据仍有效。
 

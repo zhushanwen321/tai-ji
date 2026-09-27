@@ -132,8 +132,9 @@ export function initialRunJournalFold(): RunJournalFold {
 
 /**
  * run journal 增量 fold（幂等：ask 终局/进度边沿按「后到覆盖」语义，重复事件
- * 重放只推进同值字段）。run 域事件无 seq 信封（词表早于 seq 裁决，U1 补齐）——
- * 截断重读由 onReset 清 fold 后从初始态重放保证幂等。
+ * 重放只推进同值字段）。run 域事件自 W1 起携带 seq 信封（run-events
+ * EventEnvelope 单调分配）；本 fold 不以 seq 去重，截断重读由 onReset 清 fold
+ * 后从初始态重放保证幂等。
  */
 export function foldRunJournalEvents(
   fold: RunJournalFold,

@@ -608,15 +608,18 @@ export default [
       'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
     },
   },
-  // [workflow 状态机接线 2026-09-22] worker-message-pump.ts 单独提额 1100：P1b-1 起
+  // [workflow 状态机接线 2026-09-22] worker-message-pump.ts 单独提额：P1b-1 起
   // 该文件承载 run 状态机投递入口（dispatchRunTrigger/journal 落账/终局投影），A2
-  // 修复轮补 errorCode 构造与 ask-retrying 帧后折算 1066——拆分属独立重构任务
-  // （候选轴：run 事件投递族 / ask 编排族），按「微超即提额，保留软上限告警」
-  // 先例（engine-client 650 / event-interpreter 700 同型）过渡。
+  // 修复轮补 errorCode 构造与 ask-retrying 帧后折算 1066（提额 1100）。
+  // [W1 介质归位 2026-09-26] 物化时机收敛 + v2 条目接线（u1-core 批）净增后折算
+  // 1218——再提额 1240 过渡。拆分属独立重构任务（候选轴：run 事件投递族 / ask 编排
+  // 族 / v2 条目物化接线族），归 W2 状态机收敛波次（该波次本就要重组 run 域编排），
+  // 按「微超即提额，保留软上限告警」先例（engine-client 650 / event-interpreter 700
+  // 同型）。
   {
     files: ['packages/subagent-core/src/orchestration/worker-message-pump.ts'],
     rules: {
-      'max-lines': ['warn', { max: 1100, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 1240, skipBlankLines: true, skipComments: true }],
     },
   },
   // [H4 record 持久化收敛] record-store 三轴拆分（2026-09-13 落地）：store 保留容器 +
@@ -627,10 +630,14 @@ export default [
   // 单规则 + entry 重建族 + manifest 读写投影 + 缓存戳类型），按 u-2a 同款过渡设
   // max 700。D7 写面约束不变：七名写函数调用字面只留在 record-store.ts（轴文件经
   // ctx 注入），check-record-write-surface 白名单零改动。
+  // [W1 介质归位 2026-09-26] 写点改事件文件 + 收编入口 + Atomics.wait 退役（u2a/u7）
+  // 后折算 805 微超 5 行——按「微超即提额」（pi-provider-store 508>500→520 同型）
+  // 提额 820 保留软上限告警；容器侧再拆属独立重构任务（事件写面接线族已在 rounds
+  // 轴承接）。
   {
     files: ['packages/subagent-core/src/execution/persistence/record-store.ts'],
     rules: {
-      'max-lines': ['warn', { max: 800, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 820, skipBlankLines: true, skipComments: true }],
     },
   },
   {

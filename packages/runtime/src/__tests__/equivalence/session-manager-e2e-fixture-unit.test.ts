@@ -8,6 +8,9 @@
  * faux 轨（凭证无关，门控只判 binary），属 main 满并行组——real-pi 池的饿死模式（真实 LLM
  * 轮次长等待窗口在 CPU 饱和下超时）在 faux 毫秒级本地轮次下结构性不存在（见 vitest.config.ts
  * 维护契约），故豁免登记；混合轨文件（同时 import 两个 READY）含真实 LLM 用例，仍强制登记。
+ * [HISTORICAL 2026-09-26] 例外：多 spawn + jiti 冷编译的重 faux 件（idle-pi-reclaim-
+ * integration）在满并行下存在扩展注册/模型解析竞态，允许自愿登记进 REAL_PI_TESTS
+ * 顺序尾组（豁免 = 不强制，非禁止；登记证据见 vitest.config.ts 同日注释）。
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'

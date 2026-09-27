@@ -107,8 +107,12 @@ interface EntrySources {
   pointers: Map<string, { path: string }>;
   /** v2 注册条目（runId → 注册载荷；journal 权威重建的定界源）。 */
   registered: Map<string, WorkflowRecordRegisteredEntryData>;
-  /** 已有 v2 终态条目的 runId（终态条目幂等补写的判定面）。 */
-  settledRunIds: Set<string>;
+  /**
+   * 已有 v2 终态条目的 run（runId → 终态载荷，后写覆盖 = last-wins）。双面证据的
+   * 条目面（D4）：终态条目幂等补写的抑制判定 + 「journal 无终局帧」实体的先在
+   * 终局证据（rebuild 按条目终局重建，见 rebuildRunsFromJournals）。
+   */
+  settledEntries: Map<string, WorkflowRecordSettledEntryData>;
 }
 
 /**
@@ -190,9 +194,10 @@ function collectStateLinkPointer(entry: CustomEntry, pointers: Map<string, { pat
 
 /**
  * v2 条目 → 注册定界 / 终态判定（[W1 / D1] 新增读面）。载荷按 kind 分流：
- * registered → registered Map（定界 + journalPath 锚点）；settled → settledRunIds
- * （终态条目幂等补写判定）。载荷形状损坏（缺 runId 等半写形态）warn 留证后跳过
- * （对齐 SO-DATA-2 的 per-entry 隔离口径）。返回 entry 是否命中该类型。
+ * registered → registered Map（定界 + journalPath 锚点）；settled → settledEntries
+ * （终态条目幂等补写判定 + D4 双面证据的条目面）。载荷形状损坏（缺 runId 等半写
+ * 形态）warn 留证后跳过（对齐 SO-DATA-2 的 per-entry 隔离口径）。返回 entry 是否
+ * 命中该类型。
  */
 function collectV2RecordEntry(entry: CustomEntry, entryIndex: number, sources: EntrySources): boolean {
   if (entry.customType !== WORKFLOW_RECORD_CUSTOM_TYPE) return false;
@@ -216,7 +221,7 @@ function collectV2RecordEntry(entry: CustomEntry, entryIndex: number, sources: E
     );
     return true;
   }
-  sources.settledRunIds.add(v2.runId);
+  sources.settledEntries.set(v2.runId, v2);
   return true;
 }
 
@@ -227,7 +232,7 @@ function collectEntrySources(entries: SessionEntry[]): EntrySources {
     recordRuns: new Map<string, WorkflowRun>(),
     pointers: new Map<string, { path: string }>(),
     registered: new Map<string, WorkflowRecordRegisteredEntryData>(),
-    settledRunIds: new Set<string>(),
+    settledEntries: new Map<string, WorkflowRecordSettledEntryData>(),
   };
   // 索引循环：损坏留证的 warn 需要 entry 索引（SO-DATA-2）
   for (let i = 0; i < entries.length; i++) {
@@ -903,7 +908,7 @@ export class JsonlRunStore implements RunStore {
     const runs: WorkflowRun[] = [];
     try {
       const entries = this.ctx.sessionManager.getEntries();
-      const { recordRuns, pointers, registered, settledRunIds } = collectEntrySources(entries);
+      const { recordRuns, pointers, registered, settledEntries } = collectEntrySources(entries);
 
       // 2) v1 兼容层终局调和：v1 entry 是「最后一次成功 append」的快照，journal
       //    终局帧与 GC 终局化可能新于它——running 态先对账再交恢复链。v2 实体不走
@@ -917,7 +922,7 @@ export class JsonlRunStore implements RunStore {
 
       // 1) v2 注册条目定界 → journal 权威重建（当前写点形态，优先级同 v1 并列——
       //    两族按 id 不相交，混合会话分流执行）
-      const built = this.rebuildRunsFromJournals(registered, settledRunIds);
+      const built = this.rebuildRunsFromJournals(registered, settledEntries);
       runs.push(...built);
 
       // 3) 旧 link 指针 → state 文件兼容（1/2 已覆盖的 runId 跳过——link 优先级低）
@@ -942,14 +947,22 @@ export class JsonlRunStore implements RunStore {
    * 逐注册条目重建 run：journal 全量读（readJournalTail 冷启动形态）→ 事件流投影
    * 重建（projectRunEvents 对 degraded running 基线做富集）→ 终局判定。
    *
-   * 终局判定与状态重建：
+   * 终局判定与状态重建（D4 双面证据：journal 终态帧 ∧ 主 session 终态条目）：
    * - 投影 outcome 有值 ⟺ fold 命中 run-settled ⟺ 终局（等价于状态机 fold 的
    *   terminal 判定——run-settled 是唯一终局转移的 journal 帧）。终局 run 用
    *   reconstruct 直接构造 done 聚合（reason 从 outcome 映射、error 取帧 reason、
    *   completedAt 取帧 ts），并幂等补写终态条目（终态条目缺失时）。
-   * - 非终局（含 journal 只有 run-created 首帧的早崩形态）→ running 聚合交恢复链
-   *   （recoverCrashedRuns 经收编链追加 run-settled 后，下次 loadAll 自然读到终局）。
-   * - journal 缺失（ENOENT——注册后首帧未落 / 足迹已裁剪）：warn 跳过，不产幻影。
+   * - journal 无终局帧但终态条目已在（终局帧损坏 / 全损而条目完好）：按条目终局
+   *   重建 done——条目即先在终局证据，**不交恢复链**（交恢复链会追加
+   *   run-settled(failed) 收编帧与第二条 settled(failed) 条目，与既有 done 条目
+   *   构成 D4 明文要防的两记录面矛盾）。
+   * - 非终局且终态条目缺（含 journal 只有 run-created 首帧的早崩形态 / journal
+   *   空·缺·全损）→ running 聚合交恢复链收编（recoverCrashedRuns 经收编链追加
+   *   run-settled 后，下次 loadAll 自然读到终局；journal 空流的 run-settled 追加
+   *   会撞 created × run-settled 表外转移，由恢复链围栏降级 state 快照面收编）。
+   * - journal 空/缺/全损但终态条目已在：warn 跳过不重建——条目已是终局证据，
+   *   该 run 的呈现面归条目读者（runtime 投影 / session-reader），壳 runs 集合
+   *   不回收窗外实体（足迹已裁剪的终态 run 灌回内存会被 cap 淘汰反复震荡）。
    *
    * 投影载荷边界（登记）：journal 不携带 call 级结果/sessionFile（args 只进截断
    * 摘要）——v2 重建的 run 聚合是恢复语义的最小形态（spec.scriptSource 空、calls 空、
@@ -958,7 +971,7 @@ export class JsonlRunStore implements RunStore {
    */
   private rebuildRunsFromJournals(
     registered: Map<string, WorkflowRecordRegisteredEntryData>,
-    settledRunIds: Set<string>,
+    settledEntries: Map<string, WorkflowRecordSettledEntryData>,
   ): WorkflowRun[] {
     const runs: WorkflowRun[] = [];
     for (const [runId, reg] of registered) {
@@ -979,21 +992,41 @@ export class JsonlRunStore implements RunStore {
         );
       }
       if (chunk.events.length === 0) {
-        // journal 空/缺（run-created 未落或足迹已裁剪）——无重建证据，跳过不产幻影
+        // journal 空/缺/全损（readJournalTail 对 ENOENT 亦产空流）。终态条目在 =
+        // 先在终局证据（双面证据条目面）→ 跳过不重建；终态条目缺 = 「有注册、无
+        // 终态」的崩溃形态 → degraded running 基线交恢复链按中断收编（设计 §3.1
+        // 失败路径样例「全文件不可解析 → 该 run 按中断收编」——静默跳过会让该
+        // 实体对恢复链/abandon 扫描全部不可见）。
+        if (settledEntries.has(runId)) {
+          logger.warn(
+            `[subagent-workflow] v2 rebuild: journal empty or missing but settled entry present, run skipped (runId=${runId}, journal=${journalPath})`,
+          );
+          continue;
+        }
         logger.warn(
-          `[subagent-workflow] v2 rebuild: journal empty or missing, run skipped (runId=${runId}, journal=${journalPath})`,
+          `[subagent-workflow] v2 rebuild: journal empty or missing and no settled entry, degraded rebuild for interruption adoption (runId=${runId}, journal=${journalPath})`,
         );
+        runs.push(this.reconstructRunFromProjection(runId, reg, chunk.events, undefined));
         continue;
       }
       const events = chunk.events;
       const settledEvent = lastRunSettledEvent(events);
+      // [W1 / D4] 双面证据的条目面：journal 无可解析终局帧而终态条目已在 → 按
+      // 条目终局重建 done，不交恢复链（防两记录面矛盾，见方法注释）。
+      if (settledEvent === undefined && settledEntries.has(runId)) {
+        logger.warn(
+          `[subagent-workflow] v2 rebuild: journal has no parseable run-settled but settled entry present, rebuilt from settled entry (runId=${runId})`,
+        );
+        runs.push(this.reconstructRunFromSettledEntry(runId, reg, settledEntries.get(runId)!));
+        continue;
+      }
       const run = this.reconstructRunFromProjection(runId, reg, events, settledEvent);
       runs.push(run);
       // [W1 / D4] 终态条目幂等补写：journal 已终局而主 session 终态条目缺失
       //（终局 coda 的条目半边写失败 / 旧版本写点形态）→ 补写；条目已在 → 跳过
-      //（双重启不重复追加的构造性保证——补写只在 loadAll 收编面发生且被 settledRunIds
+      //（双重启不重复追加的构造性保证——补写只在 loadAll 收编面发生且被 settledEntries
       // 拦截）。无 pi（测试/非 Pi 环境）跳过。
-      if (settledEvent !== undefined && !settledRunIds.has(runId)) {
+      if (settledEvent !== undefined && !settledEntries.has(runId)) {
         this.appendSettledEntryFallback(runId, settledEvent, events);
       }
     }
@@ -1053,6 +1086,46 @@ export class JsonlRunStore implements RunStore {
       {
         startedAt: startedAtIso,
         completedAt: new Date(settledEvent.ts).toISOString(),
+      },
+    );
+  }
+
+  /**
+   * 按终态条目重建 done 聚合（D4 双面证据的条目面分支）：journal 终局帧不可解析
+   * 而终态条目已在时，条目是唯一可用终局证据——reason 直取条目 DoneReason、
+   * completedAt 取条目 settledAt。error 文本不构造（条目契约只携结构化 errorCode，
+   * 无错误文本载荷——不落 generic 恢复文案，与帧分支同一纪律）。spec 基线与
+   * {@link reconstructRunFromProjection} 同构（恢复语义最小形态）。
+   */
+  private reconstructRunFromSettledEntry(
+    runId: string,
+    reg: WorkflowRecordRegisteredEntryData,
+    settled: WorkflowRecordSettledEntryData,
+  ): WorkflowRun {
+    const startedAtIso = Number.isFinite(reg.startedAt)
+      ? new Date(reg.startedAt).toISOString()
+      : new Date().toISOString();
+    const spec = {
+      scriptSource: "",
+      args: {},
+      scriptName: reg.scriptName,
+      scriptPath: "",
+      ...(reg.slug !== undefined ? { slug: reg.slug } : {}),
+    };
+    return WorkflowRun.reconstruct(
+      runId,
+      spec,
+      {
+        status: "done",
+        reason: settled.reason,
+        budget: new Budget(),
+        calls: new Map(),
+        trace: new Trace(),
+        errorLogs: [],
+      },
+      {
+        startedAt: startedAtIso,
+        completedAt: new Date(settled.settledAt).toISOString(),
       },
     );
   }

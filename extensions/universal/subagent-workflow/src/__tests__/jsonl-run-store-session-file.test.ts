@@ -1103,14 +1103,54 @@ describe("W17/W1: workflow-record 条目面（v1 停写锚定 + v2 收编读面�
     expect(loggerMock.warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain("bad journal line");
   });
 
-  it("[W1 无幻影] 注册条目指向缺失 journal → warn 跳过，loadAll 不产幻影 run", async () => {
+  it("[W1 中断收编] 注册条目指向缺失 journal 且无终态条目 → degraded running 重建交恢复链", async () => {
     const runId = "run-w1-missing";
     const entries: CustomEntry[] = [
       v2RegisteredEntry(runId, path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`)),
     ];
     const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
-    await expect(store.loadAll()).resolves.toEqual([]);
+    const loaded = await store.loadAll();
+    // 设计 §3.1 失败路径样例「全文件不可解析 → 该 run 按中断收编」：静默跳过会让
+    // 该实体对恢复链与 abandon 扫描全部不可见（adoptInterruptedRun 对空 journal
+    // 返回 skippedMissing）——degraded running 基线交恢复链收编（journal
+    // run-settled 追加归恢复链；空流撞 created × run-settled 表外转移时由其围栏
+    // 降级 state 快照面收编）。
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]!.runId).toBe(runId);
+    expect(loaded[0]!.state.status).toBe("running");
     expect(loggerMock.warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain(runId);
+  });
+
+  it("[W1 双面证据·条目在] journal 空/缺 + 终态条目在 → 跳过不重建（条目即终局证据）", async () => {
+    const runId = "run-w1-missing-settled";
+    const entries: CustomEntry[] = [
+      v2RegisteredEntry(runId, path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`)),
+      v2SettledEntry(runId),
+    ];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    // 终态条目在 = 非 interrupted 先在证据（D4 双面证据条目面）→ 不重建不收编
+    //（journal 已被保留窗口清理的终态 run 同形态——呈现面归条目读者）
+    await expect(store.loadAll()).resolves.toEqual([]);
+    expect(loggerMock.warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain("settled entry present");
+  });
+
+  it("[W1 双面证据·终局帧损坏] journal 终局帧不可解析 + 终态条目在 → 按条目终局重建 done，不追加第二条 settled 条目", async () => {
+    const runId = "run-w1-settled-entry-final";
+    const journalPath = path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`);
+    appendJournalLine(tmpDir, runId, { type: "run-created", runId, workflowName: "test-script", argsSummary: "{}", ts: 1000, seq: 1 });
+    // 终局帧损坏而其余行可解析：fold 停在 dispatched——交恢复链会追加
+    // run-settled(failed) 与第二条 settled(failed) 条目，与既有 done 条目构成
+    // D4 明文要防的两记录面矛盾（last-wins 读者显示 failed 覆盖 done）
+    fs.appendFileSync(journalPath, '{"type":"run-settled","outcome":"compl\n', "utf8");
+
+    const entries: CustomEntry[] = [v2RegisteredEntry(runId, journalPath), v2SettledEntry(runId)];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const loaded = await store.loadAll();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]!.state.status).toBe("done");
+    expect(loaded[0]!.state.reason).toBe("completed"); // 终局语义以先在条目证据为准
+    // 条目数量不变（2）——不追加第二条 settled 条目
+    expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(2);
   });
 
   it("[W1 分流] 混合会话：v1 夹具实体（终局调和）与 v2 实体（journal 权威）同批重建互不干扰", async () => {

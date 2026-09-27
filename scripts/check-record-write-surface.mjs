@@ -46,10 +46,11 @@
 //   R6 entry 载荷死字节拒绝（W1 新增，全域无豁免）：append 条目调用窗口内出现
 //      `eventLog:` / `displayItems:` 字段写形态即违规（ADR-0078：运行态死字节
 //      不进主 session 条目；v1 兼容层的整对象投影不经字段字面量，不误伤）。
-//   R7 事件文件直写拒绝（W1 新增）：appendFileSync/appendFile 调用行内含 `.events`
-//      路径字面量只许 record-events.ts（record 事件文件唯一写者）与 run-events.ts
-//      （run journal 唯一写者）——事件文件的追加必须经两模块的原语入口，禁止
-//      在别处构造 .events 路径直接 append。
+//   R7 事件文件直写拒绝（W1 新增）：appendFileSync/appendFile 调用行起 4 行
+//      窗口内含 `.events` 路径字面量只许 record-events.ts（record 事件文件唯一
+//      写者）与 run-events.ts（run journal 唯一写者）——事件文件的追加必须经
+//      两模块的原语入口，禁止在别处构造 .events 路径直接 append（窗口判定与
+//      R2-R6 同构，覆盖 prettier 拆行形态）。
 //
 // 白名单逐域（D7 ③ + ADR-0078 写面清单）：
 //   - store 家族：record-store.ts（R1+R2+R4 豁免，唯一写入口本体）+
@@ -117,12 +118,26 @@ export const WF_V1_PAYLOAD_RE = /\bv:\s*1\b|\btoWorkflowRecordEntryData\s*\(|\bs
 /** R6 entry 载荷死字节字段写形态（eventLog/displayItems——ADR-0078 停写面）。 */
 export const ENTRY_DEAD_BYTES_RE = /\beventLog\s*:|\bdisplayItems\s*:/;
 
-/** R7 事件文件直写形态：appendFile(Sync) 调用 + 同行 `.events` 路径字面量。 */
-export const EVENTS_DIRECT_APPEND_RE = /\bappendFile(?:Sync)?\s*\([^\n]*["'`][^"'`\n]*\.events/;
+/** R7 事件文件直写形态（两段窗口判定）：调用行锚 = appendFile(Sync) 调用；
+ *  路径形态 = 窗口内 `.events` 路径字面量（引号起始到 .events 的串）。两段
+ *  拆开单行组合正则，覆盖 prettier 拆行形态（appendFileSync( / join(dir,
+ *  id + ".events") / …）——与 R2-R6 的 APPEND_WINDOW_LINES 窗口同构。 */
+export const APPEND_FILE_CALL_RE = /\bappendFile(?:Sync)?\s*\(/;
+export const EVENTS_PATH_LITERAL_RE = /["'`][^"'`\n]*\.events/;
 
-/** append 条目调用窗口（行数）：调用行 + 后 3 行——覆盖 pretier 拆行形态
+/** append 条目调用窗口（行数）：调用行 + 后 3 行——覆盖 prettier 拆行形态
  *  （appendEntry( / customType / payload / ) 四行）。 */
 const APPEND_WINDOW_LINES = 4;
+
+/** 调用行起的判定窗口构造：APPEND_WINDOW_LINES 行内剔除注释行（起点 idx 0 =
+ *  调用行，主循环已过滤非注释；后续注释行剔除——R5/R6/R7 触发词在注释行
+ *  提及不构成违规，违规行号仍报调用行）。R2-R6 与 R7 共用。 */
+function callWindow(lines, i) {
+  return lines
+    .slice(i, i + APPEND_WINDOW_LINES)
+    .filter((l, idx) => idx === 0 || !isCommentLine(l))
+    .join("\n");
+}
 
 /** store 本体（R1+R2+R4 豁免）——唯一写入口本体，含全部合法调用与注释提及。 */
 const STORE_FILE = "packages/subagent-core/src/execution/persistence/record-store.ts";
@@ -220,8 +235,10 @@ function collectScanRoots() {
  * 返回违规文本数组（空 = 通过）。roots 注入后可对 tmpdir fixture 判定，
  * 不依赖真实仓库状态。
  *
- * 窗口规则（R2/R3/R5/R6）：append 条目调用行起取 4 行窗口，customType 引用与
- * 载荷形态标记在窗口内组合判定——覆盖单行与 pretier 拆行两种调用形态。
+ * 窗口规则（R2/R3/R5/R6/R7）：调用行起取 4 行窗口并剔除窗口内注释行
+ * （触发词在注释行提及不构成违规），customType 引用、载荷形态标记与
+ * `.events` 路径字面量在窗口内组合判定——覆盖单行与 prettier 拆行两种
+ * 调用形态。
  */
 export function scanRecordWriteSurface(roots) {
   const files = roots.flatMap((root) => collectTsFiles(root));
@@ -255,14 +272,18 @@ export function scanRecordWriteSurface(roots) {
         continue;
       }
       // R7：事件文件直写（appendFile 族 × `.events` 路径字面量，双写者外违规）。
-      if (EVENTS_DIRECT_APPEND_RE.test(line) && !EVENTS_WRITER_FILES.has(rel)) {
-        violations.push(
-          `${rel}:${i + 1} [R7] 事件文件直写（appendFile×\`.events\`）出现在唯一写者外——` +
-            `run journal 与 record 事件文件的追加原语分别在 run-events.ts / record-events.ts` +
-            `（seq 分配权与头行契约单点）。Recovery: 改经两模块的 journal 追加入口` +
-            `（createRunEventJournal / createRecordEventJournal，ADR-0078）。`,
-        );
-        continue;
+      // 调用行起 4 行窗口内找 `.events` 字面量——覆盖 prettier 拆行形态
+      // （appendFileSync( / join(dir, id + ".events") / …），与 R2-R6 窗口同构。
+      if (APPEND_FILE_CALL_RE.test(line) && !EVENTS_WRITER_FILES.has(rel)) {
+        if (EVENTS_PATH_LITERAL_RE.test(callWindow(lines, i))) {
+          violations.push(
+            `${rel}:${i + 1} [R7] 事件文件直写（appendFile×\`.events\`）出现在唯一写者外——` +
+              `run journal 与 record 事件文件的追加原语分别在 run-events.ts / record-events.ts` +
+              `（seq 分配权与头行契约单点）。Recovery: 改经两模块的 journal 追加入口` +
+              `（createRunEventJournal / createRecordEventJournal，ADR-0078）。`,
+          );
+          continue;
+        }
       }
       // R4：v1 快照投影构造器调用（白名单外违规——W1 停写面，兼容层除外）。
       if (V1_SNAPSHOT_PROJECTOR_RE.test(line) && !V1_PROJECTOR_ALLOWED_FILES.has(rel)) {
@@ -275,9 +296,9 @@ export function scanRecordWriteSurface(roots) {
         );
         continue;
       }
-      // 窗口类规则（R2/R3/R5/R6）：append 条目调用行起 4 行窗口。
+      // 窗口类规则（R2/R3/R5/R6）：append 条目调用行起 4 行窗口（注释行剔除）。
       if (!APPEND_ENTRY_CALL_RE.test(line)) continue;
-      const window = lines.slice(i, i + APPEND_WINDOW_LINES).join("\n");
+      const window = callWindow(lines, i);
       const hasSubagentType = SUBAGENT_RECORD_TYPE_RE.test(window);
       const hasWorkflowType = WORKFLOW_RECORD_TYPE_RE.test(window);
       if (!hasSubagentType && !hasWorkflowType) continue;

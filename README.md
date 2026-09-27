@@ -8,7 +8,7 @@
   <a href="README.md">简体中文</a> ｜ <a href="README_EN.md">English</a> ｜ <a href="https://github.com/zhushanwen321/tai-ji/releases">下载安装</a>
 </p>
 
-太极是一个 AI Agent 桌面工作台（macOS / Windows / Linux）。它把多个 AI 会话放进同一个窗口，你可以同时推进多个任务，实时看到 AI 的思考、文件编辑和命令执行过程，随时分叉重试。基于 [pi](https://github.com/badlogic/pi-mono) agent 内核，内置 18 个扩展，支持接入各类模型服务。
+太极是一个 AI Agent 桌面工作台（macOS / Windows / Linux）。它把多个 AI 会话放进同一个窗口，你可以同时推进多个任务，实时看到 AI 的思考、文件编辑和命令执行过程，随时分叉重试。基于 [pi](https://github.com/badlogic/pi-mono) agent 内核，内置 22 个扩展，支持接入各类模型服务。
 
 <p align="center">
   <img src="docs/assets/screenshot/screenshot.png" alt="太极 TaiJi 主界面：侧栏多会话管理与 Agent 对话流，思考、工具调用、文件编辑实时可见" width="900" />
@@ -20,7 +20,7 @@
 
 ## 快速开始
 
-当前最新版本：**v0.10.1**（[查看全部版本](https://github.com/zhushanwen321/tai-ji/releases)）。安装后 app 内会自动检测新版本，提示一键升级。
+当前最新版本：**v0.10.4**（[查看全部版本](https://github.com/zhushanwen321/tai-ji/releases)）。安装后 app 内会自动检测新版本，提示一键升级。
 
 <!-- INSTALL:BEGIN -->
 <!-- 本区块内的版本号由 .agents/skills/merge/scripts/update-readme-install.mjs 在每次正式发布后自动替换；区块外的版本号不会被打扰。 -->
@@ -96,8 +96,8 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 ### 🛠️ 工作台集成
 侧栏文件树（大目录流畅 + git 标记）、抽屉终端（每会话独立现场）、Git/worktree 管理、内置浏览器面板。
 
-### 🧩 21 个内置扩展
-Agent 能力通过 pi 扩展机制实现，涵盖权限控制、定时任务、上下文压缩、结构化输出等。16 个可脱离 taiji 独立使用，详见[扩展开发指南](docs/extensions/development-guide.md)。
+### 🧩 22 个内置扩展
+Agent 能力通过 pi 扩展机制实现，涵盖权限控制、定时任务、上下文压缩、结构化输出等。17 个可脱离 taiji 独立使用，详见[扩展开发指南](docs/extensions/development-guide.md)。
 
 ---
 
@@ -138,9 +138,9 @@ Agent 能力通过 pi 扩展机制实现，涵盖权限控制、定时任务、�
 
 ## 扩展生态
 
-taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](extensions/)（21 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 18 个随应用打包内置。
+taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](extensions/)（22 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 17 个随应用打包内置。
 
-以下 16 个扩展可脱离 taiji 独立使用（全部经 npm 发布，也可 `--extension` 直接加载）：
+以下 17 个扩展可脱离 taiji 独立使用（全部经 npm 发布，也可 `--extension` 直接加载）：
 
 | 扩展 | 用途 |
 |------|------|
@@ -160,6 +160,7 @@ taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](e
 | [`pi-plan`](extensions/universal/plan/README.md) | 轻量 plan 模式 |
 | [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | 缓存前缀指纹采集 |
 | [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner + `cw_query` 工具 |
+| [`pi-provider-live-sync`](extensions/universal/provider-live-sync/README.md) | Provider 配置实时同步 |
 
 其余 5 个（`pi-agent-ext` / `pi-msg-id-mapper` / `pi-plugin-bridge` / `pi-system-prompt` / `pi-system-prompt-trace`）为 taiji 集成专用。扩展开发见 [docs/extensions/development-guide.md](docs/extensions/development-guide.md)。
 
@@ -167,7 +168,7 @@ taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](e
 
 ## 开发指南
 
-**前置条件**: Node.js >= 22.19（推荐 24，见 `.nvmrc`），pnpm >= 10
+**前置条件**: Node.js 24（见 `.nvmrc`），pnpm >= 10
 
 ```bash
 pnpm install          # 安装依赖
