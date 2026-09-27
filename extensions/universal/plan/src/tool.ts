@@ -28,6 +28,7 @@ import { activatePlanMode, resolveSkills } from "./enter.js";
 import { t } from "./i18n.js";
 import { formatReviewComments } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
+import { MAX_SKILL_OPTIONS } from "./prompts.js";
 import type { PendingSelect, PlanCtx, PlanState, PlanTerminalState } from "./state.js";
 import {
   applyPlanEvent,
@@ -936,11 +937,9 @@ interface ExecOption {
   skillEntryPath?: string;
 }
 
-/** skill 选项上限（用户裁决：第一/第二两个 skill 排位；检测再多不进选项） */
-const MAX_SKILL_OPTIONS = 2;
-
-/** Build execution options: up to 2 detected plan-exec skills + execute + not-now. */
-function buildExecOptions(execSkills: ExecSkill[]): ExecOption[] {
+/** Build execution options: up to MAX_SKILL_OPTIONS detected plan-exec skills + execute + not-now.
+ *  （上限常量 SSOT 在 prompts.ts——PHASE_D 散文与这里同源；导出供对齐测试消费。） */
+export function buildExecOptions(execSkills: ExecSkill[]): ExecOption[] {
   const options: ExecOption[] = execSkills.slice(0, MAX_SKILL_OPTIONS).map((skill) => ({
     label: t("exec.viaSkill", { name: skill.name }),
     mode: `skill:${skill.name}`,

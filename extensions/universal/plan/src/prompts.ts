@@ -46,14 +46,24 @@ const PHASE_B_SECTION =
   `4. **Propose 2-3 approaches** with trade-offs + recommendation.\n` +
   `5. **Assumption audit**: Grep-verify interfaces/types exist. Mark [UNVERIFIED] what can't be verified.`;
 
+/**
+ * 执行方式选项集的技能档上限（SSOT）：PHASE_D 散文（本文件）与 buildExecOptions
+ * （tool.ts）共同消费——散文数量与实际截断同源，对齐测试锁定。
+ */
+export const MAX_SKILL_OPTIONS = 2;
+
 // Phase D 第 3 点的选项集描述必须与 buildExecOptions（tool.ts）产出的实际选项一致
-// （有 plan-exec 技能时 = ≤2 个技能档 + Execute + Not now，label 与 i18n exec.* 词典同源；
-// 无技能时不弹表单直通 execute，D7②）——描述漂移会诱导模型向用户预告不存在的执行方式。
+// （有 plan-exec 技能时 = ≤MAX_SKILL_OPTIONS 个技能档 + Execute + Not now，label 与
+// i18n exec.* 词典同源；无技能时不弹表单直通 execute，D7②）——描述漂移会诱导模型
+// 向用户预告不存在的执行方式。对齐测试（exec-options-alignment.test.ts）锁定散文锚点。
 const PHASE_D_SECTION =
   `## Phase D: Completion\n` +
   `1. Ask user to review the complete plan.\n` +
   `2. Call plan tool (complete).\n` +
-  `3. After plan complete: when plan-exec skills are detected, the user picks an execution method in the completion dialog — up to 2 detected plan-exec skills (Execute via skill: <name>), Execute (goal tracking integrated when available), or Not now (stay in plan mode). When NO plan-exec skill is detected, no dialog appears and the plan executes directly.`;
+  `3. After plan complete: when plan-exec skills are detected, the user picks an execution method in the completion dialog — up to ${MAX_SKILL_OPTIONS} detected plan-exec skills (Execute via skill: <name>), Execute (goal tracking integrated when available), or Not now (stay in plan mode). When NO plan-exec skill is detected, no dialog appears and the plan executes directly.`;
+
+/** 对齐测试消费（exec-options-alignment.test.ts）——PHASE_D 散文的机器防线锚点。 */
+export const PHASE_D_PROSE = PHASE_D_SECTION;
 
 /**
  * Phase C.5 自审清单（D9②）：submit-review 前的自审引导——产物纪律段之后恒注入（全流程，
