@@ -62,7 +62,7 @@ const CLI_PATH = process.env.ZCODE_ENG_CLI_PATH;
 const V2_PATH = process.env.ZCODE_ENG_V2_CONFIG || path.join(os.homedir(), '.zcode', 'v2', 'config.json');
 const CONFIG_PATH = path.join(os.homedir(), '.zcode', 'cli', 'config.json');
 // 与 constants.ts ZCODE_FALLBACK_DEFAULT_MODEL 双源（内嵌字符串无法 import）——改那边须同步此处
-const FALLBACK_MODEL_MAIN = 'builtin:bigmodel-coding-plan/GLM-5.3';
+const FALLBACK_MODEL_MAIN = 'builtin:bigmodel-coding-plan/GLM-5.3-Flash';
 
 // 合并形态：真实 cli config 原样（model/plugins/mcp/subagents 等 worker 继承面不变）
 // + v2 的 provider 字典注入，同 id 时 v2 条目整条优先——GUI 直传 modelConfig 时

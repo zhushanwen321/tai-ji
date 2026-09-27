@@ -462,7 +462,7 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
     writeJson(v2Path, {
       provider: {
         [PROVIDER]: { options: { apiKey: "k", baseURL: "https://t.example" }, models: { m1: {} } },
-        "builtin:bigmodel-coding-plan": { options: { apiKey: "k" }, models: { "GLM-5.3": {} } },
+        "builtin:bigmodel-coding-plan": { options: { apiKey: "k" }, models: { "GLM-5.3-Flash": {} } },
       },
     });
     const { engine, workspace } = makeEngine();

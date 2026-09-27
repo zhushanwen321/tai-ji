@@ -50,7 +50,7 @@ export const ZCODE_V2_CONFIG_PATH_SUFFIX = [".zcode", "v2", "config.json"] as co
  * launcher 的 model.main 兜底是 zcode 缺席解析链的一环（defaultModelSelection 缺席
  * 时的进程级缺省），与 create 条件携带正交——依赖成立，常量随 D4 结论保留。
  */
-export const ZCODE_FALLBACK_DEFAULT_MODEL = "builtin:bigmodel-coding-plan/GLM-5.3";
+export const ZCODE_FALLBACK_DEFAULT_MODEL = "builtin:bigmodel-coding-plan/GLM-5.3-Flash";
 
 /** 杀链 grace 窗口：SIGTERM 后等这么久再 SIGKILL（zsub 同构 5s；实测 SIGTERM→exit 仅 103ms）。 */
 export const ZCODE_KILL_GRACE_MS = 5_000;

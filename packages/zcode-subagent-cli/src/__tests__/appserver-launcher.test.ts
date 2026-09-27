@@ -190,7 +190,7 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     const res = h.run();
     expect(res.status).toBe(0);
     const cfg = JSON.parse(h.state().syncUtf8.text as string);
-    expect(cfg.model.main).toBe("builtin:bigmodel-coding-plan/GLM-5.3");
+    expect(cfg.model.main).toBe("builtin:bigmodel-coding-plan/GLM-5.3-Flash");
   });
 
   it("v2.model.main 存在时优先于 FALLBACK", () => {

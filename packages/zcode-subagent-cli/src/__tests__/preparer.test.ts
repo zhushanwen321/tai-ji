@@ -26,7 +26,7 @@ const PROVIDER_B = "e512d53e-test-provider";
 function seedSources(): void {
   writeJson(v2Path, {
     provider: {
-      [PROVIDER_A]: { options: { apiKey: "key-a", baseURL: "https://a.example" }, models: { "GLM-5.3": {}, "GLM-5.2": {} } },
+      [PROVIDER_A]: { options: { apiKey: "key-a", baseURL: "https://a.example" }, models: { "GLM-5.3": {}, "GLM-5.3-Flash": {}, "GLM-5.2": {} } },
       [PROVIDER_B]: { name: "test-router", options: { apiKey: "key-b", baseURL: "https://b.example" }, models: { "mimo-v2.5-pro": {} } },
       "no-key-provider": { options: { baseURL: "https://x.example" }, models: { "M1": {} } },
     },
@@ -54,7 +54,7 @@ describe("resolveZcodeModelRef（v2 单源）", () => {
 
   it("未指定时落官方兜底（不受任何本机 CLI 配置影响）", () => {
     expect(resolveZcodeModelRef(undefined, { v2ConfigPath: v2Path })).toBe(
-      `${PROVIDER_A}/GLM-5.3`,
+      `${PROVIDER_A}/GLM-5.3-Flash`,
     );
   });
 
@@ -66,7 +66,7 @@ describe("resolveZcodeModelRef（v2 单源）", () => {
       expect(err).toBeInstanceOf(ZcodePrepareError);
       const e = err as ZcodePrepareError;
       expect(e.code).toBe("model_not_available");
-      expect(e.message).toContain("GLM-5.3, GLM-5.2");
+      expect(e.message).toContain("GLM-5.3, GLM-5.3-Flash, GLM-5.2");
     }
   });
 
