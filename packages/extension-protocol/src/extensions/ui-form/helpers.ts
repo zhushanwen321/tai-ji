@@ -32,6 +32,19 @@ export interface UiFormInteractOptions {
   signal?: AbortSignal
   /** 前端是否显示取消按钮（默认 true，沿已退役的 askUserInteract 的默认值先例） */
   allowCancel?: boolean
+  /**
+   * 源元数据：本次表单提交后是否有 turn 预期（respond 分型判据，form-submit-busy-convergence D1）。
+   *
+   * 三态语义（D2）：`true | undefined` = 有 turn 预期——提交型桥接 message_start 照旧
+   * （undefined 为缺省态：存量扩展与未声明者，桥接 = 现状，方向安全）；
+   * `false` = 无 turn 预期——命令 handler 内 select（提交后结构性无 turn），respond 侧
+   * 提交即收尾，消除 30s 假忙。消费方判定必须是 `=== false` 显式式：truthy 简化
+   * （`!expectTurn`）会把 undefined 也当无 turn、误清桥接（D2 被否谱系）。
+   *
+   * 缺省（undefined）经 stripUndefined 剥键——未声明者的 wire payload 逐字节不变，
+   * 旧 runtime 读不到即忽略（JSON.parse 容忍未知键）。
+   */
+  expectTurn?: boolean
   /** 失败留痕注入（echo 命中 / 形状错），日志策略归调用方 */
   log?: (msg: string, detail?: object) => void
 }
@@ -130,6 +143,9 @@ export async function uiFormInteract(
   const payload = JSON.stringify(stripUndefined({
     formQuestions: form,
     allowCancel: opts?.allowCancel ?? true,
+    // expectTurn 原样透传、不设 ?? true 缺省：undefined 由 stripUndefined 剥键保持
+    // 存量 wire 逐字节不变，三态归 respond 分型按 === false 显式判定（D1/D2）
+    expectTurn: opts?.expectTurn,
   }))
   const rpcResult = await callMarkerRpc(
     ctx,

@@ -101,6 +101,8 @@ export function createMockSessionServiceInstance(options: SessionServiceMockOpti
     // D6a：server.setServices 装配时注册挂起 UI 请求汇聚清理（onSessionDestroyed 回调），
     // mock 缺此方法会在 setServices 内抛 TypeError。
     setOnSessionDestroyed: vi.fn(),
+    // MF-1-7：abortPlan 编排下沉的失效回调注册槽（setServices 同点注册，同上缺法即 TypeError）。
+    setOnPlanAborted: vi.fn(),
   }
 
   return { instance, sendMessageMock }
@@ -137,6 +139,8 @@ export function createMockSessionServiceClass(options: SessionServiceMockOptions
     // D6a：server.setServices 装配时注册挂起 UI 请求汇聚清理（onSessionDestroyed 回调），
     // mock 缺此方法会在 setServices 内抛 TypeError。
     setOnSessionDestroyed = vi.fn()
+    // MF-1-7：abortPlan 编排下沉的失效回调注册槽（setServices 同点注册，同上缺法即 TypeError）。
+    setOnPlanAborted = vi.fn()
   }
 }
 

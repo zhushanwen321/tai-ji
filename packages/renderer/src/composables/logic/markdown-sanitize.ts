@@ -181,9 +181,16 @@ export function isRelativeResourcePath(value: string): boolean {
 
 /**
  * POSIX resolve（Node path.resolve 语义的纯函数实现，D4）：base 恒为绝对目录（resourceBaseDir
- * 契约），rel 相对。../ 穿越按 POSIX 语义出 base（真收口在下游 runtime 守门——git.getDiff
- * 的 path_not_allowed / stat 的 not_found，见设计错误规格表）。renderer 运行时无 node:path
- * （vite browser build），全仓运行时源码零 node:path 先例，故自实现等价语义。
+ * 契约），rel 相对。../ 穿越按 POSIX 语义出 base，越界收口按消费通道分列：
+ * - img src（本函数在 renderer 的唯一消费方 = 上方 hook）：出 base 路径经 toLocalFileUrl
+ *   走 local-file:// 协议，由 Electron main 进程（apps/electron/main/main.ts 的
+ *   protocol.handle('local-file')）按 computeLocalFilePrefixes/isPathInAllowedPrefixes
+ *   前缀白名单拦截——越界 403；
+ * - 相对链接 href（④路 MarkdownRenderer.vue 镜像实现，不 import 本函数）：点击时由
+ *   runtime RPC 守门——git.getDiff 的 path_not_allowed / stat 的 not_found，
+ *   见设计错误规格表。
+ * renderer 运行时无 node:path（vite browser build），全仓运行时源码零 node:path 先例，
+ * 故自实现等价语义。
  */
 export function resolveResourcePath(base: string, rel: string): string {
   const joined = rel.startsWith('/') ? rel : `${base}/${rel}`

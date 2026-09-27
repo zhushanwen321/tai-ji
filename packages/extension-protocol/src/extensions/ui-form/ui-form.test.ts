@@ -123,6 +123,35 @@ describe('uiFormInteract：类型双路径（payload 构造 / answers 解析）'
     expect(opts.signal).toBe(signal)
   })
 
+  it('expectTurn: false 显式进 payload（无 turn 源声明，respond 侧提交即收尾）', async () => {
+    const { ctx, selectMock } = makeCtx(async () => JSON.stringify({}))
+
+    await uiFormInteract(ctx, [{ type: 'text', question: 'q' }], { expectTurn: false })
+
+    const payload = JSON.parse((selectMock.mock.calls[0] as [string, string[]])[1][0])
+    expect(payload.expectTurn).toBe(false)
+  })
+
+  it('expectTurn: true 显式进 payload（与 undefined 同语义：有 turn 预期，桥接照旧）', async () => {
+    const { ctx, selectMock } = makeCtx(async () => JSON.stringify({}))
+
+    await uiFormInteract(ctx, [{ type: 'text', question: 'q' }], { expectTurn: true })
+
+    const payload = JSON.parse((selectMock.mock.calls[0] as [string, string[]])[1][0])
+    expect(payload.expectTurn).toBe(true)
+  })
+
+  it('expectTurn 缺省 → 键剥除，存量 wire payload 逐字节不变（三态归 undefined=桥接）', async () => {
+    const questions: FormQuestion[] = [{ type: 'text', question: 'q' }]
+    const { ctx, selectMock } = makeCtx(async () => JSON.stringify({}))
+
+    await uiFormInteract(ctx, questions)
+
+    // 逐字节断言：未声明 expectTurn 的调用方 payload 与加员前完全一致（stripUndefined 剥键）
+    const options = (selectMock.mock.calls[0] as [string, string[]])[1]
+    expect(options[0]).toBe(JSON.stringify({ formQuestions: questions, allowCancel: true }))
+  })
+
   it('空 questions → {ok:true, answers:{}}，不触达通道（与 askUserInteract 先例一致）', async () => {
     const { ctx, selectMock } = makeCtx()
 

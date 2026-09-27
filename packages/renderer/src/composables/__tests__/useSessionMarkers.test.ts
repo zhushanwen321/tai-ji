@@ -242,4 +242,58 @@ describe('useSessionMarkers', () => {
     })
     warnSpy.mockRestore()
   })
+
+  // ── 形状守卫（合法 JSON 但结构漂移不进 cache）──
+
+  it('[形状守卫] 顶层非对象 JSON（数组等形状漂移）与解析失败同走 corrupt 通道', () => {
+    const arrayRaw = '[{"s1":{"unread":true}}]'
+    localStorage.setItem(STORAGE_KEY, arrayRaw)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    markUnread('s2') // hydrate → 顶层形状守卫失败 → corrupt → 拒写
+    expect(warnSpy).toHaveBeenCalled()
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(arrayRaw) // 原值保留不覆写
+    expect(isUnread('s1')).toBe(false) // 错误形状未进 cache
+
+    // 与解析失败同一恢复路径：合法值经 storage 事件写入后解除保护
+    const fixed = JSON.stringify({ s1: { unread: true } })
+    localStorage.setItem(STORAGE_KEY, fixed)
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: fixed }))
+    markUnread('s2')
+    expect(isUnread('s2')).toBe(true)
+    warnSpy.mockRestore()
+  })
+
+  it('[形状守卫] 条目形状漂移被丢弃并 warn-once，合法条目与合法字段照常加载', () => {
+    const raw = JSON.stringify({
+      s1: { unread: true }, // 合法
+      s2: 'junk', // 非对象 → 丢弃
+      s3: { unread: 'yes' }, // 字段漂移且无合法字段 → 丢弃
+      s4: { unread: 'yes', markedDone: true }, // 部分漂移 → 剔除漂移字段，保留 markedDone
+    })
+    localStorage.setItem(STORAGE_KEY, raw)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    expect(isUnread('s1')).toBe(true)
+    expect(isUnread('s2')).toBe(false)
+    expect(isUnread('s3')).toBe(false)
+    expect(isMarkedDone('s3')).toBe(false)
+    expect(isUnread('s4')).toBe(false)
+    expect(isMarkedDone('s4')).toBe(true)
+    expect(warnSpy).toHaveBeenCalledTimes(1) // 丢弃只提示一次，不刷屏
+
+    // 丢弃不置 corrupt：写盘正常，坏条目随下次写盘被清理
+    markUnread('s5')
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).toEqual({
+      s1: { unread: true },
+      s4: { markedDone: true },
+      s5: { unread: true },
+    })
+
+    // warn 去重跨读取生效：再次读入含坏条目的值不重复提示
+    localStorage.setItem(STORAGE_KEY, raw)
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: raw }))
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    warnSpy.mockRestore()
+  })
 })

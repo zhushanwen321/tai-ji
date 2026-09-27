@@ -27,11 +27,11 @@
 
 假设读者了解 pi extension 基本形态（factory 函数 `export default (pi: ExtensionAPI) => void`），但不懂 plan/goal 内部。三个关键角色：
 
-- **plan 扩展**（`extensions/universal/plan/`，universal 组 = 独立通用包）：提供 `plan` 工具，AI 在计划模式下起草 plan 文件后调 `action=complete` 结束计划期。complete 时弹出执行方式对话框（`resolveCompleteChoice` 三路分流：headless 默认 develop / taiji rpc 走统一表单协议 / 原生 plain select），选项由 `buildExecOptions` 构造（动态参数：检测到的 exec skills + goal 能力）——其中 goal 档「Goal-driven execution (/goal)」按 `detectGoalCapability()` 探测结果决定是否出现。
+- **plan 扩展**（`extensions/universal/plan/`，universal 组 = 独立通用包）：提供 `plan` 工具，AI 在计划模式下起草 plan 文件后调 `action=complete` 结束计划期。complete 时弹出执行方式对话框（`resolveCompleteChoice` 三路分流：headless 默认 execute / taiji rpc 走统一表单协议 / 原生 plain select），选项由 `buildExecOptions` 构造（动态参数：检测到的 exec skills，root 序前 2 个）+ 固定 Execute / 暂不执行档——goal 跟踪整合在 Execute 档内（`tryGoalInit` 读 slot：可用即建跟踪，不可用降级直接执行，无独立 goal 档）。
 - **goal 扩展**（`extensions/universal/goal/`）：目标驱动执行——`/goal` 命令族 + `goal_control` 工具 + widget 投影 + token 预算。goal 创建有两条入口：用户命令（`/goal <objective>`）与编程式接口 `__goalInit`（service.ts `createGoal` 唯一创建入口，FR-3.1）。**goal 桥**指后者被 plan 消费的通道——这是两包唯一的跨包运行时接触面（类型经 `import type { GoalInitFn } from "@zhushanwen/pi-goal"` 擦除，运行时零依赖，compact.ts:6）。
 - **pi 扩展加载器**（实装 `dist/core/extensions/loader.js`）：对每个 `--extension` 路径走 `loadExtensionsInternal`（:499-509 循环）→ `initializeExtension`（:459-472）：先建全新登记表 `createExtension()`（:441-458），再建全新 API 对象 `createExtensionAPI(extension, runtime, cwd, eventBus)`（:209），然后 `factory(load.api)`。官方注释自述设计意图（:204-208）：*"Create the ExtensionAPI for an extension. Registration methods write to the extension object. Action methods delegate to the shared runtime."*——**pi 的共享面是 runtime 与 eventBus（循环外创建一次、逐个传入），API 对象本身从不共享**。
 
-桥的消费时序（设计 06 §6.2 D2 已定，本设计不动）：plan complete 的 goal 档被选中 → compact 档在 `session_before_compact` 的 `onComplete` 回调内调 `tryGoalInit`（goal 状态 entry 须在压缩后世界里创建）→ 成功发 goal steer、失败按五值 reason 发降级 steer + warning notify。
+桥的消费时序（设计 06 §6.2 D2 已定，本设计不动）：plan complete 选 Execute 档（goal 跟踪整合）→ compact 档在 `session_before_compact` 的 `onComplete` 回调内调 `tryGoalInit`（goal 状态 entry 须在压缩后世界里创建）→ 成功发 goal steer、失败按五值 reason 发降级 steer + warning notify。
 
 ### 目标（从使用者体验倒推）
 
@@ -56,7 +56,7 @@
 
 ### 2.1 现状的真实样子
 
-**用户看到的**（2026-09-14 真机实测，probe-06 driver 全链路；当时选项集）：plan complete 对话框恒为 4 选项——`["Subagent-driven execution", "Single-agent (current session)", "Modify the plan first", "Save for later"]`，goal 档「Goal-driven execution (/goal)」恒缺失；goal 扩展本体加载成功（同会话 `/goal status` 响应正常）。现行选项集为 v2（统一表单协议 + Develop 收口，见 §3.1 场景 A）。
+**用户看到的**（2026-09-14 真机实测，probe-06 driver 全链路；当时选项集）：plan complete 对话框恒为 4 选项——`["Subagent-driven execution", "Single-agent (current session)", "Modify the plan first", "Save for later"]`，goal 档「Goal-driven execution (/goal)」恒缺失；goal 扩展本体加载成功（同会话 `/goal status` 响应正常）。现行选项集见 §3.1 场景 A（plan-exec skill 档 + Execute 档（goal 整合）+ 暂不执行，2026-09-21 重排）。
 
 **代码里的**（两侧取自实装，行号为 2026-09-14 HEAD）：
 
@@ -117,7 +117,7 @@ plan 使用时（buildExecOptions / tryGoalInit）──读──▶ 同一 slot
 
 ### 3.1 终态（使用者视角先行）
 
-**场景 A：成功路径**（回溯 G1/G2）。独立 pi 用户安装 goal+plan，AI 起草含 `## Implementation Steps` 编号步骤的 plan 文件后调 `plan(action=complete, isolation=compact)`。执行方式选择现为统一表单单 choice 问题（FormOverlay 单视图，taiji rpc 宿主）/ pi 原生 select（独立 pi TUI），选项集 v2 = 内置「Develop (auto-parallel)」（subagent / single-agent 收口，按任务复杂度内部切换）+ 检测到的 plan-exec skill 项（`Execute via skill: <name>`，每检测到一个一项）+ goal 档「Goal-driven execution (/goal)」（`detectGoalCapability` 有能力时出现）+ 尾部两项 `["Modify the plan first", "Save for later"]`（留在 plan mode）。用户选 goal 档 → compaction 完成 → AI 收到 goal steer（`Execute via /goal: Execute plan: <path>`）并开始执行 → `/goal status` 显示 active goal（objective/slug/预算/成功判据来自 plan 文件派生）→ goal widget 投影出现 → goal 状态 entry 在压缩后世界存活（`session_before_compact` 的 onComplete 时序，06 已定）。
+**场景 A：成功路径**（回溯 G1/G2）。独立 pi 用户安装 goal+plan，AI 起草含 `## Implementation Steps` 编号步骤的 plan 文件后调 `plan(action=complete, isolation=compact)`。执行方式选择现为统一表单单 choice 问题（FormOverlay 单视图，taiji rpc 宿主）/ pi 原生 select（独立 pi TUI），现行选项集 = 检测到的 plan-exec skill 项（`Execute via skill: <name>`，四根扫描 root 序前 2 个）+ Execute 档（goal 跟踪整合：`tryGoalInit` 读 slot，桥可达即建跟踪）+ 暂不执行（Not now，留在 plan mode）。用户选 Execute 档 → compaction 完成 → onComplete 内 `tryGoalInit` 经 slot 建立 goal → AI 收到 goal steer 并开始执行 → `/goal status` 显示 active goal（objective/slug/预算/成功判据来自 plan 文件派生）→ goal widget 投影出现 → goal 状态 entry 在压缩后世界存活（`session_before_compact` 的 onComplete 时序，06 已定）。
 
 **场景 B：失败路径**（回溯 G3/G4）。五值出口全部带恢复指引（GOAL_FAILURE_RECOVERY，compact.ts:156-162，本设计零变更），每个失败经降级 steer（AI 可见）+ warning notify（用户可见）报告：
 

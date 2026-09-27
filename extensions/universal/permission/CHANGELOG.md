@@ -1,5 +1,11 @@
 # @zhushanwen/pi-permission
 
+## 1.4.7
+
+### Patch Changes
+
+- 8285841af: chore: refresh dependency range (triggered by @zhushanwen/pi-llm-shared@0.8.1 → @zhushanwen/pi-llm-shared@0.9.0)
+
 ## 1.4.6
 
 ### Patch Changes

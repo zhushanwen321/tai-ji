@@ -225,6 +225,20 @@ describe("submit-review 宿主分流（TAIJI_AGENT_EXT_LOG）", () => {
     // select settled 后 controller 即弃（注册表不留已 settled 的条目）
     expect(controllers.has("test-session")).toBe(false);
   });
+
+  it("env 泄漏的非 rpc 形态（signal=1 但 mode='tui'）：回落文本软门，不挂 marker select（与 resolveCompleteChoice 分流对齐）", async () => {
+    // 独立 pi TUI 继承了 TAIJI_AGENT_EXT_LOG=1（env 泄漏）时，宿主没有 marker 路由——
+    // 只判 env 会挂 \x00 marker select，pi TUI 渲染成乱码对话；分流条件必须同查 ctx.mode
+    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
+    const { exec, ctx } = setupActive();
+    (ctx as { mode?: string }).mode = "tui";
+
+    const res = await exec({ action: "submit-review" });
+
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1 });
+    expect(res.content[0].text).toContain("directly in the conversation");
+  });
 });
 
 describe("turn abort 级联（execute signal → 挂起 select 解散，MF-1-8）", () => {

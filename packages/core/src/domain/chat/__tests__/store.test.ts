@@ -20,6 +20,7 @@ import type { ChatStoreInstance } from '../store'
 import { textToSegments, segmentsToText } from '@taiji/shared'
 import type { Message, Segment, ServerMessage } from '@taiji/shared'
 import { replayEntries } from '../apply-entry'
+import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
 import { msg } from './helpers/fixtures'
 
 /** 构造独立 store 实例（effectScope 包裹 onScopeDispose 注册 + 测试隔离）。返回 store + dispose。 */
@@ -861,6 +862,68 @@ describe('createChatStore factory', () => {
       sut.store.finalizeSession(sid, 'error')
       // bash 消息不被 finalizeSession 改 status
       expect(sut.store.getMessages(sid)[0].status).toBe('streaming')
+    })
+  })
+
+  describe('finalizeSession 收口 warn 的 dev 门（D5：仅 timeout 去门）', () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>
+
+    beforeEach(() => {
+      // 钉死非 dev 起点（isDevMode 默认 false；防御同 worker 前序用例泄漏 true）
+      __resetDevModeForTesting()
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+    afterEach(() => {
+      warnSpy.mockRestore()
+      __resetDevModeForTesting()
+    })
+
+    /** 只取 finalizeSession 收口 warn 行（steer/send 等路径另有 warn，滤除） */
+    function finalizeWarnLines(): string[] {
+      const allLines: string[] = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]))
+      return allLines.filter((s) => s.includes('finalizeSession'))
+    }
+
+    it('非 dev（isDevMode=false）→ reason=timeout → console.warn 发出（含 sid/reason，「非 dev 构建可见」构造性证据）', () => {
+      sut.store.finalizeSession('s-t', 'timeout')
+      const line = finalizeWarnLines().find((s) => s.includes('sid=s-t') && s.includes('reason=timeout'))
+      expect(line).toBeDefined()
+    })
+
+    it('非 dev → 30s pendingSend timer 唯一来源路径同发 timeout warn（timer 到期 → finalizeSession timeout）', () => {
+      const sid = 's-timer'
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' }))
+      sut.store.addPendingSend(sid)
+      vi.advanceTimersByTime(30_000)
+      const line = finalizeWarnLines().find((s) => s.includes(`sid=${sid}`) && s.includes('reason=timeout'))
+      expect(line).toBeDefined()
+      expect(sut.store.isActive(sid)).toBe(false) // 兜底收口照旧（D3 timer 语义零改动）
+    })
+
+    it('非 dev → 其余异常 reason（error/disconnect）零 warn（其余 reason dev 门保留）', () => {
+      sut.store.finalizeSession('s-e', 'error')
+      sut.store.finalizeSession('s-d', 'disconnect')
+      expect(finalizeWarnLines()).toHaveLength(0)
+    })
+
+    it('非 dev → normal/aborted 零 warn（正常路径零噪音不变）', () => {
+      sut.store.finalizeSession('s-n', 'normal')
+      sut.store.finalizeSession('s-a', 'aborted')
+      expect(finalizeWarnLines()).toHaveLength(0)
+    })
+
+    it('dev → 其余异常 reason 照旧 warn、normal 不 warn（dev 门行为零变化）', () => {
+      provideDevMode(true)
+      sut.store.finalizeSession('s-e', 'error')
+      expect(finalizeWarnLines()).toHaveLength(1)
+      sut.store.finalizeSession('s-n', 'normal')
+      expect(finalizeWarnLines()).toHaveLength(1) // normal 仍被排除
+    })
+
+    it('dev → timeout 仍 warn（去门是放大而非移除信号）', () => {
+      provideDevMode(true)
+      sut.store.finalizeSession('s-t', 'timeout')
+      expect(finalizeWarnLines()).toHaveLength(1)
     })
   })
 

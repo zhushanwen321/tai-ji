@@ -313,6 +313,17 @@ describe("normalizeFixResult", () => {
     expect(normalizeFixResult({ fixes: [] })).toBeNull();
     expect(normalizeFixResult("not json")).toBeNull();
   });
+  it("disputed 申述数组透传；缺省归一为空数组（2026-09-23 disputed 通道）", () => {
+    const r = normalizeFixResult({
+      fixed_count: 1,
+      fixes: [{ issue_id: "MF-1", description: "d", self_check: "grep X → 0 hits", affected_files: ["a.ts"] }],
+      disputed: [{ issue_id: "MF-2", evidence: "src/a.ts:42 — aggregator missed the guard at line 42" }],
+    });
+    expect(r).not.toBeNull();
+    expect(r!.disputed.length).toBe(1);
+    expect(r!.disputed[0].issue_id).toBe("MF-2");
+    expect(normalizeFixResult({ fixed_count: 0, fixes: [] })!.disputed).toEqual([]);
+  });
 });
 
 describe("validateFixResult", () => {
@@ -387,6 +398,44 @@ describe("validateFixResult", () => {
       fixes: [],
       deferred: [{ issue_id: "S-2", severity: "minor", reason: "high cost" }],
     }, [], trackedIssues)).toEqual([]);
+  });
+  it("disputed 合法申述豁免 must-fix 记账（2026-09-23 disputed 通道取代一票否决）", () => {
+    // MF-1 被 fixer 申述（带实质反证）→ 不判漏修；MF-2 未处理仍判
+    const violations = validateFixResult({
+      fixed_count: 1,
+      fixes: [{ issue_id: "MF-2" }],
+      disputed: [{ issue_id: "MF-1", evidence: "src/a.ts:42 — aggregator missed the guard at line 42" }],
+    }, ["MF-1", "MF-2"]);
+    expect(violations).toEqual([]);
+  });
+  it("disputed 反证空洞 → disputed-no-evidence 违规（敷衍申述不可放行）", () => {
+    const violations = validateFixResult({
+      fixed_count: 0,
+      fixes: [],
+      disputed: [{ issue_id: "MF-1", evidence: "我觉得不是问题" }],
+    }, ["MF-1"]);
+    expect(violations).toEqual([{ issue_id: "MF-1", severity: "disputed-no-evidence" }]);
+  });
+  it("disputed 未命中追踪台账 → disputed-untracked 违规；无台账降级路径仅查反证", () => {
+    const trackedIssues = {
+      "MF-1": { firstSeen: 1, severity: "major", status: "open", history: [], fixAttempts: 0 },
+    };
+    // MF-9 申述未命中台账；MF-1 未修复也未申述 → 漏修违规并列出现
+    const violations = validateFixResult({
+      fixed_count: 0,
+      fixes: [],
+      disputed: [{ issue_id: "MF-9", evidence: "src/nonexistent.ts:1 — claim references a file that does not exist" }],
+    }, ["MF-1"], trackedIssues);
+    expect(violations).toEqual([
+      { issue_id: "MF-9", severity: "disputed-untracked" },
+      { issue_id: "mf-1", severity: "must-fix-not-fixed" },
+    ]);
+    // 无台账（mustFixIds null 降级路径）→ 跳过命中检查，反证合格即放行
+    expect(validateFixResult({
+      fixed_count: 0,
+      fixes: [],
+      disputed: [{ issue_id: "MF-9", evidence: "src/a.ts:7 — counter evidence with file and line" }],
+    })).toEqual([]);
   });
 });
 
@@ -2432,14 +2481,14 @@ describe("reconcileGroups（分组确定性校验：覆盖补漏 + 相交合并�
     { id: "MF-4", files: [] },
   ];
   it("合法分组直通（文件不相交、全覆盖）+ 重编 G1..Gn + files 以 issue 聚合为准", () => {
+    // MF-4 空 files：不再独立并行（空组防御归并进首个非空组 G1）
     const out = reconcileGroups(
       [{ issueIds: ["MF-1", "MF-2"], id: "Ga", note: "a-module" }, { issueIds: ["MF-3"] }, { issueIds: ["MF-4"] }],
       entries,
     );
     expect(out).toEqual([
-      { id: "G1", issueIds: ["MF-1", "MF-2"], files: ["src/a.ts", "src/b.ts"], note: "a-module" },
+      { id: "G1", issueIds: ["MF-1", "MF-2", "MF-4"], files: ["src/a.ts", "src/b.ts"], note: "a-module (empty files, conservatively merged)" },
       { id: "G2", issueIds: ["MF-3"], files: ["src/c.ts"], note: "" },
-      { id: "G3", issueIds: ["MF-4"], files: [], note: "" },
     ]);
   });
   it("覆盖性兜底：漏分的活跃问题独立成组（漏分 ≠ 漏修）", () => {
@@ -2449,7 +2498,8 @@ describe("reconcileGroups（分组确定性校验：覆盖补漏 + 相交合并�
     expect(out.some((g) => g.issueIds.includes("MF-2") && g.note.includes("漏分"))).toBe(true);
   });
   it("组间文件相交 → 传递闭包合并（并行 fixer 不编辑同一文件）", () => {
-    // MF-1(a)↔MF-2(a,b)↔MF-5(b,c)↔MF-3(c) 传递链全连通；MF-4 无文件孤立
+    // MF-1(a)↔MF-2(a,b)↔MF-5(b,c)↔MF-3(c) 传递链全连通；MF-4 无文件 → 相交合并后
+    // 再被空 files 防御归并吸收（并行安全性未知 → 最保守单组）
     const chain = [
       { id: "MF-1", files: ["src/a.ts"] },
       { id: "MF-2", files: ["src/a.ts", "src/b.ts"] },
@@ -2461,10 +2511,29 @@ describe("reconcileGroups（分组确定性校验：覆盖补漏 + 相交合并�
       [{ issueIds: ["MF-1"] }, { issueIds: ["MF-2"] }, { issueIds: ["MF-3"] }, { issueIds: ["MF-5"] }],
       chain,
     );
-    expect(out).toHaveLength(2);
-    expect(out[0].issueIds.sort()).toEqual(["MF-1", "MF-2", "MF-3", "MF-5"]);
+    expect(out).toHaveLength(1);
+    expect(out[0].issueIds.sort()).toEqual(["MF-1", "MF-2", "MF-3", "MF-4", "MF-5"]);
     expect(out[0].files.sort()).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
     expect(out[0].note).toContain("defensively merged");
+    expect(out[0].note).toContain("conservatively merged");
+  });
+  it("空 files 组防御归并：空组全部并入首个非空组（漏分兜底空组同罪）；全空 → 互并成单组", () => {
+    const es = [
+      { id: "MF-1", files: ["src/a.ts"] },
+      { id: "MF-4", files: [] },
+      { id: "MF-6" }, // 无 files 键（aggregator 漏给）与空数组同罪
+    ];
+    const out = reconcileGroups([{ issueIds: ["MF-1"] }, { issueIds: ["MF-4"] }, { issueIds: ["MF-6"] }], es);
+    expect(out).toHaveLength(1);
+    expect(out[0].issueIds.sort()).toEqual(["MF-1", "MF-4", "MF-6"]);
+    expect(out[0].files).toEqual(["src/a.ts"]);
+    expect(out[0].note).toContain("conservatively merged");
+    // 全部组都空 files（无任何非空组可吸）→ 互并成单组（单 fixer 串行，最保守）
+    const onlyEmpty = [{ id: "MF-4", files: [] }, { id: "MF-6" }];
+    const allEmpty = reconcileGroups([{ issueIds: ["MF-4"] }, { issueIds: ["MF-6"] }], onlyEmpty);
+    expect(allEmpty).toHaveLength(1);
+    expect(allEmpty[0].files).toEqual([]);
+    expect(allEmpty[0].note).toContain("conservatively merged");
   });
   it("rawGroups 缺失/空 → 单组全包（退化 = 旧单 fixer 行为；含互不相交条目也不拆）", () => {
     expect(reconcileGroups(undefined, entries)).toEqual([

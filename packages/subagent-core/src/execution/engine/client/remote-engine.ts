@@ -604,7 +604,7 @@ function buildRunRouteHandlers(ctx: RunContext): RunRoute {
 /**
  * [D9-2 调用面裁决登记（grep 锚：D9-2）] `EngineClient.killAll`（组杀引擎 CLI）
  * 全调用面逐处判定——本文件只承载①②的收窄后路径；③④及其余引擎级故障面保留
- * 组杀（豁免理由与判定一致，面本体在 engine-client.ts 既有注释）：
+ * 组杀（豁免判定以本表为权威）：
  *
  * | # | 调用面 | 位置 | 判定 |
  * |---|--------|------|------|

@@ -173,8 +173,9 @@ export function registerCompactContextTool(
 				// E1 实锤崩溃点（9/3 pi-crash log）：两个回调由 compact 的内部 Promise 链异步
 				// 调用，不在 pi runner emit() 的 try/catch 内——session 替换窗口（GUI 切
 				// session/新建/重载高频触发）下 pi.sendMessage 命中 stale ctx 同步抛错即
-				// 杀死 pi 进程（pi 0.84.4 实装：loader.js assertActive 在 runtime 调用前
-				// 同步 throw）。守卫 stale 静默降级（结果不投递，用户可重试 /compact），非
+				// 杀死 pi 进程（pi 0.84.4 实装：dist/core/extensions/loader.js 的 assertActive
+				// 214-219 wrapper → 142-146 staleMessage throw，在 runtime 调用前同步 throw）。
+				// 守卫 stale 静默降级（结果不投递，用户可重试 /compact），非
 				// stale 错误原样上抛（守卫不吞真实 bug）。
 				onComplete: (r: unknown) => {
 					guardStaleCtx(() => {

@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const mainSource = readFileSync(path.resolve(__dirname, '../main.ts'), 'utf-8')
 const utilSource = readFileSync(path.resolve(__dirname, '../utils/dev-data-dir.ts'), 'utf-8')
+const packagedUtilSource = readFileSync(path.resolve(__dirname, '../utils/packaged-data-dir.ts'), 'utf-8')
 
 describe('main.ts dev 数据目录接线（受控采信，R-13 修复守护）', () => {
   it('源码守护：isDev 块经 resolveDevDataDir 解析 TAIJI_AGENT_DATA_DIR', () => {
@@ -80,5 +81,40 @@ describe('main.ts dev 数据目录接线（受控采信，R-13 修复守护）',
 
   it('源码守护：树内包含判定用 sep 边界（非字符串前缀判，防 .taiji-devish 误放行）', () => {
     expect(utilSource).toMatch(/resolved === fallback \|\| resolved\.startsWith\(fallback \+ path\.sep\)/)
+  })
+})
+
+describe('main.ts 打包数据目录接线（缺省反转后 prod 唯一权威钉死点）', () => {
+  it('源码守护：isDev else 分支经 resolvePackagedDataDir 解析 TAIJI_AGENT_DATA_DIR', () => {
+    expect(mainSource).toMatch(
+      /process\.env\.TAIJI_AGENT_DATA_DIR = resolvePackagedDataDir\(process\.env, homedir\(\)\)/,
+    )
+  })
+
+  it('时序守护：打包分支赋值早于 getDataDir() 消费者与单实例锁（与 dev 分支同一消费者锚）', () => {
+    const assignIdx = mainSource.indexOf('process.env.TAIJI_AGENT_DATA_DIR = resolvePackagedDataDir')
+    const consumerAnchors = [
+      mainSource.indexOf('initMainLogger({'),
+      mainSource.indexOf('initCrashJournal()'),
+      mainSource.indexOf('app.requestSingleInstanceLock()'),
+    ]
+    expect(assignIdx).toBeGreaterThan(-1)
+    for (const anchor of consumerAnchors) {
+      expect(anchor).toBeGreaterThan(-1)
+      expect(assignIdx).toBeLessThan(anchor)
+    }
+  })
+
+  it('源码守护：打包分支自置位 TAIJI_AGENT_PACKAGED（getDataDir prod 值准入守卫的合法消费前提）', () => {
+    // C-proc-26 第二支柱：打包 main 持有 ~/.taiji 树值必须声明 prod 形态，
+    // 否则自身后续 getDataDir() 消费被准入守卫拦截。赋值语句在 main.ts 应唯一
+    //（process-control 侧是对象属性注入，非本形态）。
+    expect(mainSource).toMatch(/process\.env\.TAIJI_AGENT_PACKAGED = '1'/)
+  })
+
+  it('源码守护：打包侧树内包含判定用 sep 边界（与 dev 侧同形态，防 .taijiish 误放行）', () => {
+    expect(packagedUtilSource).toMatch(
+      /resolved === fallback \|\| resolved\.startsWith\(fallback \+ path\.sep\)/,
+    )
   })
 })

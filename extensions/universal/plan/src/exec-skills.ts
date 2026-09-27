@@ -30,7 +30,7 @@ const logger = getLogger("pi-plan");
  *   （`plan-exec: true`；pi 的 Skill 对象不保留原始 frontmatter）。skill 侧自愿
  *   opt-in，`disable-model-invocation` 与 plan-exec 并存不过滤（用户显式选择是
  *   另一通路，设计 D10 顺手裁决）。
- * - steer 执行走路径读取（read `<skillDir>` = skill 入口文件路径），不依赖 pi skill 注册。
+ * - steer 执行走路径读取（read `<skillEntryPath>` = skill 入口文件路径），不依赖 pi skill 注册。
  *
  * 已登记偏差（对照表⑦散 .md 形态）：与 pi auto 源（collectSkillEntries）方向相反——
  * agents 源根级散 .md 检测收而 pi 不收（多提议）、子目录散 .md pi 收而检测不收
@@ -267,8 +267,7 @@ export interface ExecSkill {
   name: string;
   description: string;
   /** skill 入口文件路径（标准形态 = SKILL.md 路径，散 .md 形态 = 文件本身；steer 指引 read 该路径，两种形态统一无分支） */
-  skillDir: string;
-  skillPath: string;
+  skillEntryPath: string;
 }
 
 export interface DetectExecSkillsOptions {
@@ -383,8 +382,7 @@ function scanSkillRoot(
       // 入口文件路径两种形态统一：标准形态 filePath 即 SKILL.md 路径、散 .md 形态即
       // 文件本身——接收端（steer 文案）直接 read 该值，不再拼 SKILL.md（散 .md 形态
       // 拼接会得到不存在的 `<skills根>/SKILL.md` 悬空指引）
-      skillDir: skill.filePath,
-      skillPath: skill.filePath,
+      skillEntryPath: skill.filePath,
     });
   }
   return found;

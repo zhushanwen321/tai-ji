@@ -36,7 +36,8 @@ import { connectPage, sampleDomShape } from '../../../scripts/render-sampling/li
 
 | 资产 | 覆盖环节 | 说明 | 最近验证 |
 |------|---------|------|---------|
-| `scripts/render-sampling/lib.mjs` | ①-⑥ 全部 + 窗口 resize | 共享函数库 + 关键选择器/信号常量 + `resizeViewport`/`restoreViewport` | 2026-09-21 plan-mode-ux 验收轮 2-3 真机复用（r2 踩出 r3 复用后沉淀） |
+| `scripts/render-sampling/lib.mjs` | ①-⑥ 全部 + 窗口 resize | 共享函数库 + 关键选择器/信号常量 + `resizeViewport`/`restoreViewport`；判定逻辑在 decisions.mjs | 2026-09-23 判定层抽取接单测（审查 MF-1-22） |
+| `scripts/render-sampling/decisions.mjs` | 判定层 | 发送按钮探测 / 渲染判稳 / CDP 边框余量算术 / CLI 参数解析；浏览器侧函数自包含（page.evaluate 序列化无闭包），单测 `scripts/__tests__/render-sampling-decisions.test.mjs`（CI scripts guards 轨） | 2026-09-23 建立（31 例全绿） |
 | `scripts/render-sampling/cli.mjs` | 端到端 | 冒烟入口（连接→注入→采样→落盘） | 2026-09-19 建立 |
 
 ## 已知坑

@@ -26,6 +26,7 @@ import {
   type PiPresetsFile,
   type PresetPromptConfig,
   type PresetPromptSegment,
+  type PresetUsageEntry,
 } from '@taiji/shared'
 import type { IConfigStore } from './ports/config.js'
 import type { IExtensionService } from '../interfaces.js'
@@ -284,8 +285,8 @@ export class PresetService {
    * 从磁盘读取并解析 pi-presets.json（容错，S-RT-2 抽出以便 loadPresetsFile 复用）。
    *
    * 主函数只留编排：读文件容错（readPresetsObject）→ presets 逐项 coerce →
-   * usage/defaultPresetId 透传兜底。损坏（JSON 畸形 / 顶层非对象）由 readPresetsObject
-   * 隔离保现场，本函数置 corruptedState（写侧据此拒绝空骨架覆写，M4/RT-7#2）。
+   * usage 逐条目 coerce / defaultPresetId 透传兜底。损坏（JSON 畸形 / 顶层非对象）由
+   * readPresetsObject 隔离保现场，本函数置 corruptedState（写侧据此拒绝空骨架覆写，M4/RT-7#2）。
    */
   private parsePresetsFileFromDisk(path: string): PiPresetsFile {
     if (!existsSync(path)) {
@@ -303,16 +304,14 @@ export class PresetService {
     const presets = coercePresetsArray(
       Array.isArray(obj['presets']) ? obj['presets'] as unknown[] : [],
     )
-    // 透传 usage（FR-14 的持久化字段，load 容错不做强类型守卫，
-    // 与 defaultPresetId 同策略：只校验顶层存在性，值合法性由消费方在使用时兜底）
-    const usage = coerceRecordField(obj['usage'])
+    // usage 逐条目 coerce（FR-14 持久化字段读路折叠，与 coercePresetsArray 同策略：
+    // 坏条目丢弃 + warn，不丢整个容器、不抛错；形状守卫后即类型化值，无裸断言）
+    const usage = coerceUsage(obj['usage'])
     const defaultPresetId = typeof obj['defaultPresetId'] === 'string' ? obj['defaultPresetId'] as string : undefined
     const file: PiPresetsFile = {
       presets,
       defaultPresetId,
-      // usage 用 as 保持 PiPresetsFile 兼容（值是 Record<string, PresetUsageEntry>，
-      // 已知字段类型不安全但与原实现一致——load 容错不抛错，消费方信任读到的形状）
-      usage: usage as PiPresetsFile['usage'],
+      usage,
       version: 1,
     }
     // [HISTORICAL] FR-15（per-cwd 默认预设）已随 state-truth-sync U9 全链删除，perCwdDefaults
@@ -749,15 +748,39 @@ function coercePresetsArray(presets: unknown[]): PiLaunchPreset[] {
   return validPresets
 }
 
+/** PresetUsageEntry 形状守卫（FR-14 契约面）：count / lastUsed 均须有限数值。 */
+function isPresetUsageEntry(value: unknown): value is PresetUsageEntry {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const entry = value as Record<string, unknown>
+  return typeof entry['count'] === 'number' && Number.isFinite(entry['count'])
+    && typeof entry['lastUsed'] === 'number' && Number.isFinite(entry['lastUsed'])
+}
+
 /**
- * coerce Record 形状的持久化字段（usage 用，FR-14）：
- * 普通对象原样透传，其余（缺失/数组/标量）返回 undefined。不做强类型守卫，
- * 值合法性由消费方在使用时兜底（与 defaultPresetId 同策略）。
+ * usage 逐条目 coerce（FR-14 持久化字段读路折叠，与 coercePresetsArray 同策略）：
+ * 形如 PresetUsageEntry 的条目原样透传；畸形条目丢弃 + warn（只记 presetId 键名，
+ * 不记条目值）；usage 顶层非对象形状（数组/标量）→ 丢弃整个字段为 undefined。
+ * load 容错不抛错语义不变，坏条目不再以伪造类型流入 renderer 契约面（preset.getUsage）。
  */
-function coerceRecordField(value: unknown): Record<string, unknown> | undefined {
-  return (typeof value === 'object' && value !== null && !Array.isArray(value))
-    ? value as Record<string, unknown>
-    : undefined
+function coerceUsage(raw: unknown): Record<string, PresetUsageEntry> | undefined {
+  if (raw === undefined) return undefined
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    logger.warn('[preset-service] usage 形状非法（非对象），已丢弃整个 usage 字段')
+    return undefined
+  }
+  const usage: Record<string, PresetUsageEntry> = {}
+  const invalidIds: string[] = []
+  for (const [presetId, entry] of Object.entries(raw)) {
+    if (isPresetUsageEntry(entry)) {
+      usage[presetId] = entry
+    } else {
+      invalidIds.push(presetId)
+    }
+  }
+  if (invalidIds.length > 0) {
+    logger.warn(`[preset-service] usage 条目畸形（count/lastUsed 须为有限数值），已丢弃条目：${invalidIds.join(', ')}`)
+  }
+  return usage
 }
 
 /** 合计超限丢段：优先丢 append 保留 replace（替换段语义更重且用户更难自恢复）。 */

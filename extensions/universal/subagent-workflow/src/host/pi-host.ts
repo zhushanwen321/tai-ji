@@ -298,8 +298,9 @@ function resolveStructuredOutputPeer(): string | undefined {
  * extension 值，布尔镜像面不再透传）。
  *
  * 有值 flag 表（跳过其他 flag 的值时不误吃）与 MF-7a 判定（`--extension` 后跟
- * `--` 开头 token 不吃值）逐字保留原语义——解析坑防回归见旧测试族
- * （spawn-args.test.ts 历史，git 可追溯）。
+ * `--` 开头 token 不吃值）逐字保留原语义——解析坑防回归见 pi-host.test.ts
+ * 解析用例（--skill 值跳过 / 真 flag 不吃值 / 单 - 路径是值）；
+ * spawn-args.test.ts 历史族已随镜像退役换代。
  */
 const ARGV_VALUED_FLAGS = new Set<string>([
   "--extension", "-e",

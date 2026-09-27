@@ -492,8 +492,8 @@ function reviewErrorResult(reason: ReviewErrorDetails["reason"], recovery: strin
  * - E6 双守卫：isActive=false → 错误不挂 select；docs 空 → 错误提示先 register-doc。
  * - 挂起前落 reviewState='awaiting'（崩溃恢复 E3 依赖此持久态）+ docs 快照指纹
  *   （重提交无变化检测基线，text/gui 两分支共用；快照缺失 = 无既往提交不警告）。
- * - 宿主分流：taiji（TAIJI_AGENT_EXT_LOG=1）发 PLAN_REVIEW_MARKER select；
- *   独立 pi 返回 E8 文本软门。
+ * - 宿主分流：taiji rpc 宿主（TAIJI_AGENT_EXT_LOG=1 且 mode==='rpc'）发
+ *   PLAN_REVIEW_MARKER select；其余形态（独立 pi / env 泄漏的非 rpc）返回 E8 文本软门。
  * - select 挂 signal（E10），resolve 后 E5 解析守卫，再按 decision 消费。
  */
 async function executeSubmitReview(
@@ -539,9 +539,11 @@ async function executeSubmitReview(
   state.lastSubmitReviewDocsFingerprint = fingerprint;
   persistPlanState(pi, state);
 
-  // E8 宿主分流：独立 pi 无 marker 路由，pi TUI 会把 \x00 title + JSON options
-  // 渲染成乱码对话——不发 select，审批退化为自然语言软门
-  if (!isTaijiHost()) {
+  // E8 宿主分流（与下方 resolveCompleteChoice 的 taiji 判定对齐 = isTaijiHost() &&
+  // ctx.mode === 'rpc'）：env 信号只证明 taiji runtime 在上游，mode 非 rpc（env 泄漏
+  // 到独立 pi TUI / json / print）时宿主没有 marker 路由，pi TUI 会把 \x00 title +
+  // JSON options 渲染成乱码对话——不发 select，审批退化为自然语言软门
+  if (!(isTaijiHost() && ctx.mode === "rpc")) {
     return {
       content: [{
         type: "text" as const,
@@ -621,7 +623,7 @@ async function executeSubmitReview(
       pi.sendMessage(
         {
           customType: PLAN_CONTEXT_CUSTOM_TYPE,
-          content: formatReviewComments("revise", response.comments),
+          content: formatReviewComments(response.comments),
           display: false,
         },
         { deliverAs: "steer", triggerTurn: true },
@@ -662,7 +664,7 @@ interface ExecOption {
   mode: string;
   description?: string;
   /** skill 档携带（skill 入口文件路径，标准形态 SKILL.md / 散 .md 形态文件本身；CompleteChoiceOutcome 数据通路 → steer 文案 read 该路径） */
-  skillDir?: string;
+  skillEntryPath?: string;
 }
 
 /** skill 选项上限（用户裁决：第一/第二两个 skill 排位；检测再多不进选项） */
@@ -674,7 +676,7 @@ function buildExecOptions(execSkills: ExecSkill[]): ExecOption[] {
     label: t("exec.viaSkill", { name: skill.name }),
     mode: `skill:${skill.name}`,
     description: skill.description ?? t("exec.viaSkillDesc", { name: skill.name }),
-    skillDir: skill.skillDir,
+    skillEntryPath: skill.skillEntryPath,
   }));
   options.push({
     label: t("exec.execute"),
@@ -698,7 +700,7 @@ const LATER_MODE = "later";
 /** Outcome of the complete-action execution-method prompt. */
 type CompleteChoiceOutcome =
   | { kind: "cancelled"; result: ActionResult }
-  | { kind: "mode"; chosenMode: string; skillDir?: string };
+  | { kind: "mode"; chosenMode: string; skillEntryPath?: string };
 
 /** complete-cancelled result（用户选暂不执行 / 通道取消，reason = 点选 label 或 cancelled） */
 function cancelledByUserResult(choice: string | undefined): ActionResult {
@@ -755,7 +757,7 @@ async function resolveCompleteChoice(
   }
 
   // complete 时现扫 plan-exec skill（无缓存，技能热装可见；检测自带降级规格，
-  // 最坏 = skill 选项空集，绝不炸本流程）。选项构造时一次解析，skillDir 随 outcome 流转
+  // 最坏 = skill 选项空集，绝不炸本流程）。选项构造时一次解析，skillEntryPath 随 outcome 流转
   const execSkills = detectExecSkills({ cwd: ctx.cwd, trusted: ctx.isProjectTrusted() });
   const execOptions = buildExecOptions(execSkills);
 
@@ -809,7 +811,7 @@ async function resolveCompleteChoice(
   if (option.mode === LATER_MODE) {
     return { kind: "cancelled", result: cancelledByUserResult(chosenLabel) };
   }
-  return { kind: "mode", chosenMode: option.mode, skillDir: option.skillDir };
+  return { kind: "mode", chosenMode: option.mode, skillEntryPath: option.skillEntryPath };
 }
 
 /**
@@ -860,7 +862,7 @@ async function executeComplete(
   restoreFullToolSet(pi);
 
   // Execute completion handler (compact setup + steer/goalInit delivery)
-  const goalOutcome = handlePlanComplete(pi, ctx, state, isolation, chosenMode, choice.skillDir);
+  const goalOutcome = handlePlanComplete(pi, ctx, state, isolation, chosenMode, choice.skillEntryPath);
 
   // Reset state and clear widget — same as abort
   const updatedState = resetPlanState(pi, sessions, sessionId, ctx);

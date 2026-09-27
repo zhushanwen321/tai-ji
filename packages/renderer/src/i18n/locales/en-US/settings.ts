@@ -526,7 +526,7 @@ export default {
   // ── Extension page (ExtensionPage) ──
   extension: {
     // RD-4#11: explicit note when getDataDir read fails (do not masquerade as the real path)
-    dataDirReadFailed: 'Failed to read the actual path; showing the default ~/.taiji',
+    dataDirReadFailed: 'Failed to read the data directory; user-level forced paths are not shown',
     recommendedTitle: 'Recommended',
     installed: 'Installed',
     install: 'Install',
@@ -719,7 +719,7 @@ export default {
   resource: {
     discovered: 'Discovered {label}',
     // RD-4#11: explicit note when getDataDir read fails (do not masquerade as the real path)
-    dataDirReadFailed: 'Failed to read the actual path; showing the default ~/.taiji',
+    dataDirReadFailed: 'Failed to read the data directory; user-level forced paths are not shown',
     refresh: 'Refresh',
     refreshing: 'Refreshing…',
     notFound: 'No {label} found',

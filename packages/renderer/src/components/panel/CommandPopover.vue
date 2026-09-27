@@ -3,8 +3,12 @@
     命令浮层（draft-composer-states §2d，四符号体系扩为四路共享容器：$ 文件 / # session /
     @ subagent / / 命令）。由 Composer 受控打开（v-model:open）。用 reka-ui Popover portal
     到 body，不受 composer-box 父容器 overflow/stacking context 限制（修复 D5 定位 bug）。
-    **anchor 是 slot 传入的 composer-box**：composer-box 内任何 focus 都算 inside，
-    不触发 onFocusOutside dismiss（修复 focus-outside 误关 bug）。
+    **anchor 是 slot 传入的 composer-box**：仅承担定位参考职责（side/align 对齐 +
+    宽度变量 --reka-popper-anchor-width 的锚源），不参与 focus-outside/pointerdown-outside
+    的 inside 判定——该判定只认 DismissableLayer 层链（isLayerExist 按
+    [data-dismissable-layer] closest 查 target 层 + DOM 序晚挂载层覆盖早层，anchor 无
+    此属性不在层链上）。焦点留在输入区打字不产生 focusin（焦点未转移），focusOutside
+    判定无从发生，浮层不因输入被 dismiss。
     键盘事件（↑↓ ⏎ Tab Esc）主入口 = 本组件经 command-popover-keyboard.ts 注册的 window
     capture 监听；Composer 在 ComposerInput keydown 时调 handleKeydown 为兜底路（见
     composer-keydown.ts），二者共用同一 handleKeydown——幂等守卫（e.defaultPrevented）在
@@ -26,8 +30,9 @@
     - 容器投影走 PopoverContent 默认 shadow-2（demo .cmd-pop box-shadow）
   -->
   <Popover v-model:open="controlledOpen">
-    <!-- anchor：composer-box 本身（由调用方通过 slot 传入），DOM contains 成立 →
-         composer-box 内任何 focus 都算 inside，不触发 onFocusOutside dismiss -->
+    <!-- anchor：composer-box 本身（由调用方通过 slot 传入），仅作定位/宽度锚源，
+         不参与 DismissableLayer inside 判定（见上方头注：isLayerExist 只认
+         [data-dismissable-layer] 层序） -->
     <PopoverAnchor as-child>
       <slot />
     </PopoverAnchor>
@@ -143,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, ref, toRef, watch } from 'vue'
+import { computed, inject, onMounted, ref, toRef, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, FolderOpen, LoaderCircle, SearchX } from '@lucide/vue'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
@@ -157,6 +162,7 @@ import { useCommandPopoverOpenFetch } from './command-popover-open-fetch'
 import { useCommandSync } from '@/composables/panel/useCommandSync'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
 import { useCommandPopoverKeyboard } from '@/composables/panel/command-popover-keyboard'
+import type { ShellInputInstance } from '@/composables/panel/composer-shell'
 import type { SkillInfo } from '@taiji/shared'
 import { useSessionStore } from '@/stores/session'
 import { useSubagentStore } from '@/stores/subagent'
@@ -189,26 +195,29 @@ const props = defineProps<{
  *   session cwd，landing 态 = flow.currentCwd——接线在 Composer）。skill 段两态共用 +
  *   panel slash 段 registry 源 skill 项。默认空。 */
   projectSkills?: SkillInfo[]
+  /** composer 输入区实例引用（Composer shellInputRef prop 一跳，通道缺口③）：D1 前置② activeElement 门识别源，缺省 fail-closed 不直发 */
+  shellInputRef?: Readonly<Ref<ShellInputInstance | null>>
 }>()
+
+/** select / select-and-send 共用 payload 字段面（五路归一；字段语义见 useCommandPopoverTrigger 的 CommandSelectPayload） */
+interface CommandSelectEmit {
+  type: CmdType
+  name: string
+  icon?: string
+  description?: string
+  /** slash 路 skill 项标记（D3）：onCmdSelect 按「项类型」而非入口 type 分流到 skill 通路 */
+  isSkill?: boolean
+  location?: string
+  sessionId?: string
+  label?: string
+  subagentId?: string
+  slug?: string
+}
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
-  select: [payload: {
-    type: CmdType
-    name: string
-    icon?: string
-    description?: string
-    /** slash 路 skill 项标记（D3）：onCmdSelect 按「项类型」而非入口 type 分流到 skill 通路 */
-    isSkill?: boolean
-    /** skill 路：SKILL.md 绝对路径（可得时带上）；缺省时 runtime 经 get_commands 权威映射解析 */
-    location?: string
-    /** session 路（#）：选中 session 的 id + 显示 label */
-    sessionId?: string
-    label?: string
-    /** subagent 路（@）：record id + 短标签；「新建」项两字段空串 */
-    subagentId?: string
-    slug?: string
-  }]
+  select: [payload: CommandSelectEmit]
+  'select-and-send': [payload: CommandSelectEmit & { originalEvent: KeyboardEvent }]
 }>()
 
 /** 受控 open：双向同步 props.open ↔ emit update:open */
@@ -387,11 +396,8 @@ function iconClass(item: { isSkill?: boolean }, isSelected: boolean): string {
   return item.isSkill ? 'text-reasoning' : 'text-neutral-dim'
 }
 
-function onSelect(item: CmdItem): void {
-  // 已选禁选守卫（多 skill 注入 D2）：命中 selectedSkillNames 的 skill 项不再派发 select
-  // （同一 skill 不重复注入全文）；键盘 Enter/Tab 与鼠标点击共用本函数，一处守卫双路生效
-  if (item.selected) return
-  emit('select', {
+function toSelectPayload(item: CmdItem): CommandSelectEmit {
+  return {
     type: props.type,
     name: item.name,
     icon: item.icon,
@@ -402,7 +408,18 @@ function onSelect(item: CmdItem): void {
     label: item.label,
     subagentId: item.subagentId,
     slug: item.slug,
-  })
+  }
+}
+
+function onSelect(item: CmdItem): void {
+  // 已选禁选守卫（多 skill 注入 D2）：命中 selectedSkillNames 的 skill 项不再派发 select
+  // （同一 skill 不重复注入全文）；键盘 Enter/Tab 与鼠标点击共用本函数，一处守卫双路生效
+  if (item.selected) return
+  emit('select', toSelectPayload(item))
+}
+
+function onSelectAndSend(item: CmdItem, e: KeyboardEvent): void {
+  emit('select-and-send', { ...toSelectPayload(item), originalEvent: e })
 }
 
 // ── 键盘路由（↑↓ ⏎ Tab Esc）+ activeIndex 收敛在 command-popover-keyboard.ts ──────────
@@ -412,6 +429,10 @@ const { activeIndex, handleKeydown } = useCommandPopoverKeyboard<CmdItem>({
   open: () => props.open,
   items: () => items.value,
   onSelect,
+  onSelectAndSend,
+  query: () => props.query ?? '',
+  type: () => props.type,
+  shellInputRef: () => props.shellInputRef,
   close: () => {
     controlledOpen.value = false
   },

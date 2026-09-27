@@ -512,6 +512,24 @@ describe('dispatchMessageEvent message.stream_warn（W2 liveOnly 标记）', () 
     expect(list[0].content).toBe('长时间无响应')
     expect(list[0].liveOnly).toBe(true)
   })
+
+  it('[MF-1-13] streaming 期到达 → 不 finalizeSession，assistant 保持 streaming，turn 可被后续 complete 正常收口', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'partial' }))
+
+    // 单帧翻译失败经 adapter 显形为 stream_warn（MF-1-13）：非终结——不得收口 session
+    dispatchMessageEvent(ctx, SID, msg('message.stream_warn', { content: '事件翻译失败，本帧已跳过：x' }))
+    expect(ctx.finalizeSession).not.toHaveBeenCalled()
+    expect(lastAssistant(ctx).status).toBe('streaming')
+    expect(lastAssistant(ctx).content).toBe('partial')
+
+    // pi 实际成功的 turn：后续 message.complete 正常走完（不被提前 seal 成 error 终态）
+    dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'stop', content: 'partial + done' }))
+    expect(lastAssistant(ctx).status).toBe('complete')
+    expect(lastAssistant(ctx).error).toBeUndefined()
+    expect(getMsgs(ctx).some((m) => m.status === 'error')).toBe(false)
+  })
 })
 
 describe('dispatchMessageEvent message.compactionSummary（W6 entry 化——消灭最后一条直插双路径）', () => {

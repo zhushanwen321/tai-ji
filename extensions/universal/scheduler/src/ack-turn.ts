@@ -1,22 +1,28 @@
 // ack 确认轮编排（dev-flow u-ack-turn 单元）。
 //
 // 背景：scheduler 命令路径建任务后，任务条目只 append 到 pi 的内存 fileEntries，
-// 而 pi 只有在会话「第一次落盘」后才把 fileEntries 写到磁盘 —— 若用户建完任务就
+// 而 pi 只有在会话「第一次落盘」后才把 fileEntries 写到磁盘（pi _persist 的
+// hasAssistant 门控，语义登记 docs/pi-semantics.json PS-14，锚 pi
+// dist/core/session-manager.js:726-756）—— 若用户建完任务就
 // 不再说话，任务会随进程退出丢失。解法：注入一次零 token 本地合成轮，产出真
 // assistant 消息，打开落盘开关（设计 scheduler-command-path-persistence §3.3）。
 //
 // 生命周期（覆写只活在极小时间片，故无需互斥）：
 //   ① 建任务成功 ⇒ maybeStartAck：只读检查未落盘 + 空闲 + 可用，注入 custom 触发器
-//      （triggerTurn）并武装 30s 写盘自检；
-//   ② 触发器的 message_start 到达（本轮首次模型请求之前，已按 pi-agent-core
-//      agent-loop 实装核实）⇒ 同步 registerProvider 覆写当前 provider 的 streamSimple；
+//      （triggerTurn）；写盘兜底判定收敛在 session 边界；
+//   ② 触发器的 message_start 到达（本轮首次模型请求之前——pi-agent-core
+//      agent-loop.js:51-53 初始 prompt 逐条 emit message_start/message_end 先于
+//      :56 runLoop → :122 streamAssistantResponse 首次模型请求，按 0.84.4 实装核实；
+//      直达链锚 PS-08）⇒ 同步 registerProvider 覆写当前 provider 的 streamSimple；
 //   ③ 我们的 streamSimple 被调用 ⇒ 返回 stream 之前同步注销覆写（one-shot 自撤），
 //      本轮内被 steer/followUp drain 出的后续请求与后续轮次全部走真实 provider；
 //   ④ turn_end / session 边界 ⇒ 安全网注销（幂等）。
 //
-// 状态住模块级单例 ackState：pi 每次 session 替换都重跑 extension factory（index.ts
-// 顶部 G1 注释），闭包级状态随重跑重置，上一代遗留的定时器/覆写窗口会失去清理者；
-// 模块级单例跨代共享，新实例才能取消上一代定时器（本机制的结构性前提）。
+// 状态住进程级单例槽（development-guide §7.5）：pi 每次 session 替换都重跑 extension
+// factory（index.ts 顶部 G1 注释），闭包级状态随重跑重置，上一代遗留的覆写窗口会失去
+// 清理者；ackState 持在 globalThis[Symbol.for] 槽内，跨 factory 重跑与 jiti 模块重求值
+// （reload/cwd 变化产生新模块环境）都取回同一对象，新实例才能注销上一代残留的覆写
+// 窗口（本机制的结构性前提）。
 
 import { existsSync } from 'node:fs'
 
@@ -33,24 +39,41 @@ import type {
   SchedulerCurrentModel,
 } from './types.js'
 
-/** 30s 写盘自检窗口（设计 §3.3 D7）：ack 轮从未启动且文件仍不存在才补发如实告警。 */
+/**
+ * ack 状态进程槽（development-guide §7.5：跨 session 存活的进程级单例必须用
+ * globalThis[Symbol.for] 持有——jiti 按模块路径字符串做缓存 key，双路径加载会把
+ * 模块级单例分裂成多份互不可见；Symbol.for 全局注册表 + 进程级唯一 globalThis
+ * 保证槽内对象跨所有 module instance 唯一）。
+ */
+const ACK_STATE_SLOT_KEY = Symbol.for('@zhushanwen/pi-scheduler.ack-state')
+
+/** 槽 get-or-create（整对象一槽；形态同 subagent-workflow getOrCreateWorkflowDomainState）。 */
+function getOrCreateAckState(): AckState {
+  let state = Reflect.get(globalThis, ACK_STATE_SLOT_KEY) as AckState | undefined
+  if (!state) {
+    state = {
+      window: null,
+      ackTurnStarted: false,
+      ackStreamCalled: false,
+      taskId: null,
+      taskName: '',
+      ackText: '',
+      model: undefined,
+      sessionFile: undefined,
+      availability: undefined,
+    }
+    Reflect.set(globalThis, ACK_STATE_SLOT_KEY, state)
+  }
+  return state
+}
 
 /**
- * ack 模块级单例状态。resetAckState() 之外禁止整体重新赋值（`const` 对象 + 字段赋值），
- * 保证跨代共享同一引用。availability 承载建任务期的可用性判定结果，供同会话重复创建复用
+ * ack 进程级单例状态（槽内对象，见 getOrCreateAckState 与 development-guide §7.5）。
+ * resetAckState() 之外禁止整体重新赋值（字段赋值重置），保证跨代共享同一引用。
+ * availability 承载建任务期的可用性判定结果，供同会话重复创建复用
  * （省重复读 models.json 与动态 import）。
  */
-export const ackState: AckState = {
-  window: null,
-  ackTurnStarted: false,
-  ackStreamCalled: false,
-  taskId: null,
-  taskName: '',
-  ackText: '',
-  model: undefined,
-  sessionFile: undefined,
-  availability: undefined,
-}
+export const ackState: AckState = getOrCreateAckState()
 
 /** 通知去重（模块级；resetAckState 全清——跨会话隔离）。 */
 const notifyDedup = createAckNotifyDedup()
@@ -73,6 +96,11 @@ export interface AckTurnDeps {
    */
   loadBuiltinProviderIds?: () => Promise<Set<string>>
   loadModelsJsonProviderIds?: () => Promise<Set<string>>
+  /**
+   * 已注册 provider 查询器（测试缝隙；生产不传则判据缺失——装配点必传，见
+   * ack-provider AckAvailabilityDeps 注释）。
+   */
+  isProviderRegistered?: (providerId: string) => boolean
 }
 
 /** ack 编排控制器（index.ts 在既有 pi.on handler 内委派，不新增事件类型）。 */
@@ -96,8 +124,8 @@ export interface AckTurnController {
 }
 
 /**
- * 全量清理模块级状态（session_start 与 session_shutdown 都调）：清 window /
- * ackTurnStarted / 记录上下文 / 可用性缓存与通知去重。幂等。
+ * 全量清理槽内状态（session_start 与 session_shutdown 都调）：对槽内对象逐字段重置
+ * window / ackTurnStarted / 记录上下文 / 可用性缓存，并清通知去重。幂等。
  */
 export function resetAckState(): void {
   ackState.window = null
@@ -112,7 +140,7 @@ export function resetAckState(): void {
   notifyDedup.clear()
 }
 
-/** 构造 ack 编排控制器（backend 装配点注入；状态仍是模块级单例）。 */
+/** 构造 ack 编排控制器（backend 装配点注入；状态为槽内进程级单例）。 */
 export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
   /** 通知去重键：同 session 同 task 只发一次（sessionFile 缺失时以字面量占位）。 */
   function dedupKey(): string {
@@ -166,6 +194,7 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
       isToggleDisabled: () => isToggleDisabled,
       loadBuiltinProviderIds: deps.loadBuiltinProviderIds,
       loadModelsJsonProviderIds: deps.loadModelsJsonProviderIds,
+      isProviderRegistered: deps.isProviderRegistered,
     })
     ackState.availability = { providerId, isToggleDisabled, value }
     return value
@@ -192,10 +221,10 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
       // ③ 非空闲（F2 修正：判据必须在记录上下文与可用性判定之前）：在跑的轮次必然产出
       //    assistant 消息 ⇒ 自然打开落盘开关 ⇒ 任务照样落盘。此时若先判可用性并通知，
       //    会在「忙 + 覆写不可用」组合下对**已落盘**的会话发"未写入"= 反向撒谎（D2/D8）。
-      //    故此处直接返回：不记录上下文、不通知、不武装定时器。
+      //    故此处直接返回：不记录上下文、不通知。
       if (!isIdle) return
 
-      // 记录本次触发上下文（message_start / 30s 自检 / 边界清理共享）。
+      // 记录本次触发上下文（message_start 与 session 边界写盘判定共享）。
       ackState.taskId = task.id
       ackState.taskName = task.name ?? task.id
       ackState.sessionFile = sessionFile
@@ -212,7 +241,7 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
         return
       }
 
-      // ④ 可用性预计算（不可用 ⇒ 同步如实通知，不开窗、不武装定时器）。
+      // ④ 可用性预计算（不可用 ⇒ 同步如实通知，不开窗）。
       const availability = await getAvailability(model.provider, isToggleDisabled)
       if (!availability.available) {
         // reason 只进日志（文案复用同一如实键，避免「文案分叉」）。
@@ -286,7 +315,6 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
         })
       }
       // 安全网（幂等）：正常路径已在 streamSimple 调用点自撤；这里覆盖「覆写未被调用」。
-      // 不取消 30s 定时器——它服务通知判定。
       selfUnregister()
     },
 
@@ -307,7 +335,7 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
       }
       // ② 覆写自撤（含 E6 重试一次）。
       selfUnregister()
-      // ③ 全量清理（含 30s 定时器与可用性缓存），供下一代复用同一单例。
+      // ③ 全量清理（覆写窗口引用、可用性缓存与通知去重），供下一代复用同一单例。
       resetAckState()
     },
   }
@@ -315,6 +343,11 @@ export function createAckTurnController(deps: AckTurnDeps): AckTurnController {
 
 /**
  * 落盘判据①：会话内已有 assistant 消息 ⇒ pi 已 flush，任务必然已落盘。
+ *
+ * 反向推论承重锚（语义登记 docs/pi-semantics.json PS-14）：pi _appendEntry 先 push 进
+ * fileEntries 再同步 _persist（dist/core/session-manager.js:757-762），assistant 在列时
+ * hasAssistant 命中即走同步 wx 全量补写分支（:741-752，0.84.4 无异步 flush）——getEntries
+ * 读到 assistant 的时刻磁盘必已含全部内存 entry，无异步窗口。
  *
  * entry 形状来自 replay 的 SchedulerEntryLike（无 role 字段声明），故用 `in` 收窄到
  * unknown 再比较——不引断言、不引 any。

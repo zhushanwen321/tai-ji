@@ -117,12 +117,17 @@ describe('RD-5#5 useBrowserZoom seq 守卫 + catch', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
   it('快速切 session：晚到的旧 sid 响应被丢弃（不写陈旧值）', async () => {
+    // C-proc-01：负时序断言走 fake timers——旧响应的释放由确定性时钟推进，不赌真实墙钟。
+    // 不用 vi.waitFor：它在 fake timers 下每轮轮询会 advanceTimersByTime(interval)，
+    // 会提前释放 20ms 旧响应 timer、破坏「新值先写、旧值后到」的时序。
+    vi.useFakeTimers()
     const sid = ref('sess-1')
-    // 旧 sid 的读取延迟 resolve，新 sid 立即 resolve
+    // 旧 sid 的读取由 20ms fake timer 延迟 resolve（确定性，零真实等待），新 sid 立即 resolve
     zoomMocks.browserGetZoom.mockImplementation((target: string) => (
       target === 'sess-1'
         ? new Promise<number>((resolve) => setTimeout(() => resolve(0.3), 20))
@@ -131,9 +136,11 @@ describe('RD-5#5 useBrowserZoom seq 守卫 + catch', () => {
     const { zoomFactor } = useBrowserZoom(sid)
 
     sid.value = 'sess-2'
-    await vi.waitFor(() => expect(zoomFactor.value).toBe(0.6))
-    // 等旧 sid 的迟到响应到达：不得覆盖新值
-    await new Promise((r) => setTimeout(r, 40))
+    // 排空微任务：新 sid 响应（立即 resolve）写入 0.6；20ms timer 未到期，旧响应尚未到达
+    await vi.advanceTimersByTimeAsync(0)
+    expect(zoomFactor.value).toBe(0.6)
+    // 推进 fake 时钟释放旧 sid 的迟到响应：不得覆盖新值
+    await vi.advanceTimersByTimeAsync(20)
     expect(zoomFactor.value).toBe(0.6)
   })
 

@@ -94,7 +94,8 @@ export const HOOK_ENTRY_TYPE = "structured-output:hook";
 /**
  * steer reminder 的 sendMessage customType（role:"custom" 消息，pi convertToLlm 对其
  * 无条件转 LLM user 消息——LLM 可见性与 user message 无差别；display:false 不渲染
- * 用户气泡，对话流归属语义结构性正确）。
+ * 用户气泡，对话流归属语义结构性正确。锚点登记 docs/pi-semantics.json PS-43：
+ * pi dist/core/messages.js:89-96 case "custom" 无条件 role:"user"）。
  */
 export const RETRY_REMINDER_CUSTOM_TYPE = "structured-output:retry-reminder";
 

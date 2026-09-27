@@ -1,5 +1,11 @@
 # @zhushanwen/pi-goal
 
+## 0.14.6
+
+### Patch Changes
+
+- 8285841af: Route resume/set prompts through the sendContextMessage port: injected steering prompts now go out as custom messages instead of user messages, so the conversation stream no longer fabricates user bubbles. LLM-visible content is unchanged.
+
 ## 0.14.5
 
 ### Patch Changes

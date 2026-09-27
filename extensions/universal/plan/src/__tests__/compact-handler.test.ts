@@ -137,7 +137,7 @@ describe("handlePlanComplete", () => {
       expect(steer).toContain("current session");
     });
 
-    it("skill mode (compact): onComplete steer carries the skill entry path (D10 skillDir 通路)", () => {
+    it("skill mode (compact): onComplete steer carries the skill entry path (D10 skillEntryPath 通路)", () => {
       const goalInit = attachGoalInit(() => true);
       const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
 
@@ -148,7 +148,7 @@ describe("handlePlanComplete", () => {
       const steer = lastSteer(pi);
       expect(steer).toContain("skill:dev-flow"); // Execution mode 行透传 execMode
       expect(steer).toContain("dev-flow"); // 指引按名加载
-      expect(steer).toContain("/tmp/fixtures/skills/dev-flow/SKILL.md"); // 路径读取指引（skillDir = 入口文件路径，直接透传）
+      expect(steer).toContain("/tmp/fixtures/skills/dev-flow/SKILL.md"); // 路径读取指引（skillEntryPath = 入口文件路径，直接透传）
     });
 
     it("onError (execute mode, init-refused): compact-failure notify + degraded steer + warning notify, no /goal promise", () => {
@@ -180,7 +180,7 @@ describe("handlePlanComplete", () => {
       expect(ctx.ui.notify).not.toHaveBeenCalled();
     });
 
-    it("skill mode (direct): returns undefined, steer with skill entry path (steer 文案含 skillDir，D10)", () => {
+    it("skill mode (direct): returns undefined, steer with skill entry path (steer 文案含 skillEntryPath，D10)", () => {
       attachGoalInit(() => true);
       const skillEntryPath = "/tmp/fixtures/skills/dev-flow/SKILL.md";
 
@@ -205,7 +205,7 @@ describe("handlePlanComplete", () => {
       expect(steer).not.toContain("/tmp/fixtures/skills/SKILL.md"); // 旧缺陷形态：散 .md 的 dirname + SKILL.md
     });
 
-    it("skill mode without skillDir falls back to name-only guidance (防御形态)", () => {
+    it("skill mode without skillEntryPath falls back to name-only guidance (防御形态)", () => {
       attachGoalInit(() => true);
 
       handlePlanComplete(pi as never, ctx as never, makeActiveState(), "direct", "skill:dev-flow");

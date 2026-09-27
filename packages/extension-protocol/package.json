@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/extension-protocol",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Cross-layer pi extension contract package: dual-mode (TUI/GUI) rendering helpers, session/background-task/pending-entries protocols, and shared behavior primitives",
   "type": "module",
   "main": "src/index.ts",

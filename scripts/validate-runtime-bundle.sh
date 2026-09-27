@@ -285,16 +285,23 @@ done
 
 # 启动 runtime，等待 ready，发送 health check，清理
 RUNTIME_PID=""
+# 数据目录隔离：验证 runtime 的全部写面（日志 / runtime.port / crash journal /
+# 单实例注册）必须落临时目录，禁止写任何真实数据目录（prod ~/.taiji 或 dev 树）。
+# 同时剥 TAIJI_AGENT_PACKAGED：宿主泄漏该标志会使验证 runtime 按打包态解析不存在
+# 的捆绑 pi 二进制、boot 即挂（spawn-env-contract 探针 P1 实锤）。
+VALIDATE_DATA_DIR="$(mktemp -d /tmp/taiji-bundle-validate.XXXXXX)"
 cleanup() {
     __check_principle
     if [ -n "$RUNTIME_PID" ] && kill -0 "$RUNTIME_PID" 2>/dev/null; then
         kill "$RUNTIME_PID" 2>/dev/null || true
         wait "$RUNTIME_PID" 2>/dev/null || true
     fi
+    rm -rf "$VALIDATE_DATA_DIR"
 }
 trap cleanup EXIT
 
-node "$BUNDLE_PATH" --port=$PORT > /tmp/runtime-validate.log 2>&1 &
+env -u TAIJI_AGENT_PACKAGED TAIJI_AGENT_DATA_DIR="$VALIDATE_DATA_DIR" \
+    node "$BUNDLE_PATH" --port=$PORT > /tmp/runtime-validate.log 2>&1 &
 RUNTIME_PID=$!
 
 # 等待 runtime ready（最多 15s）

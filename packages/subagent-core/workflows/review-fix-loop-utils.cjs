@@ -285,7 +285,8 @@ function buildFixPrompt({ header, groupDocPath, reportPath, fixPrompt, commitIns
 
 /**
  * fix 结果兼容解析（5.3）：旧格式 fixes string[] / 新格式 object[]（issue_id/description/
- * self_check/affected_files）+ deferred 缺省 []。畸形输入（fixed_count 缺失/非对象）返回 null。
+ * self_check/affected_files）+ deferred/disputed 缺省 []。畸形输入（fixed_count 缺失/非对象）
+ * 返回 null。disputed = fixer 误报申述（claim 非裁决，人类终态裁决）。
  */
 function normalizeFixResult(raw) {
   const parsed = parseResult(raw);
@@ -299,7 +300,10 @@ function normalizeFixResult(raw) {
   const deferred = Array.isArray(parsed.deferred)
     ? parsed.deferred.filter((d) => d && typeof d === "object")
     : [];
-  return { fixed_count: parsed.fixed_count, fixes: normalized, deferred };
+  const disputed = Array.isArray(parsed.disputed)
+    ? parsed.disputed.filter((d) => d && typeof d === "object")
+    : [];
+  return { fixed_count: parsed.fixed_count, fixes: normalized, deferred, disputed };
 }
 
 /**
@@ -376,15 +380,20 @@ function normMustFixEntryId(id) {
 /**
  * must-fix 漏修违规收集（m3）：ID 归一化比较——大小写 + 尾部括号尾注（如 "(fixed)"）
  * 漂移不误杀：严格 trim 比较会把 "mf-1"/"MF-1 (fixed)" 判漏修，整轮 fix-failure 误杀。
+ * disputed 申述豁免（格式合法性由 collectDisputedViolations 把关）：申述条目不再判漏修，
+ * 裁决权移交人类——否则「fixer 申述 + must-fix-not-fixed 违规」绕回一票否决老路。
  */
 function collectMustFixNotFixedViolations(result, mustFixIds) {
   const violations = [];
   const fixedIds = new Set((result.fixes || [])
     .map((f) => (f && typeof f.issue_id === "string" ? normIssueId(f.issue_id) : ""))
     .filter(Boolean));
+  const disputedIds = new Set((result.disputed || [])
+    .map((d) => (d && typeof d.issue_id === "string" ? normIssueId(d.issue_id) : ""))
+    .filter(Boolean));
   for (const id of mustFixIds) {
     const norm = normMustFixEntryId(id);
-    if (norm && !fixedIds.has(norm)) {
+    if (norm && !fixedIds.has(norm) && !disputedIds.has(norm)) {
       violations.push({ issue_id: norm, severity: "must-fix-not-fixed" });
     }
   }
@@ -392,19 +401,48 @@ function collectMustFixNotFixedViolations(result, mustFixIds) {
 }
 
 /**
+ * disputed 申述违规收集（2026-09-23 disputed 通道取代 rejected 一票否决）：申述是
+ * claim 不是裁决——格式非法（未命中台账 / 反证空洞）仍违规（敷衍申诉不可放行），
+ * 格式合法则豁免 must-fix 记账、随终态转人类裁决。反证门槛 = evidence ≥20 字符
+ *（对齐 ES2 deferred 理由下限）且含路径 hint（"/" 或 ":"）——防「我觉得不是问题」式
+ * 空洞申诉。idMap 翻译同 deferred 侧（findIssueKey 查表输入）；trackedIssues 缺省
+ *（无台账降级路径）跳过命中检查，仅查反证。
+ */
+function collectDisputedViolations(result, trackedIssues, idMap) {
+  const violations = [];
+  for (const d of result.disputed || []) {
+    if (!d) continue;
+    const key = trackedIssues
+      ? findIssueKey(trackedIssues, translateId(idMap, d.issue_id, trackedIssues))
+      : undefined;
+    if (trackedIssues && !key) {
+      violations.push({ issue_id: d.issue_id || "(unnamed)", severity: "disputed-untracked" });
+      continue;
+    }
+    const ev = typeof d.evidence === "string" ? d.evidence.trim() : "";
+    if (ev.length < 20 || (ev.indexOf("/") === -1 && ev.indexOf(":") === -1)) {
+      violations.push({ issue_id: d.issue_id || "(unnamed)", severity: "disputed-no-evidence" });
+    }
+  }
+  return violations;
+}
+
+/**
  * ES3 硬校验（5.3-P1 红线）：(1) deferred 只允许 minor/trivial；(2) must-fix 必须全进
- * fixes[]——mustFixIds 中未修复且未显式处理的 ID 判 violation（漏修）。mustFixIds
+ * fixes[]/disputed[]——mustFixIds 中未修复且未申述的 ID 判 violation（漏修）。mustFixIds
  * 为 null/undefined 时仅做 (1)（无 aggregator 数据的降级路径，wave 2 限制）。
- * trackedIssues（state.issues）可选：deferred 的 severity 与追踪表交叉核对（MF-4）——
+ * (3) disputed 申述格式校验（未命中台账/反证空洞即违规）。
+ * trackedIssues（state.issues）可选：deferred/disputed 的交叉核对——
  * 追踪条目以追踪 severity 为准（must-fix 追踪皆 critical/major，defer 即违规），
  * 仅追踪无此 ID（S-x minor）时采信 fix agent 自报。
- * idMap（可选，本轮表格号→台账键）：仅在 deferred 交叉核对「查台账」的输入上翻译——
- * L2/L3 改键后 fixer 申报的表格号需翻译才能命中台账。mustFixIds 与 fixes[].issue_id
+ * idMap（可选，本轮表格号→台账键）：仅在 deferred/disputed 交叉核对「查台账」的输入上
+ * 翻译——L2/L3 改键后 fixer 申报的表格号需翻译才能命中台账。mustFixIds 与 fixes[].issue_id
  * 的集合比较（第 2 项）**双侧保持表格号空间不翻译**——它们同源（aggregated.md），
  * 翻译任一侧都会制造假失配（must-fix-not-fixed 误杀整 run）。
  */
 function validateFixResult(result, mustFixIds, trackedIssues, idMap) {
   const violations = collectDeferredViolations(result, trackedIssues, idMap);
+  violations.push(...collectDisputedViolations(result, trackedIssues, idMap));
   if (Array.isArray(mustFixIds) && mustFixIds.length > 0) {
     violations.push(...collectMustFixNotFixedViolations(result, mustFixIds));
   }
@@ -1104,46 +1142,28 @@ function normalizeGroupEntry(x) {
   return entry;
 }
 
-/**
- * 修复分组确定性校验（不信任 LLM 分组自觉；与 zcode 原生版同构）：
- *  ① 过滤无效组（issueIds 非活跃 id 的剔除 + 重复认领去重，剔空的组丢弃）
- *  ② 覆盖性兜底——未被认领的活跃问题独立成组（漏分 ≠ 漏修）
- *  ③ 组间文件相交 → 传递闭包合并（并行 fixer 不编辑同一文件）
- *  ④ 组 files 以组内 issue 的 files 聚合为准（aggregator 报的组 files 仅参考）
- *  ⑤ 重编 G1..Gn；rawGroups 缺失/空时全部活跃问题归一组（退化 = 旧单 fixer 行为）
- * @param rawGroups normalizeGroupEntry 归一后的分组（或 undefined）
- * @param activeEntries 活跃（adjudication=evidence）聚合条目 [{id, files?, ...}]
- */
-function reconcileGroups(rawGroups, activeEntries) {
-  const active = (activeEntries || []).filter((e) => e && typeof e.id === "string" && e.id);
-  if (active.length === 0) return [];
-  const activeIds = new Set(active.map((e) => e.id));
-  const filesOf = new Map(active.map((e) => [e.id, Array.isArray(e.files) ? e.files.filter((f) => typeof f === "string" && f.trim()) : []]));
-  let groups;
-  if (!rawGroups || rawGroups.length === 0) {
-    // 缺失/空分组 → 单组全包（退化 = 旧单 fixer 行为；单组无组对，下方合并循环天然 no-op）
-    groups = [{ issueIds: [...activeIds], note: "" }];
-  } else {
-    groups = [];
-    // claimed 双职责：过滤阶段逐组去重（id 已被前组认领则从后组剔除，剔空组丢弃，
-    // 与 ② 漏分兜底对称）+ 兜底阶段漏分判定。重复认领不去重的话，同 id 两组在
-    // files 缺失时（空集恒不相交）③ 的相交合并不触发，两个并行 fixer 并发修同一 issue。
-    const claimed = new Set();
-    for (const g of rawGroups) {
-      const issueIds = g.issueIds.filter((id) => activeIds.has(id) && !claimed.has(id));
-      if (issueIds.length === 0) continue;
-      for (const id of issueIds) claimed.add(id);
-      groups.push({ note: g.note || "", issueIds });
-    }
-    for (const id of activeIds) {
-      if (!claimed.has(id)) groups.push({ issueIds: [id], note: "aggregator 漏分，兜底独立组" });
-    }
+/** ①② rawGroups 过滤 + 漏分兜底（reconcileGroups 子步骤）：issueIds 非活跃 id 剔除、
+ * 重复认领逐组去重（id 已被前组认领则从后组剔除，剔空组丢弃）、未被认领的活跃问题
+ * 独立成组。claimed 去重的动机：同 id 两组在 files 缺失时（空集恒不相交）③ 的相交
+ * 合并不触发，两个并行 fixer 会并发修同一 issue。 */
+function filterAndBackfillGroups(rawGroups, activeIds) {
+  const groups = [];
+  const claimed = new Set();
+  for (const g of rawGroups) {
+    const issueIds = g.issueIds.filter((id) => activeIds.has(id) && !claimed.has(id));
+    if (issueIds.length === 0) continue;
+    for (const id of issueIds) claimed.add(id);
+    groups.push({ note: g.note || "", issueIds });
   }
-  const groupFiles = (ids) => {
-    const s = new Set();
-    for (const id of ids) for (const f of filesOf.get(id) || []) s.add(f);
-    return [...s];
-  };
+  for (const id of activeIds) {
+    if (!claimed.has(id)) groups.push({ issueIds: [id], note: "aggregator 漏分，兜底独立组" });
+  }
+  return groups;
+}
+
+/** ③ 组间文件相交 → 传递闭包合并（reconcileGroups 子步骤）：并行 fixer 不编辑同一
+ * 文件；groupFiles 为组→files 投影函数。 */
+function mergeOverlappingGroups(groups, groupFiles) {
   let mergedFlag = true;
   while (mergedFlag) {
     mergedFlag = false;
@@ -1164,7 +1184,58 @@ function reconcileGroups(rawGroups, activeEntries) {
       }
     }
   }
-  return groups.map((g, idx) => ({ id: "G" + (idx + 1), issueIds: g.issueIds, files: groupFiles(g.issueIds), note: g.note }));
+  return groups;
+}
+
+/** 空 files 组防御归并（reconcileGroups 子步骤）：files 缺失/全空白 的组对相交合并
+ * 不可达（空集恒不相交），但组内 issue 仍可能按 evidence/guidance 描述改同一物理
+ * 文件——aggregator 漏给 files 的数据质量问题无法用声明数据判定并行安全，全部归并
+ * 进首个非空 files 组（无非空组则互并成单组），保证空 files 组永不与其他组并行。 */
+function mergeEmptyFilesGroups(groups, groupFiles) {
+  const emptyIdxs = [];
+  for (let i = 0; i < groups.length; i++) {
+    if (groupFiles(groups[i].issueIds).length === 0) emptyIdxs.push(i);
+  }
+  if (emptyIdxs.length === 0 || groups.length === 1) return groups;
+  let target = groups.findIndex((_, i) => !emptyIdxs.includes(i));
+  if (target === -1) target = emptyIdxs[0];
+  const absorbed = groups.filter((_, i) => i !== target && emptyIdxs.includes(i));
+  groups[target] = {
+    issueIds: [...groups[target].issueIds, ...absorbed.flatMap((g) => g.issueIds)],
+    note: [groups[target].note, ...absorbed.map((g) => g.note)].filter(Boolean).join("; ")
+      + " (empty files, conservatively merged)",
+  };
+  return groups.filter((_, i) => i === target || !emptyIdxs.includes(i));
+}
+
+/**
+ * 修复分组确定性校验（不信任 LLM 分组自觉；与 zcode 原生版同构）：
+ *  ① 过滤无效组（issueIds 非活跃 id 的剔除 + 重复认领去重，剔空的组丢弃）
+ *  ② 覆盖性兜底——未被认领的活跃问题独立成组（漏分 ≠ 漏修）
+ *  ③ 组间文件相交 → 传递闭包合并（并行 fixer 不编辑同一文件）
+ *  ④ 组 files 以组内 issue 的 files 聚合为准（aggregator 报的组 files 仅参考）
+ *  ⑤ 重编 G1..Gn；rawGroups 缺失/空时全部活跃问题归一组（退化 = 旧单 fixer 行为）
+ * ①② → filterAndBackfillGroups；③ → mergeOverlappingGroups；空 files 防御归并 →
+ * mergeEmptyFilesGroups（同文件私有辅助，行为契约由 reconcileGroups 单测锁定）。
+ * @param rawGroups normalizeGroupEntry 归一后的分组（或 undefined）
+ * @param activeEntries 活跃（adjudication=evidence）聚合条目 [{id, files?, ...}]
+ */
+function reconcileGroups(rawGroups, activeEntries) {
+  const active = (activeEntries || []).filter((e) => e && typeof e.id === "string" && e.id);
+  if (active.length === 0) return [];
+  const activeIds = new Set(active.map((e) => e.id));
+  const filesOf = new Map(active.map((e) => [e.id, Array.isArray(e.files) ? e.files.filter((f) => typeof f === "string" && f.trim()) : []]));
+  const groupFiles = (ids) => {
+    const s = new Set();
+    for (const id of ids) for (const f of filesOf.get(id) || []) s.add(f);
+    return [...s];
+  };
+  // 缺失/空分组 → 单组全包（退化 = 旧单 fixer 行为；单组无组对，③ 合并天然 no-op）
+  const groups = !rawGroups || rawGroups.length === 0
+    ? [{ issueIds: [...activeIds], note: "" }]
+    : filterAndBackfillGroups(rawGroups, activeIds);
+  return mergeEmptyFilesGroups(mergeOverlappingGroups(groups, groupFiles), groupFiles)
+    .map((g, idx) => ({ id: "G" + (idx + 1), issueIds: g.issueIds, files: groupFiles(g.issueIds), note: g.note }));
 }
 
 /** 数字字段多键名归一（5.1→5.7 键名演进）：按序取首个 number 形态键，全缺省返回 fallback */

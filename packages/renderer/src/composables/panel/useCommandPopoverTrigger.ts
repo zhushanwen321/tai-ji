@@ -11,15 +11,26 @@
  *   两 / 触发域正则互斥）。
  * - onAddSelect：+ 菜单打开 slash 浮层（不设触发态，防普通键误关）。
  * - onCmdSelect：选中后插 chip（slash/file/session/subagent），清过滤文本 + 复位触发态。
- * - pendingSlash watch：消费 SearchModal 经 commandStore 注入的 slash 请求。
+ * - onSelectAndSend：命令名精确匹配直发（onCmdSelect 复用 + 同步直调 dispatchEnter 链，
+ *   command-enter-exact-send D2 钉死直调、禁合成事件）。
+ * - pendingSlash watch：消费 SearchModal 经 commandStore 注入的 slash 请求（D2b：注入前
+ *   清活跃域 token 残留——session 冻结守卫 + 文本定位删除助手，再插 chip）。
+ * - SM 互斥 watch（search-modal-popover-mutual-exclusion D1）：SearchModal open 时单向
+ *   关闭命令浮层（flush:'sync'，close 不恢复；open 时冻结 sessionId 供 D2b 守卫）。
  * - commandPopoverRef + cmdOpen：键盘路由（⏎/Esc）与 v-model:open 绑定。
  *
  * 不含：发送/steer/abort 编排、模型/思考等级、草稿维护（均留在 Composer.vue / 其他 composable）。
  */
 import { ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useSearchModal } from '@taiji/core'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { pickFile } from '@/lib/ipc'
+// D2b 注入前清理：非光标锚定的活跃域 token 文本定位删除（带域约束正则 + 非唯一命中 no-op）
+import {
+  removeActiveTokenText,
+  ACTIVE_TOKEN_DOMAIN_PATTERN_SOURCES,
+} from '@taiji/dom-core/composer/input'
 // 裸 skill 名归一化单点（剥 `skill:` / `/` 前缀）——与 CommandPopover skill-only 候选 /
 // slash 候选 selected 比对 / onCmdSelect skill 项分流同源，避免第三份前缀剥离实现漂移。
 import { bareSkillCommandName } from '@/components/panel/command-popover-skill-candidates'
@@ -57,9 +68,22 @@ export interface CommandSelectPayload {
   slug?: string
 }
 
+/** exactMatch 直发通道 payload（通道缺口④，编译器强制）：select 字段面 + 原始 Enter 事件 */
+export interface CommandSelectAndSendPayload extends CommandSelectPayload {
+  /** 原始 Enter KeyboardEvent（window capture 已 preventDefault + stopPropagation 截断） */
+  originalEvent: KeyboardEvent
+}
+
 export function useCommandPopoverTrigger(
   inputRef: Readonly<Ref<ShellInputInstance | null>>,
   sessionId: Ref<string | null>,
+  /** [command-enter-exact-send D2 直调通道] composer Enter 分发链（useComposerKeydown 返回的
+   *  onKeydown——dispatchEnter 所在链体，composer-keydown.ts:140-151）。onSelectAndSend 同步
+   *  直调、传原事件：严禁合成/再派发 KeyboardEvent（合成事件经 window capture 时浮层已关会
+   *  早退放行 → 落到 ComposerInput 冒泡 → 二次 dispatchEnter → 双发）。缺省 undefined =
+   *  只插 chip 不直发（fail-closed，与 activeElement 门同向）。调用方须传晚绑定闭包
+   *  （本函数先于 useComposerKeydown 构建）。 */
+  onComposerKeydown?: (e: KeyboardEvent) => void,
 ): {
   cmdOpen: Ref<boolean>
   cmdType: Ref<CommandPopoverType>
@@ -76,6 +100,7 @@ export function useCommandPopoverTrigger(
   onSkillTrigger: (payload: { query: string } | null) => void
   onAddSelect: (type: 'attach' | 'image' | 'slash') => Promise<void>
   onCmdSelect: (payload: CommandSelectPayload) => void
+  onSelectAndSend: (payload: CommandSelectAndSendPayload) => void
 } {
   const { t } = useI18n()
   const commandStore = useCommandStore()
@@ -108,16 +133,95 @@ export function useCommandPopoverTrigger(
   const skillQuery = ref('')
   const commandPopoverRef = ref<InstanceType<typeof CommandPopover> | null>(null)
 
+  /** SearchModal 单例（core 域，⌘K 全局搜索弹窗）——D1 互斥 watch 消费其 isOpen */
+  const searchModal = useSearchModal()
+  /**
+   * SM open 时刻冻结的 sessionId（D2b session 冻结守卫锚点）：消费 pendingSlash 清理时
+   * 冻结值 ≠ 当前 session 则跳过清理（⌘N 在 SM open 期间可切 session，切换时 draft watch
+   * setText 整框替换且不派发 trigger——冻结的 active/query 与新文本静默脱钩，不守卫则可能
+   * 误删他 session 草稿的同形 token）。注入本身不受此守卫影响（由 req.sessionId 过滤）。
+   */
+  const frozenSearchModalSessionId = ref<string | null>(null)
+
+  /**
+   * D1 单向状态互斥（search-modal-popover-mutual-exclusion 设计 D1）：SM open 时关命令浮层。
+   *
+   * 单向语义：仅 open 边沿动 cmdOpen（置 false），close 不动（SM 关闭后浮层不自动恢复——
+   * 恢复 = 替用户决定她仍在命令语境；slash query 文本保留，删改任一字符即重新触发，D2）。
+   * SM open 期间 cmdOpen 无再开向量（再开向量封闭三事实，设计前提 1）：①SM open watch →
+   * nextTick autofocus 搜索输入框——键盘输入进 SM 不进 composer；②fixed inset-0 z-[1000]
+   * 遮罩 + click.self——pointer 无法触达 composer；③slash-trigger level 重估只在 composer
+   * input emit 时发生（dom-core contenteditable onInput），composer 收不到 input ⇒ cmdOpen
+   * 无重置为 true 的输入源。flush:'sync'：⌘K keydown → isOpen=true → watch 同步执行
+   * cmdOpen=false，同一事件循环内完成——用户下一次物理按键时 capture 监听开门条件已失效
+   * （前提 3；仓内既定习语，command-popover-keyboard activeIndex 收敛 watch 同款）。
+   * 不动 triggerActive/query 标记（保留即冻结守卫与 D2b 活跃域判定的锚，D2b 责任面）。
+   */
+  watch(
+    () => searchModal.isOpen.value,
+    (open) => {
+      if (open) {
+        cmdOpen.value = false
+        frozenSearchModalSessionId.value = sessionId.value
+      }
+    },
+    { flush: 'sync' },
+  )
+
+  /**
+   * 活跃触发域判定（D2b 责任面判据）：五路 triggerActive 找 true 的那路，取其 query ref。
+   * 活跃域至多一个（触发符检测按光标位置单激活）；判据是 active 标记**非 query ref 非空**
+   * （失活域的 query ref 保留旧值不清，makeTriggerHandler null 分支只关浮层不清 query）；
+   * +菜单路径（onAddSelect）不设 active——无活跃域返回 null（无清理对象，no-op-safe）。
+   */
+  function resolveActiveTriggerDomain(): { type: CommandPopoverType; query: Ref<string> } | null {
+    if (slashTriggerActive.value) return { type: 'slash', query: slashQuery }
+    if (fileTriggerActive.value) return { type: 'file', query: fileQuery }
+    if (sessionTriggerActive.value) return { type: 'session', query: sessionQuery }
+    if (subagentTriggerActive.value) return { type: 'subagent', query: subagentQuery }
+    if (skillTriggerActive.value) return { type: 'skill', query: skillQuery }
+    return null
+  }
+
+  /**
+   * D2b 注入前清理：SM confirm 注入 chip 前清除活跃触发域 token 残留（文本定位式，非光标锚定）。
+   *
+   * 不清理则用户输入 `/compact`（浮层 open、域活跃）→ ⌘K → SM confirm `/commit` → chip 注入
+   * 但残留明文仍在 → 序列化归首产出 `/commit /compact` → pi 把残留当 args 执行（垃圾参数）。
+   * 链路：session 冻结守卫（SM open 时冻结 ≠ 当前 session 跳过——防误删他 session 草稿）→
+   * 活跃域判定（无活跃域跳过）→ removeActiveTokenText（带域约束正则全文定位；非唯一/0 命中
+   * 自行 no-op；删除范围 = 符号 + query，边界空白保留；光标落删除点，后续 chip 落 token 原位）。
+   * onChanged 传空实现：draft ref 同步由紧随其后的 insertSlashChip/insertSkillChip 尾部
+   * onChanged（= onInput → emitInput(getText())）承担——两者在同一 watch 回调内无条件顺序
+   * 执行，删除后的最终态文本经 insert 的 emitInput 一次性同步给 Composer.vue 的 draft ref；
+   * 独立 emitInput 通道（contenteditable composable 闭包）未暴露在 ShellInputInstance 契约面。
+   */
+  function clearActiveTokenBeforeInject(): void {
+    if (frozenSearchModalSessionId.value !== sessionId.value) return
+    const domain = resolveActiveTriggerDomain()
+    if (!domain) return
+    removeActiveTokenText({
+      el: inputRef.value?.getInputElement?.() ?? null,
+      domainPatternSource: ACTIVE_TOKEN_DOMAIN_PATTERN_SOURCES[domain.type],
+      query: domain.query.value,
+      onChanged: () => {},
+    })
+  }
+
   /**
    * 消费搜索浮层的 slash 注入请求（store 驱动模式，替代断链的 injectSlash 回调）。
    * SearchModal → useSearchJump.confirmCommand → commandStore.requestSlashInjection 写入 pendingSlash，
    * 本 watch 按 sessionId 过滤消费，命中则注入 chip 并 clearPendingSlash。
    *
+   * D2b 注入顺序：先 clearActiveTokenBeforeInject 清活跃域 token，再插 chip（insert 不清
+   * 明文——insertSlashChip/insertSkillChip 的替换语义只移除既有 chip 节点，文本节点不在
+   * 其删除范围，清理职责唯一归删除助手）。
+   *
    * 分流（与 onCmdSelect 的 D3 项类型分流同款落点）：pi 的 skill 命令名是**裸** `skill:<name>`
    * （无前导 /），命令通路进入 insertSlashChip 后仅「以 /skill: 开头」的判据为假 ⇒ 落成命令
    * chip（无 chipLocation + 受单命令替换语义管辖），既丢 SKILL.md 路径也丢多 skill 共存。
-   * 故 isSkill 为真时直接走 skill 通路：裸名（bareSkillCommandName 剥 `skill:` / `/`）+ location
-   * + icon，落点与 onCmdSelect 的 skill 项/type==='skill' 两分支一致；否则维持命令通路（回归锁）。
+   * 故 isSkill 为真时直接走 skill 通路：裸名（bareSkillCommandName 剥 `skill:` / `/`）
+   * + location + icon，落点与 onCmdSelect 的 skill 项/type==='skill' 两分支一致；否则维持命令通路（回归锁）。
    *
    * 非 immediate：防 Composer 后挂载时读到旧 pendingSlash 残留值误注入（挂载时 store 可能已有
    * 给前一个 Composer 的请求，immediate 会立即误触发）。仅响应挂载后的新写入。
@@ -129,6 +233,7 @@ export function useCommandPopoverTrigger(
     (req) => {
       if (!req) return
       if (req.sessionId !== sessionId.value) return // 仅消费目标 session 的请求
+      clearActiveTokenBeforeInject()
       if (req.isSkill) {
         inputRef.value?.insertSkillChip(bareSkillCommandName(req.command), req.location, req.icon)
       } else {
@@ -265,6 +370,14 @@ export function useCommandPopoverTrigger(
     }
   }
 
+  /** exactMatch 直发接线（U2，command-enter-exact-send D2）：onCmdSelect 复用（关浮层 + 清
+   *  五路触发态 + 清 query + 插 chip——先插后发，与用户手按二次 Enter 的前置态完全同链、发送链
+   *  零改动零分叉）→ 同步直调 dispatchEnter 链（原事件直接函数调用，零合成零 DOM 派发）。 */
+  function onSelectAndSend(payload: CommandSelectAndSendPayload): void {
+    onCmdSelect(payload)
+    onComposerKeydown?.(payload.originalEvent)
+  }
+
   return {
     cmdOpen,
     cmdType,
@@ -281,5 +394,6 @@ export function useCommandPopoverTrigger(
     onSkillTrigger,
     onAddSelect,
     onCmdSelect,
+    onSelectAndSend,
   }
 }

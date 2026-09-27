@@ -420,8 +420,8 @@ export const OCCUPANCY_SETTLE_WINDOW_MS = 2_000
 /**
  * 命令-only prompt 的 occupancy 收口窗口（CP6）。
  *
- * 背景（实测确认）：pi 对 `/` 开头文本先 `await _tryExecuteExtensionCommand`、再
- * `preflightResult?.(true)`——纯命令（如 `/schedule list`）不产任何 turn 事件；而 dispatcher 的
+ * 背景（实测确认，pi-semantics PS-44）：pi 对 `/` 开头文本先 `await _tryExecuteExtensionCommand`、
+ * 再 `preflightResult?.(true)`——纯命令（如 `/schedule list`）不产任何 turn 事件；而 dispatcher 的
  * `markSessionActive` 已在 `client.prompt` 前把 `occupancy.turn` 置 `dispatching` ⇒ 该维度
  * 永远卡住（按钮变 stop、下一条消息被 busy 预检拒/转 steer 静默吞）。修法 = prompt resolve
  * 后武装 2s 短窗：期间无任何 turn 事件则回落 idle。

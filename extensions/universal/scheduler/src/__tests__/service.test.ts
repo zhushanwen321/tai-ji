@@ -303,6 +303,64 @@ describe('SchedulerService', () => {
       expect(renderResult('task.list', params, 'en-US')).toContain('### Scheduled (2)')
     })
 
+    // ── D1 执行状态摘要（task.list 行尾失败可见性补偿；widget 推送修正设计 D1 代价四要素）──
+
+    it('task.list 行尾摘要：近期失败 → 「上次: 失败×n」（用户可见失败信号）', async () => {
+      const created = await service.create('flaky', '5m')
+      const task = service.runtime.getTask(created.data!.task.id)
+      task!.history.push({ at: Date.now() - 2000, status: 'failed' }, { at: Date.now() - 1000, status: 'failed' })
+      task!.lastStatus = 'failed'
+
+      const result = service.list()
+      if (result.params === undefined || !('tasks' in result.params)) throw new Error('expected list params')
+      const line = renderResult('task.list', result.params, 'zh-CN').split('\n')[1]!
+      expect(line).toContain('上次: 失败×2')
+      // 命令变体保留相对时间（设计 D1-a：命令层按需呈现面不变）
+      expect(line).toMatch(/分钟后|分钟前|\d+m ago|in \d+m/)
+      // params 携带 locale-neutral 原始值（摘要不预渲染）
+      expect(result.params.tasks[0]!.lastExec).toEqual({ lastStatus: 'failed', recentFailures: 2 })
+    })
+
+    it('task.list 行尾摘要：有成功记录无失败 → 「上次: 成功」；无记录 → 无摘要段', async () => {
+      const done = await service.create('done-task', '5m')
+      service.runtime.getTask(done.data!.task.id)!.lastStatus = 'success'
+      await service.create('fresh-task', '5m')
+
+      const result = service.list()
+      if (result.params === undefined || !('tasks' in result.params)) throw new Error('expected list params')
+      const lines = renderResult('task.list', result.params, 'zh-CN').split('\n')
+      expect(lines[1]).toContain('上次: 成功')
+      expect(lines[2]).not.toContain('上次:')
+    })
+
+    it('task.created toast 不带执行摘要（e2e S18 断言锚定其全行文本）', async () => {
+      const created = await service.create('s18-guard', '45m', { kind: 'once' })
+      if (created.params === undefined || !('name' in created.params)) throw new Error('expected task params')
+      const toast = renderResult('task.created', created.params, 'en-US')
+      expect(toast).not.toContain('last:')
+      expect(toast).not.toContain('上次:')
+      // S18 同款形态锚点：全行结构不被摘要破坏
+      expect(toast).toMatch(/^Created [0-9a-f]+: s18-guard · once in 45m · next run in \d+m$/)
+    })
+
+    it('renderTaskLine 命令变体保留相对时间（widget 静态化的命令层对照）', async () => {
+      const now = Date.now()
+      const line = renderTaskLine(
+        {
+          mode: 'interval',
+          intervalMs: 300_000,
+          id: 'abc12345',
+          name: 'cmd variant',
+          kind: 'recurring',
+          nextRunAt: now + 3_600_000,
+          now,
+          enabled: true,
+        },
+        'en-US',
+      )
+      expect(line).toContain('in 1h')
+    })
+
     it('词典 key 集合 ⊇ messageKey 词表 + tray.title（zh/en 双侧且 key 集合对齐）', () => {
       for (const locale of ['zh-CN', 'en-US'] as const) {
         const keys = new Set(dictionaryKeys(locale))

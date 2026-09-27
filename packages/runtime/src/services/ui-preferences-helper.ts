@@ -8,7 +8,8 @@
  *   { "v": 1, "locale": "zh-CN" | "en-US", "updatedAt": <epoch ms> }
  *
  * 路径经 `configService.getConfigDir()` 推导（= shared `getDataDir()`，读 `TAIJI_AGENT_DATA_DIR`，
- * 缺省 `~/.taiji`），禁硬编码（数据目录隔离 ADR-0009；dev/多实例按各自 `<dataDir>` 天然隔离）。
+ * 缺省 `~/.taiji-dev`——fail-safe default，C-proc-26；prod `~/.taiji` 仅打包 main 显式钉死可达），
+ * 禁硬编码（数据目录隔离 ADR-0009；dev/多实例按各自 `<dataDir>` 天然隔离）。
  *
  * 原子写：tmp + rename（`utils/fs-utils` 的 `atomicWrite`，同 `system-prompt-config-helper.ts`
  * 范式），崩溃不留损坏中间态（ADR-0004）。

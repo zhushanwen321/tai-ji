@@ -1,28 +1,25 @@
 // src/protocol/reverse-channels.ts
 //
 // 6 反向通道（引擎 → core，帧④，必须应答）载荷与超时二分。设计权威源：
-// 设计 §3.3 方法集表 host/* 行 + impl-plan §2.1「8 反向通道」与「反向请求超时二分」。
-// [H1] chat 域 v1.x 增量曾新增的第 9 通道（轮次相位帧）已随 chat-run 统一退役
-// （docs/architecture/subagent-chat-run-unification.md §3.3 D5，U5 删除）——轮次终态
-// 改由 run 应答（agent_settled resolve）承载。
-// [池抽象降级 2026-09-13] 原 host/poolResolved 通道（第 8 条）随 poolKey 协议面退役
-// 一并删除（两引擎 poolKey 恒 'shared'、journal 落盘路径固定，回调零信息量）。
-// [permission 通道退役 2026-09-13] host/permission 骨架删除（两引擎 permissionMode=
-// native 零 emit、core 零注入——未接线死通道），通道集收敛为 6 个。
+// 设计 §3.3 方法集表 host/* 行 + impl-plan §2.1「反向通道集」与「反向请求超时二分」。
+// 通道集合集为终态词表（ReverseChannel ⟷ REVERSE_CHANNELS 双向锁见协议宪法）；历史
+// 通道删除的分类学（C 型死成员等）与出处 = docs/adr/decisions.md ADR-0071，本头注
+// 只载终态不载逐次删改史。
+//
+// 演进政策（通道域）：新增反向通道 = additive 面不 bump 版本，但须过新增门槛——
+// 消费方 + 降级路径（旧宿主回 {unsupported:true}，引擎自身降级）+ 能力位绑定三件齐，
+// 无消费方不进协议（占位先行即违宪，判据 6/7 把关）；A 型同形改名默认 additive 双读，
+// B 型机制替换同批合法（对端同仓 + ADR 登记），major 与 minor 协商触发条件见
+// ADR-0071。判据（字段/载体归属）全文 = engine-protocol.ts 头注；新通道按关联键总纲
+// 选键——recordId = record 镜像键（childSpawned/childStateChanged）、runId = 渲染与
+// 事件路由键（streamDelta/handleReady/askUser）、host/log 无关联键；通道注释点名消费方。
 //
 // 应答约定：数据面类回 {ok:true}（REVERSE_REQUEST_TIMEOUT_MS=10s 未答 = 引擎故障 →
 // 杀进程 + 在途 run 失败）；人机交互类走 ack 两阶段——先回 {ack:true}，结果异步到达
 // （R9-2：已 ack 的等待不计入任何 in-flight 超时；ADR-0047 静默 ≠ 卡死）；
-// 未实现的交互能力回 {unsupported:true}（引擎自行降级，不重试）。
-//
-// 反向通道关联键总纲（协议演进宪法 D11 成文；权威源
-// docs/architecture/subagent-engine-protocolization.md §3.3「协议演进宪法」）：
-//   - runId = 渲染与事件路由键（event 通知 / host/streamDelta / host/handleReady /
-//     host/askUser——载荷含 runId 的通道均归此类）；
-//   - recordId = record 镜像键（host/childSpawned / host/childStateChanged——
-//     core 侧镜像数据源按 record 归属）；
-//   新增通道按消费方选键（渲染/事件路由 → runId；record 镜像 → recordId），并在
-//   载荷类型注释点名消费方。
+// 未实现或宿主未知的通道回 {unsupported:true}——宽容语义③（条文权威 = ADR-0071）：
+// 宿主遇未知 host/* 通道（新引擎发旧宿主未实现的通道）一律回 {unsupported:true}，
+// 由 askUser 语境泛化到全通道；发送方引擎按自身降级路径走，不重试。
 
 import type { ReverseRequestTimeoutClass } from "./engine-protocol.ts";
 import type { UiRequest, UiResponse } from "../ui-types.ts";

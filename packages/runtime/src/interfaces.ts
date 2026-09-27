@@ -259,6 +259,13 @@ export interface ISessionService {
    * text/task 的换行经 encodeDirectiveText 编码为字面 \n（extension 侧 decodeNewlineEscapes 互逆还原）。
    */
   subagentAction(sessionId: string, action: 'cancel' | 'message' | 'start', params: { subagentId?: string; text?: string; slug?: string; task?: string }): Promise<void>
+  /**
+   * 退出 plan 模式（PlanModeBar 确认 Popover 后；D5/E9/E10）：ensureActive 自动恢复 +
+   * client.prompt('/plan abort') 直发 + 挂起审批失效回调上抛。编排语义见
+   * SessionService.abortPlan；失效链消费（runtime pending 摘除 + 失效帧广播）经
+   * setOnPlanAborted 注入，单一出口在 transport 层。
+   */
+  abortPlan(sessionId: string): Promise<void>
   /** W5：session 是否空闲（进程存活且非生成中），供 ReloadOrchestrator 判断立即/排队 reload。 */
   isSessionIdle(sessionId: string): boolean
   /** W5：session 是否仍存活（未被 delete），供 ReloadOrchestrator 检测排队期删除。 */
@@ -364,6 +371,8 @@ export interface ISessionService {
    *（PluginService didDestroy 投递 + server 的挂起 UI 请求汇聚清理），单 handler 异常被隔离。
    */
   setOnSessionDestroyed(handler: (summary: SessionSummary) => void): void
+  /** 注册 plan 退出失效回调（abortPlan prompt 成功后上抛；server.ts setServices 注册，失效链消费单一出口在 transport 层） */
+  setOnPlanAborted(handler: (sessionId: string) => void): void
   /** Set thinking level for a session's pi subprocess. Returns pi-effective level (P3: pi clamps unsupported levels). */
   setThinkingLevel(sessionId: string, level: string): Promise<string>
   /** Steer an actively generating session */

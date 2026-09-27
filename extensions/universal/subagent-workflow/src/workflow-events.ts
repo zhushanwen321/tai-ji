@@ -273,7 +273,9 @@ function resolveCurrentPi(): ExtensionAPI {
 // [守卫合一] 原 pi.__workflowRun 内联守卫 + getDeps 守卫两份重复（state 缺失 /
 // storeHealthy=false），合并为单一 getWorkflowDeps：返回 discriminated union，
 // 两个消费点各自决定失败形态——pi.__workflowRun（D-8 API）返回错误对象（不
-// throw，保住调用方 Promise 契约），getDeps（3 个 tool 的 lazy deps 源）throw
+// throw，保住调用方 Promise 契约），getDeps（2 个 tool + workflows command 的
+// lazy deps 注入源——workflow-script tool 走 state.registry 直供不经 lazyDeps）
+// throw
 // （pi tool 框架将其转译为 tool 错误结果）。错误消息逐字保留（crash-recovery
 // 测试锁 "store unavailable" / "loadAll failed" 子串）。
 export type WorkflowDepsResolution =
@@ -302,7 +304,7 @@ export interface WorkflowDomainHandle {
   /** workflow 域状态（组合根只读消费：engine-awareness lastEngine 存取器 /
    *  workflows command runs getter / pi.__workflowRun lastSessionId）。 */
   state: WorkflowDomainState;
-  /** 3 个 tool + workflows command 的 lazy deps 注入源。 */
+  /** 2 个 tool + workflows command 的 lazy deps 注入源（workflow-script tool 走 state.registry 直供不经 lazyDeps）。 */
   lazyDeps: LauncherDeps;
   /** 守卫单一出口（pi.__workflowRun 消费点；lazyDeps 内部走同一函数）。 */
   getWorkflowDeps(sessionId: string): WorkflowDepsResolution;
@@ -704,7 +706,8 @@ export function setupWorkflowDomain(
   };
 
   // ════════════════════════════════════════════════════════════
-  //  lazyDeps（3 个 tool + workflows command 的 lazy deps 注入源）
+  //  lazyDeps（2 个 tool + workflows command 的 lazy deps 注入源；
+  //  workflow-script tool 走 state.registry 直供不经 lazyDeps）
   //
   //  属性访问触发 getWorkflowDeps 守卫 + makeDeps 求值（每属性独立，createLazy
   //  原语转发）。守卫合一后 getWorkflowDeps 返回 discriminated union，getter 内

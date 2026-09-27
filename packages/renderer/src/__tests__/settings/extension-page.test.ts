@@ -344,8 +344,8 @@ describe('ExtensionPage 加载路径保存失败回弹（RD-4#1）', () => {
 // ── RD-4#11 · getDataDir 读取失败显形（不伪装真实路径）──
 //
 // 链路：ExtensionPage onMounted → getDataDir() reject → catch 置位 dataDirReadFailed →
-// 页面常驻「实际路径读取失败，显示的是默认路径 ~/.taiji」标注（此前无 try/catch，静默回落
-// 写死 ~/.taiji，dev 实例路径误导排查）。
+// 页面常驻「数据目录读取失败，用户级强制目录暂不展示」标注（此前无 try/catch，静默回落
+// 写死 ~/.taiji，dev 实例路径误导排查；C-proc-26 后 dev/prod 缺省不同，兜底不断言任一路径）。
 describe('ExtensionPage getDataDir 读取失败显形（RD-4#11）', () => {
   it('getDataDir reject → 常驻标注（不伪装真实路径）', async () => {
     settingsDomainMock.getDataDir.mockRejectedValueOnce(new Error('ipc down'))
@@ -355,6 +355,13 @@ describe('ExtensionPage getDataDir 读取失败显形（RD-4#11）', () => {
     const note = document.body.querySelector('[data-testid="extension-datadir-read-failed"]')
     expect(note).not.toBeNull()
     expect(note!.textContent).toContain('读取失败')
+
+    // C-proc-26：dev/prod 数据目录缺省不同，兜底不断言任一具体路径——reject 时
+    // user 级强制目录不展示，仅剩 project 级（防回退到写死 ~/.taiji 兜底的旧形态）。
+    const forcedRows = document.body.querySelectorAll('[data-testid="forced-dir-row"]')
+    expect(forcedRows.length).toBe(1)
+    expect(forcedRows[0].textContent).toContain('.taiji/extensions')
+    expect(forcedRows[0].textContent).not.toContain('~/.taiji')
   })
 
   it('getDataDir 成功 → 无标注', async () => {
@@ -363,5 +370,11 @@ describe('ExtensionPage getDataDir 读取失败显形（RD-4#11）', () => {
     await flushPromises()
 
     expect(document.body.querySelector('[data-testid="extension-datadir-read-failed"]')).toBeNull()
+
+    // 成功路径：user 级强制目录按实际数据目录展示（动态推导，非写死）
+    const forcedRows = document.body.querySelectorAll('[data-testid="forced-dir-row"]')
+    expect(forcedRows.length).toBe(2)
+    expect(forcedRows[0].textContent).toContain('~/.taiji-dev/extensions')
+    expect(forcedRows[1].textContent).toContain('.taiji/extensions')
   })
 })

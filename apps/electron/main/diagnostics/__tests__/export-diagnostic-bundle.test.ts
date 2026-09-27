@@ -82,6 +82,7 @@ describe('export-diagnostic-bundle（crash-forensics D6 u3a）', () => {
     touch(join(logsDir, 'runtime-2026-09-10.log'), `[${new Date(NOW - MS_PER_HOUR).toISOString()}] [INFO] [watermark] rss=1.0MB heapUsed=0.5MB heapTotal=2.0MB external=0.1MB sessions=1 pi=1\n`, 1)
     touch(join(logsDir, 'main-2026-09-10.log'), 'main log tail\n', 0)
     touch(join(logsDir, 'renderer-error-2026-09-10.log'), 'renderer stack\n', 2)
+    touch(join(logsDir, 'renderer-console-2026-09-10.log'), 'console warn line\n', 1)
     touch(join(logsDir, 'pi-2026-09-10-sid-1.jsonl'), '{"stdout":"line"}\n', 1)
     // detailPath 引用的深查文件 + run 运行态
     touch(join(logsDir, 'pi-crash-20260910.log'), 'pi stderr tail\n', 1)
@@ -105,6 +106,7 @@ describe('export-diagnostic-bundle（crash-forensics D6 u3a）', () => {
       expect(byPath.get('logs/runtime-2026-09-08.log')).toBeUndefined()
       expect(byPath.get('logs/main-2026-09-10.log')?.tailBytes).toBe(256 * 1024)
       expect(byPath.get('logs/renderer-error-2026-09-10.log')?.sourcePath).toBeDefined()
+      expect(byPath.get('logs/renderer-console-2026-09-10.log')?.sourcePath).toBeDefined()
       expect(byPath.get('logs/pi-2026-09-10-sid-1.jsonl')?.sourcePath).toBeDefined()
       // 台账 detailPath 引用的深查文件
       expect(byPath.get('logs/pi-crash-20260910.log')?.sourcePath).toBe(join(tmpDir, 'logs', 'pi-crash-20260910.log'))
@@ -113,8 +115,8 @@ describe('export-diagnostic-bundle（crash-forensics D6 u3a）', () => {
       expect(watermark?.content).toContain('[watermark] rss=1.0MB')
       const summary = byPath.get('summary.md')
       expect(summary?.content).toContain('# TaiJi 诊断包')
-      // 全量清单（1 水位 + 1 summary + 2 台账 + 4 日志家族 + 1 detailPath = 9 条）
-      expect(result.entries).toHaveLength(9)
+      // 全量清单（1 水位 + 1 summary + 2 台账 + 5 日志家族 + 1 detailPath = 10 条）
+      expect(result.entries).toHaveLength(10)
       // 环境信息
       expect(result.environment.appVersion).toBe('0.9.16')
       expect(result.environment.piVersion).toBe('0.84.4')

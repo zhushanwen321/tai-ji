@@ -38,8 +38,10 @@
  * - pending:unregister → { id, reason, status }
  *
  * 状态权威源：session entries 是唯一状态——工具投影与写侧去重/活跃判断全部对
- * getEntries() 现算（appendEntry 同步入账，pi dist 实证），无内存第二份状态；
- * 历史的内存 registry、session_start 重建、TTL 与 shutdown 机器已删除。
+ * getEntries() 现算（appendEntry 同步入账，pi dist 实证，锚定 pi-semantics
+ * PS-29 extensionAPI appendEntry 直委托 appendCustomEntry + PS-17 _appendEntry
+ * 同步 push 无 debounce），无内存第二份状态；历史的内存 registry、
+ * session_start 重建、TTL 与 shutdown 机器已删除。
  *
  * 监听方式：pi.events.on（Pi 的 EventBus，真实 SDK 为 EventBus.on，非 optional）。
  * workflow 侧通过 deps.eventBus 注入 pi.events（同一总线）。

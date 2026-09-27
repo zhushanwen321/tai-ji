@@ -11,6 +11,14 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 
+import {
+  collectRenderState,
+  isRenderSettled,
+  probeSendButton,
+  restoreWindowBounds,
+  windowBoundsForContent,
+} from './decisions.mjs'
+
 /** 默认 composer 输入框选择器：contenteditable 而非 textarea/input——
  *  原生表单元素禁令（前端编码规范）下 fill/click 行为与表单元素不同（须先 click 聚焦）。 */
 export const COMPOSER_SELECTOR = '.composer-input[contenteditable="true"]'
@@ -67,22 +75,11 @@ export async function injectToComposer(page, text) {
  * 发送消息：优先 composer 容器内的发送按钮（DOM 探测 aria-label/title/testid 命中
  * send|发送|submit 的未禁用 button），fallback Enter 提交。返回实际使用的通道，
  * 供产物日志归因（按钮形态变化时先看此返回值定位失效点）。
+ * 探测逻辑抽在 decisions.mjs probeSendButton（jsdom 直测）；page.evaluate 传函数
+ * 引用序列化函数体，故该函数必须自包含（见 decisions.mjs 头注）。
  */
 export async function clickSendOrSubmit(page) {
-  const viaButton = await page.evaluate(() => {
-    const composer = document.querySelector('.composer-input')
-    if (!composer) return null
-    const scope = composer.closest('div') ?? document
-    for (const el of scope.querySelectorAll('button')) {
-      if (el.disabled) continue
-      const sig = `${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('title') ?? ''} ${el.getAttribute('data-testid') ?? ''}`
-      if (/send|发送|submit/i.test(sig)) {
-        el.click()
-        return sig.trim()
-      }
-    }
-    return null
-  })
+  const viaButton = await page.evaluate(probeSendButton)
   if (viaButton) return { channel: 'button', hit: viaButton }
   await page.locator(COMPOSER_SELECTOR).first().press('Enter')
   return { channel: 'enter', hit: null }
@@ -97,16 +94,8 @@ export async function waitForRenderSettled(page, { timeout = 15000, settleMs = 6
   const deadline = Date.now() + timeout
   let lastHeight = -1
   for (;;) {
-    const state = await page.evaluate(() => {
-      const imgs = [...document.querySelectorAll('img')]
-      return {
-        pending: imgs.filter((i) => i.naturalWidth === 0 && !i.complete).length,
-        broken: imgs.filter((i) => i.complete && i.naturalWidth === 0).length,
-        loaded: imgs.filter((i) => i.naturalWidth > 0).length,
-        height: document.documentElement.scrollHeight,
-      }
-    })
-    if (state.height === lastHeight && state.pending === 0) return state
+    const state = await page.evaluate(collectRenderState)
+    if (isRenderSettled(state, lastHeight)) return state
     lastHeight = state.height
     if (Date.now() > deadline) return state // 超时返回末态：由断言判定 pending/broken 是否可接受
     await page.waitForTimeout(settleMs)
@@ -177,10 +166,7 @@ export async function resizeViewport(page, width, height) {
       const { bounds } = await cdp.send('Browser.getWindowForTarget', { windowId })
       await cdp.send('Browser.setWindowBounds', {
         windowId,
-        bounds: {
-          width: width + (bounds.width - before.w),
-          height: height + (bounds.height - before.h),
-        },
+        bounds: windowBoundsForContent({ width, height }, bounds, { width: before.w, height: before.h }),
       })
     } catch (e) {
       applied = `failed: ${String(e).slice(0, 80)}`
@@ -205,7 +191,7 @@ export async function restoreViewport(page, orig) {
       const { bounds } = await cdp.send('Browser.getWindowForTarget', { windowId })
       await cdp.send('Browser.setWindowBounds', {
         windowId,
-        bounds: { width: bounds.width - ((orig.nowW ?? orig.w) - orig.w), height: bounds.height },
+        bounds: restoreWindowBounds(bounds.width, orig.nowW ?? orig.w, orig.w, bounds.height),
       })
     } catch { /* 调用方留证 */ }
     await page.waitForTimeout(600)

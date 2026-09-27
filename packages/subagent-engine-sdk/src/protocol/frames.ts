@@ -84,7 +84,7 @@ export type ReverseResponseResult =
   | { ok: true }
   /** 人机交互类（askUser）两阶段第一阶段：已受理，结果异步到达（R9-2）。 */
   | { ack: true }
-  /** 未实现的交互能力（设计：未实现回 unsupported，引擎自行降级）。 */
+  /** 未实现或宿主未知的通道（宽容语义③：由 askUser 语境泛化到全通道——宿主对未知 host/* 通道回 unsupported，引擎自行降级）。 */
   | { unsupported: true };
 
 // ============================================================

@@ -31,8 +31,10 @@ import { readLogKeepDays } from '@taiji/shared'
  * - `plugin-crash-`：plugin worker 崩溃取证（u5b 落点，前缀先行登记）
  * - `main-`：main 进程日志（本单元 main-logger.ts 写入）
  * - `renderer-error-`：renderer JS 错误落盘（u2 写入，main 侧 writer 消费）
+ * - `renderer-console-`：renderer console warn/error 泛捕流落盘（renderer-console-handler
+ *   落点，前缀先行登记）
  */
-const RETENTION_PREFIXES = ['runtime-', 'pi-', 'plugin-crash-', 'main-', 'renderer-error-'] as const
+const RETENTION_PREFIXES = ['runtime-', 'pi-', 'plugin-crash-', 'main-', 'renderer-error-', 'renderer-console-'] as const
 
 /**
  * 固定名 stderr 文件——**不进超龄清单**（设计 D6-⑦，v7 复审定案）。

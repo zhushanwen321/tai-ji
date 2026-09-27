@@ -36,7 +36,9 @@
       :global-skills="globalSkills"
       :selected-skill-names="selectedSkillNames"
       :query="popoverQuery"
+      :shell-input-ref="shellInputHolder.ref"
       @select="onCmdSelect"
+      @select-and-send="onSelectAndSend"
     >
       <div
         ref="composerBoxRef"
@@ -358,6 +360,8 @@ const inputRef = ref<InstanceType<typeof ComposerInput> | null>(null)
 // W4：shell 的 input 契约是结构类型 ShellInputInstance（ui 包 ComposerInput 实例含全部 expose
 // 方法，与契约结构兼容）——Vue 实例类型含 props/emits，无法直接赋给结构契约 ref，故此处断言传递
 const shellInputRef = inputRef as Ref<ShellInputInstance | null>
+// 模板顶层 ref 会被渲染代理解包成值——经普通对象字段中转保活「传引用」语义（通道缺口③，fail-closed 见 CommandPopover）
+const shellInputHolder = { ref: shellInputRef }
 
 const sessionIdRef = computed(() => props.sessionId)
 
@@ -379,7 +383,9 @@ const {
   onSkillTrigger,
   onAddSelect,
   onCmdSelect,
-} = useCommandPopoverTrigger(shellInputRef, sessionIdRef)
+  onSelectAndSend,
+  // 第三参 = 晚绑定闭包：本调用先于 useComposerKeydown，事件发生时 onKeydown（dispatchEnter 链）已就绪
+} = useCommandPopoverTrigger(shellInputRef, sessionIdRef, (e) => onKeydown(e))
 
 /** 命令浮层过滤 query 五路映射（四符号体系 + skill：$ file / # session / @ subagent / 行首 / slash / 空格后 / skill） */
 const popoverQuery = computed(() => {

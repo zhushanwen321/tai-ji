@@ -5,29 +5,39 @@
  * method 超界恢复 + receivedAt）；TC5 无 sessionId 跳过；TC6 投递层 askUser 过滤（C4 分流）；
  * TC7/TC8 回传双通道（plugin.uiResponse / extension.ui_response 复用）；
  * TC10 onUiRequestExpired 撤窗订阅（D2，requestId 反查 sessionId + miss noop）；
- * TC-G1 respond 路径反查表删除（memory-leak-remediation G1）。
+ * TC-G1 respond 路径反查表删除（memory-leak-remediation G1）；
+ * TC-D4a/TC-PDS sendPiResponse 应答终局收尾锚点（cancel/提交/断连三型统一
+ * clearPendingSend；ADR-0072 D4a cancel 先例 → ADR-0073 通路级收口）。
  *
  * 策略：convertToDialogRequest 直测（纯函数）；createDialogRequestSource 用真实
  * InternalEventBus（bus.emit）+ dispatchGlobal（onGlobal 通道）——对齐 useExtensionHostBridge.test.ts
- * 全链路范式；createUiResponseTransport 用 vi.mock 断言 send 调用形状。
+ * 全链路范式；createUiResponseTransport 用 vi.mock 断言 send 调用形状；收尾锚点用例用
+ * 真 pinia + 真 chat store 断言 pendingSend 因果（对齐同目录 notify-toast.test.ts 形态）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
 import type { InternalEvent } from '@taiji/core'
 import { dispatchGlobal } from '@taiji/core/transport/api'
 
-vi.mock('@taiji/core/transport/ws-client', () => ({
+// 部分 mock（importOriginal 展开）：收尾锚点用例引入 @/stores/chat → @/stores/workflow →
+// @/api 导入链后，settings 域等旁路模块在顶层读取这些导出（onExtensions 等）——窄 mock
+// 缺导出即挂载失败。仅覆盖本文件断言的两个函数，其余透传原实现。
+vi.mock('@taiji/core/transport/ws-client', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   // 返 true = 送达（M1 环 3 后 transport 消费 boolean；断连场景用例单独 mockReturnValueOnce(false)）
   send: vi.fn((): boolean => true),
 }))
 
-vi.mock('@taiji/core/transport/api/domains/extension', () => ({
+vi.mock('@taiji/core/transport/api/domains/extension', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   sendExtensionUIResponse: vi.fn((): boolean => true),
 }))
 
 import { send } from '@taiji/core/transport/ws-client'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
 import { useToast } from '@/composables/useToast'
+import { useChatStore } from '@/stores/chat'
 import {
   convertToDialogRequest,
   createDialogRequestSource,
@@ -35,6 +45,13 @@ import {
   _probeDialogRequestIdSessionsSize,
   __resetDialogRequestIdSessionsForTest,
 } from '../extension-host-dialog'
+
+// 文件级 pinia setup：sendPiResponse 收尾锚点为无条件清（全路径执行 useChatStore()），
+// AC6/AC9、G1、锚点族所有调 transport 的用例统一持有 active pinia，不依赖 describe
+// 执行顺序；每用例新 pinia，chat store 分区状态隔离（pendingSend 是 store 内 Set）。
+beforeEach(() => {
+  setActivePinia(createPinia())
+})
 
 function makeUiRequestEvent(overrides: Partial<{ sessionId: string; pluginId: string; requestId: string; kind: 'select' | 'confirm' | 'input' }> = {}): Extract<InternalEvent, { kind: 'ui-request' }> {
   return {
@@ -274,6 +291,104 @@ describe('createUiResponseTransport（AC6/AC9）', () => {
     // 恢复后送达 → 删除
     expect(t.sendPluginResponse('r-pdrop', { value: 'x' })).toBe(true)
     expect(_probeDialogRequestIdSessionsSize()).toBe(0)
+  })
+})
+
+// ── sendPiResponse 应答终局收尾锚点（plain-dialog-submit-settle D1；ADR-0072 D4a
+// cancel 先例 → ADR-0073 通路级收口）── plain dialog 通路默认值 = 无 turn 预期、应答
+// 终局即收尾（生产者穷尽论证：command handler 源结构性无 turn / turn 内源 pendingSend
+// 恒空），cancel / 提交 / 断连三型统一清 pendingSend。真 pinia + 真 chat store 断言
+// pendingSend 因果（对齐 notify-toast.test.ts 形态；vi.mock chat store 只验调用不验
+// 状态，弱于因果断言）。
+
+describe('sendPiResponse 应答终局收尾锚点（TC-D4a/TC-PDS）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    __resetDialogRequestIdSessionsForTest()
+  })
+
+  it('TC-D4a-1 cancel 即清：addPendingSend 后 sendPiResponse(result=null) → pendingSend 清 + null 回传照发', () => {
+    const chat = useChatStore()
+    chat.addPendingSend('s1')
+    expect(chat.isPendingSend('s1')).toBe(true)
+
+    const t = createUiResponseTransport()
+    expect(t.sendPiResponse('s1', 'r1', 'confirm', null)).toBe(true)
+
+    // 锚点核心断言：cancel 送达即收口（不再空等 message_start 的 30s 兜底）
+    expect(chat.isPendingSend('s1')).toBe(false)
+    // 回传链不破坏：null 结果照发（pi 侧 Promise resolve 不受锚点影响）
+    expect(sendExtensionUIResponse).toHaveBeenCalledWith('s1', 'r1', 'confirm', null)
+  })
+
+  it('TC-D4a-2 判据先于 delivered：WS 未送达（返 false）仍清 pendingSend——取消意图与送达无关；返回值/保留语义不变', () => {
+    const chat = useChatStore()
+    chat.addPendingSend('s1')
+    expect(chat.isPendingSend('s1')).toBe(true)
+
+    const t = createUiResponseTransport()
+    vi.mocked(sendExtensionUIResponse).mockReturnValueOnce(false)
+    expect(t.sendPiResponse('s1', 'r1', 'confirm', null)).toBe(false)
+
+    // 判据在 delivered 判断之前：断连期取消也收口（不因回传失败残留假忙）
+    expect(chat.isPendingSend('s1')).toBe(false)
+    // M1 返回值语义不因锚点改变（false = 未送达，队列保留供重发）
+    expect(useToast().toasts.value.some((x) => x.type === 'error')).toBe(true)
+  })
+
+  it('TC-D4a-3 提交即清：addPendingSend 后 sendPiResponse(result≠null) → pendingSend 清（通路级应答终局收尾，ADR-0073）', () => {
+    const chat = useChatStore()
+    chat.addPendingSend('s1')
+
+    const t = createUiResponseTransport()
+    expect(t.sendPiResponse('s1', 'r1', 'confirm', 'answer')).toBe(true)
+
+    // 提交型同清：命令路径提交后结构性无 turn（pi rpc `void run()`），不清即 30s 假忙窗
+    expect(chat.isPendingSend('s1')).toBe(false)
+  })
+
+  it('TC-D4a-4 plugin 源不动：sendPluginResponse(null) → pendingSend 保留（锚点范围 = pi 源，plugin 源 dialog 无 addPendingSend 链）', () => {
+    const chat = useChatStore()
+    chat.addPendingSend('s1')
+
+    const t = createUiResponseTransport()
+    expect(t.sendPluginResponse('r-p-null', null)).toBe(true)
+
+    // plugin 源 cancel 不触锚点（plugin dialog 无 addPendingSend 发送链，清态属越权）
+    expect(chat.isPendingSend('s1')).toBe(true)
+    chat.clearPendingSend('s1') // 收尾清态
+  })
+
+  it('TC-D4a-5 无 pendingSend 的 cancel 幂等：不抛错、不产生负状态（clearPendingSend 本就幂等）', () => {
+    const chat = useChatStore()
+    expect(chat.isPendingSend('s1')).toBe(false)
+
+    const t = createUiResponseTransport()
+    expect(t.sendPiResponse('s1', 'r1', 'confirm', null)).toBe(true)
+    expect(chat.isPendingSend('s1')).toBe(false)
+    expect(sendExtensionUIResponse).toHaveBeenCalledWith('s1', 'r1', 'confirm', null)
+  })
+
+  it('TC-PDS-1 三型统一清：提交型（result≠null）/ cancel 型（result=null）/ 断连型（!delivered）均 clearPendingSend(sessionId)', () => {
+    const chat = useChatStore()
+    const t = createUiResponseTransport()
+
+    // 提交型（result 非 null）：命令路径提交即收尾——通路无 turn 可桥接（ADR-0073 通路级收口）
+    chat.addPendingSend('s-submit')
+    expect(t.sendPiResponse('s-submit', 'r-submit', 'select', 'provider-a')).toBe(true)
+    expect(chat.isPendingSend('s-submit')).toBe(false)
+
+    // cancel 型（result = null）：D4a 已交付语义不变（取消即清）
+    chat.addPendingSend('s-cancel')
+    expect(t.sendPiResponse('s-cancel', 'r-cancel', 'confirm', null)).toBe(true)
+    expect(chat.isPendingSend('s-cancel')).toBe(false)
+
+    // 断连型（提交 + sendExtensionUIResponse 返 false）：断连期 turn 不可达，不清则仍走
+    // 30s 兜底——应答意图照常收尾；返回值 / 表项保留重发语义不变（队列层由 TC9a 锁定）
+    chat.addPendingSend('s-drop')
+    vi.mocked(sendExtensionUIResponse).mockReturnValueOnce(false)
+    expect(t.sendPiResponse('s-drop', 'r-drop', 'select', 'model-b')).toBe(false)
+    expect(chat.isPendingSend('s-drop')).toBe(false)
   })
 })
 

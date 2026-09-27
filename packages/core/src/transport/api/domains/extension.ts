@@ -139,6 +139,15 @@ export interface ExtensionUIRequest {
   // runtime event-adapter 翻译 UI_FORM_MARKER select，前端 FormOverlay 渲染类型化问题集）
   form?: true
   formQuestions?: unknown[]  // FormQuestion[]（@zhushanwen/extension-protocol），前端守卫收窄
+  // 源元数据：本次表单提交后是否有 turn 预期（respond 分型判据，form-submit-busy-convergence D1 段 4/5）。
+  // 来源契约 = @zhushanwen/extension-protocol uiFormInteract options 的同名字段（A-1 加员）；
+  // core 不依赖 extension-protocol，本地同形声明（同上方 scheduleDraft/formQuestions 注释惯例），
+  // 帧上值由 runtime event-adapter tryTranslateFormSelect 条件落键（仅显式 false 落键，undefined 省键）。
+  // 三态语义（D2）：`true | undefined` = 有 turn 预期——提交型桥接 message_start 照旧
+  //（undefined 为存量扩展缺省态，桥接 = 现状，方向安全）；`false` = 无 turn 预期——命令
+  // handler 内 select（提交后结构性无 turn），respond 侧提交即收尾。消费方判定必须
+  // `=== false` 显式判定：truthy 简化（`!expectTurn`）会把 undefined 也当无 turn、误清桥接。
+  expectTurn?: boolean
   /** 请求入队时刻（ms，由 useExtensionUI 在 push 时打戳）。用于倒计时基准 */
   receivedAt?: number
 }

@@ -8,9 +8,9 @@ import Ajv from "ajv";
 import { describe, expect, it } from "vitest";
 
 import { ENGINE_PROTOCOL_SCHEMAS, FORBIDDEN_CREDENTIAL_KEY_FRAGMENTS } from "../protocol/schema.ts";
+import { AGENT_EVENT_TYPE_NAMES } from "../protocol/contract-types.ts";
 import { REVERSE_CHANNELS } from "../protocol/reverse-channels.ts";
 import { PROTOCOL_METHODS } from "../protocol/methods.ts";
-import { AGENT_EVENT_TYPE_NAMES } from "../protocol/contract-types.ts";
 
 const ajv = new Ajv({ strict: false });
 
@@ -41,24 +41,21 @@ describe("帧 schema 有效性（draft-07，ajv 编译 + 样本校验）", () =>
     expect(err({ id: 1, error: { code: "boom", message: "m", recovery: "r" } })).toBe(false);
   });
 
-  it("③ 通知帧：method 恒 event + runId/seq/event 形状；event.type 词表由 AGENT_EVENT_TYPE_NAMES 派生", () => {
+  it("③ 通知帧：method 恒 event + runId/seq/event 形状；event.type 枚举与词表同源", () => {
     const validate = ajv.compile(ENGINE_PROTOCOL_SCHEMAS.notification);
-    expect(validate({
-      method: "event",
-      params: { runId: "r1", seq: 1, event: { type: "text_delta", delta: "x" } },
-    })).toBe(true);
-    // 词表逐值通过（C3：schema enum 从词表派生，新增变体自动跟随，无需改本测试）
-    for (const eventType of AGENT_EVENT_TYPE_NAMES) {
-      expect(validate({
-        method: "event",
-        params: { runId: "r1", seq: 1, event: { type: eventType } },
-      }), `event.type "${eventType}" should validate`).toBe(true);
+    // 取值同源（U2 词表锁）：schema enum 从 AGENT_EVENT_TYPE_NAMES 派生——遍历词表
+    // 全集逐个过校验，不手写事件集合（新增事件变体时本断言自动纳入，无需改测试）
+    for (const name of AGENT_EVENT_TYPE_NAMES) {
+      expect(
+        validate({ method: "event", params: { runId: "r1", seq: 1, event: { type: name } } }),
+        `event.type=${name} 应过通知帧校验`,
+      ).toBe(true);
     }
-    // activity 活性信号变体（无载荷字段，仅 type）
-    expect(validate({
-      method: "event",
-      params: { runId: "r1", seq: 1, event: { type: "activity" } },
-    })).toBe(true);
+    // enum ⇄ 词表双向同源（有人绕开派生手写字面量集合即红）
+    const eventTypeEnum = ENGINE_PROTOCOL_SCHEMAS.notification.properties.params.properties.event
+      .properties.type.enum;
+    expect(new Set(eventTypeEnum)).toEqual(new Set(AGENT_EVENT_TYPE_NAMES));
+    expect(eventTypeEnum).toHaveLength(AGENT_EVENT_TYPE_NAMES.length);
     // [D3 协议版 P6] armed 武装回执变体显式编解码用例：完整载荷过帧 schema +
     // NDJSON 逐字序列化往返等值（「事件逐字序列化」不变量 3 的显式锚定——
     // 词表派生循环只覆盖 {type} 形态，本用例锚定 armed 的载荷字段）
@@ -76,7 +73,7 @@ describe("帧 schema 有效性（draft-07，ajv 编译 + 样本校验）", () =>
     } as const;
     expect(validate(armedFrame)).toBe(true);
     expect(JSON.parse(JSON.stringify(armedFrame))).toEqual(armedFrame);
-    // 未知 event.type
+    // 词表外的未知 event.type 拒
     expect(validate({
       method: "event",
       params: { runId: "r1", seq: 1, event: { type: "surprise" } },
@@ -88,7 +85,7 @@ describe("帧 schema 有效性（draft-07，ajv 编译 + 样本校验）", () =>
     })).toBe(false);
   });
 
-  it("④ 反向请求帧：字符串 id + method 限 9 通道词表", () => {
+  it("④ 反向请求帧：字符串 id + method 限 6 通道全集（[池抽象降级] host/poolResolved / [permission 退役] host/permission 已删）", () => {
     const validate = ajv.compile(ENGINE_PROTOCOL_SCHEMAS.reverseRequest);
     expect(validate({ id: "rev-1", method: "host/askUser", params: {} })).toBe(true);
     for (const ch of REVERSE_CHANNELS) {

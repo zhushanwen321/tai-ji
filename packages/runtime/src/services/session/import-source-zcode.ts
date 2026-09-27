@@ -58,6 +58,18 @@ function queryFailed(db: ZcodeReadonlyDb, e: unknown): ImportServiceError {
   )
 }
 
+/** 打开宿主库只读连接；失败统一映射 import_source_missing（§3.6 行 1 恢复指引：确认已安装）。 */
+async function openZcodeDbOrFail(dbPath: string): Promise<ZcodeReadonlyDb> {
+  try {
+    return await openZcodeReadonlyDb(dbPath)
+  } catch (e) {
+    throw new ImportServiceError(
+      'import_source_missing',
+      `未找到或无法打开 zcode 会话库（${dbPath}，${toErrorMessage(e)}）。请确认已安装 zcode 并至少运行过一次会话`,
+    )
+  }
+}
+
 /** zcode 源：宿主库（或 dbPath 注入的 fixture 库）只读候选列表 + 导入定位。 */
 export class ZcodeImportSource implements SessionImportSource {
   readonly kind = 'zcode' as const
@@ -69,17 +81,7 @@ export class ZcodeImportSource implements SessionImportSource {
     // ImportRequest），默认根 = 构造注入的宿主库路径（组合根传 hostZcodeDbPath，测试传
     // fixture 库路径——与 pi 源 getRootDir 同注入模式）
     const dbPath = this.deps.getHostDbPath()
-
-    // 打开失败（不存在/不可打开）→ import_source_missing（§3.6 行 1 恢复指引：确认已安装）
-    let db: ZcodeReadonlyDb
-    try {
-      db = await openZcodeReadonlyDb(dbPath)
-    } catch (e) {
-      throw new ImportServiceError(
-        'import_source_missing',
-        `未找到或无法打开 zcode 会话库（${dbPath}，${toErrorMessage(e)}）。请确认已安装 zcode 并至少运行过一次会话`,
-      )
-    }
+    const db = await openZcodeDbOrFail(dbPath)
 
     // 全量候选行（不 SQL 截断）：query 过滤 / total / dirs 聚合需全集，与 pi 源语义同构
     //（SQL LIMIT 后再过滤会漏掉 N 页之外的搜索命中）；全表 4k 行毫秒级（§3.8）
@@ -151,15 +153,7 @@ export class ZcodeImportSource implements SessionImportSource {
   /** 返回页字节聚合（独立连接：候选行查询连接已关，聚合再开短连接；错误按查询失败映射）。 */
   private async byteSizesOf(dbPath: string, sessionIds: string[]): Promise<Map<string, number>> {
     if (sessionIds.length === 0) return new Map()
-    let db: ZcodeReadonlyDb
-    try {
-      db = await openZcodeReadonlyDb(dbPath)
-    } catch (e) {
-      throw new ImportServiceError(
-        'import_source_missing',
-        `未找到或无法打开 zcode 会话库（${dbPath}，${toErrorMessage(e)}）。请确认已安装 zcode 并至少运行过一次会话`,
-      )
-    }
+    const db = await openZcodeDbOrFail(dbPath)
     try {
       return db.candidatesByteSize(sessionIds)
     } catch (e) {
@@ -187,15 +181,7 @@ export class ZcodeImportSource implements SessionImportSource {
     }
     const dbPath = request.dbPath ?? this.deps.getHostDbPath()
 
-    let db: ZcodeReadonlyDb
-    try {
-      db = await openZcodeReadonlyDb(dbPath)
-    } catch (e) {
-      throw new ImportServiceError(
-        'import_source_missing',
-        `未找到或无法打开 zcode 会话库（${dbPath}，${toErrorMessage(e)}）。请确认已安装 zcode 并至少运行过一次会话`,
-      )
-    }
+    const db = await openZcodeDbOrFail(dbPath)
     let row: ZcodeSessionRow | undefined
     try {
       row = db.getSessionRow(sessionId)
@@ -236,15 +222,7 @@ export class ZcodeImportSource implements SessionImportSource {
         // 转换相位：惰性开只读连接（prepareImport 校验连接已关；去重拒绝路径 write 不被
         // 调用，不持有连接），完成/失败都在 finally 内关闭
         let out: ZcodeConversionOutput
-        let writeDb: ZcodeReadonlyDb
-        try {
-          writeDb = await openZcodeReadonlyDb(dbPath)
-        } catch (e) {
-          throw new ImportServiceError(
-            'import_source_missing',
-            `未找到或无法打开 zcode 会话库（${dbPath}，${toErrorMessage(e)}）。请确认已安装 zcode 并至少运行过一次会话`,
-          )
-        }
+        const writeDb = await openZcodeDbOrFail(dbPath)
         try {
           out = convertZcodeSession(writeDb, sessionId, header)
         } catch (e) {

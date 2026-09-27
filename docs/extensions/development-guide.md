@@ -638,6 +638,17 @@ pi.registerCommand({
 
 **[规范]** Command 用于用户手动触发的操作。Tool 用于模型调用的操作。两者不互为替代——Tool 有 promptSnippet 提示模型何时调用，Command 没有此机制。
 
+### 5.1 向用户提问的通道选型 🔵
+
+> 通道收尾语义权威 = [docs/adr/decisions.md](../adr/decisions.md) ADR-0072 / ADR-0073。命令或工具内需要向用户提问时按此选型：
+
+| 提问形态 | 通道 | API | 收尾语义 |
+|---------|------|-----|---------|
+| 简单单选 / 确认类，一步收口，提交后无 turn 跟随 | plain dialog（taiji 内底部浮带） | 裸 `ctx.ui.select(title, labels)`（确认/输入用同族 `ctx.ui.confirm` / `ctx.ui.input`） | 应答终局即时收尾——提交/取消后宿主 busy 态立即恢复；pi select API 无元数据位，不可声明 turn 预期 |
+| 多问一次提交 / 级联表单 / 需显式声明「提交后是否有 turn 跟随」 | form（taiji 内 FormOverlay） | `uiFormInteract`（`@zhushanwen/extension-protocol`） | `expectTurn` 三态声明：命令 handler 内提交后无 turn 传 `expectTurn: false`（应答即收尾）；缺省 `true` = 提交后桥接 message_start |
+
+**[指南]** 提交后要 `pi.sendMessage` 驱动模型开 turn 的提问，必须走 `uiFormInteract`（`expectTurn` 保持缺省或显式 `true`）——plain dialog 通路提交即收尾，提交后开 turn 会在 turn 到来前产生状态空窗（插话可能打断）。通道可用性：`uiFormInteract` 仅 taiji 宿主（RPC 模式）有效，TUI 形态需扩展自有组件渲染（scheduler / plan 先例）；裸 `ctx.ui.select` 是 pi 原生 API，无 taiji 宿主时同样可用。
+
 ---
 
 ## 6. 事件生命周期管理 **[规范]**

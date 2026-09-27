@@ -979,8 +979,11 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     // 清 pendingSend（bash 消息不经此收口：finalizeMessages 跳过 bash，
     // 其生命周期由 bashResultEffect/markBashError 独立管理，不应被 assistant 收口误清）。
     clearPendingSend(sessionId)
-    // 收口日志：仅异常 reason 打 dev warn（保留诊断价值），normal/aborted 正常路径不打（去长对话噪音）
-    if (isDevMode() && reason !== 'normal' && reason !== 'aborted') console.warn(`[chat] finalizeSession sid=${sessionId} reason=${reason}`)
+    // 收口日志（D5）：timeout = 30s 兜底命中的真异常信号，恒发 warn（不依赖 dev 标志——
+    // 非 dev 构建 attach 调试可见，与 warnSteerNotConsumed/warnSendBlocked 常驻 warn 先例形态统一）；
+    // 其余异常 reason 维持 dev 门（dev 留痕）；normal/aborted 正常路径不打（去长对话噪音）
+    const shouldWarn = reason === 'timeout' || (isDevMode() && reason !== 'normal' && reason !== 'aborted')
+    if (shouldWarn) console.warn(`[chat] finalizeSession sid=${sessionId} reason=${reason}`)
   }
 
   /**

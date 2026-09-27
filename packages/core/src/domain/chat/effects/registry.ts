@@ -516,11 +516,12 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     }
   },
 
-  // B1（PR#86 review）：pi 静默卡死 WARN（120s 无活动，提示性，不中断流）。
-  // 与 stream_error 物理隔离——仅追加 system 提示消息，不调 finalizeSession，
-  // session 保持 streaming 态（pi 可能只是慢，130s 后恢复产出）。
+  // B1（PR#86 review）：非终结性提示通道，与 stream_error 物理隔离——仅追加 system
+  // 提示消息，不调 finalizeSession，session 保持 streaming 态。两个生产者：ping 探测
+  // 的 pi 静默卡死 WARN（120s 无活动，pi 可能只是慢，130s 后恢复产出）与 EventAdapter
+  // 的单帧翻译失败提示（MF-1-13：pi 流继续、turn 可能照常成功，失败帧不可终结 turn）。
   // [W2 fix-chat-flow-order D4] liveOnly 标记（全仓唯一写入点）：stream_warn 是 taiji runtime
-  // 自产健康警告，pi 无对应 entry、重开即消失——无 entry 可构故不 entry 化（直插即本类
+  // 自产提示，pi 无对应 entry、重开即消失——无 entry 可构故不 entry 化（直插即本类
   // 消息的正确入流路径），分组层据此归 turn 内 notice（不切断 turn，W3 消费），不参与
   // 「live ≡ reload」等价性断言。
   'message.stream_warn': (ctx, sid, payload) => {

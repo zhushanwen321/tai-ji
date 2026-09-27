@@ -12,6 +12,15 @@
 // 不参与同步成员判据；唯一阻断面 = 被 gate 能力位多声明 → engine_capability_mismatch）；
 // listModels / validateModel 为诊断面（宿主侧同步成员读 manifest，不经本方法）；
 // dispose 幂等；ping 为健康检查（ADR-0047：静默 ≠ 卡死，不据此杀任务）。
+//
+// 未知正向 method 的应答义务（未知成员宽容语义②，条文权威 = ADR-0071）：宿主演进
+// 会派出本引擎未知的正向 method（协议 additive 演进的跨代窗口）——引擎必须回 error
+// 帧 `engine_method_unsupported`（engine_ 前缀透传面新码，不进 core 消费词表，
+// isEngineErrorPassthroughCode 原样透传，旧宿主收到不崩），不得静默挂起/无应答/
+// 崩溃。当前登记未实装（全仓无消费方，C 型「无消费方不进协议」纪律）：引擎实装
+// 义务 + conformance 用例随下一引擎适配层立项随批带上——义务成文 =
+// docs/extensions/subagents/engine-development-guide.md §2.1/§13；码登记 =
+// error-codes.ts 头注。
 
 import type {
   AgentCallOpts,
