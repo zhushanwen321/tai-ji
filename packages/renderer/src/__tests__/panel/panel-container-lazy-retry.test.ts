@@ -66,6 +66,24 @@ vi.mock('@/components/panel/TerminalView.vue', () => {
   }
 })
 
+// ── 静态重面板 vi.mock（import 期替换，砍掉 PanelContainer 整图 transform；本文件不开
+// git/doc/bashTask/plan/btw tab，占位组件无断言观测面，形态对齐 drawer-mode 测试）──
+vi.mock('@/components/panel/GitPanel.vue', () => ({
+  default: { name: 'GitPanel', template: '<div data-testid="git-panel" />' },
+}))
+vi.mock('@/components/panel/CommandDocPanel.vue', () => ({
+  default: { name: 'CommandDocPanel', template: '<div data-testid="doc-panel" />' },
+}))
+vi.mock('@/components/extension/BackgroundTaskDetailPanel.vue', () => ({
+  default: { name: 'BackgroundTaskDetailPanel', template: '<div data-testid="bash-task-detail-panel" />' },
+}))
+vi.mock('@/components/panel/plan/PlanDocsPanel.vue', () => ({
+  default: { name: 'PlanDocsPanel', template: '<div data-testid="plan-docs-panel" />' },
+}))
+vi.mock('@/components/panel/BtwPanel.vue', () => ({
+  default: { name: 'BtwPanel', template: '<div data-testid="btw-panel" />' },
+}))
+
 // ── 壳层依赖 mock（对齐 panel-container-drawer-mode.test.ts）──
 vi.mock('@/composables/features/file-tree/useGitStatus', () => ({
   GIT_STATUS_KEY: Symbol('git-status'),

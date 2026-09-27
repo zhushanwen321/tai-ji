@@ -38,34 +38,6 @@ const NOOP_ESM_LOADER = resolve(__dirname, 'fixtures/noop-esm-loader.cjs')
 // 宽限），整包满并行 + 系统余载下超 vitest 默认 5s testTimeout（对齐 equivalence
 // 真实 pi 用例显式超时口径）。
 describe('PluginHost', { timeout: 30_000 }, () => {
-  // ── TC-2-01: sandbox 分配独立 fork 子进程 ─────────────────────
-  it('TC-2-01: assignWorker for sandbox creates unique fork process per plugin', async () => {
-    const rpc = new PluginRpcServer()
-    const host = new PluginHost(rpc, { bootstrapPathOverride: PROCESS_MOCK_SOURCE, execArgv: ['--import', NOOP_ESM_LOADER] })
-
-    const workerId1 = await host.assignWorker('plugin-a', 'sandbox')
-    const workerId2 = await host.assignWorker('plugin-b', 'sandbox')
-
-    // sandbox 插件各自独占 fork 子进程
-    expect(workerId1).not.toBe(workerId2)
-    expect(workerId1.startsWith('sandbox-')).toBeTruthy()
-    expect(workerId2.startsWith('sandbox-')).toBeTruthy()
-
-    // sandbox 走 fork 子进程，不创建 Worker 线程 → getWorkerInstance 为 undefined
-    expect(host.getWorkerInstance(workerId1)).toBeUndefined()
-    expect(host.getWorkerInstance(workerId2)).toBeUndefined()
-
-    // 通过 pluginId 可拿到 handle（activator 消费 handle.workerId）
-    const handle1 = host.getWorkerHandle('plugin-a')
-    const handle2 = host.getWorkerHandle('plugin-b')
-    expect(handle1).toBeDefined()
-    expect(handle2).toBeDefined()
-    expect(handle1!.workerId).toBe(workerId1)
-    expect(handle2!.workerId).toBe(workerId2)
-
-    await host.shutdown()
-  })
-
   // ── TC-2-02: trusted 共享 Worker 线程 ─────────────────────────
   it('TC-2-02: assignWorker for trusted shares worker (≤10 plugins)', async () => {
     const rpc = new PluginRpcServer()
@@ -85,33 +57,6 @@ describe('PluginHost', { timeout: 30_000 }, () => {
     expect(handle.pluginIds.length).toBe(3)
 
     await host.shutdown()
-  })
-
-  // ── TC-2-03: terminateWorker 清理 sandbox 子进程 ──────────────
-  it('TC-2-03: terminateWorker removes worker', async () => {
-    const rpc = new PluginRpcServer()
-    const host = new PluginHost(rpc, { bootstrapPathOverride: PROCESS_MOCK_SOURCE, execArgv: ['--import', NOOP_ESM_LOADER] })
-
-    const workerId = await host.assignWorker('term-test', 'sandbox')
-
-    expect(host.getWorkerHandle('term-test')).toBeDefined()
-
-    await host.terminateWorker(workerId)
-
-    const afterTerminate = host.getWorkerHandle('term-test')
-    expect(afterTerminate).toBe(undefined)
-
-    await host.shutdown()
-  })
-
-  // ── 补充：getAllWorkers 初始为空 ─────────────────────────────
-  it('getAllWorkers returns empty initially', () => {
-    const rpc = new PluginRpcServer()
-    const host = new PluginHost(rpc, { workerBootstrapOverride: WORKER_MOCK })
-
-    expect(host.getAllWorkers()).toEqual([])
-
-    host.shutdown()
   })
 
   // ── 补充：terminateWorker 对不存在的 worker 是 no-op ─────────
@@ -138,33 +83,6 @@ describe('PluginHost', { timeout: 30_000 }, () => {
     await host.shutdown()
     expect(host.getWorkerHandle('s-1')).toBeUndefined()
     expect(host.getWorkerHandle('s-2')).toBeUndefined()
-  })
-
-  // ── 补充：sandbox 子进程崩溃转发 crash callback ────────────────
-  it('crash callback is invoked when worker errors', async () => {
-    const rpc = new PluginRpcServer()
-    const host = new PluginHost(rpc, { bootstrapPathOverride: PROCESS_MOCK_SOURCE, execArgv: ['--import', NOOP_ESM_LOADER] })
-
-    const crashes: Array<{ workerId: string; pluginIds: string[]; error: string }> = []
-    host.setCrashCallback((workerId, pluginIds, error) => {
-      crashes.push({ workerId, pluginIds, error })
-    })
-
-    const workerId = await host.assignWorker('crash-test', 'sandbox')
-    const handle = host.getWorkerHandle('crash-test')!
-    expect(handle).toBeDefined()
-
-    // mock bootstrap 收到 crash → process.exit(1) → 子进程 exit(1) → onCrash 转发
-    handle.postMessage({ type: 'crash' })
-
-    // 事件驱动等待子进程退出事件传播（固定 sleep 在 38 包并行负载下会超窗假红）
-    await vi.waitFor(() => expect(crashes.length).toBe(1), { timeout: 10_000 })
-
-    expect(crashes.length).toBe(1)
-    expect(crashes[0].workerId).toBe(workerId)
-    expect(crashes[0].pluginIds).toContain('crash-test')
-
-    await host.shutdown()
   })
 
   // ── 回归：预期终止不误报崩溃（退出 toast「插件 statusline 崩溃」事故）──

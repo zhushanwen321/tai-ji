@@ -9,9 +9,12 @@
  *   此断言是其英文侧补集）
  * - thinking-levels 7 档 labelKey 完整 + getDisplayLabel 双语值 + minimal 补齐（U10）
  * - THINKING_STRATEGIES 3 项 labelKey + en-US 值
- * - sidebar.update 命名空间双语存在（useAppUpdate.ts:101 动态组装
- *   `sidebar.update.${mapped}`，escape 出 locale-key-usage-guard 的字面扫描，本文件是
- *   该命名空间唯一存在性守卫）+ 插值占位符（{version}/{from}/{to}）
+ * - sidebar.update 静态字面键（newVersionWithVersion / versionTransition / downloading /
+ *   error / retry 等）双语存在 + 插值占位符（{version}/{from}/{to}）；升级失败 toast 的
+ *   upgradeFailed 族键
+ *   是真正的动态组装键（use-app-update-errors.ts 的 resolveFailedToastKey 拼接
+ *   `sidebar.update.${mapped}` / upgradeFailedInstaller / 兜底 upgradeFailed，
+ *   escape 出 locale-key-usage-guard 的字面扫描，键存在性由 upgradeFailed* 专用用例守卫）
  * - settings.update testProxy keys 完整性
  * - landing 模式改名（D4）值的回归锁定：`newTask.presetSelect.*` 用「模式」措辞
  *   （R3 补完——landing 侧曾漏改，改名落地无测试覆盖即会再次回退）
@@ -186,6 +189,37 @@ describe('sidebar.update / settings.update 双语 keys 存在', () => {
     expect(enUS.update.error).toBeDefined()
     expect(zhCN.update.retry).toBeDefined()
     expect(enUS.update.retry).toBeDefined()
+  })
+
+  it('sidebar.update.upgradeFailed* 族（动态组装键）生产源码与双语 locale 对齐', () => {
+    // 键清单从生产动态组装点提取（use-app-update-errors.ts：LAUNCH_FAILURE_ERROR_KEYS
+    // 值 + win 安装器动态码 + 兜底 upgradeFailed），防新增键漏翻或键名漂移
+    const source = readFileSync(
+      resolve(__dirname, '../../composables/features/settings/use-app-update-errors.ts'),
+      'utf-8',
+    )
+    const prodKeys = [...new Set(source.match(/upgradeFailed[A-Za-z]*/g) ?? [])].sort()
+
+    // 实际键名集合：兜底 1 + 错误码细分 8 + win 安装器动态码 1
+    const registeredKeys = [
+      'upgradeFailed',
+      'upgradeFailedAppRunning',
+      'upgradeFailedBackup',
+      'upgradeFailedExtract',
+      'upgradeFailedInstaller',
+      'upgradeFailedInternal',
+      'upgradeFailedMove',
+      'upgradeFailedReadOnly',
+      'upgradeFailedSha',
+      'upgradeFailedSwap',
+    ] as const
+    expect(prodKeys).toEqual([...registeredKeys].sort())
+
+    // 全部键 zh-CN / en-US 双语存在
+    for (const k of registeredKeys) {
+      expect(zhCN.update[k]).toBeDefined()
+      expect(enUS.update[k]).toBeDefined()
+    }
   })
 
   it('settings.update testProxy 相关 keys 存在', () => {

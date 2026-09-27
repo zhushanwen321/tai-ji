@@ -4,10 +4,10 @@
  * 覆盖验收标准：
  * ① 入口两级结构：Popover menu（内置模板/自定义）+ 点内置 → Dialog 打开
  * ② 分类 tab 过滤（both 双归属）
- * ③ 搜索含 envVar
+ * ③ 搜索含 envVar / id
  * ④ 3 列卡片网格 + 品牌色 logo + 认证 chip
  * ⑤ brandColor 纯函数（品牌色/fallback/稳定）
- * ⑥ 点卡片 → emit select + Dialog 关闭
+ * ⑥ 点卡片 → emit select + Dialog 关闭；点菜单「自定义」→ emit custom + Popover 关闭
  *
  * 测试模式：reka Dialog 经 Portal teleport 到 document.body，mount attachTo body 后
  * 用 document.body.querySelector 查询；点击用原生 HTMLElement.click()。i18n 经
@@ -62,6 +62,9 @@ describe('ProviderTemplatePicker 入口两级结构（TC1）', () => {
     await flushPromises()
     expect(document.body.querySelector('[data-testid="add-menu-builtin"]')).toBeTruthy()
     expect(document.body.querySelector('[data-testid="add-menu-custom"]')).toBeTruthy()
+    // 内置模板条目带「推荐」标识（i18n mock t() 返回 key，故断言 key 而非中文文案）
+    const builtin = document.body.querySelector('[data-testid="add-menu-builtin"]')
+    expect(builtin!.textContent).toContain('settings.provider.builtinTemplate.menuRecommended')
     // Dialog 未打开
     expect(document.body.querySelector('[data-testid="provider-template-dialog"]')).toBeNull()
     wrapper.unmount()
@@ -132,6 +135,21 @@ describe('搜索（TC3，含 envVar）', () => {
     expect(document.body.querySelector('[data-testid="provider-template-google-vertex"]')).toBeTruthy()
     wrapper.unmount()
   })
+
+  it('按 id 搜索：openai 命中 openai + openai-codex，其余被过滤', async () => {
+    const wrapper = mountPicker()
+    await openDialog()
+    const input = document.body.querySelector('[data-testid="provider-template-search"]') as HTMLInputElement
+    input.value = 'openai'
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+    // id 含 openai 的两项命中，anthropic / google-vertex 被过滤
+    expect(document.body.querySelector('[data-testid="provider-template-openai"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-testid="provider-template-openai-codex"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-testid="provider-template-anthropic"]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="provider-template-google-vertex"]')).toBeNull()
+    wrapper.unmount()
+  })
 })
 
 describe('卡片网格 + 品牌色 + 认证 chip（TC4）', () => {
@@ -188,6 +206,19 @@ describe('选中流（TC6）', () => {
     expect((selectEvents![0][0] as BuiltinProviderTemplate).id).toBe('openai')
     // Dialog 关闭
     expect(document.body.querySelector('[data-testid="provider-template-dialog"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('点菜单「自定义」→ emit custom（原手填流程出口）+ Popover menu 关闭', async () => {
+    const wrapper = mountPicker()
+    const trigger = document.body.querySelector('[data-testid="provider-template-picker"]')
+    ;(trigger as HTMLElement).click()
+    await flushPromises()
+    ;(document.body.querySelector('[data-testid="add-menu-custom"]') as HTMLElement).click()
+    await flushPromises()
+    expect(wrapper.emitted('custom')).toBeTruthy()
+    // 关闭后菜单内容从 body 消失
+    expect(document.body.querySelector('[data-testid="add-menu-custom"]')).toBeNull()
     wrapper.unmount()
   })
 })

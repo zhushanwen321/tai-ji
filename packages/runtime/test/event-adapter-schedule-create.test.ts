@@ -5,13 +5,16 @@
  * - 合法 draft → 翻译为 extension.ui_request 帧（scheduleCreate: true + scheduleDraft 字段保真）
  *   + extension-ui kind 事件（watchdog 暂停 + pending 跟踪，S4）
  * - 检测失败（非合法 JSON / draft 缺字段）→ 降级普通 select（S2 同款兜底）
- * - 既有三 marker 分支回归：SESSION_MANAGER / BRIDGE 不变；ASK_USER 随 legacy 归一上移
- *   产出 form:true 统一表单帧（questions 经 type 推断映射）
+ *
+ * 既有 marker 分支（SESSION_MANAGER / BRIDGE / ASK_USER）的覆盖：
+ * - SESSION_MANAGER → src/__tests__/session-manager-e2e-probe.test.ts（marker 翻译 + 枚举守卫）
+ * - BRIDGE → test/bridge-marker-channel.test.ts（四 method it.each + malformed 三态）
+ * - ASK_USER → test/event-adapter-gui.test.ts（U6 合法表单 + U8 降级）
  */
 
 import { describe, it, expect } from 'vitest'
 import { translate } from '../src/infra/pi/event-adapter.js'
-import { SCHEDULE_CREATE_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, BRIDGE_MARKER } from '@zhushanwen/extension-protocol'
+import { SCHEDULE_CREATE_MARKER } from '@zhushanwen/extension-protocol'
 import type { ScheduleDraft } from '@zhushanwen/extension-protocol'
 import type { PiTranslatedEvent } from '../src/services/session/types.js'
 import type { PiEvent } from '../src/infra/pi/pi-protocol.js'
@@ -203,105 +206,5 @@ describe('event-adapter: schedule-create SCHEDULE_CREATE_MARKER 检测（第 4 m
     expect(msg!.message.payload.options).toEqual(['red', 'green'])
     expect(msg!.message.payload.scheduleCreate).toBeUndefined()
     expect(msg!.message.payload.scheduleDraft).toBeUndefined()
-  })
-})
-
-// ── 既有三 marker 分支回归（只增分支不改分支：三分支翻译行为不变）──────────────
-
-describe('event-adapter: 既有 marker 分支回归（U5 改动后行为不变）', () => {
-  it('SESSION_MANAGER_MARKER → session-manager-ui kind + 无前端广播帧（runtime 内部消化）', () => {
-    const payload = JSON.stringify({ action: 'list', params: {} })
-    const event = makeSelectEvent(SESSION_MANAGER_MARKER, [payload], 'req-sm')
-
-    const results = translate(event, 'sess-1')
-
-    const smUi = results.find(r => r.kind === 'session-manager-ui') as
-      | { kind: 'session-manager-ui'; requestId: string; sessionId: string; action: string; params: Record<string, unknown> }
-      | undefined
-    expect(smUi).toBeDefined()
-    expect(smUi!.requestId).toBe('req-sm')
-    expect(smUi!.action).toBe('list')
-    expect(smUi!.params).toEqual({})
-    // [HISTORICAL] 不发前端广播：session-manager 请求由 handler 应答，广播会产生空壳 dialog
-    expect(findMessage(results)).toBeUndefined()
-  })
-
-  it('SESSION_MANAGER_MARKER 非法 action → 折叠 __malformed__ 哨兵', () => {
-    const payload = JSON.stringify({ action: 'evil', params: {} })
-    const event = makeSelectEvent(SESSION_MANAGER_MARKER, [payload], 'req-sm-bad')
-
-    const results = translate(event, 'sess-1')
-
-    const smUi = results.find(r => r.kind === 'session-manager-ui') as
-      | { kind: 'session-manager-ui'; action: string }
-      | undefined
-    expect(smUi).toBeDefined()
-    expect(smUi!.action).toBe('__malformed__')
-  })
-
-  it('BRIDGE_MARKER 合法 method → bridge-ui kind + 无前端广播帧', () => {
-    const payload = JSON.stringify({ method: 'bridge:tool_execute', toolName: 'bash', toolCallId: 'tc-1', params: { cmd: 'ls' } })
-    const event = makeSelectEvent(BRIDGE_MARKER, [payload], 'req-bridge')
-
-    const results = translate(event, 'sess-1')
-
-    const bridgeUi = results.find(r => r.kind === 'bridge-ui') as
-      | { kind: 'bridge-ui'; requestId: string; sessionId: string; method: string; data: Record<string, unknown> }
-      | undefined
-    expect(bridgeUi).toBeDefined()
-    expect(bridgeUi!.method).toBe('bridge:tool_execute')
-    expect(bridgeUi!.data.toolName).toBe('bash')
-    expect(findMessage(results)).toBeUndefined()
-  })
-
-  it('BRIDGE_MARKER 非法 JSON → 折叠 bridge:malformed 哨兵', () => {
-    const event = makeSelectEvent(BRIDGE_MARKER, ['{not json'], 'req-bridge-bad')
-
-    const results = translate(event, 'sess-1')
-
-    const bridgeUi = results.find(r => r.kind === 'bridge-ui') as
-      | { kind: 'bridge-ui'; method: string }
-      | undefined
-    expect(bridgeUi).toBeDefined()
-    expect(bridgeUi!.method).toBe('bridge:malformed')
-  })
-
-  it('ASK_USER_MARKER 合法 questions → form=true 统一表单帧（type 推断映射）+ extension-ui kind', () => {
-    const questions = [{ header: 'db', question: '选哪个?', options: [{ label: 'PG' }] }]
-    const payload = JSON.stringify({ questions, allowCancel: false })
-    const event = makeSelectEvent(ASK_USER_MARKER, [payload], 'req-ask')
-
-    const results = translate(event, 'sess-1')
-
-    const extUi = findExtensionUi(results)
-    expect(extUi).toBeDefined()
-    const msg = findMessage(results)
-    expect(msg).toBeDefined()
-    expect(msg!.message.type).toBe('extension.ui_request')
-    // legacy 归一上移：marker 命中即产 form:true 统一表单帧（有 options → choice）
-    expect(msg!.message.payload.form).toBe(true)
-    expect(msg!.message.payload.formQuestions).toEqual([
-      { type: 'choice', header: 'db', question: '选哪个?', options: [{ label: 'PG' }] },
-    ])
-    expect(msg!.message.payload.allowCancel).toBe(false)
-    expect(msg!.message.payload.options).toBeUndefined()
-    // legacy 键不再透传（归一在 runtime 单点完成）
-    expect(msg!.message.payload.askUser).toBeUndefined()
-    expect(msg!.message.payload.askUserQuestions).toBeUndefined()
-    // 与 schedule-create 源键互不串扰
-    expect(msg!.message.payload.scheduleCreate).toBeUndefined()
-    expect(msg!.message.payload.scheduleDraft).toBeUndefined()
-  })
-
-  it('ASK_USER_MARKER 非法 JSON → 降级普通 select（form 缺省）', () => {
-    const event = makeSelectEvent(ASK_USER_MARKER, ['not-valid-json{'], 'req-ask-bad')
-
-    const results = translate(event, 'sess-1')
-
-    const msg = findMessage(results)
-    expect(msg).toBeDefined()
-    expect(msg!.message.payload.form).toBeUndefined()
-    expect(msg!.message.payload.options).toEqual(['not-valid-json{'])
-    expect(msg!.message.payload.scheduleCreate).toBeUndefined()
   })
 })
