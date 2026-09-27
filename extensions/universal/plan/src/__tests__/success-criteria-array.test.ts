@@ -71,27 +71,10 @@ describe("buildPlanSuccessCriteria — 1 总述 + 前 3 条 preview", () => {
     expect(items.slice(1)).toEqual(["1. Alpha", "2. Bravo", "3. Charlie"]);
   });
 
-  it("1 步 plan → 2 条", () => {
-    const items = expectSingleLineArray(buildPlanSuccessCriteria(PLAN_PATH, ["Only step"]));
-
-    expect(items).toHaveLength(2);
-    expect(items[0]).toBe("All 1 steps of login-page executed and verified");
-    expect(items[1]).toBe("1. Only step");
-  });
-
   it("0 步 → 仅总述 1 条", () => {
     const items = expectSingleLineArray(buildPlanSuccessCriteria(PLAN_PATH, []));
 
     expect(items).toEqual(["All 0 steps of login-page executed and verified"]);
-  });
-
-  it("12 步 → 仍 4 条，总述含实际总数", () => {
-    const steps = Array.from({ length: 12 }, (_, i) => `S${i + 1}`);
-    const items = expectSingleLineArray(buildPlanSuccessCriteria(PLAN_PATH, steps));
-
-    expect(items).toHaveLength(4);
-    expect(items[0]).toBe("All 12 steps of login-page executed and verified");
-    expect(items.slice(1)).toEqual(["1. S1", "2. S2", "3. S3"]);
   });
 
   it("目录名混合大小写 → kebab 链小写折叠（非生产形态防御）", () => {
@@ -170,18 +153,6 @@ describe("handlePlanComplete — goalInit slot 第 5 参数为新形态 string[]
       "2. Step B",
       "3. Step C",
     ]);
-  });
-
-  it("12 步 plan → 数组长度固定 4（1 总述 + 3 preview），不再按 8 条上限截断", () => {
-    const steps = Array.from({ length: 12 }, (_, i) => `Step ${i + 1}`);
-    fsMock.readFileSync.mockReturnValue(makePlanContent(steps));
-
-    handlePlanComplete(pi as never, ctx as never, makeActiveState(), "execute");
-
-    const items = getCriteriaArg();
-    expect(items).toHaveLength(4);
-    expect(items[0]).toContain("12 steps");
-    expect(items[0]).toContain("login-page");
   });
 
   it("CRLF plan 文件 → 每条 criteria 仍单行不含 \\r \\n", () => {

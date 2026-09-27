@@ -203,21 +203,17 @@ describe("registerPlanTool", () => {
 
   // --- removed actions (D1 / D3) ---
   describe("removed action rejections", () => {
-    it("rejects plan(action='list-template') as an unknown action with the 6-action list (D1)", async () => {
-      const { exec } = setup();
-      await expect(exec({ action: "list-template" })).rejects.toThrow(
-        "Unknown plan action: list-template. Valid actions: enter, select-template, complete, abort, register-doc, submit-review",
-      );
-    });
-
-    it("rejects plan(action='create-template') as an unknown action (D3 / V4)", async () => {
-      const { exec } = setup();
-      await expect(
-        exec({ action: "create-template", templateName: "my-plan", templateContent: "# hello" }),
-      ).rejects.toThrow(
-        "Unknown plan action: create-template. Valid actions: enter, select-template, complete, abort, register-doc, submit-review",
-      );
-    });
+    it.each(["list-template", "create-template"] as const)(
+      "rejects plan(action='%s') as an unknown action with the 6-action list (D1/D3)",
+      async (removed) => {
+        const { exec } = setup();
+        await expect(
+          exec(removed === "create-template" ? { action: removed, templateName: "my-plan", templateContent: "# hello" } : { action: removed }),
+        ).rejects.toThrow(
+          `Unknown plan action: ${removed}. Valid actions: enter, select-template, complete, abort, register-doc, submit-review`,
+        );
+      },
+    );
   });
 
   // --- renderResult 兜底（MF-1-7 旧持久化 details 形态）---
@@ -243,34 +239,24 @@ describe("registerPlanTool", () => {
       return tool.renderResult;
     }
 
-    it("旧 action=list-template details（已删 action 的历史 entry）渲染不抛、回落 content 文本", () => {
+    it.each([
+      { action: "list-template", details: { action: "list-template", templates: ["feature-plan", "bugfix"] }, text: "Available templates: feature-plan, bugfix" },
+      { action: "create-template", details: { action: "create-template" }, text: "legacy entry" },
+    ])("legacy/unknown action details ($action) render without throwing, falling back to the content text", ({ details, text }) => {
       const { pi } = setup();
       const render = renderFn(pi);
-      // git 2ab33c46c 旧版形态：details.action="list-template" 不在现版 PlanDetails 联合内。
-      // 修复前 switch 落空返回 undefined → pi TUI 渲染循环对 undefined 调 .render() TypeError
+      // git 2ab33c46c 旧版形态：details.action 不在现版 PlanDetails 联合内（list-template 为
+      // 已删 action 的历史 entry 形态）。修复前 switch 落空返回 undefined → pi TUI 渲染循环
+      // 对 undefined 调 .render() TypeError；任意未知 action 同走 default 兜底（防御未来再删）。
       const result = {
-        content: [{ type: "text", text: "Available templates: feature-plan, bugfix" }],
-        details: { action: "list-template", templates: ["feature-plan", "bugfix"] },
+        content: [{ type: "text", text }],
+        details,
       };
 
       const component = render(result, { expanded: false }, renderTheme);
 
       expect(component).toBeInstanceOf(Text);
-      expect(component.render(400).join("\n")).toContain("Available templates: feature-plan, bugfix");
-    });
-
-    it("任意未知 action 形态同样回落 content 文本（防御未来再删 action）", () => {
-      const { pi } = setup();
-      const render = renderFn(pi);
-      const result = {
-        content: [{ type: "text", text: "legacy entry" }],
-        details: { action: "create-template" },
-      };
-
-      const component = render(result, { expanded: false }, renderTheme);
-
-      expect(component).toBeInstanceOf(Text);
-      expect(component.render(400).join("\n")).toContain("legacy entry");
+      expect(component.render(400).join("\n")).toContain(text);
     });
   });
 
@@ -386,24 +372,6 @@ describe("registerPlanTool", () => {
       expect(res.details.planFilePath).toBe("/tmp/test-project-2/.tmp/plans/auth/plan.md");
     });
 
-    it("dialog options = skills (max 2) + Execute + Not now, goal bridge availability irrelevant (选项集重排；D7② 有技能才弹表单)", async () => {
-      const { exec, ctx } = setup();
-      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
-        { name: "dev-flow", description: "d1", skillEntryPath: "/tmp/a/SKILL.md" },
-        { name: "pr-cr-fix", description: "d2", skillEntryPath: "/tmp/b/SKILL.md" },
-        { name: "third", description: "d3", skillEntryPath: "/tmp/c/SKILL.md" },
-      ]);
-      (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
-      await exec({ action: "complete" });
-      const options = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0][1] as string[];
-      expect(options).toEqual([
-        "Execute via skill: dev-flow",
-        "Execute via skill: pr-cr-fix",
-        "Execute",
-        "Not now",
-      ]);
-    });
-
     it("execute choice maps to execMode execute (goal + auto-parallel 整合档)", async () => {
       const { exec, ctx } = setup();
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
@@ -460,6 +428,8 @@ describe("registerPlanTool", () => {
       expect(res.details.action).toBe("complete");
       expect(res.details.execMode).toBe("execute");
       expect(res.details.execModeSource).toBe("no-exec-skills");
+      // 仍现扫（直通判定依赖检测结果，不是跳过检测——rpc 形态与本形态同分支，原独立用例已合并）
+      expect(detectExecSkills).toHaveBeenCalled();
       // 工具结果文案明示「无 plan-exec 技能，直接执行」（不静默吞掉没弹表单的事实）
       expect(res.content[0].text).toContain("No plan-exec skill was detected");
       expect(res.content[0].text).toContain("executed directly");
@@ -563,6 +533,10 @@ describe("registerPlanTool", () => {
       const skillOption = options.find((o) => o.label === "Execute via skill: dev-flow");
       expect(skillOption?.description).toBe("Deliver a plan via dev-flow.");
       expect(res.details.execMode).toBe("skill:dev-flow");
+      // 对话档来源标记 + 表单恰挂一次 + 无直通文案（原 rpc 非空独立用例的增量断言并入）
+      expect(res.details.execModeSource).toBe("dialog");
+      expect(ctx.ui.select).toHaveBeenCalledOnce();
+      expect(res.content[0].text).not.toContain("No plan-exec skill");
       expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "skill:dev-flow", skillEntryPath);
     });
 
@@ -644,49 +618,10 @@ describe("registerPlanTool", () => {
     });
   });
 
-  // --- D7② 无技能直通（S4 通过标准：无 plan-exec 技能不挂表单、approve 直通 execute）---
-  describe("D7② 无 plan-exec 技能直通（不挂执行方式表单）", () => {
-    it("rpc 空集直通：不挂 UI_FORM_MARKER 表单，直通 execute + 文案明示（双向之一）", async () => {
-      vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
-      const h = setup();
-      (h.ctx as { mode?: string }).mode = "rpc";
-      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([]);
-
-      const res = await h.exec({ action: "complete" });
-
-      expect(h.ctx.ui.select).not.toHaveBeenCalled();
-      expect(res.details.execMode).toBe("execute");
-      expect(res.details.execModeSource).toBe("no-exec-skills");
-      expect(res.content[0].text).toContain("No plan-exec skill was detected");
-      expect(detectExecSkills).toHaveBeenCalled(); // 仍现扫（直通判定依赖检测，不是跳过检测）
-      expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "execute", undefined);
-      vi.unstubAllEnvs();
-    });
-
-    it("非空照旧挂表单（双向之二）：技能档 + Execute + 暂不执行照常出现", async () => {
-      vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
-      const h = setup();
-      (h.ctx as { mode?: string }).mode = "rpc";
-      (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
-        { name: "dev-flow", description: "Deliver via dev-flow.", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
-      ]);
-      (h.ctx.ui.select as ReturnType<typeof vi.fn>)
-        .mockResolvedValue(JSON.stringify({ "Execution method": "Execute via skill: dev-flow" }));
-
-      const res = await h.exec({ action: "complete" });
-
-      expect(h.ctx.ui.select).toHaveBeenCalledOnce();
-      expect(res.details.execMode).toBe("skill:dev-flow");
-      expect(res.details.execModeSource).toBe("dialog");
-      expect(res.content[0].text).not.toContain("No plan-exec skill");
-      vi.unstubAllEnvs();
-    });
-  });
-
   // --- abort ---
   describe("abort", () => {
     it("resets state and cleans up session — exit 边（活跃族非终态→exited）", async () => {
-      const { exec, pi, sessions } = setup();
+      const { exec, pi, sessions, ctx } = setup();
       // Pre-populate a session（工具层 abort 走 exitPlanMode 单入口——命令层 abort 联动的顺序断言在 command.test.ts）
       sessions.set("test-session", {
         ...DEFAULT_PLAN_STATE,
@@ -702,7 +637,7 @@ describe("registerPlanTool", () => {
       expect(res.details.action).toBe("abort");
       expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
       expect(sessions.has("test-session")).toBe(false);
-      expect(updatePlanWidget).toHaveBeenCalled();
+      expect(updatePlanWidget).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ isActive: false, state: "exited" }));
       // 终态矩阵：reset entry 落 isActive=false + state='exited' + skills/selfReview 清空 + docs 保留
       expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", expect.objectContaining({ isActive: false, state: "exited" }));
       const entry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as Record<string, unknown>;

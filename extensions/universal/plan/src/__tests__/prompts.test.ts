@@ -73,6 +73,31 @@ describe("注入段项目级模板源锚点 = PlanPromptInput.projectRoot（ctx.
   });
 });
 
+describe("Phase D 段注入 buildPlanModePrompt（对齐测试的装配面锚）", () => {
+  it("Phase D 段的两个注入分支（模板流程 / --template 直传）都携带该段（若装配漏注入，exec-options-alignment 的散文锚测不到）", () => {
+    const projectRoot = mkTmpDir("plan-prompt-phased-");
+    const base = {
+      requirement: "add dark mode",
+      planFilePath: join(projectRoot, ".tmp", "plans", "add-dark-mode", "plan.md"),
+      projectRoot,
+      skills: [],
+    };
+
+    // 分支一：无 --skills 的模板流程（prompts.ts else-if 注入腿）
+    const templateFlow = buildPlanModePrompt(base);
+    expect(templateFlow).toContain("Phase D: Completion");
+    expect(templateFlow).toContain("picks an execution method in the completion dialog");
+
+    // 分支二：--template 直传变体（prompts.ts if 注入腿；技能流程分支无 Phase D 属设计现状，不锚定）
+    const directFlow = buildPlanModePrompt({
+      ...base,
+      template: { absPath: "/tmp/plans-templates/feature.md", content: "# Feature\n## Implementation Steps\n1. Do it" },
+    });
+    expect(directFlow).toContain("Phase D: Completion");
+    expect(directFlow).toContain("Template (via --template)");
+  });
+});
+
 describe("Phase C.5 自审清单 + D8 重挂请求纪律 + selfReview 必带（D9②/D8）", () => {
   it("模板流程：C.5 四项清单在产物纪律段之后注入，submit-review 指引必带 selfReview，重挂请求直接重提", () => {
     const projectRoot = mkTmpDir("plan-prompt-c5-");

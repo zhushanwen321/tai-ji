@@ -153,10 +153,15 @@ describe("dissolvedBy① 入口解散同步临界段（markDissolved 先于 abor
 
     // exec() 同步推进到 ctx.ui.select 挂起（首个 await 即 select）
     const pending = h.exec({ action: "submit-review", selfReview: SR });
+    // 挂起已登记（PendingSelect 在表内且未打标——外部解散前的缺省形态）
+    const hang = h.controllers.get("test-session");
+    expect(hang?.dissolvedBy).toBeUndefined();
     // exitPlanMode 体内无 await：整段（markDissolved('self') → controller.abort() →
     // resetPlanState）同步执行完毕，abort 触发的 promise 解析是微任务——归口点必在其后
     // 运行、dissolvedBy 已置位（同步临界段不变量）
     void h.handleCommand("abort");
+    // 打标来源随挂起闭包直达等待处（原独立中途断言用例内联）
+    expect(hang?.dissolvedBy).toBe("self");
     const res = await pending;
 
     // 归口①：dissolvedBy === 'self'（入口直传）→ 命令解散 no-op
@@ -165,20 +170,6 @@ describe("dissolvedBy① 入口解散同步临界段（markDissolved 先于 abor
     // 归口 no-op：无 review_aborted 落盘（不出现把 exited 打回 planning 的 entry）
     const all = entries(h.pi);
     expect(all.map((e) => e.state)).toEqual(["reviewing", "exited"]);
-  });
-
-  it("直接断言：exitPlanMode 打标后 PendingSelect.dissolvedBy === 'self'（来源随挂起闭包直达等待处）", async () => {
-    const h = setup(planningState());
-    h.ctx.mode = "rpc";
-    selectHonoringSignal(h.ctx);
-
-    const pending = h.exec({ action: "submit-review", selfReview: SR });
-    // 挂起已登记（PendingSelect 在表内且未打标——外部解散前的缺省形态）
-    const hang = h.controllers.get("test-session");
-    expect(hang?.dissolvedBy).toBeUndefined();
-    void h.handleCommand("abort");
-    expect(hang?.dissolvedBy).toBe("self");
-    await pending;
   });
 
   it("反向对照：同形态若仅 controller.abort()（不打标）则判外部解散（断言有效性的负向探针对照）", async () => {
@@ -249,42 +240,8 @@ describe("dissolvedBy② 跨轮无挂起退出 → 新一轮外部解散正常�
   });
 });
 
-describe("dissolvedBy③ 同 turn enter→挂新 select→外部解散 / 命令解散→归口 no-op（双向）", () => {
-  it("同 turn enter → 挂新 select → 外部解散：review_aborted 正常转移", async () => {
-    const h = setup(); // 干净 session
-    await h.exec({ action: "enter", requirement: "same turn" });
-    await h.exec({ action: "register-doc", fileName: "design.md" });
-    h.ctx.mode = "rpc";
-    selectHonoringSignal(h.ctx);
-    const pending = h.exec({ action: "submit-review", selfReview: SR });
-    h.controllers.get("test-session")?.controller.abort(); // 外部解散（不打标，缺省即外部）
-    const res = await pending;
-
-    expect(res.details).toEqual({ action: "review-error", reason: "review-interrupted" });
-    const all = entries(h.pi);
-    expect(all.at(-1)).toMatchObject({ state: "planning", isActive: true });
-  });
-
-  it("同 turn enter → 挂新 select → 命令解散（/plan abort 全序列）：归口 no-op", async () => {
-    const h = setup();
-    await h.exec({ action: "enter", requirement: "same turn" });
-    await h.exec({ action: "register-doc", fileName: "design.md" });
-    h.ctx.mode = "rpc";
-    selectHonoringSignal(h.ctx);
-    const pending = h.exec({ action: "submit-review", selfReview: SR });
-    void h.handleCommand("abort"); // 命令解散（markDissolved('self') → abort → reset 同步临界段）
-    const res = await pending;
-
-    expect(res.details).toEqual({ action: "review-error", reason: "cancelled" });
-    const all = entries(h.pi);
-    // 双向之另一半：归口 no-op——reset 的 exited 是最末条，无 planning 覆写在其后
-    expect(all.map((e) => e.state).at(-1)).toBe("exited");
-    expect(all.findIndex((e) => e.state === "exited")).toBe(all.length - 1);
-  });
-});
-
-describe("resumeHint 三时点清除断言（不变量：只描述当前降级等待的原因，不跨轮残留）", () => {
-  it("① reset 清除 / ② enter 进入重置组清除 / ③ submit-review 转移落盘清除", async () => {
+describe("resumeHint 清除断言（不变量：只描述当前降级等待的原因，不跨轮残留）", () => {
+  it("① reset 清除 / ② enter 进入重置组清除（③ submit-review 重挂起点清除归 review.test「重挂起点清 resumeHint」保留者）", async () => {
     // ① reset
     const a = setup({ ...planningState(), state: "reviewing", resumeHint: "resubmit" });
     await a.exec({ action: "abort" });
@@ -295,13 +252,6 @@ describe("resumeHint 三时点清除断言（不变量：只描述当前降级�
     await b.exec({ action: "enter", requirement: "fresh" });
     expect(entries(b.pi).at(-1)?.resumeHint).toBeUndefined();
     expect(entries(b.pi).at(-1)?.selfReview).toBeUndefined();
-
-    // ③ submit-review 转移落盘（重挂起点）——含 reviewing 自环重挂（E3/D8 路径）
-    const c = setup({ ...planningState(), state: "reviewing", resumeHint: "resubmit" });
-    (c.ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify({ decision: "dismiss" }));
-    await c.exec({ action: "submit-review", selfReview: SR });
-    const hangEntry = entries(c.pi).find((e) => e.state === "reviewing");
-    expect(hangEntry?.resumeHint).toBeUndefined();
   });
 });
 
@@ -394,7 +344,10 @@ describe("六 action 状态写走 transition()（D1 边表接线）", () => {
 // ── CompleteChoiceOutcome 显式 via 五构造点补齐（①later/⑤channel 已在 tool.test 锚定）──
 
 describe("CompleteChoiceOutcome via 构造点（D3 连带段：显式枚举，归口直读）", () => {
-  it("构造点②（TUI choice 空）→ via 'dissolved' 外部解散归口（approved 保留）", async () => {
+  // 构造点③（rpc cancel：select 解散 + signal aborted）已并入 tool.test.ts「turn abort
+  // during the pending execution-method select」（controller-abort→select-解散接线保留者）；
+  // 「signal aborted → reason cancelled」的库层判别由 extension-protocol ui-form 测试归属。
+  it("构造点④（rpc timeout：undefined resolve 且 signal 未 abort）→ 折叠 reason 'cancelled' 外部解散（review_aborted→approved）", async () => {
     const h = setup({ ...planningState(), state: "approved" });
     (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
       { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
@@ -403,22 +356,5 @@ describe("CompleteChoiceOutcome via 构造点（D3 连带段：显式枚举，�
     const res = await h.exec({ action: "complete" });
     expect(res.details).toMatchObject({ action: "complete-cancelled", source: "external" });
     expect(entries(h.pi).at(-1)?.state).toBe("approved"); // review_aborted：dispatching → approved
-  });
-
-  it("构造点③（rpc cancel：select 解散 + signal aborted）→ via 'dissolved'；与④timeout 同折 reason 'cancelled'", async () => {
-    const h = setup({ ...planningState(), state: "approved" });
-    h.ctx.mode = "rpc";
-    (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
-      { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
-    ]);
-    // 挂起窗口内 controller 被 abort（handleAbort 的 controller.abort() 半边 / turn 级联），
-    // 无 reset 介入 → uiFormInteract 判 reason='cancelled'
-    (h.ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-      h.controllers.get("test-session")?.controller.abort();
-      return undefined;
-    });
-    const res = await h.exec({ action: "complete" });
-    expect(res.details).toMatchObject({ action: "complete-cancelled", reason: "cancelled", source: "external" });
-    expect(entries(h.pi).at(-1)?.state).toBe("approved");
   });
 });

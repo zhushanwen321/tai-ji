@@ -49,7 +49,7 @@ import { detectExecSkills } from "@zhushanwen/pi-exec-skills";
 import type { PlanDocMeta } from "@zhushanwen/extension-protocol";
 import type { PlanState } from "../state.js";
 import { createPlanCtx, DEFAULT_PLAN_STATE, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
-import { PLAN_ACTIONS, registerPlanTool } from "../tool.js";
+import { registerPlanTool } from "../tool.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
 
@@ -582,7 +582,7 @@ describe("decision 消费（taiji 形态）", () => {
 });
 
 describe("submit-review 转移落盘（D4 clearRoundFields 重挂起点调用点）", () => {
-  it("重挂起点清 resumeHint（不变量：resumeHint 只描述当前降级等待的原因，不跨轮残留）", async () => {
+  it("重挂起点清 resumeHint 并重置 docs 指纹（不变量：resumeHint 只描述当前降级等待的原因，不跨轮残留）", async () => {
     // 上一轮 E3 重挂残留 resumeHint='resubmit'；本用例重提交（重挂起新 pending）
     const { exec, pi } = setup({ ...activeStateWithDocs(), state: "reviewing", resumeHint: "resubmit" });
 
@@ -594,22 +594,7 @@ describe("submit-review 转移落盘（D4 clearRoundFields 重挂起点调用点
     expect(hangEntry).toBeDefined();
     expect(hangEntry!.resumeHint).toBeUndefined();
     expect(hangEntry!.selfReview).toBe(SELF_REVIEW);
-  });
-
-  it("reviewing 自环重挂（E3 恢复 / D8 重新提交按钮路径）：transition ok:false 降级为不改状态值、照常落盘重挂", async () => {
-    vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
-    // state='reviewing' 且无挂起（E3 恢复后的降级格）——submit 自环不在 19 边表，
-    // 调用方降级处理（D9④ 该路径必须可用）
-    const { exec, ctx, pi } = setup({ ...activeStateWithDocs(), state: "reviewing", resumeHint: "resubmit" });
-    (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce(JSON.stringify({ decision: "dismiss" }));
-
-    const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
-
-    // 重挂成功（select 挂起并被消费），状态值保持 reviewing（自环不改值）
-    expect(res.details.action).toBe("review-dismissed");
-    const hangEntry = persistedEntries(pi).find((e) => e.state === "reviewing");
-    expect(hangEntry).toBeDefined();
-    expect(hangEntry!.resumeHint).toBeUndefined();
+    // 重挂起点重置 docs 指纹为本轮基线（原「自环重挂」独立用例的独有断言并入）
     expect(hangEntry!.lastSubmitReviewDocsFingerprint).toBe("design.md:1");
   });
 
@@ -626,10 +611,5 @@ describe("submit-review 转移落盘（D4 clearRoundFields 重挂起点调用点
   });
 });
 
-describe("submit-review 的 PLAN_ACTIONS 面", () => {
-  it("action list contains exactly the six actions (enter added; list-template removed, D1)", () => {
-    expect([...PLAN_ACTIONS].sort()).toEqual(
-      ["abort", "complete", "enter", "register-doc", "select-template", "submit-review"],
-    );
-  });
-});
+// PLAN_ACTIONS 六值钉死的保留者在 tool.test.ts「action list contains exactly the six actions」
+// （同断言更强：另钉已删 action 不在列）——此处不再重复守护。

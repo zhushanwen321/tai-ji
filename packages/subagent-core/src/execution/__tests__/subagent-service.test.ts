@@ -184,7 +184,7 @@ describe("SubagentService", () => {
       const service = new SubagentService({ cwd: agentDir, modelService });
       service.initSession({ pi: makePi(), sessionId: "s1" });
       const records = service.queries.collectRecords(100);
-      expect(Array.isArray(records)).toBe(true);
+      expect(records).toEqual([]);
     });
 
     it("onChange 返回 unsubscribe 函数,调用后停止通知", () => {
@@ -193,7 +193,34 @@ describe("SubagentService", () => {
       const listener = vi.fn();
       const unsubscribe = service.queries.onChange(listener);
       expect(typeof unsubscribe).toBe("function");
-      expect(() => unsubscribe()).not.toThrow();
+      // 正向通路：store 变更必须通知 listener（通知链断裂时此处红——
+      // 修复前本用例只验 unsubscribe 可调用，「停止通知」无从验证）
+      const store = Reflect.get(service, "store") as RecordStore;
+      const record = createRecord("notify-probe", {
+        agent: "general-purpose",
+        model: "test/model",
+        mode: "background",
+        slug: "notify-probe",
+        task: "notify probe",
+        startedAt: 1_000_000,
+        rootSessionId: "s1",
+      });
+      store.register(record);
+      expect(listener).toHaveBeenCalledTimes(1);
+      // 退订后变更不再通知
+      unsubscribe();
+      store.register(
+        createRecord("notify-probe-2", {
+          agent: "general-purpose",
+          model: "test/model",
+          mode: "background",
+          slug: "notify-probe-2",
+          task: "notify probe 2",
+          startedAt: 1_000_000,
+          rootSessionId: "s1",
+        }),
+      );
+      expect(listener).toHaveBeenCalledTimes(1);
     });
   });
 

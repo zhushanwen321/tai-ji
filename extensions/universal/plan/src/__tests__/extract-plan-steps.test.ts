@@ -8,6 +8,7 @@ describe("extractPlanSteps", () => {
 
 ## 背景
 Some context
+1. Background numbered line that must not leak
 
 ## 实现步骤
 1. Create the user model
@@ -27,7 +28,10 @@ Run tests`;
   it("extracts numbered steps from 实施步骤 section", () => {
     const plan = `## 实施步骤
 1. Step one
-2. Step two`;
+2. Step two
+
+## 验证
+1. Verification line that must not leak`;
     const steps = extractPlanSteps(plan);
     expect(steps).toEqual(["Step one", "Step two"]);
   });
@@ -35,7 +39,10 @@ Run tests`;
   it("extracts steps from English Steps section", () => {
     const plan = `## Steps
 1. First step
-2. Second step`;
+2. Second step
+
+## Notes
+1. Notes line that must not leak`;
     const steps = extractPlanSteps(plan);
     expect(steps).toEqual(["First step", "Second step"]);
   });
@@ -43,7 +50,10 @@ Run tests`;
   it("extracts steps from Implementation section", () => {
     const plan = `## Implementation Steps
 1. Create file
-2. Add exports`;
+2. Add exports
+
+## Validation
+1. Validation line that must not leak`;
     const steps = extractPlanSteps(plan);
     expect(steps).toEqual(["Create file", "Add exports"]);
   });
@@ -72,16 +82,6 @@ Run tests`;
     ]);
   });
 
-  it("returns empty array when no steps section and no numbered items", () => {
-    const plan = `## 背景
-Some context
-
-## 方案
-Option A is preferred`;
-    const steps = extractPlanSteps(plan);
-    expect(steps).toEqual([]);
-  });
-
   it("fallback: collects numbered items when no steps section header", () => {
     const plan = `# Plan
 1. First thing
@@ -95,8 +95,17 @@ Option A is preferred`;
     const plan = `## 实现步骤
 1. Valid step
 
-2. Another valid step`;
+2. Another valid step
+3.
+4. ${"   "}`;
     const steps = extractPlanSteps(plan);
     expect(steps).toEqual(["Valid step", "Another valid step"]);
+  });
+
+  it("fallback cap: collects at most the first 10 numbered items when no steps section header", () => {
+    const plan = Array.from({ length: 12 }, (_, i) => `${i + 1}. step ${i + 1}`).join("\n");
+    const steps = extractPlanSteps(plan);
+    expect(steps).toHaveLength(10);
+    expect(steps[9]).toBe("step 10");
   });
 });

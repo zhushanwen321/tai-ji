@@ -115,6 +115,10 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     // 状态对象已是激活态
     const state = sessions.get("test-session") as { isActive?: boolean; requirement?: string };
     expect(state.isActive).toBe(true);
+    // 状态写走 transition()：idle --enter--> planning 落盘（新会话缺省态进入；原独立
+    // 用例的转移断言并入——同通道同断言字段，仅转移源字面量与下方坏格用例不同）
+    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
+    expect(lastEntry.state).toBe("planning");
   });
 
   it("已在 plan 模式：幂等返回，不重复收工具 / 不重复注入", async () => {
@@ -181,14 +185,6 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
     expect(lastEntry.state).toBe("planning");
     expect(lastEntry.resumeHint).toBeUndefined();
-  });
-
-  it("状态写走 transition()：idle --enter--> planning 落盘（新会话缺省态进入）", async () => {
-    const { exec, pi } = setup();
-    await exec({ action: "enter", requirement: "first round" });
-    const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
-    expect(lastEntry.state).toBe("planning");
-    expect(lastEntry.isActive).toBe(true);
   });
 
   it("坏数据格（isActive=false 且 state 落活跃族）：enter 按转移 ok:false 落穿，不归一不重试（坏格自愈分支已删，C1 行为变更组——仅坏格可达，行为差锚）", async () => {

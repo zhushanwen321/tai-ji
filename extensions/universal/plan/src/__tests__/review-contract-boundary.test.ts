@@ -35,11 +35,8 @@ vi.mock("@zhushanwen/pi-exec-skills", async () => {
 
 import {
   isPlanReviewRequest,
-  isPlanReviewResponse,
-  parsePlanReviewResponse,
   PLAN_REVIEW_MARKER,
   PLAN_SELF_REVIEW_MAX_BYTES,
-  truncateSelfReview,
 } from "@zhushanwen/extension-protocol";
 
 import type { PlanState } from "../state.js";
@@ -102,77 +99,10 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-// ── 契约纯函数：error envelope + boundary 帧（canonical = review-contract.ts，consumers.md ⑤）──
-
-describe("error envelope（parsePlanReviewResponse 双分源）", () => {
-  it("ok 归一化：approve/dismiss 剥多余键（结构上不可混带评论），revise 逐项归一", () => {
-    expect(parsePlanReviewResponse({ decision: "approve", comments: [{ quote: "x", comment: "y" }] })).toEqual({
-      ok: true,
-      response: { decision: "approve" },
-    });
-    expect(parsePlanReviewResponse({ decision: "dismiss", comments: [] })).toEqual({
-      ok: true,
-      response: { decision: "dismiss" },
-    });
-    expect(parsePlanReviewResponse({ decision: "revise", comments: [{ quote: "q", comment: "c" }] })).toEqual({
-      ok: true,
-      response: { decision: "revise", comments: [{ quote: "q", comment: "c" }] },
-    });
-  });
-
-  it("unknown-decision：合法形状、值域外（4 代表值）→ 版本错配枚举而非垃圾", () => {
-    for (const decision of ["explain", "EXPIRE", "", "dismiss-all"]) {
-      expect(parsePlanReviewResponse({ decision })).toEqual({ ok: false, code: "unknown-decision", decision });
-      expect(isPlanReviewResponse({ decision })).toBe(false);
-    }
-  });
-
-  it("空载荷（9 形态）→ malformed", () => {
-    for (const bad of [undefined, null, 0, "", "x", [], {}, { decision: 42 }, { decision: null }]) {
-      expect(parsePlanReviewResponse(bad)).toEqual({ ok: false, code: "malformed" });
-    }
-  });
-
-  it("非法形态（revise 评论项坏形状）→ malformed", () => {
-    for (const bad of [
-      { decision: "revise" },
-      { decision: "revise", comments: "x" },
-      { decision: "revise", comments: [{}] },
-      { decision: "revise", comments: [{ quote: 1, comment: "c" }] },
-      { decision: "revise", comments: [{ quote: "q", comment: null }] },
-      { decision: "revise", comments: [null] },
-    ]) {
-      expect(parsePlanReviewResponse(bad)).toEqual({ ok: false, code: "malformed" });
-    }
-  });
-});
-
-describe("boundary 帧（PlanReviewRequest 入站守卫 + selfReview 有界截断）", () => {
-  it("空载荷/非法形态 request 全拒（不 throw）", () => {
-    for (const bad of [undefined, null, 42, "x", [], {}, { docs: "x" }, { docs: [{}] }, { docs: [{ fileName: "a" }] }, { docs: [], selfReview: 42 }]) {
-      expect(isPlanReviewRequest(bad)).toBe(false);
-    }
-  });
-
-  it("合法 request（含 selfReview 缺省 = 旧扩展兼容契约）全过", () => {
-    const doc = { fileName: "a.md", absPath: "/p/a.md", sourceSkill: "", version: 1 };
-    expect(isPlanReviewRequest({ docs: [doc] })).toBe(true);
-    expect(isPlanReviewRequest({ docs: [doc], selfReview: "" })).toBe(true);
-  });
-
-  it("truncateSelfReview 超限截断：UTF-8 字节界安全（多字节字符不截半），4KB 上限唯一权威", () => {
-    expect(truncateSelfReview("short")).toBe("short");
-    // 恰好预算内的全 ASCII：不截
-    expect(truncateSelfReview("x".repeat(PLAN_SELF_REVIEW_MAX_BYTES))).toHaveLength(PLAN_SELF_REVIEW_MAX_BYTES);
-    // 超长全多字节（每个 3 字节）：按字节预算截到完整码点边界，无替换字符
-    const multi = "好".repeat(PLAN_SELF_REVIEW_MAX_BYTES); // 3B × N
-    const capped = truncateSelfReview(multi);
-    expect(capped.length).toBeLessThan(multi.length);
-    expect(capped).not.toContain("\uFFFD");
-    expect(Buffer.byteLength(capped, "utf8")).toBeLessThanOrEqual(PLAN_SELF_REVIEW_MAX_BYTES);
-    expect(PLAN_SELF_REVIEW_MAX_BYTES - Buffer.byteLength(capped, "utf8")).toBeLessThan(3);
-  });
-});
+// ── 契约纯函数（error envelope / boundary 帧 / truncateSelfReview）的 canonical 测试
+// 在 packages/extension-protocol/src/extensions/plan/review-contract.test.ts（更强版本：
+// 键剥除结构断言 / 4KB 字节界精确锚 / 刁钻样本超集）——本文件只保留经 tool 消费面的
+// 接线契约，不重复测共享逻辑。──
 
 // ── 经 tool 消费面的契约落地（consumers.md ①③：payload 构造单点 + 双分源降级）──
 
@@ -190,23 +120,4 @@ describe("契约经 executeSubmitReview 消费面落地", () => {
     expect(isPlanReviewRequest(payload)).toBe(true);
   });
 
-  it("条目 7 降级：unknown decision 与 malformed 同款出口 → 'bad-response' 引导重挂；非 JSON → 同款（值域外分源仅 warn 留痕差异）", async () => {
-    const a = setup();
-    (a.ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify({ decision: "explain" }));
-    const unknownRes = await a.exec({ action: "submit-review", selfReview: "fresh." });
-    expect(unknownRes.details).toEqual({ action: "review-error", reason: "bad-response" });
-    expect(unknownRes.content[0].text).toContain("re-hang");
-
-    const b = setup();
-    (b.ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify({ decision: "revise", comments: "bad" }));
-    const malformedRes = await b.exec({ action: "submit-review", selfReview: "fresh." });
-    expect(malformedRes.details).toEqual({ action: "review-error", reason: "bad-response" });
-    expect(malformedRes.content[0].text).toContain("re-hang");
-
-    const c = setup();
-    (c.ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("not json at all");
-    const nonJsonRes = await c.exec({ action: "submit-review", selfReview: "fresh." });
-    expect(nonJsonRes.details).toEqual({ action: "review-error", reason: "bad-response" });
-    expect(nonJsonRes.content[0].text).toContain("re-hang");
-  });
 });
