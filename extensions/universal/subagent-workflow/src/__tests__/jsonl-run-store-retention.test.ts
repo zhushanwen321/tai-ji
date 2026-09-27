@@ -17,8 +17,8 @@
 //   首次写该 runId ≈ 新文件落盘时刻，每个新 run 进场做一轮维护）；
 // - glob 外文件（非 wf- 前缀 / 非 .jsonl）与父目录 session JSONL 永不误删。
 //
-// [W1 / D5 触发点③] 新 run 首写段消费统一维护轮入口（barrel 导出面）——
-// 代码断言锁接线形态（cap 族旧调用形态退役）。
+// [W1 / D5 触发点③] 新 run 首写段触发维护轮以行为断言锁定（单域目录锚：预置
+// record 域终态足迹 + 窗外终态对照组，断言维护轮只裁决 run 域）。
 //
 // mtime 确定性：事件帧 ts 相对 Date.now 构造（天数偏移注入），不依赖写入时序。
 
@@ -42,6 +42,7 @@ import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import type { RunSpec } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
+import { getSubagentRecordsDir } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 // STATE_TTL_MS_ENV 仅测试消费符号，深路径直取（[W1 / D5] 保留窗口 env 通道单源
 // core file-run-store；数量截断通道已整体退役，本件不再消费其任何符号）
@@ -177,19 +178,20 @@ describe("workflow-state 保留清理（[W1 / D5] fold 终态 + 保留窗口，c
     await store.dispose();
   });
 
-  it("废 cap 回归：60 个窗内终态 run（数量远超旧上限 50）全部保留，无截断", async () => {
+  it("废 cap 回归：51 个窗内终态 run（数量超旧上限 50）全部保留，无截断", async () => {
     // [W1 / D5] 数量截断通道废除后的行为锚：另一 session 保留窗口内的终态 run
-    // 不再被本 session 的清理轮挤出（A-8 多 session 分摊互杀回归）
+    // 不再被本 session 的清理轮挤出（A-8 多 session 分摊互杀回归）。
+    // 51 = 旧 cap（50）+1：恰好构成超限的最小数量。
     process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
     const store = new JsonlRunStore({ sessionDir: tmpDir });
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 51; i++) {
       seedTerminalRun(stateDir, runIdAt(i), 10, 5); // 全部窗内终态
     }
 
-    await store.save(makeRunningRun(runIdAt(60)));
+    await store.save(makeRunningRun(runIdAt(51)));
 
     const rest = fs.readdirSync(stateDir).filter((n) => n.endsWith(".jsonl") && !n.endsWith(".events.jsonl"));
-    expect(rest).toHaveLength(61); // 60 窗内终态 + 新 run，零裁剪
+    expect(rest).toHaveLength(52); // 51 窗内终态 + 新 run，零裁剪
     expect(loggerMock.warn).not.toHaveBeenCalled();
     await store.dispose();
   });
@@ -252,43 +254,48 @@ describe("workflow-state 保留清理（[W1 / D5] fold 终态 + 保留窗口，c
   });
 });
 
-// ── [W1 / D5 触发点③] 新 run 首写段调用统一维护轮入口（代码断言）───────────
+// ── [W1 / D5 触发点③] 新 run 首写段触发维护轮（行为断言：单域目录锚）─────────
 
-describe("新 run 首写段消费统一维护轮入口（W1 / D5 触发点③·代码断言）", () => {
-  it("runRetentionSweep 源码调 runRetentionMaintenanceRound（barrel 消费），只传 run 域目录锚", () => {
-    const source = fs.readFileSync(
-      new URL("../jsonl-run-store.ts", import.meta.url),
-      "utf8",
-    );
-    // 接线形态：新 run 首写段消费统一维护轮入口（经 barrel import）；只传 run 域
-    // 目录锚（record 域由 record 首写 / session_start 兜底触发点覆盖）。cap 族旧
-    // 调用形态的词表级清扫由引擎 grep 验收承担（本面零词表字面量）。
-    expect(source).toContain("await runRetentionMaintenanceRound(");
-    expect(source).toContain("runRetentionMaintenanceRound(\n        { stateDir },");
+describe("新 run 首写段触发维护轮只锚 run 域目录（W1 / D5 触发点③·行为断言）", () => {
+  let tmpDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-retention-anchor-"));
+    stateDir = path.join(tmpDir, "workflow-state");
+    delete process.env[STATE_TTL_MS_ENV];
   });
-});
 
-// ── [W1 / D5 触发点②] session_start 兜底触发（冷启动即清，代码断言）─────────
-//
-// 宿主装配链（session-lifecycle.ts runProcessLevelMaintenance）的行为直测件
-// （session-lifecycle.test.ts）不在本单元领地——此处以代码断言锁接线形态
-// （调用点 / 进程级防双跑守卫 / 双域目录锚），行为面由装配链存量测试（每次
-// session_start 全链跑通，维护轮在 ENOENT 目录上幂等空转）间接覆盖。
+  afterEach(() => {
+    delete process.env[STATE_TTL_MS_ENV];
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
 
-describe("session_start 兜底触发统一维护轮（W1 / D5 触发点②·代码断言）", () => {
-  it("runProcessLevelMaintenance 调 runRetentionMaintenanceRound：双域目录锚 + oncePerProcess 防双跑", () => {
-    const source = fs.readFileSync(
-      new URL("../session-lifecycle.ts", import.meta.url),
-      "utf8",
-    );
-    // 调用点在进程级维护段（冷启动即清——进程首启无任何新写时的清理机会）
-    expect(source).toContain("await runRetentionMaintenanceRound(");
-    // oncePerProcess 守卫（同进程第二次 session_start 不重复触发，幂等维护防双跑）
-    expect(source).toContain('"subagent-workflow:retention-maintenance-round"');
-    // run 域目录锚：resolveSessionDir 同源布局的 workflow-state 后缀（与 JsonlRunStore 落盘同源）
-    expect(source).toContain("path.join(resolveSessionDir(), STATE_DIR_NAME)");
-    // record 域目录锚：与 SubagentService 构造同源同式推导（rootCwd env 贯穿 ?? ctx.cwd）
-    expect(source).toContain("getSubagentRecordsDir(agentDir, rootCwd)");
-    expect(source).toContain("ENV_ROOT_CWD");
+  it("维护轮裁决窗外终态（run 域），但不触碰 record 域终态足迹（单域目录锚契约）", async () => {
+    process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
+    // record 域目录（与 SubagentService 构造 / session_start 兜底触发点同源同式推导，
+    // getSubagentRecordsDir）预置终态 run manifest——维护轮入口只收 run 域 stateDir
+    // 锚，record 域由 record 首写 / session_start 兜底触发点覆盖；越域裁剪即本断言红
+    const agentDir = path.join(tmpDir, "agent");
+    const recordsDir = getSubagentRecordsDir(agentDir, tmpDir);
+    fs.mkdirSync(recordsDir, { recursive: true });
+    const recordFile = path.join(recordsDir, "wf-record-001.json");
+    fs.writeFileSync(recordFile, JSON.stringify({ runId: "wf-record-001", outcome: "completed" }), "utf8");
+
+    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    seedTerminalRun(stateDir, runIdAt(0), 40, 35); // 窗外终态（对照组：证明维护轮确实执行）
+    seedTerminalRun(stateDir, runIdAt(1), 10, 5); // 窗内终态（对照保护）
+
+    // 新 run 首写（save 冷路径）触发维护轮——save 返回即维护已定
+    await store.save(makeRunningRun(runIdAt(2)));
+    await store.dispose();
+
+    // run 域：窗外终态被裁、窗内保留（维护轮真实执行的证明面）
+    expect(fs.existsSync(stateFile(stateDir, runIdAt(0)))).toBe(false);
+    expect(fs.existsSync(journalFile(stateDir, runIdAt(0)))).toBe(false);
+    expect(fs.existsSync(stateFile(stateDir, runIdAt(1)))).toBe(true);
+    // record 域：本轮维护轮不触碰（终局持久权威留在原地）
+    expect(fs.existsSync(recordFile)).toBe(true);
+    expect(fs.readFileSync(recordFile, "utf8")).toContain("wf-record-001");
   });
 });

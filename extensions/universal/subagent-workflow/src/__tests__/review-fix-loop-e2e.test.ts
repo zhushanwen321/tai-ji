@@ -20,36 +20,29 @@
  * 已知限制：批内 review 调用顺序不保证——剧本不依赖具体 agent 顺序
  * （E2E-2 只断言调用总数，R1 中先到者 dirty 后到者 clean 均可）。
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { JsonlRunStore } from "../jsonl-run-store.ts";
-import { parseResourceMeta } from "@zhushanwen/subagent-core";
-import { normalizeRef } from "@zhushanwen/subagent-core/shared/agent-ref.ts";
-import { type LauncherDeps, runAndWait } from "@zhushanwen/subagent-core";
-import type { LifecycleDeps } from "@zhushanwen/subagent-core";
-import type { AgentRunner } from "@zhushanwen/subagent-core/orchestration/models/ports.ts";
-import type { AgentResult, AgentUsage } from "@zhushanwen/subagent-core/orchestration/models/types.ts";
-import {
-  type WorkflowMeta,
-  WorkflowScript,
-  type WorkflowSource,
-} from "@zhushanwen/subagent-core/orchestration/models/workflow-script.ts";
-import type { WorkflowScriptRegistry } from "@zhushanwen/subagent-core";
-import { WorkerHostImpl } from "@zhushanwen/subagent-core";
+import { runAndWait } from "@zhushanwen/subagent-core";
+import type { AgentResult } from "@zhushanwen/subagent-core/orchestration/models/types.ts";
 // fail-fast 用例：F-1 形态 error 哨兵的引擎 SSOT 常量（output-collector 构造 error 时
 // 开头拼接）——结构化返回失败已无降级通道，一切 error 哨兵都走终判；此常量只用于
 // 构造「真实引擎确定性失败形态」的 error 文本。
 import { DETERMINISTIC_SCHEMA_FAILURE_PREFIX } from "@zhushanwen/pi-subagent-cli";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const WORKFLOWS_DIR = join(__dirname, "..", "..", "node_modules", "@zhushanwen", "subagent-core", "workflows");
-const wf = (name: string): string => join(WORKFLOWS_DIR, name + ".js");
+// 与 workflows-e2e.test.ts 共享的测试基建（逐字重复段抽取，行为零变化）。
+import {
+  bindRunStore,
+  type JsonSchema,
+  makeDeps,
+  MOCK_USAGE,
+  wf,
+  WORKFLOWS_DIR,
+} from "./workflow-e2e-helpers.ts";
 
 // agentMd 创建真实临时 fixture .md（e2e 自包含，不依赖包内 agents/ 清单）。
 // R3 启动期 stat 校验要求路径真实存在；fixtureDir 在 beforeEach 创建。
@@ -62,24 +55,6 @@ const agentMd = (name: string): string => {
 
 let sessionDir: string;
 let createdStores: JsonlRunStore[] = [];
-
-const MOCK_USAGE: AgentUsage = {
-  input: 10,
-  output: 5,
-  cacheRead: 0,
-  cacheWrite: 0,
-  cost: 0,
-  contextTokens: 15,
-  turns: 1,
-};
-
-type JsonSchema = {
-  type?: string | string[];
-  properties?: Record<string, JsonSchema>;
-  items?: JsonSchema;
-  oneOf?: JsonSchema[];
-  required?: string[];
-};
 
 /**
  * 轻量 schema 契约校验（m8）：递归校验 parsed 是否符合 opts.schema，防止 mock runner
@@ -286,85 +261,6 @@ function makeScenarioRunner(scenario: Scenario) {
   };
 }
 
-// ── registry（与 workflows-e2e.test.ts 同模式：读文件构造 WorkflowScript） ──
-
-function extractMeta(source: string, fallbackName: string): WorkflowMeta {
-  // m2 exec-review MINOR-1：旧 const meta regex + new Function 随 m2 迁移已失效，
-  // 改调 IF1 parseResourceMeta（与 workflows-e2e.test 一致）。
-  const meta = parseResourceMeta(source, "workflow");
-  if (meta && meta.kind === "workflow") return meta;
-  return { kind: "workflow", name: fallbackName, description: "", phases: [] };
-}
-
-function loadWorkflowsFromDir(dir: string): Map<string, WorkflowScript> {
-  const scripts = new Map<string, WorkflowScript>();
-  for (const file of readdirSync(dir)) {
-    if (!file.endsWith(".js")) continue;
-    const fullPath = join(dir, file);
-    const sourceCode = readFileSync(fullPath, "utf-8");
-    const stem = file.replace(/\.js$/, "");
-    const meta = extractMeta(sourceCode, stem);
-    const source: WorkflowSource = "saved";
-    scripts.set(
-      meta.name,
-      new WorkflowScript({
-        name: meta.name,
-        source,
-        path: fullPath,
-        sourceCode,
-        meta,
-        available: true,
-      }),
-    );
-  }
-  return scripts;
-}
-
-function makeRegistry(scripts: Map<string, WorkflowScript>): WorkflowScriptRegistry {
-  return {
-    get: async (name: string) => scripts.get(name),
-    // S2：按路径加载（任意路径 .js）——路径未预扫则直接读文件
-    getPath: async (ref: string) => {
-      const normalized = normalizeRef(ref, ".js");
-      if (normalized === null) return undefined;
-      for (const script of scripts.values()) {
-        if (script.path === normalized) return script;
-      }
-      try {
-        const sourceCode = readFileSync(normalized, "utf-8");
-        const stem = basename(normalized, ".js");
-        const meta = extractMeta(sourceCode, stem);
-        return new WorkflowScript({
-          name: meta.name,
-          source: "saved",
-          path: normalized,
-          sourceCode,
-          meta,
-          available: true,
-        });
-      } catch {
-        return undefined;
-      }
-    },
-    loadAll: async () => Array.from(scripts.values()),
-    invalidate: () => {},
-  };
-}
-
-function makeDeps(runner: AgentRunner): LauncherDeps {
-  const scripts = loadWorkflowsFromDir(WORKFLOWS_DIR);
-  const registry = makeRegistry(scripts);
-  const store = new JsonlRunStore({ sessionDir });
-  createdStores.push(store);
-  const base: LifecycleDeps = {
-    store,
-    workerHost: new WorkerHostImpl(),
-    runner,
-    runs: new Map(),
-  };
-  return { ...base, registry };
-}
-
 let rflHomeDir: string;
 
 beforeEach(() => {
@@ -379,6 +275,12 @@ beforeEach(() => {
   // 重试矩阵才收敛 failed，退避占单用例耗时大头）。生产默认不变，见
   // worker-message-pump RETRY_BACKOFF_BASE_ENV 测试通道。
   vi.stubEnv("TAIJI_SUBAGENT_TEST_RETRY_BACKOFF_BASE_MS", "1");
+  // 压缩 launcher 轮询 tick（500ms → 5ms）与 agent 重试退避（1s → 10ms，W6 用例
+  // 走 executeAgentCall 重试矩阵不再付 3s 真实等待；两通道均调用时读 env，生产
+  // 默认不变——见 core 侧 STATUS_POLL_INTERVAL_ENV / AGENT_RETRY_BACKOFF_BASE_ENV）。
+  vi.stubEnv("TAIJI_SUBAGENT_TEST_STATUS_POLL_INTERVAL_MS", "5");
+  vi.stubEnv("TAIJI_SUBAGENT_TEST_AGENT_RETRY_BACKOFF_BASE_MS", "10");
+  bindRunStore(sessionDir, createdStores);
   createdStores = [];
 });
 
@@ -424,17 +326,6 @@ function makeTmpGitRepo(): string {
 }
 
 describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () => {
-  it("sanity: chain 经本文件基础设施可跑（helper 自检）", async () => {
-    // 返回超集对象同时满足 chain 三段 schema（analyze/transform/synthesize 均被分类为 review）
-    const runner = makeScenarioRunner({
-      review: [() => ({ insights: "i", keyPoints: [], plan: "p", actions: [], summary: "s", recommendation: "r" })],
-      aggregate: () => ({}),
-      fix: () => ({}),
-    });
-    const deps = makeDeps(runner);
-    const result = await runAndWait(wf("chain"), { task: "x" }, deps, undefined, RUN_TIMEOUT_MS);
-    expect(result.reason).toBe("completed");
-  });
   it(
     "E2E-1：defer 跨轮传递 + R2 prompt 对账段 + clean 终止（§7.2 1/3）",
     async () => {
@@ -1056,43 +947,8 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
     RUN_TIMEOUT_MS,
   );
 
-  it(
-    "fail-fast：targetType 非法枚举 / target 空串 → workflow 失败且 error 含必填提示（S-19）",
-    async () => {
-      const deps = makeDeps(makeScenarioRunner({
-        review: [() => ({ report_file: "/tmp/r1.md", must_fix: 0, suggestion: 0, reconciliation: [] })],
-        aggregate: () => ({ report_file: "/tmp/agg.md", must_fix: 0, suggestion: 0, must_fix_ids: [], fixes_caution: [] }),
-        fix: () => ({ fixed_count: 0, fixes: [], deferred: [] }),
-      }));
-
-      // targetType 非法枚举（m3 TC14：chokepoint 先拦 → invalid_args + ajv 文案 + info 指引）
-      const r1 = await runAndWait(
-        wf("review-fix-loop"),
-        { targetType: "nope", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
-        deps,
-        undefined,
-        RUN_TIMEOUT_MS,
-      );
-      expect(r1.reason).toBe("invalid_args");
-      expect(r1.error).toContain("Invalid args for workflow 'review-fix-loop'");
-      expect(r1.error).toContain("targetType");
-      expect(r1.error).toContain("Read the workflow script file");
-
-      // target 空串（m3 required 空串复查先拦 → invalid_args；脚本 !target 成不可达死代码）
-      const r2 = await runAndWait(
-        wf("review-fix-loop"),
-        { targetType: "file", target: "   ", agents: agentMd("reviewer"), _runId: RUN_ID() },
-        deps,
-        undefined,
-        RUN_TIMEOUT_MS,
-      );
-      expect(r2.reason).toBe("invalid_args");
-      // schema 驱动（minLength:1 + pattern '\\S'）：chokepoint 不发明约束
-      expect(r2.error).toContain("target");
-      expect(r2.error).toContain("Read the workflow script file");
-    },
-    RUN_TIMEOUT_MS,
-  );
+  // 【targetType 非法枚举 / target 空串变体已并入 workflows-e2e.test.ts TC10 参数
+  // 矩阵（同走 runAndWait chokepoint invalid_args 通道，断言三元组一致）】
 
   // ── MF-1-1：统一 commit 块（autoCommit）e2e——真实 tmp git 仓 ──────────
 
@@ -1328,32 +1184,35 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
     fix: () => ({ fixed_count: 0, fixes: [], deferred: [] }),
   };
 
-  it("TC1: batchN 不存在路径 → 启动期 fail-fast，未调 agent", async () => {
+  // TC1/TC2 表驱动合并：agent 路径 fail-fast 的两个入列分支（batchN 的 agents 路径 /
+  // fixAgent 路径）各配不存在路径变体；makeArgs 惰性求值（fixtureDir 在 beforeEach 创建）。
+  it.each([
+    {
+      label: "batchN(agents) 不存在路径",
+      makeArgs: (): Record<string, unknown> => ({
+        targetType: "file", target: "README.md", agents: "/nonexistent/missing.md",
+      }),
+      missingPath: "/nonexistent/missing.md",
+    },
+    {
+      label: "fixAgent 不存在路径（agents 合法入列）",
+      makeArgs: (): Record<string, unknown> => ({
+        targetType: "file", target: "README.md", agents: agentMd("reviewer"), fixAgent: "/nonexistent/fix.md",
+      }),
+      missingPath: "/nonexistent/fix.md",
+    },
+  ])("TC1/TC2: $label → 启动期 fail-fast，未调 agent", async ({ makeArgs, missingPath }) => {
     const runner = makeScenarioRunner(emptyScenario);
     const deps = makeDeps(runner);
     const result = await runAndWait(
       wf("review-fix-loop"),
-      { targetType: "file", target: "README.md", agents: "/nonexistent/missing.md", _runId: RUN_ID() },
+      { ...makeArgs(), _runId: RUN_ID() },
       deps, undefined, RUN_TIMEOUT_MS,
     );
     expect(result.reason).not.toBe("completed");
     expect(String(result.error ?? "")).toContain("Agent file not found");
-    expect(String(result.error ?? "")).toContain("/nonexistent/missing.md");
+    expect(String(result.error ?? "")).toContain(missingPath);
     // fail-fast 在 round 前：agent mock 未被调用
-    expect(runner.stats().kinds.length).toBe(0);
-  }, RUN_TIMEOUT_MS);
-
-  it("TC2: fixAgent 不存在路径 → 启动期 fail-fast", async () => {
-    const runner = makeScenarioRunner(emptyScenario);
-    const deps = makeDeps(runner);
-    const result = await runAndWait(
-      wf("review-fix-loop"),
-      { targetType: "file", target: "README.md", agents: agentMd("reviewer"), fixAgent: "/nonexistent/fix.md", _runId: RUN_ID() },
-      deps, undefined, RUN_TIMEOUT_MS,
-    );
-    expect(result.reason).not.toBe("completed");
-    expect(String(result.error ?? "")).toContain("Agent file not found");
-    expect(String(result.error ?? "")).toContain("/nonexistent/fix.md");
     expect(runner.stats().kinds.length).toBe(0);
   }, RUN_TIMEOUT_MS);
 
@@ -1911,10 +1770,8 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       const parsed = JSON.parse(reviewSchemas[0]) as { required?: string[] };
       expect(parsed.required).toEqual(["report_file", "must_fix", "suggestion", "reconciliation"]);
       expect(JSON.stringify(parsed)).not.toContain("optional for R1"); // stale description 已更新
-
-      // 脚本内不再存在 per-round required spread
-      const wfSource = readFileSync(wf("review-fix-loop"), "utf-8");
-      expect(wfSource).not.toContain("...reviewerSchema, required:");
+      // 【源码 grep 断言已删（"...reviewerSchema, required:" 不在脚本内）——同用例上方
+      // 的真实调用 schema 逐字节比对已覆盖该行为面】
     },
     RUN_TIMEOUT_MS,
   );

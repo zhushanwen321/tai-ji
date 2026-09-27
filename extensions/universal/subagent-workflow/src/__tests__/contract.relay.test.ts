@@ -24,9 +24,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
-  RELAY_ENV_NODE,
   RELAY_ENV_RECORD_ID,
-  RELAY_ENV_SCRIPT,
   RELAY_ENV_SESSION_ID,
   RELAY_ENV_SOCKET,
   RELAY_EXIT_CODES,
@@ -144,15 +142,6 @@ describe("relay 变体 C-帧词表：relay.mjs 内嵌帧字面量与 relay-frame
   });
 });
 
-// SSOT 面回归锚（原 C-通道段消费的两个常量随段废弃——保留导入面活性断言，防
-// SSOT 导出被静默删除而镜像测试仍误绿）：
-describe("relay 变体 SSOT 导出面：代理启动键仍在 relay-env.ts", () => {
-  it("RELAY_ENV_NODE / RELAY_ENV_SCRIPT 非空（代理进程启动键）", () => {
-    expect(RELAY_ENV_NODE).toBeTruthy();
-    expect(RELAY_ENV_SCRIPT).toBeTruthy();
-    // 代理启动键不进 relay.mjs 镜像（上方「镜像面不扩充」锁死）——两断言互证：
-    // SSOT 有、镜像无 = 代理经 env 接收启动键而非内嵌，契约面自洽。
-    expect(RELAY_ENV_NODE).not.toBe(RELAY_ENV_SOCKET);
-    expect(RELAY_ENV_SCRIPT).not.toBe(RELAY_ENV_SOCKET);
-  });
-});
+// SSOT 面回归锚（原「SSOT 导出面」describe）：RELAY_ENV_NODE / RELAY_ENV_SCRIPT 的
+// 字面量断言与「≠ SOCKET」防呆已迁 core relay-env.test.ts（宿主侧无额外契约可锁——
+// 两常量由 runtime 注入、extension 消费，归属 core SSOT 测试）。

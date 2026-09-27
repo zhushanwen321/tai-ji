@@ -1,27 +1,19 @@
-// 测试框架：vitest
-// 运行命令：npx vitest run src/__tests__/trace.test.ts
-//
-// Trace 首个直接单测（W1TC1-W1TC12，.cw/swf-perf-impl/rt-w1-design.json）：
+// trace.test.ts —— Trace 首个直接单测（W1TC1-W1TC12，.cw/swf-perf-impl/rt-w1-design.json）。
+// 被测对象（Trace / executeAgentCall）全在 core——自 pi 壳迁移落位；W1TC11（jsonl
+// save-load round-trip）的 JsonlRunStore 归属 pi 壳，留壳侧 session-file 件。
 // - W1TC1-3/9：byIndex 倒排索引一致性与 no-op 防御语义
 // - W1TC4-8：result.content 裁剪（append/update 入口、8000 边界、patch 缺省、fromArray 原样保留）
-// - W1TC10-11：集成——executeAgentCall 真链路 / jsonl save-load round-trip
+// - W1TC10：集成——executeAgentCall 真链路（call.result 全量、trace 节点持裁剪副本）
 // - W1TC12：重复 stepIndex 违规语义锚定（last-wins + remove 后 desync 孤儿）
 
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import { describe, expect, it, vi } from "vitest";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import { TRACE_RESULT_MAX_CHARS, Trace } from "@zhushanwen/subagent-core/orchestration/models/trace.ts";
-import { AgentCall } from "@zhushanwen/subagent-core";
-import { Budget } from "@zhushanwen/subagent-core";
-import { fromRunSnapshot } from "@zhushanwen/subagent-core";
-import { WorkflowRun } from "@zhushanwen/subagent-core";
-import type { ExecutionTraceNode, AgentResult, RunSpec } from "@zhushanwen/subagent-core";
-import type { AgentRunner } from "@zhushanwen/subagent-core/orchestration/models/ports.ts";
-import { executeAgentCall } from "@zhushanwen/subagent-core/orchestration/execute-agent-call.ts";
-import { JsonlRunStore } from "../jsonl-run-store.ts";
+import { executeAgentCall } from "../execute-agent-call.ts";
+import { AgentCall } from "../models/agent-call.ts";
+import { Budget } from "../models/budget.ts";
+import { AgentRunner } from "../models/ports.ts";
+import { TRACE_RESULT_MAX_CHARS, Trace } from "../models/trace.ts";
+import type { AgentResult, ExecutionTraceNode } from "../models/types.ts";
 
 // ── 测试辅助 ─────────────────────────────────────────────────
 
@@ -298,117 +290,5 @@ describe("W1TC10: executeAgentCall 真链路——call.result 全量、trace 节
     expect(stored.content.length).toBe(4000 + marker.length + 4000);
     expect(stored.sessionId).toBe("s1");
     expect(trace.find(0)!.status).toBe("completed");
-  });
-});
-
-// ── 集成：jsonl save/load round-trip（W1TC11）─────────────────
-
-describe("W1TC11: jsonl save/load round-trip——落盘裁剪形态 + 重水合不二次裁", () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-trace-trim-test-"));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  });
-
-  function makeSpec(): RunSpec {
-    return {
-      scriptSource: "module.exports = async () => {};",
-      args: {},
-      scriptName: "test-script",
-      scriptPath: "/tmp/test.js",
-      description: "test",
-    };
-  }
-
-  /** 构造含 10000 字符 result 已完成 call 的 WorkflowRun（模式对齐 jsonl-run-store-session-file.test.ts）。 */
-  function makeRunWithDoneCall(): WorkflowRun {
-    const trace = new Trace();
-    const node = makeTraceNode(0);
-    trace.append(node);
-    const call = new AgentCall(0, { prompt: "task", agent: "worker" }, node);
-    call.markRunning();
-    // markDone 存全量 result（AgentCall.result 不裁）
-    call.markDone(makeResult("q".repeat(10000), { sessionId: "session-abc" }));
-    call.setSessionId("session-abc");
-    // trace.update 经入口裁剪——节点持裁剪副本
-    trace.update(0, {
-      status: "completed",
-      result: call.result,
-      completedAt: new Date().toISOString(),
-      sessionId: "session-abc",
-    });
-
-    return new WorkflowRun(
-      "run-trim-001",
-      makeSpec(),
-      {
-        status: "done",
-        reason: "completed",
-        budget: new Budget(),
-        calls: new Map([[0, call]]),
-        trace,
-        errorLogs: [],
-      },
-      { startedAt: new Date().toISOString(), completedAt: new Date().toISOString() },
-    );
-  }
-
-  it("W1TC11: save 落盘 trace 裁剪 + calls[].result 全量；state 投影回读逐字节一致（[W1] 停写后投影即 round-trip 面）", async () => {
-    const entries: Array<{ type: string; customType?: string; data?: unknown }> = [];
-    const mockPi = {
-      appendEntry: vi.fn((type: string, data: unknown) => {
-        entries.push({ type: "custom", customType: type, data });
-      }),
-    };
-    const mockCtx = {
-      sessionManager: { getEntries: () => entries },
-    };
-    const store = new JsonlRunStore({
-      sessionDir: tmpDir,
-      pi: mockPi as never,
-      ctx: mockCtx as never,
-    });
-
-    const run = makeRunWithDoneCall();
-    await store.save(run);
-
-    // 读磁盘快照验证落盘形态
-    const raw = fs.readFileSync(
-      path.join(tmpDir, "workflow-state", "run-trim-001.jsonl"),
-      "utf8",
-    );
-    const snapshot = JSON.parse(raw.trim()) as {
-      state: {
-        trace: Array<{ result?: { content: string } }>;
-        calls: Array<{ result?: { content: string }; traceNode: { result?: { content: string } } }>;
-      };
-    };
-
-    // trace 投影瘦身生效：trace[0] 含标记
-    expect(snapshot.state.trace[0]!.result!.content).toContain(
-      "[trace result truncated, original 10000 chars]",
-    );
-    // calls[].traceNode 是同一裁剪后节点引用（剥 live 后的 rest），亦含标记
-    expect(snapshot.state.calls[0]!.traceNode.result!.content).toContain(
-      "[trace result truncated, original 10000 chars]",
-    );
-    // 顶层 calls[].result 字段不裁——全量 10000
-    expect(snapshot.state.calls[0]!.result!.content).toHaveLength(10000);
-
-    // [W1 / D1] 条目通道停写：save 零 workflow-record entry，loadAll 对「只有 state
-    // 投影、无注册条目」的会话返回空（投影可删可重建，非重建源）——round-trip 回读
-    // 面 = state 文件 fromRunSnapshot（call 级详情的持久化投影/恢复面）。
-    expect(entries).toHaveLength(0);
-    const restored = fromRunSnapshot(JSON.parse(raw.trim()));
-    expect(restored).toBeDefined();
-    expect(restored!.runId).toBe("run-trim-001");
-    // fromArray 不再裁，与落盘形态逐字节一致（无标记嵌套）
-    const restoredContent = restored!.state.trace.toArray()[0]!.result!.content;
-    expect(restoredContent).toBe(snapshot.state.trace[0]!.result!.content);
-    expect(restoredContent.match(/truncated/g)).toHaveLength(1);
   });
 });

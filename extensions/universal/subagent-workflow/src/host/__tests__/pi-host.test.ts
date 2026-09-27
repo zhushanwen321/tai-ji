@@ -443,6 +443,51 @@ describe("createPiNotifyDomainPorts.countActiveFromEntries（适配读 .count）
 		vi.mocked(countActiveFromEntries).mockReturnValue({ count: 0, ids: [], entries: [] });
 		expect(createPiNotifyDomainPorts().countActiveFromEntries?.([])).toBe(0);
 	});
+
+	// ── 读侧过滤②（per-call 基准）装配冒烟（自 src/__tests__/pi-host-notify-ports.test.ts 迁入）──
+	// [W4 读侧过滤② / F1] countActiveFromEntries 第二参（core 端口契约 CountActivePortOptions）
+	// 透传 pending-notifications 的 currentSessionId——传入时按「register entry 的
+	// sessionId ≠ 基准 → 跳过」过滤（fork 继承的父级注册残留不进后代判定差集）；
+	// 缺省不过滤（向后兼容）。差集语义权威在 pending-notifications 包自身，这两条用
+	// 真实实现（importActual，文件级 mock 面内恢复）验证 createPiNotifyDomainPorts
+	// 装配贯通 + per-call 基准形态（本 describe 前三条的 mockReturnValue 在用例体内
+	// 后置覆盖，与该钩子不冲突）。基准来源 [F1]：core 读侧按「被读 entries 所属
+	// session」提供——本装配在扩展启动时一次定型，factory 定型表达不了 per-call 基准。
+	beforeEach(async () => {
+		const actual = await vi.importActual<typeof import("@zhushanwen/pi-pending-notifications")>(
+			"@zhushanwen/pi-pending-notifications",
+		);
+		vi.mocked(countActiveFromEntries).mockImplementation(actual.countActiveFromEntries);
+	});
+
+	/** pending:register entry 最小夹具（真实 countActiveFromEntries 可消费的形状）。 */
+	function registerEntry(id: string, type: string, sessionId: string): unknown {
+		return {
+			type: "custom",
+			customType: "pending:register",
+			data: { id, type, name: id, registeredAt: 1, sessionId },
+		};
+	}
+
+	it("调用时传 currentSessionId → 跨 session 残留不进后代判定差集", () => {
+		const entries = [
+			registerEntry("bg-parent", "subagent", "sess-parent"),
+			registerEntry("wf-parent", "workflow", "sess-parent"),
+			registerEntry("bg-own", "subagent", "sess-child"),
+		];
+		const ports = createPiNotifyDomainPorts();
+		expect(ports.countActiveFromEntries?.(entries, { currentSessionId: "sess-child" })).toBe(1);
+	});
+
+	it("调用时不传基准 → 不过滤（向后兼容：无基准调用方零改动）", () => {
+		const entries = [
+			registerEntry("bg-parent", "subagent", "sess-parent"),
+			registerEntry("wf-parent", "workflow", "sess-parent"),
+			registerEntry("bg-own", "subagent", "sess-child"),
+		];
+		const ports = createPiNotifyDomainPorts();
+		expect(ports.countActiveFromEntries?.(entries)).toBe(3);
+	});
 });
 
 describe("createPiNotifyDomainPorts.createDelivery（透传 session-delivery）", () => {

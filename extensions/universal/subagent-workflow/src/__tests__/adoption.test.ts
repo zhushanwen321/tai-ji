@@ -1,28 +1,25 @@
 // src/__tests__/adoption.test.ts
 //
-// B2 单元验收面（skill-reload-nondestructive 设计 D4/D5）：
+// B2 单元验收面（skill-reload-nondestructive 设计 D4/D5）——lifecycle / handler 面：
 //   ① D4 恢复门控：session_start(reason='reload') 全程不跑 recoverCrashedRuns
 //      （无论条目有无）——条目存在（adoption 接管）与条目缺失（reload 落首次装配
 //      await 链中）两形态的 running run 都不转 failed；非 reload（startup）现状
 //      恢复语义保持（门控是 reason 驱动的对照组）；
 //   ② D4 接管：adoption 后 sessionState.get(sid) 与 reload 前同一引用（store/runs
 //      不换实例）、ctx 换新、rebind 后 appendEntry 走新 pi；
-//   ③ D4 快照重发保序：经 store per-runId 串行 flush 链（enqueueFlush）重发，窗口
-//      内终态的 run 重发后新 pi 的该 runId 最后一条 entry 恒为终态（done 之后无
-//      更旧状态 entry），loadAll last-ways 读回终态——单测构造按终态/首写路径构造
-//      （中间态重发受 60s 节流约束可跳过，设计 r3 主审 INFO）；
-//   ④ D4 失败处置（顺序敏感 r4）：健康检查不过 → rebind-first 后 terminate 的
+//   ③ D4 失败处置（顺序敏感 r4）：健康检查不过 → rebind-first 后 terminate 的
 //      failed entry 落新 pi 权威 JSONL + notifyDone 用户可见（sendMessage
-//      workflow-result）+ sessionState 条目移除 + 全量装配兜底；
-//   ⑤ D5 store stale guard：rebind 后窗口内 stale appendEntry 统一 debug 丢弃
-//      （不进 IO 错误路径，state 文件照写）。
+//      workflow-result）+ sessionState 条目移除 + 全量装配兜底。
+//
+// store 本体面（rebind 补写 / 投影重发保序 / stale guard 直测）归属
+// jsonl-run-store-session-file.test.ts（测试审计裁决：被测对象是 JsonlRunStore
+// 本体行为的条目随归属走）。
 //
 // mock 手法对齐既有测试：seam 直测对齐 crash-recovery.test.ts（resetModules +
 // 用例内动态 import setupSessionLifecycle——oncePerProcess 守卫 Map 是模块级状态；
-// 双 Service 经访问器槽注入 fake）；store 单元级对齐 jsonl-run-store-throttle.test.ts
-// （mkPi/mkCtx 共享 entries 数组模拟 session JSONL 物理序 + fake timers 推进去抖）；
-// handler 级对齐 workflow-events-reload-branch.test.ts（真 setupWorkflowDomain 全链，
-// 不 mock session-lifecycle / jsonl-run-store / subagent-core）。
+// 双 Service 经访问器槽注入 fake）；handler 级对齐
+// workflow-events-reload-branch.test.ts（真 setupWorkflowDomain 全链，不 mock
+// session-lifecycle / jsonl-run-store / subagent-core）。
 //
 // 环境隔离：PI_CODING_AGENT_DIR 钉到 mkdtemp 临时目录（pi config.js getAgentDir
 // env 优先）——真 JsonlRunStore 的 sessionDir / syncEnginesFile 全落临时目录，
@@ -37,7 +34,6 @@ import type { CustomEntry, ExtensionContext } from "@earendil-works/pi-coding-ag
 import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
-import { WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core";
 import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run-spec.ts";
@@ -168,34 +164,6 @@ function recordStatuses(entries: CustomEntry[], runId: string): string[] {
     .map((e) => e.data.snapshot)
     .filter((s) => s?.runId === runId)
     .map((s) => s?.state?.status ?? "");
-}
-
-/** [W1 / D1] 手工 v2 注册条目夹具（字段集 = core lifecycle 写点同构）。 */
-function v2RegisteredEntry(runId: string, journalPath: string): CustomEntry {
-  return {
-    type: "custom",
-    customType: WORKFLOW_RECORD_CUSTOM_TYPE,
-    data: {
-      v: WORKFLOW_RECORD_ENTRY_VERSION,
-      kind: "registered",
-      runId,
-      workflowName: "adoption-test",
-      scriptName: "adoption-test",
-      slug: "adoption-test",
-      startedAt: Date.now(),
-      journalPath,
-    },
-    id: `seed-v2-reg-${runId}`,
-    parentId: null,
-    timestamp: new Date().toISOString(),
-  };
-}
-
-/** [W1 / D4] 向 stateDir 的 journal 文件追加一帧（raw JSONL——模拟 core 写者落账）。 */
-function appendJournalLine(sessionDir: string, runId: string, line: Record<string, unknown>): void {
-  const journalPath = path.join(sessionDir, "workflow-state", `${runId}.events.jsonl`);
-  fs.mkdirSync(path.dirname(journalPath), { recursive: true });
-  fs.appendFileSync(journalPath, `${JSON.stringify(line)}\n`, "utf8");
 }
 
 /** 读 state 投影文件的 status（[W1] 持久化投影面断言用）。 */
@@ -349,42 +317,6 @@ describe("D4 接管：同引用接管 + ctx 换新", () => {
     expect(store.rebind).toHaveBeenCalledWith(pi, ctxNew);
   });
 
-  it("store rebind 后 v2 终态条目补写走新 pi（旧 pi 不再收 entry）", async () => {
-    const { JsonlRunStore } = await import("../jsonl-run-store.ts"); // WORKFLOW_RECORD_CUSTOM_TYPE 已收 core（顶部静态 import）
-    const entriesOld: CustomEntry[] = [];
-    const entriesNew: CustomEntry[] = [];
-    const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-adopt-store-"));
-    try {
-      // v2 收编面夹具：注册条目 + journal 已终局（终态条目缺失 → loadAll 幂等补写）
-      const runId = "wf-rebind-1";
-      const journalPath = path.join(sessionDir, "workflow-state", `${runId}.events.jsonl`);
-      appendJournalLine(sessionDir, runId, { type: "run-created", runId, workflowName: "adoption-test", argsSummary: "{}", ts: 1000, seq: 1 });
-      appendJournalLine(sessionDir, runId, { type: "run-settled", outcome: "completed", artifactsDir: sessionDir, ts: 2000, seq: 2 });
-      const seedEntries: CustomEntry[] = [v2RegisteredEntry(runId, journalPath)];
-
-      const store = new JsonlRunStore({
-        sessionDir,
-        pi: mkPi(entriesOld),
-        ctx: makeFakeCtx("sess-rebind", seedEntries),
-      });
-      // rebind 换源：条目补写面路由到新 pi
-      store.rebind(mkPi(entriesNew), makeFakeCtx("sess-rebind", seedEntries));
-
-      const loaded = await store.loadAll();
-      expect(loaded[0]?.state.status).toBe("done");
-      expect(loaded[0]?.state.reason).toBe("completed");
-
-      // 补写落新 pi：seed 注册之外恰 1 条终态条目（kind: settled）
-      const wfNew = entriesNew.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE);
-      expect(wfNew).toHaveLength(1);
-      expect((wfNew[0]!.data as { kind?: string }).kind).toBe("settled");
-      // 旧 pi 不再收 entry（appendEntry 源已换新）
-      expect(entriesOld).toHaveLength(0);
-    } finally {
-      fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    }
-  });
-
   it("handler 级全链：reload 后 sessionState.get(sid) 与 reload 前同一引用、run 存活、投影重发落 state 文件（零条目写）", async () => {
     const { setupWorkflowDomain } = await import("../workflow-events.ts");
     const makeMount = () => {
@@ -430,99 +362,7 @@ describe("D4 接管：同引用接管 + ctx 换新", () => {
   });
 });
 
-// ── ③ D4 快照重发保序（经 store per-runId 串行链） ─────────────────────────────
-
-describe("D4 投影重发保序：窗口内终态 → state 投影终态收敛（[W1] 条目通道退役后投影即持久化面）", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("窗口内终态：adoption 重发后 state 投影收敛终态 + journal 权威读回终态 + 终态条目补写落新 pi", async () => {
-    const { JsonlRunStore } = await import("../jsonl-run-store.ts");
-    const entriesNew: CustomEntry[] = [];
-    const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-adopt-order-"));
-    try {
-      const runId = "wf-order-1";
-      // v2 收编面夹具：注册条目 + journal 已终局（loadAll 读回终态的证据源）。
-      // 帧时间戳用近期值——后续 save 触发的 retention sweep（D5 判据①）只裁
-      // 「终态超窗」足迹，远古时间戳会被误判超窗裁掉（测试夹具语义 = 窗口内存活）。
-      const journalPath = path.join(sessionDir, "workflow-state", `${runId}.events.jsonl`);
-      appendJournalLine(sessionDir, runId, { type: "run-created", runId, workflowName: "adoption-test", argsSummary: "{}", ts: Date.now() - 60_000, seq: 1 });
-      appendJournalLine(sessionDir, runId, { type: "run-settled", outcome: "completed", artifactsDir: sessionDir, ts: Date.now() - 30_000, seq: 2 });
-      const seedEntries: CustomEntry[] = [v2RegisteredEntry(runId, journalPath)];
-
-      const store = new JsonlRunStore({
-        sessionDir,
-        pi: mkPi([]),
-        ctx: makeFakeCtx("sess-order-1", seedEntries),
-      });
-      const run = makeRun(runId, "running");
-      await store.save(run); // 窗口内首写（running 投影落盘）
-      // 窗口内终态：内存对象变终态
-      run.transition("done", "completed");
-
-      // adoption：rebind（新 pi + stale guard）+ 投影重发（经串行链）
-      const piNew = mkPi(entriesNew);
-      store.rebind(piNew, makeFakeCtx("sess-order-1", seedEntries));
-      await store.resendSnapshots(new Map([[run.runId, run]]));
-
-      // 终态是该 runId 投影的最后一次写盘内容（绕链并发写会物理乱序，走链后链内闭合）
-      expect(readStateStatus(sessionDir, runId)).toBe("done");
-      // last-ways 读回终态（崩溃恢复不误判的反向证明）+ 终态条目幂等补写恰 1 条落新 pi
-      const restored = await store.loadAll();
-      expect(restored.find((r) => r.runId === runId)?.state.status).toBe("done");
-      expect(restored.find((r) => r.runId === runId)?.state.reason).toBe("completed");
-      const wfNew = entriesNew.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE);
-      expect(wfNew).toHaveLength(1);
-      expect((wfNew[0]!.data as { kind?: string }).kind).toBe("settled");
-    } finally {
-      fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    }
-  });
-
-  it("in-flight 去抖批与重发同链竞争：done 恒为 state 投影的最后落盘形态（done 之后无更旧状态）", async () => {
-    const { JsonlRunStore } = await import("../jsonl-run-store.ts");
-    const entriesOld: CustomEntry[] = [];
-    const entriesNew: CustomEntry[] = [];
-    const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-adopt-order2-"));
-    try {
-      const store = new JsonlRunStore({
-        sessionDir,
-        pi: mkPi(entriesOld),
-        ctx: makeFakeCtx("sess-order-2"),
-        saveDebounceMs: 200,
-      });
-      const run = makeRun("wf-order-2", "running");
-      await store.save(run); // 冷路径：running 投影落盘
-      const pHot = store.save(run); // 热路径并入去抖批（timer 未推进）
-
-      // reload 窗口：rebind + 两次投影重发（重发#1 时 run 尚 running，随后窗口内终态）
-      const piNew = mkPi(entriesNew);
-      store.rebind(piNew, makeFakeCtx("sess-order-2"));
-      const runs = new Map([[run.runId, run]]);
-      const p1 = store.resendSnapshots(runs);
-      run.transition("done", "completed");
-      const p2 = store.resendSnapshots(runs);
-      vi.advanceTimersByTime(200); // 去抖批到期，挂同一串行链尾
-      await Promise.all([pHot, p1, p2]);
-
-      // 保序红线：终态恒为该 runId 投影的最后落盘形态——绕链直接写会与 in-flight
-      // flush 物理乱序（最后落盘 running），走链后由链内闭合保证
-      expect(readStateStatus(sessionDir, "wf-order-2")).toBe("done");
-      // [W1 / D1] 停写锚定：新旧 pi 零 workflow-record entry
-      expect(recordStatuses(entriesNew, "wf-order-2")).toHaveLength(0);
-      expect(recordStatuses(entriesOld, "wf-order-2")).toHaveLength(0);
-    } finally {
-      fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    }
-  });
-});
-
-// ── ④ D4 adoption 失败处置：rebind-first 终态完整性 + 用户可见 + 条目移除 ────────
+// ── ③ D4 adoption 失败处置：rebind-first 终态完整性 + 用户可见 + 条目移除 ────────
 
 describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移除条目 → 全量装配兜底", () => {
   it("seam 级：rebind 抛错 → rebind-first 兜底再试 + onAdoptionFailed 触发（terminate+移除注入回调）", async () => {
@@ -620,47 +460,5 @@ describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移�
     expect(after).toBeDefined();
     expect(after).not.toBe(first);
     expect(after!.runs.has("wf-fail-1")).toBe(false);
-  });
-});
-
-// ── ⑤ D5 store stale guard ────────────────────────────────────────────────────
-
-describe("D5 store stale guard：rebind 后窗口内 stale appendEntry 统一 debug 丢弃", () => {
-  it("stale 抛错不进错误路径：loadAll 终态条目补写被守卫丢弃（不 reject）、save 照常 settle、state 文件照写", async () => {
-    const { JsonlRunStore } = await import("../jsonl-run-store.ts");
-    const staleMessage = "Extension runner is stale after session replacement";
-    const entriesStale: CustomEntry[] = [];
-    const piStale = mkPi(entriesStale, { appendEntry: vi.fn(() => { throw new Error(staleMessage); }) });
-    const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-adopt-stale-"));
-    try {
-      // v2 收编面夹具：注册条目 + journal 已终局（终态条目缺失 → loadAll 幂等补写）
-      const runId = "wf-stale-1";
-      const journalPath = path.join(sessionDir, "workflow-state", `${runId}.events.jsonl`);
-      appendJournalLine(sessionDir, runId, { type: "run-created", runId, workflowName: "adoption-test", argsSummary: "{}", ts: 1000, seq: 1 });
-      appendJournalLine(sessionDir, runId, { type: "run-settled", outcome: "completed", artifactsDir: sessionDir, ts: 2000, seq: 2 });
-      const seedEntries: CustomEntry[] = [v2RegisteredEntry(runId, journalPath)];
-
-      const store = new JsonlRunStore({
-        sessionDir,
-        ctx: makeFakeCtx("sess-stale", seedEntries),
-      });
-      // rebind 后新 pi 随下一次 reload 窗口变 stale（appendEntry 抛 PS-30 文案）
-      store.rebind(piStale, makeFakeCtx("sess-stale", seedEntries));
-
-      // 补写撞 stale → guardStaleCtx 分诊丢弃（debug 留痕），loadAll 不 reject、
-      // 读回终态（条目是投影锚：stale 窗口内缺失由下次 loadAll 幂等补写自愈）
-      const loaded = await store.loadAll();
-      expect(loaded).toHaveLength(1);
-      expect(loaded[0]!.state.status).toBe("done");
-      expect(entriesStale).toHaveLength(0); // stale 条目被丢弃
-
-      // state 文件照写语义保留：save 正常 settle（无条目面——[W1] 停写）
-      const doneRun = makeRun("wf-stale-2", "done", "completed");
-      await expect(store.save(doneRun)).resolves.toBeUndefined();
-      const stateFile = path.join(sessionDir, "workflow-state", "wf-stale-2.jsonl");
-      expect(JSON.parse(fs.readFileSync(stateFile, "utf8")).state.status).toBe("done");
-    } finally {
-      fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    }
   });
 });

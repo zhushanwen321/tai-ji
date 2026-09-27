@@ -62,8 +62,9 @@ const RELAY_EXIT_CODES = {
   MISSING_IDENTITY: 13,
 };
 
-/** 首次连接失败到重试的间隔（毫秒）。设计未定值；取短值——只需覆盖 runtime 建 socket 与主 pi spawn 的毫秒级窗口。 */
-const CONNECT_RETRY_DELAY_MS = 200;
+/** 首次连接失败到重试的间隔（毫秒）。设计未定值；取短值——只需覆盖 runtime 建 socket 与主 pi spawn 的毫秒级窗口。
+ * RELAY_CONNECT_RETRY_DELAY_MS 仅测试注入通道（集成测试注入短值压缩重试等待）；非法值退回默认。 */
+const CONNECT_RETRY_DELAY_MS = Number(process.env.RELAY_CONNECT_RETRY_DELAY_MS) || 200;
 /** 退出前等待 stderr/stdout flush 的兜底上限（毫秒）：pipe 写是异步的，process.exit 会丢未 flush 数据。 */
 const FLUSH_TIMEOUT_MS = 1000;
 /** goodbye 帧写出后等待 flush 的兜底上限（毫秒）：runtime 已死等形态下 write 回调永不到达。 */

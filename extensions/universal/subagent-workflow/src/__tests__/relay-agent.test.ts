@@ -10,7 +10,7 @@
 //   6. exit 帧 signal 传播（spawn 方观察到 (code=null, signal)）
 //   7. socket 断 → 退出码 12（崩溃矩阵②的 extension 侧感知机制）
 //   8. reject version → 退出码 10 + 重装指引；reject 其他 reason → 12
-//   9. 背压：1MB 随机字节经代理双向环回（stdin→down→server→up→stdout）收齐无丢字节
+//   9. 背压：256KB 随机字节经代理双向环回（stdin→down→server→up→stdout）收齐无丢字节
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import * as crypto from "node:crypto";
@@ -166,6 +166,8 @@ interface SpawnOpts {
   sessionId?: string;
   recordId?: string;
   argv?: string[];
+  /** 额外注入 env（如 RELAY_CONNECT_RETRY_DELAY_MS 压缩重试等待）；在 5 个 relay 变量精确控制之后合并。 */
+  extraEnv?: Record<string, string>;
 }
 
 /**
@@ -189,6 +191,9 @@ function spawnRelay(opts: SpawnOpts): CollectedChild {
   if (opts.socketPath !== undefined) env[RELAY_ENV_SOCKET] = opts.socketPath;
   if (opts.sessionId !== undefined) env[RELAY_ENV_SESSION_ID] = opts.sessionId;
   if (opts.recordId !== undefined) env[RELAY_ENV_RECORD_ID] = opts.recordId;
+  // 测试注入通道先剥离再按需注入：外层环境残留不得影响用例确定性
+  delete env.RELAY_CONNECT_RETRY_DELAY_MS;
+  Object.assign(env, opts.extraEnv);
   const child = spawn(process.execPath, [RELAY_SCRIPT_PATH, ...(opts.argv ?? ["--mode", "rpc"])], {
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -298,7 +303,13 @@ describe("relay agent CLI (relay.mjs)", () => {
 
   it("socket unreachable → retry once then exit 11 with path + recovery hint", { timeout: 15_000 }, async () => {
     const socketPath = path.join(makeSocketPath(), "never-listening.sock");
-    const child = spawnRelay({ socketPath, sessionId: "sess-1", recordId: "rec-1" });
+    const child = spawnRelay({
+      socketPath,
+      sessionId: "sess-1",
+      recordId: "rec-1",
+      // 重试间隔注入 10ms（生产默认 200ms）——只压缩测试等待，重试一次后失败的契约不变
+      extraEnv: { RELAY_CONNECT_RETRY_DELAY_MS: "10" },
+    });
     const res = await waitForExit(child);
     expect(res.code).toBe(RELAY_EXIT_CODES.SOCKET_UNREACHABLE);
     expect(res.stderr).toContain(socketPath);
@@ -429,15 +440,17 @@ describe("relay agent CLI (relay.mjs)", () => {
     expect(res.stderr).toContain("handshake_invalid");
   });
 
-  it("backpressure: 1MB random bytes survive full down→up roundtrip", { timeout: 60_000 }, async () => {
+  it("backpressure: 256KB random bytes survive full down→up roundtrip", { timeout: 60_000 }, async () => {
     const socketPath = makeSocketPath();
     const rt = await startFakeRuntime(socketPath);
     const child = spawnRelay({ socketPath, sessionId: "s", recordId: "r" });
     await rt.handshakePromise;
 
-    const payload = crypto.randomBytes(1024 * 1024);
+    // 256KB = 4×64KB CHUNK：跨多帧下行 + 多轮回发，足以触发双向高水位（pause/drain
+    // 背压循环）；契约 = 不丢字节，与 payload 量级无关——取值只为压测试耗时。
+    const payload = crypto.randomBytes(256 * 1024);
     child.child.stdin.write(payload);
-    await pollUntil(() => rt.downTotal() === payload.length, 30_000, "1MB down bytes");
+    await pollUntil(() => rt.downTotal() === payload.length, 30_000, "256KB down bytes");
     const receivedDown = Buffer.concat(rt.downChunks);
     expect(receivedDown).toEqual(payload);
 

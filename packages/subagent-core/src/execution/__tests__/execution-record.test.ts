@@ -686,6 +686,25 @@ describe("tryTransition", () => {
     expect(r.status).toBe("idle");
   });
 
+  it("closed 转换写入 closedReason（显式值与缺省 gc）", () => {
+    const explicit = makeRecord({ status: "running" });
+    expect(tryTransition(explicit, "closed", "cancelled")).toBe(true);
+    expect(explicit.status).toBe("idle");
+    expect(explicit.closedReason).toBe("cancelled");
+
+    const defaulted = makeRecord({ status: "running" });
+    expect(tryTransition(defaulted, "closed")).toBe(true);
+    expect(defaulted.closedReason).toBe("gc");
+  });
+
+  it("CAS 拒绝后 closedReason 不被覆盖（首次终态 reason 保持）", () => {
+    const r = makeRecord({ status: "running" });
+    tryTransition(r, "closed", "cancelled");
+    expect(tryTransition(r, "closed", "gc")).toBe(false);
+    expect(r.status).toBe("idle");
+    expect(r.closedReason).toBe("cancelled");
+  });
+
   it("running 入态时 resurrectClosed 防御性 no-op（终态回边仅限 closed）", () => {
     const r = makeRecord({ status: "running" });
     expect(resurrectClosed(r)).toBe(false);

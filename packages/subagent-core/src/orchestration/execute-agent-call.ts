@@ -39,9 +39,48 @@ import type { AgentResult } from "./models/types.ts";
 
 // ── 常量 ─────────────────────────────────────────────────────
 
-/** 指数退避基数（ms）：第 n 次重试等待 BASE^n。 */
-const BACKOFF_BASE_MS = 1000;
+/** 指数退避基数生产默认（ms）：第 n 次重试等待 BASE^n。 */
+const BACKOFF_BASE_MS_DEFAULT = 1000;
 const BACKOFF_EXPONENT_BASE = 2;
+
+/**
+ * [测试通道] agent 调用重试退避基数覆盖 env：设为正整数时覆盖 BACKOFF_BASE_MS_DEFAULT
+ * （生产默认 1000ms 逐字不变），供壳侧 e2e 压缩真实指数退避等待。与 worker-message-pump
+ * 的 TAIJI_SUBAGENT_TEST_RETRY_BACKOFF_BASE_MS 分工不同：本 env 管 executeAgentCall 的
+ * 单次 agent 调用失败重试退避，后者管 worker 崩溃后 rebuild runtime 的重建退避——两个
+ * 失败面各自独立退避，env 名以 AGENT 段区分。仅显式设置时激活 + console.warn 留痕
+ * （解析形态对齐 worker-message-pump 先例）；backoffDelay 调用时读取（非模块顶层）——
+ * 退避只在错误恢复路径消费，生产热路径零影响，测试无需在模块加载前设 env。
+ */
+export const AGENT_RETRY_BACKOFF_BASE_ENV = "TAIJI_SUBAGENT_TEST_AGENT_RETRY_BACKOFF_BASE_MS";
+
+/** 退避基数覆盖 warn 是否已发（对齐 retryBackoffHookWarned 的防刷屏）。 */
+let agentBackoffWarned = false;
+
+/** 解析退避基数：env 未设/空串 = 生产默认 1000ms；正整数 = 覆盖；非法值不激活 + warn 留痕。 */
+function resolveBackoffBaseMs(): number {
+  const raw = process.env[AGENT_RETRY_BACKOFF_BASE_ENV];
+  if (raw === undefined || raw === "") return BACKOFF_BASE_MS_DEFAULT;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    if (!agentBackoffWarned) {
+      agentBackoffWarned = true;
+      console.warn(
+        `[workflow] ${AGENT_RETRY_BACKOFF_BASE_ENV}="${raw}" is not a positive integer — ` +
+          "test hook INACTIVE, production backoff base retained",
+      );
+    }
+    return BACKOFF_BASE_MS_DEFAULT;
+  }
+  if (!agentBackoffWarned) {
+    agentBackoffWarned = true;
+    console.warn(
+      `[workflow] ${AGENT_RETRY_BACKOFF_BASE_ENV}=${raw} ACTIVE — agent retry backoff ` +
+        "base overridden (test hook; NEVER set in production)",
+    );
+  }
+  return parsed;
+}
 
 /** 最大尝试次数（含首次）：initial + 2 retries = 3。 */
 const MAX_ATTEMPTS = 3;
@@ -51,9 +90,10 @@ const MAX_ATTEMPTS = 3;
 /**
  * 计算第 n 次重试前的退避时间（ms）。
  * 第 1 次重试 → 1000ms，第 2 次 → 2000ms，第 3 次 → 4000ms（指数退避）。
+ * 基数可经 AGENT_RETRY_BACKOFF_BASE_ENV 覆盖（测试通道，生产默认不变）。
  */
 function backoffDelay(retryIndex: number): number {
-  return BACKOFF_BASE_MS * Math.pow(BACKOFF_EXPONENT_BASE, retryIndex - 1);
+  return resolveBackoffBaseMs() * Math.pow(BACKOFF_EXPONENT_BASE, retryIndex - 1);
 }
 
 /**

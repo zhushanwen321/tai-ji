@@ -158,7 +158,7 @@ describe("绝对计数语义（每帧携带当下值，非增量）", () => {
   });
 });
 
-describe("失败折叠 + 延迟重试直至成功一次（D5 缺席语义②）", () => {
+describe("失败折叠 + 延迟重试（有界：累计 MAX_REPORT_ATTEMPTS 次放弃，D5 缺席语义②）", () => {
   it("select resolve undefined（超时/旧版 runtime）→ 折叠重试；重试帧携带完整快照；ack 后停", async () => {
     const channel = makeSelectChannel();
     const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS, selectTimeoutMs: SELECT_TIMEOUT_MS });

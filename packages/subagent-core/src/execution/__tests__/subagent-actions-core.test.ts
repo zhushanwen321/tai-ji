@@ -275,6 +275,12 @@ describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-
     expect(
       recordToListItem(makeRec({ ...base, id: "bg-c5", closedReason: "disconnected" })).outcome,
     ).toBe("completed");
+    // parent-fork + 合成 error → failed（D6 显式取舍：父进程关闭未完成即失败，勿改 cancelled）
+    expect(
+      recordToListItem(
+        makeRec({ ...base, id: "bg-c6", closedReason: "parent-fork", error: "closed due to parent-fork" }),
+      ).outcome,
+    ).toBe("failed");
   });
 });
 
@@ -383,6 +389,25 @@ describe("⛔4 startHandler（校验 + 启动，快照 = pi-sw 实测）", () =>
     expect(BG_MESSAGE).toBe("detached, will notify on completion (auto-injected message, do not poll)");
     expect(NOTIFY_CONTRACT).toBe("ledger+at-least-once");
   });
+
+  it("model 拒单向上传播：execute 抛裁决错误 → 原样穿越 handler（无受理响应产出，execute 不重试）", async () => {
+    // 裁决发生在 service.execute 内部（IDENTITY 解析 → resolveModel），在 record 创建 /
+    // runSpawn 之前——错误直接向上传播为 tool isError。resolveModel 层的拒单行为
+    //（含双路径）由 model-ref.test.ts + model-resolver.test.ts 锁定；本用例锁定
+    // handler 层传播语义：异常穿越 startHandler，不产出任何受理响应。
+    const execute = vi.fn(async (): Promise<ExecutionHandle> => {
+      throw new Error(
+        'Model "prov/m1" (paramOverride) is not a registry entry. Did you mean one of these?\n  prov/M1',
+      );
+    });
+    const err = await errOf(() =>
+      startHandler(makeService({ execute }), { task: "t", slug: "s", model: "prov/m1" }, undefined),
+    );
+    expect(err.errorName).toBe("Error");
+    expect(err.message).toContain("is not a registry entry");
+    expect(err.message).toContain("Did you mean");
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ============================================================
@@ -454,6 +479,44 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
 
     expect(DEFAULT_LIST_LIMIT).toBe(20);
     expect(MAX_LIST_LIMIT).toBe(100);
+  });
+
+  it("空列表 → response 形态 { running: 0, items: [] }（LLM 消费面契约）", () => {
+    expect(
+      listHandler(makeService({ collectRecords: vi.fn(() => [] as SubagentRecord[]) }), { includeFinished: true }),
+    ).toEqual({ response: { running: 0, items: [] } });
+  });
+
+  it("截断在 store 层：collectRecords 返回超 limit 条数 → listHandler 不自行截断（limit 仅透传）", () => {
+    // 截断责任在 collectRecords（store 层），listHandler 只透传 limit + map。
+    // mock 返回 3 条（模拟 store 未截断），验证 listHandler 不自行截断——全量透传。
+    const records = [
+      makeRec({ id: "r1", startedAt: 1 }),
+      makeRec({ id: "r2", startedAt: 2 }),
+      makeRec({ id: "r3", startedAt: 3 }),
+    ];
+    const collectRecords = vi.fn(() => records);
+    const r = listHandler(makeService({ collectRecords }), { includeFinished: true, limit: 2 });
+    expect(r.response.items).toHaveLength(3);
+    expect(collectRecords).toHaveBeenCalledWith(2, "all", false);
+  });
+
+  it("顺序透传：items 保持 collectRecords 返回序（排序责任在 service 层，handler 不重排）", () => {
+    // 故意按 startedAt 升序（与 desc 相反）
+    const records = [makeRec({ id: "old", startedAt: 1 }), makeRec({ id: "new", startedAt: 5 })];
+    const r = listHandler(makeService({ collectRecords: vi.fn(() => records) }), { includeFinished: true });
+    expect(r.response.items.map((i) => i.subagentId)).toEqual(["old", "new"]);
+  });
+
+  it("includeWorkflow:true → collectRecords 第三参 true（workflow record 投影放行，排查通道）", () => {
+    // 过滤责任在 store 层（collectRecords 第三参），listHandler 只透传——stub 按第三参
+    // 分流返回，模拟 store 的 includeWorkflow 放行形态。
+    const toolRecord = makeRec({ id: "tool-1", startedAt: 1 });
+    const wfRecord = makeRec({ id: "wf-1", startedAt: 2, origin: "workflow", parentRunId: "run-1" });
+    const collectRecords = vi.fn(() => [toolRecord, wfRecord]);
+    const r = listHandler(makeService({ collectRecords }), { includeFinished: true, includeWorkflow: true });
+    expect(collectRecords).toHaveBeenCalledWith(20, "all", true);
+    expect(r.response.items.map((i) => i.subagentId)).toEqual(["tool-1", "wf-1"]);
   });
 });
 

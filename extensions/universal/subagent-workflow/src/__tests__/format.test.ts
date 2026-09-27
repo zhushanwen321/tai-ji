@@ -134,12 +134,16 @@ describe("statusGlyph", () => {
     expect(statusGlyph("running")).toEqual({ icon: undefined, color: "accent" });
   });
 
-  it("done → checkmark, success", () => {
+  it("closed → checkmark, success", () => {
     expect(statusGlyph("closed")).toEqual({ icon: "✓", color: "success" });
   });
 
-  it("closed → checkmark, success", () => {
-    expect(statusGlyph("closed")).toEqual({ icon: "✓", color: "success" });
+  // [U2 两态] idle 承接旧 closed 分支视觉基线（✓ success）——实现中 idle/closed 是同
+  // 一个 case 分支，独立断言防未来拆分 idle case 时静默漂移。（F 修：原「done →
+  // checkmark」用例名实不符、与 closed 用例逐字重复，改测真实零覆盖缺口 idle 分支；
+  // 自 status-refactor.test.ts 迁并的 idle 条同契约，合并为一条。）
+  it("idle → checkmark, success（承接旧 closed 分支视觉基线）", () => {
+    expect(statusGlyph("idle")).toEqual({ icon: "✓", color: "success" });
   });
 });
 
