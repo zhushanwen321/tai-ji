@@ -44,6 +44,7 @@ import {
   DEFAULT_SUBAGENT_ENGINE,
 } from './subagent-engine-history.js'
 import { extractWorkflowsFromSessionFile, scanWorkflowEntries } from './workflow-extractor.js'
+import { mergeWorkflowStepsIntoCache } from './workflow-step-merge.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { discoverAndRegisterEngines } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
 import { isStrictlyUnder } from '../../utils/path-utils.js'
@@ -115,11 +116,21 @@ export interface RecordEntriesCache {
  * reason）+ 步骤数（GUI 步骤实时可见的 diff 维度，[步骤可见性修复 2026-09-14]——running
  * 中 trace 逐步落盘，若只比 status/reason（恒 running），GUI 详情的 agentCalls 整个 run
  * 期间收不到任何 reload 触发）。
+ *
+ * [W0 / D4] 终态计数维度（completed+failed 之和）：步骤级转态的 diff 维度——②
+ * subagent-record 迁移（合并投影的状态权威）在 steps 不变时（record-only 成行已计数、
+ * ① trace 骨架未 flush）翻转步骤行 running↔终态，仅比 steps 会静默吞掉转态信号（现状
+ * 缺陷的根因形态）。等价性论证见设计 D4：派发经 record-only 成行使 steps 变化、转态使
+ * 终态计数 ±1、① flush 后结构补全（record-only 行归位 trace 行）两者皆不变——单计数与
+ * steps 组合覆盖全部检测需求。结构补全不独立发信号（分组 header 到达搭下一次终态转态
+ * 信号或 drawer 重开拉取，设计已知取舍 2）。
  */
 export interface PublishedWorkflowRunState {
   status: string
   reason?: string
   steps: number
+  /** [W0 / D4] 步骤行终态计数（status ∈ completed|failed 的 agentCalls 条数之和）。 */
+  settledSteps: number
 }
 
 /** get_entries RPC 响应的域内收窄（u-s4 EntriesSinceResult 同款先例，见 fetchRecordEntriesRound）。 */
@@ -514,7 +525,8 @@ export class SessionRecords {
    * - subagents：派生快照 vs 已发布快照逐 record 比对（subagentRecordEquals），差异 →
    *   publish session.subagents 全量帧（payload = 派生缓存快照数组）。
    * - workflows：按水位差异 run 构造 session.workflowUpdate 增量信号（新 run / status /
-   *   reason / 步骤数任一变化一条）——发布序 = 派生 Map 迭代序（新 run 与扫描序一致）。
+   *   reason / 步骤数 / [W0 / D4] 终态计数任一变化一条）——发布序 = 派生 Map 迭代序
+   *   （新 run 与扫描序一致）。
    * - plan（D1④）：单例状态（最后一条 plan-state entry 派生）与已发布 View 比对
    *   （planStateEquals），差异 publish session.planState 全量帧（shared 协议
    *   `{ sessionId, planState }`）；派生 null 的全量/增量收敛语义在 mergePlanState
@@ -533,6 +545,11 @@ export class SessionRecords {
     // 发生 → 水位滞留 → session 恢复后下轮触发补发）。
     mergeSubagentRecords(cache.subagents, scanSubagentEntries(entries))
     mergeWorkflowRecords(cache.workflows, scanWorkflowEntries(entries))
+    // [W0 / D2 / D5] 实时增量路径的步骤视图合并：增量 delta 的候选集不全（只含本批
+    // record），故合并不在 scanWorkflowEntries 内做，而在两缓存（workflow 骨架 × 全量
+    // 最新 subagent 投影）就位后整体重合并——与冷路径（extractWorkflowsFromSessionFile
+    // 组合扫描）共用同一 mergeWorkflowStepRecords 纯函数，冷热同代码；重合并幂等。
+    mergeWorkflowStepsIntoCache(cache.workflows, Array.from(cache.subagents.values()))
     mergePlanState(cache, scanPlanStateEntries(entries), isFullRebuild)
 
     if (!this.deps.hasSession(sessionId)) return // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
@@ -954,27 +971,43 @@ function subagentsDifferFromPublished(current: Map<string, SubagentRecord>, publ
 }
 
 /**
- * workflows 水位 diff：按差异 run 构造增量信号（新 run / status / reason / 步骤数任一
- * 变化一条）。run 消失（fullRebuild 后全集不再含该 run）不构造信号——信号面无删除形态，
- * 硬造旧状态帧只会发 stale 信息；消费端由下次真实变化或冷拉收敛。
+ * workflows 水位 diff：按差异 run 构造增量信号（新 run / status / reason / 步骤数 /
+ * [W0 / D4] 终态计数任一变化一条——转态在 steps 不变时由终态计数承载信号）。run 消失
+ * （fullRebuild 后全集不再含该 run）不构造信号——信号面无删除形态，硬造旧状态帧只会
+ * 发 stale 信息；消费端由下次真实变化或冷拉收敛。
  */
 function workflowSignalsAgainstPublished(current: Map<string, WorkflowRunRecord>, published: Map<string, PublishedWorkflowRunState>): WorkflowUpdateSignal[] {
   const updates: WorkflowUpdateSignal[] = []
   for (const [runId, record] of current) {
     const prev = published.get(runId)
     if (prev === undefined || prev.status !== record.status || prev.reason !== record.reason ||
-        prev.steps !== record.agentCalls.length) {
+        prev.steps !== record.agentCalls.length ||
+        prev.settledSteps !== countSettledSteps(record)) {
       updates.push({ runId, status: record.status, reason: record.reason })
     }
   }
   return updates
 }
 
-/** workflow 水位投影（推进时镜像当前派生 run-state：信号面三字段 + 步骤数 diff 维度）。 */
+/** [W0 / D4] 步骤行终态计数（completed+failed 之和）——转态的 diff 维度。 */
+function countSettledSteps(record: WorkflowRunRecord): number {
+  let settled = 0
+  for (const call of record.agentCalls) {
+    if (call.status === 'completed' || call.status === 'failed') settled++
+  }
+  return settled
+}
+
+/** workflow 水位投影（推进时镜像当前派生 run-state：信号面三字段 + 步骤数 + 终态计数 diff 维度）。 */
 function projectPublishedWorkflowStates(workflows: Map<string, WorkflowRunRecord>): Map<string, PublishedWorkflowRunState> {
   const projected = new Map<string, PublishedWorkflowRunState>()
   for (const [runId, record] of workflows) {
-    projected.set(runId, { status: record.status, reason: record.reason, steps: record.agentCalls.length })
+    projected.set(runId, {
+      status: record.status,
+      reason: record.reason,
+      steps: record.agentCalls.length,
+      settledSteps: countSettledSteps(record),
+    })
   }
   return projected
 }
@@ -1072,13 +1105,15 @@ function subagentRecordEquals(a: SubagentRecord, b: SubagentRecord): boolean {
     && recordStateEquals(a, b)
 }
 
-/** [身份锚组] subagent 身份与会话锚五字段：subagentId / sessionFile / agent / slug / task。 */
+/** [身份锚组] subagent 身份与会话锚七字段：subagentId / sessionFile / agent / slug / task + workflow 身份域（parentRunId / stepIndex）。 */
 function recordIdentityEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.subagentId === b.subagentId
     && a.sessionFile === b.sessionFile
     && a.agent === b.agent
     && a.slug === b.slug
     && a.task === b.task
+    && a.parentRunId === b.parentRunId
+    && a.stepIndex === b.stepIndex
 }
 
 /**

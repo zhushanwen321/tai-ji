@@ -393,7 +393,7 @@ export function setupWorkflowDomain(
       // + parentRunId）进 store、共享池/守护/journal 归 service 编排；parentRunId 由
       // pump 补 run.runId。service 单例在 session_start 后必在（run 只能于 session 内
       // 派发）；null 时抛错由 pump 的 dispatchCall catch 兜底回发 failed result。
-      workflowAgentDispatch: (opts, parentRunId, signal) => {
+      workflowAgentDispatch: (opts, parentRunId, signal, stepIndex) => {
         const service = getSubagentService();
         if (!service) {
           // [C2] 错误带恢复动作：service 缺席 = session_start 装配链失败（与
@@ -404,7 +404,7 @@ export function setupWorkflowDomain(
               "check the subagents extension logs for the root cause.",
           );
         }
-        return service.executeWorkflowAgent(opts, parentRunId, signal);
+        return service.executeWorkflowAgent(opts, parentRunId, signal, undefined, undefined, stepIndex);
       },
       log,
     };

@@ -169,6 +169,19 @@ export interface SubagentRecord {
    */
   origin?: 'tool' | 'workflow'
   /**
+   * [W0 / D1] origin='workflow' 时所属 workflow run id（subagent-record entry data
+   * 投影透传；与 origin/stepIndex 同族身份域）。runtime 合并投影按 (parentRunId,
+   * stepIndex) 关联 run 视图。additive：undefined（存量 record / tool 来源）零迁移。
+   */
+  parentRunId?: string
+  /**
+   * [W0 / D1] origin='workflow' 时在 run 内的步骤索引（单源 = pump dispatch 的
+   * callId/taskIndex，entry data 投影透传）。additive：undefined（存量 entry / tool
+   * 来源）= 不参与 run 视图合并（无 stepIndex 的 record 不成行——旧 session 回落
+   * trace-only 视图的守卫判据）。
+   */
+  stepIndex?: number
+  /**
    * 实际执行引擎 id（P4 路由留痕，设计 D9①/D3：engine 三字段贯通）。缺省 = pi，
    * 由读侧映射（runtime subagent-engine-history 的 extractRecordEngine：undefined/
    * 空串 → 'pi'，非空透传）——投影层只透传不填默认值，存量 record 零迁移。

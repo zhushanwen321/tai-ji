@@ -1489,6 +1489,10 @@ export class RecordStore {
         // 值已过 loadIndex 守卫（undefined/字面量白名单），直传即安全。
         origin: hit.origin,
         parentRunId: hit.parentRunId,
+        // [W0 / D1] stepIndex 恒 undefined：索引命中腿只在无 binding 文件时走
+        //（scanFile 的 stamps.binding === null 分支），而 binding 是 stepIndex 的
+        // 唯一磁盘载体——索引不承载本字段（identity entry 同样不承载）。
+        stepIndex: undefined,
       },
       file,
       stamps,

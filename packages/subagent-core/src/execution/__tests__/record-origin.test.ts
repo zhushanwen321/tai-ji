@@ -153,6 +153,49 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
     const rebuilt = store.scanLastRecordEntries(mainFile);
     expect(rebuilt.map((r) => r.id)).toContain("wf-step-2");
   });
+
+  it("[W0 / D1] stepIndex 往返保真：register 落盘 entry 含字段，真实重建路径读回不丢", () => {
+    const store = new RecordStore(tmpDir);
+    const captured: SubagentRecordEntryData[] = [];
+    store.setPi(makeCapturePi(captured));
+
+    const rec = makeRecord({ id: "wf-step-idx", origin: "workflow", parentRunId: "wf-run-idx", stepIndex: 7 });
+    store.register(rec);
+    expect(captured).toHaveLength(1);
+    // entry data（toSubagentRecordEntry 投影产物）携带字段
+    expect(captured[0].stepIndex).toBe(7);
+    expect(captured[0].origin).toBe("workflow");
+    expect(captured[0].parentRunId).toBe("wf-run-idx");
+
+    // 真实重建路径（rebuildEntryRecord ← readEntryOriginFields）：落盘产物 →
+    // 主 session JSONL → scanLastRecordEntries → stepIndex 不丢
+    const mainFile = path.join(rootDir, "main-step-idx.jsonl");
+    writeMainSessionFile(mainFile, captured);
+    const rebuilt = store.scanLastRecordEntries(mainFile);
+    const hit = rebuilt.find((r) => r.id === "wf-step-idx");
+    expect(hit).toBeDefined();
+    expect(hit?.stepIndex).toBe(7);
+  });
+
+  it("[W0 / D1] stepIndex 缺省负向：存量 record（无字段）落盘产物不含键（零迁移），重建归一 undefined", () => {
+    const store = new RecordStore(tmpDir);
+    const captured: SubagentRecordEntryData[] = [];
+    store.setPi(makeCapturePi(captured));
+
+    store.register(makeRecord({ id: "legacy-step", origin: "workflow", parentRunId: "wf-run-legacy" }));
+    expect(captured).toHaveLength(1);
+    // 零迁移：序列化产物不含 stepIndex 键（undefined 自然缺省）——必须断言序列化后
+    // 形态（内存对象保留 undefined 键名，真实 JSONL 丢 undefined 值）。
+    const persistedKeys = Object.keys(JSON.parse(JSON.stringify(captured[0])) as Record<string, unknown>);
+    expect(persistedKeys).not.toContain("stepIndex");
+
+    const mainFile = path.join(rootDir, "main-legacy-step.jsonl");
+    writeMainSessionFile(mainFile, captured);
+    const rebuilt = store.scanLastRecordEntries(mainFile);
+    const hit = rebuilt.find((r) => r.id === "legacy-step");
+    expect(hit).toBeDefined();
+    expect(hit?.stepIndex).toBeUndefined();
+  });
 });
 
 describe("collectRecords includeWorkflow 查询面（H2 W1）", () => {

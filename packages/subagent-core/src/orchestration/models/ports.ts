@@ -184,10 +184,16 @@ export interface LifecycleDeps {
   * SAR 已掏空为纯转调 executeWorkflowAgent，两分支执行体归一非双轨，差异仅 parentRunId
   * 来源：注入 = 真实 run.runId，回退 = SAR_UNATTACHED_PARENT_RUN_ID 占位；生产装配
   * 两字段同时注入，dispatch 恒优先）。
+  *
+  * [W0 / D1] stepIndex（可选尾参）：origin="workflow" 时在 run 内的步骤索引，
+  * pump dispatch 处以 msg.callId 单源传入（taskIndex 同源），随 originFields 进
+  * record——run 视图按 (parentRunId, stepIndex) 关联 record 的关联键之一。显式
+  * 参数而非 opts 成员：opts 是 worker 脚本的 API 面，内部键不污染脚本契约。
   */
   workflowAgentDispatch?: (
     opts: AgentCallOpts,
     parentRunId: string,
     signal?: AbortSignal,
+    stepIndex?: number,
   ) => Promise<AgentResult>;
 }

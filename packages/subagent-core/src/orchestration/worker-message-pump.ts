@@ -1443,8 +1443,11 @@ function dispatchAgentCall(
   // 旁路 progress record 族（createRecord + updateFromEvent + SubagentStream +
   // trace.live 挂载）随本切换整体退役——TUI/GUI 实时进度改从 store 订阅（D2）。
   const dispatch = deps.workflowAgentDispatch;
+  // [W0 / D1] stepIndex = msg.callId（taskIndex 单源，与 ask-dispatched 落账同源）：
+  // record 携带步骤索引供 run 视图按 (parentRunId, stepIndex) 关联。闭包捕获同一
+  // callId——executeAgentCall 重试递归再调 runner.run 时新 attempt record 仍归同一步骤。
   const innerRunner: AgentRunner = dispatch
-    ? { run: (rOpts, rSignal) => dispatch(rOpts, run.runId, rSignal) }
+    ? { run: (rOpts, rSignal) => dispatch(rOpts, run.runId, rSignal, msg.callId) }
     : deps.runner;
   // [P1b-1 ask-retrying 落账] 重试轨迹观测点（投递点裁决见 dispatchAskRetrying 注释）：
   // 包装 runner 记录最近一次失败 result；包装层的第 2..N 次调用 = 重试尝试开始

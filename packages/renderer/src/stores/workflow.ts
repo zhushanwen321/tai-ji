@@ -140,6 +140,39 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const workflowReloadTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   /**
+   * [W0/D4] per-session in-flight 拉取登记（并发失效共享一次拉取）。
+   * 同 sid 在途期间的新调用（信号 / running 重试）不另起 RPC——返回在途 promise 并置
+   * dirty，由在途完成后的补拉兜底。renderer 的信号一次性不可重放，只合并不补拉会丢
+   * 更新（起步竞态 / 终态吞没两个真实交织，设计 D4）。
+   */
+  const inflightWorkflows = new Map<string, Promise<void>>()
+
+  /**
+   * [W0/D4] per-session dirty 标志（可再武装）：在途拉取期间有新信号到达置位；在途完成
+   * 时若置位 → 清位补拉一次。补拉自身在途期间新信号同样置位 → 再补，不设递归上限
+   * （链深天然有界：每条信号至多驱动一次拉取——自启或转补拉）。
+   * 与 in-flight 同为非响应式簿记，随 clearWorkflows / clearSession / onScopeDispose
+   * 三点清理（releaseLoadBookkeeping），防已删 session 的幻影补拉复活已删分区。
+   */
+  const dirtyWorkflows = new Map<string, boolean>()
+
+  /**
+   * [W0/D4] 释放 sid 的拉取收敛簿记 + running 重试 timer（clearSession / clearWorkflows /
+   * dispose 收口点共用）。timer 清理此前只在 clearWorkflows / onScopeDispose，clearSession
+   * 缺口是既有 bug（已删 session 的重试在 500ms 后对已清空的 store 触发 loadWorkflows），
+   * 本次顺手补齐。
+   */
+  function releaseLoadBookkeeping(sessionId: string): void {
+    inflightWorkflows.delete(sessionId)
+    dirtyWorkflows.delete(sessionId)
+    const timer = workflowReloadTimers.get(sessionId)
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      workflowReloadTimers.delete(sessionId)
+    }
+  }
+
+  /**
    * loadWorkflows 空结果守卫（R1 business-logic S3，与 subagent.ts 同款）：达到 LIMIT 判
    * 真实删空放行覆盖。strike 语义单源在 createEmptyResultStrikeGuard JSDoc
    * （lib/partitioned-session-records），此处只声明本 store 的阈值与 log tag。
@@ -156,6 +189,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
     onScopeDispose(() => {
       workflowReloadTimers.forEach((t) => clearTimeout(t))
       workflowReloadTimers.clear()
+      // [W0/D4] 拉取收敛簿记一并清：在途 promise 完成后的 drainDirty 读到空簿记 → 不补拉
+      inflightWorkflows.clear()
+      dirtyWorkflows.clear()
     })
   }
 
@@ -193,16 +229,62 @@ export const useWorkflowStore = defineStore('workflow', () => {
     loadingBySession.value.delete(sessionId)
     loadErrorBySession.value.delete(sessionId)
     oversizeBySession.value.delete(sessionId)
+    // [W0/D4] 簿记 + running 重试 timer 随分区一并释放（dirty 不复活已删分区；timer 缺口补齐）
+    releaseLoadBookkeeping(sessionId)
   }
 
   // ── actions ──
   /**
-   * 加载 session 的 workflow 列表（写入该 sid 分区）。
+   * 加载 session 的 workflow 列表（写入该 sid 分区）——[W0/D4] 拉取收敛入口。
+   *
+   * 并发语义（per-session 键：split mode 双面板与 routeInbound 对所有 session 无条件
+   * 触发是常态，全局单例键会跨 session 互吞拉取）：
+   * - in-flight 合并：同 sid 在途期间的新调用共享在途 promise（不另起 RPC），同时置 dirty；
+   * - 可再武装 dirty 补拉：在途完成时 dirty 置位 → 清位补拉一次；补拉在途期间新信号
+   *   同样置 dirty → 再补，不设递归上限。只合并不补拉会丢更新（起步竞态：run-created
+   *   拉取在途期间 record 落盘；终态吞没：最后终态信号合并进 stale 在途拉取）；封顶版
+   *   dirty（只补一次）会在补拉在途窗口复刻终态吞没，故 dirty 必须可再武装。
+   *
    * 现行调用拓扑：托盘首拉/retry（useTrayCounts，D13 首拉触发迁移）、abort 后刷新
-   * （TrayNativePanel / drawer WorkflowTab）、WS 重连重拉（useSidebar.onConnected）。
+   * （TrayNativePanel / drawer WorkflowTab）、WS 重连重拉（useSidebar.onConnected）、
+   * workflowUpdate 信号（triggerWorkflowReload）。
    */
-  async function loadWorkflows(sessionId: string): Promise<void> {
-    if (!sessionId) return // 空 sid 不写分区
+  function loadWorkflows(sessionId: string): Promise<void> {
+    if (!sessionId) return Promise.resolve() // 空 sid 不写分区
+    const inflight = inflightWorkflows.get(sessionId)
+    if (inflight) {
+      // 新信号到达：共享在途拉取 + 置 dirty，由在途完成后的补拉兜底（不丢更新）
+      dirtyWorkflows.set(sessionId, true)
+      return inflight
+    }
+    // 执行体不 reject（失败写 loadError 分区），两分支同 drain——补拉判定在成功/失败
+    // 路径都成立（失败后的补拉由后续信号驱动，与成功路径语义一致）。显式类型标注：
+    // promise 被自身初始化器内的 drain 回调引用（所有权校验参数），无标注会 TS7022
+    const promise: Promise<void> = performLoadWorkflows(sessionId).then(
+      () => drainDirtyAfterLoad(sessionId, promise),
+      () => drainDirtyAfterLoad(sessionId, promise),
+    )
+    inflightWorkflows.set(sessionId, promise)
+    return promise
+  }
+
+  /**
+   * [W0/D4] 在途完成后的补拉判定（可再武装语义的收口点）：
+   * 先清在途登记（所有权校验——clearSession / clearWorkflows / dispose 已清位、或被
+   * 更新周期替换登记时不动别人的条目），dirty 置位则清位补拉。补拉经 loadWorkflows
+   * 重新登记在途，返回值串进 promise 链——合并进来的调用方 await 到的是「含补拉的
+   * 完整收敛」，非仅触发它的那次原始拉取。
+   */
+  function drainDirtyAfterLoad(sessionId: string, self: Promise<void>): Promise<void> {
+    if (inflightWorkflows.get(sessionId) === self) inflightWorkflows.delete(sessionId)
+    if (dirtyWorkflows.delete(sessionId)) {
+      return loadWorkflows(sessionId)
+    }
+    return Promise.resolve()
+  }
+
+  /** 实际拉取执行体（loadWorkflows 收敛壳内调用；失败不抛——写 loadError 分区） */
+  async function performLoadWorkflows(sessionId: string): Promise<void> {
     loadingBySession.value.set(sessionId, true)
     loadErrorBySession.value.delete(sessionId)
     try {
@@ -288,6 +370,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
     oversizeBySession.value = new Map()
     workflowReloadTimers.forEach((t) => clearTimeout(t))
     workflowReloadTimers.clear()
+    // [W0/D4] 拉取收敛簿记一并清（同 clearSession / dispose 三点清理义务）
+    inflightWorkflows.clear()
+    dirtyWorkflows.clear()
   }
 
   /**

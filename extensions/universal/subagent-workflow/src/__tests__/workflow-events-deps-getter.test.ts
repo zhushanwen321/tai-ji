@@ -302,7 +302,7 @@ describe("lazyDeps.workflowAgentDispatch 转发成员（[A1 R3] 缺失 = pump �
     expect(() => handle.lazyDeps.workflowAgentDispatch).toThrowError("Session not initialized");
   });
 
-  it("转发契约：调用即透传 (opts, parentRunId, signal) 到 SubagentService.executeWorkflowAgent 并直通返回值", async () => {
+  it("转发契约：调用即透传 (opts, parentRunId, signal, stepIndex) 到 SubagentService.executeWorkflowAgent 并直通返回值", async () => {
     const { handle } = await mountWithSession("sess-dispatch-forward");
     const executeWorkflowAgent = vi.fn(async () => ({ content: "ok" }));
     // service 进程单例槽（service-bootstrap.ts Symbol.for 槽，{ current } 形态）注入
@@ -315,10 +315,11 @@ describe("lazyDeps.workflowAgentDispatch 转发成员（[A1 R3] 缺失 = pump �
     if (!dispatch) throw new Error("lazyDeps.workflowAgentDispatch missing (regression to R2 gap)");
     const opts = { prompt: "调研 A", description: "research-a" };
     const signal = new AbortController().signal;
-    const result = await dispatch(opts, "wf-real-run", signal);
+    // [W0 / D1] stepIndex 尾参（undefined, undefined = onEvent/stream 占位）随契约透传
+    const result = await dispatch(opts, "wf-real-run", signal, 5);
 
     expect(executeWorkflowAgent).toHaveBeenCalledTimes(1);
-    expect(executeWorkflowAgent).toHaveBeenCalledWith(opts, "wf-real-run", signal);
+    expect(executeWorkflowAgent).toHaveBeenCalledWith(opts, "wf-real-run", signal, undefined, undefined, 5);
     expect(result).toEqual({ content: "ok" });
   });
 });

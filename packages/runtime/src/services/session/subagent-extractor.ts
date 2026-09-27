@@ -318,6 +318,11 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     // tool 语义）。此前投影白名单漏此字段 → renderer 过滤面 origin 恒 undefined，
     // workflow record 运行期虚亮 badge / 绑架 hasRunning / 混入 GUI 列表。
     origin: projectOrigin(d.origin),
+    // [W0 / D1] workflow 身份域透传（entry data 可选字段，与 origin 同族）：合并投影
+    // （workflow-step-merge）按 (parentRunId, stepIndex) 圈定 run 视图候选集。undefined
+    // = 存量 entry / tool 来源（读侧守卫：无 stepIndex 不成行，旧 session 回落 trace-only）。
+    parentRunId: optString(d.parentRunId),
+    stepIndex: optNumber(d.stepIndex),
     ...projectEngineSpreadFields(d),
   }
 }

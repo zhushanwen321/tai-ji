@@ -242,11 +242,16 @@ function entryNum(d: Record<string, unknown>, k: string): number | undefined {
  * 字面量守卫（非法值/缺省 → undefined = "tool" 语义，存量 entry 零迁移）；parentRunId
  * 经安全 string 读取。缺省语义对齐 ExecutionRecord.origin 注释——消费面按
  * `=== "workflow"` 负向判定，缺省（undefined）恒视为手动 tool 派发。
+ * [W0 / D1] stepIndex 经安全 number 读取（同族身份域；存量 entry 缺键 → undefined，
+ * 读侧不参与 run 视图关联——「无 stepIndex 的 record 不成行」守卫的上游归一）。
  */
-function readEntryOriginFields(d: Record<string, unknown>): Pick<SubagentRecord, "origin" | "parentRunId"> {
+function readEntryOriginFields(
+  d: Record<string, unknown>,
+): Pick<SubagentRecord, "origin" | "parentRunId" | "stepIndex"> {
   return {
     origin: d.origin === "workflow" || d.origin === "tool" ? d.origin : undefined,
     parentRunId: entryStr(d, "parentRunId"),
+    stepIndex: entryNum(d, "stepIndex"),
   };
 }
 
@@ -496,8 +501,12 @@ export function identityFromBinding(binding: RecordBinding | undefined, file: st
     // [H2 S3] 来源域透传：漏本两行则引擎子文件身份面（binding sidecar）重建丢
     // origin，归档/重启后 workflow record 逃过 D1 投影过滤（Gate B S3 FAIL 根因）。
     // binding 读侧（readRecordBinding）已字面量守卫归一，此处直传。
+    // [W0 / D1] stepIndex 同族直传：identity entry 缺失时（非 pi 引擎 / extension
+    // 重启）binding 是身份源——漏投影则重启后 record 无 stepIndex（run 视图关联键
+    // 静默缺失，无编译红无测试红的降级，同族先例 H2 S3）。
     origin: binding.origin,
     parentRunId: binding.parentRunId,
+    stepIndex: binding.stepIndex,
     model: binding.model,
     thinkingLevel: binding.thinkingLevel,
     sessionFile: file,
@@ -546,8 +555,10 @@ export function buildRecord(
       parentRecordId: base.parentRecordId,
       depth: base.depth,
       // [H2 S3] 来源域落位（identity 面已守卫归一）：缺省 undefined = "tool" 语义。
+      // [W0 / D1] stepIndex 同族落位（[W0 / D1] run 视图关联键）。
       origin: base.origin,
       parentRunId: base.parentRunId,
+      stepIndex: base.stepIndex,
       endedAt: undefined,
       turns: base.turnCount,
       totalTokens: base.totalTokens,
@@ -574,9 +585,10 @@ export function buildRecord(
       rootSessionId: base.rootSessionId,
       parentRecordId: base.parentRecordId,
       depth: base.depth,
-      // [H2 S3] 来源域落位（同全量分支）。
+      // [H2 S3] 来源域落位（同全量分支）+ [W0 / D1] stepIndex 同族落位。
       origin: base.origin,
       parentRunId: base.parentRunId,
+      stepIndex: base.stepIndex,
       endedAt: undefined,
       turns: 0,
       totalTokens: 0,
@@ -824,9 +836,12 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     // [H2 W1] 来源身份两字段随本投影持久化（register/archive/reportRecordTransition
     // 全部写点均经本投影 → toSubagentRecordEntry）。漏投影则 entry 无 origin，重启后
     // 重建链拿不到来源、D1 投影过滤全失效（同型先例：H1 U5 缺字段事故）。
-    // undefined 经 JSON.stringify 自然缺省，存量 record 序列化字节不变（零迁移）。
+    // [W0 / D1] stepIndex 同族随投影持久化——漏投影则 entry 恒无 stepIndex（run 视图
+    // 关联键静默缺失）。undefined 经 JSON.stringify 自然缺省，存量 record 序列化字节
+    // 不变（零迁移）。
     origin: r.origin,
     parentRunId: r.parentRunId,
+    stepIndex: r.stepIndex,
   };
 }
 

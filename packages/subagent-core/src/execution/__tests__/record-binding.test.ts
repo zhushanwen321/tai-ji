@@ -52,6 +52,7 @@ import {
   RECORD_BINDING_SIDECAR_EXT,
 } from "../persistence/state-marker.ts";
 import type { RecordBinding } from "../persistence/state-marker.ts";
+import { fullBindingPayload } from "../persistence/record-store-terminal.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
@@ -456,6 +457,130 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
     expect(records[0]!.totalTokens).toBe(0);
     expect(records[0]!.turns).toBe(0);
     expect(records[0]!.endedAt).toBeUndefined();
+  });
+});
+
+// ============================================================
+// E. [W0 / D1] binding 轴 stepIndex 往返（生产构造点 → 载荷 → 重建）
+// ============================================================
+//
+// 禁经 state-marker 原语（writeRecordBinding）手构 fixture 断言——原语只验证
+// schema/normalize 白名单（U0 已覆盖），载荷构造才是生产链路。本套件锁定两个
+// 生产构造点的载荷含 stepIndex，以及 identity entry 缺失形态下 identityFromBinding
+// 重建路径不丢字段（run 视图关联键的跨重启恢复面）。
+
+describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与 identityFromBinding 重建", () => {
+  let agentDir: string;
+  let sessionsDir: string;
+  let service: SubagentService;
+
+  beforeEach(() => {
+    for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
+    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-stepidx-"));
+    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    clearEngines();
+    registerFakePiEngine();
+    const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
+    service = new SubagentService({ cwd: agentDir, modelService });
+    service.initSession({ pi: makePi(), sessionId: "root-session" });
+  });
+
+  afterEach(() => {
+    service.dispose();
+    clearEngines();
+    _resetLifecycleState();
+    _resetSettledWatchdogsForTest();
+    _resetCoreSpawnedChildrenMirrorForTest();
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
+  });
+
+  /** workflow record fixture（sessionFile 预先落盘并回填 record——锚基底可写）。 */
+  function makeWorkflowRecord(id: string, sessionFile: string, stepIndex: number): ExecutionRecord {
+    const base = createRecord(id, {
+      agent: "general-purpose",
+      model: "prov/model-1",
+      mode: "background",
+      task: "workflow task",
+      slug: "wf-step",
+      startedAt: STARTED_AT,
+      rootSessionId: "root-session",
+      controller: new AbortController(),
+    });
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
+    // 锚基底回填（run 应答回填点的等价形态——writeBindingForRecord 从 record.sessionFile 取锚）
+    base.sessionFile = sessionFile;
+    return { ...base, origin: "workflow", parentRunId: "wf-run-step", stepIndex };
+  }
+
+  it("writeBindingForRecord 载荷含 stepIndex（spawn 回填点生产构造器）", () => {
+    const sessionFile = path.join(agentDir, "wf-step-write.jsonl");
+    const record = makeWorkflowRecord("sa-step-write", sessionFile, 4);
+    // 生产构造点：run 应答回填点统一入口（RunOrchestration.writeBindingForRecord）
+    const runOrchestration = (service as unknown as {
+      runOrchestration: { writeBindingForRecord(r: ExecutionRecord): void };
+    }).runOrchestration;
+    runOrchestration.writeBindingForRecord(record);
+
+    const binding = readRecordBinding(sessionFile);
+    expect(binding).toMatchObject({
+      recordId: "sa-step-write",
+      origin: "workflow",
+      parentRunId: "wf-run-step",
+      stepIndex: 4,
+    });
+  });
+
+  it("fullBindingPayload 载荷含 stepIndex（settle merge-or-create 的 create 腿 / reopen 新锚构造器）", () => {
+    const sessionFile = path.join(agentDir, "wf-step-full.jsonl");
+    const record = makeWorkflowRecord("sa-step-full", sessionFile, 12);
+    const payload = fullBindingPayload(record, undefined);
+    expect(payload.stepIndex).toBe(12);
+    expect(payload.origin).toBe("workflow");
+    expect(payload.parentRunId).toBe("wf-run-step");
+    // 无 stepIndex record（tool 来源 / 旧调用方）→ 载荷 undefined（序列化自然缺省）
+    const toolRecord = createRecord("sa-step-none", {
+      agent: "general-purpose",
+      model: "prov/model-1",
+      mode: "background",
+      task: "tool task",
+      slug: "tool",
+      startedAt: STARTED_AT,
+      rootSessionId: "root-session",
+      controller: new AbortController(),
+    });
+    expect(fullBindingPayload(toolRecord, undefined).stepIndex).toBeUndefined();
+  });
+
+  it("identityFromBinding 重建保字段：无 identity entry 子文件 + 生产构造点 binding → collectRecords 重建 stepIndex 保真（identity entry 缺失形态）", () => {
+    // engine-CLI 化子文件（无身份 entry）——identity 两级重建落到 binding 腿
+    const file = writePlainChildSession(sessionsDir);
+    const record = makeWorkflowRecord("sa-bind-1", file, 2);
+    // 经生产构造点落盘（非手构 sidecar fixture）
+    const runOrchestration = (service as unknown as {
+      runOrchestration: { writeBindingForRecord(r: ExecutionRecord): void };
+    }).runOrchestration;
+    runOrchestration.writeBindingForRecord(record);
+
+    const store = new RecordStore(sessionsDir);
+    const visible = store.collectRecords(10, "all", undefined, true);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]!.origin).toBe("workflow");
+    expect(visible[0]!.parentRunId).toBe("wf-run-step");
+    expect(visible[0]!.stepIndex).toBe(2);
+  });
+
+  it("存量 binding（无 stepIndex）→ 重建归一 undefined（零迁移，run 视图守卫的上游形态）", () => {
+    const file = writePlainChildSession(sessionsDir);
+    // 存量形态：H2 S3 时代的 binding（origin/parentRunId 有、stepIndex 无）
+    writeBindingFixture(file, { origin: "workflow", parentRunId: "wf-run-old" });
+    const store = new RecordStore(sessionsDir);
+
+    const visible = store.collectRecords(10, "all", undefined, true);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]!.origin).toBe("workflow");
+    expect(visible[0]!.stepIndex).toBeUndefined();
   });
 });
 

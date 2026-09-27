@@ -723,8 +723,9 @@ export class SubagentService {
     signal?: AbortSignal,
     onEvent?: (event: AgentEvent) => void,
     stream?: SubagentStream,
+    stepIndex?: number,
   ): Promise<WorkflowAgentResult> {
-    return this.workflowDispatch.executeWorkflowAgent(opts, parentRunId, signal, onEvent, stream);
+    return this.workflowDispatch.executeWorkflowAgent(opts, parentRunId, signal, onEvent, stream, stepIndex);
   }
 
   /**

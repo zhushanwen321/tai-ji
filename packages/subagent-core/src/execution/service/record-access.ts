@@ -357,12 +357,15 @@ export class RecordAccess {
   /** 步骤 2：按 mode 生成 id + controller，创建 record 并注册。
    *  [L-1] ExecutionMode 类型固定 "background"（sync 已删除），id/controller 分支简化。
    *  [H2 W2] originFields：workflow 域派发（executeWorkflowAgent）的来源身份——
-   *  origin:"workflow" + parentRunId 进 record（D1）；缺省不传 = tool 来源（存量零迁移）。 */
+   *  origin:"workflow" + parentRunId 进 record（D1）；缺省不传 = tool 来源（存量零迁移）。
+   *  [W0 / D1] stepIndex（可选）：origin="workflow" 时在 run 内的步骤索引（pump
+   *  dispatch 的 callId 单源），run 视图按 (parentRunId, stepIndex) 关联 record；
+   *  undefined（SAR 直调占位路径 / 旧调用方）经 JSON.stringify 自然缺省零迁移。 */
   createRecordForMode(
     identity: ResolvedIdentity,
     opts: ExecuteOptions,
     mode: ExecutionMode,
-    originFields?: { origin: "workflow"; parentRunId: string },
+    originFields?: { origin: "workflow"; parentRunId: string; stepIndex?: number },
   ): ExecutionRecord {
     // FR-1: record id 用全局 UUID，不依赖 transcript/PID
     const id = `sa-${crypto.randomUUID()}`;
@@ -408,9 +411,15 @@ export class RecordAccess {
     });
     // [H2 W2] 来源身份在对象构造点落位（origin/parentRunId 为 readonly，创建期一次性
     // 写入——与 createRecord 的 identity 语义同款「创建时确定，不可变」）。
+    // [W0 / D1] stepIndex 同族落位（readonly 身份域；undefined 自然缺省）。
     const record: ExecutionRecord =
       originFields !== undefined
-        ? { ...base, origin: originFields.origin, parentRunId: originFields.parentRunId }
+        ? {
+          ...base,
+          origin: originFields.origin,
+          parentRunId: originFields.parentRunId,
+          stepIndex: originFields.stepIndex,
+        }
         : base;
 
     this.deps.getStore().register(record);

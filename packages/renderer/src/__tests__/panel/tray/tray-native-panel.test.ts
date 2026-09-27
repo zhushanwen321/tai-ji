@@ -406,6 +406,56 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
   })
 })
 
+describe('TrayNativePanel [W0/V8] 合并投影消费锚定（盲区窗口 N/M 进度显式预期变化）', () => {
+  it('盲区窗口 record-only agentCalls → N/M 进度 0/N + 0% 进度条（旧形态 0/0 → 0/N）', async () => {
+    // D2-R3 record-only 成行契约形状：id/agent/slug/status/startedAt/sessionId、phase undefined。
+    // 显式预期变化（设计 V8）：盲区窗口托盘进度从 0/0（agentCalls 空）变为 0/N（record-only
+    // 行已可见），百分比同口径从 0%（0/0 兜底）变为 0%（0 终态 / N 总数）
+    trayState.workflowRunning = [
+      makeWorkflow({
+        runId: 'wf-blind',
+        agentCalls: [
+          { id: 0, agent: 'reviewer-1', status: 'running', sessionId: 'acs-r1' },
+          { id: 1, agent: 'reviewer-2', status: 'running', sessionId: 'acs-r2' },
+          { id: 2, agent: 'reviewer-3', status: 'running', sessionId: 'acs-r3' },
+          { id: 3, agent: 'reviewer-4', status: 'running', sessionId: 'acs-r4' },
+        ],
+      }),
+    ]
+    wrapper = mountPanel('workflow')
+    await flushPromises()
+
+    const row = wrapper.find('[data-testid="tray-workflow-row"]')
+    expect(row.exists()).toBe(true)
+    // N/M 计数：done=0 / total=4（合并投影使盲区窗口立即有值）
+    expect(row.text()).toContain(msg(zhTray.tray.agentsLabel, { done: 0, total: 4 }))
+    // 百分比：进度条宽度 0%（无终态步骤）
+    const bar = row.find('[style*="width"]')
+    expect(bar.exists()).toBe(true)
+    expect(bar.attributes('style')).toContain('width: 0%')
+  })
+
+  it('转态后 N/M 随终态计数推进：1 终态 / 4 总数 → 25% 进度条', async () => {
+    trayState.workflowRunning = [
+      makeWorkflow({
+        runId: 'wf-partial',
+        agentCalls: [
+          { id: 0, agent: 'reviewer-1', status: 'completed', sessionId: 'acs-r1' },
+          { id: 1, agent: 'reviewer-2', status: 'running', sessionId: 'acs-r2' },
+          { id: 2, agent: 'reviewer-3', status: 'running', sessionId: 'acs-r3' },
+          { id: 3, agent: 'reviewer-4', status: 'running', sessionId: 'acs-r4' },
+        ],
+      }),
+    ]
+    wrapper = mountPanel('workflow')
+    await flushPromises()
+
+    const row = wrapper.find('[data-testid="tray-workflow-row"]')
+    expect(row.text()).toContain(msg(zhTray.tray.agentsLabel, { done: 1, total: 4 }))
+    expect(row.find('[style*="width"]').attributes('style')).toContain('width: 25%')
+  })
+})
+
 describe('TrayNativePanel 空态可行动（D9）', () => {
   it('默认「进行中」桶为空 + 已结束有内容：一行提示 + 「查看已结束 (N)」，不自动跳转', async () => {
     trayState.bashEnded = [

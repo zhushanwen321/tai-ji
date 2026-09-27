@@ -227,6 +227,33 @@ describe("executeWorkflowAgent 注册面", () => {
     const unregistered = pi.events.emit.mock.calls.find((c) => c[0] === "pending:unregister");
     expect(unregistered?.[1]).toMatchObject({ id: record.id });
   });
+
+  it("[W0 / D1] dispatch 尾参 stepIndex → record 携带（originFields 写点参数链）；缺省 → undefined（零迁移）", async () => {
+    const { service, store, fake, entries } = makeHarness();
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-step", undefined, undefined, undefined, 3);
+    await flush();
+    const run = soleRun(fake);
+    const record = runningRecord(store);
+
+    // dispatch 参数 → executeWorkflowAgent 尾参 → createRecordForMode originFields →
+    // record（构造点 spread 落位）——链路终点断言，写点参数链的效果面。
+    expect(record.origin).toBe("workflow");
+    expect(record.stepIndex).toBe(3);
+
+    run.settle({ content: "done" });
+    await pending;
+    // register 落盘 entry（recordToSubagent → toSubagentRecordEntry 投影）同步携带
+    const withStep = entries.find((e) => e.stepIndex === 3);
+    expect(withStep).toMatchObject({ id: record.id, origin: "workflow", parentRunId: "run-step" });
+
+    // 缺省负向：不传 stepIndex（SAR 直调占位路径 / 旧调用方形态）→ undefined
+    const pending2 = service.executeWorkflowAgent(baseOpts(), "run-step-none");
+    await flush();
+    const record2 = runningRecord(store);
+    expect(record2.stepIndex).toBeUndefined();
+    lastRun(fake).settle({ content: "done" });
+    await pending2;
+  });
 });
 
 // ============================================================

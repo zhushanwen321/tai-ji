@@ -444,8 +444,11 @@ export class RunOrchestration {
       worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
       // [H2 S3] 来源身份随绑定落盘：引擎子文件身份面（binding sidecar）是磁盘重建
       // origin 的唯一现行载体，漏写则收口/重启后 workflow record 逃过 D1 投影过滤。
+      // [W0 / D1] stepIndex 同族随绑定落盘——漏写则 identityFromBinding 重建路径
+      // 恢复不出步骤索引（run 视图关联键静默缺失）。
       origin: record.origin,
       parentRunId: record.parentRunId,
+      stepIndex: record.stepIndex,
     });
   }
 

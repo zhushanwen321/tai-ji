@@ -1,5 +1,6 @@
 /**
  * WorkflowTab 组件测试（[P3/D6] 快照投影增强的消费面）。
+ * [W0] 合并投影消费面锚定（V4 两阶段归组 + V6 failed 错误摘要）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 使用者（黑盒 DOM）：agent call 三态渲染（running/pending/done 耗时）——每条用例
@@ -150,5 +151,93 @@ describe('WorkflowTab [P3/D6] 投影消费', () => {
     })
     const wrapper = await mountTab([wf])
     expect(wrapper.find('[data-testid="drawer-workflow-stalled"]').exists()).toBe(false)
+  })
+})
+
+// ── [W0] 合并投影形状锚定（设计 D2-R3：mock 输入按契约形状——id/agent/slug/status/
+// startedAt/sessionId，phase 可 undefined；U2 合并投影落地后由主 agent 复核真实形状）──
+
+describe('WorkflowTab [W0] 合并投影消费锚定（V4 结构 / V6 失败渲染）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: FIXED_NOW })
+    setActivePinia(createPinia())
+    _resetDrawerForTest()
+    usePanelStore().loadSession(ROOT_PANEL_ID, SID)
+    bindDrawerSessionId(ref(SID))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    _resetDrawerForTest()
+  })
+
+  it('V4 盲区窗口平铺：record-only 行（phase undefined）全部渲染、无分组 header、无「Other」占位组', async () => {
+    // D2-R3 record-only 成行契约形状：record 有候选而 trace 暂无节点 → 用自身字段成行，
+    // phase 保持 undefined（盲区窗口 ① trace 快照恒 steps=0、② record 无 phase）
+    const wf = record({
+      agentCalls: [
+        call({ id: 0, agent: 'reviewer-1', status: 'running', startedAt: startedIso(30_000), sessionId: 'acs-r1' }),
+        call({ id: 1, agent: 'reviewer-2', status: 'running', startedAt: startedIso(30_000), sessionId: 'acs-r2' }),
+        call({ id: 2, agent: 'reviewer-3', status: 'running', startedAt: startedIso(30_000), sessionId: 'acs-r3' }),
+        call({ id: 3, agent: 'reviewer-4', status: 'running', startedAt: startedIso(30_000), sessionId: 'acs-r4' }),
+      ],
+    })
+    const wrapper = await mountTab([wf])
+
+    // 秒级出现的步骤行是「无分组 header 的平铺」：4 行全渲染，各带 agent 名 + running + 计时
+    const rows = wrapper.findAll('[data-testid="drawer-workflow-agent-call"]')
+    expect(rows).toHaveLength(4)
+    expect(rows[0]!.text()).toContain('reviewer-1')
+    expect(rows[0]!.text()).toContain('运行中 · 30s')
+    // hasExplicitPhases 判 phase !== undefined 保持 false → 不出分组头（无「N 个代理」计数），
+    // 也不出「Other」占位组文案
+    expect(wrapper.text()).not.toContain('Other')
+    expect(wrapper.text()).not.toContain('个代理')
+  })
+
+  it('V4 归组阶段：① flush 后 phase 到位 → 分组 header 出现（phase 名 + 组内计数），组内步骤不丢', async () => {
+    const wf = record({
+      agentCalls: [
+        call({ id: 0, agent: 'reviewer-1', status: 'completed', phase: 'Review', sessionId: 'acs-r1', durationMs: 60_000 }),
+        call({ id: 1, agent: 'reviewer-2', status: 'completed', phase: 'Review', sessionId: 'acs-r2', durationMs: 45_000 }),
+        call({ id: 2, agent: 'fixer-1', status: 'running', phase: 'Fix', startedAt: startedIso(10_000), sessionId: 'acs-f1' }),
+      ],
+    })
+    const wrapper = await mountTab([wf])
+
+    // 分组 header：phase 名可见 + 组内计数（agentsLabel '{count} 个代理'）
+    expect(wrapper.text()).toContain('Review')
+    expect(wrapper.text()).toContain('Fix')
+    expect(wrapper.text()).toContain('2 个代理')
+    expect(wrapper.text()).toContain('1 个代理')
+    // 组内步骤行全渲染（3 行归两组）
+    expect(wrapper.findAll('[data-testid="drawer-workflow-agent-call"]')).toHaveLength(3)
+  })
+
+  it('V6 失败渲染：failed 行红点态 + 错误摘要文案（record.error 投影）', async () => {
+    const wf = record({
+      agentCalls: [
+        call({ id: 0, agent: 'reviewer-2', status: 'failed', sessionId: 'acs-r2', durationMs: 5_000, error: 'agent process crashed (exit 1)' }),
+      ],
+    })
+    const wrapper = await mountTab([wf])
+
+    const row = wrapper.find('[data-testid="drawer-workflow-agent-call"]')
+    expect(row.exists()).toBe(true)
+    expect(row.text()).toContain('reviewer-2')
+    // 错误摘要可见（failed 行不再只靠红点；title 提供全文）
+    const err = wrapper.find('[data-testid="drawer-workflow-agent-call-error"]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('agent process crashed (exit 1)')
+    expect(err.attributes('title')).toBe('agent process crashed (exit 1)')
+  })
+
+  it('V6 failed 行无 error 字段：不渲染空摘要行（缺省路径不炸）', async () => {
+    const wf = record({
+      agentCalls: [call({ id: 0, agent: 'reviewer-3', status: 'failed', sessionId: 'acs-r3' })],
+    })
+    const wrapper = await mountTab([wf])
+    expect(wrapper.find('[data-testid="drawer-workflow-agent-call"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="drawer-workflow-agent-call-error"]').exists()).toBe(false)
   })
 })

@@ -462,8 +462,12 @@ export function fullBindingPayload(record: ExecutionRecord, transcriptRef: Trans
     model: record.model,
     thinkingLevel: record.thinkingLevel,
     worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
+    // [W0 / D1] 来源身份三字段（origin/parentRunId + stepIndex）：merge-or-create 的
+    // create 腿与 reopen 新锚均经本载荷，漏拷贝则 binding 恒无该字段（schema 补键
+    // 不足以让字段落盘——载荷是显式逐字段拷贝）。
     origin: record.origin,
     parentRunId: record.parentRunId,
+    stepIndex: record.stepIndex,
     ...settleSnapshotPatch(record),
     ...(transcriptRef !== undefined ? { transcriptRef } : {}),
   };

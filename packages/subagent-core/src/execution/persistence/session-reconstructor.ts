@@ -175,6 +175,13 @@ interface RecordIdentityFields {
   origin: RecordOrigin | undefined;
   /** origin="workflow" 时所属 workflow run id（守卫归一后；缺省 undefined）。 */
   parentRunId: string | undefined;
+  /**
+   * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（同族身份域）。identity
+   * custom entry 本体不承载本字段（写入期子文件无此概念）；此处声明是
+   * identityFromBinding 重建投影的类型通道——binding sidecar 携带 stepIndex 时经
+   * IdentityHeaderRecon 进 buildRecord 落位。缺省 undefined = 存量形态零迁移。
+   */
+  stepIndex: number | undefined;
 }
 
 /** 重建产出的完整 SubagentRecord 数据（身份 + 可变状态 + 派生 eventLog）。 */
@@ -542,6 +549,9 @@ function buildReconstructedRecord(
     forkDepth: identity.forkDepth,
     origin,
     parentRunId,
+    // [W0 / D1] identity entry 不承载 stepIndex（binding sidecar 才承载）——全量
+    // 重建路径恒 undefined，buildRecord 落位该缺省形态。
+    stepIndex: undefined,
     sessionFile,
     status,
     closedReason,
@@ -803,6 +813,9 @@ function toIdentityRecon(
     worktree: identity.worktree,
     origin: normalizeReconOrigin(identity.origin),
     parentRunId: normalizeReconParentRunId(identity.parentRunId),
+    // [W0 / D1] identity entry 不承载 stepIndex（binding sidecar 才承载）——头部
+    // 重建路径恒 undefined。
+    stepIndex: undefined,
     model: state.model,
     thinkingLevel: state.thinkingLevel,
     sessionFile,

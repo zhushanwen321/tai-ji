@@ -120,12 +120,13 @@ export interface WorkflowDispatchDeps {
     agentConfig: AgentConfig | undefined,
     opts: ExecuteOptions,
   ) => ResolvedIdentity;
-  /** [R3 RecordAccess 显式接口] 按 mode 创建 record 并注册（含 workflow originFields）。 */
+  /** [R3 RecordAccess 显式接口] 按 mode 创建 record 并注册（含 workflow originFields
+   *  ——[W0 / D1] originFields 可携带 stepIndex，record 写点的唯一通道）。 */
   readonly createRecordForMode: (
     identity: ResolvedIdentity,
     opts: ExecuteOptions,
     mode: ExecutionMode,
-    originFields?: { origin: "workflow"; parentRunId: string },
+    originFields?: { origin: "workflow"; parentRunId: string; stepIndex?: number },
   ) => ExecutionRecord;
   /** NotifyHost（record 级 pending:register 注销面）。 */
   readonly getNotifyHost: () => NotifyHost;
@@ -201,6 +202,7 @@ export class WorkflowDispatch {
     signal?: AbortSignal,
     onEvent?: (event: AgentEvent) => void,
     stream?: SubagentStream,
+    stepIndex?: number,
   ): Promise<WorkflowAgentResult> {
     this.deps.assertReady();
     // 入口校验与嵌套护栏（与 execute/executeAndAwait 同款 BC-12 / T4②；护栏单源
@@ -223,11 +225,12 @@ export class WorkflowDispatch {
     const identity = await this.resolveWorkflowIdentity(route, opts, execOpts, agentConfig);
     this.stampWorkflowEngineTrace(route, execOpts);
 
-    // ── record 注册（origin:"workflow" + parentRunId；record 级 pending:register
-    //    照旧——与既有派发路径同款）──
+    // ── record 注册（origin:"workflow" + parentRunId + stepIndex；record 级
+    //    pending:register 照旧——与既有派发路径同款）──
     const record = this.deps.createRecordForMode(identity, execOpts, "background", {
       origin: "workflow",
       parentRunId,
+      stepIndex,
     });
     this.deps.getNotifyHost().emitPendingRegister(record.id, record.agent);
 

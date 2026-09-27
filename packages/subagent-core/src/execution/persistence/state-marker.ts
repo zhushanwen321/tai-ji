@@ -430,6 +430,13 @@ export interface RecordBinding {
    */
   parentRunId?: string;
   /**
+   * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（与 origin/parentRunId 同族
+   * 身份域）。undefined（存量 binding / tool 来源）= 不投影（读侧守卫归一）；
+   * identityFromBinding 重建路径据此恢复，漏本字段则重启后 record 无 stepIndex
+   * （run 视图关联键静默缺失——同族字段漏投影事故先例 H2 S3）。
+   */
+  stepIndex?: number;
+  /**
    * 终态 usage 快照（[H2 A3]，终态写点 Step3a 随 .state 同步更新 binding）：
    * totalTokens/turns/endedAt 三字段的 record 终值。light 列表面据此恢复 usage
    * （子文件无 identity entry，全量重建面不可用；round 补投影同款先例）。
@@ -580,6 +587,7 @@ export function readRecordBinding(sessionFile: string): RecordBinding | undefine
     worktree: parsed.worktree === true,
     origin: optional.origin,
     parentRunId: optional.parentRunId,
+    stepIndex: optional.stepIndex,
     totalTokens: optional.totalTokens,
     turns: optional.turns,
     endedAt: optional.endedAt,
@@ -637,6 +645,7 @@ function normalizeOptionalBindingFields(
   | "thinkingLevel"
   | "origin"
   | "parentRunId"
+  | "stepIndex"
   | "totalTokens"
   | "turns"
   | "endedAt"
@@ -659,6 +668,10 @@ function normalizeOptionalBindingFields(
     // 对齐 record-store.readEntryOriginFields 主 entry 重建侧的同名守卫。
     origin: originOrUndefined(parsed.origin),
     parentRunId: strOrUndefined(parsed.parentRunId),
+    // [W0 / D1] 步骤索引：number 守卫（非法/缺省 → undefined = 不投影，存量 binding
+    // 零迁移）；normalize 白名单含本键是 updateRecordBinding read-modify-write
+    // round-trip 不丢字段的结构性保证（读出保留 → spread 合并 → 重写带回）。
+    stepIndex: numOrUndefined(parsed.stepIndex),
     // 终态 usage 快照三字段（H2 A3）：number 守卫（非法/缺省 → undefined = 不投影）。
     totalTokens: numOrUndefined(parsed.totalTokens),
     turns: numOrUndefined(parsed.turns),

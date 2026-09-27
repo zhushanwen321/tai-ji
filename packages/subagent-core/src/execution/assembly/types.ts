@@ -505,6 +505,13 @@ export interface ExecutionRecord {
    */
   readonly parentRunId?: string;
   /**
+   * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（派发单源 = pump dispatch 的
+   * callId/taskIndex，创建时随 originFields 写入）。additive：undefined（存量 record /
+   * tool 来源）零迁移。持久化经 subagent-record entry 与 binding sidecar（两持久化面
+   * 漏投影则重启后本字段回落 undefined，run 视图关联键缺失）。
+   */
+  readonly stepIndex?: number;
+  /**
    * [modeless 波1·已删除字段] chatMode（对话模式标志）停写删除：万物可续后
    * 「模式」不再是 record 状态——每个 record 轮终落 idle 可续聊（message 即续、
    * fork 可继承）。旧持久化数据（entry / binding / session identity）残留键读侧
@@ -944,6 +951,12 @@ export interface SubagentRecord {
    * W2/W3 run 视图下钻按 collectRecordsByParentRunId 查询；tool 来源恒 undefined。
    */
   parentRunId?: string;
+  /**
+   * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（与 ExecutionRecord.stepIndex
+   * 同源投影 / entry 与 binding 重建）。additive：undefined（存量磁盘重建源 / tool
+   * 来源）零迁移，读侧不参与 run 视图关联（无 stepIndex 的 record 不成行）。
+   */
+  stepIndex?: number;
   endedAt: number | undefined;
   turns: number;
   totalTokens: number;

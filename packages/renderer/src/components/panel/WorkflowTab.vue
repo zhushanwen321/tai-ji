@@ -117,6 +117,14 @@
                 <span v-if="callTokenTotal(call) > 0">{{ formatTokens(callTokenTotal(call), 'tokens') }}</span>
                 <span v-if="call.turns !== undefined">· {{ call.turns }} {{ t('sidebar.workflowDetail.turnsUnit') }}</span>
               </div>
+              <!-- [W0/V6] failed 行错误摘要（record.error 投影，截断一行，title 全文）：
+                   状态行转 failed 的同时错误可见（失败路径恢复指引），不再只靠红点 -->
+              <div
+                v-if="call.status === 'failed' && call.error"
+                data-testid="drawer-workflow-agent-call-error"
+                class="mt-0.5 truncate pl-[19px] font-mono text-[length:var(--text-3xs)] text-danger"
+                :title="call.error"
+              >{{ call.error }}</div>
             </div>
           </div>
         </div>

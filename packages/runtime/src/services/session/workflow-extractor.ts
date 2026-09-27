@@ -40,6 +40,8 @@ import {
 // 删改）才 bump 版本，additive 面旧读侧按缺省渲染（本文件对缺字段逐项 `??` 缺省，历史
 // run 投影保留）。字段集演进时对照权威源的 projectRunEvents 注释核对（fold 填充面）。
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
+import { scanSubagentEntries } from './subagent-extractor.js'
+import { mergeWorkflowStepRecords } from './workflow-step-merge.js'
 import { isEnoent } from '../../utils/errors.js'
 import { warnOnce } from '../../utils/warn-once.js'
 import type {
@@ -166,6 +168,22 @@ export function scanWorkflowEntries(entries: unknown[]): WorkflowRunRecord[] {
 }
 
 /**
+ * [W0 / D2 / D5] 合并扫描入口：扫 ① workflow-record 后在**同一份已解析 entries 数组**
+ * 上扫 ② subagent-record（内存第二遍扫描，零文件读取——D5 禁双读盘约束的实现锚点：
+ * 冷路径的 readFileSync + parseJsonl 只发生在 session-file-extraction 骨架一处，
+ * 本函数只消费骨架传入的 entries）并按 (parentRunId, stepIndex) 合并——① 供编排
+ * 结构（trace 骨架），② 供运行时状态（迁移即写、无节流）。
+ *
+ * 仅冷启动全量路径使用（extractWorkflowsFromSessionFile 的 scan 注入）；实时增量路径
+ * 不经本函数（增量 delta 的候选集不全，改由 session-records 的
+ * mergeWorkflowStepsIntoCache 用全量 subagent 缓存重合并——两路共用同一
+ * mergeWorkflowStepRecords 纯函数，D5 冷热同代码）。
+ */
+export function scanWorkflowEntriesWithSteps(entries: unknown[]): WorkflowRunRecord[] {
+  return mergeWorkflowStepRecords(scanWorkflowEntries(entries), scanSubagentEntries(entries))
+}
+
+/**
  * 收集自描述 workflow-record entry（W17 v1）。
  *
  * @returns null = 无有效命中（走 legacy 兜底）；WorkflowRunRecord[] = 命中。
@@ -234,7 +252,9 @@ function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null 
  * 从主 session JSONL 文件提取 WorkflowRunRecord[]（冷启动 / getWorkflows RPC 路径）。
  *
  * 读取/预检/降级语义走 ./session-file-extraction.ts 共享骨架（与 subagent-extractor
- * 同一实现）；本函数只注入日志标签、降级文案与 scanWorkflowEntries 扫描器。
+ * 同一实现）；本函数注入日志标签、降级文案与 scanWorkflowEntriesWithSteps 合并扫描器
+ * （[W0 / D5] 冷路径全量 entries 上 ① trace 骨架 × ② record 状态合并——与实时路径
+ * 共用同一 mergeWorkflowStepRecords，重开 session 与运行中视图同一份派生代码）。
  *
  * 读失败分级（与 extractSubagentsFromSessionFile 同款，renderer 侧栏 stale 守卫的
  * 契约前提，由骨架承担）：ENOENT → 空数组（pi session 文件延迟写入的合法窗口）；
@@ -248,7 +268,7 @@ export function extractWorkflowsFromSessionFile(filePath: string): SessionFileEx
   return extractRecordsFromSessionFile(filePath, {
     warnTag: 'workflow-extractor',
     subject: 'workflow',
-    scan: scanWorkflowEntries,
+    scan: scanWorkflowEntriesWithSteps,
   })
 }
 

@@ -129,6 +129,13 @@ export interface SubagentRecordEntryData {
    * W2/W3 run 视图按 collectRecordsByParentRunId 从本字段回查本 run 的 record 集。
    */
   parentRunId?: string;
+  /**
+   * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（与 origin/parentRunId 同族
+   * 身份域，run 视图按 (parentRunId, stepIndex) 关联 record）。additive 字段，
+   * v 不 bump（对齐 stopReason 先例）：undefined（存量 entry / tool 来源）经
+   * JSON.stringify 自然缺省零迁移，读侧守卫归一。
+   */
+  stepIndex?: number;
 }
 
 /** SubagentRecord → 自描述 entry data（快照投影，不 mutate 源）。
@@ -168,9 +175,10 @@ export function toSubagentRecordEntry(record: SubagentRecord): SubagentRecordEnt
     // [modeless 波3] collectMode 投影随字段消亡删除；batchFinalized（U1 foundation）
     // undefined 经 JSON.stringify 自然缺省，旧 entry 序列化产物字节不变（零迁移）。
     batchFinalized: record.batchFinalized,
-    // 来源身份两字段（H2 W1）：undefined 经 JSON.stringify 自然缺省，存量 entry
-    // 序列化字节不变（零迁移）。
+    // 来源身份两字段（H2 W1）+ 步骤索引（[W0 / D1] 同族身份域）：undefined 经
+    // JSON.stringify 自然缺省，存量 entry 序列化字节不变（零迁移）。
     origin: record.origin,
     parentRunId: record.parentRunId,
+    stepIndex: record.stepIndex,
   };
 }
