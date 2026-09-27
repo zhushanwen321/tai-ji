@@ -80,6 +80,8 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 
 <!-- INSTALL:END -->
 
+> **macOS Intel users**: Only Apple Silicon (arm64) DMG is available. Intel Macs are not currently supported.
+
 ---
 
 ## Core Capabilities
@@ -161,7 +163,7 @@ The following 16 extensions are usable standalone outside taiji (all published t
 | [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | Cache prefix fingerprint collection |
 | [`pi-cw-tool`](extensions/universal/cw-tool/README.md) | cw 2.0 runner + read-only `cw_query` tool |
 
-The remaining 5 (`pi-agent-ext` / `pi-msg-id-mapper` / `pi-plugin-bridge` / `pi-system-prompt` / `pi-system-prompt-trace`) are taiji-integration-specific. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
+The remaining 5 (`agent-ext` / `msg-id-mapper` / `plugin-bridge` / `system-prompt` / `system-prompt-trace`, npm package names have `pi-` prefix) are taiji-integration-specific, source code under `extensions/taiji/`. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
 
 ---
 
