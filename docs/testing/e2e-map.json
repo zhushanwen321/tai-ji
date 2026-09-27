@@ -1244,7 +1244,7 @@
       "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行（双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证，缺一 skip 不 fail；空载串行）：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-zcode-shared-lifecycle.spec.ts（需本机 zcode CLI 凭据）",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "pi-workflow-run-resource-model D3 验收 A4/A7（场景 V4/V7）。zcode 引擎实现为本设计零改动面（shared-service 透传 registry 保形）——本轨为 manifest 显式声明后的路由保形回归。D3 首跑两轮均挂：ask-dispatched ×2 正常落账但无 ask-settled（zcode 任务执行体不回；候选根因 = zcode 引擎用宿主 ~/.zcode 凭据与自动化会话自身共享同一 GLM plan 配额的自竞争），真机复核状态 = 待独立窗口复跑。"
+      "note": "pi-workflow-run-resource-model D3 验收 A4/A7（场景 V4/V7）。zcode 引擎实现为本设计零改动面（shared-service 透传 registry 保形）——本轨为 manifest 显式声明后的路由保形回归。D3 首跑两轮均挂（ask-dispatched ×2 正常落账但无 ask-settled；候选根因 = zcode 引擎用宿主 ~/.zcode 凭据与自动化会话自身共享同一 GLM plan 配额的自竞争）。2026-09-27 复跑定案：一轮通过（2.7m）——V4 双任务全程同 pid、V7 app 退出后引擎进程随退；首跑挂点根因不可回溯（现场已清），配额自竞争假设未被复现证实也未被排除，当前版本真机 PASS 为准。"
     }
   ]
 }

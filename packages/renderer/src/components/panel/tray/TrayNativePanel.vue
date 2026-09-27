@@ -280,7 +280,8 @@ import { useTwoStepConfirm } from '@/composables/useTwoStepConfirm'
 import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAction'
 import { TRAY_BUCKETS, useTrayCountsContext } from '@/components/panel/tray/useTrayCounts'
 import type { TrayBucketValue } from '@/components/panel/tray/useTrayCounts'
-import { isRunningProjection } from '@/lib/subagent-bucket'
+import { isRunningProjection, subagentDotClass } from '@/lib/subagent-bucket'
+import { workflowToneClass } from '@/components/panel/tray/tray-tone'
 import { backgroundTaskBucket, backgroundTaskStatusIcon } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry, BackgroundTaskIconState, BackgroundTaskStatusKey } from '@/lib/background-task-bucket'
 import { formatTokens as formatTokensK } from '@/lib/token-format'
@@ -505,28 +506,11 @@ function elapsedLabel(entry: BackgroundTaskEntry): string {
   return formatClockDuration(ms, { padHours: false })
 }
 
-// ── subagent 行状态点（表驱动；承自侧栏任务卡片状态表的复制迁移件——源组件已随退役批次
-//    删除，本表为唯一实现）：失败红 / 中断灰先于完成绿兜底，顺序即语义 ──
-const INTERRUPTED_STOP_REASONS = new Set(['cancelled', 'interrupted', 'interrupted-by-restart', 'interrupted-by-parent'])
-type SubagentDotRule = { match: (record: SubagentRecord) => boolean; cls: string }
-const SUBAGENT_DOT_RULES: SubagentDotRule[] = [
-  { match: (r) => r.status === 'running' && r.stopReason === 'failed', cls: 'bg-danger' },
-  { match: (r) => r.status === 'idle' && r.stopReason === 'failed', cls: 'bg-danger' },
-  { match: (r) => r.status === 'idle' && r.stopReason !== undefined && INTERRUPTED_STOP_REASONS.has(r.stopReason), cls: 'bg-neutral-dim opacity-50' },
-  { match: (r) => r.status === 'idle', cls: 'bg-success' },
-]
+// ── subagent 行状态点 / workflow 行色档：规则与映射单点在 lib/subagent-bucket
+//    （状态点规则表，[W2 D8] 迁入 + status 全集锁）与 tray-tone（outcome tone 映射 +
+//    中文词表文案，[W2 D8] 全集锁）；本组件只消费，不再自持判定表 ──
 /** 执行态判据 = SSOT 谓词（isRunningProjection），与计数/徽标同源不漂移 */
 const isRunningSubagent = isRunningProjection
-function subagentDotClass(record: SubagentRecord): string {
-  const hit = SUBAGENT_DOT_RULES.find((entry) => entry.match(record))
-  return hit ? hit.cls : 'bg-accent'
-}
-
-// ── workflow 行色档（状态点与进度条同源；承自侧栏 workflow 列表的复制迁移件）──
-function workflowToneClass(record: WorkflowRunRecord): string {
-  if (record.status === 'done') return record.reason === 'completed' ? 'bg-success' : 'bg-danger'
-  return 'bg-accent'
-}
 function completedAgentCount(record: WorkflowRunRecord): number {
   return record.agentCalls.filter((call) => call.status === 'completed' || call.status === 'failed').length
 }

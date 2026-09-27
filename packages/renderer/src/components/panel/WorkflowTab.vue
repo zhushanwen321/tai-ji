@@ -167,9 +167,8 @@ const { isAbortConfirming, onAbortClick: onWorkflowAbortClick } = useWorkflowAct
 
 /**
  * 当前选中的 workflow record（响应式）。
- * selectedWorkflowName 匹配策略：先 runId 精确匹配，后 scriptName 取最新一条（两种调用归宿：
- * 托盘行传 runId（TrayNativePanel 行点击矩阵）、对话流 workflow 内联块传 tool input name
- * （Block.vue，scriptName 回退为其兜底）。
+ * selectedWorkflowName 匹配策略：先 runId 精确匹配，后 scriptName 取最新一条（调用归宿：
+ * 托盘行传 runId（TrayNativePanel 行点击矩阵）。
  */
 const workflow = computed<WorkflowRunRecord | null>(() => {
   const name = selectedWorkflowName.value
@@ -189,7 +188,7 @@ const aborting = computed(() => workflow.value !== null && isAbortConfirming(wor
 interface PhaseGroup {
   phase: string
   calls: WorkflowAgentCall[]
-  phaseStatus: 'completed' | 'running' | 'pending'
+  phaseStatus: PhaseAggregateStatus
 }
 
 const phaseGroups = computed<PhaseGroup[]>(() => {
@@ -214,17 +213,48 @@ const hasExplicitPhases = computed(() =>
   workflow.value?.agentCalls.some((c) => c.phase !== undefined) ?? false,
 )
 
-function aggregatePhaseStatus(calls: WorkflowAgentCall[]): 'completed' | 'running' | 'pending' {
+// ── phase 聚合与状态点映射（[W2 D8] 全集锁）─────────────────────────────────
+// 聚合输出四值（failed 不再被吸收进 completed——含失败步骤的 phase 显示红点）；
+// 全部 switch 用 default-never 穷尽锁：call.status 词表扩值而分支漏配 = vue-tsc 红。
+
+/** phase 聚合输出词表（[W2 D8] 四值） */
+type PhaseAggregateStatus = 'completed' | 'failed' | 'running' | 'pending'
+
+/** never 穷尽断言（default 分支消费：漏配分支时 value 不再是 never → 编译红） */
+function assertNever(value: never): never {
+  throw new Error(`unreachable status: ${String(value)}`)
+}
+
+/** 终态判据（输入侧全集锁：call.status 扩值落 default → 编译红，不再静默判 pending） */
+function isTerminalCallStatus(status: WorkflowAgentCall['status']): boolean {
+  switch (status) {
+    case 'completed':
+    case 'failed':
+      return true
+    case 'running':
+    case 'pending':
+      return false
+    default:
+      return assertNever(status)
+  }
+}
+
+/** 组内状态聚合：有 running → running；全终态 → 含 failed 即 failed、否则 completed；否则 pending */
+function aggregatePhaseStatus(calls: WorkflowAgentCall[]): PhaseAggregateStatus {
   if (calls.some((c) => c.status === 'running')) return 'running'
-  if (calls.every((c) => c.status === 'completed' || c.status === 'failed')) return 'completed'
+  if (calls.every((c) => isTerminalCallStatus(c.status))) {
+    return calls.some((c) => c.status === 'failed') ? 'failed' : 'completed'
+  }
   return 'pending'
 }
 
-function phaseDotClass(status: 'completed' | 'running' | 'pending'): string {
+function phaseDotClass(status: PhaseAggregateStatus): string {
   switch (status) {
     case 'completed': return 'bg-success'
+    case 'failed': return 'bg-danger'
     case 'running': return 'bg-accent'
-    default: return 'bg-neutral-dim opacity-40'
+    case 'pending': return 'bg-neutral-dim opacity-40'
+    default: return assertNever(status)
   }
 }
 
@@ -233,7 +263,8 @@ function callDotClass(status: WorkflowAgentCall['status']): string {
     case 'completed': return 'bg-success'
     case 'failed': return 'bg-danger'
     case 'running': return 'bg-accent'
-    default: return 'bg-neutral-dim opacity-40'
+    case 'pending': return 'bg-neutral-dim opacity-40'
+    default: return assertNever(status)
   }
 }
 

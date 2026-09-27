@@ -119,7 +119,7 @@ subagent 跨 run 续聊时定位既有会话的凭据（引擎中立形态 `Resu
 
 ### Execution Record
 
-subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0078](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 快照条目走惰性兼容读）；对外状态两态（`active` / `idle`，ended 随终态概念删除），轮终收尾写 `<session>.state` sidecar 与 manifest（均为物化投影）。
+subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0078](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 快照条目走惰性兼容读）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外投影两态（`active` / `idle`，ended 随终态概念删除），轮终收尾写 `<session>.state` sidecar 与 manifest（均为物化投影）。
 
 ### ToolCall
 
@@ -256,13 +256,20 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 ### Run 事件 journal（workflow 域）
 workflow run 的事件流持久化：`<sessionDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），JSONL 逐行记录 run 生命周期事件（`run-created / ask-dispatched / armed / ask-settled / run-settled` 等，事件行携带单调 seq）。`ask-dispatched` 载荷携带 `phase?`——剧本 `phase()`/`opts.phase` 声明的归属，抽屉分组视图（renderer `hasExplicitPhases`）的供源。它是 run 态的**唯一事实源**（W1 介质归位，[ADR-0078](adr/decisions.md)）——注册表投影 = journal fold，终局诊断引用从事件流读回（见 [ADR-0074](adr/decisions.md)）。由显式状态机单点写入，引擎不直接写。
 
+### run/record 状态词表（W2 收敛，[ADR-0080](adr/decisions.md)）
+run 与 record 两域状态词表的单源口径，消费方按维取值、禁止跨维混用：
+
+- **run 域两维正交**：lifecycle 维 = `RunLifecycle` 五态（`created/dispatched/running/settling/terminal`，`packages/subagent-core/src/orchestration/run-events.ts` 的 `RUN_TRANSITIONS` 转移表唯一裁决，表外转移 fail-fast）；outcome 维 = `RunOutcome` 四值（`completed/failed/cancelled/interrupted`，`ALL_RUN_OUTCOMES` 单源），outcome 仅 terminal 出现。`interrupted` 是被动终局的唯一权威表达——崩溃收编 / abandon 7 天窗 / idle-gc 30 天回收三条路径写入，细分语境由 errorCode 承载（`interrupted_abandoned` / `idle-evicted`）；`cancelled` 保留「用户主动取消」语义，显示面「已取消」（主动）与「已中断」（被动）禁混用。旧 `RunStatus` 两态机（running|done + `state.status`/`state.reason` 快照字段）降级 v1 兼容层（W4 sunset），禁止作活体终局判据或载荷源。
+- **record 域三维正交**：lifecycle 维 = `ExecutionStatus`（running|idle）× 停因维 = `StopReason`（上一轮收条语义，`.state` sidecar，仅展示排障）× 结果维 = outcome 四值（轮终收窄 `ExecutionOutcome = Exclude<RunOutcome,"interrupted">`——interrupted 只由收编/回收路径写入，类型上构造性封死）。record 域不建显式转移表：意图原语族即状态机（C-data-20 唯一写入口 + `tryEnterRunning` CAS 表外拒绝）。
+- **投影相 ≠ 状态**：注册表投影 = journal fold 四相（missing/active/terminal/interrupted）——interrupted 相是「journal 停在非 terminal」的投影判读（覆盖无终态帧形态），与 outcome 维的 interrupted 值（有终态帧的被动终局）是两个层面的同名成员，合起来覆盖被动终局全通道。manifest 的 running|closed|cancelled 三态是投影持久化格式（单一生产者），不计入消费方状态词表口径。
+
 ### 介质归位（run/record 运行态持久化，W1）
 run 与 record 的运行态数据持久化形态（[ADR-0078](adr/decisions.md)）：**journal 事件流是唯一事实源**——run 侧 = 既有 Run 事件 journal，record 侧 = 新增事件文件 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀，既有 .jsonl 扫描器结构性忽略；首行 `{"type":"record-journal"}` 头行自描述）。子术语：
 
 - **注册条目 / 终态条目**：主 session JSONL 里每实体只写的两条小 entry（v:2，kind 判别 registered/settled，customType 不变）——注册条记身份与锚点（诞生时写；workflow-record 族携带 journalPath 锚点），终态条记终局与摘要（结束时写，含 result 全文与 engineHandle 双键）。旧读者按版本门跳过 v2。
 - **物化投影**：每次都能从 journal 重新算出来的状态写成的落盘文件（run state 快照、run/record manifest）——目的只是让现有读方零改动，删了可重建；不是事实源。`.alive` 是操作租约，同样不计事实源。
 - **journal tail**：从上次读到的位置（offset）继续读新增事件行的增量读取方式（`packages/subagent-core/src/execution/persistence/journal-tail.ts`，run 与 record 两域共用）——runtime 内存投影的增量喂入源之一（另一源 = pi entry 游标）。
-- **收编**：把「有注册记录、无终态记录」的实体判定为 interrupted 终态并补齐记录的动作（本域领域词）——journal 重放后幂等追加终态事件，崩溃恢复与 abandon 终局化同走该入口。
+- **收编**：把「有注册记录、无终态记录」的实体判定为被动终局（run-settled 帧 outcome='interrupted'，细分语境由 errorCode 承载）并补齐记录的动作（本域领域词）——journal 重放后幂等追加终态事件，崩溃恢复与 abandon 终局化同走该入口。
 - **惰性兼容读**：旧格式数据（v1 全量快照 entry）不做一次性迁移，读到的当下按旧格式解析（带失效版本，W4 legacy sunset 统一清理）。
 - **保留窗口**：journal 的显式保留期限（默认 30 天）——窗口内全保留，窗口外的终态实体由统一保留维护轮清理（fold 终态资格判据；cap=50 已废除）。
 
