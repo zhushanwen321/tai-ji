@@ -23,8 +23,11 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { getLogger } from "../../core/logger.ts";
 import { FileRunStore, STATE_DIR_NAME } from "../../orchestration/file-run-store.ts";
 import type { WorkflowRunGcStore } from "../persistence/idle-gc.ts";
+
+const logger = getLogger("subagents");
 
 /** pi sessions 目录分量（pi 壳建目录方字面量，与 workflow-state-root.ts 的
  *  join(agentDir, "sessions", …) 同源约束：pi 布局演进须两侧同步）。 */
@@ -38,6 +41,7 @@ const SESSIONS_DIR_NAME = "sessions";
 export function createPiHostRunEnumeration(
   getAgentDir: () => string,
 ): WorkflowRunGcStore {
+  let firstScanLogged = false;
   return {
     async loadAll() {
       const agentRoot = getAgentDir();
@@ -56,6 +60,12 @@ export function createPiHostRunEnumeration(
       const runs: Awaited<ReturnType<WorkflowRunGcStore["loadAll"]>> = [];
       for (const dir of stateDirs) {
         runs.push(...(await new FileRunStore({ stateDir: dir }).loadAll()));
+      }
+      if (!firstScanLogged) {
+        firstScanLogged = true;
+        logger.debug(
+          `[subagents] GC: first enumeration scan: ${runs.length} run(s) across ${stateDirs.length} state dir(s) (agentRoot=${agentRoot})`,
+        );
       }
       return runs;
     },

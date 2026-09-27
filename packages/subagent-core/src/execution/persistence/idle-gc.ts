@@ -175,39 +175,61 @@ export function startIdleGc(
     `[subagents] GC: idle-gc timer started (interval=${resolveWorkflowRunGcIntervalMs()}ms, ` +
       `ttl=${resolveWorkflowRunIdleTtlMs()}ms, workflowRuns=${workflowRuns !== undefined ? "injected" : "default"})`,
   );
+  let tickCount = 0;
   const timer = setInterval(() => {
+    // 周期存活可观测（每 50 轮一条 + 首轮）：排障形态下区分「timer 未 fire」
+    // 与「fire 但扫描面空载」（W2 D3 真机链：unref timer 在特定宿主事件循环
+    // 形态下的调度行为需要直接证据）。
+    tickCount += 1;
+    if (tickCount === 1 || tickCount % 50 === 0) {
+      logger.debug(`[subagents] GC: cycle tick #${tickCount}`);
+    }
     const now = Date.now();
     // [U5/D4] 扫描面 = 全部内存 record（listAllInMemory）——判据 isResumable 已改
     // idle 派生，候选集（idle record）不在 listRunningMutable 的 running 过滤结果里。
     const ttlMs = resolveWorkflowRunIdleTtlMs();
-    for (const record of store.listAllInMemory()) {
-      if (!isResumable(record)) continue;
-      // [W4 锚扩展] idleSince（轮终写点）优先；缺失（无轮终信号的存量/异常形态）
-      // 回退 startedAt（创建时确定）——两锚同为「最晚活性证据」，
-      // 30 天量级下 created 锚的精度损失可接受。
-      const anchorMs = record.idleSince ?? record.startedAt;
-      const age = now - anchorMs;
-      if (age > ttlMs) {
-        logger.warn(
-          `[subagents] GC: evicting idle record ${record.id} (idle for ${Math.round(age / MS_PER_DAY)}d)`,
-        );
-        try {
-          // [U2b / D3a release 出口②] 归口 markIdleEvicted：store.archive 先、`.alive`
-          // release 后（写序在 store 内部——回收 = 放弃持有 = 放弃写权声明，残留声明
-          // 会把 idle 回收后 message 同 id 续聊的冷查重建 + 新轮 spawn 通道拦死至宿主
-          // 退出，纯成本零防御收益；回收 record 后续被接管时统一 acquireWriteLease
-          // 重新声明）。
-          store.markIdleEvicted(record);
-        } catch (err) {
-          bestEffort(err, `GC evict record ${record.id}`);
+    // record 面故障围栏：本回调是同步 timer 回调，此处抛错会成为进程级
+    // uncaughtException（宿主兜底 handler 可能耗尽日志通道后静默吞掉）——GC 是
+    // 旁路维护，record 面单轮故障不得拖垮同轮的 workflow 面与后续所有轮
+    // （W2 D3 真机链排障：record 面异常会无限期掩盖 workflow 面的全部行为
+    // 痕迹）。单轮跳过，下轮重试。
+    try {
+      for (const record of store.listAllInMemory()) {
+        if (!isResumable(record)) continue;
+        // [W4 锚扩展] idleSince（轮终写点）优先；缺失（无轮终信号的存量/异常形态）
+        // 回退 startedAt（创建时确定）——两锚同为「最晚活性证据」，
+        // 30 天量级下 created 锚的精度损失可接受。
+        const anchorMs = record.idleSince ?? record.startedAt;
+        const age = now - anchorMs;
+        if (age > ttlMs) {
+          logger.warn(
+            `[subagents] GC: evicting idle record ${record.id} (idle for ${Math.round(age / MS_PER_DAY)}d)`,
+          );
+          try {
+            // [U2b / D3a release 出口②] 归口 markIdleEvicted：store.archive 先、`.alive`
+            // release 后（写序在 store 内部——回收 = 放弃持有 = 放弃写权声明，残留声明
+            // 会把 idle 回收后 message 同 id 续聊的冷查重建 + 新轮 spawn 通道拦死至宿主
+            // 退出，纯成本零防御收益；回收 record 后续被接管时统一 acquireWriteLease
+            // 重新声明）。
+            store.markIdleEvicted(record);
+          } catch (err) {
+            bestEffort(err, `GC evict record ${record.id}`);
+          }
         }
       }
+    } catch (err) {
+      logger.warn(
+        `[subagents] GC: record scan cycle failed (skipped this cycle): ${toErrorMessage(err)}`,
+      );
     }
     if (workflowRuns !== undefined) {
       void gcWorkflowRuns(workflowRuns, now, sessionFace);
     }
   }, resolveWorkflowRunGcIntervalMs());
-  timer.unref?.();
+  // 禁 unref（2026-09-27 W2 D3 真机链 tick 实验实证）：unref 定时器在 pi 宿主
+  // 空闲态的事件循环形态下不被调度（GC 全链静默零动作的最终根因）。pi rpc 进程
+  // 的退出由 stdin EOF / 显式终止驱动，不依赖事件循环排空——ref 定时器不影响
+  // 正常退出，却是周期轮询被调度的前提。
   return () => clearInterval(timer);
 }
 
