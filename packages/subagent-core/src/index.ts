@@ -663,8 +663,13 @@ export {
   ALL_RUN_OUTCOMES,
   createRunEventJournal,
   doneReasonToRunOutcome,
+  foldRunEventCheckpoint,
+  INITIAL_RUN_EVENT_FOLD,
   RUN_EVENT_JOURNAL_SUFFIX,
+  type RunAskStepFold,
+  type RunEventFoldCheckpoint,
   type RunEventJournal,
+  type RunJournalFold,
   type RunOutcome,
   type WorkflowRunEvent,
 } from "./orchestration/run-events.ts";
