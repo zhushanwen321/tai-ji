@@ -107,7 +107,7 @@ export interface PiMainAgentSpawnOptions {
   noTools?: boolean
   /** 禁用所有 skill（--no-skills）。调用方同时需清空 skillPaths。 */
   noSkills?: boolean
-  /** 禁用 context files（AGENTS.md/CLAUDE.md 自动发现，--no-context-files）。 */
+  /** 禁用 context files（AGENTS.md 自动发现，--no-context-files）。 */
   noContextFiles?: boolean
   /** 覆盖思考级别（--thinking <level>；注意：非 --thinking-level，附录 A.4）。 */
   thinkingLevel?: ThinkingLevel | string

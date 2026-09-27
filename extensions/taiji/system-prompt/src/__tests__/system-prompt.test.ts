@@ -335,25 +335,25 @@ describe('-nc / --no-context-files 守卫（contextFilesDisabled）', () => {
 })
 
 describe('global 候选文件选择（readGlobalAgentsFile）', () => {
-  it('候选序优先：AGENTS.MD 与 CLAUDE.md 并存 → AGENTS.MD 胜（候选列表顺序的第一个存在者）', () => {
+  it('候选序优先：AGENTS.md 与 AGENTS.MD 并存 → AGENTS.md 胜（候选列表顺序的第一个存在者）', () => {
     setupFs({
-      globalEntries: ['AGENTS.MD', 'CLAUDE.md'],
-      globalFiles: { 'AGENTS.MD': 'FROM-AGENTS-UPPER', 'CLAUDE.md': 'FROM-CLAUDE' },
+      globalEntries: ['AGENTS.md', 'AGENTS.MD'],
+      globalFiles: { 'AGENTS.md': 'FROM-LOWER', 'AGENTS.MD': 'FROM-UPPER' },
     })
     const result = runHook('BASE-PROMPT')
-    expect(result!.systemPrompt).toContain('FROM-AGENTS-UPPER')
-    expect(result!.systemPrompt).not.toContain('FROM-CLAUDE')
-    expect(result!.systemPrompt).toContain(path.join(GLOBAL_DIR, 'AGENTS.MD'))
+    expect(result!.systemPrompt).toContain('FROM-LOWER')
+    expect(result!.systemPrompt).not.toContain('FROM-UPPER')
+    expect(result!.systemPrompt).toContain(path.join(GLOBAL_DIR, 'AGENTS.md'))
   })
 
-  it('首候选内容空白 → 跳过继续找下一候选（AGENTS.md 空白 + CLAUDE.md 有内容 → 注入 CLAUDE.md）', () => {
+  it('首候选内容空白 → 跳过继续找下一候选（AGENTS.md 空白 + AGENTS.MD 有内容 → 注入 AGENTS.MD）', () => {
     setupFs({
-      globalEntries: ['AGENTS.md', 'CLAUDE.md'],
-      globalFiles: { 'AGENTS.md': '   \n\t', 'CLAUDE.md': 'FROM-CLAUDE' },
+      globalEntries: ['AGENTS.md', 'AGENTS.MD'],
+      globalFiles: { 'AGENTS.md': '   \n\t', 'AGENTS.MD': 'FROM-UPPER' },
     })
     const result = runHook('BASE-PROMPT')
-    expect(result!.systemPrompt).toContain('FROM-CLAUDE')
-    expect(result!.systemPrompt).toContain(path.join(GLOBAL_DIR, 'CLAUDE.md'))
+    expect(result!.systemPrompt).toContain('FROM-UPPER')
+    expect(result!.systemPrompt).toContain(path.join(GLOBAL_DIR, 'AGENTS.MD'))
   })
 
   it('global 目录不存在（readdirSync throw）→ 降级 null：global 不注入、不抛错（capability 默认段仍在）', () => {

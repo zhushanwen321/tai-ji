@@ -1,6 +1,6 @@
 # Pi Extension 开发约定
 
-> 本文档整合自 taiji-pi-extensions 项目的 CLAUDE.md，收录 pi extension 开发的**强约束和关键约定**。
+> 本文档收录 pi extension 开发的**强约束和关键约定**。
 > 完整开发指南（规范红线 + 进阶模式范例）见 [development-guide.md](./development-guide.md)。
 > 日志现行口径（三层通道）见 [logging-conventions.md](./logging-conventions.md)——development-guide §10 的旧 console 口径已由其收敛。
 > TUI 渲染细节见 [tui-rendering-pitfalls.md](./tui-rendering-pitfalls.md)。

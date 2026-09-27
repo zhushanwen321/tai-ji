@@ -1,5 +1,5 @@
 ---
-description: "code-simplify 固化契约（pr-lifecycle simplify step 专用）。以 simplifyMode=apply 发起时覆盖 code-simplify 的确认断点，仅授权 A 档高置信项落地；report 模式确认断点完整保留。摘录条款均锚定源文件+节名。"
+description: "code-simplify 固化契约（pr-lifecycle simplify step 专用）。以 simplifyMode=apply 发起时取代 code-simplify 的人工确认环节，仅授权 A 档高置信项落地；report 模式人工确认环节完整保留。摘录条款均锚定源文件+节名。"
 name: simplify-apply
 tools: Read, Grep, Glob, Edit, Bash
 ---
@@ -14,7 +14,7 @@ tools: Read, Grep, Glob, Edit, Bash
 
 ## 覆盖声明（先读，冲突裁决依据）
 
-本 agent 由 pr-lifecycle workflow 以 `simplifyMode=apply` 发起，code-simplify skill 的「先报告、用户确认后改」确认断点**在本上下文视为已获用户授权**，授权范围**仅 A 档（行为不变）高置信项**；B 档（行为敏感）与低置信项**只产报告不落地**。
+本 agent 由 pr-lifecycle workflow 以 `simplifyMode=apply` 发起，code-simplify skill 的「先报告、用户确认后改」人工确认环节**在本上下文视为已获用户授权**，授权范围**仅 A 档（行为不变）高置信项**；B 档（行为敏感）与低置信项**只产报告不落地**。
 
 被覆盖条款的原文位置（仅此三条被覆盖，其余条款全文有效）：
 
@@ -75,7 +75,7 @@ code-simplify skill 的以下节发生变更后，**须核对本文件的引用�
 
 - `baseHash`：PR 基线 commit。范围命令**写死**为 `git diff <baseHash>...HEAD`（`<baseHash>` 以 task prompt 给出的实际值为准）。
 - `reportPath`：报告输出路径（runId 目录下 `simplify-report.md`，绝对路径）。
-- 模式：apply（默认，覆盖声明生效）或 report（确认断点完整保留，见下）。
+- 模式：apply（默认，覆盖声明生效）或 report（人工确认环节完整保留，见下）。
 
 ## 执行指令（apply 模式）
 
@@ -89,4 +89,4 @@ code-simplify skill 的以下节发生变更后，**须核对本文件的引用�
 
 ## 执行指令（report 模式）
 
-本 run 以 report 模式发起，**确认断点完整保留**——上节「覆盖声明」不适用，任何情况下不改代码、不 commit。按同一信号清单扫描，报告写到 `reportPath`（全部为提案，按「报告格式」含 A/B 档标注），返回 `{"applied": 0, "proposals": <提案数>}`。
+本 run 以 report 模式发起，**人工确认环节完整保留**——上节「覆盖声明」不适用，任何情况下不改代码、不 commit。按同一信号清单扫描，报告写到 `reportPath`（全部为提案，按「报告格式」含 A/B 档标注），返回 `{"applied": 0, "proposals": <提案数>}`。

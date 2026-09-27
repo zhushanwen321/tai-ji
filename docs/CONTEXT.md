@@ -148,7 +148,7 @@ pi 引擎单次工具调用的记录。是数据模型的最小单位（bash、r
 session 的 token 预算。由底层模型决定上限（如 200K tokens），composer 工具条的 `ContextCapacityPopover` 展示用量（hover 出容量 popover，session 通道订阅 `context.update`，`packages/renderer/src/components/panel/Composer.vue`）。Compaction 的触发条件就是 Context Window 接近满。
 
 ### Session Context
-session 的语义内容——对话历史、项目知识（CLAUDE.md 等）、skill/agent 注入的提示词。是 agent 能感知到的全部信息。Session Context 的 token 占用量受 Context Window 上限约束。
+session 的语义内容——对话历史、项目知识（AGENTS.md 等）、skill/agent 注入的提示词。是 agent 能感知到的全部信息。Session Context 的 token 占用量受 Context Window 上限约束。
 
 ### SystemNotice
 前端本地生成/派生的系统提示行，不出自 pi 的对话消息。渲染流转过程的元信息：压缩摘要（compactionSummary）、分支摘要（branchSummary）、pi 崩溃恢复提示条（RespawnNoticeBar 分支）、`@` 定向气泡（subagent directive）。不是 pi 消息的一部分，不参与 Context Window 计算。

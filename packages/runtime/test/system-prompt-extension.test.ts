@@ -234,7 +234,7 @@ describe('@zhushanwen/pi-system-prompt', () => {
     expect(handler({ systemPrompt: 'BASE' })).toBeUndefined()
   })
 
-  it('AGENTS.md 是目录（非文件）→ 跳过该候选，注入 CLAUDE.md', async () => {
+  it('AGENTS.md 是目录（非文件）→ 跳过该候选，不注入', async () => {
     const factory = await loadPlugin()
     writeConfig(dataDir, {
       version: 1,
@@ -242,13 +242,13 @@ describe('@zhushanwen/pi-system-prompt', () => {
       append: { enabled: false, prompt: '' },
       ...CAP_OFF,
     })
-    mkdirSync(join(agentsDir, 'AGENTS.md')) // 同名目录：existsSync 为真但 isFile 为假
-    const p = writeGlobalAgents('CLAUDE_RULES', 'CLAUDE.md')
+    // 同名目录：existsSync 为真但 isFile 为假 → 跳过。其余候选（AGENTS.MD）与本
+    // 目录在大小写不敏感文件系统（macOS 默认）上冲突，无法共存，故断言跳过后不注入；
+    // 「首候选不可用 → 落下一候选」的 fall-through 由扩展单测（内存 mock FS）覆盖。
+    mkdirSync(join(agentsDir, 'AGENTS.md'))
     const { handler } = installPlugin(factory)
 
-    expect(handler({ systemPrompt: 'BASE' })).toEqual({
-      systemPrompt: 'BASE' + globalSegment(p, 'CLAUDE_RULES'),
-    })
+    expect(handler({ systemPrompt: 'BASE' })).toBeUndefined()
   })
 
   it('AGENTS.MD（大写变体）被识别为全局指令文件', async () => {

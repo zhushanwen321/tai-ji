@@ -82,7 +82,7 @@ STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButto
 RE_STYLE_SELECTOR = re.compile(r'^[.\w\-]+[\s,]*\{')
 
 # [HISTORICAL] Vue <Transition> 类选择器（.xxx-enter-active / .xxx-leave-to 等）
-# 是项目明确的 escape hatch（CLAUDE.md design-system：Tailwind 无法表达
+# 是项目明确的 escape hatch（AGENTS.md 前端编码规范 #2：Tailwind 无法表达
 # enter-from/leave-to 同时变换的状态类）。检测到这类选择器时不算自定义样式。
 # 覆盖 enter/leave/appear 三组 × from/active/to 三阶段。命名见 Vue 官方文档
 # https://vuejs.org/guide/built-ins/transition.html#css-based-transitions

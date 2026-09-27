@@ -27,8 +27,8 @@
      infrastructure 级 mandatory，清单 SSOT = packages/shared/src/mandatory-extensions.json）
      注册 before_agent_start hook
   → 每轮读 <dataDir>/system-prompt.json（不缓存），append 段追加到 event.systemPrompt 末尾
-  → 同一 hook 还负责全局指令注入：~/.agents/AGENTS.md（候选 AGENTS.md / AGENTS.MD /
-     CLAUDE.md / CLAUDE.MD，精确大小写匹配）带标签头追加；pi 带 --no-context-files /
+  → 同一 hook 还负责全局指令注入：~/.agents/AGENTS.md（候选 AGENTS.md / AGENTS.MD，
+     精确大小写匹配）带标签头追加；pi 带 --no-context-files /
      -nc 启动时不注入（尊重用户 context files opt-out）
   → 注入顺序：base prompt → 全局指令 → append 配置（显式配置排最后）
   → 保存后【下一轮】即生效（hook 每轮读配置，热生效）

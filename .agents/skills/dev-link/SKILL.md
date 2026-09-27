@@ -65,7 +65,7 @@ bash .agents/skills/dev-link/link-list.sh
 
 ## 包名格式
 
-三种都支持：短名 `subagent-workflow` / pi-前缀 `pi-subagent-workflow` / npm 全名 `@zhushanwen/pi-subagent-workflow`。多包一次：`pi-link.sh goal todo ask-user`。
+三种都支持：短名 `subagent-workflow` / pi-前缀 `pi-subagent-workflow` / npm 全名 `@zhushanwen/pi-subagent-workflow`。一次装多个包：`pi-link.sh goal todo ask-user`。
 
 ## 共享映射（dev-link-lib.sh）
 

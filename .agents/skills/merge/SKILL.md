@@ -48,7 +48,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/init.sh <worktree-dir>
 
 > **执行时机**：阶段 0 之后、阶段 1 本地验证之前——先把分支整理成最终形态再验证，阶段 1 本地验证与阶段 2 PR CI 覆盖的都是整理后的代码。改写历史会使 PR CI 重新触发，阶段 2 等待的是新一轮 CI，时序自洽。
 
-**目标**：AI 单元工作流（dev-flow / cw 等）按单元逐笔提交，feature 分支上会积累大量过细 commit（单元笔、簿记/文档同步小笔、fixup/typo/文案笔）。本阶段把 `merge-base` 之后的 commit 重组为**逻辑批次级**序列，使 main 侧 `--no-ff` 保留的分支历史可读、可 bisect。commit 数量少或已符合粒度时输出「无需整理」直接放行，不强行合并。
+**目标**：AI 单元工作流（dev-flow / cw 等）按单元逐笔提交，feature 分支上会积累大量过细 commit（单元笔、流程自动生成/文档同步小笔、fixup/typo/文案笔）。本阶段把 `merge-base` 之后的 commit 重组为**逻辑批次级**序列，使 main 侧 `--no-ff` 保留的分支历史可读、可 bisect。commit 数量少或已符合粒度时输出「无需整理」直接放行，不强行合并。
 
 **硬约束 [MANDATORY]**：
 
@@ -89,7 +89,7 @@ git push github HEAD --force-with-lease
 
 **该合并（折入）：**
 - IF message 匹配 wip / fixup / oops / tmp / typo / lint fix / review feedback 类，且 diff 归属于区间内某笔逻辑单元 → 折入该笔
-- IF 簿记小笔（snapshot 重生成、lockfile、构建配置补依赖、registry 同步等 2-5 行笔）单独存在无可说明的价值，是上一笔代码变更的直接后果 → 折入引发它的那笔
+- IF 流程自动生成的小笔（snapshot 重生成、lockfile、构建配置补依赖、registry 同步等 2-5 行笔）单独存在无可说明的价值，是上一笔代码变更的直接后果 → 折入引发它的那笔
 - IF 文档同步小笔（设计文档 / 登记表随代码回写）→ 折入对应代码 commit（项目「同 commit 回写」纪律优先于业界默许）
 - IF 对本分支更早一笔的直接修正（补漏文件、review 修复）且无独立 revert 价值 → 折入
 - IF 相邻两笔同 type 同 scope、合并后 message 更清晰 → 合并为一笔
@@ -118,7 +118,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pre-merge-check.sh "$WS_RO
 
 **测试步骤 = unit 轨**（`TAIJI_SKIP_REAL_PI=1 pnpm test`，与 CI runtime job 同口径）。**merge 门禁不跑 e2e**——e2e / 真实进程 / 真实 LLM 用例只在开发阶段按改动面跑（清单由 tech-design 的 e2e 影响面评估 + dev-flow 验收计划表圈定），执行准则 SSOT = AGENTS.md「测试」节。GitHub CI 同样从不跑 e2e（`TAIJI_SKIP_REAL_PI=1` + 无凭证注入 + 无 darwin pi binary）。
 
-**[HISTORICAL] real-pi 失败归因纪律（2026-09-15 事故，禁止盲目重试）**：事故前 premerge 曾全量并发扫并跑了真实 LLM 等价性用例，`send-queue-e2e` 120s 事件超时——根因是跨包并发饱和 CPU 使真实轮次延迟越过预算，不是代码缺陷（junit 的 seen types 显示 LLM 在推进）。处置是结构性的：门禁只跑单测、e2e 移出 merge/PR；若开发期按改动面跑 e2e 失败，先读 `packages/runtime/test-results/vitest-junit.xml` 的 failure 详情（seen types 区分「LLM 在推进但慢」与「真死锁」），禁止不归因直接重试、禁止放宽断言或膨胀预算换绿灯。
+**[HISTORICAL] real-pi 失败归因纪律（2026-09-15 事故，禁止盲目重试）**：事故前 premerge 曾全量并发扫并跑了真实 LLM 等价性用例，`send-queue-e2e` 120s 事件超时——根因是跨包并发饱和 CPU 使真实轮次延迟越过预算，不是代码缺陷（junit 的 seen types 显示 LLM 在推进）。处置是结构性的：门禁只跑单测、e2e 移出 merge/PR；若开发期按改动面跑 e2e 失败，先读 `packages/runtime/test-results/vitest-junit.xml` 的 failure 详情（seen types 区分「LLM 在推进但慢」与「真死锁」），禁止不经归因就直接重试，禁止放宽断言或膨胀预算换绿灯。
 
 ℹ️ **pnpm workspace 单步安装**：项目使用 pnpm workspace（`packages/* + apps/*`），`pnpm install` 一次装完所有依赖，无需手动 cd 子目录。如果 pre-merge-check.sh 未自动处理依赖安装，需手动执行：
 
@@ -178,7 +178,7 @@ bash scripts/check-version-bump.sh
 - **Exit 0（通过）**：代码版本 == 最新正式 release，可以安全 bump
 
 > [HISTORICAL] **禁止同版本 re-upload**（2026-08 自动升级可靠性设计 m6）：GitHub release asset
-> 无世代 ID，同版本号重新上传会改变 asset sha256，破坏升级链路的 digest/sha256 信任锚
+> 无世代 ID，同版本号重新上传会改变 asset sha256，破坏升级链路以 digest/sha256 为依据的信任校验
 > （下载缓存与 E1 观测均按版本号键控）。版本校验通过只允许 bump 到新版本，发现产物
 > 缺陷一律 bump 新版本重发，不得删除重传同版本号 asset。
 - **Exit 1（失败）**：版本不匹配，或 pi 协议契约测试失败（W25 接线），会输出具体原因
@@ -210,7 +210,7 @@ cd $WS_ROOT/main && node scripts/select-affected-e2e.mjs --release
 
 ### 阶段 4: 版本 bump + 发布
 
-> [MANDATORY] **git 关键操作纪律（全流程适用，commit/tag/push 一律如此）**：单命令执行 + 输出重定向文件 + 显式核对退出码，**禁止接进任何管道链**——`| head` 会 SIGPIPE 中途杀 commit（hook 执行一半中断，看似已执行）；`| tail` 不产生 SIGPIPE 但管道退出码 = tail 的 0，hook 拒绝的非零退出码被 `&&` 当成功放行（2026-09-23 v0.10.3 发布期坏 npm tag 推上远端的根因，教训已二犯）。skill 内命令模板是必经上下文，不依赖 memory 召回。
+> [MANDATORY] **git 关键操作纪律（全流程适用，commit/tag/push 一律如此）**：单命令执行 + 输出重定向文件 + 显式核对退出码，**禁止接进任何管道链**——`| head` 会 SIGPIPE 中途杀 commit（hook 执行一半中断，看似已执行）；`| tail` 不产生 SIGPIPE 但管道退出码 = tail 的 0，hook 拒绝的非零退出码被 `&&` 当成功放行（2026-09-23 v0.10.3 发布期坏 npm tag 推上远端的根因，同类教训已发生两次）。skill 内命令模板随流程直接可查，不依赖 memory 召回。
 
 ```bash
 cd $WS_ROOT/main
@@ -284,7 +284,7 @@ bash scripts/check-version-changes.sh "${PR_MERGE}^1..${PR_MERGE}"
 - `NEEDS_VERSION=true|false`（false = 本次无源码改动，跳过 4N）
 - `CHANGED_PACKAGES`：已声明 changeset 的包 + 声明的 type（只显示不采纳）
 - `UNDECLARED_PACKAGES`：改了 src 但无 changeset（PR 漏声明警告）—— 非空则补写 `.changeset/<slug>.md` 后重跑
-- `ANCHOR_ONLY_PACKAGES`：仅 package.json dep 范围/锚点跟随（如 pi peer ^0.84.1→^0.84.4）、无 src 改动——**不是漏声明**；按对齐 patch 先例（79e16b5b0，pi 0.84.1 对齐发 18 个纯锚点 patch）纳入 4N.2 人工定 type（通常 patch），保持 npm 元数据与仓内一致
+- `ANCHOR_ONLY_PACKAGES`：仅 package.json 依赖版本范围跟随更新（如 pi peer ^0.84.1→^0.84.4）、无 src 改动——**不是漏声明**；按对齐 patch 先例（79e16b5b0，pi 0.84.1 对齐发 18 个纯版本范围 patch）纳入 4N.2 人工定 type（通常 patch），保持 npm 元数据与仓内一致
 - `DEPENDENTS_OF_CHANGED`：**传递闭包**，自己没改 src 但通过 workspace: 直接/间接引用了已 bump 包、须 patch 重发刷新 tarball 范围的包（标注层数与触发链路）
 - `LINKED_GROUPS_AFFECTED`：linked 组受影响参考（不强制对齐）
 
@@ -303,7 +303,7 @@ bash scripts/check-version-changes.sh "${PR_MERGE}^1..${PR_MERGE}"
 | patch | 纯问题修复 |
 
 **dep 传播（两条规则）**：
-- **规则一（机械，自动）**：`DEPENDENTS_OF_CHANGED` 的包由 apply-version.sh 自动 patch bump（刷新 tarball 里 workspace:* 解析后的范围，避免消费者 ERESOLVE 或被钉旧版本）
+- **规则一（机械，自动）**：`DEPENDENTS_OF_CHANGED` 的包由 apply-version.sh 自动 patch bump（刷新 tarball 里 workspace:* 解析后的范围，避免消费者 ERESOLVE 或被固定在旧版本）
 - **规则二（语义，人工）**：`CHANGED_PACKAGES` 里某包自身代码受 breaking 影响 → 在其 type 里直接体现（人工定 minor/major）
 - linked 组不强制版本对齐；fixed 组（当前空）若启用则整组同步（apply-version.sh 兜底）
 
@@ -483,7 +483,7 @@ cd $WS_ROOT/main && source ~/.zshrc >/dev/null 2>&1; GITCODE_REPO=qq_18433817/ta
   node scripts/gitcode-release-sync.mjs sync-from-github "v$(node -p "require('./package.json').version")"
 ```
 
-脚本输出「完成：N 个文件（新传 X，跳过 Y）」即成功；失败重跑只补缺失件。预期 405MB 级耗时约 1-3 分钟（3 路并发，单路 1.4-2.5MB/s）。上传完成后脚本自动做附件推后验证（2026-09-07 复盘补齐，与 6.5.3 的引用集验证同标准）：name 集合比对（缺失即 exit 非 0；GitCode 多出附件只 WARN——补齐语义不删人工补件）+ 逐件 Range 探测远端大小与本地比对（抓截断/同名旧件残留，走匿名直链 = 终端用户同一链路）。「附件镜像完成」同样是 exit 0 语义，无需手动逐件复核。
+脚本输出「完成：N 个文件（新传 X，跳过 Y）」即成功；失败重跑只补缺失件。预期 405MB 级耗时约 1-3 分钟（3 路并发，单路 1.4-2.5MB/s）。上传完成后脚本自动做附件推送后验证（2026-09-07 复盘补齐，与 6.5.3 的引用集验证同标准）：name 集合比对（缺失即 exit 非 0；GitCode 多出附件只 WARN——按补齐语义处理、不删人工补件）+ 逐件 Range 探测远端大小与本地比对（抓截断/同名旧件残留，走匿名直链 = 终端用户同一链路）。「附件镜像完成」同样是 exit 0 语义，无需手动逐件复核。
 
 #### 6.5.2 README 安装版本更新（中英双页 + 国内/国外双通道）
 
@@ -491,7 +491,7 @@ cd $WS_ROOT/main && source ~/.zshrc >/dev/null 2>&1; GITCODE_REPO=qq_18433817/ta
 cd $WS_ROOT/main && node .agents/skills/merge/scripts/update-readme-install.mjs "$(node -p "require('./package.json').version")"
 ```
 
-脚本只替换 README.md / README_EN.md 的 `<!-- INSTALL:BEGIN/END -->` 区块内版本号（区块含国内 GitCode / 国外 GitHub 双通道安装命令；文件名后缀安全——纯三段 semver 替换）。**人工过目** `git diff README.md README_EN.md` 后提交推送：
+脚本只替换 README.md / README_EN.md 的 `<!-- INSTALL:BEGIN/END -->` 区块内版本号（区块含国内 GitCode / 国外 GitHub 双通道安装命令；替换只动 semver 三段版本号，文件名其余部分不受影响）。**人工过目** `git diff README.md README_EN.md` 后提交推送：
 
 ```bash
 cd $WS_ROOT/main
@@ -509,13 +509,13 @@ cd $WS_ROOT/main && source ~/.zshrc >/dev/null 2>&1; \
   GITCODE_REPO=qq_18433817/tai-ji node scripts/gitcode-release-sync.mjs push-repo --ref-source github
 ```
 
-⚠️ **`--ref-source github` 本地必传**：本仓唯一 remote 是 `github`，不显式传 src 脚本无法确定推送源，会把过期分支状态推上 GitCode 造成 drift。脚本 push 前自动 `fetch <src> --prune` 刷新分支跟踪视图（防 GitHub 旁路变更——web 端合并/他人 push 后本地视图过期，推旧位置再被推后验证打回），保证 GitCode 与 GitHub 分支集严格一致（--force --prune 对齐）。首次全量约 2 分钟（pack ≈ 490MB），后续发布秒级增量。
+⚠️ **`--ref-source github` 本地必传**：本仓唯一 remote 是 `github`，不显式传 src 脚本无法确定推送源，会把过期分支状态推上 GitCode 造成分支漂移。脚本 push 前自动 `fetch <src> --prune` 刷新分支跟踪视图（防 GitHub 旁路变更——web 端合并/他人 push 后本地视图过期，推旧位置再被推送后验证打回），保证 GitCode 与 GitHub 分支集严格一致（--force --prune 对齐）。首次全量约 2 分钟（pack ≈ 490MB），后续发布秒级增量。
 
 ⚠️ **tags 与 HEAD 由脚本内部处理（勿手动换 refspec）**：tags 不推本地 `refs/tags/*`——本仓还会 fetch pi-mono upstream，同名 `v*` tag 空间互相污染（2026-09-07 实测本地 478 vs GitHub 191：285 个 pi 上游 tag 混入，另有 v0.3.15 这类 GitHub 侧重打后本地残留的过期旧位置 tag——普通 fetch 永不更新已有 tag），脚本会先 fetch 到 `refs/remotes/github-tags/*` 独立命名空间再从该处推送；分支 refspec 展开前脚本会先删 `github/HEAD` symref——否则会尝试在 GitCode 创建 `refs/heads/HEAD`（保留关键字），pre-receive hook 一票否决整个 push。推送完成后脚本自动逐条比对 GitCode 与 GitHub 的引用集，不一致即 exit 非 0，无需手动 ls-remote 复核。
 
 #### 6.5.4 验证（GitCode 匿名直链可达）
 
-数据正确性已由 6.5.1（附件 name 集合 + 逐件大小）与 6.5.3（分支+tags 引用集）的推后验证机器保证，本步只做一次终端用户视角的匿名下载链路烟测（302→CDN 链路可达性）：
+数据正确性已由 6.5.1（附件 name 集合 + 逐件大小）与 6.5.3（分支+tags 引用集）的推送后验证机器保证，本步只做一次终端用户视角的匿名下载链路冒烟测试（302→CDN 链路可达性）：
 
 ```bash
 curl -sL -o /dev/null -w '%{http_code}\n' -r 0-1048575 --max-time 60 \
@@ -576,7 +576,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/remove-worktree.sh <branch
 ### 2. 执行约束
 
 - 所有阶段脚本必须在 workspace root 或其子目录（非目标 worktree）内执行
-- 阶段 1 和阶段 6 的检查**零容忍**，所有错误必须正面修复
+- 阶段 1 和阶段 6 的检查**零容忍**，所有错误必须当场直接修复
 - bash timeout >= 1200s（Release CI 含 Electron build 可能耗时 10 分钟以上）
 
 ### 3. 故障恢复
@@ -589,13 +589,13 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/remove-worktree.sh <branch
 
 1. **事故**（发生了实质损害/风险的事项）：现象、根因、修复、防再犯措施，四要素齐备
 2. **流程偏离**（对 skill 流程的有意偏离）：偏离点、理由、补偿验证。经本次验证有效的偏离应回写本 skill 成为批准路径（如阶段 0.5 路线 B），否则下次执行者要么重复「偏离 + 补偿」要么走低效路线
-3. **遗留债务清单**：本次靠人工绕过/临时处置但未根修的工具缺陷与流程债——**逐条列出，注明跟进方式**。「零未决失败」只覆盖流程门禁语义；人工绕过的工具债不算闭环，必须在此节显式暴露
+3. **遗留债务清单**：本次靠人工绕过/临时处置但未从根源修复的工具缺陷与流程债——**逐条列出，注明跟进方式**。「零未决失败」只覆盖流程门禁语义；人工绕过的工具债不算闭环，必须在此节显式暴露
 
 ## [HISTORICAL] 禁止跳过检查
 
-所有 githooks 和自动化检查（lint、ruff、脚本检查、pre-commit hook、CI 检查等）报告的问题，**必须正面修复**。绝不允许通过 `SKIP_*` 环境变量、`--no-verify`、`eslint-disable`、`# noqa` 等方式绕过或静默。检查不通过 = 流程中止，唯一的出路是修复代码让检查通过。
+所有 githooks 和自动化检查（lint、ruff、脚本检查、pre-commit hook、CI 检查等）报告的问题，**必须当场直接修复**。绝不允许通过 `SKIP_*` 环境变量、`--no-verify`、`eslint-disable`、`# noqa` 等方式绕过或静默。检查不通过 = 流程中止，唯一的出路是修复代码让检查通过。
 
-此规则来源于多次事故：跳过检查掩盖了真实 bug，上线后才发现问题，修复成本远高于当时正面解决。
+此规则来源于多次事故：跳过检查掩盖了真实 bug，上线后才发现问题，修复成本远高于当时直接解决。
 
 ## [HISTORICAL] 阶段 7 后 bash 工具失效处理
 
@@ -614,7 +614,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/remove-worktree.sh <branch
 - 如果 bash 失效已发生，**不要再尝试调用 bash**——这只会循环报错
 - 此时不需要（也不可能）做 git status / ls / pwd 等确认；删除本身的成功（无论脚本 exit 0 还是 bash 后续失效）已经说明清理完成
 - 例外：如果脚本 **exit 非 0 且 bash 仍正常返回**（没出现工具层报废错误），说明删除没走完，按失败点分两类——**rm -rf 失败**：登记与分支均未动，目录可能残缺，排查文件锁/权限/挂载后重跑脚本，或执行脚本打印的单命令；**prune 失败**：目录已删、仅登记残留，`git worktree prune` 幂等补跑即可。两类都不得当成"删除已完成"
-- **[HISTORICAL] 半删态识别（旧版脚本或手工操作产生；现行脚本结构上不再产生）**：worktree 目录还在，但目录内一切 git 命令报 `fatal: not a git repository`，且 `.bare/worktrees/<name>/` 登记已消失——这正是 `git worktree remove` 内部「先删登记、后删目录」在目录删除失败时留下的形态（2026-09-10 v0.9.16 发布实测 `Directory not empty`）。恢复：从**兄弟 worktree**（不是 doomed 目录）执行单命令 `git -C <main-wt> merge-base --is-ancestor <feat-branch> <main> && rm -rf <feat 目录> && git -C <main-wt> worktree prune && git -C <main-wt> branch -D <feat-branch>`（is-ancestor 在链首，未合入即中止不删任何东西；rm -rf 在链尾，失败即停、剩余状态仍可诊断）。该命令删除会话 cwd 所在目录 → 必须作为最后一条 bash 命令，之后只用 read/write 类工具收尾
+- **[HISTORICAL] 半删态识别（旧版脚本或手工操作产生；现行脚本结构上不再产生）**：worktree 目录还在，但目录内一切 git 命令报 `fatal: not a git repository`，且 `.bare/worktrees/<name>/` 登记已消失——这正是 `git worktree remove` 内部「先删登记、后删目录」在目录删除失败时留下的形态（2026-09-10 v0.9.16 发布实测 `Directory not empty`）。恢复：从**兄弟 worktree**（不是待删除的目录本身）执行单命令 `git -C <main-wt> merge-base --is-ancestor <feat-branch> <main> && rm -rf <feat 目录> && git -C <main-wt> worktree prune && git -C <main-wt> branch -D <feat-branch>`（is-ancestor 在链首，未合入即中止不删任何东西；rm -rf 在链尾，失败即停、剩余状态仍可诊断）。该命令删除会话 cwd 所在目录 → 必须作为最后一条 bash 命令，之后只用 read/write 类工具收尾
 
 **反模式**：删除后为"确认"再跑 `git worktree list` / `ls <worktree-dir>` → bash ENOENT → 误判为"删除失败"或"流程出错"→ 尝试 `cd $WS_ROOT` 重试 → 可能进一步混乱。
 

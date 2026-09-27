@@ -15,7 +15,7 @@
  *      globalEffect=无 sid + 无 id 的 onGlobalError 兜底（阶段 B 合并，原默认路径
  *      特判删除）
  *
- * session 隔离规则不变（CLAUDE.md line 98）：session 级消息按 sessionId 路由到 session 通道，
+ * session 隔离规则不变（AGENTS.md 关键规则 #7）：session 级消息按 sessionId 路由到 session 通道，
  * 无 sessionId 走 global 通道（config.* 及 model.list 等广播）。两通道互不串扰。
  *
  * seq gap 检测（D7 id/seq 互斥；D1 后协议归 subscription-state）：msg.seq 是 server-push

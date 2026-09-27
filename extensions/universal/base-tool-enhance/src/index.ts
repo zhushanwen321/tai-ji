@@ -6,7 +6,10 @@
  * 轮询器单例任务表）、bash_output / bash_kill 工具、进程退出收殓、subagent 降级。
  * M3：pending-notifications 通知接入——load 时刷新轮询器通知通路的 pi 引用（D17
  * session 替换接管）+ 挂 exit 边沿通知回调（unregister emit + sendMessage steer）+
- * session_start 对账（appendEntry 权威路径兜底 pending 收尾）。
+ * session_start 对账（appendEntry 权威路径兜底 pending 收尾）+ 完成通知补投
+ * （bg-task-notify-durability：终态无痕迹无标记的任务下次激活合并补投 + 同步幂等标记）。
+ * 维护链双触发面：session_start 事件 + `__taiji_bg_reconcile__` 内部命令（taiji runtime
+ * 在 getCommands 时按节流补触发，覆盖「切走切回同进程重挂接、session_start 不重发」场景）。
  * 收殓下沉（u-bte-remove）：M5 孤儿收殓已移交 taiji runtime（background-task-
  * reaper 双触发面——session 销毁时 + 启动期兜底扫描，设计 file-lock-unification-
  * and-reaper-sink.md §3.2 D2），extension 不再做全局扫描/全局锁；session_start
@@ -16,6 +19,7 @@
 
 import type {
 	ExtensionAPI,
+	ExtensionCommandContext,
 	ExtensionContext,
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
@@ -52,23 +56,46 @@ export default function baseToolEnhanceExtension(pi: ExtensionAPI): void {
 	// unified-hooks 退役承接：工具报错审计（D11 落点）
 	setupToolErrorAudit(pi);
 	// pending 对账（M3）：任意 session 启动触发（startup/reload/new/resume/fork 全
-	// reason）。孤儿收殓已下沉 runtime（见文件头），本链无全局扫描
+	// reason）。孤儿收殓已下沉 runtime（见文件头），本链无全局扫描。
+	// handler 返回维护链 promise（补投 await sendMessage 使对账 async 化，
+	// bg-task-notify-durability U3）：pi runner emit await handler（runner.js:632），
+	// promise 由其消费不产生 unhandled rejection；错误在维护链内 async 捕获
 	pi.on("session_start", (event: SessionStartEvent, ctx: ExtensionContext) => {
-		runSessionStartMaintenance(pi, ctx, event.reason);
+		return runSessionStartMaintenance(pi, ctx, event.reason);
+	});
+	// 第二触发面（bg-task-notify-durability 补强）：桌面「切走会话再切回」是同进程重新
+	// 挂接——pi 进程存活、不重发 session_start（真机实证），挂在 session_start 上的
+	// 维护链在「投递失败但进程存活」场景（设计 G2 核心场景）永不触发。taiji runtime 在
+	// getCommands（切回后 renderer 主动拉取命令的必经查询）时经 client.prompt 发起本
+	// 命令（60s per-session 节流、fire-and-forget），handler 调同一维护函数（reason 传
+	// 'resume' 语义）。`/__` 双下划线前缀 = 内部命令（前端 internal-command-filter 过滤
+	// 不显示）；无待补任务时维护链三判据早退，零输出零 turn。
+	pi.registerCommand("__taiji_bg_reconcile__", {
+		description:
+			"Internal: rerun pending background-task reconcile + completion-notify redelivery (triggered by taiji runtime on session resume; session_start does not refire for same-process reattach)",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			return runSessionStartMaintenance(pi, ctx, "resume");
+		},
 	});
 }
 
 /**
- * session_start 维护链（仅剩 M3 对账——收殓下沉 runtime 后，u-bte-remove）。
+ * session_start 维护链（M3 对账 + 补投——收殓下沉 runtime 后，u-bte-remove）。
  *
- * 执行形态：同步直跑不 await——对账毫秒级（readRegistry + kill(pid,0) +
- * appendEntry），不构成 session 启动链延迟；错误吞掉记 warn（对账失败无害：僵尸
- * register 停留差集，下一 session_start 幂等重查）。
+ * 双入口共用本函数：① session_start 事件（reason 透传）；② `__taiji_bg_reconcile__`
+ * 内部命令（runtime 切回触发，reason 恒 'resume'）。维护逻辑与幂等性对两入口完全一致。
+ *
+ * 执行形态：async（补投 await sendMessage，bg-task-notify-durability 设计决策 1
+ * 规格①；实装下 pi.sendMessage 恒同步返回，见 pending-reconcile.ts ReconcilePi
+ * 注释的适配登记）。错误吞掉记 warn（对账/补投失败无害：僵尸 register 停留差集、
+ * 待补任务三判据仍命中，下一 session_start 幂等重查）——async 捕获防 unhandled
+ * rejection 复刻已否决的 fire-and-forget 失效形态。
  *
  * 频率语义（D3 守卫粒度）：对账是 session 级操作（读当前 session 的 pi entries +
  * 当前 session 的 registry，appendEntry 幂等），属豁免类不挂进程级 once flag，
  * 每 session_start 都执行。桌面端每次激活是 startup+resume 双派发（factory 二调
- * 下 handler 还会累积），对账多次执行幂等无害；反之若挂进程级 flag，startup 消费
+ * 下 handler 还会累积），对账多次执行幂等无害（补投的重复穿透由 pending-reconcile
+ * 的 in-flight 单飞守卫 + 同步补投标记收敛）；反之若挂进程级 flag，startup 消费
  * flag 后目标 session 的对账将永远被跳过（M3 对账在主链路被禁用，此处是唯一执行点）。
  *
  * 入口无条件 debug 日志（S6 观测通道）：每次 handler 派发都打，含 reason——
@@ -77,17 +104,17 @@ export default function baseToolEnhanceExtension(pi: ExtensionAPI): void {
  * 不再含全局扫描/全局锁，原 reapSkipped 字段随 reap 调用一并移除——对应 S6
  * 场景「批 2 后 reap 类操作不再执行」。
  */
-function runSessionStartMaintenance(
+async function runSessionStartMaintenance(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	reason: SessionStartEvent["reason"],
-): void {
+): Promise<void> {
 	logger.debug("session_start maintenance dispatch", {
 		detail: { reason },
 	});
 	try {
 		const sessionId = ctx.sessionManager.getSessionId();
-		reconcilePendingEntries(pi, getAgentDir(), sessionId, ctx.sessionManager.getEntries());
+		await reconcilePendingEntries(pi, getAgentDir(), sessionId, ctx.sessionManager.getEntries());
 	} catch (err) {
 		// 对账失败无害：僵尸 register 停留差集，下一 session_start 幂等重查
 		logger.warn("session_start pending reconcile failed; zombies retried next session start", {
