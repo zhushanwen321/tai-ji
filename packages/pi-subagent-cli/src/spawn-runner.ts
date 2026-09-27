@@ -171,6 +171,12 @@ export interface SpawnRunParams {
 export interface SpawnRunResult extends Omit<CollectedOutcome, "sessionId"> {
   /** 会话头身份（header / get_state 握手回填；全 miss 时 undefined）。 */
   sessionId: string | undefined;
+  /**
+   * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。语义与
+   * 上报判据见 AgentOutcome.stderrTeePath（SDK contract-types——本字段是其引擎侧
+   * 装配源，经 pi-engine toOutcome 透传上协议）。
+   */
+  stderrTeePath?: string;
 }
 
 /** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + relay 归属键重写）。 */
@@ -205,8 +211,26 @@ function buildChildEnv(params: SpawnRunParams): Record<string, string> {
  * 孙进程 schema 强制的唯一必备扩展包（P-C5 白名单起步组成）。与宿主注入侧
  * （subagent-workflow pi-host `GRANDCHILD_EXTENSION_PKG_SEGMENTS`）是同一契约的
  * 两端：宿主决定注入什么，本断言验证引擎确实收到——扩白名单时两处同批扩。
+ *
+ * 本常量 = npm 布局包名（错误文案/恢复指引用）；匹配判据 =
+ * {@link SCHEMA_ENFORCEMENT_EXTENSION_SEGS}（与 pi-host 段集同批维护）。
  */
 const SCHEMA_ENFORCEMENT_EXTENSION_PKG = "@zhushanwen/pi-structured-output";
+
+/**
+ * 断言②匹配段集（契约两端与 pi-host `GRANDCHILD_EXTENSION_PKG_SEGMENTS` 同判据，
+ * 扩白名单时两处同批扩）。两形态别名：
+ *   - `@zhushanwen/pi-structured-output`：npm staged 布局
+ *     `.../node_modules/@zhushanwen/pi-structured-output[/index.js]`。
+ *   - `universal/structured-output`：dev 源码布局 `.../extensions/universal/structured-output`
+ *     （dev 下 taiji 宿主注入 ctx.extensionPaths 即源码目录——只认 npm 布局时
+ *     dev 真机恒判「未武装」秒级 fail-fast，schema 拦截链不可用）。
+ *     选型两段连续匹配（分组名 + 包目录名）防尾段同名误伤，登记见 pi-host 同名常量。
+ */
+const SCHEMA_ENFORCEMENT_EXTENSION_SEGS: readonly (readonly string[])[] = [
+  ["@zhushanwen", "pi-structured-output"],
+  ["universal", "structured-output"],
+];
 
 /** 武装断言的判定输入（纯函数面，测试直构）。 */
 export interface SchemaArmingInput {
@@ -270,15 +294,20 @@ export function assertSchemaEnforcementArmed(input: SchemaArmingInput): void {
 }
 
 /** argv 是否含指向 structured-output 包的 `--extension` 对：路径按 `/`|`\` 分段后
- * 做 `<scope>/<pkg>` 连续段匹配（目录形态 `.../@zhushanwen/pi-structured-output` 与
- * 入口文件形态 `.../index.js` 都命中；段必须精确，前缀相似目录不误判）。与 pi-host
- * 注入侧 isGrandchildExtensionPath 同判据（契约两端）。 */
+ * 对 {@link SCHEMA_ENFORCEMENT_EXTENSION_SEGS} 任一段集做连续段匹配（npm staged 与
+ * dev 源码两布局、目录/入口文件两形态都命中；段必须精确，前缀相似目录不误判）。
+ * 与 pi-host 注入侧 isGrandchildExtensionPath 同判据（契约两端）。 */
 function hasSchemaEnforcementExtension(spawnArgs: readonly string[]): boolean {
-  const wanted = SCHEMA_ENFORCEMENT_EXTENSION_PKG.split("/");
   for (let i = 0; i + 1 < spawnArgs.length; i++) {
     if (spawnArgs[i] !== "--extension") continue;
     const segs = (spawnArgs[i + 1] ?? "").split(/[\\/]/).filter((s) => s.length > 0);
-    if (segs.some((_, j) => wanted.every((w, k) => segs[j + k] === w))) return true;
+    if (
+      SCHEMA_ENFORCEMENT_EXTENSION_SEGS.some((wanted) =>
+        segs.some((_, j) => wanted.every((w, k) => segs[j + k] === w)),
+      )
+    ) {
+      return true;
+    }
   }
   return false;
 }
@@ -295,8 +324,12 @@ function hasSchemaEnforcementExtension(spawnArgs: readonly string[]): boolean {
  * stderr tee（W11）：实例维度路径 + 懒打开 + 尺寸轮转（超 TAIJI_LOG_MAX_BYTES rename
  * 副本重开）+ 三判据过期清理（同前缀 + pid 已死 + mtime 过期）。失败面全部静默
  * 降级（取证面不拖垮任务主通道——调用方对无 tee 形态 resume 排空防背压）。
+ *
+ * 返回 path（[D5 诊断引用落账] 失败时随终态应答上报宿主的取证文件指针）——路径在
+ * tee 创建时即确定（stderrLogPathFor 纯派生），与懒打开时机无关：零字节 tee（子进程
+ * 未写 stderr）也是合法诊断引用（「无 stderr 产出」本身是证据）。
  */
-function createStderrTee(child: ChildProcess): { close(): void } | undefined {
+function createStderrTee(child: ChildProcess): { path: string; close(): void } | undefined {
   if (child.stderr === null) return undefined;
   let dataDir: string;
   try {
@@ -331,6 +364,7 @@ function createStderrTee(child: ChildProcess): { close(): void } | undefined {
     }
   });
   return {
+    path: logPath,
     close() {
       try {
         stream?.end();
@@ -475,6 +509,8 @@ export async function runSpawnOnce(
     // 无消费面（pipe 出来即弃，写满会背压卡死子进程）——tee 到实例维度文件
     // <engineDataDir>/logs/pi-task-stderr-<pid>.log（懒打开 + 尺寸轮转 + 三判据
     // 过期清理）；dataDir 不可解析（宿主未注入且无 fallback）时仅排空防背压。
+    // [D5 诊断引用落账] tee 路径捕获：失败时随终态应答上报宿主（见 collectOutcome
+    // 消费点）。
     const stderrTee = createStderrTee(child);
     if (stderrTee === undefined && child.stderr !== null) {
       child.stderr.resume();
@@ -551,7 +587,16 @@ export async function runSpawnOnce(
       // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响守卫期待。
       ...(params.schema !== undefined ? { schemaExpected: true } : {}),
     });
-    return { ...outcome, sessionId: identity.sessionId };
+    // [D5 诊断引用落账] 失败时随终态应答上报 stderr tee 路径（引擎应答 failed /
+    // 进程异常退出路径的共同汇聚点 = outcome.error 非空；成功不报——诊断引用只在
+    // 失败语义下有意义）。tee 缺席（无 stderr / dataDir 不可解析 / pid 缺失）= 字段
+    // 缺省，宿主按「无取证指针」消费。
+    const stderrTeePath = outcome.error !== undefined ? stderrTee?.path : undefined;
+    return {
+      ...outcome,
+      ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
+      sessionId: identity.sessionId,
+    };
   } finally {
     if (tempFile !== undefined) await cleanupTempPrompt(tempFile);
   }

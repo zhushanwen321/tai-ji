@@ -226,28 +226,28 @@ export interface WorkflowListFormatOptions extends ListFormatOptions {
  * invalid 具名上报行（P5 D4-3，损坏文件不静默）。
  */
 export function formatWorkflowList(
-	workflows: WorkflowEntry[],
-	opts: WorkflowListFormatOptions,
+  workflows: WorkflowEntry[],
+  opts: WorkflowListFormatOptions,
 ): string {
-	if (workflows.length === 0) return "";
+  if (workflows.length === 0) return "";
 
-	const sorted = sortByCodepoint(workflows, (w) => w.name);
-	const { kept, truncated } = applyEntryBudget(sorted, opts.maxEntries);
+  const sorted = sortByCodepoint(workflows, (w) => w.name);
+  const { kept, truncated } = applyEntryBudget(sorted, opts.maxEntries);
 
-	const items = kept.map((wf) =>
-		`  <workflow><name>${escapeXml(wf.name)}</name><description>${escapeXml(wf.description)}</description><location>${escapeXml(wf.path)}</location></workflow>`,
-	);
-	if (truncated && opts.truncationNotice !== undefined) {
-		items.push(opts.truncationNotice);
-	}
-	if (opts.invalids !== undefined && opts.invalids.length > 0) {
-		items.push(...invalidResourceLines(opts.invalids));
-	}
-	return renderXmlSection({
-		tag: "available_workflows",
-		guide: opts.guide,
-		items,
-	});
+  const items = kept.map((wf) =>
+    `  <workflow><name>${escapeXml(wf.name)}</name><description>${escapeXml(wf.description)}</description><location>${escapeXml(wf.path)}</location></workflow>`,
+  );
+  if (truncated && opts.truncationNotice !== undefined) {
+    items.push(opts.truncationNotice);
+  }
+  if (opts.invalids !== undefined && opts.invalids.length > 0) {
+    items.push(...invalidResourceLines(opts.invalids));
+  }
+  return renderXmlSection({
+    tag: "available_workflows",
+    guide: opts.guide,
+    items,
+  });
 }
 
 /** 码点序比较（显式契约，禁 localeCompare——同 sortByCodepoint 注释） */
@@ -272,17 +272,17 @@ function compareByCodepoint(a: string, b: string): number {
  *   （约定根恒在生产不可达，纯防御分支——invalid 同随不渲染）。
  */
 export function formatEmptyResourceList(
-	kind: "agents" | "workflows",
-	roots: string[],
-	invalids: readonly InvalidResource[] = [],
+  kind: "agents" | "workflows",
+  roots: string[],
+  invalids: readonly InvalidResource[] = [],
 ): string {
-	const unique = [...new Set(roots)];
-	if (unique.length === 0) return "";
-	const tag = kind === "agents" ? "available_subagents" : "available_workflows";
-	// 骨架手写不走 renderXmlSection：其 guide 必填，而空态段无引导语——
-	// agent 只需知道「没有 + 去哪找」，guide 行是条目段的消费语义
-	const line = `  (none discovered; roots: ${unique.map(escapeXml).join(", ")})`;
-	return [`\n\n<${tag}>`, line, ...invalidResourceLines(invalids), `</${tag}>`].join("\n");
+  const unique = [...new Set(roots)];
+  if (unique.length === 0) return "";
+  const tag = kind === "agents" ? "available_subagents" : "available_workflows";
+  // 骨架手写不走 renderXmlSection：其 guide 必填，而空态段无引导语——
+  // agent 只需知道「没有 + 去哪找」，guide 行是条目段的消费语义
+  const line = `  (none discovered; roots: ${unique.map(escapeXml).join(", ")})`;
+  return [`\n\n<${tag}>`, line, ...invalidResourceLines(invalids), `</${tag}>`].join("\n");
 }
 
 /**

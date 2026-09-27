@@ -41,7 +41,7 @@ import { createEmptyResultStrikeGuard, createPartitionedRecords } from '../lib/p
 
 // ── [P3/D6] health / progress 投影消费（纯函数，drawer WorkflowTab 与托盘面板共用）──
 
-/** 停滞阈值换算因子（15 分钟；具名消 magic number，no-magic-numbers 先例同 jsonl-run-store TTL_DAYS）。 */
+/** 停滞阈值换算因子（15 分钟；具名消 magic number——no-magic-numbers 对声明器父节点的单字面量形态不报，乘法表达式才会触发）。 */
 const STALL_THRESHOLD_MINUTES = 15
 const MINUTES_PER_HOUR = 60
 const MS_PER_SECOND = 1000

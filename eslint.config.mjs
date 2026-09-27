@@ -540,11 +540,21 @@ export default [
   {
     files: [
       'packages/subagent-core/src/execution/persistence/execution-record.ts',
-      'packages/subagent-core/src/orchestration/worker-message-pump.ts',
       'packages/subagent-core/src/shared/resource-discovery.ts',
     ],
     rules: {
       'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [workflow 状态机接线 2026-09-22] worker-message-pump.ts 单独提额 1100：P1b-1 起
+  // 该文件承载 run 状态机投递入口（dispatchRunTrigger/journal 落账/终局投影），A2
+  // 修复轮补 errorCode 构造与 ask-retrying 帧后折算 1066——拆分属独立重构任务
+  // （候选轴：run 事件投递族 / ask 编排族），按「微超即提额，保留软上限告警」
+  // 先例（engine-client 650 / event-interpreter 700 同型）过渡。
+  {
+    files: ['packages/subagent-core/src/orchestration/worker-message-pump.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 1100, skipBlankLines: true, skipComments: true }],
     },
   },
   // [H4 record 持久化收敛] record-store 三轴拆分（2026-09-13 落地）：store 保留容器 +

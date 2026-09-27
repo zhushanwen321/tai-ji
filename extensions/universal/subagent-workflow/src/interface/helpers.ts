@@ -117,10 +117,13 @@ function mapDoneReasonToOutcome(reason: DoneReason): RunOutcome {
 
 /**
  * [D7] 失败终局的结构化码提取：最后一个失败 call 的 failureKind
- * （AgentResult.failureKind，ask 粒度结构化词表）。run 级死法（budget/time 耗尽、
- * 脚本异常）无 ask 级失败帧时缺省——run 级结构化 errorCode 的生产落点待后继单元
- * （core dispatchFinalRunSettle 注释同源现状），载荷 errorCode 缺省合法（reason
- * 与 trace 承载诊断）。
+ * （AgentResult.failureKind，ask 级结构化词表）。与 core 的 run 级 errorCode 分工：
+ * journal/manifest 的 run-settled errorCode 由 core dispatchFinalRunSettle 的
+ * finalRunErrorCodeOf 单点生产（含 engine 协议码前缀提取，S2 死亡可诊断），本函数
+ * 只服务终局通知载荷（取 ask 级 failureKind 单源）；core 不能 import extension
+ * （workflow-state-root.ts 头注同款分层约束），通知码与 journal 码的词表同源性由
+ * 双侧消费 RunErrorCode/AgentFailureKind 词表保证。无 ask 级失败帧时缺省，载荷
+ * errorCode 缺省合法（reason 与 trace 承载诊断）。
  */
 function extractFailureErrorCode(run: WorkflowRun): string | undefined {
   let code: string | undefined;

@@ -7,11 +7,11 @@
 //   - buildPiSubagentSpawnArgs ← pi-subagent-cli spawn-args.ts buildSpawnArgs
 //
 // 为什么是两个模板入口而非单构造器：两侧 argv 的 flag 编排顺序不同（主 agent 的
-// skill/extension 在 tools 段之前、基座 flag 前置；subagent 的 skill 在 tools 段之后、
-// mirror flag 段末尾）。pi 的 commander 解析对顺序无语义，但本包的迁移契约是「行为
-// 等价提取」（两侧典型参数集的 argv 与切换前逐字节一致，快照测试锚定），统一顺序
-// 属重写而非提取。共享的是分段拼装原语（session 定位 / thinking 传递 / tools 互斥 /
-// mirror 规则），顺序编排保留两模板各自的现状。
+// skill/extension 在 tools 段之前、基座 flag 前置；subagent 的 skill 在 tools 段之后）。
+// pi 的 commander 解析对顺序无语义，但本包的迁移契约是「行为等价提取」（两侧典型
+// 参数集的 argv 与切换前逐字节一致，快照测试锚定），统一顺序属重写而非提取。共享的
+// 是分段拼装原语（session 定位 / thinking 传递 / tools 互斥），顺序编排保留两模板
+// 各自的现状。
 //
 // 参数化差异点（设计 §3.3.2 spawn-args 行）：
 //   - session 定位：主 agent = none（pi 默认派生 agentDir/sessions）；subagent =
@@ -19,8 +19,6 @@
 //   - thinking 传递：主 agent = flag（--thinking <level>）；subagent = model 后缀
 //     （--model provider/id:level）
 //   - extensions/skills 注入：两模板共用 appendSkillArgs / appendExtensionArgs 原语
-//   - mirror 规则：subagent 镜像主进程 argv 的 flag 段（MirrorFlags；解析器在
-//     pi-subagent-cli argv-mirror.ts，本包只消费解析结果）
 
 import type { ThinkingLevel } from './types.ts'
 
@@ -180,18 +178,6 @@ export function buildPiMainAgentArgs(options: PiMainAgentSpawnOptions, model: st
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 镜像 flag 集合（subagent 侧从主进程 argv 解析出的可透传 flag）。
- * 解析器（mirrorMainProcessFlags）在 pi-subagent-cli argv-mirror.ts；本类型为
- * 两侧结构同形的消费面（TS 结构化类型下互不通 import 也可传入）。
- */
-export interface PiMirrorFlags {
-  noExtensions: boolean
-  approve: boolean
-  extensionPaths: string[]
-  noContextFiles: boolean
-}
-
-/**
  * spawn 侧已裁决的模型身份：--model 值恒为 `${provider}/${id}`（+ 可选白名单
  * `:level` 后缀）。解析自协议 ctx.model 的 canonical "provider/id" 词形。
  */
@@ -219,8 +205,6 @@ export interface PiSubagentSpawnParams {
   sessionFile?: string
   forkSource: string | undefined
   skillPaths: string[] | undefined
-  /** 镜像自主进程 argv 的 flag（--no-extensions/--approve/--extension/--no-context-files）。 */
-  mirrorFlags?: PiMirrorFlags
 }
 
 /**
@@ -252,12 +236,5 @@ export function buildPiSubagentSpawnArgs(params: PiSubagentSpawnParams): string[
     args.push('--fork', params.forkSource)
   }
   appendSkillArgs(args, params.skillPaths)
-  const mf = params.mirrorFlags
-  if (mf) {
-    if (mf.noExtensions) args.push('--no-extensions')
-    if (mf.approve) args.push('--approve')
-    if (mf.noContextFiles) args.push('--no-context-files')
-    appendExtensionArgs(args, mf.extensionPaths)
-  }
   return args
 }

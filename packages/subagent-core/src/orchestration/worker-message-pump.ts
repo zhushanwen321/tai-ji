@@ -51,6 +51,7 @@ import type { AgentRunner, LifecycleDeps, WorkerHandlers } from "./models/ports.
 // 为唯一权威实装，本文件是其编排侧唯一消费入口——journal 单写者纪律的物理载体）。
 import {
   createRunEventJournal,
+  finalRunErrorCodeOf,
   IllegalTransitionError,
   INITIAL_RUN_STATE,
   RUN_EVENT_TYPES,
@@ -67,7 +68,12 @@ import {
 import { RunRuntime } from "./models/run-runtime.ts";
 import type { RunSpec } from "./models/run-spec.ts";
 import type { WorkerLogEntry } from "./models/types.ts";
-import type { AgentCallOpts, AgentResult, DoneReason, ExecutionTraceNode } from "./models/types.ts";
+import type {
+  AgentCallOpts,
+  AgentResult,
+  DoneReason,
+  ExecutionTraceNode,
+} from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 // [P1b-2] manifest-write 输出动作的写入面（D5 终局投影）：manifest 落
 // <workflow-state>/<runId>.json、.state 收条落 <runId>.jsonl.state（state-marker
@@ -395,8 +401,10 @@ export async function finalizeRun(
 // - manifest-write → persistTerminalProjection（[P1b-2] 实装）：manifest/.state 落
 //   outcome/errorCode（run 域）；record 域既有写入面 = settleWorkflowRecord（settle
 //   链收口，record 的 outcome 字段接线归后继批次）；
-// - notify / registry-project / kill-run-topology / journal-cleanup-eligible → 后继
-//   单元消费（P4/Q2/Q3），本批执行点预留（无操作）。
+// - 其余输出动作 = 声明性语义映射（执行体各居其位，不在本段）：notify =
+//   finalizeRun 既有 onRunDone 链、registry-project = run-registry 投影侧、
+//   kill-run-topology = remote-engine D9-2、journal-cleanup-eligible = prune 资格
+//   自然兑现。
 //
 // 活体态：liveRunStates（模块级 Map）是本进程内的状态缓存，miss 时 fold journal
 // （scan + 逐事件 transition 不传 ctx——run-events.ts fold 契约）。terminal 后删除
@@ -568,6 +576,8 @@ async function appendTransition(
  * errorCode 取自 run-settled 事件载荷（失败终局的结构化码）；cancel-requested
  * 合成路径无结构化码（缺省）；abandon-elapsed 行的 interrupted_abandoned 由 Q2
  * 注册表单元附着（run-events.ts 转移表注释的词表边界）。
+ * [D5 诊断引用落账] stderrTeePath（失败终局）取自事件 journal 最后一帧带该字段的
+ * ask-settled（lastStderrTeePathFromJournal——事件流投影，见其注释）。
  *
  * 目录解析复用 journal 同源（resolveRunEventJournal——生产推导
  * resolvePiWorkflowStateDir，测试经 setRunEventJournalDirForTest 注入一次覆盖
@@ -605,6 +615,9 @@ async function persistTerminalProjection(
   }
   const errorCode: RunErrorCode | undefined =
     trigger.type === "run-settled" ? trigger.errorCode : undefined;
+  // [D5 诊断引用落账] 失败终局才投影取证指针（成功/cancelled 不写——字段语义与
+  // AskSettledEvent.stderrTeePath 同一失败伴随纪律）。
+  const stderrTeePath = outcome === "failed" ? await lastStderrTeePathFromJournal(run.runId) : undefined;
   const settledAt = Date.now();
   try {
     await writeRunTerminalManifest(dir, {
@@ -612,6 +625,7 @@ async function persistTerminalProjection(
       workflowName: run.spec.scriptName,
       outcome,
       ...(errorCode !== undefined ? { errorCode } : {}),
+      ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
       settledAt,
     });
   } catch (err) {
@@ -629,6 +643,36 @@ async function persistTerminalProjection(
     runEventLogger.error(
       `run terminal .state projection not persisted (runId=${run.runId}) — prune eligibility unaffected (manifest is the single-source anchor)`,
     );
+  }
+}
+
+/**
+ * [D5 诊断引用落账] manifest 终局诊断引用（stderrTeePath）的取值源：事件 journal
+ * 中最后一帧携带 stderrTeePath 的 ask-settled（事件流投影——D6「权威在事件流」
+ * 同款推导纪律：ask 级取证指针已随 ask-settled 落账（dispatchAskSettled 填充），
+ * 终局投影从事件流读回，不引入第二写点、不扩 run-settled 载荷）。journal 读取
+ * 失败（IO 异常）降级为 undefined 并 error 留痕——取证引用缺失不阻断终局投影
+ * （manifest 的 outcome/errorCode 权威面独立于本字段）。多 ask run 下的取值是
+ * 「最后一帧带路径」的时序近似而非归因权威：脚本吞掉早先 ask 失败后自身错误
+ * 终局时，本字段可能指向与终局无关的 ask 的 tee（结构性精确不可得——run-settled
+ * 载荷无 ask 关联键，词表边界见 D5 表）；单 ask 失败（主流场景）精确。
+ */
+async function lastStderrTeePathFromJournal(runId: string): Promise<string | undefined> {
+  try {
+    const { journal } = resolveRunEventJournal();
+    const events = await journal.scan(runId);
+    for (let i = events.length - 1; i >= 0; i--) {
+      const event = events[i];
+      if (event.type === "ask-settled" && event.stderrTeePath !== undefined) {
+        return event.stderrTeePath;
+      }
+    }
+    return undefined;
+  } catch (err) {
+    runEventLogger.error(
+      `run terminal manifest stderrTeePath derivation failed (runId=${runId}): ${toErrorMessage(err)}`,
+    );
+    return undefined;
   }
 }
 
@@ -694,10 +738,12 @@ export function dispatchRunArmedReceipt(runId: string, frame: unknown): void {
 /**
  * `run-created` 正点发射（journal 首帧，Q2 接线后的终态；P1b-1 的 created 引导
  * 补投分支已随正点接线删除——正点先落则后续触发 fold 出 dispatched，created 态
- * 构造性不可达，无双帧）。生产调用点唯一 = lifecycle.runWorkflow 宿主派发点
- * （创建期校验通过 + run 装配完成之后）；载荷 runId/scriptName/args/model 全部
- * 同源自 run.spec。重复调用 = dispatched × run-created 表外转移 fail-fast
- * （IllegalTransitionError），构造性排除双帧。
+ * 构造性不可达，无双帧）。生产调用点唯一 = lifecycle.runWorkflow 宿主派发点；
+ * 入队先于 worker 启动（enqueueRunDispatch 同步入队 + 队列执行序 = 入队序——
+ * worker 首个 agent() 的 ask 帧必然排在 created 之后，竞态丢帧结构性消除），
+ * 落账完成的 await 由调用方持有（「runWorkflow 返回 ⟹ 投影可查」）。载荷
+ * runId/scriptName/args/model 全部同源自 run.spec。重复调用 = dispatched ×
+ * run-created 表外转移 fail-fast（IllegalTransitionError），构造性排除双帧。
  */
 export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> {
   return dispatchRunTrigger(run, {
@@ -744,19 +790,24 @@ export function dispatchAskDispatched(run: WorkflowRun, callId: number, agentNam
 }
 
 /** `ask-settled` 落账（引擎终态应答：call.result；attempt = call.attempts 终局尝试
- *  序号；signal abort = ask 粒度 cancelled——run 中止连带在途 ask 终止，D5 词表）。 */
+ *  序号；signal abort = ask 粒度 cancelled——run 中止连带在途 ask 终止，D5 词表）。
+ *  [D5 诊断引用落账] 失败时从 result.stderrTeePath 填充取证文件指针（产出链 =
+ *  引擎终态应答 AgentOutcome.stderrTeePath → outcomeToWorkflowResult → call.result，
+ *  上报判据见 SDK AgentOutcome.stderrTeePath 注释；成功/cancelled 不带）。 */
 export function dispatchAskSettled(run: WorkflowRun, call: AgentCall, aborted: boolean): void {
   const result = call.result;
   if (!result) return; // AgentCall 状态机前置保证 done ⟹ result；防御性静默
   const outcome: RunOutcome = aborted ? "cancelled" : result.error === undefined ? "completed" : "failed";
   const errorCode: RunErrorCode | undefined =
     outcome === "failed" ? (result.failureKind ?? "unknown") : undefined;
+  const stderrTeePath = outcome === "failed" ? result.stderrTeePath : undefined;
   void dispatchRunTrigger(run, {
     type: "ask-settled",
     taskIndex: call.id,
     attempt: call.attempts,
     outcome,
     ...(errorCode !== undefined ? { errorCode } : {}),
+    ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
     durationMs: result.durationMs ?? 0,
     ts: Date.now(),
   }).catch((err: unknown) => reportDispatchFailure(run.runId, err));
@@ -777,11 +828,56 @@ export function dispatchAskSettledFailed(run: WorkflowRun, callId: number): void
   }).catch((err: unknown) => reportDispatchFailure(run.runId, err));
 }
 
+/** `ask-retrying` 落账（D5 载荷表 ask-retrying 行；重试轨迹从脚本内部状态变为
+ *  journal 事件——重试不再能掩盖事故）。attempt = 刚失败的尝试序号（退避后序号
+ *  +1 再执行）；backoffMs = 实测退避时长（前次失败 result resolve → 重试尝试
+ *  开始的墙钟差，值由 executeAgentCall 的 BACKOFF_* 常数决定）；reason = 失败
+ *  分类或错误文案摘要。投递点裁决（实施期登记）：编排层 runner 包装观测点
+ *  （dispatchAgentCall 的重试尝试开始处），非 executeAgentCall 内部回调——
+ *  后者是 Engine free function 领地外且无回调面，观测点天然只对真实发生的
+ *  重试发帧（stale/schema/budget/abort 非重试路径零假帧）。 */
+export function dispatchAskRetrying(
+  run: WorkflowRun,
+  callId: number,
+  failedAttempt: number,
+  backoffMs: number,
+  reason: string,
+): void {
+  void dispatchRunTrigger(run, {
+    type: "ask-retrying",
+    taskIndex: callId,
+    attempt: failedAttempt,
+    backoffMs,
+    reason,
+    ts: Date.now(),
+  }).catch((err: unknown) => reportDispatchFailure(run.runId, err));
+}
+
+/** ask-retrying reason 的摘要截断上限（事件行要小——engine 崩溃错误文本含 stderr 尾，
+ *  全文不进 journal，诊断全文在 trace/ask-settled.stderrTeePath 取证链）。 */
+const ASK_RETRY_REASON_MAX_CHARS = 160;
+
+/** ask-retrying 的 reason 摘要：失败分类标签优先，自由错误文本截断兜底。 */
+function summarizeRetryReason(result: AgentResult): string {
+  if (result.failureKind !== undefined) return result.failureKind;
+  const text = result.error ?? "unknown error";
+  return text.length > ASK_RETRY_REASON_MAX_CHARS
+    ? `${text.slice(0, ASK_RETRY_REASON_MAX_CHARS)}…`
+    : text;
+}
+
+// ── 终局 errorCode 构造（D5「诊断引用落账」的 run 级半边；S2 死亡可诊断） ──
+//
+// DoneReason → RunErrorCode 映射（finalRunErrorCodeOf）与引擎码前缀提取（其内部
+// extractFailedRunErrorCode）驻 run-events.ts——RunErrorCode 词表语义的同位归属
+// （映射分支逐一引用词表收录依据），本文件是其唯一编排消费方。
+
 /** finalizeRun 的终局事件投递：aborted → cancel-requested 控制事件（合成落账见
  *  journalEventOf）；其余 → run-settled（DoneReason 六因 → RunOutcome 三态映射：
  *  budget_limited/time_limited 是 run 怎么死的系统层失败 = failed，诊断文本进
- *  reason）。errorCode（结构化码）的生产落点待后继单元（doneReason 无结构化码
- *  词表），journal 词表与合成链路本批已就绪。 */
+ *  reason）。errorCode 由 finalRunErrorCodeOf 单点构造（engine crash 族经失败
+ *  call 的协议码前缀提取），随事件载荷落 journal 后经 persistTerminalProjection
+ *  投影进 manifest/.state（S2「死亡可诊断」的 manifest errorCode 落点）。 */
 async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason): Promise<void> {
   if (doneReason === "aborted") {
     await dispatchRunTrigger(run, {
@@ -791,9 +887,11 @@ async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason):
     return;
   }
   const outcome: RunOutcome = doneReason === "completed" ? "completed" : "failed";
+  const errorCode = finalRunErrorCodeOf(run, doneReason);
   await dispatchRunTrigger(run, {
     type: "run-settled",
     outcome,
+    ...(errorCode !== undefined ? { errorCode } : {}),
     reason: run.state.error ?? doneReason,
     artifactsDir: resolveRunEventJournal().dir,
     ts: Date.now(),
@@ -1351,9 +1449,37 @@ function dispatchAgentCall(
   // 旁路 progress record 族（createRecord + updateFromEvent + SubagentStream +
   // trace.live 挂载）随本切换整体退役——TUI/GUI 实时进度改从 store 订阅（D2）。
   const dispatch = deps.workflowAgentDispatch;
-  const runner: AgentRunner = dispatch
+  const innerRunner: AgentRunner = dispatch
     ? { run: (rOpts, rSignal) => dispatch(rOpts, run.runId, rSignal) }
     : deps.runner;
+  // [P1b-1 ask-retrying 落账] 重试轨迹观测点（投递点裁决见 dispatchAskRetrying 注释）：
+  // 包装 runner 记录最近一次失败 result；包装层的第 2..N 次调用 = 重试尝试开始
+  // （executeAgentCall 内部递归的退避已在此前流逝）——此刻 call.attempts 已被本次
+  // 尝试的 markRunning 递增，刚失败的尝试序号 = attempts - 1，backoffMs 取实测
+  // 墙钟差。非重试终局路径（stale/schema_deterministic/budget 耗尽/abort）无后续
+  // 调用，构造性零假帧。
+  let lastFailedResult: AgentResult | undefined;
+  let lastFailedAt = 0;
+  const runner: AgentRunner = {
+    run: (rOpts, rSignal) => {
+      if (lastFailedResult !== undefined) {
+        dispatchAskRetrying(
+          run,
+          msg.callId,
+          call.attempts - 1,
+          Date.now() - lastFailedAt,
+          summarizeRetryReason(lastFailedResult),
+        );
+      }
+      return innerRunner.run(rOpts, rSignal).then((result) => {
+        if (result.error !== undefined) {
+          lastFailedResult = result;
+          lastFailedAt = Date.now();
+        }
+        return result;
+      });
+    },
+  };
   // 原 gate.withSlot(fn, signal) 语义内联：pre-aborted 时 reject AbortError（
   // 下方 .catch 依赖此约定不记错），否则直接执行——并发调度归 ConcurrencyPool。
   const dispatchCall = async (): Promise<void> => {

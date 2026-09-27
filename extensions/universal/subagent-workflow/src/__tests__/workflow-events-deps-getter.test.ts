@@ -274,3 +274,51 @@ describe("lazyDeps 语义不回归：属性访问经 getWorkflowDeps → makeDep
     expect(pi1.appendEntry).not.toHaveBeenCalled();
   });
 });
+
+// ── ⑤ [A1 修复循环 R3] lazyDeps.workflowAgentDispatch 转发成员 ──────────────────
+//
+// 生产缺口实证（真机 wf-1790034646281-w7tp4f，R2 裁决）：lazyDeps 漏本成员时
+// workflow tool 的 run action 以 lazyDeps 启动 run → pump dispatchAgentCall 读到
+// undefined 静默回退 deps.runner（SAR.run 占位 runId）→ record.parentRunId =
+// "sar-unattached" → armed 回执落账键错 → fold 出 created → IllegalTransitionError
+// 让位，run journal 恒缺 armed 帧。三面锁定：可解析（非 undefined）/ 守卫同源同
+// 消息 / 转发契约透传 executeWorkflowAgent。
+
+const SUBAGENT_SERVICE_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.service");
+
+describe("lazyDeps.workflowAgentDispatch 转发成员（[A1 R3] 缺失 = pump 回退 SAR 占位 runId）", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, SUBAGENT_SERVICE_SLOT_KEY);
+  });
+
+  it("session 健康时解析为函数（守卫 + makeDeps 现读链路打通；缺失形态 = undefined 静默回退）", async () => {
+    const { handle } = await mountWithSession("sess-dispatch-resolve");
+    expect(typeof handle.lazyDeps.workflowAgentDispatch).toBe("function");
+  });
+
+  it("守卫同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
+    const { pi } = makePi();
+    const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() }); // 无 session_start
+    expect(() => handle.lazyDeps.workflowAgentDispatch).toThrowError("Session not initialized");
+  });
+
+  it("转发契约：调用即透传 (opts, parentRunId, signal) 到 SubagentService.executeWorkflowAgent 并直通返回值", async () => {
+    const { handle } = await mountWithSession("sess-dispatch-forward");
+    const executeWorkflowAgent = vi.fn(async () => ({ content: "ok" }));
+    // service 进程单例槽（service-bootstrap.ts Symbol.for 槽，{ current } 形态）注入
+    // fake——生产 session_start 后真实单例在位，此处只验证闭包转发面。
+    Reflect.set(globalThis, SUBAGENT_SERVICE_SLOT_KEY, {
+      current: { executeWorkflowAgent, dispose: vi.fn() },
+    });
+
+    const dispatch = handle.lazyDeps.workflowAgentDispatch;
+    if (!dispatch) throw new Error("lazyDeps.workflowAgentDispatch missing (regression to R2 gap)");
+    const opts = { prompt: "调研 A", description: "research-a" };
+    const signal = new AbortController().signal;
+    const result = await dispatch(opts, "wf-real-run", signal);
+
+    expect(executeWorkflowAgent).toHaveBeenCalledTimes(1);
+    expect(executeWorkflowAgent).toHaveBeenCalledWith(opts, "wf-real-run", signal);
+    expect(result).toEqual({ content: "ok" });
+  });
+});

@@ -222,9 +222,27 @@ export function createPiHostServices(): HostServices {
  * 可能注册工具/注入提示词，孙进程的工具面与 system prompt 行为不可控。
  *
  * 白名单组成唯一登记处（runtime 侧 getExtensionPaths 全量下发、本常量收窄，
- * 无第二份判据副本——扩白名单只改此处并同步 pi-host.test.ts 用例）。
+ * 无第二份判据副本——扩白名单只改此处并同步 pi-host.test.ts 用例，以及
+ * spawn-runner.ts 断言②的 SCHEMA_ENFORCEMENT_EXTENSION_SEGS 同判据两端）。
+ *
+ * 每条 = 路径段序列（`/`|`\` 分段后连续匹配）。两形态别名：
+ *   - `@zhushanwen/pi-structured-output`：npm staged 布局
+ *     `.../node_modules/@zhushanwen/pi-structured-output[/index.js]`。
+ *   - `universal/structured-output`：dev 源码布局 `.../extensions/universal/structured-output`
+ *     （dev 下 runtime 下发的 --extension 是源码目录，无 @zhushanwen scope 段——
+ *     只认 npm 布局时孙进程扩展集恒空，schema 拦截链静默失效）。
+ *     选型：两段连续匹配（分组目录名 + 包目录名）而非尾段单匹配 `structured-output`
+ *     ——尾段会撞任意同名无关目录（如其他包内的同名子目录）；两段含本仓 extensions
+ *     固定分组名 `universal`，且 --extension 值来源可控（runtime extension-service
+ *     下发 / pi CLI flags），实际碰撞面可忽略。
  */
-const GRANDCHILD_EXTENSION_PKG_SEGMENTS = "@zhushanwen/pi-structured-output";
+const GRANDCHILD_EXTENSION_PKG_SEGMENTS: readonly (readonly string[])[] = [
+  ["@zhushanwen", "pi-structured-output"],
+  ["universal", "structured-output"],
+];
+
+/** npm 布局包名（peerDep 解析锚点与诊断文案用；匹配判据见上段集）。 */
+const GRANDCHILD_EXTENSION_NPM_PKG = "@zhushanwen/pi-structured-output";
 
 /**
  * 孙进程扩展路径集解析（设计 D2 双形态；argv 与 peerDep 解析器经参数注入，纯函数
@@ -247,14 +265,14 @@ export function resolveGrandchildExtensionPaths(
   return peer !== undefined ? [peer] : [];
 }
 
-/** 路径是否命中孙进程扩展白名单：路径段序列包含 `<scope>/<pkg>` 连续两段
- *  （目录形态 `.../@zhushanwen/pi-structured-output` 与入口文件形态
- *  `.../@zhushanwen/pi-structured-output/index.js` 都命中；末尾越界段取
- *  undefined 不等，天然界内）。 */
+/** 路径是否命中孙进程扩展白名单：路径段序列包含白名单任一段集的连续匹配
+ *  （目录形态与入口文件形态都命中——末尾越界段取 undefined 不等，天然界内；
+ *  前缀相似目录如 `pi-structured-output-lookalike` 因段值不等不误判）。 */
 function isGrandchildExtensionPath(p: string): boolean {
   const segs = p.split(/[\\/]/).filter((s) => s.length > 0);
-  const wanted = GRANDCHILD_EXTENSION_PKG_SEGMENTS.split("/");
-  return segs.some((_, i) => wanted.every((w, j) => segs[i + j] === w));
+  return GRANDCHILD_EXTENSION_PKG_SEGMENTS.some((wanted) =>
+    segs.some((_, i) => wanted.every((w, j) => segs[i + j] === w)),
+  );
 }
 
 /**
@@ -264,7 +282,7 @@ function isGrandchildExtensionPath(p: string): boolean {
 function resolveStructuredOutputPeer(): string | undefined {
   try {
     const require = createRequire(import.meta.url);
-    return dirname(require.resolve(`${GRANDCHILD_EXTENSION_PKG_SEGMENTS}/package.json`));
+    return dirname(require.resolve(`${GRANDCHILD_EXTENSION_NPM_PKG}/package.json`));
   } catch (err) {
     getLogger("pi-host").debug(
       "[pi-host] structured-output optional peerDep 未解析（独立形态未安装，孙进程扩展集回退空）",

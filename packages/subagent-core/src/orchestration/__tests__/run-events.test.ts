@@ -173,8 +173,9 @@ describe("事件词表（D5）", () => {
     expect(ALL_RUN_OUTCOMES).toEqual(["completed", "failed", "cancelled"]);
   });
 
-  it("RunErrorCode 承载两族既有词表（编译期赋值由 tsc 把关）", () => {
+  it("RunErrorCode 承载三族词表（编译期赋值由 tsc 把关）", () => {
     // 引擎固定码 + engine_ 前缀透传码 + 失败分类（classifyFailureKind 词表）
+    // + run 级终局码（budget_limited/time_limited，dispatchFinalRunSettle 恒等映射族）
     const codes: RunErrorCode[] = [
       "engine_crashed",
       "engine_probe_failed",
@@ -182,8 +183,10 @@ describe("事件词表（D5）", () => {
       "stale_context",
       "schema_deterministic",
       "unknown",
+      "budget_limited",
+      "time_limited",
     ];
-    expect(codes).toHaveLength(6);
+    expect(codes).toHaveLength(8);
   });
 });
 

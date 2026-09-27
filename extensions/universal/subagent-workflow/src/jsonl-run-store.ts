@@ -302,19 +302,6 @@ function getEnvStateMaxRuns(): number | undefined {
   return parsed;
 }
 
-/**
- * 已终局 state 文件的 mtime TTL 缺省值（[P1b-2 / D5 清理规则②]：run cap +
- * 30 天 mtime TTL，两者同限已终局）。30 天 = 设计字面缺省保留期
- * （换算因子具名对齐 core session-file-gc 的 TTL_MS 先例）。
- */
-const TTL_DAYS = 30;
-const HOURS_PER_DAY = 24;
-const MINUTES_PER_HOUR = 60;
-const SECONDS_PER_MINUTE = 60;
-const MS_PER_SECOND = 1000;
-export const DEFAULT_STATE_TTL_MS =
-  TTL_DAYS * HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND;
-
 /** journal 文件后缀（<runId>.events.jsonl）——watcher 边沿判定的字面单源
  *  （retention 裁剪判定在 core pruneTerminalRunFiles，journal 作为 run 附属成对裁）。 */
 const JOURNAL_FILE_SUFFIX = ".events.jsonl";

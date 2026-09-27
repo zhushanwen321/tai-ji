@@ -48,19 +48,21 @@
  *   第二实例；dev/prod userData 不同、并存合法，「另一合法实例的 pi」由防线②的
  *   ppid=1 判据保护，单实例锁不承担该职责。
  *
- * 收殓范围变化（方案 B 显式声明，设计 §6.12）：v1 判据下孤儿 subagent/relay pi 不被
+ * 收殓范围（方案 B 显式声明，设计 §6.12）：v1 判据下孤儿 subagent/relay pi 不被
  * 收殓（其 --session-dir 指向 subagents/… ≠ 主 session 目录）；v2 下 subagent/relay pi
- * 由 mirrorFlags 镜像主进程的 staged --extension 与 --no-extensions（session-runner.ts +
- * argv-mirror.ts，数据源是主 pi 进程的 process.argv——subagent 由主 pi 进程内的
- * extension spawn，其父是主 pi）→ 四条合取①②③全过，开始被收殓。方向是修复 v1 漏收
- * （孤儿 subagent 同样烧 token），属预期改进。活跃 subagent 的 ppid = 主 pi pid（非
- * runtime pid），不满足④，不受影响。孤儿 subagent 的收殓时序是两轮：主 pi 先被收殓/
- * 死亡 → subagent reparent 到 ppid=1 → 下一轮 reap 收。
+ * 的 argv 由 pi-subagent-cli buildSpawnArgs 构造——恒定 --no-extensions 基座 +
+ * --extension 白名单集（宿主自主 pi argv 的 staged 集按 structured-output 白名单收窄，
+ * 经 wire ctx.extensionPaths 下发，structured-output 属 mandatory builtin 恒在 staged
+ * 集即恒在清单；relay 路径同 argv 经握手帧交 runtime 受托 spawn）→ 四条合取①②③
+ * 全过，开始被收殓。方向是修复 v1 漏收（孤儿 subagent 同样烧 token），属预期改进。
+ * 活跃 subagent/relay pi 的 ppid ≠ 1（直spawn 形态父为引擎 CLI 进程、relay 受托形态
+ * 父为 runtime），不满足④，不受影响。孤儿收殓时序：pi 的直接父进程退出使其 reparent
+ * 到 ppid=1 后，下一轮 reap 收。
  *
  * 清单缺失 fail-safe（宁漏不误杀，方向对齐 D4b）：清单文件缺失/读不到/坏 JSON → 跳过
  * 本轮收殓并记日志。清单读取经组合根注入（readSpawnMarkers，D6c port 纪律——清单文件
  * io 归 infra/spawn-markers.ts 读写两侧 SSOT，services 层不 import infra），注入函数
- * 返回 null 即触发本降级。写侧每次 spawn 全量覆盖写、mandatory 18 包恒传保证清单常态
+ * 返回 null 即触发本降级。写侧每次 spawn 全量覆盖写、mandatory builtin 恒传保证清单常态
  * 存在且非空（§11.11）；本降级只覆盖异常态（首启前 / 磁盘故障 / 人为删除）。
  *
  * 处置：SIGTERM → 宽限（默认 2s，对齐 destroy 链 KILL_TIMEOUT_MS 惯例）→ 仍活则

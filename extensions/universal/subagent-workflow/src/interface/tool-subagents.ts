@@ -184,8 +184,9 @@ export async function runSubagentsBatch(
   const time = params.time;
   assertEntryTimeBudget(time);
 
-  // 执行体脚本按内置名解析（与 workflow tool actionRun 同一条链：registry.get 命中
-  // 内置/已保存名；本工具不允许换脚本，故不回落 getPath）。
+  // 执行体脚本按固定内置名解析（registry.get 精确名匹配；脚本名是工具自带常量
+  // FAN_OUT_SCRIPT_NAME 而非用户参数——workflow tool actionRun 的按名解析已退役
+  // 走 getPath 单通道，本工具不允许换脚本，无 getPath 回落需求）。
   const script = await deps.registry.get(FAN_OUT_SCRIPT_NAME);
   if (!script || !script.available) {
     const all = await deps.registry.loadAll();

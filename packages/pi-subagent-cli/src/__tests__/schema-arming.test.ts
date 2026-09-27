@@ -76,6 +76,34 @@ describe("assertSchemaEnforcementArmed — [D3 止血版] 武装断言", () => {
     ).toThrow(/\[schema-arming\]/);
   });
 
+  it("断言②：dev 源码布局（extensions/universal/structured-output，目录与入口文件形态）命中", () => {
+    // L4 A1 根因回归锁：dev 下 taiji 宿主注入的 ctx.extensionPaths 是源码目录
+    // （无 @zhushanwen scope 段）——断言②须同判据识别 dev 布局别名段。
+    expect(() =>
+      assertSchemaEnforcementArmed(
+        armedInput({ spawnArgs: ["--extension", "/repo/extensions/universal/structured-output"] }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaEnforcementArmed(
+        armedInput({
+          spawnArgs: [
+            "--extension", "/repo/extensions/universal/subagent-workflow",
+            "--extension", "/repo/extensions/universal/structured-output/index.js",
+          ],
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("断言②：dev 布局尾段同名前缀目录不误判为在场（两段连续匹配防误伤）", () => {
+    expect(() =>
+      assertSchemaEnforcementArmed(
+        armedInput({ spawnArgs: ["--extension", "/repo/extensions/universal/structured-output-lookalike"] }),
+      ),
+    ).toThrow(/\[schema-arming\]/);
+  });
+
   it("全武装（env + 扩展在场）→ 不抛", () => {
     expect(() => assertSchemaEnforcementArmed(armedInput())).not.toThrow();
   });

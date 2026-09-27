@@ -298,6 +298,44 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
+  it("[D5 诊断引用落账] 失败（exit 3）→ 终态应答携带 stderrTeePath 且 tee 文件存在（S2 引擎段）", async () => {
+    const h = await makeHarness("exit-3");
+    try {
+      const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("pi child exited with code 3");
+      // 失败伴随路径：载荷含 tee 路径（<dataDir>/logs/pi-task-stderr-<pid>.log 形态）
+      expect(result.stderrTeePath).toBeDefined();
+      expect(result.stderrTeePath).toMatch(/[/\\]logs[/\\]pi-task-stderr-\d+\.log$/);
+      // 文件真实存在且内容为子进程 stderr 产出（懒打开 + close flush 在 run resolve
+      // 之后异步收敛——waitFor 等待，对齐上方成功用例的 tee 断言时序）
+      await waitFor(() => {
+        try {
+          return (
+            fs.existsSync(result.stderrTeePath!) &&
+            fs.readFileSync(result.stderrTeePath!, "utf8").includes("fake-pi stderr boot")
+          );
+        } catch {
+          return false;
+        }
+      });
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[D5 诊断引用落账] 成功 → 终态应答不带 stderrTeePath（tee 存在也不报）", async () => {
+    const h = await makeHarness("success");
+    try {
+      const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.stderrTeePath).toBeUndefined();
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
   it("header 模式（json mode）：header 行身份落位 + 握手同值去重", async () => {
     const h = await makeHarness("header");
     try {
@@ -390,6 +428,29 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       const argv: string[] = JSON.parse(result.content ?? "[]");
       expect(argv).not.toContain("--extension");
       expect(argv).toContain("--no-extensions");
+    } finally {
+      restoreHarness(h);
+    }
+  }, 15_000);
+
+  it("[D2] extensionPaths dev 源码布局 → 真实 spawn 链 argv 透传 + 武装断言②放行（L4 A1 回归锁）", async () => {
+    // dev 下 taiji 宿主注入的 extensionPaths 是源码目录（无 @zhushanwen scope 段）。
+    // 断言②（schema 任务 + dev 布局路径）走完 spawn 链 = 放行证明；到达 F-1 守卫
+    // 翻 false（fake pi 无 structured-output 调用，同上方武装态用例的预期形态）。
+    const devExtPath = "/repo/extensions/universal/structured-output";
+    const h = await makeHarness("success");
+    try {
+      const result = await runSpawnOnce(
+        baseParams(h, {
+          schema: { type: "object", properties: { answer: { type: "number" } } },
+          extensionPaths: [devExtPath],
+        }),
+        callbacksOf(h),
+      );
+      // 武装断言未拦截（零 spawn 前抛错）→ run 走到 F-1 确定性守卫
+      expect(result.success).toBe(false);
+      expect(result.failureKind).toBe("schema_deterministic");
+      expect(h.childSpawned).toHaveLength(1);
     } finally {
       restoreHarness(h);
     }
