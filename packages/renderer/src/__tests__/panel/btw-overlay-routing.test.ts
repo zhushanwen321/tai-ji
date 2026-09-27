@@ -22,7 +22,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
-import { nextTick, ref } from 'vue'
+import { nextTick, ref, effectScope } from 'vue'
 import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
@@ -43,7 +43,7 @@ import {
   createUiResponseTransport,
   __resetDialogRequestIdSessionsForTest,
 } from '@/composables/shell/extension-host-dialog'
-import { __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
+import { __resetExtensionBusSubscriptionForTesting, useExtensionUI } from '@/composables/useExtensionUI'
 import { setBtwReclaimReminder } from '@/composables/panel/btw-pending-bookkeeping'
 import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
@@ -397,13 +397,23 @@ describe('②③ badge 待处理态 + 终态机四行（D8 SSOT 表）', () => {
     await settle(w)
     emitUIRequest(VID, formFrame('r-gone', '问题？'))
     await settle(w)
-    // 模拟已终结（失效链已移除 store 记录）后迟到的提交
+    // 模拟已终结（失效链已移除 store 记录）后迟到的提交：active 已随 store 清空 →
+    // 确认条不在 DOM、无按钮可点——改直调 useExtensionUI 的 respond 语义面
+    // （同 useBtwInteraction 挂载形态：vid ref + 全放行 filter）
     useExtensionUIStore().removeRequest(VID, 'r-gone')
-    const before = useToast().toasts.value.length
-    await w.find('[data-testid="btw-form-submit"]').trigger('click').catch(() => undefined)
     await settle(w)
-    // active 已随 store 清空重派生 → 无条可点；直接断言 respond 语义面
-    expect(useToast().toasts.value.length).toBeGreaterThanOrEqual(before)
+    expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
+
+    // toast 是模块级单例且 error 停留 8s（长于用例时长），先清掉前置用例遗留再断言增量
+    for (const t of [...useToast().toasts.value]) useToast().remove(t.id)
+    const scope = effectScope()
+    const ui = scope.run(() => useExtensionUI(ref(VID), () => true))!
+    const delivered = ui.respond('r-gone', '迟到的应答')
+    scope.stop()
+
+    // 应答丢弃（返回 false）+ 失效 toast 用户可见（不静默）+ store 不受污染
+    expect(delivered).toBe(false)
+    expect(useToast().toasts.value.map((t) => t.message)).toEqual(['请求已失效，应答已丢弃'])
     expect(useExtensionUIStore().getRequestsBySession(VID)).toHaveLength(0)
   })
 })
@@ -523,6 +533,45 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
     const again = w.find('[data-testid="btw-form-text"]')
     expect(again.exists()).toBe(true)
     expect((again.element as HTMLInputElement).value).toBe('')
+  })
+
+  it('分键 vid 维度负向锚定：同 requestId 两条线各填不同草稿，切换互不串', async () => {
+    apiMock.list.mockResolvedValue([{ vid: 'btw:d7a' }, { vid: 'btw:d7b' }])
+    const w = mountPanel(MAIN)
+    await settle(w)
+    // 默认选中最新线 d7b → 切到 d7a 填草稿
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7a"]').trigger('click')
+    await nextTick()
+    emitUIRequest('btw:d7a', formFrame('r-vid-key', 'A 线问题？'))
+    await settle(w)
+    await w.find('[data-testid="btw-form-text"]').setValue('A 线草稿')
+    await nextTick()
+
+    // 切到 d7b：同 requestId 再挂一个表单，填另一份草稿
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7b"]').trigger('click')
+    await nextTick()
+    emitUIRequest('btw:d7b', formFrame('r-vid-key', 'B 线问题？'))
+    await settle(w)
+    await w.find('[data-testid="btw-form-text"]').setValue('B 线草稿')
+    await nextTick()
+
+    // 切回 A：A 的问题 + A 的草稿原样（分键若退化为裸 requestId，B 线草稿会覆写 A → 此处红）
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7a"]').trigger('click')
+    await nextTick()
+    const aBar = w.find('[data-testid="btw-inline-confirm"]')
+    expect(aBar.exists()).toBe(true)
+    expect(aBar.text()).toContain('A 线问题？')
+    const aInput = w.find('[data-testid="btw-form-text"]')
+    expect((aInput.element as HTMLInputElement).value).toBe('A 线草稿')
+
+    // 再切 B：B 的问题 + B 的草稿同样原样
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7b"]').trigger('click')
+    await nextTick()
+    const bBar = w.find('[data-testid="btw-inline-confirm"]')
+    expect(bBar.exists()).toBe(true)
+    expect(bBar.text()).toContain('B 线问题？')
+    const bInput = w.find('[data-testid="btw-form-text"]')
+    expect((bInput.element as HTMLInputElement).value).toBe('B 线草稿')
   })
 
   it('失效终结同样清草稿：切走期间 requestsInvalidated → 切回无表单、条撤下即失效反馈（store 族无行内提示）；重建为空', async () => {

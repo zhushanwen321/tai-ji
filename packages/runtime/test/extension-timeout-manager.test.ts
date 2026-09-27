@@ -8,6 +8,8 @@
  * - removeRequest 单条清理（D-B2-2：旧 clearTimeout / removePendingRequest /
  *   removeBridgeRequest 按职责收敛到本原语，超时机制已删方法名不再残留）
  * - clearForSession（含 bridge entry 清理 + 跨 session 隔离）
+ * - invalidatePendingForSession（P2-2 失效链唯一摘除口：普通 entry 摘除并出现在返回
+ *   清单，bridge entry 跳过摘除保留 isBridge 语义）
  * - isBridgeRequest
  * - B6（memory-leak-remediation §3.2-B6）应答即删（单表 entry 一体摘除）/
  *   sessionRequestCount 探针
@@ -70,13 +72,36 @@ describe('ExtensionTimeoutManager', () => {
     expect(() => mgr.clearForSession('no-such-session')).not.toThrow()
   })
 
-  it('removeRequest 摘除 bridge entry（isBridge 标记随 entry 一体清理）', () => {
+  it('invalidatePendingForSession：普通 entry 摘除并出现在返回清单，bridge entry 跳过摘除（isBridge 保留）', () => {
     const mgr = new ExtensionTimeoutManager()
-    mgr.addBridgeRequest('s1', 'r1')
-    expect(mgr.isBridgeRequest('r1')).toBe(true)
-    mgr.removeRequest('r1')
-    expect(mgr.isBridgeRequest('r1')).toBe(false)
+    mgr.registerRequest('s1', 'r1', 'select', { askUser: true })
+    mgr.registerRequest('s1', 'r2', 'confirm', {})
+    mgr.addBridgeRequest('s1', 'r-bridge')
+    mgr.registerRequest('s2', 'r3', 'select')
+
+    const invalidated = mgr.invalidatePendingForSession('s1')
+
+    // 普通 entry 全部摘除并出现在返回清单（payload 解包到顶层形态）
+    expect(invalidated.map((r) => r.requestId).sort()).toEqual(['r1', 'r2'])
+    const r1 = invalidated.find((r) => r.requestId === 'r1')
+    expect(r1?.sessionId).toBe('s1')
+    expect(r1?.method).toBe('select')
+    expect(r1?.askUser).toBe(true) // payload 解包到顶层
+    // bridge entry 不摘：失效链只覆盖前端可点击面，bridge 应答即删归 B6
+    expect(mgr.isBridgeRequest('r-bridge')).toBe(true)
+    expect(mgr.sessionRequestCount('s1')).toBe(1) // 只剩 bridge entry
+    expect(mgr.getPendingRequests('s1')).toEqual([]) // 普通 entry 已摘；快照恒不含 bridge
+    // 跨 session 隔离
+    expect(mgr.sessionRequestCount('s2')).toBe(1)
   })
+
+  it('invalidatePendingForSession 对无请求 session 返回空数组（非抛错）', () => {
+    const mgr = new ExtensionTimeoutManager()
+    expect(mgr.invalidatePendingForSession('no-such-session')).toEqual([])
+  })
+
+  // 「removeRequest 摘除 bridge entry（isBridge 标记随 entry 一体清理）」单例已删：
+  // 是下方 B6 用例的纯子集（isBridge 翻转 + 跨 session + 幂等均已覆盖）。
 
   // B6（memory-leak-remediation §3.2-B6）应答即删：removeRequest 摘单表 entry
   //（挂起登记一体清理——只摘标记不删 entry 会留死条目驻留到 session 销毁）。

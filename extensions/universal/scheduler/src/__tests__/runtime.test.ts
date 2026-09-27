@@ -48,16 +48,8 @@ describe('SchedulerRuntime', () => {
   })
 
   describe('listTasks', () => {
-    it('returns tasks sorted by nextRunAt', async () => {
-      await runtime.addTask('task 1', { mode: 'interval', intervalMs: 60000 })
-      await runtime.addTask('task 2', { mode: 'interval', intervalMs: 30000 })
-      const tasks = runtime.listTasks()
-      expect(tasks).toHaveLength(2)
-      // 30s interval 的 nextRunAt 早于 60s 的，应排前
-      expect(tasks[0]!.nextRunAt).toBeLessThan(tasks[1]!.nextRunAt)
-    })
-
-    // 强化断言：30s 任务 nextRunAt 更小（更早），应是 listTasks()[0]
+    // 排序契约：30s 任务 nextRunAt 更小（更早），应是 listTasks()[0]
+    //（含排序断言全集：tasks[0].id 定位 + nextRunAt 严格小于）
     it('orders shorter-interval task first', async () => {
       const t60 = await runtime.addTask('60s', { mode: 'interval', intervalMs: 60000 })
       const t30 = await runtime.addTask('30s', { mode: 'interval', intervalMs: 30000 })
@@ -115,7 +107,9 @@ describe('SchedulerRuntime', () => {
       const task = await runtime.addTask('test', { mode: 'interval', intervalMs: 60000 })
       await runtime.dispatchTask(task)
       expect(backend.sentMessages).toHaveLength(1)
-      expect(backend.sentMessages[0]!.msg).toEqual(expect.objectContaining({ content: 'test' }))
+      expect(backend.sentMessages[0]!.msg).toEqual(expect.objectContaining({ content: 'test', customType: 'pi-scheduler:dispatched' }))
+      // steer 直投契约（runtime.ts sendMessage 第二参）：丢 opts = pi idle 时定时任务静默不开轮次
+      expect(backend.sentMessages[0]!.opts).toEqual({ deliverAs: 'steer', triggerTurn: true })
     })
 
     it('skips disabled task', async () => {

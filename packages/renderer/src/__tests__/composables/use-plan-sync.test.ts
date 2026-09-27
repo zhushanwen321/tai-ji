@@ -7,7 +7,8 @@
  * - WS 帧驱动状态流转：awaiting → revising → 无值（reviewing → reviewing → writing）
  * - updateFor 分区断言：session A 帧不污染 session B 分区；capturedSid 与切焦点竞态模拟
  *   （切换的异步退订窗口内旧 sid 迟到帧只写旧分区）
- * - 评论草稿 per-session 隔离与清理链（triggerSessionCleanups → 分区重置，其他 session 保留）
+ * - 评论草稿转发接线 + 清理编排（triggerSessionCleanups → 分区重置，其他 session 保留；
+ *   分区语义本体归 plan-store.test.ts，此处不重复）
  *
  * 范式照抄 gen-stats-composable.test.ts：
  * - mock 边界：command 部分 mock（spread actual 保留 events 真实通道——useSessionEvents 经
@@ -463,9 +464,12 @@ describe('崩溃恢复对账：session.restored 边沿冷拉', () => {
   })
 })
 
-// ── 评论草稿：per-session 隔离与清理链 ───────────────────────
+// ── 评论草稿：usePlanState 转发接线 + 清理编排增量 ───────────────
+// 草稿的焦点分区语义本体（加/删/清只作用焦点、跨区隔离、null 焦点 no-op）归
+// plan-store.test.ts「评论草稿：焦点分区操作与 per-session 隔离」；此处只测
+// composable 转发接线（removeDraft 唯一杀伤点）与 cleanup 编排（重拉增量）。
 
-describe('评论草稿：per-session 隔离与清理链', () => {
+describe('评论草稿：usePlanState 转发接线 + 清理编排增量', () => {
   it('草稿按焦点分区隔离：A/B 各自累积、切回恢复、删除只作用焦点', async () => {
     const host = mountHost('A')
     await settle()
@@ -484,21 +488,6 @@ describe('评论草稿：per-session 隔离与清理链', () => {
     host.sidRef.value = 'A'
     await settle()
     expect(host.plan.drafts.value).toEqual([{ quote: '引文一', comment: '补充边界条件' }])
-  })
-
-  it('clearDrafts 清空焦点分区，其他分区保留', async () => {
-    const host = mountHost('A')
-    await settle()
-    host.plan.addDraft({ quote: 'q1', comment: 'c1' })
-    host.sidRef.value = 'B'
-    await settle()
-    host.plan.addDraft({ quote: 'q2', comment: 'c2' })
-    host.plan.clearDrafts()
-    expect(host.plan.drafts.value).toEqual([])
-
-    host.sidRef.value = 'A'
-    await settle()
-    expect(host.plan.drafts.value).toEqual([{ quote: 'q1', comment: 'c1' }])
   })
 
   it('cleanup 链：triggerSessionCleanups(A) → A 分区重置（草稿/view 清空），B 保留', async () => {

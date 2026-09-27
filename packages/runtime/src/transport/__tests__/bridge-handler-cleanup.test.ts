@@ -5,14 +5,15 @@
  * - 全部回包 method（sync / tool_execute / intercept / malformed / unknown）在应答完成点
  *   调 removeRequest（成功 + 异常双路——外层 catch 回错包后 finally 同样摘除）
  * - bridge:event 不登记不摘（入口收窄守卫与 finally 对称）
- * - ExtensionTimeoutManager 集成：addBridgeRequest 后 removeRequest 把 bridge entry
- *   从挂起单表一体摘除（登记与 bridge 标记同 entry，无双集合对账）
+ * - pluginService 消费面的编组入参（tool_execute 请求对象 / intercept / event 三形态）
+ *
+ * ExtensionTimeoutManager 单表行为（entry 一体摘除 / 幂等 / 跨 session 隔离）归属
+ * test/extension-timeout-manager.test.ts，此处不重复。
  *
  * 运行：cd packages/runtime && npx vitest run src/transport/__tests__/bridge-handler-cleanup.test.ts
  */
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import { BridgeHandler } from '../bridge-handler.js'
-import { ExtensionTimeoutManager } from '../../services/extension-timeout-manager.js'
 import type { IPiEngine } from '../../services/ports/pi-engine.js'
 import type { IPluginService } from '../../interfaces.js'
 
@@ -29,14 +30,24 @@ function makeHandler(pluginService: IPluginService | null, timeoutManager?: { ad
 }
 
 describe('B6 应答即删：各回包点 removeRequest（成功+异常双路）', () => {
-  it('bridge:sync 成功回包后摘除', async () => {
-    const remove = vi.fn()
-    const add = vi.fn()
-    const handler = makeHandler(null, { addBridgeRequest: add, removeRequest: remove })
-    await handler.handleBridgeRequest(SID, 'req-sync', 'bridge:sync', {}, makeClient())
-    expect(add).toHaveBeenCalledWith(SID, 'req-sync')
-    expect(remove).toHaveBeenCalledWith('req-sync')
-  })
+  // 三例（sync / malformed / unknown）断言同形仅 method 不同，合并 it.each。
+  // 注意 bridge:sync 此处 pluginService=null，实际走 sendBridgeSync 的 not-available
+  // 兜底回包分支（非成功回包路径）——成功回包形态见 bridge-marker-channel.test.ts 序列化组。
+  it.each([
+    ['bridge:sync', 'req-sync', {}],
+    ['bridge:malformed', 'req-mal', { raw: 'garbage' }],
+    ['bridge:future_method', 'req-unk', {}],
+  ] as Array<[string, string, Record<string, unknown>]>)(
+    '%s 应答完成后摘除（sync 为 pluginService 缺失兜底回包路径）',
+    async (method, reqId, data) => {
+      const remove = vi.fn()
+      const add = vi.fn()
+      const handler = makeHandler(null, { addBridgeRequest: add, removeRequest: remove })
+      await handler.handleBridgeRequest(SID, reqId, method, data, makeClient())
+      expect(add).toHaveBeenCalledWith(SID, reqId)
+      expect(remove).toHaveBeenCalledWith(reqId)
+    },
+  )
 
   it('bridge:tool_execute 成功路径：await 完成回包后摘除', async () => {
     const remove = vi.fn()
@@ -47,6 +58,15 @@ describe('B6 应答即删：各回包点 removeRequest（成功+异常双路）'
     const client = makeClient()
     await handler.handleBridgeRequest(SID, 'req-tool', 'bridge:tool_execute', { toolName: 't' }, client)
     expect(client.sendExtensionUiResponse).toHaveBeenCalledTimes(1)
+    // transport↔service 边界编组形态（bridge-handler sendBridgeToolExecute）：
+    // data 里有的字段用具体值断言；params/toolCallId 缺省走兜底 {} / ''
+    expect(pluginService.handleBridgeToolExecute as unknown as Mock).toHaveBeenCalledWith({
+      type: 'bridge.tool.execute',
+      toolName: 't',
+      parameters: {},
+      toolCallId: '',
+      sessionId: SID,
+    })
     expect(remove).toHaveBeenCalledWith('req-tool')
   })
 
@@ -71,6 +91,8 @@ describe('B6 应答即删：各回包点 removeRequest（成功+异常双路）'
     } as unknown as IPluginService
     const handler = makeHandler(pluginService, { addBridgeRequest: vi.fn(), removeRequest: remove })
     await handler.handleBridgeRequest(SID, 'req-int', 'bridge:intercept', { eventName: 'before_agent_start' }, makeClient())
+    // 编组入参：eventName 直传、data.data 缺省兜底 {}、sessionId 透传
+    expect(pluginService.handleBridgeIntercept as unknown as Mock).toHaveBeenCalledWith('before_agent_start', {}, SID)
     expect(remove).toHaveBeenCalledWith('req-int')
   })
 
@@ -86,53 +108,15 @@ describe('B6 应答即删：各回包点 removeRequest（成功+异常双路）'
     expect(remove).toHaveBeenCalledWith('req-int-err')
   })
 
-  it('bridge:malformed 哨兵回包后摘除', async () => {
-    const remove = vi.fn()
-    const handler = makeHandler(null, { addBridgeRequest: vi.fn(), removeRequest: remove })
-    await handler.handleBridgeRequest(SID, 'req-mal', 'bridge:malformed', { raw: 'garbage' }, makeClient())
-    expect(remove).toHaveBeenCalledWith('req-mal')
-  })
-
-  it('unknown method 回包后摘除（已登记的同步往返型不残留）', async () => {
-    const remove = vi.fn()
-    const handler = makeHandler(null, { addBridgeRequest: vi.fn(), removeRequest: remove })
-    await handler.handleBridgeRequest(SID, 'req-unk', 'bridge:future_method', {}, makeClient())
-    expect(remove).toHaveBeenCalledWith('req-unk')
-  })
-
   it('bridge:event：不登记不摘（fire-and-forget 收窄守卫与 finally 对称）', async () => {
     const add = vi.fn()
     const remove = vi.fn()
-    const handler = makeHandler(null, { addBridgeRequest: add, removeRequest: remove })
+    const pluginService = { handleBridgeEvent: vi.fn() } as unknown as IPluginService
+    const handler = makeHandler(pluginService, { addBridgeRequest: add, removeRequest: remove })
     await handler.handleBridgeRequest(SID, 'req-evt', 'bridge:event', { eventName: 'x' }, makeClient())
     expect(add).not.toHaveBeenCalled()
     expect(remove).not.toHaveBeenCalled()
-  })
-})
-
-describe('B6 ExtensionTimeoutManager：removeRequest 一体摘除（登记与 bridge 标记同 entry）', () => {
-  it('应答后 bridge entry 从挂起单表归零；跨 session 隔离不受影响', () => {
-    const mgr = new ExtensionTimeoutManager()
-    mgr.addBridgeRequest(SID, 'r1')
-    mgr.addBridgeRequest(SID, 'r2')
-    mgr.addBridgeRequest('sid-other', 'r3')
-    expect(mgr.sessionRequestCount(SID)).toBe(2)
-
-    mgr.removeRequest('r1')
-    expect(mgr.isBridgeRequest('r1')).toBe(false)
-    expect(mgr.sessionRequestCount(SID)).toBe(1) // entry 一体摘除
-
-    mgr.removeRequest('r2')
-    expect(mgr.sessionRequestCount(SID)).toBe(0) // entry 归零（A5 断言）
-    expect(mgr.sessionRequestCount('sid-other')).toBe(1) // 其他 session 不误伤
-    expect(mgr.isBridgeRequest('r3')).toBe(true)
-  })
-
-  it('removeRequest 幂等（重复摘除 no-op）', () => {
-    const mgr = new ExtensionTimeoutManager()
-    mgr.addBridgeRequest(SID, 'r1')
-    mgr.removeRequest('r1')
-    expect(() => mgr.removeRequest('r1')).not.toThrow()
-    expect(mgr.sessionRequestCount(SID)).toBe(0)
+    // 编组入参：eventName 直传、data.data 缺省兜底 {}、sessionId 透传
+    expect(pluginService.handleBridgeEvent as unknown as Mock).toHaveBeenCalledWith('x', {}, SID)
   })
 })

@@ -494,7 +494,12 @@ describe("factory registration (FR-1)", () => {
 		expect(tool.name).toBe("ask_user");
 		expect(tool.label).toBe("Ask User");
 		expect(tool.description).toBeTruthy();
-		expect(tool.parameters).toBeTruthy();
+		// 结构锚定：parameters 须为 { type: 'object', properties: { questions } }（InputSchema 投影），
+		// 防 parameters 被替换成任意 truthy 值仍绿的弱断言
+		expect(tool.parameters).toMatchObject({
+			type: "object",
+			properties: expect.objectContaining({ questions: expect.anything() }),
+		});
 		expect(typeof tool.execute).toBe("function");
 		expect(typeof tool.renderCall).toBe("function");
 		expect(typeof tool.renderResult).toBe("function");

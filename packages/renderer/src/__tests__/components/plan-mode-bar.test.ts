@@ -514,7 +514,10 @@ describe('场景 7（A7 降级 L1，DOM 存在性）', () => {
     })
     await flushAsync()
 
-    // PlanReviewBar 若被挂回 PanelContainer（回归），findComponent 命中 → 红
+    // PlanReviewBar 若被挂回 PanelContainer（回归），stub 替身渲染 → 三个断言全命中 → 红。
+    // 杀伤断言是 stub 自身 testid（findComponent 按名匹配不上名为 PlanReviewBarStub 的
+    // 替身，plan-review-bar 真身 testid 也不在替身上——两者单独恒 false，靠本条兜住）
+    expect(wrapper.find('[data-testid="plan-review-bar-stub"]').exists()).toBe(false)
     expect(wrapper.findComponent({ name: 'PlanReviewBar' }).exists()).toBe(false)
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
     wrapper.unmount()

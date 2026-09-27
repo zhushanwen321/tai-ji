@@ -217,7 +217,7 @@ describe.skipIf(!FAUX_PI_READY)(
   )
 
   it(
-    '混沌注入：乱序 / 丢失 / 重复投递 → 脏 state，权威重放后收敛到与纯重放一致',
+    '混沌注入：乱序 / 丢失 / 重复投递 → 各自脏 state 可检测（确定性单次断言 + 脏化判别）',
     { timeout: TEST_TIMEOUT_MS },
     async () => {
       // faux 脚本：bash toolCall（真实执行 echo chaos-w21）+ 总结文本——混沌注入的语料源
@@ -260,21 +260,16 @@ describe.skipIf(!FAUX_PI_READY)(
       // 乱序后分叉（toolResult 落在 assistant 之前 → 孤儿收集而非回填）
       expect(chaoticState.orphanToolResults.length).toBeGreaterThan(0)
       expect(chaoticState.messages).not.toEqual(reloadState.messages)
-      // 收敛：权威序列重放覆盖脏 state（快照对账——W22 broadcast≡get_state 全量化的基底）
-      expect(replayEntries(reloadEntries)).toEqual(reloadState)
 
-      // ── 混沌 2：丢失（drop 中间 entry）→ 脏；权威重放收敛 ──
+      // ── 混沌 2：丢失（drop 中间 entry）→ 脏 ──
       const dropped = liveEntries.filter((_, i) => i !== assistantIdx)
       const droppedState = replayEntries(dropped)
       expect(droppedState.messages.length).toBeLessThan(reloadState.messages.length)
-      expect(replayEntries(reloadEntries)).toEqual(reloadState)
 
-      // ── 混沌 3：重复投递（同 message_end 喂两次）→ messages 多一条（可检测脏化）；收敛 ──
+      // ── 混沌 3：重复投递（同 message_end 喂两次）→ messages 多一条（可检测脏化）──
       const duplicated = [...liveEntries, liveEntries[0]!]
       const dupState = replayEntries(duplicated)
       expect(dupState.messages.length).toBe(reloadState.messages.length + 1)
-      // 收敛：reducer 确定性保证权威重放恒得同一 state（对账重建的依据）
-      expect(replayEntries(reloadEntries)).toEqual(reloadState)
 
       await fx.dispose()
       fixture = null
@@ -342,12 +337,24 @@ describe('plan-state entry 等价（A7 静态 fixture）：live 增量折叠 ≡
     // reload 路径：getPlanState 磁盘全量 → 同一份派生函数
     const cold = scanPlanStateEntries(SEQUENCE)
     expect(cold).not.toBeNull()
-    // live 路径镜像：SessionRecords 增量重拉（前缀切片）折叠，终态与全量一致
+    // live 路径镜像：SessionRecords 增量重拉（前缀切片）折叠
+    // k=4 中段字面量锚点（不从生产函数取）：该前缀已穿越 goal-context 噪声与坏
+    // plan-state（data 非对象），view 仍 = 前缀内最后一条合法 entry（旧四字段）的
+    // 派生——钉住「跳过继续向前 + 最后一条合法 entry wins」的折叠语义
     let live: PlanStateView | null = null
+    let midAfterBadEntry: PlanStateView | null = null
     for (let k = 1; k <= SEQUENCE.length; k++) {
       const view = scanPlanStateEntries(SEQUENCE.slice(0, k))
       if (view) live = view
+      if (k === 4 && view) midAfterBadEntry = view
     }
+    expect(midAfterBadEntry).toEqual({
+      isActive: true,
+      planFilePath: '/tmp/taiji-harness/auth/plan.md',
+      requirement: '重构 auth 模块',
+      templateName: 'refactor',
+      state: 'planning',
+    })
     expect(live).toEqual(cold)
   })
 

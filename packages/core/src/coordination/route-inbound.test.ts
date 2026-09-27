@@ -529,6 +529,8 @@ describe('configureRouteInbound — crossSession 通道（ADR-0060）', () => {
       'extension:requestsInvalidated',
       'plugin:uiRequest',
       'plugin:viewUpdate',
+      'plugin:modalState',
+      'plugin:headerActionUpdate',
     ]
     for (const type of literals) {
       const ports = makePorts()

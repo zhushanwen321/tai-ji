@@ -66,6 +66,10 @@ describe('reject-digest 消化标记原语（D6）', () => {
     markDigestInitiated('compact', 's1')
     markDigestInitiated('bash', 's2')
     clearDigest('bash', 's1')
+    // 条目确实已删的判别（mark-then-check）：裸 isDigestConsumed===false 区分不了「已删」
+    // 与「仍在未决」——条目若仍在未决态，置位会被 has 守卫放行 → true；置位后仍 false
+    // = 守卫跳过 = 条目已删
+    markDigestConsumed('bash', 's1')
     expect(isDigestConsumed('bash', 's1')).toBe(false)
     expect(isDigestConsumed('bash', 's2')).toBe(false)
     // s2 的 bash 条目仍在（发起未决 = false 而非「从未发起」同值——判定语义一致即可，
@@ -83,6 +87,8 @@ describe('reject-digest 消化标记原语（D6）', () => {
     clearDigestSession('s1')
     markDigestConsumed('bash', 's1') // 条目已清 → 守卫跳过（session 已销毁，置位无意义）
     expect(isDigestConsumed('bash', 's1')).toBe(false)
+    // compact 分支同款 mark-then-check 判别（裸 false 区分不了「已删」与「未决」）
+    markDigestConsumed('compact', 's1')
     expect(isDigestConsumed('compact', 's1')).toBe(false)
     // s2 条目仍在：发起未决态可正常流转到已消化
     markDigestConsumed('bash', 's2')

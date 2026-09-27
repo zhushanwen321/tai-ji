@@ -444,7 +444,7 @@ describe('已应答抑制窗 + degraded 稳定窗（D4，fake timers 五断言 +
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(false)
   })
 
-  it('P2-2 失效帧（requestsInvalidated 摘除）同置已应答标记：ready 消失且抑制窗内零渲染', async () => {
+  it('P2-2 失效帧（requestsInvalidated 摘除）同置已应答标记：ready 消失，稳定窗满仍零渲染', async () => {
     vi.useFakeTimers()
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
@@ -455,6 +455,11 @@ describe('已应答抑制窗 + degraded 稳定窗（D4，fake timers 五断言 +
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)
+    // 杀伤锚点：推进过 2s 稳定期再断言——失效链同置已应答标记 → candidate=false 不 arm
+    // 稳定期定时器，窗满也不放行 degraded；漏置标记的变异在窗满后渲染 degraded → 红
+    // （fake timers 零推进时本断言恒绿，杀不死变异）
+    await vi.advanceTimersByTimeAsync(PLAN_REVIEW_DEGRADED_STABLE_MS + 1)
+    await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(false)
   })
 })

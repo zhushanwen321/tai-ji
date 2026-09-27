@@ -18,6 +18,7 @@ import type { ServerMessage } from '@taiji/shared'
 import { createChatStore } from '../store'
 import { getExecutingBash as getExecutingBashForTest } from '../bash-effects'
 import { createUseChat, resetChatModuleStateForTest } from '../useChat'
+import { isDigestConsumed, markDigestConsumed, markDigestInitiated } from '../reject-digest'
 import { provideDevMode, __resetDevModeForTesting } from '../../../platform/dev-mode'
 import type { UseChatDeps } from '../useChat'
 import { msg } from './helpers/fixtures'
@@ -164,16 +165,8 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('send.rejected handler：clearPendingSend + toast.error', async () => {
-    // [session-occupancy D2] send await 完成后未决记录已收口（WS FIFO 下 rejected 帧必然先于
-    // reply 处理，await 后到达属迟到帧/非直发来源）→ fallback 分支：保持既有反馈（清占位 +
-    // toast），不回滚不入队。直发时序的完整行为见下方「send.rejected 兜底与回滚」describe。
-    const f = makeFixture()
-    await f.useChat.send('s4', textToSegments('hi'))
-    f.emit('s4', msg('s4', 'send.rejected', { reason: 'busy', message: '被拒' }))
-    expect(f.toast.error).toHaveBeenCalledWith('被拒')
-    f.dispose()
-  })
+  // send.rejected 的 fallback 分支（清占位 + toast）由「send.rejected 兜底与回滚」describe
+  // 的「RPC ack 后迟到 rejected」用例覆盖（更强超集：额外断言不重复回滚不入队），此处不重复。
 
   it('message.* 单一入口：message_start → isGenerating=true', async () => {
     const f = makeFixture()
@@ -305,11 +298,19 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('disposeSession：取消订阅，再 send 重新订阅', async () => {
+  it('disposeSession：取消订阅，再 send 重新订阅；digest 残留一并清（clearDigestSession 接线锚定）', async () => {
     const f = makeFixture()
     await f.useChat.send('s12', textToSegments('hi'))
     expect(f.chatApi.streamSubscribe).toHaveBeenCalledTimes(1)
+    // dispose 前置一个已置位的 digest（原语置位 bash key，模拟 reject catch 尚未 finally
+    // 收口的残留）——disposeSession 经 clearDigestSession 清条目后，残留不得影响后续判定
+    markDigestInitiated('bash', 's12')
+    markDigestConsumed('bash', 's12')
     f.useChat.disposeSession('s12')
+    // mark-then-check 判别（裸 false 区分不了「已删」与「未决」）：条目若仍在未决态，
+    // 置位会被 has 守卫放行 → true；置位后仍 false = 守卫跳过 = 条目确实已删
+    markDigestConsumed('bash', 's12')
+    expect(isDigestConsumed('bash', 's12')).toBe(false)
     await f.useChat.send('s12', textToSegments('again'))
     expect(f.chatApi.streamSubscribe).toHaveBeenCalledTimes(2)
     f.dispose()
@@ -1277,7 +1278,7 @@ describe('sendBash ①b toast 抑制（D6 消化标记：已消化→抑制 / �
     f.dispose()
   })
 
-  it('reject 后 finally 收口：上一轮已消化残留不误抑制下一轮 transport 失败判定（单槽收口锚）', async () => {
+  it('reject 后 finally 清理：上一轮已消化残留不误抑制下一轮 transport 失败判定', async () => {
     const f = makeFixture()
     // 第一轮：终态帧先到（已消化）→ reject 抑制
     let rejectBash: (e: unknown) => void = () => {}
@@ -1293,7 +1294,9 @@ describe('sendBash ①b toast 抑制（D6 消化标记：已消化→抑制 / �
     rejectBash(new Error('Bash execution failed'))
     await first
     expect(f.toast.error).not.toHaveBeenCalled()
-    // 第二轮：transport 失败（无任何帧）——上一轮残留若未收口会误抑制，finally 收口后正常兜底
+    // 第二轮：transport 失败（无任何帧）——判定恢复主通道 = 新一轮发起 markDigestInitiated
+    // 重置上一轮已消化残留（finally clearDigest 是防泄漏兜底，删掉后本断言仍成立），两轮
+    // 断言锁「残留不跨轮误抑制」的整体行为回归
     f.chatApi.bash.mockRejectedValueOnce(new Error('transport unavailable (ws not open)'))
     await f.useChat.sendBash('b4', 'echo hi', false)
     expect(f.toast.error).toHaveBeenCalledTimes(1)

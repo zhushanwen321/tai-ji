@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, truncateSync } from 'node:fs'
+import { logger } from '../../../infra/logger.js'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { IMessageBus } from '../../message-bus/message-bus.js'
@@ -163,33 +164,8 @@ describe('refreshRecordEntries：拉取与发布', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
-  it('全量路径：有变化才发布 session.subagents 全量帧与 session.workflowUpdate 增量信号', async () => {
-    const { records, publish, client } = makeRecords()
-    const fire = registerSession(records)
-    client.getEntries.mockResolvedValue({
-      data: {
-        entries: [
-          subagentRecordEntry('sa-1', 'running', 'e1'),
-          workflowRecordEntry('run-1', 'running', 'e2'),
-        ],
-        leafId: 'e2',
-      },
-    })
-    fire('s1')
-    records.invalidateRecordEntries('s1', 'subagent-record')
-    await flushDebounce()
-
-    const subagentsMsg = publish.mock.calls.find(([, msg]) => (msg as { type: string }).type === 'session.subagents')
-    expect(subagentsMsg).toBeDefined()
-    expect(subagentsMsg![0]).toBe('s1')
-    expect((subagentsMsg![1] as { payload: { subagents: Array<{ subagentId: string; status: string }> } }).payload.subagents)
-      .toEqual([expect.objectContaining({ subagentId: 'sa-1', status: 'running' })])
-
-    const workflowMsgs = publish.mock.calls.filter(([, msg]) => (msg as { type: string }).type === 'session.workflowUpdate')
-    expect(workflowMsgs).toHaveLength(1)
-    expect((workflowMsgs[0][1] as { payload: { update: { runId: string; status: string } } }).payload.update)
-      .toEqual({ runId: 'run-1', status: 'running', reason: undefined })
-  })
+  // 「全量路径：有变化才发布」用例已并入 session-records-reconcile.test.ts「送达水位发布门」
+  // （严格超集：三家族帧 + 内容等价），此处不重复。
 
   it('running 态仅 trace 步骤数变化也发布 workflowUpdate（GUI 步骤实时可见，[步骤可见性修复 2026-09-14]）', async () => {
     const { records, publish, client } = makeRecords()
@@ -222,22 +198,8 @@ describe('refreshRecordEntries：拉取与发布', () => {
     expect(stepMsgs[1][0]).toBe('s1')
   })
 
-  it('同值重复 entry 不重复发布（diff 基线）', async () => {
-    const { records, publish, client } = makeRecords()
-    const fire = registerSession(records)
-    const entry = subagentRecordEntry('sa-1', 'running', 'e1')
-    client.getEntries.mockResolvedValue({ data: { entries: [entry], leafId: 'e1' } })
-    fire('s1')
-    records.invalidateRecordEntries('s1', 'subagent-record')
-    await flushDebounce()
-    expect(publish).toHaveBeenCalledTimes(1)
-
-    // 增量窗口返回同值新 entry（快照未变）——不发布
-    client.getEntries.mockResolvedValue({ data: { entries: [subagentRecordEntry('sa-1', 'running', 'e9')], leafId: 'e9' } })
-    records.invalidateRecordEntries('s1', 'subagent-record')
-    await flushDebounce()
-    expect(publish).toHaveBeenCalledTimes(1)
-  })
+  // 「同值重复 entry 不重复发布」用例与 session-records-reconcile.test.ts
+  // 「同值增量（新 entryId 同内容）不发布」场景相同，此处不重复。
 
   it('轮终翻转维度（result 写入 / resumable 桥接→idle）触发 publish；legacy chatMode 键容忍不触发（modeless 去比对维度）', async () => {
     const { records, publish, client } = makeRecords()
@@ -444,13 +406,20 @@ describe('refreshRecordEntries：拉取与发布', () => {
     expect(publish).not.toHaveBeenCalled()
   })
 
-  it('client 不存在（session 已死）：拉取冻结 no-op', async () => {
-    const { records, client } = makeRecords({ pm: { getClient: vi.fn(() => undefined) } as unknown as IProcessManager })
+  it('client 不存在（session 已死）：getClient 命中后 warn 显形，拉取冻结 no-op', async () => {
+    const getClient = vi.fn(() => undefined)
+    const { records, client } = makeRecords({ pm: { getClient } as unknown as IProcessManager })
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     const fire = registerSession(records)
     fire('s1')
     records.invalidateRecordEntries('s1', 'subagent-record')
     await flushDebounce()
+    // 生产代码真实消费的是 getClient('s1') 的 undefined 返回——断言打在 deps spy 上
+    expect(getClient).toHaveBeenCalledWith('s1')
     expect(client.getEntries).not.toHaveBeenCalled()
+    // [pull-push W0] 断点显形：warn 落「refresh skipped: pi client unavailable」恢复语义文案
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('refresh skipped: pi client unavailable'))).toBe(true)
+    warnSpy.mockRestore()
   })
 })
 

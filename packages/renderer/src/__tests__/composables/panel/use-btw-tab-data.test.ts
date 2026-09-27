@@ -236,10 +236,17 @@ describe('未读计数与视口清除（D8 终态表「未读」行）', () => {
     await settle(w)
     expect(text(w, 'unread')).toBe('1')
 
-    // 切回 A：切走期间分区保留，未读仍在（D7③ 线后台运行、分区继续累计）
+    // 切走期增长注入（杀伤锚点）：非焦点线（A 线）在 B 焦点期间增长 +1——
+    // routeUnreadGrowth 按 vid 归属写 A 分区（updateFor(owner)），B 焦点计数不动；
+    // 退化为写当前焦点分区的变异（update）会把增长写到 B 分区，切回 A 时丢失 → 红
+    chat.setMessages('btw:ta', [msg('a1'), msg('a2'), msg('a3')])
+    await settle(w)
+    expect(text(w, 'unread')).toBe('1') // B 焦点计数不因 A 线增长而变
+
+    // 切回 A：切走期间分区保留，未读含切走期增长（2 + 1 = 3，D7③ 线后台运行、分区继续累计）
     await w.setProps({ sid: SID_A })
     await settle(w)
-    expect(text(w, 'unread')).toBe('2')
+    expect(text(w, 'unread')).toBe('3')
   })
 })
 

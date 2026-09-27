@@ -527,14 +527,9 @@ function mixedRequiredApError(missing: string[], args: Record<string, unknown>):
 }
 
 describe("echo keys 分桶（并集恒定陷阱回归）", () => {
-	it("锁定事实：旧并集口径下三步 token 并集恒定（缺失→keys 对流）——误杀根源", () => {
-		// 模拟旧实现口径（req tokens ∪ 裸名 keys）：修好字段从缺失集迁入 keys 集，并集恒为全量
-		const legacyUnion = (fixed: number): Set<string> =>
-			new Set([...SIX_FIELDS.slice(fixed), ...SIX_FIELDS.slice(0, fixed)]);
-		expect(legacyUnion(0)).toEqual(legacyUnion(1));
-		expect(legacyUnion(1)).toEqual(legacyUnion(2));
-	});
-
+	// 误杀根源锁定：旧并集口径（req tokens ∪ 裸名 keys）下，修好字段从缺失集迁入 keys 集，
+	// req 缩小被 keys 增大抵消、token 并集恒为全量 → 三步签名恒定 → 第 3 次 terminal 误杀。
+	// 本用例证明分桶口径下每步产出新签名、计数重起不触闸（对 src/loop-gate.ts 变异可变红）。
 	it("① 核心回归：6 required 字段每轮修 1 个（缺失缩小 + keys 增大），每步新签名计数重起不触闸", () => {
 		const gate = new WorkflowGate();
 		for (let fixed = 0; fixed < 5; fixed++) {
@@ -543,7 +538,7 @@ describe("echo keys 分桶（并集恒定陷阱回归）", () => {
 			expect(gate.consecutiveFailures).toBe(1); // keys 不进签名：缺失集缩小 = 新签名
 		}
 		expect(gate.terminal).toBe(false);
-		// 签名级：前 3 轮互异（旧实现此三步同签名 fields(6)#…——上方探针复现场景）
+		// 签名级：前 3 轮互异（旧实现并集口径下此三步同签名 fields(6)#…——即上方误杀根源场景）
 		const sigs = [0, 1, 2].map((f) => normalizeErrorSignature(progressiveRequiredError(f)));
 		expect(new Set(sigs).size).toBe(3);
 	});
