@@ -383,7 +383,18 @@ export function projectV2Subagent(
     startedAt,
     endedAt,
     elapsedSeconds: deriveElapsedSeconds(startedAt, endedAt),
-    error: settled?.error ?? settledEntry?.error,
+    // error 供源与 stopReason 分流同构（W1 终态同步 F2-2 裁决）：settled 终局
+    // 原文 → 轮终失败收条（round-started 后 lastEvent 非 round-idle，上轮失败
+    // 原文随轮始清点语义不透传——对齐 v1 markRoundStartedImpl 清残留死因）→
+    // 条目面兜底（fold 缺席 = journal 未接线的旧实体）。
+    error:
+      fold !== undefined
+        ? settled !== undefined
+          ? settled.error
+          : fold.lastEvent?.type === 'record-round-idle'
+            ? roundIdle?.error
+            : undefined
+        : settledEntry?.error,
     origin: identity.origin,
     parentRunId: identity.parentRunId,
     stepIndex: identity.stepIndex,

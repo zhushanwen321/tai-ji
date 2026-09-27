@@ -216,6 +216,12 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope {
    * result 断供由本锚补齐（终局全文仍只在 v2 终态条目一次性写，D1）。
    */
   resultSummary?: string;
+  /**
+   * 轮终失败原因原文（可选——成功轮与旧 journal 行缺席）。失败轮 outcome.reason
+   * 的轮粒度结构化承载（投影 error 供源；v1 rec.error 显示信号的 journal 承接，
+   * W1 终态同步 F2-2 裁决）。resultSummary 的失败摘要句是兼容形态，本字段是权威。
+   */
+  error?: string;
 }
 
 /**

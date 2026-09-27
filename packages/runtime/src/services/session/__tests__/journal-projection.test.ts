@@ -557,6 +557,80 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     // 条目全文在场：全文优先（D1 唯一全文落点）
     expect(projectV2Subagent(registered, settledEntry, fold)!.result).toBe('full result text')
   })
+
+  // [W1 / F2-2 轮终 error] record-round-idle.error 失败原因原文供源（词表裁决）：
+  // 供源分流与 stopReason 同构——settled 终局优先 → 最新轮终失败收条 → 条目面兜底；
+  // round-started 后旧失败原文随轮始清点语义不透传（对齐 v1 markRoundStartedImpl
+  // 清残留死因，F2-1 同族红线）。
+  it('轮终失败：round-idle.error 在场（无终局）→ error 取失败原因原文', () => {
+    const roundIdle = {
+      type: 'record-round-idle' as const,
+      seq: 4,
+      ts: 3000,
+      stopReason: 'failed' as const,
+      turns: 2,
+      totalTokens: 600,
+      resultSummary: 'round did not complete: engine crashed',
+      error: 'engine crashed',
+    }
+    const fold = {
+      identity: createdEvent('sa-1'),
+      bound: undefined,
+      round: 1,
+      epoch: 0,
+      roundIdle,
+      settled: undefined,
+      lastSeq: 4,
+      lastEvent: roundIdle,
+    }
+    expect(projectV2Subagent(registered, undefined, fold)!.error).toBe('engine crashed')
+  })
+
+  it('第二轮在飞：round-started 在 round-idle 后 → 上轮失败原文不透传（轮始清点语义）', () => {
+    const roundIdle = {
+      type: 'record-round-idle' as const,
+      seq: 4,
+      ts: 3000,
+      stopReason: 'failed' as const,
+      turns: 2,
+      totalTokens: 600,
+      error: 'engine crashed',
+    }
+    const fold = {
+      identity: createdEvent('sa-1'),
+      bound: undefined,
+      round: 2,
+      epoch: 0,
+      roundIdle,
+      settled: undefined,
+      lastSeq: 5,
+      lastEvent: { type: 'record-round-started' as const, seq: 5, ts: 4000, round: 2, epoch: 0 },
+    }
+    expect(projectV2Subagent(registered, undefined, fold)!.error).toBeUndefined()
+  })
+
+  it('终局优先：settled 在场 → error 取终局原文（晚于轮终收条时不受 roundIdle 影响）', () => {
+    const roundIdle = {
+      type: 'record-round-idle' as const,
+      seq: 2,
+      ts: 2500,
+      stopReason: 'failed' as const,
+      turns: 2,
+      totalTokens: 500,
+      error: 'round-level failure',
+    }
+    const fold = {
+      identity: createdEvent('sa-1'),
+      bound: undefined,
+      round: 1,
+      epoch: 0,
+      roundIdle,
+      settled: settledRecordEvent({ seq: 3, resultSummary: 'settled summary', error: 'settled failure' }),
+      lastSeq: 3,
+      lastEvent: undefined,
+    }
+    expect(projectV2Subagent(registered, undefined, fold)!.error).toBe('settled failure')
+  })
 })
 
 describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {

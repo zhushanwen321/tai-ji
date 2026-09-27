@@ -253,9 +253,12 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   // 不再落 v1 快照 entry，只做引擎域回填感知（record-bound 帧）。
   ctx.reportRecordTransition(rec);
   // [W1 / D3 表行 4] record-round-idle 帧（轮终收条——stopReason + 轮统计快照 +
-  // result 摘要锚；.state 降级为本事件的落盘物化投影，D2 sidecar 裁决表 .state 行）。
-  // 摘要锚与 record-settled 同款截断（summarizeResultForJournal 单源）——承接 v1
-  // 轮终 result 显示信号（U8b），本轮 rec.result 已在②定稿。
+  // result 摘要锚 + 失败原因原文；.state 降级为本事件的落盘物化投影，D2 sidecar
+  // 裁决表 .state 行）。摘要锚与 record-settled 同款截断（summarizeResultForJournal
+  // 单源）——承接 v1 轮终 result 显示信号（U8b），本轮 rec.result 已在②定稿。
+  // error 原文锚（W1 终态同步 F2-2 裁决）：失败轮承载 outcome.reason——v1 rec.error
+  // 显示信号的 journal 承接；成功轮缺席。「轮始清残留死因」的投影侧语义由供源分流
+  // 保证（round-started 后 lastEvent 非 round-idle，本值不透传）。
   ctx.appendJournalEvent(rec, {
     type: "record-round-idle",
     ts: Date.now(),
@@ -263,6 +266,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
     turns: rec.turnCount,
     totalTokens: rec.totalTokens,
     resultSummary: summarizeResultForJournal(nextResult),
+    error: outcome.kind === "failed" ? outcome.reason : undefined,
   });
   // ⑫ [B2] 轮终派生 manifest 投影（session-reader manifest 直读主路径的数据源）：
   // 轮终 record 留内存 idle（U4 翻边），不经任何终态/回收写点——缺本写则 records/
