@@ -243,4 +243,21 @@ describe("buildSubagentEngineSection（恒在状态段三形态，§3.1 逐字�
     expect(buildEngineModelsPromptAppend("shared")).toBe(buildEngineModelsPromptAppend("shared"));
     expect(buildEngineModelsPromptAppend("nulled")).toBe(buildEngineModelsPromptAppend("nulled"));
   });
+
+  it("形态间干扰不产生状态残留：zcode → pi → zcode，两次 zcode 输出逐字节相等", () => {
+    // 穿插渲染其他形态（清单段消费 listModels——每次调用返回新数组实例、警告段走
+    // 未注册分支），再回到 zcode：输出必须与穿插前逐字节一致（渲染无模块级可变状态，
+    // D7 的跨形态面——任一形态的渲染调用不得污染其他形态的输出）
+    registerEngine("zcode", () =>
+      fakeEngine("zcode", [
+        { id: "builtin:bigmodel-coding-plan/GLM-5.3", name: "GLM-5.3" },
+        { id: "builtin:bigmodel-coding-plan/GLM-5.3-Flash" },
+      ]),
+    );
+    const before = buildSubagentEngineSection("zcode");
+    buildSubagentEngineSection("pi");
+    buildEngineModelsPromptAppend("zcode");
+    buildSubagentEngineSection("ghost");
+    expect(buildSubagentEngineSection("zcode")).toBe(before);
+  });
 });

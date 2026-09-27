@@ -191,6 +191,25 @@ describe('parseWorkflowRunEventFileLine（run 域 tail 行解析器）', () => {
       parseWorkflowRunEventFileLine(JSON.stringify({ type: 'run-settled', ts: 1, outcome: 'bogus' })),
     ).toBeUndefined()
   })
+
+  it('[W2 D2] 删值成员 ask-executing 的历史 journal 行 → undefined（tailer 跳过计日志链路的 parse 面）；保留成员 armed 照常放行', () => {
+    // 词表缩窄前落账的历史行（完整载荷形态）——解析层返回 undefined 交 tailer
+    // 计数 warn，不卡游标、不炸投影
+    expect(
+      parseWorkflowRunEventFileLine(
+        JSON.stringify({ type: 'ask-executing', ts: 1, taskIndex: 0, agentName: 'w', attempt: 1 }),
+      ),
+    ).toBeUndefined()
+    // member-pool（U4 additive 成员，PROBE 补键）照常放行
+    expect(
+      parseWorkflowRunEventFileLine(
+        JSON.stringify({ type: 'member-pool', ts: 1, action: 'clear' }),
+      ),
+    ).toMatchObject({ type: 'member-pool', action: 'clear' })
+    expect(
+      parseWorkflowRunEventFileLine(JSON.stringify({ type: 'armed', ts: 1, frame: {} })),
+    ).toMatchObject({ type: 'armed' })
+  })
 })
 
 describe('foldRunJournalEvents（run 骨架 fold）', () => {
@@ -214,6 +233,16 @@ describe('foldRunJournalEvents（run 骨架 fold）', () => {
     expect(replayed.asks.get(0)?.settled?.ts).toBe(1900)
     expect(replayed.runSettled?.ts).toBe(2000)
     expect(replayed.asks.size).toBe(2)
+  })
+
+  it('[W2 D2] member-pool 帧进 fold 不炸不改状态（池登记属 run 域附属投影，骨架 fold 无 per-call 语义）', () => {
+    const fold = foldRunJournalEvents(initialRunJournalFold(), [
+      runEvent({ type: 'member-pool', action: 'register', name: 'w1', recordId: 'sa-1', ts: 1000 }),
+      runEvent({ type: 'member-pool', action: 'clear', ts: 2000 }),
+    ])
+    expect(fold.created).toBeUndefined()
+    expect(fold.asks.size).toBe(0)
+    expect(fold.runSettled).toBeUndefined()
   })
 })
 

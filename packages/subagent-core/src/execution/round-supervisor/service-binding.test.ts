@@ -366,8 +366,10 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
     const supervisor = createRoundSupervisorForService(h.binding);
 
-    // 纳管经磁盘兜底视图（内存 Map 空）——boot 分区重认领形态
-    supervisor.bootPartition();
+    // 纳管经磁盘兜底视图（内存 Map 空）——[W2/V3] boot 重认领循环已清退，构造通道
+    // 迁移为死亡事件纳管：getMutable miss → findLightById 磁盘兜底视图（活跃形态）
+    // → 纳管 + merged 通知 + 指引 + 看门狗 armed。
+    supervisor.adoptOnProcessDeath(makeRecord({ id: diskRecord.id, rootSessionId: "root-1" }), "engine crashed");
     await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
 
     // sidecar：sessionFile 旁 .state 内容 = {status:finalized, reason:"gc"}；finalizeClosed 不适用（无内存 record）
@@ -397,8 +399,8 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     // 误拦异宿主接管）。
     expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
 
-    // 磁盘态分支无终止通知（sent 仅 boot 重认领的 decision guidance 一条）
-    expect(h.pi?.sent).toHaveLength(1);
+    // 磁盘态分支无终止通知（sent = merged 通知 + 决策指引两条，均非终止通知）
+    expect(h.pi?.sent).toHaveLength(2);
     expect(h.pi?.sent.every((s) => !s.message.content.includes(TERMINATION_NOTICE_MARK))).toBe(true);
   });
 
@@ -407,7 +409,8 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     const h = makeDiskBinding(diskRecord);
     const supervisor = createRoundSupervisorForService(h.binding);
 
-    supervisor.bootPartition();
+    // [W2/V3] 构造通道迁移（boot 重认领清退）：死亡事件纳管 → 磁盘兜底视图 → 看门狗。
+    supervisor.adoptOnProcessDeath(makeRecord({ id: diskRecord.id, rootSessionId: "root-1" }), "engine crashed");
     await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
 
     expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
@@ -417,8 +420,9 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
   });
 
   it("entry 面抛错（pi.appendEntry 炸）→ best-effort 吞掉不向上抛，sidecar 照常落盘", async () => {
-    // 候选入 collectResult → boot 重认领（readopted）武装看门狗——没有这一步
+    // 候选入 collectResult → 死亡事件纳管触发评估链武装看门狗——没有这一步
     // listCandidateRecords 返回空、giveUp 永不执行、entry catch 不可达（MF-R2-2）。
+    // [W2/V3] 构造通道迁移（boot 重认领清退）：死亡事件纳管。
     const diskRecord = makeDiskRecord(sessionFile);
     const h = makeDiskBinding(diskRecord);
     (h.pi!.appendEntry as ReturnType<typeof vi.fn>).mockImplementation(() => {
@@ -426,8 +430,7 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     });
     const supervisor = createRoundSupervisorForService(h.binding);
 
-    const { readopted } = supervisor.bootPartition();
-    expect(readopted).toEqual([diskRecord.id]);
+    supervisor.adoptOnProcessDeath(makeRecord({ id: diskRecord.id, rootSessionId: "root-1" }), "engine crashed");
     // 裸 await：giveUp 编排若有逃逸异常会以 unhandled rejection 判红本用例
     await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
 
@@ -452,7 +455,8 @@ describe("supervisorGiveUp 磁盘态（boot 重认领后看门狗到期）", () 
     const writeSpy = vi.mocked(stateMarker.writeFinalizedState);
     writeSpy.mockImplementation(() => false);
     try {
-      supervisor.bootPartition();
+      // [W2/V3] 构造通道迁移（boot 重认领清退）：死亡事件纳武装看门狗。
+      supervisor.adoptOnProcessDeath(makeRecord({ id: diskRecord.id, rootSessionId: "root-1" }), "engine crashed");
       await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
     } finally {
       writeSpy.mockImplementation(actual.writeFinalizedState);
@@ -670,32 +674,39 @@ describe("createRoundSupervisorForService 通知装配", () => {
 
   it("candidates 接线：collectRecords 以 (SCAN_LIMIT, running, rootId) 调用；rootId null → undefined filter", () => {
     const h = makeBinding({ sessionFile, rootId: "root-1" });
-    h.store.collectResult.push({ id: "bg-1", rootSessionId: "root-1", agent: "worker", slug: "fix-bug", startedAt: 1 });
+    // 视图源在位——评估链推进到替代对账（listCandidateRecords 的唯一剩余消费方）。
+    h.store.memory.set("bg-1", makeRecord());
+    h.store.collectResult.push({ id: "bg-2", rootSessionId: "root-1", agent: "worker", slug: "fix-bug", startedAt: 1 });
     const supervisor = createRoundSupervisorForService(h.binding);
-    supervisor.bootPartition();
+    // [W2/V3] boot 重认领循环清退——candidates 的唯一消费方 = 评估链的替代对账
+    //（superseded 窗口扫描），构造通道迁移为死亡事件纳管触发的评估。
+    supervisor.adoptOnProcessDeath(makeRecord(), "engine crashed");
     expect(h.store.collectCalls).toEqual([
       { limit: COLD_LOOKUP_SCAN_LIMIT, status: "running", rootFilter: "root-1" },
     ]);
 
     const h2 = makeBinding({ sessionFile, rootId: null });
+    h2.store.memory.set("bg-1", makeRecord());
     const supervisor2 = createRoundSupervisorForService(h2.binding);
-    supervisor2.bootPartition();
+    supervisor2.adoptOnProcessDeath(makeRecord(), "engine crashed");
     expect(h2.store.collectCalls).toEqual([
       { limit: COLD_LOOKUP_SCAN_LIMIT, status: "running", rootFilter: undefined },
     ]);
   });
 
-  it("record 视图磁盘兜底投影：内存 miss 时 boot 分区经 findLightById 读视图并可重认领", () => {
+  it("record 视图磁盘兜底投影：内存 miss 时经 findLightById 读磁盘视图驱动纳管判定", () => {
     const h = makeBinding({ sessionFile });
     h.store.disk.set("bg-disk", makeDiskRecord(sessionFile));
     h.store.collectResult.push({ id: "bg-disk", rootSessionId: "root-1", agent: "worker", slug: "fix-bug", startedAt: 1 });
     const supervisor = createRoundSupervisorForService(h.binding);
 
-    const { readopted } = supervisor.bootPartition();
+    // [W2/V3] 构造通道迁移（boot 重认领清退）：死亡事件纳管——getMutable miss 落
+    // findLightById 磁盘兜底视图，活跃形态驱动该唤醒。
+    supervisor.adoptOnProcessDeath(makeRecord({ id: "bg-disk", rootSessionId: "root-1" }), "engine crashed");
 
-    expect(readopted).toEqual(["bg-disk"]);
-    // 磁盘投影视图驱动判定：running + 无完成产出（[U5/D4] 全子集谓词）→ 决策指引送达
-    expect(h.pi?.sent).toHaveLength(1);
-    expect(h.pi?.sent[0]?.message.content).toContain("died mid-task and stays resumable");
+    // 磁盘投影视图驱动判定：活跃 + 无完成产出（[U5/D4] 全子集谓词）→ 决策指引送达
+    //（merged 通知之后第 2 条）。
+    expect(h.pi?.sent).toHaveLength(2);
+    expect(h.pi?.sent[1]?.message.content).toContain("died mid-task and stays resumable");
   });
 });

@@ -21,9 +21,12 @@
 //   ⑩ WorktreeManager.scan = 1（git/rm 进程操作在方法内部）
 //   ⑫ rebuildIndexes = 1（[U4c/G1] manifest 补缺/索引重建写发生在函数内部）
 //
-// 守卫 Map 是模块级状态：beforeEach resetModules + 动态 import 每用例取新鲜模块实例。
+// 守卫 Map 是模块级状态：本文件静态 import 被测工厂（免付每用例全图重建），守卫
+// Map 经 ext-guards 测试重置导出在 beforeEach 清空（与 resetModules 重建等价）。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { _resetOncePerProcessForTest } from "@zhushanwen/pi-ext-guards";
 
 // ── mock modules（在 import 前声明；对齐 index-session-start.test.ts 内联 vi.mock 模式） ──
 
@@ -190,18 +193,21 @@ vi.mock("../interface/commands.ts", () => ({
   registerWorkflowsCommand: vi.fn(),
 }));
 
-// ── import 被测工厂（每用例 resetModules 后动态取新鲜实例，守卫 Map 随之重建） ──
+// ── import 被测工厂（静态 import——守卫 Map 经 _resetOncePerProcessForTest 重置，
+//    免付每用例 resetModules 全图重建） ──
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+// [W2/V4 D6] 直落断言消费的 status 映射单点（与生产直落同一函数）
+import { mapReasonToStatus } from "@zhushanwen/extension-protocol";
+
 import { IDENTITY_CUSTOM_TYPE } from "@zhushanwen/subagent-core/execution/persistence/session-reconstructor.ts";
 
-let subagentsExtension: (pi: ExtensionAPI) => void;
+import subagentsExtension from "../index.ts";
 
-beforeEach(async () => {
-  vi.resetModules();
+beforeEach(() => {
   vi.clearAllMocks();
-  subagentsExtension = (await import("../index.ts")).default;
+  _resetOncePerProcessForTest();
 });
 
 // ── helpers（对齐 crash-recovery.test.ts 形态） ──
@@ -285,7 +291,8 @@ function createMockCtx(): Record<string, unknown> {
 
 describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）", () => {
   it("双派发下五项跨 session 副作用操作各执行 1 次（recoverCrashedRuns 已移出守卫，B1）", async () => {
-    // ⑪ 模拟恢复一个 run：onRunRecovered 回调 → pi.events.emit（真实链路观察点）
+    // ⑪ 模拟恢复一个 run：onRunRecovered 回调 → [W2/V4 D6] pi.appendEntry 直落
+    //（真实链路观察点——注销不经 emit）
     mockRecoverCrashedRuns.mockImplementation(async (
       _store: unknown,
       _runs: unknown,
@@ -295,7 +302,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
       opts?.onRunRecovered?.({ id: "wf-recover-1", reason: "failed" });
     });
 
-    const { pi, emits, getSessionStartHandler } = createMockPi();
+    const { pi, appendEntryCalls, getSessionStartHandler } = createMockPi();
     subagentsExtension(pi);
     // factory 体内有一次无守卫的 syncEnginesFile（U7b，模块加载期兜底，u-audit 范围外）
     // ——清计数后只观察 handler 双派发窗口。
@@ -316,13 +323,18 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
     expect(mockRebuildIndexes).toHaveBeenCalledTimes(1);
     expect(mockScan).toHaveBeenCalledTimes(1);
     // [B1] recoverCrashedRuns 不再挂进程级守卫：每 session_start 各跑一次（×2）——
-    // 双派发是幂等空转（第二次 loadAll 全终态）。mock 恒 emit 故 unregister = 2；
-    // 真实幂等语义（第二次 emit 0 条）由 crash-recovery.test.ts 的 B1 用例锁定。
+    // 双派发是幂等空转（第二次 loadAll 全终态）。mock 恒回调故 unregister = 2；
+    // 真实幂等语义（第二次直落 0 条）由 crash-recovery.test.ts 的 B1 用例锁定。
     expect(mockRecoverCrashedRuns).toHaveBeenCalledTimes(2);
     expect(mockRecoverCrashedRuns.mock.calls[0]?.[2]).toBe("Process killed (kill-9 or crash recovery)");
-    const unregister = emits.filter((e) => e.channel === "pending:unregister");
+    // [W2/V4 D6] 注销直落 appendEntry：每派发恰一条（reason/status 与生产同构）
+    const unregister = appendEntryCalls.filter((c) => c.customType === "pending:unregister");
     expect(unregister).toHaveLength(2);
-    expect(unregister[0]!.data).toEqual({ id: "wf-recover-1", reason: "failed" });
+    expect(unregister[0]!.data).toEqual({
+      id: "wf-recover-1",
+      reason: "failed",
+      status: mapReasonToStatus("failed"),
+    });
   });
 
   it("防误伤：③identity appendEntry / ④bindNotifyLedger / ⑥initSession 每 session_start 执行（双派发 ×2）", async () => {

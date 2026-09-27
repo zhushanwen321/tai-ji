@@ -1,9 +1,15 @@
-// src/__tests__/workflow-stall-notify.test.ts
+// src/__tests__/workflow-stall.test.ts
 //
-// [P4 / D6-2] stall informational 通知单测（impl-plan P4 验收条款 d：超阈值恰好
-// 一次、文案含不终止声明）。
+// stall watchdog 双面合一（stall-notify + stall-watchdog 两文件合并，用例一条不丢）：
+//   - 装配面（原 workflow-stall-notify.test.ts）：[P4 / D6-2] stall informational 通知
+//     经 setupWorkflowDomain 装配链的端到端守护（impl-plan P4 验收条款 d：超阈值恰好
+//     一次、文案含不终止声明；sessionState 投影 + 真实 journal IO + notifyStall 发送）。
+//   - 模块面（原 workflow-stall-watchdog.test.ts）：createStallWatchdog 直测——零 mock
+//     兄弟模块、零 fs（readLastProgress 注入 fake），覆盖判定/恰一次/回退/防御/围栏/
+//     arm 幂等/dispose。
+// 两层测试面：模块行为在模块面，接线正确在装配面。
 //
-// 覆盖面：
+// 装配面覆盖：
 //   - 超阈值（journal 尾帧 ts 早于 20min 阈值）→ 恰好一条 informational 通知
 //     （customType workflow-stall、无 triggerTurn——informational 不打断主 agent）
 //   - 文案含「仍在运行 / 无需干预 / 不自动终止」声明（still running / no action
@@ -15,7 +21,7 @@
 //
 // mock 手法对齐 workflow-events-deps-getter.test.ts：session-lifecycle mock 受控
 // sessionState 填充；notifyDone/notifyStall 保留真实实现（黑盒断言 sendMessage）。
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -40,7 +46,12 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import type { InFlightReporter } from "../host/inflight-reporter.ts";
 import type { WorkflowDomainHandle } from "../workflow-events.ts";
-import { peekStallWatchdog } from "../workflow-stall-watchdog.ts";
+import {
+  createStallWatchdog,
+  peekStallWatchdog,
+  type StallRunView,
+  type StallWatchdogDeps,
+} from "../workflow-stall-watchdog.ts";
 
 const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.workflow-domain-state");
 const DIALOG_QUEUE_KEY = Symbol.for("@zhushanwen/pi-subagents.dialogQueue");
@@ -49,7 +60,7 @@ const NOTIFY_LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger
 const STALL_TICK_MS = 60_000;
 const STALL_THRESHOLD_MS = 20 * 60 * 1000;
 
-// ── fake 组件（deps-getter 测试同款） ──────────────────────────
+// ── 装配面 fake 组件（deps-getter 测试同款） ──────────────────
 
 function sentMessages(pi: ExtensionAPI): { customType: string; content: string; display: boolean; details?: unknown; options?: unknown }[] {
   const fn = pi.sendMessage as unknown as { mock: { calls: unknown[][] } };
@@ -142,50 +153,67 @@ function makeFakeLifecycleResult(sessionId: string, sessionDir: string, runs: Ma
   };
 }
 
-let setupWorkflowDomain: typeof import("../workflow-events.ts").setupWorkflowDomain;
+// ── 模块面 fake deps（watchdog 直测） ─────────────────────────
 
-interface Mounted {
-  pi: ExtensionAPI;
-  handle: WorkflowDomainHandle;
-  tmpDir: string;
-  sessionId: string;
+function makeView(overrides: Partial<StallRunView> = {}): StallRunView {
+  return {
+    runId: "wf-direct",
+    scriptName: "deploy",
+    startedAtMs: Date.now(),
+    journalPath: "/tmp/none/wf-direct.events.jsonl",
+    ...overrides,
+  };
 }
 
-async function mount(sessionId: string, sessionDir: string, runs: Map<string, WorkflowRun>): Promise<Mounted> {
-  const { pi, handlers } = makePi();
-  const result = makeFakeLifecycleResult(sessionId, sessionDir, runs);
-  mockSetupSessionLifecycle.mockResolvedValue(result);
-  const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() });
-  await handlers.get("session_start")!({ type: "session_start" }, result.ctx);
-  return { pi, handle, tmpDir: sessionDir, sessionId };
+function makeDeps(views: StallRunView[], lastProgress: number | undefined) {
+  const notifyStalled = vi.fn();
+  const onTickError = vi.fn();
+  const deps: StallWatchdogDeps = {
+    getRunningRuns: () => views,
+    readLastProgress: () => lastProgress,
+    notifyStalled,
+    onTickError,
+    thresholdMs: STALL_THRESHOLD_MS,
+  };
+  return { deps, notifyStalled, onTickError };
 }
 
-beforeEach(async () => {
-  vi.resetModules();
-  vi.clearAllMocks();
-  resetSlots();
-  vi.useFakeTimers();
-  setupWorkflowDomain = (await import("../workflow-events.ts")).setupWorkflowDomain;
-});
+// ── 共享 afterEach：清装配链残留 watchdog timer（fake timers 下句柄真实存在）──
 
 afterEach(() => {
-  // 清本测试装配的 stall watchdog timer（fake timers 下 interval 句柄真实存在）
   peekStallWatchdog()?.dispose();
   vi.useRealTimers();
   resetSlots();
 });
 
-// ── 验收条款 d ───────────────────────────────────────────────
+// ══ 装配面：stall informational 通知（D6-2）════════════════
 
-describe("stall informational 通知（D6-2）", () => {
+describe("stall informational 通知（D6-2，装配面）", () => {
+  let setupWorkflowDomain: typeof import("../workflow-events.ts").setupWorkflowDomain;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    resetSlots();
+    vi.useFakeTimers();
+    setupWorkflowDomain = (await import("../workflow-events.ts")).setupWorkflowDomain;
+  });
+
+  async function mount(sessionId: string, sessionDir: string, runs: Map<string, WorkflowRun>): Promise<{ pi: ExtensionAPI; handle: WorkflowDomainHandle }> {
+    const { pi, handlers } = makePi();
+    const result = makeFakeLifecycleResult(sessionId, sessionDir, runs);
+    mockSetupSessionLifecycle.mockResolvedValue(result);
+    const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() });
+    await handlers.get("session_start")!({ type: "session_start" }, result.ctx);
+    return { pi, handle };
+  }
+
   it("超阈值：恰好一条通知，文案含不终止声明，informational 无 triggerTurn", async () => {
     vi.setSystemTime(new Date("2026-09-21T12:00:00Z"));
     const runId = "wf-stall-slow";
-    const tmpDir = mkdtempSync(join(tmpdir(), "wf-stall-root-"));
     // 尾帧 ts = now - 25min（超 20min 阈值）
     const stalledTs = Date.now() - (STALL_THRESHOLD_MS + 5 * 60_000);
     const journalDir = makeSessionDirWithJournal(runId, stalledTs);
-    rmSync(tmpDir, { recursive: true, maxRetries: 5, retryDelay: 20 });
 
     const runs = new Map<string, WorkflowRun>([[runId, makeRunningRun(runId)]]);
     const { pi } = await mount("sess-1", journalDir, runs);
@@ -263,5 +291,147 @@ describe("stall informational 通知（D6-2）", () => {
 
     await vi.advanceTimersByTimeAsync(STALL_TICK_MS);
     expect(sentMessages(pi)).toHaveLength(0);
+  });
+});
+
+// ══ 模块面：workflow stall watchdog 直测 ════════════════════
+
+describe("workflow stall watchdog（模块直测）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-24T12:00:00Z"));
+  });
+
+  it("超阈值：通知一次，二次 tick 零重发（恰一次）", () => {
+    const view = makeView();
+    const stalledTs = Date.now() - (STALL_THRESHOLD_MS + 5 * 60_000);
+    const { deps, notifyStalled } = makeDeps([view], stalledTs);
+    const watchdog = createStallWatchdog(deps);
+    watchdog.arm();
+
+    vi.advanceTimersByTime(STALL_TICK_MS);
+    expect(notifyStalled).toHaveBeenCalledTimes(1);
+    // stalledMs = tick 时刻(now=构造时刻+TICK) - 进展时间戳
+    expect(notifyStalled).toHaveBeenCalledWith(view, STALL_THRESHOLD_MS + 5 * 60_000 + STALL_TICK_MS, stalledTs);
+    expect(watchdog.hasNotified(view.runId)).toBe(true);
+
+    vi.advanceTimersByTime(STALL_TICK_MS);
+    expect(notifyStalled).toHaveBeenCalledTimes(1);
+    watchdog.dispose();
+  });
+
+  it("恰一次标记先于发送落下（notifyStalled 回调内可见）", () => {
+    const view = makeView();
+    const { deps, notifyStalled } = makeDeps([view], Date.now() - (STALL_THRESHOLD_MS + 60_000));
+    const seenDuringNotify: boolean[] = [];
+    let watchdogRef: ReturnType<typeof createStallWatchdog> | undefined;
+    notifyStalled.mockImplementation(() => {
+      seenDuringNotify.push(watchdogRef?.hasNotified(view.runId) ?? false);
+    });
+    watchdogRef = createStallWatchdog(deps);
+    watchdogRef.arm();
+
+    vi.advanceTimersByTime(STALL_TICK_MS);
+    expect(seenDuringNotify).toEqual([true]);
+    watchdogRef.dispose();
+  });
+
+  it("阈值内（进展新鲜）零通知", () => {
+    const { deps, notifyStalled } = makeDeps([makeView()], Date.now() - 60_000);
+    const watchdog = createStallWatchdog(deps);
+    watchdog.arm();
+
+    vi.advanceTimersByTime(STALL_TICK_MS);
+    expect(notifyStalled).not.toHaveBeenCalled();
+    watchdog.dispose();
+  });
+
+  it("readLastProgress 返回 undefined → 回退 startedAtMs 判定（不因无帧静默）", () => {
+    const view = makeView({ startedAtMs: Date.now() - (STALL_THRESHOLD_MS + 10 * 60_000) });
+    const { deps, notifyStalled } = makeDeps([view], undefined);
+    const watchdog = createStallWatchdog(deps);
+    watchdog.arm();
+
+    vi.advanceTimersByTime(STALL_TICK_MS);
+    expect(notifyStalled).toHaveBeenCalledTimes(1);
+    watchdog.dispose();
+  });
+
+  it("startedAtMs 无效（NaN）且回退命中 → 跳过，不通知不标记", () => {
+    const view = makeView({ startedAtMs: Number.NaN });
+    const { deps, notifyStalled } = makeDeps([view], undefined);
+    const watchdog = createStallWatchdog(deps);
+    watchdog.arm();
+
+    vi.advanceTimersByTime(STALL_TICK_MS);
+    expect(notifyStalled).not.toHaveBeenCalled();
+    expect(watchdog.hasNotified(view.runId)).toBe(false);
+    watchdog.dispose();
+  });
+
+  it("noteRunSettled 回收恰一次标记", () => {
+    const view = makeView();
+    const { deps } = makeDeps([view], Date.now() - (STALL_THRESHOLD_MS + 60_000));
+    const watchdog = createStallWatchdog(deps);
+    watchdog.arm();
+
+    vi.advanceTimersByTime(STALL_TICK_MS);
+    expect(watchdog.hasNotified(view.runId)).toBe(true);
+    watchdog.noteRunSettled(view.runId);
+    expect(watchdog.hasNotified(view.runId)).toBe(false);
+    watchdog.dispose();
+  });
+
+  it("notifyStalled 抛错 → onTickError 收到，timer 存活（下一 tick 补扫其余 run）", () => {
+    const viewA = makeView({ runId: "wf-err" });
+    const viewB = makeView({ runId: "wf-next" });
+    const { deps, notifyStalled, onTickError } = makeDeps(
+      [viewA, viewB],
+      Date.now() - (STALL_THRESHOLD_MS + 60_000),
+    );
+    notifyStalled.mockImplementation((v) => {
+      if (v.runId === "wf-err") throw new Error("send failed");
+    });
+    const watchdog = createStallWatchdog(deps);
+    watchdog.arm();
+
+    // viewA：标记已落（先标记后发送）、发送抛错 → 本 tick 循环中断（viewB 未及
+    // 处理，与拆出前语义一致——围栏在 tick 整体，错误不炸 timer）
+    vi.advanceTimersByTime(STALL_TICK_MS);
+    expect(notifyStalled).toHaveBeenCalledTimes(1);
+    expect(watchdog.hasNotified("wf-err")).toBe(true);
+    expect(watchdog.hasNotified("wf-next")).toBe(false);
+    expect(onTickError).toHaveBeenCalledTimes(1);
+    expect(onTickError.mock.calls[0]![0]).toBeInstanceOf(Error);
+
+    // 下一 tick：viewA 已标记不重试，viewB 补扫正常通知
+    vi.advanceTimersByTime(STALL_TICK_MS);
+    expect(notifyStalled).toHaveBeenCalledTimes(2);
+    expect(onTickError).toHaveBeenCalledTimes(1);
+    watchdog.dispose();
+  });
+
+  it("arm 幂等：重复 arm 清旧 timer，单周期只 tick 一次", () => {
+    const view = makeView();
+    const { deps, notifyStalled } = makeDeps([view], Date.now() - (STALL_THRESHOLD_MS + 60_000));
+    const watchdog = createStallWatchdog(deps);
+    watchdog.arm();
+    watchdog.arm(); // reload 形态：factory 重跑再 arm
+
+    vi.advanceTimersByTime(STALL_TICK_MS);
+    expect(notifyStalled).toHaveBeenCalledTimes(1);
+    watchdog.dispose();
+  });
+
+  it("dispose 后零 tick；dispose 幂等", () => {
+    const view = makeView();
+    const { deps, notifyStalled } = makeDeps([view], Date.now() - (STALL_THRESHOLD_MS + 60_000));
+    const watchdog = createStallWatchdog(deps);
+    watchdog.arm();
+    watchdog.dispose();
+    watchdog.dispose();
+
+    vi.advanceTimersByTime(STALL_TICK_MS * 3);
+    expect(notifyStalled).not.toHaveBeenCalled();
   });
 });

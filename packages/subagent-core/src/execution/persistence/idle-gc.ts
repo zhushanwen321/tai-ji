@@ -12,12 +12,18 @@
  *     （判据含「已回收 = 视同终态」）——回收跨 session record 时 appendEntry 只达
  *     当前 session entries（写达域无效），且 archive 不走 finalizeRecord、无注销
  *     发射枚举身份（发射点枚举 D2 的 5 处不含 GC）。
- *  3. WorkflowRun store 同批纳入：running 且 meta.startedAt 超 IDLE_TTL_MS 的 run
- *     终态化归档（transition("done","time_limited") + save 持久化终态）。时间锚选择
- *     = WorkflowRunMeta.startedAt（run 创建时刻，ISO string）——run 状态无 idleSince
- *     等价物，meta.completedAt 仅终态存在，startedAt 是唯一创建时确定的锚（与
- *     record startedAt 同 rationale）。**只终态化不补注销**同上：run 的注销发射
- *     身份在 transition("done") 路径（发射点③）与其宿主收口链，GC 不越权补发。
+ *  3. WorkflowRun store 同批纳入：超龄 run 终局化。[W2/V1 D1/D3] 记录动作改走
+ *     收编入口 adoptInterruptedRun 终局记录原语（journal run-settled 帧 +
+ *     manifest 物化两件直落，outcome='interrupted' + errorCode='idle-evicted'——
+ *     管理性回收 = 被动终局，不稀释 cancelled 的主动语义；原 `transition("done",
+ *     "time_limited") + save` 两态机活体写点已随 W2/V1 退役）。**只终局化不补
+ *     注销/条目**：注销依赖 reconcile-sweep 自愈（判据源 = D6 改接后的 fold/
+ *     manifest 终态证据）、条目依赖宿主 session 重开时 loadAll 的
+ *     appendSettledEntryFallback 补写——与 abandon 侧对称的「不新增跨 session
+ *     写通道」裁决（D3：appendEntry 对旧 session run 写达域无效）。
+ *     时间锚 = WorkflowRunMeta.startedAt（run 创建时刻 ISO string）；终局判定
+ *     由原语的幂等前置承接（fold 终态 / manifest / 条目三面证据——不裸读快照
+ *     status 字段，快照已终局的 run 命中 skippedTerminal 幂等跳过）。
  */
 import { toErrorMessage } from "../../core/error-message.ts";
 import { isHostNotConfiguredError } from "../../core/host-services.ts";
@@ -25,28 +31,81 @@ import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 import { isResumable } from "../lifecycle/lifecycle-predicates.ts";
 import type { RecordStore } from "./record-store.ts";
+import { adoptInterruptedRun } from "../../orchestration/run-registry.ts";
 
 const logger = getLogger("subagents");
 
-/** GC 扫描间隔：1 小时。 */
+/** GC 扫描间隔缺省：1 小时。 */
 // eslint-disable-next-line no-magic-numbers -- 60*60*1000 = 1h 的毫秒换算常数
 const GC_INTERVAL_MS = 60 * 60 * 1000;
-/** idle record TTL：30 天（超龄回收）。record 锚窗与 workflow run 锚窗共用。 */
+/** idle record TTL 缺省：30 天（超龄回收）。record 锚窗与 workflow run 锚窗共用。 */
 // eslint-disable-next-line no-magic-numbers -- 30*24*60*60*1000 = 30d 的毫秒换算常数
 const IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** 毫秒/天（GC 日志的 d 换算）。 */
 // eslint-disable-next-line no-magic-numbers -- 24*60*60*1000 = 1d 的毫秒换算常数
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// ── [W2/V1 场景 3] idle 测试调短通道两 env 旋钮（决策 8）──────────────
+//
+// TTL 定超龄判据、interval 定回收节奏，两旋钮缺一不可：TTL 调短只让 run 变
+// 超龄，回收动作本身仍要等下一轮 interval 定时器。解析语义（与 abandon 窗先例
+// 的 opt-out 语义**不同款**，决策 8 裁决）：
+// - 未设/空 → 缺省回退现状常量（TTL 30 天、interval 1h——生产行为不变）；
+// - 非法值（非有限数/≤0）→ 回退缺省并 warn 留痕——不照搬 abandon 先例的
+//   「非法 = opt-out 不终局化」：idle 侧整款照搬即 GC timer 整体停摆、30 天
+//   回收上界失效（风险侧方向相反），不采用；warn 防刷屏（每进程每旋钮一次）。
+
+/** run idle TTL env 通道（TAIJI_ 前缀理由对齐 abandon 窗先例 RUN_ABANDON_WINDOW_MS_ENV）。 */
+export const WORKFLOW_RUN_IDLE_TTL_MS_ENV = "TAIJI_WORKFLOW_RUN_IDLE_TTL_MS";
+/** GC 扫描间隔 env 通道。 */
+export const WORKFLOW_RUN_GC_INTERVAL_MS_ENV = "TAIJI_WORKFLOW_RUN_GC_INTERVAL_MS";
+
+const envWarned = new Set<string>();
+
+/** 通用解析：未设/空 → 缺省；非法值（非有限数/≤0）→ 回退缺省 + warn 留痕。 */
+function resolveMsEnv(
+  envName: string,
+  fallbackMs: number,
+  label: string,
+): number {
+  const raw = process.env[envName];
+  if (raw === undefined || raw === "") return fallbackMs;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    if (!envWarned.has(envName)) {
+      envWarned.add(envName);
+      logger.warn(
+        `[subagents] GC: ${envName}="${raw}" is not a finite positive number — ` +
+          `falling back to the default ${label} (${fallbackMs}ms). ` +
+          "Fix: unset the env or set a finite positive integer (milliseconds).",
+      );
+    }
+    return fallbackMs;
+  }
+  return parsed;
+}
+
+/** 解析 run idle TTL：env 未设/空 → 缺省 30 天；非法值 → 缺省 + warn。 */
+export function resolveWorkflowRunIdleTtlMs(): number {
+  return resolveMsEnv(WORKFLOW_RUN_IDLE_TTL_MS_ENV, IDLE_TTL_MS, "idle TTL");
+}
+
+/** 解析 GC 扫描间隔：env 未设/空 → 缺省 1 小时；非法值 → 缺省 + warn。 */
+export function resolveWorkflowRunGcIntervalMs(): number {
+  return resolveMsEnv(WORKFLOW_RUN_GC_INTERVAL_MS_ENV, GC_INTERVAL_MS, "GC interval");
+}
+
 /**
  * WorkflowRun GC 窄口（idle-gc 对 WorkflowRun store 的最小依赖面，结构类型——
  * 调用方传 FileRunStore 实例即可，不 import orchestration 具体类，保持本模块
  * 可独立编译 + 单测）。loadAll 失败（宿主未 configureCore / IO 错）由实现侧
  * 或本模块 catch 吞掉，单轮跳过下轮重试。
+ *
+ * [W2/V1] transition/save 成员删除：终局化经收编原语（journal/manifest 写面，
+ * 不经两态机快照）——快照写面不再是 GC 的职责（判据读者已随 D6 改接换源）。
  */
 export interface WorkflowRunGcStore {
-  loadAll(): Promise<Array<{ runId: string; state: { status: string }; meta: { startedAt: string }; transition(target: "done", reason?: string): void }>>;
-  save(run: unknown): Promise<void>;
+  loadAll(): Promise<Array<{ runId: string; state: { status: string }; meta: { startedAt: string } }>>;
 }
 
 /**
@@ -56,12 +115,13 @@ export interface WorkflowRunGcStore {
  *    GC 候选从「running 桥接形态」扩张到全部 idle，含中断族 idle / `.state` 重建
  *    idle；W4 死亡纳管态 running 退出候选，supervisor 接管链 settle 后落 idle 回到
  *    候选集，设计待验证①范围扩张已接受）的，锚点（idleSince
- *    优先，缺失回退 startedAt——[W4 锚扩展]）超过 IDLE_TTL_MS 的回收
+ *    优先，缺失回退 startedAt——[W4 锚扩展]）超过 TTL 的回收
  *    （[U2b] markIdleEvicted：archive 先 + `.alive` release 后——回收 = 放弃持有
  *    即放弃写权声明，D3a release 出口②）。单条失败不阻断其余（bestEffort 留痕）。
  *    **只回收不补注销**（见文件头注）。
- *  - workflow 面（注入 workflowRuns 时）：running 且 meta.startedAt 超
- *    IDLE_TTL_MS 的 run 终态化归档（transition + save），单 run 失败不阻断。
+ *  - workflow 面（注入 workflowRuns 时）：超龄 run 交收编入口终局化
+ *    （[W2/V1 D3] adoptInterruptedRun 原语——outcome='interrupted' +
+ *    errorCode='idle-evicted'，幂等前置承接终局判定），单 run 失败不阻断。
  *
  * [池抽象降级 2026-09-13] 原「回收时同步释放该 record 的引擎池引用」（releasePoolRef）
  * 接线已删除——refs 引用计数机制整体退役，record 的 journal 回收统一由
@@ -73,6 +133,7 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
     const now = Date.now();
     // [U5/D4] 扫描面 = 全部内存 record（listAllInMemory）——判据 isResumable 已改
     // idle 派生，候选集（idle record）不在 listRunningMutable 的 running 过滤结果里。
+    const ttlMs = resolveWorkflowRunIdleTtlMs();
     for (const record of store.listAllInMemory()) {
       if (!isResumable(record)) continue;
       // [W4 锚扩展] idleSince（轮终写点）优先；缺失（无轮终信号的存量/异常形态）
@@ -80,7 +141,7 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
       // 30 天量级下 created 锚的精度损失可接受。
       const anchorMs = record.idleSince ?? record.startedAt;
       const age = now - anchorMs;
-      if (age > IDLE_TTL_MS) {
+      if (age > ttlMs) {
         logger.warn(
           `[subagents] GC: evicting idle record ${record.id} (idle for ${Math.round(age / MS_PER_DAY)}d)`,
         );
@@ -99,16 +160,18 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
     if (workflowRuns !== undefined) {
       void gcWorkflowRuns(workflowRuns, now);
     }
-  }, GC_INTERVAL_MS);
+  }, resolveWorkflowRunGcIntervalMs());
   timer.unref?.();
   return () => clearInterval(timer);
 }
 
 /**
- * [W4 WorkflowRun store 纳入] running 且 startedAt 超锚窗的 run 终态化归档。
- * reason = "time_limited"（超龄归档语义的 DoneReason，对主 agent 的语义是
- * 「run 因超时被收口」而非 completed）。失败吞错留痕（清理是旁路维护，不能
- * 拖垮 GC interval；下轮重试）。
+ * [W4 WorkflowRun store 纳入 / W2/V1 D3 改走收编原语] 超龄 run 终局化。
+ * 候选 = 快照 running 且 startedAt 超锚窗（status 粗筛只做廉价预筛：v2 终局 run
+ * 的快照 status 停更 running，交原语后由三面证据幂等跳过）；终局判定权威 =
+ * adoptInterruptedRun 幂等前置（fold 终态 / manifest / 条目——不裸读快照字段
+ * 判终局，分流表 idle-gc 判活行）。失败吞错留痕（清理是旁路维护，不能拖垮 GC
+ * interval；下轮重试——原语幂等，重试安全）。
  */
 async function gcWorkflowRuns(workflowRuns: WorkflowRunGcStore, now: number): Promise<void> {
   let runs: Awaited<ReturnType<WorkflowRunGcStore["loadAll"]>>;
@@ -127,18 +190,30 @@ async function gcWorkflowRuns(workflowRuns: WorkflowRunGcStore, now: number): Pr
     }
     return;
   }
+  const ttlMs = resolveWorkflowRunIdleTtlMs();
   for (const run of runs) {
-    if (run.state.status !== "running") continue;
+    if (run.state.status !== "running") continue; // 廉价预筛（终局判定权威在原语幂等前置）
     const startedMs = Date.parse(run.meta.startedAt);
     if (!Number.isFinite(startedMs)) continue; // 畸形锚不过判（宁挂账不失明）
     const age = now - startedMs;
-    if (age <= IDLE_TTL_MS) continue;
+    if (age <= ttlMs) continue;
     logger.warn(
       `[subagents] GC: terminating stale running workflow run ${run.runId} (started ${Math.round(age / MS_PER_DAY)}d ago)`,
     );
     try {
-      run.transition("done", "time_limited");
-      await workflowRuns.save(run);
+      // [W2/V1 D3] 收编入口：journal 帧 + manifest 两件直落（outcome='interrupted'
+      // + errorCode='idle-evicted'——管理性回收归被动终局）；条目/注销不补
+      //（跨 session 写达域约束，重开自愈——D3 裁决，见文件头注）。
+      const adopted = await adoptInterruptedRun(run.runId, {
+        outcome: "interrupted",
+        errorCode: "idle-evicted",
+        reason: "idle run evicted after retention TTL",
+      });
+      if (adopted !== "adopted") {
+        logger.debug(
+          `[subagents] GC: stale workflow run ${run.runId} not adopted (${adopted}) — skip this cycle`,
+        );
+      }
     } catch (err) {
       bestEffort(err, `GC terminate workflow run ${run.runId}`);
     }

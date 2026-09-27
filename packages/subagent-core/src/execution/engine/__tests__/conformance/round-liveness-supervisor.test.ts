@@ -41,6 +41,7 @@ import {
   type SupervisorCandidateRecord,
   type SupervisorRecordView,
 } from "../../../round-supervisor/index.ts";
+import { isLegacyClosedSettled } from "../../../persistence/execution-record.ts";
 import type { ExecutionRecord } from "../../../assembly/types.ts";
 
 // ── 场景道具（替身 deps——黑盒观测面：通知/指引/替代/放弃四出口 + 三状态源）────
@@ -87,7 +88,9 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
 function viewOf(record: ExecutionRecord, overrides: Partial<SupervisorRecordView> = {}): SupervisorRecordView {
   return {
     id: record.id,
-    status: record.status === "idle" && record.closedReason !== undefined ? "closed" : "running",
+    // [W2/V3 D5] 旧「closed 终态」读判定 ⟺ isLegacyClosedSettled（唯一权威谓词）；
+    // 视图第三套词表 running|closed 删除——settled 布尔投影，判定语义不变。
+    settled: isLegacyClosedSettled(record),
     hasResult: record.result !== undefined,
     rootSessionId: record.rootSessionId,
     agent: record.agent,
@@ -170,16 +173,16 @@ describe("[W6/D2 裁决表 conversation 行 → modeless 波1 豁免消亡]", ()
 });
 
 describe("[W6/D2 表 3 行 2/3 × A5] boot 分区与 sweep 落盘衔接", () => {
-  it("running 无产出候选（原 already-resumable-idle 重认领形态）→ 纳管接管并送达指引", () => {
+  it("[W2/V3 §3.0] 恒不可达重认领循环清退：bootPartition 恒空返回且零副作用（原 already-resumable-idle 重认领形态退役）", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
     const record = makeRecord({ id: "bg-survivor" });
     deps.candidates.push({ id: record.id, rootSessionId: record.rootSessionId, agent: record.agent, slug: record.slug, startedAt: record.startedAt });
     deps.views.set(record.id, viewOf(record));
     const { readopted } = supervisor.bootPartition();
-    expect(readopted).toEqual([record.id]);
-    expect(deps.guidances).toHaveLength(1);
-    expect(supervisor.supervisedIds()).toEqual([record.id]);
+    expect(readopted).toEqual([]);
+    expect(deps.guidances).toHaveLength(0);
+    expect(supervisor.supervisedIds()).toEqual([]);
   });
 
   it("in-flight 直断后的注册残留 → 对账 sweep appendEntry 权威落盘（A5「注销落盘可查」）", () => {

@@ -34,6 +34,10 @@
 //     host-services 动态解析宿主实现，见 agents-assembly.test.ts 同款）——
 //     移除 u-5c 期的 vi.mock(core/logger)，日志断言用例自行注入 logCalls sink。
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { configureNotifyDomain, resetNotifyDomainForTests } from "../../core/notify-ports.ts";
@@ -1334,6 +1338,29 @@ describe("notify-ledger 常量锚", () => {
     expect(typeof notifierModule.createNotifier).toBe("function");
     ledger.dispose();
     _resetNotifyLedgerForTest();
+  });
+});
+
+// ─── 生产写点形态锁（迁自壳 contract.notify-custom-types.test.ts core 段） ──
+//
+// 壳侧跨包裸路径读 core 源码的形态锁迁回被测包内（同包相对路径，消除壳测试对
+// core 源码树位置的依赖）。锁两面：NOTIFY_CUSTOM_TYPE 必须保持 extension-protocol
+// SSOT 别名（非字面量赋值——回潮 = 新的裸字面量漂移面）；放弃分诊的通道判型不得
+// 裸写 customType 值字面量（判型点必须经常量/通道变量比较）。
+
+describe("notify-ledger 生产写点形态锁（SSOT 别名 + 分诊零裸字面量）", () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "notify", "notify-ledger.ts"),
+    "utf-8",
+  );
+
+  it("NOTIFY_CUSTOM_TYPE 为 SSOT 别名（= SUBAGENT_BG_NOTIFY_CUSTOM_TYPE，非字面量赋值）", () => {
+    expect(source).toMatch(/export const NOTIFY_CUSTOM_TYPE\s*=\s*SUBAGENT_BG_NOTIFY_CUSTOM_TYPE/);
+    expect(source).not.toMatch(/NOTIFY_CUSTOM_TYPE\s*=\s*["']/);
+  });
+
+  it("放弃分诊的通道判型不裸写 customType 值字面量（typeof 类型守卫不在断言面）", () => {
+    expect(source).not.toMatch(/item\.deliveryCustomType\s*(?:===|!==)\s*["']/);
   });
 });
 

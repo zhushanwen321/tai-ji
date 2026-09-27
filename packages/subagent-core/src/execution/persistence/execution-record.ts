@@ -839,8 +839,31 @@ export function deriveOutcome(
 }
 
 /**
+ * 旧「closed 终态」读判定的单一谓词（[W2/V3 D5] 桥接判据收敛——历史 6 文件 9 处
+ * 手抄 `status === "idle" && closedReason !== undefined` 的唯一权威实现，判定语义
+ * 一字不变；新增读点禁止手抄，一律 import 本函数）。
+ *
+ * 桥接不变量（两态迁移，U2 起）：旧 closed 终态读形态 ⟺ idle ∧ closedReason 有值。
+ * markSettled/markRoundIdle 产出的轮间 idle 不携带 closedReason（新侧语义——settle
+ * 不是终态），不命中本谓词；旧终态遗留（D7 例外族终态、监督器放弃、v1 数据、manifest
+ * 读侧）命中。
+ *
+ * [W2 D5 兼容位] closedReason 是读侧兼容位（设计 D5：随 W4 sunset 退役），本谓词是
+ * 其唯一读点——兼容位收缩时只改此处。
+ *
+ * @param record 结构子集（ExecutionRecord / SubagentRecord / entry 快照均满足）——
+ *   谓词只消费两态状态位与 closedReason 遗留位，不要求完整 record。
+ */
+export function isLegacyClosedSettled(record: {
+  status: ExecutionStatus;
+  closedReason?: ClosedReason;
+}): boolean {
+  return record.status === "idle" && record.closedReason !== undefined;
+}
+
+/**
  * 投影层 outcome 唯一出口：running / 轮间 idle → undefined（outcome 语义只适用
- * 旧终态遗留形态）；旧终态（桥接不变量：idle ∧ closedReason 有值）→ 一等 outcome
+ * 旧终态遗留形态）；旧终态（isLegacyClosedSettled 命中）→ 一等 outcome
  * 字段直读优先，字段缺失（存量/磁盘重建 record——outcome 持久化不在 U3 领地内）
  * 时回退 deriveOutcome(closedReason, error) 兜底——单一权威函数，消费方零手写推导。
  * 返回值联合含 "closed-legacy" 预留态，消费方必须处理。
@@ -851,9 +874,9 @@ export function projectOutcome(record: {
   closedReason?: ClosedReason;
   error?: string;
 }): ProjectedOutcome | undefined {
-  // 桥接判据：旧「closed」读形态 ⟺ idle ∧ closedReason 有值（markSettled 的轮间
-  // idle 无 closedReason，不投影 outcome——非终态语义）。
-  if (!(record.status === "idle" && record.closedReason !== undefined)) return undefined;
+  // [W2/V3 D5] 桥接判据收敛：旧「closed」读形态 ⟺ isLegacyClosedSettled（markSettled
+  // 的轮间 idle 无 closedReason，不投影 outcome——非终态语义）。
+  if (!isLegacyClosedSettled(record)) return undefined;
   return record.outcome ?? deriveOutcome(record.closedReason, record.error);
 }
 

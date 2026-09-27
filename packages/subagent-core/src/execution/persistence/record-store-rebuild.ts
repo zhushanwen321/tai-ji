@@ -24,7 +24,7 @@ import * as fs from "node:fs";
 
 import { getLogger } from "../../core/logger.ts";
 
-import { getCurrentActivity, getDisplayItems, getEventLog, markReconstructedStatus } from "./execution-record.ts";
+import { getCurrentActivity, getDisplayItems, getEventLog, isLegacyClosedSettled, markReconstructedStatus } from "./execution-record.ts";
 import { readStateMarker } from "./state-marker.ts";
 import type { RecordBinding, StateMarker } from "./state-marker.ts";
 import { readRecordBinding, zcodeAnchorBasePath } from "./state-marker.ts";
@@ -899,7 +899,8 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
 function legacyManifestStatusFields(
   rec: SubagentRecord,
 ): Pick<ManifestRecord, "status"> {
-  const legacySettled = rec.status === "idle" && rec.closedReason !== undefined;
+  // [W2/V3 D5 桥接判据收敛] 旧「closed 终态」读判定 ⟺ isLegacyClosedSettled（唯一权威谓词）。
+  const legacySettled = isLegacyClosedSettled(rec);
   return {
     status: legacySettled
       ? (rec.closedReason === "cancelled" ? "cancelled" : "closed")

@@ -27,7 +27,10 @@ import { Budget } from "../../orchestration/models/budget.ts";
 import type { RunSpec } from "../../orchestration/models/run-spec.ts";
 import type { LifecycleDeps } from "../../orchestration/models/ports.ts";
 import type { WorkerHandle } from "../../orchestration/worker-handle.ts";
-import { finalizeRun } from "../../orchestration/worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+  finalizeRun,
+} from "../../orchestration/worker-message-pump.ts";
 import { WorkflowRun } from "../../orchestration/models/workflow-run.ts";
 
 // ── harness ──────────────────────────────────────────────────
@@ -153,6 +156,7 @@ describe("run 级 pending register/unregister 闭环（D7）", () => {
     ] as const) {
       const run = makeRealRun(`wf-loop-${doneReason}`);
       const deps = makeFinalizeDeps();
+      await dispatchRunCreated(run); // [W2/V1] 六态机引导（终局裁决前置）
       await finalizeRun(run, deps, doneReason, { context: `loop-test-${doneReason}` });
       const unregister = appendedUnregister(deps);
       expect(unregister).toEqual({
@@ -168,6 +172,7 @@ describe("run 级 pending register/unregister 闭环（D7）", () => {
   it("status 非 identity 映射锁定：budget_limited → failed（词表外落值防线）", async () => {
     const run = makeRealRun("wf-loop-budget");
     const deps = makeFinalizeDeps();
+    await dispatchRunCreated(run); // [W2/V1] 六态机引导（终局裁决前置）
     await finalizeRun(run, deps, "budget_limited", { context: "loop-test-budget" });
     expect(appendedUnregister(deps)).toEqual({
       id: "wf-loop-budget",

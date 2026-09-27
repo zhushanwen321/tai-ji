@@ -38,16 +38,21 @@ import { getLogger } from "../core/logger.ts";
 
 import { assertSafeTimerDelay } from "../shared/timer-delay.ts";
 import { validateRunArgs } from "./args-validator.ts";
+import { finalRunErrorCodeOf } from "./run-events.ts";
 import {
   appendWorkflowRecordRegisteredEntry,
   buildWorkflowRecordSettledEntryData,
   closeOutInFlightCalls,
-  dispatchFinalRunSettle,
   dispatchRunCreated,
   finalizeRun,
+  forgetSettledRecord,
   handleWorkerError,
   handleWorkerExit,
   handleWorkerMessage,
+  isRunSettled,
+  runSettledOutcomeToDoneReason,
+  settleRunAccounting,
+  settledRecordOf,
 } from "./worker-message-pump.ts";
 import { Budget } from "./models/budget.ts";
 import type { LifecycleDeps, RunStore, WorkerHandlers } from "./models/ports.ts";
@@ -448,8 +453,9 @@ export async function runWorkflow(
 /**
  * 中止 workflow（running）。
  *
- * **done 状态 no-op**：已终态的 run 不重复 abort。
- * **A4 原子性**：transition("done", doneReason) 内部先 releaseRuntime。
+ * **已终局 no-op**（[W2/V1] 判据 isRunSettled）：已终局 run 不重复 abort。
+ * **A4 原子性**：runtime 释放由 finalizeRun 显式 releaseRuntime 承载（原两态机
+ * transition 内联副作用随写点删除上提，[W2/V1 D1]）。
  *
  * @param runId
  * @param deps
@@ -470,9 +476,10 @@ export async function abortRun(
 
   deps.log?.("debug", "workflow:lifecycle", "abortRun", { runId, status: run.state.status, reason, doneReason });
 
-  // done 状态 no-op
-  if (run.state.status === "done") {
-    deps.log?.("debug", "workflow:lifecycle", "abortRun no-op: already done", { runId });
+  // 已终局 no-op（[W2/V1] 判据换源 isRunSettled——原两态机 status 检查随活体
+  // 写点删除停更；活体终局经注册表判定，恢复路径写点 run 经聚合 done 判定）。
+  if (isRunSettled(run)) {
+    deps.log?.("debug", "workflow:lifecycle", "abortRun no-op: already settled", { runId });
     return;
   }
 
@@ -546,7 +553,9 @@ export async function terminateRunningRuns(
   options?: TerminateRunningRunsOptions,
 ): Promise<void> {
   for (const run of deps.runs.values()) {
-    if (run.state.status !== "running") continue;
+    // [W2/V1] 已终局 run 跳过（判据换源 isRunSettled——原两态机 status 检查随
+    // 活体写点删除停更）。
+    if (isRunSettled(run)) continue;
     try {
       deps.log?.("debug", "workflow:lifecycle", "terminateRunningRuns", { runId: run.runId, reason });
       run.state.error = reason;
@@ -578,46 +587,52 @@ export async function terminateRunningRuns(
 // ── evictDoneRunsBeyondCap（done run 内存淘汰，原地裁剪函数） ────────
 
 /**
- * 淘汰 runs Map 中超出保留窗口的 done run，返回本次淘汰数量。
+ * 淘汰 runs Map 中超出保留窗口的已终局 run，返回本次淘汰数量。
  *
- * 规则（契约 W3C1）：
- * 1. **状态白名单**：仅 `state.status === "done"` 可淘汰（RunStatus 封闭两态，
- *    显式白名单而非「非 running」——未来新增状态不落淘汰端）。running
- *    （活跃执行，isScriptRunning 遍历依赖）永不淘汰，即使 completedAt 缺失也
- *    绝不参与排序淘汰。
- * 2. **排序**：done 项按 `meta.completedAt` ISO 字符串字典序升序（toISOString 恒
- *    UTC 毫秒格式，字典序=时间序）。completedAt 缺失（防御旧格式/异常快照）fallback
- *    排序键为空串——字典序最小=最旧，先被淘汰。
+ * 规则（契约 W3C1；[W2/V1 D1] 判据与排序键换源后的形态）：
+ * 1. **终局白名单**：仅 `isRunSettled` 可淘汰（活体终局经注册表判定 / 恢复路径
+ *    写点 run 经聚合 done 判定——原两态机 `state.status === "done"` 白名单随活体
+ *    写点删除对活体终局失效）。活跃执行 run 永不淘汰，即使排序键缺失也绝不参与
+ *    排序淘汰。
+ * 2. **排序**：[W2/V1 D1] 排序键换终局帧时间戳——settledRecordOf().settledAt
+ *    （journal run-settled 帧自带时序；活体终局后 meta.completedAt 不再更新）。
+ *    恢复路径写点 run（无注册表记录）回落 `meta.completedAt`（恢复写点仍写它，
+ *    I2 在恢复域成立）。两者均缺失（防御异常形态）fallback 0——数值最小=最旧，
+ *    先被淘汰。
  * 3. **tie 稳定排序**：比较器三态返回（相等返回 0），Array#sort 稳定性（Node≥12）
  *    保持元素原序——原序 = Map 插入序 = 创建序，tie 组内先创建者视为更旧先被淘汰
- *    （kill-9 批量恢复同 ms completedAt 场景的确定性保证）。
- * 4. **淘汰执行**：超限数 excess = doneCount - keepDone（<=0 时 no-op 返回 0），
- *    对升序前 excess 项逐个 `runs.delete(runId)`。
+ *    （kill-9 批量恢复同 ms 时间戳场景的确定性保证）。
+ * 4. **淘汰执行**：超限数 excess = settledCount - keepDone（<=0 时 no-op 返回 0），
+ *    对升序前 excess 项逐个 `runs.delete(runId)`，并同步回收终局记录注册表条目
+ *    （forgetSettledRecord——注册表与内存 run 同生命周期）。
  * 5. **边界不变式**：禁止按 Map 插入序直接淘汰——嵌套 workflow 父 run 创建最早、
  *    完成最晚，插入序淘汰会在其自身 onRunDone 同步裁剪中淘汰它，runAndWait 轮询
  *    窗口内 get 不到 → 误返 "Run not found"。
- * 6. **副作用边界**：只清内存 runs Map，不动磁盘 state 文件、不删
- *    workflow-state-link 指针条目、不发任何事件。
+ * 6. **副作用边界**：只清内存 runs Map 与终局记录注册表，不动磁盘 state 文件、
+ *    不删 workflow-state-link 指针条目、不发任何事件。
  *
  * @param runs per-session 的 run 注册表（原地裁剪）
- * @param keepDone done run 保留数（生产传 MAX_RETAINED_DONE_RUNS）
+ * @param keepDone 已终局 run 保留数（生产传 MAX_RETAINED_DONE_RUNS）
  * @returns 本次淘汰的 run 数量
  */
 export function evictDoneRunsBeyondCap(
   runs: Map<string, WorkflowRun>,
   keepDone: number,
 ): number {
-  // 显式白名单：仅 done 参与淘汰（running 误删即功能破坏）
-  const done = Array.from(runs.values()).filter((r) => r.state.status === "done");
-  const excess = done.length - keepDone;
+  // 显式白名单：仅已终局参与淘汰（活跃 run 误删即功能破坏）
+  const settled = Array.from(runs.values()).filter((r) => isRunSettled(r));
+  const excess = settled.length - keepDone;
   if (excess <= 0) return 0;
-  // ISO 字典序=时间序；缺失 fallback 空串（ISO 串恒以 '2' 开头非空，空串严格最小=最旧）
-  const keyOf = (r: WorkflowRun): string => r.meta.completedAt ?? "";
+  // [W2/V1 D1] 排序键 = 终局帧时间戳（注册表）→ 恢复写点 completedAt 回落 → 0 兜底；
+  // 数值升序 = 时间升序，缺失 fallback 最小 = 最旧先淘汰
+  const keyOf = (r: WorkflowRun): number =>
+    settledRecordOf(r.runId)?.settledAt ?? (Date.parse(r.meta.completedAt ?? "") || 0);
   // 三态比较器 + sort 稳定性：tie 保持 Array.from 的 Map 插入序（=创建序）——
   // 先插入者更旧先淘汰，禁止按插入序直接 slice 淘汰（边界不变式 5）
-  done.sort((a, b) => (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : 0));
-  for (const r of done.slice(0, excess)) {
+  settled.sort((a, b) => keyOf(a) - keyOf(b));
+  for (const r of settled.slice(0, excess)) {
     runs.delete(r.runId);
+    forgetSettledRecord(r.runId);
   }
   return excess;
 }
@@ -725,22 +740,35 @@ export async function recoverCrashedRuns(
       run.state.error = reason;
       if (isV2Entity) {
         // v2 实体：journal 收编先于 state 快照直改（事实源介质归位：run-settled 帧
-        // 经 dispatchFinalRunSettle 走状态机裁决 + manifest 物化——与活体终局同一
-        // dispatch 链，证据落点对称）。
-        // 双重启幂等由 dispatch 链 fold-terminal 让位承接（terminal × run-settled
-        // 表外转移 fail-fast，warn 后 state 快照恢复继续）；loadAll 侧条目幂等由
-        // settledEntries 抑制（壳 rebuildRunsFromJournals 双面证据拦截）。失败围栏：
-        // journal IO / 坏链（IllegalTransitionError）留痕后继续 state 快照恢复
-        // （A-5 语义降级不阻断——快照面照旧收敛 failed）。
+        // 经 settleRunAccounting 终局记录原语走状态机裁决 + manifest 物化——与活体
+        // 终局同一 dispatch 链，证据落点对称）。
+        // [W2/V1 D2/D3] outcome='interrupted'：进程死亡是被动终局（崩溃 ≠ 失败，
+        // 章程 D2 四值词表裁决）；kill 语境由 errorCode 承载（保持 extractFailedRunErrorCode
+        // 提取语义——重水合最小聚合无失败 call 时落 "unknown" 保守可诊断）。
+        // 双重启幂等由原语三面证据 + dispatch 链 fold-terminal 让位承接（terminal ×
+        // run-settled 表外转移 fail-fast，warn 后 state 快照恢复继续）；loadAll 侧
+        // 条目幂等由 settledEntries 抑制（壳 rebuildRunsFromJournals 双面证据拦截）。
+        // 失败围栏：journal IO / 坏链（IllegalTransitionError）留痕后继续 state 快照
+        // 恢复（A-5 语义降级不阻断——快照面照旧收敛 failed）。
         try {
-          await dispatchFinalRunSettle(run, "failed");
+          const errorCode = finalRunErrorCodeOf(run, "failed");
+          const record = {
+            outcome: "interrupted" as const,
+            ...(errorCode !== undefined ? { errorCode } : {}),
+            reason: run.state.error,
+            settledAt: Date.now(),
+          };
+          await settleRunAccounting(run, record);
           hooks?.appendSettledEntry?.(
             WORKFLOW_RECORD_CUSTOM_TYPE,
             buildWorkflowRecordSettledEntryData({
               runId: run.runId,
-              reason: "failed",
-              outcome: "failed",
-              settledAt: Date.now(),
+              // [W2 D5] reason 经联合派生单点（interrupted → "failed" 诊断兜底容器，
+              // 细分语境由帧 errorCode 保留可辨）。
+              reason: runSettledOutcomeToDoneReason(record.outcome, record.errorCode),
+              outcome: record.outcome,
+              ...(record.errorCode !== undefined ? { errorCode: record.errorCode } : {}),
+              settledAt: record.settledAt,
               callCount: run.state.calls.size,
               usedTokens: run.state.budget.usedTokens,
             }),

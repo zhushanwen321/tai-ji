@@ -271,24 +271,48 @@ async function loadRunFromStateFile(filePath: string): Promise<WorkflowRun | nul
 }
 
 /**
- * [终局调和] journal `run-settled` 帧的 RunOutcome 三态 → DoneReason（completed/
- * failed 同名直取；cancelled → aborted——与 core doneReasonToRunOutcome 正向映射
- * 互逆；outcome 类型经 core barrel 直引 RunOutcome）。v1 兼容层与 v2 重建共用。
+ * [W2/V1 D5 签名升级] journal `run-settled` 帧的 (RunOutcome, errorCode) 联合判别
+ * → DoneReason：completed/failed 同名直取、cancelled → aborted（与 core
+ * doneReasonToRunOutcome 正向映射互逆）；budget_limited/time_limited 恢复同名细分
+ * （与帧生产侧 finalRunErrorCodeOf 恒等映射互逆——纯 outcome 反推会把预算/超时
+ * 终局静默折叠成 "failed"，通知串与条目 reason 细分丢失，不采用）；interrupted →
+ * "failed" 诊断兜底（DoneReason 无 interrupted 成员，两态机遗产 W4 随兼容层
+ * sunset——显示语义一律走 outcome 四值，折叠仅存 reason 诊断面）。
+ *
+ * 消费方：v1 兼容层调和 / v2 重建 / appendSettledEntryFallback（条目 reason 五处
+ * 统一派生第五处，[W2 D5]）。单源说明：core 侧同签名函数在
+ * worker-message-pump.runSettledOutcomeToDoneReason（core 消费方专用）——双侧
+ * 同语义实现是 V1 领地约束下的形态（barrel/exports 不在本单元领地，跨包单源
+ * 合并需 exports 登记后收口），值表一致性由两侧测试同规格锁定。
  */
-function runSettledOutcomeToDoneReason(outcome: RunOutcome): DoneReason {
+/** run-settled 帧形状（从 journal 事件词表提取——errorCode 类型同源，免第二定义点）。 */
+type RunSettledFrame = Extract<WorkflowRunEvent, { type: "run-settled" }>;
+
+export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: RunSettledFrame["errorCode"]): DoneReason {
+  if (outcome === "failed" && (errorCode === "budget_limited" || errorCode === "time_limited")) {
+    return errorCode;
+  }
   switch (outcome) {
     case "completed":
       return "completed";
-    case "failed":
-      return "failed";
     case "cancelled":
       return "aborted";
-    // [W2 D5] interrupted（被动终局）→ "failed" 诊断兜底：DoneReason 无 interrupted 成员
-    // （两态机遗产，W4 随兼容层 sunset），细分语境由帧 errorCode 保留可辨；V1 将升级为
-    // (outcome, errorCode) 联合判别签名恢复 budget_limited/time_limited 细分。
+    case "failed":
     case "interrupted":
       return "failed";
   }
+}
+
+/**
+ * [W2/V1] 终局记录（journal run-settled 帧载荷的进程内投影——与 core 侧
+ * RunSettlementRecord 同构）。reason/errorCode 直取帧载荷；DoneReason 由
+ * runSettledOutcomeToDoneReason 联合派生（不在本形状内预计算）。
+ */
+export interface RunSettlementRecord {
+  outcome: RunOutcome;
+  errorCode?: RunSettledFrame["errorCode"];
+  reason?: string;
+  settledAt: number;
 }
 
 // ── State file retention (OR-5 ⑥b default-on → [W1 / D5] core 单源收口) ─────
@@ -460,6 +484,35 @@ export class JsonlRunStore implements RunStore {
   }
 
   /**
+   * [W2/V1 D1 第 8 行] 单一判源函数（壳 store 域的判活/终局判定收拢）：
+   * ① 聚合 done（恢复路径写点 run / v1 重水合条目——v1 兼容层读面，W4 sunset）；
+   * ② journal run-settled 帧（v2 活体终局——两态机活体写点删除后聚合 status
+   *    停更 running，帧是唯一活体终局证据；读面复用增量 tail 累积缓存，判活
+   *    不新增全量 IO）。混合判源读收拢进本函数体（散落分支形态不采用——D1
+   *    第 6/8 行同族裁决）。
+   */
+  private isRunSettled(run: WorkflowRun): boolean {
+    if (run.state.status === "done") return true;
+    return lastRunSettledEvent(this.readJournalEvents(run.runId)) !== undefined;
+  }
+
+  /**
+   * [W2/V1] 终局记录查询（journal run-settled 帧投影）：生产消费方 = 通知载荷链
+   *（runSettledEffects——载荷源换帧直取，D1 第 7 行）。miss = 无终局帧（未终局，
+   * 或 journal 读失败降级——调用方按「不可判定」保守处置，不回退两态机字段兜底）。
+   */
+  settledRecordOf(runId: string): RunSettlementRecord | undefined {
+    const settled = lastRunSettledEvent(this.readJournalEvents(runId));
+    if (settled === undefined) return undefined;
+    return {
+      outcome: settled.outcome,
+      ...(settled.errorCode !== undefined ? { errorCode: settled.errorCode } : {}),
+      ...(settled.reason !== undefined ? { reason: settled.reason } : {}),
+      settledAt: settled.ts,
+    };
+  }
+
+  /**
    * Persist a single run: rewrite mode (overwrite) — state 文件恒为最新完整投影。
    *
    * 去抖路由：
@@ -485,13 +538,20 @@ export class JsonlRunStore implements RunStore {
     const runId = run.runId;
     // [P3/D6] 活跃 run 引用保留（事件边沿 flush 的实例源）：running 态更新、
     // 终局即删（有界性）。终局引用不保留——终局后的边沿无 flush 意义（投影已终态）。
-    if (run.state.status === "running") {
-      this.activeRuns.set(runId, run);
-    } else {
+    // [W2/V1 D1 第 8 行] 终局判据换源 isRunSettled（聚合 done ∨ journal run-settled
+    // 帧——两态机活体写点删除后聚合 status 停更，帧是活体终局的唯一证据）。
+    // IO 故障保守形态（已接受，四要素登记）：journal 读失败时本判定降级为已累积
+    // 事件（无帧 → 判未终局）——activeRuns 条目保留不删（保守不删对齐 D6「误删
+    // 活跃 run 是事故方向」纪律：误删使活跃 run 的事件边沿 flush 失去实例源）；
+    // 恢复路径 = 进程生命周期结束 activeRuns 全清 + IO 恢复后下一判定点即删；
+    // 重审触发 = 活跃引用随 IO 故障持续单调增长可观测时。
+    if (this.isRunSettled(run)) {
       this.activeRuns.delete(runId);
+    } else {
+      this.activeRuns.set(runId, run);
     }
     const isFirstWrite = !this.writtenOnce.has(runId);
-    const isCold = isFirstWrite || run.state.status !== "running";
+    const isCold = isFirstWrite || this.isRunSettled(run);
     if (isCold) {
       // 判定即记录：原子防并发双冷（两次并发首写都判 true 会各 flush 一次）。
       // ENOENT 边界：首写 flush 遇 ENOENT 时 state 未写但 writtenOnce 已记——
@@ -603,9 +663,9 @@ export class JsonlRunStore implements RunStore {
           // resolve 语义保持（sessionDir 已删场景持久化无意义也无法完成），但按
           // run 形态分通道留痕：终态投影未落盘是数据损失面（warn 可归因「session
           // 目录被外部删除」）；running 中间态丢一拍等价崩溃语义（debug 即可，
-          // 日志携带 status 供读上下文归因）。
-          const msg = `state flush skipped, session dir missing (likely externally removed): runId=${runId} status=${run.state.status}`;
-          if (run.state.status !== "running") {
+          // 日志携带判定结果供读上下文归因）。[W2/V1] 分通道判据换源 isRunSettled。
+          const msg = `state flush skipped, session dir missing (likely externally removed): runId=${runId} settled=${this.isRunSettled(run)}`;
+          if (this.isRunSettled(run)) {
             logger.warn(`[subagent-workflow] ${msg} (terminal projection NOT persisted)`);
           } else {
             logger.debug(`[subagent-workflow] ${msg}`);
@@ -734,6 +794,9 @@ export class JsonlRunStore implements RunStore {
    * per-runId 固定窗口防抖调度（不重置 timer——事件突发只落 1 次 flush，
    * 延迟有界 ≤eventEdgeDebounceMs，语义对齐 pending 批）。触发时以保留的活跃
    * run 引用走既有串行链 flush（空 settlers——调用方无人 await，孤儿错误链尾吞）。
+   * [W2/V1 D1 第 8 行] 边沿 flush 的活跃判定换源 isRunSettled（原两态机 status
+   * recheck 随活体写点删除停更——终局后 activeRuns 已删，此处注册表级守卫防
+   * 残留边沿对已终局 run 再 flush）。
    */
   private scheduleEventEdgeFlush(runId: string): void {
     if (this.pendingEdgeFlushes.has(runId)) return;
@@ -741,7 +804,7 @@ export class JsonlRunStore implements RunStore {
       this.pendingEdgeFlushes.delete(runId);
       if (this.disposed) return;
       const run = this.activeRuns.get(runId);
-      if (!run || run.state.status !== "running") return;
+      if (!run || this.isRunSettled(run)) return;
       this.enqueueFlush(runId, run, [], false).catch(() => {});
     }, this.eventEdgeDebounceMs);
     timer.unref();
@@ -1093,7 +1156,7 @@ export class JsonlRunStore implements RunStore {
         { startedAt: startedAtIso },
       );
     }
-    const reason = runSettledOutcomeToDoneReason(settledEvent.outcome);
+    const reason = runSettledOutcomeToDoneReason(settledEvent.outcome, settledEvent.errorCode);
     return WorkflowRun.reconstruct(
       runId,
       spec,
@@ -1168,7 +1231,7 @@ export class JsonlRunStore implements RunStore {
     if (!this.pi) return;
     const data = buildWorkflowRecordSettledEntryData({
       runId,
-      reason: runSettledOutcomeToDoneReason(settledEvent.outcome),
+      reason: runSettledOutcomeToDoneReason(settledEvent.outcome, settledEvent.errorCode),
       outcome: settledEvent.outcome,
       ...(settledEvent.errorCode !== undefined ? { errorCode: settledEvent.errorCode } : {}),
       settledAt: settledEvent.ts,
@@ -1213,7 +1276,7 @@ export class JsonlRunStore implements RunStore {
       for (let i = events.length - 1; i >= 0; i--) {
         const ev = events[i];
         if (ev?.type !== "run-settled") continue;
-        const reason = runSettledOutcomeToDoneReason(ev.outcome);
+        const reason = runSettledOutcomeToDoneReason(ev.outcome, ev.errorCode);
         if (reason !== "completed") {
           run.state.error =
             ev.reason ??

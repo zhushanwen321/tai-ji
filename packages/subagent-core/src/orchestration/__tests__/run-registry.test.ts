@@ -5,17 +5,21 @@
 //
 // 锁定语义：
 // a. 投影三态（事件流判据，mtime 启发式退役后的结构判据）：
-//    - run-settled 落账 → terminal（三态 outcome + errorCode）；
+//    - run-settled 落账 → terminal（四值 outcome + errorCode）；
 //    - 事件流停止（fold 停在非 terminal + 活体集未命中 = host-died 判据）→
 //      interrupted（待恢复态，非 terminal——快照末行 running 的僵尸在此消失）；
 //    - 活体集命中 → active（事件流正常推进）；空事件流 → missing / active。
-// b. abandon 终局化：interrupted 超放弃窗（env/参数调低）→ 状态机两步转移
-//    （host-died → abandon-elapsed）→ manifest 写 outcome:failed +
-//    errorCode:interrupted_abandoned → pruneTerminalRunFiles 裁掉 state + journal
-//    （journal 获清理资格）；反向 = 未过期不 abandon / 活跃不 abandon /
-//    已终局跳过。
+// b. abandon 终局化：interrupted 超放弃窗（env/参数调低）→ 收编入口
+//    adoptInterruptedRun → settleRunAccounting 原语（[W2/V1 D1] journal 帧 +
+//    manifest 两件单点）→ outcome:interrupted + errorCode:interrupted_abandoned
+//    → pruneTerminalRunFiles 裁掉 state + journal（journal 获清理资格）；反向 =
+//    未过期不 abandon / 活跃不 abandon / 已终局跳过。
 // c. mtime 退役断言：投影/abandon 源码零 mtime 消费（grep 断言）+ 行为断言
 //    （判定锚 = 事件 ts，文件 mtime 钉到未来不改变 abandon 结果）。
+//
+// [W2/V1] 收编/abandon 的记录动作走模块 journal 单写者域——测试注入面 =
+// setRunEventJournalDirForTest（与帧落账/manifest 写同源）；seed 侧的本地 journal
+// 实例与模块 journal 指向同一目录（文件层一致）。
 //
 // 测试红线：mkdtemp 自建自删、journal/manifest 全在 tmp、env 用后 delete、
 // 时钟经 now 参数注入（无 fake timers 依赖）。
@@ -41,6 +45,7 @@ import {
   type WorkflowRunEvent,
   type WorkflowRunEventInput,
 } from "../run-events.ts";
+import { setRunEventJournalDirForTest } from "../worker-message-pump.ts";
 import { pruneTerminalRunFiles } from "../file-run-store.ts";
 import {
   readRunTerminalManifest,
@@ -54,10 +59,14 @@ let journal: RunEventJournal;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "run-registry-"));
+  // [W2/V1] 收编链（scan/manifest/帧落账）统一走模块 journal 单写者域——注入
+  // 目录即覆盖；afterEach 复位（连带清 liveRunStates / 终局记录注册表）。
+  setRunEventJournalDirForTest(dir);
   journal = createRunEventJournal(dir);
 });
 
 afterEach(() => {
+  setRunEventJournalDirForTest(undefined);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   delete process.env[RUN_ABANDON_WINDOW_MS_ENV];
 });
@@ -206,7 +215,7 @@ describe("mtime 启发式退役（验收条款 c：grep + 行为断言）", () =
 
     expect(result.abandoned).toBe(1);
     const manifest = await readRunTerminalManifest(dir, "wf-reg-mtime");
-    expect(manifest).toMatchObject({ outcome: "failed", errorCode: "interrupted_abandoned" });
+    expect(manifest).toMatchObject({ outcome: "interrupted", errorCode: "interrupted_abandoned" });
   });
 });
 
@@ -230,7 +239,7 @@ describe("interrupted 放弃窗终局化（D5 转移表 interrupted × abandon-e
     expect(manifest).toMatchObject({
       id: "wf-ab-env",
       workflowName: "review-fix-loop",
-      outcome: "failed",
+      outcome: "interrupted",
       errorCode: "interrupted_abandoned",
     });
     expect(manifest?.settledAt).toBe(BASE_TS + 61_000);
@@ -239,7 +248,7 @@ describe("interrupted 放弃窗终局化（D5 转移表 interrupted × abandon-e
     const events = await journal.scan("wf-ab-env");
     expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "run-settled"]);
     const settled = events[2] as Extract<WorkflowRunEvent, { type: "run-settled" }>;
-    expect(settled.outcome).toBe("failed");
+    expect(settled.outcome).toBe("interrupted");
     expect(settled.errorCode).toBe("interrupted_abandoned");
     expect(settled.ts).toBe(BASE_TS + 61_000);
   });
@@ -272,7 +281,7 @@ describe("interrupted 放弃窗终局化（D5 转移表 interrupted × abandon-e
     // manifest 终局持久权威永不随裁（drawer 投影不消失）
     expect(fs.existsSync(path.join(dir, "wf-ab-prune.json"))).toBe(true);
     expect(await readRunTerminalManifest(dir, "wf-ab-prune")).toMatchObject({
-      outcome: "failed",
+      outcome: "interrupted",
       errorCode: "interrupted_abandoned",
     });
   });
@@ -341,11 +350,11 @@ describe("interrupted 放弃窗终局化（D5 转移表 interrupted × abandon-e
 // - 宽限窗 / 活跃保护 / 坏链（fold 停在 created）/ 空 journal 的分类跳过。
 
 describe("收编入口 adoptInterruptedRun（W1 / D4：幂等追加终态事件）", () => {
-  it("有注册无终态 → 追加 run-settled(failed) + 物化 manifest + 条目回调恰一次", async () => {
+  it("有注册无终态 → 追加 run-settled(interrupted) + 物化 manifest + 条目回调恰一次（[W2 三路径 outcome 断言] abandon 侧）", async () => {
     await seed("wf-ad-1", [createdEvent("wf-ad-1", BASE_TS), askDispatchedEvent(BASE_TS + 1)]);
     const appendedEntries: unknown[] = [];
 
-    const outcome = await adoptInterruptedRun(journal, dir, "wf-ad-1", {
+    const outcome = await adoptInterruptedRun("wf-ad-1", {
       now: BASE_TS + 1000,
       appendSettledEntry: (entry) => appendedEntries.push(entry),
     });
@@ -354,11 +363,11 @@ describe("收编入口 adoptInterruptedRun（W1 / D4：幂等追加终态事件�
     const events = await journal.scan("wf-ad-1");
     expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "run-settled"]);
     const settled = events[2] as Extract<WorkflowRunEvent, { type: "run-settled" }>;
-    expect(settled.outcome).toBe("failed");
+    expect(settled.outcome).toBe("interrupted");
     expect(settled.errorCode).toBeUndefined();
     expect(settled.ts).toBe(BASE_TS + 1000);
     expect(await readRunTerminalManifest(dir, "wf-ad-1")).toMatchObject({
-      outcome: "failed",
+      outcome: "interrupted",
       workflowName: "review-fix-loop",
     });
     // 收编场景无内存聚合：callCount 从 journal ask-settled 帧数推导（本 fixture 无
@@ -369,8 +378,8 @@ describe("收编入口 adoptInterruptedRun（W1 / D4：幂等追加终态事件�
       kind: "settled",
       runId: "wf-ad-1",
       status: "done",
-      reason: "failed",
-      outcome: "failed",
+      reason: "failed", // [W2 D5] interrupted → "failed" 诊断兜底（显示走 outcome 四值）
+      outcome: "interrupted",
       callCount: 0,
       usedTokens: 0,
     });
@@ -378,11 +387,11 @@ describe("收编入口 adoptInterruptedRun（W1 / D4：幂等追加终态事件�
 
   it("收编幂等（双重启不重复追加）：第二次收编命中 fold terminal → journal 帧数不增长", async () => {
     await seed("wf-ad-2", [createdEvent("wf-ad-2", BASE_TS), askDispatchedEvent(BASE_TS + 1)]);
-    const first = await adoptInterruptedRun(journal, dir, "wf-ad-2", { now: BASE_TS + 1000 });
+    const first = await adoptInterruptedRun("wf-ad-2", { now: BASE_TS + 1000 });
     expect(first).toBe("adopted");
     // 「双重启」= 两次独立收编调用（模拟两次进程重启后的 loadAll 收编）
-    const second = await adoptInterruptedRun(journal, dir, "wf-ad-2", { now: BASE_TS + 2000 });
-    const third = await adoptInterruptedRun(journal, dir, "wf-ad-2", { now: BASE_TS + 3000 });
+    const second = await adoptInterruptedRun("wf-ad-2", { now: BASE_TS + 2000 });
+    const third = await adoptInterruptedRun("wf-ad-2", { now: BASE_TS + 3000 });
     expect(second).toBe("skippedTerminal");
     expect(third).toBe("skippedTerminal");
     // run-settled 恰一帧（「一个 run 恰好一帧」终态不变量未被重复追加破坏）
@@ -398,7 +407,7 @@ describe("收编入口 adoptInterruptedRun（W1 / D4：幂等追加终态事件�
       outcome: "completed",
       settledAt: BASE_TS + 5,
     });
-    const outcome = await adoptInterruptedRun(journal, dir, "wf-ad-3", { now: BASE_TS + 1000 });
+    const outcome = await adoptInterruptedRun("wf-ad-3", { now: BASE_TS + 1000 });
     expect(outcome).toBe("skippedTerminal");
     expect((await journal.scan("wf-ad-3")).map((e) => e.type)).toEqual([
       "run-created",
@@ -408,7 +417,7 @@ describe("收编入口 adoptInterruptedRun（W1 / D4：幂等追加终态事件�
 
   it("条目面证据（双面证据第二条）：hasSettledEntry=true → 跳过（journal 损坏但终态条目完好的组合）", async () => {
     await seed("wf-ad-4", [createdEvent("wf-ad-4", BASE_TS), askDispatchedEvent(BASE_TS + 1)]);
-    const outcome = await adoptInterruptedRun(journal, dir, "wf-ad-4", {
+    const outcome = await adoptInterruptedRun("wf-ad-4", {
       now: BASE_TS + 1000,
       hasSettledEntry: (runId) => runId === "wf-ad-4",
     });
@@ -421,7 +430,7 @@ describe("收编入口 adoptInterruptedRun（W1 / D4：幂等追加终态事件�
 
   it("宽限窗（graceWindowMs）：末帧静止不足窗 → skippedGraceWindow，不追加", async () => {
     await seed("wf-ad-5", [createdEvent("wf-ad-5", BASE_TS), askDispatchedEvent(BASE_TS + 1)]);
-    const outcome = await adoptInterruptedRun(journal, dir, "wf-ad-5", {
+    const outcome = await adoptInterruptedRun("wf-ad-5", {
       now: BASE_TS + 60_000,
       graceWindowMs: 60_000 * 60,
     });
@@ -431,7 +440,7 @@ describe("收编入口 adoptInterruptedRun（W1 / D4：幂等追加终态事件�
 
   it("活跃保护：activeRunIds 命中 → skippedActive（事件流静默 ≠ 死亡）", async () => {
     await seed("wf-ad-6", [createdEvent("wf-ad-6", BASE_TS), askDispatchedEvent(BASE_TS + 1)]);
-    const outcome = await adoptInterruptedRun(journal, dir, "wf-ad-6", {
+    const outcome = await adoptInterruptedRun("wf-ad-6", {
       now: BASE_TS + 1000,
       activeRunIds: new Set(["wf-ad-6"]),
     });
@@ -449,13 +458,13 @@ describe("收编入口 adoptInterruptedRun（W1 / D4：幂等追加终态事件�
       ].join("\n"),
       "utf8",
     );
-    const outcome = await adoptInterruptedRun(journal, dir, "wf-ad-7", { now: BASE_TS + 1000 });
+    const outcome = await adoptInterruptedRun("wf-ad-7", { now: BASE_TS + 1000 });
     expect(outcome).toBe("skippedBrokenChain");
     expect(await readRunTerminalManifest(dir, "wf-ad-7")).toBeNull();
   });
 
   it("空 journal（missing）→ skippedMissing", async () => {
-    const outcome = await adoptInterruptedRun(journal, dir, "wf-ad-never", { now: BASE_TS });
+    const outcome = await adoptInterruptedRun("wf-ad-never", { now: BASE_TS });
     expect(outcome).toBe("skippedMissing");
   });
 });

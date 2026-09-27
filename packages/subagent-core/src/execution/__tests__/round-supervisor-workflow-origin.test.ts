@@ -72,11 +72,11 @@ function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   } as ExecutionRecord;
 }
 
-/** 该唤醒形态 view（running + 无产出 + 无驱动）。 */
+/** 该唤醒形态 view（活跃 + 无产出 + 无驱动）。[W2/V3] 旧 status 词表删除，settled 布尔投影。 */
 function awakeView(id: string, over: Partial<SupervisorRecordView> = {}): SupervisorRecordView {
   return {
     id,
-    status: "running",
+    settled: false,
     hasResult: false,
     rootSessionId: "sess-root",
     agent: "worker",
@@ -117,8 +117,8 @@ describe("adopt 豁免（决策表 v3 改判）", () => {
   });
 });
 
-describe("boot 分区对 workflow 形态负面断言（重认领豁免）", () => {
-  it("running+无产出的 workflow record 不被 boot 重认领；tool 对照被认领", () => {
+describe("boot 分区对 workflow 形态负面断言（[W2/V3 §3.0] 重认领循环清退后全形态零认领）", () => {
+  it("bootPartition 恒空返回：workflow 与 tool 候选均不再被认领（清退前 workflow 形态本就被 classifySupervisorDomain 挡在可 adopt 域外）", () => {
     const deps = makeDeps();
     const supervisor = new RoundSupervisor(deps);
     deps.views.set("bg-wf", awakeView("bg-wf", { origin: "workflow" }));
@@ -129,9 +129,9 @@ describe("boot 分区对 workflow 形态负面断言（重认领豁免）", () =
     );
 
     const { readopted } = supervisor.bootPartition();
-    expect(readopted).toEqual(["bg-tool"]); // workflow 形态被 classifySupervisorDomain 挡在可 adopt 域外
-    expect(supervisor.supervisedIds()).toEqual(["bg-tool"]);
-    expect(deps.guidances).toHaveLength(1); // 仅 tool record 的评估推进
+    expect(readopted).toEqual([]); // 恒不可达循环清退——任何形态零认领
+    expect(supervisor.supervisedIds()).toEqual([]);
+    expect(deps.guidances).toHaveLength(0);
   });
 });
 

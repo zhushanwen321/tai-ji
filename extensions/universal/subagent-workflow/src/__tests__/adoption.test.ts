@@ -33,7 +33,7 @@ import * as path from "node:path";
 import type { CustomEntry, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
-import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
+import { createRunEventJournal, setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core";
 import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run-spec.ts";
@@ -427,6 +427,20 @@ describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移�
     const run = makeRun("wf-fail-1", "running");
     first.runs.set(run.runId, run);
     await first.store.save(run);
+    // [W2/V1] 六态机引导：journal 首帧（run-created）——terminate 终局裁决前置。
+    // dispatch 链（fold/append）走模块 journal 单写者域，测试注入指向本 session 的
+    // workflow-state 目录（与真 store 的 tail 读同域）。注入经动态 import 取与
+    // workflow-events 同一 pump 模块实例（beforeEach vi.resetModules 双实例隔离）。
+    const pump = await import("@zhushanwen/subagent-core/orchestration/worker-message-pump.ts");
+    pump.setRunEventJournalDirForTest(path.join(first.sessionDir, "workflow-state"));
+    const journal = createRunEventJournal(path.join(first.sessionDir, "workflow-state"));
+    await journal.append(run.runId, {
+      type: "run-created",
+      runId: run.runId,
+      workflowName: "test-script",
+      argsSummary: "{}",
+      ts: Date.now(),
+    });
     // 模拟健康检查不过（上一轮装配 loadAll 失败形态的条目）
     first.storeHealthy = false;
 
@@ -435,15 +449,18 @@ describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移�
     const handle2 = setupWorkflowDomain(m2.pi, { inflightReporter: reporter });
     await m2.handlers.get("session_start")!({ type: "session_start", reason: "reload" }, makeFakeCtx(sid));
 
-    // run 转 done,failed（terminate）
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("failed");
+    // run 终局 failed（terminate；[W2/V1] 断言换源终局记录——经同一动态 pump 实例）
+    expect(pump.isRunSettled(run)).toBe(true);
+    expect(pump.settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     // 终态完整性（rebind-first）：terminate → finalizeRun → store.save 冷路径 flush，
     // failed 形态落 state 投影——[W1] 条目通道退役后投影是持久化面（journal 终局帧
     // 经 finalizeRun 同步落账，绕开 rebind-first 则 flush 走旧 pi 且 journal 权威面
     // 不受影响，但投影会停留在 running 误导恢复链）
     await vi.waitFor(() => {
-      expect(readStateStatus(agentDir, "wf-fail-1")).toBe("done");
+      // [W2/V1] 投影终态信号 = state.outcome（fold 富集；status 字段停更 running）
+      const raw = fs.readFileSync(path.join(agentDir, "workflow-state", "wf-fail-1.jsonl"), "utf8");
+      const last = JSON.parse(raw.trim().split("\n").filter((l) => l.trim()).at(-1)!) as { state?: { outcome?: string } };
+      expect(last.state?.outcome).toBe("failed");
     });
     // [W1 / D1] 停写锚定：零 workflow-record entry（本场景无注册条目——run 是注入的
     // 内存 run；journal 终局帧随 finalizeRun 落账，不经条目面）
@@ -460,5 +477,6 @@ describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移�
     expect(after).toBeDefined();
     expect(after).not.toBe(first);
     expect(after!.runs.has("wf-fail-1")).toBe(false);
+    pump.setRunEventJournalDirForTest(undefined);
   });
 });

@@ -43,8 +43,14 @@ import {
   createRunEventJournal,
   foldRunEventFrames,
   RUN_EVENT_JOURNAL_SUFFIX,
+  type RunErrorCode,
+  type RunOutcome,
   type WorkflowRunEvent,
 } from "./run-events.ts";
+// [W2/V1 D6] sweep 判据的 reason 派生单点（帧/manifest (outcome, errorCode) →
+// DoneReason——五处统一派生第三处）。方向 orchestration 内部互引（pump 闭包不
+// 回指本文件，无环）。
+import { runSettledOutcomeToDoneReason } from "./worker-message-pump.ts";
 import { SNAPSHOT_VERSION, fromRunSnapshot, toRunSnapshot } from "./run-snapshot.ts";
 
 const logger = getLogger("file-run-store");
@@ -590,47 +596,100 @@ export class FileRunStore implements RunStore {
   }
 
   /**
-   * [W4 sweep 判据，F2] 按 runId 同步查 run 状态（注册对账 sweep 的 workflow 收口
-   * 判据）。同步形态：sweep 在 session_start 同步链内运行（runReconcileSweep 同步
-   * 契约），不能 await loadAll——对单 runId 做同步文件读（对齐 sweep 自身的 sync fs
-   * 读先例），逐行解析复用 parseLine（版本衔接 + 形状校验与 loadLatestValidLine
-   * 单源，同步只读不触碰节流记账）。
+   * [W2/V1 D6 判据源改接] 按 runId 同步查 run 的终态证据（注册对账 sweep 的
+   * workflow 收口判据）——journal run-settled 帧 ∨ manifest 终局面，两态机持久化
+   * 快照字段退役为判据源（活体写点删除后 v2 run 的 state 快照永停 running，旧
+   * findStateByIdSync 判据对全部 v2 run 永判 active = sweep 结构性静默失效）。
    *
-   * 判定（宁挂账不失明——误注销活跃 run 是事故方向，判据保守侧取「不可判定」）：
-   * - state 文件不存在（ENOENT）→ missing（设计判据「已归档/不存在视同终态」——run 从未
-   *   落盘或已被清理，注册是死亡窗口残留）；
-   * - state 文件读错误（非 ENOENT）→ running + warn 留证（IO 故障 ≠ 不存在，宁挂账）；
-   * - 末条有效快照 status = running → running（活跃，sweep 跳过）；
-   * - 末条有效快照 status ≠ running（done）→ terminal + reason（I2：done ⟹ reason
-   *   有值；reason 作 pending unregister 的 status 语义源）；
-   * - 文件存在但全部行损坏（无有效快照）→ running（读不出 ≠ 不存在，不补注销）。
+   * 同步形态：sweep 在 session_start 同步链内运行（runReconcileSweep 同步契约），
+   * 不能 await——对单 runId 做同步文件读（对齐 sweep 自身的 sync fs 读先例；
+   * journal 行逐行 JSON.parse + run-settled 尾向扫描，manifest 同步读）。
+   *
+   * 判定矩阵（[W2 D6] 逐形态锚定保守侧——误注销活跃 run 是事故方向，不可逆）：
+   * - journal 与 manifest 均不存在（ENOENT）→ missing（「已归档/不存在视同终态」
+   *   ——run 从未落账或已被保留期清理，注册是死亡窗口残留）；
+   * - journal 尾向存在 run-settled 帧（append-only 单写者：帧在盘 = 终局已记录，
+   *   行级独立 JSON 不受早先坏行影响）→ terminal + reason（帧 (outcome, errorCode)
+   *   经 runSettledOutcomeToDoneReason 联合派生——[W2 D5] sweep 补注销 reason 统一
+   *   派生源第三处；budget_limited/time_limited 细分保留）；
+   * - journal 无帧但 manifest 在盘（活体物化后 journal 被裁的组合）→ terminal +
+   *   reason（manifest outcome 派生；无码细分退化为 outcome 兜底）；
+   * - journal 存在但无 run-settled 帧（run 真未终局，含坏链首帧形态）→ running
+   *   （保守按活跃，不补注销——对齐 adoptInterruptedRun skippedBrokenChain 纪律）；
+   * - journal 读错误（非 ENOENT IO 故障）→ running + warn 留证（「IO 故障 ≠ 不存在」
+   *   的保守侧纪律，宁挂账不误注销）。
    */
-  findStateByIdSync(runId: string): { kind: "running" } | { kind: "terminal"; reason: string | undefined } | { kind: "missing" } {
-    let content: string;
+  findSettlementEvidenceSync(runId: string): { kind: "running" } | { kind: "terminal"; reason: string } | { kind: "missing" } {
+    const journalPath = join(this.stateDir(), `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+    let settled: Extract<WorkflowRunEvent, { type: "run-settled" }> | undefined;
+    let journalMissing = false;
     try {
-      content = readFileSync(this.stateFilePath(runId), "utf8");
+      const content = readFileSync(journalPath, "utf8");
+      const lines = content.split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i]!.trim();
+        if (line === "") continue; // 尾部空行静默跳过
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          continue; // 坏行（截断行）继续向前——append-only 下帧行独立有效
+        }
+        if (
+          typeof parsed === "object" && parsed !== null &&
+          (parsed as { type?: unknown }).type === "run-settled"
+        ) {
+          settled = parsed as Extract<WorkflowRunEvent, { type: "run-settled" }>;
+          break;
+        }
+      }
     } catch (err) {
       if (!isEnoentError(err)) {
-        // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——同「读不出 ≠ 不存在」
-        // 的保守侧按活跃挂账（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
+        // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃挂账
+        //（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
         const msg = err instanceof Error ? err.message : String(err);
         logger.warn(
-          `[file-run-store] findStateByIdSync read failed, treating as running (stay registered): ${this.stateFilePath(runId)}: ${msg}`,
+          `[file-run-store] findSettlementEvidenceSync journal read failed, treating as running (stay registered): ${journalPath}: ${msg}`,
         );
         return { kind: "running" };
       }
-      return { kind: "missing" }; // ENOENT（未落盘/已清理）——见头注判定
+      journalMissing = true;
     }
-    const lines = content.split("\n");
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (line === "") continue; // 尾部空行（末行 \n 产物）静默跳过
-      const run = this.parseLine(line, `${runId}.jsonl`, i);
-      if (run === undefined) continue; // 损坏行继续向前找——最后一条有效行可能早于文件尾部
-      if (run.state.status === "running") return { kind: "running" };
-      return { kind: "terminal", reason: run.state.reason };
+    if (settled !== undefined) {
+      return {
+        kind: "terminal",
+        reason: runSettledOutcomeToDoneReason(settled.outcome, settled.errorCode),
+      };
     }
-    // 全部行损坏：读不出 ≠ 不存在——保守按活跃处理（宁挂账不误注销）
+    // journal 无帧：manifest 终局面（prune 资格单源锚定的第二证据通道）
+    const manifestPath = join(this.stateDir(), `${runId}.json`);
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
+      if (typeof parsed === "object" && parsed !== null) {
+        const outcome = (parsed as { outcome?: unknown }).outcome;
+        const errorCode = (parsed as { errorCode?: unknown }).errorCode;
+        if (typeof outcome === "string") {
+          return {
+            kind: "terminal",
+            reason: runSettledOutcomeToDoneReason(
+              outcome as RunOutcome,
+              typeof errorCode === "string" ? (errorCode as RunErrorCode) : undefined,
+            ),
+          };
+        }
+      }
+    } catch (err) {
+      if (!isEnoentError(err)) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          `[file-run-store] findSettlementEvidenceSync manifest read failed, treating as running (stay registered): ${manifestPath}: ${msg}`,
+        );
+        return { kind: "running" };
+      }
+    }
+    // 两证据面均缺：journal 存在但无帧 = 真未终局（保守活跃）；journal 也缺 =
+    // missing（从未落账/已清理——视同终态补注销）。
+    if (journalMissing) return { kind: "missing" };
     return { kind: "running" };
   }
 

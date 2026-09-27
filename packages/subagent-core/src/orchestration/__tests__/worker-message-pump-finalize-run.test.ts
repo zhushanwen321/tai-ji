@@ -25,8 +25,11 @@ import { describe, expect, it, vi } from "vitest";
 import { collectActivePendingIds } from "@zhushanwen/extension-protocol";
 
 import {
+  dispatchRunCreated,
   finalizeRun,
   handleWorkerMessage,
+  isRunSettled,
+  settledRecordOf,
 } from "../worker-message-pump.ts";
 import { getLogger } from "../../core/logger.ts";
 import { Budget } from "../models/budget.ts";
@@ -119,19 +122,29 @@ function appendedUnregister(deps: ReturnType<typeof makeTracingDeps>): { customT
 
 // ── finalizeRun 直测 ─────────────────────────────────────────
 
+
+/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+ *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
+ *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
+async function seedRunCreated(run: WorkflowRun): Promise<void> {
+  await dispatchRunCreated(run);
+}
+
 describe("finalizeRun（D5-② 单写点直测）", () => {
-  it("五步恰好一次且有序：transition → workflow-record 终态条目 → save → pending:unregister 直落 → onRunDone", async () => {
+  it("[W2/V1] 五步恰好一次且有序：run-settled 六态机落账 → workflow-record 终态条目 → save → pending:unregister 直落 → onRunDone", async () => {
     const run = makeRealRun("wf-fin-1");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
 
-    const transitionSpy = vi.spyOn(run, "transition");
     const ok = await finalizeRun(run, deps, "completed", { context: "test" });
 
     expect(ok).toBe(true);
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("completed");
-    // 各步恰好一次
-    expect(transitionSpy).toHaveBeenCalledTimes(1);
+    // [W2/V1] 终局断言换源：两态机字段停更（state.status 恒 running），终局经
+    // 六态机 dispatch 链（isRunSettled / 终局记录注册表）判定。
+    expect(isRunSettled(run)).toBe(true);
+    expect(run.state.status).toBe("running");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "completed" });
+    // 各步恰好一次（终局帧经 no-op journal 防线零写——投递链空转一次）
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     expect(appendedUnregister(deps)).toBeDefined();
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
@@ -149,6 +162,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
   it("[W1 / D1] v2 终态条目两写点之一：workflow-record settled data 与 run-settled 帧同源", async () => {
     const run = makeRealRun("wf-fin-v2entry");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
 
     await finalizeRun(run, deps, "completed", { context: "test" });
 
@@ -170,6 +184,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
   it("[D4] 直落 entry 三字段：{id, reason, status∈mapReasonToStatus 值域}", async () => {
     const run = makeRealRun("wf-fin-entry");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
 
     await finalizeRun(run, deps, "completed", { context: "test" });
 
@@ -183,10 +198,12 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
   it("[D4] budget_limited → status 映射为 failed（非 identity 词表锁定）", async () => {
     const run = makeRealRun("wf-fin-budget");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
 
     await finalizeRun(run, deps, "budget_limited", { context: "test" });
 
-    expect(run.state.reason).toBe("budget_limited");
+    // [W2/V1] reason 细分经终局记录联合派生（failed + budget_limited → budget_limited）
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "budget_limited" });
     expect(appendedUnregister(deps)?.data).toEqual({
       id: "wf-fin-budget",
       reason: "budget_limited",
@@ -197,6 +214,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
   it("[D4] emit 发射点已删：eventBus 零 pending:unregister 调用（注销唯一持久化路径 = 直落）", async () => {
     const run = makeRealRun("wf-fin-noemit");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
 
     await finalizeRun(run, deps, "failed", { context: "test" });
 
@@ -208,6 +226,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
   it("notifyDone:false → onRunDone 不调、直落仍发（terminateRunningRuns 真差异经参数承载）", async () => {
     const run = makeRealRun("wf-fin-2");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
 
     const ok = await finalizeRun(run, deps, "failed", {
       context: "terminateRunningRuns",
@@ -215,7 +234,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     });
 
     expect(ok).toBe(true);
-    expect(run.state.reason).toBe("failed");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(appendedUnregister(deps)?.data).toEqual({
       id: "wf-fin-2",
       reason: "failed",
@@ -244,6 +263,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
   it("save 抛错（ENOSPC）→ best-effort：直落 + onRunDone 照常（SW-DATA-3 统一）", async () => {
     const run = makeRealRun("wf-fin-4");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
     deps.store.save = vi.fn(async () => {
       throw new Error("ENOSPC: no space left on device");
     });
@@ -251,7 +271,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     const ok = await finalizeRun(run, deps, "failed", { context: "test" });
 
     expect(ok).toBe(true);
-    expect(run.state.status).toBe("done");
+    expect(isRunSettled(run)).toBe(true);
     expect(appendedUnregister(deps)).toBeDefined();
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
@@ -259,6 +279,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
   it("onRunDone 抛错 → 被捕获记日志（M12：真实副作用错误不静默吞、不上抛）", async () => {
     const run = makeRealRun("wf-fin-5");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
     deps.onRunDone = vi.fn(() => {
       throw new Error("interface notify blew up");
     });
@@ -267,13 +288,14 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
       finalizeRun(run, deps, "completed", { context: "test" }),
     ).resolves.toBe(true);
     expect(appendedUnregister(deps)).toBeDefined();
-    expect(run.state.status).toBe("done");
+    expect(isRunSettled(run)).toBe(true);
   });
 
   it("[OR-4] appendEntry 抛错（reload 转换窗 assertActive）→ 留痕 runId/reason、不崩宿主不跳过 onRunDone", async () => {
     const errorSpy = vi.spyOn(getLogger("subagents"), "error");
     const run = makeRealRun("wf-fin-fence");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
     deps.appendEntry = vi.fn(() => {
       throw new Error("assertActive: session invalidated");
     });
@@ -281,7 +303,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     const ok = await finalizeRun(run, deps, "failed", { context: "reload window" });
 
     expect(ok).toBe(true);
-    expect(run.state.status).toBe("done");
+    expect(isRunSettled(run)).toBe(true);
     // onRunDone 不被直落故障吞掉（runAndWait 轮询依赖其收口）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
     const errLogs = errorSpy.mock.calls.map((c) => String(c[0]));
@@ -298,6 +320,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
   it("[向后兼容] deps.appendEntry 未注入（旧测试 deps）→ 跳过直落不抛错，onRunDone 照常", async () => {
     const run = makeRealRun("wf-fin-noappend");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
     delete (deps as Partial<LifecycleDeps>).appendEntry;
 
     await expect(
@@ -313,6 +336,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     // 本用例从直落产物出发锁「直落后的权威视图不再含该 id」。
     const run = makeRealRun("wf-fin-race");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
     const entries: unknown[] = [
       { customType: "pending:register", data: { id: "wf-fin-race", type: "workflow" } },
     ];
@@ -335,6 +359,7 @@ describe("budget_limited 终态路径（dispatchAgentCall → finalizeRun）", (
   it("agent call 后预算超限 → 四步恰好一次（直落 reason/status=budget_limited/failed + onRunDone）", async () => {
     const run = makeRealRun("wf-budget-1");
     const deps = makeTracingDeps();
+    await seedRunCreated(run);
     // budget.isExceeded 恒 true——runner.run 成功返回后命中 C-2 coda
     (run.state.budget as unknown as { isExceeded: () => boolean }).isExceeded =
       () => true;
@@ -359,8 +384,9 @@ describe("budget_limited 终态路径（dispatchAgentCall → finalizeRun）", (
     //（async await 边沿会推出存量 flushMicrotasks 窗口）。
     await flushMicrotasks(40);
 
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("budget_limited");
+    // [W2/V1] 终局断言换源（六态机落账——两态机字段停更）
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "budget_limited" });
     // save 3 次 = dispatch 启动快照（8d52c0035 dispatch-time save，running 步骤
     // 实时可见）+ call 完成快照（dispatchAgentCall .then 的常规持久化）+ budget
     // 终态快照（finalizeRun 内）——三次语义不同，收敛前后一致

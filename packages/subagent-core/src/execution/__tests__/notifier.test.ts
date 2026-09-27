@@ -1,25 +1,272 @@
-/**
- * BgNotifier flushPendingNotifications — 单通道 triggerTurn 契约（U2 / D5）。
- *
- * 迁移史：deliverAs 从 'followUp' 改为 'steer'（FR-3/AC-3，commit d214d0d83）后，
- * U2 courier 单通道化再收敛——steer / followUp / nextTurn 通道全部删除（nextTurn
- * 唯一 drain 点在 session.prompt() 内，主 agent 长 streaming 场景下无限期滞留，
- * 设计 D5 实测证伪），唯一发送形态 = sendCustomMessage({triggerTurn:true})；busy
- * 场景由 ledger（settled 边沿 + isIdle 二次复查）或内核 settled 订阅在空闲边沿驱动。
- *
- * 测试方法：mock NotifierHost，捕获 sendMessage 调用参数，断言 options 恰为
- * { triggerTurn: true }（G4 字节锁定测试新锚：行为契约不变，机械迁移）。
- */
+// src/execution/__tests__/notifier.test.ts
+//
+// BgNotifier flushPendingNotifications — 单通道 triggerTurn 契约（U2 / D5）。
+//
+// u-5c 迁自壳套件 src/__tests__/notifier-flush.test.ts（被测 module 是 core 件，
+// 唯一测试覆盖原落壳）；壳 notifier-golden-snapshot.test.ts 的 11 条与本文件逐字
+// 重复（G4 迁移前后逐字节一致冻结用例，迁移已完成使命）——其 batch merge 用例的
+// 全文逐字断言升级进本文件 U3_UNIT mergeHold 用例（替换原 toContain 弱断言）后
+// 随文件删除。
+//
+// 迁移史：deliverAs 从 'followUp' 改为 'steer'（FR-3/AC-3）后，U2 courier 单通道化
+// 再收敛——steer / followUp / nextTurn 通道全部删除（nextTurn 唯一 drain 点在
+// session.prompt() 内，主 agent 长 streaming 场景下无限期滞留，设计 D5 实测证伪），
+// 唯一发送形态 = sendCustomMessage({triggerTurn:true})；busy 场景由 ledger（settled
+// 边沿 + isIdle 二次复查）或内核 settled 订阅在空闲边沿驱动。
+//
+// u-5c 迁移改写（对齐 notify-ledger.test.ts 先例，core 依赖闭包不含 session-delivery）：
+//   - 投递内核由真实 @zhushanwen/session-delivery createDelivery 改为下方内联内核
+//     等价桩（notifier 消费面触及的内核行为切片：payload fail-fast / dedupe /
+//     busy gate / settled 边沿驱动 / 合批窗口 / flush 强投 / dispose），内核自身
+//     全量语义（checked 挂账 / onSettled 记账 / LRU 逐出 / send 失败重试链）由
+//     session-delivery 包自有测试守卫，此处锚定的是 notifier 对内核契约的消费面。
+//
+// 测试方法：mock NotifierHost，捕获 sendMessage 调用参数，断言 options 恰为
+// { triggerTurn: true }（G4 字节锁定测试新锚：行为契约不变，机械迁移）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDelivery } from "@zhushanwen/session-delivery";
-import { configureNotifyDomain, resetNotifyDomainForTests } from "@zhushanwen/subagent-core/core/notify-ports.ts";
-import { createNotifier, FAILURE_RECOVERY_TAIL, type BgNotifier, type NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+// 内核路径降级留痕 warn（ledger 未 bind 时逐条 notify 触发）——mock 掉防刷屏。
+vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
+
+import { configureNotifyDomain, resetNotifyDomainForTests } from "../../core/notify-ports.ts";
+import type { DeliveryConfig, DeliveryHandle, DeliveryMessage, DeliveryPort } from "../../core/notify-ports.ts";
+import {
+  createNotifier,
+  FAILURE_RECOVERY_TAIL,
+  type BgNotifier,
+  type NotifierHost,
+} from "../notify/notifier.ts";
+
+// ─── 投递内核等价桩（对照 packages/session-delivery src/delivery.ts 同名实现） ──
+//
+// 忠实复刻 notifier 消费面触及的内核行为切片：
+//   - send()：payload 能力 fail-fast → dedupe → 入队 → 合批判定（mergeHoldActive
+//     命中 → 重置 60s 窗口 timer；否则清窗口 timer 立即 scheduleFlush(0)）
+//   - busy gate：isIdle() + hasPendingMessages() 双条件；有 subscribeSettled 装配时
+//     busy 消息由 settled 边沿驱动（退避强发不启动，30s watchdog 兜底）；无订阅
+//     装配退避轮询（100ms × 50 上限）达上限强发（retry-force）
+//   - flush()：清合批 timer + scheduleFlush(0) 强投
+//   - buildBatchPayload()：多条合批 content join "\n\n---\n\n"
+function createDelivery(port: DeliveryPort, options?: DeliveryConfig): DeliveryHandle {
+  const cfg = {
+    mergeWindowMs: options?.mergeWindowMs ?? 0,
+    mergeHoldActive: options?.mergeHoldActive,
+    backoff: options?.backoff ?? { ms: 100, max: 50 },
+    watchdogMs: 30_000,
+    warn: options?.warn ?? ((msg: string, err?: unknown) => { console.warn(`[session-delivery] ${msg}`, err ?? ""); }),
+  };
+
+  const queue: DeliveryMessage[] = [];
+  let inflightBatch: DeliveryMessage[] = [];
+  let inFlight = false;
+  let sendAttempts = 0;
+  let backoffTimer: ReturnType<typeof setTimeout> | undefined;
+  let mergeTimer: ReturnType<typeof setTimeout> | undefined;
+  let watchdogTimer: ReturnType<typeof setInterval> | undefined;
+  let disposed = false;
+  let settledUnsub: (() => void) | undefined;
+  const dedupSet = options?.dedupe ? new Set<string>() : null;
+
+  function buildBatchPayload(batch: DeliveryMessage[]): DeliveryMessage {
+    if (batch.length === 1) return batch[0]!;
+    const first = batch[0]!;
+    const content = batch.map((m) => m.payload.content).join("\n\n---\n\n");
+    if (first.payload.kind !== "custom") {
+      return { ...first, payload: { kind: "text", content } };
+    }
+    return {
+      ...first,
+      payload: {
+        kind: "custom",
+        customType: first.payload.customType,
+        content,
+        display: first.payload.display,
+        details: {
+          batch: true,
+          items: batch.map((m) =>
+            m.payload.kind === "custom" && m.payload.details !== undefined ? m.payload.details : m.payload,
+          ),
+        },
+      },
+    };
+  }
+
+  function isBusy(): boolean {
+    try {
+      if (!port.isIdle()) return true;
+      return port.hasPendingMessages();
+    } catch {
+      return true;
+    }
+  }
+
+  // ─── settled 订阅管理（D8：busy 消息边沿驱动 + 事件丢失 watchdog 兜底） ──
+  function ensureSettledSub(): void {
+    if (settledUnsub || !port.subscribeSettled) return;
+    settledUnsub = port.subscribeSettled(() => {
+      if (disposed) return;
+      // settled 边沿 → busy 复查（isIdle 已先于事件复位）→ flush
+      if (!isBusy()) flush();
+    });
+  }
+
+  function teardownSettledSub(): void {
+    if (settledUnsub) {
+      settledUnsub();
+      settledUnsub = undefined;
+    }
+  }
+
+  function startWatchdog(): void {
+    if (watchdogTimer !== undefined) return;
+    watchdogTimer = setInterval(() => {
+      if (disposed || inFlight) return;
+      if (queue.length === 0) return;
+      if (!isBusy()) flush();
+    }, cfg.watchdogMs);
+  }
+
+  function stopWatchdog(): void {
+    if (watchdogTimer !== undefined) {
+      clearInterval(watchdogTimer);
+      watchdogTimer = undefined;
+    }
+  }
+
+  function attemptSend(): void {
+    const composed = buildBatchPayload(inflightBatch);
+    try {
+      port.send(composed, composed.intent ?? "interrupt-at-turn-boundary");
+      onSendOk();
+    } catch (err) {
+      onSendFail(err);
+    }
+  }
+
+  function onSendOk(): void {
+    if (disposed) return;
+    inFlight = false;
+    inflightBatch = [];
+    sendAttempts = 0;
+    if (queue.length > 0) scheduleFlush(0);
+    else stopWatchdog();
+  }
+
+  function onSendFail(err: unknown): void {
+    if (disposed) return;
+    sendAttempts++;
+    if (sendAttempts > cfg.backoff.max) {
+      inFlight = false;
+      inflightBatch = [];
+      sendAttempts = 0;
+      cfg.warn("port.send failed after max retries", err);
+      return;
+    }
+    backoffTimer = setTimeout(() => {
+      backoffTimer = undefined;
+      if (disposed || !inFlight) return;
+      attemptSend();
+    }, cfg.backoff.ms);
+  }
+
+  function doSend(): void {
+    if (disposed || queue.length === 0 || inFlight) return;
+    inFlight = true;
+    inflightBatch = queue.splice(0);
+    sendAttempts = 0;
+    attemptSend();
+  }
+
+  function scheduleFlush(attempt: number): void {
+    if (disposed || queue.length === 0) return;
+    if (inFlight) return;
+    // 清残留 gate 退避 timer（settled 回调 / flush 外部入口可能覆盖旧 schedule）
+    if (backoffTimer !== undefined) {
+      clearTimeout(backoffTimer);
+      backoffTimer = undefined;
+    }
+    if (isBusy() && attempt < cfg.backoff.max) {
+      if (port.subscribeSettled) {
+        // 有订阅装配：busy 消息由 settled 边沿驱动，退避强发不启动（与事件驱动
+        // 竞速会提前注入正在进行的 run）；watchdog 兜底 settled 丢失（D8）
+        startWatchdog();
+        return;
+      }
+      // 无订阅装配：退避轮询，达上限强发
+      backoffTimer = setTimeout(() => {
+        backoffTimer = undefined;
+        scheduleFlush(attempt + 1);
+      }, cfg.backoff.ms);
+      return;
+    }
+    doSend();
+  }
+
+  function flush(): void {
+    if (disposed) return;
+    if (mergeTimer !== undefined) {
+      clearTimeout(mergeTimer);
+      mergeTimer = undefined;
+    }
+    scheduleFlush(0);
+  }
+
+  return {
+    send(msg, opts) {
+      if (disposed) return;
+      if (!port.supportedPayloads.includes(msg.payload.kind)) {
+        cfg.warn(`unsupported payload kind: ${msg.payload.kind}`);
+        return;
+      }
+      if (dedupSet) {
+        if (msg.dedupeKey !== undefined) {
+          if (dedupSet.has(msg.dedupeKey)) return;
+          dedupSet.add(msg.dedupeKey);
+        }
+      }
+      queue.push(msg);
+      const useMerge =
+        opts?.merge ??
+        (cfg.mergeWindowMs > 0 && cfg.mergeHoldActive != null && cfg.mergeHoldActive());
+      if (useMerge) {
+        // 合批窗口重置：清旧 timer + 重设窗口；等待边沿唤醒
+        if (mergeTimer !== undefined) clearTimeout(mergeTimer);
+        mergeTimer = setTimeout(() => {
+          mergeTimer = undefined;
+          flush();
+        }, cfg.mergeWindowMs);
+        ensureSettledSub();
+        return;
+      }
+      // 立即投：只清残留合批 timer（不重设——立即投递无窗口语义）
+      if (mergeTimer !== undefined) {
+        clearTimeout(mergeTimer);
+        mergeTimer = undefined;
+      }
+      ensureSettledSub();
+      scheduleFlush(0);
+    },
+    flush,
+    dispose() {
+      disposed = true;
+      queue.length = 0;
+      inflightBatch = [];
+      inFlight = false;
+      if (backoffTimer !== undefined) clearTimeout(backoffTimer);
+      if (mergeTimer !== undefined) clearTimeout(mergeTimer);
+      stopWatchdog();
+      teardownSettledSub();
+    },
+  };
+}
 
 // 投递内核经通知域窄端口注入（notifier 不再直接 import session-delivery）——
-// 本文件全部用例依赖真实内核语义（isIdle gate 退避 / 60s 合批 / dedup LRU /
-// settled 边沿驱动 / revive 重建），故注入真实 createDelivery 保住回归面；
+// 本文件全部用例依赖内核语义（isIdle gate 退避 / 60s 合批 / dedup LRU /
+// settled 边沿驱动 / revive 重建），故注入内核等价桩保住回归面；
 // afterEach 重置防注入态泄漏到其他测试文件（vitest 文件级模块隔离内的双保险）。
 beforeEach(() => {
   configureNotifyDomain({ createDelivery });
@@ -49,7 +296,7 @@ function makeMockHost(): NotifierHost & {
 
 describe("BgNotifier.flushPendingNotifications — 单通道 triggerTurn 契约（U2/D5）", () => {
 	let host: ReturnType<typeof makeMockHost>;
-		let notifier: BgNotifier;
+	let notifier: BgNotifier;
 
 	beforeEach(() => {
 		host = makeMockHost();
@@ -209,11 +456,11 @@ describe("BgNotifier dedup 按轮次（G1 决策 9：对话模式豁免 60s dedu
 
 	it("对话模式：同 id 不同 round 的两次 notify 不互相吞（round 参与 dedup key）", () => {
 		notifier.notify({
-			id: "sa-chat", status: "idle", agent: "w", round: 1, result: "round1",
+			id: "sa-chat", status: "running", agent: "w", round: 1, result: "round1",
 			startedAt: 1, endedAt: 2,
 		});
 		notifier.notify({
-			id: "sa-chat", status: "idle", agent: "w", round: 2, result: "round2",
+			id: "sa-chat", status: "running", agent: "w", round: 2, result: "round2",
 			startedAt: 3, endedAt: 4,
 		});
 
@@ -223,11 +470,11 @@ describe("BgNotifier dedup 按轮次（G1 决策 9：对话模式豁免 60s dedu
 
 	it("同 id 同 round 60s 内第二次被 dedup 吞（防重复通知）", () => {
 		notifier.notify({
-			id: "sa-dup", status: "idle", agent: "w", round: 1, result: "r",
+			id: "sa-dup", status: "running", agent: "w", round: 1, result: "r",
 			startedAt: 1, endedAt: 2,
 		});
 		notifier.notify({
-			id: "sa-dup", status: "idle", agent: "w", round: 1, result: "r",
+			id: "sa-dup", status: "running", agent: "w", round: 1, result: "r",
 			startedAt: 3, endedAt: 4,
 		});
 
@@ -584,30 +831,7 @@ describe("BgNotifier — revive 重建内核 handle（must-fix #5）", () => {
 });
 
 describe("U3_UNIT: createNotifier unit verification", () => {
-	it("createNotifier returns object with notify/flush/dispose/revive", () => {
-		const host = makeMockHost();
-		const notifier = createNotifier(host);
-		expect(typeof notifier.notify).toBe("function");
-		expect(typeof notifier.flushPendingNotifications).toBe("function");
-		expect(typeof notifier.dispose).toBe("function");
-		expect(typeof notifier.revive).toBe("function");
-		notifier.dispose();
-	});
-
-	it("notify calls host.sendMessage with customType=subagent-bg-notify", () => {
-		const host = makeMockHost();
-		const notifier = createNotifier(host);
-		notifier.notify({
-			id: "u3-test-1", status: "closed", agent: "worker", result: "ok",
-			startedAt: 1, endedAt: 2,
-		});
-		expect(host.sendMessageCalls).toHaveLength(1);
-		const msg = host.sendMessageCalls[0]!.message as { customType: string };
-		expect(msg.customType).toBe("subagent-bg-notify");
-		notifier.dispose();
-	});
-
-	it("notify with mergeHoldActive=true defers flush until explicit call", () => {
+	it("notify with mergeHoldActive=true defers flush until explicit call（合批 join 全文逐字断言，承自 golden batch merge）", () => {
 		const sendMessageCalls: unknown[] = [];
 		const host: NotifierHost = {
 			sendMessage: (msg) => { sendMessageCalls.push(msg); },
@@ -627,8 +851,13 @@ describe("U3_UNIT: createNotifier unit verification", () => {
 		expect(sendMessageCalls).toHaveLength(0);
 		notifier.flushPendingNotifications();
 		expect(sendMessageCalls).toHaveLength(1);
+		// 全文逐字断言（原 golden batch merge 用例的 G4 锁定形态，替换 toContain 弱断言）
 		const content = (sendMessageCalls[0] as { content: string }).content;
-		expect(content).toContain("\n\n---\n\n");
+		expect(content).toBe(
+			'Subagent "w" (u3-merge-1) completed. Result:\nr1' +
+			"\n\n---\n\n" +
+			'Subagent "w" (u3-merge-2) completed. Result:\nr2',
+		);
 		notifier.dispose();
 	});
 });

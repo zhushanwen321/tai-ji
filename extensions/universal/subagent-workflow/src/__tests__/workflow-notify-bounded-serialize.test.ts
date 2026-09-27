@@ -76,7 +76,7 @@ function legacySerialize(x: unknown): string {
 
 function runAndGetSection(scriptResult: unknown): string {
   const { pi, sendMessage } = makePi();
-  notifyDone(pi, "run-if13", makeRun(scriptResult) as never, new Set());
+  notifyDone(pi, "run-if13", makeRun(scriptResult) as never, new Set(), undefined, undefined, { outcome: "completed", settledAt: 0 });
   return scriptResultSection(sendMessage);
 }
 
@@ -98,6 +98,28 @@ function deepNested(): unknown {
   }
   cur.end = "leaf";
   return root;
+}
+
+
+/** [W2/V1] 终局记录构造（notifyDone 载荷源换帧直取后的测试通道——reason 词表 →
+ *  (outcome, errorCode) 按 D5 映射反构）。 */
+function settlementFor(reason: string | undefined): import("../jsonl-run-store.ts").RunSettlementRecord {
+  switch (reason) {
+    case "completed":
+      return { outcome: "completed", settledAt: 0 };
+    case "aborted":
+      return { outcome: "cancelled", settledAt: 0 };
+    case "failed":
+      return { outcome: "failed", errorCode: "unknown", settledAt: 0 };
+    case "budget_limited":
+      return { outcome: "failed", errorCode: "budget_limited", settledAt: 0 };
+    case "time_limited":
+      return { outcome: "failed", errorCode: "time_limited", settledAt: 0 };
+    case undefined:
+      return { outcome: "completed", settledAt: 0 };
+    default:
+      return { outcome: "failed", errorCode: "unknown", settledAt: 0 };
+  }
 }
 
 describe("notifyDone scriptResult — bounded 序列化等价锚定（IF13）", () => {

@@ -56,6 +56,7 @@ import { setInFlightListener } from "@zhushanwen/subagent-core";
 import {
   evictDoneRunsBeyondCap,
   MAX_RETAINED_DONE_RUNS,
+  runSummary,
   RUN_EVENT_JOURNAL_SUFFIX,
   scheduleTimeBudget,
   STATE_DIR_NAME,
@@ -66,6 +67,9 @@ import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
 // [u7a D5] 在途上报出口：实例由本 seam 创建并接线 setInFlightListener（组合根零
 // 管道），session_start / session_shutdown 驱动 attach/detach；测试可注入 fake。
 import { createInFlightReporter, type InFlightReporter } from "./host/inflight-reporter.ts";
+// [W2/V1 D1 第 8 行] 判活类消费面（isScriptRunning / stall watchdog running 过滤）
+// 经 core 投影单点（runSummary.status 二值——内部收拢注册表 ∨ 聚合混合判源）。
+import { type RunSettlementRecord } from "./jsonl-run-store.ts";
 import { notifyDone, notifyStall, trackNotifiedRunId, WORKFLOW_STALL_THRESHOLD_MS } from "./workflow-notify.ts";
 // ═══ 跨域事件注册（handler 体住各自域模块，本 seam 原位调用保注册顺序） ═══
 import { setupNotifyLedgerCompactionGuard } from "./workflow-notify.ts";
@@ -200,6 +204,13 @@ export interface RunSettledEffectsEnv {
   /** per-session 装配结果（ctx/sessionDir/runs 三字段调用时现读——sessionState
    *  条目引用，adoption rebind 换新后自动跟进的 D3 语义保持）。 */
   state: Pick<SessionLifecycleResult, "ctx" | "sessionDir" | "runs">;
+  /**
+   * [W2/V1 D1 第 7 行] 终局记录查询面（通知载荷源——journal run-settled 帧直取）。
+   * 生产装配 = JsonlRunStore.settledRecordOf；返回 undefined = 无终局帧（journal
+   * dispatch 失败窗口）——通知跳过 + error 留痕（不回退两态机字段兜底：I2 失效
+   * 窗口下兜底 = 恒 completed 假成功，比丢通知更糟）。
+   */
+  settledRecordOf(runId: string): RunSettlementRecord | undefined;
   /** evict 日志的 session 归属（lsRef 引用，调用时现读 lastSessionId）。 */
   lsRef: { lastSessionId: string };
 }
@@ -210,9 +221,9 @@ export interface RunSettledEffectsEnv {
  * onRunDone 是全部 done 路径的单点汇聚（abortRun + error-recovery），顺序固化为
  * noteRunSettled → notifyDone → trackNotifiedRunId → evictDoneRunsBeyondCap：
  * notifyDone 先发完整聚合通知（淘汰后聚合根仍在参数 run 引用上不受影响），
- * trackNotifiedRunId 有界化去重窗口，最后裁剪 done run 内存。本轮 run 的
- * completedAt 在 transition("done") 时同步设为当前时刻=全局最新，恒在保留端
- * ——结构性保证其不被自身触发的裁剪淘汰，无需 protectRunId。
+ * trackNotifiedRunId 有界化去重窗口，最后裁剪已终局 run 内存（[W2/V1] 终局判定
+ * 经 core isRunSettled 换源——本管线被 onRunDone 触发时注册表已 note，本轮 run
+ * 恒可淘汰候选，且其终局时序 = 全局最新，恒在保留端，不被自身触发的裁剪淘汰）。
  *
  * 失败语义（直测锁定，workflow-events-run-settled.test.ts）：管线内部无围栏
  * ——notifyDone 抛错（账本写账失败 / 降级直发非 stale 失败）时后续 track/evict
@@ -220,23 +231,35 @@ export interface RunSettledEffectsEnv {
  * （core worker-message-pump，OR-4/B-4：真实副作用失败 error 留痕不崩宿主）。
  * notifyDone 幂等早退（notifiedRunIds 已含 runId）不是错误：后三步照常执行。
  *
- * [D7] notifyDone 第 6 参注入产物目录指针（<sessionDir>/workflow-state——
+ * [D7] notifyDone 注入产物目录指针（<sessionDir>/workflow-state——
  * journal/manifest/.state 同目录；state.sessionDir 是 sessionState 条目字段，
  * adoption rebind 换新后自动跟进；目录分量经 core barrel STATE_DIR_NAME 单源）。
+ * [W2/V1 D1 第 7 行] notifyDone 尾参注入终局记录（载荷源 = 帧直取）；记录缺席
+ *（journal dispatch 失败窗口）时通知跳过 + error 留痕——stall 回收照常，evict 照常
+ *（内存有界性独立于通知），track 不标（未发通知不占去重窗口，允许后续语义修正）。
  * [D6-2] 第一步终局回收 stall 已通知标记（转发 watchdog 槽实例——run 已终局，
  * stall 声明生命周期结束）。
  */
 export function runSettledEffects(env: RunSettledEffectsEnv, run: WorkflowRun): void {
   env.stallWatchdog.noteRunSettled(run.runId);
-  notifyDone(
-    env.resolvePi(),
-    run.runId,
-    run,
-    env.notifiedRunIds,
-    toGuiCtx(env.state.ctx),
-    join(env.state.sessionDir, STATE_DIR_NAME),
-  );
-  trackNotifiedRunId(env.notifiedRunIds, run.runId);
+  const settlement = env.settledRecordOf(run.runId);
+  if (settlement !== undefined) {
+    notifyDone(
+      env.resolvePi(),
+      run.runId,
+      run,
+      env.notifiedRunIds,
+      toGuiCtx(env.state.ctx),
+      join(env.state.sessionDir, STATE_DIR_NAME),
+      settlement,
+    );
+    trackNotifiedRunId(env.notifiedRunIds, run.runId);
+  } else {
+    logger.error(
+      `[workflow] done notify skipped: settlement record unavailable (runId=${run.runId}) — ` +
+        "run-settled journal dispatch likely failed; recovery: consult the journal error log above",
+    );
+  }
   const evicted = evictDoneRunsBeyondCap(env.state.runs, MAX_RETAINED_DONE_RUNS);
   if (evicted > 0) {
     logger.debug("[subagent-workflow] evicted done runs beyond cap", {
@@ -297,7 +320,9 @@ export function setupWorkflowDomain(
     *getRunningRuns() {
       for (const st of domainState.sessionState.values()) {
         for (const run of st.runs.values()) {
-          if (run.state.status !== "running") continue;
+          // [W2/V1 D1 第 8 行] 判活换源 runSummary 投影二值（终局经注册表判定——
+          // 两态机活体写点删除后聚合 status 停更）。
+          if (runSummary(run).status !== "running") continue;
           yield {
             runId: run.runId,
             scriptName: run.spec.scriptName,
@@ -367,9 +392,20 @@ export function setupWorkflowDomain(
       //
       // onRunDone = run 终局固定顺序副作用管线（提级为 runSettledEffects 具名
       // 导出，顺序与失败语义的权威注释在该函数；此处纯装配注入依赖）。
+      // [W2/V1 D1 第 7 行] settledRecordOf 注入 = store 帧查询（notifyDone 在
+      // finalizeRun coda 内于 dispatch 落账之后触发，帧必已落 journal）。
       onRunDone: (run: WorkflowRun) =>
         runSettledEffects(
-          { stallWatchdog, resolvePi: resolveCurrentPi, notifiedRunIds, state, lsRef },
+          {
+            stallWatchdog,
+            resolvePi: resolveCurrentPi,
+            notifiedRunIds,
+            state,
+            // [W2/V1] 可选调用（fake lifecycle result 的 store 缺该面时返回 undefined
+            // ——notifyDone 跳过分支承接，见 runSettledEffects 注释）。
+            settledRecordOf: (runId) => state.store.settledRecordOf?.(runId),
+            lsRef,
+          },
           run,
         ),
       get eventBus() {
@@ -414,7 +450,9 @@ export function setupWorkflowDomain(
   function isScriptRunning(name: string): boolean {
     for (const state of sessionState.values()) {
       for (const run of state.runs.values()) {
-        if (run.spec.scriptName === name && run.state.status === "running") return true;
+        // [W2/V1 D1 第 8 行] 判活换源 runSummary 投影二值（混合判源收拢在 core
+        // 投影单点——原两态机 status 读随活体写点删除停更）。
+        if (run.spec.scriptName === name && runSummary(run).status === "running") return true;
       }
     }
     return false;

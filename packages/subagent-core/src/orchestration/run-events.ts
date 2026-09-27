@@ -18,7 +18,8 @@
 // 脚本 API 面只有 agent/parallel/pipeline/phase/log（worker-script-builder 注入的
 // 完整集合），无脚本内子进程调用通道，故不设脚本子进程事件（zcode world-run 族
 // 无对应物）。[U4 pi-workflow-run-resource-model] additive 扩容：member-pool（成员
-// 复用池登记/清空，决策 9）——词表 8 个。
+// 复用池登记/清空，决策 9）。[W2 D2] 死形态清退：ask-executing 事件（无生产写入
+// 方）随词表缩窄删除——词表 7 个。
 //
 // 层归属：Engine。状态机核心（词表 + 转移表 + transition）零 IO / 零时钟依赖，
 // 可独立编译测试；journal 实装是本模块唯一 IO 边（node:fs + core logger facade）。
@@ -109,8 +110,10 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  *
  * unknown 是合法成员：分类不出来的失败照记事件（词表漂移的失效模式 = 保守
  * 可诊断，不是拒记）。interrupted_abandoned 是注册表投影单元的终局化编码
- * （interrupted 超放弃窗 → terminal(failed) 的 manifest errorCode，D5 转移表
- * interrupted × abandon-elapsed 行）——不描述进程怎么死的，描述「为什么此刻
+ * （abandon 收编路径 run-settled 帧的 errorCode——[W2 D3] 超放弃窗经
+ * adoptInterruptedRun → settleRunAccounting 原语落账 outcome='interrupted'；
+ * 旧「转移表 interrupted × abandon-elapsed 行写 terminal(failed)」的形态已随
+ * [W2 D2] 死形态清退退役）——不描述进程怎么死的，描述「为什么此刻
  * 被判终局」，故为独立字面量成员而非复用任一既有族。
  *
  * budget_limited / time_limited 是 run 级终局码（dispatchFinalRunSettle 生产：
@@ -239,13 +242,17 @@ function extractFailedRunErrorCode(run: WorkflowRun): RunErrorCode {
   return lastFailureKind ?? "unknown";
 }
 
-// ── 事件词表（D5-2，U4 起 8 个）──────────────────────────────
+// ── 事件词表（D5-2，[W2 D2] 清退后 7 个）─────────────────────
 
-/** 事件类型全集（判别键）——增删成员须先改设计载荷表再动此词表（D5 纪律；member-pool 为 U4 additive 扩容）。 */
+/**
+ * 事件类型全集（判别键）——增删成员须先改设计载荷表再动此词表（D5 纪律；
+ * member-pool 为 U4 additive 扩容；ask-executing 随 [W2 D2] 死形态清退删除——
+ * 无生产写入方，dispatched 帧已承载 ask 起点语义；历史 journal 行经 scan/parse
+ * 的词表外坏行路径跳过计日志，见 isWorkflowRunEventLine）。
+ */
 export const RUN_EVENT_TYPES = [
   "run-created",
   "ask-dispatched",
-  "ask-executing",
   "ask-retrying",
   "ask-settled",
   "member-pool",
@@ -295,13 +302,13 @@ export interface RunCreatedEvent extends EventEnvelope {
 }
 
 /**
- * ask 身份三元组（D5 载荷表 dispatched/executing 行的载荷）。
+ * ask 身份三元组（D5 载荷表 dispatched 行的载荷）。
  *
  * taskIndex 对齐 AgentCall.id（= trace stepIndex，D-10 单源）——同一 ask 的
- * dispatched/executing/retrying/settled 全链共享同一 taskIndex。D5 载荷表仅在
- * dispatched/executing 行列出 taskIndex，但快照投影按 calls[].id 关联事件与
- * 条目，settled/retrying 缺 taskIndex 则无法定位归属 ask（agentName 不唯一、
- * attempt 单独不足），故四个 ask 事件统一携带。
+ * dispatched/retrying/settled 全链共享同一 taskIndex。D5 载荷表仅在 dispatched
+ * 行列出 taskIndex，但快照投影按 calls[].id 关联事件与条目，settled/retrying
+ * 缺 taskIndex 则无法定位归属 ask（agentName 不唯一、attempt 单独不足），故
+ * 三个 ask 事件统一携带。
  */
 interface AskIdentity {
   taskIndex: number;
@@ -324,16 +331,6 @@ export interface AskDispatchedEvent extends AskIdentity, EventEnvelope {
    * 「无归属」，fold/投影侧保持 undefined 不造键。
    */
   phase?: string;
-}
-
-/**
- * `ask-executing`——引擎已开始执行该次尝试（派发 → 执行的分界帧）。
- *
- * 预留成员：现役链路无生产写入方（dispatched 帧已承载 ask 起点语义），词表/
- * 转移表/投影消费设施为分界帧预留。
- */
-export interface AskExecutingEvent extends AskIdentity, EventEnvelope {
-  type: "ask-executing";
 }
 
 /** `ask-retrying`——失败尝试后将退避重试（重试轨迹从脚本内部状态变为 journal 事件，重试不再能掩盖事故）。 */
@@ -430,11 +427,10 @@ export interface RunSettledEvent extends EventEnvelope {
   artifactsDir: string;
 }
 
-/** run 事件判别联合（D5 词表全集，U4 起 8 个；判别键 = type）。 */
+/** run 事件判别联合（D5 词表全集，[W2 D2] 清退后 7 个；判别键 = type）。 */
 export type WorkflowRunEvent =
   | RunCreatedEvent
   | AskDispatchedEvent
-  | AskExecutingEvent
   | AskRetryingEvent
   | AskSettledEvent
   | MemberPoolEvent
@@ -491,14 +487,17 @@ export interface RunEventJournal {
 // ── 状态词表（D5-1 两维正交：lifecycle × outcome）──────────────
 
 /**
- * lifecycle 维全集（六态）。
+ * lifecycle 维全集（五态，[W2 D2] 死形态清退后）。
  *
  * 语义链：created（创建校验通过、run-created 未落账）→ dispatched（脚本已派发，
  * engine 预备段——armed 回执窗口）→ running（首个 ask 派发后）→ settling（全部
- * settled / 重试预算耗尽，终局判定中）→ terminal（吸收态）；interrupted =
- * 事件流停止的待恢复态（host-died 判读，非 terminal——7 天放弃窗后经
- * abandon-elapsed 终局化，D9-1）。与 outcome 维正交：只有 terminal 行产生
- * outcome，其余 lifecycle 的 outcome 恒缺省（由 transition 构造性保证）。
+ * settled / 重试预算耗尽，终局判定中）→ terminal（吸收态）。与 outcome 维正交：
+ * 只有 terminal 行产生 outcome，其余 lifecycle 的 outcome 恒缺省（由 transition
+ * 构造性保证）。旧 interrupted 态（无进入事件）与 host-died/abandon-elapsed
+ * 控制触发一并清退——「事件流停止的待恢复态」判读归注册表投影相
+ * （RunRegistryPhase.interrupted，run-registry「fold 停在非 terminal」判读，
+ * 非状态机状态）；被动终局语义由 outcome='interrupted' 承载（收编/abandon/idle
+ * 回收经 settleRunAccounting 原语写入，D2/D3）。
  */
 export const ALL_RUN_LIFECYCLES = [
   "created",
@@ -506,7 +505,6 @@ export const ALL_RUN_LIFECYCLES = [
   "running",
   "settling",
   "terminal",
-  "interrupted",
 ] as const;
 
 export type RunLifecycle = (typeof ALL_RUN_LIFECYCLES)[number];
@@ -532,19 +530,19 @@ export const INITIAL_RUN_STATE: RunState = { lifecycle: "created" };
 // ── 控制事件词表（驱动转移、不属 journal 词表——D5 第 2 层注记）─
 
 /**
- * 控制事件类型全集（3 个）。
+ * 控制事件类型全集（[W2 D2] 死形态清退后 1 个）。
  *
  * 为什么独立于 RUN_EVENT_TYPES：控制事件源于用户/宿主/投影判定，不是编排层
  * 事件流的一帧——驱动转移但不直接落 journal。类型层经 TransitionTrigger 并集
  * 区分两个词表；journal.append 的参数类型（WorkflowRunEventInput）构造性排除控制
  * 事件，控制终局路径需要落账时由调用侧合成 run-settled（见输出动作注释）。
  * watchdog-fired 已随 settled-watchdog 本体删除（pi-workflow-run-resource-model
- * 决策 6-D9：唯一生产者已删，控制事件不落 journal、无历史数据兼容负担）。
+ * 决策 6-D9）；host-died / abandon-elapsed 随 [W2 D2] 死形态清退删除（均无生产
+ * 投递点：事件流停止的待恢复判读归注册表投影相，被动终局化走 adoptInterruptedRun
+ * → settleRunAccounting 原语，不经状态机控制触发）。
  */
 export const CONTROL_TRIGGER_TYPES = [
   "cancel-requested",
-  "host-died",
-  "abandon-elapsed",
 ] as const;
 
 export type ControlTriggerType = (typeof CONTROL_TRIGGER_TYPES)[number];
@@ -553,10 +551,7 @@ export type ControlTriggerType = (typeof CONTROL_TRIGGER_TYPES)[number];
  * 控制事件判别联合。载荷只带自由文本 reason（诊断用），不带 ts——ts 信封由
  * 调用侧在合成落账事件 / 终局通知时补（transition 纯函数契约，见函数注释）。
  */
-export type ControlTrigger =
-  | { type: "cancel-requested"; reason?: string }
-  | { type: "host-died" }
-  | { type: "abandon-elapsed" };
+export type ControlTrigger = { type: "cancel-requested"; reason?: string };
 
 /** 转移触发全集 = journal 词表事件（input 形态——seq 是存储信封，不参与裁决）+ 控制事件。 */
 export type TransitionTrigger = WorkflowRunEventInput | ControlTrigger;
@@ -573,8 +568,12 @@ export type TransitionTrigger = WorkflowRunEventInput | ControlTrigger;
  *   outcome:cancelled；ts 信封由调用侧补）
  * - manifest-write：终局投影——manifest/.state 写 outcome/errorCode（D5-4）
  * - notify：终局通知触发（D7；pending:unregister 随通知闭环）
- * - registry-project：注册表投影更新（D9-1，interrupted 判读）
- * - journal-cleanup-eligible：journal 获清理资格（已终局 + 过保留期，Q2）
+ * - registry-project：注册表投影更新（D9-1 语义——「事件流停止 → 待恢复」的
+ *   投影相判读归 run-registry 投影面，非状态机转移产物；[W2 D2] 清退后现表无
+ *   引用行，标签保留供后续转移行声明）
+ * - journal-cleanup-eligible：journal 获清理资格（已终局 + 过保留期，Q2；
+ *   [W2 D2] 清退后现表无引用行——资格由 pruneTerminalRunFiles 按 manifest
+ *   outcome 非空判定自然兑现，标签保留供后续转移行声明）
  *
  * kill-run-topology 已随 D9-2 定点杀链删除（pi-workflow-run-resource-model
  * 决策 6-D1：cancel 收敛窗满 / armed 超时兜底改走「合成终态 + finalizeRun 收尾
@@ -613,11 +612,11 @@ export interface TransitionRule {
   guard?: AskSettleBranch;
   next: RunLifecycle;
   /**
-   * next === "terminal" 时的终局形态来源：固定值（cancel → cancelled、
-   * abandon → failed）或缺省 = 从 run-settled 事件载荷取（event.outcome）。
+   * next === "terminal" 时的终局形态来源：固定值（cancel → cancelled）或缺省 =
+   * 从 run-settled 事件载荷取（event.outcome）。
    * 非 terminal 行恒缺省。abandon 路径的 errorCode（interrupted_abandoned）
-   * 是 manifest 写入内容而非状态——由 Q2 注册表单元在消费 manifest-write
-   * 时附着，不进 RunState（词表边界见 RunErrorCode 注释）。
+   * 是 manifest 写入内容而非状态——由收编原语消费方附着，不进 RunState
+   * （词表边界见 RunErrorCode 注释）。
    */
   terminalOutcome?: RunOutcome;
   /** 该转移应发生的输出动作（声明性标签，执行归调用侧）。 */
@@ -625,44 +624,39 @@ export interface TransitionRule {
 }
 
 /**
- * 合法转移表（U4 起 27 行；D9 后 24 行——watchdog-fired 三声明行随
- * settled-watchdog 本体与 D9-2 定点杀链删除，见 pi-workflow-run-resource-model
- * 决策 6-D1/D9）。
+ * 合法转移表（[W2 D2] 死形态清退后 17 行；沿革：U4 起 27 行 → D9 后 24 行
+ * ——watchdog-fired 三声明行随 settled-watchdog 本体删除——→ W2 缩 17 行：
+ * host-died 四行、interrupted 两行、ask-executing 一行随死形态删除）。
  *
  * D5 示意表 8 行的落地 + 补全的必要转移：armed 在 dispatched/running 的自环
- * （D3 回执窗口横跨 engine 预备段与执行段）、后续 ask-dispatched/ask-executing/
- * ask-retrying 的 running 自环（parallel/pipeline 多波）、run-settled 自
- * running/dispatched 的终局行（cancel 路径合成 run-settled 与零 ask 脚本的
- * journal fold 重放需要——fold 只见 journal 事件，控制事件不在流中）、
- * dispatched × cancel-requested（脚本预备段可取消）、[U4] member-pool 在
- * dispatched/running/settling 的自环（复用池登记/清空不迁移 run lifecycle：
- * register 只发生在 running——ask 派发链内先有 ask-dispatched 行；clear 在 run
- * 收尾，零 ask run 落 dispatched；settling 行服务 fold 重放兼容）。interrupted
- * 的恢复转移（重跑/接管）属 D9-1（注册表单元，interrupted 待恢复态归属）后续
- * 单元裁决，本期不铺——需要时按「先改设计 D5 表再补表行与穷尽单测」的流程增补。
+ * （D3 回执窗口横跨 engine 预备段与执行段）、后续 ask-dispatched/ask-retrying
+ * 的 running 自环（parallel/pipeline 多波）、run-settled 自 running/dispatched
+ * 的终局行（cancel 路径合成 run-settled 与零 ask 脚本的 journal fold 重放需要
+ * ——fold 只见 journal 事件，控制事件不在流中）、dispatched × cancel-requested
+ * （脚本预备段可取消）、[U4] member-pool 在 dispatched/running/settling 的自环
+ * （复用池登记/清空不迁移 run lifecycle：register 只发生在 running——ask 派发
+ * 链内先有 ask-dispatched 行；clear 在 run 收尾，零 ask run 落 dispatched；
+ * settling 行服务 fold 重放兼容）。
  */
 export const RUN_TRANSITIONS: readonly TransitionRule[] = [
   // ── created：创建落账前 ──
   { from: "created", on: "run-created", next: "dispatched", outputs: ["journal-append"] },
-  { from: "created", on: "host-died", next: "interrupted", outputs: ["registry-project"] },
 
   // ── dispatched：engine 预备段（armed 窗口；零 ask 脚本可直达终局）──
   { from: "dispatched", on: "armed", next: "dispatched", outputs: ["journal-append"] },
   { from: "dispatched", on: "ask-dispatched", next: "running", outputs: ["journal-append"] },
   { from: "dispatched", on: "run-settled", next: "terminal", outputs: ["journal-append", "manifest-write", "notify"] },
   { from: "dispatched", on: "cancel-requested", next: "terminal", terminalOutcome: "cancelled", outputs: ["journal-append", "manifest-write", "notify"] },
-  { from: "dispatched", on: "host-died", next: "interrupted", outputs: ["registry-project"] },
 
   // ── running：ask 执行段（多波自环 + ask-settled 二支）──
   { from: "running", on: "armed", next: "running", outputs: ["journal-append"] },
   { from: "running", on: "ask-dispatched", next: "running", outputs: ["journal-append"] },
-  { from: "running", on: "ask-executing", next: "running", outputs: ["journal-append"] },
   { from: "running", on: "ask-retrying", next: "running", outputs: ["journal-append"] },
   { from: "running", on: "ask-settled", guard: "more-work-expected", next: "running", outputs: ["journal-append"] },
   { from: "running", on: "ask-settled", guard: "adjudicate-now", next: "settling", outputs: ["journal-append"] },
   // [U4 pi-workflow-run-resource-model] member-pool 自环（复用池登记/清空不迁移
-  // run lifecycle——池是 run 域的附属投影，非 lifecycle 状态）。created/interrupted/
-  // terminal 无行：member-pool 先于 run-created 落账或晚于终局帧均为接线错误，
+  // run lifecycle——池是 run 域的附属投影，非 lifecycle 状态）。created/terminal
+  // 无行：member-pool 先于 run-created 落账或晚于终局帧均为接线错误，
   // 表外 fail-fast 即该纪律的守卫（生产写入方：workflow-dispatch 登记与
   // finalizeRun 清空，两处都在 created→dispatched 之后、terminal 之前）。
   { from: "dispatched", on: "member-pool", next: "dispatched", outputs: ["journal-append"] },
@@ -670,18 +664,12 @@ export const RUN_TRANSITIONS: readonly TransitionRule[] = [
   { from: "settling", on: "member-pool", next: "settling", outputs: ["journal-append"] },
   { from: "running", on: "run-settled", next: "terminal", outputs: ["journal-append", "manifest-write", "notify"] },
   { from: "running", on: "cancel-requested", next: "terminal", terminalOutcome: "cancelled", outputs: ["journal-append", "manifest-write", "notify"] },
-  { from: "running", on: "host-died", next: "interrupted", outputs: ["registry-project"] },
 
-  // ── settling：终局判定中（只等 run-settled / cancel / host-died）──
+  // ── settling：终局判定中（只等 run-settled / cancel）──
   { from: "settling", on: "run-settled", next: "terminal", outputs: ["journal-append", "manifest-write", "notify"] },
   { from: "settling", on: "cancel-requested", next: "terminal", terminalOutcome: "cancelled", outputs: ["journal-append", "manifest-write", "notify"] },
-  { from: "settling", on: "host-died", next: "interrupted", outputs: ["registry-project"] },
 
   // ── terminal：吸收态，无表行（任意事件 fail-fast，D5 表末行）──
-
-  // ── interrupted：待恢复态（host-died 幂等重判 + 放弃窗终局化）──
-  { from: "interrupted", on: "host-died", next: "interrupted", outputs: ["registry-project"] },
-  { from: "interrupted", on: "abandon-elapsed", next: "terminal", terminalOutcome: "failed", outputs: ["manifest-write", "journal-cleanup-eligible"] },
 ];
 
 // ── 唯一入口 transition（纯函数）──────────────────────────────
@@ -999,8 +987,9 @@ class FileRunEventJournal implements RunEventJournal {
     }
     const seq = lastSeq + 1;
     const full = { ...event, seq } as WorkflowRunEvent;
-    // 为什么同步 append：journal 是取证证据——D9-1 的 host-died 判据 = 事件流
-    // 停止，批写缓冲随进程死亡丢失的恰好是「死前在做什么」的尾部帧；每 run 事件
+    // 为什么同步 append：journal 是取证证据——事件流停止的待恢复判读（run-registry
+    // 投影相）依赖「最后一帧是什么」，批写缓冲随进程死亡丢失的恰好是「死前在做什么」
+    // 的尾部帧；每 run 事件
     // 数实测 2-20 条（W1 检查点③，2026-09-26，29 个真实 run journal——设计包
     // w1-run-record-journal-authority/checkpoint-3-retention-sizing.md，原 D5 量级
     // 推演 200-400/run 已被实测推翻），同步追加的微秒级成本不构成吞吐压力，

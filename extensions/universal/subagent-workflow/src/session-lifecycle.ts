@@ -22,6 +22,9 @@ import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "@earendi
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { guardStaleCtx, oncePerProcess, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+// [W2/V4 D6] 恢复链注销直落消费的 protocol SSOT（customType + status 映射单点——
+// 与 finalizeRun 直落 / reconcile-sweep 补注销同一函数，零新增定义点）。
+import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 
 // ═══ core 宿主端口消费（随迁块的依赖；production 默认实现住本文件） ═══
 import { getOrCreateChannelRegistry } from "@zhushanwen/subagent-core";
@@ -543,7 +546,8 @@ interface SessionRunState {
  *
  * MF-1: store 健康度跟踪。loadAll 失败 → storeHealthy=false，workflow 域启动时 fail-fast。
  * 崩溃恢复四步（loadAll → failed → save → evict）收口到 core recoverCrashedRuns（D8：
- * 宿主各写一遍正是 failure-mode-B）；pending:unregister 经 hooks 外置发射（位置在
+ * 宿主各写一遍正是 failure-mode-B）；pending:unregister 经 hooks 外置回调在本面
+ * appendEntry 直落（[W2/V4 D6] 与 reload-closeout D4 定案对齐——不经 emit；位置在
  * transition 后、save 前，对齐原内联实现）；save 走 store 冷路径（done 绕过去抖）——
  * 冷路径语义在 JsonlRunStore.save 内，不随循环归属转移。loadAll 失败的 fail-fast
  * （storeHealthy=false 停初始化）是宿主职责，core 原样上抛、这里 catch 兜住。
@@ -591,7 +595,18 @@ async function createSessionRunState(
         "Process killed (kill-9 or crash recovery)",
         {
           onRunRecovered: (payload) => {
-            pi.events.emit("pending:unregister", payload);
+            // [W2/V4 D6] 注销直落权威面：appendEntry 直接落盘，不经 emit。
+            // [reload-closeout D4] 定案「emit 链在 reload 转换窗失效、appendEntry
+            // 是唯一可靠通道」在崩溃恢复链同样适用（session_start 装配窗可能仍在
+            // reload 转换内）；pending 域消费方全部从持久化 entries 现算，直落对其
+            // 即时生效。status 经 protocol mapReasonToStatus 单点（与 finalizeRun
+            // 直落 / reconcile-sweep 补注销同一函数）；抛错由 core 侧 hook 围栏
+            // warn 留痕后恢复循环继续，差集残留交 reconcile-sweep 下次收口。
+            pi.appendEntry(PENDING_UNREGISTER_ENTRY_TYPE, {
+              id: payload.id,
+              reason: payload.reason,
+              status: mapReasonToStatus(payload.reason),
+            });
           },
           // [W1 / D4] 收编终态条目补写（恢复链收编的条目半边）：core 在 journal
           // run-settled 落账后回调本面，v2 终态条目经当前 pi appendEntry 落主

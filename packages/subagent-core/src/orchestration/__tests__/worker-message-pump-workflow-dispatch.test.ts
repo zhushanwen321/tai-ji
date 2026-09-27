@@ -41,7 +41,7 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { AgentCallOpts } from "../models/types.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
-import { handleWorkerMessage } from "../worker-message-pump.ts";
+import { dispatchRunCreated, handleWorkerMessage, isRunSettled } from "../worker-message-pump.ts";
 import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
 import type { RecordStore } from "../../execution/persistence/record-store.ts";
 import { SubagentService } from "../../execution/subagent-service.ts";
@@ -150,6 +150,7 @@ afterEach(() => {
 describe("pump → executeWorkflowAgent 端到端", () => {
   it("record 进 store（origin=workflow + parentRunId）→ settle → 回包/终态摘要/D7 终态化全链", async () => {
     const h = makePumpHarness("wf-pump-e2e-1");
+    await dispatchRunCreated(h.run); // [W2/V1] 六态机引导（journal 首帧——run 级终局裁决前置）
     await handleWorkerMessage(
       h.run,
       { type: "agent-call", callId: 1, opts: { prompt: "调研 A", description: "research-a" } },
@@ -215,7 +216,8 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     const runUnregister = h.deps.appendEntry as ReturnType<typeof vi.fn>;
     const runUnregCall = runUnregister.mock.calls.find((c) => c[0] === "pending:unregister");
     expect(runUnregCall?.[1]).toMatchObject({ id: "wf-pump-e2e-1", status: "completed" });
-    expect(h.run.state.status).toBe("done");
+    // [W2/V1] 终局断言换源（两态机字段停更）
+    expect(isRunSettled(h.run)).toBe(true);
   });
 
   it("失败结果：引擎 error outcome → 回包 error + trace failed 终态摘要", async () => {

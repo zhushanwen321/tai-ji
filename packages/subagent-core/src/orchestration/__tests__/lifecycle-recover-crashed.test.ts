@@ -334,15 +334,15 @@ describe("recoverCrashedRuns — journal 收编接驳（W1 / D4）", () => {
       });
 
       expect(result.recovered).toBe(1);
-      // journal 尾部有收编 run-settled（interrupted 终局的 failed 形态，reason 承载
-      // kill 文本——「收编 run-settled(interrupted)」的 outcome 维 = failed）
+      // journal 尾部有收编 run-settled（[W2/V1 D2/D3] 被动终局 = interrupted，
+      // reason 承载 kill 文本——「崩溃 ≠ 失败」四值词表裁决）
       const events = await createRunEventJournal(journalDir).scan("wf-adopt-1");
       expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "run-settled"]);
       const settled = events[2] as Extract<
         import("../run-events.ts").WorkflowRunEvent,
         { type: "run-settled" }
       >;
-      expect(settled.outcome).toBe("failed");
+      expect(settled.outcome).toBe("interrupted");
       expect(settled.reason).toBe("Process killed");
       // manifest 物化（writeRunTerminalManifest 经 dispatch 链的 appendTransition）
       expect(

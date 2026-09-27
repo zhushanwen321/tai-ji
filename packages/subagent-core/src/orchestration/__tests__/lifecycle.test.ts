@@ -29,7 +29,13 @@ import {
 import { ArgsValidationError } from "../args-validator.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { projectRunRegistryState } from "../run-registry.ts";
-import { dispatchRunTrigger, setRunEventJournalDirForTest } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+  dispatchRunTrigger,
+  isRunSettled,
+  settledRecordOf,
+  setRunEventJournalDirForTest,
+} from "../worker-message-pump.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -135,10 +141,19 @@ afterEach(() => {
 
 // ── scheduleTimeBudget ───────────────────────────────────────
 
+
+/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+ *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
+ *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
+async function seedRunCreated(run: WorkflowRun): Promise<void> {
+  await dispatchRunCreated(run);
+}
+
 describe("scheduleTimeBudget", () => {
-  it("定时器到期 → abortRun(done,time_limited)", async () => {
+  it("定时器到期 → abortRun(time_limited 终局)", async () => {
     const { run } = makeRunningRealRun("wf-budget-1");
     const deps = makeDeps();
+    await seedRunCreated(run);
     deps.runs.set("wf-budget-1", run);
 
     const timer = scheduleTimeBudget("wf-budget-1", deps, 1000);
@@ -148,8 +163,8 @@ describe("scheduleTimeBudget", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await flushMicrotasks();
 
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("time_limited");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
     expect(run.state.error).toContain("Time budget exceeded");
     // 完成通知（[reload-closeout D4] 直落）
     expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
@@ -400,13 +415,14 @@ describe("runWorkflow", () => {
     //（scheduleTimeBudget 产出的 Node timer，非死代码 spy）
     expect(run.runtime?.timeBudgetTimer).toBeDefined();
 
-    // 生产行为面②：到期后 abortRun(time_limited) 真实触发——run 转 done，
-    // reason/error/通知全部落位（文件级 beforeEach 已 fake timers）
+    // 生产行为面②：到期后 abortRun(time_limited) 真实触发——run 终局（[W2/V1]
+    // 断言换源：两态机字段停更，经终局记录判定），reason/error/通知全部落位
+    //（文件级 beforeEach 已 fake timers）
     await vi.advanceTimersByTimeAsync(3000);
     await flushMicrotasks();
 
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("time_limited");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
     expect(run.state.error).toContain("Time budget exceeded");
     expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: runId,
@@ -467,15 +483,17 @@ describe("runWorkflow", () => {
 // ── abortRun ─────────────────────────────────────────────────
 
 describe("abortRun", () => {
-  it("running run → done,aborted：releaseRuntime + 直落 pending:unregister", async () => {
+  it("[W2/V1] running run → 终局(cancelled)：releaseRuntime + 直落 pending:unregister", async () => {
     const { run, terminate } = makeRunningRealRun("wf-abort-1");
     const deps = makeDeps();
     deps.runs.set("wf-abort-1", run);
+    await seedRunCreated(run);
 
     await abortRun("wf-abort-1", deps, "user cancelled");
 
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("aborted");
+    // [W2/V1] 终局断言换源（两态机字段停更——state.status 恒 running）
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "cancelled" });
     expect(run.state.error).toBe("user cancelled");
     expect(terminate).toHaveBeenCalledTimes(1);
     expect(run.runtime).toBeUndefined();
@@ -502,6 +520,7 @@ describe("abortRun", () => {
   it("[B-4] eventBus listener 抛错 → abortRun 不向调用方抛错、onRunDone 仍执行", async () => {
     const { run, terminate } = makeRunningRealRun("wf-abort-fence");
     const deps = makeDeps();
+    await seedRunCreated(run);
     deps.eventBus.emit = vi.fn(() => {
       throw new Error("listener exploded");
     });
@@ -510,9 +529,9 @@ describe("abortRun", () => {
     // 旧实现裸调 emit：listener 抛错 → 异常上抛给 tool 调用方 + 跳过 onRunDone
     await expect(abortRun("wf-abort-fence", deps, "abort with broken bus")).resolves.toBeUndefined();
 
-    // abort 成功语义保持：终态转换/terminate 照常完成
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("aborted");
+    // abort 成功语义保持：终局落账/terminate 照常完成
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "cancelled" });
     expect(terminate).toHaveBeenCalledTimes(1);
     // 独立围栏：onRunDone 不被 emit 故障跳过
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
@@ -522,10 +541,12 @@ describe("abortRun", () => {
     const { run } = makeRunningRealRun("wf-abort-3");
     const deps = makeDeps();
     deps.runs.set("wf-abort-3", run);
+    await seedRunCreated(run);
 
     await abortRun("wf-abort-3", deps, "timeout", "time_limited");
 
-    expect(run.state.reason).toBe("time_limited");
+    // [W2/V1] reason 细分经终局记录联合派生（failed + time_limited）
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
     expect(run.state.error).toBe("timeout");
   });
 
@@ -538,10 +559,12 @@ describe("abortRun", () => {
 // ── terminateRunningRuns ─────────────────────────────────────
 
 describe("terminateRunningRuns", () => {
-  it("多 run 中仅 running 被终止（done run 不动）", async () => {
+  it("多 run 中仅未终局 run 被终止（已终局 run 不动；[W2/V1] 判据换源）", async () => {
     const { run: running1 } = makeRunningRealRun("wf-term-1");
     const { run: running2 } = makeRunningRealRun("wf-term-2");
     const { run: doneRun } = makeRunningRealRun("wf-term-done");
+    await seedRunCreated(running1);
+    await seedRunCreated(running2);
     doneRun.transition("done", "completed");
     const deps = makeDeps();
     deps.runs.set("wf-term-1", running1);
@@ -550,12 +573,13 @@ describe("terminateRunningRuns", () => {
 
     await terminateRunningRuns(deps, "Session switched: run terminated");
 
-    // running 全部转 done,failed
-    expect(running1.state.status).toBe("done");
-    expect(running1.state.reason).toBe("failed");
-    expect(running2.state.status).toBe("done");
-    expect(running2.state.reason).toBe("failed");
-    // done run 不被重写（保留 completed）
+    // running 全部终局（failed + errorCode 细分承载 terminate 语境）
+    expect(isRunSettled(running1)).toBe(true);
+    expect(settledRecordOf(running1.runId)).toMatchObject({ outcome: "failed" });
+    expect(isRunSettled(running2)).toBe(true);
+    expect(settledRecordOf(running2.runId)).toMatchObject({ outcome: "failed" });
+    // 已终局 run 不被重写（恢复写点聚合 done 保留）
+    expect(doneRun.state.status).toBe("done");
     expect(doneRun.state.reason).toBe("completed");
   });
 
@@ -563,6 +587,8 @@ describe("terminateRunningRuns", () => {
     const { run: r1 } = makeRunningRealRun("wf-term-3");
     const { run: r2 } = makeRunningRealRun("wf-term-4");
     const deps = makeDeps();
+    await seedRunCreated(r1);
+    await seedRunCreated(r2);
     deps.runs.set("wf-term-3", r1);
     deps.runs.set("wf-term-4", r2);
 
@@ -582,15 +608,16 @@ describe("terminateRunningRuns", () => {
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
-  it("state.error = reason、reason 字段 = failed、run 落盘（releaseRuntime 解绑 runtime）", async () => {
+  it("state.error = reason、终局 outcome=failed、run 落盘（releaseRuntime 解绑 runtime）", async () => {
     const { run, terminate } = makeRunningRealRun("wf-term-5");
     const deps = makeDeps();
+    await seedRunCreated(run);
     deps.runs.set("wf-term-5", run);
 
     await terminateRunningRuns(deps, "Session switched: run terminated");
 
     expect(run.state.error).toBe("Session switched: run terminated");
-    expect(run.state.reason).toBe("failed");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.runtime).toBeUndefined();
     expect(terminate).toHaveBeenCalledTimes(1);
     expect(deps.store.save).toHaveBeenCalledTimes(1);
@@ -601,6 +628,8 @@ describe("terminateRunningRuns", () => {
     const { run: a, terminate: terminateA } = makeRunningRealRun("wf-term-fence-a");
     const { run: b, terminate: terminateB } = makeRunningRealRun("wf-term-fence-b");
     const deps = makeDeps();
+    await seedRunCreated(a);
+    await seedRunCreated(b);
     deps.runs.set("wf-term-fence-a", a);
     deps.runs.set("wf-term-fence-b", b);
     // 仅 runA 的 emit 抛错（按 payload id 判别模拟坏 listener）
@@ -610,9 +639,9 @@ describe("terminateRunningRuns", () => {
 
     await expect(terminateRunningRuns(deps, "Session switched: run terminated")).resolves.toBeUndefined();
 
-    // 两个 run 都走到终态（runA 的 emit 故障不中断批量收尾）
-    expect(a.state.reason).toBe("failed");
-    expect(b.state.reason).toBe("failed");
+    // 两个 run 都走到终局（runA 的 emit 故障不中断批量收尾）
+    expect(settledRecordOf(a.runId)).toMatchObject({ outcome: "failed" });
+    expect(settledRecordOf(b.runId)).toMatchObject({ outcome: "failed" });
     expect(terminateA).toHaveBeenCalledTimes(1);
     expect(terminateB).toHaveBeenCalledTimes(1);
   });
@@ -621,6 +650,8 @@ describe("terminateRunningRuns", () => {
     const { run: bad } = makeRunningRealRun("wf-term-err");
     const { run: good } = makeRunningRealRun("wf-term-ok");
     const deps = makeDeps();
+    await seedRunCreated(bad);
+    await seedRunCreated(good);
     deps.runs.set("wf-term-err", bad);
     deps.runs.set("wf-term-ok", good);
     deps.store.save = vi.fn(async (r: WorkflowRun) => {
@@ -629,18 +660,18 @@ describe("terminateRunningRuns", () => {
 
     await terminateRunningRuns(deps, "Session shutdown: run terminated");
 
-    // [D5-② finalizeRun 收敛] save 失败 best-effort（SW-DATA-3 统一）：transition 先于
-    // save，状态已转 done；与收敛前不同，unregister 不再被 save 失败短路——否则
+    // [D5-② finalizeRun 收敛] save 失败 best-effort（SW-DATA-3 统一）：六态机落账先于
+    // save，状态已终局；与收敛前不同，unregister 不再被 save 失败短路——否则
     // pending 通知幽灵注销（列表残留永不清理的 running 条目）
-    expect(bad.state.status).toBe("done");
-    expect(bad.state.reason).toBe("failed");
+    expect(isRunSettled(bad)).toBe(true);
+    expect(settledRecordOf(bad.runId)).toMatchObject({ outcome: "failed" });
     expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: "wf-term-err",
       reason: "failed",
       status: "failed",
     });
     // 其余 run 正常走完落盘 + unregister（单 run 失败不中断批量终止）
-    expect(good.state.status).toBe("done");
+    expect(isRunSettled(good)).toBe(true);
     expect(deps.store.save).toHaveBeenCalledWith(good);
     expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: "wf-term-ok",

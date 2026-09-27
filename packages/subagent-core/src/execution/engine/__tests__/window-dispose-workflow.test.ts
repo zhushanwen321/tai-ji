@@ -22,7 +22,7 @@ import type {
 import { WorkflowRun } from "../../../orchestration/models/workflow-run.ts";
 import type { LifecycleDeps } from "../../../orchestration/models/ports.ts";
 import type { WorkerHandle } from "../../../orchestration/worker-handle.ts";
-import { finalizeRun } from "../../../orchestration/worker-message-pump.ts";
+import { dispatchRunCreated, finalizeRun } from "../../../orchestration/worker-message-pump.ts";
 import {
   resetWorkflowWindowEngineStatesForTest,
   resolveWorkflowWindowEnginePort,
@@ -179,7 +179,13 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
     resolveWorkflowWindowEnginePort(runId, "fake-a");
     resolveWorkflowWindowEnginePort(runId, "fake-b");
 
-    const ok = await finalizeRun(makeRealRun(runId), makeTracingDeps(), "completed", {
+    // [W2/V1 适配] run-created 正点首帧（journal 首帧唯一落点）——V1 后 run-settled
+    // 对「journal 无 run-created 帧」的形态表外 fail-fast（IllegalTransitionError →
+    // finalizeRun false → coda 不执行），测试构造须与生产派发链同形（runWorkflow →
+    // dispatchRunCreated → … → finalizeRun）。
+    const run = makeRealRun(runId);
+    await dispatchRunCreated(run);
+    const ok = await finalizeRun(run, makeTracingDeps(), "completed", {
       context: "test",
     });
 
@@ -217,6 +223,9 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
       deps.order.push("dispose");
       closeOutObservedAtDispose = call.status === "done" && node.status === "failed";
     };
+
+    // [W2/V1 适配] run-created 正点首帧（同验收①——abort 走 dispatched×cancel-requested 表内行）。
+    await dispatchRunCreated(run);
 
     const ok = await finalizeRun(run, deps, "aborted", { context: "abort" });
 
@@ -273,7 +282,10 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
     expect(registrySpy).not.toHaveBeenCalled();
 
     // probe 创建的实例归窗口表所有：run 收尾即 dispose（G1 回落判定的机制面）
-    await finalizeRun(makeRealRun(runId), makeTracingDeps(), "completed", { context: "test" });
+    // [W2/V1 适配] run-created 正点首帧（同验收①）。
+    const run = makeRealRun(runId);
+    await dispatchRunCreated(run);
+    await finalizeRun(run, makeTracingDeps(), "completed", { context: "test" });
     expect(port.disposed).toBe(1);
   });
 
@@ -299,7 +311,10 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
 
     // probe 注入与 piEngine 注入同窗口键 → 同实例（probe 探的与 run 用的同一窗口
     // 实例）→ run 收尾 dispose 覆盖（G1 回落判定的机制面）
-    const ok = await finalizeRun(makeRealRun(runId), makeTracingDeps(), "completed", { context: "test" });
+    // [W2/V1 适配] run-created 正点首帧（同验收①）。
+    const run = makeRealRun(runId);
+    await dispatchRunCreated(run);
+    const ok = await finalizeRun(run, makeTracingDeps(), "completed", { context: "test" });
     expect(ok).toBe(true);
     expect(piPort.disposed).toBe(1);
   });
@@ -320,6 +335,10 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
     expect(registrySpy).toHaveBeenCalled();
     // shared-service 不进窗口表（U1 register no-op 语义的接线侧印证）
     expect(workflowWindowEngineState(runId).instances.get("zcode-like")).toBeUndefined();
+
+    // [W2/V1 适配] run-created 正点首帧（同验收①）——使本用例验证完整 coda 下的
+    // shared-service 不 dispose 断言（此前 coda 提前退出时断言为空真）。
+    await dispatchRunCreated(run);
 
     await finalizeRun(run, deps, "completed", { context: "test" });
 

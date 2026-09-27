@@ -6,6 +6,8 @@
 // [W3] 追加：EngineDescriptor 双模（inproc 快捷 / cli portFactory 代理透明——
 // cli 形态 EnginePort 实例 = W2 RemoteEngine）+ D4 displayName 稳定序 +
 // 全不可用 engine_not_found 文案（「未发现任何引擎包」+ 安装指引）。
+// normalizeEngineId 缺省归一直测（undefined/空白 → 'pi'、非 pi 透传）+
+// 注册表重建后注入渲染输出不变（渲染无跨重建状态）。
 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,10 +27,12 @@ import {
   hasEngine,
   listEngines,
   listEnginesByDisplayName,
+  normalizeEngineId,
   registerEngine,
   registerEngineDescriptor,
   type EngineManifestSnapshot,
 } from "../registry.ts";
+import { buildEngineModelsPromptAppend, buildSubagentEngineSection } from "../model-prompt.ts";
 import type { SessionView } from "../types.ts";
 import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
 
@@ -56,6 +60,14 @@ function makeFakeEngine(id: string): EnginePort {
     read: (_handle: Parameters<EnginePort["read"]>[0]): Promise<SessionView> =>
       Promise.resolve({ engineId: id, turns: [], source: "outcome-only" }),
   };
+}
+
+/** 带模型清单的假引擎（引擎模型段渲染的输入面；listModels 每次返回新数组实例——渲染必须与实例无关）。 */
+function makeFakeEngineWithModels(
+  id: string,
+  models: Array<{ id: string; name?: string }>,
+): EnginePort {
+  return { ...makeFakeEngine(id), listModels: () => models.map((m) => ({ ...m })) };
 }
 
 describe("engine registry", () => {
@@ -131,6 +143,36 @@ describe("engine registry", () => {
 
   it("DEFAULT_ENGINE_ID 缺省为 'pi'（D9：回填期零风险默认）", () => {
     expect(DEFAULT_ENGINE_ID).toBe("pi");
+  });
+
+  // ── normalizeEngineId（缺省归一单一权威源）────────────────────────────
+
+  it("normalizeEngineId：undefined 缺省归一到 'pi'", () => {
+    expect(normalizeEngineId(undefined)).toBe("pi");
+  });
+
+  it("normalizeEngineId：空白字符串归一到 'pi'（sanitize 拦非字符串，防御空白透传）", () => {
+    expect(normalizeEngineId("   ")).toBe("pi");
+  });
+
+  it("normalizeEngineId：非 pi 引擎 id 透传", () => {
+    expect(normalizeEngineId("zcode")).toBe("zcode");
+  });
+
+  it("注册表重建（clearEngines + 同 id 同清单重注册）后注入渲染输出不变（渲染无跨重建状态）", () => {
+    const models = [
+      { id: "builtin:bigmodel-coding-plan/GLM-5.3", name: "GLM-5.3" },
+      { id: "builtin:bigmodel-coding-plan/GLM-5.3-Flash" },
+    ];
+    registerEngine("zcode", () => makeFakeEngineWithModels("zcode", models));
+    const firstSection = buildSubagentEngineSection("zcode");
+    const firstAppend = buildEngineModelsPromptAppend("zcode");
+
+    clearEngines();
+    registerEngine("zcode", () => makeFakeEngineWithModels("zcode", models));
+
+    expect(buildSubagentEngineSection("zcode")).toBe(firstSection);
+    expect(buildEngineModelsPromptAppend("zcode")).toBe(firstAppend);
   });
 
   // ── [R1 D6②] 重注册同名：先 dispose 已实例化的旧单例（防常驻资源泄漏）──

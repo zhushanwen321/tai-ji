@@ -18,6 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runWorkflow } from "../lifecycle.ts";
+import { isRunSettled, settledRecordOf } from "../worker-message-pump.ts";
 import type { LifecycleDeps, RunStore } from "../models/ports.ts";
 import type { RunSpec } from "../models/run-spec.ts";
 import type { WorkflowRun } from "../models/workflow-run.ts";
@@ -32,7 +33,8 @@ async function waitForTerminal(
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const run = runs.get(runId);
-    if (run && run.state.status === "done") return run;
+    // [W2/V1] 终局判定换源 isRunSettled（两态机字段停更——注册表判定）
+    if (run && isRunSettled(run)) return run;
     if (Date.now() > deadline) {
       throw new Error(
         `run ${runId} did not reach a terminal state within ${timeoutMs}ms ` +
@@ -91,7 +93,8 @@ describe("[F1] 不可克隆 return → run failed（非悬挂）— e2e", () => 
       // 挂起 → 此处超时 throw（修复前行为）；收敛 → done
       const run = await waitForTerminal(runs, runId, 30_000);
 
-      expect(run.state.reason).toBe("failed");
+      // [W2/V1] reason 断言换源（终局记录联合派生——failed 终局含 unknown 因提取码）
+      expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
       // worker 侧 fallback 消息经 handleScriptError 超限路径写入归因
       expect(run.state.error).toContain("structured-clone failed");
       // 终态副作用齐全（对比 SW-DATA-3/F1 前的幽灵悬挂：无 unregister / 无 onRunDone）

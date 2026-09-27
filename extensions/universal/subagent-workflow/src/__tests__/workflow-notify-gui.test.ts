@@ -80,6 +80,27 @@ function makePi(): { pi: ExtensionAPI; captured: { details: unknown }[] } {
   return { pi, captured };
 }
 
+
+/** [W2/V1] 终局记录构造（notifyDone 载荷源换帧直取后的测试通道——reason 词表 →
+ *  (outcome, errorCode) 按 D5 映射反构）。 */
+function settlementFor(reason: string | undefined): import("../jsonl-run-store.ts").RunSettlementRecord {
+  switch (reason) {
+    case "completed":
+      return { outcome: "completed", settledAt: 0 };
+    case "aborted":
+      return { outcome: "cancelled", settledAt: 0 };
+    case "failed":
+      return { outcome: "failed", errorCode: "unknown", settledAt: 0 };
+    case "budget_limited":
+      return { outcome: "failed", errorCode: "budget_limited", settledAt: 0 };
+    case "time_limited":
+      return { outcome: "failed", errorCode: "time_limited", settledAt: 0 };
+    default:
+      // gui mocks 可无 reason（「无 reason」用例）——completed 语义
+      return { outcome: "completed", settledAt: 0 };
+  }
+}
+
 describe("notifyDone — GUI 协议", () => {
   // notifyDone 接收 WorkflowRun（class），RunMock 结构兼容（duck typing），
   // 用单次断言收窄避免每个用例重复 as never。
@@ -89,7 +110,7 @@ describe("notifyDone — GUI 协议", () => {
     const { pi, captured } = makePi();
     const run = makeRun({ status: "done", reason: "failed", slug: "ci" });
 
-    notifyDone(pi, "run-abc12345", runAsParam(run), new Set(), { mode: "rpc", hasUI: true });
+    notifyDone(pi, "run-abc12345", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
     const details = captured[0] as WorkflowNotifyDetails;
@@ -106,7 +127,7 @@ describe("notifyDone — GUI 协议", () => {
     const { pi, captured } = makePi();
     const run = makeRun({ status: "done", reason: undefined, slug: "deploy" });
 
-    notifyDone(pi, "run-defg1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true });
+    notifyDone(pi, "run-defg1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const details = captured[0] as WorkflowNotifyDetails;
     const items = details.__gui__!.component.props.items as Array<{ status: string; icon: string }>;
@@ -118,7 +139,7 @@ describe("notifyDone — GUI 协议", () => {
     const { pi, captured } = makePi();
     const run = makeRun({ status: "done", reason: "completed", slug: "deploy" });
 
-    notifyDone(pi, "run-comp1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true });
+    notifyDone(pi, "run-comp1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const details = captured[0] as WorkflowNotifyDetails;
     const items = details.__gui__!.component.props.items as Array<{ status: string; icon: string }>;
@@ -130,7 +151,7 @@ describe("notifyDone — GUI 协议", () => {
     const { pi, captured } = makePi();
     const run = makeRun({ status: "done", reason: "completed", slug: "ci" });
 
-    notifyDone(pi, "abcdefgh1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true });
+    notifyDone(pi, "abcdefgh1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const details = captured[0] as WorkflowNotifyDetails;
     const items = details.__gui__!.component.props.items as Array<{ label: string }>;
@@ -142,7 +163,7 @@ describe("notifyDone — GUI 协议", () => {
     const { pi, captured } = makePi();
     const run = makeRun({ status: "done", reason: "completed", slug: undefined });
 
-    notifyDone(pi, "abcdefgh1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true });
+    notifyDone(pi, "abcdefgh1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const details = captured[0] as WorkflowNotifyDetails;
     const items = details.__gui__!.component.props.items as Array<{ label: string }>;
@@ -154,7 +175,7 @@ describe("notifyDone — GUI 协议", () => {
     const { pi, captured } = makePi();
     const run = makeRun({ status: "done", reason: "completed" });
 
-    notifyDone(pi, "run-xxx", runAsParam(run), new Set(), { mode: "tui", hasUI: true });
+    notifyDone(pi, "run-xxx", runAsParam(run), new Set(), { mode: "tui", hasUI: true }, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const details = captured[0] as WorkflowNotifyDetails;
     expect(details.__gui__).toBeUndefined();
@@ -164,7 +185,7 @@ describe("notifyDone — GUI 协议", () => {
     const { pi, captured } = makePi();
     const run = makeRun({ status: "done", reason: "completed" });
 
-    notifyDone(pi, "run-yyy", runAsParam(run), new Set(), undefined);
+    notifyDone(pi, "run-yyy", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const details = captured[0] as WorkflowNotifyDetails;
     expect(details.__gui__).toBeUndefined();
@@ -175,8 +196,8 @@ describe("notifyDone — GUI 协议", () => {
     const run = makeRun({ status: "done", reason: "completed" });
     const notified = new Set<string>();
 
-    notifyDone(pi, "run-dedup", runAsParam(run), notified, { mode: "rpc", hasUI: true });
-    notifyDone(pi, "run-dedup", runAsParam(run), notified, { mode: "rpc", hasUI: true });
+    notifyDone(pi, "run-dedup", runAsParam(run), notified, { mode: "rpc", hasUI: true }, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
+    notifyDone(pi, "run-dedup", runAsParam(run), notified, { mode: "rpc", hasUI: true }, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
     expect(captured).toHaveLength(1);
@@ -194,7 +215,7 @@ describe("notifyDone — GUI 协议", () => {
       ],
     });
 
-    notifyDone(pi, "run-base123", runAsParam(run), new Set(), { mode: "rpc", hasUI: true });
+    notifyDone(pi, "run-base123", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const details = captured[0] as WorkflowNotifyDetails;
     expect(details.runId).toBe("run-base123");
@@ -228,18 +249,18 @@ describe("trackNotifiedRunId（notifiedRunIds 有界 FIFO）", () => {
     const ctx = { mode: "rpc", hasUI: true } as const;
 
     // old 首次通知 + track
-    notifyDone(pi, "old", runAsParam(run), set, ctx);
+    notifyDone(pi, "old", runAsParam(run), set, ctx, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
     trackNotifiedRunId(set, "old", 3);
     // 3 个新 run 依次通知 + track——"old" 被挤出窗口（set 现为 n1/n2/n3）
     for (const id of ["n1", "n2", "n3"]) {
-      notifyDone(pi, id, runAsParam(run), set, ctx);
+      notifyDone(pi, id, runAsParam(run), set, ctx, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
       trackNotifiedRunId(set, id, 3);
     }
     expect(set.size).toBe(3);
     expect(Array.from(set)).toEqual(["n1", "n2", "n3"]);
 
     // 第二次对 "old" 的 notifyDone：has 为 false → 重新发送
-    notifyDone(pi, "old", runAsParam(run), set, ctx);
+    notifyDone(pi, "old", runAsParam(run), set, ctx, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     // 旧行为『永不重复』在挤出窗口后不成立——边界显式钉死：
     // old 首次 + n1/n2/n3 + old 二次 = 5 次

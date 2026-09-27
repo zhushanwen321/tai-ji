@@ -103,7 +103,12 @@ function makeCtx(sessionId: string, mode: "rpc" | "tui"): ExtensionContext {
 function makeFakeLifecycleResult(sessionId: string, mode: "rpc" | "tui") {
   return {
     sessionId,
-    store: { dispose: vi.fn(async () => {}) } as never,
+    // [W2/V1 D1 第 7 行] 终局记录查询面（makeDeps 装配的结构化守卫读它）——
+    // completed 形态让 onRunDone 管线的 notifyDone 步骤真实发通知
+    store: {
+      dispose: vi.fn(async () => {}),
+      settledRecordOf: () => ({ outcome: "completed", settledAt: 0 }),
+    } as never,
     runs: new Map<string, WorkflowRun>(),
     sessionDir: "/tmp/subagent-workflow-deps-getter-test",
     runner: {} as never,

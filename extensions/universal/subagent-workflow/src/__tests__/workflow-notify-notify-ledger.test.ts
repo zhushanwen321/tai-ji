@@ -164,6 +164,28 @@ function ledgerNotifyIds(mock: LedgerHostMock): Set<string> {
 
 // ── 账本路径（bindNotifyLedgerHost 生产入口装配） ──────────────
 
+
+/** [W2/V1] 终局记录构造（notifyDone 载荷源换帧直取后的测试通道——reason 词表 →
+ *  (outcome, errorCode) 按 D5 映射反构）。 */
+function settlementFor(reason: string | undefined): import("../jsonl-run-store.ts").RunSettlementRecord {
+  switch (reason) {
+    case "completed":
+      return { outcome: "completed", settledAt: 0 };
+    case "aborted":
+      return { outcome: "cancelled", settledAt: 0 };
+    case "failed":
+      return { outcome: "failed", errorCode: "unknown", settledAt: 0 };
+    case "budget_limited":
+      return { outcome: "failed", errorCode: "budget_limited", settledAt: 0 };
+    case "time_limited":
+      return { outcome: "failed", errorCode: "time_limited", settledAt: 0 };
+    case undefined:
+      return { outcome: "completed", settledAt: 0 };
+    default:
+      return { outcome: "failed", errorCode: "unknown", settledAt: 0 };
+  }
+}
+
 describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
   let mock: LedgerHostMock;
 
@@ -183,7 +205,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun({ scriptName: "fan-out", scriptResult: { status: "ok" } });
 
-    notifyDone(pi, "wf-17abc", runAsParam(run), new Set(), undefined);
+    notifyDone(pi, "wf-17abc", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     // ① 写账：ledger entry 落盘，幂等键形态 wf-done:<runId>
     expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-17abc`]));
@@ -211,10 +233,10 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     const { pi } = makePi();
     const run = makeRun();
 
-    notifyDone(pi, "wf-dup", runAsParam(run), new Set());
+    notifyDone(pi, "wf-dup", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
     // 第二次调用持全新 Set（模拟内存窗口挤出 / 重启后的重复收口回调）——
     // 持久层幂等键承接去重
-    notifyDone(pi, "wf-dup", runAsParam(run), new Set());
+    notifyDone(pi, "wf-dup", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     expect(mock.sentMessages).toHaveLength(1);
     // 账本单条：后写不覆盖（同键二次写账被拒）
@@ -232,7 +254,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     mock.host.appendLedgerEntry = () => {
       throw new Error("session context is no longer active (assertActive)");
     };
-    expect(() => notifyDone(pi, "wf-stale", runAsParam(run), notified)).toThrow("assertActive");
+    expect(() => notifyDone(pi, "wf-stale", runAsParam(run), notified, undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason))).toThrow("assertActive");
     // error 留痕：含 notifyId 与 content 摘要（事后按 run 手工补偿的检索入口）
     expect(loggerFns.error).toHaveBeenCalledWith(
       expect.stringContaining("ledger record failed"),
@@ -247,7 +269,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
 
     // 重复收口回调（若到达）：appendLedgerEntry 恢复 → 写账 + 投递成功
     mock.host.appendLedgerEntry = origAppend;
-    notifyDone(pi, "wf-stale", runAsParam(run), notified);
+    notifyDone(pi, "wf-stale", runAsParam(run), notified, undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
     expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-stale`]));
     expect(mock.sentMessages).toHaveLength(1);
     expect(notified.has("wf-stale")).toBe(true);
@@ -257,7 +279,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     const { pi } = makePi();
     const run = makeRun();
 
-    notifyDone(pi, "wf-ack", runAsParam(run), new Set());
+    notifyDone(pi, "wf-ack", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
     expect(mock.sentMessages).toHaveLength(1);
 
     // 送达 entry 已落盘（sendDelivery mock 同步持久化）→ settled 边沿销账
@@ -265,7 +287,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     expect(mock.entries.some((e) => e.customType === NOTIFY_ACK_CUSTOM_TYPE)).toBe(true);
 
     // 已销账号再收口：record 幂等拒绝（终态不重发）
-    notifyDone(pi, "wf-ack", runAsParam(run), new Set());
+    notifyDone(pi, "wf-ack", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
     expect(mock.sentMessages).toHaveLength(1);
   });
 
@@ -276,7 +298,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     // 投递受理但回执不可达（deliverPersists=false——模拟 relay 瞬断，消息丢失、
     // custom_message entry 未落盘）
     mock.deliverPersists.value = false;
-    notifyDone(pi, "wf-lost", runAsParam(run), new Set());
+    notifyDone(pi, "wf-lost", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
     expect(mock.sentMessages).toHaveLength(1);
     expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-lost`]));
 
@@ -303,7 +325,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     const { pi } = makePi();
     const run = makeRun();
 
-    notifyDone(pi, "wf-done-ok", runAsParam(run), new Set());
+    notifyDone(pi, "wf-done-ok", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
     fireSettled(); // 销账
 
     const newMock = makeLedgerHost();
@@ -330,7 +352,7 @@ describe("notifyDone — 降级直发（ledger 未 bind，向后兼容）", () =
     const { pi, sendMessage } = makePi();
     const run = makeRun();
 
-    notifyDone(pi, "wf-fallback", runAsParam(run), new Set());
+    notifyDone(pi, "wf-fallback", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [msg, opts] = sendMessage.mock.calls[0] as [
@@ -368,7 +390,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun({ reason: "budget_limited" });
 
-    notifyDone(pi, "wf-budget", runAsParam(run), new Set());
+    notifyDone(pi, "wf-budget", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
     expect(msg.content).toBe(
@@ -384,7 +406,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun();
 
-    notifyDone(pi, "wf-art-1", runAsParam(run), new Set(), undefined, "/tmp/wf-state");
+    notifyDone(pi, "wf-art-1", runAsParam(run), new Set(), undefined, "/tmp/wf-state", settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
     expect(msg.content).toBe(
@@ -408,7 +430,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
       ],
     });
 
-    notifyDone(pi, "wf-full-1", runAsParam(run), new Set(), undefined, "/tmp/wf-state");
+    notifyDone(pi, "wf-full-1", runAsParam(run), new Set(), undefined, "/tmp/wf-state", settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
     expect(msg.content).toBe(
@@ -430,22 +452,24 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun({ scriptResult: null });
 
-    notifyDone(pi, "wf-null", runAsParam(run), new Set());
+    notifyDone(pi, "wf-null", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
     expect(msg.content).toBe("Workflow 'build' done: done (completed)\n\n--- Agent Trace ---");
   });
 
-  it("reason undefined（异常形态）→ header 无 reason 后缀，无 F3 段", () => {
+  it("[W2/V1] settlement completed（reason 缺省的联合派生形态）→ header 带 completed 后缀，无 F3 段", () => {
     const { pi, sendMessage } = makePi();
     const run: RunMock = {
       spec: { scriptName: "build" },
       state: { status: "done", trace: { toArray: () => [] } },
     };
 
-    notifyDone(pi, "wf-noreason", runAsParam(run), new Set());
+    notifyDone(pi, "wf-noreason", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
-    expect(msg.content).toBe("Workflow 'build' done: done\n\n--- Agent Trace ---");
+    // [W2/V1 D1 第 7 行] 载荷源换终局记录——reason 恒由 settlement 派生（completed
+    // 派生自带后缀），原 I2 兜底的「无后缀」异常形态退役
+    expect(msg.content).toBe("Workflow 'build' done: done (completed)\n\n--- Agent Trace ---");
   });
 });

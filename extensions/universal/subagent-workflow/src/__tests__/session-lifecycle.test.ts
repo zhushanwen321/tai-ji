@@ -15,10 +15,19 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
 // ── mock modules（在 import 前声明）──
 
+// getAgentDir 可变锚：兜底维护轮行为断言（组 3）把 agentDir 指进临时目录，其余
+// 用例消费缺省假路径（形态不变）。
+const { mockAgentDir } = vi.hoisted(() => ({
+  mockAgentDir: { current: "/home/user/.pi/agent" },
+}));
 vi.mock("@earendil-works/pi-coding-agent", () => ({
-  getAgentDir: () => "/home/user/.pi/agent",
+  getAgentDir: () => mockAgentDir.current,
 }));
 vi.mock("@zhushanwen/subagent-core/execution/worktree/worktree-manager.ts", () => ({
   WorktreeManager: class {
@@ -113,8 +122,13 @@ vi.mock("../interface/commands.ts", () => ({
 // ── import 被测模块 ──
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+// [W2/V4 D6] 直落断言消费的 protocol SSOT（customType 常量 + status 映射单点）
+import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 import { IDENTITY_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
+import { ENV_ROOT_CWD, getSubagentRecordsDir, resolvePiSessionScopedDir, STATE_DIR_NAME } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
+// 保留窗口 env 通道仅测试消费，深路径直取（对齐 retention 测试先例）
+import { STATE_TTL_MS_ENV } from "@zhushanwen/subagent-core/orchestration/file-run-store.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
@@ -164,11 +178,14 @@ function createFakePi(): {
   return { pi, entries, emits };
 }
 
-/** 最小 ExtensionContext fake。 */
-function createFakeCtx(sessionId = "session-seam-1"): ExtensionContext {
+/** 最小 ExtensionContext fake。mode/ui 可选注入（streamSink 守卫观察面：rpc 下 ui.setWidget）。 */
+function createFakeCtx(
+  sessionId = "session-seam-1",
+  mode: "tui" | "rpc" | "json" | "print" = "tui",
+): ExtensionContext & { ui?: { setWidget: ReturnType<typeof vi.fn> } | undefined } {
   return {
     cwd: "/home/user/project",
-    mode: "tui",
+    mode,
     modelRegistry: { getAvailable: () => [], find: () => undefined, hasConfiguredAuth: () => false },
     model: undefined,
     isIdle: () => true,
@@ -177,7 +194,8 @@ function createFakeCtx(sessionId = "session-seam-1"): ExtensionContext {
       getSessionFile: () => "/home/user/.pi/agent/sessions/seam.jsonl",
       getEntries: () => [],
     },
-  } as unknown as ExtensionContext;
+    ui: mode === "rpc" ? { setWidget: vi.fn() } : undefined,
+  } as unknown as ExtensionContext & { ui?: { setWidget: ReturnType<typeof vi.fn> } | undefined };
 }
 
 /** 构造可重水合的 WorkflowRun（reconstruct 跳过 I1 校验）。 */
@@ -330,9 +348,9 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     expect(result.storeHealthy).toBe(false);
   });
 
-  it("kill-9 恢复：running run 转 done,failed + pending:unregister emit + save 落盘", async () => {
+  it("kill-9 恢复：running run 转 done,failed + pending:unregister appendEntry 直落（不经 emit）+ save 落盘", async () => {
     const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
-    const { pi, emits } = createFakePi();
+    const { pi, entries, emits } = createFakePi();
     const runningRun = makeRun("wf-seam-k9", "running");
     const save = vi.fn(async () => {});
     const fakeStore = makeFakeStore(vi.fn(async () => [runningRun]));
@@ -344,18 +362,34 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     expect(runningRun.state.status).toBe("done");
     expect(runningRun.state.reason).toBe("failed");
     expect(runningRun.state.error).toContain("Process killed");
-    const unregister = emits.find((e) => e.channel === "pending:unregister");
+    // [W2/V4 D6] 注销直落权威面：appendEntry 直接落盘（emit 链在 reload 转换窗
+    // 失效——[reload-closeout D4] 定案在恢复链同样适用）。data 形状与 finalizeRun
+    // 直落 / reconcile-sweep 补注销同构（status 经 protocol mapReasonToStatus 单点）。
+    const unregister = entries.find((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
     expect(unregister).toBeDefined();
-    expect(unregister!.data).toEqual({ id: "wf-seam-k9", reason: "failed" });
+    expect(unregister!.data).toEqual({
+      id: "wf-seam-k9",
+      reason: "failed",
+      status: mapReasonToStatus("failed"),
+    });
+    // 零 emit：pending:unregister 不再经事件通道（验收条款：壳侧 emit 0）
+    expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();
     expect(save).toHaveBeenCalledTimes(1);
     expect(result.storeHealthy).toBe(true);
   });
 
-  it("子进程 env 注入时 identity custom entry 落 appendEntry（随迁块不含 chatMode——modeless 波5 停写）", async () => {
+  it("子进程 env 注入：identity custom entry 落 appendEntry，11 字段与 env 全量映射（唯一子进程正例；不含 chatMode——modeless 波5 停写）", async () => {
+    // 吸收自 index-session-start-identity.test.ts（11 字段全量映射为其唯一子进程正例）
     vi.stubEnv("PI_SUBAGENT_SELF_RECORD_ID", "rec-seam-1");
-    vi.stubEnv("PI_SUBAGENT_AGENT", "fixer");
+    vi.stubEnv("PI_SUBAGENT_AGENT", "worker");
     vi.stubEnv("PI_SUBAGENT_MODE", "background");
-    vi.stubEnv("PI_SUBAGENT_TASK", "do stuff");
+    vi.stubEnv("PI_SUBAGENT_TASK", "fix the bug");
+    vi.stubEnv("PI_SUBAGENT_SLUG", "fix-bug");
+    vi.stubEnv("PI_SUBAGENT_STARTED_AT", "1700000000000");
+    vi.stubEnv("PI_SUBAGENT_ROOT_SESSION_ID", "root-session-9");
+    vi.stubEnv("PI_SUBAGENT_PARENT_RECORD_ID", "rec-parent-0");
+    vi.stubEnv("PI_SUBAGENT_DEPTH", "2");
+    vi.stubEnv("PI_SUBAGENT_FORK_DEPTH", "1");
     vi.stubEnv("PI_SUBAGENT_WORKTREE", "true");
     const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi, entries } = createFakePi();
@@ -366,12 +400,110 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     expect(identityEntry).toBeDefined();
     expect(identityEntry!.data).toMatchObject({
       id: "rec-seam-1",
-      agent: "fixer",
+      agent: "worker",
       mode: "background",
-      task: "do stuff",
+      task: "fix the bug",
+      slug: "fix-bug",
+      startedAt: 1700000000000,
+      rootSessionId: "root-session-9",
+      parentRecordId: "rec-parent-0",
+      depth: 2,
+      forkDepth: 1,
+      // [review round2] worktree 隔离标志经 env 贯穿写入 identity entry（跨重启重建
+      // 拒绝续聊的数据源）
       worktree: true,
     });
     expect(Object.keys(identityEntry!.data as object)).not.toContain("chatMode");
+  });
+
+  it("可选字段缺失（slug/parentRecordId/forkDepth/worktree 未注入）：identity 仍写入，可选字段为默认", async () => {
+    // 吸收自 index-session-start-identity.test.ts；stubEnv(key, undefined) = 删除
+    // 语义（vitest 4 实装核实），显式保证可选键缺席，不依赖外层环境。
+    vi.stubEnv("PI_SUBAGENT_SELF_RECORD_ID", "rec-seam-2");
+    vi.stubEnv("PI_SUBAGENT_AGENT", "explorer");
+    vi.stubEnv("PI_SUBAGENT_MODE", "background");
+    vi.stubEnv("PI_SUBAGENT_TASK", "scan code");
+    vi.stubEnv("PI_SUBAGENT_STARTED_AT", "1700000000002");
+    vi.stubEnv("PI_SUBAGENT_ROOT_SESSION_ID", "root-9");
+    vi.stubEnv("PI_SUBAGENT_DEPTH", "1");
+    vi.stubEnv("PI_SUBAGENT_SLUG", undefined);
+    vi.stubEnv("PI_SUBAGENT_PARENT_RECORD_ID", undefined);
+    vi.stubEnv("PI_SUBAGENT_FORK_DEPTH", undefined);
+    vi.stubEnv("PI_SUBAGENT_WORKTREE", undefined);
+    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
+    const { pi, entries } = createFakePi();
+
+    await setupSessionLifecycle(pi, createFakeCtx(), {});
+
+    const identityEntry = entries.find((e) => e.customType === IDENTITY_CUSTOM_TYPE);
+    expect(identityEntry).toBeDefined();
+    const data = identityEntry!.data as Record<string, unknown>;
+    // 必填字段正常
+    expect(data.id).toBe("rec-seam-2");
+    expect(data.agent).toBe("explorer");
+    expect(data.mode).toBe("background");
+    expect(data.startedAt).toBe(1700000000002);
+    // 可选字段缺失 → undefined / false（chatMode 已随 modeless 波1 停写，键不存在）
+    expect(Object.keys(data)).not.toContain("chatMode");
+    expect(data.slug).toBeUndefined();
+    expect(data.parentRecordId).toBeUndefined();
+    expect(data.forkDepth).toBeUndefined();
+    expect(data.worktree).toBe(false);
+  });
+
+  it("worktree scan 抛错不阻断 session_start（装配后续步骤仍执行）", async () => {
+    // 吸收自 session-start-reaper.test.ts；阻断观察 = 装配后续步骤（ADR-035
+    // manifest 恢复接线）仍执行——scan 抛错被「失败记日志不阻断」兜住。
+    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
+    const { pi } = createFakePi();
+    const fakeService = {
+      initSession: vi.fn(),
+      recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
+      rebuildIndexes: vi.fn(() => 0),
+    };
+    const fakeModelService = {
+      initModel: vi.fn(),
+      reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),
+    };
+    const deps: SessionLifecycleDeps = {
+      worktreeManager: {
+        scan: (): Promise<void> => {
+          throw new Error("git not found");
+        },
+      },
+      createServices: vi.fn(() => ({
+        service: fakeService,
+        modelService: fakeModelService,
+        reused: false,
+      })) as unknown as SessionLifecycleDeps["createServices"],
+    };
+
+    await expect(
+      setupSessionLifecycle(pi, createFakeCtx(), deps),
+    ).resolves.toBeDefined();
+
+    expect(fakeService.recoverManifestTmpFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("mainSessionFile 解析值直传 initSession（按 sessionId 解析 miss → 回退 getSessionFile）", async () => {
+    // 吸收自 session-start-reaper.test.ts（形态适配：旧观察面 = 整类 mock 构造
+    // 参数，现行生产 = initSession.mainSessionFile 值直传，断言意图不变）。
+    // initSession 接线住默认 createOrReuseServices（deps.createServices 注入会绕过
+    // 它）——走默认装配 + barrel set 调用观察（组 1「new 分支」用例同款手法）。
+    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
+    const { pi } = createFakePi();
+
+    await setupSessionLifecycle(pi, createFakeCtx("session-mf-1"), {});
+
+    const { setSubagentService } = await import("@zhushanwen/subagent-core");
+    const svc = vi.mocked(setSubagentService).mock.calls[0]?.[0] as
+      | { initSession: ReturnType<typeof vi.fn> }
+      | undefined;
+
+    // stub agentDir 下按 sessionId 解析未命中 → 回退 ctx.sessionManager.getSessionFile()
+    expect(svc!.initSession).toHaveBeenCalledTimes(1);
+    const initArg = svc!.initSession.mock.calls[0]?.[0] as { mainSessionFile?: string | undefined };
+    expect(initArg.mainSessionFile).toBe("/home/user/.pi/agent/sessions/seam.jsonl");
   });
 
   it("主进程（无 PI_SUBAGENT_SELF_RECORD_ID）不写 identity custom entry", async () => {
@@ -469,5 +601,188 @@ describe("getWorkflowDeps 守卫合一 — 两消费点同源同消息", () => {
 
     expect(toolSideMessage).not.toBe("");
     expect(toolSideMessage).toBe(apiResult.error);
+  });
+});
+
+// ── 组 3：streamSink ctx.mode 守卫（吸收自 stream-sink-guard.test.ts）──────────
+//
+// 断言契约来源：session-lifecycle.ts createOrReuseServices 内 streamSink 三元
+// ——tui/json/print 下 undefined（无 widget 噪音）；rpc 下注入包装 ctx.ui.setWidget
+// 的 sink 对象。接线住默认装配路径（createOrReuseServices），不走 deps.createServices。
+
+describe("streamSink ctx.mode 守卫 — 运行时行为（FR-1/FR-2/AC-1/AC-2）", () => {
+  /** 默认装配跑一次 session_start，返回 initSession spy 与 ctx（rpc 观察面）。 */
+  async function runDefaultAssembly(mode: "tui" | "rpc" | "json" | "print"): Promise<{
+    mockInitSession: ReturnType<typeof vi.fn>;
+    ctx: ExtensionContext & { ui?: { setWidget: ReturnType<typeof vi.fn> } | undefined };
+  }> {
+    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
+    const { pi } = createFakePi();
+    const ctx = createFakeCtx("session-stream-1", mode);
+    await setupSessionLifecycle(pi, ctx, {
+      worktreeManager: { scan: vi.fn(async () => {}) },
+    });
+    // initSession 参数观察面：module mock 的 SubagentService 假类实例（访问器槽被
+    // mock 恒 null → new 分支），取当用例动态图的 barrel set 调用。
+    const { setSubagentService } = await import("@zhushanwen/subagent-core");
+    const svc = vi.mocked(setSubagentService).mock.calls[0]?.[0] as
+      | { initSession: ReturnType<typeof vi.fn> }
+      | undefined;
+    return { mockInitSession: svc!.initSession, ctx };
+  }
+
+  it.each(["tui", "json", "print"] as const)(
+    "streamSink 守卫：%s mode → initSession 收到 streamSink === undefined（无 widget 噪音）",
+    async (mode) => {
+      const { mockInitSession } = await runDefaultAssembly(mode);
+
+      expect(mockInitSession).toHaveBeenCalledTimes(1);
+      const initArg = mockInitSession.mock.calls[0]?.[0] as { streamSink: unknown };
+      // 守卫真的产出 undefined（不是源码里有就够）
+      expect(initArg.streamSink).toBeUndefined();
+    },
+  );
+
+  it("rpc mode（GUI/taiji）：initSession 收到 streamSink 是 { setWidget } 对象（守卫放行）", async () => {
+    const { mockInitSession } = await runDefaultAssembly("rpc");
+
+    const initArg = mockInitSession.mock.calls[0]?.[0] as { streamSink: unknown };
+    expect(initArg.streamSink).toBeDefined();
+    expect(typeof initArg.streamSink).toBe("object");
+    expect(typeof (initArg.streamSink as { setWidget: unknown }).setWidget).toBe("function");
+  });
+
+  it("rpc mode：streamSink.setWidget 转发到 ctx.ui.setWidget（绑定真实方法）", async () => {
+    const { mockInitSession, ctx } = await runDefaultAssembly("rpc");
+
+    const initArg = mockInitSession.mock.calls[0]?.[0] as {
+      streamSink: { setWidget: (key: string, lines: string[]) => void };
+    };
+    initArg.streamSink.setWidget("key1", ["line-a"]);
+    expect(ctx.ui?.setWidget).toHaveBeenCalledWith("key1", ["line-a"]);
+  });
+});
+
+// ── 组 4：session_start 兜底触发统一保留维护轮（[W1 / D5 触发点③]，组 2 移交项）──
+//
+// 原 retention grep 形态接线断言升级为行为断言：session_start 装配链内的兜底触发点
+// 以双域目录锚调 core runRetentionMaintenanceRound——run 域 = resolveSessionDir 同源
+// （resolvePiSessionScopedDir + STATE_DIR_NAME）+ record 域 = getSubagentRecordsDir
+// (agentDir, ENV_ROOT_CWD ?? ctx.cwd)；oncePerProcess 守卫保证单进程只跑一轮。
+
+/** 「N 天前」的 epoch ms（维护轮资格判据锚 = journal 帧 ts）。 */
+function daysAgoMs(days: number): number {
+  return Date.now() - days * 86_400_000;
+}
+
+/** 预置 run 域终态磁盘足迹（journal 帧 + state 文件 + 终局 manifest；帧格式与
+ *  retention 测试 seedTerminalRun 同源）。 */
+function seedTerminalRunFootprint(
+  stateDir: string,
+  runId: string,
+  createdDaysAgo: number,
+  settledDaysAgo: number,
+): void {
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(path.join(stateDir, `${runId}.events.jsonl`), [
+    JSON.stringify({ type: "run-created", ts: daysAgoMs(createdDaysAgo), runId, workflowName: "t", argsSummary: "{}" }),
+    JSON.stringify({ type: "run-settled", ts: daysAgoMs(settledDaysAgo), outcome: "completed", artifactsDir: "/tmp/artifacts" }),
+  ].join("\n") + "\n", "utf8");
+  fs.writeFileSync(path.join(stateDir, `${runId}.jsonl`), `{"runId":"${runId}","stub":true}\n`, "utf8");
+  // 终局 manifest（<runId>.json）：维护轮永不随裁（终局持久权威）
+  fs.writeFileSync(path.join(stateDir, `${runId}.json`), JSON.stringify({ runId, outcome: "completed" }), "utf8");
+}
+
+/** 预置 record 域终态事件文件（头行 + created + settled 帧；帧格式与 record-events
+ *  词表同源）+ manifest（<sa-id>.json 不触碰——独立 TTL 归 session-file-gc）。 */
+function seedTerminalRecordFootprint(
+  recordsDir: string,
+  id: string,
+  createdDaysAgo: number,
+  settledDaysAgo: number,
+): void {
+  fs.mkdirSync(recordsDir, { recursive: true });
+  fs.writeFileSync(path.join(recordsDir, `${id}.events`), [
+    JSON.stringify({ type: "record-journal", id }),
+    JSON.stringify({ type: "record-created", seq: 1, ts: daysAgoMs(createdDaysAgo), id, agent: "worker", task: "t", slug: "s", origin: "tool", rootSessionId: "root-1", depth: 0, mode: "background", startedAt: daysAgoMs(createdDaysAgo) }),
+    JSON.stringify({ type: "record-settled", seq: 2, ts: daysAgoMs(settledDaysAgo), stopReason: "completed", outcome: "completed", endedAt: daysAgoMs(settledDaysAgo), turns: 1, totalTokens: 0 }),
+  ].join("\n") + "\n", "utf8");
+  fs.writeFileSync(path.join(recordsDir, `${id}.json`), JSON.stringify({ runId: id, outcome: "completed" }), "utf8");
+}
+
+describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点③] 行为断言）", () => {
+  let tmpDir: string;
+  let agentDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-lifecycle-maint-"));
+    agentDir = path.join(tmpDir, "agent");
+    mockAgentDir.current = agentDir;
+  });
+
+  afterEach(() => {
+    mockAgentDir.current = "/home/user/.pi/agent";
+    delete process.env[STATE_TTL_MS_ENV];
+    delete process.env[ENV_ROOT_CWD];
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** 双域目录锚（与生产触发点同源同式推导）。 */
+  function resolveDomainAnchors(): { stateDir: string; recordsDir: string } {
+    return {
+      // run 域：<agentDir>/sessions/<slug> 不存在 → 回退 agentDir 根（探测布局单源
+      // resolvePiSessionScopedDir，与生产 resolveSessionDir 同参形态）
+      stateDir: path.join(resolvePiSessionScopedDir({ agentDir }), STATE_DIR_NAME),
+      // record 域：rootCwd = ENV_ROOT_CWD ?? ctx.cwd（ctx.cwd = createFakeCtx 固定值）
+      recordsDir: getSubagentRecordsDir(agentDir, "/home/user/project"),
+    };
+  }
+
+  it("session_start 装配触发维护轮：run/record 双域窗外终态裁剪，窗内与 manifest 保护", async () => {
+    process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
+    const { stateDir, recordsDir } = resolveDomainAnchors();
+
+    seedTerminalRunFootprint(stateDir, "wf-maint-expired", 40, 35);
+    seedTerminalRunFootprint(stateDir, "wf-maint-inwindow", 10, 5);
+    seedTerminalRecordFootprint(recordsDir, "sa-maint-expired", 40, 35);
+    seedTerminalRecordFootprint(recordsDir, "sa-maint-inwindow", 10, 5);
+
+    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
+    const { pi } = createFakePi();
+    await setupSessionLifecycle(pi, createFakeCtx("session-maint-1"), {});
+
+    // run 域：窗外终态 state + journal 成对裁；窗内保留；manifest 永不随裁
+    expect(fs.existsSync(path.join(stateDir, "wf-maint-expired.jsonl"))).toBe(false);
+    expect(fs.existsSync(path.join(stateDir, "wf-maint-expired.events.jsonl"))).toBe(false);
+    expect(fs.existsSync(path.join(stateDir, "wf-maint-expired.json"))).toBe(true);
+    expect(fs.existsSync(path.join(stateDir, "wf-maint-inwindow.jsonl"))).toBe(true);
+    expect(fs.existsSync(path.join(stateDir, "wf-maint-inwindow.events.jsonl"))).toBe(true);
+    // record 域：窗外终态事件文件裁；窗内保留；manifest 不触碰
+    expect(fs.existsSync(path.join(recordsDir, "sa-maint-expired.events"))).toBe(false);
+    expect(fs.existsSync(path.join(recordsDir, "sa-maint-expired.json"))).toBe(true);
+    expect(fs.existsSync(path.join(recordsDir, "sa-maint-inwindow.events"))).toBe(true);
+  });
+
+  it("维护轮经 oncePerProcess 守卫防双跑：首轮后新落的窗外终态不被二次裁（单进程只跑一轮）", async () => {
+    process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
+    const { stateDir, recordsDir } = resolveDomainAnchors();
+
+    seedTerminalRunFootprint(stateDir, "wf-maint-first", 40, 35);
+    seedTerminalRecordFootprint(recordsDir, "sa-maint-first", 40, 35);
+
+    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
+    const { pi } = createFakePi();
+
+    // 第一派发：兜底触发点执行首轮（首轮足迹被裁 = 触发真实发生）
+    await setupSessionLifecycle(pi, createFakeCtx("session-maint-2"), {});
+    expect(fs.existsSync(path.join(stateDir, "wf-maint-first.jsonl"))).toBe(false);
+    expect(fs.existsSync(path.join(recordsDir, "sa-maint-first.events"))).toBe(false);
+
+    // 首轮之后新落的窗外终态：第二派发重放首轮 Promise，不重扫 → 存活
+    seedTerminalRunFootprint(stateDir, "wf-maint-second", 40, 35);
+    seedTerminalRecordFootprint(recordsDir, "sa-maint-second", 40, 35);
+    await setupSessionLifecycle(pi, createFakeCtx("session-maint-3"), {});
+    expect(fs.existsSync(path.join(stateDir, "wf-maint-second.jsonl"))).toBe(true);
+    expect(fs.existsSync(path.join(recordsDir, "sa-maint-second.events"))).toBe(true);
   });
 });

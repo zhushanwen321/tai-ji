@@ -56,6 +56,7 @@ import {
   finalRunErrorCodeOf,
   foldRunEventFrames,
   IllegalTransitionError,
+  INITIAL_RUN_STATE,
   RUN_EVENT_TYPES,
   RUN_EVENT_JOURNAL_SUFFIX,
   transition,
@@ -85,6 +86,7 @@ import type {
   AgentResult,
   DoneReason,
   ExecutionTraceNode,
+  RunStatus,
 } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 // [P1b-2] manifest-write 输出动作的写入面（D5 终局投影）：manifest 落
@@ -173,8 +175,77 @@ type WorkerMsg = AgentCallMsg | WorkflowCallMsg | ReturnMsg | ErrorMsg | LogMsg;
 
 // ── 内部 helper ──────────────────────────────────────────────
 
-function isTerminal(run: WorkflowRun): boolean {
-  return run.state.status === "done";
+// ── [W2/V1 D1] 终局判定与终局记录注册表（单一判源收拢）────────────
+//
+// 两态机（WorkflowRun.transition / RunStatus）活体写点退役后，`state.status`
+// 在同进程活体窗口内恒停 running、`state.reason` 恒 undefined（I2 失效窗口，
+// D1 登记）——活体终局的进程内权威信号 = 六态机 dispatch 链落账的 run-settled
+// 帧。本段提供两个单一判源函数与一个进程内终局记录注册表，全部 state.status /
+// state.reason 的活体终局判据/载荷源读点收拢到这里：
+//
+// - {@link isRunSettled}：判活/终局二值判定（判活类混合判源收拢，D1 第 8 行
+//   同族约束）。聚合 done 分支服务恢复路径写点 run 与 v1 存量条目（v1 兼容层
+//   读面，W4 sunset）；注册表分支服务本进程活体终局（dispatch 链 note）。
+// - {@link settledRecordOf}：终局记录查询（outcome/errorCode/reason/settledAt
+//   ——通知载荷链、toResult、runSummary、淘汰排序键的派生源，五处统一 D5）。
+// - {@link forgetSettledRecord}：注册表条目回收（随 runs Map 淘汰同生命周期）。
+
+/**
+ * 单条终局记录（run-settled 帧载荷的进程内投影）。
+ *
+ * 字段与 journal run-settled 帧同源同构；`reason` 是帧载荷的诊断文本（非
+ * DoneReason——DoneReason 由 {@link runSettledOutcomeToDoneReason} 从
+ * (outcome, errorCode) 联合派生，五处统一派生源，D5 连带取值裁决）。
+ */
+export interface RunSettlementRecord {
+  outcome: RunOutcome;
+  errorCode?: RunErrorCode;
+  reason?: string;
+  settledAt: number;
+}
+
+/** 进程内终局记录注册表（key = runId；dispatch 链 terminal 落账时 note，随
+ *  runs Map 淘汰回收——条目数与终局 run 同生命周期，有界）。 */
+const settledRunRecords = new Map<string, RunSettlementRecord>();
+
+/** [W2/V1 D1] 单一判源函数（终局判定）：聚合 done（恢复路径写点 / v1 兼容层
+ *  读面，W4 sunset）∨ 进程内终局记录（本进程活体终局——dispatch 链 note）。
+ *  本进程未持有且聚合 running 的 run（重水合待收编形态）判未终局——恢复链的
+ *  收编候选筛选据此保留。 */
+export function isRunSettled(run: { runId: string; state: { status: RunStatus } }): boolean {
+  return run.state.status === "done" || settledRunRecords.has(run.runId);
+}
+
+/** 终局记录查询（注册表 miss = 本进程无活体终局记录——恢复域 run 由聚合面判读）。 */
+export function settledRecordOf(runId: string): RunSettlementRecord | undefined {
+  return settledRunRecords.get(runId);
+}
+
+/** 终局记录回收（runs Map 淘汰点调用——注册表条目与内存 run 同生命周期）。 */
+export function forgetSettledRecord(runId: string): void {
+  settledRunRecords.delete(runId);
+}
+
+/** (outcome, errorCode) → DoneReason 的联合判别单点（[W2 D5] 连带取值裁决：
+ *  五处 reason 统一本派生源——活体注销直落 / 收编条目构建 / sweep 补注销 /
+ *  通知载荷链 / appendSettledEntryFallback）。budget_limited/time_limited 恢复
+ *  同名细分（与帧生产侧 finalRunErrorCodeOf 恒等映射互逆——纯 outcome 反推会把
+ *  预算/超时终局静默折叠成 "failed"，通知串与条目 reason 细分丢失，不采用）；
+ *  interrupted → "failed" 是诊断兜底容器（DoneReason 无 interrupted 成员，两态机
+ *  遗产 W4 sunset——显示语义一律走 outcome 四值，折叠仅存 reason 诊断面）。 */
+export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: RunErrorCode): DoneReason {
+  if (outcome === "failed" && (errorCode === "budget_limited" || errorCode === "time_limited")) {
+    return errorCode;
+  }
+  switch (outcome) {
+    case "completed":
+      return "completed";
+    case "cancelled":
+      return "aborted";
+    case "failed":
+    case "interrupted":
+      return "failed";
+  }
 }
 
 /**
@@ -245,47 +316,52 @@ export interface FinalizeRunOptions {
 }
 
 /**
- * Run 终态五步 coda 的唯一定义点（D5-② + OR-8 收口内化）：
- * transition(done) → closeOutInFlightCalls → save（best-effort）→
+ * Run 终态五步 coda 的唯一定义点（D5-② + OR-8 收口内化；[W2/V1 D1] 终局裁决
+ * 单一化后的形态）：
+ * releaseRuntime（显式，原 transition 内联副作用上提）→ run-settled 六态机落账
+ * （settleRunAccounting 原语）→ closeOutInFlightCalls → save（best-effort）→
  * pending:unregister 直落 appendEntry → onRunDone。
  *
- * 收敛前 8 处逐字复制（本文件 6 处 + lifecycle 2 处）已全部改走本函数。原各副本
- * 的三处微差统一为规范形态（收敛裁决，非行为回归）：
- * - transition 失败（M12）：一律吞掉并中止后续步骤——并发 abort/terminate 抢先
- *   终态化时 illegal-transition 是预期事件，本路径的 unregister/onRunDone 语义已
- *   由抢先方兑现，重复执行只会造成重复注销/重复通知。
- * - save 失败（SW-DATA-3）：一律 best-effort——save 抛错若向上抛，handle* 的
- *   调用方（worker-host 绑定处 `void handlers.onXxx(...)`）无人接 →
- *   unhandledRejection + pending:unregister / onRunDone 不执行 → pending 通知
- *   幽灵注销（列表残留永不清理的 running 条目）。
- * - unregister reason：`run.state.reason ?? doneReason`——transition 成功后
- *   reason 恒有值（不变式 I2），兜底仅防御异常形态，取本路径的 doneReason 语义
- *   最贴近（原各副本 `?? "completed"` / 固定 "failed" / `?? "time_limited"` 三种
- *   死兜底等价收敛）。
+ * [W2/V1 D1] 两态机活体写点删除：原 `run.transition("done", doneReason)` 调用
+ * 清除——活体终局唯一经六态机 dispatch 链（状态机唯一裁决点，A1 口径）。
+ * runtime 释放随写点删除上提为显式 `run.releaseRuntime()`（独立调用形态幂等，
+ * 原由 transition 内联执行的 cleanup-before-mutate 副作用；终局后的 rebuild
+ * 入口守卫由 scheduleRebuild 的 isRunSettled 重检承接）。
  *
- * [OR-8] transition 成功后、save 之前 closeOutInFlightCalls——终态收口残留
- * in-flight call（fire-and-forget agent() 未 await / worker 死亡时已 dispatch 的
- * call），先收口再落盘，内存态与持久化快照同一时点收敛（快照不再含 running 节点）。
+ * 让位语义（原 M12 两态机让位门的六态机承接形态）：并发 abort/terminate 抢先
+ * 终局化后，本路径的终局触发命中 terminal × 终局事件表外转移 fail-fast
+ * （IllegalTransitionError）——抢先方已兑现 unregister/onRunDone，本路径 coda
+ * 终止（返回 false），重复注销/重复通知构造性排除。
+ *
+ * save 失败（SW-DATA-3）一律 best-effort——save 抛错若向上抛，handle* 的调用方
+ * （worker-host 绑定处 `void handlers.onXxx(...)`）无人接 → unhandledRejection +
+ * pending:unregister / onRunDone 不执行 → pending 通知幽灵注销。
+ *
+ * unregister reason 换源（[W2 D5] 连带取值裁决①）：原 `run.state.reason ??
+ * doneReason` 在活体写点删除后退化为裸 doneReason（I2 失效窗口）——显式换为
+ * settlement 的 (outcome, errorCode) 联合派生（runSettledOutcomeToDoneReason 单点，
+ * 与帧同源；dispatch IO 故障窗口 settlement 缺省时降级用 doneReason 本身——六值
+ * DoneReason 语义与帧意图一致）。
+ *
+ * [OR-8] run-settled 落账后、save 之前 closeOutInFlightCalls——终态收口残留
+ * in-flight call，先收口再落盘，内存态与持久化快照同一时点收敛。
  *
  * [reload-closeout D4] pending:unregister 持久化直落：经 deps.appendEntry 直接
  * appendEntry 落盘（调用时解析的活跃 append 面），不经 eventBus emit→内存 listener
- * ——emit 链在 reload 转换窗/多 extension factory 顺序窗内整链失效，注销 entry
- * 永缺位即通知悬挂（S1b 事故形态①段）。原 emit 发射点已删除（恒 no-op 死路径：
- * 全仓唯一 listener 无内存视图可同步、通知不经该事件；直落成功后 emit 必被
- * isPendingActive 幂等门拦截，直落失败时 emit 与直落同失败域零覆盖）。status 经
- * protocol mapReasonToStatus 单点映射（listener 与 bte 对账同函数——裸写
- * `status: reason` 会在非 identity 映射 case（budget_limited→failed）落词表外值）。
- * 幂等：listener/sweep 的注销写侧对 entries 现算 isPendingActive/差集，直落后
- * id 不再 active，多写方竞态无重复语义。
+ * ——emit 链在 reload 转换窗/多 extension factory 顺序窗内整链失效。status 经
+ * protocol mapReasonToStatus 单点映射。
  *
  * [OR-4][B-4] unregister 与 onRunDone 各自独立 try 围栏（不共用一个 try——直落
- * 抛错会跳过 onRunDone）：这两个是真实副作用，任一同步抛错不得经 worker-host 的
- * `void handlers.onXxx(...)` 变 unhandledRejection 崩宿主；append 撞 reload 转换窗
- * assertActive 抛错时 error 留痕（runId/reason）交 reconcile-sweep 下次
- * session_start 收口（窄竞态残差），也不得吞掉 Interface 层完成回调（runAndWait
- * 轮询依赖 onRunDone 语义收口，被跳过即悬挂）。
+ * 抛错会跳过 onRunDone）：append 撞 reload 转换窗 assertActive 抛错时 error 留痕
+ * 交 reconcile-sweep 下次 session_start 收口（窄竞态残差），也不得吞掉 Interface
+ * 层完成回调。
  *
- * @returns 是否成功 transition（false = 转移前已被并发终态化，后续步骤未执行）
+ * [W2/V1 D1 执行面裁决] 通知（onRunDone 链）仅本活体路径执行——收编/abandon/
+ * idle-gc 冷路径经 settleRunAccounting 原语落账、原语零通知副作用且冷路径入口
+ * options 面无通知通道，构造性排除「通知收条冷路径误发」（场景 4「中断 run 不
+ * 产生 workflow-result 完成通知」断言的前提）。
+ *
+ * @returns 是否本路径完成终局（false = 已被并发终局化让位，后续步骤未执行）
  */
 export async function finalizeRun(
   run: WorkflowRun,
@@ -293,19 +369,9 @@ export async function finalizeRun(
   doneReason: DoneReason,
   options: FinalizeRunOptions,
 ): Promise<boolean> {
-  try {
-    run.transition("done", doneReason);
-  } catch (te: unknown) {
-    // M12：并发 abort/terminate 导致 illegal-transition 是预期的，可忽略——
-    // 抢先方已兑现 unregister/onRunDone，本路径让位（debug 日志留痕）。
-    void te;
-    deps.log?.("debug", "workflow:worker-message-pump", "finalize skipped: run already terminal", {
-      runId: run.runId,
-      doneReason,
-      context: options.context,
-    });
-    return false;
-  }
+  // [W2/V1 D1] runtime 释放显式化（原两态机 transition 内联的 releaseRuntime，
+  // cleanup before mutate / A4——独立调用幂等，runtime undefined 时 no-op）。
+  run.releaseRuntime();
   // [U4 pi-workflow-run-resource-model] 成员复用池清空（设计 §5「成员关闭 + 池清空 +
   // 薄壳释放」三事同点；决策 9）：member-pool(clear) 事件必须**先于** run-settled 帧投递
   // ——终局帧落账后 run 进入 terminal，member-pool 是表外转移 fail-fast，清空就再也进
@@ -321,33 +387,38 @@ export async function finalizeRun(
       );
     }
   }
-  // [OR-8] 终态收口残留 in-flight call（先收口再落盘——快照不再含 running 节点）
   // [P1b-1] run-settled 事件落账先于 closeOut/save（事件流先于快照投影面）：
-  // run-settled 的 journal 终局帧只在本函数发生（终态单写点语义，D7-②）。
-  // aborted → cancel-requested 控制事件驱动终局转移（transition 裁决
-  // terminal(cancelled)），输出执行侧合成 run-settled(cancelled) 落账；其余
-  // doneReason → run-settled（outcome 映射见 dispatchFinalRunSettle）。让位
-  //（IllegalTransitionError = run 已被并发终局，抢先方已落帧）静默；其余失败
-  // error 留痕不阻断 coda（对齐 SW-DATA-3：事件 journal 是取证面，coda 是权威面）。
+  // 终局帧经 settleRunAccounting 原语（journal 帧 + manifest 物化两件，经
+  // dispatchRunTrigger per-run 单写者队列）。让位 = IllegalTransitionError（并发
+  // 终局的表外 fail-fast，M12 语义）→ coda 终止；其余失败（journal IO）error
+  // 留痕后 coda 继续（对齐 SW-DATA-3：事件 journal 是取证面，coda 是权威面），
+  // settlement 缺省由 doneReason 合成（派生链降级输入，帧意图语义不变）。
+  let settlement: RunSettlementRecord;
   try {
-    await dispatchFinalRunSettle(run, doneReason);
+    settlement = await dispatchFinalRunSettle(run, doneReason);
   } catch (err) {
-    if (!(err instanceof IllegalTransitionError)) {
-      logger.error(
-        `[workflow] run-settled journal dispatch failed (runId=${run.runId}, reason=${doneReason}): ${toErrorMessage(err)}`,
-      );
+    if (err instanceof IllegalTransitionError) {
+      deps.log?.("debug", "workflow:worker-message-pump", "finalize skipped: run already terminal", {
+        runId: run.runId,
+        doneReason,
+        context: options.context,
+      });
+      return false;
     }
+    settlement = composeFinalSettlement(run, doneReason);
+    logger.error(
+      `[workflow] run-settled journal dispatch failed (runId=${run.runId}, reason=${doneReason}): ${toErrorMessage(err)}`,
+    );
   }
   closeOutInFlightCalls(run);
-  // [W1 / D1] v2 终态条目：journal run-settled 帧 + manifest 物化（上方
-  // dispatchFinalRunSettle → appendTransition）之后的条目半边——「物化时机与
-  // 终态条目写点对齐」的接驳点（见 appendWorkflowRecordSettledEntry 注释）。
-  // 独立围栏：条目失败不阻断 save/unregister/onRunDone（投影锚 best-effort）。
-  appendWorkflowRecordSettledEntry(run, deps, doneReason, options.context);
+  // [W1 / D1] v2 终态条目：journal run-settled 帧 + manifest 物化之后的条目半边
+  // ——「物化时机与终态条目写点对齐」的接驳点。载荷源 = settlement（帧同源，
+  // [W2 D5] 五处统一派生）；独立围栏：条目失败不阻断 save/unregister/onRunDone。
+  appendWorkflowRecordSettledEntry(run, deps, settlement, options.context);
   await saveRunBestEffort(run, deps, options.context);
   deps.log?.("debug", "workflow:worker-message-pump", "run finalized", {
     runId: run.runId,
-    reason: run.state.reason,
+    reason: runSettledOutcomeToDoneReason(settlement.outcome, settlement.errorCode),
     context: options.context,
   });
   // [reload-closeout D4] pending:unregister 直落权威面：直接 appendEntry 落盘
@@ -355,7 +426,9 @@ export async function finalizeRun(
   // [OR-4] 独立围栏（不共用 try——直落抛错不得跳过 onRunDone）：append 撞 reload
   // 转换窗 assertActive 抛错时 error 留痕（runId/reason）后继续，不崩宿主、不跳过
   // onRunDone；差集残留交 reconcile-sweep 下次 session_start 收口（窄竞态残差）。
-  const unregisterReason = run.state.reason ?? doneReason;
+  // [W2 D5 连带取值①] reason 换源：settlement (outcome, errorCode) 联合派生
+  //（原 `run.state.reason ?? doneReason` 随活体写点删除失效——I2 失效窗口登记）。
+  const unregisterReason = runSettledOutcomeToDoneReason(settlement.outcome, settlement.errorCode);
   try {
     deps.appendEntry?.(PENDING_UNREGISTER_ENTRY_TYPE, {
       id: run.runId,
@@ -386,6 +459,29 @@ export async function finalizeRun(
   //（此刻 coda 已全部完成，disposeAll 自身构造性不抛——U1 契约）。
   await disposeWorkflowWindowEngineState(run.runId, doneReason, options.context);
   return true;
+}
+
+/**
+ * 活体终局的合成记录（dispatchFinalRunSettle 的帧构造输入与其 IO 故障窗口的
+ * settlement 降级合成共用单点）：DoneReason 六因 → (outcome, errorCode, reason)
+ * 按 D5 映射表；aborted 走 cancel-requested 合成（outcome=cancelled、无码）。
+ */
+function composeFinalSettlement(run: WorkflowRun, doneReason: DoneReason): RunSettlementRecord {
+  if (doneReason === "aborted") {
+    return {
+      outcome: "cancelled",
+      ...(run.state.error !== undefined ? { reason: run.state.error } : {}),
+      settledAt: Date.now(),
+    };
+  }
+  const outcome = doneReasonToRunOutcome(doneReason);
+  const errorCode = finalRunErrorCodeOf(run, doneReason);
+  return {
+    outcome,
+    ...(errorCode !== undefined ? { errorCode } : {}),
+    reason: run.state.error ?? doneReason,
+    settledAt: Date.now(),
+  };
 }
 
 // ── run 事件状态机接线（P1b-1 / D5-④ 唯一入口的编排侧消费） ──────────────
@@ -435,11 +531,13 @@ let runEventJournalDirForTest: string | undefined;
 let cachedJournal: { dir: string; journal: RunEventJournal } | undefined;
 let noopJournalWarned = false;
 
-/** 测试钩子：注入 journal 目录 + 清空活体态缓存（run-events.test 同款 teardown 纪律）。 */
+/** 测试钩子：注入 journal 目录 + 清空活体态缓存与终局记录注册表（run-events.test
+ *  同款 teardown 纪律）。 */
 export function setRunEventJournalDirForTest(dir: string | undefined): void {
   runEventJournalDirForTest = dir;
   cachedJournal = undefined;
   liveRunStates.clear();
+  settledRunRecords.clear();
 }
 
 /**
@@ -514,6 +612,15 @@ export function runEventJournalPathOf(runId: string): string | undefined {
   return join(dir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
 }
 
+/**
+ * run 事件 journal / manifest 同目录锚（[W2/V1] 收编原语的 manifest 证据面读点；
+ * 测试防线（NoopJournal 形态 dir=""）返回 undefined——零写域不做真目录读）。
+ */
+export function runEventJournalDirOf(): string | undefined {
+  const { dir } = resolveRunEventJournal();
+  return dir === "" ? undefined : dir;
+}
+
 /** [U4] run 事件 journal 只读访问器（成员复用池 fold 重建的读通道，决策 9）——池侧
  *  不自建 journal 实例，防绕过本文件的单写者纪律与 no-op 测试防线。 */
 export async function scanRunEvents(runId: string): Promise<readonly WorkflowRunEvent[]> {
@@ -554,6 +661,29 @@ function journalEventOf(trigger: TransitionTrigger): WorkflowRunEventInput {
   );
 }
 
+/**
+ * 终局触发的进程内终局记录投影（appendTransition terminal 落账时 note 进注册表）。
+ * run-settled 帧载荷直取（ts 用帧信封打点）；cancel-requested 合成路径 ts 现钟
+ * （信封打点归调用侧——与 journalEventOf 的合成打点同一时点语义）。
+ */
+function settlementRecordOfTrigger(trigger: TransitionTrigger, next: RunState): RunSettlementRecord {
+  if (trigger.type === "run-settled") {
+    return {
+      outcome: trigger.outcome,
+      ...(trigger.errorCode !== undefined ? { errorCode: trigger.errorCode } : {}),
+      ...(trigger.reason !== undefined ? { reason: trigger.reason } : {}),
+      settledAt: trigger.ts,
+    };
+  }
+  return {
+    outcome: next.outcome ?? "cancelled",
+    ...(trigger.type === "cancel-requested" && trigger.reason !== undefined
+      ? { reason: trigger.reason }
+      : {}),
+    settledAt: Date.now(),
+  };
+}
+
 async function appendTransition(
   run: RunDispatchSource,
   state: RunState,
@@ -563,10 +693,12 @@ async function appendTransition(
   const { state: next, outputs } = transition(state, trigger, ctx);
   // 活体态先于 journal（内存权威先推进；取证证据随后落盘）。terminal 删条目 =
   // 「终局后停止 append」的第一道守卫（第二道 = 表 terminal × 任意事件 fail-fast）；
-  // 投递队列条目同批回收（终局后该 run 无合法后续投递）。
+  // 投递队列条目同批回收（终局后该 run 无合法后续投递）。[W2/V1] 终局记录同步
+  // note 进进程内注册表（isRunSettled / settledRecordOf 的判定与派生源）。
   if (next.lifecycle === "terminal") {
     liveRunStates.delete(run.runId);
     runDispatchQueues.delete(run.runId);
+    settledRunRecords.set(run.runId, settlementRecordOfTrigger(trigger, next));
   } else {
     liveRunStates.set(run.runId, next);
   }
@@ -628,13 +760,15 @@ async function persistTerminalProjection(
     return;
   }
   if (run.spec === undefined) {
-    // spec 缺省 = runId 键投递（RunDispatchSource 无 spec 形态，现役唯一生产者
-    // dispatchRunArmedReceipt 只投 armed 自环——非 terminal 行，构不到此处）。终局
-    // 投影的 workflowName 载荷源只有 run.spec，缺省不伪造空名落 manifest（manifest
-    // 是「已终局」单源锚定，写坏即污染 prune 资格判定）——error 留痕后跳过，与上方
-    // non-terminal 防御同款。
-    runEventLogger.error(
-      `manifest-write output on a spec-less run dispatch source (runId=${run.runId}) — skipping projection (runId-keyed dispatch must not carry terminal events; check the caller)`,
+    // spec 缺省 = runId 键投递。[W2/V1] 合法形态 = 终局记录原语的冷路径收编
+    //（adoptInterruptedRun / idle-gc——runId 键投递 run-settled，workflowName
+    // 载荷由原语从 run-created 帧取后补写 manifest，见 settleRunAccounting）；
+    // 其余 runId 键投递（dispatchRunArmedReceipt 的 armed 自环）非 terminal 行
+    // 构不到此处。不伪造空名落 manifest（manifest 是「已终局」单源锚定，写坏即
+    // 污染 prune 资格判定）——debug 留痕后跳过，manifest 半边由原语承接。
+    runEventLogger.debug(
+      `run terminal manifest write on a spec-less run dispatch source (runId=${run.runId}) — ` +
+        "cold-path adoption dispatch: manifest is written by settleRunAccounting (workflowName from run-created frame)",
     );
     return;
   }
@@ -760,6 +894,17 @@ export function dispatchRunArmedReceipt(runId: string, frame: unknown): void {
  * run-created 表外转移 fail-fast（IllegalTransitionError），构造性排除双帧。
  */
 export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> {
+  // [W2/V1] 活体态同步 seed（created 基线，条件式）：runWorkflow 返回前
+  // liveRunStates 必命中——isRunSettled 的「miss = 已终局」单向判定由此消除创建
+  // 窗口假阳性（判活类消费方 isScriptRunning 在 run 刚启动的窗口不会误判已终局）。
+  // 条件式双守卫（防双帧不变量优先）：
+  // - liveRunStates 已命中（重复发射/活体推进中）→ 不覆写——队列任务从现态
+  //   fold，重复 run-created 保持表外 fail-fast（单终局/单首帧不变量）；
+  // - 终局记录注册表已命中（终局后重复发射）→ 不 seed——队列任务 liveRunStates
+  //   miss → fold journal → terminal × run-created 表外 fail-fast。
+  if (!liveRunStates.has(run.runId) && !settledRunRecords.has(run.runId)) {
+    liveRunStates.set(run.runId, INITIAL_RUN_STATE);
+  }
   return dispatchRunTrigger(run, {
     type: "run-created",
     runId: run.runId,
@@ -902,35 +1047,85 @@ function summarizeRetryReason(result: AgentResult): string {
 // extractFailedRunErrorCode）驻 run-events.ts——RunErrorCode 词表语义的同位归属
 // （映射分支逐一引用词表收录依据），本文件是其唯一编排消费方。
 
-/** finalizeRun 的终局事件投递：aborted → cancel-requested 控制事件（合成落账见
- *  journalEventOf）；其余 → run-settled（DoneReason 六因 → RunOutcome 三态映射：
- *  budget_limited/time_limited 是 run 怎么死的系统层失败 = failed，诊断文本进
- *  reason）。errorCode 由 finalRunErrorCodeOf 单点构造（engine crash 族经失败
- *  call 的协议码前缀提取），随事件载荷落 journal 后经 persistTerminalProjection
- *  投影进 manifest/.state（S2「死亡可诊断」的 manifest errorCode 落点）。
+// ── [W2/V1 D1] 终局记录原语（settleRunAccounting）─────────────────────
+//
+// 四类终局场景（活体 finalizeRun / 崩溃恢复 v2 收编 / abandon 7 天窗 / idle-gc
+// 30 天回收）的共享记录动作单点：场景差异只在触发时机、幂等判据与 outcome 取值
+//（D5 映射表），不在记录结构。记录 = journal run-settled 帧 + manifest 物化
+// 两件一次齐全：
+// - 帧落账统一经 dispatchRunTrigger per-run 串行队列（单写者纪律；冷路径同走
+//   队列——离线收编无并发竞争成本，D1 裁决）；
+// - manifest 半边：spec 携带形态（活体 / 崩溃恢复 v2）由 dispatch 链 outputs
+//   执行（persistTerminalProjection）；runId 键投递（冷路径收编）由本原语补写
+//   （workflowName 载荷从 run-created 帧取，调用方传入）。
+//
+// 幂等两道（D1）：调用方三面证据前置（收编路径——adoptInterruptedRun 实装：
+// journal fold terminal / manifest 在 / 终态条目在）+ 表内转移 fail-fast 让位
+//（terminal × run-settled 表外 IllegalTransitionError——进程内/跨进程双终局
+// 竞窗的后到方，调用方分类处置）。
+//
+// [W2/V1 D1 执行面裁决] 本原语零通知副作用——转移表 run-settled 行 outputs 的
+// notify 标签执行体 = 活体 finalizeRun coda 的 onRunDone 链（不经原语）；冷路径
+//（收编/abandon/idle-gc）的入口 options 面无通知通道，构造性排除「通知收条
+// 冷路径误发」（场景 4 中断 run 零完成通知断言的前提）。
+export async function settleRunAccounting(
+  run: RunDispatchSource,
+  record: RunSettlementRecord,
+  opts?: {
+    /** manifest workflowName 载荷（冷路径 runId 键投递无 spec——从 run-created 帧取后传入；缺省不补写）。 */
+    workflowName?: string;
+  },
+): Promise<void> {
+  await dispatchRunTrigger(run, {
+    type: "run-settled",
+    outcome: record.outcome,
+    ...(record.errorCode !== undefined ? { errorCode: record.errorCode } : {}),
+    ...(record.reason !== undefined ? { reason: record.reason } : {}),
+    artifactsDir: resolveRunEventJournal().dir,
+    ts: record.settledAt,
+  });
+  if (run.spec === undefined && opts?.workflowName !== undefined) {
+    // 冷路径 manifest 补写（persistTerminalProjection 对 spec 缺省形态跳过后由
+    // 本原语承接；失败 = error 留痕不抛——manifest 是投影面，帧已在 journal，
+    // 对齐「取证面失败不阻断终局 coda」纪律）。
+    const dir = resolveRunEventJournal().dir;
+    if (dir === "") return; // 测试防线（NoopRunEventJournal 形态）——与帧零写同域
+    try {
+      await writeRunTerminalManifest(dir, {
+        id: run.runId,
+        workflowName: opts.workflowName,
+        outcome: record.outcome,
+        ...(record.errorCode !== undefined ? { errorCode: record.errorCode } : {}),
+        settledAt: record.settledAt,
+      });
+    } catch (err) {
+      logger.error(
+        `[workflow] cold-path adoption manifest write failed (runId=${run.runId}): ${toErrorMessage(err)}`,
+      );
+    }
+  }
+}
+
+/** finalizeRun 的终局事件投递（活体便捷入口）：aborted → cancel-requested 控制
+ *  事件（合成落账见 journalEventOf，outcome=cancelled）；其余 → settleRunAccounting
+ *  原语（DoneReason 六因 → (outcome, errorCode, reason) 按 D5 映射表：
+ *  budget_limited/time_limited 是 run 怎么死的系统层失败 = failed + 同名终局码，
+ *  诊断文本进 reason；errorCode 由 finalRunErrorCodeOf 单点构造，随事件载荷落
+ *  journal 后经 persistTerminalProjection 投影进 manifest——S2「死亡可诊断」）。
  *
- *  [W1 / D4] 崩溃恢复收编复用：lifecycle.recoverCrashedRuns 对 running 遗留
- *  run 的 journal 终局化经本函数走同一 dispatch 链（状态机裁决 + manifest 物化）
- *  ——活体终局与恢复收编的证据落点对称（run-settled 帧 + manifest，不再旁路
- *  直改）。导出面即为此（原为模块私有）。 */
-export async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason): Promise<void> {
+ *  返回终局记录（RunSettlementRecord）——finalizeRun coda 的派生源（v2 终态
+ *  条目 / 注销 reason 五处统一派生，[W2 D5]；与注册表 note 同源）。 */
+export async function dispatchFinalRunSettle(run: WorkflowRun, doneReason: DoneReason): Promise<RunSettlementRecord> {
+  const record = composeFinalSettlement(run, doneReason);
   if (doneReason === "aborted") {
     await dispatchRunTrigger(run, {
       type: "cancel-requested",
       reason: run.state.error,
     });
-    return;
+    return record;
   }
-  const outcome: RunOutcome = doneReason === "completed" ? "completed" : "failed";
-  const errorCode = finalRunErrorCodeOf(run, doneReason);
-  await dispatchRunTrigger(run, {
-    type: "run-settled",
-    outcome,
-    ...(errorCode !== undefined ? { errorCode } : {}),
-    reason: run.state.error ?? doneReason,
-    artifactsDir: resolveRunEventJournal().dir,
-    ts: Date.now(),
-  });
+  await settleRunAccounting(run, record);
+  return record;
 }
 
 // ── [W1 / D1] v2 条目接驳（两条小条目的 core 写点与构造器单源）──────────────
@@ -1056,26 +1251,28 @@ export function appendWorkflowRecordRegisteredEntry(run: WorkflowRun, deps: Life
 
 /**
  * v2 终态条目写点（finalizeRun 终局 coda 内调用）。物化时机对齐声明：journal
- * run-settled 帧（dispatchFinalRunSettle → appendTransition，含 manifest 物化）
- * 先落账，本条目随后写入——「journal 追加后的统一物化步」的条目半边（D2/D4：
- * 追加终态事件 → 补写条目 → manifest 已物化，三个投影锚在终局 coda 单点收敛）。
+ * run-settled 帧（settleRunAccounting 原语，含 manifest 物化）先落账，本条目随后
+ * 写入——「journal 追加后的统一物化步」的条目半边（D2/D4：追加终态事件 → 补写
+ * 条目 → manifest 已物化，三个投影锚在终局 coda 单点收敛）。
+ * [W2 D5] 载荷源 = settlement（帧同源）：outcome/errorCode 直取，reason 经
+ * runSettledOutcomeToDoneReason 联合派生（原 doneReasonToRunOutcome(doneReason) +
+ * run.state.reason ?? doneReason 的两态机字段读随写点删除退役）。
  * best-effort 围栏（对齐 unregister/onRunDone 的独立 try 哲学：条目失败不吞
  * 后续步骤）。
  */
 function appendWorkflowRecordSettledEntry(
   run: WorkflowRun,
   deps: LifecycleDeps,
-  doneReason: DoneReason,
+  settlement: RunSettlementRecord,
   context: string,
 ): void {
-  const errorCode = finalRunErrorCodeOf(run, doneReason);
   const scriptResultSummary = summarizeScriptResult(run.state.scriptResult);
   const entry = buildWorkflowRecordSettledEntryData({
     runId: run.runId,
-    reason: run.state.reason ?? doneReason,
-    outcome: doneReasonToRunOutcome(doneReason),
-    ...(errorCode !== undefined ? { errorCode } : {}),
-    settledAt: Date.now(),
+    reason: runSettledOutcomeToDoneReason(settlement.outcome, settlement.errorCode),
+    outcome: settlement.outcome,
+    ...(settlement.errorCode !== undefined ? { errorCode: settlement.errorCode } : {}),
+    settledAt: settlement.settledAt,
     callCount: run.state.calls.size,
     usedTokens: run.state.budget.usedTokens,
     ...(scriptResultSummary !== undefined ? { scriptResultSummary } : {}),
@@ -1427,7 +1624,7 @@ export async function handleWorkerMessage(
   handlers: WorkerHandlers,
 ): Promise<void> {
   // 终态（done）丢弃 stale 消息（P0-1）——[加固] debug 留痕（原静默 return；type 于 M7 校验前自 raw 安全提取）。
-  if (isTerminal(run)) {
+  if (isRunSettled(run)) {
     const type = typeof raw === "object" && raw !== null
       ? (raw as { type?: unknown }).type
       : null;
@@ -1491,7 +1688,7 @@ export async function handleWorkerMessage(
  * 计入 run.state.errorLogs（与 workerLogs 通路的 L9 追加/上限语义一致——该容器
  * 本就承载全级别 worker 日志，"log" 级条目已在其中）+ deps.log debug 留痕
  * （含 phase，协议字段不落 WorkerLogEntry 但排查时可见）。
- * 终态守卫（isTerminal）已由 handleWorkerMessage 前置——此处只管写入。
+ * 终态守卫（isRunSettled）已由 handleWorkerMessage 前置——此处只管写入。
  */
 function handleWorkerLog(run: WorkflowRun, msg: LogMsg, deps: LifecycleDeps): void {
   const message = typeof msg.message === "string" ? msg.message : String(msg.message);
@@ -1641,7 +1838,7 @@ function dispatchAgentCall(
   // runner（runner.run）管 spawn pi 子进程。
   // assignRuntime/replaceRuntime 保证 status==="running" ⟺ runtime defined，
   // 故 run.runtime 在此必存在（dispatchAgentCall 仅从 handleWorkerMessage 调用，
-  // 后者已守 terminal（isTerminal）早期 return）。fallback new AbortController 已移除。
+  // 后者已守 terminal（isRunSettled）早期 return）。fallback new AbortController 已移除。
   const runtime = run.runtime!;
   const signal = runtime.controller.signal;
   // [H2 W3] 执行 port 切换（设计 §3.5 终态数据流：pump 薄化为「消息转调 + run 级
@@ -1708,7 +1905,9 @@ function dispatchAgentCall(
     .then(() => {
       // run 终止（终态）后到达的 stale completion 不写 state（终态由
       // executeAgentCall → finalizeCall 写入 node.result，node 无运行期附属对象）。
-      if (run.state.status !== "running") return;
+      // [W2/V1] 终局判据换源 isRunSettled（原 run.state.status recheck 随活体写点
+      // 删除停更——终局后的迟到 completion 经注册表判定拦截）。
+      if (isRunSettled(run)) return;
       // 孤儿 call 守卫（S7-second 竞态）：rebuild 的 discardInFlightCalls 已移除本
       // call、或重跑 dispatch 已用新实例替换同 callId 条目时，本 completion 属于旧
       // runtime 代际。postAgentResult 的投递目标是 run.runtime（已是新 worker），
@@ -1841,7 +2040,9 @@ function dispatchWorkflowCall(
   }
 
   const postResult = (result: unknown): void => {
-    if (run.state.status !== "running") return;
+    // [W2/V1] stale 完成守卫换源 isRunSettled（终局后迟到子 workflow 结果丢弃——
+    // 原两态机 status recheck 随活体写点删除停更）。
+    if (isRunSettled(run)) return;
     // W2 主线程防御：result 是子 workflow 任意返回值，可能含不可克隆成员（function/
     // Symbol/循环引用）→ postMessage 同步抛 DataCloneError。内部 try/catch + 回发
     // 纯字符串 fallback result，让 worker 内 workflow() pending Promise resolve。
@@ -1994,7 +2195,7 @@ export async function handleWorkerError(
 ): Promise<void> {
   // 与 handleWorkerMessage 对称——终态（done）丢弃 stale error（否则 workerErrorCount
   // 被污染）。[加固] debug 留痕（原静默 return）。
-  if (isTerminal(run)) {
+  if (isRunSettled(run)) {
     logger.debug(
       `[workflow] stale worker error dropped on terminal run (runId=${run.runId}, event=worker-error, message=${JSON.stringify(err.message)})`,
     );
@@ -2060,7 +2261,7 @@ export async function handleWorkerExit(
     );
     return;
   }
-  if (isTerminal(run)) {
+  if (isRunSettled(run)) {
     logger.debug(
       `[workflow] stale worker exit dropped on terminal run (runId=${run.runId}, event=worker-exit, code=${code})`,
     );
@@ -2110,7 +2311,7 @@ export async function handleScriptError(
   handlers: WorkerHandlers,
 ): Promise<void> {
   // 与 handleWorkerMessage/handleWorkerError 对称——终态守卫前置。
-  if (isTerminal(run)) return;
+  if (isRunSettled(run)) return;
 
   // P2-2: 捕获 worker 诊断日志
   // L9: 追加而非覆盖
@@ -2165,7 +2366,7 @@ async function scheduleRebuild(
   await delay(backoffDelay(retryIndex));
 
   // 退避期间状态可能变化——重检
-  if (isTerminal(run)) return;
+  if (isRunSettled(run)) return;
 
   // [race-F3] 时间预算折算后已耗尽 → 不再 rebuild 重试，直接 time_limited 终态。
   // 必须在退避 delay 之后、rebuildRuntime 之前检查：检查前移会在「退避期间耗尽」的
@@ -2190,7 +2391,7 @@ async function scheduleRebuild(
  * 重建动作本身失败按 worker 家族计数（重建的就是 worker）——计入 run.meta.workerErrorCount
  * （跨 runtime 存活的重试计数载体），与既有 handleWorkerError 共用同一上限
  * MAX_WORKER_RETRIES 与退避序列：
- * - count <= MAX → 递归 scheduleRebuild（天然复用退避 / isTerminal 重检 / 预算折算守卫；
+ * - count <= MAX → 递归 scheduleRebuild（天然复用退避 / isRunSettled 重检 / 预算折算守卫；
  *   每轮计数 +1，递归深度有界 ≤ MAX_WORKER_RETRIES）；
  * - count > MAX → 收敛 done,failed（transition + 收口 in-flight + 持久化 + 围栏副作用），
  *   run 不再卡 running。
@@ -2203,7 +2404,7 @@ async function handleRebuildStartFailure(
   deps: LifecycleDeps,
   handlers: WorkerHandlers,
 ): Promise<void> {
-  if (isTerminal(run)) return;
+  if (isRunSettled(run)) return;
   const message = toErrorMessage(err);
   const count = (run.meta.workerErrorCount ?? 0) + 1;
   run.meta.workerErrorCount = count;

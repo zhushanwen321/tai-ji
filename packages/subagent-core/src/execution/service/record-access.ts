@@ -33,7 +33,7 @@ import { toErrorMessage } from "../../core/error-message.ts";
 
 import { bestEffort } from "../assembly/best-effort.ts";
 import { COLD_LOOKUP_SCAN_LIMIT, coldLookupForAction, type ColdLookupDeps } from "../assembly/cold-lookup.ts";
-import { createRecord, project, snapshot } from "../persistence/execution-record.ts";
+import { createRecord, isLegacyClosedSettled, project, snapshot } from "../persistence/execution-record.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import {
   joinEngineModelRef,
@@ -216,8 +216,8 @@ export class RecordAccess {
     for (const rec of this.deps.getStore().scanLastRecordEntries(this.deps.getMainSessionFile())) {
       if (visibleIds.has(rec.id)) continue; // 查询面已可见：磁盘锚或 manifest 幸存
       if (rec.rootSessionId !== this.deps.getSessionRootId()) continue; // 只治本 session 树
-      // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
-      if (!(rec.status === "idle" && rec.closedReason !== undefined)
+      // [W2/V3 D5 桥接判据收敛] 旧「closed 终态」读判定 ⟺ isLegacyClosedSettled（唯一权威谓词）。
+      if (!isLegacyClosedSettled(rec)
         || !isReconnectableFinalReason(rec.closedReason)) continue;
       // manifest 投影补写走 store 公开原语（[H4 收口 / G1] store 外零 manifest 直写；
       // status 恒 closed——entry 的 closed 即终态自描述，无 running 形态可达此处）。

@@ -17,7 +17,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 import { createRecord } from "../persistence/execution-record.ts";
-import { startIdleGc } from "../persistence/idle-gc.ts";
+import { startIdleGc, resolveWorkflowRunGcIntervalMs, resolveWorkflowRunIdleTtlMs, WORKFLOW_RUN_GC_INTERVAL_MS_ENV, WORKFLOW_RUN_IDLE_TTL_MS_ENV } from "../persistence/idle-gc.ts";
+import { createRunEventJournal } from "../../orchestration/run-events.ts";
+import { setRunEventJournalDirForTest } from "../../orchestration/worker-message-pump.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { configureCore, HostNotConfiguredError, resetCoreForTests } from "../../core/host-services.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
@@ -26,20 +28,91 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const GC_INTERVAL_MS = 60 * 60 * 1000;
 
 let tmpDir: string;
+let gcDir: string;
 let stop: (() => void) | undefined;
 
 beforeEach(() => {
   vi.useFakeTimers();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "idle-gc-"));
+  gcDir = fs.mkdtempSync(path.join(os.tmpdir(), "idle-gc-run-"));
+  // [W2/V1] 收编链（scan/帧落账/manifest）走模块 journal 单写者域——注入即覆盖。
+  setRunEventJournalDirForTest(gcDir);
 });
 
 afterEach(() => {
   stop?.();
   stop = undefined;
+  setRunEventJournalDirForTest(undefined);
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  fs.rmSync(gcDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   vi.useRealTimers();
   resetCoreForTests();
+  delete process.env[WORKFLOW_RUN_IDLE_TTL_MS_ENV];
+  delete process.env[WORKFLOW_RUN_GC_INTERVAL_MS_ENV];
 });
+
+/** 预置可收编的 journal（run-created + ask-dispatched——fold 非 terminal）。 */
+async function seedJournal(runId: string): Promise<void> {
+  const journal = createRunEventJournal(gcDir);
+  await journal.append(runId, {
+    type: "run-created",
+    runId,
+    workflowName: "test-wf",
+    argsSummary: "{}",
+    ts: Date.now(),
+  });
+  await journal.append(runId, {
+    type: "ask-dispatched",
+    taskIndex: 1,
+    agentName: "a",
+    attempt: 1,
+    ts: Date.now(),
+  });
+}
+
+/** WorkflowRun GC 窄口 mock（[W2/V1] 仅 loadAll——transition/save 写点已退役）。 */
+function makeWorkflowStore(runs: Array<{
+  runId: string;
+  status: string;
+  startedAt: string;
+}>) {
+  return {
+    store: {
+      loadAll: async () =>
+        runs.map((r) => ({
+          runId: r.runId,
+          state: { status: r.status },
+          meta: { startedAt: r.startedAt },
+        })),
+    },
+  };
+}
+
+/** 排空微任务链（void gcWorkflowRuns 的 async 链推进到稳定态——journal 帧为同步
+ *  fs，微任务排空即落盘）。 */
+async function flushMicrotasks(times = 30): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await Promise.resolve(); // eslint-disable-line no-await-in-loop -- 排空微任务的固定 tick 循环
+  }
+}
+
+/** 有界轮询至条件成立（manifest 经 writeAtomicFile 真实 IO——fake timers 下微任务
+ *  排空等不到线程池回调，须以异步 tick 让 IO promise 落定；超时失败不静默）。 */
+async function pollUntil(cond: () => boolean, tries = 300): Promise<void> {
+  for (let i = 0; i < tries && !cond(); i++) {
+    await vi.advanceTimersByTimeAsync(1); // eslint-disable-line no-await-in-loop -- IO 落定的有界轮询
+  }
+  if (!cond()) throw new Error("pollUntil: condition not met within budget");
+}
+
+/** 真实时钟有界轮询（writeAtomicFile 的 rename 链在 fake timers 下不落定——
+ *  收编断言改走真实 timers + 两 env 旋钮调短通道，轮询等 IO 落定）。 */
+async function pollUntilReal(cond: () => boolean, tries = 400): Promise<void> {
+  for (let i = 0; i < tries && !cond(); i++) {
+    await new Promise((r) => setTimeout(r, 5)); // eslint-disable-line no-await-in-loop -- 真实时钟 IO 轮询
+  }
+  if (!cond()) throw new Error("pollUntilReal: condition not met within budget");
+}
 
 function makeStore(): RecordStore {
   return new RecordStore(path.join(tmpDir, "sessions"));
@@ -169,14 +242,15 @@ describe("idle-gc record 锚扩展（W4）", () => {
   });
 });
 
-describe("idle-gc WorkflowRun store 纳入（W4）", () => {
+describe("idle-gc WorkflowRun store 纳入（[W2/V1 D3] 改走收编原语）", () => {
+  // [W2/V1 D3] 终局化经 adoptInterruptedRun 原语（journal 帧 + manifest 两件，
+  // outcome=interrupted + errorCode=idle-evicted）——两态机 transition+save 写点
+  // 退役。journal/manifest 注入面 = setRunEventJournalDirForTest（模块单写者域）。
   function makeWorkflowStore(runs: Array<{
     runId: string;
     status: string;
     startedAt: string;
   }>) {
-    const transitions: Array<{ runId: string; reason?: string }> = [];
-    const saved: string[] = [];
     return {
       store: {
         loadAll: async () =>
@@ -184,39 +258,76 @@ describe("idle-gc WorkflowRun store 纳入（W4）", () => {
             runId: r.runId,
             state: { status: r.status },
             meta: { startedAt: r.startedAt },
-            transition: (_target: "done", reason?: string) => {
-              transitions.push({ runId: r.runId, reason });
-            },
           })),
-        save: async (run: { runId: string }) => {
-          saved.push(run.runId);
-        },
       },
-      transitions,
-      saved,
     };
   }
 
-  it("running 且 startedAt 超 30 天 → transition(done, time_limited) + save", async () => {
-    const { store, transitions, saved } = makeWorkflowStore([
-      { runId: "wf-old", status: "running", startedAt: new Date(Date.now() - 31 * DAY_MS).toISOString() },
+  it("running 且超 TTL → 收编原语终局化（journal run-settled 帧 outcome=interrupted/idle-evicted + manifest；两 env 旋钮调短通道）", async () => {
+    // [W2/V1 场景 3] fake timers 与 writeAtomicFile 的真实 IO rename 链不兼容——
+    // 本用例按旋钮的设计用途走真实 timers + 两 env 调短（TTL 定超龄 / interval 定
+    // 回收节奏，两旋钮缺一不可）。
+    vi.useRealTimers();
+    process.env[WORKFLOW_RUN_IDLE_TTL_MS_ENV] = "1000";
+    process.env[WORKFLOW_RUN_GC_INTERVAL_MS_ENV] = "50";
+    await seedJournal("wf-old");
+    const { store } = makeWorkflowStore([
+      { runId: "wf-old", status: "running", startedAt: new Date(Date.now() - 60_000).toISOString() },
     ]);
-    const recordStore = makeStore();
-    stop = startIdleGc(recordStore, store);
-    await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
-    expect(transitions).toEqual([{ runId: "wf-old", reason: "time_limited" }]);
-    expect(saved).toEqual(["wf-old"]);
+    stop = startIdleGc(makeStore(), store);
+    await pollUntilReal(() => fs.existsSync(path.join(gcDir, "wf-old.json")));
+
+    // journal 尾部有收编终局帧（[W2 三路径 outcome 断言] idle 回收侧）
+    const events = await createRunEventJournal(gcDir).scan("wf-old");
+    const settled = events.find((e) => e.type === "run-settled");
+    expect(settled).toBeDefined();
+    expect(settled).toMatchObject({ outcome: "interrupted", errorCode: "idle-evicted" });
+    // manifest 物化（workflowName 从 run-created 帧取）
+    const manifest = JSON.parse(fs.readFileSync(path.join(gcDir, "wf-old.json"), "utf8")) as {
+      outcome: string;
+      errorCode?: string;
+      workflowName: string;
+    };
+    expect(manifest).toMatchObject({ outcome: "interrupted", errorCode: "idle-evicted", workflowName: "test-wf" });
   });
 
-  it("窗内 running / 已终态 run 不动", async () => {
-    const { store, transitions, saved } = makeWorkflowStore([
+  it("窗内 running / 快照 done 的 run 不动（原语幂等前置承接终局判定）", async () => {
+    await seedJournal("wf-new");
+    const { store } = makeWorkflowStore([
       { runId: "wf-new", status: "running", startedAt: new Date(Date.now() - 1 * DAY_MS).toISOString() },
       { runId: "wf-done", status: "done", startedAt: new Date(Date.now() - 40 * DAY_MS).toISOString() },
     ]);
     stop = startIdleGc(makeStore(), store);
     await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
-    expect(transitions).toEqual([]);
-    expect(saved).toEqual([]);
+    const events = await createRunEventJournal(gcDir).scan("wf-new");
+    expect(events.filter((e) => e.type === "run-settled")).toHaveLength(0);
+    expect(fs.existsSync(path.join(gcDir, "wf-done.json"))).toBe(false);
+  });
+
+  it("已终局 run（journal 有 run-settled 帧）超龄 → 原语幂等跳过（skippedTerminal，不重复追加）", async () => {
+    const journal = createRunEventJournal(gcDir);
+    await journal.append("wf-settled", {
+      type: "run-created",
+      runId: "wf-settled",
+      workflowName: "test-wf",
+      argsSummary: "{}",
+      ts: Date.now() - 40 * DAY_MS,
+    });
+    await journal.append("wf-settled", {
+      type: "run-settled",
+      outcome: "completed",
+      artifactsDir: gcDir,
+      ts: Date.now() - 39 * DAY_MS,
+    });
+    // v2 run 终局后快照 status 停更 running（fold 只富集 outcome）——粗筛仍放行
+    const { store } = makeWorkflowStore([
+      { runId: "wf-settled", status: "running", startedAt: new Date(Date.now() - 40 * DAY_MS).toISOString() },
+    ]);
+    stop = startIdleGc(makeStore(), store);
+    await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
+
+    const events = await createRunEventJournal(gcDir).scan("wf-settled");
+    expect(events.filter((e) => e.type === "run-settled")).toHaveLength(1);
   });
 
   it("loadAll 抛错（宿主未 configureCore）→ 单轮跳过不炸 interval（域未启用 = debug 不 warn）", async () => {
@@ -232,7 +343,6 @@ describe("idle-gc WorkflowRun store 纳入（W4）", () => {
       loadAll: async () => {
         throw new HostNotConfiguredError("[subagent-core] core_host_not_configured");
       },
-      save: async () => {},
     };
     stop = startIdleGc(makeStore(), failing);
     await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS * 2 + 1);
@@ -254,7 +364,6 @@ describe("idle-gc WorkflowRun store 纳入（W4）", () => {
       loadAll: async () => {
         throw new Error("EIO: disk unavailable (mock)");
       },
-      save: async () => {},
     };
     stop = startIdleGc(makeStore(), failing);
     await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
@@ -266,34 +375,71 @@ describe("idle-gc WorkflowRun store 纳入（W4）", () => {
     await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS);
     expect(logCalls.filter((l) => l.level === "warn")).toHaveLength(2);
   });
+});
 
-  it("save 抛错 → 吞错留痕，不阻断其余 run", async () => {
-    const transitions: Array<{ runId: string; reason?: string }> = [];
-    const failing = {
-      loadAll: async () => [
-        {
-          runId: "wf-a",
-          state: { status: "running" },
-          meta: { startedAt: new Date(Date.now() - 31 * DAY_MS).toISOString() },
-          transition: (_t: "done", reason?: string) => {
-            transitions.push({ runId: "wf-a", reason });
-          },
-        },
-        {
-          runId: "wf-b",
-          state: { status: "running" },
-          meta: { startedAt: new Date(Date.now() - 32 * DAY_MS).toISOString() },
-          transition: (_t: "done", reason?: string) => {
-            transitions.push({ runId: "wf-b", reason });
-          },
-        },
-      ],
-      save: async (run: { runId: string }) => {
-        if (run.runId === "wf-a") throw new Error("EIO");
+// ── [W2/V1 场景 3] 两 env 旋钮解析语义（未设/空 → 缺省；非法 → 缺省 + warn）──
+
+describe("idle-gc 两 env 旋钮（TAIJI_WORKFLOW_RUN_IDLE_TTL_MS / TAIJI_WORKFLOW_RUN_GC_INTERVAL_MS）", () => {
+  afterEach(() => {
+    delete process.env[WORKFLOW_RUN_IDLE_TTL_MS_ENV];
+    delete process.env[WORKFLOW_RUN_GC_INTERVAL_MS_ENV];
+  });
+
+  it("未设 → 缺省（TTL 30 天、interval 1h——生产行为不变）", () => {
+    delete process.env[WORKFLOW_RUN_IDLE_TTL_MS_ENV];
+    delete process.env[WORKFLOW_RUN_GC_INTERVAL_MS_ENV];
+    expect(resolveWorkflowRunIdleTtlMs()).toBe(30 * DAY_MS);
+    expect(resolveWorkflowRunGcIntervalMs()).toBe(60 * 60 * 1000);
+  });
+
+  it("空串 → 同未设（缺省回退）", () => {
+    process.env[WORKFLOW_RUN_IDLE_TTL_MS_ENV] = "";
+    process.env[WORKFLOW_RUN_GC_INTERVAL_MS_ENV] = "";
+    expect(resolveWorkflowRunIdleTtlMs()).toBe(30 * DAY_MS);
+    expect(resolveWorkflowRunGcIntervalMs()).toBe(60 * 60 * 1000);
+  });
+
+  it("合法正值 → 生效（测试调短通道）", () => {
+    process.env[WORKFLOW_RUN_IDLE_TTL_MS_ENV] = "60000";
+    process.env[WORKFLOW_RUN_GC_INTERVAL_MS_ENV] = "1000";
+    expect(resolveWorkflowRunIdleTtlMs()).toBe(60000);
+    expect(resolveWorkflowRunGcIntervalMs()).toBe(1000);
+  });
+
+  it("非法值（非有限数 / ≤0）→ 回退缺省 + warn 留痕（不照搬 abandon 先例的 opt-out）", () => {
+    const logCalls: Array<{ level: string; message: string }> = [];
+    configureCore({
+      dataRoot: () => "/fake-idle-gc-data-root",
+      log: (level, _component, message) => {
+        logCalls.push({ level, message });
       },
-    };
-    stop = startIdleGc(makeStore(), failing);
-    await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
-    expect(transitions.map((t) => t.runId).sort()).toEqual(["wf-a", "wf-b"]);
+    });
+    process.env[WORKFLOW_RUN_IDLE_TTL_MS_ENV] = "abc";
+    process.env[WORKFLOW_RUN_GC_INTERVAL_MS_ENV] = "-5";
+    expect(resolveWorkflowRunIdleTtlMs()).toBe(30 * DAY_MS);
+    expect(resolveWorkflowRunGcIntervalMs()).toBe(60 * 60 * 1000);
+    const warns = logCalls.filter((l) => l.level === "warn");
+    expect(warns).toHaveLength(2);
+    expect(warns[0]?.message).toContain(WORKFLOW_RUN_IDLE_TTL_MS_ENV);
+    expect(warns[1]?.message).toContain(WORKFLOW_RUN_GC_INTERVAL_MS_ENV);
+    // 防刷屏：同 env 二次解析不再 warn
+    expect(resolveWorkflowRunIdleTtlMs()).toBe(30 * DAY_MS);
+    expect(logCalls.filter((l) => l.level === "warn")).toHaveLength(2);
+  });
+
+  it("interval 旋钮真实生效：GC_INTERVAL_MS 调低后单轮扫描按新节奏推进（TTL/interval 缺一不可）", async () => {
+    vi.useRealTimers();
+    process.env[WORKFLOW_RUN_IDLE_TTL_MS_ENV] = "1000";
+    process.env[WORKFLOW_RUN_GC_INTERVAL_MS_ENV] = "50";
+    await seedJournal("wf-knob");
+    const { store } = makeWorkflowStore([
+      { runId: "wf-knob", status: "running", startedAt: new Date(Date.now() - 60_000).toISOString() },
+    ]);
+    stop = startIdleGc(makeStore(), store);
+    // TTL 调短只让 run 变超龄；回收动作按新 interval（50ms）推进
+    await pollUntilReal(() => fs.existsSync(path.join(gcDir, "wf-knob.json")));
+    const events = await createRunEventJournal(gcDir).scan("wf-knob");
+    const settled = events.find((e) => e.type === "run-settled");
+    expect(settled).toMatchObject({ outcome: "interrupted", errorCode: "idle-evicted" });
   });
 });

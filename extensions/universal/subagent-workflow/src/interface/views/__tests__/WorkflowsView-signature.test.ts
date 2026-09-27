@@ -64,7 +64,17 @@ interface RunShape {
 }
 
 function makeRun(shape: RunShape = {}): WorkflowRun {
+  return makeRunWithId(`wf-sig-${signatureRunSeq++}`, shape);
+}
+
+/** [W2/V1] runId 唯一化 + spec 最小面（displayStatusOf → core runSummary 投影
+ *  读 runId/spec.scriptName——签名测试的 mock 需携带该最小字段集）。 */
+let signatureRunSeq = 0;
+function makeRunWithId(runId: string, shape: RunShape): WorkflowRun {
   return {
+    runId,
+    spec: { scriptName: "sig-wf" },
+    meta: { startedAt: "2026-09-27T00:00:00.000Z" },
     state: {
       status: shape.status ?? "running",
       budget: shape.budget ?? { usedTokens: 0, maxTokens: 200_000, usedCost: 0 },

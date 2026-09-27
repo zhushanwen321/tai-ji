@@ -39,6 +39,7 @@
 import { getLogger } from "../../core/logger.ts";
 import { assertSafeTimerDelay } from "../../shared/timer-delay.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
+import { isLegacyClosedSettled } from "../persistence/execution-record.ts";
 import {
   classifySupervisorDomain,
   isAwakeWarrantedShape,
@@ -112,10 +113,16 @@ export function isSupervisorGiveUpDisabled(): boolean {
 /**
  * record 只读视图（监督器判定的唯一状态源——内存/磁盘两形态统一投影）。
  * 字段语义对齐 ExecutionRecord / SubagentRecord 同名项。
+ *
+ * [W2/V3 D5] 旧第三套词表字段 `status: "running" | "closed"` 删除——终态判定改由
+ * `settled` 承载（isLegacyClosedSettled 谓词在视图构造点的消费结果，布尔投影非词
+ * 表）。语义逐处等价：旧 `status !== "running"` ⟺ 旧 `status === "closed"` ⟺
+ * `settled === true`（toView / service-binding 构造点同式换源）。
  */
 export interface SupervisorRecordView {
   id: string;
-  status: "running" | "closed";
+  /** 旧「closed 终态」读判定（isLegacyClosedSettled 消费结果——终态 record 为 true）。 */
+  settled: boolean;
   /** 已有完成产出（record.result !== undefined）——轮终 idle 挂账态判据。 */
   hasResult: boolean;
   /** [H2 W2] 来源身份（adopt 链豁免域判据——classifySupervisorDomain 消费）。 */
@@ -212,19 +219,20 @@ export class RoundSupervisor {
   }
 
   /**
-   * boot 分区（裁决表行 2/3——initSession 扫描）：
-   *  - running 候选（防御性结构——现状恒不可达，见下）→ 重认领接管（注册存续，
-   *    process 档），监督器三态继续；[modeless 波1] conversation 豁免域随 chatMode
-   *    消亡删除（判据统一管全部 running record）。
+   * boot 分区（initSession 扫描挂点）。
    *
-   *  [two-state-convergence U5/D4 MF-1] 重认领谓词（isBootReadoptable）已随死代码
-   *  清理删除——该链现状恒不可达：①根进程路径，initSession 编排孤儿恢复
+   * [W2/V3 §3.0 增量裁决] 恒不可达重认领循环已清退——本方法保留签名与返回形态
+   * （调用方 initSession 零改动），恒返回空认领集。清退依据 = 下方不可达论证链
+   * （源注释原样保留，两条论证链自证恒不可达；被删的「防御性结构保留理由 = 未来
+   * 形态变化时的重认领通道」属为想象未来预付的通道，与本波死形态清退主题同原则）。
+   *
+   *  不可达论证链（[two-state-convergence U5/D4 MF-1] 起，重认领谓词
+   *  isBootReadoptable 已随死代码清理删除）：①根进程路径，initSession 编排孤儿恢复
    *  （finalizeOrphanRecord 一律 idle 等 revive）先于本方法，重启前在途/死亡纳管
    *  形态全部落 idle；②磁盘重建单规则恒 idle（buildRecord markReconstructedStatus
    *  无条件 idle），entry 源只补本进程主 session 的 zcode record——候选门
-   *  （view.status !== 'running' → continue）后恒无元素。W4 跨重启归宿 = 孤儿纠偏
-   *  idle 等 revive（红点等续聊，无惊吓式自动复跑——设计 D6a 已接受代价）。
-   *  循环体保留为防御性结构（未来形态变化时的重认领通道）。
+   *  （settled 之外无活跃元素）后恒无元素。W4 跨重启归宿 = 孤儿纠偏 idle 等
+   *  revive（红点等续聊，无惊吓式自动复跑——设计 D6a 已接受代价）。
    *
    *  in-flight（重启前在途）不在本方法处置面：直断 failed 已由 record-store 孤儿
    *  恢复（recoverOrphanRecords → finalizeOrphanRecord）在先完成（[F3] 表 3 行 2
@@ -236,27 +244,11 @@ export class RoundSupervisor {
    * 「重启前在途」的 record 落 idle（boot 直断的唯一实现锚点）。
    */
   bootPartition(): { readopted: string[] } {
-    const readopted: string[] = [];
-    if (this.disposed) return { readopted };
-    for (const candidate of this.deps.listCandidateRecords()) {
-      const view = this.deps.getRecordView(candidate.id);
-      if (view === undefined || view.status !== "running") continue;
-      // [H2 W2] adopt 链豁免域门（conversation 豁免 + workflow origin 豁免）：
-      // classifySupervisorDomain 不把 workflow record 归入可 adopt 域（"run"）——
-      // boot 重认领对 workflow 形态不生效（豁免落空面无「重认领后 2h 看门狗挂账」）。
-      if (classifySupervisorDomain(view) !== "run") continue;
-      if (!this.supervised.has(view.id)) {
-        this.supervised.set(view.id, { guidanceSent: false, timer: undefined });
-      }
-      readopted.push(view.id);
-      this.evaluate(view.id);
-    }
-    if (readopted.length > 0) {
-      logger.warn(
-        `[round-supervisor] boot partition: readopted ${readopted.length} idle-resumable record(s): ${readopted.join(",")}`,
-      );
-    }
-    return { readopted };
+    // [W2/V3] 循环体清退（原：listCandidateRecords 候选扫描 → getRecordView 活跃门
+    // → classifySupervisorDomain 豁免门 → 纳管 + evaluate + readopted 收集 + warn）。
+    // 恒不可达由头注论证链①②承载；重认领通道若未来真实需要，须先推翻论证链并
+    // 重新设计（非原样复活——候选门判据已随本波 settled 谓词化变形）。
+    return { readopted: [] };
   }
 
   // ── 在途记账（subagent-service 报告）──────────────────────────────────
@@ -291,8 +283,10 @@ export class RoundSupervisor {
       this.release(recordId);
       return;
     }
-    if (view.status !== "running") {
+    if (view.settled) {
       // 终态 = 自然收口（finalizeRecord 已走注销①发射）——解除纳管。
+      // [W2/V3 D5] 旧判据 view.status !== "running" ⟺ view.settled（isLegacyClosedSettled
+      // 谓词等价迁移：settled=true ⟺ 旧 closed 读形态 ⟺ 非活跃）。
       this.release(recordId);
       return;
     }
@@ -314,7 +308,9 @@ export class RoundSupervisor {
       this.clearWatchdogTimer(entry);
       return;
     }
-    if (!isAwakeWarrantedShape({ status: view.status }, view.hasResult, hasInFlight, hasLive)) {
+    // [W2/V3 D5] 传参适配：domain 谓词（领地外）入参形态不变，status 由 settled
+    // 投影重建——逐值等价（settled=true ⟺ 旧 "closed"）。
+    if (!isAwakeWarrantedShape({ status: view.settled ? "closed" : "running" }, view.hasResult, hasInFlight, hasLive)) {
       // 形态不构成唤醒条件（终态 / 已有产出）——不唤醒。
       return;
     }
@@ -371,7 +367,8 @@ export class RoundSupervisor {
       entry.timer = undefined;
       this.supervised.delete(recordId);
       const view = this.deps.getRecordView(recordId);
-      if (view === undefined || view.status !== "running") return; // 已自然收口
+      // [W2/V3 D5] 旧 view.status !== "running" ⟺ view.settled（谓词等价迁移）。
+      if (view === undefined || view.settled) return; // 已自然收口
       logger.warn(
         `[round-supervisor] decision watchdog expired for ${recordId} after ${windowMs}ms ` +
           `(guidance unanswered, no convergence) — giving up (failed + unregister + termination notice)`,
@@ -407,8 +404,9 @@ export class RoundSupervisor {
   private toView(record: ExecutionRecord): SupervisorRecordView {
     return {
       id: record.id,
-      // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
-      status: record.status === "idle" && record.closedReason !== undefined ? "closed" : "running",
+      // [W2/V3 D5] 旧「closed 终态」读判定 ⟺ isLegacyClosedSettled（唯一权威谓词，
+      // 第三套词表 running|closed 删除——settled 布尔投影，判定语义不变）。
+      settled: isLegacyClosedSettled(record),
       hasResult: record.result !== undefined,
       origin: record.origin,
       rootSessionId: record.rootSessionId,

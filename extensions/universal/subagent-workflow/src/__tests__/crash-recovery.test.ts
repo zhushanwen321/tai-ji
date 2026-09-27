@@ -3,7 +3,8 @@
 // MF-5: session_start crash recovery 路径测试。
 //
 // 覆盖 store.loadAll 的 4 个分支（[u-5b / A-V3] 改写）：
-//   1. loadAll 成功 + running run → 重建（transition done,failed + emit pending:unregister failed）
+//   1. loadAll 成功 + running run → 重建（transition done,failed + [W2/V4 D6]
+//      appendEntry 直落 pending:unregister failed——不经 emit）
 //      ——被测行为在装配链内（kill-9 恢复循环），seam 直测 setupSessionLifecycle +
 //      deps.createRunStore 注入 fake（零整类 mock）
 //   2. loadAll 成功 + 已终态 run → 直接 set 到 runs Map，不 transition
@@ -40,6 +41,9 @@ vi.mock("../jsonl-run-store.ts", () => ({
 
 // ── import 被测模块 ──
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+
+// [W2/V4 D6] 直落断言消费的 protocol SSOT（customType 常量 + status 映射单点）
+import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 
 // session-lifecycle 仍持有多个进程级维护守卫（oncePerProcess，模块级 Map）：
 // beforeEach resetModules + 动态 import 每用例取新鲜模块实例，防守卫 Map 跨用例
@@ -109,17 +113,22 @@ function injectLifecycleFakes(): void {
   } as never);
 }
 
-/** 可观察 eventBus.emit 的 fake pi（seam 直测用）。 */
+/** 可观察 eventBus.emit 与 appendEntry 落盘的 fake pi（seam 直测用）。
+ *  [W2/V4 D6] 恢复链注销走 appendEntry 直落（不经 emit），entries 是注销断言面。 */
 function createFakePi(): {
   pi: ExtensionAPI;
   emits: Array<{ channel: string; data: unknown }>;
+  entries: Array<{ customType: string; data: unknown }>;
 } {
   const emits: Array<{ channel: string; data: unknown }> = [];
+  const entries: Array<{ customType: string; data: unknown }> = [];
   const noop = (): void => {
     /* fake */
   };
   const pi = {
-    appendEntry: noop,
+    appendEntry: (customType: string, data: unknown) => {
+      entries.push({ customType, data });
+    },
     events: {
       emit(channel: string, data: unknown): void {
         emits.push({ channel, data });
@@ -128,7 +137,7 @@ function createFakePi(): {
     on: noop,
     sendMessage: noop,
   } as unknown as ExtensionAPI;
-  return { pi, emits };
+  return { pi, emits, entries };
 }
 
 /** 最小 fake ExtensionContext。 */
@@ -153,10 +162,11 @@ function createFakeCtx(): ExtensionContext {
 }
 
 /** 挂载 index.ts 并跑一次 session_start（store loadAll 行为可配），返回观察面：
- *  pi（含 __workflowRun）/ eventBus emits / 已注册 tool 名清单。 */
+ *  pi（含 __workflowRun）/ eventBus emits / appendEntry entries / 已注册 tool 名清单。 */
 async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Promise<{
   pi: ExtensionAPI;
   emits: Array<{ channel: string; data: unknown }>;
+  entries: Array<{ customType: string; data: unknown }>;
   registeredToolNames: string[];
 }> {
   resetLifecycleSlots();
@@ -164,6 +174,7 @@ async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Prom
   injectLifecycleFakes();
 
   const emits: Array<{ channel: string; data: unknown }> = [];
+  const entries: Array<{ customType: string; data: unknown }> = [];
   const registeredToolNames: string[] = [];
   let sessionStartHandler: ((event: unknown, ctx: unknown) => Promise<void>) | undefined;
   const noop = (): void => {
@@ -180,7 +191,9 @@ async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Prom
         sessionStartHandler = handler as (event: unknown, ctx: unknown) => Promise<void>;
       }
     },
-    appendEntry: noop,
+    appendEntry: (customType: string, data: unknown) => {
+      entries.push({ customType, data });
+    },
     events: {
       emit(channel: string, data: unknown): void {
         emits.push({ channel, data });
@@ -194,7 +207,7 @@ async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Prom
   const handler = sessionStartHandler!;
   await handler({ type: "session_start" }, createFakeCtx());
 
-  return { pi, emits, registeredToolNames };
+  return { pi, emits, entries, registeredToolNames };
 }
 
 beforeEach(async () => {
@@ -208,12 +221,12 @@ beforeEach(async () => {
 // ── tests ──
 
 describe("session_start crash recovery（store.loadAll 路径）", () => {
-  it("loadAll 成功 + running run：transition done,failed + emit pending:unregister failed", async () => {
+  it("loadAll 成功 + running run：transition done,failed + pending:unregister appendEntry 直落（不经 emit）", async () => {
     // 用例内动态 import：setupSessionLifecycle 的守卫 Map 属模块级状态，随 beforeEach
-    // resetModules 取新鲜实例（见文件头注释）
+    // resetModules 取新鲜模块实例（见文件头注释）
     const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const runningRun = makeRun("wf-crash-1", "running");
-    const { pi, emits } = createFakePi();
+    const { pi, entries, emits } = createFakePi();
     const deps: SessionLifecycleDeps = {
       createServices: (() => ({
         service: {
@@ -243,10 +256,17 @@ describe("session_start crash recovery（store.loadAll 路径）", () => {
     expect(runningRun.state.reason).toBe("failed");
     expect(runningRun.state.error).toContain("Process killed");
 
-    // emit pending:unregister（reason=failed）
-    const unregister = emits.find((e) => e.channel === "pending:unregister");
+    // [W2/V4 D6] pending:unregister appendEntry 直落（reason=failed；status 经
+    // mapReasonToStatus 单点，data 形状与 finalizeRun 直落同构）
+    const unregister = entries.find((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
     expect(unregister).toBeDefined();
-    expect(unregister!.data).toEqual({ id: "wf-crash-1", reason: "failed" });
+    expect(unregister!.data).toEqual({
+      id: "wf-crash-1",
+      reason: "failed",
+      status: mapReasonToStatus("failed"),
+    });
+    // 零 emit：注销不再经事件通道（emit 链在 reload 转换窗失效，[reload-closeout D4]）
+    expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();
   });
 
   it("B1: 同进程第二个 session 的恢复不被跳过（/new 后 /resume 崩溃 session 场景）", async () => {
@@ -283,28 +303,34 @@ describe("session_start crash recovery（store.loadAll 路径）", () => {
     // 第二次 session_start（session-b，同进程 /resume 上次崩溃的 session）：其
     // running 残留必须被收编（不被首次调用旁路）
     const runningRun = makeRun("wf-crash-2", "running");
-    const { pi: pi2, emits } = createFakePi();
+    const { pi: pi2, entries: entries2 } = createFakePi();
     const second = await setupSessionLifecycle(pi2, createFakeCtx(), mkDeps([runningRun]));
     expect(second.storeHealthy).toBe(true);
     expect(runningRun.state.status).toBe("done");
     expect(runningRun.state.reason).toBe("failed");
-    const unregister = emits.find((e) => e.channel === "pending:unregister");
+    // [W2/V4 D6] 注销经 appendEntry 直落（不经 emit）
+    const unregister = entries2.find((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
     expect(unregister).toBeDefined();
-    expect(unregister!.data).toEqual({ id: "wf-crash-2", reason: "failed" });
+    expect(unregister!.data).toEqual({
+      id: "wf-crash-2",
+      reason: "failed",
+      status: mapReasonToStatus("failed"),
+    });
   });
 
   it("loadAll 成功 + 已终态 run：直接 set 到 runs Map，不 transition", async () => {
     const doneRun = makeRun("wf-done-1", "done", "completed");
     const originalCompletedAt = doneRun.meta.completedAt;
-    const { pi, emits } = await mountWithLoadAll(async () => [doneRun]);
+    const { pi, entries } = await mountWithLoadAll(async () => [doneRun]);
 
     // 状态不变（仍 done/completed），不重新 transition（completedAt 不变）
     expect(doneRun.state.status).toBe("done");
     expect(doneRun.state.reason).toBe("completed");
     expect(doneRun.meta.completedAt).toBe(originalCompletedAt);
 
-    // 终态 run 不触发 pending:unregister（恢复路径只处理 status==="running"）
-    const unregister = emits.filter((e) => e.channel === "pending:unregister");
+    // 终态 run 不触发 pending:unregister（恢复路径只处理 status==="running"；
+    // [W2/V4 D6] 注销面 = appendEntry 直落 entries，零断言走该通道）
+    const unregister = entries.filter((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
     expect(unregister).toHaveLength(0);
 
     // run 已被 set 到 runs Map —— pi.__workflowRun 在 storeHealthy=true 时
@@ -400,7 +426,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
       ];
 
       // fake pi：appendEntry 模拟 session JSONL append（捕获 + 落 entries——pi.appendEntry
-      // 的真实语义），events.emit 捕获 pending:unregister
+      // 的真实语义）。[W2/V4 D6] 恢复链注销走 appendEntry 直落，appended 是注销观察面。
       const appended: Array<{ t: string; d: unknown }> = [];
       const { pi: piBase, emits } = createFakePi();
       const appendEntry = vi.fn((t: string, d: unknown) => {
@@ -438,14 +464,17 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
       const run = first.runs.get(runId);
       expect(run?.state.status).toBe("done");
       expect(run?.state.reason).toBe("failed");
-      const unregister = emits.find((e) => e.channel === "pending:unregister");
+      // [W2/V4 D6] 注销经 appendEntry 直落（不经 emit）；零 emit 断言防事件通道回潮
+      const unregister = appended.find(({ t }) => t === PENDING_UNREGISTER_ENTRY_TYPE);
       expect(unregister).toBeDefined();
+      expect((unregister!.d as { reason?: string }).reason).toBe("failed");
+      expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();
 
-      // ① journal 尾部有收编 run-settled（failed）
+      // ① journal 尾部有收编 run-settled（[W2 D2/D3] 被动终局 = interrupted）
       const lines = fs.readFileSync(journalPath, "utf8").split("\n").filter((l) => l.trim());
       const lastFrame = JSON.parse(lines[lines.length - 1]!) as { type: string; outcome?: string };
       expect(lastFrame.type).toBe("run-settled");
-      expect(lastFrame.outcome).toBe("failed");
+      expect(lastFrame.outcome).toBe("interrupted");
 
       // ② 主 session 条目恰两条：注册（seed）+ 终态（收编补写）
       const wfEntries = entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE);
@@ -458,7 +487,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
         fs.readFileSync(path.join(fixtureDir, `${runId}.json`), "utf8"),
       ) as { id: string; outcome?: string };
       expect(manifest.id).toBe(runId);
-      expect(manifest.outcome).toBe("failed");
+      expect(manifest.outcome).toBe("interrupted");
 
       // ④ 双重启：journal 已终态 → loadAll 直读终局，零重复追加、零条目写
       appended.length = 0;

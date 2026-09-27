@@ -29,8 +29,12 @@ import { createWorkflowsView, type ViewActions } from "./views/WorkflowsView.ts"
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { LIST_LIMIT } from "./list-shared.ts";
 import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
+import { displayStatusOf } from "./tool-workflow.ts";
 
-/** status 显示顺序：running 优先（活跃态在前），再 startedAt 倒序。 */
+/** status 显示顺序：running 优先（活跃态在前），再 startedAt 倒序。
+ *  [W2/V1 D1 第 6 行] 权重表原样沿用，消费键 = displayStatusOf 投影二值
+ * （排序键不读 outcome 四值——v1 两态值与 v2 四值不进同一权重表，排序语义
+ * 不分裂；outcome 细分由 runSummary.reason 并列承载）。 */
 const STATUS_ORDER: Record<string, number> = {
   running: 0,
   done: 2,
@@ -84,7 +88,7 @@ export function registerWorkflowsCommand(
           return runs.map((r) => ({
             label: r.runId,
             value: r.runId,
-            description: `${r.spec.scriptName} [${r.state.status}]`,
+            description: `${r.spec.scriptName} [${displayStatusOf(r)}]`,
           }));
         } catch {
           // 拿不到运行时数据（getRuns 抛错）→ 静默降级，补全失败不影响 command
@@ -217,7 +221,7 @@ async function openFromList(
 
   // 多 run——select 选择
   const entries = all.map(
-    (r) => `${r.spec.scriptName} [${r.state.status}] (${r.runId.slice(0, ID_PREVIEW_LENGTH)})`,
+    (r) => `${r.spec.scriptName} [${displayStatusOf(r)}] (${r.runId.slice(0, ID_PREVIEW_LENGTH)})`,
   );
   const selected = await ctx.ui.select("Select workflow:", entries);
   if (!selected) return;
@@ -233,8 +237,8 @@ async function openFromList(
 function sortedRuns(runs: Map<string, WorkflowRun>): WorkflowRun[] {
   const arr = Array.from(runs.values());
   return arr.sort((a, b) => {
-    const sa = STATUS_ORDER[a.state.status] ?? UNKNOWN_STATUS_WEIGHT;
-    const sb = STATUS_ORDER[b.state.status] ?? UNKNOWN_STATUS_WEIGHT;
+    const sa = STATUS_ORDER[displayStatusOf(a)] ?? UNKNOWN_STATUS_WEIGHT;
+    const sb = STATUS_ORDER[displayStatusOf(b)] ?? UNKNOWN_STATUS_WEIGHT;
     if (sa !== sb) return sa - sb;
     const ta = a.meta.startedAt ? new Date(a.meta.startedAt).getTime() : 0;
     const tb = b.meta.startedAt ? new Date(b.meta.startedAt).getTime() : 0;

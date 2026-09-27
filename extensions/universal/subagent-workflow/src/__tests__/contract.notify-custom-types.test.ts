@@ -9,7 +9,10 @@
 //      本测试（有意识动作），不允许顺手改 SSOT 值静默漂移。
 //   2. 源码形态锁：生产写点不得本地重定义/裸写字面量（回潮 = 新的裸字面量漂移面）。
 //      生产侧写点 = 壳三处（workflow-notify 收口通知 / index messageRenderer 注册 /
-//      subagents 定向留痕）+ subagent-core notify-ledger（notifier 送达 + 放弃分诊）。
+//      subagents 定向留痕）。core 侧写点（notify-ledger 的 SSOT 别名 + 分诊零裸字面量）
+//      的形态锁在被测包内：packages/subagent-core
+//      src/execution/__tests__/notify-ledger.test.ts（原跨包裸路径读 core 源码的形态
+//      已迁回，避免壳测试穿越包边界）。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -24,18 +27,12 @@ import {
 } from "@zhushanwen/extension-protocol";
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-// 壳 src/ 上溯四级 = workspace root（src → subagent-workflow → universal → extensions → root）
-const REPO_ROOT = path.resolve(SRC_ROOT, "../../../..");
 
-/** 被锁的生产写点源文件（壳三处 + subagent-core notify 域）。 */
+/** 被锁的生产写点源文件（壳三处）。 */
 const PRODUCER_FILES = {
   workflowNotify: path.join(SRC_ROOT, "workflow-notify.ts"),
   index: path.join(SRC_ROOT, "index.ts"),
   subagents: path.join(SRC_ROOT, "interface/subagents.ts"),
-  notifyLedger: path.join(
-    REPO_ROOT,
-    "packages/subagent-core/src/execution/notify/notify-ledger.ts",
-  ),
 } as const;
 
 function readSource(file: string): string {
@@ -80,14 +77,6 @@ describe("notify customType 词表：生产写点单源形态（防裸字面量�
     // 裸字面量注册回潮即红（注释/文档提及不在本断言面——只锁注册调用形态）
     expect(source).not.toMatch(/registerMessageRenderer\(\s*["']/);
   });
-
-  it("subagent-core notify-ledger.ts：NOTIFY_CUSTOM_TYPE 为 SSOT 别名（非字面量赋值），workflow-result 分诊经常量比较", () => {
-    const source = readSource(PRODUCER_FILES.notifyLedger);
-    // NOTIFY_CUSTOM_TYPE 必须存在（兼容别名导出面），但不得字面量赋值
-    expect(source).toMatch(/export const NOTIFY_CUSTOM_TYPE\s*=\s*SUBAGENT_BG_NOTIFY_CUSTOM_TYPE/);
-    expect(source).not.toMatch(/NOTIFY_CUSTOM_TYPE\s*=\s*["']/);
-    // 放弃分诊的通道判型（item.deliveryCustomType 比较）不得裸写 customType 值字面量
-    // （typeof x === "string" 形态的类型守卫不在本断言面——词表判型点都带 item. 前缀）
-    expect(source).not.toMatch(/item\.deliveryCustomType\s*(?:===|!==)\s*["']/);
-  });
+  // 注：原 subagent-core notify-ledger.ts 形态锁（NOTIFY_CUSTOM_TYPE SSOT 别名 +
+  // 分诊零裸字面量）已迁 core 包内 src/execution/__tests__/notify-ledger.test.ts。
 });

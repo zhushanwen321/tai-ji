@@ -8,10 +8,25 @@
 //
 // 测试用 mock theme（bg 记录调用色 token），不依赖真实 Pi Theme。
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import { renderBgNotifyMessage } from "../interface/bg-notify-render.ts";
+
+const here = dirname(fileURLToPath(import.meta.url));
+/** 壳侧消费方源码（同构成败推导已收敛删除）。 */
+const CONSUMER_SOURCE = join(here, "..", "interface", "bg-notify-render.ts");
+
+/**
+ * 手写同构 switch 的源码特征 token：出现即说明有人把收敛删除的成败推导又写了回去。
+ * （"gc" 是 ClosedReason 专属字面量——outcome 三态不含它，消费方合法代码不会出现
+ * `?? "gc"` / `=== "gc"`；cancelled 比较不列入——outcome === "cancelled" 是合法消费。）
+ */
+const LEGACY_DERIVATION_TOKENS = [/\?\?\s*["']gc["']/, /===\s*["']gc["']/] as const;
 
 /**
  * 构造 mock theme：bg 记录被调用的色 token，fg/bold 透传文本。
@@ -302,6 +317,30 @@ describe("renderBgNotifyMessage", () => {
     for (let i = 1; i < lines.length - 1; i++) {
       expect(lines[i]).toContain("│");
     }
+  });
+});
+
+// ── 同构 switch 残留守卫（收敛删除后不得写回）——迁自 derive-closed-display-parity-interface.test.ts ──
+//
+// 同构成败推导收敛到 core execution-record.ts 的 deriveOutcome/projectOutcome（单一权威），
+// 本守卫锚定壳侧消费方源码不得写回手写同构 switch。（原文件的 fail-loud 前置条
+// 「消费方源码可读」属 D 裁决删除项：readFileSync 失败时下方守卫自身即红，前置条冗余。）
+describe("同构 switch 残留守卫（收敛删除后不得写回）— 壳侧消费方", () => {
+  it("bg-notify-render renderRecordLines 无 closedReason 成败推导特征", () => {
+    const src = readFileSync(CONSUMER_SOURCE, "utf-8");
+    for (const token of LEGACY_DERIVATION_TOKENS) {
+      expect(
+        token.test(src),
+        `[render] 检出旧同构推导特征 /${token.source}/——成败判定应只读 outcome 或调用 ` +
+          `execution-record.ts 的 deriveOutcome/projectOutcome（单一权威），禁止手写 switch 写回。` +
+          `若确属新增合法用法，请同步更新本护栏的特征提取。`,
+      ).toBe(false);
+    }
+    // 消费方必须经由单一权威实现
+    expect(
+      src.includes("deriveOutcome"),
+      "[render] 未引用 deriveOutcome——outcome 兜底派生必须复用单一权威函数。",
+    ).toBe(true);
   });
 });
 

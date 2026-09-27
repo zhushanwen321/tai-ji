@@ -11,6 +11,7 @@ import {
   getEventLog,
   getFullText,
   getTotalUsage,
+  isLegacyClosedSettled,
   markReconstructedStatus,
   resurrectClosed,
   deriveOutcome,
@@ -818,6 +819,39 @@ describe("completeRecord", () => {
     expect(r.patchFile).toBe("/tmp/patches/sa-x.patch");
     expect(r.result).toBe("done");
     expect(r.outcome).toBe("completed");
+  });
+});
+
+// ============================================================
+// isLegacyClosedSettled（[W2/V3 D5] 桥接判据单一谓词——历史 9 处手抄的权威实现）
+// ============================================================
+describe("isLegacyClosedSettled（桥接判据单一谓词）", () => {
+  it("命中：idle ∧ closedReason 有值（旧 closed 终态遗留——D7 例外族/监督器放弃/v1 数据）", () => {
+    const r = makeRecord({ closedReason: "gc" });
+    r.status = "idle";
+    expect(isLegacyClosedSettled(r)).toBe(true);
+    expect(isLegacyClosedSettled({ status: "idle", closedReason: "cancelled" })).toBe(true);
+  });
+
+  it("不命中：running（活跃）/ 轮间 idle 无 closedReason（markSettled 新侧语义——非终态）", () => {
+    expect(isLegacyClosedSettled(makeRecord())).toBe(false);
+    const roundIdle = makeRecord();
+    roundIdle.status = "idle";
+    roundIdle.closedReason = undefined;
+    expect(isLegacyClosedSettled(roundIdle)).toBe(false);
+  });
+
+  it("结构子集入参：SubagentRecord（磁盘投影）与 entry 快照形态同式判定（9 处读点统一消费）", () => {
+    const disk = { status: "idle" as const, closedReason: "user-close" as const };
+    expect(isLegacyClosedSettled(disk)).toBe(true);
+    expect(isLegacyClosedSettled({ status: "running" as const, closedReason: undefined })).toBe(false);
+  });
+
+  it("与 projectOutcome 联动：谓词不命中 → outcome 不投影（undefined）", () => {
+    const roundIdle = makeRecord();
+    roundIdle.status = "idle";
+    roundIdle.closedReason = undefined;
+    expect(projectOutcome(roundIdle)).toBeUndefined();
   });
 });
 

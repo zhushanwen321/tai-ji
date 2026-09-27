@@ -1,4 +1,6 @@
 // src/orchestration/run-snapshot.ts
+// [W2 剥离留档 | dwfq-f81a7c55-2] D2 词表删 ask-executing 的编译连带，属 V1 领地，主 agent 恢复补提交。
+
 //
 // WorkflowRun 快照 codec（下沉收口 D4——设计件 subagent-core-sink-design.md（已删，git 可追溯） U8）。
 //
@@ -211,10 +213,8 @@ export function toRunSnapshot(run: WorkflowRun): RunSnapshot {
  * 每次 flush 重 fold（幂等：输出只由 (snap, events) 决定），不增量缓存。
  *
  * fold 规则（词表 = run-events.ts D5 七事件）：
- * - `ask-dispatched` / `ask-executing`：按 taskIndex 关联 calls[] 条目（id 同源
- *   D-10），startedAt ??= ts（首边沿即起点——executing 兜底覆盖 journal 缺
- *   dispatched 帧的历史分段；预留消费面——ask-executing 现无生产写入方，见
- *   AskExecutingEvent 注释）；lastProgressAt = ts；ask-dispatched 另恢复
+ * - `ask-dispatched`：按 taskIndex 关联 calls[] 条目（id 同源 D-10），
+ *   startedAt ??= ts（首边沿即起点）；lastProgressAt = ts；另恢复
  *   calls[].phase（W1 D6 分组供源，事件无 phase 帧保持 undefined）；
  * - `ask-retrying` / `ask-settled`：仅推进 lastProgressAt（重试轨迹的进度语义）；
  * - `run-created` / `armed`：仅推进 run 级 health.lastProgressAt；
@@ -274,9 +274,6 @@ export function projectRunEvents(snap: RunSnapshot, events: readonly WorkflowRun
         }
         break;
       }
-      case "ask-executing":
-        advanceCallProgress(callsById, event.taskIndex, event.ts, true);
-        break;
       case "ask-retrying":
       case "ask-settled":
         advanceCallProgress(callsById, event.taskIndex, event.ts, false);

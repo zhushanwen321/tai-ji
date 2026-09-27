@@ -89,13 +89,35 @@ const DELIVERY_MESSAGE = {
 
 // ── notifyDone ─────────────────────────────────────────────────────
 
+
+/** [W2/V1] 终局记录构造（notifyDone 载荷源换帧直取后的测试通道——reason 词表 →
+ *  (outcome, errorCode) 按 D5 映射反构）。 */
+function settlementFor(reason: string | undefined): import("../jsonl-run-store.ts").RunSettlementRecord {
+  switch (reason) {
+    case "completed":
+      return { outcome: "completed", settledAt: 0 };
+    case "aborted":
+      return { outcome: "cancelled", settledAt: 0 };
+    case "failed":
+      return { outcome: "failed", errorCode: "unknown", settledAt: 0 };
+    case "budget_limited":
+      return { outcome: "failed", errorCode: "budget_limited", settledAt: 0 };
+    case "time_limited":
+      return { outcome: "failed", errorCode: "time_limited", settledAt: 0 };
+    case undefined:
+      return { outcome: "completed", settledAt: 0 };
+    default:
+      return { outcome: "failed", errorCode: "unknown", settledAt: 0 };
+  }
+}
+
 describe("notifyDone stale ctx 守卫（guardStaleCtx 接入）", () => {
   it("stale 错误静默降级：不外抛（session 替换窗口不再崩 pi）", () => {
     const { pi, sendMessage } = makePi(() => {
       throw new Error(PI_STALE_ERROR);
     });
 
-    expect(() => notifyDone(pi, "run-stale", makeRun() as never, new Set())).not.toThrow();
+    expect(() => notifyDone(pi, "run-stale", makeRun() as never, new Set(), undefined, undefined, { outcome: "completed", settledAt: 0 })).not.toThrow();
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
@@ -105,13 +127,13 @@ describe("notifyDone stale ctx 守卫（guardStaleCtx 接入）", () => {
       throw boom;
     });
 
-    expect(() => notifyDone(pi, "run-boom", makeRun() as never, new Set())).toThrow(boom);
+    expect(() => notifyDone(pi, "run-boom", makeRun() as never, new Set(), undefined, undefined, { outcome: "completed", settledAt: 0 })).toThrow(boom);
   });
 
   it("正常路径零变化：workflow-result 消息与单通道 triggerTurn 参数原样透传（[u9] 账本化后直发仅存于 ledger 未 bind 的降级形态——deliverAs 已删，本文件无绑定环境）", () => {
     const { pi, sendMessage } = makePi();
 
-    notifyDone(pi, "run-ok", makeRun() as never, new Set());
+    notifyDone(pi, "run-ok", makeRun() as never, new Set(), undefined, undefined, { outcome: "completed", settledAt: 0 });
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [msg, opts] = sendMessage.mock.calls[0] as [

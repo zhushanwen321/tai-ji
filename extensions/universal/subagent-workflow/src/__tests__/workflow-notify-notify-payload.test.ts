@@ -93,13 +93,35 @@ beforeEach(() => {
 
 // ── 三态载荷 ─────────────────────────────────────────────────
 
+
+/** [W2/V1] 终局记录构造（notifyDone 载荷源换帧直取后的测试通道——reason 词表 →
+ *  (outcome, errorCode) 按 D5 映射反构）。 */
+function settlementFor(reason: string | undefined): import("../jsonl-run-store.ts").RunSettlementRecord {
+  switch (reason) {
+    case "completed":
+      return { outcome: "completed", settledAt: 0 };
+    case "aborted":
+      return { outcome: "cancelled", settledAt: 0 };
+    case "failed":
+      return { outcome: "failed", errorCode: "unknown", settledAt: 0 };
+    case "budget_limited":
+      return { outcome: "failed", errorCode: "budget_limited", settledAt: 0 };
+    case "time_limited":
+      return { outcome: "failed", errorCode: "time_limited", settledAt: 0 };
+    case undefined:
+      return { outcome: "completed", settledAt: 0 };
+    default:
+      return { outcome: "failed", errorCode: "unknown", settledAt: 0 };
+  }
+}
+
 describe("notifyDone 终局载荷（D7）", () => {
   it("成功：outcome=completed + resultSummary + 产物目录与 journal 指针，恰好一条", () => {
     const harness = makeLedgerHarness();
     bindNotifyLedgerHost(harness.host);
     const run = makeRun({ reason: "completed", scriptResult: { ok: true, files: 3 } });
 
-    notifyDone(makePi(), "wf-payload-ok", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR);
+    notifyDone(makePi(), "wf-payload-ok", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     expect(harness.deliveries).toHaveLength(1);
     const delivery = harness.deliveries[0]!;
@@ -122,7 +144,7 @@ describe("notifyDone 终局载荷（D7）", () => {
     bindNotifyLedgerHost(harness.host);
     const run = makeRun({ reason: "failed", failedCall: { error: "engine crashed", failureKind: "unknown" } });
 
-    notifyDone(makePi(), "wf-payload-fail", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR);
+    notifyDone(makePi(), "wf-payload-fail", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     expect(harness.deliveries).toHaveLength(1);
     const details = harness.deliveries[0]!.details as Record<string, unknown>;
@@ -137,7 +159,7 @@ describe("notifyDone 终局载荷（D7）", () => {
     bindNotifyLedgerHost(harness.host);
     const run = makeRun({ reason: "aborted" });
 
-    notifyDone(makePi(), "wf-payload-cancel", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR);
+    notifyDone(makePi(), "wf-payload-cancel", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     expect(harness.deliveries).toHaveLength(1);
     const details = harness.deliveries[0]!.details as Record<string, unknown>;
@@ -151,7 +173,7 @@ describe("notifyDone 终局载荷（D7）", () => {
     bindNotifyLedgerHost(harness.host);
     const run = makeRun({ reason: "completed" });
 
-    notifyDone(makePi(), "wf-payload-bare", runAsParam(run), new Set(), undefined);
+    notifyDone(makePi(), "wf-payload-bare", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     expect(harness.deliveries).toHaveLength(1);
     const details = harness.deliveries[0]!.details as Record<string, unknown>;
@@ -169,7 +191,7 @@ describe("notifyDone 终局载荷（D7）", () => {
     const big = "x".repeat(2000);
     const run = makeRun({ reason: "completed", scriptResult: big });
 
-    notifyDone(makePi(), "wf-payload-big", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR);
+    notifyDone(makePi(), "wf-payload-big", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const summary = (harness.deliveries[0]!.details as Record<string, unknown>)["resultSummary"] as string;
     expect(summary.length).toBeLessThanOrEqual(600); // 500 + 截断标记余量

@@ -59,13 +59,16 @@ import { mergeWorkflowStepRecords } from './workflow-step-merge.js'
  * run 事件 type 词表的运行时镜像（barrel 未导出 RUN_EVENT_TYPES 常量数组）。
  * Record 键型 = WorkflowRunEvent['type'] 的全联合——core 词表增删成员时本处的
  * 记录字面量缺键/多键即编译红（编译期穷尽守卫，替代运行时漂移）。
+ * [W2 D2] core 死形态清退后 7 键：ask-executing 删除（无生产写入方——其历史
+ * journal 行经本镜像的词表外判定返回 undefined，由 tailer 跳过计日志）；member-pool
+ * 补键（U4 additive 扩容的镜像补齐）。
  */
 const RUN_EVENT_TYPE_PROBE: Record<WorkflowRunEvent['type'], true> = {
   'run-created': true,
   'ask-dispatched': true,
-  'ask-executing': true,
   'ask-retrying': true,
   'ask-settled': true,
+  'member-pool': true,
   armed: true,
   'run-settled': true,
 }
@@ -155,20 +158,6 @@ export function foldRunJournalEvents(
             agentName: event.agentName,
             // 剧本归属随帧落投影（W1 D6）；无 phase 帧不造键（旧 journal 行兼容）
             ...(event.phase !== undefined ? { phase: event.phase } : {}),
-            startedAt: event.ts,
-            lastProgressAt: event.ts,
-          })
-        } else {
-          existing.lastProgressAt = Math.max(existing.lastProgressAt, event.ts)
-        }
-        break
-      }
-      case 'ask-executing': {
-        const existing = fold.asks.get(event.taskIndex)
-        if (existing === undefined) {
-          fold.asks.set(event.taskIndex, {
-            taskIndex: event.taskIndex,
-            agentName: event.agentName,
             startedAt: event.ts,
             lastProgressAt: event.ts,
           })

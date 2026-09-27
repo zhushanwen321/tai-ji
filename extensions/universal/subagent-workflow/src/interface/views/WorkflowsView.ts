@@ -48,6 +48,9 @@ import {
   statusDotStr,
   type ThemeLike,
 } from "../format.ts";
+// [W2/V1 D1 分流表第 9 行] CLI 视图显示换源：投影二值 status（混合判源收拢在
+// displayStatusOf 单点——core runSummary 注册表 ∨ 聚合 v1 读面）。
+import { displayStatusOf } from "../tool-workflow.ts";
 import {
   b,
   dashes,
@@ -230,7 +233,7 @@ export function computeRenderSignature(
     const l = liveProgress.get(n.stepIndex);
     return `${n.stepIndex}:${n.status}:${n.sessionFile ?? "-"}:${l?.totalTokens ?? -1}:${l?.toolCallCount ?? -1}:${l?.elapsedSeconds ?? -1}:${l?.turns ?? -1}:${l?.eventLog.length ?? -1}:${l?.currentActivity ? `${l.currentActivity.type}:${l.currentActivity.label}` : "-"}:${l?.lastError ?? "-"}`;
   });
-  return [run.state.status, Math.floor(now / SECOND_MS), `${completed}/${traceArr.length}`, budgetPart, errorLogsPart, ...nodeParts].join("|");
+  return [displayStatusOf(run), Math.floor(now / SECOND_MS), `${completed}/${traceArr.length}`, budgetPart, errorLogsPart, ...nodeParts].join("|");
 }
 
 // ── View state ────────────────────────────────────────────────
@@ -496,7 +499,7 @@ export function createWorkflowsView(
     function handleShortcutKeys(data: string): void {
  // ── Lifecycle shortcuts (no restart per D-9; no pause/resume — one-shot) ──
       if (data === "a") {
-        if (run.state.status === "running") {
+        if (displayStatusOf(run) === "running") {
           void actions.abort(run.runId)
             .then(() => { cache.key = undefined; requestRender(); })
             .catch((err: Error) => ctx.ui.notify(`Abort failed: ${err.message}`, "error"));
@@ -703,7 +706,7 @@ function renderHeader(
   const completed = traceArr.filter((n) => n.status === "completed").length;
   const total = traceArr.length;
   const elapsed = formatElapsed(run.meta.startedAt);
-  const headerRight = `${formatStatusBadge(run.state.status, theme)} · ${completed}/${total} agents · ${elapsed}`;
+  const headerRight = `${formatStatusBadge(displayStatusOf(run), theme)} · ${completed}/${total} agents · ${elapsed}`;
   const budget = run.state.budget;
   const budgetStr = `${Math.round(budget.usedTokens / BUDGET_TOKENS_DIVISOR)}k/${budget.maxTokens ? `${Math.round(budget.maxTokens / BUDGET_TOKENS_DIVISOR)}k` : "∞"} tok · $${budget.usedCost.toFixed(BUDGET_COST_DECIMALS)}`;
 
@@ -746,7 +749,7 @@ function renderFooter(
       ? "↑↓ agent · ⏎ detail"
       : "↑↓ agent · ⏎ prompt · PgUp/PgDn scroll";
   const actionParts: string[] = [];
-  if (run.state.status === "running") {
+  if (displayStatusOf(run) === "running") {
     actionParts.push("a abort");
   }
   actionParts.push("s save");
@@ -1055,7 +1058,7 @@ function saveTraceToFile(run: WorkflowRun, ctx: ExtensionContext): void {
 function traceHeaderLines(run: WorkflowRun): string[] {
   const lines: string[] = [];
   lines.push(`# Workflow Trace: ${run.spec.scriptName} (${run.runId})`, "");
-  lines.push(`Status: ${run.state.status} | Started: ${run.meta.startedAt ?? "-"} | Duration: ${formatElapsed(run.meta.startedAt)}`);
+  lines.push(`Status: ${displayStatusOf(run)} | Started: ${run.meta.startedAt ?? "-"} | Duration: ${formatElapsed(run.meta.startedAt)}`);
   const budget = run.state.budget;
   lines.push(`Budget: ${budget.usedTokens}/${budget.maxTokens ?? "unlimited"} tokens, $${budget.usedCost.toFixed(BUDGET_COST_DECIMALS)}`, "");
   return lines;

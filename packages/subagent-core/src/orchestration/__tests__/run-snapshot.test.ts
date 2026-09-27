@@ -1,4 +1,6 @@
 // run-snapshot.test.ts —— WorkflowRun 快照 codec 单源（下沉收口 D4/U8）。
+// [W2 剥离留档 | dwfq-f81a7c55-2] D2 词表删 ask-executing 的编译连带，属 V1 领地，主 agent 恢复补提交。
+
 //
 // 四视角：
 // ①使用者——toRunSnapshot/fromRunSnapshot 往返等值（含 pi 壳 jsonl-run-store
@@ -405,10 +407,9 @@ describe("run-snapshot — [P3/D6] SNAPSHOT_VERSION additive 策略", () => {
 });
 
 describe("run-snapshot — [P3/D6] projectRunEvents fold（单一推导点）", () => {
-  it("ask 全链 dispatched→executing→retrying→settled：startedAt 取首边沿、lastProgressAt 逐边沿推进", () => {
+  it("ask 全链 dispatched→retrying→settled：startedAt 取首边沿、lastProgressAt 逐边沿推进", () => {
     const snap = projectRunEvents(makeSnapshotWithCalls(), [
       ev({ type: "ask-dispatched", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 1000 }),
-      ev({ type: "ask-executing", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 1200 }),
       ev({ type: "ask-retrying", taskIndex: 0, attempt: 1, backoffMs: 1000, reason: "boom", ts: 2000 }),
       ev({ type: "ask-settled", taskIndex: 0, attempt: 2, outcome: "completed", durationMs: 900, ts: 3000 }),
     ]);
@@ -421,14 +422,6 @@ describe("run-snapshot — [P3/D6] projectRunEvents fold（单一推导点）", 
     expect(call1.lastProgressAt).toBeUndefined();
     // run 级 health 随 ask 边沿推进
     expect(snap.state.health?.lastProgressAt).toBe(3000);
-  });
-
-  it("executing 兜底：journal 缺 dispatched 帧时 startedAt 从 executing 首帧取", () => {
-    const snap = projectRunEvents(makeSnapshotWithCalls(), [
-      ev({ type: "ask-executing", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 700 }),
-    ]);
-    const call0 = snap.state.calls.find((c) => c.id === 0)!;
-    expect(call0.startedAt).toBe(700);
   });
 
   it("ask-dispatched 恢复 calls[].phase（W1 D6 分组供源）；无 phase 帧保持 undefined（旧 journal 行兼容）", () => {
@@ -481,7 +474,7 @@ describe("run-snapshot — [P3/D6] projectRunEvents fold（单一推导点）", 
   it("ts 回拨防御：lastProgressAt 取 max（乱序帧不回拨进度时钟）", () => {
     const snap = projectRunEvents(makeSnapshotWithCalls(), [
       ev({ type: "ask-dispatched", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 3000 }),
-      ev({ type: "ask-executing", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 1000 }),
+      ev({ type: "ask-retrying", taskIndex: 0, attempt: 1, backoffMs: 1000, reason: "boom", ts: 1000 }),
     ]);
     const call0 = snap.state.calls.find((c) => c.id === 0)!;
     expect(call0.lastProgressAt).toBe(3000);

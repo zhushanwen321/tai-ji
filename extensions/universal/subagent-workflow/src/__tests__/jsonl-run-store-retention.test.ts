@@ -47,6 +47,7 @@ import { WorkflowRun } from "@zhushanwen/subagent-core";
 // STATE_TTL_MS_ENV 仅测试消费符号，深路径直取（[W1 / D5] 保留窗口 env 通道单源
 // core file-run-store；数量截断通道已整体退役，本件不再消费其任何符号）
 import { STATE_TTL_MS_ENV } from "@zhushanwen/subagent-core/orchestration/file-run-store.ts";
+import { setRunEventJournalDirForTest } from "@zhushanwen/subagent-core/orchestration/worker-message-pump.ts";
 import { JsonlRunStore } from "../jsonl-run-store.ts";
 
 function makeSpec(): RunSpec {
@@ -166,6 +167,8 @@ describe("workflow-state 保留清理（[W1 / D5] fold 终态 + 保留窗口，c
     process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
     const store = new JsonlRunStore({ sessionDir: tmpDir });
     seedActiveRun(stateDir, runIdAt(0), 40); // 静默 40 天（> 7 天放弃窗，触发收编）
+    // [W2/V1] 收编链（scan/帧落账/manifest）走模块 journal 单写者域——注入本目录
+    setRunEventJournalDirForTest(stateDir);
 
     await store.save(makeRunningRun(runIdAt(1)));
 
@@ -176,6 +179,7 @@ describe("workflow-state 保留清理（[W1 / D5] fold 终态 + 保留窗口，c
     expect(warns).toContain("interrupted run adopted");
     expect(warns).not.toContain("failed to delete");
     await store.dispose();
+    setRunEventJournalDirForTest(undefined);
   });
 
   it("废 cap 回归：51 个窗内终态 run（数量超旧上限 50）全部保留，无截断", async () => {

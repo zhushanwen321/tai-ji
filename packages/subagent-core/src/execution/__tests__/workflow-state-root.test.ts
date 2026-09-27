@@ -12,10 +12,12 @@
 //
 // 本套件用 mkdtemp 真实目录布局（非 mock fs）证明四件事：
 //   ① resolvePiWorkflowStateDir 探测语义两分支（sessionScopedDir 存在/不存在）；
-//   ② FileRunStore({stateDir}) findStateByIdSync 在真实布局命中 running/终态/missing；
+//   ② FileRunStore({stateDir}) findSettlementEvidenceSync（[W2/V1 D6] 判据源改接
+//      journal/manifest 终态证据）在真实布局命中 running/终态/missing；
 //   ③ sweep 装配链（runPendingReconcileSweepForService，env 指向 tmp agentDir）端到端：
 //      running run 不补注销（修复前被误注销的事故方向）、终态 run 补注销；
-//   ④ idle-gc 同布局：30 天 running run 文件被终态化写回（findStateByIdSync 变 done）。
+//   ④ idle-gc 同布局：超龄 running run 经收编原语终局化（journal run-settled 帧 +
+//      manifest 落盘——[W2/V1 D3] transition+save 写点退役）。
 //
 // 写删目标全部 mkdtempSync 自建自删（禁触真实数据目录纪律）。
 
@@ -27,6 +29,8 @@ import { setTimeout as sleepReal } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FileRunStore } from "../../orchestration/file-run-store.ts";
+import { createRunEventJournal } from "../../orchestration/run-events.ts";
+import { setRunEventJournalDirForTest } from "../../orchestration/worker-message-pump.ts";
 import { Budget } from "../../orchestration/models/budget.ts";
 import { Trace } from "../../orchestration/models/trace.ts";
 import { WorkflowRun } from "../../orchestration/models/workflow-run.ts";
@@ -148,18 +152,26 @@ describe("resolvePiWorkflowStateDir 探测语义（resolvePiSessionScopedDir 后
   });
 });
 
-describe("FileRunStore({stateDir}) × 真实 JsonlRunStore 布局（findStateByIdSync 读侧判据）", () => {
-  it("真实布局命中：running → {kind:running}；done → {kind:terminal, reason}；无文件 → {kind:missing}", async () => {
+describe("FileRunStore({stateDir}) × 真实 JsonlRunStore 布局（findSettlementEvidenceSync 读侧判据——[W2/V1 D6] 改接）", () => {
+  it("真实布局命中：journal 运行中帧 → running；run-settled 帧 → terminal+派生 reason；无文件 → missing", async () => {
     const stateDir = path.join(tmpDir, "sessions", slugOf("/x/y"), "workflow-state");
     const store = new FileRunStore({ stateDir });
-    await store.save(makeRun("wf-live")); // running（首写不节流）
-    await store.save(makeRun("wf-done", { status: "done" }));
+    setRunEventJournalDirForTest(stateDir);
+    try {
+      const journal = createRunEventJournal(stateDir);
+      await journal.append("wf-live", { type: "run-created", runId: "wf-live", workflowName: "test-script", argsSummary: "{}", ts: Date.now() });
+      await journal.append("wf-live", { type: "ask-dispatched", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
+      await journal.append("wf-done", { type: "run-created", runId: "wf-done", workflowName: "test-script", argsSummary: "{}", ts: Date.now() });
+      await journal.append("wf-done", { type: "run-settled", outcome: "completed", artifactsDir: stateDir, ts: Date.now() });
 
-    expect(store.findStateByIdSync("wf-live")).toEqual({ kind: "running" });
-    expect(store.findStateByIdSync("wf-done")).toEqual({ kind: "terminal", reason: "completed" });
-    expect(store.findStateByIdSync("wf-never")).toEqual({ kind: "missing" });
-    // 落盘路径形状与 pi 壳 JsonlRunStore 同构：<sessionDir>/workflow-state/<runId>.jsonl
-    expect(fs.existsSync(path.join(stateDir, "wf-live.jsonl"))).toBe(true);
+      expect(store.findSettlementEvidenceSync("wf-live")).toEqual({ kind: "running" });
+      expect(store.findSettlementEvidenceSync("wf-done")).toEqual({ kind: "terminal", reason: "completed" });
+      expect(store.findSettlementEvidenceSync("wf-never")).toEqual({ kind: "missing" });
+      // journal 落盘路径形状与 pi 壳 JsonlRunStore 同构：<sessionDir>/workflow-state/<runId>.events.jsonl
+      expect(fs.existsSync(path.join(stateDir, "wf-live.events.jsonl"))).toBe(true);
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+    }
   });
 });
 
@@ -169,11 +181,24 @@ describe("sweep 装配链端到端（runPendingReconcileSweepForService × 真�
    * env + process.cwd()），run state 由 FileRunStore({stateDir}) 写入解析出的目录——
    * 证明「生产装配点读的目录 = run state 真实落盘目录」（同源布局闭环）。
    */
-  function setupSweep(): { agentDir: string; store: FileRunStore } {
+  function setupSweep(): { agentDir: string; stateDir: string } {
     const agentDir = path.join(tmpDir, "agent");
     vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-    const store = new FileRunStore({ stateDir: resolvePiWorkflowStateDir() }); // 与生产装配同参
-    return { agentDir, store };
+    const stateDir = resolvePiWorkflowStateDir(); // 与生产装配同参
+    // [W2/V1 D6] sweep 判据源 = journal/manifest 终态证据——收编/帧落账与判据同源注入。
+    setRunEventJournalDirForTest(stateDir);
+    return { agentDir, stateDir };
+  }
+
+  async function seedJournalIn(dir: string, runId: string, settled?: { outcome: "completed" | "failed" | "cancelled" | "interrupted" }): Promise<void> {
+    const journal = createRunEventJournal(dir);
+    await journal.append(runId, { type: "run-created", runId, workflowName: "test-script", argsSummary: "{}", ts: Date.now() });
+    if (settled !== undefined) {
+      await journal.append(runId, { type: "ask-dispatched", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
+      await journal.append(runId, { type: "run-settled", outcome: settled.outcome, artifactsDir: dir, ts: Date.now() });
+    } else {
+      await journal.append(runId, { type: "ask-dispatched", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
+    }
   }
 
   function makeBinding(sessionFile: string, appended: Array<{ customType: string; data: unknown }>): RoundSupervisorBinding {
@@ -199,25 +224,33 @@ describe("sweep 装配链端到端（runPendingReconcileSweepForService × 真�
     );
   }
 
-  it("活跃 workflow run（running state 文件在盘）→ sweep 不补注销（修复前被误注销）", async () => {
-    const { agentDir, store } = setupSweep();
-    await store.save(makeRun("wf-live"));
+  it("活跃 workflow run（journal 运行中帧在盘）→ sweep 不补注销（修复前被误注销）", async () => {
+    const { agentDir, stateDir } = setupSweep();
+    await seedJournalIn(stateDir, "wf-live");
 
     const sessionFile = path.join(agentDir, "main-session.jsonl");
     writeRegister(sessionFile, "wf-live");
     const appended: Array<{ customType: string; data: unknown }> = [];
-    runPendingReconcileSweepForService(makeBinding(sessionFile, appended), false);
+    try {
+      runPendingReconcileSweepForService(makeBinding(sessionFile, appended), false);
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+    }
     expect(appended).toHaveLength(0); // 活跃 run 不注销——事故方向的回归钉
   });
 
-  it("终态 workflow run（done state 文件在盘）→ sweep 补注销（reason 取 run reason）", async () => {
-    const { agentDir, store } = setupSweep();
-    await store.save(makeRun("wf-done", { status: "done" }));
+  it("终态 workflow run（journal run-settled 帧在盘）→ sweep 补注销（reason 经联合派生）", async () => {
+    const { agentDir, stateDir } = setupSweep();
+    await seedJournalIn(stateDir, "wf-done", { outcome: "completed" });
 
     const sessionFile = path.join(agentDir, "main-session.jsonl");
     writeRegister(sessionFile, "wf-done");
     const appended: Array<{ customType: string; data: unknown }> = [];
-    runPendingReconcileSweepForService(makeBinding(sessionFile, appended), false);
+    try {
+      runPendingReconcileSweepForService(makeBinding(sessionFile, appended), false);
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+    }
     expect(appended).toEqual([
       { customType: "pending:unregister", data: { id: "wf-done", reason: "completed", status: "completed" } },
     ]);
@@ -254,7 +287,7 @@ describe("idle-gc 同布局（WorkflowRun GC 读对根）", () => {
   }
 
   it(
-    "真实布局 30 天 running run → GC 终态化写回（findStateByIdSync 变 terminal/time_limited）",
+    "真实布局超龄 running run → GC 经收编原语终局化（journal run-settled 帧 + manifest；[W2/V1 D3]）",
     { timeout: 30_000 }, // pollUntilPersisted 预算 10s 的用例级余量（先例 git-head-watcher 同款）
     async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
@@ -264,20 +297,32 @@ describe("idle-gc 同布局（WorkflowRun GC 读对根）", () => {
       fs.mkdirSync(sessionScopedDir, { recursive: true });
       const stateDir = resolvePiWorkflowStateDir({ agentDir, cwd });
       const runStore = new FileRunStore({ stateDir });
+      // 超龄锚 = 快照 meta.startedAt（loadAll 面）；终局证据面 = journal（可收编形态）
       await runStore.save(
         makeRun("wf-stale", { startedAt: new Date(Date.now() - 31 * DAY_MS).toISOString() }),
       );
-      expect(runStore.findStateByIdSync("wf-stale")).toEqual({ kind: "running" });
+      setRunEventJournalDirForTest(stateDir);
+      try {
+        const journal = createRunEventJournal(stateDir);
+        await journal.append("wf-stale", { type: "run-created", runId: "wf-stale", workflowName: "test-script", argsSummary: "{}", ts: Date.now() });
+        await journal.append("wf-stale", { type: "ask-dispatched", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
 
-      stopGc = startIdleGc(new RecordStore(path.join(tmpDir, "records")), runStore);
-      await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
-      await flushRealIo();
-      // 满并行下固定排空窗口可能早于 fs save 落盘（GC 已触发，libuv IO 回调被 CPU 饱和推迟）——
-      // 轮询等待落盘翻转；预算耗尽静默返回，落到下方原断言失败（断言语义不放松）。
-      await pollUntilPersisted(() => runStore.findStateByIdSync("wf-stale").kind === "terminal");
+        stopGc = startIdleGc(new RecordStore(path.join(tmpDir, "records")), runStore);
+        await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
+        await flushRealIo();
+        // 满并行下固定排空窗口可能早于 manifest（writeAtomicFile 真实 IO）落盘——
+        // 轮询等待落盘翻转；预算耗尽静默返回，落到下方原断言失败（断言语义不放松）。
+        await pollUntilPersisted(() => fs.existsSync(path.join(stateDir, "wf-stale.json")));
 
-      // 终态已落盘（同目录 append 终态快照行）——GC 读侧与落盘侧同根闭环
-      expect(runStore.findStateByIdSync("wf-stale")).toEqual({ kind: "terminal", reason: "time_limited" });
+        // 终局已落盘（journal run-settled 帧 + manifest 两件直落，[W2 三路径 outcome 断言]）
+        const events = await createRunEventJournal(stateDir).scan("wf-stale");
+        const settled = events.find((e) => e.type === "run-settled");
+        expect(settled).toMatchObject({ outcome: "interrupted", errorCode: "idle-evicted" });
+        const manifest = JSON.parse(fs.readFileSync(path.join(stateDir, "wf-stale.json"), "utf8")) as { outcome?: string };
+        expect(manifest.outcome).toBe("interrupted");
+      } finally {
+        setRunEventJournalDirForTest(undefined);
+      }
     },
   );
 
@@ -289,11 +334,21 @@ describe("idle-gc 同布局（WorkflowRun GC 读对根）", () => {
     await runStore.save(
       makeRun("wf-fresh", { startedAt: new Date(Date.now() - 1 * DAY_MS).toISOString() }),
     );
+    setRunEventJournalDirForTest(stateDir);
+    try {
+      const journal = createRunEventJournal(stateDir);
+      await journal.append("wf-fresh", { type: "run-created", runId: "wf-fresh", workflowName: "test-script", argsSummary: "{}", ts: Date.now() });
+      await journal.append("wf-fresh", { type: "ask-dispatched", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
 
-    stopGc = startIdleGc(new RecordStore(path.join(tmpDir, "records")), runStore);
-    await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
-    await flushRealIo();
+      stopGc = startIdleGc(new RecordStore(path.join(tmpDir, "records")), runStore);
+      await vi.advanceTimersByTimeAsync(GC_INTERVAL_MS + 1);
+      await flushRealIo();
 
-    expect(runStore.findStateByIdSync("wf-fresh")).toEqual({ kind: "running" });
+      const events = await createRunEventJournal(stateDir).scan("wf-fresh");
+      expect(events.filter((e) => e.type === "run-settled")).toHaveLength(0);
+      expect(fs.existsSync(path.join(stateDir, "wf-fresh.json"))).toBe(false);
+    } finally {
+      setRunEventJournalDirForTest(undefined);
+    }
   });
 });

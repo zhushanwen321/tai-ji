@@ -33,13 +33,13 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 // session-lifecycle.ts session_start 装配；未 bind 时降级直发，见 notifyDone 注释）。
 import {
   boundedPrettySerialize,
-  doneReasonToRunOutcome,
   getBoundNotifyLedger,
   isTerminalDoneReason,
   RUN_EVENT_JOURNAL_SUFFIX,
   type RunOutcome,
 } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
+import { runSettledOutcomeToDoneReason, type RunSettlementRecord } from "./jsonl-run-store.ts";
 
 // 模块级 logger（与 session-lifecycle.ts / index.ts 同 component 名）
 const logger = getLogger("subagents");
@@ -104,31 +104,11 @@ export const WORKFLOW_DONE_NOTIFY_ID_PREFIX = "wf-done:";
  */
 export const MAX_NOTIFIED_RUN_IDS = 1000;
 
-// [D7] run 终局 outcome 三态 + DoneReason 六因 → 三态映射：经 core barrel 单源
-// （RunOutcome / doneReasonToRunOutcome，run-events 定义——词表语义与映射依据的
-// 权威注释在 core 侧；漂移信号 = journal run-settled 帧出现词表外值时 core 自有
-// 用例先红）。原本地镜像类型 + mapDoneReasonToOutcome 已删。
-
-/**
- * [D7] 失败终局的结构化码提取：最后一个失败 call 的 failureKind
- * （AgentResult.failureKind，ask 级结构化词表）。与 core 的 run 级 errorCode 分工：
- * journal/manifest 的 run-settled errorCode 由 core dispatchFinalRunSettle 的
- * finalRunErrorCodeOf 单点生产（含 engine 协议码前缀提取，S2 死亡可诊断），本函数
- * 只服务终局通知载荷（取 ask 级 failureKind 单源）；core 不能 import extension
- * （workflow-state-root.ts 头注同款分层约束），通知码与 journal 码的词表同源性由
- * 双侧消费 RunErrorCode/AgentFailureKind 词表保证。无 ask 级失败帧时缺省，载荷
- * errorCode 缺省合法（reason 与 trace 承载诊断）。
- */
-function extractFailureErrorCode(run: WorkflowRun): string | undefined {
-  let code: string | undefined;
-  for (const call of run.state.calls.values()) {
-    const result = call.result;
-    if (result !== undefined && result.error !== undefined && result.failureKind !== undefined) {
-      code = result.failureKind;
-    }
-  }
-  return code;
-}
+// [D7] run 终局 outcome + DoneReason 派生：经 jsonl-run-store 的联合判别单点
+//（[W2/V1 D1 第 7 行] 载荷源换终局记录——outcome/errorCode 帧直取、DoneReason
+// 联合派生；原 extractFailureErrorCode 重提取链废弃——它与 core 帧生产链
+// finalRunErrorCodeOf 值域本就不同，换源后通知码与 journal 码同源同值）。
+// 漂移信号 = journal run-settled 帧出现词表外值时 core 自有用例先红。
 
 /**
  * notifyDone 的 details 结构（通过 pi.sendMessage 透传给前端）。
@@ -212,6 +192,11 @@ interface WorkflowNotifyDetails {
 /**
  * notifyDone 构建面（content + details 一次成型）。
  *
+ * [W2/V1 D1 第 7 行] 载荷源换源：status 串 / reason / outcome / errorCode 全部
+ * 取终局记录（settlement——与 run-settled 帧同源），不再读两态机字段（I2 失效
+ * 窗口：活体写点删除后 state.reason 恒 undefined，原 I2 兜底载荷恒退 completed
+ * 假成功——显式换源后删除）。trace/scriptResult 仍读聚合（非两态机字段）。
+ *
  * content 段顺序：标题行 →（终止性原因非正常完成时）防偷懒收尾指令 →
  * （有 scriptResult 时）Script Result 段 → Agent Trace 段 →（artifactsDir 有时）
  * Artifacts 指针段。
@@ -220,10 +205,12 @@ function buildDoneNotifyContent(
   run: WorkflowRun,
   runId: string,
   artifactsDir: string | undefined,
+  settlement: RunSettlementRecord,
 ): { content: string; eventsJournalPath: string | undefined } {
   const traceNodes = run.state.trace.toArray();
   const name = run.spec.scriptName;
-  const status = `${run.state.status}${run.state.reason ? ` (${run.state.reason})` : ""}`;
+  const reason = runSettledOutcomeToDoneReason(settlement.outcome, settlement.errorCode);
+  const status = `done (${reason})`;
 
   // 构建消息内容
   const parts: string[] = [];
@@ -231,13 +218,14 @@ function buildDoneNotifyContent(
 
   // 终止性原因（非正常完成）追加防偷懒收尾指令——budget/time 耗尽或 abort 不是任务完成，
   // 模型可能把 "done" 当成功汇报（F3 偷懒完成）。收尾三步骤与 turn-limiter WRAP_UP_MESSAGE 对齐。
-  // 判定经 core isTerminalDoneReason 单源（穷举 switch，DoneReason 新增成员 tsc 强制归类）；
-  // 原本地 Set 镜像已删（其幽灵成员 "circular" 不在 core 词表——镜像漂移实证）。
-  if (run.state.reason !== undefined && isTerminalDoneReason(run.state.reason)) {
+  // 判定经 core isTerminalDoneReason 单源（穷举 switch，DoneReason 新增成员 tsc 强制归类），
+  // 输入 = 派生 DoneReason（载荷源换源后与原 state.reason 判据逐值等价——细分恢复使
+  // 预算/超时终局不误命中/漏命中）。
+  if (isTerminalDoneReason(reason)) {
     parts.push("");
     parts.push(
       "This is NOT task completion. Summarize what was DONE and VERIFIED, list what remains " +
-      "NOT DONE, and give the user the single most important next step.",
+        "NOT DONE, and give the user the single most important next step.",
     );
   }
 
@@ -284,25 +272,28 @@ function buildDoneNotifyDetails(
   notifiedCtx: GuiContext | undefined,
   artifactsDir: string | undefined,
   eventsJournalPath: string | undefined,
+  settlement: RunSettlementRecord,
 ): WorkflowNotifyDetails {
   const traceNodes = run.state.trace.toArray();
   const name = run.spec.scriptName;
+  const reason = runSettledOutcomeToDoneReason(settlement.outcome, settlement.errorCode);
   const baseDetails: WorkflowNotifyDetails = {
     runId,
     name,
-    status: run.state.status,
-    reason: run.state.reason,
+    status: "done",
+    reason,
     traceLength: traceNodes.length,
     notifyId: `${WORKFLOW_DONE_NOTIFY_ID_PREFIX}${runId}`,
-    // [D7] 终局必达载荷：outcome 恒有（done ⟹ reason 有值，I2 不变式；防御缺省
-    // completed 兜底只在异常形态生效）；errorCode/resultSummary/指针按终局形态。
-    outcome: doneReasonToRunOutcome(run.state.reason ?? "completed"),
+    // [W2/V1 D1 第 7 行] 终局必达载荷：outcome/errorCode 帧直取（与 run-settled
+    // 帧同源——漂移判据 = core run-events 注释的「通知 outcome ≡ 帧 outcome」；
+    // 换源后 engine 协议码族与 'unknown' 首次进入通知 errorCode 值域，消费方容忍
+    // 已核对：bg-notify-render 不消费 errorCode，真实消费方按扩张值域透传）。
+    outcome: settlement.outcome,
   };
-  if (run.state.reason === "failed") {
-    const errorCode = extractFailureErrorCode(run);
-    if (errorCode !== undefined) baseDetails.errorCode = errorCode;
+  if (settlement.errorCode !== undefined) {
+    baseDetails.errorCode = settlement.errorCode;
   }
-  if (run.state.reason === "completed" && run.state.scriptResult !== undefined && run.state.scriptResult !== null) {
+  if (settlement.outcome === "completed" && run.state.scriptResult !== undefined && run.state.scriptResult !== null) {
     baseDetails.resultSummary = boundedPrettySerialize(run.state.scriptResult, MAX_RESULT_SUMMARY_LENGTH);
   }
   if (artifactsDir !== undefined && eventsJournalPath !== undefined) {
@@ -316,8 +307,7 @@ function buildDoneNotifyDetails(
   // label 对齐 buildWorkflowGui 的格式：name + slug + runId 前 8 字符（I#3）；
   // 非 RPC 模式 build 回调不执行（零构造成本）。
   return withGuiAttach(baseDetails, notifiedCtx, () => {
-    const reason = run.state.reason;
-    const statusStr = `${run.state.status}${reason ? ` (${reason})` : ""}`;
+    const statusStr = `done (${reason})`;
     const slug = run.spec.slug;
     const label = [name, slug, runId.slice(0, ID_PREVIEW_LENGTH)]
       .filter(Boolean)
@@ -424,12 +414,13 @@ export function notifyDone(
   runId: string,
   run: WorkflowRun,
   notifiedRunIds: Set<string>,
-  ctx?: GuiContext,
-  artifactsDir?: string,
+  ctx: GuiContext | undefined,
+  artifactsDir: string | undefined,
+  settlement: RunSettlementRecord,
 ): void {
   if (notifiedRunIds.has(runId)) return;
-  const { content, eventsJournalPath } = buildDoneNotifyContent(run, runId, artifactsDir);
-  const details = buildDoneNotifyDetails(run, runId, ctx, artifactsDir, eventsJournalPath);
+  const { content, eventsJournalPath } = buildDoneNotifyContent(run, runId, artifactsDir, settlement);
+  const details = buildDoneNotifyDetails(run, runId, ctx, artifactsDir, eventsJournalPath, settlement);
   deliverDoneNotify(pi, runId, notifiedRunIds, content, details);
 }
 

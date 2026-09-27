@@ -530,6 +530,50 @@ export default [
       ],
     },
   },
+  // [W2/V1 D1 决策 11 + A1] run 两态机（WorkflowRun.transition / RunStatus /
+  // VALID_RUN_TRANSITIONS）活体写点退役：活体终局唯一经六态机 dispatchRunTrigger
+  //（worker-message-pump.settleRunAccounting 终局记录原语），transition("done", …)
+  // 调用仅剩恢复路径写点显式白名单——recoverCrashedRuns 公共快照收敛（lifecycle，
+  // v1/v2 实体崩溃后的 state 快照定格，壳调和旁路证据的生产者）+ 壳
+  // reconcileRunningFinality（v1 快照条目终局调和，v1 兼容层）。选择器精确锁定
+  // 两态机终局调用形态（方法调用 .transition("done", …)——六态机 transition 是
+  // 自由函数、record 域走 tryTransition，均不命中）；测试豁免（夹具构造非生产
+  // 写点，对齐 H4 record 写面守卫先例）。白名单外新增引用 = lint 红。
+  // [flat config 覆盖语义] 本块必须置于上方全局 node:test 块**之后**（同规则 ID
+  // 后块整条覆盖前块——本块 files 命中域与其相交，故按 core 块决策 4 先例把
+  // node:test selector 合并进本块选择器数组，双向红线互不拆除）。
+  {
+    files: [
+      'packages/subagent-core/src/**/*.ts',
+      'extensions/universal/subagent-workflow/src/**/*.ts',
+    ],
+    ignores: [
+      // 恢复路径写点白名单（函数级清单的文件级近似：两文件内 transition("done")
+      // 调用仅上述白名单函数持有，活体路径已清零——A1 grep 断言按函数级锚定复核）。
+      'packages/subagent-core/src/orchestration/lifecycle.ts',
+      'extensions/universal/subagent-workflow/src/jsonl-run-store.ts',
+      'packages/subagent-core/src/**/__tests__/**',
+      'packages/subagent-core/src/**/*.test.ts',
+      'extensions/**/src/**/__tests__/**',
+      'extensions/**/src/**/*.test.ts',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.property.name='transition'][arguments.0.value='done']",
+          message:
+            'run 两态机活体写点已退役（W2/V1 D1）——活体终局唯一经六态机 dispatchRunTrigger' +
+            '（settleRunAccounting 原语）；transition("done") 调用 = 恢复路径写点白名单专属' +
+            '（recoverCrashedRuns 快照收敛 + 壳 reconcileRunningFinality），新增引用即违规。',
+        },
+        {
+          selector: "ImportDeclaration[source.value='node:test']",
+          message: '禁止 node:test——测试框架统一 vitest（docs/TEST-STRATEGY.md 红线）',
+        },
+      ],
+    },
+  },
   // pi extensions（extensions/**/*.ts）专用规则块。
   // extensions 是无构建的 TS 源码（pi 运行时直接加载），迁自旧 pi 扩展仓（已废弃，见 git 历史与 AGENTS.md），
   // 与 renderer/runtime 的 Vue/Electron 代码性质不同：
@@ -852,12 +896,14 @@ export default [
   // [2026-09-27 W2 L0] worker-message-pump：run 终局 coda 单写点 + worker 消息路由 +
   // 事件状态机接线的聚合点（finalizeRun 五步序的唯一编排面），1244 > 1240 微超
   // （先例：pi-provider-store「微超即提额，保留软上限告警」同型；8 个模块级常量已
-  // 提取至 worker-message-pump-constants.ts，再拆属独立重构）。W2-V1 终局统一将
-  // 重整此文件（活体写点删除 + 读者分流迁移），落地后复测行数，长期拆分候选。
+  // 提取至 worker-message-pump-constants.ts，再拆属独立重构）。
+  // [2026-09-27 W2/V1 D1] 终局统一落地复测：终局记录原语 settleRunAccounting +
+  // 终局记录注册表 + D1 分流表读者换源收拢本文件（折算 1340）——按「微超即提额」
+  // 同型提额 1400 保留软上限告警（长期拆分候选：记录原语/注册表段独立成轴）。
   {
     files: ['packages/subagent-core/src/orchestration/worker-message-pump.ts'],
     rules: {
-      'max-lines': ['warn', { max: 1250, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 1400, skipBlankLines: true, skipComments: true }],
     },
   },
 ];

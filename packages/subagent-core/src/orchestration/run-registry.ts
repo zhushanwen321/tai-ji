@@ -14,7 +14,7 @@
 //
 // 能力二：interrupted 放弃窗终局化（D5 转移表 interrupted × abandon-elapsed 行）
 // ——超窗（缺省 7 天，env 可调低）后走收编入口（adoptInterruptedRun，W1 [D4]）：
-// 幂等追加 run-settled(failed, interrupted_abandoned) 终态事件 + 物化 manifest，
+// 幂等追加 run-settled(interrupted, interrupted_abandoned) 终态事件 + 物化 manifest（[W2 D3] outcome 四值裁决），
 // journal 随之获清理资格（pruneTerminalRunFiles，file-run-store 单源）。
 //
 // 能力边界：终局证据三通道（journal 帧 / state 快照 / manifest）的角色与采信
@@ -29,14 +29,11 @@
 import { readdir } from "node:fs/promises";
 
 import { getLogger } from "../core/logger.ts";
-import {
-  readRunTerminalManifest,
-  writeRunTerminalManifest,
-} from "../execution/persistence/manifest-store.ts";
+import { readRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
 import {
   INITIAL_RUN_STATE,
   RUN_EVENT_JOURNAL_SUFFIX,
-  createRunEventJournal,
+  IllegalTransitionError,
   foldRunEventFrames,
   type RunErrorCode,
   type RunEventJournal,
@@ -45,7 +42,16 @@ import {
   type WorkflowRunEvent,
 } from "./run-events.ts";
 // [W1 / D1] 收编追加的终态条目构造（字段集单源在 pump 的 v2 条目接驳段）。
-import { buildWorkflowRecordSettledEntryData } from "./worker-message-pump.ts";
+// [W2/V1 D1] 收编追加的记录动作走 settleRunAccounting 终局记录原语（journal 帧 +
+// manifest 两件单点）+ (outcome, errorCode) → DoneReason 联合派生单点；
+// scan 走 pump 的 scanRunEvents（模块 journal 单写者域——帧落账同域，证据面一致）。
+import {
+  buildWorkflowRecordSettledEntryData,
+  runSettledOutcomeToDoneReason,
+  runEventJournalDirOf,
+  scanRunEvents,
+  settleRunAccounting,
+} from "./worker-message-pump.ts";
 
 const logger = getLogger("run-registry");
 
@@ -186,9 +192,13 @@ export async function projectRunRegistryState(
 export interface AdoptInterruptedRunOptions {
   /** 时钟注入（epoch ms）；缺省 Date.now()——终态 ts/settledAt 与宽限窗判定的确定性测试通道。 */
   now?: number;
-  /** 追加终态的 outcome；缺省 "failed"（interrupted 族终局 = harness 系统层失败）。 */
+  /**
+   * 追加终态的 outcome；缺省 "interrupted"（[W2 D2/D3] 被动终局的唯一权威表达——
+   * 崩溃收编 / abandon / idle 回收三路径写入；W1 过渡口径 "failed" 退役，细分
+   * 语境由 errorCode 承载：interrupted_abandoned / idle-evicted）。
+   */
   outcome?: RunOutcome;
-  /** 终局编码（abandon 场景 = interrupted_abandoned；kill-9 即时收编缺省无码）。 */
+  /** 终局编码（abandon 场景 = interrupted_abandoned；idle 回收 = idle-evicted；kill-9 即时收编缺省无码）。 */
   errorCode?: RunErrorCode;
   /** 终局 reason 文本（journal run-settled 帧 + 诊断面；缺省无 reason）。 */
   reason?: string;
@@ -225,31 +235,54 @@ export type AdoptInterruptedRunOutcome =
   /** 空 journal（无事件证据——从未落账或已过保留期清理）。 */
   | "skippedMissing";
 
+/** 收编 manifest 证据面目录（模块 journal 同源锚；测试防线形态返回 undefined）。 */
+function resolveManifestDirForAdopt(): string | undefined {
+  return runEventJournalDirOf();
+}
+
 /**
- * 单 run 收编：scan → fold → 三面证据 → （宽限窗）→ 幂等追加 run-settled →
- * 物化 manifest → 终态条目补写回调。
+ * 单 run 收编：scan → fold → 三面证据 → （宽限窗）→ settleRunAccounting 原语
+ * （幂等追加 run-settled + 物化 manifest 两件）→ 终态条目补写回调。
  *
- * 追加走 journal.append（D4 对 append 单写者面的显式扩容，见 RunEventJournal.append
- * 注释）；dispatched/running/settling × run-settled 全部表内合法（事件面终局，
- * 不经控制事件面——这正是「证据落点对称」的实现形态）。manifest 物化复用
- * abandon 既有写面（writeRunTerminalManifest；workflowName 取 run-created 帧）。
+ * [W2/V1 D1] 记录动作统一走终局记录原语：run-settled 写入经 dispatchRunTrigger
+ * per-run 串行队列（冷路径同走队列——离线收编无并发竞争成本），scan/manifest
+ * 走模块 journal 单写者域（与帧落账同源，证据面一致）；三面证据前置是原语裁决点
+ * 的前置防御（跨进程防双帧），表内转移 fail-fast 让位（IllegalTransitionError →
+ * skippedTerminal）是进程内第二道幂等。
+ * [W2 D3] outcome 缺省 "interrupted"（被动终局唯一权威表达）；条目 reason 经
+ * (outcome, errorCode) 联合派生单点（D5 五处统一）。
+ *
+ * [W2 D3] abandon 注销差集——已接受代价登记（登记不修）：本收编链无注销通道
+ * （收编产物 = journal 帧 + manifest 两件 + 可选终态条目，不含 pending:unregister），
+ * 收编的是旧 session 的 run 时，旧 session 文件里的 pending:register 残留无直落
+ * 写达域（注销条目只能落当前进程的 session 文件——对未注册该 run 的 session 无效）。
+ * 已接受代价四要素：量级 = 每个永不重开的旧 session 至多多一行（有界）；后果 =
+ * 该 session 的 pending-notifications 活跃列表多一行，仅在该 session 内的 pending
+ * 工具查询可见，无跨 session 泄漏；恢复路径 = 宿主 session 重开即 reconcile-sweep
+ * 依 journal fold / manifest 终态证据（D6 判据源改接后成立）补注销自愈；重审触发
+ * 条件 = W4 终态同步复核时按 sweep 自愈覆盖率（journal 坏链等不可 fold 形态占比）
+ * 重审。显式判定 = 可接受——为低频残留给本函数加「跨 session 定位旧 session 文件
+ * 并写入」通道，是新增写路径与新的失败情形，收益不成比例（不采用）。
  */
 export async function adoptInterruptedRun(
-  journal: RunEventJournal,
-  manifestDir: string,
   runId: string,
   opts?: AdoptInterruptedRunOptions,
 ): Promise<AdoptInterruptedRunOutcome> {
   const now = opts?.now ?? Date.now();
-  const events = await journal.scan(runId);
+  const events = await scanRunEvents(runId);
   if (events.length === 0) return "skippedMissing";
   if (opts?.activeRunIds?.has(runId)) return "skippedActive";
   const state = foldEvents(events, runId);
   // 三面证据（幂等第一道）：journal fold 面
   if (state.lifecycle === "terminal") return "skippedTerminal";
-  // manifest 面（abandon 旧路径写的 manifest / 活体物化但 journal 已被裁的组合）
-  const existingManifest = await readRunTerminalManifest(manifestDir, runId);
-  if (existingManifest !== null) return "skippedTerminal";
+  // manifest 面（abandon 旧路径写的 manifest / 活体物化但 journal 已被裁的组合）。
+  // dir=""（测试 NoopJournal 防线形态）跳过 manifest 证据——帧面已由 scan 空流
+  // skippedMissing 承接，与「零写域不做真目录读」红线一致。
+  const manifestDir = resolveManifestDirForAdopt();
+  if (manifestDir !== undefined) {
+    const existingManifest = await readRunTerminalManifest(manifestDir, runId);
+    if (existingManifest !== null) return "skippedTerminal";
+  }
   // 条目面（双面证据第二条——壳注入读面）
   if (opts?.hasSettledEntry !== undefined && (await opts.hasSettledEntry(runId))) {
     return "skippedTerminal";
@@ -259,34 +292,35 @@ export async function adoptInterruptedRun(
   if (now - lastEventAt < (opts?.graceWindowMs ?? 0)) return "skippedGraceWindow";
   // 坏链守卫：fold 停在 created（首帧损坏）时 run-settled 表外转移——保守跳过
   if (state.lifecycle === "created") return "skippedBrokenChain";
-  // 幂等追加终态事件（上方三面证据保证仅未终局 run 到此）
-  const outcome = opts?.outcome ?? "failed";
-  await journal.append(runId, {
-    type: "run-settled",
-    outcome,
-    ...(opts?.errorCode !== undefined ? { errorCode: opts.errorCode } : {}),
-    ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
-    artifactsDir: manifestDir,
-    ts: now,
-  });
-  // 物化 manifest（fold 投影：run-settled 落账 ⟹ terminal；outcome 非空 =
-  // prune 资格单源锚定）。workflowName 取 run-created 帧（缺帧回落 runId）。
+  // 幂等追加终态事件 + 物化 manifest（原语两件单点；上方三面证据保证仅未终局
+  // run 到此；Illegal = 并发收编让位——抢先方已落帧，skippedTerminal 收敛）。
+  // workflowName 取 run-created 帧（缺帧回落 runId）。
+  const outcome = opts?.outcome ?? "interrupted";
   const created = events.find((e) => e.type === "run-created");
   const workflowName =
     created !== undefined && created.type === "run-created" ? created.workflowName : runId;
-  await writeRunTerminalManifest(manifestDir, {
-    id: runId,
-    workflowName,
-    outcome,
-    ...(opts?.errorCode !== undefined ? { errorCode: opts.errorCode } : {}),
-    settledAt: now,
-  });
+  try {
+    await settleRunAccounting(
+      { runId },
+      {
+        outcome,
+        ...(opts?.errorCode !== undefined ? { errorCode: opts.errorCode } : {}),
+        ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
+        settledAt: now,
+      },
+      { workflowName },
+    );
+  } catch (err) {
+    if (err instanceof IllegalTransitionError) return "skippedTerminal";
+    throw err;
+  }
   // 终态条目补写（收编场景无内存聚合——callCount 从 journal ask-settled 帧数
-  // 推导；usedTokens 事件流不可得，摘要级 0 诚实缺省）
+  // 推导；usedTokens 事件流不可得，摘要级 0 诚实缺省）。[W2 D5] reason 经联合
+  // 派生单点（interrupted → "failed" 诊断兜底容器，细分语境由帧 errorCode 保留）。
   opts?.appendSettledEntry?.(
     buildWorkflowRecordSettledEntryData({
       runId,
-      reason: "failed",
+      reason: runSettledOutcomeToDoneReason(outcome, opts?.errorCode),
       outcome,
       ...(opts?.errorCode !== undefined ? { errorCode: opts.errorCode } : {}),
       settledAt: now,
@@ -326,12 +360,11 @@ export function resolveRunAbandonWindowMs(): number | undefined {
   return parsed;
 }
 
-/** abandonElapsedInterruptedRuns 的可调项（全部可选——缺省即生产形态）。 */
+/** abandonElapsedInterruptedRuns 的可调项（全部可选——缺省即生产形态）。
+ *  [W2/V1] journal/manifestDir 注入成员删除：收编记录动作统一走终局记录原语
+ *  （模块 journal 单写者域），证据面与帧落账同源——注入面 = setRunEventJournalDirForTest
+ *  （pump 测试钩子），目录参数只服务扫描候选列举。 */
 export interface AbandonElapsedInterruptedRunsOptions {
-  /** journal 读面；缺省 createRunEventJournal(dir)。测试注入 mkdtemp 目录形态。 */
-  journal?: RunEventJournal;
-  /** 终局投影 manifest 写入目录；缺省 = dir（journal/manifest/state 同目录布局）。 */
-  manifestDir?: string;
   /** 时钟注入（epoch ms）；缺省 Date.now()——放弃窗判定的确定性测试通道。 */
   now?: number;
   /** 放弃窗（ms）；缺省 {@link resolveRunAbandonWindowMs}。 */
@@ -363,7 +396,7 @@ export interface AbandonElapsedInterruptedRunsResult {
  * 2. 三面证据幂等检查（journal terminal / manifest / 终态条目——任一命中跳过）；
  * 3. 活跃保护 + 放弃窗判定（事件流最后活动时刻 ts——mtime 启发式退役后的时间
  *   判据唯一来源）；
- * 4. 幂等追加 run-settled(failed, interrupted_abandoned) 终态事件 + 物化
+ * 4. 幂等追加 run-settled(interrupted, interrupted_abandoned) 终态事件 + 物化
  *   manifest（outcome 非空 = prune 资格单源锚定）。journal-cleanup-eligible
  *   由 pruneTerminalRunFiles 的资格判定自然兑现，无需单独执行。
  *
@@ -379,10 +412,8 @@ export interface AbandonElapsedInterruptedRunsResult {
 /** 单 run 的 abandon 判定结果分类（主循环计数归集用）。 */
 type AbandonSingleRunOutcome = "abandoned" | "skippedActive" | "skippedTerminal" | "skippedOther";
 
-/** abandonSingleRun 的执行上下文（主循环解析一次的常量面 + journal / 活体集）。 */
+/** abandonSingleRun 的执行上下文（主循环解析一次的常量面 + 活体集）。 */
 interface AbandonSingleRunCtx {
-  journal: RunEventJournal;
-  manifestDir: string;
   now: number;
   abandonWindowMs: number;
   activeRunIds?: ReadonlySet<string>;
@@ -391,13 +422,10 @@ interface AbandonSingleRunCtx {
 /** 选项缺省解析集中点（主流程零缺省分支）。abandonWindowMs 由调用方先做 opt-out
  * 判定（undefined = 不终局化）后传入，此处收窄为必传。 */
 function resolveAbandonOptions(
-  dir: string,
   opts: AbandonElapsedInterruptedRunsOptions | undefined,
   abandonWindowMs: number,
 ): AbandonSingleRunCtx {
   return {
-    journal: opts?.journal ?? createRunEventJournal(dir),
-    manifestDir: opts?.manifestDir ?? dir,
     now: opts?.now ?? Date.now(),
     abandonWindowMs,
     activeRunIds: opts?.activeRunIds,
@@ -424,13 +452,14 @@ async function listJournalRunIds(dir: string): Promise<string[] | null> {
 
 /**
  * 单 run 的 abandon 判定链（[W1 / D4] 改走收编入口 adoptInterruptedRun）：放弃窗
- * 判定 + 收编参数（outcome=failed + errorCode=interrupted_abandoned）。分类结果
- * 由主循环计数；journal/manifest IO 异常上抛，主循环统一 warn 留痕后继续。
+ * 判定 + 收编参数（[W2 D3] outcome=interrupted + errorCode=interrupted_abandoned
+ * ——被动终局权威表达，细分语境由码承载）。分类结果由主循环计数；journal/manifest
+ * IO 异常上抛，主循环统一 warn 留痕后继续。
  */
 async function abandonSingleRun(runId: string, ctx: AbandonSingleRunCtx): Promise<AbandonSingleRunOutcome> {
-  const adopted = await adoptInterruptedRun(ctx.journal, ctx.manifestDir, runId, {
+  const adopted = await adoptInterruptedRun(runId, {
     now: ctx.now,
-    outcome: "failed",
+    outcome: "interrupted",
     errorCode: "interrupted_abandoned",
     reason: "interrupted run abandoned after grace window",
     graceWindowMs: ctx.abandonWindowMs,
@@ -463,7 +492,7 @@ export async function abandonElapsedInterruptedRuns(
   };
   const abandonWindowMs = opts?.abandonWindowMs ?? resolveRunAbandonWindowMs();
   if (abandonWindowMs === undefined) return result; // 显式 opt-out：不终局化
-  const ctx = resolveAbandonOptions(dir, opts, abandonWindowMs);
+  const ctx = resolveAbandonOptions(opts, abandonWindowMs);
 
   const journalRunIds = await listJournalRunIds(dir);
   if (journalRunIds === null) return result;

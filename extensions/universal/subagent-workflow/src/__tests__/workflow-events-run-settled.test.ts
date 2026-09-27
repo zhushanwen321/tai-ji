@@ -96,6 +96,9 @@ function makeEnv(): EnvHarness {
     resolvePi: () => pi,
     notifiedRunIds,
     state: { ctx: makeCtx(), sessionDir: "/tmp/run-settled-test-session", runs },
+    // [W2/V1 D1 第 7 行] 终局记录查询注入（生产 = JsonlRunStore.settledRecordOf；
+    // 直测按 makeRun 的 completed 形态给帧同源记录）
+    settledRecordOf: () => ({ outcome: "completed", settledAt: 0 }),
     lsRef: { lastSessionId: "sess-run-settled" },
   };
   return {

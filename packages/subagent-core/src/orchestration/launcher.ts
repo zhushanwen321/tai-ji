@@ -25,6 +25,13 @@
 
 import { ArgsValidationError } from "./args-validator.ts";
 import { abortRun, runWorkflow } from "./lifecycle.ts";
+// [W2/V1 D1] 终局判定与终局记录换源（分流表第 1 行：pollRunToResult 完成轮询 +
+// toResult 返回值构造——六态机终局判定 + DoneReason 联合派生，不再依赖 I2 兜底）。
+import {
+  isRunSettled,
+  runSettledOutcomeToDoneReason,
+  settledRecordOf,
+} from "./worker-message-pump.ts";
 import type { LifecycleDeps } from "./models/ports.ts";
 import type { RunSpec } from "./models/run-spec.ts";
 import type { DoneReason } from "./models/types.ts";
@@ -36,8 +43,46 @@ import { assertSafeTimerDelay } from "../shared/timer-delay.ts";
 
 // ── 常量 ─────────────────────────────────────────────────────
 
-/** 轮询间隔（500ms）。 */
-const STATUS_POLL_INTERVAL_MS = 500;
+/** 轮询间隔生产默认（500ms）。 */
+const STATUS_POLL_INTERVAL_MS_DEFAULT = 500;
+
+/**
+ * [测试通道] 轮询间隔覆盖 env：设为正整数时覆盖 STATUS_POLL_INTERVAL_MS_DEFAULT
+ * （生产默认 500ms 逐字不变），供壳侧 e2e 压缩轮询 tick（worker 毫秒级完成时，
+ * 真实 500ms tick 是纯测试等待）。仅显式设置时激活 + console.warn 留痕（解析形态
+ * 对齐 worker-message-pump 的 TAIJI_SUBAGENT_TEST_RETRY_BACKOFF_BASE_MS 先例）；
+ * pollInterval 调用时读取（非模块顶层）——生产热路径零影响，测试无需在模块加载前
+ * 设 env。
+ */
+export const STATUS_POLL_INTERVAL_ENV = "TAIJI_SUBAGENT_TEST_STATUS_POLL_INTERVAL_MS";
+
+/** 轮询间隔覆盖 warn 是否已发（对齐 retryBackoffHookWarned 的防刷屏）。 */
+let statusPollIntervalWarned = false;
+
+/** 解析轮询间隔：env 未设/空串 = 生产默认 500ms；正整数 = 覆盖；非法值不激活 + warn 留痕。 */
+function resolveStatusPollIntervalMs(): number {
+  const raw = process.env[STATUS_POLL_INTERVAL_ENV];
+  if (raw === undefined || raw === "") return STATUS_POLL_INTERVAL_MS_DEFAULT;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    if (!statusPollIntervalWarned) {
+      statusPollIntervalWarned = true;
+      console.warn(
+        `[workflow] ${STATUS_POLL_INTERVAL_ENV}="${raw}" is not a positive integer — ` +
+          "test hook INACTIVE, production poll interval retained",
+      );
+    }
+    return STATUS_POLL_INTERVAL_MS_DEFAULT;
+  }
+  if (!statusPollIntervalWarned) {
+    statusPollIntervalWarned = true;
+    console.warn(
+      `[workflow] ${STATUS_POLL_INTERVAL_ENV}=${raw} ACTIVE — status poll interval ` +
+        "overridden (test hook; NEVER set in production)",
+    );
+  }
+  return parsed;
+}
 
 /**
  * [U7] TAIJI_SUBAGENT_RUN_WATCHDOG_MS：无显式限时 run 的轮询绝对时限兜底 env。
@@ -99,9 +144,9 @@ export interface LauncherDeps extends LifecycleDeps {
 function pollInterval(): Promise<void> {
   // IF10(#16)：unref 使轮询等待 tick 不钉住事件循环（对齐 subagent-service
   // gcTimer.unref?.() 先例的防御 duck-type 写法）。resolve 语义不变——unref
-  // 只影响进程退出判定，已注册 timer 仍按 500ms 触发。
+  // 只影响进程退出判定，已注册 timer 仍按解析出的间隔触发。
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, STATUS_POLL_INTERVAL_MS);
+    const timer = setTimeout(resolve, resolveStatusPollIntervalMs());
     timer.unref?.();
   });
 }
@@ -179,13 +224,19 @@ function workflowUnavailableMessage(ref: string, path: string): string {
 /**
  * 从 WorkflowRun 构建 WorkflowRunResult（D-8）。
  *
- * reason 取 run.state.reason（done 时必有，WorkflowRun 不变式 I2 保证），
- * 防御性 fallback "failed"（理论不可达——I2 保证 done 时 reason 已设）。
+ * [W2/V1 D1 分流表第 1 行] reason 换源：优先取终局记录（注册表——活体终局的
+ * (outcome, errorCode) 经 runSettledOutcomeToDoneReason 联合派生，budget_limited/
+ * time_limited 细分保留）；无注册表记录（恢复路径写点 run / v1 存量）回落聚合
+ * state.reason——恢复域 I2 成立（写点白名单），`?? "failed"` 仅剩恢复域防御位，
+ * 不再是活体终局的载荷兜底（I2 失效窗口登记：活体终局的载荷源显式换终局记录）。
  */
 function toResult(run: WorkflowRun): WorkflowRunResult {
+  const settled = settledRecordOf(run.runId);
   return {
     status: "done",
-    reason: run.state.reason ?? "failed",
+    reason: settled !== undefined
+      ? runSettledOutcomeToDoneReason(settled.outcome, settled.errorCode)
+      : run.state.reason ?? "failed",
     scriptResult: run.state.scriptResult,
     error: run.state.error,
     runId: run.runId,
@@ -234,7 +285,7 @@ async function pollRunToResult(
   while (Date.now() < deadline) {
     if (signal?.aborted) {
       const runBeforeAbort = deps.runs.get(runId);
-      if (runBeforeAbort?.state.status === "done") return toResult(runBeforeAbort);
+      if (runBeforeAbort !== undefined && isRunSettled(runBeforeAbort)) return toResult(runBeforeAbort);
       await safeAbort(runId, deps, abortReason, "aborted");
       const run = deps.runs.get(runId);
       return run
@@ -243,11 +294,11 @@ async function pollRunToResult(
     }
     const run = deps.runs.get(runId);
     if (!run) return { status: "done", reason: "failed", error: "Run not found", runId };
-    if (run.state.status === "done") return toResult(run);
+    if (isRunSettled(run)) return toResult(run);
     await pollInterval();
   }
   const runBeforeTimeout = deps.runs.get(runId);
-  if (runBeforeTimeout?.state.status === "done") return toResult(runBeforeTimeout);
+  if (runBeforeTimeout !== undefined && isRunSettled(runBeforeTimeout)) return toResult(runBeforeTimeout);
   // 循环退出 ⇒ deadline 有限 ⇒ explicitTimeoutMs 必已定义（undefined/<=0 走 Infinity 不进此分支）
   await safeAbort(runId, deps, `Workflow timed out after ${explicitTimeoutMs}ms`, "time_limited");
   const finalRun = deps.runs.get(runId);

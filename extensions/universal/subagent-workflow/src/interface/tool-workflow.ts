@@ -498,6 +498,26 @@ function actionStatus(deps: LauncherDeps): WorkflowExecuteResult {
 
 // ── abort action ─────────────────────────────────────────────
 
+/**
+ * [W2/V1 D1 分流表第 6 行] 单一判源函数（CLI 面显示/排序的混合判源收拢）：输出
+ * 投影二值 status（running|done，值域与 v1 state.status 统一——对齐 runtime
+ * projectV2Workflow 六态收窄二值先例）。判源 = core runSummary 投影（活体终局经
+ * 进程内终局记录注册表判定、恢复路径写点 run 与 v1 存量条目经聚合 status 读——
+ * v1 兼容层读面，W4 sunset），散落的等价分支形态不采用（D1 否决记录：散落分支
+ * 在 grep 层不可区分，活体判据误用漏网）。
+ *
+ * 排序键契约：STATUS_ORDER 权重表只消费本函数的二值输出（排序键不读 outcome
+ * 四值——v1 两态值与 v2 四值不进同一权重表，排序语义不分裂）；outcome 细分由
+ * runSummary.reason 并列承载（列表行 reasonSuffix）。
+ *
+ * 落点说明（实施期登记）：函数体消费 core barrel 既有导出 runSummary，落本文件
+ * 使 commands/WorkflowsView 可单向 import（commands → view 既有边使 commands.ts
+ * 落点成环，本文件与两者均无既有边）。
+ */
+export function displayStatusOf(run: WorkflowRun): "running" | "done" {
+  return runSummary(run).status;
+}
+
 // 一次性生命周期：abort 是唯一的提前停止方式（pause/resume 已随 D-2 移除）。
 async function actionAbort(
   params: WorkflowToolParams,
@@ -516,10 +536,14 @@ async function actionAbort(
     );
   }
   try {
-    const oldStatus = run.state.status;
+    // [W2/V1 D1 分流表第 7 行] abort 读回换源：oldStatus/newStatus/reason 全部
+    // 取 runSummary 投影（活体终局经终局记录派生 DoneReason——原两态机字段读随
+    // 活体写点删除停更，abort 后 state.reason 恒 undefined）。
+    const oldStatus = displayStatusOf(run);
     await abortRun(runId, deps, params.error);
-    const newStatus = run.state.status;
-    const reasonSuffix = run.state.reason ? ` (${run.state.reason})` : "";
+    const summary = runSummary(run);
+    const newStatus = summary.status;
+    const reasonSuffix = summary.reason ? ` (${summary.reason})` : "";
     return {
       content: [
         {
@@ -527,7 +551,7 @@ async function actionAbort(
           text: `Workflow '${run.spec.scriptName}' (${runId}): ${oldStatus} → ${newStatus}${reasonSuffix}`,
         },
       ],
-      details: { action: "abort", runId, status: newStatus, reason: run.state.reason },
+      details: { action: "abort", runId, status: newStatus, reason: summary.reason },
     };
   } catch (err) {
     // "Error: " 前缀是 abortRun 失败的既有 LLM 可见形态，保持不变

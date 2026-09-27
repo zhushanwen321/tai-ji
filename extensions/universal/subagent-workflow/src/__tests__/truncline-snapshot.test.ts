@@ -20,24 +20,24 @@ interface SnapshotCase {
   expected: string;
 }
 
-function loadCases(): SnapshotCase[] {
+/** fixture 快照用例（模块级读一次——两个 describe 共用同一份，避免各自 readFileSync）。 */
+const CASES: SnapshotCase[] = (() => {
   const here = dirname(fileURLToPath(import.meta.url));
   return JSON.parse(
     readFileSync(join(here, "__fixtures__", "truncline.snapshot.json"), "utf8"),
   ) as SnapshotCase[];
-}
+})();
 
 describe("truncLine — indexOf 化 byte-identical 快照（IF12）", () => {
   it("全部 fixture 用例（10k ANSI 混合行 / CJK / OSC / 裸 ESC / CSI-K / emoji）与改造前输出逐字节一致", () => {
-    const cases = loadCases();
-    expect(cases.length).toBeGreaterThanOrEqual(10);
-    for (const c of cases) {
+    expect(CASES.length).toBeGreaterThanOrEqual(10);
+    for (const c of CASES) {
       expect(truncLine(c.text, c.maxWidth)).toBe(c.expected);
     }
   });
 
   it("10k 混合长行在多个截断宽度下均一致（fixture 内 maxWidth 之外再加宽度扫描）", () => {
-    const mixed = loadCases().find((c) => c.label === "sgr-mixed-10k")!;
+    const mixed = CASES.find((c) => c.label === "sgr-mixed-10k")!;
     for (const w of [8, 15, 30, 61, 100]) {
       const expected = mixed.expected; // fixture 锁 maxWidth=60；其他宽度靠 oracle 断言
       void expected;
