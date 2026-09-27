@@ -283,6 +283,11 @@ function runSettledOutcomeToDoneReason(outcome: RunOutcome): DoneReason {
       return "failed";
     case "cancelled":
       return "aborted";
+    // [W2 D5] interrupted（被动终局）→ "failed" 诊断兜底：DoneReason 无 interrupted 成员
+    // （两态机遗产，W4 随兼容层 sunset），细分语境由帧 errorCode 保留可辨；V1 将升级为
+    // (outcome, errorCode) 联合判别签名恢复 budget_limited/time_limited 细分。
+    case "interrupted":
+      return "failed";
   }
 }
 

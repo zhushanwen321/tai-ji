@@ -119,10 +119,61 @@ function writeDiag(name: string, data: Record<string, unknown>): void {
   console.log(`[batch-cr] diag → /tmp/${name}`)
 }
 
-async function waitUntil<T>(poll: () => T | undefined, deadlineMs: number, intervalMs = 200): Promise<T | undefined> {
+/** 诊断采集：薄壳进程命令行现场——子进程 spawn 参数（session-dir/agent-dir/model）
+ *  配置错误是「派发受理但子会话零响应」的首查面，仅 pid 无法判别。 */
+function shellPidsDetail(): { pid: number; cmd: string }[] {
+  return [...shellPids()].map((pid) => {
+    try {
+      return { pid, cmd: execSync(`ps -o command= -p ${pid}`, { encoding: 'utf8' }).trim() }
+    } catch {
+      return { pid, cmd: '(exited)' }
+    }
+  })
+}
+
+/** 诊断采集：数据目录两层文件树（含大小）——子会话 JSONL 是否被创建/有无增长，
+ *  区分「子进程没起来」「起来了但模型零输出」两种失败形态。 */
+function dirTree(root: string, depth: number): string[] {
+  const out: string[] = []
+  const walk = (dir: string, level: number): void => {
+    if (level > depth) return
+    let items: fs.Dirent[]
+    try {
+      items = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const it of items) {
+      const p = path.join(dir, it.name)
+      if (it.isDirectory()) {
+        out.push(`${p}/`)
+        walk(p, level + 1)
+      } else {
+        let size = ''
+        try {
+          size = ` (${fs.statSync(p).size}B)`
+        } catch {
+          // 文件在列目录与 stat 之间被删——大小缺省不影响树形判读
+        }
+        out.push(`${p}${size}`)
+      }
+    }
+  }
+  walk(root, 0)
+  return out
+}
+
+/** 轮询等待器契约：poll 的 resolved 值为 undefined = 未就绪、继续等；非 undefined = 终局。
+ *  poll 可为 async（内部 await）——不 await 的话 Promise 对象本身恒非 undefined，窗口即失效。
+ *  传 boolean 谓词会把首个 false 当终局立即返回——boolean 条件必须包成 `cond ? true : undefined`。 */
+async function waitUntil<T>(
+  poll: () => T | undefined | Promise<T | undefined>,
+  deadlineMs: number,
+  intervalMs = 200,
+): Promise<T | undefined> {
   const end = Date.now() + deadlineMs
   while (Date.now() < end) {
-    const v = poll()
+    const v = await poll()
     if (v !== undefined) return v
     await new Promise((r) => setTimeout(r, intervalMs))
   }
@@ -203,7 +254,10 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
       payload: { sessionId: sid, content: 'First run `echo ready` using the bash tool, wait for it to finish, then reply with only the word READY. [CR-WARM-7776]' },
     }, 'cr-warm', 30_000)
     expect(warmReply.type, '预热 prompt 应被接受').not.toBe('error')
-    const warmDone = await waitUntil(() => sub.events.filter((e) => e.type === 'message.complete').length > 0, MAIN_TURN_TIMEOUT_MS)
+    const warmDone = await waitUntil(
+      () => (sub.events.some((e) => e.type === 'message.complete') ? true : undefined),
+      MAIN_TURN_TIMEOUT_MS,
+    )
     expect(warmDone, `预热 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成`).toBe(true)
     sub.events.length = 0
 
@@ -224,6 +278,8 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
       const items = await getSubagents(port, sid).catch(() => [])
       writeDiag('batch-cr-round1-not-idle.json', {
         items,
+        shellNow: shellPidsDetail(),
+        dataDirTree: dirTree(dataDir, 2),
         runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
         piLogsTail: readPiLogs(dataDir).slice(-3000),
       })
@@ -233,7 +289,7 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
     console.log(`[batch-cr] 轮 1 idle：subagentId=${subagentId} turns=${idle1!.turns}`)
 
     // ── V5①：idle 后薄壳退出（chat 轮 idle 收尾 dispose） ──
-    const shellBack1 = await waitUntil(() => shellPids().size <= shellBase.size, ORPHAN_GRACE_MS, 1_000)
+    const shellBack1 = await waitUntil(() => (shellPids().size <= shellBase.size ? true : undefined), ORPHAN_GRACE_MS, 1_000)
     if (!shellBack1) {
       writeDiag('batch-cr-idle-shell-residue.json', {
         shellBase: [...shellBase],
@@ -253,7 +309,7 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
     expect(msgReply.type, 'message action 应被受理（@ 定向通道）').not.toBe('error')
     const respawnSeen = await waitUntil(() => {
       const now = shellPids()
-      return [...now].some((p) => !shellBase.has(p))
+      return [...now].find((p) => !shellBase.has(p))
     }, REVIVE_SPAWN_BUDGET_MS, 100)
     const respawnMs = Date.now() - reviveAt
     const firstEvents = sub.events.map((e) => String(e['type']))
@@ -265,7 +321,7 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
         eventsSeen: firstEvents,
       })
     }
-    expect(respawnSeen, `revive 后新薄壳应在 ${REVIVE_SPAWN_BUDGET_MS}ms 内 respawn（实际 ${respawnMs}ms；超线归因 spawn/握手/续写分段）`).toBe(true)
+    expect(respawnSeen, `revive 后新薄壳应在 ${REVIVE_SPAWN_BUDGET_MS}ms 内 respawn（实际 ${respawnMs}ms；超线归因 spawn/握手/续写分段）`).toBeTruthy()
     console.log(`[batch-cr] revive respawn：${respawnMs}ms（预算 ${REVIVE_SPAWN_BUDGET_MS}ms）；事件面首批：${firstEvents.slice(0, 6).join(',') || '（无）'}`)
 
     // ── V5③：续写轮完成（running→idle，turns 增至 2） ──
@@ -284,11 +340,23 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
     const sessionFile = idle2!.sessionFile
     expect(sessionFile, 'record 投影应携带 sessionFile 路径').toBeTruthy()
     const sessionText = fs.readFileSync(sessionFile!, 'utf8')
-    expect(sessionText.includes('WL-CHAT-7777'), 'session 文件应含轮 1 任务文本（冷续写历史完整）').toBe(true)
-    expect(sessionText.includes('WL-CHAT-7778'), 'session 文件应含 revive 续聊文本（同文件续写）').toBe(true)
+    const hasRound1 = sessionText.includes('WL-CHAT-7777')
+    const hasRevive = sessionText.includes('WL-CHAT-7778')
+    if (!hasRevive) {
+      // 归因采集：区分「续聊写进了别的 session 文件」（产品偏离同文件续写）与
+      //「尚未 flush」（文件内容滞后）——尾部文本 + subagents 目录全清单一次判别
+      writeDiag('batch-cr-revive-text-missing.json', {
+        sessionFile,
+        sessionTextTail: sessionText.slice(-2000),
+        subagentsTree: dirTree(path.join(dataDir, 'agent', 'subagents'), 3),
+        sessionsTree: dirTree(path.join(dataDir, 'agent', 'sessions'), 3),
+      })
+    }
+    expect(hasRound1, 'session 文件应含轮 1 任务文本（冷续写历史完整）').toBe(true)
+    expect(hasRevive, 'session 文件应含 revive 续聊文本（同文件续写）').toBe(true)
 
     // 收尾：续写轮 idle 后薄壳再次退出（idle dispose 对 revive 轮同样生效）
-    const shellBack2 = await waitUntil(() => shellPids().size <= shellBase.size, ORPHAN_GRACE_MS, 1_000)
+    const shellBack2 = await waitUntil(() => (shellPids().size <= shellBase.size ? true : undefined), ORPHAN_GRACE_MS, 1_000)
     expect(shellBack2, '续写轮 idle 后薄壳应再次退出（idle 收尾对每轮生效）').toBe(true)
 
     await page.screenshot({ path: testInfo.outputPath('cr-done.png'), fullPage: true })

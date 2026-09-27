@@ -1218,7 +1218,7 @@
       "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行（双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证，缺一 skip 不 fail；空载串行）：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-chat-revive.spec.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "pi-workflow-run-resource-model D3 验收 A5（场景 V5）落建。通道 = session.subagentAction start/message（runtime 短路 /subagents 命令）；spec 内含预热 turn（pi session 延迟写入——主 LLM 无对话则主 session 文件不落盘、getSubagents 投影无源）。D3 首跑四轮均挂于预热 turn（user 消息落定后 assistant 零响应；pi CLI 直跑探针同凭据同模型正常——挂点在 real-app 链路待归因，非窗口资源模型改动面），真机复核状态 = 待归因复跑。"
+      "note": "pi-workflow-run-resource-model D3 验收 A5（场景 V5）落建。通道 = session.subagentAction start/message（runtime 短路 /subagents 命令）；spec 内含预热 turn（pi session 延迟写入——主 LLM 无对话则主 session 文件不落盘、getSubagents 投影无源）。2026-09-27 复跑定案：D3 首跑四轮挂点为 spec 等待器误用（boolean 谓词与 async poll 未 await——等待窗口失效即返回），已修；复跑预热、轮 1、V5① idle 薄壳退出、V5② respawn（实测 64ms，预算 5s）、V5③ 续写轮 turns≥2 全部真机通过。V5④ 抓到产品差距：revive 续聊 user 消息未持久化进 session JSONL（模型回复正常落盘、仅该 user entry 缺失，append 顺序排除时序）——修复落点在 chat-rounds/pi 引擎 message 通道，与在途并行改动同文件，待裁决后再动手。"
     },
     {
       "id": "E2E-BATCH-13",

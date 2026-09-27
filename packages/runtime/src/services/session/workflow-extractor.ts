@@ -52,8 +52,16 @@ import type {
   WorkflowRunStatus,
 } from '@taiji/shared'
 
-/** [P3/D6] outcome 词表集合（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunOutcome）。 */
-const WORKFLOW_RUN_OUTCOMES = ['completed', 'failed', 'cancelled'] as const
+/**
+ * [P3/D6] outcome 词表集合（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunOutcome）。
+ *
+ * [W2 D5] 四值（interrupted = 被动终局：崩溃收编 / abandon / idle 回收）。本集合
+ * 是 shared 投影词表的第一道值域跟随锚——漏升的后果 = 新终态帧 outcome=
+ * 'interrupted' 经下方值级判定被静默丢为 undefined（「已中断」在 session 历史
+ * workflow 记录上显示缺失）；第二道锚 = 双包值级等价断言（core ALL_RUN_OUTCOMES
+ * ≡ 本集合 ≡ shared 词表成员，runtime 单测 workflow-outcome-vocab-parity）。
+ */
+const WORKFLOW_RUN_OUTCOMES = ['completed', 'failed', 'cancelled', 'interrupted'] as const
 
 /** status 合法词表（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunStatus 两态）。 */
 const WORKFLOW_RUN_STATUSES: readonly WorkflowRunStatus[] = ['running', 'done']

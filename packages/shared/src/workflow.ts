@@ -76,8 +76,67 @@ export interface WorkflowAgentCall {
 /**
  * [P3/D6] run 终局形态（RunSnapshot.state.outcome，事件 journal fold 投影）。
  * 与 status/reason（DoneReason）正交——「run 自身怎么死的」维度（harness 系统层）。
+ *
+ * [W2 D5] 四值终态词表，归类为**投影派生输出**（单一生产者 = runtime extractor
+ * 投影构建点，renderer 消费投影载荷字段、不自行翻译）：core↔shared 依赖方向
+ * （@taiji/shared 为 private 包、subagent-core 为 npm 发布包）不允许物理单源，
+ * 值域跟随由两道锚承载——① runtime extractor 值级判定集合 WORKFLOW_RUN_OUTCOMES
+ * （漏升 = interrupted 经提取链被静默丢弃）；② runtime 双包值级等价断言
+ * （core ALL_RUN_OUTCOMES ≡ extractor 集合 ≡ 本词表成员，runtime 单测）。
+ *
+ * 值语义：completed=成功 / failed=失败 / cancelled=已取消（用户主动）/
+ * interrupted=已中断（被动终局：崩溃收编 / abandon / idle 回收，细分语境由
+ * 帧 errorCode 承载）——「已取消」与「已中断」禁混用，显示名见
+ * WORKFLOW_RUN_OUTCOME_LABELS。
  */
-export type WorkflowRunOutcome = 'completed' | 'failed' | 'cancelled'
+export type WorkflowRunOutcome = 'completed' | 'failed' | 'cancelled' | 'interrupted'
+
+/**
+ * WorkflowRunOutcome 值全集（[W2 D5] 值级跟随锚的 shared 侧载体；形态对齐
+ * SUBAGENT_STATUS_ALL 先例）。
+ *
+ * 用途：跨包值级等价断言的成员集合（runtime 单测逐成员比对 core
+ * ALL_RUN_OUTCOMES / extractor 集合）+ 消费方全集遍历数据源。扩枚举守卫：
+ * 上方联合与本元组须同步改——正向（元组含非联合值）由 satisfies 编译期拦截；
+ * 反向（联合扩值漏改元组）由下方覆盖编译锁拦截。
+ */
+export const WORKFLOW_RUN_OUTCOME_ALL = [
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted',
+] as const satisfies readonly WorkflowRunOutcome[]
+
+/**
+ * 反向完备编译锁：WorkflowRunOutcome 联合 ⊆ WORKFLOW_RUN_OUTCOME_ALL 值域。
+ * 联合扩值漏改元组时该类型退化为错误信息元组，下行赋值 tsc 编译错。
+ */
+type _WorkflowRunOutcomeCoversAll = [WorkflowRunOutcome] extends [
+  (typeof WORKFLOW_RUN_OUTCOME_ALL)[number],
+]
+  ? true
+  : ['WorkflowRunOutcome 扩值须同步 WORKFLOW_RUN_OUTCOME_ALL 元组（w2-state-machine-convergence D5 值级跟随锚）']
+
+/**
+ * 编译锁消费点（导出以通过 noUnusedLocals）：值恒 true 无运行期语义——类型才
+ * 承重，联合漏扩元组时本赋值 tsc 红。
+ */
+export const WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK: _WorkflowRunOutcomeCoversAll = true
+
+/**
+ * [W2 D8] outcome 状态中文显示名单源词表（成功/失败/已取消/已中断——章程 D2
+ * 中文词表）。
+ *
+ * 消费方 = 通知渲染与 tray 文案（显示接线归 UI 单元）；「已取消」（用户主动）
+ * 与「已中断」（被动终局）禁混用。Record 键型 = 词表全集——词表扩值漏配显示名
+ * 即编译红（编译期穷尽锁）。
+ */
+export const WORKFLOW_RUN_OUTCOME_LABELS: Record<WorkflowRunOutcome, string> = {
+  completed: '成功',
+  failed: '失败',
+  cancelled: '已取消',
+  interrupted: '已中断',
+}
 
 /**
  * 单条 workflow run 记录（列表项 + 详情数据）。

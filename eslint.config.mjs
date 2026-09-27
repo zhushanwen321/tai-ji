@@ -848,4 +848,16 @@ export default [
       'max-lines': ['warn', { max: 550, skipBlankLines: true, skipComments: true }],
     },
   },
+
+  // [2026-09-27 W2 L0] worker-message-pump：run 终局 coda 单写点 + worker 消息路由 +
+  // 事件状态机接线的聚合点（finalizeRun 五步序的唯一编排面），1244 > 1240 微超
+  // （先例：pi-provider-store「微超即提额，保留软上限告警」同型；8 个模块级常量已
+  // 提取至 worker-message-pump-constants.ts，再拆属独立重构）。W2-V1 终局统一将
+  // 重整此文件（活体写点删除 + 读者分流迁移），落地后复测行数，长期拆分候选。
+  {
+    files: ['packages/subagent-core/src/orchestration/worker-message-pump.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 1250, skipBlankLines: true, skipComments: true }],
+    },
+  },
 ];

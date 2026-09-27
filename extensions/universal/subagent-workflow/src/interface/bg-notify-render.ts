@@ -25,7 +25,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { displayAgentName } from "@zhushanwen/subagent-core";
 import { deriveOutcome } from "@zhushanwen/subagent-core";
 import { CLOSED_REASONS } from "@zhushanwen/subagent-core";
-import type { ClosedReason, ExecutionOutcome } from "@zhushanwen/subagent-core";
+import type { ClosedReason, RunOutcome } from "@zhushanwen/subagent-core";
 import {
   firstLineSanitized,
   shortId,
@@ -50,6 +50,14 @@ const BORDER_CHARS = 2;
 const MIN_BORDER_WIDTH = BORDER_CHARS + INNER_PAD_TOTAL + 1;
 
 /**
+ * record 域轮终 outcome 子集（[W2 D5] 单源 RunOutcome 收窄别名——interrupted 只由
+ * run 收编/回收路径写入，record 轮终构造性不可达）。本文件原经 core 的
+ * ExecutionOutcome 消费同值联合；词表单源后换源直引 RunOutcome 派生，与 core
+ * execution/assembly/types.ts 的收窄子集同构。
+ */
+type RecordOutcome = Exclude<RunOutcome, "interrupted">;
+
+/**
  * background 完成通知的 record 形态（从 message.details 提取）。
  * notifier.ts 构造，本文件防御性解析。
  */
@@ -60,7 +68,7 @@ interface BgNotifyRecord {
   /** L2 关闭原因子枚举（内部诊断 + outcome 兑底派生输入；经 toClosedReason 防御性收窄）。 */
   closedReason?: ClosedReason;
   /** 终态三态对外语义（U3 C-outcome）。缺失（升级前旧消息重放）时按 deriveOutcome 兑底。 */
-  outcome?: ExecutionOutcome;
+  outcome?: RecordOutcome;
   agent: string;
   model?: string;
   result?: string;
@@ -263,7 +271,7 @@ function toClosedReason(value: unknown): ClosedReason | undefined {
 }
 
 /** details.outcome 防御性收窄：仅接受三态枚举值，其余按缺失处理。 */
-function toOutcome(value: unknown): ExecutionOutcome | undefined {
+function toOutcome(value: unknown): RecordOutcome | undefined {
   return value === "completed" || value === "failed" || value === "cancelled" ? value : undefined;
 }
 

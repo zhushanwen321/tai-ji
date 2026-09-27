@@ -21,6 +21,7 @@ import {
   ALL_RUN_LIFECYCLES,
   ALL_RUN_OUTCOMES,
   CONTROL_TRIGGER_TYPES,
+  doneReasonToRunOutcome,
   foldRunEventCheckpoint,
   INITIAL_RUN_STATE,
   RUN_EVENT_TYPES,
@@ -35,6 +36,7 @@ import {
   type RunEventJournal,
   type RunEventType,
   type RunLifecycle,
+  type RunOutcome,
   type RunState,
   type TransitionTrigger,
   type WorkflowRunEvent,
@@ -158,6 +160,17 @@ const runSettledCancelled: WorkflowRunEvent = {
   artifactsDir: "/journal-fixture/wf-1758-a1",
 };
 
+/** [W2 D2] 被动终局帧样本（收编/回收路径写入——「崩溃 ≠ 失败」的词表表达）。 */
+const runSettledInterrupted: WorkflowRunEvent = {
+  type: "run-settled",
+  seq: 8,
+  ts: TS + 300_000,
+  outcome: "interrupted",
+  errorCode: "idle-evicted",
+  reason: "idle evicted after 30d",
+  artifactsDir: "/journal-fixture/wf-1758-a1",
+};
+
 // ── 穷尽性处理样例 ────────────────────────────────────────────
 
 /** 剥离 seq 的载荷投影（seq 分配断言与载荷断言解耦用）。 */
@@ -212,13 +225,14 @@ describe("事件词表（D5）", () => {
     ]);
   });
 
-  it("ALL_RUN_OUTCOMES 三态正交（completed / failed / cancelled）", () => {
-    expect(ALL_RUN_OUTCOMES).toEqual(["completed", "failed", "cancelled"]);
+  it("ALL_RUN_OUTCOMES 四值正交（completed / failed / cancelled / interrupted——[W2 D2] 被动终局入词表）", () => {
+    expect(ALL_RUN_OUTCOMES).toEqual(["completed", "failed", "cancelled", "interrupted"]);
   });
 
   it("RunErrorCode 承载三族词表（编译期赋值由 tsc 把关）", () => {
     // 引擎固定码 + engine_ 前缀透传码 + 失败分类（classifyFailureKind 词表）
-    // + run 级终局码（budget_limited/time_limited，dispatchFinalRunSettle 恒等映射族）
+    // + run 级终局码（budget_limited/time_limited/interrupted_abandoned/idle-evicted，
+    // dispatchFinalRunSettle 恒等映射族 + 收编/回收「为什么此刻被判终局」族）
     const codes: RunErrorCode[] = [
       "engine_crashed",
       "engine_probe_failed",
@@ -228,8 +242,10 @@ describe("事件词表（D5）", () => {
       "unknown",
       "budget_limited",
       "time_limited",
+      "interrupted_abandoned",
+      "idle-evicted",
     ];
-    expect(codes).toHaveLength(8);
+    expect(codes).toHaveLength(10);
   });
 });
 
@@ -514,6 +530,23 @@ describe("状态词表（D5-1 两维正交）", () => {
   it("INITIAL_RUN_STATE = created 且无 outcome", () => {
     expect(INITIAL_RUN_STATE).toEqual({ lifecycle: "created" });
   });
+
+  it("[W2 V0 预备] lifecycle 五态目标词表类型锁：现词表去 interrupted 恰为五态（死形态删除随 V2 缩窄 ALL_RUN_LIFECYCLES，本锁钉住目标词表成员集）", () => {
+    // 编译期穷尽锁（形态对齐 shared SUBAGENT_STATUS_COVERAGE_LOCK 先例）：
+    // RunLifecycle 增删 interrupted 以外的成员时本 Equal 断言编译红，强制显式
+    // 重审五态目标词表；V2 缩窄 ALL_RUN_LIFECYCLES 后本断言照常成立。
+    type Expect<T extends true> = T;
+    type Equal<X, Y> =
+      (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
+    type _FiveStateLock = Expect<
+      Equal<
+        Exclude<RunLifecycle, "interrupted">,
+        "created" | "dispatched" | "running" | "settling" | "terminal"
+      >
+    >;
+    const _lock: _FiveStateLock = true;
+    expect(_lock).toBe(true);
+  });
 });
 
 // ── 转移表完整性（表是数据，不是散落分支）────────────────────
@@ -629,7 +662,7 @@ describe("终局与输出动作语义", () => {
     }
   });
 
-  it("run-settled 的 outcome 透传到终态（completed / failed / cancelled）", () => {
+  it("run-settled 的 outcome 透传到终态（completed / failed / cancelled / interrupted——[W2 D2] 四值全贯通）", () => {
     const settling: RunState = { lifecycle: "settling" };
     expect(transition(settling, runSettledCompleted).state).toEqual({
       lifecycle: "terminal",
@@ -642,6 +675,10 @@ describe("终局与输出动作语义", () => {
     expect(transition(settling, runSettledCancelled).state).toEqual({
       lifecycle: "terminal",
       outcome: "cancelled",
+    });
+    expect(transition(settling, runSettledInterrupted).state).toEqual({
+      lifecycle: "terminal",
+      outcome: "interrupted",
     });
   });
 
@@ -996,5 +1033,39 @@ describe("isTerminalDoneReason", () => {
       "time_limited",
     ];
     expect([...ALL_DONE_REASONS].sort()).toEqual([...expectedMembers].sort());
+  });
+});
+
+// ── [W2 D5] DoneReason → RunOutcome 映射表定稿（六值逐行全表）──────────────
+
+describe("doneReasonToRunOutcome 映射表定稿（[W2 D5] dispatch 链语境全表）", () => {
+  // 期望表 = run-events.ts 映射注释定稿表的逐行镜像；err 面只断言 mapping 行，
+  // errorCode 承载行的取值由 finalRunErrorCodeOf 单测域覆盖（stderr-tee 等）。
+  const expectedRows: Record<string, RunOutcome> = {
+    completed: "completed", // 成功
+    failed: "failed", // 执行失败（errorCode 承载因提取）
+    aborted: "cancelled", // 用户主动取消
+    budget_limited: "failed", // 预算耗尽 = 用户视角的诚实失败归因（errorCode='budget_limited'）
+    time_limited: "failed", // 活体墙钟预算超时 = 主动管理行为（errorCode='time_limited'）
+    invalid_args: "failed", // 参数校验失败——run 从未创建不落帧（不适用行，收录仅为映射穷尽）
+  };
+
+  it("六值逐行与定稿表一致", () => {
+    for (const reason of ALL_DONE_REASONS) {
+      expect(doneReasonToRunOutcome(reason)).toBe(expectedRows[reason]);
+    }
+  });
+
+  it("期望表与 DoneReason 词表零差集（词表新增成员时本用例红——强制先改定稿表再扩词表）", () => {
+    expect(Object.keys(expectedRows).sort()).toEqual([...ALL_DONE_REASONS].sort());
+  });
+
+  it("time_limited 双语境注记：dispatch 链行落 failed；idle-gc 回收行（interrupted + 'idle-evicted'）不经本函数——由收编/回收写入方按场景语境直写（D5 表注）", () => {
+    // dispatch 链语境
+    expect(doneReasonToRunOutcome("time_limited")).toBe("failed");
+    // 被动终局语境的词表承载在盘：interrupted ∈ 词表 且 idle-evicted ∈ RunErrorCode
+    expect(ALL_RUN_OUTCOMES).toContain("interrupted");
+    const idleEvicted: RunErrorCode = "idle-evicted";
+    expect(idleEvicted).toBe("idle-evicted");
   });
 });

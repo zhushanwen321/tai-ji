@@ -66,7 +66,7 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
 // ── 终态双维度（D5-1）────────────────────────────────────────
 
 /**
- * run 终局形态词表（三态）。
+ * run 终局形态词表（四值正交，[W2 D2/D5] interrupted 入词表后的单源）。
  *
  * 与 DoneReason（completed/failed/aborted/invalid_args/budget_limited/
  * time_limited，六因单维度）的关系：outcome 是终态正交化后的「run 自身怎么死的」维度（harness
@@ -74,8 +74,24 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
  * 结论（业务层），两者处置路径不同（前者人工聚合报告，后者修环境重跑），必须
  * 分维度表达。aborted 在本词表命名为 cancelled（对齐 D5 词表；DoneReason 存量
  * 词表不动，映射归 journal 写入方实现）。
+ *
+ * interrupted = 被动终局的唯一权威表达（「崩溃 ≠ 失败」的用户可感区分）：
+ * 崩溃收编 / abandon 7 天窗 / idle-gc 30 天回收三条路径写入，细分语境由
+ * errorCode 承载（interrupted_abandoned / idle-evicted）。它不出自任何执行侧
+ * 判定——只有收编/回收原语写入（record 轮终与 ask 终局构造性不可达，消费方
+ * 按 `Exclude<RunOutcome, "interrupted">` 收窄，见 execution/assembly/types.ts
+ * 的 ExecutionOutcome 派生别名）。
+ *
+ * 值域跟随锚：shared `WorkflowRunOutcome`（投影派生输出口径的第三份字面量，
+ * core↔shared 依赖方向不允许物理单源）经 runtime 侧双包值级等价断言钉住
+ * （core ALL_RUN_OUTCOMES ≡ extractor 集合 ≡ shared 词表成员，runtime 单测）。
  */
-export const ALL_RUN_OUTCOMES = ["completed", "failed", "cancelled"] as const;
+export const ALL_RUN_OUTCOMES = [
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+] as const;
 
 /** run 终局形态（run-settled 与 ask-settled 共用——ask 粒度的 cancelled = run 中止连带在途 ask 终止）。 */
 export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
@@ -104,6 +120,11 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  * 预算/时限耗尽是宿主侧裁决非引擎上报，借用即伪造自报）；AgentFailureKind
  * 是 ask 级失败分诊三态（预算耗尽不是 ask 失败形态）；"unknown" 语义 = 分类
  * 不出来，而这两族死因是确定已知的。
+ *
+ * idle-evicted 同族第三成员（[W2 D3/D5]）：idle-gc 30 天回收的终局码——
+ * outcome='interrupted' 帧的细分语境（管理性回收，非用户主动非证实失败）。
+ * 写入方 = idle-gc 改走终局记录原语的路径；词表先于接线入单源（V0），
+ * 与 interrupted_abandoned 同款登记。
  */
 export type RunErrorCode =
   | EngineProtocolErrorCode
@@ -111,18 +132,30 @@ export type RunErrorCode =
   | AgentFailureKind
   | "budget_limited"
   | "time_limited"
-  | "interrupted_abandoned";
+  | "interrupted_abandoned"
+  | "idle-evicted";
 
-// ── DoneReason → RunOutcome 三态映射（与下方 RunErrorCode 映射同族的姊妹单点）──
+// ── DoneReason → RunOutcome 映射表定稿（与下方 RunErrorCode 映射同族的姊妹单点）──
 
 /**
- * DoneReason 六因 → RunOutcome 三态的单点映射。
+ * DoneReason 六因 → RunOutcome 的单点映射（[W2 D5] 映射表定稿，dispatch 链语境）。
  *
- * - completed → completed；aborted → cancelled（cancel-requested 控制事件合成路径
- *   的终局 outcome 同值——转移表 cancelled 行与本映射构造性一致）；
- * - failed/budget_limited/time_limited/invalid_args → failed（budget/time 是
- *   「run 怎么死的」系统层失败；invalid_args 生产不达 finalizeRun——launcher
- *   参数校验在 run 创建前返回，收录仅为映射穷尽）。
+ * 全表（六值逐行）：
+ *
+ * | DoneReason      | outcome    | errorCode 承载        | 语义依据 |
+ * |-----------------|------------|----------------------|---------|
+ * | completed       | completed  | —                    | 成功 |
+ * | failed          | failed     | 因提取（extractFailedRunErrorCode） | 执行失败 |
+ * | aborted         | cancelled  | —                    | 用户主动取消（cancel-requested 控制事件合成路径的终局 outcome 同值——转移表 cancelled 行与本映射构造性一致） |
+ * | budget_limited  | failed     | 'budget_limited'     | 预算耗尽 = 任务没跑完，failed 是用户视角的诚实归因 |
+ * | time_limited    | failed     | 'time_limited'       | 活体墙钟预算超时 = 用户显式设置 timeoutMs/budgetTimeMs 到期的主动管理行为 |
+ * | invalid_args    | failed     | 因提取               | 参数校验失败——生产不达 finalizeRun（launcher 校验在 run 创建前返回），收录仅为映射穷尽；run 从未创建、不落终局帧（不适用行） |
+ *
+ * time_limited 双语境注记（[W2 D5 表注]）：上表行只覆盖 dispatch 链语境（活体
+ * 预算超时 → failed）。idle-gc 30 天回收语境的同一 DoneReason 字面量落
+ * interrupted + errorCode='idle-evicted'（管理性回收 = 被动终局，不稀释
+ * cancelled 的「主动」语义）——该行不经本函数派生，映射判据用触发源（场景
+ * 语境）而非字面量，由收编/回收写入方（idle-gc 改走终局记录原语的路径）直写。
  *
  * 消费方：core worker-message-pump 的 dispatchFinalRunSettle（同构判别，aborted
  * 分支走 cancel-requested 合成不改用本函数——两条路径的 outcome 语义一致）+ 壳
