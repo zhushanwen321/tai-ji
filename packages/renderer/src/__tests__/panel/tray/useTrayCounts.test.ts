@@ -407,7 +407,12 @@ describe('P-invisible·任务托盘面：D9③ 派生投影抑制（btw 线不�
     const vid = 'btw:line-tray-1'
     // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(vid) / 广播腿落分区）
     useSubagentStore().applyRecords(vid, [makeSubagent({ subagentId: 'a-line', status: 'running' })])
-    useWorkflowStore().applyRecords(vid, [makeWorkflow({ runId: 'wf-line', status: 'running' })])
+    // 种数据（applyRecords 已私有化，直写分区 ref）
+    const workflowStore = useWorkflowStore()
+    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(
+      vid,
+      [makeWorkflow({ runId: 'wf-line', status: 'running' })],
+    )
     // bash = 线自身后台命令（非派生虚拟键，抑制面不覆盖）
     partitionState = reactive({
       tasks: [makeTask({ taskId: 't-line' })], loaded: true, corrupted: false, fetchFailed: false,

@@ -215,6 +215,88 @@ export interface PruneTerminalRunFilesResult {
  * （manifest outcome 单源锚定）+ 清理对象（run 粒度成对删 state + journal）。
  * cap 解析（env 通道）归调用方（pi 宿主 getEnvStateMaxRuns 持有 env 通道）。
  */
+/** 资格合格的 run 条目（mtime 判定锚 = state 文件，D5 清理规则②）。 */
+interface PruneEligibleRun {
+  runId: string;
+  stateFull: string;
+  mtimeMs: number;
+}
+
+/**
+ * 逐 state 文件做资格判定（D5 规则①单源锚定：manifest outcome 非空）+ stat mtime。
+ * manifest 读失败/缺失 = 无资格（宁保留不误裁）；stat 失败跳过该 run（并发删除，
+ * debug 留痕）。返回资格条目与资格计数（含 stat 失败者——资格与 mtime 可得性正交）。
+ */
+async function collectEligibleTerminalRuns(
+  stateDir: string,
+  stateNames: readonly string[],
+  deps: PruneStateDeps,
+): Promise<{ runs: PruneEligibleRun[]; eligibleCount: number }> {
+  const runs: PruneEligibleRun[] = [];
+  let eligibleCount = 0;
+  for (const name of stateNames) {
+    const runId = name.slice(0, -".jsonl".length);
+    // 资格判定（D5 规则①单源锚定）：manifest 读失败/缺失 = 无资格（活跃/interrupted
+    // /未终局保护——宁保留不误裁，误裁活跃 run 是不可恢复事故方向）
+    const manifest = await readRunTerminalManifest(stateDir, runId);
+    if (manifest === null) continue;
+    eligibleCount += 1;
+    const stateFull = join(stateDir, name);
+    try {
+      runs.push({ runId, stateFull, mtimeMs: (await stat(stateFull)).mtimeMs });
+    } catch (err) {
+      // stat 失败（并发删除等）跳过该 run，不阻断本轮（debug——清理是旁路维护）
+      deps.debug(`state retention: stat failed, skipped ${stateFull}: ${deps.toMsg(err)}`);
+    }
+  }
+  return { runs, eligibleCount };
+}
+
+/**
+ * 裁剪受害者判定（纯函数）：TTL 超期全裁 + mtime 升序保最新 cap 个（其余入 victims）。
+ */
+function selectPruneVictims(
+  eligible: readonly PruneEligibleRun[],
+  ttlMs: number | undefined,
+  cap: number,
+  now: number,
+): Set<string> {
+  const victims = new Set<string>();
+  if (ttlMs !== undefined) {
+    for (const e of eligible) {
+      if (now - e.mtimeMs > ttlMs) victims.add(e.runId);
+    }
+  }
+  const survivors = eligible
+    .filter((e) => !victims.has(e.runId))
+    .sort((a, b) => a.mtimeMs - b.mtimeMs);
+  for (const e of survivors.slice(0, Math.max(0, survivors.length - cap))) {
+    victims.add(e.runId);
+  }
+  return victims;
+}
+
+/** 单 run 磁盘足迹成对删（state + journal，存在才删）。返回 state 文件是否删除成功。 */
+async function deleteRunFootprint(
+  stateDir: string,
+  runId: string,
+  deps: PruneStateDeps,
+): Promise<boolean> {
+  const stateFull = join(stateDir, `${runId}.jsonl`);
+  const journalFull = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  let prunedState = false;
+  for (const full of [stateFull, journalFull]) {
+    try {
+      await unlink(full);
+      prunedState ||= full === stateFull;
+    } catch (err) {
+      if (isEnoentError(err)) continue; // 并发删除已达成目标 / journal 本就不存在
+      deps.warn(`state retention: failed to delete ${full}: ${deps.toMsg(err)}`);
+    }
+  }
+  return prunedState;
+}
+
 export async function pruneTerminalRunFiles(
   stateDir: string,
   options: PruneTerminalRunFilesOptions,
@@ -237,53 +319,16 @@ export async function pruneTerminalRunFiles(
   result.scanned = stateNames.length;
   if (stateNames.length === 0) return result;
 
-  const now = Date.now();
-  const ttlMs = options.ttlMs ?? resolveStateTtlMs();
-  const eligible: Array<{ runId: string; stateFull: string; mtimeMs: number }> = [];
-  for (const name of stateNames) {
-    const runId = name.slice(0, -".jsonl".length);
-    // 资格判定（D5 规则①单源锚定）：manifest 读失败/缺失 = 无资格（活跃/interrupted
-    // /未终局保护——宁保留不误裁，误裁活跃 run 是不可恢复事故方向）
-    const manifest = await readRunTerminalManifest(stateDir, runId);
-    if (manifest === null) continue;
-    result.eligible += 1;
-    const stateFull = join(stateDir, name);
-    try {
-      eligible.push({ runId, stateFull, mtimeMs: (await stat(stateFull)).mtimeMs });
-    } catch (err) {
-      // stat 失败（并发删除等）跳过该 run，不阻断本轮（debug——清理是旁路维护）
-      deps.debug(`state retention: stat failed, skipped ${stateFull}: ${deps.toMsg(err)}`);
-    }
-  }
+  const { runs: eligible, eligibleCount } = await collectEligibleTerminalRuns(stateDir, stateNames, deps);
+  result.eligible = eligibleCount;
   if (eligible.length === 0) return result;
 
-  const victims = new Set<string>();
-  if (ttlMs !== undefined) {
-    for (const e of eligible) {
-      if (now - e.mtimeMs > ttlMs) victims.add(e.runId);
-    }
-  }
-  const survivors = eligible
-    .filter((e) => !victims.has(e.runId))
-    .sort((a, b) => a.mtimeMs - b.mtimeMs);
-  for (const e of survivors.slice(0, Math.max(0, survivors.length - options.cap))) {
-    victims.add(e.runId);
-  }
+  const now = Date.now();
+  const ttlMs = options.ttlMs ?? resolveStateTtlMs();
+  const victims = selectPruneVictims(eligible, ttlMs, options.cap, now);
 
   for (const runId of victims) {
-    const stateFull = join(stateDir, `${runId}.jsonl`);
-    const journalFull = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
-    let prunedState = false;
-    for (const full of [stateFull, journalFull]) {
-      try {
-        await unlink(full);
-        prunedState ||= full === stateFull;
-      } catch (err) {
-        if (isEnoentError(err)) continue; // 并发删除已达成目标 / journal 本就不存在
-        deps.warn(`state retention: failed to delete ${full}: ${deps.toMsg(err)}`);
-      }
-    }
-    if (prunedState) result.pruned += 1;
+    if (await deleteRunFootprint(stateDir, runId, deps)) result.pruned += 1;
     deps.debug(`state retention: pruned terminal run files for ${runId} (state + journal)`);
   }
   return result;

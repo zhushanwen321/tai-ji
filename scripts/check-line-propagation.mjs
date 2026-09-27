@@ -91,6 +91,57 @@ function daysSince(isoDate) {
   return Math.floor((Date.now() - new Date(isoDate).getTime()) / 86_400_000)
 }
 
+/**
+ * 硬检查：target ⊇ main。返回 hardRed（落后即 true）；
+ * merge-base 执行失败（非 0/1 退出码）就地 exit 2。
+ */
+function checkHardInclusion(target) {
+  const mb = gitStatus(['merge-base', '--is-ancestor', 'main', target])
+  if (mb.status === 0) {
+    console.log('[硬检查] 目标线 ⊇ main：通过')
+    return false
+  }
+  if (mb.status === 1) {
+    const missing = gitOut(['log', `${target}..main`, '--oneline'])
+    const count = missing.trim() ? missing.trim().split('\n').length : 0
+    console.error(`[硬检查] 目标线 ${target} 落后 main ${count} 个提交（已进 main 的提交未被目标线吸收）：`)
+    for (const line of missing.trim().split('\n')) {
+      if (line) console.error(`    ${line}`)
+    }
+    console.error('    恢复指引：在目标线 worktree 内 git merge main 后重跑本守卫；')
+    console.error('    确有正当理由一次性越过：node scripts/check-line-propagation.mjs --target <ref> --allow-diverged')
+    return true
+  }
+  console.error(`[硬检查] git merge-base 执行失败（main 或 ${target} 不可读？）：${mb.stderr}`)
+  process.exit(2)
+}
+
+/** 单个兄弟线的未传播 commit 呈报（git log 读取失败 / 无共享文件时静默跳过该线）。 */
+function reportSibling(sibling, target, targetFiles) {
+  // 兄弟线与目标线相同时 range 为空，结构性自排除，无需特判
+  let records
+  try {
+    records = parseLogRecords(
+      gitOut(['log', `${target}..${sibling}`, '--no-merges', '--name-only', '--no-renames', '--format=C\x1f%H\x1f%cI\x1f%s']),
+    )
+  } catch (e) {
+    console.error(`    [${sibling}] git log 读取失败，跳过该线：${e.message.split('\n')[0]}`)
+    return
+  }
+  const shared = records.filter((r) => r.files.some((f) => targetFiles.has(f)))
+  if (shared.length === 0) {
+    console.log(`    [${sibling}] 无触及目标线共享文件的未传播 commit。`)
+    return
+  }
+  // git log 默认新→旧；最老 = 末条
+  const oldest = shared[shared.length - 1]
+  console.log(`    [${sibling}] ${shared.length} 个 commit 触及目标线也存在的文件，最老停留 ${daysSince(oldest.date)} 天：`)
+  for (const r of shared) {
+    const day = r.date.slice(0, 10)
+    console.log(`      ${r.hash.slice(0, 10)} ${day} ${r.subject}`)
+  }
+}
+
 function main() {
   const { target, allowDiverged } = parseArgs(process.argv.slice(2))
 
@@ -102,24 +153,7 @@ function main() {
   }
 
   // ---- 硬检查：target ⊇ main ----
-  let hardRed = false
-  const mb = gitStatus(['merge-base', '--is-ancestor', 'main', target])
-  if (mb.status === 0) {
-    console.log('[硬检查] 目标线 ⊇ main：通过')
-  } else if (mb.status === 1) {
-    hardRed = true
-    const missing = gitOut(['log', `${target}..main`, '--oneline'])
-    const count = missing.trim() ? missing.trim().split('\n').length : 0
-    console.error(`[硬检查] 目标线 ${target} 落后 main ${count} 个提交（已进 main 的提交未被目标线吸收）：`)
-    for (const line of missing.trim().split('\n')) {
-      if (line) console.error(`    ${line}`)
-    }
-    console.error('    恢复指引：在目标线 worktree 内 git merge main 后重跑本守卫；')
-    console.error('    确有正当理由一次性越过：node scripts/check-line-propagation.mjs --target <ref> --allow-diverged')
-  } else {
-    console.error(`[硬检查] git merge-base 执行失败（main 或 ${target} 不可读？）：${mb.stderr}`)
-    process.exit(2)
-  }
+  const hardRed = checkHardInclusion(target)
 
   if (hardRed && allowDiverged) {
     console.warn('[警示] --allow-diverged：硬检查被一次性越过（不登记持久豁免），软提示照常执行。')
@@ -143,28 +177,7 @@ function main() {
     console.log('    无 dev-* 兄弟线。')
   }
   for (const sibling of siblings) {
-    // 兄弟线与目标线相同时 range 为空，结构性自排除，无需特判
-    let records
-    try {
-      records = parseLogRecords(
-        gitOut(['log', `${target}..${sibling}`, '--no-merges', '--name-only', '--no-renames', '--format=C\x1f%H\x1f%cI\x1f%s']),
-      )
-    } catch (e) {
-      console.error(`    [${sibling}] git log 读取失败，跳过该线：${e.message.split('\n')[0]}`)
-      continue
-    }
-    const shared = records.filter((r) => r.files.some((f) => targetFiles.has(f)))
-    if (shared.length === 0) {
-      console.log(`    [${sibling}] 无触及目标线共享文件的未传播 commit。`)
-      continue
-    }
-    // git log 默认新→旧；最老 = 末条
-    const oldest = shared[shared.length - 1]
-    console.log(`    [${sibling}] ${shared.length} 个 commit 触及目标线也存在的文件，最老停留 ${daysSince(oldest.date)} 天：`)
-    for (const r of shared) {
-      const day = r.date.slice(0, 10)
-      console.log(`      ${r.hash.slice(0, 10)} ${day} ${r.subject}`)
-    }
+    reportSibling(sibling, target, targetFiles)
   }
 
   process.exit(hardRed && !allowDiverged ? 1 : 0)

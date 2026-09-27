@@ -209,28 +209,30 @@ interface WorkflowNotifyDetails {
  * @param artifactsDir [D7] 产物目录指针（`<sessionDir>/workflow-state`，onRunDone
  *   桥注入；缺省 undefined = 旧调用兼容，载荷与文案指针段双双省略）
  */
-export function notifyDone(
-  pi: ExtensionAPI,
-  runId: string,
+/**
+ * notifyDone 构建面（content + details 一次成型）。
+ *
+ * content 段顺序：标题行 →（终止性原因非正常完成时）防偷懒收尾指令 →
+ * （有 scriptResult 时）Script Result 段 → Agent Trace 段 →（artifactsDir 有时）
+ * Artifacts 指针段。
+ */
+function buildDoneNotifyContent(
   run: WorkflowRun,
-  notifiedRunIds: Set<string>,
-  ctx?: GuiContext,
-  artifactsDir?: string,
-): void {
-  if (notifiedRunIds.has(runId)) return;
-
+  runId: string,
+  artifactsDir: string | undefined,
+): { content: string; eventsJournalPath: string | undefined } {
   const traceNodes = run.state.trace.toArray();
   const name = run.spec.scriptName;
   const status = `${run.state.status}${run.state.reason ? ` (${run.state.reason})` : ""}`;
 
- // 构建消息内容
+  // 构建消息内容
   const parts: string[] = [];
   parts.push(`Workflow '${name}' done: ${status}`);
 
- // 终止性原因（非正常完成）追加防偷懒收尾指令——budget/time 耗尽或 abort 不是任务完成，
- // 模型可能把 "done" 当成功汇报（F3 偷懒完成）。收尾三步骤与 turn-limiter WRAP_UP_MESSAGE 对齐。
- // 判定经 core isTerminalDoneReason 单源（穷举 switch，DoneReason 新增成员 tsc 强制归类）；
- // 原本地 Set 镜像已删（其幽灵成员 "circular" 不在 core 词表——镜像漂移实证）。
+  // 终止性原因（非正常完成）追加防偷懒收尾指令——budget/time 耗尽或 abort 不是任务完成，
+  // 模型可能把 "done" 当成功汇报（F3 偷懒完成）。收尾三步骤与 turn-limiter WRAP_UP_MESSAGE 对齐。
+  // 判定经 core isTerminalDoneReason 单源（穷举 switch，DoneReason 新增成员 tsc 强制归类）；
+  // 原本地 Set 镜像已删（其幽灵成员 "circular" 不在 core 词表——镜像漂移实证）。
   if (run.state.reason !== undefined && isTerminalDoneReason(run.state.reason)) {
     parts.push("");
     parts.push(
@@ -267,10 +269,24 @@ export function notifyDone(
     parts.push(`Events journal: ${eventsJournalPath}`);
   }
 
-  const content = parts.join("\n");
+  return { content: parts.join("\n"), eventsJournalPath };
+}
 
-  // 送达通道保持 "workflow-result"（runtime W18 失效信号 + taiji display 覆写 SSOT
-  // 按该类型识别；迁移不改变消息类型与文案字节，只改变投递可靠性机制）
+/**
+ * notifyDone 的 details 构建面（baseDetails + GUI attach）。
+ *
+ * 送达通道保持 "workflow-result"（runtime W18 失效信号 + taiji display 覆写 SSOT
+ * 按该类型识别；迁移不改变消息类型与文案字节，只改变投递可靠性机制）。
+ */
+function buildDoneNotifyDetails(
+  run: WorkflowRun,
+  runId: string,
+  notifiedCtx: GuiContext | undefined,
+  artifactsDir: string | undefined,
+  eventsJournalPath: string | undefined,
+): WorkflowNotifyDetails {
+  const traceNodes = run.state.trace.toArray();
+  const name = run.spec.scriptName;
   const baseDetails: WorkflowNotifyDetails = {
     runId,
     name,
@@ -299,7 +315,7 @@ export function notifyDone(
   // 下游 record/sendMessage 均经返回值消费，无人依赖 mutation 副作用，字节等价）。
   // label 对齐 buildWorkflowGui 的格式：name + slug + runId 前 8 字符（I#3）；
   // 非 RPC 模式 build 回调不执行（零构造成本）。
-  const details = withGuiAttach(baseDetails, ctx, () => {
+  return withGuiAttach(baseDetails, notifiedCtx, () => {
     const reason = run.state.reason;
     const statusStr = `${run.state.status}${reason ? ` (${reason})` : ""}`;
     const slug = run.spec.slug;
@@ -314,7 +330,19 @@ export function notifyDone(
       }],
     });
   });
+}
 
+/**
+ * notifyDone 投递面：账本在 → 四步生命周期（写账 / courier 投递 / 销账 / 重放）；
+ * 账本未装配 → fire-once 直发降级（stale ctx 静默）。见 notifyDone 主注释。
+ */
+function deliverDoneNotify(
+  pi: ExtensionAPI,
+  runId: string,
+  notifiedRunIds: Set<string>,
+  content: string,
+  details: WorkflowNotifyDetails,
+): void {
   const ledger = getBoundNotifyLedger();
   if (ledger) {
     // [u9 账本化] ledger 在 → ①写账（record false = 同幂等键已在账/已销账——内存
@@ -349,12 +377,8 @@ export function notifyDone(
       );
       throw err;
     }
-    if (!recorded) {
-      trackNotifiedRunId(notifiedRunIds, runId);
-      return;
-    }
     trackNotifiedRunId(notifiedRunIds, runId);
-    ledger.attemptDeliver();
+    if (recorded) ledger.attemptDeliver();
     return;
   }
 
@@ -393,6 +417,20 @@ export function notifyDone(
       },
     },
   );
+}
+
+export function notifyDone(
+  pi: ExtensionAPI,
+  runId: string,
+  run: WorkflowRun,
+  notifiedRunIds: Set<string>,
+  ctx?: GuiContext,
+  artifactsDir?: string,
+): void {
+  if (notifiedRunIds.has(runId)) return;
+  const { content, eventsJournalPath } = buildDoneNotifyContent(run, runId, artifactsDir);
+  const details = buildDoneNotifyDetails(run, runId, ctx, artifactsDir, eventsJournalPath);
+  deliverDoneNotify(pi, runId, notifiedRunIds, content, details);
 }
 
 /**

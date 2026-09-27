@@ -53,11 +53,17 @@ export const RELAY_KILL_GRACE_MS = 3_000
  * 不得判死），延迟有硬上限防无限活。量级为任务级（分钟），与控制面秒级 grace 不可
  * 互相挪用（超时默认按对象粒度校准）。
  */
-const ORPHAN_IDLE_REAP_MS = 5 * 60_000
+/** 量级换算基准：1 秒 / 1 分钟的毫秒数（孤儿处置族的阈值定义与日志换算共用）。 */
+const SECOND_MS = 1_000
+const MINUTE_MS = 60_000
+/** 孤儿静默判定阈值（分钟）：tee 镜像最近写入超过该时长视为纯资源占用，立即收割。 */
+const ORPHAN_IDLE_REAP_MINUTES = 5
+const ORPHAN_IDLE_REAP_MS = ORPHAN_IDLE_REAP_MINUTES * MINUTE_MS
 /** pending 孤儿复查间隔。 */
 const ORPHAN_PENDING_RECHECK_MS = 60_000
-/** pending 硬上限：活跃孤儿最多延迟这么多再收割（防 tee 持续产出但恢复链已死透）。 */
-const ORPHAN_PENDING_MAX_MS = 30 * 60_000
+/** pending 硬上限（分钟）：活跃孤儿最多延迟这么多再收割（防 tee 持续产出但恢复链已死透）。 */
+const ORPHAN_PENDING_MAX_MINUTES = 30
+const ORPHAN_PENDING_MAX_MS = ORPHAN_PENDING_MAX_MINUTES * MINUTE_MS
 /** 握手超时：连接建立后等第一帧的上限（防半开连接占资源）。 */
 const HANDSHAKE_TIMEOUT_MS = 10_000
 /** spawn 失败时代理看到的退出码（127 = command not found 惯例，走子进程非零退出语义）。 */
@@ -66,6 +72,8 @@ const SPAWN_FAILURE_EXIT_CODE = 127
 const PID_REUSE_TOLERANCE_MS = 2_000
 /** 畸形帧日志预览的头部截取长度（足以辨识帧形态，不整行落日志防垃圾刷屏）。 */
 const MALFORMED_FRAME_HEAD_PREVIEW_CHARS = 120
+/** record id 清洗后参与 tee 文件名匹配的长度上限（防异常长 id 撑爆文件名比对）。 */
+const RECORD_ID_MAX_CHARS = 64
 
 // ── 协议帧（runtime 侧视角；握手/数据帧 schema 见设计 §3.1）─────────────
 
@@ -642,6 +650,60 @@ export class RelayRegistry {
    * ——误杀无辜进程的代价高于留孤儿。幂等可重入：deferred 发生时由复查 timer 周期
    * 重扫（在册 recordId 跳过——本 runtime 在管的不是孤儿）。
    */
+  /** 单 pid 文件的孤儿判定链（在册排除 → 解析 → 死活 → pid 复用 → 活跃度分级处置）；
+   * 返回 'deferred' = 本轮出现活跃孤儿（主循环据此布防复查 timer），其余已处置/跳过。 */
+  private async sweepOnePidFile(pidFile: string, recordId: string): Promise<'deferred' | 'handled'> {
+    let pid: number
+    let spawnedAt: number
+    let pendingSince: number | undefined
+    try {
+      const parsed = JSON.parse(readFileSync(pidFile, 'utf-8')) as { pid?: unknown; spawnedAt?: unknown; pendingSince?: unknown }
+      if (typeof parsed.pid !== 'number' || typeof parsed.spawnedAt !== 'number') throw new Error('malformed pid file')
+      pid = parsed.pid
+      spawnedAt = parsed.spawnedAt
+      if (typeof parsed.pendingSince === 'number') pendingSince = parsed.pendingSince
+    } catch (e) {
+      console.warn(`[relay] stale pid file removed (unreadable) recordId=${recordId}:`, e)
+      this.removePidFile(pidFile)
+      return 'handled'
+    }
+    if (!isPidAlive(pid)) {
+      this.removePidFile(pidFile)
+      return 'handled'
+    }
+    const procStart = await this.readProcessStartTime(pid)
+    if (procStart === null) {
+      // ps 不可用/解析失败：无法排除 pid 复用，保守跳过（保留文件，下次启动再扫）
+      console.warn(`[relay] orphan sweep skipped (no process start time) recordId=${recordId} pid=${String(pid)}`)
+      return 'handled'
+    }
+    if (procStart > spawnedAt + PID_REUSE_TOLERANCE_MS) {
+      // 进程比 spawn 记录新 → pid 已被复用，现在持有者是无关进程：不杀，仅删过期记录
+      console.warn(`[relay] pid ${String(pid)} reused (procStart ${procStart} > spawnedAt ${spawnedAt}), not killing — recordId=${recordId}`)
+      this.removePidFile(pidFile)
+      return 'handled'
+    }
+    // —— 活跃度分级处置（2026-09-24 事故修复）——
+    const teeMtime = this.latestRelayTeeMtimeMs(recordId)
+    const idleMs = teeMtime === null ? Number.POSITIVE_INFINITY : Date.now() - teeMtime
+    if (idleMs > ORPHAN_IDLE_REAP_MS) {
+      // 静默孤儿（或无 tee 证据）：立即收割——纯资源回收，无任务上下文损失
+      this.reapOrphanPid(pidFile, recordId, pid, pendingSince !== undefined ? 'deferred orphan went idle' : 'tee idle (no recent output)')
+      return 'handled'
+    }
+    // 活跃孤儿：任务仍在推进，立即杀 = 反复中断重派（重启风暴振荡形态）——登记 pending 延迟收割；到硬上限 → 强制收割。
+    if (pendingSince === undefined) {
+      this.markOrphanPending(pidFile, recordId, pid, idleMs)
+      return 'deferred'
+    }
+    if (Date.now() - pendingSince > ORPHAN_PENDING_MAX_MS) {
+      this.reapOrphanPid(pidFile, recordId, pid, `pending max age exceeded (${Math.round(ORPHAN_PENDING_MAX_MS / MINUTE_MS)}min hard cap)`)
+      return 'handled'
+    }
+    // 仍在产出且未到硬上限：留待下次复查（timer 驱动或下次 runtime 重启的 sweep）
+    return 'deferred'
+  }
+
   async sweepOrphanChildren(): Promise<void> {
     const dir = getRelayChildrenDir(this.opts.dataDir)
     let files: string[]
@@ -656,57 +718,10 @@ export class RelayRegistry {
     let deferredAny = false
     for (const file of files) {
       if (!file.endsWith('.pid')) continue
-      const pidFile = `${dir}/${file}`
       const recordId = basename(file, '.pid')
       // 本 runtime 在册（正常在管）不是孤儿——复查 timer 重入时排除在册条目
       if (this.recordIdToConn.has(recordId)) continue
-      let pid: number
-      let spawnedAt: number
-      let pendingSince: number | undefined
-      try {
-        const parsed = JSON.parse(readFileSync(pidFile, 'utf-8')) as { pid?: unknown; spawnedAt?: unknown; pendingSince?: unknown }
-        if (typeof parsed.pid !== 'number' || typeof parsed.spawnedAt !== 'number') throw new Error('malformed pid file')
-        pid = parsed.pid
-        spawnedAt = parsed.spawnedAt
-        if (typeof parsed.pendingSince === 'number') pendingSince = parsed.pendingSince
-      } catch (e) {
-        console.warn(`[relay] stale pid file removed (unreadable) recordId=${recordId}:`, e)
-        this.removePidFile(pidFile)
-        continue
-      }
-      if (!isPidAlive(pid)) {
-        this.removePidFile(pidFile)
-        continue
-      }
-      const procStart = await this.readProcessStartTime(pid)
-      if (procStart === null) {
-        // ps 不可用/解析失败：无法排除 pid 复用，保守跳过（保留文件，下次启动再扫）
-        console.warn(`[relay] orphan sweep skipped (no process start time) recordId=${recordId} pid=${String(pid)}`)
-        continue
-      }
-      if (procStart > spawnedAt + PID_REUSE_TOLERANCE_MS) {
-        // 进程比 spawn 记录新 → pid 已被复用，现在持有者是无关进程：不杀，仅删过期记录
-        console.warn(`[relay] pid ${String(pid)} reused (procStart ${procStart} > spawnedAt ${spawnedAt}), not killing — recordId=${recordId}`)
-        this.removePidFile(pidFile)
-        continue
-      }
-      // —— 活跃度分级处置（2026-09-24 事故修复）——
-      const teeMtime = this.latestRelayTeeMtimeMs(recordId)
-      const idleMs = teeMtime === null ? Number.POSITIVE_INFINITY : Date.now() - teeMtime
-      if (idleMs > ORPHAN_IDLE_REAP_MS) {
-        // 静默孤儿（或无 tee 证据）：立即收割——纯资源回收，无任务上下文损失
-        this.reapOrphanPid(pidFile, recordId, pid, pendingSince !== undefined ? 'deferred orphan went idle' : 'tee idle (no recent output)')
-        continue
-      }
-      // 活跃孤儿：任务仍在推进，立即杀 = 反复中断重派（重启风暴振荡形态）。
-      // 登记 pending 延迟收割；已有 pending 且到硬上限 → 强制收割。
-      deferredAny = true
-      if (pendingSince === undefined) {
-        this.markOrphanPending(pidFile, recordId, pid, idleMs)
-      } else if (Date.now() - pendingSince > ORPHAN_PENDING_MAX_MS) {
-        this.reapOrphanPid(pidFile, recordId, pid, `pending max age exceeded (${Math.round(ORPHAN_PENDING_MAX_MS / 60_000)}min hard cap)`)
-      }
-      // 仍在产出且未到硬上限：留待下次复查（timer 驱动或下次 runtime 重启的 sweep）
+      deferredAny ||= (await this.sweepOnePidFile(`${dir}/${file}`, recordId)) === 'deferred'
     }
     if (deferredAny) this.armOrphanRecheck()
   }
@@ -718,7 +733,7 @@ export class RelayRegistry {
    * 维持原 sweep 的立即收割语义——孤儿无产出证据时留着只是资源占用。
    */
   private latestRelayTeeMtimeMs(recordId: number | string): number | null {
-    const safeRecordId = String(recordId).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)
+    const safeRecordId = String(recordId).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, RECORD_ID_MAX_CHARS)
     if (safeRecordId.length === 0) return null
     let best: number | null = null
     try {
@@ -765,15 +780,20 @@ export class RelayRegistry {
       setTimeout(() => {
         try {
           if (isPidAlive(oldPid)) process.kill(oldPid, 'SIGKILL')
-        } catch {
-          // ESRCH = 已死（目标状态）；其他 errno 交 orphan sweep 兜底
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException)?.code !== 'ESRCH') {
+            // 非 ESRCH（EPERM 等）：没杀掉也不阻塞新注册，残留交 orphan sweep 兜底
+            console.warn(`[relay] superseded pid SIGKILL failed, deferring to orphan sweep pid=${String(oldPid)}:`, toErrorMessage(e))
+          }
+          // ESRCH = 已死（探活到 SIGKILL 之间退出，正是收割目标状态），静默
         }
       }, RELAY_KILL_GRACE_MS).unref()
     })
   }
 
   /** 活跃孤儿登记 pending（pid 文件写回 pendingSince + 响亮日志；幂等重写无 pending 语义不变）。 */
-  private markOrphanPending(pidFile: string, recordId: string, pid: number, idleMs: number): void {    try {
+  private markOrphanPending(pidFile: string, recordId: string, pid: number, idleMs: number): void {
+    try {
       const parsed = JSON.parse(readFileSync(pidFile, 'utf-8')) as { pid?: unknown; spawnedAt?: unknown }
       if (typeof parsed.pid !== 'number' || typeof parsed.spawnedAt !== 'number') return
       writeFileSync(pidFile, JSON.stringify({ pid: parsed.pid, spawnedAt: parsed.spawnedAt, pendingSince: Date.now() }))
@@ -782,8 +802,8 @@ export class RelayRegistry {
       return
     }
     console.warn(
-      `[relay] orphan still active (tee wrote ${Math.round(idleMs / 1000)}s ago), deferred reap — waiting for recovery chain or idleness recordId=${recordId} pid=${String(pid)} ` +
-      `(idle threshold ${Math.round(ORPHAN_IDLE_REAP_MS / 60_000)}min, recheck every ${Math.round(ORPHAN_PENDING_RECHECK_MS / 1000)}s, hard cap ${Math.round(ORPHAN_PENDING_MAX_MS / 60_000)}min)`,
+      `[relay] orphan still active (tee wrote ${Math.round(idleMs / SECOND_MS)}s ago), deferred reap — waiting for recovery chain or idleness recordId=${recordId} pid=${String(pid)} ` +
+      `(idle threshold ${Math.round(ORPHAN_IDLE_REAP_MS / MINUTE_MS)}min, recheck every ${Math.round(ORPHAN_PENDING_RECHECK_MS / SECOND_MS)}s, hard cap ${Math.round(ORPHAN_PENDING_MAX_MS / MINUTE_MS)}min)`,
     )
   }
 

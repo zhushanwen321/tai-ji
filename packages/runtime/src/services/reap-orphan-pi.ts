@@ -352,6 +352,58 @@ function defaultReadProcessStartTime(pid: number): Promise<number | null> {
  * 清单缺失/坏（readSpawnMarkers 返回 null）→ 跳过本轮（fail-safe，宁漏不误杀）。
  * 本函数不抛（全路径 catch 或降级返回），调用方可安全 fire-and-forget。
  */
+/** killOrphan 依赖簇（信号面 + 宽限），逐 pid 处置循环与主流程解包共享。 */
+interface OrphanKillDeps {
+  killGraceMs: number
+  signal: (pid: number, signal: 'SIGTERM' | 'SIGKILL' | 0) => void
+  delay: (ms: number) => Promise<void>
+  readProcessStartTime: (pid: number) => Promise<number | null>
+}
+
+/**
+ * 逐孤儿处置 + 台账双写（crash-forensics §3.3 D1）：SIGTERM → 宽限 → SIGKILL 链
+ * 逐 pid 执行，reaped / reap-failed 两类事件挂处置结果处（事件名语义 = 已收殓 /
+ * 处置失败，防误记）。台账 best-effort（writer append 自吞错不向收殓链传播）。
+ */
+async function reapOrphansWithJournal(
+  orphans: PsRow[],
+  deps: OrphanKillDeps,
+): Promise<{ reaped: number[]; failed: number[] }> {
+  const reaped: number[] = []
+  const failed: number[] = []
+  for (const row of orphans) {
+    const ok = await killOrphan(row, deps.killGraceMs, deps.signal, deps.delay, deps.readProcessStartTime)
+    if (ok) {
+      reaped.push(row.pid)
+      // 台账双写（crash-forensics §3.3 D1 reaped 行：杀链判据命中处置成功处，与既有
+      // 逐 pid 处置日志同点）。挂在 ok 分支而非发现处：事件名语义 = 已收殓，处置失败
+      // 进 failed 不记 reaped（防误记）。best-effort：writer append 自吞错不向收殓链传播。
+      // 经中间变量传入（扩展字段过 schema 闭接口的 excess property check）。
+      const journalEvent: CrashJournalEvent = {
+        layer: 'pi',
+        event: 'reaped',
+        pid: row.pid,
+        ppid: row.ppid,
+        detailDigest: `argv matches spawn marker list (--mode rpc + --no-extensions + staged extension/skill value) AND ppid=1; argv: ${argvSummary(row.command)}`,
+      }
+      getCrashJournal().append(journalEvent)
+    } else {
+      failed.push(row.pid)
+      // 台账双写（reap-failed 行，与 reaped 同 schema 同挂点阶段）：处置失败率可机器
+      // 对账（评估器按 event 计数），失败原因进 detailDigest。best-effort 同 reaped 行。
+      const journalEvent: CrashJournalEvent = {
+        layer: 'pi',
+        event: 'reap-failed',
+        pid: row.pid,
+        ppid: row.ppid,
+        detailDigest: `orphan matched spawn marker list + ppid=1 but disposal failed (signal error, non-ESRCH); argv: ${argvSummary(row.command)}`,
+      }
+      getCrashJournal().append(journalEvent)
+    }
+  }
+  return { reaped, failed }
+}
+
 export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise<ReapOrphanResult> {
   const { dataDir, ownPid, readSpawnMarkers } = options
   const killGraceMs = options.killGraceMs ?? ORPHAN_KILL_GRACE_MS
@@ -409,36 +461,11 @@ export async function reapOrphanPiProcesses(options: ReapOrphanOptions): Promise
     reason: 'argv matches spawn marker list (--mode rpc + --no-extensions + staged extension/skill value) AND ppid=1 (parent runtime dead, orphan reparented to init)',
     graceMs: killGraceMs,
   })
-  for (const row of orphans) {
-    const ok = await killOrphan(row, killGraceMs, signal, delay, readProcessStartTime)
-    if (ok) {
-      result.reaped.push(row.pid)
-      // 台账双写（crash-forensics §3.3 D1 reaped 行：杀链判据命中处置成功处，与既有
-      // 逐 pid 处置日志同点）。挂在 ok 分支而非发现处：事件名语义 = 已收殓，处置失败
-      // 进 failed 不记 reaped（防误记）。best-effort：writer append 自吞错不向收殓链传播。
-      // 经中间变量传入（扩展字段过 schema 闭接口的 excess property check）。
-      const journalEvent: CrashJournalEvent = {
-        layer: 'pi',
-        event: 'reaped',
-        pid: row.pid,
-        ppid: row.ppid,
-        detailDigest: `argv matches spawn marker list (--mode rpc + --no-extensions + staged extension/skill value) AND ppid=1; argv: ${argvSummary(row.command)}`,
-      }
-      getCrashJournal().append(journalEvent)
-    } else {
-      result.failed.push(row.pid)
-      // 台账双写（reap-failed 行，与 reaped 同 schema 同挂点阶段）：处置失败率可机器
-      // 对账（评估器按 event 计数），失败原因进 detailDigest。best-effort 同 reaped 行。
-      const journalEvent: CrashJournalEvent = {
-        layer: 'pi',
-        event: 'reap-failed',
-        pid: row.pid,
-        ppid: row.ppid,
-        detailDigest: `orphan matched spawn marker list + ppid=1 but disposal failed (signal error, non-ESRCH); argv: ${argvSummary(row.command)}`,
-      }
-      getCrashJournal().append(journalEvent)
-    }
-  }
+  const { reaped, failed } = await reapOrphansWithJournal(orphans, {
+    killGraceMs, signal, delay, readProcessStartTime,
+  })
+  result.reaped = reaped
+  result.failed = failed
   // 收殓结果汇总（D6-⑥ 配套：决策 → 结果闭环，failed 非空时归因有据）
   console.log('[orphan-reap] reap result', {
     action: 'reap_orphan_pi_result',

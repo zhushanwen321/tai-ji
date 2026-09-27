@@ -1,3 +1,4 @@
+---
 '@zhushanwen/extension-protocol': minor
 '@zhushanwen/subagent-core': patch
 '@zhushanwen/pi-subagent-workflow': patch

@@ -60,6 +60,9 @@ function makeFixture(overrides: {
     getState: vi.fn(async () => state as Record<string, unknown>),
     getSessionStats: vi.fn(async () => stats as Record<string, unknown>),
     setModel: vi.fn(async () => undefined),
+    // bg-task-notify 补投触发：getCommands 必经 maybeTriggerBgReconcile → client.prompt
+    // （fire-and-forget），本文件被测语义不含补投，mock 空实现即可
+    prompt: vi.fn(async () => undefined),
   }
   const pm = {
     onSessionExit: vi.fn(),

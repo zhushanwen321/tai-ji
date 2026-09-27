@@ -59,6 +59,7 @@ import {
   reportChildSpawned,
   wireChildStdoutPump,
   type RunEndState,
+  type SessionIdentityTracker,
 } from "./spawn-run-pump.ts";
 import { performGetStateHandshake } from "./get-state-handshake.ts";
 import { sendPromptCommand } from "./stdin-writer.ts";
@@ -420,6 +421,53 @@ function buildTranslatorOpts(
   };
 }
 
+/**
+ * run 尾段：退出码 → 终态 outcome 收集（含 spawn 'error' 形态文案、成功轮数快照
+ * 恢复、失败时 stderr tee 取证指针）。返回 SpawnRunResult 终态载荷。
+ */
+function collectRunResult(
+  record: ReturnType<typeof createReplayRecord>,
+  runEnd: RunEndState,
+  exitCode: number,
+  identity: SessionIdentityTracker,
+  stderrTee: { path: string; close(): void } | undefined,
+  params: SpawnRunParams,
+  startTime: number,
+): SpawnRunResult {
+  // spawn 'error' 形态（子进程从未运行，典型 ENOENT）：错误事件消息（含 errno
+  // code 与命令路径）直接进终态文案——比裸退出码可诊断，且不命中 stale 分诊
+  // 词表。exitCode 判定优先（close 已 settle 0 后迟到的 error 事件只留日志，
+  // 不产生 success=true + error 并存的自相矛盾终态）。
+  // 成功边界（agent_settled 到达）已按轮清零 record.turnCount（SP-9）——收集前
+  // 以 resolve 时刻快照恢复真实轮数（成功 run 的 outcome.turns/usage.turns 不为
+  // 0）；失败路径 agent_settled 未到达，快照缺省，record 值即真实值。
+  if (runEnd.settledTurnCount !== undefined) record.turnCount = runEnd.settledTurnCount;
+  const outcome = collectOutcome(record, {
+    startTime,
+    success: exitCode === 0,
+    error: exitCode === 0
+      ? undefined
+      : runEnd.childErrorMessage !== undefined
+        ? `pi child error: ${runEnd.childErrorMessage} (exit code ${exitCode})`
+        : `pi child exited with code ${exitCode}`,
+    sessionId: identity.sessionId ?? "",
+    sessionFile: identity.sessionFile,
+    // [F-1 信号解耦] schemaExpected 判定源 = task.schema 声明形态（schema 本体
+    // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响守卫期待。
+    ...(params.schema !== undefined ? { schemaExpected: true } : {}),
+  });
+  // [D5 诊断引用落账] 失败时随终态应答上报 stderr tee 路径（引擎应答 failed /
+  // 进程异常退出路径的共同汇聚点 = outcome.error 非空；成功不报——诊断引用只在
+  // 失败语义下有意义）。tee 缺席（无 stderr / dataDir 不可解析 / pid 缺失）= 字段
+  // 缺省，宿主按「无取证指针」消费。
+  const stderrTeePath = outcome.error !== undefined ? stderrTee?.path : undefined;
+  return {
+    ...outcome,
+    ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
+    sessionId: identity.sessionId,
+  };
+}
+
 export async function runSpawnOnce(
   params: SpawnRunParams,
   callbacks: SpawnRunCallbacks,
@@ -567,39 +615,7 @@ export async function runSpawnOnce(
 
     // 9. 等待退出
     const exitCode = await exitPromise;
-
-    // spawn 'error' 形态（子进程从未运行，典型 ENOENT）：错误事件消息（含 errno
-    // code 与命令路径）直接进终态文案——比裸退出码可诊断，且不命中 stale 分诊
-    // 词表。exitCode 判定优先（close 已 settle 0 后迟到的 error 事件只留日志，
-    // 不产生 success=true + error 并存的自相矛盾终态）。
-    // 成功边界（agent_settled 到达）已按轮清零 record.turnCount（SP-9）——收集前
-    // 以 resolve 时刻快照恢复真实轮数（成功 run 的 outcome.turns/usage.turns 不为
-    // 0）；失败路径 agent_settled 未到达，快照缺省，record 值即真实值。
-    if (runEnd.settledTurnCount !== undefined) record.turnCount = runEnd.settledTurnCount;
-    const outcome = collectOutcome(record, {
-      startTime,
-      success: exitCode === 0,
-      error: exitCode === 0
-        ? undefined
-        : runEnd.childErrorMessage !== undefined
-          ? `pi child error: ${runEnd.childErrorMessage} (exit code ${exitCode})`
-          : `pi child exited with code ${exitCode}`,
-      sessionId: identity.sessionId ?? "",
-      sessionFile: identity.sessionFile,
-      // [F-1 信号解耦] schemaExpected 判定源 = task.schema 声明形态（schema 本体
-      // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响守卫期待。
-      ...(params.schema !== undefined ? { schemaExpected: true } : {}),
-    });
-    // [D5 诊断引用落账] 失败时随终态应答上报 stderr tee 路径（引擎应答 failed /
-    // 进程异常退出路径的共同汇聚点 = outcome.error 非空；成功不报——诊断引用只在
-    // 失败语义下有意义）。tee 缺席（无 stderr / dataDir 不可解析 / pid 缺失）= 字段
-    // 缺省，宿主按「无取证指针」消费。
-    const stderrTeePath = outcome.error !== undefined ? stderrTee?.path : undefined;
-    return {
-      ...outcome,
-      ...(stderrTeePath !== undefined ? { stderrTeePath } : {}),
-      sessionId: identity.sessionId,
-    };
+    return collectRunResult(record, runEnd, exitCode, identity, stderrTee, params, startTime);
   } finally {
     if (tempFile !== undefined) await cleanupTempPrompt(tempFile);
   }

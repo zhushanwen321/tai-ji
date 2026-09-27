@@ -71,6 +71,11 @@ export default [
       // zcode-workflow facade（declare agent/world 等）只在引擎编译器内成立，
       // 仓库 eslint 环境下是未定义符号，故豁免
       '.agents/skills/**/workflows/**',
+      // 项目 workflow 脚本（.agents/workflows/pr-lifecycle.js，pi 宿主 workflow 引擎加载）：
+      // $ARGS/log/fail 是引擎注入符号（仓库 eslint 环境下未定义），require() 是该环境
+      // 的 CJS 惯用形态（对齐内置 review-fix-loop-utils.cjs）——与上方 workflow 脚本
+      // 豁免同理由，非项目源码不参与 lint
+      '.agents/workflows/**',
     ],
   },
   // [HISTORICAL] mock 门面文件是所有 domain 的聚合中心（session/chat/config/model/extension/plugin/
@@ -772,6 +777,17 @@ export default [
     files: ['packages/runtime/src/services/preset-service.ts'],
     rules: {
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // relay-registry.ts 是 relay 子进程注册表的唯一聚合点（握手/spawn/双向泵/断连杀/
+  // pid 文件 + 重启残留扫描兜底）。2026-09-24 孤儿活跃度分级收割入列后统计行越过
+  // 500：orphan 处置与 sweep 同属注册表生命周期职责，拆分归独立重构任务——按
+  // 「微超即提额，保留软上限告警」先例（pi-provider-store 520 / preset-service 520
+  // 同型）提额而非 off，超限即再暴露。
+  {
+    files: ['packages/runtime/src/infra/relay/relay-registry.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 550, skipBlankLines: true, skipComments: true }],
     },
   },
 ];

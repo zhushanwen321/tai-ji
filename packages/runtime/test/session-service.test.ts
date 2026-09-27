@@ -232,6 +232,21 @@ interface Setup {
 
 let autoId = 0
 
+/**
+ * per-session replicated-state 实例组的 teardown 登记表。
+ *
+ * 播种 refetch 失败（mock 缺 wire 字段）的实例以真时钟 1s/5s 退避重试；用例结束无人
+ * dispose 时定时器穿越文件生命周期，全包跑撞上 vitest worker teardown →
+ * EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was pending（exit=1）。
+ * 每个创建点（createSetup / 局部 new SessionService）经 trackScalarStates 登记，
+ * afterEach 统一 dispose 四实例停止全部定时器。
+ */
+const liveScalarStateOwners: Array<{ service: SessionService; sids: () => Iterable<string> }> = []
+
+function trackScalarStates(service: SessionService, sids: () => Iterable<string>): void {
+  liveScalarStateOwners.push({ service, sids })
+}
+
 function createSetup(): Setup {
   const clientMap = new Map<string, MockClient>()
   let exitCb: ((sessionId: string, code: number | null, stderr: string) => void) | null = null
@@ -341,6 +356,8 @@ function createSetup(): Setup {
     return { id: piSid, client }
   }
 
+  trackScalarStates(service, () => clientMap.keys())
+
   return {
     service, pm, broker, messageBus, extensionService, clientMap, gitInfoReader,
     triggerExit: (sid, code, stderr = '') => exitCb?.(sid, code, stderr),
@@ -408,6 +425,20 @@ async function waitForSnapshotPublish(): Promise<void> {
 // useRealTimers 幂等，真 timers 下 no-op——不影响 2062 行自管 fake timers 的既有用例）
 afterEach(() => {
   vi.useRealTimers()
+  // 停掉全部登记实例组的退避/防抖/周期定时器（见 liveScalarStateOwners JSDoc——
+  // 泄漏定时器在文件 teardown 后 fire 会撞 vitest worker 关闭，报 unhandled rejection）
+  for (const { service, sids } of liveScalarStateOwners) {
+    for (const sid of sids()) {
+      const states = service.getScalarReplicatedStates(sid)
+      if (states) {
+        states.thinkingLevel.dispose()
+        states.modelId.dispose()
+        states.usage.dispose()
+        states.commands.dispose()
+      }
+    }
+  }
+  liveScalarStateOwners.length = 0
 })
 
 // ───────────────────────────────────────────────────────────────────
@@ -825,6 +856,7 @@ describe('SessionService · lifecycle', () => {
           localSetup.gitInfoReader,
           { record: vi.fn(), list: vi.fn().mockReturnValue([]) } as unknown as ConstructorParameters<typeof SessionService>[8],
         )
+        trackScalarStates(localService, () => ['persist-detach'])
         const client = makeMockClient()
         vi.mocked(localSetup.pm.createSession).mockResolvedValue(client as unknown as IPiEngine)
 
@@ -1715,6 +1747,7 @@ describe('SessionService · onSessionExit callback', () => {
       localSetup.gitInfoReader,
       { record: vi.fn(), list: vi.fn().mockReturnValue([]) } as unknown as ConstructorParameters<typeof SessionService>[8],
     )
+    trackScalarStates(localService, () => localSetup.clientMap.keys())
     const piSid = 'pi-detach-1'
     const client = makeMockClient({
       // W2 收口后 create 用 client.getState()，返回归一后的 state 对象

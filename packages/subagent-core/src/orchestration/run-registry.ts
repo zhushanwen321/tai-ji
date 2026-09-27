@@ -242,6 +242,95 @@ export interface AbandonElapsedInterruptedRunsResult {
  * 活跃 run 一律不放弃（事件流静默 ≠ 死亡，ADR-0047 同源纪律——放弃窗只作用于
  * 已失去活体持有的 run）。
  */
+/** 单 run 的 abandon 判定结果分类（主循环计数归集用）。 */
+type AbandonSingleRunOutcome = "abandoned" | "skippedActive" | "skippedTerminal" | "skippedOther";
+
+/** abandonSingleRun 的执行上下文（主循环解析一次的常量面 + journal / 活体集）。 */
+interface AbandonSingleRunCtx {
+  journal: RunEventJournal;
+  manifestDir: string;
+  now: number;
+  abandonWindowMs: number;
+  activeRunIds?: ReadonlySet<string>;
+}
+
+/** 选项缺省解析集中点（主流程零缺省分支）。abandonWindowMs 由调用方先做 opt-out
+ * 判定（undefined = 不终局化）后传入，此处收窄为必传。 */
+function resolveAbandonOptions(
+  dir: string,
+  opts: AbandonElapsedInterruptedRunsOptions | undefined,
+  abandonWindowMs: number,
+): AbandonSingleRunCtx {
+  return {
+    journal: opts?.journal ?? createRunEventJournal(dir),
+    manifestDir: opts?.manifestDir ?? dir,
+    now: opts?.now ?? Date.now(),
+    abandonWindowMs,
+    activeRunIds: opts?.activeRunIds,
+  };
+}
+
+/** readdir → journal runId 列表；目录不存在 / 读取失败（已 warn）返回 null = 空态。 */
+async function listJournalRunIds(dir: string): Promise<string[] | null> {
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn(`run registry abandon: readdir ${dir} failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`);
+    }
+    return null; // ENOENT = 从未有任何 run 落账，正常空态
+  }
+  return names
+    .filter((n) => n.endsWith(RUN_EVENT_JOURNAL_SUFFIX))
+    .map((n) => n.slice(0, -RUN_EVENT_JOURNAL_SUFFIX.length));
+}
+
+/**
+ * 单 run 的 abandon 判定链（扫描 → 活跃保护 → 已终局幂等跳过 → host-died →
+ * 放弃窗 → 终局化写 manifest）。分类结果由主循环计数；写 manifest 失败 /
+ * 状态机拒绝（坏链 run）以异常上抛，主循环统一 warn 留痕后继续。
+ */
+async function abandonSingleRun(runId: string, ctx: AbandonSingleRunCtx): Promise<AbandonSingleRunOutcome> {
+  const events = await ctx.journal.scan(runId);
+  if (events.length === 0) return "skippedOther"; // 空 journal：无事件证据（missing），无从终局化
+  if (ctx.activeRunIds?.has(runId)) return "skippedActive"; // 活跃保护：事件流静默 ≠ 死亡
+  // 已终局跳过（D5 规则①单源锚定，幂等关键）：abandon 不落 journal 帧
+  // （manifest-write 是唯一终局证据），重扫时 fold 仍停在 interrupted——
+  // 已终局判定必须并读 manifest，否则每轮重复终局化写 manifest（幂等破坏）。
+  // 坏链 fold 停在 created 但 manifest 已在的存量 run 同样在此保护。
+  const existing = await readRunTerminalManifest(ctx.manifestDir, runId);
+  let state = foldEvents(events, runId);
+  if (state.lifecycle === "terminal" || existing !== null) return "skippedTerminal";
+  // 投影判定 host-died（活体集未命中 + 事件流停止）→ interrupted
+  state = transition(state, { type: "host-died" }).state;
+  // 放弃窗判定锚 = 事件流最后活动时刻（事件自带 ts 信封——mtime 启发式退役后
+  // 的时间判据唯一来源）
+  const lastEventAt = events[events.length - 1]!.ts;
+  if (ctx.now - lastEventAt < ctx.abandonWindowMs) return "skippedOther"; // interrupted 但放弃窗未到——待恢复期
+  // abandon-elapsed → terminal(failed)；输出动作 manifest-write 执行（
+  // journal-cleanup-eligible 由 prune 资格判定读 manifest 自然兑现）
+  const terminal = transition(state, { type: "abandon-elapsed" }).state;
+  const created = events.find((e) => e.type === "run-created");
+  const workflowName =
+    created !== undefined && created.type === "run-created" ? created.workflowName : runId;
+  await writeRunTerminalManifest(ctx.manifestDir, {
+    id: runId,
+    workflowName,
+    outcome: terminal.outcome ?? "failed",
+    errorCode: "interrupted_abandoned",
+    settledAt: ctx.now,
+  });
+  logger.warn(
+    `run registry: interrupted run abandoned after grace window (runId=${runId}, ` +
+      `lastEventAt=${new Date(lastEventAt).toISOString()}, windowMs=${ctx.abandonWindowMs}) — ` +
+      "manifest written with outcome=failed errorCode=interrupted_abandoned; journal is now cleanup-eligible",
+  );
+  return "abandoned";
+}
+
 export async function abandonElapsedInterruptedRuns(
   dir: string,
   opts?: AbandonElapsedInterruptedRunsOptions,
@@ -253,79 +342,18 @@ export async function abandonElapsedInterruptedRuns(
     skippedTerminal: 0,
     skippedOther: 0,
   };
-  const journal = opts?.journal ?? createRunEventJournal(dir);
-  const manifestDir = opts?.manifestDir ?? dir;
-  const now = opts?.now ?? Date.now();
   const abandonWindowMs = opts?.abandonWindowMs ?? resolveRunAbandonWindowMs();
-  const activeRunIds = opts?.activeRunIds;
   if (abandonWindowMs === undefined) return result; // 显式 opt-out：不终局化
+  const ctx = resolveAbandonOptions(dir, opts, abandonWindowMs);
 
-  let names: string[];
-  try {
-    names = await readdir(dir);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      logger.warn(`run registry abandon: readdir ${dir} failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`);
-    }
-    return result; // ENOENT = 从未有任何 run 落账，正常空态
-  }
-  const journalRunIds = names
-    .filter((n) => n.endsWith(RUN_EVENT_JOURNAL_SUFFIX))
-    .map((n) => n.slice(0, -RUN_EVENT_JOURNAL_SUFFIX.length));
+  const journalRunIds = await listJournalRunIds(dir);
+  if (journalRunIds === null) return result;
   result.scanned = journalRunIds.length;
 
   for (const runId of journalRunIds) {
     try {
-      const events = await journal.scan(runId);
-      if (events.length === 0) {
-        result.skippedOther += 1; // 空 journal：无事件证据（missing），无从终局化
-        continue;
-      }
-      const active = activeRunIds?.has(runId) ?? false;
-      if (active) {
-        result.skippedActive += 1;
-        continue;
-      }
-      // 已终局跳过（D5 规则①单源锚定，幂等关键）：abandon 不落 journal 帧
-      // （manifest-write 是唯一终局证据），重扫时 fold 仍停在 interrupted——
-      // 已终局判定必须并读 manifest，否则每轮重复终局化写 manifest（幂等破坏）。
-      // 坏链 fold 停在 created 但 manifest 已在的存量 run 同样在此保护。
-      const existing = await readRunTerminalManifest(manifestDir, runId);
-      let state = foldEvents(events, runId);
-      if (state.lifecycle === "terminal" || existing !== null) {
-        result.skippedTerminal += 1;
-        continue;
-      }
-      // 投影判定 host-died（活体集未命中 + 事件流停止）→ interrupted
-      state = transition(state, { type: "host-died" }).state;
-      // 放弃窗判定锚 = 事件流最后活动时刻（事件自带 ts 信封——mtime 启发式退役后
-      // 的时间判据唯一来源）
-      const lastEventAt = events[events.length - 1]!.ts;
-      if (now - lastEventAt < abandonWindowMs) {
-        result.skippedOther += 1; // interrupted 但放弃窗未到——待恢复期
-        continue;
-      }
-      // abandon-elapsed → terminal(failed)；输出动作 manifest-write 执行（
-      // journal-cleanup-eligible 由 prune 资格判定读 manifest 自然兑现）
-      const terminal = transition(state, { type: "abandon-elapsed" }).state;
-      const created = events.find((e) => e.type === "run-created");
-      const workflowName =
-        created !== undefined && created.type === "run-created" ? created.workflowName : runId;
-      await writeRunTerminalManifest(manifestDir, {
-        id: runId,
-        workflowName,
-        outcome: terminal.outcome ?? "failed",
-        errorCode: "interrupted_abandoned",
-        settledAt: now,
-      });
-      result.abandoned += 1;
-      logger.warn(
-        `run registry: interrupted run abandoned after grace window (runId=${runId}, ` +
-          `lastEventAt=${new Date(lastEventAt).toISOString()}, windowMs=${abandonWindowMs}) — ` +
-          "manifest written with outcome=failed errorCode=interrupted_abandoned; journal is now cleanup-eligible",
-      );
+      // outcome 分类名与 result 计数字段名同构，直接索引计数
+      result[await abandonSingleRun(runId, ctx)] += 1;
     } catch (err) {
       // 单 run 失败不中断整轮（含状态机拒绝——坏链 run 保守跳过，下轮重判）
       result.skippedOther += 1;

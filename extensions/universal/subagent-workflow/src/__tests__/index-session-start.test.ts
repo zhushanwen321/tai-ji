@@ -32,6 +32,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// 本文件大量用例保留组合根挂载形态（mount index.ts + vi.mock 3 模块），加载期
+// 整图重建在覆盖率插桩 + 机器满载时单用例可超 5s 默认预算（PR 门禁 gate-suite
+// 实测 W3TC8 超时假红）——预算放大只作用于挂载/重建耗时，不改断言语义。
+vi.setConfig({ testTimeout: 30_000 });
+
 // ── mock modules（在 import 前声明；路径相对 src/__tests__/） ──
 
 // JsonlRunStore mock：mount 用例的 store 可控点。dispose/flushPendingSaves：

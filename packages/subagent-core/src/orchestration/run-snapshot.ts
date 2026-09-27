@@ -223,6 +223,24 @@ export function toRunSnapshot(run: WorkflowRun): RunSnapshot {
  * @param events journal scan 产出（写入序；坏行已被 scan 侧跳过）
  * @returns 新快照对象（浅拷贝分层克隆——输入不被修改，flush 侧可安全覆写）
  */
+/** ts 单调防御：进度时钟取 max（乱序帧不回拨）。run 级 health 与 per-call 共用。 */
+function advanceProgress(current: number | undefined, ts: number): number {
+  return current === undefined || current < ts ? ts : current;
+}
+
+/** 单事件推进关联 call（taskIndex 关联不上 = 代际错位，per-call 跳过——health 照常推进）。 */
+function advanceCallProgress(
+  callsById: ReadonlyMap<number, CallSnapshot>,
+  taskIndex: number,
+  ts: number,
+  startIfFirst: boolean,
+): void {
+  const call = callsById.get(taskIndex);
+  if (call === undefined) return;
+  if (startIfFirst && call.startedAt === undefined) call.startedAt = ts;
+  call.lastProgressAt = advanceProgress(call.lastProgressAt, ts);
+}
+
 export function projectRunEvents(snap: RunSnapshot, events: readonly WorkflowRunEvent[]): RunSnapshot {
   const callsById = new Map<number, CallSnapshot>();
   const calls = snap.state.calls.map((c) => {
@@ -235,27 +253,16 @@ export function projectRunEvents(snap: RunSnapshot, events: readonly WorkflowRun
   let outcome = snap.state.outcome;
   let errorCode = snap.state.errorCode;
 
-  const advanceCall = (taskIndex: number, ts: number, startIfFirst: boolean): void => {
-    const call = callsById.get(taskIndex);
-    if (call === undefined) return; // 代际错位：per-call 跳过（health 照常推进）
-    if (startIfFirst && call.startedAt === undefined) call.startedAt = ts;
-    call.lastProgressAt = call.lastProgressAt === undefined || call.lastProgressAt < ts
-      ? ts
-      : call.lastProgressAt;
-  };
-
   for (const event of events) {
-    lastProgressAt = lastProgressAt === undefined || lastProgressAt < event.ts
-      ? event.ts
-      : lastProgressAt;
+    lastProgressAt = advanceProgress(lastProgressAt, event.ts);
     switch (event.type) {
       case "ask-dispatched":
       case "ask-executing":
-        advanceCall(event.taskIndex, event.ts, true);
+        advanceCallProgress(callsById, event.taskIndex, event.ts, true);
         break;
       case "ask-retrying":
       case "ask-settled":
-        advanceCall(event.taskIndex, event.ts, false);
+        advanceCallProgress(callsById, event.taskIndex, event.ts, false);
         break;
       case "run-settled":
         outcome = event.outcome;

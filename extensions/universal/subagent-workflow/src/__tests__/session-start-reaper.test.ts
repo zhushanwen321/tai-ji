@@ -17,6 +17,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+// 每用例 beforeEach resetModules 后动态 import 整条模块图（覆盖率插桩下为纯 CPU
+// 重建），机器满载时 5s 默认预算会被打穿（PR 门禁 gate-suite 实测超时假红）——
+// 本文件无真实时钟依赖，预算放大只作用于重建耗时，不改断言语义。
+vi.setConfig({ testTimeout: 30_000 });
+
 import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
 import type { SessionLifecycleDeps } from "../session-lifecycle.ts";
 

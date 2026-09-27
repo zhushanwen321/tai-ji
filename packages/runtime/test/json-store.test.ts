@@ -671,6 +671,23 @@ describe('cleanupAgedBackupResidue（备份残留按龄回收）', () => {
   const OLD_ISO = '2020-01-01T000000000Z'
   const RECENT_ISO = new Date().toISOString().replace(/[:.]/g, '')
 
+  // 回收动作的 console.debug/warn 输出（json-store.ts cleanup 路径）非断言对象，
+  // mock 掉：① 消除 worker console 转发流量——满并行 + coverage 插桩下文件结束时
+  // onUserConsoleLog RPC pending 未完成会以 EnvironmentTeardownError 收场，run 退出码
+  // 非 0（gate-suite round 2 实测）；② 该输出本就污染测试 stdout/stderr。
+  let consoleSpies: Array<ReturnType<typeof vi.spyOn>>
+
+  beforeEach(() => {
+    consoleSpies = [
+      vi.spyOn(console, 'debug').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+    ]
+  })
+
+  afterEach(() => {
+    for (const spy of consoleSpies) spy.mockRestore()
+  })
+
   function makeScanRoot(): string {
     return mkdtempSync(join(tmpdir(), 'aged-backup-'))
   }
