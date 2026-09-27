@@ -1367,6 +1367,10 @@
         {
           "type": "machine",
           "hook": "eslint.config.mjs"
+        },
+        {
+          "type": "machine",
+          "hook": "install-hooks.sh §node:test grep 段（NODE_TEST_HITS 段——测试文件面拦截载体：eslint 全局 ignores 硬排除测试文件，测试文件经 pre-commit 模板 grep 拦截）"
         }
       ]
     },

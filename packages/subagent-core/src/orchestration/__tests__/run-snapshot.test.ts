@@ -431,6 +431,16 @@ describe("run-snapshot — [P3/D6] projectRunEvents fold（单一推导点）", 
     expect(call0.startedAt).toBe(700);
   });
 
+  it("ask-dispatched 恢复 calls[].phase（W1 D6 分组供源）；无 phase 帧保持 undefined（旧 journal 行兼容）", () => {
+    const snap = projectRunEvents(makeSnapshotWithCalls(), [
+      ev({ type: "ask-dispatched", taskIndex: 0, agentName: "agent-0", attempt: 1, phase: "Dev-w0(W1)", ts: 1000 }),
+      // 无 phase 帧 = 停写期 journal 行 / 未标注剧本——fold 不造键
+      ev({ type: "ask-dispatched", taskIndex: 1, agentName: "agent-1", attempt: 1, ts: 1100 }),
+    ]);
+    expect(snap.state.calls.find((c) => c.id === 0)!.phase).toBe("Dev-w0(W1)");
+    expect(snap.state.calls.find((c) => c.id === 1)!.phase).toBeUndefined();
+  });
+
   it("run-settled：health 推进 + 终局 outcome/errorCode 落快照（failed 形态）", () => {
     const snap = projectRunEvents(makeSnapshotWithCalls(), [
       ev({ type: "run-settled", outcome: "failed", errorCode: "engine_crashed", reason: "boom", artifactsDir: "/tmp/wf", ts: 9000 }),

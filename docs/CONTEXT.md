@@ -254,7 +254,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 **命名约定**: "Panel" 统一指 Session 的视口（即代码中的 `Panel` / `PanelLeaf` / `PanelTree`，`packages/renderer/src/stores/panel.ts`），不用于其他含义。
 
 ### Run 事件 journal（workflow 域）
-workflow run 的事件流持久化：`<sessionDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），JSONL 逐行记录 run 生命周期事件（`run-created / ask-dispatched / armed / ask-settled / run-settled` 等，事件行携带单调 seq）。它是 run 态的**唯一事实源**（W1 介质归位，[ADR-0078](adr/decisions.md)）——注册表投影 = journal fold，终局诊断引用从事件流读回（见 [ADR-0074](adr/decisions.md)）。由显式状态机单点写入，引擎不直接写。
+workflow run 的事件流持久化：`<sessionDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），JSONL 逐行记录 run 生命周期事件（`run-created / ask-dispatched / armed / ask-settled / run-settled` 等，事件行携带单调 seq）。`ask-dispatched` 载荷携带 `phase?`——剧本 `phase()`/`opts.phase` 声明的归属，抽屉分组视图（renderer `hasExplicitPhases`）的供源。它是 run 态的**唯一事实源**（W1 介质归位，[ADR-0078](adr/decisions.md)）——注册表投影 = journal fold，终局诊断引用从事件流读回（见 [ADR-0074](adr/decisions.md)）。由显式状态机单点写入，引擎不直接写。
 
 ### 介质归位（run/record 运行态持久化，W1）
 run 与 record 的运行态数据持久化形态（[ADR-0078](adr/decisions.md)）：**journal 事件流是唯一事实源**——run 侧 = 既有 Run 事件 journal，record 侧 = 新增事件文件 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀，既有 .jsonl 扫描器结构性忽略；首行 `{"type":"record-journal"}` 头行自描述）。子术语：

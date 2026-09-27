@@ -793,13 +793,21 @@ function reportDispatchFailure(runId: string, err: unknown): void {
 }
 
 /** `ask-dispatched` 落账（脚本 agent() 调用已派发；attempt 恒 1——重试在
- *  executeAgentCall 内部递归，attempt 递增随终局帧的 call.attempts 落账）。 */
-export function dispatchAskDispatched(run: WorkflowRun, callId: number, agentName: string): void {
+ *  executeAgentCall 内部递归，attempt 递增随终局帧的 call.attempts 落账）。
+ *  phase = agent-call 消息携带的剧本归属（W1 D6「phase 分组供源承接」）——
+ *  undefined/空串（未标注剧本）时不写字段，载荷紧凑且旧读侧兼容。 */
+export function dispatchAskDispatched(
+  run: WorkflowRun,
+  callId: number,
+  agentName: string,
+  phase?: string,
+): void {
   void dispatchRunTrigger(run, {
     type: "ask-dispatched",
     taskIndex: callId,
     agentName,
     attempt: 1,
+    ...(phase ? { phase } : {}),
     ts: Date.now(),
   }).catch((err: unknown) => reportDispatchFailure(run.runId, err));
 }
@@ -1611,7 +1619,9 @@ function dispatchAgentCall(
   const call = new AgentCall(msg.callId, resolved.opts, node);
   run.state.calls.set(msg.callId, call);
   // [P1b-1] ask-dispatched 落账（编排层事件源，D5 载荷表；taskIndex = callId 单源）。
-  dispatchAskDispatched(run, msg.callId, agentName);
+  // phase 透传（W1 D6）：worker 脚本派发时已算好归属（opts.phase || _currentPhase），
+  // 与 trace 节点（node.phase = msg.phase）同源——journal 承载后投影链 phase 不再恒缺。
+  dispatchAskDispatched(run, msg.callId, agentName, msg.phase);
 
   // [GUI 步骤实时可见 2026-09-14] 启动即持久化：trace.append 的 running 节点若等
   // 完成路径（.then/.catch）才随 save 落盘，running 中步骤在权威快照里恒缺席——

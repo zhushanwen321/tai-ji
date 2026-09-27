@@ -87,6 +87,13 @@ interface CallSnapshot {
   startedAt?: number;
   /** [P3/D6] 该 ask 最近一次事件边沿（dispatched/executing/retrying/settled）的墙钟时间（epoch ms）。 */
   lastProgressAt?: number;
+  /**
+   * [W1/D6] 剧本 phase 归属——ask-dispatched 事件 fold 恢复（单一推导点同
+   * startedAt/lastProgressAt）。聚合上不维护（phase 现场在 traceNode.phase，
+   * dispatch 期写入）；事件无 phase 帧（停写期 journal 行 / 未标注剧本）保持
+   * undefined，toRunSnapshot 不产出此键、flush 后由 fold 重填（幂等）。
+   */
+  phase?: string;
   result?: AgentResult;
   sessionId?: string;
   sessionFile?: string;
@@ -207,7 +214,8 @@ export function toRunSnapshot(run: WorkflowRun): RunSnapshot {
  * - `ask-dispatched` / `ask-executing`：按 taskIndex 关联 calls[] 条目（id 同源
  *   D-10），startedAt ??= ts（首边沿即起点——executing 兜底覆盖 journal 缺
  *   dispatched 帧的历史分段；预留消费面——ask-executing 现无生产写入方，见
- *   AskExecutingEvent 注释）；lastProgressAt = ts；
+ *   AskExecutingEvent 注释）；lastProgressAt = ts；ask-dispatched 另恢复
+ *   calls[].phase（W1 D6 分组供源，事件无 phase 帧保持 undefined）；
  * - `ask-retrying` / `ask-settled`：仅推进 lastProgressAt（重试轨迹的进度语义）；
  * - `run-created` / `armed`：仅推进 run 级 health.lastProgressAt；
  * - `run-settled`：health 推进 + 终局投影（state.outcome / errorCode 落快照）；
@@ -256,7 +264,16 @@ export function projectRunEvents(snap: RunSnapshot, events: readonly WorkflowRun
   for (const event of events) {
     lastProgressAt = advanceProgress(lastProgressAt, event.ts);
     switch (event.type) {
-      case "ask-dispatched":
+      case "ask-dispatched": {
+        advanceCallProgress(callsById, event.taskIndex, event.ts, true);
+        // [W1/D6] phase 分组供源恢复——事件无 phase 帧（旧 journal 行 / 未标注
+        // 剧本）保持 undefined 不造键；关联不上条目同进度语义（per-call 跳过）。
+        const dispatched = callsById.get(event.taskIndex);
+        if (dispatched !== undefined && event.phase !== undefined) {
+          dispatched.phase = event.phase;
+        }
+        break;
+      }
       case "ask-executing":
         advanceCallProgress(callsById, event.taskIndex, event.ts, true);
         break;

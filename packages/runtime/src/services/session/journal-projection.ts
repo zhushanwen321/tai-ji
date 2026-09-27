@@ -107,6 +107,8 @@ export function parseWorkflowRunEventFileLine(line: string): WorkflowRunEvent | 
 export interface RunAskStepFold {
   taskIndex: number
   agentName: string
+  /** 剧本 phase 归属（W1 D6 分组供源；ask-dispatched 携带，旧 journal 行缺省 undefined）。 */
+  phase?: string
   /** 首个 dispatched ts（步骤起点）。 */
   startedAt: number
   /** 最近一次该 ask 事件 ts（进度边沿）。 */
@@ -145,7 +147,22 @@ export function foldRunJournalEvents(
       case 'run-created':
         fold.created = { runId: event.runId, workflowName: event.workflowName, ts: event.ts }
         break
-      case 'ask-dispatched':
+      case 'ask-dispatched': {
+        const existing = fold.asks.get(event.taskIndex)
+        if (existing === undefined) {
+          fold.asks.set(event.taskIndex, {
+            taskIndex: event.taskIndex,
+            agentName: event.agentName,
+            // 剧本归属随帧落投影（W1 D6）；无 phase 帧不造键（旧 journal 行兼容）
+            ...(event.phase !== undefined ? { phase: event.phase } : {}),
+            startedAt: event.ts,
+            lastProgressAt: event.ts,
+          })
+        } else {
+          existing.lastProgressAt = Math.max(existing.lastProgressAt, event.ts)
+        }
+        break
+      }
       case 'ask-executing': {
         const existing = fold.asks.get(event.taskIndex)
         if (existing === undefined) {
@@ -391,6 +408,9 @@ export function projectV2Workflow(
       agentCalls.push({
         id: ask.taskIndex,
         agent: ask.agentName,
+        // phase 分组供源透传（W1 D6）——renderer hasExplicitPhases 判据
+        // `phase !== undefined` 由此成立；fold 缺 phase（旧行）不造键保持平铺
+        ...(ask.phase !== undefined ? { phase: ask.phase } : {}),
         status: stepStatus,
         startedAt: toIso(ask.startedAt),
         ...(ask.settled !== undefined ? { completedAt: toIso(ask.settled.ts) } : {}),

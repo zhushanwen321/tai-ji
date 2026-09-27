@@ -279,6 +279,16 @@ interface AskIdentity {
 /** `ask-dispatched`——脚本 agent() 调用已派发。 */
 export interface AskDispatchedEvent extends AskIdentity, EventEnvelope {
   type: "ask-dispatched";
+  /**
+   * 剧本 phase 归属（`phase()` 包裹 / `opts.phase` 显式声明——派发时刻由 worker
+   * 脚本按 `opts.phase || _currentPhase` 算出，随 agent-call 消息到达壳侧落账）。
+   * W1 设计 D6「phase 分组供源承接」：v1 快照 trace 停写后 phase 的唯一落盘通道，
+   * 快照 fold 与 runtime 投影经此恢复 calls[].phase（renderer hasExplicitPhases
+   * 判据 `phase !== undefined` 的供源）。
+   * 可选 = 旧 journal 行（停写期帧）与未标注剧本（无 phase 归属）兼容——缺省即
+   * 「无归属」，fold/投影侧保持 undefined 不造键。
+   */
+  phase?: string;
 }
 
 /**

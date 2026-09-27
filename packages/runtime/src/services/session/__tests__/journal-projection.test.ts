@@ -370,6 +370,34 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
     expect(record.agentCalls[1]!.error).toBe('engine_crashed')
     expect(record.outcome).toBe('completed')
   })
+
+  it('ask-dispatched 带 phase → fold 骨架与投影 call.phase 透传；无 phase 行 undefined（W1 D6 分组供源）', () => {
+    const fold = foldRunJournalEvents(
+      initialRunJournalFold(),
+      [
+        runEvent({ type: 'ask-dispatched', taskIndex: 0, agentName: 'w1', attempt: 1, phase: 'Dev-w0(W1)', ts: 1100 }),
+        // 无 phase 帧 = 停写期 journal 行 / 未标注剧本——fold 不造键
+        runEvent({ type: 'ask-dispatched', taskIndex: 1, agentName: 'w2', attempt: 1, ts: 1200 }),
+      ],
+    )
+    expect(fold.asks.get(0)?.phase).toBe('Dev-w0(W1)')
+    expect('phase' in fold.asks.get(1)!).toBe(false)
+
+    const registered = {
+      v: 2 as const,
+      kind: 'registered' as const,
+      runId: 'wf-phase',
+      workflowName: 'flow',
+      scriptName: 'test-flow',
+      slug: 'tf',
+      startedAt: 1000,
+      journalPath: '/tmp/ws/wf-phase.events.jsonl',
+    }
+    const record = projectV2Workflow(registered, undefined, fold)!
+    // renderer hasExplicitPhases（phase !== undefined）的供源：带 phase 步骤进分组，旧行保持平铺
+    expect(record.agentCalls[0]!.phase).toBe('Dev-w0(W1)')
+    expect(record.agentCalls[1]!.phase).toBeUndefined()
+  })
 })
 
 describe('mergeJournalProjection（单点合并）', () => {

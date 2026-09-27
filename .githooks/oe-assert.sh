@@ -40,7 +40,9 @@ check_exempt() {
   local d=${tag#oe-exempt:}; d=${d%%:*}
   local cat=${tag##*:}
   local days
-  # 兼容 BSD/GNU date：解析失败按 0 天处理（U7 场景 4 实测适配点）
+  # 兼容 BSD/GNU date：两层解析均失败（非法日期串如 99999999）时回退 epoch 0 → 巨大天数
+  # → 判 expired。fail-safe：手滑写错的豁免日期被拒绝豁免，而非意外获得永久放行
+  # （合法日期含未来日期两层解析正常，实测 20260926/20990101 均 ok）
   days=$(( ( $(date +%s) - $(date -j -f "%Y%m%d" "$d" +%s 2>/dev/null || date -d "${d:0:4}-${d:4:2}-${d:6:2}" +%s 2>/dev/null || echo 0) ) / 86400 ))
   { [ "$cat" = "wip"  ] && [ "$days" -gt 30 ]; } && { echo expired; return; }
   { [ "$cat" = "test" ] && [ "$days" -gt 90 ]; } && { echo expired; return; }

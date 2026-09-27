@@ -124,7 +124,9 @@ export function buildTypecheckSteps() {
 export function hasExecutableLines(content, filePath) {
   if (filePath.endsWith('.vue')) return true
   // 逐字符状态机：剥注释（行/块）并抹掉字符串字面量——字符串内的 // 与括号不参与判定。
-  // 模板串内 ${} 表达式一并抹掉（纯类型文件无模板串；方向偏排除，由保守兜底覆盖）。
+  // 模板串内 ${} 表达式一并抹掉——已知漏 FAIL 边界（有意取舍，不做完整 JS 词法）：
+  // 唯一执行语义为模板插值的 const（export const V = `x${f()}`）判 false；正则字面量内
+  // 的 { 计入深度可能吞掉同文件后续行判定。此两形态靠 audit 细网 / 评审兜底，不视为门禁缺陷。
   const lines = stripCommentsAndStrings(content).split('\n')
   let i = 0
   while (i < lines.length) {

@@ -188,6 +188,40 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
   });
 });
 
+// ── 1.5 ask-dispatched phase 承载（W1 D6 phase 分组供源） ────
+
+describe("ask-dispatched phase 承载（W1 D6 分组供源）", () => {
+  it("dispatchAskDispatched 透传 phase：journal 帧携带剧本归属", async () => {
+    const run = makeRun("wf-phase-1");
+    await dispatchRunCreated(run);
+    dispatchAskDispatched(run, 0, "reviewer", "Dev-w0(W1)");
+    await dispatchRunTrigger(run, { type: "cancel-requested", reason: "test-drain" });
+
+    const events = await scanRunEvents(journalDir, run.runId);
+    const dispatched = events.find(
+      (e): e is Extract<WorkflowRunEvent, { type: "ask-dispatched" }> => e.type === "ask-dispatched",
+    )!;
+    expect(dispatched.phase).toBe("Dev-w0(W1)");
+  });
+
+  it("无归属（缺参 / 空串）不写 phase 键——载荷紧凑，旧读侧零兼容成本", async () => {
+    const run = makeRun("wf-phase-2");
+    await dispatchRunCreated(run);
+    dispatchAskDispatched(run, 0, "reviewer");
+    dispatchAskDispatched(run, 1, "fixer", "");
+    await dispatchRunTrigger(run, { type: "cancel-requested", reason: "test-drain" });
+
+    const events = await scanRunEvents(journalDir, run.runId);
+    const dispatched = events.filter(
+      (e): e is Extract<WorkflowRunEvent, { type: "ask-dispatched" }> => e.type === "ask-dispatched",
+    );
+    expect(dispatched).toHaveLength(2);
+    for (const frame of dispatched) {
+      expect("phase" in frame).toBe(false);
+    }
+  });
+});
+
 // ── 2. 终态三形态（journal 侧写读闭环） ──────────────────────
 
 describe("终态写读三形态（验收 b：journal 侧）", () => {
