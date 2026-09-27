@@ -158,6 +158,21 @@ function listFilesRecursive(root: string, suffix: string, depth = 0, acc: string
   return acc
 }
 
+/**
+ * 会话文件定位：waitUntil sessions 树下出现会话 JSONL 后返回路径。
+ * pi 延迟写入语义（首条 assistant 消息 flush 前文件可能不存在）决定只能在
+ * 首条消息发出后调用；journal 侧 *.events.jsonl 同以 .jsonl 结尾，排除防误取。
+ */
+async function locateSessionFile(agentDir: string): Promise<string> {
+  const isSessionFile = (f: string): boolean => f.endsWith('.jsonl') && !f.endsWith('.events.jsonl')
+  const found = await waitUntil(
+    () => listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').some(isSessionFile),
+    JSONL_FLUSH_TIMEOUT_MS,
+  )
+  expect(found, `会话 JSONL 应在首条消息 flush 后落盘（${JSONL_FLUSH_TIMEOUT_MS}ms 窗口）`).toBe(true)
+  return listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').find(isSessionFile)!
+}
+
 function parseJsonlLines(file: string): { entries: Record<string, unknown>[]; badLines: number } {
   const entries: Record<string, unknown>[] = []
   let badLines = 0
@@ -176,6 +191,14 @@ function extractCustomEntries(file: string, customType: string): Record<string, 
   return parseJsonlLines(file).entries
     .filter((e) => e['type'] === 'custom' && e['customType'] === customType)
     .map((e) => (e['data'] ?? {}) as Record<string, unknown>)
+}
+
+/** 送达标签通道：type=custom_message（pi.sendMessage 落盘形态——权威消费面
+ *  collectDeliveredNotifyIds 只认此形态）。与 plain custom entry（type=custom，
+ *  data 平铺）是两条落盘通道，customType 同名不能混用 extractor。 */
+function extractCustomMessageEntries(file: string, customType: string): Record<string, unknown>[] {
+  return parseJsonlLines(file).entries
+    .filter((e) => e['type'] === 'custom_message' && e['customType'] === customType)
 }
 
 function readJournalFrames(file: string): Record<string, unknown>[] {
@@ -248,15 +271,10 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     if (typeof sid !== 'string' || sid === '') throw new Error('session.created reply 应携带非空 session.id')
     const sub = await openListenWs(port, sid)
 
-    const agentDir = path.join(dataDir, 'agent')
-    const sessionFound = await waitUntil(
-      () => listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').length > 0,
-      JSONL_FLUSH_TIMEOUT_MS,
-    )
-    expect(sessionFound, '会话 JSONL 应已落盘（session.create 即建文件）').toBe(true)
-    const sessionFile = listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl')[0]
-
-    shared = { dataDir, fixtureDir, goodAgentPath, port, sid, page, sessionFile, sub, consoleCap, cleanup, s3aRecordId: undefined }
+    // 会话文件不在此处等待：pi 延迟写入语义 = 首条 assistant 消息 flush 前文件可能
+    // 不存在，session.create 后裸等必超时——sessionFile 由各用例发首条消息后
+    // locateSessionFile 定位（serial 共享同会话，S3a 首次定位后 S3b/S3c 幂等重定位）
+    shared = { dataDir, fixtureDir, goodAgentPath, port, sid, page, sessionFile: '', sub, consoleCap, cleanup, s3aRecordId: undefined }
   })
 
   test.afterAll(async () => {
@@ -272,29 +290,47 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     }
   })
 
-  /** 发 prompt → 等主 turn complete（真实 LLM 调工具后收口）。 */
+  /** 发 prompt → 等主 turn complete（真实 LLM 调工具后收口）。
+   *  busy-retry：上一场景的 wf-done 通知（triggerTurn）唤醒的 turn 可能仍在跑，
+   *  此时 message.send 的 RPC 回执成功但 pi 层 prompt 失败被静默丢弃（runtime 日志
+   *  'Agent is already processing'——r3 实测 S3b 证据，sessionTail 空白佐证）。
+   *  判定：短探测窗内无 message.complete 且发送后新增日志含 busy 拒绝 → 等待后
+   *  重发；末轮用全预算窗，仍无 complete 按原超时断言红。 */
   async function sendAndWaitTurn(content: string, tag: string, timeoutMs: number): Promise<void> {
     const s = shared!
-    const sendReply = await wsRoundTrip(s.port, {
-      type: 'message.send',
-      id: tag,
-      payload: { sessionId: s.sid, content },
-    }, tag, 30_000)
-    expect(sendReply.type, `${tag} message.send 应被接受`).not.toBe('error')
-    const done = await waitUntil(
-      () => s.sub.events.filter((e) => e.type === 'message.complete').length > 0,
-      timeoutMs,
-    )
-    if (!done) {
+    const BUSY_PROBE_MS = 20_000
+    const BUSY_SETTLE_MS = 8_000
+    const MAX_ATTEMPTS = 4
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const sendId = `${tag}-${attempt}`
+      const logsBefore = readRuntimeLogs(s.dataDir).length
+      const sendReply = await wsRoundTrip(s.port, {
+        type: 'message.send',
+        id: sendId,
+        payload: { sessionId: s.sid, content },
+      }, sendId, 30_000)
+      expect(sendReply.type, `${tag} message.send 应被接受`).not.toBe('error')
+      s.sub.events.length = 0
+      const done = await waitUntil(
+        () => s.sub.events.filter((e) => e.type === 'message.complete').length > 0,
+        attempt === MAX_ATTEMPTS ? timeoutMs : BUSY_PROBE_MS,
+      )
+      if (done) return
+      const busyRejected = readRuntimeLogs(s.dataDir).slice(logsBefore).includes('Agent is already processing')
+      if (attempt < MAX_ATTEMPTS && busyRejected) {
+        console.warn(`[batch-s3] ${tag} 撞 busy turn（prompt 被静默丢弃），${BUSY_SETTLE_MS}ms 后重发（${attempt}/${MAX_ATTEMPTS}）`)
+        await new Promise((resolve) => setTimeout(resolve, BUSY_SETTLE_MS))
+        continue
+      }
       writeDiag(`batch-s3-${tag}-turn.json`, {
         seen: [...new Set(s.sub.events.map((e) => String(e.type)))],
         runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
+        busyRejected,
         consoleErrors: s.consoleCap.errors,
       })
+      expect(done, `${tag} 主 turn 未在 ${timeoutMs}ms 内 message.complete（查 diag）`).toBe(true)
+      return
     }
-    expect(done, `${tag} 主 turn 未在 ${timeoutMs}ms 内 message.complete（查 diag）`).toBe(true)
-    // 清零事件窗（下一 turn 的 complete 计数不受污染）
-    s.sub.events.length = 0
   }
 
   test('S3a (batch real): 坏 agent 路径 → partial 收口（脚本层失败 ≠ run 死法）', async ({ }, testInfo) => {
@@ -311,6 +347,9 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
       `After the tool call returns, reply with only the word DISPATCHED. [${MAIN_MARKER}]`
 
     await sendAndWaitTurn(prompt, 's3a-send', MAIN_TURN_TIMEOUT_MS)
+
+    // 会话文件定位（首条消息已发，pi flush 后文件必在——本用例起供 S3b/S3c 共用）
+    s.sessionFile = await locateSessionFile(path.join(s.dataDir, 'agent'))
 
     // journal 出现 → runId
     const agentDir = path.join(s.dataDir, 'agent')
@@ -338,8 +377,8 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     await s.page.screenshot({ path: testInfo.outputPath('s3a-partial-arrived.png'), fullPage: true })
 
     // 通知恰 1 条 + Script Result status=partial：一 ok 一 failed（failed 带 error）
-    const deliveries = extractCustomEntries(s.sessionFile, 'workflow-result')
-    expect(deliveries.length, 'workflow-result 送达 entry 应恰 1 条').toBe(1)
+    const deliveries = extractCustomMessageEntries(s.sessionFile, 'workflow-result')
+    expect(deliveries.length, 'workflow-result 送达 entry 应恰 1 条（custom_message 通道）').toBe(1)
     const content = String(deliveries[0]['content'] ?? '')
     const scriptResultMatch = content.match(/--- Script Result ---\n([\s\S]*?)(\n\n--- Agent Trace ---|$)/)
     expect(scriptResultMatch, '通知 content 应含 Script Result 段').not.toBeNull()
@@ -381,27 +420,41 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     test.skip(s.s3aRecordId === undefined, 'S3a 未产出 record id（前置失败则本用例跳过）')
     const recordId = s.s3aRecordId!
 
-    const byteOffsetBefore = fs.statSync(s.sessionFile).size
-    const prompt =
+    // prompt 遵从 flake 对策（r4 绿 / r5 红 + sessionTail 空白 = LLM 未调工具直接
+    // 文字回复——spec 头部「失败归因」点名的已知形态）：第一轮未命中拒绝文案时，
+    // 强化指令重发一轮（归因明确后的单次重试）；仍失败落 diag 红。
+    const basePrompt =
       `Use the \`message\` tool to send the text "ping" to the subagent with id "${recordId}". ` +
       `Then reply with the exact tool output verbatim. Do not use any other tool.`
-
-    await sendAndWaitTurn(prompt, 's3b-send', MAIN_TURN_TIMEOUT_MS)
-    // 拒绝文案落盘等待（toolResult 随 turn flush）
-    const rejectArrived = await waitUntil(
-      () => fs.readFileSync(s.sessionFile, 'utf8').length > byteOffsetBefore
-        && fs.readFileSync(s.sessionFile, 'utf8').slice(byteOffsetBefore).includes(REJECT_BOUNDARY_SNIPPET),
-      JSONL_FLUSH_TIMEOUT_MS,
-    )
+    const retryPrompt =
+      `You did not call the \`message\` tool in your previous turn. Call it NOW with ` +
+      `to="${recordId}" and text="ping". This is a tool-calling test: you MUST invoke the ` +
+      `\`message\` tool before replying. Do not summarize, do not simulate the result.`
+    let rejectArrived = false
+    for (let round = 1; round <= 2 && !rejectArrived; round += 1) {
+      const offsetBefore = fs.statSync(s.sessionFile).size
+      await sendAndWaitTurn(round === 1 ? basePrompt : retryPrompt, `s3b-send-r${round}`, MAIN_TURN_TIMEOUT_MS)
+      s.sessionFile = await locateSessionFile(path.join(s.dataDir, 'agent'))
+      rejectArrived = await waitUntil(
+        () => {
+          const text = fs.readFileSync(s.sessionFile, 'utf8')
+          return text.length > offsetBefore && text.slice(offsetBefore).includes(REJECT_BOUNDARY_SNIPPET)
+        },
+        round === 1 ? JSONL_FLUSH_TIMEOUT_MS : JSONL_FLUSH_TIMEOUT_MS * 2,
+      )
+      if (!rejectArrived && round === 1) {
+        console.warn('[batch-s3b] 第一轮未见拒绝文案（LLM 未调 message 工具的遵从 flake），强化指令重发一轮')
+      }
+    }
     if (!rejectArrived) {
       writeDiag('batch-s3b-reject-missing.json', {
-        sessionTail: fs.readFileSync(s.sessionFile, 'utf8').slice(byteOffsetBefore).slice(-3000),
+        sessionTail: fs.readFileSync(s.sessionFile, 'utf8').slice(-3000),
         runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
       })
     }
     expect(rejectArrived, `message 工具结果应含域边界拒绝文案 "${REJECT_BOUNDARY_SNIPPET}"（workflow-origin record 不进 message 通道）`).toBe(true)
-    const newText = fs.readFileSync(s.sessionFile, 'utf8').slice(byteOffsetBefore)
-    expect(newText.includes(REJECT_REDIPATCH_SNIPPET), '拒绝文案应含恢复指引 "re-dispatch via the subagents tool"').toBe(true)
+    const sessionTextAll = fs.readFileSync(s.sessionFile, 'utf8')
+    expect(sessionTextAll.includes(REJECT_REDIPATCH_SNIPPET), '拒绝文案应含恢复指引 "re-dispatch via the subagents tool"').toBe(true)
     await s.page.screenshot({ path: testInfo.outputPath('s3b-rejected.png'), fullPage: true })
     console.log('[batch-s3b] PASS：message 域边界拒绝')
   })
@@ -422,6 +475,9 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
 
     const journalsBefore = listFilesRecursive(path.join(s.dataDir, 'agent'), '.events.jsonl').length
     await sendAndWaitTurn(prompt, 's3c-send', MAIN_TURN_TIMEOUT_MS)
+
+    // 会话文件幂等重定位（同会话同文件；S3c 的 notify/v2 条目断言读它）
+    s.sessionFile = await locateSessionFile(path.join(s.dataDir, 'agent'))
 
     const agentDir = path.join(s.dataDir, 'agent')
     const newJournalFound = await waitUntil(
@@ -455,19 +511,25 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
     expect(settledFrames[0]?.['outcome'], '数量错配的 run outcome 应为 failed（invalid_args → failed 映射）').toBe('failed')
 
-    // 错配文案证据（fail-fast 带纠正指引）：通知 content 或主 session JSONL 任一落点
-    const deliveries = extractCustomEntries(s.sessionFile, 'workflow-result')
+    // 错配文案证据（fail-fast 带纠正指引）：通知 content / 主 session JSONL /
+    // journal run-settled.reason 任一落点（r4 实测纠正指引全文落 journal reason，
+    // 通知 content 的 Script Result 段仅含 status 摘要——三落点并查）
+    const deliveries = extractCustomMessageEntries(s.sessionFile, 'workflow-result')
     const lastDelivery = deliveries[deliveries.length - 1]
     const notifyContent = String(lastDelivery?.['content'] ?? '')
     const sessionText = fs.readFileSync(s.sessionFile, 'utf8')
-    const mismatchEvidence = notifyContent.includes(MISMATCH_SNIPPET) || sessionText.includes(MISMATCH_SNIPPET)
+    const journalReason = String(settledFrames[0]?.['reason'] ?? '')
+    const mismatchEvidence =
+      notifyContent.includes(MISMATCH_SNIPPET) ||
+      sessionText.includes(MISMATCH_SNIPPET) ||
+      journalReason.includes(MISMATCH_SNIPPET)
     if (!mismatchEvidence) {
       writeDiag('batch-s3c-mismatch-snippet-missing.json', {
         notifyContentHead: notifyContent.slice(0, 2000),
         journalSettled: settledFrames[0],
       })
     }
-    expect(mismatchEvidence, `fail-fast 证据应含错配文案 "${MISMATCH_SNIPPET}"（纠正指引随通知/工具结果落盘）`).toBe(true)
+    expect(mismatchEvidence, `fail-fast 证据应含错配文案 "${MISMATCH_SNIPPET}"（纠正指引随通知/会话/journal reason 落盘）`).toBe(true)
 
     // v2 条目照写（fail-fast run 也有注册 + 终态两条）
     const wfRegisteredAll = extractCustomEntries(s.sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'registered')

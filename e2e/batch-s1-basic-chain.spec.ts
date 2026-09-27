@@ -82,6 +82,9 @@ const MAIN_PROMPT =
 const MAIN_TURN_TIMEOUT_MS = 180_000
 const JOURNAL_TIMEOUT_MS = 300_000
 const NOTIFY_TIMEOUT_MS = 300_000
+/** ack 销账等待窗：ack 由回执扫描（agent_settled 边沿）驱动——通知唤醒 turn 结算
+ *  后才落盘，送达后立即断言必为 0；窗口 = 一个真实 LLM turn（r3 实测教训）。 */
+const ACK_TIMEOUT_MS = 180_000
 const JSONL_FLUSH_TIMEOUT_MS = 20_000
 
 // ── 凭证门与播种（E2E-BTW-01 同款范式；只读源 = 本机真实数据目录） ─────────────
@@ -186,6 +189,16 @@ function extractCustomEntries(file: string, customType: string): Record<string, 
   return entries
     .filter((e) => e['type'] === 'custom' && e['customType'] === customType)
     .map((e) => (e['data'] ?? {}) as Record<string, unknown>)
+}
+
+/** 送达标签通道：type=custom_message（pi.sendMessage 落盘形态，进 LLM 上下文——
+ *  notify-ledger-helpers.ts collectDeliveredNotifyIds 是该形态的权威消费面：
+ *  entry.type==='custom_message' + entry.customType + 顶层 entry.details.notifyId。
+ *  与 plain custom entry（type=custom，data 平铺——ledger/ack/record 族）是两条
+ *  不同的落盘通道，customType 同名也不能混用 extractor。 */
+function extractCustomMessageEntries(file: string, customType: string): Record<string, unknown>[] {
+  const { entries } = parseJsonlLines(file)
+  return entries.filter((e) => e['type'] === 'custom_message' && e['customType'] === customType)
 }
 
 /** run journal 帧解析：{ type, seq, ts, ...载荷 }。 */
@@ -316,14 +329,50 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
     expect(notifyArrived, `notifyDone（${notifyId}）应在 ${NOTIFY_TIMEOUT_MS}ms 内送达主会话 JSONL（journal 事件序见 diag）`).toBe(true)
     await page.screenshot({ path: testInfo.outputPath('s1-notify-arrived.png'), fullPage: true })
 
-    // ── 断言 N1（一条收齐）：notifyId 送达恰 1 次 ──
+    // ── 断言 N1（一条收齐，三通道口径）：送达恰 1 + ledger/ack 各恰 1 ──
+    // W1 通知链在会话 JSONL 落三类含 wf-done:<runId> 的 entry，通道与 entry type 均不同：
+    // ①送达 = type custom_message + customType "workflow-result"（u9 外部通道设计，
+    //   workflow-notify.ts 以 deliveryCustomType=WORKFLOW_RESULT_CUSTOM_TYPE record；
+    //   权威消费面 collectDeliveredNotifyIds 只认此形态，键在顶层 details.notifyId）
+    // ②ledger 落账 = type custom + "subagent-bg-notify-ledger"（键在 data.notifyId）
+    // ③ack 销账 = type custom + "subagent-bg-notify-ack"
+    // 「notifyId 字面出现次数」结构性 = 3 ≠ 投递次数——送达恰 1（单次投递）
+    // + ledger/ack 各恰 1（at-least-once 幂等闭环，BATCH-06 口径）。
+    const deliveredWorkflowResults = extractCustomMessageEntries(sessionFile, 'workflow-result').filter(
+      (e) => ((e['details'] ?? {}) as Record<string, unknown>)['notifyId'] === notifyId,
+    )
     expect(
-      sessionText.split(notifyId).length - 1,
-      'notifyDone 送达应恰 1 条（wf-done:<runId> 幂等键单次投递）',
+      deliveredWorkflowResults.length,
+      'notifyDone 送达通道（custom_message × workflow-result）应恰 1 条（幂等键单次投递）',
+    ).toBe(1)
+    const countNotifyEntries = (customType: string): number =>
+      extractCustomEntries(sessionFile, customType)
+        .filter((d) => JSON.stringify(d).includes(notifyId)).length
+    expect(
+      countNotifyEntries('subagent-bg-notify-ledger'),
+      'notifyDone ledger 落账应恰 1 条（at-least-once 幂等闭环——落账/销账各恰一次，BATCH-06 口径）',
+    ).toBe(1)
+    // ack 销账等回执扫描的 agent_settled 边沿（通知 triggerTurn 唤醒的 turn 结算后
+    // 才写）——先等待再计数（r3 实测：送达后立即断言 Received 0）
+    const ackArrived = await waitUntil(
+      () => countNotifyEntries('subagent-bg-notify-ack') > 0,
+      ACK_TIMEOUT_MS,
+    )
+    if (!ackArrived) {
+      writeDiag('batch-s1-ack-missing.json', {
+        sessionTail: fs.readFileSync(sessionFile, 'utf8').slice(-4000),
+        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
+        journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
+      })
+    }
+    expect(ackArrived, `notifyDone ack 销账应在 turn 结算后落盘（agent_settled 边沿，${ACK_TIMEOUT_MS}ms 窗）`).toBe(true)
+    expect(
+      countNotifyEntries('subagent-bg-notify-ack'),
+      'notifyDone ack 销账应恰 1 条（at-least-once 幂等闭环——落账/销账各恰一次，BATCH-06 口径）',
     ).toBe(1)
 
     // ── 断言 N2（S1 原始口径）：status=ok / results=2 / taskIndex 0,1 / Agent Trace 2 条均 ok ──
-    const deliveries = extractCustomEntries(sessionFile, 'workflow-result')
+    const deliveries = extractCustomMessageEntries(sessionFile, 'workflow-result')
     expect(deliveries.length, 'workflow-result 送达 entry 应恰 1 条').toBe(1)
     const content = String(deliveries[0]['content'] ?? '')
     // Script Result 段（fan-out 返回 {status, results:[...]}）从通知 content 提取
@@ -343,14 +392,25 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
     for (const r of scriptResult.results ?? []) {
       expect(r.status, `成员 taskIndex=${String(r.taskIndex)} 应 ok（partial/failed 见 error 字段）`).toBe('ok')
     }
-    // Agent Trace 段：2 行均 ok
-    const traceMatch = content.match(/--- Agent Trace ---\n([\s\S]*)$/)
+    // Agent Trace 段：每成员一行 `[stepIndex] agent: status`（workflow-notify.ts
+    // buildDoneNotifyContent，节点成功态词 = completed——r5 diag 实锤）。段提取必须
+    // 在 Artifacts 段前截断（`[\s\S]*$` 贪婪会把 Artifacts 3 行吞进 trace——r4/r5
+    // 「5 行」的真相）；原始口径「2 条均 ok」语义化 = stepIndex 0/1 各有一行成功轨迹。
+    const traceMatch = content.match(/--- Agent Trace ---\n([\s\S]*?)(?:\n--- Artifacts ---|$)/)
     expect(traceMatch, '通知 content 应含 Agent Trace 段').not.toBeNull()
     const traceLines = (traceMatch![1] || '').trim().split('\n').filter((l) => l.trim() !== '')
-    expect(traceLines.length, 'Agent Trace 应恰 2 条（双成员）').toBe(2)
-    for (const line of traceLines) {
-      expect(line, `Agent Trace 行应为 ok 终态（收到 "${line}"）`).toMatch(/: ok$/)
+    const okSteps = new Set(
+      traceLines
+        .filter((l) => /: completed$/.test(l.trim()))
+        .map((l) => (l.trim().match(/^\[(\d+)\]/) ?? [])[1]),
+    )
+    if (!(okSteps.has('0') && okSteps.has('1'))) {
+      writeDiag('batch-s1-trace-anomaly.json', { traceLines, contentHead: content.slice(0, 3000) })
     }
+    expect(
+      okSteps.has('0') && okSteps.has('1'),
+      `Agent Trace 应覆盖双成员且均 completed（trace ${traceLines.length} 行，逐行见 diag）`,
+    ).toBe(true)
 
     // ── 断言 M1（journal）：首帧 run-created / run-settled 恰 1 且 completed / seq 严格递增 ──
     const frames = readJournalFrames(journalFile)

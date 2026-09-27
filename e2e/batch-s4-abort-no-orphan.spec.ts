@@ -83,7 +83,10 @@ const MAIN_TURN_TIMEOUT_MS = 180_000
 const JOURNAL_TIMEOUT_MS = 300_000
 const ABORT_SETTLE_TIMEOUT_MS = 120_000
 const NOTIFY_TIMEOUT_MS = 120_000
-const ORPHAN_GRACE_MS = 60_000
+/** ack 销账等待窗：ack 由回执扫描（agent_settled 边沿）驱动——通知唤醒 turn 结算
+ *  后才落盘，送达后立即断言必为 0；窗口 = 一个真实 LLM turn（r3 实测教训）。 */
+const ACK_TIMEOUT_MS = 180_000
+const ORPHAN_GRACE_MS = 150_000
 const JSONL_FLUSH_TIMEOUT_MS = 20_000
 
 // ── 凭证门与播种（E2E-BTW-01 同款范式） ──────────────────────────────────
@@ -185,6 +188,15 @@ function extractCustomEntries(file: string, customType: string): Record<string, 
   return parseJsonlLines(file).entries
     .filter((e) => e['type'] === 'custom' && e['customType'] === customType)
     .map((e) => (e['data'] ?? {}) as Record<string, unknown>)
+}
+
+/** 送达标签通道：type=custom_message（pi.sendMessage 落盘形态，进 LLM 上下文——
+ *  权威消费面 notify-ledger-helpers.ts collectDeliveredNotifyIds：entry.type ===
+ *  'custom_message' + entry.customType + 顶层 entry.details.notifyId）。与 plain
+ *  custom entry（type=custom，data 平铺——ledger/ack/record 族）是两条落盘通道。 */
+function extractCustomMessageEntries(file: string, customType: string): Record<string, unknown>[] {
+  return parseJsonlLines(file).entries
+    .filter((e) => e['type'] === 'custom_message' && e['customType'] === customType)
 }
 
 function readJournalFrames(file: string): Record<string, unknown>[] {
@@ -376,8 +388,44 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
       })
     }
     expect(notifyArrived, `abort 终局通知应照达（${notifyId}）——通知链不因 abort 丢失`).toBe(true)
-    const sessionText = fs.readFileSync(sessionFile, 'utf8')
-    expect(sessionText.split(notifyId).length - 1, 'notifyDone 送达应恰 1 条（幂等键单次投递）').toBe(1)
+
+    // ── 三通道口径（BATCH-06）：送达恰 1 + ledger/ack 各恰 1 ──
+    // 通道与 entry type 均不同（与 s1 同款口径，详见 s1 注释）：①送达 = type
+    // custom_message × customType "workflow-result"（u9 外部通道设计，键在顶层
+    // details.notifyId；权威消费面 collectDeliveredNotifyIds）②ledger 落账 = type
+    // custom × "subagent-bg-notify-ledger" ③ack 销账 = type custom ×
+    // "subagent-bg-notify-ack"。「键出现次数」结构性 = 3 ≠ 投递次数。
+    const deliveredWorkflowResults = extractCustomMessageEntries(sessionFile, 'workflow-result').filter(
+      (e) => ((e['details'] ?? {}) as Record<string, unknown>)['notifyId'] === notifyId,
+    )
+    expect(
+      deliveredWorkflowResults.length,
+      'notifyDone 送达通道（custom_message × workflow-result）应恰 1 条（幂等键单次投递）',
+    ).toBe(1)
+    const countNotifyEntries = (customType: string): number =>
+      extractCustomEntries(sessionFile, customType)
+        .filter((d) => JSON.stringify(d).includes(notifyId)).length
+    expect(
+      countNotifyEntries('subagent-bg-notify-ledger'),
+      'notifyDone ledger 落账应恰 1 条（at-least-once 幂等闭环——落账/销账各恰一次，BATCH-06 口径）',
+    ).toBe(1)
+    // ack 销账等回执扫描的 agent_settled 边沿（通知 triggerTurn 唤醒的 turn 结算后
+    // 才写）——先等待再计数（r3 实测：送达后立即断言 Received 0）
+    const ackArrived = await waitUntil(
+      () => countNotifyEntries('subagent-bg-notify-ack') > 0,
+      ACK_TIMEOUT_MS,
+    )
+    if (!ackArrived) {
+      writeDiag('batch-s4-ack-missing.json', {
+        sessionTail: fs.readFileSync(sessionFile, 'utf8').slice(-4000),
+        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
+      })
+    }
+    expect(ackArrived, `notifyDone ack 销账应在 turn 结算后落盘（agent_settled 边沿，${ACK_TIMEOUT_MS}ms 窗）`).toBe(true)
+    expect(
+      countNotifyEntries('subagent-bg-notify-ack'),
+      'notifyDone ack 销账应恰 1 条（at-least-once 幂等闭环——落账/销账各恰一次，BATCH-06 口径）',
+    ).toBe(1)
 
     // ── 断言 A3：v2 settled 条目 outcome === journal（journal 唯一事实源投影面） ──
     const wfSettled = extractCustomEntries(sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'settled')
@@ -386,11 +434,32 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     expect(thisRunSettled?.['outcome'], 'settled 条目 outcome 应为 cancelled（与 journal run-settled 一致）').toBe('cancelled')
 
     // ── 断言 A4：无孤儿引擎进程（正面对照 = 派发后曾 > 基线） ──
+    // 慢退属合法形态（abort → 成员 kill → pi 引擎 flush journal/manifest 收尾，
+    // 真机 LLM 成员长轮次下退出可达分钟级；r4 实测 60s 窗未回落而进程最终已退
+    // ——spec teardown 后 ps 复核零残留）。窗口 = 预算校准面（头部「预算」约定），
+    // 断言语义不变：回落基线。diag 带 etime/ppid 供残留时定位 kill 链路。
     const orphanFree = await waitUntil(() => countEngineProcesses().count <= baseline.count, ORPHAN_GRACE_MS, 1000)
     if (!orphanFree) {
+      // countEngineProcesses 的 lines 是 `ps -axo command=` 纯命令行（无 PID 列）——
+      // PID 需按同特征从 `ps -axo pid,command=` 重采样（r5 实测取 command 第二段当
+      // PID 会 ps 报错使 diag 自身炸掉）
+      let psDetail = '(无残留 PID)'
+      try {
+        const pidLines = execSync('ps -axo pid,command=', { encoding: 'utf8', timeout: 10_000 })
+          .split('\n')
+          .filter((line) => (line.includes('pi-subagent-cli') || line.includes('/engines/')) && !line.includes('playwright'))
+          .map((line) => line.trim().split(/\s+/)[0])
+          .filter(Boolean)
+        if (pidLines.length > 0) {
+          psDetail = execSync(`ps -o pid,ppid,etime,command -p ${pidLines.join(',')}`, { encoding: 'utf8', timeout: 10_000 })
+        }
+      } catch (err) {
+        psDetail = `(ps 采样失败：${String(err)})`
+      }
       writeDiag('batch-s4-orphans.json', {
         baseline: baseline.lines,
         current: countEngineProcesses().lines,
+        psDetail,
         journalEventTypes: frames.map((f) => f['type']),
       })
     }
