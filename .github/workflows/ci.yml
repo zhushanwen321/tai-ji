@@ -276,6 +276,17 @@ jobs:
       # + checkManifest 6 失败分支）依赖 prepare-builtin-extensions.sh 预产出的 staged 产物
       #（gitignored，fresh checkout 不存在）——先 prepare 再跑。pnpm exec 同 taste-lint step
       # 理由（显式本地 bin，防 npx registry 静默拉版）。
+      # .agents 实体已脱离 git 跟踪（workspace 根单一实体 + worktree symlink，ADR 见
+      # docs/adr/decisions.md）——CI 从 skills snapshot ref 物化出 .agents 树供守卫读取；
+      # snapshot 缺失时 fail-fast 给修复指引（设计 cross-worktree-skill-sync.md D4/U4）。
+      - name: Materialize .agents from skills snapshot
+        run: |
+          if ! git fetch origin refs/skills-snapshot:refs/skills-snapshot; then
+            echo "::error::refs/skills-snapshot missing - run bash .githooks/snapshot-skills.sh in any worktree and push the ref, then rerun CI"
+            exit 1
+          fi
+          git archive refs/skills-snapshot | tar -x
+
       - name: Prepare builtin extensions (staged bundles)
         run: bash scripts/prepare-builtin-extensions.sh
 
@@ -461,6 +472,17 @@ jobs:
 
       # 非 workspace 结构接线对账（S1，PR #20 组 D 守卫化；与 pre-commit 结构接线段同源——
       # D7 通则：pre-commit 之外的 CI 面同源拦截，防本地 hook 被绕过）
+      # .agents 实体已脱离 git 跟踪（workspace 根单一实体 + worktree symlink，ADR 见
+      # docs/adr/decisions.md）——CI 从 skills snapshot ref 物化出 .agents 树供守卫读取；
+      # snapshot 缺失时 fail-fast 给修复指引（设计 cross-worktree-skill-sync.md D4/U4）。
+      - name: Materialize .agents from skills snapshot
+        run: |
+          if ! git fetch origin refs/skills-snapshot:refs/skills-snapshot; then
+            echo "::error::refs/skills-snapshot missing - run bash .githooks/snapshot-skills.sh in any worktree and push the ref, then rerun CI"
+            exit 1
+          fi
+          git archive refs/skills-snapshot | tar -x
+
       - name: Structure wiring check (non-workspace packages)
         run: node scripts/check-structure-wiring.mjs
 

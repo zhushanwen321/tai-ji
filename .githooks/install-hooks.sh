@@ -99,6 +99,54 @@ NC='\033[0m'
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 cd "$PROJECT_ROOT"
 
+# ============================================================================
+# [skills-symlink-guard 第 0 段] .agents 实体 symlink 三分支判定（D5）
+#   .agents 实体已迁 workspace 根（<workspace>/.agents），各 worktree 以 symlink
+#   共享同一实体（脱离 git 跟踪，设计 cross-worktree-skill-sync.md）。本段只做
+#   部署形态守卫与缺失自愈，不做内容检查：
+#   ① symlink 且实体可达且指向 workspace 实体 → 跳过（常态）；
+#   ② .agents 缺失且父目录下实体存在 → 幂等补建 symlink（误删自愈；
+#      父目录下无实体的场所——如 /tmp 下 fallow 临时 worktree——天然不命中，
+#      静默放行，与该类 worktree「无本地 .agents」的常态一致）；
+#   ③ 其余形态（检出未迁移 ref/tag 被 git 写回的真实目录、手工副本、悬空
+#      symlink、指错目标）→ 停手报错，按 bisect/detached 或常态分派指引，
+#      不做自动替换（自动替换会静默复活旧副本）。
+# ============================================================================
+SKILL_PROJECT_ROOT_P="$(cd "$PROJECT_ROOT" && pwd -P)"
+SKILL_WS_ROOT="$(dirname "$SKILL_PROJECT_ROOT_P")"
+SKILL_ENTITY="$SKILL_WS_ROOT/.agents"
+SKILL_LINK="$PROJECT_ROOT/.agents"
+
+if [ -L "$SKILL_LINK" ]; then
+    if [ ! -d "$SKILL_LINK/" ]; then
+        echo -e "${RED}[ERROR] .agents symlink 悬空——实体（$SKILL_ENTITY）丢失或不可达${NC}"
+        echo -e "${YELLOW}[FIX] 从快照还原：git archive refs/skills-snapshot | tar -x -C \"$SKILL_WS_ROOT\"${NC}"
+        echo -e "${YELLOW}      远端恢复：git fetch github refs/skills-snapshot:refs/skills-snapshot 后重试；详见 docs/TROUBLESHOOTING.md${NC}"
+        exit 1
+    fi
+    SKILL_RESOLVED="$(cd "$SKILL_LINK" && pwd -P)"
+    if [ "$SKILL_RESOLVED" != "$SKILL_ENTITY" ]; then
+        echo -e "${RED}[ERROR] .agents symlink 指向 $SKILL_RESOLVED，期望 $SKILL_ENTITY${NC}"
+        echo -e "${YELLOW}[FIX] 确认目标后重建：rm .agents && ln -sfn ../.agents .agents${NC}"
+        exit 1
+    fi
+elif [ ! -e "$SKILL_LINK" ]; then
+    if [ -d "$SKILL_ENTITY" ] && [ ! -L "$SKILL_ENTITY" ]; then
+        ln -sfn ../.agents "$SKILL_LINK"
+        echo -e "${GREEN}[OK] 已自动补建 .agents → 实体 symlink（自愈）${NC}"
+    fi
+    # 父目录下无实体（fallow 等临时场所）：无本地 .agents 属常态，静默放行
+else
+    SKILL_REF_STATE="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    echo -e "${RED}[ERROR] .agents 不是指向 workspace 实体的 symlink（实态：$([ -L "$SKILL_LINK" ] && echo "symlink→$(readlink "$SKILL_LINK")" || echo "真实目录/其他"))${NC}"
+    if [ "$SKILL_REF_STATE" = "HEAD" ] || [ -z "$SKILL_REF_STATE" ]; then
+        echo -e "${YELLOW}[FIX] bisect/detached 态：该目录与被测代码无关，直接重建后继续——rm -rf .agents && ln -sfn ../.agents .agents${NC}"
+    else
+        echo -e "${YELLOW}[FIX] 本分支检出的是迁移前的 .agents 跟踪内容：合并迁移 commit（git merge dev-0.10.5 或含迁移 commit 的集成分支）；确认目录可丢弃则 rm -rf .agents 后重跑 commit（symlink 将自动补建）${NC}"
+    fi
+    exit 1
+fi
+
 print_section() {
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -2031,6 +2079,20 @@ if echo "$MODEL_REF_STAGED" | grep -qE "^extensions/.*\.md$|^packages/runtime/sr
     echo -e "${GREEN}[OK] pi 资产模型引用漂移守卫通过（D8 机器守卫在案）${NC}"
 else
     echo -e "${GREEN}[OK] 无 extensions .md / 快照变更，跳过模型引用漂移守卫${NC}"
+fi
+
+# ============================================================================
+# [skills-snapshot 尾部段] 实体快照（备份链 D3；失败非阻断）
+#   全部检查通过后对 workspace 根实体做快照（refs/skills-snapshot：临时 index +
+#   commit-tree，不碰工作树与真实 index）。失败仅日志放行本次提交，下次提交自动
+#   重试（push 失败同语义）；实体缺失/为空由脚本自身空树防御拦截（不覆盖好快照）。
+#   脚本未随分支检出的时序窗口（收敛 commit 之前）静默跳过。
+# ============================================================================
+if [ -f ".githooks/snapshot-skills.sh" ]; then
+    print_section "[skills 实体快照]"
+    if ! bash .githooks/snapshot-skills.sh; then
+        echo -e "${YELLOW}[WARN] skills 快照失败（非阻断，不影响本次提交）；下次提交自动重试${NC}"
+    fi
 fi
 
 # ============================================================================

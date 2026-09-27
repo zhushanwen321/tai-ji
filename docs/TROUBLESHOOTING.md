@@ -516,3 +516,10 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **取证源**：workflow run 生命周期由显式状态机裁决（`subagent-core/src/orchestration/run-events.ts`，`RUN_TRANSITIONS` 转移表 + `transition` 纯函数，表外转移 fail-fast）；事件流 journal 是 run 态权威投影源——`<agentDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时为 `<agentDir>/sessions/<slug>/workflow-state/`，推导 = `resolvePiWorkflowStateDir`），JSONL 逐帧（`run-created / ask-dispatched / ask-executing / ask-retrying / ask-settled / armed / run-settled`）。
 - **判定姿势**：run 卡死/终态异常先读 journal 帧序列对照合法转移表——① 缺 `run-settled` 帧 = run 未终局（查 pump 日志）；② schema 任务缺 `armed` 帧 = 武装回执未达（宿主等待窗 fail-fast 先行，查引擎侧武装断言与扩展装载）；③ debug 日志 `run event dispatch yielded (runId=...)` = 表外转移让位，常见根因是派发链 runId 键错、事件落进占位键（旁证：binding sidecar `.record-binding` 的 `parentRunId` 为 `sar-unattached` 占位而非真实 runId = 未走 workflowAgentDispatch 通道）。
 - **注册表投影**：run 列表态 = journal fold（四相 missing/active/terminal/interrupted），不看文件 mtime；journal 缺失即 missing 相，手工挪动/删除 journal 文件直接改变投影结果。
+
+### 22. 项目 skill 实体（.agents）排障：symlink 形态判定 / 实体还原 / 检出旧 ref 脱钩（2026-09-25 ADR-0074）
+
+- **现状**：`.agents` 实体唯一一份在 workspace 根（`<workspace>/.agents/`），各 worktree 经 symlink 共享，git 不跟踪（`git status` 干净是常态）。backup = `refs/skills-snapshot`（pre-commit 尾部段自动维护；远端同名 ref = 跨机器权威备份点）。
+- **判定姿势**：`ls -la .agents` 应显示 `-> ../.agents`；`git ls-files .agents | wc -l` 应为 0。commit 被第 0 段拦下时按错误信息分派：symlink 悬空 = 实体丢失（走还原）；symlink 指错目标 = 重建（`rm .agents && ln -sfn ../.agents .agents`）；`.agents` 是真实目录 = 该分支检出的是迁移前内容（先落迁移 commit 再删目录重建；bisect/detached 态直接 `rm -rf .agents && ln -sfn ../.agents .agents` 后 continue——禁 merge，会污染 bisect 序列）。
+- **实体还原**（实体误删 / `.bare` 损坏）：`git archive refs/skills-snapshot | tar -x -C <workspace 根>`；本地 ref 不可用先 `git fetch github refs/skills-snapshot:refs/skills-snapshot`（本 workspace remote 名 = `github`；fresh clone 默认 `origin`——`refs/remotes/origin/*` 是 remote 改名前的 stale 残留，`rev-parse origin/main` 仍解析出陈旧值属半工作陷阱，勿作为依据）。还原后 `diff -r` 核对。
+- **快照链排障**：`git rev-parse refs/skills-snapshot` 不存在 = 任一 worktree 手动跑 `bash .githooks/snapshot-skills.sh`；hook 输出 `[WARN] skills 快照失败` = 非阻断（下次 commit 自动重试，多为离线 push 超时）；跨机器重建前 `git ls-remote github refs/skills-snapshot` 核对新鲜度。

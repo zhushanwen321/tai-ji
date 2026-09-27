@@ -99,7 +99,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 
 12. **Electron 打包约束（事故最高发）**：① runtime 源码禁止 `import.meta.url` / `globalThis.__dirname`（CJS bundle 下失效），路径用 `typeof __dirname !== 'undefined' ? __dirname : undefined`；② 新增 runtime 依赖必须同步加 `tsup.config.ts` 的 `noExternal`；③ 打包子系统改动逐个 commit 逐个验证。细节核对见 `pr-cr-fix/agents/review-electron-build.md`；验证三阶段（preflight → build → postbuild）+ validate-runtime-bundle 由脚本自动化
 13. **目录规范**：禁止 `demos/` / `impeccable/` 目录；禁止外部绝对路径 symlink（pre-commit 检查）；`.taiji-harness/` 是本地决策/工作流档案，**不入库**（2026-09-13 裁决：gitignore，决策追溯靠 commit message 与 docs）；视觉设计权威 = `docs/DESIGN.md`（Warm&Soft 旧根 DESIGN.md 已删除，git 可追溯）
-14. **项目 skill 必须自包含 [HISTORICAL]**：`.agents/skills/` 引用的脚本复制到 skill 目录内随 git 跟踪（`merge/scripts/` 已自包含），禁止依赖 `~/.agents/skills/` 全局脚本或 symlink
+14. **项目 skill 必须自包含 [HISTORICAL]**：skill 引用的脚本复制到该 skill 目录内（`merge/scripts/` 已自包含），禁止依赖 `~/.agents/skills/` 全局脚本或 symlink。`.agents` 整体**不入 git 跟踪**（2026-09-25 起：实体在 workspace 根 `<workspace>/.agents/`，各 worktree 经 symlink 共享同一实体，改动跨 worktree 实时生效；备份 = `refs/skills-snapshot`，由 pre-commit 尾部段自动维护；恢复 = `git archive refs/skills-snapshot | tar -x -C <workspace 根>`，见 ADR-0074 与 docs/TROUBLESHOOTING.md）——编辑 skill 后 `git status` 干净是常态而非异常，skill 改动不经 PR review，YAML 评审靠实体内 pr-cr-fix 的 validate-skill-yaml
 15. **排查规则（untracked 展开 `-uall` / 禁止写死绝对路径用 `getDataDir()` 等动态推导 / 跨层机制要查遍所有层直到 pi extension 层）**：详见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) 的「历史排查规则」
 
 **Plugin / Builtin extensions**：
