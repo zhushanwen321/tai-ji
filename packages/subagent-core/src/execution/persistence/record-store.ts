@@ -334,11 +334,13 @@ export class RecordStore {
     };
   }
 
-  /** session_start 后由 SubagentService.initSession 调，注入真实 Pi handle。
-   *  设计为独立方法而非要求构造时必传——RecordStore 在 SubagentService 构造时即建
-   *  （与 sessionsDir/manifestStore 一同初始化），但 this.pi 此时尚未注入。
-   *  后续构造期外的 appendEntry 上报才有意义。 */
-  setPi(pi: RecordStorePi): void {
+  /** session_start 后由 SubagentService.initSession 调，注入真实 Pi handle；session
+   *  结束（service.dispose 尾部 clearSessionHandles）传 null 回收——pi 官方契约：
+   *  session 替换/重载后旧 handle 全方法抛 stale 错，dispose 后任何迟到的写面
+   *  （register 的 appendEntry 等）不得触达它。设计为独立方法而非要求构造时必传——
+   *  RecordStore 在 SubagentService 构造时即建（与 sessionsDir/manifestStore 一同
+   *  初始化），但 this.pi 此时尚未注入。后续构造期外的 appendEntry 上报才有意义。 */
+  setPi(pi: RecordStorePi | null): void {
     this.pi = pi ?? null;
   }
 

@@ -842,6 +842,11 @@ export class SubagentService {
     // 存活，重开 session 由 boot 分区重认领 + sweep 对账收口）。
     this.roundSupervisor.dispose();
     this.store.dispose();
+    // [stale ctx 根治] 最后一步回收 session 级句柄（_pi/_streamSink/_isIdleFn +
+    // store pi）——必须在 flush 与 pending 落盘复写（合法使用 pi 的最后两步）之后：
+    // pi 替换后旧 handle 全方法抛 stale 错，dispose 后迟到的异步收尾触达残留引用
+    // 会崩进程（详见 SessionBaselines.clearSessionHandles 注释）。
+    this.baselines.clearSessionHandles();
   }
 
   /**

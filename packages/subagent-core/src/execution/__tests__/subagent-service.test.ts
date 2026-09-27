@@ -88,6 +88,51 @@ describe("SubagentService", () => {
       expect(() => service.queries.findRecord("any")).toThrow(/session ended|session_start|new session/i);
     });
 
+    it("dispose 回收 session 句柄：替换窗口内迟到的写面不触达 stale pi（不崩进程）", () => {
+      // [HISTORICAL] 2026-09-22 真机崩溃（docs/todo/notify-stale-ctx-roundidle-crash.md）：
+      // session 替换（newSession/fork）后 pi 旧 handle 全方法抛 stale 错（runner.invalidate
+      // → assertActive），单例 Service 的 _pi 残留指向旧 session——替换窗口内迟到的
+      // 异步收尾（轮终 markRoundIdle 簿记⑧ pending 注销 / 迟到 register 的 appendEntry）
+      // 触达它即抛未捕获异常崩 runtime。根治 = dispose 尾部 clearSessionHandles 回收
+      // _pi/_streamSink/_isIdleFn + store pi，消费点经 `pi?.` 短路为 no-op。
+      const STALE_MSG = "This extension ctx is stale after session replacement or reload.";
+      const stalePi = makePi();
+      stalePi.appendEntry.mockImplementation(() => {
+        throw new Error(STALE_MSG);
+      });
+      stalePi.events.emit.mockImplementation(() => {
+        throw new Error(STALE_MSG);
+      });
+      stalePi.sendMessage.mockImplementation(() => {
+        throw new Error(STALE_MSG);
+      });
+
+      const service = new SubagentService({ cwd: agentDir, modelService });
+      service.initSession({ pi: stalePi, sessionId: "s1" });
+      service.dispose();
+      // dispose 后 queries 面被 disposed 守卫拦截（上一用例锚定），迟到写面走 store 直驱
+      const store = Reflect.get(service, "store") as RecordStore;
+
+      // 替换窗口内迟到的 record 写面（形态：dispose 未覆盖到的 running record 收尾）
+      const record = createRecord("late-round", {
+        agent: "general-purpose",
+        model: "test/model",
+        mode: "background",
+        task: "late task",
+        slug: "late",
+        startedAt: 1_000_000,
+        rootSessionId: "s1",
+      });
+      // register 的 appendEntry 上报 + markRoundIdle 簿记⑧ pending 注销——句柄已回收，
+      // 两路都不触达 stale pi（修复前：直接抛 STALE_MSG → 崩进程）
+      expect(() => store.register(record)).not.toThrow();
+      expect(() =>
+        store.markRoundIdle("late-round", { kind: "success", content: "late round done" }),
+      ).not.toThrow();
+      // 簿记⑧ 确实走到了（record 翻边 idle）——no-op 是句柄短路不是路径没走
+      expect(Reflect.get(store, "records").get("late-round").status).toBe("idle");
+    });
+
     it("dispose 幂等(多次调用不抛)", () => {
       const service = new SubagentService({ cwd: agentDir, modelService });
       service.initSession({ pi: makePi(), sessionId: "s1" });

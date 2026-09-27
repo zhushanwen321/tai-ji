@@ -127,8 +127,9 @@ export interface SessionBaselinesDeps {
   readonly readAssertState: () => { pi: PiLike | null; disposed: boolean };
   /** session 复活：壳 `_disposed` 置 false（dispose 的逆操作，/resume /fork /new 后）。 */
   readonly reviveDisposed: () => void;
-  /** RecordStore 窄门面（setPi 同步注入 + revive；store 为 #1 留壳共享依赖）。 */
-  readonly getStore: () => { setPi(pi: PiLike): void; revive(): void };
+  /** RecordStore 窄门面（setPi 同步注入 + revive；store 为 #1 留壳共享依赖）。
+   *  setPi 接受 null = session 结束回收（clearSessionHandles 消费）。 */
+  readonly getStore: () => { setPi(pi: PiLike | null): void; revive(): void };
   /** NotifyHost 窄门面（revive；通知面 #1 留壳）。 */
   readonly getNotifyHost: () => { revive(): void };
   /** [跨域编排回调] 孤儿终态恢复（#3 RecordLifecycle 域方法；R3 改指聚合显式接口）。 */
@@ -327,6 +328,28 @@ export class SessionBaselines {
   }
 
   /**
+   * session 结束时回收 session 级注入句柄（dispose 尾部唯一调用点；initSession 重新注入）。
+   *
+   * [stale ctx 根治] pi 0.84.4 官方契约：session 替换（newSession/fork/switchSession/
+   * reload）后旧 pi / ctx 全方法抛 stale 错（runner.invalidate → assertActive）。
+   * 本 Service 是跨 session 单例，`_pi` 若在 dispose 后残留指向旧 session 的 handle，
+   * 替换窗口内迟到的异步收尾（轮终 markRoundIdle 簿记⑧ pending 注销、迟到 register
+   * 的 appendEntry 等）触达它即抛未捕获异常 → runtime 进程崩（间歇性：仅「替换 ×
+   * 恰有收尾在飞行中」交叠时触发）。回收后 getPi() 返回 null，全部消费点经 `pi?.`
+   * 短路为干净 no-op——旧 session 的收尾通知本也无人消费，丢弃是正确语义。
+   * 同批回收同持旧 ctx 闭包的 `_streamSink`（ctx.ui.setWidget）与 `_isIdleFn`
+   * （ctx.isIdle）；`_sessionId`/`_mainSessionFile`/`_sessionRootId` 是纯数据快照
+   * 无调用面，不回收（initSession 覆写）。必须在 flushPendingNotifications 与
+   * persistUndeliveredNotificationsForReplay（合法使用 pi 的最后两步）之后调用。
+   */
+  clearSessionHandles(): void {
+    this._pi = null;
+    this._streamSink = null;
+    this._isIdleFn = undefined;
+    this.deps.getStore().setPi(null);
+  }
+
+  /**
    * [递归可见性] exec 上下文基线：子进程读 env PI_SUBAGENT_SELF_RECORD_ID / DEPTH
    * 建立身份基线后，createRecordForMode 读嵌套上下文自动正确（孙挂到子名下）。
    * enterWith 贯穿整个 session 生命周期（与 forkDepthAls 同构，决策 4）。
@@ -378,15 +401,18 @@ export class SessionBaselines {
    */
   assertReady(): void {
     const { pi, disposed } = this.deps.readAssertState();
-    if (pi === null) {
-      throw new Error("pi not injected (initSession not called?)");
-    }
+    // disposed 判定先于 pi 判定：dispose 尾部 clearSessionHandles 会回收 pi，若 pi 判在
+    // 前，session 结束后的调用会拿到误导性恢复指引（「initSession 未调」——实际是
+    // session 已结束，恢复动作 = 新开 session）。
     if (disposed) {
       throw new Error(
         "subagents service disposed (session ended). " +
           "This happens after session shutdown when the follow-up session_start did not arrive. " +
           "Recovery: start a new session or run /new to revive the subagents runtime.",
       );
+    }
+    if (pi === null) {
+      throw new Error("pi not injected (initSession not called?)");
     }
   }
 }
