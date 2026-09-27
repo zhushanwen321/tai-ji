@@ -1,5 +1,8 @@
 /**
- * computeRenderSignature（IF11/TC7/DM6）— 渲染签名单测（now 参数化）。
+ * WorkflowsView 纯函数三块合一（同被测文件 views/WorkflowsView.ts 及其 companion
+ * detail-content.ts）：渲染签名 / live 配对 / detail session 路径行，fixture 同族共享。
+ *
+ * ── computeRenderSignature（IF11/TC7/DM6）— 渲染签名单测（now 参数化） ──
  *
  * 契约：tick 条件失效的判据——签名字段集覆盖 header（renderHeader）/节点行
  * （renderLevel1 agent list）/L2 detail（buildDetailContent）当前消费的全部动态
@@ -18,13 +21,16 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { computeRenderSignature } from "../WorkflowsView.ts";
 import type { LiveProgressView } from "../detail-content.ts";
+import { buildDetailContent } from "../detail-content.ts";
+import type { ThemeLike } from "../../format.ts";
+import { collectNodeLiveProgress, computeRenderSignature } from "../WorkflowsView.ts";
 import type { AgentEventLogEntry } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode, WorkerLogEntry } from "@zhushanwen/subagent-core";
+import type { SubagentRecord } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 
-// ── Fixtures（duck typing，对齐 detail-content-session-file.test.ts 先例）──
+// ── Fixtures（duck typing）──
 
 const T0 = 1_700_000_000_000; // 固定 epoch ms
 
@@ -56,7 +62,7 @@ function makeNode(overrides: Partial<ExecutionTraceNode> = {}): ExecutionTraceNo
   };
 }
 
-interface RunShape {
+type RunShape = {
   status?: string;
   budget?: { usedTokens: number; maxTokens?: number; usedCost: number };
   nodes?: ExecutionTraceNode[];
@@ -91,6 +97,35 @@ function runWithLive(nodeOverrides: Partial<ExecutionTraceNode>, live: LiveProgr
     run: makeRun({ nodes: [node] }),
     live: new Map<number, LiveProgressView>([[node.stepIndex, live]]),
   };
+}
+
+/** plain theme: 着色方法直接返回原文，无 ANSI 色码——测试断言纯文本。
+ *  bg/underline 为宽 ThemeLike 接口的 no-op 实现（workflow 渲染面只用 fg/bold）。 */
+const plainTheme: ThemeLike = {
+  bg: (_color: string, text: string) => text,
+  fg: (_tag: string, text: string) => text,
+  bold: (text: string) => text,
+  underline: (text: string) => text,
+};
+
+/** collectNodeLiveProgress 配对用 run：只含 trace 节点面（task/status/startedAt）。 */
+function makeRunShape(nodes: { stepIndex: number; task: string; status: string; startedAt: string }[]): WorkflowRun {
+  return {
+    state: { trace: { toArray: () => nodes } },
+  } as unknown as WorkflowRun;
+}
+
+function makeSub(over: Partial<SubagentRecord> = {}): SubagentRecord {
+  return {
+    id: "sa-match",
+    task: "调研 A",
+    status: "running",
+    startedAt: T0,
+    turns: 0,
+    totalTokens: 0,
+    eventLog: [],
+    ...over,
+  } as SubagentRecord;
 }
 
 beforeEach(() => {
@@ -229,17 +264,35 @@ describe("computeRenderSignature — 节点级字段（store record 投影）", 
 });
 
 describe("computeRenderSignature — 多节点与无 live 终态", () => {
-  it("多节点逐一拼接（节点序参与签名）", () => {
+  it("多节点：live 投影按 stepIndex 配对生效（live 值出现 / 消失 / 挂到另一节点 → 签名变）", () => {
+    // 对比式断言：同一 run 换 live 投影驱动签名变化——词法格式串是内部表示非契约，
+    // 不作为主证明（结构快照见下一条）。
     const run = makeRun({
       nodes: [
         makeNode({ stepIndex: 0, status: "completed" }),
         makeNode({ stepIndex: 1, status: "running" }),
       ],
     });
-    const live = new Map([[1, makeLiveView({ totalTokens: 500 })]]);
-    const sig = computeRenderSignature(run, live, T0);
-    expect(sig).toContain("0:completed:-:-1:-1:-1:-1:-1:-:-");
-    expect(sig).toContain("1:running:-:500:0:5:0:0:-:-");
+    const noLive = new Map<number, LiveProgressView>();
+    const liveOnNode1 = new Map<number, LiveProgressView>([[1, makeLiveView({ totalTokens: 500 })]]);
+    const liveOnNode0 = new Map<number, LiveProgressView>([[0, makeLiveView({ totalTokens: 500 })]]);
+
+    const base = computeRenderSignature(run, noLive, T0);
+    // live 值出现（挂到节点 1）→ 签名变
+    expect(computeRenderSignature(run, liveOnNode1, T0)).not.toBe(base);
+    // 同值 live 挂到另一节点 → 签名也变（配对按 stepIndex 生效，非全局均摊）
+    expect(computeRenderSignature(run, liveOnNode0, T0)).not.toBe(computeRenderSignature(run, liveOnNode1, T0));
+    // live 值消失 → 签名回落基线
+    expect(computeRenderSignature(run, noLive, T0)).toBe(base);
+  });
+
+  // 结构快照（不承担主证明）：签名段集 = run 级五段 + 每节点一段；
+  // 段内词法编码是内部表示，不锁定。
+  it("多节点结构快照：两节点 run 签名共 7 段（run 级 5 + 节点 2）", () => {
+    const run = makeRun({
+      nodes: [makeNode({ stepIndex: 0 }), makeNode({ stepIndex: 1 })],
+    });
+    expect(computeRenderSignature(run, new Map(), T0).split("|")).toHaveLength(7);
   });
 
   it("节点重排（trace 数组序对调，stepIndex 维度）→ 签名变", () => {
@@ -256,5 +309,87 @@ describe("computeRenderSignature — 多节点与无 live 终态", () => {
   it("无节点 run 签名仅含 run 级五段（status/秒桶/completed-total/budget/errorLogs）", () => {
     const sig = computeRenderSignature(makeRun({ nodes: [] }), new Map(), T0);
     expect(sig.split("|")).toHaveLength(5);
+  });
+});
+
+// ── collectNodeLiveProgress 配对（[H2 W3] store record live 进度配对） ──
+//
+// 配对规则：task 标签匹配 + startedAt 最近邻 + 贪心唯一；终态 node 不配；
+// 无匹配 record（重试间隙）返回空。
+// SubagentRecord 投影面（eventLog/turns/totalTokens 等）的投影恒等由 core 侧
+// record-store 测试锁定，此处消费投影面。
+
+describe("collectNodeLiveProgress 配对", () => {
+  it("task 全等匹配：running node ↔ running record，投影挂到 stepIndex", () => {
+    const run = makeRunShape([{ stepIndex: 0, task: "调研 A", status: "running", startedAt: new Date(T0).toISOString() }]);
+    const live = collectNodeLiveProgress(run, [makeSub({ totalTokens: 42 })]);
+    expect(live.get(0)?.totalTokens).toBe(42);
+  });
+
+  it("多候选（parallel 同 prompt）取 startedAt 最近邻，贪心一一不重复消费", () => {
+    const run = makeRunShape([
+      { stepIndex: 0, task: "调研 A", status: "running", startedAt: new Date(T0).toISOString() },
+      { stepIndex: 1, task: "调研 A", status: "running", startedAt: new Date(T0 + 5000).toISOString() },
+    ]);
+    const near0 = makeSub({ id: "sa-near0", startedAt: T0 + 10, totalTokens: 100 });
+    const near1 = makeSub({ id: "sa-near1", startedAt: T0 + 5010, totalTokens: 200 });
+    const live = collectNodeLiveProgress(run, [near1, near0]);
+    expect(live.get(0)?.totalTokens).toBe(100); // node0(startedAt=T0) 最近 = near0
+    expect(live.get(1)?.totalTokens).toBe(200); // node1(T0+5s) 最近 = near1
+  });
+
+  it("终态 node 不配对；task 不匹配（不同 prompt）不配对", () => {
+    const run = makeRunShape([
+      { stepIndex: 0, task: "调研 A", status: "completed", startedAt: new Date(T0).toISOString() },
+      { stepIndex: 1, task: "写总结", status: "running", startedAt: new Date(T0).toISOString() },
+    ]);
+    const live = collectNodeLiveProgress(run, [makeSub({ task: "调研 A", totalTokens: 99 })]);
+    expect(live.size).toBe(0); // node0 终态跳过；node1 task 不匹配
+  });
+
+  it("重试间隙（无 running record）→ 空 map（views 走终态 fallback 渲染）", () => {
+    const run = makeRunShape([{ stepIndex: 0, task: "调研 A", status: "running", startedAt: new Date(T0).toISOString() }]);
+    const live = collectNodeLiveProgress(run, [makeSub({ status: "closed" })]);
+    expect(live.size).toBe(0);
+  });
+});
+
+// ── buildDetailContent session 路径行渲染 ──
+//
+// TUI 渲染测试：buildDetailContent 在 agent 终态时渲染 session: 路径行。
+//
+// 防的 bug：node.sessionFile 有值但 TUI detail 不显示——用户在交互面板里
+// 看不到 agent 的 session jsonl 路径，无法定位文件做后续查看。
+
+describe("buildDetailContent session 路径行渲染", () => {
+  it("node.sessionFile 有值 → 详情末尾渲染 session: <路径>", () => {
+    const sessionPath = "/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl";
+    const node = makeNode({
+      status: "completed",
+      sessionFile: sessionPath,
+      result: { content: "done" },
+    });
+    const lines = buildDetailContent(node, { promptExpanded: false }, makeRun(), plainTheme, 120, Date.now());
+    const sessionLine = lines.find((l) => l.includes("session:"));
+    expect(sessionLine).toBeDefined();
+    expect(sessionLine).toContain(sessionPath);
+  });
+
+  it("node.sessionFile undefined（窗口期）→ 不渲染 session: 行", () => {
+    const node = makeNode({ status: "completed", sessionFile: undefined, result: { content: "done" } });
+    const lines = buildDetailContent(node, { promptExpanded: false }, makeRun(), plainTheme, 120, Date.now());
+    const sessionLine = lines.find((l) => l.includes("session:"));
+    expect(sessionLine).toBeUndefined();
+  });
+
+  it("长路径截断到 mainWidth（防溢出）", () => {
+    const longPath = "/very/long/path/" + "x".repeat(200) + "/session.jsonl";
+    const node = makeNode({ status: "completed", sessionFile: longPath, result: { content: "done" } });
+    const narrowWidth = 60;
+    const lines = buildDetailContent(node, { promptExpanded: false }, makeRun(), plainTheme, narrowWidth, Date.now());
+    const sessionLine = lines.find((l) => l.includes("session:"));
+    expect(sessionLine).toBeDefined();
+    // 截断后行宽不超过 mainWidth + 边框余量
+    expect(sessionLine!.length).toBeLessThanOrEqual(narrowWidth);
   });
 });

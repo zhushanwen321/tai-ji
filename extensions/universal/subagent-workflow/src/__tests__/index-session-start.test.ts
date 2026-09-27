@@ -10,18 +10,23 @@
 //   handler 可能失效。
 //
 // [u-5b / A-V3] 改写（2026-09-03）：
-//   - 装配链内行为（SR-3 接线 / recoverManifestTmpFiles 接线 / loadAll 裁剪 /
-//     通知账本恢复）→ bootstrap seam 直测 setupSessionLifecycle：双 Service 经
-//     单例访问器槽（setSubagentService/setModelConfigService，globalThis 槽）注入
-//     fake——默认装配走 existing 分支复用 fake，initSession 参数可观察。零整类
-//     mock SubagentService/pi-ai/typebox（pi-coding-agent 运行时值由包根 mocks/
-//     alias 提供）。
-//   - 组合根消费点行为（W2TC16 shutdown 编排 / W3TC8 onRunDone 接线）→ 保留挂载
-//     index.ts，mock 面收窄至 3：jsonl-run-store（store 可控）+ lifecycle
-//     （terminate spy）+ interface/commands（runs getter / lazyDeps 捕获）。
+//   - 装配链内行为（SR-3 接线 / 通知账本恢复）→ bootstrap seam 直测
+//     setupSessionLifecycle：双 Service 经单例访问器槽（setSubagentService/
+//     setModelConfigService，globalThis 槽）注入 fake——默认装配走 existing 分支
+//     复用 fake，initSession 参数可观察。零整类 mock SubagentService/pi-ai/typebox
+//     （pi-coding-agent 运行时值由包根 mocks/ alias 提供）。
+//   - 组合根消费点行为（W2TC16 shutdown 编排）→ 保留挂载 index.ts，mock 面收窄
+//     至 3：jsonl-run-store（store 可控）+ lifecycle（terminate spy）+
+//     interface/commands（runs getter / lazyDeps 捕获）。
 //   - 旧 [D15] 裁决注释（「不抽共享 mocks 文件」）随本轮撤销清理：运行时桩已收敛
 //     共享桩 module（src/__tests__/mocks/runtime-stubs.ts，u-5a），形态分工由
 //     A-V3（seam 注入 / 访问器 mock）取代「内联 vi.mock 承担运行时隔离」。
+//
+// [组 5a 瘦身 2026-09-27] beforeEach 不再 resetModules + 动态 import index.ts
+//（每用例全图重求值，9 条 seam 用例免付）——模块图静态加载一次，oncePerProcess
+// 守卫 Map 经 ext-guards 测试重置导出在 beforeEach 清空（与 resetModules 重建等价）；
+// W3TC7/W3TC8 淘汰接线两条删除（core lifecycle-recover-crashed 已锁淘汰语义；
+// W3TC8 由组 5b 在 workflow-events 合并文件补薄接线断言）。
 //
 // 旧用例「new 路径（existingService=null）」的形态适配（deviation 已登记）：initSession
 // 参数接线仅在 existing 分支可观察（fake service 经访问器槽注入；new 分支构造真实
@@ -32,10 +37,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// 本文件大量用例保留组合根挂载形态（mount index.ts + vi.mock 3 模块），加载期
-// 整图重建在覆盖率插桩 + 机器满载时单用例可超 5s 默认预算（PR 门禁 gate-suite
-// 实测 W3TC8 超时假红）——预算放大只作用于挂载/重建耗时，不改断言语义。
-vi.setConfig({ testTimeout: 30_000 });
+import { _resetOncePerProcessForTest } from "@zhushanwen/pi-ext-guards";
 
 // ── mock modules（在 import 前声明；路径相对 src/__tests__/） ──
 
@@ -68,8 +70,8 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", async (importOri
   return { ...actual, terminateRunningRuns: mockTerminateRunningRuns };
 });
 
-// interface/commands mock：W3TC8 捕获 registerWorkflowsCommand 的 runs getter
-//（第二参数）与 lazyDeps（第三参数，onRunDone 接线观察面）。
+// interface/commands mock：组合根 factory 体内的 registerWorkflowsCommand 调用
+// 打桩（挂载用例的 fake pi 无真实命令注册面）。
 const { mockRegisterWorkflowsCommand } = vi.hoisted(() => ({
   mockRegisterWorkflowsCommand: vi.fn(),
 }));
@@ -80,23 +82,14 @@ vi.mock("../interface/commands.ts", () => ({
 // ── import 被测模块 ──
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-// resetModules 每用例重新加载 index.ts 副本，factory 体内的 process 信号 hook
-//（SIGTERM/SIGINT/beforeExit 收割防线）随之叠加注册——本文件 mount 用例超 Node 默认
-// listener 阈值 10 触发误报警告，抬高上限（生产单副本恒 3 个 listener，无此形态）。
-process.setMaxListeners(50);
-
 // session_start 的六项跨 session 副作用操作经 oncePerProcess 守卫（u-audit-fix），
-// 守卫 Map 是模块级状态：beforeEach resetModules + 动态 import 每用例取新鲜模块实例，
-// 否则首用例消费 key 后，后续用例的 recoverManifestTmpFiles / recoverCrashedRuns
-//（loadAll 淘汰、storeHealthy）等断言静默失真。seam 直测路径同因：调用点
-//（runSessionAssembly / W3TC7 / U2 用例）各自动态 import 取当用例的新鲜
-// setupSessionLifecycle——静态引用跨 resetModules 存活，守卫 Map 不随用例重置。
-let subagentsExtension: typeof import("../index.ts").default;
-import { NOTIFY_ACK_CUSTOM_TYPE, NOTIFY_CUSTOM_TYPE, NOTIFY_LEDGER_CUSTOM_TYPE } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
-import { Budget } from "@zhushanwen/subagent-core";
-import { Trace } from "@zhushanwen/subagent-core";
-import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
+// 守卫 Map 是模块级状态：beforeEach 经 _resetOncePerProcessForTest 清空（本文件
+// 静态加载模块图，无 resetModules 重建）。
+import { NOTIFY_ACK_CUSTOM_TYPE, NOTIFY_CUSTOM_TYPE, NOTIFY_LEDGER_CUSTOM_TYPE, _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
+import { setupSessionLifecycle } from "../session-lifecycle.ts";
+import subagentsExtension from "../index.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
+import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -165,8 +158,6 @@ async function runSessionAssembly(mode: "tui" | "rpc" | "json" | "print", entrie
   const mockInitSession = vi.fn();
   const mockInitModel = vi.fn();
   const mockRecoverManifestTmpFiles = vi.fn(async () => ({ deleted: 0, recovered: 0 }));
-  // 当用例的新鲜 seam 实例（守卫 Map 随 beforeEach resetModules 重置，见文件头注释）
-  const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
   setSubagentService({
     initSession: mockInitSession,
     recoverManifestTmpFiles: mockRecoverManifestTmpFiles,
@@ -245,12 +236,11 @@ async function mountWithLoadAll(loadAll: () => Promise<unknown[]>): Promise<{
   };
 }
 
-beforeEach(async () => {
-  vi.resetModules();
+beforeEach(() => {
   vi.clearAllMocks();
   mockStoreLoadAll.mockResolvedValue([]);
   resetLifecycleSlots();
-  subagentsExtension = (await import("../index.ts")).default;
+  _resetOncePerProcessForTest();
 });
 
 afterEach(() => {
@@ -260,7 +250,7 @@ afterEach(() => {
 // ── tests ──
 
 describe("session_start UI handler 注入链路（SR-3）", () => {
-  it("装配链（tui mode）：initSession 收到 uiRequestHandler=函数 + session 锚点（槽注入 existing 形态）", async () => {
+  it("装配链（tui mode）：initSession 收到 uiRequestHandler=函数 + session 锚点 + mode/dialogQueue 注入（槽注入 existing 形态）", async () => {
     // 旧用例为「new 路径（existingService=null）」——initSession 参数接线仅在
     // existing 分支可观察（见文件头 deviation 说明）；new/existing 共用同一行
     // 接线代码（D8 init 无条件），此处经槽注入走 existing 分支锁定同一契约。
@@ -273,6 +263,10 @@ describe("session_start UI handler 注入链路（SR-3）", () => {
     expect(typeof initArg?.uiRequestHandler).toBe("function");
     // session 锚点同步注入（SR-3：/resume /fork 复用时更新 sessionId）
     expect(initArg?.sessionId).toBe("session-inject-1");
+    // [#24][D4-④] 单一注入入口（原独立用例并入）：mode 仍需 session 级注入
+    //（uiObservability.setMode 依赖它）；dialogQueue 仍注入（SR-4 清理路径接通）
+    expect(initArg?.mode).toBe("tui");
+    expect(initArg).toHaveProperty("dialogQueue");
   });
 
   it("existing 路径（槽注入复用）：initSession 仍收到 handler + initModel 无条件执行（SR-3 关键）", async () => {
@@ -303,41 +297,6 @@ describe("session_start UI handler 注入链路（SR-3）", () => {
     expect(mockInitSession).toHaveBeenCalledTimes(1);
     const initArg = mockInitSession.mock.calls[0]?.[0] as { uiRequestHandler?: unknown };
     expect(initArg?.uiRequestHandler).toBeNull();
-  });
-
-  it("rpc mode：initSession 收到 uiRequestHandler=函数", async () => {
-    const { mockInitSession } = await runSessionAssembly("rpc");
-
-    expect(mockInitSession).toHaveBeenCalledTimes(1);
-    const initArg = mockInitSession.mock.calls[0]?.[0] as { uiRequestHandler?: unknown };
-    expect(typeof initArg?.uiRequestHandler).toBe("function");
-  });
-
-  it("initSession 是 uiRequestHandler 单一注入入口（[#24][D4-④]，防双路径注入回退）", async () => {
-    const { mockInitSession } = await runSessionAssembly("tui");
-
-    // [#24][D4-④] 单一注入入口：session_start 经 initSession.uiRequestHandler 注入 handler
-    //（原 setUiRequestHandler 方法已删，双路径注入在 Service 面上不可达）。
-    // mode 仍需 session 级注入（uiObservability.setMode 依赖它）。
-    expect(mockInitSession).toHaveBeenCalledTimes(1);
-    const initArg = mockInitSession.mock.calls[0]?.[0] as {
-      uiRequestHandler?: unknown;
-      mode?: unknown;
-      dialogQueue?: unknown;
-    } | undefined;
-    expect(initArg).toBeDefined();
-    expect(typeof initArg?.uiRequestHandler).toBe("function");
-    // mode 仍需 session 级注入（uiObservability.setMode 依赖它）
-    expect(initArg?.mode).toBe("tui");
-    // dialogQueue 仍注入（SR-4 清理路径接通）
-    expect(initArg).toHaveProperty("dialogQueue");
-  });
-
-  it("session_start 调用 recoverManifestTmpFiles（接线守护，防 ADR-035 启动恢复再次断线）", async () => {
-    const { mockRecoverManifestTmpFiles } = await runSessionAssembly("tui");
-
-    // ADR-035 接线断言：session_start 必须调 service.recoverManifestTmpFiles（防死代码回退）
-    expect(mockRecoverManifestTmpFiles).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -395,162 +354,6 @@ describe("session_shutdown: store.dispose 接线（W2TC16）", () => {
   });
 });
 
-// ── W-N: done run 淘汰接线（loadAll 裁剪 + onRunDone 裁剪） ──
-
-/** fixture 基准时刻（过去时刻，保证 now 恒晚于全部 fixture completedAt）。 */
-const W3_T0 = Date.parse("2020-01-01T00:00:00.000Z");
-function w3IsoAt(min: number): string {
-  return new Date(W3_T0 + min * 60_000).toISOString();
-}
-
-/** loadAll 重水合输入 fixture：done run（status done reason completed + completedAt）。 */
-function makeLoadedDoneRun(runId: string, completedAt: string): WorkflowRun {
-  return WorkflowRun.reconstruct(
-    runId,
-    {
-      scriptSource: "execute() {}",
-      args: {},
-      scriptName: "test",
-      scriptPath: "/fake/test.js",
-    },
-    {
-      status: "done",
-      reason: "completed",
-      budget: new Budget({ maxTokens: 1000 }),
-      calls: new Map(),
-      trace: new Trace(),
-      errorLogs: [],
-    },
-    { startedAt: completedAt, completedAt },
-  );
-}
-
-/** loadAll 重水合输入 fixture：running run（kill-9 恢复输入，reconstruct 跳 I1 合法）。 */
-function makeLoadedRunningRun(runId: string): WorkflowRun {
-  return WorkflowRun.reconstruct(
-    runId,
-    {
-      scriptSource: "execute() {}",
-      args: {},
-      scriptName: "test",
-      scriptPath: "/fake/test.js",
-    },
-    {
-      status: "running",
-      budget: new Budget({ maxTokens: 1000 }),
-      calls: new Map(),
-      trace: new Trace(),
-      errorLogs: [],
-    },
-    { startedAt: w3IsoAt(0) },
-  );
-}
-
-describe("W-3: done run 淘汰接线（loadAll 裁剪 + onRunDone 裁剪）", () => {
-  it("W3TC7: session_start loadAll 灌入后裁剪到 K（21 done + 1 running kill-9 恢复）", async () => {
-    // seam 直测：loadAll 循环 + kill-9 恢复 + evict 住在 session-lifecycle.ts 装配链内，
-    // 装配结果 result.runs 即裁剪后 runs Map（旧形态经 registerWorkflowsCommand
-    // 捕获 runs getter，观察面等价迁移）。
-    const doneRuns = Array.from({ length: 21 }, (_, i) =>
-      makeLoadedDoneRun(`wf-loaded-${i}`, w3IsoAt(i)));
-    const runningRun = makeLoadedRunningRun("wf-recovered-1");
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
-
-    const result = await setupSessionLifecycle(createFakePi(), createFakeCtx("tui"), {
-      createServices: (() => ({
-        service: {
-          initSession: vi.fn(),
-          recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-          startGcTimer: vi.fn(),
-        },
-        modelService: {
-          initModel: vi.fn(),
-          reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),
-        },
-        reused: false,
-      })) as never,
-      worktreeManager: { scan: vi.fn(async () => {}) },
-      createRunStore: () =>
-        ({
-          loadAll: vi.fn(async () => [...doneRuns, runningRun]),
-          save: vi.fn(async () => {}),
-          dispose: vi.fn(async () => {}),
-        }) as never,
-    });
-    const runs = result.runs;
-
-    // kill-9 恢复链把 running 转 done,failed（既有语义）后共 22 done → 裁到 20
-    expect(runs.size).toBe(20);
-    // 恢复 run 的 completedAt 为 transition 时刻（now，晚于全部 fixture 过去时间戳）
-    // → 必在保留端
-    expect(runs.has("wf-recovered-1")).toBe(true);
-    expect(runs.get("wf-recovered-1")?.state.status).toBe("done");
-    expect(runs.get("wf-recovered-1")?.state.reason).toBe("failed");
-    // 被淘汰 2 个 = fixture 最旧两个
-    expect(runs.has("wf-loaded-0")).toBe(false);
-    expect(runs.has("wf-loaded-1")).toBe(false);
-    for (let i = 2; i < 21; i++) {
-      expect(runs.has(`wf-loaded-${i}`)).toBe(true);
-    }
-  });
-
-  it("W3TC8: onRunDone 回调接线——notify → track → evict，本轮 run 不被自身触发的裁剪淘汰", async () => {
-    // onRunDone 接线住组合根 makeDeps（index.ts），保留挂载形态。
-    // session_start 预热：恰好 20 个 done（completedAt t0..t19）
-    const doneRuns = Array.from({ length: 20 }, (_, i) =>
-      makeLoadedDoneRun(`wf-pre-${i}`, w3IsoAt(i)));
-    await mountWithLoadAll(async () => doneRuns);
-
-    // lazyDeps = registerWorkflowsCommand 第三参数（getter 转发 makeDeps 的 onRunDone）
-    const lazyDeps = mockRegisterWorkflowsCommand.mock.calls[0]?.[2] as
-      | { onRunDone: (run: WorkflowRun) => void }
-      | undefined;
-    expect(lazyDeps).toBeDefined();
-
-    // 本轮 newDoneRun：completedAt = now（晚于全部 fixture 过去时间戳）
-    const newDoneRun = WorkflowRun.reconstruct(
-      "wf-current-1",
-      {
-        scriptSource: "execute() {}",
-        args: {},
-        scriptName: "test",
-        scriptPath: "/fake/test.js",
-      },
-      {
-        status: "done",
-        reason: "completed",
-        budget: new Budget({ maxTokens: 1000 }),
-        calls: new Map(),
-        trace: new Trace(),
-        errorLogs: [],
-      },
-      { startedAt: w3IsoAt(999), completedAt: new Date().toISOString() },
-    );
-
-    // 模拟真实流程的注册步骤：lifecycle.ts runWorkflow 在创建时 deps.runs.set(runId, run)
-    //（onRunDone 回调只裁剪不注册——本轮 run 必须先在 Map 中，「保留端」断言才有对象）
-    const getRuns = mockRegisterWorkflowsCommand.mock.calls[0]?.[1] as
-      | (() => Map<string, WorkflowRun>)
-      | undefined;
-    expect(typeof getRuns).toBe("function");
-    const runs = getRuns!();
-    runs.set("wf-current-1", newDoneRun);
-
-    // 回调不抛错（notifyDone 对 fake pi 安全：sendMessage no-op；
-    // toGuiCtx(tui ctx) isGuiCapable false 走无 __gui__ 分支）
-    expect(() => lazyDeps!.onRunDone(newDoneRun)).not.toThrow();
-
-    // 21 done 裁 1：size 回到 20
-    expect(runs.size).toBe(20);
-    // 被淘汰的是 t0 最旧 run 而非本轮 run（completedAt 最新恒在保留端）
-    expect(runs.has("wf-current-1")).toBe(true);
-    expect(runs.has("wf-pre-0")).toBe(false);
-    for (let i = 1; i < 20; i++) {
-      expect(runs.has(`wf-pre-${i}`)).toBe(true);
-    }
-  });
-});
-
 // ============================================================
 // [U2] session_start 通知账本装配 + 重启恢复钩子（设计 D4）
 // ============================================================
@@ -561,14 +364,12 @@ describe("W-3: done run 淘汰接线（loadAll 裁剪 + onRunDone 裁剪）", ()
 // 经模块级绑定消费账本）。
 
 describe("session_start 通知账本恢复钩子（U2 B-ledger）", () => {
-  afterEach(async () => {
-    // 动态 import 命中用例已加载的同一 notify-ledger 实例（下一次 beforeEach 才
-    // resetModules），重置的正是被测绑定槽——静态引用属首载模块图，重置对其无效。
-    const { _resetNotifyLedgerForTest } = await import("@zhushanwen/subagent-core/execution/notify/notify-ledger.ts");
+  afterEach(() => {
+    // 静态 import 命中被测绑定槽同一实例（本文件已无 resetModules，首载图即当前图）
     _resetNotifyLedgerForTest();
   });
 
-  it("mock session 含 ledger/ack entry → 未销账号重放（单通道 triggerTurn），已销账零重发", async () => {
+  it("mock session 含 ledger/ack entry → 仅未销账号重放（单通道 triggerTurn），已销账零重发零重放", async () => {
     const appendEntryCalls: Array<{ customType: string; data: unknown }> = [];
     const sendMessageCalls: Array<{ message: unknown; options: unknown }> = [];
     const pi = createFakePi({
@@ -580,13 +381,15 @@ describe("session_start 通知账本恢复钩子（U2 B-ledger）", () => {
       },
     });
 
-    // 模拟重启前落盘：2 条 ledger entry（s-a 已销账 + s-b 未销账）+ 1 条 ack
+    // 模拟重启前落盘：3 条 ledger entry（s-a/s-c 已销账 + s-b 未销账）+ 2 条 ack
+    //（原「全部已销账 → 零重放」独立用例并入：已销账条目不重投由 s-a/s-c 共同证明）
     const entries: unknown[] = [
       { type: "custom", customType: NOTIFY_LEDGER_CUSTOM_TYPE, data: { v: 1, notifyId: "s-a", content: "ca", record: { notifyId: "s-a" } } },
       { type: "custom", customType: NOTIFY_LEDGER_CUSTOM_TYPE, data: { v: 1, notifyId: "s-b", content: "cb", record: { notifyId: "s-b" } } },
+      { type: "custom", customType: NOTIFY_LEDGER_CUSTOM_TYPE, data: { v: 1, notifyId: "s-c", content: "cc", record: { notifyId: "s-c" } } },
       { type: "custom", customType: NOTIFY_ACK_CUSTOM_TYPE, data: { v: 1, notifyId: "s-a" } },
+      { type: "custom", customType: NOTIFY_ACK_CUSTOM_TYPE, data: { v: 1, notifyId: "s-c" } },
     ];
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
 
     await setupSessionLifecycle(pi, createFakeCtx("rpc", entries), {
       createServices: (() => ({
@@ -617,46 +420,7 @@ describe("session_start 通知账本恢复钩子（U2 B-ledger）", () => {
     expect(sent.customType).toBe(NOTIFY_CUSTOM_TYPE);
     expect(sent.content).toBe("cb");
     expect(sent.details?.notifyId).toBe("s-b");
-    // 已销账 s-a 零重发（不追加新 ledger entry，不重投）
+    // 已销账 s-a/s-c 零重发（不追加新 ledger entry，不重投）
     expect(appendEntryCalls.filter((c) => c.customType === NOTIFY_LEDGER_CUSTOM_TYPE)).toHaveLength(0);
-  });
-
-  it("全部已销账（差集为空）→ 零重放零发送", async () => {
-    const sendMessageCalls: unknown[] = [];
-    const pi = createFakePi({
-      sendMessage: () => {
-        sendMessageCalls.push({});
-      },
-    });
-
-    const entries: unknown[] = [
-      { type: "custom", customType: NOTIFY_LEDGER_CUSTOM_TYPE, data: { v: 1, notifyId: "s-x", content: "cx", record: { notifyId: "s-x" } } },
-      { type: "custom", customType: NOTIFY_ACK_CUSTOM_TYPE, data: { v: 1, notifyId: "s-x" } },
-    ];
-    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
-
-    await setupSessionLifecycle(pi, createFakeCtx("rpc", entries), {
-      createServices: (() => ({
-        service: {
-          initSession: vi.fn(),
-          recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-          startGcTimer: vi.fn(),
-        },
-        modelService: {
-          initModel: vi.fn(),
-          reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),
-        },
-        reused: false,
-      })) as never,
-      worktreeManager: { scan: vi.fn(async () => {}) },
-      createRunStore: () =>
-        ({
-          loadAll: vi.fn(async () => []),
-          save: vi.fn(async () => {}),
-          dispose: vi.fn(async () => {}),
-        }) as never,
-    });
-
-    expect(sendMessageCalls).toHaveLength(0);
   });
 });

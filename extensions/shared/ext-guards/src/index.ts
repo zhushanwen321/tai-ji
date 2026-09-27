@@ -78,6 +78,14 @@ export function oncePerProcess<T>(key: string, fn: () => T): T {
 }
 
 /**
+ * 测试专用：清空 oncePerProcess 的进程级守卫 Map。供静态 import 形态的测试重置
+ * 去重状态（无 resetModules 重建模块图时的等价手段）；生产代码禁止调用。
+ */
+export function _resetOncePerProcessForTest(): void {
+	executions.clear();
+}
+
+/**
  * 从任意 thrown 值提取可读的错误信息字符串：Error → `.message`，其它 → `String(value)`。
  *
  * 收敛各 extension 包散落的 `e instanceof Error ? e.message : String(e)` 样板

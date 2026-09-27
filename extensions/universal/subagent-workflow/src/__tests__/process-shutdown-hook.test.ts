@@ -9,8 +9,12 @@
  *   - process.on → spy + mockImplementation 捕获 handler（不真实注册，防 listener 泄漏）
  *   - process.kill → spy mock（SIGINT handler re-raise 会 kill 自身，必须拦截防杀测试 runner）
  *   - process.removeListener → spy（断言 SIGINT re-raise 前先摘除自身 listener）
+ *
+ * 装载成本分层：index.ts 模块图三层全量加载——factory 在 beforeAll 只跑一次
+ *（process.on 已被 spy 拦截，handler 存 registered Map 不跨用例泄漏），每用例只付
+ * mock 重置 + guard 重置。
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -29,6 +33,11 @@ vi.mock("@zhushanwen/subagent-core/execution/engine/host/spawned-children.ts", a
   };
 });
 
+// 直接 import src/index.ts（而非 extension-root/index.ts re-export）——后者只
+// re-export default，拿不到 named export _resetProcessShutdownGuardForTest。
+// vi.mock 自动提升 → 静态 import 时 mock 面已生效。
+import subagentsExtension, { _resetProcessShutdownGuardForTest } from "../index.ts";
+
 /** 最小 mock ExtensionAPI（对齐 wave0-package-structure.test.ts 的 createMockExtensionAPI）。 */
 function createMockExtensionAPI(): ExtensionAPI {
   return {
@@ -41,24 +50,19 @@ function createMockExtensionAPI(): ExtensionAPI {
   } as unknown as ExtensionAPI;
 }
 
-// [HISTORICAL] 2026-09-15 对齐 PR #185 口径：describe 级 30s timeout 豁免——动态
-// import("../index.ts") 模块图重（三层全量加载），整包满并行高负载下偶发超 vitest
-// 默认 testTimeout，属模块加载 headroom 而非用例逻辑耗时。
-describe("[V2 决策 7 防线 i] process 级 shutdown hook", { timeout: 30000 }, () => {
+describe("[V2 决策 7 防线 i] process 级 shutdown hook", () => {
   type Handler = (...args: unknown[]) => void;
   const registered: Partial<Record<string, Handler>> = {};
   let onSpy: ReturnType<typeof vi.spyOn>;
   let removeListenerSpy: ReturnType<typeof vi.spyOn>;
   let killSpy: ReturnType<typeof vi.spyOn>;
-  let resetGuard: () => void;
 
-  // hook 显式 timeout：describe 级 { timeout } 不传播给 hook（vitest 4 行为），
-  // 动态 import("../index.ts") 大模块图在全量并行高负载下偶发超默认 10s
-  beforeEach(async () => {
-    markAllSpawnedChildrenDeadMock.mockReset();
-    for (const k of Object.keys(registered)) delete registered[k];
-
-    // 捕获 process.on 注册的 handler（不真实注册到全局 process，避免 listener 跨用例泄漏）。
+  // [HISTORICAL] 2026-09-15 对齐 PR #185 口径：本 describe 曾用动态 import +
+  // describe 级 30s timeout 豁免（每用例付 index.ts 三层全量模块图重求值，高负载下
+  // 偶发超默认 testTimeout）。现改静态 import + beforeAll 单次 factory 装载，
+  // per-case 大模块图成本消失，30s 豁免随之收敛回默认。
+  beforeAll(() => {
+    // 捕获 process.on 注册的 handler（不真实注册到全局 process，避免 listener 泄漏）。
     onSpy = vi.spyOn(process, "on");
     onSpy.mockImplementation(((event: string, handler: Handler) => {
       registered[event] = handler;
@@ -69,16 +73,18 @@ describe("[V2 决策 7 防线 i] process 级 shutdown hook", { timeout: 30000 },
     killSpy = vi.spyOn(process, "kill").mockImplementation((() => true) as never);
     removeListenerSpy = vi.spyOn(process, "removeListener");
 
-    // 直接 import src/index.ts（而非 extension-root/index.ts re-export）——后者只
-    // re-export default，拿不到 named export _resetProcessShutdownGuardForTest。
-    const mod = await import("../index.ts");
-    resetGuard = (
-      mod as unknown as { _resetProcessShutdownGuardForTest: () => void }
-    )._resetProcessShutdownGuardForTest;
-    mod.default(createMockExtensionAPI());
-  }, 30000);
+    subagentsExtension(createMockExtensionAPI());
+  });
 
-  afterEach(() => {
+  beforeEach(() => {
+    markAllSpawnedChildrenDeadMock.mockReset();
+    // spy 调用记录每用例清零（不清 implementation：spy 拦截面必须跨用例持续在位）
+    killSpy.mockClear();
+    removeListenerSpy.mockClear();
+    _resetProcessShutdownGuardForTest();
+  });
+
+  afterAll(() => {
     onSpy.mockRestore();
     killSpy.mockRestore();
     removeListenerSpy.mockRestore();
@@ -91,14 +97,12 @@ describe("[V2 决策 7 防线 i] process 级 shutdown hook", { timeout: 30000 },
   });
 
   it("SIGTERM handler 触发时调 markAllSpawnedChildrenDead() + process.exitCode = 0", () => {
-    resetGuard();
     registered["SIGTERM"]!("SIGTERM");
     expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledWith();
     expect(process.exitCode).toBe(0);
   });
 
   it("SIGINT handler 触发时收割 + re-raise（先 removeListener 自身再 kill 自身，恢复默认终止）", () => {
-    resetGuard();
     const beforeExitCode = process.exitCode;
     registered["SIGINT"]!("SIGINT");
     // 镜像记账清空（无参——函数不发任何进程信号）
@@ -111,26 +115,15 @@ describe("[V2 决策 7 防线 i] process 级 shutdown hook", { timeout: 30000 },
   });
 
   it("beforeExit handler 触发时调 markAllSpawnedChildrenDead 但不 process.kill（自然退出）", () => {
-    resetGuard();
     registered["beforeExit"]!();
     expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledWith();
     expect(killSpy).not.toHaveBeenCalled();
   });
 
   it("idempotent：多信号叠加（SIGTERM 后又 SIGINT/beforeExit）只收割一次", () => {
-    resetGuard();
     registered["SIGTERM"]!("SIGTERM");
     registered["SIGINT"]!("SIGINT");
     registered["beforeExit"]!();
-    expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("idempotent：session_shutdown 已收割后，process 级 handler 不重复 kill", () => {
-    // 模拟 session_shutdown 先触发（resetGuard 后先收割一次），再 process 信号到达。
-    resetGuard();
-    registered["beforeExit"]!();
-    expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledTimes(1);
-    registered["SIGTERM"]!("SIGTERM");
     expect(markAllSpawnedChildrenDeadMock).toHaveBeenCalledTimes(1);
   });
 });

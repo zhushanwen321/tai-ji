@@ -7,11 +7,14 @@
 //      不挂载 index.ts、零整类 mock（设计 §3.1「使用者视角」样例的落地）。
 //   2. 守卫合一——原 pi.__workflowRun 内联守卫与 getDeps 守卫两份重复合并为
 //      单一 getWorkflowDeps 出口后，两个消费点（返回错误对象 / throw）对同一
-//      失败态产生同源同消息的失败形态（错误消息逐字保留，crash-recovery 已锁
+//      失败态产生同源同消息的失败形态（错误消息逐字保留，组 2 / 组 6 用例锁定
 //      "store unavailable" / "loadAll failed" 子串）。
 //
-// mock 面说明：第 2 组用例必须挂载 index.ts（守卫消费点是其闭包内符号），沿
-// crash-recovery.test.ts 的 module 级 vi.mock 先例；打桩面收敛是 u-5b 领地。
+// mock 面说明：第 2 组用例必须挂载 index.ts（守卫消费点是其闭包内符号），走
+// module 级 vi.mock（jsonl-run-store + interface 层）；打桩面收敛是 u-5b 领地。
+// crash-recovery.test.ts 已并入本文件：loadAll 四分支中与组 1 seam 条同契约的
+// 不重复设条，独有断言面（B1 第二 session 恢复 / 已终态直 set / 域隔离）在组 6，
+// kill-9 真实链路 fixture 在组 7。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -124,6 +127,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 // [W2/V4 D6] 直落断言消费的 protocol SSOT（customType 常量 + status 映射单点）
 import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
+import { STALE_CTX_MARKER } from "@zhushanwen/pi-ext-guards";
 import { IDENTITY_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
 import { ENV_ROOT_CWD, getSubagentRecordsDir, resolvePiSessionScopedDir, STATE_DIR_NAME } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
@@ -226,6 +230,46 @@ function makeFakeStore(loadAll: () => Promise<WorkflowRunType[]>): {
     save: vi.fn(async () => {}),
     dispose: vi.fn(async () => {}),
   };
+}
+
+/** 挂载 index.ts 并跑一次 session_start（loadAll 行为可配），返回守卫/恢复观察面：
+ *  pi（含 __workflowRun）/ appendEntry entries / lazyDeps / 绑定 __workflowRun。
+ *  守卫组（组 2）与 crash-recovery 吸收组（组 6）共用本挂载 harness（仅此一份）。 */
+async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Promise<{
+  pi: ExtensionAPI;
+  entries: EntryRecord[];
+  lazyDeps: { store: unknown };
+  workflowRun: (n: string, a: Record<string, unknown>) => Promise<{ status: string; reason: string; error?: string; runId: string }>;
+}> {
+  mockStoreLoadAll.mockImplementation(loadAll);
+  let sessionStartHandler: ((event: unknown, ctx: unknown) => Promise<void>) | undefined;
+  const entries: EntryRecord[] = [];
+  const noop = (): void => { /* fake */ };
+  const pi = {
+    appendEntry: (customType: string, data: unknown) => {
+      entries.push({ customType, data });
+    },
+    events: { emit: noop },
+    on: (event: string, handler: (...args: unknown[]) => unknown) => {
+      if (event === "session_start") {
+        sessionStartHandler = handler as (event: unknown, ctx: unknown) => Promise<void>;
+      }
+    },
+    sendMessage: noop,
+    registerMessageRenderer: noop,
+  } as unknown as ExtensionAPI;
+
+  subagentsExtension(pi);
+
+  const handler = sessionStartHandler!;
+  await handler({ type: "session_start" }, createFakeCtx("session-guard-1"));
+
+  // registerWorkflowTool 第二参 = lazyDeps（LauncherDeps getter 形态，u-5b 领地改写）
+  const lazyDeps = mockRegisterWorkflowTool.mock.calls[0]?.[1] as { store: unknown };
+  const workflowRun = (pi as unknown as {
+    __workflowRun: (n: string, a: Record<string, unknown>) => Promise<{ status: string; reason: string; error?: string; runId: string }>;
+  }).__workflowRun.bind(pi);
+  return { pi, entries, lazyDeps, workflowRun };
 }
 
 beforeEach(async () => {
@@ -523,40 +567,6 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
 // ── 组 2：守卫合一（两消费点单一出口，u-4 行为变更点） ──────────────────────────
 
 describe("getWorkflowDeps 守卫合一 — 两消费点同源同消息", () => {
-  /** 挂载 index.ts 并跑一次 session_start（loadAll 行为可配），返回守卫观察面。 */
-  async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Promise<{
-    pi: ExtensionAPI;
-    lazyDeps: { store: unknown };
-    workflowRun: (n: string, a: Record<string, unknown>) => Promise<{ status: string; reason: string; error?: string; runId: string }>;
-  }> {
-    mockStoreLoadAll.mockImplementation(loadAll);
-    let sessionStartHandler: ((event: unknown, ctx: unknown) => Promise<void>) | undefined;
-    const noop = (): void => { /* fake */ };
-    const pi = {
-      appendEntry: noop,
-      events: { emit: noop },
-      on: (event: string, handler: (...args: unknown[]) => unknown) => {
-        if (event === "session_start") {
-          sessionStartHandler = handler as (event: unknown, ctx: unknown) => Promise<void>;
-        }
-      },
-      sendMessage: noop,
-      registerMessageRenderer: noop,
-    } as unknown as ExtensionAPI;
-
-    subagentsExtension(pi);
-
-    const handler = sessionStartHandler!;
-    await handler({ type: "session_start" }, createFakeCtx("session-guard-1"));
-
-    // registerWorkflowTool 第二参 = lazyDeps（LauncherDeps getter 形态，u-5b 领地改写）
-    const lazyDeps = mockRegisterWorkflowTool.mock.calls[0]?.[1] as { store: unknown };
-    const workflowRun = (pi as unknown as {
-      __workflowRun: (n: string, a: Record<string, unknown>) => Promise<{ status: string; reason: string; error?: string; runId: string }>;
-    }).__workflowRun.bind(pi);
-    return { pi, lazyDeps, workflowRun };
-  }
-
   it("session 未初始化：tool 侧消费点（lazyDeps getter）throw 'Session not initialized'", async () => {
     // 新 factory 实例，不触发 session_start——sessionState 为空。
     const noop = (): void => { /* fake */ };
@@ -784,5 +794,321 @@ describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点�
     await setupSessionLifecycle(pi, createFakeCtx("session-maint-3"), {});
     expect(fs.existsSync(path.join(stateDir, "wf-maint-second.jsonl"))).toBe(true);
     expect(fs.existsSync(path.join(recordsDir, "sa-maint-second.events"))).toBe(true);
+  });
+});
+
+// ── 组 5：sendDelivery stale ctx 守卫（出自 notify-stale-guard.test.ts，归属本域）──
+//
+// 被测入口是本文件的 bindLedgerHostAndRecover 装配 seam（crash-resilience D1 /
+// ext-guards 审计 §7 blockers#1 收口）：取装配后的 ledgerHost 直调 sendDelivery，
+// 验证 stale 分诊三面——stale 错误（含 PS-30 分诊词）静默降级不外抛、非 stale
+// 错误原样上抛（同一错误实例，attemptDeliver 既有 catch 的 settleRejected 留账
+// 重试语义可接住）、正常路径单通道 {triggerTurn:true} 形态原样透传。notifyDone
+// 半边（降级直发分支的同判）在 workflow-notify.test.ts。形态对齐 ext-guards
+// guard-stale-ctx.test.ts（PI_STALE_ERROR 文案 fixture）；分诊无 isCtxStale 注入
+// （与生产接入一致，文案兜底由 PS-30 门禁守卫）。
+
+/** pi 实装 stale 文案的完整形态（E1 崩溃堆栈原文，探针 PS-30 守卫其稳定性）。 */
+const PI_STALE_ERROR = `This extension ctx is stale ${STALE_CTX_MARKER} or reload. Do not use a captured pi or command ctx after ctx.newSession().`;
+
+const DELIVERY_MESSAGE = {
+  customType: "bg-notify",
+  content: "subagent done: reviewer",
+  display: true,
+};
+
+describe("sendDelivery stale ctx 守卫（bindLedgerHostAndRecover seam，出自 notify-stale-guard）", () => {
+  /** bindLedgerHostAndRecover 最小 pi 面（sendMessage 可注入抛错形态）。 */
+  function makeLedgerPi(sendMessageImpl?: (...args: unknown[]) => void): {
+    pi: ExtensionAPI;
+    sendMessage: ReturnType<typeof vi.fn>;
+  } {
+    const sendMessage = vi.fn(sendMessageImpl);
+    const noop = (): void => {
+      /* mock */
+    };
+    const pi = {
+      appendEntry: noop,
+      on: noop,
+      sendMessage,
+    } as unknown as ExtensionAPI;
+    return { pi, sendMessage };
+  }
+
+  /** 每用例动态 import 取当用例模块图的 bindLedgerHostAndRecover 并装配（对齐
+   *  本文件 resetModules 惯例——静态引用属首载图）。ctx 走 createFakeCtx：其
+   *  sessionManager.getEntries 恒空数组（恢复扫描零重放）、isIdle 恒 true。 */
+  async function bindHost(sendMessageImpl?: (...args: unknown[]) => void) {
+    const { bindLedgerHostAndRecover } = await import("../session-lifecycle.ts");
+    const { pi, sendMessage } = makeLedgerPi(sendMessageImpl);
+    const host = bindLedgerHostAndRecover(pi, createFakeCtx("session-stale-guard-1"));
+    return { host, sendMessage };
+  }
+
+  it("stale 错误静默降级：不外抛，投递不放大为无人接 rejection", async () => {
+    const { host, sendMessage } = await bindHost(() => {
+      throw new Error(PI_STALE_ERROR);
+    });
+    expect(host).toBeDefined();
+
+    expect(() => host!.sendDelivery(DELIVERY_MESSAGE)).not.toThrow();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("非 stale 错误原样上抛：attemptDeliver 既有 catch（settleRejected 留账重试）仍可接住", async () => {
+    const boom = new Error("delivery rejected by runtime");
+    const { host } = await bindHost(() => {
+      throw boom;
+    });
+
+    expect(() => host!.sendDelivery(DELIVERY_MESSAGE)).toThrow(boom);
+  });
+
+  it("正常路径零变化：单通道形态 sendCustomMessage({triggerTurn:true}) 原样透传", async () => {
+    const { host, sendMessage } = await bindHost();
+
+    host!.sendDelivery(DELIVERY_MESSAGE);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [msg, opts] = sendMessage.mock.calls[0] as [unknown, Record<string, unknown>];
+    expect(msg).toEqual(DELIVERY_MESSAGE);
+    expect(opts).toEqual({ triggerTurn: true });
+  });
+});
+
+// ── 组 6：session_start crash recovery — store.loadAll 路径（吸收自 crash-recovery.test.ts）──
+//
+// loadAll 四分支的归属现状：成功+running（transition + appendEntry 直落 + 不经 emit）
+// 与失败 fail-fast（storeHealthy=false）两分支与组 1 seam 条同契约，以组 1 既有条为准
+// 不重复设条；「store unavailable / loadAll failed」错误面由组 2 守卫条锁定。本组保留
+// crash-recovery 独有断言面：B1 第二 session 恢复、已终态直 set、域隔离。观察面迁移
+// 两处（断言意图不变）：已终态条的 entries 经挂载 harness 的 appendEntry 捕获（原文件
+// 同形）；域隔离条的注册观察从 pi.registerTool 捕获 "subagent" 改为 interface mock 的
+// registerSubagentTool 调用断言（本文件 interface 层 module mock 下真实注册不达 pi）。
+
+describe("session_start crash recovery — store.loadAll 路径（吸收自 crash-recovery）", () => {
+  it("B1: 同进程第二个 session 的恢复不被跳过（/new 后 /resume 崩溃 session 场景）", async () => {
+    // [B1 回归] 恢复曾挂 oncePerProcess（进程级单次），同进程第二个 session_start
+    // 重放首次 Promise、跳过 loadAll——被 /resume 的崩溃 session 残留 run 不被收编。
+    // 修复后恢复是 session 级幂等操作：同一模块实例连续两次装配，第二次照常收编。
+    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
+    const mkDeps = (runs: WorkflowRunType[]): SessionLifecycleDeps => ({
+      createServices: (() => ({
+        service: {
+          initSession: vi.fn(),
+          recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
+          startGcTimer: vi.fn(),
+        },
+        modelService: {
+          initModel: vi.fn(),
+          reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),
+        },
+        reused: false,
+      })) as never,
+      worktreeManager: { scan: vi.fn(async () => {}) },
+      createRunStore: () =>
+        ({
+          loadAll: vi.fn(async () => runs),
+          save: vi.fn(async () => {}),
+          dispose: vi.fn(async () => {}),
+        }) as never,
+    });
+
+    // 第一次 session_start（session-a）：无残留，恢复空转
+    const first = await setupSessionLifecycle(createFakePi().pi, createFakeCtx(), mkDeps([]));
+    expect(first.storeHealthy).toBe(true);
+
+    // 第二次 session_start（session-b，同进程 /resume 上次崩溃的 session）：其
+    // running 残留必须被收编（不被首次调用旁路）
+    const runningRun = makeRun("wf-crash-2", "running");
+    const { pi: pi2, entries: entries2 } = createFakePi();
+    const second = await setupSessionLifecycle(pi2, createFakeCtx(), mkDeps([runningRun]));
+    expect(second.storeHealthy).toBe(true);
+    expect(runningRun.state.status).toBe("done");
+    expect(runningRun.state.reason).toBe("failed");
+    // [W2/V4 D6] 注销经 appendEntry 直落（不经 emit）
+    const unregister = entries2.find((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
+    expect(unregister).toBeDefined();
+    expect(unregister!.data).toEqual({
+      id: "wf-crash-2",
+      reason: "failed",
+      status: mapReasonToStatus("failed"),
+    });
+  });
+
+  it("loadAll 成功 + 已终态 run：直接 set 到 runs Map，不 transition", async () => {
+    const doneRun = makeRun("wf-done-1", "done");
+    const originalCompletedAt = doneRun.meta.completedAt;
+    const { entries, workflowRun } = await mountWithLoadAll(async () => [doneRun]);
+
+    // 状态不变（仍 done/completed），不重新 transition（completedAt 不变）
+    expect(doneRun.state.status).toBe("done");
+    expect(doneRun.state.reason).toBe("completed");
+    expect(doneRun.meta.completedAt).toBe(originalCompletedAt);
+
+    // 终态 run 不触发 pending:unregister（恢复路径只处理 status==="running"；
+    // [W2/V4 D6] 注销面 = appendEntry 直落 entries，零断言走该通道）
+    const unregister = entries.filter((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
+    expect(unregister).toHaveLength(0);
+
+    // run 已被 set 到 runs Map —— pi.__workflowRun 在 storeHealthy=true 时
+    // 不会因 store unavailable 提前返回
+    const result = await workflowRun("any", {});
+    expect(result.error).not.toContain("store unavailable");
+  });
+
+  it("loadAll 失败后 subagent 域不受影响：registerSubagentTool 仍被调用", async () => {
+    await mountWithLoadAll(async () => {
+      throw new Error("disk corruption");
+    });
+
+    // 域隔离：subagent tool 注册在 factory 入口（session_start 之外），与 store
+    // 健康无关。观察面迁移：本文件 interface 层 module mock 下断言 mock 调用
+    //（原文件无 interface mock、以 pi.registerTool 捕获 "subagent"），断言意图
+    // 不变：store 不健康时 factory 入口的 subagent 域注册仍执行。
+    const { registerSubagentTool } = await import("../interface/subagent-tool.ts");
+    expect(vi.mocked(registerSubagentTool)).toHaveBeenCalled();
+  });
+});
+
+// ── 组 7：[W1 / D4] kill-9 收编 fixture（吸收自 crash-recovery.test.ts）────────
+//
+// 真实链路夹具（非 mock store）：真实 JsonlRunStore（经 importActual 绕开本文件
+// 顶部的 JsonlRunStore module mock——mock 面服务挂载类用例的 store 可控点）+ 真实
+// run journal（core 写者落账）+ setRunEventJournalDirForTest 注入 fixture 目录
+// （真实 dispatchFinalRunSettle 链：状态机裁决 + journal run-settled 落账 + manifest
+// 物化）。验收断言（设计场景 3 的 fixture 化）：
+//   ① journal 尾部有收编 run-settled（failed）；
+//   ② 主 session 条目恰两条（注册 + 终态，v2 形态）；
+//   ③ manifest 物化（outcome=failed，prune 资格单源锚定）；
+//   ④ 双重启不重复追加（幂等：第二次装配 journal 仍一条 run-settled、零条目写）。
+
+describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + manifest 物化", () => {
+  it("crashed run（有注册无终态）经恢复链收编；双重启零重复追加", async () => {
+    const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
+    // 真实 store（绕开文件顶部 module mock）+ core journal 写者 + pump journal 目录注入
+    const { JsonlRunStore: RealJsonlRunStore } =
+      await vi.importActual<typeof import("../jsonl-run-store.ts")>("../jsonl-run-store.ts");
+    const { setRunEventJournalDirForTest } = await import(
+      "@zhushanwen/subagent-core/orchestration/worker-message-pump.ts"
+    );
+    const { createRunEventJournal, WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } =
+      await import("@zhushanwen/subagent-core");
+    type CustomEntry = { type: string; customType?: string; data?: unknown; id: string; parentId: null; timestamp: string };
+
+    const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-kill9-"));
+    setRunEventJournalDirForTest(fixtureDir);
+    try {
+      const runId = "wf-kill9-1";
+      const journalPath = path.join(fixtureDir, `${runId}.events.jsonl`);
+      // 崩溃形态 journal：run-created + ask 帧，无 run-settled（进程被 kill-9 的磁盘形态）
+      const journal = createRunEventJournal(fixtureDir);
+      await journal.append(runId, { type: "run-created", runId, workflowName: "kill9", argsSummary: "{}", ts: Date.now() - 60_000 });
+      await journal.append(runId, { type: "ask-dispatched", taskIndex: 0, agentName: "a", attempt: 1, ts: Date.now() - 30_000 });
+
+      // 主 session 面只落注册条目（v2 形态——终态条目缺失即收编补写对象）
+      const entries: CustomEntry[] = [
+        {
+          type: "custom",
+          customType: WORKFLOW_RECORD_CUSTOM_TYPE,
+          data: {
+            v: WORKFLOW_RECORD_ENTRY_VERSION,
+            kind: "registered",
+            runId,
+            workflowName: "kill9",
+            scriptName: "kill9",
+            slug: "kill9",
+            startedAt: Date.now() - 60_000,
+            journalPath,
+          },
+          id: "seed-reg",
+          parentId: null,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      // fake pi：appendEntry 模拟 session JSONL append（捕获 + 落 entries——pi.appendEntry
+      // 的真实语义）。[W2/V4 D6] 恢复链注销走 appendEntry 直落，appended 是注销观察面。
+      const appended: Array<{ t: string; d: unknown }> = [];
+      const { pi: piBase, emits } = createFakePi();
+      const appendEntry = vi.fn((t: string, d: unknown) => {
+        appended.push({ t, d });
+        entries.push({ type: "custom", customType: t, data: d, id: `entry-${entries.length}`, parentId: null, timestamp: new Date().toISOString() });
+      });
+      const pi = Object.assign(piBase, { appendEntry });
+      const baseCtx = createFakeCtx();
+      const ctx = {
+        ...baseCtx,
+        sessionManager: {
+          ...baseCtx.sessionManager,
+          getEntries: () => [...entries],
+        },
+      } as ExtensionContext;
+
+      const mkDeps = (): SessionLifecycleDeps => ({
+        createServices: (() => ({
+          service: {
+            initSession: vi.fn(),
+            recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
+            startGcTimer: vi.fn(),
+          },
+          modelService: {
+            initModel: vi.fn(),
+            reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),
+          },
+          reused: false,
+        })) as never,
+        worktreeManager: { scan: vi.fn(async () => {}) },
+        createRunStore: () => new RealJsonlRunStore({ sessionDir: fixtureDir, pi, ctx }),
+      });
+
+      // 第一次启动（kill-9 后重启）：running 收编
+      const first = await setupSessionLifecycle(pi, ctx, mkDeps());
+      const run = first.runs.get(runId);
+      expect(run?.state.status).toBe("done");
+      expect(run?.state.reason).toBe("failed");
+      // [W2/V4 D6] 注销经 appendEntry 直落（不经 emit）；零 emit 断言防事件通道回潮
+      const unregister = appended.find(({ t }) => t === PENDING_UNREGISTER_ENTRY_TYPE);
+      expect(unregister).toBeDefined();
+      expect((unregister!.d as { reason?: string }).reason).toBe("failed");
+      expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();
+
+      // ① journal 尾部有收编 run-settled（[W2 D2/D3] 被动终局 = interrupted）
+      const lines = fs.readFileSync(journalPath, "utf8").split("\n").filter((l) => l.trim());
+      const lastFrame = JSON.parse(lines[lines.length - 1]!) as { type: string; outcome?: string };
+      expect(lastFrame.type).toBe("run-settled");
+      expect(lastFrame.outcome).toBe("interrupted");
+
+      // ② 主 session 条目恰两条：注册（seed）+ 终态（收编补写）
+      const wfEntries = entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE);
+      expect(wfEntries).toHaveLength(2);
+      expect((wfEntries[0]!.data as { kind?: string }).kind).toBe("registered");
+      expect((wfEntries[1]!.data as { kind?: string }).kind).toBe("settled");
+
+      // ③ manifest 物化（writeRunTerminalManifest 落 <fixtureDir>/<runId>.json）
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(fixtureDir, `${runId}.json`), "utf8"),
+      ) as { id: string; outcome?: string };
+      expect(manifest.id).toBe(runId);
+      expect(manifest.outcome).toBe("interrupted");
+
+      // ④ 双重启：journal 已终态 → loadAll 直读终局，零重复追加、零条目写
+      appended.length = 0;
+      await setupSessionLifecycle(pi, ctx, mkDeps());
+      const settledFrames = fs
+        .readFileSync(journalPath, "utf8")
+        .split("\n")
+        .filter((l) => l.trim() && (JSON.parse(l) as { type: string }).type === "run-settled");
+      expect(settledFrames).toHaveLength(1);
+      expect(appended.filter((a) => a.t === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(0);
+      expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(2);
+    } finally {
+      // 清 journal 目录注入（恢复 vitest 防线 no-op 形态——防其他测试误写真目录）
+      const { setRunEventJournalDirForTest } = await import(
+        "@zhushanwen/subagent-core/orchestration/worker-message-pump.ts"
+      );
+      setRunEventJournalDirForTest(undefined);
+      fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
   });
 });
