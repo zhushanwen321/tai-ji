@@ -719,7 +719,7 @@
       "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-s4-abort-no-orphan.spec.ts（双凭证门 = env + 本机 provider 凭证，缺一 skip 不 fail；空载串行）。剧本化包装：bash .tmp/dev-flow/w1-run-record-journal-authority.acceptance/batch-rerun.sh（W1 D3 verify 载体，含 build 前置 + 三 spec 串行 + 产物落 batch/，.tmp 不入 git）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收口）：S4 中途停止 → cancelled + 通知照达 + 无孤儿成员任务子进程；W1 新介质锚 = 收编幂等与死字节断言。 R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现面），成员任务子进程 ps 核对为通过条件之一（设计 S4）。断言锚（双特征集）：① 成员保活 sleep 进程；② 引擎宿主 pi-subagent-cli 薄壳——pi-workflow-run-resource-model per-window 形态下薄壳随派发窗口生灭（run 收尾 dispose），abort 收口后计数回落基线（2026-09-27 断言升级，原「连接级常驻不数孤儿」裁决随形态切换退役，git 可追溯），计数复用 count-engine-shell-processes.mjs（特征串权威单源，基线差分吸收 zcode 常驻单例与测试进程 cmdline 噪声）。真机已过（升级前形态）：done(cancelled) 通知照达 + 零成员任务残留；升级断言（宿主纳入判定面）的真机复核归 D3 验收批次（A2）。"
+      "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收口）：S4 中途停止 → cancelled + 通知照达 + 无孤儿成员任务子进程；W1 新介质锚 = 收编幂等与死字节断言。 R2 态，触发条件同 E2E-BATCH-01。abort 走 workflow tool 既有 action（runId 同体系，subagents 侧无独立实现面），成员任务子进程 ps 核对为通过条件之一（设计 S4）。断言锚（双特征集）：① 成员保活 sleep 进程；② 引擎宿主 pi-subagent-cli 薄壳——pi-workflow-run-resource-model per-window 形态下薄壳随派发窗口生灭（run 收尾 dispose），abort 收口后计数回落基线（2026-09-27 断言升级，原「连接级常驻不数孤儿」裁决随形态切换退役，git 可追溯），计数复用 count-engine-shell-processes.mjs（特征串权威单源，基线差分吸收 zcode 常驻单例与测试进程 cmdline 噪声）。真机已过（2026-09-27 D3 A2 升级断言形态）：TAIJI_PI_LIVE=1 空载串行绿（2.6m）——run-settled(cancelled) 恰 1 + 通知照达 + 成员保活进程与引擎宿主薄壳均在飞观测到并回落基线（升级断言特征集首跑命中零校准）；真机首跑暴露 workflow 成员 pi 派发未携窗口键（engine_window_scoped 拒答），修复 = routeWorkflowEngine 的 piEngine 注入携带 parentRunId（e51bfed9c），回归锁 = workflow-agent-dispatch 窗口键断言。"
     },
     {
       "id": "E2E-BATCH-08",
@@ -743,7 +743,7 @@
       "run": "cd packages/subagent-core && npx vitest run src/orchestration/__tests__/member-reuse-pool.test.ts src/execution/__tests__/conversation-continuation.test.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "pi-workflow-run-resource-model §4.1 V8 登记行（2026-09-27 U6）：通过标准 = 同一 record id 多轮、session 文件同 id 历史连续、callId 核对每条独立结果照旧（复用键 = name，对齐 zcode 平台语义；续聊 = revive 拉起，决策 7）。当前登记 = 成员复用通道的 mock 锁（复用池命中/未命中/跨 round 连续 + revive 续写链）+ 能力本体 fan-out（同名 agent() 剧本载体，asset 锚 = 被验能力本体先例同 E2E-BATCH-01）；真机剧本（同名 agent() ×2 真机跑 + record/session 文件核对）未落建，真机复核归 D3 验收批次，落建后同 commit 扩 assets 并翻 layer/serial（翻轨先例 E2E-RENAME-01）。"
+      "note": "pi-workflow-run-resource-model §4.1 V8 登记行（2026-09-27 U6）：通过标准 = 同一 record id 多轮、session 文件同 id 历史连续、callId 核对每条独立结果照旧（复用键 = name，对齐 zcode 平台语义；续聊 = revive 拉起，决策 7）。当前登记 = 成员复用通道的 mock 锁（复用池命中/未命中/跨 round 连续 + revive 续写链）+ 能力本体 fan-out（同名 agent() 剧本载体，asset 锚 = 被验能力本体先例同 E2E-BATCH-01）；真机复核已完成（2026-09-27 D3 A8，E2E-BATCH-11 spec 承载：member-pool register 恰 1 + v2 条目对 + ask ×2 completed；多轮介质证据 = member-pool 单 register 帧结构性证明第二调用未新建 record——workflow 成员 revive 续轮不经 chat 域 continuation，无 record-round-started 帧，为已知实现语义）。"
     },
     {
       "id": "E2E-BATCH-09",
@@ -1143,6 +1143,108 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "本表消费者脚本（_meta.consumers）的登记（2026-09-27 补登）：scope/asset 匹配语义、watched roots 推导、--check coverage 判定由 19 用例零 token 锁定；真实运行形态 = 开发期按 diff 选受影响面 + pre-commit --check 门禁（本文件或 e2e-map.json 或 validate 脚本变更时触发，接线 SSOT = .githooks/install-hooks.sh）。changedFiles 排除已删除文件（--diff-filter=d）：删除不产生 coverage 义务，磁盘已不存在的文件不可登记为 asset（validate-e2e-map existsSync 强校验拒绝死资产条目）"
+    },
+    {
+      "id": "E2E-BATCH-10",
+      "summary": "WL 窗口生命周期：双 workflow 并发（长短成员）——短收尾不杀长窗口（V3）+ 长正常完成后薄壳回落基线（V1）",
+      "scope": [
+        "packages/subagent-core/src/execution/engine/**",
+        "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
+        "packages/pi-subagent-cli/src/**"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/batch-window-lifecycle.spec.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行（双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证，缺一 skip 不 fail；空载串行）：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-window-lifecycle.spec.ts",
+      "owner": "packages/subagent-core",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "pi-workflow-run-resource-model D3 验收 A1/A3（场景 V1/V3）落建（2026-09-27 D3 真机首跑 3.0m 绿：短收尾后长成员/薄壳仍存活、long completed 后成员与薄壳回落基线；abort 路径同型断言见 E2E-BATCH-04）。断言 ground truth = ps 进程表（count-engine-shell-processes.mjs 特征并集，基线差分）+ journal run-settled 帧。"
+    },
+    {
+      "id": "E2E-BATCH-11",
+      "summary": "WRR 窗口复用与自愈：kill 注入薄壳后第二条 agent() respawn（V6）+ 同名 agent() 复用同一成员（V8）",
+      "scope": [
+        "packages/subagent-core/src/execution/engine/**",
+        "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
+        "packages/pi-subagent-cli/src/**",
+        "packages/subagent-core/src/orchestration/member-reuse-pool.ts"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/batch-window-reuse-recovery.spec.ts"
+        },
+        {
+          "kind": "script",
+          "ref": "e2e/fixtures/wl-seq-two.js"
+        },
+        {
+          "kind": "script",
+          "ref": "e2e/fixtures/wl-name-reuse.js"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行（双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证，缺一 skip 不 fail；空载串行）：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-window-reuse-recovery.spec.ts",
+      "owner": "packages/subagent-core",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "pi-workflow-run-resource-model D3 验收 A6/A8（场景 V6/V8）落建（2026-09-27 D3 真机绿：A6 kill→respawn→r2 completed→run completed（errorCode 断言口径 = failureKind 值域，engine_crashed 为 run 级词表值不适用 ask 级）；A8 member-pool register 恰 1 + v2 条目对 + record-created 恰 1——同 record 多轮的介质证据；workflow 成员 revive 续轮不经 chat 域 continuation，无 record-round-started 帧，为已知实现语义）。自定义模板经 workflow tool run action 绝对路径派发。"
+    },
+    {
+      "id": "E2E-BATCH-12",
+      "summary": "CR chat 轮 revive：idle 后薄壳退出（V5①）+ revive 冷续写新薄壳 ≤5s 历史完整（V5②③④）",
+      "scope": [
+        "packages/subagent-core/src/execution/engine/**",
+        "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
+        "packages/subagent-core/src/execution/service/chat-rounds.ts",
+        "packages/pi-subagent-cli/src/**"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/batch-chat-revive.spec.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行（双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证，缺一 skip 不 fail；空载串行）：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-chat-revive.spec.ts",
+      "owner": "packages/subagent-core",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "pi-workflow-run-resource-model D3 验收 A5（场景 V5）落建。通道 = session.subagentAction start/message（runtime 短路 /subagents 命令）；spec 内含预热 turn（pi session 延迟写入——主 LLM 无对话则主 session 文件不落盘、getSubagents 投影无源）。D3 首跑四轮均挂于预热 turn（user 消息落定后 assistant 零响应；pi CLI 直跑探针同凭据同模型正常——挂点在 real-app 链路待归因，非窗口资源模型改动面），真机复核状态 = 待归因复跑。"
+    },
+    {
+      "id": "E2E-BATCH-13",
+      "summary": "ZSL zcode shared-service 生命周期：双任务同 pid（V4 懒加载单例回归）+ taiji 退出引擎进程随退（V7）",
+      "scope": [
+        "packages/subagent-core/src/execution/engine/**",
+        "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
+        "packages/zcode-subagent-cli/src/**"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "e2e/batch-zcode-shared-lifecycle.spec.ts"
+        },
+        {
+          "kind": "script",
+          "ref": "e2e/fixtures/wl-zcode-two.js"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行（双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证，缺一 skip 不 fail；空载串行）：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-zcode-shared-lifecycle.spec.ts（需本机 zcode CLI 凭据）",
+      "owner": "packages/subagent-core",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "pi-workflow-run-resource-model D3 验收 A4/A7（场景 V4/V7）。zcode 引擎实现为本设计零改动面（shared-service 透传 registry 保形）——本轨为 manifest 显式声明后的路由保形回归。D3 首跑两轮均挂：ask-dispatched ×2 正常落账但无 ask-settled（zcode 任务执行体不回；候选根因 = zcode 引擎用宿主 ~/.zcode 凭据与自动化会话自身共享同一 GLM plan 配额的自竞争），真机复核状态 = 待独立窗口复跑。"
     }
   ]
 }

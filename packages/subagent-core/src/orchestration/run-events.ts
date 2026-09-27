@@ -321,11 +321,13 @@ export interface AskSettledEvent extends EventEnvelope {
   type: "ask-settled";
   /** ask 关联键（见 AskIdentity——投影按 calls[].id 关联）。 */
   taskIndex: number;
-  /** 终局尝试的序号（验收形态：ask-settled{outcome:failed, errorCode:engine_crashed, attempt:1}）。 */
+  /** 终局尝试的序号（ask 粒度 attempt=1 即终局，无 ask 级重试波时恒 1）。 */
   attempt: number;
   /** ask 终局形态（复用 RunOutcome 三态）。 */
   outcome: RunOutcome;
-  /** 失败时的结构化编码（成功/取消缺省）。 */
+  /** 失败时的结构化编码（成功/取消缺省）。ask 级实装取值 = result.failureKind
+   *  （AgentFailureKind 三值 + unknown 缺省，dispatchAskSettled 映射）；engine_crashed
+   *  等 run 级 RunErrorCode 值属 run-settled 帧，不出现在本帧。 */
   errorCode?: RunErrorCode;
   /** 终局尝试的墙钟耗时毫秒（对齐 AgentResult.durationMs 口径）。 */
   durationMs: number;
