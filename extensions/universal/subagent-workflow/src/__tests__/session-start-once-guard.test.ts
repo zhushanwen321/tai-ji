@@ -9,7 +9,7 @@
 // [B1] recoverCrashedRuns 已移出守卫清单（原⑪）：W17 后 loadAll 只读本 session
 // entries、save 只写自身 runId 的 state 文件——恢复是 session 级幂等操作，挂进程级
 // 守卫会让同进程后续 session（/new 后 /resume 崩溃 session）的残留不被收编
-// （crash-recovery.test.ts 的 B1 用例锁定该场景）。双派发下恢复 ×2 是幂等空转
+// （session-lifecycle.test.ts 的 B1 用例锁定该场景）。双派发下恢复 ×2 是幂等空转
 // （第二次 loadAll 全终态、emit 0 条）——本文件 mock 不模拟幂等（每次调用恒 emit），
 // 故断言 ×2 / emit 2 条，真实幂等语义由 B1 用例锁定。
 //
@@ -210,7 +210,7 @@ beforeEach(() => {
   _resetOncePerProcessForTest();
 });
 
-// ── helpers（对齐 crash-recovery.test.ts 形态） ──
+// ── helpers（对齐 session-lifecycle.test.ts 形态） ──
 
 /** 创建可观察 eventBus.emit / appendEntry 的 mock ExtensionAPI，捕获 session_start handler。 */
 function createMockPi(): {
@@ -324,7 +324,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
     expect(mockScan).toHaveBeenCalledTimes(1);
     // [B1] recoverCrashedRuns 不再挂进程级守卫：每 session_start 各跑一次（×2）——
     // 双派发是幂等空转（第二次 loadAll 全终态）。mock 恒回调故 unregister = 2；
-    // 真实幂等语义（第二次直落 0 条）由 crash-recovery.test.ts 的 B1 用例锁定。
+    // 真实幂等语义（第二次直落 0 条）由 session-lifecycle.test.ts 的 B1 用例锁定。
     expect(mockRecoverCrashedRuns).toHaveBeenCalledTimes(2);
     expect(mockRecoverCrashedRuns.mock.calls[0]?.[2]).toBe("Process killed (kill-9 or crash recovery)");
     // [W2/V4 D6] 注销直落 appendEntry：每派发恰一条（reason/status 与生产同构）

@@ -38,11 +38,11 @@ docs/architecture/
 ├── subagent-record-persistence-consolidation.md  # H4：record 持久化单一写入口
 ├── subagent-permanent-session-model.md  # 永久会话模型（两态 + 万物可续聊，P0）
 │  状态与前端域
-├── state-truth-sync-architecture.md     # 状态真值同步（单一解析层 resolveLaunchConfig + 等价性守卫）
+├── state-truth-sync-architecture.md     # 状态真值同步（单一解析层 resolveLaunchConfig + 等价性检查）
 ├── background-task-sidebar-view.md      # 后台命令侧边栏视图契约（registry.json SSOT + RPC + 广播）
-├── pi-evolution-consistency-and-project-switcher.md  # pi 版本锚点守卫 + 模型目录单真相 + 项目切换器
+├── pi-evolution-consistency-and-project-switcher.md  # pi 版本锚点检查 + 模型目录单真相 + 项目切换器
 │  发布与锁域
-├── npm-publish-surface-guard.md         # npm 发布面一致性守卫（check-publish-surface.mjs 设计依据）
+├── npm-publish-surface-guard.md         # npm 发布面一致性检查（check-publish-surface.mjs 设计依据）
 └── file-lock-unification-and-reaper-sink.md  # 文件锁统一 SSOT + 后台任务收殓下沉 runtime
 ```
 

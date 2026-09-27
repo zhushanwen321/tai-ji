@@ -17,7 +17,7 @@
 
 关键认知纠正（用户在 shape 阶段明确）：**fork 的主要目的是"在新线提问"，不是"开空白分支"**。空白 fork 是低频的。因此核心交互不是"fork 一个空白 session 后台待命"，而是 **Fork-to-Ask**：点 fork → composer 进 fork 模式 → 打字发送 = 原子地（fork 新 session + 作为首条 user message 发送），主线 session 完全不参与。
 
-## 1. 本 spec 要收口的冲突
+## 1. 本 spec 要收敛的冲突
 
 三套交互在现有 v1 fork 上互相打架，必须统一：
 
@@ -339,11 +339,11 @@ async function forkSessionAsk(srcSessionId, fromMessageId, content) {
 
 **快捷键注册**（`packages/renderer/src/components/sidebar/Sidebar.vue:371-404` keymap）：
 - 现有 `KeymapEntry`（`Sidebar.vue:363-369`）**需扩展加 `shift?: boolean` 字段**（当前只有 key/commandId/action）
-- `matchOverrideKey`（`Sidebar.vue:385-404`）加 shift 守卫：`m.shift` 则要求 `e.shiftKey`，非 shift 则要求 `!e.shiftKey`（否则 ⌘G 和 ⌘⇧G 都命中 ⌘G）
+- `matchOverrideKey`（`Sidebar.vue:385-404`）加 shift 检查：`m.shift` 则要求 `e.shiftKey`，非 shift 则要求 `!e.shiftKey`（否则 ⌘G 和 ⌘⇧G 都命中 ⌘G）
 - keymap 加两条：`{ key: 'g', action: () => forkFromLastAssistant() }` + `{ key: 'g', shift: true, action: () => enterForkModeFromLastAssistant() }`
 - **⌘G/⌘⇧G 无冲突**（验证确认，grep `'g'` 无命中；现有 ⌘K/⌘N/⌘B/⌘[/⌘]/⌘,）
 - **fork 点来源**（验证发现的空白）：全局 ⌘G 触发时无 hover 上下文，**默认从末条 assistant fork**（`lastAssistant`），与用户在 message-stream 末尾的视觉焦点一致
-- **composer focus 时禁用全局快捷键**：在 keymap handler 开头加守卫 `if (forkMode.value || composerFocused) return`，否则 forkMode 下输入 g 会误触发 fork
+- **composer focus 时禁用全局快捷键**：在 keymap handler 开头加检查 `if (forkMode.value || composerFocused) return`，否则 forkMode 下输入 g 会误触发 fork
 
 ### 8.5 后台分支小列表 + 分支自身血缘展示 + 后台分支管理
 

@@ -776,14 +776,56 @@ export function transition(
 // ── journal fold 循环（投影侧共享单源）──────────────────────
 
 /**
- * fold 检查点：状态机终帧 + seq 水位。
+ * 单个 ask（步骤）的 fold 投影行：骨架行 + 终局。
+ *
+ * [W2 D7] 自 runtime journal-projection.ts 上收（原 RunAskStepFold）——run 域
+ * fold 单源后，runtime 投影消费 core fold 的骨架输出，不再自建第二套 fold。
+ */
+export interface RunAskStepFold {
+  taskIndex: number;
+  agentName: string;
+  /** 剧本 phase 归属（ask-dispatched 携带；旧 journal 行缺省 undefined——不造键）。 */
+  phase?: string;
+  /** 首个 dispatched ts（步骤起点）。 */
+  startedAt: number;
+  /** 最近一次该 ask 事件 ts（进度边沿）。 */
+  lastProgressAt: number;
+  /** 终局（ask-settled；未终态 undefined）。 */
+  settled?: { outcome: RunOutcome; durationMs?: number; errorCode?: RunErrorCode; ts: number };
+}
+
+/**
+ * 单个 run journal 的投影骨架（fold 产物的投影半边：run 首帧 + ask 步骤行 +
+ * run 终局）。
+ *
+ * [W2 D7] 自 runtime journal-projection.ts 上收（原 RunJournalFold）：runtime
+ * 投影（projectV2Workflow）读本骨架合成 WorkflowRunRecord，与状态机半边
+ * （state/lastSeq）同源于一次 fold 循环。
+ */
+export interface RunJournalFold {
+  /** run-created 帧（journal 首帧；undefined = 首帧未达）。 */
+  created: { runId: string; workflowName: string; ts: number } | undefined;
+  /** ask 投影（taskIndex → 步骤行）。 */
+  asks: Map<number, RunAskStepFold>;
+  /** run-settled 终局（未终态 undefined；terminal 吸收性保证先到帧为准）。 */
+  runSettled: { outcome: RunOutcome; errorCode?: RunErrorCode; reason?: string; ts: number } | undefined;
+}
+
+/**
+ * fold 检查点：状态机终帧 + seq 水位 + 投影骨架（RunJournalFold）。
  *
  * lastSeq = 已接受事件的最高 seq（增量续读 / tail 截断重建后全量重读的去重依据
  * ——W2 通知去重键与 fold 幂等共用的行身份载体，D6「重复行的去重归域 fold」的
  * run 域落点）。全量 fold 与增量 fold（以既有 checkpoint 传入）共用本入口；旧
  * 格式行（无 seq，W1 前）不推进水位（见 foldRunEventFrames 注释）。
+ *
+ * 骨架半边的消费方 = runtime journal 投影（[W2 D7] fold 单源：runtime 的
+ * SessionJournalProjection 以本 checkpoint 为 per-run tailer 状态，投影读
+ * created/asks/runSettled 合成 WorkflowRunRecord——「只要终帧状态」的 core 内
+ * 消费面（file-run-store 清理资格 / 注册表投影 / pump 活体 fold）经
+ * foldRunEventFrames 只取 state，骨架半边零成本闲置。
  */
-export interface RunEventFoldCheckpoint {
+export interface RunEventFoldCheckpoint extends RunJournalFold {
   state: RunState;
   lastSeq: number;
 }
@@ -792,12 +834,95 @@ export interface RunEventFoldCheckpoint {
 export const INITIAL_RUN_EVENT_FOLD: RunEventFoldCheckpoint = {
   state: INITIAL_RUN_STATE,
   lastSeq: 0,
+  created: undefined,
+  asks: new Map(),
+  runSettled: undefined,
 };
+
+/**
+ * ask 骨架行推进（纯函数 copy-on-write：命中行克隆改写、写时整表克隆——initial
+ * checkpoint 的 Map 不被变异，重放幂等与「以既有 checkpoint 为初值」的调用形态
+ * 都不产生别名副作用）。非 ask 事件原表透传。
+ *
+ * 推进语义（runtime 自建 fold 时代的原语义，[W2 D7] 原样上收）：
+ * - ask-dispatched：缺行建骨架行（phase 随帧落投影，无 phase 帧不造键）；有行
+ *   只推进进度边沿（重派发不改 agentName/phase）；
+ * - ask-retrying：仅推进进度边沿（缺行 no-op——重试帧不造行）；
+ * - ask-settled：缺行建占位行（agentName '(unknown)'——ask-dispatched 缺席的残
+ *   形态：状态机不校验 taskIndex 归属，跨 ask 错位的合法转移载荷仍可落账；兜底
+ *   成行保投影不丢终局）；有行推进边沿 + 落终局（后到覆盖）。
+ */
+function applyAskFoldEvent(
+  asks: Map<number, RunAskStepFold>,
+  event: WorkflowRunEvent,
+): Map<number, RunAskStepFold> {
+  switch (event.type) {
+    case "ask-dispatched": {
+      const existing = asks.get(event.taskIndex);
+      const next = new Map(asks);
+      next.set(
+        event.taskIndex,
+        existing !== undefined
+          ? { ...existing, lastProgressAt: Math.max(existing.lastProgressAt, event.ts) }
+          : {
+            taskIndex: event.taskIndex,
+            agentName: event.agentName,
+            // 剧本归属随帧落投影（W1 D6）；无 phase 帧不造键（旧 journal 行兼容）
+            ...(event.phase !== undefined ? { phase: event.phase } : {}),
+            startedAt: event.ts,
+            lastProgressAt: event.ts,
+          },
+      );
+      return next;
+    }
+    case "ask-retrying": {
+      const existing = asks.get(event.taskIndex);
+      if (existing === undefined) return asks;
+      const next = new Map(asks);
+      next.set(event.taskIndex, {
+        ...existing,
+        lastProgressAt: Math.max(existing.lastProgressAt, event.ts),
+      });
+      return next;
+    }
+    case "ask-settled": {
+      const existing = asks.get(event.taskIndex);
+      const settled = { outcome: event.outcome, durationMs: event.durationMs, errorCode: event.errorCode, ts: event.ts };
+      const next = new Map(asks);
+      next.set(
+        event.taskIndex,
+        existing !== undefined
+          ? {
+            ...existing,
+            lastProgressAt: Math.max(existing.lastProgressAt, event.ts),
+            settled,
+          }
+          : {
+            taskIndex: event.taskIndex,
+            // ask-settled 先于 dispatched 的残形态：骨架行缺 agentName，用占位名
+            // 成行（状态位仍可投影；record overlay 会覆盖该行）
+            agentName: "(unknown)",
+            startedAt: event.ts,
+            lastProgressAt: event.ts,
+            settled,
+          },
+      );
+      return next;
+    }
+    default:
+      return asks;
+  }
+}
 
 /**
  * fold 检查点入口（事件流 + 既有检查点 → 新检查点）：全量 fold 与增量 fold
  * （tail 续读 / 截断重建后全量重读，以既有 checkpoint 传入）共用本函数——
  * tail 消费方（壳 stall watchdog / runtime 投影）的增量接续面。
+ *
+ * 产出 = 状态半边（state/lastSeq）+ 投影骨架半边（created/asks/runSettled，
+ * [W2 D7] fold 单源：runtime journal 投影消费骨架，不再自建第二套 fold）。骨架
+ * 写入点在状态机转移裁决之后——坏帧行整体不写，骨架与状态同停在最近一致态。
+ * 纯函数：初值 checkpoint（含 asks Map）不被变异（applyAskFoldEvent 写时克隆）。
  *
  * seq 守卫（幂等语义，与 record 侧 foldRecordJournalEvents 同构）：
  * - seq ≤ 既有水位的事件行按重放跳过——tail 截断/重建后的幂等全量重读（D6
@@ -824,9 +949,21 @@ export function foldRunEventCheckpoint(
       continue;
     }
     try {
+      const { state } = transition(checkpoint.state, event);
       checkpoint = {
-        state: transition(checkpoint.state, event).state,
+        state,
         lastSeq: typeof seq === "number" ? seq : checkpoint.lastSeq,
+        // 骨架半边（[W2 D7]）：状态机转移合法才推进——坏帧行整体不写，骨架与
+        // 状态同停在最近一致态。
+        created:
+          event.type === "run-created"
+            ? { runId: event.runId, workflowName: event.workflowName, ts: event.ts }
+            : checkpoint.created,
+        asks: applyAskFoldEvent(checkpoint.asks, event),
+        runSettled:
+          event.type === "run-settled"
+            ? { outcome: event.outcome, errorCode: event.errorCode, reason: event.reason, ts: event.ts }
+            : checkpoint.runSettled,
       };
     } catch (err) {
       onBrokenFrame(err, event.type);

@@ -119,7 +119,7 @@ export const myTool: ToolDefinition = {
 - `content` 里的 text 仍然会展示给 LLM（content 是 LLM 可见的），`details` 里的 `__gui__` 只给前端渲染用
 - 重开 session 后 `__gui__` 仍可见——runtime 已修复历史路径透传（message-converter.ts F1 修复）
 
-### 3.2 setWidget：持久化面板
+### 3.2 setWidget：持久化写入点板
 
 Widget 是常驻面板（如任务列表）；GUI 下渲染到 **composer 任务托盘的协议 widget 区**，按 widgetKey 一行一个 icon 条目（`meta` 驱动 icon/badge/状态色），条目面板内渲染组件树。RPC 模式下 `ctx.ui.setWidget` 的 factory 参数被丢弃、只吃 `string[]`，所以协议 helper 把 `GuiRenderResult` 编码进单行 `string[]`（NUL 标记 JSON），runtime 解码为结构化 WS 帧。
 
@@ -160,7 +160,7 @@ setWidgetDual(ctx as GuiContext, 'my-widget', undefined)   // 模式无关；托
 ```
 
 **注意事项**：
-- ⚠️ **`guiSetWidget()` 不是 no-op，而是没有 mode 守卫**——它只查 `ctx.ui?.setWidget` 是否存在。TUI/json/print 模式下误调会把 marker 编码行推进 pi 原生 widget，表现为乱码。模式分派只在 `setWidgetDual` 内部（单点），extension 不要自行复写 `isGuiCapable` 判定；「no-op」只属于「`ctx.ui.setWidget` 不存在」（headless）这一种情形。
+- ⚠️ **`guiSetWidget()` 不是 no-op，而是没有 mode 检查**——它只查 `ctx.ui?.setWidget` 是否存在。TUI/json/print 模式下误调会把 marker 编码行推进 pi 原生 widget，表现为乱码。模式分派只在 `setWidgetDual` 内部（单点），extension 不要自行复写 `isGuiCapable` 判定；「no-op」只属于「`ctx.ui.setWidget` 不存在」（headless）这一种情形。
 - 不需要手动拼接 NUL 标记或 JSON.stringify——helper 已封装
 - 前端通过 `extension:widgetGui` WS 消息接收（`ViewHostStore` per-session 缓存）→ composer 任务托盘的 icon 条目/面板；推 `undefined` = invalidate = 条目消失
 
@@ -176,7 +176,7 @@ ctx.ui.setStatus('my-ext:status', '\x1b[32m● Running\x1b[0m')
 
 ### 3.4 ctx.ui.custom：富交互组件（统一提问表单协议 ui-form）
 
-`ctx.ui.custom()` 在 RPC 模式下返回 undefined（崩溃）。`uiFormInteract()` helper 复用 select 双向通道 + `UI_FORM_MARKER` 检测，前端 FormOverlay 在 Panel 内联渲染统一表单（覆盖 composer 位置；多问 = 多 tab，单问 = 单视图）。ask-user / scheduler / plan 三个内置 extension 的提问已全部收口到该协议；新 extension 的「向用户提问」应直接使用它，而不是自建 marker + 专用组件。
+`ctx.ui.custom()` 在 RPC 模式下返回 undefined（崩溃）。`uiFormInteract()` helper 复用 select 双向通道 + `UI_FORM_MARKER` 检测，前端 FormOverlay 在 Panel 内联渲染统一表单（覆盖 composer 位置；多问 = 多 tab，单问 = 单视图）。ask-user / scheduler / plan 三个内置 extension 的提问已全部收敛到该协议；新 extension 的「向用户提问」应直接使用它，而不是自建 marker + 专用组件。
 
 ```typescript
 import {
@@ -329,10 +329,10 @@ async onMessage(msg, ctx) {
 | `guiResult(component, meta?)` | 构造 `details.__gui__` / widget 载荷值 | 返回 `{ v: 1, component, meta? }`；递归删除 undefined 字段 |
 | `guiComponent(type, props)` | 构造组件 | 类型参数约束 props 形状 |
 | `setWidgetDual(ctx, key, { gui, text } \| undefined)` | 设置/清除 widget（双模唯一入口） | 内部做 `isGuiCapable` 分派：RPC 编码 NUL 标记 JSON、TUI/json/print 推原生文本行；`undefined` 清屏且模式无关 |
-| `guiSetWidget(ctx, key, result \| undefined)` | 推送 GUI 臂（低层原语） | ⚠️ 无 mode 守卫：TUI/json/print 误调会把 marker 行推进原生 widget（乱码）；正常路径用 `setWidgetDual` |
+| `guiSetWidget(ctx, key, result \| undefined)` | 推送 GUI 臂（低层原语） | ⚠️ 无 mode 检查：TUI/json/print 误调会把 marker 行推进原生 widget（乱码）；正常路径用 `setWidgetDual` |
 | `uiFormInteract(ctx, form, options?)` | 统一提问表单（RPC 专用） | select 通道 + `UI_FORM_MARKER`；返回判别联合 `ok / cancelled / timeout / channel-error / non-json`（不抛错，channel-error 含 echo 检测升级指引）；TUI 误调抛错 |
-| `isFormQuestion / isFormAnswers` | 表单形状守卫 | `isFormQuestion` 收窄 `unknown` 为合法问题对象（发送侧不合法项抛错 fail-fast，消费侧逐项过滤） |
-| `getAskUserAnswer / getAskUserOther / isAskUserQuestion` | 答案解析与守卫 | `getAskUserAnswer` 多选自动 `JSON.parse`（失败降级 `[raw]`）；`getAskUserOther` 读 `${header}__other` key；入参类型是 `AskUserQuestion`（ask-user 的 LLM 契约），`FormAnswers` 的 choice/text 部分与之逐字兼容 |
+| `isFormQuestion / isFormAnswers` | 表单形状检查 | `isFormQuestion` 收窄 `unknown` 为合法问题对象（发送侧不合法项抛错 fail-fast，消费侧逐项过滤） |
+| `getAskUserAnswer / getAskUserOther / isAskUserQuestion` | 答案解析与检查 | `getAskUserAnswer` 多选自动 `JSON.parse`（失败降级 `[raw]`）；`getAskUserOther` 读 `${header}__other` key；入参类型是 `AskUserQuestion`（ask-user 的 LLM 契约），`FormAnswers` 的 choice/text 部分与之逐字兼容 |
 | `extractGui(details)` | 提取 `__gui__`（带版本校验） | 前端消费侧用，extension 一般不需要 |
 
 ---
@@ -481,7 +481,7 @@ setWidgetDual(ctx as GuiContext, 'key', {
 setWidgetDual(ctx as GuiContext, 'key', undefined)
 ```
 
-**别拿 `guiSetWidget()` 当双模入口**：它是 `setWidgetDual` 内部的 GUI 臂原语，**没有 mode 守卫**（只查 `ctx.ui?.setWidget` 是否存在）——TUI/json/print 模式下调用会把 marker 编码行推进 pi 原生 widget，表现为乱码，**不是 no-op**。no-op 只发生在「`ctx.ui.setWidget` 不存在」（headless）这一种情形。
+**别拿 `guiSetWidget()` 当双模入口**：它是 `setWidgetDual` 内部的 GUI 臂原语，**没有 mode 检查**（只查 `ctx.ui?.setWidget` 是否存在）——TUI/json/print 模式下调用会把 marker 编码行推进 pi 原生 widget，表现为乱码，**不是 no-op**。no-op 只发生在「`ctx.ui.setWidget` 不存在」（headless）这一种情形。
 
 同理 `uiFormInteract()` —— TUI 模式下它抛错。extension 需按 ctx.mode 分支，TUI 调 `ctx.ui.custom()`，RPC 调 `uiFormInteract()`。
 
@@ -512,7 +512,7 @@ setWidgetDual(ctx as GuiContext, 'key', undefined)
 - [ ] `execute()` 内用 `isGuiCapable(ctx)` 做 RPC 分支判断
 - [ ] RPC 分支构造 `guiComponent(type, props)` + `guiResult()` 放进 `details.__gui__`
 - [ ] TUI 分支保留原有 `renderResult` / `ctx.ui.setWidget` / `ctx.ui.custom` 逻辑
-- [ ] widget 用 `setWidgetDual()` 双模一次调用（`gui` 臂 + `text` 臂），清屏传 `undefined`；不要单独调 `guiSetWidget()`（它是无 mode 守卫的 GUI 臂原语，TUI 误调会乱码）
+- [ ] widget 用 `setWidgetDual()` 双模一次调用（`gui` 臂 + `text` 臂），清屏传 `undefined`；不要单独调 `guiSetWidget()`（它是无 mode 检查的 GUI 臂原语，TUI 误调会乱码）
 - [ ] 提问交互用 `uiFormInteract()`（RPC 模式，统一提问表单协议 §3.4）/ `ctx.ui.custom()`（TUI 模式）按 ctx.mode 分支
 - [ ] `content` 只放 LLM 可见的摘要文本，结构化数据放 `details`
 - [ ] `details.__gui__` 放在 `result.details` 下，不在 `content` 内

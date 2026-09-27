@@ -3,7 +3,7 @@
 > **审查对象**：`docs/design/ext-simplify-06-plan.md`（v1，2026-09-12，自称「已起草待审查」——见 `docs/design/ext-simplify-index.md:17`）
 > **审查方法**：over-engineering-audit skill 四问框架 + 反模式清单 + 豁免规则（`~/.agents/skills/over-engineering-audit/references/evidence-signals.md`），对抗式：设计文档每条现状声称逐条定点核实当前源码，方案每个新增/保留机制过四问。
 > **源码基线**：本 worktree 当前 HEAD，`extensions/universal/plan/` src 自 2026-09-12 起零变更（`git diff 1725c4c94..HEAD -- .../compact.ts` 为空），pi SDK 为实装 `@earendil-works/pi-coding-agent@0.84.4`（`node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts`，下称 SDK types）。
-> **关键时间线**（本次审查 git 考古结论，must-fix 1 的根因依据）：crash-resilience u1（`8ca11d330`，09-10 01:48）给 plan 的 compact.ts 加了 `guardStaleCtx` 守卫与 logger 使用；本文档 v1 于 09-12 08:01 提交（`1725c4c94`）。**crash-resilience 早于本文档起草 2 天，但本文档的 compact.ts 行号与 crash-resilience 之前的版本逐行吻合**（详见 must-fix 1）。
+> **关键时间线**（本次审查 git 考古结论，must-fix 1 的根因依据）：crash-resilience u1（`8ca11d330`，09-10 01:48）给 plan 的 compact.ts 加了 `guardStaleCtx` 检查与 logger 使用；本文档 v1 于 09-12 08:01 提交（`1725c4c94`）。**crash-resilience 早于本文档起草 2 天，但本文档的 compact.ts 行号与 crash-resilience 之前的版本逐行吻合**（详见 must-fix 1）。
 
 ---
 
@@ -34,7 +34,7 @@ VERDICT: NEEDS-FIX (must-fix 1 / suggestion 4)
 | 9 | extractPlanSteps 唯一生产调用在 tryGoalInit（§5.4 证据） | compact.ts:142（tryGoalInit 内），产物只进 buildPlanSuccessCriteria（:121-129） | 属实 |
 | 10 | M3 三处动态 import（§3.2 F5） | index.ts:20-24（含 :19 注释 "avoids cross-group static import"）、tool.ts:255（buildExecOptions）、tool.ts:326（executeComplete） | 属实 |
 | 11 | **extension-logger 依赖的唯一使用点是 index.ts:2/:9/:23**（§3.2 F5） | **失实**：compact.ts:7（`import { getLogger }`）、:12（实例化）、:236/:246（guardStaleCtx onStale 回调 `logger.warn` ×2）也是使用点——crash-resilience u1（09-10）加入，早于本文档 v1（09-12） | **失实** → must-fix 1 |
-| 12 | **compact.ts 运行时零跨组依赖（唯一外部引用是 import type GoalInitFn）**（§5.5 D5 被否方案） | **失实**：compact.ts:5 运行时 import `guardStaleCtx, toErrorMessage`（@zhushanwen/pi-ext-guards）；:7 getLogger（@zhushanwen/pi-extension-logger）；package.json:44-47 两个 dependencies；extension-dependencies.json:93-95 已登记 pi-ext-guards 为强依赖 | **失实** → must-fix 1 |
+| 12 | **compact.ts 运行时零跨组依赖（唯一外部引用是 import type GoalInitFn）**（§5.5 D5 不采用方案） | **失实**：compact.ts:5 运行时 import `guardStaleCtx, toErrorMessage`（@zhushanwen/pi-ext-guards）；:7 getLogger（@zhushanwen/pi-extension-logger）；package.json:44-47 两个 dependencies；extension-dependencies.json:93-95 已登记 pi-ext-guards 为强依赖 | **失实** → must-fix 1 |
 | 13 | peer 声明与事实倒挂（§3.2 F6） | package.json:24（`@zhushanwen/pi-goal: workspace:*` 硬 peer）vs :26-30（peerDependenciesMeta 仅 pi-ai optional）；extension-dependencies.json:87（`"type": "optional"`） | 属实 |
 | 14 | check-extension-dependencies.mjs 不校验 peer 字段（§8.1 u5） | `scripts/check-extension-dependencies.mjs` grep `peer\|optional` 零命中 | 属实 |
 | 15 | PlanPhase 与 isActive 双编码、无 invariant（§3.2 F7） | state.ts:3-11（四态 + 布尔并存）；tool.ts:205（executeSelectTemplate 不检查 isActive 即写 `phase="writing"`）/:319-320；command.ts:152（写 brainstorming）/:114（handleStatus 显示）；widget.ts:6 只读 isActive | 属实 |
@@ -53,15 +53,15 @@ VERDICT: NEEDS-FIX (must-fix 1 / suggestion 4)
 
 ### MF1：D5「extension-logger 依赖剥离」子项基于过期源码快照，按文档执行会 typecheck 红
 
-- **文档位置**：§3.2 F5（「这是 `@zhushanwen/pi-extension-logger` 依赖的**唯一**使用点，index.ts:2/:9/:23」）、§5.5 D5（「index.ts 删 logger……与 `@zhushanwen/pi-extension-logger` 依赖（package.json:44-46）」+ 被否方案「compact.ts 运行时零跨组依赖」）、§5.5 效果（「-1 个 npm 依赖」）、§6 表格（package.json「dependencies 删 extension-logger（D5）」+「净删约 250 行」估算）。
+- **文档位置**：§3.2 F5（「这是 `@zhushanwen/pi-extension-logger` 依赖的**唯一**使用点，index.ts:2/:9/:23」）、§5.5 D5（「index.ts 删 logger……与 `@zhushanwen/pi-extension-logger` 依赖（package.json:44-46）」+ 不采用方案「compact.ts 运行时零跨组依赖」）、§5.5 效果（「-1 个 npm 依赖」）、§6 表格（package.json「dependencies 删 extension-logger（D5）」+「净删约 250 行」估算）。
 - **源码证据**：
   - `extensions/universal/plan/src/compact.ts:5`：`import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";`（运行时依赖）
   - `extensions/universal/plan/src/compact.ts:7/:12`：`import { getLogger } from "@zhushanwen/pi-extension-logger"` + `const logger = getLogger("pi-plan")`
-  - `extensions/universal/plan/src/compact.ts:236/:246`：guardStaleCtx 的 onStale 回调 `logger.warn(...)` ×2（compact onComplete/onError 双守卫）
+  - `extensions/universal/plan/src/compact.ts:236/:246`：guardStaleCtx 的 onStale 回调 `logger.warn(...)` ×2（compact onComplete/onError 双检查）
   - `extensions/universal/plan/package.json:44-47`：dependencies 含 pi-ext-guards 与 pi-extension-logger 两项
   - **根因考古**：本文档自称「plan 包行号均为 2026-09-11 实读值」（证据基线节），但其 compact.ts 行号（tree case :233-236 / tryGoalInit :128-151 / 调用点 :222/:227/:241 / detectGoalCapability :71-79）与 `8ca11d330^`（crash-resilience 之前的 08-25 版本，245 行）**逐行吻合**（已用 `git show 8ca11d330^:...compact.ts` 比对），与当前源码（:253-256/:132-155/:233/:243/:261/:74-82，265 行）不符。crash-resilience u1 提交于 09-10 01:48，早于本文档 v1 提交（09-12 08:01）——即起草时工作区已含该改动，文档的 compact.ts「实读」读的是过期快照。
 - **问题**：按文档实施「删 extension-logger 依赖」后 compact.ts 的 getLogger 无来源，typecheck 失败；§6 的 package.json 改动项与净删行数随之失真。这属于「设计文档声称的现状问题与源码不符」级别的事实基础错误（该子项的收益论证「-1 个 npm 依赖」不成立）。
-- **为什么必须修**：D5 是文档六个决策之一，u1 是实施排期第一个代码单元；实施者按 §6 表格执行会在第一步撞墙，或更糟——为删依赖顺手删掉 compact.ts 的守卫日志（破坏 crash-resilience D1 的降级语义登记）。
+- **为什么必须修**：D5 是文档六个决策之一，u1 是实施排期第一个代码单元；实施者按 §6 表格执行会在第一步撞墙，或更糟——为删依赖顺手删掉 compact.ts 的检查日志（破坏 crash-resilience D1 的降级语义登记）。
 - **建议修法**（保留 D5 主体，收缩失效子项）：
   1. D5 的「3 处动态 import 改静态」**维持**——该三条现状属实（#10），且「同包静态 import 无循环」的论证不受影响（compact.ts 新增的两个运行时依赖均不构成 tool.ts→compact.ts 的环；反向 compact.ts 不 import tool/index）；
   2. index.ts 局部删 logger 使用（:2/:9/:23 随 `.catch` 消失）**维持**；
@@ -76,9 +76,9 @@ VERDICT: NEEDS-FIX (must-fix 1 / suggestion 4)
 
 - **文档位置**：§3.2 F7「写入它（tool.ts:319）与 resetPlanState 归零（tool.ts:330）之间无任何 await」。
 - **源码证据**：tool.ts:326 `const { handlePlanComplete } = await import("./compact.js");` 位于两者之间；文档 §3.2 F5 自己把 tool.ts:326 列为 M3 动态 import 证据——同一文档两处互相矛盾。
-- **问题与建议**：语义上该 await 在 `ctx.compact()` 启动（:327）之前，事件不可达窗口结论方向成立；且 P1 探针（u0）恰排在 u1（删动态 import）之前，对含 await 的现状实测反而是更强的验证。但「无任何 await」的字面断言会误导实施者跳过 P1（以为纯同步推理已闭合）。建议改写为「唯一 await（:326 动态 import，模块缓存后近似同步）位于 ctx.compact() 启动之前，事件窗口不存在；u1 删除该动态 import 后才严格无 await」，P1 保留为门。
+- **问题与建议**：语义上该 await 在 `ctx.compact()` 启动（:327）之前，事件不可达窗口结论方向成立；且 P1 探针（u0）恰排在 u1（删动态 import）之前，对含 await 的现状实测反而是更强的验证。但「无任何 await」的字面断言会误导实施者跳过 P1（以为纯同步推理已完成）。建议改写为「唯一 await（:326 动态 import，模块缓存后近似同步）位于 ctx.compact() 启动之前，事件窗口不存在；u1 删除该动态 import 后才严格无 await」，P1 保留为门。
 
-### S2：GoalBridgeOutcome 的 4 值 reason 与 5 个失败出口「一一对应」不闭合
+### S2：GoalBridgeOutcome 的 4 值 reason 与 5 个失败出口「一一对应」不完整
 
 - **文档位置**：§5.2 D2（「5 个 false 出口改为返回 GoalBridgeOutcome = { started: false; reason: "goal-unavailable" | "plan-unreadable" | "no-steps" | "init-refused" }……出口与 §3.2 F2 列举一一对应」）、§4.2（reason 列表 4 值）。
 - **源码证据**：F2/实读出口 5 个：compact.ts:136/:139/:143/:145-151/:152-154；catch 出口（:152-154）在 4 值枚举中无对应 reason。
@@ -107,7 +107,7 @@ VERDICT: NEEDS-FIX (must-fix 1 / suggestion 4)
 - **F2 goal 桥 5 出口 + 3 调用点不消费**：见核对表 #4/#5/#6。
 - **F3 三源 + create-template 全链 ≈200 行**：见核对表 #7；模板目录仅 1 commit（05d64e48e）。
 - **F4 正则脱节**：见核对表 #8/#9；fallback 会误收非步骤编号项的下游代价论证成立（extractPlanSteps 产物直接进 goal successCriteria，compact.ts:121-129——goal 完成判定的证据审计依据）。
-- **F6 peer 倒挂 + 无守卫联动**：见核对表 #13/#14。
+- **F6 peer 倒挂 + 无检查联动**：见核对表 #13/#14。
 - **F7 双编码 + executeSelectTemplate 无 isActive 门**：见核对表 #15；死状态方向论证（#17）+ P1 门兜底。
 - **发现 7 依据**：两处 `pi as ExtensionAPI & { __goalInit? }` 断言（compact.ts:77/:134）；detectGoalCapability 的 try/catch 包裹纯属性访问（`typeof api.__goalInit === "function"`），plain object 无抛错路径。
 - **发现 8 依据**：SDK ui.select 只收 string[]（:70）；现状 label 双处硬编码（tool.ts:256/:265）确为真实双知识源，EXEC_MODE_OPTIONS 查表有真实依据。
@@ -125,9 +125,9 @@ VERDICT: NEEDS-FIX (must-fix 1 / suggestion 4)
 
 | 方案机制 | ①赌的决策 | ②接口/实现复杂度 | ③依据 | ④反模式 | 结论 |
 |---|---|---|---|---|---|
-| GoalBridgeOutcome 联合类型（D2） | goal 桥失败原因分类——由现存 5 个出口真实定义，非想象 | 4-5 值枚举替代语义真空的 boolean，接口远简于实现 | 现存 5 出口（compact.ts:136-154） | 无 | 通过（S2 补映射闭合） |
+| GoalBridgeOutcome 联合类型（D2） | goal 桥失败原因分类——由现存 5 个出口真实定义，非想象 | 4-5 值枚举替代语义真空的 boolean，接口远简于实现 | 现存 5 出口（compact.ts:136-154） | 无 | 通过（S2 补映射解决） |
 | EXEC_MODE_OPTIONS 查表（发现 8） | label↔mode 映射稳定——由 SDK string[] 签名强制 | 3 项静态表，消除现状两处字面耦合 | SDK :70 + 现状双处硬编码 | 无 | 通过 |
-| 模板-正则守卫测试（D4） | 非抽象，测试钉死单一知识源 | — | F4 双知识源脱节实证 | 无 | 通过 |
+| 模板-正则检查测试（D4） | 非抽象，测试固定单一知识源 | — | F4 双知识源脱节实证 | 无 | 通过 |
 | getGoalInit 单一断言点（发现 7） | 消重（两处断言→一处） | 降低 | 现状两处（compact.ts:77/:134） | 无 | 通过 |
 | goalInit 先行后 steer（D2） | 时序保守（保持 onComplete 时序，P2 验证） | 无新增间接层 | steer 先发的正确性缺陷实证 | 无 | 通过 |
 | D3 砍三源/create-template、D1 砍 tree、D6 删 PlanPhase、D5 改静态 import | 纯减法 | — | 各自现状问题实证 | 均为反模式的**删除**（inner-platform/leaky/双编码） | 通过 |

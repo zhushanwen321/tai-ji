@@ -250,7 +250,7 @@ function sortedRuns(runs: Map<string, WorkflowRun>): WorkflowRun[] {
  * 打开 WorkflowsView（三级导航 TUI），注入 lifecycle ViewActions。
  *
  * ViewActions 通过 deps 调 lifecycle（abort），与 view 解耦——
- * view 单测可注入 mock actions（见 views/__tests__/WorkflowsView-signature.test.ts）。
+ * view 单测可注入 mock actions（见 views/__tests__/WorkflowsView.test.ts）。
  *
  * [H2 W3] live 进度数据源（设计 D2 进度源切换）：view 经 store 查询
  * collectRecordsByParentRunId(run.runId)（内存 ∪ 磁盘重建 ∪ manifest，LIST_LIMIT

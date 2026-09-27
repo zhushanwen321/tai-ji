@@ -1,10 +1,10 @@
-# A1：轮终收口遇 stale extension ctx 崩溃 runtime 进程（P1，间歇性）
+# A1：轮终收尾遇 stale extension ctx 崩溃 runtime 进程（P1，间歇性）
 
 状态：待裁决（2026-09-22 登记，源自 B1/B2 修复真机复验）
 
 ## 症状
 
-GUI 派发 subagent，轮终收口时 runtime 进程崩溃（exit 1），当轮 record 丢失、manifest 投影（簿记⑫）未执行；随后 runtime supervisor 重启循环约 6 分钟（liveness probe force-kill half-alive 后恢复）。间歇性：复验 3 轮派发仅第 1 轮触发，run2/3 未复现。
+GUI 派发 subagent，轮终收尾时 runtime 进程崩溃（exit 1），当轮 record 丢失、manifest 投影（簿记⑫）未执行；随后 runtime supervisor 重启循环约 6 分钟（liveness probe force-kill half-alive 后恢复）。间歇性：复验 3 轮派发仅第 1 轮触发，run2/3 未复现。
 
 ## 根因（已核实的部分）
 
@@ -25,4 +25,4 @@ GUI 派发 subagent，轮终收口时 runtime 进程崩溃（exit 1），当轮 
 ## 证据
 
 - 复验产物（含崩溃日志、重启截图）：`.tmp/dev-flow/b1b2-verify/`（`evidence-pi-crash-run1.log`、`evidence-crashes-*.jsonl`、`anomaly-run1-runtime-restarting.png`）
-- 台账：`.tmp/dev-flow/session-reader-shared-core.impl-plan.md` 变更历史第 10 笔
+- 登记：`.tmp/dev-flow/session-reader-shared-core.impl-plan.md` 变更历史第 10 笔

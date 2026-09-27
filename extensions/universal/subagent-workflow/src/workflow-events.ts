@@ -15,7 +15,7 @@
  *      + 4 个跨域事件注册（notify ledger compaction 守卫 / model 缓存刷新 /
  *      subagents 父级联关闭×2——setup* 函数住各自域模块，本 seam 在原注册位
  *      置调用；pi.on 全链注册顺序逐位不变，
- *      workflow-events-registration-order.test.ts 锁定）
+ *      workflow-events.test.ts 锁定）
  *   4. getWorkflowDeps 守卫（单一出口，discriminated union）+ lazyDeps（tool lazy 注入源）
  *
  * 组合根消费面：setupWorkflowDomain(pi) 返回
@@ -30,8 +30,8 @@
  * 测试入口：既有 index 挂载类测试（index-session-start / process-shutdown-hook /
  * wave0-package-structure 等）经 factory 间接覆盖；mock 锚点是模块解析路径
  * （jsonl-run-store / interface/* / subagent-core 深路径），随迁不改写。
- * runSettledEffects 经 fake deps 直测（workflow-events-run-settled.test.ts，
- * 不挂装配面）。注册顺序经 workflow-events-registration-order.test.ts 锁定。
+ * runSettledEffects 经 fake deps 直测（workflow-events.test.ts，
+ * 不挂装配面）。注册顺序经 workflow-events.test.ts 锁定。
  *
  * 架构导航见 docs/extensions/subagents/architecture.md §2.1。
  */
@@ -225,7 +225,7 @@ export interface RunSettledEffectsEnv {
  * 经 core isRunSettled 换源——本管线被 onRunDone 触发时注册表已 note，本轮 run
  * 恒可淘汰候选，且其终局时序 = 全局最新，恒在保留端，不被自身触发的裁剪淘汰）。
  *
- * 失败语义（直测锁定，workflow-events-run-settled.test.ts）：管线内部无围栏
+ * 失败语义（直测锁定，workflow-events.test.ts）：管线内部无围栏
  * ——notifyDone 抛错（账本写账失败 / 降级直发非 stale 失败）时后续 track/evict
  * 不执行、异常原样上抛，由调用方 finalizeRun 的 onRunDone 独立 try 围栏接住
  * （core worker-message-pump，OR-4/B-4：真实副作用失败 error 留痕不崩宿主）。
@@ -291,7 +291,7 @@ export interface WorkflowDomainHandle {
  * 本域 3 个 handler（session_start → session_tree → session_shutdown）与 4 个
  * 跨域 setup* 注册（notify ledger compaction 守卫 / model 缓存刷新 / subagents
  * 父级联关闭×2）交错，pi.on 全链注册顺序逐位不变（锁
- * workflow-events-registration-order.test.ts）；engine-awareness
+ * workflow-events.test.ts）；engine-awareness
  * （before_agent_start 链尾）仍由组合根在本调用之后注册（before_agent_start
  * 链序不变，跨事件通道无注册时序语义）。
  */

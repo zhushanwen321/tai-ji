@@ -1,11 +1,11 @@
 #!/bin/bash
-# check_pnpm_store_layout.sh — pnpm store 布局守卫（pre-commit 与 validate-runtime-bundle.sh 共用）
+# check_pnpm_store_layout.sh — pnpm store 布局检查（pre-commit 与 validate-runtime-bundle.sh 共用）
 #
 # [HISTORICAL 2026-09-03] zsw 引擎 worker 覆写 HOME（~/.zcode/zsw/engines/*/home-appserver），
 # pnpm store 默认路径随 HOME 解析 → 引擎侧 pre-commit 内 verify-*.sh 的自含 install 把引擎
 # store 写进 node_modules/.modules.yaml；本地（正常 HOME）后续 install 判布局过期，要求删除
 # 重建，非 TTY 上下文直接 abort：ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY（间歇复现，
-# 谁最后 install 谁的 storeDir 生效）。本守卫把该场景从「5 分钟排障」收敛为一条 [FIX] 指引，
+# 谁最后 install 谁的 storeDir 生效）。本检查把该场景从「5 分钟排障」收敛为一条 [FIX] 指引，
 # 同时是引擎侧 HOME 修复的验收探针——引擎仍覆写 HOME 时，workflow 一跑、本地一 commit 本
 # 护栏立刻红。根因/恢复/排障：docs/TROUBLESHOOTING.md「pnpm store 布局双向翻转」条目。
 

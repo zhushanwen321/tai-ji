@@ -178,7 +178,7 @@ cd packages/runtime && npx vitest run test/system-prompt-extension.test.ts test/
 | ⚠️ 长度上限 16000 仅约束 replace | `SYSTEM_PROMPT_MAX_LENGTH`（shared/constants.ts），ConfigService 拒绝超长（ok:false）；append 走 hook 不经 argv 无硬上限，UI 只显示字符数（R3） |
 | ⚠️ 参考区是静态常量不是实时快照 | `DEFAULT_PI_SYSTEM_PROMPT` 是 pi 0.84.1 提取的常量（pi-default-prompt.ts 内含版本标记）；旧「当前生效提示词快照」机制（system-prompt-snapshot.md）已随 builtin→npm 迁移删除，[HISTORICAL] 勿按旧文档找 snapshot testid / `config.getSystemPromptSnapshot` 命令（均已不存在） |
 | ⚠️ corrupted 仅 JSON.parse 失败才置 true | 字段缺失/类型错走 `mergeSystemPromptConfig` 字段级容错（corrupted=false）。只有文件整个不是合法 JSON 才回退默认 + corrupted=true 提示用户 |
-| ⚠️ 全局指令注入受 argv 守卫 | pi 带 `--no-context-files` / `-nc` 启动时 hook 跳过全局 AGENTS.md 注入，两种形式都判（pi CLI 把 -nc 视为等价短形式）；守卫按各 pi 进程自身 argv 判定——subagent pi 由引擎 CLI 直 spawn（恒定 --no-extensions 基座 + 显式 --extension 白名单），宿主该 flag 不透传其 argv |
+| ⚠️ 全局指令注入受 argv 检查 | pi 带 `--no-context-files` / `-nc` 启动时 hook 跳过全局 AGENTS.md 注入，两种形式都判（pi CLI 把 -nc 视为等价短形式）；检查按各 pi 进程自身 argv 判定——subagent pi 由引擎 CLI 直 spawn（恒定 --no-extensions 基座 + 显式 --extension 白名单），宿主该 flag 不透传其 argv |
 | ⚠️ hook 绝不阻塞 agent | hook 顶层 try/catch 兜底，任何异常返回 `undefined`（放行）+ stderr 诊断。测试注入坏 dataDir 不会让 pi 卡住 |
 | ⚠️ 数据目录双名同根 | 文档/代码中 configDir 与 dataDir 均指 `TAIJI_AGENT_DATA_DIR` 根（dev=`~/.taiji-dev/`，prod=`~/.taiji/`），`system-prompt.json` 两端读到同一文件（extension 经 TAIJI_AGENT_DATA_DIR / PI_CODING_AGENT_DIR 上溯两级解析） |
 
@@ -408,8 +408,8 @@ bash scripts/validate-runtime-bundle.sh    # 作为第 7 步自动运行（pre-c
 ## 4. 缺口跟踪
 
 1. **权限审批等待无人唤醒 —— 已修复**（2026-08-16，`fix(runtime): wake pending plugin permission approvals on approve`）。
-   - **修复前实证**（保留作历史）：sandbox 插件声明 permissions 时，boot 激活的 30s 等待（`PluginActivator.waitForPermissionApproval`）只能超时——`resolvePermissionApproval` 全仓无调用方，`PluginService.approvePermissions` 只 grant 不 resolve 该 pending；且等待期间 approvePermissions 触发的 re-activate 因 ACTIVATING 幂等守卫 no-op。实测 boot 后台初始化被阻塞 30s（`plugins=30007.5ms`）。
-   - **修复内容**：① `approvePermissions` grant 后调 `activator.resolvePermissionApproval(pluginId, true)` 唤醒挂起中的激活；② `revokePermissions` 对挂起 pending resolve(false)（拒绝走既有失败路径 UNLOADED）；③ `activatePlugin` 幂等守卫重构为 in-flight 真幂等（重入返回同一 promise，approvePermissions 可 await 到被唤醒激活的完成，不再被 no-op 吞）；④ `deactivatePlugin` 清 pending + 权限等待醒来后校验状态仍为 ACTIVATING（防「批准后快速 disable 复活」「卸载后幽灵 setState」）。单测 `packages/runtime/test/plugin-permission-approval-wake.test.ts`；真实验收：批准后激活完成 93ms、boot plugins 步骤 582.6ms（均对比修复前 30007.5ms）。
+   - **修复前实证**（保留作历史）：sandbox 插件声明 permissions 时，boot 激活的 30s 等待（`PluginActivator.waitForPermissionApproval`）只能超时——`resolvePermissionApproval` 全仓无调用方，`PluginService.approvePermissions` 只 grant 不 resolve 该 pending；且等待期间 approvePermissions 触发的 re-activate 因 ACTIVATING 幂等检查 no-op。实测 boot 后台初始化被阻塞 30s（`plugins=30007.5ms`）。
+   - **修复内容**：① `approvePermissions` grant 后调 `activator.resolvePermissionApproval(pluginId, true)` 唤醒挂起中的激活；② `revokePermissions` 对挂起 pending resolve(false)（拒绝走既有失败路径 UNLOADED）；③ `activatePlugin` 幂等检查重构为 in-flight 真幂等（重入返回同一 promise，approvePermissions 可 await 到被唤醒激活的完成，不再被 no-op 吞）；④ `deactivatePlugin` 清 pending + 权限等待醒来后校验状态仍为 ACTIVATING（防「批准后快速 disable 复活」「卸载后幽灵 setState」）。单测 `packages/runtime/test/plugin-permission-approval-wake.test.ts`；真实验收：批准后激活完成 93ms、boot plugins 步骤 582.6ms（均对比修复前 30007.5ms）。
 2. **plugin.toggle 停用后的协议状态**：UNLOADED 映射为 `discovered`（`mapStateForProtocol`），非 `inactive`。脚本断言按 `status ≠ active && enabled=false` 表述，不锁具体值。
 
 ## 5. 排查指南

@@ -15,10 +15,10 @@
 // jsonl-run-store-session-file.test.ts（测试审计裁决：被测对象是 JsonlRunStore
 // 本体行为的条目随归属走）。
 //
-// mock 手法对齐既有测试：seam 直测对齐 crash-recovery.test.ts（resetModules +
+// mock 手法对齐既有测试：seam 直测对齐 session-lifecycle.test.ts（resetModules +
 // 用例内动态 import setupSessionLifecycle——oncePerProcess 守卫 Map 是模块级状态；
 // 双 Service 经访问器槽注入 fake）；handler 级对齐
-// workflow-events-reload-branch.test.ts（真 setupWorkflowDomain 全链，不 mock
+// workflow-events.test.ts（真 setupWorkflowDomain 全链，不 mock
 // session-lifecycle / jsonl-run-store / subagent-core）。
 //
 // 环境隔离：PI_CODING_AGENT_DIR 钉到 mkdtemp 临时目录（pi config.js getAgentDir
@@ -45,7 +45,7 @@ import type { SessionLifecycleDeps, SessionLifecycleResult } from "../session-li
 //（getAgentDir 硬编码 /home/user/.pi/agent）。handler 级用例走真 JsonlRunStore 写盘，
 // 经 PI_CODING_AGENT_DIR 钉到 mkdtemp 临时目录——部分覆写 mock 的 getAgentDir 对齐
 // 真实 pi config.js 的 env 优先语义（config.js:420-424），其余 mock 成员原样保留
-//（importOriginal 部分覆写，对齐 workflow-events-reload-branch.test.ts 手法）。
+//（importOriginal 部分覆写，对齐 workflow-events.test.ts 手法）。
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
   return {

@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """
-用户内容出站点静态守卫（adversarial-review-fixes A2 D-A2-3）
+用户内容出站点静态检查（adversarial-review-fixes A2 D-A2-3）
 
 扫描 packages/runtime/src 的三个用户内容出站方法调用点（.prompt( / .steer( /
 .followUp(），对照白名单（文件路径 + 行内稳定子串指纹 + 内容性质 + 注入状态 +
 登记理由）逐一放行；未登记的新调用点 → 退出码 2 红。
 
-设计依据与背景：原设计文档 adversarial-review-fixes.md §3.2 A2（D-A2-3；已删除，git 可追溯）——出站点守卫原则：用户内容出站必须经注入器，本注释自足
+设计依据与背景：原设计文档 adversarial-review-fixes.md §3.2 A2（D-A2-3；已删除，git 可追溯）——出站点检查原则：用户内容出站必须经注入器，本注释自足
 起因：MF-B（@ 定向消息带 skill chip 绕过 SkillInjector 直发 client.prompt）与
 MF-C（landing 首发同缺口）——注入器以「N 入口挂载」模式存在，新增用户内容
-出站通路时没有「必须经注入」的机器约束，靠人记住，各漏一处。本守卫把
+出站通路时没有「必须经注入」的机器约束，靠人记住，各漏一处。本检查把
 「忘挂注入」从人责变机器责（复用 check_spawn_env_boundary.py 的成熟模式）。
 
 扫描宽度裁决：匹配任意接收者的 `.prompt(` / `.steer(` / `.followUp(`，
 不限定 `client.` 前缀——设计期 grep 用 `client.prompt(` 字面量，handoff-service
-的 `srcClient.prompt(` / `newClient.prompt(` 即因此漏出（实施期实测抓回，本守卫
+的 `srcClient.prompt(` / `newClient.prompt(` 即因此漏出（实施期实测抓回，本检查
 正是为堵这类变量名形态逃逸而存在）。方法接收者改名（const c = client）不构成
 绕过面。
 已知边界（登记接受）：CALL_RE 按单行匹配，`client.` 在行末、`prompt(` 在次行
 行首（无点号）的跨行链式形态不命中——现存代码 `await client.prompt(` 同行风格
 占绝对主流（268 文件实测零漏网），多行解析复杂度与该逃逸面不成比例；若未来
-出现跨行形态的新出站点且被本守卫漏检，按未登记红处理（补白名单或改同行风格）。
+出现跨行形态的新出站点且被本检查漏检，按未登记红处理（补白名单或改同行风格）。
 
 判定模型：
 1. 逐行匹配（注释行跳过：行首空白后以 // 、 * 、 /* 开头）；
@@ -247,7 +247,7 @@ def run(scan_root):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="用户内容出站点守卫（A2 D-A2-3）")
+    parser = argparse.ArgumentParser(description="用户内容出站点检查（A2 D-A2-3）")
     parser.add_argument(
         "--root",
         default=REPO_ROOT,
@@ -264,6 +264,6 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except Exception as exc:  # noqa: BLE001 守卫自身崩溃不能静默放行
-        print(f"[ERROR] 守卫脚本异常: {exc}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 检查自身崩溃不能静默放行
+        print(f"[ERROR] 检查脚本异常: {exc}", file=sys.stderr)
         sys.exit(1)

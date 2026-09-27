@@ -95,7 +95,7 @@ export function createMockPi(handlers: CapturedHandlers): ExtensionAPI {
 		/* mock */
 	};
 	// setup*Injector 仅调 pi.on；用最小对象 + 双重断言满足 ExtensionAPI 契约
-	// （测试 mock 约定，见 crash-recovery.test.ts 的 Proxy 模式）
+	// （测试 mock 约定，见 session-lifecycle.test.ts 的 Proxy 模式）
 	return {
 		on,
 		appendEntry: noop,

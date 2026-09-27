@@ -7,7 +7,9 @@
  *   scanRecordFamilyEntriesFromSessionFile 流式扫描喂入（同一入口）；
  * - journal 源：record 事件文件（`<recordsDir>/<sa-id>.events`）与 run journal
  *   （`<sessionDir>/workflow-state/<runId>.events.jsonl`）——经 u0 journal-tail
- *   目录 tailer（watch + offset 续读 + 周期复查）增量 fold。
+ *   目录 tailer（watch + offset 续读 + 周期复查）增量 fold。run 域 fold 自
+ *   [W2 D7] 起单源 core run-events foldRunEventCheckpoint（状态机检查点 + 投影
+ *   骨架 created/asks/runSettled 一体产出），runtime 不再自建 fold。
  *
  * 仲裁规则（journal 胜出 / 窗外条目兜底）：同实体两源都有数据时 journal 事件
  * 胜出（事实源）；journal 被保留通道清理（窗外终态实体）后 entry 终态条目是
@@ -27,6 +29,8 @@
 import type { SubagentRecord, WorkflowRunRecord, WorkflowAgentCall } from '@taiji/shared'
 import {
   ALL_RUN_OUTCOMES,
+  foldRunEventCheckpoint,
+  INITIAL_RUN_EVENT_FOLD,
   RUN_EVENT_JOURNAL_SUFFIX,
   SUBAGENT_RECORD_CUSTOM_TYPE,
   WORKFLOW_RECORD_CUSTOM_TYPE,
@@ -41,7 +45,7 @@ import {
   type RecordCreatedEvent,
   type RecordJournalEvent,
   type RecordJournalFoldState,
-  type RunOutcome,
+  type RunEventFoldCheckpoint,
   type SubagentRecordRegisteredEntryData,
   type SubagentRecordSettledEntryData,
   type WorkflowRecordRegisteredEntryData,
@@ -104,113 +108,14 @@ export function parseWorkflowRunEventFileLine(line: string): WorkflowRunEvent | 
   return parsed as WorkflowRunEvent
 }
 
-// ── run journal fold（事件流 → run 骨架投影）───────────────────
-
-/** 单个 ask（步骤）的 journal fold 投影：骨架行 + 终局。 */
-export interface RunAskStepFold {
-  taskIndex: number
-  agentName: string
-  /** 剧本 phase 归属（W1 D6 分组供源；ask-dispatched 携带，旧 journal 行缺省 undefined）。 */
-  phase?: string
-  /** 首个 dispatched ts（步骤起点）。 */
-  startedAt: number
-  /** 最近一次该 ask 事件 ts（进度边沿）。 */
-  lastProgressAt: number
-  /** 终局（ask-settled；未终态 undefined）。 */
-  settled?: { outcome: RunOutcome; durationMs?: number; errorCode?: string; ts: number }
-}
-
-/** 单个 run journal 的 fold 状态（增量 append fold，重放幂等）。 */
-export interface RunJournalFold {
-  /** run-created 帧（journal 首帧；undefined = 残文件/首帧未达）。 */
-  created: { runId: string; workflowName: string; ts: number } | undefined
-  /** ask 投影（taskIndex → 步骤行）。 */
-  asks: Map<number, RunAskStepFold>
-  /** run-settled 终局（未终态 undefined）。 */
-  runSettled: { outcome: RunOutcome; errorCode?: string; reason?: string; ts: number } | undefined
-}
-
-/** run fold 初始态。 */
-export function initialRunJournalFold(): RunJournalFold {
-  return { created: undefined, asks: new Map(), runSettled: undefined }
-}
-
-/**
- * run journal 增量 fold（幂等：ask 终局/进度边沿按「后到覆盖」语义，重复事件
- * 重放只推进同值字段）。run 域事件自 W1 起携带 seq 信封（run-events
- * EventEnvelope 单调分配）；本 fold 不以 seq 去重，截断重读由 onReset 清 fold
- * 后从初始态重放保证幂等。
- */
-export function foldRunJournalEvents(
-  fold: RunJournalFold,
-  events: readonly WorkflowRunEvent[],
-): RunJournalFold {
-  for (const event of events) {
-    switch (event.type) {
-      case 'run-created':
-        fold.created = { runId: event.runId, workflowName: event.workflowName, ts: event.ts }
-        break
-      case 'ask-dispatched': {
-        const existing = fold.asks.get(event.taskIndex)
-        if (existing === undefined) {
-          fold.asks.set(event.taskIndex, {
-            taskIndex: event.taskIndex,
-            agentName: event.agentName,
-            // 剧本归属随帧落投影（W1 D6）；无 phase 帧不造键（旧 journal 行兼容）
-            ...(event.phase !== undefined ? { phase: event.phase } : {}),
-            startedAt: event.ts,
-            lastProgressAt: event.ts,
-          })
-        } else {
-          existing.lastProgressAt = Math.max(existing.lastProgressAt, event.ts)
-        }
-        break
-      }
-      case 'ask-retrying': {
-        const existing = fold.asks.get(event.taskIndex)
-        if (existing !== undefined) {
-          existing.lastProgressAt = Math.max(existing.lastProgressAt, event.ts)
-        }
-        break
-      }
-      case 'ask-settled': {
-        const existing = fold.asks.get(event.taskIndex)
-        const settled = {
-          outcome: event.outcome,
-          durationMs: event.durationMs,
-          errorCode: event.errorCode,
-          ts: event.ts,
-        }
-        if (existing === undefined) {
-          // settled 先于 dispatched 到达（截断重读分段 / 半写形态）：骨架行缺
-          // agentName，用占位名成行（状态位仍可投影；record overlay 会覆盖该行）
-          fold.asks.set(event.taskIndex, {
-            taskIndex: event.taskIndex,
-            agentName: '(unknown)',
-            startedAt: event.ts,
-            lastProgressAt: event.ts,
-            settled,
-          })
-        } else {
-          existing.lastProgressAt = Math.max(existing.lastProgressAt, event.ts)
-          existing.settled = settled
-        }
-        break
-      }
-      case 'armed':
-        break
-      case 'run-settled':
-        fold.runSettled = {
-          outcome: event.outcome,
-          errorCode: event.errorCode,
-          reason: event.reason,
-          ts: event.ts,
-        }
-        break
-    }
-  }
-  return fold
-}
+// ── run journal fold（[W2 D7] 单源删除）───────────────────────
+//
+// run 域 journal fold 收敛到 core 原语：core run-events foldRunEventCheckpoint
+// 的产出（RunEventFoldCheckpoint = 状态机检查点 state/lastSeq + 投影骨架
+// created/asks/runSettled）即本投影的 run 骨架数据源——runtime 不再自建第二套
+// fold（词表/骨架语义随 core 单源演进，双实现漂移病因消灭）。tailer 增量批次
+// 经 checkpoint 传参接续（见 applyRunEvents），投影合成读骨架半边
+// （projectV2Workflow）。
 
 // ── v2 条目载荷守卫（classify 只判 v/kind，字段形状归本层）─────
 //
@@ -410,7 +315,7 @@ export function projectV2Subagent(
 export function projectV2Workflow(
   registered: WorkflowRecordRegisteredEntryData | undefined,
   settledEntry: WorkflowRecordSettledEntryData | undefined,
-  fold: RunJournalFold | undefined,
+  fold: RunEventFoldCheckpoint | undefined,
 ): WorkflowRunRecord | null {
   if (registered === undefined && settledEntry === undefined) return null
   const runSettled = fold?.runSettled
@@ -481,8 +386,8 @@ export interface JournalProjectionSources {
   v2WorkflowSettled: Map<string, WorkflowRecordSettledEntryData>
   /** record 事件文件 fold（sa-id → 当前态）。 */
   recordFolds: Map<string, RecordJournalFoldState>
-  /** run journal fold（runId → 骨架投影）。 */
-  runFolds: Map<string, RunJournalFold>
+  /** run journal fold（runId → core fold 检查点：状态半边 + 投影骨架半边，[W2 D7] 单源）。 */
+  runFolds: Map<string, RunEventFoldCheckpoint>
 }
 
 export function initialJournalProjectionSources(): JournalProjectionSources {
@@ -713,8 +618,19 @@ export class SessionJournalProjection {
   private applyRunEvents(filename: string, events: readonly WorkflowRunEvent[]): void {
     if (this.disposed || events.length === 0) return
     const runId = runIdOfFilename(filename)
-    const current = this.sources.runFolds.get(runId) ?? initialRunJournalFold()
-    this.sources.runFolds.set(runId, foldRunJournalEvents(current, [...events]))
+    // [W2 D7] fold 单源：core foldRunEventCheckpoint 增量接续（既有 checkpoint 为
+    // 初值；seq 守卫去重 + 坏帧保守停帧归 core 单点）。坏帧出声（warn 归消费方
+    // 注入——停帧后骨架停在最近一致态，截断重建走 onReset 清 fold 全量重放）。
+    const current = this.sources.runFolds.get(runId) ?? INITIAL_RUN_EVENT_FOLD
+    this.sources.runFolds.set(
+      runId,
+      foldRunEventCheckpoint(events, (err, lastType) => {
+        console.warn(
+          `[journal-projection] run journal fold stopped at a broken frame (file=${filename}, ` +
+            `lastType=${lastType}): ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }, current),
+    )
     this.recompute()
     this.fireChange()
   }

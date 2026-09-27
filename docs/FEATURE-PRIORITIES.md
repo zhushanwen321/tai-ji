@@ -28,7 +28,7 @@
 
 跨级调用点的判定：P0/P1 主流程调用 P2/P3 能力时，**接入点按被调功能的契约降级隔离**（调用方不因辅助功能故障而崩），被调功能内部按自身级的契约处理。
 
-执行抓手：PR 审查维度见 `pr-cr-fix/agents/review-business-logic.md`（grading-error-policy 类别）；流水线审查见 dev-flow 阶段 3 reviewer 模板。
+执行切入点：PR 审查维度见 `pr-cr-fix/agents/review-business-logic.md`（grading-error-policy 类别）；流水线审查见 dev-flow 阶段 3 reviewer 模板。
 
 ## 2. P0 — 必不可少（挂了 = harness 对用户毫无价值）
 
@@ -51,11 +51,11 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 模型与 thinking level | 能力注册表、生效回执（RPC 状态化）、模型切换 | 用户控制 agent 智能水平/成本的核心旋钮；锁死单模型不可用 |
 | 中断/取消 | turn 取消链、取消后状态一致性 | 失控 agent 无法停止 = 持续烧 token 不可用 |
 | Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
-| 扩展装载框架 | builtin 21 包装载、分组守卫（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
+| 扩展装载框架 | builtin 21 包装载、分组检查（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
 | subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、drawer 详情 tab、workflow 面板、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化） |
 | 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题 | provider 配置是首次使用必经路径，配不了连会话都起不了 |
 | 插件系统 | PluginService、trusted/sandbox 隔离、statusBar、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据面） | harness 可扩展能力主体（testing 13）；交互点位是管理面类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
-| 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方收口）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
+| 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方收尾）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
 ## 3. P1 — 核心体验（挂了 = 大体能用，体验非常差）
 

@@ -83,7 +83,7 @@ pnpm run dev → 起 runtime 子进程 → 连 pi → 真实 session 文件读�
 - CI 不稳定（pi 子进程、端口、文件系统）
 - 适合**手工冒烟** + **关键链路验证脚本**（独立 `verify-<system>.cjs`,放项目根或临时位置）
 
-### 1.3 dev 冒烟闸门（堵 MOCK 盲区的第三轨）
+### 1.3 dev 冒烟门禁（堵 MOCK 盲区的第三轨）
 
 ```
 node scripts/dev-smoke.mjs（待建）→ chromium 加载 vite dev server → 0 错误即 pass
@@ -101,7 +101,7 @@ node scripts/dev-smoke.mjs（待建）→ chromium 加载 vite dev server → 0 
 | 非 MOCK 轨 | `pnpm run dev` | 全链路（含 runtime/pi/文件系统） | 慢、环境敏感 | 手工冒烟、关键链路验证 |
 | dev 冒烟 | `node scripts/dev-smoke.mjs`（待建） | 模块加载健康 | 不测交互 | CI gate、PR 检查 |
 
-> **铁律**：MOCK 轨 E2E 全绿 ≠ 功能可用。必须配套非 MOCK 手工冒烟（或 dev 冒烟闸门）。这是 2026-06-30 事故的血泪教训。
+> **铁律**：MOCK 轨 E2E 全绿 ≠ 功能可用。必须配套非 MOCK 手工冒烟（或 dev 冒烟门禁）。这是 2026-06-30 事故的血泪教训。
 
 ## 2. MOCK 模式如何启动
 
@@ -656,7 +656,7 @@ pnpm run dev
 | `e2e/ask-user-real.spec.ts` | A1/A2/A3 | ask-user 协议透传（问题对象无 allowComment）+ form-overlay 真实渲染（Other 保留）+ UI 交互闭环（overlay 关闭 + pi 恢复 turn）。wire 键断言双读 `formQuestions ?? askUserQuestions`（统一表单 form 帧 / legacy 帧双形态，ui-presentation-protocol） | ✅ 3/3（需 LLM；统一表单迁移后按双读断言复跑） |
 | `e2e/workflow-thinkinglevel-real.spec.ts` | TC1/TC2/TC3 | workflow agent() thinkingLevel 端到端：state 请求值 / pi 子进程 thinking_level_change / 完整跑通 | ✅ 3/3（需 LLM） |
 | `e2e/workspace-real.spec.ts` | 1 | 跨进程持久化 | ✅ 1/1 |
-| `e2e/workflow-disconnect-recovery.spec.ts` | A2 | WS 断开期间 run 完成 → 重连后收敛（传输兜底面回归，水位结构性不触发场景）：恢复来源双断言 = `session.subscribe` reply 的 stateSnapshot 携带该 run 的 done workflowUpdate last-value 回放帧 + `session.getWorkflows` 冷拉 RPC 返回终态记录；GUI 收敛（托盘 workflow 条目 data-state 回 idle ≤30s）；重连稳态无重复 done live 帧（断连空投下 publish 已完成、重连后 diff 恒空） | ✅ 2026-09-19 首跑全绿（reload-closeout-reliability u3b 执行，依赖 u1 送达水位对账已落地）：断连期间 run 完成 → 重连后 stateSnapshot 回放 done 帧 + `session.getWorkflows` 冷拉终态 + GUI 托盘 data-state=idle ≤30s 收敛 + 稳态无重复 done live 帧 |
+| `e2e/workflow-disconnect-recovery.spec.ts` | A2 | WS 断开期间 run 完成 → 重连后收敛（传输兜底面回归，水位结构性不触发场景）：恢复来源双断言 = `session.subscribe` reply 的 stateSnapshot 携带该 run 的 done workflowUpdate last-value 回放帧 + `session.getWorkflows` 主动拉取 RPC 返回终态记录；GUI 收敛（托盘 workflow 条目 data-state 回 idle ≤30s）；重连稳态无重复 done live 帧（断连且无订阅者时 publish 已完成、重连后 diff 恒空） | ✅ 2026-09-19 首跑全绿（reload-closeout-reliability u3b 执行，依赖 u1 送达水位对账已落地）：断连期间 run 完成 → 重连后 stateSnapshot 回放 done 帧 + `session.getWorkflows` 主动拉取终态 + GUI 托盘 data-state=idle ≤30s 收敛 + 稳态无重复 done live 帧 |
 | `e2e/btw-turn-isolation.spec.ts` | S7 | btw 双进程并发不变量（真实进程轨）：主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort/无 steer 注入 + 主会话 pi session JSONL 全文不含 btw 内容（滚动检查 = 全文扫描三问哨兵）+ 正面对照（btw 线文件含三问）。L3 真实 LLM 双凭证门（`TAIJI_PI_LIVE=1` + 本机 provider 凭证，缺一 skip 不 fail）；执行侧六要素（触发/预算/事件/断言/失败归档/重试禁令）SSOT = [e2e-map.json](./e2e-map.json) E2E-BTW-01 note，预算旋钮 = 主 prompt 的 bash `sleep 40` | ⬜ 资产已交付未执行（M4-b 剧本骨架，登记 E2E-BTW-01 R2；执行 = 阶段 5 验收 A7 行，空载串行，PR/merge/CI 不跑） |
 
 > [HISTORICAL] skill-reload 族原四 spec（登记 E2E-SKILLRELOAD-01/02/03/04）：2026-09-25 W5 skill 变更→pi reload 编排退役（ADR-0050 退役延伸），01/02/03 的被测对象（reload 非破坏化机制链）不复存在，随编排一并删除（登记同步移除）；04（`e2e/workflow-disconnect-recovery.spec.ts`，断连恢复场景）与 reload 无关保留，域 id E2E-SKILLRELOAD 维持稳定标识。共享装配与断言工具在 `e2e/fixtures/skill-reload-real-helpers.ts`。

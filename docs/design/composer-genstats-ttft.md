@@ -35,8 +35,8 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
   - **窗口构成（pi 0.84.4 实装时序，agent-loop.js:90-109 核实）**：`turn_start` 在 `prepareNextTurn` **之后** emit——**原生 auto-compaction 运行在 `prepareNextTurn` 内、先于锚点，不含在窗口**；窗口内只剩：turn_start 后的 steering 注入段（通常毫秒级，计入并接受）+ extension `transformContext` 链 + HTTP 请求 + provider 排队 + 首 token。**不含**原生压缩、不含工具执行（工具后下一轮 turn_start 重新起算）。[HISTORICAL] 初稿「含 transformContext 内 compaction、压缩轮偏大」与实装时序相反，经三审 P0-11/P0-12 修正。
   - **pi 语义依赖登记**：「`turn_start` 逐 LLM 请求 emit」与「`*_start` 先于 delta」两条是本指标前提，随 U2 落地登记进 `scripts/check-pi-semantics.mjs` 探针族（pi bump 门禁复验，防升级静默漂移）。
 - **首输出结算**：本请求窗口内首个输出信号到达 → `onFirstOutput()`（幂等 first-wins，已有 firstOutputAt 直接 return）→ `ttftMs = firstOutputAt - requestStartedAt`。信号来源（单点收，无 interpreter 兜底）：adapter 对 `text_start` / `thinking_start` / `toolcall_start` 三个子类型产 `{ kind: 'llm-first-output' }`（原 noop / 既有 `message.thinking_start` 帧行为保留，追加此内部事件——adapter 单事件可产多 translated event）。[HISTORICAL] 初稿另有 interpreter 侧 `text_delta`/`thinking_delta`/`tool-call-index` 三点兜底钩，存在理由「防 provider 缺 start 子类型」经简洁审 P0-22 证伪：pi-ai 0.84.4 全部流式 api 实现（openai / anthropic / google / bedrock / mistral / responses 全族）凡产 delta 必先产对应 `*_start`——兜底钩删除，高频快速路径零新增开销。
-- **interpreter 分发守卫**：新 kind 若漏注册 case 是**静默失败**（handle 分发无 default warn）——U2 落地时 `llm-request-start` / `llm-first-output` 未识别须 warn（既有结构无守卫则显式加），入 U2 验收条款。
-- **消费**：`turn-usage` 挂点 `consume()`（现有一次性消费语义）组装样本时追加 `ttftMs`（读取后置 null）。`message_end` 不清 ttft（窗口闭合结算归 durationMs；ttft 生命周期 = 锚点重锚 / consume 消费两处）。
+- **interpreter 分发检查**：新 kind 若漏注册 case 是**静默失败**（handle 分发无 default warn）——U2 落地时 `llm-request-start` / `llm-first-output` 未识别须 warn（既有结构无检查则显式加），入 U2 验收条款。
+- **消费**：`turn-usage` 挂点 `consume()`（现有一次性消费语义）组装样本时追加 `ttftMs`（读取后置 null）。`message_end` 不清 ttft（窗口结束结算归 durationMs；ttft 生命周期 = 锚点重锚 / consume 消费两处）。
 - 无值路径（一律 null，禁 `?? 0`）：无配对 `llm-request-start`（runtime 中途启动）、窗口内无任何输出信号即结束（错误 / 断连）、`llm-request-start` 后异常无 consume。
 
 ### 3.3 存储与聚合（runtime）
@@ -63,7 +63,7 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
 | 模型切换 | modelKey 分桶同 speed；current 槽按 modelKey 校验丢弃异模型残留 |
 | 多 content block（text + tool 混合） | first-wins 只取窗口首个信号 |
 | steering 注入段（turn_start 后、请求前） | 计入窗口；量级通常毫秒级，接受并在 note 声明 |
-| interpreter 新 kind 漏分发 | 未识别 kind warn（U2 加守卫），不静默 |
+| interpreter 新 kind 漏分发 | 未识别 kind warn（U2 加检查），不静默 |
 
 ## 4 验收
 
@@ -74,7 +74,7 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
 | S1 | 真机首显 | `TAIJI_DEV_BACKGROUND=1 pnpm dev` 连本实例，真实 session 发一条 prompt 至首个 token 可见 | composer 工具带 TTFT 触发器位于速度左侧且显示非 `—` 的 `Nms`/`N.Ns`；值 > 0 且 < 30000 |
 | S2 | 浮层四行 | hover TTFT 触发器 | 浮层出现：head 标题 + 模型名；四行（本次/今日/7天/30天）数值或 `—`；note 文案完整 |
 | S3 | 无数据 / landing | 新 session 未发消息；主 landing 页 | 未发时显 `—`；landing（无 session）整个 gen-stats 组不渲染（与速度同判据） |
-| S4 | 持久化恢复 | 发 1+ 条消息后重启 runtime，切入回该 session | 恢复腿 `session.getGenStats` 回填**聚合帧一致**（今日/7 天/30 天 p50 = 重启前值）；**触发器 current 显 `—` 直至新样本（内存槽态，与速度同构——speed 同重启同样显 `—`，非回归）**；下一轮请求后重新显示实测值 |
+| S4 | 持久化恢复 | 发 1+ 条消息后重启 runtime，切入回该 session | 恢复路径 `session.getGenStats` 回填**聚合帧一致**（今日/7 天/30 天 p50 = 重启前值）；**触发器 current 显 `—` 直至新样本（内存槽态，与速度同构——speed 同重启同样显 `—`，非回归）**；下一轮请求后重新显示实测值 |
 | S5 | 分档语义色 | 单测覆盖阈值边界（1499/1500/3000/3001）+ 真机观察一次正常请求 | 边界用例 class 断言绿；真机正常请求呈 success 色（或与其实测值档位一致） |
 | S6 | 回归：速度/缓存不受扰 | 跑 gen-stats 既有全套单测 + 真机发消息观察速度/命中率触发器 | 既有用例全绿；速度/缓存显示行为与改前一致 |
 | S7 | 错误路径不产脏样本 | 单测：无锚 consume / 无输出信号即结束 / 异模型 current 残留 / **工具执行后下一轮重锚（TTFT 不含工具执行的契约钉）** | ttftMs=null 路径样本被 service 跳过，无 0 值污染；工具轮次间锚点重置、ttft 不跨轮；聚合与 current 均不受影响 |
@@ -92,14 +92,14 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
 
 ### 4.3 场景 → 实现回溯
 
-S1/S2/S3 落 U4；S4 落 U1+U3（恢复腿协议 + 服务回填）；S5 落 U4；S6 落 U2/U3 回归；S7 落 U2/U3 单测；S8 落 U3。
+S1/S2/S3 落 U4；S4 落 U1+U3（恢复路径协议 + 服务回填）；S5 落 U4；S6 落 U2/U3 回归；S7 落 U2/U3 单测；S8 落 U3。
 
 ## 5 下一层拆分
 
 | Unit | 职责 | 领地 |
 |------|------|------|
 | U1 契约根 | shared `GenStatsTtft` + `GenStatsFrame.ttft` + runtime `GenStatsSample.ttftMs` + `PiTranslatedEvent` 两个新 kind（`llm-request-start` / `llm-first-output`）+ 协议断言测试 | `packages/shared/src/gen-stats.ts`、`packages/shared/src/__tests__/gen-stats.test.ts`、`packages/runtime/src/services/session/types.ts` |
-| U2 采样 | adapter：`turn_start` 出 NULL_EVENTS + 首输出子类型产 `llm-first-output`；`LlmWindowSampler` 双锚 + first-wins；interpreter 挂点（`llm-request-start` / `llm-first-output` 分发 + 未识别 kind warn 守卫） | `packages/runtime/src/infra/pi/event-adapter.ts`、`packages/runtime/src/services/session/event-interpreter-gen-stats.ts`、`packages/runtime/src/services/session/event-interpreter.ts` + 各自测试 |
+| U2 采样 | adapter：`turn_start` 出 NULL_EVENTS + 首输出子类型产 `llm-first-output`；`LlmWindowSampler` 双锚 + first-wins；interpreter 挂点（`llm-request-start` / `llm-first-output` 分发 + 未识别 kind warn 检查） | `packages/runtime/src/infra/pi/event-adapter.ts`、`packages/runtime/src/services/session/event-interpreter-gen-stats.ts`、`packages/runtime/src/services/session/event-interpreter.ts` + 各自测试 |
 | U3 存储聚合 | `TtftRecord` + **校验签名参数化（元组长度入参，默认 2）+ service 侧 `appendRecord`/`entriesSince` 泛型化（禁 `as` 绕过）** + ttft 文件读写 + `aggregateTtft`（p50）+ service 逐字段判定 / current 槽 / composeFrame | `packages/runtime/src/services/session/gen-stats-store.ts`、`gen-stats-service.ts` + 测试 |
 | U4 展示 | TTFT 触发器（速度左侧）+ 浮层 + 三档色 + 格式化 + i18n 双侧 + 挂载顺序断言 | `packages/renderer/src/components/panel/GenStatsTriggers.vue`、`packages/renderer/src/i18n/locales/{zh-CN,en-US}/panel.ts`、`packages/renderer/src/__tests__/panel/gen-stats-*` |
 
@@ -110,7 +110,7 @@ S1/S2/S3 落 U4；S4 落 U1+U3（恢复腿协议 + 服务回填）；S5 落 U4�
 | 方案 | 内容 | 否决理由 |
 |------|------|----------|
 | B：锚 assistant `message_start` → 首输出 | 零协议改动 | `message_start` = provider 响应头到达时刻（pi-ai `stream.push({type:"start"})` 在 HTTP 响应返回后），测不到「请求发出 → 响应头」网络段，系统性偏小——而这段恰是 TTFT 体感的主要组成 |
-| C：锚前端 dispatch 时刻 | 用户点发送 → 首输出 | 混入用户排队 / steering 注入段；工具循环轮次无 dispatch 锚点，口径不闭合 |
+| C：锚前端 dispatch 时刻 | 用户点发送 → 首输出 | 混入用户排队 / steering 注入段；工具循环轮次无 dispatch 锚点，口径不完整 |
 | D：TTFT 用均值聚合 | 与 speed 口径统一 | 延迟重尾，均值被偶发慢请求拉飞；p50 稳健且存储本就是样本数组、可直接算 |
 | E：interpreter 侧 delta/tool-call 三点兜底钩 | 防 provider 缺 `*_start` | pi-ai 0.84.4 全部流式 api 实现凡产 delta 必先产对应 `*_start`（简洁审核实），兜底不存在服务对象，且挂在事件量最高频路径 |
 
@@ -119,5 +119,5 @@ S1/S2/S3 落 U4；S4 落 U1+U3（恢复腿协议 + 服务回填）；S5 落 U4�
 | 轮次 | 报告 | must_fix | 处置 |
 |------|------|----------|------|
 | R1 | 主审 / 影响面审 / 简洁审（2026-09-22，`.tmp/tech-design/design-review-20260922-181552*.md`） | 去重后 3 条，全部成立（源码逐条核实） | ① 压缩口径时序反向 → §3.2 重写窗口构成 + [HISTORICAL] 标注；② TtftRecord 单元素组被 isValidRecord 丢弃 → §3.3 校验参数化**（R2 扩至 service 侧 appendRecord/entriesSince 泛型化）** + S8 双向单测；③ interpreter 三点兜底钩冗余 → §3.2 删除 + 否决表 E |
-| R1-suggestion | 3+3+1 条 | — | **采纳**：p50 行 label 不复用「今日均值」（§3.1 新 i18n key）、阈值初值 + 重审触发声明（§3.1）、interpreter 分发守卫（§3.5/U2）、e2e 预列补 MOCK-01/EQUIV-01 + 机器对账落定（§4.2）、pi 语义依赖登记探针（§3.2）、S7 补工具轮重锚契约钉；**登记不采纳**：ttft/durationMs 生命周期差异加一句理由（两者消费同点、差异已由 §3.2 重锚清除不变量覆盖，不另占篇幅） |
-| R2/R2b 聚焦复审 | 主审 R2 报告 + 简洁审 R2/R3 + 影响面审 R2/R3（同时间戳 `-r2`/`-impact-r2`/`-impact-r3`） | 主审 0 / 简洁审 1→0 / 影响面审 2→0（终态三审均 0） | 简洁审 R2：§5 U2 悬空括注删，改分发守卫条款；影响面审 R2：§3.3 扩至 service 侧 `appendRecord`/`entriesSince` 签名面（泛型化禁 as）；硬编码计数「8 个」改族名（主审 INFO）。**终态三审均 0，过阶段 0 门** |
+| R1-suggestion | 3+3+1 条 | — | **采纳**：p50 行 label 不复用「今日均值」（§3.1 新 i18n key）、阈值初值 + 重审触发声明（§3.1）、interpreter 分发检查（§3.5/U2）、e2e 预列补 MOCK-01/EQUIV-01 + 机器对账落定（§4.2）、pi 语义依赖登记探针（§3.2）、S7 补工具轮重锚契约钉；**登记不采纳**：ttft/durationMs 生命周期差异加一句理由（两者消费同点、差异已由 §3.2 重锚清除不变量覆盖，不另占篇幅） |
+| R2/R2b 聚焦复审 | 主审 R2 报告 + 简洁审 R2/R3 + 影响面审 R2/R3（同时间戳 `-r2`/`-impact-r2`/`-impact-r3`） | 主审 0 / 简洁审 1→0 / 影响面审 2→0（终态三审均 0） | 简洁审 R2：§5 U2 悬空括注删，改分发检查条款；影响面审 R2：§3.3 扩至 service 侧 `appendRecord`/`entriesSince` 签名面（泛型化禁 as）；硬编码计数「8 个」改族名（主审 INFO）。**终态三审均 0，过阶段 0 门** |

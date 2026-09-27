@@ -65,7 +65,7 @@ builtin（包内 agents/）< npm global < user .pi/agent < user .agents
 
 **接入内置 workflow 的方式**：项目级 agent 放 `.agents/agents/<name>.md`，`batch1` 传该 agent 的 `.md` 绝对路径——即 `<available_subagents>` 注入的 `<location>`（裸名会被 resolveAgentDefs 拒收）。同名覆盖关系由 AgentRegistry 发现优先级决定：项目级源优先级高于内置，覆盖发生在注入 `<location>` 的解析时，调用侧无需感知。
 
-## 4. 防平铺守卫（弱模型兼容）
+## 4. 防平铺检查（弱模型兼容）
 
 弱模型常把 workflow args 子字段（`task`/`target`/`batchN`）平铺到 params 顶层，导致 `args={}` 静默启动缺参 run（P0）。
 

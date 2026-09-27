@@ -43,14 +43,14 @@ tick 扫描（30s）→ 到期任务 pending → dispatchTask
 3. **工具面简化**：`schedule` 删除 `force` 参数（全部任务统一语义）；创建回显删 `no-force`/`force` 标签。
 4. **调度本体不动**：tick 轮询 + pending 状态机、rate limit（6 次/分钟）、append-only 记账（upsert/advance/toggle/delete）、croner 解析、resume 重放、importer 一次性迁移——全部保留。
 
-**In-scope**：`extensions/universal/scheduler/`（src + tests + package.json version bump 0.6.0 → 0.7.0）；本文档 + ext-simplify-08 设计文档头部 supersede 注记；changeset；`.tmp/dev-flow/ext-simplify-group-a.impl-plan.md` 风险 10 登记收口（归因结论 + 以简化移除载体关闭）。
+**In-scope**：`extensions/universal/scheduler/`（src + tests + package.json version bump 0.6.0 → 0.7.0）；本文档 + ext-simplify-08 设计文档头部 supersede 注记；changeset；`.tmp/dev-flow/ext-simplify-group-a.impl-plan.md` 风险 10 登记收尾（归因结论 + 以简化移除载体关闭）。
 **Out-of-scope**：`packages/session-delivery`（保留——runtime 的 session-manager send 通路与 subagent-workflow 仍在消费；其 per-message settled 语义对 runtime 零影响，runtime 不配 onSettled）；runtime / subagent-workflow 的 delivery 装配；scheduler 的 event sourcing 存储层。
 
 ## 3. 现状：投递模型为何可以砍
 
 **本章结论：现有投递链的全部高级语义（必达 + 合批 + 不打断）都服务于一个「礼貌提醒」的产品假设；用户裁决该假设过重——提醒的价值在到达速度而非礼貌，steer 打断是期望行为而非缺陷。**
 
-逐机制清账：
+逐机制逐条关闭：
 
 | 机制 | 服务的语义 | 简化后 |
 |---|---|---|
@@ -112,7 +112,7 @@ schedule_control list：runCount +1、nextRunAt 推进（与注入同 tick，不
 | `src/types.ts` | 改 | `ScheduledTask.force`、`TaskSnapshot.force`、`AddOptions.force` 删 |
 | `src/replay.ts` | 改 | upsert 折叠删 `force: snapshot.force`（旧 JSONL entry 中的 force 字段成为被忽略的多余字段，无害） |
 | `src/importer.ts` | 改 | 旧 store 迁移删 force 读取（旧 force/non-force 任务统一收敛到新直投语义） |
-| `src/__tests__/` | 删+改 | 删：`U4-ONSETTLED`、`U4-PARK_GATE`、`U4-AFTER_RUN_INTENT`（投递链专属）；改：`U4-DISPATCH_INFLIGHT`（守卫保留但断言改直投形态）、`index-generation`（装配断言删 delivery 段）、`index-session-start`、`runtime`（dispatch 用例改 steer 直投断言）、`service`/`tool`/`commands`/`replay`/`importer`/`widget`/`backend` 中 force 相关断言清理；`mock-backend.ts` sendMessage 签名跟随 |
+| `src/__tests__/` | 删+改 | 删：`U4-ONSETTLED`、`U4-PARK_GATE`、`U4-AFTER_RUN_INTENT`（投递链专属）；改：`U4-DISPATCH_INFLIGHT`（检查保留但断言改直投形态）、`index-generation`（装配断言删 delivery 段）、`index-session-start`、`runtime`（dispatch 用例改 steer 直投断言）、`service`/`tool`/`commands`/`replay`/`importer`/`widget`/`backend` 中 force 相关断言清理；`mock-backend.ts` sendMessage 签名跟随 |
 | `package.json` | 改 | version 0.6.0 → 0.7.0；dependencies 删 `@zhushanwen/session-delivery` |
 
 错误规格不变量：`sendMessage` throw → failed 记账 + pending 保留 + 不 rethrow（tick 继续其他任务）；rate limit 拦截 → pending 保留（现状语义）；`addTask`/`toggle`/`delete`/advance 记账链零变化。

@@ -51,8 +51,8 @@ components:
 
 # taiji 视觉设计系统（太极纯灰 · v6）
 
-> **权威链（2026-09-13 文档资产收口裁决）**：
-> - **值真值 = [`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root` tokens**（运行时唯一源）。本文件 §4 token 表与它挂值相等守卫（pre-commit 检查）。
+> **权威链（2026-09-13 文档资产收敛裁决）**：
+> - **值真值 = [`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root` tokens**（运行时唯一源）。本文件 §4 token 表与它挂值相等检查（pre-commit 检查）。
 > - **本文件（docs/DESIGN.md）= 视觉范式权威 + token 登记对照 + AI / impeccable 视觉上下文入口**。范式冲突以本文件为准；值冲突以 style.css 为准，并回修本文件。
 > - 原 `docs/page-design/` 目录整体退役（2026-09-13）：v6-master-spec.md 与 traffic-light-layout.md 的有价值内容已并入本文件，其余文件（v6-tokens.css / v6-spec-*.html / v6-spec-base.css / 各 demo html 等）已删除，git 可追溯。
 > - 设计演变史见 [docs/design-evolution.md](./design-evolution.md)；demo 活验证在 `.tmp/v6/`。
@@ -76,7 +76,7 @@ v6 重构的三个缘由：
 
 对标 Codex / Claude / Linear / Figma / Notion / Raycast / Stripe 的极简专业风格。一句话哲学：
 
-> **冷蓝暗色不变，shell 三栏不变，对标极简专业——「层级代替边框、圆角升档、正文提亮、内容收窄、彩色降噪」五原则更彻底地应用到全部页面。**
+> **冷蓝暗色不变，shell 三栏不变，对标极简专业——「层级代替边框、圆角档位提升、正文提亮、内容收窄、彩色降噪」五原则更彻底地应用到全部页面。**
 
 > **v2 演进（2026-08-02）**：色相从「冷蓝」演进为「太极阴阳 6 主题预设」（默认太极·玄，纯灰系）。五原则不变，色相成为可切换的表层。
 
@@ -112,7 +112,7 @@ v6 重构的三个缘由：
 | # | 原则 | 具体含义 |
 |---|------|---------|
 | 1 | **层级代替边框** | 静态容器只用一个表面色，不叠加 border；靠 bg 层级浮起分隔。border 仅保留给浮起可交互容器（popover/dialog/composer）和 focus 态 |
-| 2 | **圆角升档** | `--radius-sm` 6px（全局默认档）；卡片 10px；浮层/composer 12px；徽章/pill 999px 胶囊 |
+| 2 | **圆角档位提升** | `--radius-sm` 6px（全局默认档）；卡片 10px；浮层/composer 12px；徽章/pill 999px 胶囊 |
 | 3 | **正文提亮** | `--neutral-dim` 抬亮一档；正文位置统一用 `--neutral-mid`（过 WCAG AA ≥4.5:1）；仅装饰/极弱位置保留 dim/faint |
 | 4 | **内容收窄** | assistant 居中 720px（整 turn 居中，UserBubble 列内右浮）；设置内容列同 720px 左对齐；Composer 非 landing 对齐同列 |
 | 5 | **彩色降噪** | 保留 git 语义色（M/A/D 降为极小圆点或单字）+ accent + 真 failure 的 danger，其余降灰阶。从色块/pill 降级为极小圆点或单字 badge |
@@ -152,7 +152,7 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 - **TurnRail mini-map 节点**：active 用 `bg-accent-soft + inset accent-ring`（第三种视觉语言）。理由：mini-map 是「当前位置指示器」语义（非持久选中），且节点极小（224px 浮层内），accent-soft 染底 + ring 提供最强可见性。属瞬时高亮的延伸。
 - **SearchModal sm-item**：用 `bg-surface-hover` + accent 蓝字/蓝 icon（非列表项型默认的 bg-surface）。理由：dialog 底 = surface，sel 用 bg-surface 会同色淹没，改 surface-hover 靠蓝字区分（Linear/Raycast 范式）。
 
-### 3.5 实践原则（2026-08-02 demo 迭代沉淀）
+### 3.5 实践原则（2026-08-02 demo 迭代记录在案）
 
 > 以下 8 条来自 `.tmp/v6/` demo 多轮迭代的实际教训，是 §3.1 视觉五原则在具体场景的展开。涉及状态指示的已在 §5.6 / §9 对齐。
 
@@ -221,7 +221,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 ## §4 Design Tokens
 
-> **真相源**：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root`（token 值真值，运行时唯一源）。以下值与该文件逐字对齐，受挂值相等守卫保护（pre-commit）；运行时值更新时须同 commit 回写本表。
+> **真相源**：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root`（token 值真值，运行时唯一源）。以下值与该文件逐字对齐，受挂值相等检查保护（pre-commit）；运行时值更新时须同 commit 回写本表。
 > 本节取代 v6-design.md §2 / v6-summary.md §3（两文档已删除，残值并入本文档）与 v6-spec-tokens.html（已删除，2026-09-13 退役，git 可追溯）。
 
 ### 4.1 背景层级（阶梯上抬 + 加宽级差，暗端防糊）
@@ -543,7 +543,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | `↑↓`（SearchModal/nav） | 键盘导航 + Enter 确认 |
 | `Tab`（SettingsOverlay） | 焦点陷阱；nav 内 `↑↓/Home/End` 移动 |
 
-**IME 守卫**：Composer 的 `isComposing` 期间不拦截回车（中文/日文输入法 composing 态不发送）。
+**IME 检查**：Composer 的 `isComposing` 期间不拦截回车（中文/日文输入法 composing 态不发送）。
 
 **composer-bar popover 锚点范式**：absolute 相对 composer-bar，`bottom: calc(100% + 6px)`，`z-modal`，`bg-elevated + border-strong + shadow-2 + radius-lg`。popover open 时触发按钮 `.bar-btn--active` = `accent-soft 底 + accent 字`（锁高亮）。
 
@@ -584,7 +584,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   - **composer-bar 组成（左→右）**：左簇 = `+`添加 → 任务托盘（下行）/ extension toolbar 挂载点（`composer.toolbar`，无贡献时零 DOM）→ spacer；右簇 = 生成指标(GenStatsTriggers) / 上下文容量(hover popover) / 模型(click popover, 分组+搜索+选中 check) / 思考强度(click popover, 6 档圆点) / send-slot(30×30 accent 圆角矩形 radius 8px + 倾斜箭头)；bar-btn h28 icon 14px；popover 锚点范式见 §5.12
   - **composer-bar 密度策略（三簇 + 按序退化 + 溢出兜底）**：容器 `flex-nowrap` **永不换行**（发送位右锚不漂移）；按序退化（累计）：序 1 容量+生成指标合流为单 chip → 序 2 模型+推理档位合体 → 序 3 插件 toolbar 进 `»` 溢出菜单（零贡献时菜单不渲染）→ 序 4 托盘聚合为单入口（层叠图标 + 运行数）。三档阈值 **≥640px 全展开 / 520–640px 用序 1–3 / <520px 用序 1–4**，由 `ResizeObserver` 实测 `.composer-bar` 内容宽驱动；纯状态机 `packages/renderer/src/components/panel/composer-density.ts`。图标语义硬约束：聚合入口 = 层叠图标，溢出入口 = 省略号，两者不共用
   - **composer-bar 任务托盘（ComposerTray）**：`+`添加 之后、spacer 之前的左簇常驻托盘（`v-if="sessionId"`，landing 态隐藏）。条目 = built-in 四件（后台命令 / 子代理 / 工作流 / 子会话，固定序恒在最左）+ 协议 widget 区（todo / goal known-order 优先，其余按 ViewHostStore 当前插入序；icon / badge / 状态色由 `WidgetMeta` 驱动）。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻（无计数）；全无记录 → 不渲染（归零不虚噪）。第 4 件「子会话」= `parentAgentSessionId === 当前 sessionId` 的条目，pin 态行内「打开 / 停止（两段确认）」，行点击跳该子会话——调度模式的观察入口。窄档（<520px）整托盘聚合为「层叠图标 + 运行数」单入口。交互：hover icon 160ms 开面板、指针离开 icon+面板整体 240ms 收（移入面板不收起），点击 icon = pin（再点 / Esc / 点面板外解除），同一时刻至多一个面板；面板锚定 icon 上方 400px 宽、max-h 60vh 内滚动，行内操作仅 pin 态渲染，行点击开 drawer 对应 tab 详情（session 行为跳转子会话）。设计文档已删除（git 可追溯；终态以本节与 CONTEXT.md「任务托盘」词条为准）
-  - **contenteditable + slash 触发**：光标位置检测 `/` 或 `#`（行首或空格后）触发 CommandPopover；选中插入 chip + 移除触发文本；IME 守卫见 §5.12
+  - **contenteditable + slash 触发**：光标位置检测 `/` 或 `#`（行首或空格后）触发 CommandPopover；选中插入 chip + 移除触发文本；IME 检查见 §5.12
   - **comp-box 态**：`.has-input`(2px `color-mix(surface-hover 40%)` 透明微环) / `.focused`(border-accent + 3px accent-ring 外环) / `.staging`(border-accent + 3px ring + bg-accent-soft，独立于焦点)
 - **ContextBar**（composer 上方，goal/todo 摘要 + plugin foot 挂载点）：与 composer 同宽同中线居中；常态归零（无 goal/todo 时整条隐藏）；slim bar 24px `text-2xs neutral-dim`；点击展开 popover（goal 全文 + 3px 进度条 + todo checklist）
 - **TurnRail**（右侧 turn 导航 + 自定义滚动条接管）：spine(`surface-hover` 6px 暗条 340px，点击翻页) + thumb(`accent-soft + 2px accent border-left`，按滚动比例定位 min-h 24px，可拖拽，hover/active 三档色阶详见 §3.5.6)；hover 展开 mini-map(6px→224px，turn 节点两行：user 行 + agent 状态图标行，含**折展 toggle** ChevronUp/Down，active 节点常驻可见 toggle)；active 节点见 §3.4 例外
@@ -607,7 +607,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 - 底色 `var(--bg)`；SegmentedTab 见 §5.3；SessionItem 选中态见 §5.4
 - **Project 一级导航**（D14）：nav 下方 ProjectSwitcher。**折叠态** = 当前 project 名 + ChevronDown（点击展开列表）；**展开态** = project 列表（popover 范式 bg-elevated + border-strong + shadow-2），每行 project 名 + hover 显删除按钮（Trash icon，danger 色，点击 window.confirm 后 removeProject），底部「+ 新建项目」按钮（点击变 input，Enter 创建 + 设活跃）；选中态 `bg-surface + accent 字`（列表项型）。session 按 workspace（目录）分组，worktree chip 用 `--reasoning` 紫（§3.5.7）
-- **3 tab**（sessions/files/plugins；plugins 为第 3 枚，Puzzle icon，plugin view 收口于此）
+- **3 tab**（sessions/files/plugins；plugins 为第 3 枚，Puzzle icon，plugin view 收敛于此）
 - 组标题去 uppercase；ForkGroup 去 border 改缩进，分支行单行（序号 pill + 标题 + 时间，不显示状态，§3.5.4）；FileTree 缩进 10px gap 4px
 - SessionList 状态信号见 §5.6A（左未读点 + 右异常 badge）；非列表行场景（GitPanel 等）用 §5.6B 的 7px 圆点
 - **Brand 区**（顶部）：TaijiLogo 28px 旋转（8s，reduced-motion 停，currentColor 适配主题）+ 产品名(base 600) + 版本号(2xs mid) + 可升级按钮（accent + 7px danger 红点角标）
@@ -639,12 +639,12 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - 11 个 page 分组卡片 `bg-card` + 10px 圆角 + 去 border；行分隔 hairline 0.05；每行 label 加 12px `neutral-mid` 描述
 - **ProviderEdit**：展开就地编辑（手风琴，取代 ProviderEditModal 双层 modal）
 - 表单 label 去 uppercase tracking-wider
-- **交互状态机**（有编辑态的页面）：dirty 快照 diff（净零翻转恢复 clean）/ 保存流（mock 延迟 + 已保存反馈）/ 离开守卫（dirty 拦截切页 + 放弃先还原快照防重入）/ beforeunload
+- **交互状态机**（有编辑态的页面）：dirty 快照 diff（净零翻转恢复 clean）/ 保存流（mock 延迟 + 已保存反馈）/ 离开检查（dirty 拦截切页 + 放弃先还原快照防重入）/ beforeunload
 
 ### 6.5 Overlays
 
 - **SearchModal**：手写覆盖层；命令/文件聚合（session 源待接入，demo 现有 2 group：建议命令 + 最近打开）；选中态见 §3.4 例外（surface-hover + 蓝字，dialog 底 surface 上 bg-surface 会淹没）；分组 header 去 uppercase；高亮 `<span class="sm-hit">` font-semibold 不染蓝（颜色继承父元素）；loading 防闪 200ms（见 §5.10）；default 态尾部 clock icon 表最近/历史
-- **FormOverlay**：内联（非 modal），统一提问表单协议（ui-form）的 GUI 唯一渲染面——ask-user / scheduler / plan 三方提问收口，覆盖 composer 挂载（多问 = 多 tab，单问 = 单视图；schedule 整表单 = ScheduleForm 渲染器，无边框一体化形态）
+- **FormOverlay**：内联（非 modal），统一提问表单协议（ui-form）的 GUI 唯一渲染面——ask-user / scheduler / plan 三方提问收尾，覆盖 composer 挂载（多问 = 多 tab，单问 = 单视图；schedule 整表单 = ScheduleForm 渲染器，无边框一体化形态）
   - **多问题切 tab**（form-tab：无 border / 全圆角 6px / active=bg-elevated+500 / 已答 tab 显 7px success 绿点）
   - **单选 radio**：16px，unchecked=`border-strong` 空心，checked=`accent` 实心 + `inset 2px bg-input` 形成环
   - **多选 checkbox**：16px 方块，checked=`accent` 实心 + `accent-fg` 勾 10px
@@ -722,7 +722,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 - 启用 coverage + 设观察门槛
 - E2E 进 CI（mock 轨 + real 轨独立 job）
-- 补建 dev-smoke 闸门
+- 补建 dev-smoke 门禁
 - 重写 TEST-STRATEGY.md
 
 ### 8.2 阶段 A：整体架构（3 项）
@@ -799,7 +799,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | R11 | block icon | 14px |
 | R13 | SegmentedTab 圆角 | 12px（radius-lg） |
 | R14 | drawer 投影 | 弱投影 0.15-0.18 |
-| R22 | 圆角升档 | tr-git/fg-pill 等升 6px；tt-close 保留 3px 例外 |
+| R22 | 圆角档位提升 | tr-git/fg-pill 等升 6px；tt-close 保留 3px 例外 |
 
 ### 9.3 文档裁决
 
@@ -821,7 +821,7 @@ style.css（packages/renderer/src/style.css :root，值真值，运行时唯一�
   > .tmp/v6/ demo（组件实现活验证）
 ```
 
-**冲突处理**：范式冲突以本文件为准；值冲突以 style.css 为准并回修本文件（§4 挂值相等守卫，pre-commit 检查）。
+**冲突处理**：范式冲突以本文件为准；值冲突以 style.css 为准并回修本文件（§4 挂值相等检查，pre-commit 检查）。
 
 ### 10.1 终态表（原 28 份 v6 文档分类整合后）
 

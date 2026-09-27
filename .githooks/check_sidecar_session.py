@@ -152,7 +152,7 @@ def main():
             print(f'{RED}{v}{NC}')
         print()
         print(f'{YELLOW}规则: session 级别事件必须带 sessionId{NC}')
-        print('\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m')
+        print('\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m')
         sys.exit(2)
 
     print(f'{GREEN}[OK] Sidecar session 隔离检查通过{NC}')

@@ -40,7 +40,7 @@ function assertNever(value: never): string {
 /**
  * action ↔ domain 配对的承重类型（替代三处松散 `as`）。
  * 调用方必须传匹配的 {action, domain}——TS 在调用点校验，错配编译报错。
- * export：gui-mode-dispatch.test.ts 经 type-only import 消费（RPC/TUI 模式分发契约）。
+ * export：gui.test.ts 经 type-only import 消费（RPC/TUI 模式分发契约）。
  */
 export type AdapterInput =
   | { action: "start"; domain: StartHandlerResult }

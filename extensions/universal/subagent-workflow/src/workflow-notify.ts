@@ -541,7 +541,7 @@ export const WORKFLOW_STALL_CUSTOM_TYPE = "workflow-stall";
  * 归 notify 域：守卫对象是 NotifyLedger 的账面完整性（getBoundNotifyLedger 的
  * 家内事务），与 workflow 域事件族装配零数据耦合。由 setupWorkflowDomain 在
  * 原注册位置调用（pi.on 注册顺序逐位不变，
- * workflow-events-registration-order.test.ts 锁定）。
+ * workflow-events.test.ts 锁定）。
  */
 export function setupNotifyLedgerCompactionGuard(pi: ExtensionAPI): void {
   pi.on("session_compact", (_event: SessionCompactEvent, _ctx: ExtensionContext) => {

@@ -26,7 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SERVICES_ROOT = PROJECT_ROOT / "packages/runtime/src/services"
 
 # 受控例外分两个语义集合（S2②：集合拆分使「文档登记 ↔ runtime-layering §3 表行」可机器对账，
-# 对账器 = check-layering-registry-sync.py，双向漂移即红——MF-5-1 形态的守卫化收口）：
+# 对账器 = check-layering-registry-sync.py，双向漂移即红——MF-5-1 形态的检查化覆盖）：
 # DOCUMENTED_MODULES = runtime-layering.md §3「跨切面例外」表登记的模块（增删须同步 §3 表）
 # BASELINE_MODULES = 现状基线债（不在 §3 表，待 ports 收编，见 docstring）
 DOCUMENTED_MODULES = {
@@ -35,7 +35,7 @@ DOCUMENTED_MODULES = {
     "pi-paths",
     "git-status-parser",
     "ignore-parser",
-    # crash-journal：崩溃台账 writer（crash-forensics-and-watchdog 设计 D1），logger 类横切
+    # crash-journal：崩溃登记 writer（crash-forensics-and-watchdog 设计 D1），logger 类横切
     # 关注点——无业务语义、process-wide 单例、best-effort 决策点双写（写失败不抛进业务链），
     # 2026-09-11 随 E 组取证链落地列入（同 logger「为它定义 port 只会增加无意义的间接层」裁决）
     "crash-journal",
@@ -48,7 +48,7 @@ DOCUMENTED_MODULES = {
     # crash-correlation：崩溃时刻机器面只读取证查询（crash-forensics-and-watchdog 设计 D10，
     # 2026-09-20 连坐崩溃实证后落地），mem-pressure 同款横切关注点——无业务语义、无状态、
     # 只读（ps 进程表 + log show 系统日志，spawn-env-boundary 白名单豁免的同族只读探测）、
-    # best-effort 永不 reject（无 sink 不采样）；session-service pi crash 台账行消费
+    # best-effort 永不 reject（无 sink 不采样）；session-service pi crash 登记行消费
     # captureMachinePiDigest（同 mem-pressure 由 D 系列消费先例）
     # 登记同步见 docs/architecture/runtime-layering.md §3 ③f
     "crash-correlation",
@@ -88,7 +88,7 @@ BASELINE_MODULES = {
     "spawn-env",
 }
 
-# 守卫判定用并集（行为与拆分前一致）
+# 检查判定用并集（行为与拆分前一致）
 ALLOWED_MODULES = DOCUMENTED_MODULES | BASELINE_MODULES
 
 # value import 行（import { X } from '...infra/...'；import type 豁免）

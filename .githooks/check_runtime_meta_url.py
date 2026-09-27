@@ -11,7 +11,7 @@ runtime 源码 CJS 兼容形态检查（C-build-01 前置化）——落实 AGEN
     不在 globalThis 上）。裸 __dirname 是 CJS 合法用法，不拦。
 
 存量豁免：services/plugin-service/plugin-host.ts——双形态（CJS/ESM）路径解析的权威
-guard 实现（typeof __dirname / typeof import.meta 双守卫 + 清晰报错），正是本规则
+guard 实现（typeof __dirname / typeof import.meta 双检查 + 清晰报错），正是本规则
 推荐形态的参照实现。
 
 退出码: 0 通过 / 2 违规

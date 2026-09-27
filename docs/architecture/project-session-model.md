@@ -50,7 +50,7 @@ cwd（session 属性）→ 仅前端展示聚合（侧栏按目录分组 Session
 - **session 归属**：runtime sidecar `<sessionFile>.project.json`（磁盘权威），与
   `.preset.json`（launch preset）、`.meta.json`（终态）并列独立。
   - 写入：`persistProjectBinding(filePath, projectId)`（复制 preset binding 模式：
-    原子写 + 缓存失效 + [规则 #6] JSONL 未落盘时 existsSync 守卫跳过；
+    原子写 + 缓存失效 + [规则 #6] JSONL 未落盘时 existsSync 检查跳过；
     turn_end/agent_end 兜底补写，见 session-service.tryPersistProjectBinding）
   - 读取：`scanSessionMeta` 第五读（与 header/name/outcome/preset 同批次，共享
     `sessionMetaCache`）；active session 内存态兜底（`ManagedSession.projectId`）

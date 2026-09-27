@@ -4,7 +4,7 @@
  * 原内联在 workflow-events.ts 装配 seam（跨域 handler 迁出，原样搬移——行为与
  * 日志文案逐字保留）；ModelConfigService 缓存是 model 域状态，与 workflow 域
  * 装配零数据耦合。由 setupWorkflowDomain 在原注册位置调用 setupModelEvents
- * （pi.on 注册顺序逐位不变，workflow-events-registration-order.test.ts 锁定）。
+ * （pi.on 注册顺序逐位不变，workflow-events.test.ts 锁定）。
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

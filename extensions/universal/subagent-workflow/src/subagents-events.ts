@@ -5,7 +5,7 @@
  * 日志文案逐字保留）；级联关闭的对象是 SubagentService 的 record 池，与 workflow
  * 域装配零数据耦合。由 setupWorkflowDomain 在原注册位置调用
  * setupSubagentsCascadeEvents（pi.on 注册顺序逐位不变，
- * workflow-events-registration-order.test.ts 锁定）。
+ * workflow-events.test.ts 锁定）。
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

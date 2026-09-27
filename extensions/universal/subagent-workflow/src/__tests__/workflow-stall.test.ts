@@ -19,7 +19,7 @@
 //   - 数据源：事件 journal 尾帧 ts；journal 缺文件回退 run 起点（meta.startedAt）
 //   - 非 running run 零通知
 //
-// mock 手法对齐 workflow-events-deps-getter.test.ts：session-lifecycle mock 受控
+// mock 手法对齐 workflow-events.test.ts：session-lifecycle mock 受控
 // sessionState 填充；notifyDone/notifyStall 保留真实实现（黑盒断言 sendMessage）。
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

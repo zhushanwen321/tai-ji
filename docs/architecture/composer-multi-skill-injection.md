@@ -40,7 +40,7 @@ composer 的输入是 contenteditable 富文本，结构化片段（chip）在 D
 - skill segment 序列化格式改造（shared）
 - runtime 发送前预处理注入（展开 + 预检 + 降级）四条发送路径全覆盖
 - resume 反渲染兜底（sidecar 之外的标记反解析）
-- pi 语义探针守卫（展开格式漂移检测）
+- pi 语义探针检查（展开格式漂移检测）
 - runtime 读 pi stdout 的 readline 分帧防御（顺手修，风险敞口因大文本注入上升）
 
 **Out-of-scope**：
@@ -177,7 +177,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 | 方案 | 长期架构合理性 | 短期实现成本 | 风险 | 裁决 |
 |---|---|---|---|---|
 | A. 拆多条 RPC prompt（每条一个 skill） | 差：每条 prompt 是独立 agent turn，纯 skill 无正文的消息立即触发模型回复，语义完全错误；且无「批量 pending」RPC 通道 | 中 | 行为错误不可绕过 | ❌ |
-| B. renderer 预展开（发送前拉内容拼文本） | 差：renderer 无文件系统访问，需异步 RPC 拉 SKILL.md 内容，点发送时才取内容引入时序复杂度与失败面；prompt 组装逻辑散到两端 | 中 | 发送时序竞态；展开逻辑双份 | ❌ |
+| B. renderer 预展开（发送前拉内容拼文本） | 差：renderer 无文件系统访问，需异步 RPC 拉 SKILL.md 内容，点发送时才取内容引入时序复杂度与失败路径；prompt 组装逻辑散到两端 | 中 | 发送时序竞态；展开逻辑双份 | ❌ |
 | C. runtime 预处理注入，无预算预检 | 中：注入语义正确，但失败模式 C（单条巨大消息 → 会话持续失败）无任何防护，等于给用户一把卡死会话的枪 | 低 | 撑爆后只能 fork/新开 session 救援 | ❌ |
 | **D. runtime 预处理注入 + 预算预检 + 降级标记（本设计）** | 好：注入收敛在 runtime 一处、格式与 pi 对齐可探针守护；降级路径复用 pi 已有的「模型自主 read」机制；chip 通道与 pi 原生命令通道正交互不干扰 | 中：触发/chip/序列化/注入四层各一小块 | 降级判断依赖 CJK 感知字符估算（非精确计量）——估算取保守方向（宁可提早降级），漏判由 pi overflow 报错链兜底（D6 漏判-兜底关系） | ✅ |
 
@@ -186,37 +186,37 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 ### 3.3 关键决策与权衡
 
 **D1：触发模式——空格后 `/` 弹 skill-only 浮层（选定）**
-- **采用**：新增 skill 触发检测，正则 **`/[^\S\n]\/(\S*)$/`**（`[^\S\n]` = 空白但非换行：半角空格、tab、全角空格 U+3000、NBSP 等全部覆盖——对齐 `#`/`$`/`@` 的 `\s` 空白语义，仅排除 `\n` 分支；行首与换行后新行行首完整让位给现有命令浮层，见「被否 1」的仲裁说明）。命中的浮层**只列 skill**（panel 态从 commandStore 过滤 `source:"skill"` 项；landing 态用 `useProjectSkills` + `useGlobalSkills` 合并列表），不列命令。行首 `/` 的现有命令浮层（命令 + skill 全量）**保持不变**。
-- **被否 1**：正则含 `^` 分支（`(?:^|\s)\/`）——实装（`contenteditable.ts:171-184`）各触发回调独立派发，行首 `/x` 会同时命中命令触发与新 skill 触发，两个浮层打架；仲裁规则：**行首（含换行后新行行首）归命令浮层，仅行中空白（非换行）后归 skill 浮层**，两个正则的触发域互斥无重叠。早期草案用 `[ \t]`——不含全角空格/NBSP，中文输入法全角空格后 `/` 不触发，与「对齐四符号体验」不一致，被否。
-- **被否 2**：空格后 `/` 弹全部命令——命令语义仍是「行首命令」（对齐 pi 命令模型），任意位置弹命令会让 `/compact` 等出现在句中造成语义混乱。
-- **被否 3**：维持仅行首触发——直接否掉本需求 G1。
+- **采用**：新增 skill 触发检测，正则 **`/[^\S\n]\/(\S*)$/`**（`[^\S\n]` = 空白但非换行：半角空格、tab、全角空格 U+3000、NBSP 等全部覆盖——对齐 `#`/`$`/`@` 的 `\s` 空白语义，仅排除 `\n` 分支；行首与换行后新行行首完整让位给现有命令浮层，见「不采用 1」的仲裁说明）。命中的浮层**只列 skill**（panel 态从 commandStore 过滤 `source:"skill"` 项；landing 态用 `useProjectSkills` + `useGlobalSkills` 合并列表），不列命令。行首 `/` 的现有命令浮层（命令 + skill 全量）**保持不变**。
+- **不采用 1**：正则含 `^` 分支（`(?:^|\s)\/`）——实装（`contenteditable.ts:171-184`）各触发回调独立派发，行首 `/x` 会同时命中命令触发与新 skill 触发，两个浮层打架；仲裁规则：**行首（含换行后新行行首）归命令浮层，仅行中空白（非换行）后归 skill 浮层**，两个正则的触发域互斥无重叠。早期草案用 `[ \t]`——不含全角空格/NBSP，中文输入法全角空格后 `/` 不触发，与「对齐四符号体验」不一致，不采用。
+- **不采用 2**：空格后 `/` 弹全部命令——命令语义仍是「行首命令」（对齐 pi 命令模型），任意位置弹命令会让 `/compact` 等出现在句中造成语义混乱。
+- **不采用 3**：维持仅行首触发——直接否掉本需求 G1。
 - **D5 翻案与误触发缓解**：空格后 `/` 触发当年被 D5 否决（路径文本 `看看 /usr/local/bin` 误弹）。缓解与量级：① 浮层 query 合法性过滤——skill 名 pattern 为 `[a-z0-9-]{1,64}`（**query 过滤含空串合法**：刚敲 `/` 尚无过滤词时列全量 skill，`{1,64}` 指 skill 名本体域；实施为 `{0,64}`），query 一旦含 `/`、大写、下划线等非法字符**立即关闭浮层**（`/usr` 短暂弹出，输入到第二个 `/` 即关闭）；② 误弹量级：当前用户 skill 集（约 30 个，名多为多音节英文）下，常见路径短 token（`tmp`/`usr`/`var`/`home`）前缀命中 0~2 项，误弹为极小浮层且输入即收。**重审触发条件**：skill 集增长导致单字母/双字母前缀命中 > 5 项时，评估加最小 query 长度门槛（如 ≥2 字符才弹）。
 - **证据**：`input-dom.ts:237-264`（四符号正则与 D5 注释）、`CommandPopover.vue:158-194`（variant 数据源分支）。
 - **效果**：G1 成立（§3.1 场景 1 的 `空一格键入 /rev`），且行首命令行为零变化（场景 6② 回归）。
 
 **D2：skill chip 标记化——光标插入、多个共存、同 skill 去重（选定）**
 - **采用**：新增 `insertSkillChip`（类比 `insertFileChip`，`chip-commands.ts`）：插在光标处、多个共存、`×` 删除、Backspace 整块删除；浮层列表里**已插入的 skill 标记「已选」并禁选**（去重，防同一 skill 注入两份全文浪费上下文）。解除「存在任何 chip 时 slash 不触发」对 **skill 浮层**的限制（对行首**命令**浮层保留该限制——命令仍是行首唯一语义）。
-- **被否**：复用现有 slash chip（最前、唯一）——与 G1/G2 直接冲突。
+- **不采用**：复用现有 slash chip（最前、唯一）——与 G1/G2 直接冲突。
 - **证据**：`chip-commands.ts:46-58`（insertChipAtSelection 通用机制）、`:76-104`（slash chip 的最前唯一限制；D4-a 就地化改革前状态，现行「唯一/替换 + 视觉就地」语义见 composer-chip-insertion-semantics.md）、`getSegmentsFromEl`（`input-dom.ts:92-107`）已支持解析任意位置多个 skill chip——数据模型层零改动。
 - **效果**：G1/G2 的输入侧成立。
 
 **D3：序列化——skill segment 产出私有标记 `<taiji-skill/>`（选定）**
 - **采用**：`segmentsToText` 的 skill 分支从 `/skill:${name}` 改为 `<taiji-skill name="${name}" location="${location}"/>`（location 可得时带上，作为降级模式与反解析的自描述数据）。runtime 只认该标记展开。手打文本 `/skill:name` **不处理**，与 pi 原生行为完全一致（整条消息以其开头才被 pi 展开）。
-- **被否 1**：维持 `/skill:name` 文本 + runtime 全局替换——用户正文里讨论 `/skill:` 语法（meta 场景）会被误展开，且 chip 与手打无法区分。
-- **被否 2**：runtime 同时展开任意位置的 `/skill:valid-name` token——比 pi 更激进（pi 只认行首），扩大误伤面；被否 1 同理。
+- **不采用 1**：维持 `/skill:name` 文本 + runtime 全局替换——用户正文里讨论 `/skill:` 语法（meta 场景）会被误展开，且 chip 与手打无法区分。
+- **不采用 2**：runtime 同时展开任意位置的 `/skill:valid-name` token——比 pi 更激进（pi 只认行首），扩大误伤面；不采用 1 同理。
 - **边界声明**：手打 `/skill:a` 与 chip 混排时，**手打文本不位于消息首位**则序列化产物不以 `/skill:` 开头，pi 字面透传（模型可经 `<available_skills>` 自主 read）；手打文本位于首位时 pi 仍原生展开（block + args，args 内的标记与末尾块不受影响）。两情形均为 pi 原生行为：chip 通道才是本设计的增强面，手打行为与 pi 零偏差。
 - **证据**：`segments.ts:96-98`（现序列化点，单点改造）。
 - **效果**：G5 成立（手打行为零变化）；标记自描述支撑 G4 兜底与降级模式（D7）。
 
 **D4：name → 文件路径的权威源 = taiji SkillRegistry（skill-reload-nondestructive D7 修订；本节原选定的 pi `get_commands` 决策已被反转）**
 - **采用（现行）**：runtime 展开器解析 skill name 时，以 taiji SkillRegistry 扫描（`getGlobalSkills() ∪ getProjectSkills(sessionCwd)`，取 `SkillInfo.sourcePath`）为权威映射；**不信任标记自带 location** 的不变式不变——read 路径唯一来自权威扫描。SkillRegistry 职责自本修订起含注入权威映射（在 settings UI / 扫描预览之外）。project 扫描集含 `cwd/.pi/skills`（scan/watch 同源对账）。
-- **被否（本修订否决原选定）**：pi `get_commands` 快照——reload 才刷新的滞后快照，与「skill 变更即时生效、不依赖 pi 生命周期」目标冲突；同名覆盖语义保留与 pi first-set-wins 的对齐（global 先载）。反转的完整论证（扫描集差异 / 失败与陈旧窗口语义）见 skill-reload-nondestructive §3.3 D7 与 [ADR-0050](../adr/decisions.md)。
+- **不采用（本修订否决原选定）**：pi `get_commands` 快照——reload 才刷新的滞后快照，与「skill 变更即时生效、不依赖 pi 生命周期」目标冲突；同名覆盖语义保留与 pi first-set-wins 的对齐（global 先载）。反转的完整论证（扫描集差异 / 失败与陈旧窗口语义）见 skill-reload-nondestructive §3.3 D7 与 [ADR-0050](../adr/decisions.md)。
 - **证据**：`skill-injector.ts`（`SkillMappingSource` / registry 源映射）、`skill-dirs.ts`（project 扫描集）。
 
-**D5：展开格式与 pi 逐字对齐 + 探针守卫（选定；R4 修订：落点从原位替换改为末尾块内集中，见 D11）**
-- **采用**：runtime 展开器产出的 block 格式与 pi `_expandSkillCommand` 逐字一致：`<skill name="..." location="...">\nReferences are relative to ${baseDir}.\n\n${body}\n</skill>`（body = SKILL.md 全文剥 frontmatter 后 trim；**baseDir = `dirname(SKILL.md path)`**，对齐 pi 实装 `skill.baseDir`，不取 `sourceInfo.baseDir`——见 §5 检查点 1 实施定案）。**R4 起 block 不再原位替换正文**：全部展开 block 集中在消息末尾的 `<taiji-skill-data>` 包裹块内（形态与去重规则见 D11），正文标记原样保留。`stripFrontmatter` 剥离逻辑与 pi `dist/utils/frontmatter.js` 逐字镜像（实施修订：pi 包 exports 白名单仅 `.`/`./rpc-entry`/`./client`，深路径 import 被拦、包根 import 会将 TUI/WASM 静态依赖拖进 tsup bundle——镜像的漂移风险由下方探针守卫兜住）。
-- **守卫**：PS-24 探针（实施落点：runtime REAL_PI vitest 池 `pi-semantics-skill-expansion-golden.test.ts`，登记于 `docs/pi-semantics.json`；`REAL_PI_READY` 门控，无凭证环境自动 skip——CI 拦截能力以 REAL_PI 池为界）——起真实 pi RPC 进程，发 `/skill:name` prompt，读 JSONL 落盘文本，与 taiji 展开器同输入输出做 golden diff。pi 升级若改格式（如 tag 结构、References 行），探针红。R4 核对：探针 golden diff 的锚定对象是单个 `<skill>` block 内容（不变）；整条消息形态断言（若有）随 D11 更新为「标记保留 + 末尾块」。
-- **被否**：自造注入格式（如 markdown 代码块包裹）——与 pi 会话格式割裂，探针无法对齐。
+**D5：展开格式与 pi 逐字对齐 + 探针检查（选定；R4 修订：落点从原位替换改为末尾块内集中，见 D11）**
+- **采用**：runtime 展开器产出的 block 格式与 pi `_expandSkillCommand` 逐字一致：`<skill name="..." location="...">\nReferences are relative to ${baseDir}.\n\n${body}\n</skill>`（body = SKILL.md 全文剥 frontmatter 后 trim；**baseDir = `dirname(SKILL.md path)`**，对齐 pi 实装 `skill.baseDir`，不取 `sourceInfo.baseDir`——见 §5 检查点 1 实施定案）。**R4 起 block 不再原位替换正文**：全部展开 block 集中在消息末尾的 `<taiji-skill-data>` 包裹块内（形态与去重规则见 D11），正文标记原样保留。`stripFrontmatter` 剥离逻辑与 pi `dist/utils/frontmatter.js` 逐字镜像（实施修订：pi 包 exports 白名单仅 `.`/`./rpc-entry`/`./client`，深路径 import 被拦、包根 import 会将 TUI/WASM 静态依赖拖进 tsup bundle——镜像的漂移风险由下方探针检查兜住）。
+- **检查**：PS-24 探针（实施落点：runtime REAL_PI vitest 池 `pi-semantics-skill-expansion-golden.test.ts`，登记于 `docs/pi-semantics.json`；`REAL_PI_READY` 门控，无凭证环境自动 skip——CI 拦截能力以 REAL_PI 池为界）——起真实 pi RPC 进程，发 `/skill:name` prompt，读 JSONL 落盘文本，与 taiji 展开器同输入输出做 golden diff。pi 升级若改格式（如 tag 结构、References 行），探针红。R4 核对：探针 golden diff 的锚定对象是单个 `<skill>` block 内容（不变）；整条消息形态断言（若有）随 D11 更新为「标记保留 + 末尾块」。
+- **不采用**：自造注入格式（如 markdown 代码块包裹）——与 pi 会话格式割裂，探针无法对齐。
 - **证据**：pi `agent-session.js:983-1007`（格式模板）、`utils/frontmatter.js` 导出。
 - **效果**：G5 的「零侵入」与长期防漂移；格式一致保证块内 block 与 pi 原生展开可互换理解。R4 代价变更：原「整条消息 = 单个 skill block」在 pi TUI 可折叠渲染的形态不再产生（所有消息 = 正文 + 末尾块混排，pi TUI 显示 XML 原文——§3.5-④ 登记更新）。
 
@@ -226,8 +226,8 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 - **漏判-兜底关系（诚实声明）**：估算非精确计量，仍存在漏判可能（如中英混排密度异常、contextWindow 元数据虚标）。漏判时 pi overflow 报错链仍然存在（用户可见错误 + 一次 compact-and-retry），预检目标是**拦住大概率超窗的注入**而非精确计量；真实死亡尺寸（单条 ≥ 20000 token 切点保护线）由 CJK 上界估算覆盖（20000 真实 token 的中文内容按 1.0 密度估算 = 20000，不会被漏判到放行程度）。
 - **为什么只看单条消息自身大小、不叠加会话历史占用**：历史占用超阈由 pi 的 threshold compaction 在提交前/每轮前处理（`agent-session.js:893-896`、`:274-287`）——历史是**挤得动**的；而单条 ≥ keepRecentTokens(20000) 的消息受切点算法保护**永远挤不掉**（§2.3 失败模式 C 第 3 步）。所以历史归 pi 已有机制，单条消息自身大小才是本设计必须拦的量。
 - **为什么一刀切整条降级、不做逐 skill 贪心**：贪心（选择序展开、预算耗尽后剩余降级）会产生「部分全文 + 部分标记」混合态——模型看到两种注入形态、用户难以感知哪些生效，验证复杂度高；一刀切行为可预测（要么全展开要么全标记）。减法原则。
-- **失败安全（fail-safe，修订）**：contextWindow 实时获取失败（RPC 错误）时**降级为标记模式**。——被否：fail-open（获取失败照常全文注入）——`get_session_stats` 失败本身预示 pi RPC 异常（后续 prompt 大概率同样失败），此时放行的大消息若真发出并超窗，落入 §2.3 失败模式 C 的持续失败态（会话报废），与 G3 直接矛盾；fail-safe 的代价只是功能减弱一轮（标记模式 skill 仍可用），方向安全。
-- **被否**：拒绝发送（硬拦截）——用户被拦后无法表达意图，降级（标记模式）让消息仍可发且 skill 仍可用，是更软的安全路径。
+- **失败安全（fail-safe，修订）**：contextWindow 实时获取失败（RPC 错误）时**降级为标记模式**。——不采用：fail-open（获取失败照常全文注入）——`get_session_stats` 失败本身预示 pi RPC 异常（后续 prompt 大概率同样失败），此时放行的大消息若真发出并超窗，落入 §2.3 失败模式 C 的持续失败态（会话报废），与 G3 直接矛盾；fail-safe 的代价只是功能减弱一轮（标记模式 skill 仍可用），方向安全。
+- **不采用**：拒绝发送（硬拦截）——用户被拦后无法表达意图，降级（标记模式）让消息仍可发且 skill 仍可用，是更软的安全路径。
 - **证据**：`compaction.js:308-352`（切点盲区，已亲自复核）、`agent-session.js:893-896`（threshold compaction 时机）、pi `estimateTokens` chars/4（`compaction.js:188-226`，对中文低估 2~4 倍故不可照抄）。
 - **效果**：G3 成立（§3.1 场景 2）。
 
@@ -242,7 +242,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 **D8：skill 失效降级必须前端可见（选定）**
 - **采用**：runtime 展开器对「name 在权威映射（D7 切源后 = SkillRegistry 扫描，原 get_commands）无映射」或「SKILL.md 读取失败」或「`<taiji-skill/>` 标记被 BeforeSend hook 改写破坏至不可解析」的标记：**原样保留**（对齐 pi 的透传行为），同时经现有 runtime → renderer 广播通道发一条消息级提示（renderer 以 toast + 消息内联提示呈现）。禁止静默——静默降级会让用户以为 skill 生效。
 - **检测域边界（R4 补登）**：D8 的残缺扫描发生在 runtime 注入器发送前，只覆盖 BeforeSend hook 及之前的改写；**pi 侧 `input` hook 在注入器之后运行**（client.prompt 进入 pi 后触发），其改写破坏标记/块时无检测点、无提示，静默进入 LLM 上下文——不新增机制，依赖 hook 自律（仓内现仅 msg-id-mapper 使用 input hook 且只剥 u- 注释不触碰标记；第三方 extension 为真实暴露面，登记为已知边界）。
-- **被否**：整条消息拒绝发送——单个 skill 失效不该阻断整条消息的表达。
+- **不采用**：整条消息拒绝发送——单个 skill 失效不该阻断整条消息的表达。
 - **证据**：pi 对未知 skill 原样透传（`agent-session.js:989-991`）——行为对齐。
 - **效果**：§3.1 场景 3。
 
@@ -250,7 +250,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 - **采用**：runtime 新增单一展开函数（注入模块），`message-dispatcher.ts` 的三个入口——`sendPrompt`（:79-149，普通发送/landing 首条最终都汇入）、`steerMessage`（:522）、`followUpMessage`（:527）——在把文本交给 `client.prompt/steer/followUp` 之前**统一调用**。
 - **挂载顺序（明确）**：注入器挂在 **BeforeSend hook 之后、`client.prompt` 之前**——plugin hook 审核的是用户原文（含标记，语义为「用户提交了什么」），注入器处理 hook 改写后的文本；hook 改写若破坏标记完整性，走 D8 透传+提示（标记残缺不展开、不静默丢内容）。
 - **幂等（结构化保证）**：每条消息仅过一次注入器，由 dispatcher 调用点保证（sendPrompt/steerMessage/followUpMessage 各自单次调用）；**不做文本级幂等检测**（grep「已展开否」会被用户正文手打 `<taiji-skill` 字样欺骗而误跳过真实 chip）。
-- **被否**：只改 sendPrompt——steer/followUp 场景（busy 补充 skill）注入失效，G2 不完整。
+- **不采用**：只改 sendPrompt——steer/followUp 场景（busy 补充 skill）注入失效，G2 不完整。
 - **证据**：`message-dispatcher.ts:522-529`（steer/followUp 不走 sendPrompt 骨架，需各自挂载）、`:84-137`（hook 先于 client.prompt 的现有顺序）。
 - **效果**：§3.1 场景 4。
 
@@ -268,20 +268,20 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 - **同 name 去重**：块内每个 name 只展开一次（按标记出现序首个归并，notice 不发）。UI 层 D2 已禁选同 skill，此处兜底手打/编辑重发路径；重复全文纯浪费上下文。**数据源澄清**：块内 `<skill>` 的 location **与降级清单条目的 location 均恒取 SkillRegistry 权威扫描的 `sourcePath`**（D4 修订后权威源；「与 pi 逐字对齐」约束的是展开格式而非数据源；标记自带 location 若过时——skill 移动后——不得作为权威 read 路径进入块/清单，否则模型按过时路径 read）；去重归并判定仅按 `name`（不读标记自带 location）；标记自带 location 仅作反解析自描述，非权威数据源。
 - **落盘末尾性依赖声明**：useChat 在注入前已于文本尾追加 `<!--taiji:msg:u-…-->` 标记，注入块实际拼接在该注释之后；「真末尾」由 pi 侧 msg-id-mapper input hook 剥除注释实现——该 extension 自身降级（hook 错误标记存活）时落盘为「注释 + 块」，反解析剥块按任意位置匹配不受影响。
 - **LLM 关联指引：正常形态不加文本内指引行（选定）**。理由：对齐信号完备——正文标记带 `name`、块内每个 `<skill>` 也带同名 `name`，citation/脚注模式主流 coding 模型可建立映射；块 tag 名语义化。**观察点**：若实测弱模型漏读末尾块（回答未体现 skill 内容），补救路径 = system-prompt extension 经 hook 注入提示词（一处生效全 session，不污染消息文本）；不回退到文本内指引行。降级形态保留指引行（该形态下 read 是唯一获取通道，指引是必要指令非冗余）。
-- **被否**：① 维持原位展开——裁决理由 ①②③ 全部反向；② 展开块紧跟各标记后方内联——可读性问题与原位展开等价，只是换个包裹；③ 新降级 tag 与新块并存——同构形态双 tag 徒增反解析与文档分叉；④ **复用既有 `<taiji-skills>` 作统一包裹 tag**——基础设施虽现成（`buildSkillsFallbackBlock`/`parseSkillsFallbackBlocks` 已实装），但 tag 名是 LLM 可读协议面：`taiji-skills`（清单语义）承载全文块语义 stretch，`taiji-skill-data` 对模型的「数据附挂区」语义传达更准；且存量降级块消息与 R4 新形态消息靠 tag 名即可自识别（诊断/测试断言友好），复用则须解析块内子项形态才能区分新旧——概念净增 1 个 tag 换取协议面语义精度与新旧自识别，判定值得。
+- **不采用**：① 维持原位展开——裁决理由 ①②③ 全部反向；② 展开块紧跟各标记后方内联——可读性问题与原位展开等价，只是换个包裹；③ 新降级 tag 与新块并存——同构形态双 tag 徒增反解析与文档分叉；④ **复用既有 `<taiji-skills>` 作统一包裹 tag**——基础设施虽现成（`buildSkillsFallbackBlock`/`parseSkillsFallbackBlocks` 已实装），但 tag 名是 LLM 可读协议面：`taiji-skills`（清单语义）承载全文块语义 stretch，`taiji-skill-data` 对模型的「数据附挂区」语义传达更准；且存量降级块消息与 R4 新形态消息靠 tag 名即可自识别（诊断/测试断言友好），复用则须解析块内子项形态才能区分新旧——概念净增 1 个 tag 换取协议面语义精度与新旧自识别，判定值得。
 - **效果**：正文可读；resume/复制/编辑重发数据面干净；降级/正常统一包裹。验收场景 1②/2①/4 形态断言随本决策更新。
 
 **D12：用户气泡混排内联渲染（R4 新增，选定——修复 badge 前后换行）**
 - **现状缺陷**：`UserBubble.vue` 渲染循环中 badge（skill/file/session/subagent）与非 text 段（slash 文本还原、image 缩略图）均为 inline 形态，但 text 段经 `MarkdownRenderer` 渲染为**块级**（根元素 `<div class="md-render">` + markdown-it 包裹的块级 `<p>`）——badge 前后任意一侧存在 text 段时该侧必然换行（块级边界），`[text, skill, text]` 段序下 badge 单独占一行。live 与 reload 两侧同构（共用 UserBubble），发送后立即可见。
 - **采用**：气泡同时含 text 段与非 text 段（badge/slash/image——实现按非 text 段统一判定，一致性审查登记的扩面）时，给气泡内容容器启用 inline 化修饰 class，scoped CSS 将 `.md-render`、其内部段容器与 `p` 置为 `display:inline`，段落间换行以 `p + p::before { content: "\a"; white-space: pre }` 类手法补偿；纯 text 消息（无 badge）不加 class，复杂 markdown（标题/列表/表格/代码块）排版完全不受影响。
 - **已接受代价（四要素）**：混排消息的 text 段含复杂块级 markdown 时排版退化为 inline 流。**量级**：混排场景的 text 段以短句为主（badge 是句中引用形态）；**恢复路径**：不适用（显示形态，非内容损伤）；**重审条件**：用户反馈混排消息代码块/列表显示异常；**判定**：可接受。
-- **被否**：text 段弃用 MarkdownRenderer 改轻量 inline 渲染器——等于产品决策「用户气泡非 markdown」，影响面大（现有用例断言 + live ≡ reload 等价性重验），收益不明确。
+- **不采用**：text 段弃用 MarkdownRenderer 改轻量 inline 渲染器——等于产品决策「用户气泡非 markdown」，影响面大（现有用例断言 + live ≡ reload 等价性重验），收益不明确。
 - **效果**：混排消息 badge 与正文同行（验收场景 10）。
 
 **D13：composer skill chip 前后自动空开（R4 新增，选定）**
 - **现状缺陷**：`insertChipAtSelection` 落 chip 后仅插 ZWSP（不可见光标锚点）+ `.slash-chip` 仅有 `margin-right: 4px` 单侧间距；chip 前侧无任何间距处理——触发路径（空格 + `/`）靠清 query 后的前置空格，非触发路径（+ 菜单/搜索注入/landing）chip 紧贴前文。
 - **采用**：CSS 单点——`.composer-input :deep(.slash-chip[data-chip-type='skill'])` 增加 `margin-left: 4px`、`margin-right` 提至 6px；行首缩进抑制用 `.composer-input :deep(.slash-chip[data-chip-type='skill']:first-child) { margin-left: 0 }`（scoped CSS 下 :deep() 后代形式，与实现一致；「行首」= DOM 首子节点语义）。纯视觉零数据污染：ZWSP spacer 契约（`isSpacerNode`/Backspace 删 chip 通路）不动，序列化层 `needsBoundarySpace` 的空格补齐逻辑不变。
-- **被否**：插入时补真实空格文本节点——DOM 文本污染 + Backspace 联动复杂化 + 与序列化层空格规则双重维护，纯视觉诉求不值得数据层改动。
+- **不采用**：插入时补真实空格文本节点——DOM 文本污染 + Backspace 联动复杂化 + 与序列化层空格规则双重维护，纯视觉诉求不值得数据层改动。
 - **范围**：仅 skill chip（用户报告面）；file/session/subagent chip 的同类间距问题不在本批（后续统一时另行评估）。
 - **效果**：composer 中 skill 占位前后各空开约一个空格宽（验收场景 11）。
 
@@ -307,7 +307,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 ④ **pi TUI 打开混排消息显示 XML 原文（P0-19 登记）**。**量级**：仅 pi CLI 用户打开 taiji 会话时可见（taiji 用户不经过 pi TUI）；**恢复路径**：不适用（显示形态差异，非功能损伤——模型收到的内容一致）；**重审条件**：pi 上游 `parseSkillBlock` 支持混排时自动消除；**判定**：可接受。**R4 更新**：末尾块协议下所有消息均为「正文 + 末尾块」混排形态，原「整条 = 单 block」的折叠渲染形态不再产生——taiji 用户不经 pi TUI，实际影响面不变。
 
-⑤ **`normalizeContent` 纯文本投影面（P0-12 登记）**。`segmentsToText` 注释标明其双用途（「归一化展示用 + pi prompt 序列化唯一实现」），skill 分支改产标记后，展示类消费方看到 `<taiji-skill .../>` 而非 `/skill:name`：复制消息（气泡复制动作 `copy(normalizeContent(...))`）——非自然语言形态变化，可接受；**composer ↑/↓ 输入历史召回（R4 补登）**——`composer-shell.ts` 的 `deriveHistoryFromChatStore` 以 normalizeContent 派生历史条目，召回含 chip 消息时 composer 回填标记原文（非 chip），与编辑重发草稿回填同族（视觉退化、重发后注入器仍生效），按原样接受；重审条件 = 用户反馈召回体验，届时在 deriveHistoryFromChatStore 做标记→可读短形投影；**编辑重发草稿回填**（`UserBubble.startEdit` 的 `draftText = normalizeContent(content)`）——旧消息重发时 composer 显示标记文本而非 chip（视觉退化，按原样接受；重发后 runtime 再展开仍生效）。**[轮 3 收口 · 2026-09-10] 该路径的真实缺陷不是「仅视觉退化」**：提交时编辑稿整串回灌首个 text 段、非 text 段原位保留，任何「序列化形态出现在文本里」的段都会翻倍——`[skill('review'), text('正文')]` → 草稿 `<taiji-skill name="review"/> 正文` → 重建产物序列化出**两个** `<taiji-skill>` 标记 → runtime 注入器按标记逐个展开 ⇒ **同一 SKILL.md 注入两遍**（上下文浪费，且违反 §3.5-② 的单消息内 chip 去重意图）；file/mention/session/handoff 同族翻倍（探针实测，回归锁见 `packages/ui/src/lib/__tests__/segment-rebuild.test.ts` 与 `packages/ui/src/features/chat/__tests__/UserBubble.test.ts`）。已由 `packages/ui/src/lib/segment-rebuild.ts` 的「编辑稿中与保留段重复的序列化文本剥离」收口（skill 用 `buildSkillMarker` SSOT 输出精确匹配；剥离不到即丢弃该段、以文本形态随 prompt 进入——与 slash 段同款「剥离/丢弃」规则；slash 的前缀剥离口径由轮 3 的编辑重发修复（2026-09-10 同批）确立，本收口项未改动 slash 行为）。**image 段（未修项清零轮已修，2026-09-10）**：修复前两个方向均实测复现：① **翻倍**——`[image('/data/a/1.png'), text('正文')]` 编辑重发后 prompt = `\n/data/a/1.png\n/data/a/1.png\n正文`，同一路径出现两次（与上段 skill 同因）；② **删除后路径复活**——用户把编辑稿里的 `/data/a/1.png` 删掉后 prompt 仍为 `\n/data/a/1.png\n正文`（image 段恒保留、不参与剥离）。根因：image 的序列化单元是换行定界的裸路径 `\n<path>\n`，而 `UserBubble.submitEdit` 的 `draftText.trim()` 会吃掉**草稿首尾**的换行（链路：`normalizeContent` → `draftText.trim()` → `rebuildSegmentsWithEditedText` → `segmentsToPrompt`）——**位于草稿首/末位**的 image 其序列化串被 trim 破坏、精确匹配不命中；**居中位置**不受 trim 影响（如 `[text('正文'), image, text('尾部')]` → 草稿 `正文\n<path>\n尾部`，序列化串完整存在 ⇒ 精确匹配会命中），故「精确匹配不可靠」只对首/末位成立，不能一般化为「恒不命中」。**落地修法（行为层）= 裸路径 token 双侧边界匹配 + 剥掉整个 image 序列化单元（路径 + 紧邻换行）+ 未命中即丢弃段**（`packages/ui/src/lib/segment-rebuild.ts`）：前边界（串首或空白）与后边界（串尾或空白）双判定，防 `x/data/a/1.png`、`/data/a/1.png2` 前缀误配；命中 ⇒ 剥掉整个序列化单元（路径连同其紧邻换行，存在才剥、不存在不剥），段保留（序列化后路径只出现一次，①关闭）；未命中 ⇒ 丢弃段（语义 = 用户删掉了该路径，②关闭）。**轮 5 由「只剥裸路径 token」收敛为「剥掉整个序列化单元」**——只剥裸 token 会把路径前后的换行留在文本里，重建时 image 段再补一遍 `\n<path>\n`，未编辑草稿重发**每轮净增一个换行（无界累积，轮 4 遗留项）**；剥掉整单元后该累积关闭。**当前行为边界**：image 居首/居末时编辑重发**幂等**（重建产物与草稿逐字相等）；image 居中时仍受「首个 text 段承接全部正文、chip 位置不动」的既有位置近似影响（round0 与草稿不等，但 round1 = round2 收敛、不累积）——属设计 D6 已登记的可接受项。回归锁见 `packages/ui/src/lib/__tests__/segment-rebuild.test.ts` 与 `packages/ui/src/features/chat/__tests__/UserBubble.test.ts`（**用例数以文件实际为准**，轮 5 该文件用例数再增）。**被否变体（历史）**：序列化串精确匹配 + 匹配不到即丢弃——对**位于草稿首/末位**的 image，`\n<path>\n` 在 `trim()` 后的编辑稿中必不命中（trim 只吃草稿首尾，居中位置不受影响）⇒ 段被丢弃而路径文本仍在，prompt 首行变 `/data/...` 且失去段自带的起首换行，pi 不 trim ⇒ 被当行首命令的风险从「无」变「有」，比翻倍更糟，故对该场景不采纳（该方案覆盖不了首/末位，整体不采纳；「比翻倍更糟」的结论仅在首/末位场景成立，居中位置本可命中、不构成否决理由）。完整的「从原消息 Segment[] 重建 chip 而非文本回填」优化项仍经评估延期未实施——草稿仍显示标记文本这一视觉退化按原样接受；重审条件=用户反馈编辑重发体验；会话摘要/标题（`summarize-turn.ts:21`）、系统通知（`notify-toast.ts:56`）——短标记进摘要 prompt/通知文案，可接受；滚动跟随的末条文本长度观察（现行 `useMessageStreamFollowTriggers.ts` 的 normalizeContent 长度 watch，2026-09 chat-pin-bottom-fix 自已删除的 useMessageStreamScroll 迁入）——无影响。**判定**：①③④可接受，②视觉退化按原样接受（标记翻倍已由 `segment-rebuild.ts` 的序列化剥离消除；image 段的两方向已于未修项清零轮（2026-09-10）修复、其轮 4 遗留的「每轮 +1 换行累积」由轮 5 关闭——命中 ⇒ 剥掉整个序列化单元并保留段、未命中 ⇒ 丢弃段，见上），「从 Segment[] 重建 chip 而非文本回填」的完整优化项仍经评估延期未实施（不阻塞主链路，处置见上）。
+⑤ **`normalizeContent` 纯文本投影形态（P0-12 登记）**。`segmentsToText` 注释标明其双用途（「归一化展示用 + pi prompt 序列化唯一实现」），skill 分支改产标记后，展示类消费方看到 `<taiji-skill .../>` 而非 `/skill:name`：复制消息（气泡复制动作 `copy(normalizeContent(...))`）——非自然语言形态变化，可接受；**composer ↑/↓ 输入历史召回（R4 补登）**——`composer-shell.ts` 的 `deriveHistoryFromChatStore` 以 normalizeContent 派生历史条目，召回含 chip 消息时 composer 回填标记原文（非 chip），与编辑重发草稿回填同族（视觉退化、重发后注入器仍生效），按原样接受；重审条件 = 用户反馈召回体验，届时在 deriveHistoryFromChatStore 做标记→可读短形投影；**编辑重发草稿回填**（`UserBubble.startEdit` 的 `draftText = normalizeContent(content)`）——旧消息重发时 composer 显示标记文本而非 chip（视觉退化，按原样接受；重发后 runtime 再展开仍生效）。**[轮 3 收敛 · 2026-09-10] 该路径的真实缺陷不是「仅视觉退化」**：提交时编辑稿整串回灌首个 text 段、非 text 段原位保留，任何「序列化形态出现在文本里」的段都会翻倍——`[skill('review'), text('正文')]` → 草稿 `<taiji-skill name="review"/> 正文` → 重建产物序列化出**两个** `<taiji-skill>` 标记 → runtime 注入器按标记逐个展开 ⇒ **同一 SKILL.md 注入两遍**（上下文浪费，且违反 §3.5-② 的单消息内 chip 去重意图）；file/mention/session/handoff 同族翻倍（探针实测，回归锁见 `packages/ui/src/lib/__tests__/segment-rebuild.test.ts` 与 `packages/ui/src/features/chat/__tests__/UserBubble.test.ts`）。已由 `packages/ui/src/lib/segment-rebuild.ts` 的「编辑稿中与保留段重复的序列化文本剥离」收尾（skill 用 `buildSkillMarker` SSOT 输出精确匹配；剥离不到即丢弃该段、以文本形态随 prompt 进入——与 slash 段同款「剥离/丢弃」规则；slash 的前缀剥离口径由轮 3 的编辑重发修复（2026-09-10 同批）确立，本收敛项未改动 slash 行为）。**image 段（未修项清零轮已修，2026-09-10）**：修复前两个方向均实测复现：① **翻倍**——`[image('/data/a/1.png'), text('正文')]` 编辑重发后 prompt = `\n/data/a/1.png\n/data/a/1.png\n正文`，同一路径出现两次（与上段 skill 同因）；② **删除后路径复活**——用户把编辑稿里的 `/data/a/1.png` 删掉后 prompt 仍为 `\n/data/a/1.png\n正文`（image 段恒保留、不参与剥离）。根因：image 的序列化单元是换行定界的裸路径 `\n<path>\n`，而 `UserBubble.submitEdit` 的 `draftText.trim()` 会吃掉**草稿首尾**的换行（链路：`normalizeContent` → `draftText.trim()` → `rebuildSegmentsWithEditedText` → `segmentsToPrompt`）——**位于草稿首/末位**的 image 其序列化串被 trim 破坏、精确匹配不命中；**居中位置**不受 trim 影响（如 `[text('正文'), image, text('尾部')]` → 草稿 `正文\n<path>\n尾部`，序列化串完整存在 ⇒ 精确匹配会命中），故「精确匹配不可靠」只对首/末位成立，不能一般化为「恒不命中」。**落地修法（行为层）= 裸路径 token 双侧边界匹配 + 剥掉整个 image 序列化单元（路径 + 紧邻换行）+ 未命中即丢弃段**（`packages/ui/src/lib/segment-rebuild.ts`）：前边界（串首或空白）与后边界（串尾或空白）双判定，防 `x/data/a/1.png`、`/data/a/1.png2` 前缀误配；命中 ⇒ 剥掉整个序列化单元（路径连同其紧邻换行，存在才剥、不存在不剥），段保留（序列化后路径只出现一次，①关闭）；未命中 ⇒ 丢弃段（语义 = 用户删掉了该路径，②关闭）。**轮 5 由「只剥裸路径 token」收敛为「剥掉整个序列化单元」**——只剥裸 token 会把路径前后的换行留在文本里，重建时 image 段再补一遍 `\n<path>\n`，未编辑草稿重发**每轮净增一个换行（无界累积，轮 4 遗留项）**；剥掉整单元后该累积关闭。**当前行为边界**：image 居首/居末时编辑重发**幂等**（重建产物与草稿逐字相等）；image 居中时仍受「首个 text 段承接全部正文、chip 位置不动」的既有位置近似影响（round0 与草稿不等，但 round1 = round2 收敛、不累积）——属设计 D6 已登记的可接受项。回归锁见 `packages/ui/src/lib/__tests__/segment-rebuild.test.ts` 与 `packages/ui/src/features/chat/__tests__/UserBubble.test.ts`（**用例数以文件实际为准**，轮 5 该文件用例数再增）。**不采用变体（历史）**：序列化串精确匹配 + 匹配不到即丢弃——对**位于草稿首/末位**的 image，`\n<path>\n` 在 `trim()` 后的编辑稿中必不命中（trim 只吃草稿首尾，居中位置不受影响）⇒ 段被丢弃而路径文本仍在，prompt 首行变 `/data/...` 且失去段自带的起首换行，pi 不 trim ⇒ 被当行首命令的风险从「无」变「有」，比翻倍更糟，故对该场景不采纳（该方案覆盖不了首/末位，整体不采纳；「比翻倍更糟」的结论仅在首/末位场景成立，居中位置本可命中、不构成否决理由）。完整的「从原消息 Segment[] 重建 chip 而非文本回填」优化项仍经评估延期未实施——草稿仍显示标记文本这一视觉退化按原样接受；重审条件=用户反馈编辑重发体验；会话摘要/标题（`summarize-turn.ts:21`）、系统通知（`notify-toast.ts:56`）——短标记进摘要 prompt/通知文案，可接受；滚动跟随的末条文本长度观察（现行 `useMessageStreamFollowTriggers.ts` 的 normalizeContent 长度 watch，2026-09 chat-pin-bottom-fix 自已删除的 useMessageStreamScroll 迁入）——无影响。**判定**：①③④可接受，②视觉退化按原样接受（标记翻倍已由 `segment-rebuild.ts` 的序列化剥离消除；image 段的两方向已于未修项清零轮（2026-09-10）修复、其轮 4 遗留的「每轮 +1 换行累积」由轮 5 关闭——命中 ⇒ 剥掉整个序列化单元并保留段、未命中 ⇒ 丢弃段，见上），「从 Segment[] 重建 chip 而非文本回填」的完整优化项仍经评估延期未实施（不阻塞主链路，处置见上）。
 
 ⑥ **SKILL.md 自含标记逃逸（2026-09-07 登记，adversarial-review-fixes MS-8 维持）**。SKILL.md 正文自身含字面标记形态（`<skill>` / `<taiji-skill` / `<taiji-skills>` 字样，如写注入格式文档的 skill）经全文注入后进入消息文本，可能形成嵌套块/伪块形态。**量级**：现产线解析器按「嵌套块不在生产形态中」假设处理（`skill-marker.ts` 降级块正则非贪婪取首个闭合标签；`<skill>` 展开块按 pi 原生形态解析）——自含标记只出现在块内正文时被当普通文本保留，不误剥离/误还原；仅在自含形态恰好构成完整可解析块且位于反解析扫描路径（sidecar 丢失的兜底反解析 / message-converter parse）时才可能被误识别为额外 chip。**R4 扩面**：① `<taiji-skill-data>` 块内为 SKILL.md 全文，正文若含 `</taiji-skill-data>` 字样会把块提前闭合（非贪婪截断）——截断后残留内容落入后续标记解析，可能误还原；② 正文手打完整 `<taiji-skill-data>...</taiji-skill-data>` 字样且 sidecar 丢失时整块被误剥（用户文字丢失于显示层，pi 落盘原文不变）；③ **注入器侧（与 ③「手打完整标记 → 真展开」同族）**：手打/粘贴的完整块内标记会被注入器 parseSkillMarkers 全局匹配逐个真展开（注入器不识别块边界）——显示侧误剥与注入侧真展开是同一手打行为的两侧，均已登记。**恢复路径**：偏差仅限显示层（badge 多还原/少还原），pi 已落盘的实际内容不变。**重审条件**：出现 SKILL.md 实际含标记字样的 skill（作者在正文写注入格式示例）且反解析误命中时，评估展开时对 SKILL.md 正文内的标记形态做转义或剥离。**判定**：可接受（联合概率极低，与 ③ 手打字样同族；R4 扩面两项同判定——① 需 SKILL.md 作者精确写出闭合 tag 字样，② 需用户手打完整机器块形态且 sidecar 同时丢失）。
 
@@ -331,7 +331,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 **场景 3：skill 失效可见降级（回溯 G3/D8）**
 - 步骤：插入一个 chip 后，磁盘上把该 skill 目录移走，发送。
-- 通过标准：① 消息正常发送，prompt 里标记原样透传；② 前端出现 toast 与消息内联提示「skill xxx 不存在」；③ 无静默（对比：关掉提示机制重试，用户无从得知 skill 未生效——此为被否状态）。
+- 通过标准：① 消息正常发送，prompt 里标记原样透传；② 前端出现 toast 与消息内联提示「skill xxx 不存在」；③ 无静默（对比：关掉提示机制重试，用户无从得知 skill 未生效——此为不采用状态）。
 
 **场景 2b：contextWindow 获取失败 fail-safe 降级（回溯 G3/D6 fail-safe）**
 - 步骤：dev 环境临时屏蔽 runtime 对 `get_session_stats` 的调用（模拟 RPC 失败），发送一条含 skill chip 的消息；随后恢复屏蔽再发一条。
@@ -357,7 +357,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 - 步骤：不用浮层，手打整条消息 `/skill:code-simplify 帮我看看`（消息以 /skill: 开头），发送。
 - 通过标准：pi 原生展开生效（JSONL 单个 block + args），行为与改造前完全一致。
 
-**场景 8：pi 升级格式漂移被探针拦截（回溯 G5/D5 守卫）**
+**场景 8：pi 升级格式漂移被探针拦截（回溯 G5/D5 检查）**
 - 步骤：运行 runtime REAL_PI vitest 池的 `pi-semantics-skill-expansion-golden.test.ts`（真实 pi 进程 golden diff；无凭证环境跑 `pi-semantics-skill-expansion-static.test.ts` 静态锚）。`node scripts/check-pi-semantics.mjs` 只做登记表结构校验、不执行 golden diff，不可作为本场景的执行手段。
 - 通过标准：golden 测试对 pi 实装 `/skill:` 展开输出与 taiji 展开器输出做逐字 diff，当前版本全绿；人为篡改展开器格式一处（临时实验）golden 测试变红。**R4 核对**：golden diff 锚定对象是单个 `<skill>` block 内容（D11 下不变）；若探针含整条消息形态断言，同步更新为「标记保留 + 末尾块」。
 
@@ -389,9 +389,9 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 | 阶段 | 单元 | 内容 | justification | 对应验收 |
 |---|---|---|---|---|
 | P1 | **runtime 注入器**（核心，先行） | `packages/runtime/src/services/session/skill-injector.ts`（新增）：标记解析、权威映射（D7 切源后 = SkillRegistry，原 get_commands）、展开（import pi stripFrontmatter）、**[R4] 末尾 `<taiji-skill-data>` 块组装（正文标记保留，D11；同 name 去重）**、预检（CJK 感知估算 + 0.8 阈值常量）、**[R4] 降级形态生成（标记清单 + 指引行并入同一块）**、失效/残缺透传+广播提示；`message-dispatcher.ts` 三入口挂载（hook 之后、client.prompt 之前） | 注入器是全链路枢纽且可独立测（纯函数 + RPC 查询）；先行实施可用手写标记文本验证，不依赖 UI 改动 | 场景 2/3/5/12（用脚本发构造消息；12 = 跨消息累积观察） |
-| P2 | **序列化与反解析（含 core SSOT 升级）** | `segments.ts` skill 分支改产 `<taiji-skill/>` 标记；`shared/skill-marker.ts` **[R4]** 新增 `SKILL_DATA_BLOCK_TAG`（`taiji-skill-data`）与块构建/解析辅助；**[R4] `packages/core/src/domain/chat/apply-entry-convert.ts` 反解析升级为三形态**（剥块优先 + 标记还原 + 存量 block/`<taiji-skills>` 兼容，D7，三链路共用 SSOT）；**[R4]** `apply-entry-equivalence` 等价性守卫扩展覆盖「标记 + 末尾块消息」两链路（live ≡ reload，架构关键规则 9）；现有测试更新（`segments.test.ts`、`store.test.ts`、`turn-skill-badge.test.ts`、command-popover 系列——全部锁定旧 `/skill:` 形态将变红） | 序列化格式是 renderer/runtime 契约变更点；core 反解析与序列化同批定义标记语法；等价性守卫是「live ≡ reload」的机器防线，必须随格式变更同步扩展 | 场景 1/4（含正文保留断言） |
+| P2 | **序列化与反解析（含 core SSOT 升级）** | `segments.ts` skill 分支改产 `<taiji-skill/>` 标记；`shared/skill-marker.ts` **[R4]** 新增 `SKILL_DATA_BLOCK_TAG`（`taiji-skill-data`）与块构建/解析辅助；**[R4] `packages/core/src/domain/chat/apply-entry-convert.ts` 反解析升级为三形态**（剥块优先 + 标记还原 + 存量 block/`<taiji-skills>` 兼容，D7，三链路共用 SSOT）；**[R4]** `apply-entry-equivalence` 等价性检查扩展覆盖「标记 + 末尾块消息」两链路（live ≡ reload，架构关键规则 9）；现有测试更新（`segments.test.ts`、`store.test.ts`、`turn-skill-badge.test.ts`、command-popover 系列——全部锁定旧 `/skill:` 形态将变红） | 序列化格式是 renderer/runtime 契约变更点；core 反解析与序列化同批定义标记语法；等价性检查是「live ≡ reload」的机器防线，必须随格式变更同步扩展 | 场景 1/4（含正文保留断言） |
 | P3 | **composer 触发与 chip + 提示呈现** | `input-dom.ts` 新增 skill 触发正则（`/[^\S\n]\/(\S*)$/` + query 过滤）；`contenteditable.ts` chip 抑制解除（skill 通道）；`chip-commands.ts` `insertSkillChip`；`CommandPopover.vue` skill-only variant + 已选禁选；**`ComposerInput.vue` skill chip 前后空开 CSS（D13，R4）**；**renderer 提示呈现**（降级「标记模式注入」提示行——文案区分「预算超限」vs「窗口信息获取失败」两种降级原因——+ 失效 toast/消息内联提示，复用现有 toast 机制；实施形态 = 消息内联提示行 `SkillNoticeInline`，锚点 turn 之后渲染） | UI 层最后做：P1/P2 就绪后插入即可端到端生效，避免 UI 先行却无注入的空转；提示呈现是场景 2/2b/3/3b 的验收依赖面；**[R4]** D12 混排 inline 化 + D13 chip CSS 落点在本阶段（UserBubble/ComposerInput） | 场景 1/2b/3/3b/6/**10/11** |
-| P4 | **守卫与防御** | PS-24 探针（golden diff，实施落点 = runtime REAL_PI vitest 池 + pi-semantics.json 登记）；rpc-client readline 替换 LF-only 读取器 | 守卫与防御独立于功能主线，可并行或收尾 | 场景 8/9 |
+| P4 | **检查与防御** | PS-24 探针（golden diff，实施落点 = runtime REAL_PI vitest 池 + pi-semantics.json 登记）；rpc-client readline 替换 LF-only 读取器 | 检查与防御独立于功能主线，可并行或收尾 | 场景 8/9 |
 
 ### 文件改动地图
 
@@ -413,7 +413,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 | `packages/runtime/src/services/session/message-dispatcher.ts` | 三入口挂载注入器（hook 后、client.prompt 前） |
 | `packages/runtime/src/infra/pi/rpc-client.ts` | readline → LF-only 读取器（D10） |
 | `scripts/check-pi-semantics.mjs` | 不改（PS-24 探针实施落点改为 runtime REAL_PI vitest 池 `pi-semantics-skill-expansion-golden.test.ts` + `docs/pi-semantics.json` 登记，登记 schema 强制 guard.test 指向 .test.ts） |
-| 测试连带：`packages/shared/src/__tests__/segments.test.ts`、`packages/core/src/domain/chat/__tests__/store.test.ts`、`packages/renderer/src/__tests__/panel/turn-skill-badge.test.ts`、command-popover 系列测试、`apply-entry-equivalence` 等价性守卫 | 锁定旧 `/skill:` 形态的断言全部更新；等价性守卫扩展「标记消息」两链路 |
+| 测试连带：`packages/shared/src/__tests__/segments.test.ts`、`packages/core/src/domain/chat/__tests__/store.test.ts`、`packages/renderer/src/__tests__/panel/turn-skill-badge.test.ts`、command-popover 系列测试、`apply-entry-equivalence` 等价性检查 | 锁定旧 `/skill:` 形态的断言全部更新；等价性检查扩展「标记消息」两链路 |
 
 ### 待验证检查点（实施期核实，不阻塞设计）
 
@@ -428,10 +428,10 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 ## 变更历史
 
-- 2026-09-13（R4 对抗审查收口：三审 0 must-fix / 10 suggestion 全修）：主审 4 条——§5 补实施状态注记（pre-R4 基线 vs R4 增量，D10 标注已实施、§2.3-D readline 动机记录标注）；场景 8 执行步骤改为 REAL_PI golden 测试（check-pi-semantics.mjs 不执行 diff，防假绿）；D3 边界声明按位置限定（首位手打 = pi 原生展开）；新增场景 12（跨消息同 skill 累积观察，补 §3.5-②/⑧ 重审条件基线）。影响面审 5 条——§3.5-① 机制描述修正为投影级比较（失配域 = sidecar 丢失兜底；store.ts 注释实施期同批更正）；② 补 QueueBubble 显示投影；⑤ 补 composer ↑/↓ 历史召回消费面；新增 ⑧ 历史读取字节预算耦合；D8/§3.4 补 pi 侧 input hook 检测域边界。简洁审 1 条——D11 补被否变体 ④（复用 `<taiji-skills>` 作统一包裹 tag：LLM 可读性 + 新旧消息 tag 级自识别，判定不复用）。另采影响面 INFO 三条：D11 数据源澄清（location 恒来自 get_commands 映射，D4 口径统一）、落盘末尾性依赖声明（msg-id-mapper 剥注释）、§3.5-⑥ 补注入器侧手打块真展开；场景 10 补非 skill badge 混排回归断言。
+- 2026-09-13（R4 对抗审查收尾：三审 0 must-fix / 10 suggestion 全修）：主审 4 条——§5 补实施状态注记（pre-R4 基线 vs R4 增量，D10 标注已实施、§2.3-D readline 动机记录标注）；场景 8 执行步骤改为 REAL_PI golden 测试（check-pi-semantics.mjs 不执行 diff，防假绿）；D3 边界声明按位置限定（首位手打 = pi 原生展开）；新增场景 12（跨消息同 skill 累积观察，补 §3.5-②/⑧ 重审条件基线）。影响面审 5 条——§3.5-① 机制描述修正为投影级比较（失配域 = sidecar 丢失兜底；store.ts 注释实施期同批更正）；② 补 QueueBubble 显示投影；⑤ 补 composer ↑/↓ 历史召回消费方；新增 ⑧ 历史读取字节预算耦合；D8/§3.4 补 pi 侧 input hook 检测域边界。简洁审 1 条——D11 补不采用变体 ④（复用 `<taiji-skills>` 作统一包裹 tag：LLM 可读性 + 新旧消息 tag 级自识别，判定不复用）。另采影响面 INFO 三条：D11 数据源澄清（location 恒来自 get_commands 映射，D4 口径统一）、落盘末尾性依赖声明（msg-id-mapper 剥注释）、§3.5-⑥ 补注入器侧手打块真展开；场景 10 补非 skill badge 混排回归断言。
 - 2026-09-12（R4：末尾集中追加协议 + 气泡混排渲染 + chip 空开）：① **D11 新增**——注入形态从「原位展开」改为「正文原样保留 `<taiji-skill/>` 占位标记 + 消息末尾集中追加 `<taiji-skill-data>` 包裹块」：正常形态（块内 pi 对齐展开全文、同 name 去重）/ 降级形态（标记清单 + 指引行，原 D7 降级块 `<taiji-skills>` 统一并入、旧 tag 退役但反解析保留识别）；失效标记与 mapping_unavailable 不进块；LLM 关联指引正常形态不加（citation 模式 name 双向对齐），观察点登记为 hook 注入系统提示词补救路径。② **D7 修订**——resume 兑底反解析升级三形态（剥块优先 → 标记还原 → 存量 block/`<taiji-skills>` 兼容），剥块任意位置匹配。③ **D5 修订**——block 落点改末尾块内，探针 golden diff 锚定单 block 不变、整条形态断言待核对。④ **D12 新增**——UserBubble 混排消息 inline 化渲染（badge 前后换行修复；复杂块级 markdown 排版退化登记）。⑤ **D13 新增**——composer skill chip 前后 CSS 空开（ZWSP/序列化契约不动）。⑥ 场景 1/2/2b/4/8 形态断言更新，新增场景 10/11；错误规格表四行更新；§3.5-① 补 R4 注记、④ 折叠形态消失更新、⑥ 补块内逃逸与手打块误剥扩面；§5 P1/P2/P3 与文件地图同步。
 - 2026-09-05：初版（对齐三轮分析结论：pi 单 skill 限制根因、切点盲区后果链、方案 D 选型）。
-- 2026-09-05：第 3 版（R2 双复审 0 must-fix 后的 suggestion 收尾）。主审 4 条：D1 字符类 `[ \t]` → `[^\S\n]`（全角空格/NBSP 缺口，对齐 `#` 符号空白语义）+ 记入被否谱系；D6 补推演边界（代码密集非 CJK 内容 ÷4 低估 1~2 倍，检查点 6 校准样本扩三类）；新增场景 2b（fail-safe 降级 + 文案区分）与 3b（hook 破坏标记）；D10 效果栏验收指向 8→9 更正。影响面审 2 条：§3.5-③「内容无损」限定为仅显示层消费 + 标注编辑重发升级路径由 §3.5-⑤② 消除；D7 补 `<skill` 字面全局匹配边界 + 场景 4⑤ 存量格式回归断言。G1 表述精确化（空格/tab 后，行首归命令浮层）。
-- 2026-09-05：第 2 版（双审 7 must-fix + 13 suggestion 全修）。主要修订：D1 触发正则改 `/[ \t]\//`（行首让位命令浮层的仲裁）+ 误弹量级与重审条件；D6 估算改 CJK 感知公式（chars/2「双向保守」声称不实被否）、fail-open 改 fail-safe、补等效阈值推演与漏判-兜底关系；D5 删「pi TUI 正确渲染混排」声称（实装整条锚定不成立，登记 §3.5-④）；D7 兜底反解析实现位置定于 core `apply-entry-convert.ts`（三链路 SSOT）并修复其前置正文丢失缺陷；D9 补 hook 挂载顺序、幂等改结构化保证；新增 §3.5 影响面与已接受代价五项登记（store 判据失配、JSONL 累积、兜底误还原、pi TUI 显示、normalizeContent 投影面）；错误规格表修正三处（日志路径、fail-safe、降级后超窗的会话内救援路径）；§4 场景 2 补真实 token 校准、场景 4 补正文保留断言、场景 9 补例外声明；§5 改动地图补 core/renderer 提示/测试连带条目，待验证检查点 1 已核实关闭、新增检查点 6。
+- 2026-09-05：第 3 版（R2 双复审 0 must-fix 后的 suggestion 收尾）。主审 4 条：D1 字符类 `[ \t]` → `[^\S\n]`（全角空格/NBSP 缺口，对齐 `#` 符号空白语义）+ 记入否决记录；D6 补推演边界（代码密集非 CJK 内容 ÷4 低估 1~2 倍，检查点 6 校准样本扩三类）；新增场景 2b（fail-safe 降级 + 文案区分）与 3b（hook 破坏标记）；D10 效果栏验收指向 8→9 更正。影响面审 2 条：§3.5-③「内容无损」限定为仅显示层消费 + 标注编辑重发升级路径由 §3.5-⑤② 消除；D7 补 `<skill` 字面全局匹配边界 + 场景 4⑤ 存量格式回归断言。G1 表述精确化（空格/tab 后，行首归命令浮层）。
+- 2026-09-05：第 2 版（双审 7 must-fix + 13 suggestion 全修）。主要修订：D1 触发正则改 `/[ \t]\//`（行首让位命令浮层的仲裁）+ 误弹量级与重审条件；D6 估算改 CJK 感知公式（chars/2「双向保守」声称不实不采用）、fail-open 改 fail-safe、补等效阈值推演与漏判-兜底关系；D5 删「pi TUI 正确渲染混排」声称（实装整条锚定不成立，登记 §3.5-④）；D7 兜底反解析实现位置定于 core `apply-entry-convert.ts`（三链路 SSOT）并修复其前置正文丢失缺陷；D9 补 hook 挂载顺序、幂等改结构化保证；新增 §3.5 影响面与已接受代价五项登记（store 判据失配、JSONL 累积、兜底误还原、pi TUI 显示、normalizeContent 投影形态）；错误规格表修正三处（日志路径、fail-safe、降级后超窗的会话内救援路径）；§4 场景 2 补真实 token 校准、场景 4 补正文保留断言、场景 9 补例外声明；§5 改动地图补 core/renderer 提示/测试连带条目，待验证检查点 1 已核实关闭、新增检查点 6。
 - 2026-09-06：实施期一致性修订（阶段 3 双区审查 doc_errors + 合理偏差同步）。① 检查点 1 正式修正：sourceInfo.baseDir 不可依赖（extension 覆盖链 + 兜底无字段），References baseDir 恒用 dirname(path)，get_commands skill 项 name 恒带 `skill:` 前缀需剥前缀（实施 448c2ef32）；② D5 更新：baseDir 来源标注 + stripFrontmatter 改仓内镜像（exports 白名单与 tsup bundle 约束）+ 探针落点改 runtime REAL_PI vitest 池（CI skip 边界注明）；③ §3.4 错误规格表补 get_commands RPC 整体失败行（mapping_unavailable）；④ 场景 2③/P3/文件改动地图的提示形态措辞更新为「消息内联提示行」（实施落点 useSkillNoticeStream + SkillNoticeInline）；⑤ D1 补 query 空串合法语义（`{0,64}`）。
-- 2026-09-10（design-code-sync 轮 3 收口）：§3.5-⑤② 与 ③ 的「编辑重发仅视觉退化 / 优化项延期未实施」判定按实测更正——探针复现证实编辑重发会让非 text 段序列化形态**翻倍**（`[skill, text]` 经 `normalizeContent` → `rebuildSegmentsWithEditedText`（段翻倍）→ `segmentsToPrompt` 序列化出两个 `<taiji-skill>` 标记 ⇒ runtime 逐个展开 ⇒ 同一 SKILL.md 注入两遍；file/mention/session/handoff 同族）。已由 `packages/ui/src/lib/segment-rebuild.ts` 增加「与保留段重复的序列化文本剥离」修复（skill 用 `buildSkillMarker` SSOT 精确匹配，剥离不到即丢弃段；slash 段处理逻辑一字未动——其前缀剥离口径为同轮编辑重发修复引入，见 §3.5-⑤②）。回归锁落在 `packages/ui/src/lib/__tests__/segment-rebuild.test.ts`（该目录为轮 3 新增；`rebuildSegmentsWithEditedText` 此前全仓无单测引用——`git grep -l rebuildSegmentsWithEditedText HEAD -- '*test*'` 为空）与 `packages/ui/src/features/chat/__tests__/UserBubble.test.ts`（两文件共 **66 例** = `segment-rebuild.test.ts` 40 + `UserBubble.test.ts` 26，为**轮 3 收口时点实测值**；修复落地时点为 50 例（25 + 25），其后的 16 例为同轮代码侧新增用例——`[轮 3-4 · RC-A-2]` 4 例、`[轮 3-4 · RC-A-6]` 3 例、`[轮 3-4]` 未编辑草稿重发 8 例，另 `UserBubble.test.ts` 1 例）；整文件回退即红（回退 = 用 HEAD 版覆盖工作区文件，实验必须可逆）：`cp packages/ui/src/lib/segment-rebuild.ts /tmp/segment-rebuild.bak.ts && git show HEAD:packages/ui/src/lib/segment-rebuild.ts > packages/ui/src/lib/segment-rebuild.ts`，还原 = `cp /tmp/segment-rebuild.bak.ts packages/ui/src/lib/segment-rebuild.ts`；回退后 `cd packages/ui && npx vitest run src/lib/__tests__/segment-rebuild.test.ts src/features/chat/__tests__/UserBubble.test.ts` = **43 failed | 23 passed（66）**（2026-09-10 实测，还原后工作区与实验前 `md5` 一致），恢复修复后 **66 passed**。image 段因 `\n<path>\n` 与 `draftText.trim()` 交互无法精确匹配，其「翻倍」与「删除后路径复活」两个方向均作为未修项登记于 ⑤②（附安全变体/被否变体处置方向）。③ 的「误还原 segment → 真展开」语义升级路径仍开放（只能由 ⑤② 完整优化项消除）。另同步 `packages/core/src/domain/composer/dispatch/send.test.ts` 三处失实注释：fixture `draft: '任务描述/compact'` 为构造值（真实 `getText()` 走 `segmentsToText`，产出已归位文本），其作用是锁定「判定源不得退回 `draft.value`」。
+- 2026-09-10（design-code-sync 轮 3 收尾）：§3.5-⑤② 与 ③ 的「编辑重发仅视觉退化 / 优化项延期未实施」判定按实测更正——探针复现证实编辑重发会让非 text 段序列化形态**翻倍**（`[skill, text]` 经 `normalizeContent` → `rebuildSegmentsWithEditedText`（段翻倍）→ `segmentsToPrompt` 序列化出两个 `<taiji-skill>` 标记 ⇒ runtime 逐个展开 ⇒ 同一 SKILL.md 注入两遍；file/mention/session/handoff 同族）。已由 `packages/ui/src/lib/segment-rebuild.ts` 增加「与保留段重复的序列化文本剥离」修复（skill 用 `buildSkillMarker` SSOT 精确匹配，剥离不到即丢弃段；slash 段处理逻辑一字未动——其前缀剥离口径为同轮编辑重发修复引入，见 §3.5-⑤②）。回归锁落在 `packages/ui/src/lib/__tests__/segment-rebuild.test.ts`（该目录为轮 3 新增；`rebuildSegmentsWithEditedText` 此前全仓无单测引用——`git grep -l rebuildSegmentsWithEditedText HEAD -- '*test*'` 为空）与 `packages/ui/src/features/chat/__tests__/UserBubble.test.ts`（两文件共 **66 例** = `segment-rebuild.test.ts` 40 + `UserBubble.test.ts` 26，为**轮 3 收敛时点实测值**；修复落地时点为 50 例（25 + 25），其后的 16 例为同轮代码侧新增用例——`[轮 3-4 · RC-A-2]` 4 例、`[轮 3-4 · RC-A-6]` 3 例、`[轮 3-4]` 未编辑草稿重发 8 例，另 `UserBubble.test.ts` 1 例）；整文件回退即红（回退 = 用 HEAD 版覆盖工作区文件，实验必须可逆）：`cp packages/ui/src/lib/segment-rebuild.ts /tmp/segment-rebuild.bak.ts && git show HEAD:packages/ui/src/lib/segment-rebuild.ts > packages/ui/src/lib/segment-rebuild.ts`，还原 = `cp /tmp/segment-rebuild.bak.ts packages/ui/src/lib/segment-rebuild.ts`；回退后 `cd packages/ui && npx vitest run src/lib/__tests__/segment-rebuild.test.ts src/features/chat/__tests__/UserBubble.test.ts` = **43 failed | 23 passed（66）**（2026-09-10 实测，还原后工作区与实验前 `md5` 一致），恢复修复后 **66 passed**。image 段因 `\n<path>\n` 与 `draftText.trim()` 交互无法精确匹配，其「翻倍」与「删除后路径复活」两个方向均作为未修项登记于 ⑤②（附安全变体/不采用变体处置方向）。③ 的「误还原 segment → 真展开」语义升级路径仍开放（只能由 ⑤② 完整优化项消除）。另同步 `packages/core/src/domain/composer/dispatch/send.test.ts` 三处失实注释：fixture `draft: '任务描述/compact'` 为构造值（真实 `getText()` 走 `segmentsToText`，产出已归位文本），其作用是锁定「判定源不得退回 `draft.value`」。

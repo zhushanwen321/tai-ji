@@ -152,7 +152,7 @@ def main() -> int:
     print(f'  在缺失的一侧 locale 文件补充对应 key，保持 zh-CN/en-US 结构完全镜像。')
     print(f'  跑 pnpm --filter @taiji/frontend check:i18n 可用 vitest 验证。')
     print()
-    print(f'\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m')
+    print(f'\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m')
     return 2
 
 

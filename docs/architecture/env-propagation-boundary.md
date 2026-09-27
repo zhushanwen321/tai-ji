@@ -40,7 +40,7 @@
 ### 1.4 Scope
 
 - **In**：runtime 及 Electron main 全部子进程 spawn 点的 env 出站契约；出站清单 SSOT；检查与约束登记；与入站白名单 SSOT 的关系界定。
-- **Out**：pi 上游仓任何改动（[MANDATORY] 红线）；`ENV_WHITELIST_PREFIXES` 本体内容调整（D2 论证为何不动）；pi/bash 工具内部继承实现（不可控面，只做上游边界收口）；文中点名之外的 shell 脚本改造。
+- **Out**：pi 上游仓任何改动（[MANDATORY] 红线）；`ENV_WHITELIST_PREFIXES` 本体内容调整（D2 论证为何不动）；pi/bash 工具内部继承实现（不可控面，只做上游边界封堵）；文中点名之外的 shell 脚本改造。
 
 ---
 
@@ -81,7 +81,7 @@
  ▼
  ┌─ pi --mode rpc（上游仓，⛔ [MANDATORY] 不修改源码）
  │   之后的一切（bash 工具、git hooks、subagent…）都是 pi 自己孵化的后代，
- │   继承什么由 pi 决定 —— 我们不可治理，只能在边界①收口。
+ │   继承什么由 pi 决定 —— 我们不可治理，只能在边界①封堵。
  └─▶ …（bash → pre-commit hook → validate-runtime-bundle.sh → 又一个 runtime…）
 ```
 
@@ -96,8 +96,8 @@
 | B1 | 开发 shell → Electron main（dev 链） | `apps/electron/package.json:14-17` | 无任何过滤，全量继承 | 反向入口；prod 由 LaunchServices 最小 env 天然防护 |
 | B2 | main → runtime | `supervisor/process-control.ts:258`（extras :259-266） | 入站白名单（SSOT+`ELECTRON_`）+ extras + undefined⇒删除 | **健康**（本项目唯一完备的双向契约样板） |
 | B3 | runtime → 主会话 pi | `infra/pi/rpc-client.ts:162,:168,:255` | 第二份私有 buildSafeEnv（:15-29，不支持 undefined 删除语义，与 main 版行为已漂移）+ 裸 `'TAIJI_'` 整段放行 | **本案泄道**；两份 buildSafeEnv 即重复实现漂移的既成证据 |
-| B4 | pi → 全部后代 | pi 上游实现 | 全量/近似继承（本会话 bash 实测携带 4 个 TAIJI_/PI_* 变量） | 不可治理（红线），倒逼必须在 B3 收口 |
-| B5 | runtime → 嵌套 pi（relay 受托 spawn） | `infra/relay/relay-registry.ts:314`（buildChildEnv :173-182） | 握手帧透传，仅剥 5 个 relay 定位键，不再过白名单 | 泄漏沿嵌套链传播；无二次收口 |
+| B4 | pi → 全部后代 | pi 上游实现 | 全量/近似继承（本会话 bash 实测携带 4 个 TAIJI_/PI_* 变量） | 不可治理（红线），倒逼必须在 B3 封堵 |
+| B5 | runtime → 嵌套 pi（relay 受托 spawn） | `infra/relay/relay-registry.ts:314`（buildChildEnv :173-182） | 握手帧透传，仅剥 5 个 relay 定位键，不再过白名单 | 泄漏沿嵌套链传播，中途无二次拦截 |
 | B6 | runtime → plugin 宿主/沙箱 | `plugin-host-process.ts:392,:394,:397` | `{...process.env}` 全量 + 强制 `ELECTRON_RUN_AS_NODE=1`（sandbox 另注 `TAIJI_PLUGIN_SANDBOX_DIR`） | 产品标志一并漏入三方插件进程 |
 | B7 | runtime → 用户终端 PTY | `terminal-service.ts:93`（buildEnv :229-250） | 全量副本，仅删 ELECTRON_ 三键（PR #105 先例） | PACKAGED/TOKEN 仍漏入用户 shell |
 | B8 | runtime → 自有脚本/git | `shell-runner.ts:63`、`git-executor.ts:40-47`、`reap-orphan-pi.ts:225`(ps 只读无害) | 未提供 env ⇒ **隐式全量继承**（含 `ELECTRON_RUN_AS_NODE=1`） | 与 PR #105 同病未治：worktree 脚本内再起 node/electron 会退化为 Electron GUI 语义 |
@@ -184,7 +184,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 
 ## 3. 解决方案
 
-### 3.1 前提：pi 零改动红线决定收口位置
+### 3.1 前提：pi 零改动红线决定封堵位置
 
 [MANDATORY] 不修改 pi 源码、不提 PR、不 fork（AGENTS.md 顶部强约束）。B4 及其后代链的继承实现因此是不可治理面。推论：**治理只能在 B2/B3 这两个我们自己拥有的边界上做**，主战场是 B3（B2 已是完备样板）。由此得出正向需求第一原则：
 
@@ -197,7 +197,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 | 反向（shell→main→runtime） | 入站必传基座 | PATH/HOME/USER/LANG/TERM/NODE_/NVM_/XDG_ 等 + main extras 五件（PACKAGED/DATA_DIR/PORT_OFFSET/RUNTIME_TOKEN/RUN_AS_NODE）+ undefined=删除语义 | `safe-env.ts`（现状保留，G4 不回归） |
 | 正向（runtime→pi） | 必传白名单 | 白名单过滤后的父 env 基座 + `TAIJI_AGENT_DATA_DIR`、`PI_CODING_AGENT_DIR`、PATH 补齐、relay 三件套（活动时显式注入）；forward 参考 = B 组五项（附 pi 子树内消费锚点） | 本文 U1/U2 新建 |
 | 正向（runtime→pi 及一切自有子进程） | 边界剥除清单 | 首版 `['TAIJI_AGENT_PACKAGED','TAIJI_RUNTIME_TOKEN']`；扩展须补消费/危害证据入档 | U1 `spawn-env-contract.ts` |
-| 红线 | 上游不可控面 | B4 及其后代零改动——全部治理压缩在 B3 收口 | [MANDATORY] pi 零改动 |
+| 红线 | 上游不可控面 | B4 及其后代零改动——全部治理压缩在 B3 封堵 | [MANDATORY] pi 零改动 |
 
 实施载体即 §5 的 U1（清单）+ U2（构建器）。
 
@@ -224,7 +224,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 | 风险 | 低但假阴性：钩子链之外的场景（terminal/插件/shell-runner/嵌套 subagent）带病运行 | 中：B8 把隐式继承改显式构建，理论上可能丢白名单外的系统变量——以「白名单基座 + 逐边界等价性测试」控制 | 同 B，另加检查误报摩擦（豁免清单化管理缓解） |
 | 若采用它，§1.2 案例变成什么样 | commit 场景治愈 | 同左，且 terminal / worktree 脚本 / 嵌套 subagent 同时治愈 | 同左，且下次有人裸写 spawn 时 CI 挡住而不是用户挡住 |
 
-**推荐：C 档，按 B → C 分两次 commit 落地**（行为收敛先行、绿灯后上检查）。A 不是被否决而是被吸收——它的两个 delete 就是 deny 清单的首批成员。单独采用 A 违背长期合理性：三个月后再看，会有五个散落的 `delete TAIJI_X` 和一个新的泄密案例。
+**推荐：C 档，按 B → C 分两次 commit 落地**（行为收敛先行、绿灯后上检查）。A 不是被丢弃而是被吸收——它的两个 delete 就是 deny 清单的首批成员。单独采用 A 违背长期合理性：三个月后再看，会有五个散落的 `delete TAIJI_X` 和一个新的泄密案例。
 
 ### 3.5 关键决策与权衡
 
@@ -235,7 +235,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
   入站白名单回答「外部环境哪些东西准许进来」（策略层：防宿主污染、防凭证串台；constants.ts:76-80 云凭证 ambient 变量的细粒度豁免展示了它的立法精密性）。出站契约回答「我自己身上的东西哪些允许跟随 spawn 出去」。两问不同维度。曾考虑把 `'TAIJI_'` 改精细枚举一次性解决：否决。因为入站环节不知道哪个下游消费 `TAIJI_GLOBAL_AGENTS_DIR`（那是 pi 子树里 system-prompt extension 的事）——把业务变量生死塞进白名单会让 SSOT 职责膨胀成变量注册表，每次加变量都得动共享常量（guard 摩擦、churn），且依然回答不了「哪些该进 pi」——只有出站契约能答。互引关系登记进 constraints.json（U6）；`check_env_whitelist_sync.py:43` 的 `LOCAL_DEF_RE = const\s+ENV_WHITELIST_PREFIXES` 为精确名匹配，新常量命名 `SPAWN_ENV_OUTBOUND_DENY_LIST` 规避该字面量即可零冲突共存。
 
 - **D3 出站 deny 清单首版只收 2 个实证项，其余进观察名单。**
-  进入：`TAIJI_AGENT_PACKAGED`（pi 子树零消费 + 行为危害探针实锤）、`TAIJI_RUNTIME_TOKEN`（零消费 + 凭证暴露活体取证）。不进的：`PORT_OFFSET`/`MOCK`/`LOG_*` 等——有的双端可读（如 `TAIJI_EXTENSION_PATHS` 两侧消费）、有的「似乎该剥但消费面未穷尽」。一次性大面积剥离违反最小变更原则，且每个变量都需独立消费证据——契约清单化之后这类增量恰好变容易。
+  进入：`TAIJI_AGENT_PACKAGED`（pi 子树零消费 + 行为危害探针实锤）、`TAIJI_RUNTIME_TOKEN`（零消费 + 凭证暴露活体取证）。不进的：`PORT_OFFSET`/`MOCK`/`LOG_*` 等——有的双端可读（如 `TAIJI_EXTENSION_PATHS` 两侧消费）、有的「似乎该剥但消费点未穷尽」。一次性大面积剥离违反最小变更原则，且每个变量都需独立消费证据——契约清单化之后这类增量恰好变容易。
 
 - **D4 relay 显式注入与继承剥除的等价性。**
   担心「剥掉继承来的 relay 三件套会弄坏实时通道」不成立：三件套本就有显式注入通路（`process-manager.ts:123`）；relay 未激活时返回空对象（`relay-env.ts:110-112`「全有或全无」），继承值从未承担独立职责。嵌套方向 `buildChildEnv`（:173-182）已剥五键防旧值误导，叠加 deny 过滤后不多不少。AC7 用真实 subagent 链验证此等价性。
@@ -244,7 +244,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
   terminal 身份是「用户的 shell」，比 pi 更外部——连 `PI_CODING_AGENT_DIR` 都不该有。首版仅加 deny 两项 + 保持 PR #105 三项删除不变；扩独立 TERMINAL_DENY 属过度设计信号，等实证需求。
 
 - **D6 plugin 宿主（B6）只做增量叠加。**
-  `{...process.env}` 全量拷贝对 trusted/sandbox 插件的兼容性属有意设计，无实证受害前不改拓扑，仅叠加 deny 两项删除。诚实标注：plugin 域消费面未逐一审计（无 blocker，超 MVP 范围）。
+  `{...process.env}` 全量拷贝对 trusted/sandbox 插件的兼容性属有意设计，无实证受害前不改拓扑，仅叠加 deny 两项删除。诚实标注：plugin 域消费点未逐一审计（无 blocker，超 MVP 范围）。
 
 - **待验证集（实施期核实，如实标注）：**
   ① `TAIJI_SUBAGENT_IDLE_TIMEOUT_MS` 进入主 pi 的真实通道（extension 设置进嵌套 frame.env，还是依赖 B3 白名单继承；15 处命中多为测试）；② `TAIJI_LOG_LEVEL` 族是否同时被 `extensions/shared/extension-logger` 读取（若是则须并入 forward，否则 extension 日志静默变级）；③ `RELAY_ENV_SESSION_ID/_RECORD_ID` 常量定义文件定位。三项动作各为一次 rg，嵌入 U0/U2。
@@ -280,7 +280,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 
 ### 3.7 引擎子进程 env 契约（`buildEngineChildEnv`，W12 迁移期中间态）
 
-子代理引擎协议化（`subagent-engine-protocolization.impl-plan.md`（已删除，git 可追溯）§2.12，约束登记 C-proc-12）引入引擎 CLI 子进程形态后，出站契约新增引擎面分支——与 §3.5 D2/D3 的 runtime/main 面共用治理原则（deny-by-default + 消费证据），但**SSOT 落在 `@zhushanwen/subagent-engine-sdk`**（F9：SDK 消费面 zsw 宿主/引擎 CLI 不可依赖 `@taiji/shared`，SDK 是跨宿主 SSOT）：
+子代理引擎协议化（`subagent-engine-protocolization.impl-plan.md`（已删除，git 可追溯）§2.12，约束登记 C-proc-12）引入引擎 CLI 子进程形态后，出站契约新增引擎面分支——与 §3.5 D2/D3 的 runtime/main 面共用治理原则（deny-by-default + 消费证据），但**SSOT 落在 `@zhushanwen/subagent-engine-sdk`**（F9：SDK 消费方（zsw 宿主/引擎 CLI）不可依赖 `@taiji/shared`，SDK 是跨宿主 SSOT）：
 
 - **`buildEngineChildEnv(baseEnv, opts)` 三层**（高者覆盖低者，次序写死 = 先过滤后 L0 显式注入）：
   - **L0 基础设施键**（core 过滤之后显式注入，不受放行/剥除约束）：`TAIJI_AGENT_DATA_DIR` / `TAIJI_AGENT_ENGINE_NODE` / `ELECTRON_RUN_AS_NODE`（执行器为 Electron 二进制时）/ `TAIJI_AGENT_SUBAGENT=1`（nesting guard）/ relay 三键 `TAIJI_SUBAGENT_RELAY_{SOCKET,NODE,SCRIPT}`（必经 L0——L1 拒绝 `TAIJI_SUBAGENT_` 前缀、L2 是 manifest 面，两层都到不了）/ 引擎侧身份 env（`PI_SUBAGENT_ROOT_SESSION_ID` 等）；
@@ -291,7 +291,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 - **检查扩展**：`check_spawn_env_boundary.py` 的 `SCAN_ROOTS` 已含 SDK（`packages/subagent-engine-sdk/src`）与两个引擎 CLI 包（`packages/zcode-subagent-cli`、`packages/pi-subagent-cli`，创建前 WARN 跳过）；`buildEngineChildEnv` 与 `buildOutboundChildEnv` / `composeChildEnvBase` 并列进 `CONTRACT_BUILDER_SYMBOLS`。
 - **引擎侧自灭**（SDK `armEngineSelfDestruct`）：主判据 stdio EOF；辅助判据未 ack 反向请求计时超时（缺省 30s，env `TAIJI_ENGINE_HOST_REQUEST_TIMEOUT_MS`）；排除面 = 已 ack 的 host/askUser 与两阶段 ack 的长运行 `HostBridge.executeAndAwait`。配套 `spawnEngineChild`（任务子进程唯一 spawn 入口）：硬编码 `detached:false` + `windowsHide:true`，子进程 stdin 恒自有 pipe、绝不继承引擎自身 stdin fd（R9-4②，否则 EOF 主判据失效）。
 
-**【W11 收口终态（原 W12 拖尾四项核对完毕，2026-09-09）】**：① 本文档 B3 条目与 `packages/shared/src/spawn-env-contract.ts` 的 `TAIJI_ZCODE_CLI` `piConsumerAnchors` 已回写引擎包新路径（`packages/zcode-subagent-cli/src/registration.ts:40` + core d8-compat `deps.cliPath` 等价通道）；② `check_spawn_env_boundary.py` SCAN_ROOTS 已含 SDK 与两个引擎 CLI 包（W12 主时点落地）且 `packages/subagent-core/src` 已加入（本收口批；**迁移期临时豁免清零，现存 6 条 core 侧永久类豁免**——pid-file/reaper/pi-engine/session-runner×2/worker-host 的只读探测/kill/Worker 场景，EXEMPT_CALLSITES 逐条附理由，语义合理非泄漏面）；③ pi 侧 `buildChildEnv` 5 键剥离已落 `packages/pi-subagent-cli/src/spawn-runner.ts`（`buildOutboundChildEnv` deny 清单承载，SDK `ENGINE_ENV_DENY_LIST` 含 ①`TAIJI_AGENT_PACKAGED` ②`TAIJI_RUNTIME_TOKEN` ③`TAIJI_SUBAGENT_RELAY_SESSION_ID` ④`TAIJI_SUBAGENT_RELAY_RECORD_ID` ⑤`TAIJI_AGENT_API_KEY`，relay 身份两键在 buildChildEnv 内按 run ctx 显式重写——次序 = 先过滤后注入，与 §2.12 规格一致）；④ 见 ②。
+**【W11 收尾终态（原 W12 拖尾四项核对完毕，2026-09-09）】**：① 本文档 B3 条目与 `packages/shared/src/spawn-env-contract.ts` 的 `TAIJI_ZCODE_CLI` `piConsumerAnchors` 已回写引擎包新路径（`packages/zcode-subagent-cli/src/registration.ts:40` + core d8-compat `deps.cliPath` 等价通道）；② `check_spawn_env_boundary.py` SCAN_ROOTS 已含 SDK 与两个引擎 CLI 包（W12 主时点落地）且 `packages/subagent-core/src` 已加入（本收尾批；**迁移期临时豁免清零，现存 6 条 core 侧永久类豁免**——pid-file/reaper/pi-engine/session-runner×2/worker-host 的只读探测/kill/Worker 场景，EXEMPT_CALLSITES 逐条附理由，语义合理非泄漏面）；③ pi 侧 `buildChildEnv` 5 键剥离已落 `packages/pi-subagent-cli/src/spawn-runner.ts`（`buildOutboundChildEnv` deny 清单承载，SDK `ENGINE_ENV_DENY_LIST` 含 ①`TAIJI_AGENT_PACKAGED` ②`TAIJI_RUNTIME_TOKEN` ③`TAIJI_SUBAGENT_RELAY_SESSION_ID` ④`TAIJI_SUBAGENT_RELAY_RECORD_ID` ⑤`TAIJI_AGENT_API_KEY`，relay 身份两键在 buildChildEnv 内按 run ctx 显式重写——次序 = 先过滤后注入，与 §2.12 规格一致）；④ 见 ②。
 
 ## 4. 验收（真实场景，非单测堆砌）
 
