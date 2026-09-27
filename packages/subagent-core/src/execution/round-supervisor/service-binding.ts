@@ -13,7 +13,7 @@
 import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 import { COLD_LOOKUP_SCAN_LIMIT } from "../assembly/cold-lookup.ts";
-import { createRecord, tryTransition, isLegacyClosedSettled } from "../persistence/execution-record.ts";
+import { createRecord, trySettleLegacyClosed, isLegacyClosedSettled } from "../persistence/execution-record.ts";
 import { hasLiveProcessHandle } from "../lifecycle/lifecycle-predicates.ts";
 import { FileRunStore } from "../../orchestration/file-run-store.ts";
 import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
@@ -40,7 +40,7 @@ export interface RoundSupervisorBinding {
   getMainSessionFile(): string | undefined;
   /**
    * record 终态化委托（service.finalizeRecord——注销合法发射点①的宿主路径）。
-   * 监督器 giveUp 的内存 record 分支消费；CAS 防双收尾由本文件 giveUp 先 tryTransition。
+   * 监督器 giveUp 的内存 record 分支消费；CAS 防双收尾由本文件 giveUp 先 trySettleLegacyClosed。
    */
   finalizeClosed(record: ExecutionRecord, result: AgentResult): Promise<void>;
 }
@@ -110,7 +110,7 @@ function supervisorCandidates(binding: RoundSupervisorBinding): SupervisorCandid
 /**
  * 监督器「该放弃 / superseded」执行（RoundSupervisorDeps.giveUp）。
  * 形态分流：
- *  - 内存 record：CAS tryTransition → finalizeClosed（终态化 + 注销①发射 + worktree/
+ *  - 内存 record：CAS trySettleLegacyClosed → finalizeClosed（终态化 + 注销①发射 + worktree/
  *    manifest 收尾）——watchdog-expired 额外发终止通知（此时可重派）；superseded 的
  *    替代通知已由监督器先行发出。boot 直断不经本函数（孤儿恢复层直断 + in-flight
  *    的重启中断 error 语义由 finalizeOrphanRecord 落位，见 supervisor.bootPartition 头注）。
@@ -145,7 +145,7 @@ async function supervisorGiveUp(
       toolCalls: [],
     };
     // CAS 抢锁防与 cancel/dispose 双收尾；抢锁失败 = 对方已终态化，收尾跳过。
-    if (!tryTransitionClosed(memory)) return;
+    if (!trySettleLegacyClosed(memory, "gc")) return;
     try {
       await binding.finalizeClosed(memory, failedResult);
     } catch (err) {
@@ -197,7 +197,7 @@ async function supervisorGiveUp(
   record.error = errorText;
   record.endedAt = Date.now();
   // 防御：createRecord 产物恒 running，CAS 失败不可达（不终态化直接返回）。
-  if (!tryTransition(record, "closed", "gc")) return;
+  if (!trySettleLegacyClosed(record, "gc")) return;
   try {
     const persisted = store.markFinalized(record, "gc");
     if (!persisted) {
@@ -217,11 +217,6 @@ async function supervisorGiveUp(
   } catch (err) {
     bestEffort(err, `round supervisor give-up entry (${recordId})`, "error");
   }
-}
-
-/** tryTransition closed+gc 的本地命名（CAS 语义见 execution-record.ts）。 */
-function tryTransitionClosed(record: ExecutionRecord): boolean {
-  return tryTransition(record, "closed", "gc");
 }
 
 /** 装配监督器实例（SubagentService.roundSupervisor 字段的工厂）。 */

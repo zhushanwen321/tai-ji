@@ -19,6 +19,7 @@ import * as subagentCore from "../../index.ts";
 import { parseResourceMetaDetailed } from "../../shared/meta-parser.ts";
 import {
   generateWorkflowScript,
+  WORKER_IIFE_HOST_DECLARED_NAMES,
   type GenerateWorkflowScriptOptions,
   type GenerateWorkflowScriptResult,
 } from "../script-generate.ts";
@@ -38,7 +39,6 @@ parameters:
     task: { type: string }
   required: [task]
 */
-const agent = require("./agent");
 agent("worker", { task: $ARGS.task });
 `;
 
@@ -48,7 +48,6 @@ description: bad
   broken: indent
 phases: [a]
 */
-const agent = require("./agent");
 agent("w");
 `;
 
@@ -61,7 +60,6 @@ parameters:
   patternProperties:
     "^batch\\d+$": { type: string }
 */
-const agent = require("./agent");
 agent("w");
 `;
 
@@ -70,12 +68,10 @@ const LEGACY_CONST_META = `const meta = {
   description: "legacy format",
   phases: ["a"]
 };
-const agent = require("./agent");
 agent("w");
 `;
 
-const NO_META = `const agent = require("./agent");
-agent("w");
+const NO_META = `agent("w");
 `;
 
 const ESM_IMPORT = `/* @pi-meta
@@ -84,7 +80,6 @@ description: d
 phases: [a]
 */
 import { foo } from "bar";
-const agent = require("./agent");
 agent("w");
 `;
 
@@ -93,7 +88,6 @@ name: x
 description: d
 phases: [a]
 */
-const agent = require("./agent");
 export const foo = 1;
 agent("w");
 `;
@@ -111,8 +105,43 @@ name: x
 description: d
 phases: [a]
 */
-const agent = require("./agent");
 agent("w";
+`;
+
+// 宿主预声明冲突样本（闸 4 拼宿主段后新增的行为面）
+const HOST_NAME_ARGS_CONFLICT = `/* @pi-meta
+name: x
+description: d
+phases: [a]
+*/
+const args = {};
+agent("w");
+`;
+
+const HOST_NAME_AGENT_CONFLICT = `/* @pi-meta
+name: x
+description: d
+phases: [a]
+*/
+function agent() {}
+agent("w");
+`;
+
+const NO_CONFLICT_RENAMED = `/* @pi-meta
+name: x
+description: d
+phases: [a]
+*/
+const wfArgs = {};
+agent("w");
+`;
+
+const BLOCK_SCOPE_ARGS = `/* @pi-meta
+name: x
+description: d
+phases: [a]
+*/
+agent("w", (() => { let args = 1; return String(args); })());
 `;
 
 // ============================================================
@@ -275,6 +304,68 @@ describe("generateWorkflowScript 合法样本落 tmp", () => {
       cwdSpy.mockRestore();
       rmSync(fakeCwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
+  });
+});
+
+// ============================================================
+// 宿主预声明冲突拦截（闸 4 拼宿主段——曾因闸只包脚本文本，产物 const args
+// 撞宿主别名仅在真机 SyntaxError、生成期零信号）
+// ============================================================
+
+describe("宿主预声明冲突拦截（闸 4 与 worker 包裹作用域一致）", () => {
+  it("顶层 const args → 拒（already been declared）", () => {
+    const err = errorOf(generateWorkflowScript("args-clash", HOST_NAME_ARGS_CONFLICT));
+    expect(err.startsWith("Syntax error in script: ")).toBe(true);
+    expect(err).toMatch(/already been declared/);
+  });
+
+  it("顶层 function agent → 拒（同名宿主编排函数）", () => {
+    const err = errorOf(generateWorkflowScript("agent-clash", HOST_NAME_AGENT_CONFLICT));
+    expect(err).toMatch(/already been declared/);
+  });
+
+  it("顶层改名 wfArgs → 过闸落盘", () => {
+    const tmpRoot = makeTmpRoot();
+    try {
+      const r = generateWorkflowScript("renamed-ok", NO_CONFLICT_RENAMED, { tmpDir: tmpRoot });
+      expect(r.ok).toBe(true);
+      if (!r.ok) throw new Error(r.error);
+      expect(existsSync(r.path)).toBe(true);
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it("函数块内 let args → 过（块级作用域不与宿主顶层声明冲突）", () => {
+    const tmpRoot = makeTmpRoot();
+    try {
+      const r = generateWorkflowScript("block-args", BLOCK_SCOPE_ARGS, { tmpDir: tmpRoot });
+      expect(r.ok).toBe(true);
+      if (!r.ok) throw new Error(r.error);
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+});
+
+// ============================================================
+// 宿主声明对账守卫（worker-script-builder 宿主段 ↔ 清单双向一致——
+// builder 增删名字忘同步清单时在此红）
+// ============================================================
+
+describe("宿主声明对账守卫（worker-script-builder ↔ WORKER_IIFE_HOST_DECLARED_NAMES）", () => {
+  it("IIFE 宿主段声明名提取集与清单互查一致", () => {
+    const src = readFileSync(new URL("../worker-script-builder.ts", import.meta.url), "utf8");
+    const start = src.indexOf("'(async () => {'");
+    const end = src.indexOf("'  // ── User workflow script ──'");
+    expect(start, "builder IIFE 起点锚缺失").toBeGreaterThan(0);
+    expect(end, "builder userScript 终点锚缺失").toBeGreaterThan(start);
+    const names = new Set<string>();
+    for (const m of src.slice(start, end).matchAll(/^\s*'  (?:const|let|class|async function|function)\s+([\w$]+)/gm)) {
+      names.add(m[1]);
+    }
+    expect(names.size, "提取数为 0 = 提取器与源形态失配，守卫失效").toBeGreaterThan(0);
+    expect([...names].sort()).toEqual([...WORKER_IIFE_HOST_DECLARED_NAMES].sort());
   });
 });
 

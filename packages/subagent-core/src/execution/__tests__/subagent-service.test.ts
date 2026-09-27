@@ -405,7 +405,7 @@ describe("SubagentService", () => {
   // （见文件头——execute 集成测试在 execute-nesting.test.ts / run-spawn-integration.test.ts）：
   //   - finalizeRecord status="closed"（background 正常完成 → unregister(closed)）
   //   - finalizeRecord status="cancelled" 经 runAndFinalize 路径（cancel 抢先 CAS 时
-  //     runAndFinalize 侧 tryTransition 失败跳过 finalizeRecord，由 cancelBackground 侧 emit——
+  //     runAndFinalize 侧 trySettleLegacyClosed 失败跳过 finalizeRecord，由 cancelBackground 侧 emit——
   //     本块 cancel 用例覆盖的即此后端 emit）
   //   - background detached 正常完成回注（finalizeRecord → emitPendingUnregister(done, {result,error,patchFile})）
   // register emit 的 payload（type:"subagent"、name）由本块 worktree-fail 路径附带覆盖。

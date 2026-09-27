@@ -49,10 +49,10 @@
 //
 // ── 字段级写点全集 → 操作映射（设计 §3.1 v4 十字段逐一归口）──
 //   ① status      —— 轮始重置→markRoundStarted；轮终翻边 idle（U4/D3）→markRoundIdle；
-//                    终态→markFinalized/markCancelled（内存冻结由调用方 completeRecord/
-//                    tryTransition 先行，store 收口持久化面）
+//                    终态→markFinalized/markCancelled（内存冻结由调用方 completeLegacyClosed/
+//                    trySettleLegacyClosed 先行，store 收口持久化面）
 //   ② result      —— 轮始清→markRoundStarted；轮终写→markRoundIdle(outcome)；终态→
-//                    markFinalized 序言（completeRecord 冻结后随 entry/manifest 投影）
+//                    markFinalized 序言（completeLegacyClosed 冻结后随 entry/manifest 投影）
 //   ③ round       —— 轮终 +1→markRoundIdle
 //   ④ closedReason—— 终态→markFinalized/markCancelled；轮终清除→markRoundIdle（[S10]）
 //   ⑤ resumable   —— 字段已退役（[U5/D4] idle 即 resumable，字段从 record/entry
@@ -448,13 +448,13 @@ export class RecordStore {
   }
 
   /**
-   * 出册：record 已被 completeRecord 设置了终态 status。
+   * 出册：record 已被 completeLegacyClosed 设置了终态 status。
    * 立即从内存移除（终态 record 下次读时从 session.jsonl 重建）。
    * cancelled record 由调用方先写终态 sidecar（cancel 路径），此处只负责移除。
    *
-   * [W1 / D1·D2] v1 全量快照 entry 停写。真终局（completeRecord 已冻结 endedAt）
+   * [W1 / D1·D2] v1 全量快照 entry 停写。真终局（completeLegacyClosed 已冻结 endedAt）
    * 时经 settleViaJournal 落 record-settled 帧 + v2 终态条目（终态冻结字段在
-   * completeRecord 已就绪——与 v1「archive 即完整终态记录」同点）；事件面未接线
+   * completeLegacyClosed 已就绪——与 v1「archive 即完整终态记录」同点）；事件面未接线
    * 时条目面独立工作（终态条目照常，零事件帧）。内存回收
    * （markIdleEvicted——endedAt 未设，非终局）零条目零事件，manifest 派生投影
    * 由回收点自写（U4c / G2 写序不变）。
@@ -551,8 +551,8 @@ export class RecordStore {
   /**
    * 意图原语：正常终态（含 disposeAllRecords 编排性关闭，reason=parent-*，D8 矩阵）。
    * 只吸收**持久化面**——collectPatch / worktree cleanup / pending 注销① / onFinalized
-   * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeRecord/tryTransition
-   * 桥接：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
+   * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeLegacyClosed/
+   * trySettleLegacyClosed：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
    *
    * 内部写序（D8 v7）：`.state` writeSync **先**（终态权威优先落）→ entry/archive →
    * manifest writeSync 后 → `.alive` 删除（release 出口①）。
@@ -685,7 +685,7 @@ export class RecordStore {
    * 携带旧终态遗留位）。
    *
    * CAS：仅 running 可收口（对 idle record 重复 settle = 非法迁移，拒绝返回 false
-   * + warn 留痕——与 tryTransition 抢锁语义同族）。
+   * + warn 留痕——与 trySettleLegacyClosed 抢锁语义同族）。
    *
    * 写序（D8：`.state` 先 → binding → manifest 后）：
    *   ① `.state` 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState；

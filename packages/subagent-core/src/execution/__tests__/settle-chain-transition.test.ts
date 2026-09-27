@@ -10,7 +10,7 @@
 // 3. finalizeFailed / finalizeAborted（RecordLifecycle）workflow origin 分支：失败/
 //    取消 → 同一收口单点（静默吞失败路径的间接接入面）。
 // 4. 直写通道删除断言（机器守卫）：读三个领地源文件断言 workflow origin 直写对
-//    （tryTransition(record, "closed" + 内联 finalizeRecord 对）不再存在于
+//    （trySettleLegacyClosed(record + 内联 finalizeRecord 对）不再存在于
 //    run-orchestration / record-lifecycle——收口后唯一剩余点在 worker-message-pump。
 //
 // doFinalizeRecord 经 vi.mock 拦截（避免真实 manifest/archive 写面）；journal 面
@@ -28,7 +28,7 @@ vi.mock("../persistence/finalize-record.ts", () => ({
   doFinalizeRecord: vi.fn(async () => {}),
 }));
 
-import { createRecord, tryTransition } from "../persistence/execution-record.ts";
+import { createRecord, trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import { settleWorkflowRecord } from "../../orchestration/worker-message-pump.ts";
 import { RunOrchestration } from "../service/run-orchestration.ts";
 import { RecordLifecycle } from "../service/record-lifecycle.ts";
@@ -79,7 +79,7 @@ describe("settleWorkflowRecord（D7 例外族收口单点）", () => {
 
   it("CAS 拒绝（竞态抢先收口）→ 静默跳过不覆盖（现状守卫语义）", async () => {
     const record = makeWorkflowRecord("sa-sw-2");
-    tryTransition(record, "closed", "cancelled"); // 抢先方
+    trySettleLegacyClosed(record, "cancelled"); // 抢先方
     const finalizeRecord = vi.fn(async () => {});
 
     await settleWorkflowRecord(record, successResult, "gc", { finalizeRecord });
@@ -145,6 +145,7 @@ describe("finalizeFailed / finalizeAborted 经收口单点（workflow origin）"
       getStore: () => ({ markRoundIdle: vi.fn() }),
       getNotifyHost: () => ({}),
       getPi: () => null,
+      getMainSessionFile: () => undefined,
       getSessionsDir: () => os.tmpdir(),
     } as unknown as ConstructorParameters<typeof RecordLifecycle>[0]);
     return lifecycle;
@@ -199,22 +200,22 @@ describe("直写通道删除断言（grep 等价的机器守卫）", () => {
     return fs.readFileSync(path.join(here, "../service", name), "utf8");
   }
 
-  it("run-orchestration.ts 无 workflow origin 直写对（tryTransition + finalizeRecord 内联）", () => {
+  it("run-orchestration.ts 无 workflow origin 直写对（trySettleLegacyClosed + finalizeRecord 内联）", () => {
     const source = readService("run-orchestration.ts");
-    expect(source).not.toContain('tryTransition(record, "closed"');
+    expect(source).not.toContain("trySettleLegacyClosed(record");
     // settleOneShotOutcome 改调收口单点
     expect(source).toContain("settleWorkflowRecord(record, result, aborted ? \"cancelled\" : \"gc\"");
   });
 
   it("record-lifecycle.ts 无 workflow origin 直写对", () => {
     const source = readService("record-lifecycle.ts");
-    expect(source).not.toContain('tryTransition(record, "closed"');
+    expect(source).not.toContain("trySettleLegacyClosed(record");
     expect(source).toContain("settleWorkflowRecord(record, failedResult");
     expect(source).toContain("settleWorkflowRecord(record, cancelledResult");
   });
 
-  it("收口单点唯一性：tryTransition(record, \"closed\" 仅存在于 worker-message-pump（settle 域）", () => {
+  it("收口单点唯一性：trySettleLegacyClosed(record 仅存在于 worker-message-pump（settle 域）", () => {
     const pump = fs.readFileSync(path.join(here, "../../orchestration/worker-message-pump.ts"), "utf8");
-    expect(pump).toContain('tryTransition(record, "closed"');
+    expect(pump).toContain("trySettleLegacyClosed(record, closedReason)");
   });
 });

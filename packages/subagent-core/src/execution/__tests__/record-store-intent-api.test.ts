@@ -93,7 +93,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 import { writeAliveMarker, readAliveMarker } from "../persistence/alive-store.ts";
 import * as stateMarker from "../persistence/state-marker.ts";
-import { createRecord, tryTransition } from "../persistence/execution-record.ts";
+import { createRecord, trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 
@@ -221,7 +221,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       record.sessionFile = sessionFile;
       store.acquireWriteLease(sessionFile, "bg-1"); // 持有期写权声明（release 前置形态）
       store.register(record);
-      tryTransition(record, "closed", "user-close");
+      trySettleLegacyClosed(record, "user-close");
       record.endedAt = 5000;
       probe.manifestPath = manifestPathOf("bg-1");
 
@@ -258,7 +258,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       record.sessionFile = sessionFile;
       store.acquireWriteLease(sessionFile, "bg-2");
       store.register(record);
-      tryTransition(record, "closed", "user-close");
+      trySettleLegacyClosed(record, "user-close");
       appendEntryMock.mockClear();
 
       vi.mocked(stateMarker.writeFinalizedState).mockReturnValueOnce(false);
@@ -278,7 +278,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
     it("sessionFile 缺失 → .state 面跳过（warn 留痕），manifest/entry 照常", () => {
       const record = makeRecord("bg-3");
       store.register(record);
-      tryTransition(record, "closed", "gc");
+      trySettleLegacyClosed(record, "gc");
 
       expect(store.markFinalized(record, "gc")).toBe(true);
       expect(loggerMock.warn).toHaveBeenCalled();
@@ -293,7 +293,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       record.sessionFile = sessionFile;
       store.register(record);
       store.acquireWriteLease(sessionFile, "bg-c1");
-      tryTransition(record, "closed", "cancelled");
+      trySettleLegacyClosed(record, "cancelled");
       record.endedAt = 7777;
       probe.manifestPath = manifestPathOf("bg-c1");
 
@@ -313,7 +313,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       const record = makeRecord("bg-c2");
       record.sessionFile = sessionFile;
       store.register(record);
-      tryTransition(record, "closed", "cancelled");
+      trySettleLegacyClosed(record, "cancelled");
 
       vi.mocked(stateMarker.writeCancelledState).mockReturnValueOnce(false);
 
@@ -405,7 +405,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
     it("终态簿记已冻结（endedAt 已设）→ fail-fast 抛错", () => {
       const record = makeRecord("chat-4");
-      record.endedAt = 123; // completeRecord 已跑的冻结判据
+      record.endedAt = 123; // completeLegacyClosed 已跑的冻结判据
       store.register(record);
 
       expect(() => store.markRoundIdle("chat-4", { kind: "success", content: "x" })).toThrow(
@@ -458,7 +458,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
     const makeClosedCandidate = (id: string): ExecutionRecord => {
       const record = makeRecord(id);
       record.sessionFile = sessionFile;
-      tryTransition(record, "closed", "parent-shutdown");
+      trySettleLegacyClosed(record, "parent-shutdown");
       record.endedAt = 4000;
       return record;
     };

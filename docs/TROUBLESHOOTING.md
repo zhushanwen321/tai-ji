@@ -513,7 +513,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 
 ### 21. workflow run 状态异常排查：run 事件 journal 取证（2026-09-21 run 显式状态机落地）
 
-- **取证源**：workflow run 生命周期由显式状态机裁决（`subagent-core/src/orchestration/run-events.ts`，`RUN_TRANSITIONS` 转移表 + `transition` 纯函数，表外转移 fail-fast）；事件流 journal 是 run 态权威投影源——`<agentDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时为 `<agentDir>/sessions/<slug>/workflow-state/`，推导 = `resolvePiWorkflowStateDir`），JSONL 逐行（`run-created / ask-dispatched / ask-executing / ask-retrying / ask-settled / armed / run-settled`；`ask-dispatched` 载荷携带 `phase?` = 剧本 phase 归属，抽屉分组视图供源）。
+- **取证源**：workflow run 生命周期由显式状态机裁决（`subagent-core/src/orchestration/run-events.ts`，`RUN_TRANSITIONS` 转移表 + `transition` 纯函数，表外转移 fail-fast）；事件流 journal 是 run 态权威投影源——`<agentDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时为 `<agentDir>/sessions/<slug>/workflow-state/`，推导 = `resolvePiWorkflowStateDir`），JSONL 逐行（`run-created / ask-dispatched / ask-retrying / ask-settled / member-pool / armed / run-settled`；`ask-dispatched` 载荷携带 `phase?` = 剧本 phase 归属，抽屉分组视图供源；成员词表权威源 = `subagent-core/src/orchestration/run-events.ts` 的 `RUN_EVENT_TYPES`）。
 - **判定姿势**：run 卡死/终态异常先读 journal 事件序列对照合法转移表——① 缺 `run-settled` 事件 = run 未终局（查 pump 日志）；② schema 任务缺 `armed` 事件 = 武装回执未达（宿主等待窗 fail-fast 先行，查引擎侧武装断言与扩展装载）；③ debug 日志 `run event dispatch yielded (runId=...)` = 表外转移让位，常见根因是派发链 runId 键错、事件落进占位键（旁证：binding sidecar `.record-binding` 的 `parentRunId` 为 `sar-unattached` 占位而非真实 runId = 未走 workflowAgentDispatch 通道）。
 - **注册表投影**：run 列表态 = journal fold（四相 missing/active/terminal/interrupted），不看文件 mtime；journal 缺失即 missing 相，手工挪动/删除 journal 文件直接改变投影结果。
 

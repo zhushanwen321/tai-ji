@@ -40,7 +40,7 @@ import { writeAliveMarker } from "../persistence/alive-store.ts";
 import { createRecordEventJournal, recordEventsPath } from "../persistence/record-events.ts";
 import type { RecordJournalEvent } from "../persistence/record-events.ts";
 import { readStateMarker } from "../persistence/state-marker.ts";
-import { completeRecord, createRecord, projectOutcome, tryTransition } from "../persistence/execution-record.ts";
+import { completeLegacyClosed, createRecord, projectOutcome, trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import { writeCancelledState, writeFinalizedState, writeSettledState } from "../persistence/state-marker.ts";
 import type { ManifestRecord } from "../persistence/manifest-store.ts";
 import { ManifestStore } from "../persistence/manifest-store.ts";
@@ -1127,9 +1127,9 @@ describe("RecordStore", () => {
       const { store, appended } = makeStoreWithPi();
       const r = makeRecord();
       store.register(r);
-      // 模拟正常终态路径：tryTransition CAS → completeRecord 冻结 → archive（D-017 时序）
-      tryTransition(r, "closed", "gc");
-      completeRecord(r, { text: "task done", turns: 1, durationMs: 500, success: true, sessionId: "r1", toolCalls: [] }, "closed", "gc");
+      // 模拟正常终态路径：trySettleLegacyClosed CAS → completeLegacyClosed 冻结 → archive（D-017 时序）
+      trySettleLegacyClosed(r, "gc");
+      completeLegacyClosed(r, { text: "task done", turns: 1, durationMs: 500, success: true, sessionId: "r1", toolCalls: [] }, "gc");
       store.archive(r);
 
       // 探针基线（单测级）：one-shot 生命周期 = register + archive = 2 次 append
@@ -1511,12 +1511,12 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
     expect(events.filter((e) => e.type === "record-settled")).toHaveLength(1);
   });
 
-  it("archive 真终局（completeRecord 已冻结 endedAt）→ record-settled 帧；内存回收（endedAt 未设）零事件", async () => {
+  it("archive 真终局（completeLegacyClosed 已冻结 endedAt）→ record-settled 帧；内存回收（endedAt 未设）零事件", async () => {
     const captured: unknown[] = [];
     const store = makeStore(captured);
     const rec = v2MakeRecord({ id: "sa-v2-arch" });
     store.register(rec);
-    // completeRecord 桥接形态：冻结终局字段（含 endedAt）。
+    // completeLegacyClosed 桥接形态：冻结终局字段（含 endedAt）。
     rec.status = "idle";
     rec.stopReason = "completed";
     rec.outcome = "completed";

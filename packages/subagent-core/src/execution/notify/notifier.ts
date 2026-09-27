@@ -125,8 +125,8 @@ export interface BgNotifyRecord {
   closedReason?: ClosedReason;
   /**
    * 终态三态对外语义（U3 C-outcome）。notify() 投影边界物化：closed 入参缺省时按
-   * deriveOutcome(closedReason, error) 兑底填充（所有可达流程下与 completeRecord
-   * 冻结的 record.outcome 等价——toNotifyRecord 构造点在 completeRecord 之后；该
+   * deriveOutcome(closedReason, error) 兑底填充（所有可达流程下与 completeLegacyClosed
+   * 冻结的 record.outcome 等价——toNotifyRecord 构造点在 completeLegacyClosed 之后；该
    * 构造点属 U3 领地外，不透传本字段）。buildLlmContent 与 bg-notify-render 只读本字段。
    */
   outcome?: ExecutionOutcome;
@@ -440,7 +440,7 @@ export function createNotifier(host: NotifierHost): BgNotifier {
 
       // U3 C-outcome：投影边界物化 outcome——closed payload 缺省时按单一权威
       // deriveOutcome 兑底填充，content 与 details（GUI pane 消费）均携带一等 outcome；
-      // 所有可达流程下与 record.outcome 等价（toNotifyRecord 在 completeRecord 之后
+      // 所有可达流程下与 record.outcome 等价（toNotifyRecord 在 completeLegacyClosed 之后
       // 构造）。running（轮次通知）语义上无 outcome，不物化。消源自 record 的浅拷贝
       // ——不改写入方对象（BgNotifyRecord 由调用方持有）。notifyId 同批物化（U2：
       // dedupe key 与账本身份键同源，details 携带供回执匹配）。

@@ -739,6 +739,31 @@ describe("runSettledEffects：四步固定顺序", () => {
     expect(h.runs.size).toBe(MAX_RETAINED_DONE_RUNS);
     expect(h.runs.has("seed-0")).toBe(false);
   });
+
+  it("终局记录缺席（settlement undefined）→ 通知跳过 + error 留痕 + track 不标 + evict 照常（[W2/V1 D1 第 7 行] 失败语义分支）", () => {
+    const h = makeEnv();
+    const run = makeRun({ runId: "wf-nosettlement", status: "done", completedAt: new Date(10_000).toISOString() });
+    seedRunsWithCapOverflow(h, run);
+    // journal dispatch 失败窗口：终局记录查询 miss
+    h.env.settledRecordOf = () => undefined;
+
+    // 缺席不是抛错路径：不回退两态机字段兜底（I2 失效窗口下兜底 = 恒 completed 假成功）
+    expect(() => runSettledEffects(h.env, run)).not.toThrow();
+
+    // 通知跳过：发送面零调用 + error 留痕（含恢复动作指向 journal 错误日志）
+    expect(h.sendMessage).not.toHaveBeenCalled();
+    expect(loggerFns.error).toHaveBeenCalledWith(
+      "[workflow] done notify skipped: settlement record unavailable (runId=wf-nosettlement) — " +
+        "run-settled journal dispatch likely failed; recovery: consult the journal error log above",
+    );
+    // track 不标：未发通知不占去重窗口（允许后续语义修正重试）
+    expect(h.notifiedRunIds.has("wf-nosettlement")).toBe(false);
+    // evict 照常：内存有界性独立于通知（stall 回收同样照常——seq 恒只有 step1）
+    expect(h.seq).toEqual(["1:noteRunSettled(wf-nosettlement)"]);
+    expect(h.runs.size).toBe(MAX_RETAINED_DONE_RUNS);
+    expect(h.runs.has("seed-0")).toBe(false);
+    expect(h.runs.has("wf-nosettlement")).toBe(true);
+  });
 });
 
 // ── ⑤ setupWorkflowDomain 的 pi.on 注册顺序锁（逐位不变契约） ──────────────────

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  completeRecord,
+  completeLegacyClosed,
   computeElapsedSeconds,
   createRecord,
   extractLabelFromArgs,
@@ -18,7 +18,7 @@ import {
   projectOutcome,
   project,
   snapshot,
-  tryTransition,
+  trySettleLegacyClosed,
   updateFromEvent,
 } from "../persistence/execution-record.ts";
 import type { AgentResult, ExecutionRecord, SubagentRecord, Turn } from "../assembly/types.ts";
@@ -655,53 +655,53 @@ describe("getTotalUsage", () => {
 });
 
 // ============================================================
-// tryTransition — CAS lock
+// trySettleLegacyClosed — CAS lock（[W2/V3] 说谎签名退役后的诚实原语）
 // ============================================================
-describe("tryTransition", () => {
-  it("returns true and sets status when transitioning from running", () => {
+describe("trySettleLegacyClosed", () => {
+  it("returns true and sets status when settling from running", () => {
     const r = makeRecord({ status: "running" });
-    expect(tryTransition(r, "closed")).toBe(true);
+    expect(trySettleLegacyClosed(r)).toBe(true);
     expect(r.status).toBe("idle");
   });
 
-  it("returns false when already terminal (closed)", () => {
+  it("returns false when already legacy-closed settled", () => {
     const r = makeRecord({ status: "idle" });
-    expect(tryTransition(r, "closed")).toBe(false);
+    expect(trySettleLegacyClosed(r)).toBe(false);
     expect(r.status).toBe("idle");
   });
 
-  it("returns false when already terminal (closed, cancelled reason)", () => {
+  it("returns false when already legacy-closed settled (cancelled reason)", () => {
     const r = makeRecord({ status: "idle", closedReason: "cancelled" });
-    expect(tryTransition(r, "closed")).toBe(false);
+    expect(trySettleLegacyClosed(r)).toBe(false);
   });
 
-  it("returns false when already terminal (closed, gc reason)", () => {
+  it("returns false when already legacy-closed settled (gc reason)", () => {
     const r = makeRecord({ status: "idle", closedReason: "gc" });
-    expect(tryTransition(r, "closed")).toBe(false);
+    expect(trySettleLegacyClosed(r)).toBe(false);
   });
 
-  it("first transition wins in concurrent race (running → closed is one-way)", () => {
+  it("first settle wins in concurrent race (running → legacy closed is one-way)", () => {
     const r = makeRecord({ status: "running" });
-    expect(tryTransition(r, "closed")).toBe(true);
-    expect(tryTransition(r, "closed")).toBe(false);
+    expect(trySettleLegacyClosed(r)).toBe(true);
+    expect(trySettleLegacyClosed(r)).toBe(false);
     expect(r.status).toBe("idle");
   });
 
-  it("closed 转换写入 closedReason（显式值与缺省 gc）", () => {
+  it("legacy closed 收口写入 closedReason（显式值与缺省 gc）", () => {
     const explicit = makeRecord({ status: "running" });
-    expect(tryTransition(explicit, "closed", "cancelled")).toBe(true);
+    expect(trySettleLegacyClosed(explicit, "cancelled")).toBe(true);
     expect(explicit.status).toBe("idle");
     expect(explicit.closedReason).toBe("cancelled");
 
     const defaulted = makeRecord({ status: "running" });
-    expect(tryTransition(defaulted, "closed")).toBe(true);
+    expect(trySettleLegacyClosed(defaulted)).toBe(true);
     expect(defaulted.closedReason).toBe("gc");
   });
 
   it("CAS 拒绝后 closedReason 不被覆盖（首次终态 reason 保持）", () => {
     const r = makeRecord({ status: "running" });
-    tryTransition(r, "closed", "cancelled");
-    expect(tryTransition(r, "closed", "gc")).toBe(false);
+    trySettleLegacyClosed(r, "cancelled");
+    expect(trySettleLegacyClosed(r, "gc")).toBe(false);
     expect(r.status).toBe("idle");
     expect(r.closedReason).toBe("cancelled");
   });
@@ -747,13 +747,13 @@ describe("markReconstructedStatus", () => {
 });
 
 // ============================================================
-// completeRecord
+// completeLegacyClosed（[W2/V3] 说谎签名退役后的诚实原语）
 // ============================================================
-describe("completeRecord", () => {
+describe("completeLegacyClosed", () => {
   it("writes outcome fields without resetting turnCount/totalTokens", () => {
     const r = makeRecord({ turnCount: 5, totalTokens: 42 });
     r.status = "idle";
-    completeRecord(r, SAMPLE_RESULT, "closed");
+    completeLegacyClosed(r, SAMPLE_RESULT);
     expect(r.status).toBe("idle");
     expect(r.endedAt).toBeTypeOf("number");
     expect(r.agentResult).toBe(SAMPLE_RESULT);
@@ -767,32 +767,31 @@ describe("completeRecord", () => {
     const r = makeRecord();
     r.status = "idle";
     const failedResult: AgentResult = { ...SAMPLE_RESULT, success: false, error: "oops" };
-    completeRecord(r, failedResult, "closed");
+    completeLegacyClosed(r, failedResult);
     expect(r.error).toBe("oops");
   });
 
-  // ── U3 C-outcome：completeRecord 唯一写入点冻结 outcome ──
+  // ── U3 C-outcome：completeLegacyClosed 唯一写入点冻结 outcome ──
 
   it("[U3] 唯一写入点冻结 outcome：completed / failed / cancelled", () => {
     const ok = makeRecord();
     ok.status = "idle";
-    completeRecord(ok, SAMPLE_RESULT, "closed", "gc");
+    completeLegacyClosed(ok, SAMPLE_RESULT, "gc");
     expect(ok.outcome).toBe("completed");
     expect(ok.closedReason).toBe("gc");
 
     const failed = makeRecord();
     failed.status = "idle";
     const failedResult: AgentResult = { ...SAMPLE_RESULT, success: false, error: "oops" };
-    completeRecord(failed, failedResult, "closed", "gc");
+    completeLegacyClosed(failed, failedResult, "gc");
     expect(failed.outcome).toBe("failed");
 
     // 取消优先于 error（abort 合成 result 可能携带 error，取消语义优先）
     const cancelled = makeRecord();
     cancelled.status = "idle";
-    completeRecord(
+    completeLegacyClosed(
       cancelled,
       { ...SAMPLE_RESULT, success: false, error: "aborted by user" },
-      "closed",
       "cancelled",
     );
     expect(cancelled.outcome).toBe("cancelled");
@@ -803,19 +802,18 @@ describe("completeRecord", () => {
     // ——语义为「父进程关闭时子 agent 未完成即失败」，选定行为而非疏漏。
     const r = makeRecord();
     r.status = "idle";
-    completeRecord(
+    completeLegacyClosed(
       r,
       { ...SAMPLE_RESULT, success: false, error: "closed due to parent-shutdown" },
-      "closed",
       "parent-shutdown",
     );
     expect(r.outcome).toBe("failed");
   });
 
-  it("[U3] patchFile 语义不变：completeRecord 不触碰 patchFile/result，仅新增 outcome", () => {
+  it("[U3] patchFile 语义不变：completeLegacyClosed 不触碰 patchFile/result，仅新增 outcome", () => {
     const r = makeRecord({ patchFile: "/tmp/patches/sa-x.patch" });
     r.status = "idle";
-    completeRecord(r, SAMPLE_RESULT, "closed", "gc");
+    completeLegacyClosed(r, SAMPLE_RESULT, "gc");
     expect(r.patchFile).toBe("/tmp/patches/sa-x.patch");
     expect(r.result).toBe("done");
     expect(r.outcome).toBe("completed");

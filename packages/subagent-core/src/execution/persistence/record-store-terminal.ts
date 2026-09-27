@@ -120,8 +120,8 @@ function legacyTerminalWrite(
 /**
  * 意图原语：正常终态（含 disposeAllRecords 编排性关闭，reason=parent-*，D8 矩阵）。
  * 只吸收**持久化面**——collectPatch / worktree cleanup / pending 注销① / onFinalized
- * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeRecord/tryTransition
- * 桥接：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
+ * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeLegacyClosed/
+ * trySettleLegacyClosed：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
  *
  * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 收口动作
  * 接线退役（正常收口归 markSettled、close 收口归 markSettledOut、编排性关闭归新编排）；
@@ -311,7 +311,7 @@ export function releaseWriteLeaseImpl(record: ExecutionRecord, ctx: TerminalCtx)
  * 携带旧终态遗留位）。
  *
  * CAS：仅 running 可收口（对 idle record 重复 settle = 非法迁移，拒绝返回 false
- * + warn 留痕——与 tryTransition 抢锁语义同族）。
+ * + warn 留痕——与 trySettleLegacyClosed 抢锁语义同族）。
  *
  * 写序（D8：`.state` 先 → binding → manifest 后）：
  *   ① `.state` 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState；

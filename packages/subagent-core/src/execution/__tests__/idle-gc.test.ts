@@ -330,6 +330,103 @@ describe("idle-gc WorkflowRun store 纳入（[W2/V1 D3] 改走收编原语）", 
     expect(events.filter((e) => e.type === "run-settled")).toHaveLength(1);
   });
 
+  it("same-session run（当前 session 注册差集命中）→ 四件直落齐套（[W2 D3] journal 帧 + manifest + 终态条目 + 注销条目）", async () => {
+    // 正向 manifest 断言走真实 timers + 两 env 旋钮（fake timers 与 writeAtomicFile
+    // 的真实 IO rename 链不兼容——对齐同 describe 收编用例先例）。
+    vi.useRealTimers();
+    process.env[WORKFLOW_RUN_IDLE_TTL_MS_ENV] = "1000";
+    process.env[WORKFLOW_RUN_GC_INTERVAL_MS_ENV] = "50";
+    await seedJournal("wf-same");
+    // 当前 session 文件：含 wf-same 的 pending:register（活跃注册差集命中 = 归属
+    // 判定锚——run 属当前 session，appendEntry 写达域有效）。
+    const sessionFile = path.join(tmpDir, "main-session.jsonl");
+    fs.writeFileSync(
+      sessionFile,
+      `${JSON.stringify({ customType: "pending:register", data: { id: "wf-same", type: "workflow" } })}\n`,
+      "utf-8",
+    );
+    const appended: Array<{ customType: string; data: unknown }> = [];
+    const { store } = makeWorkflowStore([
+      { runId: "wf-same", status: "running", startedAt: new Date(Date.now() - 60_000).toISOString() },
+    ]);
+    stop = startIdleGc(makeStore(), store, {
+      sessionFile: () => sessionFile,
+      appendEntry: () => (customType, data) => {
+        appended.push({ customType, data });
+      },
+    });
+    // 终态条目/注销条目在 manifest 物化后同步直落——轮询至两件条目齐（IO 落定）。
+    await pollUntilReal(
+      () => fs.existsSync(path.join(gcDir, "wf-same.json")) && appended.length >= 2,
+    );
+    // 立即停表 + 等在飞 GC 链落定：真实 timers 的 50ms interval 在 afterEach 停表/
+    // 删目录/删 env 之后仍可能在飞——在飞链撞已删 journal 目录的失败 warn 会泄漏
+    // 进后续用例的 log sink（A11 分通道断言对 warn 计数敏感）。
+    stop?.();
+    stop = undefined;
+    await new Promise((r) => setTimeout(r, 80));
+
+    // ① journal 收编终局帧（outcome/errorCode 断言同 cross-session 形态）
+    const events = await createRunEventJournal(gcDir).scan("wf-same");
+    const settled = events.find((e) => e.type === "run-settled");
+    expect(settled).toMatchObject({ outcome: "interrupted", errorCode: "idle-evicted" });
+    // ② manifest 物化
+    expect(fs.existsSync(path.join(gcDir, "wf-same.json"))).toBe(true);
+    // ③ 主 session 终态条目（workflow-record settled——appendSettledEntry 透传直落）
+    const settledEntry = appended.find((e) => e.customType === "workflow-record");
+    expect(settledEntry).toBeDefined();
+    expect(settledEntry?.data).toMatchObject({
+      kind: "settled",
+      runId: "wf-same",
+      outcome: "interrupted",
+      errorCode: "idle-evicted",
+      reason: "failed",
+    });
+    // ④ pending 注销条目（reason 经 runSettledOutcomeToDoneReason 联合派生单点——
+    //    interrupted → "failed" 诊断兜底容器；status 经 mapReasonToStatus = "failed"）
+    const unregister = appended.find((e) => e.customType === "pending:unregister");
+    expect(unregister?.data).toMatchObject({ id: "wf-same", reason: "failed", status: "failed" });
+  });
+
+  it("cross-session run（注册差集未命中）→ 维持两件直落（零 appendEntry——条目/注销重开自愈，[W2 D3]）", async () => {
+    vi.useRealTimers();
+    process.env[WORKFLOW_RUN_IDLE_TTL_MS_ENV] = "1000";
+    process.env[WORKFLOW_RUN_GC_INTERVAL_MS_ENV] = "50";
+    await seedJournal("wf-cross");
+    // session 文件只注册了别的 run——wf-cross 不在当前 session 注册差集内。
+    const sessionFile = path.join(tmpDir, "main-session-cross.jsonl");
+    fs.writeFileSync(
+      sessionFile,
+      `${JSON.stringify({ customType: "pending:register", data: { id: "wf-other", type: "workflow" } })}\n`,
+      "utf-8",
+    );
+    const appended: Array<{ customType: string; data: unknown }> = [];
+    const { store } = makeWorkflowStore([
+      { runId: "wf-cross", status: "running", startedAt: new Date(Date.now() - 60_000).toISOString() },
+    ]);
+    stop = startIdleGc(makeStore(), store, {
+      sessionFile: () => sessionFile,
+      appendEntry: () => (customType, data) => {
+        appended.push({ customType, data });
+      },
+    });
+    await pollUntilReal(() => fs.existsSync(path.join(gcDir, "wf-cross.json")));
+    // 立即停表 + 等在飞 GC 链落定（同 same-session 用例——防在飞链泄漏 warn 进
+    // 后续用例的 log sink）。
+    stop?.();
+    stop = undefined;
+    await new Promise((r) => setTimeout(r, 80));
+
+    // 两件直落（journal 帧 + manifest），条目/注销不落（跨 session 写达域无效）
+    const events = await createRunEventJournal(gcDir).scan("wf-cross");
+    expect(events.find((e) => e.type === "run-settled")).toMatchObject({
+      outcome: "interrupted",
+      errorCode: "idle-evicted",
+    });
+    expect(fs.existsSync(path.join(gcDir, "wf-cross.json"))).toBe(true);
+    expect(appended).toHaveLength(0);
+  });
+
   it("loadAll 抛错（宿主未 configureCore）→ 单轮跳过不炸 interval（域未启用 = debug 不 warn）", async () => {
     // [A11] 用例级 logCalls sink：域未启用走 debug 通道（正常形态不噪声），断言零 warn。
     const logCalls: Array<{ level: string; message: string }> = [];

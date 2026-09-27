@@ -205,8 +205,13 @@ function isRegisterDataLike(v: unknown): v is RegisterDataLike {
  * 读主 session 文件的 pending:register − pending:unregister 差集（register 顺序
  * 保留；同 id 重 register 去重）。文件不可读（首条 assistant 前未 flush / 被删）
  * 返回空集——sweep 空跑，下次触发点重试。坏行跳过（append 中途崩溃的截断行）。
+ *
+ * [W2/V1 D3 same-session 四件直落] 导出供 idle-gc 的 run 归属判定复用：当前
+ * session 活跃注册集含 runId ⟺ run 属当前 session ⟺ appendEntry 对该 run 的
+ * 终态条目/注销条目写达域有效。空集判定（文件未 flush/不可读）= 保守按
+ * cross-session 两件直落（重开自愈兜底，与现状等价，无回归）。
  */
-function collectActiveRegisterEntries(sessionFile: string): ActiveRegisterEntry[] {
+export function collectActiveRegisterEntries(sessionFile: string): ActiveRegisterEntry[] {
   let content: string;
   try {
     content = fs.readFileSync(sessionFile, "utf-8");

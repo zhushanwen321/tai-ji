@@ -1821,7 +1821,7 @@ fi
 #   （设计 §4.4⑤ 顺序依赖声明；检查防复发而非清存量）。
 #   触发面在主 STAGED_FILES 外并入本路径范围的 staged 删除（pathspec 清单天然含 D）：
 #   单独 staged 删除检查脚本也必须触发，存在性检查正是删除场景防线。
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兑底）。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 SCROLL_FOLLOW_STAGED=$(git diff --cached --name-only -- packages/renderer/src/composables/panel/ packages/renderer/src/components/panel/MessageStream.vue scripts/check-scroll-follow.mjs)

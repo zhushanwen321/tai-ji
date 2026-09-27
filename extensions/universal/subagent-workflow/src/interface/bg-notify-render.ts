@@ -65,9 +65,9 @@ interface BgNotifyRecord {
   id: string;
   /** v4 B-1: closed（终态，含 cancelled）或 running（对话模式轮次完成，旧 idle）。 */
   status: "running" | "closed";
-  /** L2 关闭原因子枚举（内部诊断 + outcome 兑底派生输入；经 toClosedReason 防御性收窄）。 */
+  /** L2 关闭原因子枚举（内部诊断 + outcome 兜底派生输入；经 toClosedReason 防御性收窄）。 */
   closedReason?: ClosedReason;
-  /** 终态三态对外语义（U3 C-outcome）。缺失（升级前旧消息重放）时按 deriveOutcome 兑底。 */
+  /** 终态三态对外语义（U3 C-outcome）。缺失（升级前旧消息重放）时按 deriveOutcome 兜底。 */
   outcome?: RecordOutcome;
   agent: string;
   model?: string;
@@ -220,7 +220,7 @@ function renderRecordLines(record: BgNotifyRecord, t: ThemeLike): string[] {
     ? ` ${t.fg("dim", "·")} ${t.fg("accent", truncLine(record.model, MODEL_MAX_WIDTH))}`
     : "";
   // U3 C-outcome：verb 与正文分流只读 outcome——单一权威派生（升级前旧消息重放等
-  // details 缺 outcome 的存量形态经 deriveOutcome(closedReason, error) 兑底，非同构
+  // details 缺 outcome 的存量形态经 deriveOutcome(closedReason, error) 兜底，非同构
   // 重写）。判定先于 patchFile：failed 分支不展示 patch/result（失败轮也会写
   // patchFile，历史 bug 存档见 deriveOutcome 注释）。
   const outcome = record.outcome ?? deriveOutcome(record.closedReason, record.error);
@@ -264,7 +264,7 @@ function renderRecordLines(record: BgNotifyRecord, t: ThemeLike): string[] {
 
 /**
  * details.closedReason 防御性收窄：任意字符串 → ClosedReason | undefined。
- * 旧数据/外部构造的非法值按缺失处理，交由 deriveOutcome 兑底（消费方不崩溃）。
+ * 旧数据/外部构造的非法值按缺失处理，交由 deriveOutcome 兜底（消费方不崩溃）。
  */
 function toClosedReason(value: unknown): ClosedReason | undefined {
   return CLOSED_REASONS.find((reason) => reason === value);

@@ -6,7 +6,7 @@
 //     Continuation.startFirstRound
 //     ——轮末 markRoundIdle 收口（status 翻 idle [two-state-convergence U4/D3] + round+1 +
 //     closedReason 清除），不走 kickOffEngineRun（已删）one-shot 编排（finalizeEngineOutcome（已删）
-//     tryTransition：status='idle' + closedReason='gc' 且 round 不推进）；
+//     legacy close CAS：status='idle' + closedReason='gc' 且 round 不推进）；
 //   - B-routing：会话轮引擎按 record.engine 经 registry 解析——zcode chatMode 轮
 //     （首轮与续轮）派发到 zcode port，不再钉死 pi；续轮 resume 锚携带
 //     engineHandle.sessionRef 的 zcode cold 形态（引擎侧 resume 读 + 新 session 注入）；

@@ -202,7 +202,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
     rec.lastError = outcome.reason;
     // [modeless 波1] 失败轮同步写 rec.error（投影/通知 outcome 派生消费——
     // toNotifyRecord 的 deriveOutcome(closedReason, error) 判 failed；旧 one-shot
-    // 路径经 finalizeFailed → completeRecord 写 error 的等价承接）。
+    // 路径经 finalizeFailed → completeLegacyClosed 写 error 的等价承接）。
     rec.error = outcome.reason;
     nextResult = rec.result ?? `round did not complete: ${outcome.reason}`;
   } else {

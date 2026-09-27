@@ -100,7 +100,7 @@ import { toErrorMessage } from "../core/error-message.ts";
 // 解析。import 方向 execution/service → orchestration 为既有先例（file-run-store），
 // 本处是反向的 orchestration → execution/{assembly,persistence}：types 为 type-only、
 // execution-record/workflow-state-root 为叶子模块（无反向依赖），零环。
-import { tryTransition } from "../execution/persistence/execution-record.ts";
+import { trySettleLegacyClosed } from "../execution/persistence/execution-record.ts";
 import { resolvePiWorkflowStateDir } from "../execution/assembly/workflow-state-root.ts";
 import type { AgentResult as ExecutionAgentResult, ExecutionRecord } from "../execution/assembly/types.ts";
 // [U2 pi-workflow-run-resource-model] 窗口实例收尾释放（机制本体在 execution/engine/
@@ -731,8 +731,9 @@ async function appendTransition(
  * 单源锚定 = outcome 非空，保留清理资格判定与 Q2 放弃窗终局化的共同读面）。
  *
  * errorCode 取自 run-settled 事件载荷（失败终局的结构化码）；cancel-requested
- * 合成路径无结构化码（缺省）；abandon-elapsed 行的 interrupted_abandoned 由 Q2
- * 注册表单元附着（run-events.ts 转移表注释的词表边界）。
+ * 合成路径无结构化码（缺省）；abandon 收编路径的 interrupted_abandoned 由
+ * adoptInterruptedRun → settleRunAccounting 的 run-settled 帧载荷附着
+ * （词表边界见 run-events.ts RunErrorCode 注释）。
  * [D5 诊断引用落账] stderrTeePath（失败终局）取自事件 journal 最后一帧带该字段的
  * ask-settled（lastStderrTeePathFromJournal——事件流投影，见其注释）。
  *
@@ -1296,8 +1297,8 @@ function appendWorkflowRecordSettledEntry(
 //
 // 与 run 状态机（上方接线段）的关系：ask-settled 事件面由 pump call 完成链投递
 //（dispatchAskSettled——taskIndex/attempt 取 callId/call.attempts 单源），record
-// 终态化是同一 ask 终局的投影面（ExecutionRecord 两态机 CAS——D5 范围边界明示
-// record 域状态机收敛 out-of-scope，tryTransition 保留）。run 域的 manifest/.state
+// 终态化是同一 ask 终局的投影面（ExecutionRecord 两态机 CAS——W2/V3 说谎签名
+// 退役后走 trySettleLegacyClosed 诚实原语，closedReason 双写语义不变）。run 域的 manifest/.state
 // outcome 投影已随 [P1b-2] 实装（persistTerminalProjection）；record 域的
 // ManifestRecord.outcome 字段传参接线归后继批次（record 终态链所在领地）。
 
@@ -1313,7 +1314,7 @@ export async function settleWorkflowRecord(
   closedReason: "gc" | "cancelled",
   exec: WorkflowRecordSettleExec,
 ): Promise<void> {
-  if (tryTransition(record, "closed", closedReason)) {
+  if (trySettleLegacyClosed(record, closedReason)) {
     await exec.finalizeRecord(result, closedReason);
   }
 }

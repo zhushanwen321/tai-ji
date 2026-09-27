@@ -8,7 +8,7 @@
  * 两维度的 fallback 各自保留：文字缺省空串（继承按钮中性色）、底色缺省 bg-neutral-dim。
  */
 import type { WidgetMeta } from '@zhushanwen/extension-protocol'
-import type { WorkflowRunRecord, WorkflowRunOutcome } from '@taiji/shared'
+import { WORKFLOW_RUN_OUTCOME_LABELS, type WorkflowRunRecord, type WorkflowRunOutcome } from '@taiji/shared'
 
 const WIDGET_TONE = new Map<WidgetMeta['status'], { text: string; dot: string }>([
   ['running', { text: 'text-accent', dot: 'bg-accent' }],
@@ -60,9 +60,14 @@ export function workflowToneClass(record: WorkflowRunRecord): string {
   return record.outcome === undefined ? NEUTRAL_TONE : WORKFLOW_TONE_BY_OUTCOME[record.outcome]
 }
 
-// 中文显示名（WORKFLOW_RUN_OUTCOME_LABELS）的 tray 文案消费位（workflow 行状态点
-// hover title）待上游导出面补登记后接线：该常量已落 packages/shared/src/workflow.ts
-// （[W2 D8]），但 shared 包根 index.ts 的 workflow 导出块只登记了 type 导出、运行时
-// 常量（WORKFLOW_RUN_OUTCOME_ALL / WORKFLOW_RUN_OUTCOME_LABELS）未登记——index.ts
-// 不在本单元领地内，接线（tray-tone import + workflowStatusLabel + 模板 title +
-// state-tone-lock 文案断言段）随导出登记一并补齐。
+/**
+ * workflow run 行的终态中文文案（[W2 D8] 状态中文显示名统一词表的 tray 消费位）：
+ * done + outcome 四值 → shared WORKFLOW_RUN_OUTCOME_LABELS 单源取名（成功/失败/
+ * 已取消/已中断——「已取消」（主动）与「已中断」（被动）禁混用由词表唯一承载）；
+ * running（spinner 已表达进行中）与 done + outcome 缺省（v1 存量快照数据缺口）→
+ * undefined（模板 :title 绑定 undefined = 不出 hover 文案，不发明词表外描述）。
+ */
+export function workflowStatusLabel(record: WorkflowRunRecord): string | undefined {
+  if (record.status !== 'done' || record.outcome === undefined) return undefined
+  return WORKFLOW_RUN_OUTCOME_LABELS[record.outcome]
+}

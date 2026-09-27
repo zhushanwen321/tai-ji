@@ -183,7 +183,7 @@ interface WorkflowNotifyDetails {
  *
  * @param pi ExtensionAPI（仅降级路径直发用）
  * @param runId run 标识
- * @param run WorkflowRun 聚合根（读 spec.scriptName + state.status + trace + scriptResult）
+ * @param run WorkflowRun 聚合根（读 spec.scriptName + trace + scriptResult；status/reason/outcome 载荷源 = 终局记录 settlement——[W2/V1 D1 第 7 行] 换源，不读两态机字段）
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
  * @param ctx GuiContext（GUI 协议渲染载荷；可选）
  * @param artifactsDir [D7] 产物目录指针（`<sessionDir>/workflow-state`，onRunDone

@@ -205,6 +205,15 @@ export type {
   WorkflowAgentCall,
   WorkflowRunRecord,
 } from './workflow'
+// [W2 D8] 状态中文显示名词表运行时常量（ALL = 值域全集 / LABELS = outcome → 中文
+// 显示名（成功/失败/已取消/已中断），通知渲染与 tray 文案消费它 / COVERAGE_LOCK =
+// WorkflowRunOutcome 联合 ⊆ ALL 的反向完备编译锁载体）——renderer 消费入口经此
+// 包根导出面（tray-tone workflowStatusLabel / state-tone-lock 文案断言段）。
+export {
+  WORKFLOW_RUN_OUTCOME_ALL,
+  WORKFLOW_RUN_OUTCOME_LABELS,
+  WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK,
+} from './workflow'
 // pi-preset 用具名导出（S-SH-3）：避免 export * 导致的命名冲突与 tree-shaking 不友好。
 // 所有 type / const / 运行时守卫均显式列出，新增导出时同步在此登记。
 export type {

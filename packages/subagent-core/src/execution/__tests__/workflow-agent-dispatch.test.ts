@@ -40,7 +40,7 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
-import { tryTransition } from "../persistence/execution-record.ts";
+import { trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { createNotifyHost } from "../notify/notify-host.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
@@ -424,7 +424,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     const record = runningRecord(store);
 
     // 模拟 close 路径赢家（close 收口前的终态写点抢先形态：closed + user-close）
-    expect(tryTransition(record, "closed", "user-close")).toBe(true);
+    expect(trySettleLegacyClosed(record, "user-close")).toBe(true);
 
     run.settle({ content: "done" });
     await pending;
@@ -544,7 +544,7 @@ describe("D6 toNotifyRecord origin gate", () => {
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
     // 对照：tool 来源 closed record 正常产通知（gate 仅 workflow）
-    expect(tryTransition(base, "closed", "gc")).toBe(true);
+    expect(trySettleLegacyClosed(base, "gc")).toBe(true);
     expect(host.toNotifyRecord(base)).toBeDefined();
   });
 

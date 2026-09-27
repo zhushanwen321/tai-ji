@@ -2,7 +2,7 @@
 //
 // SP-4: 父子联动测试（真实 SubagentService + index.ts 事件接线）。
 //
-// [M2/M7 重写] 旧套件在测试内手写 tryTransition/completeRecord/recentlyCascaded 模拟
+// [M2/M7 重写] 旧套件在测试内手写 legacy 终态桥接原语（已随 W2/V3 说谎签名退役）/recentlyCascaded 模拟
 // （平行复刻生产逻辑），生产代码任何回归恒绿。现改为两层真实驱动：
 //   Block 1: 真实 SubagentService.onParentFork / onParentNew / disposeAllRecords
 //            → 断言 record 转 closed + closedReason + archive + pending:unregister

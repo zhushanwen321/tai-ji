@@ -168,7 +168,8 @@
               <div class="flex items-center gap-2">
                 <Loader2 v-if="record.status === 'running'" data-testid="tray-workflow-spinner"
                   class="size-[13px] shrink-0 animate-spin text-accent" />
-                <span v-else class="size-2 shrink-0 rounded-full" :class="workflowToneClass(record)" />
+                <span v-else class="size-2 shrink-0 rounded-full" :class="workflowToneClass(record)"
+                  :title="workflowStatusLabel(record)" />
                 <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] font-medium leading-[1.35] text-neutral-fg">
                   {{ record.scriptName }}
                 </span>
@@ -281,7 +282,7 @@ import { useWorkflowAction } from '@/composables/features/workflow/useWorkflowAc
 import { TRAY_BUCKETS, useTrayCountsContext } from '@/components/panel/tray/useTrayCounts'
 import type { TrayBucketValue } from '@/components/panel/tray/useTrayCounts'
 import { isRunningProjection, subagentDotClass } from '@/lib/subagent-bucket'
-import { workflowToneClass } from '@/components/panel/tray/tray-tone'
+import { workflowStatusLabel, workflowToneClass } from '@/components/panel/tray/tray-tone'
 import { backgroundTaskBucket, backgroundTaskStatusIcon } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry, BackgroundTaskIconState, BackgroundTaskStatusKey } from '@/lib/background-task-bucket'
 import { formatTokens as formatTokensK } from '@/lib/token-format'

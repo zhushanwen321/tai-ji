@@ -16,21 +16,37 @@
  *     收编入口 adoptInterruptedRun 终局记录原语（journal run-settled 帧 +
  *     manifest 物化两件直落，outcome='interrupted' + errorCode='idle-evicted'——
  *     管理性回收 = 被动终局，不稀释 cancelled 的主动语义；原 `transition("done",
- *     "time_limited") + save` 两态机活体写点已随 W2/V1 退役）。**只终局化不补
- *     注销/条目**：注销依赖 reconcile-sweep 自愈（判据源 = D6 改接后的 fold/
- *     manifest 终态证据）、条目依赖宿主 session 重开时 loadAll 的
- *     appendSettledEntryFallback 补写——与 abandon 侧对称的「不新增跨 session
- *     写通道」裁决（D3：appendEntry 对旧 session run 写达域无效）。
+ *     "time_limited") + save` 两态机活体写点已随 W2/V1 退役）。**收编形态按 run
+ *     的 session 归属区分**（[W2 D3] 形态区分裁决）：
+ *     - cross-session（run 属旧 session，30 天档常态）：journal + manifest 两件
+ *       直落；条目/注销依赖宿主 session 重开自愈（loadAll 的
+ *       appendSettledEntryFallback 补条目 + reconcile-sweep 补注销，判据源 = D6
+ *       改接后的 fold/manifest 终态证据）——与 abandon 侧对称的「不新增跨 session
+ *       写通道」裁决（appendEntry 对旧 session run 写达域无效）。
+ *     - same-session（run 属当前 session）：**四件直落齐套**——两件之外，终态
+ *       条目 + pending 注销条目经注入面直落当前 session entries（写达域有效）。
+ *       归属判定锚 = 当前 session 的活跃注册差集（collectActiveRegisterEntries）；
+ *       注销 reason 经 runSettledOutcomeToDoneReason 联合派生单点（D5 五处统一）。
  *     时间锚 = WorkflowRunMeta.startedAt（run 创建时刻 ISO string）；终局判定
  *     由原语的幂等前置承接（fold 终态 / manifest / 条目三面证据——不裸读快照
  *     status 字段，快照已终局的 run 命中 skippedTerminal 幂等跳过）。
  */
+import { mapReasonToStatus } from "@zhushanwen/extension-protocol";
 import { toErrorMessage } from "../../core/error-message.ts";
 import { isHostNotConfiguredError } from "../../core/host-services.ts";
 import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 import { isResumable } from "../lifecycle/lifecycle-predicates.ts";
+import { collectActiveRegisterEntries } from "../round-supervisor/reconcile-sweep.ts";
 import type { RecordStore } from "./record-store.ts";
+import {
+  writePendingUnregisterEntryVia,
+  writeSettledRecordEntryVia,
+} from "../../orchestration/lifecycle.ts";
+import {
+  buildWorkflowRecordSettledEntryData,
+  runSettledOutcomeToDoneReason,
+} from "../../orchestration/worker-message-pump.ts";
 import { adoptInterruptedRun } from "../../orchestration/run-registry.ts";
 
 const logger = getLogger("subagents");
@@ -109,6 +125,21 @@ export interface WorkflowRunGcStore {
 }
 
 /**
+ * [W2/V1 D3 same-session 四件直落] 当前 session 直落面（全部惰性 getter——pi/
+ * 主 session 文件 initSession 注入、dispose 翻转，运行时可变；对齐 notify-host
+ * deps 惰性求值先例）。缺省不注入 = 全部 run 按 cross-session 两件直落（保守侧，
+ * 与收编原语缺省行为一致）。
+ */
+export interface WorkflowRunGcSessionFace {
+  /** 主 session 文件现读（run 归属判定锚——活跃注册差集证据源；undefined = 无
+   *  判定通道，本轮全部按 cross-session 两件直落）。 */
+  readonly sessionFile: () => string | undefined;
+  /** 权威直落现读（终态条目/注销条目写当前 session entries；dispose 后 pi 置
+   *  null，闭包内部现读 → no-op，对齐 notify-host「pi 缺席静默丢弃」语义）。 */
+  readonly appendEntry: () => (customType: string, data: unknown) => void;
+}
+
+/**
  * 启动 idle record GC 定时器，返回 stop 函数（清理 interval；幂等）。
  * 每个扫描周期：
  *  - record 面：对 store 内全部 active record 中 resumable（[U5/D4] idle 派生——
@@ -122,13 +153,20 @@ export interface WorkflowRunGcStore {
  *  - workflow 面（注入 workflowRuns 时）：超龄 run 交收编入口终局化
  *    （[W2/V1 D3] adoptInterruptedRun 原语——outcome='interrupted' +
  *    errorCode='idle-evicted'，幂等前置承接终局判定），单 run 失败不阻断。
+ *    收编件数按 run 的 session 归属区分（[W2 D3] 形态区分裁决，见文件头注）：
+ *    same-session 四件直落齐套（sessionFace 注入 + 注册差集命中），cross-session
+ *    两件直落（条目/注销重开自愈）。
  *
  * [池抽象降级 2026-09-13] 原「回收时同步释放该 record 的引擎池引用」（releasePoolRef）
  * 接线已删除——refs 引用计数机制整体退役，record 的 journal 回收统一由
  * pool-manager cleanupExpiredJournals 的 30 天 mtime TTL 兜底（record 主数据死亡对
  * core 无触发点，mtime 是唯一可观测锚）。
  */
-export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStore): () => void {
+export function startIdleGc(
+  store: RecordStore,
+  workflowRuns?: WorkflowRunGcStore,
+  sessionFace?: WorkflowRunGcSessionFace,
+): () => void {
   const timer = setInterval(() => {
     const now = Date.now();
     // [U5/D4] 扫描面 = 全部内存 record（listAllInMemory）——判据 isResumable 已改
@@ -158,7 +196,7 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
       }
     }
     if (workflowRuns !== undefined) {
-      void gcWorkflowRuns(workflowRuns, now);
+      void gcWorkflowRuns(workflowRuns, now, sessionFace);
     }
   }, resolveWorkflowRunGcIntervalMs());
   timer.unref?.();
@@ -172,8 +210,20 @@ export function startIdleGc(store: RecordStore, workflowRuns?: WorkflowRunGcStor
  * adoptInterruptedRun 幂等前置（fold 终态 / manifest / 条目——不裸读快照字段
  * 判终局，分流表 idle-gc 判活行）。失败吞错留痕（清理是旁路维护，不能拖垮 GC
  * interval；下轮重试——原语幂等，重试安全）。
+ *
+ * 收编件数按 run 的 session 归属区分（[W2 D3] 形态区分裁决）：归属锚 = 当前
+ * session 活跃注册差集（collectActiveRegisterEntries——注册条目在本 session
+ * 文件里 ⟺ appendEntry 写达域有效）。same-session 四件直落齐套（journal 帧 +
+ * manifest + 终态条目 + 注销条目）；cross-session 两件直落（条目/注销依赖宿主
+ * session 重开自愈，不新增跨 session 写通道——与 abandon 侧对称裁决）。
+ * 直落失败（appendEntry 抛错）不重试本轮——残差交 reconcile-sweep 自愈（判据源
+ * 已改接 fold/manifest 终态证据，与「直落失败窄竞态交 sweep」同构）。
  */
-async function gcWorkflowRuns(workflowRuns: WorkflowRunGcStore, now: number): Promise<void> {
+async function gcWorkflowRuns(
+  workflowRuns: WorkflowRunGcStore,
+  now: number,
+  sessionFace?: WorkflowRunGcSessionFace,
+): Promise<void> {
   let runs: Awaited<ReturnType<WorkflowRunGcStore["loadAll"]>>;
   try {
     runs = await workflowRuns.loadAll();
@@ -191,24 +241,61 @@ async function gcWorkflowRuns(workflowRuns: WorkflowRunGcStore, now: number): Pr
     return;
   }
   const ttlMs = resolveWorkflowRunIdleTtlMs();
+  // [W2/V1 D3 same-session 归属判定] 当前 session 活跃注册集（每轮现读——主
+  // session 文件 initSession 注入运行时可变；文件不可读返回空集 = 本轮全部按
+  // cross-session 两件直落，保守侧与重开自愈兜底等价，无回归）。
+  const sessionFile = sessionFace?.sessionFile();
+  const currentSessionRunIds =
+    sessionFace !== undefined && sessionFile !== undefined
+      ? new Set(collectActiveRegisterEntries(sessionFile).map((e) => e.id))
+      : new Set<string>();
   for (const run of runs) {
     if (run.state.status !== "running") continue; // 廉价预筛（终局判定权威在原语幂等前置）
     const startedMs = Date.parse(run.meta.startedAt);
     if (!Number.isFinite(startedMs)) continue; // 畸形锚不过判（宁挂账不失明）
     const age = now - startedMs;
     if (age <= ttlMs) continue;
+    const sameSession = currentSessionRunIds.has(run.runId);
     logger.warn(
-      `[subagents] GC: terminating stale running workflow run ${run.runId} (started ${Math.round(age / MS_PER_DAY)}d ago)`,
+      `[subagents] GC: terminating stale running workflow run ${run.runId} (started ${Math.round(age / MS_PER_DAY)}d ago` +
+        `${sameSession ? ", same-session full accounting" : ""})`,
     );
     try {
       // [W2/V1 D3] 收编入口：journal 帧 + manifest 两件直落（outcome='interrupted'
-      // + errorCode='idle-evicted'——管理性回收归被动终局）；条目/注销不补
-      //（跨 session 写达域约束，重开自愈——D3 裁决，见文件头注）。
+      // + errorCode='idle-evicted'——管理性回收归被动终局）。same-session 追注
+      // 终态条目回调（③——写达域有效）；cross-session 不传（缺省 = 不写，跨
+      // session 写达域约束，重开自愈——D3 裁决，见文件头注）。
       const adopted = await adoptInterruptedRun(run.runId, {
         outcome: "interrupted",
         errorCode: "idle-evicted",
         reason: "idle run evicted after retention TTL",
+        ...(sameSession
+          ? {
+              appendSettledEntry: (entry: ReturnType<typeof buildWorkflowRecordSettledEntryData>) => {
+                // customType 绑定经白名单宿主薄写函数（R3 写面守卫：run 族
+                // customType 常量不出现在消费侧文件，见 lifecycle.ts 薄写函数注释）。
+                const write = sessionFace?.appendEntry();
+                if (write) writeSettledRecordEntryVia(write, entry);
+              },
+            }
+          : {}),
       });
+      if (adopted === "adopted" && sameSession) {
+        // 注销条目④直落（写达域有效；仅恰在本轮收编成功时发——上轮已收编而注销
+        // 直落失败的残差交 reconcile-sweep 自愈，不在原语幂等跳过路径上重发）。
+        // reason 经 runSettledOutcomeToDoneReason 联合派生单点（[W2 D5] 五处统一
+        // ——interrupted → "failed" 诊断兜底容器，细分语境由帧 errorCode 保留）；
+        // status 经 protocol mapReasonToStatus 单点映射（与 sweep 补注销同款）。
+        const reason = runSettledOutcomeToDoneReason("interrupted", "idle-evicted");
+        const unregisterWrite = sessionFace?.appendEntry();
+        if (unregisterWrite) {
+          writePendingUnregisterEntryVia(unregisterWrite, {
+            id: run.runId,
+            reason,
+            status: mapReasonToStatus(reason),
+          });
+        }
+      }
       if (adopted !== "adopted") {
         logger.debug(
           `[subagents] GC: stale workflow run ${run.runId} not adopted (${adopted}) — skip this cycle`,

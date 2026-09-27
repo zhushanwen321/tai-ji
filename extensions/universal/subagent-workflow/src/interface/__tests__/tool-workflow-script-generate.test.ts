@@ -81,7 +81,6 @@ parameters:
     task: { type: string }
   required: [task]
 */
-const agent = require("./agent");
 agent("worker", { task: $ARGS.task });
 `;
 
@@ -91,7 +90,6 @@ description: bad
   broken: indent
 phases: [a]
 */
-const agent = require("./agent");
 agent("w");
 `;
 
@@ -104,7 +102,6 @@ parameters:
   patternProperties:
     "^batch\\d+$": { type: string }
 */
-const agent = require("./agent");
 agent("w");
 `;
 
@@ -113,12 +110,10 @@ const LEGACY_CONST_META = `const meta = {
   description: legacy,
   phases: ["a"]
 };
-const agent = require("./agent");
 agent("w");
 `;
 
-const NO_META = `const agent = require("./agent");
-agent("w");
+const NO_META = `agent("w");
 `;
 
 const ESM_IMPORT = `/* @pi-meta
@@ -127,7 +122,6 @@ description: d
 phases: [a]
 */
 import { foo } from "bar";
-const agent = require("./agent");
 agent("w");
 `;
 
@@ -209,7 +203,6 @@ name: x
 description: d
 phases: [a]
 */
-const agent = require("./agent");
 export const foo = 1;
 agent("w");
 `;

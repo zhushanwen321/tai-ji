@@ -12,7 +12,7 @@
 //                   的原始缺陷已由「identity 字段创建时一次确定」的收口本身消解，
 //                   undefined 是合法缺席语义而非丢失）
 //   updateFromEvent 唯一事件更新入口（累积进 turns[]，消灭闭包旁路累积器）
-//   completeRecord  唯一完成入口（冻结状态）
+//   completeLegacyClosed 唯一 legacy 终态冻结入口（D7 例外族 / 监督器放弃，W4 sunset）
 //   project/snapshot 唯一投影入口（两路径字段一致）
 //
 // Core 层叶子原语：仅依赖 types.ts。零 Pi / Runtime / TUI 依赖。
@@ -221,7 +221,7 @@ export function createRecord(
     // 全 record 自增（万物可续）。
     round: 0,
 
-    // 完成（completeRecord 唯一写点）
+    // 完成（completeLegacyClosed 唯一写点）
     endedAt: undefined,
     result: undefined,
     error: undefined,
@@ -681,33 +681,32 @@ export function getTotalUsage(record: ExecutionRecord): AgentUsageTotal | undefi
 }
 
 // ============================================================
-// 完成（唯一入口）
+// 意图原语（record 两态机内存面：CAS 收口 / 冻结 / 回边）
 // ============================================================
 
 /**
- * status 状态机的 CAS 互斥锁（settle 方向：running → idle）。仅当
- * `record.status === "running"` 时收口并返回 true，否则返回 false。**status 状态机
- * 本身就是互斥锁**——check-then-set 在 JS 单线程事件循环里天然原子。
+ * 意图原语：legacy closed 终态收口的 CAS 抢锁（settle 方向：running → idle）。
+ * 仅当 `record.status === "running"` 时收口并返回 true，否则返回 false。**status
+ * 状态机本身就是互斥锁**——check-then-set 在 JS 单线程事件循环里天然原子。
  *
- * 用途：executor 的收尾竞争。cancelBackground 与 background detached 完成回调
- * 都调 tryTransition 抢锁：抢到负责完整收尾，没抢到闭嘴不做事。
+ * [W2/V3 说谎签名退役] 前身函数的 target 参数被 void 丢弃（说谎签名），本原语是
+ * 同一行为的诚实命名——无目标参数：收口
+ * 目标恒为 legacy closed 形态（idle + closedReason/stopReason 双写，桥接不变量
+ * 「closed ⟺ idle ∧ closedReason≠undefined」的写侧半边）。
  *
- * [U2 桥接] 永久会话模型两态下旧「closed 终态」不再存在——本函数桥接为
- * running→idle 收口 + closedReason/stopReason 双写（桥接不变量「closed ⟺ idle ∧
- * closedReason≠undefined」的写侧半边，保持全部既有读侧 gate 语义零漂移）。
- * target 参数保留旧字面量（调用方零改动）；新代码应改调 store.markSettled
- * （U5 意愿动作接线时本函数随旧终态编排一并退役）。
+ * 写侧生产者仅剩两处（types.ts ExecutionStatus 头注登记）：workflow D7 例外族
+ * （settleWorkflowRecord 收口单点）与监督器放弃产出（service-binding giveUp）；
+ * 读侧对偶 = isLegacyClosedSettled 单一谓词。轮收口（非终态）走 store.markSettled
+ * （不写 closedReason），与本原语语义分界清晰。
  *
  * @param closedReason 旧终态 L2 原因（同时镜像进 stopReason 展示位）。
  *   缺省 "gc"（通用完成/失败）。
  */
-export function tryTransition(
+export function trySettleLegacyClosed(
   record: ExecutionRecord,
-  target: "closed",
   closedReason?: ClosedReason,
 ): boolean {
   if (record.status !== "running") return false;
-  void target; // 桥接期唯一合法值（类型位保留）；新两态下收口目标恒 idle。
   record.status = "idle";
   record.closedReason = closedReason ?? "gc";
   record.stopReason = record.closedReason;
@@ -717,7 +716,7 @@ export function tryTransition(
 /**
  * status 状态机的 CAS 互斥锁（wake 方向：idle → running，U2 新增）。仅当
  * `record.status === "idle"` 时翻回 running 并返回 true；running（一轮已在飞）/
- * 其他形态一律拒绝。与 tryTransition（settle 方向）共同构成两态状态机的
+ * 其他形态一律拒绝。与 trySettleLegacyClosed（settle 方向）共同构成两态状态机的
  * running↔idle 迁移面，非法迁移（对 running 重复 settle / 对 running 重复 wake）
  * 由 CAS 前置判据拒绝。
  *
@@ -761,7 +760,7 @@ export function resurrectClosed(
  *
  * 仅用于 session-reconstructor 从 session.jsonl 重建终态 record 时——
  * 重建的 record 没有 running 状态需要保护，直接赋值即可。
- * 禁止在正常执行流程中使用此函数（应使用 tryTransition）。
+ * 禁止在正常执行流程中使用此函数（应使用 trySettleLegacyClosed）。
  */
 export function markReconstructedStatus(
   record: { status: ExecutionStatus },
@@ -771,24 +770,24 @@ export function markReconstructedStatus(
 }
 
 /**
- * 唯一完成入口。冻结状态（写 endedAt/agentResult/result/error/outcome）。
- * 不修改 turns/totalTokens——已由 updateFromEvent 累积，completeRecord 只读不重置。
+ * 意图原语：legacy closed 终态冻结（D7 例外族 / 监督器放弃的终态写点）。
+ * 冻结状态（写 endedAt/agentResult/result/error/outcome）。
+ * 不修改 turns/totalTokens——已由 updateFromEvent 累积，本函数只读不重置。
  *
- * ⚠ 前置条件：调用方必须先通过 tryTransition 抢到锁（status 已被 CAS 设为 target）。
+ * ⚠ 前置条件：调用方必须先通过 trySettleLegacyClosed 抢到锁（status 已被 CAS 置 idle）。
  *
- * [U2 桥接] status 参数保留旧字面量（调用方零改动）；两态下冻结为 idle +
- * closedReason/stopReason 双写（桥接不变量写侧半边，与 tryTransition 同构）。
- * U5 意愿动作接线后本函数随旧终态编排退役（轮收口归 markSettled）。
+ * [W2/V3 说谎签名退役] 前身函数的 status 参数被 void 丢弃（说谎签名），本原语是
+ * 同一行为的诚实命名——无目标
+ * 参数：冻结目标恒为 legacy closed 形态（idle + closedReason/stopReason 双写，
+ * 与 trySettleLegacyClosed 同构）。唯一 outcome 写入点（U3 C-outcome）。
  *
  * @param closedReason 旧终态 L2 关闭原因（同时镜像进 stopReason 展示位）。
  */
-export function completeRecord(
+export function completeLegacyClosed(
   record: ExecutionRecord,
   result: AgentResult,
-  status: "closed",
   closedReason?: ClosedReason,
 ): void {
-  void status; // 桥接期唯一合法值（类型位保留）；两态下冻结目标恒 idle。
   record.status = "idle";
   record.closedReason = closedReason ?? "gc";
   record.stopReason = record.closedReason;
@@ -826,7 +825,7 @@ export function completeRecord(
  * "failed"——语义为「父进程关闭时子 agent 未完成即失败」，选定行为而非疏漏，
  * 勿当 bug 改回 cancelled 造成派生矛盾。
  *
- * 唯一写点 completeRecord 调用本函数冻结 record.outcome；通知 payload（notifier 投影
+ * 唯一写点 completeLegacyClosed 调用本函数冻结 record.outcome；通知 payload（notifier 投影
  * 边界）与无 outcome 字段的存量/重建 record 由 projectOutcome 兜底复用本函数。
  */
 export function deriveOutcome(

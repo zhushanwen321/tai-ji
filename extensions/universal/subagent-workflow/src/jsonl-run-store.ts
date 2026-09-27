@@ -650,8 +650,9 @@ export class JsonlRunStore implements RunStore {
     const filePath = this.filePathFor(runId);
     try {
       // 兜底容错：run 工作目录（sessionDir）已被清理时，mkdir 抛 ENOENT，放弃持久化。
-      // 竞态场景（review-fix-loop-e2e 等 runAndWait 测试）：handleReturn 内
-      // run.transition("done") 同步改 status 后，runAndWait 轮询发现 done 并 resolve，
+      // 竞态场景（review-fix-loop-e2e 等 runAndWait 测试）：handleReturn 活体终局经
+      // journal run-settled 帧落账后（两态机活体写点已删——[W2/V1 D1]），runAndWait
+      // 轮询按 isRunSettled（聚合 done ∨ journal run-settled 帧）判定终局并 resolve，
       // 测试 afterEach 随即 rmSync 删除 sessionDir；此时 in-flight 的 mkdir
       // 遇到目录链已删除 → ENOENT（{recursive:true} 在并发 rmSync 下仍可抛 ENOENT）。
       // run 既已终态（状态不再变化），持久化无意义也无法完成 → settle resolve。

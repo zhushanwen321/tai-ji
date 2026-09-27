@@ -141,8 +141,14 @@ function linkEntry(runId: string, statePath: string): CustomEntry {
   };
 }
 
-/** journal run-settled 帧（isWorkflowRunEventLine 最小形状：type/ts/outcome 落词表）。 */
-function settledLine(outcome: "completed" | "failed" | "cancelled", extra?: Record<string, unknown>): string {
+/** journal run-settled 帧（isWorkflowRunEventLine 最小形状：type/ts/outcome 落词表）。
+ *  outcome 放行 RunOutcome 四值——interrupted 用例锁定壳侧 runSettledOutcomeToDoneReason
+ *  的 interrupted→"failed" 反向行（与 core run-registry.test.ts 收编条目 reason 断言
+ *  同规格——双侧镜像实现的防漂移锚）。 */
+function settledLine(
+  outcome: "completed" | "failed" | "cancelled" | "interrupted",
+  extra?: Record<string, unknown>,
+): string {
   return JSON.stringify({ type: "run-settled", ts: Date.now(), outcome, artifactsDir: "/tmp/wf", ...extra });
 }
 
@@ -263,6 +269,27 @@ describe("loadAll 终局调和（v1 兼容层）：journal settled 帧 / state �
     const loaded = await store.loadAll();
     expect(loaded[0]!.state.status).toBe("done");
     expect(loaded[0]!.state.reason).toBe("aborted");
+  });
+
+  it("A1 interrupted：journal run-settled(interrupted) → 诊断面折叠 reason='failed'（[W2 D5] 反向行壳侧锚——显示语义走 outcome 四值，reason 是唯一折叠位）", async () => {
+    const run = makeRunningRun("run-recon-g");
+    const entries: CustomEntry[] = [v1RecordEntry(run)];
+
+    const journalPath = path.join(tmpDir, "workflow-state", "run-recon-g.events.jsonl");
+    fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+    fs.writeFileSync(
+      journalPath,
+      `${settledLine("interrupted", { errorCode: "interrupted_abandoned", reason: "abandon window elapsed" })}\n`,
+      "utf8",
+    );
+
+    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const loaded = await store.loadAll();
+    expect(loaded[0]!.state.status).toBe("done");
+    // interrupted → "failed" 诊断兜底（DoneReason 无 interrupted 成员，W4 随兼容层 sunset）
+    expect(loaded[0]!.state.reason).toBe("failed");
+    // 帧 reason 文本保真（不落 generic 文案）——细分语境由帧 errorCode 承载
+    expect(loaded[0]!.state.error).toBe("abandon window elapsed");
   });
 
   it("A2 GC 旁路：journal 无 settled + state 文件被旁路终局化（done,time_limited）→ 采纳 state 终局", async () => {

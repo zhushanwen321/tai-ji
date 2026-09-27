@@ -395,6 +395,11 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   it("kill-9 恢复：running run 转 done,failed + pending:unregister appendEntry 直落（不经 emit）+ save 落盘", async () => {
     const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const { pi, entries, emits } = createFakePi();
+    // 通知发送面 spy 化：守卫「中断 run 不产生 workflow-result 完成通知」（[W2 场景 4]
+    // 断言——收编路径无通知回调，构造性成立；若未来壳侧装配误把 onRunDone 接进恢复
+    // 链，此断言红灯）
+    const sendMessage = vi.fn();
+    pi.sendMessage = sendMessage;
     const runningRun = makeRun("wf-seam-k9", "running");
     const save = vi.fn(async () => {});
     const fakeStore = makeFakeStore(vi.fn(async () => [runningRun]));
@@ -418,6 +423,8 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     });
     // 零 emit：pending:unregister 不再经事件通道（验收条款：壳侧 emit 0）
     expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();
+    // 零完成通知：恢复链无通知回调（场景 4 断言环——收编 run 不发 workflow-result）
+    expect(sendMessage).not.toHaveBeenCalled();
     expect(save).toHaveBeenCalledTimes(1);
     expect(result.storeHealthy).toBe(true);
   });

@@ -1159,6 +1159,30 @@ describe("W17/W1: workflow-record 条目面（v1 停写锚定 + v2 收编读面�
     expect(data["callCount"]).toBe(1); // journal ask-settled 帧数投影
   });
 
+  it("[W2 D5 反向行壳侧锚] interrupted 帧收编补写：条目 reason 折叠 'failed' + outcome 四值透传", async () => {
+    const runId = "run-w1-interrupted";
+    const journalPath = path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`);
+    appendJournalLine(tmpDir, runId, { type: "run-created", runId, workflowName: "test-script", argsSummary: "{}", ts: 1000, seq: 1 });
+    appendJournalLine(tmpDir, runId, { type: "run-settled", outcome: "interrupted", errorCode: "interrupted_abandoned", reason: "abandon window elapsed", artifactsDir: tmpDir, ts: 3000, seq: 2 });
+
+    const entries: CustomEntry[] = [v2RegisteredEntry(runId, journalPath)];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const loaded = await store.loadAll();
+    expect(loaded[0]!.state.status).toBe("done");
+    // 聚合诊断面折叠：interrupted → "failed"（与 core 收编条目 reason 断言同规格——
+    // run-registry.test.ts [W2 D5] 锚的壳侧镜像；DoneReason 无 interrupted 成员）
+    expect(loaded[0]!.state.reason).toBe("failed");
+    // fallback 条目面：reason 同折叠 + outcome 四值透传（细分语境由 errorCode 保留可辨）
+    const settledEntries = entries.filter(
+      (e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE && (e.data as { kind?: string }).kind === "settled",
+    );
+    expect(settledEntries).toHaveLength(1);
+    const data = settledEntries[0]!.data as Record<string, unknown>;
+    expect(data["reason"]).toBe("failed");
+    expect(data["outcome"]).toBe("interrupted");
+    expect(data["errorCode"]).toBe("interrupted_abandoned");
+  });
+
   it("[W1 收编幂等] 终态条目已在 → 补写跳过；双重启 loadAll 不重复追加", async () => {
     const runId = "run-w1-idem";
     const journalPath = path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`);

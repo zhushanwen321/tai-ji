@@ -13,19 +13,20 @@
  *   OUTCOME_SNAPSHOT——词表扩值而映射漏配时权威拦截是 satisfies 编译红，本文件
  *   快照比对为第二道）；四值 tone 三分行为（completed 绿 / failed 红 /
  *   cancelled+interrupted 同中性——用词区分由 shared WORKFLOW_RUN_OUTCOME_LABELS
- *   承载，其断言段随导出面登记后补齐，见文件尾登记注释）；reopened 中性色修正锚。
+ *   承载，文案断言段见「中文显示名词表单源」describe）；reopened 中性色修正锚。
  *
  * 运行：cd packages/renderer && pnpm vitest run src/__tests__/state-tone-lock.test.ts
  */
 import { describe, it, expect } from 'vitest'
 import {
   SUBAGENT_STATUS_ALL,
+  WORKFLOW_RUN_OUTCOME_LABELS,
   type SubagentRecord,
   type WorkflowRunOutcome,
   type WorkflowRunRecord,
 } from '@taiji/shared'
 import { SUBAGENT_DOT_RULES, subagentDotClass } from '@/lib/subagent-bucket'
-import { WORKFLOW_TONE_BY_OUTCOME, workflowToneClass } from '@/components/panel/tray/tray-tone'
+import { WORKFLOW_TONE_BY_OUTCOME, workflowStatusLabel, workflowToneClass } from '@/components/panel/tray/tray-tone'
 
 /**
  * WorkflowRunOutcome 词表快照（与 shared/src/workflow.ts:92 四值联合同步的本地锚）：
@@ -88,6 +89,30 @@ describe('WORKFLOW_TONE_BY_OUTCOME 全集锁（[W2 D8] workflow tone 三分）',
   })
 })
 
+describe('中文显示名词表单源（[W2 D8] WORKFLOW_RUN_OUTCOME_LABELS 消费接线）', () => {
+  it('逐值显示名断言（成功/失败/已取消/已中断——shared 常量为唯一权威，消费方零翻译）', () => {
+    expect(WORKFLOW_RUN_OUTCOME_LABELS.completed).toBe('成功')
+    expect(WORKFLOW_RUN_OUTCOME_LABELS.failed).toBe('失败')
+    expect(WORKFLOW_RUN_OUTCOME_LABELS.cancelled).toBe('已取消')
+    expect(WORKFLOW_RUN_OUTCOME_LABELS.interrupted).toBe('已中断')
+  })
+
+  it('「已取消」（主动）与「已中断」（被动）禁混用锚：四值显示名两两互异且含两被动/主动区分词', () => {
+    const labels = Object.values(WORKFLOW_RUN_OUTCOME_LABELS)
+    expect(sorted(labels)).toEqual(sorted(['成功', '失败', '已取消', '已中断']))
+    expect(new Set(labels).size).toBe(labels.length)
+  })
+
+  it('workflowStatusLabel：done+outcome → 词表取名；running / outcome 缺省 → undefined（不出 hover 文案）', () => {
+    expect(workflowStatusLabel(workflowRecord('completed'))).toBe('成功')
+    expect(workflowStatusLabel(workflowRecord('failed'))).toBe('失败')
+    expect(workflowStatusLabel(workflowRecord('cancelled'))).toBe('已取消')
+    expect(workflowStatusLabel(workflowRecord('interrupted'))).toBe('已中断')
+    expect(workflowStatusLabel(workflowRecord('failed', 'running'))).toBeUndefined()
+    expect(workflowStatusLabel(workflowRecord(undefined))).toBeUndefined()
+  })
+})
+
 describe('SUBAGENT_DOT_RULES 全集锁（[W2 D8] 状态点规则按 status 分组）', () => {
   it('分组键域 ≡ SubagentStatus 词表全集（词表扩值漏配 → 本断言红 + satisfies 编译红）', () => {
     expect(sorted(Object.keys(SUBAGENT_DOT_RULES))).toEqual(sorted(SUBAGENT_STATUS_ALL))
@@ -118,7 +143,3 @@ describe('SUBAGENT_DOT_RULES 全集锁（[W2 D8] 状态点规则按 status 分�
     expect(SUBAGENT_DOT_RULES['phantom' as string]).toBeUndefined()
   })
 })
-
-// 待上游导出面登记后的补齐段（见 tray-tone.ts 尾注）：WORKFLOW_RUN_OUTCOME_LABELS
-// 逐值接线断言（成功/失败/已取消/已中断）+「已取消」（主动）与「已中断」（被动）
-// 禁混用锚——常量自 shared 包根 index.ts 可导入后随接线一并落此。

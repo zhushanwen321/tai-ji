@@ -6,8 +6,8 @@
 // （.state/binding/manifest/.alive 各面写断言）+ epoch 递增」）。
 //
 // 桥接不变量（U2 迁移契约）：旧「closed 终态」⟺ idle ∧ closedReason 有值——
-// 旧终态路径（tryTransition/completeRecord）双写 closedReason + stopReason；新
-// settle 路径（markSettled）只写 stopReason（不终态化）。
+// legacy 终态原语（trySettleLegacyClosed/completeLegacyClosed）双写 closedReason +
+// stopReason；新 settle 路径（markSettled）只写 stopReason（不终态化）。
 //
 // fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实数据目录。
 
@@ -18,11 +18,11 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  completeRecord,
+  completeLegacyClosed,
   createRecord,
   resurrectClosed,
   tryEnterRunning,
-  tryTransition,
+  trySettleLegacyClosed,
 } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { readRecordBinding, readStateMarker, writeRecordBinding } from "../persistence/state-marker.ts";
@@ -83,24 +83,24 @@ function newStore(): RecordStore {
 // ── ① CAS 语义：running↔idle 迁移 + 非法迁移拒绝 ────────────────────────────
 
 describe("两态状态机 CAS 语义", () => {
-  it("tryTransition（settle 方向）：running→idle 收口 + closedReason/stopReason 双写", () => {
+  it("trySettleLegacyClosed（settle 方向）：running→idle 收口 + closedReason/stopReason 双写", () => {
     const rec = runningRecord();
-    expect(tryTransition(rec, "closed", "gc")).toBe(true);
+    expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
     expect(rec.status).toBe("idle");
     expect(rec.closedReason).toBe("gc");
     expect(rec.stopReason).toBe("gc");
   });
 
-  it("tryTransition：非 running（已收口）重复 settle = 非法迁移拒绝（false，无副作用）", () => {
+  it("trySettleLegacyClosed：非 running（已收口）重复 settle = 非法迁移拒绝（false，无副作用）", () => {
     const rec = runningRecord();
-    expect(tryTransition(rec, "closed", "gc")).toBe(true);
-    expect(tryTransition(rec, "closed", "cancelled")).toBe(false);
+    expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
+    expect(trySettleLegacyClosed(rec, "cancelled")).toBe(false);
     expect(rec.closedReason).toBe("gc"); // 首次收口位不被二次收口覆盖
   });
 
   it("tryEnterRunning（wake 方向）：idle→running 翻转；running 重复 wake 拒绝", () => {
     const rec = runningRecord();
-    expect(tryTransition(rec, "closed", "gc")).toBe(true);
+    expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
     expect(tryEnterRunning(rec)).toBe(true);
     expect(rec.status).toBe("running");
     expect(tryEnterRunning(rec)).toBe(false); // 已 running：非法迁移拒绝
@@ -109,7 +109,7 @@ describe("两态状态机 CAS 语义", () => {
 
   it("running↔idle 往返迁移（settle → wake → settle）构造性成立", () => {
     const rec = runningRecord();
-    expect(tryTransition(rec, "closed", "user-close")).toBe(true);
+    expect(trySettleLegacyClosed(rec, "user-close")).toBe(true);
     expect(rec.status).toBe("idle");
     expect(tryEnterRunning(rec)).toBe(true);
     expect(rec.status).toBe("running");
@@ -138,7 +138,7 @@ describe("两态状态机 CAS 语义", () => {
 
   it("resurrectClosed：已收口 idle → running 接管翻回（清收口位）；running no-op", () => {
     const rec = runningRecord();
-    expect(tryTransition(rec, "closed", "gc")).toBe(true);
+    expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
     expect(resurrectClosed(rec)).toBe(true);
     expect(rec.status).toBe("running");
     expect(rec.closedReason).toBeUndefined();
@@ -149,12 +149,11 @@ describe("两态状态机 CAS 语义", () => {
     expect(rec.status).toBe("running");
   });
 
-  it("completeRecord 桥接：冻结 idle + closedReason/stopReason 双写 + outcome 派生", () => {
+  it("completeLegacyClosed 桥接：冻结 idle + closedReason/stopReason 双写 + outcome 派生", () => {
     const rec = runningRecord();
-    completeRecord(
+    completeLegacyClosed(
       rec,
       { text: "done", turns: 1, durationMs: 5, success: true, sessionId: "bg-1", toolCalls: [] },
-      "closed",
       "gc",
     );
     expect(rec.status).toBe("idle");

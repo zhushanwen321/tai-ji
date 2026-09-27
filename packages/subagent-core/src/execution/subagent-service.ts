@@ -13,7 +13,7 @@ import { bestEffort } from "./assembly/best-effort.ts";
 // DEFAULT_IDLE_TIMEOUT_MS 消费（assertIdleTimeoutMsSafe 错误文案基准）已随 run 域
 // 迁 service/run-orchestration.ts——本文件 lifecycle-manager 零 import。
 import { type ConcurrencyPool, DefaultConcurrencyPool } from "./assembly/concurrency-pool.ts";
-// [R4] execution-record 消费（project/tryTransition/updateFromEvent）已随 run 域迁
+// [R4] execution-record 消费（project/updateFromEvent）已随 run 域迁
 // service/run-orchestration.ts（+ workflow-dispatch.ts 的 updateFromEvent）——壳内零消费。
 // [R4] doFinalizeRoundToIdle（finalizeRoundToIdle wrapper）已随 run 域迁
 // service/run-orchestration.ts——壳内零消费。
@@ -295,6 +295,9 @@ export class SubagentService {
       getNotifyHost: () => this.notifyHost,
       getSessionsDir: () => this.sessionsDir,
       getPi: () => this.pi,
+      // [W2/V1 D3 same-session 四件直落] GC 收编归属判定的注册差集证据源（晚绑定
+      // ——mainSessionFile 经 baselines 现读，initSession 注入前 undefined）。
+      getMainSessionFile: () => this.mainSessionFile,
       // [R4 / C-5 兑现 / 2026-09-13 design-code-sync 接线] Continuation 协作面本体
       //（continuations 队列 + onRecordFinalizedCleanup + abortAndClearQueue）已迁
       // ChatRounds 聚合——R3 装配时指向壳闭包的回调改指聚合显式接口（r0-inventory
@@ -655,8 +658,8 @@ export class SubagentService {
 
   // ── 域 #17 取消 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts）──
 
-  /** 取消 background record（tryTransition CAS 抢锁防重复副作用）。本体已迁
-   *  RecordLifecycle；壳纯转发，对外签名不变（D3 壳终态保留面）。 */
+  /** 取消 background record（[U5] cancel = 中断当前轮 settle，语义见 RecordLifecycle）。
+   *  本体已迁 RecordLifecycle；壳纯转发，对外签名不变（D3 壳终态保留面）。 */
   cancel(id: string): boolean {
     return this.recordLifecycle.cancel(id);
   }

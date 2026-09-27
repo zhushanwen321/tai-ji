@@ -1386,7 +1386,7 @@ describe("集成：[A5] message 资格引擎轴判定本体直测（engineSuppor
 //   1. chat 轮（kickOffChatRound chatMode 分支）：实时累积 + 轮终 entry 保真 + 跨轮持续
 //      （Continuation 轮间共用同一 record 实例）+ close 终态 entry 保真；
 //   2. pi one-shot（kickOffChatRound 非 chatMode 分支——修复前连 onEvent 都不传）：
-//      实时累积 + outcome 写入不重置（completeRecord 只读不重置契约）；
+//      实时累积 + outcome 写入不重置（completeLegacyClosed 只读不重置契约）；
 //   3. 非 pi 引擎（one-shot 派发——修复前事件只喂 journal）：
 //      实时累积 + 终态 entry 保真（非 pi one-shot 一次 run 即终态化）。
 // 红锚：任一形态喂入行移除即转红（totalTokens 恒 0）。
@@ -1572,7 +1572,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     expect(record!.totalTokens).toBe(180);
     expect(record!.turnCount).toBe(1);
 
-    // settle → outcome 字段写入不重置 turns/totalTokens（completeRecord 只读契约）
+    // settle → outcome 字段写入不重置 turns/totalTokens（completeLegacyClosed 只读契约）
     fake.runs[0]!.settle({ content: "done" });
     await vi.waitFor(() => expect(record!.result).toBe("done"));
     expect(record!.totalTokens).toBe(180);

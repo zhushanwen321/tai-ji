@@ -71,11 +71,12 @@ export type RecordOrigin = "tool" | "workflow";
 /**
  * 旧 closed 终态的 L2 关闭原因子枚举。
  *
- * [U2 桥接期地位] 终态概念已删除（{@link ExecutionStatus} 两态），本枚举退役为
- * **读侧兼容位**：值域完整并入 {@link StopReason}（旧 7 值 = 旧 closed 的展示迁移）。
- * 迁移期旧终态路径（tryTransition/completeRecord 桥接、`.state`/entry/manifest 读侧
- * 迁移映射）继续写本字段 + stopReason 双写，消费方（deriveOutcome/notifier 等）
- * 零改动；U3+ 逐单元收缩后本字段随旧原语一并退役。
+ * [U2 桥接期地位 → W2/V3 后现状] 终态概念已删除（{@link ExecutionStatus} 两态），
+ * 本枚举退役为**读侧兼容位**：值域完整并入 {@link StopReason}（旧 7 值 = 旧 closed
+ * 的展示迁移）。写侧遗留终态原语（trySettleLegacyClosed / completeLegacyClosed——
+ * workflow D7 例外族 + 监督器放弃两个生产者）继续写本字段 + stopReason 双写，
+ * 消费方（deriveOutcome/notifier 等）零改动；本字段随读侧谓词 isLegacyClosedSettled
+ * 一并在 W4 sunset 退役。
  *
  * 值语义（历史）：
  *   parent-shutdown  — 父进程 session_shutdown 时回收子进程
@@ -148,7 +149,7 @@ export const CLOSED_REASONS: readonly ClosedReason[] = [
  * Exclude 封死。消费方（project/list/notify 文案/渲染器）只读本字段，不再各自
  * 手写成败推导 switch（三处同构 switch 已随 U3 收敛删除）。
  *
- * 由 completeRecord 唯一写入点按 deriveOutcome 一次计算（判定顺序：cancelled 优先
+ * 由 completeLegacyClosed 唯一写入点按 deriveOutcome 一次计算（判定顺序：cancelled 优先
  * → error 非空 → completed）。
  *
  * [D6 显式取舍] parent-shutdown/parent-fork/parent-new 合成关闭（subagent-service
@@ -465,7 +466,7 @@ export class DirtyWorktreeError extends Error {
  * （getEventLog / getCurrentActivity / getFullText），不再独立存储切片或缓冲。
  *
  * 生命周期：createRecord() 创建 → updateFromEvent() 实时更新（累积进 turns）→
- *           completeRecord() 冻结 → archive 立即移出内存（读时从 session.jsonl 重建）。
+ *           completeLegacyClosed() 冻结 → archive 立即移出内存（读时从 session.jsonl 重建）。
  *
  * TUI 永远拿 RecordSnapshot（.slice() 快照），不直接持此可变对象。
  */
@@ -561,7 +562,7 @@ export interface ExecutionRecord {
    */
   closedReason?: ClosedReason;
   /**
-   * 终态三态对外语义（U3 C-outcome）。completeRecord 唯一写入点按 deriveOutcome
+   * 终态三态对外语义（U3 C-outcome）。completeLegacyClosed 唯一写入点按 deriveOutcome
    * 一次计算，消费方只读本字段不再自行推导。向后兼容：旧 record / 磁盘重建
    * record 无此字段，投影层按 projectOutcome 兜底（closed-legacy 语义）。
    */

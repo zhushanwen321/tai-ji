@@ -99,6 +99,10 @@ export interface RecordLifecycleDeps {
   readonly getSessionsDir: () => string;
   /** pi 句柄（manifest 写失败事件 appendEntry；initSession 时点晚绑定，dispose 后 null）。 */
   readonly getPi: () => PiLike | null;
+  /** 主 session 文件（[W2/V1 D3 same-session 四件直落] GC 收编归属判定的注册差集
+   *  证据源；initSession 时点晚绑定，未初始化 undefined = GC 按 cross-session
+   *  两件直落）。 */
+  readonly getMainSessionFile: () => string | undefined;
   /** [C-5 显式回调] record 终态化路径的宿主侧收口汇聚点（#14 Continuation 实例清理，
    *  本体在壳）。disposeAllRecords/cancelBackground 直调点 + doFinalizeRecord
    *  deps.onFinalized 钩子统一经此回调。 */
@@ -259,14 +263,23 @@ export class RecordLifecycle {
 
   /** 启动 idle record GC 定时器（session_start 调用，幂等）。
    *  [W4] WorkflowRun store（FileRunStore）同批纳入：running 且 startedAt 超 30 天
-   *  锚窗的 run 终态化归档（只终态化不补注销，见 idle-gc.ts 头注）。宿主未
-   *  configureCore 时 loadAll 抛错由 idle-gc 内部吞掉（单轮跳过）。
+   *  锚窗的 run 终态化归档（收编件数按 run 的 session 归属区分，见 idle-gc.ts
+   *  头注）。宿主未 configureCore 时 loadAll 抛错由 idle-gc 内部吞掉（单轮跳过）。
    *  [F-1 修复] stateDir 与 pi 壳 JsonlRunStore 落盘布局同源
    *  （resolvePiWorkflowStateDir → <sessionDir>/workflow-state/）——缺省 dataRoot 根
-   *  与 pi 生产落盘不相交，WorkflowRun GC 曾恒空转（W4 引入的装配错位）。 */
+   *  与 pi 生产落盘不相交，WorkflowRun GC 曾恒空转（W4 引入的装配错位）。
+   *  [W2/V1 D3 same-session 四件直落] 直落面惰性 getter 注入——pi/主 session 文件
+   *  运行时可变，每次回收现读（对齐本聚合 deps 晚绑定纪律）。 */
   startGcTimer(): void {
     if (this.stopIdleGc) return;
-    this.stopIdleGc = startIdleGc(this.deps.getStore(), new FileRunStore({ stateDir: resolvePiWorkflowStateDir() }));
+    this.stopIdleGc = startIdleGc(
+      this.deps.getStore(),
+      new FileRunStore({ stateDir: resolvePiWorkflowStateDir() }),
+      {
+        sessionFile: this.deps.getMainSessionFile,
+        appendEntry: () => (customType: string, data: unknown) => this.deps.getPi()?.appendEntry(customType, data),
+      },
+    );
   }
 
   /** 停止 idle record GC 定时器（dispose 调用）。 */
