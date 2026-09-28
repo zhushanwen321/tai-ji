@@ -118,9 +118,9 @@ export interface SubagentServiceSessionInit {
  * - 复活回调（reviveDisposed）：initSession 对壳旗标的写点显式化。
  *   [modeless 波3] 旧 resetSettledRescan 回调（#5 SyncCollect 的 settledRescanState
  *   复活重置，清单① C-2）随 E1 恢复面退役删除。
- * - 跨域编排回调（getStore/getNotifyHost/recoverOrphans/bootRoundSupervisor/
- *   runPendingReconcileSweep）：initSession 复活后的跨域编排时序（R3/R4 域）以回调
- *   注入，聚合→壳零 import（D4）；R3/R4 抽取后同点改指聚合显式接口。
+ * - 跨域编排回调（getStore/getNotifyHost/recoverOrphans/runPendingReconcileSweep）：
+ *   initSession 复活后的跨域编排时序（R3/R4 域）以回调注入，聚合→壳零 import（D4）；
+ *   R3/R4 抽取后同点改指聚合显式接口。
  */
 export interface SessionBaselinesDeps {
   /** [D4 late-bound getter] assertReady 断言状态快照源（pi 运行时注入 + 声明周期 disposed 旗标）。 */
@@ -133,9 +133,7 @@ export interface SessionBaselinesDeps {
   readonly getNotifyHost: () => { revive(): void };
   /** [跨域编排回调] 孤儿终态恢复（#3 RecordLifecycle 域方法；R3 改指聚合显式接口）。 */
   readonly recoverOrphans: () => void;
-  /** [跨域编排回调] 轮次监督器 boot 分区（#14 协作面；R4 改指聚合显式接口）。 */
-  readonly bootRoundSupervisor: () => void;
-  /** [跨域编排回调] 注册对账 sweep（#14 service-binding 模块函数 + #18 finalize 委托闭包，壳装配）。 */
+  /** [跨域编排回调] 注册对账 sweep（#14 registry-reconcile/sweep-binding 模块函数，壳装配）。 */
   readonly runPendingReconcileSweep: () => void;
 }
 
@@ -300,12 +298,9 @@ export class SessionBaselines {
     // 孤儿终态恢复（放 initSession 末尾：setPi 已注入（appendEntry 可用）、
     // sessionRootId 已建立（过滤当前根的 record）；单扫描者判据见 recoverOrphansIfRootProcess）
     this.deps.recoverOrphans();
-    // [W4] boot 分区 + 注册对账 sweep（须在孤儿恢复之后——依赖关系见两方法注释：
-    // 孤儿恢复把「重启前在途」record 一律纠偏 idle 等 revive（[U5/D4 MF-1] 重认领
-    // 谓词已随死代码清理删除——磁盘重建单规则恒 idle，boot 候选门后恒空，W4 跨重启
-    // 归宿 = idle 等 revive 非重认领）；sweep 再对终态 record 补发注销落盘——表 3 行 2
-    // 「注销经对账 sweep 保证落盘」的编排点）。
-    this.deps.bootRoundSupervisor();
+    // 注册对账 sweep（须在孤儿恢复之后——孤儿恢复把「重启前在途」record 一律纠偏
+    // idle 等 revive（[U5/D4 MF-1]：磁盘重建单规则恒 idle）；sweep 再对终态 record
+    // 补发注销落盘——「注销经对账 sweep 保证落盘」的编排点）。
     this.deps.runPendingReconcileSweep();
   }
 

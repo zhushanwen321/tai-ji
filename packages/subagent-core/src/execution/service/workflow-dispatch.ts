@@ -19,8 +19,8 @@
 //
 // [R1 打样模式——R4 落地]（模式权威定义见 session-baselines.ts 文件头）
 // 1. 依赖注入形态：deps 全晚绑定闭包（构造期零求值）——execNesting / streamSink /
-//    sessionRootId 等会话基线运行时可变态经壳 getter 现读；modelService /
-//    roundSupervisor 等 #1 留壳共享依赖 getter 现读同一实例。
+//    sessionRootId 等会话基线运行时可变态经壳 getter 现读；modelService 等 #1 留壳
+//    共享依赖 getter 现读同一实例。
 // 2. 模块常量 SSOT：PRIORITY_BACKGROUND 已 [R6/D-R4-4] 归一常量叶子文件
 //    service-constants.ts（原两聚合重复声明消除，改 import 消费）。
 // 3. 只搬不改：两方法 + 类外 5 helper 自壳文件迁移，方法体除依赖通道替换
@@ -77,7 +77,6 @@ import type { NotifyHost } from "../notify/notify-host.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import type { RoundSupervisor } from "../round-supervisor/index.ts";
 import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
 // 嵌套深度护栏单点（与 run-orchestration 同源；聚合间零互调不受影响——共同 import
 // 叶子 helper 文件是既有形态，G2 禁的是两聚合互相 import）。
@@ -121,7 +120,7 @@ export type MemberReviveOutcome =
  *   getSessionRootId / getPi 通道外的 NotifyHost 投影）：initSession 注入的运行时可变
  *   态现读。
  * - R3 聚合显式接口（resolveIdentity / resolveIdentityForEngine / createRecordForMode）
- *   与 #1 留壳共享依赖（getModelService / getNotifyHost / getRoundSupervisor）。
+ *   与 #1 留壳共享依赖（getModelService / getNotifyHost）。
  * - 同域跨文件协作回调（经壳编排指 run-orchestration 实例方法，零 import）：
  *   resolveChatEnginePort / acquirePoolOrFinalize / outcomeToAgentResult /
  *   settleOneShotOutcome / releaseRoundResources；finalizeFailed 指 RecordLifecycle。
@@ -166,8 +165,6 @@ export interface WorkflowDispatchDeps {
   readonly getUiObservability: () => UiRequestObservability;
   /** 根 session id（relay 归属键 SESSION_ID 权威源；SessionBaselines 现读）。 */
   readonly getSessionRootId: () => string | null;
-  /** [B-6 留壳] 轮次活性监督器（在途记账 noteRunStarted/noteRunEnded）。 */
-  readonly getRoundSupervisor: () => RoundSupervisor;
   /** [RunOrchestration 协作回调] 池槽获取（失败路径含 S1 cancelled 终态收口）。 */
   readonly acquirePoolOrFinalize: (
     record: ExecutionRecord,
@@ -483,9 +480,6 @@ export class WorkflowDispatch {
 
     const journal = wireEventJournal({ engineId: engine.id, taskId: record.id, forwardEvents: onEvent });
     let runSignal: MergedRunSignalHandle | undefined;
-    // [W4] 在途记账（监督器「该等」判据源；与 kickOffChatRound 同款
-    //——运行期监督对 workflow record 照旧纳管，只豁免 adopt 接管）。
-    this.deps.getRoundSupervisor().noteRunStarted(record.id);
     try {
       // timeoutMs + 外部 signal 并入同一合流。
       runSignal = mergeRunSignals(
@@ -551,7 +545,7 @@ export class WorkflowDispatch {
     } catch (err) {
       // swallow（不 re-throw）：脚本观察到合成 failed result 而非异常（引擎死亡
       // engine_crashed 同路）；record 由失败路径立即终态化（finalizeFailed CAS →
-      // finalizeRecord；adopt 豁免——workflow record 不保持纳管态交监督器）。
+      // finalizeRecord），不保持 running 态。
       // [P1b-1] 静默吞失败路径的终态写入已经 transition 体系收口：deps.finalizeFailed
       // 内部改调 worker-message-pump 的 settleWorkflowRecord 单点（原直写对删除），
       // ask-settled 事件面由 pump call 完成链投递——失败不再绕过状态机体系无痕。
@@ -563,7 +557,6 @@ export class WorkflowDispatch {
       runSignal?.dispose();
       this.deps.releaseRoundResources(record, pooled && acquired, effectiveStream);
       await journal.close();
-      this.deps.getRoundSupervisor().noteRunEnded(record.id);
     }
   }
 }

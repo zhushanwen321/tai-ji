@@ -1,4 +1,4 @@
-// src/execution/round-supervisor/reconcile-sweep-settlement.test.ts
+// src/execution/registry-reconcile/reconcile-sweep-settlement.test.ts
 //
 // [W2/V4 D6] sweep 判据源改接后的补注销行为与幂等验证。
 //

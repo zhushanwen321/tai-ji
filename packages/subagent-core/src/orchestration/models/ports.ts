@@ -47,7 +47,7 @@ export interface AgentRunner {
  * stateFilePath 返回 run 状态文件的绝对路径（供 overlay/GUI 暴露给用户）。
  *
  * 读写分离装配事实：pi 宿主 = 写侧 JsonlRunStore + 读侧对账直接消费 FileRunStore
- * 具体类（findStateByIdSync 为端口外同步读方法——单实现单消费方 [round-supervisor
+ * 具体类（findStateByIdSync 为端口外同步读方法——单实现单消费方 [registry-reconcile
  * 对账 sweep]，不为其设端口：一个 adapter 是假想 seam）。
  */
 export interface RunStore {

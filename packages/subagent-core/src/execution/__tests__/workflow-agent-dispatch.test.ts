@@ -590,8 +590,6 @@ describe("引擎死亡与 adopt 豁免（§3.4 + 决策表）", () => {
     expect(record.closedReason).toBe("gc");
     expect(store.getMutable(record.id)).toBeUndefined();
     expect(entries.at(-1)).toMatchObject({ id: record.id, kind: "settled", status: "idle", stopReason: "gc" });
-    const supervisor = Reflect.get(service, "roundSupervisor") as { supervisedIds(): string[] };
-    expect(supervisor.supervisedIds()).toEqual([]);
   });
 
 });

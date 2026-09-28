@@ -29,8 +29,8 @@
 //      deps.onRecordFinalizedCleanup 回调——disposeAllRecords/cancelBackground 直调点
 //      与 doFinalizeRecord deps.onFinalized 钩子闭包统一经此回调（现状显式注入形态
 //      天然兼容，清单①预判兑现）；R4 抽取 Continuation 协作面时回调改指聚合显式接口。
-//    - C-6（roundSupervisor/reconcile sweep 装配闭包调 finalizeRecord）：闭包经壳
-//      late-bound 读取壳转发方法——天然兼容聚合化，壳装配零改动（清单①预判兑现）。
+//    - C-6（reconcile sweep 装配闭包的终态化委托面）：闭包经壳 late-bound 读取壳
+//      转发方法——天然兼容聚合化，壳装配零改动（清单①预判兑现）。
 //    - C-4（壳 dispose 直调 continuations.clear）：#14 Continuation 状态清理，壳 dispose
 //      编排消费——R4 领地，本单元留置不动（壳直调壳字段，非跨聚合写）。
 //    - closeSubagent 对 Continuation 队列的清空（continuations.get(...)?.abortAndClearQueue）：

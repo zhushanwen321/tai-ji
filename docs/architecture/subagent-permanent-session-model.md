@@ -265,7 +265,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
       事件表行保留为领域语义（「轮终=会话回到可续聊」），中断族（abort/engine death/host
       shutdown）仍真实翻 idle。登记 impl-plan §5 S3-R1。
   running--abort(用户 cancel)-->   idle      （stopReason=interrupted；不写任何「终态」）
-  running--engine death-->         idle      （纳管语义保留：交 round-supervisor 或等 revive）
+  running--engine death-->         idle      （死亡即翻 idle：等 revive）
   running--host shutdown-->        idle      （stopReason=interrupted-by-restart；进程亡，锚在）
   idle--close-->                   idle（close 终态写点，无任何状态位翻转：worktree 回收+patch 落盘+注销 reason=completed，
                                           顺序约束见 §3.2.5；intent 意愿位已删——原「寻回翻回」行随之消亡，message 到任意

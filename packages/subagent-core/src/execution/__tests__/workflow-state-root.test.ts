@@ -2,7 +2,7 @@
 //
 // [F-1 修复] pi 宿主 WorkflowRun state 读侧装配同源布局测试。
 //
-// 背景（装配错位事故面）：round-supervisor sweep 与 idle-gc 曾用 FileRunStore 缺省根
+// 背景（装配错位事故面）：对账 sweep 与 idle-gc 曾用 FileRunStore 缺省根
 // `<dataRoot>/workflow-state`（zcode 宿主布局）读 workflow run state，而 pi 宿主真实
 // 落盘 = JsonlRunStore 的 `<sessionDir>/workflow-state/<runId>.jsonl`——两目录生产不
 // 相交 → findStateByIdSync 恒 missing → sweep 按终态补注销**活跃 run**；WorkflowRun
@@ -36,8 +36,8 @@ import { Trace } from "../../orchestration/models/trace.ts";
 import { WorkflowRun } from "../../orchestration/models/workflow-run.ts";
 import { startIdleGc } from "../persistence/idle-gc.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { runPendingReconcileSweepForService } from "../round-supervisor/service-binding.ts";
-import type { RoundSupervisorBinding } from "../round-supervisor/service-binding.ts";
+import { runPendingReconcileSweepForService } from "../registry-reconcile/sweep-binding.ts";
+import type { ReconcileSweepBinding } from "../registry-reconcile/sweep-binding.ts";
 import { resolvePiSessionScopedDir, resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -201,7 +201,7 @@ describe("sweep 装配链端到端（runPendingReconcileSweepForService × 真�
     }
   }
 
-  function makeBinding(sessionFile: string, appended: Array<{ customType: string; data: unknown }>): RoundSupervisorBinding {
+  function makeBinding(sessionFile: string, appended: Array<{ customType: string; data: unknown }>): ReconcileSweepBinding {
     return {
       getStore: () => new RecordStore(path.join(tmpDir, "records")),
       getPi: () =>
@@ -209,10 +209,8 @@ describe("sweep 装配链端到端（runPendingReconcileSweepForService × 真�
           appendEntry: (type: string, data: unknown) => appended.push({ customType: type, data }),
           events: { emit: vi.fn() },
           sendMessage: vi.fn(),
-        }) as unknown as NonNullable<ReturnType<RoundSupervisorBinding["getPi"]>>,
-      getSessionRootId: () => "root",
+        }) as unknown as NonNullable<ReturnType<ReconcileSweepBinding["getPi"]>>,
       getMainSessionFile: () => sessionFile,
-      finalizeClosed: vi.fn(),
     };
   }
 

@@ -37,7 +37,7 @@ import { isHostNotConfiguredError } from "../../core/host-services.ts";
 import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 import { isResumable } from "../lifecycle/lifecycle-predicates.ts";
-import { collectActiveRegisterEntries } from "../round-supervisor/reconcile-sweep.ts";
+import { collectActiveRegisterEntries } from "../registry-reconcile/reconcile-sweep.ts";
 import type { RecordStore } from "./record-store.ts";
 import {
   writePendingUnregisterEntryVia,

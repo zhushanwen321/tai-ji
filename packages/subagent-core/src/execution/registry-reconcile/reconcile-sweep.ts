@@ -1,6 +1,6 @@
-// src/execution/round-supervisor/reconcile-sweep.ts
+// src/execution/registry-reconcile/reconcile-sweep.ts
 //
-// [W4] 注册对账 sweep——Plane E pending entry 死亡窗口对账 + ①段直落失败的窄竞态
+// 注册对账 sweep——Plane E pending entry 死亡窗口对账 + ①段直落失败的窄竞态
 // 窗兜底（reload-closeout D5 正名：触发点/对账逻辑零改动，职责声明按真实章程）。
 //
 // 设计锚点：D2「注册对账 sweep」（R2 增补、R3 钉死判据与写法）+ reload-closeout
@@ -26,8 +26,8 @@
 // 现算 isPendingActive 后，emit 到达时该 id 必已注销 = 恒 no-op 死路径）一并删除
 // （与 finalizeRun emit 发射点删除同款论证）。
 //
-// 触发时机：session reattach / session_start / 监督器启动（由 subagent-service 在
-// initSession 链内调用）。与 session_start 的 registry rebuild 先后时序不作保证，
+// 触发时机：session reattach / session_start（由 subagent-service 在 initSession 链内
+// 调用）。与 session_start 的 registry rebuild 先后时序不作保证，
 // 残余窗口由下次 session_start 收口（设计明示容忍）。
 //
 // 判据保守性（[F2] 按类型分流收口）：
@@ -166,7 +166,7 @@ function appendUnregisterEntry(
       status: mapReasonToStatus(reason),
     });
   } catch (err) {
-    // 落盘失败：差集残留交下次 sweep（session_start / 监督器启动）重试。
+    // 落盘失败：差集残留交下次 sweep（session_start）重试。
     logger.warn(
       `[subagents] reconcile sweep appendEntry failed for ${id} (retry on next sweep): ${
         err instanceof Error ? err.message : String(err)

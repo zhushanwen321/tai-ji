@@ -750,9 +750,8 @@
       "summary": "V10 域边界 + 回归：外部 message 对 workflow 成员续聊三类拒绝原样 + 断点恢复 / journal 核对 / structured-output 门禁既有测试族全绿",
       "scope": [
         "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts",
-        "packages/subagent-core/src/execution/round-supervisor/**",
+        "packages/subagent-core/src/execution/registry-reconcile/**",
         "packages/subagent-core/src/execution/__tests__/subagent-actions-core.test.ts",
-        "packages/subagent-core/src/execution/__tests__/round-supervisor-workflow-origin.test.ts",
         "packages/subagent-core/src/orchestration/__tests__/lifecycle-recover-crashed.test.ts",
         "packages/subagent-core/src/execution/__tests__/journal-tail.test.ts",
         "extensions/universal/structured-output/tests/**"
@@ -766,10 +765,10 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "cd packages/subagent-core && npx vitest run src/execution/__tests__/subagent-actions-core.test.ts src/execution/__tests__/round-supervisor-workflow-origin.test.ts src/orchestration/__tests__/lifecycle-recover-crashed.test.ts src/execution/__tests__/journal-tail.test.ts && cd ../../extensions/universal/structured-output && npx vitest run tests/loop-gate.test.ts",
+      "run": "cd packages/subagent-core && npx vitest run src/execution/__tests__/subagent-actions-core.test.ts src/orchestration/__tests__/lifecycle-recover-crashed.test.ts src/execution/__tests__/journal-tail.test.ts && cd ../../extensions/universal/structured-output && npx vitest run tests/loop-gate.test.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "pi-workflow-run-resource-model §4.1 V10 登记行（2026-09-27 U6）：三类拒绝 = message 对 workflow 成员续聊拒绝（workflow-origin 域边界，subagent-actions-core 拒绝文案 + round-supervisor workflow-origin 判定）、冷复活绕过检查、agents 数量错配 fail-fast（设计 G7「内部复用通道与外部 message 通道分离」）；回归测试 = 断点恢复（lifecycle-recover-crashed）+ journal 核对（journal-tail）+ structured-output 门禁（loop-gate，行为零变化正交红线）。全部零 token mock 轨；真机形态未单列（域边界拒绝行为有既有测试锚，设计核实状态 ✅）。"
+      "note": "pi-workflow-run-resource-model §4.1 V10 登记行（2026-09-27 U6）：三类拒绝 = message 对 workflow 成员续聊拒绝（workflow-origin 域边界，subagent-actions-core 拒绝文案）、冷复活绕过检查、agents 数量错配 fail-fast（设计 G7「内部复用通道与外部 message 通道分离」）；回归测试 = 断点恢复（lifecycle-recover-crashed）+ journal 核对（journal-tail）+ structured-output 门禁（loop-gate，行为零变化正交红线）。全部零 token mock 轨；真机形态未单列（域边界拒绝行为有既有测试锚，设计核实状态 ✅）。"
     },
     {
       "id": "E2E-BATCH-05",

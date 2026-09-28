@@ -15,7 +15,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runReconcileSweep, type SupervisedRecordState } from "../round-supervisor/reconcile-sweep.ts";
+import { runReconcileSweep, type SupervisedRecordState } from "../registry-reconcile/reconcile-sweep.ts";
 
 let tmpDir: string;
 let sessionFile: string;

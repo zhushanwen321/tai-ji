@@ -128,14 +128,9 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
     }
   });
 
-  it("[modeless 波1·adopt 链退役] 引擎死亡（run reject）→ Continuation 失败分支收口：record 落 idle 可恢复 + 失败通知，无监督器 adopt 接管", async () => {
+  it("[modeless 波1·adopt 链退役] 引擎死亡（run reject）→ Continuation 失败分支收口：record 落 idle 可恢复 + 失败通知", async () => {
     const h = makeService();
     try {
-      const adoptSpy = vi.spyOn(
-        (h.service as unknown as { roundSupervisor: { adoptOnProcessDeath: (r: unknown, m: string) => void } })
-          .roundSupervisor,
-        "adoptOnProcessDeath",
-      );
       const record = createRecord("bg-engine-death", {
         agent: "general-purpose",
         model: "prov/model-1",
@@ -162,7 +157,6 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
         expect(record.lastError).toContain("engine process exited");
       });
       expect(record.round).toBe(1);
-      expect(adoptSpy).not.toHaveBeenCalled();
     } finally {
       h.service.dispose();
       clearEngines();
