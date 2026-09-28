@@ -370,8 +370,11 @@ function parseRecordStreamLine(line: string): RecordStreamLine | undefined {
  * - agent-settled：call 终局（outcome/durationMs + result 全文的 sessionFile/
  *   sessionId——家族链跳转入口）；
  * - run-interrupted：[D2] 中断转移 → status 'interrupted'（非终局）；
+ * - run-resumed：[D2] 复活转移 → 清中断标记（status 回 running——lifecycle fold
+ *   投影语义：run-resumed 是 interrupted → running 的转移证据，跳过会使 resume
+ *   续跑期间的概览停在 interrupted 直至终局）；
  * - run-settled：终局帧 → status 'done' + outcome（done/failed/cancelled/time_limited）；
- * - 其余（phase-started / phase-settled / run-resumed）：跳过（状态机转移不进概览文本——phase 分组展示
+ * - 其余（phase-started / phase-settled）：跳过（状态机转移不进概览文本——phase 分组展示
  *   归 format 域，U3 接线）。
  *
  * 空流/无终局帧 → status 'running'（活跃 run 概览不退化为 skipped——红线）。
@@ -412,6 +415,8 @@ export function parseRunRecordStream(
         reason: typeof rec.reason === 'string' ? rec.reason : undefined,
         ts: typeof rec.ts === 'number' ? rec.ts : 0,
       }
+    } else if (rec.type === 'run-resumed') {
+      fold.interrupted = undefined
     } else if (rec.type === 'run-settled') {
       fold.runSettled = {
         outcome: typeof rec.outcome === 'string' ? rec.outcome : undefined,

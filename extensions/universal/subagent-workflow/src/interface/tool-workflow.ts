@@ -469,20 +469,20 @@ function actionStatus(deps: LauncherDeps): WorkflowExecuteResult {
 
 /**
  * [W2/V1 D1 分流表第 6 行] 单一判源函数（CLI 面显示/排序的混合判源收拢）：输出
- * 投影二值 status（running|done——对齐 runtime projectV2Workflow 六态收窄二值
- * 先例）。判源 = core runSummary 投影（活体终局经进程内终局记录注册表判定、
- * 恢复路径写点 run 经聚合 status 读），散落的等价分支形态不采用（D1 否决记录：
- * 散落分支在 grep 层不可区分，活体判据误用漏网）。
+ * 投影三态 status（running|interrupted|done——重水合中断 run 经 meta.interruptedAt
+ * 投影中断态，[D2] 与 shared WorkflowRunStatus 三态同词；活体终局经进程内终局
+ * 记录注册表判定、恢复路径写点 run 经聚合 status 读）。判源 = core runSummary
+ * 投影，散落的等价分支形态不采用（D1 否决记录：散落分支在 grep 层不可区分，
+ * 活体判据误用漏网）。
  *
- * 排序键契约：STATUS_ORDER 权重表只消费本函数的二值输出（排序键不读 outcome
- * 四值——v1 两态值与 v2 四值不进同一权重表，排序语义不分裂）；outcome 细分由
+ * 排序键契约：STATUS_ORDER 权重表只消费本函数的三态输出；outcome 细分由
  * runSummary.reason 并列承载（列表行 reasonSuffix）。
  *
  * 落点说明（实施期登记）：函数体消费 core barrel 既有导出 runSummary，落本文件
  * 使 commands/WorkflowsView 可单向 import（commands → view 既有边使 commands.ts
  * 落点成环，本文件与两者均无既有边）。
  */
-export function displayStatusOf(run: WorkflowRun): "running" | "done" {
+export function displayStatusOf(run: WorkflowRun): "running" | "interrupted" | "done" {
   return runSummary(run).status;
 }
 
@@ -535,31 +535,36 @@ async function actionAbort(
  */
 const RESUME_ARGS_EXCLUDED_KEY = "_runId";
 
-/** record 流内 run-created 帧的 argsSummary 读取结果（D14 比对的数据源形态）。 */
+/** record 流内 run-created 帧的 args 读取结果（D14 比对的数据源形态）。 */
 type HistoricalArgs =
   | { kind: "args"; args: Record<string, unknown> }
   | { kind: "absent" }
   | { kind: "truncated" };
 
 /**
- * record 行 → run-created 帧窄化（type 字面量判别 + argsSummary 透传；非该帧 /
- * 非 object 返回 undefined——结构判别走运行时守卫，不做断言）。
+ * record 行 → run-created 帧窄化（type 字面量判别 + args 全文 / argsSummary 透传；
+ * 非该帧 / 非 object 返回 undefined——结构判别走运行时守卫，不做断言）。
  */
-function asRunCreatedFrame(parsed: unknown): { argsSummary: unknown } | undefined {
+function asRunCreatedFrame(parsed: unknown): { args?: unknown; argsSummary: unknown } | undefined {
   if (typeof parsed !== "object" || parsed === null) return undefined;
   if (!("type" in parsed) || parsed.type !== "run-created") return undefined;
-  return { argsSummary: "argsSummary" in parsed ? parsed.argsSummary : undefined };
+  return {
+    args: "args" in parsed ? parsed.args : undefined,
+    argsSummary: "argsSummary" in parsed ? parsed.argsSummary : undefined,
+  };
 }
 
 /**
  * 读 run-created 帧的历史 args（D14 比对数据源；record 流是唯一事实源）。
  *
+ * - args 全文优先（设计 §3.1 载荷表 run-created 行「args」——现行写入面
+ *   dispatchRunCreated 随帧落全文，任意体积的 args 都可逐字段深度比对）；
  * - 流不存在 / 无 run-created 帧 → absent：不在 D14 层拒绝——资格判据（无 record
  *   流 / 首帧缺失）归 resumeRun 权威文案，此处不重复实现（分层：D14 只管 args 一致性）；
- * - argsSummary 截断（>256 字符，写侧 summarizeRunArgs 截断标记）→ truncated：
- *   完整 args 不进 record（[D1] 载荷裁决），截断摘要无法逐字段比对——保守拒绝
+ * - 旧格式帧回落 argsSummary（无 args 字段）：截断（>256 字符，写侧
+ *   summarizeRunArgs 截断标记）→ truncated——截断摘要无法逐字段比对，保守拒绝
  *   （静默放行 = 静默忽略传入 args，D14 不采用形态）；
- * - 解析失败 → throw：argsSummary 是 JSON.stringify 产物，未截断必可解析——
+ * - 解析失败 → throw：args/argsSummary 是 JSON.stringify 产物，未截断必可解析——
  *   不可解析 = 流被篡改或写入器 bug（对齐 D12 拒绝精神）。
  */
 function readHistoricalArgs(recordPath: string, runId: string): HistoricalArgs {
@@ -579,6 +584,9 @@ function readHistoricalArgs(recordPath: string, runId: string): HistoricalArgs {
     }
     const frame = asRunCreatedFrame(parsed);
     if (frame === undefined) continue;
+    // args 全文优先：大 args run 的 D14 逐字段比对由此成立（truncated 拒绝只对
+    // 旧格式帧的截断摘要形态出现）
+    if (isPlainObject(frame.args)) return { kind: "args", args: frame.args };
     const summary = frame.argsSummary;
     if (typeof summary !== "string" || summary.length === 0) return { kind: "absent" };
     if (summary.endsWith("…")) return { kind: "truncated" };
@@ -673,10 +681,13 @@ export async function actionResume(
   if (params.args !== undefined) {
     const historical = readHistoricalArgs(deps.store.stateFilePath(runId), runId);
     if (historical.kind === "truncated") {
+      // 仅旧格式帧（args 全文载荷落地前落盘、截断摘要形态）到达此分支——现行
+      // 写入面随帧落 args 全文，任意体积可逐字段比对
       throw new Error(
-        `Resume rejected: original args of run ${runId} exceed the record's args summary limit — ` +
-          "they cannot be verified field-by-field (full args are not carried in the record stream). " +
-          "Recovery: resume WITHOUT args to reuse the originals, or start a new run for changed arguments.",
+        `Resume rejected: original args of run ${runId} exceed the record's args summary limit ` +
+          "(legacy record stream without the full-args payload) — they cannot be verified field-by-field. " +
+          "Recovery: start a new run for these arguments, or resume WITHOUT args knowing $ARGS will be empty " +
+          "(a truncated summary cannot be reconstructed).",
       );
     }
     if (historical.kind === "args") {

@@ -276,6 +276,35 @@ describe("终态写读三形态（验收 b：journal 侧）", () => {
     expect(events.map((e) => e.type)).toEqual(["run-created", "agent-started", "run-settled"]);
     expect(events.at(-1)).toMatchObject({ type: "run-settled", outcome: "cancelled", reason: "user abort" });
   });
+
+  it("派发前置失败形态（resolveAgentOpts 失败）= failed + errorCode unknown + result 全文随帧", async () => {
+    // [U6 回归] agent-settled 帧缺 result 是 record 恢复读面（loadAll 严格解析 /
+    // D12 完整性校验）的拒绝形态——本帧是合法写入方（agent 名/skill 解析失败路径），
+    // result 必须随帧落账，否则一次普通用户错误（agent 名拼错）在重启后使整个
+    // workflow 域停初始化。errorResult 与 worker-message-pump resolveAgentOpts
+    // 失败分支构造的 run 内形态同源（{content:"", error}）。
+    const run = makeRun("wf-pre-dispatch-fail");
+    await dispatchRunCreated(run);
+    dispatchAgentSettledFailed(run, 0, { content: "", error: "skill not found: reviewer-x" });
+    await dispatchRunTrigger(run, {
+      type: "run-settled",
+      outcome: "failed",
+      errorCode: "unknown",
+      reason: "agent opts resolve failed",
+      artifactsDir: journalDir,
+      ts: Date.now(),
+    });
+
+    const events = await scanRunEvents(journalDir, run.runId);
+    const settled = events.find((e) => e.type === "agent-settled");
+    expect(settled).toMatchObject({
+      type: "agent-settled",
+      taskIndex: 0,
+      outcome: "failed",
+      errorCode: "unknown",
+      result: { content: "", error: "skill not found: reviewer-x" },
+    });
+  });
 });
 
 // ── 3. terminal 后单写者停止 append ──────────────────────────
@@ -392,7 +421,7 @@ describe("run 启动竞态回归（created 落账前到达的 ask 帧零丢失�
       const createdPromise = dispatchRunCreated(run);
       dispatchAgentStarted(run, 0, "reviewer");
       dispatchAgentRetrying(run, 0, 1, 1000, "engine_run_failed: race probe");
-      dispatchAgentSettledFailed(run, 0);
+      dispatchAgentSettledFailed(run, 0, { content: "", error: "skill not found: nope" });
       await dispatchRunTrigger(run, {
         type: "cancel-requested",
         reason: "race-probe",

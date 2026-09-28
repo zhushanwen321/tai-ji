@@ -30,6 +30,7 @@ function makeRun(
     error?: string;
     startedAt?: string;
     completedAt?: string;
+    interruptedAt?: string;
   } = {},
 ): WorkflowRun {
   const status = opts.status ?? "running";
@@ -48,6 +49,7 @@ function makeRun(
     {
       startedAt: opts.startedAt ?? "2026-08-30T00:00:00.000Z",
       ...(opts.completedAt !== undefined ? { completedAt: opts.completedAt } : {}),
+      ...(opts.interruptedAt !== undefined ? { interruptedAt: opts.interruptedAt } : {}),
     },
   );
 }
@@ -87,6 +89,19 @@ describe("runSummary — 字段投影（字段以 core WorkflowRun 为准）", (
       completedAt: "2026-08-30T10:05:00.000Z",
       error: "agent timeout",
     });
+  });
+
+  it("interrupted run（meta.interruptedAt 置位）：status 投影 'interrupted'——聚合 status 保持两态，中断态经 meta 在投影面表达", () => {
+    // [U10 回归] 重水合中断 run（loadAll fold / 收编链写 meta.interruptedAt）在
+    // CLI/TUI 展示投影三态：不再显示僵尸「运行中」（与 shared WorkflowRunStatus
+    // 三态、场景 25 中断显示语义同词）。resume 资格判据在 core fold lifecycle，
+    // 不受本投影影响。
+    const run = makeRun("wf-i1", { status: "running", interruptedAt: "2026-08-30T05:00:00.000Z" });
+
+    expect(runSummary(run).status).toBe("interrupted");
+    // 终局优先于中断标记（settled/done → done——中断标记不遮蔽终局）
+    const settledRun = makeRun("wf-i2", { status: "done", reason: "failed", interruptedAt: "2026-08-30T05:00:00.000Z" });
+    expect(runSummary(settledRun).status).toBe("done");
   });
 });
 

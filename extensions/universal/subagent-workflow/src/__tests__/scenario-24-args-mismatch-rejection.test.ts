@@ -177,13 +177,69 @@ describe("场景 24：args 不一致拒绝（D14 fail-fast）", () => {
     }
   });
 
-  it("argsSummary 截断形态（超长 args 经生产截断器形态：slice 256 + 「…」尾标）传 args → 保守拒绝 + 恢复指引；省略 args → resume 正常续跑（行为钉住）", async () => {
+  it("现行格式：超长 args 全文随帧落盘 → 传 args 逐字段深度比对通过（截断退化不复存在）+ 不一致逐字段可见", async () => {
+    const runId = "wf-s24-fullargs";
+    const env = mkScenarioEnv("24fa");
+    try {
+      // 生产写面 dispatchRunCreated 现行形态：args 全文 + argsSummary 摘要随帧
+      // 双落（超长 args 的摘要截断不影响全文比对面）
+      const longPayload = "y".repeat(400);
+      const historical = { payload: longPayload, _runId: runId };
+      const serialized = JSON.stringify({ payload: longPayload, _runId: runId });
+      expect(serialized.length).toBeGreaterThan(256);
+      await seedCrashedRun(env, runId, {
+        scriptSource: THREE_CALL_SERIAL_SCRIPT,
+        args: historical,
+        argsSummary: `${serialized.slice(0, 256)}…`,
+        settled: [{ agent: "A" }, { agent: "B" }],
+        inflight: [{ agent: "C" }],
+      });
+
+      // 传原 args（剔除 _runId 机器字段）→ D14 逐字段比对通过，resume 真链路续跑
+      const sd = makeScenarioDeps(env, makeFauxRunner());
+      await actionResume(
+        { action: "resume", runId, args: { payload: longPayload } } as Parameters<typeof actionResume>[0],
+        makeShellDeps(sd),
+      );
+      const summary = await waitForScenarioSettled(sd.runs, runId);
+      expect(summary.reason).toBe("completed");
+      await waitForTerminalManifest(env, runId);
+      expect(sd.faux.dispatches.map((d) => d.opts["agent"])).toEqual(["C"]);
+
+      // 传不一致 args → 逐字段差异可见（截断形态下曾退化为「传 args 一律拒绝」，
+      // 全文面恢复「逐字段深度比对」承诺）
+      const env2 = mkScenarioEnv("24fa2");
+      try {
+        await seedCrashedRun(env2, runId, {
+          scriptSource: THREE_CALL_SERIAL_SCRIPT,
+          args: historical,
+          settled: [{ agent: "A" }, { agent: "B" }],
+          inflight: [{ agent: "C" }],
+        });
+        const sd2 = makeScenarioDeps(env2, makeFauxRunner());
+        const err = await actionResume(
+          { action: "resume", runId, args: { payload: "z".repeat(400) } } as Parameters<typeof actionResume>[0],
+          makeShellDeps(sd2),
+        ).catch((e: unknown) => e as Error);
+        expect(err).toBeInstanceOf(Error);
+        expect(err.message).toContain("payload");
+        expect(err.message).toContain("differ from the original run");
+      } finally {
+        env2.cleanup();
+      }
+    } finally {
+      env.cleanup();
+    }
+  });
+
+  it("旧格式帧回落：argsSummary 截断形态（无 args 全文）传 args → 保守拒绝 + 恢复指引；省略 args → resume 正常续跑", async () => {
     const runId = "wf-s24-trunc";
     const env = mkScenarioEnv("24tr");
     try {
-      // 生产写侧 summarizeRunArgs 形态：序列化超 256 字符截断加「…」（截断边界
-      // 常量 = terminal-actions.ts RUN_ARGS_SUMMARY_MAX_CHARS，模块私有——此处按
-      // 生产形态字面构造；检测面 = readHistoricalArgs 的「…」尾标判定）
+      // 旧格式流（args 全文载荷落地前落盘）：run-created 帧只带截断摘要（slice 256
+      // + 「…」尾标——截断边界常量 = terminal-actions.ts RUN_ARGS_SUMMARY_MAX_CHARS，
+      // 模块私有，此处按生产形态字面构造；检测面 = readHistoricalArgs 的「…」尾标
+      // 判定，仅旧格式帧到达）
       const longPayload = "y".repeat(400);
       const serialized = JSON.stringify({ payload: longPayload, _runId: runId });
       expect(serialized.length).toBeGreaterThan(256);
@@ -202,11 +258,12 @@ describe("场景 24：args 不一致拒绝（D14 fail-fast）", () => {
         makeShellDeps(sd),
       ).catch((e: unknown) => e as Error);
       expect(err).toBeInstanceOf(Error);
-      expect(err.message).toContain("exceed the record's args summary limit");
-      expect(err.message).toContain("resume WITHOUT args");
+      expect(err.message).toContain("truncated summary");
+      expect(err.message).toContain("legacy record stream without the full-args payload");
+      expect(err.message).toContain("$ARGS will be empty");
       await expectRejectionLeftNoTrace(sd, env, runId);
 
-      // 恢复路径钉住：省略 args → D14 跳过，resume 真链路正常续跑（截断摘要的
+      // 恢复路径：省略 args → D14 跳过，resume 真链路正常续跑（截断摘要的
       // $ARGS 尽力恢复回落 {}，脚本不消费 $ARGS 不受影响）
       await actionResume(
         { action: "resume", runId } as Parameters<typeof actionResume>[0],

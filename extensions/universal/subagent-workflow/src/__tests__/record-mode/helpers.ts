@@ -92,6 +92,8 @@ export function runCreated(opts: {
   workflowName?: string;
   scriptSource: string;
   argsSummary?: string;
+  /** run-created 帧的 args 全文（设计 §3.1 载荷表——生产写面 dispatchRunCreated 随帧落）。 */
+  args?: Record<string, unknown>;
   model?: string;
 }): WorkflowRunEvent {
   return {
@@ -100,6 +102,7 @@ export function runCreated(opts: {
     runId: opts.runId,
     workflowName: opts.workflowName ?? "fidelity-script",
     argsSummary: opts.argsSummary ?? "{}",
+    ...(opts.args !== undefined ? { args: opts.args } : {}),
     scriptSource: opts.scriptSource,
     ...(opts.model !== undefined ? { model: opts.model } : {}),
   } as WorkflowRunEvent;

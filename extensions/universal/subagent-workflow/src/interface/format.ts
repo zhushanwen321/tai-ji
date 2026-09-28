@@ -432,14 +432,16 @@ const MS_PER_SEC = 1000;
 /**
  * 可显示的状态文本集合。
  *
- * 包含 RunStatus（"running"|"done" 不直接显示，转 reason）+ DoneReason
- * （completed/failed/aborted/budget_limited/time_limited）+ ExecutionTraceNode.status
- * （含 "pending"——trace 节点的初始态）。
+ * 包含 RunStatus（"running"|"done" 不直接显示，转 reason）+ 中断投影态
+ * "interrupted"（[D2] 重水合中断 run 经 meta.interruptedAt 投影——displayStatusOf
+ * 三态输出的第三值）+ DoneReason（completed/failed/aborted/budget_limited/
+ * time_limited）+ ExecutionTraceNode.status（含 "pending"——trace 节点的初始态）。
  *
  * 收窄自 string → 显式联合，编译器会在新增 status 时强制 switch 补齐分支。
  */
 export type StatusText =
   | RunStatus
+  | "interrupted"
   | DoneReason
   | "pending";
 
@@ -471,6 +473,7 @@ export function formatStatusBadge(
 ): string {
   switch (status) {
     case "running": return theme.fg("warning", "\u25CF running");
+    case "interrupted": return theme.fg("muted", "\u25CB interrupted");
     case "completed": return theme.fg("success", "\u2713 completed");
     case "failed": return theme.fg("error", "\u2717 failed");
     case "aborted": return theme.fg("error", "\u2717 aborted");

@@ -168,14 +168,18 @@ function extractRunReferencesFromLine(line: string, out: Set<string>): void {
 }
 
 /**
- * [裁决点 7] 采集全部存活 session 的 workflow run 引用并集（agentDir 活源——
- * sessions 布局与 resolveMainSessionFileById 同源）。
+ * [裁决点 7] 采集全部存活 session 的 workflow run 引用并集（agentDir 活源）。
+ *
+ * sessions 布局对齐 pi 实装 getSessionsDir（config.js）：`<agentDir>/sessions`
+ * 下的 encoded-cwd 子目录（session-manager.js——`--<cwd 编码>--` 目录内
+ * `<ts>_<sessionId>.jsonl`）。指向错误层级会静默扫出空集，裁决点 7 的引用
+ * 保护整体落空（活跃 run 误判无主）——布局锚点以 pi dist 实装为准。
  */
 async function collectAliveWorkflowRunReferences(
   agentDir: string,
 ): Promise<ReadonlySet<string>> {
   const refs = new Set<string>();
-  const sessionsRoot = path.join(agentDir, "..", "sessions");
+  const sessionsRoot = path.join(agentDir, "sessions");
   let slugDirs: string[];
   try {
     slugDirs = fs.readdirSync(sessionsRoot, { withFileTypes: true })

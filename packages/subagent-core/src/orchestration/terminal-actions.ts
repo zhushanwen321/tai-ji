@@ -61,10 +61,13 @@ import {
   type WorkflowRecordSettledEntryData,
 } from "./workflow-record-entry.ts";
 import type { AgentCall } from "./models/agent-call.ts";
+import { canonicalJsonStringify } from "./canonical-json.ts";
 import { toErrorMessage } from "../core/error-message.ts";
 import { trySettleLegacyClosed } from "../execution/persistence/execution-record.ts";
 import type { AgentResult as ExecutionAgentResult, ExecutionRecord } from "../execution/assembly/types.ts";
 import type {
+  AgentCallOpts,
+  AgentResult,
   DoneReason,
   RunStatus,
 } from "./models/types.ts";
@@ -83,7 +86,8 @@ import {
 /** run 事件 journal 词表集合（判别「触发事件是否本身落账」；词表 SSOT 在 run-events.ts）。 */
 const JOURNAL_EVENT_TYPES: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
 
-/** run-created 载荷 argsSummary 的截断上限（事件行要小，全文 args 不进 record）。 */
+/** run-created 载荷 argsSummary 的截断上限（行内摘要的体积上限——摘要供展示/
+ * 日志读面；args 全文随帧另落 args 字段，设计 §3.1 载荷表 run-created 行「args」）。 */
 const RUN_ARGS_SUMMARY_MAX_CHARS = 256;
 
 /** 本进程内 per-run 活体状态缓存（key = runId；terminal 即删）。 */
@@ -516,6 +520,10 @@ export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> 
     // [D1] record 单源存储收敛：scriptSource 全文唯一落点 = 本帧（快照已删）——
     // resume 的确定性重放（rebuildRunFromRecord / D13 嵌套检测）依赖此字段
     scriptSource: run.spec.scriptSource,
+    // args 全文（设计 §3.1 载荷表 run-created 行「args」）：D14 逐字段深度比对与
+    // resume 重放的 $ARGS 恢复依赖完整 args——argsSummary 截断摘要只覆盖小 args
+    // 的未截断形态，截断即两处读面退化（比对拒绝 / $ARGS 回落 {}）。
+    args: run.spec.args,
     argsSummary: summarizeRunArgs(run.spec.args),
     ...(run.spec.model !== undefined ? { model: run.spec.model } : {}),
     ts: Date.now(),
@@ -555,13 +563,17 @@ export function dispatchPhaseSettled(run: WorkflowRun, phase: string): void {
  *  恒 1——重试在 executeAgentCall 内部递归，attempt 递增随终局帧的 call.attempts
  *  落账）。phase = agent-call 消息携带的剧本归属（[D3] call 归属快照）——
  *  undefined/空串（未标注剧本）时不写字段。memberRecordId = 绑定的子代理 record
- *  id（[D6] 绑定字段化承载——续写帧携带，首派缺省）。 */
+ *  id（[D6] 绑定字段化承载——续写帧携带，首派缺省）。opts = resolveAgentOpts
+ *  规范化后的完整入参（canonical 序列化随帧落账——设计 §3.1 载荷表 agent-started
+ *  行「入参」；resume 重建回放集 call 的 opts 恢复源，detectReplayInputMismatch
+ *  的输入一致性比对由此可比）。 */
 export function dispatchAgentStarted(
   run: WorkflowRun,
   callId: number,
   agentName: string,
   phase?: string,
   memberRecordId?: string,
+  opts?: AgentCallOpts,
 ): void {
   void dispatchRunTrigger(run, {
     type: "agent-started",
@@ -570,6 +582,7 @@ export function dispatchAgentStarted(
     attempt: 1,
     ...(phase ? { phase } : {}),
     ...(memberRecordId !== undefined ? { memberRecordId } : {}),
+    ...(opts !== undefined ? { input: canonicalJsonStringify(opts) } : {}),
     ts: Date.now(),
   }).catch((err: unknown) => reportDispatchFailure(run.runId, err));
 }
@@ -610,14 +623,21 @@ export function dispatchAgentSettled(run: WorkflowRun, call: AgentCall, aborted:
 
 /** `agent-settled`（派发前置失败形态）：resolveAgentOpts 失败 = call 从未 markRunning
  *  （attempt 恒 1、durationMs 0）；errorCode 恒 unknown（自由文本无词表位，诊断文本
- *  在 trace/record 面）。 */
-export function dispatchAgentSettledFailed(run: WorkflowRun, callId: number): void {
+ *  在 trace/record 面）。result 全文随帧落账（调用方传入 run 内 errorResult 同源——
+ *  [D1] 完整性纪律：agent-settled 帧缺 result 是 record 恢复读面（loadAll / D12）的
+ *  拒绝形态，本帧是合法写入方，写面补齐优于读面放宽）。 */
+export function dispatchAgentSettledFailed(
+  run: WorkflowRun,
+  callId: number,
+  result: AgentResult,
+): void {
   void dispatchRunTrigger(run, {
     type: "agent-settled",
     taskIndex: callId,
     attempt: 1,
     outcome: "failed",
     errorCode: "unknown",
+    result,
     durationMs: 0,
     ts: Date.now(),
   }).catch((err: unknown) => reportDispatchFailure(run.runId, err));

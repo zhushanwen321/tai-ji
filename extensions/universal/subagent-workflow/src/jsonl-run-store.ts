@@ -239,7 +239,7 @@ function readRecordStream(recordPath: string): WorkflowRunEvent[] {
     // outcome（携带时）落词表——历史形态帧（旧词表成员/旧 outcome 值）按损坏拒绝
     // （[D1] 历史数据处置：旧词表行不进解析路径；本 strict 读面不静默跳过坏行，
     // 拒绝语义同半截行——调用方 storeHealthy=false fail-fast）。
-    if (!RUN_EVENT_TYPE_SET.has(event.type) && !(RUN_EVENT_TYPE_SET as ReadonlySet<string>).has(event.type)) {
+    if (!RUN_EVENT_TYPE_SET.has(event.type)) {
       throw corruption(`词表外事件 type=${JSON.stringify(event.type)}（旧词表历史行——[D1] 不读旧两件）`);
     }
     if (event.type === "run-settled" || event.type === "agent-settled") {
@@ -269,6 +269,20 @@ function lastRunSettledEvent(
   return undefined;
 }
 
+/**
+ * 尾向扫描「末次 run-interrupted 后无 run-resumed」的中断时刻（ISO；无中断或
+ * 已复活 → undefined）。[D2] interrupted 暂停态的 fold 投影依据——loadAll 重建
+ * 的中断 run 由 meta.interruptedAt 承载（聚合 status 保持两态）。
+ */
+function lastInterruptedAt(events: readonly WorkflowRunEvent[]): string | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i];
+    if (ev?.type === "run-resumed") return undefined; // 已复活——中断标记清除
+    if (ev?.type === "run-interrupted") return new Date(ev.ts).toISOString();
+  }
+  return undefined;
+}
+
 // ── record 流 fold 重建（事件流 → WorkflowRun）──────────────────
 
 /**
@@ -292,8 +306,9 @@ interface CallDraft {
  * record 事件流 → WorkflowRun 聚合重建（纯函数，零 IO）。
  *
  * fold 语义（词表 = run-events.ts [D4] 对齐后 9 事件）：
- * - `run-created`：spec.scriptSource（全文，[D1]）+ startedAt 锚点（帧 ts 优先，
- *   回落注册条目 startedAt）；
+ * - `run-created`：spec.scriptSource（全文，[D1]）+ args（全文，设计 §3.1 载荷表；
+ *   旧格式帧回落 argsSummary 尽力恢复——parseLegacyArgsSummary）+ startedAt 锚点
+ *   （帧 ts 优先，回落注册条目 startedAt）；
  * - `agent-started`：按 taskIndex 建 call（agentName/phase/startedAt）；
  *   重复 started 不重建（同 record fold 语义）；
  * - `agent-retrying`：无实体字段可回填（attempts 终值由 settled 帧承载）——跳过；
@@ -303,10 +318,28 @@ interface CallDraft {
  * - `run-settled`：终局（status=done + reason 映射 + completedAt=帧 ts）；无帧 =
  *   running（交恢复链收编）。
  *
- * record 流不承载的字段（budget 计数/errorLogs/trace 完整面/args 全文）按恢复
- * 语义最小形态缺省——步骤级详情的恢复读面 = record 流直读（session-reader 家族
- * 链），不经本聚合。
+ * record 流不承载的字段（budget 计数/errorLogs/trace 完整面）按恢复语义最小形态
+ * 缺省——步骤级详情的恢复读面 = record 流直读（session-reader 家族链），不经本聚合。
  */
+
+/**
+ * argsSummary → args 尽力恢复（旧格式帧回落通道，core resume-run.parseArgsSummary
+ * 同款语义）：现行写入面 run-created 帧携带 args 全文（上方优先消费）；本函数只
+ * 服务旧格式帧——未截断摘要可完整恢复，截断/不可解析回落 {}（旧格式流的 $ARGS
+ * 语义限制，静默回落对齐 core 侧「尽力恢复」处置）。
+ */
+function parseLegacyArgsSummary(argsSummary: string | undefined): Record<string, unknown> {
+  if (argsSummary === undefined || argsSummary === "" || argsSummary.endsWith("…")) return {};
+  try {
+    const parsed: unknown = JSON.parse(argsSummary);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // fallthrough：不可解析回落 {}
+  }
+  return {};
+}
 function foldRecordStreamToRun(
   runId: string,
   reg: WorkflowRecordRegisteredEntryData,
@@ -320,7 +353,10 @@ function foldRecordStreamToRun(
   const startedAtIso = new Date(startedAtMs).toISOString();
   const spec = {
     scriptSource: created?.scriptSource ?? "",
-    args: {},
+    // args 全文优先（设计 §3.1 载荷表 run-created 行「args」）；旧格式帧回落
+    // argsSummary 尽力恢复（未截断可完整恢复，截断回落 {}——core parseArgsSummary
+    // 同款语义；两侧行为等价由 record-mode 测试锁定）
+    args: created?.args ?? parseLegacyArgsSummary(created?.argsSummary),
     scriptName: reg.scriptName,
     scriptPath: "",
     ...(reg.slug !== undefined ? { slug: reg.slug } : {}),
@@ -400,6 +436,7 @@ function foldRecordStreamToRun(
 
   const settledEvent = lastRunSettledEvent(events);
   if (settledEvent === undefined) {
+    const interruptedAt = lastInterruptedAt(events);
     return WorkflowRun.reconstruct(
       runId,
       spec,
@@ -410,7 +447,14 @@ function foldRecordStreamToRun(
         trace,
         errorLogs: [],
       },
-      { startedAt: startedAtIso },
+      {
+        startedAt: startedAtIso,
+        // 中断标记（[D2] 聚合 status 两态、中断态经 meta 投影表达）：末次
+        // run-interrupted 后无 run-resumed 复活 → meta.interruptedAt 置位，
+        // runSummary 投影 'interrupted'（CLI/TUI 不显示僵尸「运行中」；resume
+        // 资格判据在 core fold lifecycle，不受本投影影响）。
+        ...(interruptedAt !== undefined ? { interruptedAt } : {}),
+      },
     );
   }
   const reason = runSettledOutcomeToDoneReason(settledEvent.outcome, settledEvent.errorCode);

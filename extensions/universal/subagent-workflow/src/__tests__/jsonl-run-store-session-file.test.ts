@@ -43,6 +43,7 @@ import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
+import { runSummary } from "@zhushanwen/subagent-core";
 import {
   RUN_EVENT_JOURNAL_SUFFIX,
   WORKFLOW_RECORD_CUSTOM_TYPE,
@@ -194,6 +195,34 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 ask-settled resul
     // phase 归属随 dispatched 帧恢复（traceNode.phase——分组展示供源）
     expect(restored[0]!.state.calls.get(1)!.traceNode.phase).toBe("review");
     expect(restored[0]!.state.calls.get(0)!.traceNode.agent).toBe("worker");
+  });
+
+  it("[U10] 中断流 fold：run-interrupted 无复活无终局 → meta.interruptedAt 置位（投影 interrupted 非僵尸 running）；复活流清除标记", async () => {
+    // 已收编 run（流含 run-interrupted）的重水合投影：聚合 status 保持两态
+    // （running），中断态经 meta.interruptedAt 表达——runSummary 据此投影
+    // 'interrupted'，CLI/TUI 不显示僵尸「运行中」；resume 复活（run-resumed
+    // 尾帧）后标记清除回 running。
+    const runId = "run-rt-interrupted";
+    const recordPath = appendRecordLine(tmpDir, runId, { type: "run-created", seq: 1, ts: 1000, runId, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')" });
+    appendRecordLine(tmpDir, runId, { type: "agent-started", seq: 2, ts: 1100, taskIndex: 0, agentName: "worker", attempt: 1 });
+    appendRecordLine(tmpDir, runId, { type: "run-interrupted", seq: 3, ts: 1200, errorCode: "crashed", reason: "Process killed" });
+
+    const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const restored = await store.loadAll();
+    expect(restored[0]!.state.status).toBe("running"); // 聚合两态保持
+    expect(restored[0]!.meta.interruptedAt).toBe(new Date(1200).toISOString());
+    expect(runSummary(restored[0]!).status).toBe("interrupted");
+
+    // 复活流（同流追加 run-resumed）：标记清除，投影回 running
+    const runId2 = "run-rt-resumed";
+    const recordPath2 = appendRecordLine(tmpDir, runId2, { type: "run-created", seq: 1, ts: 1000, runId: runId2, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')" });
+    appendRecordLine(tmpDir, runId2, { type: "run-interrupted", seq: 2, ts: 1100, errorCode: "crashed", reason: "Process killed" });
+    appendRecordLine(tmpDir, runId2, { type: "run-resumed", seq: 3, ts: 1200, reason: "resume dispatch plan: 1 restart(tier-3)", host: "h" });
+    const store2 = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx([v2RegisteredEntry(runId2, recordPath2)]) });
+    const restored2 = await store2.loadAll();
+    expect(restored2[0]!.meta.interruptedAt).toBeUndefined();
+    expect(runSummary(restored2[0]!).status).toBe("running");
   });
 });
 

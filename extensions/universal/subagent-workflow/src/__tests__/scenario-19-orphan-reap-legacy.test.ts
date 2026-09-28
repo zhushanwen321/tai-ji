@@ -165,7 +165,12 @@ beforeEach(() => {
   agentDir = path.join(tmpDir, "agent");
   stateDir = path.join(resolvePiSessionScopedDir({ agentDir }), STATE_DIR_NAME);
   fs.mkdirSync(stateDir, { recursive: true });
-  sessionsRoot = path.join(tmpDir, "sessions");
+  // 夹具布局与 pi 实装同构（对齐 U5 修复后采集路径）：sessions 根 = <agentDir>/sessions
+  // （pi config.js getSessionsDir = join(getAgentDir(), "sessions")），session 文件
+  // 在 encoded-cwd 子目录下——旧写法（tmpDir/sessions）与生产采集目录不同树，
+  // 引用集恒空 → 存量 run 被误判无主删除，本场景「不删」断言全红。
+  sessionsRoot = path.join(agentDir, "sessions");
+  expect(sessionsRoot.startsWith(agentDir)).toBe(true);
   mockAgentDir.current = agentDir;
 });
 

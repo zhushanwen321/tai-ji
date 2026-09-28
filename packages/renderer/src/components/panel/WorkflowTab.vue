@@ -36,6 +36,12 @@
         <span v-if="workflow.slug" class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim">
           {{ workflow.slug }}
         </span>
+        <!-- [D2] 中断 run 状态徽标（status 徽标面——state-tone-lock 登记的「已中断（可续跑）」
+             显示位）：非终局不出 outcome 终态文案，暂停态可 resume 复活（回 running 后本徽标消失） -->
+        <span v-if="workflow.status === 'interrupted'" data-testid="drawer-workflow-interrupted"
+          class="shrink-0 rounded-sm border border-hairline px-1.5 py-px text-[length:var(--text-3xs)] text-neutral-dim">
+          {{ t('panel.tray.workflowInterrupted') }}
+        </span>
         <!-- workflow 一次性生命周期（subagent-workflow D-2）：仅 abort，pause/resume 已移除 -->
         <div v-if="workflow.status === 'running'" class="flex shrink-0 items-center gap-0.5">
           <Button

@@ -32,12 +32,13 @@ import { LIST_LIMIT } from "./list-shared.ts";
 import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
 import { displayStatusOf } from "./tool-workflow.ts";
 
-/** status 显示顺序：running 优先（活跃态在前），再 startedAt 倒序。
- *  [W2/V1 D1 第 6 行] 权重表原样沿用，消费键 = displayStatusOf 投影二值
- * （排序键不读 outcome 四值——v1 两态值与 v2 四值不进同一权重表，排序语义
- * 不分裂；outcome 细分由 runSummary.reason 并列承载）。 */
+/** status 显示顺序：running 优先（活跃态在前），interrupted 次之（[D2] 暂停态
+ *  ——无活体但可续跑，排活体后、终局前），再 startedAt 倒序。
+ *  [W2/V1 D1 第 6 行] 权重表消费键 = displayStatusOf 投影三态（排序键不读
+ *  outcome 细分——outcome 由 runSummary.reason 并列承载）。 */
 const STATUS_ORDER: Record<string, number> = {
   running: 0,
+  interrupted: 1,
   done: 2,
 };
 /** 未知 status 的默认排序权重（排在已知 status 之后）。 */
@@ -156,12 +157,11 @@ export function registerWorkflowsCommand(
  *
  * 各 action 语义：
  * - abort → 调 lifecycle abortRun，成功/失败均 notify（不向上抛）
- * - lifecycle-removed → 已移除的 verb（pause/resume），给定制指引而非 Usage
- *   （F3 定稿——提示语义优先于 missing-id：run 一次性生命周期后不可挂起）。
- *   注：resume verb 的 RPC 通道接线（解析词表在 command-actions.ts，领地外）
- *   未随 U3 落地——resume 的用户入口 = workflow tool（action:"resume"）与 TUI
- *   命令（/workflows resume <runId>），见 handler TUI 分支；RPC removed 提示的
- *   文案与 resume 能力的矛盾随编排层的 command-actions 词表适配一并解决。
+ * - resume → 调 core resumeRun 断点续跑（与 TUI verb、workflow tool
+ *   action:"resume" 三通道同语义——D14 args 校验面在 tool action 入口，命令
+ *   通道不带 args，沿用历史 args），成功/失败均 notify（不向上抛）
+ * - lifecycle-removed → 已移除的 verb（pause），给定制指引而非 Usage
+ *   （F3 定稿——提示语义优先于 missing-id：run 一次性生命周期后不可挂起）
  * - lifecycle-missing-id → Usage 提示
  * - noop → 无 action 或未知 action：GUI 端已屏蔽此 command 入口，此处兜底
  */
@@ -179,6 +179,19 @@ async function handleRpcMode(
       } catch (err) {
         const msg = toErrorMessage(err);
         ctx.ui.notify(`Failed to abort workflow ${parsed.runId}: ${msg}`, "warning");
+      }
+      return;
+    }
+    case "resume": {
+      try {
+        await resumeRun(parsed.runId, deps);
+        ctx.ui.notify(
+          `Workflow ${parsed.runId}: resuming — completed calls replay at zero token cost, unfinished calls re-dispatched`,
+          "info",
+        );
+      } catch (err) {
+        const msg = toErrorMessage(err);
+        ctx.ui.notify(`Failed to resume workflow ${parsed.runId}: ${msg}`, "warning");
       }
       return;
     }

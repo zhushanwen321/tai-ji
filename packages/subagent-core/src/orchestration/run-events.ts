@@ -34,8 +34,13 @@
 // 判据可分叉。manifest（<runId>.json）降格为 run-settled 终局事件的派生缓存/
 // 索引（转移表 manifest-write 输出动作同批写出，可随时从 record 重建，损坏即
 // 重建，不构成第二份事实）——仅两个用途：retention / 对账清理的加速判定
-// （findSettlementEvidenceSync 通道）与终局诊断的独立可寻址落点。record 流被
-// 保留期裁剪后，manifest 是终局事实的最后落点。
+// （findSettlementEvidenceSync 通道）与终局诊断的独立可寻址落点。
+//
+// record 流的磁盘清理归裁决点 7 对账清理（无主 run 五件全删）——pi 壳域 run 域
+// 保留期不裁 record 流（prune 候选锚定 state 快照族，run-state-evidence [D1 后
+// 射程] 段），故「record 流被保留期裁剪、manifest 成终局事实最后落点」的形态在
+// 现行写入面无正常产生通道；findRunSettlementEvidence 的 manifest 兜底分支保留
+// 为残局防御（外部删除 / 清理部分失败），非设计内读序。
 //
 // interrupted 不是终局（[D2] interrupted 入 lifecycle 为暂停态）：run-interrupted
 // 转移事件只表达「执行中断、无活体」，fold 停在 interrupted 的 run 可经
@@ -309,8 +314,17 @@ export interface RunCreatedEvent extends EventEnvelope {
   runId: string;
   /** 脚本身份名（RunSpec.scriptName，meta.name 或文件名 stem）。 */
   workflowName: string;
-  /** 调用参数摘要（截断的序列化形态——事件行要小，全文 args 不进 record）。 */
+  /** 调用参数摘要（截断的序列化形态——展示/日志用途的行内小摘要；恢复读面优先
+   *  消费下方 args 全文字段，摘要仅旧格式帧回落）。 */
   argsSummary: string;
+  /**
+   * 调用参数全文（RunSpec.args 原文，设计 §3.1 载荷表 run-created 行「args」——
+   * D14 逐字段深度比对与 resume 重放的 $ARGS 恢复依赖完整 args，摘要截断形态
+   * 使两者退化为「传 args 一律拒绝」/「$ARGS 回落空对象」）。可选 = 读取面对
+   * 旧格式行放行（载荷缺失回落 argsSummary 尽力恢复），写侧契约由写入方承担
+   * （写入点 = terminal-actions dispatchRunCreated，scriptSource 同款处理）。
+   */
+  args?: Record<string, unknown>;
   /** run 级 model 引用（RunSpec.model；缺省 = 继承主 agent 模型）。 */
   model?: string;
   /**
@@ -362,6 +376,16 @@ export interface AgentStartedEvent extends AgentIdentity, EventEnvelope {
    * 续写（复用既有成员）携带。可选 = 读取面对旧格式行与首派帧放行。
    */
   memberRecordId?: string;
+  /**
+   * 入参全文（resolveAgentOpts 规范化后 opts 的 canonical JSON 序列化——设计
+   * §3.1 载荷表 agent-started 行「入参」；读放量重审轴「agent-started 入参全文
+   * 重复行数」即本字段）。resume 重建回放集 call 以本字段恢复 opts，
+   * detectReplayInputMismatch 的输入一致性比对由此可比（[U13]：缺本字段时重建
+   * 只能落占位 opts {prompt:""}，比对结构性跳过——回放前缀的非确定性漂移零
+   * 检出）。可选 = 读取面对旧格式行放行（旧帧重建回落占位形态，比对跳过维持）；
+   * 写侧填充责任在 dispatchAgentStarted（worker-message-pump 派发链）。
+   */
+  input?: string;
 }
 
 /** `agent-retrying`——失败尝试后将退避重试（重试轨迹从脚本内部状态变为 record 事件，重试不再能掩盖事故）。 */

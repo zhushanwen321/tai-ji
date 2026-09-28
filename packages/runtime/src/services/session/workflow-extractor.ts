@@ -66,6 +66,20 @@ const WORKFLOW_RUN_OUTCOMES = ['done', 'failed', 'cancelled', 'time_limited'] as
 /** status 合法词表（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunStatus 三态——[D2] interrupted 暂停态）。 */
 const WORKFLOW_RUN_STATUSES: readonly WorkflowRunStatus[] = ['running', 'interrupted', 'done']
 
+/**
+ * call 级 status 合法词表（值级守卫用；词表 SSOT = @taiji/shared
+ * WorkflowAgentCall.status 四值——[D2] 词表变更登记第 4 条 call 级投影同词贯穿）。
+ * 词表外值（存量 v2 快照的旧词表 'completed' 等）不进 renderer：下游
+ * isTerminalCallStatus/callDotClass 的 default-never 穷尽锁对词表外运行时值抛错
+ * （编译锁拦不住绕过类型的脏数据），冻结读面按坏 run 丢弃（对齐 state.status
+ * 守卫口径——跨版本混跑不做兼容读）。
+ */
+const WORKFLOW_CALL_STATUSES: readonly WorkflowAgentCall['status'][] = ['pending', 'running', 'done', 'failed']
+// [D2] 词表变更登记第 4 条的存量兼容：D2 前 v2 快照 call 级终态词 'completed' 是
+// 合法历史形态（非脏数据），守卫放行、mapTraceNode 映射为 'done'——丢弃会把升级
+// 后打开存量 session 的整条 run 投影判死（workflow-step-merge V3 fixture 同源）。
+const LEGACY_CALL_STATUS_MAP: Readonly<Record<string, WorkflowAgentCall['status']>> = { completed: 'done' }
+
 /** workflow-state-link entry 的 data 结构（legacy） */
 interface WorkflowStateLinkData {
   runId: string
@@ -438,10 +452,12 @@ function mapValidatedSnapshot(runId: string, parsed: unknown, stateFilePath: str
 }
 
 /**
- * 核心必填字段值级守卫（mapSnapshotToRecord 直接透传三字段的校验点）。
+ * 核心必填字段值级守卫（mapSnapshotToRecord 直接透传字段的校验点）。
  * 返回首个不合法字段的描述（诊断用）或 null = 全部合法：
  * - spec.scriptName：非空 string（record 直透，列表/详情展示键）；
- * - state.status：∈ WorkflowRunStatus 词表（running/done，renderer 状态徽标按词表消费）；
+ * - state.status：∈ WorkflowRunStatus 词表（running/interrupted/done，renderer 状态徽标按词表消费）；
+ * - state.trace[].status：∈ WorkflowAgentCall.status 词表（[D2] 词表变更登记第 4 条——
+ *   旧词表 'completed' 直透会在 renderer 穷尽锁运行时抛错，词表外按坏 run 丢弃）；
  * - meta.startedAt：非空 string 且可解析为有限时间（ISO 契约，写点 = subagent-core
  *   lifecycle.ts 的 meta.startedAt toISOString；非有限时间串 = 损坏数据）。
  */
@@ -453,6 +469,18 @@ function coreProjectionFieldIssue(snapshot: RunSnapshot): string | null {
   const state = snapshot.state as Record<string, unknown>
   if (!(WORKFLOW_RUN_STATUSES as readonly unknown[]).includes(state.status)) {
     return `state.status invalid (${String(state.status)})`
+  }
+  // trace 数组形态由调用方前置守卫（Array.isArray）；null/非对象项归
+  // mapSnapshotToRecord 的项级过滤（R4 坏项隔离），此处只查对象项的词表外值
+  for (const raw of state.trace as unknown[]) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const nodeStatus = (raw as { status?: unknown }).status
+    if (
+      typeof nodeStatus !== 'string'
+      || (!(WORKFLOW_CALL_STATUSES as readonly string[]).includes(nodeStatus) && !(nodeStatus in LEGACY_CALL_STATUS_MAP))
+    ) {
+      return `trace.status invalid (${String(nodeStatus)})`
+    }
   }
   const meta = snapshot.meta as Record<string, unknown>
   if (
@@ -541,7 +569,8 @@ function mapTraceNode(node: SnapshotTraceNode, lastProgressAt: number | undefine
     id: node.stepIndex,
     agent: node.agent,
     phase: node.phase,
-    status: node.status,
+    // [D2] 存量兼容映射：旧词表 'completed' → 'done'（守卫已放行合法历史值）
+    status: node.status in LEGACY_CALL_STATUS_MAP ? LEGACY_CALL_STATUS_MAP[node.status] : node.status,
     model: node.model,
     sessionId: node.sessionId ?? node.result?.sessionId,
     startedAt: node.startedAt,

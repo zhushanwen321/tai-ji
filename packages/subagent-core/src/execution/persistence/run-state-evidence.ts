@@ -232,6 +232,14 @@ async function deleteRunFootprint(
  * （state + journal）+ manifest 永不随裁。窗口解析（env 通道）缺省经
  * {@link resolveStateTtlMs}——窗口是唯一资格判据。
  * 统一维护轮（runRetentionMaintenanceRound）与直接调用方共用同一实装。
+ *
+ * [D1 后射程（workflow-run-resume-revision 裁决点 7）] pi 壳域 run 的唯一磁盘清理
+ * 通道 = 对账清理（reapOrphanRuns：引用判据 + 宽限窗 + 全部件删除）——本函数的
+ * 保留窗是无引用判据的盲删除，对本域 run 启用即绕过引用保护（裁决点 7 明文废弃
+ * 方向）。判据换源 record 流后本函数的现行形态因此保持**结构性不触新格式 run**：
+ * 候选锚定 state 快照族（新格式无快照件——不进候选），journal 后缀 filter 排除
+ * record 流。record 流的「终态 + 超窗」删除资格不落本通道，其清理随对账清理的
+ * 无主判定走（有主 run 的 record 流保留是设计内行为——resume 依赖全文）。
  */
 export async function pruneTerminalRunFiles(
   stateDir: string,
@@ -245,6 +253,8 @@ export async function pruneTerminalRunFiles(
  * run 域保留清理实装（pruneTerminalRunFiles 的单源体，统一维护轮同点消费）：
  * 枚举 state 文件候选 → 逐 run fold 判定 → 终态 ∧ 超窗者成对删（state + journal）。
  * retentionMs undefined（opt-out）= 整轮不裁（窗口是唯一资格判据），仅保留候选计数。
+ * 候选锚定与 record 流排除的裁决性理由见 pruneTerminalRunFiles 注释（[D1 后射程]
+ * 段）——新格式 run（唯一件 = record 流）结构性不进候选，清理由对账清理通道承接。
  */
 async function pruneTerminalRunFootprint(
   stateDir: string,
@@ -266,7 +276,9 @@ async function pruneTerminalRunFootprint(
     }
     return result;
   }
-  // state 文件候选：wf-*.jsonl 且排除 journal（<runId>.record.jsonl——附属，不单独候选）
+  // state 文件候选：wf-*.jsonl 且排除 journal（<runId>.record.jsonl）——record 流
+  // 不作候选是裁决点 7 引用保护的构成部分（唯一清理通道 = 对账清理），非实现疏漏；
+  // 裁决性理由见 pruneTerminalRunFiles 注释 [D1 后射程] 段
   const stateNames = names.filter(
     (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(RUN_EVENT_JOURNAL_SUFFIX),
   );
@@ -506,7 +518,9 @@ export type RunSettlementEvidence =
  *   行级独立 JSON 不受早先坏行影响）→ terminal + reason（帧 (outcome, errorCode)
  *   经 runSettledOutcomeToDoneReason 联合派生——[W2 D5] sweep 补注销 reason 统一
  *   派生源第三处；budget_limited/time_limited 细分保留）；
- * - journal 无帧但 manifest 在盘（活体物化后 journal 被裁的组合）→ terminal +
+ * - journal 无帧但 manifest 在盘（record 流缺场 + manifest 残局——现行写入面下
+ *   record 流不被保留期裁剪（prune 候选排除，裁决点 7）、对账清理五件全删不留
+ *   manifest，该组合只剩外部删除 / 清理部分失败残局两类来源）→ terminal +
  *   reason（manifest outcome 派生；无码细分退化为 outcome 兜底）；
  * - journal 存在但无 run-settled 帧（run 真未终局，含坏链首帧形态）→ running
  *   （保守按活跃，不补注销——对齐 adoptInterruptedRun skippedBrokenChain 纪律）；
@@ -555,7 +569,8 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
       reason: runSettledOutcomeToDoneReason(settled.outcome, settled.errorCode),
     };
   }
-  // journal 无帧：manifest 终局面（prune 资格单源锚定的第二证据通道）
+  // journal 无帧：manifest 终局面（残局防御——现行写入面下 record 流不被保留期
+  // 裁剪、对账清理五件全删，正常无此组合；见上方判定矩阵该行注释）
   const manifestPath = join(stateDir, `${runId}.json`);
   try {
     const parsed: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));

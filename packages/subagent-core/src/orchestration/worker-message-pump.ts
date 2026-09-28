@@ -31,7 +31,7 @@
 
 import { getLogger } from "../core/logger.ts";
 
-import { createHash } from "node:crypto";
+import { canonicalJsonHash } from "./canonical-json.ts";
 
 import { resolveAgentOpts } from "./agent-opts-resolver.ts";
 import { executeAgentCall } from "./execute-agent-call.ts";
@@ -294,41 +294,11 @@ function discardInFlightCalls(run: WorkflowRun): number[] {
 
 // ── [U2] canonical JSON 工具（场景 13：schema 哈希稳定）─────────
 
-/**
- * canonical JSON 序列化（键排序的确定性形态）。
- *
- * 为什么需要：回放一致性校验与 schema 模式调用的输入比对依赖「同一逻辑值恒产
- * 同一序列化」——JSON.stringify 的键序由插入序决定，schema 对象经 worker IPC
- * 往返与历史记录对照时，两个执行实例的对象构造序可能不同（从缓存/外部数据
- * 重建的键序不保证），同值不同文即假 mismatch。canonical 形态（对象键字典序
- * 递归排序、数组保序、原始值直出）消除该漂移——场景 13 的「零误报 mismatch」。
- *
- * 语义边界：undefined 值的键跳过（JSON 语义）；BigInt / 循环引用抛 TypeError
- * （调用方按校验失败处置——这两类值本就不可 IPC 传输，出现在比对面即编程错误）。
- * 落位本文件（而非 resume-run.ts）：pump 的 replay 校验与本工具的消费方向是
- * resume-run → pump 单向依赖，工具放 resume-run 会让 pump 反向 import 成环。
- */
-export function canonicalJsonStringify(value: unknown): string {
-  return serializeCanonical(value);
-}
-
-function serializeCanonical(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => serializeCanonical(item)).join(",")}]`;
-  }
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, v]) => v !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${serializeCanonical(v)}`).join(",")}}`;
-}
-
-/** canonical 形态的 SHA-256 哈希（十六进制，64 字符）——回放一致性比对的键形态。 */
-export function canonicalJsonHash(value: unknown): string {
-  return createHash("sha256").update(canonicalJsonStringify(value)).digest("hex");
-}
+// 实装与设计说明已抽至 ./canonical-json.ts（第二消费方 terminal-actions 的
+// agent-started 入参落账出现后，工具留在本文件会形成 pump ↔ terminal-actions
+// 反向 import 成环）。此处 re-export 维持既有 import 路径（测试与下游消费方
+// 不变），语义与落位理由见该模块头注。
+export { canonicalJsonStringify, canonicalJsonHash } from "./canonical-json.ts";
 
 // ── [D10] resume 时间预算账本（活跃段算式的执行期消费面）────────
 
@@ -605,8 +575,9 @@ function isMalformedAgentCallMsg(msg: AgentCallMsg): boolean {
  * 差异，canonical 键序消除 IPC/重建往返的形态漂移——场景 13 零误报）。
  *
  * 跳过比对（返回 false）的三形态——比对即假 mismatch：
- * 1. 占位 opts（resume/重水合重建的 call：record 流 agent-started 帧不携带入参
- *    全文，[D1] 载荷裁决只扩 result/scriptSource 两处——历史入参不在数据面）；
+ * 1. 占位 opts（resume/重水合重建的 call 无可比数据面时：旧格式 record 流的
+ *    agent-started 帧不携带入参全文（input 载荷为 [U13] 补齐，写侧随本设计
+ *    落地）——新帧有 input 的重建走 opts 恢复，比对正常执行）；
  * 2. 失败历史（cached.result.error 在场——失败也是真实历史结果，重跑不保证更对
  *    且机制文档 D5 裁决「含失败的 done 保留回放」）；
  * 3. 本次 resolve 失败（skill 丢失等——错误结果回放路径，非漂移信号）。
@@ -725,8 +696,9 @@ function dispatchAgentCall(
       result: errorResult,
       completedAt: new Date().toISOString(),
     });
-    // [P1b-1] agent-settled(failed) 落账（派发前置失败形态：attempt 恒 1）。
-    dispatchAgentSettledFailed(run, msg.callId);
+    // [P1b-1] agent-settled(failed) 落账（派发前置失败形态：attempt 恒 1）。result
+    // 随帧携带（errorResult 同源——record 恢复读面拒绝缺 result 的 settled 帧）。
+    dispatchAgentSettledFailed(run, msg.callId, errorResult);
     postAgentResult(run, msg.callId, errorResult, false);
     deps.store.save(run).catch((e: unknown) => {
       logger.error(`[workflow] store.save failed (resolveAgentOpts): ${toErrorMessage(e)}`);
@@ -739,9 +711,11 @@ function dispatchAgentCall(
   // [P1b-1] agent-started 落账（编排层事件源，D5 载荷表；taskIndex = callId 单源）。
   // phase 透传（[D3] call 归属快照）；memberRecordId 透传（[D6] 绑定字段化——
   // 续写帧携带既有成员 record id，首派缺省；绑定登记的真相面在 workflow-dispatch，
-  // 此处从复用池活体缓存取值随帧落账，跨崩溃重建由 fold 消费本字段）。
+  // 此处从复用池活体缓存取值随帧落账，跨崩溃重建由 fold 消费本字段）；opts 落
+  // 入参全文（设计 §3.1 载荷表 agent-started 行「入参」——canonical 序列化，
+  // resume 重建回放集 call 的 opts 恢复源，detectReplayInputMismatch 比对由此可比）。
   const boundRecordId = lookupBoundRecordIdSync(run.runId, agentName);
-  dispatchAgentStarted(run, msg.callId, agentName, msg.phase, boundRecordId);
+  dispatchAgentStarted(run, msg.callId, agentName, msg.phase, boundRecordId, resolved.opts);
 
   // [GUI 步骤实时可见 2026-09-14] 启动即持久化（[D1] 后 save 为壳侧 no-op 契约，
   // 调用保留 = RunStore port 契约面）。火后模式与下方 .catch 同款。

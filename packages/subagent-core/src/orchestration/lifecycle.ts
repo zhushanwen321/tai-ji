@@ -835,7 +835,13 @@ export async function recoverCrashedRuns(
               ? (entry) => hooks.appendSettledEntry?.(WORKFLOW_RECORD_CUSTOM_TYPE, entry)
               : undefined,
         });
-        if (adopted) recovered += 1;
+        if (adopted) {
+          recovered += 1;
+          // 内存投影同步（[D2] 中断标记）：record 侧转移事件已落，聚合侧
+          // meta.interruptedAt 同步置位——runSummary 投影 'interrupted'（CLI/TUI
+          // 不显示僵尸「运行中」；fold 重建路径同款写点见壳 foldRecordStreamToRun）。
+          run.meta.interruptedAt = new Date().toISOString();
+        }
       } catch (err) {
         const msg = toErrorMessage(err);
         logger.warn(

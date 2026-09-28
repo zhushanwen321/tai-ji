@@ -156,4 +156,64 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
     expect(loaded[0]!.state.status).toBe("done");
     expect(loaded[0]!.state.reason).toBe("completed");
   });
+
+  it("[U6 回归] resolveAgentOpts 失败形态的 agent-settled 帧带 result → loadAll 正常重建（不判损坏）", async () => {
+    // 派发前置失败（agent 名/skill 解析失败）是设计内合法产出：run 终局 failed、
+    // call 的 agent-settled 帧由 dispatchAgentSettledFailed 落账。写面补齐 result
+    // 后，重启 loadAll 的严格读原语（settled 帧缺 result = RecordStreamCorruptionError
+    // → storeHealthy=false 停初始化）不再把该流判损坏。
+    const journalPath = journalPathOf(tmpDir, "run-pre-dispatch-fail");
+    fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+    fs.writeFileSync(
+      journalPath,
+      [
+        JSON.stringify({
+          type: "run-created",
+          seq: 1,
+          ts: Date.now(),
+          runId: "run-pre-dispatch-fail",
+          workflowName: "test-script",
+          argsSummary: "{}",
+          scriptSource: "agent('nope')",
+        }),
+        JSON.stringify({
+          type: "agent-started",
+          seq: 2,
+          ts: Date.now(),
+          taskIndex: 0,
+          agentName: "nope",
+          attempt: 1,
+        }),
+        JSON.stringify({
+          type: "agent-settled",
+          seq: 3,
+          ts: Date.now(),
+          taskIndex: 0,
+          attempt: 1,
+          outcome: "failed",
+          errorCode: "unknown",
+          result: { content: "", error: "skill not found: nope" },
+          durationMs: 0,
+        }),
+        JSON.stringify({
+          type: "run-settled",
+          seq: 4,
+          ts: Date.now(),
+          outcome: "failed",
+          errorCode: "unknown",
+          reason: "agent opts resolve failed",
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx([v2RegisteredEntry("run-pre-dispatch-fail", journalPath)]) });
+    const loaded = await store.loadAll();
+
+    expect(loaded.map((r) => r.runId)).toEqual(["run-pre-dispatch-fail"]);
+    expect(loaded[0]!.state.status).toBe("done");
+    expect(loaded[0]!.state.reason).toBe("failed");
+    const call = loaded[0]!.state.calls.get(0);
+    expect(call?.result).toMatchObject({ content: "", error: "skill not found: nope" });
+  });
 });

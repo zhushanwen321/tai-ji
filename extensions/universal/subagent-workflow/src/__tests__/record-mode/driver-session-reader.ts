@@ -52,17 +52,16 @@ switch (MODE) {
     break;
   }
   case "overview-resumed": {
-    // 复活流的概览现行为记录：run-resumed 帧不进概览文本（u1a 概览链换源的
-    // 显式设计——状态机转移帧跳过，只渲染终局/中断帧）→ 复活 run 在 session_read
-    // 概览保持 interrupted 直至终局。「resume 后恢复 running 投影」（场景 25 GUI
-    // 面）的数据源是 runtime journal-projection（foldRunEventCheckpoint 消费
-    // run-resumed），非本链——分层登记见场景 25 文件注释。
+    // 复活流的概览状态：run-resumed 是 interrupted → running 的转移证据（[D2]
+    // lifecycle fold 投影），概览链消费该帧清中断标记 → 复活 run 在 session_read
+    // 概览回 running（与 runtime journal-projection 的 foldRunEventCheckpoint
+    // 消费同一转移帧，两链状态语义一致）。
     const withResumed = [
       ...content.split("\n").filter((l) => l.trim()),
       JSON.stringify({ type: "run-resumed", ts: 1_759_000_001_000, reason: "resume dispatch plan: 1 restart(tier-3)" }),
     ].join("\n");
     const overview = parseRunRecordStream(withResumed, RUN_ID, RECORD_PATH);
-    expectCond(overview.status === "interrupted", `resumed stream stays interrupted in session_read overview (transition frames skipped), got ${overview.status}`);
+    expectCond(overview.status === "running", `resumed stream returns to running in session_read overview, got ${overview.status}`);
     break;
   }
   case "overview-corrupt-tolerant": {

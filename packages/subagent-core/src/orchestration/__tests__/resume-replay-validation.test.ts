@@ -21,6 +21,7 @@ import {
 } from "../lifecycle.ts";
 import { setRunEventJournalDirForTest } from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
+import { resolveAgentOpts } from "../agent-opts-resolver.ts";
 import { AgentCall } from "../models/agent-call.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
@@ -62,7 +63,7 @@ function makeRunningRun(
 }
 
 /** 真实派发形态的 done call（markRunning → markDone，opts 为真实入参）。 */
-function makeSettledCall(callId: number, opts: Record<string, unknown>, result: AgentResult): AgentCall {
+function makeSettledCall(callId: number, opts: AgentCall["opts"], result: AgentResult): AgentCall {
   const node: ExecutionTraceNode = {
     stepIndex: callId,
     agent: "reviewer",
@@ -71,7 +72,7 @@ function makeSettledCall(callId: number, opts: Record<string, unknown>, result: 
     status: "running",
     startedAt: new Date().toISOString(),
   };
-  const call = new AgentCall(callId, opts as unknown as AgentCall["opts"], node);
+  const call = new AgentCall(callId, opts, node);
   call.markRunning();
   call.markDone(result);
   return call;
@@ -194,7 +195,8 @@ describe("pump replay 校验增强 — cached 命中的输入一致性", () => {
 
   it("占位 opts（resume/重水合重建形态）→ 跳过比对直接回话（零误报，场景 13 约束）", async () => {
     const { run, postMessage } = makeRunningRun("wf-replay-placeholder");
-    // resume 重建的 call：opts 占位 { prompt: "" }（record 流不携带入参全文）
+    // 旧格式 record 流重建的 call：帧无 input 载荷（agent-started 入参全文为 [U13]
+    // 补齐，落地前落盘的流）→ opts 占位 { prompt: "" }
     const node: ExecutionTraceNode = {
       stepIndex: 0,
       agent: "a",
@@ -219,6 +221,63 @@ describe("pump replay 校验增强 — cached 命中的输入一致性", () => {
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "agent-result", callId: 0, cached: true }),
     );
+  });
+
+  it("rebuild 恢复 opts 形态（agent-started input 载荷 parse 往返）→ 比对可比：一致命中回话、漂移检出", async () => {
+    // [U13] 机制面：dispatchAgentStarted 落 canonical 序列化入参全文（resolved
+    // 形态——schema 已注入 appendSystemPrompt），rebuild 经 JSON.parse 恢复 opts
+    // ——与本次消息 opts 走同一 resolveAgentOpts + canonical 哈希比对，形态对称
+    // 成立（一致 → 回话；漂移 → mismatch 终局，不再结构性跳过）。
+    const roundtrip = (opts: unknown): AgentCall["opts"] =>
+      JSON.parse(canonicalJsonStringify(opts)) as AgentCall["opts"];
+    const resolvedForm = (raw: AgentCall["opts"]): AgentCall["opts"] =>
+      resolveAgentOpts(raw).opts;
+
+    // 一致：rebuild 恢复的 resolved 形态 opts（input 载荷 parse 往返）与重发消息
+    // （同一脚本字面量——schema 键序天然一致）经同一管道值级相等
+    const { run: okRun, postMessage: okPost } = makeRunningRun("wf-replay-restored-ok");
+    okRun.state.calls.set(
+      0,
+      makeSettledCall(
+        0,
+        roundtrip(resolvedForm({ prompt: "same", schema: { type: "object", properties: { a: { type: "number" } } } })),
+        { content: "cached" },
+      ),
+    );
+    const { deps } = makeDeps();
+    await handleWorkerMessage(okRun, { type: "agent-call", callId: 0, opts: { prompt: "same", schema: { type: "object", properties: { a: { type: "number" } } } } }, deps, {
+      onMessage: vi.fn(async () => {}),
+      onError: vi.fn(async () => {}),
+      onExit: vi.fn(async () => {}),
+    });
+    expect(okPost).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agent-result", callId: 0, cached: true }),
+    );
+
+    // 漂移：resume 前缀含非确定性（Date.now() 进 call#1 prompt）→ 检出、不回话
+    const runId = "wf-replay-restored-drift";
+    const seedJournal = createRunEventJournal(journalDir);
+    await seedJournal.append(runId, {
+      type: "run-created",
+      runId,
+      workflowName: "w",
+      argsSummary: "{}",
+      scriptSource: "async function execute() {}",
+      ts: 1_770_000_000_000,
+    });
+    const driftRun = makeRunningRun(runId);
+    driftRun.run.state.calls.set(0, makeSettledCall(0, roundtrip({ prompt: "t=1000" }), { content: "stale" }));
+    await handleWorkerMessage(driftRun.run, { type: "agent-call", callId: 0, opts: { prompt: "t=2000" } }, deps, {
+      onMessage: vi.fn(async () => {}),
+      onError: vi.fn(async () => {}),
+      onExit: vi.fn(async () => {}),
+    });
+    await flushMicrotasks();
+    expect(driftRun.postMessage).not.toHaveBeenCalled();
+    const events = await createRunEventJournal(journalDir).scan(runId);
+    const settled = events.find((e) => e.type === "run-settled");
+    expect(settled).toBeDefined();
+    expect((settled as { outcome?: string }).outcome).toBe("failed");
   });
 });
 

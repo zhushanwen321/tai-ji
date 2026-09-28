@@ -41,7 +41,7 @@ describe("场景 25 无门段：中断 run 宿主投影数据面", () => {
     expect(entry).toMatchObject({ kind: "settled", runId: RUN_ID, status: "interrupted" });
   });
 
-  it("概览链三态渲染：中断 run 显示 interrupted（非 running）；复活流在 session_read 概览保持 interrupted（现行为记录，分层见下）", async () => {
+  it("概览链三态渲染：中断 run 显示 interrupted（非 running）；复活流回 running（run-resumed 转移证据被概览链消费）", async () => {
     const env = mkScenarioEnv("25ov");
     try {
       await seedCrashedRun(env, RUN_ID, {
@@ -55,11 +55,9 @@ describe("场景 25 无门段：中断 run 宿主投影数据面", () => {
       // 中断态：概览渲染 interrupted（GUI「已中断（可续跑）」的数据面——文案消费
       // 归 renderer，词面由 state-tone-lock 锁）
       await runSessionReaderProbe("overview-interrupted", env.recordPath(RUN_ID), RUN_ID);
-      // 复活流（run-resumed 落流、无终局帧）的 session_read 概览现行为：保持
-      // interrupted（转移帧不进概览文本——u1a 概览链换源的显式设计）。「resume 后
-      // 恢复 running 投影」（场景 25 GUI 通过标准）的数据源 = runtime
-      // journal-projection（foldRunEventCheckpoint 消费 run-resumed，u1a 适配），
-      // 真机断言在 CDP 门段；分层差异登记 u4a deviations。
+      // 复活流（run-resumed 落流、无终局帧）：run-resumed 是 interrupted → running
+      // 的转移证据，session_read 概览链消费该帧回 running——与 runtime
+      // journal-projection（foldRunEventCheckpoint 同款转移帧消费）状态语义一致。
       await runSessionReaderProbe("overview-resumed", env.recordPath(RUN_ID), RUN_ID);
     } finally {
       env.cleanup();

@@ -161,9 +161,14 @@ export interface SeedRunSpec { // oe-exempt:20260929:test:seed run shape (test f
   workflowName?: string;
   ts?: number;
   /**
-   * run-created 帧的 argsSummary（D14 比对数据源，场景 24）。缺省 "{}"；生产
-   * 形态 = JSON.stringify(args)（含 rfl 注入的 _runId），超 256 字符被
-   * summarizeRunArgs 截断加 "…" 尾标——截断形态由调用方自行构造。
+   * run-created 帧的 args 全文（设计 §3.1 载荷表——生产写面 dispatchRunCreated
+   * 随帧落；D14 逐字段深度比对优先消费，任意体积可比对）。
+   */
+  args?: Record<string, unknown>;
+  /**
+   * run-created 帧的 argsSummary（D14 比对的旧格式回落数据源，场景 24）。
+   * 缺省 "{}"；生产形态 = JSON.stringify(args)（含 rfl 注入的 _runId），超 256
+   * 字符被 summarizeRunArgs 截断加 "…" 尾标——截断形态由调用方自行构造。
    */
   argsSummary?: string;
   /** 已完成调用（started + settled 对，按 taskIndex 顺序落）。 */
@@ -184,6 +189,7 @@ export async function seedCrashedRun(env: RecordFixtureEnv, runId: string, spec:
       ts: t0,
       runId,
       scriptSource: spec.scriptSource,
+      ...(spec.args !== undefined ? { args: spec.args } : {}),
       ...(spec.argsSummary !== undefined ? { argsSummary: spec.argsSummary } : {}),
       ...(spec.workflowName !== undefined ? { workflowName: spec.workflowName } : {}),
     }),

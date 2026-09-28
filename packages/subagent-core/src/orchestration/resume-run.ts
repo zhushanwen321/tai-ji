@@ -20,9 +20,9 @@
 //      cached replay）+ pending 信号
 //
 // 边界：壳入口（tool action / 命令 verb）与 D14 args 校验归 U3；本文件是 core
-// 编排原语，Deps 复用 LifecycleDeps。canonical JSON 工具在 worker-message-pump.ts
-// （pump 的 replay 校验与 resume 的依赖方向：resume-run → pump 单向，工具放 pump
-// 防环）。
+// 编排原语，Deps 复用 LifecycleDeps。canonical JSON 工具在 ./canonical-json.ts
+// （独立模块：消费方含 pump 的回放比对与 terminal-actions 的 agent-started 入参
+// 落账，两侧间已有 pump → terminal-actions 依赖边，工具留在任一侧都会成环）。
 //
 // 层归属：Engine。IO 面：record 流严格读取 + 会话文件尾部扫描（fs 直读——与
 // run-events.ts journal 实装同款「Engine 模块唯一 IO 边」形态）+ proper-lockfile。
@@ -47,7 +47,7 @@ import {
 } from "./run-events.ts";
 import { AgentCall } from "./models/agent-call.ts";
 import { Budget } from "./models/budget.ts";
-import type { AgentResult, ExecutionTraceNode } from "./models/types.ts";
+import type { AgentCallOpts, AgentResult, ExecutionTraceNode } from "./models/types.ts";
 import { Trace } from "./models/trace.ts";
 import { WorkflowRun } from "./models/workflow-run.ts";
 import type { LifecycleDeps } from "./models/ports.ts";
@@ -662,8 +662,9 @@ function summarizeTiers(plan: readonly TierPlanEntry[]): string | undefined {
  * 回放集 = 有 agent-settled 帧的 taskIndex（含档 1 补收帧）——done + result 全文；
  * 重派集（有 started 无 settled）不建条目：worker 重跑脚本到断点处重新发
  * agent-call(callId=N) → dispatchAgentCall miss → 真实派发（D8 档 2/3 经成员
- * 复用通道续写/新建）。budget/args 按恢复语义最小形态（record 流不承载预算与
- * args 全文——argsSummary 截断摘要尽力恢复）。
+ * 复用通道续写/新建）。budget 按恢复语义最小形态（record 流不承载预算）；args
+ * 从 run-created 帧的 args 全文恢复（设计 §3.1 载荷表，旧格式帧回落 argsSummary
+ * 尽力恢复——见 parseArgsSummary）。
  */
 function rebuildRunFromRecord(
   runId: string,
@@ -672,7 +673,7 @@ function rebuildRunFromRecord(
 ): WorkflowRun {
   const spec = {
     scriptSource: created.scriptSource ?? "",
-    args: parseArgsSummary(created.argsSummary),
+    args: created.args ?? parseArgsSummary(created.argsSummary),
     scriptName: created.workflowName,
     scriptPath: "",
     ...(created.model !== undefined ? { model: created.model } : {}),
@@ -680,7 +681,7 @@ function rebuildRunFromRecord(
   // call 重建中间形态（Trace 先建——traceNode 回链 D-10 引用共享；重派集成员
   // 不建 node——dispatchAgentCall 重派时 trace.append 自然落位，重建悬空节点
   // 只会与重派 append 重复）
-  type Draft = { agentName: string; phase?: string; startedAtIso: string; attempts: number; result?: AgentResult; settledTs?: number };
+  type Draft = { agentName: string; phase?: string; startedAtIso: string; attempts: number; result?: AgentResult; settledTs?: number; opts?: AgentCallOpts };
   const drafts = new Map<number, Draft>();
   for (const event of events) {
     if (event.type === "agent-started") {
@@ -690,6 +691,7 @@ function rebuildRunFromRecord(
           ...(event.phase !== undefined ? { phase: event.phase } : {}),
           startedAtIso: new Date(event.ts).toISOString(),
           attempts: event.attempt,
+          ...(event.input !== undefined ? { opts: parseAgentInput(event.input) } : {}),
         });
       }
     } else if (event.type === "agent-settled") {
@@ -725,7 +727,12 @@ function rebuildRunFromRecord(
     // 先例）。
     if (d.result === undefined) continue;
     const linked = sharedNodes.get(taskIndex) ?? nodes.find((n) => n.stepIndex === taskIndex)!;
-    const call = new AgentCall(taskIndex, { prompt: "" }, linked);
+    // opts 恢复（[U13]）：agent-started 帧的入参全文（canonical 序列化，写点 =
+    // dispatchAgentStarted）parse 回对象——detectReplayInputMismatch 的比对由此
+    // 可比（worker 重放脚本重发同 callId 消息时，cached.opts 与本次 opts 走同一
+    // canonical 哈希比对，非确定性漂移可检出）。旧格式帧无 input 载荷 → 落占位
+    // {prompt:""}（比对跳过维持——结构性无可比数据面）。
+    const call = new AgentCall(taskIndex, d.opts ?? { prompt: "" }, linked);
     call.attempts = d.attempts;
     call.status = "done";
     call.result = d.result;
@@ -742,17 +749,37 @@ function rebuildRunFromRecord(
 }
 
 /**
- * argsSummary → args 尽力恢复：run-created 帧只带截断摘要（256 字符，[D1] 载荷
- * 裁决「全文 args 不进 record」）——未截断时可完整恢复；截断/不可解析回落空对象
- * + warn（脚本 $ARGS 丢字段的语义限制，U3 壳入口的 D14 args 通道可显式传入完整
- * args 补齐——core 侧按「尽力恢复 + 留痕」处置）。
+ * agent-started 帧 input 载荷 → AgentCallOpts 恢复（[U13]）。写点是
+ * canonicalJsonStringify（dispatchAgentStarted），JSON.parse 往返后对象值级
+ * 等于原 resolved.opts——回放比对两侧再走同一 canonical 哈希，形态对称成立。
+ * 不可解析/非对象形态 = 流被篡改或写入器 bug：warn 留痕回落占位 opts（比对
+ * 跳过——宁跳过不误报，对齐 detectReplayInputMismatch 的保守侧纪律）。
+ */
+function parseAgentInput(input: string): AgentCallOpts | undefined {
+  try {
+    const parsed: unknown = JSON.parse(input);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as AgentCallOpts;
+    }
+  } catch {
+    // fallthrough 到 warn
+  }
+  logger.warn("[workflow] resume: agent-started input payload is not parseable opts — replay input check falls back to placeholder skip");
+  return undefined;
+}
+
+/**
+ * argsSummary → args 尽力恢复（旧格式帧回落通道）：现行写入面 run-created 帧
+ * 携带 args 全文（rebuildRunFromRecord 优先消费）；本函数只服务旧格式帧（无
+ * args 字段——设计 §3.1 载荷表落地前落盘的流）。未截断摘要可完整恢复；截断/
+ * 不可解析回落空对象 + warn（旧格式流的 $ARGS 语义限制，留痕可诊断）。
  */
 function parseArgsSummary(argsSummary: string | undefined): Record<string, unknown> {
   if (argsSummary === undefined || argsSummary === "") return {};
   if (argsSummary.endsWith("…")) {
     logger.warn(
-      "[workflow] resume: run-created argsSummary is truncated — $ARGS restored as {} " +
-        "(full args are not carried in the record stream; pass args via the resume entry point if the script needs them)",
+      "[workflow] resume: legacy run-created frame carries only a truncated argsSummary — $ARGS restored as {} " +
+        "(legacy record stream predates the full-args payload; rerun with a fresh run if the script needs exact args)",
     );
     return {};
   }

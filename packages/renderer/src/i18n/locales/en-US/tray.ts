@@ -56,6 +56,11 @@ export default {
     abort: 'Stop',
     abortConfirm: 'Confirm stop?',
     workflowOpFailed: 'Workflow action failed: {msg}',
+    /**
+     * [D2] interrupted-run status text (visible on workflow rows + WorkflowTab header;
+     * zh literal is the scenario-25 CDP assertion anchor): paused, resumable via resume.
+     */
+    workflowInterrupted: 'Interrupted (resumable)',
     /** Row summary units and labels */
     agentsLabel: '{done}/{total}',
     turnsUnit: 'turns',

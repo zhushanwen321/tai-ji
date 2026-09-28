@@ -180,7 +180,12 @@ beforeEach(() => {
   agentDir = path.join(tmpDir, "agent");
   stateDir = path.join(resolvePiSessionScopedDir({ agentDir }), STATE_DIR_NAME);
   fs.mkdirSync(stateDir, { recursive: true });
-  sessionsRoot = path.join(tmpDir, "sessions");
+  // 夹具布局与 pi 实装同构（锚定不改层级）：sessions 根 = <agentDir>/sessions
+  // （pi config.js getSessionsDir = join(getAgentDir(), "sessions")），session 文件
+  // 落其下 encoded-cwd 子目录（session-manager.js `--<cwd>--` 形态）——层级错位
+  // 会让引用集扫描恒空集，场景 8 的对照组结论失真。
+  sessionsRoot = path.join(agentDir, "sessions");
+  expect(sessionsRoot.startsWith(agentDir)).toBe(true);
   mockAgentDir.current = agentDir;
 });
 

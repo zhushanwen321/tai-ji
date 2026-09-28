@@ -30,7 +30,12 @@ export interface WorkflowRunSummary {
   name: string;
   /** run 级简短标签（可选，旧持久化 run 缺失）。 */
   slug?: string;
-  status: RunStatus;
+  /**
+   * 投影三态（[D2]）：done（终局）> interrupted（重水合中断标记——聚合 status
+   * 词表保持两态，中断态经 meta.interruptedAt 在投影面表达，与 shared
+   * WorkflowRunStatus 三态同词）> running。
+   */
+  status: RunStatus | "interrupted";
   reason?: DoneReason;
   /** ISO 时间戳，run 创建/启动时刻。 */
   startedAt: string;
@@ -51,7 +56,12 @@ export function runSummary(run: WorkflowRun): WorkflowRunSummary {
     runId: run.runId,
     name: run.spec.scriptName,
     slug: run.spec.slug,
-    status: settled !== undefined || run.state.status === "done" ? "done" : "running",
+    status:
+      settled !== undefined || run.state.status === "done"
+        ? "done"
+        : run.meta.interruptedAt !== undefined
+          ? "interrupted"
+          : "running",
     reason:
       settled !== undefined
         ? runSettledOutcomeToDoneReason(settled.outcome, settled.errorCode)

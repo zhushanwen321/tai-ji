@@ -57,6 +57,12 @@ export default {
     abort: '终止',
     abortConfirm: '确认终止？',
     workflowOpFailed: '工作流操作失败：{msg}',
+    /**
+     * [D2] 中断 run 的人读状态文案（workflow 行可见文本 + WorkflowTab header 徽标，
+     * 字面量与场景 25 CDP 断言对齐）：中断 run 显示「已中断（可续跑）」而非「运行中」
+     * ——非终局（不进 outcome 终态文案词表），暂停态可经 resume 复活。
+     */
+    workflowInterrupted: '已中断（可续跑）',
     /** 行摘要单位与标签 */
     agentsLabel: '{done}/{total}',
     turnsUnit: 'turns',

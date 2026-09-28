@@ -175,6 +175,11 @@
                 </span>
                 <span v-if="record.slug" data-testid="tray-workflow-slug"
                   class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid">{{ record.slug }}</span>
+                <!-- [D2] 中断 run 人读状态文案（可见文本——场景 25 CDP 断言 innerText 承载位）：
+                     「已中断（可续跑）」非「运行中」；状态点色调归 workflowToneClass 中性暗档，
+                     hover title 不承载（workflowStatusLabel 出终态文案，interrupted 非终局） -->
+                <span v-if="record.status === 'interrupted'" data-testid="tray-workflow-interrupted"
+                  class="shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">{{ t('panel.tray.workflowInterrupted') }}</span>
                 <!-- 行内操作（仅 pin 态）：running 态 abort 两段式。workflow 一次性生命周期
                      （subagent-workflow D-2）：pause/resume 已在扩展侧移除，宿主不再暴露 -->
                 <template v-if="pinned && record.status === 'running'">

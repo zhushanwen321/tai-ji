@@ -29,12 +29,12 @@
 //      RecordJournalWriteFace 容器——W1 v2 两条款写面宿主）与常量定义面
 //      （record-entry.ts）。appendEntry 是 pi 全局通路，全域禁不可行，按
 //      customType 限定到「写」形态（读面失效回调/类型声明不拦）。
-//   R3 workflow-record entry 写面白名单（W1 新增；D15/D16 扩）：append 条目调用 ×
-//      customType 引用（WORKFLOW_RECORD_CUSTOM_TYPE 常量或 "workflow-record" 字面量）
-//      只许五写点宿主——worker-message-pump.ts（core 注册/终态条目）、lifecycle.ts
-//      （收编终态条目补写 hook 面）、壳 jsonl-run-store.ts（loadAll 终态条目幂等
-//      补写）、terminal-actions.ts（D15 终局编排单一入口的注册/终态条目写点）、
-//      resume-run.ts（D16 resume 链注册条目写点）。其余文件（含 extension 域）一律违规。
+//   R3 workflow-record entry 写面白名单（W1 新增；D15/D7 裁决点 7 扩）：append 条目
+//      调用 × customType 引用（WORKFLOW_RECORD_CUSTOM_TYPE 常量或 "workflow-record"
+//      字面量）只许四写点宿主——lifecycle.ts（收编终态条目补写 hook 面）、壳
+//      jsonl-run-store.ts（loadAll 终态条目幂等补写）、terminal-actions.ts（D15
+//      终局编排单一入口的注册/终态条目写点）、resume-run.ts（D7/裁决点 7 resume 链
+//      注册条目写点）。其余文件（含 extension 域）一律违规。
 //   R4 v1 快照投影构造器白名单（W1 新增，subagent-record 族）：toSubagentRecordEntry
 //      调用只许 record-entry.ts（定义）与 record-store.ts（v1 实体孤儿纠偏兼容层
 //      reportSubagentRecord——ADR-0078 失效清单登记面，W4 sunset 统一退役）。
@@ -42,7 +42,7 @@
 //      已停写，新写点一律走 v2 条目构造器。
 //   R5 workflow-record v1 快照载荷形态拒绝（W1 新增，全域无豁免）：workflow-record
 //      写点窗口内出现 v1 快照形态标记（`v: 1` 载荷字面量 / toWorkflowRecordEntryData
-//      构造器 / snapshot 直传）即违规——含 R3 白名单宿主自身（五宿主的写点必须
+//      构造器 / snapshot 直传）即违规——含 R3 白名单宿主自身（四宿主的写点必须
 //      全部是 v2 形态，回潮 v1 快照即守卫红）。
 //   R6 entry 载荷死字节拒绝（W1 新增，全域无豁免）：append 条目调用窗口内出现
 //      `eventLog:` / `displayItems:` 字段写形态即违规（ADR-0078：运行态死字节
@@ -61,8 +61,8 @@
 //     manifest-store.ts（R1 定义行豁免：函数/类方法定义处，非调用方）
 //   - 常量定义：record-entry.ts（R2/R4 豁免）、workflow-record-entry.ts（R3 天然
 //     不命中——定义行无 append 调用）
-//   - run 族五写点宿主：worker-message-pump.ts / lifecycle.ts / 壳
-//     jsonl-run-store.ts / terminal-actions.ts（D15）/ resume-run.ts（D16）
+//   - run 族四写点宿主：lifecycle.ts / 壳 jsonl-run-store.ts /
+//     terminal-actions.ts（D15）/ resume-run.ts（D7/裁决点 7）
 //     （R3 豁免；R5/R6 在宿主内照常拦截）
 //   - 事件文件双写者：record-events.ts / run-events.ts（R7 豁免）
 //   - notify-ledger 投递账 entry（NOTIFY_LEDGER_CUSTOM_TYPE）、reconcile-sweep
@@ -168,9 +168,8 @@ const ENTRY_DEFINITION_FILES = new Set([
   "packages/subagent-core/src/execution/persistence/record-entry.ts",
 ]);
 
-/** R3 白名单：workflow-record 五写点宿主（core 注册/终态 + 收编补写 + 壳 fallback + D15 终局编排 + D16 resume）。 */
+/** R3 白名单：workflow-record 四写点宿主（D15 注册/终态 + 收编补写 + 壳 fallback + D7/裁决点 7 resume）。 */
 const WF_ENTRY_HOST_FILES = new Set([
-  "packages/subagent-core/src/orchestration/worker-message-pump.ts",
   "packages/subagent-core/src/orchestration/lifecycle.ts",
   "extensions/universal/subagent-workflow/src/jsonl-run-store.ts",
   "packages/subagent-core/src/orchestration/terminal-actions.ts",
@@ -321,17 +320,17 @@ export function scanRecordWriteSurface(roots) {
             `reportSubagentRecord（appendEntry 是 pi 全局通路，record 域 customType 限定唯一，D7 ②）。`,
         );
       }
-      // R3：workflow-record entry 写面白名单（五写点宿主外违规）。
+      // R3：workflow-record entry 写面白名单（四写点宿主外违规）。
       if (hasWorkflowType && !WF_ENTRY_HOST_FILES.has(rel)) {
         violations.push(
-          `${rel}:${i + 1} [R3] customType "workflow-record" 的 entry 写出现在五写点宿主外——` +
-            `run 族条目写面只许 worker-message-pump.ts（注册/终态条目）、lifecycle.ts` +
-            `（收编终态条目补写）、壳 jsonl-run-store.ts（loadAll 幂等补写）、` +
-            `terminal-actions.ts（D15 终局编排）与 resume-run.ts（D16 resume 链）。` +
-            `Recovery: 经 core run 写链（pump dispatch / 收编入口）落条目，勿在消费侧直写（ADR-0078）。`,
+          `${rel}:${i + 1} [R3] customType "workflow-record" 的 entry 写出现在四写点宿主外——` +
+            `run 族条目写面只许 lifecycle.ts（收编终态条目补写）、壳 jsonl-run-store.ts` +
+            `（loadAll 幂等补写）、terminal-actions.ts（D15 终局编排注册/终态条目）与` +
+            `resume-run.ts（D7/裁决点 7 resume 链注册条目）。` +
+            `Recovery: 经 core run 写链（terminal-actions 终局编排 / 收编入口）落条目，勿在消费侧直写（ADR-0078）。`,
         );
       }
-      // R5：workflow-record v1 快照载荷形态（全域拒绝，含五宿主自身）。
+      // R5：workflow-record v1 快照载荷形态（全域拒绝，含四宿主自身）。
       if (hasWorkflowType && WF_V1_PAYLOAD_RE.test(window)) {
         violations.push(
           `${rel}:${i + 1} [R5] workflow-record 写点携带 v1 快照载荷形态（v:1 / snapshot 直传）——` +
