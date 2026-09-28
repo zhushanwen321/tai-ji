@@ -3,7 +3,8 @@
 // SubagentService 与注册表对账 sweep（reconcile-sweep.ts）的装配绑定面。
 //
 // 从 subagent-service.ts 抽出的纯绑定代码（max-lines 纪律）：sweep 的 store 读侧
-// 判据闭包 + FileRunStore 判据供给内聚本文件，机制与语义注释见 reconcile-sweep.ts。
+// 判据闭包内聚本文件（workflow 判据经共享判定核 findRunSettlementEvidence，
+// [U1] 判定核抽取），机制与语义注释见 reconcile-sweep.ts。
 // 变化轴：改 sweep 的 store 读侧判据只动本文件。
 //
 // 全部依赖经 ReconcileSweepBinding 惰性闭包注入（session 级状态运行时可变——
@@ -11,11 +12,33 @@
 
 import { bestEffort } from "../assembly/best-effort.ts";
 import { isLegacyClosedSettled } from "../persistence/execution-record.ts";
-import { FileRunStore } from "../../orchestration/file-run-store.ts";
+import { findRunSettlementEvidence, type RunSettlementEvidence } from "../persistence/run-state-evidence.ts";
 import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
 import type { PiLike } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
-import { runReconcileSweep } from "./reconcile-sweep.ts";
+import { runReconcileSweep, type SupervisedRecordState } from "./reconcile-sweep.ts";
+
+/**
+ * [D16⑤] 判定核三态 → sweep 的 SupervisedRecordState 映射（生产装配与判定
+ * 矩阵测试共用同一份——两份手抄会漂移）。
+ *
+ * manifest 面 reason 换源：判定核 terminal.reason 经 runSettledOutcomeToDoneReason
+ * 穷尽 switch 派生——词表内值（[D2] 四值）恒派生非 undefined；运行时 undefined
+ * 只在词表外历史值漏出（旧写入方 manifest outcome=interrupted 族——文件名未随
+ * [D1] 迁移，磁盘可达）。消费侧显式折叠 "failed"（W2 D5 先例「interrupted →
+ * failed 诊断兜底容器」：中断形态注销 reason 报 completed 是完成语义误报），
+ * 不落 reconcile-sweep closedReasonToPendingReason 的 completed 兜底。
+ */
+export function settlementEvidenceToRunState(state: RunSettlementEvidence): SupervisedRecordState {
+  if (state.kind === "missing") return "missing";
+  if (state.kind === "terminal") {
+    return {
+      terminal: true,
+      closedReason: typeof state.reason === "string" ? state.reason : "failed",
+    };
+  }
+  return "active";
+}
 
 /** 绑定面（SubagentService 供给；全部惰性——见文件头注）。 */
 export interface ReconcileSweepBinding { // oe-exempt:20260928:framework:sweep 依赖注入面 ports 契约先立——生产实现经 SubagentService 单点装配，测试 fake 为第二变体
@@ -29,7 +52,7 @@ export interface ReconcileSweepBinding { // oe-exempt:20260928:framework:sweep �
  * 注册对账 sweep（发射点枚举⑤）：对「本 session register entry × 对应
  * record/run ∈ 终态集 ∪ 已离场/不存在」差集补发 unregister——appendEntry 权威落盘
  * （唯一写路径，不经 emit——写法论证见 reconcile-sweep.ts 头注）。[F2] 判据按类型
- * 分流：subagent 走 RecordStore，workflow/畸形走 FileRunStore（findSettlementEvidenceSync——[W2/V1 D6] 判据源改接 fold/manifest 终态证据），
+ * 分流：subagent 走 RecordStore，workflow/畸形走共享判定核（findRunSettlementEvidence——[W2/V1 D6] 判据源改接 journal/manifest 终态证据），
  * bash 无收口通道保守跳过（显式偏差 impl-plan §5）。触发点 = initSession（session
  * reattach / session_start 时机，根进程 only——与孤儿恢复同一单扫描者判据，
  * isChildProcess 由调用方传）。与 registry rebuild 的先后时序不作保证，残余窗口由
@@ -38,14 +61,15 @@ export interface ReconcileSweepBinding { // oe-exempt:20260928:framework:sweep �
 export function runPendingReconcileSweepForService(binding: ReconcileSweepBinding, isChildProcess: boolean): void {
   if (isChildProcess) return;
   try {
-    // [F2] workflow run 判据供给：FileRunStore 构造轻量（无 IO 副作用，lastSavedAt
-    // 空 Map——findSettlementEvidenceSync 同步只读不触碰节流记账），sweep 挂点低频
-    // （initSession），每轮构造一次闭包持有。
+    // [U1 判定核抽取] workflow run 判据供给改调共享判定核 findRunSettlementEvidence
+    //（journal 尾向 + manifest 第二证据 + 保守矩阵，单源注释在
+    // persistence/run-state-evidence.ts）——判定核以 stateDir 直接参数化。
+    // 目录解析每轮 sweep 一次、闭包内复用。
     // [F-1 修复] stateDir 必须与 pi 壳 JsonlRunStore 的落盘布局同源
-    //（<sessionDir>/workflow-state/，推导 = resolvePiWorkflowStateDir）；缺省根
-    // <dataRoot>/workflow-state 是 zcode 宿主布局，与 pi 生产落盘不相交——曾致
-    // findSettlementEvidenceSync 两证据面恒 missing → sweep 按终态补注销活跃 run（装配错位事故）。
-    const workflowStore = new FileRunStore({ stateDir: resolvePiWorkflowStateDir() });
+    //（<sessionDir>/workflow-state/，推导 = resolvePiWorkflowStateDir）——与 pi
+    // 生产落盘不相交的目录会致判据两证据面恒 missing → sweep 按终态补注销活跃
+    // run（装配错位事故）。
+    const workflowStateDir = resolvePiWorkflowStateDir();
     runReconcileSweep({
       sessionFile: binding.getMainSessionFile(),
       lookupRecordState: (id) => {
@@ -77,17 +101,13 @@ export function runPendingReconcileSweepForService(binding: ReconcileSweepBindin
       // [F2] type=workflow 及畸形条目的收口判据（设计 D2 sweep 判据补全——
       // 「终态集 ∪ 已离场/不存在」对 workflow run 同样成立）。
       // [W2/V1 D6 判据源改接] 判据源 = journal run-settled 帧 ∨ manifest 终局面
-      //（findSettlementEvidenceSync）——两态机持久化快照字段退役（活体写点删除后
-      // v2 run 的 state 快照永停 running，旧判据对全部 v2 run 永判 active = sweep
-      // 结构性静默失效）。判定矩阵保守侧（非终态/坏链/IO 故障均保守按活跃，不误
-      // 注销）内聚在判据方法内；terminal 的 reason 已按 [W2 D5] 联合派生单点产出
-      //（budget_limited/time_limited 细分保留）。
-      lookupWorkflowRunState: (runId) => {
-        const state = workflowStore.findSettlementEvidenceSync(runId);
-        if (state.kind === "missing") return "missing";
-        if (state.kind === "terminal") return { terminal: true, closedReason: state.reason };
-        return "active";
-      },
+      //（经 [U1] 共享判定核 findRunSettlementEvidence）——两态机持久化快照字段
+      // 退役（活体写点删除后 v2 run 的 state 快照永停 running，旧判据对全部 v2
+      // run 永判 active = sweep 结构性静默失效）。判定矩阵保守侧（非终态/坏链/
+      // IO 故障均保守按活跃，不误注销）内聚在判定核内；terminal 的 reason 已按
+      // [W2 D5] 联合派生单点产出（budget_limited/time_limited 细分保留）。
+      lookupWorkflowRunState: (runId) =>
+        settlementEvidenceToRunState(findRunSettlementEvidence(workflowStateDir, runId)),
       appendEntry: (customType, data) => binding.getPi()?.appendEntry(customType, data),
     });
   } catch (err) {

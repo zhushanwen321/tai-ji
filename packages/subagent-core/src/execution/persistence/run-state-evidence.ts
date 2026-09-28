@@ -1,44 +1,34 @@
-// src/orchestration/file-run-store.ts
+// src/execution/persistence/run-state-evidence.ts
 //
-// RunStore port 的通用文件实现（D2 设计件——zsw 回接 host-surface 单元）。
+// run 状态的终局证据判定核 + 磁盘保留期维护（workflow-run-store-convergence
+// 设计 U3+U4：自 orchestration/file-run-store.ts 拆解迁移，行为零变化）。
 //
-// 为什么需要它：pi 壳的 JsonlRunStore 深耦合 pi session（appendEntry /
-// sessionManager，经 pi SDK 落盘 session JSONL），zcode 侧宿主没有这两个设施，
-// 无法复用。RunStore port 早在 ports.ts 定义却只有 pi 一份 Infra 实现——本文件
-// 补上「宿主无关」的第二份实现，双宿主的 workflow state 持久化从此同源（消灭
-// 失败模式 B：行为不一致各自修）。
+// 为什么在这里：终局证据查询与保留期清理是持久化域的读侧与维护职责，与
+// record-store.ts / record-events.ts 同域；store 写身份退役后本模块不再持有
+// store 之名——journal（<runId>.events.jsonl）与 manifest（<runId>.json）是
+// 判定与清理的事实源，state 快照文件只作为磁盘足迹的一部分被成对清理、
+// 不参与判定。
 //
-// 落盘布局：<dataRoot>/workflow-state/<runId>.jsonl（D2 规定，与 pi 壳
-// <sessionDir>/workflow-state/<runId>.jsonl 同名分量、锚点不同：pi 锚 session，
-// 本实现锚宿主数据根——zcode 宿主无 session dir 概念，daemon 重启后按 dataRoot
-// 重水合孤儿 run）。
-//
-// dataRoot 通道选型：直接走 getHostServices().dataRoot()（core/host-services.ts），
-// 不用 getEngineDataDir（engine/common/data-dir.ts）——后者是引擎 journal/隔离池
-// 通道，带 TAIJI_AGENT_DATA_DIR env 优先 + warn-once 语义（taiji 宿主注入专用）；
-// workflow run 快照是宿主编排状态，语义归属宿主数据根本身，宿主 configureCore
-// 注入什么就落什么，不引入第二条 env 覆盖链。
+// 依赖方向：record 事件文件族的枚举与 fold 资格判定消费同域 record-events；
+// run 事件词表与 fold 经 orchestration/run-events 单源消费（本文件只做候选
+// 枚举与成对裁剪，不定义后缀词表；fold 终态 = W1 D5 清理资格判据）；
+// reason 派生单点在 orchestration/terminal-actions
+// （runSettledOutcomeToDoneReason——sweep 判据的 reason 派生单点，
+// 帧/manifest (outcome, errorCode) → DoneReason 五处统一派生）。
 
-import { readFileSync, statSync } from "node:fs";
-import { appendFile, mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
+import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
-import { getHostServices } from "../core/host-services.ts";
-import { getLogger } from "../core/logger.ts";
-// [W1/D5 清理规则] record 事件文件族的枚举与 fold 资格判定（统一保留维护轮的
-// record 域半边）。方向 orchestration → execution/persistence 为既有先例
-// （worker-message-pump → writeRunTerminalManifest）；record-events 不回指
-// orchestration，无环。
+import { getLogger } from "../../core/logger.ts";
+import type {
+  RecordJournalEvent,
+} from "./record-events.ts";
 import {
   createRecordEventJournal,
   foldRecordJournalEvents,
   RECORD_EVENTS_SUFFIX,
-  type RecordJournalEvent,
-} from "../execution/persistence/record-events.ts";
-import type { RunStore } from "./models/ports.ts";
-import { WorkflowRun } from "./models/workflow-run.ts";
-// journal 后缀与 fold 循环经 run-events 单源消费（本文件只做候选枚举与成对裁剪，
-// 不定义后缀词表；fold 终态 = W1 D5 清理资格判据）。
+} from "./record-events.ts";
 import {
   createRunEventJournal,
   foldRunEventFrames,
@@ -46,56 +36,26 @@ import {
   type RunErrorCode,
   type RunOutcome,
   type WorkflowRunEvent,
-} from "./run-events.ts";
-// [W2/V1 D6] sweep 判据的 reason 派生单点（帧/manifest (outcome, errorCode) →
-// DoneReason——五处统一派生第三处）。方向 orchestration 内部互引（pump 闭包不
-// 回指本文件，无环）。
-import { runSettledOutcomeToDoneReason } from "./worker-message-pump.ts";
-import { SNAPSHOT_VERSION, fromRunSnapshot, toRunSnapshot } from "./run-snapshot.ts";
+} from "../../orchestration/run-events.ts";
+import { runSettledOutcomeToDoneReason } from "../../orchestration/terminal-actions.ts";
 
-const logger = getLogger("file-run-store");
+const logger = getLogger("run-state-evidence");
 
 /**
  * run 状态目录名（<dataRoot> 下的固定分量）。
  *
  * 单源导出（barrel 上收）：pi 壳 JsonlRunStore / workflow-events 的
- * `<sessionDir>/workflow-state` 布局与 core FileRunStore 的
- * `<dataRoot>/workflow-state` 同名分量——字面量散布时任一侧单独改名即静默
- * 漂移（store 读写错目录 / stall 判定读不到 journal）。
+ * `<sessionDir>/workflow-state` 布局与 pi 宿主枚举的 agentDir 根回退目录
+ * 同名分量——字面量散布时任一侧单独改名即静默漂移（store 读写错目录 /
+ * stall 判定读不到 journal）。
  */
 export const STATE_DIR_NAME = "workflow-state";
-
-// ── 磁盘保留（C1 → W1 D5 重写：fold 终态 + 保留窗口，废除 cap）─────
-//
-// cap=50 数量截断语义已整体退役（数量上限常量 / env 通道名 / 解析函数三件导出
-// 一并删除）：cap 按 cwd 共享池计数会把别的 session 保留窗口内的 journal 清掉
-// （「窗口内全保留」与「保最新 N 个」互斥，A-8 多 session 分摊互杀）。保留窗口
-// 是唯一资格判据（见下方「统一保留通道」段注释）。
-
-/** FileRunStore 构造参数（全部可选；缺省即生产形态）。 */
-export interface FileRunStoreOptions {
-  /**
-   * [F-1 修复] run 状态目录覆盖。缺省 = `<dataRoot>/workflow-state`（zcode 宿主布局，
-   * 见 stateDir()）；pi 宿主的读侧装配点（对账 sweep）必须传
-   * resolvePiWorkflowStateDir()（execution/workflow-state-root.ts）——pi 宿主 run state
-   * 由 JsonlRunStore 落 `<sessionDir>/workflow-state/`，与缺省根不相交。
-   */
-  stateDir?: string;
-}
 
 /** Node fs 错误 code 判定（ENOENT = 路径不存在，并发删除场景；对齐 pi isEnoentError）。 */
 function isEnoentError(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err &&
     (err as { code?: unknown }).code === "ENOENT";
 }
-
-// ── 快照形状 / 序列化 / 重水合 ────────────────────────────────
-//
-// 投影与版本衔接语义收敛于 ./run-snapshot.ts 单源 codec（下沉收口 D4/U8）：
-// 本 store 只保留 IO 策略（append-only + 从尾向头取最后有效行）。版本衔接的
-// 宿主侧职责（D4 裁决②③，见 parseLine）：「缺 v 宽容读」预处理与「版本不
-// 匹配 warn 可见性」在此实现——不内聚进 codec，保 pi 侧「v1 存量静默跳过」
-// 语义不被宽容化误读。
 
 // ── 磁盘保留原语（C1 → W1 D5 重写：fold 终态 + 保留窗口）──────────
 //
@@ -519,250 +479,385 @@ export async function runRetentionMaintenanceRound(
   return { run, record };
 }
 
-// ── FileRunStore ────────────────────────────────────────────
+// ── run 终局证据判定核（枚举改接与对账 sweep 的共用判定逻辑）──────────
 
 /**
- * RunStore port 的宿主无关文件实现（port 见 models/ports.ts）。
- *
- * - save：append-only 全量快照行（崩溃时旧快照仍在，loadAll 取最后一条有效行恢复
- *   到最后一致状态）。W1 写通道语义收敛后不再自带节流（快照 = journal fold 的
- *   物化投影，写点收敛归 pump 物化时机，见 save 注释）。
- * - loadAll：扫 <dataRoot>/workflow-state/*.jsonl，每文件从尾向头取第一条形状
- *   有效的快照行；损坏行（JSON.parse 失败 / 形状校验不过 / 版本不匹配）跳过并
- *   warn——单行损坏不拖垮整个 run 的恢复（与 pi 壳 kill-9 恢复同容忍度）。
- *   目录读错分通道（ADR-0081）：ENOENT = 空集正常态；EACCES/EIO
- *   等真 IO 故障上抛（recoverCrashedRuns 的 @throws 契约本就要求 loadAll 失败
- *   上抛宿主裁决——此前 EACCES 被裸 catch 吞成空集是偏离契约的吞错）。
- *   版本衔接（快照 codec 归 run-snapshot.ts 单源，D4）：存量无 v 行按当前版本
- *   宽容读、写入恒补 v、v 不匹配跳过 + warn（三裁决明细见 parseLine 注释）。
- * - stateFilePath：纯路径计算（<状态目录>/<runId>.jsonl），不建目录。状态目录 =
- *   构造注入的 stateDir 覆盖，或缺省 <dataRoot>/workflow-state（pi 宿主读侧装配点
- *   必须传 resolvePiWorkflowStateDir()——见 FileRunStoreOptions.stateDir 与
- *   execution/workflow-state-root.ts 的同源布局论证）。
- *
- * 未 configureCore 即 save/loadAll 会抛 core_host_not_configured（dataRoot 端口
- * 语义，host-services.ts §3.4）——宿主壳必须在初始化最早期注入。
+ * run 终局证据三态（判定核 {@link findRunSettlementEvidence} 的返回形状；
+ * terminal 携带 reason——经 runSettledOutcomeToDoneReason 联合派生的 DoneReason）。
  */
-export class FileRunStore implements RunStore {
-  /** run 状态目录绝对路径（显式覆盖优先——pi 宿主读侧装配点；缺省 dataRoot 每次现取
-   *  ——宿主覆盖配置即刻生效，对齐 data-dir.ts「不缓存路径防测试/宿主切换读到旧值」
-   *  先例）。 */
-  private stateDir(): string {
-    return this.stateDirOverride ?? join(getHostServices().dataRoot(), STATE_DIR_NAME);
-  }
+export type RunSettlementEvidence =
+  | { kind: "running" }
+  | { kind: "terminal"; reason: string }
+  | { kind: "missing" };
 
-  /** 显式状态目录覆盖（构造注入；见 FileRunStoreOptions.stateDir）。 */
-  private readonly stateDirOverride: string | undefined;
-
-  constructor(opts?: FileRunStoreOptions) {
-    this.stateDirOverride = opts?.stateDir;
-  }
-
-  stateFilePath(runId: string): string {
-    return join(this.stateDir(), `${runId}.jsonl`);
-  }
-
-  /**
-   * 快照落盘（append-only 全量行）。W1 写通道语义收敛后本 store 不再自带节流
-   * （节流模块已随写通道退役删除）：快照降级为 journal fold 的物化投影，
-   * 写点收敛到「journal 追加后的统一物化步」（pump 物化时机归 U1）——节流层
-   * 与物化时机收敛重复保险，且物化点稀疏化后节流窗口无保护对象。
-   */
-  async save(run: WorkflowRun): Promise<void> {
-    // mkdir recursive 每次 save 前执行：幂等零成本（目录已存在时仅一次 stat），
-    // 且免「构造时预建」——构造时建会在宿主尚未 configureCore 的窗口抛错。
-    await mkdir(this.stateDir(), { recursive: true });
-    // toRunSnapshot 补 v 字段（D4 裁决②写入侧）；live strip 已随 [H2 W3] live 字段删除退役
-    const line = JSON.stringify(toRunSnapshot(run));
-    await appendFile(this.stateFilePath(run.runId), line + "\n", "utf8");
-  }
-
-  async loadAll(): Promise<WorkflowRun[]> {
-    let files: string[];
-    try {
-      files = await readdir(this.stateDir());
-    } catch (err) {
-      if (!isEnoentError(err)) {
-        // 读错分通道（ADR-0081）：EACCES/EIO 等真 IO 故障上抛给
-        // 扫描层（枚举/启动扫描 error 留痕承接）——静默折叠成空集会让持续 IO
-        // 故障伪装成「0 个 run 的成功扫描」。
-        throw err;
-      }
-      // 目录不存在 = 从未持久化过（首启/干净环境），空集是正常态不是错误。
-      return [];
-    }
-
-    const runs: WorkflowRun[] = [];
-    for (const file of files) {
-      // journal（<runId>.events.jsonl）同为 .jsonl 后缀但是事件流附属文件——不排除
-      // 会进逐行 parseLine，事件行全部按损坏快照行逐条 warn（噪音洪泛）。排除先例：
-      // pruneTerminalRunFiles 的 stateNames 过滤同款。
-      if (!file.endsWith(".jsonl") || file.endsWith(RUN_EVENT_JOURNAL_SUFFIX)) continue;
-      const run = await this.loadLatestValidLine(join(this.stateDir(), file), file);
-      if (run) runs.push(run);
-    }
-    return runs;
-  }
-
-  /**
-   * [W2/V1 D6 判据源改接] 按 runId 同步查 run 的终态证据（注册对账 sweep 的
-   * workflow 收口判据）——journal run-settled 帧 ∨ manifest 终局面，两态机持久化
-   * 快照字段退役为判据源（活体写点删除后 v2 run 的 state 快照永停 running，旧
-   * findStateByIdSync 判据对全部 v2 run 永判 active = sweep 结构性静默失效）。
-   *
-   * 同步形态：sweep 在 session_start 同步链内运行（runReconcileSweep 同步契约），
-   * 不能 await——对单 runId 做同步文件读（对齐 sweep 自身的 sync fs 读先例；
-   * journal 行逐行 JSON.parse + run-settled 尾向扫描，manifest 同步读）。
-   *
-   * 判定矩阵（[W2 D6] 逐形态锚定保守侧——误注销活跃 run 是事故方向，不可逆）：
-   * - journal 与 manifest 均不存在（ENOENT）→ missing（「已归档/不存在视同终态」
-   *   ——run 从未落账或已被保留期清理，注册是死亡窗口残留）；
-   * - journal 尾向存在 run-settled 帧（append-only 单写者：帧在盘 = 终局已记录，
-   *   行级独立 JSON 不受早先坏行影响）→ terminal + reason（帧 (outcome, errorCode)
-   *   经 runSettledOutcomeToDoneReason 联合派生——[W2 D5] sweep 补注销 reason 统一
-   *   派生源第三处；budget_limited/time_limited 细分保留）；
-   * - journal 无帧但 manifest 在盘（活体物化后 journal 被裁的组合）→ terminal +
-   *   reason（manifest outcome 派生；无码细分退化为 outcome 兜底）；
-   * - journal 存在但无 run-settled 帧（run 真未终局，含坏链首帧形态）→ running
-   *   （保守按活跃，不补注销——对齐 adoptInterruptedRun skippedBrokenChain 纪律）；
-   * - journal 读错误（非 ENOENT IO 故障）→ running + warn 留证（「IO 故障 ≠ 不存在」
-   *   的保守侧纪律，宁挂账不误注销）。
-   */
-  findSettlementEvidenceSync(runId: string): { kind: "running" } | { kind: "terminal"; reason: string } | { kind: "missing" } {
-    const journalPath = join(this.stateDir(), `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
-    let settled: Extract<WorkflowRunEvent, { type: "run-settled" }> | undefined;
-    let journalMissing = false;
-    try {
-      const content = readFileSync(journalPath, "utf8");
-      const lines = content.split("\n");
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i]!.trim();
-        if (line === "") continue; // 尾部空行静默跳过
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue; // 坏行（截断行）继续向前——append-only 下帧行独立有效
-        }
-        if (
-          typeof parsed === "object" && parsed !== null &&
-          (parsed as { type?: unknown }).type === "run-settled"
-        ) {
-          settled = parsed as Extract<WorkflowRunEvent, { type: "run-settled" }>;
-          break;
-        }
-      }
-    } catch (err) {
-      if (!isEnoentError(err)) {
-        // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃挂账
-        //（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn(
-          `[file-run-store] findSettlementEvidenceSync journal read failed, treating as running (stay registered): ${journalPath}: ${msg}`,
-        );
-        return { kind: "running" };
-      }
-      journalMissing = true;
-    }
-    if (settled !== undefined) {
-      return {
-        kind: "terminal",
-        reason: runSettledOutcomeToDoneReason(settled.outcome, settled.errorCode),
-      };
-    }
-    // journal 无帧：manifest 终局面（prune 资格单源锚定的第二证据通道）
-    const manifestPath = join(this.stateDir(), `${runId}.json`);
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
-      if (typeof parsed === "object" && parsed !== null) {
-        const outcome = (parsed as { outcome?: unknown }).outcome;
-        const errorCode = (parsed as { errorCode?: unknown }).errorCode;
-        if (typeof outcome === "string") {
-          return {
-            kind: "terminal",
-            reason: runSettledOutcomeToDoneReason(
-              outcome as RunOutcome,
-              typeof errorCode === "string" ? (errorCode as RunErrorCode) : undefined,
-            ),
-          };
-        }
-      }
-    } catch (err) {
-      if (!isEnoentError(err)) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn(
-          `[file-run-store] findSettlementEvidenceSync manifest read failed, treating as running (stay registered): ${manifestPath}: ${msg}`,
-        );
-        return { kind: "running" };
-      }
-    }
-    // 两证据面均缺：journal 存在但无帧 = 真未终局（保守活跃）；journal 也缺 =
-    // missing（从未落账/已清理——视同终态补注销）。
-    if (journalMissing) return { kind: "missing" };
-    return { kind: "running" };
-  }
-
-  /** 单文件从尾向头取第一条有效快照行；整文件无有效行返回 undefined（warn）。 */
-  private async loadLatestValidLine(absPath: string, display: string): Promise<WorkflowRun | undefined> {
-    let content: string;
-    try {
-      content = await readFile(absPath, "utf8");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`[file-run-store] skip unreadable state file ${display}: ${msg}`);
-      return undefined;
-    }
-
+/**
+ * 按 runId 同步查 run 的终局证据——journal run-settled 帧 ∨ manifest 终局面的
+ * 三态判定核。枚举改接（启动扫描，pi-host-run-store.ts）与对账 sweep 判据
+ * （sweep-binding）共用同一份判定逻辑（设计 §3.3 决策 2：抽取共用而非各写一份
+ * 尾向扫描——两份尾扫 = 新的一对并存实现，正是该设计要消灭的形态）。同步形态：
+ * sweep 在 session_start 同步链内运行（runReconcileSweep 同步契约），不能
+ * await——对单 runId 做同步文件读（对齐 sweep 自身的 sync fs 读先例；journal
+ * 行逐行 JSON.parse + run-settled 尾向扫描，manifest 同步读）。
+ *
+ * 判定矩阵（[W2 D6] 逐形态锚定保守侧——误注销活跃 run 是事故方向，不可逆）：
+ * - journal 与 manifest 均不存在（ENOENT）→ missing（「已归档/不存在视同终态」
+ *   ——run 从未落账或已被保留期清理，注册是死亡窗口残留）；
+ * - journal 尾向存在 run-settled 帧（append-only 单写者：帧在盘 = 终局已记录，
+ *   行级独立 JSON 不受早先坏行影响）→ terminal + reason（帧 (outcome, errorCode)
+ *   经 runSettledOutcomeToDoneReason 联合派生——[W2 D5] sweep 补注销 reason 统一
+ *   派生源第三处；budget_limited/time_limited 细分保留）；
+ * - journal 无帧但 manifest 在盘（活体物化后 journal 被裁的组合）→ terminal +
+ *   reason（manifest outcome 派生；无码细分退化为 outcome 兜底）；
+ * - journal 存在但无 run-settled 帧（run 真未终局，含坏链首帧形态）→ running
+ *   （保守按活跃，不补注销——对齐 adoptInterruptedRun skippedBrokenChain 纪律）；
+ * - journal / manifest 读错误（非 ENOENT IO 故障）→ running + warn 留证
+ *   （「IO 故障 ≠ 不存在」的保守侧纪律，宁挂账不误注销）。
+ */
+export function findRunSettlementEvidence(stateDir: string, runId: string): RunSettlementEvidence {
+  const journalPath = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  let settled: Extract<WorkflowRunEvent, { type: "run-settled" }> | undefined;
+  let journalMissing = false;
+  try {
+    const content = readFileSync(journalPath, "utf8");
     const lines = content.split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (line === "") continue; // 尾部空行（末行 \n 产物）静默跳过
-      const run = this.parseLine(line, display, i);
-      if (run) return run;
-      // 损坏行 warn 后继续向前找——最后一条「有效」行可能早于文件尾部（半行写入崩溃）
-    }
-    logger.warn(`[file-run-store] no valid snapshot line in ${display} (empty or all corrupted)`);
-    return undefined;
-  }
-
-  /**
-   * 单行解析 + 版本衔接预处理（D4 裁决②③，宿主侧职责）+ 形状校验；损坏
-   * warn 并返回 undefined。
-   *
-   * - 缺 v 字段（core 存量行）→ 就地补当前版本再进 codec（「缺版本 = 当前
-   *   版本」宽容读，不做自动迁移——写回时经 toRunSnapshot 自然补 v 完成渐进
-   *   收敛）；预处理留在 store 层而非 codec，保 pi 侧「v1 存量静默跳过」语义
-   *   不被宽容化误读（D4 裁决②归属裁决）。
-   * - v 存在但不匹配（未知更高版本/降级写入）→ 跳过 + warn（补可见性，对齐
-   *   pi 静默跳过语义；字符串版本无大小序，不引入比较逻辑——D4 裁决③）。
-   *   此处版本判断仅为 warn 可见性，数据防线仍是 codec 内 guard（双保险，
-   *   pi 切换 codec 后共享同一防线）。
-   */
-  private parseLine(line: string, display: string, lineNo: number): WorkflowRun | undefined {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`[file-run-store] skip corrupted line ${display}:${lineNo}: ${msg}`);
-      return undefined;
-    }
-    if (parsed !== null && typeof parsed === "object") {
-      const rec = parsed as { v?: unknown };
-      if (rec.v === undefined) {
-        rec.v = SNAPSHOT_VERSION;
-      } else if (rec.v !== SNAPSHOT_VERSION) {
-        logger.warn(
-          `[file-run-store] skip snapshot with unsupported version ${display}:${lineNo}: v=${JSON.stringify(rec.v)} (this build only reads v=${JSON.stringify(SNAPSHOT_VERSION)}; the run line is skipped). To recover: upgrade @zhushanwen/subagent-core, or migrate/delete this state file if its runs are no longer needed`,
-        );
-        return undefined;
+      const line = lines[i]!.trim();
+      if (line === "") continue; // 尾部空行静默跳过
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue; // 坏行（截断行）继续向前——append-only 下帧行独立有效
+      }
+      if (
+        typeof parsed === "object" && parsed !== null &&
+        (parsed as { type?: unknown }).type === "run-settled"
+      ) {
+        settled = parsed as Extract<WorkflowRunEvent, { type: "run-settled" }>;
+        break;
       }
     }
-    const run = fromRunSnapshot(parsed);
-    if (run === undefined) {
-      logger.warn(`[file-run-store] skip malformed snapshot ${display}:${lineNo} (shape validation failed)`);
-      return undefined;
+  } catch (err) {
+    if (!isEnoentError(err)) {
+      // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃挂账
+      //（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        `[run-state-evidence] findRunSettlementEvidence journal read failed, treating as running (stay registered): ${journalPath}: ${msg}`,
+      );
+      return { kind: "running" };
     }
-    return run;
+    journalMissing = true;
   }
+  if (settled !== undefined) {
+    return {
+      kind: "terminal",
+      reason: runSettledOutcomeToDoneReason(settled.outcome, settled.errorCode),
+    };
+  }
+  // journal 无帧：manifest 终局面（prune 资格单源锚定的第二证据通道）
+  const manifestPath = join(stateDir, `${runId}.json`);
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (typeof parsed === "object" && parsed !== null) {
+      const outcome = (parsed as { outcome?: unknown }).outcome;
+      const errorCode = (parsed as { errorCode?: unknown }).errorCode;
+      if (typeof outcome === "string") {
+        return {
+          kind: "terminal",
+          reason: runSettledOutcomeToDoneReason(
+            outcome as RunOutcome,
+            typeof errorCode === "string" ? (errorCode as RunErrorCode) : undefined,
+          ),
+        };
+      }
+    }
+  } catch (err) {
+    if (!isEnoentError(err)) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        `[run-state-evidence] findRunSettlementEvidence manifest read failed, treating as running (stay registered): ${manifestPath}: ${msg}`,
+      );
+      return { kind: "running" };
+    }
+  }
+  // 两证据面均缺：journal 存在但无帧 = 真未终局（保守活跃）；journal 也缺 =
+  // missing（从未落账/已清理——视同终态补注销）。
+  if (journalMissing) return { kind: "missing" };
+  return { kind: "running" };
+}
+
+
+// ── 裁决点 7：孤儿 run 对账清理（无主 run 的唯一磁盘清理通道）──────────
+//
+// 语义（用户裁决 2026-09-28，workflow-run-resume-revision 裁决点 7）：run 数据
+// 生命周期跟随 session 归属——任一存活 session 的注册引用指向该 runId 则保留；
+// 全部引用 session 已删 → 清理三件（record 流 + manifest 派生缓存 + 历史遗留
+// 旧双源文件——旧两件按 [D1] 处置不读不写不主动删，「无引用回收时顺带删除是
+// 既有清理通道的自然结果，非新增删除动作」；顺带删同 runId `.resume.lock`）。
+//
+// 实现落点：维护轮族扩展（本文件——prune/maintenance 同族，[D9] abandon 移除后
+// 无主 run 的唯一磁盘清理通道），复用三触发点（新 run 首写 / record 首写 /
+// session_start 兜底——经壳侧 session-lifecycle 装配）；存活 session 引用集采集
+// = 壳侧注入面（collectAliveRunReferences，core 不 import pi SDK）；不复用
+// createPiHostRunEnumeration（run 维度枚举 ≠ session 维度引用集采集，且维护轮
+// 不应依赖 pi 布局的 agentDir 活源）。
+//
+// 引用集三代形态（都解析——只认 v2 会把存量 run 首轮误判无主并不可逆删除）：
+// v2 注册条目（当前主形态）/ v1 全量快照条目 / pre-W17 link 指针。
+
+/** 对账清理的宿主注入依赖（引用集采集面 + 日志）。 */
+export interface OrphanRunReapDeps {
+  /**
+   * 存活 session 引用集采集（壳侧注入面——全池 session 文件流式扫描，秒级～
+   * 十秒级）：返回「全部存活 session 的注册引用并集」runId 集合。调用一次，
+   * 结果复用于本轮全部判定（宽限窗判定不做增量）。
+   */
+  collectAliveRunReferences: () => Promise<ReadonlySet<string>>;
+  /** warn 通道（登记 IO 失败留证；清理是旁路维护，失败不抛）。 */
+  warn: (msg: string) => void;
+  /** debug 通道（登记/删除过程记录）。 */
+  debug: (msg: string) => void;
+  /** error → 可读字符串。 */
+  toMsg: (err: unknown) => string;
+}
+
+/** 对账清理可调项。 */
+export interface OrphanRunReapOptions {
+  /**
+   * 宽限窗（ms）：删除条件 = 登记距今 ≥ 宽限窗 ∧ 三件最大 mtime 距扫描 ≥ 宽限窗
+   * （与门防活跃误删）∧ 当轮仍无引用。缺省 {@link resolveOrphanRunGraceWindowMs}
+   * （7 天，env 可调 / 测试调零）。
+   */
+  graceWindowMs?: number;
+  /** 时钟注入（epoch ms）；缺省 Date.now——宽限窗判定的确定性测试通道。 */
+  now?: number;
+}
+
+/** 宽限窗缺省值 = 7 天（裁决点 7「删除安全（首版宽限）」——首判无主后仍留观察期）。 */
+export const DEFAULT_ORPHAN_RUN_GRACE_WINDOW_MS = 604_800_000;
+
+/** 宽限窗 env 通道（测试期调零用；TAIJI_ 前缀理由对齐 STATE_TTL_MS_ENV——pi 进程内读的配置 env）。 */
+export const ORPHAN_RUN_GRACE_WINDOW_MS_ENV = "TAIJI_WORKFLOW_ORPHAN_RUN_GRACE_WINDOW_MS";
+
+/** 解析宽限窗；env 未设/空 → 缺省 7 天；显式 0/正数 → env 值（调零 = 测试即删通道）。 */
+export function resolveOrphanRunGraceWindowMs(): number {
+  const raw = process.env[ORPHAN_RUN_GRACE_WINDOW_MS_ENV];
+  if (raw === undefined || raw === "") return DEFAULT_ORPHAN_RUN_GRACE_WINDOW_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_ORPHAN_RUN_GRACE_WINDOW_MS;
+  return parsed;
+}
+
+/** 首判无主登记状态文件名（<stateDir>/orphan-run-reap.json——原子写，损坏按空重登记）。 */
+const ORPHAN_REAP_REGISTRY_FILE = "orphan-run-reap.json";
+
+/** 登记状态：runId → 首判无主时刻（epoch ms）。并发丢更新显式接受不设锁（低频维护轮 + 宁保留方向）。 */
+type OrphanReapRegistry = Record<string, number>;
+
+/** 原子写 helper（临时文件 + rename——与 manifest-store 同族纪律）。 */
+function writeAtomicJson(fullPath: string, value: unknown): void {
+  const tmp = `${fullPath}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(value), "utf8");
+  renameSync(tmp, fullPath);
+}
+
+/** 读登记状态（损坏按空重登记——宁保留方向：登记丢失只会延后删除，不会提前）。 */
+function readOrphanReapRegistry(stateDir: string): OrphanReapRegistry {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(stateDir, ORPHAN_REAP_REGISTRY_FILE), "utf8"));
+    if (typeof parsed === "object" && parsed !== null) {
+      const out: OrphanReapRegistry = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+      }
+      return out;
+    }
+  } catch {
+    // ENOENT（首轮无登记）/ 损坏 JSON → 空表重登记
+  }
+  return {};
+}
+
+/** 三件（record 流 + manifest + 旧双源）+ .resume.lock 的存在性探测（mtime 取最大——与门输入）。 */
+function runFootprintMaxMtime(stateDir: string, runId: string): { exists: boolean; maxMtime: number } {
+  const candidates = [
+    `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`,
+    `${runId}.json`,
+    `${runId}.jsonl`, // 历史遗留旧 state 快照（[D1] 不读不写不主动删——无主回收顺带删）
+    `${runId}.events.jsonl`, // 历史遗留旧 journal（同上）
+    `${runId}.resume.lock`, // 顺带删（裁决点 7：孤儿 run 清理顺带清残锁）
+  ];
+  let exists = false;
+  let maxMtime = 0;
+  for (const name of candidates) {
+    try {
+      const st = statSync(join(stateDir, name));
+      exists = true;
+      if (st.mtimeMs > maxMtime) maxMtime = st.mtimeMs;
+    } catch {
+      // 不存在——继续探测其余件
+    }
+  }
+  return { exists, maxMtime };
+}
+
+/** 成对删 run 磁盘足迹（三件 + 残锁，存在才删——ENOENT 静默）。 */
+function deleteOrphanRunFootprint(stateDir: string, runId: string): number {
+  const names = [
+    `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`,
+    `${runId}.json`,
+    `${runId}.jsonl`,
+    `${runId}.events.jsonl`,
+    `${runId}.resume.lock`,
+  ];
+  let deleted = 0;
+  for (const name of names) {
+    try {
+      unlinkSync(join(stateDir, name));
+      deleted += 1;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+  return deleted;
+}
+
+/** 对账清理执行结果（宿主日志/健康面用）。 */
+export interface OrphanRunReapResult {
+  /** 扫描的 run 候选数（record 流 + 旧 journal 文件族并集的 runId 数）。 */
+  scanned: number;
+  /** 存活引用保护跳过数。 */
+  skippedReferenced: number;
+  /** 宽限窗未到跳过数（新登记或早于窗）。 */
+  skippedGraceWindow: number;
+  /** 本次删除的 run 数。 */
+  reaped: number;
+}
+
+/**
+ * 裁决点 7 对账清理：无主 run 的唯一磁盘清理通道（维护轮族扩展，幂等可重入）。
+ *
+ * 判定链（每轮全量）：
+ * 1. 枚举 stateDir 的 runId 候选（record 流后缀 + 旧 journal 后缀的文件族并集——
+ *    含历史遗留形态；manifest 单独在场不成候选：无 record 流与旧 journal 的孤儿
+ *    manifest 是终局投影残留，prune 资格链已覆盖）；
+ * 2. 引用集三代解析（collectAliveRunReferences 注入——壳侧全池 session 文件扫描，
+ *    v2 注册条目 ∪ v1 快照条目 ∪ pre-W17 link 指针的并集，解析归壳侧注入面）；
+ * 3. 引用命中 → 跳过（保护——任一存活 session 引用即保留）；引用未命中 → 登记
+ *    首判无主时刻（幂等：已登记保持首判时刻，宽限锚不随重扫漂移——「不采用锚
+ *    mtime」的裁决：仅被 v1/link 引用的存量 run 创建于数周前，首轮判无主即删
+ *    的话宽限保护为零）；
+ * 4. 删除条件（与门）：登记距今 ≥ 宽限窗 ∧ 三件最大 mtime 距扫描 ≥ 宽限窗 ∧
+ *    当轮仍无引用 → 删三件 + 残锁 + 清登记条目。
+ *
+ * 失败处置：单 run 判定/删除失败按「不可判定 → 跳过」降级（宁保留不误删——
+ * 误删活跃 run 是不可恢复事故方向），warn 留证；登记 IO 失败整轮降级跳过
+ * （无登记不删——防宽限锚丢失后首轮即删）。
+ */
+export async function reapOrphanRuns(
+  input: { stateDir?: string },
+  deps: OrphanRunReapDeps,
+  options: OrphanRunReapOptions = {},
+): Promise<OrphanRunReapResult> {
+  const result: OrphanRunReapResult = {
+    scanned: 0,
+    skippedReferenced: 0,
+    skippedGraceWindow: 0,
+    reaped: 0,
+  };
+  if (input.stateDir === undefined) return result;
+  const stateDir = input.stateDir;
+  const now = options.now ?? Date.now();
+  const graceWindowMs = options.graceWindowMs ?? resolveOrphanRunGraceWindowMs();
+
+  // 候选枚举（record 流 + 旧 journal 文件族并集）
+  let names: string[];
+  try {
+    names = await readdir(stateDir);
+  } catch (err) {
+    if (!isEnoentError(err)) {
+      deps.warn(`orphan reap: readdir ${stateDir} failed: ${deps.toMsg(err)}`);
+    }
+    return result; // ENOENT = 从未落盘，正常空态
+  }
+  const runIds = new Set<string>();
+  for (const name of names) {
+    for (const suffix of [RUN_EVENT_JOURNAL_SUFFIX, ".events.jsonl"]) {
+      if (name.endsWith(suffix)) {
+        runIds.add(name.slice(0, -suffix.length));
+        break;
+      }
+    }
+  }
+  result.scanned = runIds.size;
+
+  // 引用集采集（壳侧注入面——三代解析归注入实现）
+  let referenced: ReadonlySet<string>;
+  try {
+    referenced = await deps.collectAliveRunReferences();
+  } catch (err) {
+    // 采集失败 = 引用状态不可知 → 整轮跳过（宁保留）
+    deps.warn(`orphan reap: alive reference collection failed, round skipped: ${deps.toMsg(err)}`);
+    return result;
+  }
+
+  // 登记状态读（IO 失败整轮降级——无登记不删，防宽限锚丢失后首轮即删）
+  let registry: OrphanReapRegistry;
+  try {
+    registry = readOrphanReapRegistry(stateDir);
+  } catch (err) {
+    deps.warn(`orphan reap: registry read failed, round skipped: ${deps.toMsg(err)}`);
+    return result;
+  }
+  let registryDirty = false;
+
+  for (const runId of runIds) {
+    try {
+      if (referenced.has(runId)) {
+        // 引用保护命中——清登记（引用恢复的 run 不再处于无主观察期）
+        if (registry[runId] !== undefined) {
+          delete registry[runId];
+          registryDirty = true;
+        }
+        result.skippedReferenced += 1;
+        continue;
+      }
+      // 无主判定（登记锚 = 首判时刻，非 mtime）
+      const firstSeen = registry[runId] ?? now;
+      if (registry[runId] === undefined) {
+        registry[runId] = now;
+        registryDirty = true;
+      }
+      const footprint = runFootprintMaxMtime(stateDir, runId);
+      if (!footprint.exists) continue; // 候选文件在本轮扫描后被并发清走
+      // 与门：首判距 now ≥ 窗 ∧ 三件最大 mtime 距 now ≥ 窗
+      if (now - firstSeen < graceWindowMs || now - footprint.maxMtime < graceWindowMs) {
+        result.skippedGraceWindow += 1;
+        continue;
+      }
+      // 删除（三件 + 残锁 + 登记条目）
+      const deleted = deleteOrphanRunFootprint(stateDir, runId);
+      delete registry[runId];
+      registryDirty = true;
+      result.reaped += 1;
+      deps.debug(
+        `orphan reap: removed ${deleted} file(s) for unreferenced run ${runId} (grace window ${graceWindowMs}ms elapsed)`,
+      );
+    } catch (err) {
+      // 单 run 失败不中断整轮（宁保留）
+      result.skippedGraceWindow += 1;
+      deps.warn(`orphan reap: skipped run ${runId}: ${deps.toMsg(err)}`);
+    }
+  }
+
+  // 登记落盘（原子写；有变更才写）
+  if (registryDirty) {
+    try {
+      writeAtomicJson(join(stateDir, ORPHAN_REAP_REGISTRY_FILE), registry);
+    } catch (err) {
+      deps.warn(`orphan reap: registry write failed (re-registration next round): ${deps.toMsg(err)}`);
+    }
+  }
+  return result;
 }

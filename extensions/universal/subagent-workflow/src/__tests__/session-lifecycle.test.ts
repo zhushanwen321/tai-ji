@@ -130,7 +130,7 @@ import { IDENTITY_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
 import { ENV_ROOT_CWD, getSubagentRecordsDir, resolvePiSessionScopedDir, STATE_DIR_NAME } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
 // 保留窗口 env 通道仅测试消费，深路径直取（对齐 retention 测试先例）
-import { STATE_TTL_MS_ENV } from "@zhushanwen/subagent-core/orchestration/file-run-store.ts";
+import { STATE_TTL_MS_ENV } from "@zhushanwen/subagent-core/execution/persistence/run-state-evidence.ts";
 // 通知账本重置导出（beforeEach 显式清空，对齐 index-session-start 先例）
 import { _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
@@ -404,7 +404,7 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     expect(result.storeHealthy).toBe(false);
   });
 
-  it("kill-9 恢复：running run 转 done,failed + pending:unregister appendEntry 直落（不经 emit）+ save 落盘", async () => {
+  it("kill-9 恢复（[D2]/[D15] 中断收编）：running run 落 run-interrupted + pending:unregister 直落（reason interrupted）+ 零 save", async () => {
     const { pi, entries, emits } = createFakePi();
     // 通知发送面 spy 化：守卫「中断 run 不产生 workflow-result 完成通知」（[W2 场景 4]
     // 断言——收编路径无通知回调，构造性成立；若未来壳侧装配误把 onRunDone 接进恢复
@@ -419,24 +419,21 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
 
     const result = await setupSessionLifecycle(pi, createFakeCtx(), deps);
 
-    expect(runningRun.state.status).toBe("done");
-    expect(runningRun.state.reason).toBe("failed");
+    // [D2] 中断非终局：内存观测面 status 维持 running（活体写点停更——终局判据归
+    // record fold）；state.error 承载 kill 文本
+    expect(runningRun.state.status).toBe("running");
     expect(runningRun.state.error).toContain("Process killed");
     // [W2/V4 D6] 注销直落权威面：appendEntry 直接落盘（emit 链在 reload 转换窗
     // 失效——[reload-closeout D4] 定案在恢复链同样适用）。data 形状与 finalizeRun
     // 直落 / reconcile-sweep 补注销同构（status 经 protocol mapReasonToStatus 单点）。
     const unregister = entries.find((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
-    expect(unregister).toBeDefined();
-    expect(unregister!.data).toEqual({
-      id: "wf-seam-k9",
-      reason: "failed",
-      status: mapReasonToStatus("failed"),
-    });
+    // [D15] 中断路径不经 finalizeRun（终局 coda 专属）——register/unregister 的
+    // 直落与保存语义随中断收编收敛：零 save（v1 尾段删除——[D1] 无覆盖写）
+    expect(save).toHaveBeenCalledTimes(0);
     // 零 emit：pending:unregister 不再经事件通道（验收条款：壳侧 emit 0）
     expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();
     // 零完成通知：恢复链无通知回调（场景 4 断言环——收编 run 不发 workflow-result）
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(save).toHaveBeenCalledTimes(1);
     expect(result.storeHealthy).toBe(true);
   });
 
@@ -737,7 +734,7 @@ describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点�
     };
   }
 
-  it("session_start 装配触发维护轮：run/record 双域窗外终态裁剪，窗内与 manifest 保护", async () => {
+  it("session_start 装配触发维护轮：record 域窗外终态裁剪；run 域旧双源不获裁剪资格（[D1] 中间态），窗内与 manifest 保护", async () => {
     process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
     const { stateDir, recordsDir } = resolveDomainAnchors();
 
@@ -749,9 +746,12 @@ describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点�
     const { pi } = createFakePi();
     await setupSessionLifecycle(pi, createFakeCtx("session-maint-1"), {});
 
-    // run 域：窗外终态 state + journal 成对裁；窗内保留；manifest 永不随裁
-    expect(fs.existsSync(path.join(stateDir, "wf-maint-expired.jsonl"))).toBe(false);
-    expect(fs.existsSync(path.join(stateDir, "wf-maint-expired.events.jsonl"))).toBe(false);
+    // run 域：[D1] 中间态锚——prune 资格 = journal run-settled fold，journal 读经
+    // record 后缀单源后旧双源不进判定路径（空流 = 非终态 = 不获资格）；候选枚举
+    // 换源（快照行 → record fold）归 u1a prune 判据适配，届时本断言随批反转。
+    // 旧两件套「不读不写不主动删」（D1 历史数据处置）在保留通道的自然成立形态。
+    expect(fs.existsSync(path.join(stateDir, "wf-maint-expired.jsonl"))).toBe(true);
+    expect(fs.existsSync(path.join(stateDir, "wf-maint-expired.events.jsonl"))).toBe(true);
     expect(fs.existsSync(path.join(stateDir, "wf-maint-expired.json"))).toBe(true);
     expect(fs.existsSync(path.join(stateDir, "wf-maint-inwindow.jsonl"))).toBe(true);
     expect(fs.existsSync(path.join(stateDir, "wf-maint-inwindow.events.jsonl"))).toBe(true);
@@ -770,10 +770,11 @@ describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点�
 
     const { pi } = createFakePi();
 
-    // 第一派发：兜底触发点执行首轮（首轮足迹被裁 = 触发真实发生）
+    // 第一派发：兜底触发点执行首轮（record 域足迹被裁 = 触发真实发生；run 域旧
+    // 双源因 [D1] journal 判据换源不获资格——见上一用例中间态锚）
     await setupSessionLifecycle(pi, createFakeCtx("session-maint-2"), {});
-    expect(fs.existsSync(path.join(stateDir, "wf-maint-first.jsonl"))).toBe(false);
     expect(fs.existsSync(path.join(recordsDir, "sa-maint-first.events"))).toBe(false);
+    expect(fs.existsSync(path.join(stateDir, "wf-maint-first.jsonl"))).toBe(true);
 
     // 首轮之后新落的窗外终态：第二派发重放首轮 Promise，不重扫 → 存活
     seedTerminalRunFootprint(stateDir, "wf-maint-second", 40, 35);
@@ -908,16 +909,9 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     const { pi: pi2, entries: entries2 } = createFakePi();
     const second = await setupSessionLifecycle(pi2, createFakeCtx(), mkDeps([runningRun]));
     expect(second.storeHealthy).toBe(true);
-    expect(runningRun.state.status).toBe("done");
-    expect(runningRun.state.reason).toBe("failed");
-    // [W2/V4 D6] 注销经 appendEntry 直落（不经 emit）
-    const unregister = entries2.find((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
-    expect(unregister).toBeDefined();
-    expect(unregister!.data).toEqual({
-      id: "wf-crash-2",
-      reason: "failed",
-      status: mapReasonToStatus("failed"),
-    });
+    // [D2] 中断收编：内存观测面维持 running（终局判据归 record fold）
+    expect(runningRun.state.status).toBe("running");
+    expect(runningRun.state.error).toContain("crash");
   });
 
   it("loadAll 成功 + 已终态 run：直接 set 到 runs Map，不 transition", async () => {
@@ -970,9 +964,9 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
     const { JsonlRunStore: RealJsonlRunStore } =
       await vi.importActual<typeof import("../jsonl-run-store.ts")>("../jsonl-run-store.ts");
     const { setRunEventJournalDirForTest } = await import(
-      "@zhushanwen/subagent-core/orchestration/worker-message-pump.ts"
+      "@zhushanwen/subagent-core/orchestration/terminal-actions.ts"
     );
-    const { createRunEventJournal, WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } =
+    const { createRunEventJournal, RUN_EVENT_JOURNAL_SUFFIX, WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } =
       await import("@zhushanwen/subagent-core");
     type CustomEntry = { type: string; customType?: string; data?: unknown; id: string; parentId: null; timestamp: string };
 
@@ -980,11 +974,11 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
     setRunEventJournalDirForTest(fixtureDir);
     try {
       const runId = "wf-kill9-1";
-      const journalPath = path.join(fixtureDir, `${runId}.events.jsonl`);
+      const journalPath = path.join(fixtureDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
       // 崩溃形态 journal：run-created + ask 帧，无 run-settled（进程被 kill-9 的磁盘形态）
       const journal = createRunEventJournal(fixtureDir);
       await journal.append(runId, { type: "run-created", runId, workflowName: "kill9", argsSummary: "{}", ts: Date.now() - 60_000 });
-      await journal.append(runId, { type: "ask-dispatched", taskIndex: 0, agentName: "a", attempt: 1, ts: Date.now() - 30_000 });
+      await journal.append(runId, { type: "agent-started", taskIndex: 0, agentName: "a", attempt: 1, ts: Date.now() - 30_000 });
 
       // 主 session 面只落注册条目（v2 形态——终态条目缺失即收编补写对象）
       const entries: CustomEntry[] = [
@@ -1041,50 +1035,43 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
         createRunStore: () => new RealJsonlRunStore({ sessionDir: fixtureDir, pi, ctx }),
       });
 
-      // 第一次启动（kill-9 后重启）：running 收编
+      // 第一次启动（kill-9 后重启）：running 收编（[D2]/[D15] 中断转移——非终局帧）
       const first = await setupSessionLifecycle(pi, ctx, mkDeps());
       const run = first.runs.get(runId);
-      expect(run?.state.status).toBe("done");
-      expect(run?.state.reason).toBe("failed");
-      // [W2/V4 D6] 注销经 appendEntry 直落（不经 emit）；零 emit 断言防事件通道回潮
-      const unregister = appended.find(({ t }) => t === PENDING_UNREGISTER_ENTRY_TYPE);
-      expect(unregister).toBeDefined();
-      expect((unregister!.d as { reason?: string }).reason).toBe("failed");
+      // [D2] 中断非终局：loadAll 重建产物 status 维持 running（fold 停在 interrupted
+      // 是状态机相——聚合面无终局），无 reason
+      expect(run?.state.status).toBe("running");
+      expect(run?.state.reason).toBeUndefined();
       expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();
 
-      // ① journal 尾部有收编 run-settled（[W2 D2/D3] 被动终局 = interrupted）
+      // ① record 尾部有收编 run-interrupted（[D2] 中断转移帧；errorCode=crashed）
       const lines = fs.readFileSync(journalPath, "utf8").split("\n").filter((l) => l.trim());
-      const lastFrame = JSON.parse(lines[lines.length - 1]!) as { type: string; outcome?: string };
-      expect(lastFrame.type).toBe("run-settled");
-      expect(lastFrame.outcome).toBe("interrupted");
+      const lastFrame = JSON.parse(lines[lines.length - 1]!) as { type: string; errorCode?: string };
+      expect(lastFrame.type).toBe("run-interrupted");
+      expect(lastFrame.errorCode).toBe("crashed");
+      // [D2] 中断非终局：零 manifest 物化（派生缓存是终局专属）
+      expect(fs.existsSync(path.join(fixtureDir, `${runId}.json`))).toBe(false);
 
-      // ② 主 session 条目恰两条：注册（seed）+ 终态（收编补写）
+      // ② 主 session 条目恰两条：注册（seed）+ 中断（收编补写 status 'interrupted'）
       const wfEntries = entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE);
       expect(wfEntries).toHaveLength(2);
       expect((wfEntries[0]!.data as { kind?: string }).kind).toBe("registered");
-      expect((wfEntries[1]!.data as { kind?: string }).kind).toBe("settled");
+      expect((wfEntries[1]!.data as { kind?: string; status?: string }).status).toBe("interrupted");
 
-      // ③ manifest 物化（writeRunTerminalManifest 落 <fixtureDir>/<runId>.json）
-      const manifest = JSON.parse(
-        fs.readFileSync(path.join(fixtureDir, `${runId}.json`), "utf8"),
-      ) as { id: string; outcome?: string };
-      expect(manifest.id).toBe(runId);
-      expect(manifest.outcome).toBe("interrupted");
-
-      // ④ 双重启：journal 已终态 → loadAll 直读终局，零重复追加、零条目写
+      // ④ 双重启：record 已中断 → loadAll 直读（fold interrupted 非终局→重建
+      // running），幂等让位零重复追加、零条目写
       appended.length = 0;
       await setupSessionLifecycle(pi, ctx, mkDeps());
-      const settledFrames = fs
+      const interruptedFrames = fs
         .readFileSync(journalPath, "utf8")
         .split("\n")
-        .filter((l) => l.trim() && (JSON.parse(l) as { type: string }).type === "run-settled");
-      expect(settledFrames).toHaveLength(1);
+        .filter((l) => l.trim() && (JSON.parse(l) as { type: string }).type === "run-interrupted");
+      expect(interruptedFrames).toHaveLength(1);
       expect(appended.filter((a) => a.t === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(0);
-      expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(2);
     } finally {
       // 清 journal 目录注入（恢复 vitest 防线 no-op 形态——防其他测试误写真目录）
       const { setRunEventJournalDirForTest } = await import(
-        "@zhushanwen/subagent-core/orchestration/worker-message-pump.ts"
+        "@zhushanwen/subagent-core/orchestration/terminal-actions.ts"
       );
       setRunEventJournalDirForTest(undefined);
       fs.rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });

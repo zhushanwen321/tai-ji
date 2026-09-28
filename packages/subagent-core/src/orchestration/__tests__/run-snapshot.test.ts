@@ -25,7 +25,7 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 import type { WorkflowRunEvent } from "../run-events.ts";
 import { SNAPSHOT_VERSION, fromRunSnapshot, projectRunEvents, toRunSnapshot } from "../run-snapshot.ts";
 
-/** 构造可持久化的 WorkflowRun（对齐 file-run-store.test.ts makeRun 模式）。 */
+/** 构造可持久化的 WorkflowRun。 */
 function makeRun(runId: string, opts: { status?: "running" | "done" } = {}): WorkflowRun {
   const status = opts.status ?? "running";
   return WorkflowRun.reconstruct(
@@ -377,8 +377,8 @@ describe("run-snapshot — [P3/D6] SNAPSHOT_VERSION additive 策略", () => {
   it("新写侧快照（含新字段）读取不炸：未知/新增字段被旧读面容忍，不进聚合", () => {
     const base = makeSnapshotWithCalls();
     const enriched = projectRunEvents(base, [
-      ev({ type: "ask-dispatched", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 1000 }),
-      ev({ type: "run-settled", outcome: "completed", artifactsDir: "/tmp/wf", ts: 5000 }),
+      ev({ type: "agent-started", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 1000 }),
+      ev({ type: "run-settled", outcome: "done", artifactsDir: "/tmp/wf", ts: 5000 }),
     ]);
     // 序列化 → 重水合（模拟旧读面走 codec）——additive 字段不阻碍重建
     const round = fromRunSnapshot(JSON.parse(JSON.stringify(enriched)));
@@ -390,9 +390,9 @@ describe("run-snapshot — [P3/D6] SNAPSHOT_VERSION additive 策略", () => {
 describe("run-snapshot — [P3/D6] projectRunEvents fold（单一推导点）", () => {
   it("ask 全链 dispatched→retrying→settled：startedAt 取首边沿、lastProgressAt 逐边沿推进", () => {
     const snap = projectRunEvents(makeSnapshotWithCalls(), [
-      ev({ type: "ask-dispatched", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 1000 }),
-      ev({ type: "ask-retrying", taskIndex: 0, attempt: 1, backoffMs: 1000, reason: "boom", ts: 2000 }),
-      ev({ type: "ask-settled", taskIndex: 0, attempt: 2, outcome: "completed", durationMs: 900, ts: 3000 }),
+      ev({ type: "agent-started", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 1000 }),
+      ev({ type: "agent-retrying", taskIndex: 0, attempt: 1, backoffMs: 1000, reason: "boom", ts: 2000 }),
+      ev({ type: "agent-settled", taskIndex: 0, attempt: 2, outcome: "done", durationMs: 900, ts: 3000 }),
     ]);
     const call0 = snap.state.calls.find((c) => c.id === 0)!;
     expect(call0.startedAt).toBe(1000);
@@ -407,9 +407,9 @@ describe("run-snapshot — [P3/D6] projectRunEvents fold（单一推导点）", 
 
   it("ask-dispatched 恢复 calls[].phase（W1 D6 分组供源）；无 phase 帧保持 undefined（旧 journal 行兼容）", () => {
     const snap = projectRunEvents(makeSnapshotWithCalls(), [
-      ev({ type: "ask-dispatched", taskIndex: 0, agentName: "agent-0", attempt: 1, phase: "Dev-w0(W1)", ts: 1000 }),
+      ev({ type: "agent-started", taskIndex: 0, agentName: "agent-0", attempt: 1, phase: "Dev-w0(W1)", ts: 1000 }),
       // 无 phase 帧 = 停写期 journal 行 / 未标注剧本——fold 不造键
-      ev({ type: "ask-dispatched", taskIndex: 1, agentName: "agent-1", attempt: 1, ts: 1100 }),
+      ev({ type: "agent-started", taskIndex: 1, agentName: "agent-1", attempt: 1, ts: 1100 }),
     ]);
     expect(snap.state.calls.find((c) => c.id === 0)!.phase).toBe("Dev-w0(W1)");
     expect(snap.state.calls.find((c) => c.id === 1)!.phase).toBeUndefined();
@@ -437,7 +437,7 @@ describe("run-snapshot — [P3/D6] projectRunEvents fold（单一推导点）", 
 
   it("taskIndex 无关联条目：per-call 跳过、health 照常推进（代际错位不炸）", () => {
     const snap = projectRunEvents(makeSnapshotWithCalls(), [
-      ev({ type: "ask-dispatched", taskIndex: 42, agentName: "ghost", attempt: 1, ts: 1500 }),
+      ev({ type: "agent-started", taskIndex: 42, agentName: "ghost", attempt: 1, ts: 1500 }),
     ]);
     expect(snap.state.health?.lastProgressAt).toBe(1500);
     expect(snap.state.calls.find((c) => c.id === 0)!.startedAt).toBeUndefined();
@@ -454,8 +454,8 @@ describe("run-snapshot — [P3/D6] projectRunEvents fold（单一推导点）", 
 
   it("ts 回拨防御：lastProgressAt 取 max（乱序帧不回拨进度时钟）", () => {
     const snap = projectRunEvents(makeSnapshotWithCalls(), [
-      ev({ type: "ask-dispatched", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 3000 }),
-      ev({ type: "ask-retrying", taskIndex: 0, attempt: 1, backoffMs: 1000, reason: "boom", ts: 1000 }),
+      ev({ type: "agent-started", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 3000 }),
+      ev({ type: "agent-retrying", taskIndex: 0, attempt: 1, backoffMs: 1000, reason: "boom", ts: 1000 }),
     ]);
     const call0 = snap.state.calls.find((c) => c.id === 0)!;
     expect(call0.lastProgressAt).toBe(3000);
@@ -474,7 +474,7 @@ describe("run-snapshot — [P3/D6] projectRunEvents fold（单一推导点）", 
     const base = makeSnapshotWithCalls();
     const frozen = JSON.parse(JSON.stringify(base));
     projectRunEvents(base, [
-      ev({ type: "ask-dispatched", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 1000 }),
+      ev({ type: "agent-started", taskIndex: 0, agentName: "agent-0", attempt: 1, ts: 1000 }),
     ]);
     expect(JSON.parse(JSON.stringify(base))).toEqual(frozen);
   });

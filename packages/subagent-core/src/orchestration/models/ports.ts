@@ -38,17 +38,17 @@ export interface AgentRunner {
 // ── Port 2: RunStore ──────────────────────────────────────────
 
 /**
- * WorkflowRun 持久化 port（写侧语义）。Infra 实现：pi 壳 JsonlRunStore（session
- * 锚定）与 core FileRunStore（宿主数据根锚定，zsw 等无 pi session 设施的宿主）。
+ * WorkflowRun 持久化 port（写侧语义）。生产唯一实现 = pi 壳 JsonlRunStore
+ * （session 锚定；core 侧通用文件写实现已随写身份退役删除）。
  *
  * save 在每次状态变更后持久化整个 WorkflowRun（聚合根）——W1 写通道语义收敛后
  * 快照 = journal fold 的物化投影（写点收敛到 journal 追加后的统一物化步）；
  * loadAll 在 session_start 时重水合（D-5：JSONL 不向后兼容旧 session，旧格式返回空）。
  * stateFilePath 返回 run 状态文件的绝对路径（供 overlay/GUI 暴露给用户）。
  *
- * 读写分离装配事实：pi 宿主 = 写侧 JsonlRunStore + 读侧对账直接消费 FileRunStore
- * 具体类（findStateByIdSync 为端口外同步读方法——单实现单消费方 [registry-reconcile
- * 对账 sweep]，不为其设端口：一个 adapter 是假想 seam）。
+ * 读侧职责不经本 port：终局证据判定核与保留期维护位于
+ * execution/persistence/run-state-evidence.ts（journal/manifest 事实源直读，
+ * 对账 sweep 与启动扫描枚举共用同一份判据）。
  */
 export interface RunStore {
   save(run: WorkflowRun): Promise<void>;

@@ -55,8 +55,8 @@ export interface PiSessionScopedDirOptions {
  *     创建——cwd 有过 workflow run 才存在），否则回退 agentDir 根
  *     （JsonlRunStore 的 mkdir recursive 使首写直接落 agentDir 根，两侧探测一致）。
  *
- * 只读解析（existsSync 探测），无目录创建副作用——与 FileRunStore 的 save 侧
- * mkdir 职责分离。
+ * 只读解析（existsSync 探测），无目录创建副作用——目录创建归 pi 壳 store 首写
+ * 侧（上方 JsonlRunStore mkdir recursive 语义），职责分离。
  */
 export function resolvePiSessionScopedDir(opts?: PiSessionScopedDirOptions): string {
   const agentDir = opts?.agentDir ?? resolvePiAgentDir();

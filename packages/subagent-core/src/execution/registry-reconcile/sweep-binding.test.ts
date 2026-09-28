@@ -5,7 +5,7 @@
 // subagent 两方向：活跃 record 不被 sweep 注销 + 终态/missing 差集补发注销）。
 //
 // 测试纪律：替身 RecordStore/PiLike 驱动（不触真实数据目录）；PI_CODING_AGENT_DIR
-// stub 指向 tmp（sweep 内 FileRunStore 构造读侧解析不探测真实 ~/.pi/agent）。
+// stub 指向 tmp（sweep 内判定核目录解析不探测真实 ~/.pi/agent）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -160,7 +160,7 @@ afterEach(() => {
 });
 
 describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordState 闭包）", () => {
-  /** sweep harness：PI_CODING_AGENT_DIR stub（sweep 内 FileRunStore 读侧解析不触真实目录）。 */
+  /** sweep harness：PI_CODING_AGENT_DIR stub（sweep 内判定核目录解析不触真实目录）。 */
   function setup(): { agentDir: string } {
     const agentDir = path.join(tmpDir, "agent");
     vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);

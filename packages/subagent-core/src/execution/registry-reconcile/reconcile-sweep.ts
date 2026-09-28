@@ -70,7 +70,8 @@ export interface ReconcileSweepDeps {
   lookupRecordState: (id: string) => SupervisedRecordState;
   /**
    * [F2] workflow run 状态判据（type=workflow 及畸形条目的收口依据）。生产装配查
-   * WorkflowRun store（service-binding → FileRunStore.findStateByIdSync）。
+   * 共享判定核（service-binding → persistence/run-state-evidence 的
+   * findRunSettlementEvidence）。
    * 缺省（未注入）= workflow/畸形条目无收口通道，保守跳过（skippedNonSubagent）。
    */
   lookupWorkflowRunState?: (runId: string) => SupervisedRecordState;

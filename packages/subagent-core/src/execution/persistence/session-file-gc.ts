@@ -125,7 +125,7 @@ function cleanExpiredJsonl(full: string, now: number): void {
 /**
  * journal 事件文件名判定（W1 D3/D5 显式忽略规则）：record 事件文件（*.events，
  * records 目录内）与 run journal（*.events.jsonl）不是 session 文件——清理归统一
- * 保留维护轮（fold 终态 + 保留窗口判据，file-run-store.ts 单源），GC 不得触碰。
+ * 保留维护轮（fold 终态 + 保留窗口判据，run-state-evidence.ts 单源），GC 不得触碰。
  *
  * 现状分发本不命中 *.events（无 .jsonl 后缀、不落任何清理分支），显式化是防
  * 未来通配规则回归，不是行为改动；*.events.jsonl 以 .jsonl 结尾、若进入扫描树

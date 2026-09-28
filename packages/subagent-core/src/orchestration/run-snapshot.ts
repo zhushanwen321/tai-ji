@@ -4,21 +4,20 @@
 //
 // WorkflowRun 快照 codec（下沉收口 D4——设计件 subagent-core-sink-design.md（已删，git 可追溯） U8）。
 //
-// 为什么需要它：WorkflowRun 的 JSONL 快照投影此前两宿主各写一份（core
-// file-run-store.ts 的 toSnapshot/fromSnapshot 与 pi 壳 jsonl-run-store.ts 的
-// serializeRun/deserializeRun）——字段集一致但语义细节分叉（版本 guard 等），
-// 修一处漏一处。本模块收敛为单源 codec：字段演进
-// 单点（G2），两宿主（FileRunStore / pi JsonlRunStore）各自只保留 IO 策略
-// （rewrite/append/去抖），投影与版本衔接语义全部经此模块。
+// 为什么需要它：WorkflowRun 的 JSONL 快照投影此前两处各写一份（core 侧 store
+// 内联实现与 pi 壳 jsonl-run-store.ts 的 serializeRun/deserializeRun）——字段集
+// 一致但语义细节分叉（版本 guard 等），修一处漏一处。本模块收敛为单源 codec：
+// 字段演进单点（G2）；core 写侧身份退役后物化消费方 = pi 壳
+// JsonlRunStore（IO 策略：rewrite/append/去抖），投影与版本衔接语义全部经此模块。
 //
 // 版本衔接三裁决（D4，含审查 MF-2）：
 // ① 版本值沿用 pi 现有字符串 "wf-run-v2"——pi 存量逐字节可读；
-// ② FileRunStore 存量行（无 v 字段）按「缺版本 = 当前版本」宽容读取，写入时
-//    补 v，不做自动迁移——「缺 v 宽容」实现于 FileRunStore 层预处理（读出的行
-//    先补缺省 v 再进 fromRunSnapshot），**不内聚进本 codec**：codec 层面缺 v
-//    即拒绝，保 pi 侧「v1 存量静默跳过」既有语义不被宽容化误读；
+// ② core 存量行（无 v 字段）按「缺版本 = 当前版本」宽容读取，写入时补 v，
+//    不做自动迁移——「缺 v 宽容」的预处理留在读取方（读出的行先补缺省 v 再进
+//    fromRunSnapshot），**不内聚进本 codec**：codec 层面缺 v 即拒绝，保 pi 侧
+//    「v1 存量静默跳过」既有语义不被宽容化误读；
 // ③ guard 语义 = v 不匹配当前版本即拒（字符串版本无大小序，不引入比较逻辑）；
-//    「跳过 + warn」的可见性由宿主 store 层补（本 codec 只返回 undefined）。
+//    「跳过 + warn」的可见性由读取方补（本 codec 只返回 undefined）。
 //
 // 序列化形态（键序即 JSON.stringify 输出序）逐键对齐 pi serializeRun 现网形态，
 // 使 pi 切换本 codec 后存量往返逐字节一致（⛔5）。
@@ -55,7 +54,7 @@ import type { RunErrorCode, RunOutcome, WorkflowRunEvent } from "./run-events.ts
  * 迁移方案。
  *
  * 升级格式时 bump 此常量——旧版本快照经 fromRunSnapshot 返回 undefined，由
- * 宿主 store 层决定跳过可见性（FileRunStore warn / pi 静默）。
+ * 读取方决定跳过可见性（壳 store 层语义：版本不匹配 warn 跳过 / pi v1 存量静默）。
  */
 export const SNAPSHOT_VERSION = "wf-run-v2" as const;
 
@@ -201,21 +200,21 @@ export function toRunSnapshot(run: WorkflowRun): RunSnapshot {
 // ── 事件 journal fold 投影（[P3/D6] 单一推导点）──────────────
 
 /**
- * 从事件 journal fold 投影快照的 additive 字段（[P3/D6] 唯一推导点）。
+ * 从事件流 fold 投影快照的 additive 字段（[P3/D6] 唯一推导点）。
  *
- * 为什么是纯函数 + 调用方传入事件：本 codec 零 IO（模块头注），journal scan 归
- * 宿主 store 层（pi JsonlRunStore flush 时读同目录 `<runId>.events.jsonl` 后调
- * 本函数）。权威在事件流（D5 证据：「快照 + 事件流双写时快照必然漂移」）——
+ * 为什么是纯函数 + 调用方传入事件：本 codec 零 IO（模块头注），record scan 归
+ * 宿主 store 层。权威在事件流（D5 证据：「快照 + 事件流双写时快照必然漂移」）——
  * 每次 flush 重 fold（幂等：输出只由 (snap, events) 决定），不增量缓存。
  *
- * fold 规则（词表 = run-events.ts D5 七事件）：
- * - `ask-dispatched`：按 taskIndex 关联 calls[] 条目（id 同源 D-10），
+ * fold 规则（词表 = run-events.ts [D4] 九事件）：
+ * - `agent-started`：按 taskIndex 关联 calls[] 条目（id 同源 D-10），
  *   startedAt ??= ts（首边沿即起点）；lastProgressAt = ts；另恢复
- *   calls[].phase（W1 D6 分组供源，事件无 phase 帧保持 undefined）；
- * - `ask-retrying` / `ask-settled`：仅推进 lastProgressAt（重试轨迹的进度语义）；
- * - `run-created` / `armed`：仅推进 run 级 health.lastProgressAt；
+ *   calls[].phase（[D3] call 归属快照，事件无 phase 帧保持 undefined）；
+ * - `agent-retrying` / `agent-settled`：仅推进 lastProgressAt（重试轨迹的进度语义）；
+ * - `run-created` / `phase-*` / `run-interrupted` / `run-resumed`：仅推进 run 级
+ *   health.lastProgressAt（[D5] armed 分支随词表成员删除而移除）；
  * - `run-settled`：health 推进 + 终局投影（state.outcome / errorCode 落快照）；
- * - taskIndex 无关联条目（journal 与快照代际错位）：per-call 跳过、health 照常
+ * - taskIndex 无关联条目（record 与快照代际错位）：per-call 跳过、health 照常
  *   推进（run 级进展是事实）——坏数据失效模式 = 缺省渲染，不炸不丢 run；
  * - ts 单调防御：lastProgressAt 取 max（乱序帧不回拨进度时钟）。
  *
@@ -224,7 +223,7 @@ export function toRunSnapshot(run: WorkflowRun): RunSnapshot {
  * 派生字段。
  *
  * @param snap 基线快照（toRunSnapshot 产物；其新字段缺省 undefined）
- * @param events journal scan 产出（写入序；坏行已被 scan 侧跳过）
+ * @param events record scan 产出（写入序；坏行已被 scan 侧跳过）
  * @returns 新快照对象（浅拷贝分层克隆——输入不被修改，flush 侧可安全覆写）
  */
 /** ts 单调防御：进度时钟取 max（乱序帧不回拨）。run 级 health 与 per-call 共用。 */
@@ -260,18 +259,18 @@ export function projectRunEvents(snap: RunSnapshot, events: readonly WorkflowRun
   for (const event of events) {
     lastProgressAt = advanceProgress(lastProgressAt, event.ts);
     switch (event.type) {
-      case "ask-dispatched": {
+      case "agent-started": {
         advanceCallProgress(callsById, event.taskIndex, event.ts, true);
-        // [W1/D6] phase 分组供源恢复——事件无 phase 帧（旧 journal 行 / 未标注
-        // 剧本）保持 undefined 不造键；关联不上条目同进度语义（per-call 跳过）。
-        const dispatched = callsById.get(event.taskIndex);
-        if (dispatched !== undefined && event.phase !== undefined) {
-          dispatched.phase = event.phase;
+        // [D3] phase 归属快照恢复——事件无 phase 帧（未标注剧本）保持 undefined
+        // 不造键；关联不上条目同进度语义（per-call 跳过）。
+        const started = callsById.get(event.taskIndex);
+        if (started !== undefined && event.phase !== undefined) {
+          started.phase = event.phase;
         }
         break;
       }
-      case "ask-retrying":
-      case "ask-settled":
+      case "agent-retrying":
+      case "agent-settled":
         advanceCallProgress(callsById, event.taskIndex, event.ts, false);
         break;
       case "run-settled":
@@ -279,8 +278,11 @@ export function projectRunEvents(snap: RunSnapshot, events: readonly WorkflowRun
         if (event.errorCode !== undefined) errorCode = event.errorCode;
         break;
       case "run-created":
-      case "armed":
-        // 仅推进 run 级 health（无 per-call 语义）
+      case "phase-started":
+      case "phase-settled":
+      case "run-interrupted":
+      case "run-resumed":
+        // 仅推进 run 级 health（无 per-call 语义）；[D5] armed 分支随词表成员删除移除
         break;
     }
   }
@@ -317,7 +319,7 @@ interface ValidatedSnapshot {
  * 顶层形状校验（检查顺序与原内联守卫逐条一致）。
  *
  * 含 D4 裁决③ version guard（字符串相等，无大小序）：v 不等于当前版本即拒
- * （含缺版本——「缺 v 宽容」是 FileRunStore 层预处理职责，不内聚进本 codec；
+ * （含缺版本——「缺 v 宽容」是读取方预处理职责，不内聚进本 codec；
  * pi 侧对 v1 存量行的静默跳过语义依赖此拒绝行为）。
  */
 function isValidSnapshotShape(s: Partial<RunSnapshot>): s is ValidatedSnapshot {
@@ -373,7 +375,7 @@ function rehydrateCalls(snapshots: CallSnapshot[], trace: Trace): Map<number, Ag
  * 快照 → WorkflowRun 重水合。
  *
  * 版本 guard（D4 裁决③）：v 不等于当前版本即返回 undefined（含缺版本——
- * 「缺 v 宽容」是 FileRunStore 层预处理职责，不内聚进本函数；pi 侧对 v1 存量
+ * 「缺 v 宽容」是读取方预处理职责，不内聚进本函数；pi 侧对 v1 存量
  * 行的静默跳过语义依赖此拒绝行为）。
  *
  * 形状校验失败同样返回 undefined（调用方按损坏行处理，本函数不抛——唯一例外：

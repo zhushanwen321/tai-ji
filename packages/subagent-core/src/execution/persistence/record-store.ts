@@ -117,10 +117,9 @@ import type { V2EntryState } from "./record-store-terminal.ts";
 // 轮次簿记轴承载（事件落账调用面主体 = RoundsCtx/TerminalCtx 注入位）。RecordStore
 // 是 record 域事件的唯一合法写者（单写者纪律，face 是容器的单点封装）。
 import { RecordJournalWriteFace } from "./record-store-rounds.ts";
-// [W1 / U7·D5] 统一保留维护轮入口（record 域触发点）：core 内部深路径直取
-// （barrel 面只约束壳生产消费；execution → orchestration 深路径先例 =
-// registry-reconcile/sweep-binding.ts 的 FileRunStore import）。
-import { runRetentionMaintenanceRound } from "../../orchestration/file-run-store.ts";
+// [W1 / U7·D5] 统一保留维护轮入口（record 域触发点）：同域 run-state-evidence
+// 直取（barrel 面只约束壳生产消费）。
+import { runRetentionMaintenanceRound } from "./run-state-evidence.ts";
 import type { ManifestRecord, ManifestStore } from "./manifest-store.ts";
 import { INDEX_WRITE_MIN_INTERVAL_MS, loadIndex, saveIndex } from "./sessions-index.ts";
 import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "./sessions-index.ts";
