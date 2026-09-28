@@ -77,9 +77,10 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
  * 词表不动，映射归 journal 写入方实现）。
  *
  * interrupted = 被动终局的唯一权威表达（「崩溃 ≠ 失败」的用户可感区分）：
- * 崩溃收编 / abandon 7 天窗 / idle-gc 30 天回收三条路径写入，细分语境由
- * errorCode 承载（interrupted_abandoned / idle-evicted）。它不出自任何执行侧
- * 判定——只有收编/回收原语写入（record 轮终与 ask 终局构造性不可达，消费方
+ * 崩溃收编 / abandon 7 天窗 / runtime 启动扫描三条路径写入，细分语境由
+ * errorCode 承载（interrupted_abandoned / startup-sweep；历史值 idle-evicted
+ * 的写入方已随机制退役，登记见下方 RunErrorCode 词表段）。它不出自任何执行侧
+ * 判定——只有收编原语写入（record 轮终与 ask 终局构造性不可达，消费方
  * 按 `Exclude<RunOutcome, "interrupted">` 收窄，见 execution/assembly/types.ts
  * 的 ExecutionOutcome 派生别名）。
  *
@@ -124,10 +125,17 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  * 是 ask 级失败分诊三态（预算耗尽不是 ask 失败形态）；"unknown" 语义 = 分类
  * 不出来，而这两族死因是确定已知的。
  *
- * idle-evicted 同族第三成员（[W2 D3/D5]）：idle-gc 30 天回收的终局码——
+ * startup-sweep 是 runtime 启动扫描收编的终局码：outcome='interrupted' 帧的
+ * 细分语境——启动扫描把磁盘 running 的孤儿 run 终局化时写入（两件直落收编，
+ * 见 execution/assembly/startup-sweep.ts；写入时机 = runtime 启动序列、单实例
+ * 锁确立后先于任何 pi spawn 的时点）。与 interrupted_abandoned 同族：不描述
+ * 进程怎么死的，描述「为什么此刻被判终局」，同款登记形态。
+ *
+ * idle-evicted 同族第三成员（[W2 D3/D5]，词表成员保留）：历史写入方 = 已退役
+ * 的 30 天内存回收机制（ADR 登记，见 docs/adr/decisions.md 启动扫描条目），
+ * 生产写入方已随机制退役归零。append-only journal 的存量帧携带该值，词表成员
+ * 是解析词表而非「现存写入方」登记，删值破坏历史帧解析——故保留。语义：
  * outcome='interrupted' 帧的细分语境（管理性回收，非用户主动非证实失败）。
- * 写入方 = idle-gc 改走终局记录原语的路径；词表先于接线入单源（V0），
- * 与 interrupted_abandoned 同款登记。
  */
 export type RunErrorCode =
   | EngineProtocolErrorCode
@@ -136,6 +144,7 @@ export type RunErrorCode =
   | "budget_limited"
   | "time_limited"
   | "interrupted_abandoned"
+  | "startup-sweep"
   | "idle-evicted";
 
 // ── DoneReason → RunOutcome 映射表定稿（与下方 RunErrorCode 映射同族的姊妹单点）──
@@ -155,10 +164,11 @@ export type RunErrorCode =
  * | invalid_args    | failed     | 因提取               | 参数校验失败——生产不达 finalizeRun（launcher 校验在 run 创建前返回），收录仅为映射穷尽；run 从未创建、不落终局帧（不适用行） |
  *
  * time_limited 双语境注记（[W2 D5 表注]）：上表行只覆盖 dispatch 链语境（活体
- * 预算超时 → failed）。idle-gc 30 天回收语境的同一 DoneReason 字面量落
- * interrupted + errorCode='idle-evicted'（管理性回收 = 被动终局，不稀释
+ * 预算超时 → failed）。被动收编语境的同一 DoneReason 字面量落 interrupted +
+ * errorCode 承载细分语境（现行 = interrupted_abandoned / startup-sweep，历史值
+ * idle-evicted 见上方 RunErrorCode 词表段——管理性收编 = 被动终局，不稀释
  * cancelled 的「主动」语义）——该行不经本函数派生，映射判据用触发源（场景
- * 语境）而非字面量，由收编/回收写入方（idle-gc 改走终局记录原语的路径）直写。
+ * 语境）而非字面量，由收编写入方直写。
  *
  * 消费方：core worker-message-pump 的 dispatchFinalRunSettle（同构判别，aborted
  * 分支走 cancel-requested 合成不改用本函数——两条路径的 outcome 语义一致）+ 壳

@@ -613,10 +613,17 @@ export { getSubagentRecordsDir } from "./execution/assembly/path-encoding.ts";
 // 路径消费，不需要 barrel 面。
 export { resolvePiSessionScopedDir } from "./execution/assembly/workflow-state-root.ts";
 
-// createPiHostRunEnumeration：pi 宿主 workflow-run GC 的读侧枚举 store（agentDir
-// 活源 + 全 session 目录）。消费方 = pi 壳 session-lifecycle 的 startGcTimer
-// 装配点（跨包消费，需 barrel 面）；见 pi-host-run-store.ts 头注的分层边界。
+// createPiHostRunEnumeration：pi 宿主 workflow run 的读侧枚举 store（agentDir
+// 活源 + 全 session 目录）。消费方 = startupSweep 的枚举注入（runtime 启动扫描；
+// 原 pi 壳定时器装配点已随机制退役）——跨包消费，需 barrel 面；
+// 见 pi-host-run-store.ts 头注的分层边界。
 export { createPiHostRunEnumeration } from "./execution/assembly/pi-host-run-store.ts";
+
+// startupSweep：runtime 启动收编扫描的 core 装配单点（30 天定时器回收机制退役
+// 后的替代实装——枚举 + 逐 run 收编 + 事件流静止宽限窗 + 失败语义 + 注入日志
+// 通道；决策登记见 docs/adr/decisions.md 启动扫描条目）。消费方 = runtime main()
+// 挂点（registerRuntimeInstance 之后、service 构造段之前，先于任何 pi spawn）。
+export { startupSweep } from "./execution/assembly/startup-sweep.ts";
 
 // run 级终局投影 manifest（[P1b-2 / D5]）读写原语：「已终局」单源锚定（outcome
 // 非空）。消费全在 core 内部深路径（run-registry abandon 终局化 /

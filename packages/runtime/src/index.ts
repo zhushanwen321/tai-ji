@@ -31,6 +31,9 @@ import { ModelService } from './services/model-service.js'
 import { BASE_PORT, MAX_PORT, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
+// startupSweep：启动收编扫描 core 装配单点（挂点见 main() 内 registerRuntimeInstance
+// 之后的时序硬声明注释段）。
+import { startupSweep } from '@zhushanwen/subagent-core'
 import { initLogger, closeLogger, logger, captureMemorySnapshot, formatMemoryWatermarkLine, MEMORY_WATERMARK_INTERVAL_MS } from './infra/logger.js'
 import { probeSingleInstance, registerRuntimeInstance } from './infra/single-instance-guard.js'
 // u1b（crash-forensics-and-watchdog D1）runtime 台账单例。初始化是组合根职责（与
@@ -421,6 +424,13 @@ async function main(): Promise<void> {
   // 写内。listen 成功后无需重复登记（登记内容不含 listen 结果）；写失败不阻塞（文件
   // 非权威，supervisor runtime.port 通道并行）。
   registerRuntimeInstance(getDataDir(), port)
+
+  // [MANDATORY] 时序硬声明（决策 1，登记见 docs/adr/decisions.md 启动扫描条目）：
+  // startup sweep 必须先于任何 pi spawn：本时点无新 pi（启动段不 spawn）、单实例
+  // 锁已确立；旧 pi 残活的末帧新鲜形态由 graceWindowMs 兜——挪动此调用序前必读
+  // 设计 §3.3 决策 1。扫描是旁路维护：startupSweep 结构性不 reject（内部失败只
+  // warn/error 留痕），await 返回后启动主路径照常继续。
+  await startupSweep(getPiAgentDir, logger)
 
   // u1b（crash-forensics-and-watchdog D1）：runtime 台账单例初始化。位置与时序对齐上方
   // initLogger（同处于组合根最早期、数据目录 getDataDir() 可用性已由 initLogger 验证）；
