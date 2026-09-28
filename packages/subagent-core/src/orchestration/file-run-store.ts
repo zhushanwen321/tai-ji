@@ -530,6 +530,9 @@ export async function runRetentionMaintenanceRound(
  * - loadAll：扫 <dataRoot>/workflow-state/*.jsonl，每文件从尾向头取第一条形状
  *   有效的快照行；损坏行（JSON.parse 失败 / 形状校验不过 / 版本不匹配）跳过并
  *   warn——单行损坏不拖垮整个 run 的恢复（与 pi 壳 kill-9 恢复同容忍度）。
+ *   目录读错分通道（idle-gc 退役 §3.1 规格 2）：ENOENT = 空集正常态；EACCES/EIO
+ *   等真 IO 故障上抛（recoverCrashedRuns 的 @throws 契约本就要求 loadAll 失败
+ *   上抛宿主裁决——此前 EACCES 被裸 catch 吞成空集是偏离契约的吞错）。
  *   版本衔接（快照 codec 归 run-snapshot.ts 单源，D4）：存量无 v 行按当前版本
  *   宽容读、写入恒补 v、v 不匹配跳过 + warn（三裁决明细见 parseLine 注释）。
  * - stateFilePath：纯路径计算（<状态目录>/<runId>.jsonl），不建目录。状态目录 =
@@ -578,7 +581,13 @@ export class FileRunStore implements RunStore {
     let files: string[];
     try {
       files = await readdir(this.stateDir());
-    } catch {
+    } catch (err) {
+      if (!isEnoentError(err)) {
+        // 读错分通道（idle-gc 退役 §3.1 规格 2）：EACCES/EIO 等真 IO 故障上抛给
+        // 扫描层（枚举/启动扫描 error 留痕承接）——静默折叠成空集会让持续 IO
+        // 故障伪装成「0 个 run 的成功扫描」。
+        throw err;
+      }
       // 目录不存在 = 从未持久化过（首启/干净环境），空集是正常态不是错误。
       return [];
     }

@@ -44,7 +44,8 @@ import {
 // [W1 / D1] 收编追加的终态条目构造（字段集单源在 pump 的 v2 条目接驳段）。
 // [W2/V1 D1] 收编追加的记录动作走 settleRunAccounting 终局记录原语（journal 帧 +
 // manifest 两件单点）+ (outcome, errorCode) → DoneReason 联合派生单点；
-// scan 走 pump 的 scanRunEvents（模块 journal 单写者域——帧落账同域，证据面一致）。
+// scan 走 pump 的 scanRunEvents（journal 单写者域——帧落账同域，证据面一致；
+// idle-gc 退役决策 2 起 journal 目录支持 per-call 参数注入，缺省仍模块锚）。
 import {
   buildWorkflowRecordSettledEntryData,
   runSettledOutcomeToDoneReason,
@@ -207,6 +208,13 @@ export interface AdoptInterruptedRunOptions {
    * 语义）。缺省 0 = 立即收编（kill-9 重启场景——活体集未命中的静止流即收编）。
    */
   graceWindowMs?: number;
+  /**
+   * journal 目录（idle-gc 退役 §3.3 决策 2 目录参数化）：runtime 侧启动扫描注入
+   * ——调用进程 cwd/env 与落盘目录不相交，scanRunEvents / manifest 证据面 /
+   * settleRunAccounting dispatch 链按它解析。缺省 = 模块锚
+   * （resolvePiWorkflowStateDir 三层解析），pi 壳既有调用点零改动。
+   */
+  journalDir?: string;
   /** 活跃保护集（本进程活体 runId）——活跃 run 事件流静默不判死，永不收编。 */
   activeRunIds?: ReadonlySet<string>;
   /**
@@ -235,9 +243,10 @@ export type AdoptInterruptedRunOutcome =
   /** 空 journal（无事件证据——从未落账或已过保留期清理）。 */
   | "skippedMissing";
 
-/** 收编 manifest 证据面目录（模块 journal 同源锚；测试防线形态返回 undefined）。 */
-function resolveManifestDirForAdopt(): string | undefined {
-  return runEventJournalDirOf();
+/** 收编 manifest 证据面目录（模块 journal 同源锚；`journalDir` = per-call 目录
+ *  （决策 2——runtime 侧扫描注入，缺省模块锚）；测试防线形态返回 undefined）。 */
+function resolveManifestDirForAdopt(journalDir?: string): string | undefined {
+  return runEventJournalDirOf(journalDir);
 }
 
 /**
@@ -246,9 +255,10 @@ function resolveManifestDirForAdopt(): string | undefined {
  *
  * [W2/V1 D1] 记录动作统一走终局记录原语：run-settled 写入经 dispatchRunTrigger
  * per-run 串行队列（冷路径同走队列——离线收编无并发竞争成本），scan/manifest
- * 走模块 journal 单写者域（与帧落账同源，证据面一致）；三面证据前置是原语裁决点
- * 的前置防御（跨进程防双帧），表内转移 fail-fast 让位（IllegalTransitionError →
- * skippedTerminal）是进程内第二道幂等。
+ * 走模块 journal 单写者域（与帧落账同源，证据面一致；journal 目录经 opts.journalDir
+ * per-call 注入，idle-gc 退役决策 2——runtime 侧扫描形态，缺省模块锚）；三面证据
+ * 前置是原语裁决点的前置防御（跨进程防双帧），表内转移 fail-fast 让位
+ *（IllegalTransitionError → skippedTerminal）是进程内第二道幂等。
  * [W2 D3] outcome 缺省 "interrupted"（被动终局唯一权威表达）；条目 reason 经
  * (outcome, errorCode) 联合派生单点（D5 五处统一）。
  *
@@ -269,7 +279,10 @@ export async function adoptInterruptedRun(
   opts?: AdoptInterruptedRunOptions,
 ): Promise<AdoptInterruptedRunOutcome> {
   const now = opts?.now ?? Date.now();
-  const events = await scanRunEvents(runId);
+  // journal 目录（决策 2 目录参数化）：per-call 显式目录优先，缺省 = 模块锚——
+  // scan / manifest 证据面 / settleRunAccounting dispatch 链三处统一按它解析。
+  const journalDir = opts?.journalDir;
+  const events = await scanRunEvents(runId, journalDir);
   if (events.length === 0) return "skippedMissing";
   if (opts?.activeRunIds?.has(runId)) return "skippedActive";
   const state = foldEvents(events, runId);
@@ -278,7 +291,7 @@ export async function adoptInterruptedRun(
   // manifest 面（abandon 旧路径写的 manifest / 活体物化但 journal 已被裁的组合）。
   // dir=""（测试 NoopJournal 防线形态）跳过 manifest 证据——帧面已由 scan 空流
   // skippedMissing 承接，与「零写域不做真目录读」红线一致。
-  const manifestDir = resolveManifestDirForAdopt();
+  const manifestDir = resolveManifestDirForAdopt(journalDir);
   if (manifestDir !== undefined) {
     const existingManifest = await readRunTerminalManifest(manifestDir, runId);
     if (existingManifest !== null) return "skippedTerminal";
@@ -308,7 +321,7 @@ export async function adoptInterruptedRun(
         ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
         settledAt: now,
       },
-      { workflowName },
+      { workflowName, journalDir },
     );
   } catch (err) {
     if (err instanceof IllegalTransitionError) return "skippedTerminal";

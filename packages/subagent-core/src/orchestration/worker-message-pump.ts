@@ -526,16 +526,20 @@ function enqueueRunDispatch<T>(runId: string, task: () => Promise<T>): Promise<T
   return next;
 }
 
-/** journal 实例缓存与测试注入点（生产目录 = run store 旁 workflow-state，惰性解析）。 */
+/** journal 实例缓存（按目录 keyed）与测试注入点（生产目录 = run store 旁
+ *  workflow-state，惰性解析）。keyed 缓存（idle-gc 退役 §3.3 决策 2）：per-call
+ *  目录参数化后同进程可并存多个目录的 journal 实例（runtime 启动扫描收编 ≠ pi 壳
+ *  模块锚目录），单值缓存会让两目录互相踢缓存——Map 按目录各持一份，单写者纪律
+ *  不受影响（同一 run 恒同目录）。 */
+const journalCache = new Map<string, RunEventJournal>();
 let runEventJournalDirForTest: string | undefined;
-let cachedJournal: { dir: string; journal: RunEventJournal } | undefined;
 let noopJournalWarned = false;
 
 /** 测试钩子：注入 journal 目录 + 清空活体态缓存与终局记录注册表（run-events.test
- *  同款 teardown 纪律）。 */
+ *  同款 teardown 纪律；连带清按目录 keyed 的 journal 缓存——换目录注入即换实例）。 */
 export function setRunEventJournalDirForTest(dir: string | undefined): void {
   runEventJournalDirForTest = dir;
-  cachedJournal = undefined;
+  journalCache.clear();
   liveRunStates.clear();
   settledRunRecords.clear();
 }
@@ -558,13 +562,29 @@ class NoopRunEventJournal implements RunEventJournal {
   }
 }
 
-function resolveRunEventJournal(): { dir: string; journal: RunEventJournal } {
+/** 按目录取（惰性创建）journal 实例（keyed 缓存单点）。 */
+function journalForDir(dir: string): RunEventJournal {
+  let journal = journalCache.get(dir);
+  if (journal === undefined) {
+    journal = createRunEventJournal(dir);
+    journalCache.set(dir, journal);
+  }
+  return journal;
+}
+
+/**
+ * journal 目录解析（idle-gc 退役 §3.3 决策 2 目录参数化）：显式 `journalDir`
+ * 优先（runtime 侧收编链注入——调用进程 cwd/env 与落盘目录不相交的形态，目录
+ * 即权威）；缺省 = 模块锚三层解析（测试注入 / vitest 防线 / 生产推导），pi 壳
+ * 既有调用点零改动。显式目录不受 VITEST 防线拦截（与 setRunEventJournalDirForTest
+ * 同信任级——显式注入即显式落点，红线护的是「未注入却落到真实推导路径」）。
+ */
+function resolveRunEventJournal(journalDir?: string): { dir: string; journal: RunEventJournal } {
+  if (journalDir !== undefined) {
+    return { dir: journalDir, journal: journalForDir(journalDir) };
+  }
   if (runEventJournalDirForTest !== undefined) {
-    cachedJournal ??= {
-      dir: runEventJournalDirForTest,
-      journal: createRunEventJournal(runEventJournalDirForTest),
-    };
-    return cachedJournal;
+    return { dir: runEventJournalDirForTest, journal: journalForDir(runEventJournalDirForTest) };
   }
   // 测试防线（「测试禁止触碰真实数据目录」红线）：vitest 环境未显式注入目录时禁写
   // 真实推导路径——落 no-op journal + 一次性 warn 留痕。生产（无 VITEST env）不受
@@ -580,13 +600,13 @@ function resolveRunEventJournal(): { dir: string; journal: RunEventJournal } {
     return { dir: "", journal: new NoopRunEventJournal() };
   }
   const dir = resolvePiWorkflowStateDir();
-  cachedJournal ??= { dir, journal: createRunEventJournal(dir) };
-  return cachedJournal;
+  return { dir, journal: journalForDir(dir) };
 }
 
-/** journal fold：scan + 逐事件 transition（不传 ctx——run-events.ts fold 契约）。 */
-async function foldRunState(runId: string): Promise<RunState> {
-  const { journal } = resolveRunEventJournal();
+/** journal fold：scan + 逐事件 transition（不传 ctx——run-events.ts fold 契约；
+ *  journalDir = dispatch 源携带的 per-call 目录，缺省模块锚）。 */
+async function foldRunState(runId: string, journalDir?: string): Promise<RunState> {
+  const { journal } = resolveRunEventJournal(journalDir);
   const events = await journal.scan(runId);
   return foldRunEventFrames(events, (err, lastType) => {
     // journal 坏链（历史帧与当前表不兼容）：投影失效模式 = 保守停在最近一致态
@@ -614,17 +634,19 @@ export function runEventJournalPathOf(runId: string): string | undefined {
 
 /**
  * run 事件 journal / manifest 同目录锚（[W2/V1] 收编原语的 manifest 证据面读点；
- * 测试防线（NoopJournal 形态 dir=""）返回 undefined——零写域不做真目录读）。
+ * `journalDir` = per-call 目录（决策 2 收编链注入，缺省模块锚）；测试防线
+ * （NoopJournal 形态 dir=""）返回 undefined——零写域不做真目录读）。
  */
-export function runEventJournalDirOf(): string | undefined {
-  const { dir } = resolveRunEventJournal();
+export function runEventJournalDirOf(journalDir?: string): string | undefined {
+  const { dir } = resolveRunEventJournal(journalDir);
   return dir === "" ? undefined : dir;
 }
 
 /** [U4] run 事件 journal 只读访问器（成员复用池 fold 重建的读通道，决策 9）——池侧
- *  不自建 journal 实例，防绕过本文件的单写者纪律与 no-op 测试防线。 */
-export async function scanRunEvents(runId: string): Promise<readonly WorkflowRunEvent[]> {
-  const { journal } = resolveRunEventJournal();
+ *  不自建 journal 实例，防绕过本文件的单写者纪律与 no-op 测试防线。`journalDir`
+ *  = per-call 目录（runtime 侧收编扫描注入，缺省模块锚）。 */
+export async function scanRunEvents(runId: string, journalDir?: string): Promise<readonly WorkflowRunEvent[]> {
+  const { journal } = resolveRunEventJournal(journalDir);
   return journal.scan(runId);
 }
 
@@ -642,7 +664,7 @@ const memberReusePoolIo: MemberReusePoolIo = {
  * 非终局，构不到这里）。ts 信封在合成时打点（transition 纯函数契约：
  * 时钟归调用侧）；seq 由 journal.append 分配（入参即 input 形态）。
  */
-function journalEventOf(trigger: TransitionTrigger): WorkflowRunEventInput {
+function journalEventOf(trigger: TransitionTrigger, journalDir?: string): WorkflowRunEventInput {
   if (JOURNAL_EVENT_TYPES.has(trigger.type)) {
     return trigger as WorkflowRunEventInput;
   }
@@ -651,7 +673,7 @@ function journalEventOf(trigger: TransitionTrigger): WorkflowRunEventInput {
       type: "run-settled",
       outcome: "cancelled",
       ...(trigger.reason !== undefined ? { reason: trigger.reason } : {}),
-      artifactsDir: resolveRunEventJournal().dir,
+      artifactsDir: resolveRunEventJournal(journalDir).dir,
       ts: Date.now(),
     };
   }
@@ -689,6 +711,7 @@ async function appendTransition(
   state: RunState,
   trigger: TransitionTrigger,
   ctx?: TransitionContext,
+  journalDir?: string,
 ): Promise<TransitionResult> {
   const { state: next, outputs } = transition(state, trigger, ctx);
   // 活体态先于 journal（内存权威先推进；取证证据随后落盘）。terminal 删条目 =
@@ -703,13 +726,13 @@ async function appendTransition(
     liveRunStates.set(run.runId, next);
   }
   if (outputs.includes("journal-append")) {
-    const { journal } = resolveRunEventJournal();
-    await journal.append(run.runId, journalEventOf(trigger));
+    const { journal } = resolveRunEventJournal(journalDir);
+    await journal.append(run.runId, journalEventOf(trigger, journalDir));
   }
   // [P1b-2] manifest-write 终局投影：manifest（<runId>.json）落 outcome/errorCode
   //（D5-④ 输出动作统一——执行面收口在本函数，persistTerminalProjection）。
   if (outputs.includes("manifest-write")) {
-    const projectionDir = resolveRunEventJournal().dir;
+    const projectionDir = resolveRunEventJournal(journalDir).dir;
     if (projectionDir === "") {
       // 测试防线（与 no-op journal 同族）：vitest 无注入时禁写真实目录——同步 warn
       // 后跳过，不进入 async 调用（await 边沿会把终局 coda 尾链推出既有测试的
@@ -719,7 +742,7 @@ async function appendTransition(
           "manifest not written (prevents writes to the real workflow-state dir)",
       );
     } else {
-      await persistTerminalProjection(run, next, trigger, projectionDir);
+      await persistTerminalProjection(run, next, trigger, projectionDir, journalDir);
     }
   }
   return { state: next, outputs };
@@ -750,6 +773,7 @@ async function persistTerminalProjection(
   state: RunState,
   trigger: TransitionTrigger,
   dir: string,
+  journalDir?: string,
 ): Promise<void> {
   const outcome = state.outcome;
   if (outcome === undefined) {
@@ -777,7 +801,7 @@ async function persistTerminalProjection(
     trigger.type === "run-settled" ? trigger.errorCode : undefined;
   // [D5 诊断引用落账] 失败终局才投影取证指针（成功/cancelled 不写——字段语义与
   // AskSettledEvent.stderrTeePath 同一失败伴随纪律）。
-  const stderrTeePath = outcome === "failed" ? await lastStderrTeePathFromJournal(run.runId) : undefined;
+  const stderrTeePath = outcome === "failed" ? await lastStderrTeePathFromJournal(run.runId, journalDir) : undefined;
   const settledAt = Date.now();
   try {
     await writeRunTerminalManifest(dir, {
@@ -806,9 +830,9 @@ async function persistTerminalProjection(
  * 终局时，本字段可能指向与终局无关的 ask 的 tee（结构性精确不可得——run-settled
  * 载荷无 ask 关联键，词表边界见 D5 表）；单 ask 失败（主流场景）精确。
  */
-async function lastStderrTeePathFromJournal(runId: string): Promise<string | undefined> {
+async function lastStderrTeePathFromJournal(runId: string, journalDir?: string): Promise<string | undefined> {
   try {
-    const { journal } = resolveRunEventJournal();
+    const { journal } = resolveRunEventJournal(journalDir);
     const events = await journal.scan(runId);
     for (let i = events.length - 1; i >= 0; i--) {
       const event = events[i];
@@ -837,6 +861,14 @@ export interface RunDispatchSource {
   runId: string;
   /** terminal 投影（manifest workflowName）的载荷源；runId 键投递（armed 回执）可缺省。 */
   spec?: RunSpec;
+  /**
+   * 本投递的 journal 目录锚（idle-gc 退役 §3.3 决策 2 目录参数化）：dispatch 链
+   * （fold / 帧落账 / manifest 投影）按它解析 journal 目录。runtime 侧冷路径收编
+   * 注入（调用进程 cwd/env 与落盘目录不相交）；缺省 = 模块锚（活体链既有调用点
+   * 零改动）。安全性：per-run 投递队列按 runId 串行 + 同一 run 恒同目录——per-call
+   * 目录不破坏「事件 journal 序 = 调用序」的单写者纪律。
+   */
+  journalDir?: string;
 }
 
 /**
@@ -865,8 +897,8 @@ async function dispatchRunTriggerInner(
   ctx?: TransitionContext,
 ): Promise<TransitionResult> {
   let state = liveRunStates.get(run.runId);
-  if (state === undefined) state = await foldRunState(run.runId);
-  return appendTransition(run, state, trigger, ctx);
+  if (state === undefined) state = await foldRunState(run.runId, run.journalDir);
+  return appendTransition(run, state, trigger, ctx, run.journalDir);
 }
 
 /**
@@ -1059,6 +1091,9 @@ function summarizeRetryReason(result: AgentResult): string {
 // - manifest 半边：spec 携带形态（活体 / 崩溃恢复 v2）由 dispatch 链 outputs
 //   执行（persistTerminalProjection）；runId 键投递（冷路径收编）由本原语补写
 //   （workflowName 载荷从 run-created 帧取，调用方传入）。
+// - journal 目录（idle-gc 退役 §3.3 决策 2 目录参数化）：opts.journalDir 显式
+//   传入时 artifactsDir / manifest / dispatch 链 fold 全按它解析（runtime 启动
+//   扫描收编——调用进程 cwd/env 与落盘目录不相交）；缺省 = 模块锚。
 //
 // 幂等两道（D1）：调用方三面证据前置（收编路径——adoptInterruptedRun 实装：
 // journal fold terminal / manifest 在 / 终态条目在）+ 表内转移 fail-fast 让位
@@ -1075,21 +1110,27 @@ export async function settleRunAccounting(
   opts?: {
     /** manifest workflowName 载荷（冷路径 runId 键投递无 spec——从 run-created 帧取后传入；缺省不补写）。 */
     workflowName?: string;
+    /** journal 目录（决策 2 目录参数化——收编链 artifactsDir / manifest / dispatch
+     *  链按它解析；缺省 = 模块锚，pi 壳既有调用点零改动）。 */
+    journalDir?: string;
   },
 ): Promise<void> {
-  await dispatchRunTrigger(run, {
+  // journalDir 合入投递源（dispatch 链 fold / 帧落账 / manifest 投影统一按它解析）
+  const source: RunDispatchSource =
+    opts?.journalDir !== undefined ? { ...run, journalDir: opts.journalDir } : run;
+  await dispatchRunTrigger(source, {
     type: "run-settled",
     outcome: record.outcome,
     ...(record.errorCode !== undefined ? { errorCode: record.errorCode } : {}),
     ...(record.reason !== undefined ? { reason: record.reason } : {}),
-    artifactsDir: resolveRunEventJournal().dir,
+    artifactsDir: resolveRunEventJournal(opts?.journalDir).dir,
     ts: record.settledAt,
   });
   if (run.spec === undefined && opts?.workflowName !== undefined) {
     // 冷路径 manifest 补写（persistTerminalProjection 对 spec 缺省形态跳过后由
     // 本原语承接；失败 = error 留痕不抛——manifest 是投影面，帧已在 journal，
     // 对齐「取证面失败不阻断终局 coda」纪律）。
-    const dir = resolveRunEventJournal().dir;
+    const dir = resolveRunEventJournal(opts?.journalDir).dir;
     if (dir === "") return; // 测试防线（NoopRunEventJournal 形态）——与帧零写同域
     try {
       await writeRunTerminalManifest(dir, {
