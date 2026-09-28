@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -1264,6 +1264,211 @@
       "owner": "docs",
       "authority": "docs/constraints.json",
       "note": "设计文档同步纪律（C-proc-10）的机器门：pre-commit 按 docs/architecture/ 或映射源码路径触发（install-hooks.sh DOC_SYMBOL_DRIFT 段）。本 rule 登记脚本资产的 coverage（剪枝清单 = node_modules/.git/dist/coverage/test-results/playwright-report/.taiji-harness/resources/.zcode——.zcode 为 workflow 引擎 gitignored 工作区，agents 手工维护目录不受影响）；改动脚本扫描面/剪枝清单/映射表时跑 node scripts/check-doc-symbol-drift.mjs 冒烟（exit 0 + 四段 OK 行）"
+    },
+    {
+      "id": "E2E-RESUME-01",
+      "summary": "workflow run 断点续跑确定性场景族（scenario-01…25 无门段：主链回放 / 拒绝族 / 三档恢复 / 预算 / 重建保真 / D14 args 校验）+ record-mode 夹具族 + 壳层与 core 侧 resume 单测（进程内真 resumeRun + faux runner，零 token）",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/**",
+        "packages/subagent-core/src/orchestration/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-01-main-chain-resume.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-02-script-drift-rejection.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-03-terminal-resume-rejection.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-04-resume-reentrancy.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-05-parallel-wave.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-06-record-rebuild-fidelity.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-07-failed-terminal-rejection.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-08-orphan-reap.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-09-cross-process-resume.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-10-nondeterministic-resume.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-11-pipeline-value-dep.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-12-session-switch-keepalive.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-13-schema-hash-stability.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-14-trace-fidelity.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-15-inprocess-double-resume.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-16-cross-day-budget.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-17-resume-then-abort.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-18-corruption-rejection.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-19-orphan-reap-legacy.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-20-nested-false-positive.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-21-retry-budget.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-22-three-tier-recovery.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-23-phase-statemachine.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-24-args-mismatch-rejection.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-25-host-projection.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/record-mode/corruption-rejection.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/record-mode/rebuild-fidelity.test.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/record-mode/helpers.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/record-mode/scenario-kit.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/record-mode/driver-resume.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/record-mode/driver-session-reader.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/interface/__tests__/tool-workflow-resume.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/interface/__tests__/commands-resume.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/subagent-core/src/orchestration/__tests__/resume-orchestration.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/subagent-core/src/orchestration/__tests__/resume-replay-validation.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/subagent-core/src/orchestration/__tests__/resume-tier-budget.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "cd extensions/universal/subagent-workflow && npx vitest run src/__tests__/scenario- src/__tests__/record-mode/ src/interface/__tests__/tool-workflow-resume.test.ts src/interface/__tests__/commands-resume.test.ts && cd ../../packages/subagent-core && npx vitest run src/orchestration/__tests__/resume-orchestration.test.ts src/orchestration/__tests__/resume-replay-validation.test.ts src/orchestration/__tests__/resume-tier-budget.test.ts",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（来源设计 workflow-run-resume-revision §4 e2e 影响面「场景 1-25 新族」行——设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-MODELREF-01 同款先例；登记零实现依赖复审 F3 的校验由 u4b 完成收尾）。触发面 = resume/record 链路（壳 interface/jsonl-run-store + core orchestration/resume-run/run-events）改动时按改动范围跑。分层形态：进程内真 resumeRun + 真 WorkerHost + 真 record IO，LLM 层 = faux runner（AgentRunner 协议替身，派发捕获 + 行为队列），崩溃前置态经生产 journal 写入器 seed——scenario-kit.ts 头注「写侧载荷前置缺口声明」（terminal-actions dispatch 载荷缺口登记在 u2 deviations）。场景 24（D14 args 不一致拒绝）驱动壳层入口 actionResume（D14 校验唯一所在层），其余场景直驱 core resumeScenarioRun。scenario-22/25 各含环境门段（节点级默认 skip），门段触发面拆分至 E2E-RESUME-02/03（同 asset 重复引用，E2E-EQUIV-01/02 拆分先例）；record-mode 两 spec（损坏拒绝/重建保真）与夹具四件（helpers/scenario-kit/driver-resume/driver-session-reader）随族登记——driver-* 为 tsx 子进程 driver（D16 ③ 跨包断言载体）。core 三件 = resumeRun 编排原语 / replay 校验增强 / 三档判定与预算算式；interface 两件 = workflow tool resume action（D14 单元层）+ /workflows 命令 resume verb 契约"
+    },
+    {
+      "id": "E2E-RESUME-02",
+      "summary": "场景 22 三档恢复真机冒烟段（TAIJI_PI_LIVE 门）：真实 pi 会话文件面的档位判定 + 档 1 补收零派发 + 档 2 原会话续写表面不变",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/__tests__/scenario-22-three-tier-recovery.test.ts",
+        "packages/subagent-core/src/orchestration/resume-run.ts"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-22-three-tier-recovery.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "cd extensions/universal/subagent-workflow && TAIJI_PI_LIVE=1 TAIJI_PI_LIVE_SESSION_DIR=<D3 剧本采集的真实会话文件目录> npx vitest run src/__tests__/scenario-22-three-tier-recovery.test.ts（env 缺省时门段 skip 不 fail，节点级只跑确定性段）",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "E2E-RESUME-01 同资产（scenario-22）的门段触发面拆分（trigger 单值纪律）。设计 §4 场景 22 行：「档位判据依赖真实 pi 会话文件语义，本场景必须 TAIJI_PI_LIVE 真机冒烟执行」。门段输入 = D3 剧本采集的真实 pi 会话文件（TAIJI_PI_LIVE_SESSION_DIR 指向，tier1.jsonl 完整回复 / tier2.jsonl 悬空 prompt），resume 链仍为 faux runner——真实面在档位判据的文件语义与 pi 侧续写表面（不新建会话文件、原会话续写追加），非真实 LLM 轮，layer 记 L2.5。编排侧确定性断言（三档判定替身形态）归 E2E-RESUME-01 常规跑"
+    },
+    {
+      "id": "E2E-RESUME-03",
+      "summary": "场景 25 中断 run 宿主投影真机段（TAIJI_E2E_HOST_PROJECTION_CDP 门）：dev app GUI workflow 列表「已中断（可续跑）」+ resume 后恢复 running 投影",
+      "scope": [
+        "extensions/universal/subagent-workflow/src/__tests__/scenario-25-host-projection.test.ts",
+        "packages/shared/src/workflow.ts",
+        "packages/runtime/src/services/session/journal-projection.ts",
+        "packages/renderer/src/components/panel/tray/tray-tone.ts"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-25-host-projection.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "前置：TAIJI_DEV_BACKGROUND=1 pnpm dev（AGENTS.md 前端调试规约）+ node apps/electron/scripts/dev-instance.mjs --print 取本实例 CDP 端口，剧本在窗口内构造 interrupted run。执行：cd extensions/universal/subagent-workflow && TAIJI_E2E_HOST_PROJECTION_CDP=<cdp-port> npx vitest run src/__tests__/scenario-25-host-projection.test.ts（env 缺省时门段 skip 不 fail）",
+      "owner": "extensions/universal/subagent-workflow",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "E2E-RESUME-01 同资产（scenario-25）的门段触发面拆分。设计 §4 场景 25 行：真机 dev app 环境断 GUI workflow 列表；断言面 = 列表文案字面量「已中断（可续跑）」（非「运行中」）+ resume 后恢复 running 投影——色调已由 state-tone-lock L1 锁死，托盘桶归类（interrupted 计 ended 桶）不进真机断言（D2 宿主投影④登记不覆盖理由）。scope = 文案标签单源链（shared WORKFLOW_RUN_OUTCOME_LABELS → journal-projection 投影 → tray-tone 消费）+ spec 自身。数据面断言（中断形态条目契约 / 概览链三态 / session-reader 家族链）归 E2E-RESUME-01 常规跑，无门"
     }
   ]
 }
