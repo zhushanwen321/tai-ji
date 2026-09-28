@@ -8,6 +8,7 @@
  * - /workflow run <name> → 用 workflow tool { action: "run" }
  * - /workflow list → 用 workflow tool { action: "status" }
  * - /workflow abort <run-id> → 用 workflow tool { action: "abort" }
+ * - /workflow resume <run-id> → 用 workflow tool { action: "resume" }（interrupted 态断点续跑）
  * - /workflow save <name> → 用 workflow-script tool { action: "save" }
  * - /workflow delete <name> → 用 workflow-script tool { action: "delete" }
  *
@@ -22,7 +23,7 @@
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
-import { abortRun, getSubagentService } from "@zhushanwen/subagent-core";
+import { abortRun, getSubagentService, resumeRun } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import { parseWorkflowRpcCommand, type WorkflowRpcAction } from "./command-actions.ts";
 import { createWorkflowsView, type ViewActions } from "./views/WorkflowsView.ts";
@@ -49,6 +50,7 @@ const UNKNOWN_STATUS_WEIGHT = 9;
  *
  * 行为：
  * - 无 UI（RPC/print/json 模式）→ notify 提示（降级，不打开 TUI）
+ * - `/workflows resume <runId>`（TUI）→ 执行断点续跑后 notify，不打开面板
  * - `/workflows <runId>` 或前缀匹配唯一 run → 直接打开该 run 的 view
  * - `/workflows`（无参）：
  * · 0 runs → notify "No workflows"
@@ -60,7 +62,7 @@ const UNKNOWN_STATUS_WEIGHT = 9;
  *
  * @param api ExtensionAPI
  * @param getRuns 获取当前 session 的 runs（Map<runId, WorkflowRun>）
- * @param deps LauncherDeps（lifecycle abort 用）
+ * @param deps LauncherDeps（lifecycle abort / resumeRun 用）
  */
 export function registerWorkflowsCommand(
   api: ExtensionAPI,
@@ -68,7 +70,7 @@ export function registerWorkflowsCommand(
   deps: LauncherDeps,
 ): void {
   api.registerCommand("workflows", {
-    description: "Open workflow panel. /workflows [runId] | /workflows abort <runId>",
+    description: "Open workflow panel. /workflows [runId] | /workflows abort <runId> | /workflows resume <runId>",
     getArgumentCompletions(prefix: string) {
       const trimmed = prefix.trimStart();
       const parts = trimmed.split(/\s+/).filter(Boolean);
@@ -77,11 +79,12 @@ export function registerWorkflowsCommand(
       if (parts.length <= 1) {
         return [
           { label: "abort", value: "abort ", description: "Abort a workflow run" },
+          { label: "resume", value: "resume ", description: "Resume an interrupted workflow run" },
         ].filter((opt) => opt.label.startsWith(trimmed.toLowerCase()));
       }
 
       // 第二级：lifecycle 动词后补全当前 session 的 runId
-      if (parts[0] === "abort") {
+      if (parts[0] === "abort" || parts[0] === "resume") {
         try {
           const runs = sortedRuns(getRuns());
           if (runs.length === 0) return null;
@@ -111,8 +114,30 @@ export function registerWorkflowsCommand(
         return;
       }
 
+      // TUI 动词命令：/workflows resume <runId>——执行断点续跑后 notify，不打开面板
+      // （abort 动词在 TUI 侧无既有通道，不在此顺手扩——resume 是本批接入面）
+      const trimmedArgs = args.trim();
+      const [verb, ...rest] = trimmedArgs.split(/\s+/).filter(Boolean);
+      if (verb === "resume") {
+        const runId = rest[0];
+        if (!runId) {
+          ctx.ui.notify("Usage: /workflows resume <runId>", "warning");
+          return;
+        }
+        try {
+          await resumeRun(runId, deps);
+          ctx.ui.notify(
+            `Workflow ${runId}: resuming — completed calls replay at zero token cost, unfinished calls re-dispatched`,
+            "info",
+          );
+        } catch (err) {
+          ctx.ui.notify(`Failed to resume workflow ${runId}: ${toErrorMessage(err)}`, "warning");
+        }
+        return;
+      }
+
       // 直接按 runId / 前缀匹配打开
-      const directRunId = args.trim();
+      const directRunId = trimmedArgs;
       if (directRunId) {
         await openByRunId(directRunId, getRuns, ctx, deps);
         return;
@@ -132,7 +157,11 @@ export function registerWorkflowsCommand(
  * 各 action 语义：
  * - abort → 调 lifecycle abortRun，成功/失败均 notify（不向上抛）
  * - lifecycle-removed → 已移除的 verb（pause/resume），给定制指引而非 Usage
- *   （F3 定稿——提示语义优先于 missing-id：run 一次性生命周期后不可挂起）
+ *   （F3 定稿——提示语义优先于 missing-id：run 一次性生命周期后不可挂起）。
+ *   注：resume verb 的 RPC 通道接线（解析词表在 command-actions.ts，领地外）
+ *   未随 U3 落地——resume 的用户入口 = workflow tool（action:"resume"）与 TUI
+ *   命令（/workflows resume <runId>），见 handler TUI 分支；RPC removed 提示的
+ *   文案与 resume 能力的矛盾随编排层的 command-actions 词表适配一并解决。
  * - lifecycle-missing-id → Usage 提示
  * - noop → 无 action 或未知 action：GUI 端已屏蔽此 command 入口，此处兜底
  */

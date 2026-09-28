@@ -1,5 +1,5 @@
 /**
- * Workflow Extension — workflow tool（3 actions，FR-5 tool 收口）。
+ * Workflow Extension — workflow tool（4 actions，FR-5 tool 收口）。
  *
  * 合并原 tool-workflow.ts + tool-workflow-run.ts 为单 tool。
  *
@@ -7,12 +7,18 @@
  * - run: registry.getPath → runWorkflow（直接启动，无需用户确认）
  * - status: 列出 runs（deps.runs）
  * - abort: 调 abortRun
+ * - resume: 调 resumeRun（interrupted 态 run 断点续跑，D14 args 校验在入口）
  *
- * **restart 不包含**（D-9 废弃）；**pause/resume 不包含**（一次性生命周期——run
- * 不可挂起，提前停止用 abort，要新结果开新 run）。
+ * **restart 不包含**（D-9 废弃）；**pause 不包含**（一次性生命周期——run 不可
+ * 挂起，提前停止用 abort，要新结果开新 run）。**resume 是中断恢复不是挂起恢复**：
+ * 仅 interrupted 态 run 可续（崩溃收编 / terminate 被动失联后的断点续跑，
+ * workflow-run-resume-revision U3/D14），不是把活跃 run 暂停再继续。
  *
  * 层归属：Interface。依赖 Pi SDK + Engine lifecycle/launcher + helpers。
  */
+
+import { readFileSync } from "node:fs";
+import os from "node:os";
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
@@ -25,7 +31,8 @@ import { type Static, Type } from "typebox";
 import { SLUG_MAX_LENGTH } from "@zhushanwen/subagent-core";
 import { THINKING_ORDER } from "@zhushanwen/subagent-core";
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
-import { abortRun, runWorkflow } from "@zhushanwen/subagent-core";
+import { abortRun, resumeRun, runWorkflow } from "@zhushanwen/subagent-core";
+import type { ResumeRunOptions } from "@zhushanwen/subagent-core";
 import type { RunStore } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 // [D8 创建期拒单] 模型目录分类裁决 + 宿主注入的模型清单投影访问器（既有投影面：
@@ -66,12 +73,14 @@ import {
 export type WorkflowAction =
   | "run"
   | "status"
-  | "abort";
+  | "abort"
+  | "resume";
 
 const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
   "run",
   "status",
   "abort",
+  "resume",
 ];
 
 const WorkflowParams = Type.Object({
@@ -88,15 +97,18 @@ const WorkflowParams = Type.Object({
     }),
   ),
   runId: Type.Optional(
-    Type.String({ description: "Workflow run ID (abort action)" }),
+    Type.String({ description: "Workflow run ID (abort / resume action; find it via action:status)" }),
   ),
   args: Type.Optional(
     Type.Record(Type.String(), Type.Unknown(), {
-      description: "Arguments passed to workflow as key-value pairs (run action)",
+      description:
+        "Arguments passed to workflow as key-value pairs (run action). For resume: optional — when passed, " +
+        "must deep-equal the run's original args (except the internal _runId key); mismatch is rejected with " +
+        "the differing fields listed. Omit to reuse the original args.",
     }),
   ),
   tokens: Type.Optional(Type.Number({ description: "Max token budget — ONLY set when user explicitly requests a limit; omit = unlimited (default)" })),
-  time: Type.Optional(Type.Number({ description: `Max time budget in ms — ONLY set when user explicitly requests a limit; omit = unlimited (default; hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry)` })),
+  time: Type.Optional(Type.Number({ description: `Max time budget in ms — ONLY set when user explicitly requests a limit; omit = unlimited (default; hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry). For resume: the budget applied to the resumed execution (active time already spent by the run is counted against it; suspended time is not)` })),
   error: Type.Optional(
     Type.String({ description: "Error/reason message (optional, used with abort)" }),
   ),
@@ -172,7 +184,8 @@ interface RunSummary {
 export type WorkflowToolDetails =
   | ({ action: "run"; name: string } & RunStartDetails)
   | { action: "status"; runs: RunSummary[] }
-  | { action: "abort"; runId: string; status: string; reason?: string };
+  | { action: "abort"; runId: string; status: string; reason?: string }
+  | ({ action: "resume"; runId: string } & RunStartDetails);
 
 /** Result returned by the `workflow` tool's execute（公共骨架见 tool-result.ts）。 */
 type WorkflowExecuteResult = WorkflowToolResult<WorkflowToolDetails | undefined>;
@@ -180,8 +193,9 @@ type WorkflowExecuteResult = WorkflowToolResult<WorkflowToolDetails | undefined>
 // ── Tool registration ────────────────────────────────────────
 
 /**
- * 注册 workflow tool（3 actions: run / status / abort；pause/resume 已随一次性
- * 生命周期移除——enum 拒绝由 pi 核心校验拦截，见 F3）。
+ * 注册 workflow tool（4 actions: run / status / abort / resume；pause 已随一次性
+ * 生命周期移除——enum 拒绝由 pi 核心校验拦截，见 F3。resume = interrupted 态断点
+ * 续跑，不是挂起恢复）。
  *
  * @param pi ExtensionAPI
  * @param deps LauncherDeps（LifecycleDeps + registry）
@@ -201,9 +215,9 @@ export function registerWorkflowTool(
     name: "workflow",
     label: "Workflow",
     description:
-      "Execute and control workflows: run (start), status, abort.\n" +
+      "Execute and control workflows: run (start), status, abort, resume (continue an interrupted run).\n" +
       "Replaces workflow + workflow-run tools.",
-    promptSnippet: "Run, abort, or check workflow status",
+    promptSnippet: "Run, abort, resume, or check workflow status",
     promptGuidelines: [
       "PRIORITY: When user says 'workflow', 'run workflow', try run action FIRST.",
       "All listed workflows run DIRECTLY with action:run — refs/descriptions come from " +
@@ -212,11 +226,17 @@ export function registerWorkflowTool(
       "workflow-script generate for patterns already covered by available workflows.",
       "run: pass the workflow ref as name — ALWAYS the <location> absolute .js path from <available_workflows> (bare names are rejected with a not-found error listing locations).",
       "DO NOT bash sleep or poll status after starting — results appear automatically via notifyDone.",
-      "Runs are one-shot: there is no pause/resume — to stop a run early use abort; for a fresh result start a new run.",
+      "Runs are one-shot: there is no pause — to stop a run early use abort; for a fresh result start a new run. " +
+      "resume is ONLY for runs whose status is interrupted (crash or session-switch during execution): it replays " +
+      "completed calls from the record at zero token cost and continues where the run stopped. " +
+      "Do NOT resume a settled (done/failed/cancelled) run — start a new run instead.",
+      "resume: pass the SAME args as the original run (they are verified field-by-field; a mismatch is rejected " +
+      "with the differing fields listed). Omit args to reuse the original ones. Changed args = different intent = new run.",
       "Call shapes (JSON): " +
       "- run: {\"action\":\"run\",\"name\":\"<script>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\",\"thinkingLevel\":\"<level>\"}. " +
       "- status: {\"action\":\"status\"}. " +
-      "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"} (optional: {\"error\":\"<reason>\"}).",
+      "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"} (optional: {\"error\":\"<reason>\"}). " +
+      "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"time\":N} — args/time optional.",
       "Budget: Do NOT set tokens/time unless the user explicitly requests a limit. Built-in workflows run unlimited by default.",
       "Model/thinkingLevel: omit by default (inherit main agent's model). Only set model/thinkingLevel when the user explicitly requests a specific model or thinking depth for this run.",
       "Anti-patterns: Flattening args sub-fields (task/items/...) to the top level — they belong inside args. Calling {\"action\":\"run\"} without name.",
@@ -256,6 +276,9 @@ export function registerWorkflowTool(
             break;
           case "abort":
             result = await actionAbort(params, deps);
+            break;
+          case "resume":
+            result = await actionResume(params, deps);
             break;
           default: {
             // Exhaustiveness check — 新增 WorkflowAction 成员时未补 case，tsc 在此报错。
@@ -502,6 +525,191 @@ async function actionAbort(
     // "Error: " 前缀是 abortRun 失败的既有 LLM 可见形态，保持不变
     throwPrefixed("Error", err);
   }
+}
+
+// ── resume action（D14 args 校验 + resumeRun 接线）──────────
+
+/**
+ * D14 比对排除键：rfl 仪表向 spec.args 原地注入的稳定 `_runId`（lifecycle
+ * runWorkflow 注入面）——run 派发的机器字段，不属用户意图，比对前双侧剔除。
+ */
+const RESUME_ARGS_EXCLUDED_KEY = "_runId";
+
+/** record 流内 run-created 帧的 argsSummary 读取结果（D14 比对的数据源形态）。 */
+type HistoricalArgs =
+  | { kind: "args"; args: Record<string, unknown> }
+  | { kind: "absent" }
+  | { kind: "truncated" };
+
+/**
+ * record 行 → run-created 帧窄化（type 字面量判别 + argsSummary 透传；非该帧 /
+ * 非 object 返回 undefined——结构判别走运行时守卫，不做断言）。
+ */
+function asRunCreatedFrame(parsed: unknown): { argsSummary: unknown } | undefined {
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  if (!("type" in parsed) || parsed.type !== "run-created") return undefined;
+  return { argsSummary: "argsSummary" in parsed ? parsed.argsSummary : undefined };
+}
+
+/**
+ * 读 run-created 帧的历史 args（D14 比对数据源；record 流是唯一事实源）。
+ *
+ * - 流不存在 / 无 run-created 帧 → absent：不在 D14 层拒绝——资格判据（无 record
+ *   流 / 首帧缺失）归 resumeRun 权威文案，此处不重复实现（分层：D14 只管 args 一致性）；
+ * - argsSummary 截断（>256 字符，写侧 summarizeRunArgs 截断标记）→ truncated：
+ *   完整 args 不进 record（[D1] 载荷裁决），截断摘要无法逐字段比对——保守拒绝
+ *   （静默放行 = 静默忽略传入 args，D14 不采用形态）；
+ * - 解析失败 → throw：argsSummary 是 JSON.stringify 产物，未截断必可解析——
+ *   不可解析 = 流被篡改或写入器 bug（对齐 D12 拒绝精神）。
+ */
+function readHistoricalArgs(recordPath: string, runId: string): HistoricalArgs {
+  let content: string;
+  try {
+    content = readFileSync(recordPath, "utf8");
+  } catch {
+    return { kind: "absent" };
+  }
+  for (const line of content.split("\n")) {
+    if (line.trim().length === 0) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const frame = asRunCreatedFrame(parsed);
+    if (frame === undefined) continue;
+    const summary = frame.argsSummary;
+    if (typeof summary !== "string" || summary.length === 0) return { kind: "absent" };
+    if (summary.endsWith("…")) return { kind: "truncated" };
+    const args: unknown = JSON.parse(summary);
+    if (!isPlainObject(args)) {
+      throw new Error(
+        `Resume rejected: original args of run ${runId} are malformed in its record stream — ` +
+          "the record stream is the sole source of truth. Recovery: inspect the record file for external edits; " +
+          "if unrepairable, start a new run.",
+      );
+    }
+    return { kind: "args", args };
+  }
+  return { kind: "absent" };
+}
+
+/** plain object 判定（数组/null 排除——数组按值比、不递归键差）。 */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * 逐字段深度比对（D14）——返回差异字段描述列表（空 = 一致）。
+ *
+ * 差异三形态：仅 resume 侧有（unexpected）/ 仅原 run 侧有（missing）/ 值不等
+ * （mismatch）。嵌套 plain object 递归比对（路径 `a.b` 形态）；数组与原始值按
+ * JSON 值比。值展示用 JSON.stringify（函数/undefined 等不可序列化形态按原样）。
+ */
+export function diffResumeArgs(
+  incoming: Record<string, unknown>,
+  historical: Record<string, unknown>,
+): string[] {
+  return diffPlainObject(incoming, historical).map((d) => `args.${d}`);
+}
+
+/** diffResumeArgs 的递归体（裸键路径，`a.b` 形态——前缀由公开包装统一添加）。 */
+function diffPlainObject(
+  incoming: Record<string, unknown>,
+  historical: Record<string, unknown>,
+): string[] {
+  const diffs: string[] = [];
+  const keys = new Set([...Object.keys(incoming), ...Object.keys(historical)]);
+  keys.delete(RESUME_ARGS_EXCLUDED_KEY);
+  for (const key of [...keys].sort()) {
+    const hasIn = Object.hasOwn(incoming, key);
+    const hasHist = Object.hasOwn(historical, key);
+    if (!hasIn || !hasHist) {
+      const holder = hasIn ? "resume args only (not in original run)" : "original run only (missing from resume args)";
+      diffs.push(`${key}: ${holder}`);
+      continue;
+    }
+    const a = incoming[key];
+    const b = historical[key];
+    if (isPlainObject(a) && isPlainObject(b)) {
+      diffs.push(...diffPlainObject(a, b).map((d) => `${key}.${d}`));
+      continue;
+    }
+    const sa = JSON.stringify(a);
+    const sb = JSON.stringify(b);
+    if (sa !== sb) diffs.push(`${key}: resume ${sa ?? String(a)} vs original ${sb ?? String(b)}`);
+  }
+  return diffs;
+}
+
+/**
+ * resume action：interrupted 态 run 断点续跑。
+ *
+ * 入口语义（D14）：
+ * - runId 必需；
+ * - args 可选——传入时与 run-created 帧的历史 args 逐字段深度比对（排除 `_runId`），
+ *   不一致明确拒绝并列出差异字段（换 args 重放 = 换意图，属新 run）；不传默认沿用历史；
+ * - time 可选——resume 执行段的时间预算（活跃段算式在 core：已耗活跃时间计入、
+ *   搁置不计）；入口护栏（负值/超安全域）与 run action 同源（assertEntryTimeBudget）。
+ *
+ * 资格拒绝（非 interrupted / record 损坏 / 锁被占 / D13 嵌套 / 预算耗尽）由 core
+ * resumeRun 权威裁决——ResumeRejectionError 文案含恢复指引，原样透出（throw，
+ * pi 置 isError:true）。
+ */
+export async function actionResume(
+  params: WorkflowToolParams,
+  deps: LauncherDeps,
+): Promise<WorkflowExecuteResult> {
+  const runId = params.runId;
+  if (!runId) {
+    throw new Error(
+      "resume requires 'runId' parameter. Correct: {\"action\":\"resume\",\"runId\":\"<id>\"} (use action:\"status\" to find runId; args optional — must equal the original run's args)",
+    );
+  }
+  assertEntryTimeBudget(params.time);
+
+  // D14 args 校验（fail-fast——先于任何副作用；不一致即拒绝，不触碰 run 状态）
+  if (params.args !== undefined) {
+    const historical = readHistoricalArgs(deps.store.stateFilePath(runId), runId);
+    if (historical.kind === "truncated") {
+      throw new Error(
+        `Resume rejected: original args of run ${runId} exceed the record's args summary limit — ` +
+          "they cannot be verified field-by-field (full args are not carried in the record stream). " +
+          "Recovery: resume WITHOUT args to reuse the originals, or start a new run for changed arguments.",
+      );
+    }
+    if (historical.kind === "args") {
+      const diffs = diffResumeArgs(params.args, historical.args);
+      if (diffs.length > 0) {
+        throw new Error(
+          `Resume rejected: args for run ${runId} differ from the original run — resume replays the same intent; ` +
+            `changed arguments belong to a new run. Differing fields:\n  - ${diffs.join("\n  - ")}\n` +
+            "Recovery: pass the original args exactly, omit args to reuse them, or start a new run.",
+        );
+      }
+    }
+    // absent：D14 层不拒绝——无 record 流 / 无 run-created 帧的资格判据归 resumeRun 权威文案
+  }
+
+  const options: ResumeRunOptions = {
+    ...(params.time !== undefined ? { budgetTimeMs: params.time } : {}),
+    host: os.hostname(),
+  };
+  await resumeRun(runId, deps, options);
+
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `Resuming workflow run ${runId} — completed calls are replayed from the record at zero token cost, ` +
+          "unfinished calls are re-dispatched. Running in background — DO NOT bash sleep or poll status; " +
+          "results are auto-delivered via notifyDone.",
+      },
+    ],
+    details: { action: "resume", runId, status: "running", stateFile: deps.store.stateFilePath(runId) },
+  };
 }
 
 // ── helpers ──────────────────────────────────────────────────
