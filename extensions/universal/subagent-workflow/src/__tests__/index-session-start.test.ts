@@ -394,7 +394,7 @@ describe("session_start 通知账本恢复钩子（U2 B-ledger）", () => {
         service: {
           initSession: vi.fn(),
           recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-              },
+        },
         modelService: {
           initModel: vi.fn(),
           reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),

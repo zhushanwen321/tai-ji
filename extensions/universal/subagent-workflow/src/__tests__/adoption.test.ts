@@ -124,7 +124,7 @@ function makeSeamDeps(overrides: Partial<SessionLifecycleDeps> = {}): SessionLif
         service: {
           initSession: vi.fn(),
           recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-              },
+        },
         modelService: {
           initModel: vi.fn(),
           reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),
