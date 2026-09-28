@@ -173,7 +173,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return partition.get(sessionId)
   }
 
-  /** 该 session 是否有进行中的 workflow（供 derivedStatus 计算 hasBackgroundWork） */
+  /**
+   * 该 session 是否有进行中的 workflow（供 derivedStatus 计算 hasBackgroundWork）。
+   * [D2] 三态维持现状语义：interrupted（暂停态）不计入进行中——判据 `status ===
+   * 'running'` 自然排除（显式裁决：中断 run 事件流静止，无后台工作量）。
+   */
   function hasRunningWorkflow(sessionId: string): boolean {
     return getRecordsBySession(sessionId).some((s) => s.status === 'running')
   }
@@ -300,7 +304,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * workflow-state-link 可能刚 append 还未 flush（pi 延迟写入时序）。延迟 RUNNING_RETRY_MS 再拉一次兜底。
    *
    * @param sessionId 信号归属的 session ID
-   * @param status 信号里的 workflow status（'running' 触发延迟重试，其他只拉一次）
+   * @param status 信号里的 workflow status（'running' 触发延迟重试，其他只拉一次。
+   *   [D2] 显式裁决维持：interrupted 落「其他」分支只拉一次——中断 run 事件流静止
+   *   无需轮询，resume 复活变 running 后自然进入重试分支）
    */
   function triggerWorkflowReload(sessionId: string, status: string): void {
     const sid = sessionId

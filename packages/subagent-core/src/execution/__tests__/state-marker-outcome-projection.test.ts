@@ -36,10 +36,10 @@ afterEach(() => {
 
 describe(".state outcome 投影三形态写读", () => {
   it("成功 = completed（errorCode 不落键）", () => {
-    expect(writeSettledState(sessionFile, { endedAt: 100, outcome: "completed" })).toBe(true);
+    expect(writeSettledState(sessionFile, { endedAt: 100, outcome: "done" })).toBe(true);
 
     const marker = readStateMarker(sessionFile);
-    expect(marker).toMatchObject({ status: "idle", endedAt: 100, outcome: "completed" });
+    expect(marker).toMatchObject({ status: "idle", endedAt: 100, outcome: "done" });
     expect(marker).not.toHaveProperty("errorCode");
   });
 
@@ -62,12 +62,12 @@ describe(".state outcome 投影三形态写读", () => {
   });
 
   it("与 stopReason 正交共存（既有字段不丢）", () => {
-    expect(writeSettledState(sessionFile, { stopReason: "completed", endedAt: 100, outcome: "completed" })).toBe(true);
+    expect(writeSettledState(sessionFile, { stopReason: "completed", endedAt: 100, outcome: "done" })).toBe(true);
 
     expect(readStateMarker(sessionFile)).toMatchObject({
       status: "idle",
       reason: "completed",
-      outcome: "completed",
+      outcome: "done",
     });
   });
 });
@@ -91,12 +91,13 @@ describe("旧 .state 兼容（无 outcome 字段）", () => {
   it("outcome 词表外值 → 守卫丢弃归 undefined（不误投影）", () => {
     fs.writeFileSync(
       `${sessionFile}.state`,
-      JSON.stringify({ status: "idle", endedAt: 100, outcome: "done" }),
+      JSON.stringify({ status: "idle", endedAt: 100, outcome: "interrupted" }),
       "utf-8",
     );
 
     const marker = readStateMarker(sessionFile);
     expect(marker?.status).toBe("idle");
+    // [D2] interrupted 已出 outcome 词表（词表外值形态）→ 守卫丢弃归 undefined
     expect(marker?.outcome).toBeUndefined();
   });
 

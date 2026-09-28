@@ -58,7 +58,7 @@ import {
   parseSessionFile,
   type ParseResult,
 } from '@zhushanwen/session-core'
-import { parseRunSnapshot, renderWorkflowOverview, type WorkflowOverview } from './core/workflow.js'
+import { parseRunRecordStream, parseRunSnapshot, renderWorkflowOverview, type WorkflowOverview } from './core/workflow.js'
 import { buildTreeView } from './core/tree.js'
 import { segmentTurns } from './core/turns.js'
 import { renderOutline, renderExpand, renderDetail, type OutlineOptions } from './core/render.js'
@@ -1180,6 +1180,23 @@ async function doWorkflow(
   const contentParts: string[] = []
 
   for (const wf of selected) {
+    // [D16③] 概览链换源：v2 档的 stateFile = record 流路径（journalPath 锚点语义
+    // 重定义）——直读流经 parseRunRecordStream 概览（[D2] 三态 status；空流/读失败
+    // 投影 running，活跃 run 概览不退化为 skipped——红线）。record 后缀以外的
+    // stateFile（v1 快照档空串 / 旧指针档 link path）走原快照链。
+    if (wf.stateFile.endsWith('.record.jsonl')) {
+      let content: string | undefined
+      try {
+        content = await readFile(wf.stateFile, 'utf8')
+      } catch {
+        content = undefined // 流被清理/不可读 → 空流解析（running 兜底，不 skipped）
+      }
+      const overview = parseRunRecordStream(content, wf.runId, wf.stateFile)
+      runs.push(overview)
+      runIds.push(wf.runId)
+      contentParts.push(renderWorkflowOverview(overview))
+      continue
+    }
     const snap = await readRunSnapshot(wf.stateFile)
     if (snap === undefined) {
       // ES-wf-snapshot-read-fail：文件不存在/读失败/全行不可解析 → 跳过，不中断其他 run

@@ -23,7 +23,7 @@ import {
   dispatchRunTrigger,
   finalizeRun,
   setRunEventJournalDirForTest,
-} from "../worker-message-pump.ts";
+} from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { readRunTerminalManifest } from "../../execution/persistence/manifest-store.ts";
 import { AgentCall } from "../models/agent-call.ts";
@@ -85,7 +85,7 @@ describe("终态写读三形态（验收 a：manifest 经真实转移链）", ()
     await dispatchRunCreated(run); // [Q2] 正点发射（P1b-1 created 引导已删除）
     await dispatchRunTrigger(run, {
       type: "run-settled",
-      outcome: "completed",
+      outcome: "done",
       artifactsDir: projectionDir,
       ts: Date.now(),
     });
@@ -94,7 +94,7 @@ describe("终态写读三形态（验收 a：manifest 经真实转移链）", ()
     expect(manifest).toMatchObject({
       id: run.runId,
       workflowName: "review-fix-loop",
-      outcome: "completed",
+      outcome: "done",
     });
     expect(manifest).not.toHaveProperty("errorCode");
   });
@@ -119,7 +119,7 @@ describe("终态写读三形态（验收 a：manifest 经真实转移链）", ()
     const run = makeRun("wf-proj-cancel");
     await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
-      type: "ask-dispatched",
+      type: "agent-started",
       taskIndex: 1,
       agentName: "a",
       attempt: 1,
@@ -141,7 +141,7 @@ describe("errorCode 只溯源 run-settled 载荷", () => {
     await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "run-settled",
-      outcome: "completed",
+      outcome: "done",
       artifactsDir: projectionDir,
       ts: Date.now(),
     });
@@ -157,7 +157,7 @@ describe("投影时机（终局前的中间态零投影）", () => {
     const run = makeRun("wf-proj-timing");
     await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
-      type: "ask-dispatched",
+      type: "agent-started",
       taskIndex: 1,
       agentName: "a",
       attempt: 1,
@@ -167,7 +167,7 @@ describe("投影时机（终局前的中间态零投影）", () => {
 
     await dispatchRunTrigger(run, {
       type: "run-settled",
-      outcome: "completed",
+      outcome: "done",
       artifactsDir: projectionDir,
       ts: Date.now(),
     });
@@ -176,7 +176,7 @@ describe("投影时机（终局前的中间态零投影）", () => {
     // terminal 后再投递 = IllegalTransitionError 让位，投影不被重写（状态不变量）
     await expect(
       dispatchRunTrigger(run, {
-        type: "ask-settled",
+        type: "agent-settled",
         taskIndex: 1,
         attempt: 1,
         outcome: "failed",
@@ -185,7 +185,7 @@ describe("投影时机（终局前的中间态零投影）", () => {
       }),
     ).rejects.toThrow(/terminal/);
     expect(await readRunTerminalManifest(projectionDir, run.runId)).toMatchObject({
-      outcome: "completed",
+      outcome: "done",
     });
   });
 });
@@ -211,7 +211,7 @@ describe("投影与 journal 共存（同目录不同文件）", () => {
     });
     // 目录投影文件齐备：journal / manifest
     const names = fs.readdirSync(projectionDir).sort();
-    expect(names).toContain(`${run.runId}.events.jsonl`);
+    expect(names).toContain(`${run.runId}.record.jsonl`);
     expect(names).toContain(`${run.runId}.json`);
   });
 });
@@ -272,16 +272,20 @@ describe("生产链 errorCode 投影（finalizeRun 构造 → manifest，S2 死�
     expect(events.at(-1)).toMatchObject({ type: "run-settled", outcome: "failed", errorCode: "engine_crashed" });
   });
 
-  it("budget_limited / time_limited 终局 → manifest 落对应 run 级终局码", async () => {
-    for (const reason of ["budget_limited", "time_limited"] as const) {
-      const run = makeRun(`wf-prod-${reason}`);
-      await dispatchRunCreated(run);
-      const deps = makeDeps();
+  it("budget_limited → manifest{failed, budget_limited}；time_limited → manifest{time_limited, 无码}（[D2] 升格）", async () => {
+    const budgetRun = makeRun("wf-prod-budget_limited");
+    await dispatchRunCreated(budgetRun);
+    await finalizeRun(budgetRun, makeDeps(), "budget_limited", { context: "test" });
+    expect(await readRunTerminalManifest(projectionDir, budgetRun.runId)).toMatchObject({
+      outcome: "failed",
+      errorCode: "budget_limited",
+    });
 
-      await finalizeRun(run, deps, reason, { context: "test" });
-
-      const manifest = await readRunTerminalManifest(projectionDir, run.runId);
-      expect(manifest).toMatchObject({ outcome: "failed", errorCode: reason });
-    }
+    const timeRun = makeRun("wf-prod-time_limited");
+    await dispatchRunCreated(timeRun);
+    await finalizeRun(timeRun, makeDeps(), "time_limited", { context: "test" });
+    const timeManifest = await readRunTerminalManifest(projectionDir, timeRun.runId);
+    expect(timeManifest).toMatchObject({ outcome: "time_limited" });
+    expect(timeManifest?.errorCode).toBeUndefined();
   });
 });

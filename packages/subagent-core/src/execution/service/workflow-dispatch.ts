@@ -38,13 +38,14 @@ import { assertModelInCatalog } from "../../orchestration/model-catalog.ts";
 // [D3 协议版 P6] armed 回执落账投递（runId 键入口；observedEvent 消费点）。value
 // import 方向 execution/service → orchestration/pump：pump 的传递闭包（persistence/
 // assembly/orchestration 内部）不 import execution/service，无循环。
-// [U4 pi-workflow-run-resource-model] 同文件的 dispatchRunTrigger / scanRunEvents
-// 供成员复用池的 journal 读写注入面（MemberReusePoolIo 生产装配）。
+// [U4 → D15/D6] dispatchRunTrigger / scanRunEvents 迁 terminal-actions（终局编排
+// 入口 + 投递域单写者链），供成员复用绑定的 record 读注入面（MemberReusePoolIo
+// 生产装配）。dispatchRunArmedReceipt 随 [D5] armed 词表成员删除而退役——引擎
+// armed 回执的消费落账面整体删除（占位事件无生产语义）。
 import {
-  dispatchRunArmedReceipt,
   dispatchRunTrigger,
   scanRunEvents,
-} from "../../orchestration/worker-message-pump.ts";
+} from "../../orchestration/terminal-actions.ts";
 // [U4] 成员复用池（决策 4/9/10 的机制本体；orchestration → execution 零反向依赖，
 // 池的 journal 读写经 io 注入，无环）。
 import {
@@ -202,12 +203,12 @@ export class WorkflowDispatch {
   private readonly deps: WorkflowDispatchDeps;
 
   /**
-   * [U4] 成员复用池的 journal 读写注入面（本聚合单点装配；与 pump finalizeRun 清空
-   * 侧同款——append 经 dispatchRunTrigger 单写者链、scan 经 scanRunEvents 同源
-   * 防线，池侧不自建 journal 实例）。
+   * [U4 → D6] 成员复用绑定的 record 读注入面（本聚合单点装配；scan 经
+   * terminal-actions 的 scanRunEvents 同源防线，不自建 journal 实例）。append
+   * 通道随 [D6] 绑定消解删除——绑定随 agent-started 帧落账（pump dispatchAgentCall
+   * 链），登记收尾只改内存（member-reuse-pool.registerMemberRecord）。
    */
   private readonly memberReusePoolIo: MemberReusePoolIo = {
-    appendEvent: (runId, event) => dispatchRunTrigger({ runId }, event),
     scanEvents: (runId) => scanRunEvents(runId),
   };
 
@@ -488,14 +489,9 @@ export class WorkflowDispatch {
       );
       const journalOnEvent = journal.onEvent;
       const observedEvent = (event: AgentEvent): void => {
-        // [D3 协议版 P6] armed 回执消费落账：引擎武装回执经宿主 run 事件路由到达本
-        // 编排点，投递 dispatchRunArmedReceipt 落 run 事件 journal（dispatched/running
-        // 自环行；run 聚合不出 orchestration 层——runId 键入口）。宿主等待门
-        // （remote-engine）之外的第二消费面 = journal 取证通道。非 workflow origin
-        // record 无 parentRunId（chat 域无 run journal），回执不落账。
-        if (event.type === "armed" && record.parentRunId !== undefined) {
-          dispatchRunArmedReceipt(record.parentRunId, event);
-        }
+        // [D5] armed 回执的落账消费点已随占位事件删除（占位形态协议版落地前无
+        // 生产写入方——词表无死成员裁决；宿主等待门 remote-engine 的消费面不受
+        // 影响，journal 取证通道不再接收回执）。
         // [H2 A3 修复] live reducer 喂入恢复：W3 删 inproc pi 引擎时，原
         // engines/pi/session-runner.ts agentEvent 出口的 updateFromEvent(record, event)
         // 一并消失，协议化 service 侧未重建——record.turns/totalTokens 在 live 通路

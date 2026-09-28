@@ -16,7 +16,7 @@
 
 import type { RunStatus, DoneReason } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
-import { runSettledOutcomeToDoneReason, settledRecordOf } from "./worker-message-pump.ts";
+import { runSettledOutcomeToDoneReason, settledRecordOf } from "./terminal-actions.ts";
 
 /**
  * WorkflowRun 的可序列化摘要（status action / 列表渲染用）。

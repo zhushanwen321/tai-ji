@@ -88,7 +88,7 @@ export function mapStepStatusFromRecord(record: Pick<SubagentRecord, 'status' | 
   if (record.status === 'running') return { status: 'running', error: undefined }
   // idle（终态概念在 stopReason）
   const reason = record.stopReason
-  if (reason === 'completed') return { status: 'completed', error: record.error }
+  if (reason === 'completed') return { status: 'done', error: record.error }
   if (reason === 'failed') return { status: 'failed', error: record.error }
   if (reason === 'gc') {
     // 双语义值按 error 分叉（写侧依据 = D7 例外族，subagent-core run-orchestration.ts
@@ -96,7 +96,7 @@ export function mapStepStatusFromRecord(record: Pick<SubagentRecord, 'status' | 
     // 区分——成功 result.error 空、失败恒带错误文本）。truthy 判定与写侧 outcome 权威
     // 派生 deriveOutcome 同构（空串不构成失败）；error 空判 completed，否则 failed。
     if (record.error) return { status: 'failed', error: record.error }
-    return { status: 'completed', error: undefined }
+    return { status: 'done', error: undefined }
   }
   if (reason === 'cancelled') {
     return { status: 'failed', error: record.error ?? CANCELLED_FILL_TEXT }

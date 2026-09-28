@@ -76,7 +76,7 @@ describe('WorkflowTab [P3/D6] 投影消费', () => {
       agentCalls: [
         call({ id: 0, agent: 'a-run', status: 'running' }),
         call({ id: 1, agent: 'a-pending', status: 'pending' }),
-        call({ id: 2, agent: 'a-done', status: 'completed', durationMs: 65_000 }),
+        call({ id: 2, agent: 'a-done', status: 'done', durationMs: 65_000 }),
       ],
     })
     const wrapper = await mountTab([wf])
@@ -155,8 +155,8 @@ describe('WorkflowTab [W0] 合并投影消费锚定（V4 结构 / V6 失败渲�
   it('V4 归组阶段：① flush 后 phase 到位 → 分组 header 出现（phase 名 + 组内计数），组内步骤不丢', async () => {
     const wf = record({
       agentCalls: [
-        call({ id: 0, agent: 'reviewer-1', status: 'completed', phase: 'Review', sessionId: 'acs-r1', durationMs: 60_000 }),
-        call({ id: 1, agent: 'reviewer-2', status: 'completed', phase: 'Review', sessionId: 'acs-r2', durationMs: 45_000 }),
+        call({ id: 0, agent: 'reviewer-1', status: 'done', phase: 'Review', sessionId: 'acs-r1', durationMs: 60_000 }),
+        call({ id: 1, agent: 'reviewer-2', status: 'done', phase: 'Review', sessionId: 'acs-r2', durationMs: 45_000 }),
         call({ id: 2, agent: 'fixer-1', status: 'running', phase: 'Fix', startedAt: startedIso(10_000), sessionId: 'acs-f1' }),
       ],
     })

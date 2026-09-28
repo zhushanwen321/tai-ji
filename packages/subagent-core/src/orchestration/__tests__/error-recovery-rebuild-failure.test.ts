@@ -17,11 +17,13 @@ import {
   getLogger,
 } from "../../core/logger.ts";
 import {
-  dispatchRunCreated,
   handleWorkerError,
   resetRebuildFailureInjectionForTest,
 } from "../worker-message-pump.ts";
-import { isRunSettled, settledRecordOf } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+} from "../terminal-actions.ts";
+import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";

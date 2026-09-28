@@ -60,8 +60,8 @@ import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
 import { project } from "../persistence/execution-record.ts";
 // [P1b-1] settle 链收口单点（settleOneShotOutcome workflow origin 分支的终态收口
-// 迁入；execution/service → orchestration import 为既有先例方向——file-run-store）。
-import { settleWorkflowRecord } from "../../orchestration/worker-message-pump.ts";
+// 迁入；execution/service → orchestration import 为既有先例方向——run-state-evidence）。
+import { settleWorkflowRecord } from "../../orchestration/terminal-actions.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";

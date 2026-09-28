@@ -35,7 +35,7 @@ import {
   isRunSettled,
   settledRecordOf,
   setRunEventJournalDirForTest,
-} from "../worker-message-pump.ts";
+} from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -164,7 +164,7 @@ describe("scheduleTimeBudget", () => {
     await flushMicrotasks();
 
     expect(isRunSettled(run)).toBe(true);
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(run.state.error).toContain("Time budget exceeded");
     // 完成通知（[reload-closeout D4] 直落）
     expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
@@ -318,7 +318,8 @@ describe("runWorkflow", () => {
         activeRunIds: new Set(deps.runs.keys()),
       });
       expect(projection.phase).toBe("active");
-      expect(projection.state.lifecycle).toBe("dispatched");
+      // [D2] dispatched 并入 running——run-created 首帧后 fold 即 running
+      expect(projection.state.lifecycle).toBe("running");
       // [W1 / D1] v2 注册条目（两写点之一）：journal 首帧落账成功后经
       // appendEntry 写主 session——journalPath 锚点指向真实 journal 文件
       const registered = deps.appendEntry.mock.calls.find((c) => c[0] === "workflow-record");
@@ -332,7 +333,7 @@ describe("runWorkflow", () => {
         slug: "test-wf",
       });
       const regData = registered![1] as { journalPath: string; startedAt: number };
-      expect(regData.journalPath).toBe(path.join(journalDir, `${runId}.events.jsonl`));
+      expect(regData.journalPath).toBe(path.join(journalDir, `${runId}.record.jsonl`));
       expect(fs.existsSync(regData.journalPath)).toBe(true);
       expect(typeof regData.startedAt).toBe("number");
     } finally {
@@ -357,7 +358,7 @@ describe("runWorkflow", () => {
         if (typeof raceRunId === "string") {
           void dispatchRunTrigger(
             { runId: raceRunId },
-            { type: "ask-dispatched", taskIndex: 0, agentName: "fast-worker", attempt: 1, ts: Date.now() },
+            { type: "agent-started", taskIndex: 0, agentName: "fast-worker", attempt: 1, ts: Date.now() },
           ).catch(() => {});
         }
         return { postMessage: vi.fn(), terminate: vi.fn(async () => {}) };
@@ -375,7 +376,7 @@ describe("runWorkflow", () => {
       // 修复前形态：ask-dispatched 先入队先执行 → created 态表外让位吞帧，
       // journal 只剩 run-created；修复后帧序 created 先行、零丢帧
       const events = await createRunEventJournal(journalDir).scan(runId);
-      expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "run-settled"]);
+      expect(events.map((e) => e.type)).toEqual(["run-created", "agent-started", "run-settled"]);
     } finally {
       setRunEventJournalDirForTest(undefined);
       fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
@@ -422,7 +423,7 @@ describe("runWorkflow", () => {
     await flushMicrotasks();
 
     expect(isRunSettled(run)).toBe(true);
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(run.state.error).toContain("Time budget exceeded");
     expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: runId,
@@ -546,7 +547,7 @@ describe("abortRun", () => {
     await abortRun("wf-abort-3", deps, "timeout", "time_limited");
 
     // [W2/V1] reason 细分经终局记录联合派生（failed + time_limited）
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(run.state.error).toBe("timeout");
   });
 

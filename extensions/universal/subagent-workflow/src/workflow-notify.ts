@@ -276,7 +276,7 @@ function buildDoneNotifyDetails(
   if (settlement.errorCode !== undefined) {
     baseDetails.errorCode = settlement.errorCode;
   }
-  if (settlement.outcome === "completed" && run.state.scriptResult !== undefined && run.state.scriptResult !== null) {
+  if (settlement.outcome === "done" && run.state.scriptResult !== undefined && run.state.scriptResult !== null) {
     baseDetails.resultSummary = boundedPrettySerialize(run.state.scriptResult, MAX_RESULT_SUMMARY_LENGTH);
   }
   if (artifactsDir !== undefined && eventsJournalPath !== undefined) {

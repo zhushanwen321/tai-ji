@@ -55,16 +55,16 @@ import type {
 /**
  * [P3/D6] outcome 词表集合（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunOutcome）。
  *
- * [W2 D5] 四值（interrupted = 被动终局：崩溃收编 / abandon / idle 回收）。本集合
+ * [D2]（workflow-run-resume-revision）四值（done/failed/cancelled/time_limited——
+ * interrupted 已移出入 status 三态、time_limited 升格独立 outcome）。本集合
  * 是 shared 投影词表的第一道值域跟随锚——漏升的后果 = 新终态帧 outcome=
- * 'interrupted' 经下方值级判定被静默丢为 undefined（「已中断」在 session 历史
- * workflow 记录上显示缺失）；第二道锚 = 双包值级等价断言（core ALL_RUN_OUTCOMES
+ * 词表外 outcome 经下方值级判定被静默丢为 undefined；第二道锚 = 双包值级等价断言（core ALL_RUN_OUTCOMES
  * ≡ 本集合 ≡ shared 词表成员，runtime 单测 workflow-outcome-vocab-parity）。
  */
-const WORKFLOW_RUN_OUTCOMES = ['completed', 'failed', 'cancelled', 'interrupted'] as const
+const WORKFLOW_RUN_OUTCOMES = ['done', 'failed', 'cancelled', 'time_limited'] as const
 
-/** status 合法词表（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunStatus 两态）。 */
-const WORKFLOW_RUN_STATUSES: readonly WorkflowRunStatus[] = ['running', 'done']
+/** status 合法词表（值级守卫用；词表 SSOT = @taiji/shared WorkflowRunStatus 三态——[D2] interrupted 暂停态）。 */
+const WORKFLOW_RUN_STATUSES: readonly WorkflowRunStatus[] = ['running', 'interrupted', 'done']
 
 /** workflow-state-link entry 的 data 结构（legacy） */
 interface WorkflowStateLinkData {
@@ -107,7 +107,7 @@ interface SnapshotTraceNode {
   agent: string
   task?: string
   model?: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'done' | 'failed'
   phase?: string
   startedAt?: string
   completedAt?: string
@@ -139,7 +139,7 @@ interface RunSnapshot {
     description?: string
   }
   state: {
-    // v2 两态（wf-run-v2 随一次性生命周期收窄，paused 态已删除）；v1 三态快照被版本守卫跳过
+    // v2 快照 status（[D2] 三态投影——running/interrupted/done）；v1 三态快照被版本守卫跳过
     status: 'running' | 'done'
     reason?: WorkflowDoneReason
     budget: SnapshotBudget
@@ -521,7 +521,7 @@ function mapSnapshotToRecord(snapshot: RunSnapshot, stateFilePath: string): Work
     scriptName: snapshot.spec.scriptName,
     slug: snapshot.spec.slug,
     description: snapshot.spec.description,
-    // v2 两态直接赋值（与 WorkflowRunStatus 一致，无需断言；一次性生命周期 D-2 只产出 running/done）
+    // v2 status 直接赋值（与 WorkflowRunStatus 三态一致，无需断言——快照层 status 与投影同词）
     status: snapshot.state.status,
     reason: snapshot.state.reason,
     startedAt: snapshot.meta.startedAt,

@@ -78,21 +78,28 @@ export interface WorkflowRecordRegisteredEntryData {
 /**
  * v2 终态条目 data（设计 D1 条目契约表 workflow-record 行·终态列）。
  *
- * run 终局时写一条（收编幂等补写同一形态，U1 接线）：终局 + 摘要。字段与
- * run-settled journal 帧同源（条目是 journal 的投影锚，不是第二事实源）。
+ * run 终局时写一条（[D2] 宿主投影裁决②：settled 终态条目仅 terminal 时写——
+ * 现状收编补写 settled 条目的行为随 D2 终止）：终局 + 摘要。字段与
+ * run-settled record 帧同源（条目是 record 的投影锚，不是第二事实源）。
  */
 export interface WorkflowRecordSettledEntryData {
   v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
   kind: "settled";
   runId: string;
-  /** 终态收敛词（run 一次性生命周期：终局即 done）。 */
-  status: "done";
-  /** 终态原因（= DoneReason，run.state.reason 同源）。 */
-  reason: DoneReason;
-  /** 终局形态（run-settled 帧 outcome 同源，与 reason 正交维度）。 */
-  outcome: RunOutcome;
-  /** 失败终局的结构化编码（completed/cancelled 缺省）。 */
+  /**
+   * 收敛词（[D2] 宿主投影裁决②——schema 契约单源在本字段）：terminal 终局 =
+   * 'done'（reason/outcome 必带）；interrupted 暂停态 = 'interrupted'（中断非终局
+   * ——reason/outcome 缺省，细分语境由 errorCode 承载中断来源标记，可 resume，
+   * runtime 读侧三态投影的消费面）。
+   */
+  status: "done" | "interrupted";
+  /** 终态原因（= DoneReason，run.state.reason 同源；interrupted 形态缺省）。 */
+  reason?: DoneReason;
+  /** 终局形态（run-settled 帧 outcome 同源，与 reason 正交维度；interrupted 形态缺省——中断非终局）。 */
+  outcome?: RunOutcome;
+  /** 失败终局的结构化编码（done/cancelled/time_limited 缺省；interrupted 形态 = 中断来源标记）。 */
   errorCode?: RunErrorCode;
+  /** 收敛时刻（终局帧 ts / 中断转移帧 ts 同源）。 */
   settledAt: number;
   /** 摘要：call 计数（终局 trace 规模）。 */
   callCount: number;

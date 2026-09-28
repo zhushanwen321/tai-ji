@@ -23,25 +23,27 @@ import { extractWorkflowsFromSessionFile } from '../src/services/session/workflo
 
 /** shared WorkflowRunOutcome 词表成员（编译期 satisfies 锚定 shared 类型——词表收窄即此处编译红）。 */
 const SHARED_WORKFLOW_RUN_OUTCOMES = [
-  'completed',
+  'done',
   'failed',
   'cancelled',
-  'interrupted',
+  'time_limited',
 ] as const satisfies readonly WorkflowRunOutcome[]
 
 describe('outcome 词表双包值级等价（[W2 D5] core ≡ extractor ≡ shared）', () => {
-  it('core ALL_RUN_OUTCOMES 与 shared 词表成员逐成员一致（含 interrupted）', () => {
+  it('core ALL_RUN_OUTCOMES 与 shared 词表成员逐成员一致（[D2] 后四值——done/time_limited）', () => {
     expect([...ALL_RUN_OUTCOMES].sort()).toEqual([...SHARED_WORKFLOW_RUN_OUTCOMES].sort())
-    expect(ALL_RUN_OUTCOMES).toContain('interrupted')
+    expect(ALL_RUN_OUTCOMES).toContain('time_limited')
+    // [D2] interrupted 已移出 outcome（入 status 三态）——词表不含
+    expect(ALL_RUN_OUTCOMES).not.toContain('interrupted')
   })
 
   it('四值全表快照（词表扩缩值时本用例红——三侧同步显式重审）', () => {
-    expect([...ALL_RUN_OUTCOMES].sort()).toEqual(['cancelled', 'completed', 'failed', 'interrupted'])
+    expect([...ALL_RUN_OUTCOMES].sort()).toEqual(['cancelled', 'done', 'failed', 'time_limited'])
     expect([...SHARED_WORKFLOW_RUN_OUTCOMES].sort()).toEqual([
       'cancelled',
-      'completed',
+      'done',
       'failed',
-      'interrupted',
+      'time_limited',
     ])
   })
 })
@@ -105,12 +107,12 @@ describe('extractor 值级判定集合同步（漏升 = interrupted 被静默丢
     })
   }
 
-  it("interrupted 帧细分语境（errorCode='idle-evicted'）随投影透传", () => {
-    const built = buildSessionWithOutcome('interrupted', 'idle-evicted')
+  it("time_limited 帧细分语境（errorCode 缺省——[D2] 升格后无码）随投影透传", () => {
+    const built = buildSessionWithOutcome('time_limited')
     dir = built.dir
     const { records } = extractWorkflowsFromSessionFile(built.sessionFile)
     expect(records).toHaveLength(1)
-    expect(records[0].outcome).toBe('interrupted')
-    expect(records[0].errorCode).toBe('idle-evicted')
+    expect(records[0].outcome).toBe('time_limited')
+    expect(records[0].errorCode).toBeUndefined()
   })
 })

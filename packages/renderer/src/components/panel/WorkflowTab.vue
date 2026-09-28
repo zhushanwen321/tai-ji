@@ -206,7 +206,7 @@ const hasExplicitPhases = computed(() =>
 // 全部 switch 用 default-never 穷尽锁：call.status 词表扩值而分支漏配 = vue-tsc 红。
 
 /** phase 聚合输出词表（[W2 D8] 四值） */
-type PhaseAggregateStatus = 'completed' | 'failed' | 'running' | 'pending'
+type PhaseAggregateStatus = 'done' | 'failed' | 'running' | 'pending'
 
 /** never 穷尽断言（default 分支消费：漏配分支时 value 不再是 never → 编译红） */
 function assertNever(value: never): never {
@@ -216,7 +216,7 @@ function assertNever(value: never): never {
 /** 终态判据（输入侧全集锁：call.status 扩值落 default → 编译红，不再静默判 pending） */
 function isTerminalCallStatus(status: WorkflowAgentCall['status']): boolean {
   switch (status) {
-    case 'completed':
+    case 'done':
     case 'failed':
       return true
     case 'running':
@@ -231,14 +231,14 @@ function isTerminalCallStatus(status: WorkflowAgentCall['status']): boolean {
 function aggregatePhaseStatus(calls: WorkflowAgentCall[]): PhaseAggregateStatus {
   if (calls.some((c) => c.status === 'running')) return 'running'
   if (calls.every((c) => isTerminalCallStatus(c.status))) {
-    return calls.some((c) => c.status === 'failed') ? 'failed' : 'completed'
+    return calls.some((c) => c.status === 'failed') ? 'failed' : 'done'
   }
   return 'pending'
 }
 
 function phaseDotClass(status: PhaseAggregateStatus): string {
   switch (status) {
-    case 'completed': return 'bg-success'
+    case 'done': return 'bg-success'
     case 'failed': return 'bg-danger'
     case 'running': return 'bg-accent'
     case 'pending': return 'bg-neutral-dim opacity-40'
@@ -248,7 +248,7 @@ function phaseDotClass(status: PhaseAggregateStatus): string {
 
 function callDotClass(status: WorkflowAgentCall['status']): string {
   switch (status) {
-    case 'completed': return 'bg-success'
+    case 'done': return 'bg-success'
     case 'failed': return 'bg-danger'
     case 'running': return 'bg-accent'
     case 'pending': return 'bg-neutral-dim opacity-40'
@@ -278,9 +278,9 @@ function callStatusLabel(call: WorkflowAgentCall): string {
   return elapsed === null ? label : `${label} · ${formatDuration(elapsed)}`
 }
 
-/** agent call 是否终态（completed/failed，显示 token/turns 第二行；running/pending 不显） */
+/** agent call 是否终态（done/failed，显示 token/turns 第二行；running/pending 不显） */
 function isCallDone(status: WorkflowAgentCall['status']): boolean {
-  return status === 'completed' || status === 'failed'
+  return status === 'done' || status === 'failed'
 }
 
 /** agent call 的 token 总量（input + output 合并，精简显示） */

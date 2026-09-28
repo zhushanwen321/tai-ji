@@ -18,13 +18,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getLogger } from "../../core/logger.ts";
 import {
-  dispatchRunCreated,
-  closeOutInFlightCalls,
   handleScriptError,
   handleWorkerError,
   handleWorkerExit,
   handleWorkerMessage,
 } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+  closeOutInFlightCalls,
+} from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { toRunSnapshot } from "../run-snapshot.ts";
@@ -34,7 +36,7 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import { flushMicrotasks } from "./helpers/flush-microtasks.ts";
-import { isRunSettled, settledRecordOf } from "../worker-message-pump.ts";
+import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -226,7 +228,7 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
     await vi.advanceTimersByTimeAsync(1000); // 退避
     await expect(p).resolves.toBeUndefined();
 
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     // [B-4] 独立围栏：直落故障不再跳过 onRunDone（旧实现同一 try 会跳过）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
@@ -252,7 +254,7 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
 
     await handleWorkerMessage(run, { type: "return", result: 1 }, deps, makeHandlers());
 
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
     expect(deps.onRunDone).toHaveBeenCalledTimes(1); // 旧实现同一 try：直落抛错会跳过
     const errLogs = errorSpy.mock.calls.map((c) => String(c[0]));
     expect(

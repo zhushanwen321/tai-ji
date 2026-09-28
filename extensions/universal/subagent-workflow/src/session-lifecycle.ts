@@ -44,7 +44,7 @@ import { resolvePiSessionScopedDir } from "@zhushanwen/subagent-core";
 // [W1 / D5] session_start 兜底触发点的统一保留维护轮：入口 + record 域目录锚
 // （getSubagentRecordsDir 布局 + ENV_ROOT_CWD 贯穿 env 名单源）+ state 目录分量
 // 单源 STATE_DIR_NAME——全部经 barrel 消费（壳生产消费纪律）。
-import { runRetentionMaintenanceRound } from "@zhushanwen/subagent-core";
+import { reapOrphanRuns, runRetentionMaintenanceRound } from "@zhushanwen/subagent-core";
 import { getSubagentRecordsDir } from "@zhushanwen/subagent-core";
 import { ENV_ROOT_CWD } from "@zhushanwen/subagent-core";
 import { STATE_DIR_NAME } from "@zhushanwen/subagent-core";
@@ -122,6 +122,89 @@ function resolveMainSessionFileById(sessionId: string): string | undefined {
 function resolveSessionDir(): string {
   // F2：agentDir 走 pi SDK 活源注入（实例隔离）；slug + 探测布局单源在 core。
   return resolvePiSessionScopedDir({ agentDir: getAgentDir() });
+}
+
+// ── [裁决点 7] 存活 session 引用集采集（壳侧注入面，core 不 import pi SDK）──────
+//
+// 全池 session 文件流式扫描（sessions 根 + 全 slug 子目录的 *.jsonl），逐文件
+// 提 workflow run 的注册引用并集——三代形态都解析（v2 注册条目 / v1 全量快照
+// 条目 / pre-W17 link 指针）：
+// - v2：workflow-record custom entry，data.kind === "registered" → data.runId；
+// - v1：data.v === 1 且 data.snapshot.runId 为 string → snapshot.runId；
+// - link：workflow-state-link custom entry → data.runId。
+// 只认 v2 会把存量 run 首轮误判无主并不可逆删除（设计裁决点 7「引用集三代形态」）。
+//
+// 行预过滤（customType 子串）+ 逐行 JSON.parse 的宽容扫描：单文件解析失败跳过
+// （坏文件不阻断整轮——引用集缺侧 = 宁保留方向：少采集到的 run 引用会使其
+// 进观察期而非直接删除，宽限窗兜底）。成本量级 = 全池文件流式扫描，秒级～
+// 十秒级（设计「实现落点」登记的实测预期——每 session_start 一次，oncePerProcess
+// 守卫下进程内单跑）。
+
+function extractRunReferencesFromLine(line: string, out: Set<string>): void {
+  const trimmed = line.trim();
+  if (trimmed === "" || !trimmed.includes("workflow")) return; // 行级预过滤
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+  if (typeof parsed !== "object" || parsed === null) return;
+  const entry = parsed as { type?: unknown; customType?: unknown; data?: unknown };
+  if (entry.type !== "custom") return;
+  const data = entry.data;
+  if (typeof data !== "object" || data === null) return;
+  const d = data as { v?: unknown; kind?: unknown; runId?: unknown; snapshot?: unknown };
+  if (entry.customType === "workflow-record") {
+    if (d.kind === "registered" && typeof d.runId === "string" && d.runId !== "") {
+      out.add(d.runId);
+    } else if (d.v === 1 && typeof d.snapshot === "object" && d.snapshot !== null) {
+      const snapRunId = (d.snapshot as { runId?: unknown }).runId;
+      if (typeof snapRunId === "string" && snapRunId !== "") out.add(snapRunId);
+    }
+  } else if (entry.customType === "workflow-state-link") {
+    if (typeof d.runId === "string" && d.runId !== "") out.add(d.runId);
+  }
+}
+
+/**
+ * [裁决点 7] 采集全部存活 session 的 workflow run 引用并集（agentDir 活源——
+ * sessions 布局与 resolveMainSessionFileById 同源）。
+ */
+async function collectAliveWorkflowRunReferences(
+  agentDir: string,
+): Promise<ReadonlySet<string>> {
+  const refs = new Set<string>();
+  const sessionsRoot = path.join(agentDir, "..", "sessions");
+  let slugDirs: string[];
+  try {
+    slugDirs = fs.readdirSync(sessionsRoot, { withFileTypes: true })
+      .filter((ent) => ent.isDirectory())
+      .map((ent) => path.join(sessionsRoot, ent.name));
+  } catch {
+    return refs; // sessions 根不存在 = 无任何 session 落盘，空集（整轮跳过删除）
+  }
+  const readOpts = { encoding: "utf8" as const };
+  for (const dir of slugDirs) {
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+      try {
+        const content = fs.readFileSync(path.join(dir, file), readOpts);
+        for (const line of content.split("\n")) {
+          extractRunReferencesFromLine(line, refs);
+        }
+      } catch {
+        continue; // 单文件读失败跳过（宁保留——该文件的引用缺席只延后删除）
+      }
+    }
+  }
+  return refs;
 }
 
 // ── 进程级单例（dialog queue；原 index.ts module 级随域搬移） ────────────────────
@@ -521,6 +604,19 @@ async function runProcessLevelMaintenance(
           toMsg: (err: unknown) => toErrorMessage(err),
         },
       );
+      // [裁决点 7]（workflow-run-resume-revision）孤儿 run 对账清理：引用集采集 =
+      // 壳侧注入面（core 不 import pi SDK——全池 session 文件流式扫描，v2 注册
+      // 条目 ∪ v1 快照条目 ∪ pre-W17 link 指针三代解析的并集）。同维护轮触发点、
+      // 同 oncePerProcess 守卫（幂等整轮）；宽限窗缺省 7 天（env 可调）。
+      await reapOrphanRuns(
+        { stateDir: path.join(resolveSessionDir(), STATE_DIR_NAME) },
+        {
+          collectAliveRunReferences: () => collectAliveWorkflowRunReferences(agentDir),
+          warn: (msg) => logger.warn(`[subagent-workflow] ${msg}`),
+          debug: (msg) => logger.debug(`[subagent-workflow] ${msg}`),
+          toMsg: (err: unknown) => toErrorMessage(err),
+        },
+      );
     });
   } catch (err) {
     logger.warn("[subagents] retention maintenance round failed", {
@@ -633,7 +729,7 @@ async function createSessionRunState(
 /**
  * adoption 主体：接管既有条目（同引用原地改写）。成功返回原 SessionLifecycleResult
  * （sessionState.get(sid) 与 reload 前同一引用——探针红线，store/runs 不换实例）；
- * 失败（健康检查不过 / rebind / 快照重发抛错）走 {@link failAdoption} 后返回
+ * 失败（健康检查不过 / rebind 抛错）走 {@link failAdoption} 后返回
  * undefined（调用方落到全量装配）。
  */
 async function tryAdoptExistingSession(
@@ -650,13 +746,11 @@ async function tryAdoptExistingSession(
     return undefined;
   }
   try {
-    // D3 rebind：在飞去抖批与串行 flush 链持有 store（this），原地改写 .pi/.ctx
-    // 对后续 flush 天然可见；换入的 appendEntry 源带 stale guard（D5）。
+    // D3 rebind：store 实例跨 reload 存活（this 引用不变），原地改写 .pi/.ctx；
+    // 换入的 appendEntry 源带 stale guard（D5）。[D1] record 单源后 store 无投影
+    // 物化面（原 D4 快照重发随 state 快照删除而退役）——接管动作收敛为 rebind，
+    // 后续 v2 终态条目补写自动走新 pi。
     existing.store.rebind(pi, ctx);
-    // D4 快照重发：经 store 既有 per-runId 串行 flush 链重发当前快照权威 entry
-    //（设计红线：禁止绕链直接 pi.appendEntry——物理乱序会让 last-ways 读回
-    // running → 崩溃恢复误判）。任何 IO 失败上抛 → 失败处置。
-    await existing.store.resendSnapshots(existing.runs);
   } catch (err) {
     await failAdoption(pi, ctx, deps, existing, toErrorMessage(err));
     return undefined;

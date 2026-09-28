@@ -4,7 +4,7 @@
 //
 // 锁四面（S2「stderr tee 文件路径在事件载荷中且文件存在」的 L1 等价用例）：
 // 1. 全链三段：引擎上报（call.result.stderrTeePath 注入——真实引擎段由
-//    pi-subagent-cli run-spawn-once.integration 覆盖）→ dispatchAskSettled 事件
+//    pi-subagent-cli run-spawn-once.integration 覆盖）→ dispatchAgentSettled 事件
 //    载荷含路径 → 失败终局 manifest 含路径（事件流投影取值）。
 // 2. 失败伴随纪律：成功 ask / cancelled 终局不带 stderrTeePath（成功/cancel 不写）。
 // 3. 旧 manifest 读兼容：无 stderrTeePath 字段的存量形态读回 undefined 不炸。
@@ -18,12 +18,12 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  dispatchAskDispatched,
-  dispatchAskSettled,
+  dispatchAgentStarted,
+  dispatchAgentSettled,
   dispatchRunCreated,
   finalizeRun,
   setRunEventJournalDirForTest,
-} from "../worker-message-pump.ts";
+} from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { AgentCall } from "../models/agent-call.ts";
 import { Budget } from "../models/budget.ts";
@@ -142,7 +142,7 @@ describe("stderrTeePath 全链（引擎上报 → ask-settled 载荷 → 失败�
     const run = makeRealRun("wf-tee-1");
     const deps = makeDeps();
     await dispatchRunCreated(run);
-    dispatchAskDispatched(run, 0, "reviewer");
+    dispatchAgentStarted(run, 0, "reviewer");
     // 引擎上报段：call.result.stderrTeePath（真实产出链 = AgentOutcome.stderrTeePath
     // → outcomeToWorkflowResult → call.result，引擎段由 pi-subagent-cli 集成测试覆盖）
     const call = makeSettledCall(0, {
@@ -153,14 +153,14 @@ describe("stderrTeePath 全链（引擎上报 → ask-settled 载荷 → 失败�
       durationMs: 21_000,
       toolCalls: [],
     });
-    dispatchAskSettled(run, call, false);
+    dispatchAgentSettled(run, call, false);
     await flushMicrotasks();
 
     // 事件载荷段：ask-settled(failed) 携带路径 + 文件真实存在（S2 L1 等价断言）
     const events = await scanRunEvents("wf-tee-1");
-    const settled = events.find((e) => e.type === "ask-settled");
+    const settled = events.find((e) => e.type === "agent-settled");
     expect(settled).toMatchObject({
-      type: "ask-settled",
+      type: "agent-settled",
       taskIndex: 0,
       attempt: 1,
       outcome: "failed",
@@ -184,9 +184,9 @@ describe("stderrTeePath 全链（引擎上报 → ask-settled 载荷 → 失败�
     const run = makeRealRun("wf-tee-2");
     const deps = makeDeps();
     await dispatchRunCreated(run);
-    dispatchAskDispatched(run, 0, "reviewer");
+    dispatchAgentStarted(run, 0, "reviewer");
     const call = makeSettledCall(0, { content: "ok", durationMs: 5, toolCalls: [] });
-    dispatchAskSettled(run, call, false);
+    dispatchAgentSettled(run, call, false);
     await flushMicrotasks();
 
     const ok = await finalizeRun(run, deps, "failed", { context: "script error" });
@@ -201,7 +201,7 @@ describe("stderrTeePath 全链（引擎上报 → ask-settled 载荷 → 失败�
     const run = makeRealRun("wf-tee-3");
     const deps = makeDeps();
     await dispatchRunCreated(run);
-    dispatchAskDispatched(run, 0, "reviewer");
+    dispatchAgentStarted(run, 0, "reviewer");
     const call = makeSettledCall(0, {
       content: "",
       error: "pi child exited with code 1",
@@ -210,7 +210,7 @@ describe("stderrTeePath 全链（引擎上报 → ask-settled 载荷 → 失败�
       durationMs: 3_000,
       toolCalls: [],
     });
-    dispatchAskSettled(run, call, false);
+    dispatchAgentSettled(run, call, false);
     await flushMicrotasks();
 
     const ok = await finalizeRun(run, deps, "aborted", { context: "abortRun" });

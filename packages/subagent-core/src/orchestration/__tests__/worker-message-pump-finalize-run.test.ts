@@ -25,12 +25,14 @@ import { describe, expect, it, vi } from "vitest";
 import { collectActivePendingIds } from "@zhushanwen/extension-protocol";
 
 import {
+  handleWorkerMessage,
+} from "../worker-message-pump.ts";
+import {
   dispatchRunCreated,
   finalizeRun,
-  handleWorkerMessage,
   isRunSettled,
   settledRecordOf,
-} from "../worker-message-pump.ts";
+} from "../terminal-actions.ts";
 import { getLogger } from "../../core/logger.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
@@ -143,7 +145,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     // 六态机 dispatch 链（isRunSettled / 终局记录注册表）判定。
     expect(isRunSettled(run)).toBe(true);
     expect(run.state.status).toBe("running");
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
     // 各步恰好一次（终局帧经 no-op journal 防线零写——投递链空转一次）
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     expect(appendedUnregister(deps)).toBeDefined();
@@ -174,7 +176,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
       runId: "wf-fin-v2entry",
       status: "done",
       reason: "completed",
-      outcome: "completed",
+      outcome: "done",
       callCount: 0,
       usedTokens: 0,
     });

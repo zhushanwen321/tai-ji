@@ -115,7 +115,7 @@ describe("classifyWorkflowRecordEntryData v2 分支（W1 注册/终态两条小�
       runId: "wf-1",
       status: "done",
       reason: "completed",
-      outcome: "completed",
+      outcome: "done",
       settledAt: 1780000123000,
       callCount: 4,
       usedTokens: 12345,

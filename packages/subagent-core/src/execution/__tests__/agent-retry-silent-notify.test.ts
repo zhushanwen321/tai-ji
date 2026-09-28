@@ -9,8 +9,8 @@
 //   1. call 级（executeAgentCall 真函数 + fake runner 首败后成）：重试等待期
 //      call 未终局化（status=running、trace 零终态 update、无 markDone）；整个过程
 //      finalizeCall 恰好一次（终局化单次，无逐 attempt 终态信号）。
-//   2. journal 级（dispatchAskSettled 的 result gate）：call 未 markDone（重试中）
-//      时 dispatchAskSettled 静默返回——ask-settled / run-settled 帧只在终局后落账
+//   2. journal 级（dispatchAgentSettled 的 result gate）：call 未 markDone（重试中）
+//      时 dispatchAgentSettled 静默返回——ask-settled / run-settled 帧只在终局后落账
 //      （run-settled 帧是终局通知的单点判定源，重试期零帧 = 零通知的结构性前提）。
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,8 +18,12 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setRunEventJournalDirForTest } from "../../orchestration/worker-message-pump.ts";
-import { dispatchAskSettled } from "../../orchestration/worker-message-pump.ts";
+import {
+  setRunEventJournalDirForTest,
+} from "../../orchestration/terminal-actions.ts";
+import {
+  dispatchAgentSettled,
+} from "../../orchestration/terminal-actions.ts";
 import { executeAgentCall } from "../../orchestration/execute-agent-call.ts";
 import { AgentCall } from "../../orchestration/models/agent-call.ts";
 import { Budget } from "../../orchestration/models/budget.ts";
@@ -44,7 +48,7 @@ afterEach(() => {
   rmSync(journalDir, { recursive: true, maxRetries: 5, retryDelay: 20 });
 });
 
-/** 构造 running 态真实 WorkflowRun（dispatchAskSettled 的 journal 归属键）。 */
+/** 构造 running 态真实 WorkflowRun（dispatchAgentSettled 的 journal 归属键）。 */
 function makeRealRun(runId: string): WorkflowRun {
   const run = new WorkflowRun(
     runId,
@@ -147,7 +151,7 @@ describe("agent 失败重试期零通知（D7 反向面）", () => {
     }
   });
 
-  it("journal 级：call 未终局（重试中）→ dispatchAskSettled 静默零帧", async () => {
+  it("journal 级：call 未终局（重试中）→ dispatchAgentSettled 静默零帧", async () => {
     const run = makeRealRun("wf-retry-silent-1");
     const call = new AgentCall(
       1,
@@ -163,7 +167,7 @@ describe("agent 失败重试期零通知（D7 反向面）", () => {
     );
     call.markRunning(); // running、无 result —— 重试中的真实形态
 
-    dispatchAskSettled(run, call, false);
+    dispatchAgentSettled(run, call, false);
     await flushMicrotasks();
 
     const journal = createRunEventJournal(journalDir);

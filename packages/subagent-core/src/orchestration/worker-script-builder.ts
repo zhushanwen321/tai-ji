@@ -23,7 +23,7 @@
  *
  * 生成的源码通过 `new Worker(code, { eval: true, workerData })` 在隔离的 Worker 线程运行。
  *
- * 通信协议（AC-4 契约，逐字保留）：
+ * 通信协议（AC-4 契约；[D3] 新增 phase 消息）：
  * Worker → Main (postMessage):
  * { type: "agent-call", callId: number, opts: AgentCallOpts }
  * { type: "return", runId: string, result: unknown }
@@ -34,6 +34,12 @@
  *   记入 _workerLogs 随 return/error 消息再带回一份——同一日志在 errorLogs 占两格、
  *   TUI 双份，已退役。崩溃场景（return/error 消息未发出）丢 log 条目可接受：
  *   log 是 T7 补充可观测，非持久化权威。
+ * { type: "phase", phase: string }
+ *   —— [D3] phase() 切换的唯一通路：主线程 handleWorkerMessage 的 phase case 经
+ *   dispatchPhaseStarted 落 record（phase 状态机转移事件，重启折叠重建）。postMessage
+ *   异步通道固有竞态（worker 执行 phase() 后、消息送达壳侧前死亡 → 转移事件缺失）
+ *   由 fold 自愈规则承接（agent-started 载荷的 phase 字段驱动 pending → running）；
+ *   持久修复通道 = resume 后脚本确定性重放重新执行 phase() 补落事件。
  *
  * Main → Worker (parentPort.on("message")):
  * { type: "agent-result", callId: number, result: AgentResult, cached: boolean }
@@ -204,8 +210,15 @@ const WORKER_TEMPLATE_PRE = [
   '  });',
   '',
   // ── phase global ──
+  // [D3] phase() 事件化：切换 = 更新模块级当前 phase（agent-call 消息的归属快照
+  // 供源）+ postMessage 通知壳侧落 phase-started 转移事件。通知失败（_safePost
+  // 返回 false）只记 workerLogs 不中断脚本——转移事件缺失由 fold 自愈规则承接
+  // （agent-started 载荷的 phase 字段驱动 pending → running）。
   '  let _currentPhase = "";',
-  '  function phase(name) { _currentPhase = String(name); }',
+  '  function phase(name) {',
+  '    _currentPhase = String(name);',
+  '    _safePost({ type: "phase", phase: _currentPhase }, "phase");',
+  '  }',
   '',
   // ── log global ──
   '  function log(msg) {',

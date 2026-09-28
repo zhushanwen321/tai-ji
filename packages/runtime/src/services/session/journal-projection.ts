@@ -69,11 +69,13 @@ import { mergeWorkflowStepRecords } from './workflow-step-merge.js'
  */
 const RUN_EVENT_TYPE_PROBE: Record<WorkflowRunEvent['type'], true> = {
   'run-created': true,
-  'ask-dispatched': true,
-  'ask-retrying': true,
-  'ask-settled': true,
-  'member-pool': true,
-  armed: true,
+  'phase-started': true,
+  'agent-started': true,
+  'agent-retrying': true,
+  'agent-settled': true,
+  'phase-settled': true,
+  'run-interrupted': true,
+  'run-resumed': true,
   'run-settled': true,
 }
 
@@ -319,8 +321,15 @@ export function projectV2Workflow(
 ): WorkflowRunRecord | null {
   if (registered === undefined && settledEntry === undefined) return null
   const runSettled = fold?.runSettled
+  // [D2] 三态投影：terminal（fold 终帧或终态条目）→ done；fold 状态机停在
+  // interrupted 暂停态（run-interrupted 帧在盘、无终局）→ interrupted（GUI 显示
+  // 「已中断（可续跑）」）；其余 → running。
   const status: WorkflowRunRecord['status'] =
-    runSettled !== undefined || settledEntry !== undefined ? 'done' : 'running'
+    runSettled !== undefined || settledEntry?.status === 'done'
+      ? 'done'
+      : fold?.state.lifecycle === 'interrupted'
+        ? 'interrupted'
+        : 'running'
   // reason 词表收窄：core DoneReason ⊃ shared WorkflowDoneReason（core 另含
   // invalid_args 等扩展值，shared 信号面不认——词表外按缺省归一，不硬透传）
   const reason =
@@ -335,8 +344,8 @@ export function projectV2Workflow(
       const stepStatus: WorkflowAgentCall['status'] =
         ask.settled === undefined
           ? 'running'
-          : ask.settled.outcome === 'completed'
-            ? 'completed'
+          : ask.settled.outcome === 'done'
+            ? 'done'
             : 'failed'
       agentCalls.push({
         id: ask.taskIndex,

@@ -18,7 +18,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runWorkflow } from "../lifecycle.ts";
-import { isRunSettled, settledRecordOf } from "../worker-message-pump.ts";
+import {
+  isRunSettled,
+  settledRecordOf,
+} from "../terminal-actions.ts";
 import type { LifecycleDeps, RunStore } from "../models/ports.ts";
 import type { RunSpec } from "../models/run-spec.ts";
 import type { WorkflowRun } from "../models/workflow-run.ts";

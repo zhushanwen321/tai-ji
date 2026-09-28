@@ -28,7 +28,9 @@ import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { AgentResult, ExecutionTraceNode } from "../models/types.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
 // [W2/V1] 终局断言换源：两态机字段停更，经终局记录注册表判定/派生。
-import { settledRecordOf } from "../worker-message-pump.ts";
+import {
+  settledRecordOf,
+} from "../terminal-actions.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 
 // ── helpers ──────────────────────────────────────────────────
@@ -250,7 +252,7 @@ describe("[OR-7] signal abort listener run 终态移除", () => {
     const handlers = deps.workerHost.start.mock.calls[0]?.[2] as WorkerHandlers;
     await handlers.onMessage({ type: "return", result: { ok: true } });
 
-    expect(settledRecordOf(runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "done" });
     expect(removed).toEqual([added[0]]);
     expect(postSpy(handle).mock.calls.some((c) => (c[0] as { type?: string })?.type === "abort")).toBe(false);
   });
@@ -317,12 +319,12 @@ describe("[OR-7] signal abort listener run 终态移除", () => {
     // 正常完成
     const handlers = deps.workerHost.start.mock.calls[0]?.[2] as WorkerHandlers;
     await handlers.onMessage({ type: "return", result: "ok" });
-    expect(settledRecordOf(runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "done" });
 
     // 完成后外部 signal 才 abort——listener 已移除，run 保持 completed（不被改写）
     controller.abort();
     await vi.advanceTimersByTimeAsync(0);
-    expect(settledRecordOf(runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "done" });
     expect(deps.store.save).toHaveBeenCalledTimes(2); // runWorkflow 启动 + return 各 1 次
   });
 });
@@ -404,7 +406,7 @@ describe("[D3] makeHandlers deps 视图保持 volatile 成员现读（reload 后
 
     await handlers.onMessage({ type: "return", result: { ok: true } });
 
-    expect(settledRecordOf(runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "done" });
     // 新 append 面收到注销直落——函数体现读生效
     expect(appendFace).toHaveBeenCalledWith("pending:unregister", {
       id: runId,
@@ -450,7 +452,7 @@ describe("[D3] makeHandlers deps 视图保持 volatile 成员现读（reload 后
     appendFace = vi.fn();
     await handlers.onMessage({ type: "return", result: { ok: true } });
 
-    expect(settledRecordOf(runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(runId)).toMatchObject({ outcome: "done" });
     // 新 append 面收到注销直落——原型 getter 现读生效
     expect(appendFace).toHaveBeenCalledWith(
       "pending:unregister",

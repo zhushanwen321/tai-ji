@@ -137,7 +137,10 @@ function _safePost(msg, context) {
   });
 
   let _currentPhase = "";
-  function phase(name) { _currentPhase = String(name); }
+  function phase(name) {
+    _currentPhase = String(name);
+    _safePost({ type: "phase", phase: _currentPhase }, "phase");
+  }
 
   function log(msg) {
     var _logText = String(msg);

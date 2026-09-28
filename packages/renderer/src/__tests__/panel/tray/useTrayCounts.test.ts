@@ -165,18 +165,19 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
     expect(data().lists.subagent.running.value.map((r) => r.subagentId)).toEqual(['a-tool'])
   })
 
-  it('workflow：running 计入进行中，done 落已结束（一次性生命周期 D-2：无 paused 态）', async () => {
+  it('workflow：running 计入进行中，done 落已结束；[D2] interrupted 计 ended 桶（暂停态不算进行中——显式裁决单测锁住）', async () => {
     const workflowStore = useWorkflowStore()
     // 种数据（applyRecords 已私有化，直写分区 ref）
     workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, [
       makeWorkflow({ runId: 'wf-run', status: 'running' }),
       makeWorkflow({ runId: 'wf-done', status: 'done', reason: 'completed' }),
+      makeWorkflow({ runId: 'wf-int', status: 'interrupted' }),
     ])
     mountHarness()
 
-    expect(data().counts.value.workflow).toEqual({ running: 1, ended: 1, total: 2 })
+    expect(data().counts.value.workflow).toEqual({ running: 1, ended: 2, total: 3 })
     expect(data().lists.workflow.running.value.map((r) => r.runId)).toEqual(['wf-run'])
-    expect(data().lists.workflow.ended.value.map((r) => r.runId)).toEqual(['wf-done'])
+    expect(data().lists.workflow.ended.value.map((r) => r.runId)).toEqual(['wf-done', 'wf-int'])
   })
 
   it('bash：两视图由 background-task-bucket SSOT 谓词派生（killing 属运行中桶，含排序）', async () => {

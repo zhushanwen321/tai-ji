@@ -17,7 +17,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  dispatchRunCreated,
   handleScriptError,
   handleWorkerError,
   handleWorkerExit,
@@ -25,6 +24,9 @@ import {
   postBudgetUpdate,
   rebuildRuntime,
 } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+} from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -34,7 +36,7 @@ import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import { flushMicrotasks } from "./helpers/flush-microtasks.ts";
 // [W2/V1] 六态机引导 + 终局断言换源（两态机字段停更——终局经注册表判定/派生）。
-import { isRunSettled, settledRecordOf } from "../worker-message-pump.ts";
+import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -482,7 +484,7 @@ describe("race-F3: rebuild 时间预算折算", () => {
     expect(scheduleTimeBudget).not.toHaveBeenCalled();
     // 直接 time_limited 终态 + 持久化 + 注销直落 + onRunDone
     expect(isRunSettled(run)).toBe(true);
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(deps.store.save).toHaveBeenCalled();
     expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",

@@ -11,11 +11,11 @@
 //    取消 → 同一收口单点（静默吞失败路径的间接接入面）。
 // 4. 直写通道删除断言（机器守卫）：读三个领地源文件断言 workflow origin 直写对
 //    （trySettleLegacyClosed(record + 内联 finalizeRecord 对）不再存在于
-//    run-orchestration / record-lifecycle——收口后唯一剩余点在 worker-message-pump。
+//    run-orchestration / record-lifecycle——收口后唯一剩余点在 terminal-actions。
 //
 // doFinalizeRecord 经 vi.mock 拦截（避免真实 manifest/archive 写面）；journal 面
 // （pump 接线段）走 vitest no-op 防线（本文件不注入目录——断言面在 record 终态，
-// journal 落账已由 run-event-dispatch / worker-message-pump-run-events 两文件锁定）。
+// journal 落账已由 run-event-dispatch / terminal-actions-run-events 两文件锁定）。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -29,7 +29,9 @@ vi.mock("../persistence/finalize-record.ts", () => ({
 }));
 
 import { createRecord, trySettleLegacyClosed } from "../persistence/execution-record.ts";
-import { settleWorkflowRecord } from "../../orchestration/worker-message-pump.ts";
+import {
+  settleWorkflowRecord,
+} from "../../orchestration/terminal-actions.ts";
 import { RunOrchestration } from "../service/run-orchestration.ts";
 import { RecordLifecycle } from "../service/record-lifecycle.ts";
 import type { AgentResult, ExecutionRecord } from "../assembly/types.ts";
@@ -213,8 +215,8 @@ describe("直写通道删除断言（grep 等价的机器守卫）", () => {
     expect(source).toContain("settleWorkflowRecord(record, cancelledResult");
   });
 
-  it("收口单点唯一性：trySettleLegacyClosed(record 仅存在于 worker-message-pump（settle 域）", () => {
-    const pump = fs.readFileSync(path.join(here, "../../orchestration/worker-message-pump.ts"), "utf8");
+  it("收口单点唯一性：trySettleLegacyClosed(record 仅存在于 terminal-actions（settle 域）", () => {
+    const pump = fs.readFileSync(path.join(here, "../../orchestration/terminal-actions.ts"), "utf8");
     expect(pump).toContain("trySettleLegacyClosed(record, closedReason)");
   });
 });

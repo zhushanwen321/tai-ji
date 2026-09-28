@@ -219,7 +219,7 @@ function ledgerNotifyIds(mock: LedgerHostMock): Set<string> {
 function settlementFor(reason: string | undefined): import("../jsonl-run-store.ts").RunSettlementRecord {
   switch (reason) {
     case "completed":
-      return { outcome: "completed", settledAt: 0 };
+      return { outcome: "done", settledAt: 0 }; // [D2] 成功值 completed→done
     case "aborted":
       return { outcome: "cancelled", settledAt: 0 };
     case "failed":
@@ -227,9 +227,9 @@ function settlementFor(reason: string | undefined): import("../jsonl-run-store.t
     case "budget_limited":
       return { outcome: "failed", errorCode: "budget_limited", settledAt: 0 };
     case "time_limited":
-      return { outcome: "failed", errorCode: "time_limited", settledAt: 0 };
+      return { outcome: "time_limited", settledAt: 0 }; // [D2] 升格独立 outcome、无码
     case undefined:
-      return { outcome: "completed", settledAt: 0 };
+      return { outcome: "done", settledAt: 0 };
     default:
       return { outcome: "failed", errorCode: "unknown", settledAt: 0 };
   }
@@ -459,7 +459,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
         "\n" +
         "--- Artifacts ---\n" +
         "Artifacts dir: /tmp/wf-state\n" +
-        "Events journal: /tmp/wf-state/wf-art-1.events.jsonl",
+        "Events journal: /tmp/wf-state/wf-art-1.record.jsonl",
     );
   });
 
@@ -487,7 +487,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
         "\n" +
         "--- Artifacts ---\n" +
         "Artifacts dir: /tmp/wf-state\n" +
-        "Events journal: /tmp/wf-state/wf-full-1.events.jsonl",
+        "Events journal: /tmp/wf-state/wf-full-1.record.jsonl",
     );
   });
 
@@ -531,7 +531,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
 const ARTIFACTS_DIR = "/tmp/wf-state-root/workflow-state";
 
 describe("notifyDone 终局载荷（D7）", () => {
-  it("成功：outcome=completed + resultSummary + 产物目录与 journal 指针，恰好一条", () => {
+  it("成功：outcome=done + resultSummary + 产物目录与 journal 指针，恰好一条", () => {
     const mock = makeLedgerHost();
     bindNotifyLedgerHost(mock.host);
     const run = makeRun({ reason: "completed", scriptResult: { ok: true, files: 3 } });
@@ -543,15 +543,15 @@ describe("notifyDone 终局载荷（D7）", () => {
     expect(delivery.customType).toBe(WORKFLOW_RESULT_CUSTOM_TYPE);
     const details = delivery.details as Record<string, unknown>;
     expect(details["notifyId"]).toBe(`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-payload-ok`);
-    expect(details["outcome"]).toBe("completed");
+    expect(details["outcome"]).toBe("done");
     expect(typeof details["resultSummary"]).toBe("string");
     expect(details["resultSummary"]).toContain("ok");
     expect(details["errorCode"]).toBeUndefined();
     expect(details["artifactsDir"]).toBe(ARTIFACTS_DIR);
-    expect(details["eventsJournalPath"]).toBe(`${ARTIFACTS_DIR}/wf-payload-ok.events.jsonl`);
+    expect(details["eventsJournalPath"]).toBe(`${ARTIFACTS_DIR}/wf-payload-ok.record.jsonl`);
     // 文案含产物指针段（主 agent 可操作的入口）
     expect(delivery.content).toContain("Artifacts dir:");
-    expect(delivery.content).toContain(`Events journal: ${ARTIFACTS_DIR}/wf-payload-ok.events.jsonl`);
+    expect(delivery.content).toContain(`Events journal: ${ARTIFACTS_DIR}/wf-payload-ok.record.jsonl`);
   });
 
   it("失败：outcome=failed + errorCode（最后失败 call 的 failureKind）+ 证据指针，零 resultSummary", () => {
@@ -566,7 +566,7 @@ describe("notifyDone 终局载荷（D7）", () => {
     expect(details["outcome"]).toBe("failed");
     expect(details["errorCode"]).toBe("unknown");
     expect(details["resultSummary"]).toBeUndefined();
-    expect(details["eventsJournalPath"]).toBe(`${ARTIFACTS_DIR}/wf-payload-fail.events.jsonl`);
+    expect(details["eventsJournalPath"]).toBe(`${ARTIFACTS_DIR}/wf-payload-fail.record.jsonl`);
   });
 
   it("取消：outcome=cancelled（aborted 经 cancel-requested 同构映射），零 errorCode / 零 resultSummary", () => {
@@ -592,7 +592,7 @@ describe("notifyDone 终局载荷（D7）", () => {
 
     expect(mock.sentMessages).toHaveLength(1);
     const details = mock.sentMessages[0]!.details as Record<string, unknown>;
-    expect(details["outcome"]).toBe("completed");
+    expect(details["outcome"]).toBe("done");
     expect(details["resultSummary"]).toBeUndefined();
     expect(details["artifactsDir"]).toBeUndefined();
     expect(details["eventsJournalPath"]).toBeUndefined();

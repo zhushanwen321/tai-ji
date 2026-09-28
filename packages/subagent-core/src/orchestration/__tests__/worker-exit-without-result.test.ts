@@ -23,18 +23,20 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  dispatchRunCreated,
   handleWorkerExit,
   handleWorkerMessage,
   handleScriptError,
   handleWorkerError,
 } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+} from "../terminal-actions.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { DoneReason, RunStatus } from "../models/types.ts";
 import type { WorkflowRun } from "../models/workflow-run.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 // [W2/V1] 六态机引导 + 终局断言换源（两态机字段停更——终局经注册表判定/派生）。
-import { isRunSettled, settledRecordOf } from "../worker-message-pump.ts";
+import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
 
 /** [F1] 归因文案——与 worker-message-pump.ts 常量一致（不直接 import 常量以锚定对外文案）。 */
 const EXITED_WITHOUT_RESULT_MSG =
@@ -315,7 +317,7 @@ describe("handleWorkerMessage — [F1] 终态消息标记", () => {
 
     expect((run.runtime as { receivedTerminalMessage?: boolean }).receivedTerminalMessage).toBe(true);
     expect(isRunSettled(run)).toBe(true);
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
   });
 
   it("error 消息同样置 true——在 rebuild 前的退避窗口内捕获（replaceRuntime 前 start 时刻）", async () => {

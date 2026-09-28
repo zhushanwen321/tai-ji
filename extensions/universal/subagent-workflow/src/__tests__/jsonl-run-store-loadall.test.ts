@@ -1,10 +1,11 @@
 // src/__tests__/jsonl-run-store-loadall.test.ts
 //
 // loadAll 发现域裁决锚（v2-only）：主 session 的发现通道收敛为「v2 注册条目定界 →
-// journal 权威重建」单通道。历史形态 entry（v1 全量快照 / 旧 workflow-state-link
+// record 流权威重建」单通道。历史形态 entry（v1 全量快照 / 旧 workflow-state-link
 // 指针）不参与发现——旧 session JSONL 里的历史 entry 仍在盘上，loadAll 必须静默
 // 忽略（不抛、不重建、零 warn），未知 entry 容忍面不受影响。
-// v2 重建/收编读面的完整用例在 jsonl-run-store-session-file.test.ts（W17/W1 describe）。
+// v2 重建/收编读面的完整用例在 jsonl-run-store-session-file.test.ts（W17/W1 describe）与
+// __tests__/record-mode/（[D1] record 单源语义族）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -77,13 +78,19 @@ function v2RegisteredEntry(runId: string, journalPath: string): CustomEntry {
   };
 }
 
-/** journal run-settled 终局帧（isWorkflowRunEventLine 最小形状）。 */
+/** record 流 run-settled 终局帧（载荷完整形态——[D1] 后 settled 帧必带 result 全文）。 */
 function settledLine(): string {
-  return JSON.stringify({ type: "run-settled", ts: Date.now(), outcome: "completed", artifactsDir: "/tmp/wf" });
+  return JSON.stringify({
+    type: "run-settled",
+    seq: 2,
+    ts: Date.now(),
+    outcome: "done",
+    artifactsDir: "/tmp/wf",
+  });
 }
 
 function journalPathOf(tmpDir: string, runId: string): string {
-  return path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`);
+  return path.join(tmpDir, "workflow-state", `${runId}.record.jsonl`);
 }
 
 // ── 用例 ─────────────────────────────────────────────────────────────────────

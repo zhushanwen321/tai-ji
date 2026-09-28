@@ -491,7 +491,7 @@ function elapsedLabel(entry: BackgroundTaskEntry): string {
 /** 执行态判据 = SSOT 谓词（isRunningProjection），与计数/徽标同源不漂移 */
 const isRunningSubagent = isRunningProjection
 function completedAgentCount(record: WorkflowRunRecord): number {
-  return record.agentCalls.filter((call) => call.status === 'completed' || call.status === 'failed').length
+  return record.agentCalls.filter((call) => call.status === 'done' || call.status === 'failed').length
 }
 function workflowPercent(record: WorkflowRunRecord): number {
   if (record.agentCalls.length === 0) return 0

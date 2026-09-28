@@ -41,7 +41,13 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { AgentCallOpts } from "../models/types.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
-import { dispatchRunCreated, handleWorkerMessage, isRunSettled } from "../worker-message-pump.ts";
+import {
+  handleWorkerMessage,
+} from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+  isRunSettled,
+} from "../terminal-actions.ts";
 import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
 import type { RecordStore } from "../../execution/persistence/record-store.ts";
 import { SubagentService } from "../../execution/subagent-service.ts";

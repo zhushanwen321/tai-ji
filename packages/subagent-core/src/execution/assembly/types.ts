@@ -16,7 +16,6 @@ import type {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentFailureKind } from "../../orchestration/models/types.ts";
-import type { RunOutcome } from "../../orchestration/run-events.ts";
 import type { ModelInfo } from "./model-resolver.ts";
 
 // ============================================================
@@ -143,11 +142,14 @@ export const CLOSED_REASONS: readonly ClosedReason[] = [
 /**
  * 终态三态对外语义（U3 C-outcome 一等披露）。
  *
- * [W2 D5 词表单源] 本类型不再是独立字面量联合——派生自 run 域单源
- * {@link RunOutcome}（orchestration/run-events.ts）的收窄子集：record 域轮终/终局
- * 构造性不可能 interrupted（该值只由 run 收编/abandon/回收路径写入），类型层
- * Exclude 封死。消费方（project/list/notify 文案/渲染器）只读本字段，不再各自
- * 手写成败推导 switch（三处同构 switch 已随 U3 收敛删除）。
+ * [W2 D5 词表单源 → D2 实施期裁决]（workflow-run-resume-revision）：原
+ * `Exclude<RunOutcome, "interrupted">` 派生别名取消——interrupted 已移出
+ * RunOutcome，Exclude 失去意义。本域（execution/subagent-record）词表改为独立
+ * 实体字面量、与 RunOutcome 解耦：设计 D2 只裁决了 run 域词表改名
+ * （completed→done）与 call 级（run 域 agent-settled 帧）随改传导，未裁决
+ * execution/subagent-record 域（Out of scope 射程外——本域 outcome 语义是 record
+ * 终局形态，与 run 域 status/outcome 同词原则无涉），本域写入值保持不变。消费方
+ * （project/list/notify 文案/渲染器）只读本字段，不再各自手写成败推导 switch。
  *
  * 由 completeLegacyClosed 唯一写入点按 deriveOutcome 一次计算（判定顺序：cancelled 优先
  * → error 非空 → completed）。
@@ -156,7 +158,7 @@ export const CLOSED_REASONS: readonly ClosedReason[] = [
  * disposeAllRecords 合成 result 恒写 error:"closed due to ..."）落 "failed"——语义为
  * 「父进程关闭时子 agent 未完成即失败」，选定行为而非疏漏，勿当 bug 改回 cancelled。
  */
-export type ExecutionOutcome = Exclude<RunOutcome, "interrupted">;
+export type ExecutionOutcome = "completed" | "failed" | "cancelled";
 
 /**
  * 对外投影的 outcome 联合：含历史 record（outcome 字段诞生前的存量数据）兼容态。

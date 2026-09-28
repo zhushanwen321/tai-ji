@@ -1,11 +1,13 @@
 // ============================================================
-// workflow 概览解析与渲染（w5 新增，纯逻辑零 IO）
+// workflow 概览解析与渲染（w5 新增 → [D16③] record 流换源）
 // ============================================================
 //
-// 本文件消费 discovery/workflows.ts 的 readRunSnapshot（返 unknown 原始快照对象），
-// 把 unknown 类型化为 WorkflowOverview（NEW v='wf-run-v1'/'wf-run-v2' / OLD 无 v 双格式分支），
-// 再渲染为人类可读文本。零 IO：parseRunSnapshot/renderWorkflowOverview 喂 mock 即可单测
-//（w5 TC-wf-core-pure-logic，对齐 session-reader core/* 纯逻辑约定）。
+// 本文件消费 discovery/workflows.ts 的 readRunSnapshot（v1/旧指针档——返 unknown
+// 原始快照对象，NEW/OLD 双格式分支）与 record 流文本（[D16③] v2 档——journalPath
+// 锚点语义重定义为 record 流路径后的新数据源），把 unknown/事件流行类型化为
+// WorkflowOverview，再渲染为人类可读文本。零 IO：parseRunSnapshot /
+// parseRunRecordStream / renderWorkflowOverview 喂 mock 即可单测（w5
+// TC-wf-core-pure-logic，对齐 session-reader core/* 纯逻辑约定）。
 //
 // 不 import @zhushanwen/pi-subagent-workflow 的 RunSnapshot 类型——跨包类型耦合会使上游
 // 升版连带编译期影响本扩展；且上游类型只描述 NEW，OLD 仍需自处理（TC-wf-snapshot-version-union）。
@@ -72,7 +74,7 @@ export interface WorkflowOverview {
   runId: string
   /** WorkflowRef.stateFile 透传 */
   stateFile: string
-  /** NEW state.status / OLD 顶层 status */
+  /** NEW state.status / OLD 顶层 status / record 流投影（[D2] 三态：running | interrupted | done） */
   status: string
   /** details 格式标记（随 details.runs 透传给程序化消费方，文本渲染不读）。v2 读取面形状与 v1 一致（pi-subagent-workflow 8.x 一次性生命周期） */
   version: 'wf-run-v1' | 'wf-run-v2' | 'legacy'
@@ -318,4 +320,144 @@ export function renderWorkflowOverview(overview: WorkflowOverview): string {
   for (const step of overview.steps) lines.push(renderStepLine(step))
   if (overview.error) lines.push(`error: ${overview.error}`)
   return lines.join('\n')
+}
+
+// ---- parseRunRecordStream（[D16③] record 事件流 → WorkflowOverview）----
+
+/** record 事件流逐行宽容解析后的最小行视图（type 判别 + 载荷按需读）。 */
+interface RecordStreamLine {
+  type: unknown
+  ts?: unknown
+  [key: string]: unknown
+}
+
+/** 流解析产物：run 装配面（runId 透传 + stateFile=record 流路径）。 */
+interface RecordStreamFold {
+  workflowName?: string
+  startedAt?: number
+  interrupted?: { errorCode?: string; reason?: string; ts: number }
+  runSettled?: { outcome?: string; reason?: string; ts: number }
+  budgetUsedTokens?: number
+  calls: Map<number, RecordStreamCallFold>
+}
+
+interface RecordStreamCallFold {
+  index: number
+  agentName?: string
+  phase?: string
+  settledOutcome?: string
+  durationMs?: number
+  sessionFile?: string
+  sessionId?: string
+}
+
+function parseRecordStreamLine(line: string): RecordStreamLine | undefined {
+  const trimmed = line.trim()
+  if (trimmed === '') return undefined
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (typeof parsed === 'object' && parsed !== null) return parsed as RecordStreamLine
+    return undefined
+  } catch {
+    return undefined // 坏行（截断行）跳过
+  }
+}
+
+/**
+ * record 事件流 → WorkflowOverview（[D16③] 概览链换源；[D2]/[D3]/[D4] 词表）：
+ * - run-created：workflowName + startedAt（ISO 换算）；
+ * - agent-started：call 行骨架（agentName / phase / 首见生效）；
+ * - agent-settled：call 终局（outcome/durationMs + result 全文的 sessionFile/
+ *   sessionId——家族链跳转入口）；
+ * - run-interrupted：[D2] 中断转移 → status 'interrupted'（非终局）；
+ * - run-settled：终局帧 → status 'done' + outcome（done/failed/cancelled/time_limited）；
+ * - 其余（phase-started / phase-settled / run-resumed）：跳过（状态机转移不进概览文本——phase 分组展示
+ *   归 format 域，U3 接线）。
+ *
+ * 空流/无终局帧 → status 'running'（活跃 run 概览不退化为 skipped——红线）。
+ */
+export function parseRunRecordStream(
+  content: string | undefined,
+  runId: string,
+  stateFile: string,
+): WorkflowOverview {
+  const fold: RecordStreamFold = { calls: new Map() }
+  for (const line of content?.split('\n') ?? []) {
+    const rec = parseRecordStreamLine(line)
+    if (rec === undefined) continue
+    if (rec.type === 'run-created') {
+      fold.workflowName = typeof rec.workflowName === 'string' ? rec.workflowName : undefined
+      fold.startedAt = typeof rec.ts === 'number' ? rec.ts : undefined
+    } else if (rec.type === 'agent-started' && typeof rec.taskIndex === 'number') {
+      if (!fold.calls.has(rec.taskIndex)) {
+        fold.calls.set(rec.taskIndex, {
+          index: rec.taskIndex,
+          agentName: typeof rec.agentName === 'string' ? rec.agentName : undefined,
+          phase: typeof rec.phase === 'string' ? rec.phase : undefined,
+        })
+      }
+    } else if (rec.type === 'agent-settled' && typeof rec.taskIndex === 'number') {
+      const existing = fold.calls.get(rec.taskIndex) ?? { index: rec.taskIndex }
+      const result = typeof rec.result === 'object' && rec.result !== null ? (rec.result as Record<string, unknown>) : {}
+      fold.calls.set(rec.taskIndex, {
+        ...existing,
+        settledOutcome: typeof rec.outcome === 'string' ? rec.outcome : undefined,
+        durationMs: typeof rec.durationMs === 'number' ? rec.durationMs : undefined,
+        sessionFile: typeof result.sessionFile === 'string' ? result.sessionFile : existing.sessionFile,
+        sessionId: typeof result.sessionId === 'string' ? result.sessionId : existing.sessionId,
+      })
+    } else if (rec.type === 'run-interrupted') {
+      fold.interrupted = {
+        errorCode: typeof rec.errorCode === 'string' ? rec.errorCode : undefined,
+        reason: typeof rec.reason === 'string' ? rec.reason : undefined,
+        ts: typeof rec.ts === 'number' ? rec.ts : 0,
+      }
+    } else if (rec.type === 'run-settled') {
+      fold.runSettled = {
+        outcome: typeof rec.outcome === 'string' ? rec.outcome : undefined,
+        reason: typeof rec.reason === 'string' ? rec.reason : undefined,
+        ts: typeof rec.ts === 'number' ? rec.ts : 0,
+      }
+    }
+  }
+
+  // status 三态投影（[D2]）：终局帧 > 中断转移 > running（空流也 running——活跃兜底）
+  let status = 'running'
+  let reason: string | undefined
+  let completedAt: string | undefined
+  let error: string | undefined
+  if (fold.runSettled !== undefined) {
+    status = 'done'
+    reason = fold.runSettled.outcome
+    completedAt = new Date(fold.runSettled.ts).toISOString()
+    if (fold.runSettled.outcome === 'failed') error = fold.runSettled.reason ?? fold.runSettled.outcome
+  } else if (fold.interrupted !== undefined) {
+    status = 'interrupted'
+    error = fold.interrupted.reason
+  }
+
+  const steps: WorkflowStep[] = [...fold.calls.values()]
+    .sort((a, b) => a.index - b.index)
+    .map((call) => ({
+      index: call.index,
+      status: call.settledOutcome === undefined ? 'running' : 'done',
+      ...(call.agentName !== undefined ? { description: call.agentName } : {}),
+      ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
+      ...(call.sessionId !== undefined ? { sessionId: call.sessionId } : {}),
+      ...(call.sessionFile !== undefined ? { sessionFile: call.sessionFile } : {}),
+    }))
+
+  return {
+    runId,
+    stateFile,
+    status,
+    version: 'wf-run-v2',
+    ...(fold.workflowName !== undefined ? { script: fold.workflowName } : {}),
+    ...(fold.startedAt !== undefined ? { startedAt: new Date(fold.startedAt).toISOString() } : {}),
+    ...(completedAt !== undefined ? { completedAt } : {}),
+    ...(reason !== undefined ? { reason } : {}),
+    ...(error !== undefined ? { error } : {}),
+    budget: {},
+    steps,
+  }
 }
