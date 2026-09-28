@@ -45,7 +45,7 @@ import {
 // [W2/V1 D1] 收编追加的记录动作走 settleRunAccounting 终局记录原语（journal 帧 +
 // manifest 两件单点）+ (outcome, errorCode) → DoneReason 联合派生单点；
 // scan 走 pump 的 scanRunEvents（journal 单写者域——帧落账同域，证据面一致；
-// idle-gc 退役决策 2 起 journal 目录支持 per-call 参数注入，缺省仍模块锚）。
+// ADR-0081 起 journal 目录支持 per-call 参数注入，缺省仍模块锚）。
 import {
   buildWorkflowRecordSettledEntryData,
   runSettledOutcomeToDoneReason,
@@ -209,7 +209,7 @@ export interface AdoptInterruptedRunOptions {
    */
   graceWindowMs?: number;
   /**
-   * journal 目录（idle-gc 退役 §3.3 决策 2 目录参数化）：runtime 侧启动扫描注入
+   * journal 目录（ADR-0081 目录参数化）：runtime 侧启动扫描注入
    * ——调用进程 cwd/env 与落盘目录不相交，scanRunEvents / manifest 证据面 /
    * settleRunAccounting dispatch 链按它解析。缺省 = 模块锚
    * （resolvePiWorkflowStateDir 三层解析），pi 壳既有调用点零改动。
@@ -256,7 +256,7 @@ function resolveManifestDirForAdopt(journalDir?: string): string | undefined {
  * [W2/V1 D1] 记录动作统一走终局记录原语：run-settled 写入经 dispatchRunTrigger
  * per-run 串行队列（冷路径同走队列——离线收编无并发竞争成本），scan/manifest
  * 走模块 journal 单写者域（与帧落账同源，证据面一致；journal 目录经 opts.journalDir
- * per-call 注入，idle-gc 退役决策 2——runtime 侧扫描形态，缺省模块锚）；三面证据
+ * per-call 注入，ADR-0081——runtime 侧扫描形态，缺省模块锚）；三面证据
  * 前置是原语裁决点的前置防御（跨进程防双帧），表内转移 fail-fast 让位
  *（IllegalTransitionError → skippedTerminal）是进程内第二道幂等。
  * [W2 D3] outcome 缺省 "interrupted"（被动终局唯一权威表达）；条目 reason 经

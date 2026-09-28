@@ -56,7 +56,7 @@
 //   ④ closedReason—— 终态→markFinalized/markCancelled；轮终清除→markRoundIdle（[S10]）
 //   ⑤ resumable   —— 字段已退役（[U5/D4] idle 即 resumable，字段从 record/entry
 //                    契约删除，无写点）
-//   ⑥ idleSince   —— 轮终刷新→markRoundIdle
+//   ⑥ idleSince   —— 已退役（30 天空闲回收判据锚，ADR-0081；字段与写点删除）
 //   ⑦ sessionFile —— 回填族（run 应答/promote）归调用方内存回填 + register/
 //                    markFinalized 序言随投影持久化；acquireWriteLease 在锚点确立时
 //                    声明写权（D3a 时机①）
@@ -520,8 +520,8 @@ export class RecordStore {
    *   ① status 写 idle；② result 按 outcome 写入（成功=content / 失败=前值??
    *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable
    *      字段已退役（[U5/D4] idle 即 resumable，无簿记动作）；⑥
-   *      idleSince 刷新（idle-GC 判据锚）；⑦ **`.alive` 保留**
-   *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 回收]，轮终
+   *      idleSince 已退役（30 天空闲回收判据锚，ADR-0081，无簿记动作）；⑦ **`.alive` 保留**
+   *      （D3a 跨轮延续——写权声明至 release 单出口[终态原语 markSettledOut]，轮终
    *      record 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
    *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
    *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
@@ -922,16 +922,6 @@ export class RecordStore {
   listRunningMutable(): ExecutionRecord[] {
     return [...this.records.values()]
       .filter((r) => r.status === "running");
-  }
-
-  /**
-   * 列出全部内存 record（running + idle）的可变引用——idle-GC 专用扫描面。
-   * [two-state-convergence U5/D4] GC 判据改 idle 派生后，候选集 = idle record
-   * （listRunningMutable 的 running 过滤会把它们挡在扫描外，GC 将恒空转）——本方法
-   * 提供不过滤的枚举面，判据（isResumable = idle）在消费方收拢，单一权威不变。
-   */
-  listAllInMemory(): ExecutionRecord[] {
-    return [...this.records.values()];
   }
 
   /**

@@ -527,7 +527,7 @@ function enqueueRunDispatch<T>(runId: string, task: () => Promise<T>): Promise<T
 }
 
 /** journal 实例缓存（按目录 keyed）与测试注入点（生产目录 = run store 旁
- *  workflow-state，惰性解析）。keyed 缓存（idle-gc 退役 §3.3 决策 2）：per-call
+ *  workflow-state，惰性解析）。keyed 缓存（ADR-0081）：per-call
  *  目录参数化后同进程可并存多个目录的 journal 实例（runtime 启动扫描收编 ≠ pi 壳
  *  模块锚目录），单值缓存会让两目录互相踢缓存——Map 按目录各持一份，单写者纪律
  *  不受影响（同一 run 恒同目录）。 */
@@ -573,7 +573,7 @@ function journalForDir(dir: string): RunEventJournal {
 }
 
 /**
- * journal 目录解析（idle-gc 退役 §3.3 决策 2 目录参数化）：显式 `journalDir`
+ * journal 目录解析（ADR-0081 目录参数化）：显式 `journalDir`
  * 优先（runtime 侧收编链注入——调用进程 cwd/env 与落盘目录不相交的形态，目录
  * 即权威）；缺省 = 模块锚三层解析（测试注入 / vitest 防线 / 生产推导），pi 壳
  * 既有调用点零改动。显式目录不受 VITEST 防线拦截（与 setRunEventJournalDirForTest
@@ -862,7 +862,7 @@ export interface RunDispatchSource {
   /** terminal 投影（manifest workflowName）的载荷源；runId 键投递（armed 回执）可缺省。 */
   spec?: RunSpec;
   /**
-   * 本投递的 journal 目录锚（idle-gc 退役 §3.3 决策 2 目录参数化）：dispatch 链
+   * 本投递的 journal 目录锚（ADR-0081 目录参数化）：dispatch 链
    * （fold / 帧落账 / manifest 投影）按它解析 journal 目录。runtime 侧冷路径收编
    * 注入（调用进程 cwd/env 与落盘目录不相交）；缺省 = 模块锚（活体链既有调用点
    * 零改动）。安全性：per-run 投递队列按 runId 串行 + 同一 run 恒同目录——per-call
@@ -1091,7 +1091,7 @@ function summarizeRetryReason(result: AgentResult): string {
 // - manifest 半边：spec 携带形态（活体 / 崩溃恢复 v2）由 dispatch 链 outputs
 //   执行（persistTerminalProjection）；runId 键投递（冷路径收编）由本原语补写
 //   （workflowName 载荷从 run-created 帧取，调用方传入）。
-// - journal 目录（idle-gc 退役 §3.3 决策 2 目录参数化）：opts.journalDir 显式
+// - journal 目录（ADR-0081 目录参数化）：opts.journalDir 显式
 //   传入时 artifactsDir / manifest / dispatch 链 fold 全按它解析（runtime 启动
 //   扫描收编——调用进程 cwd/env 与落盘目录不相交）；缺省 = 模块锚。
 //

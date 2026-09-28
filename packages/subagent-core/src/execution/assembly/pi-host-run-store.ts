@@ -13,12 +13,12 @@
 // getAgentDir()，与壳 resolveSessionDir 同源，pi 升级自动跟随；runtime 侧注入
 // getPiAgentDir() 自派生树）。消费方 = runtime 启动扫描（startup-sweep）：
 // 全量枚举 + 逐 run 收编（adoptInterruptedRun 的 journalDir per-call 参数，
-// idle-gc 退役 §3.3 决策 2），枚举全部 session 目录——same/cross-session 两
+// ADR-0081），枚举全部 session 目录——same/cross-session 两
 // 形态一次覆盖（单目录扫描对 cross-session 形态结构性不可达）+ agentDir 根
 // workflow-state（resolvePiSessionScopedDir 回退分支兼容）。每轮 loadAll 现解析
 //（目录集运行时可变，对齐 sessionFace 晚绑定纪律）。
 //
-// 读错分通道（idle-gc 退役 §3.1 规格 2）：sessions 根 ENOENT = 从未有过 session
+// 读错分通道（ADR-0081）：sessions 根 ENOENT = 从未有过 session
 // 落盘的正常空态（仅保留 agentDir 根回退目录扫描）；EACCES / EIO 等真 IO 故障
 // 上抛给扫描层——静默折叠成空集会让持续 IO 故障伪装成「0 个 run 的成功扫描」
 // （与 §2.3 批评的「静默跳过伪装成无 run 可回收」同病）。
@@ -43,7 +43,7 @@ const SESSIONS_DIR_NAME = "sessions";
  * 结构类型——调用方传 FileRunStore 实例即可，不 import orchestration 具体类，
  * 保持本模块可独立编译 + 单测）。
  *
- * 返回形态（idle-gc 退役 §3.1 规格 2 终态重构）：`{ runId, stateDir, status }`
+ * 返回形态（ADR-0081 终态重构）：`{ runId, stateDir, status }`
  * ——stateDir = 该 run 的 workflow-state 目录（FileRunStore 构造时已知），启动
  * 扫描收编按它传 journalDir 参数；不含 startedAt（旧 TTL 超龄判定字段，全量
  * 收编不判超龄，消费方为零的字段不进接口）。

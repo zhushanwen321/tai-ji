@@ -110,6 +110,9 @@ workflow run 与 subagent record 的状态词表与状态机形态收敛（承�
 
 本波不新增约束登记（构造性保证无需第二道 grep 检查）；既有 C-ext-26（终局通知裁决点）/ C-data-20（record 写面唯一入口）口径不变。
 
+### ADR-0081 idle-gc 机制退役，崩溃恢复收敛为事件驱动两层 + 启动扫描（2026-09-28 设计裁决）
+**idle-gc 机制退役，崩溃恢复收敛为事件驱动两层 + 启动扫描**：30 天 TTL 定时器机制（record 内存回收 + workflow run 僵尸收编）整体删除——三个必要性论据经核实全部不成立（视图按目录取数 / journal 恒 KB 级 / retention 事件驱动），且机制跑在 pi 进程内、pi 空闲态事件循环停止调度周期任务使其在生产常态下停摆。替代 = runtime 启动序列（单实例锁确立后、先于任何 pi spawn）全量枚举收编 pi 宿主形态的 running run（两件直落：journal run-settled 帧 outcome=interrupted errorCode=startup-sweep【RunErrorCode 词表新增值】+ manifest）；判僵尸依据 = 双防线——启动时点排除新 pi（runtime 启动段不 spawn）+ 事件流静止宽限窗排除旧 pi 残活的末帧新鲜形态（graceWindowMs=60s：末帧距扫描时点过近即跳过本轮，runtime 崩溃自动重启可落在旧 pi EOF 收尾窗口内）；「旧 pi 残活且末帧已超窗」形态（长 ask 静默期崩溃）不设防，按四要素登记为已接受代价（后果 = journal 双 run-settled 帧，fold / outcome 主显示链真实终局被 interrupted 遮蔽，manifest 通道被旧 pi 终局覆写为真实终局、registry 投影 errorCode 取末帧亦为真实值——失真形态随消费方各异，排障以 journal 末帧为准；重审触发 = 双 run-settled 帧实例 / EOF 退出时延实测超窗）。record 内存回收无替代（驻留有界：session 结束进程退出全清；重审触发 = 单 session 驻留过千条或内存排障定位到 record 驻留）；孤儿 `.alive` 经三条代码证据核实无拦截路径（三分支重建判 running / 覆盖写 / pid 探针放行）。
+
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）

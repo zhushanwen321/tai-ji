@@ -561,7 +561,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("[B5/D3a] record 带 sessionFile → 轮终后 .alive marker 仍在（写权声明跨轮延续）+ record.status=running + round 0→1", async () => {
     const sessionFile = path.join(tmpDir, "session.jsonl");
     // 预写 .alive marker（[B5] 行为变化锚点：轮终**保留** marker——release = 终态原语
-    // 或 idle-GC 归档两出口，轮终 record 仍 resumable 随时续聊 spawn 写同一
+    // markSettledOut 单出口，轮终 record 仍 resumable 随时续聊 spawn 写同一
     // sessionFile，删则轮后跨进程防御空窗，D3a）
     fs.writeFileSync(
       `${sessionFile}.alive`,

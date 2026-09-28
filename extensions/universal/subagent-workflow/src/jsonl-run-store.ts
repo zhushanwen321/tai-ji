@@ -1258,8 +1258,9 @@ export class JsonlRunStore implements RunStore {
    * 两级证据拼图。语义保持（两个已证实的误判面修复 A1/A2）：
    * 1. **journal 终局先于终态 entry 落账**：终态 entry 写失败后，任何一次进程退出
    *    都会让 recoverCrashedRuns 把实际 completed 的 run 误标 failed；
-   * 2. **idle-GC 双轨**：core GC（FileRunStore 通道）终局化只写 state 文件不改
-   *    entry，resume 后恢复链从 entry 读到 running 再次转 failed，覆盖 GC 终局。
+   * 2. **state 与 entry 双轨**：core 侧终局化只写 state 文件不改 entry（历史 idle
+   *    回收机制即此形态，已退役见 ADR-0081），resume 后恢复链从 entry 读到 running
+   *    再次转 failed，覆盖 state 终局。
    *
    * 证据读序的权威声明 = core orchestration/run-events.ts 文件头「终局证据读序」
    * （journal run-settled 帧 > state 终态快照 > manifest），本调和取前两级：无证据

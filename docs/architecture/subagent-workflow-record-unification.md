@@ -14,7 +14,7 @@
 ### 1.1 SCQA
 
 - **S**：workflow 域是「用户写 JS 脚本编排多子代理」的功能——脚本里 `agent("任务")` 派单个子代理、`parallel()` 并发派多个。脚本本体跑在 worker 子进程，宿主进程侧由 `worker-message-pump.ts`（1295 行）接收 agent() 调用代为执行：pump 建 TUI 进度 record → 调 `SubprocessAgentRunner.run()` → SAR 委托 `subagentService.executeAndAwait`（`subprocess-agent-runner.ts:21/125`）执行。
-- **C**：**每个 agent() 调用存在两个 record**——① pump 自建的游离 progress record（`createRecord` 直调 `:708-717`，挂 trace 节点 `live` 字段，run 完即清，不进 store）；② `executeAndAwait` 创建并 `store.register` 的真实执行 record（`:1849-1850` + `:2110`）——已进共享池（`runAndFinalize` → `acquirePoolOrFinalize`，`:2467`）、已受孤儿恢复覆盖[2026-09 实施勘误：H1 后 SAR 直调 engine.run、无 record，本条仅在 22f77c157 基线成立——共享池实为 W2 新增，见 impl-plan 偏差表 W2]。真实 record 的问题在**状态语义**：成功走 `settleOneShotOutcome` 成功分支 → `doFinalizeRoundToIdle` **保持 running-idle**（SP-5：等首条 message 升级 chatMode，`:2536-2538`）——workflow agent 结果由脚本返回值承载、无 message 对端，running-idle 恒挂到 30 天 idle-gc，且 `useBackgroundWork.hasBackgroundWork`（`:32`，原 hasRunning `:26`）被绑架为恒真。另有编排双轨：SAR.run 平行接线（路由/预检/journal/守护，`:158-333`）与 service `runEngineTask` 族两份同构编排（journal-wiring 注释自述「两份同构接线提为 common helper」——helper 共享了，编排没归一，`:1-4`）。进度消费方（views/detail-content.ts 3 处、WorkflowsView.ts 3 处）直连 `node.live`，重启即失。
+- **C**：**每个 agent() 调用存在两个 record**——① pump 自建的游离 progress record（`createRecord` 直调 `:708-717`，挂 trace 节点 `live` 字段，run 完即清，不进 store）；② `executeAndAwait` 创建并 `store.register` 的真实执行 record（`:1849-1850` + `:2110`）——已进共享池（`runAndFinalize` → `acquirePoolOrFinalize`，`:2467`）、已受孤儿恢复覆盖[2026-09 实施勘误：H1 后 SAR 直调 engine.run、无 record，本条仅在 22f77c157 基线成立——共享池实为 W2 新增，见 impl-plan 偏差表 W2]。真实 record 的问题在**状态语义**：成功走 `settleOneShotOutcome` 成功分支 → `doFinalizeRoundToIdle` **保持 running-idle**（SP-5：等首条 message 升级 chatMode，`:2536-2538`）——workflow agent 结果由脚本返回值承载、无 message 对端，running-idle 恒挂不清（无终态化路径），且 `useBackgroundWork.hasBackgroundWork`（`:32`，原 hasRunning `:26`）被绑架为恒真。另有编排双轨：SAR.run 平行接线（路由/预检/journal/守护，`:158-333`）与 service `runEngineTask` 族两份同构编排（journal-wiring 注释自述「两份同构接线提为 common helper」——helper 共享了，编排没归一，`:1-4`）。进度消费方（views/detail-content.ts 3 处、WorkflowsView.ts 3 处）直连 `node.live`，重启即失。
 - **Q**：能否让 workflow 里的 agent() 在概念与治理上等同一个 subagent——单一 record、正确终态、store 订阅进度、隐藏可见性？
 - **A**：能——真实 record 已在 store（v1 误判「游离」在此修正），增量 = 删进度假 record 换 store 订阅、workflow origin 成功即终态化、编排归一、投影层隐藏。用户已四裁定：agent() 等同 subagent / 可见性隐藏 / 进度从 store 订阅 / 并发共享池（共享池现状已成立，本设计回归验证）。
 
@@ -39,12 +39,12 @@
 
 ### 2.1 使用者视角的现状（真实链路）
 
-用户在 GUI 跑一个 workflow：`parallel(() => agent("调研 A"), () => agent("调研 B"), () => agent("写总结"))`。每个 agent() 调用：worker 发消息 → pump `dispatchAgentCall`（`:700-792`）**先建游离 progress record**（挂 trace.live，TUI 进度用）→ `runner.run(opts)` → SAR.run 平行编排（路由/预检/journal/`armMidRoundNoProgress(taskId)`）→ 委托 `executeAndAwait` → **真实 record 注册进 store**（emitPendingRegister `:1849-1850`）→ 池 acquire → 执行 → 成功走 `settleOneShotOutcome` **保持 running-idle**（`:2536-2538`）→ AgentResult 回填 `node.result`、progress record 清除。重启后：WorkflowRun 由 FileRunStore 重水合（trace result 摘要在，进度即失）；真实 record 经 store 孤儿恢复——恢复成什么状态取决于崩溃时点，成功完成的 record 已在 30 天 idle-gc 边缘。
+用户在 GUI 跑一个 workflow：`parallel(() => agent("调研 A"), () => agent("调研 B"), () => agent("写总结"))`。每个 agent() 调用：worker 发消息 → pump `dispatchAgentCall`（`:700-792`）**先建游离 progress record**（挂 trace.live，TUI 进度用）→ `runner.run(opts)` → SAR.run 平行编排（路由/预检/journal/`armMidRoundNoProgress(taskId)`）→ 委托 `executeAndAwait` → **真实 record 注册进 store**（emitPendingRegister `:1849-1850`）→ 池 acquire → 执行 → 成功走 `settleOneShotOutcome` **保持 running-idle**（`:2536-2538`）→ AgentResult 回填 `node.result`、progress record 清除。重启后：WorkflowRun 由 FileRunStore 重水合（trace result 摘要在，进度即失）；真实 record 经 store 孤儿恢复——恢复成什么状态取决于崩溃时点，成功完成的 record 已长期 idle 驻留。
 
 ### 2.2 问题清单（带证据）
 
 1. **双 record 并存**：pump progress record（`:708-717` 游离、run 完即清、`execution-record.ts:3,10-13`「唯一创建/更新入口」头注被绕开）+ store 真实 record（`:1849-1850` 注册）——进度真相分裂：TUI/GUI 看假 record，治理面（恢复/对账/监督）管真 record。
-2. **成功 record 恒 running-idle（SP-5 寄生）**：`settleOneShotOutcome` 成功分支 → `doFinalizeRoundToIdle` 保持 running-resumable（`:2536-2538`）。四面连带：① `useBackgroundWork.hasBackgroundWork`（`:32`，原 hasRunning）恒真——GUI working 态被 workflow record 绑架；② record 恒挂到 30 天 idle-gc；③ subagent message 按记录可命中并**升级为 chatMode 容器**（actions-core 升级链，语义怪异——脚本持有结果，无人会 message 它）；④ goal continuation 检查被 SP-5 打穿（`goal/src/adapters/event-handlers/agent-end.ts:192-213` 依赖 record 级 pending:unregister 判收尾，成功恒 running 时 defer 恒挂）。
+2. **成功 record 恒 running-idle（SP-5 寄生）**：`settleOneShotOutcome` 成功分支 → `doFinalizeRoundToIdle` 保持 running-resumable（`:2536-2538`）。四面连带：① `useBackgroundWork.hasBackgroundWork`（`:32`，原 hasRunning）恒真——GUI working 态被 workflow record 绑架；② record 恒挂不清；③ subagent message 按记录可命中并**升级为 chatMode 容器**（actions-core 升级链，语义怪异——脚本持有结果，无人会 message 它）；④ goal continuation 检查被 SP-5 打穿（`goal/src/adapters/event-handlers/agent-end.ts:192-213` 依赖 record 级 pending:unregister 判收尾，成功恒 running 时 defer 恒挂）。
 3. **编排双轨**：SAR.run 平行接线（路由 `routeEngineForHost` / 预检 `assertTaskShapeSupported` / model 校验 / journal 接线 / no-progress 守护双刷新源 / `mergeRunSignals` / spawned-children 注册，`:158-333`）与 service `runEngineTask` 族两份同构编排；公共 helper 已共享（D3-②③④ 协议化产物），**编排顺序没有归一**。
 4. **进度通道直连且不持久**：`node.live` 消费方 = `interface/views/detail-content.ts`（:79/:222/:274 三处分支）+ `interface/views/WorkflowsView.ts`（:141/:169/:816）+ `orchestration/run-snapshot.ts`（:136/:149 快照序列化剥离 live）；进度不落盘、重启即失。
 5. **对账盲区（record 级精确化）**：run 级对账**已有判据收敛**（`service-binding.ts:260-266` 生产装配注入 `lookupWorkflowRunState`：running→active / done→terminal / 缺失→missing）；盲区在 record 级——record 状态（running-idle 恒挂）与 run 级终态之间无对账，sweep 对「run 已 done、record 恒 running」的组合无感知。
@@ -121,7 +121,6 @@ workflow 域早于引擎协议化演进定型。协议化（D3 系列）把真�
 | 监督器通知族（supervisorNotify steer 通道） | 随 adopt 豁免自然零触发（D6 出口枚举） |
 | pending register/unregister（record 级） | 照旧配对（`:1849-1850` / 终态化注销） |
 | pending register/unregister（run 级） | 照旧配对（lifecycle ↔ pump），不动（D5） |
-| idle-gc 30 天 | 不再适用于 workflow 成功 record（D7 终态化后无 running-idle 堆积） |
 | message 升级链（actions-core） | 成功 record 已终态 → `getRecordForAction` not found → endedMessageGuard 硬拒指引（语义正确）。**[演进注记 2026-09-13]** 永久会话模型（万物可续，更新的产品裁定）下本行硬拒指引不再成立：终态 workflow record 跨重启重建为 idle（record-access.ts:505 getRecordForAction 冷查重建）→ message 经 reviveOrThrow 准入可复活（conversation-continuation.ts:800 万物可续）。现实触发面窄（需显式持有 record id）；如需收紧，另立 workflow-origin message 准入分支的后续项（不改代码，此处仅承认该面） |
 
 ### 3.4 错误规格（增量）

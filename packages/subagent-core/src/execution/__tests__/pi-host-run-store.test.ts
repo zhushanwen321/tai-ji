@@ -1,7 +1,7 @@
 // pi-host-run-store 回归锁：枚举读侧目录由调用方注入的 agentDir 活源驱动，
 // 不从进程 env/cwd/sessionFile 推测（两条推导路径均曾在 W2 D3 真机链实证
 // 错位致恒空转，见被测模块头注）。
-// 覆盖面（idle-gc 退役 §3.1 规格 2 / §3.3 决策 2 / §4.1 场景 3、5）：
+// 覆盖面（ADR-0081 / §4.1 场景 3、5）：
 // 1. 枚举目录形态（agentDir 活源 + 全 session 目录 + 回退根）；
 // 2. 终态返回形态 { runId, stateDir, status }（stateDir = 收编链 journalDir 注入源）；
 // 3. runtime 形态：journalDir 参数显式传入时收编链（adoptInterruptedRun）读写

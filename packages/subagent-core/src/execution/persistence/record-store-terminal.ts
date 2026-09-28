@@ -314,7 +314,6 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
   }
   record.status = "idle";
   record.stopReason = stopReason;
-  record.idleSince = Date.now();
   const settledAt = Date.now();
   // [U7 / §3.2.7 统计口径单基准] settle 快照锚分派（U6-D2 交接收编）：
   //   - pi：子 session 文件锚（现行——`.state` 收条 + binding 快照）；

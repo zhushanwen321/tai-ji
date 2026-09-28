@@ -362,7 +362,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   });
 
   describe("markRoundIdle（簿记全集①-⑨；簿记⑦ .alive 保留）", () => {
-    it("成功轮：result=content、round+1、closedReason 清、翻 idle、idleSince 刷新、注销②、entry 携带新 round", () => {
+    it("成功轮：result=content、round+1、closedReason 清、翻 idle、注销②、entry 携带新 round", () => {
       const record = makeRecord("chat-2", { round: 1 });
       record.closedReason = "gc"; // [S10]：前置残留不清则泄漏进 list 投影
       record.sessionFile = sessionFile;
@@ -379,7 +379,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(record.result).toBe("round done"); // ②
       expect(record.round).toBe(2); // ③
       expect(record.closedReason).toBeUndefined(); // ④
-      expect(record.idleSince).toBeGreaterThan(0); // ⑥
+      // ⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081）——无簿记动作。
       expect(order).toEqual([]); // ⑦ `.alive` 保留——无 release 动作
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true); // ⑦ 落盘面仍持声明
       expect(unregister).toHaveBeenCalledWith("chat-2", "running"); // ⑧ 发射点②

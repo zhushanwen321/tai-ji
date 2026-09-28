@@ -616,11 +616,9 @@ export interface ExecutionRecord {
   // [H1 U6 / D7 ③] roundBaseTurnIndex（增量通知 base 记账）已退役删除——消费函数
   // getFullTextFrom/nextRoundBaseTurnIndex 与唯一写点 settleChatRoundFromResponse 随
   // chat 域载体退役，生产零调用（base 推进 = 死记账）。
-  /**
-   * record 进入 idle 态的时间戳（ms）。finalizeRoundToIdle 设值；GC 定时器据此计算
-   * 剩余 TTL。undefined = 非 idle 态（running/closed/cancelled）或旧 record 缺失字段。
-   */
-  idleSince?: number;
+  // [ADR-0081 空闲回收机制退役] idleSince（GC 定时器 TTL 判据锚）已退役删除——机制删除
+  // 后生产零读点（写点 markSettledImpl / markRoundIdle 随删）；磁盘存量字段的读取
+  // 按宽容形状处理（多余 JSON 字段无害）。
   /**
    * close 优雅关闭标志（M2-B3）。record 运行中调 `close {force:false}` 时置 true；
    * 收口轮的轮次通知送达后收口落账消费（Continuation settle 分支 / one-shot 主干尾部，

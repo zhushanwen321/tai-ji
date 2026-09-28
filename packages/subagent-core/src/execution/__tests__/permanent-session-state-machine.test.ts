@@ -167,7 +167,7 @@ describe("两态状态机 CAS 语义", () => {
 // ── ② markSettled 副作用矩阵（.state / binding / manifest / .alive）──────────
 
 describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
-  it("内存面：status=idle + stopReason 写入 + idleSince 刷新；closedReason 不写（非终态）；record 留内存", () => {
+  it("内存面：status=idle + stopReason 写入；closedReason 不写（非终态）；record 留内存", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.round = 2;
@@ -176,7 +176,6 @@ describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
     expect(rec.status).toBe("idle");
     expect(rec.stopReason).toBe("interrupted");
     expect(rec.closedReason).toBeUndefined();
-    expect(rec.idleSince).toBeDefined();
     expect(rec.endedAt).toBeUndefined(); // 非终态，duration 语义保持
     expect(store.getMutable("bg-1")).toBe(rec); // 留内存（随时可续聊）
   });

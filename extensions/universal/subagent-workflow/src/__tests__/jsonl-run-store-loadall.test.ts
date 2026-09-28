@@ -12,8 +12,9 @@
 // 2. loadAll 终局调和（reconcileRunningFinality——[W1 / D4/D7] v1 兼容层）：两个
 //    已证实的误判面——① journal run-settled 终局先于终态 entry 落账（pump 落账
 //    顺序 + 终态 entry best-effort 不重试）→ 实际 completed 的 run 崩溃恢复后被
-//    误标 failed；② idle-GC（core FileRunStore 通道）终局化只写 state 文件不改
-//    entry → resume 后恢复链从 entry 读到 running 再次转 failed，覆盖 GC 终局。
+//    误标 failed；② state 与 entry 双轨——core 侧终局化只写 state 文件不改
+//    entry（历史 idle 回收机制即此形态，已退役见 ADR-0081）→ resume 后恢复链从
+//    entry 读到 running 再次转 failed，覆盖 state 终局。
 //    [W1] 分流锚定：本调和只服务 v1 快照 entry 定界的实体；v2 实体的终局核对 =
 //    journal 投影本身（rebuildRunsFromJournals，见 session-file 件 v2 用例）。
 // 3. loadAll entry 源扫描（collectEntrySources + loadRunFromStateFile，R2-TC S4）：
