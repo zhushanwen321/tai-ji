@@ -102,6 +102,8 @@ interface StoreHarness {
   collectResult: SupervisorCandidateRecord[];
   collectCalls: Array<{ limit: number; status: string; rootFilter: string | undefined }>;
   reported: SubagentRecord[];
+  /** [W4 收敛] 判据第三级替身面（id → 收编停因）。 */
+  adoptedStopReasons: Map<string, string>;
 }
 
 /** duck-typed RecordStore 替身（service-binding 消费 getMutable / findLightById /
@@ -115,6 +117,8 @@ function makeStore(): StoreHarness {
   const collectCalls: StoreHarness["collectCalls"] = [];
   const reported: SubagentRecord[] = [];
   const realStore = new RecordStore(path.join(tmpDir, "sessions"));
+  // [W4 收敛] sweep 判据第三级的替身面：id → 收编停因（生产实现读收编 manifest）。
+  const adoptedStopReasons = new Map<string, string>();
   const store = {
     getMutable: (id: string) => memory.get(id),
     findLightById: (id: string) => disk.get(id),
@@ -127,8 +131,11 @@ function makeStore(): StoreHarness {
     },
     markFinalized: (record: ExecutionRecord, closedReason?: ClosedReason) =>
       realStore.markFinalized(record, closedReason),
+    // [W4 收敛] sweep 判据第三级的替身面：id → 收编停因（生产实现读收编 manifest）。
+    adoptedStopReasons,
+    findAdoptedStopReasonSync: (id: string) => adoptedStopReasons.get(id),
   };
-  return { store: store as unknown as RecordStore, realStore, memory, disk, collectResult, collectCalls, reported };
+  return { store: store as unknown as RecordStore, realStore, memory, disk, collectResult, collectCalls, reported, adoptedStopReasons };
 }
 
 interface BindingHarness {
@@ -550,6 +557,33 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     h.store.disk.set("bg-disk", makeDiskRecord(sessionFile, { id: "bg-disk" }));
     runPendingReconcileSweepForService(h.binding, false);
     expect(h.pi?.appended ?? []).toHaveLength(0);
+  });
+
+  it("[W4 收敛] v2 收编 record（findLightById 未命中 + 收编 manifest 停因在场）→ 注销 reason=interrupted-by-restart status=aborted（expired 误注销回归钉）", () => {
+    setup();
+    writeRegister("bg-adopted", "subagent");
+    const h = makeBinding({ sessionFile });
+    h.store.adoptedStopReasons.set("bg-adopted", "interrupted-by-restart");
+    runPendingReconcileSweepForService(h.binding, false);
+    const entry = (h.pi?.appended ?? []).find(
+      (c) => c.customType === "pending:unregister",
+    );
+    expect(entry?.data).toMatchObject({
+      id: "bg-adopted",
+      reason: "interrupted-by-restart",
+      status: "aborted",
+    });
+  });
+
+  it("[W4 收敛] v2 收编停因缺席（判据第三级 undefined）→ 维持 missing 分支 expired（保守侧不回归）", () => {
+    setup();
+    writeRegister("bg-nonadopted", "subagent");
+    const h = makeBinding({ sessionFile });
+    runPendingReconcileSweepForService(h.binding, false);
+    const entry = (h.pi?.appended ?? []).find(
+      (c) => c.customType === "pending:unregister",
+    );
+    expect(entry?.data).toMatchObject({ id: "bg-nonadopted", reason: "expired", status: "expired" });
   });
 
   it("终态 subagent record（内存 closed，closedReason 有值）→ 差集补发注销（reason 直传 closedReason，status 经 mapReasonToStatus）", () => {

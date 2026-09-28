@@ -61,6 +61,15 @@ export interface ManifestRecord {
    * （磁盘 sidecar 源由 .state reason 承载，不经本字段）。
    */
   closedReason?: ClosedReason;
+  /**
+   * [W4 收敛] v2 收编 record 的被动终局停因（record-settled 帧 stopReason 同名同值
+   * ——interrupted-by-restart 族）。仅收编投影写入（buildAdoptedManifestProjection），
+   * 轮终/终态原语投影不写——本字段是 sweep 判据第三级（findAdoptedStopReasonSync）
+   * 区分「收编终局」与「轮终 idle」的唯一依据：v2 收编产物不在 findLightById 读取面，
+   * 判据缺席时收编 record 落 missing 分支被误注销为 expired（注销词统一手术的修复点）。
+   * 不并入 closedReason：那是 close/cancel 意愿动作词族，被动收编停因不进该词表。
+   */
+  stopReason?: string;
   createdAt: number;
   completedAt?: number;
   sessionFile?: string;

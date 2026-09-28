@@ -771,6 +771,35 @@ export class RecordStore {
   }
 
   /**
+   * [W4 收敛] v2 收编 record 的终局停因查询（sweep 判据第三级同步只读面）。
+   * 读收编 manifest 物化（manifestDir/<id>.json——收编写面是同步原子写，读侧
+   * 恒一致）：executionStatus==="idle" 且 stopReason 在场 = 收编终局，返回停因
+   * （interrupted 族——注销条目经 mapReasonToStatus 落 aborted）；其余形态
+   * （轮终/终态原语投影无 stopReason、文件缺失、解析失败）返回 undefined，判据
+   * 保守维持现状分支。manifestStore 异步写形态（纯内存测试）读不到 = undefined，
+   * 与保守侧一致。v2 收编产物不在 findLightById 读取面——本方法是 sweep 对账
+   * 不把收编 record 误注销为 expired 的唯一判据源。
+   */
+  findAdoptedStopReasonSync(id: string): string | undefined {
+    if (this.manifestDir === undefined) return undefined;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(path.join(this.manifestDir, `${id}.json`), "utf8");
+    } catch {
+      return undefined; // 文件缺失/不可读 = 非收编终局形态（保守）
+    }
+    try {
+      const manifest = JSON.parse(raw) as { executionStatus?: string; stopReason?: string };
+      if (manifest.executionStatus === "idle" && typeof manifest.stopReason === "string") {
+        return manifest.stopReason;
+      }
+      return undefined;
+    } catch {
+      return undefined; // 解析失败 = 保守（与 sweep 判据矩阵的坏链保守侧同款）
+    }
+  }
+
+  /**
    * [D8 v7] 终态 manifest 落盘（markFinalized/markCancelled 共用，投影 status 恒
    * closed）。同步性与失败语义见 writeManifestPersisted。
    */

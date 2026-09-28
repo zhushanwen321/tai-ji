@@ -95,10 +95,6 @@ export interface RecordLifecycleDeps {
   readonly getSessionsDir: () => string;
   /** pi 句柄（manifest 写失败事件 appendEntry；initSession 时点晚绑定，dispose 后 null）。 */
   readonly getPi: () => PiLike | null;
-  /** 主 session 文件（晚绑定 getter）。原消费方（回收机制收编归属判定的注册差集
-   *  证据源）已随该机制退役删除；成员与装配点接线暂留（删除将波及本聚合 deps
-   *  的既有测试构造点），待后续批次清理。 */
-  readonly getMainSessionFile: () => string | undefined;
   /** [C-5 显式回调] record 终态化路径的宿主侧收口汇聚点（#14 Continuation 实例清理，
    *  本体在壳）。disposeAllRecords/cancelBackground 直调点 + doFinalizeRecord
    *  deps.onFinalized 钩子统一经此回调。 */

@@ -295,9 +295,6 @@ export class SubagentService {
       getNotifyHost: () => this.notifyHost,
       getSessionsDir: () => this.sessionsDir,
       getPi: () => this.pi,
-      // [已退役回收机制的收编归属判定消费面已删] 接线随 deps 成员暂留待清理
-      // （mainSessionFile 经 baselines 现读，initSession 注入前 undefined）。
-      getMainSessionFile: () => this.mainSessionFile,
       // [R4 / C-5 兑现 / 2026-09-13 design-code-sync 接线] Continuation 协作面本体
       //（continuations 队列 + onRecordFinalizedCleanup + abortAndClearQueue）已迁
       // ChatRounds 聚合——R3 装配时指向壳闭包的回调改指聚合显式接口（r0-inventory

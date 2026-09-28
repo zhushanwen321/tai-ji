@@ -289,10 +289,20 @@ export function runPendingReconcileSweepForService(binding: RoundSupervisorBindi
             : "active";
         }
         const disk = binding.getStore().findLightById(id);
-        if (disk === undefined) return "missing";
-        return isLegacyClosedSettled(disk)
-          ? { terminal: true, closedReason: disk.closedReason }
-          : "active";
+        if (disk !== undefined) {
+          return isLegacyClosedSettled(disk)
+            ? { terminal: true, closedReason: disk.closedReason }
+            : "active";
+        }
+        // [W4 收敛] v2 收编 record 的第三级判据：v1 磁盘读取面（findLightById）不含
+        // 收编产物（events 帧 + manifest 投影），无本级时收编 record 落 missing 分支
+        // 被误注销为 expired——注销词统一手术的修复点（与 run 侧 D6 判据源改接
+        // findSettlementEvidenceSync 同构：判据接终局证据，不接两态机持久化字段）。
+        const adoptedStopReason = binding.getStore().findAdoptedStopReasonSync(id);
+        if (adoptedStopReason !== undefined) {
+          return { terminal: true, closedReason: adoptedStopReason };
+        }
+        return "missing";
       },
       // [F2] type=workflow 及畸形条目的收口判据（设计 D2 sweep 判据补全——
       // 「终态集 ∪ 已离场/不存在」对 workflow run 同样成立）。

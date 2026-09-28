@@ -759,6 +759,10 @@ export function buildAdoptedManifestProjection(
     agentName: identity.agent,
     status: "running", // legacy 三态投影：无 closedReason → running（executionStatus 承载两态权威词）
     executionStatus: "idle",
+    // [W4 收敛] 收编停因上投影：sweep 判据第三级（findAdoptedStopReasonSync）经它把
+    // 收编 record 判 terminal，注销条目 reason 落 interrupted 族（mapReasonToStatus
+    // → aborted），不再误走 missing 分支的 expired。
+    stopReason,
     createdAt: identity.startedAt,
     completedAt: now,
     ...(bound !== undefined && bound.sessionFile !== "" ? { sessionFile: bound.sessionFile } : {}),
