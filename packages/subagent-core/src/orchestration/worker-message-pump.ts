@@ -494,9 +494,9 @@ function composeFinalSettlement(run: WorkflowRun, doneReason: DoneReason): RunSe
 //   outcome/errorCode（run 域）；record 域既有写入面 = settleWorkflowRecord（settle
 //   链收口，record 的 outcome 字段接线归后继批次）；
 // - 其余输出动作 = 声明性语义映射（执行体各居其位，不在本段）：notify =
-//   finalizeRun 既有 onRunDone 链、registry-project = run-registry 投影侧、
-//   journal-cleanup-eligible = prune 资格自然兑现（kill-run-topology 已随
-//   D9-2 定点杀链删除，决策 6-D1）。
+//   finalizeRun 既有 onRunDone 链。注册表投影判读归 run-registry 投影面、journal
+//   清理资格由 pruneTerminalRunFiles 按 manifest outcome 自然兑现——两者均非状态机
+//   转移产物（kill-run-topology 已随 D9-2 定点杀链删除，决策 6-D1）。
 //
 // 活体态：liveRunStates（模块级 Map）是本进程内的状态缓存，miss 时 fold journal
 // （scan + 逐事件 transition 不传 ctx——run-events.ts fold 契约）。terminal 后删除
@@ -897,7 +897,7 @@ export function dispatchRunArmedReceipt(runId: string, frame: unknown): void {
 export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> {
   // [W2/V1] 活体态同步 seed（created 基线，条件式）：runWorkflow 返回前
   // liveRunStates 必命中——isRunSettled 的「miss = 已终局」单向判定由此消除创建
-  // 窗口假阳性（判活类消费方 isScriptRunning 在 run 刚启动的窗口不会误判已终局）。
+  // 窗口假阳性（run 刚启动的窗口不会误判已终局）。
   // 条件式双守卫（防双帧不变量优先）：
   // - liveRunStates 已命中（重复发射/活体推进中）→ 不覆写——队列任务从现态
   //   fold，重复 run-created 保持表外 fail-fast（单终局/单首帧不变量）；

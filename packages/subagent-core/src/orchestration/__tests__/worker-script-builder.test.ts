@@ -125,10 +125,6 @@ describe("buildWorkerScript — W1 postMessage defense & parallel degrade", () =
       expect(script).toContain("[pipeline stage ");
       expect(script).toContain("_pushWorkerLog(\"error\"");
     });
-
-    it("cartesian mode logs stage errors instead of silent swallow", () => {
-      expect(script).toContain("[pipeline cartesian stage failed");
-    });
   });
 });
 

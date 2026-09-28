@@ -52,6 +52,11 @@ import { makePi, type PiMock } from "../../execution/__tests__/helpers/pi-mock.t
 
 // ── harness ──────────────────────────────────────────────────
 
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number) {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
+
 interface PumpHarness {
   service: SubagentService;
   store: RecordStore;
@@ -194,7 +199,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     expect(posted!.result!.error).toBeUndefined();
     // node 终态摘要（D2：live 删除后 node 保留 result——数据源 = executeWorkflowAgent
     // 的 AgentResult 出口，经 executeAgentCall finalizeCall 写入）
-    const node = h.run.state.trace.find(1);
+    const node = findByStep(h.run.state.trace, 1);
     expect(node?.status).toBe("completed");
     expect(node?.result?.content).toBe("ok");
     expect(node?.result?.sessionFile).toBe(sessionFile);
@@ -243,7 +248,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     const posted = findAgentResultPost(h.postMessage, 2);
     expect(posted).toBeDefined();
     expect(posted!.result!.error).toBe("engine blew up");
-    const node = h.run.state.trace.find(2);
+    const node = findByStep(h.run.state.trace, 2);
     expect(node?.status).toBe("failed");
     expect(node?.result?.error).toBe("engine blew up");
     expect(h.run.state.calls.get(2)?.status).toBe("done");

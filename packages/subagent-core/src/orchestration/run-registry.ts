@@ -397,8 +397,8 @@ export interface AbandonElapsedInterruptedRunsResult {
  * 3. 活跃保护 + 放弃窗判定（事件流最后活动时刻 ts——mtime 启发式退役后的时间
  *   判据唯一来源）；
  * 4. 幂等追加 run-settled(interrupted, interrupted_abandoned) 终态事件 + 物化
- *   manifest（outcome 非空 = prune 资格单源锚定）。journal-cleanup-eligible
- *   由 pruneTerminalRunFiles 的资格判定自然兑现，无需单独执行。
+ *   manifest（outcome 非空 = prune 资格单源锚定，pruneTerminalRunFiles 按此
+ *   资格判定自然兑现清理，无需单独的状态机输出动作）。
  *
  * 触发时机归调用方（生产接线：pi 宿主新 run 首写的 retention 维护轮，与
  * pruneTerminalRunFiles 同点）——本函数自身无副作用时钟，幂等可重入（已终局

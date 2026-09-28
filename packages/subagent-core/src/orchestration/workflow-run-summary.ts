@@ -16,7 +16,7 @@
 
 import type { RunStatus, DoneReason } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
-import { isRunSettled, runSettledOutcomeToDoneReason, settledRecordOf } from "./worker-message-pump.ts";
+import { runSettledOutcomeToDoneReason, settledRecordOf } from "./worker-message-pump.ts";
 
 /**
  * WorkflowRun 的可序列化摘要（status action / 列表渲染用）。
@@ -65,21 +65,3 @@ export function runSummary(run: WorkflowRun): WorkflowRunSummary {
   };
 }
 
-/**
- * 判断是否存在指定名字、仍在 running 的 workflow script。
- *
- * pi 版遍历全部 session 的 runs（两层循环）；core 版收口为单 runs Map——
- * per-session 隔离由调用方（宿主逐 session 调用或传入聚合 Map）负责。
- *
- * [W2/V1 D1 分流表] 判活换源单一判源函数 isRunSettled（活体终局经注册表判定，
- * 恢复写点 / v1 条目经聚合 done 判定——原两态机 status 读随写点删除退役）。
- *
- * @param runs run 注册表（runId → WorkflowRun）
- * @param name script 名（按 spec.scriptName 精确匹配）
- */
-export function isScriptRunning(runs: Map<string, WorkflowRun>, name: string): boolean {
-  for (const run of runs.values()) {
-    if (run.spec.scriptName === name && !isRunSettled(run)) return true;
-  }
-  return false;
-}

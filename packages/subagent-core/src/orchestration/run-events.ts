@@ -559,21 +559,15 @@ export type TransitionTrigger = WorkflowRunEventInput | ControlTrigger;
 // ── 输出动作词表（转移的声明性输出，P1b 接线消费）──────────────
 
 /**
- * 输出动作标签全集（5 个）。
+ * 输出动作标签全集（3 个）。
  *
  * 状态机核心不执行动作——transition 只裁决「哪些动作应该发生」，执行归调用侧
- * （P1b 接线：workflow-dispatch / settle 编排点 / 注册表投影）。标签语义：
+ * （P1b 接线：workflow-dispatch / settle 编排点）。标签语义：
  * - journal-append：事件落 journal。触发事件属 journal 词表时 = 事件本身；
  *   控制事件触发的终局转移 = 调用侧合成的 run-settled 事件（cancel →
  *   outcome:cancelled；ts 信封由调用侧补）
  * - manifest-write：终局投影——manifest/.state 写 outcome/errorCode（D5-4）
  * - notify：终局通知触发（D7；pending:unregister 随通知闭环）
- * - registry-project：注册表投影更新（D9-1 语义——「事件流停止 → 待恢复」的
- *   投影相判读归 run-registry 投影面，非状态机转移产物；[W2 D2] 清退后现表无
- *   引用行，标签保留供后续转移行声明）
- * - journal-cleanup-eligible：journal 获清理资格（已终局 + 过保留期，Q2；
- *   [W2 D2] 清退后现表无引用行——资格由 pruneTerminalRunFiles 按 manifest
- *   outcome 非空判定自然兑现，标签保留供后续转移行声明）
  *
  * kill-run-topology 已随 D9-2 定点杀链删除（pi-workflow-run-resource-model
  * 决策 6-D1：cancel 收敛窗满 / armed 超时兜底改走「合成终态 + finalizeRun 收尾
@@ -583,8 +577,6 @@ export const TRANSITION_OUTPUT_TYPES = [
   "journal-append",
   "manifest-write",
   "notify",
-  "registry-project",
-  "journal-cleanup-eligible",
 ] as const;
 
 export type TransitionOutput = (typeof TRANSITION_OUTPUT_TYPES)[number];

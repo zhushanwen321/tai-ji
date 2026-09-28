@@ -491,13 +491,11 @@ describe("状态词表（D5-1 两维正交）", () => {
     }
   });
 
-  it("TRANSITION_OUTPUT_TYPES 五个输出动作标签（kill-run-topology 随 D9-2 杀链删除）", () => {
+  it("TRANSITION_OUTPUT_TYPES 三个输出动作标签（kill-run-topology 随 D9-2 杀链删除）", () => {
     expect(TRANSITION_OUTPUT_TYPES).toEqual([
       "journal-append",
       "manifest-write",
       "notify",
-      "registry-project",
-      "journal-cleanup-eligible",
     ]);
   });
 

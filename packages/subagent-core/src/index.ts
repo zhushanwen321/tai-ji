@@ -687,18 +687,12 @@ export {
 // 投影类型）消费全在 core 内部，壳零消费——按 D3 判定标准不进 barrel。
 export { abandonElapsedInterruptedRuns } from "./orchestration/run-registry.ts";
 
-// run 投影（U7 / D8）：isScriptRunning / runSummary 以 core WorkflowRun 为准的
-// 投影（runSummary 双投影分叉收口）。
-export {
-  isScriptRunning,
-  runSummary,
-} from "./orchestration/workflow-run-summary.ts";
+// run 投影（U7 / D8）：runSummary 以 core WorkflowRun 为准的投影（双投影分叉收口）。
+export { runSummary } from "./orchestration/workflow-run-summary.ts";
 
 // ── schema 助手（U9 / D9）─────────────────────────────────────
 // workflow 资产 @pi-meta parameters 的 schema→已知键集与平铺参数检测
 // （pi tool-workflow 消费面下沉；宿主白名单退役入口）。
-// [2026-09-13 barrel 收窄] normalizeArgsByMeta 与本组类型族已出公共面（仅测试
-// 深路径消费），归一化留在模块内部。
 export {
   argKeysFromMeta,
   findFlattenedArgKeys,

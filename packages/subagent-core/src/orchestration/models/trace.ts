@@ -143,11 +143,6 @@ export class Trace {
     return this.byIndex.get(stepIndex);
   }
 
-  /** 按节点引用删除（仅用于测试或 run 重建场景；正常运行不调用）。 */
-  find(stepIndex: number): ExecutionTraceNode | undefined {
-    return this.findByStepIndex(stepIndex);
-  }
-
   /**
  * 按 stepIndex 移除节点（崩溃重建清理在飞 call 用）。
  *

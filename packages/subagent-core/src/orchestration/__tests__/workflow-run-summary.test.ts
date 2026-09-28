@@ -1,11 +1,10 @@
-// workflow-run-summary.test.ts —— runSummary 投影 + isScriptRunning 判定测试（U7/B5/D8）。
+// workflow-run-summary.test.ts —— runSummary 投影测试（U7/B5/D8）。
 //
 // 覆盖（验收条款③）：
 // - runSummary：字段投影全断言（running / done 两形态；slug/error/completedAt 缺省透传）
-// - isScriptRunning：真（同名 running）/ 假（同名 done、异名 running、空 Map）两分支
 import { describe, expect, it } from "vitest";
 
-import { isScriptRunning, runSummary } from "../workflow-run-summary.ts";
+import { runSummary } from "../workflow-run-summary.ts";
 import { Budget } from "../models/budget.ts";
 import type { RunSpec } from "../models/run-spec.ts";
 import { Trace } from "../models/trace.ts";
@@ -91,29 +90,3 @@ describe("runSummary — 字段投影（字段以 core WorkflowRun 为准）", (
   });
 });
 
-describe("isScriptRunning — 真假两分支", () => {
-  it("真：同名 script 仍在 running", () => {
-    const runs = new Map<string, WorkflowRun>([
-      ["wf-1", makeRun("wf-1", { status: "done", scriptName: "other-wf" })],
-      ["wf-2", makeRun("wf-2", { status: "running", scriptName: "deploy-site" })],
-    ]);
-
-    expect(isScriptRunning(runs, "deploy-site")).toBe(true);
-  });
-
-  it("假：同名但已 done（running 状态白名单）", () => {
-    const runs = new Map<string, WorkflowRun>([
-      ["wf-1", makeRun("wf-1", { status: "done", scriptName: "deploy-site" })],
-    ]);
-
-    expect(isScriptRunning(runs, "deploy-site")).toBe(false);
-  });
-
-  it("假：异名 running / 空 Map", () => {
-    const runs = new Map<string, WorkflowRun>([
-      ["wf-1", makeRun("wf-1", { status: "running", scriptName: "other-wf" })],
-    ]);
-    expect(isScriptRunning(runs, "deploy-site")).toBe(false);
-    expect(isScriptRunning(new Map(), "deploy-site")).toBe(false);
-  });
-});

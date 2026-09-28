@@ -834,7 +834,5 @@ function toSdkTaskSubset(task: AgentCallOpts): SdkAgentCallOpts {
     forkSource: task.forkSource,
     worktree: task.worktree,
     idleTimeoutMs: task.idleTimeoutMs,
-    denyTools: task.denyTools,
-    permissionMode: task.permissionMode,
   };
 }

@@ -33,6 +33,11 @@ import type { WorkerHandle } from "../worker-handle.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number): ExecutionTraceNode | undefined {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
+
 function makeSpec(): RunSpec {
   return {
     scriptSource: "execute() {}",
@@ -182,7 +187,7 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
     // 收口：call done + trace failed（Cancelled 文案；[H2 W3] trace.live 已删除）
     expect(call.status).toBe("done");
     expect(call.result?.error).toContain("Cancelled");
-    expect(run.state.trace.find(1)?.status).toBe("failed");
+    expect(findByStep(run.state.trace, 1)?.status).toBe("failed");
     // 落盘在收口之后：save 时 run 已无 running 节点
     expect(run.state.trace.toArray().every((n) => n.status !== "running")).toBe(true);
   });

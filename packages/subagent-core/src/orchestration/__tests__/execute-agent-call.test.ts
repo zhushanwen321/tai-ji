@@ -53,6 +53,11 @@ function makeTraceNode(stepIndex = 0): ExecutionTraceNode {
   };
 }
 
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number): ExecutionTraceNode | undefined {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
+
 /** 构造 AgentCall + 关联的 Trace（call.id 与 trace 节点 stepIndex 对齐） */
 function makeAgentCallAndTrace(): { call: AgentCall; trace: Trace } {
   const trace = new Trace();
@@ -131,7 +136,7 @@ describe("U1: finalizeCall sessionFile → trace 节点", () => {
 
     await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-    const node = trace.find(0);
+    const node = findByStep(trace, 0);
     expect(node).toBeDefined();
     expect(node!.sessionFile).toBe(sessionFilePath);
     expect(node!.sessionId).toBe("session-abc");
@@ -146,7 +151,7 @@ describe("U1: finalizeCall sessionFile → trace 节点", () => {
 
     await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-    const node = trace.find(0);
+    const node = findByStep(trace, 0);
     expect(node).toBeDefined();
     expect(node!.sessionFile).toBeUndefined();
   });
@@ -251,7 +256,7 @@ describe("isOrphaned 守卫", () => {
     await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
     expect(updateSpy).toHaveBeenCalledTimes(1);
-    expect(trace.find(0)?.status).toBe("completed");
+    expect(findByStep(trace, 0)?.status).toBe("completed");
     expect(call.status).toBe("done");
   });
 
@@ -321,7 +326,7 @@ describe("W4b: stale 分诊对齐 pi 真实文案", () => {
     expect(runner.run).toHaveBeenCalledTimes(1);
     expect(call.status).toBe("done");
     expect(call.result?.error).toBe(PI_REAL_STALE_MESSAGE);
-    expect(trace.find(0)?.status).toBe("failed");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
   it("普通 transient 错误 → 不命中 stale（照常进入重试路径，现状回归）", () => {
@@ -374,7 +379,7 @@ describe("MF-1: 确定性 schema 失败不重试", () => {
     expect(runner.run).toHaveBeenCalledTimes(1);
     expect(call.attempts).toBe(1);
     expect(call.status).toBe("done");
-    expect(trace.find(0)?.status).toBe("failed");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
   it("态①真实产物（never called，缺 extension 环境确定性）→ 同样不重试", async () => {
@@ -389,7 +394,7 @@ describe("MF-1: 确定性 schema 失败不重试", () => {
 
     expect(runner.run).toHaveBeenCalledTimes(1);
     expect(call.attempts).toBe(1);
-    expect(trace.find(0)?.status).toBe("failed");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
   it("MF-2 计数不再低估：retry 不发生 → usage consume 恰一次、totalCallCount=1", async () => {
@@ -491,7 +496,7 @@ describe("D5-③: failureKind 三态分诊", () => {
     expect(call.attempts).toBe(1);
     expect(call.status).toBe("done");
     expect(call.result?.error).toBe(PI_REAL_STALE_MESSAGE);
-    expect(trace.find(0)?.status).toBe("failed");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
   it("schema_deterministic → 不重试特判维持：runner.run 恰 1 次（V5③ 同族）", async () => {
@@ -508,7 +513,7 @@ describe("D5-③: failureKind 三态分诊", () => {
     await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
     expect(runner.run).toHaveBeenCalledTimes(1);
-    expect(trace.find(0)?.status).toBe("failed");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
   it("unknown → 默认退避重试：瞬态错误（模拟 provider 5xx）退避后第二次成功（V5④ 正向）", async () => {
@@ -532,7 +537,7 @@ describe("D5-③: failureKind 三态分诊", () => {
       expect(runner.run).toHaveBeenCalledTimes(2);
       expect(call.status).toBe("done");
       expect(call.result?.error).toBeUndefined();
-      expect(trace.find(0)?.status).toBe("completed");
+      expect(findByStep(trace, 0)?.status).toBe("completed");
     } finally {
       vi.useRealTimers();
     }

@@ -155,25 +155,13 @@ const [r1, r2, r3] = await parallel([
 
 ### `pipeline(...)` — Execute stages sequentially
 
-**模式一：顺序模式** — 传入 stage 数组，每个 stage 收到上一个 stage 的结果：
+传入 stage 数组，每个 stage 收到上一个 stage 的结果：
 
 ```javascript
 const final = await pipeline([
   () => agent({ prompt: 'Analyze code', description: 'analyze' }),
   (prev) => agent({ prompt: `Write tests for: ${prev}`, description: 'test-gen' }),
 ]);
-```
-
-**模式二：笛卡尔积模式** — 传入 items 数组 + 多个 stage，对每个 item 依次跑完所有 stage（批处理杀手锏）：
-
-```javascript
-// 对每个 file 依次跑 review → fix
-await pipeline(
-  files,                                      // items
-  (file) => agent({ prompt: `Review ${file}`, description: 'review', schema: {...} }),
-  (review, file) => agent({ prompt: `Fix ${file}: ${JSON.stringify(review)}`, description: 'fix' }),
-);
-// stage 函数签名：(prevResult, currentItem) => result；第一个 stage 只收 currentItem
 ```
 
 ### `workflow(name, args?)` — Call another workflow (nested orchestration)

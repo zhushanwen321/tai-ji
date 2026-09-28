@@ -38,6 +38,11 @@ import { isRunSettled, settledRecordOf } from "../worker-message-pump.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number) {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
+
 const MAX_ERROR_LOGS = 500;
 
 function makeRealRun(runId: string, opts: { budgetTimeMs?: number } = {}): WorkflowRun {
@@ -358,7 +363,7 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     expect(call?.status).toBe("done");
     expect(call?.result?.error).toContain("Cancelled");
     // trace 节点 failed + completedAt（快照/GUI 不再显示 running 步骤）
-    const node = run.state.trace.find(1);
+    const node = findByStep(run.state.trace, 1);
     expect(node?.status).toBe("failed");
     expect(node?.error).toContain("Cancelled");
     expect(node?.completedAt).toBeDefined();
@@ -383,7 +388,7 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.calls.get(2)?.status).toBe("done");
     expect(run.state.calls.get(2)?.result?.error).toContain("Cancelled");
-    expect(run.state.trace.find(2)?.status).toBe("failed");
+    expect(findByStep(run.state.trace, 2)?.status).toBe("failed");
   });
 
   it("closeOutInFlightCalls 对 pending 状态 call 补齐状态机（markRunning→markDone）", () => {
@@ -417,6 +422,6 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
 
     // 已完成 call 的结果原样保留（不被取消文案覆盖）
     expect(run.state.calls.get(4)?.result?.content).toBe("ok");
-    expect(run.state.trace.find(4)?.status).toBe("completed");
+    expect(findByStep(run.state.trace, 4)?.status).toBe("completed");
   });
 });
