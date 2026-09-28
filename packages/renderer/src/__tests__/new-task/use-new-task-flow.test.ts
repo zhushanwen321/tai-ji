@@ -147,7 +147,7 @@ describe('useNewTaskFlow 状态机', () => {
       await flow.startFlow()
       await flow.submitFirstMessage(textToSegments('一二三四五六七八九十十一')) // 11 字
       expect(apiMock.create).toHaveBeenCalledTimes(1)
-      // cwd 兑底用最近 session 的 /repo；label 截断为前 10 字 + 省略号
+      // cwd 兜底用最近 session 的 /repo；label 截断为前 10 字 + 省略号
       expect(apiMock.create).toHaveBeenCalledWith('/repo', '一二三四五六七八九十…', undefined, undefined, undefined, 'high')
     })
 
@@ -161,7 +161,7 @@ describe('useNewTaskFlow 状态机', () => {
       expect(apiMock.create).toHaveBeenCalledWith('/repo', '修 bug', undefined, undefined, undefined, 'high')
     })
 
-    it('selectedWorkspace 选定 cwd 后发送 → create 第 1 参数用选定 cwd 而非兑底', async () => {
+    it('selectedWorkspace 选定 cwd 后发送 → create 第 1 参数用选定 cwd 而非兜底', async () => {
       setGroups([gitSession({ id: 'hist', cwd: '/repo', lastActiveAt: 1 })])
       const flow = useNewTaskFlow()
       await flow.startFlow()
@@ -188,7 +188,7 @@ describe('useNewTaskFlow 状态机', () => {
       const flow = useNewTaskFlow()
       await flow.startFlow()
       await flow.submitFirstMessage(textToSegments('hello'))
-      // create 用兑底 cwd 调用
+      // create 用兜底 cwd 调用
       expect(apiMock.create).toHaveBeenCalledWith('/gone', expect.any(String), undefined, undefined, undefined, 'high')
       // toast 触发一次，文案含「已不存在」+ 原 cwd
       expect(toastMock.error).toHaveBeenCalledTimes(1)

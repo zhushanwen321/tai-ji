@@ -220,7 +220,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * submitFirstMessage —— landing 态首发提交：载入 panel + 发消息。
    *
    * 预创建后 session 已在选目录时建立，这里只负责载入 panel + 发送。
-   * - 无绑定 session（未选目录直接输入发送，用 workspaceStore.defaultCwd 兑底 create）→ create 后发送
+   * - 无绑定 session（未选目录直接输入发送，用 workspaceStore.defaultCwd 兜底 create）→ create 后发送
    * - 已绑定 session（选过目录预建 / 重试场景）→ 直接载入 + 发送，不重复 create
    *
    * 终态时序（D3 交接原子化）：交接三步（setActiveSession + loadPanel + pushChat）完成
@@ -296,7 +296,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     // C-NT-2：session 创建部分改调注入的 createSessionFlow 端口（SessionFlowPort，
     // 契约对齐 domain/session/createSessionFlow IF5）。壳把 createSessionFlow(ctx, input)
     // 包成端口实现（ctx 的 store/api/defaultCwd/onCwdFallback 由壳组装）。
-    // createSessionFlow 内部做：guard→cwd 兑底→label 派生→create→INV-7 降级（含 E7
+    // createSessionFlow 内部做：guard→cwd 兜底→label 派生→create→INV-7 降级（含 E7
     // 两空提示）→appendSession→migrateImages，返回 {session, migratedSegments} | null
     // （null=空 content guard）。post-create apply（applyModel / setThinkingLevel）已随
     // D5 契约快照化删除——override 经 create 一次到位。
@@ -401,7 +401,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     controller.setCreateInFlight(true)
     try {
       let finalSegments = segments
-      // 未选目录直接发送（用默认 cwd 兑底 create），或重试场景已绑定
+      // 未选目录直接发送（用默认 cwd 兜底 create），或重试场景已绑定
       if (!currentSession.value) {
         const migrated = await createSessionForSubmit(segments, thinkingLevel, bashCommand)
         if (migrated === null) return

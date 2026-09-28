@@ -135,7 +135,7 @@ export interface CreateSessionFlowInput {
   presetId?: string | null
   /** landing 态选定的模型（"provider/modelId" 复合串；经 create modelOverride 快照化生效） */
   pendingModel?: string | null
-  /** 归属 project id（D14 语义修正 2026-08-04：创建时归属当前 activeProject；空 = 默认项目兑底） */
+  /** 归属 project id（D14 语义修正 2026-08-04：创建时归属当前 activeProject；空 = 默认项目兜底） */
   projectId?: string | null
   /** 首发消息段（含 text/image/skill 等；label 从首条 text 段取、trim 空时回退首个 slash 段，
    * image 段需迁移） */

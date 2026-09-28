@@ -419,7 +419,7 @@ export interface ClientMessageMap {
     label?: string
     hidden?: boolean
     presetId?: string
-    /** 归属 project id（D14 语义修正）：创建时归属当前 activeProject；空 = 默认项目兑底。 */
+    /** 归属 project id（D14 语义修正）：创建时归属当前 activeProject；空 = 默认项目兜底。 */
     projectId?: string
     modelOverride?: string
     thinkingOverride?: ThinkingLevel

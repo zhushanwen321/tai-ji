@@ -567,9 +567,9 @@ describe("executeNestedWorkflow", () => {
       }
     });
 
-    // [U7] TAIJI_SUBAGENT_RUN_WATCHDOG_MS：显式不限时 run 的绝对时限兑底（与
-    // spawn watchdog env 同款：未设 = 无兑底，设置 = opt-in 挂载）。
-    describe("TAIJI_SUBAGENT_RUN_WATCHDOG_MS 兑底（U7）", () => {
+    // [U7] TAIJI_SUBAGENT_RUN_WATCHDOG_MS：显式不限时 run 的绝对时限兜底（与
+    // spawn watchdog env 同款：未设 = 无兜底，设置 = opt-in 挂载）。
+    describe("TAIJI_SUBAGENT_RUN_WATCHDOG_MS 兜底（U7）", () => {
       it("env 设置 + 未传 timeoutMs → env 时限到期 abort time_limited，错误串含 env 值", async () => {
         vi.useFakeTimers();
         try {
@@ -627,7 +627,7 @@ describe("executeNestedWorkflow", () => {
         }
       });
 
-      it("env 非法值（abc / -1）→ 视为未设（无兑底，不限）", async () => {
+      it("env 非法值（abc / -1）→ 视为未设（无兜底，不限）", async () => {
         vi.useFakeTimers();
         try {
           const childRun = makeRunningChildRun();

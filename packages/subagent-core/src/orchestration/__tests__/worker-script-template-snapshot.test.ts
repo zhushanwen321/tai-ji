@@ -119,7 +119,7 @@ describe("buildWorkerScript — _KNOWN_FIELDS module scope 提升（IF6）", () 
   });
 
   // [F-2 maxTurns:0 吞没修复] 旧字符串分支 `&& maxTurns) || undefined` 把显式 0
-  // 抹成 undefined → runSpawn 落 env 兑底（SPAWN_WATCHDOG env 设置时误挂 watchdog），
+  // 抹成 undefined → runSpawn 落 env 兜底（SPAWN_WATCHDOG env 设置时误挂 watchdog），
   // 与对象分支保真语义分裂。锁定生成源为 ?? 形态（0/null/undefined 区分处理）。
   it("string 分支 maxTurns 用 ?? 语义（显式 0 不抹成 undefined，F-2）", () => {
     const out = buildWorkerScript("// noop");

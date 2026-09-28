@@ -586,7 +586,7 @@ describe('B1-disk-error-classification', () => {
   })
 
   it('B1 non-english OS message falls back to disk space substring (parity with single-part W-6)', () => {
-    // 单段路径判定含子串兑底：无 errno code 时 message 含 'disk space' 同样判磁盘错
+    // 单段路径判定含子串兜底：无 errno code 时 message 含 'disk space' 同样判磁盘错
     const err = new Error("can't write: not enough disk space")
     expect(classifyNetError(err, 'downloading').errorCode).toBe('UPDATE_DISK_SPACE')
   })
@@ -618,7 +618,7 @@ describe('B4-downloadPart-no-double-wrap', () => {
     // 探针实证场景复现：probe（GET Range 0-0，多源改造后不再走 HEAD）返回 206 放行
     // 多段，随后各段 Range 请求统一回 HTTP 500。downloadPart 内先构造
     // `part N download failed: HTTP 500`，再进自己的 catch——
-    // 修复前被 classifyNetError 兑底二次包装成
+    // 修复前被 classifyNetError 兜底二次包装成
     // 「download failed: part N download failed: HTTP 500」双重前缀
     const fetchMock = vi.fn(async (_url: unknown, init?: { headers?: Record<string, string> }) => {
       // probe 探测请求（GET Range: bytes=0-0）→ 206 + Content-Range total 达标放行多段

@@ -90,7 +90,7 @@ describe('SettingsMessageHandler · config.getProviders supportedLevels 接线�
     expect(providers[0].models[1].supportedLevels).toEqual(['off'])
   })
 
-  it('modelService 缺 attachSupportedLevels（调用抛 TypeError）→ providers 原样 reply 不抛（降级兑底）', async () => {
+  it('modelService 缺 attachSupportedLevels（调用抛 TypeError）→ providers 原样 reply 不抛（降级兜底）', async () => {
     const { ctx, replies } = mockCtx({ aggregateModels: vi.fn(() => []) })
     const handler = new SettingsMessageHandler(ctx)
 

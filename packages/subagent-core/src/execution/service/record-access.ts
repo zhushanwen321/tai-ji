@@ -279,7 +279,7 @@ export class RecordAccess {
     // 静默回落 override→主 agent model，用户拿到的 subagent 无 systemPrompt/工具白名单
     // 且零反馈。require:true 让失败抛出带 <available_subagents> 指引的错误（对齐
     // workflow name not found 反馈风格）；不传 agent = 默认 general-purpose 语义，
-    // agentConfig 保持 undefined（合法缺省，走 override → ctxModel 兑底）。
+    // agentConfig 保持 undefined（合法缺省，走 override → ctxModel 兜底）。
     // [u-h2 D2-1] execute() 已在路由前解析 agentConfig（pre 通道），此处复用不二次加载。
     const agentConfig = pre
       ? pre.agentConfig
@@ -453,7 +453,7 @@ export class RecordAccess {
    *
    * 与 getRecordForAction 的差异：不做归属/直接父校验、不重建可变 record 入内存，
    * 只读快照（light 形态可能缺详情重数据，身份/sidecar 状态字段齐全）。查询顺序与
-   * getRecordForAction 冷路径同款（idToFile 索引直查 → collectRecords 全扫兑底），
+   * getRecordForAction 冷路径同款（idToFile 索引直查 → collectRecords 全扫兜底），
    * 不限 status——终态（sidecar closed）记录也能查到。
    *
    * 返回 undefined：id 在内存与磁盘均不存在。

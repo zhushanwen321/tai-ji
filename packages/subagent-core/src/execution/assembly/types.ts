@@ -727,8 +727,8 @@ export interface ExecuteOptions {
   appendSystemPrompt?: string[];
   schema?: Record<string, unknown>;
   /**
-   * Turn 上限 limiter。显式 0/负 = 显式不限：压过 SPAWN_WATCHDOG_ENV 兑底不挂
-   * watchdog（SP-6 参数 > env，U5）；undefined 未传才由 env 兑底。
+   * Turn 上限 limiter。显式 0/负 = 显式不限：压过 SPAWN_WATCHDOG_ENV 兜底不挂
+   * watchdog（SP-6 参数 > env，U5）；undefined 未传才由 env 兜底。
    */
   maxTurns?: number;
   graceTurns?: number;

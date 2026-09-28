@@ -69,7 +69,7 @@ describe('EventAdapter 后台任务旁路钩子（D2 触发面②）', () => {
     expect(() => listener({ type: 'message_start', message: null })).not.toThrow()
     expect(() => listener({ type: 42 })).not.toThrow()
     expect(activity).not.toHaveBeenCalled()
-    // 正常翻译仍工作：message:null 走 assistant-turn 兑底分支产出 2 事件，type:42 未知类型 0 事件（不进 interpret）
+    // 正常翻译仍工作：message:null 走 assistant-turn 兜底分支产出 2 事件，type:42 未知类型 0 事件（不进 interpret）
     listener(BASH_EXIT_NOTICE)
     expect(activity).toHaveBeenCalledTimes(1)
     expect(interpret).toHaveBeenCalledTimes(2)

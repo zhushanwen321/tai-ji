@@ -115,7 +115,7 @@ export interface SessionCreateOptions {
    * 优先级（设计文档 §5.2）：Landing Chip > preset.thinkingLevel > 全局默认。
    */
   thinkingOverride?: string
-  /** 归属 project id（D14 语义修正 2026-08-04）：创建时归属当前 activeProject；空 = 默认项目兑底。 */
+  /** 归属 project id（D14 语义修正 2026-08-04）：创建时归属当前 activeProject；空 = 默认项目兜底。 */
   projectId?: string
   /** 发起来源：'user' | 'agent'。agent-managed session 标记（session-manager create 链路传入）。 */
   spawnSource?: 'user' | 'agent'

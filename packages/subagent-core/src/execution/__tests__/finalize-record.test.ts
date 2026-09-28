@@ -701,7 +701,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(record.result).toBe("review done, found 3 issues");
   });
 
-  it("MF-2 兑底：失败轮次（无前值）record.result 用失败摘要填充（D7 outcome 入参：前值 ?? 失败摘要）", async () => {
+  it("MF-2 兜底：失败轮次（无前值）record.result 用失败摘要填充（D7 outcome 入参：前值 ?? 失败摘要）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-result-err" });
     record.status = "idle";

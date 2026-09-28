@@ -1339,7 +1339,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * active session 同步内存态（toSummary 从内存透传，广播后 summary 立即携带新归属）；
    * 磁盘 session 经扫描拿 filePath 写 sidecar（scanner 下次扫描读到）。
    * 空 projectId = 归回默认项目（等价删除绑定，persistProjectBinding 空值守卫跳过）。
-   * session 不存在/文件未落盘（延迟写入窗口）→ 静默跳过（不阻断归类流程，下次 create 兑底）。
+   * session 不存在/文件未落盘（延迟写入窗口）→ 静默跳过（不阻断归类流程，下次 create 兜底）。
    */
   async setProject(sessionId: string, projectId: string): Promise<void> {
     const active = this.lifecycle.get(sessionId) as (IManagedSessionView & { projectId?: string }) | undefined
@@ -1472,12 +1472,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
-   * 归属 project sidecar 延迟写入兑底（D14 语义修正，2026-08-04）。
+   * 归属 project sidecar 延迟写入兜底（D14 语义修正，2026-08-04）。
    *
    * [V9-④ 根修后] create 路径 persistProjectBinding 已传 skipJsonlExistsGuard 放行
    * 守卫直接落盘，本补偿退化为异常时序兜底：仅 sessionFilePath 缺失（pi 异常未返回
-   * 路径，create 写点无从落盘）等场景，在 turn_end（主路径）/ agent_end（兑底）时
-   * 补写——此时文件存在（或仍不存在 → 跳过，下次兑底）。无归属（undefined）跳过。
+   * 路径，create 写点无从落盘）等场景，在 turn_end（主路径）/ agent_end（兜底）时
+   * 补写——此时文件存在（或仍不存在 → 跳过，下次兜底）。无归属（undefined）跳过。
    *
    * 用 projectBindingPersisted 标记防重复写（session 级运行时标记，不进 toSummary）。
    */

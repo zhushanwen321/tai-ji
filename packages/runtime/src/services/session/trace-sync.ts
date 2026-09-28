@@ -231,7 +231,7 @@ export class TraceSync {
   /**
    * session-trace 增量腿串行链（A33）：per-session promise 链，同 session 触发事件按到达序
    * 串行拉取（message_end + agent_settled 几乎同时到达 → 链式串行后第二次 since 已是新
-   * leaf，空 delta 不广播；burst 天然合并）。每段 catch 兑底，链永不 reject（diffChain 同款）。
+   * leaf，空 delta 不广播；burst 天然合并）。每段 catch 兜底，链永不 reject（diffChain 同款）。
    */
   private readonly traceSyncChains = new Map<string, Promise<void>>()
 
@@ -300,7 +300,7 @@ export class TraceSync {
   syncTraceEntries(sessionId: string, trigger: string): void {
     const prev = this.traceSyncChains.get(sessionId) ?? Promise.resolve()
     const next = prev.then(() => this.doSyncTraceEntries(sessionId, trigger)).catch((e: unknown) => {
-      // 链段兑底：单次同步失败不断链（diffChain 同款）；错误已在 doSync 内分类处理，
+      // 链段兜底：单次同步失败不断链（diffChain 同款）；错误已在 doSync 内分类处理，
       // 此处仅防 unhandledRejection 逃逸。
       console.warn(`[session-trace] sync chain segment failed (sid=${sessionId}, trigger=${trigger}):`, e)
     })

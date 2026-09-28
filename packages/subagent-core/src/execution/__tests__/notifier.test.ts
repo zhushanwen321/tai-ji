@@ -624,7 +624,7 @@ describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile �
 		);
 	});
 
-	it("[U3] details payload 物化 outcome：closed 入参缺省时按 deriveOutcome 兑底填充", () => {
+	it("[U3] details payload 物化 outcome：closed 入参缺省时按 deriveOutcome 兜底填充", () => {
 		notifier.notify({
 			id: "sa-u3-mat", status: "closed", closedReason: "gc", agent: "w",
 			error: "boom",
@@ -636,7 +636,7 @@ describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile �
 		expect(msg.details?.outcome).toBe("failed");
 	});
 
-	it("[U3] 显式 outcome 优先于 closedReason 兑底（一等字段直读）", () => {
+	it("[U3] 显式 outcome 优先于 closedReason 兜底（一等字段直读）", () => {
 		notifier.notify({
 			id: "sa-u3-explicit", status: "closed", closedReason: "gc", agent: "w",
 			outcome: "cancelled",
