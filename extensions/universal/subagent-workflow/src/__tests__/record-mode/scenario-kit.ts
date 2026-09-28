@@ -4,12 +4,12 @@
 //
 // 夹具原则（与 helpers.ts 同源，扩展到 resume 真链路）：
 // - 崩溃前置态 = record 流经 core journal 生产写入器构造（createRunEventJournal
-//   append——与生产单写者落盘形态逐字节同源）。**写侧载荷前置缺口声明**：生产链
-//   terminal-actions 的 dispatchRunCreated/dispatchAgentSettled 现不写
-//   scriptSource/result 全文（u2 deviations 登记、待编排层裁决归属），真跑
-//   runWorkflow 产生的流无法被 resumeRun 的 [D12] 检查②消费——场景以「构造崩溃
-//   态 → resume 起全真链路」形态覆盖（resumeRun 锁/校验/三档/重建、worker 真线程
-//   重放、收编/维护轮真代码全部执行，唯一被夹具替代的是崩溃前的事件写入器）。
+//   append——与生产单写者落盘形态逐字节同源；生产侧载荷完整：dispatchRunCreated
+//   写 scriptSource 全文、dispatchAgentSettled 写 result 全文，真跑 runWorkflow
+//   产生的流同样可被 resumeRun 消费——夹具构造形态是可控性选择而非绕过缺口）。
+//   场景以「构造崩溃态 → resume 起全真链路」形态覆盖（resumeRun 锁/校验/三档/
+//   重建、worker 真线程重放、收编/维护轮真代码全部执行，唯一被夹具替代的是
+//   崩溃前的事件写入器）。
 // - resume 侧不 mock：真 WorkerHostImpl（node:worker_threads）+ 真 resumeRun
 //   + 真 record 读写；唯一替身 = faux runner（AgentRunner 的 LLM 层替身，场景表
 //   「faux-pi 协议替身注入」的 vitest 内形态——派发捕获 + 行为队列可控）。

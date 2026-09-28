@@ -47,7 +47,6 @@
 | `LintFinding`, `LintResult` | type | lint 发现项 / 结果 |
 | `discoverWorkflows(configOrCwd?)`, `loadWorkflows()`, `getWorkflow(name)`, `getWorkflowByPath(ref)`, `invalidateCache()` | fn | workflow 发现/加载/缓存失效（宿主 list 面与 registry 构造消费） |
 | `WorkflowScanConfig`, `CachedWorkflowMeta`, `WorkflowMeta`, `WorkflowSource` | type | 发现层类型（扫描目录声明 / 缓存 meta / 资源 meta / 来源标签） |
-| `FileRunStore` | class | `RunStore` port 的宿主无关文件实现：落盘 `<dataRoot>/workflow-state/<runId>.jsonl`（append-only 全量快照，`loadAll` 取每文件最后一条有效行、损坏行跳过并 warn）。zsw 等无 pi session 设施的宿主装配 `deps.store` 用 |
 | `AgentRunner`, `RunStore`, `WorkerHost`, `WorkerHandlers` | type | 编排层 port 契约（宿主自写 Infra 实现时的契约面） |
 | `registerZcodeEngine(engineDataDir?)` | fn | 把 `zcode` 引擎登记进 registry（组合根调用，幂等、工厂惰性） |
 | `createZcodeEngine(deps)` | fn | zcode 引擎 DI 工厂（测试/宿主注入 `ZcodeEngineDeps`） |
@@ -146,12 +145,13 @@ vendoring 宿主接入片段：
 ```js
 // 宿主目录内（无 node_modules）
 const {
-  configureCore, getLogger, FileRunStore, WorkerHostImpl,
-  runWorkflow, abortRun, terminateRunningRuns, discoverWorkflows,
+  configureCore, getLogger, DEFAULT_DATA_ROOT,
 } = require("./vendor/subagent-core/dist/index.cjs");
 
 configureCore({
-  dataRoot() { return "/path/to/host/data-root"; }, // FileRunStore 落 <dataRoot>/workflow-state/
+  dataRoot() { return DEFAULT_DATA_ROOT; }, // 或宿主自有数据根
   log(level, component, message, data) { /* 接宿主日志 */ },
 });
 ```
+
+workflow 编排链（`runWorkflow` / `abortRun` / `terminateRunningRuns`，需注入 `deps.store`）不在此形态装配：`RunStore` port 生产唯一实现 = pi 壳 `JsonlRunStore`（pi session 锚定的 record 流折叠重建）；无 pi session 设施的宿主无 workflow 编排链，不装配。

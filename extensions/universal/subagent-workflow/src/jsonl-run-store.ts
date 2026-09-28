@@ -59,8 +59,8 @@ import {
   buildWorkflowRecordSettledEntryData,
   classifyWorkflowRecordEntryData,
   getLogger,
+  runSettledOutcomeToDoneReason,
   type AgentResult,
-  type DoneReason,
   type ExecutionTraceNode,
   type RunOutcome,
   type RunStore,
@@ -134,36 +134,14 @@ function collectEntrySources(entries: SessionEntry[]): EntrySources {
 
 // ── run-settled 帧判读（DoneReason 映射 + 终局记录投影）────────────
 
-/**
- * record `run-settled` 帧的 (RunOutcome, errorCode) 联合判别 → DoneReason（[D2] 后
- * 与 core terminal-actions 同语义）：done→completed、cancelled→aborted、
- * time_limited 直返同名（[D2] 升格独立 outcome，新写入方无码）、failed 且
- * errorCode=budget_limited 恢复同名细分；interrupted 已移出 outcome（[D2] 入
- * lifecycle 暂停态，无该分支）。
- *
- * 消费方：record 重建（foldRecordStreamToRun）/ 终态条目补写
- * （appendSettledEntryFallback）的 reason 派生。单源说明：core 侧同签名函数在
- * terminal-actions.runSettledOutcomeToDoneReason（core 消费方专用）——双侧
- * 同语义实现（跨包单源合并需 exports 登记后收口），值表一致性由两侧测试同规格锁定。
- */
+// DoneReason 联合判别单点 = core terminal-actions.runSettledOutcomeToDoneReason
+// （值表与语义注释见 core 侧定义）——壳内消费方（foldRecordStreamToRun /
+// appendSettledEntryFallback）经顶部 import 取用；re-export 维持
+// workflow-notify 等壳内文件的既有本地导入路径。
 /** run-settled 帧形状（从 record 事件词表提取——errorCode 类型同源，免第二定义点）。 */
 type RunSettledFrame = Extract<WorkflowRunEvent, { type: "run-settled" }>;
 
-export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: RunSettledFrame["errorCode"]): DoneReason {
-  if (outcome === "failed" && errorCode === "budget_limited") {
-    return errorCode;
-  }
-  switch (outcome) {
-    case "done":
-      return "completed";
-    case "cancelled":
-      return "aborted";
-    case "time_limited":
-      return "time_limited";
-    case "failed":
-      return "failed";
-  }
-}
+export { runSettledOutcomeToDoneReason } from "@zhushanwen/subagent-core";
 
 /**
  * 终局记录（record run-settled 帧载荷的进程内投影——与 core 侧

@@ -6,7 +6,8 @@
  *   活跃会话经既有 get_entries 游标通道喂入（applyEntryBatch），冷会话经
  *   scanRecordFamilyEntriesFromSessionFile 流式扫描喂入（同一入口）；
  * - journal 源：record 事件文件（`<recordsDir>/<sa-id>.events`）与 run journal
- *   （`<sessionDir>/workflow-state/<runId>.events.jsonl`）——经 u0 journal-tail
+ *   （`<sessionDir>/workflow-state/<runId>.record.jsonl`，后缀常量
+ *   RUN_EVENT_JOURNAL_SUFFIX 单源）——经 u0 journal-tail
  *   目录 tailer（watch + offset 续读 + 周期复查）增量 fold。run 域 fold 自
  *   [W2 D7] 起单源 core run-events foldRunEventCheckpoint（状态机检查点 + 投影
  *   骨架 created/asks/runSettled 一体产出），runtime 不再自建 fold。

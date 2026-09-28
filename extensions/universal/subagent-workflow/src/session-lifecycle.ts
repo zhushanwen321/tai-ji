@@ -112,7 +112,7 @@ function resolveMainSessionFileById(sessionId: string): string | undefined {
  * workflow 域 per-session state 目录探测（随迁为 module 私有，唯一消费方是随迁块）。
  *
  * [已知限制·登记] slug 锚 process.cwd()（进程 cwd）而非 session cwd：pi CLI 在
- * 目录 B resume cwd 为 A 的 session 时，新 run 的 state 文件/journal 落 B 的 slug
+ * 目录 B resume cwd 为 A 的 session 时，新 run 的 record 事件流落 B 的 slug
  * 目录、旧 run 的在 A——GC/retention sweep（core 同源推导）读不到旧 run 的磁盘
  * 足迹，兜底失效。主数据不受影响（权威 entry 在 session 文件里，跨 cwd 可重建）。
  * 布局单源在 core resolvePiSessionScopedDir（workflow-state-root.ts）——修复改锚
@@ -671,16 +671,19 @@ async function createSessionRunState(
   let storeHealthy = true;
   // [skill-reload D4] 恢复门控：session_start(reason==='reload') 全程不跑
   // recoverCrashedRuns（无论条目有无）。暗礁（设计 §2.4）：recoverCrashedRuns 判
-  // 「crashed」只看磁盘快照 status=running、内存活 run 不参与判定且会被重建对象
-  // 覆盖——契约前提是「拥有这些 run 的进程已死」，而 reload 恰恰证明进程没死，
-  // 跑恢复即误杀窗口内存活的 run。条目缺失场景同理门控：磁盘可能有本 session 的
-  // running entry（前一轮 adoption 未完成又 reload 的窗口），由下一次**非 reload**
-  // 的 session_start（真重启/切换）按既有 kill-9 语义收编。跳过 loadAll 时无从
-  // 证伪健康度：storeHealthy 保持 true（workflow 域可用，可派发新 run）。
+  // 「crashed」只认 record 事件流 fold——loadAll 折叠重建出 running 态即经
+  // interruptRun（终局编排单一入口）收编，事件流不含进程存活信息、窗口内存活
+  // run 的流同样是 running 形态——契约前提是「拥有这些 run 的进程已死」，而
+  // reload 恰恰证明进程没死，跑恢复即误杀窗口内存活的 run。条目缺失场景同理
+  // 门控：磁盘可能有本 session 的 running entry（前一轮 adoption 未完成又
+  // reload 的窗口），由下一次**非 reload** 的 session_start（真重启/切换）按既有
+  // kill-9 语义收编。跳过 loadAll 时无从证伪健康度：storeHealthy 保持 true
+  // （workflow 域可用，可派发新 run）。
   if (!opts.skipRecovery) {
     try {
-      // [B1 修复] 恢复不挂 oncePerProcess：W17 后 loadAll 只读当前 session 的
-      // entries（本 session 权威面）、save 只写自身 runId 的 state 文件——恢复是
+      // [B1 修复] 恢复不挂 oncePerProcess：loadAll 只认本 session 的 v2 注册
+      // 条目（record 流折叠重建，W17 定界的现行形态）、收编即向本 run 的 record
+      // 流追加 run-interrupted 转移事件（不覆盖任何文件，天然幂等）——恢复是
       // session 级幂等操作，挂进程级守卫会让同进程的后续 session_start（如 /new
       // 后 /resume 一个上次崩溃退出的 session）重放首次 Promise、跳过 loadAll，
       // 该 session 的 running 残留既不收编也不进 run 列表。reload 的防误杀由上方

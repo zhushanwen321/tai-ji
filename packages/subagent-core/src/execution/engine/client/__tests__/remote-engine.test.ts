@@ -448,7 +448,7 @@ describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
     const result = await runPromise; // 注入 500ms 兜底窗超时 → 本地合成终态
     expect(result.outcome.error).toContain("aborted before terminal answer");
     // [D1] shared-service 降级出口：不杀任何进程、不触发 dispose（dispose 对其是
-    // 宿主停机/退役语义）——stall warn 出声（ADR-0047；通知通道 = workflow-stall）。
+    // 宿主停机/退役语义）——无进展 warn 出声（ADR-0047 静默 ≠ 卡死）。
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("stalled, not stopped"));
     warnSpy.mockRestore();
     expect(client.currentState).toBe("ready");

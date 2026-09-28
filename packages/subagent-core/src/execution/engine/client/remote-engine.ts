@@ -97,8 +97,8 @@ const logger = getLogger("remote-engine");
  * cancel 后 run 应答收敛的兜底窗（超时 = 本地合成 abort 终态收尾 record；进程回收
  * 归资源归属链——per-window 引擎随窗口收尾 dispose（薄壳死 = 孙进程同进程组连带
  * 收割，P2/P3），shared-service 引擎（zcode）stall 出声不杀（dispose 对其是宿主
- * 停机/引擎退役语义，ADR-0047 静默 ≠ 卡死：stall 信号由 workflow-stall 通知通道
- * 承载）。
+ * 停机/引擎退役语义，ADR-0047 静默 ≠ 卡死：无进展的判定由任务级无进展检测承载，
+ * 此处不杀不判死）。
  *
  * 量级校准依据（全局超时原则：兜底窗按被保护对象粒度校准——本窗保护的是
  * 「pi 引擎 cancel 停轮收敛」这一任务级过程，非控制面单请求）：pi 引擎 cancel
@@ -650,9 +650,8 @@ function buildRunRouteHandlers(ctx: RunContext): RunRoute {
  * | — | 引擎自报故障杀链（data-plane 反向请求 10s 未答判引擎故障） | engine-client.ts failEngine → killAll 组杀保留（同 dispose 族）：故障定位在引擎级（引擎反向通道楔死），按进程组终止后同窗口后续派发经 ensureConnected respawn（D7 保留语义） |
  *
  * shared-service 降级出口（①②的 zcode 分支）：不杀任何进程、不触发任何 dispose
- * ——stall warn 出声（ADR-0047 静默 ≠ 卡死；stall 通知通道 = workflow-stall
- * informational 通知，由 subagent-workflow 扩展的 journal 尾帧扫描承载，core 不另开
- * 第二通知面）。
+ * ——stall warn 出声（ADR-0047 静默 ≠ 卡死：活跃产出不得判死，无进展的判定由
+ * 任务级无进展检测承载，core 不在回收路径上另开通知面）。
  */
 
 /**
@@ -675,8 +674,8 @@ function armWindowDisposeFallbackForArmedTimeout(
       logger.warn(
         `[remote-engine] armed receipt timeout fallback for run ${runId}: shared-service engine ` +
           `did not settle after cancel — no process recovery (dispose on a shared-service engine is ` +
-          `host-shutdown/retirement semantics). The run is stalled, not stopped: a stall notice is ` +
-          `owned by the workflow-stall notification channel; the host-side record has been force-settled.`,
+          `host-shutdown/retirement semantics). The run is stalled, not stopped; the host-side ` +
+          `record has been force-settled.`,
       );
       return;
     }
@@ -741,8 +740,8 @@ function wireAbortSignal(
         logger.warn(
           `[remote-engine] cancel did not settle within grace for run ${runId}: shared-service ` +
             `engine host left untouched (dispose on a shared-service engine is host-shutdown/` +
-            `retirement semantics). The run is stalled, not stopped: a stall notice is owned by ` +
-            `the workflow-stall notification channel; the host-side record has been force-settled as aborted.`,
+            `retirement semantics). The run is stalled, not stopped; the host-side record has ` +
+            `been force-settled as aborted.`,
         );
       }
       forceSettle?.();

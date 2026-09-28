@@ -486,10 +486,13 @@ export {
 // [D15] terminal-actions 终局编排入口：finalizeRun 五步 coda（终局目标态）+
 // interruptRun 中断编排（[D2] interrupted 暂停态转移）+ isRunSettled 判定 +
 // buildWorkflowRecord{Registered,Settled,Interrupted}EntryData 条目构造器单源。
+// [G1 跨包单源] runSettledOutcomeToDoneReason：壳侧曾持同语义本地实现（值表靠
+// 双侧测试锁定），收敛为 core 单源——壳经 barrel import 消费。
 export {
   finalizeRun,
   interruptRun,
   isRunSettled,
+  runSettledOutcomeToDoneReason,
   closeOutInFlightCalls,
   buildWorkflowRecordRegisteredEntryData,
   buildWorkflowRecordSettledEntryData,

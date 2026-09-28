@@ -41,10 +41,9 @@ export interface AgentRunner {
  * WorkflowRun 持久化 port（写侧语义）。生产唯一实现 = pi 壳 JsonlRunStore
  * （session 锚定；core 侧通用文件写实现已随写身份退役删除）。
  *
- * save 在每次状态变更后持久化整个 WorkflowRun（聚合根）——W1 写通道语义收敛后
- * 快照 = journal fold 的物化投影（写点收敛到 journal 追加后的统一物化步）；
- * loadAll 在 session_start 时重水合（D-5：JSONL 不向后兼容旧 session，旧格式返回空）。
- * stateFilePath 返回 run 状态文件的绝对路径（供 overlay/GUI 暴露给用户）。
+ * save = 显式 no-op（state 快照已删，唯一事实源 = record 事件流，ADR-0082 D1；
+ * 接口保留为 port 契约）；loadAll 在 session_start 折叠 record 流重建 run 聚合。
+ * stateFilePath 返回 run record 流文件的绝对路径（供 overlay/GUI 暴露给用户）。
  *
  * 读侧职责不经本 port：终局证据判定核与保留期维护位于
  * execution/persistence/run-state-evidence.ts（journal/manifest 事实源直读，
@@ -53,7 +52,7 @@ export interface AgentRunner {
 export interface RunStore {
   save(run: WorkflowRun): Promise<void>;
   loadAll(): Promise<WorkflowRun[]>;
-  /** 返回 run 状态快照文件的绝对路径：<sessionDir>/workflow-state/<runId>.jsonl */
+  /** 返回 run record 流文件的绝对路径：<sessionDir>/workflow-state/<runId>.record.jsonl（供 overlay/GUI 暴露） */
   stateFilePath(runId: string): string;
 }
 
