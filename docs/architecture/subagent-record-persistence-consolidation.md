@@ -16,7 +16,7 @@
 
 ### 1.1 SCQA
 
-- **S**：一个 subagent record 的状态今天写在多处：session.jsonl 的 `subagent-record` custom entry（主记录，随 pi 的 debounce flush 落盘）、终态 sidecar（L4 后为 `.state`）、`.alive`（pid 探活）、manifest `records/<sa-id>.json`（反查索引）、sessions-index.json（缓存）、主 session 文件的 batchFinalized 覆写、notify-ledger 三类 entry、workflow run state 文件（H2 后其子代理 record 入 store，run 级状态仍在 FileRunStore）。
+- **S**：一个 subagent record 的状态今天写在多处：session.jsonl 的 `subagent-record` custom entry（主记录，随 pi 的 debounce flush 落盘）、终态 sidecar（L4 后为 `.state`）、`.alive`（pid 探活）、manifest `records/<sa-id>.json`（反查索引）、sessions-index.json（缓存）、主 session 文件的 batchFinalized 覆写、notify-ledger 三类 entry、workflow run state 文件（H2 后其子代理 record 入 store，run 级状态在 run journal）。
 - **C**：「该写哪几个文件」的知识散落在每个调用方——`finalize-record.ts` 自己凑齐 `.state` + entry + manifest + archive 四件套；`subagent-service` 直接写 batchFinalized entry 与 manifest；每处写面各自处理崩溃窗口（flush 丢终写 / abort 截断 / 批一致性），一致性 bug 要跨多处排查。
 - **Q**：如何让 record 状态的真相与写入只有一处？
 - **A**：RecordStore 暴露意图级操作（调用方说「发生了什么」，不说「写哪个文件」），所有文件布局知识收进 store 内部；终态走同步写权威。
@@ -35,7 +35,7 @@ RecordStore（`execution/persistence/record-store.ts`，1466 行）已是 record
 ### 1.4 in / out scope
 
 **in**：store 意图级 API 立面；终态同步写权威；各写点迁移；缓存降级与重建；恢复路径归并；测试范围切换。
-**out**：pi session 文件本身（pi 子进程写的任务记录，不动）；notify-ledger 的投递账（存在性判定改挂权威，投递/回执机制不动）；WorkflowRun/FileRunStore（run 级状态）；zcode 会话库（C-ext-20 不动）。
+**out**：pi session 文件本身（pi 子进程写的任务记录，不动）；notify-ledger 的投递账（存在性判定改挂权威，投递/回执机制不动）；WorkflowRun/run journal（run 级状态）；zcode 会话库（C-ext-20 不动）。
 
 ---
 
@@ -52,7 +52,7 @@ RecordStore（`execution/persistence/record-store.ts`，1466 行）已是 record
 | 5 | sessions-index.json | identity 探测缓存 | 性能 | 降为**缓存** |
 | 6 | 主 session 文件 batchFinalized 覆写 | sync 批成员终态 | 批通知一致性 | 并入 `markBatchFinalized` 意图操作 |
 | 7 | notify-ledger 三类 entry | 通知存在性（防重放） | 「不通知」事故族修复 | 存在性判定改读权威；entry 保留为投递账 |
-| 8 | workflow run state（FileRunStore） | workflow run 级状态 | workflow 崩溃恢复 | **不动**（run 级 ≠ record 级；H2 后子代理 record 已入 store） |
+| 8 | workflow run state（run journal 事件流） | workflow run 级状态 | workflow 崩溃恢复 | **不动**（run 级 ≠ record 级；H2 后子代理 record 已入 store） |
 | 10 | pending:register/unregister entry（v2 补录） | 跨进程通知记账（session-pending 判定依据） | goal 检查/后代判定口径 | 发射点①-④随对应意图操作；**发射点⑤ = reconcile-sweep 直写**（D7 白名单保留域） |
 | 9 | ~~pump 游离 record~~ | —— | —— | H2 删除 |
 

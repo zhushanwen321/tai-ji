@@ -207,7 +207,7 @@ interface NotifyDomainPorts {
 }
 ```
 
-  RunStore / AgentRunner / WorkerHost 三个既有 port 不动——jsonl-run-store（写 pi 会话）留 pi 壳，core 另提供通用 `FileRunStore`（落 dataRoot 下）供 zsw 壳与未来 CLI 宿主用。
+  RunStore / AgentRunner / WorkerHost 三个既有 port 不动——jsonl-run-store（写 pi 会话）留 pi 壳；core 不持有 store 实现（RunStore 生产实现唯一 = 壳 JsonlRunStore，读侧统一 journal 判定核，见 ADR-0078）。
 
   **端口演进纪律（治理条款，随下一层接口契约产物固化）**：①新增宿主触点默认以**可选方法**或**独立窄端口**（RunStore/AgentRunner 先例）承载——HostServices 只收环境服务语义（数据根/日志/发现/通知），不收业务能力；②新增方法必须有 ≥1 个真实宿主触点证据，禁止推测性预留；③方法签名禁止出现宿主特有类型（pi SDK / zcode 类型泄漏即 D9 检查红线）；④方法数达 8 触发拆分评审（按域拆为独立端口）。P3 的每项演进（file: 入口 / 材料注入 / 常驻引擎）引入新触点时按此过闸。
 - **不采用**：①把 pi extension API 全量抽象成宿主接口——过度设计，CLI 宿主不需要 ask-user/GUI，端口按「core 实际触点」收尾；②HostServices 经 postMessage 传 worker thread——workflow 脚本跑在 worker，但 agent 调用经 agent-call 消息回主线程执行（AgentRunner 在主线程），worker 内无需 HostServices；③把 30 处模块顶层 `getLogger` 下沉为函数内惰性获取——改动范围大且每调用一次解析是纯噪音，facade 代理在保持既有顶层缓存惯例下达成同样的时序安全（P0 因此仍是机械替换）。
@@ -268,7 +268,7 @@ interface NotifyDomainPorts {
 - **证据**：本仓探针文化（check-pi-semantics / check-extension-dependencies / check-pi-sync 同族）。
 - **效果**：D1 判据与 D4 双形态契约从文档约束升级为机器约束；目标 1 与目标 5 的长期保障。
 
-**接管 / 替换既有流程的副作用核对（D6 逐段）**：zsw 壳被 core 接管的段落与其后半段内部步骤的归属——①spawn 子进程后的 stdout 解析：core parser 接管（zsw 现 runner-spawn 的解析段废弃，不保留双路径）；②record 落盘：2c 后由 core 的 `FileRunStore`（D2 引入的 core 新增件，即此处「record 落盘」的载体）写 dataRoot 布局，zsw record-store.js 降级为存量只读；③完成通知：core `notify` 端口 → zsw 壳实现投递 task-notification（复刻 zsw 现有 notifier-mailbox 的「下次活动才注入」边界语义由壳侧决定）；zsw 现通知的 polling 兜底模式归壳侧 notify 实现内部，不进 core；④reaper/孤儿回收：core 的 crash-recovery / session-start-reaper 等价物接管，zsw reaper 删除；⑤slots 并发：core concurrency-pool 接管（2c 验收含并发行为对比）；⑥**runner-appserver 活跃通道**（实测：`ports.js` 按 runnerKind 分派，`ZSW_RUNNER=appserver` 探针门控 + 失败降级 spawn，e2e 在用）——zcode app-server 常驻模式按上游设计属「引擎内部优化项，不进首期接口实现」（engine-abstraction §1 out of scope）：2c 时**显式退役**（统一走 core `engines/zcode` 的 spawn 单轮；appserver 的长驻/零冷启动/实时进度/per-session model 优势暂时让渡），在 zsw README 与 e2e 标注 break；常驻实现的回归路线见 P3（core zcode engine 内部换常驻实现，EnginePort 接口已常驻友好）【注记 2026-08-30：P3 常驻回归已提前实施，见 [zcode-engine-appserver-resident.md](zcode-engine-appserver-resident.md)——2c 时的显式退役是当时的正确事实，原文保留】；per-session model 的回收载体单列为 P3 的 core engine 配置面扩展（EnginePort 三层路由只管 engine 选择、不含 per-task model 配置面，需在 core engine options 扩展后由 zsw 壳透传），不与常驻实现捆绑；⑦**资源发现**（实测：zsw agent .md 四根 `agent-md-resolver.js`——project > user、同级 .agents > .zcode，刻意跟随 symlink（头注自证：因 zcode 引擎发现跳过 symlink 而自实现）；workflow 脚本四根 `workflow-script.js`——`<ws>/.agents/workflows/` > `<ws>/.zsw/workflows/` > `~/.agents/workflows/` > `~/.zsw/workflows/`）——根列表经 `discoveryRoots()` 注入 core，扫描/遮蔽语义归 core 统一（D2 语义边界），pi 特有的 npm 包发现根 zsw 不传即不适用；迁移前后 zcode 用户可见清单与优先级对比入 V3-④，symlink 策略差异入检查点 6；⑧**自定义脚本契约（`script:<name>`）**（实测：zsw 自定义脚本在 daemon 进程内 fresh-require 执行、无进程级隔离，契约 `ctx = {task, cwd, model, runAgent, log, params}` → `{markdown, json}`——与 core 的 worker thread + $ARGS + structured-output 契约**不兼容**，2b 构成用户可见 break）——处置为显式迁移而非静默废弃：zsw README 标注 break + 提供脚本改写对照（runAgent → agent-call 消息、log → worker 进度回传、params → $ARGS.params），V5-④ 验收一个真实自定义脚本按对照改写后跑通；降级路径：2b 实施期若发现存量自定义脚本生态大于预期，壳侧保留 `workflow-script.js` 作为自定义脚本专用通道（内置 workflow 走 core、custom 走旧通道），core 不为旧契约加兼容层。每段要么复刻要么显式废弃，禁止默认沿用旧段。
+**接管 / 替换既有流程的副作用核对（D6 逐段）**：zsw 壳被 core 接管的段落与其后半段内部步骤的归属——①spawn 子进程后的 stdout 解析：core parser 接管（zsw 现 runner-spawn 的解析段废弃，不保留双路径）；②record 落盘：record 持久化走 record 域单源存储（record 事件流 + v2 条目，即此处「record 落盘」的载体）写 dataRoot 布局，zsw record-store.js 降级为存量只读；③完成通知：core `notify` 端口 → zsw 壳实现投递 task-notification（复刻 zsw 现有 notifier-mailbox 的「下次活动才注入」边界语义由壳侧决定）；zsw 现通知的 polling 兜底模式归壳侧 notify 实现内部，不进 core；④reaper/孤儿回收：core 的 crash-recovery / session-start-reaper 等价物接管，zsw reaper 删除；⑤slots 并发：core concurrency-pool 接管（2c 验收含并发行为对比）；⑥**runner-appserver 活跃通道**（实测：`ports.js` 按 runnerKind 分派，`ZSW_RUNNER=appserver` 探针门控 + 失败降级 spawn，e2e 在用）——zcode app-server 常驻模式按上游设计属「引擎内部优化项，不进首期接口实现」（engine-abstraction §1 out of scope）：2c 时**显式退役**（统一走 core `engines/zcode` 的 spawn 单轮；appserver 的长驻/零冷启动/实时进度/per-session model 优势暂时让渡），在 zsw README 与 e2e 标注 break；常驻实现的回归路线见 P3（core zcode engine 内部换常驻实现，EnginePort 接口已常驻友好）【注记 2026-08-30：P3 常驻回归已提前实施，见 [zcode-engine-appserver-resident.md](zcode-engine-appserver-resident.md)——2c 时的显式退役是当时的正确事实，原文保留】；per-session model 的回收载体单列为 P3 的 core engine 配置面扩展（EnginePort 三层路由只管 engine 选择、不含 per-task model 配置面，需在 core engine options 扩展后由 zsw 壳透传），不与常驻实现捆绑；⑦**资源发现**（实测：zsw agent .md 四根 `agent-md-resolver.js`——project > user、同级 .agents > .zcode，刻意跟随 symlink（头注自证：因 zcode 引擎发现跳过 symlink 而自实现）；workflow 脚本四根 `workflow-script.js`——`<ws>/.agents/workflows/` > `<ws>/.zsw/workflows/` > `~/.agents/workflows/` > `~/.zsw/workflows/`）——根列表经 `discoveryRoots()` 注入 core，扫描/遮蔽语义归 core 统一（D2 语义边界），pi 特有的 npm 包发现根 zsw 不传即不适用；迁移前后 zcode 用户可见清单与优先级对比入 V3-④，symlink 策略差异入检查点 6；⑧**自定义脚本契约（`script:<name>`）**（实测：zsw 自定义脚本在 daemon 进程内 fresh-require 执行、无进程级隔离，契约 `ctx = {task, cwd, model, runAgent, log, params}` → `{markdown, json}`——与 core 的 worker thread + $ARGS + structured-output 契约**不兼容**，2b 构成用户可见 break）——处置为显式迁移而非静默废弃：zsw README 标注 break + 提供脚本改写对照（runAgent → agent-call 消息、log → worker 进度回传、params → $ARGS.params），V5-④ 验收一个真实自定义脚本按对照改写后跑通；降级路径：2b 实施期若发现存量自定义脚本生态大于预期，壳侧保留 `workflow-script.js` 作为自定义脚本专用通道（内置 workflow 走 core、custom 走旧通道），core 不为旧契约加兼容层。每段要么复刻要么显式废弃，禁止默认沿用旧段。
 
 ### 3.4 错误规格（每类配恢复指引）
 
@@ -285,7 +285,7 @@ interface NotifyDomainPorts {
 ```
         ┌── 本仓 packages/subagent-core（npm 发布：src 供 workspace + dist ESM/CJS）──┐
         │  execution/engine（EnginePort + pi/zcode adapter + conformance/golden）      │
-        │  execution 引擎无关件 + orchestration + shared + HostServices + FileRunStore │
+        │  execution 引擎无关件 + orchestration + shared + HostServices + persistence 读侧│
         └────────────┬──────────────────────────────┬────────────────────────────────┘
      workspace:*     │                              │ npm ^（经 prerelease 通道联调）
 ┌────────────────────┴──────────┐      ┌────────────┴───────────────────────────────┐
@@ -300,7 +300,7 @@ interface NotifyDomainPorts {
   dataRoot=~/.taiji 派生（D2 三段语义注入），zcode 宿主=~/.zcode/zsw，宿主差异收敛到 dataRoot 值。
   **workflow state 不统一落点**——RunStore 是端口：pi 壳经 PiSessionRunStore 写 pi 会话 JSONL
   CustomEntry（V1 零回归要求；sessionDir 下 state 文件仅性能缓存），zsw / 未来 CLI 宿主经 core
-  FileRunStore 落 `<dataRoot>/workflow-state/`
+  经 RunStore port 注入自有实现（core 不持有 store 实现，读侧统一 journal 判定核）
 ```
 
 ## 4. 验收
