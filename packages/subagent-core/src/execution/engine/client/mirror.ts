@@ -5,13 +5,13 @@
 // 协议化后引擎进程是子进程的持有方（spawn/杀链都发生在引擎侧），core 只持
 // **状态镜像**：数据源 = 反向通道 `host/childSpawned` / `host/childStateChanged`。
 // 消费者 = 生命周期谓词（W6 起 lifecycle-predicates 的 hasLiveProcessHandle /
-// isResumable 改读镜像，同步读、不跨进程查询）与 notify 合并窗口 / idle GC。
+// isResumable 改读镜像，同步读、不跨进程查询）与 notify 合并窗口。
 //
 // 失效语义（impl-plan §2.2 必写死）：
 //   1. 未收 `childSpawned` 前 = 无句柄（getChildByRecord undefined 等价）；
 //   2. 引擎进程 exit / 重建 / dispose / killAll 时把该引擎**全部镜像项整体置死**
-//      （killed=true + 状态广播）——否则 notify-host 60s 合并窗口挂住 / idle-gc TTL
-//      不触发 / resumable 说谎 / 续聊被拒；
+//      （killed=true + 状态广播）——否则 notify-host 60s 合并窗口挂住 /
+//      resumable 说谎 / 续聊被拒；
 //   3. 置死广播后镜像清空，isResumable 回落「无句柄」。
 //
 // 载荷契约（SDK reverse-channels.ts）：`killed` 必含，判据

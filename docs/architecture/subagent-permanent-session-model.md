@@ -53,7 +53,7 @@
 - **zcode 引擎**：subagent 可以选两种执行引擎之一。pi 引擎有上述独立 transcript 文件；zcode 引擎把对话存在自己的 SQLite 会话库里，宿主侧**没有**独立文件——这就是「zcode 续聊结构性不成立」的根源（见 §2.3）。
 - **状态机**：record 的 `status` 字段。现状 `running | closed` 两值，closed 再挂七值 `closedReason`。
 - **锚（anchor / transcript ref）**：record 指向 transcript 的指针。pi 形态 = 子 session 文件路径；本设计为 zcode 引入 = 会话库 session id + 库路径。
-- **close 收敛与内存回收（evicted）**：本设计原把「收起（archived 意愿位）」与「内存回收」拆为两个概念；**archived 意愿位已随 2026-09-16 裁决删除**——close 现为资源终态写点（`markSettledOut`），record 不再从列表隐藏（用户可见状态只有进行中 / 已结束两桶）；**内存回收** = 容量管理（idle 超过 30 天，宿主把 record 移出内存，用户不可见，磁盘数据不动）。
+- **close 收敛与内存回收（evicted）**：本设计原把「收起（archived 意愿位）」与「内存回收」拆为两个概念；**archived 意愿位已随 2026-09-16 裁决删除**——close 现为资源终态写点（`markSettledOut`），record 不再从列表隐藏（用户可见状态只有进行中 / 已结束两桶）；**内存回收** = 容量管理（idle 超过 30 天，宿主把 record 移出内存，用户不可见，磁盘数据不动）——**该机制已退役（30 天定时器内存回收机制退役，[ADR-0081](../adr/decisions.md)）**：idle record 驻留宿主内存至进程退出（有界：session 结束全清）。
 - **写权声明（`.alive` marker）**：一个跨进程互斥小文件（内容 = 持有进程 pid），防两个宿主进程同时写同一份 transcript。H4 已把它定义为「跨进程写权声明」（母设计 D3）。
 
 ### 1.3 设计目标（从使用者体验倒推）
@@ -61,7 +61,7 @@
 1. **G1 万物可续聊**：对任何**非 workflow-origin** 的 subagent——无论自然完成、被取消、被关闭、宿主重启过、用的哪种引擎——用户（或主 agent）发 message 都能在**同一个 id** 上继续对话；不需要理解任何形态词汇（workflow 编排成员的立即终态化语义维持现状，见 §1.4 out-of-scope）。**准入例外第二类（one-shot 批成员）**：批量编排成员（workflow-origin record，含 `subagents` 批量 tool 的 fan-out 成员）硬拒续聊——成员是一次性 one-shot 计算单元，message 通道在 core `subagent-actions-core.ts` 的 messageHandler 处拒绝（成员工具文案同步明示 re-dispatch 指引）；恢复 = 按恢复指引只重派失败项（`subagents` tool）或普通 `subagent start` 单发（无批参数）。
 2. **G2 状态可读**：用户在 UI 上只需要理解两个词：「正在跑」（running）和「空闲」（idle）。「为什么停」作为一句话解释展示，不参与任何资格判定。
 3. **G3 资源有序**：永久会话不等于资源永不释放——进程、worktree、transcript 文件各有明确保留期与回收通道；回收后续聊自动降级为「带历史重开」，用户无感知中断。
-   **[阶段 5 验收注记，commit `8ea19681e`] 归档保留分支的资源生命周期裁决**：归档 cleanup keepBranch:true 后，`pi-sub-*` 分支作为重建依据保留（无注册表条目、无 checkout 目录、对账器不触碰），回收通道**随 record 语义存续**——寻回续聊可消费，record 被 idle-gc/用户删除时分支留存（GC 名单不含 git 分支）。显式接受该形态（分支是轻量 ref，量级远小于 worktree 目录与 transcript 文件）；**重审条件**：主仓 `pi-sub-*` 分支数超过阈值（建议 500，idle-gc 归档量观测后校准）或出现分支名冲突事故时，复审「transcript GC 联动回收无 checkout 分支」通道。
+   **[阶段 5 验收注记，commit `8ea19681e`] 归档保留分支的资源生命周期裁决**：归档 cleanup keepBranch:true 后，`pi-sub-*` 分支作为重建依据保留（无注册表条目、无 checkout 目录、对账器不触碰），回收通道**随 record 语义存续**——寻回续聊可消费，record 被用户删除时分支留存（GC 名单不含 git 分支）。显式接受该形态（分支是轻量 ref，量级远小于 worktree 目录与 transcript 文件）；**重审条件**：主仓 `pi-sub-*` 分支数超过阈值（建议 500）或出现分支名冲突事故时，复审「transcript GC 联动回收无 checkout 分支」通道。
 4. **G4 动作语义直白**：cancel = 「暂停这一轮」（可以继续聊）；close = 「这件事告一段落」（资源收尾：worktree 回收，record 归已结束桶，message 仍可续聊——2026-09-16 裁决后 close 不再隐藏列表）。两者都不是处决。
 5. **G5 架构收敛**：subagent 的操作逻辑统一收敛（一条 message 链、一套意图原语）；主 agent 与 subagent 在 pi 进程 RPC 上的同类操作（追加消息、状态判断、中断、杀进程）提取公共包，消除双轨实现。
 
@@ -156,7 +156,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 
 ```
 内存 record (RecordStore)
-  │  意图原语: markFinalized / markCancelled / markResurrected / markIdleArchived / markRoundIdle ...
+  │  意图原语: markFinalized / markCancelled / markResurrected / markRoundIdle ...
   │  （C-data-20：store 唯一写入口，eslint + pre-commit 检查）
   ▼
 磁盘（子 session 文件旁）                     其他面
@@ -232,7 +232,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 | 暂停 cancel | 用户动作：中断当前轮，回 idle | cancel = 终态化 cancelled |
 | 收敛 close | 用户动作：资源终态写点（`markSettledOut`——worktree 回收 + patch 落盘 + `.alive` release），record 归「已结束」桶，message 仍可续聊 | close = 终态化 user-close（原「收起归档」意愿位于 2026-09-16 裁决删除） |
 | 寻回 | 机制已消亡（2026-09-16 裁决随 intent 位删除）——message 到「已结束」record 直接续聊（万物可续判据不变），无列表翻位发生 | — |
-| 内存回收 evicted | 容量管理：idle record 超 30 天移出宿主内存（磁盘不动、可重建），用户不可见 | markIdleArchived 的「归档」义 |
+| 内存回收 evicted | 机制已消亡（30 天定时器内存回收机制退役，[ADR-0081](../adr/decisions.md)）——idle record 驻留宿主内存至进程退出（有界：session 结束全清） | — |
 | 对话记录指针 transcriptRef | 会话历史的物理定位（文件路径或库指针）。与 SDK 协议层 `ResumeAnchor.sessionRef` 是同一概念的两层投影：传输层弱类型 `Record<string,string>`，领域层强类型判别联合 | sessionFile 锚、entry-born |
 | 带历史重开 reopen | 锚失效后同 id 开新 transcript，注入摘要 | fork-from（该场景下） |
 | 回收 collect | 资源被 GC 删除（不可逆） | gc（同时是 closedReason 值的歧义消除） |
@@ -321,7 +321,7 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 
 写时机：轮次 settle / abort / 引擎死亡 / 宿主 shutdown 时由对应意图原语写入（markRoundIdle 已有，扩 stopReason 字段）；**不再是「死亡证明」，只是「上一轮收条」**。manifest 与 entry 同步投影（写序沿用 D8：`.state` 先、manifest 后）。
 
-**`.alive` 写权声明生命周期（挂载点迁移，语义不变）**：跨轮保留策略不变（settle 不删——idle record 随时可能续写同一 transcript）。release 出口从「终态原语」迁移为：①**close 终态写点（`markSettledOut`）**——放弃写权（worktree 同点回收；原 markArchived 原语已随 2026-09-16 裁决删除，资源收尾职责由 markSettledOut 承接）；②**内存回收（30 天）**——原 markIdleArchived 出口保留（原语随统一语言更名 markIdleEvicted，语义不变）；③宿主进程退出（marker pid 失效，findForeignLiveInstance pid 单判据自愈）。下游两个消费方行为核对：worktree 孤儿 reaper / D5b 双向对账（worktree-manager.ts:139）与 session-file-gc 探活保护（:99）——close 收敛后 marker 删除 → reaper 可回收 worktree、GC 可删 transcript，与「close 即释放资源」语义一致，无回归。
+**`.alive` 写权声明生命周期（挂载点迁移，语义不变）**：跨轮保留策略不变（settle 不删——idle record 随时可能续写同一 transcript）。release 出口 = ①**close 终态写点（`markSettledOut`）**——放弃写权（worktree 同点回收；原 markArchived 原语已随 2026-09-16 裁决删除，资源收尾职责由 markSettledOut 承接）；②宿主进程退出（marker pid 失效，findForeignLiveInstance pid 单判据自愈）。下游两个消费方行为核对：worktree 孤儿 reaper / D5b 双向对账（worktree-manager.ts:139）与 session-file-gc 探活保护（:99）——close 收敛后 marker 删除 → reaper 可回收 worktree、GC 可删 transcript，与「close 即释放资源」语义一致，无回归。
 
 #### 3.2.5 动作语义（cancel / close / 编排性关闭）
 
@@ -512,7 +512,7 @@ H4 确立的 `.state` 是「终态权威」。终态删除后，磁盘需要表�
 | 单元 | 内容 | justification | 验收挂钩 |
 |---|---|---|---|
 | U1 pi-rpc 公共包 | 新包 + runtime rpc-client 薄壳化 + pi-subagent-cli stdin-writer 归并（先并存后切换；旧路径保持单 commit 可恢复） | 独立于状态机改造，先行落地降后续风险；P0 主链路分步迁移 | S7 |
-| U2 领域词汇与状态机 | types.ts 两态 + stopReason/epoch/lastAbandonedRound + transcriptRef 类型（intent 字段后随 2026-09-16 裁决删除）；store 原语扩展（markRoundIdle 扩 stopReason、markReopened 新增、markFinalized/markCancelled 退役为 markSettled、markIdleArchived 更名 markIdleEvicted——统一语言「内存回收」义；markArchived 后随同裁决删除、由 markSettledOut 承接） | 类型先行，后续单元按图施工 | S8 |
+| U2 领域词汇与状态机 | types.ts 两态 + stopReason/epoch/lastAbandonedRound + transcriptRef 类型（intent 字段后随 2026-09-16 裁决删除）；store 原语扩展（markRoundIdle 扩 stopReason、markReopened 新增、markFinalized/markCancelled 退役为 markSettled；markArchived 后随同裁决删除、由 markSettledOut 承接） | 类型先行，后续单元按图施工 | S8 |
 | U3 `.state` 语义切换与重建矩阵 | state-marker 写/读新格式 + 双向兼容映射（新版读旧值/旧版读新值均声明）；buildRecord 收敛为单规则；孤儿恢复简化（删直断分支）；`.alive` release 出口迁移（close 收起点 + 内存回收点）；binding 增字段（transcriptRef / epoch / lastAbandonedRound） | 磁盘侧先稳，行为侧随后 | S2/S8 |
 | U4 准入判据切换 | cold-lookup 检查段 + reviveOrThrow 合并为锚判据单点；endedMessageGuard 缩型；fork-from 检查 4/6 调整 | 删 gate 是本设计核心交付 | S1/S2 |
 | U5 动作语义 | cancel=abort+settle+置放弃轮标记、close=终态写点（markSettledOut：worktree 回收 + patch 前移 + `.alive` release + pending 注销补发（reason=completed）+ 顺序约束——原 intent 翻转与 markArchived 已随 2026-09-16 裁决删除）、编排性关闭（disposeAllRecords 改造：立即打断 + 置放弃轮标记）、message 寻回翻位已消亡（message 直接续聊）；worktree 重建链（含 apply 冲突三形态） | 用户可感知语义变化，独立可验 | S5/S9 |

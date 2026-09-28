@@ -161,7 +161,6 @@ async function runSessionAssembly(mode: "tui" | "rpc" | "json" | "print", entrie
   setSubagentService({
     initSession: mockInitSession,
     recoverManifestTmpFiles: mockRecoverManifestTmpFiles,
-    startGcTimer: vi.fn(),
     getStreamSink: () => null,
     dispose: vi.fn(),
   } as never);
@@ -194,7 +193,6 @@ async function mountWithLoadAll(loadAll: () => Promise<unknown[]>): Promise<{
   setSubagentService({
     initSession: vi.fn(),
     recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-    startGcTimer: vi.fn(),
     getStreamSink: () => null,
     dispose: vi.fn(),
   } as never);
@@ -396,7 +394,6 @@ describe("session_start 通知账本恢复钩子（U2 B-ledger）", () => {
         service: {
           initSession: vi.fn(),
           recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-          startGcTimer: vi.fn(),
         },
         modelService: {
           initModel: vi.fn(),

@@ -211,7 +211,7 @@ jobs:
         # [HISTORICAL] 同 test-runtime：exec 直传参数（pnpm@10 `--` 透传令 CLI flag 全失效，
         # 其中 --coverage 自落地起从未真正执行过，coverage 阈值门禁形同虚设）。
         # coverage 门禁不在此跑：插桩 ~2x 会把本 job 推到 ~5min 关键路径——迁往
-        # coverage.yml（nightly + 手动）由每日快照兑底，TEST-STRATEGY.md §7 同步更新。
+        # coverage.yml（nightly + 手动）由每日快照兜底，TEST-STRATEGY.md §7 同步更新。
         run: pnpm --filter @taiji/frontend exec vitest run --shard=${{ matrix.shard-index }}/${{ matrix.shard-total }}
 
       - name: Upload test results

@@ -67,7 +67,6 @@ vi.mock("@zhushanwen/subagent-core/execution/subagent-service.ts", () => ({
     recoverManifestTmpFiles = vi.fn(async () => ({ deleted: 0, recovered: 0 }));
     // [U4c/G1] boot 全量重建钩子（runProcessLevelMaintenance 消费面）
     rebuildIndexes = vi.fn(() => 0);
-    startGcTimer = vi.fn();
   },
 }));
 vi.mock(
@@ -910,7 +909,6 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
         service: {
           initSession: vi.fn(),
           recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-          startGcTimer: vi.fn(),
         },
         modelService: {
           initModel: vi.fn(),
@@ -1061,7 +1059,6 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
           service: {
             initSession: vi.fn(),
             recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-            startGcTimer: vi.fn(),
           },
           modelService: {
             initModel: vi.fn(),

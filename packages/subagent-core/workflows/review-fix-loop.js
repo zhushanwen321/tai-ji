@@ -11,7 +11,7 @@
 // 修复范围 = 全部等级（must-fix + suggestion/minor）；批内某 agent 已无任何等级问题
 // （must-fix 与 suggestion 全 0）则后续轮跳过，优化 token 效率。终止/收敛判定仍以
 // must-fix 为主驱动，但任何「成功类」终止（clean/converged/A4 全降级）都要求 suggestion 也为 0。
-// stuck 检测只看 must-fix（suggestion 主观新冒不谈 stuck，由 maxRounds 硬顶兑底）。
+// stuck 检测只看 must-fix（suggestion 主观新冒不谈 stuck，由 maxRounds 硬顶兜底）。
 //
 // 台账守门（假 clean 防护）：state.issues 是「问题是否全部解决」的唯一权威——四个
 // 成功收工点（全员 clean 早退 / all-clean / converged / A4 全降级）统一前置

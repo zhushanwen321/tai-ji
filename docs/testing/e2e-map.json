@@ -1244,6 +1244,26 @@
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "pi-workflow-run-resource-model D3 验收 A4/A7（场景 V4/V7）。zcode 引擎实现为本设计零改动范围（shared-service 透传 registry 保形）——本轨为 manifest 显式声明后的路由保形回归。D3 首跑两轮均挂（ask-dispatched ×2 正常登记但无 ask-settled；候选根因 = zcode 引擎用宿主 ~/.zcode 凭据与自动化会话自身共享同一 GLM plan 配额的自竞争）。2026-09-27 复跑定案：一轮通过（2.7m）——V4 双任务全程同 pid、V7 app 退出后引擎进程随退；首跑挂点根因不可回溯（现场已清），配额自竞争假设未被复现证实也未被排除，当前版本真机 PASS 为准。"
+    },
+    {
+      "id": "E2E-DOC-01",
+      "summary": "文档-代码符号漂移检查（check-doc-symbol-drift：DOC_MODULE_MAP 映射文档 × 源码导出表零悬空 + 测试文档路径存在性 + 源码注释 docs 引用零悬空 + 数据源登记锚点对账）",
+      "scope": [
+        "scripts/check-doc-symbol-drift.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-doc-symbol-drift.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-doc-symbol-drift.mjs",
+      "owner": "docs",
+      "authority": "docs/constraints.json",
+      "note": "设计文档同步纪律（C-proc-10）的机器门：pre-commit 按 docs/architecture/ 或映射源码路径触发（install-hooks.sh DOC_SYMBOL_DRIFT 段）。本 rule 登记脚本资产的 coverage（剪枝清单 = node_modules/.git/dist/coverage/test-results/playwright-report/.taiji-harness/resources/.zcode——.zcode 为 workflow 引擎 gitignored 工作区，agents 手工维护目录不受影响）；改动脚本扫描面/剪枝清单/映射表时跑 node scripts/check-doc-symbol-drift.mjs 冒烟（exit 0 + 四段 OK 行）"
     }
   ]
 }

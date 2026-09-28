@@ -619,7 +619,7 @@ describe("buildWorkerScript runtime — P3/P4 run-level model/thinkingLevel over
 
 describe("buildWorkerScript runtime — string 分支 maxTurns ?? 语义保真（F-2）", () => {
   // 旧实现 `(cond && secondArg.maxTurns) || undefined` 把显式 0 抹成 undefined →
-  // 落 runSpawn 的 env 兑底（SPAWN_WATCHDOG env 设置时误挂 watchdog），与对象分支
+  // 落 runSpawn 的 env 兜底（SPAWN_WATCHDOG env 设置时误挂 watchdog），与对象分支
   // （直接透传保真）语义分裂。锁定运行时行为：string 分支传 0 → postMessage
   // opts.maxTurns === 0。
   it("agent(str, { maxTurns: 0 }) → postMessage opts.maxTurns === 0（不被抹成 undefined）", async () => {

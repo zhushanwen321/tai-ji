@@ -121,7 +121,7 @@ export interface ComposerSendDeps {
   // ── 状态 ──
   /** 发送中状态（普通 send / landing 首发 / staging 发送期间置 true）——兼作 staging 双发锁
    *  （不拦 isActive：fork-ask 对源 session 只读，streaming 中合法；handoff 的 streaming
-   *  拦截在 handleHandoffSend 的 isSessionActive 兑底） */
+   *  拦截在 handleHandoffSend 的 isSessionActive 兜底） */
   isSending: Ref<boolean>
   // ── landing 首发依赖 ──
   /** flow（submitFirstMessage —— landing 态首发提交） */
@@ -171,7 +171,7 @@ async function routeStaging(deps: ComposerSendDeps, route: SendRoute): Promise<'
   // staging 活跃时由 StagingAction 自管 allowsEmptySend（handoff 允许空，fork 不允许）；
   // 双发锁只看 isSending（staging 发送自身会置位），不拦 isActive——fork-ask 发给新建
   // session 对源 session 只读，streaming 中合法（handoff 的 streaming 拦截在
-  // handleHandoffSend 的 isSessionActive 兑底，非此处）。非 staging 走原 canSend 守卫。
+  // handleHandoffSend 的 isSessionActive 兜底，非此处）。非 staging 走原 canSend 守卫。
   const activeStaging = deps.staging.activeStaging.value
   const canStagingSend = !!activeStaging && (activeStaging.allowsEmptySend || deps.canSend.value) && !deps.isSending.value
   if (!deps.canSend.value && !canStagingSend) {

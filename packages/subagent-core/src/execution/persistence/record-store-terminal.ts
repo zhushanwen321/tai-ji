@@ -2,8 +2,8 @@
 //
 // [H4 三轴拆分 / 终态原语轴] RecordStore 终态/settle/收口动作原语的实现体：
 //   - legacy 终态族（markFinalized / markCancelled——workflow D7 例外族专用，U5 退役）；
-//   - settle / 收口动作族（markSettled / markReopened / markSettledOut /
-//     markIdleEvicted——永久会话模型 §3.2.2/§3.2.5）；
+//   - settle / 收口动作族（markSettled / markReopened / markSettledOut——
+//     永久会话模型 §3.2.2/§3.2.5）；
 //   - 磁盘终态位翻活（markResurrected）；[collect 退役] 原 sync 批终态
 //     （markBatchFinalized）已随批机制删除；
 //   - binding settle 快照族（settleSnapshotPatch / fullBindingPayload /
@@ -266,29 +266,6 @@ function commitDerivedTransition(record: ExecutionRecord, ctx: TerminalCtx): voi
 }
 
 /**
- * 意图原语：内存回收（evicted，§3.2.4 release 出口②）。30 天 TTL 内存回收，
- * 用户不可见，非终态化——磁盘不动、可重建。
- *
- * 写序（D3a/轮 5，语义不变）：store.archive **先**、`.alive` release **后**——
- * archive 抛错则原语整体失败、marker 必未删（持有与声明一致）；release 失败
- * best-effort 留痕（removeAliveMarker 内部 warn——GC 为旁路维护路径不阻断
- * interval，泄漏窗 = 至宿主退出，已接受）。回收 record 后续被接管时统一
- * acquireWriteLease 重新声明。
- *
- * [U4c / G2] 回收点补写 manifest（投影 running——磁盘确仍 running）：record 离开
- * 内存后，外部 session-reader 的 identity 富字段主路径只剩 manifest（子文件
- * identity entry 随 30 天 GC 衰减），回收时不落盘则该 record 在 manifest 面长期
- * 缺席。写失败走 writeTerminalManifest 同款响亮上报（终态写面共用通道）。
- */
-export function markIdleEvictedImpl(record: ExecutionRecord, ctx: TerminalCtx): void {
-  ctx.archive(record);
-  // [U4c / G2] 回收点补写：经状态派生投影（running 如实投影——非终态化语义，
-  // terminalManifestRecord 的 closed 硬编码不适用），响亮失败通道同终态写面。
-  persistDerivedManifest(record, ctx);
-  releaseWriteLeaseImpl(record, ctx);
-}
-
-/**
  * [U7 / §3.2.4 release 出口] 写权声明 release 的锚分派：pi = 子 session 文件
  * （现行键）；zcode = transcriptRef 派生锚基底（markResurrected acquire 的对称
  * 反向）。双锚皆缺（spawn 窗口期未确立锚）无声明可释——静默跳过（acquire 同形态
@@ -337,7 +314,6 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
   }
   record.status = "idle";
   record.stopReason = stopReason;
-  record.idleSince = Date.now();
   const settledAt = Date.now();
   // [U7 / §3.2.7 统计口径单基准] settle 快照锚分派（U6-D2 交接收编）：
   //   - pi：子 session 文件锚（现行——`.state` 收条 + binding 快照）；
@@ -783,6 +759,10 @@ export function buildAdoptedManifestProjection(
     agentName: identity.agent,
     status: "running", // legacy 三态投影：无 closedReason → running（executionStatus 承载两态权威词）
     executionStatus: "idle",
+    // [W4 收敛] 收编停因上投影：sweep 判据第三级（findAdoptedStopReasonSync）经它把
+    // 收编 record 判 terminal，注销条目 reason 落 interrupted 族（mapReasonToStatus
+    // → aborted），不再误走 missing 分支的 expired。
+    stopReason,
     createdAt: identity.startedAt,
     completedAt: now,
     ...(bound !== undefined && bound.sessionFile !== "" ? { sessionFile: bound.sessionFile } : {}),

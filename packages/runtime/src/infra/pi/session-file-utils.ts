@@ -269,7 +269,7 @@ export function projectSidecarPath(filePath: string): string {
  * 跟 session 走（删除 session 归属自动消失，fork 继承父归属）。
  *
  * [规则 #6] session JSONL 文件不存在时**绝不创建 sidecar**（与 persistPresetBinding 同守则）：
- * pi 延迟写入窗口内 existsSync=false → 静默跳过；active session 归属经内存态兑底
+ * pi 延迟写入窗口内 existsSync=false → 静默跳过；active session 归属经内存态兜底
  *（ManagedSession.projectId），不阻断主流程。例外：create 路径经 opts.skipJsonlExistsGuard
  * 放行（session 由本进程刚创建必然真实，见 PersistBindingSidecarOpts）。
  *
@@ -280,7 +280,7 @@ export function projectSidecarPath(filePath: string): string {
 export function persistProjectBinding(filePath: string, projectId: string, opts?: PersistBindingSidecarOpts): void {
   if (!filePath) return
   // 空 projectId（归回默认项目）= 删除绑定 sidecar。readProjectBinding 以 sidecar 为权威（无 sidecar
-  // 兑底 undefined → 展示层归入默认项目），若只 return 不删，已存在的 .project.json 会继续生效——
+  // 兜底 undefined → 展示层归入默认项目），若只 return 不删，已存在的 .project.json 会继续生效——
   // 重启后 session 归属回退到旧命名项目（review MF-2 回归）。删除不创建文件，不违反规则 #6，
   // 因此不依赖 JSONL 存在性，放在公共写入（其 existsSync 守卫）之前执行。
   if (!projectId) {
@@ -863,7 +863,7 @@ export interface ScannedSessionMeta extends ModelBindingFields {
   launchPresetId?: string
   /**
    * 归属 project id（从 .project.json sidecar 读，D14 语义修正 2026-08-04）。
-   * undefined = 未归类（展示层归入默认项目 proj-default 兑底）。
+   * undefined = 未归类（展示层归入默认项目 proj-default 兜底）。
    */
   projectId?: string
   /**

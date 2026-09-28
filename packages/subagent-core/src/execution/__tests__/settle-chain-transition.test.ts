@@ -145,7 +145,6 @@ describe("finalizeFailed / finalizeAborted 经收口单点（workflow origin）"
       getStore: () => ({ markRoundIdle: vi.fn() }),
       getNotifyHost: () => ({}),
       getPi: () => null,
-      getMainSessionFile: () => undefined,
       getSessionsDir: () => os.tmpdir(),
     } as unknown as ConstructorParameters<typeof RecordLifecycle>[0]);
     return lifecycle;

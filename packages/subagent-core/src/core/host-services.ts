@@ -91,7 +91,7 @@ export function resetCoreForTests(): void {
 /**
  * 宿主未 configureCore 即被消费的判别错误（§3.4 core_host_not_configured）。
  *
- * 为什么带 `code` 判别符而非只靠 message 子串：消费侧（idle-gc 的 workflow 域
+ * 为什么带 `code` 判别符而非只靠 message 子串：消费侧（workflow 域
  * 「未启用 / 真 IO 故障」分通道）曾用错误文案子串做控制流——文案任何调整都会
  * 静默改判。消费者一律用 isHostNotConfiguredError（结构化判定）。
  * code 判定而非 instanceof：dist 双形态（主 bundle × 子入口 bundle 各持模块副本）

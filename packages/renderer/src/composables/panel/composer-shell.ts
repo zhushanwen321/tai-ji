@@ -394,7 +394,7 @@ export function useComposerShell(params: ComposerShellParams) {
   const isBusy = computed(() => isActive.value || isSending.value)
   const canSend = computed(() => hasInput.value && !isBusy.value)
   /** 可提交：staging 活跃时只看本地双发锁（isSending）——streaming 中 fork 提交合法，
-   *  handoff 的 streaming 拦截在入口（enterHandoffMode）+ 兑底（handleHandoffSend）。
+   *  handoff 的 streaming 拦截在入口（enterHandoffMode）+ 兜底（handleHandoffSend）。
    *  非 staging 态维持原 canSend（hasInput ∧ ¬isBusy）。 */
   const canSubmit = computed(() => {
     const active = staging.activeStaging.value

@@ -395,7 +395,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     seedCrashedRecord("sa-adopt-1");
 
     const capturedA: unknown[] = [];
-    rebootStore(capturedA);
+    const storeA = rebootStore(capturedA);
     const eventsA = v2ReadEventLines(recordsDir, "sa-adopt-1");
     expect(eventsA.filter((e) => e.type === "record-settled")).toHaveLength(1);
     const settled = eventsA.find((e) => e.type === "record-settled");
@@ -403,8 +403,13 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     expect(capturedA.filter((c) => (c as { data: { kind?: string } }).data?.kind === "settled")).toHaveLength(1);
     const manifest = JSON.parse(
       fs.readFileSync(path.join(recordsDir, "sa-adopt-1.json"), "utf8") as string,
-    ) as { id: string; agentName: string; executionStatus: string };
+    ) as { id: string; agentName: string; executionStatus: string; stopReason?: string };
     expect(manifest).toMatchObject({ id: "sa-adopt-1", agentName: "worker", executionStatus: "idle" });
+    // [W4 收敛] 收编停因上投影——sweep 判据第三级（findAdoptedStopReasonSync）的读取源。
+    expect(manifest.stopReason).toBe("interrupted-by-restart");
+    // 判据第三级本体：收编 manifest → 停因；非收编形态（文件缺失）→ undefined。
+    expect(storeA.findAdoptedStopReasonSync("sa-adopt-1")).toBe("interrupted-by-restart");
+    expect(storeA.findAdoptedStopReasonSync("sa-never-existed")).toBeUndefined();
 
     // 第二次重启：fold settled + 终态条目在（双面证据）→ 零追加。
     const capturedB: unknown[] = [];

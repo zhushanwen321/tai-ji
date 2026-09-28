@@ -276,7 +276,8 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
   })
 
   it('被动终局帧透传：收编/回收路径 run-settled（interrupted + errorCode 细分）落骨架与投影', () => {
-    // idle-gc 回收形态（场景 3 journal 帧口径）：outcome=interrupted + errorCode=idle-evicted
+    // 历史回收帧（场景 3 journal 帧口径）：outcome=interrupted + errorCode=idle-evicted
+    // ——历史写入方 = 已退役的 30 天内存回收机制（见 ADR），词表成员为存量帧解析保留
     const evicted = foldRunEventCheckpoint(
       [
         runSeqEvent(1, { type: 'run-created', runId: 'wf-idle', workflowName: 'flow', argsSummary: '' }),

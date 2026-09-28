@@ -699,8 +699,8 @@ export class RunOrchestration {
   ): Promise<void> {
     // [H2 W2 / D7 例外族维持现状（§1.4 out-of-scope）] workflow origin 成功 = 立即
     // 终态化（closed/"gc"）；aborted/失败 = closed+cancelled/gc——workflow agent 结果
-    // 由脚本返回值承载、无 message 对端，留内存 idle 会绑架 hasRunning / 恒挂
-    // idle-gc / 被误升级为对话容器 / goal defer 恒挂（设计 D7 四面连带）。自带 CAS
+    // 由脚本返回值承载、无 message 对端，留内存 idle 会绑架 hasRunning / 被误升级
+    // 为对话容器 / goal defer 恒挂（设计 D7 连带理由）。自带 CAS
     // 抢锁（承接现状「cancel/dispose 抢先 → 静默跳过」守卫语义）。
     // [P1b-1] 直写通道删除：closed/cancelled 终态判定不再在本方法直写——收口至
     // worker-message-pump 的 settleWorkflowRecord 单点（D7 例外族 CAS + finalize 对

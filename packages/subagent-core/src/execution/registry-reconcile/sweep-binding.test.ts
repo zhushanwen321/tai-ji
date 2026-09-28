@@ -59,18 +59,24 @@ interface StoreHarness { // oe-exempt:20260928:framework:测试替身形状契�
   store: RecordStore;
   memory: Map<string, ExecutionRecord>;
   disk: Map<string, SubagentRecord>;
+  /** [W4 收敛] 判据第三级替身面（id → 收编停因）。 */
+  adoptedStopReasons: Map<string, string>;
 }
 
-/** duck-typed RecordStore 替身（sweep-binding 消费 getMutable / findLightById 两个
- *  读点——真实磁盘发现需 session 文件扫描，与本文件断言面无关）。 */
+/** duck-typed RecordStore 替身（sweep-binding 消费 getMutable / findLightById /
+ *  findAdoptedStopReasonSync 三个读点——真实磁盘发现需 session 文件扫描，与本文件
+ *  断言面无关）。 */
 function makeStore(): StoreHarness {
   const memory = new Map<string, ExecutionRecord>();
   const disk = new Map<string, SubagentRecord>();
+  // [W4 收敛] sweep 判据第三级的替身面：id → 收编停因（生产实现读收编 manifest）。
+  const adoptedStopReasons = new Map<string, string>();
   const store = {
     getMutable: (id: string) => memory.get(id),
     findLightById: (id: string) => disk.get(id),
+    findAdoptedStopReasonSync: (id: string) => adoptedStopReasons.get(id),
   };
-  return { store: store as unknown as RecordStore, memory, disk };
+  return { store: store as unknown as RecordStore, memory, disk, adoptedStopReasons };
 }
 
 interface BindingHarness { // oe-exempt:20260928:framework:测试装配契约——binding/store/pi 三件套打包返回，与既有测试 SetupResult 形态同构
@@ -241,6 +247,33 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
     expect(h.pi?.appended).toEqual([
       { customType: "pending:unregister", data: { id: "bg-gone", reason: "expired", status: "expired" } },
     ]);
+  });
+
+  it("[W4 收敛] v2 收编 record（findLightById 未命中 + 收编 manifest 停因在场）→ 注销 reason=interrupted-by-restart status=aborted（expired 误注销回归钉）", () => {
+    setup();
+    writeRegister("bg-adopted", "subagent");
+    const h = makeBinding({ sessionFile });
+    h.store.adoptedStopReasons.set("bg-adopted", "interrupted-by-restart");
+    runPendingReconcileSweepForService(h.binding, false);
+    const entry = (h.pi?.appended ?? []).find(
+      (c) => c.customType === "pending:unregister",
+    );
+    expect(entry?.data).toMatchObject({
+      id: "bg-adopted",
+      reason: "interrupted-by-restart",
+      status: "aborted",
+    });
+  });
+
+  it("[W4 收敛] v2 收编停因缺席（判据第三级 undefined）→ 维持 missing 分支 expired（保守侧不回归）", () => {
+    setup();
+    writeRegister("bg-nonadopted", "subagent");
+    const h = makeBinding({ sessionFile });
+    runPendingReconcileSweepForService(h.binding, false);
+    const entry = (h.pi?.appended ?? []).find(
+      (c) => c.customType === "pending:unregister",
+    );
+    expect(entry?.data).toMatchObject({ id: "bg-nonadopted", reason: "expired", status: "expired" });
   });
 
   it("pi 缺席（getPi null）→ 只判不写，不炸", () => {

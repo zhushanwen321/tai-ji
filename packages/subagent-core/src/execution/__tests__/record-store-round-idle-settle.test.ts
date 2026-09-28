@@ -88,7 +88,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(record.round).toBe(1);
     expect(record.endedAt).toBeUndefined();
     expect(record.result).toBe("round output");
-    expect(record.idleSince).toBeTypeOf("number");
+    // ⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081）——轮终不再写 idle 锚。
     // ⑪ `.state` 收条：轮收口 idle 形态（重建单规则一律 idle）。
     const state = readStateJson();
     expect(state["status"]).toBe("idle");

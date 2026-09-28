@@ -167,7 +167,7 @@ describe("两态状态机 CAS 语义", () => {
 // ── ② markSettled 副作用矩阵（.state / binding / manifest / .alive）──────────
 
 describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
-  it("内存面：status=idle + stopReason 写入 + idleSince 刷新；closedReason 不写（非终态）；record 留内存", () => {
+  it("内存面：status=idle + stopReason 写入；closedReason 不写（非终态）；record 留内存", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.round = 2;
@@ -176,7 +176,6 @@ describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
     expect(rec.status).toBe("idle");
     expect(rec.stopReason).toBe("interrupted");
     expect(rec.closedReason).toBeUndefined();
-    expect(rec.idleSince).toBeDefined();
     expect(rec.endedAt).toBeUndefined(); // 非终态，duration 语义保持
     expect(store.getMutable("bg-1")).toBe(rec); // 留内存（随时可续聊）
   });
@@ -387,9 +386,9 @@ describe("epoch 递增（reopen 防撞）", () => {
   });
 });
 
-// ── ⑤ markSettledOut / markIdleEvicted 副作用矩阵（写权声明 + 收口落账写面）──────────
+// ── ⑤ markSettledOut 副作用矩阵（写权声明 + 收口落账写面）──────────
 
-describe("markSettledOut / markIdleEvicted 副作用矩阵", () => {
+describe("markSettledOut 副作用矩阵", () => {
   it("markSettledOut：.alive release（release 出口①）+ entry 上报 + worktreeHandle 清句（占用位不动）", () => {
     const store = newStore();
     const rec = runningRecord();
@@ -412,24 +411,5 @@ describe("markSettledOut / markIdleEvicted 副作用矩阵", () => {
     expect(store.markSettledOut(rec)).toBe(true);
     expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
     expect(store.getMutable("bg-1")).toBe(rec);
-  });
-
-  it("markIdleEvicted：内存移除 + manifest 投影 + .alive release 后（写序 archive 先 release 后）", () => {
-    const store = newStore();
-    const rec = runningRecord();
-    rec.status = "running";
-    store.register(rec);
-    fs.writeFileSync(
-      `${rec.sessionFile}.alive`,
-      JSON.stringify({ pid: process.pid, id: "bg-1", startedAt: Date.now() }),
-      "utf-8",
-    );
-    store.markIdleEvicted(rec);
-    expect(store.getMutable("bg-1")).toBeUndefined(); // 内存回收
-    expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(manifestDir, "bg-1.json"), "utf-8"),
-    ) as Record<string, unknown>;
-    expect(manifest.status).toBe("running"); // 非终态化如实投影（磁盘仍可接管）
   });
 });

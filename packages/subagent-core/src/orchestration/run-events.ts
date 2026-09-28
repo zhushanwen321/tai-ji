@@ -76,9 +76,10 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
  * 词表不动，映射归 journal 写入方实现）。
  *
  * interrupted = 被动终局的唯一权威表达（「崩溃 ≠ 失败」的用户可感区分）：
- * 崩溃收编 / abandon 7 天窗 / idle-gc 30 天回收三条路径写入，细分语境由
- * errorCode 承载（interrupted_abandoned / idle-evicted）。它不出自任何执行侧
- * 判定——只有收编/回收原语写入（record 轮终与 ask 终局构造性不可达，消费方
+ * 崩溃收编 / abandon 7 天窗 / runtime 启动扫描三条路径写入，细分语境由
+ * errorCode 承载（interrupted_abandoned / startup-sweep；历史值 idle-evicted
+ * 的写入方已随机制退役，登记见下方 RunErrorCode 词表段）。它不出自任何执行侧
+ * 判定——只有收编原语写入（record 轮终与 ask 终局构造性不可达，消费方
  * 按 `Exclude<RunOutcome, "interrupted">` 收窄，见 execution/assembly/types.ts
  * 的 ExecutionOutcome 派生别名）。
  *
@@ -123,10 +124,17 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  * 是 ask 级失败分诊三态（预算耗尽不是 ask 失败形态）；"unknown" 语义 = 分类
  * 不出来，而这两族死因是确定已知的。
  *
- * idle-evicted 同族第三成员（[W2 D3/D5]）：idle-gc 30 天回收的终局码——
+ * startup-sweep 是 runtime 启动扫描收编的终局码：outcome='interrupted' 帧的
+ * 细分语境——启动扫描把磁盘 running 的孤儿 run 终局化时写入（两件直落收编，
+ * 见 execution/assembly/startup-sweep.ts；写入时机 = runtime 启动序列、单实例
+ * 锁确立后先于任何 pi spawn 的时点）。与 interrupted_abandoned 同族：不描述
+ * 进程怎么死的，描述「为什么此刻被判终局」，同款登记形态。
+ *
+ * idle-evicted 同族第三成员（[W2 D3/D5]，词表成员保留）：历史写入方 = 已退役
+ * 的 30 天内存回收机制（ADR 登记，见 docs/adr/decisions.md 启动扫描条目），
+ * 生产写入方已随机制退役归零。append-only journal 的存量帧携带该值，词表成员
+ * 是解析词表而非「现存写入方」登记，删值破坏历史帧解析——故保留。语义：
  * outcome='interrupted' 帧的细分语境（管理性回收，非用户主动非证实失败）。
- * 写入方 = idle-gc 改走终局记录原语的路径；词表先于接线入单源（V0），
- * 与 interrupted_abandoned 同款登记。
  */
 export type RunErrorCode =
   | EngineProtocolErrorCode
@@ -135,6 +143,7 @@ export type RunErrorCode =
   | "budget_limited"
   | "time_limited"
   | "interrupted_abandoned"
+  | "startup-sweep"
   | "idle-evicted";
 
 // ── DoneReason → RunOutcome 映射表定稿（与下方 RunErrorCode 映射同族的姊妹单点）──
@@ -154,16 +163,18 @@ export type RunErrorCode =
  * | invalid_args    | failed     | 因提取               | 参数校验失败——生产不达 finalizeRun（launcher 校验在 run 创建前返回），收录仅为映射穷尽；run 从未创建、不落终局帧（不适用行） |
  *
  * time_limited 双语境注记（[W2 D5 表注]）：上表行只覆盖 dispatch 链语境（活体
- * 预算超时 → failed）。idle-gc 30 天回收语境的同一 DoneReason 字面量落
- * interrupted + errorCode='idle-evicted'（管理性回收 = 被动终局，不稀释
+ * 预算超时 → failed）。被动收编语境的同一 DoneReason 字面量落 interrupted +
+ * errorCode 承载细分语境（现行 = interrupted_abandoned / startup-sweep，历史值
+ * idle-evicted 见上方 RunErrorCode 词表段——管理性收编 = 被动终局，不稀释
  * cancelled 的「主动」语义）——该行不经本函数派生，映射判据用触发源（场景
- * 语境）而非字面量，由收编/回收写入方（idle-gc 改走终局记录原语的路径）直写。
+ * 语境）而非字面量，由收编写入方直写。
  *
  * 消费方：core worker-message-pump 的 dispatchFinalRunSettle（同构判别，aborted
- * 分支走 cancel-requested 合成不改用本函数——两条路径的 outcome 语义一致）+ 壳
- * helpers 通知载荷的 outcome 字段（原 extension 侧 mapDoneReasonToOutcome 本地
- * 镜像已删，经 barrel 消费本单源；漂移信号 = 通知 outcome 与 journal
- * run-settled 帧 outcome 不一致）。
+ * 分支走 cancel-requested 合成不改用本函数——两条路径的 outcome 语义一致）。
+ * 壳侧通知载荷的 outcome 字段不经本函数：帧直取（settlement.outcome，与
+ * run-settled 帧同源）+ DoneReason 经 runSettledOutcomeToDoneReason 反向派生
+ * （原 extension 侧 mapDoneReasonToOutcome 本地镜像已删）；漂移信号 = 通知
+ * outcome ≡ journal run-settled 帧 outcome。
  */
 export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
   switch (reason) {
@@ -190,8 +201,8 @@ export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
  *   （RunSettledEvent.errorCode 字段语义「失败时才有」）；
  * - budget_limited/time_limited：run 级终局码恒等映射（同名字面量，上方注释载
  *   收录依据）；
- * - failed/invalid_args：按因提取——invalid_args 与 failed 同组对齐 extension
- *   mapDoneReasonToOutcome 的既有归类（invalid_args 生产不达 finalizeRun——
+ * - failed/invalid_args：按因提取——invalid_args 与 failed 同组对齐上方
+ *   doneReasonToRunOutcome 的既有归类（invalid_args 生产不达 finalizeRun——
  *   launcher 参数校验在 run 创建前返回，防误分组而已）。
  */
 export function finalRunErrorCodeOf(run: WorkflowRun, doneReason: DoneReason): RunErrorCode | undefined {
@@ -438,7 +449,8 @@ export type WorkflowRunEvent =
 
 /**
  * 写侧入参形态：事件去掉 seq（seq 由 journal 单写者分配——单调性的构造性保证，
- * 调用方无法传错；与 record 侧 RecordJournalEventInput 同构）。DistributiveOmit
+ * 调用方无法传错；与 record 侧 RecordJournalEventInput（execution/persistence/
+ * record-events.ts）同构）。DistributiveOmit
  * 使联合逐成员 Omit（保持判别键窄化能力）。
  *
  * 状态机消费面（TransitionTrigger 的事件族）即本形态——seq 是 journal 存储层的
@@ -991,6 +1003,10 @@ const journalLogger = getLogger("run-event-journal");
  * （stall watchdog 的 journal 路径构造、终局通知的 eventsJournalPath、
  * jsonl-run-store 的 watcher 边沿判定）统一 import 本常量——后缀字面量散布
  * 多处时任何一侧单独改动都是静默漂移（watcher 失配 / 指针失效）。
+ *
+ * 已知范围外同值副本：session-reader 包（跨包无 core 依赖边，物理单源结构性
+ * 不可行——与 D5 core↔shared 同款约束）本地持有同值常量，以「写侧同值」注释
+ * 锚 + 测试守卫承接漂移检查（v2 条目 journalPath → state 快照推导消费它）。
  */
 export const RUN_EVENT_JOURNAL_SUFFIX = ".events.jsonl";
 

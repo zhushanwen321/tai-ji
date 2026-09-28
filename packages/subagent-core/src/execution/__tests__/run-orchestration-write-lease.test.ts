@@ -117,7 +117,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
       expect(record?.sessionFile).toBe(sessionFile);
       // [D3a 时机①] 锚点确立即声明写权（kickOffChatRound 回填点）
       expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: handle.subagentId });
-      // [D3a/B5] 轮终跨轮保留——release 出口只有终态原语/idle-GC 归档
+      // [D3a/B5] 轮终跨轮保留——release 出口只有终态原语（markSettledOut）
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
       // [UF-1] 绑定 sidecar 同步落盘（既有行为不回归）
       expect(fs.existsSync(`${sessionFile}.record-binding`)).toBe(true);

@@ -893,12 +893,12 @@ describe("projectOutcome（投影唯一出口）", () => {
     expect(projectOutcome({ status: "idle", closedReason: "gc", outcome: "cancelled" })).toBe("cancelled");
   });
 
-  it("closed + 无 outcome（存量/重建 record）→ deriveOutcome(closedReason, error) 兑底", () => {
+  it("closed + 无 outcome（存量/重建 record）→ deriveOutcome(closedReason, error) 兜底", () => {
     expect(projectOutcome({ status: "idle", closedReason: "gc", error: "boom" })).toBe("failed");
     expect(projectOutcome({ status: "idle", closedReason: "cancelled" })).toBe("cancelled");
     expect(projectOutcome({ status: "idle", closedReason: "gc" })).toBe("completed");
     // 连 closedReason/error 都缺失的最旧存量：兜底为 completed（与旧 closedReason??'gc'
-    // 兑底显示语义一致）
+    // 兜底显示语义一致）
     expect(projectOutcome({ status: "idle", closedReason: "gc" })).toBe("completed");
   });
 });
@@ -943,7 +943,7 @@ describe("projections", () => {
       expect(d.sessionFile).toBe("bg-1-abc.jsonl");
     });
 
-    it("[U3] project 投影携带 outcome：一等字段直读 / 存量兑底 / running undefined", () => {
+    it("[U3] project 投影携带 outcome：一等字段直读 / 存量兜底 / running undefined", () => {
       const done = makeRecord({ status: "idle", outcome: "completed", closedReason: "gc" });
       expect(project(done).outcome).toBe("completed");
       const legacy = makeRecord({ status: "idle", closedReason: "gc", error: "boom" });

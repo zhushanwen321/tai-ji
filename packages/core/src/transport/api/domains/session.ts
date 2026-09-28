@@ -47,7 +47,7 @@ export async function create(
   if (cwd !== undefined) payload.cwd = cwd
   if (label !== undefined) payload.label = label
   if (presetId !== undefined) payload.presetId = presetId
-  // D14 语义修正（2026-08-04）：创建时归属当前 activeProject（空 = 默认项目兑底）。
+  // D14 语义修正（2026-08-04）：创建时归属当前 activeProject（空 = 默认项目兜底）。
   if (projectId !== undefined) payload.projectId = projectId
   // B3：透传 modelOverride / thinkingOverride（Landing Chip 覆盖值）。
   // 优先级：Landing Chip override > preset.modelOverride/thinkingLevel > 全局默认。

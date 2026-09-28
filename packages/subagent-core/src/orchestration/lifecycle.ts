@@ -34,7 +34,6 @@
  * WorkflowRun + handleWorker* 函数。
  */
 
-import { PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 import { getLogger } from "../core/logger.ts";
 
 import { assertSafeTimerDelay } from "../shared/timer-delay.ts";
@@ -807,22 +806,4 @@ export async function recoverCrashedRuns(
     );
   }
   return { loaded: loaded.length, recovered };
-}
-
-/** [W2/V1 D3 same-session] idle 回收收编的终态条目直写面——workflow-record 条目的
- * customType 常量绑定收拢在本文件（R3 写面守卫白名单宿主），idle-gc 只经
- * sessionFace 注入的裸 write 消费，不在消费侧感知 customType。 */
-export function writeSettledRecordEntryVia(
-  write: (customType: string, data: unknown) => void,
-  data: unknown,
-): void {
-  write(WORKFLOW_RECORD_CUSTOM_TYPE, data);
-}
-
-/** [W2/V1 D6] idle 回收 same-session 收编成功后的注销条目直写面（同上收拢纪律）。 */
-export function writePendingUnregisterEntryVia(
-  write: (customType: string, data: unknown) => void,
-  data: unknown,
-): void {
-  write(PENDING_UNREGISTER_ENTRY_TYPE, data);
 }

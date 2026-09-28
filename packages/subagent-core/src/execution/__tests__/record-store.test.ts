@@ -1540,7 +1540,7 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
       data: { v: 2, kind: "settled", id: "sa-v2-arch", endedAt: 12345, turns: 2, totalTokens: 300, result: "done text" },
     });
 
-    // 内存回收形态（markIdleEvicted 前置——endedAt 未设）：零事件零条目。
+    // 非终局 archive（endedAt 未设）：零事件零条目。
     const captured2: unknown[] = [];
     const store2 = makeStore(captured2);
     const rec2 = v2MakeRecord({ id: "sa-v2-evict" });

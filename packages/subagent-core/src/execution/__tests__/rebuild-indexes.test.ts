@@ -5,8 +5,8 @@
 //     rebuildIndexes + 查询面惰性通道 mergedRecords 双通道各自可独立触发）；
 //   - 失败降级：无 identity 的损坏/异构文件不在扫描集 → 不重建不抛（sessions-index
 //     「损坏静默回退全扫」同款先例）；幸存 manifest 不覆写（幂等补缺）；
-//   - G2 词汇双写：manifest 写面（markFinalized/markCancelled/markSettledOut/
-//     markIdleEvicted）旧 status 三态投影 + executionStatus/closedReason 并存。
+//   - G2 词汇双写：manifest 写面（markFinalized/markCancelled/markSettledOut）
+//     旧 status 三态投影 + executionStatus/closedReason 并存。
 //     [collect 退役] markBatchFinalized 写面已删，批成员 manifest 改为存量读侧容忍用例。
 
 import * as fs from "node:fs";
@@ -21,6 +21,17 @@ import { ManifestStore } from "../persistence/manifest-store.ts";
 import { INDEX_FILENAME } from "../persistence/sessions-index.ts";
 import { writeCancelledState, writeFinalizedState } from "../persistence/state-marker.ts";
 import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+
+// [teardown 竞态修复] 被测链（rebuild/store/manifest 降级路径）的 logger 输出经
+// console 落 stderr，满并行下文件结束与 worker rpc 关闭竞态会触发 vitest
+// EnvironmentTeardownError（onUserConsoleLog pending）→ run 退出码 1。本文件对
+// logger 零断言依赖，mock 静默（对齐 record-store.test.ts 同款先例）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
 
 /** 最小合法子 session 文件（session header + identity custom entry + assistant msg）。 */
 function writeSessionJsonl(
@@ -283,22 +294,6 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
     const manifest = readManifest("sa-cx2");
     expect(manifest.status).toBe("closed");
     expect(manifest.executionStatus).toBe("idle");
-    store.dispose();
-  });
-
-  it("markIdleEvicted：回收点补写 running 投影（非终态化语义——磁盘仍 running 可接管）", () => {
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
-    const sessionFile = path.join(sessionsDir, "20260912T000008_idle.jsonl");
-    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
-    const record = makeRecord("sa-idle", { sessionFile });
-
-    store.markIdleEvicted(record);
-    const manifest = readManifest("sa-idle");
-    expect(manifest.status).toBe("running");
-    expect(manifest.executionStatus).toBe("running");
-    expect(manifest.completedAt).toBeUndefined();
-    // 非终态化：不写 .state（回收 ≠ 放弃可重连性）
-    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     store.dispose();
   });
 

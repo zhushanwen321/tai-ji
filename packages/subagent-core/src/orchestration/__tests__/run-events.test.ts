@@ -1122,7 +1122,7 @@ describe("doneReasonToRunOutcome 映射表定稿（[W2 D5] dispatch 链语境全
     expect(Object.keys(expectedRows).sort()).toEqual([...ALL_DONE_REASONS].sort());
   });
 
-  it("time_limited 双语境注记：dispatch 链行落 failed；idle-gc 回收行（interrupted + 'idle-evicted'）不经本函数——由收编/回收写入方按场景语境直写（D5 表注）", () => {
+  it("time_limited 双语境注记：dispatch 链行落 failed；被动终局行（interrupted + 'idle-evicted'，历史写入方 = 已退役的 30 天内存回收机制，见 ADR）不经本函数——由收编写入方按场景语境直写（D5 表注）", () => {
     // dispatch 链语境
     expect(doneReasonToRunOutcome("time_limited")).toBe("failed");
     // 被动终局语境的词表承载在盘：interrupted ∈ 词表 且 idle-evicted ∈ RunErrorCode

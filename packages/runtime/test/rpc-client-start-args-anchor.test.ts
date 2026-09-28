@@ -35,7 +35,7 @@ const fakeProc = {
   },
   kill: vi.fn((_signal?: NodeJS.Signals | number) => {
     // kill 即死（mock 语义）：从 on.mock.calls 找 exit listener 微任务驱动，短路 grace 真实等待
-    // （beforeEach 已 mockClear，calls 仅含本用例注册；重复驱动由链内 settled 幂等守卫兑底）
+    // （beforeEach 已 mockClear，calls 仅含本用例注册；重复驱动由链内 settled 幂等守卫兜底）
     queueMicrotask(() => {
       for (const [event, handler] of fakeProc.on.mock.calls) {
         if (event === 'exit') (handler as (code: number | null) => void)(0)

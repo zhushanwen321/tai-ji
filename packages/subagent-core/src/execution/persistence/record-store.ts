@@ -45,7 +45,6 @@
 // | markSettled(record, stopReason) | 轮收口（settle：成功/失败/中断统一落 idle + stopReason；替代 markFinalized/markCancelled 的轮收口角色） | U2 定（usage 快照落 binding + manifest 投影；`.alive` 跨轮保留） |
 // | markReopened(record, transcriptRef) | 带历史重开（新 transcriptRef + round 归零 + epoch+1 + stopReason=reopened，§3.2.3） | U2 定（binding 持久化 epoch/锚） |
 // | markSettledOut(record) | close 收口落账（worktreeHandle 清句 + `.alive` release，§3.2.4 release 出口①） | U2 定（worktree/patch/注销编排留调用方） |
-// | markIdleEvicted(record) | 内存回收（30 天 TTL，用户不可见，非终态化——磁盘不动、可重建接管） | store.archive 先 → manifest（running 投影）→ `.alive` release 后（archive 抛错则整体失败 marker 必未删） |
 //
 // ── 字段级写点全集 → 操作映射（设计 §3.1 v4 十字段逐一归口）──
 //   ① status      —— 轮始重置→markRoundStarted；轮终翻边 idle（U4/D3）→markRoundIdle；
@@ -57,7 +56,7 @@
 //   ④ closedReason—— 终态→markFinalized/markCancelled；轮终清除→markRoundIdle（[S10]）
 //   ⑤ resumable   —— 字段已退役（[U5/D4] idle 即 resumable，字段从 record/entry
 //                    契约删除，无写点）
-//   ⑥ idleSince   —— 轮终刷新→markRoundIdle
+//   ⑥ idleSince   —— 已退役（30 天空闲回收判据锚，ADR-0081；字段与写点删除）
 //   ⑦ sessionFile —— 回填族（run 应答/promote）归调用方内存回填 + register/
 //                    markFinalized 序言随投影持久化；acquireWriteLease 在锚点确立时
 //                    声明写权（D3a 时机①）
@@ -157,7 +156,6 @@ import {
   MANIFEST_INDENT_SPACES,
   markCancelledImpl,
   markFinalizedImpl,
-  markIdleEvictedImpl,
   markReopenedImpl,
   markResurrectedImpl,
   markSettledImpl,
@@ -455,9 +453,7 @@ export class RecordStore {
    * [W1 / D1·D2] v1 全量快照 entry 停写。真终局（completeLegacyClosed 已冻结 endedAt）
    * 时经 settleViaJournal 落 record-settled 帧 + v2 终态条目（终态冻结字段在
    * completeLegacyClosed 已就绪——与 v1「archive 即完整终态记录」同点）；事件面未接线
-   * 时条目面独立工作（终态条目照常，零事件帧）。内存回收
-   * （markIdleEvicted——endedAt 未设，非终局）零条目零事件，manifest 派生投影
-   * 由回收点自写（U4c / G2 写序不变）。
+   * 时条目面独立工作（终态条目照常，零事件帧）。
    */
   archive(record: ExecutionRecord): void {
     this.records.delete(record.id);
@@ -524,8 +520,8 @@ export class RecordStore {
    *   ① status 写 idle；② result 按 outcome 写入（成功=content / 失败=前值??
    *      失败摘要 + lastError）；③ round+1；④ closedReason 清除（[S10]）；⑤ resumable
    *      字段已退役（[U5/D4] idle 即 resumable，无簿记动作）；⑥
-   *      idleSince 刷新（idle-GC 判据锚）；⑦ **`.alive` 保留**
-   *      （D3a 跨轮延续——写权声明至 release 两出口[终态原语/idle-GC 回收]，轮终
+   *      idleSince 已退役（30 天空闲回收判据锚，ADR-0081，无簿记动作）；⑦ **`.alive` 保留**
+   *      （D3a 跨轮延续——写权声明至 release 单出口[终态原语 markSettledOut]，轮终
    *      record 随时续聊 spawn 写同一 sessionFile，删则轮后跨进程防御
    *      空窗）；⑧ pending 注销发射点②（进程已死，从活跃后代差集移除——经
    *      setPendingUnregister 注入，未注入时跳过）；⑨ reportRecordTransition（entry
@@ -640,25 +636,6 @@ export class RecordStore {
   }
 
   /**
-   * 意图原语：内存回收（evicted，§3.2.4 release 出口②）。30 天 TTL 内存回收，
-   * 用户不可见，非终态化——磁盘不动、可重建。
-   *
-   * 写序（D3a/轮 5，语义不变）：store.archive **先**、`.alive` release **后**——
-   * archive 抛错则原语整体失败、marker 必未删（持有与声明一致）；release 失败
-   * best-effort 留痕（removeAliveMarker 内部 warn——GC 为旁路维护路径不阻断
-   * interval，泄漏窗 = 至宿主退出，已接受）。回收 record 后续被接管时统一
-   * acquireWriteLease 重新声明。
-   *
-   * [U4c / G2] 回收点补写 manifest（投影 running——磁盘确仍 running）：record 离开
-   * 内存后，外部 session-reader 的 identity 富字段主路径只剩 manifest（子文件
-   * identity entry 随 30 天 GC 衰减），回收时不落盘则该 record 在 manifest 面长期
-   * 缺席。写失败走 writeTerminalManifest 同款响亮上报（终态写面共用通道）。
-   */
-  markIdleEvicted(record: ExecutionRecord): void {
-    markIdleEvictedImpl(record, this.terminalCtx);
-  }
-
-  /**
    * [A6 / D3a 时机①] store 内部 acquire 动作——writeAliveMarker 的唯一包装（G1 口径
    * = store 内部写面；非新意图原语）。spawn 侧 sessionFile 锚点确立（run 应答回填 /
    * 冷启动 resume 续轮）时由调用方挂钩（U2b），宿主开始往 session 文件写即声明写权。
@@ -761,7 +738,7 @@ export class RecordStore {
   }
 
   // [H4 三轴拆分] releaseWriteLease（写权 release 锚分派）已迁 record-store-terminal.ts
-  // （releaseWriteLeaseImpl）——markIdleEvicted/markSettledOut 实现内部消费。
+  // （releaseWriteLeaseImpl）——markSettledOut 实现内部消费。
 
   // [H4 三轴拆分] terminalManifestRecord / legacyManifestStatusFields /
   // derivedManifestRecord（manifest 投影族）已迁
@@ -789,6 +766,35 @@ export class RecordStore {
       void this.manifestStore.writeManifest(manifest).catch((err: unknown) => {
         RecordStore.reportManifestWriteFailure(id, err, this.pi);
       });
+    }
+  }
+
+  /**
+   * [W4 收敛] v2 收编 record 的终局停因查询（sweep 判据第三级同步只读面）。
+   * 读收编 manifest 物化（manifestDir/<id>.json——收编写面是同步原子写，读侧
+   * 恒一致）：executionStatus==="idle" 且 stopReason 在场 = 收编终局，返回停因
+   * （interrupted 族——注销条目经 mapReasonToStatus 落 aborted）；其余形态
+   * （轮终/终态原语投影无 stopReason、文件缺失、解析失败）返回 undefined，判据
+   * 保守维持现状分支。manifestStore 异步写形态（纯内存测试）读不到 = undefined，
+   * 与保守侧一致。v2 收编产物不在 findLightById 读取面——本方法是 sweep 对账
+   * 不把收编 record 误注销为 expired 的唯一判据源。
+   */
+  findAdoptedStopReasonSync(id: string): string | undefined {
+    if (this.manifestDir === undefined) return undefined;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(path.join(this.manifestDir, `${id}.json`), "utf8");
+    } catch {
+      return undefined; // 文件缺失/不可读 = 非收编终局形态（保守）
+    }
+    try {
+      const manifest = JSON.parse(raw) as { executionStatus?: string; stopReason?: string };
+      if (manifest.executionStatus === "idle" && typeof manifest.stopReason === "string") {
+        return manifest.stopReason;
+      }
+      return undefined;
+    } catch {
+      return undefined; // 解析失败 = 保守（与 sweep 判据矩阵的坏链保守侧同款）
     }
   }
 
@@ -944,16 +950,6 @@ export class RecordStore {
   listRunningMutable(): ExecutionRecord[] {
     return [...this.records.values()]
       .filter((r) => r.status === "running");
-  }
-
-  /**
-   * 列出全部内存 record（running + idle）的可变引用——idle-GC 专用扫描面。
-   * [two-state-convergence U5/D4] GC 判据改 idle 派生后，候选集 = idle record
-   * （listRunningMutable 的 running 过滤会把它们挡在扫描外，GC 将恒空转）——本方法
-   * 提供不过滤的枚举面，判据（isResumable = idle）在消费方收拢，单一权威不变。
-   */
-  listAllInMemory(): ExecutionRecord[] {
-    return [...this.records.values()];
   }
 
   /**

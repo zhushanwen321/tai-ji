@@ -166,8 +166,8 @@ function _safePost(msg, context) {
         scene: (secondArg && typeof secondArg === "object" && secondArg.scene) || undefined,
         phase: (secondArg && typeof secondArg === "object" && secondArg.phase) || undefined,
         thinkingLevel: (secondArg && typeof secondArg === "object" && secondArg.thinkingLevel) || $THINKING_LEVEL,
-        // step 级 turn 上限（turn limiter；显式 0/负 = 显式不限，压过 spawn watchdog env 兑底，SP-6）
-        // ?? 语义保真：仅 null/undefined 归 undefined（走 env 兑底），显式 0 保留（U5 参数 > env）
+        // step 级 turn 上限（turn limiter；显式 0/负 = 显式不限，压过 spawn watchdog env 兜底，SP-6）
+        // ?? 语义保真：仅 null/undefined 归 undefined（走 env 兜底），显式 0 保留（U5 参数 > env）
         maxTurns: (secondArg && typeof secondArg === "object" ? secondArg.maxTurns : undefined) ?? undefined,
         // [OR-3] per-call timeoutMs 透传（string 分支此前丢弃该字段——对象分支已有；
         // worker pending 消息层超时依赖它流到 agent-call 消息）

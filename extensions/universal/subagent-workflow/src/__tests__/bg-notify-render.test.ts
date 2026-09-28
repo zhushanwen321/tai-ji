@@ -159,7 +159,7 @@ describe("renderBgNotifyMessage", () => {
     expect(joined).toContain("cancelled");
   });
 
-  it("[U3] 升级前旧消息重放（details 无 outcome，仅 closedReason+error）→ deriveOutcome 兑底不崩溃", () => {
+  it("[U3] 升级前旧消息重放（details 无 outcome，仅 closedReason+error）→ deriveOutcome 兜底不崩溃", () => {
     const { theme } = makeTheme();
     const comp = renderBgNotifyMessage(
       {
@@ -175,7 +175,7 @@ describe("renderBgNotifyMessage", () => {
     expect(joined).toContain("legacy boom");
   });
 
-  it("[U3] 非法 outcome 值按缺失处理（防御性收窄，不崩溃，兑底派生）", () => {
+  it("[U3] 非法 outcome 值按缺失处理（防御性收窄，不崩溃，兜底派生）", () => {
     const { theme } = makeTheme();
     const comp = renderBgNotifyMessage(
       {

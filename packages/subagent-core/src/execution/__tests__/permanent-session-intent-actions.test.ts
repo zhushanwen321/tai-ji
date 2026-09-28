@@ -311,7 +311,6 @@ function makeLifecycleDeps(overrides: Partial<RecordLifecycleDeps> = {}): {
     }) as unknown as ReturnType<RecordLifecycleDeps["getNotifyHost"]>,
     getSessionsDir: () => "/tmp/sessions",
     getPi: () => null,
-    getMainSessionFile: () => undefined,
     onRecordFinalizedCleanup: () => {},
     abortContinuationQueue: () => {},
     clearContinuationQueue: () => {},

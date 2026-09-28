@@ -121,11 +121,11 @@ export interface BgNotifyRecord {
    * toNotifyRecord 守卫放行后经此联合穷尽。
    */
   status: "running" | "closed";
-  /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。内部诊断 + outcome 兑底派生输入。 */
+  /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。内部诊断 + outcome 兜底派生输入。 */
   closedReason?: ClosedReason;
   /**
    * 终态三态对外语义（U3 C-outcome）。notify() 投影边界物化：closed 入参缺省时按
-   * deriveOutcome(closedReason, error) 兑底填充（所有可达流程下与 completeLegacyClosed
+   * deriveOutcome(closedReason, error) 兜底填充（所有可达流程下与 completeLegacyClosed
    * 冻结的 record.outcome 等价——toNotifyRecord 构造点在 completeLegacyClosed 之后；该
    * 构造点属 U3 领地外，不透传本字段）。buildLlmContent 与 bg-notify-render 只读本字段。
    */
@@ -233,7 +233,7 @@ function buildLlmContent(record: BgNotifyRecord): string {
     : "";
   switch (record.status) {
     case "closed": {
-      // U3 C-outcome：终态文案只读 outcome（notify() 投影边界已物化；?? 兑底为防御
+      // U3 C-outcome：终态文案只读 outcome（notify() 投影边界已物化；?? 兜底为防御
       // 完整性——单一权威函数，非同构重写）。判定先于 patchFile——失败轮也会写
       // patchFile（doFinalizeRecord Step 0 对 worktreeHandle 无条件 collectPatch），
       // failed 分支不展示 patch 提示，否则 worktree 失败并存时 LLM 被告知 completed
@@ -439,7 +439,7 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       if (disposed) return;
 
       // U3 C-outcome：投影边界物化 outcome——closed payload 缺省时按单一权威
-      // deriveOutcome 兑底填充，content 与 details（GUI pane 消费）均携带一等 outcome；
+      // deriveOutcome 兜底填充，content 与 details（GUI pane 消费）均携带一等 outcome；
       // 所有可达流程下与 record.outcome 等价（toNotifyRecord 在 completeLegacyClosed 之后
       // 构造）。running（轮次通知）语义上无 outcome，不物化。消源自 record 的浅拷贝
       // ——不改写入方对象（BgNotifyRecord 由调用方持有）。notifyId 同批物化（U2：
@@ -473,7 +473,7 @@ export function createNotifier(host: NotifierHost): BgNotifier {
 
     flushPendingNotifications(): void {
       // ledger 路径：立即投递尝试（isIdle 复查，busy 则挂 pending 等边沿——账已落盘，
-      // 重启恢复兑底）；内核路径：flush。
+      // 重启恢复兜底）；内核路径：flush。
       const ledger = getBoundNotifyLedger();
       if (ledger) {
         ledger.attemptDeliver();
