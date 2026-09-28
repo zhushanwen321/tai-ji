@@ -76,7 +76,7 @@ export const STATE_DIR_NAME = "workflow-state";
 export interface FileRunStoreOptions {
   /**
    * [F-1 修复] run 状态目录覆盖。缺省 = `<dataRoot>/workflow-state`（zcode 宿主布局，
-   * 见 stateDir()）；pi 宿主的读侧装配点（round-supervisor sweep / idle-gc）必须传
+   * 见 stateDir()）；pi 宿主的读侧装配点（round-supervisor sweep）必须传
    * resolvePiWorkflowStateDir()（execution/workflow-state-root.ts）——pi 宿主 run state
    * 由 JsonlRunStore 落 `<sessionDir>/workflow-state/`，与缺省根不相交。
    */

@@ -298,7 +298,7 @@ export class RoundSupervisor {
       return;
     }
     if (view.hasResult) {
-      // 已有完成产出（SP-5 upgrade 等待态挂账归 idle-gc）——不唤醒。
+      // 已有完成产出（SP-5 upgrade 等待态挂账）——不唤醒。
       // [F5] 挂账态必须解除看门狗：此前的该唤醒评估可能已 armed，转挂账后 timer
       // 若留存，2h 到期会把已完成挂账 record 误 giveUp(watchdog-expired)。对照上方
       // 该等分支的清理形态——不再需要放弃计时的形态（有驱动 / 已收敛挂账）统一

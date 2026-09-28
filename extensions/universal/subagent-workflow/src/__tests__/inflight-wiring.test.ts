@@ -108,7 +108,6 @@ function injectFakeServices(): void {
   setSubagentService({
     initSession: vi.fn(),
     recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-    startGcTimer: vi.fn(),
     getStreamSink: () => null,
     dispose: vi.fn(),
   } as never);

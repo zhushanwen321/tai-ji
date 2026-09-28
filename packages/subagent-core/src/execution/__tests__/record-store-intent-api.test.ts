@@ -2,12 +2,11 @@
 //
 // [U1 / record 持久化收敛 §3.1] RecordStore 意图级操作 API 立面专属测试。
 //
-// 覆盖（验收条款 A1/A2/A5/A6）：
+// 覆盖（验收条款 A1/A5/A6）：
 //   - A1 九意图原语齐备（register/appendEvent/markRoundStarted/markRoundIdle/
-//     markFinalized/markCancelled/adoptEngineDeath/markResurrected/markIdleEvicted，
+//     markFinalized/markCancelled/adoptEngineDeath/markResurrected，
 //     [collect 退役] 原 markBatchFinalized 已删；[u-arch] 原 markArchived 更名
 //     markSettledOut 随意图机制退役收口）+ acquireWriteLease（A6）；
-//     archive 先 release 后（archive 抛错 marker 必未删）；
 //   - A5 markResurrected D3c 三中间形态（(ii) acquire 后中断 / (iii) 全成 /
 //     acquire 失败）+ running 候选接管形态（跳删终态位仍 acquire）；
 //   - §3.4 失败语义：`.state` 写失败 → 零持久化副作用、record 留 running 形态。
@@ -202,7 +201,6 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
         "markCancelled",
         "adoptEngineDeath",
         "markResurrected",
-        "markIdleEvicted",
         "markSettledOut",
         "acquireWriteLease", // A6
       ] as const;
@@ -546,40 +544,6 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       const record = makeRecord("rs-5"); // 无 sessionFile
       expect(() => store.markResurrected(record, true)).toThrow(/no sessionFile anchor/);
       expect(store.getMutable("rs-5")).toBeUndefined();
-    });
-  });
-
-  // ============================================================
-  // A2 markIdleEvicted（archive 先、release 后）
-  // ============================================================
-  describe("markIdleEvicted（A2 写序）", () => {
-    it("回收成功 → 内存移除 + .alive release（磁盘仍 running 可接管，不写 .state）", () => {
-      const record = makeRecord("idle-1");
-      record.sessionFile = sessionFile;
-      store.register(record);
-      store.acquireWriteLease(sessionFile, "idle-1");
-      order.length = 0;
-
-      store.markIdleEvicted(record);
-
-      expect(store.getMutable("idle-1")).toBeUndefined(); // archive 先
-      expect(order).toEqual(["alive-release"]); // release 后
-      expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(false); // 非终态化
-    });
-
-    it("archive 抛错 → 原语整体失败、marker 必未删（持有与声明一致）", () => {
-      const record = makeRecord("idle-2");
-      record.sessionFile = sessionFile;
-      store.register(record);
-      store.acquireWriteLease(sessionFile, "idle-2");
-      const archiveSpy = vi.spyOn(store, "archive").mockImplementationOnce(() => {
-        throw new Error("archive boom");
-      });
-
-      expect(() => store.markIdleEvicted(record)).toThrow(/archive boom/);
-      expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true); // marker 未删
-      expect(archiveSpy).toHaveBeenCalledTimes(1);
     });
   });
 

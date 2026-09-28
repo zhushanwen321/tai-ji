@@ -25,13 +25,25 @@ import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 import { FileRunStore, STATE_DIR_NAME } from "../../orchestration/file-run-store.ts";
-import type { WorkflowRunGcStore } from "../persistence/idle-gc.ts";
 
 const logger = getLogger("subagents");
 
 /** pi sessions 目录分量（pi 壳建目录方字面量，与 workflow-state-root.ts 的
  *  join(agentDir, "sessions", …) 同源约束：pi 布局演进须两侧同步）。 */
 const SESSIONS_DIR_NAME = "sessions";
+
+/**
+ * WorkflowRun store 窄口（run 枚举读侧对 WorkflowRun store 的最小依赖面，结构
+ * 类型——调用方传 FileRunStore 实例即可，不 import orchestration 具体类，保持
+ * 本模块可独立编译 + 单测）。loadAll 失败（宿主未 configureCore / IO 错）由
+ * 实现侧 catch 吞掉，单轮跳过下轮重试。
+ *
+ * [W2/V1] transition/save 成员删除：终局化经收编原语（journal/manifest 写面，
+ * 不经两态机快照）——快照写面不再是枚举读侧的职责（判据读者已随 D6 改接换源）。
+ */
+export interface WorkflowRunGcStore {
+  loadAll(): Promise<Array<{ runId: string; state: { status: string }; meta: { startedAt: string } }>>;
+}
 
 /**
  * pi 宿主全 session 的 run state 枚举 store（WorkflowRunGcStore 适配）。

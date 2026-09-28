@@ -356,8 +356,8 @@ export interface FinalizeRunOptions {
  * 交 reconcile-sweep 下次 session_start 收口（窄竞态残差），也不得吞掉 Interface
  * 层完成回调。
  *
- * [W2/V1 D1 执行面裁决] 通知（onRunDone 链）仅本活体路径执行——收编/abandon/
- * idle-gc 冷路径经 settleRunAccounting 原语落账、原语零通知副作用且冷路径入口
+ * [W2/V1 D1 执行面裁决] 通知（onRunDone 链）仅本活体路径执行——收编/abandon
+ * 冷路径经 settleRunAccounting 原语落账、原语零通知副作用且冷路径入口
  * options 面无通知通道，构造性排除「通知收条冷路径误发」（场景 4「中断 run 不
  * 产生 workflow-result 完成通知」断言的前提）。
  *
@@ -762,7 +762,7 @@ async function persistTerminalProjection(
   }
   if (run.spec === undefined) {
     // spec 缺省 = runId 键投递。[W2/V1] 合法形态 = 终局记录原语的冷路径收编
-    //（adoptInterruptedRun / idle-gc——runId 键投递 run-settled，workflowName
+    //（adoptInterruptedRun——runId 键投递 run-settled，workflowName
     // 载荷由原语从 run-created 帧取后补写 manifest，见 settleRunAccounting）；
     // 其余 runId 键投递（dispatchRunArmedReceipt 的 armed 自环）非 terminal 行
     // 构不到此处。不伪造空名落 manifest（manifest 是「已终局」单源锚定，写坏即
@@ -1050,8 +1050,8 @@ function summarizeRetryReason(result: AgentResult): string {
 
 // ── [W2/V1 D1] 终局记录原语（settleRunAccounting）─────────────────────
 //
-// 四类终局场景（活体 finalizeRun / 崩溃恢复 v2 收编 / abandon 7 天窗 / idle-gc
-// 30 天回收）的共享记录动作单点：场景差异只在触发时机、幂等判据与 outcome 取值
+// 三类终局场景（活体 finalizeRun / 崩溃恢复 v2 收编 / abandon 7 天窗）的共享记录
+// 动作单点：场景差异只在触发时机、幂等判据与 outcome 取值
 //（D5 映射表），不在记录结构。记录 = journal run-settled 帧 + manifest 物化
 // 两件一次齐全：
 // - 帧落账统一经 dispatchRunTrigger per-run 串行队列（单写者纪律；冷路径同走
@@ -1067,7 +1067,7 @@ function summarizeRetryReason(result: AgentResult): string {
 //
 // [W2/V1 D1 执行面裁决] 本原语零通知副作用——转移表 run-settled 行 outputs 的
 // notify 标签执行体 = 活体 finalizeRun coda 的 onRunDone 链（不经原语）；冷路径
-//（收编/abandon/idle-gc）的入口 options 面无通知通道，构造性排除「通知收条
+//（收编/abandon）的入口 options 面无通知通道，构造性排除「通知收条
 // 冷路径误发」（场景 4 中断 run 零完成通知断言的前提）。
 export async function settleRunAccounting(
   run: RunDispatchSource,

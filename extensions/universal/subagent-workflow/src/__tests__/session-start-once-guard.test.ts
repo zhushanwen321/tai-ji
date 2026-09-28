@@ -15,7 +15,6 @@
 //
 // 断言与验证点的对应（入口计数 ⟹ 内层副作用 ≤1 的构造性蕴含）：
 //   ① syncEnginesFile 写 = 1（engines.json 写发生在函数内部，入口 =1 ⟹ 写 ≤1）
-//   ⑦ startGcTimer = 1（setInterval 注册在 idle-gc 内部，入口 =1 ⟹ 注册 ≤1）
 //   ⑧ maybeCleanupExpiredSessionFiles = 1（扫描 + unlink 在函数内部）
 //   ⑨ recoverManifestTmpFiles = 1（promote/unlink 在函数内部）
 //   ⑩ WorktreeManager.scan = 1（git/rm 进程操作在方法内部）
@@ -58,7 +57,6 @@ const {
   mockSyncEnginesFile,
   mockScan,
   mockMaybeCleanup,
-  mockStartGcTimer,
   mockRecoverManifestTmpFiles,
   mockRebuildIndexes,
   mockRecoverCrashedRuns,
@@ -75,8 +73,6 @@ const {
     mockScan: vi.fn(),
     // ⑧ 超 TTL session 文件清理
     mockMaybeCleanup: vi.fn(),
-    // ⑦ idle GC 定时器
-    mockStartGcTimer: vi.fn(),
     // ⑨ manifest tmp 恢复
     mockRecoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
     // ⑫ [U4c/G1] boot 全量索引重建
@@ -129,14 +125,13 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", async (importOri
   return { ...actual, recoverCrashedRuns: mockRecoverCrashedRuns };
 });
 
-// ⑦⑨⑥ SubagentService mock：方法全部挂 hoisted spy（跨实例聚合计数）。
+// ⑨⑥ SubagentService mock：方法全部挂 hoisted spy（跨实例聚合计数）。
 // [H3/R6 连带] SubagentService 类仍从壳导出（壳 mock 保留）；单例访问器族外移
 // service/service-bootstrap.ts，经 importOriginal 只替换 get/set（同 session-lifecycle）。
 vi.mock("@zhushanwen/subagent-core/execution/subagent-service.ts", () => ({
   SubagentService: class {
     initSession = mockInitSession;
     setUiRequestHandler = vi.fn();
-    startGcTimer = mockStartGcTimer;
     recoverManifestTmpFiles = mockRecoverManifestTmpFiles;
     rebuildIndexes = mockRebuildIndexes;
     getStreamSink = () => null;
@@ -317,7 +312,6 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
     // 探针 a：handler 体执行 2 次（防误伤项证明双派发真实发生，见下一用例的 ×2 断言）
     // + 五项包装操作各执行 1 次
     expect(mockSyncEnginesFile).toHaveBeenCalledTimes(1);
-    expect(mockStartGcTimer).toHaveBeenCalledTimes(1);
     expect(mockMaybeCleanup).toHaveBeenCalledTimes(1);
     expect(mockRecoverManifestTmpFiles).toHaveBeenCalledTimes(1);
     expect(mockRebuildIndexes).toHaveBeenCalledTimes(1);

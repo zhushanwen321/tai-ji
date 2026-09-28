@@ -295,8 +295,8 @@ export class SubagentService {
       getNotifyHost: () => this.notifyHost,
       getSessionsDir: () => this.sessionsDir,
       getPi: () => this.pi,
-      // [W2/V1 D3 same-session 四件直落] GC 收编归属判定的注册差集证据源（晚绑定
-      // ——mainSessionFile 经 baselines 现读，initSession 注入前 undefined）。
+      // [已退役回收机制的收编归属判定消费面已删] 接线随 deps 成员暂留待清理
+      // （mainSessionFile 经 baselines 现读，initSession 注入前 undefined）。
       getMainSessionFile: () => this.mainSessionFile,
       // [R4 / C-5 兑现 / 2026-09-13 design-code-sync 接线] Continuation 协作面本体
       //（continuations 队列 + onRecordFinalizedCleanup + abortAndClearQueue）已迁
@@ -542,9 +542,9 @@ export class SubagentService {
 
   // ── 域 #4 回收面 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts）──
   // [被否谱系 #3] 回收面显式归 RecordLifecycle——disposeAllRecords/onParentFork/
-  // onParentNew 编排性关闭 + GC timer 随终态写面迁移；壳只保留时序编排（检查点③：
+  // onParentNew 编排性关闭随终态写面迁移；壳只保留时序编排（检查点③：
   // dispose 调用顺序与现状逐行等价，E9 先于批量 archive）。promoteSessionFileFromEngine
-  // Handle（A 通道写点，清单②#1）/stopIdleGc/stopGcTimer 为聚合内部互调成员，壳内零
+  // Handle（A 通道写点，清单②#1）为聚合内部互调成员，壳内零
   // 消费 → 零转发（R2 打样模式 2）。
 
   /** SP-4: 关闭所有活跃 record（dispose 编排 parent-shutdown 路径 + D3 对外面）。
@@ -564,19 +564,6 @@ export class SubagentService {
    *  本体已迁 RecordLifecycle；壳纯转发，对外签名不变。 */
   onParentNew(): number {
     return this.recordLifecycle.onParentNew();
-  }
-
-  /** 启动 idle record GC 定时器（session_start 调用，幂等）。本体已迁 RecordLifecycle
-   *  （stopIdleGc 句柄为聚合唯一写者字段）；壳纯转发。workflowRuns 注入 =
-   *  pi 宿主的读侧枚举 store（壳用 pi SDK getAgentDir 活源构造；缺省 = zcode
-   *  dataRoot 布局，见 record-lifecycle.startGcTimer 头注）。 */
-  startGcTimer(workflowRuns?: import("./persistence/idle-gc.ts").WorkflowRunGcStore): void {
-    this.recordLifecycle.startGcTimer(workflowRuns);
-  }
-
-  /** 停止 idle record GC 定时器（dispose 编排消费点）。壳纯转发。 */
-  private stopGcTimer(): void {
-    this.recordLifecycle.stopGcTimer();
   }
 
   // ── 域 #13 身份解析/record 创建（R3 抽取；本体 execution/service/record-access.ts）──
@@ -853,7 +840,6 @@ export class SubagentService {
   dispose(): void {
     if (this._disposed) return;
     this._disposed = true;
-    this.stopGcTimer();
     // [dispose stub] 第一时间换 stub，防 trailing ui_request 调到 stale handler 闭包
     // （仍持有 disposed session 的 ctx）产生误导性 console.error。stub 干净降级为 cancelled。
     // 必须在 emit/abort 之前——这些步骤可能同步触发 trailing pump。

@@ -107,7 +107,6 @@ function injectLifecycleFakes(): void {
   setSubagentService({
     initSession: vi.fn(),
     recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-    startGcTimer: vi.fn(),
     getStreamSink: () => null,
     dispose: vi.fn(),
   } as never);
@@ -125,8 +124,7 @@ function makeSeamDeps(overrides: Partial<SessionLifecycleDeps> = {}): SessionLif
         service: {
           initSession: vi.fn(),
           recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-          startGcTimer: vi.fn(),
-        },
+              },
         modelService: {
           initModel: vi.fn(),
           reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),

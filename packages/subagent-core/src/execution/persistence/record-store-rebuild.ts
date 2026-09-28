@@ -910,7 +910,7 @@ function legacyManifestStatusFields(
 
 /**
  * [U4c / G1+G2] 状态派生 manifest 投影（rebuildIndexes / 反查 miss 惰性通道 /
- * markIdleEvicted 回收点 / markSettled 收口点 / markArchived 归档点共用）。
+ * markSettled 收口点 / markArchived 归档点共用）。
  * 数据源 = SubagentRecord 投影（identity entry/binding + `.state` sidecar 矩阵，
  * D1「.state 权威 + entry 尽力」）——词汇双写同终态写面。
  * [U2 两态桥接] 旧 status 三态派生收口 legacyManifestStatusFields 单点：

@@ -45,7 +45,6 @@
 // | markSettled(record, stopReason) | 轮收口（settle：成功/失败/中断统一落 idle + stopReason；替代 markFinalized/markCancelled 的轮收口角色） | U2 定（usage 快照落 binding + manifest 投影；`.alive` 跨轮保留） |
 // | markReopened(record, transcriptRef) | 带历史重开（新 transcriptRef + round 归零 + epoch+1 + stopReason=reopened，§3.2.3） | U2 定（binding 持久化 epoch/锚） |
 // | markSettledOut(record) | close 收口落账（worktreeHandle 清句 + `.alive` release，§3.2.4 release 出口①） | U2 定（worktree/patch/注销编排留调用方） |
-// | markIdleEvicted(record) | 内存回收（30 天 TTL，用户不可见，非终态化——磁盘不动、可重建接管） | store.archive 先 → manifest（running 投影）→ `.alive` release 后（archive 抛错则整体失败 marker 必未删） |
 //
 // ── 字段级写点全集 → 操作映射（设计 §3.1 v4 十字段逐一归口）──
 //   ① status      —— 轮始重置→markRoundStarted；轮终翻边 idle（U4/D3）→markRoundIdle；
@@ -157,7 +156,6 @@ import {
   MANIFEST_INDENT_SPACES,
   markCancelledImpl,
   markFinalizedImpl,
-  markIdleEvictedImpl,
   markReopenedImpl,
   markResurrectedImpl,
   markSettledImpl,
@@ -455,9 +453,7 @@ export class RecordStore {
    * [W1 / D1·D2] v1 全量快照 entry 停写。真终局（completeLegacyClosed 已冻结 endedAt）
    * 时经 settleViaJournal 落 record-settled 帧 + v2 终态条目（终态冻结字段在
    * completeLegacyClosed 已就绪——与 v1「archive 即完整终态记录」同点）；事件面未接线
-   * 时条目面独立工作（终态条目照常，零事件帧）。内存回收
-   * （markIdleEvicted——endedAt 未设，非终局）零条目零事件，manifest 派生投影
-   * 由回收点自写（U4c / G2 写序不变）。
+   * 时条目面独立工作（终态条目照常，零事件帧）。
    */
   archive(record: ExecutionRecord): void {
     this.records.delete(record.id);
@@ -641,25 +637,6 @@ export class RecordStore {
   }
 
   /**
-   * 意图原语：内存回收（evicted，§3.2.4 release 出口②）。30 天 TTL 内存回收，
-   * 用户不可见，非终态化——磁盘不动、可重建。
-   *
-   * 写序（D3a/轮 5，语义不变）：store.archive **先**、`.alive` release **后**——
-   * archive 抛错则原语整体失败、marker 必未删（持有与声明一致）；release 失败
-   * best-effort 留痕（removeAliveMarker 内部 warn——GC 为旁路维护路径不阻断
-   * interval，泄漏窗 = 至宿主退出，已接受）。回收 record 后续被接管时统一
-   * acquireWriteLease 重新声明。
-   *
-   * [U4c / G2] 回收点补写 manifest（投影 running——磁盘确仍 running）：record 离开
-   * 内存后，外部 session-reader 的 identity 富字段主路径只剩 manifest（子文件
-   * identity entry 随 30 天 GC 衰减），回收时不落盘则该 record 在 manifest 面长期
-   * 缺席。写失败走 writeTerminalManifest 同款响亮上报（终态写面共用通道）。
-   */
-  markIdleEvicted(record: ExecutionRecord): void {
-    markIdleEvictedImpl(record, this.terminalCtx);
-  }
-
-  /**
    * [A6 / D3a 时机①] store 内部 acquire 动作——writeAliveMarker 的唯一包装（G1 口径
    * = store 内部写面；非新意图原语）。spawn 侧 sessionFile 锚点确立（run 应答回填 /
    * 冷启动 resume 续轮）时由调用方挂钩（U2b），宿主开始往 session 文件写即声明写权。
@@ -762,7 +739,7 @@ export class RecordStore {
   }
 
   // [H4 三轴拆分] releaseWriteLease（写权 release 锚分派）已迁 record-store-terminal.ts
-  // （releaseWriteLeaseImpl）——markIdleEvicted/markSettledOut 实现内部消费。
+  // （releaseWriteLeaseImpl）——markSettledOut 实现内部消费。
 
   // [H4 三轴拆分] terminalManifestRecord / legacyManifestStatusFields /
   // derivedManifestRecord（manifest 投影族）已迁

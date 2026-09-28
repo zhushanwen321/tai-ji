@@ -499,7 +499,7 @@ export class ChatRounds {
   //   - armChatIdleTimer（idle 相位帧 → idle timer 挂载）→ 相位帧消费面退役；
   //     [u7a 重接] arm 语义由 Continuation.settleRoundSuccess 轮终簿记后的
   //     armIdleKeepalive 承载（活句柄保活 + D5 在途推送，见 conversation-continuation.ts）
-  //     ——30 天 idle-gc 只回收内存不终态化不变。
+  //     ——idle record 留内存可续聊、不终态化（原 30 天内存回收机制已退役，见 ADR）。
   //   - backfillChatAnchor（idle 帧锚点回填）→ sessionFile 回填改由 run 应答
   //     outcome.sessionFile 承载（+ writeBindingForRecord 落盘，UF-1）。
   //   - onChatRoundFailed（failed 相位分诊）→ Continuation.onRunSettled 失败分支

@@ -199,7 +199,7 @@ describe("RoundSupervisor 三态判定", () => {
     // armed 的看门狗必须已解除——2h 到期不得把已完成挂账 record 判死
     await vi.advanceTimersByTimeAsync(ROUND_SUPERVISOR_WATCHDOG_DEFAULT_MS + 1);
     expect(deps.givenUp).toHaveLength(0);
-    expect(supervisor.supervisedIds()).toEqual(["bg-1"]); // 挂账态保持纳管（归 idle-gc 收口）
+    expect(supervisor.supervisedIds()).toEqual(["bg-1"]); // 挂账态保持纳管（驻留有界，session 结束随进程退出全清）
   });
 
   it("env ≤0 关闭该放弃路径：只指引永不放弃（回收层 opt-out）", async () => {

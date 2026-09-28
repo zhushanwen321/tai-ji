@@ -69,7 +69,7 @@ export function isAwakeWarrantedShape(
   hasLiveProcess: boolean,
 ): boolean {
   if (record.status !== "running") return false; // 终态 = 已收口
-  // 已有完成产出（轮终 idle 挂账归 idle-gc）→ 不唤醒；该等（有驱动）→
+  // 已有完成产出（轮终 idle 挂账）→ 不唤醒；该等（有驱动）→
   // 不干预；无驱动的 running + 无产出 = W4 死亡纳管态 → 唤醒。
   if (hasResult) return false;
   return !hasInFlightRun && !hasLiveProcess;

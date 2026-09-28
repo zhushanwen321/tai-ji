@@ -387,9 +387,9 @@ describe("epoch 递增（reopen 防撞）", () => {
   });
 });
 
-// ── ⑤ markSettledOut / markIdleEvicted 副作用矩阵（写权声明 + 收口落账写面）──────────
+// ── ⑤ markSettledOut 副作用矩阵（写权声明 + 收口落账写面）──────────
 
-describe("markSettledOut / markIdleEvicted 副作用矩阵", () => {
+describe("markSettledOut 副作用矩阵", () => {
   it("markSettledOut：.alive release（release 出口①）+ entry 上报 + worktreeHandle 清句（占用位不动）", () => {
     const store = newStore();
     const rec = runningRecord();
@@ -412,24 +412,5 @@ describe("markSettledOut / markIdleEvicted 副作用矩阵", () => {
     expect(store.markSettledOut(rec)).toBe(true);
     expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
     expect(store.getMutable("bg-1")).toBe(rec);
-  });
-
-  it("markIdleEvicted：内存移除 + manifest 投影 + .alive release 后（写序 archive 先 release 后）", () => {
-    const store = newStore();
-    const rec = runningRecord();
-    rec.status = "running";
-    store.register(rec);
-    fs.writeFileSync(
-      `${rec.sessionFile}.alive`,
-      JSON.stringify({ pid: process.pid, id: "bg-1", startedAt: Date.now() }),
-      "utf-8",
-    );
-    store.markIdleEvicted(rec);
-    expect(store.getMutable("bg-1")).toBeUndefined(); // 内存回收
-    expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(manifestDir, "bg-1.json"), "utf-8"),
-    ) as Record<string, unknown>;
-    expect(manifest.status).toBe("running"); // 非终态化如实投影（磁盘仍可接管）
   });
 });
