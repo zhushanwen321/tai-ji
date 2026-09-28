@@ -402,8 +402,8 @@ export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext
           }),
       });
     },
-    // abandon 对会话补显形（T4③ 放弃终态）：不唤醒的 display 消息（无 triggerTurn
-    // ——notifyStall 同款形态），让主 agent/用户在会话里看到「通知已放弃」线索。
+    // abandon 对会话补显形（T4③ 放弃终态）：不唤醒的 display 消息（无 triggerTurn），
+    // 让主 agent/用户在会话里看到「通知已放弃」线索。
     // 与 sendDelivery（triggerTurn 唤醒）分工，通道不复用。
     sendDisplayMessage: (message) => {
       guardStaleCtx(() => pi.sendMessage(message), {

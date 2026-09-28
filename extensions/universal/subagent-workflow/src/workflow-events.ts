@@ -9,7 +9,7 @@
  * reload 存活，factory 重跑拿到同一 domain state，post-reload adoption 据此接管
  * 在飞 run）：
  *   1. per-factory 域状态（lsRef / notifiedRunIds / workerHost / registry / sessionState）
- *   2. log（pi.appendEntry 包装）+ runSettledEffects（onRunDone 四步终局副作用
+ *   2. log（pi.appendEntry 包装）+ runSettledEffects（onRunDone 三步终局副作用
  *      管线，具名导出可直测）+ makeLifecycleDeps + makeDeps（LauncherDeps 纯装配）
  *   3. 本域 3 个 pi.on handler（session_start / session_tree / session_shutdown）
  *      + 4 个跨域事件注册（notify ledger compaction 守卫 / model 缓存刷新 /
@@ -23,9 +23,8 @@
  * tool + command 注册与 pi.__workflowRun 仍留 index.ts。
  *
  * [skill-reload D3] makeDeps 的三个 volatile 成员（eventBus / log / onRunDone 的
- * pi 与 GuiContext）不做闭包快照：pi 从槽上 currentPi 现读（factory 重跑时覆盖
- * 登记），ctx 从 sessionState 条目的 state.ctx 现读（adoption rebind 换新后自动
- * 跟进）——在飞 pump 持有的旧 deps 对象经属性访问自动路由到新绑定，无需遍历重绑。
+ * pi）不做闭包快照：pi 从槽上 currentPi 现读（factory 重跑时覆盖登记）——在飞
+ * pump 持有的旧 deps 对象经属性访问自动路由到新绑定，无需遍历重绑。
  *
  * 测试入口：既有 index 挂载类测试（index-session-start / process-shutdown-hook /
  * wave0-package-structure 等）经 factory 间接覆盖；mock 锚点是模块解析路径
@@ -57,7 +56,6 @@ import {
   evictDoneRunsBeyondCap,
   MAX_RETAINED_DONE_RUNS,
   runSummary,
-  RUN_EVENT_JOURNAL_SUFFIX,
   scheduleTimeBudget,
   STATE_DIR_NAME,
 } from "@zhushanwen/subagent-core";
@@ -67,15 +65,14 @@ import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
 // [u7a D5] 在途上报出口：实例由本 seam 创建并接线 setInFlightListener（组合根零
 // 管道），session_start / session_shutdown 驱动 attach/detach；测试可注入 fake。
 import { createInFlightReporter, type InFlightReporter } from "./host/inflight-reporter.ts";
-// [W2/V1 D1 第 8 行] 判活类消费面（isScriptRunning / stall watchdog running 过滤）
-// 经 core 投影单点（runSummary.status 二值——内部收拢注册表 ∨ 聚合混合判源）。
+// [W2/V1 D1 第 8 行] 判活类消费面（isScriptRunning）经 core 投影单点
+//（runSummary.status 二值——内部收拢注册表 ∨ 聚合混合判源）。
 import { type RunSettlementRecord } from "./jsonl-run-store.ts";
-import { notifyDone, notifyStall, trackNotifiedRunId, WORKFLOW_STALL_THRESHOLD_MS } from "./workflow-notify.ts";
+import { notifyDone, trackNotifiedRunId } from "./workflow-notify.ts";
 // ═══ 跨域事件注册（handler 体住各自域模块，本 seam 原位调用保注册顺序） ═══
 import { setupNotifyLedgerCompactionGuard } from "./workflow-notify.ts";
 import { setupModelEvents } from "./model-events.ts";
 import { setupSubagentsCascadeEvents } from "./subagents-events.ts";
-import { toGuiCtx } from "./interface/gui-mappers.ts";
 // ═══ session 生命周期装配 seam（bootstrap seam，设计 §3.1/D1） ═══
 import {
   getOrCreateDialogQueue,
@@ -83,8 +80,6 @@ import {
   type SessionLifecycleDeps,
   type SessionLifecycleResult,
 } from "./session-lifecycle.ts";
-// ═══ [D6-2] stall watchdog（run 无进展 informational 通知——监控逻辑独立模块，此处仅装配） ═══
-import { getOrCreateStallWatchdog, type StallRunView, type StallWatchdog } from "./workflow-stall-watchdog.ts";
 
 // 模块级 logger（与 index.ts 同 component 名；setPiHandle 注入后自动走 appendEntry）
 const logger = getLogger("subagents");
@@ -191,19 +186,17 @@ function createLazy<K extends keyof LauncherDeps>(
 
 // ── run 终局固定顺序副作用（makeDeps onRunDone 管线提级，可直测） ─────────────
 
-/** runSettledEffects 的注入面（生产装配点 = makeDeps；直测注入 fake——对齐
- *  workflow-stall-watchdog 的 deps 注入风格：模块行为可脱离装配面独立测试）。 */
+/** runSettledEffects 的注入面（生产装配点 = makeDeps；直测注入 fake——模块行为
+ *  可脱离装配面独立测试）。 */
 export interface RunSettledEffectsEnv {
-  /** [D6-2] stall watchdog 槽实例转发——终局回收恰一次标记（Set 防泄漏）。 */
-  stallWatchdog: Pick<StallWatchdog, "noteRunSettled">;
   /** 完成通知的发送面（现读 volatile pi：生产传 resolveCurrentPi，调用时解析——
    *  D3 不快照，reload 后自动路由新 pi）。 */
   resolvePi(): ExtensionAPI;
   /** notifyDone 完成通知去重窗口（domainState.notifiedRunIds，调用方持有）。 */
   notifiedRunIds: Set<string>;
-  /** per-session 装配结果（ctx/sessionDir/runs 三字段调用时现读——sessionState
+  /** per-session 装配结果（sessionDir/runs 两字段调用时现读——sessionState
    *  条目引用，adoption rebind 换新后自动跟进的 D3 语义保持）。 */
-  state: Pick<SessionLifecycleResult, "ctx" | "sessionDir" | "runs">;
+  state: Pick<SessionLifecycleResult, "sessionDir" | "runs">;
   /**
    * [W2/V1 D1 第 7 行] 终局记录查询面（通知载荷源——journal run-settled 帧直取）。
    * 生产装配 = JsonlRunStore.settledRecordOf；返回 undefined = 无终局帧（journal
@@ -219,7 +212,7 @@ export interface RunSettledEffectsEnv {
  * run 终局后的固定顺序副作用管线（原 makeDeps 的 onRunDone 闭包体提级具名导出）。
  *
  * onRunDone 是全部 done 路径的单点汇聚（abortRun + error-recovery），顺序固化为
- * noteRunSettled → notifyDone → trackNotifiedRunId → evictDoneRunsBeyondCap：
+ * notifyDone → trackNotifiedRunId → evictDoneRunsBeyondCap：
  * notifyDone 先发完整聚合通知（淘汰后聚合根仍在参数 run 引用上不受影响），
  * trackNotifiedRunId 有界化去重窗口，最后裁剪已终局 run 内存（[W2/V1] 终局判定
  * 经 core isRunSettled 换源——本管线被 onRunDone 触发时注册表已 note，本轮 run
@@ -229,19 +222,16 @@ export interface RunSettledEffectsEnv {
  * ——notifyDone 抛错（账本写账失败 / 降级直发非 stale 失败）时后续 track/evict
  * 不执行、异常原样上抛，由调用方 finalizeRun 的 onRunDone 独立 try 围栏接住
  * （core worker-message-pump，OR-4/B-4：真实副作用失败 error 留痕不崩宿主）。
- * notifyDone 幂等早退（notifiedRunIds 已含 runId）不是错误：后三步照常执行。
+ * notifyDone 幂等早退（notifiedRunIds 已含 runId）不是错误：后两步照常执行。
  *
  * [D7] notifyDone 注入产物目录指针（<sessionDir>/workflow-state——
  * journal/manifest/.state 同目录；state.sessionDir 是 sessionState 条目字段，
  * adoption rebind 换新后自动跟进；目录分量经 core barrel STATE_DIR_NAME 单源）。
  * [W2/V1 D1 第 7 行] notifyDone 尾参注入终局记录（载荷源 = 帧直取）；记录缺席
- *（journal dispatch 失败窗口）时通知跳过 + error 留痕——stall 回收照常，evict 照常
+ *（journal dispatch 失败窗口）时通知跳过 + error 留痕——evict 照常
  *（内存有界性独立于通知），track 不标（未发通知不占去重窗口，允许后续语义修正）。
- * [D6-2] 第一步终局回收 stall 已通知标记（转发 watchdog 槽实例——run 已终局，
- * stall 声明生命周期结束）。
  */
 export function runSettledEffects(env: RunSettledEffectsEnv, run: WorkflowRun): void {
-  env.stallWatchdog.noteRunSettled(run.runId);
   const settlement = env.settledRecordOf(run.runId);
   if (settlement !== undefined) {
     notifyDone(
@@ -249,7 +239,6 @@ export function runSettledEffects(env: RunSettledEffectsEnv, run: WorkflowRun): 
       run.runId,
       run,
       env.notifiedRunIds,
-      toGuiCtx(env.state.ctx),
       join(env.state.sessionDir, STATE_DIR_NAME),
       settlement,
     );
@@ -311,34 +300,6 @@ export function setupWorkflowDomain(
   // [skill-reload D2] handle.state 即槽对象本身（不做解构重包装——否则容器每次
   //  factory 重跑新建，调用方拿不到「同一 domain state 引用」的接管前提）。
   const domainState = getOrCreateWorkflowDomainState();
-  // [D6-2] stall watchdog 装配：监控逻辑本体在 workflow-stall-watchdog.ts（timer/
-  // 判定/恰一次/journal 尾读内聚，可脱离装配面直测），此处仅注入 deps + arm（arm
-  // 幂等清旧 timer——reload 防双 tick；实例跨 reload 挂槽复用，恰一次标记不丢）。
-  // status 过滤与 journalPath 构造在投影内（模块收纯 view，零路径知识）。
-  const stallWatchdog = getOrCreateStallWatchdog({
-    thresholdMs: WORKFLOW_STALL_THRESHOLD_MS,
-    *getRunningRuns() {
-      for (const st of domainState.sessionState.values()) {
-        for (const run of st.runs.values()) {
-          // [W2/V1 D1 第 8 行] 判活换源 runSummary 投影二值（终局经注册表判定——
-          // 两态机活体写点删除后聚合 status 停更）。
-          if (runSummary(run).status !== "running") continue;
-          yield {
-            runId: run.runId,
-            scriptName: run.spec.scriptName,
-            startedAtMs: Date.parse(run.meta.startedAt),
-            journalPath: join(st.sessionDir, STATE_DIR_NAME, `${run.runId}${RUN_EVENT_JOURNAL_SUFFIX}`),
-          } satisfies StallRunView;
-        }
-      }
-    },
-    notifyStalled: (view, stalledMs, lastProgressMs) =>
-      notifyStall(resolveCurrentPi(), view.runId, view.scriptName, stalledMs, lastProgressMs),
-    onTickError: (err) => {
-      logger.warn(`[workflow] stall watchdog tick failed: ${toErrorMessage(err)}`);
-    },
-  });
-  stallWatchdog.arm();
   // [skill-reload D3] current pi 登记点：factory 每次重跑（reload 后新 factory 持新
   // pi）在此覆盖槽上 volatile 绑定——旧 deps 对象的现读成员（见 makeDeps）自动
   // 路由到新 pi，这是「不做遍历重绑」的登记侧前提。
@@ -375,7 +336,7 @@ export function setupWorkflowDomain(
   }
 
   function makeDeps(
-    state: Pick<SessionLifecycleResult, "store" | "runs" | "sessionDir" | "runner" | "ctx">,
+    state: Pick<SessionLifecycleResult, "store" | "runs" | "sessionDir" | "runner">,
   ) {
     const deps: LauncherDeps = {
       store: state.store,
@@ -383,10 +344,9 @@ export function setupWorkflowDomain(
       runner: state.runner,
       runs: state.runs,
       registry,
-      // [skill-reload D3] 三个 volatile 成员（eventBus / log / onRunDone 的 pi 与
-      // GuiContext）现读不快照：pi 从槽 currentPi 解析（factory 重跑覆盖登记），ctx
-      // 从 state.ctx 解析（槽上 sessionState 条目字段，adoption rebind 换新后自动
-      // 跟进）。在飞 pump 持有的旧 deps 对象经属性访问自动路由到新 pi/ctx。eventBus
+      // [skill-reload D3] 三个 volatile 成员（eventBus / log / onRunDone 的 pi）
+      // 现读不快照：pi 从槽 currentPi 解析（factory 重跑覆盖登记）。在飞 pump 持有的
+      // 旧 deps 对象经属性访问自动路由到新 pi。eventBus
       // 是值成员必须 getter；log/onRunDone 是函数成员，现读在函数体内达成（函数引用
       // 稳定，调用方缓存引用也无 stale 面）。
       //
@@ -397,7 +357,6 @@ export function setupWorkflowDomain(
       onRunDone: (run: WorkflowRun) =>
         runSettledEffects(
           {
-            stallWatchdog,
             resolvePi: resolveCurrentPi,
             notifiedRunIds,
             state,

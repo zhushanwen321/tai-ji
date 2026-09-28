@@ -15,7 +15,7 @@
  *   清理（clearSession / clearWorkflows / $dispose 完成后无幻影补拉——已删 session 的 dirty
  *   不复活）+ 两 sid 并发互不吞（per-session 键粒度）+ clearSession 补齐 reload timer 清理
  *   缺口（已删 session 的 500ms 重试不再触发）
- * - [P3/D6] deriveStalledSince / agentCallElapsedMs / agentCallStalled 投影消费纯函数
+ * - [P3/D6] agentCallElapsedMs 投影消费纯函数（每 ask 已执行时长）
  *
  * [HISTORICAL] overlay 相关用例（selectAgentCall/backFromAgentCall/isViewing/getViewingAgentCallId/
  * getActiveAgentCallVirtualId）已随 U7 overlay 移除删除。agent call 详情现走 drawer SubagentTab
@@ -718,54 +718,14 @@ describe('workflow store — [W0/D4] 拉取收敛簿记三点清理（已删 ses
   })
 })
 
-// ── [P3/D6] health / progress 投影消费纯函数（drawer/tray 共用推导单点）──
+// ── [P3/D6] progress 投影消费纯函数（drawer/tray 共用推导单点）──
 
-import {
-  WORKFLOW_STALL_THRESHOLD_MS,
-  agentCallElapsedMs,
-  agentCallStalled,
-  deriveStalledSince,
-} from '@/stores/workflow'
+import { agentCallElapsedMs } from '@/stores/workflow'
 import type { WorkflowAgentCall } from '@taiji/shared'
 
 const NOW = 1_000_000_000_000
 
-function recordWith(status: 'running' | 'done', health?: { lastProgressAt: number }): WorkflowRunRecord {
-  return {
-    runId: 'wf-stall-1',
-    scriptName: 'flow',
-    status,
-    startedAt: new Date(NOW - 60_000).toISOString(),
-    agentCalls: [],
-    stateFilePath: '',
-    ...(health !== undefined ? { health } : {}),
-  }
-}
-
-describe('workflow store — [P3/D6] deriveStalledSince（stalledSince 消费侧推导单点）', () => {
-  it('running 且 lastProgressAt 超阈值 → 返回停滞起点（= lastProgressAt）', () => {
-    const last = NOW - WORKFLOW_STALL_THRESHOLD_MS - 1000
-    expect(deriveStalledSince(recordWith('running', { lastProgressAt: last }), NOW)).toBe(last)
-  })
-
-  it('running 且阈值内（含恰在阈值上）→ null', () => {
-    expect(deriveStalledSince(recordWith('running', { lastProgressAt: NOW - 1000 }), NOW)).toBeNull()
-    expect(
-      deriveStalledSince(recordWith('running', { lastProgressAt: NOW - WORKFLOW_STALL_THRESHOLD_MS }), NOW),
-    ).toBeNull()
-  })
-
-  it('旧快照 health 缺省 → null（无数据不判定，ADR-0047）', () => {
-    expect(deriveStalledSince(recordWith('running'), NOW)).toBeNull()
-  })
-
-  it('非 running（done 终局）→ null（终局 run 无停滞语义）', () => {
-    const last = NOW - WORKFLOW_STALL_THRESHOLD_MS * 10
-    expect(deriveStalledSince(recordWith('done', { lastProgressAt: last }), NOW)).toBeNull()
-  })
-})
-
-describe('workflow store — [P3/D6] agentCallElapsedMs / agentCallStalled（每 ask 时长槽与停滞）', () => {
+describe('workflow store — [P3/D6] agentCallElapsedMs（每 ask 已执行时长槽）', () => {
   const startedIso = new Date(NOW - 30_000).toISOString()
 
   function callWith(overrides: Partial<WorkflowAgentCall>): WorkflowAgentCall {
@@ -781,13 +741,5 @@ describe('workflow store — [P3/D6] agentCallElapsedMs / agentCallStalled（每
     expect(agentCallElapsedMs(callWith({ status: 'done' }), NOW)).toBeNull()
     expect(agentCallElapsedMs(callWith({ startedAt: undefined }), NOW)).toBeNull()
     expect(agentCallElapsedMs(callWith({ startedAt: 'garbage' }), NOW)).toBeNull()
-  })
-
-  it('停滞判定：lastProgressAt 超阈值 true；缺省 false；非 running false', () => {
-    const stale = callWith({ lastProgressAt: NOW - WORKFLOW_STALL_THRESHOLD_MS - 1 })
-    expect(agentCallStalled(stale, NOW)).toBe(true)
-    expect(agentCallStalled(callWith({ lastProgressAt: NOW - 1000 }), NOW)).toBe(false)
-    expect(agentCallStalled(callWith({}), NOW)).toBe(false)
-    expect(agentCallStalled(callWith({ status: 'done', lastProgressAt: NOW - WORKFLOW_STALL_THRESHOLD_MS * 2 }), NOW)).toBe(false)
   })
 })

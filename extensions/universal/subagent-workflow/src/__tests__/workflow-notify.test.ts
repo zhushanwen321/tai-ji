@@ -43,7 +43,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { GuiRenderResult } from "@zhushanwen/extension-protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { STALE_CTX_MARKER } from "@zhushanwen/pi-ext-guards";
@@ -257,7 +256,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun({ scriptName: "fan-out", scriptResult: { status: "ok" } });
 
-    notifyDone(pi, "wf-17abc", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-17abc", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
     // ① 写账：ledger entry 落盘，幂等键形态 wf-done:<runId>
     expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-17abc`]));
@@ -285,10 +284,10 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     const { pi } = makePi();
     const run = makeRun();
 
-    notifyDone(pi, "wf-dup", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-dup", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
     // 第二次调用持全新 Set（模拟内存窗口挤出 / 重启后的重复收口回调）——
     // 持久层幂等键承接去重
-    notifyDone(pi, "wf-dup", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-dup", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
     expect(mock.sentMessages).toHaveLength(1);
     // 账本单条：后写不覆盖（同键二次写账被拒）
@@ -306,7 +305,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     mock.host.appendLedgerEntry = () => {
       throw new Error("session context is no longer active (assertActive)");
     };
-    expect(() => notifyDone(pi, "wf-stale", runAsParam(run), notified, undefined, undefined, settlementFor(run.state.reason))).toThrow("assertActive");
+    expect(() => notifyDone(pi, "wf-stale", runAsParam(run), notified, undefined, settlementFor(run.state.reason))).toThrow("assertActive");
     // error 留痕：含 notifyId 与 content 摘要（事后按 run 手工补偿的检索入口）
     expect(loggerFns.error).toHaveBeenCalledWith(
       expect.stringContaining("ledger record failed"),
@@ -321,7 +320,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
 
     // 重复收口回调（若到达）：appendLedgerEntry 恢复 → 写账 + 投递成功
     mock.host.appendLedgerEntry = origAppend;
-    notifyDone(pi, "wf-stale", runAsParam(run), notified, undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-stale", runAsParam(run), notified, undefined, settlementFor(run.state.reason));
     expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-stale`]));
     expect(mock.sentMessages).toHaveLength(1);
     expect(notified.has("wf-stale")).toBe(true);
@@ -331,7 +330,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     const { pi } = makePi();
     const run = makeRun();
 
-    notifyDone(pi, "wf-ack", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-ack", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
     expect(mock.sentMessages).toHaveLength(1);
 
     // 送达 entry 已落盘（sendDelivery mock 同步持久化）→ settled 边沿销账
@@ -339,7 +338,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     expect(mock.entries.some((e) => e.customType === NOTIFY_ACK_CUSTOM_TYPE)).toBe(true);
 
     // 已销账号再收口：record 幂等拒绝（终态不重发）
-    notifyDone(pi, "wf-ack", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-ack", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
     expect(mock.sentMessages).toHaveLength(1);
   });
 
@@ -350,7 +349,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     // 投递受理但回执不可达（deliverPersists=false——模拟 relay 瞬断，消息丢失、
     // custom_message entry 未落盘）
     mock.deliverPersists.value = false;
-    notifyDone(pi, "wf-lost", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-lost", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
     expect(mock.sentMessages).toHaveLength(1);
     expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-lost`]));
 
@@ -377,7 +376,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     const { pi } = makePi();
     const run = makeRun();
 
-    notifyDone(pi, "wf-done-ok", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-done-ok", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
     fireSettled(); // 销账
 
     const newMock = makeLedgerHost();
@@ -398,7 +397,7 @@ describe("notifyDone — 降级直发（ledger 未 bind，向后兼容）", () =
     const { pi, sendMessage } = makePi();
     const run = makeRun();
 
-    notifyDone(pi, "wf-fallback", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-fallback", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [msg, opts] = sendMessage.mock.calls[0] as [
@@ -434,7 +433,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun({ reason: "budget_limited" });
 
-    notifyDone(pi, "wf-budget", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-budget", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
     const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
     expect(msg.content).toBe(
@@ -450,7 +449,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun();
 
-    notifyDone(pi, "wf-art-1", runAsParam(run), new Set(), undefined, "/tmp/wf-state", settlementFor(run.state.reason));
+    notifyDone(pi, "wf-art-1", runAsParam(run), new Set(), "/tmp/wf-state", settlementFor(run.state.reason));
 
     const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
     expect(msg.content).toBe(
@@ -474,7 +473,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
       ],
     });
 
-    notifyDone(pi, "wf-full-1", runAsParam(run), new Set(), undefined, "/tmp/wf-state", settlementFor(run.state.reason));
+    notifyDone(pi, "wf-full-1", runAsParam(run), new Set(), "/tmp/wf-state", settlementFor(run.state.reason));
 
     const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
     expect(msg.content).toBe(
@@ -496,7 +495,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun({ scriptResult: null });
 
-    notifyDone(pi, "wf-null", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "wf-null", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
     const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
     expect(msg.content).toBe("Workflow 'build' done: done (completed)\n\n--- Agent Trace ---");
@@ -509,7 +508,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
       state: { status: "done", trace: { toArray: () => [] } },
     };
 
-    notifyDone(pi, "wf-noreason", runAsParam(run), new Set(), undefined, undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
+    notifyDone(pi, "wf-noreason", runAsParam(run), new Set(), undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));
 
     const [msg] = sendMessage.mock.calls[0] as [{ content: string }];
     // [W2/V1 D1 第 7 行] 载荷源换终局记录——reason 恒由 settlement 派生（completed
@@ -537,7 +536,7 @@ describe("notifyDone 终局载荷（D7）", () => {
     bindNotifyLedgerHost(mock.host);
     const run = makeRun({ reason: "completed", scriptResult: { ok: true, files: 3 } });
 
-    notifyDone(makePi().pi, "wf-payload-ok", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR, settlementFor(run.state.reason));
+    notifyDone(makePi().pi, "wf-payload-ok", runAsParam(run), new Set(), ARTIFACTS_DIR, settlementFor(run.state.reason));
 
     expect(mock.sentMessages).toHaveLength(1);
     const delivery = mock.sentMessages[0]!;
@@ -560,7 +559,7 @@ describe("notifyDone 终局载荷（D7）", () => {
     bindNotifyLedgerHost(mock.host);
     const run = makeRun({ reason: "failed", failedCall: { error: "engine crashed", failureKind: "unknown" } });
 
-    notifyDone(makePi().pi, "wf-payload-fail", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR, settlementFor(run.state.reason));
+    notifyDone(makePi().pi, "wf-payload-fail", runAsParam(run), new Set(), ARTIFACTS_DIR, settlementFor(run.state.reason));
 
     expect(mock.sentMessages).toHaveLength(1);
     const details = mock.sentMessages[0]!.details as Record<string, unknown>;
@@ -575,7 +574,7 @@ describe("notifyDone 终局载荷（D7）", () => {
     bindNotifyLedgerHost(mock.host);
     const run = makeRun({ reason: "aborted" });
 
-    notifyDone(makePi().pi, "wf-payload-cancel", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR, settlementFor(run.state.reason));
+    notifyDone(makePi().pi, "wf-payload-cancel", runAsParam(run), new Set(), ARTIFACTS_DIR, settlementFor(run.state.reason));
 
     expect(mock.sentMessages).toHaveLength(1);
     const details = mock.sentMessages[0]!.details as Record<string, unknown>;
@@ -589,7 +588,7 @@ describe("notifyDone 终局载荷（D7）", () => {
     bindNotifyLedgerHost(mock.host);
     const run = makeRun({ reason: "completed" });
 
-    notifyDone(makePi().pi, "wf-payload-bare", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
+    notifyDone(makePi().pi, "wf-payload-bare", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
     expect(mock.sentMessages).toHaveLength(1);
     const details = mock.sentMessages[0]!.details as Record<string, unknown>;
@@ -607,7 +606,7 @@ describe("notifyDone 终局载荷（D7）", () => {
     const big = "x".repeat(2000);
     const run = makeRun({ reason: "completed", scriptResult: big });
 
-    notifyDone(makePi().pi, "wf-payload-big", runAsParam(run), new Set(), undefined, ARTIFACTS_DIR, settlementFor(run.state.reason));
+    notifyDone(makePi().pi, "wf-payload-big", runAsParam(run), new Set(), ARTIFACTS_DIR, settlementFor(run.state.reason));
 
     const summary = (mock.sentMessages[0]!.details as Record<string, unknown>)["resultSummary"] as string;
     expect(summary.length).toBeLessThanOrEqual(600); // 500 + 截断标记余量
@@ -657,7 +656,7 @@ function legacySerialize(x: unknown): string {
 
 function runAndGetSection(scriptResult: unknown): string {
   const { pi, sendMessage } = makePi();
-  notifyDone(pi, "run-if13", runAsParam(makeRun({ scriptResult })), new Set(), undefined, undefined, settlementFor(undefined));
+  notifyDone(pi, "run-if13", runAsParam(makeRun({ scriptResult })), new Set(), undefined, settlementFor(undefined));
   return scriptResultSection(sendMessage);
 }
 
@@ -787,14 +786,13 @@ describe("notifyDone scriptResult — 截断边界（恰好 8000 / 8001 / 转义
   });
 });
 
-// ── GUI 协议（S#13） ─────────────────────────────────────────
+// ── details 形状（S#13 收口：`__gui__` 死构造已删除，通知 details 不含 GUI 描述符）──
 
-// notifyDone 在 run 到达 done 终态时发送完成通知，RPC 模式下附加 __gui__ list-tree。
-// 覆盖：RPC 模式下 details.__gui__ 正确构造（list-tree + status/icon 映射）；reason
-// 非空时 statusStr 拼接后映射正确（如 done (failed) → failed/cross）；reason 为空时
-// 的映射；非 RPC 模式不附加 __gui__；label 格式含 slug（I#3 对齐）。
+// notifyDone 在 run 到达 done 终态时发送完成通知。GUI 描述符构造已删除（isWorkflow
+// 块分支恒折叠单行不消费 `__gui__`，构造即死代码——D8 同款裁决）；本节锁 details
+// 基础字段形状与「不含 __gui__ 键」的负向断言。
 
-/** notifyDone details 内联镜像（helpers.ts WorkflowNotifyDetails 已去 export 为模块私有）。 */
+/** notifyDone details 内联镜像（workflow-notify.ts WorkflowNotifyDetails 已去 export 为模块私有）。 */
 type WorkflowNotifyDetails = {
   runId: string;
   name: string;
@@ -803,93 +801,18 @@ type WorkflowNotifyDetails = {
   traceLength: number;
   /** [u9] 账本幂等键（wf-done:<runId>）——无 ledger 绑定，走降级直发，字段原样携带。 */
   notifyId: string;
-  __gui__?: GuiRenderResult;
 };
 
-describe("notifyDone — GUI 协议", () => {
-  it("RPC 模式 + reason=failed → __gui__ list-tree status=failed icon=cross", () => {
-    const { pi, sendMessage } = makePi();
-    const run = makeRun({ status: "done", reason: "failed", slug: "ci" });
-
-    notifyDone(pi, "run-abc12345", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor(run.state.reason));
-
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    const details = sentDetails(sendMessage) as WorkflowNotifyDetails;
-    expect(details.__gui__).toBeDefined();
-    const comp = details.__gui__!.component;
-    expect(comp.type).toBe("list-tree");
-    const items = comp.props.items as Array<{ status: string; icon: string }>;
-    // statusStr = "done (failed)" → mapRunStatus 含 "failed" → failed
-    expect(items[0].status).toBe("failed");
-    expect(items[0].icon).toBe("cross");
-  });
-
-  it("RPC 模式 + 无 reason → __gui__ status=done icon=check", () => {
-    const { pi, sendMessage } = makePi();
-    const run = makeRun({ status: "done", reason: undefined, slug: "deploy" });
-
-    notifyDone(pi, "run-defg1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor(run.state.reason));
-
-    const details = sentDetails(sendMessage) as WorkflowNotifyDetails;
-    const items = details.__gui__!.component.props.items as Array<{ status: string; icon: string }>;
-    expect(items[0].status).toBe("done");
-    expect(items[0].icon).toBe("check");
-  });
-
-  it("RPC 模式 + reason=completed → __gui__ status=done icon=check", () => {
-    const { pi, sendMessage } = makePi();
-    const run = makeRun({ status: "done", reason: "completed", slug: "deploy" });
-
-    notifyDone(pi, "run-comp1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor(run.state.reason));
-
-    const details = sentDetails(sendMessage) as WorkflowNotifyDetails;
-    const items = details.__gui__!.component.props.items as Array<{ status: string; icon: string }>;
-    expect(items[0].status).toBe("done");
-    expect(items[0].icon).toBe("check");
-  });
-
-  it("RPC 模式 + label 含 slug（I#3 对齐 buildWorkflowGui 格式）", () => {
+describe("notifyDone — details 形状", () => {
+  it("通知 details 不含 __gui__ 键（GUI 描述符死构造已删除）", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun({ status: "done", reason: "completed", slug: "ci" });
 
-    notifyDone(pi, "abcdefgh1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "run-nogui1", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
-    const details = sentDetails(sendMessage) as WorkflowNotifyDetails;
-    const items = details.__gui__!.component.props.items as Array<{ label: string }>;
-    // label = `${name} ${slug} ${runId.slice(0,8)}`.trim()
-    expect(items[0].label).toBe("build ci abcdefgh");
-  });
-
-  it("RPC 模式 + 无 slug → label 不含多余空格（filter(Boolean) 生效）", () => {
-    const { pi, sendMessage } = makePi();
-    const run = makeRun({ status: "done", reason: "completed", slug: undefined });
-
-    notifyDone(pi, "abcdefgh1234", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor(run.state.reason));
-
-    const details = sentDetails(sendMessage) as WorkflowNotifyDetails;
-    const items = details.__gui__!.component.props.items as Array<{ label: string }>;
-    // slug 为 undefined → filter(Boolean) 过滤空段 → "build abcdefgh"（单空格）
-    expect(items[0].label).toBe("build abcdefgh");
-  });
-
-  it("非 RPC 模式 → 不附加 __gui__", () => {
-    const { pi, sendMessage } = makePi();
-    const run = makeRun({ status: "done", reason: "completed" });
-
-    notifyDone(pi, "run-xxx", runAsParam(run), new Set(), { mode: "tui", hasUI: true }, undefined, settlementFor(run.state.reason));
-
-    const details = sentDetails(sendMessage) as WorkflowNotifyDetails;
-    expect(details.__gui__).toBeUndefined();
-  });
-
-  it("无 ctx → 不附加 __gui__", () => {
-    const { pi, sendMessage } = makePi();
-    const run = makeRun({ status: "done", reason: "completed" });
-
-    notifyDone(pi, "run-yyy", runAsParam(run), new Set(), undefined, undefined, settlementFor(run.state.reason));
-
-    const details = sentDetails(sendMessage) as WorkflowNotifyDetails;
-    expect(details.__gui__).toBeUndefined();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const details = sentDetails(sendMessage) as Record<string, unknown>;
+    expect(Object.keys(details)).not.toContain("__gui__");
   });
 
   it("去重：同一 runId 第二次调用不发送消息", () => {
@@ -897,8 +820,8 @@ describe("notifyDone — GUI 协议", () => {
     const run = makeRun({ status: "done", reason: "completed" });
     const notified = new Set<string>();
 
-    notifyDone(pi, "run-dedup", runAsParam(run), notified, { mode: "rpc", hasUI: true }, undefined, settlementFor(run.state.reason));
-    notifyDone(pi, "run-dedup", runAsParam(run), notified, { mode: "rpc", hasUI: true }, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "run-dedup", runAsParam(run), notified, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "run-dedup", runAsParam(run), notified, undefined, settlementFor(run.state.reason));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
@@ -915,7 +838,7 @@ describe("notifyDone — GUI 协议", () => {
       ],
     });
 
-    notifyDone(pi, "run-base123", runAsParam(run), new Set(), { mode: "rpc", hasUI: true }, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "run-base123", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
     const details = sentDetails(sendMessage) as WorkflowNotifyDetails;
     expect(details.runId).toBe("run-base123");
@@ -943,21 +866,20 @@ describe("trackNotifiedRunId（notifiedRunIds 有界 FIFO）", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun({ status: "done", reason: "completed" });
     const set = new Set<string>();
-    const ctx = { mode: "rpc", hasUI: true } as const;
 
     // old 首次通知 + track
-    notifyDone(pi, "old", runAsParam(run), set, ctx, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "old", runAsParam(run), set, undefined, settlementFor(run.state.reason));
     trackNotifiedRunId(set, "old", 3);
     // 3 个新 run 依次通知 + track——"old" 被挤出窗口（set 现为 n1/n2/n3）
     for (const id of ["n1", "n2", "n3"]) {
-      notifyDone(pi, id, runAsParam(run), set, ctx, undefined, settlementFor(run.state.reason));
+      notifyDone(pi, id, runAsParam(run), set, undefined, settlementFor(run.state.reason));
       trackNotifiedRunId(set, id, 3);
     }
     expect(set.size).toBe(3);
     expect(Array.from(set)).toEqual(["n1", "n2", "n3"]);
 
     // 第二次对 "old" 的 notifyDone：has 为 false → 重新发送
-    notifyDone(pi, "old", runAsParam(run), set, ctx, undefined, settlementFor(run.state.reason));
+    notifyDone(pi, "old", runAsParam(run), set, undefined, settlementFor(run.state.reason));
 
     // 旧行为『永不重复』在挤出窗口后不成立——边界显式钉死：
     // old 首次 + n1/n2/n3 + old 二次 = 5 次
@@ -1009,7 +931,7 @@ describe("notifyDone stale ctx 守卫（guardStaleCtx 接入）", () => {
       throw new Error(PI_STALE_ERROR);
     });
 
-    expect(() => notifyDone(pi, "run-stale", runAsParam(makeRun({ scriptResult: { ok: 1 } })), new Set(), undefined, undefined, settlementFor(undefined))).not.toThrow();
+    expect(() => notifyDone(pi, "run-stale", runAsParam(makeRun({ scriptResult: { ok: 1 } })), new Set(), undefined, settlementFor(undefined))).not.toThrow();
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
@@ -1019,13 +941,13 @@ describe("notifyDone stale ctx 守卫（guardStaleCtx 接入）", () => {
       throw boom;
     });
 
-    expect(() => notifyDone(pi, "run-boom", runAsParam(makeRun({ scriptResult: { ok: 1 } })), new Set(), undefined, undefined, settlementFor(undefined))).toThrow(boom);
+    expect(() => notifyDone(pi, "run-boom", runAsParam(makeRun({ scriptResult: { ok: 1 } })), new Set(), undefined, settlementFor(undefined))).toThrow(boom);
   });
 
   it("正常路径零变化：workflow-result 消息与单通道 triggerTurn 参数原样透传（[u9] 账本化后直发仅存于 ledger 未 bind 的降级形态——deliverAs 已删，本组无绑定环境）", () => {
     const { pi, sendMessage } = makePi();
 
-    notifyDone(pi, "run-ok", runAsParam(makeRun({ scriptResult: { ok: 1 } })), new Set(), undefined, undefined, settlementFor(undefined));
+    notifyDone(pi, "run-ok", runAsParam(makeRun({ scriptResult: { ok: 1 } })), new Set(), undefined, settlementFor(undefined));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [msg, opts] = sendMessage.mock.calls[0] as [

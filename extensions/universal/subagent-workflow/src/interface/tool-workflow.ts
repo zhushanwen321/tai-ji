@@ -20,10 +20,6 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 const logger = getLogger("tool-workflow");
 import { Text } from "@earendil-works/pi-tui";
-import {
-  guiComponent,
-  type GuiRenderResult,
-} from "@zhushanwen/extension-protocol";
 import { type Static, Type } from "typebox";
 
 import { SLUG_MAX_LENGTH } from "@zhushanwen/subagent-core";
@@ -47,7 +43,6 @@ import {
 } from "@zhushanwen/subagent-core";
 import { assertEntryTimeBudget, assertEntryTokenBudget, assertSlugWithinLimit } from "@zhushanwen/subagent-core";
 import { runSummary } from "@zhushanwen/subagent-core";
-import { mapRunIcon, mapRunStatus, toGuiCtx } from "./gui-mappers.ts";
 import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
 import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 import {
@@ -63,7 +58,6 @@ import {
   optionSlugSuffix,
   renderTextResult,
   throwPrefixed,
-  withGuiAttach,
 } from "./tool-shared.ts";
 
 // ── Parameter schema ─────────────────────────────────────────
@@ -173,60 +167,15 @@ interface RunSummary {
  * Discriminated union of `workflow` tool `details` payloads.
  *
  * Discriminant: `action`. Each action's details shape is explicitly typed so
- * downstream consumers (GUI list-tree renderer, structured-output) can narrow
- * without unsafe casts.
+ * downstream consumers (structured-output) can narrow without unsafe casts.
  */
 export type WorkflowToolDetails =
-  | ({ action: "run"; name: string; __gui__?: GuiRenderResult } & RunStartDetails)
-  | { action: "status"; runs: RunSummary[]; __gui__?: GuiRenderResult }
-  | { action: "abort"; runId: string; status: string; reason?: string; __gui__?: GuiRenderResult };
+  | ({ action: "run"; name: string } & RunStartDetails)
+  | { action: "status"; runs: RunSummary[] }
+  | { action: "abort"; runId: string; status: string; reason?: string };
 
 /** Result returned by the `workflow` tool's execute（公共骨架见 tool-result.ts）。 */
 type WorkflowExecuteResult = WorkflowToolResult<WorkflowToolDetails | undefined>;
-
-// ── GUI 协议 helpers ───────────────────────────────────────
-
-/** 按 WorkflowToolDetails 构造对应的 GuiComponent。 */
-export function buildWorkflowGui(details: WorkflowToolDetails) {
-  if (details.action === "run") {
-    // not_found 曾是「isError:true + not_found details」的错误形态（W4 前返回值 isError 被
-    // pi 丢弃）；W4 后该错误改为 throw（details 不再产出此形态），本分支保留消费历史
-    // session entry / 防御性渲染，不能走通用 mapper 的 done/check 成功映射。
-    if (details.status === "not_found") {
-      return guiComponent("stats-line", {
-        items: [{ label: "run", value: "not found", severity: "danger" as const }],
-      });
-    }
-    const statusStr = details.status;
-    return guiComponent("list-tree", {
-      items: [{
-        label: [details.name, details.slug, details.runId.slice(0, ID_PREVIEW_LENGTH)].filter(Boolean).join(" "),
-        status: mapRunStatus(statusStr),
-        icon: mapRunIcon(statusStr),
-      }],
-    });
-  }
-  if (details.action === "status") {
-    return guiComponent("list-tree", {
-      items: details.runs.map((r) => {
-        const statusStr = r.reason ? `${r.status} (${r.reason})` : r.status;
-        return {
-          label: [r.name, r.slug, r.runId.slice(0, ID_PREVIEW_LENGTH)].filter(Boolean).join(" "),
-          status: mapRunStatus(statusStr),
-          icon: mapRunIcon(statusStr),
-        };
-      }),
-    });
-  }
-  // abort（唯一 lifecycle action）：破坏性终止非成功完成，用 warn 与成功区分
-  return guiComponent("stats-line", {
-    items: [{
-      label: details.action,
-      value: details.runId.slice(0, ID_PREVIEW_LENGTH),
-      severity: "warn" as const,
-    }],
-  });
-}
 
 // ── Tool registration ────────────────────────────────────────
 
@@ -314,11 +263,9 @@ export function registerWorkflowTool(
             throw new Error(`Unknown action: ${String(_exhaustive)}`);
           }
         }
-        // GUI 协议：RPC 模式下附加 __gui__ 到 details（attach 单点在 tool-shared）
-        return {
-          ...result,
-          details: withGuiAttach(result.details, toGuiCtx(_ctx), buildWorkflowGui),
-        };
+        // workflow 块分支（WORKFLOW_TOOL_NAMES 集合分流）恒折叠单行不消费 __gui__
+        // （D8 裁决），details 不构造 GUI 描述符。
+        return result;
       } finally {
         releaseReentryGuard(reentryRef);
       }

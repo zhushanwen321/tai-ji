@@ -38,14 +38,6 @@
         </span>
         <!-- workflow 一次性生命周期（subagent-workflow D-2）：仅 abort，pause/resume 已移除 -->
         <div v-if="workflow.status === 'running'" class="flex shrink-0 items-center gap-0.5">
-          <!-- [P3/D6] run 级 health：停滞信号（stalledSince 消费侧推导；旧快照 health 缺省不判定） -->
-          <span
-            v-if="stalledSince !== null"
-            data-testid="drawer-workflow-stalled"
-            class="shrink-0 font-mono text-[length:var(--text-3xs)] text-warn"
-          >
-            {{ t('sidebar.workflowDetail.stalledNoProgress', { duration: formatDuration(stalledAgeMs) }) }}
-          </span>
           <Button
             variant="ghost"
             size="icon"
@@ -93,19 +85,17 @@
               <div class="flex items-center gap-2">
                 <Loader2
                   v-if="call.status === 'running'"
-                  class="size-[11px] shrink-0 animate-spin"
-                  :class="callStalled(call) ? 'text-warn' : 'text-accent'"
+                  class="size-[11px] shrink-0 animate-spin text-accent"
                 />
                 <span v-else class="size-1.5 shrink-0 rounded-full" :class="callDotClass(call.status)" />
                 <span class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-2xs)] font-medium text-neutral-fg">
                   {{ call.agent }}
                 </span>
-                <!-- [P3/D6] running ask：已执行时长槽（elapsed 可得时）+ 停滞信号（lastProgressAt 超阈值）；
-                     旧快照缺 startedAt/lastProgressAt → 缺省渲染（槽省略、不判定停滞） -->
+                <!-- [P3/D6] running ask：已执行时长槽（elapsed 可得时）；
+                     旧快照缺 startedAt → 缺省渲染（槽省略） -->
                 <span
                   v-if="call.status === 'running'"
-                  class="shrink-0 font-mono text-[length:var(--text-3xs)]"
-                  :class="callStalled(call) ? 'text-warn' : 'text-accent'"
+                  class="shrink-0 font-mono text-[length:var(--text-3xs)] text-accent"
                 >
                   {{ callStatusLabel(call) }}
                 </span>
@@ -143,8 +133,6 @@ import { useDrawerControl, openSubagent } from '@taiji/core/domain/drawer'
 import {
   agentCallVirtualId,
   agentCallElapsedMs,
-  agentCallStalled,
-  deriveStalledSince,
   useWorkflowStore,
 } from '@/stores/workflow'
 import { usePanelStore } from '@/stores/panel'
@@ -273,8 +261,8 @@ function formatDuration(ms: number): string {
   return formatCompactDuration(Math.floor(ms / MS_PER_SECOND), { hours: false })
 }
 
-// ── [P3/D6] health / progress 消费（推导纯函数单源在 stores/workflow）────────
-// 1s tick 只驱动「已执行时长」槽与停滞信号重算（data 面仍由 records 推送驱动；
+// ── [P3/D6] progress 消费（推导纯函数单源在 stores/workflow）────────
+// 1s tick 只驱动「已执行时长」槽重算（data 面仍由 records 推送驱动；
 // interval 随组件 scope 自动回收）。
 const now = ref(Date.now())
 const TICK_INTERVAL_MS = 1000
@@ -283,24 +271,8 @@ const tickTimer = setInterval(() => {
 }, TICK_INTERVAL_MS)
 onScopeDispose(() => clearInterval(tickTimer))
 
-/** run 级停滞起点（null = 非停滞 / health 缺省不可判定） */
-const stalledSince = computed(() =>
-  workflow.value ? deriveStalledSince(workflow.value, now.value) : null,
-)
-const stalledAgeMs = computed(() =>
-  stalledSince.value === null ? 0 : now.value - stalledSince.value,
-)
-
-function callStalled(call: WorkflowAgentCall): boolean {
-  return agentCallStalled(call, now.value)
-}
-
-/** running ask 的状态标签：停滞 → 无进展文案；其余 → 运行中（+ 已执行时长槽，可得时） */
+/** running ask 的状态标签：运行中（+ 已执行时长槽，可得时） */
 function callStatusLabel(call: WorkflowAgentCall): string {
-  if (callStalled(call)) {
-    const age = call.lastProgressAt === undefined ? 0 : now.value - call.lastProgressAt
-    return t('sidebar.workflowDetail.stalledNoProgress', { duration: formatDuration(age) })
-  }
   const elapsed = agentCallElapsedMs(call, now.value)
   const label = t('panel.sideDrawer.workflowRunning')
   return elapsed === null ? label : `${label} · ${formatDuration(elapsed)}`

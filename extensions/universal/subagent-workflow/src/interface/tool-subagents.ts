@@ -10,6 +10,11 @@
  * - 唯一批量入口：N 个已知独立任务一次派发；handler 确定性转译
  *   runWorkflow("fan-out")（执行管道唯一——collect 时代的批协调状态已退役，
  *   不存在第二套批机制）。
+ * - 批量派发的等价性契约：tasks[] 经 handler 确定性转译为内置 fan-out 模板脚本，
+ *   走 runWorkflow 完整管道执行——模板仅由 tasks[] 确定性生成、不含任何批协调
+ *   状态，执行管道唯一（不存在第二套批机制）；走管道使批量派发继承 workflow 的
+ *   持久化、journal、GUI 投影与断点恢复（resume）全套能力，这是刻意保留间接层
+ *   的原因。
  * - 无 action 分发：status/abort 不复制，直接指路 workflow tool（runId 同体系）。
  * - 无 args 嵌套：tasks/agents/aggregate/... 全在顶层（弱模型信任 schema 结构信号，
  *   两跳转译是事故高发区——对照 workflow tool 的 name+args 形态）。
@@ -18,7 +23,7 @@
  * - 不构造 `details.__gui__`：GUI 挂载按 WORKFLOW_TOOL_NAMES 集合分流，批量块走
  *   workflow 块分支（恒折叠单行 + openWorkflowDrawer）；`__gui__` 的渲染点在普通
  *   tool 分支（v-else）的展开区内，isWorkflow 分支无展开路径不消费——构造即死代码
- *   （D8 裁决；workflow tool 现状构造 `__gui__` 但块面同样不消费，本工具不复制该漂移）。
+ *   （D8 裁决；workflow tool 的 `__gui__` 死构造已随之删除，isWorkflow 集合内工具零消费）。
  *
  * 层归属：Interface。依赖 Pi SDK + core lifecycle/registry + reentry-guard。
  */

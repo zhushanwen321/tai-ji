@@ -5,10 +5,8 @@
  * 三视角（TEST-STRATEGY §3）：
  * - 使用者（黑盒 DOM）：agent call 三态渲染（running/pending/done 耗时）——每条用例
  *   至少一个用户可见断言；[P3/D6] 每 ask 已执行时长槽（「运行中 · 30s」）可见
- * - 观察者（形态）：run 级停滞徽标与 per-ask 停滞信号（stalledSince 消费侧推导，
- *   推导纯函数单源在 stores/workflow——数值边界在其单测，此处验渲染接线）
- * - 构建者：旧快照 additive 读缺省渲染路径（health/startedAt/lastProgressAt 缺省
- *   → 无停滞徽标、时长槽省略，组件不炸）
+ * - 观察者（形态）：ask 行渲染形态随 status/durationMs/startedAt 派生
+ * - 构建者：旧快照 additive 读缺省渲染路径（startedAt 缺省 → 时长槽省略，组件不炸）
  *
  * mock 策略：真实 pinia（panel + workflow store，分区 ref 直写种数据）；
  * drawer 控制态 bindDrawerSessionId + openWorkflow 真实域状态；vue-i18n 全局 setup
@@ -26,7 +24,6 @@ import { bindDrawerSessionId, openWorkflow, _resetDrawerForTest } from '@taiji/c
 import WorkflowTab from '@/components/panel/WorkflowTab.vue'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import { useWorkflowStore } from '@/stores/workflow'
-import { WORKFLOW_STALL_THRESHOLD_MS } from '@/stores/workflow'
 import type { WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
 
 // 固定 now（fake timers）：停滞推导与时长槽的时间锚
@@ -100,36 +97,9 @@ describe('WorkflowTab [P3/D6] 投影消费', () => {
     expect(row.text()).toContain('运行中 · 30s')
   })
 
-  it('停滞渲染：run 级 health 超阈值 → drawer-workflow-stalled 徽标（无进展文案）', async () => {
-    const stale = FIXED_NOW - WORKFLOW_STALL_THRESHOLD_MS - 60_000
+  it('旧快照缺省渲染：startedAt 缺省 → 时长槽省略、不炸', async () => {
     const wf = record({
-      agentCalls: [call({ id: 0, status: 'running', startedAt: startedIso(30_000) })],
-      health: { lastProgressAt: stale },
-    })
-    const wrapper = await mountTab([wf])
-    const badge = wrapper.find('[data-testid="drawer-workflow-stalled"]')
-    expect(badge.exists()).toBe(true)
-    expect(badge.text()).toContain('无进展')
-    expect(badge.text()).toContain('16m')
-  })
-
-  it('per-ask 停滞：call.lastProgressAt 超阈值 → 该 ask 标签呈「无进展」（warn 色档），他 ask 不受累', async () => {
-    const stale = FIXED_NOW - WORKFLOW_STALL_THRESHOLD_MS - 60_000
-    const wf = record({
-      agentCalls: [
-        call({ id: 0, agent: 'stalled-ask', status: 'running', startedAt: startedIso(30_000), lastProgressAt: stale }),
-        call({ id: 1, agent: 'fresh-ask', status: 'running', startedAt: startedIso(30_000), lastProgressAt: FIXED_NOW - 1000 }),
-      ],
-    })
-    const wrapper = await mountTab([wf])
-    const rows = wrapper.findAll('[data-testid="drawer-workflow-agent-call"]')
-    expect(rows[0]!.text()).toContain('无进展')
-    expect(rows[1]!.text()).toContain('运行中')
-  })
-
-  it('旧快照缺省渲染：health/startedAt/lastProgressAt 全缺 → 无停滞徽标、时长槽省略、不炸', async () => {
-    const wf = record({
-      agentCalls: [call({ id: 0, status: 'running', startedAt: undefined, lastProgressAt: undefined })],
+      agentCalls: [call({ id: 0, status: 'running', startedAt: undefined })],
     })
     const wrapper = await mountTab([wf])
 
@@ -138,19 +108,6 @@ describe('WorkflowTab [P3/D6] 投影消费', () => {
     expect(row.exists()).toBe(true)
     expect(row.text()).toContain('运行中')
     expect(row.text()).not.toContain('·')
-    // 无 run 级停滞徽标（health 缺省 → 不判定）
-    expect(wrapper.find('[data-testid="drawer-workflow-stalled"]').exists()).toBe(false)
-  })
-
-  it('done run 不判停滞：终局 run 即使 health 陈旧也无徽标', async () => {
-    const stale = FIXED_NOW - WORKFLOW_STALL_THRESHOLD_MS * 10
-    const wf = record({
-      status: 'done',
-      reason: 'completed',
-      health: { lastProgressAt: stale },
-    })
-    const wrapper = await mountTab([wf])
-    expect(wrapper.find('[data-testid="drawer-workflow-stalled"]').exists()).toBe(false)
   })
 })
 
