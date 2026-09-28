@@ -171,10 +171,11 @@ export type RunErrorCode =
  * 语境）而非字面量，由收编写入方直写。
  *
  * 消费方：core worker-message-pump 的 dispatchFinalRunSettle（同构判别，aborted
- * 分支走 cancel-requested 合成不改用本函数——两条路径的 outcome 语义一致）+ 壳
- * helpers 通知载荷的 outcome 字段（原 extension 侧 mapDoneReasonToOutcome 本地
- * 镜像已删，经 barrel 消费本单源；漂移信号 = 通知 outcome 与 journal
- * run-settled 帧 outcome 不一致）。
+ * 分支走 cancel-requested 合成不改用本函数——两条路径的 outcome 语义一致）。
+ * 壳侧通知载荷的 outcome 字段不经本函数：帧直取（settlement.outcome，与
+ * run-settled 帧同源）+ DoneReason 经 runSettledOutcomeToDoneReason 反向派生
+ * （原 extension 侧 mapDoneReasonToOutcome 本地镜像已删）；漂移信号 = 通知
+ * outcome ≡ journal run-settled 帧 outcome。
  */
 export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
   switch (reason) {
@@ -201,8 +202,8 @@ export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
  *   （RunSettledEvent.errorCode 字段语义「失败时才有」）；
  * - budget_limited/time_limited：run 级终局码恒等映射（同名字面量，上方注释载
  *   收录依据）；
- * - failed/invalid_args：按因提取——invalid_args 与 failed 同组对齐 extension
- *   mapDoneReasonToOutcome 的既有归类（invalid_args 生产不达 finalizeRun——
+ * - failed/invalid_args：按因提取——invalid_args 与 failed 同组对齐上方
+ *   doneReasonToRunOutcome 的既有归类（invalid_args 生产不达 finalizeRun——
  *   launcher 参数校验在 run 创建前返回，防误分组而已）。
  */
 export function finalRunErrorCodeOf(run: WorkflowRun, doneReason: DoneReason): RunErrorCode | undefined {
@@ -449,7 +450,8 @@ export type WorkflowRunEvent =
 
 /**
  * 写侧入参形态：事件去掉 seq（seq 由 journal 单写者分配——单调性的构造性保证，
- * 调用方无法传错；与 record 侧 RecordJournalEventInput 同构）。DistributiveOmit
+ * 调用方无法传错；与 record 侧 RecordJournalEventInput（execution/persistence/
+ * record-events.ts）同构）。DistributiveOmit
  * 使联合逐成员 Omit（保持判别键窄化能力）。
  *
  * 状态机消费面（TransitionTrigger 的事件族）即本形态——seq 是 journal 存储层的
@@ -1010,6 +1012,10 @@ const journalLogger = getLogger("run-event-journal");
  * （stall watchdog 的 journal 路径构造、终局通知的 eventsJournalPath、
  * jsonl-run-store 的 watcher 边沿判定）统一 import 本常量——后缀字面量散布
  * 多处时任何一侧单独改动都是静默漂移（watcher 失配 / 指针失效）。
+ *
+ * 已知范围外同值副本：session-reader 包（跨包无 core 依赖边，物理单源结构性
+ * 不可行——与 D5 core↔shared 同款约束）本地持有同值常量，以「写侧同值」注释
+ * 锚 + 测试守卫承接漂移检查（v2 条目 journalPath → state 快照推导消费它）。
  */
 export const RUN_EVENT_JOURNAL_SUFFIX = ".events.jsonl";
 
