@@ -1124,7 +1124,7 @@ export const RUN_EVENT_JOURNAL_SUFFIX = ".record.jsonl";
  * runId 白名单：字母数字开头 + [A-Za-z0-9_-]，长度 ≤ 128。
  *
  * 为什么白名单而非黑名单：journal 文件名由 runId 直接拼出（join(dir,
- * `<runId>.events.jsonl`)），黑名单漏一个形态就是一次路径穿越；白名单只放行
+ * `<runId><RUN_EVENT_JOURNAL_SUFFIX>`)），黑名单漏一个形态就是一次路径穿越；白名单只放行
  * generateRunId 的产出字符集（wf-<ts>-<base36>），首字符约束同时排除 "."、
  * ".." 与隐藏文件形态，"/" "\" 根本不在字符集内。
  */
