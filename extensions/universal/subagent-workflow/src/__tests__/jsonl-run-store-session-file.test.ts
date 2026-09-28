@@ -1,6 +1,6 @@
 // src/__tests__/jsonl-run-store-session-file.test.ts
 //
-// JsonlRunStore 壳侧归属面汇总件：save 去抖 / flush 串行链 / dispose、state 投影
+// JsonlRunStore 壳侧归属面汇总件：物化触发源路由 / flush 串行链 / dispose、state 投影
 // round-trip（sessionFile / trace 裁剪保真）、workflow-record 条目面（零条目写锚定 +
 // v2 收编读面 + rebind 补写）、codec 切换 golden 字节锚、adoption 投影重发保序与
 // stale guard（被测对象是 JsonlRunStore 本体的条目收敛到本件）。
@@ -109,7 +109,7 @@ function makeRunWithDoneCall(): WorkflowRun {
 }
 
 /**
- * W4+ fixture：running 状态 run（热路径去抖测试的前提）。
+ * W4+ fixture：running 状态 run（热路径批登记测试的前提）。
  *
  * 用 WorkflowRun.reconstruct 构造——running 且 runtime undefined 违反 I1
  * （持久化的 running 快照无 worker），constructor 会抛错；reconstruct 跳过 I1
@@ -409,10 +409,10 @@ describe("W9: 快照版本守卫（v2 当前）", () => {
 
 // W3: save 兜底容错——run 工作目录被并发清理时 mkdir 抛 ENOENT，save 静默返回。
 //
-// 防的 bug（PR #166 CI 回归）：review-fix-loop-e2e 等 runAndWait 测试中，
-// handleReturn 的 run.transition("done") 同步改 status 后，runAndWait 轮询发现 done
-// 并 resolve，测试 afterEach 随即 rmSync 删除 sessionDir；此时 handleReturn 内 in-flight
-// 的 await save 尚未完成，mkdir 遇到目录链被并发删除 → ENOENT。原实现 await save 让错误
+// 防的 bug（PR #166 CI 回归）：review-fix-loop-e2e 等 e2e 测试中，
+// run 终局（终局记录落账）后测试继续推进，测试 afterEach 随即 rmSync 删除
+// sessionDir；此时终局链内 in-flight 的 await save 尚未完成，mkdir 遇到目录链被
+// 并发删除 → ENOENT。原实现 await save 让错误
 // 冒泡为 unhandled promise rejection（worker-host onMessage 无 catch），CI exit 1。
 // 修复：save 仅容错 ENOENT（run 已终态，状态不再变化，持久化无意义也无法完成）→ silent return；
 // 非 ENOENT 错误（EACCES/ENOSPC 等真实磁盘问题）仍重新抛出，不掩盖。
@@ -461,23 +461,27 @@ describe("W3: JsonlRunStore.save 兜底容错（run 工作目录被并发清理�
   });
 });
 
-// ── W4-W8: save 去抖（cw swf-perf wave2，W2TC1-15）──────────────────────
+// ── W4-W8: 物化触发源（单一触发源合并后：热路径登记批 + 边沿物化 / 冷路径直通）──
 //
-// 状态机前提：热路径 = running 中间态且本实例已首写（writtenOnce 已记）→ 进去抖批；
-// 冷路径 = 本实例首写（任何 status）或 status !== "running"（done）→ 同步
-// flush 绕过 timer。所有用例先做一次冷路径首写 + await 落盘，再进热路径。
+// 状态机前提：热路径 = running 中间态且本实例已首写（writtenOnce 已记）→ 登记
+// pending 批（无 timer，物化 = 事件边沿取批）；冷路径 = 本实例首写（任何 status）
+// 或 isRunSettled 终局 → 同步 flush。所有用例先做一次冷路径首写 + await 落盘，
+// 再进热路径。合并裁定的行为差异：热路径 save 的 settle 由下一次物化兑现（不再
+// 有 200ms 自发 timer）——测试经 simulateJournalEdgeForTest seam + fake timers
+// advance 驱动物化，或 flushPendingSaves 直发。
 //
 // fake timers 惯例对齐 lifecycle.test.ts（vi.useFakeTimers + advanceTimersByTimeAsync）；
 // writeFile/mkdir 计数用 vi.spyOn 保留原实现（真实落盘，读磁盘断言内容）。
 
-describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
+describe("W4: 物化触发源（热路径批合并 / 冷路径同步 flush）", () => {
   let tmpDir: string;
   let store: JsonlRunStore;
 
   beforeEach(() => {
     vi.useFakeTimers();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-store-debounce-"));
-    store = new JsonlRunStore({ sessionDir: tmpDir });
+    // eventEdgeDebounceMs 200 = 原 save 去抖节奏（advance 200 断言保留可读）
+    store = new JsonlRunStore({ sessionDir: tmpDir, eventEdgeDebounceMs: 200 });
   });
 
   afterEach(() => {
@@ -486,26 +490,32 @@ describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("W2TC1: 热路径去抖合并：3 次 save 合并 1 次写盘、内容为 flush 时刻最新状态、零条目写", async () => {
+  it("W2TC1: 热路径批合并：3 次 save 登记同批、边沿一次物化（1 次写盘、最新状态、零条目写）", async () => {
     const entries: CustomEntry[] = [];
-    const store1 = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
+    const store1 = new JsonlRunStore({
+      sessionDir: tmpDir,
+      pi: mkPi(entries),
+      eventEdgeDebounceMs: 200,
+    });
     const run = makeRunningRun("run-w2tc1");
     // 首写冷路径立即落盘（writtenOnce 记录，热路径前提）
     await store1.save(run);
     const wfSpy = vi.spyOn(fs.promises, "writeFile");
 
-    // 热路径 3 次 save（同一 run 引用 mutate，中间态演进）
+    // 热路径 3 次 save（同一 run 引用 mutate，中间态演进）——登记同批，无自发物化
     run.state.trace.append(makeTraceNode(1));
     const p1 = store1.save(run);
     run.state.trace.append(makeTraceNode(2));
     const p2 = store1.save(run);
     const p3 = store1.save(run);
 
-    // advance 前：无写盘，文件停留首写状态（1 个节点）——去抖窗口内「崩溃」的
-    // 丢失边界 = 最后一次成功 flush（原 W2TC13 断言面并入）
+    // 边沿前：无写盘，文件停留首写状态（1 个节点）——未物化窗口内「崩溃」的
+    // 丢失边界 = 最后一次成功物化（原 W2TC13 断言面并入）
     expect(wfSpy).not.toHaveBeenCalled();
     expect(readStateFile(tmpDir, "run-w2tc1").state.trace).toHaveLength(1);
 
+    // 边沿取批：一次物化兑现批内全部 settle（防抖窗口 advance 推进）
+    store1.simulateJournalEdgeForTest("run-w2tc1");
     await vi.advanceTimersByTimeAsync(200);
     // 3 个 save() Promise 全部 resolved（await 落盘完成——fake timers 不等真实 IO）
     await Promise.all([p1, p2, p3]);
@@ -516,11 +526,12 @@ describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
     const steps = snap.state.trace.map((n) => n.stepIndex);
     expect(steps).toContain(1);
     expect(steps).toContain(2);
-    // [W1 / D1] 停写锚定（原 W2TC13 停写面并入）：热批 flush 落投影，条目通道零写
+    // [W1 / D1] 停写锚定（原 W2TC13 停写面并入）：热批物化落投影，条目通道零写
     expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(0);
+    await store1.dispose();
   });
 
-  it("W2TC2: 终态 save 绕过 timer 立即落盘：合并 pending 批 + 取消 timer 无二次写", async () => {
+  it("W2TC2: 终态 save 立即落盘：取走已登记 pending 批合并 settle，批清后无二次写", async () => {
     const run = makeRunningRun("run-w2tc2");
     await store.save(run); // 首写
     const wfSpy = vi.spyOn(fs.promises, "writeFile");
@@ -532,10 +543,10 @@ describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
     await p1;
     await p2;
 
-    // 不 advance（timer 未走）：终态已落盘
+    // 不 advance（边沿未调度）：终态已落盘
     expect(readStateFile(tmpDir, "run-w2tc2").state.status).toBe("done");
 
-    // timer 已取消：advance 后无第二次写，终态内容不被中间态覆盖
+    // 批已被终态 save 取走（且无自发 timer）：advance 后无第二次写，终态内容不被中间态覆盖
     await vi.advanceTimersByTimeAsync(1000);
     expect(wfSpy).toHaveBeenCalledTimes(1);
     expect(readStateFile(tmpDir, "run-w2tc2").state.status).toBe("done");
@@ -555,7 +566,7 @@ describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
     expect(readStateFile(tmpDir, "run-w2tc3b").state.status).toBe("done");
   });
 
-  it("W2TC7: 终态冷路径同步 flush：立即落盘（绕过 timer）+ 零条目写（[W1] 停写锚定）", async () => {
+  it("W2TC7: 终态冷路径同步 flush：立即落盘（不等待边沿）+ 零条目写（[W1] 停写锚定）", async () => {
     const mockPi = mkPi();
     const store7 = new JsonlRunStore({ sessionDir: tmpDir, pi: mockPi });
     const run = makeRunningRun("run-w2tc7");
@@ -564,16 +575,16 @@ describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
 
     const pHot = store7.save(run); // 热路径批 pending
     run.transition("done", "completed");
-    await store7.save(run); // 终态冷路径
+    await store7.save(run); // 终态冷路径（取走热批）
 
-    // 不 advance 立即读磁盘：终态优先持久化（去抖窗口内的崩溃不吞终态）
+    // 不 advance 立即读磁盘：终态优先持久化（未物化窗口内的崩溃不吞终态）
     expect(readStateFile(tmpDir, "run-w2tc7").state.status).toBe("done");
     // 合并的热路径批 Promise 一并 resolved
     await pHot;
     // [W1 / D1] 停写锚定：全程零 workflow-record entry（恢复权威在 journal，
     // 条目只剩注册 + 终态两条 v2 小条目，写点不在 save 面）
     expect(mockPi.appendEntry).not.toHaveBeenCalled();
-    // advance 后无追加写
+    // advance 后无追加写（批已清 + 无边沿调度）
     await vi.advanceTimersByTimeAsync(1000);
     expect(mockPi.appendEntry).not.toHaveBeenCalled();
   });
@@ -597,24 +608,9 @@ describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
     expect(readStateFile(tmpDir, "run-w2tc8").state.trace).toHaveLength(2);
   });
 
-  it("W2TC15: saveDebounceMs 构造参数可调：短参数窗口生效", async () => {
-    const store50 = new JsonlRunStore({ sessionDir: tmpDir, saveDebounceMs: 50 });
-    const run = makeRunningRun("run-w2tc15");
-    await store50.save(run); // 首写
-    const wfSpy = vi.spyOn(fs.promises, "writeFile");
-
-    run.state.trace.append(makeTraceNode(1));
-    const p = store50.save(run);
-    await vi.advanceTimersByTimeAsync(49);
-    expect(wfSpy).not.toHaveBeenCalled(); // 窗口未到
-    await vi.advanceTimersByTimeAsync(1);
-    await p; // flush 落盘完成
-    expect(wfSpy).toHaveBeenCalledTimes(1); // 50ms 参数生效
-  });
-
   it("高频 running flush：零条目写，state 文件每次 flush 照写最新投影（[W1 / D1] 停写锚）", async () => {
-    // 原 throttle 件并入：原节流通道（O(n²) 防线）随停写退役——flush 直发（绕开
-    // 去抖 timer），fs 真实 IO 不受 fake timers 影响
+    // 原 throttle 件并入：原节流通道（O(n²) 防线）随停写退役——flush 直发
+    //（flushPendingSaves 取批，绕开边沿防抖），fs 真实 IO 不受 fake timers 影响
     const entries: CustomEntry[] = [];
     const storeHi = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
     const run = makeRunningRun("run-w2tc-throttle-hi");
@@ -622,7 +618,7 @@ describe("W4: save 去抖（热路径合并 / 冷路径同步 flush）", () => {
     await storeHi.save(run); // 冷路径首写
     for (let i = 0; i < 10; i++) {
       run.state.trace.append({ stepIndex: i + 1, agent: "a", task: "t", model: "m", status: "pending" });
-      const p = storeHi.save(run); // 热路径入去抖批
+      const p = storeHi.save(run); // 热路径登记批
       await storeHi.flushPendingSaves(); // 直发 flush
       await p;
     }
@@ -656,7 +652,7 @@ describe("W5: 批 settle 与 IO 错误语义", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-store-ioerr-"));
-    store = new JsonlRunStore({ sessionDir: tmpDir });
+    store = new JsonlRunStore({ sessionDir: tmpDir, eventEdgeDebounceMs: 200 });
   });
 
   afterEach(() => {
@@ -674,15 +670,17 @@ describe("W5: 批 settle 与 IO 错误语义", () => {
 
     const p1 = store.save(run);
     const p2 = store.save(run); // 同批两次调用
+    store.simulateJournalEdgeForTest("run-w2tc4"); // 边沿取批物化
     await vi.advanceTimersByTimeAsync(200);
     // 批内全部 Promise rejects 同一错误（EACCES 消息传播）
     await expect(p1).rejects.toThrow("permission denied");
     await expect(p2).rejects.toThrow("permission denied");
 
-    // 失败不粘滞：pending Map 条目已清除，下一 save 开新批正常 flush 成功
+    // 失败不粘滞：pending 批已清除，下一 save 开新批正常物化成功
     //（含失败后的中间态演进内容——原 W2TC11b「链上前序失败不传染后续批」断言并入）
     run.state.trace.append(makeTraceNode(1));
     const p3 = store.save(run);
+    store.simulateJournalEdgeForTest("run-w2tc4");
     await vi.advanceTimersByTimeAsync(200);
     await p3;
     expect(readStateFile(tmpDir, "run-w2tc4").state.status).toBe("running");
@@ -702,14 +700,14 @@ describe("W5: 批 settle 与 IO 错误语义", () => {
     await expect(store4.save(run)).rejects.toThrow("permission denied");
     expect(mockPi.appendEntry).not.toHaveBeenCalled(); // 停写锚定：失败路径亦零条目
 
-    // 恢复 IO 后 running 中间态 save：不经 timer 立即落盘（首写资格已回滚，冷路径重写）
+    // 恢复 IO 后 running 中间态 save：立即落盘（首写资格已回滚，重走冷路径直通重写）
     const p = store4.save(run);
     await p; // 冷路径同步 flush 完成
     expect(readStateFile(tmpDir, "run-w2tc4b").state.status).toBe("running");
     expect(mockPi.appendEntry).not.toHaveBeenCalled();
   });
 
-  it("W2TC5: ENOENT 静默语义保留——热路径去抖批 mkdir ENOENT resolve 全部批 Promise", async () => {
+  it("W2TC5: ENOENT 静默语义保留——热路径登记批物化遇 mkdir ENOENT resolve 全部批 Promise", async () => {
     const run = makeRunningRun("run-w2tc5");
     await store.save(run); // 首写
     vi.spyOn(fs.promises, "mkdir").mockRejectedValueOnce(
@@ -719,6 +717,7 @@ describe("W5: 批 settle 与 IO 错误语义", () => {
     );
 
     const p1 = store.save(run); // 热路径批 pending
+    store.simulateJournalEdgeForTest("run-w2tc5"); // 边沿取批物化
     await vi.advanceTimersByTimeAsync(200);
     await p1; // resolved（不抛 unhandled rejection）
     // 无新写入：内容停留首写状态
@@ -740,9 +739,9 @@ describe("W6: flush 次数与停写锚定（save 级不放大）", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("W2TC6(W1): flush 计数 = 去抖批合并（N save → 1 flush）、全程零条目写、终态投影含 done", async () => {
+  it("W2TC6(W1): flush 计数 = 批合并（N save → 1 物化）、全程零条目写、终态投影含 done", async () => {
     const mockPi = mkPi();
-    const store6 = new JsonlRunStore({ sessionDir: tmpDir, pi: mockPi });
+    const store6 = new JsonlRunStore({ sessionDir: tmpDir, pi: mockPi, eventEdgeDebounceMs: 200 });
     const run = makeRunningRun("run-w2tc6");
     const wfSpy = vi.spyOn(fs.promises, "writeFile");
 
@@ -750,15 +749,16 @@ describe("W6: flush 次数与停写锚定（save 级不放大）", () => {
     await store6.save(run);
     expect(wfSpy).toHaveBeenCalledTimes(1);
 
-    // 3 轮 running 中间态：每轮窗口内 2 次 save（热路径批合并）→ 各 1 次 flush
+    // 3 轮 running 中间态：每轮窗口内 2 次 save（热路径批合并）→ 边沿 1 次物化
     for (let i = 1; i <= 3; i++) {
       run.state.trace.append(makeTraceNode(i));
       const p1 = store6.save(run);
       const p2 = store6.save(run);
+      store6.simulateJournalEdgeForTest("run-w2tc6");
       await vi.advanceTimersByTimeAsync(200);
       await Promise.all([p1, p2]);
     }
-    expect(wfSpy).toHaveBeenCalledTimes(4); // save 级不放大（2 save → 1 flush）
+    expect(wfSpy).toHaveBeenCalledTimes(4); // save 级不放大（2 save → 1 物化）
 
     // done 终态 flush → 1 次写盘，投影携带终态
     run.transition("done", "completed");
@@ -777,7 +777,7 @@ describe("W7: flushPendingSaves / dispose / 串行链", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-store-dispose-"));
-    store = new JsonlRunStore({ sessionDir: tmpDir });
+    store = new JsonlRunStore({ sessionDir: tmpDir, eventEdgeDebounceMs: 200 });
     loggerMock.debug.mockClear();
   });
 
@@ -802,13 +802,14 @@ describe("W7: flushPendingSaves / dispose / 串行链", () => {
     expect(readStateFile(tmpDir, "run-w2tc9b").state.trace).toHaveLength(2);
     await Promise.all([pa, pb]); // 两批 save Promise 全部 resolved
 
-    // store 保持可用：后续 save 正常进入新去抖批
+    // store 保持可用：后续 save 正常登记新批并可再次物化
     const pa2 = store.save(runA);
+    store.simulateJournalEdgeForTest("run-w2tc9a");
     await vi.advanceTimersByTimeAsync(200);
     await pa2;
   });
 
-  it("W2TC10: dispose 刷 pending + 停 timer + 幂等 + dispose 后 save 静默 no-op + debug 日志", async () => {
+  it("W2TC10: dispose 刷 pending + 停边沿 timer + 幂等 + dispose 后 save 静默 no-op + debug 日志", async () => {
     const run = makeRunningRun("run-w2tc10");
     await store.save(run); // 首写
     const wfSpy = vi.spyOn(fs.promises, "writeFile");
@@ -826,7 +827,7 @@ describe("W7: flushPendingSaves / dispose / 串行链", () => {
     expect(d3).toBe(d1); // 返回同一已 resolve 的 Promise
     await d3;
 
-    // timer 清除：advance 后无追加写
+    // timer 清除（边沿防抖 timer + 批已取走）：advance 后无追加写
     await vi.advanceTimersByTimeAsync(1000);
     expect(wfSpy).toHaveBeenCalledTimes(1);
 
@@ -886,13 +887,15 @@ describe("W7: flushPendingSaves / dispose / 串行链", () => {
     wfSpy.mockImplementationOnce(() => gate);
 
     run.state.trace.append(makeTraceNode(1));
-    const p1 = store.save(run); // save#1
-    await vi.advanceTimersByTimeAsync(200); // flush#1 触发，writeFile#1 挂起
+    const p1 = store.save(run); // save#1 登记批
+    store.simulateJournalEdgeForTest("run-w2tc11"); // 边沿调度 flush#1（唯一触发源）
+    await vi.advanceTimersByTimeAsync(200); // 防抖窗口到 → flush#1 触发，writeFile#1 挂起
     expect(wfSpy).toHaveBeenCalledTimes(1);
 
     run.state.trace.append(makeTraceNode(2));
     const p2 = store.save(run); // save#2 新批
-    await vi.advanceTimersByTimeAsync(200); // flush#2 timer 到点，排队等待 flush#1
+    store.simulateJournalEdgeForTest("run-w2tc11"); // 边沿调度 flush#2
+    await vi.advanceTimersByTimeAsync(200); // flush#2 防抖到点，排队等待 flush#1
     expect(wfSpy).toHaveBeenCalledTimes(1); // writeFile 仅 1 次（无并发）
 
     gateResolve(); // 释放 flush#1
@@ -903,7 +906,7 @@ describe("W7: flushPendingSaves / dispose / 串行链", () => {
     expect(readStateFile(tmpDir, "run-w2tc11").state.trace).toHaveLength(3);
   });
 
-  it("W2TC14: 不同 runId 批互不阻塞：并发 workflow 各自独立去抖", async () => {
+  it("W2TC14: 不同 runId 批互不阻塞：并发 workflow 各自独立 flush 链", async () => {
     const runA = makeRunningRun("run-w2tc14a");
     const runB = makeRunningRun("run-w2tc14b");
     await store.save(runA);
@@ -931,7 +934,7 @@ describe("W7: flushPendingSaves / dispose / 串行链", () => {
     runA.state.trace.append(makeTraceNode(1)); // 中间态演进（serialize-at-flush）
     runB.state.trace.append(makeTraceNode(1));
     const pb = store.save(runB); // runB 批
-    await vi.advanceTimersByTimeAsync(200);
+    void store.flushPendingSaves(); // 两批直发（各自独立链；runA 挂 gate 使本调用暂不返回）
     await pb; // runB 真实写盘完成
 
     // runA flush 挂起中，runB 已落盘（无全局锁，per-runId 独立链）
@@ -945,7 +948,7 @@ describe("W7: flushPendingSaves / dispose / 串行链", () => {
   });
 });
 
-describe("W8: 去抖窗口崩溃语义与 timer unref", () => {
+describe("W8: 触发源 timer 纪律（合并后唯一 timer 面 = 边沿防抖）", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -960,7 +963,7 @@ describe("W8: 去抖窗口崩溃语义与 timer unref", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("W2TC12: 去抖 timer 必须 unref（不钉住 extension 进程）", async () => {
+  it("W2TC12: save 侧零 timer（热路径只登记批）；边沿防抖 timer 必须 unref（不钉住 extension 进程）", async () => {
     const fakeTimer = { unref: vi.fn(), ref: vi.fn() };
     const setTimeoutSpy = vi.fn(() => fakeTimer);
     const clearTimeoutSpy = vi.fn();
@@ -968,23 +971,24 @@ describe("W8: 去抖窗口崩溃语义与 timer unref", () => {
     vi.stubGlobal("clearTimeout", clearTimeoutSpy);
 
     const run = makeRunningRun("run-w2tc12");
-    // 全程用同一 store50 实例：首写必须落在 store50 上（writtenOnce 是 per-instance，
-    // 用另一个实例首写会让本实例的 save 走冷路径，测不到建批 timer）
-    const store50 = new JsonlRunStore({ sessionDir: tmpDir, saveDebounceMs: 50 });
+    // 全程用同一 store 实例：首写必须落在本实例上（writtenOnce 是 per-instance，
+    // 用另一个实例首写会让本实例的 save 走冷路径，测不到热路径形态）
+    const store50 = new JsonlRunStore({ sessionDir: tmpDir, eventEdgeDebounceMs: 50 });
     await store50.save(run); // 首写冷路径：不经 timer
     expect(setTimeoutSpy).not.toHaveBeenCalled();
 
-    const p = store50.save(run); // 热路径建批
-    // setTimeout 以构造参数 50 被调用，返回的 timer unref() 恰 1 次
+    void store50.save(run); // 热路径只登记批（单一触发源合并：save 侧零 timer）
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+
+    // 边沿调度：防抖 timer 以构造参数 50 创建，unref() 恰 1 次——不钉进程的纪律
+    // 收敛到唯一剩余 timer 面（边沿防抖）
+    store50.simulateJournalEdgeForTest("run-w2tc12");
     expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 50);
     expect(fakeTimer.unref).toHaveBeenCalledTimes(1);
-
-    void store50.save(run); // 并入已有批：不重复创建 timer
-    expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
-    // 不 advance（timer 是 stub 假对象永不触发）；save Promise 由 store 实例持有，
+    // stub timer 永不触发：批与边沿调度均无物化；dispose 收尾（clearTimeout 走 stub 无害），
     // tmpDir 随 afterEach 清理，无悬挂写盘
-    void p;
+    await store50.dispose();
   });
 });
 
@@ -1029,8 +1033,8 @@ describe("W17/W1: workflow-record 条目面（零条目写锚定 + v2 收编读�
     const runId = "run-w17-terminal-flush";
 
     await storeT.save(makeRunningRun(runId));
-    const pHot = storeT.save(makeRunningRun(runId)); // 热路径入去抖批
-    await storeT.flushPendingSaves(); // 直发 flush（绕开去抖 timer）
+    const pHot = storeT.save(makeRunningRun(runId)); // 热路径登记批
+    await storeT.flushPendingSaves(); // 直发 flush（绕开边沿防抖）
     await pHot;
     expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(0);
 
@@ -1253,11 +1257,10 @@ describe("W17/W1: workflow-record 条目面（零条目写锚定 + v2 收编读�
 const GOLDEN_SNAPSHOT_LINE =
   '{"v":"wf-run-v2","runId":"wf-golden-noref","spec":{"scriptSource":"module.exports = async () => {};","args":{"topic":"demo"},"scriptName":"test-script","scriptPath":"/tmp/test.js","description":"test"},"state":{"status":"done","reason":"completed","budget":{"maxTokens":4096,"maxCost":1.5,"maxTimeMs":60000,"usedTokens":4321,"usedCost":0.42,"totalCallCount":3},"calls":[{"id":0,"opts":{"prompt":"task","agent":"worker","cwd":"/tmp"},"status":"done","attempts":1,"result":{"content":"done","sessionId":"session-abc","sessionFile":"/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl"},"sessionId":"session-abc","sessionFile":"/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl","traceNode":{"stepIndex":0,"agent":"worker","task":"do thing","model":"default","status":"completed","startedAt":"2026-08-30T00:00:01.000Z","completedAt":"2026-08-30T00:00:02.000Z","sessionId":"session-abc","sessionFile":"/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl"}}],"trace":[{"stepIndex":0,"agent":"worker","task":"do thing","model":"default","status":"completed","startedAt":"2026-08-30T00:00:01.000Z","completedAt":"2026-08-30T00:00:02.000Z","sessionId":"session-abc","sessionFile":"/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl"}],"errorLogs":[{"level":"warn","message":"worker retry 1"}],"scriptResult":{"ok":true}},"meta":{"startedAt":"2026-08-30T00:00:00.000Z","completedAt":"2026-08-30T00:00:03.000Z","workerErrorCount":1,"scriptErrorCount":0}}';
 
-function makeCodecSpec(withBudgetRef: boolean): RunSpec {
+function makeCodecSpec(): RunSpec {
   const spec: RunSpec = {
     scriptSource: "module.exports = async () => {};",
     args: { topic: "demo" },
-    ...(withBudgetRef ? { budgetRef: new Budget({ maxTokens: 999 }) } : {}),
     scriptName: "test-script",
     scriptPath: "/tmp/test.js",
     description: "test",
@@ -1270,7 +1273,7 @@ function makeCodecSpec(withBudgetRef: boolean): RunSpec {
  * [H2 W3] 原「含 live 字段」构造随 ExecutionTraceNode.live 字段退役删除——节点
  * 不再携带运行期附属对象（设计 D2），golden 行（本就无 live 键）字节不变。
  */
-function makeDoneRunWithLive(runId: string, withBudgetRef: boolean): WorkflowRun {
+function makeDoneRunWithLive(runId: string): WorkflowRun {
   const sessionFile = "/abs/.pi/agent/subagents/enc/sessions/2026-07-15T_session-abc.jsonl";
   const node = {
     stepIndex: 0,
@@ -1293,7 +1296,7 @@ function makeDoneRunWithLive(runId: string, withBudgetRef: boolean): WorkflowRun
 
   return WorkflowRun.reconstruct(
     runId,
-    makeCodecSpec(withBudgetRef),
+    makeCodecSpec(),
     {
       status: "done",
       reason: "completed",
@@ -1340,30 +1343,15 @@ describe("⛔5: 快照往返与实施前逐字节一致（codec 切换 D4）", (
     const entries: CustomEntry[] = [];
     const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
 
-    await store.save(makeDoneRunWithLive("wf-golden-noref", false));
+    await store.save(makeDoneRunWithLive("wf-golden-noref"));
 
     expect(readStateLine(tmpDir, "wf-golden-noref")).toBe(GOLDEN_SNAPSHOT_LINE);
   });
 
-  it("spec.budgetRef 剔除（codec 单源裁决的投影差异）：落盘 = 无 budgetRef 同构形态", async () => {
-    // 嵌套 run 的 spec.budgetRef 是进程内共享引用（非持久化数据）——codec 剔除后
-    // 落盘字节 = 同 run 去 budgetRef 形态（仅 runId 不同）。钉住防无意回退。
-    const entries: CustomEntry[] = [];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
-
-    await store.save(makeDoneRunWithLive("wf-golden-ref", true));
-
-    const goldenWithRefStripped = GOLDEN_SNAPSHOT_LINE.replace(
-      '"runId":"wf-golden-noref"',
-      '"runId":"wf-golden-ref"',
-    );
-    expect(readStateLine(tmpDir, "wf-golden-ref")).toBe(goldenWithRefStripped);
-    const parsed: unknown = JSON.parse(readStateLine(tmpDir, "wf-golden-ref"));
-    if (typeof parsed !== "object" || parsed === null) throw new Error("not an object");
-    const spec = (parsed as { spec: Record<string, unknown> }).spec;
-    expect("budgetRef" in spec).toBe(false);
-  });
+  // 【spec.budgetRef 剔除用例已删除】RunSpec.budgetRef 字段（嵌套 workflow() 的
+  // 进程内 Budget 共享引用）随该 API 退役删除——spec 中不再存在需剔除的字段。
 });
+
 
 // ── D4 投影重发保序（自 adoption 件并入——被测对象是 JsonlRunStore 串行链）────
 
@@ -1418,7 +1406,7 @@ describe("D4 投影重发保序：窗口内终态 → state 投影终态收敛�
     }
   });
 
-  it("in-flight 去抖批与重发同链竞争：done 恒为 state 投影的最后落盘形态（done 之后无更旧状态）", async () => {
+  it("in-flight 登记批与重发同链竞争：done 恒为 state 投影的最后落盘形态（done 之后无更旧状态）", async () => {
     const entriesOld: CustomEntry[] = [];
     const entriesNew: CustomEntry[] = [];
     const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-adopt-order2-"));
@@ -1427,11 +1415,12 @@ describe("D4 投影重发保序：窗口内终态 → state 投影终态收敛�
         sessionDir,
         pi: mkPi(entriesOld),
         ctx: mkCtx([]),
-        saveDebounceMs: 200,
+        eventEdgeDebounceMs: 200,
       });
       const run = makeRunningRun("wf-order-2");
       await store.save(run); // 冷路径：running 投影落盘
-      const pHot = store.save(run); // 热路径并入去抖批（timer 未推进）
+      const pHot = store.save(run); // 热路径登记批（边沿未推进，未物化）
+      store.simulateJournalEdgeForTest("wf-order-2"); // 边沿调度（防抖窗口未到）
 
       // reload 窗口：rebind + 两次投影重发（重发#1 时 run 尚 running，随后窗口内终态）
       const piNew = mkPi(entriesNew);
@@ -1440,7 +1429,7 @@ describe("D4 投影重发保序：窗口内终态 → state 投影终态收敛�
       const p1 = store.resendSnapshots(runs);
       run.transition("done", "completed");
       const p2 = store.resendSnapshots(runs);
-      vi.advanceTimersByTime(200); // 去抖批到期，挂同一串行链尾
+      vi.advanceTimersByTime(200); // 边沿防抖到期，批取走挂同一串行链尾
       await Promise.all([pHot, p1, p2]);
 
       // 保序红线：终态恒为该 runId 投影的最后落盘形态——绕链直接写会与 in-flight

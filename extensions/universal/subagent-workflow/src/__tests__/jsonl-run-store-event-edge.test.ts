@@ -1,6 +1,6 @@
 // src/__tests__/jsonl-run-store-event-edge.test.ts
 //
-// [P3/D6] 事件边沿 flush（快照投影增强）单测。
+// [P3/D6] 事件边沿 flush（快照投影增强）单测 + 单一触发源合并锚。
 //
 // 锁定的语义：
 // - fold 投影：每次 flush 经 core projectRunEvents 从同目录 journal 增量喂入
@@ -9,7 +9,12 @@
 // - 无 journal（旧 run 形态）→ 未富集投影（缺省渲染前提，字节面无新键）；
 // - 事件边沿防抖合并：窗口内 N 次边沿只触发 1 次 flush（固定窗口，writeFile 计数法
 //   ——[W1] 条目通道停写后 flush 计数面收敛到 state 写盘）；
-// - fs.watch 真实接线：journal 文件 append（模拟 pump 落账）→ 防抖后 state 文件更新。
+// - fs.watch 真实接线：journal 文件 append（模拟 pump 落账）→ 防抖后 state 文件更新；
+// - 单一触发源（合并批次）：物化唯一去抖窗口 = 边沿防抖——热路径 save 只登记
+//   pending 批（无独立 timer、不自发物化），边沿取批一次物化兑现批内全部 settle；
+// - 降级直通：watcher 不可用/运行期失效（watcherBroken）/ 禁用（watchJournalEdges=
+//   false）时热路径 save 直通 flush——边沿退役后物化时机由 save 承担，不丢；
+//   置位瞬间已登记批由降级补偿直通兑现。
 //
 // 时间：真实 timers + 注入小防抖窗口（eventEdgeDebounceMs: 5）——fake timers 不
 // 控制 fs.watch 真实事件与真实 IO，edge 路径统一走 waitFor 轮询；防抖合并的确定性
@@ -19,6 +24,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { EventEmitter } from "node:events";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -194,6 +200,101 @@ describe("JsonlRunStore 事件边沿 flush（[P3/D6] + [W1] 停写锚定）", ()
     store.simulateJournalEdgeForTest(runId);
     await new Promise((r) => setTimeout(r, EDGE_DEBOUNCE_MS * 4));
     expect(wfSpy.mock.calls.length).toBe(baseline); // 无新 flush
+    await store.dispose();
+  });
+
+  it("批合并 settle：热路径多次 save 登记同批（不自发物化），边沿一次物化兑现全部", async () => {
+    const store = makeStore();
+    const runId = "wf-edge-batch";
+    const run = makeRun(runId);
+    await store.save(run); // 冷路径首写
+    const wfSpy = vi.spyOn(fs.promises, "writeFile");
+    const baseline = wfSpy.mock.calls.length;
+
+    run.state.trace.append({ stepIndex: 1, agent: "a", task: "t", model: "m", status: "pending" });
+    const p1 = store.save(run); // 热路径登记批（单一触发源：无 timer、不自发物化）
+    run.state.trace.append({ stepIndex: 2, agent: "a", task: "t", model: "m", status: "pending" });
+    const p2 = store.save(run); // 并入同批（latestRun 更新）
+    const p3 = store.save(run); // 并入同批
+
+    // 防回归锚：save 侧零 timer——无边沿则无物化（4 倍防抖窗口时长内零写盘）
+    await new Promise((r) => setTimeout(r, EDGE_DEBOUNCE_MS * 4));
+    expect(wfSpy.mock.calls.length).toBe(baseline);
+
+    // 边沿取批：一次物化兑现批内全部 settle + serialize-at-flush（最新状态一次落盘）
+    store.simulateJournalEdgeForTest(runId);
+    await Promise.all([p1, p2, p3]);
+    expect(wfSpy.mock.calls.length).toBe(baseline + 1);
+    const state = readStateSnapshot(tmpDir, runId).state as { trace: Array<{ stepIndex: number }> };
+    expect(state.trace.map((n) => n.stepIndex)).toEqual(expect.arrayContaining([1, 2]));
+    await store.dispose();
+  });
+
+  it("watcher 建立即失败降级：热路径 save 直通 flush（边沿退役后物化时机不丢）", async () => {
+    // fs.watch 构造即抛错 → 首写冷路径的 ensureJournalWatcher 降级置位（watcherBroken）
+    vi.spyOn(fs, "watch").mockImplementation(() => {
+      throw new Error("fs.watch unavailable (simulated platform limitation)");
+    });
+    const store = makeStore();
+    const runId = "wf-edge-degraded";
+    const run = makeRun(runId);
+    await store.save(run); // 冷路径首写（此刻 watcher 降级已置位）
+    let state = readStateSnapshot(tmpDir, runId).state as Record<string, unknown>;
+    expect(state.health).toBeUndefined();
+
+    // 热路径 save：降级直通——不经 seam / 防抖窗口，await 返回即已落盘（含 fold）
+    appendJournalEvent(tmpDir, runId, {
+      type: "ask-dispatched", taskIndex: 0, agentName: "a0", attempt: 1, ts: 1000,
+    });
+    await store.save(run);
+    state = readStateSnapshot(tmpDir, runId).state as Record<string, unknown>;
+    expect(state.health).toEqual({ lastProgressAt: 1000 });
+    await store.dispose();
+  });
+
+  it("watcher 运行期失效降级：置位瞬间已登记批直通兑现（降级补偿不丢物化）", async () => {
+    // fake watcher（可手动 emit error，模拟平台 watcher 级故障——句柄失效/目录被删；
+    // close = FSWatcher 接口面，降级路径 closeJournalWatcher 会调）
+    const fakeWatcher = new EventEmitter() as EventEmitter & { close: () => void };
+    fakeWatcher.close = () => {};
+    const watchSpy = vi.spyOn(fs, "watch").mockReturnValue(fakeWatcher as unknown as fs.FSWatcher);
+    const store = makeStore();
+    const runId = "wf-edge-degrade-mid";
+    const run = makeRun(runId);
+    await store.save(run); // 冷路径首写（watcher 以 fake 实例建立）
+    expect(watchSpy).toHaveBeenCalled();
+
+    const wfSpy = vi.spyOn(fs.promises, "writeFile");
+    const baseline = wfSpy.mock.calls.length;
+    const p1 = store.save(run); // 热路径登记批（此刻边沿可用形态）
+    fakeWatcher.emit("error", new Error("watcher handle broken")); // 运行期失效
+    await p1; // 降级补偿直通兑现（不依赖边沿 seam / 防抖窗口）
+    expect(wfSpy.mock.calls.length).toBe(baseline + 1);
+
+    // 置位后热路径 save 持续直通（单向降级，不再产生登记批）
+    await store.save(run);
+    expect(wfSpy.mock.calls.length).toBe(baseline + 2);
+    await store.dispose();
+  });
+
+  it("watchJournalEdges=false：边沿面整体禁用，热路径 save 直通 flush", async () => {
+    const store = new JsonlRunStore({
+      sessionDir: tmpDir,
+      eventEdgeDebounceMs: EDGE_DEBOUNCE_MS,
+      watchJournalEdges: false,
+    });
+    const runId = "wf-edge-disabled";
+    const run = makeRun(runId);
+    await store.save(run); // 冷路径首写
+    const wfSpy = vi.spyOn(fs.promises, "writeFile");
+    const baseline = wfSpy.mock.calls.length;
+    appendJournalEvent(tmpDir, runId, {
+      type: "ask-dispatched", taskIndex: 0, agentName: "a0", attempt: 1, ts: 1000,
+    });
+    await store.save(run); // 热路径直通（禁用形态不登记批——物化时机由 save 承担）
+    expect(wfSpy.mock.calls.length).toBe(baseline + 1);
+    const state = readStateSnapshot(tmpDir, runId).state as Record<string, unknown>;
+    expect(state.health).toEqual({ lastProgressAt: 1000 });
     await store.dispose();
   });
 });

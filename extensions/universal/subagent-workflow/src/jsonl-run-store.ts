@@ -29,11 +29,14 @@
  *   flush 物化投影（时机加密到事件边沿；物化对象 = state 文件，无条目写放大面）。
  *   本 store 不消费任何节流设施（state 覆盖写无累积，无需节流）。
  *
- * save 去抖语义（cw swf-perf wave2，不变）：
- * - **热路径**（running 中间态，本实例已写过）：per-runId pending 批合并——窗口内
- *   N 次 save 只落盘 1 次（serialize-at-flush：写 flush 时刻最新聚合状态）。
- * - **冷路径**（本实例对该 runId 首写，或 status !== "running" 即 done）：
- *   同步挂链 flush 绕过 timer。
+ * 物化触发源（单一触发源合并：事件边沿为主，save 直通只留冷路径）：
+ * - **冷路径**（本实例对该 runId 首写，或 isRunSettled 即终局）：同步挂链 flush
+ *   立即物化——首写与终态投影不等待边沿（终态及时落盘，去抖窗口内的崩溃不吞终态）。
+ * - **热路径**（running 中间态，本实例已写过）：只更新内存聚合 + 登记 pending 批
+ *   （批内 N 次 save 由下一次物化一起落盘 1 次——serialize-at-flush：写 flush 时刻
+ *   最新聚合状态），物化时机 = 事件边沿（watcher 正常时 save 不再起独立去抖 timer）。
+ * - **降级直通**（watcher 失效/禁用）：边沿触发退役后物化时机由 save 自身承担——
+ *   热路径 save 立即直通 flush（降级补偿：置位瞬间已登记的批一并直通兑现）。
  * - per-runId 串行 flush 链：同 runId 的 flush 排队顺序执行（不跳过、永不并发
  *   writeFile），链尾吞错防断链——错误只经各 save() Promise 的 settlers 传播。
  * - dispose()：幂等（缓存自身 Promise）；刷全部 pending 批 + await 全部 in-flight
@@ -209,17 +212,9 @@ export interface RunSettlementRecord {
 const logger = getLogger("subagents");
 
 /**
- * save 去抖窗口默认值（ms）。区间 100-250 内取值——agent-call 间隔秒级，
- * 200ms 足以合并同一 call 周期内的多次状态 mutation，又不至于让崩溃窗口
- * （未 flush 的 running 尾部丢失，等价崩溃链由 kill-9 恢复收编）明显放大。
- * 模块私有：无外部消费方（构造参数 saveDebounceMs 可调窗口，测试经其注入）。
- */
-const DEFAULT_SAVE_DEBOUNCE_MS = 200;
-
-/**
- * [P3/D6] 事件边沿 flush 的防抖窗口默认值（ms）。物化时机从「agent 完成」
- * 加密到「事件边沿」：journal append 经 fs.watch 感知后按本窗口合并触发 flush，
- * state 投影（calls[].startedAt/lastProgressAt、health、outcome/errorCode——
+ * [P3/D6] 事件边沿 flush 的防抖窗口默认值（ms）——物化的唯一去抖窗口（单一触发源
+ * 合并后 save 侧无独立 timer）：journal append 经 fs.watch 感知后按本窗口合并触发
+ * flush，state 投影（calls[].startedAt/lastProgressAt、health、outcome/errorCode——
  * projectRunEvents fold）在事件落账后 ≤1s 内进入 state 文件（固定窗口合并不
  * 重置 timer；超标上调通道 = 构造参数 eventEdgeDebounceMs）。
  * 模块私有：无外部消费方（测试经构造参数注入小窗口）。
@@ -227,17 +222,13 @@ const DEFAULT_SAVE_DEBOUNCE_MS = 200;
 const DEFAULT_EVENT_EDGE_DEBOUNCE_MS = 1000;
 
 /**
- * per-runId 去抖批。窗口内 N 次 save 合并：latestRun 保留最新聚合引用
- * （serialize-at-flush），settlers 收集批内全部 save() 调用方的 settle 回调。
+ * per-runId pending 批。窗口内 N 次热路径 save 合并为一次物化：latestRun 保留
+ * 最新聚合引用（serialize-at-flush），settlers 收集批内全部 save() 调用方的 settle
+ * 回调（一次物化时一起兑现）。批自身无 timer——物化由事件边沿驱动（单一触发源），
+ * 降级路径（watcher 失效/禁用）下 save 直通 flush，批只在边沿可用时存在。
  */
 interface PendingSaveBatch {
   latestRun: WorkflowRun;
-  /**
-   * 批的去抖 timer（构造时即确定——经 {@link JsonlRunStore.armPendingBatch} 工厂
-   * 内联组装，timer 与批对象在同一同步段成型，类型上不存在「先构造后赋值」的
-   * 可选窗口）。
-   */
-  timer: NodeJS.Timeout;
   settlers: Array<{ resolve: () => void; reject: (e: unknown) => void }>;
 }
 
@@ -248,8 +239,6 @@ interface JsonlRunStoreOptions {
   pi?: ExtensionAPI;
   /** Pi ExtensionContext for sessionManager.getEntries (optional for testing). */
   ctx?: ExtensionContext;
-  /** save 去抖窗口（ms），默认 {@link DEFAULT_SAVE_DEBOUNCE_MS}。 */
-  saveDebounceMs?: number;
   /**
    * [P3/D6] 事件边沿 flush 防抖窗口（ms），默认 {@link DEFAULT_EVENT_EDGE_DEBOUNCE_MS}。
    * 测试经此注入小窗口（fake timers 推进）。
@@ -289,8 +278,7 @@ export class JsonlRunStore implements RunStore {
    */
   private pi?: Pick<ExtensionAPI, "appendEntry">;
   private ctx?: ExtensionContext;
-  private readonly saveDebounceMs: number;
-  /** [P3/D6] 事件边沿 flush 防抖窗口（ms）。 */
+  /** [P3/D6] 事件边沿 flush 防抖窗口（ms）——唯一的去抖窗口（单一触发源）。 */
   private readonly eventEdgeDebounceMs: number;
   /**
    * [P3/D6] 本实例活跃 run 的最新聚合引用（running 态才保留，终局即删）——
@@ -302,9 +290,9 @@ export class JsonlRunStore implements RunStore {
   private readonly pendingEdgeFlushes = new Map<string, NodeJS.Timeout>();
   /**
    * [P3/D6] journal 目录 watcher（事件边沿感知）。惰性开（首次 doFlush 后目录
-   * 必存在）；失败一次性降级（watcherBroken = 边沿触发退役，flush 时机回落
-   * 「agent 完成」的 pump save 链——辅助功能降级不拖垮持久化主链）。
-   * persistent:false = 不钉住 extension 进程空转（对齐去抖 timer unref 纪律）。
+   * 必存在）；失败一次性降级（watcherBroken = 边沿触发退役，热路径 save 直通
+   * flush 承担物化时机——辅助功能降级不拖垮持久化主链）。
+   * persistent:false = 不钉住 extension 进程空转（对齐防抖 timer unref 纪律）。
    */
   private journalWatcher: fs.FSWatcher | undefined;
   private journalWatcherBroken = false;
@@ -319,7 +307,7 @@ export class JsonlRunStore implements RunStore {
    * 全量事件流重放，增量 chunk 追加进本累积；截断/重建时整体替换）。有界性同上。
    */
   private readonly journalEventsByRun = new Map<string, WorkflowRunEvent[]>();
-  /** per-runId 去抖批（热路径）。 */
+  /** per-runId pending 批（热路径登记，事件边沿物化时取走兑现）。 */
   private readonly pending = new Map<string, PendingSaveBatch>();
   /** 本实例已至少成功发起过一次 flush 的 runId（冷/热路径判据）。 */
   private readonly writtenOnce = new Set<string>();
@@ -337,7 +325,6 @@ export class JsonlRunStore implements RunStore {
     this.sessionDir = opts.sessionDir;
     this.pi = opts.pi;
     this.ctx = opts.ctx;
-    this.saveDebounceMs = opts.saveDebounceMs ?? DEFAULT_SAVE_DEBOUNCE_MS;
     this.eventEdgeDebounceMs = Math.max(0, opts.eventEdgeDebounceMs ?? DEFAULT_EVENT_EDGE_DEBOUNCE_MS);
     this.watchJournalEdges = opts.watchJournalEdges ?? true;
   }
@@ -389,10 +376,12 @@ export class JsonlRunStore implements RunStore {
   /**
    * Persist a single run: rewrite mode (overwrite) — state 文件恒为最新完整投影。
    *
-   * 去抖路由：
-   * - 冷路径（本实例首写，或 status !== "running"）→ 立即挂链 flush（绕过 timer），
-   *   回滚资格 = 首写（flush 失败时 doFlush 回滚 writtenOnce，下次 save 重走冷路径）；
-   * - 热路径（running 且已写过）→ 并入 per-runId 去抖批（固定窗口不重置 timer）。
+   * 触发源路由（单一触发源：事件边沿为主物化，save 直通只留冷路径）：
+   * - 冷路径（本实例首写，或 isRunSettled 终局）→ 立即挂链 flush（不等待边沿——
+   *   首写与终态投影及时落盘），回滚资格 = 首写（flush 失败时 doFlush 回滚
+   *   writtenOnce，下次 save 重走冷路径）；
+   * - 热路径（running 且已写过）→ 边沿可用时只登记 pending 批（物化 = 事件边沿
+   *   取批 flush）；降级（watcher 失效/禁用）时直通 flush。
    *
    * Promise 语义：本批实际落盘后 resolve（同批多次调用共享 settle）；IO 错误
    * （非 ENOENT）reject 本批全部调用方；ENOENT 静默 resolve（工作目录已被清理，
@@ -431,20 +420,20 @@ export class JsonlRunStore implements RunStore {
       // ENOENT 边界：首写 flush 遇 ENOENT 时 state 未写但 writtenOnce 已记——
       // sessionDir 已删场景持久化无意义，接受（非 ENOENT 失败由 doFlush 回滚，重走冷路径）。
       this.writtenOnce.add(runId);
-      // 原子取走 pending 批（终态与最后一个 agent-call 的 debounced save 交错时，
-      // pending 批 settlers 并入本次同步 flush 的批合并 settle，timer 取消防二次写）。
+      // 原子取走 pending 批（终态与最后一个 agent-call 的登记 save 交错时，
+      // pending 批 settlers 并入本次同步 flush 的批合并 settle——终局 flush 是
+      // 该批的最后物化，链内保序防中间态后写覆盖终态）。
       const batch = this.pending.get(runId);
-      if (batch) {
-        clearTimeout(batch.timer);
-        this.pending.delete(runId);
-      }
+      if (batch) this.pending.delete(runId);
       return this.enqueueFlush(runId, run, batch ? batch.settlers : [], isFirstWrite);
     }
 
-    // 热路径：running 中间态，并入去抖批
+    // 热路径：running 中间态。单一触发源分流（见类头注触发源拓扑）：边沿可用 →
+    // 只登记 pending 批（物化时机 = 事件边沿取批 flush）；降级（watcher 失效/禁用）
+    // → save 直通 flush（边沿触发退役后物化时机由 save 自身承担，不丢）。
     const existing = this.pending.get(runId);
     if (existing) {
-      // latestRun 更新（固定窗口不重置 timer——flush 延迟有界 ≤saveDebounceMs）
+      // latestRun 更新（serialize-at-flush：批内多次 save 由下一次物化一起落盘）
       existing.latestRun = run;
       return new Promise<void>((resolve, reject) => {
         existing.settlers.push({ resolve, reject });
@@ -454,39 +443,23 @@ export class JsonlRunStore implements RunStore {
     const promise = new Promise<void>((resolve, reject) => {
       settlers.push({ resolve, reject });
     });
-    this.pending.set(runId, this.armPendingBatch(runId, run, settlers));
+    if (this.edgeTriggerAvailable) {
+      this.pending.set(runId, { latestRun: run, settlers });
+    } else {
+      // 直通 flush：错误只经 settlers 传播给 save() 调用方（fire-and-forget + catch），
+      // 此处 catch 防止 unhandled rejection（enqueueFlush 链尾已吞错）。
+      this.enqueueFlush(runId, run, settlers, false).catch(() => {});
+    }
     return promise;
   }
 
   /**
-   * 构造去抖批（[review 修复] 工厂内联组装：timer 与批对象在同一同步段成型，
-   * PendingSaveBatch.timer 保持非可选——消除「批先构造、timer 后赋值」靠注释维持
-   * 的可选窗口）。timer 回调闭包经局部 batch 变量持批引用做身份守卫（ES3）。
+   * 事件边沿触发源是否可用（热路径 save 能否只登记批等边沿物化）。watcher 禁用
+   * （watchJournalEdges=false，测试隔离形态）或已失效（watcherBroken 降级）时为
+   * false——此时热路径 save 直通 flush 承担物化时机。
    */
-  private armPendingBatch(
-    runId: string,
-    run: WorkflowRun,
-    settlers: PendingSaveBatch["settlers"],
-  ): PendingSaveBatch {
-    // timer 回调闭包经下方 const batch 持批引用做身份守卫——前向引用在运行时安全：
-    // 回调最早 saveDebounceMs 后才执行，届时 batch 已在本同步段尾部初始化完毕。
-    const timer = setTimeout(() => {
-      // ES3 幂等守卫（批身份比较）：回调闭包持自身批引用，与 pending Map 现值做
-      // 身份比较而非仅按键存在性判断。除「批已被冷路径/flushPendingSaves/dispose
-      // 原子取走（clearTimeout 与回调触发在 fake timers 下可能交错）」的交接语义外，
-      // 还防「旧 timer 撞新批」交错：本批被取走后同 runId 的新批已入 Map 时，若只看
-      // 键存在性，旧 timer 会误取走新批提前 flush（缩短新批去抖窗口）。身份不匹配
-      // 直接 return，批由取走方负责 flush。
-      if (this.pending.get(runId) !== batch) return;
-      this.pending.delete(runId);
-      // 孤儿 Promise（无调用方持有）：错误只经 settlers 传播给 save() 调用方，
-      // 此处 catch 防止 unhandled rejection。
-      this.enqueueFlush(runId, batch.latestRun, batch.settlers, false).catch(() => {});
-    }, this.saveDebounceMs);
-    // DS5：timer 必须 unref——不 unref 会钉住空转的 extension 进程不退出。
-    timer.unref();
-    const batch: PendingSaveBatch = { latestRun: run, timer, settlers };
-    return batch;
+  private get edgeTriggerAvailable(): boolean {
+    return this.watchJournalEdges && !this.journalWatcherBroken;
   }
 
   /**
@@ -632,18 +605,32 @@ export class JsonlRunStore implements RunStore {
         this.onJournalDirEvent(typeof filename === "string" ? filename : undefined);
       });
       this.journalWatcher.on("error", (err: unknown) => {
-        // 平台差异/目录被删等 watcher 级错误：降级退役（边沿触发 → pump save 链兜底）
-        this.journalWatcherBroken = true;
-        this.closeJournalWatcher();
-        logger.debug(
-          `[subagent-workflow] journal watcher error, event-edge flush degraded: ${toErrorMessage(err)}`,
-        );
+        // 平台差异/目录被删等 watcher 级错误：降级退役（边沿触发 → save 直通）
+        this.degradeJournalWatcher(err, "error");
       });
     } catch (err) {
-      this.journalWatcherBroken = true;
-      logger.debug(
-        `[subagent-workflow] journal watcher unavailable, event-edge flush degraded: ${toErrorMessage(err)}`,
-      );
+      this.degradeJournalWatcher(err, "unavailable");
+    }
+  }
+
+  /**
+   * watcher 一次性降级（单向：边沿触发退役后不复活）。降级补偿：置位瞬间已登记的
+   * pending 批全部直通 flush——这批 save 登记时边沿尚可用（只登记未物化），置位后
+   * 边沿事件源已死，不补偿则批内 settlers 悬挂到 dispose（物化时机丢失）。之后的
+   * 热路径 save 经 edgeTriggerAvailable 判定直通，不再产生新批。
+   */
+  private degradeJournalWatcher(err: unknown, variant: "error" | "unavailable"): void {
+    this.journalWatcherBroken = true;
+    this.closeJournalWatcher();
+    logger.debug(
+      `[subagent-workflow] journal watcher ${variant}, event-edge flush degraded: ${toErrorMessage(err)}`,
+    );
+    // dispose 收尾后无补偿面（批已被 doDispose 的 flushPendingSaves 取走，不再挂新链）
+    if (this.disposed) return;
+    for (const [runId, batch] of Array.from(this.pending.entries())) {
+      this.pending.delete(runId);
+      // 链尾吞错 + catch：错误只经 settlers 传播（同 timer 时代回调的孤儿防 unhandled 形态）
+      this.enqueueFlush(runId, batch.latestRun, batch.settlers, false).catch(() => {});
     }
   }
 
@@ -666,9 +653,10 @@ export class JsonlRunStore implements RunStore {
 
   /**
    * per-runId 固定窗口防抖调度（不重置 timer——事件突发只落 1 次 flush，
-   * 延迟有界 ≤eventEdgeDebounceMs，语义对齐 pending 批）。触发时以保留的活跃
-   * run 引用走既有串行链 flush（空 settlers——调用方无人 await，孤儿错误链尾吞）。
-   * [W2/V1 D1 第 8 行] 边沿 flush 的活跃判定换源 isRunSettled（原两态机 status
+   * 延迟有界 ≤eventEdgeDebounceMs）。触发时原子取走 pending 批（若有——批合并
+   * settle：一次物化兑现批内全部 save 调用方），以批/活跃 run 引用走既有串行链
+   * flush（空 settlers 时调用方无人 await，孤儿错误链尾吞）。
+   * [W2/V1 D1 第 8 行] 无批形态的活跃判定换源 isRunSettled（原两态机 status
    * recheck 随活体写点删除停更——终局后 activeRuns 已删，此处注册表级守卫防
    * 残留边沿对已终局 run 再 flush）。
    */
@@ -677,9 +665,17 @@ export class JsonlRunStore implements RunStore {
     const timer = setTimeout(() => {
       this.pendingEdgeFlushes.delete(runId);
       if (this.disposed) return;
-      const run = this.activeRuns.get(runId);
-      if (!run || this.isRunSettled(run)) return;
-      this.enqueueFlush(runId, run, [], false).catch(() => {});
+      // 批合并 settle：原子取走 pending 批（取批即交由本回调负责物化，防二次兑现）
+      const batch = this.pending.get(runId);
+      if (batch) this.pending.delete(runId);
+      const run = batch ? batch.latestRun : this.activeRuns.get(runId);
+      if (!run) return;
+      // 终局拦截只作用于无批形态（activeRuns 已回收/已终局 run 的残留边沿不 flush
+      // ——投影已终态，无 flush 意义）。有批形态不拦截：批内 settlers 必须由本次
+      // 物化兑现（拦截即悬挂）；批建立时 run 是 running 态，flush 时刻 journal 已有
+      // 终局帧则落终态投影合法，后续终局 save 的冷路径 flush 在串行链内保序收敛。
+      if (!batch && this.isRunSettled(run)) return;
+      this.enqueueFlush(runId, run, batch ? batch.settlers : [], false).catch(() => {});
     }, this.eventEdgeDebounceMs);
     timer.unref();
     this.pendingEdgeFlushes.set(runId, timer);
@@ -738,14 +734,13 @@ export class JsonlRunStore implements RunStore {
   }
 
   /**
-   * 立即刷全部 pending 去抖批（测试与排查的备用手段）。自身恒 resolve——IO 错误
+   * 立即刷全部 pending 批（测试与排查的备用手段）。自身恒 resolve——IO 错误
    * 已由各 save() Promise 的 settlers 传播给调用方。store 保持可用：不动 disposed
-   * 标志，后续 save 正常进入新去抖批。
+   * 标志，后续 save 正常按触发源路由（边沿可用登记新批 / 降级直通）。
    */
   async flushPendingSaves(): Promise<void> {
     const flushes: Promise<void>[] = [];
     for (const [runId, batch] of Array.from(this.pending.entries())) {
-      clearTimeout(batch.timer);
       this.pending.delete(runId);
       flushes.push(this.enqueueFlush(runId, batch.latestRun, batch.settlers, false));
     }
@@ -773,7 +768,7 @@ export class JsonlRunStore implements RunStore {
     // 在调用时同步执行到第一个 await，批收集发生在置位后的同一同步段，时序与
     // 折叠前的内联收集逐分支等值。
     this.disposed = true;
-    // [P3/D6] 事件边沿面收尾：清防抖 timer（挂起的边沿 flush 由下方 flushPendingSaves
+    // [P3/D6] 事件边沿面收尾：清边沿防抖 timer（挂起的边沿 flush 由下方 flushPendingSaves
     // 的终批覆盖语义兜住）+ 关 watcher（persistent:false 本不钉进程，主动关 = 纪律收尾）。
     for (const timer of this.pendingEdgeFlushes.values()) clearTimeout(timer);
     this.pendingEdgeFlushes.clear();

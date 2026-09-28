@@ -223,8 +223,11 @@ describe("workflow-state 保留清理（[W1 / D5] fold 终态 + 保留窗口，c
 
     const id = runIdAt(0);
     await store.save(makeRunningRun(id)); // 冷路径首写：触发一轮
-    // 同 runId 再 save（running 热路径）：并入去抖批不触发新维护轮（每 runId 一轮）
-    await store.save(makeRunningRun(id));
+    // 同 runId 再 save（running 热路径）：登记批 + 取批物化 flush（rollbackFirstWrite=false
+    // ——维护轮只在首写冷路径触发，热路径物化不重复触发维护轮，每 runId 一轮）
+    const hot = store.save(makeRunningRun(id));
+    await store.flushPendingSaves();
+    await hot;
 
     for (const name of bystanders) {
       expect(fs.existsSync(path.join(stateDir, name))).toBe(true);
