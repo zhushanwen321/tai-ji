@@ -31,10 +31,10 @@ export type { WorkflowMeta };
  * 内容也命中）。
  *
  * 重复点：registry.getPath/get 每次 new WorkflowScript（workflow-script-registry-impl），
- * launcher.ts runAndWait / executeNestedWorkflow（每 nested call）各 validate 一次，
- * 同脚本 N 次嵌套 = N 次全量正则 lint。失效语义：文件变更 → 内容值不等 → miss →
- * 重 lint 并覆写条目。等长前缀不同的内容比较在 V8 走指针/长度快路径 + memcmp，
- * 成本远低于正则 lint（TC9 alternatives 中「值键成本≈重 lint」的量级判断不成立）。
+ * 各消费方每次 validate 一次，同脚本多次校验 = 多次全量正则 lint。失效语义：文件变更 →
+ * 内容值不等 → miss → 重 lint 并覆写条目。等长前缀不同的内容比较在 V8 走指针/长度
+ * 快路径 + memcmp，成本远低于正则 lint（TC9 alternatives 中「值键成本≈重 lint」的
+ * 量级判断不成立）。
  */
 const lintMemo = new Map<string, { srcRef: string; result: LintResult }>();
 
@@ -89,8 +89,8 @@ export class WorkflowScript {
  * - result.output/parsedOutput/content 不存在
  * - 文件传状态警告
  *
- * IF9（#15）：同 path 且 sourceCode 引用相等 → 返回缓存 lint 结果（launcher 嵌套
- * 场景下 registry 重建实例的重复全量 lint 消除）；否则 lint + 覆写条目。
+ * IF9（#15）：同 path 且 sourceCode 引用相等 → 返回缓存 lint 结果（registry 重建
+ * 实例的重复全量 lint 消除）；否则 lint + 覆写条目。
  */
   validate(): LintResult {
     const memoized = lintMemo.get(this.path);

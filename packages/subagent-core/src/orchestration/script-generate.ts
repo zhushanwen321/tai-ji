@@ -64,7 +64,6 @@ export const WORKER_IIFE_HOST_DECLARED_NAMES = [
   "agent",
   "parallel",
   "pipeline",
-  "workflow",
 ] as const;
 
 /** generate 目录注入参数：tmp 落盘目录宿主注入（缺省 DEFAULT_WORKFLOW_TMP_DIR）。 */

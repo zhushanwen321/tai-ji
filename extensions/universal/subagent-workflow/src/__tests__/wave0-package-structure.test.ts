@@ -4,11 +4,13 @@
  * 验证新包 @zhushanwen/pi-subagent-workflow 的结构完整性：
  * - index.ts 导出工厂函数
  * - 3 tool + 2 command 注册正确
- * - pi.__workflowRun 可用
  * - 目录结构符合三层架构
  *
+ * （历史上含「挂载后暴露跨扩展编程 API」断言——该编程入口已随嵌套 workflow()
+ * 编排 API 退役删除，对应 mock 槽位与用例一并移除。）
+ *
  * [装载模型] 模块图（index.js 全图）beforeAll 静态加载一次，factory 对同一 mock api
- * 执行一次，6 用例共享同一份注册记录断言。各用例断言均为存在性形态（toContain /
+ * 执行一次，用例共享同一份注册记录断言。各用例断言均为存在性形态（toContain /
  * toBeDefined / length 下界），无「从零只有自己注册项」的隔离性断言，共享一份记录
  * 不改变任何断言语义。factory 幂等（D2b 稳定标识等价保留单例），单次执行即注册面
  * 全集。
@@ -42,7 +44,6 @@ function createMockExtensionAPI() {
       emit: vi.fn(),
       on: vi.fn(),
     },
-    __workflowRun: undefined as unknown,
   };
 
   return { api, tools, commands, eventHandlers, messageRenderers };
@@ -76,11 +77,6 @@ describe("wave-0: package structure merge", { timeout: 30000 }, () => {
 
   it("AC-1.1: registers subagent-bg-notify message renderer", () => {
     expect(mounted.messageRenderers).toContain("subagent-bg-notify");
-  });
-
-  it("AC-1.1: sets pi.__workflowRun", () => {
-    expect(mounted.api.__workflowRun).toBeDefined();
-    expect(typeof mounted.api.__workflowRun).toBe("function");
   });
 
   it("session_start handler registers SubagentService and ModelConfigService", () => {

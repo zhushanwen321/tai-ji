@@ -1075,7 +1075,6 @@ describe("isTerminalDoneReason", () => {
       completed: false,
       failed: true,
       aborted: true,
-      invalid_args: true,
       budget_limited: true,
       time_limited: true,
     };
@@ -1090,7 +1089,6 @@ describe("isTerminalDoneReason", () => {
       "completed",
       "failed",
       "aborted",
-      "invalid_args",
       "budget_limited",
       "time_limited",
     ];
@@ -1098,7 +1096,7 @@ describe("isTerminalDoneReason", () => {
   });
 });
 
-// ── [W2 D5] DoneReason → RunOutcome 映射表定稿（六值逐行全表）──────────────
+// ── [W2 D5] DoneReason → RunOutcome 映射表定稿（五值逐行全表）──────────────
 
 describe("doneReasonToRunOutcome 映射表定稿（[W2 D5] dispatch 链语境全表）", () => {
   // 期望表 = run-events.ts 映射注释定稿表的逐行镜像；err 面只断言 mapping 行，
@@ -1109,10 +1107,9 @@ describe("doneReasonToRunOutcome 映射表定稿（[W2 D5] dispatch 链语境全
     aborted: "cancelled", // 用户主动取消
     budget_limited: "failed", // 预算耗尽 = 用户视角的诚实失败归因（errorCode='budget_limited'）
     time_limited: "failed", // 活体墙钟预算超时 = 主动管理行为（errorCode='time_limited'）
-    invalid_args: "failed", // 参数校验失败——run 从未创建不落帧（不适用行，收录仅为映射穷尽）
   };
 
-  it("六值逐行与定稿表一致", () => {
+  it("五值逐行与定稿表一致", () => {
     for (const reason of ALL_DONE_REASONS) {
       expect(doneReasonToRunOutcome(reason)).toBe(expectedRows[reason]);
     }

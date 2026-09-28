@@ -6,8 +6,8 @@
 //
 // 为什么需要它：WorkflowRun 的 JSONL 快照投影此前两宿主各写一份（core
 // file-run-store.ts 的 toSnapshot/fromSnapshot 与 pi 壳 jsonl-run-store.ts 的
-// serializeRun/deserializeRun）——字段集一致但语义细节分叉（版本 guard、
-// budgetRef 剔除），修一处漏一处。本模块收敛为单源 codec：字段演进
+// serializeRun/deserializeRun）——字段集一致但语义细节分叉（版本 guard 等），
+// 修一处漏一处。本模块收敛为单源 codec：字段演进
 // 单点（G2），两宿主（FileRunStore / pi JsonlRunStore）各自只保留 IO 策略
 // （rewrite/append/去抖），投影与版本衔接语义全部经此模块。
 //
@@ -157,15 +157,11 @@ export interface RunSnapshot {
  * - trace 节点全量序列化（[H2 W3] live strip 分支随 ExecutionTraceNode.live 字段
  *   删除而退役——节点不再携带运行期对象，无需防御性剥离；旧快照经 fromRunSnapshot
  *   重水合时多余键自然丢弃，存量行零迁移）。
- * - spec.budgetRef 剔除：父 Budget 共享引用是进程内优化（嵌套 workflow 预算
- *   共享），非持久化数据；Budget 实例若混入 spec 落盘将退化为普通对象投影
- *   （重水合后类型不符的脏字段）——重水合后 budget 从 state.budget 独立重建，
- *   嵌套 run 的预算共享不跨进程存活。
  * - runtime 不落盘（worker/controller/timer 不可序列化且跨进程必死——重水合
  *   语义见 WorkflowRun.reconstruct 注释）。
  */
 export function toRunSnapshot(run: WorkflowRun): RunSnapshot {
-  const { budgetRef: _budgetRef, ...spec } = run.spec;
+  const spec = run.spec;
   return {
     v: SNAPSHOT_VERSION,
     runId: run.runId,

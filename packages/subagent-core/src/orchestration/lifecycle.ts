@@ -241,8 +241,8 @@ export function scheduleTimeBudget(
 // ── runWorkflow ──────────────────────────────────────────────
 
 /**
- * rfl 仪表（tier-1 §7.1）：向 spec.args 原地注入稳定 _runId。runAndWait 与
- * executeNestedWorkflow 两个 args 入口都经 runWorkflow 这一 choke point；
+ * rfl 仪表（tier-1 §7.1）：向 spec.args 原地注入稳定 _runId。全部 args 入口都经
+ * runWorkflow 这一 choke point；
  * rebuildRuntime 复用 run.spec.args 同一对象（worker-message-pump.ts），worker rebuild
  * 后脚本侧 $ARGS._runId 不漂移——修复「rebuild 回退 run-<Date.now()> 导致同一
  * 逻辑 run 碎裂到多个 state 目录」。注入在 validateRunArgs 之后，不参与脚本
@@ -261,14 +261,14 @@ function assertSignalNotAborted(signal: AbortSignal | undefined): void {
   }
 }
 
-/** 创建 running 态 WorkflowRun（budget 共享引用优先，否则按 spec 上限新建）。 */
+/** 创建 running 态 WorkflowRun（按 spec 上限新建 Budget）。 */
 function createRunningRun(runId: string, spec: RunSpec): WorkflowRun {
   return new WorkflowRun(
     runId,
     spec,
     {
       status: "running",
-      budget: spec.budgetRef ?? new Budget({
+      budget: new Budget({
         maxTokens: spec.budgetTokens,
         maxTimeMs: spec.budgetTimeMs,
       }),
@@ -440,7 +440,7 @@ export async function runWorkflow(
     );
   }
 
-  // pending-notifications: run 启动 → 注册（runAndWait / actionRun / 未来入口全覆盖）
+  // pending-notifications: run 启动 → 注册（actionRun / 未来入口全覆盖）
   deps.log?.("debug", "workflow:lifecycle", "emit pending:register", { runId });
   emitPendingRegister(runId, deps, spec);
   deps.log?.("debug", "workflow:lifecycle", "emit pending:register done", { runId });
@@ -605,9 +605,9 @@ export async function terminateRunningRuns(
  * 4. **淘汰执行**：超限数 excess = settledCount - keepDone（<=0 时 no-op 返回 0），
  *    对升序前 excess 项逐个 `runs.delete(runId)`，并同步回收终局记录注册表条目
  *    （forgetSettledRecord——注册表与内存 run 同生命周期）。
- * 5. **边界不变式**：禁止按 Map 插入序直接淘汰——嵌套 workflow 父 run 创建最早、
- *    完成最晚，插入序淘汰会在其自身 onRunDone 同步裁剪中淘汰它，runAndWait 轮询
- *    窗口内 get 不到 → 误返 "Run not found"。
+ * 5. **边界不变式**：禁止按 Map 插入序直接淘汰——插入序 = 创建序，与终局序可能
+ *    相反（先创建的 run 完成最晚），插入序淘汰会在其自身 onRunDone 同步裁剪中
+ *    淘汰它，消费方轮询窗口内 get 不到 → 误判 run 丢失。
  * 6. **副作用边界**：只清内存 runs Map 与终局记录注册表，不动磁盘 state 文件与
  *    manifest、不发任何事件。
  *

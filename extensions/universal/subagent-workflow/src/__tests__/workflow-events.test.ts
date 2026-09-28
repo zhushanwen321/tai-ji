@@ -215,7 +215,7 @@ function mount(): { handle: WorkflowDomainHandle; handlers: HandlerMap } {
   return { handle, handlers };
 }
 
-/** 挂载 + session_start 装配受控条目（getWorkflowDeps 守卫要求条目 + storeHealthy）。 */
+/** 挂载 + session_start 装配受控条目（deps 守卫要求条目 + storeHealthy）。 */
 async function mountWithSession(
   sessionId: string,
   opts: { mode?: "rpc" | "tui"; runs?: WorkflowRun[] } = {},
@@ -232,9 +232,10 @@ async function mountWithSession(
   mockSetupSessionLifecycle.mockResolvedValue(result);
   const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() });
   await handlers.get("session_start")!({ type: "session_start" }, ctx);
-  const resolution = handle.getWorkflowDeps(sessionId);
-  if (!resolution.ok) throw new Error(`getWorkflowDeps failed: ${resolution.reason}`);
-  return { pi, handle, handlers, deps: resolution.deps, ctx, runs };
+  // deps = lazyDeps 本体（getter 形态）：属性访问触发守卫 + makeDeps 现读——
+  // D3 volatile 现读语义（pi 切换后旧 deps 解析新 pi）依赖 getter 不被展开求值。
+  const deps: LauncherDeps = handle.lazyDeps;
+  return { pi, handle, handlers, deps, ctx, runs };
 }
 
 // ── 槽隔离（提权后槽是进程级共享态，防跨用例 / 跨测试文件串扰） ────────────────
@@ -338,7 +339,7 @@ describe("D3 currentPi 登记点：factory 重跑覆盖槽上 volatile 绑定", 
 
 // ── ① lazyDeps 语义不回归 ─────────────────────────────────────────────────────
 
-describe("lazyDeps 语义不回归：属性访问经 getWorkflowDeps → makeDeps 现读链路", () => {
+describe("lazyDeps 语义不回归：属性访问经 deps 守卫 → makeDeps 现读链路", () => {
   it("pi 切换后经 lazyDeps 的 eventBus/log/onRunDone 属性访问同样解析新 pi", async () => {
     const { pi: pi1, handle } = await mountWithSession("sess-lazy");
     expect(handle.lazyDeps.eventBus).toBe(pi1.events); // 守卫 + 转发语义不变（切换前）

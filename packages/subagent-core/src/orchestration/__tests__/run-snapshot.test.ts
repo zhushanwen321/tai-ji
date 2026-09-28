@@ -10,7 +10,7 @@
 // ③幸存者——版本 guard（D4 裁决③：v 不匹配即拒，字符串无大小序）+ 形状校验
 //   全分支不抛（返回 undefined）；
 // ④接线者——「缺 v 宽容」不内聚进 codec（D4 裁决②归属：store 层预处理职责，
-//   codec 层缺 v 即拒，保 pi 侧 v1 存量静默跳过语义）+ spec.budgetRef 剔除。
+//   codec 层缺 v 即拒，保 pi 侧 v1 存量静默跳过语义）。
 //
 // 纯内存测试：无 configureCore 依赖（codec 不触 host-services）。
 
@@ -234,25 +234,6 @@ describe("run-snapshot — [H2 W3] live 字段退役后的序列化行为", () =
 
     const back = fromRunSnapshot(JSON.parse(JSON.stringify(snap)))!;
     expect(back.state.trace.toArray()[0]?.status).toBe("running");
-  });
-});
-
-describe("run-snapshot — spec.budgetRef 剔除", () => {
-  it("spec.budgetRef（进程内共享引用）不落盘，spec 其余字段保真", () => {
-    const run = makeRun("wf-ref-1");
-    const specWithRef = { ...run.spec, budgetRef: new Budget({ maxTokens: 500 }) };
-    // reconstruct 直造带 budgetRef 的聚合（嵌套 workflow 的 run 形态）
-    const nested = WorkflowRun.reconstruct("wf-ref-1", specWithRef, run.state, run.meta);
-
-    const snap = toRunSnapshot(nested);
-
-    expect(nested.spec.budgetRef).toBeDefined(); // 内存对象不受影响
-    expect(snap.spec).not.toHaveProperty("budgetRef");
-    expect(snap.spec.scriptName).toBe("test-script");
-
-    const back = fromRunSnapshot(JSON.parse(JSON.stringify(snap)))!;
-    expect(back.spec).not.toHaveProperty("budgetRef");
-    expect(back.spec.budgetTokens).toBe(1000);
   });
 });
 

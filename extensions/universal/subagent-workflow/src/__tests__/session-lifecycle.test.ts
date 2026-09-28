@@ -5,10 +5,9 @@
 //   1. bootstrap seam 直测——setupSessionLifecycle(pi, ctx, deps) 以 deps 注入
 //      fake（worktreeManager/createServices/createRunStore）验证装配行为，
 //      不挂载 index.ts、零整类 mock（设计 §3.1「使用者视角」样例的落地）。
-//   2. 守卫合一——原 pi.__workflowRun 内联守卫与 getDeps 守卫两份重复合并为
-//      单一 getWorkflowDeps 出口后，两个消费点（返回错误对象 / throw）对同一
-//      失败态产生同源同消息的失败形态（错误消息逐字保留，组 2 / 组 6 用例锁定
-//      "store unavailable" / "loadAll failed" 子串）。
+//   2. deps 守卫单一出口——lazyDeps 属性访问触发守卫，失败 throw（守卫收敛为
+//      本单出口；错误消息逐字保留，组 2 / 组 6 用例锁定 "store unavailable" /
+//      "loadAll failed" 子串）。
 //
 // mock 面说明：第 2 组用例必须挂载 index.ts（守卫消费点是其闭包内符号），走
 // module 级 vi.mock（jsonl-run-store + interface 层）；打桩面收敛是 u-5b 领地。
@@ -248,13 +247,12 @@ function makeFakeStore(loadAll: () => Promise<WorkflowRunType[]>): {
 }
 
 /** 挂载 index.ts 并跑一次 session_start（loadAll 行为可配），返回守卫/恢复观察面：
- *  pi（含 __workflowRun）/ appendEntry entries / lazyDeps / 绑定 __workflowRun。
- *  守卫组（组 2）与 crash-recovery 吸收组（组 6）共用本挂载 harness（仅此一份）。 */
+ *  pi / appendEntry entries / lazyDeps。守卫组（组 2）与 crash-recovery 吸收组
+ *  （组 6）共用本挂载 harness（仅此一份）。 */
 async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Promise<{
   pi: ExtensionAPI;
   entries: EntryRecord[];
   lazyDeps: { store: unknown };
-  workflowRun: (n: string, a: Record<string, unknown>) => Promise<{ status: string; reason: string; error?: string; runId: string }>;
 }> {
   mockStoreLoadAll.mockImplementation(loadAll);
   let sessionStartHandler: ((event: unknown, ctx: unknown) => Promise<void>) | undefined;
@@ -281,10 +279,7 @@ async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Prom
 
   // registerWorkflowTool 第二参 = lazyDeps（LauncherDeps getter 形态，u-5b 领地改写）
   const lazyDeps = mockRegisterWorkflowTool.mock.calls[0]?.[1] as { store: unknown };
-  const workflowRun = (pi as unknown as {
-    __workflowRun: (n: string, a: Record<string, unknown>) => Promise<{ status: string; reason: string; error?: string; runId: string }>;
-  }).__workflowRun.bind(pi);
-  return { pi, entries, lazyDeps, workflowRun };
+  return { pi, entries, lazyDeps };
 }
 
 // [组 5a 瘦身] 模块图静态加载一次（文件顶部 import），beforeEach 显式重置全部被
@@ -583,10 +578,10 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   });
 });
 
-// ── 组 2：守卫合一（两消费点单一出口，u-4 行为变更点） ──────────────────────────
+// ── 组 2：deps 守卫单一出口（u-4 行为变更点，守卫收敛为 lazyDeps 单出口） ────
 
-describe("getWorkflowDeps 守卫合一 — 两消费点同源同消息", () => {
-  it("session 未初始化：tool 侧消费点（lazyDeps getter）throw 'Session not initialized'", async () => {
+describe("deps 守卫单一出口（lazyDeps 属性访问触发）", () => {
+  it("session 未初始化：lazyDeps getter throw 'Session not initialized'", async () => {
     // 新 factory 实例，不触发 session_start——sessionState 为空。
     const noop = (): void => { /* fake */ };
     const rawPi = {
@@ -602,34 +597,12 @@ describe("getWorkflowDeps 守卫合一 — 两消费点同源同消息", () => {
     expect(() => rawLazyDeps.store).toThrowError("Session not initialized");
   });
 
-  it("store 不健康：__workflowRun 消费点返回错误对象（fail-fast，不 throw）", async () => {
-    const { workflowRun } = await mountWithLoadAll(async () => {
+  it("store 不健康：守卫出口 throw 含 store unavailable / loadAll failed 子串（fail-fast）", async () => {
+    const { lazyDeps } = await mountWithLoadAll(async () => {
       throw new Error("disk corruption");
     });
 
-    const result = await workflowRun("any", {});
-
-    expect(result.status).toBe("done");
-    expect(result.reason).toBe("failed");
-    expect(result.error).toContain("store unavailable");
-    expect(result.error).toContain("loadAll failed");
-  });
-
-  it("store 不健康：两消费点从单一守卫出口拿到逐字相同的消息", async () => {
-    const { lazyDeps, workflowRun } = await mountWithLoadAll(async () => {
-      throw new Error("disk corruption");
-    });
-
-    const apiResult = await workflowRun("any", {});
-    let toolSideMessage = "";
-    try {
-      void lazyDeps.store;
-    } catch (err) {
-      toolSideMessage = err instanceof Error ? err.message : String(err);
-    }
-
-    expect(toolSideMessage).not.toBe("");
-    expect(toolSideMessage).toBe(apiResult.error);
+    expect(() => lazyDeps.store).toThrowError(/store unavailable[\s\S]*loadAll failed/);
   });
 });
 
@@ -950,7 +923,7 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
   it("loadAll 成功 + 已终态 run：直接 set 到 runs Map，不 transition", async () => {
     const doneRun = makeRun("wf-done-1", "done");
     const originalCompletedAt = doneRun.meta.completedAt;
-    const { entries, workflowRun } = await mountWithLoadAll(async () => [doneRun]);
+    const { entries, lazyDeps } = await mountWithLoadAll(async () => [doneRun]);
 
     // 状态不变（仍 done/completed），不重新 transition（completedAt 不变）
     expect(doneRun.state.status).toBe("done");
@@ -962,10 +935,8 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     const unregister = entries.filter((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
     expect(unregister).toHaveLength(0);
 
-    // run 已被 set 到 runs Map —— pi.__workflowRun 在 storeHealthy=true 时
-    // 不会因 store unavailable 提前返回
-    const result = await workflowRun("any", {});
-    expect(result.error).not.toContain("store unavailable");
+    // run 已被 set 到 runs Map —— storeHealthy=true 时守卫出口放行（不 throw）
+    expect(() => lazyDeps.store).not.toThrow();
   });
 
   it("loadAll 失败后 subagent 域不受影响：registerSubagentTool 仍被调用", async () => {

@@ -779,7 +779,7 @@ describe("evictDoneRunsBeyondCap（done run 内存淘汰，K=MAX_RETAINED_DONE_R
   it("W3TC3: 反序 fixture——创建最早、完成最晚的 run 不被淘汰（GAP-1 回归锚点）", () => {
     // 嵌套 workflow 竞态背景：父 run 创建最早（Map 首元素）、完成最晚（completedAt
     // 全局最新）。同 session 累计 21 个 done 时父 run 完成瞬间触发同步裁剪——若按
-    // Map 插入序淘汰，父 run 被淘汰，runAndWait 轮询窗口内 get 不到 → 误返
+    // Map 插入序淘汰，晚终局的 run 被淘汰，消费方轮询窗口内 get 不到 → 误返
     // "Run not found"。completedAt 排序结构性消除。
     const runs = new Map<string, WorkflowRun>();
     // 插入序 = 创建序：wf-parent 最先插入，completedAt=t100 全局最新（先创建后完成）

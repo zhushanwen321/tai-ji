@@ -10,7 +10,7 @@
  *   6. F1 回归：doc-reviewer-only 批（reconciliation 恒空）→ merge 重新报告转换 → needs-redesign（E2E-6）
  *   另含 fail-fast describe（结构化返回失败立即终判，W1-W6；弱格式降级通道已整体拆除）。
  *
- * 与 workflows-e2e.test.ts 同模式：真实 runAndWait + 真实 worker thread +
+ * 与 workflows-e2e.test.ts 同模式：真实 runWorkflowToSettled + 真实 worker thread +
  * 唯一 mock 是 deps.runner（AgentRunner）。runner 按调用分流：
  *   - schema 含 must_fix_ids → aggregator
  *   - schema 含 fixed_count → fix
@@ -28,7 +28,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { JsonlRunStore } from "../jsonl-run-store.ts";
-import { runAndWait } from "@zhushanwen/subagent-core";
 import type { AgentResult } from "@zhushanwen/subagent-core/orchestration/models/types.ts";
 // fail-fast 用例：F-1 形态 error 哨兵的引擎 SSOT 常量（output-collector 构造 error 时
 // 开头拼接）——结构化返回失败已无降级通道，一切 error 哨兵都走终判；此常量只用于
@@ -40,6 +39,7 @@ import {
   type JsonSchema,
   makeDeps,
   MOCK_USAGE,
+  runWorkflowToSettled,
   wf,
   WORKFLOWS_DIR,
 } from "./workflow-e2e-helpers.ts";
@@ -268,17 +268,17 @@ beforeEach(() => {
   fixtureDir = mkdtempSync(join(tmpdir(), "rfl-e2e-agents-"));
   // rfl 仪表（tier-1 T3）：state.json 现落 ~/.review-fix-loop/——HOME 重定向到
   // 临时目录，防测试写真实 home（worker_threads 在 new Worker 时拷贝主线程 env
-  // 快照，stubEnv 先于 runAndWait 即可让 worker 侧 os.homedir() 读到隔离值）。
+  // 快照，stubEnv 先于起 run 即可让 worker 侧 os.homedir() 读到隔离值）。
   rflHomeDir = mkdtempSync(join(tmpdir(), "rfl-e2e-home-"));
   vi.stubEnv("HOME", rflHomeDir);
   // 压缩 script-error 重试矩阵的真实指数退避（1+2+4s → 3ms；fail-fast 用例走完
   // 重试矩阵才收敛 failed，退避占单用例耗时大头）。生产默认不变，见
   // worker-message-pump RETRY_BACKOFF_BASE_ENV 测试通道。
   vi.stubEnv("TAIJI_SUBAGENT_TEST_RETRY_BACKOFF_BASE_MS", "1");
-  // 压缩 launcher 轮询 tick（500ms → 5ms）与 agent 重试退避（1s → 10ms，W6 用例
-  // 走 executeAgentCall 重试矩阵不再付 3s 真实等待；两通道均调用时读 env，生产
-  // 默认不变——见 core 侧 STATUS_POLL_INTERVAL_ENV / AGENT_RETRY_BACKOFF_BASE_ENV）。
-  vi.stubEnv("TAIJI_SUBAGENT_TEST_STATUS_POLL_INTERVAL_MS", "5");
+  // 压缩 agent 重试退避（1s → 10ms，W6 用例走 executeAgentCall 重试矩阵不再付
+  // 3s 真实等待；调用时读 env，生产默认不变——见 core 侧
+  // AGENT_RETRY_BACKOFF_BASE_ENV）。轮询等待已随 helper runWorkflowToSettled
+  // 内建小间隔，不再经 env 通道。
   vi.stubEnv("TAIJI_SUBAGENT_TEST_AGENT_RETRY_BACKOFF_BASE_MS", "10");
   bindRunStore(sessionDir, createdStores);
   createdStores = [];
@@ -307,7 +307,7 @@ const RUN_ID = () => "rfl-e2e-" + Date.now() + "-" + Math.floor(Math.random() * 
  * MF-1-1 临时 git 仓：统一 commit 块（autoCommit）的 e2e 载体。仓内 config 写死
  * user.name/email（不依赖宿主全局 git 配置——CI 环境可能缺失）。worker 未显式传
  * cwd（WorkerHost 的 new Worker 默认继承主进程 cwd）——测试主线程 process.chdir(repo)
- * 后再 runAndWait，脚本内 execFileSync("git", ...) 即作用于本仓。
+ * 后再 runWorkflowToSettled，脚本内 execFileSync("git", ...) 即作用于本仓。
  */
 /**
  * 测试内全部 git 子进程统一 env：显式钉 LC_ALL=C，使 git 自身报错文案跨系统
@@ -357,11 +357,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
 
@@ -421,11 +420,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
 
@@ -485,11 +483,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer") + "," + agentMd("doc-reviewer"), fixAgent: agentMd("reviewer"), _runId: RUN_ID() },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
 
@@ -545,11 +542,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
 
@@ -615,11 +611,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), maxRounds: 2, _runId: RUN_ID() },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
 
@@ -678,11 +673,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer") + "," + agentMd("doc-reviewer"), recheckAfterFix: true, _runId: RUN_ID() },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
 
@@ -747,11 +741,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("doc-reviewer"), _runId: RUN_ID() },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
 
@@ -823,11 +816,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), maxRounds: 4, _runId: RUN_ID() },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
 
@@ -888,11 +880,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), maxRounds: 4, stuckThreshold: 5, _runId: RUN_ID() },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
 
@@ -930,11 +921,10 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), batchl: "fallow-scan", _runId: RUN_ID() },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
 
@@ -947,8 +937,8 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
     RUN_TIMEOUT_MS,
   );
 
-  // 【targetType 非法枚举 / target 空串变体已并入 workflows-e2e.test.ts TC10 参数
-  // 矩阵（同走 runAndWait chokepoint invalid_args 通道，断言三元组一致）】
+  // 【targetType 非法枚举 / target 空串变体已并入 workflows-e2e.test.ts 的
+  // actionRun 参数校验用例（同走 validateRunArgs chokepoint，throw + 指引文案）】
 
   // ── MF-1-1：统一 commit 块（autoCommit）e2e——真实 tmp git 仓 ──────────
 
@@ -986,7 +976,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
           }),
         });
         const deps = makeDeps(runner);
-        const result = await runAndWait(
+        const result = await runWorkflowToSettled(
           wf("review-fix-loop"),
           { targetType: "file", target: "README.md", agents: agentMd("reviewer"), autoCommit: true, _runId: RUN_ID() },
           deps, undefined, RUN_TIMEOUT_MS,
@@ -1045,7 +1035,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
           }),
         });
         const deps = makeDeps(runner);
-        const result = await runAndWait(
+        const result = await runWorkflowToSettled(
           wf("review-fix-loop"),
           { targetType: "file", target: "README.md", agents: agentMd("reviewer"), autoCommit: true, _runId: RUN_ID() },
           deps, undefined, RUN_TIMEOUT_MS,
@@ -1126,7 +1116,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         },
       });
       const deps = makeDeps(runner);
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
         deps, undefined, RUN_TIMEOUT_MS,
@@ -1204,7 +1194,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
   ])("TC1/TC2: $label → 启动期 fail-fast，未调 agent", async ({ makeArgs, missingPath }) => {
     const runner = makeScenarioRunner(emptyScenario);
     const deps = makeDeps(runner);
-    const result = await runAndWait(
+    const result = await runWorkflowToSettled(
       wf("review-fix-loop"),
       { ...makeArgs(), _runId: RUN_ID() },
       deps, undefined, RUN_TIMEOUT_MS,
@@ -1242,7 +1232,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       });
       const deps = makeDeps(runner);
       const userRunId = RUN_ID();
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: userRunId },
         deps, undefined, RUN_TIMEOUT_MS,
@@ -1347,7 +1337,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
         }),
       });
       const deps = makeDeps(runner);
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer") + "," + agentMd("doc-reviewer"), recheckAfterFix: true, _runId: RUN_ID() },
         deps, undefined, RUN_TIMEOUT_MS,
@@ -1448,7 +1438,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
         deps, undefined, RUN_TIMEOUT_MS,
@@ -1569,7 +1559,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"),
           aggregatorModel: "mock-model-x", _runId: RUN_ID() },
@@ -1677,7 +1667,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
         deps, undefined, RUN_TIMEOUT_MS,
@@ -1750,7 +1740,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
         deps, undefined, RUN_TIMEOUT_MS,
@@ -1802,7 +1792,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         {
           targetType: "file", target: "README.md",
@@ -1867,7 +1857,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         {
           targetType: "file", target: "README.md",
@@ -1959,7 +1949,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
         deps, undefined, RUN_TIMEOUT_MS,
@@ -2008,7 +1998,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         {
           targetType: "file", target: "README.md",
@@ -2113,7 +2103,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       });
       const deps = makeDeps(runner);
 
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("review-fix-loop"),
         {
           targetType: "file", target: "README.md", maxRounds: 2,
@@ -2224,7 +2214,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
           }),
         });
         const deps = makeDeps(runner);
-        const result = await runAndWait(
+        const result = await runWorkflowToSettled(
           faultScriptPath,
           { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
           deps, undefined, RUN_TIMEOUT_MS,
@@ -2296,7 +2286,7 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
     args: Record<string, unknown> = {},
   ): Promise<FailFastOutcome> {
     const deps = makeDeps(runner);
-    const result = await runAndWait(
+    const result = await runWorkflowToSettled(
       wf("review-fix-loop"),
       { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID(), ...args },
       deps, undefined, RUN_TIMEOUT_MS,

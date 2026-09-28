@@ -457,17 +457,15 @@ export {
 // 已出公共面（定义文件内部类型闭包），hooks 形状经函数签名隐式约束。
 export { recoverCrashedRuns } from "./orchestration/lifecycle.ts";
 
-// launcher 层：runAndWait / executeNestedWorkflow（workflow 域嵌套编排入口）
-// + deps / 结果类型。
+// launcher 层：deps 类型 + 拒单文案单点。
 // formatAvailableWorkflowRefs / workflowNotFoundMessage：not found 拒单清单与
 // 文案单点（extension 顶层 workflow tool 同案消费，副本已删）。
+// runAndWait / executeNestedWorkflow（编程阻塞入口与脚本内嵌套调用实现）已随
+// 嵌套 workflow() 编排 API 退役整体删除。
 export {
-  runAndWait,
-  executeNestedWorkflow,
   formatAvailableWorkflowRefs,
   workflowNotFoundMessage,
   type LauncherDeps,
-  type WorkflowRunResult,
 } from "./orchestration/launcher.ts";
 
 // worker-message-pump 内核件（execution 生产域消费，A2a）：finalizeRun run 终态

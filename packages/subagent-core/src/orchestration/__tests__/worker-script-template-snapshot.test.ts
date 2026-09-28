@@ -6,7 +6,7 @@
  * 缩进语义（AC-4「逐字保留」不变式）。IF6（_KNOWN_FIELDS 提升至生成源
  * module scope）落地时基线已按设计在同一 commit 内更新为最终形态。
  *
- * 样例脚本覆盖 $ARGS / schema / parallel / pipeline / workflow / phase / log 特性。
+ * 样例脚本覆盖 $ARGS / schema / parallel / pipeline / phase / log 特性。
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -26,7 +26,6 @@ const sampleScript = [
   '  agent({ task: "lint", agent: "./linter.md", skill: "lint-skill" }),',
   "]);",
   "await pipeline([(x) => x, (x) => x]);",
-  'await workflow("deploy", { env: "prod" });',
   'log("done " + name + " " + $WORKSPACE + " " + $BUDGET.remaining());',
   "module.exports = { execute: async (ctx) => ctx.agent(\"finalize\") };",
 ].join("\n");

@@ -161,20 +161,6 @@ export interface LifecycleDeps {
     budgetTimeMs: number,
   ) => ReturnType<typeof setTimeout> | undefined;
  /**
- * workflow() 嵌套调用回调（可选）。Worker 脚本内调 workflow(name, args) 时触发。
- *
- * 由 Interface 层 makeDeps 注入（闭包捕获 registry + deps）。Engine 层的
- * worker-message-pump.handleWorkerMessage 收到 workflow-call 消息后调本回调，
- * 拿到子 workflow 执行结果后 postMessage(workflow-result) 回 worker。
- *
- * 不注入时 workflow() 返回 error result（向后兼容，不影响非嵌套场景）。
- */
-  onWorkflowCall?: (
-    name: string,
-    args: Record<string, unknown>,
-    parentRun: WorkflowRun,
-  ) => Promise<unknown>;
- /**
   * [H2 W3] workflow 域 agent() 统一派发入口（SubagentService.executeWorkflowAgent 的
   * deps 注入形态，设计 §3.5 终态数据流）。窄函数类型——不引 execution 层具体类，
   * 保持本 ports 文件零 infra/execution 依赖。由组合根（extension index.ts makeDeps）

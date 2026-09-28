@@ -16,11 +16,11 @@
  *      subagents 父级联关闭×2——setup* 函数住各自域模块，本 seam 在原注册位
  *      置调用；pi.on 全链注册顺序逐位不变，
  *      workflow-events.test.ts 锁定）
- *   4. getWorkflowDeps 守卫（单一出口，discriminated union）+ lazyDeps（tool lazy 注入源）
+ *   4. deps 守卫（单一出口，失败 throw）+ lazyDeps（tool lazy 注入源）
  *
  * 组合根消费面：setupWorkflowDomain(pi) 返回
- * WorkflowDomainHandle（state / lazyDeps / getWorkflowDeps / isScriptRunning），
- * tool + command 注册与 pi.__workflowRun 仍留 index.ts。
+ * WorkflowDomainHandle（state / lazyDeps / isScriptRunning），
+ * tool + command 注册仍留 index.ts。
  *
  * [skill-reload D3] makeDeps 的三个 volatile 成员（eventBus / log / onRunDone 的
  * pi）不做闭包快照：pi 从槽上 currentPi 现读（factory 重跑时覆盖登记）——在飞
@@ -50,7 +50,7 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { bestEffort } from "@zhushanwen/subagent-core";
 import { getSubagentService } from "@zhushanwen/subagent-core";
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
-import { executeNestedWorkflow, terminateRunningRuns } from "@zhushanwen/subagent-core";
+import { terminateRunningRuns } from "@zhushanwen/subagent-core";
 import { setInFlightListener } from "@zhushanwen/subagent-core";
 import {
   evictDoneRunsBeyondCap,
@@ -156,32 +156,21 @@ function resolveCurrentPi(): ExtensionAPI {
 
 // ── workflow deps 守卫（单一出口） ─────────────────────────────────────────────
 //
-// [守卫合一] 原 pi.__workflowRun 内联守卫 + getDeps 守卫两份重复（state 缺失 /
-// storeHealthy=false），合并为单一 getWorkflowDeps：返回 discriminated union，
-// 两个消费点各自决定失败形态——pi.__workflowRun（D-8 API）返回错误对象（不
-// throw，保住调用方 Promise 契约），getDeps（2 个 tool + workflows command 的
-// lazy deps 注入源——workflow-script tool 走 state.registry 直供不经 lazyDeps）
-// throw
-// （pi tool 框架将其转译为 tool 错误结果）。错误消息逐字保留（crash-recovery
-// 测试锁 "store unavailable" / "loadAll failed" 子串）。
-export type WorkflowDepsResolution =
-  | { ok: true; deps: LauncherDeps }
-  | { ok: false; reason: string };
+// 守卫单一出口（lazyDeps 消费）：state 缺失 / storeHealthy=false 时 throw（pi tool
+// 框架将其转译为 tool 错误结果）。错误消息逐字保留（crash-recovery 测试锁
+// "store unavailable" / "loadAll failed" 子串）。
 
 // ── lazyDeps 样板收敛 ──────────────────────────────────────────────────────────
 
 /**
- * lazyDeps 单成员转发原语：属性访问触发 getWorkflowDeps 守卫求值，失败 throw
- * （与 __workflowRun 的 return 错误对象对齐——同源同消息），成功转发 deps[key]。
- * 收敛原 index.ts 10 个同构 4 行 getter；每属性独立求值语义不变。
+ * lazyDeps 单成员转发原语：属性访问触发 deps 守卫求值，失败 throw，成功转发
+ * deps[key]。收敛原 index.ts 10 个同构 4 行 getter；每属性独立求值语义不变。
  */
 function createLazy<K extends keyof LauncherDeps>(
-  resolve: () => WorkflowDepsResolution,
+  resolve: () => LauncherDeps,
   key: K,
 ): LauncherDeps[K] {
-  const resolved = resolve();
-  if (!resolved.ok) throw new Error(resolved.reason);
-  return resolved.deps[key];
+  return resolve()[key];
 }
 
 // ── run 终局固定顺序副作用（makeDeps onRunDone 管线提级，可直测） ─────────────
@@ -263,12 +252,10 @@ export function runSettledEffects(env: RunSettledEffectsEnv, run: WorkflowRun): 
 
 export interface WorkflowDomainHandle {
   /** workflow 域状态（组合根只读消费：engine-awareness lastEngine 存取器 /
-   *  workflows command runs getter / pi.__workflowRun lastSessionId）。 */
+   *  workflows command runs getter）。 */
   state: WorkflowDomainState;
   /** 2 个 tool + workflows command 的 lazy deps 注入源（workflow-script tool 走 state.registry 直供不经 lazyDeps）。 */
   lazyDeps: LauncherDeps;
-  /** 守卫单一出口（pi.__workflowRun 消费点；lazyDeps 内部走同一函数）。 */
-  getWorkflowDeps(sessionId: string): WorkflowDepsResolution;
   /** workflow-script tool 的重入检查（跨 session 全局视角）。 */
   isScriptRunning(name: string): boolean;
 }
@@ -360,7 +347,7 @@ export function setupWorkflowDomain(
             resolvePi: resolveCurrentPi,
             notifiedRunIds,
             state,
-            // [W2/V1] 可选调用（fake lifecycle result 的 store 缺该面时返回 undefined
+            // [W2/V1 D1 第 7 行] 可选调用（fake lifecycle result 的 store 缺该面时返回 undefined
             // ——notifyDone 跳过分支承接，见 runSettledEffects 注释）。
             settledRecordOf: (runId) => state.store.settledRecordOf?.(runId),
             lsRef,
@@ -381,8 +368,6 @@ export function setupWorkflowDomain(
       },
       scheduleTimeBudget: (runId: string, budgetTimeMs: number) =>
         scheduleTimeBudget(runId, deps, budgetTimeMs),
-      onWorkflowCall: (name: string, args: Record<string, unknown>, parentRun: WorkflowRun) =>
-        executeNestedWorkflow(name, args, parentRun, deps),
       // [H2 W3] workflow agent() 统一派发入口（设计 §3.5）：pump 侧 dispatchAgentCall
       // 经此转调 SubagentService.executeWorkflowAgent——真实 record（origin:"workflow"
       // + parentRunId）进 store、共享池/守护/journal 归 service 编排；parentRunId 由
@@ -621,7 +606,9 @@ export function setupWorkflowDomain(
     dialogQueue.rejectAll();
   });
 
-  const getWorkflowDeps = (sessionId: string): WorkflowDepsResolution => {
+  /** deps 守卫单一出口：state 缺失 / store 不健康时 throw（错误消息逐字保留——
+   *  crash-recovery / session-lifecycle 等测试锁定子串），成功返回 LauncherDeps。 */
+  const resolveDepsFor = (sessionId: string): LauncherDeps => {
     const state = sessionState.get(sessionId);
     if (!state) {
       // [C2] 错误带恢复动作（对齐下方 store unavailable 的 MF-1 闭环风格）：state
@@ -629,39 +616,34 @@ export function setupWorkflowDomain(
       // 日志），文案指引 reload + 查日志，接通「现象 → 根因」链路。前缀子串
       // "Session not initialized" 被 session-lifecycle / workflow-events-deps-getter
       // 测试锁定（toThrowError 子串匹配），改写时保留该前缀。
-      return {
-        ok: false,
-        reason:
-          "Session not initialized (session_start assembly failed). " +
+      throw new Error(
+        "Session not initialized (session_start assembly failed). " +
           "Recovery: restart pi or reload this session to re-run initialization; " +
           "check the subagents extension logs (session_start failure) for the root cause.",
-      };
+      );
     }
     // MF-1: store 不健康时 fail-fast，避免 store.save 再次失败导致 run 状态不落地。
     if (!state.storeHealthy) {
       // 错误带恢复动作（错误 → 恢复闭环）：loadAll 失败的 store 本进程内不恢复，
       // 重启 pi 或重载 session（重建 store + 重跑 kill-9 恢复）是唯一出路。前半段
       // 子串（"store unavailable" / "loadAll failed"）被 crash-recovery 等测试锁定。
-      return {
-        ok: false,
-        reason:
-          "Workflow store unavailable (loadAll failed in session_start). " +
+      throw new Error(
+        "Workflow store unavailable (loadAll failed in session_start). " +
           "Restart pi or reload this session to re-run crash recovery.",
-      };
+      );
     }
-    return { ok: true, deps: makeDeps(state) };
+    return makeDeps(state);
   };
 
   // ════════════════════════════════════════════════════════════
   //  lazyDeps（2 个 tool + workflows command 的 lazy deps 注入源；
   //  workflow-script tool 走 state.registry 直供不经 lazyDeps）
   //
-  //  属性访问触发 getWorkflowDeps 守卫 + makeDeps 求值（每属性独立，createLazy
-  //  原语转发）。守卫合一后 getWorkflowDeps 返回 discriminated union，getter 内
-  //  消费时 throw（与 __workflowRun 的 return 错误对象对齐——同源同消息，
-  //  session-lifecycle.test.ts 锁定）。
+  //  属性访问触发 deps 守卫 + makeDeps 求值（每属性独立，createLazy 原语转发；
+  //  守卫失败 throw——pi tool 框架转译为 tool 错误结果，session-lifecycle.test.ts
+  //  锁定消息子串）。
   // ════════════════════════════════════════════════════════════
-  const resolveDeps = (): WorkflowDepsResolution => getWorkflowDeps(lsRef.lastSessionId);
+  const resolveDeps = (): LauncherDeps => resolveDepsFor(lsRef.lastSessionId);
   const lazyDeps: LauncherDeps = {
     get store() { return createLazy(resolveDeps, "store"); },
     get runs() { return createLazy(resolveDeps, "runs"); },
@@ -676,17 +658,15 @@ export function setupWorkflowDomain(
     // "sar-unattached" → armed 回执落账键错 → fold 出 created 态 → IllegalTransitionError
     // 让位，run journal 恒缺 armed 帧（真机 wf-1790034646281-w7tp4f 实证链，R2 裁决）。
     get workflowAgentDispatch() { return createLazy(resolveDeps, "workflowAgentDispatch"); },
-    // scheduleTimeBudget / onWorkflowCall / appendEntry 不可缺席（ports.ts D-12
-    // regression fix 同族）：rebuildRuntime 重排 run 级墙钟预算计时器、worker 脚本
-    // 嵌套 workflow() 调用、finalizeRun 的 pending:unregister 直落都经这三个成员
-    // 消费——lazyDeps 缺席会让消费点拿到 undefined（可选属性静默放行）；appendEntry
-    // 缺席尤其危险：workflow tool 的 run action 以 lazyDeps 为 deps 启动 run，直落
-    // 静默跳过 + emit 已删 = 注销 entry 永缺位。转发形态与其余成员一致。
+    // scheduleTimeBudget / appendEntry 不可缺席（ports.ts D-12 regression fix 同族）：
+    // rebuildRuntime 重排 run 级墙钟预算计时器、finalizeRun 的 pending:unregister
+    // 直落都经这两个成员消费——lazyDeps 缺席会让消费点拿到 undefined（可选属性
+    // 静默放行）；appendEntry 缺席尤其危险：workflow tool 的 run action 以 lazyDeps
+    // 为 deps 启动 run，直落静默跳过 + emit 已删 = 注销 entry 永缺位。转发形态与其余成员一致。
     get scheduleTimeBudget() { return createLazy(resolveDeps, "scheduleTimeBudget"); },
-    get onWorkflowCall() { return createLazy(resolveDeps, "onWorkflowCall"); },
     get appendEntry() { return createLazy(resolveDeps, "appendEntry"); },
     get log() { return createLazy(resolveDeps, "log"); },
   };
 
-  return { state: domainState, lazyDeps, getWorkflowDeps, isScriptRunning };
+  return { state: domainState, lazyDeps, isScriptRunning };
 }

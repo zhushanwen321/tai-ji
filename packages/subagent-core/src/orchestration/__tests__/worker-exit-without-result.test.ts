@@ -4,7 +4,7 @@
  *
  * F1 背景：execute() 返回不可克隆值（function/Symbol/循环引用）→ worker 侧 _safePost 吞掉
  * DataCloneError → return 消息从未发出 → worker exit(0)。旧实现 handleWorkerExit 对
- * code===0 no-op → run 永久 running、runAndWait 无限挂起。
+ * code===0 no-op → run 永久 running、无终态（消费方无限等待）。
  *
  * 修复语义（本文件锚定）：
  * - exit(0) 且本 runtime 代际未收到 return/error 消息 → transition done,failed +

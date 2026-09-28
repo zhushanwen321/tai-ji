@@ -2,7 +2,7 @@
  * rfl 仪表 T2（tier-1 §7.1）：引擎注入稳定 _runId。
  *
  *   A3 runWorkflow 在 validateRunArgs 后向 spec.args 注入 _runId（值 = 返回的
- *      runId）——runAndWait 与 executeNestedWorkflow 两个 args 入口共用的单一
+ *      runId）——全部 args 入口共用的单一
  *      choke point（lifecycle.ts runWorkflow）。
  *   A4 rebuildRuntime 复用 run.spec.args 同一对象，_runId 跨 worker rebuild 不
  *      漂移（修复「rebuild 回退 run-<Date.now()> 导致 run 碎裂」）。

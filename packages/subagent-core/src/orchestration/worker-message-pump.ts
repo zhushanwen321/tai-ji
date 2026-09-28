@@ -2,7 +2,7 @@
  * Workflow Extension — worker-message-pump（原 error-recovery，D5-① 更名）
  *
  * Worker 消息泵 + 失败恢复 free functions（D-12）。承载四类职责：
- * 1. 消息路由：handleWorkerMessage 分发 agent-call / workflow-call / return / error
+ * 1. 消息路由：handleWorkerMessage 分发 agent-call / return / error / log
  * 2. IPC 序列化防御：postMessage 的 DataCloneError 拦截 + fallback 回发（W2）
  * 3. retry/重建：worker/script 错误的指数退避重试 + rebuildRuntime（G3-001）
  * 4. 终态化：finalizeRun ——「transition → closeOut in-flight → save →
@@ -157,13 +157,6 @@ interface ErrorMsg {
   workerLogs?: WorkerLogEntry[];
 }
 
-interface WorkflowCallMsg {
-  type: "workflow-call";
-  callId: number;
-  name: string;
-  args: Record<string, unknown>;
-}
-
 /** 脚本 log() 全局发出的独立诊断消息（协议见 worker-script-builder 头注释，OR-6）。 */
 interface LogMsg {
   type: "log";
@@ -171,7 +164,7 @@ interface LogMsg {
   message: string;
 }
 
-type WorkerMsg = AgentCallMsg | WorkflowCallMsg | ReturnMsg | ErrorMsg | LogMsg;
+type WorkerMsg = AgentCallMsg | ReturnMsg | ErrorMsg | LogMsg;
 
 // ── 内部 helper ──────────────────────────────────────────────
 
@@ -1683,9 +1676,6 @@ export async function handleWorkerMessage(
     case "agent-call":
       dispatchAgentCall(run, msg, deps);
       return;
-    case "workflow-call":
-      dispatchWorkflowCall(run, msg, deps);
-      return;
     case "return":
       // [F1] 标记本 runtime 代际已收到终态消息：WorkerHandle.isCurrent 守卫保证消息必
       // 来自当前代际 worker。handleWorkerExit 的 exit(0) 无终态判定据此区分——
@@ -2033,102 +2023,17 @@ function dispatchAgentCall(
 /**
  * postMessage 序列化失败时回发的 fallback result（必可克隆），让 worker pending resolve。
  *
- * postResult（workflow-call）与 postAgentResult（agent-call）各自前缀不同，故 prefix 参数化，
- * 共享返回类型与构造逻辑，避免字面量重复导致形状漂移。
+ * prefix 参数由调用方传入（当前唯一消费方 postAgentResult 用 "Result serialization
+ * failed" 前缀）；返回 shape `{content:"", error:"<prefix>: <errMsg>"}` 恒定。
  *
  * W2 防御关键纯函数——export 供独立单测（worker-message-pump-serialize-failed-result.test.ts）验证
- * 返回 shape `{content:"", error:"<prefix>: <errMsg>"}`，确保两条 fallback 路径（workflow-call /
- * agent-call）共享同一构造逻辑不漂移。
+ * 返回 shape。
  */
 export function makeSerializeFailedResult(
   prefix: string,
   errMsg: string,
 ): { content: string; error: string } {
   return { content: "", error: `${prefix}: ${errMsg}` };
-}
-
-/**
- * 派发 workflow 嵌套调用：调 deps.onWorkflowCall 获取子 workflow 结果，
- * 异步 postMessage(workflow-result) 回 worker。
- *
- * onWorkflowCall 未注入时（向后兼容），返回 error result 让脚本 soft-fail。
- * 与 dispatchAgentCall 对称：异步触发（不 await），stale 完成守卫（终态不发）。
- */
-function dispatchWorkflowCall(
-  run: WorkflowRun,
-  msg: WorkflowCallMsg,
-  deps: LifecycleDeps,
-): void {
-  // M4: IPC 字段校验——畸形 workflow-call 消息。[加固] callId 合法（worker 侧有对应
-  // pending）时回发可克隆 error result 让 worker 内 workflow() pending 收敛（原仅日志
-  // return = pending 永挂）；callId 非法无法定向回发，仅日志。回发走 try/catch：纯字符串
-  // result 必可克隆，仅通道死（worker 已终）才可能抛，留痕即可。
-  if (typeof msg.callId !== "number" || !Number.isFinite(msg.callId) ||
-      typeof msg.name !== "string" ||
-      typeof msg.args !== "object" || msg.args === null) {
-    logger.error(`[workflow] malformed workflow-call message: callId=${JSON.stringify(msg.callId)}, name=${JSON.stringify(msg.name)}`);
-    if (typeof msg.callId === "number" && Number.isFinite(msg.callId)) {
-      try {
-        run.runtime?.worker.postMessage({
-          type: "workflow-result",
-          callId: msg.callId,
-          result: { content: "", error: "malformed message dropped: workflow-call IPC fields invalid (worker/main module mismatch suspected)" },
-        });
-      } catch (err) {
-        logger.error(`[workflow] malformed workflow-call error-reply failed (callId=${msg.callId}): ${toErrorMessage(err)}`);
-      }
-    }
-    return;
-  }
-
-  const postResult = (result: unknown): void => {
-    // [W2/V1] stale 完成守卫换源 isRunSettled（终局后迟到子 workflow 结果丢弃——
-    // 原两态机 status recheck 随活体写点删除停更）。
-    if (isRunSettled(run)) return;
-    // W2 主线程防御：result 是子 workflow 任意返回值，可能含不可克隆成员（function/
-    // Symbol/循环引用）→ postMessage 同步抛 DataCloneError。内部 try/catch + 回发
-    // 纯字符串 fallback result，让 worker 内 workflow() pending Promise resolve。
-    // 注意：错误变量用 err（外层 dispatchWorkflowCall 参数名为 msg，避免遮蔽）。
-    try {
-      run.runtime?.worker.postMessage({
-        type: "workflow-result",
-        callId: msg.callId,
-        result,
-      });
-    } catch (err) {
-      const errMsg = toErrorMessage(err);
-      logger.error(`[workflow] postResult (workflow-call callId=${msg.callId}) failed: ${errMsg}. Sending error fallback.`);
-      // 回发纯字符串 fallback result（必可克隆），让 worker pending resolve
-      try {
-        run.runtime?.worker.postMessage({
-          type: "workflow-result",
-          callId: msg.callId,
-          result: makeSerializeFailedResult("Workflow result serialization failed", errMsg),
-        });
-      } catch {
-        // fallback 也失败——worker 此 callId 的 pending 只能靠 timeout 兜底
-        logger.error(`[workflow] postResult fallback also failed (callId=${msg.callId}): worker pending will hang until timeout`);
-      }
-    }
-  };
-
-  if (!deps.onWorkflowCall) {
-    postResult({
-      content: "",
-      error: `workflow() not supported: onWorkflowCall not injected`,
-    });
-    return;
-  }
-
-  void deps
-    .onWorkflowCall(msg.name, msg.args, run)
-    .then(postResult)
-    .catch((err: unknown) => {
-      postResult({
-        content: "",
-        error: toErrorMessage(err),
-      });
-    });
 }
 
 /**
@@ -2281,7 +2186,7 @@ export async function handleWorkerError(
  *   退避窗口——rebuild 即将发生，不得干扰）
  * - 本代际未收到任何终态消息 → [F1] 转 done,failed（WORKER_EXITED_WITHOUT_RESULT_MSG）。
  *   旧实现对 code===0 一律 no-op：不可克隆 return 被 worker 侧 _safePost 吞掉后
- *   DataCloneError 静默丢失，worker exit(0) 而 run 永久 running、runAndWait 悬挂。
+ *   DataCloneError 静默丢失，worker exit(0) 而 run 永久 running、无终态。
  * code !== 0 → 委托 handleWorkerError（非零 exit 视为崩溃，既有重试矩阵；重试耗尽仍会
  *   转 done,failed，无悬挂面）
  *
@@ -2315,7 +2220,7 @@ export async function handleWorkerExit(
     if (run.runtime?.receivedTerminalMessage) return;
 
     // [F1] 无终态消息的 exit(0) = worker 静默退出（不可克隆 return 被吞 / 脚本直调
-    // process.exit(0) 等）。置 failed 保证 runAndWait 必有终态。不重试：rebuild 重跑
+    // process.exit(0) 等）。置 failed 保证 run 必有终态。不重试：rebuild 重跑
     // 脚本对确定性根因（不可克隆 return）无意义，且 belt 路径优先给用户明确归因。
     deps.log?.("debug", "workflow:worker-message-pump", "worker exited without terminal message, transition done", { runId: run.runId });
     run.state.error = WORKER_EXITED_WITHOUT_RESULT_MSG;

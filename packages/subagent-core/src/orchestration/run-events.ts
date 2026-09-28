@@ -68,8 +68,8 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
 /**
  * run 终局形态词表（四值正交，[W2 D2/D5] interrupted 入词表后的单源）。
  *
- * 与 DoneReason（completed/failed/aborted/invalid_args/budget_limited/
- * time_limited，六因单维度）的关系：outcome 是终态正交化后的「run 自身怎么死的」维度（harness
+ * 与 DoneReason（completed/failed/aborted/budget_limited/
+ * time_limited，五因单维度）的关系：outcome 是终态正交化后的「run 自身怎么死的」维度（harness
  * 系统层）——脚本判定失败（review-failure）= outcome:completed + 脚本返回失败
  * 结论（业务层），两者处置路径不同（前者人工聚合报告，后者修环境重跑），必须
  * 分维度表达。aborted 在本词表命名为 cancelled（对齐 D5 词表；DoneReason 存量
@@ -149,9 +149,9 @@ export type RunErrorCode =
 // ── DoneReason → RunOutcome 映射表定稿（与下方 RunErrorCode 映射同族的姊妹单点）──
 
 /**
- * DoneReason 六因 → RunOutcome 的单点映射（[W2 D5] 映射表定稿，dispatch 链语境）。
+ * DoneReason 五因 → RunOutcome 的单点映射（[W2 D5] 映射表定稿，dispatch 链语境）。
  *
- * 全表（六值逐行）：
+ * 全表（五值逐行）：
  *
  * | DoneReason      | outcome    | errorCode 承载        | 语义依据 |
  * |-----------------|------------|----------------------|---------|
@@ -160,7 +160,6 @@ export type RunErrorCode =
  * | aborted         | cancelled  | —                    | 用户主动取消（cancel-requested 控制事件合成路径的终局 outcome 同值——转移表 cancelled 行与本映射构造性一致） |
  * | budget_limited  | failed     | 'budget_limited'     | 预算耗尽 = 任务没跑完，failed 是用户视角的诚实归因 |
  * | time_limited    | failed     | 'time_limited'       | 活体墙钟预算超时 = 用户显式设置 timeoutMs/budgetTimeMs 到期的主动管理行为 |
- * | invalid_args    | failed     | 因提取               | 参数校验失败——生产不达 finalizeRun（launcher 校验在 run 创建前返回），收录仅为映射穷尽；run 从未创建、不落终局帧（不适用行） |
  *
  * time_limited 双语境注记（[W2 D5 表注]）：上表行只覆盖 dispatch 链语境（活体
  * 预算超时 → failed）。被动收编语境的同一 DoneReason 字面量落 interrupted +
@@ -185,7 +184,6 @@ export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
     case "failed":
     case "budget_limited":
     case "time_limited":
-    case "invalid_args":
       return "failed";
   }
 }
@@ -201,9 +199,7 @@ export function doneReasonToRunOutcome(reason: DoneReason): RunOutcome {
  *   （RunSettledEvent.errorCode 字段语义「失败时才有」）；
  * - budget_limited/time_limited：run 级终局码恒等映射（同名字面量，上方注释载
  *   收录依据）；
- * - failed/invalid_args：按因提取——invalid_args 与 failed 同组对齐上方
- *   doneReasonToRunOutcome 的既有归类（invalid_args 生产不达 finalizeRun——
- *   launcher 参数校验在 run 创建前返回，防误分组而已）。
+ * - failed：按因提取。
  */
 export function finalRunErrorCodeOf(run: WorkflowRun, doneReason: DoneReason): RunErrorCode | undefined {
   switch (doneReason) {
@@ -215,7 +211,6 @@ export function finalRunErrorCodeOf(run: WorkflowRun, doneReason: DoneReason): R
     case "time_limited":
       return "time_limited";
     case "failed":
-    case "invalid_args":
       return extractFailedRunErrorCode(run);
   }
 }

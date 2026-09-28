@@ -3,7 +3,7 @@
  *
  * 合并 @zhushanwen/pi-subagents + @zhushanwen/pi-workflow 为统一包。
  * 注册项：3 tool（subagent + workflow + workflow-script）+ 2 command（subagents + workflows）
- * + messageRenderer（subagent-bg-notify）+ pi.__workflowRun + session 事件。
+ * + messageRenderer（subagent-bg-notify）+ session 事件。
  *
  * 包内结构（执行运行时已迁 packages/subagent-core，本包只留注册面与宿主适配）：
  *   interface/           → 注册胶水（tools / commands / TUI 渲染 / GUI mappers）
@@ -12,12 +12,12 @@
  *   session-lifecycle.ts → 会话生命周期装配 seam（测试可注入 fake 依赖）
  *   workflow-events.ts   → workflow 域事件族装配 seam（7 个 pi.on handler + deps 装配）
  *
- * 本文件 = 组合根：只留注册（tools / commands / renderer / pi.__workflowRun / 进程级
- * 信号 hook）与装配接线（core 端口 / 注入器 / 两个 seam 调用）。
+ * 本文件 = 组合根：只留注册（tools / commands / renderer / 进程级信号 hook）与
+ * 装配接线（core 端口 / 注入器 / 两个 seam 调用）。
  *
  * 架构导航见 docs/extensions/subagents/architecture.md。
  *
- * 设计基线：D-004（旧包不动）/ ADR-025（进程内执行）/ D-8（pi.__workflowRun 签名）。
+ * 设计基线：D-004（旧包不动）/ ADR-025（进程内执行）。
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -40,7 +40,6 @@ import { syncEnginesFile } from "@zhushanwen/subagent-core";
 // engineDataDir 默认走 common/data-dir SSOT）
 import { registerZcodeEngine } from "@zhushanwen/subagent-core";
 import { markAllSpawnedChildrenDead } from "@zhushanwen/subagent-core";
-import { runAndWait, type WorkflowRunResult } from "@zhushanwen/subagent-core";
 // bg-notify 送达通道 customType（notify 词表单源，与 shared/runtime/core 消费侧同源）
 import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE } from "@zhushanwen/extension-protocol";
 // [engine-awareness U3/D7-④] per-turn 引擎检测编排 + before_agent_start 链尾接线
@@ -56,22 +55,9 @@ import { registerSubagentsCommand } from "./interface/subagents.ts";
 import { registerSubagentsTool } from "./interface/tool-subagents.ts";
 import { registerWorkflowTool } from "./interface/tool-workflow.ts";
 import { registerWorkflowScriptTool } from "./interface/tool-workflow-script.ts";
-// ═══ workflow 域事件族装配 seam（7 个 pi.on handler + makeDeps/getWorkflowDeps/
-// lazyDeps；与 session-lifecycle.ts 同构，D2 原样搬移 + lazyDeps 样板收敛） ═══
+// ═══ workflow 域事件族装配 seam（7 个 pi.on handler + makeDeps/lazyDeps；
+// 与 session-lifecycle.ts 同构，D2 原样搬移 + lazyDeps 样板收敛） ═══
 import { setupWorkflowDomain } from "./workflow-events.ts";
-
-// ── pi.__workflowRun 类型扩展（D-8 签名） ─────────────────
-
-declare module "@earendil-works/pi-coding-agent" {
-  interface ExtensionAPI {
-    __workflowRun?: (
-      workflowName: string,
-      workflowArgs: Record<string, unknown>,
-      workflowSignal?: AbortSignal,
-      workflowTimeoutMs?: number,
-    ) => Promise<WorkflowRunResult>;
-  }
-}
 
 // ── Factory ──────────────────────────────────────────────────
 
@@ -238,36 +224,6 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   };
   process.on("SIGINT", sigintHandler);
   process.on("beforeExit", reapSpawnedChildrenOnShutdown);
-
-  // ════════════════════════════════════════════════════════════
-  //  pi.__workflowRun（D-8 签名）
-  // ════════════════════════════════════════════════════════════
-  pi.__workflowRun = async (
-    workflowName: string,
-    workflowArgs: Record<string, unknown>,
-    workflowSignal?: AbortSignal,
-    workflowTimeoutMs?: number,
-  ): Promise<WorkflowRunResult> => {
-    // 注意：lastSessionId 是单值假设——Pi 当前保证单 session 串行（一次只一个活跃 session）。
-    // 若未来 Pi 支持多 session 并发，此处需改为从 ctx.sessionManager.getSessionId() 显式传入。
-    // M-2 已记录此假设。
-    const resolved = workflow.getWorkflowDeps(workflow.state.lsRef.lastSessionId);
-    if (!resolved.ok) {
-      return {
-        status: "done",
-        reason: "failed",
-        error: resolved.reason,
-        runId: "",
-      };
-    }
-    return runAndWait(
-      workflowName,
-      workflowArgs,
-      resolved.deps,
-      workflowSignal,
-      workflowTimeoutMs,
-    );
-  };
 
   // ════════════════════════════════════════════════════════════
   //  Tools（3 个）+ Commands（2 个）—— 注册面

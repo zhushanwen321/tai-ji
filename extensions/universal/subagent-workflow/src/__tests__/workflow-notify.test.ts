@@ -420,7 +420,7 @@ describe("notifyDone — 降级直发（ledger 未 bind，向后兼容）", () =
 // notifyDone 的 content 分支矩阵（workflow-notify.ts parts 构造，期望值逐字取自实现）：
 //   ① header 恒有：`Workflow '<name>' done: <status>[ (<reason>)]`
 //   ② F3 防偷懒收尾指令段：reason ∈ isTerminalDoneReason 词表（failed/aborted/
-//     invalid_args/budget_limited/time_limited——completed 不含）时追加
+//     budget_limited/time_limited——completed 不含）时追加
 //   ③ Script Result 段：scriptResult 非 undefined 且非 null 时追加（含 bounded
 //     pretty 序列化形态，序列化本体由 core bounded-serialize.test.ts 锚定）
 //   ④ Agent Trace 段恒有：空 trace = 仅标题；非空 = `[<i>] <agent>: <status>` 行

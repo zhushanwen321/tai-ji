@@ -2,14 +2,14 @@
  * 内置 workflow E2E（真实 worker thread + mock LLM runner）
  *
  * 验证 4 个内置 workflow（parallel/chain/map-reduce/scatter-gather）通过真实的编排
- * 链路执行成功。调用真实的 runAndWait(name, args, deps)（src/orchestration/launcher.ts），
- * 它内部会：
- *   1. deps.registry.get(name) 加载真实 .js 脚本
+ * 链路执行成功。调用共享测试 helper runWorkflowToSettled(name, args, deps)
+ * （workflow-e2e-helpers.ts），它内部会：
+ *   1. deps.registry.getPath(name) 加载真实 .js 脚本
  *   2. 脚本校验（lintScript）
  *   3. runWorkflow(spec, deps) 起真实的 node:worker_threads Worker 执行脚本
  *   4. 脚本内调 agent()/parallel() → worker postMessage(agent-call) →
  *      主线程 deps.runner.run() → 我们 mock 它返回固定结构化数据
- *   5. 脚本聚合结果 → return outcome → runAndWait 返回 WorkflowRunResult
+ *   5. 脚本聚合结果 → return outcome → helper 轮询至终局返回结果投影
  *
  * 唯一 mock 的是 deps.runner（AgentRunner 接口）——真实 runner 会 spawn pi 子进程调 LLM，
  * mock runner 根据 opts.schema 生成符合脚本 schema 的假数据。
@@ -32,7 +32,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { JsonlRunStore } from "../jsonl-run-store.ts";
-import { runAndWait } from "@zhushanwen/subagent-core";
 import { actionRun } from "../interface/tool-workflow.ts";
 import type { AgentRunner } from "@zhushanwen/subagent-core/orchestration/models/ports.ts";
 import type { AgentResult } from "@zhushanwen/subagent-core/orchestration/models/types.ts";
@@ -43,6 +42,7 @@ import {
   makeDeps,
   makeRegistry,
   MOCK_USAGE,
+  runWorkflowToSettled,
   wf,
 } from "./workflow-e2e-helpers.ts";
 
@@ -127,10 +127,9 @@ beforeEach(() => {
   sessionDir = mkdtempSync(join(tmpdir(), "wf-e2e-"));
   createdStores = [];
   bindRunStore(sessionDir, createdStores);
-  // 压缩 launcher 轮询 tick（500ms → 5ms）与 agent 重试退避（1s → 10ms）：
-  // 起 worker 的用例不再付真实轮询尾/退避等待（两通道均调用时读 env，生产默认
-  // 不变——见 core 侧 STATUS_POLL_INTERVAL_ENV / AGENT_RETRY_BACKOFF_BASE_ENV）。
-  vi.stubEnv("TAIJI_SUBAGENT_TEST_STATUS_POLL_INTERVAL_MS", "5");
+  // 压缩 agent 重试退避（1s → 10ms）：起 worker 的用例不再付真实退避等待
+  // （调用时读 env，生产默认不变——见 core 侧 AGENT_RETRY_BACKOFF_BASE_ENV）。
+  // （轮询等待已随 helper runWorkflowToSettled 内建小间隔，不再经 env 通道。）
   vi.stubEnv("TAIJI_SUBAGENT_TEST_AGENT_RETRY_BACKOFF_BASE_MS", "10");
 });
 
@@ -149,7 +148,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ── 断言 helper：对每个 workflow 的 WorkflowRunResult 做统一终态断言 ──────
+// ── 断言 helper：对每个 workflow 的结果投影做统一终态断言 ──────
 
 interface ScriptOutcome {
   status: string;
@@ -158,18 +157,16 @@ interface ScriptOutcome {
 }
 
 /**
- * 断言 runAndWait 返回成功完成的终态。
+ * 断言 runWorkflowToSettled 返回成功完成的终态。
  *
- * - result.status === "closed"（runAndWait 恒 done）
  * - result.reason === "completed"（脚本正常 return，非 failed/aborted/time_limited）
  * - result.scriptResult.status 是 "ok" 或 "partial"（脚本层 outcome，非 "error"）
  * - result.error 为 undefined
  */
 function assertCompleted(
-  result: { status: string; reason: string; scriptResult?: unknown; error?: string },
+  result: { reason: string; scriptResult?: unknown; error?: string },
   workflowName: string,
 ): void {
-  expect(result.status, `${workflowName}: status 应为 done`).toBe("done");
   expect(result.reason, `${workflowName}: reason 应为 completed`).toBe("completed");
   expect(result.error, `${workflowName}: error 应为 undefined`).toBeUndefined();
   const outcome = result.scriptResult as ScriptOutcome | undefined;
@@ -189,11 +186,10 @@ describe("内置 workflow E2E（真实 worker thread + mock LLM runner）", () =
     "parallel workflow：多视角并行分析 → 聚合，reason=completed, outcome.status != error",
     async () => {
       const deps = makeDeps(makeMockRunner());
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("parallel"),
         { target: "src/auth/login.ts" },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
       assertCompleted(result, "parallel");
@@ -212,11 +208,10 @@ describe("内置 workflow E2E（真实 worker thread + mock LLM runner）", () =
     "chain workflow：analyze → transform → synthesize 顺序三步，reason=completed, outcome.status != error",
     async () => {
       const deps = makeDeps(makeMockRunner());
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("chain"),
         { task: "把这段需求文档拆成技术任务" },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
       assertCompleted(result, "chain");
@@ -235,11 +230,10 @@ describe("内置 workflow E2E（真实 worker thread + mock LLM runner）", () =
     "map-reduce workflow：parallel map → reduce 两段，reason=completed, outcome.status != error",
     async () => {
       const deps = makeDeps(makeMockRunner());
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("map-reduce"),
         { operation: "审查代码风格", items: ["file1.ts", "file2.ts"] },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
       assertCompleted(result, "map-reduce");
@@ -260,11 +254,10 @@ describe("内置 workflow E2E（真实 worker thread + mock LLM runner）", () =
     "scatter-gather workflow：scatter 拆分 → parallel 处理 → gather 合并 三段，reason=completed, outcome.status != error",
     async () => {
       const deps = makeDeps(makeMockRunner());
-      const result = await runAndWait(
+      const result = await runWorkflowToSettled(
         wf("scatter-gather"),
         { task: "重构认证模块，涉及 session/jwt/oauth 三块" },
         deps,
-        undefined,
         RUN_TIMEOUT_MS,
       );
       assertCompleted(result, "scatter-gather");
@@ -282,52 +275,9 @@ describe("内置 workflow E2E（真实 worker thread + mock LLM runner）", () =
     RUN_TIMEOUT_MS,
   );
 
-  it.each([
-    {
-      label: "缺 required（targetType/target 均缺）",
-      args: (): Record<string, unknown> => ({ batch1: agentMd("code-reviewer") }),
-      errorKeys: ["targetType"],
-    },
-    {
-      label: "targetType 非法枚举 'nope'（原 review-fix-loop e2e 变体并入）",
-      args: (): Record<string, unknown> => ({
-        targetType: "nope", target: "README.md", agents: agentMd("code-reviewer"),
-      }),
-      errorKeys: ["targetType"],
-    },
-    {
-      label: "target 纯空白（minLength/pattern 拦，原 review-fix-loop e2e 变体并入）",
-      args: (): Record<string, unknown> => ({
-        targetType: "file", target: "   ", agents: agentMd("code-reviewer"),
-      }),
-      errorKeys: ["target"],
-    },
-  ])(
-    "TC10: runAndWait 参数校验失败（$label）→ reason=invalid_args + runId='' + info 指引（chokepoint 先拦）",
-    async ({ args, errorKeys }) => {
-      // review-fix-loop 有 parameters schema（唯一带 schema 的内置 workflow）——
-      // 缺 required / 枚举越界 / 空白串违反 minLength+pattern → chokepoint 在
-      // worker 启动前拦截。断言三元组不变：invalid_args + runId 空串 + §5.3 指引。
-      const deps = makeDeps(makeMockRunner());
-      const result = await runAndWait(
-        wf("review-fix-loop"),
-        args(),
-        deps,
-        undefined,
-        RUN_TIMEOUT_MS,
-      );
-
-      expect(result.status).toBe("done");
-      expect(result.reason).toBe("invalid_args");
-      expect(result.runId).toBe("");
-      expect(result.error).toContain("Invalid args for workflow 'review-fix-loop'");
-      for (const key of errorKeys) {
-        expect(result.error).toContain(key);
-      }
-      expect(result.error).toContain("Read the workflow script file");
-    },
-    RUN_TIMEOUT_MS,
-  );
+  // 【TC10 已删除】原「runAndWait 参数校验失败 → reason=invalid_args 三元组」随
+  // runAndWait 删除退役；同一 chokepoint（validateRunArgs）的拒绝行为由下方 TC6/TC9
+  // 的 actionRun throw 形态覆盖（含同样的 targetType/指引文案断言）。
 
   it(
     "TC12: coerce 结果到达 worker（chokepoint 原地 coerce → $ARGS 收到 boolean false）",
@@ -359,11 +309,10 @@ describe("内置 workflow E2E（真实 worker thread + mock LLM runner）", () =
         const scripts = loadWorkflowsFromDir(fixtureDir);
         const deps = { ...makeDeps(makeMockRunner()), registry: makeRegistry(scripts) };
 
-        const result = await runAndWait(
+        const result = await runWorkflowToSettled(
           join(fixtureDir, "args-probe.js"),
           { autoCommit: "false" },
           deps,
-          undefined,
           RUN_TIMEOUT_MS,
         );
 

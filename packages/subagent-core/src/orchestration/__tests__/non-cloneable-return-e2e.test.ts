@@ -7,7 +7,7 @@
  *   矩阵：3 次 rebuild + 指数退避 1s/2s/4s）→ 第 4 次 error 超限 → run done,failed。
  *
  * 修复前：return 消息被静默吞掉 → worker exit(0) → handleWorkerExit(0) no-op → run 永久
- * running、runAndWait 无限挂起（本测试会超时红）。
+ * running、无终态（消费方无限等待；本测试会超时红）。
  *
  * 主线程 belt（exit(0) 无终态消息 → 立即 failed）由 worker-exit-without-result.test.ts
  * handler 级单测覆盖；两条防线共同保证「run 必达终态」不变式。

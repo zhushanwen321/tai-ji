@@ -304,7 +304,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
 
     expect(ok).toBe(true);
     expect(isRunSettled(run)).toBe(true);
-    // onRunDone 不被直落故障吞掉（runAndWait 轮询依赖其收口）
+    // onRunDone 不被直落故障吞掉（终局链依赖其收口）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
     const errLogs = errorSpy.mock.calls.map((c) => String(c[0]));
     expect(

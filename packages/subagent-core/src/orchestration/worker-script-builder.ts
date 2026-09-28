@@ -26,7 +26,6 @@
  * 通信协议（AC-4 契约，逐字保留）：
  * Worker → Main (postMessage):
  * { type: "agent-call", callId: number, opts: AgentCallOpts }
- * { type: "workflow-call", callId: number, name: string, args: Record<string, unknown> }
  * { type: "return", runId: string, result: unknown }
  * { type: "error", runId: string, error: string }
  * { type: "log", phase: string, message: string }
@@ -38,7 +37,6 @@
  *
  * Main → Worker (parentPort.on("message")):
  * { type: "agent-result", callId: number, result: AgentResult, cached: boolean }
- * { type: "workflow-result", callId: number, result: unknown }
  * { type: "budget-update", budget: unknown }
  * { type: "abort", reason: string }
  *   —— [OR-3] 主线程在 abortRun/terminateRunningRuns 终止 run 时、worker.terminate
@@ -50,8 +48,7 @@
  * 超时——主线程对 agent-call 永不回话（畸形消息丢弃 / postMessage 双重失败 / runner
  * 不 settle）时 pending 以错误 resolve（对齐 agent-result 失败容错策略：不 reject、
  * 不放大成脚本 error → rebuild）。缺省（未传 timeoutMs）= 不限，与 runner 侧
- * per-call timeout 语义一致。workflow() 无 timeout 协议字段，不接线（其 pending
- * 由 abort 广播与嵌套 run 自身上界兜底）。
+ * per-call timeout 语义一致。
  */
 
 // ── Build worker source ─────────────────────────────────────
@@ -89,7 +86,7 @@ const WORKER_TEMPLATE_PRE = [
   '// ── safePostMessage wrapper: 统一 postMessage 防御（DataCloneError 等）──',
   '// Module-scope so the outer .then/.catch return/error handlers can use it.',
   '// context 取值约定（诊断标识）：固定为消息类型字面量——',
-  '// "agent-call" / "workflow-call" / "return" / "error"，调用方据此在日志里',
+  '// "agent-call" / "return" / "error"，调用方据此在日志里',
   '// 一眼定位是哪类 postMessage 失败。新增调用点必须传对应 context。',
   'function _safePost(msg, context) {',
   '  try { _parentPort.postMessage(msg); return true; }',
@@ -191,14 +188,6 @@ const WORKER_TEMPLATE_PRE = [
   '        } else {',
   '          pending.resolve(_value);',
   '        }',
-  '      }',
-  '    } else if (msg.type === "workflow-result") {',
-  '      const pending = _pendingCalls.get(msg.callId);',
-  '      if (pending) {',
-  '        _pendingCalls.delete(msg.callId);',
-  '        // [OR-3] 结果已到，清除 per-call 超时 timer（workflow() 当前不挂 timer，防御性对称清理）',
-  '        if (pending.timer) { clearTimeout(pending.timer); }',
-  '        pending.resolve(msg.result);',
   '      }',
   '    } else if (msg.type === "abort") {',
   '      // [OR-3] 主线程 abortRun/terminateRunningRuns 的优雅解阻广播：全部 pending',
@@ -402,22 +391,6 @@ const WORKER_TEMPLATE_PRE = [
   '    throw new Error("pipeline() expects pipeline([stage1, ...])");',
   '  }',
   '',
-  '  // ── workflow global — nested workflow invocation ──',
-  '  async function workflow(name, args) {',
-  '    if (typeof name !== "string" || name.length === 0) {',
-  '      throw new Error("workflow() requires a workflow name string as first argument");',
-  '    }',
-  '    const workflowArgs = (typeof args === "object" && args !== null) ? args : {};',
-  '    const callId = _callIdCounter;',
-  '    _callIdCounter++;',
-  '    if (!_safePost({ type: "workflow-call", callId, name, args: workflowArgs }, "workflow-call")) {',
-  '      return Promise.reject(new Error("postMessage failed for workflow-call (name=" + name + "): see workerLogs"));',
-  '    }',
-  '    return new Promise((resolve, reject) => {',
-  '      _pendingCalls.set(callId, { resolve, reject });',
-  '    });',
-  '  }',
-  '',
   '  // ── User workflow script ──',
 ].join("\n");
 
@@ -425,14 +398,14 @@ const WORKER_TEMPLATE_PRE = [
 const WORKER_TEMPLATE_POST = [
   '  // ── Auto-invoke execute() for module.exports pattern ──',
   '  if (typeof module !== "undefined" && module.exports && typeof module.exports.execute === "function") {',
-  '    return await module.exports.execute({ agent, parallel, pipeline, phase, log, workflow, $ARGS, $WORKSPACE, $BUDGET });',
+  '    return await module.exports.execute({ agent, parallel, pipeline, phase, log, $ARGS, $WORKSPACE, $BUDGET });',
   '  }',
   '})().then((result) => {',
   '  const runId = (_workerData.args && typeof _workerData.args === "object" && _workerData.args._runId) || "";',
   '  if (!_safePost({ type: "return", runId, result, workerLogs: _workerLogs }, "return")) {',
   '    // [F1] return 值不可克隆（含 function/Symbol/循环引用 → DataCloneError）时 _safePost',
   '    // 只能记日志返回 false——若不补救，worker 将静默 exit(0)，主线程收不到任何终态消息，',
-  '    // run 永久 running、runAndWait 悬挂。回发可克隆的 error 消息（DataCloneError 详情',
+  '    // run 永久 running、无终态。回发可克隆的 error 消息（DataCloneError 详情',
   '    // 已由 _safePost 记入 _workerLogs 随消息带回），让主线程 handleScriptError 接管，',
   '    // run 经既有重试矩阵收敛到终态 failed。',
   '    _safePost({ type: "error", runId, error: "Workflow return value could not be delivered (structured-clone failed) — see workerLogs for the postMessage error", workerLogs: _workerLogs }, "error");',

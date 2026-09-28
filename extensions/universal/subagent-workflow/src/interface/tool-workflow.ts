@@ -327,8 +327,7 @@ export async function actionRun(
     // [全路径自救指引] 清单逐条附绝对路径 location：run 的 name 形参最贴近的
     // 读取面就是本清单（<available_workflows> 注入面在 start 时已过时/可能不在
     // 上下文）——带 location 后失败一次即可按绝对路径自救。按名解析已退役
-    // （D4-1），location 是唯一活路；文案单源 = core launcher.workflowNotFoundMessage
-    //（与 runAndWait / executeNestedWorkflow 内层入口拒单同源）。
+    // （D4-1），location 是唯一活路；文案单源 = core launcher.workflowNotFoundMessage。
     throw new Error(await workflowNotFoundMessage(name, deps));
   }
 
