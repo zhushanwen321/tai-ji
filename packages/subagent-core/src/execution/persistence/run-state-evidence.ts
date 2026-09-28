@@ -5,7 +5,7 @@
 //
 // 为什么在这里：终局证据查询与保留期清理是持久化域的读侧与维护职责，与
 // record-store.ts / record-events.ts 同域；store 写身份退役后本模块不再持有
-// store 之名——journal（<runId>.events.jsonl）与 manifest（<runId>.json）是
+// store 之名——journal（<runId>.record.jsonl）与 manifest（<runId>.json）是
 // 判定与清理的事实源，state 快照文件只作为磁盘足迹的一部分被成对清理、
 // 不参与判定。
 //
@@ -84,7 +84,7 @@ export interface PruneStateDeps {
 // ② 判据②（无终态事件 ∧ 注册超窗 ∧ mtime 超阈值）默认不启用：阈值未实测校准前
 //    只走判据①。其镜像代价（崩溃后永不重开的会话 journal 滞留）经维护轮候选数
 //    日志监控——持续增长 = 启用判据②校准的反向触发信号（设计 D5 显式声明）；
-// ③ 清理对象按 run 粒度成对删 state 文件 + journal（<runId>.events.jsonl，存在才
+// ③ 清理对象按 run 粒度成对删 state 文件 + journal（<runId>.record.jsonl，存在才
 //    删）；record 域同判据清 <sa-id>.events 事件文件（manifest 不触碰，其独立
 //    30 天 TTL 归 session-file-gc，孤儿判定窗口不漂移）；
 // ④ 任何失败不抛（辅助清理降级不拖垮主链）：readdir 失败静默放弃本轮该域，单
@@ -266,7 +266,7 @@ async function pruneTerminalRunFootprint(
     }
     return result;
   }
-  // state 文件候选：wf-*.jsonl 且排除 journal（<runId>.events.jsonl——附属，不单独候选）
+  // state 文件候选：wf-*.jsonl 且排除 journal（<runId>.record.jsonl——附属，不单独候选）
   const stateNames = names.filter(
     (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(RUN_EVENT_JOURNAL_SUFFIX),
   );

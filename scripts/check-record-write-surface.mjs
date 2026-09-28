@@ -42,7 +42,7 @@
 //      已停写，新写点一律走 v2 条目构造器。
 //   R5 workflow-record v1 快照载荷形态拒绝（W1 新增，全域无豁免）：workflow-record
 //      写点窗口内出现 v1 快照形态标记（`v: 1` 载荷字面量 / toWorkflowRecordEntryData
-//      构造器 / snapshot 直传）即违规——含 R3 白名单宿主自身（三宿主的写点必须
+//      构造器 / snapshot 直传）即违规——含 R3 白名单宿主自身（五宿主的写点必须
 //      全部是 v2 形态，回潮 v1 快照即守卫红）。
 //   R6 entry 载荷死字节拒绝（W1 新增，全域无豁免）：append 条目调用窗口内出现
 //      `eventLog:` / `displayItems:` 字段写形态即违规（ADR-0078：运行态死字节
@@ -62,8 +62,8 @@
 //   - 常量定义：record-entry.ts（R2/R4 豁免）、workflow-record-entry.ts（R3 天然
 //     不命中——定义行无 append 调用）
 //   - run 族五写点宿主：worker-message-pump.ts / lifecycle.ts / 壳
-//     jsonl-run-store.ts / terminal-actions.ts（D15）/ resume-run.ts（D16）——原三写点+壳
-//     jsonl-run-store.ts（R3 豁免；R5/R6 在宿主内照常拦截）
+//     jsonl-run-store.ts / terminal-actions.ts（D15）/ resume-run.ts（D16）
+//     （R3 豁免；R5/R6 在宿主内照常拦截）
 //   - 事件文件双写者：record-events.ts / run-events.ts（R7 豁免）
 //   - notify-ledger 投递账 entry（NOTIFY_LEDGER_CUSTOM_TYPE）、reconcile-sweep
 //     注销 entry（发射点⑤）、pending:register/unregister 通道：customType 均非
@@ -321,7 +321,7 @@ export function scanRecordWriteSurface(roots) {
             `reportSubagentRecord（appendEntry 是 pi 全局通路，record 域 customType 限定唯一，D7 ②）。`,
         );
       }
-      // R3：workflow-record entry 写面白名单（三写点宿主外违规）。
+      // R3：workflow-record entry 写面白名单（五写点宿主外违规）。
       if (hasWorkflowType && !WF_ENTRY_HOST_FILES.has(rel)) {
         violations.push(
           `${rel}:${i + 1} [R3] customType "workflow-record" 的 entry 写出现在五写点宿主外——` +
@@ -331,7 +331,7 @@ export function scanRecordWriteSurface(roots) {
             `Recovery: 经 core run 写链（pump dispatch / 收编入口）落条目，勿在消费侧直写（ADR-0078）。`,
         );
       }
-      // R5：workflow-record v1 快照载荷形态（全域拒绝，含三宿主自身）。
+      // R5：workflow-record v1 快照载荷形态（全域拒绝，含五宿主自身）。
       if (hasWorkflowType && WF_V1_PAYLOAD_RE.test(window)) {
         violations.push(
           `${rel}:${i + 1} [R5] workflow-record 写点携带 v1 快照载荷形态（v:1 / snapshot 直传）——` +
