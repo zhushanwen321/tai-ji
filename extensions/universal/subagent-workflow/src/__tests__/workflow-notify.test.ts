@@ -523,7 +523,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
 // [P4 / D7] notifyDone 终局载荷扩展（impl-plan P4 验收条款 a：成功/失败/取消
 // 各恰好一条，载荷含 outcome / 结果摘要或 errorCode / 产物与 journal 指针）。
 // 覆盖面：三态 outcome 映射（completed→completed、failed→failed、aborted→
-// cancelled，mapDoneReasonToOutcome 与 core dispatchFinalRunSettle 同构）；
+// cancelled，与 core doneReasonToRunOutcome（dispatchFinalRunSettle 消费）同构）；
 // 成功载荷 resultSummary（bounded 截断）+ 指针面；失败载荷 errorCode（最后失败
 // call 的 failureKind）+ 证据指针、零 resultSummary；取消载荷零 errorCode /
 // 零 resultSummary（cancelled 无失败帧语义）；幂等键沿用 wf-done:<runId>、
