@@ -21,11 +21,7 @@ import { basename, join } from 'node:path'
 import type { ServerMessage } from '@taiji/shared'
 import {
   RELAY_PROTOCOL_VERSION,
-  RELAY_ENV_SOCKET,
-  RELAY_ENV_NODE,
-  RELAY_ENV_SCRIPT,
-  RELAY_ENV_SESSION_ID,
-  RELAY_ENV_RECORD_ID,
+  RELAY_ENV_SOCKET, RELAY_ENV_NODE, RELAY_ENV_SCRIPT, RELAY_ENV_SESSION_ID, RELAY_ENV_RECORD_ID,
 } from '@zhushanwen/subagent-core/relay-env'
 import {
   RELAY_FRAME_DIRS,

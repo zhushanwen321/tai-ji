@@ -31,11 +31,14 @@
 
 import type { SubagentStream } from "../execution/assembly/stream-sink.ts";
 import type { AgentEvent } from "../shared/agent-event.ts";
+import { getLogger } from "../core/logger.ts";
 import type { AgentCall } from "./models/agent-call.ts";
 import type { Budget } from "./models/budget.ts";
 import type { AgentRunner } from "./models/ports.ts";
 import type { Trace } from "./models/trace.ts";
 import type { AgentResult } from "./models/types.ts";
+
+const logger = getLogger("subagents");
 
 // ── 常量 ─────────────────────────────────────────────────────
 
@@ -48,7 +51,7 @@ const BACKOFF_EXPONENT_BASE = 2;
  * （生产默认 1000ms 逐字不变），供壳侧 e2e 压缩真实指数退避等待。与 worker-message-pump
  * 的 TAIJI_SUBAGENT_TEST_RETRY_BACKOFF_BASE_MS 分工不同：本 env 管 executeAgentCall 的
  * 单次 agent 调用失败重试退避，后者管 worker 崩溃后 rebuild runtime 的重建退避——两个
- * 失败面各自独立退避，env 名以 AGENT 段区分。仅显式设置时激活 + console.warn 留痕
+ * 失败面各自独立退避，env 名以 AGENT 段区分。仅显式设置时激活 + logger.warn 留痕
  * （解析形态对齐 worker-message-pump 先例）；backoffDelay 调用时读取（非模块顶层）——
  * 退避只在错误恢复路径消费，生产热路径零影响，测试无需在模块加载前设 env。
  */
@@ -65,7 +68,7 @@ function resolveBackoffBaseMs(): number {
   if (!Number.isInteger(parsed) || parsed <= 0) {
     if (!agentBackoffWarned) {
       agentBackoffWarned = true;
-      console.warn(
+      logger.warn(
         `[workflow] ${AGENT_RETRY_BACKOFF_BASE_ENV}="${raw}" is not a positive integer — ` +
           "test hook INACTIVE, production backoff base retained",
       );
@@ -74,7 +77,7 @@ function resolveBackoffBaseMs(): number {
   }
   if (!agentBackoffWarned) {
     agentBackoffWarned = true;
-    console.warn(
+    logger.warn(
       `[workflow] ${AGENT_RETRY_BACKOFF_BASE_ENV}=${raw} ACTIVE — agent retry backoff ` +
         "base overridden (test hook; NEVER set in production)",
     );

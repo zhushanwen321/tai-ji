@@ -55,7 +55,6 @@ import type { StreamSink, SubagentStream } from "./assembly/stream-sink.ts";
 // ResumeAnchor（引擎死亡分诊）已迁 run-orchestration。
 import type {
   AgentEvent,
-  AgentResult,
   ClosedReason,
   ExecuteOptions,
   ExecutionHandle,
