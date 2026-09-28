@@ -26,19 +26,18 @@
 
 // ── 终局证据读序（权威声明）──────────────────────────────────
 //
-// 「这个 run 终局了吗、怎么死的」在磁盘上有三个通道。各消费方（壳终局调和
-// reconcileRunningFinality / 注册表投影 run-registry / retention
-// pruneTerminalRunFiles）此前在各自注释里局部论述「谁在何时信哪个」，现单点
-// 收口于 journal 帧的定义处（本文件）。三通道角色与采信顺序（降序）：
+// 「这个 run 终局了吗、怎么死的」在磁盘上有三个通道。各消费方（注册表投影
+// run-registry / retention pruneTerminalRunFiles）此前在各自注释里局部论述
+// 「谁在何时信哪个」，现单点收口于 journal 帧的定义处（本文件）。三通道角色
+// 与采信顺序（降序）：
 //
 // 1. journal run-settled 帧（<runId>.events.jsonl，本文件词表）——最权威。一个
 //    run 恰好一帧、单写者（worker-message-pump 终局 coda）同步落账；活体状态
-//    查询、终局调和、注册表投影一律首选。保留期内恒可信；被 retention 裁剪后
-//    通道消失。
+//    查询、注册表投影一律首选。保留期内恒可信；被 retention 裁剪后通道消失。
 // 2. state 文件终态快照（<runId>.jsonl 末行 status/reason）——恢复投影。与
 //    journal 双写、天然可能过时（快照必漂移，见 EventEnvelope.ts 注释），仅当
-//    journal 通道缺席（已裁剪）时作降级终局证据（壳 reconcileRunningFinality
-//    的 2) 级读面）。
+//    journal 通道缺席（已裁剪）时作降级终局证据（读方 = runtime session 投影 /
+//    session-reader 家族链的 state 文件读取）。
 // 3. terminal manifest（<runId>.json 的 outcome/errorCode）——终局持久投影，
 //    不承载「怎么死的」的运行时判定。仅两个用途：retention 资格（outcome 非空
 //    = 已终局，pruneTerminalRunFiles 的单源锚定）与 abandon 终局化（run-registry

@@ -447,11 +447,10 @@ function actionStatus(deps: LauncherDeps): WorkflowExecuteResult {
 
 /**
  * [W2/V1 D1 分流表第 6 行] 单一判源函数（CLI 面显示/排序的混合判源收拢）：输出
- * 投影二值 status（running|done，值域与 v1 state.status 统一——对齐 runtime
- * projectV2Workflow 六态收窄二值先例）。判源 = core runSummary 投影（活体终局经
- * 进程内终局记录注册表判定、恢复路径写点 run 与 v1 存量条目经聚合 status 读——
- * v1 兼容层读面，W4 sunset），散落的等价分支形态不采用（D1 否决记录：散落分支
- * 在 grep 层不可区分，活体判据误用漏网）。
+ * 投影二值 status（running|done——对齐 runtime projectV2Workflow 六态收窄二值
+ * 先例）。判源 = core runSummary 投影（活体终局经进程内终局记录注册表判定、
+ * 恢复路径写点 run 经聚合 status 读），散落的等价分支形态不采用（D1 否决记录：
+ * 散落分支在 grep 层不可区分，活体判据误用漏网）。
  *
  * 排序键契约：STATUS_ORDER 权重表只消费本函数的二值输出（排序键不读 outcome
  * 四值——v1 两态值与 v2 四值不进同一权重表，排序语义不分裂）；outcome 细分由

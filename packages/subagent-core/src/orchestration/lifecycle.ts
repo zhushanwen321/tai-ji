@@ -609,8 +609,8 @@ export async function terminateRunningRuns(
  * 5. **边界不变式**：禁止按 Map 插入序直接淘汰——嵌套 workflow 父 run 创建最早、
  *    完成最晚，插入序淘汰会在其自身 onRunDone 同步裁剪中淘汰它，runAndWait 轮询
  *    窗口内 get 不到 → 误返 "Run not found"。
- * 6. **副作用边界**：只清内存 runs Map 与终局记录注册表，不动磁盘 state 文件、
- *    不删 workflow-state-link 指针条目、不发任何事件。
+ * 6. **副作用边界**：只清内存 runs Map 与终局记录注册表，不动磁盘 state 文件与
+ *    manifest、不发任何事件。
  *
  * @param runs per-session 的 run 注册表（原地裁剪）
  * @param keepDone 已终局 run 保留数（生产传 MAX_RETAINED_DONE_RUNS）
@@ -665,16 +665,6 @@ export interface RecoverCrashedRunsHooks {
    * （D4 序列：追加终态事件 → 补写条目 → 物化）。错误围栏与 onRunRecovered 同款。
    */
   appendSettledEntry?: (customType: string, data: unknown) => void;
-  /**
-   * [W1 / D4 收编定界] v2 注册条目定界注入面：runId 是否被 v2 注册条目定界
-   * （宿主 loadAll 扫主 session entry 时采出的 registered 集——pi 壳经
-   * JsonlRunStore.hasV2RegisteredEntry 供给）。设计 §3.3 D4：收编定界按注册
-   * 条目形态分流——true = v2 实体，收编走 journal dispatch 链（下方 appendSettledEntry
-   * 随行）；false / 未注入 = v1 快照条目实体（或宿主未接线定界），走 v1 兼容
-   * 旧分支（state 旁路直改，不落 journal / manifest / 条目——D7「旧会话行为
-   * 完全不变」，随 W4 sunset 退役）。
-   */
-  isV2RegisteredEntry?: (runId: string) => boolean;
 }
 
 /**
@@ -734,55 +724,48 @@ export async function recoverCrashedRuns(
 
   for (const run of loaded) {
     if (run.state.status === "running") {
-      // [W1 / D4 收编定界分流] 设计 §3.3 D4：收编定界按注册条目形态分流——v2
-      // 注册条目定界的实体走 journal 收编；v1 快照条目实体保留 W1 前旁路直改为
-      // 兼容层（决策记录 11：与 D7「旧会话行为完全不变」互斥矛盾的唯一解）。
-      const isV2Entity = hooks?.isV2RegisteredEntry?.(run.runId) === true;
       run.state.error = reason;
-      if (isV2Entity) {
-        // v2 实体：journal 收编先于 state 快照直改（事实源介质归位：run-settled 帧
-        // 经 settleRunAccounting 终局记录原语走状态机裁决 + manifest 物化——与活体
-        // 终局同一 dispatch 链，证据落点对称）。
-        // [W2/V1 D2/D3] outcome='interrupted'：进程死亡是被动终局（崩溃 ≠ 失败，
-        // 章程 D2 四值词表裁决）；kill 语境由 errorCode 承载（保持 extractFailedRunErrorCode
-        // 提取语义——重水合最小聚合无失败 call 时落 "unknown" 保守可诊断）。
-        // 双重启幂等由原语三面证据 + dispatch 链 fold-terminal 让位承接（terminal ×
-        // run-settled 表外转移 fail-fast，warn 后 state 快照恢复继续）；loadAll 侧
-        // 条目幂等由 settledEntries 抑制（壳 rebuildRunsFromJournals 双面证据拦截）。
-        // 失败围栏：journal IO / 坏链（IllegalTransitionError）留痕后继续 state 快照
-        // 恢复（A-5 语义降级不阻断——快照面照旧收敛 failed）。
-        try {
-          const errorCode = finalRunErrorCodeOf(run, "failed");
-          const record = {
-            outcome: "interrupted" as const,
-            ...(errorCode !== undefined ? { errorCode } : {}),
-            reason: run.state.error,
-            settledAt: Date.now(),
-          };
-          await settleRunAccounting(run, record);
-          hooks?.appendSettledEntry?.(
-            WORKFLOW_RECORD_CUSTOM_TYPE,
-            buildWorkflowRecordSettledEntryData({
-              runId: run.runId,
-              // [W2 D5] reason 经联合派生单点（interrupted → "failed" 诊断兜底容器，
-              // 细分语境由帧 errorCode 保留可辨）。
-              reason: runSettledOutcomeToDoneReason(record.outcome, record.errorCode),
-              outcome: record.outcome,
-              ...(record.errorCode !== undefined ? { errorCode: record.errorCode } : {}),
-              settledAt: record.settledAt,
-              callCount: run.state.calls.size,
-              usedTokens: run.state.budget.usedTokens,
-            }),
-          );
-        } catch (err) {
-          const msg = toErrorMessage(err);
-          logger.warn(
-            `[workflow] recoverCrashedRuns journal settle failed for run ${run.runId} (state recovery continues): ${msg}`,
-          );
-        }
+      // journal 收编先于 state 快照直改（事实源介质归位：run-settled 帧经
+      // settleRunAccounting 终局记录原语走状态机裁决 + manifest 物化——与活体
+      // 终局同一 dispatch 链，证据落点对称）。
+      // [W2/V1 D2/D3] outcome='interrupted'：进程死亡是被动终局（崩溃 ≠ 失败，
+      // 章程 D2 四值词表裁决）；kill 语境由 errorCode 承载（保持 extractFailedRunErrorCode
+      // 提取语义——重水合最小聚合无失败 call 时落 "unknown" 保守可诊断）。
+      // 双重启幂等由原语三面证据 + dispatch 链 fold-terminal 让位承接（terminal ×
+      // run-settled 表外转移 fail-fast，warn 后 state 快照恢复继续）；loadAll 侧
+      // 条目幂等由 settledEntries 抑制（壳 rebuildRunsFromJournals 双面证据拦截）。
+      // 失败围栏：journal IO / 坏链（IllegalTransitionError）留痕后继续 state 快照
+      // 恢复（A-5 语义降级不阻断——快照面照旧收敛 failed）。
+      try {
+        const errorCode = finalRunErrorCodeOf(run, "failed");
+        const record = {
+          outcome: "interrupted" as const,
+          ...(errorCode !== undefined ? { errorCode } : {}),
+          reason: run.state.error,
+          settledAt: Date.now(),
+        };
+        await settleRunAccounting(run, record);
+        hooks?.appendSettledEntry?.(
+          WORKFLOW_RECORD_CUSTOM_TYPE,
+          buildWorkflowRecordSettledEntryData({
+            runId: run.runId,
+            // [W2 D5] reason 经联合派生单点（interrupted → "failed" 诊断兜底容器，
+            // 细分语境由帧 errorCode 保留可辨）。
+            reason: runSettledOutcomeToDoneReason(record.outcome, record.errorCode),
+            outcome: record.outcome,
+            ...(record.errorCode !== undefined ? { errorCode } : {}),
+            settledAt: record.settledAt,
+            callCount: run.state.calls.size,
+            usedTokens: run.state.budget.usedTokens,
+          }),
+        );
+      } catch (err) {
+        const msg = toErrorMessage(err);
+        logger.warn(
+          `[workflow] recoverCrashedRuns journal settle failed for run ${run.runId} (state recovery continues): ${msg}`,
+        );
       }
-      // v1 实体（含宿主未注入定界的保守形态）：W1 前旁路直改（D7 兼容层——不落
-      // journal / manifest / 条目，随 W4 sunset 退役），此处仅 state 面收敛 failed。
+      // state 面收敛 failed（journal 收编后的快照直改——终态与恢复 reason 落盘）。
       run.transition("done", "failed");
       // [OR-8] 重水合 running 快照可携带 in-flight call（崩溃瞬间的 running 节点）——
       // 终态收口为 cancelled，先收口再落盘
