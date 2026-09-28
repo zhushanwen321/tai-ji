@@ -25,7 +25,7 @@ taiji 与 pi 之间的私有语义适配收敛为四支柱：① 能力注册表
 ### ADR-0062 单一数据 owner + 绝对写规则
 pi 当前持有的 session JSONL 唯一写方是 pi 进程——taiji 任何代码永不直写，能力缺口由 pi 扩展在 pi 进程内补齐。三类登记在案的合法边界形态：sidecar 家族四后缀（.meta/.preset/.project/.handoff.json，写前 existsSync 检查）、fork 文件创建型、restore-time 归一化 rename-over（inactive-only、白名单变换、每文件一次）。标量状态复制模式 = 快照拉取 + 事件只做失效（事件永不直写数据）。登记表 SSOT：[docs/architecture/data-source-registry.md](../architecture/data-source-registry.md) + `replicated-states.config.ts`（新数据 = 新配置条目）。登记 C-pi-07、C-data-01。
 
-### ADR-0065 btw 旁路提问：派生临时会话形态
+### ADR-0083 btw 旁路提问：派生临时会话形态
 btw 旁路提问（主对话旁开 drawer 辅助对话流）的会话形态定案（2026-09-22 定案，2026-09-23 交付）：① 每条 btw 线 = 主会话当前进度的 **pi 原生 fork 全树快照**（`--fork` + `--session-dir`，含分支；不复用 session-fork.ts 单路径截断），跑在独立 pi 进程；源状态三分支（正常 / 无快照线（fork throw → 回落无 fork 新建 spawn，宿主零直写）/ 截断快照）；② 虚拟 ID 第三家族 `btw:<piSessionId>` 两段式（与 pi id 零冲突契约：真 sid 禁冒号、虚拟 id 永含冒号；派生键第二段 = owner piSessionId，INVAR-1.1 强制化 + 生产值域断言）；③ 持久化 = 目录即关联（`btw/<encodeCwd>/<mainSid>/`，注册表启动重建 hidden 复原）+ 重载链（applyEntry 全量回放；离线尾读含 btw 目录解析路径）+ 孤儿补账；仅主删级联删（deleteSession / deleteByCwd 连带）/ 显式关线，关闭/退出/闲置回收均不删；④ G4 三防线（目录隔离 / `hidden: true` / 不记工作区历史）——关联只服务生命周期与自身线列表，不进任何展示链；⑤ 派生资源边界（zcode selection side chat 先例对照）：命令族硬禁 + 派发能力保留 + 投影收窄（无 opener）+ 派生键三触发分层（失效保留 / 终结清除 / btw 驱逐同驱）+ model-only 行为契约注入；⑥ 挂起交互请求终态机（应答 / 撤回 / 失效 + 回收提醒/未读清除支），失效提示三路收敛——事件 invalidated 与快照对账差集两路写入收敛单入口 + 回放悬空对账独立路（信号源 = pi 会话文件持久层，不依赖内存簿记跨进程存活）；交互呈现现行形态 = **D8 降级启用**（V4 核实三通道抽离的 plan 通道不成立）：五类请求统一 drawer 内联确认条 + 富表单降档，三通道 per-vid 路由为未启用备手（产品意图仍为与主 agent 同形态保真，plan-store 分区化后可复评启用）。权威源：`.tmp/tech-design/btw-question.md`（设计文档，不入 git；实施记录 git 可追溯）。登记：数据面见 data-source-registry ⑧ btw 补登链；未新增约束族（机制边界由既有 C-ext-19 / C-pi-12/13 / C-data-01 等覆盖）。
 
 ## 通信与协议
@@ -238,10 +238,10 @@ skill 候选两态统一 taiji 源：globalSkills ∪ projectSkills（location �
 ### ADR-0066 太极·玄纯灰 V3（唯一现行视觉 ADR）
 全族去冷蓝换纯灰（bg/surface/neutral/border 同步），accent 中亮灰 #cfcfd4，状态色保留极弱色相（M/A/D badge 语义辨识下限）。值权威 = `packages/renderer/src/style.css`（暗色默认，亮色 [data-theme=light] 镜像）。视觉演化史见 [docs/design-evolution.md](../design-evolution.md)。
 
-### ADR-0067 Overview 视图整体移除
+### ADR-0084 Overview 视图整体移除
 用户裁决 Overview（多会话鸟瞰）不应在任何地方存在，全链路删除（组件/路由 view/入口链/i18n/测试）。背景：入口早已收敛（v6 D14 移除 sidebar 按钮，仅 ⌘K 命令面板 go-overview 可达），实态为 v1 骨架无真实用户价值。替代形态：会话切换与统筹由 Sidebar Session List + ⌘K 搜索满足；后台任务可见性由侧栏 Agents/Flows 视图 + 通知体系承担。连带删除唯一消费者 sessionDigest 派生（useSessionDerivations）。
 
-### ADR-0068 TTFT 首字延迟锚点与聚合口径
+### ADR-0085 TTFT 首字延迟锚点与聚合口径
 锚点 = pi `turn_start`（移出 adapter NULL_EVENTS → 新中间事件 `llm-request-start`，逐 LLM 请求 emit；含 context transform/steering 注入段，**不含原生 auto-compaction**（prepareNextTurn 内、先于锚点）与工具执行）；首输出结算 = adapter 单点产 `llm-first-output`（text/thinking/toolcall start 三子类型），**interpreter 侧 delta/tool-call 兜底钩否决**（pi-ai 全部流式实现凡产 delta 必先产 `*_start`，兜底无服务对象且挂最高频路径）；聚合 = **p50 中位数**（延迟重尾，速度口径的加权均值不适用）；存储 = 独立 ttft 日文件单元素组，校验签名参数化（元组长度入参，默认 2 不降既有强度）。已否方案：B 锚 message_start（缺网络段系统性偏小）/ C 锚前端 dispatch（无工具循环锚）。pi 语义前提登记探针 PS-46/47（pi bump 门禁复验）。实装 `runtime/services/session/event-interpreter-gen-stats.ts` + `gen-stats-store.ts`；设计 SSOT `docs/design/composer-genstats-ttft.md`。
 
 ### ADR-0070 scheduler widget 推送减频与帧双职责显式接管（2026-09-21 设计裁决）
@@ -264,7 +264,7 @@ widget 推送从「每 30s 无条件全量」改为**任务集指纹跳推**（�
 - **ADR-0017**（digest）traffic light safe-zone v2——数值 SSOT 现为 DESIGN.md §11。
 - **ADR-0061**（digest）cw store repo 级键控——被 coding-workflow 仓库方案取代。
 
-### ADR-0074 项目 skill 实体迁 workspace 根，脱离 git 分支版本化（2026-09-25 设计裁决）
+### ADR-0086 项目 skill 实体迁 workspace 根，脱离 git 分支版本化（2026-09-25 设计裁决）
 `.agents`（42 skills + workflows）不再被 git 跟踪：实体唯一一份放 workspace 根 `<workspace>/.agents/`（非 git 仓库），各 worktree 经 symlink `../.agents` 共享——任一现场改动全部 worktree 实时生效，构造性消除「skill 随分支版本化 vs 横切工具需要恒定」的根因冲突。**判据裁决（两刀）**：刀一 = 开发阶段工具 vs 产品能力（scripts/.githooks/CI 实测整体属开发工具——产品运行时源码零引用）；刀二 = 在不在代码变更传播链上——检查/测试/构建/CI 被代码变更强制拉动（拉不动 = 假红/假绿/构建崩），必须版本化锁同代、随分支流动是正确语义；skill 对代码只有操作入口引用，不同步的失效温和、可见、有人工裁决缓冲，可独立版本化。`.agents` 是唯一刀一链外 + 刀二链外 + 发现层 symlink 友好的资产（`.zcode/agents/` 过两刀但 host 桌面 app agent 发现 root lstat 零容忍，维持现状；`.githooks`/`scripts`/`.github` 卡刀二——各分支检查与该分支代码配套，统一刷平 = 2026-09-11 [HISTORICAL] 事故形态复刻，实测 8 个活工作线各领先 dev-0.10.5 17–58 commits，故不做全量基底刷平，检查/快照配套仅落活跃分支随 merge 自然传播）。**配套**：备份 = `refs/skills-snapshot` 快照 ref（`.githooks/snapshot-skills.sh`：临时 index + commit-tree 不碰工作树，空树防御防好快照被覆盖，push 超时降级链 timeout→perl→跳过，remote 自适应 github/origin）；pre-commit 第 0 段 = symlink 三分支判定（常态跳过 / 缺失幂等补建 / 真实目录等异态停手指引，bisect/detached 专用指引禁 merge）；CI（invariants + test-extensions 两 job）从 snapshot ref 物化 `.agents` 后再跑检查读点（snapshot 缺失 fail-fast 给指引）；git-cwt setup-worktree.sh 加部署段（补建/跳过/未迁移分支保留真实目录）。实体初版构成 = dev-0.10.5 侧全量 + main 侧 pi 内置版 pr-lifecycle（用户裁决 main 为最终版）− 退役 zsw 版 `.agents/workflows/pr-lifecycle.js`。已知形态：检出未迁移 ref/tag（v0.10.4 等）时 git 静默把 symlink 替换为旧内容真实目录——第 0 段③停手指引（该分支先落迁移 commit 或确认丢弃重建）。设计 SSOT `.tmp/tech-design/cross-worktree-skill-sync.md`（过程产物）；迁移 commit = 2133009f9（dev-0.10.5 试点）等 8 分支。
 
 ### ADR-0077 workflow 步骤视图数据源 = runtime 合并投影（2026-09-25 设计裁决）

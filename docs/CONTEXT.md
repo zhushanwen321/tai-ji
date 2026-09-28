@@ -244,7 +244,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 
 ### ~~Panel Grid~~（v3 已废弃）
 
-> **废弃说明**：v3 重构后窗口内最多双 Panel（主从模式），不再需要“全局 panel 缩略图网格”。鸟瞰形态已随 Overview 视图整体移除而消亡（见 [ADR-0067](adr/decisions.md)），会话统筹由 Sidebar Session List 承担。旧 `overviewVisible`/`toggleOverview` 等代码引用待清理。
+> **废弃说明**：v3 重构后窗口内最多双 Panel（主从模式），不再需要“全局 panel 缩略图网格”。鸟瞰形态已随 Overview 视图整体移除而消亡（见 [ADR-0084](adr/decisions.md)），会话统筹由 Sidebar Session List 承担。旧 `overviewVisible`/`toggleOverview` 等代码引用待清理。
 
 ~~全局面板网格视图。展示所有 Panel 的缩略图，类似 macOS Mission Control / Windows Task View。用于快速定位和跳转 Panel。~~
 
@@ -254,7 +254,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 **命名约定**: "Panel" 统一指 Session 的视口（即代码中的 `Panel` / `PanelLeaf` / `PanelTree`，`packages/renderer/src/stores/panel.ts`），不用于其他含义。
 
 ### Run record 事件流（workflow 域）
-workflow run 的唯一持久化：`<sessionDir>/workflow-state/<runId>.record.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），append-only JSONL 逐行记录 run 生命周期事件（[ADR-0082](adr/decisions.md) 对齐 pi 后 9 事件：`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`，事件行携带单调 seq；`run-created` 带 scriptSource 全文、`agent-settled` 带 result 全文与 sessionFile）。`agent-started` 载荷携带 `phase?`（call 归属快照——fold 推导无需回溯转移事件）与 `memberRecordId?`（[D6] 绑定字段——同名续写路由）；`phase-started`/`phase-settled` 是 phase 状态机转移事件（[D3]——worker 模板 `phase()` 经 postMessage 写入 record，异步丢失窗口由 fold 自愈规则承接）。run 生命周期四态 + interrupted 暂停态（`created → running → settling → terminal`；`running/settling → interrupted → resume → running`）——interrupted 非 终局（run-interrupted 转移帧，可续跑）；终局 outcome 四值 `done/failed/cancelled/time_limited`。manifest（`<runId>.json`）降格为 run-settled 终局事件的派生缓存。判读 = record fold 唯一权威（注册表投影 / 终局诊断引用 / resume 资格全部折叠）。由显式状态机单点写入（terminal-actions.ts 的 dispatchRunTrigger 单写者链），引擎不直接写。无主 run 的磁盘清理走对账清理（裁决点 7：引用集三代解析 + 宽限窗——run 数据生命周期跟随 session 归属）。
+workflow run 的唯一持久化：`<sessionDir>/workflow-state/<runId>.record.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），append-only JSONL 逐行记录 run 生命周期事件（[ADR-0082](adr/decisions.md) 对齐 pi 后 9 事件：`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`，事件行携带单调 seq；`run-created` 带 scriptSource 全文、`agent-settled` 带 result 全文与 sessionFile）。`agent-started` 载荷携带 `phase?`（call 归属快照——fold 推导无需回溯转移事件）与 `memberRecordId?`（[D6] 绑定字段——同名续写路由）；`phase-started`/`phase-settled` 是 phase 状态机转移事件（[D3]——worker 模板 `phase()` 经 postMessage 写入 record，异步丢失窗口由 fold 自愈规则承接）。run 生命周期四态 + interrupted 暂停态（`created → running → settling → terminal`；`running/settling → interrupted → resume → running`）——interrupted 非终局（run-interrupted 转移帧，可续跑）；终局 outcome 四值 `done/failed/cancelled/time_limited`。manifest（`<runId>.json`）降格为 run-settled 终局事件的派生缓存。判读 = record fold 唯一权威（注册表投影 / 终局诊断引用 / resume 资格全部折叠）。由显式状态机单点写入（terminal-actions.ts 的 dispatchRunTrigger 单写者链），引擎不直接写。无主 run 的磁盘清理走对账清理（裁决点 7：引用集三代解析 + 宽限窗——run 数据生命周期跟随 session 归属）。
 
 ### run/record 状态词表（W2 收敛 + 生命周期重构，[ADR-0080](adr/decisions.md) / [ADR-0082](adr/decisions.md)）
 run 与 record 两域状态词表的单源口径，消费方按维取值、禁止跨维混用：

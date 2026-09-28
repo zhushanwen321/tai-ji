@@ -481,8 +481,8 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 
 ### 14. closedReason:"gc" 是统一终态占位，不是故障（2026-08-27 事故 A）
 
-- **机制**：pi 的 session close 事件把 done/failed/crashed 等全部终态统一坍缩为 `closed + closedReason:"gc"`——"gc" 是「非用户主动关闭」的占位终态，不代表垃圾回收、不代表异常
-- **处置建议**：看到它先别当故障查——**看 outcome 字段**（completed / failed / cancelled 一等字段）判成败，禁止对 closedReason 做 switch 推导（历史上下游三处同构各自重新推导成败，是「写入时坍缩」问题类的温床）；若消费方还在读 closedReason 判成败，改为消费 outcome。（暂无 PS 互链：机器登记层未收录该语义锚点，补登记留待后续）
+- **机制**：pi 的 session close 事件把 done/failed/crashed 等全部终态统一改写为 `closed + closedReason:"gc"`——"gc" 是「非用户主动关闭」的占位终态，不代表垃圾回收、不代表异常
+- **处置建议**：看到它先别当故障查——**看 outcome 字段**（completed / failed / cancelled 一等字段）判成败，禁止对 closedReason 做 switch 推导（历史上下游三处同构各自重新推导成败，是「写入时合并终态、丢失区分度」问题类的温床）；若消费方还在读 closedReason 判成败，改为消费 outcome。（暂无 PS 互链：机器登记层未收录该语义锚点，补登记留待后续）
 
 ### 15. dev 实例数据目录共享污染（R-13，已修复：受控采信）
 
@@ -517,7 +517,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **判定姿势**：run 卡死/终态异常先读 journal 事件序列对照合法转移表——① 缺 `run-settled` 事件 = run 未终局（查 pump 日志）；② schema 任务缺 `armed` 事件 = 武装回执未达（宿主等待窗 fail-fast 先行，查引擎侧武装断言与扩展装载）；③ debug 日志 `run event dispatch yielded (runId=...)` = 表外转移让位，常见根因是派发链 runId 键错、事件落进占位键（旁证：binding sidecar `.record-binding` 的 `parentRunId` 为 `sar-unattached` 占位而非真实 runId = 未走 workflowAgentDispatch 通道）。
 - **注册表投影**：run 列表态 = journal fold（四相 missing/active/terminal/interrupted），不看文件 mtime；journal 缺失即 missing 相，手工挪动/删除 journal 文件直接改变投影结果。
 
-### 22. 项目 skill 实体（.agents）排障：symlink 形态判定 / 实体还原 / 检出旧 ref 脱钩（2026-09-25 ADR-0074）
+### 22. 项目 skill 实体（.agents）排障：symlink 形态判定 / 实体还原 / 检出旧 ref 脱钩（2026-09-25 ADR-0086）
 
 - **现状**：`.agents` 实体唯一一份在 workspace 根（`<workspace>/.agents/`），各 worktree 经 symlink 共享，git 不跟踪（`git status` 干净是常态）。backup = `refs/skills-snapshot`（pre-commit 尾部段自动维护；远端同名 ref = 跨机器权威备份点）。
 - **判定姿势**：`ls -la .agents` 应显示 `-> ../.agents`；`git ls-files .agents | wc -l` 应为 0。commit 被第 0 段拦下时按错误信息分派：symlink 悬空 = 实体丢失（走还原）；symlink 指错目标 = 重建（`rm .agents && ln -sfn ../.agents .agents`）；`.agents` 是真实目录 = 该分支检出的是迁移前内容（先落迁移 commit 再删目录重建；bisect/detached 态直接 `rm -rf .agents && ln -sfn ../.agents .agents` 后 continue——禁 merge，会污染 bisect 序列）。
