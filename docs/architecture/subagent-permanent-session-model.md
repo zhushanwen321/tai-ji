@@ -53,7 +53,7 @@
 - **zcode 引擎**：subagent 可以选两种执行引擎之一。pi 引擎有上述独立 transcript 文件；zcode 引擎把对话存在自己的 SQLite 会话库里，宿主侧**没有**独立文件——这就是「zcode 续聊结构性不成立」的根源（见 §2.3）。
 - **状态机**：record 的 `status` 字段。现状 `running | closed` 两值，closed 再挂七值 `closedReason`。
 - **锚（anchor / transcript ref）**：record 指向 transcript 的指针。pi 形态 = 子 session 文件路径；本设计为 zcode 引入 = 会话库 session id + 库路径。
-- **close 收敛与内存回收（evicted）**：本设计原把「收起（archived 意愿位）」与「内存回收」拆为两个概念；**archived 意愿位已随 2026-09-16 裁决删除**——close 现为资源终态写点（`markSettledOut`），record 不再从列表隐藏（用户可见状态只有进行中 / 已结束两桶）；**内存回收** = 容量管理（idle 超过 30 天，宿主把 record 移出内存，用户不可见，磁盘数据不动）。
+- **close 收敛与内存回收（evicted）**：本设计原把「收起（archived 意愿位）」与「内存回收」拆为两个概念；**archived 意愿位已随 2026-09-16 裁决删除**——close 现为资源终态写点（`markSettledOut`），record 不再从列表隐藏（用户可见状态只有进行中 / 已结束两桶）；**内存回收** = 容量管理（idle 超过 30 天，宿主把 record 移出内存，用户不可见，磁盘数据不动）——**该机制已退役（30 天定时器内存回收机制退役，[ADR-0081](../adr/decisions.md)）**：idle record 驻留宿主内存至进程退出（有界：session 结束全清）。
 - **写权声明（`.alive` marker）**：一个跨进程互斥小文件（内容 = 持有进程 pid），防两个宿主进程同时写同一份 transcript。H4 已把它定义为「跨进程写权声明」（母设计 D3）。
 
 ### 1.3 设计目标（从使用者体验倒推）
