@@ -520,8 +520,9 @@ export function setupWorkflowDomain(
   //  store 收尾：每 session 的 JsonlRunStore 在 terminateRunningRuns 之后 dispose（刷
   //  pending 去抖批 + await in-flight 链，见 W2C5）。R3 声明：SIGTERM/SIGINT 走
   //  组合根 process handler 不触发本路径，pending 去抖丢失等价崩溃链（重启后 kill-9
-  //  恢复收编 running 残留——终态/创建均冷路径已落盘，丢的只有 ≤saveDebounceMs 的
-  //  running 尾巴，ES1 已接受）；不做 best-effort SIGTERM dispose（需同步 IO 改造，
+  //  恢复收编 running 残留——终态/创建均冷路径已落盘，丢的只有最后一次成功物化之后
+  //  的 running 尾巴（边沿防抖窗口内有批未物化时同属此列），ES1 已接受）；不做
+  //  best-effort SIGTERM dispose（需同步 IO 改造，
   //  超出 wave 边界）。
   // ════════════════════════════════════════════════════════════
   pi.on("session_shutdown", async (event: SessionShutdownEvent, _ctx: ExtensionContext) => {
