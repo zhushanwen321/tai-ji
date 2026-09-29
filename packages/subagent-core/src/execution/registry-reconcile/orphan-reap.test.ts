@@ -18,6 +18,8 @@
 // 测试纪律：全部 mkdtempSync 自建自删（禁触真实数据目录）；时钟经 options.now
 // 注入（确定性）；reap 不读 record 内容（候选按文件名 / 引用按注入 / 时间按
 // mtime 与登记），fixture 手写文件即可。
+// - 登记文件损坏路径：一次性损坏自愈（空表重登记 + 轮末原子重写）、损坏读
+//   warn 出声（观测面）、ENOENT 静默（不存在 ≠ 损坏的语义区分钉）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -236,5 +238,61 @@ describe("场景 19：对账清理存量形态与接管保护（裁决点 7）",
     expect(warnCalls.some((m) => m.includes("alive reference collection failed"))).toBe(true);
     // 无登记写达（引用不可知 ≠ 判无主——不进观察期）
     expect(readRegistry()).toEqual({});
+  });
+});
+
+describe("登记文件损坏路径（观测面 + 一次性自愈）", () => {
+  /** 把登记文件写坏（非法 JSON——readOrphanReapRegistry 的损坏读形态）。 */
+  function corruptRegistry(): void {
+    fs.writeFileSync(path.join(stateDir, "orphan-run-reap.json"), "{corrupted-not-json", "utf8");
+  }
+
+  it("一次性损坏自愈：损坏轮按空重登记（超窗孤儿宽限窗重起不删），轮末原子重写为合法 JSON；次轮重置窗内仍不删", async () => {
+    seedRunFootprint("wf-stale");
+    const now = 1_700_000_000_000;
+    const grace = 604_800_000;
+    // 预置正常登记：首判在 8 天前（超 7 天宽限窗——若无损坏，本轮即删）
+    fs.writeFileSync(
+      path.join(stateDir, "orphan-run-reap.json"),
+      JSON.stringify({ "wf-stale": now - 8 * 86_400_000 }),
+      "utf8",
+    );
+    ageFootprint("wf-stale", now - 8 * 86_400_000); // 与门第二臂同样满足（mtime 距 now 8 天）
+    corruptRegistry(); // 跑前写坏——「预置超窗登记 + 损坏读」的合成形态
+    const { deps } = makeDeps(new Set<string>());
+
+    // 损坏轮：读坏 → 空表重登记 → 宽限窗重起（firstSeen = 损坏轮时刻）→ 不删
+    const first = await reapOrphanRuns({ stateDir }, deps, { graceWindowMs: grace, now });
+    expect(first).toMatchObject({ scanned: 1, skippedGraceWindow: 1, reaped: 0 });
+    for (const name of footprintNames("wf-stale")) expect(fileExists(name)).toBe(true);
+    // 登记锚重置为损坏轮时刻；readRegistry 的 JSON.parse 不 throw = 轮末原子重写已落合法 JSON
+    expect(readRegistry()).toEqual({ "wf-stale": now });
+
+    // 次轮（登记已合法）：重置后的宽限窗内（3 天 < 7 天）仍不删，登记锚不漂移
+    const second = await reapOrphanRuns({ stateDir }, deps, { graceWindowMs: grace, now: now + 3 * 86_400_000 });
+    expect(second.reaped).toBe(0);
+    for (const name of footprintNames("wf-stale")) expect(fileExists(name)).toBe(true);
+    expect(readRegistry()).toEqual({ "wf-stale": now });
+  });
+
+  it("损坏读 warn 出声：消息含登记文件路径与空重登记语义（观测面——损坏循环可见）", async () => {
+    seedRunFootprint("wf-corrupt");
+    corruptRegistry();
+    const { deps, warnCalls } = makeDeps(new Set<string>());
+
+    await reapOrphanRuns({ stateDir }, deps, { graceWindowMs: 604_800_000, now: 1_700_000_000_000 });
+
+    const msg = warnCalls.find((m) => m.includes("orphan-run-reap.json"));
+    expect(msg).toBeDefined();
+    expect(msg).toContain("re-registering");
+  });
+
+  it("ENOENT 静默：无登记文件的首轮不出损坏 warn（不存在 = 正常空态，非损坏）", async () => {
+    seedRunFootprint("wf-fresh");
+    const { deps, warnCalls } = makeDeps(new Set<string>());
+
+    await reapOrphanRuns({ stateDir }, deps, { graceWindowMs: 604_800_000, now: 1_700_000_000_000 });
+
+    expect(warnCalls).toEqual([]);
   });
 });

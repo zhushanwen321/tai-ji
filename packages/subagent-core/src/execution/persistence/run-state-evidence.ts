@@ -677,21 +677,55 @@ function writeAtomicJson(fullPath: string, value: unknown): void {
   renameSync(tmp, fullPath);
 }
 
-/** 读登记状态（损坏按空重登记——宁保留方向：登记丢失只会延后删除，不会提前）。 */
-function readOrphanReapRegistry(stateDir: string): OrphanReapRegistry {
+/**
+ * 读登记状态（损坏按空重登记——宁保留方向：登记丢失只会延后删除，不会提前）。
+ *
+ * ENOENT 静默返回空表（首轮无登记的正常空态——不存在 ≠ 损坏）；其余读失败 /
+ * 损坏 JSON / 非登记表结构 warn 留证后按空表返回——持续损坏 = 宽限窗反复重起
+ * 的循环，无 warn 则该循环不可见（观测面）。
+ */
+function readOrphanReapRegistry(
+  stateDir: string,
+  deps: Pick<OrphanRunReapDeps, "warn" | "toMsg">,
+): OrphanReapRegistry {
+  const fullPath = join(stateDir, ORPHAN_REAP_REGISTRY_FILE);
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(join(stateDir, ORPHAN_REAP_REGISTRY_FILE), "utf8"));
-    if (typeof parsed === "object" && parsed !== null) {
-      const out: OrphanReapRegistry = {};
-      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
-      }
-      return out;
-    }
-  } catch {
-    // ENOENT（首轮无登记）/ 损坏 JSON → 空表重登记
+    parsed = JSON.parse(readFileSync(fullPath, "utf8"));
+  } catch (err) {
+    if (isEnoentError(err)) return {}; // 首轮无登记——正常空态，静默
+    warnCorruptOrphanReapRegistry(fullPath, deps.warn, deps.toMsg(err));
+    return {};
   }
-  return {};
+  if (typeof parsed !== "object" || parsed === null) {
+    // 合法 JSON 但非登记表结构（原始值/数组）——后果与损坏 JSON 同路（空表重
+    // 登记 + 宽限窗重起），同走 warn 观测面
+    warnCorruptOrphanReapRegistry(
+      fullPath,
+      deps.warn,
+      `unexpected registry shape (parsed ${Array.isArray(parsed) ? "array" : typeof parsed})`,
+    );
+    return {};
+  }
+  const out: OrphanReapRegistry = {};
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+  }
+  return out;
+}
+
+/** 损坏登记的观测面 warn（单点文案：文件路径 + 空重登记语义 + 恢复指引）。 */
+function warnCorruptOrphanReapRegistry(
+  fullPath: string,
+  warn: (msg: string) => void,
+  detail: string,
+): void {
+  warn(
+    `orphan reap: registry read failed or corrupted, re-registering from empty ` +
+      `(registered runs restart their grace windows — keep-not-delete; deletion is deferred, never advanced): ` +
+      `${fullPath}: ${detail}. If this recurs, check disk and filesystem health; the file is safe to ` +
+      `delete — the next reconcile round rebuilds it.`,
+  );
 }
 
 /** 三件（record 流 + manifest + 旧双源）+ .resume.lock 的存在性探测（mtime 取最大——与门输入）。 */
@@ -820,7 +854,7 @@ export async function reapOrphanRuns(
   // 登记状态读（IO 失败整轮降级——无登记不删，防宽限锚丢失后首轮即删）
   let registry: OrphanReapRegistry;
   try {
-    registry = readOrphanReapRegistry(stateDir);
+    registry = readOrphanReapRegistry(stateDir, deps);
   } catch (err) {
     deps.warn(`orphan reap: registry read failed, round skipped: ${deps.toMsg(err)}`);
     return result;
