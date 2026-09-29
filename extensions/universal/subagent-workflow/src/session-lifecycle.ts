@@ -111,14 +111,22 @@ function getCachedMainSessionFile(): string | undefined {
  * extension ctx 持有的 sessionManager 若尚未重绑到 root session，getSessionFile
  * 仍回旧值（与 E2E 实测一致）。clone v0.84.2 核对，实装 0.84.4。
  */
+/** sessions 根下的 encoded-cwd slug 子目录绝对路径列表（布局锚点 = `<agentDir>/sessions`
+ *  对齐 pi 实装 getSessionsDir，详注见 resolveMainSessionFileById 与
+ *  collectAliveWorkflowRunReferences）。readdir 失败原样上抛——错误分通道
+ *  （catch-all 回落 / ENOENT 空态分流）归各调用方。 */
+function listSessionSlugDirs(agentDir: string): string[] {
+  const sessionsRoot = path.join(agentDir, "sessions");
+  return fs
+    .readdirSync(sessionsRoot, { withFileTypes: true })
+    .filter((ent) => ent.isDirectory())
+    .map((ent) => path.join(sessionsRoot, ent.name));
+}
+
 function resolveMainSessionFileById(sessionId: string): string | undefined {
-  const sessionsRoot = path.join(getAgentDir(), "sessions");
   let slugDirs: string[];
   try {
-    slugDirs = fs
-      .readdirSync(sessionsRoot, { withFileTypes: true })
-      .filter((ent) => ent.isDirectory())
-      .map((ent) => path.join(sessionsRoot, ent.name));
+    slugDirs = listSessionSlugDirs(getAgentDir());
   } catch {
     return undefined;
   }
@@ -231,12 +239,9 @@ async function collectAliveWorkflowRunReferences(
   agentDir: string,
 ): Promise<ReadonlySet<string>> {
   const refs = new Set<string>();
-  const sessionsRoot = path.join(agentDir, "sessions");
   let slugDirs: string[];
   try {
-    slugDirs = fs.readdirSync(sessionsRoot, { withFileTypes: true })
-      .filter((ent) => ent.isDirectory())
-      .map((ent) => path.join(sessionsRoot, ent.name));
+    slugDirs = listSessionSlugDirs(agentDir);
   } catch (err) {
     // 读错分通道（对齐 core pi-host-run-store 同款纪律）：ENOENT = 从未落盘的
     // 正常空态，空集返回（core reapOrphanRuns 按「无引用」正常判定）；非 ENOENT
