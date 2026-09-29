@@ -1,6 +1,6 @@
 # TODO：workflow resume 重派丢失脚本路径锚定，内置模板 resume 必失败
 
-状态：已实施（2026-09-29，采纳候选 A——run-created 帧携带可选 scriptPath），待 a1a4 真机复跑终判后关闭本条
+状态：已实施（2026-09-29，采纳候选 A——run-created 帧携带可选 scriptPath）；a1a4 真机复跑 run3 已执行（2026-09-29）——被环境类缺陷（成员引擎 Provider Registry，另条登记 `zcode-bare-cli-provider-registry.md`）阻断在 kill/resume 阶段之前，scriptPath 修复链未被击穿；关闭形态取舍待裁决（见处置状态末段）
 
 ## 背景
 
@@ -29,4 +29,8 @@ workflow resume（断点续跑）重派还没返回结果的调用时，需要�
 
 ## 处置状态
 
-已实施（2026-09-29）：采纳候选 A——run-created 帧携带可选 scriptPath 载荷（与 args/scriptSource 同款 additive 纪律），core rebuildRunFromRecord 与壳 foldRecordStreamToRun 双侧恢复；顺带把六个内置模板的 scriptPath 检查从「非 string」收紧到「非空」（旧格式帧回落的失败从无指引的 Node 原生错误变为带恢复指引的 fail-fast）。设计档案：`.tmp/tech-design/workflow-resume-scriptpath-recovery.md`（含 8 条用例走查）；候选 B/C 的否决理由在设计的方案对比节。回归网：record-mode/template-resume.test.ts 实跑 A2（真跑 fan-out 模板 resume 全链）/A4（旧格式帧空串 fail-fast）两用例通过（commit a32df2905）。剩余：a1a4 真机复跑终判（BLOCKED → PASS，需 TAIJI_PI_LIVE 凭证 + 空载串行，未在本批执行）——真机复跑与 record-mode fixture 替代的关闭形态取舍待裁决。
+已实施（2026-09-29）：采纳候选 A——run-created 帧携带可选 scriptPath 载荷（与 args/scriptSource 同款 additive 纪律），core rebuildRunFromRecord 与壳 foldRecordStreamToRun 双侧恢复；顺带把六个内置模板的 scriptPath 检查从「非 string」收紧到「非空」（旧格式帧回落的失败从无指引的 Node 原生错误变为带恢复指引的 fail-fast）。设计档案：`.tmp/tech-design/workflow-resume-scriptpath-recovery.md`（含 8 条用例走查）；候选 B/C 的否决理由在设计的方案对比节。回归网：record-mode/template-resume.test.ts 实跑 A2（真跑 fan-out 模板 resume 全链）/A4（旧格式帧空串 fail-fast）两用例通过（commit a32df2905）。
+
+真机复跑 run3（2026-09-29 12:41，TAIJI_PI_LIVE=1 空载串行）：剧本在 A1.second-result 失败退出——三个成员调用全部被 zcode 引擎 app-server 的 session/create 拒绝（Provider Registry 中不存在 Model: builtin:bigmodel-coding-plan/GLM-5.3-Flash，run2 verdict 阻塞项②复发，登记 = `zcode-bare-cli-provider-registry.md`），剧本未进入 kill/resume 阶段，三条通过判定（在途调用重执行 / 全 run 完成 / 崩溃前结果逐字保真）均无法评估。scriptPath 修复链在本 run 的证据：run-created 帧正确携带 scriptPath、record 流 fold 与 run 生命周期 15 帧完整走完、无 Cannot find module _shared（终判 = `a1a4/verdict-run3.json`）。
+
+关闭形态取舍（待裁决）：A = 接受 record-mode fixture 回归网 + run3 写入侧证据作为关闭判据（推荐——scriptPath 缺陷本身已有修复实现 / 确定性回归 / 真机写入侧三重验证，真机全绿 PASS 被无关的环境类缺陷单独卡住）；B = 等 Provider Registry 缺口（`zcode-bare-cli-provider-registry.md`）修复后重跑真机拿全绿 PASS 再关闭本条。
