@@ -127,8 +127,9 @@ function usageFromNext(next: AgentUsage): AgentUsage {
 /**
  * 累加两个 AgentUsage（field-wise）。prev 为空时返回 next 的拷贝。
  * 供 message_end 把 usage 增量并入 turn.usageDelta。
+ * 导出单源：活态 record 与磁盘重建（session-reconstructor）共用，副本已删。
  */
-function addUsage(prev: AgentUsage | undefined, next: AgentUsage): AgentUsage {
+export function addUsage(prev: AgentUsage | undefined, next: AgentUsage): AgentUsage {
   if (prev === undefined) return usageFromNext(next);
   return {
     input: sumUsageField(prev.input, next.input),
@@ -143,8 +144,9 @@ function addUsage(prev: AgentUsage | undefined, next: AgentUsage): AgentUsage {
 // 创建（唯一入口）
 // ============================================================
 
-/** 创建一个空 turn（text/thinking 空，无 toolCalls，未闭合）。 */
-function emptyTurn(): Turn {
+/** 创建一个空 turn（text/thinking 空，无 toolCalls，未闭合）。
+ *  导出单源：活态创建与磁盘重建（session-reconstructor）共用，副本已删。 */
+export function emptyTurn(): Turn {
   return { text: "", thinking: "", toolCalls: [], usageDelta: undefined, closed: false };
 }
 
@@ -516,8 +518,24 @@ export function updateFromEvent(record: ExecutionRecord, event: AgentEvent): voi
  * 纯函数：每次调用重新生成，不缓存。消费方按需调（投影时用）。
  */
 export function getEventLog(record: ExecutionRecord): AgentEventLogEntry[] {
+  return deriveEventLog(record.turns, record.lastError, record.startedAt);
+}
+
+/**
+ * eventLog 派生本体（单源）——活态路径（getEventLog）与磁盘重建路径
+ * （session-reconstructor 的 ReconstructedRecord）共用同一实现，此前两处各持
+ * 副本、靠注释互指「镜像」（漂移面已删）。
+ *
+ * 形参取最小结构（turns + lastError + startedAt）而非 ExecutionRecord：重建路径
+ * 产出的不是 ExecutionRecord，放宽形参即可直接复用（与 getDisplayItems 同款手法）。
+ */
+export function deriveEventLog(
+  turns: readonly Turn[],
+  lastError: string | undefined,
+  startedAt: number,
+): AgentEventLogEntry[] {
   const log: AgentEventLogEntry[] = [];
-  for (const turn of record.turns) {
+  for (const turn of turns) {
     for (const tc of turn.toolCalls) {
       const label = extractLabelFromArgs(tc.toolName, tc.args);
       const ts = tc.startedTs;
@@ -530,11 +548,11 @@ export function getEventLog(record: ExecutionRecord): AgentEventLogEntry[] {
       const summary = turn.text.length > 0
         ? (turn.text.length > TURN_SUMMARY_MAX ? turn.text.slice(0, TURN_SUMMARY_MAX) : turn.text)
         : "turn";
-      log.push({ type: "turn_end", label: summary, ts: turn.closedTs ?? record.startedAt });
+      log.push({ type: "turn_end", label: summary, ts: turn.closedTs ?? startedAt });
     }
   }
-  if (record.lastError) {
-    log.push({ type: "error", label: record.lastError, ts: Date.now() });
+  if (lastError) {
+    log.push({ type: "error", label: lastError, ts: Date.now() });
   }
   return log;
 }
@@ -624,7 +642,16 @@ export function getCurrentActivity(
  * 与「拼接所有 assistant message」语义一致。单 turn 场景两者完全等价。
  */
 export function getFullText(record: ExecutionRecord): string {
-  return record.turns
+  return joinTurnText(record.turns);
+}
+
+/**
+ * turn 正文拼接（单源）——空文本 turn 过滤后按空行连接。活态路径（getFullText）与
+ * 磁盘重建路径（session-reconstructor 的 result 派生）共用，重建侧的内联 join 已删。
+ * 形参取最小结构（turns）以便重建产物直接复用。
+ */
+export function joinTurnText(turns: readonly Turn[]): string {
+  return turns
     .map((t) => t.text)
     .filter((text) => text.length > 0)
     .join("\n\n");
