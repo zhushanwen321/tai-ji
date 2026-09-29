@@ -160,6 +160,12 @@ export interface SeedCallSpec { // oe-exempt:20260929:test:seed call shape (test
 export interface SeedRunSpec { // oe-exempt:20260929:test:seed run shape (test fixture infra)
   scriptSource: string;
   workflowName?: string;
+  /**
+   * run-created 帧的 scriptPath 锚定载荷（生产写面 dispatchRunCreated 随帧落——
+   * 内置模板场景必填：worker 沙箱 require _shared 族靠它定位；缺省 = 旧格式帧，
+   * 模板脚本 resume 由收紧后的守卫拒绝——A4 场景的构造面）。
+   */
+  scriptPath?: string;
   ts?: number;
   /**
    * run-created 帧的 args 全文（设计 §3.1 载荷表——生产写面 dispatchRunCreated
@@ -190,6 +196,7 @@ export async function seedCrashedRun(env: RecordFixtureEnv, runId: string, spec:
       ts: t0,
       runId,
       scriptSource: spec.scriptSource,
+      ...(spec.scriptPath !== undefined ? { scriptPath: spec.scriptPath } : {}),
       ...(spec.args !== undefined ? { args: spec.args } : {}),
       ...(spec.argsSummary !== undefined ? { argsSummary: spec.argsSummary } : {}),
       ...(spec.workflowName !== undefined ? { workflowName: spec.workflowName } : {}),
