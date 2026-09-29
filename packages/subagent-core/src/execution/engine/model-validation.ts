@@ -219,11 +219,13 @@ function safeListModels(engine: EnginePort): string[] {
   }
 }
 
-/** 引擎缺省模型（validateModel(undefined)；失败安全返回 undefined）。 */
+/** 引擎缺省模型（validateModel(undefined)；失败安全返回 undefined。空串 = 引擎
+ *  裁决「缺席/CLI 缺省解析」（zcode 语义）——同 undefined 处理，不进诊断文案）。 */
 function safeEngineDefault(engine: EnginePort): string | undefined {
   if (typeof engine.validateModel !== "function") return undefined;
   try {
-    return engine.validateModel(undefined).canonicalRef;
+    const canonical = engine.validateModel(undefined).canonicalRef;
+    return canonical.trim() === "" ? undefined : canonical;
   } catch {
     return undefined;
   }

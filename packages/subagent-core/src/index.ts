@@ -405,15 +405,13 @@ export { isProcessAlive } from "./execution/persistence/alive-store.ts";
 // zsw 侧装配注入，core 公共面只留 ConcurrencyPool 契约类型。
 export type { ConcurrencyPool } from "./execution/assembly/concurrency-pool.ts";
 
-// 模型引用切分原语（U1 契约面批件）：provider/model 引用切分与缺省值（两宿主
+// 模型引用切分原语（U1 契约面批件）：provider/model 引用切分（两宿主
 // maxTurns/model 换算同源）。[W11/H2] 实现体随 engines/zcode 删除迁至
-// shared/zcode-model-ref.ts（宿主侧原语，与引擎包各自单源）。
-export {
-  DEFAULT_PROVIDER_ID,
-  hasApiKey,
-  splitZcodeModelRef,
-  ZCODE_FALLBACK_DEFAULT_MODEL,
-} from "./shared/zcode-model-ref.ts";
+// shared/zcode-model-ref.ts（宿主侧原语，与引擎包各自单源）。[2026-09-29 account
+// 体系迁移同步] DEFAULT_PROVIDER_ID / ZCODE_FALLBACK_DEFAULT_MODEL / hasApiKey
+// 删除——plan 家族 id 经 entitlement 门控后宿主侧无消费场景（引擎侧模型源已切换
+// provider_config.json，见 zcode-subagent-cli preparer.ts）。
+export { splitZcodeModelRef } from "./shared/zcode-model-ref.ts";
 
 // ── worktree git 内核（U5 / D5）───────────────────────────────
 // git 语义纯函数单源：保真读（gitRun）、SafeId 校验、dirty 谓词、

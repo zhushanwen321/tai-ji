@@ -1,24 +1,28 @@
-# TODO：裸 CLI 场景下 zcode 引擎 Provider Registry 缺失成员模型（验收环境阻断）
+# TODO：zcode 引擎显式模型的 reasoningLevel 接线（account 体系迁移收尾项）
 
-状态：已登记（2026-09-29，a1a4 真机复跑 run3 复发）——归属 zcode-subagent-cli 包，不阻塞 workflow resume 线的修复登记
+状态：根因已查明并修复主体（2026-09-29，account 体系迁移同步批次）——模型源/缺省语义/常量清理已落地；本条只剩显式模型的 reasoningLevel 传递收尾
 
-## 背景
+## 背景（根因全景，2026-09-29 深查定案）
 
-workflow resume 真机验收剧本（`.tmp/dev-flow/workflow-run-store-convergence.acceptance/a1a4-real-pi-recovery.mts`）经裸 pi CLI 宿主派发成员调用，成员引擎 = zcode（app-server RPC）。run2 与 run3 两次终判均被同一环境类缺陷阻断在成员 session/create：app-server 报 `[-32603] Provider Registry 中不存在 Model: builtin:bigmodel-coding-plan/GLM-5.3-Flash`。run2 终判（`.tmp/dev-flow/workflow-run-store-convergence.acceptance/a1a4/verdict.json` A4_completion 字段）已诊断为「模型目录双登记制：引擎目录 builtin:* 过审后 app-server Provider Registry 仍不识别」，归属 zcode-subagent-cli 包；生产 taiji runtime 装配经 appserver-launcher 的 v2 provider 注入（fs 拦截合并宿主 config）不走此裸链路——此为 handoff 缺陷 3 的既有判定，本轮未复核生产侧。
+a1a4 真机复验 run3 三成员调用全部被 app-server 的 session/create 拒绝（「Provider Registry 中不存在 Model: builtin:bigmodel-coding-plan/GLM-5.3-Flash」）。深查（bundle 解剖 + 活体探针对拍）定案：
 
-## 现状（证据链）
+- **app 3.14.x 起 provider 注册表架构**：内建目录（`~/.zcode/v2/runtime/provider/<plat>/<ver>/endpoint-*/zcode-builtin.json`）的 providerRules 以 `account:` 前缀定义 plan 家族（builtin:bigmodel-coding-plan → account:bigmodel-individual-coding-plan 等迁移映射在 bundle 内）；这些 provider 全部 `access=zhipu-account`（账号 entitlement 门控），CLI 自举缺省 fail-closed（entitled:false → 整族不进注册表）。
+- **外部 spawn（我们引擎的形态）的注册表实况**：只有 `~/.zcode/v2/provider_config.json` 的个人 provider（自带 apiKey）装载可用；plan 家族任何 id（builtin:/account: 前缀）一律 provider-not-found（CLI 的报错文案误导性地写「不存在 Model」——provider-not-found 分支静默返回 undefined 后落进同一文案）。
+- **GUI 侧为何正常**：GUI 宿主（zcode-host-local-*）由桌面主进程完整装配（env 配方含 ZCODE_BASE_URL=https://zcode.z.ai + LV/tte 双目录 env + ZAI OAuth 三件套）并有账号态供数链；`provider/updateAccountConfig` host 推送在 3.14.3 上被 refresh 检查挡（账号快照 basedOn 为 string、目录 revision 为 number，严格不等 → resolver 静默跳过）——外部进程即使模拟 GUI 推送也补不进 plan 家族。
+- **裸起崩溃**：不经 launcher 注入 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 时 CLI 自身推导 bundled 目录失败（相对路径推导在该 app 布局下算到根目录 `/config/...`）→ 启动即退；launcher 的目录定位注入是外部 spawn 能启动的前提。
 
-- run3（2026-09-29 12:41）：三个成员调用全部在 session/create 被拒（record journal seq4/8/12 三次同因，间隔各约 2.5s——LLM 从未被调用到，非慢/未遵从）；attempt 2 的 markResurrected「no sessionFile anchor」为下游症状（session 从未创建成功，无锚点，无半状态干净中止）。剧本证据 = `a1a4/evidence.json`；保留现场 tmp 目录路径见该文件 preservedTmpRoot 字段（含 record journal / engine-data 引擎制品 / pi session 文件，系统重启后清空）。
-- 差分事实：run2（同日 02:56，同一剧本、成员模型同一写死值）三成员派发成功（verdict.json A1 PASS）；两次之间 packages/zcode-subagent-cli 零提交（git log 核实）——引擎链路仓库代码未变，剩余变量是宿主 zcode app 侧状态（具体变化未核实）。
-- 宿主 config（`~/.zcode/cli/config.json`）：provider `builtin:bigmodel-coding-plan` 在场（含凭据与 baseURL）；`subagents.builtInModelOverrides.general-purpose` 正是被拒的同一模型 id；`model.main` 指向 `builtin:bigmodel-start-plan/GLM-5.3-Flash`（另一 provider 家族）——宿主侧登记与 app-server Provider Registry 的模型目录不一致。
+## 已修复（account 体系迁移同步批次，2026-09-29）
 
-## 实现要点（届时从这起步）
+- `zcode-subagent-cli/preparer.ts`：模型解析/清单源切换 `~/.zcode/v2/provider_config.json`（个人 provider 单源，凭据判据 config.access.apiKey，短名默认 provider = providerOrder 首个带凭据者）；缺席模型返回空串（create 帧省略 model 键 → CLI 缺省解析，实测落 providerOrder 首位快档模型并自动补齐 reasoning 档位）。
+- `constants.ts`：`ZCODE_FALLBACK_DEFAULT_MODEL` 删除；core 侧镜像 `zcode-model-ref.ts` 的 `DEFAULT_PROVIDER_ID`/`ZCODE_FALLBACK_DEFAULT_MODEL`/`hasApiKey` 同步删除（宿主侧零消费）。
+- `appserver-launcher.ts`：model.main 兜底伪造删除（v2.model.main 透传保留）；新增 ZCODE_BASE_URL 注入（从已定位目录邻位 `zcode-builtin-refresh.json` 的 endpointKey 读出——对齐 CLI 的 active 目录路径推导，避免向错误 endpoint 联网重装）。
 
-- 复现锚点：zcode-subagent-cli 的 app-server 客户端（session/create 错误透传处），对比「引擎目录 builtin:* 过审」与「Provider Registry 模型目录」两个清单的来源与刷新时机差异。
-- 候选方向：裸 CLI 形态下（无 taiji runtime 注入）让引擎侧对缺失模型给出可操作错误（指向宿主 config 刷新 / 模型目录再登记的恢复动作），或 launcher 侧把宿主 builtInModelOverrides 同步进注册表。
-- 关联条目：`engine-default-provider-setting.md`（引擎默认 provider/model 页面化——长期形态）；本条是裸 CLI 验收环境的地板缺口，两者可同批设计。
+## 剩余收尾（本条现承载）
+
+- **显式模型 + reasoningLevel**：部分注册表模型（实测个人 provider 全部）要求 create 帧 `model.options.reasoningLevel`（值域 per-model，源 = 内建目录 modelConfigRules 的 optionSpecs——mimo 家族为 disabled/enabled，GLM 家族为 low/high/max 档）；引擎 create 参数当前不携带 options → 显式指定这些模型在 create 即报「Reasoning level is required」。接线点：AgentCallOpts 侧新增可选 reasoningLevel（或引擎侧读内建目录 modelRules 匹配值域自动补默认档）→ `buildAppServerCreateParams` 的 model 对象带 options。验证形态已探针确认（`options.reasoningLevel: "enabled"` 的 create 建会话成功）。
+- 关联条目：`engine-default-provider-setting.md`（引擎默认 provider/model 页面化——长期形态）。
 
 ## 出处
 
 - run2 终判：`.tmp/dev-flow/workflow-run-store-convergence.acceptance/a1a4/verdict.json` A4_completion 阻塞项②（handoff 缺陷 3）
-- run3 复发：同目录 evidence.json + verdict-run3.json（2026-09-29）
+- run3 复发与深查证据：同目录 evidence.json + verdict-run3.json + 根因探针 `.tmp/dev-flow/zcode-registry-probe.mts`（接受矩阵/推送实验/缺省解析落点）

@@ -7,7 +7,7 @@ settings 页面新增「subagent 引擎默认模型」配置：读取所有已�
 ## 现状（本 TODO 之前的替代形态）
 
 - pi 引擎：零配置——taiji 与 pi 引擎是同一个 pi，provider 配置共享（`~/.pi/agent/` 一份）。
-- zcode 引擎：适配包内硬编码缺省 `builtin:bigmodel-coding-plan/GLM-5.3`（`packages/zcode-subagent-cli` 的 `constants.ts` `ZCODE_FALLBACK_DEFAULT_MODEL`，与 `appserver-launcher.ts` 内嵌 wrapper 双源同步——改缺省值两处一起改）。
+- zcode 引擎（2026-09-29 account 体系迁移后）：**无硬编码缺省模型**——task 未指定 model 时 create 帧省略 model 键，CLI 自身缺省解析（落 provider_config.json 的 providerOrder 首位可用模型）；显式模型校验源 = `~/.zcode/v2/provider_config.json`（个人 provider 单源，plan 家族 builtin:/account: 经 entitlement 门控不可用）。原 `ZCODE_FALLBACK_DEFAULT_MODEL` 硬编码常量已删除（commit 见 account 迁移同步批次）。
 - 新引擎接入：各自适配包内显式指定缺省（契约 = pi-workflow-run 资源模型设计文档决策 3）。
 
 ## 背景与裁决

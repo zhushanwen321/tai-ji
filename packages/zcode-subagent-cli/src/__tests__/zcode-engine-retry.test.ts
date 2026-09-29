@@ -50,6 +50,7 @@ let seq = 0;
 let tmpRoot: string;
 let dataDir: string;
 let v2Path: string;
+let personalPath: string;
 
 function writeJson(p: string, v: unknown): void {
   fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -60,9 +61,21 @@ beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "zcode-eng-retry-"));
   dataDir = path.join(tmpRoot, "data");
   v2Path = path.join(tmpRoot, "v2.json");
+  personalPath = path.join(tmpRoot, "personal.json");
   writeJson(v2Path, {
     provider: { [PROVIDER]: { options: { apiKey: "k", baseURL: "https://t.example" }, models: { m1: {} } } },
   });
+  writeJson(personalPath, {
+    config: {
+      providerOrder: [PROVIDER],
+      providerConfigRules: {
+        providerRules: [
+          { providerId: PROVIDER, providerName: "t", config: { access: { type: "api-key", apiKey: "k" }, personalModelIds: ["m1"] } },
+        ],
+      },
+    },
+  });
+
 });
 
 afterEach(async () => {
@@ -117,7 +130,7 @@ function makeEngine(overrides: ScenarioOverrides = {}): EngineFixture {
   const deps: ZcodeEngineDeps = {
     engineDataDir: () => dataDir,
     cliPath: FAKE_CLI,
-    sources: { v2ConfigPath: v2Path },
+    sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath },
     processEnv: {
       PATH: process.env.PATH ?? "",
       // 钉扎 appserver 定向（定向不探不降）；turn 阈值走全局 env stub（session-channel

@@ -62,6 +62,7 @@ let seq = 0;
 let tmpRoot: string;
 let dataDir: string;
 let v2Path: string;
+let personalPath: string;
 
 function writeJson(p: string, v: unknown): void {
   fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -72,9 +73,21 @@ beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "zcode-eng-appserver-"));
   dataDir = path.join(tmpRoot, "data");
   v2Path = path.join(tmpRoot, "v2.json");
+  personalPath = path.join(tmpRoot, "personal.json");
   writeJson(v2Path, {
     provider: { [PROVIDER]: { options: { apiKey: "k", baseURL: "https://t.example" }, models: { m1: {} } } },
   });
+  writeJson(personalPath, {
+    config: {
+      providerOrder: [PROVIDER],
+      providerConfigRules: {
+        providerRules: [
+          { providerId: PROVIDER, providerName: "t", config: { access: { type: "api-key", apiKey: "k" }, personalModelIds: ["m1"] } },
+        ],
+      },
+    },
+  });
+
 });
 
 afterEach(async () => {
@@ -125,7 +138,7 @@ function makeEngine(overrides: ScenarioOverrides = {}): EngineHandle_ {
   const deps: ZcodeEngineDeps = {
     engineDataDir: () => dataDir,
     cliPath: FAKE_CLI,
-    sources: { v2ConfigPath: v2Path },
+    sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath },
     processEnv: {
       PATH: process.env.PATH ?? "",
       HOME: "/fake-host-home",
@@ -458,13 +471,8 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
   }, 15_000);
 
   it("显式 task.model 或 ctx 无 ctxModel → 零 ctxModel 信号（F16b：只在「ctx 有模型但被忽略」时出声）", async () => {
-    // 第二段 run（model 缺省）走引擎缺省链——v2 config 需含 ZCODE_FALLBACK_DEFAULT_MODEL 的 provider
-    writeJson(v2Path, {
-      provider: {
-        [PROVIDER]: { options: { apiKey: "k", baseURL: "https://t.example" }, models: { m1: {} } },
-        "builtin:bigmodel-coding-plan": { options: { apiKey: "k" }, models: { "GLM-5.3-Flash": {} } },
-      },
-    });
+    // 第二段 run（model 缺省）走 create 省略 model 键链（CLI 缺省解析）——无 plan 家族
+    // 兜底 id 参与解析（2026-09-29 account 体系迁移后缺席即省略，不伪造）
     const { engine, workspace } = makeEngine();
     const warns: string[] = [];
     const warnSpy = vi.spyOn(subagentsLogger, "warn").mockImplementation(((msg: string) => {
