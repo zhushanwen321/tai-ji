@@ -1,5 +1,11 @@
 # @zhushanwen/pi-system-prompt-trace
 
+## 0.2.1
+
+### Patch Changes
+
+- 50f31a73c: chore: refresh dependency range (triggered by @zhushanwen/pi-ext-guards@0.4.1 → @zhushanwen/pi-ext-guards@0.4.2)
+
 ## 0.2.0
 
 ### Minor Changes

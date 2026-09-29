@@ -1,5 +1,11 @@
 # @zhushanwen/pi-goal
 
+## 0.14.8
+
+### Patch Changes
+
+- 50f31a73c: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.14.0 → @zhushanwen/extension-protocol@0.15.0)
+
 ## 0.14.7
 
 ### Patch Changes
