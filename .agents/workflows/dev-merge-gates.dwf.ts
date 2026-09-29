@@ -625,9 +625,9 @@ async function main(): Promise<Record<string, unknown>> {
           if (!activeIds.has(normIssueId(f.id))) throw bad(`fixes 引用未知 id：${String(f.id)}`);
           if (strArr(f.affectedFiles).length === 0) throw bad(`fix ${String(f.id)} 未申报 affectedFiles（工作流无法统一 commit）`);
         }
-        for (const d of (v.disputed ?? []) as ReconEntry[]) {
+        for (const d of (v.disputed ?? []) as { id?: unknown; evidence?: unknown }[]) {
           if (!isRecord(d as unknown) || nonEmptyStr(d.evidence) === "") throw bad("disputed 申述缺 evidence 反证");
-          const rec = g.issues.find((r) => normIssueId(r.id) === normIssueId(d.prevId));
+          const rec = g.issues.find((r) => normIssueId(r.id) === normIssueId(d.id));
           if (rec) {
             rec.status = "disputed";
             rec.disputeEvidence = nonEmptyStr(d.evidence);
@@ -689,7 +689,7 @@ async function main(): Promise<Record<string, unknown>> {
       for (round = 1; round <= maxRounds; round++) {
         const openRecords = records.filter((r) => r.status === "open");
         const activeDims = round === 1 ? dims : [...new Set(openRecords.map((r) => r.dimension))];
-        phase(`branch-review 第 ${round} 轮（维度 ${activeDims.join("、")}）`);
+        phase("branch-review 审查修复循环（每轮重审活跃维度）");
         const verdicts = await mapBatch(activeDims, REVIEWER_BATCH, async (dim) => ({
           dim,
           v: await dispatchReviewer(dim, round, openRecords.filter((r) => r.dimension === dim)),
