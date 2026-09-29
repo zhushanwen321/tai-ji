@@ -167,8 +167,8 @@ export function createSessionDeliveryRegistry(
     const onSettledMessage = deps.onSettledMessage
     const notifyReceipt = onSettledMessage
       ? (msg: DeliveryMessage, outcome: 'delivered' | 'rejected'): void => {
-          onSettledMessage(sessionId, msg, outcome)
-        }
+        onSettledMessage(sessionId, msg, outcome)
+      }
       : undefined
     return createDelivery(
       {
