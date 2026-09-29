@@ -8,14 +8,20 @@
  * 注入层级选择（验收「真实 fixture 或 mock RPC 层二选一，禁 mock pi 本体逻辑」）：
  * mock RPC 层——EventInterpreter + SessionService + 真 MessageBus + mock client
  * （getEntries 返回 fixture 化 entry 数组，形态对齐 pi appendCustomEntry 契约 +
- * W16/W17 extension 写点 schema）。生产代码全链路真实执行（adapter translate →
- * interpreter 编排 → invalidateRecordEntries → 防抖 → get_entries 增量 → scan →
- * merge → publish），只拦截事件投递层模拟广播丢失。
+ * W1 [D1] v2 subagent-record 条目 schema：注册 + 终态两条小条目）。生产代码全链路
+ * 真实执行（adapter translate → interpreter 编排 → invalidateRecordEntries → 防抖 →
+ * get_entries 增量 → journal 投影 entry 源摄入 → 合并 → publish），只拦截事件投递层
+ * 模拟广播丢失。
  *
- * 收敛依据：extension 在 record 状态迁移点既 append 自描述 entry（entry_appended 主
- * 信号）又发 subagent-bg-notify / workflow-result 事件（兜底信号）——主信号被拦截时，
- * 兜底事件仍触发失效 → 重拉把「已持久化的 subagent-record entry」一并拉到 → 派生缓存
- * 收敛到 entry 扫描的权威值（与主信号在位时同值——这就是等价性断言）。
+ * 收敛依据：extension 在 record 状态迁移点既 append 自描述 v2 条目（entry_appended
+ * 主信号）又发 subagent-bg-notify / workflow-result 事件（兜底信号）——主信号被拦截时，
+ * 兜底事件仍触发失效 → 重拉把「已持久化的 v2 条目」一并拉到 → 投影合并快照收敛到
+ * entry 源扫描的权威值（与主信号在位时同值——这就是等价性断言）。
+ *
+ * [v1 全量快照兼容层删除后] 等价性对照保留：本 fixture 的 session meta 缺席
+ * （scanSessions → []）⇒ recordsDir 不可得 ⇒ entry-only 降级投影，journal 源缺席；
+ * 故此处对照 = 「主信号在位」与「主信号丢失」两条 entry 通路收敛到同一权威快照
+ * （journal 胜出仲裁的对照面在 journal-projection 单测覆盖）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ServerMessage } from '@taiji/shared'
@@ -36,15 +42,62 @@ function createMockWs(): BusClient & { sent: string[] } {
 
 type GetEntriesResult = { data?: { entries?: unknown[]; leafId?: string | null } }
 
-/** 自描述 subagent-record entry（W16 v1 完整快照，extension register/reportRecordTransition 写点产物）。 */
-function subagentRecordEntry(id: string, status: string, entryId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+/**
+ * v2 注册条目（W1 [D1] 身份域：id/agent/task/slug/origin/rootSessionId/depth/startedAt）。
+ * rootSessionId = 投影摄入侧的会话归属键（entry 源定界判据）。
+ */
+function subagentRegisteredEntry(
+  sid: string,
+  id: string,
+  entryId: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     type: 'custom',
     customType: 'subagent-record',
     id: entryId,
     parentId: null,
     timestamp: '2026-08-19T00:00:00Z',
-    data: { v: 1, id, agent: 'worker', task: 'Do work', slug: 'work', status, startedAt: 1000, ...extra },
+    data: {
+      v: 2,
+      kind: 'registered',
+      id,
+      agent: 'worker',
+      task: 'Do work',
+      slug: 'work',
+      origin: 'tool',
+      rootSessionId: sid,
+      depth: 0,
+      startedAt: 1000,
+      ...extra,
+    },
+  }
+}
+
+/** v2 终态条目（W1 [D1] 终局域：status 恒 idle + stopReason/统计/result 全文）。 */
+function subagentSettledEntry(
+  id: string,
+  entryId: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    type: 'custom',
+    customType: 'subagent-record',
+    id: entryId,
+    parentId: null,
+    timestamp: '2026-08-19T00:01:00Z',
+    data: {
+      v: 2,
+      kind: 'settled',
+      id,
+      status: 'idle',
+      stopReason: 'completed',
+      endedAt: 61000,
+      turns: 3,
+      totalTokens: 100,
+      result: 'chaos result',
+      ...extra,
+    },
   }
 }
 
@@ -73,10 +126,10 @@ describe('W18 equivalence: 丢失 entry_appended 广播 → 兜底失效重拉�
 
   it('场景 5 收尾：拦截 entry_appended 不投递 → bg-notify 兜底事件触发失效 → 重拉收敛到 entry 扫描权威值', async () => {
     const sid = 'w18-chaos-drop'
-    // pi 内存 entry 集合（get_entries 权威视图）：register(running) + 终态(closed) 两条自描述 entry
+    // pi 内存 entry 集合（get_entries 权威视图）：sa-chaos-1 的 v2 条目对（注册 + 终态）
     const piEntries = [
-      subagentRecordEntry('sa-chaos-1', 'running', 'e-1'),
-      subagentRecordEntry('sa-chaos-1', 'closed', 'e-2', { closedReason: 'gc', endedAt: 61000, error: 'Model timeout' }),
+      subagentRegisteredEntry(sid, 'sa-chaos-1', 'e-1'),
+      subagentSettledEntry('sa-chaos-1', 'e-2', { stopReason: 'failed', error: 'Model timeout' }),
     ]
     const client = {
       getEntries: vi.fn(async (_since?: string) => ({ data: { entries: [...piEntries], leafId: 'e-2' } }) as GetEntriesResult),
@@ -120,14 +173,20 @@ describe('W18 equivalence: 丢失 entry_appended 广播 → 兜底失效重拉�
     expect(normalMsgs).toHaveLength(1)
     expect(normalMsgs[0]!.payload).toEqual({
       sessionId: sid,
-      // [U6/D5] closed 归一 idle + closedReason 保留（gc+error → 派生 stopReason:failed）
-      subagents: [expect.objectContaining({ subagentId: 'sa-chaos-1', status: 'idle', closedReason: 'gc', stopReason: 'failed', error: 'Model timeout' })],
+      // v2 条目对投影：终态条目定终局（stopReason/error/result 直出；closedReason 无 v2 等价位）
+      subagents: [expect.objectContaining({
+        subagentId: 'sa-chaos-1',
+        status: 'idle',
+        stopReason: 'failed',
+        error: 'Model timeout',
+        result: 'chaos result',
+      })],
     })
 
     // ── 混沌注入：丢失 entry_appended 广播（拦截不下发）──
-    // 终态迁移的第二条 subagent-record entry 已持久化进 pi entry 集合（append 与广播是
-    // 两个环节——广播可丢，持久化不丢），但 entry_appended 事件被拦截。
-    const droppedEntry = subagentRecordEntry('sa-chaos-2', 'running', 'e-3')
+    // sa-chaos-2 的注册条目已持久化进 pi entry 集合（append 与广播是两个环节——广播可丢，
+    // 持久化不丢），但 entry_appended 事件被拦截。
+    const droppedEntry = subagentRegisteredEntry(sid, 'sa-chaos-2', 'e-3')
     piEntries.push(droppedEntry)
     // （不投递 entryAppendedPiEvent(droppedEntry)——这就是混沌注入）
 
@@ -136,8 +195,8 @@ describe('W18 equivalence: 丢失 entry_appended 广播 → 兜底失效重拉�
     interpreter.interpret(translate(bgNotifyMessageStartPiEvent(sid, { id: 'sa-chaos-2', status: 'running', agent: 'worker' }) as unknown as PiEvent, sid))
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
 
-    // 收敛断言：兜底失效触发重拉，get_entries 把被拦截的 subagent-record entry 拉到 →
-    // 派生缓存收敛到与「主信号在位」等价的权威值（sa-chaos-2 出现在列表中）
+    // 收敛断言：兜底失效触发重拉，get_entries 把被拦截的 v2 注册条目拉到 →
+    // 投影合并快照收敛到与「主信号在位」等价的权威值（sa-chaos-2 出现在列表中）
     const healedMsgs = ws.sent.map((s) => JSON.parse(s) as ServerMessage).filter((m) => m.type === 'session.subagents')
     expect(healedMsgs).toHaveLength(2)
     const healedSubs = (healedMsgs[1]!.payload as { subagents: Array<{ subagentId: string; status: string }> }).subagents
@@ -147,7 +206,7 @@ describe('W18 equivalence: 丢失 entry_appended 广播 → 兜底失效重拉�
 
   it('双信号全丢的兜底：entry_appended 与 bg-notify 都被拦截 → 后续任一事件（如下一条 entry_appended）触发重拉，历史丢失 entry 一并收敛', async () => {
     const sid = 'w18-chaos-both-drop'
-    const piEntries = [subagentRecordEntry('sa-a', 'running', 'e-1')]
+    const piEntries = [subagentRegisteredEntry(sid, 'sa-a', 'e-1')]
     const client = {
       getEntries: vi.fn(async (_since?: string) => ({ data: { entries: [...piEntries], leafId: `e-${piEntries.length}` } }) as GetEntriesResult),
       getState: vi.fn(async () => ({ sessionName: 'w18', thinkingLevel: 'low', model: { id: 'm', provider: 'p' }, pendingMessageCount: 0 }) as Record<string, unknown>),
@@ -187,12 +246,12 @@ describe('W18 equivalence: 丢失 entry_appended 广播 → 兜底失效重拉�
     expect(client.getEntries).not.toHaveBeenCalled()
 
     // 第二条 entry_appended 正常到达（下一状态迁移）：触发重拉
-    piEntries.push(subagentRecordEntry('sa-b', 'running', 'e-2'))
+    piEntries.push(subagentRegisteredEntry(sid, 'sa-b', 'e-2'))
     interpreter.interpret(translate(entryAppendedPiEvent(piEntries[1]!) as unknown as PiEvent, sid))
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
 
     // 收敛断言：重拉全量（cursor 为 null——首拉）把被丢失的 sa-a entry 一并拉到，
-    // 派生缓存 == pi entry 集合扫描的权威全集（丢失窗口的 entry 不静默缺失）
+    // 投影合并快照 == pi entry 集合扫描的权威全集（丢失窗口的 entry 不静默缺失）
     const subMsgs = ws.sent.map((s) => JSON.parse(s) as ServerMessage).filter((m) => m.type === 'session.subagents')
     expect(subMsgs).toHaveLength(1)
     const subs = (subMsgs[0]!.payload as { subagents: Array<{ subagentId: string }> }).subagents

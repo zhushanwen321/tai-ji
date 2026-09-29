@@ -8,9 +8,10 @@
  *   scanSubagentEntries/scanWorkflowEntries 的 legacy 分支；本文件覆盖 RPC 编排链）
  *
  * mock 层级 = RPC（client.getEntries 可编程返回 entry 数组，entry 形态对齐 pi
- * appendCustomEntry 契约：{type:'custom', customType, data:{v:1,...}}）——生产代码
- * （invalidateRecordEntries → refreshRecordEntries → scan → merge → bus.publish）
- * 全部真实执行，不 mock。
+ * appendCustomEntry 契约：{type:'custom', customType, data:{v:2, kind, ...}}——v2 条目对：
+ * 每条记录 = registered（身份）+ 可选 settled（终局），见 core record-entry.ts）——
+ * 生产代码（invalidateRecordEntries → refreshRecordEntries → 投影 applyEntryBatch →
+ * syncCacheFromProjection → 水位 diff → bus.publish）全部真实执行，不 mock。
  *
  * fake timers（项目规范）：SCALAR_STATE_DEBOUNCE_MS 防抖由 advanceTimersByTimeAsync 推进。
  */
@@ -32,8 +33,11 @@ function createMockWs(): BusClient & { sent: string[] } {
 /** get_entries RPC 返回形态（pi GetEntriesResponse：{entries, leafId}）。 */
 type GetEntriesResult = { data?: { entries?: unknown[]; leafId?: string | null } }
 
-/** 自描述 subagent-record entry（W16 v1 完整快照）。 */
-function subagentRecordEntry(id: string, status: string, entryId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+/**
+ * v2 subagent-record 注册条目（身份半边；rootSessionId 是投影的 session 归属键，
+ * 必须等于被测 sessionId——投影按此过滤跨会话注册条目）。
+ */
+function subagentRegisteredEntry(sid: string, id: string, entryId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     type: 'custom',
     customType: 'subagent-record',
@@ -41,20 +45,47 @@ function subagentRecordEntry(id: string, status: string, entryId: string, extra:
     parentId: null,
     timestamp: '2026-08-19T00:00:00Z',
     data: {
-      v: 1,
+      v: 2,
+      kind: 'registered',
       id,
       agent: 'worker',
       task: 'Do work',
       slug: 'work',
-      status,
+      origin: 'tool',
+      rootSessionId: sid,
+      depth: 0,
       startedAt: 1000,
       ...extra,
     },
   }
 }
 
-/** 自描述 workflow-record entry（W17 v1：{v:1, snapshot, updatedAt}）。 */
-function workflowRecordEntry(runId: string, status: 'running' | 'done', entryId: string, reason?: string): Record<string, unknown> {
+/** v2 subagent-record 终态条目（终局半边：status 归一 idle + stopReason + 统计）。 */
+function subagentSettledEntry(id: string, entryId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    type: 'custom',
+    customType: 'subagent-record',
+    id: entryId,
+    parentId: null,
+    timestamp: '2026-08-19T00:00:01Z',
+    data: {
+      v: 2,
+      kind: 'settled',
+      id,
+      status: 'idle',
+      stopReason: 'completed',
+      endedAt: 2000,
+      turns: 1,
+      totalTokens: 10,
+      model: 'test-model',
+      thinkingLevel: 'low',
+      ...extra,
+    },
+  }
+}
+
+/** v2 workflow-record 注册条目（run 身份 + journalPath 锚点——journalPath 是投影收编键）。 */
+function workflowRegisteredEntry(runId: string, entryId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     type: 'custom',
     customType: 'workflow-record',
@@ -62,15 +93,36 @@ function workflowRecordEntry(runId: string, status: 'running' | 'done', entryId:
     parentId: null,
     timestamp: '2026-08-19T00:00:00Z',
     data: {
-      v: 1,
-      updatedAt: '2026-08-19T00:00:01Z',
-      snapshot: {
-        v: 'wf-run-v2',
-        runId,
-        spec: { scriptName: 'test-flow' },
-        state: { status, reason, budget: { usedTokens: 1, usedCost: 0 }, calls: [], trace: [] },
-        meta: { startedAt: '2026-08-19T00:00:00Z' },
-      },
+      v: 2,
+      kind: 'registered',
+      runId,
+      workflowName: 'test-flow',
+      scriptName: 'test-flow',
+      slug: 'test-flow',
+      startedAt: 1000,
+      journalPath: `/tmp/workflow-state/${runId}.record.jsonl`,
+      ...extra,
+    },
+  }
+}
+
+/** v2 workflow-record 终态条目（done/interrupted 收敛词 + reason + 摘要）。 */
+function workflowSettledEntry(runId: string, status: 'done' | 'interrupted', entryId: string, reason?: string): Record<string, unknown> {
+  return {
+    type: 'custom',
+    customType: 'workflow-record',
+    id: entryId,
+    parentId: null,
+    timestamp: '2026-08-19T00:00:02Z',
+    data: {
+      v: 2,
+      kind: 'settled',
+      runId,
+      status,
+      ...(reason !== undefined ? { reason } : {}),
+      settledAt: 2000,
+      callCount: 0,
+      usedTokens: 1,
     },
   }
 }
@@ -132,8 +184,8 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     fx.client.getEntries.mockResolvedValueOnce({
       data: {
         entries: [
-          subagentRecordEntry('sa-1', 'running', 'e-1'),
-          workflowRecordEntry('wf-1', 'running', 'e-2'),
+          subagentRegisteredEntry(sid, 'sa-1', 'e-1'),
+          workflowRegisteredEntry('wf-1', 'e-2'),
         ],
         leafId: 'e-2',
       },
@@ -166,17 +218,17 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     await fx.svc.initializeManagedSession(sid, {} as unknown as IPiEngine, '/tmp', 'test')
     await vi.advanceTimersByTimeAsync(1)
 
-    // 首次全量：sa-1 running + leafId e-2
+    // 首次全量：sa-1 running + leafId e-1
     fx.client.getEntries.mockResolvedValueOnce({
-      data: { entries: [subagentRecordEntry('sa-1', 'running', 'e-1')], leafId: 'e-1' },
+      data: { entries: [subagentRegisteredEntry(sid, 'sa-1', 'e-1')], leafId: 'e-1' },
     } as GetEntriesResult)
     fx.svc.invalidateRecordEntries(sid, 'subagent-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
     expect(received(ws, 'session.subagents')).toHaveLength(1)
 
-    // 第二次失效：增量窗口（since=e-1）只带终态快照
+    // 第二次失效：增量窗口（since=e-1）只带终态条目
     fx.client.getEntries.mockResolvedValueOnce({
-      data: { entries: [subagentRecordEntry('sa-1', 'closed', 'e-2', { closedReason: 'gc', endedAt: 61000, error: 'boom' })], leafId: 'e-2' },
+      data: { entries: [subagentSettledEntry('sa-1', 'e-2', { stopReason: 'failed', endedAt: 61000, error: 'boom' })], leafId: 'e-2' },
     } as GetEntriesResult)
     fx.svc.invalidateRecordEntries(sid, 'subagent-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
@@ -185,11 +237,11 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     expect(fx.client.getEntries).toHaveBeenCalledWith('e-1')
     const subMsgs = received(ws, 'session.subagents')
     expect(subMsgs).toHaveLength(2)
-    // merge 后终态收敛（增量快照覆盖 running 基线，列表仍是全量派生）
+    // merge 后终态收敛（增量终态条目覆盖 running 基线，列表仍是全量派生）
     expect(subMsgs[1]!.payload).toEqual({
       sessionId: sid,
-      // [U6/D5] closed 归一 idle + closedReason 保留（gc+error → 派生 stopReason:failed）
-      subagents: [expect.objectContaining({ subagentId: 'sa-1', status: 'idle', closedReason: 'gc', stopReason: 'failed' })],
+      // v2 终态条目直定 idle + stopReason（v1 的 closed→idle 归一 + closedReason 派生位已随 v1 层删除）
+      subagents: [expect.objectContaining({ subagentId: 'sa-1', status: 'idle', stopReason: 'failed' })],
     })
   })
 
@@ -202,7 +254,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     await vi.advanceTimersByTimeAsync(1)
 
     fx.client.getEntries.mockResolvedValue({
-      data: { entries: [subagentRecordEntry('sa-1', 'running', 'e-1')], leafId: 'e-1' },
+      data: { entries: [subagentRegisteredEntry(sid, 'sa-1', 'e-1')], leafId: 'e-1' },
     } as GetEntriesResult)
 
     // 窗口内连续三次失效（主信号 + 双兜底事件的真实形态）
@@ -230,16 +282,19 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
 
     // 首次全量建立 cursor e-1
     fx.client.getEntries.mockResolvedValueOnce({
-      data: { entries: [subagentRecordEntry('sa-1', 'running', 'e-1')], leafId: 'e-1' },
+      data: { entries: [subagentRegisteredEntry(sid, 'sa-1', 'e-1')], leafId: 'e-1' },
     } as GetEntriesResult)
     fx.svc.invalidateRecordEntries(sid, 'subagent-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
 
     // 增量拉取报 Entry not found（pi 文案 'Entry not found: <id>'，rpc-client 经 sendCommand reject Error）
     fx.client.getEntries.mockRejectedValueOnce(new Error('Entry not found: e-1'))
-    // 自愈全量：新 entry 集合（旧 entry 已被外部改写消失，新基线 e-9）
+    // 自愈全量：新 entry 集合（旧 entry 已被外部改写消失，新基线 = sa-2 条目对）
     fx.client.getEntries.mockResolvedValueOnce({
-      data: { entries: [subagentRecordEntry('sa-2', 'closed', 'e-9', { closedReason: 'gc', endedAt: 2000 })], leafId: 'e-9' },
+      data: {
+        entries: [subagentRegisteredEntry(sid, 'sa-2', 'e-9'), subagentSettledEntry('sa-2', 'e-10')],
+        leafId: 'e-9',
+      },
     } as GetEntriesResult)
 
     fx.svc.invalidateRecordEntries(sid, 'subagent-record')
@@ -253,7 +308,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     const subMsgs = received(ws, 'session.subagents')
     expect(subMsgs[subMsgs.length - 1]!.payload).toEqual({
       sessionId: sid,
-      // [U6/D5] closed 归一 idle（gc 无 error → 派生 completed）
+      // v2 终态条目直定 idle + stopReason（v1 closed→idle 归一已随 v1 层删除）
       subagents: [expect.objectContaining({ subagentId: 'sa-2', status: 'idle', stopReason: 'completed' })],
     })
   })
@@ -267,7 +322,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     await vi.advanceTimersByTimeAsync(1)
 
     fx.client.getEntries.mockResolvedValueOnce({
-      data: { entries: [subagentRecordEntry('sa-1', 'running', 'e-1')], leafId: 'e-1' },
+      data: { entries: [subagentRegisteredEntry(sid, 'sa-1', 'e-1')], leafId: 'e-1' },
     } as GetEntriesResult)
     fx.svc.invalidateRecordEntries(sid, 'subagent-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
@@ -281,7 +336,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
 
     // 下次失效：仍走增量（cursor 未丢）
     fx.client.getEntries.mockResolvedValueOnce({
-      data: { entries: [subagentRecordEntry('sa-1', 'closed', 'e-2', { closedReason: 'gc' })], leafId: 'e-2' },
+      data: { entries: [subagentSettledEntry('sa-1', 'e-2')], leafId: 'e-2' },
     } as GetEntriesResult)
     fx.svc.invalidateRecordEntries(sid, 'subagent-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
@@ -289,7 +344,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     const subMsgs = received(ws, 'session.subagents')
     expect(subMsgs[subMsgs.length - 1]!.payload).toEqual({
       sessionId: sid,
-      // [U6/D5] closed 归一 idle
+      // v2 终态条目直定 idle
       subagents: [expect.objectContaining({ subagentId: 'sa-1', status: 'idle' })],
     })
   })
@@ -318,7 +373,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     await vi.advanceTimersByTimeAsync(1)
 
     fx.client.getEntries.mockResolvedValueOnce({
-      data: { entries: [workflowRecordEntry('wf-1', 'running', 'e-1')], leafId: 'e-1' },
+      data: { entries: [workflowRegisteredEntry('wf-1', 'e-1')], leafId: 'e-1' },
     } as GetEntriesResult)
     fx.svc.invalidateRecordEntries(sid, 'workflow-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
@@ -326,7 +381,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
 
     // 同状态快照重拉（running 未变）：不发 workflowUpdate
     fx.client.getEntries.mockResolvedValueOnce({
-      data: { entries: [workflowRecordEntry('wf-1', 'running', 'e-2')], leafId: 'e-2' },
+      data: { entries: [workflowRegisteredEntry('wf-1', 'e-2')], leafId: 'e-2' },
     } as GetEntriesResult)
     fx.svc.invalidateRecordEntries(sid, 'workflow-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
@@ -334,7 +389,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
 
     // 终态（done + reason）：发增量信号
     fx.client.getEntries.mockResolvedValueOnce({
-      data: { entries: [workflowRecordEntry('wf-1', 'done', 'e-3', 'completed')], leafId: 'e-3' },
+      data: { entries: [workflowSettledEntry('wf-1', 'done', 'e-3', 'completed')], leafId: 'e-3' },
     } as GetEntriesResult)
     fx.svc.invalidateRecordEntries(sid, 'workflow-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)

@@ -1199,15 +1199,54 @@ describe('预算窗口内 live ≡ reload（u6 re-scope）', () => {
 //   1. 翻边 entry 序列投影的确定性（同序列两次全量扫描 deep-equal）；
 //   2. 冷启动全量 ≡ 逐条前缀增量折叠（后到覆盖语义下，live 任意时点的增量重拉态
 //      与全量重放的同 id 投影一致）；
-//   3. U6 归一边（legacy 值 → 两态 + 展示位合成；第五归一 running+resumable → idle）
-//      在重放/live 两通路结果一致；
+//   3. v2 条目族（registered 定身份 / settled 定终局）在重放/live 两通路结果一致；
 //   4. 01a09f83 形态 fixture（U1/U2 批入库，renderer 与 core 双副本头注互指）回放
 //      badge 计数 = 0（P1 门在 renderer subagent-bucket.test 的等价镜像——跨包消费
 //      同一 SSOT 谓词，钉住 fixture 资产不因包边界漂移）。
+//
+// [v2 迁移] fixture 从 v1 全量快照单条 entry 迁到 v2「注册 + 终态」两条小条目（生产
+// record-entry.ts 现行唯一形态）：identity 域（agent/slug/task/startedAt/…）在 registered，
+// 终局域（status='idle'/stopReason/result/endedAt/…）在 settled；同 id 后到覆盖按条目族
+// 各自取末条（collectV2SubagentPair 语义）。v1 条目载体字段（closed/closedReason/resumable
+// 等）无 v2 carrier，其归一断言随读面删除（见各用例注释）。
 
-/** W16 v1 自描述 subagent-record entry 构造（extension record-entry.ts schema 的测试镜像） */
-function subagentRecordEntry(data: Record<string, unknown>): Record<string, unknown> {
-  return { type: 'custom', customType: 'subagent-record', data: { v: 1, agent: 'worker', slug: 'fx', task: 'replay', startedAt: 1000, ...data } }
+/** v2 registered 条目构造（extension record-entry.ts v2 schema 的测试镜像）：身份 + 家族链锚点 */
+function subagentRegisteredEntry(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: 'custom',
+    customType: 'subagent-record',
+    data: {
+      v: 2,
+      kind: 'registered',
+      agent: 'worker',
+      slug: 'fx',
+      task: 'replay',
+      origin: 'tool',
+      rootSessionId: 'sess-fixture-root',
+      depth: 0,
+      startedAt: 1000,
+      ...data,
+    },
+  }
+}
+
+/** v2 settled 条目构造（extension record-entry.ts v2 schema 的测试镜像）：终局 + 摘要（status 两态恒 idle） */
+function subagentSettledEntry(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: 'custom',
+    customType: 'subagent-record',
+    data: {
+      v: 2,
+      kind: 'settled',
+      status: 'idle',
+      turns: 1,
+      totalTokens: 10,
+      model: 'fixture-model',
+      thinkingLevel: 'medium',
+      endedAt: 2000,
+      ...data,
+    },
+  }
 }
 
 /** 同 id 后到覆盖折叠（scanSubagentEntries 的 live 增量合并语义镜像） */
@@ -1216,20 +1255,17 @@ function foldBySubagentId(records: SubagentRecord[]): Map<string, SubagentRecord
 }
 
 describe('[two-state-convergence U7] subagent-record 轮终翻边 entry 序列等价回放（P2）', () => {
-  /** 翻边序列：register → 轮终翻边 → revive 续轮（清点族清 result/stopReason）→ 再翻边
-   *  + 一条 legacy closed entry + 一条存量桥接 entry（第五归一输入） */
+  /** 翻边序列（v2 条目族）：注册 → 轮终终态 → 第二轮注册（revive 轮始）→ 第二轮终态。
+   *  v1「同 id 全量快照后到覆盖」在 v2 由 registered / settled 各自后到覆盖表达——identity
+   *  取末条 registered、终局取末条 settled，两轮翻边语义等价（终态条目出现即 idle）。 */
   const FLIP_SEQUENCE: Record<string, unknown>[] = [
-    subagentRecordEntry({ id: 'sa-flip', status: 'running' }),
-    // 轮终翻边（U4 后写面：idle + result + stopReason）
-    subagentRecordEntry({ id: 'sa-flip', status: 'idle', result: 'round 1 output', stopReason: 'completed', endedAt: 2000 }),
-    // revive/第 2 轮轮始（[U6/D4] 清点族：result/stopReason 清，status 翻 running）
-    subagentRecordEntry({ id: 'sa-flip', status: 'running' }),
-    // 第 2 轮轮终
-    subagentRecordEntry({ id: 'sa-flip', status: 'idle', result: 'round 2 output', stopReason: 'completed', endedAt: 4000 }),
-    // legacy closed 终态（[U6] 归一边输入：→ idle + closedReason 保留 + stopReason 派生）
-    subagentRecordEntry({ id: 'sa-legacy-closed', status: 'closed', closedReason: 'gc', error: 'boom', endedAt: 5000 }),
-    // 存量桥接形态（U4 部署边界 entry：running + resumable——[U6/D5 第五归一] → idle）
-    subagentRecordEntry({ id: 'sa-bridged', status: 'running', resumable: true, result: 'stale', stopReason: 'completed' }),
+    subagentRegisteredEntry({ id: 'sa-flip' }),
+    // 轮终终态（v2：settled 携带 result + stopReason + endedAt）
+    subagentSettledEntry({ id: 'sa-flip', result: 'round 1 output', stopReason: 'completed', endedAt: 2000 }),
+    // revive / 第 2 轮轮始（v2：再写一条 registered，后到覆盖 identity 与轮始时点）
+    subagentRegisteredEntry({ id: 'sa-flip', startedAt: 3000 }),
+    // 第 2 轮轮终（settled 后到覆盖终局）
+    subagentSettledEntry({ id: 'sa-flip', result: 'round 2 output', stopReason: 'completed', endedAt: 4000 }),
   ]
 
   it('翻边序列投影确定性：同序列两次全量扫描 deep-equal（D5 纯函数范式镜像）', () => {
@@ -1259,35 +1295,35 @@ describe('[two-state-convergence U7] subagent-record 轮终翻边 entry 序列�
     expect([...live.entries()]).toEqual([...coldStart.entries()])
   })
 
-  it('[U6] 归一边在重放/live 两通路结果一致：legacy closed → idle+closedReason 保留+派生 stopReason；桥接形态 → 第五归一 idle', () => {
+  it('[v2] 注册+终态条目对投影：registered 定身份 / settled 定终局，冷启动与增量折叠一致', () => {
     const records = foldBySubagentId(scanSubagentEntries(FLIP_SEQUENCE))
-    // legacy closed 归一（与 runtime subagent-status.test 的映射表一致）
-    const closed = records.get('sa-legacy-closed')!
-    expect(closed.status).toBe('idle')
-    expect(closed.closedReason).toBe('gc')
-    expect(closed.stopReason).toBe('failed') // deriveClosedDisplay(gc+error) → failed 派生
-    // 第五归一（running + resumable=true → idle；entry 自带 stopReason 保留）
-    const bridged = records.get('sa-bridged')!
-    expect(bridged.status).toBe('idle')
-    expect(bridged.stopReason).toBe('completed')
-    // 翻边终态（正常路径：idle + result + stopReason 直投）
+    // 翻边终态（v2 正常路径：终局取末条 settled——idle + result + stopReason 直投）
     const flip = records.get('sa-flip')!
     expect(flip.status).toBe('idle')
     expect(flip.result).toBe('round 2 output')
     expect(flip.stopReason).toBe('completed')
+    // identity 域取末条 registered（第二轮轮始时点），终局域取末条 settled——两族后到覆盖各自独立
+    expect(flip.startedAt).toBe(3000)
+    expect(flip.endedAt).toBe(4000)
   })
 
-  it('⛔门：01a09f83 fixture 回放 badge 计数 = 0（39 形态经投影 + renderer SSOT 谓词；跨包同源消费）', () => {
-    /** fixture 脱敏规格 → entry data（字段形态六元组，与 renderer P1 门同构映射） */
-    function specToEntryData(spec: GhostFixtureSpec): Record<string, unknown> {
-      return {
-        id: spec.aliasId,
-        status: spec.status,
-        ...(spec.hasResult ? { result: '(redacted)' } : {}),
-        ...(spec.stopReason !== undefined ? { stopReason: spec.stopReason } : {}),
-      }
+  it('⛔门：01a09f83 fixture 回放 badge 计数 = 0（39 形态经 v2 注册+终态条目对投影 + renderer SSOT 谓词；跨包同源消费）', () => {
+    /** fixture 脱敏规格 → v2 条目对（identity 在 registered / 终局在 settled）：
+     *  终态形态（idle）= 注册 + 终态两条；在飞形态（running）只有注册条目（无 settled 即投影
+     *  running，badge 判据非空——规格若混入 running 形态本门即红，与 renderer P1 门同口径）。 */
+    function specToEntryPair(spec: GhostFixtureSpec): Record<string, unknown>[] {
+      const registered = subagentRegisteredEntry({ id: spec.aliasId })
+      if (spec.status === 'running') return [registered]
+      return [
+        registered,
+        subagentSettledEntry({
+          id: spec.aliasId,
+          ...(spec.hasResult ? { result: '(redacted)' } : {}),
+          ...(spec.stopReason !== undefined ? { stopReason: spec.stopReason } : {}),
+        }),
+      ]
     }
-    const entries = SESSION_01A09F83_GHOST_FIXTURE.map(specToEntryData).map(subagentRecordEntry)
+    const entries = SESSION_01A09F83_GHOST_FIXTURE.flatMap(specToEntryPair)
     // 冷启动全量
     const cold = scanSubagentEntries(entries)
     // live 增量折叠终态
