@@ -30,6 +30,7 @@ import {
 import { abortRun } from "../lifecycle.ts";
 import { setRunEventJournalDirForTest } from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
+import { getLogger } from "../../core/logger.ts";
 import type { WorkflowRunEvent } from "../run-events.ts";
 import type { LifecycleDeps } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
@@ -419,5 +420,70 @@ describe("resumeRun — v2 条目补写与预算预检", () => {
       resumeRun("wf-budget-ok", deps, { budgetTimeMs: 60_000, now: () => T0 + 10 * 24 * 3600 * 1000 }),
     ).resolves.toBe("wf-budget-ok");
     expect(runs.get("wf-budget-ok")).toBeDefined();
+  });
+});
+
+// ── 段 6 接管失败补偿（僵尸 run 防线）─────────────────────────
+
+describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => {
+  it("adoptResumedRun 失败：回滚落 run-interrupted(crashed)、无僵尸注册、再次 resume 不被「actively running」误拒", async () => {
+    await seedInterruptedRecord("wf-adoptfail");
+    const { deps, runs } = makeDeps();
+    // worker 接管失败（段 6 可失败面：run-resumed 帧已落盘之后的重建/接管抛错）
+    vi.mocked(deps.workerHost.start).mockImplementation(() => {
+      throw new Error("engine spawn failed");
+    });
+
+    // 原异常上抛（调用方报错给用户），不被补偿路径转换语义
+    await expect(resumeRun("wf-adoptfail", deps, { now: () => T0 + 100_000 }))
+      .rejects.toThrow("engine spawn failed");
+
+    // record：run-resumed 已落 + 补偿回滚——末帧 run-interrupted(errorCode=crashed，
+    // reason 带失败原因)，而非滞留 running 的僵尸流
+    const events = await scanEvents("wf-adoptfail");
+    expect(events.some((e) => e.type === "run-resumed")).toBe(true);
+    const last = events.at(-1);
+    expect(last?.type).toBe("run-interrupted");
+    expect((last as { errorCode?: string }).errorCode).toBe("crashed");
+    expect((last as { reason?: string }).reason).toContain("resume adoption failed");
+    expect((last as { reason?: string }).reason).toContain("engine spawn failed");
+    // 进程内无僵尸注册（接管失败点在 runs.set 之前）
+    expect(runs.has("wf-adoptfail")).toBe(false);
+
+    // 再次 resume：record 已回 interrupted 态，资格校验不误拒——重试成功复活
+    //（修复前：fold 滞留 running → 以「an actively running run needs no resume」
+    // 拒绝，与「进程内无活体」的实情相反）
+    const fresh = makeDeps();
+    await expect(resumeRun("wf-adoptfail", fresh.deps, { now: () => T0 + 200_000 }))
+      .resolves.toBe("wf-adoptfail");
+    expect(fresh.runs.get("wf-adoptfail")!.state.status).toBe("running");
+    const eventsAfterRetry = await scanEvents("wf-adoptfail");
+    expect(eventsAfterRetry.filter((e) => e.type === "run-resumed")).toHaveLength(2);
+  });
+
+  it("回滚自身失败（journal 不可写）：不掩盖原异常上抛 + error 留痕指恢复路径", async () => {
+    await seedInterruptedRecord("wf-rollbackfail");
+    const { deps } = makeDeps();
+    const errorSpy = vi.spyOn(getLogger("subagents"), "error");
+    const recordPath = path.join(journalDir, "wf-rollbackfail.record.jsonl");
+    vi.mocked(deps.workerHost.start).mockImplementation(() => {
+      // 段 6 时刻（run-resumed 帧已落盘）：把 record 流换成目录形态，令补偿回滚的
+      // journal append 以 EISDIR 失败——模拟「回滚自身也失败」的双重故障
+      fs.rmSync(recordPath);
+      fs.mkdirSync(recordPath);
+      throw new Error("engine spawn failed");
+    });
+
+    try {
+      // 原异常照常上抛（不被回滚失败掩盖成第二个错误）
+      await expect(resumeRun("wf-rollbackfail", deps, { now: () => T0 + 100_000 }))
+        .rejects.toThrow("engine spawn failed");
+      // 回滚失败 error 留痕（含 runId 与恢复指引：下次 session_start 崩溃收编兜底）
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("resume rollback to interrupted failed (runId=wf-rollbackfail)"),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

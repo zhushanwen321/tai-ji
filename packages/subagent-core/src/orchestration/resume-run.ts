@@ -37,6 +37,7 @@ import { toErrorMessage } from "../core/error-message.ts";
 import {
   buildWorkflowRecordRegisteredEntryData,
   dispatchRunTrigger,
+  interruptRun,
   runEventJournalPathOf,
 } from "./terminal-actions.ts";
 import {
@@ -172,8 +173,11 @@ export interface ResumeTierDecision { // oe-exempt:20260929:framework:tier-decis
 }
 
 /**
- * 档 1 提取边界（待验证检查点 8，已核实）：pi assistant message.content = string
- * 或 blocks 数组（type: text/thinking/toolCall/tool_result，text 块携带文本）。
+ * 档 1 提取边界（pi 0.84.4 实装锚点 pi-ai dist/types.d.ts:304-309，登记
+ * PS-53）：assistant message.content 恒为 blocks 数组（TextContent |
+ * ThinkingContent | ToolCall——text 块携带文本）；string 形态属 UserMessage
+ * （content: string | (TextContent | ImageContent)[]），此处 string 分支为
+ * 防御宽面（正常 assistant 流不命中）。
  * 提取口径 = type==='text' 块的 text 拼接（'' join）——与 session-reader
  * result-action「取 subagent 最终正文」同款口径（跨包无依赖边，口径一致性由
  * 两侧测试锁定）。thinking / toolCall / tool_result 块排除（推理噪音与工具协议
@@ -205,9 +209,11 @@ const defaultSessionReader: MemberSessionReader = (p) => readFileSync(p, "utf8")
  * - 尾部（跳过末尾非 message 元数据行）最后一条 message 是完整 assistant 且带
  *   可提取正文 → collect（档 1：回复完整落盘仅结果未回传，补收零 token）；
  * - 其余（末尾悬空 user prompt / toolResult / 半截行 / 纯工具调用 assistant /
- *   无 message）→ continue（档 2：请求未完成，同会话续写——pi 实装语义 = 重发
- *   请求重新生成末次回复，历史上下文经同一 sessionFile 保留，cacheRead 低价；
- *   待验证检查点 1 已核实，与设计档 2「只重花最后一次生成」效益吻合）。
+ *   无 message）→ continue（档 2：请求未完成，同会话续写——pi 实装语义（待验证
+ *   检查点 1 已核实，0.84.4 agent-session.js:892：prompt 路径新增 user 消息、
+ *   不调 agent.continue()）= 悬空 prompt 原样留在上下文 + 新增续跑指令（两个
+ *   连续 user 轮），不重发原文；上下文已在（cacheRead 低价），与设计档 2
+ *   「只重花最后一次生成」效益吻合）。
  */
 export function classifyResumeTierFromContent(content: string): ResumeTierDecision {
   const lines = content.split("\n");
@@ -581,14 +587,24 @@ function adoptResumedRun(
   });
   // pending-notifications 信号（runWorkflow 启动同款）：复活 = 该 run 对当前
   // session 重新可见的进行中任务（run-resumed 转移表行「通知语义归 resume 编排」的落点）
-  deps.eventBus?.emit("pending:register", { id: runId, type: "workflow", name: run.spec.slug || run.spec.scriptName || runId });
-  deps.log?.("debug", "workflow:resume-run", "run resumed", {
-    runId,
-    replayCalls: summary.events.filter((e) => e.type === "agent-settled").length + summary.collectCount,
-    collectedCalls: summary.collectCount,
-    rescheduledBudgetMs: remainingBudgetMs,
-    tierSummary: summary.tierSummary,
-  });
+  // [OR-4 同款独立围栏] 此处接管（deps.runs.set）已成功——通知/日志是辅助面，
+  // 失败不得把已复活的 run 判死回滚（record 停在 running 是此刻的事实）。宿主
+  // eventBus 经 resolveCurrentPi() 现读，reload/替换窗口会抛。
+  try {
+    deps.eventBus?.emit("pending:register", { id: runId, type: "workflow", name: run.spec.slug || run.spec.scriptName || runId });
+    deps.log?.("debug", "workflow:resume-run", "run resumed", {
+      runId,
+      replayCalls: summary.events.filter((e) => e.type === "agent-settled").length + summary.collectCount,
+      collectedCalls: summary.collectCount,
+      rescheduledBudgetMs: remainingBudgetMs,
+      tierSummary: summary.tierSummary,
+    });
+  } catch (err) {
+    logger.error(
+      `[workflow] resume post-adoption signal failed (runId=${runId}): ${toErrorMessage(err)} — ` +
+        "the run itself is adopted and running; only the notification/log was lost",
+    );
+  }
 }
 
 /** 锁段内的编排主体（resumeRun 持锁后执行；锁释放归调用方 finally）。 */
@@ -631,9 +647,39 @@ async function resumeRunLocked(
   const collectCount = await dispatchTierCollectFrames(runId, tierPlan, dispatchSource, now);
 
   // ── 6. 重建聚合 + D10 预算标记 + worker 接管 + pending 信号 ──
-  adoptResumedRun(runId, deps, created, recordPath, {
-    events, activeElapsedMs, budgetTimeMs, resumedAt, collectCount, tierSummary,
-  }, now);
+  // 补偿围栏：段 4/5 的失败都是干净拒绝（run-resumed 未落、状态无损），但本段在
+  // run-resumed 帧 + 档 1 补收帧已落盘之后执行——接管失败若无补偿，record 流
+  // fold=running 而进程内无活体无注册：run 可被 GUI/枚举发现却永不推进，且再次
+  // resume 被资格校验以「actively running needs no resume」误拒（与实情相反）。
+  // 回滚 = interruptRun 落 run-interrupted（running → interrupted 表内合法转移、
+  // 幂等），run 回到可重试 resume 的暂停态；回滚自身失败（journal IO error）仅
+  // error 留痕——兜底收敛 = 下次 session_start 的 recoverCrashedRuns 收编。原异常
+  // 照常上抛（调用方报错给用户）。
+  try {
+    adoptResumedRun(runId, deps, created, recordPath, {
+      events, activeElapsedMs, budgetTimeMs, resumedAt, collectCount, tierSummary,
+    }, now);
+  } catch (err) {
+    try {
+      await interruptRun(runId, {
+        errorCode: "crashed",
+        reason: `resume adoption failed: ${toErrorMessage(err)}`,
+        ...(options?.journalDir !== undefined ? { journalDir: options.journalDir } : {}),
+        workflowName: created.workflowName,
+      });
+      logger.error(
+        `[workflow] resume adoption failed, run rolled back to interrupted (runId=${runId}): ${toErrorMessage(err)}`,
+      );
+    } catch (rollbackErr) {
+      logger.error(
+        `[workflow] resume rollback to interrupted failed (runId=${runId}): ${toErrorMessage(rollbackErr)} — ` +
+          "record stays folded as running with no live worker. Recovery: the next session_start crash " +
+          "adoption (recoverCrashedRuns) will re-interrupt this run; inspect the record stream manually " +
+          "if adoption keeps failing.",
+      );
+    }
+    throw err;
+  }
   return runId;
 }
 

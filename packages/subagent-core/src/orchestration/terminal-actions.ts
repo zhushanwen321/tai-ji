@@ -958,16 +958,30 @@ export async function interruptRun(
         `interruptRun entry callCount derivation failed (runId=${runId}): ${toErrorMessage(err)}`,
       );
     }
-    opts.appendInterruptedEntry(
-      buildWorkflowRecordInterruptedEntryData({
-        runId,
-        workflowName: opts.workflowName,
-        errorCode: opts.errorCode,
-        interruptedAt: now,
-        callCount,
-        usedTokens: 0,
-      }),
-    );
+    // 独立围栏（镜像 appendWorkflowRecordSettledEntry 的 [OR-4] 同款纪律）：
+    // 条目失败不吞调用方的收尾链——terminateRunningRuns 的 closeOut/releaseRuntime/
+    // dispose 与 recoverCrashedRuns 的 meta.interruptedAt 置位都在本回调之后，
+    // 宿主回调本体（resolveCurrentPi().appendEntry）在 reload/替换窗口会抛。
+    // record 转移事件此刻已落盘（事实源无损），缺的只是投影锚条目。
+    try {
+      opts.appendInterruptedEntry(
+        buildWorkflowRecordInterruptedEntryData({
+          runId,
+          workflowName: opts.workflowName,
+          errorCode: opts.errorCode,
+          interruptedAt: now,
+          callCount,
+          usedTokens: 0,
+        }),
+      );
+    } catch (err) {
+      runEventLogger.error(
+        `[workflow] workflow-record interrupted entry append failed (runId=${runId}): ${toErrorMessage(err)} — ` +
+          "the run-interrupted journal frame is already durable; only the entry (projection anchor) is missing. " +
+          "Recovery: reopen or reload the session to rebuild the projection; re-interrupting is idempotent " +
+          "(a repeated interrupt yields without appending a second frame).",
+      );
+    }
   }
   return true;
 }

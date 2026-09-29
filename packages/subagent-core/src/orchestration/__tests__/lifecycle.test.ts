@@ -28,6 +28,15 @@ import {
 } from "../lifecycle.ts";
 import { ArgsValidationError } from "../args-validator.ts";
 import { createRunEventJournal } from "../run-events.ts";
+import { getLogger } from "../../core/logger.ts";
+import { AgentCall } from "../models/agent-call.ts";
+import type { ExecutionTraceNode } from "../models/types.ts";
+import {
+  resetWorkflowWindowEngineStatesForTest,
+  resolveWorkflowWindowEnginePort,
+  setWorkflowWindowEngineGateway,
+} from "../../execution/engine/routing.ts";
+import type { EnginePort } from "../../execution/engine/port.ts";
 import { projectRunRegistryState } from "../run-registry.ts";
 import {
   dispatchRunCreated,
@@ -663,6 +672,70 @@ describe("terminateRunningRuns", () => {
     expect(events.filter((e) => e.type === "run-interrupted")).toHaveLength(1);
     await expectInterruptedFrame("wf-term-fence-b");
     expect(terminateB).toHaveBeenCalledTimes(1);
+  });
+
+  // [D15 回调围栏回归] 中断条目宿主回调（appendInterruptedEntry → 宿主
+  // resolveCurrentPi().appendEntry）在 reload/替换窗口抛 assertActive 时，
+  // interruptRun 必须就地围栏消化——修复前该抛错穿透到 terminateRunningRuns 的
+  // 单 run try 块，排在后面的三步收尾（closeOutInFlightCalls / releaseRuntime /
+  // disposeWorkflowWindowEngineState）全部被跳过：record 已 interrupted 但执行
+  // 资源继续活着。
+  it("中断条目宿主回调抛错不吞收尾链：三步收尾仍执行、中断帧已落、错误留痕", async () => {
+    const runId = "wf-term-entry-throw";
+    const { run, terminate } = makeRunningRealRun(runId);
+    // 在途 call（running 态）——第一步 closeOutInFlightCalls 的收口对象
+    const traceNode: ExecutionTraceNode = {
+      stepIndex: 1, agent: "worker", task: "in-flight", model: "test", status: "running",
+    };
+    run.state.trace.append(traceNode);
+    const call = new AgentCall(1, { prompt: "test task", agent: "worker" }, traceNode);
+    call.markRunning();
+    run.state.calls.set(1, call);
+    await seedRunCreated(run);
+    // 引擎窗口实例——第三步 disposeWorkflowWindowEngineState 的可观察对象
+    //（经 gateway 注入缝登记 per-window 实例，dispose 计数即收尾证据）
+    const disposedPorts: EnginePort[] = [];
+    setWorkflowWindowEngineGateway({
+      processModelOf: () => "per-window",
+      createPort: () => {
+        const port = {
+          dispose: () => {
+            disposedPorts.push(port);
+            return Promise.resolve();
+          },
+        } as unknown as EnginePort;
+        return port;
+      },
+    });
+    resolveWorkflowWindowEnginePort(runId, "pw");
+    const errorSpy = vi.spyOn(getLogger("run-event-dispatch"), "error");
+
+    const deps = makeDeps();
+    // 宿主回调抛错（pi reload 切换窗口的 assertActive 形态）
+    deps.appendEntry.mockImplementation(() => {
+      throw new Error("assertActive: session was replaced");
+    });
+    deps.runs.set(runId, run);
+
+    try {
+      await terminateRunningRuns(deps, "Session switched: run terminated");
+
+      // 三步收尾仍执行（修复前全部被跳过）
+      expect(call.status).toBe("done"); // ① closeOutInFlightCalls：在途 call 收口取消
+      expect(call.result?.error).toContain("Cancelled");
+      expect(run.runtime).toBeUndefined(); // ② releaseRuntime：worker 解绑停机
+      expect(terminate).toHaveBeenCalledTimes(1);
+      expect(disposedPorts).toHaveLength(1); // ③ disposeWorkflowWindowEngineState
+      // 中断帧已落（journal 事实源不受回调失败影响）
+      await expectInterruptedFrame(runId);
+      // 错误留痕（含 runId 的 error 级日志）
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`workflow-record interrupted entry append failed (runId=${runId})`),
+      );
+    } finally {
+      errorSpy.mockRestore();
+      resetWorkflowWindowEngineStatesForTest();
+    }
   });
 });
 
