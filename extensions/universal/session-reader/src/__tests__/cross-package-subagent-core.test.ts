@@ -9,6 +9,7 @@ import { handleSessionRead } from '../tool-handler.js'
 import {
   ModelConfigService,
   RecordStore,
+  SUBAGENT_RECORD_CUSTOM_TYPE,
   SubagentService,
   type SubagentRecord,
 } from '@zhushanwen/subagent-core'
@@ -199,12 +200,12 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
         data: { id: m.id, agent: '/agents/worker.md', mode: 'background', task: 'cross-package task', startedAt: 1000, rootSessionId: ROOT_SESSION, depth: 0 },
       }),
       JSON.stringify({
+        // 登记 §3.3：主/子文件条目面 = v2 注册条（身份域；运行态事实源在 record 事件文件）。
         type: 'custom', id: `cid-${m.id}-2`, parentId: `cid-${m.id}-1`, timestamp: ts,
         customType: 'subagent-record',
         data: {
-          v: 1, id: m.id, agent: '/agents/worker.md', task: 'cross-package task', slug: 'cross',
-          status: 'running', mode: 'background', startedAt: 1000, rootSessionId: ROOT_SESSION,
-          depth: 0, turns: 1, totalTokens: 10, model: m.model, eventLog: [], displayItems: [],
+          v: 2, kind: 'registered', id: m.id, agent: '/agents/worker.md', task: 'cross-package task',
+          slug: 'cross', origin: 'tool', rootSessionId: ROOT_SESSION, depth: 0, startedAt: 1000,
         },
       }),
     )
@@ -216,11 +217,31 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
    *  全文 + sessionFile）——[U4/D4] 翻边后成功成员崩溃时的真实末条形态（U5 前的
    *  running+resumable 桥接形态已随字段退役消亡）。 */
   function seedRoundTerminalEntries(m: MemberSeed, childFile: string): void {
-    const store = makeSeedStore()
-    store.reportSubagentRecord(memberRecord({ id: m.id, sessionFile: childFile, model: m.model }))
-    store.reportSubagentRecord(
-      memberRecord({ id: m.id, sessionFile: childFile, model: m.model, status: 'idle', result: m.resultText }),
-    )
+    // 登记 §3.3：v1 快照写点已删——经写入型 pi 落 v2 条目族（注册 + 终态）。
+    const pi = makeWritingPi(mainFile)
+    const seed = (record: SubagentRecord): void => {
+      for (const entry of v2Entries(record)) pi.appendEntry(SUBAGENT_RECORD_CUSTOM_TYPE, entry)
+    }
+    seed(memberRecord({ id: m.id, sessionFile: childFile, model: m.model }))
+    seed(memberRecord({ id: m.id, sessionFile: childFile, model: m.model, status: 'idle', result: m.resultText }))
+  }
+
+  /** record → v2 条目族（注册恒在场；非 running 再补终态条）。 */
+  function v2Entries(record: SubagentRecord): Array<Record<string, unknown>> {
+    const registered = {
+      v: 2, kind: 'registered', id: record.id, agent: record.agent, task: record.task, slug: record.slug,
+      origin: record.origin ?? 'tool', rootSessionId: record.rootSessionId, depth: record.depth,
+      startedAt: record.startedAt,
+    }
+    if (record.status === 'running') return [registered]
+    return [registered, {
+      v: 2, kind: 'settled', id: record.id, status: 'idle',
+      stopReason: record.stopReason ?? 'end_turn', endedAt: record.endedAt ?? record.startedAt,
+      turns: record.turns, totalTokens: record.totalTokens, model: record.model,
+      thinkingLevel: record.thinkingLevel,
+      ...(record.sessionFile !== undefined ? { sessionFile: record.sessionFile } : {}),
+      ...(record.result !== undefined ? { result: record.result } : {}),
+    }]
   }
 
   /** 全链路驱动：种子 → 恢复 service（orphan 覆写）→ rebuildIndexes（现行 boot
