@@ -583,56 +583,6 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     expect(record.stopReason).toBe('reopened')
   })
 
-  it('对拍 v1 冻结路径：v1 快照轮终实体（idle）经 mergeJournalProjection 原样透传', () => {
-    const v1Record: SubagentRecord = {
-      subagentId: 'sa-v1',
-      sessionFile: null,
-      agent: 'worker',
-      slug: 'work',
-      task: 'Do work',
-      status: 'idle',
-      stopReason: 'completed',
-      turns: 2,
-      totalTokens: 500,
-      startedAt: 1000,
-      origin: 'workflow',
-      parentRunId: 'wf-1',
-      stepIndex: 0,
-    }
-    const sources = initialJournalProjectionSources()
-    sources.v1Subagents.set('sa-v1', v1Record)
-    const merged = mergeJournalProjection(sources, 's1')
-    const projected = merged.subagents.get('sa-v1')!
-    expect(projected.status).toBe('idle')
-    expect(projected.stopReason).toBe('completed')
-  })
-
-  // [F2-1] 对拍 v1 冻结路径同形态：轮始清点后的 v1 running 记录无停因（v1 写侧
-  // markRoundStartedImpl rec.stopReason=undefined）——v2 在飞投影同形（不透传旧停因）
-  it('对拍 v1 冻结路径：v1 快照在飞实体（running、轮始清点无停因）原样透传', () => {
-    const v1Record: SubagentRecord = {
-      subagentId: 'sa-v1-flight',
-      sessionFile: null,
-      agent: 'worker',
-      slug: 'work',
-      task: 'Do work',
-      status: 'running',
-      stopReason: undefined,
-      turns: 2,
-      totalTokens: 500,
-      startedAt: 1000,
-      origin: 'workflow',
-      parentRunId: 'wf-1',
-      stepIndex: 0,
-    }
-    const sources = initialJournalProjectionSources()
-    sources.v1Subagents.set('sa-v1-flight', v1Record)
-    const merged = mergeJournalProjection(sources, 's1')
-    const projected = merged.subagents.get('sa-v1-flight')!
-    expect(projected.status).toBe('running')
-    expect(projected.stopReason).toBeUndefined()
-  })
-
   // [W1 / F1-46 轮终 result] record-round-idle 携带 result 摘要锚（D3 词表裁决①）：
   // 轮终粒度的 result 断供修复——承接 v1 U8b 轮终 result 显示信号（「轮终等待续聊」
   // 的展示面），终局全文仍只在 v2 终态条目一次性写（D1）。
@@ -913,13 +863,8 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
 })
 
 describe('mergeJournalProjection（单点合并）', () => {
-  it('v1 冻结定界：v1 快照实体不被 journal/entry v2 覆盖', () => {
+  it('[§3.3 仲裁反转] journal fold 是实体唯一来源：注册条目缺席时按 fold 投影（无 v1 遮蔽通道）', () => {
     const sources = initialJournalProjectionSources()
-    sources.v1Subagents.set('sa-1', {
-      subagentId: 'sa-1', sessionFile: null, agent: 'v1-agent', slug: '', task: '',
-      status: 'running',
-    })
-    // 同 id 的 journal fold（身份 agent=worker）不得覆盖 v1 冻结数据
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined, round: undefined, epoch: undefined, roundIdle: undefined,
@@ -927,7 +872,9 @@ describe('mergeJournalProjection（单点合并）', () => {
     }
     sources.recordFolds.set('sa-1', fold)
     const merged = mergeJournalProjection(sources, 's1')
-    expect(merged.subagents.get('sa-1')?.agent).toBe('v1-agent')
+    // fold 的 record-created 身份（agent=worker）直接进投影——v1 冻结层删除后不存在
+    // 「同 id 快照遮蔽事件流」的方向性缺陷。
+    expect(merged.subagents.get('sa-1')?.agent).toBe('worker')
   })
 
   it('rootSessionId 非本会话的 record fold 被排除（records 目录按 cwd 共享）', () => {

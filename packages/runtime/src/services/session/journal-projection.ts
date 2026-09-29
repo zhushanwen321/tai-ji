@@ -2,7 +2,7 @@
  * journal 投影（W1 [D6]：runtime 读侧换源——每会话内存投影，读请求唯一数据源）。
  *
  * 双源单点合并（设计 w1-run-record-journal-authority §3.1 环节 B / §3.3 D6）：
- * - entry 源：主 session 条目（v1 全量快照兼容读 + v2 注册/终态两条小条目）——
+ * - entry 源：主 session 条目（v2 注册/终态两条小条目）——
  *   活跃会话经既有 get_entries 游标通道喂入（applyEntryBatch），冷会话经
  *   scanRecordFamilyEntriesFromSessionFile 流式扫描喂入（同一入口）；
  * - journal 源：record 事件文件（`<recordsDir>/<sa-id>.events`）与 run journal
@@ -14,8 +14,9 @@
  *
  * 仲裁规则（journal 胜出 / 窗外条目兜底）：同实体两源都有数据时 journal 事件
  * 胜出（事实源）；journal 被保留通道清理（窗外终态实体）后 entry 终态条目是
- * 唯一来源。v1 快照条目实体走冻结兼容路径不与 journal 合并（读侧定界，对齐
- * 设计 D4 收编定界按注册条目形态分流）。
+ * 唯一来源。v1 全量快照兼容层已随「项目未上线、无 v1 数据」整体删除（登记 §3.3，
+ * 2026-09-30）——投影只认 v2 条目 + journal fold，不再有「v1 冻结定界优先」的实体级
+ * 拦截（那正是「投影遮蔽事件流」的方向性缺陷本体）。
  *
  * 与 W0 的衔接（水位/合并喂入退役）：步骤视图合并（mergeWorkflowStepRecords
  * 纯函数保留）的输入从「entry 通道派生缓存」换成本投影的合并快照——冷热两路
@@ -56,8 +57,6 @@ import {
   type WorkflowRunEvent,
 } from '@zhushanwen/subagent-core'
 
-import { scanSubagentEntries } from './subagent-extractor.js'
-import { scanWorkflowEntries } from './workflow-extractor.js'
 import { mergeWorkflowStepRecords } from './workflow-step-merge.js'
 
 // ── run journal 行解析（域无关 tail 原语的 run 域注入）─────────
@@ -142,7 +141,7 @@ export interface V2EntryScan { // oe-exempt:20260929:framework:workflow/record �
 /** [scanV2RecordEntries 拆分] subagent 域 v2 条目收编（classify 单源判 v/kind，id 键守卫归本层）。 */
 function scanSubagentV2Entry(data: unknown, result: V2EntryScan): void {
   const classification = classifySubagentRecordEntryData(data)
-  if (classification.ok || classification.reason !== 'v2') return
+  if (!classification.ok) return
   const v2 = classification.entry
   if (v2.kind === 'registered' && typeof v2.id === 'string') {
     result.subagentRegistered.set(v2.id, v2)
@@ -193,7 +192,7 @@ export function scanV2RecordEntries(entries: readonly unknown[]): V2EntryScan {
   return result
 }
 
-// ── 合并仲裁纯函数（journal 胜出 / 窗外条目兜底 / v1 冻结）─────
+// ── 合并仲裁纯函数（journal 胜出 / 窗外条目兜底）─────
 
 /** ms → ISO（WorkflowAgentCall/WorkflowRunRecord 时间契约是 ISO 字符串）。 */
 function toIso(ms: number): string {
@@ -521,11 +520,8 @@ export function projectV2Workflow(
   }
 }
 
-/** 投影双源持有态（entry 源两代 + journal 源两域）。 */
+/** 投影双源持有态（entry 源 + journal 源两域；v1 全量快照兼容层已删，登记 §3.3）。 */
 export interface JournalProjectionSources { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
-  /** v1 全量快照实体（兼容层冻结数据——journal 不参与合并）。 */
-  v1Subagents: Map<string, SubagentRecord>
-  v1Workflows: Map<string, WorkflowRunRecord>
   v2SubagentRegistered: Map<string, SubagentRecordRegisteredEntryData>
   v2SubagentSettled: Map<string, SubagentRecordSettledEntryData>
   v2WorkflowRegistered: Map<string, WorkflowRecordRegisteredEntryData>
@@ -538,8 +534,6 @@ export interface JournalProjectionSources { // oe-exempt:20260929:framework:work
 
 export function initialJournalProjectionSources(): JournalProjectionSources {
   return {
-    v1Subagents: new Map(),
-    v1Workflows: new Map(),
     v2SubagentRegistered: new Map(),
     v2SubagentSettled: new Map(),
     v2WorkflowRegistered: new Map(),
@@ -552,8 +546,6 @@ export function initialJournalProjectionSources(): JournalProjectionSources {
 /**
  * 双源单点合并（纯函数）：sources → 合并快照。
  *
- * - v1 实体冻结透传（定界：v1 快照在场的实体不经 journal 仲裁——旧会话行为
- *   完全不变）；
  * - v2 subagent：journal fold 的 record-created.rootSessionId === sessionId 才进
  *   投影（records 目录按 cwd 共享跨会话，rootSessionId 是 record 域 session 归属
  *   权威）；v2 注册条目在 applyEntryBatch 摄入侧按 rootSessionId 过滤；终态条目
@@ -581,21 +573,17 @@ export function mergeJournalProjection(
   return { subagents, workflows }
 }
 
-/** [mergeJournalProjection 拆分] subagent 半边：v1 冻结透传 + v2 三源 id 并集投影。 */
+/** [mergeJournalProjection 拆分] subagent 半边：v2 三源 id 并集投影（v1 冻结层已删）。 */
 function mergeSubagentHalf(
   sources: JournalProjectionSources,
   sessionId: string,
 ): Map<string, SubagentRecord> {
   const subagents = new Map<string, SubagentRecord>()
-  for (const [id, record] of sources.v1Subagents) {
-    subagents.set(id, record)
-  }
   const v2Ids = new Set<string>()
   for (const id of sources.v2SubagentRegistered.keys()) v2Ids.add(id)
   for (const id of sources.v2SubagentSettled.keys()) v2Ids.add(id)
   sources.recordFolds.forEach((fold, id) => { if (fold.identity !== undefined) v2Ids.add(id) })
   for (const id of v2Ids) {
-    if (subagents.has(id)) continue // v1 冻结定界优先
     const fold = sources.recordFolds.get(id)
     // journal 源的 session 归属过滤：fold 有身份但 rootSessionId 非本会话 → 排除
     if (fold?.identity !== undefined && fold.identity.rootSessionId !== sessionId) {
@@ -611,17 +599,13 @@ function mergeSubagentHalf(
   return subagents
 }
 
-/** [mergeJournalProjection 拆分] workflow 半边：v1 冻结透传 + v2 条目定界 × journal fold 合并。 */
+/** [mergeJournalProjection 拆分] workflow 半边：v2 条目定界 × journal fold 合并（v1 冻结层已删）。 */
 function mergeWorkflowHalf(sources: JournalProjectionSources): Map<string, WorkflowRunRecord> {
   const workflows = new Map<string, WorkflowRunRecord>()
-  for (const [runId, record] of sources.v1Workflows) {
-    workflows.set(runId, record)
-  }
   const v2RunIds = new Set<string>()
   for (const runId of sources.v2WorkflowRegistered.keys()) v2RunIds.add(runId)
   for (const runId of sources.v2WorkflowSettled.keys()) v2RunIds.add(runId)
   for (const runId of v2RunIds) {
-    if (workflows.has(runId)) continue // v1 冻结定界优先
     const record = projectV2Workflow(
       sources.v2WorkflowRegistered.get(runId),
       sources.v2WorkflowSettled.get(runId),
@@ -718,9 +702,8 @@ export class SessionJournalProjection {
   }
 
   /**
-   * entry 批应用（v1 快照扫描 + v2 条目分类 → 源持有态；fullRebuild = 游标全量
-   * 重拉，entry 源两代整体重置为新基线，journal 源不动——journal 是事实源，
-   * 不随 entry 游标自愈重置）。
+   * entry 批应用（v2 条目分类 → 源持有态；fullRebuild = 游标全量重拉，entry 源
+   * 整体重置为新基线，journal 源不动——journal 是事实源，不随 entry 游标自愈重置）。
    *
    * v2 注册条目按 rootSessionId 定界摄入（records 目录按 cwd 共享，注册条目是
    * 本会话实体登记簿）；终态条目/快照不携 rootSessionId，信任 append-only 文件
@@ -732,15 +715,11 @@ export class SessionJournalProjection {
     this.applyingEntryBatch = true
     try {
       if (fullRebuild) {
-        this.sources.v1Subagents.clear()
-        this.sources.v1Workflows.clear()
         this.sources.v2SubagentRegistered.clear()
         this.sources.v2SubagentSettled.clear()
         this.sources.v2WorkflowRegistered.clear()
         this.sources.v2WorkflowSettled.clear()
       }
-      for (const r of scanSubagentEntries([...entries])) this.sources.v1Subagents.set(r.subagentId, r)
-      for (const r of scanWorkflowEntries([...entries])) this.sources.v1Workflows.set(r.runId, r)
       const v2 = scanV2RecordEntries(entries)
       v2.subagentRegistered.forEach((reg, id) => {
         if (reg.rootSessionId === this.sessionId) this.sources.v2SubagentRegistered.set(id, reg)
