@@ -276,6 +276,16 @@ widget 推送从「每 30s 无条件全量」改为**任务集指纹跳推**（�
 ### ADR-0090 seam 与注入通道二选一（2026-09-25 架构审查裁决，反转 W3「ui 依赖一律注入」决议）
 方法已在 SettingsTransport seam 上时，ui 包组件直取 seam（ui→core 合法依赖方向），不再经 provide/inject 复刻第二条注入通道——双通道是对同一方法的双轨复刻（假接缝）。本次以删除 `SETTINGS_CONFIG_API_KEY`（detectSources 注入通道）落地；保留的注入 key（SETTINGS_TOAST_KEY/QUOTA_CONFIGURE_FACTORY_KEY/SETTINGS_CHOOSE_DIRECTORY_KEY）承载的是 seam 之外的真实依赖（壳层 toast、工厂装配、Electron dialog），不适用本条。
 
+### ADR-0091 subagent 资源引用 = 绝对路径 + 两段式暴露（承接包内 ADR-0001/0002/0003，2026-09-29 收敛）
+
+subagent 体系的资源面决策三条现状（原记于包内 `extensions/universal/subagent-workflow/docs/adr/`，该目录已按「包内不自建 ADR 目录」规则退役，内容折入本条）：
+
+- **引用形态 = 绝对路径**：`agentRef` / `workflowRef` 统一为绝对路径引用（原 ADR-0002），发现与解析不依赖 cwd；后续实现质量补强（发现对齐 pi skill 的 session 级节奏、M2 改 `appendSystemPrompt` 内容语义并删除 agent/schema 临时文件、`AgentCallOpts` 字段统一、砍 info action、review-fix-loop 启动期 stat fail-fast）见原 ADR-0003 各条，均已落地。
+- **暴露机制 = 两段式**（原 ADR-0001）：workflow 侧「结构化参数 + 固定编排」按第一性原理推导（结构化参数是暴露问题的单一根因），subagent 侧参考竞品优化；四家（含 pi-subagent）趋同于两段式而非三段式。
+- **决策记录归属**：包内不再自建 ADR / 长期设计文档源（规则见 [extension-conventions.md](../extensions/extension-conventions.md)「决策记录与设计文档归属」）；体系级决策进本文件，包内实现细节进 `docs/architecture/` 或源码注释。
+
+现行载体：[docs/extensions/subagents/architecture.md](../extensions/subagents/architecture.md)（包拓扑 / 协议面 / 机制落点导航）+ `packages/subagent-core/src/shared/resource-discovery.ts`（7 源同名 last-writer-wins，SSOT）。
+
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 
 - **ADR-0008** navigate-tree 桥接命令——命令已删，桥接形态被 marker 通道取代。

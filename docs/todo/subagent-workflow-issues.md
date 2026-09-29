@@ -88,9 +88,11 @@
 
 - `session-lifecycle.ts:421-440`（appendSubagentIdentityEntry）以 `PI_SUBAGENT_SELF_RECORD_ID` 是否存在判主/子进程，并从 `PI_SUBAGENT_MODE` 等一组 env 读身份数据——角色判定隐式依赖 spawn 约定，无独立裁决入口。
 
-### 2.8 决策记录两处并存（原 G8）
+### 2.8 决策记录两处并存（已修，防复发规则已立）
 
-- 包内 `extensions/universal/subagent-workflow/docs/adr/`（3 个 ADR）与 `docs/design/`（13 个设计文档）跟项目级 `docs/adr/decisions.md` 两套文档源头并存，决策与设计位置无单一规则。
+- 状态：**已修**（2026-09-30）：包内 3 个 ADR 与 12 个历史设计文档已删除（仍有效的决策折入 `docs/adr/decisions.md` ADR-0091，git 可追溯；清单：resource-exposure / agentref-path / discovery-session-level、v2/v3/v4 与 workflow-one-shot 族、idle 侦查、dsh 对比、agent-ref-v3）。
+- 防复发：`docs/extensions/extension-conventions.md` 新增「决策记录与设计文档归属 [MANDATORY]」——扩展包内不得自建 ADR / 长期设计文档源。
+- 遗留一项：`docs/design/recursive-subagent-visibility.md` 是 §2.7 的现行依据（live 代码注释引用），随 §2.7 改写为 `docs/architecture/` 下的现行形态文档后删除包内副本。
 
 ### 2.9 测试深路径 import（已裁决关闭，勿重复怀疑）
 
