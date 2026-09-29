@@ -239,7 +239,7 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
 });
 
 // ══════════════════════════════════════════════════════════════
-describe("handler 转译：runWorkflow('fan-out') 确定性映射（D3）", () => {
+describe("handler 组装：runWorkflow('fan-out') 确定性映射（D3）", () => {
   it("全参数调用 → spec 逐字段映射（scriptSource/budget/slug/model/thinkingLevel/args）", async () => {
     const registry = makeRegistry();
     const result = await runSubagentsBatch(

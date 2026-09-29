@@ -7,14 +7,15 @@
  * 不影响命令壳，反之亦然。
  *
  * 行为契约（设计 §3.1 终态 / §3.3 D1-D3、D8、D9）：
- * - 唯一批量入口：N 个已知独立任务一次派发；handler 确定性转译
- *   runWorkflow("fan-out")（执行管道唯一——collect 时代的批协调状态已退役，
- *   不存在第二套批机制）。
- * - 批量派发的等价性契约：tasks[] 经 handler 确定性转译为内置 fan-out 模板脚本，
- *   走 runWorkflow 完整管道执行——模板仅由 tasks[] 确定性生成、不含任何批协调
- *   状态，执行管道唯一（不存在第二套批机制）；走管道使批量派发继承 workflow 的
- *   持久化、journal、GUI 投影与断点恢复（resume）全套能力，这是刻意保留间接层
- *   的原因。
+ * - 唯一批量入口：N 个已知独立任务一次派发；handler 按固定名解析内置 `fan-out`
+ *   模板（FAN_OUT_SCRIPT_NAME，不经 registry 之外的第二套批机制），组装
+ *   `args = {tasks, agents?, aggregate?}` 后交 runWorkflow 执行——**不生成脚本
+ *   文本**，执行形态 = 内置模板 + 一跳扁平 args 透传。
+ * - 执行形态保留间接层的原因：模板经 worker 执行模型（脚本 eval + postMessage
+ *   调用协议）运载，该形态同时承载 resume 重放（脚本确定性重跑 + 已 settled 调用
+ *   走 record 回放）、注入安全（workerData.scriptPath 定位 _shared，不回退当前目录）
+ *   与脚本可探索性（@pi-meta 进可用 workflow 清单）——走 workflow 管道使批量派发
+ *   继承持久化、journal、GUI 投影与断点恢复全套能力。
  * - 无 action 分发：status/abort 不复制，直接指路 workflow tool（runId 同体系）。
  * - 无 args 嵌套：tasks/agents/aggregate/... 全在顶层（弱模型信任 schema 结构信号，
  *   两跳转译是事故高发区——对照 workflow tool 的 name+args 形态）。
@@ -61,7 +62,7 @@ import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 /**
  * 本工具的固定执行体（内置模板）脚本名。
  *
- * 常量而非参数：subagents tool 的契约就是「转译到 fan-out 模板」——参数化会让
+ * 常量而非参数：subagents tool 的契约就是「把 tasks 透传给 fan-out 模板」——参数化会让
  * 工具的语义随脚本漂移（对照 D3「执行管道唯一」）。脚本按名经 registry 解析
  * （内置名优先链与 workflow tool actionRun 同一条，见 plan U2「复刻既有加载路径」）。
  */
@@ -209,7 +210,7 @@ export async function runSubagentsBatch(
     );
   }
 
-  // D3 确定性转译：tasks/agents/aggregate 原样进 args（模板参数面，$ARGS）；未提供的
+  // D3 确定性 args 组装：tasks/agents/aggregate 原样进 args（模板参数面，$ARGS）；未提供的
   // 缺省键不写入（模板侧 aggregate 缺省 false；空值不制造「都传/都缺」歧义形态）。
   const args: Record<string, unknown> = { tasks };
   if (params.agents !== undefined) args.agents = params.agents;

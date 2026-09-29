@@ -86,13 +86,15 @@
 
 - 包内 `extensions/universal/subagent-workflow/docs/adr/`（3 个 ADR）与 `docs/design/`（13 个设计文档）跟项目级 `docs/adr/decisions.md` 两套文档源头并存，决策与设计位置无单一规则。
 
-### 2.9 测试深路径 import（原 G9）
+### 2.9 测试深路径 import（已裁决关闭，勿重复怀疑）
 
-- 测试直接 import 包内部深层模块路径而非包入口：`interface/__tests__/commands-resume.test.ts:21`（`@zhushanwen/subagent-core/orchestration/resume-run.ts`）等；另有跨包超深相对路径形态（engine/__tests__/conformance/registry-fork-filter.test.ts:35）。
+- 2026-09-29 用户裁决：属 C-ext-27 已裁决设计（测试/bench/mocks 的深路径是 u-2c 决议，测试消费符号不塞 barrel，经 vitest alias + tsconfig paths 双轨解析，不受该约束管辖），本项关闭；否定性结论登记见 §7.8。
 
-### 2.10 subagents 批量 tool 经模板转译间接层执行（原 F1-C6）
+### 2.10 subagents 批量 tool 的执行形态（描述已更正，不重构）
 
-- `interface/tool-subagents.ts:13/:68`：tasks[] 参数经 handler 确定性转译为内置 fan-out 模板脚本再执行，工具契约与执行形态之间隔一层转译。
+- 现状（2026-09-29 核实更正）：handler **不生成脚本文本**——`args = {tasks, agents?, aggregate?}`（`tool-subagents.ts:214-216`）经固定名 `fan-out` 解析内置模板（`:201`）后交 `runWorkflow` 管道执行；旧表述「tasks[] 确定性转译为模板脚本」是更早实现的说法。
+- 真正的间接层 = **worker 执行模型**（脚本 eval 进 Worker + postMessage 调用协议），同时是 resume 重放（脚本确定性重跑 + 已 settled 调用走 record 回放）、注入安全（`workerData.scriptPath` 定位 `_shared`，不回退当前目录）与脚本可探索/可测试性（`@pi-meta` 进可用 workflow 清单）三项能力的载体。
+- 2026-09-29 用户裁决：**不做一等原语重构**（拆掉会引入第二份「按下标短路」重放实现，收益仅少一层 postMessage 与一次 Worker 启动）；若未来出现性能或调试痛点再立项。
 
 ### 2.11 两引擎 server.ts 平行双实现无共享底座
 
@@ -177,6 +179,8 @@
 5. **gui-mappers 现行输入域覆盖正确**（见 §2.2）。
 6. **19 组包间同名文件 12 组是合法垫片/参数化收敛形态**，真差异双实现仅 best-effort / logger / data-dir / server 四组且均有文档登记。
 7. **worktree reconcile 无误删路径**：判死清理有 mtime+宽限防 create 窗口误清；方向一要求双消失且查询失败保守跳过；歧义宁跳勿删。
+8. **测试深路径 import 不是缺陷**（2026-09-29 用户裁决）：属 C-ext-27 已裁决设计——测试/bench/mocks 消费符号不塞 barrel，经 vitest alias + tsconfig paths 双轨解析；生产码深路径由该约束的 ESLint 门单独拦（见 C-ext-27 原文）。
+9. **subagents 批量 tool 无文本生成**（2026-09-29 核实）：handler 只做 args 组装与按名解析内置模板，`@pi-meta` 与 `workerData.scriptPath` 注入安全锚均有效；「模板由 tasks[] 生成」的表述与实现不符，已在 §2.10 更正。
 
 ---
 
