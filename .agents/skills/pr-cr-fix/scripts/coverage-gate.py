@@ -76,6 +76,14 @@ PKG_PREFIXES = ("packages/", "extensions/", "resources/plugins/")
 # 匹配用 .search（后缀锚定）——re.match 锚串首，对完整 repo 路径恒不命中
 PLUGIN_SOURCE_SUFFIX = re.compile(r"\.(ts|tsx|mts|vue)$")
 
+# 测试文件形态（__tests__ 路径段 / .test|.spec 后缀，含 colocation 布局）不算源。
+# 为什么必须排除：测量侧（run_coverage 的 coverage 排除 + vitest 对 test 后缀的默认
+# 排除）使测试文件恒无 lcov 记录，若收进新增文件清单必然落入 no_lcov → 下游
+# quality-gates 机器盲区判定（judgeNoLcov）把新增测试文件自身误报为
+# 「未被任何测试加载的盲区」（2026-09-29 单轮 71 条违规全为此形态）。判定侧与
+# 测量侧口径对齐后，no_lcov 只剩真源文件的盲区信号。
+TEST_FILE_RE = re.compile(r"__tests__/|\.(test|spec)\.[cm]?[jt]sx?$")
+
 DEBUG = False
 
 
@@ -142,17 +150,19 @@ def changed_packages(repo_root: Path, base: str) -> tuple[dict[str, list[str]], 
     """返回 ({包目录: 改动的源文件列表}, {包目录: 不测量原因})。
 
     源文件判据：/src/ 路径段（workspace 包布局），或 resources/plugins/ 前缀下的
-    源扩展（builtin 插件包根平铺布局——index.ts 在包根，无 src/ 段；测试文件
-    __tests__/**.test.* 不算源）。前缀内但缺 package.json / vitest.config.ts 的
-    目录记入 unmeasured（gate 输出显式登记「改动不测量」，不静默跳过）。
+    源扩展（builtin 插件包根平铺布局——index.ts 在包根，无 src/ 段）。测试文件
+    （__tests__ 路径段 / .test|.spec 后缀，TEST_FILE_RE）不算源——测量侧恒不产出其
+    lcov 记录，收进清单必然落入 no_lcov 误报盲区（见 TEST_FILE_RE 注释）。前缀内但
+    缺 package.json / vitest.config.ts 的目录记入 unmeasured（gate 输出显式登记
+    「改动不测量」，不静默跳过）。
     """
     pkgs: dict[str, list[str]] = {}
     unmeasured: dict[str, str] = {}
     for f in git_diff_names(repo_root, base):
+        if TEST_FILE_RE.search(f):
+            continue
         in_plugin_prefix = f.startswith("resources/plugins/")
-        if "/src/" not in f and not (
-            in_plugin_prefix and PLUGIN_SOURCE_SUFFIX.search(f) and "__tests__" not in f
-        ):
+        if "/src/" not in f and not (in_plugin_prefix and PLUGIN_SOURCE_SUFFIX.search(f)):
             continue
         pkg = pkg_dir_of(repo_root, f)
         if pkg is None:
