@@ -450,20 +450,46 @@ export function rebuildRuntime(
  *
  * 终态（done）下的 stale 消息丢弃（P0-1）。
  */
+/** [handleWorkerMessage 拆分] 终态 stale 消息留痕丢弃（P0-1；type 自 raw 安全提取）。 */
+function dropStaleWorkerMessage(run: WorkflowRun, raw: unknown): void {
+  const type = typeof raw === "object" && raw !== null
+    ? (raw as { type?: unknown }).type
+    : null;
+  logger.debug(
+    `[workflow] stale worker message dropped on terminal run (runId=${run.runId}, type=${JSON.stringify(type)})`,
+  );
+}
+
+/** [handleWorkerMessage 拆分] [F1] 标记本 runtime 代际已收到终态消息：WorkerHandle.isCurrent
+ * 守卫保证消息必来自当前代际 worker。handleWorkerExit 的 exit(0) 无终态判定据此区分——
+ * 「已交付但 run 仍 running」（script-error 重试退避窗口）不得误判 failed。 */
+function markTerminalMessageDelivered(run: WorkflowRun): void {
+  if (run.runtime) run.runtime.receivedTerminalMessage = true;
+}
+
+/** [handleWorkerMessage 拆分] [OR-6/T7④] 协议漂移防线：未知消息类型 warn 留痕后丢弃。
+ * 畸形消息（M7 形状校验之上、已知类型之外的 type）此前静默穿过 switch——协议注释
+ * 新增消息类型而主线程未接线时，这里提供可观测信号（而非零痕迹丢弃）。 */
+function logUnknownWorkerMessageType(run: WorkflowRun, msg: WorkerMsg, deps: LifecycleDeps): void {
+  logger.warn(
+    `[workflow] unknown worker message type dropped (runId=${run.runId}): ` +
+      `${JSON.stringify((msg as { type?: unknown }).type)}`,
+  );
+  deps.log?.("warn", "workflow:worker-message-pump", "unknown worker message type", {
+    runId: run.runId,
+    type: (msg as { type?: unknown }).type,
+  });
+}
+
 export async function handleWorkerMessage(
   run: WorkflowRun,
   raw: unknown,
   deps: LifecycleDeps,
   handlers: WorkerHandlers,
 ): Promise<void> {
-  // 终态（done）丢弃 stale 消息（P0-1）——[加固] debug 留痕（原静默 return；type 于 M7 校验前自 raw 安全提取）。
+  // 终态（done）丢弃 stale 消息（P0-1）——[加固] debug 留痕（原静默 return）。
   if (isRunSettled(run)) {
-    const type = typeof raw === "object" && raw !== null
-      ? (raw as { type?: unknown }).type
-      : null;
-    logger.debug(
-      `[workflow] stale worker message dropped on terminal run (runId=${run.runId}, type=${JSON.stringify(type)})`,
-    );
+    dropStaleWorkerMessage(run, raw);
     return;
   }
 
@@ -475,16 +501,12 @@ export async function handleWorkerMessage(
       dispatchAgentCall(run, msg, deps);
       return;
     case "return":
-      // [F1] 标记本 runtime 代际已收到终态消息：WorkerHandle.isCurrent 守卫保证消息必
-      // 来自当前代际 worker。handleWorkerExit 的 exit(0) 无终态判定据此区分——
-      // 「已交付但 run 仍 running」（script-error 重试退避窗口）不得误判 failed。
-      if (run.runtime) run.runtime.receivedTerminalMessage = true;
+      markTerminalMessageDelivered(run);
       await handleReturn(run, msg, deps);
       return;
     case "error":
       // M1: 传 handlers（rebuildRuntime 需要）
-      // [F1] 同 return——error 也是终态消息，标记本代际已交付（同上防误判）。
-      if (run.runtime) run.runtime.receivedTerminalMessage = true;
+      markTerminalMessageDelivered(run);
       await handleScriptError(
         run,
         msg.error,
@@ -506,17 +528,7 @@ export async function handleWorkerMessage(
       }
       return;
     default:
-      // [OR-6/T7④] 协议漂移防线：未知消息类型 warn 留痕后丢弃。畸形消息（M7 形状
-      // 校验之上、已知类型之外的 type）此前静默穿过 switch——协议注释新增消息类型
-      // 而主线程未接线时，这里提供可观测信号（而非零痕迹丢弃）。
-      logger.warn(
-        `[workflow] unknown worker message type dropped (runId=${run.runId}): ` +
-          `${JSON.stringify((msg as { type?: unknown }).type)}`,
-      );
-      deps.log?.("warn", "workflow:worker-message-pump", "unknown worker message type", {
-        runId: run.runId,
-        type: (msg as { type?: unknown }).type,
-      });
+      logUnknownWorkerMessageType(run, msg, deps);
       return;
   }
 }
@@ -600,54 +612,69 @@ function detectReplayInputMismatch(cached: AgentCall, currentRaw: AgentCallMsg["
   return canonicalJsonHash(cached.opts) !== canonicalJsonHash(current.opts);
 }
 
+/** [dispatchAgentCall 拆分] M4 畸形 agent-call 消息拒绝（不写 trace / 不建 call）。
+ * [加固] callId 合法（worker 侧有对应 pending）时回发可克隆 error result 让 worker
+ * 内 agent() pending 收敛（原仅日志 return = pending 永挂）；callId 非法无法定向
+ * 回发，仅日志。 */
+function rejectMalformedAgentCall(run: WorkflowRun, msg: AgentCallMsg): void {
+  logger.error(`[workflow] malformed agent-call message: callId=${JSON.stringify(msg.callId)}, opts=${JSON.stringify(msg.opts)?.slice(0, MALFORMED_MSG_LOG_PREVIEW_CHARS)}`);
+  if (typeof msg.callId === "number" && Number.isFinite(msg.callId)) {
+    const dropped = "malformed message dropped: agent-call IPC fields invalid (worker/main module mismatch suspected)";
+    postAgentResult(run, msg.callId, { content: "", error: dropped }, false);
+  }
+}
+
+/**
+ * [dispatchAgentCall 拆分] 已缓存调用（done 终态）的 replay 半边。返回 true =
+ * 已处理（replay 回话或 mismatch 终局），调用方直接 return；false = 无 done
+ * 缓存，走正常派发。
+ *
+ * [U2 校验增强] 可比形态下做 canonical JSON 输入一致性比对（机制文档 D3）：
+ * 历史入参与本次调用入参哈希不一致 = 脚本非确定性漂移（Date.now()/外部 IO 进了
+ * prompt）——静默命中错误结果继续跑违背「错了明说」，转 failed 终局（诊断含
+ * callId 与恢复指引）。不可比形态（占位 opts / 失败历史 / resolve 失败）跳过
+ * 比对——详见 detectReplayInputMismatch 注释（场景 13 的「零误报」约束）。
+ */
+function tryReplayCachedCall(run: WorkflowRun, msg: AgentCallMsg, deps: LifecycleDeps): boolean {
+  const cached = run.state.calls.get(msg.callId);
+  if (!cached || cached.status !== "done") return false;
+  if (detectReplayInputMismatch(cached, msg.opts)) {
+    const mismatch = `Resume replay input mismatch at call #${msg.callId}: the script produced a ` +
+      `different input than the recorded call (nondeterministic source detected, e.g. Date.now()/` +
+      `Math.random()/external IO in prompt construction). Recovery: make the script deterministic ` +
+      `up to the resume point, then start a new run — the replayed prefix cost zero tokens.`;
+    logger.error(`[workflow] ${mismatch} (runId=${run.runId})`);
+    run.state.error = run.state.error ?? mismatch;
+    // 终局处置：[D2] 状态机无 running → interrupted 的人工回退转移（机制文档
+    // 「run 保持 interrupted」写于 terminal[interrupted] 旧形态）——按可行性形态
+    // 收敛 failed 终局（不回话错误结果——worker pending 由 finalizeRun 内
+    // releaseRuntime 的 terminate 收敛）。
+    void finalizeRun(run, deps, "failed", { context: "replay input mismatch (resume)" }).catch(
+      (err: unknown) => {
+        logger.error(`[workflow] replay mismatch finalize failed: ${toErrorMessage(err)}`);
+      },
+    );
+    return true;
+  }
+  postAgentResult(run, msg.callId, cached.result!, true);
+  return true;
+}
+
 function dispatchAgentCall(
   run: WorkflowRun,
   msg: AgentCallMsg,
   deps: LifecycleDeps,
 ): void {
   // M4: IPC 字段校验——畸形 agent-call 消息不写 trace / 不建 call（worker/main 模块
-  // 不匹配疑号）。[加固] callId 合法（worker 侧有对应 pending）时回发可克隆 error
-  // result 让 worker 内 agent() pending 收敛（原仅日志 return = pending 永挂）；callId
-  // 非法无法定向回发，仅日志。
+  // 不匹配疑号）。
   if (isMalformedAgentCallMsg(msg)) {
-    logger.error(`[workflow] malformed agent-call message: callId=${JSON.stringify(msg.callId)}, opts=${JSON.stringify(msg.opts)?.slice(0, MALFORMED_MSG_LOG_PREVIEW_CHARS)}`);
-    if (typeof msg.callId === "number" && Number.isFinite(msg.callId)) {
-      const dropped = "malformed message dropped: agent-call IPC fields invalid (worker/main module mismatch suspected)";
-      postAgentResult(run, msg.callId, { content: "", error: dropped }, false);
-    }
+    rejectMalformedAgentCall(run, msg);
     return;
   }
 
   // 已缓存的调用直接 replay（跨 rebuild / 跨 resume——崩溃重建或 resume 重跑脚本后，
-  // 已完成调用按 callId 命中缓存零 token 回话）。[U2 校验增强] 可比形态下做
-  // canonical JSON 输入一致性比对（机制文档 D3）：历史入参与本次调用入参哈希
-  // 不一致 = 脚本非确定性漂移（Date.now()/外部 IO 进了 prompt）——静默命中错误
-  // 结果继续跑违背「错了明说」，转 failed 终局（诊断含 callId 与恢复指引）。
-  // 不可比形态（占位 opts / 失败历史 / resolve 失败）跳过比对——详见
-  // detectReplayInputMismatch 注释（场景 13 的「零误报」约束）。
-  const cached = run.state.calls.get(msg.callId);
-  if (cached && cached.status === "done") {
-    if (detectReplayInputMismatch(cached, msg.opts)) {
-      const mismatch = `Resume replay input mismatch at call #${msg.callId}: the script produced a ` +
-        `different input than the recorded call (nondeterministic source detected, e.g. Date.now()/` +
-        `Math.random()/external IO in prompt construction). Recovery: make the script deterministic ` +
-        `up to the resume point, then start a new run — the replayed prefix cost zero tokens.`;
-      logger.error(`[workflow] ${mismatch} (runId=${run.runId})`);
-      run.state.error = run.state.error ?? mismatch;
-      // 终局处置：[D2] 状态机无 running → interrupted 的人工回退转移（机制文档
-      // 「run 保持 interrupted」写于 terminal[interrupted] 旧形态）——按可行性形态
-      // 收敛 failed 终局（不回话错误结果——worker pending 由 finalizeRun 内
-      // releaseRuntime 的 terminate 收敛）。
-      void finalizeRun(run, deps, "failed", { context: "replay input mismatch (resume)" }).catch(
-        (err: unknown) => {
-          logger.error(`[workflow] replay mismatch finalize failed: ${toErrorMessage(err)}`);
-        },
-      );
-      return;
-    }
-    postAgentResult(run, msg.callId, cached.result!, true);
-    return;
-  }
+  // 已完成调用按 callId 命中缓存零 token 回话）。
+  if (tryReplayCachedCall(run, msg, deps)) return;
 
   // 构建 trace 节点（[H2 W3] trace.live 退役——实时进度改由 views 经 store 订阅）。
   const agentName = msg.opts.description ?? msg.opts.agent ?? "unknown";

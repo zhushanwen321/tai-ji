@@ -317,31 +317,11 @@ function parseLegacyArgsSummary(argsSummary: string | undefined): Record<string,
   }
   return {};
 }
-function foldRecordStreamToRun(
-  runId: string,
-  reg: WorkflowRecordRegisteredEntryData,
-  events: readonly WorkflowRunEvent[],
-): WorkflowRun {
-  const created = events.find(
-    (e): e is Extract<WorkflowRunEvent, { type: "run-created" }> => e.type === "run-created",
-  );
-  const startedAtMs =
-    created?.ts ?? (Number.isFinite(reg.startedAt) ? reg.startedAt : Date.now());
-  const startedAtIso = new Date(startedAtMs).toISOString();
-  const spec = {
-    scriptSource: created?.scriptSource ?? "",
-    // args 全文优先（设计 §3.1 载荷表 run-created 行「args」）；旧格式帧回落
-    // argsSummary 尽力恢复（未截断可完整恢复，截断回落 {}——core parseArgsSummary
-    // 同款语义；两侧行为等价由 record-mode 测试锁定）
-    args: created?.args ?? parseLegacyArgsSummary(created?.argsSummary),
-    scriptName: reg.scriptName,
-    // 锚定恢复（core rebuildRunFromRecord 同款，两侧行为等价由 record-mode 测试
-    // 锁定）：worker 沙箱 eval 模式无 __dirname，模板脚本靠 scriptPath 定位
-    // _shared 族共享件；旧格式帧缺失回落空串
-    scriptPath: created?.scriptPath ?? "",
-    ...(reg.slug !== undefined ? { slug: reg.slug } : {}),
-  };
 
+/** [foldRecordStreamToRun 拆分] 事件流 → call 重建中间形态（per taskIndex 聚合
+ * started/settled 两帧；settled 先于 started 的残形态占位行兜底——同 journal fold，
+ * 保投影不丢终局）。 */
+function collectRunCallDrafts(events: readonly WorkflowRunEvent[]): Map<number, CallDraft> {
   const drafts = new Map<number, CallDraft>();
   for (const event of events) {
     if (event.type === "agent-started") {
@@ -354,31 +334,42 @@ function foldRecordStreamToRun(
         attempts: event.attempt,
       });
     } else if (event.type === "agent-settled") {
-      const existing = drafts.get(event.taskIndex);
-      if (existing === undefined) {
-        // settled 先于 dispatched 的残形态：占位行兜底（同 journal fold——
-        // 保投影不丢终局）
-        drafts.set(event.taskIndex, {
-          taskIndex: event.taskIndex,
-          agentName: "(unknown)",
-          startedAtIso: new Date(event.ts).toISOString(),
-          attempts: event.attempt,
-          result: event.result,
-          settledOutcome: event.outcome,
-          settledTs: event.ts,
-        });
-        continue;
-      }
-      existing.attempts = event.attempt;
-      existing.result = event.result;
-      existing.settledOutcome = event.outcome;
-      existing.settledTs = event.ts;
+      applySettledToRunDraft(drafts, event);
     }
   }
+  return drafts;
+}
 
-  // Trace 先重建：call 的 traceNode 回链到 Trace 副本（D-10 引用共享；匹配不到
-  // 退化为独立浅拷贝，仅保构造不炸）。
-  const nodes: ExecutionTraceNode[] = [...drafts.values()].map((d) => ({
+/** [collectRunCallDrafts 拆分] agent-settled 归并（无 started 行时占位兜底成行）。 */
+function applySettledToRunDraft(
+  drafts: Map<number, CallDraft>,
+  event: Extract<WorkflowRunEvent, { type: "agent-settled" }>,
+): void {
+  const existing = drafts.get(event.taskIndex);
+  if (existing === undefined) {
+    // settled 先于 dispatched 的残形态：占位行兜底（同 journal fold——
+    // 保投影不丢终局）
+    drafts.set(event.taskIndex, {
+      taskIndex: event.taskIndex,
+      agentName: "(unknown)",
+      startedAtIso: new Date(event.ts).toISOString(),
+      attempts: event.attempt,
+      result: event.result,
+      settledOutcome: event.outcome,
+      settledTs: event.ts,
+    });
+    return;
+  }
+  existing.attempts = event.attempt;
+  existing.result = event.result;
+  existing.settledOutcome = event.outcome;
+  existing.settledTs = event.ts;
+}
+
+/** [foldRecordStreamToRun 拆分] 中间形态 → trace 节点（Trace 先重建——call 的
+ * traceNode 回链到 Trace 副本，D-10 引用共享；匹配不到退化为独立浅拷贝，仅保构造不炸）。 */
+function draftsToExecutionTraceNodes(drafts: Map<number, CallDraft>): ExecutionTraceNode[] {
+  return [...drafts.values()].map((d) => ({
     stepIndex: d.taskIndex,
     agent: d.agentName,
     task: "",
@@ -392,16 +383,20 @@ function foldRecordStreamToRun(
     ...(d.result?.error !== undefined ? { error: d.result.error } : {}),
     ...(d.settledTs !== undefined ? { completedAt: new Date(d.settledTs).toISOString() } : {}),
   }));
-  const trace = Trace.fromArray(nodes);
-  const sharedNodes = new Map(trace.toArray().map((n) => [n.stepIndex, n]));
+}
 
+/** [foldRecordStreamToRun 拆分] 中间形态 → AgentCall（直接构造 done/running 终态，
+ * bypass markRunning/markDone 状态机守卫——重建已知良好持久态的既定先例；opts 最小
+ * 形态：record 流现行载荷不携带入参全文，重建聚合的 opts 仅满足 AgentCallOpts
+ * 契约形状，prompt 占位空串）。 */
+function draftsToAgentCalls(
+  drafts: Map<number, CallDraft>,
+  sharedNodes: Map<number, ExecutionTraceNode>,
+  nodes: ExecutionTraceNode[],
+): Map<number, AgentCall> {
   const calls = new Map<number, AgentCall>();
   for (const d of drafts.values()) {
     const linked = sharedNodes.get(d.taskIndex) ?? nodes.find((n) => n.stepIndex === d.taskIndex)!;
-    // 直接构造 done/running 终态（bypass markRunning/markDone 状态机守卫——
-    // 重建已知良好持久态的既定先例）。
-    // opts 最小形态：record 流现行载荷不携带入参全文（入参入载荷归后续词表批），
-    // 重建聚合的 opts 仅满足 AgentCallOpts 契约形状（prompt 占位空串）。
     const call = new AgentCall(d.taskIndex, { prompt: "" }, linked);
     call.attempts = d.attempts;
     call.status = d.settledOutcome === undefined ? "running" : "done";
@@ -413,6 +408,51 @@ function foldRecordStreamToRun(
     }
     calls.set(d.taskIndex, call);
   }
+  return calls;
+}
+
+
+/** [foldRecordStreamToRun 拆分] run spec 重建（run-created 帧优先，注册条目兜底）：
+ * args 全文优先（设计 §3.1 载荷表 run-created 行「args」）；旧格式帧回落
+ * argsSummary 尽力恢复（未截断可完整恢复，截断回落 {}——core parseArgsSummary
+ * 同款语义；两侧行为等价由 record-mode 测试锁定）；scriptPath 锚定恢复（core
+ * rebuildRunFromRecord 同款）：worker 沙箱 eval 模式无 __dirname，模板脚本靠
+ * scriptPath 定位 _shared 族共享件；旧格式帧缺失回落空串。 */
+function rebuildRunSpecFromEntries(
+  created: Extract<WorkflowRunEvent, { type: "run-created" }> | undefined,
+  reg: WorkflowRecordRegisteredEntryData,
+) {
+  return {
+    scriptSource: created?.scriptSource ?? "",
+    args: created?.args ?? parseLegacyArgsSummary(created?.argsSummary),
+    scriptName: reg.scriptName,
+    scriptPath: created?.scriptPath ?? "",
+    ...(reg.slug !== undefined ? { slug: reg.slug } : {}),
+  };
+}
+
+function foldRecordStreamToRun(
+  runId: string,
+  reg: WorkflowRecordRegisteredEntryData,
+  events: readonly WorkflowRunEvent[],
+): WorkflowRun {
+  const created = events.find(
+    (e): e is Extract<WorkflowRunEvent, { type: "run-created" }> => e.type === "run-created",
+  );
+  const startedAtMs =
+    created?.ts ?? (Number.isFinite(reg.startedAt) ? reg.startedAt : Date.now());
+  const startedAtIso = new Date(startedAtMs).toISOString();
+  const spec = rebuildRunSpecFromEntries(created, reg);
+
+  const drafts = collectRunCallDrafts(events);
+
+  // Trace 先重建：call 的 traceNode 回链到 Trace 副本（D-10 引用共享；匹配不到
+  // 退化为独立浅拷贝，仅保构造不炸）。
+  const nodes = draftsToExecutionTraceNodes(drafts);
+  const trace = Trace.fromArray(nodes);
+  const sharedNodes = new Map(trace.toArray().map((n) => [n.stepIndex, n]));
+
+  const calls = draftsToAgentCalls(drafts, sharedNodes, nodes);
 
   const settledEvent = lastRunSettledEvent(events);
   if (settledEvent === undefined) {

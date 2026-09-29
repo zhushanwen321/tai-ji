@@ -379,69 +379,96 @@ function parseRecordStreamLine(line: string): RecordStreamLine | undefined {
  *
  * 空流/无终局帧 → status 'running'（活跃 run 概览不退化为 skipped——红线）。
  */
-export function parseRunRecordStream(
-  content: string | undefined,
-  runId: string,
-  stateFile: string,
-): WorkflowOverview {
-  const fold: RecordStreamFold = { calls: new Map() }
-  for (const line of content?.split('\n') ?? []) {
-    const rec = parseRecordStreamLine(line)
-    if (rec === undefined) continue
-    if (rec.type === 'run-created') {
-      fold.workflowName = typeof rec.workflowName === 'string' ? rec.workflowName : undefined
-      fold.startedAt = typeof rec.ts === 'number' ? rec.ts : undefined
-    } else if (rec.type === 'agent-started' && typeof rec.taskIndex === 'number') {
-      if (!fold.calls.has(rec.taskIndex)) {
-        fold.calls.set(rec.taskIndex, {
-          index: rec.taskIndex,
-          agentName: typeof rec.agentName === 'string' ? rec.agentName : undefined,
-          phase: typeof rec.phase === 'string' ? rec.phase : undefined,
-        })
-      }
-    } else if (rec.type === 'agent-settled' && typeof rec.taskIndex === 'number') {
-      const existing = fold.calls.get(rec.taskIndex) ?? { index: rec.taskIndex }
-      const result = typeof rec.result === 'object' && rec.result !== null ? (rec.result as Record<string, unknown>) : {}
-      fold.calls.set(rec.taskIndex, {
-        ...existing,
-        settledOutcome: typeof rec.outcome === 'string' ? rec.outcome : undefined,
-        durationMs: typeof rec.durationMs === 'number' ? rec.durationMs : undefined,
-        sessionFile: typeof result.sessionFile === 'string' ? result.sessionFile : existing.sessionFile,
-        sessionId: typeof result.sessionId === 'string' ? result.sessionId : existing.sessionId,
-      })
-    } else if (rec.type === 'run-interrupted') {
-      fold.interrupted = {
-        errorCode: typeof rec.errorCode === 'string' ? rec.errorCode : undefined,
-        reason: typeof rec.reason === 'string' ? rec.reason : undefined,
-        ts: typeof rec.ts === 'number' ? rec.ts : 0,
-      }
-    } else if (rec.type === 'run-resumed') {
-      fold.interrupted = undefined
-    } else if (rec.type === 'run-settled') {
-      fold.runSettled = {
-        outcome: typeof rec.outcome === 'string' ? rec.outcome : undefined,
-        reason: typeof rec.reason === 'string' ? rec.reason : undefined,
-        ts: typeof rec.ts === 'number' ? rec.ts : 0,
-      }
+/** [parseRunRecordStream 拆分] 单行 fold 归并（rec 已过 parseRecordStreamLine 判形）。 */
+function applyRecordStreamLine(fold: RecordStreamFold, rec: RecordStreamLine): void {
+  if (rec.type === 'run-created') {
+    fold.workflowName = typeof rec.workflowName === 'string' ? rec.workflowName : undefined
+    fold.startedAt = typeof rec.ts === 'number' ? rec.ts : undefined
+  } else if (rec.type === 'agent-started' && typeof rec.taskIndex === 'number') {
+    applyAgentStartedToFold(fold, rec)
+  } else if (rec.type === 'agent-settled' && typeof rec.taskIndex === 'number') {
+    applyAgentSettledToFold(fold, rec)
+  } else if (rec.type === 'run-interrupted' || rec.type === 'run-resumed' || rec.type === 'run-settled') {
+    applyRunTransitionLine(fold, rec)
+  }
+}
+
+/** [applyRecordStreamLine 拆分] run 级转移帧归并（interrupted 置位 / resumed 清除 / settled 落终局）。 */
+function applyRunTransitionLine(fold: RecordStreamFold, rec: RecordStreamLine): void {
+  if (rec.type === 'run-interrupted') {
+    fold.interrupted = {
+      errorCode: typeof rec.errorCode === 'string' ? rec.errorCode : undefined,
+      reason: typeof rec.reason === 'string' ? rec.reason : undefined,
+      ts: typeof rec.ts === 'number' ? rec.ts : 0,
+    }
+  } else if (rec.type === 'run-resumed') {
+    fold.interrupted = undefined
+  } else if (rec.type === 'run-settled') {
+    fold.runSettled = {
+      outcome: typeof rec.outcome === 'string' ? rec.outcome : undefined,
+      reason: typeof rec.reason === 'string' ? rec.reason : undefined,
+      ts: typeof rec.ts === 'number' ? rec.ts : 0,
     }
   }
+}
 
-  // status 三态投影（[D2]）：终局帧 > 中断转移 > running（空流也 running——活跃兜底）
-  let status = 'running'
-  let reason: string | undefined
-  let completedAt: string | undefined
-  let error: string | undefined
+/** [applyRecordStreamLine 拆分] agent-started 归并（已有行不覆盖——首见即权威）。 */
+function applyAgentStartedToFold(
+  fold: RecordStreamFold,
+  rec: RecordStreamLine,
+): void {
+  const taskIndex = rec.taskIndex
+  if (typeof taskIndex !== 'number') return
+  if (fold.calls.has(taskIndex)) return
+  fold.calls.set(taskIndex, {
+    index: taskIndex,
+    agentName: typeof rec.agentName === 'string' ? rec.agentName : undefined,
+    phase: typeof rec.phase === 'string' ? rec.phase : undefined,
+  })
+}
+
+/** [applyRecordStreamLine 拆分] agent-settled 归并（终局字段覆盖，session 锚点取 result 载荷、缺席保留既有）。 */
+function applyAgentSettledToFold(
+  fold: RecordStreamFold,
+  rec: RecordStreamLine,
+): void {
+  const taskIndex = rec.taskIndex
+  if (typeof taskIndex !== 'number') return
+  const existing = fold.calls.get(taskIndex) ?? { index: taskIndex }
+  const result = typeof rec.result === 'object' && rec.result !== null ? (rec.result as Record<string, unknown>) : {}
+  fold.calls.set(taskIndex, {
+    ...existing,
+    settledOutcome: typeof rec.outcome === 'string' ? rec.outcome : undefined,
+    durationMs: typeof rec.durationMs === 'number' ? rec.durationMs : undefined,
+    sessionFile: typeof result.sessionFile === 'string' ? result.sessionFile : existing.sessionFile,
+    sessionId: typeof result.sessionId === 'string' ? result.sessionId : existing.sessionId,
+  })
+}
+
+/** [parseRunRecordStream 拆分] status 三态投影（[D2]）：终局帧 > 中断转移 > running（空流也 running——活跃兜底）。 */
+function projectRecordStreamStatus(fold: RecordStreamFold): {
+  status: string
+  reason: string | undefined
+  completedAt: string | undefined
+  error: string | undefined
+} {
   if (fold.runSettled !== undefined) {
-    status = 'done'
-    reason = fold.runSettled.outcome
-    completedAt = new Date(fold.runSettled.ts).toISOString()
-    if (fold.runSettled.outcome === 'failed') error = fold.runSettled.reason ?? fold.runSettled.outcome
-  } else if (fold.interrupted !== undefined) {
-    status = 'interrupted'
-    error = fold.interrupted.reason
+    return {
+      status: 'done',
+      reason: fold.runSettled.outcome,
+      completedAt: new Date(fold.runSettled.ts).toISOString(),
+      error: fold.runSettled.outcome === 'failed' ? fold.runSettled.reason ?? fold.runSettled.outcome : undefined,
+    }
   }
+  if (fold.interrupted !== undefined) {
+    return { status: 'interrupted', reason: undefined, completedAt: undefined, error: fold.interrupted.reason }
+  }
+  return { status: 'running', reason: undefined, completedAt: undefined, error: undefined }
+}
 
-  const steps: WorkflowStep[] = [...fold.calls.values()]
+/** [parseRunRecordStream 拆分] call 行 → 概览 steps（index 升序，条件展开保持键缺席语义）。 */
+function foldCallsToOverviewSteps(fold: RecordStreamFold): WorkflowStep[] {
+  return [...fold.calls.values()]
     .sort((a, b) => a.index - b.index)
     .map((call) => ({
       index: call.index,
@@ -451,6 +478,22 @@ export function parseRunRecordStream(
       ...(call.sessionId !== undefined ? { sessionId: call.sessionId } : {}),
       ...(call.sessionFile !== undefined ? { sessionFile: call.sessionFile } : {}),
     }))
+}
+
+export function parseRunRecordStream(
+  content: string | undefined,
+  runId: string,
+  stateFile: string,
+): WorkflowOverview {
+  const fold: RecordStreamFold = { calls: new Map() }
+  for (const line of content?.split('\n') ?? []) {
+    const rec = parseRecordStreamLine(line)
+    if (rec === undefined) continue
+    applyRecordStreamLine(fold, rec)
+  }
+
+  const { status, reason, completedAt, error } = projectRecordStreamStatus(fold)
+  const steps = foldCallsToOverviewSteps(fold)
 
   return {
     runId,

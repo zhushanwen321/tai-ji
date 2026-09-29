@@ -212,9 +212,12 @@ function makeWorkflow(overrides: Partial<WorkflowRunRecord> & { runId: string })
     slug: 'rel',
     status: 'running',
     startedAt: new Date(T(60_000)).toISOString(),
+    // id/status 对齐 WorkflowAgentCall 契约（id = trace.stepIndex 数字；status 词表
+    // pending|running|done|failed——record 域 'completed' 由 mapStepStatusFromRecord
+    // 映射为 'done'，词表显式转换禁止直拷）
     agentCalls: [
-      { id: 'c1', agent: 'a', status: 'completed', phase: 'p1' },
-      { id: 'c2', agent: 'b', status: 'running', phase: 'p1' },
+      { id: 0, agent: 'a', status: 'done', phase: 'p1' },
+      { id: 1, agent: 'b', status: 'running', phase: 'p1' },
     ],
     stateFilePath: '/data/wf.jsonl',
     ...overrides,
@@ -420,7 +423,7 @@ describe('TrayNativePanel [W0/V8] 合并投影消费锚定（盲区窗口 N/M �
       makeWorkflow({
         runId: 'wf-partial',
         agentCalls: [
-          { id: 0, agent: 'reviewer-1', status: 'completed', sessionId: 'acs-r1' },
+          { id: 0, agent: 'reviewer-1', status: 'done', sessionId: 'acs-r1' },
           { id: 1, agent: 'reviewer-2', status: 'running', sessionId: 'acs-r2' },
           { id: 2, agent: 'reviewer-3', status: 'running', sessionId: 'acs-r3' },
           { id: 3, agent: 'reviewer-4', status: 'running', sessionId: 'acs-r4' },

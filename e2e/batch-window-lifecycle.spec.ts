@@ -230,6 +230,56 @@ function readSettledFrames(journalFile: string): RunSettledView[] {
 
 // ── 主用例 ───────────────────────────────────────────────────────────────
 
+
+/**
+ * [WL test 拆分] 在飞证据段：双 run journal 落盘 + long 两成员 / short 一成员 /
+ * 引擎宿主薄壳（每 run 一窗口）的差分计数正面对照。失败 diag 与拆出前同构。
+ */
+async function awaitWLInFlightEvidence(
+  dataDir: string,
+  baseLong: { count: number; lines: string[] },
+  baseShort: { count: number; lines: string[] },
+  shellBaseline: { count: number; lines: string[] },
+): Promise<string[]> {
+  // ── journal 恰 2 个 run（双 workflow 在飞） ──
+  const agentDir = path.join(dataDir, 'agent')
+  const journalsFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length >= 2, JOURNAL_TIMEOUT_MS)
+  if (!journalsFound) {
+    writeDiag('batch-wl-journals-missing.json', {
+      runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
+      piLogsTail: readPiLogs(dataDir).slice(-3000),
+    })
+  }
+  expect(journalsFound, '双 workflow run journal 应落盘').toBe(true)
+  const journalFiles = listFilesRecursive(agentDir, '.events.jsonl')
+
+  // ── 在飞证据：long 两成员 + short 一成员 + 引擎宿主薄壳（每 run 一窗口） ──
+  const inFlightLong = await waitUntil(
+    () => countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).count - baseLong.count >= 2,
+    JOURNAL_TIMEOUT_MS,
+  )
+  const inFlightShort = countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S).count - baseShort.count >= 1
+  const shellInFlight = await waitUntil(
+    () => countEngineShellProcesses().count > shellBaseline.count,
+    JOURNAL_TIMEOUT_MS,
+  )
+  if (!inFlightLong || !inFlightShort || !shellInFlight) {
+    writeDiag('batch-wl-inflight-missing.json', {
+      baseLong: baseLong.lines,
+      longNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).lines,
+      baseShort: baseShort.lines,
+      shortNow: countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S).lines,
+      shellBaseline: shellBaseline.lines,
+      shellNow: countEngineShellProcesses().lines,
+      hint: '特征不命中——按 count-engine-shell-processes.mjs 头注校准特征集，不删在飞断言',
+    })
+  }
+  expect(inFlightLong, `派发后 long 成员保活进程应 ≥2（差分；diag 见明细）`).toBe(true)
+  expect(inFlightShort, `派发后 short 成员保活进程应 ≥1（差分）`).toBe(true)
+  expect(shellInFlight, `派发后引擎宿主薄壳应 > 基线（per-window 在飞证据）`).toBe(true)
+  return journalFiles
+}
+
 test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）+ 长正常完成后薄壳回落基线（V1）', async ({ }, testInfo) => {
   test.setTimeout(600_000)
 
@@ -301,42 +351,7 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
     await dispatch(longSid, DISPATCH_PROMPT_LONG, 'wl-dispatch-long', listeners[0]!)
     await dispatch(shortSid, DISPATCH_PROMPT_SHORT, 'wl-dispatch-short', listeners[1]!)
 
-    // ── journal 恰 2 个 run（双 workflow 在飞） ──
-    const agentDir = path.join(dataDir, 'agent')
-    const journalsFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length >= 2, JOURNAL_TIMEOUT_MS)
-    if (!journalsFound) {
-      writeDiag('batch-wl-journals-missing.json', {
-        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-        piLogsTail: readPiLogs(dataDir).slice(-3000),
-      })
-    }
-    expect(journalsFound, '双 workflow run journal 应落盘').toBe(true)
-    const journalFiles = listFilesRecursive(agentDir, '.events.jsonl')
-
-    // ── 在飞证据：long 两成员 + short 一成员 + 引擎宿主薄壳（每 run 一窗口） ──
-    const inFlightLong = await waitUntil(
-      () => countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).count - baseLong.count >= 2,
-      JOURNAL_TIMEOUT_MS,
-    )
-    const inFlightShort = countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S).count - baseShort.count >= 1
-    const shellInFlight = await waitUntil(
-      () => countEngineShellProcesses().count > shellBaseline.count,
-      JOURNAL_TIMEOUT_MS,
-    )
-    if (!inFlightLong || !inFlightShort || !shellInFlight) {
-      writeDiag('batch-wl-inflight-missing.json', {
-        baseLong: baseLong.lines,
-        longNow: countMemberSleeperProcesses(MEMBER_SLEEP_LONG_S).lines,
-        baseShort: baseShort.lines,
-        shortNow: countMemberSleeperProcesses(MEMBER_SLEEP_SHORT_S).lines,
-        shellBaseline: shellBaseline.lines,
-        shellNow: countEngineShellProcesses().lines,
-        hint: '特征不命中——按 count-engine-shell-processes.mjs 头注校准特征集，不删在飞断言',
-      })
-    }
-    expect(inFlightLong, `派发后 long 成员保活进程应 ≥2（差分；diag 见明细）`).toBe(true)
-    expect(inFlightShort, `派发后 short 成员保活进程应 ≥1（差分）`).toBe(true)
-    expect(shellInFlight, `派发后引擎宿主薄壳应 > 基线（per-window 在飞证据）`).toBe(true)
+    const journalFiles = await awaitWLInFlightEvidence(dataDir, baseLong, baseShort, shellBaseline)
     await page.screenshot({ path: testInfo.outputPath('wl-in-flight.png'), fullPage: true })
 
     // ── short 收口（第一个 settled = short：sleep 硬下界 150s vs 20s 保证判据） ──

@@ -207,32 +207,50 @@ function collectWorkflowEntryTiers(entries: readonly Entry[]): WorkflowEntryTier
   for (const e of entries) {
     const data = e.data as Record<string, unknown> | undefined
     if (e.customType === WORKFLOW_RECORD_CUSTOM_TYPE && data !== undefined) {
-      if (data.v === WORKFLOW_RECORD_ENTRY_V2 && data.kind === 'registered') {
-        const runId = data.runId
-        const journalPath = data.journalPath
-        if (typeof runId === 'string' && runId !== '' && typeof journalPath === 'string' && journalPath !== '') {
-          tiers.v2ByRunId.set(runId, journalPath)
-          noteRunId(runId)
-        }
-      } else if (data.v === 1 && typeof data.snapshot === 'object' && data.snapshot !== null) {
-        const snapshotRunId = (data.snapshot as Record<string, unknown>).runId
-        if (typeof snapshotRunId === 'string' && snapshotRunId !== '') {
-          tiers.v1ByRunId.set(snapshotRunId, data.snapshot)
-          noteRunId(snapshotRunId)
-        }
-      }
+      collectWorkflowRecordEntryTier(tiers, noteRunId, data)
       continue
     }
     if (e.customType === 'workflow-state-link') {
-      const runId = data?.runId
-      const path = data?.path
-      if (typeof runId === 'string' && typeof path === 'string') {
-        tiers.linkByRunId.set(runId, { runId, path }) // 后写覆盖前写（取最新 link）
-        noteRunId(runId)
-      }
+      collectWorkflowStateLinkTier(tiers, noteRunId, data)
     }
   }
   return tiers
+}
+
+/** [collectWorkflowEntryTiers 拆分] workflow-record 条目两代分流（v2 注册 / v1 快照）。 */
+function collectWorkflowRecordEntryTier(
+  tiers: WorkflowEntryTiers,
+  noteRunId: (runId: string) => void,
+  data: Record<string, unknown>,
+): void {
+  if (data.v === WORKFLOW_RECORD_ENTRY_V2 && data.kind === 'registered') {
+    const runId = data.runId
+    const journalPath = data.journalPath
+    if (typeof runId === 'string' && runId !== '' && typeof journalPath === 'string' && journalPath !== '') {
+      tiers.v2ByRunId.set(runId, journalPath)
+      noteRunId(runId)
+    }
+  } else if (data.v === 1 && typeof data.snapshot === 'object' && data.snapshot !== null) {
+    const snapshotRunId = (data.snapshot as Record<string, unknown>).runId
+    if (typeof snapshotRunId === 'string' && snapshotRunId !== '') {
+      tiers.v1ByRunId.set(snapshotRunId, data.snapshot)
+      noteRunId(snapshotRunId)
+    }
+  }
+}
+
+/** [collectWorkflowEntryTiers 拆分] workflow-state-link 指针条目（后写覆盖前写——取最新 link）。 */
+function collectWorkflowStateLinkTier(
+  tiers: WorkflowEntryTiers,
+  noteRunId: (runId: string) => void,
+  data: Record<string, unknown> | undefined,
+): void {
+  const runId = data?.runId
+  const path = data?.path
+  if (typeof runId === 'string' && typeof path === 'string') {
+    tiers.linkByRunId.set(runId, { runId, path }) // 后写覆盖前写（取最新 link）
+    noteRunId(runId)
+  }
 }
 
 /**

@@ -529,21 +529,28 @@ export type RunSettlementEvidence =
  * - journal / manifest 读错误（非 ENOENT IO 故障）→ running + warn 留证
  *   （「IO 故障 ≠ 不存在」的保守侧纪律，宁挂账不误注销）。
  */
-export function findRunSettlementEvidence(stateDir: string, runId: string): RunSettlementEvidence {
-  const journalPath = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+/** journal 尾扫四态（[findRunSettlementEvidence 拆分] 的返回契约）。 */
+type JournalScan =
+  | { kind: "frame"; settled: Extract<WorkflowRunEvent, { type: "run-settled" }> }
+  | { kind: "noFrame" } // 读成功、无 run-settled 帧（真未终局）
+  | { kind: "fileMissing" } // ENOENT（从未落账/已清理）
+  | { kind: "ioError" }; // 非 ENOENT 读错误（保守挂账）
+
+/** [findRunSettlementEvidence 拆分] journal 尾扫：自尾向头找最近一条 run-settled 帧
+ * （坏行继续向前——append-only 下帧行独立有效；尾部空行静默跳过）。 */
+function scanJournalLastSettledFrame(journalPath: string): JournalScan {
   let settled: Extract<WorkflowRunEvent, { type: "run-settled" }> | undefined;
-  let journalMissing = false;
   try {
     const content = readFileSync(journalPath, "utf8");
     const lines = content.split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i]!.trim();
-      if (line === "") continue; // 尾部空行静默跳过
+      if (line === "") continue;
       let parsed: unknown;
       try {
         parsed = JSON.parse(line);
       } catch {
-        continue; // 坏行（截断行）继续向前——append-only 下帧行独立有效
+        continue;
       }
       if (
         typeof parsed === "object" && parsed !== null &&
@@ -554,53 +561,72 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
       }
     }
   } catch (err) {
-    if (!isEnoentError(err)) {
-      // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃挂账
-      //（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(
-        `[run-state-evidence] findRunSettlementEvidence journal read failed, treating as running (stay registered): ${journalPath}: ${msg}`,
-      );
-      return { kind: "running" };
-    }
-    journalMissing = true;
+    if (isEnoentError(err)) return { kind: "fileMissing" };
+    return { kind: "ioError" };
   }
-  if (settled !== undefined) {
+  return settled !== undefined ? { kind: "frame", settled } : { kind: "noFrame" };
+}
+
+/** [findRunSettlementEvidence 拆分] manifest 终局面（残局防御）。undefined = 无
+ * manifest / 无 outcome / ENOENT——交回调用方兜底；非 ENOENT 读错误原样上抛（保守挂账）。 */
+function readManifestSettlement(
+  manifestPath: string,
+): { reason: string } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (err) {
+    if (isEnoentError(err)) return undefined;
+    throw err;
+  }
+  if (typeof parsed === "object" && parsed !== null) {
+    const outcome = (parsed as { outcome?: unknown }).outcome;
+    const errorCode = (parsed as { errorCode?: unknown }).errorCode;
+    if (typeof outcome === "string") {
+      return {
+        reason: runSettledOutcomeToDoneReason(
+          outcome as RunOutcome,
+          typeof errorCode === "string" ? (errorCode as RunErrorCode) : undefined,
+        ),
+      };
+    }
+  }
+  return undefined;
+}
+
+export function findRunSettlementEvidence(stateDir: string, runId: string): RunSettlementEvidence {
+  const journalPath = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  const journal = scanJournalLastSettledFrame(journalPath);
+  if (journal.kind === "ioError") {
+    // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃挂账
+    //（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
+    logger.warn(
+      `[run-state-evidence] findRunSettlementEvidence journal read failed, treating as running (stay registered): ${journalPath}`,
+    );
+    return { kind: "running" };
+  }
+  if (journal.kind === "frame") {
     return {
       kind: "terminal",
-      reason: runSettledOutcomeToDoneReason(settled.outcome, settled.errorCode),
+      reason: runSettledOutcomeToDoneReason(journal.settled.outcome, journal.settled.errorCode),
     };
   }
   // journal 无帧：manifest 终局面（残局防御——现行写入面下 record 流不被保留期
   // 裁剪、对账清理五件全删，正常无此组合；见上方判定矩阵该行注释）
   const manifestPath = join(stateDir, `${runId}.json`);
   try {
-    const parsed: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
-    if (typeof parsed === "object" && parsed !== null) {
-      const outcome = (parsed as { outcome?: unknown }).outcome;
-      const errorCode = (parsed as { errorCode?: unknown }).errorCode;
-      if (typeof outcome === "string") {
-        return {
-          kind: "terminal",
-          reason: runSettledOutcomeToDoneReason(
-            outcome as RunOutcome,
-            typeof errorCode === "string" ? (errorCode as RunErrorCode) : undefined,
-          ),
-        };
-      }
-    }
+    const fromManifest = readManifestSettlement(manifestPath);
+    if (fromManifest !== undefined) return { kind: "terminal", reason: fromManifest.reason };
   } catch (err) {
-    if (!isEnoentError(err)) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(
-        `[run-state-evidence] findRunSettlementEvidence manifest read failed, treating as running (stay registered): ${manifestPath}: ${msg}`,
-      );
-      return { kind: "running" };
-    }
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      `[run-state-evidence] findRunSettlementEvidence manifest read failed, treating as running (stay registered): ${manifestPath}: ${msg}`,
+    );
+    return { kind: "running" };
   }
   // 两证据面均缺：journal 存在但无帧 = 真未终局（保守活跃）；journal 也缺 =
   // missing（从未落账/已清理——视同终态补注销）。
-  if (journalMissing) return { kind: "missing" };
+  if (journal.kind === "fileMissing") return { kind: "missing" };
   return { kind: "running" };
 }
 
@@ -799,6 +825,67 @@ export interface OrphanRunReapResult {
  * 误删活跃 run 是不可恢复事故方向），warn 留证；登记 IO 失败整轮降级跳过
  * （无登记不删——防宽限锚丢失后首轮即删）。
  */
+/** [reapOrphanRuns 拆分] 候选枚举（record 流 + 旧 journal 文件族并集，去前缀得 runId 集）。 */
+function collectOrphanCandidateRunIds(names: readonly string[]): Set<string> {
+  const runIds = new Set<string>();
+  for (const name of names) {
+    for (const suffix of [RUN_EVENT_JOURNAL_SUFFIX, ".events.jsonl"]) {
+      if (name.endsWith(suffix)) {
+        runIds.add(name.slice(0, -suffix.length));
+        break;
+      }
+    }
+  }
+  return runIds;
+}
+
+/**
+ * [reapOrphanRuns 拆分] 单 run 收编判定与删除（异常上抛交调用方降级——宁保留）。
+ * 返回值 = 登记表是否被本次触碰（引用清登记 / 首判登记 / 删除清登记）。
+ */
+function reapSingleOrphanRun(
+  stateDir: string,
+  runId: string,
+  ctx: {
+    referenced: ReadonlySet<string>;
+    registry: OrphanReapRegistry;
+    now: number;
+    graceWindowMs: number;
+  },
+  deps: OrphanRunReapDeps,
+  result: OrphanRunReapResult,
+): boolean {
+  if (ctx.referenced.has(runId)) {
+    // 引用保护命中——清登记（引用恢复的 run 不再处于无主观察期）
+    const hadEntry = ctx.registry[runId] !== undefined;
+    if (hadEntry) delete ctx.registry[runId];
+    result.skippedReferenced += 1;
+    return hadEntry;
+  }
+  // 无主判定（登记锚 = 首判时刻，非 mtime）
+  let registryDirty = false;
+  const firstSeen = ctx.registry[runId] ?? ctx.now;
+  if (ctx.registry[runId] === undefined) {
+    ctx.registry[runId] = ctx.now;
+    registryDirty = true;
+  }
+  const footprint = runFootprintMaxMtime(stateDir, runId);
+  if (!footprint.exists) return registryDirty; // 候选文件在本轮扫描后被并发清走
+  // 与门：首判距 now ≥ 窗 ∧ 三件最大 mtime 距 now ≥ 窗
+  if (ctx.now - firstSeen < ctx.graceWindowMs || ctx.now - footprint.maxMtime < ctx.graceWindowMs) {
+    result.skippedGraceWindow += 1;
+    return registryDirty;
+  }
+  // 删除（三件 + 残锁 + 登记条目）
+  const deleted = deleteOrphanRunFootprint(stateDir, runId);
+  delete ctx.registry[runId];
+  result.reaped += 1;
+  deps.debug(
+    `orphan reap: removed ${deleted} file(s) for unreferenced run ${runId} (grace window ${ctx.graceWindowMs}ms elapsed)`,
+  );
+  return true;
+}
+
 export async function reapOrphanRuns(
   input: { stateDir?: string },
   deps: OrphanRunReapDeps,
@@ -825,15 +912,7 @@ export async function reapOrphanRuns(
     }
     return result; // ENOENT = 从未落盘，正常空态
   }
-  const runIds = new Set<string>();
-  for (const name of names) {
-    for (const suffix of [RUN_EVENT_JOURNAL_SUFFIX, ".events.jsonl"]) {
-      if (name.endsWith(suffix)) {
-        runIds.add(name.slice(0, -suffix.length));
-        break;
-      }
-    }
-  }
+  const runIds = collectOrphanCandidateRunIds(names);
   result.scanned = runIds.size;
 
   // 引用集采集（壳侧注入面——三代解析归注入实现）
@@ -858,36 +937,7 @@ export async function reapOrphanRuns(
 
   for (const runId of runIds) {
     try {
-      if (referenced.has(runId)) {
-        // 引用保护命中——清登记（引用恢复的 run 不再处于无主观察期）
-        if (registry[runId] !== undefined) {
-          delete registry[runId];
-          registryDirty = true;
-        }
-        result.skippedReferenced += 1;
-        continue;
-      }
-      // 无主判定（登记锚 = 首判时刻，非 mtime）
-      const firstSeen = registry[runId] ?? now;
-      if (registry[runId] === undefined) {
-        registry[runId] = now;
-        registryDirty = true;
-      }
-      const footprint = runFootprintMaxMtime(stateDir, runId);
-      if (!footprint.exists) continue; // 候选文件在本轮扫描后被并发清走
-      // 与门：首判距 now ≥ 窗 ∧ 三件最大 mtime 距 now ≥ 窗
-      if (now - firstSeen < graceWindowMs || now - footprint.maxMtime < graceWindowMs) {
-        result.skippedGraceWindow += 1;
-        continue;
-      }
-      // 删除（三件 + 残锁 + 登记条目）
-      const deleted = deleteOrphanRunFootprint(stateDir, runId);
-      delete registry[runId];
-      registryDirty = true;
-      result.reaped += 1;
-      deps.debug(
-        `orphan reap: removed ${deleted} file(s) for unreferenced run ${runId} (grace window ${graceWindowMs}ms elapsed)`,
-      );
+      registryDirty = reapSingleOrphanRun(stateDir, runId, { referenced, registry, now, graceWindowMs }, deps, result) || registryDirty;
     } catch (err) {
       // 单 run 失败不中断整轮（宁保留）
       result.skippedGraceWindow += 1;

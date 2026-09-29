@@ -1035,106 +1035,145 @@ export const INITIAL_RUN_EVENT_FOLD: RunEventFoldCheckpoint = {
  *   agent-settled 后该 phase 名下 call 行全部落定 → 推导收束；agent-started /
  *   agent-retrying 出现未落定（或在途重试）的 call 行 → 推导值翻回 running。
  */
+/** [applyAskFoldEvent 拆分] agent-started 帧折叠（[D3] fold 自愈 + 对称自愈见各内联注释）。 */
+function foldAgentStartedEvent(
+  asks: Map<number, RunAskStepFold>,
+  phases: Map<string, RunPhaseFold>,
+  event: Extract<WorkflowRunEvent, { type: "agent-started" }>,
+): { asks: Map<number, RunAskStepFold>; phases: Map<string, RunPhaseFold> } {
+  const existing = asks.get(event.taskIndex);
+  const nextAsks = new Map(asks);
+  nextAsks.set(
+    event.taskIndex,
+    existing !== undefined
+      ? { ...existing, lastProgressAt: Math.max(existing.lastProgressAt, event.ts) }
+      : {
+        taskIndex: event.taskIndex,
+        agentName: event.agentName,
+        // 剧本归属随帧落投影（W1 D6 / [D3] call 归属快照）；无 phase 帧不造键
+        ...(event.phase !== undefined ? { phase: event.phase } : {}),
+        startedAt: event.ts,
+        lastProgressAt: event.ts,
+      },
+  );
+  // [D3] fold 自愈：phase 行缺席时按 call 归属快照驱动 pending → running
+  // （写时克隆——自愈建行同守 copy-on-write 契约，输入 phases Map 不被变异）
+  let nextPhases = phases;
+  if (event.phase !== undefined && !nextPhases.has(event.phase)) {
+    nextPhases = new Map(phases);
+    nextPhases.set(event.phase, { phase: event.phase, startedAt: event.ts });
+  }
+  // [D3 对称自愈] 新 call 行在场（重派/重入）→ 推导值翻回 running
+  if (event.phase !== undefined) {
+    nextPhases = derivePhaseSettlement(nextAsks, nextPhases, event.phase);
+  }
+  return { asks: nextAsks, phases: nextPhases };
+}
+
+/** [applyAskFoldEvent 拆分] agent-retrying 帧折叠（重试在途 → phase 推导值翻回 running）。 */
+function foldAgentRetryingEvent(
+  asks: Map<number, RunAskStepFold>,
+  phases: Map<string, RunPhaseFold>,
+  event: Extract<WorkflowRunEvent, { type: "agent-retrying" }>,
+): { asks: Map<number, RunAskStepFold>; phases: Map<string, RunPhaseFold> } {
+  const existing = asks.get(event.taskIndex);
+  if (existing === undefined) return { asks, phases };
+  const nextAsks = new Map(asks);
+  nextAsks.set(event.taskIndex, {
+    ...existing,
+    lastProgressAt: Math.max(existing.lastProgressAt, event.ts),
+  });
+  // [D3 对称自愈] 重试在途（call 行仍携上一次尝试的旧 settled）→ 该 phase
+  // 推导值翻回 running（treatAsRunning——判据不依赖 call 行 settled 缺席）
+  const nextPhases = existing.phase !== undefined
+    ? derivePhaseSettlement(nextAsks, phases, existing.phase, true)
+    : phases;
+  return { asks: nextAsks, phases: nextPhases };
+}
+
+/** [applyAskFoldEvent 拆分] agent-settled 帧折叠（骨架行落定 + phase 终局推导）。 */
+function foldAgentSettledEvent(
+  asks: Map<number, RunAskStepFold>,
+  phases: Map<string, RunPhaseFold>,
+  event: Extract<WorkflowRunEvent, { type: "agent-settled" }>,
+): { asks: Map<number, RunAskStepFold>; phases: Map<string, RunPhaseFold> } {
+  const existing = asks.get(event.taskIndex);
+  const settled = { outcome: event.outcome, durationMs: event.durationMs, errorCode: event.errorCode, ts: event.ts };
+  const nextAsks = new Map(asks);
+  nextAsks.set(
+    event.taskIndex,
+    existing !== undefined
+      ? {
+        ...existing,
+        lastProgressAt: Math.max(existing.lastProgressAt, event.ts),
+        settled,
+      }
+      : {
+        taskIndex: event.taskIndex,
+        // agent-settled 先于 started 的残形态：骨架行缺 agentName，用占位名
+        // 成行（状态位仍可投影）
+        agentName: "(unknown)",
+        startedAt: event.ts,
+        lastProgressAt: event.ts,
+        settled,
+      },
+  );
+  // [D3 对称自愈] 该 phase 名下 call 行全部落定 → 推导 phase 终局（行存在
+  // 即权威，无需 phase-settled 转移帧确认——postMessage 异步丢失窗口封闭）
+  const phase = existing?.phase;
+  const nextPhases = phase !== undefined
+    ? derivePhaseSettlement(nextAsks, phases, phase)
+    : phases;
+  return { asks: nextAsks, phases: nextPhases };
+}
+
+/** [applyAskFoldEvent 拆分] phase-started 帧折叠（登记 phase 行 + resume 重放收束恢复）。 */
+function foldPhaseStartedEvent(
+  asks: Map<number, RunAskStepFold>,
+  phases: Map<string, RunPhaseFold>,
+  event: Extract<WorkflowRunEvent, { type: "phase-started" }>,
+): { asks: Map<number, RunAskStepFold>; phases: Map<string, RunPhaseFold> } {
+  let nextPhases = new Map(phases);
+  nextPhases.set(event.phase, { phase: event.phase, startedAt: event.ts });
+  // [D3 对称自愈] resume 重放形态：新 phase-started 重置后，该 phase 的 call
+  // 行已在前段流全部落定（缓存回话零新帧）→ 立即恢复收束投影
+  nextPhases = derivePhaseSettlement(asks, nextPhases, event.phase);
+  return { asks, phases: nextPhases };
+}
+
+/** [applyAskFoldEvent 拆分] phase-settled 帧折叠（帧值收束，settledBy "frame" 不参与推导翻回）。 */
+function foldPhaseSettledEvent(
+  phases: Map<string, RunPhaseFold>,
+  event: Extract<WorkflowRunEvent, { type: "phase-settled" }>,
+): Map<string, RunPhaseFold> {
+  const existing = phases.get(event.phase);
+  const nextPhases = new Map(phases);
+  nextPhases.set(
+    event.phase,
+    existing !== undefined
+      ? { ...existing, settledAt: event.ts, settledBy: "frame" }
+      // 转移事件缺失窗口的迟到收束帧：兜底成行（startedAt 不可考——取收束 ts）
+      : { phase: event.phase, startedAt: event.ts, settledAt: event.ts, settledBy: "frame" },
+  );
+  return nextPhases;
+}
+
 function applyAskFoldEvent(
   asks: Map<number, RunAskStepFold>,
   phases: Map<string, RunPhaseFold>,
   event: WorkflowRunEvent,
 ): { asks: Map<number, RunAskStepFold>; phases: Map<string, RunPhaseFold> } {
   switch (event.type) {
-    case "agent-started": {
-      const existing = asks.get(event.taskIndex);
-      const nextAsks = new Map(asks);
-      nextAsks.set(
-        event.taskIndex,
-        existing !== undefined
-          ? { ...existing, lastProgressAt: Math.max(existing.lastProgressAt, event.ts) }
-          : {
-            taskIndex: event.taskIndex,
-            agentName: event.agentName,
-            // 剧本归属随帧落投影（W1 D6 / [D3] call 归属快照）；无 phase 帧不造键
-            ...(event.phase !== undefined ? { phase: event.phase } : {}),
-            startedAt: event.ts,
-            lastProgressAt: event.ts,
-          },
-      );
-      // [D3] fold 自愈：phase 行缺席时按 call 归属快照驱动 pending → running
-      // （写时克隆——自愈建行同守 copy-on-write 契约，输入 phases Map 不被变异）
-      let nextPhases = phases;
-      if (event.phase !== undefined && !nextPhases.has(event.phase)) {
-        nextPhases = new Map(phases);
-        nextPhases.set(event.phase, { phase: event.phase, startedAt: event.ts });
-      }
-      // [D3 对称自愈] 新 call 行在场（重派/重入）→ 推导值翻回 running
-      if (event.phase !== undefined) {
-        nextPhases = derivePhaseSettlement(nextAsks, nextPhases, event.phase);
-      }
-      return { asks: nextAsks, phases: nextPhases };
-    }
-    case "agent-retrying": {
-      const existing = asks.get(event.taskIndex);
-      if (existing === undefined) return { asks, phases };
-      const nextAsks = new Map(asks);
-      nextAsks.set(event.taskIndex, {
-        ...existing,
-        lastProgressAt: Math.max(existing.lastProgressAt, event.ts),
-      });
-      // [D3 对称自愈] 重试在途（call 行仍携上一次尝试的旧 settled）→ 该 phase
-      // 推导值翻回 running（treatAsRunning——判据不依赖 call 行 settled 缺席）
-      const nextPhases = existing.phase !== undefined
-        ? derivePhaseSettlement(nextAsks, phases, existing.phase, true)
-        : phases;
-      return { asks: nextAsks, phases: nextPhases };
-    }
-    case "agent-settled": {
-      const existing = asks.get(event.taskIndex);
-      const settled = { outcome: event.outcome, durationMs: event.durationMs, errorCode: event.errorCode, ts: event.ts };
-      const nextAsks = new Map(asks);
-      nextAsks.set(
-        event.taskIndex,
-        existing !== undefined
-          ? {
-            ...existing,
-            lastProgressAt: Math.max(existing.lastProgressAt, event.ts),
-            settled,
-          }
-          : {
-            taskIndex: event.taskIndex,
-            // agent-settled 先于 started 的残形态：骨架行缺 agentName，用占位名
-            // 成行（状态位仍可投影）
-            agentName: "(unknown)",
-            startedAt: event.ts,
-            lastProgressAt: event.ts,
-            settled,
-          },
-      );
-      // [D3 对称自愈] 该 phase 名下 call 行全部落定 → 推导 phase 终局（行存在
-      // 即权威，无需 phase-settled 转移帧确认——postMessage 异步丢失窗口封闭）
-      const phase = existing?.phase;
-      const nextPhases = phase !== undefined
-        ? derivePhaseSettlement(nextAsks, phases, phase)
-        : phases;
-      return { asks: nextAsks, phases: nextPhases };
-    }
-    case "phase-started": {
-      let nextPhases = new Map(phases);
-      nextPhases.set(event.phase, { phase: event.phase, startedAt: event.ts });
-      // [D3 对称自愈] resume 重放形态：新 phase-started 重置后，该 phase 的 call
-      // 行已在前段流全部落定（缓存回话零新帧）→ 立即恢复收束投影
-      nextPhases = derivePhaseSettlement(asks, nextPhases, event.phase);
-      return { asks, phases: nextPhases };
-    }
-    case "phase-settled": {
-      const existing = phases.get(event.phase);
-      const nextPhases = new Map(phases);
-      nextPhases.set(
-        event.phase,
-        existing !== undefined
-          ? { ...existing, settledAt: event.ts, settledBy: "frame" }
-          // 转移事件缺失窗口的迟到收束帧：兜底成行（startedAt 不可考——取收束 ts）
-          : { phase: event.phase, startedAt: event.ts, settledAt: event.ts, settledBy: "frame" },
-      );
-      return { asks, phases: nextPhases };
-    }
+    case "agent-started":
+      return foldAgentStartedEvent(asks, phases, event);
+    case "agent-retrying":
+      return foldAgentRetryingEvent(asks, phases, event);
+    case "agent-settled":
+      return foldAgentSettledEvent(asks, phases, event);
+    case "phase-started":
+      return foldPhaseStartedEvent(asks, phases, event);
+    case "phase-settled":
+      return { asks, phases: foldPhaseSettledEvent(phases, event) };
     default:
       return { asks, phases };
   }

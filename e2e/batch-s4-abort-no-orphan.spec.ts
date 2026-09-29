@@ -260,6 +260,182 @@ function countEngineShellProcesses(): { count: number; lines: string[] } {
   }
 }
 
+/**
+ * [S4 test 拆分] 在飞证据段：journal 落盘 + ask-dispatched 帧 + 成员保活进程与引擎
+ * 宿主薄壳的双正面对照（孤儿断言的前提是派发后确实有任务进程可回收）。失败路径
+ * diag 与拆出前同构。
+ */
+async function awaitS4InFlightEvidence(
+  dataDir: string,
+  baseline: { count: number; lines: string[] },
+  shellBaseline: { count: number; lines: string[] },
+): Promise<{ journalFile: string; runId: string }> {
+  const agentDir = path.join(dataDir, 'agent')
+  const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
+  if (!journalFound) {
+    writeDiag('batch-s4-journal-missing.json', {
+      runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
+      piLogsTail: readPiLogs(dataDir).slice(-3000),
+    })
+  }
+  expect(journalFound, 'run journal 应落盘').toBe(true)
+  const journalFile = listFilesRecursive(agentDir, '.events.jsonl')[0]
+  const runId = path.basename(journalFile).replace(/\.events\.jsonl$/, '')
+  const dispatched = await waitUntil(
+    () => readJournalFrames(journalFile).some((f) => f['type'] === 'ask-dispatched'),
+    JOURNAL_TIMEOUT_MS,
+  )
+  if (!dispatched) {
+    writeDiag('batch-s4-not-dispatched.json', {
+      journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
+      piLogsTail: readPiLogs(dataDir).slice(-3000),
+    })
+  }
+  expect(dispatched, `journal 应出现 ask-dispatched 帧（成员在飞——abort 才有「中途」语义）`).toBe(true)
+
+  // 成员保活进程在跑（正面对照：孤儿断言的前提是派发后确实有任务进程可回收）
+  const inFlight = await waitUntil(() => countMemberSleeperProcesses().count > baseline.count, JOURNAL_TIMEOUT_MS)
+  if (!inFlight) {
+    writeDiag('batch-s4-engine-process-not-seen.json', {
+      baseline: baseline.lines,
+      current: countMemberSleeperProcesses().lines,
+      hint: '特征集不命中——按头注「进程核对锚」校准特征集，不删孤儿断言',
+    })
+  }
+  expect(inFlight, `派发后成员保活进程数应 > 基线（在飞证据；特征锚见 diag）`).toBe(true)
+
+  // 引擎宿主薄壳在跑（per-window 在飞证据：窗口内薄壳存活，是收口后可回收的前提）
+  const shellInFlight = await waitUntil(() => countEngineShellProcesses().count > shellBaseline.count, JOURNAL_TIMEOUT_MS)
+  if (!shellInFlight) {
+    writeDiag('batch-s4-engine-shell-not-seen.json', {
+      shellBaseline: shellBaseline.lines,
+      shellCurrent: countEngineShellProcesses().lines,
+      hint: '薄壳特征不命中（pi-subagent-cli / /engines/）——按 count-engine-shell-processes.mjs 头注校准特征集，不删宿主断言',
+    })
+  }
+  expect(shellInFlight, `派发后引擎宿主薄壳数应 > 基线（per-window 在飞证据；特征锚见 diag）`).toBe(true)
+  return { journalFile, runId }
+}
+
+
+/**
+ * [S4 test 拆分] 断言 A1+A2 基座：run-settled(cancelled) 恰 1 + 主会话 JSONL 落盘
+ * + notifyDone 送达等待。返回主会话文件路径（后续三通道计数与孤儿断言消费）。
+ */
+async function awaitS4SettlementAndNotifyBase(
+  dataDir: string,
+  agentDir: string,
+  journalFile: string,
+  runId: string,
+  consoleCap: { errors: string[] },
+): Promise<string> {
+  // ── 断言 A1：journal run-settled(cancelled) 恰 1 ──
+  const settled = await waitUntil(
+    () => readJournalFrames(journalFile).some((f) => f['type'] === 'run-settled'),
+    ABORT_SETTLE_TIMEOUT_MS,
+  )
+  const frames = readJournalFrames(journalFile)
+  if (!settled) {
+    writeDiag('batch-s4-not-settled.json', {
+      journalEventTypes: frames.map((f) => f['type']),
+      engineProcesses: countMemberSleeperProcesses().lines,
+      piLogsTail: readPiLogs(dataDir).slice(-3000),
+    })
+  }
+  expect(settled, `abort 后 run 应在 ${ABORT_SETTLE_TIMEOUT_MS}ms 内落 run-settled 帧`).toBe(true)
+  const settledFrames = frames.filter((f) => f['type'] === 'run-settled')
+  expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
+  expect(
+    settledFrames[0]?.['outcome'],
+    `abort 终局 outcome 应为 cancelled（收到 "${String(settledFrames[0]?.['outcome'])}"；若为 completed = 保活窗口不足，调大 MEMBER_SLEEP_S）`,
+  ).toBe('cancelled')
+
+  // ── 断言 A2：notifyDone 照达恰 1 ──
+  const sessionFound = await waitUntil(
+    () => listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').some((f) => {
+      try { return fs.readFileSync(f, 'utf8').includes(MAIN_MARKER) } catch { return false }
+    }),
+    JSONL_FLUSH_TIMEOUT_MS,
+  )
+  expect(sessionFound, '主会话 JSONL 应已落盘').toBe(true)
+  const sessionFile = listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl')
+    .find((f) => fs.readFileSync(f, 'utf8').includes(MAIN_MARKER))!
+  const notifyId = `wf-done:${runId}`
+  const notifyArrived = await waitUntil(() => fs.readFileSync(sessionFile, 'utf8').includes(notifyId), NOTIFY_TIMEOUT_MS)
+  if (!notifyArrived) {
+    writeDiag('batch-s4-notify-missing.json', {
+      journalEventTypes: frames.map((f) => f['type']),
+      piLogsTail: readPiLogs(dataDir).slice(-3000),
+    })
+  }
+  expect(notifyArrived, `abort 终局通知应照达（${notifyId}）——通知链不因 abort 丢失`).toBe(true)
+
+  // ── 三通道口径（BATCH-06）：送达恰 1 + ledger/ack 各恰 1 ──
+  // 通道与 entry type 均不同（与 s1 同款口径，详见 s1 注释）：①送达 = type
+  // custom_message × customType "workflow-result"（u9 外部通道设计，键在顶层
+  // details.notifyId；权威消费面 collectDeliveredNotifyIds）②ledger 落账 = type
+  // custom × "subagent-bg-notify-ledger" ③ack 销账 = type custom ×
+  // "subagent-bg-notify-ack"。「键出现次数」结构性 = 3 ≠ 投递次数。
+
+  return sessionFile
+}
+
+
+/**
+ * [S4 test 拆分] 断言 A3 + A4①：v2 settled 条目 outcome 与 journal 一致
+ * （journal 唯一事实源投影面）+ 成员保活 sleep 进程回落基线（abort 的 kill 分级
+ * 先杀 run 拓扑再收口；diag 带 etime/ppid 供残留时定位 kill 链路——countMember
+ * SleeperProcesses 的 lines 是 `ps -axo command=` 纯命令行（无 PID 列），PID 需按
+ * 同特征从 `ps -axo pid,command=` 重采样（r5 实测取 command 第二段当 PID 会 ps
+ * 报错使 diag 自身炸掉））。
+ */
+async function assertS4SettledEntryAndOrphanFree(
+  sessionFile: string,
+  runId: string,
+  baseline: { count: number; lines: string[] },
+  frames: Record<string, unknown>[],
+): Promise<void> {
+  // ── 断言 A3：v2 settled 条目 outcome === journal（journal 唯一事实源投影面） ──
+  const wfSettled = extractCustomEntries(sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'settled')
+  const thisRunSettled = wfSettled.find((d) => d['runId'] === runId)
+  expect(thisRunSettled, 'workflow-record v2 settled 条目应存在（abort run 也写终态条目）').toBeDefined()
+  expect(thisRunSettled?.['outcome'], 'settled 条目 outcome 应为 cancelled（与 journal run-settled 一致）').toBe('cancelled')
+
+  // ── 断言 A4：无孤儿（正面对照 = 派发后两者均曾 > 基线） ──
+  // ① 成员保活 sleep 进程（run 拓扑 spawned children）：abort 的 kill 分级先杀
+  //    run 拓扑再收口，杀干净后应立即回落基线。
+  // ② 引擎宿主 pi-subagent-cli 薄壳：per-window 形态下随派发窗口生灭（run 收尾
+  //    finalizeRun 遍历窗口实例 dispose），收口后同样回落基线（头注断言 ④ 升级面；
+  //    计数复用 count-engine-shell-processes.mjs，基线差分吸收环境噪声）。
+  // diag 带 etime/ppid 供残留时定位 kill 链路。
+  const orphanFree = await waitUntil(() => countMemberSleeperProcesses().count <= baseline.count, ORPHAN_GRACE_MS, 1000)
+  if (!orphanFree) {
+    // countMemberSleeperProcesses 的 lines 是 `ps -axo command=` 纯命令行（无 PID 列）——
+    // PID 需按同特征从 `ps -axo pid,command=` 重采样（r5 实测取 command 第二段当
+    // PID 会 ps 报错使 diag 自身炸掉）
+    let psDetail = '(无残留 PID)'
+    try {
+      const sleeperMarker = `sleep ${MEMBER_SLEEP_S}`
+      const pidLines = execSync('ps -axo pid,command=', { encoding: 'utf8', timeout: 10_000 })
+        .split('\n')
+        .filter((line) => line.includes(sleeperMarker) && !line.includes('playwright'))
+        .map((line) => line.trim().split(/\s+/)[0])
+        .filter(Boolean)
+      if (pidLines.length > 0) {
+        psDetail = execSync(`ps -o pid,ppid,etime,command -p ${pidLines.join(',')}`, { encoding: 'utf8', timeout: 10_000 })
+      }
+    } catch (err) {
+      psDetail = `(ps 采样失败：${String(err)})`
+    }
+    writeDiag('batch-s4-orphans.json', {
+      baseline: baseline.lines,
+      current: countMemberSleeperProcesses().lines,
+      psDetail,
+      journalEventTypes: frames.map((f) => f['type']),
+    })
+  }
+  expect(orphanFree, `abort 收口后成员保活进程数应回落基线（孤儿窗口 ${ORPHAN_GRACE_MS}ms；残留进程见 diag）`).toBe(true)
+}
 // ── S4 主用例 ────────────────────────────────────────────────────────────
 
 test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达 + 无孤儿（成员任务子进程 + 引擎宿主薄壳）', async ({ }, testInfo) => {
@@ -322,51 +498,8 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     expect(dispatchDone, `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagents 工具？）`).toBe(true)
     sub.events.length = 0
 
-    // ── 在飞证据：journal 出现 + ask-dispatched 帧 ──
-    const agentDir = path.join(dataDir, 'agent')
-    const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
-    if (!journalFound) {
-      writeDiag('batch-s4-journal-missing.json', {
-        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-        piLogsTail: readPiLogs(dataDir).slice(-3000),
-      })
-    }
-    expect(journalFound, 'run journal 应落盘').toBe(true)
-    const journalFile = listFilesRecursive(agentDir, '.events.jsonl')[0]
-    const runId = path.basename(journalFile).replace(/\.events\.jsonl$/, '')
-    const dispatched = await waitUntil(
-      () => readJournalFrames(journalFile).some((f) => f['type'] === 'ask-dispatched'),
-      JOURNAL_TIMEOUT_MS,
-    )
-    if (!dispatched) {
-      writeDiag('batch-s4-not-dispatched.json', {
-        journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
-        piLogsTail: readPiLogs(dataDir).slice(-3000),
-      })
-    }
-    expect(dispatched, `journal 应出现 ask-dispatched 帧（成员在飞——abort 才有「中途」语义）`).toBe(true)
-
-    // 成员保活进程在跑（正面对照：孤儿断言的前提是派发后确实有任务进程可回收）
-    const inFlight = await waitUntil(() => countMemberSleeperProcesses().count > baseline.count, JOURNAL_TIMEOUT_MS)
-    if (!inFlight) {
-      writeDiag('batch-s4-engine-process-not-seen.json', {
-        baseline: baseline.lines,
-        current: countMemberSleeperProcesses().lines,
-        hint: '特征集不命中——按头注「进程核对锚」校准特征集，不删孤儿断言',
-      })
-    }
-    expect(inFlight, `派发后成员保活进程数应 > 基线（在飞证据；特征锚见 diag）`).toBe(true)
-
-    // 引擎宿主薄壳在跑（per-window 在飞证据：窗口内薄壳存活，是收口后可回收的前提）
-    const shellInFlight = await waitUntil(() => countEngineShellProcesses().count > shellBaseline.count, JOURNAL_TIMEOUT_MS)
-    if (!shellInFlight) {
-      writeDiag('batch-s4-engine-shell-not-seen.json', {
-        shellBaseline: shellBaseline.lines,
-        shellCurrent: countEngineShellProcesses().lines,
-        hint: '薄壳特征不命中（pi-subagent-cli / /engines/）——按 count-engine-shell-processes.mjs 头注校准特征集，不删宿主断言',
-      })
-    }
-    expect(shellInFlight, `派发后引擎宿主薄壳数应 > 基线（per-window 在飞证据；特征锚见 diag）`).toBe(true)
+    // ── 在飞证据（journal + ask-dispatched + 双进程正面对照；拆出 awaitS4InFlightEvidence）──
+    const { journalFile, runId } = await awaitS4InFlightEvidence(dataDir, baseline, shellBaseline)
     await page.screenshot({ path: testInfo.outputPath('s4-in-flight.png'), fullPage: true })
 
     // ── turn 2：abort ──
@@ -385,53 +518,8 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     }
     expect(abortTurnDone, `abort turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成`).toBe(true)
 
-    // ── 断言 A1：journal run-settled(cancelled) 恰 1 ──
-    const settled = await waitUntil(
-      () => readJournalFrames(journalFile).some((f) => f['type'] === 'run-settled'),
-      ABORT_SETTLE_TIMEOUT_MS,
-    )
-    const frames = readJournalFrames(journalFile)
-    if (!settled) {
-      writeDiag('batch-s4-not-settled.json', {
-        journalEventTypes: frames.map((f) => f['type']),
-        engineProcesses: countMemberSleeperProcesses().lines,
-        piLogsTail: readPiLogs(dataDir).slice(-3000),
-      })
-    }
-    expect(settled, `abort 后 run 应在 ${ABORT_SETTLE_TIMEOUT_MS}ms 内落 run-settled 帧`).toBe(true)
-    const settledFrames = frames.filter((f) => f['type'] === 'run-settled')
-    expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
-    expect(
-      settledFrames[0]?.['outcome'],
-      `abort 终局 outcome 应为 cancelled（收到 "${String(settledFrames[0]?.['outcome'])}"；若为 completed = 保活窗口不足，调大 MEMBER_SLEEP_S）`,
-    ).toBe('cancelled')
-
-    // ── 断言 A2：notifyDone 照达恰 1 ──
-    const sessionFound = await waitUntil(
-      () => listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').some((f) => {
-        try { return fs.readFileSync(f, 'utf8').includes(MAIN_MARKER) } catch { return false }
-      }),
-      JSONL_FLUSH_TIMEOUT_MS,
-    )
-    expect(sessionFound, '主会话 JSONL 应已落盘').toBe(true)
-    const sessionFile = listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl')
-      .find((f) => fs.readFileSync(f, 'utf8').includes(MAIN_MARKER))!
+    const sessionFile = await awaitS4SettlementAndNotifyBase(dataDir, agentDir, journalFile, runId, consoleCap)
     const notifyId = `wf-done:${runId}`
-    const notifyArrived = await waitUntil(() => fs.readFileSync(sessionFile, 'utf8').includes(notifyId), NOTIFY_TIMEOUT_MS)
-    if (!notifyArrived) {
-      writeDiag('batch-s4-notify-missing.json', {
-        journalEventTypes: frames.map((f) => f['type']),
-        piLogsTail: readPiLogs(dataDir).slice(-3000),
-      })
-    }
-    expect(notifyArrived, `abort 终局通知应照达（${notifyId}）——通知链不因 abort 丢失`).toBe(true)
-
-    // ── 三通道口径（BATCH-06）：送达恰 1 + ledger/ack 各恰 1 ──
-    // 通道与 entry type 均不同（与 s1 同款口径，详见 s1 注释）：①送达 = type
-    // custom_message × customType "workflow-result"（u9 外部通道设计，键在顶层
-    // details.notifyId；权威消费面 collectDeliveredNotifyIds）②ledger 落账 = type
-    // custom × "subagent-bg-notify-ledger" ③ack 销账 = type custom ×
-    // "subagent-bg-notify-ack"。「键出现次数」结构性 = 3 ≠ 投递次数。
     const deliveredWorkflowResults = extractCustomMessageEntries(sessionFile, 'workflow-result').filter(
       (e) => ((e['details'] ?? {}) as Record<string, unknown>)['notifyId'] === notifyId,
     )
@@ -464,46 +552,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
       'notifyDone ack 销账应恰 1 条（at-least-once 幂等闭环——落账/销账各恰一次，BATCH-06 口径）',
     ).toBe(1)
 
-    // ── 断言 A3：v2 settled 条目 outcome === journal（journal 唯一事实源投影面） ──
-    const wfSettled = extractCustomEntries(sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'settled')
-    const thisRunSettled = wfSettled.find((d) => d['runId'] === runId)
-    expect(thisRunSettled, 'workflow-record v2 settled 条目应存在（abort run 也写终态条目）').toBeDefined()
-    expect(thisRunSettled?.['outcome'], 'settled 条目 outcome 应为 cancelled（与 journal run-settled 一致）').toBe('cancelled')
-
-    // ── 断言 A4：无孤儿（正面对照 = 派发后两者均曾 > 基线） ──
-    // ① 成员保活 sleep 进程（run 拓扑 spawned children）：abort 的 kill 分级先杀
-    //    run 拓扑再收口，杀干净后应立即回落基线。
-    // ② 引擎宿主 pi-subagent-cli 薄壳：per-window 形态下随派发窗口生灭（run 收尾
-    //    finalizeRun 遍历窗口实例 dispose），收口后同样回落基线（头注断言 ④ 升级面；
-    //    计数复用 count-engine-shell-processes.mjs，基线差分吸收环境噪声）。
-    // diag 带 etime/ppid 供残留时定位 kill 链路。
-    const orphanFree = await waitUntil(() => countMemberSleeperProcesses().count <= baseline.count, ORPHAN_GRACE_MS, 1000)
-    if (!orphanFree) {
-      // countMemberSleeperProcesses 的 lines 是 `ps -axo command=` 纯命令行（无 PID 列）——
-      // PID 需按同特征从 `ps -axo pid,command=` 重采样（r5 实测取 command 第二段当
-      // PID 会 ps 报错使 diag 自身炸掉）
-      let psDetail = '(无残留 PID)'
-      try {
-        const sleeperMarker = `sleep ${MEMBER_SLEEP_S}`
-        const pidLines = execSync('ps -axo pid,command=', { encoding: 'utf8', timeout: 10_000 })
-          .split('\n')
-          .filter((line) => line.includes(sleeperMarker) && !line.includes('playwright'))
-          .map((line) => line.trim().split(/\s+/)[0])
-          .filter(Boolean)
-        if (pidLines.length > 0) {
-          psDetail = execSync(`ps -o pid,ppid,etime,command -p ${pidLines.join(',')}`, { encoding: 'utf8', timeout: 10_000 })
-        }
-      } catch (err) {
-        psDetail = `(ps 采样失败：${String(err)})`
-      }
-      writeDiag('batch-s4-orphans.json', {
-        baseline: baseline.lines,
-        current: countMemberSleeperProcesses().lines,
-        psDetail,
-        journalEventTypes: frames.map((f) => f['type']),
-      })
-    }
-    expect(orphanFree, `abort 收口后成员保活进程数应回落基线（孤儿窗口 ${ORPHAN_GRACE_MS}ms；残留进程见 diag）`).toBe(true)
+    await assertS4SettledEntryAndOrphanFree(sessionFile, runId, baseline, readJournalFrames(journalFile))
 
     // 断言 A4b：引擎宿主薄壳回落基线（per-window 收尾 dispose——abort 收尾杀薄壳，
     // 头注断言 ④ 升级面；同窗等待吸收成员任务收尾与薄壳退出的时序差）

@@ -151,38 +151,48 @@ export function hasExecutableLines(content, filePath) {
 
 function stripCommentsAndStrings(content) {
   let out = ''
-  let i = 0
-  const n = content.length
   let state = 'code' // code | line | block | sq | dq | tpl
-  while (i < n) {
-    const c = content[i]
-    const d = content[i + 1]
-    if (state === 'code') {
-      if (c === '/' && d === '/') { state = 'line'; out += '  '; i += 2; continue }
-      if (c === '/' && d === '*') { state = 'block'; out += '  '; i += 2; continue }
-      if (c === "'") { state = 'sq'; out += c; i++; continue }
-      if (c === '"') { state = 'dq'; out += c; i++; continue }
-      if (c === '`') { state = 'tpl'; out += c; i++; continue }
-      out += c; i++; continue
-    }
-    if (state === 'line') {
-      if (c === '\n') { state = 'code'; out += c } else { out += ' ' }
-      i++; continue
-    }
-    if (state === 'block') {
-      if (c === '*' && d === '/') { state = 'code'; out += '  '; i += 2; continue }
-      out += c === '\n' ? '\n' : ' '
-      i++; continue
-    }
-    // 字符串态：字面量内容抹成空格（保留边界引号），转义跳过
-    if (c === '\\') { out += '  '; i += 2; continue }
-    if ((state === 'sq' && c === "'") || (state === 'dq' && c === '"') || (state === 'tpl' && c === '`')) {
-      state = 'code'; out += c; i++; continue
-    }
-    out += c === '\n' ? '\n' : ' '
-    i++
+  let i = 0
+  while (i < content.length) {
+    const step = stripStep(state, content[i], content[i + 1])
+    out += step.text
+    state = step.state
+    i += step.advance
   }
   return out
+}
+
+/** [stripCommentsAndStrings 拆分] code 态单步转移（注释开 / 引号开 / 原样透出）。 */
+function stripCodeStep(c, d) {
+  if (c === '/' && d === '/') return { state: 'line', advance: 2, text: '  ' }
+  if (c === '/' && d === '*') return { state: 'block', advance: 2, text: '  ' }
+  if (c === "'") return { state: 'sq', advance: 1, text: c }
+  if (c === '"') return { state: 'dq', advance: 1, text: c }
+  if (c === '`') return { state: 'tpl', advance: 1, text: c }
+  return { state: 'code', advance: 1, text: c }
+}
+
+/**
+ * [stripCommentsAndStrings 拆分] 状态机单步转移：返回 { state, advance, text }
+ * （advance = 本步消耗字符数 ≥1，text = 本步追加输出——注释与字符串字面量内容抹成
+ * 空格、保留边界引号与换行，转义跳过下一字符）。逐分支与拆分前实现同构。
+ */
+function stripStep(state, c, d) {
+  if (state === 'code') return stripCodeStep(c, d)
+  if (state === 'line') {
+    return c === '\n'
+      ? { state: 'code', advance: 1, text: '\n' }
+      : { state: 'line', advance: 1, text: ' ' }
+  }
+  if (state === 'block') {
+    if (c === '*' && d === '/') return { state: 'code', advance: 2, text: '  ' }
+    return { state: 'block', advance: 1, text: c === '\n' ? '\n' : ' ' }
+  }
+  // 字符串态（sq/dq/tpl）：转义跳过；闭合引号回 code
+  if (c === '\\') return { state, advance: 2, text: '  ' }
+  const closing = state === 'sq' ? "'" : state === 'dq' ? '"' : '`'
+  if (c === closing) return { state: 'code', advance: 1, text: c }
+  return { state, advance: 1, text: c === '\n' ? '\n' : ' ' }
 }
 
 /** 从 lines[i] 起消费一个完整语句/声明（括号深度归零且见行尾），返回下一行下标。 */
@@ -281,9 +291,7 @@ export async function runGates(deps, args) {
   const { side, base: explicitBase } = args
 
   // fail-fast：py 实体缺失在跑任何门之前报错（不静默跳过、也不白跑重型 typecheck）
-  const missing = [COVERAGE_PY, METRICS_PY]
-    .map((f) => join(PY_REL_DIR, f))
-    .filter((rel) => !deps.exists(rel))
+  const missing = missingPythonEntities(deps)
   if (missing.length > 0) {
     return {
       exitCode: 2,
@@ -304,6 +312,33 @@ export async function runGates(deps, args) {
   const { base, source } = resolveBase({ side, explicitBase }, deps.git)
 
   // 1. typecheck 三处（自跑）
+  runTypecheckGates(deps, gates)
+
+  // 2. coverage-gate（py）
+  const covError = runCoverageGate(deps, base, gates)
+  if (covError) return finish(deps, base, source, gates, covError)
+
+  // 3. 机器盲区判定（消费 coverage.json；py fail 时产物仍在，判定照跑并叠加明细）
+  const blindspotError = runBlindspotGate(deps, gates)
+  if (blindspotError) return finish(deps, base, source, gates, blindspotError)
+
+  // 4. metrics-gate（py；coverage 之后——消费同 base coverage.json）
+  const metricsError = runMetricsGate(deps, base, gates)
+  if (metricsError) return finish(deps, base, source, gates, metricsError)
+
+  const hasFail = gates.some((g) => g.status === 'FAIL')
+  return { exitCode: hasFail ? 1 : 0, result: { verdict: hasFail ? 'fail' : 'pass', base, baseSource: source, gates, metrics: buildMetricsBrief(deps) } }
+}
+
+/** [runGates 拆分] fail-fast 前置：py 实体缺失清单（缺失即中止，不白跑重型 typecheck）。 */
+function missingPythonEntities(deps) {
+  return [COVERAGE_PY, METRICS_PY]
+    .map((f) => join(PY_REL_DIR, f))
+    .filter((rel) => !deps.exists(rel))
+}
+
+/** [runGates 拆分] gate 1：typecheck 三处（命令/cwd 与 pr-pre-merge.sh 同款）。 */
+function runTypecheckGates(deps, gates) {
   for (const step of buildTypecheckSteps()) {
     const r = deps.exec(step.cmd, step.args, step.cwd)
     const ok = r.status === 0
@@ -313,34 +348,36 @@ export async function runGates(deps, args) {
       detail: ok ? '' : tailLines((r.stderr || '') + (r.stdout || ''), 30),
     })
   }
+}
 
-  // 2. coverage-gate（py）
+/**
+ * [runGates 拆分] gate 2：coverage-gate（py 子进程）。返回中止 error 对象或 null
+ * （null = 正常推进；status 0/1 记 PASS/FAIL 后继续——产物 coverage.json 照常消费）。
+ */
+function runCoverageGate(deps, base, gates) {
   const cov = deps.runPython(buildCoverageCommand(join(PY_REL_DIR, COVERAGE_PY), base))
   if (cov.status === null || cov.error) {
-    return finish(deps, base, source, gates, {
-      exitCode: 2,
-      error: { message: `coverage-gate.py 无法执行（python3 缺失或不可执行）`, detail: String(cov.error || '') },
-    })
+    return { exitCode: 2, error: { message: `coverage-gate.py 无法执行（python3 缺失或不可执行）`, detail: String(cov.error || '') } }
   }
   if (cov.status === 2) {
-    return finish(deps, base, source, gates, {
-      exitCode: 2,
-      error: { message: 'coverage-gate.py 工具错误（exit 2）', detail: tailLines((cov.stderr || '') + (cov.stdout || ''), 30) },
-    })
+    return { exitCode: 2, error: { message: 'coverage-gate.py 工具错误（exit 2）', detail: tailLines((cov.stderr || '') + (cov.stdout || ''), 30) } }
   }
   gates.push({
     name: 'coverage-gate',
     status: cov.status === 0 ? 'PASS' : 'FAIL',
     detail: tailLines((cov.stdout || '') + (cov.stderr || ''), 15),
   })
+  return null
+}
 
-  // 3. 机器盲区判定（消费 coverage.json；py fail 时产物仍在，判定照跑并叠加明细）
+/** [runGates 拆分] gate 3：机器盲区判定（judgeNoLcov，见其头注释）。 */
+function runBlindspotGate(deps, gates) {
   const report = deps.readJson('.review/coverage.json')
   if (!report) {
-    return finish(deps, base, source, gates, {
+    return {
       exitCode: 2,
       error: { message: 'coverage.json 读取/解析失败（coverage-gate.py 已跑但产物不可用）', detail: join(deps.root, '.review', 'coverage.json') },
-    })
+    }
   }
   const blindspot = judgeNoLcov(report, deps.readHead)
   gates.push({
@@ -353,37 +390,37 @@ export async function runGates(deps, args) {
     exempt: blindspot.exempt,
     violations: blindspot.violations,
   })
+  return null
+}
 
-  // 4. metrics-gate（py；coverage 之后——消费同 base coverage.json）
+/**
+ * [runGates 拆分] gate 4：metrics-gate（py 子进程）。返回中止 error 对象或 null。
+ */
+function runMetricsGate(deps, base, gates) {
   const met = deps.runPython(buildMetricsCommand(join(PY_REL_DIR, METRICS_PY), base))
   if (met.status === null || met.error) {
-    return finish(deps, base, source, gates, {
-      exitCode: 2,
-      error: { message: 'metrics-gate.py 无法执行（python3 缺失或 fallow 未安装）', detail: String(met.error || '') },
-    })
+    return { exitCode: 2, error: { message: 'metrics-gate.py 无法执行（python3 缺失或 fallow 未安装）', detail: String(met.error || '') } }
   }
   if (met.status === 2) {
-    return finish(deps, base, source, gates, {
-      exitCode: 2,
-      error: { message: 'metrics-gate.py 工具错误（exit 2）', detail: tailLines((met.stderr || '') + (met.stdout || ''), 30) },
-    })
+    return { exitCode: 2, error: { message: 'metrics-gate.py 工具错误（exit 2）', detail: tailLines((met.stderr || '') + (met.stdout || ''), 30) } }
   }
   gates.push({
     name: 'metrics-gate',
     status: met.status === 0 ? 'PASS' : 'FAIL',
     detail: tailLines((met.stdout || '') + (met.stderr || ''), 15),
   })
-  // warn 档与 targets 呈报（决策 4：降级为机器报告，不逐条 LLM 核查；fail 档已由上方 status 承接）
+  return null
+}
+
+/** [runGates 拆分] metrics 报告呈报摘要（决策 4：降级为机器报告，不逐条 LLM 核查）。 */
+function buildMetricsBrief(deps) {
   const metricsReport = deps.readJson('.review/metrics.json')
-  const metricsBrief = metricsReport
+  return metricsReport
     ? {
         warn: (metricsReport.warn || []).map((w) => `${w.path || (w.files || []).join(',') || '?'}${w.line ? ':' + w.line : ''} ${w.reason || ''}`.trim()).slice(0, 20),
         targets: (metricsReport.targets?.high_crap || []).map((t) => `${t.path}:${t.line} ${t.name} (crap=${t.crap})`),
       }
     : null
-
-  const hasFail = gates.some((g) => g.status === 'FAIL')
-  return { exitCode: hasFail ? 1 : 0, result: { verdict: hasFail ? 'fail' : 'pass', base, baseSource: source, gates, metrics: metricsBrief } }
 }
 
 function finish(deps, base, source, gates, { exitCode, error }) {

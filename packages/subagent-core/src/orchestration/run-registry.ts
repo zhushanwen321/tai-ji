@@ -254,6 +254,46 @@ function resolveManifestDirForAdopt(journalDir?: string): string | undefined {
  * skippedTerminal）是进程内第二道幂等。中断条目（status 'interrupted'）构造与
  * callCount 推导归 interruptRun 入口内聚——本函数只透传补写通道与载荷源。
  */
+/**
+ * [adoptInterruptedRun 拆分] 收编前置裁决（三面证据 + 宽限窗 + 坏链守卫）：
+ * 返回 skipped* 让位理由；null = 前置全过、继续收编。lastEventAt 一并返回
+ * （收编成功日志的静止锚点），前置不通过时为 undefined。
+ */
+async function precheckAdoption(
+  runId: string,
+  events: readonly WorkflowRunEvent[],
+  state: ReturnType<typeof foldEvents>,
+  opts: AdoptInterruptedRunOptions | undefined,
+  journalDir: string | undefined,
+  now: number,
+): Promise<{ skipped: AdoptInterruptedRunOutcome; lastEventAt?: undefined } | { skipped: null; lastEventAt: number }> {
+  // 三面证据（幂等第一道）：record fold 面（terminal 或已 interrupted 均跳过——
+  // 重复收编让位）
+  if (state.lifecycle === "terminal" || state.lifecycle === "interrupted") {
+    return { skipped: "skippedTerminal" };
+  }
+  // manifest 面（活体物化但 record 已被裁的组合）。dir=""（测试 NoopJournal 防线
+  // 形态）跳过 manifest 证据——帧面已由 scan 空流 skippedMissing 承接，与「零写域
+  // 不做真目录读」红线一致。
+  const manifestDir = resolveManifestDirForAdopt(journalDir);
+  if (manifestDir !== undefined) {
+    const existingManifest = await readRunTerminalManifest(manifestDir, runId);
+    if (existingManifest !== null) return { skipped: "skippedTerminal" };
+  }
+  // 条目面（双面证据第二条——壳注入读面）
+  if (opts?.hasSettledEntry !== undefined && (await opts.hasSettledEntry(runId))) {
+    return { skipped: "skippedTerminal" };
+  }
+  // 宽限窗（事件流静止判定；缺省 0 = 立即收编）
+  const lastEventAt = events[events.length - 1]!.ts;
+  if (now - lastEventAt < (opts?.graceWindowMs ?? 0)) {
+    return { skipped: "skippedGraceWindow" };
+  }
+  // 坏链守卫：fold 停在 created（首帧损坏）时 run-interrupted 表外转移——保守跳过
+  if (state.lifecycle === "created") return { skipped: "skippedBrokenChain" };
+  return { skipped: null, lastEventAt };
+}
+
 export async function adoptInterruptedRun(
   runId: string,
   opts?: AdoptInterruptedRunOptions,
@@ -266,28 +306,8 @@ export async function adoptInterruptedRun(
   if (events.length === 0) return "skippedMissing";
   if (opts?.activeRunIds?.has(runId)) return "skippedActive";
   const state = foldEvents(events, runId);
-  // 三面证据（幂等第一道）：record fold 面（terminal 或已 interrupted 均跳过——
-  // 重复收编让位）
-  if (state.lifecycle === "terminal" || state.lifecycle === "interrupted") {
-    return "skippedTerminal";
-  }
-  // manifest 面（活体物化但 record 已被裁的组合）。dir=""（测试 NoopJournal 防线
-  // 形态）跳过 manifest 证据——帧面已由 scan 空流 skippedMissing 承接，与「零写域
-  // 不做真目录读」红线一致。
-  const manifestDir = resolveManifestDirForAdopt(journalDir);
-  if (manifestDir !== undefined) {
-    const existingManifest = await readRunTerminalManifest(manifestDir, runId);
-    if (existingManifest !== null) return "skippedTerminal";
-  }
-  // 条目面（双面证据第二条——壳注入读面）
-  if (opts?.hasSettledEntry !== undefined && (await opts.hasSettledEntry(runId))) {
-    return "skippedTerminal";
-  }
-  // 宽限窗（事件流静止判定；缺省 0 = 立即收编）
-  const lastEventAt = events[events.length - 1]!.ts;
-  if (now - lastEventAt < (opts?.graceWindowMs ?? 0)) return "skippedGraceWindow";
-  // 坏链守卫：fold 停在 created（首帧损坏）时 run-interrupted 表外转移——保守跳过
-  if (state.lifecycle === "created") return "skippedBrokenChain";
+  const precheck = await precheckAdoption(runId, events, state, opts, journalDir, now);
+  if (precheck.skipped !== null) return precheck.skipped;
   // 幂等追加中断转移事件（[D15] 入口；workflowName 取 run-created 帧——中断条目
   // 的 scriptName 载荷，缺帧回落 runId）。Illegal = 并发收编/终局让位——抢先方已
   // 落帧，skippedTerminal 收敛。
@@ -306,7 +326,7 @@ export async function adoptInterruptedRun(
   logger.warn(
     `run registry: interrupted run adopted (runId=${runId}` +
       `${opts?.errorCode !== undefined ? `, errorCode=${opts.errorCode}` : ""}, ` +
-      `lastEventAt=${new Date(lastEventAt).toISOString()}) — run-interrupted appended`,
+      `lastEventAt=${new Date(precheck.lastEventAt).toISOString()}) — run-interrupted appended`,
   );
   return "adopted";
 }

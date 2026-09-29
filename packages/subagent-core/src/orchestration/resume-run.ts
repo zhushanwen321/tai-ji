@@ -457,15 +457,15 @@ function resolveRecordPath(runId: string, journalDir?: string): string {
   return anchor;
 }
 
-/** 锁段内的编排主体（resumeRun 持锁后执行；锁释放归调用方 finally）。 */
-async function resumeRunLocked(
+/**
+ * [resumeRunLocked 拆分] 资格校验（段 2）：run-created 帧 / interrupted 生命周期 /
+ * D10 预算预检（场景 16：搁置不计，活跃已耗不退）。任一不过即拒绝（异常即返回值）。
+ */
+function assertResumeEligibility(
   runId: string,
-  deps: LifecycleDeps,
   recordPath: string,
   options: ResumeRunOptions | undefined,
-  now: () => number,
-): Promise<string> {
-  // ── 2. 资格校验 ──
+): { events: WorkflowRunEvent[]; created: Extract<WorkflowRunEvent, { type: "run-created" }>; activeElapsedMs: number; budgetTimeMs: number | undefined } {
   const events = readRecordStreamStrict(recordPath, runId);
   const created = events.find(
     (e): e is Extract<WorkflowRunEvent, { type: "run-created" }> => e.type === "run-created",
@@ -494,7 +494,6 @@ async function resumeRunLocked(
         "interrupted before resuming.",
     );
   }
-  // D10 预算预检（场景 16：搁置不计，活跃已耗不退）
   const budgetTimeMs = options?.budgetTimeMs;
   const activeElapsedMs = computeActiveElapsedMs(events);
   if (budgetTimeMs !== undefined && budgetTimeMs > 0 && activeElapsedMs >= budgetTimeMs) {
@@ -504,6 +503,104 @@ async function resumeRunLocked(
         "time is). Recovery: start a new run, or rerun with a larger budgetTimeMs.",
     );
   }
+  return { events, created, activeElapsedMs, budgetTimeMs };
+}
+
+/**
+ * [resumeRunLocked 拆分] 档 1 补收帧（段 5 尾，running × agent-settled 合法自环
+ * ——补收事实入流，D1；幂等性：「run-resumed 落盘后、补收帧落盘前」崩溃 → 下次
+ * resume 重判档 1 重新补收，会话文件仍在即幂等；时间窗内 record 无 settled 帧
+ * 该 call 归重派集，无错档）。返回补收条数。
+ */
+async function dispatchTierCollectFrames(
+  runId: string,
+  tierPlan: readonly TierPlanEntry[],
+  dispatchSource: { runId: string; journalDir?: string },
+  now: () => number,
+): Promise<number> {
+  let collectCount = 0;
+  for (const entry of tierPlan) {
+    if (entry.decision.tier !== "collect" || entry.decision.collectedContent === undefined) continue;
+    await dispatchRunTrigger(dispatchSource, {
+      type: "agent-settled",
+      taskIndex: entry.taskIndex,
+      attempt: entry.lastAttempt,
+      outcome: "done",
+      durationMs: 0,
+      result: {
+        content: entry.decision.collectedContent,
+        durationMs: 0,
+        ...(entry.sessionFile !== undefined ? { sessionFile: entry.sessionFile } : {}),
+      },
+      ts: now(),
+    });
+    collectCount += 1;
+    logger.warn(
+      `[workflow] resume tier-1 collect: call #${entry.taskIndex} ("${entry.agentName}") result ` +
+        `recovered from member session file without token spend (runId=${runId})`,
+    );
+  }
+  return collectCount;
+}
+
+/**
+ * [resumeRunLocked 拆分] 段 6：重建聚合 + D10 预算标记 + worker 接管 + pending 信号。
+ * 补收帧落盘后重读全量流重建（帧的 seq 由 journal.append 分配——重读拿权威序）。
+ */
+function adoptResumedRun(
+  runId: string,
+  deps: LifecycleDeps,
+  created: Extract<WorkflowRunEvent, { type: "run-created" }>,
+  recordPath: string,
+  summary: {
+    events: readonly WorkflowRunEvent[];
+    activeElapsedMs: number;
+    budgetTimeMs: number | undefined;
+    resumedAt: number;
+    collectCount: number;
+    tierSummary: string | undefined;
+  },
+  now: () => number,
+): void {
+  noteRunResumedBudget(runId, summary.activeElapsedMs, summary.resumedAt);
+  const run = rebuildRunFromRecord(runId, created, readRecordStreamStrict(recordPath, runId));
+  const handlers = makeHandlers(run, deps);
+  // 剩余预算（D10）：budget −（累计活跃已耗 + 本段已跑）——搁置不计
+  const remainingBudgetMs = summary.budgetTimeMs && summary.budgetTimeMs > 0
+    ? Math.max(0, summary.budgetTimeMs - summary.activeElapsedMs - (now() - summary.resumedAt))
+    : undefined;
+  const timeBudgetTimer = remainingBudgetMs && remainingBudgetMs > 0 && deps.scheduleTimeBudget
+    ? deps.scheduleTimeBudget(runId, remainingBudgetMs)
+    : undefined;
+  const worker = deps.workerHost.start(run.spec, run.spec.args, handlers);
+  run.assignRuntime(new RunRuntime(worker, new AbortController(), timeBudgetTimer));
+  deps.runs.set(runId, run);
+  // RunStore port 契约保形（D1 后壳侧 save 为 no-op——core 调用点不改）
+  deps.store.save(run).catch((err: unknown) => {
+    logger.error(`[workflow] store.save failed (resumeRun): ${toErrorMessage(err)}`);
+  });
+  // pending-notifications 信号（runWorkflow 启动同款）：复活 = 该 run 对当前
+  // session 重新可见的进行中任务（run-resumed 转移表行「通知语义归 resume 编排」的落点）
+  deps.eventBus?.emit("pending:register", { id: runId, type: "workflow", name: run.spec.slug || run.spec.scriptName || runId });
+  deps.log?.("debug", "workflow:resume-run", "run resumed", {
+    runId,
+    replayCalls: summary.events.filter((e) => e.type === "agent-settled").length + summary.collectCount,
+    collectedCalls: summary.collectCount,
+    rescheduledBudgetMs: remainingBudgetMs,
+    tierSummary: summary.tierSummary,
+  });
+}
+
+/** 锁段内的编排主体（resumeRun 持锁后执行；锁释放归调用方 finally）。 */
+async function resumeRunLocked(
+  runId: string,
+  deps: LifecycleDeps,
+  recordPath: string,
+  options: ResumeRunOptions | undefined,
+  now: () => number,
+): Promise<string> {
+  // ── 2. 资格校验 ──
+  const { events, created, activeElapsedMs, budgetTimeMs } = assertResumeEligibility(runId, recordPath, options);
 
   // ── 3. D8 三档判定（重派集判档；档 1 补收候选）──
   const tierPlan = planResumeTiers(events, options?.readMemberSession ?? defaultSessionReader);
@@ -531,61 +628,12 @@ async function resumeRunLocked(
         "before retrying the resume.",
     );
   }
-  // 档 1 补收帧（running × agent-settled 合法自环——补收事实入流，D1；幂等性：
-  // 「run-resumed 落盘后、补收帧落盘前」崩溃 → 下次 resume 重判档 1 重新补收，
-  // 会话文件仍在即幂等；时间窗内 record 无 settled 帧该 call 归重派集，无错档）
-  let collectCount = 0;
-  for (const entry of tierPlan) {
-    if (entry.decision.tier !== "collect" || entry.decision.collectedContent === undefined) continue;
-    await dispatchRunTrigger(dispatchSource, {
-      type: "agent-settled",
-      taskIndex: entry.taskIndex,
-      attempt: entry.lastAttempt,
-      outcome: "done",
-      durationMs: 0,
-      result: {
-        content: entry.decision.collectedContent,
-        durationMs: 0,
-        ...(entry.sessionFile !== undefined ? { sessionFile: entry.sessionFile } : {}),
-      },
-      ts: now(),
-    });
-    collectCount += 1;
-    logger.warn(
-      `[workflow] resume tier-1 collect: call #${entry.taskIndex} ("${entry.agentName}") result ` +
-        `recovered from member session file without token spend (runId=${runId})`,
-    );
-  }
+  const collectCount = await dispatchTierCollectFrames(runId, tierPlan, dispatchSource, now);
 
   // ── 6. 重建聚合 + D10 预算标记 + worker 接管 + pending 信号 ──
-  noteRunResumedBudget(runId, activeElapsedMs, resumedAt);
-  // 补收帧落盘后重读全量流重建（帧的 seq 由 journal.append 分配——重读拿权威序）
-  const run = rebuildRunFromRecord(runId, created, readRecordStreamStrict(recordPath, runId));
-  const handlers = makeHandlers(run, deps);
-  // 剩余预算（D10）：budget −（累计活跃已耗 + 本段已跑）——搁置不计
-  const remainingBudgetMs = budgetTimeMs && budgetTimeMs > 0
-    ? Math.max(0, budgetTimeMs - activeElapsedMs - (now() - resumedAt))
-    : undefined;
-  const timeBudgetTimer = remainingBudgetMs && remainingBudgetMs > 0 && deps.scheduleTimeBudget
-    ? deps.scheduleTimeBudget(runId, remainingBudgetMs)
-    : undefined;
-  const worker = deps.workerHost.start(run.spec, run.spec.args, handlers);
-  run.assignRuntime(new RunRuntime(worker, new AbortController(), timeBudgetTimer));
-  deps.runs.set(runId, run);
-  // RunStore port 契约保形（D1 后壳侧 save 为 no-op——core 调用点不改）
-  deps.store.save(run).catch((err: unknown) => {
-    logger.error(`[workflow] store.save failed (resumeRun): ${toErrorMessage(err)}`);
-  });
-  // pending-notifications 信号（runWorkflow 启动同款）：复活 = 该 run 对当前
-  // session 重新可见的进行中任务（run-resumed 转移表行「通知语义归 resume 编排」的落点）
-  deps.eventBus?.emit("pending:register", { id: runId, type: "workflow", name: run.spec.slug || run.spec.scriptName || runId });
-  deps.log?.("debug", "workflow:resume-run", "run resumed", {
-    runId,
-    replayCalls: events.filter((e) => e.type === "agent-settled").length + collectCount,
-    collectedCalls: collectCount,
-    rescheduledBudgetMs: remainingBudgetMs,
-    tierSummary,
-  });
+  adoptResumedRun(runId, deps, created, recordPath, {
+    events, activeElapsedMs, budgetTimeMs, resumedAt, collectCount, tierSummary,
+  }, now);
   return runId;
 }
 
@@ -640,27 +688,12 @@ function summarizeTiers(plan: readonly TierPlanEntry[]): string | undefined {
  * 从 run-created 帧的 args 全文恢复（设计 §3.1 载荷表，旧格式帧回落 argsSummary
  * 尽力恢复——见 parseArgsSummary）。
  */
-function rebuildRunFromRecord(
-  runId: string,
-  created: Extract<WorkflowRunEvent, { type: "run-created" }>,
-  events: readonly WorkflowRunEvent[],
-): WorkflowRun {
-  const spec = {
-    scriptSource: created.scriptSource ?? "",
-    args: created.args ?? parseArgsSummary(created.argsSummary),
-    scriptName: created.workflowName,
-    // 锚定恢复：scriptPath 与 scriptSource/args 同为 run-created 帧恢复面（worker
-    // 沙箱 eval 模式无 __dirname，模板脚本靠它定位 _shared 族共享件）；旧格式帧
-    // 缺失回落空串，由模板脚本内建 fail-fast 拒绝（壳侧 foldRecordStreamToRun
-    // 同款恢复，两侧行为等价由测试锁定）
-    scriptPath: created.scriptPath ?? "",
-    ...(created.model !== undefined ? { model: created.model } : {}),
-  };
-  // call 重建中间形态（Trace 先建——traceNode 回链 D-10 引用共享；重派集成员
-  // 不建 node——dispatchAgentCall 重派时 trace.append 自然落位，重建悬空节点
-  // 只会与重派 append 重复）
-  type Draft = { agentName: string; phase?: string; startedAtIso: string; attempts: number; result?: AgentResult; settledTs?: number; opts?: AgentCallOpts };
-  const drafts = new Map<number, Draft>();
+/** call 重建中间形态（Trace 先建——traceNode 回链 D-10 引用共享；重派集成员不建 node——dispatchAgentCall 重派时 trace.append 自然落位，重建悬空节点只会与重派 append 重复）。 */
+type CallDraft = { agentName: string; phase?: string; startedAtIso: string; attempts: number; result?: AgentResult; settledTs?: number; opts?: AgentCallOpts };
+
+/** [rebuildRunFromRecord 拆分] 事件流 → call 重建中间形态（per taskIndex 聚合 started/settled 两帧）。 */
+function collectCallDrafts(runId: string, events: readonly WorkflowRunEvent[]): Map<number, CallDraft> {
+  const drafts = new Map<number, CallDraft>();
   for (const event of events) {
     if (event.type === "agent-started") {
       if (!drafts.has(event.taskIndex)) {
@@ -673,27 +706,41 @@ function rebuildRunFromRecord(
         });
       }
     } else if (event.type === "agent-settled") {
-      const existing = drafts.get(event.taskIndex);
-      if (existing === undefined) {
-        // [D12 宽松面留痕] settled 无 started 的残形态按 fold 自愈占位行处理
-        // （不拒绝——对齐 run-events fold 兜底语义；严格拒绝面限坏行/seq 断档/
-        // settled 缺 result 三项）。warn 出声：行级合法但配对异常 = 流被外部
-        // 篡改或写入器 bug 的观测线索，静默会让该形态不可诊断。
-        logger.warn(
-          `[workflow] resume: agent-settled frame for call #${event.taskIndex} has no matching ` +
-            `agent-started frame (runId=${runId}) — rebuilding as placeholder row "(unknown)" ` +
-            "(fold self-heal semantics, not rejected)",
-        );
-      }
-      const base: Draft =
-        existing ?? { agentName: "(unknown)", startedAtIso: new Date(event.ts).toISOString(), attempts: event.attempt };
-      base.attempts = event.attempt;
-      base.result = event.result;
-      base.settledTs = event.ts;
-      drafts.set(event.taskIndex, base);
+      applySettledFrameToDraft(runId, drafts, event);
     }
   }
-  const nodes: ExecutionTraceNode[] = [...drafts.entries()].map(([taskIndex, d]) => ({
+  return drafts;
+}
+
+/** [collectCallDrafts 拆分] agent-settled 帧归并（settled 无 started 的残形态按 fold 自愈占位行处理）。 */
+function applySettledFrameToDraft(
+  runId: string,
+  drafts: Map<number, CallDraft>,
+  event: Extract<WorkflowRunEvent, { type: "agent-settled" }>,
+): void {
+  const existing = drafts.get(event.taskIndex);
+  if (existing === undefined) {
+    // [D12 宽松面留痕] settled 无 started 的残形态按 fold 自愈占位行处理
+    // （不拒绝——对齐 run-events fold 兜底语义；严格拒绝面限坏行/seq 断档/
+    // settled 缺 result 三项）。warn 出声：行级合法但配对异常 = 流被外部
+    // 篡改或写入器 bug 的观测线索，静默会让该形态不可诊断。
+    logger.warn(
+      `[workflow] resume: agent-settled frame for call #${event.taskIndex} has no matching ` +
+        `agent-started frame (runId=${runId}) — rebuilding as placeholder row "(unknown)" ` +
+        "(fold self-heal semantics, not rejected)",
+    );
+  }
+  const base: CallDraft =
+    existing ?? { agentName: "(unknown)", startedAtIso: new Date(event.ts).toISOString(), attempts: event.attempt };
+  base.attempts = event.attempt;
+  base.result = event.result;
+  base.settledTs = event.ts;
+  drafts.set(event.taskIndex, base);
+}
+
+/** [rebuildRunFromRecord 拆分] 中间形态 → trace 节点（result.error 定 failed/completed 状态位）。 */
+function draftsToTraceNodes(drafts: Map<number, CallDraft>): ExecutionTraceNode[] {
+  return [...drafts.entries()].map(([taskIndex, d]) => ({
     stepIndex: taskIndex,
     agent: d.agentName,
     task: "",
@@ -705,8 +752,14 @@ function rebuildRunFromRecord(
     ...(d.result?.error !== undefined ? { error: d.result.error } : {}),
     ...(d.settledTs !== undefined ? { completedAt: new Date(d.settledTs).toISOString() } : {}),
   }));
-  const trace = Trace.fromArray(nodes);
-  const sharedNodes = new Map(trace.toArray().map((n) => [n.stepIndex, n]));
+}
+
+/** [rebuildRunFromRecord 拆分] 中间形态 → 回放集 AgentCall（done 终态直接构造）。 */
+function draftsToReplayCalls(
+  drafts: Map<number, CallDraft>,
+  sharedNodes: Map<number, ExecutionTraceNode>,
+  nodes: ExecutionTraceNode[],
+): Map<number, AgentCall> {
   const calls = new Map<number, AgentCall>();
   for (const [taskIndex, d] of drafts) {
     // 重派集成员（result 缺省）不建条目：worker 重放脚本到断点处重新发
@@ -728,6 +781,30 @@ function rebuildRunFromRecord(
     if (d.result.sessionId !== undefined) call.sessionId = d.result.sessionId;
     calls.set(taskIndex, call);
   }
+  return calls;
+}
+
+function rebuildRunFromRecord(
+  runId: string,
+  created: Extract<WorkflowRunEvent, { type: "run-created" }>,
+  events: readonly WorkflowRunEvent[],
+): WorkflowRun {
+  const spec = {
+    scriptSource: created.scriptSource ?? "",
+    args: created.args ?? parseArgsSummary(created.argsSummary),
+    scriptName: created.workflowName,
+    // 锚定恢复：scriptPath 与 scriptSource/args 同为 run-created 帧恢复面（worker
+    // 沙箱 eval 模式无 __dirname，模板脚本靠它定位 _shared 族共享件）；旧格式帧
+    // 缺失回落空串，由模板脚本内建 fail-fast 拒绝（壳侧 foldRecordStreamToRun
+    // 同款恢复，两侧行为等价由测试锁定）
+    scriptPath: created.scriptPath ?? "",
+    ...(created.model !== undefined ? { model: created.model } : {}),
+  };
+  const drafts = collectCallDrafts(runId, events);
+  const nodes = draftsToTraceNodes(drafts);
+  const trace = Trace.fromArray(nodes);
+  const sharedNodes = new Map(trace.toArray().map((n) => [n.stepIndex, n]));
+  const calls = draftsToReplayCalls(drafts, sharedNodes, nodes);
   return WorkflowRun.reconstruct(
     runId,
     spec,

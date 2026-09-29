@@ -525,37 +525,62 @@ export class ZcodeEngine implements EnginePort {
       if (ctx.signal?.aborted === true) return abortedAppServerAttempt(ctx);
       return parsedAppServerAttempt(task, r);
     } catch (err) {
-      if (ctx.signal?.aborted === true) return abortedAppServerAttempt(ctx);
-      // [P0-1 U2] 超时入口（D3 v1.1）：turn 已被 channel 判死 reject——升级判据不能
-      // 再挂在 turn 落定上（race 恒真，killChain 结构性不可达的 v1 击穿点），改以
-      // stop 应答三态裁决。await 链终局（非 fire-and-forget）：outcome 止损文案与
-      // 重试时序（D6，u-z4）都依赖链终局信号——止损完成前不合成终态。
-      if (err instanceof TurnTimeoutError) {
-        const stopPath = await this.appServerAbortChain(
-          rt,
-          turn,
-          () => currentSessionId,
-          sessionCreated,
-          { escalateOn: "stop-outcome" },
-        );
-        // [P0-1 U4] timeout 类（idle/ceiling 都算）是 D6 明文的可重试形态——结构化
-        // 标记（TurnTimeoutError 类型化判据，不经字符串匹配，D4 同精神）
-        return timeoutAppServerAttempt(err, currentSessionId, stopPath, { retried: opts.retried });
-      }
-      // [P0-1 U4] 连接崩溃收割形态（failAllTurns 的错误，D6 第二可重试形态）判据：
-      // 非 RPC error（服务端无明确应答——有应答即精确错误归类，非瞬时崩溃面）且
-      // conn 不存活。时序可靠性：catch 时刻紧随 onClose 收割，连接重建仅由
-      // conn.request 惰性触发——本链路中 runTurn finally 的 closeSession 对死连接
-      // 短路（channel 侧 !alive 守卫）、stop 只属 abort/超时入口（前者已被
-      // signal.aborted 短路、后者走上一分支）——此刻无 request 可重建，判据可靠。
-      if (!isAppServerRpcError(err) && !rt.conn.alive) {
-        return failedAppServerAttempt(err, currentSessionId, { retried: opts.retried, transient: "conn-closed" });
-      }
-      return failedAppServerAttempt(err, currentSessionId, { retried: opts.retried });
+      return await this.classifyAppServerTurnFailure(err, ctx, {
+        rt,
+        turn,
+        currentSessionId: () => currentSessionId,
+        sessionCreated,
+        retried: opts.retried,
+      });
     } finally {
       if (currentSessionId !== undefined) rt.activeSessions.delete(currentSessionId);
       if (ctx.signal !== undefined) ctx.signal.removeEventListener("abort", onAbort);
     }
+  }
+
+  /**
+   * [attemptAppServerTurn 拆分] 失败分流（catch 半边）：
+   * - signal 已 aborted → 中止终态收口；
+   * - [P0-1 U2] 超时入口（D3 v1.1）：turn 已被 channel 判死 reject——升级判据不能
+   *   再挂在 turn 落定上（race 恒真，killChain 结构性不可达的 v1 击穿点），改以
+   *   stop 应答三态裁决。await 链终局（非 fire-and-forget）：outcome 止损文案与
+   *   重试时序（D6，u-z4）都依赖链终局信号——止损完成前不合成终态。timeout 类
+   *   （idle/ceiling 都算）是 D6 明文的可重试形态——结构化标记
+   *   （TurnTimeoutError 类型化判据，不经字符串匹配，D4 同精神）；
+   * - [P0-1 U4] 连接崩溃收割形态（failAllTurns 的错误，D6 第二可重试形态）判据：
+   *   非 RPC error（服务端无明确应答——有应答即精确错误归类，非瞬时崩溃面）且
+   *   conn 不存活。时序可靠性：catch 时刻紧随 onClose 收割，连接重建仅由
+   *   conn.request 惰性触发——本链路中 runTurn finally 的 closeSession 对死连接
+   *   短路（channel 侧 !alive 守卫）、stop 只属 abort/超时入口（前者已被
+   *   signal.aborted 短路、后者走上一分支）——此刻无 request 可重建，判据可靠；
+   * - 其余 → 精确错误终态。
+   */
+  private async classifyAppServerTurnFailure(
+    err: unknown,
+    ctx: RunContext,
+    args: {
+      rt: AppServerRuntime;
+      turn: Promise<unknown>;
+      currentSessionId: () => string | undefined;
+      sessionCreated: Promise<void>;
+      retried: boolean | undefined;
+    },
+  ): Promise<AttemptResult> {
+    if (ctx.signal?.aborted === true) return abortedAppServerAttempt(ctx);
+    if (err instanceof TurnTimeoutError) {
+      const stopPath = await this.appServerAbortChain(
+        args.rt,
+        args.turn as never,
+        args.currentSessionId,
+        args.sessionCreated,
+        { escalateOn: "stop-outcome" },
+      );
+      return timeoutAppServerAttempt(err, args.currentSessionId(), stopPath, { retried: args.retried });
+    }
+    if (!isAppServerRpcError(err) && !args.rt.conn.alive) {
+      return failedAppServerAttempt(err, args.currentSessionId(), { retried: args.retried, transient: "conn-closed" });
+    }
+    return failedAppServerAttempt(err, args.currentSessionId(), { retried: args.retried });
   }
 
   /**

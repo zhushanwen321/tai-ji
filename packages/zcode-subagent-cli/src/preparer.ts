@@ -102,6 +102,13 @@ function readSourceConfig(absPath: string): SourceConfig {
   const orderSrc = (parsed["config"] as Record<string, unknown> | undefined)?.["providerOrder"];
   const conf: SourceConfig = { providers: new Map(), order: strArray(orderSrc) };
   if (!Array.isArray(providerRules)) return conf;
+  collectProviderRules(providerRules, conf);
+  return conf;
+}
+
+/** [readSourceConfig 拆分] providerRules 逐条归并（id 键守卫 + access/personalModelIds
+ * 形态窄化，非法条跳过）。 */
+function collectProviderRules(providerRules: readonly unknown[], conf: SourceConfig): void {
   for (const rule of providerRules) {
     if (!isRecord(rule)) continue;
     const id = rule["providerId"];
@@ -116,7 +123,6 @@ function readSourceConfig(absPath: string): SourceConfig {
       models: personal.length > 0 ? personal : strArray(cfg["modelOrder"]),
     });
   }
-  return conf;
 }
 
 // ============================================================
@@ -242,6 +248,12 @@ export function resolveZcodeMinimalReasoningLevel(modelRef: string, sources?: Zc
       ? rules["modelConfigRules"]["modelRules"]
       : undefined;
   if (!Array.isArray(modelRules)) return undefined;
+  return lastMatchingReasoningValues(modelRules, modelId)?.[0];
+}
+
+/** [resolveZcodeMinimalReasoningLevel 拆分] 末个匹配 modelMatch 的
+ * reasoningLevel.values（regex 编译失败/无值域的条目跳过，后写覆盖前写）。 */
+function lastMatchingReasoningValues(modelRules: readonly unknown[], modelId: string): string[] | undefined {
   let values: string[] | undefined;
   for (const rule of modelRules) {
     if (!isRecord(rule)) continue;
@@ -259,7 +271,7 @@ export function resolveZcodeMinimalReasoningLevel(modelRef: string, sources?: Zc
     const vals = isRecord(level) ? strArray(level["values"]) : [];
     if (vals.length > 0) values = vals;
   }
-  return values?.[0];
+  return values;
 }
 
 /**

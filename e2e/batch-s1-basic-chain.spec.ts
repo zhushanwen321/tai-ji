@@ -225,6 +225,214 @@ function attachConsoleCapture(page: Page): { all: string[]; errors: string[] } {
   return { all, errors }
 }
 
+/**
+ * [S1 test 拆分] W1 介质锚 ①（journal 落盘）+ 主会话 JSONL 落盘 + notifyDone 送达等待。
+ * 失败路径 diag 与拆出前同构（journal-missing / notify-missing 两形态）。
+ */
+async function settleS1Anchors(
+  dataDir: string,
+  consoleCap: { errors: string[] },
+): Promise<{ journalFile: string; runId: string; sessionFile: string }> {
+  const agentDir = path.join(dataDir, 'agent')
+  const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
+  if (!journalFound) {
+    writeDiag('batch-s1-journal-missing.json', {
+      agentTree: fs.existsSync(agentDir) ? fs.readdirSync(agentDir) : [],
+      runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
+      piLogsTail: readPiLogs(dataDir).slice(-3000),
+      consoleErrors: consoleCap.errors,
+    })
+  }
+  expect(journalFound, `run journal (wf-*.events.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <agentDir>/sessions/**/workflow-state/`).toBe(true)
+  const journalFile = listFilesRecursive(agentDir, '.events.jsonl')[0]
+  const runId = path.basename(journalFile).replace(/\.events\.jsonl$/, '')
+  expect(runId.startsWith('wf-'), `journal 文件名应为 <runId>.events.jsonl 且 runId 带 wf- 前缀，收到 "${runId}"`).toBe(true)
+
+  // ── 通知等待：notifyDone 送达 entry（customType=workflow-result，details.notifyId=wf-done:<runId>） ──
+  const sessionFileFound = await waitUntil(
+    () => listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').some((f) => {
+      try { return fs.readFileSync(f, 'utf8').includes(MAIN_MARKER) } catch { return false }
+    }),
+    JSONL_FLUSH_TIMEOUT_MS,
+  )
+  expect(sessionFileFound, '主会话 JSONL 应已落盘（含 MAIN 哨兵）').toBe(true)
+  const sessionFile = listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl')
+    .find((f) => fs.readFileSync(f, 'utf8').includes(MAIN_MARKER))!
+
+  const notifyId = `wf-done:${runId}`
+  const notifyArrived = await waitUntil(
+    () => fs.readFileSync(sessionFile, 'utf8').includes(notifyId),
+    NOTIFY_TIMEOUT_MS,
+  )
+  const sessionText = fs.readFileSync(sessionFile, 'utf8')
+  if (!notifyArrived) {
+    const frames = readJournalFrames(journalFile).map((f) => f['type'])
+    writeDiag('batch-s1-notify-missing.json', {
+      journalEventTypes: frames,
+      sessionBytes: sessionText.length,
+      runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
+      piLogsTail: readPiLogs(dataDir).slice(-3000),
+      consoleErrors: consoleCap.errors,
+    })
+  }
+  expect(notifyArrived, `notifyDone（${notifyId}）应在 ${NOTIFY_TIMEOUT_MS}ms 内送达主会话 JSONL（journal 事件序见 diag）`).toBe(true)
+  return { journalFile, runId, sessionFile }
+}
+
+
+/** [S1 test 拆分] 断言 N1（一条收齐，三通道口径）：送达恰 1 + ledger/ack 各恰 1。
+ * W1 通知链在会话 JSONL 落三类含 wf-done:<runId> 的 entry，通道与 entry type 均不同：
+ * ①送达 = type custom_message + customType "workflow-result"（u9 外部通道设计，
+ *   workflow-notify.ts 以 deliveryCustomType=WORKFLOW_RESULT_CUSTOM_TYPE record；
+ *   权威消费面 collectDeliveredNotifyIds 只认此形态，键在顶层 details.notifyId）
+ * ②ledger 落账 = type custom + "subagent-bg-notify-ledger"（键在 data.notifyId）
+ * ③ack 销账 = type custom + "subagent-bg-notify-ack"
+ * 「notifyId 字面出现次数」结构性 = 3 ≠ 投递次数——送达恰 1（单次投递）
+ * + ledger/ack 各恰 1（at-least-once 幂等闭环，BATCH-06 口径）。 */
+function assertS1NotifyChannels(
+  sessionFile: string,
+  runId: string,
+  journalFile: string,
+  dataDir: string,
+): void {
+// ── 断言 N1（一条收齐，三通道口径）：送达恰 1 + ledger/ack 各恰 1 ──
+// W1 通知链在会话 JSONL 落三类含 wf-done:<runId> 的 entry，通道与 entry type 均不同：
+// ①送达 = type custom_message + customType "workflow-result"（u9 外部通道设计，
+//   workflow-notify.ts 以 deliveryCustomType=WORKFLOW_RESULT_CUSTOM_TYPE record；
+//   权威消费面 collectDeliveredNotifyIds 只认此形态，键在顶层 details.notifyId）
+// ②ledger 落账 = type custom + "subagent-bg-notify-ledger"（键在 data.notifyId）
+// ③ack 销账 = type custom + "subagent-bg-notify-ack"
+// 「notifyId 字面出现次数」结构性 = 3 ≠ 投递次数——送达恰 1（单次投递）
+// + ledger/ack 各恰 1（at-least-once 幂等闭环，BATCH-06 口径）。
+const deliveredWorkflowResults = extractCustomMessageEntries(sessionFile, 'workflow-result').filter(
+  (e) => ((e['details'] ?? {}) as Record<string, unknown>)['notifyId'] === notifyId,
+)
+expect(
+  deliveredWorkflowResults.length,
+  'notifyDone 送达通道（custom_message × workflow-result）应恰 1 条（幂等键单次投递）',
+).toBe(1)
+const countNotifyEntries = (customType: string): number =>
+  extractCustomEntries(sessionFile, customType)
+    .filter((d) => JSON.stringify(d).includes(notifyId)).length
+expect(
+  countNotifyEntries('subagent-bg-notify-ledger'),
+  'notifyDone ledger 落账应恰 1 条（at-least-once 幂等闭环——落账/销账各恰一次，BATCH-06 口径）',
+).toBe(1)
+// ack 销账等回执扫描的 agent_settled 边沿（通知 triggerTurn 唤醒的 turn 结算后
+// 才写）——先等待再计数（r3 实测：送达后立即断言 Received 0）
+const ackArrived = await waitUntil(
+  () => countNotifyEntries('subagent-bg-notify-ack') > 0,
+  ACK_TIMEOUT_MS,
+)
+if (!ackArrived) {
+  writeDiag('batch-s1-ack-missing.json', {
+    sessionTail: fs.readFileSync(sessionFile, 'utf8').slice(-4000),
+    runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
+    journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
+  })
+}
+expect(ackArrived, `notifyDone ack 销账应在 turn 结算后落盘（agent_settled 边沿，${ACK_TIMEOUT_MS}ms 窗）`).toBe(true)
+expect(
+  countNotifyEntries('subagent-bg-notify-ack'),
+  'notifyDone ack 销账应恰 1 条（at-least-once 幂等闭环——落账/销账各恰一次，BATCH-06 口径）',
+).toBe(1)
+
+}
+
+/** [S1 test 拆分] 断言 N2（S1 原始口径）：status=ok / results=2 / taskIndex 0,1 / Agent Trace 2 条均 ok。 */
+function assertS1DeliveryContent(sessionFile: string): void {
+// ── 断言 N2（S1 原始口径）：status=ok / results=2 / taskIndex 0,1 / Agent Trace 2 条均 ok ──
+const deliveries = extractCustomMessageEntries(sessionFile, 'workflow-result')
+expect(deliveries.length, 'workflow-result 送达 entry 应恰 1 条').toBe(1)
+const content = String(deliveries[0]['content'] ?? '')
+// Script Result 段（fan-out 返回 {status, results:[...]}）从通知 content 提取
+const scriptResultMatch = content.match(/--- Script Result ---\n([\s\S]*?)(\n\n--- Agent Trace ---|$)/)
+expect(scriptResultMatch, '通知 content 应含 Script Result 段（fan-out 返回值）').not.toBeNull()
+let scriptResult: { status?: string; results?: { taskIndex?: number; status?: string; error?: string }[] } = {}
+try {
+  scriptResult = JSON.parse((scriptResultMatch![1] || '').trim()) as typeof scriptResult
+} catch {
+  writeDiag('batch-s1-script-result-unparsable.json', { contentHead: content.slice(0, 2000) })
+  throw new Error('Script Result 段应为合法 JSON（fan-out 返回 {status, results}）')
+}
+expect(scriptResult.status, `批收口 status 应为 ok（收到 "${String(scriptResult.status)}"）`).toBe('ok')
+expect(scriptResult.results?.length, 'results 应恰 2 条（双任务并行收齐）').toBe(2)
+const taskIndexes = (scriptResult.results ?? []).map((r) => r.taskIndex).sort()
+expect(taskIndexes, 'results[].taskIndex 应为 [0,1]（派发序归因）').toEqual([0, 1])
+for (const r of scriptResult.results ?? []) {
+  expect(r.status, `成员 taskIndex=${String(r.taskIndex)} 应 ok（partial/failed 见 error 字段）`).toBe('ok')
+}
+// Agent Trace 段：每成员一行 `[stepIndex] agent: status`（workflow-notify.ts
+// buildDoneNotifyContent，节点成功态词 = completed——r5 diag 实锤）。段提取必须
+// 在 Artifacts 段前截断（`[\s\S]*$` 贪婪会把 Artifacts 3 行吞进 trace——r4/r5
+// 「5 行」的真相）；原始口径「2 条均 ok」语义化 = stepIndex 0/1 各有一行成功轨迹。
+const traceMatch = content.match(/--- Agent Trace ---\n([\s\S]*?)(?:\n--- Artifacts ---|$)/)
+expect(traceMatch, '通知 content 应含 Agent Trace 段').not.toBeNull()
+const traceLines = (traceMatch![1] || '').trim().split('\n').filter((l) => l.trim() !== '')
+const okSteps = new Set(
+  traceLines
+    .filter((l) => /: completed$/.test(l.trim()))
+    .map((l) => (l.trim().match(/^\[(\d+)\]/) ?? [])[1]),
+)
+if (!(okSteps.has('0') && okSteps.has('1'))) {
+  writeDiag('batch-s1-trace-anomaly.json', { traceLines, contentHead: content.slice(0, 3000) })
+}
+expect(
+  okSteps.has('0') && okSteps.has('1'),
+  `Agent Trace 应覆盖双成员且均 completed（trace ${traceLines.length} 行，逐行见 diag）`,
+).toBe(true)
+
+}
+
+/** [S1 test 拆分] 断言 M1（journal 帧序）+ M2（v2 条目两条/实体）+ M4（死字节）+ record 事件文件。 */
+function assertS1JournalAndEntryContract(
+  sessionFile: string,
+  journalFile: string,
+  runId: string,
+  dataDir: string,
+): void {
+  const agentDir = path.join(dataDir, 'agent')
+// ── 断言 M1（journal）：首帧 run-created / run-settled 恰 1 且 completed / seq 严格递增 ──
+const frames = readJournalFrames(journalFile)
+expect(frames.length, 'journal 应至少有 run-created 与 run-settled 两帧').toBeGreaterThanOrEqual(2)
+expect(frames[0]?.['type'], 'journal 首帧应为 run-created（journal 首帧行为）').toBe('run-created')
+const settledFrames = frames.filter((f) => f['type'] === 'run-settled')
+expect(settledFrames.length, 'run-settled 应恰 1 帧（一个 run 恰好一帧）').toBe(1)
+expect(settledFrames[0]?.['outcome'], 'run-settled outcome 应为 completed').toBe('completed')
+const seqs = frames.map((f) => Number(f['seq']))
+const strictlyIncreasing = seqs.every((s, i) => i === 0 || s > seqs[i - 1])
+expect(strictlyIncreasing, 'journal seq 应严格递增（行级单调序号，W1 D1 信封契约）').toBe(true)
+
+// ── 断言 M2（v2 条目两条/实体）+ M4（死字节）+ M5（journal 胜出一致性锚） ──
+const wfRegistered = extractCustomEntries(sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'registered')
+const wfSettled = extractCustomEntries(sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'settled')
+expect(wfRegistered.length, 'workflow-record v2 registered 条目应恰 1 条（每 run 注册一条）').toBe(1)
+expect(wfSettled.length, 'workflow-record v2 settled 条目应恰 1 条（每 run 终态一条）').toBe(1)
+expect(wfRegistered[0]['runId'], 'registered 条目 runId 应与 journal 文件名一致').toBe(runId)
+expect(wfSettled[0]['outcome'], 'settled 条目 outcome 应与 journal run-settled outcome 一致（journal 唯一事实源的终态投影面）')
+  .toBe(settledFrames[0]['outcome'])
+
+const saRegistered = extractCustomEntries(sessionFile, 'subagent-record').filter((d) => d['v'] === 2 && d['kind'] === 'registered')
+const saSettled = extractCustomEntries(sessionFile, 'subagent-record').filter((d) => d['v'] === 2 && d['kind'] === 'settled')
+expect(saRegistered.length, 'subagent-record v2 registered 条目应恰 2 条（每成员一条）').toBe(2)
+expect(saSettled.length, 'subagent-record v2 settled 条目应恰 2 条（每成员一条）').toBe(2)
+
+// W1 死字节（场景 1 grep 断言）：两族条目行不含 v1 时代的全量快照字段
+const recordEntryLines = parseJsonlLines(sessionFile).entries
+  .filter((e) => e['type'] === 'custom' && (e['customType'] === 'workflow-record' || e['customType'] === 'subagent-record'))
+expect(recordEntryLines.length, '两族 record entry 总行数应为 6（run 2 + 成员 4）').toBe(6)
+for (const line of recordEntryLines) {
+  const serialized = JSON.stringify(line)
+  expect(serialized.includes('eventLog'), 'v2 条目不应含 eventLog 死字节（W1 停写断言）').toBe(false)
+  expect(serialized.includes('displayItems'), 'v2 条目不应含 displayItems 死字节（W1 停写断言）').toBe(false)
+}
+
+// record 事件文件存在性（record 侧新介质）：每成员 <sa-id>.events
+const recordEvents = listFilesRecursive(path.join(agentDir, 'subagents'), '.events')
+expect(recordEvents.length, 'record 事件文件族应恰 2 个（<recordsDir>/<sa-id>.events，每成员一个）').toBe(2)
+
+}
+
 // ── S1 主用例 ────────────────────────────────────────────────────────────
 
 test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + W1 新介质锚定', async ({ }, testInfo) => {
@@ -283,173 +491,13 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
     expect(mainDone, `主 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内 message.complete（真实 LLM 未调 subagents 工具？查 diag）`).toBe(true)
     await page.screenshot({ path: testInfo.outputPath('s1-dispatched.png'), fullPage: true })
 
-    // ── W1 介质锚 ①：journal 文件出现（runId = wf-<ts>-<rand>，文件名去 .events.jsonl 后缀） ──
-    const agentDir = path.join(dataDir, 'agent')
-    const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
-    if (!journalFound) {
-      writeDiag('batch-s1-journal-missing.json', {
-        agentTree: fs.existsSync(agentDir) ? fs.readdirSync(agentDir) : [],
-        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-        piLogsTail: readPiLogs(dataDir).slice(-3000),
-        consoleErrors: consoleCap.errors,
-      })
-    }
-    expect(journalFound, `run journal (wf-*.events.jsonl) 应在 ${JOURNAL_TIMEOUT_MS}ms 内落盘于 <agentDir>/sessions/**/workflow-state/`).toBe(true)
-    const journalFile = listFilesRecursive(agentDir, '.events.jsonl')[0]
-    const runId = path.basename(journalFile).replace(/\.events\.jsonl$/, '')
-    expect(runId.startsWith('wf-'), `journal 文件名应为 <runId>.events.jsonl 且 runId 带 wf- 前缀，收到 "${runId}"`).toBe(true)
-
-    // ── 通知等待：notifyDone 送达 entry（customType=workflow-result，details.notifyId=wf-done:<runId>） ──
-    const sessionFileFound = await waitUntil(
-      () => listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').some((f) => {
-        try { return fs.readFileSync(f, 'utf8').includes(MAIN_MARKER) } catch { return false }
-      }),
-      JSONL_FLUSH_TIMEOUT_MS,
-    )
-    expect(sessionFileFound, '主会话 JSONL 应已落盘（含 MAIN 哨兵）').toBe(true)
-    const sessionFile = listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl')
-      .find((f) => fs.readFileSync(f, 'utf8').includes(MAIN_MARKER))!
-
-    const notifyId = `wf-done:${runId}`
-    const notifyArrived = await waitUntil(
-      () => fs.readFileSync(sessionFile, 'utf8').includes(notifyId),
-      NOTIFY_TIMEOUT_MS,
-    )
-    const sessionText = fs.readFileSync(sessionFile, 'utf8')
-    if (!notifyArrived) {
-      const frames = readJournalFrames(journalFile).map((f) => f['type'])
-      writeDiag('batch-s1-notify-missing.json', {
-        journalEventTypes: frames,
-        sessionBytes: sessionText.length,
-        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-        piLogsTail: readPiLogs(dataDir).slice(-3000),
-        consoleErrors: consoleCap.errors,
-      })
-    }
-    expect(notifyArrived, `notifyDone（${notifyId}）应在 ${NOTIFY_TIMEOUT_MS}ms 内送达主会话 JSONL（journal 事件序见 diag）`).toBe(true)
+    // ── W1 介质锚 ① + 通知等待（拆出 settleS1Anchors）──
+    const { journalFile, runId, sessionFile } = await settleS1Anchors(dataDir, consoleCap)
     await page.screenshot({ path: testInfo.outputPath('s1-notify-arrived.png'), fullPage: true })
 
-    // ── 断言 N1（一条收齐，三通道口径）：送达恰 1 + ledger/ack 各恰 1 ──
-    // W1 通知链在会话 JSONL 落三类含 wf-done:<runId> 的 entry，通道与 entry type 均不同：
-    // ①送达 = type custom_message + customType "workflow-result"（u9 外部通道设计，
-    //   workflow-notify.ts 以 deliveryCustomType=WORKFLOW_RESULT_CUSTOM_TYPE record；
-    //   权威消费面 collectDeliveredNotifyIds 只认此形态，键在顶层 details.notifyId）
-    // ②ledger 落账 = type custom + "subagent-bg-notify-ledger"（键在 data.notifyId）
-    // ③ack 销账 = type custom + "subagent-bg-notify-ack"
-    // 「notifyId 字面出现次数」结构性 = 3 ≠ 投递次数——送达恰 1（单次投递）
-    // + ledger/ack 各恰 1（at-least-once 幂等闭环，BATCH-06 口径）。
-    const deliveredWorkflowResults = extractCustomMessageEntries(sessionFile, 'workflow-result').filter(
-      (e) => ((e['details'] ?? {}) as Record<string, unknown>)['notifyId'] === notifyId,
-    )
-    expect(
-      deliveredWorkflowResults.length,
-      'notifyDone 送达通道（custom_message × workflow-result）应恰 1 条（幂等键单次投递）',
-    ).toBe(1)
-    const countNotifyEntries = (customType: string): number =>
-      extractCustomEntries(sessionFile, customType)
-        .filter((d) => JSON.stringify(d).includes(notifyId)).length
-    expect(
-      countNotifyEntries('subagent-bg-notify-ledger'),
-      'notifyDone ledger 落账应恰 1 条（at-least-once 幂等闭环——落账/销账各恰一次，BATCH-06 口径）',
-    ).toBe(1)
-    // ack 销账等回执扫描的 agent_settled 边沿（通知 triggerTurn 唤醒的 turn 结算后
-    // 才写）——先等待再计数（r3 实测：送达后立即断言 Received 0）
-    const ackArrived = await waitUntil(
-      () => countNotifyEntries('subagent-bg-notify-ack') > 0,
-      ACK_TIMEOUT_MS,
-    )
-    if (!ackArrived) {
-      writeDiag('batch-s1-ack-missing.json', {
-        sessionTail: fs.readFileSync(sessionFile, 'utf8').slice(-4000),
-        runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
-        journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
-      })
-    }
-    expect(ackArrived, `notifyDone ack 销账应在 turn 结算后落盘（agent_settled 边沿，${ACK_TIMEOUT_MS}ms 窗）`).toBe(true)
-    expect(
-      countNotifyEntries('subagent-bg-notify-ack'),
-      'notifyDone ack 销账应恰 1 条（at-least-once 幂等闭环——落账/销账各恰一次，BATCH-06 口径）',
-    ).toBe(1)
-
-    // ── 断言 N2（S1 原始口径）：status=ok / results=2 / taskIndex 0,1 / Agent Trace 2 条均 ok ──
-    const deliveries = extractCustomMessageEntries(sessionFile, 'workflow-result')
-    expect(deliveries.length, 'workflow-result 送达 entry 应恰 1 条').toBe(1)
-    const content = String(deliveries[0]['content'] ?? '')
-    // Script Result 段（fan-out 返回 {status, results:[...]}）从通知 content 提取
-    const scriptResultMatch = content.match(/--- Script Result ---\n([\s\S]*?)(\n\n--- Agent Trace ---|$)/)
-    expect(scriptResultMatch, '通知 content 应含 Script Result 段（fan-out 返回值）').not.toBeNull()
-    let scriptResult: { status?: string; results?: { taskIndex?: number; status?: string; error?: string }[] } = {}
-    try {
-      scriptResult = JSON.parse((scriptResultMatch![1] || '').trim()) as typeof scriptResult
-    } catch {
-      writeDiag('batch-s1-script-result-unparsable.json', { contentHead: content.slice(0, 2000) })
-      throw new Error('Script Result 段应为合法 JSON（fan-out 返回 {status, results}）')
-    }
-    expect(scriptResult.status, `批收口 status 应为 ok（收到 "${String(scriptResult.status)}"）`).toBe('ok')
-    expect(scriptResult.results?.length, 'results 应恰 2 条（双任务并行收齐）').toBe(2)
-    const taskIndexes = (scriptResult.results ?? []).map((r) => r.taskIndex).sort()
-    expect(taskIndexes, 'results[].taskIndex 应为 [0,1]（派发序归因）').toEqual([0, 1])
-    for (const r of scriptResult.results ?? []) {
-      expect(r.status, `成员 taskIndex=${String(r.taskIndex)} 应 ok（partial/failed 见 error 字段）`).toBe('ok')
-    }
-    // Agent Trace 段：每成员一行 `[stepIndex] agent: status`（workflow-notify.ts
-    // buildDoneNotifyContent，节点成功态词 = completed——r5 diag 实锤）。段提取必须
-    // 在 Artifacts 段前截断（`[\s\S]*$` 贪婪会把 Artifacts 3 行吞进 trace——r4/r5
-    // 「5 行」的真相）；原始口径「2 条均 ok」语义化 = stepIndex 0/1 各有一行成功轨迹。
-    const traceMatch = content.match(/--- Agent Trace ---\n([\s\S]*?)(?:\n--- Artifacts ---|$)/)
-    expect(traceMatch, '通知 content 应含 Agent Trace 段').not.toBeNull()
-    const traceLines = (traceMatch![1] || '').trim().split('\n').filter((l) => l.trim() !== '')
-    const okSteps = new Set(
-      traceLines
-        .filter((l) => /: completed$/.test(l.trim()))
-        .map((l) => (l.trim().match(/^\[(\d+)\]/) ?? [])[1]),
-    )
-    if (!(okSteps.has('0') && okSteps.has('1'))) {
-      writeDiag('batch-s1-trace-anomaly.json', { traceLines, contentHead: content.slice(0, 3000) })
-    }
-    expect(
-      okSteps.has('0') && okSteps.has('1'),
-      `Agent Trace 应覆盖双成员且均 completed（trace ${traceLines.length} 行，逐行见 diag）`,
-    ).toBe(true)
-
-    // ── 断言 M1（journal）：首帧 run-created / run-settled 恰 1 且 completed / seq 严格递增 ──
-    const frames = readJournalFrames(journalFile)
-    expect(frames.length, 'journal 应至少有 run-created 与 run-settled 两帧').toBeGreaterThanOrEqual(2)
-    expect(frames[0]?.['type'], 'journal 首帧应为 run-created（journal 首帧行为）').toBe('run-created')
-    const settledFrames = frames.filter((f) => f['type'] === 'run-settled')
-    expect(settledFrames.length, 'run-settled 应恰 1 帧（一个 run 恰好一帧）').toBe(1)
-    expect(settledFrames[0]?.['outcome'], 'run-settled outcome 应为 completed').toBe('completed')
-    const seqs = frames.map((f) => Number(f['seq']))
-    const strictlyIncreasing = seqs.every((s, i) => i === 0 || s > seqs[i - 1])
-    expect(strictlyIncreasing, 'journal seq 应严格递增（行级单调序号，W1 D1 信封契约）').toBe(true)
-
-    // ── 断言 M2（v2 条目两条/实体）+ M4（死字节）+ M5（journal 胜出一致性锚） ──
-    const wfRegistered = extractCustomEntries(sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'registered')
-    const wfSettled = extractCustomEntries(sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'settled')
-    expect(wfRegistered.length, 'workflow-record v2 registered 条目应恰 1 条（每 run 注册一条）').toBe(1)
-    expect(wfSettled.length, 'workflow-record v2 settled 条目应恰 1 条（每 run 终态一条）').toBe(1)
-    expect(wfRegistered[0]['runId'], 'registered 条目 runId 应与 journal 文件名一致').toBe(runId)
-    expect(wfSettled[0]['outcome'], 'settled 条目 outcome 应与 journal run-settled outcome 一致（journal 唯一事实源的终态投影面）')
-      .toBe(settledFrames[0]['outcome'])
-
-    const saRegistered = extractCustomEntries(sessionFile, 'subagent-record').filter((d) => d['v'] === 2 && d['kind'] === 'registered')
-    const saSettled = extractCustomEntries(sessionFile, 'subagent-record').filter((d) => d['v'] === 2 && d['kind'] === 'settled')
-    expect(saRegistered.length, 'subagent-record v2 registered 条目应恰 2 条（每成员一条）').toBe(2)
-    expect(saSettled.length, 'subagent-record v2 settled 条目应恰 2 条（每成员一条）').toBe(2)
-
-    // W1 死字节（场景 1 grep 断言）：两族条目行不含 v1 时代的全量快照字段
-    const recordEntryLines = parseJsonlLines(sessionFile).entries
-      .filter((e) => e['type'] === 'custom' && (e['customType'] === 'workflow-record' || e['customType'] === 'subagent-record'))
-    expect(recordEntryLines.length, '两族 record entry 总行数应为 6（run 2 + 成员 4）').toBe(6)
-    for (const line of recordEntryLines) {
-      const serialized = JSON.stringify(line)
-      expect(serialized.includes('eventLog'), 'v2 条目不应含 eventLog 死字节（W1 停写断言）').toBe(false)
-      expect(serialized.includes('displayItems'), 'v2 条目不应含 displayItems 死字节（W1 停写断言）').toBe(false)
-    }
-
-    // record 事件文件存在性（record 侧新介质）：每成员 <sa-id>.events
-    const recordEvents = listFilesRecursive(path.join(agentDir, 'subagents'), '.events')
-    expect(recordEvents.length, 'record 事件文件族应恰 2 个（<recordsDir>/<sa-id>.events，每成员一个）').toBe(2)
+    assertS1NotifyChannels(sessionFile, runId, journalFile, dataDir)
+    assertS1DeliveryContent(sessionFile)
+    assertS1JournalAndEntryContract(sessionFile, journalFile, runId, dataDir)
 
     if (consoleCap.errors.length > 0) {
       writeDiag('batch-s1-console-errors.json', { errors: consoleCap.errors.slice(-50) })

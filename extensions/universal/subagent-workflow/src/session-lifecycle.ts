@@ -182,14 +182,23 @@ function extractRunReferencesFromLine(line: string, out: Set<string>): void {
   if (typeof data !== "object" || data === null) return;
   const d = data as { v?: unknown; kind?: unknown; runId?: unknown; snapshot?: unknown };
   if (entry.customType === "workflow-record") {
-    if (d.kind === "registered" && typeof d.runId === "string" && d.runId !== "") {
-      out.add(d.runId);
-    } else if (d.v === 1 && typeof d.snapshot === "object" && d.snapshot !== null) {
-      const snapRunId = (d.snapshot as { runId?: unknown }).runId;
-      if (typeof snapRunId === "string" && snapRunId !== "") out.add(snapRunId);
-    }
+    extractWorkflowRecordRunReference(d, out);
   } else if (entry.customType === "workflow-state-link") {
     if (typeof d.runId === "string" && d.runId !== "") out.add(d.runId);
+  }
+}
+
+/** [extractRunReferencesFromLine 拆分] workflow-record 条目两代引用提取
+ * （v2 registered 的 runId / v1 快照内 runId）。 */
+function extractWorkflowRecordRunReference(
+  d: { v?: unknown; kind?: unknown; runId?: unknown; snapshot?: unknown },
+  out: Set<string>,
+): void {
+  if (d.kind === "registered" && typeof d.runId === "string" && d.runId !== "") {
+    out.add(d.runId);
+  } else if (d.v === 1 && typeof d.snapshot === "object" && d.snapshot !== null) {
+    const snapRunId = (d.snapshot as { runId?: unknown }).runId;
+    if (typeof snapRunId === "string" && snapRunId !== "") out.add(snapRunId);
   }
 }
 

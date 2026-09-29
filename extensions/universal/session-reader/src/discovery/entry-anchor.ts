@@ -62,14 +62,25 @@ function zcodeAnchorOfEntry(entry: Entry, saId: string): ZcodeAnchor | undefined
   if (typeof data !== 'object' || data === null) return undefined
   const d = data as Record<string, unknown>
   if (d.id !== saId) return undefined
+  if (!isAnchorEligibleRecordEntryVersion(d)) return undefined
+  return extractZcodeSessionRefAnchor(d.engineHandle)
+}
+
+/** [zcodeAnchorOfEntry 拆分] 条目形态判别：v1 全量快照 或 v2 终态条（registered
+ * 条目不携带 engineHandle，且设计 D1 裁决「sessionRef 双键取自终态条」；kind
+ * 非法 = unknown-kind 跳过）。 */
+function isAnchorEligibleRecordEntryVersion(d: Record<string, unknown>): boolean {
   if (d.v === SUBAGENT_RECORD_ENTRY_V2) {
-    if (d.kind !== 'settled') return undefined
-  } else if (d.v !== 1) {
-    return undefined
+    return d.kind === 'settled'
   }
-  const handle: unknown = d.engineHandle
-  if (typeof handle !== 'object' || handle === null) return undefined
-  const ref: unknown = (handle as Record<string, unknown>).sessionRef
+  return d.v === 1
+}
+
+/** [zcodeAnchorOfEntry 拆分] engineHandle.sessionRef 双键提取（sessionId/dbPath
+ * 均非空 string 才命中；pi record 的 sessionRef 无 dbPath → 天然不命中）。 */
+function extractZcodeSessionRefAnchor(engineHandle: unknown): ZcodeAnchor | undefined {
+  if (typeof engineHandle !== 'object' || engineHandle === null) return undefined
+  const ref: unknown = (engineHandle as Record<string, unknown>).sessionRef
   if (typeof ref !== 'object' || ref === null) return undefined
   const r = ref as Record<string, unknown>
   const { sessionId, dbPath } = r

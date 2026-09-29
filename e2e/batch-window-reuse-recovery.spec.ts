@@ -402,6 +402,67 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
   }
 })
 
+
+/**
+ * [A8 test 拆分] record 介质面断言（W1 权威介质口径——「同一 record 多轮」的最硬
+ * 证据）：① 主 session 文件的 subagent-record v2 条目 registered 恰 1 + settled 恰 1
+ * （origin=workflow + parentRunId=本 run；第二次调用若新建成员会有第二对条目）。
+ * ② record 事件文件（<recordsDir>/<sa-id>.events，注册条目 id 直接定址）：
+ * record-round-started 恰 2（revive 续写轮）+ record-round-idle 恰 2。
+ * 注：pi 成员 session 文件（sessions/ 树）的落盘时序对本 spec 不可靠（多轮实测
+ * 只见主 session 落盘），不作为断言面——session 连续性由 record 单 id + 两轮
+ * 事件承载（BATCH-08 通过标准的介质同型锚）。v2 条目落盘经 pi appendEntry
+ * （JSONL flush 有延迟）——轮询等待 registered 出现。
+ */
+async function assertA8RecordMediaFace(
+  sessionsNow: string[],
+  run: { runId: string },
+  agentDir: string,
+): Promise<{ registered: Record<string, unknown>[] }> {
+  const sessionsNow = listFilesRecursive(sessionsDir, '.jsonl')
+  // record 介质面（W1 权威介质口径——「同一 record 多轮」的最硬证据）：
+  // ① 主 session 文件的 subagent-record v2 条目：registered 恰 1 + settled 恰 1
+  //    （origin=workflow + parentRunId=本 run；第二次调用若新建成员会有第二对条目）。
+  // ② record 事件文件（<recordsDir>/<sa-id>.events，注册条目 id 直接定址）：
+  //    record-round-started 恰 2（revive 续写轮）+ record-round-idle 恰 2。
+  // 注：pi 成员 session 文件（sessions/ 树）的落盘时序对本 spec 不可靠（多轮实测
+  // 只见主 session 落盘），不作为断言面——session 连续性由 record 单 id + 两轮
+  // 事件承载（BATCH-08 通过标准的介质同型锚）。
+  const mainSessionFile = sessionsNow.find((f) => {
+    try { return fs.readFileSync(f, 'utf8').includes('[a8-dispatch]') } catch { return false }
+  })
+  expect(mainSessionFile, '主 session 文件应已落盘（派发 turn 已完成）').toBeDefined()
+  // v2 条目落盘经 pi appendEntry（JSONL flush 有延迟）——轮询等待 registered 出现
+  const readSaEntries = (): { registered: Record<string, unknown>[]; settledEntries: Record<string, unknown>[] } => {
+    const entries = parseJsonlLines(mainSessionFile!).entries
+      .filter((e) => e['type'] === 'custom' && e['customType'] === 'subagent-record')
+      .map((e) => (e['data'] ?? {}) as Record<string, unknown>)
+    return {
+      registered: entries.filter((d) => d['v'] === 2 && d['kind'] === 'registered'),
+      settledEntries: entries.filter((d) => d['v'] === 2 && d['kind'] === 'settled'),
+    }
+  }
+  let entriesView = readSaEntries()
+  {
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline
+      && (entriesView.registered.length < 1 || entriesView.settledEntries.length < 1)) {
+      await new Promise((r) => setTimeout(r, 1_000))
+      entriesView = readSaEntries()
+    }
+  }
+  const registered = entriesView.registered
+  const settledEntries = entriesView.settledEntries
+  expect(registered.length, `subagent-record v2 registered 条目应恰 1（实际 ${registered.length}——2 = 第二次调用新建了独立成员）`).toBe(1)
+  expect(
+    registered[0]?.['origin'],
+    'registered 条目 origin 应为 workflow',
+  ).toBe('workflow')
+  expect(registered[0]?.['parentRunId'], 'registered 条目应锚定本 run').toBe(run.runId)
+  expect(settledEntries.length, `subagent-record v2 settled 条目应恰 1（同一成员收口一次）`).toBe(1)
+  return { registered }
+}
+
 // ── A8/V8：同名续写同一子代理 ────────────────────────────────────────────
 
 test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（memberRecordId 绑定恰 1 + session 文件连续）', async ({ }, testInfo) => {
@@ -475,47 +536,7 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
       '两条 agent 均应 done（revive 续写轮正常完成）',
     ).toBe(true)
 
-    const sessionsNow = listFilesRecursive(sessionsDir, '.jsonl')
-    // record 介质面（W1 权威介质口径——「同一 record 多轮」的最硬证据）：
-    // ① 主 session 文件的 subagent-record v2 条目：registered 恰 1 + settled 恰 1
-    //    （origin=workflow + parentRunId=本 run；第二次调用若新建成员会有第二对条目）。
-    // ② record 事件文件（<recordsDir>/<sa-id>.events，注册条目 id 直接定址）：
-    //    record-round-started 恰 2（revive 续写轮）+ record-round-idle 恰 2。
-    // 注：pi 成员 session 文件（sessions/ 树）的落盘时序对本 spec 不可靠（多轮实测
-    // 只见主 session 落盘），不作为断言面——session 连续性由 record 单 id + 两轮
-    // 事件承载（BATCH-08 通过标准的介质同型锚）。
-    const mainSessionFile = sessionsNow.find((f) => {
-      try { return fs.readFileSync(f, 'utf8').includes('[a8-dispatch]') } catch { return false }
-    })
-    expect(mainSessionFile, '主 session 文件应已落盘（派发 turn 已完成）').toBeDefined()
-    // v2 条目落盘经 pi appendEntry（JSONL flush 有延迟）——轮询等待 registered 出现
-    const readSaEntries = (): { registered: Record<string, unknown>[]; settledEntries: Record<string, unknown>[] } => {
-      const entries = parseJsonlLines(mainSessionFile!).entries
-        .filter((e) => e['type'] === 'custom' && e['customType'] === 'subagent-record')
-        .map((e) => (e['data'] ?? {}) as Record<string, unknown>)
-      return {
-        registered: entries.filter((d) => d['v'] === 2 && d['kind'] === 'registered'),
-        settledEntries: entries.filter((d) => d['v'] === 2 && d['kind'] === 'settled'),
-      }
-    }
-    let entriesView = readSaEntries()
-    {
-      const deadline = Date.now() + 30_000
-      while (Date.now() < deadline
-        && (entriesView.registered.length < 1 || entriesView.settledEntries.length < 1)) {
-        await new Promise((r) => setTimeout(r, 1_000))
-        entriesView = readSaEntries()
-      }
-    }
-    const registered = entriesView.registered
-    const settledEntries = entriesView.settledEntries
-    expect(registered.length, `subagent-record v2 registered 条目应恰 1（实际 ${registered.length}——2 = 第二次调用新建了独立成员）`).toBe(1)
-    expect(
-      registered[0]?.['origin'],
-      'registered 条目 origin 应为 workflow',
-    ).toBe('workflow')
-    expect(registered[0]?.['parentRunId'], 'registered 条目应锚定本 run').toBe(run.runId)
-    expect(settledEntries.length, `subagent-record v2 settled 条目应恰 1（同一成员收口一次）`).toBe(1)
+    const { registered } = await assertA8RecordMediaFace(sessionsNow, run, agentDir)
 
     // record 事件文件：round 两轮（encodeCwd 同源公式：--<cwd 斜杠转->>--）
     const encCwd = '--' + SAMPLE_PROJECT.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-') + '--'

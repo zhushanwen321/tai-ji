@@ -252,21 +252,7 @@ function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null 
     // [W1 / D1] v2 条目静默跳过（当前版本，journal 投影消费面——scanV2RecordEntries）；
     // missing-v / future-v / unknown-kind warnOnce 留证。本扫描器是 v1 快照兼容层（D7 惰性兼容读）。
     if (classification.reason === 'v2') return null
-    // warnOnce 去重键取 snapshot.runId + 坏版本值（热路径重扫同一坏
-    // entry 只出声一次；snapshot 缺失/无 runId 回退固定键——该形态本身已无 run 可归因）。
-    // data 此时必为对象（wrong-type 已排除），cast 仅为读取日志键字段。
-    const raw = e.data as Record<string, unknown>
-    const snapForId = raw.snapshot
-    const entryRunId = typeof snapForId === 'object' && snapForId !== null
-      && typeof (snapForId as Record<string, unknown>).runId === 'string'
-      ? ((snapForId as Record<string, unknown>).runId as string)
-      : '(no runId)'
-    warnOnce(
-      `entry-schema:${entryRunId}:${String(raw.v)}`,
-      `[workflow-extractor] workflow-record entry schema version '${String(raw.v)}' unsupported (expected 1) — ` +
-        `extension/runtime version skew, skip this entry. Fix: align schema with ` +
-        `packages/subagent-core/src/orchestration/workflow-record-entry.ts (W1 v2 current).`,
-    )
+    warnUnsupportedEntrySchemaVersion(e.data)
     return null
   }
   const snapshot = classification.snapshot
@@ -275,6 +261,26 @@ function parseSelfDescribedWorkflowSnapshot(entry: unknown): RunSnapshot | null 
   // runId 存在性守卫（snapshot 内嵌完整 runId；无 runId 视为坏 entry 跳过）
   if (typeof snap.runId !== 'string' || snap.runId.length === 0) return null
   return snapshot as RunSnapshot
+}
+
+/** [parseSelfDescribedWorkflowSnapshot 拆分] 不受支持的 entry schema 版本 warnOnce
+ * 留证（missing-v / future-v / unknown-kind 三 reason）。去重键取 snapshot.runId +
+ * 坏版本值（热路径重扫同一坏 entry 只出声一次；snapshot 缺失/无 runId 回退固定键
+ * ——该形态本身已无 run 可归因）。data 此时必为对象（wrong-type 已排除），cast
+ * 仅为读取日志键字段。 */
+function warnUnsupportedEntrySchemaVersion(data: unknown): void {
+  const raw = data as Record<string, unknown>
+  const snapForId = raw.snapshot
+  const entryRunId = typeof snapForId === 'object' && snapForId !== null
+    && typeof (snapForId as Record<string, unknown>).runId === 'string'
+    ? ((snapForId as Record<string, unknown>).runId as string)
+    : '(no runId)'
+  warnOnce(
+    `entry-schema:${entryRunId}:${String(raw.v)}`,
+    `[workflow-extractor] workflow-record entry schema version '${String(raw.v)}' unsupported (expected 1) — ` +
+      `extension/runtime version skew, skip this entry. Fix: align schema with ` +
+      `packages/subagent-core/src/orchestration/workflow-record-entry.ts (W1 v2 current).`,
+  )
 }
 
 /**
