@@ -74,7 +74,10 @@ import type {
 } from "../engine/types.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
-import { toSubagentRecordEntry } from "../persistence/record-entry.ts";
+// [v1 兼容层删除] 主 session 条目现行为「注册 + 终态两条小条目」（record-entry.ts v2）：
+// engine/engineHandle 的持久载体 = 终态条目，故断言改经 v2 投影辅助（与生产写侧
+// toSettledEntryData 同形）。
+import { v2SettledEntry } from "./helpers/v2-record-entry.ts";
 // W10（§2.10 ②）：子进程句柄断言改读 core 侧状态镜像（host/spawned-children——
 // 协议化后 spawnedChildren 持有方在引擎进程，core 消费镜像面；判据 pid 同构）。
 import {
@@ -353,7 +356,9 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     const rec = service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId);
     expect(rec).toBeDefined();
     expect(rec?.engine).toBeUndefined();
-    expect(JSON.stringify(toSubagentRecordEntry(rec!))).not.toContain("engine");
+    // [v1 兼容层删除] engine 域的持久面 = v2 终态条目（engine/engineHandle 只落此处）；
+    // pi 缺省不盖章 → 终态投影序列化产物不含 engine 键。
+    expect(JSON.stringify(v2SettledEntry(rec!))).not.toContain("engine");
   });
 
   it("[D5] 显式 engine:'pi' 路由回 pi：record 不盖章 engine", async () => {
@@ -592,8 +597,11 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     const rec = service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId);
     expect(rec?.engine).toBe("pi");
     expect(rec?.engineFallback).toEqual({ from: "zcode", reason: "engine_probe_failed" });
-    // entry（register 写点）含 engineFallback——兜底路径允许新增键（D5 只约束纯缺省路径）
-    expect(JSON.stringify(toSubagentRecordEntry(rec!))).toContain("engine_probe_failed");
+    // [v1 兼容层删除] engineFallback 在现行持久面无载体：v2 条目（record-entry.ts）、
+    // manifest 投影（terminalManifestRecord / derivedManifestRecord /
+    // buildAdoptedManifestProjection）与 record 事件帧均不含该字段——留痕唯一承载 =
+    // 上行 record 内存投影（collectRecords）。原「entry JSON 含 engine_probe_failed」
+    // 断言随 v1 全量快照写点删除，不另造字段补位。
   });
 
   it("[守卫] 显式 engine='zcode' + probe 失败 → engine_probe_failed 报错不兜底", async () => {
@@ -827,7 +835,9 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
 
     const rec = service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId);
-    const entryJson = JSON.stringify(toSubagentRecordEntry(rec!));
+    // [v1 兼容层删除] engine/engineHandle 的持久载体 = v2 终态条目（engineFallback 在
+    // 现行持久面无字段——此处保留缺位断言作「v2 投影不重新引入该键」的回归守卫）。
+    const entryJson = JSON.stringify(v2SettledEntry(rec!));
     expect(entryJson).not.toContain("engineFallback");
     expect(entryJson).not.toContain("engineHandle");
     expect(entryJson).not.toMatch(/"engine"/);

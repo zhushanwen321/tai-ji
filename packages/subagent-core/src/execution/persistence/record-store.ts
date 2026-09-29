@@ -99,13 +99,14 @@ import { statStateStamp, writeFinalizedState, writeCancelledState, writeSettledS
 // binding 读写函数的调用已随终态轴/投影轴外迁（readRecordBinding/writeRecordBinding/
 // updateRecordBinding 仅经轴文件 import——读函数与 binding 写不在 D7 七名拦截面）。
 import { RECORD_BINDING_SIDECAR_EXT } from "./state-marker.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry } from "./record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
 // [W1 / U2a] v2 条目构造 / v2 定界扫描 / 收编组装 / 事件帧载荷构造（纯函数族，
 // 变化轴 = v2 条目与事件载荷构造规则）——终局写点载荷构造单源在终态原语轴。
 import {
   buildAdoptedManifestProjection,
   buildAdoptedSettledEntry,
   buildAdoptedSettledEvent,
+  buildEntryOnlyOrphanSettledEntry,
   collectV2EntryState,
   isNonInterruptedSettledEvidence,
   settledEntrySourceOf,
@@ -131,20 +132,19 @@ import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "./sessions-
 import {
   buildFileCacheEntry,
   buildRecord,
-  collectLastRecordEntries,
+  collectV2EntryPairs,
   compareRecords,
   derivedManifestRecord,
   detectIdentity,
   identityFromBinding,
   isFreshCache,
   manifestToSubagent,
-  mergeOrphanLastEntry,
   readSidecarPayloads,
-  rebuildEntryRecord,
   recordToSubagent,
   sameStamp,
   statStamp,
   terminalManifestRecord,
+  v2PairToRecord,
 } from "./record-store-rebuild.ts";
 import type { FileCacheEntry, FileCacheValue, FileStamps, Stamp } from "./record-store-rebuild.ts";
 // [H4 三轴拆分] 终态原语轴（record-store-terminal.ts）：markFinalized/markCancelled/
@@ -369,7 +369,6 @@ export class RecordStore {
       archive: (r) => this.archive(r),
       register: (r) => this.register(r),
       reportRecordTransition: (r) => this.reportRecordTransition(r),
-      reportSubagentRecord: (r) => this.reportSubagentRecord(r),
       writeManifestPersisted: (id, m) => this.writeManifestPersisted(id, m),
       writeTerminalManifest: (r) => this.writeTerminalManifest(r),
       // [W1 / D3] 终局事件 + v2 终态条目（markSettled 写点；archive 真终局路径同款）。
@@ -1232,15 +1231,6 @@ export class RecordStore {
   }
 
   /**
-   * 重建 SubagentRecord 的自描述 entry 落盘入口（签名适配：reportRecordTransition 收
-   * ExecutionRecord，重建孤儿的数据源是 SubagentRecord——直接经 toSubagentRecordEntry
-   * 投影 appendEntry，绕过 recordToSubagent）。pi 未注入时可选链静默。
-   */
-  reportSubagentRecord(record: SubagentRecord): void {
-    this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry(record));
-  }
-
-  /**
    * 孤儿恢复（§3.2.4 降权后的残职责：entry 面纠偏）。重建单规则下磁盘重建恒 idle
    * （§3.2.4：两态下 running 只在轮次在飞时有意义，崩溃后必然空闲），磁盘面已无
    * 「终态化」职责；本方法只纠一处残留——**主 session 末条 entry 仍停在 running**
@@ -1261,21 +1251,9 @@ export class RecordStore {
     // [U7 / B-restart] 主 session 路径记忆（entry 源读取锚——initSession 恢复段每
     // session 供给一次；/resume /fork 后新主文件随下次调用覆盖）。
     if (mainSessionFile !== undefined) this.mainSessionFile = mainSessionFile;
-    const lastById = new Map(this.scanLastRecordEntries(mainSessionFile).map((r) => [r.id, r]));
-    for (const rec of this.reconstructAll(rootSessionFilter)) {
-      const lastEntry = lastById.get(rec.id);
-      // 纠偏对象 = entry 面残留 running：末条缺失（无 entry 可纠）或已收口/轮终非
-      // running（entry 自洽）都跳过。
-      if (lastEntry === undefined || lastEntry.status !== "running") continue;
-      if (rec.sessionFile !== undefined && findForeignLiveInstance(rec.sessionFile) !== undefined) {
-        continue;
-      }
-      if (this.orphanJudged.has(rec.id)) continue;
-      this.orphanJudged.add(rec.id);
-      this.finalizeOrphanRecord(rec, lastEntry);
-    }
-    // [W1 / D4] v2 段：注册条目定界（registered ∧ ¬settled）→ 收编入口。v1 循环
-    // （上方）只覆盖 v1 快照实体（v 门跳过 v2 行）——收编定界按注册条目形态分流。
+    // [登记 §3.3] v1 快照纠偏循环已随兼容层删除（无 v1 数据、旧形态不进解析路径）——
+    // 本方法只做「注册条目定界（registered ∧ ¬settled）→ 收编」：事件文件在场的实体
+    // 归一入口。事件文件缺席的 entry-only 形态归 recoverEntryOnlyOrphans（另一入口）。
     if (this.journalFace !== undefined && mainSessionFile !== undefined) {
       let content: string;
       try {
@@ -1288,35 +1266,19 @@ export class RecordStore {
   }
 
   /**
-   * 单孤儿 record 的 entry 纠偏落盘（§3.2.4 孤儿恢复简化后唯一职责）。防重锚
-   * （orphanJudged 标记）已由调用方完成。
+   * [E2E 实测缺口 / 登记 §3.3 改 v2 读面] entry-born 孤儿恢复：v2 注册条目已落主 session、
+   * 但子 session 文件从未创建（父进程死在 spawn 窗口期——register 写点与子进程首笔写入
+   * 之间的窗口；外部删除子文件的已知边界同形）。
    *
-   * 一律保留 idle（锚在，等 revive）：旧直断分支（SP-5 完成态 closed+gc / in-flight
-   * closed+gc+error / resumable 分流 / 末行截断判读）随「不存在不可逆终态」
-   * 整体删除——record 的 stopReason 已由重建单规则从 `.state` 或 interrupted-by-restart
-   * 兜底给出，本方法不做任何终态判定（子文件末行内容不再参与，超长/截断行无感知）。
+   * 目录扫描（reconstructAll）看不见这类 record（无文件即无扫描集），recoverOrphanRecords
+   * 的收编入口也够不着（它要求事件文件在场，见 adoptInterruptedRecord 的 lastSeq 判定），
+   * 不纠偏则侧栏（runtime entry 扫描源）永久 spinner。
    *
-   * 覆写前 merge（lastEntry）保留既有信息（批域标记 + 轮终正文/模型）：
-   * 覆写是状态迁移不是信息重建。
-   */
-  private finalizeOrphanRecord(rec: SubagentRecord, lastEntry: SubagentRecord): void {
-    const rec0 = mergeOrphanLastEntry(rec, lastEntry);
-    this.reportSubagentRecord({ ...rec0, status: "idle" });
-  }
-
-  /**
-   * [E2E 实测缺口] entry-born 孤儿恢复：register entry 已落主 session、但子 session 文件
-   * 从未创建（父进程死在 spawn 窗口期——register 写点与子进程首笔写入之间的窗口；外部
-   * 删除子文件的已知边界同形）。目录扫描（reconstructAll）看不见这类 record（无文件即
-   * 无扫描集），recoverOrphanRecords 判不到，侧栏（runtime entry 扫描源）永久 spinner。
+   * 判定（v2 形态）：每 id 有注册条目 ∧ 无「非 interrupted 终态」条目 ∧ 无子文件锚
+   *（不在 reconstructAll 结果中）∧ 不在内存活 record（防误杀刚 register 的在途 spawn）
+   * ∧ 事件文件缺席（事件文件在场的实体归 adoptV2Orphans——那里有 fold 统计与 bound 锚）
+   * → 补写 v2 终态条目（一律 idle + interrupted-by-restart，不直断）。
    *
-   * 判定：读主 session 的 subagent-record entry，取每 id 末条；末条 status=running 且
-   * 无子文件锚（不在 reconstructAll 结果中）且不在内存活 record（防误杀刚 register 的
-   * 在途 spawn）→ 落 idle entry 纠偏（一律保留 idle，不直断）。
-   *
-   * [U3 / §3.2.4] 直断分支（closed+gc+error）删除：entry-born 无 transcript 锚的
-   * 续聊拒绝由 U4 准入判据单点给出唯一占用拒绝文案（zcode 锚 U6 落地前，无锚
-   * record 保持 idle 可见、不可续聊——本单元只删直断、保留记录可见）。
    * 调用点：initSession 的 recoverOrphanRecords 之后（session_start，内存恒空）。
    */
   recoverEntryOnlyOrphans(mainSessionFile: string | undefined, rootSessionFilter?: string): void {
@@ -1330,68 +1292,48 @@ export class RecordStore {
     } catch {
       return; // 主文件不可读（含新 session 未 flush 的 ENOENT）：静默跳过（best-effort 恢复）
     }
-    const lastById = collectLastRecordEntries(content);
-    if (lastById.size === 0 && this.journalFace === undefined) return;
+    const pairs = collectV2EntryPairs(content);
+    if (pairs.size === 0) return;
     const anchoredIds = new Set(this.reconstructAll(rootSessionFilter).map((r) => r.id));
-    for (const [id, d] of lastById) {
-      if (!this.isEntryOrphanCandidate(id, d, rootSessionFilter, anchoredIds)) continue;
-      this.orphanJudged.add(id);
-      const rec = rebuildEntryRecord(id, d);
-      if (rec === null) {
-        // 损坏 entry：跳过（orphanJudged 已标记，不重判）——但必须留痕：末条 running
-        // 的 entry 损坏意味着该 record 永远无法被纠偏落 idle（侧栏 spinner 永挂），
-        // 静默 continue 会把身份域损坏伪装成「无孤儿可判」，排障无从下手。
-        logger.warn(`[subagents] recoverEntryOnlyOrphans: corrupt subagent-record entry for ${id} — skipped (not recoverable, will not be re-judged)`);
+    for (const [id, pair] of pairs) {
+      const st: V2EntryState = {
+        registered: pair.registered !== undefined,
+        settled: pair.settled !== undefined,
+        settledStopReason: pair.settled?.stopReason,
+        rootSessionId: pair.registered?.rootSessionId,
+      };
+      // 定界与 adoptV2Orphans 同款：registered ∧ 无非 interrupted 终态条目。
+      if (!st.registered || isNonInterruptedSettledEvidence(st)) continue;
+      if (rootSessionFilter !== undefined && st.rootSessionId !== rootSessionFilter) continue;
+      if (anchoredIds.has(id)) continue; // 有子文件锚：磁盘/收编面已判（或 sidecar 已收口）
+      if (this.records.has(id)) continue; // 内存活 record：在途 spawn，不得误杀
+      if (this.orphanJudged.has(id)) continue; // 防重（同 init 内两个恢复入口共用）
+      if (this.journalFace !== undefined && this.journalFace.foldOf(id).lastSeq > 0) continue; // 事件文件在场：归收编入口
+      if (v2PairToRecord(id, pair, this.journalFace?.foldOf(id).bound) === null) {
+        // 损坏身份域：纠偏产物会是无身份的幻影终态条目。跳过但必须留痕——静默
+        // continue 会把「身份域损坏」伪装成「无孤儿可判」，排障无从下手。
+        this.orphanJudged.add(id); // 防重：不重复 warn / 不重复判
+        logger.warn(
+          `[subagents] recoverEntryOnlyOrphans: corrupt v2 registered entry for ${id} — skipped (not recoverable, will not be re-judged)`,
+        );
         continue;
       }
-      this.finalizeEntryOnlyOrphan(rec);
+      this.orphanJudged.add(id);
+      this.pi?.appendEntry?.(
+        SUBAGENT_RECORD_CUSTOM_TYPE,
+        buildEntryOnlyOrphanSettledEntry(id, "interrupted-by-restart", Date.now()),
+      );
+      logger.warn(
+        `[subagents] entry-only orphan adopted (id=${id}) — settled entry appended (no journal, no child session file)`,
+      );
     }
-    // [W1 / D4] v2 段：entry-born v2 孤儿（registered ∧ ¬settled ∧ 无子文件锚 ∧
-    // 不在内存——spawn 窗口期父进程死亡后事件文件有 created 帧、无终态帧）走收编。
-    if (this.journalFace !== undefined) {
-      this.adoptV2Orphans(collectV2EntryState(content), rootSessionFilter);
-    }
   }
 
   /**
-   * entry-born 孤儿候选判定（recoverEntryOnlyOrphans 的守卫链拆出）：末条 running、
-   * root session 匹配、无子文件锚、不在内存活 record（防误杀在途 spawn）、未判过。
-   */
-  private isEntryOrphanCandidate(
-    id: string,
-    d: Record<string, unknown>,
-    rootSessionFilter: string | undefined,
-    anchoredIds: Set<string>,
-  ): boolean {
-    if (d.status !== "running") return false; // 末条已收口/轮终：entry 自洽，无需恢复
-    if (rootSessionFilter !== undefined && d.rootSessionId !== rootSessionFilter) return false;
-    if (anchoredIds.has(id)) return false; // 有子文件锚：主循环已判（或 sidecar 已收口）
-    if (this.records.has(id)) return false; // 内存活 record：在途 spawn，不得误杀
-    return !this.orphanJudged.has(id);
-  }
-
-  /**
-   * entry-born 孤儿纠偏落 entry：一律保留 idle（§3.2.4——spawn 窗口期死亡 = 在途中断，
-   * stopReason 兜底 interrupted-by-restart；无直断、无终态化）。锚在等 revive：zcode
-   * transcriptRef 锚（U6）落地前无锚形态的续聊拒绝走 U4 准入判据文案。
-   */
-  private finalizeEntryOnlyOrphan(rec: SubagentRecord): void {
-    this.reportSubagentRecord({
-      ...rec,
-      status: "idle",
-      stopReason: rec.stopReason ?? "interrupted-by-restart",
-    });
-  }
-
-  /**
-   * [E1/U5] sync 批崩溃恢复扫描：主 session 文件「每 id 末条 subagent-record entry」
-   * （collectLastRecordEntries + rebuildEntryRecord 组合通路，设计 §3.1.3「标记读取
-   * 通路」——batchFinalized 落标 entry 写主 session 文件，本扫描同文件域才可见；禁走
-   * collectRecords light 路径，它只读子文件 identity 头+sidecar，主 session 落标
-   * entry 不可见）。返回每 id 末条重建的完整 record（含 batchFinalized /
-   * 终态五字段，损坏 entry 跳过）；调用方（[collect 退役] 原批域排除判据已随批机制
-   * 删除，现行消费 = recoverOrphanRecords 的覆写 merge 与读侧守卫测试）自行取舍。
-   * 主文件不可读（含新 session 未 flush 的 ENOENT）→ 空数组静默。
+   * 主 session 全文 → 每 id 末态 v2 记录（entry 面读源；引擎域回落 journal bound 锚）。
+   * 旧名保留（消费方 = entrySourceRecords 缓存读 + record-access 的 manifest 重物化
+   * 可见性判定）：语义仍是「每 id 末态 entry 重建的 record」，形态从 v1 快照换成 v2
+   * 注册/终态条目对（登记 §3.3）。
    */
   scanLastRecordEntries(mainSessionFile: string | undefined): SubagentRecord[] {
     if (mainSessionFile === undefined) return [];
@@ -1402,8 +1344,9 @@ export class RecordStore {
       return []; // 与 recoverEntryOnlyOrphans 同判：best-effort 恢复，不可读静默跳过
     }
     const out: SubagentRecord[] = [];
-    for (const [id, d] of collectLastRecordEntries(content)) {
-      const rec = rebuildEntryRecord(id, d);
+    for (const [id, pair] of collectV2EntryPairs(content)) {
+      const bound = this.journalFace?.foldOf(id).bound;
+      const rec = v2PairToRecord(id, pair, bound);
       if (rec !== null) out.push(rec);
     }
     return out;

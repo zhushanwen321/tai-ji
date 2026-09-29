@@ -3,8 +3,8 @@
 // [H4 三轴拆分 / 重建与投影轴] RecordStore 的无状态重建与投影纯函数族：
 //   - buildRecord 重建单规则（§3.2.4：identity 基底 + `.state` sidecar 矩阵 → 一律 idle
 //     + stopReason 单源）与 light/full 两分支装配（buildFileCacheEntry）；
-//   - entry 重建族（rebuildEntryRecord + readEntry* 域投影 + collectLastRecordEntries
-//     ——含 [W1 / U2b] v1 快照通道版本门：v2 条目与未知版本结构性跳过，零幻影）；
+//   - entry 重建族（collectV2EntryPairs + v2PairToRecord ——登记 §3.3 后只剩当前版本
+//     通道：旧形态与未知版本结构性跳过，零幻影）；
 //   - 身份解析三级优先级（[W1 / U2b] resolveRecordIdentity：事件文件 fold >
 //     binding > manifest——纯函数参考实现 + 测试锚定面；现行生产路径 = v2 实体
 //     fold 通道 / v1 实体磁盘重建链，分流依据 W1 D4）；
@@ -29,7 +29,11 @@ import { readStateMarker } from "./state-marker.ts";
 import type { RecordBinding, StateMarker } from "./state-marker.ts";
 import { readRecordBinding, zcodeAnchorBasePath } from "./state-marker.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE, classifySubagentRecordEntryData } from "./record-entry.ts";
-import type { RecordJournalFoldState } from "./record-events.ts";
+import type {
+  SubagentRecordRegisteredEntryData,
+  SubagentRecordSettledEntryData,
+} from "./record-entry.ts";
+import type { RecordBoundEvent, RecordJournalFoldState } from "./record-events.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 // [U7 / §3.2.6 引擎中立锚] transcriptAnchorOf（cold-lookup 导出接口）：record →
 // transcript 锚的派生单点（显式 transcriptRef 优先 / zcode engineHandle.sessionRef
@@ -216,35 +220,19 @@ function asSubagentRecordEntry(o: unknown): { id: string; data: Record<string, u
 }
 
 /**
- * [W1 / U2b] v1 快照通道的版本门（设计 D1「旧读者版本门补齐清单」的 A-17 缺口，
- * 判定单源 = classifySubagentRecordEntryData）。
+ * [登记 §3.3] 主 session 全文 → 每 id 的 v2 条目对（registered / settled，后写覆盖）。
  *
- * 跳过（结构性不可见——零幻影，D8 中间态「不崩溃不产幻影」的读侧半边）：
- *   - v2 条目（registered/settled）：v2 实体的状态权威在事件文件 fold（record-
- *     events.ts），v1 快照通道消费它会产半构造投影（registered 重建出 running 假态、
- *     settled 丢失 eventLog/displayItems 详情域）；
- *   - future-v（v > 2）/ unknown-kind（v2 但 kind 越词表）：不认识的版本跳过而非
- *     猜测（record-entry v1 契约同款纪律）。
- *
- * 保留照 v1 读：missing-v。真实写点 W16 起恒写 v（toSubagentRecordEntry），磁盘
- * 合法数据不存在无 v 形态——missing-v 宽容面只覆盖测试 fixture 的简化形态与
- * 极端损坏残留（后者的幻影风险由 rebuildEntryRecord 的字段守卫承接）。
- *
- * 消费点两层（单谓词单源）：collectLastRecordEntries（行为门——v2 行像不存在，
- * 「每 id 末条 v1」语义保持）与 rebuildEntryRecord（契约门——导出函数对非 v1
- * 输入返回 null，与「损坏 entry 返回 null」同款契约）。
+ * v 门内联（classifySubagentRecordEntryData 单源）：非当前版本 / 未知 kind 的行跳过
+ * 而非猜测——v1 全量快照形态已随兼容层删除，旧形态不进任何解析路径（零幻影）。
+ * 快过滤与 collectV2EntryState 同款（customType 子串）。
  */
-function isV1SnapshotEntry(data: Record<string, unknown>): boolean {
-  const verdict = classifySubagentRecordEntryData(data);
-  return verdict.ok || verdict.reason === "missing-v";
+export interface V2EntryPair {
+  registered?: SubagentRecordRegisteredEntryData;
+  settled?: SubagentRecordSettledEntryData;
 }
 
-/** recoverEntryOnlyOrphans 用的 entry 扫描：主 session 全文 → 每 id 末条 record data。
- *  [W1 / U2b] 版本门内联：v2/未知版本行跳过（isV1SnapshotEntry），v1 兼容路径
- *  （纯 v1 会话与 v1+v2 混排行）输出与无门时逐字节一致——D7「旧会话行为完全
- *  不变」的读侧证明义务。 */
-export function collectLastRecordEntries(content: string): Map<string, Record<string, unknown>> {
-  const lastById = new Map<string, Record<string, unknown>>();
+export function collectV2EntryPairs(content: string): Map<string, V2EntryPair> {
+  const byId = new Map<string, V2EntryPair>();
   for (const line of content.split("\n")) {
     if (!line.includes(SUBAGENT_RECORD_CUSTOM_TYPE)) continue; // 快过滤：绝大多数行不是本类型
     let entry: { id: string; data: Record<string, unknown> } | null = null;
@@ -252,110 +240,92 @@ export function collectLastRecordEntries(content: string): Map<string, Record<st
       entry = asSubagentRecordEntry(JSON.parse(line));
     } catch (err) {
       // 截断/异构行跳过（主文件末行可能正被写入）——行级 best-effort，debug 留痕
-      logger.debug("[subagents] entry-only orphan scan: skip unparsable line", {
+      logger.debug("[subagents] v2 entry scan: skip unparsable line", {
         reason: err instanceof Error ? err.message : String(err),
       });
     }
     if (entry === null) continue;
-    if (!isV1SnapshotEntry(entry.data)) {
-      // v 门跳过是设计内合法形态（非坏行）：v2 实体归新读者（事件文件 fold 通道，
-      // U3），此处 debug 留痕供「record 为什么不见了」类排障对账。
-      logger.debug("[subagents] entry-only orphan scan: skip non-v1 subagent-record entry", {
+    const verdict = classifySubagentRecordEntryData(entry.data);
+    if (!verdict.ok) {
+      logger.debug("[subagents] v2 entry scan: skip non-current subagent-record entry", {
         id: entry.id,
+        reason: verdict.reason,
       });
       continue;
     }
-    lastById.set(entry.id, entry.data);
+    const pair = byId.get(entry.id) ?? {};
+    if (verdict.entry.kind === "registered") pair.registered = verdict.entry;
+    else pair.settled = verdict.entry;
+    byId.set(entry.id, pair);
   }
-  return lastById;
-}
-
-/** entry data 字段的安全 string 读取（非 string → undefined）。 */
-function entryStr(d: Record<string, unknown>, k: string): string | undefined {
-  return typeof d[k] === "string" ? (d[k] as string) : undefined;
-}
-
-/** entry data 字段的安全 number 读取（非 number → undefined）。 */
-function entryNum(d: Record<string, unknown>, k: string): number | undefined {
-  return typeof d[k] === "number" ? (d[k] as number) : undefined;
+  return byId;
 }
 
 /**
- * 来源域投影（H2 W1，设计 subagent-workflow-record-unification §3.3 D1）：origin 经
- * 字面量守卫（非法值/缺省 → undefined = "tool" 语义，存量 entry 零迁移）；parentRunId
- * 经安全 string 读取。缺省语义对齐 ExecutionRecord.origin 注释——消费面按
- * `=== "workflow"` 负向判定，缺省（undefined）恒视为手动 tool 派发。
- * [W0 / D1] stepIndex 经安全 number 读取（同族身份域；存量 entry 缺键 → undefined，
- * 读侧不参与 run 视图关联——「无 stepIndex 的 record 不成行」守卫的上游归一）。
+ * [登记 §3.3] v2 条目对 → SubagentRecord（entry 面重建）。
+ *
+ * 身份域取注册条目（缺注册条目的终态行不成实体——身份无所出，返回 null）；终局域取
+ * 终态条目；运行态记录（无终态条目）的引擎域回落 journal 的 bound 事件（条目契约
+ * 不承载 engine/sessionFile）。
+ *
+ * 缺省纪律：v2 条目契约不承载的字段（patchFile / worktree / round / closedReason /
+ * batchFinalized / 详情域）一律缺席——与 runtime 投影 projectV2Subagent 同口径，
+ * 这些字段的权威源在 manifest 与子 session 文件。
  */
-function readEntryOriginFields(
-  d: Record<string, unknown>,
-): Pick<SubagentRecord, "origin" | "parentRunId" | "stepIndex"> {
+export function v2PairToRecord(
+  id: string,
+  pair: V2EntryPair,
+  bound?: RecordBoundEvent,
+): SubagentRecord | null {
+  const registered = pair.registered;
+  if (registered === undefined) return null;
+  // 损坏身份域（agent / task / startedAt 缺失或类型漂移）→ 拒绝重建（零幻影）：
+  // 分类只认 v/kind（形态合法 ≠ 载荷可用），字段级守卫与旧 v1 重建路径同款——
+  // 消费方（scanLastRecordEntries / 纠偏判定）据此跳过并 warn 留痕。
+  if (
+    typeof registered.agent !== "string" ||
+    typeof registered.task !== "string" ||
+    typeof registered.startedAt !== "number"
+  ) {
+    return null;
+  }
+  const settled = pair.settled;
+  const engine = settled?.engine ?? bound?.engine;
+  const engineHandle = settled?.engineHandle ?? bound?.engineHandle;
+  const sessionFile = settled?.sessionFile
+    ?? (bound !== undefined && bound.sessionFile !== "" ? bound.sessionFile : undefined);
   return {
-    origin: d.origin === "workflow" || d.origin === "tool" ? d.origin : undefined,
-    parentRunId: entryStr(d, "parentRunId"),
-    stepIndex: entryNum(d, "stepIndex"),
+    id,
+    agent: registered.agent,
+    task: registered.task,
+    slug: registered.slug,
+    status: settled !== undefined ? "idle" : "running",
+    ...(settled?.stopReason !== undefined ? { stopReason: settled.stopReason } : {}),
+    ...(settled?.outcome !== undefined ? { outcome: settled.outcome } : {}),
+    mode: "background",
+    startedAt: registered.startedAt,
+    rootSessionId: registered.rootSessionId,
+    parentRecordId: registered.parentRecordId,
+    depth: registered.depth,
+    origin: registered.origin,
+    parentRunId: registered.parentRunId,
+    stepIndex: registered.stepIndex,
+    endedAt: settled?.endedAt,
+    turns: settled?.turns ?? 0,
+    totalTokens: settled?.totalTokens ?? 0,
+    model: modelOrUndefined(settled?.model),
+    thinkingLevel: settled?.thinkingLevel,
+    eventLog: [],
+    displayItems: [],
+    result: settled?.result,
+    error: settled?.error,
+    sessionFile,
+    ...(engine !== undefined ? { engine } : {}),
+    ...(engineHandle !== undefined ? { engineHandle } : {}),
   };
 }
 
-/**
- * 终态域投影（U2 两态迁移映射）。已收口 entry 的两种形态：
- *   ① 存量旧写侧：status:"closed" + closedReason → 迁移映射 idle + stopReason
- *     （StopReason ⊇ ClosedReason，§3.2.2 展示迁移）；
- *   ② 新写侧投影（recordToSubagent/markSettled 后 U2 起产 status:"idle"）：直投，
- *     stopReason 优先取 entry 的 stopReason 字段（新写侧 additive），缺失回落
- *     closedReason 迁移映射。
- * 其余含缺省 → "running"。closedReason 经枚举守卫保留为读侧兼容位（closed-only，
- * 防 running + closedReason 脏组合）；stopReason 经 isValidStopReason 守卫后有值即
- * 透传——running entry 的合法停因（存量桥接形态轮终 entry 携带 completed/failed；
- * [two-state-convergence U4] 翻边后新轮终 entry 落 idle + stopReason，running+停因
- * 组合不再新产）不再恒丢，与 runtime extractor 侧 value-present 判据对齐（A-lite
- * 阶段 3 裁决），仅 settled entry 缺 stopReason 时回落 closedReason 迁移映射。
- */
-function readEntryTerminalFields(
-  d: Record<string, unknown>,
-): Pick<SubagentRecord, "status" | "closedReason" | "stopReason"> {
-  const closedReason = entryStr(d, "closedReason");
-  const validClosed = isValidClosedReason(closedReason) ? closedReason : undefined;
-  const stopReasonRaw = entryStr(d, "stopReason");
-  const validStop = isValidStopReason(stopReasonRaw) ? stopReasonRaw : undefined;
-  const settledEntry = d.status === "closed" || d.status === "idle";
-  return {
-    status: settledEntry ? "idle" : "running",
-    closedReason: settledEntry ? validClosed : undefined,
-    stopReason: validStop ?? (settledEntry ? validClosed : undefined),
-  };
-}
 
-/** 批收集域投影：仅显式字面量收敛，缺省 undefined（JSON 序列化自然缺省）。
- *  [U5/D4] resumable 投影已随字段退役删除。[modeless 波3] collectMode 读侧丢弃
- * （旧 entry 残留键自然忽略——collect = 派发时路由选项，成员身份 = 协调器登记态）。
- *  E1 排除判据随其退役消亡，batchFinalized 保留为批域审计/孤儿 merge 透传面。 */
-function readEntryBatchFields(
-  d: Record<string, unknown>,
-): Pick<SubagentRecord, "batchFinalized"> {
-  return {
-    batchFinalized: d.batchFinalized === true ? true : undefined,
-  };
-}
-
-/** engine 域投影：engineFallback/engineHandle 经运行时 guard（未知 JSON 不裸收）。 */
-function readEntryEngineFields(
-  d: Record<string, unknown>,
-): Pick<SubagentRecord, "engine" | "engineFallback" | "engineHandle"> {
-  return {
-    engine: entryStr(d, "engine"),
-    engineFallback: isEngineFallbackShape(d.engineFallback) ? d.engineFallback : undefined,
-    engineHandle: isEngineHandleShape(d.engineHandle) ? d.engineHandle : undefined,
-  };
-}
-
-/** engineFallback entry 值的运行时 guard（未知 JSON 不裸收）。 */
-function isEngineFallbackShape(v: unknown): v is { from: string; reason: string } {
-  if (typeof v !== "object" || v === null) return false;
-  const r = v as Record<string, unknown>;
-  return typeof r.from === "string" && typeof r.reason === "string";
-}
 
 /**
  * [U7 / §3.2.6] record 的 zcode 锚（cold-lookup transcriptAnchorOf 派生单点的 zcode
@@ -386,74 +356,6 @@ export function isEngineHandleShape(
   return true;
 }
 
-/** entry data 即 SubagentRecord v1 快照——带运行时 guard 重建（taste/no-unsafe-cast）。
- *  损坏 entry（agent/task/startedAt 任一缺失）返回 null，由调用方跳过。
- *  [W1 / U2b] 版本门（isV1SnapshotEntry 同谓词）：v2/未知版本 data 返回 null——
- *  导出函数不消费非 v1 形态，防直接调用方（绕过 collectLastRecordEntries）产
- *  半构造投影；v2 实体重建归事件文件 fold 通道（record-events.ts，U3 消费）。
- *  [U5 E1] 投影白名单扩展（设计 §3.1.3「标记读取通路」）：batchFinalized
- * （[modeless 波3] collectMode 读侧丢弃随字段消亡删除）+ 终态五字段 status/endedAt/closedReason/result/error——原实现硬编码
- *  status:"running" 且不投影终态，E1 重建成员恒被视为 running，「全员终态→补发」
- *  判定永假、补发内容缺失，整条补发路径成死代码。status 守卫只认 "closed" 字面量
- *  （其余含缺省 → "running"，旧调用方 recoverEntryOnlyOrphans 行为不变——其候选
- *  守卫已滤非 running 末条）；closedReason 经 isValidClosedReason 枚举守卫。
- *  [v2 D3] 再补 sessionFile 投影（resumable 投影已随 [U5/D4] 字段退役删除；
- *  [collect 退役] 原桥接期豁免判据 isCollectPending 的 status 子句已随批机制删除）：
- *  sessionFile 原硬编码
- *  undefined，导致
- *  E1 落标路径重建快照丢失反查索引锚（断链 1 前置依赖）。recoverEntryOnlyOrphans
- *  的候选判定（isEntryOrphanCandidate）只认 status==="running"，该字段不参与
- *  判定（P-rebuild 探针守卫面）。
- *  [E1 恢复批语义修复] 再补 patchFile 投影：entry data 携带该字段
- *  （toSubagentRecordEntry 落盘含 patchFile）但原投影丢弃 → E1 补发记录丢失
- *  worktree patch 的 git-apply 回收指针（正常 flush 路径经 toNotifyRecord 特意
- *  携带，notify-host.ts patchFile 透传）。undefined 经 JSON.stringify 自然缺省，
- *  无 patchFile 的存量 entry 序列化字节不变（落标出口经 toSubagentRecordEntry
- *  按名重投影，重建对象字段顺序不影响序列化字节形态）。
- *  字段顺序 = 对象字面量原序（终态/批收集/engine 域以 spread 在原位置展开），
- *  entry 序列化字节形态不变。 */
-export function rebuildEntryRecord(id: string, d: Record<string, unknown>): SubagentRecord | null {
-  if (!isV1SnapshotEntry(d)) return null; // v 门：v2/未知版本不经 v1 快照重建（零幻影）
-  const agent = entryStr(d, "agent");
-  const task = entryStr(d, "task");
-  const startedAt = entryNum(d, "startedAt");
-  if (agent === undefined || task === undefined || startedAt === undefined) return null; // 损坏 entry：跳过
-  return {
-    id,
-    agent,
-    task,
-    slug: entryStr(d, "slug") ?? "",
-    ...readEntryTerminalFields(d),
-    // [u-arch] intent 载荷停读（概念已删除）：旧 entry 残留 intent 键在此被忽略
-    //（与 chatMode 字段消亡同款先例——该标记不再驱动任何行为，旧 record 重启后
-    // 按 idle 重建 = 两态「已结束」侧，语义无损）。
-    mode: "background",
-    startedAt,
-    rootSessionId: entryStr(d, "rootSessionId"),
-    parentRecordId: entryStr(d, "parentRecordId"),
-    depth: entryNum(d, "depth") ?? 0,
-    // [H2 W1] 来源域透传（origin/parentRunId）：漏本行则主 session entry 重建路径
-    // 丢 origin，重启后 workflow record 逃过投影过滤（D1 ①-④ 全失效）。
-    ...readEntryOriginFields(d),
-    endedAt: entryNum(d, "endedAt"),
-    turns: entryNum(d, "turns") ?? 0,
-    totalTokens: entryNum(d, "totalTokens") ?? 0,
-    // [R4/D6-③] 空串归一缺席（存量 entry 的 "" 兜底产物不再复活）。
-    model: modelOrUndefined(entryStr(d, "model")),
-    thinkingLevel: entryStr(d, "thinkingLevel"),
-    eventLog: [],
-    displayItems: [],
-    result: entryStr(d, "result"),
-    error: entryStr(d, "error"),
-    sessionFile: entryStr(d, "sessionFile"),
-    patchFile: entryStr(d, "patchFile"),
-    // [modeless 波1] chatMode 读侧丢弃（旧 entry 残留键自然忽略——万物可续语义
-    // 与 legacy 缺省归 chat 天然一致）。
-    round: entryNum(d, "round"),
-    ...readEntryEngineFields(d),
-    ...readEntryBatchFields(d),
-  };
-}
 
 // ============================================================
 // 戳工具与 sidecar 读取
@@ -1038,23 +940,6 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     origin: r.origin,
     parentRunId: r.parentRunId,
     stepIndex: r.stepIndex,
-  };
-}
-
-/** [v2 D3] 孤儿覆写 merge 字段集：末条 entry 的批域标记 + 轮终正文/模型，仅补 rec 侧
- *  undefined/空值（model 空值形态含 "" 与 undefined——旧数据空串经归一后与缺席同域），
- *  不覆盖已有值。merge 后写 entry 经 reportSubagentRecord →
- *  toSubagentRecordEntry 序列化，undefined 字段自然缺省（不引入显式 null）。
- *  [R4/D6-③] merge 产物经 modelOrUndefined 归一：两侧均空（含旧数据 ""）→ undefined
- *  （缺席），不再以 `?? ""` 收尾产空串。 */
-export function mergeOrphanLastEntry(rec: SubagentRecord, last: SubagentRecord): SubagentRecord {
-  const pickStr = (cur: string | undefined, src: string | undefined): string | undefined =>
-    cur !== undefined && cur !== "" ? cur : src;
-  return {
-    ...rec,
-    batchFinalized: rec.batchFinalized ?? last.batchFinalized,
-    result: pickStr(rec.result, last.result),
-    model: modelOrUndefined(pickStr(rec.model, last.model)),
   };
 }
 

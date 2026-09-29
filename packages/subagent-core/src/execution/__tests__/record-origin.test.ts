@@ -3,18 +3,23 @@
 // record 来源身份 origin/parentRunId（H2 W1，设计 subagent-workflow-record-unification
 // §3.3 D1）持久化链 + 查询面 + 治理面负向规格。
 //
+// v2 单形态（W1 [D1]）：主 session 条目 = 注册（身份域）+ 终态（终局域）两条小条目，
+// 身份域 origin/parentRunId/stepIndex 只落在注册条目；v1 全量快照写点与读面已随兼容层
+// 删除（登记 §3.3），本文件同步到 v2 播种形态与断言面。
+//
 // 锁四件事：
-//   1. 持久化链往返保真：register 落盘（recordToSubagent → toSubagentRecordEntry →
-//      真实 JSONL 序列化）→ scanLastRecordEntries 重建（collectLastRecordEntries →
-//      rebuildEntryRecord 真实路径）→ 两字段不丢。禁手工构造对象绕过 schema——entry
-//      data 一律来自 store.register 的真实落盘产物。
-//   2. 缺省负向：无 origin 的存量 record 落盘产物不含 origin 键（零迁移），重建后
-//      origin === undefined（= "tool" 语义）。
+//   1. 持久化链往返保真：register/archive 真实落盘（appendEntry 通路）→
+//      scanLastRecordEntries 重建（collectV2EntryPairs → v2PairToRecord 真实路径）→
+//      origin/parentRunId/stepIndex 不丢。禁手工构造对象绕过 schema——entry data
+//      一律来自 store.register / store.archive 的真实落盘产物。
+//   2. 缺省负向：无 origin 的存量 record 落 v2 注册条目 origin="tool"（必填域归一），
+//      可选域 parentRunId/stepIndex 序列化自然缺省（零迁移）。
 //   3. 查询面：collectRecords 缺省过滤 origin==="workflow"（includeWorkflow 缺省
 //      false）、includeWorkflow:true 放行；collectRecordsByParentRunId 按 run id
 //      精确列 record（内存 ∪ 磁盘重建口径，不过滤 origin）。
 //   4. 治理面负向保证（D1⑥）：recoverEntryOnlyOrphans / 重建投影不因 origin 过滤——
-//      workflow 来源的 entry-only 孤儿照样被终态化收敛，且终态 entry 保留 origin。
+//      workflow 来源的 entry-only 孤儿（注册条目已在主 session、无事件文件、无子文件锚）
+//      照样被终态化收敛；身份域留在注册条目，纠偏只追加终态条目。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -39,10 +44,11 @@ vi.mock("../persistence/sessions-index.ts", async (importOriginal) => {
 
 import { createRecord } from "../persistence/execution-record.ts";
 import { recordToSubagent } from "../persistence/record-store-rebuild.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry } from "../persistence/record-entry.ts";
-import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
+import type { SubagentRecordEntryV2 } from "../persistence/record-entry.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
+import { v2RegisteredEntry } from "./helpers/v2-record-entry.ts";
 
 /** 构造 ExecutionRecord（base 默认 running one-shot，over 覆盖任意字段）。 */
 function makeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
@@ -59,18 +65,18 @@ function makeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
   return { ...base, ...over };
 }
 
-/** 捕获 register/archive/reportRecordTransition 落盘 entry 的 fake pi。 */
-function makeCapturePi(captured: SubagentRecordEntryData[]): { appendEntry: (customType: string, data: unknown) => void } {
+/** 捕获 register/archive 落盘 entry 的 fake pi。 */
+function makeCapturePi(captured: SubagentRecordEntryV2[]): { appendEntry: (customType: string, data: unknown) => void } {
   return {
     appendEntry: (customType: string, data: unknown) => {
       if (customType !== SUBAGENT_RECORD_CUSTOM_TYPE) return;
-      captured.push(data as SubagentRecordEntryData);
+      captured.push(data as SubagentRecordEntryV2);
     },
   };
 }
 
 /** 把捕获的 entry data 写成主 session JSONL 行（pi appendEntry 的落盘产物形态）。 */
-function writeMainSessionFile(filePath: string, entries: SubagentRecordEntryData[]): void {
+function writeMainSessionFile(filePath: string, entries: SubagentRecordEntryV2[]): void {
   const lines = entries.map((data) =>
     JSON.stringify({
       type: "custom",
@@ -97,9 +103,9 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
     fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("[W1/D1·D7] v2 注册条目携带 origin/parentRunId；v1 快照通道对 v2 条目结构性跳过（往返双面）", () => {
+  it("[W1/D1] v2 注册条目携带 origin/parentRunId；注册 + 终态成对落盘经真实重建路径读回不丢", () => {
     const store = new RecordStore(tmpDir);
-    const captured: SubagentRecordEntryData[] = [];
+    const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
     const rec = makeRecord({ id: "wf-step-1", origin: "workflow", parentRunId: "wf-run-1" });
@@ -113,18 +119,28 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
       parentRunId: "wf-run-1",
     });
 
-    // v1 快照通道（scanLastRecordEntries → collectLastRecordEntries v 门）对 v2 条目
-    // 结构性跳过——身份域的恢复通道已移交事件文件 fold（record-events.ts，U3 消费）；
-    // 此处断言跳过行为本身（零幻影：不产 id+status 幻影行）。
+    // 终态条目（真实 archive 写点）补齐条目对——身份域只在注册条目，重建链按对读回。
+    store.archive({ ...rec, status: "idle", stopReason: "completed", endedAt: 2000, turnCount: 2, totalTokens: 30, result: "ok" });
+    expect(captured).toHaveLength(2);
+    expect(captured[1]).toMatchObject({
+      v: 2,
+      kind: "settled",
+      id: "wf-step-1",
+      status: "idle",
+      stopReason: "completed",
+    });
+
     const mainFile = path.join(rootDir, "main.jsonl");
     writeMainSessionFile(mainFile, captured);
-    const rebuilt = store.scanLastRecordEntries(mainFile);
-    expect(rebuilt.find((r) => r.id === "wf-step-1")).toBeUndefined();
+    const rebuilt = store.scanLastRecordEntries(mainFile).find((r) => r.id === "wf-step-1");
+    expect(rebuilt?.origin).toBe("workflow");
+    expect(rebuilt?.parentRunId).toBe("wf-run-1");
+    expect(rebuilt?.status).toBe("idle");
   });
 
   it("[W1/D1] 缺省归一：无 origin 的 record 落 v2 注册条目 origin=\"tool\"（必填域归一，parentRunId 缺省不含键）", () => {
     const store = new RecordStore(tmpDir);
-    const captured: SubagentRecordEntryData[] = [];
+    const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
     store.register(makeRecord({ id: "legacy-1" }));
@@ -132,6 +148,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
     // v2 契约 origin 必填：undefined 归一 "tool"（消费面负向判定零迁移）；可选域
     // parentRunId 经序列化自然缺省（断言序列化后形态——内存对象保留 undefined 键名）。
     const persisted = JSON.parse(JSON.stringify(captured[0])) as Record<string, unknown>;
+    expect(persisted.kind).toBe("registered");
     expect(persisted.origin).toBe("tool");
     expect(Object.keys(persisted)).not.toContain("parentRunId");
   });
@@ -139,8 +156,6 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   it("重建投影不过滤（D1⑤）：workflow 来源 record 经内存源投影全量返回（includeWorkflow 通道）", () => {
     const store = new RecordStore(tmpDir);
     store.register(makeRecord({ id: "wf-step-2", origin: "workflow", parentRunId: "wf-run-2" }));
-    // [W1/D7] v2 条目不经 v1 重建通道（上方负向断言）；重建投影不过滤的现役断言面
-    // = collectRecords 的 includeWorkflow 通道（内存源投影 recordToSubagent 直传）。
     const all = store.collectRecords(50, "all", "sess-origin", true);
     expect(all.map((r) => r.id)).toContain("wf-step-2");
     expect(all.find((r) => r.id === "wf-step-2")?.origin).toBe("workflow");
@@ -148,7 +163,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
 
   it("[W0 / D1] stepIndex 往返保真：register 落盘 entry 含字段，真实重建路径读回不丢", () => {
     const store = new RecordStore(tmpDir);
-    const captured: SubagentRecordEntryData[] = [];
+    const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
     const rec = makeRecord({ id: "wf-step-idx", origin: "workflow", parentRunId: "wf-run-idx", stepIndex: 7 });
@@ -162,15 +177,17 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
       parentRunId: "wf-run-idx",
     });
 
-    // v1 快照通道对 v2 条目结构性跳过（往返的另一半断言与主往返用例同款）。
     const mainFile = path.join(rootDir, "main-step-idx.jsonl");
     writeMainSessionFile(mainFile, captured);
-    expect(store.scanLastRecordEntries(mainFile).find((r) => r.id === "wf-step-idx")).toBeUndefined();
+    const rebuilt = store.scanLastRecordEntries(mainFile).find((r) => r.id === "wf-step-idx");
+    expect(rebuilt?.stepIndex).toBe(7);
+    expect(rebuilt?.origin).toBe("workflow");
+    expect(rebuilt?.parentRunId).toBe("wf-run-idx");
   });
 
   it("[W0 / D1·W1 v2] stepIndex 缺省负向：无字段 record 落 v2 条目不含键（序列化自然缺省）", () => {
     const store = new RecordStore(tmpDir);
-    const captured: SubagentRecordEntryData[] = [];
+    const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
     store.register(makeRecord({ id: "legacy-step", origin: "workflow", parentRunId: "wf-run-legacy" }));
@@ -279,63 +296,123 @@ describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可
     fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("recoverEntryOnlyOrphans：workflow origin 的 entry-only 孤儿照样纠偏（idle），纠偏 entry 保留 origin（v1 兼容层）", () => {
-    // [W1/D7] 收编定界分流：v1 快照实体保留 v1 纠偏路径（旧会话行为完全不变）——
-    // 种子直接落 v1 快照行（toSubagentRecordEntry——兼容读面的写入侧单源）。
+  it("recoverEntryOnlyOrphans：workflow origin 的 entry-only 孤儿照样纠偏（v2 终态条目），身份域留在注册条目", () => {
+    // v2 entry-only 孤儿形态：主 session 只有注册条目（running，未收口），无事件文件、
+    // 无子 session 文件锚——正是 recoverEntryOnlyOrphans 的判定域。
     const orphan = makeRecord({ id: "wf-orphan", origin: "workflow", parentRunId: "run-G" });
-    const captured: SubagentRecordEntryData[] = [toSubagentRecordEntry(recordToSubagent(orphan))];
+    const registered = v2RegisteredEntry(recordToSubagent(orphan));
+    expect(registered.origin).toBe("workflow");
+    expect(registered.parentRunId).toBe("run-G");
     const mainFile = path.join(rootDir, "main.jsonl");
-    writeMainSessionFile(mainFile, captured);
+    writeMainSessionFile(mainFile, [registered]);
 
     // 新 store（模拟重启后内存恒空）执行恢复链
-    const recovered: SubagentRecordEntryData[] = [];
+    const recovered: SubagentRecordEntryV2[] = [];
     const store2 = new RecordStore(tmpDir);
     store2.setPi(makeCapturePi(recovered));
     store2.recoverEntryOnlyOrphans(mainFile, "sess-origin");
 
-    // 治理面不过滤：workflow origin 孤儿照样被纠偏（[U3 / §3.2.4] 一律保留 idle，
-    // 直断 closed+gc 退役）
-    const finalized = recovered.find((e) => e.id === "wf-orphan");
-    expect(finalized).toBeDefined();
-    expect(finalized?.status).toBe("idle");
-    expect(finalized?.closedReason).toBeUndefined();
-    expect(finalized?.stopReason).toBe("interrupted-by-restart");
-    // 纠偏 entry 保留来源身份（origin/parentRunId 不因恢复链丢失）
-    expect(finalized?.origin).toBe("workflow");
-    expect(finalized?.parentRunId).toBe("run-G");
+    // 治理面不过滤：workflow origin 孤儿照样被终态化收敛（一律 idle + interrupted-by-restart，
+    // 不直断 closed+gc）
+    expect(recovered).toHaveLength(1);
+    const finalized = recovered[0]?.kind === "settled" ? recovered[0] : undefined;
+    expect(finalized).toMatchObject({
+      v: 2,
+      kind: "settled",
+      id: "wf-orphan",
+      status: "idle",
+      stopReason: "interrupted-by-restart",
+    });
+    expect((finalized as { closedReason?: unknown } | undefined)?.closedReason).toBeUndefined();
+    // 终态条目只装终局域——身份域（origin/parentRunId）不重复落
+    expect(Object.keys(JSON.parse(JSON.stringify(finalized)) as Record<string, unknown>)).not.toContain("origin");
+
+    // 纠偏是追加，不重写身份：主文件的注册条目原样保留 origin/parentRunId
+    const seededLine = JSON.parse(fs.readFileSync(mainFile, "utf-8").split("\n")[0]) as {
+      data: { origin?: string; parentRunId?: string };
+    };
+    expect(seededLine.data.origin).toBe("workflow");
+    expect(seededLine.data.parentRunId).toBe("run-G");
   });
 
-  it("toSubagentRecordEntry schema 面：origin/parentRunId 白名单透传（写入侧单点）", () => {
-    // 直连 schema 投影的补充断言（往返用例已锁全链，此处锁字段白名单本身）。
-    // 入参形态 = recordToSubagent 投影产物（SubagentRecord），对齐 record-entry-collect.test.ts。
-    const subagentRecord = {
+  it("[v2/D1] 条目 schema 面：注册条目透传 origin/parentRunId/stepIndex，终态条目收敛终局域（写入侧单点）", () => {
+    // 直连写入侧单点的补充断言（往返用例已锁全链，此处锁两族条目的字段白名单本身）。
+    // 入参 = 真实 register/archive 落盘产物（不手搓 entry data 绕过写侧 schema）。
+    const store = new RecordStore(tmpDir);
+    const captured: SubagentRecordEntryV2[] = [];
+    store.setPi(makeCapturePi(captured));
+
+    const rec = makeRecord({ id: "wf-schema", origin: "workflow", parentRunId: "run-H", stepIndex: 3 });
+    store.register(rec);
+    const registered = captured[0];
+    expect(registered).toMatchObject({
+      v: 2,
+      kind: "registered",
       id: "wf-schema",
       agent: "worker",
       task: "t",
       slug: "origin-test",
-      status: "running" as const,
-      mode: "background" as const,
-      startedAt: 1000,
-      rootSessionId: "sess-origin",
-      parentRecordId: undefined,
-      depth: 0,
-      endedAt: undefined,
-      turns: 1,
-      totalTokens: 0,
-      model: "m",
-      thinkingLevel: undefined,
-      eventLog: [],
-      displayItems: [],
-      origin: "workflow" as const,
+      origin: "workflow",
       parentRunId: "run-H",
-    };
-    const entry = toSubagentRecordEntry(subagentRecord);
-    expect(entry.origin).toBe("workflow");
-    expect(entry.parentRunId).toBe("run-H");
+      stepIndex: 3,
+      rootSessionId: "sess-origin",
+      depth: 0,
+      startedAt: 1000,
+    });
+    // 白名单负向：v1 全量快照字段族不得回流进注册条目（身份条目只装身份域）
+    const registeredKeys = Object.keys(JSON.parse(JSON.stringify(registered)) as Record<string, unknown>);
+    for (const v1Only of [
+      "eventLog",
+      "displayItems",
+      "status",
+      "mode",
+      "endedAt",
+      "turns",
+      "totalTokens",
+      "closedReason",
+      "result",
+      "error",
+    ]) {
+      expect(registeredKeys).not.toContain(v1Only);
+    }
 
-    const { origin: _o, parentRunId: _p, ...legacyShape } = subagentRecord;
-    const legacy = toSubagentRecordEntry(legacyShape);
-    expect(legacy.origin).toBeUndefined();
-    expect(legacy.parentRunId).toBeUndefined();
+    store.archive({
+      ...rec,
+      status: "idle",
+      stopReason: "completed",
+      endedAt: 2000,
+      turnCount: 2,
+      totalTokens: 30,
+      result: "done",
+    });
+    const settled = captured[1];
+    expect(settled).toMatchObject({
+      v: 2,
+      kind: "settled",
+      id: "wf-schema",
+      status: "idle",
+      stopReason: "completed",
+      endedAt: 2000,
+      turns: 2,
+      totalTokens: 30,
+      model: "m",
+      result: "done",
+    });
+    // 终态条目只装终局/统计域——身份域不重复落（origin/parentRunId/stepIndex 归注册条目）
+    const settledKeys = Object.keys(JSON.parse(JSON.stringify(settled)) as Record<string, unknown>);
+    for (const identityOnly of [
+      "origin",
+      "parentRunId",
+      "stepIndex",
+      "agent",
+      "slug",
+      "startedAt",
+      "rootSessionId",
+      "depth",
+      "eventLog",
+      "displayItems",
+    ]) {
+      expect(settledKeys).not.toContain(identityOnly);
+    }
   });
 });

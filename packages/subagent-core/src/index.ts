@@ -302,11 +302,9 @@ export {
   type StatusFilter,
 } from "./execution/persistence/record-store.ts";
 
-// record 落盘 entry 契约：custom entry 写入侧（@experimental U10 / D6）。
-export {
-  SUBAGENT_RECORD_CUSTOM_TYPE,
-  toSubagentRecordEntry,
-} from "./execution/persistence/record-entry.ts";
+// record 落盘 entry 契约（登记 §3.3 后 = v2 注册/终态两条小条目；v1 全量快照写点随
+// 兼容层删除——写侧自定义条目构造入口见下方 v2 条目契约行段）。
+export { SUBAGENT_RECORD_CUSTOM_TYPE } from "./execution/persistence/record-entry.ts";
 
 // ── W1 [D1/D3/D6]：介质归位契约与 tail 原语（U0 新增行段——既有行零改动，
 // cap 族导出行的删改归 U7）。两族 v2 条目契约（版本常量/classify）+
@@ -675,6 +673,8 @@ export {
 export { THINKING_ORDER } from "./shared/model-ref.ts";
 // 定时器上限（壳 tool-workflow.ts OR-1 消费，D3 判定进 barrel）
 export { MAX_TIMER_DELAY_MS } from "./shared/timer-delay.ts";
+// [§2.6] 进程级全局槽键单一声明处（壳侧托管槽 dialogQueue/workflowDomainState 同源消费）。
+export { GLOBAL_SLOT_KEYS, type GlobalSlotName } from "./shared/global-slots.ts";
 // 入口态 fail-fast 断言（time 上界/负值、tokens 负值、slug 长度）：两个 tool 入口
 // 共用的同一份实现（findings g11a-F2；schema 第一道关卡之外，副作用链之前的运行时
 // 第二道）。

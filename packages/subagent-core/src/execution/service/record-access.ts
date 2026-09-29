@@ -21,7 +21,7 @@
 //    #1 留壳共享依赖，getter 现读同一实例（晚绑定形态统一）——深绑测试的 store 读
 //    路径（ServiceInternals）保持生效，断言零改写。
 // 2. 转发壳写法：壳保留同名方法（含原可见性）单行转发；本聚合公共面 = 壳转发面，
-//    聚合内部互调（recoverOrphanRecords / rematerializeReconnectableEntryManifests /
+//    聚合内部互调（recoverOrphanRecords /
 //    coldLookupDeps 消费）保持 private。原 private 方法因壳转发需要可见性放宽为
 //    public（strangler 必然，非行为变化）。
 // 3. 只搬不改：方法体除依赖注入通道替换（this.X → this.deps.getX()）外逐字节保留
@@ -33,7 +33,7 @@ import { toErrorMessage } from "../../core/error-message.ts";
 
 import { bestEffort } from "../assembly/best-effort.ts";
 import { COLD_LOOKUP_SCAN_LIMIT, coldLookupForAction, type ColdLookupDeps } from "../assembly/cold-lookup.ts";
-import { createRecord, isLegacyClosedSettled, project, snapshot } from "../persistence/execution-record.ts";
+import { createRecord, project, snapshot } from "../persistence/execution-record.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import {
   joinEngineModelRef,
@@ -53,7 +53,6 @@ import type { RecordStore, StatusFilter } from "../persistence/record-store.ts";
 import { ENV_SELF_RECORD_ID } from "./service-constants.ts";
 import {
   DEFAULT_AGENT_NAME,
-  isReconnectableFinalReason,
   type ExecuteOptions,
   type ExecutionHandle,
   type ExecutionMode,
@@ -176,7 +175,6 @@ export class RecordAccess {
       });
     }
     try {
-      this.rematerializeReconnectableEntryManifests();
     } catch (err) {
       logger.warn("[subagents] reconnectable entry manifest re-materialization failed", {
         reason: toErrorMessage(err),
@@ -184,59 +182,6 @@ export class RecordAccess {
     }
   }
 
-  /**
-   * [M1 Gate B] 可重连终态 entry 的 manifest 重物化（boot 自愈段）。
-   *
-   * 缺口：编排性关闭（disposeAllRecords）的 manifest 写是 fire-and-forget——SIGKILL /
-   * 崩溃打进 shutdown 窗口时 entry（pi flush）与 manifest 写可能只活下来前者。末条
-   * subagent-record entry 为 closed + closedReason ∈ 可重连集（RECONNECTABLE_FINAL_
-   * REASONS = parent-shutdown/disconnected，types.ts SSOT）的 record，若查询面
-   * （collectRecords：内存∪磁盘∪manifest）已不可见，则从 entry 自描述快照重物化
-   * manifest——恢复 list 可见性 + message 的可重连分流（D4 revive 准入仍由
-   * cold-lookup 四守卫把门，重物化只补反查索引，不复活任何执行态）。
-   *
- * 刻意收窄的语义边界：
- *  - 只认可重连集（RECONNECTABLE_FINAL_REASONS = disconnected/parent-shutdown）。
- *    重物化是可见性自愈的窄口：只对「查询面已不可见且 entry 自描述为旧 closed 读形态」
- *    的条目补 manifest 反查索引，不复活任何执行态。按 closedReason 集合 gate 是桥接期
- *    残留——万物可续模型下续聊资格由冷查物理三件套判定（§3.2.3），本集合判据随桥接
- *    词汇清算统一收口（M1 负向断言锁定现值）。
-   *  - 只补本 rootSessionId 的 entry（每 session boot 治自己的树；跨 session 记录
-   *    归属其自身 boot 段，防本进程替异树批量落盘）。
-   *  - 已可见（磁盘锚或 manifest 幸存）的 id 跳过——重物化是幂等补缺，不是覆写源。
-   */
-  private rematerializeReconnectableEntryManifests(): void {
-    if (this.deps.getMainSessionFile() === undefined) return;
-    const visibleIds = new Set(
-      // [S3] includeWorkflow:true：已可见判定是全量存在性判定（幂等跳过守卫），
-      // 不吃 origin 缺省过滤——否则已可见的 reconnectable workflow record 被误判
-      // 不可见，每次 boot 冗余重物化 manifest（治理/全态查询语义，同 lookupRecordAnyState）。
-      this.deps.getStore().collectRecords(COLD_LOOKUP_SCAN_LIMIT, "all", undefined, true).map((r) => r.id),
-    );
-    for (const rec of this.deps.getStore().scanLastRecordEntries(this.deps.getMainSessionFile())) {
-      if (visibleIds.has(rec.id)) continue; // 查询面已可见：磁盘锚或 manifest 幸存
-      if (rec.rootSessionId !== this.deps.getSessionRootId()) continue; // 只治本 session 树
-      // [W2/V3 D5 桥接判据收敛] 旧「closed 终态」读判定 ⟺ isLegacyClosedSettled（唯一权威谓词）。
-      if (!isLegacyClosedSettled(rec)
-        || !isReconnectableFinalReason(rec.closedReason)) continue;
-      // manifest 投影补写走 store 公开原语（[H4 收口 / G1] store 外零 manifest 直写；
-      // status 恒 closed——entry 的 closed 即终态自描述，无 running 形态可达此处）。
-      this.deps.getStore().rematerializeManifest({
-        id: rec.id,
-        rootSessionId: rec.rootSessionId ?? "",
-        parentRecordId: rec.parentRecordId,
-        agentName: rec.agent,
-        status: "closed",
-        closedReason: rec.closedReason,
-        createdAt: rec.startedAt,
-        completedAt: rec.endedAt ?? Date.now(),
-        sessionFile: rec.sessionFile,
-        task: rec.task,
-        slug: rec.slug,
-        model: rec.model,
-      });
-    }
-  }
 
   /** 启动清扫：manifest tmp 残留（崩溃打断的原子写留下的 *.json.tmp.<pid>）静默删除
    *  ——[U4c / D6] tmp 恢复已退役（manifest 是可丢可重建缓存，promote 语义失效）。

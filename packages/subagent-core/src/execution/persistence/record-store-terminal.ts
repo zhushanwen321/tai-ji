@@ -63,7 +63,6 @@ export interface TerminalCtx {
   archive: (record: ExecutionRecord) => void;
   register: (record: ExecutionRecord) => void;
   reportRecordTransition: (record: ExecutionRecord) => void;
-  reportSubagentRecord: (record: SubagentRecord) => void;
   /** manifest 落盘统一通道（record-store.ts 私有 writeManifestPersisted 注入位）。 */
   writeManifestPersisted: (id: string, manifest: ManifestRecord) => void;
   /** 终态 manifest 落盘（record-store.ts 私有 writeTerminalManifest 注入位）。 */
@@ -682,9 +681,8 @@ export interface V2EntryState {
 
 /**
  * 主 session 内容 → 每 id 的 v2 条目定界状态（收编双面证据第二条，D4）。
- * v1 快照行不在本扫描面（v 门跳过——收编定界按注册条目形态分流：v1 实体保留
- * v1 纠偏循环，D7 兼容层）。判定单源 = classifySubagentRecordEntryData（u2b），
- * 快过滤与 collectLastRecordEntries 同款（customType 子串）。
+ * 判定单源 = classifySubagentRecordEntryData（登记 §3.3 后 v2-only，旧形态已删）。
+ * 快过滤与 collectV2EntryPairs 同款（customType 子串）。
  */
 export function collectV2EntryState(content: string): Map<string, V2EntryState> {
   const out = new Map<string, V2EntryState>();
@@ -700,7 +698,7 @@ export function collectV2EntryState(content: string): Map<string, V2EntryState> 
     const obj = parsed as Record<string, unknown>;
     if (obj.type !== "custom" || obj.customType !== SUBAGENT_RECORD_CUSTOM_TYPE) continue;
     const verdict = classifySubagentRecordEntryData(obj.data);
-    if (!verdict.ok && verdict.reason === "v2") {
+    if (verdict.ok) {
       const entry = verdict.entry;
       const prev =
         out.get(entry.id) ?? { registered: false, settled: false, settledStopReason: undefined, rootSessionId: undefined };
@@ -762,6 +760,30 @@ export function buildAdoptedSettledEntry(
     ...(bound !== undefined ? { engine: bound.engine } : {}),
     ...(bound !== undefined ? { engineHandle: bound.engineHandle } : {}),
     ...(bound !== undefined && bound.sessionFile !== "" ? { sessionFile: bound.sessionFile } : {}),
+  };
+}
+
+/**
+ * entry-only 孤儿纠偏产物（登记 §3.3）：主 session 有 v2 注册条目、无子 session 文件、
+ * 无事件文件（spawn 窗口期死亡）时的终态条目。事件面缺席 → 统计诚实 0，停因缺省
+ * interrupted-by-restart；身份域无载荷可补（注册条目已在场）。
+ */
+export function buildEntryOnlyOrphanSettledEntry(
+  id: string,
+  stopReason: StopReason,
+  now: number,
+): SubagentRecordSettledEntryData {
+  return {
+    v: SUBAGENT_RECORD_ENTRY_VERSION,
+    kind: "settled",
+    id,
+    status: "idle",
+    stopReason,
+    endedAt: now,
+    turns: 0,
+    totalTokens: 0,
+    model: undefined,
+    thinkingLevel: undefined,
   };
 }
 

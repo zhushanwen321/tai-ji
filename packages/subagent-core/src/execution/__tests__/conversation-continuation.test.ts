@@ -74,7 +74,7 @@ import {
   registerSpawnedChildForRecord,
 } from "../engine/host/spawned-children.ts";
 import type { ExecutionRecord } from "../assembly/types.ts";
-import { SUBAGENT_RECORD_CUSTOM_TYPE, type SubagentRecordEntryData } from "../persistence/record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE, type SubagentRecordEntryV2 } from "../persistence/record-entry.ts";
 
 // [U4] 锚可解析性 fixture（模块级——makeRecord 缺省锚消费）：每个用例独立 tmp 文件。
 beforeEach(() => {
@@ -1445,7 +1445,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
   let store: RecordStore;
   let pi: PiMock;
   let fake: FakePiEnginePort;
-  let entries: SubagentRecordEntryData[];
+  let entries: SubagentRecordEntryV2[];
   let prevDataDirEnv: string | undefined;
 
   beforeEach(() => {
@@ -1468,7 +1468,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     entries = [];
     pi.appendEntry.mockImplementation(
       (customType: string, data: unknown) => {
-        if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryData);
+        if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryV2);
       },
     );
     service.initSession({ pi, sessionId: "root-session" });
@@ -1486,8 +1486,9 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
   });
 
   /** 本 record 的 entry 序列（appendEntry 捕获投影）。 */
-  function entriesFor(id: string): SubagentRecordEntryData[] {
-    return entries.filter((e) => (e as { id?: string }).id === id);
+  function entriesFor(id: string): SubagentRecordEntryV2[] {
+    // id 是 v2 两族（registered / settled）共有字段，无需按 kind 窄化。
+    return entries.filter((e) => e.id === id);
   }
 
   it("chat 轮：message_end(usage) → totalTokens/turnCount 实时累积；轮终 entry 保真；跨轮持续；close 终态 entry 保真", async () => {

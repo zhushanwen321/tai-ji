@@ -49,7 +49,7 @@ import { SubagentStream } from "../assembly/stream-sink.ts";
 import { SAR_UNATTACHED_PARENT_RUN_ID } from "../assembly/subprocess-agent-runner.ts";
 import { SubagentService } from "../subagent-service.ts";
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
-import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
+import type { SubagentRecordEntryV2 } from "../persistence/record-entry.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
 import { resetCoreForTests } from "../../core/host-services.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
@@ -74,7 +74,7 @@ interface DispatchHarness {
   store: RecordStore;
   pi: PiMock;
   fake: FakePiEnginePort;
-  entries: SubagentRecordEntryData[];
+  entries: SubagentRecordEntryV2[];
   tmpRoot: string;
 }
 
@@ -95,9 +95,9 @@ function makeHarness(opts: {
   });
   const service = new SubagentService({ cwd: agentDir, modelService });
   const pi = makePi();
-  const entries: SubagentRecordEntryData[] = [];
+  const entries: SubagentRecordEntryV2[] = [];
   pi.appendEntry.mockImplementation((customType: string, data: unknown) => {
-    if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryData);
+    if (customType === SUBAGENT_RECORD_CUSTOM_TYPE) entries.push(data as SubagentRecordEntryV2);
   });
   service.initSession({
     pi,
@@ -251,8 +251,9 @@ describe("executeWorkflowAgent 注册面", () => {
 
     run.settle({ content: "done" });
     await pending;
-    // register 落盘 entry（recordToSubagent → toSubagentRecordEntry 投影）同步携带
-    const withStep = entries.find((e) => e.stepIndex === 3);
+    // register 落盘 entry（recordToSubagent → v2 注册条目投影）同步携带
+    // stepIndex 仅存在于 registered 变体（settled 无该域）——按 kind 窄化后查找。
+    const withStep = entries.find((e) => e.kind === "registered" && e.stepIndex === 3);
     expect(withStep).toMatchObject({ id: record.id, origin: "workflow", parentRunId: "run-step" });
 
     // 缺省负向：不传 stepIndex（SAR 直调占位路径 / 旧调用方形态）→ undefined
@@ -513,10 +514,12 @@ describe("executeWorkflowAgent live usage 喂入（H2 A3）", () => {
     await pending;
 
     // 失败收口不受喂入影响（终态 entry 正常落盘）
+    // status 仅存在于 settled 变体（v2 判别联合）——先按 kind 窄化再读。
     const finalEntry = entries.at(-1);
-    expect(finalEntry).toBeDefined();
-    expect(finalEntry!.status).toBe("idle");
-    expect(store.getMutable(finalEntry!.id)).toBeUndefined();
+    expect(finalEntry?.kind).toBe("settled");
+    if (finalEntry?.kind !== "settled") throw new Error("expected settled entry");
+    expect(finalEntry.status).toBe("idle");
+    expect(store.getMutable(finalEntry.id)).toBeUndefined();
   });
 });
 
