@@ -675,7 +675,11 @@ function rebuildRunFromRecord(
     scriptSource: created.scriptSource ?? "",
     args: created.args ?? parseArgsSummary(created.argsSummary),
     scriptName: created.workflowName,
-    scriptPath: "",
+    // 锚定恢复：scriptPath 与 scriptSource/args 同为 run-created 帧恢复面（worker
+    // 沙箱 eval 模式无 __dirname，模板脚本靠它定位 _shared 族共享件）；旧格式帧
+    // 缺失回落空串，由模板脚本内建 fail-fast 拒绝（壳侧 foldRecordStreamToRun
+    // 同款恢复，两侧行为等价由测试锁定）
+    scriptPath: created.scriptPath ?? "",
     ...(created.model !== undefined ? { model: created.model } : {}),
   };
   // call 重建中间形态（Trace 先建——traceNode 回链 D-10 引用共享；重派集成员

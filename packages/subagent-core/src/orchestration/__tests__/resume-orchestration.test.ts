@@ -58,7 +58,7 @@ function scanEvents(runId: string): Promise<readonly WorkflowRunEvent[]> {
 /** 预置「崩溃收编后」record 流：2 settled + 1 in-flight + run-interrupted。 */
 async function seedInterruptedRecord(
   runId: string,
-  opts: { scriptSource?: string; withSessionFile?: boolean } = {},
+  opts: { scriptSource?: string; scriptPath?: string; withSessionFile?: boolean } = {},
 ): Promise<void> {
   const journal = createRunEventJournal(journalDir);
   await journal.append(runId, {
@@ -67,6 +67,7 @@ async function seedInterruptedRecord(
     workflowName: "test-wf",
     argsSummary: "{}",
     scriptSource: opts.scriptSource ?? SCRIPT_SOURCE,
+    ...(opts.scriptPath !== undefined ? { scriptPath: opts.scriptPath } : {}),
     ts: T0,
   });
   await journal.append(runId, {
@@ -147,7 +148,7 @@ function expectRejection(p: Promise<unknown>, fragment: string): Promise<void> {
 
 describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
   it("run-resumed 落 record + 聚合重建（回放集 done+result / 重派集不建条目）+ worker 接管 + v2 条目 + pending:register", async () => {
-    await seedInterruptedRecord("wf-main");
+    await seedInterruptedRecord("wf-main", { scriptPath: "/abs/workflows/fan-out.js" });
     const { deps, runs, appendEntry, emit } = makeDeps();
 
     const returned = await resumeRun("wf-main", deps, { now: () => T0 + 100_000 });
@@ -169,6 +170,8 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
     expect(run!.state.status).toBe("running");
     expect(run!.runtime).toBeDefined();
     expect(run!.spec.scriptSource).toBe(SCRIPT_SOURCE);
+    // 锚定恢复：scriptPath 从 run-created 帧逐字恢复（worker 沙箱 _shared 定位来源）
+    expect(run!.spec.scriptPath).toBe("/abs/workflows/fan-out.js");
     const replayed = run!.state.calls.get(0);
     expect(replayed?.status).toBe("done");
     expect(replayed?.result?.content).toBe("result-0");
@@ -181,6 +184,15 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
     expect(entry.runId).toBe("wf-main");
     // pending 信号（复活 = 对当前 session 重新可见）
     expect(emit).toHaveBeenCalledWith("pending:register", expect.objectContaining({ id: "wf-main" }));
+  });
+
+  it("旧格式帧（无 scriptPath 载荷）：重建回落空串（现状行为不劣化，inline 脚本不受影响）", async () => {
+    await seedInterruptedRecord("wf-legacy"); // 不传 scriptPath = scriptPath 载荷落地前的旧格式帧
+    const { deps, runs } = makeDeps();
+
+    await resumeRun("wf-legacy", deps, { now: () => T0 + 100_000 });
+
+    expect(runs.get("wf-legacy")!.spec.scriptPath).toBe("");
   });
 
   it("D8 档 3（会话文件不可知/不存在）：重派集成员不补收、不建条目——worker 重放时真实派发", async () => {

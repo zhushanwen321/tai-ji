@@ -30,3 +30,7 @@ tech-design-wf 设计流程已于 2026-09-29 启动，设计文档将落 `.tmp/t
 
 - 真机终判：`.tmp/dev-flow/workflow-run-store-convergence.acceptance/a1a4/verdict.json` A4_completion 字段（BLOCKED）
 - workflow resume 线 handoff 审查发现的登记缺失项（本文件补 tracked 登记）
+
+## 处置状态
+
+已实施（2026-09-29）：采纳候选 A——run-created 帧携带可选 scriptPath 载荷（与 args/scriptSource 同款 additive 纪律），core rebuildRunFromRecord 与壳 foldRecordStreamToRun 双侧恢复；顺带把六个内置模板的 scriptPath 检查从「非 string」收紧到「非空」（旧格式帧回落的失败从无指引的 Node 原生错误变为带恢复指引的 fail-fast）。设计档案：`.tmp/tech-design/workflow-resume-scriptpath-recovery.md`（含 8 条用例走查）；候选 B/C 的否决理由在设计的方案对比节。剩余：a1a4 真机复跑终判（BLOCKED → PASS，需 TAIJI_PI_LIVE 凭证 + 空载串行，未在本批执行）。

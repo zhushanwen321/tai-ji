@@ -335,6 +335,15 @@ export interface RunCreatedEvent extends EventEnvelope {
    * 写侧契约由写入方承担（写入点 = worker-message-pump dispatchRunCreated）。
    */
   scriptSource?: string;
+  /**
+   * 脚本文件所在目录的路径锚定（RunSpec.scriptPath 原文——worker 沙箱 eval 模式
+   * 无 __dirname，模板脚本靠 workerData.scriptPath 定位 _shared 族共享件）。
+   * resume 重建 spec 时从本字段恢复锚定；缺失 = 旧格式行回落空串，旧 run 的模板
+   * 脚本 resume 由模板脚本内建 fail-fast 拒绝（已知边界，不走兼容读）。可选 =
+   * 读取面对旧格式行放行，写侧契约由写入方承担（写入点 = terminal-actions
+   * dispatchRunCreated，与 scriptSource 同款条件式）。
+   */
+  scriptPath?: string;
 }
 
 /**

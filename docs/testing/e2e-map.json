@@ -1267,10 +1267,11 @@
     },
     {
       "id": "E2E-RESUME-01",
-      "summary": "workflow run 断点续跑确定性场景族（scenario-01…25 无门段：主链回放 / 拒绝族 / 三档恢复 / 预算 / 重建保真 / D14 args 校验）+ record-mode 夹具族 + 壳层与 core 侧 resume 单测（进程内真 resumeRun + faux runner，零 token）",
+      "summary": "workflow run 断点续跑确定性场景族（scenario-01…25 无门段：主链回放 / 拒绝族 / 三档恢复 / 预算 / 重建保真 / D14 args 校验）+ record-mode 夹具族 + 壳层与 core 侧 resume 单测（进程内真 resumeRun + faux runner，零 token；含内置模板 scriptPath 守卫探针族 review-fix-loop-scriptpath-failfast——空串形态 = 旧 record 流 resume）",
       "scope": [
         "extensions/universal/subagent-workflow/src/**",
-        "packages/subagent-core/src/orchestration/**"
+        "packages/subagent-core/src/orchestration/**",
+        "packages/subagent-core/workflows/**"
       ],
       "layer": "L1",
       "assets": [

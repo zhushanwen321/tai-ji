@@ -51,12 +51,15 @@ const RESULT_CALL_2 = {
 
 const SCRIPT_SOURCE = "const a = await agent('stage-1');\nconst b = await agent('stage-2');\nconst c = await agent('stage-3');\nreturn { a, b, c };";
 
+/** run-created 帧的 scriptPath 锚定载荷（fold 重建恢复面的断言锚）。 */
+const SCRIPT_PATH = "/abs/packages/subagent-core/workflows/fan-out.js";
+
 const T0 = 1_759_000_000_000;
 
 /** 写入崩溃瞬间的事件链：run-created + 3×dispatched + 2×settled（全文），无 run-settled。 */
 async function seedCrashedRun(env: RecordFixtureEnv): Promise<void> {
   await appendEvents(env, RUN_ID, [
-    runCreated({ ts: T0, runId: RUN_ID, scriptSource: SCRIPT_SOURCE }),
+    runCreated({ ts: T0, runId: RUN_ID, scriptSource: SCRIPT_SOURCE, scriptPath: SCRIPT_PATH }),
     askDispatched({ ts: T0 + 10, taskIndex: 0, agentName: "stage-1", phase: "build" }),
     askDispatched({ ts: T0 + 20, taskIndex: 1, agentName: "stage-2", phase: "build" }),
     askDispatched({ ts: T0 + 30, taskIndex: 2, agentName: "stage-3", phase: "report" }),
@@ -101,6 +104,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
     // run 级：身份 + 脚本体 + 崩溃形态状态
     expect(run!.runId).toBe(RUN_ID);
     expect(run!.spec.scriptSource).toBe(SCRIPT_SOURCE);
+    expect(run!.spec.scriptPath).toBe(SCRIPT_PATH);
     expect(run!.spec.scriptName).toBe("fidelity-script");
     expect(run!.state.status).toBe("running"); // 无 run-settled 帧 = 交恢复链收编
 
@@ -168,5 +172,16 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
     expect(run!.state.reason).toBe("completed");
     expect(run!.meta.startedAt).toBe(new Date(T0).toISOString());
     expect(run!.meta.completedAt).toBe(new Date(T0 + 2000).toISOString());
+  });
+
+  it("旧格式帧（无 scriptPath 载荷）：fold 重建回落空串（现状行为不劣化）", async () => {
+    await appendEvents(env, RUN_ID, [
+      runCreated({ ts: T0, runId: RUN_ID, scriptSource: SCRIPT_SOURCE }),
+      runSettled({ ts: T0 + 1000, outcome: "done" }),
+    ]);
+    const entries = [registeredEntry(RUN_ID, env.recordPath(RUN_ID))];
+    const store = new JsonlRunStore({ sessionDir: env.sessionDir, ctx: mkCtxWith(entries) as never });
+    const [run] = await store.loadAll();
+    expect(run!.spec.scriptPath).toBe("");
   });
 });

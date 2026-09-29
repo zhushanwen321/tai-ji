@@ -59,14 +59,14 @@ function scanRunEvents(runId: string) {
 }
 
 /** 构造真实 WorkflowRun（真实状态机 transition）。 */
-function makeRealRun(runId: string): WorkflowRun {
+function makeRealRun(runId: string, specOverrides: { scriptPath?: string } = {}): WorkflowRun {
   const run = new WorkflowRun(
     runId,
     {
       scriptName: "test-wf",
       scriptSource: "agent('hi')",
       args: {},
-      scriptPath: "/tmp/test-wf.js",
+      scriptPath: specOverrides.scriptPath ?? "/tmp/test-wf.js",
     },
     {
       status: "running",
@@ -139,6 +139,21 @@ describe("finalizeRun 落 run-settled（终态单写点）", () => {
     // 零 ask run：正点 run-created + run-settled
     expect(events.map((e) => e.type)).toEqual(["run-created", "run-settled"]);
     expect(events[1]).toMatchObject({ type: "run-settled", outcome: "done" });
+  });
+
+  it("run-created 帧携带 scriptPath 锚定载荷（spec.scriptPath 非空才落字段——空值防御形态不落）", async () => {
+    const run = makeRealRun("wf-ev-anchor");
+    await dispatchRunCreated(run);
+
+    const events = await scanRunEvents("wf-ev-anchor");
+    expect(events[0]).toMatchObject({ type: "run-created", scriptPath: "/tmp/test-wf.js" });
+
+    const empty = makeRealRun("wf-ev-anchor-empty", { scriptPath: "" });
+    await dispatchRunCreated(empty);
+
+    const emptyEvents = await scanRunEvents("wf-ev-anchor-empty");
+    expect(emptyEvents[0]).toMatchObject({ type: "run-created" });
+    expect("scriptPath" in emptyEvents[0]).toBe(false);
   });
 
   it("failed → run-settled(failed)，reason 承载诊断文本", async () => {

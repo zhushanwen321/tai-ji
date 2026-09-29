@@ -525,6 +525,9 @@ export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> 
     // 的未截断形态，截断即两处读面退化（比对拒绝 / $ARGS 回落 {}）。
     args: run.spec.args,
     argsSummary: summarizeRunArgs(run.spec.args),
+    // scriptPath 锚定（worker 沙箱相对 require 的目录来源）：空值不落字段——
+    // 读侧对缺失回落空串（旧格式行），与 model 同款条件式
+    ...(run.spec.scriptPath ? { scriptPath: run.spec.scriptPath } : {}),
     ...(run.spec.model !== undefined ? { model: run.spec.model } : {}),
     ts: Date.now(),
   });

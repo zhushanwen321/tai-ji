@@ -335,7 +335,10 @@ function foldRecordStreamToRun(
     // 同款语义；两侧行为等价由 record-mode 测试锁定）
     args: created?.args ?? parseLegacyArgsSummary(created?.argsSummary),
     scriptName: reg.scriptName,
-    scriptPath: "",
+    // 锚定恢复（core rebuildRunFromRecord 同款，两侧行为等价由 record-mode 测试
+    // 锁定）：worker 沙箱 eval 模式无 __dirname，模板脚本靠 scriptPath 定位
+    // _shared 族共享件；旧格式帧缺失回落空串
+    scriptPath: created?.scriptPath ?? "",
     ...(reg.slug !== undefined ? { slug: reg.slug } : {}),
   };
 
