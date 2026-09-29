@@ -140,6 +140,11 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
     // [D2] 中断非终局：重建产物维持 running（终局判据归 fold；无 done/reason 收敛）
     expect(run!.state.status).toBe("running");
     expect(run!.state.reason).toBeUndefined();
+    // 中断标记投影（U10）：流含 run-interrupted、无 run-settled → meta.interruptedAt
+    // 置位（= 帧 ts ISO）——runSummary/displayStatusOf 投影 'interrupted'，CLI/TUI
+    // 不显示僵尸「运行中」；resume 复活流清该标记（lastInterruptedAt 尾向遇
+    // run-resumed 返回 undefined）
+    expect(run!.meta.interruptedAt).toBe(new Date(T0 + 100_000).toISOString());
     // 收编后数据不丢（设计目标 1 的断言面）：全文载荷原样保真
     expect(run!.spec.scriptSource).toBe(SCRIPT_SOURCE);
     expect(run!.state.calls.get(0)!.result).toEqual(RESULT_CALL_1);

@@ -91,6 +91,13 @@ function getCachedMainSessionFile(): string | undefined {
  * 时（AGENTS.md 规则 6：首条 assistant 消息前可能不存在）返回 undefined，调用方
  * （fork 解析 / 孤儿恢复）对该场景本就无 entry 可读。
  *
+ * 布局对齐 pi 实装 getSessionsDir（config.js）：session 文件落
+ * `<agentDir>/sessions/<encoded-cwd>/` 子目录（session-manager.js——`--<cwd 编码>--`
+ * 目录内 `<ts>_<sessionId>.jsonl`；与 collectAliveWorkflowRunReferences 同一布局
+ * 锚点）。子目录枚举 + 文件名后缀段 `<ts>_<sessionId>.jsonl` 匹配，slug 目录名不
+ * 解析（pi 编码规则演进不影响按 id 命中）。任一层 readdir 失败（sessions 根不存在
+ * 等）返回 undefined，调用方回落 getSessionFile()。
+ *
  * [pi 锚点 ADR-0063 I4] getSessionFile attach 语义：返回 `this.sessionFile` 字段
  * （pi-mono coding-agent/src/core/session-manager.ts :1011-1013），该字段仅在
  * _setSessionFile（:884/:895-896，constructor 显式路径或 setSessionFile）与
@@ -99,13 +106,26 @@ function getCachedMainSessionFile(): string | undefined {
  * 仍回旧值（与 E2E 实测一致）。clone v0.84.2 核对，实装 0.84.4。
  */
 function resolveMainSessionFileById(sessionId: string): string | undefined {
-  const sessionsDir = path.join(getAgentDir(), "..", "sessions");
+  const sessionsRoot = path.join(getAgentDir(), "sessions");
+  let slugDirs: string[];
   try {
-    const match = fs.readdirSync(sessionsDir).find((f) => f.endsWith(`_${sessionId}.jsonl`));
-    return match === undefined ? undefined : path.join(sessionsDir, match);
+    slugDirs = fs
+      .readdirSync(sessionsRoot, { withFileTypes: true })
+      .filter((ent) => ent.isDirectory())
+      .map((ent) => path.join(sessionsRoot, ent.name));
   } catch {
     return undefined;
   }
+  const suffix = `_${sessionId}.jsonl`;
+  for (const dir of slugDirs) {
+    try {
+      const match = fs.readdirSync(dir).find((f) => f.endsWith(suffix));
+      if (match !== undefined) return path.join(dir, match);
+    } catch {
+      continue; // 单子目录读失败继续其余（宁回落 getSessionFile，不中断装配）
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -612,15 +632,35 @@ async function runProcessLevelMaintenance(
       // 壳侧注入面（core 不 import pi SDK——全池 session 文件流式扫描，v2 注册
       // 条目 ∪ v1 快照条目 ∪ pre-W17 link 指针三代解析的并集）。同维护轮触发点、
       // 同 oncePerProcess 守卫（幂等整轮）；宽限窗缺省 7 天（env 可调）。
-      await reapOrphanRuns(
-        { stateDir: path.join(resolveSessionDir(), STATE_DIR_NAME) },
-        {
-          collectAliveRunReferences: () => collectAliveWorkflowRunReferences(agentDir),
-          warn: (msg) => logger.warn(`[subagent-workflow] ${msg}`),
-          debug: (msg) => logger.debug(`[subagent-workflow] ${msg}`),
-          toMsg: (err: unknown) => toErrorMessage(err),
-        },
-      );
+      // 触发面 = 全部 state 目录（对齐 core pi-host-run-store 枚举口径：agentDir
+      // 根回退 + sessions/<slug>/workflow-state 全目录 + 本 session 锚定目录）——
+      // 「引用 session 全删的目录」的残留 run 对本 session 维护轮结构性可达，判定
+      // 与删除判据归 core reapOrphanRuns，本处只做目录枚举。引用集预采集一次复用
+      // 全部目录（同轮同快照，逐目录重复全池扫描无增益）；登记文件
+      // （orphan-run-reap.json）落各自 stateDir，多目录天然隔离。
+      const stateDirs = new Set<string>([
+        path.join(resolveSessionDir(), STATE_DIR_NAME),
+        path.join(agentDir, STATE_DIR_NAME),
+      ]);
+      try {
+        for (const ent of fs.readdirSync(path.join(agentDir, "sessions"), { withFileTypes: true })) {
+          if (ent.isDirectory()) {
+            stateDirs.add(path.join(agentDir, "sessions", ent.name, STATE_DIR_NAME));
+          }
+        }
+      } catch {
+        // sessions 根不存在 = 从未落盘（首次运行形态），仅保留上方两目录锚
+      }
+      const aliveRefs = collectAliveWorkflowRunReferences(agentDir);
+      const reapDeps = {
+        collectAliveRunReferences: () => aliveRefs,
+        warn: (msg: string) => logger.warn(`[subagent-workflow] ${msg}`),
+        debug: (msg: string) => logger.debug(`[subagent-workflow] ${msg}`),
+        toMsg: (err: unknown) => toErrorMessage(err),
+      };
+      for (const dir of stateDirs) {
+        await reapOrphanRuns({ stateDir: dir }, reapDeps);
+      }
     });
   } catch (err) {
     logger.warn("[subagents] retention maintenance round failed", {
@@ -671,10 +711,11 @@ async function createSessionRunState(
   let storeHealthy = true;
   // [skill-reload D4] 恢复门控：session_start(reason==='reload') 全程不跑
   // recoverCrashedRuns（无论条目有无）。暗礁（设计 §2.4）：recoverCrashedRuns 判
-  // 「crashed」只认 record 事件流 fold——loadAll 折叠重建出 running 态即经
-  // interruptRun（终局编排单一入口）收编，事件流不含进程存活信息、窗口内存活
-  // run 的流同样是 running 形态——契约前提是「拥有这些 run 的进程已死」，而
-  // reload 恰恰证明进程没死，跑恢复即误杀窗口内存活的 run。条目缺失场景同理
+  // 「crashed」只看 record fold 出的 running 态（loadAll 产物；runs Map 内存活
+  // run 不参与判定）——loadAll 折叠重建出 running 态即经 interruptRun（终局编排
+  // 单一入口）收编，事件流不含进程存活信息、窗口内存活 run 的流同样是 running
+  // 形态——契约前提是「拥有这些 run 的进程已死」，而 reload 恰恰证明进程没死，
+  // 跑恢复即误杀窗口内存活的 run。条目缺失场景同理
   // 门控：磁盘可能有本 session 的 running entry（前一轮 adoption 未完成又
   // reload 的窗口），由下一次**非 reload** 的 session_start（真重启/切换）按既有
   // kill-9 语义收编。跳过 loadAll 时无从证伪健康度：storeHealthy 保持 true

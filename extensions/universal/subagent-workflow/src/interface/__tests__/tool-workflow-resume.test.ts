@@ -188,6 +188,23 @@ describe("actionResume", () => {
     expect(vi.mocked(resumeRun)).not.toHaveBeenCalled();
   });
 
+  it("argsSummary 被篡改为非法 JSON → 拒绝含恢复指引（不含裸 SyntaxError；U21 与 malformed 分支同构）", async () => {
+    // 字段篡改形态：未截断摘要字符串是非法 JSON（JSON.stringify 只把它当字符串值
+    // 序列化，读取面 parse 必炸）——catch 后抛结构化拒绝文案，原生 SyntaxError
+    // 不透出。
+    const recordPath = writeRecordStream([runCreatedFrame("{broken json")]);
+    const err = await actionResume(
+      { action: "resume", runId: "wf-test", args: { a: 1 } } as never,
+      makeDeps(recordPath) as never,
+    ).catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain("Resume rejected: original args of run wf-test are malformed");
+    expect(err.message).toContain("Recovery: inspect the record file");
+    expect(err.message).toContain("start a new run");
+    expect(err.message).not.toContain("SyntaxError");
+    expect(vi.mocked(resumeRun)).not.toHaveBeenCalled();
+  });
+
   it("time 形参透传 budgetTimeMs（u2 偏差②：预算经 D14 同款通道传入）", async () => {
     const recordPath = writeRecordStream([runCreatedFrame('{"a":1}')]);
     await actionResume(

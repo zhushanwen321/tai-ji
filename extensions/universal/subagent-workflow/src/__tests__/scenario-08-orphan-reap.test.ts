@@ -250,4 +250,40 @@ describe("场景 8：终局化移除 + 对账清理（真装配维护轮 + 壳�
     // run 侧帧零追加（reap 只登记/删除，不落 run-settled / run-interrupted）
     expect(fs.readFileSync(path.join(stateDir, "wf-s8-noevents.record.jsonl"), "utf8")).toBe(before);
   });
+
+  it("多目录触发面：引用 session 已删的其他 slug 目录残留 run 同轮回收（本 session 锚定目录覆盖不回归）", async () => {
+    // docError5 接线（维护轮全目录枚举 reapOrphanRuns，对齐 core pi-host-run-store
+    // 枚举口径）：单目录触发面下「引用 session 全删的其他 slug 目录」残留 run 结构性
+    // 不可达——本用例构造两个目录各一个孤儿 run（宽限调零 + 老化 mtime），一轮维护
+    // 后两处都被回收。
+    process.env[ORPHAN_RUN_GRACE_WINDOW_MS_ENV] = "0";
+    // 目录 A：本 session 锚定目录（夹具形态 = resolvePiSessionScopedDir 回退的
+    // agentDir 根）——既有覆盖不回归
+    seedRunFootprint("wf-s8-local");
+    ageFootprint("wf-s8-local", OLD);
+    // 目录 B：其他 cwd 的 slug 目录 workflow-state（引用 session 已删的残留形态）
+    const otherStateDir = path.join(sessionsRoot, "--other-cwd--", STATE_DIR_NAME);
+    fs.mkdirSync(otherStateDir, { recursive: true });
+    const suffixes = [".record.jsonl", ".json", ".jsonl", ".events.jsonl", ".resume.lock"];
+    for (const suffix of suffixes) {
+      fs.writeFileSync(path.join(otherStateDir, `wf-s8-cross${suffix}`), '{"fixture":true}\n', "utf8");
+    }
+    const aged = new Date(OLD);
+    for (const suffix of suffixes) {
+      fs.utimesSync(path.join(otherStateDir, `wf-s8-cross${suffix}`), aged, aged);
+    }
+
+    await runMaintenanceRound("sess-multi-1");
+
+    expect(footprintExists("wf-s8-local")).toBe(false);
+    for (const suffix of suffixes) {
+      expect(fs.existsSync(path.join(otherStateDir, `wf-s8-cross${suffix}`))).toBe(false);
+    }
+    // B 目录登记条目随删除清空（core 写回空对象登记文件——条目级判定，与
+    // 上方「删引用 session 后」用例同口径）
+    const otherRegistry = JSON.parse(
+      fs.readFileSync(path.join(otherStateDir, "orphan-run-reap.json"), "utf8"),
+    ) as Record<string, number>;
+    expect(otherRegistry["wf-s8-cross"]).toBeUndefined();
+  });
 });

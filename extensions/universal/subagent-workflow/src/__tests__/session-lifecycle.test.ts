@@ -562,6 +562,38 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     expect(initArg.mainSessionFile).toBe("/home/user/.pi/agent/sessions/seam.jsonl");
   });
 
+  it("mainSessionFile 真布局按 id 解析命中：sessions/<encoded-cwd>/<ts>_<sessionId>.jsonl（U20——不再扫 agentDir 上级与目录根）", async () => {
+    // pi 实装布局（config.js getSessionsDir + session-manager.js newSession）：
+    // session 文件落 <agentDir>/sessions/<encoded-cwd>/ 子目录，文件名
+    // `<ts>_<sessionId>.jsonl`。夹具复刻该层级（含一个同 id 前缀干扰目录），断言
+    // 解析命中真实文件而非回退 getSessionFile——修复前扫 <agentDir>/../sessions 且
+    // 在目录根直接 readdir，恒 miss。
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-mf-resolve-"));
+    try {
+      const agentDir = path.join(tmpDir, "agent");
+      const slugDir = path.join(agentDir, "sessions", "--home-user-project--");
+      fs.mkdirSync(slugDir, { recursive: true });
+      // 干扰形态：目录根的同名文件（旧 bug 版本会在这一层找——修复后子目录枚举不触达）
+      fs.writeFileSync(path.join(agentDir, "sessions", `1700000000_session-real-1.jsonl`), "", "utf8");
+      // 真布局文件 + 同前缀不同 id 的邻文件（后缀段匹配的判别面）
+      fs.writeFileSync(path.join(slugDir, "1700000000_session-real-1.jsonl"), "", "utf8");
+      fs.writeFileSync(path.join(slugDir, "1700000001_session-real-12.jsonl"), "", "utf8");
+      mockAgentDir.current = agentDir;
+
+      const { pi } = createFakePi();
+      await setupSessionLifecycle(pi, createFakeCtx("session-real-1"), {});
+
+      const svc = vi.mocked(setSubagentService).mock.calls[0]?.[0] as
+        | { initSession: ReturnType<typeof vi.fn> }
+        | undefined;
+      const initArg = svc!.initSession.mock.calls[0]?.[0] as { mainSessionFile?: string | undefined };
+      expect(initArg.mainSessionFile).toBe(path.join(slugDir, "1700000000_session-real-1.jsonl"));
+    } finally {
+      mockAgentDir.current = "/home/user/.pi/agent";
+      fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
   it("主进程（无 PI_SUBAGENT_SELF_RECORD_ID）不写 identity custom entry", async () => {
     // [S5] 用例隐含依赖「测试进程 env 无 PI_SUBAGENT_SELF_RECORD_ID」——在 pi subagent
     // 进程内跑测试（该 env 已注入）必红。显式 stub 隔离，不依赖外层环境。

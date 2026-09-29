@@ -590,7 +590,18 @@ function readHistoricalArgs(recordPath: string, runId: string): HistoricalArgs {
     const summary = frame.argsSummary;
     if (typeof summary !== "string" || summary.length === 0) return { kind: "absent" };
     if (summary.endsWith("…")) return { kind: "truncated" };
-    const args: unknown = JSON.parse(summary);
+    let args: unknown;
+    try {
+      args = JSON.parse(summary);
+    } catch {
+      // 未截断摘要必可解析（JSON.stringify 产物）——不可解析 = 字段被篡改/流损坏，
+      // 与上方 malformed 分支同构拒绝（裸 SyntaxError 无恢复指引，不透出）。
+      throw new Error(
+        `Resume rejected: original args of run ${runId} are malformed in its record stream — ` +
+          "the record stream is the sole source of truth. Recovery: inspect the record file for external edits; " +
+          "if unrepairable, start a new run.",
+      );
+    }
     if (!isPlainObject(args)) {
       throw new Error(
         `Resume rejected: original args of run ${runId} are malformed in its record stream — ` +
