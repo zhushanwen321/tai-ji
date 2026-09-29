@@ -163,8 +163,12 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
 
     expect(postSpy(handleA)).toHaveBeenCalledWith({ type: "abort", reason: "Session switched: run terminated" });
     expect(postSpy(handleB)).toHaveBeenCalledWith({ type: "abort", reason: "Session switched: run terminated" });
-    expect(settledRecordOf(idA)).toMatchObject({ outcome: "failed" });
-    expect(settledRecordOf(idB)).toMatchObject({ outcome: "failed" });
+    // [D11] 统一中断语义：terminate 不再落 failed 终局，run 转 interrupted 暂停态（可 resume）
+    expect(settledRecordOf(idA)).toBeUndefined();
+    expect(settledRecordOf(idB)).toBeUndefined();
+    const runA = deps.runs.get(idA)!;
+    expect(runA.state.error).toBe("Session switched: run terminated");
+    expect(runA.runtime).toBeUndefined();
   });
 
   it("[OR-8] abortRun 收口残留 in-flight call：先收口再落盘，快照无 running 节点", async () => {
