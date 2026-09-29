@@ -15,8 +15,7 @@
 //   completeLegacyClosed 唯一 legacy 终态冻结入口（D7 例外族 / 监督器放弃，W4 sunset）
 //   project/snapshot 唯一投影入口（两路径字段一致）
 //
-// Core 层叶子原语：依赖 types.ts + 引擎 SDK 契约（§3.1.4 后事件 reducer 单源在 SDK，
-// updateFromEvent 为委托）。零 Pi / Runtime / TUI 依赖。
+// Core 层叶子原语：仅依赖 types.ts。零 Pi / Runtime / TUI 依赖。
 
 import type {
   AgentEvent,
@@ -39,9 +38,6 @@ import type {
   ToolCall,
   Turn,
 } from "../assembly/types.ts";
-// [§3.1.4 reducer 单源] 事件 reducer 的唯一实现体在 SDK（重放与活体共用），本文件
-// 只做委托——core 侧副本（8 个 apply* 处理器 + running toolCall 索引）已删。
-import { updateFromEvent as sdkUpdateFromEvent } from "@zhushanwen/subagent-engine-sdk";
 
 // ============================================================
 // 常量
@@ -242,30 +238,264 @@ export function createRecord(
 // 事件更新（唯一更新点）
 // ============================================================
 
-// [§3.1.4 reducer 单源] 本文件此前自持一份 updateFromEvent 实现（currentTurn /
-// findRunningToolCall / runningToolIndex / 8 个 apply* 处理器），与 SDK 的
-// journal-replay.ts 逐字同形——两处各改一处即漂移，且既有 conformance C5 用例只跑
-// SDK 路径，从不调用本实现（防漂移断言名不副实）。现收敛为委托 SDK 单源：SDK 那份
-// 是超集（多 running toolCall 的 O(1) 倒序索引），重放与活体共用同一 reducer 的设计
-// 决策因此真正成立（SDK ReplayRecordView 注释已声明「core ExecutionRecord 满足本视图」）。
+/**
+ * 取当前正在进行（未 closed）的 turn；若全部 closed 则开新 turn。
+ * 保证调用后返回的 turn 一定 closed===false，可安全累积内容。
+ */
+function currentTurn(record: ExecutionRecord): Turn {
+  const last = record.turns[record.turns.length - 1];
+  if (last !== undefined && !last.closed) return last;
+  const fresh = emptyTurn();
+  record.turns.push(fresh);
+  return fresh;
+}
 
 /**
- * 从 AgentEvent 更新 record（累积进 record.turns[]）——委托 SDK reducer 单源。
+ * 在 record.turns[] 范围内倒序找最后一个同名且仍 running 的 toolCall。
  *
- * 语义（实现体在 @zhushanwen/subagent-engine-sdk 的 journal-replay.ts）：
- *   - text/thinking：流式累积进当前 turn（完整内容，非切片）
- *   - tool_start/end：push 进 currentTurn().toolCalls（含完整 result）；tool_end 索引
- *     O(1) 命中，miss 回退跨 turn 倒序全扫（兜底滞后事件 / 历史 running toolCall）
- *   - turn_end：闭合当前 turn，记 closedTs，turnCount++，清 lastError
- *   - message_end：usage 增量累加进末 turn.usageDelta + totalTokens 累加；error 记 lastError
+ * 扫描所有 turn（非仅当前 turn）——SDK 在 turn_end 后仍可能补发滞后的 tool_end，
+ * 仅扫当前 turn 会漏配对、误 push 幽灵 ToolCall。跨 turn 扫描兜底滞后事件。
+ *
+ * 返回 [turn, index]；未找到返回 undefined。
+ */
+function findRunningToolCall(
+  record: ExecutionRecord,
+  toolName: string,
+): readonly [Turn, number] | undefined {
+  for (let t = record.turns.length - 1; t >= 0; t--) {
+    const turn = record.turns[t];
+    if (turn === undefined) continue;
+    for (let i = turn.toolCalls.length - 1; i >= 0; i--) {
+      const tc = turn.toolCalls[i];
+      if (tc?._status === "running" && tc.toolName === toolName) {
+        return [turn, i] as const;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * [perf] running toolCall 倒序索引：tool_start push 位置入索引，tool_end 弹尾定位
+ *（尾部 = 最后 push 的同名项，与 findRunningToolCall 倒序全扫的语义等价），把每次
+ * tool_end 的 O(所有 turns × toolCalls) 扫描降为 O(1)。WeakMap 按 record 实例隔离
+ *（createRecord 新实例从空索引开始，不影响旧实例）。
+ * 索引 miss（重建 record 的历史 running toolCall / 外部注入工具无 tool_start）
+ * 回退 findRunningToolCall 全扫兜底——正确性不依赖索引完整性。
+ */
+const runningToolIndex = new WeakMap<ExecutionRecord, Map<string, Array<{ turn: Turn; idx: number }>>>();
+
+function indexToolStart(record: ExecutionRecord, turn: Turn, toolName: string): void {
+  let byName = runningToolIndex.get(record);
+  if (byName === undefined) {
+    byName = new Map();
+    runningToolIndex.set(record, byName);
+  }
+  const arr = byName.get(toolName);
+  if (arr === undefined) {
+    byName.set(toolName, [{ turn, idx: turn.toolCalls.length - 1 }]);
+  } else {
+    arr.push({ turn, idx: turn.toolCalls.length - 1 });
+  }
+}
+
+// ── 各事件处理器（updateFromEvent 按 case 分发，每个处理器单一职责）──
+
+/** text_delta：流式累积进当前 turn 的 text（完整内容，非切片）。 */
+function applyTextDelta(
+  record: ExecutionRecord,
+  event: Extract<AgentEvent, { type: "text_delta" }>,
+): void {
+  currentTurn(record).text += event.delta;
+}
+
+/** thinking_delta：流式累积进当前 turn 的 thinking（完整内容）。 */
+function applyThinkingDelta(
+  record: ExecutionRecord,
+  event: Extract<AgentEvent, { type: "thinking_delta" }>,
+): void {
+  currentTurn(record).thinking += event.delta;
+}
+
+/** tool_start：push 一个 running 的 InternalToolCall（带 startedTs）+ 弹尾索引入册。 */
+function applyToolStart(
+  record: ExecutionRecord,
+  event: Extract<AgentEvent, { type: "tool_start" }>,
+): void {
+  const tc: InternalToolCall = {
+    toolName: event.toolName,
+    args: event.args,
+    result: undefined,
+    isError: false,
+    _status: "running",
+    startedTs: Date.now(),
+  };
+  const turn = currentTurn(record);
+  turn.toolCalls.push(tc);
+  indexToolStart(record, turn, event.toolName);
+}
+
+/**
+ * tool_end 定位：索引弹尾 O(1) 命中 running 同名 toolCall；索引 miss（无记录 / 槽位
+ * 已非 running）回退 findRunningToolCall 跨 turn 倒序全扫兜底。
+ * 返回 [turn, index]；两路都 miss 返回 undefined。
+ */
+function matchRunningToolCall(
+  record: ExecutionRecord,
+  toolName: string,
+): readonly [Turn, number] | undefined {
+  const byName = runningToolIndex.get(record);
+  const arr = byName?.get(toolName);
+  if (arr !== undefined && arr.length > 0) {
+    const item = arr[arr.length - 1];
+    arr.pop();
+    const tc = item.turn.toolCalls[item.idx];
+    if (tc !== undefined && tc._status === "running") {
+      return [item.turn, item.idx] as const;
+    }
+  }
+  // 兜底：重建 record 的历史 running toolCall（索引未覆盖）、索引项被外部路径
+  // 置非 running 等场景——保持与旧实现一致的跨 turn 倒序全扫。
+  return findRunningToolCall(record, toolName);
+}
+
+/**
+ * tool_end：命中则回填 result/isError/_status；未命中（SDK 发了 tool_end 但无对应
+ * tool_start，如外部注入的工具）直接 push 一个已完成的 InternalToolCall，避免数据丢失。
+ */
+function applyToolEnd(
+  record: ExecutionRecord,
+  event: Extract<AgentEvent, { type: "tool_end" }>,
+): void {
+  const matched = matchRunningToolCall(record, event.toolName);
+  if (matched !== undefined) {
+    const [turn, i] = matched;
+    const tc = turn.toolCalls[i]!;
+    tc.args = event.args ?? tc.args;
+    tc.result = event.result;
+    tc.isError = event.isError ?? false;
+    tc._status = event.isError ? "failed" : "done";
+    return;
+  }
+  currentTurn(record).toolCalls.push({
+    toolName: event.toolName,
+    args: event.args,
+    result: event.result,
+    isError: event.isError ?? false,
+    _status: event.isError ? "failed" : "done",
+    startedTs: Date.now(),
+  });
+}
+
+/**
+ * turn_end：闭合当前 turn，记 closedTs（真实墙钟），turnCount++，清 lastError。
+ * 正常闭合清 lastError：瞬态 error 恢复后不应误判 success=false
+ * （若 turn_end 后 message_end 报 error，会在 message_end 处理器重新写回）。
+ */
+function applyTurnEnd(record: ExecutionRecord): void {
+  const turn = currentTurn(record);
+  turn.closed = true;
+  turn.closedTs = Date.now();
+  record.turnCount += 1;
+  record.lastError = undefined;
+}
+
+/**
+ * message_end：usage 增量存进末 turn.usageDelta（直接写末 turn，不开新 turn）；
+ * totalTokens 累加；error（stopReason=error）记进 lastError。
+ *
+ * usageDelta 按 message_end **累加**（非覆盖）——同一 turn 内若多次 message_end
+ * 到达（或 turn_end 后的滞后 message_end 落到 currentTurn 开的新 turn），
+ * 累加保证不丢 usage。getTotalUsage 扁平求和所有 turn，归属 turn 的精确性
+ * 不影响最终 total（无消费方读单 turn usage）。
+ */
+function applyMessageEnd(
+  record: ExecutionRecord,
+  event: Extract<AgentEvent, { type: "message_end" }>,
+): void {
+  if (event.usage) {
+    const turn = currentTurn(record);
+    turn.usageDelta = addUsage(turn.usageDelta, event.usage);
+    // totalTokens 累加四项之和（保留旧语义，投影直接读）
+    record.totalTokens +=
+      (event.usage.input ?? 0) + (event.usage.output ?? 0) +
+      (event.usage.cacheRead ?? 0) + (event.usage.cacheWrite ?? 0);
+  }
+  if (event.error) {
+    record.lastError = event.error;
+  }
+}
+
+/** error：存 record.lastError（getEventLog 派生 error 条目用）。 */
+function applyErrorEvent(
+  record: ExecutionRecord,
+  event: Extract<AgentEvent, { type: "error" }>,
+): void {
+  record.lastError = event.message;
+}
+
+/**
+ * 从 AgentEvent 更新 record。所有数据收口进 record.turns[]。
+ *   - text/thinking：流式累积进 currentTurn()（完整内容，非切片）
+ *   - tool_start/end：push 进 currentTurn().toolCalls（含完整 result）
+ *     tool_end 跨 turn 扫描找 running 同名 toolCall（兜底滞后事件）
+ *   - turn_end：闭合当前 turn，记 closedTs（真实墙钟，供 getEventLog）；
+ *     正常闭合清 lastError（瞬态 error 恢复后不应误判 success=false）
+ *   - message_end：usage 增量存进末 turn.usageDelta（直接写末 turn，不开新 turn）；
+ *     totalTokens 累加
  *   - error：存 record.lastError（getEventLog 派生 error 条目用）
- *   - compaction/activity/armed：no-op（活性与协议回执不进 record 投影）
  *
  * 唯一写点——session-runner 闭包不再旁路累积，collectResult 从 record 读。
- * 穷尽性由 SDK 侧 switch 的 `never` 断言保证（新增 AgentEvent variant 时编译期报错）。
+ *
+ * 穷尽性：switch 覆盖 AgentEvent 全部 variant；default 的 `never` 断言保证
+ * 新增 variant 时编译期报错（而非静默 no-op）。
  */
 export function updateFromEvent(record: ExecutionRecord, event: AgentEvent): void {
-  sdkUpdateFromEvent(record, event);
+  switch (event.type) {
+    // ── text / thinking：流式累积进当前 turn ──
+    case "text_delta":
+      return applyTextDelta(record, event);
+    case "thinking_delta":
+      return applyThinkingDelta(record, event);
+
+    // ── tool_start/end：push 进 currentTurn().toolCalls（含完整 result）──
+    case "tool_start":
+      return applyToolStart(record, event);
+    case "tool_end":
+      return applyToolEnd(record, event);
+
+    // ── turn_end：闭合当前 turn ──
+    case "turn_end":
+      return applyTurnEnd(record);
+
+    // ── message_end：usage 增量累加 + totalTokens 累加 ──
+    case "message_end":
+      return applyMessageEnd(record, event);
+
+    // ── error：存 record.lastError ──
+    case "error":
+      return applyErrorEvent(record, event);
+
+    // ── compaction：不产生数据（不变）──
+    case "compaction":
+      return;
+
+    // ── activity：纯活性信号，reducer no-op（协议语义见 SDK contract-types）──
+    case "activity":
+      return;
+
+    // ── armed：武装确认回执（[D3 协议版 P6]，协议语义见 SDK contract-types）——
+    //    监控信号不进 record 投影，消费方 = 宿主等待门 + run 事件 journal（C3 第④步
+    //    双侧 reducer no-op 义务的 core 侧）
+    case "armed":
+      return;
+
+    default: {
+      // 穷尽性检查：新增 AgentEvent variant 时编译期报错
+      const _exhaustive: never = event;
+      return _exhaustive;
+    }
+  }
 }
 
 // ============================================================
