@@ -3,7 +3,7 @@
 // U2: executeAgentCall 透传 stream 给 runner.run
 // U3: executeAgentCall retry 递归也透传 stream（不丢、不重建）
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   classifyFailureKind,
@@ -589,6 +589,86 @@ describe("D5-③: failureKind 三态分诊", () => {
 
       expect(runner.run).toHaveBeenCalledTimes(2);
       expect(call.status).toBe("done");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("AGENT_RETRY_BACKOFF_BASE_ENV 退避基数通道", () => {
+  const ENV = "TAIJI_SUBAGENT_TEST_AGENT_RETRY_BACKOFF_BASE_MS";
+
+  afterEach(() => {
+    delete process.env[ENV];
+  });
+
+  it("合法正整数 → 激活覆盖：退避按覆盖基数计时（1ms 快速重试，fake timers 推进 1ms 即第二轮）", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env[ENV] = "1";
+      const { call, trace } = makeAgentCallAndTrace();
+      const runner = createMockRunner(
+        vi.fn()
+          .mockResolvedValueOnce(makeMockResult({ error: "transient", failureKind: "unknown" }))
+          .mockResolvedValueOnce(makeMockResult()),
+      );
+      const budget = new Budget();
+
+      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
+      // 覆盖基数 1 → 首次重试退避 1×2^0 = 1ms：推进 1ms 第二轮立即启动（默认基数下
+      // 此推进量不足，用例将超时——即覆盖生效的行为判据）
+      await vi.advanceTimersByTimeAsync(1);
+      await promise;
+
+      expect(runner.run).toHaveBeenCalledTimes(2);
+      expect(call.status).toBe("done");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("非法值（非正整数）→ 不激活 + 默认基数维持：退避仍按 1000ms 计（推进 1ms 不进第二轮）", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env[ENV] = "not-a-number";
+      const { call, trace } = makeAgentCallAndTrace();
+      const runner = createMockRunner(
+        vi.fn()
+          .mockResolvedValueOnce(makeMockResult({ error: "transient", failureKind: "unknown" }))
+          .mockResolvedValueOnce(makeMockResult()),
+      );
+      const budget = new Budget();
+
+      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
+      await vi.advanceTimersByTimeAsync(1);
+      // 默认基数下首次退避 1000ms：1ms 内不得出现第二轮
+      expect(runner.run).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2000);
+      await promise;
+      expect(runner.run).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("空串 → 等同未设：默认基数（resolveBackoffBaseMs 未设分支回归）", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env[ENV] = "";
+      const { call, trace } = makeAgentCallAndTrace();
+      const runner = createMockRunner(
+        vi.fn()
+          .mockResolvedValueOnce(makeMockResult({ error: "transient", failureKind: "unknown" }))
+          .mockResolvedValueOnce(makeMockResult()),
+      );
+      const budget = new Budget();
+
+      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(runner.run).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2000);
+      await promise;
+      expect(runner.run).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
