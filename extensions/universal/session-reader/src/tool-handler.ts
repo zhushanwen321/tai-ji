@@ -1098,7 +1098,8 @@ interface SkippedRun {
 /**
  * workflow：workflow run 概览（design §3.4 workflow，m2 IF-doWorkflow）。
  *
- * 流程：① resolveSessionId（multi 走 disambiguate）→ ② 读目标 session 的 workflow-state-link
+ * 流程：① resolveSessionId（multi 走 disambiguate）→ ② 读目标 session 的 workflow 条目三档
+ * 发现链（v2 注册条目 record 流主源 > v1 快照 > 旧 workflow-state-link 指针）
  * → ③ 无 run → ES-wf-no-runs（提示+👉family，不抛错）→ ④ runId 过滤，无匹配 →
  * ES-wf-runid-not-found（列候选+👉，不抛错）→ ⑤ 逐 run readRunSnapshot+parseRunSnapshot，
  * 不可读/不可解析 → skippedRuns（不中断其他 run，ES-wf-snapshot-read-fail/unparseable）

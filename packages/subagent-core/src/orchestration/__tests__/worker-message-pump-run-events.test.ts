@@ -8,7 +8,7 @@
 //    run-settled(cancelled)——journal 词表恰无 cancel-requested 帧）。
 // 2. 终局后让位：并发终态化（抢先 transition）→ finalizeRun 让位返回 false，journal
 //    零追加（M12 语义 + 单写者纪律）。
-// 3. dispatchAgentCall 的 ask 事件链：ask-dispatched（派发时）+ ask-settled(completed，
+// 3. dispatchAgentCall 的 ask 事件链：agent-started（派发时）+ agent-settled(completed，
 //    完成回调时)——taskIndex = callId 单源、attempt = call.attempts。
 // 4. journal 目录测试注入（setRunEventJournalDirForTest + mkdtemp 自建自删，测试红线：
 //    不触真实数据目录）。
@@ -211,7 +211,7 @@ describe("finalizeRun 落 run-settled（终态单写点）", () => {
 // ── 2. dispatchAgentCall 的 ask 事件链 ───────────────────────
 
 describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
-  it("agent-call 派发 → ask-dispatched；完成 → ask-settled(completed, attempt=1)", async () => {
+  it("agent-call 派发 → agent-started；完成 → agent-settled(completed, attempt=1)", async () => {
     const run = makeRealRun("wf-ev-6");
     await dispatchRunCreated(run);
     const deps = makeDeps();
@@ -268,7 +268,7 @@ describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
 
     const events = await scanRunEvents("wf-ev-7");
     // 终局帧存在（runner 内抢先 finalizeRun 不发生——本用例只 transition 不 finalize，
-    // journal 无 run-settled；核心断言 = 无 ask-settled 迟到帧）
+    // journal 无 run-settled；核心断言 = 无 agent-settled 迟到帧）
     expect(events.some((e) => e.type === "agent-settled")).toBe(false);
   });
 });
@@ -280,7 +280,7 @@ describe("run-created 正点接线（无双帧 + 引导退役）", () => {
     const run = makeRealRun("wf-ev-dual");
     await dispatchRunCreated(run);
 
-    // 正点后的 ask 事件照常落账（fold 出 dispatched，ask-dispatched 合法转移）
+    // 正点后的 ask 事件照常落账（fold 出 dispatched，agent-started 合法转移）
     const deps = makeDeps();
     deps.runner.run = vi.fn(async () =>
       ({ content: "ok", durationMs: 1, toolCalls: [] }) as AgentResult,
@@ -422,9 +422,9 @@ describe("finalizeRun 的 run-settled errorCode 构造（DoneReason → RunError
   });
 });
 
-// ── 5. dispatchAgentCall 重试轨迹（ask-retrying 帧补投 + 静默反向） ──
+// ── 5. dispatchAgentCall 重试轨迹（agent-retrying 帧补投 + 静默反向） ──
 
-describe("dispatchAgentCall 重试轨迹（ask-retrying 帧 + 静默反向）", () => {
+describe("dispatchAgentCall 重试轨迹（agent-retrying 帧 + 静默反向）", () => {
   it("两次失败后成功 → journal dispatched→retrying{attempt:1}→retrying{attempt:2}→settled{attempt:3}（backoffMs 实测 = 退避调度值）", async () => {
     vi.useFakeTimers();
     try {
@@ -462,7 +462,7 @@ describe("dispatchAgentCall 重试轨迹（ask-retrying 帧 + 静默反向）", 
       await vi.advanceTimersByTimeAsync(1000); // 首退避（BACKOFF 1000ms）→ attempt 2
       await flushMicrotasks();
       await vi.advanceTimersByTimeAsync(2000); // 次退避（BACKOFF 2000ms）→ attempt 3 成功
-      await flushMicrotasks(); // ask-settled 投递链落账
+      await flushMicrotasks(); // agent-settled 投递链落账
 
       expect(run.state.status).toBe("running"); // call 成功不触发终局
       // 静默反向（D7）：重试窗口零终局通知（journal 事件落账 ≠ 通知）
@@ -485,7 +485,7 @@ describe("dispatchAgentCall 重试轨迹（ask-retrying 帧 + 静默反向）", 
     }
   });
 
-  it("非重试终局（stale_context 不重试）→ 零 ask-retrying 帧（构造性零假帧）", async () => {
+  it("非重试终局（stale_context 不重试）→ 零 agent-retrying 帧（构造性零假帧）", async () => {
     const run = makeRealRun("wf-ev-noretry");
     await dispatchRunCreated(run);
     const deps = makeDeps();

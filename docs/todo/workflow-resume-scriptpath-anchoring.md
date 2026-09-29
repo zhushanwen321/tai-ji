@@ -1,6 +1,6 @@
 # TODO：workflow resume 重派丢失脚本路径锚定，内置模板 resume 必失败
 
-状态：产品级缺陷，tracked 登记（2026-09-29；tech-design-wf 设计流程已于同日启动，实施后关闭本条）
+状态：已实施（2026-09-29，采纳候选 A——run-created 帧携带可选 scriptPath），待 a1a4 真机复跑终判后关闭本条
 
 ## 背景
 
@@ -15,16 +15,12 @@ workflow resume（断点续跑）重派还没返回结果的调用时，需要�
 - 6 个内置模板全部依赖 scriptPath 锚定脚本目录才能加载共享模块：chain.js:51 / fan-out.js:74 / map-reduce.js:83 / parallel.js:61 / scatter-gather.js:52 各自 `require(SCRIPT_DIR + "/_shared/agent-refs.cjs")`；review-fix-loop.js:163 require 同目录 `review-fix-loop-utils.cjs`（依赖形态与前五个不同，但同样依赖 scriptPath 推导 SCRIPT_DIR）。缺席检查分布：chain.js:44-45 / fan-out.js:67-68 / map-reduce.js:76-77 / parallel.js:54-55 / scatter-gather.js:45-46 / review-fix-loop.js:105-106。
 - 影响范围：inline 脚本（scriptSource 即全文）可 resume；6 个内置模板不可（scriptPath 空串被 worker 启动检查拒绝）；subagents 批量 tool（转译为 fan-out 模板执行，见 `extensions/universal/subagent-workflow/src/interface/tool-subagents.ts:68`）连带不可。
 
-## 实现要点（修复方向候选，供后续 tech-design 裁决，不写死结论）
+## 实现要点（修复方向候选——裁决已完成：候选 A 采纳，B/C 否决理由见设计档案 .tmp/tech-design/workflow-resume-scriptpath-recovery.md 方案对比节，处置状态见下）
 
 - 候选 A：`RunCreatedEvent` 增加 scriptPath 可选字段。代价 = record 流格式变更，且需评估绝对路径跨环境（换机器 / 包重装路径变化）失效问题。
 - 候选 B：ResumeRunOptions 增加 scriptPath 字段，由壳入口（pi / zcode 两侧调用方）在发起 resume 时显式传入。
 - 候选 C：core 侧按 workflowName 反查内置模板路径（内置模板在包内 `packages/subagent-core/workflows/` 下，名字可枚举）。
-- 候选 D：`_shared` / 同目录共享模块的定位改为从 core 包自身位置推导（不依赖 per-run 的 scriptPath）。
-
-## 处置状态
-
-tech-design-wf 设计流程已于 2026-09-29 启动，设计文档将落 `.tmp/tech-design/`（gitignored）。本文件是该缺陷的 tracked 登记条目，实施并验证后关闭。
+- 候选 D：`_shared` / 同目录共享模块的定位改为从 core 包自身位置推导（不依赖 per-run 的 scriptPath）。未进设计档案方案对比——对比仅 A/B/C 三列、无留档否决理由，随候选 A 已实施而不采纳。
 
 ## 出处
 
@@ -33,4 +29,4 @@ tech-design-wf 设计流程已于 2026-09-29 启动，设计文档将落 `.tmp/t
 
 ## 处置状态
 
-已实施（2026-09-29）：采纳候选 A——run-created 帧携带可选 scriptPath 载荷（与 args/scriptSource 同款 additive 纪律），core rebuildRunFromRecord 与壳 foldRecordStreamToRun 双侧恢复；顺带把六个内置模板的 scriptPath 检查从「非 string」收紧到「非空」（旧格式帧回落的失败从无指引的 Node 原生错误变为带恢复指引的 fail-fast）。设计档案：`.tmp/tech-design/workflow-resume-scriptpath-recovery.md`（含 8 条用例走查）；候选 B/C 的否决理由在设计的方案对比节。剩余：a1a4 真机复跑终判（BLOCKED → PASS，需 TAIJI_PI_LIVE 凭证 + 空载串行，未在本批执行）。
+已实施（2026-09-29）：采纳候选 A——run-created 帧携带可选 scriptPath 载荷（与 args/scriptSource 同款 additive 纪律），core rebuildRunFromRecord 与壳 foldRecordStreamToRun 双侧恢复；顺带把六个内置模板的 scriptPath 检查从「非 string」收紧到「非空」（旧格式帧回落的失败从无指引的 Node 原生错误变为带恢复指引的 fail-fast）。设计档案：`.tmp/tech-design/workflow-resume-scriptpath-recovery.md`（含 8 条用例走查）；候选 B/C 的否决理由在设计的方案对比节。回归网：record-mode/template-resume.test.ts 实跑 A2（真跑 fan-out 模板 resume 全链）/A4（旧格式帧空串 fail-fast）两用例通过（commit a32df2905）。剩余：a1a4 真机复跑终判（BLOCKED → PASS，需 TAIJI_PI_LIVE 凭证 + 空载串行，未在本批执行）——真机复跑与 record-mode fixture 替代的关闭形态取舍待裁决。

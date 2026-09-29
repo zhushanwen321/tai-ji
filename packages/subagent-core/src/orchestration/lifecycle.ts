@@ -434,9 +434,9 @@ export async function runWorkflow(
   // [Q2/D5] run-created 正点发射（journal 首帧，唯一生产落点）。入队先于 worker
   // 启动（竞态结构性消除，L4 A4 附带发现 8 跑 1 实测）：dispatchRunCreated 经
   // enqueueRunDispatch 同步入队（执行异步），startWorkerGuarded 之后 worker 首个
-  // agent() 的 ask-dispatched 必然排在 created 之后执行——旧实现 created 在
+  // agent() 的 agent-started 必然排在 created 之后执行——旧实现 created 在
   // store.save（await 让出事件循环）之后才入队，worker 极快时 ask 帧先入队，在
-  // created 态表外转移被 yielded 吞（丢 6 帧：3×ask-dispatched + 3×ask-settled）。
+  // created 态表外转移被 yielded 吞（丢 6 帧：3×agent-started + 3×agent-settled）。
   // 修复形态裁决：run-created 入队先行（候选②），候选①「created 态缓冲重放」被
   // 否——重放 = 靠引导静默补齐时序倒置，与 pump dispatchRunTrigger 的既有裁决
   // （表外转移 fail-fast 不补投）冲突。await 留在 store.save 之后原位，保持

@@ -233,7 +233,7 @@ function isTerminalCallStatus(status: WorkflowAgentCall['status']): boolean {
   }
 }
 
-/** 组内状态聚合：有 running → running；全终态 → 含 failed 即 failed、否则 completed；否则 pending */
+/** 组内状态聚合：有 running → running；全终态 → 含 failed 即 failed、否则 done；否则 pending */
 function aggregatePhaseStatus(calls: WorkflowAgentCall[]): PhaseAggregateStatus {
   if (calls.some((c) => c.status === 'running')) return 'running'
   if (calls.every((c) => isTerminalCallStatus(c.status))) {

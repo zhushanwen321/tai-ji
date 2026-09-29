@@ -700,6 +700,17 @@ function rebuildRunFromRecord(
       }
     } else if (event.type === "agent-settled") {
       const existing = drafts.get(event.taskIndex);
+      if (existing === undefined) {
+        // [D12 宽松面留痕] settled 无 started 的残形态按 fold 自愈占位行处理
+        // （不拒绝——对齐 run-events fold 兜底语义；严格拒绝面限坏行/seq 断档/
+        // settled 缺 result 三项）。warn 出声：行级合法但配对异常 = 流被外部
+        // 篡改或写入器 bug 的观测线索，静默会让该形态不可诊断。
+        logger.warn(
+          `[workflow] resume: agent-settled frame for call #${event.taskIndex} has no matching ` +
+            `agent-started frame (runId=${runId}) — rebuilding as placeholder row "(unknown)" ` +
+            "(fold self-heal semantics, not rejected)",
+        );
+      }
       const base: Draft =
         existing ?? { agentName: "(unknown)", startedAtIso: new Date(event.ts).toISOString(), attempts: event.attempt };
       base.attempts = event.attempt;

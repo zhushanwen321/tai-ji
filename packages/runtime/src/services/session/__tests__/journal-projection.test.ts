@@ -333,8 +333,8 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
     expect(dual.state).toEqual({ lifecycle: 'terminal', outcome: 'interrupted' })
   })
 
-  it('占位行兜底：合法转移下跨 taskIndex 错位的 ask-settled（dispatched 缺席）成占位行不丢终局', () => {
-    // 转移表不校验 taskIndex 归属：running 态下 settled 的 taskIndex 无 dispatched
+  it('占位行兜底：合法转移下跨 taskIndex 错位的 agent-settled（agent-started 缺席）成占位行不丢终局', () => {
+    // 转移表不校验 taskIndex 归属：running 态下 settled 的 taskIndex 无 agent-started
     // 行 = 残形态——骨架兜底 '(unknown)' 占位行，终局不丢（record overlay 会覆盖）
     const fold = foldRunEventCheckpoint(
       [
@@ -813,7 +813,7 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
     expect(record.outcome).toBe('done')
   })
 
-  it('ask-dispatched 带 phase → fold 骨架与投影 call.phase 透传；无 phase 行 undefined（W1 D6 分组供源）', () => {
+  it('agent-started 带 phase → fold 骨架与投影 call.phase 透传；无 phase 行 undefined（W1 D6 分组供源）', () => {
     const fold = foldRunEventCheckpoint(
       [
         runEvent({ type: 'run-created', runId: 'wf-phase', workflowName: 'flow', argsSummary: '', ts: 1000 }),
@@ -840,6 +840,56 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
     // renderer hasExplicitPhases（phase !== undefined）的供源：带 phase 步骤进分组，旧行保持平铺
     expect(record.agentCalls[0]!.phase).toBe('Dev-w0(W1)')
     expect(record.agentCalls[1]!.phase).toBeUndefined()
+  })
+
+  it('中断形态条目（status=interrupted）在 fold 缺席兜底层 → interrupted（entry-only 降级投影不回落 running）', () => {
+    const registered = {
+      v: 2 as const,
+      kind: 'registered' as const,
+      runId: 'wf-intr',
+      workflowName: 'flow',
+      scriptName: 'test-flow',
+      slug: 'tf',
+      startedAt: 1000,
+      journalPath: '/tmp/ws/wf-intr.record.jsonl',
+    }
+    const interruptedEntry = {
+      v: 2 as const,
+      kind: 'settled' as const,
+      runId: 'wf-intr',
+      status: 'interrupted' as const,
+      errorCode: 'crashed' as const,
+      settledAt: 3000,
+      callCount: 1,
+      usedTokens: 0,
+    }
+    // fold 缺席（runJournalDir 缺席的 entry-only 降级投影 / record 流被外部清理）
+    const record = projectV2Workflow(registered, interruptedEntry, undefined)!
+    expect(record.status).toBe('interrupted')
+    // 主链路不受影响：record 流在场时 fold 判据仍权威
+    const folded = foldRunEventCheckpoint(
+      [
+        runEvent({ type: 'run-created', runId: 'wf-intr', workflowName: 'flow', argsSummary: '', ts: 1000 }),
+        runEvent({ type: 'run-interrupted', errorCode: 'crashed', ts: 2500 }),
+      ],
+      () => {},
+    )
+    const record2 = projectV2Workflow(registered, interruptedEntry, folded)!
+    expect(record2.status).toBe('interrupted')
+    // F2-1：resume 复活窗口——run-resumed 已被 fold（lifecycle 回 running），中断
+    // 形态条目留存不被覆盖（resume 只补写 registered 条目，appendResumeRegisteredEntry）。
+    // 条目陈旧值不得劫持 fold 权威态：复活 run 整个执行期显示 running 而非「已中断」
+    const resumedFold = foldRunEventCheckpoint(
+      [
+        runEvent({ type: 'run-created', runId: 'wf-intr', workflowName: 'flow', argsSummary: '', ts: 1000 }),
+        runEvent({ type: 'run-interrupted', errorCode: 'crashed', ts: 2500 }),
+        runEvent({ type: 'run-resumed', ts: 4000 }),
+      ],
+      () => {},
+    )
+    expect(resumedFold.state.lifecycle).toBe('running')
+    const record3 = projectV2Workflow(registered, interruptedEntry, resumedFold)!
+    expect(record3.status).toBe('running')
   })
 })
 

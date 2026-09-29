@@ -3096,7 +3096,7 @@
     },
     {
       "id": "C-ext-28",
-      "summary": "workflow 成员续写双通道分离（域边界）：同 run 同名 agent() 调用的续写走编排层内部复用通道——executeWorkflowAgent 入口分岔（路由/预检序列内、record 创建前），name 复用池命中 → 既有成员 revive 拉起回 running + Continuation 续写轮直调（resume 锚点经 RunContext.resume 携带），登记/清空经 run 事件 journal member-pool 事件承载（写入序 = 先事件后内存，恢复 = fold 重建）；外部 message 通道对 workflow-origin record 的拒绝行为保持原样（subagent-actions-core messageHandler 域检查——成员结果由脚本返回值承载、无 message 对端）。禁止把成员续写改道 messageHandler，禁止放宽外部拒绝",
+      "summary": "workflow 成员续写双通道分离（域边界）：同 run 同名 agent() 调用的续写走编排层内部复用通道——executeWorkflowAgent 入口分岔（路由/预检序列内、record 创建前），name 复用池命中 → 既有成员 revive 拉起回 running + Continuation 续写轮直调（resume 锚点经 RunContext.resume 携带），登记/清空经 record 事件流承载（[D6] 绑定消解：绑定 = agent-started 载荷 memberRecordId 字段，与帧同帧落账构造性满足写入序红线；恢复 = fold 重建；收尾清空只释放内存——无 clear 事件，清空语义由终局后无后续 agent-started 帧构造性承接）；外部 message 通道对 workflow-origin record 的拒绝行为保持原样（subagent-actions-core messageHandler 域检查——成员结果由脚本返回值承载、无 message 对端）。禁止把成员续写改道 messageHandler，禁止放宽外部拒绝",
       "scope": [
         "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
         "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts",

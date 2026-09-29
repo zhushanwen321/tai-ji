@@ -19,6 +19,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  dispatchAgentSettled,
   dispatchRunCreated,
   dispatchRunTrigger,
   finalizeRun,
@@ -287,5 +288,36 @@ describe("生产链 errorCode 投影（finalizeRun 构造 → manifest，S2 死�
     const timeManifest = await readRunTerminalManifest(projectionDir, timeRun.runId);
     expect(timeManifest).toMatchObject({ outcome: "time_limited" });
     expect(timeManifest?.errorCode).toBeUndefined();
+  });
+
+  it("time_limited 终局携带 stderrTeePath（[D2] 词表变更登记第 3 条「证据采集沿用 failed 同款」——record 有带路径失败帧时，「脚本慢」与「引擎卡死超时」在 manifest 面可区分）", async () => {
+    const run = makeRun("wf-prod-time-tee");
+    await dispatchRunCreated(run);
+    // 超时前有失败 call 落盘（引擎卡死超时的典型形态：最后一帧带取证指针）
+    const failed = makeSettledCall(0, {
+      content: "",
+      error: "engine_crashed: engine process exited unexpectedly",
+      durationMs: 21_000,
+      toolCalls: [],
+      stderrTeePath: "/tee-fixtures/wf-prod-time-tee/call-0.stderr.log",
+    });
+    run.state.calls.set(0, failed);
+    dispatchAgentSettled(run, failed, false);
+
+    await finalizeRun(run, makeDeps(), "time_limited", { context: "test" });
+
+    const manifest = await readRunTerminalManifest(projectionDir, run.runId);
+    expect(manifest).toMatchObject({
+      outcome: "time_limited",
+      stderrTeePath: "/tee-fixtures/wf-prod-time-tee/call-0.stderr.log",
+    });
+    // 对照：成功/cancelled 终局维持不写（失败伴随纪律不受本条影响）
+    const okRun = makeRun("wf-prod-done-tee");
+    await dispatchRunCreated(okRun);
+    const okCall = makeSettledCall(0, { content: "ok", durationMs: 1, toolCalls: [] });
+    okRun.state.calls.set(0, okCall);
+    dispatchAgentSettled(okRun, okCall, false);
+    await finalizeRun(okRun, makeDeps(), "completed", { context: "test" });
+    expect(await readRunTerminalManifest(projectionDir, okRun.runId)).not.toHaveProperty("stderrTeePath");
   });
 });

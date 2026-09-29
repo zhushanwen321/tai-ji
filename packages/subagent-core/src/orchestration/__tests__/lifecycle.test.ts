@@ -352,7 +352,7 @@ describe("runWorkflow", () => {
       const deps = makeDeps();
       const spec = makeSpec();
       // 模拟 worker 极快的竞态形态：workerHost.start 同步段内首个 agent() 的
-      // ask-dispatched 已到达宿主（修复前此帧在 created 态表外让位被吞）
+      // agent-started 已到达宿主（修复前此帧在 created 态表外让位被吞）
       vi.spyOn(deps.workerHost, "start").mockImplementation((startSpec: RunSpec) => {
         const raceRunId = (startSpec.args as Record<string, unknown>)["_runId"];
         if (typeof raceRunId === "string") {
@@ -373,7 +373,7 @@ describe("runWorkflow", () => {
         { type: "cancel-requested", reason: "race-probe" },
       );
 
-      // 修复前形态：ask-dispatched 先入队先执行 → created 态表外让位吞帧，
+      // 修复前形态：agent-started 先入队先执行 → created 态表外让位吞帧，
       // journal 只剩 run-created；修复后帧序 created 先行、零丢帧
       const events = await createRunEventJournal(journalDir).scan(runId);
       expect(events.map((e) => e.type)).toEqual(["run-created", "agent-started", "run-settled"]);

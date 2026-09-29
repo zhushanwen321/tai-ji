@@ -171,6 +171,20 @@ describe("createPiHostRunEnumeration status 映射（判定核三态）", () => 
     expect(runs).toEqual([{ runId: "wf-done", stateDir: wsA, status: "completed" }]);
   });
 
+  it("terminal via manifest（journal 无终局帧 + 历史词表外 outcome=interrupted manifest 在盘）→ status 折叠 \"failed\" 恒 string（判定核单点防御——枚举 status 契约不漏 undefined）", async () => {
+    await seedRunningJournal(wsA, "wf-legacy-manifest");
+    // [D2] 前旧收编链物化的历史 manifest（文件名未随 [D1] 迁移故磁盘可达）：
+    // 词表外 outcome 经 findRunSettlementEvidence 的 as 强转读入，派生函数
+    // default 分支折叠 "failed"（W2 D5 诊断兜底容器先例）
+    writeFileSync(
+      join(wsA, "wf-legacy-manifest.json"),
+      JSON.stringify({ outcome: "interrupted", errorCode: "idle-evicted" }),
+      "utf8",
+    );
+    const runs = await createPiHostRunEnumeration(() => agentRoot).loadAll();
+    expect(runs).toEqual([{ runId: "wf-legacy-manifest", stateDir: wsA, status: "failed" }]);
+  });
+
   it("missing（竞态窗口：候选列举后 journal 被删）→ 候选跳过不入结果", async () => {
     await seedRunningJournal(wsA, "wf-race");
     const wsB = join(agentRoot, "sessions", "--other-slug--", "workflow-state");

@@ -5,7 +5,7 @@
  * 职责：以 workflow 投影的 trace 节点为骨架（stepIndex/phase/agent/task），subagent
  * 投影按 (parentRunId, stepIndex) 圈定候选集后合并——「① 供编排结构，② 供运行时
  * 状态」。phase 供源两代（W1 D6）：v1 快照 trace 节点自带 phase（停写，兼容读）；
- * v2 = journal ask-dispatched 载荷 phase（现役——journal-projection fold 恢复 +
+ * v2 = journal agent-started 载荷 phase（现役——journal-projection fold 恢复 +
  * projectV2Workflow 透传）。
  *
  * 三条规则（设计 D2）：

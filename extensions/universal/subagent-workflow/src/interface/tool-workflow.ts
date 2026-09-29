@@ -169,7 +169,7 @@ interface RunSummary {
   startedAt?: string;
   completedAt?: string;
   error?: string;
-  /** Run 状态快照文件绝对路径（<sessionDir>/workflow-state/<runId>.jsonl）。 */
+  /** run 唯一持久件（record 事件流 <sessionDir>/workflow-state/<runId>.record.jsonl）的绝对路径。 */
   stateFile?: string;
 }
 

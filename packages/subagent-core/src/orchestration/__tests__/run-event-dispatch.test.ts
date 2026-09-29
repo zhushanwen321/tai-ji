@@ -3,8 +3,8 @@
 // [P1b-1] run 事件状态机接线单测（D5-④ 唯一入口的编排侧消费面）。
 //
 // 锁四面（设计 workflow-architecture-redesign D5 事件枚举表 + 转移表）：
-// 1. 事件序列落账：ask 重试轨迹完整（run-created → ask-dispatched → ask-retrying →
-//    ask-settled(failed, errorCode) → ask-settled(completed, attempt 递增) →
+// 1. 事件序列落账：ask 重试轨迹完整（run-created → agent-started → agent-retrying →
+//    agent-settled(failed, errorCode) → agent-settled(completed, attempt 递增) →
 //    run-settled(completed)）——对照设计 D5 事件枚举表的字段验收（attempt/errorCode）。
 // 2. 终态三形态（journal 侧写读闭环）：成功=completed、失败=failed+errorCode、
 //    取消=cancelled（经 cancel-requested 控制事件合成 run-settled 路径——控制事件
@@ -188,9 +188,9 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
   });
 });
 
-// ── 1.5 ask-dispatched phase 承载（W1 D6 phase 分组供源） ────
+// ── 1.5 agent-started phase 承载（W1 D6 phase 分组供源） ────
 
-describe("ask-dispatched phase 承载（W1 D6 分组供源）", () => {
+describe("agent-started phase 承载（W1 D6 分组供源）", () => {
   it("dispatchAgentStarted 透传 phase：journal 帧携带剧本归属", async () => {
     const run = makeRun("wf-phase-1");
     await dispatchRunCreated(run);

@@ -23,19 +23,17 @@ import { runReconcileSweep, type SupervisedRecordState } from "./reconcile-sweep
  * 矩阵测试共用同一份——两份手抄会漂移）。
  *
  * manifest 面 reason 换源：判定核 terminal.reason 经 runSettledOutcomeToDoneReason
- * 穷尽 switch 派生——词表内值（[D2] 四值）恒派生非 undefined；运行时 undefined
- * 只在词表外历史值漏出（旧写入方 manifest outcome=interrupted 族——文件名未随
- * [D1] 迁移，磁盘可达）。消费侧显式折叠 "failed"（W2 D5 先例「interrupted →
+ * 穷尽 switch 派生——词表内值（[D2] 四值）恒派生非 undefined；词表外历史值
+ * （旧写入方 manifest outcome=interrupted 族——文件名未随 [D1] 迁移，磁盘可达）
+ * 的折叠收敛在派生函数单点（default 分支折 "failed"，W2 D5 先例「interrupted →
  * failed 诊断兜底容器」：中断形态注销 reason 报 completed 是完成语义误报），
- * 不落 reconcile-sweep closedReasonToPendingReason 的 completed 兜底。
+ * 本消费面零处理直传（reason 恒 string，不落 reconcile-sweep
+ * closedReasonToPendingReason 的 completed 兜底）。
  */
 export function settlementEvidenceToRunState(state: RunSettlementEvidence): SupervisedRecordState {
   if (state.kind === "missing") return "missing";
   if (state.kind === "terminal") {
-    return {
-      terminal: true,
-      closedReason: typeof state.reason === "string" ? state.reason : "failed",
-    };
+    return { terminal: true, closedReason: state.reason };
   }
   return "active";
 }
@@ -91,7 +89,7 @@ export function runPendingReconcileSweepForService(binding: ReconcileSweepBindin
         // [W4 收敛] v2 收编 record 的第三级判据：v1 磁盘读取面（findLightById）不含
         // 收编产物（events 帧 + manifest 投影），无本级时收编 record 落 missing 分支
         // 被误注销为 expired——注销词统一手术的修复点（与 run 侧 D6 判据源改接
-        // findSettlementEvidenceSync 同构：判据接终局证据，不接两态机持久化字段）。
+        // findRunSettlementEvidence 同构：判据接终局证据，不接两态机持久化字段）。
         const adoptedStopReason = binding.getStore().findAdoptedStopReasonSync(id);
         if (adoptedStopReason !== undefined) {
           return { terminal: true, closedReason: adoptedStopReason };

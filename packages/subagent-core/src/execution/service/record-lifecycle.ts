@@ -513,7 +513,7 @@ export class RecordLifecycle {
     // 由脚本返回值承载，留内存 idle 会绑架 hasRunning / 被误升级 /
     // goal defer 恒挂，设计 D7 连带理由；§1.4 out-of-scope）。
     // [P1b-1] 直写通道删除：closed/gc 终态判定收口至 worker-message-pump 的
-    // settleWorkflowRecord 单点（与 settleOneShotOutcome 同款；ask-settled/run-settled
+    // settleWorkflowRecord 单点（与 settleOneShotOutcome 同款；agent-settled/run-settled
     // 事件面由 pump 状态机接线段承载——静默吞失败路径（workflow-dispatch catch 等
     // 多调用方）经本方法自动接入同一收口）。
     if (record.origin === "workflow") {

@@ -6,12 +6,16 @@
  * JSONL 全量解析 → getWorkflows RPC）两条通路都调它（D4「实时与重开走同一份扫描代码」）。
  *
  * 数据来源优先级：
- * 1. **自描述 `workflow-record` entry（W17 v1，权威）**：pi-subagent-workflow 每次成功
- *    flush 同步 append 完整 RunSnapshot（customType 常量 = core WORKFLOW_RECORD_CUSTOM_TYPE，
- *    data = {v:1, snapshot, updatedAt}）。同 runId 多条取最后一条（后者更新）。
+ * 1. **自描述 `workflow-record` v1 快照条目（[D16②] v1 冻结兼容读）**：W17~W1 期间
+ *    创建的历史 run 的全量快照条目（customType 常量 = core WORKFLOW_RECORD_CUSTOM_TYPE，
+ *    data = {v:1, snapshot, updatedAt}）——pi-subagent-workflow 已停写该形态（[D1]
+ *    record 单源后 v1 快照条目不读、不写），本扫描器是历史 run 的冻结显示层：不再
+ *    新增事件、不可 resume，跟随裁决点 7 清理消亡。同 runId 多条取最后一条。
  * 2. **legacy 解析（降级兜底）**：无自描述 entry 命中（W17 改造前创建的旧 session）时走
  *    workflow-state-link 指针 entry + state 文件读取。降级表现 = 数据滞后但可用（登记表
  *    #9 标注）。state 文件在 W17 后降级为纯性能缓存（读序 entry > state 文件 > 空）。
+ *    新 run（W1+ v2 条目）不经本扫描器——runtime 列表主数据源 = journal-projection 的
+ *    record 流 fold + v2 注册/终态条目（v2 条目在本扫描器按版本门静默跳过）。
  *
  * agent call 对话流：trace[].sessionId 是 pi session ID（uuidv7），
  * SessionService.getAgentCallHistory 按 sessionId 全局查找 JSONL 文件
@@ -19,7 +23,7 @@
  *
  * 参考扩展源码（[u1-move] core 切面抽至 packages/subagent-core，extension 侧留壳）：
  * - packages/subagent-core/src/orchestration/run-snapshot.ts（RunSnapshot 格式 + SNAPSHOT_VERSION 权威定义）
- * - extensions/universal/subagent-workflow/src/jsonl-run-store.ts（workflow-record entry data schema W17 v1 写点，快照 codec 留壳消费 core）
+ * - extensions/universal/subagent-workflow/src/jsonl-run-store.ts（record store 单模式——v2 条目写点，快照 codec 留壳消费 core）
  * - packages/subagent-core/src/orchestration/models/workflow-run.ts（WorkflowRun 聚合根）
  * - packages/subagent-core/src/orchestration/models/types.ts（RunStatus/DoneReason/AgentResult）
  */

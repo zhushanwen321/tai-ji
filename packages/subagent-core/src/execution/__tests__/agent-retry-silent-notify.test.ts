@@ -10,7 +10,7 @@
 //      call 未终局化（status=running、trace 零终态 update、无 markDone）；整个过程
 //      finalizeCall 恰好一次（终局化单次，无逐 attempt 终态信号）。
 //   2. journal 级（dispatchAgentSettled 的 result gate）：call 未 markDone（重试中）
-//      时 dispatchAgentSettled 静默返回——ask-settled / run-settled 帧只在终局后落账
+//      时 dispatchAgentSettled 静默返回——agent-settled / run-settled 帧只在终局后落账
 //      （run-settled 帧是终局通知的单点判定源，重试期零帧 = 零通知的结构性前提）。
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -171,7 +171,7 @@ describe("agent 失败重试期零通知（D7 反向面）", () => {
     await flushMicrotasks();
 
     const journal = createRunEventJournal(journalDir);
-    // 零 ask-settled / run-settled 帧——终局 journal 帧（终局通知的单点判定源）
+    // 零 agent-settled / run-settled 帧——终局 journal 帧（终局通知的单点判定源）
     // 只在 markDone 后落账，重试期结构性静默。
     await expect(journal.scan(run.runId)).resolves.toHaveLength(0);
   });

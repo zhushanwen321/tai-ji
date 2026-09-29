@@ -224,4 +224,51 @@ describe("场景 19：对账清理存量形态与接管保护", () => {
     expect(fs.existsSync(path.join(stateDir, "wf-s19-takeover.record.jsonl"))).toBe(true);
     expect(fs.existsSync(path.join(stateDir, "wf-s19-takeover.json"))).toBe(true);
   });
+
+  it("pre-W17 link 指针条目引用的 run：三代引用识别的第三档，宽限调零维护轮后五件不删", async () => {
+    process.env[ORPHAN_RUN_GRACE_WINDOW_MS_ENV] = "0";
+    seedRecordFootprint("wf-s19-link");
+    fs.writeFileSync(path.join(stateDir, "wf-s19-link.jsonl"), '{"v":"wf-run-v1","fixture":true}\n', "utf8");
+    fs.writeFileSync(path.join(stateDir, "wf-s19-link.events.jsonl"), '{"type":"run-created"}\n', "utf8");
+    fs.writeFileSync(path.join(stateDir, "wf-s19-link.resume.lock"), "{}", "utf8");
+    ageRun("wf-s19-link", OLD);
+    // pre-W17 指针形态：workflow-state-link custom entry → data.runId
+    seedSessionEntry("legacy", "sess-link", {
+      type: "custom",
+      customType: "workflow-state-link",
+      data: { runId: "wf-s19-link", path: path.join(stateDir, "wf-s19-link.jsonl") },
+    });
+
+    await runMaintenanceRound("sess-link-round");
+    // 五件全在（record 流 + manifest + 旧双源 + 残锁——link 引用命中保护）
+    for (const suffix of [".record.jsonl", ".json", ".jsonl", ".events.jsonl", ".resume.lock"]) {
+      expect(fs.existsSync(path.join(stateDir, `wf-s19-link${suffix}`))).toBe(true);
+    }
+  });
+
+  // 真实采集器经读错分通道上抛（root 进程 chmod 不生效，跳过）
+  it.skipIf(process.getuid?.() === 0)(
+    "sessions 根真 IO 故障（EACCES）→ 采集失败整轮跳过：无引用 run 不删、无登记写达（core 宁保留防御经真实采集器可达）",
+    async () => {
+      process.env[ORPHAN_RUN_GRACE_WINDOW_MS_ENV] = "0";
+      seedRecordFootprint("wf-s19-iofail");
+      ageRun("wf-s19-iofail", OLD);
+      // 存活 session 在场（chmod 前 seed，证明「跳过」不是空集的正常路径）
+      seedSessionEntry("proj", "sess-io", {
+        type: "custom",
+        customType: "workflow-record",
+        data: { v: 2, kind: "registered", runId: "wf-s19-io", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, journalPath: path.join(stateDir, "wf-s19-io.record.jsonl") },
+      });
+      fs.chmodSync(sessionsRoot, 0o000);
+
+      try {
+        await runMaintenanceRound("sess-io-round");
+      } finally {
+        fs.chmodSync(sessionsRoot, 0o755);
+      }
+      // 采集失败 = 引用状态不可知 → 整轮跳过：候选 run 五件不删 + 无登记写达
+      expect(fs.existsSync(path.join(stateDir, "wf-s19-iofail.record.jsonl"))).toBe(true);
+      expect(fs.existsSync(path.join(stateDir, "orphan-run-reap.json"))).toBe(false);
+    },
+  );
 });

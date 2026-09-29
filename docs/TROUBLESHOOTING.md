@@ -330,6 +330,28 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **排障**：组件经 `defineExpose` 暴露真实元素 getter（先例 `ComposerInput.getInputElement()`），消费方读 expose 元素、缺失即 fail-closed，禁回退 `$el`（ADR-0073 [HISTORICAL]，事故 = W1 F-1 直发门 dev 全变体静默失效）。
 
+### 25. 导入的 zcode 会话 usage 缺失两级症状：stats WARN（已知降级）与续聊即死（毒消息，2026-09-21 事故，已根治）
+
+- **症状 A（轻）**：runtime 日志反复 `replicated-state usage snapshot fetch failed (attempt=N/4): Cannot read properties of undefined (reading 'input')` WARN——token 用量统计（辅助功能）降级，续聊正常。
+- **症状 B（重）**：续聊发出后 25ms 内 turn 即死，pi tee 日志 `turn_end` 带 `stopReason:"error"` + `errorMessage:"Cannot read properties of undefined (reading 'totalTokens')"`，且与症状 A 并存。
+- **根因**：产物中存在「assistant 消息、stopReason 为终态（stop/toolUse/length）、无 usage 键」的 entry。pi 0.84.4 读面对此无检查（pi-semantics PS-41：`agent-session.js:2678` stats 读 `.input`、`:2721` turn 前上下文扫描读 `.totalTokens` 仅跳过 aborted/error）。pi 原生写侧连错误轮都写全零 usage，原生会话不触发；只有导入产物能违反该隐式不变量。
+- **成因与根治**：旧版 zcode 导入转换器把「取消轮」（zcode `data.error.turnResult=cancelled`、无 step-finish part）映射成 `stopReason:'stop'` 且不写 usage——设计期「message 级 stopReason 零消费」断言只查了 taiji 渲染链、漏了 pi 读面。已根治（converter `unsealedStopReason`：cancelled→aborted / error 家族→error；`zeroUsage` 不变量门：assistant 恒带 usage 对象，缺失零值兜底——全零是 pi「无测量数据」的合法编码）。
+- **修复配方（存量毒产物，手术式）**：备份 jsonl → 定位毒 entry（assistant + 终态 stopReason + 无 usage）→ 补 `stopReason:'aborted'`（zcode 源有取消证据时）与全零 usage 对象 → 验证：`parseSessionEntries` + PS-41 双谓词零违例 → 重启应用或切走再切回该会话（运行中 pi 进程持旧内存态，改文件不生效于已加载会话）。
+- **排查特征**：「续聊即死 + reading 'totalTokens' + stats WARN」三者并存 = 症状 B；仅 stats WARN（续聊正常）= 症状 A（毒 entry 的 stopReason 恰为 aborted/error 时 2721 跳过、仅 2678 崩）。两者同根（usage 缺键），根治后新导入产物均不再出现；存量产物按修复配方手术。
+
+### 26. workflow run 状态异常排查：run 事件 journal 取证（2026-09-21 run 显式状态机落地）
+
+- **取证源**：workflow run 生命周期由显式状态机裁决（`subagent-core/src/orchestration/run-events.ts`，`RUN_TRANSITIONS` 转移表 + `transition` 纯函数，表外转移 fail-fast）；record 流 journal 是 run 态权威投影源——`<agentDir>/workflow-state/<runId>.record.jsonl`（[D1] record 单源，后缀经 core `RUN_EVENT_JOURNAL_SUFFIX`；workspace 有活跃 session 时为 `<agentDir>/sessions/<slug>/workflow-state/`，推导 = `resolvePiWorkflowStateDir`），JSONL 逐行（`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`；`agent-started` 载荷携带 `phase?` = 剧本 phase 归属，抽屉分组视图供源；成员词表权威源 = `subagent-core/src/orchestration/run-events.ts` 的 `RUN_EVENT_TYPES`）。旧格式 `.events.jsonl` 两件套不读不写（历史 run 不进 GUI 列表、resume 拒绝，随孤儿对账清理自然消亡）——不是取证源。
+- **判定姿势**：run 卡死/终态异常先读 journal 事件序列对照合法转移表——① 缺 `run-settled` 事件 = run 未终局（查 pump 日志）；② schema 任务武装回执异常：journal 里没有也不该有 `armed` 事件（占位事件已随 D5 删除——回执经运行时事件路由喂入宿主等待门，不落 journal）；现行断言点 = run 终态 failed 且 error 文案含 `[schema-arming]`（宿主 armed 回执等待窗窗满合成失败 outcome，fail-fast 先行——查引擎侧武装断言与 `@zhushanwen/pi-structured-output` 扩展装载；native 引擎 + schema 任务才有武装面，emulated 引擎 / 无 schema 任务豁免不适用本条）；③ debug 日志 `run event dispatch yielded (runId=...)` = 表外转移让位，常见根因是派发链 runId 键错、事件落进占位键（旁证：binding sidecar `.record-binding` 的 `parentRunId` 为 `sar-unattached` 占位而非真实 runId = 未走 workflowAgentDispatch 通道）。
+- **注册表投影**：run 列表态 = journal fold（四相 missing/active/terminal/interrupted），不看文件 mtime；journal 缺失即 missing 相，手工挪动/删除 journal 文件直接改变投影结果。
+
+### 27. 项目 skill 实体（.agents）排障：symlink 形态判定 / 实体还原 / 检出旧 ref 脱钩（2026-09-25 ADR-0086）
+
+- **现状**：`.agents` 实体唯一一份在 workspace 根（`<workspace>/.agents/`），各 worktree 经 symlink 共享，git 不跟踪（`git status` 干净是常态）。backup = `refs/skills-snapshot`（pre-commit 尾部段自动维护；远端同名 ref = 跨机器权威备份点）。
+- **判定姿势**：`ls -la .agents` 应显示 `-> ../.agents`；`git ls-files .agents | wc -l` 应为 0。commit 被第 0 段拦下时按错误信息分派：symlink 悬空 = 实体丢失（走还原）；symlink 指错目标 = 重建（`rm .agents && ln -sfn ../.agents .agents`）；`.agents` 是真实目录 = 该分支检出的是迁移前内容（先落迁移 commit 再删目录重建；bisect/detached 态直接 `rm -rf .agents && ln -sfn ../.agents .agents` 后 continue——禁 merge，会污染 bisect 序列）。
+- **实体还原**（实体误删 / `.bare` 损坏）：`git archive refs/skills-snapshot | tar -x -C <workspace 根>`；本地 ref 不可用先 `git fetch github refs/skills-snapshot:refs/skills-snapshot`（本 workspace remote 名 = `github`；fresh clone 默认 `origin`——`refs/remotes/origin/*` 是 remote 改名前的 stale 残留，`rev-parse origin/main` 仍解析出陈旧值属半工作陷阱，勿作为依据）。还原后 `diff -r` 核对。
+- **快照链排障**：`git rev-parse refs/skills-snapshot` 不存在 = 任一 worktree 手动跑 `bash .githooks/snapshot-skills.sh`；hook 输出 `[WARN] skills 快照失败` = 非阻断（下次 commit 自动重试，多为离线 push 超时）；跨机器重建前 `git ls-remote github refs/skills-snapshot` 核对新鲜度。
+
 ## 环境变量速查
 
 | 变量 | 用途 | 生产默认值 | 开发默认值 |
@@ -501,25 +523,3 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **症状**：续聊大上下文会话（实测 230K tokens）时 assistant 恒定 `stopReason=error`：`undefined is not an object (evaluating 'usage.totalTokens')`，秒级失败（上游 100ms 即拒）。
 - **机制**：provider 上游渠道对超窗口请求返回**不含 usage 字段**的错误响应，pi openai-completions 适配层解析时未对 usage 缺失做防御。凭据/通路无问题（同 provider 小上下文请求成功）。
 - **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
-
-### 20. 导入的 zcode 会话 usage 缺失两级症状：stats WARN（已知降级）与续聊即死（毒消息，2026-09-21 事故，已根治）
-
-- **症状 A（轻）**：runtime 日志反复 `replicated-state usage snapshot fetch failed (attempt=N/4): Cannot read properties of undefined (reading 'input')` WARN——token 用量统计（辅助功能）降级，续聊正常。
-- **症状 B（重）**：续聊发出后 25ms 内 turn 即死，pi tee 日志 `turn_end` 带 `stopReason:"error"` + `errorMessage:"Cannot read properties of undefined (reading 'totalTokens')"`，且与症状 A 并存。
-- **根因**：产物中存在「assistant 消息、stopReason 为终态（stop/toolUse/length）、无 usage 键」的 entry。pi 0.84.4 读面对此无检查（pi-semantics PS-41：`agent-session.js:2678` stats 读 `.input`、`:2721` turn 前上下文扫描读 `.totalTokens` 仅跳过 aborted/error）。pi 原生写侧连错误轮都写全零 usage，原生会话不触发；只有导入产物能违反该隐式不变量。
-- **成因与根治**：旧版 zcode 导入转换器把「取消轮」（zcode `data.error.turnResult=cancelled`、无 step-finish part）映射成 `stopReason:'stop'` 且不写 usage——设计期「message 级 stopReason 零消费」断言只查了 taiji 渲染链、漏了 pi 读面。已根治（converter `unsealedStopReason`：cancelled→aborted / error 家族→error；`zeroUsage` 不变量门：assistant 恒带 usage 对象，缺失零值兜底——全零是 pi「无测量数据」的合法编码）。
-- **修复配方（存量毒产物，手术式）**：备份 jsonl → 定位毒 entry（assistant + 终态 stopReason + 无 usage）→ 补 `stopReason:'aborted'`（zcode 源有取消证据时）与全零 usage 对象 → 验证：`parseSessionEntries` + PS-41 双谓词零违例 → 重启应用或切走再切回该会话（运行中 pi 进程持旧内存态，改文件不生效于已加载会话）。
-- **排查特征**：「续聊即死 + reading 'totalTokens' + stats WARN」三者并存 = 症状 B；仅 stats WARN（续聊正常）= 症状 A（毒 entry 的 stopReason 恰为 aborted/error 时 2721 跳过、仅 2678 崩）。两者同根（usage 缺键），根治后新导入产物均不再出现；存量产物按修复配方手术。
-
-### 21. workflow run 状态异常排查：run 事件 journal 取证（2026-09-21 run 显式状态机落地）
-
-- **取证源**：workflow run 生命周期由显式状态机裁决（`subagent-core/src/orchestration/run-events.ts`，`RUN_TRANSITIONS` 转移表 + `transition` 纯函数，表外转移 fail-fast）；事件流 journal 是 run 态权威投影源——`<agentDir>/workflow-state/<runId>.events.jsonl`（workspace 有活跃 session 时为 `<agentDir>/sessions/<slug>/workflow-state/`，推导 = `resolvePiWorkflowStateDir`），JSONL 逐行（`run-created / ask-dispatched / ask-retrying / ask-settled / member-pool / armed / run-settled`；`ask-dispatched` 载荷携带 `phase?` = 剧本 phase 归属，抽屉分组视图供源；成员词表权威源 = `subagent-core/src/orchestration/run-events.ts` 的 `RUN_EVENT_TYPES`）。
-- **判定姿势**：run 卡死/终态异常先读 journal 事件序列对照合法转移表——① 缺 `run-settled` 事件 = run 未终局（查 pump 日志）；② schema 任务缺 `armed` 事件 = 武装回执未达（宿主等待窗 fail-fast 先行，查引擎侧武装断言与扩展装载）；③ debug 日志 `run event dispatch yielded (runId=...)` = 表外转移让位，常见根因是派发链 runId 键错、事件落进占位键（旁证：binding sidecar `.record-binding` 的 `parentRunId` 为 `sar-unattached` 占位而非真实 runId = 未走 workflowAgentDispatch 通道）。
-- **注册表投影**：run 列表态 = journal fold（四相 missing/active/terminal/interrupted），不看文件 mtime；journal 缺失即 missing 相，手工挪动/删除 journal 文件直接改变投影结果。
-
-### 22. 项目 skill 实体（.agents）排障：symlink 形态判定 / 实体还原 / 检出旧 ref 脱钩（2026-09-25 ADR-0086）
-
-- **现状**：`.agents` 实体唯一一份在 workspace 根（`<workspace>/.agents/`），各 worktree 经 symlink 共享，git 不跟踪（`git status` 干净是常态）。backup = `refs/skills-snapshot`（pre-commit 尾部段自动维护；远端同名 ref = 跨机器权威备份点）。
-- **判定姿势**：`ls -la .agents` 应显示 `-> ../.agents`；`git ls-files .agents | wc -l` 应为 0。commit 被第 0 段拦下时按错误信息分派：symlink 悬空 = 实体丢失（走还原）；symlink 指错目标 = 重建（`rm .agents && ln -sfn ../.agents .agents`）；`.agents` 是真实目录 = 该分支检出的是迁移前内容（先落迁移 commit 再删目录重建；bisect/detached 态直接 `rm -rf .agents && ln -sfn ../.agents .agents` 后 continue——禁 merge，会污染 bisect 序列）。
-- **实体还原**（实体误删 / `.bare` 损坏）：`git archive refs/skills-snapshot | tar -x -C <workspace 根>`；本地 ref 不可用先 `git fetch github refs/skills-snapshot:refs/skills-snapshot`（本 workspace remote 名 = `github`；fresh clone 默认 `origin`——`refs/remotes/origin/*` 是 remote 改名前的 stale 残留，`rev-parse origin/main` 仍解析出陈旧值属半工作陷阱，勿作为依据）。还原后 `diff -r` 核对。
-- **快照链排障**：`git rev-parse refs/skills-snapshot` 不存在 = 任一 worktree 手动跑 `bash .githooks/snapshot-skills.sh`；hook 输出 `[WARN] skills 快照失败` = 非阻断（下次 commit 自动重试，多为离线 push 超时）；跨机器重建前 `git ls-remote github refs/skills-snapshot` 核对新鲜度。

@@ -377,9 +377,15 @@ async function persistTerminalProjection(
   }
   const errorCode: RunErrorCode | undefined =
     trigger.type === "run-settled" ? trigger.errorCode : undefined;
-  // [D5 诊断引用落账] 失败终局才投影取证指针（成功/cancelled/time_limited 不写——
-  // 字段语义与 AgentSettledEvent.stderrTeePath 同一失败伴随纪律）。
-  const stderrTeePath = outcome === "failed" ? await lastStderrTeePathFromRecord(run.runId, journalDir) : undefined;
+  // [D5 诊断引用落账 / D2 time_limited 升格连带] failed 与 time_limited 两值终局
+  // 才投影取证指针（成功/cancelled 不写——字段语义与 AgentSettledEvent.stderrTeePath
+  // 的失败伴随纪律一致）；time_limited 采集保留 = 设计 D2 词表变更登记第 3 条
+  // （「超时也可能是引擎卡死，stderr 采集保留」——升格前超时是 failed 终局有
+  // 采集，升格不回退证据通道，「脚本慢」与「引擎卡死超时」在 manifest 面可区分）。
+  const stderrTeePath =
+    outcome === "failed" || outcome === "time_limited"
+      ? await lastStderrTeePathFromRecord(run.runId, journalDir)
+      : undefined;
   const settledAt = Date.now();
   try {
     await writeRunTerminalManifest(dir, {
@@ -728,6 +734,15 @@ export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: R
     case "time_limited":
       return "time_limited";
     case "failed":
+      return "failed";
+    default:
+      // 词表外防御（判定核单点收敛）：穷尽 switch 无兜底时词表外值漏出
+      // undefined，会击穿 RunSettlementEvidence.reason: string 契约（枚举 status /
+      // 注销 reason 等消费面直接透传）。运行时可达形态 = 历史 manifest 的
+      // outcome=interrupted 族（[D2] 前旧收编链物化，文件名未随 [D1] 迁移故磁盘
+      // 可达，经 findRunSettlementEvidence 的 as RunOutcome 强转读入）——统一
+      // 折叠 "failed" 诊断兜底容器（W2 D5 先例「interrupted → failed」：中断形态
+      // 报 completed 是完成语义误报），消费侧零处理。
       return "failed";
   }
 }

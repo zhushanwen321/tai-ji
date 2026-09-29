@@ -160,6 +160,12 @@ function resolveSessionDir(): string {
 // 十秒级（设计「实现落点」登记的实测预期——每 session_start 一次，oncePerProcess
 // 守卫下进程内单跑）。
 
+/** Node fs 错误 code 判定（ENOENT = 路径不存在；core shared/fs-error 的 errorCodeOf
+ *  未进 barrel——本地等价 helper，判据与 pi-host-run-store 的读错分通道同款）。 */
+function isEnoent(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as NodeJS.ErrnoException).code === "ENOENT";
+}
+
 function extractRunReferencesFromLine(line: string, out: Set<string>): void {
   const trimmed = line.trim();
   if (trimmed === "" || !trimmed.includes("workflow")) return; // 行级预过滤
@@ -205,15 +211,26 @@ async function collectAliveWorkflowRunReferences(
     slugDirs = fs.readdirSync(sessionsRoot, { withFileTypes: true })
       .filter((ent) => ent.isDirectory())
       .map((ent) => path.join(sessionsRoot, ent.name));
-  } catch {
-    return refs; // sessions 根不存在 = 无任何 session 落盘，空集（整轮跳过删除）
+  } catch (err) {
+    // 读错分通道（对齐 core pi-host-run-store 同款纪律）：ENOENT = 从未落盘的
+    // 正常空态，空集返回（core reapOrphanRuns 按「无引用」正常判定）；非 ENOENT
+    // （EACCES/EIO 等真 IO 故障）上抛——空集会把「引用状态不可知」折叠成「无任何
+    // 引用」的成功返回，core 的「采集失败 = 整轮跳过（宁保留）」防御（reapOrphan
+    // Runs 的 collectAliveRunReferences catch）在生产路径将不可达，持续 IO 权限
+    // 故障下被存活 session 引用的 run 会在宽限窗后被不可逆删除。
+    if (isEnoent(err)) return refs;
+    throw err;
   }
   const readOpts = { encoding: "utf8" as const };
   for (const dir of slugDirs) {
     let files: string[];
     try {
       files = fs.readdirSync(dir);
-    } catch {
+    } catch (err) {
+      // 同款分通道：ENOENT = 该 slug 目录被并发清走（会话删除竞态），跳过；真 IO
+      // 故障上抛整轮跳过（该目录下 session 的引用集缺席只延后删除——但「缺席的
+      // 原因不可知」时按失败处置，不冒充空集）。
+      if (!isEnoent(err)) throw err;
       continue;
     }
     for (const file of files) {
@@ -651,9 +668,17 @@ async function runProcessLevelMaintenance(
       } catch {
         // sessions 根不存在 = 从未落盘（首次运行形态），仅保留上方两目录锚
       }
-      const aliveRefs = collectAliveWorkflowRunReferences(agentDir);
+      // 引用集惰性单次采集（同轮同快照，逐目录重复全池扫描无增益）：promise 在
+      // core reapOrphanRuns 的 await 表达式内才创建——采集器上抛（真 IO 故障，
+      // 读错分通道）时拒绝被该 await 的 try/catch 即时接住，不产生提前创建导致的
+      // 未处理拒绝告警；登记文件（orphan-run-reap.json）落各自 stateDir，多目录天然隔离。
+      let aliveRefsPromise: Promise<ReadonlySet<string>> | undefined;
+      const collectAliveRefsOnce = (): Promise<ReadonlySet<string>> => {
+        aliveRefsPromise ??= collectAliveWorkflowRunReferences(agentDir);
+        return aliveRefsPromise;
+      };
       const reapDeps = {
-        collectAliveRunReferences: () => aliveRefs,
+        collectAliveRunReferences: collectAliveRefsOnce,
         warn: (msg: string) => logger.warn(`[subagent-workflow] ${msg}`),
         debug: (msg: string) => logger.debug(`[subagent-workflow] ${msg}`),
         toMsg: (err: unknown) => toErrorMessage(err),

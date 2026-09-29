@@ -136,7 +136,7 @@ async function flushMicrotasks(ticks = 20): Promise<void> {
 
 // ── 1. 全链三段（引擎上报 → 事件载荷 → manifest） ────────────
 
-describe("stderrTeePath 全链（引擎上报 → ask-settled 载荷 → 失败终局 manifest）", () => {
+describe("stderrTeePath 全链（引擎上报 → agent-settled 载荷 → 失败终局 manifest）", () => {
   it("失败 ask → 事件载荷含 stderrTeePath 且文件存在；终局 failed → manifest 投影同路径", async () => {
     const teePath = writeTeeFixture("pi-task-stderr-4242.log", "fake-pi stderr boot\n");
     const run = makeRealRun("wf-tee-1");
@@ -156,7 +156,7 @@ describe("stderrTeePath 全链（引擎上报 → ask-settled 载荷 → 失败�
     dispatchAgentSettled(run, call, false);
     await flushMicrotasks();
 
-    // 事件载荷段：ask-settled(failed) 携带路径 + 文件真实存在（S2 L1 等价断言）
+    // 事件载荷段：agent-settled(failed) 携带路径 + 文件真实存在（S2 L1 等价断言）
     const events = await scanRunEvents("wf-tee-1");
     const settled = events.find((e) => e.type === "agent-settled");
     expect(settled).toMatchObject({

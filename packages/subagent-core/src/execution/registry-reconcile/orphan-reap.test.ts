@@ -12,8 +12,10 @@
 // run 的唯一磁盘清理通道）。引用集三代（v2 注册条目 / v1 全量快照条目 /
 // pre-W17 link 指针）的解析本体在壳侧注入面（subagent-workflow/session-lifecycle
 // 的 collectAliveWorkflowRunReferences，u1a 领地）——core 层契约 = 注入并集命中
-// 即保护，本文件按该契约以注入集合模拟三代引用与接管；三代解析本体的测试缺口
-// 登记 deviations 待壳侧补。
+// 即保护，本文件按该契约以注入集合模拟三代引用与接管；三代解析本体的测试覆盖
+// 已由壳侧真实解析路径承接（v1/v2 两代见 scenario-08 / scenario-19；link 指针
+// 分支见 scenario-19「pre-W17 link 指针条目引用」用例——同文件另含 sessions 根
+// 真 IO 故障整轮跳过用例）。
 //
 // 测试纪律：全部 mkdtempSync 自建自删（禁触真实数据目录）；时钟经 options.now
 // 注入（确定性）；reap 不读 record 内容（候选按文件名 / 引用按注入 / 时间按

@@ -67,9 +67,12 @@ export interface WorkflowRecordRegisteredEntryData {
   slug: string;
   startedAt: number;
   /**
-   * journal 绝对路径锚点（`<sessionDir>/workflow-state/<runId>.events.jsonl`）——
-   * v2 条目的 journalPath 锚点字段（任务书 U0 职责 1）；保留窗口内 journal 在盘
-   * 即可按锚点读步骤级家族链，窗口外回落 manifest 摘要级（D10 三档发现链）。
+   * record 事件流绝对路径锚点（`<sessionDir>/workflow-state/<runId>.record.jsonl`
+   * ——后缀经 core RUN_EVENT_JOURNAL_SUFFIX 单源常量，[D1] record 单源流命名；
+   * 写侧锚点与实写面同源见 terminal-actions.runEventJournalPathOf）——v2 条目
+   * 的 journalPath 锚点字段（任务书 U0 职责 1）；保留窗口内 record 流在盘即可
+   * 按锚点读步骤级家族链，窗口外回落 manifest 摘要级（session-reader 发现链
+   * 三档，[D16③] 适配）。
    */
   journalPath: string;
 }

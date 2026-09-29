@@ -1,7 +1,7 @@
 // src/__tests__/jsonl-run-store-session-file.test.ts
 //
 // JsonlRunStore 壳侧归属面汇总件（[D1] record 单源形态）：record 流折叠重建的
-// round-trip 保真（sessionFile / result 全文经 ask-settled 载荷恢复）、record 流
+// round-trip 保真（sessionFile / result 全文经 agent-settled 载荷恢复）、record 流
 // 路径指针（stateFilePath）、workflow-record 条目面（零条目写锚定 + v2 收编读面 +
 // rebind 补写 + stale guard）、历史实体分流（旧后缀锚点不重建）。
 //
@@ -18,7 +18,7 @@
 //
 // 起源防的 bug（沿用）：sessionFile 加入 AgentCall + ExecutionTraceNode 后，持久化
 // 时必须写入、重建时必须恢复——否则跨 session 重水合后 agent 的 session jsonl
-// 路径丢失，overlay 无法定位。[D1] 形态下持久化面 = record 流 ask-settled 帧
+// 路径丢失，overlay 无法定位。[D1] 形态下持久化面 = record 流 agent-settled 帧
 // result 载荷（sessionFile 随 result 全文落流）。
 
 import * as fs from "node:fs";
@@ -117,7 +117,7 @@ function seedSettledRunWithCall(
 
 // ── record 重建 round-trip（sessionFile / result 全文保真）────────────
 
-describe("W1[D1]: record 重建 round-trip（call 级详情经 ask-settled result 恢复）", () => {
+describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled result 恢复）", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -343,7 +343,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     expect(data["outcome"]).toBe("done");
     expect(data["reason"]).toBe("completed");
     expect(data["settledAt"]).toBe(3000);
-    expect(data["callCount"]).toBe(1); // record ask-settled 帧数投影
+    expect(data["callCount"]).toBe(1); // record agent-settled 帧数投影
   });
 
   it("[D2] 历史形态 interrupted outcome 帧被 scan 词表外坏行跳过（[D1] 历史数据处置——旧词表行不进解析路径，run 重建退 running 交收编）", async () => {

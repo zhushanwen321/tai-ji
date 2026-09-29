@@ -1151,8 +1151,14 @@ describe("foldRunEventCheckpoint（seq 守卫，D6 域 fold 去重）", () => {
     expect(twice).toEqual(once);
     expect(once.state).toEqual({ lifecycle: "terminal", outcome: "done" });
     expect(once.lastSeq).toBe(11);
-    // [D3] phase 状态机投影半边：startedAt/settledAt 随转移事件落投影
-    expect(once.phases.get("review")).toEqual({ phase: "review", startedAt: TS + 5, settledAt: TS + 130_000 });
+    // [D3] phase 状态机投影半边：startedAt/settledAt 随转移事件落投影（settledBy
+    // "frame"——phase-settled 帧值，不参与对称自愈的推导翻回）
+    expect(once.phases.get("review")).toEqual({
+      phase: "review",
+      startedAt: TS + 5,
+      settledAt: TS + 130_000,
+      settledBy: "frame",
+    });
   });
 
   it("seq ≤ 水位的事件按重放跳过：以既有 checkpoint 为初值重放全量流，不重复应用", () => {
@@ -1211,6 +1217,114 @@ describe("foldRunEventCheckpoint（seq 守卫，D6 域 fold 去重）", () => {
     });
     expect(healed.phases.get("impl")).toEqual({ phase: "impl", startedAt: TS + 10 });
     expect(healed.state).toEqual({ lifecycle: "running" });
+  });
+
+  it("[D3 对称自愈] phase-settled 帧缺失：该 phase 在场 call 全部落定 → 按 agent-settled 帧行推导 phase 终局（行存在即权威）", () => {
+    const chain: WorkflowRunEvent[] = [
+      runCreated,
+      phaseStarted,
+      { ...agentStarted, phase: "review" },
+      { ...agentSettledCompleted, taskIndex: 0, ts: TS + 120_000 },
+    ];
+    const checkpoint = foldRunEventCheckpoint(chain, () => {
+      throw new Error("phase-settled 帧缺失（postMessage 异步丢失窗口）不该被判坏帧");
+    });
+    expect(checkpoint.state).toEqual({ lifecycle: "running" });
+    expect(checkpoint.phases.get("review")).toEqual({
+      phase: "review",
+      startedAt: TS + 5,
+      settledAt: TS + 120_000,
+      settledBy: "derived",
+    });
+  });
+
+  it("[D3 对称自愈] resume 重放：run-interrupted → run-resumed → 新 phase-started 重置后，崩溃前已完成的 phase 收束保持（缓存回话零新帧的恢复通道）", () => {
+    const chain: WorkflowRunEvent[] = [
+      runCreated,
+      phaseStarted,
+      { ...agentStarted, phase: "review" },
+      { ...agentSettledCompleted, taskIndex: 0, ts: TS + 120_000 },
+      phaseSettled,
+      { ...runInterrupted, seq: 30 },
+      { ...runResumed, seq: 31 },
+      // resume 后脚本确定性重放重新执行 phase() 落新 phase-started 帧（taskIndex
+      // 0 命中缓存回话，不落新 agent 事件——设计 D3「持久修复通道」）
+      { ...phaseStarted, seq: 32, ts: TS + 300_000 },
+    ];
+    const checkpoint = foldRunEventCheckpoint(chain, () => {
+      throw new Error("resume 重放形态不该被判坏帧");
+    });
+    expect(checkpoint.state).toEqual({ lifecycle: "running" });
+    expect(checkpoint.phases.get("review")).toEqual({
+      phase: "review",
+      // startedAt 随重放 phase-started 更新；收束由对称自愈按已落定 call 行恢复
+      startedAt: TS + 300_000,
+      settledAt: TS + 120_000,
+      settledBy: "derived",
+    });
+  });
+
+  it("[D3 对称自愈] 同名义真重入：新 agent-started 到达 → 推导值翻回 running；新 call 落定后再度推导收束（推导态不是吸收态）", () => {
+    const round1: WorkflowRunEvent[] = [
+      runCreated,
+      phaseStarted,
+      { ...agentStarted, phase: "review" },
+      { ...agentSettledCompleted, taskIndex: 0, ts: TS + 120_000 },
+      // 同名义新一轮 phase-started：先瞬态推导为收束（与 resume 重放不可区分）
+      { ...phaseStarted, seq: 10, ts: TS + 200_000 },
+    ];
+    const mid = foldRunEventCheckpoint(round1, () => {});
+    expect(mid.phases.get("review")?.settledBy).toBe("derived");
+    // 首个新 agent-started 到达 → 翻回 running
+    const withNewCall = foldRunEventCheckpoint(
+      [...round1, { ...agentStarted, seq: 11, ts: TS + 210_000, taskIndex: 1, phase: "review" }],
+      () => {},
+    );
+    expect(withNewCall.phases.get("review")).toEqual({ phase: "review", startedAt: TS + 200_000 });
+    // 新 call 落定 → 再度推导收束
+    const settledAgain = foldRunEventCheckpoint(
+      [
+        ...round1,
+        { ...agentStarted, seq: 11, ts: TS + 210_000, taskIndex: 1, phase: "review" },
+        { ...agentSettledCompleted, seq: 12, ts: TS + 250_000, taskIndex: 1 },
+      ],
+      () => {},
+    );
+    expect(settledAgain.phases.get("review")).toEqual({
+      phase: "review",
+      startedAt: TS + 200_000,
+      settledAt: TS + 250_000,
+      settledBy: "derived",
+    });
+  });
+
+  it("[D3 对称自愈] 重试在途：agent-retrying 使推导值翻回 running（call 行携上一次尝试的旧 settled，判据按 treatAsRunning）；phase-settled 帧值不参与翻回", () => {
+    const chain: WorkflowRunEvent[] = [
+      runCreated,
+      phaseStarted,
+      { ...agentStarted, phase: "review" },
+      { ...agentSettledCompleted, taskIndex: 0, ts: TS + 120_000 },
+    ];
+    const derived = foldRunEventCheckpoint(chain, () => {});
+    expect(derived.phases.get("review")?.settledBy).toBe("derived");
+    const retrying = foldRunEventCheckpoint(
+      [...chain, { ...agentRetrying, seq: 10, ts: TS + 130_000, taskIndex: 0 }],
+      () => {},
+    );
+    expect(retrying.phases.get("review")?.settledAt).toBeUndefined();
+    // 帧值（settledBy "frame"）随后到 phase-settled 落位后，agent 事件不再翻回
+    const framed = foldRunEventCheckpoint([...chain, { ...phaseSettled, seq: 11 }], () => {});
+    expect(framed.phases.get("review")).toEqual({
+      phase: "review",
+      startedAt: TS + 5,
+      settledAt: TS + 130_000,
+      settledBy: "frame",
+    });
+    const framedThenRetry = foldRunEventCheckpoint(
+      [...chain, { ...phaseSettled, seq: 11 }, { ...agentRetrying, seq: 12, ts: TS + 140_000, taskIndex: 0 }],
+      () => {},
+    );
+    expect(framedThenRetry.phases.get("review")?.settledAt).toBe(TS + 130_000);
   });
 
   it("[D2] 中断/复活投影：interrupted / resumed 骨架半边随转移事件产出（D10 预算算式的切段边界数据源）", () => {

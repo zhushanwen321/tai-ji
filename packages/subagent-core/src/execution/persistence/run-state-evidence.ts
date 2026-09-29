@@ -16,7 +16,9 @@
 // （runSettledOutcomeToDoneReason——sweep 判据的 reason 派生单点，
 // 帧/manifest (outcome, errorCode) → DoneReason 五处统一派生）。
 
-import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, unlinkSync } from "node:fs";
+
+import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 import { readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -670,13 +672,6 @@ const ORPHAN_REAP_REGISTRY_FILE = "orphan-run-reap.json";
 /** 登记状态：runId → 首判无主时刻（epoch ms）。并发丢更新显式接受不设锁（低频维护轮 + 宁保留方向）。 */
 type OrphanReapRegistry = Record<string, number>;
 
-/** 原子写 helper（临时文件 + rename——与 manifest-store 同族纪律）。 */
-function writeAtomicJson(fullPath: string, value: unknown): void {
-  const tmp = `${fullPath}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(value), "utf8");
-  renameSync(tmp, fullPath);
-}
-
 /**
  * 读登记状态（损坏按空重登记——宁保留方向：登记丢失只会延后删除，不会提前）。
  *
@@ -900,10 +895,12 @@ export async function reapOrphanRuns(
     }
   }
 
-  // 登记落盘（原子写；有变更才写）
+  // 登记落盘（原子写——shared writeAtomicFileSync 单源：统一 tmp 约定可被
+  // listStaleTmpFiles/cleanupStaleTmpFiles 识别清扫、失败路径尽力清理残留 tmp；
+  // 有变更才写）
   if (registryDirty) {
     try {
-      writeAtomicJson(join(stateDir, ORPHAN_REAP_REGISTRY_FILE), registry);
+      writeAtomicFileSync(join(stateDir, ORPHAN_REAP_REGISTRY_FILE), JSON.stringify(registry));
     } catch (err) {
       deps.warn(`orphan reap: registry write failed (re-registration next round): ${deps.toMsg(err)}`);
     }

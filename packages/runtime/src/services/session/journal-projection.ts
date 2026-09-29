@@ -64,9 +64,10 @@ import { mergeWorkflowStepRecords } from './workflow-step-merge.js'
  * run 事件 type 词表的运行时镜像（barrel 未导出 RUN_EVENT_TYPES 常量数组）。
  * Record 键型 = WorkflowRunEvent['type'] 的全联合——core 词表增删成员时本处的
  * 记录字面量缺键/多键即编译红（编译期穷尽守卫，替代运行时漂移）。
- * [W2 D2] core 死形态清退后 7 键：ask-executing 删除（无生产写入方——其历史
- * journal 行经本镜像的词表外判定返回 undefined，由 tailer 跳过计日志）；member-pool
- * 补键（U4 additive 扩容的镜像补齐）。
+ * 现态 9 键（[D4] 对齐 pi 后定稿）：ask-* 三词改 agent-*，新增 phase-started/
+ * phase-settled（D3）与 run-interrupted/run-resumed（D2）；ask-executing 已随
+ * [W2 D2] 死形态清退删除（其历史 journal 行经本镜像的词表外判定返回 undefined，
+ * 由 tailer 跳过计日志）；member-pool 已随 [D6] 绑定消解删除。
  */
 const RUN_EVENT_TYPE_PROBE: Record<WorkflowRunEvent['type'], true> = {
   'run-created': true,
@@ -86,7 +87,7 @@ const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set(Object.keys(RUN_EVENT_TY
  * run journal 文件行解析器（journal-tail parseLine 注入面，run 域）。
  *
  * 守卫对齐 core run-events isWorkflowRunEventLine 的最宽共同判定面：JSON 对象 +
- * type 落词表 + ts 有限数值 + outcome（ask-settled / run-settled 携带时）落词表。
+ * type 落词表 + ts 有限数值 + outcome（agent-settled / run-settled 携带时）落词表。
  * 坏行返回 undefined 交 tailer 计数（宽容跳过，不卡游标）。
  */
 export function parseWorkflowRunEventFileLine(line: string): WorkflowRunEvent | undefined {
@@ -322,15 +323,29 @@ export function projectV2Workflow(
 ): WorkflowRunRecord | null {
   if (registered === undefined && settledEntry === undefined) return null
   const runSettled = fold?.runSettled
-  // [D2] 三态投影：terminal（fold 终帧或终态条目）→ done；fold 状态机停在
-  // interrupted 暂停态（run-interrupted 帧在盘、无终局）→ interrupted（GUI 显示
-  // 「已中断（可续跑）」）；其余 → running。
+  // [D2] 三态投影（journal 胜出仲裁的判据面：fold 在场 = journal 已接线，三态
+  // 全由 fold 定，条目 status 不参与——条目是 append-only last-wins 快照，resume
+  // 复活只补写 registered 条目、留存的中断形态条目不被覆盖，条目值在 fold 在场
+  // 时会陈旧；resume 后 fold 已回 running，此时按留存中断条目判 interrupted 会
+  // 把复活 run 误显示「已中断（可续跑）」直到终局）：
+  // - fold 在场：runSettled 终帧 → done；状态机停 interrupted 暂停态
+  //   （run-interrupted 帧在盘、无终局）→ interrupted（GUI 显示「已中断
+  //   （可续跑）」）；其余 → running；
+  // - fold 缺席（entry-only 降级投影：runJournalDir 缺席或 record 流被外部
+  //   清理，条目是唯一来源）：settledEntry 三态自描述（schema 契约见 core
+  //   workflow-record-entry），中断 run 不得回落显示「运行中」。
   const status: WorkflowRunRecord['status'] =
-    runSettled !== undefined || settledEntry?.status === 'done'
-      ? 'done'
-      : fold?.state.lifecycle === 'interrupted'
-        ? 'interrupted'
-        : 'running'
+    fold === undefined
+      ? settledEntry?.status === 'done'
+        ? 'done'
+        : settledEntry?.status === 'interrupted'
+          ? 'interrupted'
+          : 'running'
+      : runSettled !== undefined
+        ? 'done'
+        : fold.state.lifecycle === 'interrupted'
+          ? 'interrupted'
+          : 'running'
   // reason 词表收窄：core DoneReason ⊃ shared WorkflowDoneReason（core 另含
   // invalid_args 等扩展值，shared 信号面不认——词表外按缺省归一，不硬透传）
   const reason =

@@ -704,7 +704,7 @@ export class RunOrchestration {
     // 抢锁（承接现状「cancel/dispose 抢先 → 静默跳过」守卫语义）。
     // [P1b-1] 直写通道删除：closed/cancelled 终态判定不再在本方法直写——收口至
     // worker-message-pump 的 settleWorkflowRecord 单点（D7 例外族 CAS + finalize 对
-    // 的唯一剩余处）；ask-settled/run-settled 事件面由同文件状态机接线段承载。
+    // 的唯一剩余处）；agent-settled/run-settled 事件面由同文件状态机接线段承载。
     if (record.origin === "workflow") {
       await settleWorkflowRecord(record, result, aborted ? "cancelled" : "gc", {
         finalizeRecord: (r, closedReason) => this.deps.finalizeRecord(record, r, "closed", closedReason),

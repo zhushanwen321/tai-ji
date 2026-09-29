@@ -232,11 +232,12 @@ describe("[W2/V4 D6] sweep 判据源改接后的 v2 run 补注销（真实判定
     const result = runReconcileSweep(deps);
 
     expect(result.reconciled).toEqual(["wf-v4-manifest"]);
-    // [D16⑤ manifest 面 reason 换源（u1b 终定）] interrupted manifest 是历史写入方
-    // 产物形态（[D2] 前旧收编链物化，文件名未随 [D1] 迁移故磁盘可达）——判定核
-    // 对词表外 outcome 漏 undefined，消费侧（settlementEvidenceToRunState）折叠
-    // "failed"（W2 D5「interrupted → failed 诊断兜底容器」先例），不落 completed
-    // 兜底（完成语义对中断形态是误报）
+    // [D16⑤ manifest 面 reason 换源（词表外折叠收敛到判定核单点）] interrupted
+    // manifest 是历史写入方产物形态（[D2] 前旧收编链物化，文件名未随 [D1] 迁移
+    // 故磁盘可达）——词表外 outcome 在派生函数 runSettledOutcomeToDoneReason 的
+    // default 分支折叠 "failed"（W2 D5「interrupted → failed 诊断兜底容器」先例），
+    // 判定核 reason 恒 string、消费侧零处理，不落 completed 兜底（完成语义对
+    // 中断形态是误报）
     expect(unregisterAppends[0]).toMatchObject({ id: "wf-v4-manifest", reason: "failed" });
   });
 });
@@ -268,7 +269,7 @@ async function writeSettledJournal(
   });
 }
 
-/** journal 非终局形态：run-created + ask-dispatched（无 settled 帧）。 */
+/** journal 非终局形态：run-created + agent-started（无 settled 帧）。 */
 async function writeLiveJournal(runId: string): Promise<void> {
   const journal = createRunEventJournal(stateDirOf());
   await journal.append(runId, {

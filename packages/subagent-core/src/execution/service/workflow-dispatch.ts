@@ -544,7 +544,7 @@ export class WorkflowDispatch {
       // finalizeRecord），不保持 running 态。
       // [P1b-1] 静默吞失败路径的终态写入已经 transition 体系收口：deps.finalizeFailed
       // 内部改调 worker-message-pump 的 settleWorkflowRecord 单点（原直写对删除），
-      // ask-settled 事件面由 pump call 完成链投递——失败不再绕过状态机体系无痕。
+      // agent-settled 事件面由 pump call 完成链投递——失败不再绕过状态机体系无痕。
       const failed = await this.deps.finalizeFailed(record, err);
       return mapToWorkflowAgentResult(failed);
     } finally {
@@ -578,7 +578,7 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
     sessionFile: outcome.sessionFile,
     worktreePath: outcome.worktreePath,
     // [D5 诊断引用落账] 失败伴随的 stderr tee 路径透传（引擎终态应答 → call.result
-    // → dispatchAskSettled 载荷；上报判据见 AgentOutcome.stderrTeePath 注释）。
+    // → dispatchAgentSettled 载荷；上报判据见 AgentOutcome.stderrTeePath 注释）。
     ...(outcome.stderrTeePath !== undefined ? { stderrTeePath: outcome.stderrTeePath } : {}),
     toolCalls: outcome.toolCalls,
   };

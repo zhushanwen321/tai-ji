@@ -282,8 +282,10 @@ export function extractRecordStreamSessionFiles(content: string): string[] {
  *
  * **签名与返回值结构（WorkflowRef[]{runId,stateFile,calls:SessionRef[]}）完全不变**
  * （C-resolveworkflows-signature，保 m1 已冻结交付的消费者）。三档的 stateFile 语义：
- * - v2 档：journalPath 推导的 state 快照路径（窗口外文件已删 → readRunSnapshot
- *   undefined → calls=[]，run 存在性兜底——与旧链窗外行为同构）；
+ * - v2 档：stateFile = journalPath 本身（record 流路径——[D16③] 锚点语义重定义，
+ *   D1 后 v2 条目携带的锚点即 record 事件流文件）；record 流直读提 calls
+ *   （agent-settled.result.sessionFile），流被清理/不可读 → calls=[]（run 存在性
+ *   兜底）；
  * - v1 档：空串（v1 快照条目不携带 state 路径，快照数据直接从条目提 calls；概览
  *   消费面 readRunSnapshot('') 自然落「快照不可读」跳过，家族链 calls 不受影响）；
  * - 旧指针档：link 的 path（现状）。

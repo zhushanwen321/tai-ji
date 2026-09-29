@@ -34,7 +34,7 @@
 // 判据可分叉。manifest（<runId>.json）降格为 run-settled 终局事件的派生缓存/
 // 索引（转移表 manifest-write 输出动作同批写出，可随时从 record 重建，损坏即
 // 重建，不构成第二份事实）——仅两个用途：retention / 对账清理的加速判定
-// （findSettlementEvidenceSync 通道）与终局诊断的独立可寻址落点。
+// （findRunSettlementEvidence 通道）与终局诊断的独立可寻址落点。
 //
 // record 流的磁盘清理归裁决点 7 对账清理（无主 run 五件全删）——pi 壳域 run 域
 // 保留期不裁 record 流（prune 候选锚定 state 快照族，run-state-evidence [D1 后
@@ -332,7 +332,7 @@ export interface RunCreatedEvent extends EventEnvelope {
    * workflow-run-resume-revision §3.1 载荷表）。record 流是唯一事实源后，脚本
    * 确定性重放（resume 的缓存回放）所需的 scriptSource 只能从本帧恢复——快照
    * 投影文件已删，无第二落点。可选 = 读取面对旧格式行放行（载荷缺失不拒绝），
-   * 写侧契约由写入方承担（写入点 = worker-message-pump dispatchRunCreated）。
+   * 写侧契约由写入方承担（写入点 = terminal-actions dispatchRunCreated，worker-message-pump 派发链调用）。
    */
   scriptSource?: string;
   /**
@@ -392,7 +392,7 @@ export interface AgentStartedEvent extends AgentIdentity, EventEnvelope {
    * detectReplayInputMismatch 的输入一致性比对由此可比（[U13]：缺本字段时重建
    * 只能落占位 opts {prompt:""}，比对结构性跳过——回放前缀的非确定性漂移零
    * 检出）。可选 = 读取面对旧格式行放行（旧帧重建回落占位形态，比对跳过维持）；
-   * 写侧填充责任在 dispatchAgentStarted（worker-message-pump 派发链）。
+   * 写侧填充责任在 dispatchAgentStarted（terminal-actions 定义，worker-message-pump 派发链调用）。
    */
   input?: string;
 }
@@ -441,7 +441,7 @@ export interface AgentSettledEvent extends EventEnvelope {
    * 或写入器 bug）——壳侧 record store 的 loadAll 读原语对该形态拒绝（场景 18；
    * core record scan 维持宽容跳过——活体投影不因单帧全停，拒绝语义归恢复读面）。
    * 可选 = 类型层对读取面放行（拒绝判定在消费方按载荷完整性执行），写侧填充
-   * 责任在写入方（worker-message-pump dispatchAgentSettled）。
+   * 责任在写入方（terminal-actions dispatchAgentSettled，worker-message-pump 完成链调用）。
    */
   result?: AgentResult;
 }
@@ -544,7 +544,7 @@ type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K>
 /**
  * run 事件 journal 的接口形态（append / scan）。
  *
- * 单写者约束（D5）：append 的唯一合法调用方 = worker-message-pump
+ * 单写者约束（D5，[D15] 后落点）：append 的唯一合法调用方 = terminal-actions
  * （dispatchRunTrigger 唯一投递入口 + appendTransition 单写点——journal 单写者
  * 纪律的物理载体）——引擎侧事件经既有 run 事件通道上报后由写者落账，
  * 引擎不直接写 journal。类型层无法约束调用方，该约束由实装与守卫共同保证。
@@ -557,10 +557,12 @@ export interface RunEventJournal {
    * 在 journal 实装内，构造性单调）；runId 显式传参而非从事件取——仅 run-created
    * 携带 runId，目标文件定位不依赖事件形态。
    *
-   * 单写者约束（W1 起扩容，D4）：合法调用方 = worker-message-pump 的
-   * dispatchRunTrigger（活体链）+ run-registry 的收编入口（恢复链幂等追加终态
-   * 事件）——「收编入口幂等追加 run-settled」是设计 D4 对 append 面的显式扩容，
-   * 除此之外引擎/读侧一律不写。
+   * 单写者约束（[D15] 终局编排单一入口后）：合法调用方 = terminal-actions 的
+   * dispatchRunTrigger（唯一投递入口——活体链与经 interruptRun /
+   * settleRunAccounting 的收编冷路径都经它；resume 的复活转移由 resume-run 在锁
+   * 段内经同一入口投递）+ terminal-actions.appendTransition 的 journal.append
+   * 单写点——除此之外引擎/读侧一律不写。收编链追加的是 run-interrupted 转移
+   * 事件（[D2] 中断非终局，不再落 run-settled(outcome=interrupted)）。
    */
   append(runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent>;
   /**
@@ -673,7 +675,7 @@ export type TransitionOutput = (typeof TRANSITION_OUTPUT_TYPES)[number];
 // ── 合法转移表（数据 = 唯一权威；表外一律 fail-fast）───────────
 
 /**
- * running × ask-settled 的二支判别（D5 转移表行 3/4 的条件维度）。
+ * running × agent-settled 的二支判别（D5 转移表行 3/4 的条件维度）。
  *
  * 为什么这一族需要条件行：「重试预算未尽 → 留在 running」与「预算耗尽 / 全部
  * settled → 进入终局判定」依赖状态机外的事实（在途 ask 数、排定的重试），事件
@@ -688,7 +690,7 @@ export interface TransitionRule {
   on: RunEventType | ControlTriggerType;
   /**
    * 条件行判别标签：同 (from, on) 键二支时区分，undefined = 无条件行。
-   * 当前唯一条件族 = running × ask-settled。
+   * 当前唯一条件族 = running × agent-settled。
    */
   guard?: AskSettleBranch;
   next: RunLifecycle;
@@ -752,7 +754,7 @@ export const RUN_TRANSITIONS: readonly TransitionRule[] = [
 // ── 唯一入口 transition（纯函数）──────────────────────────────
 
 /**
- * running × ask-settled 二支的裁决输入。
+ * running × agent-settled 二支的裁决输入。
  *
  * enterSettling = 本次 settle 后无在途 ask 且无排定重试（预算耗尽或全部
  * settled），直接进入终局判定。缺省 / false = 留在 running——journal fold
@@ -878,8 +880,75 @@ export interface RunPhaseFold {
   phase: string;
   /** 转移进入时刻（phase-started 帧 ts；自愈重建 = 首 agent-started ts）。 */
   startedAt: number;
-  /** 收束时刻（phase-settled 帧 ts；未收束 undefined）。 */
+  /** 收束时刻（phase-settled 帧 ts，或 [D3 对称自愈] 按 agent-settled 帧行推导的值；未收束 undefined）。 */
   settledAt?: number;
+  /**
+   * settledAt 供源标记（[D3 对称自愈] 推导规则的半边）："frame" = phase-settled
+   * 转移帧（显式转移记录，后到 agent 事件不翻回 running——新一轮只有再次
+   * phase-started 才重置）；"derived" = agent-settled 帧行推导（phase-settled 帧
+   * 缺失窗口，含 resume 重放的同名 phase-started 重置后重推导——该 phase 后续
+   * 出现未落定 call 行 / 重试帧时翻回 running，推导态不是吸收态）；
+   * undefined = 未收束。消费方只读 settledAt 即可（format.ts phase group 的
+   * running/settled 判定），本标记服务 fold 自身的翻回裁决。
+   */
+  settledBy?: "frame" | "derived";
+}
+
+/**
+ * [D3 对称自愈] phase 终局的 agent-settled 推导（设计 D3：phase-settled 帧缺失时
+ * fold 按 agent-settled 帧行推导 phase 终局——行存在即权威，无需转移帧确认）。
+ *
+ * 判据：该 phase 名下在场 call 行 ≥1 且全部落定 → settledAt = 各 call 落定 ts 的
+ * 最大值（推导值）；出现未落定 call 行（或 treatAsRunning 显式标记——重试帧在
+ * 途，call 行仍携上一次尝试的旧 settled）且现值为推导值 → 翻回 running。帧值
+ * （settledBy "frame"）不参与翻回（显式转移记录以帧为准）。
+ *
+ * 两个窗口由此封闭：
+ * - postMessage 异步丢失 phase-settled 帧（设计明示的固有竞态）：最后一个
+ *   agent-settled 到达即推导收束；
+ * - resume 重放（设计 D3「持久修复通道 = resume 后脚本确定性重放重新执行
+ *   phase() 补落事件」）：重放落新 phase-started 重置 settledAt 后，该 phase 的
+ *   call 行已在前段流全部落定（缓存回话零新帧）——phase-started 触发本推导即
+ *   恢复收束投影，消灭「崩溃前已完成的 phase 在 resume 后永不收束」。
+ *
+ * 取舍（同名义真重入与重放在 phase-started 帧不可区分）：真重入先按已落定旧
+ * call 行瞬态推导为收束，首个新 agent-started / 重试帧到达即翻回 running——
+ * 活体显示的瞬态收束是该取舍的已知代价，终态随最后一个新 call 落定收敛。
+ */
+function derivePhaseSettlement(
+  asks: Map<number, RunAskStepFold>,
+  phases: Map<string, RunPhaseFold>,
+  phase: string,
+  treatAsRunning?: boolean,
+): Map<string, RunPhaseFold> {
+  const row = phases.get(phase);
+  if (row === undefined || row.settledBy === "frame") return phases; // 帧值不参与推导/翻回
+  let present = 0;
+  let allSettled = !treatAsRunning;
+  let lastSettledTs = 0;
+  if (allSettled) {
+    for (const ask of asks.values()) {
+      if (ask.phase !== phase) continue;
+      present += 1;
+      if (ask.settled === undefined) {
+        allSettled = false;
+        break;
+      }
+      if (ask.settled.ts > lastSettledTs) lastSettledTs = ask.settled.ts;
+    }
+  }
+  if (present > 0 && allSettled) {
+    const nextPhases = new Map(phases);
+    nextPhases.set(phase, { ...row, settledAt: lastSettledTs, settledBy: "derived" });
+    return nextPhases;
+  }
+  if (row.settledBy === "derived" && row.settledAt !== undefined) {
+    // 翻回 running：推导态不是吸收态（真重入派发新 call / 重试在途）
+    const nextPhases = new Map(phases);
+    nextPhases.set(phase, { phase: row.phase, startedAt: row.startedAt });
+    return nextPhases;
+  }
+  return phases;
 }
 
 /**
@@ -949,14 +1018,21 @@ export const INITIAL_RUN_EVENT_FOLD: RunEventFoldCheckpoint = {
  *
  * phase 状态机推进语义（[D3]）：
  * - phase-started：登记 phase 行（startedAt；已 settled 的同名 phase 后到 started
- *   = 新一轮同名义转移——覆盖 settledAt 回到 running 投影）；
- * - phase-settled：落 settledAt（缺 started 行 = 转移事件缺失窗口的迟到收束帧，
- *   按 agent-started 自愈面兜底成行）；
+ *   = 新一轮同名义转移——覆盖 settledAt 回到 running 投影；[D3 对称自愈] 随后跑
+ *   推导（derivePhaseSettlement）：resume 重放形态下该 phase 的 call 行已全部
+ *   落定 → 立即恢复收束投影——「崩溃前已完成的 phase 在 resume 后永不收束」
+ *   由此封闭，同名义真重入的瞬态收束见推导函数注释的取舍说明）；
+ * - phase-settled：落 settledAt（settledBy "frame"——帧值不参与推导翻回；缺
+ *   started 行 = 转移事件缺失窗口的迟到收束帧，按 agent-started 自愈面兜底成行）；
  * - agent-started 携带 phase 且 phase 行缺席（postMessage 异步丢失窗口——[D3]
  *   fold 自愈规则）：按 call 归属快照驱动 pending → running（自愈重建 phase 行，
  *   startedAt 取本帧 ts；转移事件缺失不判损坏、不进 D12 拒绝范围——该窗口是
  *   异步通道固有竞态而非写入器 bug）。phase 行已存在时不改写（startedAt 以
  *   phase-started 帧为准）。
+ * - agent 事件的 [D3 对称自愈] 推导（derivePhaseSettlement，设计 D3「对称侧」：
+ *   phase-settled 帧缺失时按 agent-settled 帧行推导 phase 终局——行存在即权威）：
+ *   agent-settled 后该 phase 名下 call 行全部落定 → 推导收束；agent-started /
+ *   agent-retrying 出现未落定（或在途重试）的 call 行 → 推导值翻回 running。
  */
 function applyAskFoldEvent(
   asks: Map<number, RunAskStepFold>,
@@ -981,9 +1057,15 @@ function applyAskFoldEvent(
           },
       );
       // [D3] fold 自愈：phase 行缺席时按 call 归属快照驱动 pending → running
-      const nextPhases = phases;
+      // （写时克隆——自愈建行同守 copy-on-write 契约，输入 phases Map 不被变异）
+      let nextPhases = phases;
       if (event.phase !== undefined && !nextPhases.has(event.phase)) {
+        nextPhases = new Map(phases);
         nextPhases.set(event.phase, { phase: event.phase, startedAt: event.ts });
+      }
+      // [D3 对称自愈] 新 call 行在场（重派/重入）→ 推导值翻回 running
+      if (event.phase !== undefined) {
+        nextPhases = derivePhaseSettlement(nextAsks, nextPhases, event.phase);
       }
       return { asks: nextAsks, phases: nextPhases };
     }
@@ -995,7 +1077,12 @@ function applyAskFoldEvent(
         ...existing,
         lastProgressAt: Math.max(existing.lastProgressAt, event.ts),
       });
-      return { asks: nextAsks, phases };
+      // [D3 对称自愈] 重试在途（call 行仍携上一次尝试的旧 settled）→ 该 phase
+      // 推导值翻回 running（treatAsRunning——判据不依赖 call 行 settled 缺席）
+      const nextPhases = existing.phase !== undefined
+        ? derivePhaseSettlement(nextAsks, phases, existing.phase, true)
+        : phases;
+      return { asks: nextAsks, phases: nextPhases };
     }
     case "agent-settled": {
       const existing = asks.get(event.taskIndex);
@@ -1019,11 +1106,20 @@ function applyAskFoldEvent(
             settled,
           },
       );
-      return { asks: nextAsks, phases };
+      // [D3 对称自愈] 该 phase 名下 call 行全部落定 → 推导 phase 终局（行存在
+      // 即权威，无需 phase-settled 转移帧确认——postMessage 异步丢失窗口封闭）
+      const phase = existing?.phase;
+      const nextPhases = phase !== undefined
+        ? derivePhaseSettlement(nextAsks, phases, phase)
+        : phases;
+      return { asks: nextAsks, phases: nextPhases };
     }
     case "phase-started": {
-      const nextPhases = new Map(phases);
+      let nextPhases = new Map(phases);
       nextPhases.set(event.phase, { phase: event.phase, startedAt: event.ts });
+      // [D3 对称自愈] resume 重放形态：新 phase-started 重置后，该 phase 的 call
+      // 行已在前段流全部落定（缓存回话零新帧）→ 立即恢复收束投影
+      nextPhases = derivePhaseSettlement(asks, nextPhases, event.phase);
       return { asks, phases: nextPhases };
     }
     case "phase-settled": {
@@ -1032,9 +1128,9 @@ function applyAskFoldEvent(
       nextPhases.set(
         event.phase,
         existing !== undefined
-          ? { ...existing, settledAt: event.ts }
+          ? { ...existing, settledAt: event.ts, settledBy: "frame" }
           // 转移事件缺失窗口的迟到收束帧：兜底成行（startedAt 不可考——取收束 ts）
-          : { phase: event.phase, startedAt: event.ts, settledAt: event.ts },
+          : { phase: event.phase, startedAt: event.ts, settledAt: event.ts, settledBy: "frame" },
       );
       return { asks, phases: nextPhases };
     }
@@ -1176,7 +1272,7 @@ const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
 /**
  * 坏行判定的最小形状校验：JSON 对象 + type 落在词表内 + ts 有限数值（EventEnvelope
  * 信封全词表必填——fold 投影的 startedAt/lastProgressAt 派生与注册表新鲜度判据都
- * 消费它，坏值防污染投影）+ outcome（ask-settled / run-settled 携带）落词表
+ * 消费它，坏值防污染投影）+ outcome（agent-settled / run-settled 携带）落词表
  * （其余事件不携带，缺省自然放行）。任一不过 = 坏行。
  *
  * [W1 seq 契约] 携带 seq 的行按正整数校验（新写行信封必填）；seq 缺失放行——

@@ -1,19 +1,19 @@
 /**
- * Workflow 数据模型 —— 从主 session JSONL 的 workflow-state-link entry 提取。
+ * Workflow 数据模型 —— runtime 投影链的 shared 消费契约。
  *
  * 数据来源：pi-subagent-workflow 扩展注册的 `workflow` tool。主 agent 调用该 tool
  * (action=run) 时，扩展在独立 worker 线程执行 workflow run。
  *
- * workflow run 的状态持久化在 `<sessionDir>/workflow-state/<runId>.jsonl`（单行
- * RunSnapshot，rewrite mode）。主 session JSONL 里通过 pi.appendEntry 写入
- * `workflow-state-link` custom entry 指向 state 文件路径。
+ * workflow run 的唯一持久化 = record 事件流（`<sessionDir>/workflow-state/
+ * <runId>.record.jsonl`，append-only——[D1] record 单源存储收敛，快照文件已删）。
+ * 主 session JSONL 里每 run 写 `workflow-record` v2 注册/终态两条小条目（身份 +
+ * record 流路径锚点 / 终局摘要，appendEntry 通路）；runtime 投影（journal-
+ * projection）以注册条目定界、record 流 fold 为骨架合成 WorkflowRunRecord。
+ * v1 全量快照条目与 `workflow-state-link` 指针条目仅作历史 run 的 v1 冻结兼容
+ * 读（[D16②]：不再新增事件、不可 resume，跟随裁决点 7 清理消亡）。
  *
- * runtime 的 workflow-extractor 从主 session JSONL 提取 workflow-state-link，
- * 读 path 指向的 state 文件，映射 RunSnapshot → WorkflowRunRecord[]。
- *
- * RunSnapshot 格式版本：`wf-run-v2`（D-5 版本守卫，v1 旧格式跳过——extension 侧
- * 声明的接受边界，旧 run 历史价值低，不做兼容迁移）。
- * 扩展源码：extensions/universal/subagent-workflow/src/jsonl-run-store.ts
+ * 扩展源码：extensions/universal/subagent-workflow/src/jsonl-run-store.ts（record
+ * store 单模式）；快照格式版本 `wf-run-v2` 的常量单源 = core run-snapshot.ts。
  */
 
 /**

@@ -300,7 +300,7 @@ export interface AgentResult {
  * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。
  * 产出侧 = 引擎终态应答 AgentOutcome.stderrTeePath（SDK contract-types，上报判据
  * 见彼处注释），经 workflow-dispatch outcomeToWorkflowResult 透传到本形态；消费侧
- * worker-message-pump dispatchAskSettled 读本字段填 ask-settled 事件载荷。
+ * worker-message-pump dispatchAgentSettled 读本字段填 agent-settled 事件载荷。
  */
   stderrTeePath?: string;
  /**
