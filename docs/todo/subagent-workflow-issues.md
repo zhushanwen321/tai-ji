@@ -2,6 +2,8 @@
 
 > **本文件定位**：subagent 体系（`packages/subagent-core` / `packages/subagent-engine-sdk` / `packages/pi-subagent-cli` / `packages/zcode-subagent-cli` / `extensions/universal/subagent-workflow` 及 runtime 投影消费链）的问题、待裁决项与收尾跟踪的**单一登记处**——取代此前分散的多份一事一文件登记（已随本文件清空，内容全部并入）。
 >
+> **修复进度（2026-09-29 快速修复批，8 个并行 subagent + 主会话收口）**：已落地——§1.2（close 幂等键补 epoch 段）、§1.1 附带（回滚清账本）、§3 全部死代码簇（3.1 barrel 清出 46 个零消费导出并恢复 1 个误删的 RecordSettledEvent、3.2 journal-replay 死函数、3.3 manifest-store 五函数、3.4 worktree-git-ops 整文件 402 行、3.5 HostBridge 整文件、3.6 observability 死段、3.7 mirror 三谓词、3.8 updatePid/sessionFile、3.9 零散项 ping/死 import/死 re-export/return 帧 runId 死字段、3.10 僵尸 env 三族、3.11 phaseSettlementTracker 终局回收——实装为账本迁入 terminal-actions 的 notePhaseDispatched/settlePhaseLedger/forgetPhaseSettlement，避免 terminal-actions→pump 反向依赖成环）、§4.2.2（RUN_EVENT_TYPES barrel 单源 + 双向类型锁）、§4.2.3（runtime 行解析补 seq 校验 + 测试）、§4.2.4（stopReason 词表上 barrel，runtime 派生排除 reopened 保行为等价）、§4.2.5（subagent v 判定改 classify 单源）、§4.2.6（WORKFLOW_STATE_LINK_CUSTOM_TYPE 常量化：可替换 3 处 + session-reader 侧测试锚定镜像）、§4.2.7（recordsDir 单源）、§5.1/5.3-5.13 注释失实全部改写实、notify N-3 死分支与 N-5 留痕对齐。未动（需设计或裁决）：§1.1 主体、§1.3/1.4、§1.5、§1.6、§2 全部、§4.1、§4.3、§5.2、§6、§7。
+>
 > **来源**：① 2026-09-29 三轮对抗式架构审查（9 个并行 subagent + 主会话逐项核实，DDD 与六边形视角，关键发现全部经源码核实）；② 既有 8 份 todo 登记合并（branch-review R1 建议级残余 3 条 / notify stale ctx 崩溃 / orphan-reap 封顶裁决 / resume 档 1 补收退化 / workflow 架构候选清单 / scriptPath 锚定 / zcode Provider Registry / zcode 宿主双源）。
 >
 > **修复优先级总览**：第一批 = §1 行为级缺陷（各自独立可单独修）；第二批 = §3 死代码清退（机械性强）；第三批 = §2 结构性条目（需排期设计）；§5 注释失实随各批顺带修正；§6 为裁决输入。§7 为已实施待验证项，§8 为否定性结论（后续审查勿重复怀疑）。

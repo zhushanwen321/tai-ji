@@ -4,18 +4,19 @@
 //
 // 协议化后引擎进程是子进程的持有方（spawn/杀链都发生在引擎侧），core 只持
 // **状态镜像**：数据源 = 反向通道 `host/childSpawned` / `host/childStateChanged`。
-// 消费者 = 生命周期谓词（W6 起 lifecycle-predicates 的 hasLiveProcessHandle /
-// isResumable 改读镜像，同步读、不跨进程查询）与 notify 合并窗口。
+// 消费方 = 引擎客户端（killAll 整体置死、孤儿收割快照、onChange → core 镜像的
+// 桥接投影）；生命周期谓词读 core 侧镜像（host/spawned-children.ts 的
+// hasLiveProcessHandleCore），不读本类。
 //
 // 失效语义（impl-plan §2.2 必写死）：
-//   1. 未收 `childSpawned` 前 = 无句柄（getChildByRecord undefined 等价）；
+//   1. 未收 `childSpawned` 前 = 无句柄（getEntry undefined 等价）；
 //   2. 引擎进程 exit / 重建 / dispose / killAll 时把该引擎**全部镜像项整体置死**
 //      （killed=true + 状态广播）——否则 notify-host 60s 合并窗口挂住 /
-//      resumable 说谎 / 续聊被拒；
-//   3. 置死广播后镜像清空，isResumable 回落「无句柄」。
+//      桥接投影把死句柄登记为活（countInFlight 虚高）；
+//   3. 置死广播后镜像清空，core 镜像读点回落「无句柄」。
 //
 // 载荷契约（SDK reverse-channels.ts）：`killed` 必含，判据
-// `child !== undefined && !child.killed`——本镜像的状态查询面与其同构。
+// `child !== undefined && !child.killed`——镜像项的 killed 语义与其同构。
 
 import { getLogger } from "@zhushanwen/subagent-engine-sdk";
 
@@ -53,7 +54,7 @@ type MirrorListener = (event: MirrorChangeEvent) => void;
  * spawnedChildren 状态镜像（per EngineClient 一份）。
  *
  * 镜像只是状态投影：本类不发信号、不杀进程（收割 = 引擎进程组级，见 EngineClient）；
- * 「整体置死」是对状态面的批量标记 + 广播，使宿主侧谓词/通知/GC 立即回落安全态。
+ * 「整体置死」是对状态面的批量标记 + 广播，使宿主侧桥接投影/通知/GC 立即回落安全态。
  */
 export class SpawnedChildrenMirror {
   private readonly entries = new Map<number, MirrorEntry>();
@@ -120,26 +121,8 @@ export class SpawnedChildrenMirror {
   }
 
   /** 未收 childSpawned / 已被整体置死清空后 → undefined（无句柄等价，失效语义 1）。 */
-  getChildByRecord(recordId: string): MirrorEntry | undefined {
-    for (const entry of this.entries.values()) {
-      if (entry.recordId === recordId) return entry;
-    }
-    return undefined;
-  }
-
   getEntry(pid: number): MirrorEntry | undefined {
     return this.entries.get(pid);
-  }
-
-  /** 句柄存活谓词：镜像有项且未被置死（`child !== undefined && !child.killed`）。 */
-  hasLiveProcessHandle(recordId: string): boolean {
-    const entry = this.getChildByRecord(recordId);
-    return entry !== undefined && !entry.killed;
-  }
-
-  /** isResumable 的镜像面（W6 lifecycle-predicates 改读本方法；语义同 hasLiveProcessHandle）。 */
-  isResumable(recordId: string): boolean {
-    return this.hasLiveProcessHandle(recordId);
   }
 
   /** 快照（诊断/测试）。 */

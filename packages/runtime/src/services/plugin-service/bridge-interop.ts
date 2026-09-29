@@ -20,8 +20,7 @@ import { toErrorMessage } from '../../utils/errors.js'
  *
  * 旧值 30s 固定墙钟误杀长工具（失败模式 A）；新默认可被 ToolRegistration.timeoutMs
  * 声明覆盖（声明通道 U2 落地），声明 <=0 / Infinity 显式 opt-out（见 resolveToolTimeoutMs）。
- * 30min 与本仓既有裁决同值：subagent-core dialog-queue DEFAULT_DIALOG_TIMEOUT_MS、
- * session-runner SPAWN_WATCHDOG_FLOOR_MS。
+ * 30min 与本仓既有裁决同值：subagent-core dialog-queue DEFAULT_DIALOG_TIMEOUT_MS。
  */
 export const DEFAULT_TOOL_EXECUTE_TIMEOUT_MS = 1_800_000
 

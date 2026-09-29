@@ -14,7 +14,7 @@
 // 2. 转发壳写法：壳保留同名私有 getter（字段面）与同名方法（方法面）单行转发；
 //    聚合公共面 = 壳转发面 + 测试改写后的聚合路径，两面同源零漂移。
 // 3. 跨聚合边收敛：他域直写本域字段的写点收敛为显式接口方法（本聚合：
-//    disposeSessionUi ← 壳 dispose 直写 uiRequestHandler/uiObservability，清单① C-3）；
+//    disposeSessionUi ← 壳 dispose 直写 uiRequestHandler，清单① C-3）；
 //    本域直写他域字段的写点收敛为 deps 显式回调（[modeless 波3] resetSettledRescan
 //    随 E1 退役删除——历史写点见 git）
 //    直写 settledRescanState，清单① C-2；R2 抽取后回调改指其聚合显式接口）。
@@ -67,9 +67,8 @@ export const ENV_ROOT_CWD = "PI_SUBAGENT_ROOT_CWD";
  * stub 始终返回 {cancelled:true}，不调 ctx.ui、不捕获任何 ctx，让 trailing ui_request
  * 干净降级为 cancelled（等价于子进程主动取消）。
  *
- * 不置 undefined —— 那会让 trailing ui_request 走 inproc UI 请求队列（已删） 的 handler-missing
- * 分支触发 notifyMissingHandlerGlobal warn，噪声性质从 threw-error 变 missing-handler，
- * 没真正解决。
+ * 不置 undefined——那会让 trailing ui_request 找不到 handler 接管，降级路径不明确；
+ * stub 化让行为固定为 cancelled。
  *
  * [R1] 自壳文件迁入（消费点 = disposeSessionUi + 壳 dispose 的应答端 stub 替换）。 */
 export const disposedUiRequestStub: UiRequestHandler = () => Promise.resolve({ cancelled: true });
@@ -271,7 +270,6 @@ export class SessionBaselines {
     this._uiObservability.setMode(init.mode);
     if (init.uiRequestHandler !== undefined) {
       this.uiRequestHandler = init.uiRequestHandler ?? undefined;
-      this._uiObservability.resetMissingHandlerWarnings();
       // [W6 R3 MF-A] session 级覆盖同步进壳侧应答端登记（三态：null = 显式清空）。
       setHostUiRequestEndpoint(this.uiRequestHandler);
     }
@@ -344,16 +342,15 @@ export class SessionBaselines {
     }
   }
 
-  /** [C-3 显式接口收敛] dispose 时的 UI 面 stub 化：uiRequestHandler 换 stub +
-   *  缺失告警去重重置。原壳 dispose 直写本聚合两个字段，R1 收敛为本显式方法
-   *  （壳 dispose 编排调用；壳侧应答端登记 setHostUiRequestEndpoint(stub) 仍留壳）。
+  /** [C-3 显式接口收敛] dispose 时的 UI 面 stub 化：uiRequestHandler 换 stub。
+   *  R1 收敛为本显式方法（壳 dispose 编排调用；壳侧应答端登记 setHostUiRequestEndpoint(stub)
+   *  仍留壳）。
    *
    *  stub 化时序契约（原壳 dispose 注释）：第一时间换 stub，防 trailing ui_request 调到
    *  stale handler 闭包（仍持有 disposed session 的 ctx）产生误导性 console.error；
    *  必须在 emit/abort 之前——这些步骤可能同步触发 trailing pump。 */
   disposeSessionUi(): void {
     this.uiRequestHandler = disposedUiRequestStub;
-    this._uiObservability.resetMissingHandlerWarnings();
   }
 
   /**

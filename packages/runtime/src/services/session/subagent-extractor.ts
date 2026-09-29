@@ -43,9 +43,9 @@ import { parseBgNotifyDetails } from '@taiji/shared'
 import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 // subagent-record 词表已收 core 单源（runtime 投影经 core barrel 消费；shared 副本仅剩 renderer 消费）
 import {
+  classifySubagentRecordEntryData,
   parseEngineHandle,
   SUBAGENT_RECORD_CUSTOM_TYPE,
-  SUBAGENT_RECORD_ENTRY_VERSION,
 } from '@zhushanwen/subagent-core'
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { normalizeSubagentStatus } from './subagent-status.js'
@@ -225,22 +225,22 @@ function parseSelfDescribedSubagentRecord(entry: unknown): SubagentRecord | null
   if (typeof entry !== 'object' || entry === null) return null
   const e = entry as JsonlCustomEntry
   if (e.type !== 'custom' || e.customType !== SUBAGENT_RECORD_CUSTOM_TYPE) return null
-  const data = e.data
-  if (typeof data !== 'object' || data === null) return null
-  const d = data as Record<string, unknown>
-  if (d.v !== 1) {
-    // [W1 / D1] v2 条目静默跳过（当前版本，journal 投影消费面——scanV2RecordEntries）；
-    // missing-v / future-v（≥3）warn 留证。本扫描器是 v1 快照兼容层（D7 惰性兼容读）。
-    if (d.v !== SUBAGENT_RECORD_ENTRY_VERSION) {
-      console.warn(
-        `[subagent-extractor] subagent-record entry schema version '${String(d.v)}' unsupported (expected 1) — ` +
-          `extension/runtime version skew, skip this entry. Fix: align schema with ` +
-          `packages/subagent-core/src/execution/persistence/record-entry.ts (W1 v2 current).`,
-      )
-    }
-    return null
+  // v 判别单源 core classifySubagentRecordEntryData（journal-projection 的
+  // scanV2RecordEntries 同源消费）：v1 快照进本层投影；v2（含 unknown-kind 形态损坏）
+  // 静默跳过——v2 消费面是 scanV2RecordEntries；missing-v / future-v（≥3）warn 留证。
+  // 本扫描器是 v1 快照兼容层（D7 惰性兼容读）。
+  const classification = classifySubagentRecordEntryData(e.data)
+  if (classification.ok) {
+    return projectSelfDescribedSubagentRecord(classification.data as Record<string, unknown>)
   }
-  return projectSelfDescribedSubagentRecord(d)
+  if (classification.reason === 'missing-v' || classification.reason === 'future-v') {
+    console.warn(
+      `[subagent-extractor] subagent-record entry schema version '${String((e.data as { v?: unknown }).v)}' unsupported (expected 1) — ` +
+        `extension/runtime version skew, skip this entry. Fix: align schema with ` +
+        `packages/subagent-core/src/execution/persistence/record-entry.ts (W1 v2 current).`,
+    )
+  }
+  return null
 }
 
 /**

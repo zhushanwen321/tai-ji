@@ -22,8 +22,10 @@ import {
   noteRunResumedBudget,
   rebuildRuntime,
 } from "../worker-message-pump.ts";
-import { resetPhaseSettlementTrackerForTest } from "../worker-message-pump.ts";
-import { setRunEventJournalDirForTest } from "../terminal-actions.ts";
+import {
+  resetPhaseSettlementTrackerForTest,
+  setRunEventJournalDirForTest,
+} from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";

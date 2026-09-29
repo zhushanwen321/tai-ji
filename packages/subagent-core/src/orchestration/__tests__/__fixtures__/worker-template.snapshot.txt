@@ -332,7 +332,7 @@ module.exports = { execute: async (ctx) => ctx.agent("finalize") };
   }
 })().then((result) => {
   const runId = (_workerData.args && typeof _workerData.args === "object" && _workerData.args._runId) || "";
-  if (!_safePost({ type: "return", runId, result, workerLogs: _workerLogs }, "return")) {
+  if (!_safePost({ type: "return", result, workerLogs: _workerLogs }, "return")) {
     // [F1] return 值不可克隆（含 function/Symbol/循环引用 → DataCloneError）时 _safePost
     // 只能记日志返回 false——若不补救，worker 将静默 exit(0)，主线程收不到任何终态消息，
     // run 永久 running、无终态。回发可克隆的 error 消息（DataCloneError 详情

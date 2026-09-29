@@ -28,9 +28,17 @@ import {
   resumeRun,
 } from "../resume-run.ts";
 import { abortRun } from "../lifecycle.ts";
-import { setRunEventJournalDirForTest } from "../terminal-actions.ts";
+import { forgetRunResumedBudget, rebuildRuntime } from "../worker-message-pump.ts";
+import {
+  resetPhaseSettlementTrackerForTest,
+  setRunEventJournalDirForTest,
+} from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { getLogger } from "../../core/logger.ts";
+import { RunRuntime } from "../models/run-runtime.ts";
+import { Budget } from "../models/budget.ts";
+import { Trace } from "../models/trace.ts";
+import { WorkflowRun } from "../models/workflow-run.ts";
 import type { WorkflowRunEvent } from "../run-events.ts";
 import type { LifecycleDeps } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
@@ -484,6 +492,66 @@ describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => 
       );
     } finally {
       errorSpy.mockRestore();
+    }
+  });
+
+  it("接管失败回滚清 D10 预算账目：残留会让后续按 runId 的预算折算读到已废弃的复活时刻", async () => {
+    await seedInterruptedRecord("wf-budget-rollback");
+    const { deps } = makeDeps();
+    vi.mocked(deps.workerHost.start).mockImplementation(() => {
+      throw new Error("engine spawn failed");
+    });
+
+    // noteRunResumedBudget 在段 6 首行写入（workerHost.start 之前）——接管失败后
+    // 该账目必须随回滚清除
+    await expect(resumeRun("wf-budget-rollback", deps, { now: () => T0 + 100_000 }))
+      .rejects.toThrow("engine spawn failed");
+
+    // 观察面 = 预算账本的执行期消费（remainingTimeBudgetMs → rebuildRuntime 重排）：
+    // 同 runId 新建 run（startedAt 10min 前、预算 60min）。账目已清 → 回落 startedAt
+    // 墙钟算法（重排 ≈ 50min）；修复前残留账目（resumedAt = 注入的 T0+100_000，远早
+    // 于真实 Date.now()）→ 折算剩余 0 → 不重排（scheduleTimeBudget 零调用）。
+    const run = new WorkflowRun(
+      "wf-budget-rollback",
+      {
+        scriptSource: "async function execute() {}",
+        args: {},
+        scriptName: "w",
+        scriptPath: "",
+        budgetTimeMs: 60 * 60_000,
+      },
+      {
+        status: "running",
+        budget: new Budget({ maxTimeMs: 60 * 60_000 }),
+        calls: new Map(),
+        trace: new Trace(),
+        errorLogs: [],
+      },
+      { startedAt: new Date(Date.now() - 10 * 60_000).toISOString() },
+    );
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(async () => {}) } as unknown as WorkerHandle;
+    run.assignRuntime(new RunRuntime(worker, new AbortController()));
+    const scheduleTimeBudget = vi.fn();
+    const rebuildDeps = {
+      store: { save: vi.fn(async () => {}) },
+      workerHost: { start: vi.fn(() => worker) },
+      runner: { run: vi.fn(async () => ({ content: "" })) },
+      runs: new Map(),
+      scheduleTimeBudget,
+    } as unknown as LifecycleDeps;
+    try {
+      rebuildRuntime(run, rebuildDeps, {
+        onMessage: vi.fn(async () => {}),
+        onError: vi.fn(async () => {}),
+        onExit: vi.fn(async () => {}),
+      });
+      expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
+      const rescheduled = scheduleTimeBudget.mock.calls[0]![1] as number;
+      expect(rescheduled).toBeGreaterThanOrEqual(49 * 60_000); // 60 − 10（墙钟，容差 1min）
+      expect(rescheduled).toBeLessThanOrEqual(50 * 60_000);
+    } finally {
+      forgetRunResumedBudget("wf-budget-rollback");
+      resetPhaseSettlementTrackerForTest();
     }
   });
 });

@@ -54,7 +54,7 @@ import { WorkflowRun } from "./models/workflow-run.ts";
 import type { LifecycleDeps } from "./models/ports.ts";
 import { RunRuntime } from "./models/run-runtime.ts";
 import { makeHandlers } from "./lifecycle.ts";
-import { noteRunResumedBudget } from "./worker-message-pump.ts";
+import { forgetRunResumedBudget, noteRunResumedBudget } from "./worker-message-pump.ts";
 import { WORKFLOW_RECORD_CUSTOM_TYPE } from "./workflow-record-entry.ts";
 
 const logger = getLogger("subagents");
@@ -95,9 +95,10 @@ const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
  *
  * 与 core journal scan 的宽容跳过（活体投影面）刻意分层：活体 fold 不能因单帧
  * 全停，恢复读面不能对损坏装瞎——静默跳过会把「record 被截断/篡改」伪装成
- * 「无此调用」让残缺流上的 resume 继续跑。语义对齐壳侧 readRecordStream
+ * 「无此调用」让残缺流上的 resume 继续跑。与壳侧 readRecordStream
  * （jsonl-run-store.ts；跨包单源结构性不可行——同 D5 core↔shared 约束先例，
- * 该函数未导出且属壳 Infra 层）。
+ * 该函数未导出且属壳 Infra 层）语义同源但严格度有意分化：core 面多查 seq
+ * 断档（见下 D12 检查①），壳面不查。
  *
  * 本读面额外承担 seq 断档检测（D12 检查①）：行身份严格 +1 递增（首帧 1 起），
  * 跳号 = 截断/丢失行（core scan 宽容跳过坏行后断档即暴露；末尾半截行由 JSON
@@ -651,15 +652,20 @@ async function resumeRunLocked(
   // run-resumed 帧 + 档 1 补收帧已落盘之后执行——接管失败若无补偿，record 流
   // fold=running 而进程内无活体无注册：run 可被 GUI/枚举发现却永不推进，且再次
   // resume 被资格校验以「actively running needs no resume」误拒（与实情相反）。
-  // 回滚 = interruptRun 落 run-interrupted（running → interrupted 表内合法转移、
-  // 幂等），run 回到可重试 resume 的暂停态；回滚自身失败（journal IO error）仅
-  // error 留痕——兜底收敛 = 下次 session_start 的 recoverCrashedRuns 收编。原异常
-  // 照常上抛（调用方报错给用户）。
+  // 回滚 = 清 D10 预算账目 + interruptRun 落 run-interrupted（running → interrupted
+  // 表内合法转移、幂等），run 回到可重试 resume 的暂停态；回滚自身失败（journal IO
+  // error）仅 error 留痕——兜底收敛 = 下次 session_start 的 recoverCrashedRuns 收编。
+  // 原异常照常上抛（调用方报错给用户）。
   try {
     adoptResumedRun(runId, deps, created, recordPath, {
       events, activeElapsedMs, budgetTimeMs, resumedAt, collectCount, tierSummary,
     }, now);
   } catch (err) {
+    // 回滚清账（D10）：noteRunResumedBudget 在段 6 首行写入（workerHost.start 之前）
+    // ——接管失败即无活体消费该账目，残留会让后续按 runId 的预算折算读到已废弃的
+    // 复活时刻；record 流是权威源，下次成功 resume 会重写覆盖。interruptRun 失败
+    // （record 滞留 running 的僵尸形态）同样无活体，清账无条件先行。
+    forgetRunResumedBudget(runId);
     try {
       await interruptRun(runId, {
         errorCode: "crashed",

@@ -26,7 +26,7 @@
  * 通信协议（AC-4 契约；[D3] 新增 phase 消息）：
  * Worker → Main (postMessage):
  * { type: "agent-call", callId: number, opts: AgentCallOpts }
- * { type: "return", runId: string, result: unknown }
+ * { type: "return", result: unknown }
  * { type: "error", runId: string, error: string }
  * { type: "log", phase: string, message: string }
  *   —— log() 的唯一通路：主线程 handleWorkerMessage 的 log case 即时消费（push 进
@@ -415,7 +415,7 @@ const WORKER_TEMPLATE_POST = [
   '  }',
   '})().then((result) => {',
   '  const runId = (_workerData.args && typeof _workerData.args === "object" && _workerData.args._runId) || "";',
-  '  if (!_safePost({ type: "return", runId, result, workerLogs: _workerLogs }, "return")) {',
+  '  if (!_safePost({ type: "return", result, workerLogs: _workerLogs }, "return")) {',
   '    // [F1] return 值不可克隆（含 function/Symbol/循环引用 → DataCloneError）时 _safePost',
   '    // 只能记日志返回 false——若不补救，worker 将静默 exit(0)，主线程收不到任何终态消息，',
   '    // run 永久 running、无终态。回发可克隆的 error 消息（DataCloneError 详情',

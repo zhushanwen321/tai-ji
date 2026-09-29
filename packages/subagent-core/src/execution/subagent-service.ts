@@ -64,7 +64,6 @@ import type {
 } from "./assembly/types.ts";
 // [R4] ExecutionMode / ForkDepthExceededError / DEFAULT_AGENT_NAME / WorktreeHandle 消费
 // 已随 run 域迁聚合——types import 收窄为转发签名所需类型面。
-import { registerGlobalObservability } from "./ui/ui-request-observability.ts";
 // [R1] 转发 getter 返回类型标注（实例已迁聚合，仅 type 引用）。
 import type { UiRequestObservability } from "./ui/ui-request-observability.ts";
 import { WorktreeManager } from "./worktree/worktree-manager.ts";
@@ -395,10 +394,6 @@ export class SubagentService {
         this.runOrchestration.releaseRoundResources(record, holdSlot, stream),
       reviveMemberRecord: (recordId) => this.reviveWorkflowMemberRecord(recordId),
     });
-    // #11：注册进程级 observability 单例——inproc UI 请求队列 handleUiRequest（已删） 经
-    // globalThis 桥接（notifyMissingHandlerGlobal）调到同一实例，共享
-    // warnedMissingHandlerSessions 去重集合。未注册时 queue 走 fallback warn（不去重）。
-    registerGlobalObservability(this.uiObservability);
   }
 
   // [D4-①] 通知簇四方法（notifyComplete / notifyClosed / piAdapter / toNotifyRecord）

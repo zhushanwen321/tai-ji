@@ -23,7 +23,11 @@ import { parseJsonl } from '../../utils/jsonl.js'
 import { isEnoent } from '../../utils/errors.js'
 import { warnOnce } from '../../utils/warn-once.js'
 import { BYTES_PER_MB, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
-import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
+import {
+  SUBAGENT_RECORD_CUSTOM_TYPE,
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_STATE_LINK_CUSTOM_TYPE,
+} from '@zhushanwen/subagent-core'
 
 /** extract*FromSessionFile 的结果形状：records + oversize 正交降级标志（不往 records
  * 里塞哨兵记录；正交字段先例 = HistoryFileReadResult {messages, truncated} /
@@ -96,7 +100,7 @@ export function extractRecordsFromSessionFile<T>(
 const RECORD_FAMILY_LINE_HINTS: readonly string[] = [
   SUBAGENT_RECORD_CUSTOM_TYPE, // v1 快照 + v2 注册/终态条目
   WORKFLOW_RECORD_CUSTOM_TYPE, // 同上（两族）
-  'workflow-state-link', // legacy workflow 指针
+  WORKFLOW_STATE_LINK_CUSTOM_TYPE, // legacy workflow 指针
   'subagent-bg-notify', // legacy bg-notify custom_message
   '"subagent"', // legacy toolCall（"name":"subagent"）/ toolResult（"toolName":"subagent"）
   '"type":"session"', // legacy 主 cwd 提取（findLegacyMainCwd）

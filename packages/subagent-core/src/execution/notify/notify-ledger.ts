@@ -482,9 +482,9 @@ export function createNotifyLedger(
       for (const notifyId of state.abandoned) abandonedIds.add(notifyId);
       let replayed = 0;
       for (const entry of state.ledger.values()) {
-        if (state.acked.has(entry.notifyId)) continue; // 已销账零重发
         if (abandonedIds.has(entry.notifyId)) continue; // 已放弃不复活（止损终态）
-        if (items.has(entry.notifyId) || ackedIds.has(entry.notifyId)) continue; // 幂等
+        // 幂等：在账不重建；已销账零重发（state.acked 已在上方全量并入 ackedIds）
+        if (items.has(entry.notifyId) || ackedIds.has(entry.notifyId)) continue;
         items.set(entry.notifyId, {
           ...entry,
           recordedAt: Date.now(),

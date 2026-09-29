@@ -403,7 +403,7 @@ export interface AgentResult {
 
 // [S4 簇 3 收编] WorktreeHandle 本地定义已删除，自 SDK re-export（原为结构等价
 // 副本，单源化后 SDK contract-types 是唯一定义点；「仅 worktree:true 时持有、
-// Object.freeze 守卫不可变」的语义注释见消费方 worktree-manager / worktree-git-ops）。
+// Object.freeze 守卫不可变」的语义注释见消费方 worktree-manager）。
 export type { WorktreeHandle } from "@zhushanwen/subagent-engine-sdk";
 
 /** alive marker：跨进程写权声明载体（写者 = 宿主进程；acquire/release 见
@@ -729,8 +729,7 @@ export interface ExecuteOptions {
   appendSystemPrompt?: string[];
   schema?: Record<string, unknown>;
   /**
-   * Turn 上限 limiter。显式 0/负 = 显式不限：压过 SPAWN_WATCHDOG_ENV 兜底不挂
-   * watchdog（SP-6 参数 > env，U5）；undefined 未传才由 env 兜底。
+   * Turn 上限 limiter。显式 0/负 = 显式不限 turn；undefined 未传同样不限。
    */
   maxTurns?: number;
   graceTurns?: number;

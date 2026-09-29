@@ -62,7 +62,7 @@ export function recordEventsPath(recordsDir: string, id: string): string {
 /**
  * record id 白名单：`[\w-]`（字母数字下划线短横线）+ 长度 ≤128。
  *
- * 与 worktree-git-ops 的 SAFE_ID_RE 同式（本模块不 import 它——那会拖入
+ * 与 worktree-manager 的本地 SAFE_ID_RE 同式（本模块不 import 它——那会拖入
  * worktree 层依赖边；两处同式漂移由本注释锚定）。record id 生产源 =
  * record-access.ts 的 `sa-${crypto.randomUUID()}`，字符集 ⊆ 白名单；首字符
  * 白名单排除 "."、".." 与隐藏文件形态，防路径穿越。

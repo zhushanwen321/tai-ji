@@ -40,18 +40,16 @@ import type { AgentRunner, LifecycleDeps, WorkerHandlers } from "./models/ports.
 // [D15] 投递域与终态编排自 terminal-actions 消费（单向依赖——pump 不再承载
 // journal 单写者链与 finalizeRun，消息面终态路径全部经彼处 coda）。
 import {
-  closeOutInFlightCalls,
   dispatchAgentRetrying,
   dispatchAgentSettled,
   dispatchAgentSettledFailed,
   dispatchAgentStarted,
   dispatchPhaseSettled,
   dispatchPhaseStarted,
-  dispatchRunTrigger,
   isRunSettled,
   memberReusePoolIo,
-  type RunDispatchSource,
-  type RunSettlementRecord,
+  notePhaseDispatched,
+  settlePhaseLedger,
 } from "./terminal-actions.ts";
 import { finalizeRun } from "./terminal-actions.ts";
 import { RunRuntime } from "./models/run-runtime.ts";
@@ -153,34 +151,9 @@ function isOrphanedCall(run: WorkflowRun, callId: number, call: AgentCall): bool
 }
 
 // ── [D3] phase 收束判定（phase-settled 的壳侧裁决面）─────────────
-
-/**
- * phase 归属 → 已落定 call 计数的过程内账本（[D3] phase-settled 落账判定）：
- * dispatchAgentCall 记账派发、agent-settled 链记账落定；某 phase 的全部已派发
- * call 落定即落 phase-settled 帧并清账。按 runId 分区（Map<runId, Map<phase,
- * {dispatched, settled}>>），终局/中断随 MemberReusePool 清理同域回收（进程内
- * 过程状态，崩溃即失——phase-settled 的权威重建归 fold 自愈与 resume 重放）。
- */
-const phaseSettlementTracker = new Map<string, Map<string, { dispatched: number; settled: number }>>();
-
-function phaseEntryOf(runId: string, phase: string): { dispatched: number; settled: number } {
-  let byPhase = phaseSettlementTracker.get(runId);
-  if (byPhase === undefined) {
-    byPhase = new Map();
-    phaseSettlementTracker.set(runId, byPhase);
-  }
-  let entry = byPhase.get(phase);
-  if (entry === undefined) {
-    entry = { dispatched: 0, settled: 0 };
-    byPhase.set(phase, entry);
-  }
-  return entry;
-}
-
-/** [D3] 测试/终局清理钩子：清空 phase 收束账本（与 resetMemberReusePoolsForTest 同域）。 */
-export function resetPhaseSettlementTrackerForTest(): void {
-  phaseSettlementTracker.clear();
-}
+// 账本状态与记账原语（notePhaseDispatched / settlePhaseLedger / forgetPhaseSettlement
+// / resetPhaseSettlementTrackerForTest）在 terminal-actions 投递域宿主侧——本侧
+// 只保留消息路由消费（派发记账 + 收束判定落帧），见下方消费点。
 
 // ── rebuildRuntime（G3-001 整重建） ─────────────────────────
 
@@ -327,9 +300,12 @@ export function forgetRunResumedBudget(runId: string): void {
 /**
  * 计算 run 的剩余时间预算（ms）[race-F3 → D10 活跃段算式]。
  *
- * 优先消费 [D10] resume 账本（跨天/跨 pause 的搁置时间不计）；无账目回落
- * startedAt 墙钟现状算法（非 resume 来源 run——重试不重置预算的既有语义保持）。
- * 未配置预算（budgetTimeMs 未设或 <=0，默认不限）返回 undefined。
+ * 账本消费现状（已登记缺陷，docs/todo/subagent-workflow-issues.md §1.1）：当前
+ * resume 重建 spec（resume-run.ts rebuildRunFromRecord）不含 budgetTimeMs，本函数
+ * 首行的预算缺失提前返回发生在查 [D10] resume 账本之前——账本消费在该形态下
+ * 不可达（若可达，按 activeElapsedMs + 复活后墙钟折算，搁置时间不计）。无账目
+ * 回落 startedAt 墙钟现状算法（非 resume 来源 run——重试不重置预算的既有语义
+ * 保持）。未配置预算（budgetTimeMs 未设或 <=0，默认不限）返回 undefined。
  */
 function remainingTimeBudgetMs(run: WorkflowRun): number | undefined {
   const budget = run.spec.budgetTimeMs;
@@ -693,10 +669,8 @@ function dispatchAgentCall(
   run.state.trace.append(node);
 
   // [D3] phase 收束账本记账（phase-settled 判定的派发半边；无 phase 归属的 call
-  // 不入账——phase-settled 只对显式 phase 落账）。
-  if (msg.phase !== undefined && msg.phase !== "") {
-    phaseEntryOf(run.runId, msg.phase).dispatched += 1;
-  }
+  // 不入账——phase-settled 只对显式 phase 落账，空值守卫在 notePhaseDispatched 内）。
+  notePhaseDispatched(run.runId, msg.phase);
 
   // 构建 AgentCall（opts 形状对齐 AgentCallOpts；schema: unknown → Record）
   // 跨进程 IPC 边界的 schema 为 unknown，窄化前加 typeof guard 兜底。
@@ -888,8 +862,9 @@ function lookupBoundRecordIdSync(runId: string, name: string): string | undefine
 
 /**
  * [D3] phase 收束判定与落账：该 phase 账本 settled 计数追平 dispatched 时落
- * phase-settled 帧并清账。仅显式 phase（非 undefined/空串）参与；无 phase 归属的
- * call 落定不影响任何账本。竞态说明：账本是过程内派发/落定序的镜像（同 runId 内
+ * phase-settled 帧并清账（账本与记账原语在 terminal-actions——settlePhaseLedger
+ * 含空串守卫与无条目 false，语义同前：仅显式 phase 参与、无 phase 归属的 call
+ * 落定不影响任何账本）。竞态说明：账本是过程内派发/落定序的镜像（同 runId 内
  * dispatchAgentCall 与其完成链天然按事件循环序推进），终局/中断路径不经此判定
  * （phase-settled 只在 running/settling 自环行合法——落账于 run-settled 之前的
  * 调用序构造性满足表内转移；让位形态（IllegalTransitionError）由 reportDispatchFailure
@@ -897,15 +872,7 @@ function lookupBoundRecordIdSync(runId: string, name: string): string | undefine
  */
 function settlePhaseIfComplete(run: WorkflowRun, phase: string | undefined): void {
   if (phase === undefined || phase === "") return;
-  const byPhase = phaseSettlementTracker.get(run.runId);
-  const entry = byPhase?.get(phase);
-  if (entry === undefined) return;
-  entry.settled += 1;
-  if (entry.settled < entry.dispatched) return;
-  // 收束达成：落 phase-settled + 清账（同 phase 重启新一轮由后续 phase() 消息重建）
-  byPhase?.delete(phase);
-  if (byPhase !== undefined && byPhase.size === 0) phaseSettlementTracker.delete(run.runId);
-  dispatchPhaseSettled(run, phase);
+  if (settlePhaseLedger(run.runId, phase)) dispatchPhaseSettled(run, phase);
 }
 
 /**
@@ -1258,8 +1225,3 @@ const ASK_RETRY_REASON_MAX_CHARS = 160;
 // ── [D6] 复用池活体缓存的同步读取面 ─────────────────────────
 
 import { peekMemberRecordId } from "./member-reuse-pool.ts";
-
-// 显式标记 RunDispatchSource/RunSettlementRecord 的类型位（re-export 消费面 =
-// 既有 pump 深度 import 的测试与装配点；运行期符号已迁 terminal-actions）。
-export type { RunDispatchSource, RunSettlementRecord };
-export { closeOutInFlightCalls, dispatchRunTrigger };

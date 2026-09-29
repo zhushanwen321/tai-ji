@@ -811,8 +811,10 @@ export class ConversationContinuation {
    * [u7a 生产补挂] 轮终翻入保活：arm idle timer + 推送最新在途计数（语义承接旧
    * armChatIdleTimer 的挂载降级链——配置值 throw 时回落 DEFAULT，arm 失败不得打断
    * 轮末分流链：本方法运行在 fire-and-forget 的 settle 后续链上，逃逸 throw 即
-   * unhandled rejection）。超时处置 = host.closeNow（无在跑轮 record 的终态化收口
-   * ——kill 链记账/disarm/finalize/notifyClosed 全含，幂等成分对已死形态无害）。
+   * unhandled rejection）。超时处置 = host.closeNow（接线 = idleTimeoutRecycle，
+   * [U5] 进程回收不收口——disarm + kill 保活进程，record 保持 idle 随时可续聊；
+   * 收口是用户动作，归档是用户意愿位，超时不是用户动作——表述对齐
+   * lifecycle-manager.ts 头注）。
    */
   private armIdleKeepalive(): void {
     const record = this.record;

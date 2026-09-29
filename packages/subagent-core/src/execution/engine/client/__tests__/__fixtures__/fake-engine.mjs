@@ -6,7 +6,7 @@
 // - 协议版本（FAKE_PROTOCOL_VERSION，缺省 1）：版本协商越界测试用；
 // - run 动作脚本（FAKE_RUN_ACTIONS，JSON 数组）：emit / streamDelta / poolResolved /
 //   handleReady / childSpawned / childStateChanged / askUser / log / delay / spawnGrandchild /
-//   exit —— 逐动作播放，播完回 run 终态应答；
+//   rawStdout / exit —— 逐动作播放，播完回 run 终态应答；
 // - cancel：受理应答；FAKE_CANCEL_SETTLE=1 时同步收敛 run 终态（测收敛路径），
 //   缺省继续挂（测 3s 收敛窗口超时杀链）；
 // - spawnGrandchild：spawn 同组长眠子进程（不 detached → 与引擎同组，供组杀断言），
@@ -136,6 +136,21 @@ async function playRunActions(requestId) {
       case "delay":
         await new Promise((resolve) => setTimeout(resolve, action.ms ?? 10));
         break;
+      case "rawStdout": {
+        // 裸 stdout 写（非 NDJSON）：bytes 字节垃圾分片写（可选 terminateNewline 补
+        // 一个换行冲刷残片）——EngineClient stdoutBuffer 半行上限（MAX_LINE_BYTES）
+        // 测试数据源。分片写模拟管道真实送达形态（残片经多次 data 事件累积）。
+        const bytes = action.bytes ?? 0;
+        const chunkSize = 64 * 1024;
+        let written = 0;
+        while (written < bytes) {
+          const n = Math.min(chunkSize, bytes - written);
+          process.stdout.write("x".repeat(n));
+          written += n;
+        }
+        if (action.terminateNewline) process.stdout.write("\n");
+        break;
+      }
       case "exit":
         process.stderr.write(action.stderr ?? "fake engine mid-run crash\n");
         process.exit(action.code ?? 137);

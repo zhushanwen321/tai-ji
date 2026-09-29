@@ -34,6 +34,7 @@ import { readFileSync } from 'node:fs'
 import {
   SNAPSHOT_VERSION,
   WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_STATE_LINK_CUSTOM_TYPE,
   classifyWorkflowRecordEntryData,
 } from '@zhushanwen/subagent-core'
 // RunSnapshot 格式版本（D-5 版本守卫判据）单源 import 自 subagent-core barrel（权威定义
@@ -323,7 +324,7 @@ function extractWorkflowsFromEntriesLegacy(entries: unknown[]): WorkflowRunRecor
     // 真实 JSONL entry type 是 'custom'（不是 'custom_message'）。
     // custom_message 是 pi 推给前端的消息类型，JSONL 持久化层用 'custom' + customType 区分。
     // 实测验证（存量 session 文件抽查）：workflow-state-link 条目 type 均为 'custom'。
-    if (e.type !== 'custom' || e.customType !== 'workflow-state-link') continue
+    if (e.type !== 'custom' || e.customType !== WORKFLOW_STATE_LINK_CUSTOM_TYPE) continue
     const data = e.data as WorkflowStateLinkData | undefined
     if (!data?.runId || !data?.path) continue
     // 同 runId 后出现的覆盖前面的（JSONL 顺序 = 时间顺序，后者更新）

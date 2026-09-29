@@ -29,7 +29,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { loggerMock } = vi.hoisted(() => ({
   loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-// 内核路径降级留痕 warn（ledger 未 bind 时逐条 notify 触发）——mock 掉防刷屏。
+// 内核路径降级留痕 warn（ledger 未 bind 时触发，per-notifier 一次）——mock 掉
+// 防刷屏，同时供「降级 warn 一次性去重」用例断言调用次数。
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { configureNotifyDomain, resetNotifyDomainForTests } from "../../core/notify-ports.ts";
@@ -495,6 +496,59 @@ describe("BgNotifier dedup 按轮次（G1 决策 9：对话模式豁免 60s dedu
 
 		// 第二条被吞（旧 dedup 行为不变，一次性模式回归）
 		expect(host.sendMessageCalls).toHaveLength(1);
+	});
+
+	it("[U5] 无轮形态（close 收口提示清 round）epoch>0 → key=`id:epoch`：不同 epoch 不互吞，同 key 仍吞", () => {
+		// close → reopen（epoch+1）→ 再 close 的 key 形态锚定：notifyClosed 显式清
+		// round，终态提示走无轮分支——epoch>0 时带 epoch 段，不与首轮 close 的裸 id
+		// 撞键（撞键会被 ledger 按「同 notifyId 已 ack」永久拒绝，通知永不可达）
+		notifier.notify({
+			id: "sa-epoch", status: "closed", agent: "w", result: "close@0",
+			startedAt: 1, endedAt: 2,
+		});
+		notifier.notify({
+			id: "sa-epoch", status: "closed", agent: "w", result: "close@1", epoch: 1,
+			startedAt: 3, endedAt: 4,
+		});
+
+		// 两条不同 key（裸 id vs id:1）都送达，details 携带各自 notifyId
+		expect(host.sendMessageCalls).toHaveLength(2);
+		const first = host.sendMessageCalls[0]!.message as { details?: { notifyId?: string } };
+		const second = host.sendMessageCalls[1]!.message as { details?: { notifyId?: string } };
+		expect(first.details?.notifyId).toBe("sa-epoch");
+		expect(second.details?.notifyId).toBe("sa-epoch:1");
+
+		// 同 key（同 epoch）重复仍被 dedupe 吞——幂等去重语义不因 epoch 段放宽
+		notifier.notify({
+			id: "sa-epoch", status: "closed", agent: "w", result: "again@1", epoch: 1,
+			startedAt: 5, endedAt: 6,
+		});
+		expect(host.sendMessageCalls).toHaveLength(2);
+	});
+});
+
+describe("BgNotifier — ledger 未 bind 降级留痕（per-notifier 一次性去重）", () => {
+	it("降级 warn 仅首条 notify 触发，后续 notify / revive 不再刷（对齐 directFallbackWarned 同款策略）", () => {
+		loggerMock.warn.mockClear();
+		const host = makeMockHost();
+		const notifier = createNotifier(host);
+		notifier.notify({ id: "sa-lw-1", status: "closed", agent: "w", result: "r", startedAt: 1, endedAt: 2 });
+		notifier.notify({ id: "sa-lw-2", status: "closed", agent: "w", result: "r", startedAt: 3, endedAt: 4 });
+		notifier.notify({ id: "sa-lw-3", status: "closed", agent: "w", result: "r", startedAt: 5, endedAt: 6 });
+
+		// 三条都送达（降级只损失投递时机治理，不丢消息），warn 只在首条刷
+		expect(host.sendMessageCalls).toHaveLength(3);
+		expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+		expect(String(loggerMock.warn.mock.calls[0]?.[0])).toContain("notify ledger not bound");
+
+		// revive 不复位标志：装配级降级事实一次留痕即可定位，新生命周期不重复刷
+		notifier.dispose();
+		notifier.revive();
+		notifier.notify({ id: "sa-lw-4", status: "closed", agent: "w", result: "r", startedAt: 7, endedAt: 8 });
+		expect(host.sendMessageCalls).toHaveLength(4);
+		expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+
+		notifier.dispose();
 	});
 });
 

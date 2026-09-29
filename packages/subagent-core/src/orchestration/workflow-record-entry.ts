@@ -36,6 +36,16 @@ import type { RunErrorCode, RunOutcome } from "./run-events.ts";
 export const WORKFLOW_RECORD_CUSTOM_TYPE = "workflow-record";
 
 /**
+ * legacy workflow 指针条目（`workflow-state-link`）的 customType。W17 前写侧
+ * 产物，写侧已停写——现役消费全在读侧兼容面：runtime workflow-extractor /
+ * session-file-extraction、壳 session-lifecycle 引用集三代解析（均经 barrel
+ * import 本常量）。session-reader 生产依赖面不引 core（包架构裁决），侧持本地
+ * 字面量镜像、值等价由其 workflow.test.ts 常量等值断言锚定。命名对齐
+ * {@link WORKFLOW_RECORD_CUSTOM_TYPE}。
+ */
+export const WORKFLOW_STATE_LINK_CUSTOM_TYPE = "workflow-state-link";
+
+/**
  * `workflow-record` entry 的 data schema 版本（W1 起 v2）。消费方按 v 判别
  * 解析，不认识的版本跳过而非猜测；与快照层 SNAPSHOT_VERSION（"wf-run-v2"）
  * 是两级独立版本号。v1 全量快照形态随版本门保留为兼容读面（D7）。

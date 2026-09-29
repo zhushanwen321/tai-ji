@@ -3,7 +3,8 @@
 // EngineClient：协议客户端（W2，impl-plan §2.2；与 zcode AppServerConnection 同型
 // 但引擎无关）。职责 = spawn 引擎 CLI / NDJSON 帧编解码 / 请求-应答 id 关联 /
 // 反向请求路由（见 reverse-router.ts）/ 崩溃重建（≤3 次指数退避 1s/2s/4s）/
-// dispose / killAll / stdout 行解析 + stderr 常驻排空（仅内存环缓冲尾 400 字符）。
+// dispose / killAll / stdout 行解析（半行残片有上限，见 MAX_LINE_BYTES）+
+// stderr 常驻排空（仅内存环缓冲尾 400 字符）。
 //
 // spawn 平台参数（impl-plan §2.2 必写死）：POSIX 引擎 CLI 以独立进程组 spawn
 // （detached:true，进程组收割前提）；Windows detached:false + windowsHide:true，
@@ -97,6 +98,13 @@ const DISPOSE_GRACE_MS = 3_000;
 const SIGKILL_REAP_TIMEOUT_MS = 10_000;
 /** 协议帧违规日志的回显截断长度（非 NDJSON 行 / 未知帧的诊断留痕）。 */
 const FRAME_ECHO_MAX_CHARS = 200;
+/**
+ * stdout 半行残片上限（1 MiB 量级；按 UTF-16 code unit 计——NDJSON 载荷以 ASCII
+ * 为主，与字节数同阶）。引擎持续输出不含换行的数据时残片本会无界增长：超限丢头
+ * 留尾 + warn 一次（每引擎进程）；被截断的行在换行到达后必无法 JSON.parse，由
+ * handleLine 的非 NDJSON 分支丢弃留痕（上限约束的是内存驻留，不是协议合法性）。
+ */
+const MAX_LINE_BYTES = 1_048_576;
 
 /** 客户端连接状态。 */
 export type EngineClientState =
@@ -176,6 +184,8 @@ export class EngineClient {
   private lastPartialHandle: { sessionRef: Record<string, string> } | undefined;
   private initializeDiagnostics: InitializeResult | undefined;
   private stdoutBuffer = "";
+  /** 半行残片截断告警已发标记（每引擎进程一次，attachFrameReader 重置）。 */
+  private stdoutOverflowWarned = false;
 
   constructor(opts: EngineClientOptions) {
     this.opts = opts;
@@ -433,6 +443,7 @@ export class EngineClient {
 
   private attachFrameReader(): void {
     this.stdoutBuffer = "";
+    this.stdoutOverflowWarned = false;
   }
 
   private onStdoutData(chunk: string): void {
@@ -444,7 +455,20 @@ export class EngineClient {
       if (line.trim().length > 0) this.handleLine(line);
       newlineIndex = this.stdoutBuffer.indexOf("\n");
     }
-    // 帧间残片留 buffer（OS 管道背压语义：不做无界缓存——残片即半行，有界）。
+    // 帧间残片留 buffer（OS 管道背压语义）。残片有上限：引擎持续输出不含换行的
+    // 数据时残片本会无界增长——超限丢头留尾，首截断 warn 一次、后续静默截断；
+    // 被截断的行在换行到达后由 handleLine 按 non-NDJSON 丢弃（协议契约 stdout 只
+    // 允许 NDJSON，无换行输出本身就是引擎侧违规，不构成需要保真的数据）。
+    if (this.stdoutBuffer.length > MAX_LINE_BYTES) {
+      this.stdoutBuffer = this.stdoutBuffer.slice(this.stdoutBuffer.length - MAX_LINE_BYTES);
+      if (!this.stdoutOverflowWarned) {
+        this.stdoutOverflowWarned = true;
+        logger.warn(
+          `[engine-client:${this.engineId}] stdout partial line exceeded ${MAX_LINE_BYTES} chars `
+            + `— dropping head and keeping tail (engine emitting non-newline output without completing a line?)`,
+        );
+      }
+    }
   }
 
   private handleLine(line: string): void {
@@ -558,12 +582,6 @@ export class EngineClient {
         this.runRoutes.delete(runId);
       }
     };
-  }
-
-  /** 健康检查（ADR-0047：静默 ≠ 卡死，不据此杀任务）。 */
-  async ping(): Promise<void> {
-    await this.ensureConnected();
-    await this.request("ping", {});
   }
 
   /** cancel 受理窗口 = CANCEL_SETTLE_GRACE_MS；终态收敛由调用方（RemoteEngine）等 run 应答。 */

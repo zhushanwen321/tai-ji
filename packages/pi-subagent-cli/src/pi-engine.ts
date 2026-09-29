@@ -11,8 +11,8 @@
 //     --session 续写原文件；agent_settled resolve + 收割——D7）。U5 起 registry 本体
 //     与 interact 控制面已删除（续聊不经 interact——deliverChatMessage 面 = U2 建
 //     ConversationContinuation 后的 run 域派发）；
-//   - HostBridge 编排面（executeAndAwait / record 状态回写 / idle+activate lock 定时器）
-//     → core（W3 改线消费本引擎的事件面）；
+//   - 宿主编排面（executeAndAwait / record 状态回写 / idle 定时器）→ core
+//     （W3 改线消费本引擎的事件面）；
 //   - read：①级 pi 原生读取依赖 core session-reconstructor（§2.7「保持 core」），
 //     引擎包 read 走 ②级 journal 重放（SDK journal-replay）→ ③级 outcome-only
 //     降级链（deviations 登记：①级留在 core 侧过渡期链路，W10 conformance 定夺）。

@@ -210,6 +210,10 @@ function collectWorkflowEntryTiers(entries: readonly Entry[]): WorkflowEntryTier
       collectWorkflowRecordEntryTier(tiers, noteRunId, data)
       continue
     }
+    // legacy 指针档字面量：常量 SSOT 在 subagent-core（WORKFLOW_STATE_LINK_CUSTOM_TYPE，
+    // orchestration/workflow-record-entry.ts）。reader 生产依赖面不引 subagent-core
+    // （包架构裁决，同 entry-anchor.ts 的协议字面量模式），保持本地镜像，值等价由
+    // __tests__/workflow.test.ts 跨包契约守卫断言锚定。
     if (e.customType === 'workflow-state-link') {
       collectWorkflowStateLinkTier(tiers, noteRunId, data)
     }

@@ -158,9 +158,7 @@ export interface AgentCallOpts {
  /**
   * Turn 上限（turn limiter 用）。
   *
-  * [预算语义对齐] 未传或 <=0 = 不限 turn；此时也不按 turns 估算 spawn watchdog——
-  * 仅当 env TAIJI_SUBAGENT_SPAWN_WATCHDOG_MS 设置时才按绝对时限挂 watchdog（见
-  * session-runner.resolveSpawnWatchdogMs）。pi 边界直出为 ExecuteOptions.maxTurns
+  * [预算语义对齐] 未传或 <=0 = 不限 turn。pi 边界直出为 ExecuteOptions.maxTurns
   * → runSpawn（D6 合流后无中间映射层）。
   */
   maxTurns?: number;

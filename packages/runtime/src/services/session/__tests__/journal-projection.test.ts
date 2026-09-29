@@ -221,6 +221,25 @@ describe('parseWorkflowRunEventFileLine（run 域 tail 行解析器）', () => {
       parseWorkflowRunEventFileLine(JSON.stringify({ type: 'run-interrupted', ts: 1, errorCode: 'crashed' })),
     ).toMatchObject({ type: 'run-interrupted', errorCode: 'crashed' })
   })
+
+  it('[W1 seq 契约] 携带 seq 的行按正安全整数校验：字符串/0/-1/1.5 → undefined；合法 seq 与无 seq 旧行放行（对齐 core isWorkflowRunEventLine）', () => {
+    const seqLine = (seq: unknown): string =>
+      JSON.stringify({ type: 'agent-started', ts: 1, taskIndex: 0, agentName: 'w', attempt: 1, seq })
+    // 坏值：非 number（字符串 "5"）/ 非正整数（0 / -1）/ 非整数（1.5）——坏行交 tailer 计数
+    expect(parseWorkflowRunEventFileLine(seqLine('5'))).toBeUndefined()
+    expect(parseWorkflowRunEventFileLine(seqLine(0))).toBeUndefined()
+    expect(parseWorkflowRunEventFileLine(seqLine(-1))).toBeUndefined()
+    expect(parseWorkflowRunEventFileLine(seqLine(1.5))).toBeUndefined()
+    // 合法 seq（1 起正安全整数）透传
+    expect(parseWorkflowRunEventFileLine(seqLine(1))).toMatchObject({ type: 'agent-started', seq: 1 })
+    expect(parseWorkflowRunEventFileLine(seqLine(Number.MAX_SAFE_INTEGER))).toMatchObject({
+      seq: Number.MAX_SAFE_INTEGER,
+    })
+    // W1 前存量 journal 行无 seq 字段（D7 惰性兼容读）——放行
+    expect(
+      parseWorkflowRunEventFileLine(JSON.stringify({ type: 'agent-started', ts: 1, taskIndex: 0, agentName: 'w', attempt: 1 })),
+    ).toMatchObject({ type: 'agent-started' })
+  })
 })
 
 describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint——runtime 投影消费骨架半边）', () => {

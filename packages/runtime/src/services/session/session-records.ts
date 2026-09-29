@@ -29,7 +29,11 @@ import type { SubagentRecord, WorkflowRunRecord, PlanStateView, PlanDocMeta } fr
 import { PLAN_STATE_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 // subagent-record / workflow-record 词表均已收 core 单源（runtime 投影经 core barrel 消费；
 // shared 的 subagent-record 副本仅剩 renderer 消费）
-import { SUBAGENT_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
+import {
+  SUBAGENT_RECORD_CUSTOM_TYPE,
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  getSubagentRecordsDir,
+} from '@zhushanwen/subagent-core'
 import { extractPlanStateFromSessionFile, scanPlanStateEntries, INACTIVE_PLAN_STATE_VIEW } from './plan-state-extractor.js'
 import type { SubagentEngineConfigView, SubagentEnginesFile } from '@zhushanwen/extension-protocol'
 import { SUBAGENTS_ENGINES_FILENAME } from '@zhushanwen/extension-protocol'
@@ -47,7 +51,7 @@ import {
 import { extractWorkflowsFromSessionFile } from './workflow-extractor.js'
 import { scanRecordFamilyEntriesFromSessionFile } from './session-file-extraction.js'
 import { SessionJournalProjection } from './journal-projection.js'
-import { encodeCwd, getPiAgentDir } from '../../infra/pi/pi-paths.js'
+import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { discoverAndRegisterEngines } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
 import { isStrictlyUnder } from '../../utils/path-utils.js'
 import type { ISessionStore } from '../ports/session.js'
@@ -401,8 +405,8 @@ export class SessionRecords {
    * 2. journal 源 attach——两域目录 tailer 从文件头全量读（offset 续读此后增量）。
    * 两源幂等、次序不敏感；活跃会话的 get_entries 游标通道继续增量喂 entry 源。
    *
-   * 目录派生：records = `<agentDir>/subagents/<encodeCwd(cwd)>/records`（与
-   * core getSubagentRecordsDir 同式）；run journal = 会话文件所在目录的
+   * 目录派生：records = core getSubagentRecordsDir(agentDir, cwd)（单源，不再本侧
+   * 手抄同式推导）；run journal = 会话文件所在目录的
    * `workflow-state`（pi 壳 JsonlRunStore 同源布局——sessionDir 按探测落位）。
    * [已知限制·登记] core resolvePiSessionScopedDir 的 slug 只折叠 `/`，pi session
    * 目录折叠 `/\:`——cwd 含 `:` 或 `\` 时写侧探测落 agentDir 根、本侧推导落 session
@@ -419,9 +423,7 @@ export class SessionRecords {
     const cwd = meta?.cwd
     const projection = new SessionJournalProjection({
       sessionId,
-      recordsDir: typeof cwd === 'string'
-        ? join(getPiAgentDir(), 'subagents', encodeCwd(cwd), 'records')
-        : undefined,
+      recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
       runJournalDir: meta !== undefined ? join(dirname(meta.filePath), 'workflow-state') : undefined,
       onProjectionChange: () => this.onJournalProjectionChange(sessionId),
       ...(this.deps.journalTailerRecheckMs !== undefined

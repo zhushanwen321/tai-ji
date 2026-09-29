@@ -79,7 +79,8 @@ export interface WorkerHost {
  * 构造并注入。2 个 engine 文件（lifecycle / worker-message-pump）共用此签名，
  * 避免各自定义形状不一致的 handler bag（打破循环依赖）。
  *
- * 所有回调返回 Promise——允许 engine 层在回调内做 await persistState 等异步操作。
+ * 所有回调返回 Promise——允许 engine 层在回调内做 await 终局编排等异步操作
+ *（record 事件流落账；store.save 现为 no-op 契约保留，见 Port 2）。
  */
 export interface WorkerHandlers {
  /** Worker → Main 的业务消息（agent-call / return / error / log）。 */
@@ -107,7 +108,8 @@ export interface WorkerHandlers {
  * factory 注入（notifyDone —— 唤醒 parent agent 消费结果）。Engine 层不依赖
  * Pi SDK，通过 callback 把完成信号外推到 Interface 层。所有 transition("done", ...)
  * 路径（handleReturn / handleWorkerError / handleScriptError / abortRun /
- * dispatchAgentCall budget 终止）调完 transition + save 后触发本回调。
+ * dispatchAgentCall budget 终止）在终局编排后触发本回调（record 事件流落账；
+ * store.save 为 no-op 契约保留，不承担持久化）。
  */
 export interface LifecycleDeps {
   store: RunStore;

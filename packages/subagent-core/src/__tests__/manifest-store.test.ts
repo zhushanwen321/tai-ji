@@ -9,10 +9,6 @@ import { ManifestStore } from "../execution/persistence/manifest-store";
 import {
   materializeBoundRecordManifest,
   readRunTerminalManifest,
-  rebuildManifestRecordIfMissing,
-  rematerializeManifestRecord,
-  reportInvalidManifestRecord,
-  writeManifestRecordPersisted,
 } from "../execution/persistence/manifest-store";
 import type { ManifestRecord } from "../execution/persistence/manifest-store";
 // [W1 / U2a] bound 物化守卫断言的观察面（RecordStore 写点 → records/<id>.json 投影）。
@@ -498,12 +494,9 @@ describe("bound 物化守卫三断言（W1 D2 决策 9）", () => {
   });
 });
 
-// ── [W1 / U2a / D2] record 域 manifest 落盘写面自由函数段 ─────────────
+// ── [W1 / D2] record 域 manifest 落盘写面自由函数段 ─────────────
 //
-// 写面语义三档（manifest-store.ts 中段头注释的测试锚定）：
-//   响亮（writeManifestRecordPersisted：失败 error 日志 + 用户可见 entry）/
-//   不响亮（rematerialize / rebuild：失败 warn/debug 留痕不构成宿主错误）/
-//   守卫降级（materializeBoundRecordManifest：写失败记日志跳过）。
+// materializeBoundRecordManifest（守卫降级档：写失败记日志跳过）。
 // 写失败触发手法：blockedDir() 把目标路径的父段用文件占住——writeAtomicFileSync
 // 的 mkdirSync(recursive) 对「路径段中被文件占据」抛 ENOTDIR（不 mock fs）。
 
@@ -528,94 +521,6 @@ describe("record 域 manifest 写面自由函数（W1/U2a/D2）", () => {
     fs.writeFileSync(blocker, "occupied");
     return path.join(blocker, "sub");
   }
-
-  describe("writeManifestRecordPersisted（终态持久通道——响亮档）", () => {
-    it("dir 接线 → 同步原子写：内容与 manifest 一致（读侧无感差异）", () => {
-      const m = makeManifest("w1-persist");
-      writeManifestRecordPersisted(undefined, dir, m.id, m);
-      const onDisk = JSON.parse(fs.readFileSync(path.join(dir, "w1-persist.json"), "utf8")) as ManifestRecord;
-      expect(onDisk.id).toBe("w1-persist");
-      expect(onDisk.status).toBe("running");
-    });
-
-    it("dir 分支写失败 → 响亮降级：不 throw + appendEntry 双通道上报", () => {
-      const appendEntry = vi.fn();
-      writeManifestRecordPersisted(undefined, blockedDir(), "w1-fail", makeManifest("w1-fail"), appendEntry);
-      expect(appendEntry).toHaveBeenCalledTimes(1);
-      expect(appendEntry).toHaveBeenCalledWith(
-        "subagent:manifest-write-failed",
-        expect.objectContaining({ id: "w1-fail" }),
-      );
-    });
-
-    it("dir 缺省 + store 在 → 异步写（fire-and-forget，终态不阻塞）", async () => {
-      const store = new ManifestStore(dir);
-      writeManifestRecordPersisted(store, undefined, "w1-async", makeManifest("w1-async"));
-      await vi.waitFor(() => {
-        expect(fs.existsSync(path.join(dir, "w1-async.json"))).toBe(true);
-      });
-    });
-  });
-
-  describe("rematerializeManifestRecord（缓存补缺通道——不响亮档）", () => {
-    it("dir 分支成功：补写落盘", () => {
-      const m = makeManifest("w1-remat");
-      rematerializeManifestRecord(undefined, dir, m);
-      expect(JSON.parse(fs.readFileSync(path.join(dir, "w1-remat.json"), "utf8"))).toMatchObject({ id: "w1-remat" });
-    });
-
-    it("dir 分支写失败：warn 留痕不响亮（不 throw、无 entry 面）", () => {
-      expect(() => rematerializeManifestRecord(undefined, blockedDir(), makeManifest("w1-remat-fail"))).not.toThrow();
-    });
-
-    it("dir 缺省 + store 在 → 异步补写", async () => {
-      const store = new ManifestStore(dir);
-      rematerializeManifestRecord(store, undefined, makeManifest("w1-remat-async"));
-      await vi.waitFor(() => {
-        expect(fs.existsSync(path.join(dir, "w1-remat-async.json"))).toBe(true);
-      });
-    });
-  });
-
-  describe("rebuildManifestRecordIfMissing（惰性补建通道）", () => {
-    it("无落点（dir 与 store 均缺省，纯内存测试形态）→ false 不写", () => {
-      expect(rebuildManifestRecordIfMissing(undefined, undefined, "w1-none", makeManifest("w1-none"), new Set())).toBe(false);
-    });
-
-    it("dir 分支：缺员补写 true → 已存在 false → tried 去重 false", () => {
-      const tried = new Set<string>();
-      const m = makeManifest("w1-rebuild");
-      expect(rebuildManifestRecordIfMissing(dir, undefined, m.id, m, tried)).toBe(true);
-      expect(fs.existsSync(path.join(dir, "w1-rebuild.json"))).toBe(true);
-      // manifest 已在盘 → 跳过。
-      expect(rebuildManifestRecordIfMissing(dir, undefined, m.id, m, new Set())).toBe(false);
-      // tried 集合已登记（boot 全量轮与惰性通道共享防重复写）→ 跳过。
-      expect(rebuildManifestRecordIfMissing(dir, undefined, m.id, m, tried)).toBe(false);
-    });
-
-    it("dir 分支写失败 → false（debug 留痕不抛）", () => {
-      expect(rebuildManifestRecordIfMissing(blockedDir(), undefined, "w1-rebuild-fail", makeManifest("w1-rebuild-fail"), new Set())).toBe(false);
-    });
-
-    it("dir 缺省 + store 在 → 异步写返回 true", async () => {
-      const store = new ManifestStore(dir);
-      expect(rebuildManifestRecordIfMissing(undefined, store, "w1-rebuild-async", makeManifest("w1-rebuild-async"), new Set())).toBe(true);
-      await vi.waitFor(() => {
-        expect(fs.existsSync(path.join(dir, "w1-rebuild-async.json"))).toBe(true);
-      });
-    });
-  });
-
-  describe("reportInvalidManifestRecord（损坏 manifest 双通道上报）", () => {
-    it("appendEntry 载荷携带身份四字段（session.jsonl 复盘面）", () => {
-      const appendEntry = vi.fn();
-      reportInvalidManifestRecord(makeManifest("bad-invalid"), appendEntry);
-      expect(appendEntry).toHaveBeenCalledWith(
-        "subagent:manifest-invalid-status",
-        expect.objectContaining({ id: "bad-invalid", rootSessionId: "sess-w1", agentName: "worker" }),
-      );
-    });
-  });
 
   describe("materializeBoundRecordManifest（守卫降级档）", () => {
     it("守卫通过但落点不可写 → false 不抛（下一物化点自愈）", () => {

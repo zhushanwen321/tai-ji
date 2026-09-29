@@ -11,8 +11,6 @@ import {
   CRASH_REBUILD_BACKOFF_MS,
   CRASH_REBUILD_MAX_ATTEMPTS,
   ENGINE_PROTOCOL_VERSION,
-  ENGINE_EVENT_COALESCE_DEFAULT,
-  ENGINE_EVENT_COALESCE_ENV,
   HANDSHAKE_TIMEOUT_MS,
   REVERSE_REQUEST_TIMEOUT_MS,
   STDERR_TAIL_CHARS,
@@ -109,11 +107,6 @@ describe("量级常量（impl-plan §2.1 逐项写死）", () => {
 
   it("stderr 崩溃现场尾部 400 字符", () => {
     expect(STDERR_TAIL_CHARS).toBe(400);
-  });
-
-  it("事件合并默认关闭（TAIJI_ENGINE_EVENT_COALESCE=0，A1 逐字段等价前提）", () => {
-    expect(ENGINE_EVENT_COALESCE_ENV).toBe("TAIJI_ENGINE_EVENT_COALESCE");
-    expect(ENGINE_EVENT_COALESCE_DEFAULT).toBe("0");
   });
 });
 

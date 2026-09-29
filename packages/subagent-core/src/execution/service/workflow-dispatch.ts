@@ -38,14 +38,9 @@ import { assertModelInCatalog } from "../../orchestration/model-catalog.ts";
 // [D3 协议版 P6] armed 回执落账投递（runId 键入口；observedEvent 消费点）。value
 // import 方向 execution/service → orchestration/pump：pump 的传递闭包（persistence/
 // assembly/orchestration 内部）不 import execution/service，无循环。
-// [U4 → D15/D6] dispatchRunTrigger / scanRunEvents 迁 terminal-actions（终局编排
-// 入口 + 投递域单写者链），供成员复用绑定的 record 读注入面（MemberReusePoolIo
-// 生产装配）。dispatchRunArmedReceipt 随 [D5] armed 词表成员删除而退役——引擎
-// armed 回执的消费落账面整体删除（占位事件无生产语义）。
-import {
-  dispatchRunTrigger,
-  scanRunEvents,
-} from "../../orchestration/terminal-actions.ts";
+// [U4 → D15/D6] scanRunEvents 迁 terminal-actions（投递域单写者链），供成员复用
+// 绑定的 record 读注入面（MemberReusePoolIo 生产装配）。
+import { scanRunEvents } from "../../orchestration/terminal-actions.ts";
 // [U4] 成员复用池（决策 4/9/10 的机制本体；orchestration → execution 零反向依赖，
 // 池的 journal 读写经 io 注入，无环）。
 import {

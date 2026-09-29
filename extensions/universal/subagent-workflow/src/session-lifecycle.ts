@@ -48,6 +48,12 @@ import { reapOrphanRuns, runRetentionMaintenanceRound } from "@zhushanwen/subage
 import { getSubagentRecordsDir } from "@zhushanwen/subagent-core";
 import { ENV_ROOT_CWD } from "@zhushanwen/subagent-core";
 import { STATE_DIR_NAME } from "@zhushanwen/subagent-core";
+// workflow 族 customType 词表单源（workflow-record 现役 + workflow-state-link legacy
+// 指针）：引用集三代解析的判别字面量经 barrel 消费，勿手抄。
+import {
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_STATE_LINK_CUSTOM_TYPE,
+} from "@zhushanwen/subagent-core";
 import {
   getSubagentService,
   setSubagentService,
@@ -192,9 +198,9 @@ function extractRunReferencesFromLine(line: string, out: Set<string>): void {
   }
   if (!isWorkflowCustomEntry(parsed)) return;
   const d: Record<string, unknown> = parsed.data;
-  if (parsed.customType === "workflow-record") {
+  if (parsed.customType === WORKFLOW_RECORD_CUSTOM_TYPE) {
     extractWorkflowRecordRunReference(d, out);
-  } else if (parsed.customType === "workflow-state-link") {
+  } else if (parsed.customType === WORKFLOW_STATE_LINK_CUSTOM_TYPE) {
     if (typeof d.runId === "string" && d.runId !== "") out.add(d.runId);
   }
 }

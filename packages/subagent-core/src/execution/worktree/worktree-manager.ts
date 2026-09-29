@@ -434,8 +434,9 @@ export class WorktreeManager {
    * 判据（唯一不删条件 = 进程还活着）：
    *   pid > 0 且 isProcessAlive(pid)   → 跳过（活进程，绝不删）
    *   pid > 0 且进程已死                → 孤儿（正常退出未 cleanup / 崩溃残留）
-   *   pid == 0 且超 SPAWN_GRACE_MS      → 孤儿（create 后崩溃，pid 永未补全）
-   *   pid == 0 且未超宽限               → 跳过（可能正在 spawn）
+   *   pid == 0 且超 SPAWN_GRACE_MS      → 孤儿（历史遗留条目/异常路径——正常路径
+   *                                       add 恒写宿主 pid，不再产生 pid=0）
+   *   pid == 0 且未超宽限               → 跳过（宽限防误清）
    *
    * 阶段二（D5b）：物理面（tmpdir checkout + 分支）与注册表双向 diff 收敛——
    * 兑现 worktree-registry.ts 头注释声称的「tmpdir + 分支对账兜底」。全流程
@@ -458,16 +459,19 @@ export class WorktreeManager {
   }
 
   /**
-   * 判孤儿：pid 死活为主判据。pid=0 走 SPAWN_GRACE 宽限（create→spawn 窗口）。
+   * 判孤儿：pid 死活为主判据。pid=0 = 历史遗留条目（inproc 时代的占位形态）或
+   * 异常路径（正常路径 add 恒写宿主 pid，见 create 的注册注释），走 SPAWN_GRACE
+   * 宽限后判孤儿清理。
    */
   private isOrphan(entry: WorktreeEntry, now: number): boolean {
     if (entry.pid === 0) {
-      // create→spawn 窗口：超过宽限期仍未补 pid = create 后崩溃
+      // 超宽限期仍 pid=0 = 历史遗留/异常条目。正常路径不产生 pid=0（add 时直接
+      // 写宿主 pid），命中即诊断信号（registry save 失败的 warn / 陈旧注册表数据）。
       const expired = now - entry.createdAt > SPAWN_GRACE_MS;
       if (expired) {
-        // [worktree-reaper-fix] pid=0 超宽限 = create 后 spawn 前崩溃（或补全链路再次断链）。
-        // 正常路径 spawn 返回后 pid 已同步补全，此处不应命中活 worktree；命中即诊断信号，
-        // 与 updatePid 写盘失败的 warn 日志呼应（补全失败可观测闭环）。
+        // [worktree-reaper-fix] pid=0 超宽限 = 历史遗留/异常条目（inproc 时代占位
+        // 形态的残留数据，或注册表写入异常）。正常路径 add 恒写宿主 pid，此处不应
+        // 命中活 worktree；命中即诊断信号，与 registry save 失败的 warn 日志呼应。
         logger.warn(
           "[worktree] orphan reaper: pid=0 entry exceeded SPAWN_GRACE_MS, treating as orphan",
           { branch: entry.branch, checkout: entry.checkout, createdAt: entry.createdAt, now },

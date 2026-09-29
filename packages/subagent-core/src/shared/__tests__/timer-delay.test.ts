@@ -1,7 +1,7 @@
 // src/shared/__tests__/timer-delay.test.ts
 //
-// assertSafeTimerDelay 纯函数契约——三个 timer 挂载入口（budgetTimeMs /
-// TAIJI_SUBAGENT_SPAWN_WATCHDOG_MS / idleTimeoutMs）统一在值流入 setTimeout 前调
+// assertSafeTimerDelay 纯函数契约——timer 挂载入口（budgetTimeMs /
+// idleTimeoutMs）统一在值流入 setTimeout 前调
 // 用本函数 fail-fast，契约由本文件锁定。
 //
 // [F-3 NaN 穿透修复] 旧实现只挡 `> MAX`：NaN 的 `NaN > MAX` 为 false 静默放行，

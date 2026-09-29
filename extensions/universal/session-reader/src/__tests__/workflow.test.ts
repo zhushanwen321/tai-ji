@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } from '@zhushanwen/subagent-core'
+import {
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_RECORD_ENTRY_VERSION,
+  WORKFLOW_STATE_LINK_CUSTOM_TYPE,
+} from '@zhushanwen/subagent-core'
 
 import { parseRunSnapshot, renderWorkflowOverview } from '../core/workflow.js'
 import {
@@ -642,6 +646,8 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
     expect(WORKFLOW_RECORD_CUSTOM_TYPE).toBe('workflow-record')
     expect(WORKFLOW_RECORD_ENTRY_VERSION).toBe(2)
     expect(RUN_RECORD_STREAM_SUFFIX).toBe('.record.jsonl')
+    // legacy 指针档：collectWorkflowEntryTiers 本地字面量与 core 常量同值
+    expect(WORKFLOW_STATE_LINK_CUSTOM_TYPE).toBe('workflow-state-link')
   })
 })
 

@@ -568,6 +568,75 @@ export function dispatchPhaseSettled(run: WorkflowRun, phase: string): void {
   }).catch((err: unknown) => reportDispatchFailure(run.runId, err));
 }
 
+// ── [D3] phase 收束账本（phase-settled 判定的过程内状态）─────────
+
+/**
+ * phase 归属 → 已派发/已落定 call 计数的过程内账本（[D3] phase-settled 落账判定）：
+ * notePhaseDispatched 记账派发（pump dispatchAgentCall 消费）、settlePhaseLedger
+ * 记账落定（pump settlePhaseIfComplete 消费）；某 phase 的全部已派发 call 落定即
+ * 清账（消费方据此落 phase-settled 帧）。按 runId 分区（Map<runId, Map<phase,
+ * {dispatched, settled}>>），run 级条目在 finalizeRun / interruptRun 经
+ * forgetPhaseSettlement 回收——未收束 phase 的条目无人清账（run 终局后不再有
+ * call 落定），回收缺失即 runId 键泄漏。进程内过程状态，崩溃即失——phase-settled
+ * 的权威重建归 fold 自愈与 resume 重放。
+ */
+const phaseSettlementTracker = new Map<string, Map<string, { dispatched: number; settled: number }>>();
+
+function phaseEntryOf(runId: string, phase: string): { dispatched: number; settled: number } {
+  let byPhase = phaseSettlementTracker.get(runId);
+  if (byPhase === undefined) {
+    byPhase = new Map();
+    phaseSettlementTracker.set(runId, byPhase);
+  }
+  let entry = byPhase.get(phase);
+  if (entry === undefined) {
+    entry = { dispatched: 0, settled: 0 };
+    byPhase.set(phase, entry);
+  }
+  return entry;
+}
+
+/**
+ * [D3] 派发记账半边：显式 phase（非 undefined/空串）才入账——phase-settled 只对
+ * 显式 phase 落账，无 phase 归属的 call 不影响任何账本。
+ */
+export function notePhaseDispatched(runId: string, phase: string | undefined): void {
+  if (phase === undefined || phase === "") return;
+  phaseEntryOf(runId, phase).dispatched += 1;
+}
+
+/**
+ * [D3] 落定记账半边：settled 计数 +1，追平 dispatched 即清账（phase 条目删除；
+ * run 级 Map 空则连 runId 键删除）并返回 true——消费方据此落 phase-settled 帧
+ * （同 phase 重启新一轮由后续派发重建条目）。无条目（未入账的 phase）返回 false。
+ */
+export function settlePhaseLedger(runId: string, phase: string | undefined): boolean {
+  if (phase === undefined || phase === "") return false;
+  const byPhase = phaseSettlementTracker.get(runId);
+  const entry = byPhase?.get(phase);
+  if (entry === undefined) return false;
+  entry.settled += 1;
+  if (entry.settled < entry.dispatched) return false;
+  byPhase?.delete(phase);
+  if (byPhase !== undefined && byPhase.size === 0) phaseSettlementTracker.delete(runId);
+  return true;
+}
+
+/** [D3] 测试清理钩子：清空 phase 收束账本（与 resetMemberReusePoolsForTest 同域）。 */
+export function resetPhaseSettlementTrackerForTest(): void {
+  phaseSettlementTracker.clear();
+}
+
+/**
+ * run 级回收（finalizeRun 终局路径 / interruptRun 中断完成路径接线——与
+ * clearMemberReusePool 同域终局清理）：删除该 run 的全部 phase 记账条目。条目
+ * lazily 重建——interrupted run resume 后的新派发经 notePhaseDispatched 自建，
+ * 回收只防 runId 键泄漏、无正确性影响。
+ */
+export function forgetPhaseSettlement(runId: string): void {
+  phaseSettlementTracker.delete(runId);
+}
+
 /** `agent-started` 落账（脚本 agent() 调用已派发，[D4] 对齐 pi agent_start；attempt
  *  恒 1——重试在 executeAgentCall 内部递归，attempt 递增随终局帧的 call.attempts
  *  落账）。phase = agent-call 消息携带的剧本归属（[D3] call 归属快照）——
@@ -825,6 +894,10 @@ export async function finalizeRun(
       );
     }
   }
+  // [D3] phase 收束账本回收（与 MemberReusePool 清理同域终局清理）：未收束 phase
+  // 的条目在本路径后无人清账，delete 防 runId 键泄漏；幂等（让位路径由并发终局方
+  // 的同款调用回收），条目 lazily 重建无正确性影响（见 forgetPhaseSettlement）。
+  forgetPhaseSettlement(run.runId);
   // [P1b-1] run-settled 事件落账先于 closeOut/save（事件流先于投影面）：
   // 终局帧经 settleRunAccounting 原语（record 帧 + manifest 派生缓存两件，经
   // dispatchRunTrigger per-run 单写者队列）。让位 = IllegalTransitionError（并发
@@ -944,6 +1017,9 @@ export async function interruptRun(
     }
     throw err;
   }
+  // [D3] phase 收束账本回收（中断完成路径——中断无终局 coda，此处是该路径的
+  // 唯一回收点；resume 后新派发经 notePhaseDispatched lazily 重建，回收只防泄漏）。
+  forgetPhaseSettlement(runId);
   // 中断条目补写（收编场景无内存聚合——callCount 从 record agent-settled 帧数
   // 推导；usedTokens 事件流不可得，摘要级 0 诚实缺省）。status 'interrupted' =
   // 暂停态收敛词（非终局——与 settled 终态条目的 'done' 判别，runtime 读侧三态
@@ -1011,8 +1087,10 @@ function composeFinalSettlement(run: WorkflowRun, doneReason: DoneReason): RunSe
 }
 
 /**
- * [D15] 终局记录原语（journal 帧 + manifest 派生缓存两件一次齐全；interruptRun
- * 的终局半边与 finalizeRun 的落账半边共用）：
+ * [D15] 终局记录原语（journal 帧 + manifest 派生缓存两件一次齐全；唯一生产
+ * 调用方是同文件 dispatchFinalRunSettle——finalizeRun 的落账半边。interruptRun
+ * 的中断路径不走本原语：中断是暂停态收敛词，落 run-interrupted 帧 + interrupted
+ * 投影条目，非 run-settled 终局落账）：
  * - 帧落账统一经 dispatchRunTrigger per-run 串行队列（单写者纪律；冷路径同走
  *   队列——离线收编无并发竞争成本）；
  * - manifest 半边：spec 携带形态（活体）由 dispatch 链 outputs 执行

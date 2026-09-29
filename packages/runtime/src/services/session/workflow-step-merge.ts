@@ -26,7 +26,7 @@
  * （D5 禁双读盘约束）。
  */
 
-import { displayAgentName } from '@zhushanwen/subagent-core'
+import { NEW_STOP_REASONS, displayAgentName } from '@zhushanwen/subagent-core'
 
 import type { SubagentRecord, WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
 
@@ -39,8 +39,15 @@ const CANCELLED_FILL_TEXT = 'cancelled by run abort'
 /** 秒→ms 换算常数（record.elapsedSeconds 秒 → 步骤行 durationMs ms）。 */
 const MS_PER_SECOND = 1000
 
-/** [R1] 中断族三值（record-lifecycle disposeAllRecords 编排性关闭 / record-store 重启重建兜底产出）。 */
-const INTERRUPTED_STOP_REASONS: readonly string[] = ['interrupted', 'interrupted-by-restart', 'interrupted-by-parent']
+/**
+ * [R1] 中断族三值（record-lifecycle disposeAllRecords 编排性关闭 / record-store 重启重建
+ * 兜底产出）。单源派生自 core NEW_STOP_REASONS（barrel import）排除 'reopened'——
+ * reopened 非中断语义，走下方通用文案分支（矩阵表「其余任意值」行）；中断族词表
+ * 新增成员自动传导，不手抄清单。
+ */
+const INTERRUPTED_STOP_REASONS: readonly string[] = NEW_STOP_REASONS.filter(
+  (reason) => reason !== 'reopened',
+)
 
 /**
  * [R1] 兜底通用异常文案（stopReason ∈ legacy ClosedReason 家族 / reopened / 缺失——
@@ -87,6 +94,10 @@ export function mapStepStatusFromRecord(record: Pick<SubagentRecord, 'status' | 
 } {
   if (record.status === 'running') return { status: 'running', error: undefined }
   // idle（终态概念在 stopReason）
+  // 下方单值分支字面量均为 core 词表成员（completed/failed ∈ ROUND_TERMINAL_STOP_REASONS，
+  // gc/cancelled ∈ CLOSED_REASONS，barrel 可取）——但四个分支行为各异（done / failed /
+  // error 分叉 / 文案填充），用集合常量 includes 判定会把同族其余成员吸进单一分支改变
+  // 行为（如 CLOSED_REASONS 含 parent-shutdown 等 4 值），故保留单值字面量判定。
   const reason = record.stopReason
   if (reason === 'completed') return { status: 'done', error: record.error }
   if (reason === 'failed') return { status: 'failed', error: record.error }

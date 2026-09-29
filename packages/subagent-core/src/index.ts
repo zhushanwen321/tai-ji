@@ -134,7 +134,8 @@ export {
   setInFlightListener,
   getInFlightSnapshot,
 } from "./execution/engine/inflight-snapshot.ts";
-// W3 后内核宿主 = engine/host（host-bridge arm/disarm 委托点为在途迁移点），模块本体不经 engines/pi。
+// W3 后内核宿主 = engine/host（在途推送迁移点 = Continuation arm/disarm 与 EngineClient
+// 反向通道镜像桥接），模块本体不经 engines/pi。
 // maxTurnsToWatchdogMs 为 maxTurns→watchdog 毫秒换算（U3/U4 / D7，floor 语义
 // 文档化——现役消费 = scripts/probe-third-host-integration.mjs 探针；引擎侧无消费
 //（预算各自实现）；[W3] 定义收敛在 pi-host-binding，原 inproc session-runner（已删）
@@ -175,9 +176,15 @@ export { registerNativeSessionReader } from "./execution/engine/common/session-v
 // types.ts 领域类型族：record / 响应 / 列表项等 subagent 域公共契约（壳消费最高频面，
 // tool 面 / interface 渲染层 / bg-notify 共同消费）。CLOSED_REASONS / DEFAULT_AGENT_NAME
 // 为值常量，ResurrectDeniedError 为错误类（值 + 类型双形态）。
+// stopReason 词表族（NEW_STOP_REASONS 中断+重开 4 值 / ROUND_TERMINAL_STOP_REASONS
+// 正常轮终 2 值 / STOP_REASONS 13 值全集）单源在 types.ts——runtime workflow-step-merge
+// 的步骤状态映射按词表判定（消费方引用常量，勿手抄字面量清单）。
 export {
   CLOSED_REASONS,
   DEFAULT_AGENT_NAME,
+  NEW_STOP_REASONS,
+  ROUND_TERMINAL_STOP_REASONS,
+  STOP_REASONS,
   ResurrectDeniedError,
 } from "./execution/assembly/types.ts";
 export type {
@@ -302,18 +309,14 @@ export {
 } from "./execution/persistence/record-entry.ts";
 
 // ── W1 [D1/D3/D6]：介质归位契约与 tail 原语（U0 新增行段——既有行零改动，
-// cap 族导出行的删改归 U7）。两族 v2 条目契约（版本常量/kind 词表/classify）+
-// record 事件词表（六类事件 + 行级单调 seq + 首行头行形态）+ journal 读写原语
-// （append 单调分配 seq / scan 宽容解析）+ 域无关 tail 读取器（offset 续读 /
-// 完整行边界 / 坏行宽容 / watch 目录 + 周期复查）。生产消费方（U1 壳写侧 /
-// U2a record 写侧 / U3 runtime 读侧 / U5 清理）一律经 barrel 消费。
+// cap 族导出行的删改归 U7）。两族 v2 条目契约（版本常量/classify）+
+// record 事件 journal 读写原语（append 单调分配 seq / scan 宽容解析）+
+// 域无关 tail 读取器（offset 续读 / 完整行边界 / 坏行宽容 / watch 目录 +
+// 周期复查）。生产消费方（U1 壳写侧 / U2a record 写侧 / U3 runtime 读侧 /
+// U5 清理）一律经 barrel 消费。
 export {
-  SUBAGENT_RECORD_ENTRY_KINDS,
   SUBAGENT_RECORD_ENTRY_VERSION,
   classifySubagentRecordEntryData,
-  type SubagentRecordEntryClassification,
-  type SubagentRecordEntryKind,
-  type SubagentRecordEntryV2,
   type SubagentRecordRegisteredEntryData,
   type SubagentRecordSettledEntryData,
 } from "./execution/persistence/record-entry.ts";
@@ -321,27 +324,15 @@ export {
   createRecordEventJournal,
   foldRecordJournalEvents,
   INITIAL_RECORD_JOURNAL_FOLD_STATE,
-  isRecordJournalHeader,
   parseRecordEventFileLine,
-  parseRecordEventLine,
-  RECORD_EVENT_TYPES,
   recordEventsPath,
   RECORD_EVENTS_SUFFIX,
-  RECORD_JOURNAL_HEADER_TYPE,
-  type RecordBoundEvent,
   type RecordCreatedEvent,
-  type RecordEventEnvelope,
   type RecordEventJournal,
-  type RecordEventType,
   type RecordJournalEvent,
   type RecordJournalEventInput,
   type RecordJournalFoldState,
-  type RecordJournalHeader,
-  type RecordReopenedEvent,
-  type RecordRoundIdleEvent,
-  type RecordRoundStartedEvent,
   type RecordSettledEvent,
-  toRecordJournalHeader,
   applyRecordJournalEvent,
 } from "./execution/persistence/record-events.ts";
 export {
@@ -362,8 +353,7 @@ export { AgentRegistry } from "./execution/assembly/agent-registry.ts";
 export { parseAgentProfile } from "./execution/assembly/agent-registry.ts";
 
 // 错误类型族（error-recovery.ts 计划路径实测不存在，实测散布于下列源文件）：
-// resurrect/fork-depth/dirty-worktree 为动作层守卫抛出点（types.ts），
-// GitRunError 见 worktree 内核组裁决。
+// resurrect/fork-depth/dirty-worktree 为动作层守卫抛出点（types.ts）。
 export {
   DirtyWorktreeError,
   ForkDepthExceededError,
@@ -381,17 +371,11 @@ export {
   messageHandler,
   recordToListItem,
   startHandler,
-  type CancelHandlerInput,
   type CancelHandlerResult,
-  type CloseHandlerInput,
   type CloseHandlerResult,
-  type ForkFromHandlerInput,
   type ForkFromHandlerResult,
-  type ListHandlerInput,
   type ListHandlerResult,
-  type MessageHandlerInput,
   type MessageHandlerResult,
-  type StartHandlerInput,
   type StartHandlerResult,
 } from "./execution/assembly/subagent-actions-core.ts";
 
@@ -412,24 +396,6 @@ export type { ConcurrencyPool } from "./execution/assembly/concurrency-pool.ts";
 // 删除——plan 家族 id 经 entitlement 门控后宿主侧无消费场景（引擎侧模型源已切换
 // provider_config.json，见 zcode-subagent-cli preparer.ts）。
 export { splitZcodeModelRef } from "./shared/zcode-model-ref.ts";
-
-// ── worktree git 内核（U5 / D5）───────────────────────────────
-// git 语义纯函数单源：保真读（gitRun）、SafeId 校验、dirty 谓词、
-// collectWorktreePatch（统一 add+diff 基线机制，返回结构即 patchIncomplete
-// 留痕载体）、三步容错清理、listWorktreePorcelain（原始输出供宿主 realpath
-// 对账）。锚点缺失/损坏与 add 失败两条降级路径 warn + 留痕（⛔3）。
-// [2026-09-13 barrel 收窄] 上述纯函数族与 Options/结果类型族已出公共面（仓内
-// 仅测试深路径消费；WorktreeManager 仍在 internal 消费）——barrel 保留错误类
-// 与校验正则两个公共锚点。
-//
-// GitRunError 同名双类裁决（u-core-exec-export 交接）：worktree-manager.ts 与
-// worktree-git-ops.ts 各有一个 GitRunError（文案同但类独立）——barrel 只导出
-// 本组 worktree-git-ops 版（git 语义新单源）；worktree-manager 版不进 barrel，
-// 将来 manager 收缩到 git-ops 内核时随之消除。
-export {
-  GitRunError,
-  SAFE_ID_RE,
-} from "./execution/worktree/worktree-git-ops.ts";
 
 // 组装层（U2 装配）：discoverAgents 发现→宽容解析→去重→码点序（workflow 侧
 // discoverWorkflows 对称面，第三宿主「列 agents」入口）。
@@ -495,7 +461,6 @@ export {
   buildWorkflowRecordRegisteredEntryData,
   buildWorkflowRecordSettledEntryData,
   buildWorkflowRecordInterruptedEntryData,
-  type FinalizeRunOptions,
 } from "./orchestration/terminal-actions.ts";
 
 // workflow 领域模型族：run / call / trace / budget / 状态与规格（壳 store 与
@@ -514,7 +479,7 @@ export type { RunState } from "./orchestration/models/run-state.ts";
 export { Trace } from "./orchestration/models/trace.ts";
 export { AgentCall } from "./orchestration/models/agent-call.ts";
 export { Budget } from "./orchestration/models/budget.ts";
-export { WorkflowRun, type WorkflowRunMeta } from "./orchestration/models/workflow-run.ts";
+export { WorkflowRun } from "./orchestration/models/workflow-run.ts";
 export type {
   AgentCallOpts,
   AgentResult,
@@ -581,47 +546,21 @@ export type {
 // 终局证据判定核与保留期维护（workflow-run-store-convergence U3+U4：自
 // orchestration/file-run-store.ts 迁入 execution/persistence/，RunStore 写实现
 // 身份已退役——生产唯一实现 = pi 壳 JsonlRunStore）。
-// pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪单源（[W1 / D5 清理规则①②]——
-// fold 终态资格 + 保留窗口 + journal 成对删）；resolveStateTtlMs / STATE_TTL_MS_ENV /
-// DEFAULT_STATE_TTL_MS：保留窗口 env 通道单源（[P1b-2] 引入、[W1] 起 run+record
-// 两域统一窗口）。cap 族与节流族导出（数量上限常量 / cap env 通道名与解析函数 /
-// 节流间隔常量与节流器工厂）已随 W1 cap 语义废除与写通道收敛整体退役。
 // [C3 常量上收] STATE_DIR_NAME：pi 壳 workflow-events / jsonl-run-store 的
 // `<sessionDir>/workflow-state` 与 pi 宿主枚举的 agentDir 根回退目录同名分量
 // 单源——壳侧字面量改 import 消费，防布局分量漂移。
-export {
-  DEFAULT_STATE_TTL_MS,
-  STATE_DIR_NAME,
-  STATE_TTL_MS_ENV,
-  pruneTerminalRunFiles,
-  resolveStateTtlMs,
-  type PruneTerminalRunFilesOptions,
-  type PruneTerminalRunFilesResult,
-} from "./execution/persistence/run-state-evidence.ts";
+export { STATE_DIR_NAME } from "./execution/persistence/run-state-evidence.ts";
 
 // [W1 / D5] 统一保留维护轮入口：run journal prune + record 事件文件 prune 同轮
 // 幂等扫描 + 判据②候选数日志。三触发点（新 run 首写 / 新 record 事件文件首写 /
 // session_start 兜底）都经此单入口消费——壳生产消费必须走 barrel（深路径仅
 // 测试侧 vitest alias 可解析，barrel 先例同上）。
-export {
-  runRetentionMaintenanceRound,
-  type RetentionMaintenanceInput,
-  type RetentionMaintenanceOptions,
-  type RetentionMaintenanceResult,
-} from "./execution/persistence/run-state-evidence.ts";
+export { runRetentionMaintenanceRound } from "./execution/persistence/run-state-evidence.ts";
 
 // [裁决点 7]（workflow-run-resume-revision）孤儿 run 对账清理：无主 run 的唯一
 // 磁盘清理通道（run 数据生命周期跟随 session 归属——引用集三代解析 + 宽限窗登记
 // + 三件删除）。壳生产消费（session-lifecycle 装配的引用集注入面）走 barrel。
-export {
-  reapOrphanRuns,
-  resolveOrphanRunGraceWindowMs,
-  DEFAULT_ORPHAN_RUN_GRACE_WINDOW_MS,
-  ORPHAN_RUN_GRACE_WINDOW_MS_ENV,
-  type OrphanRunReapDeps,
-  type OrphanRunReapOptions,
-  type OrphanRunReapResult,
-} from "./execution/persistence/run-state-evidence.ts";
+export { reapOrphanRuns } from "./execution/persistence/run-state-evidence.ts";
 
 // [W1 / D5] session_start 兜底触发点的 record 域目录锚（与 SubagentService 构造点
 // 同源同式推导）：getSubagentRecordsDir 给出 records 目录布局，ENV_ROOT_CWD 是
@@ -649,29 +588,23 @@ export { createPiHostRunEnumeration } from "./execution/assembly/pi-host-run-sto
 // 挂点（registerRuntimeInstance 之后、service 构造段之前，先于任何 pi spawn）。
 export { startupSweep } from "./execution/assembly/startup-sweep.ts";
 
-// run 级终局投影 manifest（[P1b-2 / D5]）读写原语：「已终局」单源锚定（outcome
-// 非空）。消费全在 core 内部深路径（run-registry abandon 终局化 /
-// worker-message-pump finalizeRun / run-state-evidence pruneTerminalRunFiles 资格
-// 判定），壳零消费——按 D3 判定标准不进 barrel。
-
 // ── workflow-record entry 契约（词表/guard 收敛单源）──────────
 // customType / entry schema 版本 / v1 判定分类：壳 jsonl-run-store（写点 +
 // loadAll 重建）与 runtime workflow-extractor（entry 扫描投影）共用的 entry 层
 // 契约单源（收敛前壳与 shared 各持一份字面量、v1 guard 壳/runtime 双实现）。
+// WORKFLOW_STATE_LINK_CUSTOM_TYPE：legacy workflow 指针条目（W17 前写侧停写，
+// 读侧兼容消费——runtime 两处 + 壳 session-lifecycle 引用集解析经 barrel 引用）。
 // classify 无 IO 无日志——日志策略（warn/warnOnce/静默）留消费方；snapshot 层
 // 解码仍在 run-snapshot.ts codec（entry 层 v 与 snapshot 层 v 两级独立版本）。
 export {
   WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_STATE_LINK_CUSTOM_TYPE,
   WORKFLOW_RECORD_ENTRY_VERSION,
   classifyWorkflowRecordEntryData,
-  type WorkflowRecordEntryClassification,
 } from "./orchestration/workflow-record-entry.ts";
 // [W1 / D1] v2 条目契约增量导出（既有行段零改动）：注册/终态两条小条目的类型面
-// 与 kind 词表——壳 U1 写点 / runtime U3 投影 / session-reader U4 锚链消费。
+// ——壳 U1 写点 / runtime U3 投影 / session-reader U4 锚链消费。
 export {
-  WORKFLOW_RECORD_ENTRY_KINDS,
-  type WorkflowRecordEntryKind,
-  type WorkflowRecordEntryV2,
   type WorkflowRecordRegisteredEntryData,
   type WorkflowRecordSettledEntryData,
 } from "./orchestration/workflow-record-entry.ts";

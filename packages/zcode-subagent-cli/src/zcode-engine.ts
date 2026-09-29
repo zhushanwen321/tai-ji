@@ -5,9 +5,8 @@
 // 连接）/ D3（abort 链）/ D4（会话自包含）/ D5（capabilities）/ D6（停机面）。
 //
 // 2026-09 breaking 重构（用户拍板，理由与代价见设计文档修订节）：
-//   - **删除 CLI spawn 降级链**（原 TAIJI_ZCODE_MODE=spawn 定向 / probe 冒烟门控 /
-//     protocol-drift 首败降级）：zcode 无公开契约，协议漂移不再降级保底，直接报
-//     可操作错误（提示核对版本 / 重启 / 改用 engine: pi）。
+//   - **删除 CLI spawn 降级链**（probe 冒烟门控 / protocol-drift 首败降级）：zcode 无公开
+//     契约，协议漂移不再降级保底，直接报可操作错误（提示核对版本 / 重启 / 改用 engine: pi）。
 //   - **删除 HOME 池化，共享宿主 HOME**：spawn env 不覆写 HOME，app-server 共享
 //     宿主 ~/.zcode/（凭据经 appserver-launcher fs 拦截注入——cli config 读取重定向
 //     为「真实文件 + v2 provider」合并，同 id 时 v2 优先，机制与漂移面见该文件头注；

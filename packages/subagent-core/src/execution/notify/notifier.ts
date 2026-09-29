@@ -152,14 +152,15 @@ export interface BgNotifyRecord {
    *  record 都要能被 message/fork 定位。缺失时 buildLlmContent 省略整行。 */
   sessionFile?: string;
   /** [U2] 通知身份键（投影边界物化 = dedupe key：`id` / `id:round`；[U5 / §3.2.3]
-   *  epoch>0 时扩为 `id:epoch:round`——reopen 后 round 归零不与历史轮撞键，epoch=0
-   *  恒旧格式，磁盘账本零迁移）。账本条目 / 回执匹配 / 幂等去重共用——details 携带
-   *  （不进文案，G4 字节锁定不受影响），重复注入条目凭此可识别为同一条（G2
-   *  at-least-once 幂等键）。 */
+   *  epoch>0 时扩为 `id:epoch:round` / `id:epoch`（无轮形态——reopen 后第二次
+   *  close 不与首轮 close 撞键，epoch=0 恒旧格式，磁盘账本零迁移）。账本条目 /
+   *  回执匹配 / 幂等去重共用——details 携带（不进文案，G4 字节锁定不受影响），
+   *  重复注入条目凭此可识别为同一条（G2 at-least-once 幂等键）。 */
   notifyId?: string;
   /**
    * [U5 / §3.2.3] 通知所属世代（reopen 防撞维度）：notifyId 构造消费——epoch>0 的
-   *  轮次通知 key 带 epoch 段。缺省（undefined）= epoch 0 旧格式。
+   *  key 带 epoch 段（轮次通知 `id:epoch:round`、无轮通知 `id:epoch`）。缺省
+   *  （undefined）= epoch 0 旧格式。
    */
   epoch?: number;
   /**
@@ -405,12 +406,18 @@ export function createNotifier(host: NotifierHost): BgNotifier {
   };
   let handle: DeliveryHandle = createHandle();
 
+  /** ledger 未 bind 降级留痕的 per-notifier 一次性去重（对齐 directFallbackWarned
+   *  同款策略）：降级是装配级状态而非逐条通知事件，首条 warn 即可定位漏装配；每条
+   *  notify 刷一次会在多通知场景刷屏。revive 不复位（per-notifier 一次），新 session
+   *  新 notifier 再 warn 可接受。 */
+  let ledgerFallbackWarned = false;
+
   /** 四步投递链收尾共用段（S2，code-simplify）：ledger 在 → ①写账（拒绝 = false，
    *  幂等去重：同 notifyId 已在账/已销账）→ ②attemptDeliver（settled 边沿 + isIdle
    *  二次复查，③④销账/重放在 ledger 内）；ledger 缺（旧装配 / 部分测试，含 jiti
-   *  单例分裂的失效形态）→ 内核路径降级 + 降级留痕 warn（C-ext-06 配套，不改变向
-   *  后兼容行为）。notify 为 fire-and-forget，返回值忽略。闭包读 let handle：
-   *  revive 重建后自然指向新 handle。 */
+   *  单例分裂的失效形态）→ 内核路径降级 + 降级留痕 warn（C-ext-06 配套，per-notifier
+   *  一次，不改变向后兼容行为）。notify 为 fire-and-forget，返回值忽略。闭包读
+   *  let handle：revive 重建后自然指向新 handle。 */
   function deliverViaLedgerOrKernel(notifyId: string, content: string, details: object): boolean {
     const ledger = getBoundNotifyLedger();
     if (ledger) {
@@ -418,9 +425,12 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       ledger.attemptDeliver();
       return true;
     }
-    notifyLogger.warn("notify ledger not bound, falling back to delivery kernel path (at-most-once)", {
-      notifyId,
-    });
+    if (!ledgerFallbackWarned) {
+      ledgerFallbackWarned = true;
+      notifyLogger.warn("notify ledger not bound, falling back to delivery kernel path (at-most-once)", {
+        notifyId,
+      });
+    }
     handle.send({
       payload: {
         kind: "custom",
@@ -445,15 +455,17 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       // ——不改写入方对象（BgNotifyRecord 由调用方持有）。notifyId 同批物化（U2：
       // dedupe key 与账本身份键同源，details 携带供回执匹配）。
       // notifyId 构造：dedupKey 显式覆盖优先（drain 丢弃通知等派生通知的独立去重
-      // 身份），缺省 = `id:round` / `id` 旧格式；[U5 / §3.2.3] epoch>0 扩为
-      // `id:epoch:round`（reopen 后 round 归零不与历史轮撞键，同 key 撞车吞通知是
-      // 本代码库已修复过的事故类——epoch 是同族防御的构造性根治）。
+      // 身份），缺省 = `id:round` / `id` 旧格式；[U5 / §3.2.3] epoch>0 时两种形态都
+      // 带 epoch 段——轮次通知 `id:epoch:round`（reopen 后 round 归零不与历史轮撞
+      // 键）、无轮通知 `id:epoch`（notifyClosed 显式清 round，reopen 后第二次 close
+      // 的终态提示若沿用裸 id 会与首轮 close 撞键，被 ledger 按「同 notifyId 已
+      // ack」永久拒绝——同 key 撞车吞通知是本代码库已修复过的事故类，epoch 是同族
+      // 防御的构造性根治）。epoch=0 恒旧格式，磁盘账本零迁移。
+      const withEpoch = record.epoch !== undefined && record.epoch > 0;
       const roundKey =
         record.round != null
-          ? (record.epoch !== undefined && record.epoch > 0
-            ? `${record.id}:${record.epoch}:${record.round}`
-            : `${record.id}:${record.round}`)
-          : record.id;
+          ? (withEpoch ? `${record.id}:${record.epoch}:${record.round}` : `${record.id}:${record.round}`)
+          : (withEpoch ? `${record.id}:${record.epoch}` : record.id);
       const notifyId = record.dedupKey ?? roundKey;
       const payload: BgNotifyRecord =
         record.status === "closed"

@@ -55,7 +55,7 @@ vi.mock("../engine/host/spawned-children.ts", async (importOriginal) => {
 });
 
 const { mockLoad, mockAdd, mockRemove, registryEntries } = vi.hoisted(() => {
-  type Entry = { repo: string; branch: string; checkout: string; pid: number; createdAt: number; sessionFile?: string };
+  type Entry = { repo: string; branch: string; checkout: string; pid: number; createdAt: number };
   const entries: Entry[] = [];
   return {
     registryEntries: entries,
@@ -75,7 +75,6 @@ const { mockLoad, mockAdd, mockRemove, registryEntries } = vi.hoisted(() => {
 vi.mock("../worktree/worktree-registry.ts", () => ({
   WorktreeRegistry: class {
     add = mockAdd;
-    updatePid = vi.fn();
     remove = mockRemove;
     load = mockLoad;
   },

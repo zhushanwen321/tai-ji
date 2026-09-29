@@ -164,8 +164,12 @@ export function sweepEnginePidfiles(args: {
 }
 
 /**
- * 进程存活三态探测：true（存活）/ false（ESRCH = 已死）/ undefined（不确定，
+ * 进程存活三态探测：true（存活）/ false（ESRCH = 已死）/ undefined（探测失败，
  * 如 EPERM——清扫方必须保守跳过）。
+ *
+ * 同名异义警示：persistence/alive-store.ts 另有一个二态 isProcessAlive
+ * （true=活含 EPERM 保守判活 / false=死，无 undefined 档）——本函数是三态语义，
+ * 探测失败显式回流 undefined 由调用方分流；两个函数语义不同，勿混用。
  */
 export function isProcessAlive(pid: number): boolean | undefined {
   try {

@@ -109,13 +109,6 @@ describe("EngineClient 帧往返与握手", () => {
     expect(existsSync(path)).toBe(false);
   });
 
-  it("ping 往返（请求-应答 id 关联；不设墙钟）", async () => {
-    const { client, cleanup } = makeClient();
-    await client.ping();
-    expect(client.currentState).toBe("ready");
-    await cleanup();
-  });
-
   it("版本协商越界：engine_protocol_mismatch（含双方版本 + 升级指引）+ 该引擎标记不可用", async () => {
     const { client, cleanup } = makeClient({
       args: [FAKE_ENGINE, "--protocol-version", "99"],
@@ -241,6 +234,43 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     expect(client.currentState).toBe("ready");
     await cleanup();
   });
+});
+
+describe("stdout 半行上限（MAX_LINE_BYTES：残片丢头留尾，防无界增长）", () => {
+  it("引擎持续输出无换行数据 → 残片截断 + 首截断 warn 一次；换行冲刷后垃圾行丢弃，后续合法帧照常解析", async () => {
+    const warnMessages: string[] = [];
+    const { client, cleanup } = makeClient({
+      args: [
+        FAKE_ENGINE,
+        "--run-actions",
+        // 1.5 MiB 无换行垃圾（> 1 MiB 上限）分片写 + 换行冲刷；run 终态应答在垃圾
+        // 之后到达且是独立完整行——必须照常解析（截断不得破坏后续帧边界）。
+        JSON.stringify([{ op: "rawStdout", bytes: 1_572_864, terminateNewline: true }]),
+      ],
+    });
+    const original = console.warn;
+    console.warn = (...parts: unknown[]) => {
+      warnMessages.push(parts.join(" "));
+    };
+    let outcome: { content: string } | undefined;
+    try {
+      await client.ensureConnected();
+      const result = (await client.request("run", {
+        runId: "run-1",
+        task: { prompt: "p" },
+        ctx: { cwd: dataDir },
+      })) as { outcome: { content: string } };
+      outcome = result.outcome;
+    } finally {
+      console.warn = original;
+    }
+    expect(outcome?.content).toBe("fake-content-run-1");
+    // 残片经多次 data 事件反复超限——截断告警只发首截断一次
+    expect(warnMessages.filter((m) => m.includes("stdout partial line exceeded"))).toHaveLength(1);
+    // 冲刷出的垃圾行（截断尾部 + 换行）按 non-NDJSON 丢弃留痕
+    expect(warnMessages.some((m) => m.includes("dropped non-NDJSON stdout line"))).toBe(true);
+    await cleanup();
+  }, 20_000);
 });
 
 describe("镜像桥接 → core 镜像投影（u7a 数据面桥接）", () => {
@@ -442,7 +472,7 @@ describe("引擎崩溃与重建（A8①③）", () => {
       return true;
     });
     expect(client.currentState).toBe("exited");
-    expect(client.mirror.size).toBe(0); // 崩溃后镜像清空（isResumable 回落「无句柄」）
+    expect(client.mirror.size).toBe(0); // 崩溃后镜像清空（读点回落「无句柄」）
     await waitFor(() => !existsSync(path)); // pidfile 随引擎死亡清理
     await cleanup();
   });
