@@ -759,12 +759,17 @@
         "../AGENTS.md"
       ],
       "dimensions": [
-        "arch-boundary"
+        "arch-boundary",
+        "business-logic"
       ],
       "enforcement": [
         {
           "type": "review",
           "agent": "review-arch-boundary"
+        },
+        {
+          "type": "review",
+          "agent": "review-business-logic"
         }
       ]
     },
@@ -3105,6 +3110,132 @@
       "authority": [
         "../packages/subagent-core/src/execution/assembly/subagent-actions-core.ts",
         "extensions/subagents/architecture.md"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-state-18",
+      "summary": "streaming message 生命周期时序：pi 一次 agent 调用产生多 message，每个 message_start 必须先完成前一个 streaming message 再开新 message（时序链 message_start → 完成 current → 新建 → text_delta 追加 → tool_execution_start/end → 下一个 message_start → agent_end completeStreaming）；漏「完成 current」步骤 = 消息内容错乱合并",
+      "scope": [
+        "packages/runtime/src/**",
+        "packages/core/src/**",
+        "packages/renderer/src/**"
+      ],
+      "authority": [
+        "STANDARDS.md"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-state-19",
+      "summary": "session 双状态前置判定：所有 session 操作必须先判活跃/非活跃两态——活跃 session（运行中 pi 进程）走实时 RPC（prompt/get_messages），非活跃 session（仅 .jsonl 文件）走文件解析 + restore 后才能发送；禁止单态假设的实现",
+      "scope": [
+        "packages/runtime/src/**",
+        "packages/core/src/**",
+        "packages/renderer/src/**"
+      ],
+      "authority": [
+        "STANDARDS.md"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-data-25",
+      "summary": "文件持久化与内存 Store 同步三规则（同数据双介质必守）：①启动时加载（初始化从文件加载进 store）；②写后刷新（修改文件后立即更新 store，不留过期读窗）；③防竞争（异步写操作队列串行化，防并发写入丢失）",
+      "scope": [
+        "packages/runtime/src/**",
+        "packages/core/src/**",
+        "packages/renderer/src/**"
+      ],
+      "authority": [
+        "STANDARDS.md"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-21",
+      "summary": "独立数据源聚合必须 Promise.allSettled（禁 Promise.all——单一失败丢弃全部结果）：多个互不依赖的加载各自降级消费错误，不得因单一来源失败使整体初始化失败",
+      "scope": [
+        "packages/renderer/src/**",
+        "packages/core/src/**",
+        "packages/ui/src/**"
+      ],
+      "authority": [
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "business-logic"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-business-logic"
+        }
+      ]
+    },
+    {
+      "id": "C-comm-22",
+      "summary": "Electron 四层分层职责：renderer 禁直用 ipcRenderer（必须经 preload 的 electronAPI 桥接）；main 进程只管窗口与 runtime 子进程生命周期（禁混入业务逻辑——Window Manager 与 Process Supervisor 职责）；packages/shared 是前后端唯一类型源（协议源 protocol.ts），禁某一端私自重定义",
+      "scope": [
+        "packages/renderer/src/**",
+        "packages/shared/src/**",
+        "apps/electron/main/**",
+        "apps/electron/preload/**"
+      ],
+      "authority": [
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
+      "id": "C-ext-29",
+      "summary": "Extension 与 Plugin 概念区分（禁混用）：Extension = pi extension，运行在 pi 子进程内（ExtensionAPI），数据存 ~/.taiji/extensions/，由 extension-service 管理；Plugin = taiji 插件，运行在 runtime 的 Worker Thread（agentAPI），数据存 ~/.taiji/plugins/，由 PluginService 管理；Pi Bridge Extension 是插件系统与 pi 引擎的唯一适配层，插件系统内禁绕过 Bridge 直接访问 pi",
+      "scope": [
+        "global"
+      ],
+      "authority": [
+        "CONTEXT.md",
+        "../AGENTS.md"
       ],
       "dimensions": [
         "arch-boundary"
