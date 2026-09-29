@@ -164,17 +164,21 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(failIdle?.error).toBe("engine crashed");
   });
 
-  it("跨轮轮终不击穿 A3 断言（endedAt 不写）+ `.state` 收条随最新轮覆写", () => {
+  it("跨轮轮终不击穿 A3 断言（endedAt 不写）+ `.state` 收条随最新轮覆写（每轮先过轮始门）", () => {
     const record = makeRecord("bg-multi", { sessionFile });
     store.register(record);
-    store.markRoundIdle("bg-multi", { kind: "success", content: "r1" });
-    // 第二轮：先失败轮终，再断言收条 reason 跟随最新轮（单槽收口位覆写）。
+    expect(store.markRoundIdle("bg-multi", { kind: "success", content: "r1" })).toBe(true);
+    // 第二轮：先过轮始门（[§4] 轮终原语的同状态在途门——连续两次轮终会被拒绝），
+    // 再失败轮终——断言收条 reason 跟随最新轮（单槽收口位覆写）。
+    expect(store.markRoundStarted("bg-multi")).toBe(true);
     expect(() => store.markRoundIdle("bg-multi", { kind: "failed", reason: "r2 boom" })).not.toThrow();
     expect(record.round).toBe(2);
     expect(record.stopReason).toBe("failed");
     expect(readStateJson()["reason"]).toBe("failed");
-    // 同 record 第二次成功轮终（round=2 收口后的第三轮）也不抛——A3 只拦终态冻结。
+    // 第三轮同款：轮始门 → 成功轮终；A3 断言（endedAt）始终不被击穿。
+    expect(store.markRoundStarted("bg-multi")).toBe(true);
     expect(() => store.markRoundIdle("bg-multi", { kind: "success", content: "r3" })).not.toThrow();
+    expect(record.round).toBe(3);
     expect(readStateJson()["reason"]).toBe("completed");
   });
 

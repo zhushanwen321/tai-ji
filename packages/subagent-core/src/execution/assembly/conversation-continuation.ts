@@ -475,6 +475,19 @@ export class ConversationContinuation {
     summaryPrefix = rebuild.summaryPrefix;
     const worktreeNotice = rebuild.worktreeNotice;
 
+    // [轮次轴在途门 / §4 补强] :472 的重建 await 是终态门（:460）之后唯一的挂起点：
+    // 窗口内 cancel/close 抢先收口时 record 已离 running，而轮始原语的判据不能是
+    // status（首轮出生即 running、reopen 后仍是 idle 也要允许轮始——store 侧无法
+    // 单靠 status 判「已有在途轮」），继续走 markRoundStarted 会把已收口的 record
+    // 静默翻回 running：内存态与磁盘已落的 stopReason / `.state` 收条分叉。
+    // 此处同步复查（本行到 markRoundStarted 之间无 await，同 tick 内不可被抢占，
+    // 由结构本身保证）；处置与 :460 的终态门逐字同形。
+    if (record.status !== "running") {
+      this.clearActiveRound();
+      this.queue.length = 0;
+      return;
+    }
+
     // ② 载荷组装：轮级 signal（record controller 级联 + 打断通道）。
     //    model 身份重建 / resume 锚点 / chat 键组装 / sessionRootId 注入 / pool
     //    acquire / priority 在泛化派发主干（host.dispatchChatRound——归自

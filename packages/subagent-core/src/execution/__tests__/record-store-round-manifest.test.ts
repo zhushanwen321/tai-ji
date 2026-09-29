@@ -136,8 +136,11 @@ describe("markRoundIdle 轮终派生 manifest 投影（B2 簿记⑫）", () => {
   it("跨轮幂等：多轮轮终重复写派生投影（缓存性质），manifest 恒为最新合法 idle 形态", () => {
     const record = makeRecord("bg-multi", { sessionFile });
     store.register(record);
-    store.markRoundIdle("bg-multi", { kind: "success", content: "r1" });
-    store.markRoundIdle("bg-multi", { kind: "success", content: "r2" });
+    expect(store.markRoundIdle("bg-multi", { kind: "success", content: "r1" })).toBe(true);
+    // 第二轮（[§4] 轮终原语的同状态在途门：须先过轮始门）——派生投影重写幂等，
+    // manifest 恒为最新合法 idle 形态。
+    expect(store.markRoundStarted("bg-multi")).toBe(true);
+    expect(store.markRoundIdle("bg-multi", { kind: "success", content: "r2" })).toBe(true);
 
     const raw = readManifest("bg-multi");
     expect(raw["id"]).toBe("bg-multi");

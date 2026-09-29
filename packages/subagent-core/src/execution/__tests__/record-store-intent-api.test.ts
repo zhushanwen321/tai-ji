@@ -411,6 +411,40 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       );
     });
 
+    it("[§4 在途门 CAS] 已轮终（idle）的 record 再次轮终 → warn 留痕 + false，零副作用", () => {
+      // 形态来源：cancel 的 markSettledOut 有意不写 endedAt（endedAt 门拦不住），
+      // 或迟到应答越过上层 status 门——原语级兜底即本用例。
+      const record = makeRecord("chat-cas", { round: 0 });
+      record.sessionFile = sessionFile;
+      store.register(record);
+      const eventsPath = path.join(manifestDir, "chat-cas.events");
+      const countRoundIdleEvents = (): number =>
+        fs
+          .readFileSync(eventsPath, "utf-8")
+          .split("\n")
+          .filter((line) => line.includes('"type":"record-round-idle"')).length;
+
+      expect(store.markRoundIdle("chat-cas", { kind: "success", content: "r1" })).toBe(true);
+      const roundAfterFirst = record.round;
+      const stateAfterFirst = fs.readFileSync(`${sessionFile}.state`, "utf-8");
+      const idleEventsAfterFirst = countRoundIdleEvents();
+      loggerMock.warn.mockClear();
+
+      // 第二次轮终（未过轮始门）：拒绝且零副作用。
+      expect(store.markRoundIdle("chat-cas", { kind: "failed", reason: "late settle" })).toBe(false);
+
+      expect(record.round).toBe(roundAfterFirst); // ③ 轮次不二次递增
+      expect(record.stopReason).toBe("completed"); // ⑩ 展示位不被覆写
+      expect(record.lastError).toBeUndefined(); // ⑨ 失败原因不入内存
+      expect(record.result).toBe("r1"); // ② 结果不被覆写
+      expect(fs.readFileSync(`${sessionFile}.state`, "utf-8")).toBe(stateAfterFirst); // ⑪ 收条不覆写
+      expect(countRoundIdleEvents()).toBe(idleEventsAfterFirst); // 事件流不追加
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        "[subagents] markRoundIdle: CAS rejected (record not running)",
+        expect.objectContaining({ detail: expect.objectContaining({ id: "chat-cas", status: "idle" }) }),
+      );
+    });
+
     it("id 不在内存 → false 无副作用", () => {
       expect(store.markRoundIdle("nope", { kind: "success", content: "x" })).toBe(false);
     });

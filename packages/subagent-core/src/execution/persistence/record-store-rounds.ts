@@ -178,7 +178,8 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
  * worktree/通知等副作用编排留调用方。
  *
  * @param outcome 轮终结果（kind 判别：success=content / 失败=reason）
- * @returns false = id 不在内存（debug 留痕，无副作用）。
+ * @returns false = id 不在内存（debug 留痕，无副作用）或**在途门拒绝**（状态已非
+ *          running——warn 留痕，零副作用；见下方 CAS 段）。
  * @throws Error record 终态簿记已冻结（endedAt 已设——复活终态的调用即 bug，
  *         fail-fast，对齐 doFinalizeRoundToIdle A3 断言）。
  */
@@ -195,6 +196,21 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
         `round-idle finalization would resurrect a finalized record. ` +
         `Recovery: caller must gate on record.status === "running" before settling a round.`,
     );
+  }
+  // [轮次轴 CAS] 在途门：只在「在途（running）」时允许轮终。此前唯一保护是上面的
+  // endedAt 终态冻结检查——cancel（markSettled 有意不写 endedAt）或迟到应答把 record
+  // 收成 idle 后再轮终，会静默多推一轮：round 二次递增 + `.state` 收条被覆写 +
+  // 多写一条 record-round-idle 事件行（事件流事实源被污染）。三类生产调用链
+  // （settleOneShotOutcome / finalizeFailed / chat 域 onRunSettled）均在 running 门下，
+  // 本段为原语级兜底（chat 域的门与轮终之间隔着 settleRoundXxx 的 await 边界）。
+  // 拒绝语义对齐 markReopened / markSettled：warn 留痕 + 返回 false，不抛错——调用
+  // 链是 `void settleRoundXxx(...)` 的断头 promise 形式，抛错会升级为无人接的
+  // promise 拒绝（而不是被上层的 status 门接住）。
+  if (rec.status !== "running") {
+    logger.warn("[subagents] markRoundIdle: CAS rejected (record not running)", {
+      detail: { id, status: rec.status, stopReason: rec.stopReason },
+    });
+    return false;
   }
   // ② result 写入规则（D7）：成功轮 = content（chat 空 content 兜底占位）；失败轮 =
   // 前值保真 ?? 失败摘要 + lastError 写失败原因（字段⑨）。
