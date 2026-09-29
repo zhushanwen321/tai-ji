@@ -259,7 +259,7 @@ async function gateFixLoop<R>(
     }
     if (round === MAX_GATE_ROUNDS) break;
     const fixer = agent(
-      `fix-${stepId}-r${round}`,
+      `gate-fix-${stepId}-r${round}`,
       "你是 gate 修复工程师：只修失败输出直接相关的问题，修完自行 commit（显式路径），禁止 git add -A / git add .。",
     );
     const ctxTxt = extraFixContext ? `\n\n${await extraFixContext()}` : "";
@@ -990,7 +990,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
             const k = i + bi + 1;
             const docPath = `${rDir}/aggregate-4-fixer-${k}.md`;
             return agent(
-              `fixer-a${attempt}-r${round}-${g.id}`,
+              `review-fix-a${attempt}-r${round}-${g.id}`,
               "你是资深修复工程师：先验证再修改（疑误报走 disputed 申诉，不盲改不擅放）、小步修复、每条给可复核的自检证据；做不完的如实说明，不静默跳过。",
             ).ask<FixOutcome>(
               [
@@ -1469,7 +1469,7 @@ await step("gate-suite", async () => {
     }
     if (round === GATE_SUITE_ROUNDS) break;
     const repairer = agent(
-      `gate-repairer-r${round}`,
+      `suite-fix-r${round}`,
       "你是 gate 修复工程师：拿聚合失败清单一次修复（覆盖率缺口与结构度量常同文件同源），只修清单直接相关的问题，修完自行 commit（显式路径），禁止 git add -A / git add .。",
     );
     await repairer.ask(

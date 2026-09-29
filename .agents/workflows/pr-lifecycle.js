@@ -395,7 +395,7 @@ async function gateFixLoop(stepId, gateName, runGate, onPass, extraFixContext) {
           "3. 禁止 git add -A / git add .（会把工作区无关改动一起提交）。",
           "4. 修不完的部分在回复中明确说明，不要静默跳过。",
         ].join("\n") + (extraFixContext ? "\n\n" + (await extraFixContext()) : ""),
-        description: "fix-" + stepId + "-r" + round,
+        description: "gate-fix-" + stepId + "-r" + round,
       },
       "gate 修复 agent",
     );
@@ -1169,7 +1169,7 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
             "7. 返回 JSON：fixes / disputed / deferred / commitMessage（issueId 与任务文档中一致，原样引用）。",
           ].join("\n"),
           schema: fixOutcomeSchema,
-          description: "fixer-a" + attempt + "-r" + round + "-" + g.id,
+          description: "review-fix-a" + attempt + "-r" + round + "-" + g.id,
           model: $MODEL,
           returnMeta: true,
         });
@@ -1662,7 +1662,7 @@ await step("gate-suite", async () => {
           "3. 禁止 git add -A / git add .（会把工作区无关改动一起提交）。",
           "4. 修不完的部分在回复中明确说明，不要静默跳过。",
         ].join("\n"),
-        description: "gate-repairer-r" + round,
+        description: "suite-fix-r" + round,
       },
       "gate 修复 agent",
     );
