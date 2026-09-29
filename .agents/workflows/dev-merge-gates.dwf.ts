@@ -689,7 +689,8 @@ async function main(): Promise<Record<string, unknown>> {
       for (round = 1; round <= maxRounds; round++) {
         const openRecords = records.filter((r) => r.status === "open");
         const activeDims = round === 1 ? dims : [...new Set(openRecords.map((r) => r.dimension))];
-        phase(`branch-review 第 ${round} 轮（维度 ${activeDims.join("、")}）`);
+        // phase 名须编译期字面量：循环体复用同名 marker = GUI 单节点；轮次/维度信息归 log/report（下方两行已承载）
+        phase("branch-review 审查修复循环（每轮重审活跃维度）");
         const verdicts = await mapBatch(activeDims, REVIEWER_BATCH, async (dim) => ({
           dim,
           v: await dispatchReviewer(dim, round, openRecords.filter((r) => r.dimension === dim)),
