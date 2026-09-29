@@ -40,9 +40,6 @@
 //    通道表（r0-inventory 清单②）中 #4 的 promoteSessionFileFromEngineHandle（A 通道
 //    唯一 R3 迁移项）+ store.archive（B）+ manifest/sidecar（D/E）原样随迁。
 
-import * as fs from "node:fs";
-import * as path from "node:path";
-
 import { toErrorMessage } from "../../core/error-message.ts";
 
 import { getLogger } from "../../core/logger.ts";
@@ -60,11 +57,11 @@ import { notifyInFlightChanged } from "../engine/inflight-snapshot.ts";
 import { disarmIdleTimer } from "../lifecycle/lifecycle-manager.ts";
 import { hasArmedIdleTimer, isResumable } from "../lifecycle/lifecycle-predicates.ts";
 import { doFinalizeRecord } from "../persistence/finalize-record.ts";
-import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { NotifyHost, PiLike } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
+import { collectWorktreePatch } from "../worktree/worktree-patch-collection.ts";
 import type { AgentResult, ClosedReason, ExecutionRecord, StopReason } from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
@@ -336,20 +333,15 @@ export class RecordLifecycle {
     const handle = record.worktreeHandle;
     if (!handle) return;
     const manager = this.deps.getWorktreeManager();
-    try {
-      // patch 前移（collectPatchIfWorktree 同款——sessionsDir/<branch>.patch，
-      // written 才回填防悬空路径）。
-      const sessionsDir = getSubagentSessionDir(
-        this.deps.getModelService().getAgentDir(),
-        handle.mainCwd,
-      );
-      fs.mkdirSync(sessionsDir, { recursive: true });
-      const patchFile = path.join(sessionsDir, `${handle.branch}.patch`);
-      const patch = await manager.collectPatch(handle, patchFile);
-      if (patch.written) record.patchFile = patchFile;
-    } catch (err) {
-      bestEffort(err, `collectPatch (archive ${source})`);
-    }
+    // patch 前移经单源原语（collectWorktreePatch——与终态收尾 Step 0 同实现，登记
+    // §3.1.6；sessionsDir/<branch>.patch，written 才回填防悬空路径）。try 边界与
+    // best-effort 标签收敛在原语内（此前 manager 在 try 外取，getter 抛错会外抛）。
+    await collectWorktreePatch({
+      record,
+      getWorktreeManager: () => manager,
+      getAgentDir: () => this.deps.getModelService().getAgentDir(),
+      label: `collectPatch (archive ${source})`,
+    });
     try {
       // [S5 修复] keepBranch：归档回收释放 checkout（并发写隔离语义达成）但保留
       // 分支——分支是续聊重建依据（reconstruct 按 `pi-sub-<recordId>` 命名约定 +

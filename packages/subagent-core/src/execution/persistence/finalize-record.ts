@@ -28,6 +28,7 @@ import type { RecordStore } from "./record-store.ts";
 import { readIdentityHeader, readIdentityTail } from "./session-reconstructor.ts";
 import type { AgentResult, ClosedReason, ExecutionRecord } from "../assembly/types.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
+import { collectWorktreePatch } from "../worktree/worktree-patch-collection.ts";
 
 const logger = getLogger("subagents");
 
@@ -120,21 +121,16 @@ function resolveMissingSessionFile(deps: FinalizeDeps, record: ExecutionRecord):
  * Step 0: collectPatch（best-effort，仅 worktree 绑定时执行）。
  * [MF#3] patchFile 写到 worktree 之外（sessionsDir/<branch>.patch），避免被 cleanup 删除；
  * 路径回填 record.patchFile，供调用方（tool result / /subagents list）应用。
+ * 正文与归档路径（record-lifecycle.archiveWorktreeResources）共用单源原语
+ * collectWorktreePatch（登记 §3.1.6）；本壳只补 deps 取值形态与标签。
  */
 async function collectPatchIfWorktree(deps: FinalizeDeps, record: ExecutionRecord): Promise<void> {
-  if (!record.worktreeHandle) return;
-  try {
-    const sessionsDir = getSubagentSessionDir(
-      deps.modelService.getAgentDir(),
-      record.worktreeHandle.mainCwd,
-    );
-    fs.mkdirSync(sessionsDir, { recursive: true });
-    const patchFile = path.join(sessionsDir, `${record.worktreeHandle.branch}.patch`);
-    const patch = await deps.worktreeManager.collectPatch(record.worktreeHandle, patchFile);
-    if (patch.written) record.patchFile = patchFile;
-  } catch (pe: unknown) {
-    bestEffort(pe, "collectPatch (finalizeRecord Step0)");
-  }
+  await collectWorktreePatch({
+    record,
+    getWorktreeManager: () => deps.worktreeManager,
+    getAgentDir: () => deps.modelService.getAgentDir(),
+    label: "collectPatch (finalizeRecord Step0)",
+  });
 }
 
 /**
