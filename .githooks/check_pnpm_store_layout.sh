@@ -25,7 +25,19 @@ MODULES_YAML="$PROJECT_ROOT/node_modules/.modules.yaml"
 # pnpm 缺失时后续检查自会失败，不在此添噪
 command -v pnpm >/dev/null 2>&1 || exit 0
 
-EXPECTED="$(cd "$PROJECT_ROOT" && pnpm store path 2>/dev/null)" || exit 0
+# EXPECTED 解析 [HISTORICAL 2026-09-29]：pnpm 10.27 的 `pnpm store path` 不反映
+# globalconfig（~/Library/Preferences/pnpm/rc）的 store-dir 配置，而 install 读它
+# ——两命令分叉使本检查对配置了全局 store-dir 的环境永久假阳性（install 写
+# <store-dir>/v<major>，store path 报默认位置）。修正 = 与 install 同源解析：
+# config 有 store-dir 时取「<store-dir>/v<major>」，否则回落 store path（沙箱
+# HOME 覆写场景下 config 无 store-dir，回落路径与原防线语义不变）。
+STORE_DIR_CONFIG="$(pnpm config get store-dir 2>/dev/null)"
+PNPM_MAJOR="$(pnpm --version 2>/dev/null | cut -d. -f1)"
+if [ -n "$STORE_DIR_CONFIG" ] && [ "$STORE_DIR_CONFIG" != "undefined" ] && [ -n "$PNPM_MAJOR" ]; then
+    EXPECTED="${STORE_DIR_CONFIG%/}/v${PNPM_MAJOR}"
+else
+    EXPECTED="$(cd "$PROJECT_ROOT" && pnpm store path 2>/dev/null)" || exit 0
+fi
 RECORDED="$(grep -m1 '^storeDir:' "$MODULES_YAML" | sed 's/^storeDir:[[:space:]]*//')"
 
 # 记录缺失属 install 语义问题，不是翻转问题，不在此判
