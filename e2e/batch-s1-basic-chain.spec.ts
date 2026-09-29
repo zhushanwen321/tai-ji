@@ -29,7 +29,8 @@
  *   前置：real renderer bundle（VITE_E2E=true pnpm run build:e2e，不带 VITE_MOCK）。
  * - 预算：test.setTimeout 600s（真实 LLM 双成员并行 + 通知落盘）；journal/通知到达
  *   等待 300s（轮询，不固定 sleep）；窗口不足属预算校准，禁止放宽断言换绿灯。
- * - 失败归因：writeDiag 落 /tmp/batch-s1-*.json（seen types + 日志尾 + 目录清单）
+ * - 失败归因：writeDiag 落 testInfo.outputPath（batch-s1-*.json，seen types + 日志尾 +
+ *   目录清单——含 entry 正文的诊断载荷只进 Playwright 托管产物位，不落 /tmp，ADR-0063 I2）
  *   + console 抓取 + 全页截图（关键节点落 testInfo.outputPath）+ <dataDir>/logs/。
  * - 重试禁令：失败先读 diag 归因（通知缺席 → 查 journal 是否推进；LLM 未调工具 →
  *   查 prompt 遵从性），禁止不归因直接重试。
@@ -40,7 +41,7 @@
  * 凭证播种：拷本机真实 provider 配置进临时 dataDir（只读源目录，写面恒为临时 dataDir；
  * TAIJI_BATCH_CREDENTIAL_SOURCE 可覆盖源目录，缺省 ~/.taiji/agent）。
  */
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import {
   launchRealApp,
   waitForRuntime,
@@ -144,9 +145,13 @@ function seedRealCredentials(dataDir: string): void {
 
 // ── 诊断与扫描 helpers（btw-turn-isolation 同款范式 + W1 介质族） ─────────────
 
-function writeDiag(name: string, data: Record<string, unknown>): void {
-  fs.writeFileSync(`/tmp/${name}`, JSON.stringify(data, null, 2))
-  console.log(`[batch-s1] diag → /tmp/${name}`)
+/** 诊断落 Playwright 托管产物位（testInfo.outputPath，随 output 目录管理）——
+ *  载荷可含 session entry 正文，/tmp 不是其合法落盘位置（ADR-0063 I2）。 */
+function writeDiag(testInfo: TestInfo, name: string, data: Record<string, unknown>): void {
+  const target = testInfo.outputPath(name)
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, JSON.stringify(data, null, 2))
+  console.log(`[batch-s1] diag → ${target}`)
 }
 
 async function waitUntil(pred: () => boolean, deadlineMs: number, intervalMs = 200): Promise<boolean> {
@@ -230,13 +235,14 @@ function attachConsoleCapture(page: Page): { all: string[]; errors: string[] } {
  * 失败路径 diag 与拆出前同构（journal-missing / notify-missing 两形态）。
  */
 async function settleS1Anchors(
+  testInfo: TestInfo,
   dataDir: string,
   consoleCap: { errors: string[] },
 ): Promise<{ journalFile: string; runId: string; sessionFile: string }> {
   const agentDir = path.join(dataDir, 'agent')
   const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
   if (!journalFound) {
-    writeDiag('batch-s1-journal-missing.json', {
+    writeDiag(testInfo, 'batch-s1-journal-missing.json', {
       agentTree: fs.existsSync(agentDir) ? fs.readdirSync(agentDir) : [],
       runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
       piLogsTail: readPiLogs(dataDir).slice(-3000),
@@ -267,7 +273,7 @@ async function settleS1Anchors(
   const sessionText = fs.readFileSync(sessionFile, 'utf8')
   if (!notifyArrived) {
     const frames = readJournalFrames(journalFile).map((f) => f['type'])
-    writeDiag('batch-s1-notify-missing.json', {
+    writeDiag(testInfo, 'batch-s1-notify-missing.json', {
       journalEventTypes: frames,
       sessionBytes: sessionText.length,
       runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
@@ -289,12 +295,14 @@ async function settleS1Anchors(
  * ③ack 销账 = type custom + "subagent-bg-notify-ack"
  * 「notifyId 字面出现次数」结构性 = 3 ≠ 投递次数——送达恰 1（单次投递）
  * + ledger/ack 各恰 1（at-least-once 幂等闭环，BATCH-06 口径）。 */
-function assertS1NotifyChannels(
+async function assertS1NotifyChannels(
+  testInfo: TestInfo,
   sessionFile: string,
   runId: string,
   journalFile: string,
   dataDir: string,
-): void {
+): Promise<void> {
+const notifyId = `wf-done:${runId}`
 // ── 断言 N1（一条收齐，三通道口径）：送达恰 1 + ledger/ack 各恰 1 ──
 // W1 通知链在会话 JSONL 落三类含 wf-done:<runId> 的 entry，通道与 entry type 均不同：
 // ①送达 = type custom_message + customType "workflow-result"（u9 外部通道设计，
@@ -325,7 +333,7 @@ const ackArrived = await waitUntil(
   ACK_TIMEOUT_MS,
 )
 if (!ackArrived) {
-  writeDiag('batch-s1-ack-missing.json', {
+  writeDiag(testInfo, 'batch-s1-ack-missing.json', {
     sessionTail: fs.readFileSync(sessionFile, 'utf8').slice(-4000),
     runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
     journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
@@ -340,7 +348,7 @@ expect(
 }
 
 /** [S1 test 拆分] 断言 N2（S1 原始口径）：status=ok / results=2 / taskIndex 0,1 / Agent Trace 2 条均 ok。 */
-function assertS1DeliveryContent(sessionFile: string): void {
+function assertS1DeliveryContent(testInfo: TestInfo, sessionFile: string): void {
 // ── 断言 N2（S1 原始口径）：status=ok / results=2 / taskIndex 0,1 / Agent Trace 2 条均 ok ──
 const deliveries = extractCustomMessageEntries(sessionFile, 'workflow-result')
 expect(deliveries.length, 'workflow-result 送达 entry 应恰 1 条').toBe(1)
@@ -352,7 +360,7 @@ let scriptResult: { status?: string; results?: { taskIndex?: number; status?: st
 try {
   scriptResult = JSON.parse((scriptResultMatch![1] || '').trim()) as typeof scriptResult
 } catch {
-  writeDiag('batch-s1-script-result-unparsable.json', { contentHead: content.slice(0, 2000) })
+  writeDiag(testInfo, 'batch-s1-script-result-unparsable.json', { contentHead: content.slice(0, 2000) })
   throw new Error('Script Result 段应为合法 JSON（fan-out 返回 {status, results}）')
 }
 expect(scriptResult.status, `批收口 status 应为 ok（收到 "${String(scriptResult.status)}"）`).toBe('ok')
@@ -375,7 +383,7 @@ const okSteps = new Set(
     .map((l) => (l.trim().match(/^\[(\d+)\]/) ?? [])[1]),
 )
 if (!(okSteps.has('0') && okSteps.has('1'))) {
-  writeDiag('batch-s1-trace-anomaly.json', { traceLines, contentHead: content.slice(0, 3000) })
+  writeDiag(testInfo, 'batch-s1-trace-anomaly.json', { traceLines, contentHead: content.slice(0, 3000) })
 }
 expect(
   okSteps.has('0') && okSteps.has('1'),
@@ -482,7 +490,7 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
     // 主 turn（LLM 调 subagents 工具后即收口——批量是后台通知型工具）
     const mainDone = await waitUntil(() => sub.events.filter((e) => e.type === 'message.complete').length > 0, MAIN_TURN_TIMEOUT_MS)
     if (!mainDone) {
-      writeDiag('batch-s1-main-turn.json', {
+      writeDiag(testInfo, 'batch-s1-main-turn.json', {
         seen: [...new Set(sub.events.map((e) => String(e.type)))],
         consoleErrors: consoleCap.errors,
         runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
@@ -492,15 +500,15 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
     await page.screenshot({ path: testInfo.outputPath('s1-dispatched.png'), fullPage: true })
 
     // ── W1 介质锚 ① + 通知等待（拆出 settleS1Anchors）──
-    const { journalFile, runId, sessionFile } = await settleS1Anchors(dataDir, consoleCap)
+    const { journalFile, runId, sessionFile } = await settleS1Anchors(testInfo, dataDir, consoleCap)
     await page.screenshot({ path: testInfo.outputPath('s1-notify-arrived.png'), fullPage: true })
 
-    assertS1NotifyChannels(sessionFile, runId, journalFile, dataDir)
-    assertS1DeliveryContent(sessionFile)
+    await assertS1NotifyChannels(testInfo, sessionFile, runId, journalFile, dataDir)
+    assertS1DeliveryContent(testInfo, sessionFile)
     assertS1JournalAndEntryContract(sessionFile, journalFile, runId, dataDir)
 
     if (consoleCap.errors.length > 0) {
-      writeDiag('batch-s1-console-errors.json', { errors: consoleCap.errors.slice(-50) })
+      writeDiag(testInfo, 'batch-s1-console-errors.json', { errors: consoleCap.errors.slice(-50) })
       console.warn(`[batch-s1] renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言面）`)
     }
     console.log(`[batch-s1] PASS：runId=${runId}，journal=${journalFile}`)
