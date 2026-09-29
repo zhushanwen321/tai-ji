@@ -101,6 +101,46 @@ async function settle(w: VueWrapper): Promise<void> {
   await nextTick()
 }
 
+/**
+ * 轮询等待 Host 投影 unread 到达期望值（仅用于「增长到达」类断言）：
+ * 消息数 0→1 增长到 badge 投影更新依赖 Vue watcher 回调的异步调度，
+ * 固定 settle 后立即断言对调度器微时序有隐性依赖——CI 并行负载下偶发
+ * 不达（CI 偶发 run 36585066332），改带超时轮询去依赖。超时后先输出
+ * 失败现场快照，再以 expect 收尾（保持 vitest 断言失败形态）。
+ */
+async function waitForUnread(w: VueWrapper, expected: string, timeoutMs = 2000): Promise<void> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    await flushPromises()
+    await nextTick()
+    if (text(w, 'unread') === expected) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  await logBtwFlakyDiagnosis(w)
+  expect(text(w, 'unread')).toBe(expected)
+}
+
+/**
+ * 失败现场取证（waitForUnread 超时路径）：Host 投影三项 + 线分区消息条数 +
+ * btw.list 最近一次 mock 返回值——下次 CI 复现时据此区分「watcher 未计数」
+ * vs「分区无数据」vs「投影未更新」。
+ */
+async function logBtwFlakyDiagnosis(w: VueWrapper): Promise<void> {
+  const chat = useChatStore()
+  console.log('[btw-flaky-diagnosis] host projection:', {
+    threads: text(w, 'threads'),
+    unread: text(w, 'unread'),
+    pending: text(w, 'pending'),
+  })
+  console.log('[btw-flaky-diagnosis] chat partition counts:', {
+    'btw:t2': chat.getMessages('btw:t2').length,
+    'btw:t1': chat.getMessages('btw:t1').length,
+  })
+  const lastResult = btwMock.list.mock.results.at(-1)
+  const lastReturned = lastResult?.type === 'return' ? await Promise.resolve(lastResult.value) : undefined
+  console.log('[btw-flaky-diagnosis] btw.list last mock result:', lastReturned ?? '(no result)')
+}
+
 function msg(id: string): Message {
   return { id, role: 'assistant', content: 'x', status: 'complete', timestamp: 0 }
 }
@@ -276,7 +316,7 @@ describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费面�
 
     chat.setMessages('btw:t2', [msg('b1')])
     await settle(w)
-    expect(text(w, 'unread')).toBe('1')
+    await waitForUnread(w, '1')
 
     // 关线后重拉（抽屉活动触发面）：权威列表只剩 t1
     btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }])
