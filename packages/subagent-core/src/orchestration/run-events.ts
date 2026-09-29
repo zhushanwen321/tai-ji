@@ -47,7 +47,6 @@
 // run-resumed 复活（resume 编排，U2）；prune / 对账清理对 interrupted 态天然
 // 不获资格（fold 不达 terminal——宁保留不误裁）。
 
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // 引擎协议码运行时 guard（SDK 权威词表，RunErrorCode engine 家族收窄用——自造匹配
@@ -59,6 +58,9 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import { getLogger } from "../core/logger.ts";
+// [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-journal.ts（与 record 事件
+// journal 共用同一实现体，差异经策略注入——本文件只提供 run 域策略）。
+import { JsonlEventJournal } from "../shared/jsonl-event-journal.ts";
 import type { AgentFailureKind, AgentResult, DoneReason } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 
@@ -1361,108 +1363,25 @@ function isWorkflowRunEventLine(value: unknown): value is WorkflowRunEvent {
   return true;
 }
 
-function isNodeErrorCode(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === code;
-}
-
-/** 读文件并宽容解析：坏行跳过计数 + 有效事件最大 seq 探测（scan 与 append 分配共用）。 */
-function scanJournalFile(
-  filePath: string,
-): { events: WorkflowRunEvent[]; malformed: number; maxSeq: number } {
-  let content: string;
-  try {
-    content = readFileSync(filePath, "utf8");
-  } catch (error) {
-    if (isNodeErrorCode(error, "ENOENT")) return { events: [], malformed: 0, maxSeq: 0 };
-    throw error;
-  }
-  const events: WorkflowRunEvent[] = [];
-  let malformed = 0;
-  let maxSeq = 0;
-  for (const line of content.split("\n")) {
-    if (line.trim().length === 0) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      malformed += 1;
-      continue;
-    }
-    if (isWorkflowRunEventLine(parsed)) {
-      const event = parsed as WorkflowRunEvent;
-      events.push(event);
-      // 存量行 seq 运行时缺失（兼容读）——typeof 守卫下不参与水位探测
-      if (typeof event.seq === "number" && event.seq > maxSeq) maxSeq = event.seq;
-    } else {
-      // 词表外 type（含合法 JSON 但漂移的形态）同样按坏行跳过——scan 的失效
-      // 模式是保守可诊断（跳过 + 计数 + warn），不是炸掉整个投影
-      malformed += 1;
-    }
-  }
-  return { events, malformed, maxSeq };
-}
-
-class FileRunEventJournal implements RunEventJournal {
-  private dirEnsured = false;
-  /** runId → 已知末 seq（append 分配基数；跨实例正确性靠首 append 探测文件尾，不靠缓存）。 */
-  private readonly lastSeqByRunId = new Map<string, number>();
-
-  constructor(private readonly dir: string) {}
-
-  /** record 流文件名：<runId>.record.jsonl（runId 自带 wf- 前缀；后缀经 RUN_EVENT_JOURNAL_SUFFIX 单源）。 */
-  private journalPath(runId: string): string {
-    return join(this.dir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
-  }
-
-  async append(runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent> {
-    assertValidRunId(runId);
-    if (!this.dirEnsured) {
-      // 惰性一次：目录缺失自建（recursive 幂等），scan 侧不建目录（只读）
-      mkdirSync(this.dir, { recursive: true });
-      this.dirEnsured = true;
-    }
-    // seq 分配：末水位 + 1。水位未缓存时探测文件（存在则取有效事件最大 seq）
-    // ——同步 readFileSync 与 append 同一取舍（取证证据，append 返回即达页缓存）；
-    // 与 record 侧 FileRecordEventJournal 的分配纪律同构（W1 前存量行无 seq →
-    // maxSeq=0，新行从 1 起号，「带 seq 的行」保持严格递增）。
-    let lastSeq = this.lastSeqByRunId.get(runId);
-    if (lastSeq === undefined) {
-      lastSeq = scanJournalFile(this.journalPath(runId)).maxSeq;
-    }
-    const seq = lastSeq + 1;
-    const full = { ...event, seq } as WorkflowRunEvent;
-    // 为什么同步 append：journal 是取证证据——事件流停止的待恢复判读（run-registry
-    // 投影相）依赖「最后一帧是什么」，批写缓冲随进程死亡丢失的恰好是「死前在做什么」
-    // 的尾部帧；每 run 事件
-    // 数实测 2-20 条（W1 检查点③，2026-09-26，29 个真实 run journal——设计包
-    // w1-run-record-journal-authority/checkpoint-3-retention-sizing.md，原 D5 量级
-    // 推演 200-400/run 已被实测推翻），同步追加的微秒级成本不构成吞吐压力，
-    // 换取「append 返回即达页缓存」的零丢失窗口。接口保持 Promise 形态
-    // （RunEventJournal 契约），实装内同步完成——调用方无需感知。
-    appendFileSync(this.journalPath(runId), `${JSON.stringify(full)}\n`, "utf8");
-    this.lastSeqByRunId.set(runId, seq);
-    return full;
-  }
-
-  async scan(runId: string): Promise<readonly WorkflowRunEvent[]> {
-    assertValidRunId(runId);
-    const { events, malformed } = scanJournalFile(this.journalPath(runId));
-    if (malformed > 0) {
-      journalLogger.warn(
-        `run-event journal scan：跳过 ${malformed} 个坏行（文件=${this.journalPath(runId)}）`,
-        { runId, malformed },
-      );
-    }
-    return events;
-  }
-}
-
 /**
  * 创建文件形态的 run 事件 journal（唯一创建入口）。
+ *
+ * 实装体 = shared 泛型基座（JsonlEventJournal，与 record 事件 journal 单源）；本函数
+ * 只提供 run 域策略：路径（runId 白名单校验 + `.record.jsonl` 后缀）、行校验器
+ *（存量无 seq 行容忍）、warn 标签。无首行头行契约（run 侧文件自带后缀，无需自描述行）。
  *
  * @param dir journal 目录（布局决策归调用方：taiji 布局传 run store 旁的
  *        workflow-state 目录，测试传 mkdtemp 临时目录）。
  */
 export function createRunEventJournal(dir: string): RunEventJournal {
-  return new FileRunEventJournal(dir);
+  return new JsonlEventJournal<WorkflowRunEventInput, WorkflowRunEvent>(dir, {
+    pathFor: (runId) => {
+      assertValidRunId(runId);
+      return join(dir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+    },
+    parseLine: (value) => (isWorkflowRunEventLine(value) ? (value as WorkflowRunEvent) : undefined),
+    withSeq: (event, seq) => ({ ...event, seq }) as WorkflowRunEvent,
+    scanWarn: (filePath, malformed) => `run-event journal scan：跳过 ${malformed} 个坏行（文件=${filePath}）`,
+    warn: (message, detail) => journalLogger.warn(message, detail),
+  });
 }

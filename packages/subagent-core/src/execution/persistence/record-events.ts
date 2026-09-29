@@ -29,10 +29,12 @@
 // tail 增量读取（offset 续读 / 完整行边界 / 坏行宽容）不在本模块——journal-tail.ts
 // 是域无关的 tail 原语层，本模块只提供 parseRecordEventFileLine 行解析器注入。
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
+// [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-journal.ts（与 run journal
+// 共用同一实现体，差异经策略注入——本文件只提供 record 域策略）。
+import { JsonlEventJournal } from "../../shared/jsonl-event-journal.ts";
 import type {
   Epoch,
   ExecutionMode,
@@ -446,100 +448,23 @@ export interface RecordEventJournal { // oe-exempt:20260929:framework:workflow/r
   scan(id: string): Promise<readonly RecordJournalEvent[]>;
 }
 
-function isNodeErrorCode(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === code;
-}
-
-/** 读文件并宽容解析：头行跳过、坏行跳过计数（scan 与 append 的 seq 水位探测共用）。 */
-function scanEventFile(
-  filePath: string,
-): { events: RecordJournalEvent[]; skipped: number; maxSeq: number } {
-  let content: string;
-  try {
-    content = readFileSync(filePath, "utf8");
-  } catch (error) {
-    if (isNodeErrorCode(error, "ENOENT")) return { events: [], skipped: 0, maxSeq: 0 };
-    throw error;
-  }
-  const events: RecordJournalEvent[] = [];
-  let skipped = 0;
-  let maxSeq = 0;
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      skipped += 1;
-      continue;
-    }
-    if (isRecordJournalHeader(parsed)) continue;
-    const event = parseRecordEventLine(parsed);
-    if (event === null) {
-      // 词表外 type（含合法 JSON 但漂移的形态）/信封坏值按坏行跳过——失效模式
-      // 是保守可诊断（跳过 + 计数 + warn），不是炸掉整个投影（run 侧 scan 同款）
-      skipped += 1;
-      continue;
-    }
-    events.push(event);
-    if (event.seq > maxSeq) maxSeq = event.seq;
-  }
-  return { events, skipped, maxSeq };
-}
-
-class FileRecordEventJournal implements RecordEventJournal {
-  private dirEnsured = false;
-  /** id → 已知末 seq（append 分配基数；跨实例正确性靠首 append 探测文件尾，不靠缓存）。 */
-  private readonly lastSeqById = new Map<string, number>();
-
-  constructor(private readonly recordsDir: string) {}
-
-  async append(id: string, event: RecordJournalEventInput): Promise<RecordJournalEvent> {
-    assertValidRecordId(id);
-    if (!this.dirEnsured) {
-      // 惰性一次：目录缺失自建（recursive 幂等），scan 侧不建目录（只读）
-      mkdirSync(this.recordsDir, { recursive: true });
-      this.dirEnsured = true;
-    }
-    const filePath = recordEventsPath(this.recordsDir, id);
-    // seq 分配：末水位 + 1。水位未缓存时探测文件（存在则取有效事件最大 seq）——
-    // 同步 readFileSync 与 run 侧 append 同一取舍（取证证据，append 返回即达页缓存）。
-    let lastSeq = this.lastSeqById.get(id);
-    if (lastSeq === undefined) {
-      lastSeq = scanEventFile(filePath).maxSeq;
-    }
-    const seq = lastSeq + 1;
-    const full = { ...event, seq } as RecordJournalEvent;
-    // 文件不存在 → 先落头行（写侧头行契约：创建时恰一行）。existsSync 每次探测
-    // （微秒级）而非进程内标记——跨 journal 实例（重启后续写）不重写头行。
-    if (!existsSync(filePath)) {
-      appendFileSync(filePath, `${JSON.stringify(toRecordJournalHeader(id))}\n`, "utf8");
-    }
-    appendFileSync(filePath, `${JSON.stringify(full)}\n`, "utf8");
-    this.lastSeqById.set(id, seq);
-    return full;
-  }
-
-  async scan(id: string): Promise<readonly RecordJournalEvent[]> {
-    assertValidRecordId(id);
-    const { events, skipped } = scanEventFile(recordEventsPath(this.recordsDir, id));
-    if (skipped > 0) {
-      journalLogger.warn(
-        `record-event journal scan：跳过 ${skipped} 个坏行（文件=${recordEventsPath(this.recordsDir, id)}）`,
-        { id, skipped },
-      );
-    }
-    return events;
-  }
-}
-
 /**
  * 创建文件形态的 record 事件 journal（唯一创建入口）。
+ *
+ * 实装体 = shared 泛型基座（JsonlEventJournal，与 run journal 单源）；本函数只提供
+ * record 域策略：路径（含 id 白名单校验）、首行头行、行校验器（seq 必填）、warn 标签。
  *
  * @param recordsDir manifest 同款目录（getSubagentRecordsDir 产物；测试传
  *        mkdtemp 临时目录）。
  */
 export function createRecordEventJournal(recordsDir: string): RecordEventJournal {
-  return new FileRecordEventJournal(recordsDir);
+  return new JsonlEventJournal<RecordJournalEventInput, RecordJournalEvent>(recordsDir, {
+    pathFor: (id) => recordEventsPath(recordsDir, id),
+    headerFor: (id) => toRecordJournalHeader(id),
+    isHeader: isRecordJournalHeader,
+    parseLine: (value) => parseRecordEventLine(value) ?? undefined,
+    withSeq: (event, seq) => ({ ...event, seq }) as RecordJournalEvent,
+    scanWarn: (filePath, skipped) => `record-event journal scan：跳过 ${skipped} 个坏行（文件=${filePath}）`,
+    warn: (message, detail) => journalLogger.warn(message, detail),
+  });
 }

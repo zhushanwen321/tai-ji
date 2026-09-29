@@ -178,10 +178,12 @@ const WF_ENTRY_HOST_FILES = new Set([
   "packages/subagent-core/src/orchestration/resume-run.ts",
 ]);
 
-/** R7 白名单：事件文件双写者（record 事件文件 + run journal 的唯一追加入口）。 */
+/** R7 白名单：事件文件追加入口（record 事件文件 + run journal 的唯一写面，经
+ *  shared/jsonl-event-journal.ts 基座落地——§3.1.3 后 append/scan 单源，两域只提供策略）。 */
 const EVENTS_WRITER_FILES = new Set([
   "packages/subagent-core/src/execution/persistence/record-events.ts",
   "packages/subagent-core/src/orchestration/run-events.ts",
+  "packages/subagent-core/src/shared/jsonl-event-journal.ts",
 ]);
 
 /** extension 自有域白名单（R1+R2；相对仓根路径）。当前零命中，新增须注明依据。 */
@@ -296,9 +298,9 @@ function scanWriteLineRules(rel, i, line, lines, flags, violations) {
     if (EVENTS_PATH_LITERAL_RE.test(callWindow(lines, i))) {
       violations.push(
         `${rel}:${i + 1} [R7] 事件文件直写（appendFile×\`.events\`）出现在唯一写者外——` +
-          `run journal 与 record 事件文件的追加原语分别在 run-events.ts / record-events.ts` +
-          `（seq 分配权与头行契约单点）。Recovery: 改经两模块的 journal 追加入口` +
-          `（createRunEventJournal / createRecordEventJournal，ADR-0078）。`,
+          `追加原语单源在 shared/jsonl-event-journal.ts（seq 分配权与头行契约单点），` +
+          `两域策略分别在 run-events.ts / record-events.ts（createRunEventJournal / ` +
+          `createRecordEventJournal，ADR-0078）。Recovery: 改经两个创建入口。`,
       );
       return;
     }
