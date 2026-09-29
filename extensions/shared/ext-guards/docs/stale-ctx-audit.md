@@ -76,7 +76,7 @@
 
 ## 6. P-guard-holds 探针执行记录（pi CLI RPC 实测，⛔ 交付门）
 
-**执行环境**：2026-09-09，本机 pi CLI 0.84.0（RPC 模式；stale 文案与 workspace 实装 0.84.4 一致，已先行核对全局安装的 runner.js :352 invalidate 默认 message）；模型 `xiaomi-token-plan-cn/mimo-v2.5-pro`（真实 LLM）；dev extension 直挂 `extensions/universal/smart-context`；`PI_CODING_AGENT_DIR` 指向 mkdtemp 临时目录（凭据文件复制 + 低阈值配置 `reminderThresholds: [100,200,300]`，对齐 A10 阈值校准法——压缩触发面在测试配置内构造，链路全真实）+ `TAIJI_AGENT_DEBUG=1`；session-dir 为临时目录，实测后整体删除。
+**执行环境**：2026-09-09，本机 pi CLI 0.84.0（RPC 模式；stale 文案与 workspace 实装 0.84.4 一致，已先行核对全局安装的 runner.js :352 invalidate 默认 message）；模型 `<本机可用模型>`（真实 LLM）；dev extension 直挂 `extensions/universal/smart-context`；`PI_CODING_AGENT_DIR` 指向 mkdtemp 临时目录（凭据文件复制 + 低阈值配置 `reminderThresholds: [100,200,300]`，对齐 A10 阈值校准法——压缩触发面在测试配置内构造，链路全真实）+ `TAIJI_AGENT_DEBUG=1`；session-dir 为临时目录，实测后整体删除。
 
 **场景 1（P-guard-holds 主场景，stale）**：stdin JSONL 发 `prompt` → 模型调用 `compact_context`（tool_execution_end isError=false，工具返回「压缩已启动」）→ 3 秒后发 `new_session`（session 替换，runner invalidate）→ 10 秒后发 `get_state`。
 

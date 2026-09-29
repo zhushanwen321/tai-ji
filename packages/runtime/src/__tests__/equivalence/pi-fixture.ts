@@ -58,7 +58,7 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
 /** 低成本测试模型（workspace AGENTS.md pi 实测流程同款，验收契约锁定）。导出供附着恢复用例做 CLI-model 对照断言。 */
-export const DEFAULT_MODEL = 'xiaomi-token-plan-cn/mimo-v2.5-pro'
+export const DEFAULT_MODEL = 'xiaomi-token-plan-cn/mimo-v2.6-flash'
 /** 冷启动就绪等待上限（探针结论中位数 ~500ms，取 10 倍余量） */
 const DEFAULT_COLD_START_TIMEOUT_MS = 5_000
 /** faux 轨冷启动就绪等待下限（jiti 冷编译 extension + 满并行负载余量；见 spawnPiFixture） */

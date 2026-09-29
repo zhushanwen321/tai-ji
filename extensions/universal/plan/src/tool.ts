@@ -153,7 +153,7 @@ function isTaijiHost(): boolean {
 }
 
 /**
- * 重提交无变化警告（E8 机制级兜底）：独立 pi 实测（mimo-v2.5-pro，干净 session × 3）
+ * 重提交无变化警告（E8 机制级兜底）：独立 pi 实测（干净 session × 3）
  * LLM 收到用户修改意见后不 rewrite/re-register 直接重调 submit-review——result 文本
  * 已带的修订闭环指令不足以纠正，升级为确定性检测（docs 快照指纹比对）后逐次警告。
  * 提示词级引导保留：警告行是追加信号，不替换原有闭环指令。

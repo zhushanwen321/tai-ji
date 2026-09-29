@@ -55,7 +55,7 @@ RESULT_FILE=$(mktemp -t scheduler-result-XXXXXX)
 EXIT_CODE=0
 
 # 启动 pi（-ne 不加载已安装扩展，避免与本地 extension 冲突）
-timeout 80 pi --mode rpc -ne --session-dir "$SESSION_DIR" --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension "$EXTENSION_PATH" < "$PI_FIFO" > "$RESULT_FILE" 2>"$RESULT_FILE.stderr" &
+timeout 80 pi --mode rpc -ne --session-dir "$SESSION_DIR" --model xiaomi-token-plan-cn/mimo-v2.6-flash --approve --extension "$EXTENSION_PATH" < "$PI_FIFO" > "$RESULT_FILE" 2>"$RESULT_FILE.stderr" &
 PI_PID=$!
 
 echo "[e2e-s4] pi PID: $PI_PID" >&2

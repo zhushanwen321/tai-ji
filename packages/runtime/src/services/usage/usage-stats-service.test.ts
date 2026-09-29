@@ -764,7 +764,7 @@ describe('UsageStatsService', () => {
   it('④ rename-session custom entry 正常落账（G3）', async () => {
     const content = [
       sessionEntry('/Users/dev/rename-ledger'),
-      renameSessionEntry({ data: { model: 'xiaomi-token-plan-cn/mimo-v2.5', usage: RENAME_USAGE } }),
+      renameSessionEntry({ data: { model: 'xiaomi-token-plan-cn/mimo-v2.6-flash', usage: RENAME_USAGE } }),
     ].join('\n')
     await writeFile(join(tmpDir, 'rename-1.jsonl'), content)
 
@@ -774,7 +774,7 @@ describe('UsageStatsService', () => {
     expect(result.rows).toHaveLength(1)
     const row = result.rows[0]
     expect(row.provider).toBe('rename-session')
-    expect(row.model).toBe('xiaomi-token-plan-cn/mimo-v2.5')
+    expect(row.model).toBe('xiaomi-token-plan-cn/mimo-v2.6-flash')
     expect(row.input).toBe(800)
     expect(row.output).toBe(40)
     expect(row.cacheRead).toBe(20)
@@ -787,7 +787,7 @@ describe('UsageStatsService', () => {
   it('④ usage 有值但 cost 缺失：token 正常、costUSD=$0（诚实降级）', async () => {
     const content = [
       sessionEntry('/Users/dev/rename-nocost'),
-      renameSessionEntry({ data: { model: 'xiaomi-token-plan-cn/mimo-v2.5', usage: RENAME_USAGE_NO_COST } }),
+      renameSessionEntry({ data: { model: 'xiaomi-token-plan-cn/mimo-v2.6-flash', usage: RENAME_USAGE_NO_COST } }),
     ].join('\n')
     await writeFile(join(tmpDir, 'rename-2.jsonl'), content)
 

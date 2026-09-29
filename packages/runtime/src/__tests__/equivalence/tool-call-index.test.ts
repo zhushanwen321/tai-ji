@@ -45,7 +45,7 @@ import type { PiEvent } from '../../infra/pi/pi-protocol.js'
 import { EventInterpreter } from '../../services/session/event-interpreter.js'
 import type { ServerMessage } from '@taiji/shared'
 
-// ── 探针抓包样本（照抄，2026-08-20 /tmp 隔离探针，xiaomi mimo-v2.5-pro）──────────
+// ── 探针抓包样本（照抄，2026-08-20 /tmp 隔离探针）──────────
 // 0.84.1 历史样本（与实装的行为等价性见头部契约漂移注释）：message_update 恒无顶层
 // message；toolcall_start 无 id（0.84.4 起增顶层 id/toolName）；toolcall_end 携带完整
 // toolCall；id 与 tool_execution_start 同值。

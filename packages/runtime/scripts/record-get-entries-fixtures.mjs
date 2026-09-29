@@ -55,7 +55,7 @@ const SESSIONS = [
 const PI_BIN = process.env.TRACE_FIXTURE_PI_BIN
   ?? resolve(RUNTIME_ROOT, '../../../.pi-binary-cache/pi-0.84.1-darwin-arm64/pi-darwin-arm64')
 /** 模型仅满足 pi 启动配置校验（录制全程无 prompt，不产生 LLM 调用）。可用 TRACE_FIXTURE_PI_MODEL 覆盖。 */
-const PI_MODEL = process.env.TRACE_FIXTURE_PI_MODEL ?? 'xiaomi-token-plan-cn/mimo-v2.5-pro'
+const PI_MODEL = process.env.TRACE_FIXTURE_PI_MODEL ?? 'xiaomi-token-plan-cn/mimo-v2.6-flash'
 
 /**
  * 子进程 env：剥离全部 PI_* 运行时变量（本脚本可能在 pi 子进程环境内跑——PI_MODEL/

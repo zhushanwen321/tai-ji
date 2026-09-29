@@ -113,7 +113,7 @@ function makeEngine(
         dynamic: true,
         models: [
           { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
-          { id: "mimo-v2.5-pro", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.5-pro" },
+          { id: "mimo-v2.6-flash", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash" },
         ],
       },
       ...manifestOverrides,
@@ -174,7 +174,7 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
     const listed = makeEngine();
     expect(listed.engine.listModels()).toEqual([
       { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
-      { id: "mimo-v2.5-pro", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.5-pro" },
+      { id: "mimo-v2.6-flash", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash" },
     ]);
     await Promise.all([omitted, nullForm, dynamicEmpty, explicitEmpty, listed].map((f) => f.cleanup()));
   });
@@ -190,8 +190,8 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
     const { engine } = makeEngine();
     expect(engine.validateModel("zai/glm-4.6")).toEqual({ canonicalRef: "zai/glm-4.6" });
     expect(engine.validateModel("glm")).toEqual({ canonicalRef: "zai/glm-4.6" }); // alias
-    expect(engine.validateModel("mimo-v2.5-pro")).toEqual({
-      canonicalRef: "xiaomi-token-plan-cn/mimo-v2.5-pro",
+    expect(engine.validateModel("mimo-v2.6-flash")).toEqual({
+      canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash",
     });
     // dynamic:true：未命中放行、原样 ref（运行期引擎为权威；无斜杠 ref 拆分 = 契约变更④归 W3）
     expect(engine.validateModel("custom/new-model")).toEqual({ canonicalRef: "custom/new-model" });

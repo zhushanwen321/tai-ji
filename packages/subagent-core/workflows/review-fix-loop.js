@@ -255,7 +255,7 @@ const convergeRounds = coerceInt($ARGS.convergeRounds, 2);
 const MODEL = $MODEL;
 // rfl aggregator 降档（tier-1 6.4，T8）：聚合是机械去重/格式化工作，可降档到便宜
 // 模型。模型路由参考全局/项目 AGENTS.md（当前用户全局有条目：
-// xiaomi-token-plan-cn/mimo-v2.5-pro，thinking 开非 max）；无条目请先与主人确认
+// xiaomi-token-plan-cn/mimo-v2.6-flash，thinking 开非 max）；无条目请先与主人确认
 // 并写入 AGENTS.md。缺省回退主模型（行为与现状一致）。
 const AGG_MODEL = resolveAggregatorModel($ARGS.aggregatorModel, MODEL);
 

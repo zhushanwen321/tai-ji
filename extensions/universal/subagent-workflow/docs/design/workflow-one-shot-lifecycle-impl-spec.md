@@ -206,7 +206,7 @@ S3（kill-9 + session 切换完整两路）+ S5 + S6 + S8b（`grep -rn '"paused"
 ```bash
 SESSION_DIR=/tmp/wf-one-shot-$(date +%s)
 TAIJI_AGENT_DEBUG=1 pi --mode rpc --session-dir "$SESSION_DIR" \
-  --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension "$WF"
+  --model <本机可用模型> --approve --extension "$WF"
 # stdin 发 prompt JSONL 驱动主 agent 调 workflow 工具（pi rpc-mode 标准 prompt 命令；
 # 首次执行时把实际 prompt 报文记入验收报告）
 ```

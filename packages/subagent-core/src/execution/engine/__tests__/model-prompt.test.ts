@@ -67,7 +67,7 @@ describe("buildEngineModelsPromptAppend（defaultEngine 开关语义）", () => 
     registerEngine("zcode", () =>
       fakeEngine("zcode", [
         { id: "builtin:bigmodel-coding-plan/GLM-5.3", name: "Z.ai - Coding Plan · GLM-5.3" },
-        { id: "e512/mimo-v2.5-pro" },
+        { id: "e512/mimo-v2.6-flash" },
       ]),
     );
     const append = buildEngineModelsPromptAppend("zcode");
@@ -75,7 +75,7 @@ describe("buildEngineModelsPromptAppend（defaultEngine 开关语义）", () => 
     expect(append).toContain("</available_zcode_models>");
     expect(append).toContain("<id>builtin:bigmodel-coding-plan/GLM-5.3</id>");
     expect(append).toContain("<name>Z.ai - Coding Plan · GLM-5.3</name>");
-    expect(append).toContain("<id>e512/mimo-v2.5-pro</id>");
+    expect(append).toContain("<id>e512/mimo-v2.6-flash</id>");
     // 分界语义：pi 段的 id 不适用于本引擎
     expect(append).toContain("do NOT apply to engine 'zcode'");
   });
