@@ -160,6 +160,20 @@ describe('isDirty 快照矩阵（D13）', () => {
     form.draft.authMethod = undefined
     expect(form.isDirty.value).toBe(false)
   })
+
+  it('clearApiKey 写清除哨兵 → dirty，且 save 走空串清除语义（D18）', async () => {
+    const { form } = mountForm(makeProvider({ kind: 'custom' }))
+    expect(form.isDirty.value).toBe(false)
+
+    form.clearApiKey()
+    // 哨兵进 draft（不是空串——区分「用户未动」与「显式清除」）
+    expect(form.draft.apiKey).toBe(API_KEY_CLEAR_SENTINEL)
+    expect(form.isDirty.value).toBe(true)
+
+    const result = await form.save()
+    expect(result.wroteApiKey).toBe(false)
+    expect(savePayload().apiKey).toBe('')
+  })
 })
 
 describe('save：校验与 apiKey 合并协议（D15b / D18）', () => {

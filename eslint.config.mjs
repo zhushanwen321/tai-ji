@@ -801,12 +801,15 @@ export default [
   // provider-config-helper：provider 配置读改/清洗/凭据应用聚合中心。
   // 写侧防线载体（applyProviderWritePolicy）驻本文件，且后续单元（M2b 的 listProviders 迁移、M4 的 resolveCatalogDisplayFields 改造）
   // 仍会继续追加，故上限抬到 900（先例：download-asset.ts 抬到 1000）。
+  // [gate-suite 2026-09] setProvider 复杂度拆分（新建分支抽 provisionNewProvider，
+  // cyclomatic 16→11）净增 10 有效行（901→910），按 pi-provider-store「微超即提额，
+  // 保留软上限告警」先例抬到 920。
   // 沿用既有「sanitize* 校验组拆分是长期方向，短期 override 与 chat.ts 等聚合中心同模式」表述——
   // 长期仍应拆分（防线载体可拆独立模块）。
   {
     files: ['packages/runtime/src/services/provider-config-helper.ts'],
     rules: {
-      'max-lines': ['warn', { max: 900, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 920, skipBlankLines: true, skipComments: true }],
     },
   },
   // runtime 组合根 main()：装配顺序带文档化时序耦合（函数内注释逐段说明构造先后

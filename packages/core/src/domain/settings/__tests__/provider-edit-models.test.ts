@@ -15,6 +15,7 @@ import {
   toEditableModels,
   buildModelsPayload,
   mergeDiscoveredModels,
+  resolveThinkingMap,
   type LocalModel,
   type ProviderEditModelsModule,
 } from '../provider-edit-models'
@@ -200,6 +201,17 @@ describe('行级 CRUD（toggleInput / updateCtx / removeModel / compat 展开）
     expect(model.input).toEqual(['image'])
   })
 
+  it('toggleNewInput 切换新增表单的输入类型（与行级 toggleInput 同语义，可逆）', () => {
+    const m = mountModels()
+    // 出厂 inputTypes = ['text']
+    m.toggleNewInput('image')
+    expect(m.newModel.inputTypes).toEqual(['text', 'image'])
+    m.toggleNewInput('text')
+    expect(m.newModel.inputTypes).toEqual(['image'])
+    m.toggleNewInput('image')
+    expect(m.newModel.inputTypes).toEqual([])
+  })
+
   it('removeModel 移除指定下标；updateCtx 更新上下文', () => {
     const m = mountModels()
     m.localModels.value = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }]
@@ -271,6 +283,26 @@ describe('D9 思考档位修复（reasoning 显式化 + 预设对齐 pi 过滤�
     expect(m.getStrategyFromMap(undefined)).toBe('all-levels')
     expect(m.getStrategyFromMap({ off: 'off', high: 'high' })).toBe('on-off')
     expect(m.getStrategyFromMap({ off: 'off', high: 'high', max: 'xhigh' })).toBe('high-max')
+    // 有可用档位但不含 high/max（如只开 minimal）→ 兜底 all-levels
+    expect(m.getStrategyFromMap({ off: 'off', minimal: 'minimal' })).toBe('all-levels')
+  })
+
+  it('resolveThinkingMap 正向解析（深拷贝副本）且与 getStrategyFromMap round-trip', () => {
+    expect(resolveThinkingMap('all-levels')).toBeUndefined()
+    expect(resolveThinkingMap('on-off')).toEqual({ off: 'off', high: 'high', minimal: null, low: null, medium: null })
+    expect(resolveThinkingMap('high-max')).toEqual({ off: 'off', high: 'high', max: 'xhigh', minimal: null, low: null, medium: null })
+
+    // 深拷贝：两次 resolve 不共享引用，改一份不影响另一份（防多模型共享 map 引用）
+    const a = resolveThinkingMap('on-off')!
+    const b = resolveThinkingMap('on-off')!
+    expect(a).not.toBe(b)
+    a.off = 'changed'
+    expect(b.off).toBe('off')
+
+    // round-trip：resolve → getStrategyFromMap 反推回原策略（Select 回显链路闭环）
+    const m = mountModels()
+    expect(m.getStrategyFromMap(resolveThinkingMap('on-off'))).toBe('on-off')
+    expect(m.getStrategyFromMap(resolveThinkingMap('high-max'))).toBe('high-max')
   })
 })
 

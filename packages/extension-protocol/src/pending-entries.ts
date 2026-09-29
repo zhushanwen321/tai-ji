@@ -122,38 +122,30 @@ export type MappedPendingStatus =
   | 'time_limited'
   | 'aborted'
 
+/** reason→status 映射表（mapReasonToStatus 唯一数据源）：键集 = 全部已知 reason
+ *  词表；interrupted 三态归 aborted、budget_limited 归 failed、reopened 归 completed、
+ *  notify-once D3 四 reason（stopped→aborted / exited・deleted・orphaned→cancelled，
+ *  词表零扩张）。新 reason 漏登记落下方 default 兜底 completed（防误标 cancelled 同族
+ *  事故先例的防线在测试的键集断言）。 */
+const REASON_STATUS_MAP: Readonly<Record<string, MappedPendingStatus>> = {
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'cancelled',
+  expired: 'expired',
+  time_limited: 'time_limited',
+  budget_limited: 'failed',
+  aborted: 'aborted',
+  interrupted: 'aborted',
+  'interrupted-by-restart': 'aborted',
+  'interrupted-by-parent': 'aborted',
+  reopened: 'completed',
+  stopped: 'aborted',
+  exited: 'cancelled',
+  deleted: 'cancelled',
+  orphaned: 'cancelled',
+}
+
 export function mapReasonToStatus(reason: string): MappedPendingStatus {
-  switch (reason) {
-    case 'completed':
-      return 'completed'
-    case 'failed':
-      return 'failed'
-    case 'cancelled':
-      return 'cancelled'
-    case 'expired':
-      return 'expired'
-    case 'time_limited':
-      return 'time_limited'
-    case 'budget_limited':
-      return 'failed'
-    case 'aborted':
-      return 'aborted'
-    case 'interrupted':
-    case 'interrupted-by-restart':
-    case 'interrupted-by-parent':
-      return 'aborted'
-    case 'reopened':
-      return 'completed'
-    // ── notify-once D3 族映射（4 case，终态子集内映射，词表零扩张）──
-    case 'stopped':
-      // 用户 UI 掐断含债权轮 → 既有终态 aborted（用户干预不取消债权，精确态归正文）
-      return 'aborted'
-    case 'exited':
-    case 'deleted':
-    case 'orphaned':
-      // 终局死亡/删除/orphan 吸收态 → 既有终态 cancelled（防落 default 误标 completed）
-      return 'cancelled'
-    default:
-      return 'completed'
-  }
+  // 未知 reason → completed（与既有 switch default 同义：日终 summary 的兜底口径）
+  return REASON_STATUS_MAP[reason] ?? 'completed'
 }

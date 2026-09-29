@@ -156,6 +156,23 @@ describe('aggregate 聚合边界', () => {
     expect(r.activeDays).toBe(2)
   })
 
+  it('range>0 → 今天往回 range 天完整日历（含无数据日，本地时区），nDays=range', () => {
+    const expected = (offset: number): string => {
+      const d = new Date()
+      d.setDate(d.getDate() - offset)
+      return fmtISO(d)
+    }
+    // 有数日落在窗内（昨天）；今天与前天无数据但仍占日历格
+    const rows = [makeRow({ date: expected(1), model: 'm1' })]
+    const r = aggregate(rows, { ...noFilter(), range: 3 })
+    expect(r.nDays).toBe(3)
+    expect(r.perDay.map((d) => d.dateStr)).toEqual([expected(2), expected(1), expected(0)])
+    // 无数据日也有空聚合格（值 0），有数日计入 activeDays
+    expect(r.activeDays).toBe(1)
+    expect(totalTokens(r.perDay[1].dTot)).toBeGreaterThan(0)
+    expect(totalTokens(r.perDay[0].dTot)).toBe(0)
+  })
+
   it('单日单行 → 该日 provs/dTot 与 tot 一致', () => {
     const rows = [makeRow({ date: '2026-08-01' })]
     const r = aggregate(rows, noFilter())

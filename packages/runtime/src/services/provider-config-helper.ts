@@ -1230,6 +1230,31 @@ function clearGatewayMarker(
 }
 
 /**
+ * 新建 provider 分支（拆分自 setProvider）：边界1 白名单守卫 + coding-plan 额度显示
+ * 自动开启（新增即默认同意，§2.2.1）——写入在返回前完成（toast 只报真实写入）。
+ * 边界1（wave3 TC5 / C2）不受 skipUpsert 影响：catalog 定义在 pi 内置 catalog，无
+ * models.json 条目时 provider 依然存在可用（内置定义 + auth.json 凭据），`<id>/*`
+ * 不是死引用；且守卫幂等（pattern 已存在 no-op），首次配置凭据的 catalog 用户不能因
+ * 「不物化条目」而漏启用。条件/守卫见 quota-auto-enable.ts。
+ */
+async function provisionNewProvider(
+  configStore: IConfigStore,
+  extrasStore: ProviderExtrasAccessors | undefined,
+  credentialWriter: CredentialWriter | undefined,
+  providerId: string,
+  data: SetProviderInput,
+  merged: Record<string, unknown>,
+): Promise<boolean> {
+  configStore.ensureProviderInWhitelist(providerId)
+  return autoEnableQuotaDisplayOnCreate(
+    extrasStore,
+    providerId,
+    resolveCreateMatchIdentity(isCatalogProvider(providerId) ? builtinProvidersById.get(providerId) : undefined, data, merged),
+    isPlaintextCredential(data.apiKey) && (!isCatalogProvider(providerId) || credentialWriter !== undefined),
+  )
+}
+
+/**
  * 新建 / 更新 provider（wave3 边界1 白名单守卫 + I9 auth.json 清理 + catalog 分体系）。
  * 纯函数：configStore / authStorage / extrasStore / credentialWriter 经参数注入
  * （原 ConfigService.setProvider 逐字搬迁）。
@@ -1328,22 +1353,11 @@ export async function setProvider(
   if (!shouldSkipUpsert(skipUpsert, existingConfig)) {
     result = configStore.upsertProvider(providerId, merged)
   }
-  // 边界1（wave3 TC5 / C2）：新建 provider 时若 enabledModels 非空，加 <id>/* 白名单守卫——
-  // 否则在白名单语义下新 provider 默认不启用（与 importer applyImport 的 upsertProvider 后
-  // 守卫对称，共用水台函数 ensureProviderInWhitelist）。**不受 skipUpsert 影响**：catalog
-  // 定义在 pi 内置 catalog，无 models.json 条目时 provider 依然存在可用（内置定义 + auth.json
-  // 凭据），`<id>/*` 不是死引用；且守卫幂等（pattern 已存在 no-op），首次配置凭据的 catalog
-  // 用户不能因「不物化条目」而漏启用。
-  // coding-plan 额度显示自动开启（新增即默认同意，§2.2.1）同锚新建分支：条件/守卫见 quota-auto-enable.ts；写入在返回前完成（toast 只报真实写入）。
+  // 边界1（wave3 TC5 / C2）+ coding-plan 额度显示自动开启：拆分至 provisionNewProvider
+  //（守卫与自动开启的语义/时序契约见其注释——await 在返回前完成，toast 只报真实写入）。
   let quotaAutoEnabled = false
   if (existingConfig === undefined) {
-    configStore.ensureProviderInWhitelist(providerId)
-    quotaAutoEnabled = await autoEnableQuotaDisplayOnCreate(
-      extrasStore,
-      providerId,
-      resolveCreateMatchIdentity(isCatalogProvider(providerId) ? builtinProvidersById.get(providerId) : undefined, data, merged),
-      isPlaintextCredential(data.apiKey) && (!isCatalogProvider(providerId) || credentialWriter !== undefined),
-    )
+    quotaAutoEnabled = await provisionNewProvider(configStore, extrasStore, credentialWriter, providerId, data, merged)
   }
   // 清除网关 = 写序契约第二步：先落 models.json 键删除（已由载体删除）、后清 extras 标记
   // （见 clearGatewayMarker，本调用点在 upsert 之后）。

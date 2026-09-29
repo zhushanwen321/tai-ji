@@ -136,3 +136,21 @@ describe('D8 广播数据源接线（settingsStore.providers → form module 的
     expect(edit.form.draft.name).toBe('') // 保持空
   })
 })
+
+describe('discover 错误通道接线（facade 注入回调 → form.actionError，MF-1-7 source=discover）', () => {
+  it('discover 失败 → reportActionError 写 form.actionError；再次探活成功 → clearActionError 清除', async () => {
+    provideSettingsTransport(makeFakeTransport({
+      discoverModels: async () => ({ success: false, error: 'conn refused' }),
+    }))
+    const edit = mount(ref<ProviderInfo | null>(makeProvider()))
+
+    await edit.discover.autoDiscover()
+    // 错误经 facade 的 reportActionError 回调落 form module（带 source 标签，投影 message）
+    expect(edit.form.actionError.value).toBe('conn refused')
+
+    // 成功探活：runDiscover 开头 clearActionError → 错误投影清除
+    provideSettingsTransport(makeFakeTransport())
+    await edit.discover.testConnection()
+    expect(edit.form.actionError.value).toBe('')
+  })
+})

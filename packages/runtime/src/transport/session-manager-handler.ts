@@ -450,51 +450,11 @@ export class SessionManagerHandler {
     // prompt 注入失败时错误对象携带 sessionId，走外层 catch 的恢复路径）
     // sd-u5：直投不走内核队列（D7 末行——新 session 必 idle 无竞态，port 层同款
     // ensureActive+prompt 直发），失败照旧 throw 维持 create+send 原子性契约。
-    //
-    // notify-once D2 受理点：claim arm 先于 lifetime arm（claim 重复时早抛，不留
-    // 未开表的 lifetime 悬挂）；sendDirect 受理回执（await 成功）即 markInjected
-    //（create 路径直调无 envelope 载体，新 session 必 idle 无 settled 竞态——D2 两路径锚差异）。
-    const claims = this.opts.claims
     const wantsClaim = prompt !== undefined && prompt !== ''
-    const notifyId = params.notifyId
-    let claimArmed = false
-    if (wantsClaim) {
-      if (!isSessionManagerNotifyId(notifyId)) {
-        logNotifyIdAbsence('create')
-      } else if (claims) {
-        const armResult = claims.arm({ parentSid: parentSessionId, notifyId, kind: 'claim', sessionId: session.id })
-        if (!armResult.ok) {
-          throw Object.assign(new Error('duplicate notifyId — claim already armed for this agent session'), {
-            sessionId: session.id,
-          })
-        }
-        claimArmed = true
-      }
-    }
-    const lifetimeNotifyId = `sm-${randomUUID()}`
-    if (claims) {
-      const lt = claims.arm({ parentSid: parentSessionId, notifyId: lifetimeNotifyId, kind: 'lifetime', sessionId: session.id })
-      if (!lt.ok) {
-        // uuid 碰撞理论不可达；防御性回滚已 arm 的 claim，不留下无主记录
-        if (claimArmed && notifyId !== undefined) claims.disarmDeliveryFailed(parentSessionId, notifyId)
-        throw Object.assign(new Error('duplicate lifetime notifyId'), { sessionId: session.id })
-      }
-    }
+    const { claimArmed, lifetimeNotifyId } = this.armCreateClaims(parentSessionId, session.id, wantsClaim, params.notifyId)
 
     if (wantsClaim && typeof prompt === 'string') {
-      try {
-        await this.opts.delivery.sendDirect(session.id, prompt)
-        if (claims && claimArmed && notifyId !== undefined) {
-          claims.markInjected(parentSessionId, notifyId)
-        }
-      } catch (e) {
-        // 原子回滚（D2）：claim 与 lifetime 一并静默 disarm（E7 同族：无 respond、无 undelivered 计数）
-        if (claims) {
-          if (claimArmed && notifyId !== undefined) claims.disarmDeliveryFailed(parentSessionId, notifyId)
-          claims.disarmDeliveryFailed(parentSessionId, lifetimeNotifyId)
-        }
-        throw Object.assign(new Error(toErrorMessage(e)), { sessionId: session.id })
-      }
+      await this.injectInitialPrompt(parentSessionId, session.id, prompt, claimArmed, params.notifyId, lifetimeNotifyId)
     }
 
     // 4. respond
@@ -504,6 +464,79 @@ export class SessionManagerHandler {
       modelId: session.modelId || undefined,
       willNotify: claimArmed,
       lifetimeNotifyId,
+    }
+  }
+
+  /**
+   * notify-once 受理点 arm（create 路径 D2/D5 拆分自 handleCreate 步骤 3 前半）：
+   * - claim：仅 create 携 prompt 时可能产生——notifyId 缺省/畸形 → 不 arm + willNotify:false
+   *   + once 日志（象限2 观测信号）；形态合法但同键重复 → throw（幂等不变量执行点，
+   *   错误对象携 sessionId 走恢复路径）。
+   * - lifetime：claims 在册时无条件 arm（与 claim 双键独立，杜绝撞幂等键），
+   *   `lifetimeNotifyId` 恒随结果返回（claims 缺席 = 停用象限：仍返键但未入册，
+   *   extension 开表将 fail-closed 静默收口）。
+   * - claim arm 先于 lifetime arm（claim 重复时早抛，不留未开表的 lifetime 悬挂）。
+   */
+  private armCreateClaims(
+    parentSessionId: string,
+    sessionId: string,
+    wantsClaim: boolean,
+    notifyId: string | undefined,
+  ): { claimArmed: boolean; lifetimeNotifyId: string } {
+    const claims = this.opts.claims
+    let claimArmed = false
+    if (wantsClaim) {
+      if (!isSessionManagerNotifyId(notifyId)) {
+        logNotifyIdAbsence('create')
+      } else if (claims) {
+        const armResult = claims.arm({ parentSid: parentSessionId, notifyId, kind: 'claim', sessionId })
+        if (!armResult.ok) {
+          throw Object.assign(new Error('duplicate notifyId — claim already armed for this agent session'), {
+            sessionId,
+          })
+        }
+        claimArmed = true
+      }
+    }
+    const lifetimeNotifyId = `sm-${randomUUID()}`
+    if (claims) {
+      const lt = claims.arm({ parentSid: parentSessionId, notifyId: lifetimeNotifyId, kind: 'lifetime', sessionId })
+      if (!lt.ok) {
+        // uuid 碰撞理论不可达；防御性回滚已 arm 的 claim，不留下无主记录
+        if (claimArmed && notifyId !== undefined) claims.disarmDeliveryFailed(parentSessionId, notifyId)
+        throw Object.assign(new Error('duplicate lifetime notifyId'), { sessionId })
+      }
+    }
+    return { claimArmed, lifetimeNotifyId }
+  }
+
+  /**
+   * 初始 prompt 直投（拆分自 handleCreate 步骤 3 后半）：sendDirect 受理回执
+   * （await 成功）即 markInjected（create 路径直调无 envelope 载体，新 session 必
+   * idle 无 settled 竞态——D2 两路径锚差异）。
+   * 原子回滚（D2）：sendDirect throw → claim 与 lifetime 一并静默 disarm（E7 同族：
+   * 无 respond、无 undelivered 计数），错误对象携 sessionId 走外层 catch 的恢复路径。
+   */
+  private async injectInitialPrompt(
+    parentSessionId: string,
+    sessionId: string,
+    prompt: string,
+    claimArmed: boolean,
+    notifyId: string | undefined,
+    lifetimeNotifyId: string,
+  ): Promise<void> {
+    const claims = this.opts.claims
+    try {
+      await this.opts.delivery.sendDirect(sessionId, prompt)
+      if (claims && claimArmed && notifyId !== undefined) {
+        claims.markInjected(parentSessionId, notifyId)
+      }
+    } catch (e) {
+      if (claims) {
+        if (claimArmed && notifyId !== undefined) claims.disarmDeliveryFailed(parentSessionId, notifyId)
+        claims.disarmDeliveryFailed(parentSessionId, lifetimeNotifyId)
+      }
+      throw Object.assign(new Error(toErrorMessage(e)), { sessionId })
     }
   }
 

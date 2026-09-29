@@ -93,6 +93,16 @@ function isOptionalString(v: unknown): boolean {
   return v === undefined || typeof v === 'string'
 }
 
+/** 可选数值字段（watch respond 守卫用）：undefined 放行，present 须为 number */
+function isOptionalNumber(v: unknown): boolean {
+  return v === undefined || typeof v === 'number'
+}
+
+/** 可选数值或显式 null 字段（exitCode：进程未退出时 runtime 供 null） */
+function isOptionalNumberOrNull(v: unknown): boolean {
+  return v === undefined || v === null || typeof v === 'number'
+}
+
 /**
  * notifyId 形态入站自检（notify-once D2/D6，廉价防御级校验）——协议面单一权威：
  * extension 侧 `crypto.randomUUID()` 前缀 `sm-` 生成、runtime 生成的 `lifetimeNotifyId`
@@ -320,13 +330,13 @@ export function isSessionManagerWatchRespondPayload(
 ): v is SessionManagerWatchRespondPayload {
   if (!isRecord(v)) return false
   if (typeof v.reason !== 'string' || !WATCH_REASON_SET.has(v.reason)) return false
-  if (v.sessionId !== undefined && typeof v.sessionId !== 'string') return false
-  if (v.deathSeq !== undefined && typeof v.deathSeq !== 'number') return false
-  if (v.settleSeq !== undefined && typeof v.settleSeq !== 'number') return false
-  if (v.fulfillsN !== undefined && typeof v.fulfillsN !== 'number') return false
-  if (v.exitCode !== undefined && v.exitCode !== null && typeof v.exitCode !== 'number') return false
-  if (v.stderrTail !== undefined && typeof v.stderrTail !== 'string') return false
-  if (v.sessionFilePath !== undefined && typeof v.sessionFilePath !== 'string') return false
+  if (!isOptionalString(v.sessionId)) return false
+  if (!isOptionalNumber(v.deathSeq)) return false
+  if (!isOptionalNumber(v.settleSeq)) return false
+  if (!isOptionalNumber(v.fulfillsN)) return false
+  if (!isOptionalNumberOrNull(v.exitCode)) return false
+  if (!isOptionalString(v.stderrTail)) return false
+  if (!isOptionalString(v.sessionFilePath)) return false
   return true
 }
 

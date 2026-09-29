@@ -15,7 +15,7 @@ import {
 } from '../transport'
 import { makeFakeTransport } from './helpers/fake-transport'
 import { createSettingsStore, getSettingsStore, provideSettingsStore } from '../settings-store'
-import { createSettingsLifecycle } from '../settings-lifecycle'
+import { createSettingsLifecycle, useSettings } from '../settings-lifecycle'
 import { InMemoryStorage } from './helpers/in-memory-storage'
 import { SYSTEM_KEY } from '../system-storage'
 import type { ProviderInfo, SkillInfo, AgentInfo, ExtensionInfo } from '@taiji/shared'
@@ -360,5 +360,17 @@ describe('A4: onProviders 推送 scopedModels 时 store 更新', () => {
     // 再推一次不带 scopedModels（undefined）→ 不覆盖
     handlers.providers([], undefined)
     expect(store.scopedModels.value).toEqual(['openai/gpt-4o'])
+  })
+})
+
+describe('useSettings 模块级单例', () => {
+  it('返回 defaultLifecycle（同一引用，消费方共享订阅生命周期入口）', () => {
+    // 单例语义：多次调用同一引用（renderer 原 useSettings 语义保持）
+    expect(useSettings()).toBe(useSettings())
+    // 形状：订阅生命周期方法齐备
+    const lifecycle = useSettings()
+    expect(typeof lifecycle.init).toBe('function')
+    expect(typeof lifecycle.refreshProviders).toBe('function')
+    expect(typeof lifecycle.dispose).toBe('function')
   })
 })
