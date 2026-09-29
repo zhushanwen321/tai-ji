@@ -156,6 +156,7 @@ const gates: { coverage: string | null; metrics: string | null; premerge: string
 let prUrl: string | null = null;
 let crFixTerminated: string | null = null;
 let simplifySummary: string | null = null;
+let sweptFiles: string[] = [];
 let failure: { step: string; error: string } | null = null;
 // 当前分支名仅作披露（PR 规模展示等），不参与任何行为分流——流程不按分支名做决策
 let crFixBranch = "";
@@ -173,7 +174,16 @@ function tailLines(text: string, n: number): string {
 
 // porcelain 过滤 .review/（脚本自持目录，gitignore 假设与 zsw 版一致——未 gitignore 的仓
 // 里脚本写产物会自挡干净检查，结构性排除语义只强不弱）
-async function dirtyWorktree(): Promise<string> {
+// porcelain 行 → 路径：rename 行（R  old -> new）取新路径——slice(3) 拿到的是 "old -> new"，
+// 不剥箭头会让「rename 进 .review/」的行漏过滤；过滤与终态清扫取路径共用（pi 版同构同步）
+function porcelainPath(line: string): string {
+  let p = line.slice(3).trim().replace(/^"|"$/g, "");
+  const arrow = p.indexOf(" -> ");
+  if (arrow >= 0) p = p.slice(arrow + 4).trim().replace(/^"|"$/g, "");
+  return p;
+}
+
+async function dirtyLines(): Promise<string[]> {
   const st = await world.run("git", ["status", "--porcelain"]);
   if (st.exitCode !== 0) {
     // 工具错误单独分流（不折叠成「存在未提交改动」误导恢复指引）
@@ -183,15 +193,32 @@ async function dirtyWorktree(): Promise<string> {
     .split("\n")
     .map((s) => s.trimEnd())
     .filter(Boolean)
-    // rename 行（R  old -> new）：过滤判据看新路径——slice(3) 拿到的是 "old -> new"，
-    // 不剥箭头会让「rename 进 .review/」的行漏过滤（pi 版同构同步）
     .filter((line) => {
-      let p = line.slice(3).trim().replace(/^"|"$/g, "");
-      const arrow = p.indexOf(" -> ");
-      if (arrow >= 0) p = p.slice(arrow + 4).trim().replace(/^"|"$/g, "");
+      const p = porcelainPath(line);
       return !p.startsWith(".review/") && !p.startsWith(".tmp/");
-    })
-    .join("\n");
+    });
+}
+
+async function dirtyWorktree(): Promise<string> {
+  return (await dirtyLines()).join("\n");
+}
+
+// 终态清扫（2026-09-30 轻量裁决）：流程不因未提交改动中途停机，唯一硬保证 = 终态把全部
+// 残留显式路径提交、随 push 推出；清单记入 sweptFiles 随终态披露，push 授权即否决点
+async function sweepResidualChanges(): Promise<string[]> {
+  const lines = await dirtyLines();
+  if (lines.length === 0) return [];
+  const paths = lines.map(porcelainPath);
+  const add = await world.run("git", ["add", "--", ...paths]);
+  if (add.exitCode !== 0) {
+    throw new Error(`终态清扫 git add 失败（exit ${add.exitCode}）：${add.stderr.trim() || add.stdout.trim()}；人工 commit 后重新发起`);
+  }
+  const cm = await world.run("git", ["commit", "-m", `chore: prl end-of-run sweep (${paths.length} files)`]);
+  if (cm.exitCode !== 0) {
+    throw new Error(`终态清扫 commit 失败（exit ${cm.exitCode}）：${cm.stderr.trim() || cm.stdout.trim()}；人工 commit 后重新发起`);
+  }
+  log(`[sweep] 终态清扫提交 ${paths.length} 个残留文件（将随 push 推出）：\n${paths.join("\n")}`);
+  return paths;
 }
 
 async function writeViaNode(path: string, body: string): Promise<void> {
@@ -240,7 +267,8 @@ async function step<T>(id: string, fn: () => Promise<T>): Promise<T | null> {
 }
 
 // ── gate 修复子循环（同 zsw 版 gateFixLoop：3 轮上限；exit 2 工具错误不重试；
-//    失败轮派 fix agent 修完自行 commit；agent 返回后 porcelain 非空即止损失败） ──
+//    失败轮派 fix agent 修完自行 commit；agent 返回后若有未提交改动只记 log——
+//    轻量裁决不停机，残留随终态清扫统一提交） ──
 async function gateFixLoop<R>(
   stepId: string,
   gateName: string,
@@ -277,9 +305,7 @@ async function gateFixLoop<R>(
     );
     const dirt = await dirtyWorktree();
     if (dirt !== "") {
-      throw new Error(
-        `fix agent 返回后存在未提交改动（第 1 次止损，不烧后续轮次）：\n${dirt}\n人工检查后显式路径 commit 或 checkout 还原，再重新发起本 workflow`,
-      );
+      log(`[gate-fix:${stepId}] agent 返回后存在未提交改动（轻量模式不停机，随终态清扫提交）：\n${dirt}`);
     }
   }
   throw new Error(
@@ -1148,7 +1174,7 @@ if (baseLockRes.exitCode !== 0 || baseLockRes.stdout.trim() === "") {
 const baseHash = baseLockRes.stdout.trim();
 
 // ── cr-fix 维度集判定（与 SKILL.md「审查维度集」节同规则；preflight step 落定） ──
-// step 1：preflight（仓库根 / 工作区干净 / base..HEAD 非空 / gh 认证 / fallow 可用）
+// step 1：preflight（仓库根 / 工作区残留披露 / base..HEAD 非空 / gh 认证 / fallow 可用）
 await step("preflight", async () => {
   const failures: string[] = [];
   // 仓库根守卫（对齐 zsw 版 Gate B S1）：workspace 非仓库根时后续全部相对路径脚本
@@ -1157,7 +1183,7 @@ await step("preflight", async () => {
     failures.push("当前 workspace 不是本仓库根（scripts/pr-pre-merge.sh 不存在）；CreateWorkflow 须在仓库根（git rev-parse --show-toplevel）发起");
   }
   const dirt = await dirtyWorktree();
-  if (dirt !== "") failures.push(`存在未提交改动：\n${dirt}\n若为中断残留，人工检查后显式路径 commit 或 git checkout -- <路径> 还原后重新发起`);
+  if (dirt !== "") log(`[preflight] 工作区存在未提交改动（轻量模式不拦截，将随终态清扫提交并披露）：\n${dirt}`);
   const commits = await world.run("git", ["log", `${baseHash}..HEAD`, "--oneline"]);
   if (commits.exitCode !== 0) failures.push(`git log ${baseHash}..HEAD 失败：${commits.stderr.trim()}`);
   else if (!commits.stdout.trim()) failures.push(`分支相对 base ${base} 无 commits；确认当前分支正确，或先 commit 后重新发起`);
@@ -1491,9 +1517,7 @@ await step("gate-suite", async () => {
       ].join("\n"),
     );
     const dirt = await dirtyWorktree();
-    if (dirt !== "") {
-      throw new Error(`gate-suite 修复 agent 返回后存在未提交改动（第 1 次止损，不烧后续轮次）：\n${dirt}\n人工检查后显式路径 commit 或 checkout 还原，再重新发起本 workflow`);
-    }
+    if (dirt !== "") log(`[gate-suite] 修复 agent 返回后存在未提交改动（轻量模式不停机，随终态清扫提交）：\n${dirt}`);
   }
   throw new Error(`gate-suite（coverage + metrics 聚合）经 ${GATE_SUITE_ROUNDS} 轮修复仍未通过。处置：人工修复并 commit 后重新发起本 workflow（gate 面对已 commit 的改动正常判定）`);
 });
@@ -1538,15 +1562,11 @@ await step("cr-fix", async () => {
     }
     if (CR_FIX_RETRY_TERMINATED.has(last.terminated)) {
       if (attempt < CR_FIX_MAX_ATTEMPTS) {
-        // 止损守卫（对齐 gateFixLoop/simplify 的 agent 返回后 porcelain 检查）：fix-failure
-        // 的三个来源（ES3 违规 / 统一 commit 失败 / 批中途 throw）都可能留下未提交的半成品
-        // 编辑——本轮 reviewer 只审已提交改动 + 双路降级路径，残留直接重试会被 attempt 2 的
-        // 统一 commit 一并 stage（未经审查）。脏区不自动重试，failed 交人工盘点。
+        // 轻量裁决（2026-09-30）：残留编辑不再阻止重试——半成品编辑留工作区随 attempt 2
+        // 继续，终不可收的残留由终态清扫统一提交并在 sweptFiles 披露
         const dirt = await dirtyWorktree();
         if (dirt !== "") {
-          throw new Error(
-            `cr-fix 终态 ${last.terminated}（第 ${attempt} 次发起）且工作区存在未提交改动——不自动重试（attempt 2 会把未经审查的残留一并 commit）：\n${dirt}\n人工盘点后显式路径 commit 或还原，再重新发起本 workflow（cr-fix 整体重跑）`,
-          );
+          log(`[cr-fix] nested loop ${last.terminated} 且工作区有未提交残留（轻量模式不拦截，随终态清扫提交）：\n${dirt}`);
         }
         log(`[cr-fix] nested loop ${last.terminated}（第 ${attempt} 次发起），自动重试 1 次`);
         continue;
@@ -1640,9 +1660,8 @@ await step("simplify", async () => {
   const applied = apply ? v.applied : 0;
   const dirt = await dirtyWorktree();
   if (dirt !== "") {
-    throw new Error(
-      `simplify agent 返回后存在未提交改动（agent 声称 applied=${applied}）：\n${dirt}\n` +
-      `${applied > 0 ? "agent 声称已应用但未 commit = 半成品" : "agent 违规改动代码（无应用授权却留下改动），或为更早 step 的降级残留（fix 未申报 affectedFiles / git add 全失败时改动留工作区）"}；查看 ${reportPath} 后人工处置（显式路径 commit 或还原），再重新发起或带 skipSteps 含 "simplify" 接管`,
+    log(
+      `[simplify] agent 返回后存在未提交改动（轻量模式不停机，随终态清扫提交；agent 声称 applied=${applied}）：\n${dirt}`,
     );
   }
   if (!(await existsViaNode(reportPath))) {
@@ -1697,11 +1716,9 @@ await step("final-gates", async () => {
     async () => `${await coverageFixContext(false)}\n注：本 step 三动作（coverage → metrics → pre-merge --test-result）每轮从 ① 头部重跑。`,
   );
   void out;
-  // 收尾防线：step 完成前最后一次 porcelain——防「修复改动未 commit → 读数假绿 → push 后修复静默丢失」
-  const dirt = await dirtyWorktree();
-  if (dirt !== "") {
-    throw new Error(`final-gates 收尾防线：存在未提交改动，修复可能静默丢失：\n${dirt}\n经 git add <显式路径> && git commit 落盘后重新发起`);
-  }
+  // 终态清扫（2026-09-30 轻量裁决）：唯一提交保证点——把所有残留显式路径提交，使 HEAD ==
+  // 门禁刚验证过的工作树（push 推出的就是门禁验证的字节）；清单进 sweptFiles 随终态披露
+  sweptFiles = await sweepResidualChanges();
   // e2e 影响面披露（非门禁）：PR/merge 门禁不跑真实 LLM e2e，披露只保证「哪些 e2e 面被
   // 本次改动触及、由开发阶段承接」对用户可见；脚本失败仅记 WARN 不阻塞
   const e2e = await world.run("node", ["scripts/select-affected-e2e.mjs", "--base", base]);
@@ -1723,7 +1740,7 @@ const summaryLines = [
   "",
   fail
     ? `- failedStep: **${fail.step}**${prUrl ? `\n- prUrl: ${prUrl}（PR 已开，处置后重跑 pr-submit 幂等更新）` : ""}`
-    : `- prUrl: ${prUrl ?? "（未知）"}\n- cr-fix: ${crFixTerminated ?? "（未执行）"}\n- simplify: ${simplifySummary ?? "（未执行）"}\n- gates: coverage=${gates.coverage} / metrics=${gates.metrics} / premerge=${gates.premerge}`,
+    : `- prUrl: ${prUrl ?? "（未知）"}\n- cr-fix: ${crFixTerminated ?? "（未执行）"}\n- simplify: ${simplifySummary ?? "（未执行）"}\n- gates: coverage=${gates.coverage} / metrics=${gates.metrics} / premerge=${gates.premerge}\n- sweptFiles: ${sweptFiles.length > 0 ? `${sweptFiles.length} 项（终态清扫已提交，随 push 推出）` : "无"}`,
   skippedSteps.length ? `- skippedSteps:\n${skippedSteps.map((s) => `  - ${s.step}: ${s.reason}`).join("\n")}` : "- skippedSteps: 无",
   reviewModeNote ? `- review 判定: ${reviewModeNote}` : "- review 判定: （cr-fix 无判定披露——step 被 skipSteps 接管或未产出）",
   fail ? `\n> ${fail.error}` : "\n> push 需用户授权：主 agent 披露上述结果并请求授权后执行 `git push github HEAD:<branch> --force-with-lease`",
@@ -1755,7 +1772,8 @@ return {
   terminated: crFixTerminated,
   simplify: simplifySummary,
   gates,
+  sweptFiles,
   skippedSteps,
   review: reviewModeNote,
-  nextAction: "逐项披露 skippedSteps / review 判定与 gates 后请求用户 push 授权；push 命令恒 git push github HEAD:<branch> --force-with-lease，push 后验证 git rev-parse HEAD github/<branch> 一致",
+  nextAction: "逐项披露 skippedSteps / review 判定 / gates 与 sweptFiles（终态清扫清单——push 授权即对其内容的否决点）后请求用户 push 授权；push 命令恒 git push github HEAD:<branch> --force-with-lease，push 后验证 git rev-parse HEAD github/<branch> 一致",
 };
