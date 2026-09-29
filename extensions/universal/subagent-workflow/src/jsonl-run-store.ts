@@ -221,7 +221,9 @@ function readRecordStream(recordPath: string): WorkflowRunEvent[] {
       throw corruption(`词表外事件 type=${JSON.stringify(event.type)}（旧词表历史行——[D1] 不读旧两件）`);
     }
     if (event.type === "run-settled" || event.type === "agent-settled") {
-      const outcome = (parsed as { outcome?: unknown }).outcome;
+      // event 已窄化为 RunSettledEvent | AgentSettledEvent（两成员 outcome 均必填）；
+      // !== undefined 防御保留——旧格式历史行可能缺字段（读取面放行，词表判据兜底）。
+      const outcome = event.outcome;
       if (outcome !== undefined && !(ALL_RUN_OUTCOMES as readonly string[]).includes(outcome as string)) {
         throw corruption(`词表外 outcome=${JSON.stringify(outcome)}（[D2] 词表重构后的历史形态——interrupted 已入 lifecycle）`);
       }
@@ -303,7 +305,7 @@ interface CallDraft {
  * argsSummary → args 尽力恢复（旧格式帧回落通道，core resume-run.parseArgsSummary
  * 同款语义）：现行写入面 run-created 帧携带 args 全文（上方优先消费）；本函数只
  * 服务旧格式帧——未截断摘要可完整恢复，截断/不可解析回落 {}（旧格式流的 $ARGS
- * 语义限制，静默回落对齐 core 侧「尽力恢复」处置）。
+ * 语义限制，回落处置对齐 core 侧「尽力恢复」——core 同款分支 warn 留证，非静默）。
  */
 function parseLegacyArgsSummary(argsSummary: string | undefined): Record<string, unknown> {
   if (argsSummary === undefined || argsSummary === "" || argsSummary.endsWith("…")) return {};
@@ -312,8 +314,12 @@ function parseLegacyArgsSummary(argsSummary: string | undefined): Record<string,
     if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
-  } catch {
-    // fallthrough：不可解析回落 {}
+  } catch (err) {
+    // 回落 {} 不变（$ARGS 语义限制），warn 留证旧格式数据异常（对齐 core
+    // parseArgsSummary 同分支的日志级别）
+    logger.warn(
+      `[subagent-workflow] legacy run-created argsSummary is not parseable JSON — $ARGS restored as {} (${toErrorMessage(err)})`,
+    );
   }
   return {};
 }

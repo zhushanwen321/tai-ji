@@ -166,6 +166,21 @@ function isEnoent(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as NodeJS.ErrnoException).code === "ENOENT";
 }
 
+/** workflow custom entry 的最小消费视图（宽容扫描用）：customType 保持 unknown
+ *  （值域分流在调用方），data 已过对象校验（字段级读取仍走 unknown 判型）。 */
+interface WorkflowCustomEntryView {
+  customType: unknown;
+  data: Record<string, unknown>;
+}
+
+/** [extractRunReferencesFromLine 守卫] 是否为 data 载荷成形的 workflow custom
+ *  entry（type=custom 且 data 为对象；customType 免判型——分流在调用方）。 */
+function isWorkflowCustomEntry(v: unknown): v is WorkflowCustomEntryView {
+  if (typeof v !== "object" || v === null) return false;
+  const rec = v as Record<string, unknown>;
+  return rec.type === "custom" && typeof rec.data === "object" && rec.data !== null;
+}
+
 function extractRunReferencesFromLine(line: string, out: Set<string>): void {
   const trimmed = line.trim();
   if (trimmed === "" || !trimmed.includes("workflow")) return; // 行级预过滤
@@ -175,15 +190,11 @@ function extractRunReferencesFromLine(line: string, out: Set<string>): void {
   } catch {
     return;
   }
-  if (typeof parsed !== "object" || parsed === null) return;
-  const entry = parsed as { type?: unknown; customType?: unknown; data?: unknown };
-  if (entry.type !== "custom") return;
-  const data = entry.data;
-  if (typeof data !== "object" || data === null) return;
-  const d = data as { v?: unknown; kind?: unknown; runId?: unknown; snapshot?: unknown };
-  if (entry.customType === "workflow-record") {
+  if (!isWorkflowCustomEntry(parsed)) return;
+  const d: Record<string, unknown> = parsed.data;
+  if (parsed.customType === "workflow-record") {
     extractWorkflowRecordRunReference(d, out);
-  } else if (entry.customType === "workflow-state-link") {
+  } else if (parsed.customType === "workflow-state-link") {
     if (typeof d.runId === "string" && d.runId !== "") out.add(d.runId);
   }
 }
@@ -191,13 +202,13 @@ function extractRunReferencesFromLine(line: string, out: Set<string>): void {
 /** [extractRunReferencesFromLine 拆分] workflow-record 条目两代引用提取
  * （v2 registered 的 runId / v1 快照内 runId）。 */
 function extractWorkflowRecordRunReference(
-  d: { v?: unknown; kind?: unknown; runId?: unknown; snapshot?: unknown },
+  d: Record<string, unknown>,
   out: Set<string>,
 ): void {
   if (d.kind === "registered" && typeof d.runId === "string" && d.runId !== "") {
     out.add(d.runId);
   } else if (d.v === 1 && typeof d.snapshot === "object" && d.snapshot !== null) {
-    const snapRunId = (d.snapshot as { runId?: unknown }).runId;
+    const snapRunId: unknown = (d.snapshot as Record<string, unknown>).runId;
     if (typeof snapRunId === "string" && snapRunId !== "") out.add(snapRunId);
   }
 }
@@ -674,8 +685,15 @@ async function runProcessLevelMaintenance(
             stateDirs.add(path.join(agentDir, "sessions", ent.name, STATE_DIR_NAME));
           }
         }
-      } catch {
-        // sessions 根不存在 = 从未落盘（首次运行形态），仅保留上方两目录锚
+      } catch (err) {
+        // sessions 根不可枚举：ENOENT = 从未落盘（首次运行形态），仅保留上方两
+        // 目录锚；非 ENOENT（EACCES/EIO 等真 IO 故障）debug 留痕不放大——枚举
+        // 缺侧 = 少扫目录（宁保留方向，宽限窗兜底），对齐读错分通道纪律。
+        if (!isEnoent(err)) {
+          logger.debug(
+            `[subagent-workflow] sessions 根目录枚举失败，state 目录触发面缺侧：${toErrorMessage(err)}`,
+          );
+        }
       }
       // 引用集惰性单次采集（同轮同快照，逐目录重复全池扫描无增益）：promise 在
       // core reapOrphanRuns 的 await 表达式内才创建——采集器上抛（真 IO 故障，

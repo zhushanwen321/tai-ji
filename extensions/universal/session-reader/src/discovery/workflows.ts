@@ -262,6 +262,26 @@ function isNewRecordStreamAnchor(journalPath: string): boolean {
   return journalPath.endsWith(RUN_RECORD_STREAM_SUFFIX)
 }
 
+/** agent-settled 帧的最小消费视图（record 流宽容解析只消费 taskIndex 与
+ *  result.sessionFile 两字段，其余载荷不读取）。 */
+interface AgentSettledSessionFileView {
+  taskIndex: number
+  result: { sessionFile: string }
+}
+
+/** [extractRecordStreamSessionFiles 守卫] 单帧是否为携带非空 result.sessionFile
+ *  的 agent-settled 帧：逐字段 typeof 校验（type → taskIndex → result →
+ *  sessionFile），不过关 = 宽容跳过（与 readRunSnapshot 同容忍度）。 */
+function isAgentSettledSessionFileFrame(v: unknown): v is AgentSettledSessionFileView {
+  if (typeof v !== 'object' || v === null) return false
+  const rec = v as Record<string, unknown>
+  if (rec.type !== 'agent-settled' || typeof rec.taskIndex !== 'number') return false
+  const result: unknown = rec.result
+  if (typeof result !== 'object' || result === null) return false
+  const sessionFile: unknown = (result as Record<string, unknown>).sessionFile
+  return typeof sessionFile === 'string' && sessionFile !== ''
+}
+
 /**
  * [D16③] record 事件流 → calls 的 sessionFile 绝对路径数组：逐行宽容解析
  * （跳过坏行/空行——与 readRunSnapshot 同容忍度），agent-settled 帧（含
@@ -279,15 +299,8 @@ export function extractRecordStreamSessionFiles(content: string): string[] {
     } catch {
       continue // 坏行（截断行）跳过
     }
-    if (typeof parsed !== 'object' || parsed === null) continue
-    const rec = parsed as { type?: unknown; taskIndex?: unknown; result?: unknown }
-    if (rec.type !== 'agent-settled' || typeof rec.taskIndex !== 'number') continue
-    const result = rec.result
-    if (typeof result !== 'object' || result === null) continue
-    const sessionFile = (result as { sessionFile?: unknown }).sessionFile
-    if (typeof sessionFile === 'string' && sessionFile !== '') {
-      byIndex.set(rec.taskIndex, sessionFile)
-    }
+    if (!isAgentSettledSessionFileFrame(parsed)) continue
+    byIndex.set(parsed.taskIndex, parsed.result.sessionFile)
   }
   return [...byIndex.entries()].sort((a, b) => a[0] - b[0]).map(([, sf]) => sf)
 }
