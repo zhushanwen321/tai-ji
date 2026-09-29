@@ -17,9 +17,11 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const scriptDir = dirname(fileURLToPath(import.meta.url));
-// scripts → merge → skills → .agents → repo root（4 级）
-const repoRoot = resolve(scriptDir, '../../../..');
+// 目标 worktree 锚定：merge skill 恒从目标 worktree 根 cwd 调用本脚本
+// （`cd $WS_ROOT/main && node .agents/...`）。不可从脚本自身路径推导——.agents
+// 实体在 workspace 根、worktree 内是 symlink，import.meta.url 解析到实体后
+// 固定层数回退落在 workspace 根而非目标 worktree（ADR-0074 布局漂移实测）。
+const repoRoot = process.cwd();
 const README_FILES = ['README.md', 'README_EN.md'];
 
 const BEGIN = '<!-- INSTALL:BEGIN -->';
