@@ -569,7 +569,8 @@ export function setupWorkflowDomain(
     // H-5: 遍历所有 sessionState 条目清理（而不只 lastSessionId——
     // 防御 session 切换但 session_tree 未先触发导致 lastSessionId 指向已删除 session 的情况）。
     for (const [sessionId, state] of sessionState) {
-      // 编排顺序（W2C5）：terminate（await，failed 落盘——重启后 kill-9 恢复不误判）
+      // 编排顺序（W2C5）：terminate（await，[D11] 中断转移落 record——run 停
+      // interrupted 暂停态可再 resume）
       // → store.dispose（await，刷 pending 去抖批 + await in-flight 链，关「shutdown
       // 时刻 pending 去抖写丢失」窗口）→ delete。terminate 的 running 过滤在 helper
       // 内部（单 run 失败不中断其余）；外层 try/catch 兜底防单 session 异常中断后续
@@ -577,8 +578,8 @@ export function setupWorkflowDomain(
       try {
         await terminateRunningRuns(makeDeps(state), "Session shutdown: run terminated");
       } catch (err) {
-        // 外层兜底（正常路径 helper 内部已自过滤单 run 失败）——error 级：终态落盘
-        // 失败意味着重启后 kill-9 恢复的输入缺失，必须可见。
+        // 外层兜底（正常路径 helper 内部已自过滤单 run 失败）——error 级：中断转移
+        // 落账失败意味着重启后收编链的输入缺失（该 run 仍呈 running 活体投影），必须可见。
         bestEffort(err, "terminateRunningRuns (session_shutdown handler)", "error");
       }
       // dispose 自身恒 resolve，catch 兜底防御——handler 内抛错会中断后续 session

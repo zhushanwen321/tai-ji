@@ -8,8 +8,8 @@
 //   ② D4 接管：adoption 后 sessionState.get(sid) 与 reload 前同一引用（store/runs
 //      不换实例）、ctx 换新、rebind 后 appendEntry 走新 pi；
 //   ③ D4 失败处置（顺序敏感 r4）：健康检查不过 → rebind-first 后 terminate 的
-//      failed entry 落新 pi 权威 JSONL + notifyDone 用户可见（sendMessage
-//      workflow-result）+ sessionState 条目移除 + 全量装配兜底。
+//      中断条目（status "interrupted"）落新 pi 权威 JSONL（workflow 列表「已中断
+//      （可续跑）」可见性载体）+ sessionState 条目移除 + 全量装配兜底。
 //
 // store 本体面（rebind 补写 / 投影重发保序 / stale guard 直测）归属
 // jsonl-run-store-session-file.test.ts（测试审计裁决：被测对象是 JsonlRunStore
@@ -256,7 +256,7 @@ describe("D4 恢复门控：session_start(reason=reload) 不跑 kill-9 恢复", 
     expect(result.runs.size).toBe(0);
   });
 
-  it("非 reload（startup）：现状恢复语义保持（磁盘 running entry 转 failed）——门控是 reason 驱动", async () => {
+  it("非 reload（startup）：磁盘 running entry 走中断收编（run-interrupted，非 done,failed）——门控是 reason 驱动", async () => {
     const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const diskRun = makeRun("wf-gate-3", "running");
     const deps = makeSeamDeps({
@@ -366,7 +366,7 @@ describe("D4 接管：同引用接管 + ctx 换新", () => {
 
 // ── ③ D4 adoption 失败处置：rebind-first 终态完整性 + 用户可见 + 条目移除 ────────
 
-describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移除条目 → 全量装配兜底", () => {
+describe("D4 失败处置：rebind-first → terminate 中断转移 → 移除条目 → 全量装配兜底", () => {
   it("seam 级：rebind 抛错 → rebind-first 兜底再试 + onAdoptionFailed 触发（terminate+移除注入回调）", async () => {
     const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const run = makeRun("wf-fail-seam", "running");

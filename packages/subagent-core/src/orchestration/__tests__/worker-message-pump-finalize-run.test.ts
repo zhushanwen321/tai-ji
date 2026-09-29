@@ -5,7 +5,7 @@
  * 序列的唯一定义点（worker-message-pump.ts）。收敛前 8 处逐字复制（本文件 6 处 +
  * lifecycle 2 处）——本文件锁定：
  * 1. 四步恰好一次且有序（transition 先于 save 先于直落先于 onRunDone）
- * 2. notifyDone:false 真差异承载（terminateRunningRuns 不发 onRunDone、直落仍发）
+ * 2. notifyDone:false 真差异承载（finalizeRun 的 notifyDone 参数语义：false 时不调 onRunDone、直落 unregister 仍发）
  * 3. transition 让位（并发终态化）→ 后三步全不执行
  * 4. save best-effort（SW-DATA-3）→ 直落/onRunDone 不被落盘失败短路
  * 5. [reload-closeout D4] 直落 entry 三字段（id/reason/status∈mapReasonToStatus
@@ -225,7 +225,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     expect(appendedUnregister(deps)?.data).toMatchObject({ id: "wf-fin-noemit" });
   });
 
-  it("notifyDone:false → onRunDone 不调、直落仍发（terminateRunningRuns 真差异经参数承载）", async () => {
+  it("notifyDone:false → onRunDone 不调、直落仍发（finalizeRun 参数语义锁）", async () => {
     const run = makeRealRun("wf-fin-2");
     const deps = makeTracingDeps();
     await seedRunCreated(run);

@@ -474,8 +474,9 @@ export interface PhaseSettledEvent extends EventEnvelope {
 
 /**
  * `run-interrupted`——running/settling → interrupted 的转移事件（[D2]）：崩溃收编
- * / terminate 被动失联（D11 resume 来源 run）经 [D15] 终局编排入口统一写入。
- * 中断不是终局——本事件后 run 停在 interrupted 暂停态，可经 run-resumed 复活。
+ * / terminate 被动失联（[D11] 统一中断——全部 running run，不分来源）经 [D15]
+ * 终局编排入口统一写入。中断不是终局——本事件后 run 停在 interrupted 暂停态，
+ * 可经 run-resumed 复活。
  */
 export interface RunInterruptedEvent extends EventEnvelope {
   type: "run-interrupted";
