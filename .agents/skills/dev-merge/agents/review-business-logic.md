@@ -26,29 +26,20 @@ task prompt 中必须包含：
 
 ## 项目特化检查
 
-1. **taiji 特定检查**（参考项目 AGENTS.md「关键规则」、STANDARDS.md）：
-   - 错误路径是否重置 `isGenerating` + `streamingMessage`（否则 UI 卡在「思考中」）
-   - emit 是否只传单个 payload 对象（禁止 `emit('event', a, b)`）
-   - 独立数据源是否用 `Promise.allSettled`（禁止 `Promise.all`）
-   - **分级匹配的错误处理策略**（契约见 [docs/FEATURE-PRIORITIES.md](../../../../docs/FEATURE-PRIORITIES.md) §1「分级与错误处理契约」；判据本体 = 上方 code-harden 引用）：先按 diff 触及的模块查功能分级，再逐接入点核对——
-     - P0/P1 功能的改动：故障是否响亮（fail-fast + 结构化日志 + 可定位恢复动作）？静默吞错 / 启发式兜底掩盖 = MUST_FIX（类别 `grading-error-policy`）
-     - 主流程衔接 P2/P3 功能的接入点：是否有降级边界（catch + 日志 + 关闭/占位兜底）？P2/P3 异常向上传播可打断 P0/P1 主流程 = MUST_FIX（同类别）
-     - 跨级调用点按被调功能契约判：调用方不因辅助功能故障而崩，但降级路径必须有日志（无日志的静默降级 = 吞错，同级别 MUST_FIX）
-2. **streaming message 生命周期（STANDARDS.md §3.3）**：pi 一次 agent 调用产生多 message，每个 `message_start` 应完成前一个 streaming message、开始新的。检查变更是否破坏这个时序（`message_start` → 完成 current → 新建 → `text_delta` 追加 → `tool_execution_start/end` → 下一个 `message_start` → 最终 `agent_end` completeStreaming）。漏掉「完成 current」步骤会导致消息内容错乱合并。
-3. **session 双状态处理（STANDARDS.md §4.1）**：所有 session 操作必须处理两种状态：
-   - **活跃 session**：有运行中的 pi 进程，可实时通信（prompt/get_messages）
-   - **非活跃 session**：只有 `.jsonl` 文件，需从文件解析历史，restore 后才能发送消息
-   - 变更是否先检查 session 是否活跃，不活跃时走文件路径
-4. **文件持久化与内存 Store 同步（STANDARDS.md §5）**：同时存在文件持久化和内存 Store 时，检查三条规则：
-   - 启动时加载（初始化从文件加载到 Pinia store）
-   - 写后刷新（修改文件后立即更新 store）
-   - 防竞争（异步操作用队列串行化，避免并发写入丢失）
+本维度的项目检查项已收编 `docs/constraints.json`（登记 SSOT），经 `.review/constraints.md` 按本维度（business-logic）消费——清单中 dimensions 含 business-logic 的条目逐条核对（含全部 enforcement 为 review 且 agent 指向本维度的条目），约束内容全文以「权威源」列指向的文档为准。主要承接条目导航：
+
+- emit 单 payload / listener refCount / 错误重置 isGenerating + streamingMessage → C-comm-11（authority: AGENTS.md）
+- streaming message 生命周期时序 → C-state-18（authority: STANDARDS.md §3.3）
+- session 双状态前置判定 → C-state-19（authority: STANDARDS.md §4.1）
+- 文件持久化与 Store 同步三规则 → C-data-25（authority: STANDARDS.md §5）
+- 独立数据源 Promise.allSettled → C-comm-21（authority: AGENTS.md 前端编码规范）
+- 错误处理策略分级契约（核心 fail-fast / 辅助降级留痕 / 用户可见降级显形）→ C-proc-21（authority: STANDARDS.md）；**分级数据源**（diff 触及的模块是 P0-P3 哪一级）查 [docs/FEATURE-PRIORITIES.md](../../../../docs/FEATURE-PRIORITIES.md) §1——违反分级契约 = MUST_FIX（类别 `grading-error-policy`）
 
 ## 执行步骤
 
 1. **获取变更范围**：在项目根目录执行 `git diff main...HEAD --stat` 确认变更文件列表，再执行 `git diff main...HEAD` 获取完整 diff。
-2. **按通用判据执行**：Read 两个技能文件，按 code-domain-review 五步协议过全部变更（意图判断 / 逻辑推演 / 副作用系统检查），按 code-harden 策略裁决表核对每个错误路径（分级输入 = 项目特化检查 1 的功能分级契约）。
-3. **项目特化检查逐项核对**（上方清单）。
+2. **按通用判据执行**：Read 两个技能文件，按 code-domain-review 五步协议过全部变更（意图判断 / 逻辑推演 / 副作用系统检查），按 code-harden 策略裁决表核对每个错误路径（分级输入 = 项目特化检查的 FEATURE-PRIORITIES 分级 + C-proc-21 契约）。
+3. **项目特化检查**：读 `.review/constraints.md`，对 dimensions 含 business-logic 的条目逐条核对（上方导航表 + 清单内其余命中条目）；约束内容需要完整表述时 Read 其 authority 文档原文。
 4. **输出审查报告**到 `output` 路径。
 
 ## 输出格式

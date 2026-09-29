@@ -31,10 +31,7 @@ task prompt 中必须包含：
 
 ## 项目特化检查
 
-1. **Electron 分层边界**：变更是否违反分层职责：
-   - renderer 进程是否直接使用 `ipcRenderer`（必须经 preload 的 `electronAPI`）
-   - main 进程是否混入业务逻辑（应只管窗口/runtime 进程生命周期；M2 Window Manager = `window/window-manager.ts`，M3 Process Supervisor = `supervisor/runtime-supervisor.ts` Facade + port-discoverer/health-checker/process-control/port-file/safe-env 子模块）
-   - shared/src 类型是否被某一端私自重定义（应为前后端唯一类型源，协议源 `shared/src/protocol.ts`）
+1. **Electron 四层分层职责**（已收编 C-comm-22，经 constraints.md 消费；authority: AGENTS.md）：renderer 经 preload electronAPI / main 只管窗口与 runtime 生命周期 / shared 唯一类型源。
 2. **runtime 三层边界（runtime-layering.md）**：
    - **transport/**：纯路由（server.ts + router.ts + handlers/），不碰 node: 内置、不做业务决策
    - **services/**：业务编排，**禁止 import infra**、**禁止出现 `Pi*` 类型**（应经 ports 接口访问外部能力）
@@ -60,7 +57,7 @@ task prompt 中必须包含：
 7. **ENV_WHITELIST SSOT（#3）**：
    - `ENV_WHITELIST_PREFIXES` 是否只在 `packages/shared/src/constants.ts` 定义
    - main/ 和 runtime/ 层是否本地重新定义（禁止，只能 import 扩展）
-8. **Extension vs Plugin 概念区分（context.md 核心术语）**——两者是不同概念，禁止混用：
+8. **Extension vs Plugin 概念区分**（已收编 C-ext-29，scope=global 恒载，经 constraints.md 消费；authority: CONTEXT.md + AGENTS.md）——两者是不同概念，禁止混用：
    - **Extension**（pi extension）：运行在 **pi 子进程内**，用 `ExtensionAPI`，数据存 `~/.taiji/extensions/`，由 `extension-service.ts` 管理
    - **Plugin**（taiji 插件）：运行在 **runtime 的 Worker Thread**，用 agentAPI（非 ExtensionAPI），数据存 `~/.taiji/plugins/`，由 PluginService 管理
    - **Pi Bridge Extension**：插件系统与 pi 引擎的**唯一适配层**（插件系统内部唯一感知 pi 的模块）——变更是否绕过 Bridge 直接访问 pi
