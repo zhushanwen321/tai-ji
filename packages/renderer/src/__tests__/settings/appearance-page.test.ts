@@ -5,6 +5,8 @@
  *  - 首屏渲染：h1 =「外观」、分区字号卡文案命中 locale（无 raw key 泄漏）、
  *    三个区域 Select trigger + 终端字号 input testid 存在。
  *  - 太极主题按钮：点击 → emit update {theme, themePreset}（持久化路径，与 store 落库闭环）。
+ *  - Select 载荷守卫：外观模式/全局字号/分区字号三 Select 经 reka 真实交互点选 →
+ *    update emit 走 onXxxSelect 运行时守卫收窄（不写死模板 as 断言的回归面）。
  *  - 终端字号：mount 拉取 getTerminalConfig；改值 + blur → setTerminalConfig 整体写回
  *    （保留 shell 等其他字段）+ clamp 边界（30 → 24）。
  *
@@ -104,6 +106,61 @@ describe('AppearancePage 渲染 gate', () => {
     await flushPromises()
     expect(document.body.innerHTML).toContain('--accent')
     expect(document.body.innerHTML).toContain('--bg')
+  })
+})
+
+describe('AppearancePage Select 载荷守卫（reka Select 交互 → update emit）', () => {
+  /** 打开指定 trigger 的下拉（reka Select：pointerdown 打开，SelectPortal teleport 到 body） */
+  async function openDropdown(trigger: Element): Promise<HTMLElement[]> {
+    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    ;(trigger as HTMLElement).click()
+    await flushPromises()
+    return Array.from(document.body.querySelectorAll('[role="option"]')) as HTMLElement[]
+  }
+
+  /** 在已打开下拉中点选指定文案 option（同 update-page-source.test.ts 交互模式） */
+  async function pickOption(trigger: Element, label: string): Promise<void> {
+    const options = await openDropdown(trigger)
+    const target = options.find((el) => (el.textContent ?? '').includes(label))
+    expect(target, `option "${label}" should exist in dropdown`).toBeTruthy()
+    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+    target!.click()
+    await flushPromises()
+  }
+
+  /** 按显示文案定位 SelectTrigger（theme/fontSize 的 trigger 无 testid，以 SelectValue 文案锚定） */
+  function findTriggerByText(text: string): HTMLElement {
+    const btn = wrapper!.findAll('button').find((b) => b.text() === text)
+    expect(btn, `trigger showing "${text}" should exist`).toBeTruthy()
+    return btn!.element as HTMLElement
+  }
+
+  function lastUpdate(): Record<string, unknown> {
+    const emitted = (wrapper as any).emitted('update')
+    expect(emitted).toBeTruthy()
+    return emitted.at(-1)[0]
+  }
+
+  it('外观模式 Select：点「浅色」→ emit update {theme:"light"}（isThemeMode 守卫收窄后放行）', async () => {
+    wrapper = mountPage() // DEFAULT_SYSTEM theme=dark → trigger 显示「深色」
+    await flushPromises()
+    await pickOption(findTriggerByText('深色'), '浅色')
+    expect(lastUpdate()).toEqual({ theme: 'light' })
+  })
+
+  it('全局字号 Select：点「大」→ emit update {fontSize:"large"}', async () => {
+    wrapper = mountPage() // fontSize=medium → trigger 显示「中」
+    await flushPromises()
+    await pickOption(findTriggerByText('中'), '大')
+    expect(lastUpdate()).toEqual({ fontSize: 'large' })
+  })
+
+  it('分区字号 Select（sidebar）：点「特大」→ emit update {fontScales 含 sidebar:"xlarge"}（浅合并回传完整对象）', async () => {
+    wrapper = mountPage()
+    await flushPromises()
+    const trigger = wrapper!.find('[data-testid="appearance-fs-sidebar-trigger"]').element
+    await pickOption(trigger, '特大')
+    expect(lastUpdate().fontScales).toEqual({ ...DEFAULT_SYSTEM.fontScales, sidebar: 'xlarge' })
   })
 })
 

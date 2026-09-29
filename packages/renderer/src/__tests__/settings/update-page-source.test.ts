@@ -76,6 +76,52 @@ async function pickOption(label: string): Promise<void> {
   await flushPromises()
 }
 
+describe('UpdatePage 预下载开关与代理表单保存（setting-field 编排）', () => {
+  it('预下载开关：点 switch → setUpdateSettings({ preDownload: true }) 立即持久化', async () => {
+    wrapper = mount(UpdatePage)
+    await flushPromises()
+    expect(settingsMock.getUpdateSettings).toHaveBeenCalled()
+
+    const sw = wrapper.find('[data-testid="switch-pre-download"]')
+    expect(sw.exists()).toBe(true)
+    await sw.trigger('click')
+    await flushPromises()
+
+    expect(settingsMock.setUpdateSettings).toHaveBeenCalledTimes(1)
+    expect(settingsMock.setUpdateSettings).toHaveBeenCalledWith({ preDownload: true })
+  })
+
+  it('代理表单保存（system 模式直存）：点保存 → setProxyConfig 整体写回 + 成功 toast', async () => {
+    wrapper = mount(UpdatePage)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="btn-save-proxy"]').trigger('click')
+    await flushPromises()
+
+    expect(settingsMock.setProxyConfig).toHaveBeenCalledTimes(1)
+    expect(settingsMock.setProxyConfig).toHaveBeenCalledWith({
+      mode: 'system',
+      httpProxy: undefined,
+      httpsProxy: undefined,
+    })
+    // createExplicitSave 成功 toast（settings.update.saved = 「代理配置已保存」）
+    expect(toastMock.info).toHaveBeenCalledWith('代理配置已保存')
+  })
+
+  it('代理保存失败：setProxyConfig reject → error toast 透传 RPC 错误文案（onError 路径）', async () => {
+    settingsMock.setProxyConfig.mockRejectedValue(new Error('proxy down'))
+    wrapper = mount(UpdatePage)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="btn-save-proxy"]').trigger('click')
+    await flushPromises()
+
+    expect(toastMock.error).toHaveBeenCalledTimes(1)
+    // onError 文案 = settings.update.saveFailed 插值（半角冒号，locale 原文）
+    expect(toastMock.error).toHaveBeenCalledWith('保存失败: proxy down')
+  })
+})
+
 describe('UpdatePage 更新来源三选控件', () => {
   it('testid 存在：DOM 含 select-update-source trigger', async () => {
     wrapper = mount(UpdatePage)

@@ -196,6 +196,22 @@ describe('SystemLlmRetrySection（u3 LLM 调用重试）', () => {
     wrapper.unmount()
   })
 
+  it('保存失败：setRetryConfig reject → error toast「保存失败，请重试」（onError 路径，不抛错）', async () => {
+    const wrapper = mountSection()
+    await flushPromises()
+
+    configApiMock.setRetryConfig.mockRejectedValueOnce(new Error('rpc down'))
+    await setInput(wrapper, 'llm-retry-base-delay-input', '5')
+    await wrapper.find('[data-testid="llm-retry-save-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(configApiMock.setRetryConfig).toHaveBeenCalledTimes(1)
+    expect(toastMock.error).toHaveBeenCalledTimes(1)
+    // createExplicitSave 的 onError 文案（本域固定 key，不含 RPC 错误原文）
+    expect(toastMock.error).toHaveBeenCalledWith('保存失败，请重试')
+    wrapper.unmount()
+  })
+
   it('保存越界：baseDelay=99999 → setRetryConfig 不被调 + toast 含「超出范围」+ 输入框标红', async () => {
     const wrapper = mountSection()
     await flushPromises()

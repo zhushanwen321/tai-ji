@@ -191,6 +191,54 @@ describe('hover 切换（D2：hover 即切，不关弹层；同值不 emit）', 
   })
 })
 
+describe('pending 回流/终态清理（emit 去重基准复位，U4 单飞锁配套）', () => {
+  it('模型 hover 启动切换后 selected 回流同目标 → pending 清除；切走后同目标可再次 emit', async () => {
+    const w = mountAggregate() // selected=anthropic/claude-4
+    await openAggregate(w)
+    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')!
+    await hover(gptRow) // pending=gpt-4，emit 第 1 条
+    // 切换回流：runtime 确认 selected=gpt-4 → watch(selectedBare) 清 pending
+    await w.setProps({ selected: 'openai/gpt-4' })
+    // 用户又切回 claude-4（基准值离开 gpt-4）→ 再次 hover gpt-4 应重新 emit
+    // （若 pending 未清，第二次 hover 被幂等拦截，只有 1 条）
+    await w.setProps({ selected: 'anthropic/claude-4' })
+    await hover(gptRow)
+    const emitted = w.emitted('selectModel')
+    expect(emitted).toBeTruthy()
+    expect(emitted).toHaveLength(2)
+    expect(emitted![1][0]).toEqual({ modelId: 'gpt-4', provider: 'openai' })
+  })
+
+  it('switching true→false 回落（切换终态）→ pending 清除；同目标可再次 emit', async () => {
+    const w = mountAggregate()
+    await openAggregate(w)
+    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')!
+    await hover(gptRow) // pending=gpt-4，emit 第 1 条
+    await w.setProps({ switching: true })
+    await w.setProps({ switching: false }) // 切换终态回落（覆盖失败/超时）→ 清 pending
+    await hover(gptRow) // pending 已清 → 重新 emit（允许用户重试同目标）
+    const emitted = w.emitted('selectModel')
+    expect(emitted).toBeTruthy()
+    expect(emitted).toHaveLength(2)
+  })
+
+  it('思考档 hover 后 level 回流同目标 → pending 清除；切走后同档位可再次 emit', async () => {
+    const w = mountAggregate() // level=high
+    await openAggregate(w)
+    const maxRow = document.body.querySelector('[data-testid="thinking-level-row-max"]')!
+    await hover(maxRow) // pendingLevelKey='max'，emit 第 1 条（实际值 xhigh）
+    // 切换回流：level=xhigh → currentLevelKey 反查为 'max' → watch 清 pending
+    await w.setProps({ level: 'xhigh' })
+    // 基准值离开 max → 再次 hover max 应重新 emit（若 pending 未清则被幂等拦截）
+    await w.setProps({ level: 'high' })
+    await hover(maxRow)
+    const emitted = w.emitted('selectThinking')
+    expect(emitted).toBeTruthy()
+    expect(emitted).toHaveLength(2)
+    expect(emitted![1][0]).toBe('xhigh')
+  })
+})
+
 describe('click 选中（关弹层）', () => {
   it('click 模型行 → emit selectModel 后弹层关闭', async () => {
     const w = mountAggregate()

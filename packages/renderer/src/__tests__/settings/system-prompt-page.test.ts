@@ -181,6 +181,37 @@ describe('SystemPromptPage 保存交互', () => {
     expect(toasts.value.some((t) => t.type === 'info')).toBe(true)
   })
 
+  it('修改追加区并保存后调用 setSystemPrompt（payload 含 append 段，两卡共用同一保存动作）', async () => {
+    configMock.getSystemPrompt.mockResolvedValueOnce({
+      config: defaultConfig(),
+      corrupted: false,
+    })
+    configMock.setSystemPrompt.mockResolvedValueOnce({
+      config: {
+        version: 1,
+        replace: { enabled: false, prompt: '' },
+        append: { enabled: true, prompt: '追加段落内容' },
+      },
+      corrupted: false,
+    })
+
+    await openSystemPromptPage()
+
+    // 开启追加开关 + 输入追加文本 + 点追加卡保存按钮（与替换卡共用同一 createExplicitSave 动作）
+    await $('[data-testid="system-prompt-append-switch"]').trigger('click')
+    await $('[data-testid="system-prompt-append-input"]').setValue('追加段落内容')
+    await $('[data-testid="system-prompt-append-save"]').trigger('click')
+    await flushPromises()
+
+    expect(configMock.setSystemPrompt).toHaveBeenCalledTimes(1)
+    const payload = configMock.setSystemPrompt.mock.calls[0]![0] as SystemPromptConfig
+    expect(payload.append.enabled).toBe(true)
+    expect(payload.append.prompt).toBe('追加段落内容')
+
+    const { toasts } = useToast()
+    expect(toasts.value.some((t) => t.type === 'info')).toBe(true)
+  })
+
   it('setSystemPrompt 失败时显示 error toast', async () => {
     configMock.getSystemPrompt.mockResolvedValueOnce({
       config: defaultConfig(),

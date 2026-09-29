@@ -232,6 +232,133 @@ describe('ExtensionActions 启用开关乐观更新协议（MF-1-3）', () => {
   })
 })
 
+// ── 自动升级开关乐观更新（ExtensionDetail · runOptimisticUpdate 协议）──────────────
+//
+// 行为不变量（手写 try/catch 迁入协议后的同一编排面）：
+//  A1 apply 乐观写：点开关 → store 对应项 autoUpgrade 立即翻转（setExtensionAutoUpgrade 返回旧值）
+//  A2 commit 持久化：transport.setExtensionAutoUpgrade(name, enabled) 被调
+//  A3 失败回滚 + 就近显错：commit reject → store 回滚旧值 + error ref 显示 e.message
+describe('ExtensionDetail 自动升级开关（乐观更新协议）', () => {
+  /** 与 MF-1-3 同装配：store 预置 userExt，props 与 store.extensions 同引用 */
+  async function mountWithPresetStore(): Promise<ReturnType<typeof getSettingsStore>> {
+    provideSettingsStore(createSettingsStore())
+    const store = getSettingsStore()
+    store.extensions.value = [userExt()]
+    wrapper = mount(ExtensionPage, {
+      props: { extensions: store.extensions.value },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    return store
+  }
+
+  it('点开关 → store autoUpgrade 立即翻转 + transport.setExtensionAutoUpgrade 持久化', async () => {
+    const store = await mountWithPresetStore()
+    const sw = wrapper!.find('button[aria-label="自动升级"]')
+    expect(sw.exists()).toBe(true)
+    expect(sw.attributes('data-state')).toBe('unchecked')
+
+    await sw.trigger('click')
+    await flushPromises()
+
+    // apply 乐观写（store 先翻转）+ commit 持久化
+    expect(store.extensions.value[0]!.autoUpgrade).toBe(true)
+    expect(extensionMock.setAutoUpgrade).toHaveBeenCalledTimes(1)
+    expect(extensionMock.setAutoUpgrade).toHaveBeenCalledWith('my-tools', true)
+  })
+
+  it('commit reject → 回滚旧值 + error 就近显示 e.message', async () => {
+    const store = await mountWithPresetStore()
+    extensionMock.setAutoUpgrade.mockRejectedValueOnce(new Error('persist down'))
+
+    await wrapper!.find('button[aria-label="自动升级"]').trigger('click')
+    await flushPromises()
+
+    // rollback：store 回滚旧值，error ref 就近显示（非静默吞）
+    expect(store.extensions.value[0]!.autoUpgrade).toBe(false)
+    expect(wrapper!.text()).toContain('persist down')
+  })
+})
+
+// ── 安装流四路径（ExtensionInstallFlow · transport seam 调用面）──────────────────
+describe('ExtensionInstallFlow 安装流（transport seam）', () => {
+  /** 发现一个候选（git tab → installGitRepository → 候选区展开），返回 tempDir */
+  async function discoverCandidateViaGit(tempDir: string): Promise<void> {
+    extensionMock.installGitRepository.mockResolvedValueOnce({ tempDir, candidates: [userExt()] })
+    const gitTab = wrapper!.findAll('button').find((b) => b.text() === 'Git URL')
+    expect(gitTab).toBeTruthy()
+    await gitTab!.trigger('click')
+    await wrapper!.find('[data-testid="install-input"]').setValue('https://example.com/u/ext')
+    const discoverBtn = wrapper!.findAll('button').find((b) => b.text() === '发现')
+    expect(discoverBtn).toBeTruthy()
+    await discoverBtn!.trigger('click')
+    await flushPromises()
+    expect(wrapper!.find('[data-testid="install-candidates"]').exists()).toBe(true)
+  }
+
+  it('推荐扩展一键安装 → installExtension 自动补 npm: 前缀', async () => {
+    extensionMock.fetchRecommended.mockResolvedValueOnce([
+      { name: 'rec-ext', description: 'recommended ext' },
+    ] as never)
+    wrapper = mount(ExtensionPage, { props: { extensions: [] } })
+    await flushPromises()
+
+    // 推荐区 section（v-if recommended.length）按行内包名定位；行内「安装」按钮点击 → npm: 前缀安装
+    const recSection = wrapper.findAll('section').find((s) => s.text().includes('rec-ext'))
+    expect(recSection).toBeTruthy()
+    const installBtn = recSection.findAll('button').find((b) => b.text() === '安装')
+    expect(installBtn).toBeTruthy()
+    await installBtn!.trigger('click')
+    await flushPromises()
+
+    expect(extensionMock.install).toHaveBeenCalledWith('npm:rec-ext')
+  })
+
+  it('git tab：输入 URL 点发现 → installExtensionGitRepository 被调', async () => {
+    wrapper = mount(ExtensionPage, { props: { extensions: [] } })
+    await flushPromises()
+    extensionMock.installGitRepository.mockResolvedValueOnce({ tempDir: '/tmp/git', candidates: [] })
+
+    const gitTab = wrapper.findAll('button').find((b) => b.text() === 'Git URL')
+    expect(gitTab).toBeTruthy()
+    await gitTab!.trigger('click')
+    await wrapper.find('[data-testid="install-input"]').setValue('https://example.com/u/ext')
+    const discoverBtn = wrapper.findAll('button').find((b) => b.text() === '发现')
+    await discoverBtn!.trigger('click')
+    await flushPromises()
+
+    expect(extensionMock.installGitRepository).toHaveBeenCalledWith('https://example.com/u/ext')
+  })
+
+  it('候选确认安装：勾选候选点「安装选中」→ finishInstall(tempDir, names)', async () => {
+    wrapper = mount(ExtensionPage, { props: { extensions: [] } })
+    await flushPromises()
+    await discoverCandidateViaGit('/tmp/cand')
+
+    await wrapper.find('[data-testid="install-candidates"] button[role="checkbox"]').trigger('click')
+    const confirmBtn = wrapper.findAll('button').find((b) => b.text() === '安装选中')
+    expect(confirmBtn).toBeTruthy()
+    await confirmBtn!.trigger('click')
+    await flushPromises()
+
+    expect(extensionMock.finishInstall).toHaveBeenCalledWith('/tmp/cand', ['my-tools'])
+  })
+
+  it('放弃安装：点「取消」→ cancelInstall(tempDir)（候选区收起）', async () => {
+    wrapper = mount(ExtensionPage, { props: { extensions: [] } })
+    await flushPromises()
+    await discoverCandidateViaGit('/tmp/cancel')
+
+    const cancelBtn = wrapper.findAll('button').find((b) => b.text() === '取消')
+    expect(cancelBtn).toBeTruthy()
+    await cancelBtn!.trigger('click')
+    await flushPromises()
+
+    expect(extensionMock.cancelInstall).toHaveBeenCalledWith('/tmp/cancel')
+    expect(wrapper.find('[data-testid="install-candidates"]').exists()).toBe(false)
+  })
+})
+
 // ── W2 · D3: 候选项双触发 bug（U3）──────────────────────────────────
 //
 // bug 根因：候选项用 <Label> 包裹 <Checkbox> + 内层 <div @click="toggleCandidate">。

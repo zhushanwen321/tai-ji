@@ -204,3 +204,36 @@ describe('WorktreePage RD-4#6 保存失败透传 runtime 文案', () => {
     ).toBe(true)
   })
 })
+
+describe('WorktreePage 初始化脚本持久化（setting-field 编排，blur 保存）', () => {
+  it('setup script 改值 + blur → setSetupScript 被调', async () => {
+    wrapper = mount(WorktreePage, { attachTo: document.body })
+    await flushPromises()
+
+    // 两脚本输入无 testid，以 locale placeholder 锚定（「如 …」为 worktree 区脚本、无前缀为 bare 区）
+    const input = $('input[placeholder="如 custom-hooks/setup-worktree.sh"]')
+    ;(input.element as HTMLInputElement).value = 'custom-hooks/a.sh'
+    await input.trigger('input')
+    await input.trigger('blur')
+    await flushPromises()
+
+    expect(settingsMock.setSetupScript).toHaveBeenCalledTimes(1)
+    expect(settingsMock.setSetupScript).toHaveBeenCalledWith('custom-hooks/a.sh')
+    expect(settingsMock.setBareSetupScript).not.toHaveBeenCalled()
+  })
+
+  it('bare setup script 改值 + blur → setBareSetupScript 被调', async () => {
+    wrapper = mount(WorktreePage, { attachTo: document.body })
+    await flushPromises()
+
+    const input = $('input[placeholder="custom-hooks/setup-worktree.sh"]')
+    ;(input.element as HTMLInputElement).value = 'custom-hooks/bare.sh'
+    await input.trigger('input')
+    await input.trigger('blur')
+    await flushPromises()
+
+    expect(settingsMock.setBareSetupScript).toHaveBeenCalledTimes(1)
+    expect(settingsMock.setBareSetupScript).toHaveBeenCalledWith('custom-hooks/bare.sh')
+    expect(settingsMock.setSetupScript).not.toHaveBeenCalled()
+  })
+})

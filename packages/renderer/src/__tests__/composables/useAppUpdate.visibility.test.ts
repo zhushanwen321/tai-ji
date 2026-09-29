@@ -138,6 +138,30 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     stop()
   })
 
+  it('补查节流（RM2.4）：10min 窗口内第二次补查被跳过（console 提示 + 不再联网）', async () => {
+    setHidden(true)
+    const { stop } = setupWithAutoCheck()
+    // initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
+    await vi.advanceTimersByTimeAsync(0)
+
+    // hidden 30s 首查跳过（skipped 置位）→ 恢复可见补查#1（lastVisibilityCheckAt = t+30s）
+    await vi.advanceTimersByTimeAsync(30_000)
+    setHidden(false)
+    fireVisibilityChange()
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+
+    // 多消费者再次 initAutoCheck（幂等重排）：清补查#1 的 60min 周期 timer，重排 30s 首查
+    // （skipped 复位为 false，恢复链/订阅幂等）
+    activeScope!.run(() => controller.initAutoCheck())
+    setHidden(true)
+    await vi.advanceTimersByTimeAsync(30_000) // t+60s：hidden 触发 → skipped 再次置位
+    setHidden(false)
+    fireVisibilityChange() // 距补查#1 仅 30s < 10min 窗口 → 节流 return，不联网
+
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+    stop()
+  })
+
   it('恢复可见无跳过记录时不补查（正常周期内的 visibilitychange 是 no-op）', async () => {
     const { stop } = setupWithAutoCheck()
     // initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
