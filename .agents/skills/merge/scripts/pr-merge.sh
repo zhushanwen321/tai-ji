@@ -124,7 +124,11 @@ fi
 echo ""
 echo "  sync 本地 main..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-WS_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd -P)"
+# 向上查找含 .bare/ 的目录（.agents 实体在 workspace 根，worktree 内是 symlink）
+WS_ROOT="$SCRIPT_DIR"
+while [[ "$WS_ROOT" != "/" && ! -d "$WS_ROOT/.bare" ]]; do
+    WS_ROOT="$(dirname "$WS_ROOT")"
+done
 MAIN_WT="$WS_ROOT/main"
 
 git -C "$MAIN_WT" fetch "$GH_REMOTE" main 2>&1 | tail -1

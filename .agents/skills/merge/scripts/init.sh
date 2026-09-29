@@ -20,9 +20,13 @@ WORKTREE_DIR_NAME="${1:?Usage: init.sh <worktree-dir-name>}"
 # 项目常量
 GH_REPO="zhushanwen321/tai-ji"
 
-# workspace 检测
+# workspace 检测（向上查找含 .bare/ 的目录——.agents 实体在 workspace 根，
+# worktree 内是 symlink，pwd -P 已解析到实体物理路径；固定层数推导会随布局漂移失效）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-WS_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd -P)"
+WS_ROOT="$SCRIPT_DIR"
+while [[ "$WS_ROOT" != "/" && ! -d "$WS_ROOT/.bare" ]]; do
+    WS_ROOT="$(dirname "$WS_ROOT")"
+done
 
 if [[ ! -d "$WS_ROOT/.bare" ]]; then
     echo -e "${RED}Error: 未找到 workspace root（向上查找 .bare/ 失败）${NC}"
