@@ -8,14 +8,29 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ZcodePrepareError,
+  defaultPersonalProviderConfigPath,
   listZcodeModels,
+  locateZcodeBuiltinCatalog,
   resolveZcodeMinimalReasoningLevel,
   resolveZcodeModelRef,
 } from "../preparer.ts";
+
+// locateZcodeBuiltinCatalog 目录扫描分支以 os.homedir() 为根——测试不触碰真实
+// ~/.zcode：zcHomeRef 置值后 homedir 指向 tmp 树（缺省回落真实 HOME，供缺省路径
+// 断言用例）。
+const { zcHomeRef } = vi.hoisted(() => ({ zcHomeRef: { current: undefined as string | undefined } }));
+
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof os>();
+  return {
+    ...actual,
+    homedir: () => zcHomeRef.current ?? actual.homedir(),
+  };
+});
 
 let tmpRoot: string;
 let personalPath: string;
@@ -59,6 +74,10 @@ beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "zcode-preparer-"));
   personalPath = path.join(tmpRoot, "provider_config.json");
   seedSources();
+});
+
+afterEach(() => {
+  fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
 describe("resolveZcodeModelRef（provider_config 单源）", () => {
@@ -171,7 +190,94 @@ describe("resolveZcodeMinimalReasoningLevel（目录值域）", () => {
     expect(resolveZcodeMinimalReasoningLevel(`${PROVIDER_B}/no-values-x`, { builtinCatalogPath: catalogPath })).toBe("disabled");
   });
 
+  it("regex 编译失败的规则跳过（后续规则继续参与——坏规则不毒化整目录）", () => {
+    const badRegexCatalog = path.join(tmpRoot, "bad-regex-catalog.json");
+    writeJson(badRegexCatalog, {
+      config: {
+        modelConfigRules: {
+          modelRules: [
+            { modelMatch: "([", config: { optionSpecs: { reasoningLevel: { values: ["broken"] } } } },
+            { modelMatch: ".*", config: { optionSpecs: { reasoningLevel: { values: ["low"] } } } },
+          ],
+        },
+      },
+    });
+    expect(resolveZcodeMinimalReasoningLevel(`${PROVIDER_B}/any`, { builtinCatalogPath: badRegexCatalog })).toBe("low");
+  });
+
   it("目录缺失 → undefined（不携带，行为与未实现等价）", () => {
     expect(resolveZcodeMinimalReasoningLevel(`${PROVIDER_B}/m1`, { builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") })).toBeUndefined();
+  });
+});
+
+// ── locateZcodeBuiltinCatalog 目录定位（显式源 > env > runtime/provider 扫描）──
+// env 全局污染防护：本 describe 用例独占 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 的
+// save/delete/restore（其余 describe 一律走显式 sources，不受影响）。
+const CATALOG_ENV_KEY = "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE";
+
+describe("locateZcodeBuiltinCatalog（目录定位三源）", () => {
+  let savedCatalogEnv: string | undefined;
+
+  beforeEach(() => {
+    savedCatalogEnv = process.env[CATALOG_ENV_KEY];
+    delete process.env[CATALOG_ENV_KEY];
+  });
+
+  afterEach(() => {
+    if (savedCatalogEnv === undefined) {
+      delete process.env[CATALOG_ENV_KEY];
+    } else {
+      process.env[CATALOG_ENV_KEY] = savedCatalogEnv;
+    }
+    zcHomeRef.current = undefined;
+  });
+
+  it("env 注入优先于目录扫描（launcher/宿主注入通道）", () => {
+    const envPath = path.join(tmpRoot, "env-catalog.json");
+    process.env[CATALOG_ENV_KEY] = envPath;
+    expect(locateZcodeBuiltinCatalog()).toBe(envPath);
+  });
+
+  it("runtime/provider 扫描：本平台目录 × semver 最大版本 × endpoint 排序内首个命中", () => {
+    const fakeHome = path.join(tmpRoot, "fake-home");
+    const providerRoot = path.join(fakeHome, ".zcode", "v2", "runtime", "provider");
+    const plat = `${process.platform}-test`;
+    // 字符串排序会误判 1.9.0 > 1.10.0（'9' > '1'）——本用例钉住 semver 数值比较：
+    // 旧版本目录即使有命中文件也必须让位给 1.10.0。
+    writeJson(path.join(providerRoot, plat, "1.9.0", "endpoint-a", "zcode-builtin.json"), {});
+    // 新版本 endpoint-a 空目录（不命中）→ 落到同版本 endpoint-b。
+    fs.mkdirSync(path.join(providerRoot, plat, "1.10.0", "endpoint-a"), { recursive: true });
+    const expected = path.join(providerRoot, plat, "1.10.0", "endpoint-b", "zcode-builtin.json");
+    writeJson(expected, {});
+    // 非本平台前缀目录不参与扫描。
+    writeJson(path.join(providerRoot, "otheros-1", "9.9.9", "endpoint-a", "zcode-builtin.json"), {});
+    zcHomeRef.current = fakeHome;
+    expect(locateZcodeBuiltinCatalog()).toBe(expected);
+  });
+
+  it("版本目录被文件占据（readdir ENOTDIR）→ 跳过该版本继续扫后续", () => {
+    const fakeHome = path.join(tmpRoot, "fake-home-filever");
+    const providerRoot = path.join(fakeHome, ".zcode", "v2", "runtime", "provider");
+    const plat = `${process.platform}-test`;
+    fs.mkdirSync(path.join(providerRoot, plat), { recursive: true });
+    // "2.0.0" 是文件（命中 /^\d+\.\d+/ 名形）→ readdirSync 抛 ENOTDIR → continue。
+    fs.writeFileSync(path.join(providerRoot, plat, "2.0.0"), "occupied");
+    const expected = path.join(providerRoot, plat, "1.0.0", "endpoint-a", "zcode-builtin.json");
+    writeJson(expected, {});
+    zcHomeRef.current = fakeHome;
+    expect(locateZcodeBuiltinCatalog()).toBe(expected);
+  });
+
+  it("provider 根目录缺失 → undefined（reasoningLevel 解析降级为不携带）", () => {
+    zcHomeRef.current = path.join(tmpRoot, "empty-home");
+    expect(locateZcodeBuiltinCatalog()).toBeUndefined();
+  });
+});
+
+describe("defaultPersonalProviderConfigPath（缺省源路径）", () => {
+  it("= homedir × [.zcode, v2, provider_config.json]", () => {
+    expect(defaultPersonalProviderConfigPath()).toBe(
+      path.join(os.homedir(), ".zcode", "v2", "provider_config.json"),
+    );
   });
 });
