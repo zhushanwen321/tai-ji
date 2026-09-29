@@ -214,18 +214,26 @@ function sanitizeAnsiForBg(text: string): string {
  *   第 2 行（正文）：结果首行 / Error 首行 / cancelled 无第二行
  */
 function renderRecordLines(record: BgNotifyRecord, t: ThemeLike): string[] {
-  const glyph = statusGlyph(record.status);
+  // U3 C-outcome：verb 与正文分流只读 outcome——单一权威派生（升级前旧消息重放等
+  // details 缺 outcome 的存量形态经 deriveOutcome(closedReason, error) 兜底，非同构
+  // 重写）。判定先于 patchFile：failed 分支不展示 patch/result（失败轮也会写
+  // patchFile，历史 bug 存档见 deriveOutcome 注释）。
+  const outcome = record.outcome ?? deriveOutcome(record.closedReason, record.error);
+  // [§2.2 通知字形修复] 字形与 verb 同源、只读 outcome：终态 record 的 status 恒为
+  // "closed"（statusGlyph 对 closed 返回 ✓ success），此前失败通知会画绿勾 + "failed"
+  // 文案自相矛盾。running 记录（无 outcome）仍走 statusGlyph。
+  const glyph =
+    outcome === "failed"
+      ? { icon: "✗", color: "error" as const }
+      : outcome === "cancelled"
+        ? { icon: "■", color: "muted" as const }
+        : statusGlyph(record.status);
   const icon = glyph.icon ?? "•";
   const agent = truncLine(displayAgentName(record.agent), AGENT_MAX_WIDTH);
   // model 段：agent 后、状态描述前，accent 色。空则省略（向后兼容旧 record）。
   const modelPart = record.model
     ? ` ${t.fg("dim", "·")} ${t.fg("accent", truncLine(record.model, MODEL_MAX_WIDTH))}`
     : "";
-  // U3 C-outcome：verb 与正文分流只读 outcome——单一权威派生（升级前旧消息重放等
-  // details 缺 outcome 的存量形态经 deriveOutcome(closedReason, error) 兜底，非同构
-  // 重写）。判定先于 patchFile：failed 分支不展示 patch/result（失败轮也会写
-  // patchFile，历史 bug 存档见 deriveOutcome 注释）。
-  const outcome = record.outcome ?? deriveOutcome(record.closedReason, record.error);
   let verb: string;
   if (outcome === "cancelled") {
     verb = "cancelled";

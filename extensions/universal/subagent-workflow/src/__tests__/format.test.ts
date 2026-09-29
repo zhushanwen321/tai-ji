@@ -17,11 +17,13 @@ import {
   formatElapsedSeconds,
   formatPhaseLine,
   formatRunStatusElapsed,
+  formatStatusBadge,
   formatTokens,
   formatToolCall,
   sanitizeLabel,
   shortId,
   spinnerGlyph,
+  statusDotStr,
   statusGlyph,
   type ThemeLike,
 } from "../interface/format.ts";
@@ -748,5 +750,29 @@ describe("buildPhaseGroups × fold 投影同源（D3/检查点 6 展示侧）", 
     expect(p2Line).toContain("warning(●)");
     expect(p1Line).toContain("1 p1 2/2");
     expect(p2Line).toContain("2 p2 0/1");
+  });
+});
+
+// ============================================================
+// [§2.2] run 域展示映射的可见错误回归
+// ============================================================
+describe("run 域展示映射（§2.2 回归）", () => {
+  it("formatStatusBadge('done') 出 success 徽标而非 muted 裸字（唯一生产入参的终局值）", () => {
+    // displayStatusOf 的值域 = running | interrupted | done；此前无 "done" 分支 →
+    // 落 default 显示 muted 色裸字 "done"。
+    expect(formatStatusBadge("done", markingTheme)).toBe("success(✓ completed)");
+    // 既有词表分支不被去重破坏
+    expect(formatStatusBadge("completed", markingTheme)).toBe("success(✓ completed)");
+    expect(formatStatusBadge("running", markingTheme)).toBe("warning(● running)");
+    expect(formatStatusBadge("failed", markingTheme)).toBe("error(✗ failed)");
+  });
+
+  it("statusDotStr 的色档与徽标一致：预算耗尽/超时归 error，中断归 muted", () => {
+    // statusDotStr 经私有 statusColorToken；此前 budget_limited/time_limited 落 muted，
+    // 与 formatStatusBadge 的 error 档冲突（同一状态一个当错误一个当灰）。
+    expect(statusDotStr("budget_limited", markingTheme)).toContain("error(");
+    expect(statusDotStr("time_limited", markingTheme)).toContain("error(");
+    expect(statusDotStr("interrupted", markingTheme)).toContain("muted(");
+    expect(statusDotStr("completed", markingTheme)).toContain("success(");
   });
 });

@@ -2,12 +2,13 @@
  * GUI 协议映射辅助函数 —— run/subagent 状态字符串 → 协议 TreeItem 状态 + 图标。
  *
  * 协议包 @zhushanwen/extension-protocol 的 list-tree 组件用 TreeItem.status（三态）
- * + TreeItem.icon 表达运行态。本模块把 workflow/subagent 领域的丰富状态字符串收口
- * 到这两个枚举，供 helpers.ts / tool-workflow.ts / subagent-actions.ts 复用。
+ * + TreeItem.icon 表达运行态。本模块把**子代理执行状态**（ExecutionStatus）映射到
+ * 这两个枚举，供 subagent-actions.ts 复用。
  *
  * 参考：@zhushanwen/extension-protocol GuiComponentProps['list-tree']。
  */
 
+import type { ExecutionStatus } from "@zhushanwen/subagent-core";
 import type { GuiContext, TreeItem, TreeItemIcon } from "@zhushanwen/extension-protocol";
 
 /**
@@ -29,53 +30,45 @@ export function toGuiCtx(ctx: { mode: GuiContext["mode"]; hasUI: boolean } | und
 type TreeStatus = NonNullable<TreeItem["status"]>;
 
 /**
- * 状态字符串是否为失败态（mapRunStatus/mapRunIcon 共享谓词——两映射仅返回值形态不同，
- * 关键词表必须同步演化，抽单点防双写漂移）。入参须已 toLowerCase。
+ * [§2.2 入参收窄] 本模块服务的状态域 = **子代理执行状态**（`ExecutionStatus`
+ * "running" | "idle"，唯一生产调用方 subagent-actions.ts 传的就是 SubagentListItem
+ * .status）。
+ *
+ * 历史形态是裸 string + 关键词子串匹配（failed/abort/cancel/crash/error/budget/
+ * time_limited），宣称服务 workflow run 状态——但 workflow 路径早已无调用方，那些
+ * 失败关键词分支在生产**全部不可达**，用例也只是在测死词表。收窄到显式联合后，
+ * 新增状态值会在编译期强制补齐分支（与 format.ts 的 statusGlyph 同款做法）。
  */
-function isFailedStatus(s: string): boolean {
-  return (
-    s.includes("failed") ||
-    s.includes("abort") ||
-    s.includes("cancel") ||
-    s.includes("crash") ||
-    s.includes("error") ||
-    s.includes("budget") ||
-    s.includes("time_limited")
-  );
+type SubagentDisplayStatus = ExecutionStatus;
+
+/** 子代理状态 → 协议三态 / 图标（穷尽 switch，无 default 静默兜底）。 */
+function displayIndexOf(status: SubagentDisplayStatus): { tree: TreeStatus; icon: TreeItemIcon } {
+  switch (status) {
+    // running = 有任务在飞；idle = 无进行中工作（可续聊）——「为什么停」不进树形状态
+    //（协议无该维度），空闲落 done/check。
+    case "running": return { tree: "running", icon: "circle" };
+    case "idle": return { tree: "done", icon: "check" };
+    // 运行时兜底：类型层已排除域外值，但 extension 入参来自宿主/存量数据，可能带
+    // 旧词表（如 done/failed）——落 done/check（与收窄前的 default 行为一致），
+    // 不抛错（树形渲染不该因一个状态字崩掉整棵列表）。
+    default: return { tree: "done", icon: "check" };
+  }
 }
 
 /**
- * 把 workflow/subagent 状态字符串映射到 list-tree 的三态 status。
+ * 子代理执行状态 → list-tree 三态 status。
  *
- * 输入可能是纯 RunStatus（running/done）、RunStatus+reason 组合
- * （如 "done (failed)"），或 subagent status（running/idle/legacy done/failed/
- * cancelled/crashed）。
- *
- * 映射规则：
- *   - running → running
- *   - failed / aborted / error / crashed / cancelled / budget_limited / time_limited → failed
- *   - 其他（done / completed / success / pending / idle）→ done
- *
- * [U8 两态] subagent 的 idle（无任务在飞可续聊）在协议三态里落 done（空闲 = 无
- * 进行中工作，check 图标）；「为什么停」不进树形状态（协议无该维度）。
+ *   running → running；idle → done（空闲 = 无进行中工作，check 图标）
  */
-export function mapRunStatus(status: string): TreeStatus {
-  const s = status.toLowerCase();
-  if (s.includes("running")) return "running";
-  if (isFailedStatus(s)) return "failed";
-  return "done";
+export function mapRunStatus(status: SubagentDisplayStatus): TreeStatus {
+  return displayIndexOf(status).tree;
 }
 
 /**
- * 把状态字符串映射到 TreeItem.icon。
+ * 子代理执行状态 → TreeItem.icon。
  *
- *   running                       → circle（进行中）
- *   failed/abort/cancel/crash     → cross
- *   其他（done）                  → check
+ *   running → circle；idle → check
  */
-export function mapRunIcon(status: string): TreeItemIcon {
-  const s = status.toLowerCase();
-  if (s.includes("running")) return "circle";
-  if (isFailedStatus(s)) return "cross";
-  return "check";
+export function mapRunIcon(status: SubagentDisplayStatus): TreeItemIcon {
+  return displayIndexOf(status).icon;
 }

@@ -10,6 +10,8 @@
 
 ### 1.1 resume 复活 run 的时间预算在首次错误重试后静默失效（P1）
 
+- 状态：**已修**（2026-09-30 批次，main 线）；run-created 载预算 + resume 三档回落 + 生效预算随 run-resumed 落盘 + spec 重建读取——重试重建与引擎投影同源。遗留：`budgetTokens` 仍未恢复（resume 后 token 上限失效，与墙钟同族，见本批次报告）。
+
 证据链三环（2026-09-29 逐一核实）：
 - `packages/subagent-core/src/orchestration/resume-run.ts:838-847`：rebuildRunFromRecord 构造的 spec 只含 scriptSource/args/scriptName/scriptPath/model，**结构性不含 budgetTimeMs**（RunSpec.budgetTimeMs 是 readonly 也无法写回）。
 - `packages/subagent-core/src/orchestration/worker-message-pump.ts` remainingTimeBudgetMs：`if (!budget || budget <= 0) return undefined` 在查 D10 复活预算账本**之前**提前返回——账本唯一写入方是 resume 链（noteRunResumedBudget 全仓仅 resume-run.ts:571 调用），即账本唯一写入场景恰好是它结构性读不到的场景。
@@ -18,11 +20,15 @@
 
 ### 1.2 worktree reconstruct 的 patch 丢失判定在完整重建之后执行，已重建 worktree 泄漏 + 每续轮重复重建
 
+- 状态：**已修**（2026-09-30 批次）：patch 丢失判定前置（degrade-reopen 变无副作用）；stale git 元数据恢复抽共享原语。
+
 - `packages/subagent-core/src/execution/worktree/worktree-manager.ts`：分支存在性检查最先（:280），patchFile 存在性检查却排在 worktree add / registry.add（:309）/ symlink（:319-325）全部完成之后（:332-335）——该判定只依赖入参路径，完全可以前置。
 - 后果：走 degrade-reopen 降级时已重建的 checkout + 注册表条目 + symlink 留存到宿主进程死亡；消费方 conversation-continuation.ts:618 对 degrade-reopen 不接收 handle，下一续轮再进 rebuildWorktreeBinding（:605）→ 每续轮重复全套 git 重建再丢弃。
 - 设计决策点：判定前置后 degrade-reopen 语义是否需带「未重建」标记；与 1.3 的 git 元数据清理统一为共享原语。
 
 ### 1.3 worktree create() 无 prune-retry，与 reconstruct 不对称——陈旧 git 元数据残留时同 recordId 永久卡死
+
+- 状态：**已修**（2026-09-30 批次）：create/reconstruct 共享陈旧元数据恢复（prune + 分支清理 + 重试）；保留分支不回收维持既有裁决。
 
 - create 前置 rmSync 清目录（:176-182）但不清 git 元数据；上次 create 回滚的 `worktree remove` 失败被 bestEffort 吞掉（:221-224）留下 `<repo>/.git/worktrees/<branch>` 陈旧登记后，`worktree add` 报 already registered 恒失败。reconstruct 对同形态有 prune+重试（:296-305），create 没有。
 - 关联登记：keepBranch 保留的 pi-sub-* 分支无终局回收（单调累积），回收策略（TTL / 数量上限 / 显式清理）待裁决。
@@ -106,12 +112,12 @@
 
 ### 3.1 同策略双实现（修一处漏一处即漂移）
 
-1. **manifest 写面检查逃逸**：写面检查 check-record-write-surface R1 只拦七个函数名字面，record-store-rounds.ts:44 经别名 materializeBoundRecordManifest 逃逸，与该文件:75 自己写的「不 import manifest 写函数」注释矛盾；MANIFEST_INDENT_SPACES 双定义（字节格式兼容靠两处都=2）。
-2. **eventLog/getFullText 派生规则**：session-reconstructor.ts:229-255 对 execution-record.ts:518-540 逐字节复制（含 TURN_SUMMARY_MAX=80 常量副本）——注释自称「避免循环依赖」，实测反向 import 无环，理由不成立；磁盘重建路径走副本。
-3. **seq journal 基座**：record 域 FileRecordEventJournal.append 与 run 域 FileRunEventJournal.append 各约 90 行 95% 同文，真差异仅 header 行契约与无 seq 存量行兼容两点——可合并为泛型基座。
-4. **updateFromEvent 双 reducer**：core 活体 reducer（execution-record.ts:451）vs SDK 重放 reducer（journal-replay.ts:321）——「重放与 live 共用同一 reducer」的设计已退化为两份，靠 conformance 行为断言防漂移。
-5. **binding 载荷双构造**：run-orchestration.ts:431-453 手写 15 字段 vs terminal.ts:452-476 fullBindingPayload 人肉同步——两处注释同时记录了历史上两次补字段漏拷贝事故。
-6. **collectPatch 接线双份**：finalize-record.ts:124-137 vs record-lifecycle.ts:337-352（注释自称「同款」）。
+1. **[已修 2026-09-30] manifest 写面检查逃逸**（R1 名单补 `materializeBoundRecordManifest` + 缩进常量单源）：写面检查 check-record-write-surface R1 只拦七个函数名字面，record-store-rounds.ts:44 经别名 materializeBoundRecordManifest 逃逸，与该文件:75 自己写的「不 import manifest 写函数」注释矛盾；MANIFEST_INDENT_SPACES 双定义（字节格式兼容靠两处都=2）。
+2. **[已修 2026-09-30] eventLog/getFullText 派生规则**（deriveEventLog/emptyTurn/addUsage/joinTurnText 单源于 execution-record，副本已删）：session-reconstructor.ts:229-255 对 execution-record.ts:518-540 逐字节复制（含 TURN_SUMMARY_MAX=80 常量副本）——注释自称「避免循环依赖」，实测反向 import 无环，理由不成立；磁盘重建路径走副本。
+3. **[已修 2026-09-30] seq journal 基座**（`shared/jsonl-event-journal.ts` 泛型基座 + 两域策略注入；R7 白名单随写者文件更新）：record 域 FileRecordEventJournal.append 与 run 域 FileRunEventJournal.append 各约 90 行 95% 同文，真差异仅 header 行契约与无 seq 存量行兼容两点——可合并为泛型基座。
+4. **[已处置 2026-09-30] updateFromEvent 双 reducer**：两份实现保留（core execution-record.ts:451 / SDK journal-replay.ts:321，逐字等价）；新增差分对拍 `packages/subagent-core/src/execution/__tests__/reducer-parity.test.ts`（同一事件序列分喂两侧、逐字段断言）作为真漂移防线——既有 conformance C5 只跑 SDK 侧，不构成防线。原「core 委托 SDK」的收敛方案已**回退**：经 SDK barrel 会把 spawn/env/child_process 整图拖进 core 持久化模块，与 4 个 `vi.mock("node:child_process")` 测试冲突（全量套件 72 例红）；两侧注释已改为「两份 + 差分对拍锁定」。
+5. **[已修 2026-09-30] binding 载荷双构造**（身份域子载荷单源，spawn 与 settle 两处共用）：run-orchestration.ts:431-453 手写 15 字段 vs terminal.ts:452-476 fullBindingPayload 人肉同步——两处注释同时记录了历史上两次补字段漏拷贝事故。
+6. **[已修 2026-09-30] collectPatch 接线双份**（`worktree/worktree-patch-collection.ts` 单源）：finalize-record.ts:124-137 vs record-lifecycle.ts:337-352（注释自称「同款」）。
 
 ### 3.2 record 流严格读面双实现（branch-review R1 条 2 并入）
 

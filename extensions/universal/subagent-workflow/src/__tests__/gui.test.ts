@@ -2,7 +2,7 @@
  * GUI 协议测试（interface 渲染壳的映射 / ctx 分发 / 构造器三面）。
  *
  * 覆盖：
- *   1. gui-mappers —— mapRunStatus / mapRunIcon（状态字符串 → 协议三态 + 图标）与
+ *   1. gui-mappers —— mapRunStatus / mapRunIcon（子代理执行状态 → 协议三态 + 图标）与
  *      toGuiCtx（ExtensionContext → GuiContext 最小子集）
  *   2. adapter     —— ctx.mode 分发契约（rpc → __gui__ 附加，其余模式不附加）
  *   3. 构造器      —— buildGuiComponent（subagent）/ buildScriptGui（script）按
@@ -27,67 +27,30 @@ import { buildScriptGui } from "../interface/tool-workflow-script.ts";
 import type { WorkflowScriptToolDetails } from "../interface/tool-workflow-script.ts";
 
 // ============================================================
-// mapRunStatus —— 状态字符串 → list-tree 三态 status
+// mapRunStatus / mapRunIcon —— 子代理执行状态（ExecutionStatus）→ 三态 + 图标
+//
+// [§2.2 入参域纠正] 此前用例喂的是 workflow run 词表（done/completed/failed/
+// aborted/cancelled/crashed/error/budget_limited/time_limited + 大写 + 子串拼接），
+// 而唯一生产调用方（subagent-actions.ts）传的是 SubagentListItem.status =
+// ExecutionStatus（running|idle）——那一整张关键词表在生产不可达。收窄入参后按域内
+// 两值断言；「未知词表」这类断言随之删除（类型层面已不可表达）。
 // ============================================================
 
 describe("mapRunStatus", () => {
   it.each([
     ["running", "running"],
-    ["done", "done"],
-    ["completed", "done"],
-    ["success", "done"],
-    ["pending", "done"],
-    ["failed", "failed"],
-    ["aborted", "failed"],
-    ["cancelled", "failed"],
-    ["crashed", "failed"],
-    ["error", "failed"],
-    ["budget_limited", "failed"],
-    ["time_limited", "failed"],
-    // mapRunStatus 用 includes 子串匹配，"done (failed)" 含 "failed" → failed。
-    // 这是 workflow status action 的典型输入（status + reason 拼接），
-    // reason 后缀优先于外层 done。
-    ["done (failed)", "failed"],
-  ])("%s → %s", (status, expected) => {
+    ["idle", "done"],
+  ] as const)("%s → %s", (status, expected) => {
     expect(mapRunStatus(status)).toBe(expected);
   });
-
-  it("大小写不敏感", () => {
-    expect(mapRunStatus("RUNNING")).toBe("running");
-    expect(mapRunStatus("Failed")).toBe("failed");
-    expect(mapRunStatus("DONE")).toBe("done");
-  });
 });
-
-// ============================================================
-// mapRunIcon —— 状态字符串 → TreeItem.icon
-// ============================================================
 
 describe("mapRunIcon", () => {
   it.each([
     ["running", "circle"],
-    ["done", "check"],
-    ["completed", "check"],
-    ["success", "check"],
-    ["failed", "cross"],
-    ["aborted", "cross"],
-    ["cancelled", "cross"],
-    ["crashed", "cross"],
-    ["error", "cross"],
-    ["budget_limited", "cross"],
-    ["time_limited", "cross"],
-  ])("%s → %s", (status, expected) => {
+    ["idle", "check"],
+  ] as const)("%s → %s", (status, expected) => {
     expect(mapRunIcon(status)).toBe(expected);
-  });
-
-  it("未知状态 → done/check（default 兜底，S#15）", () => {
-    expect(mapRunStatus("foobar")).toBe("done");
-    expect(mapRunIcon("foobar")).toBe("check");
-  });
-
-  it("空串 → done/check（default 兜底，S#15）", () => {
-    expect(mapRunStatus("")).toBe("done");
-    expect(mapRunIcon("")).toBe("check");
   });
 });
 
@@ -178,20 +141,22 @@ describe("buildGuiComponent", () => {
                   totalTokens: 100,
                 },
                 {
-                  subagentId: "sub-done",
+                  subagentId: "sub-idle",
                   agent: "reviewer",
                   slug: "",
-                  status: "done",
+                  // [§2.2 入参域纠正] 子代理执行状态只有 running|idle——旧 fixture 用
+                  // done/failed（workflow 词表），那是 mapRunStatus 收窄掉的死分支。
+                  status: "idle",
                   mode: "background",
                   duration: 20,
                   model: "gpt-4",
                   totalTokens: 200,
                 },
                 {
-                  subagentId: "sub-failed",
+                  subagentId: "sub-idle-2",
                   agent: "tester",
                   slug: "ci",
-                  status: "failed",
+                  status: "idle",
                   mode: "background",
                   duration: 5,
                   model: "gpt-4",
@@ -214,15 +179,16 @@ describe("buildGuiComponent", () => {
       // 含 slug 时 label 格式 "agent · slug · subagentId"
       expect(props.items[0].label).toBe("coder · feat-a · sub-running");
 
-      // done → done / check
+      // idle → done / check（空闲 = 无进行中工作）
       expect(props.items[1].status).toBe("done");
       expect(props.items[1].icon).toBe("check");
       // 无 slug（空串）时 label 格式 "agent · subagentId"
-      expect(props.items[1].label).toBe("reviewer · sub-done");
+      expect(props.items[1].label).toBe("reviewer · sub-idle");
 
-      // failed → failed / cross
-      expect(props.items[2].status).toBe("failed");
-      expect(props.items[2].icon).toBe("cross");
+      // idle（带 slug）→ 同映射；标签格式 "agent · slug · subagentId"
+      expect(props.items[2].status).toBe("done");
+      expect(props.items[2].icon).toBe("check");
+      expect(props.items[2].label).toBe("tester · ci · sub-idle-2");
     });
 
     it("空 items → list-tree with empty items", () => {

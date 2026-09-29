@@ -452,9 +452,11 @@ function statusColorToken(
   status: StatusText,
 ): "success" | "warning" | "error" | "muted" {
   switch (status) {
-    case "completed": return "success";
+    // [§2.2 色档对齐] 预算耗尽 / 超时是失败族终局——与 formatStatusBadge 同档 error
+    //（此前本函数把它们归 muted，同一状态在徽标与圆点两处一个当错误一个当灰）。
+    case "failed": case "aborted": case "budget_limited": case "time_limited": return "error";
+    case "completed": case "done": return "success";
     case "running": return "warning";
-    case "failed": case "aborted": return "error";
     default: return "muted";
   }
 }
@@ -472,9 +474,12 @@ export function formatStatusBadge(
   theme: ThemeLike,
 ): string {
   switch (status) {
+    // [§2.2 终局徽标修复] displayStatusOf（唯一生产入参）的终局值是 "done"，此前无该
+    // 分支 → 落 default 显示 muted 裸字 "done"；补成分支后与 completed 同形（success
+    // ✓ completed），TUI 头部不再出现无色的裸状态字。
+    case "done": case "completed": return theme.fg("success", "\u2713 completed");
     case "running": return theme.fg("warning", "\u25CF running");
     case "interrupted": return theme.fg("muted", "\u25CB interrupted");
-    case "completed": return theme.fg("success", "\u2713 completed");
     case "failed": return theme.fg("error", "\u2717 failed");
     case "aborted": return theme.fg("error", "\u2717 aborted");
     case "budget_limited": return theme.fg("error", "\u26A0 budget");

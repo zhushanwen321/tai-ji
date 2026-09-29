@@ -83,8 +83,13 @@ export function projectRecordProgress(rec: SubagentRecord): LiveProgressView {
   };
 }
 
-/** status → 语义色标签（L2 detail 头用）。 */
-export function statusLabel(status: string, theme: ThemeLike): string {
+/**
+ * status → 语义色标签（L2 detail 头用）。
+ *
+ * [§2.2 入参收窄] 此前签名是裸 string，任何词表都能静默落 muted（与 formatStatusBadge
+ * 同批状态处理不一致）；收窄到 trace 节点状态联合后，新增节点状态会在编译期强制补齐。
+ */
+export function statusLabel(status: ExecutionTraceNode["status"], theme: ThemeLike): string {
   switch (status) {
     case "completed": return theme.fg("success", status);
     case "running": return theme.fg("warning", status);
