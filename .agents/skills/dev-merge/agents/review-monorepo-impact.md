@@ -19,7 +19,7 @@ task prompt 中必须包含：
 阶段 1.5 产物 `<repo>/.review/metrics.json` 存在时必须消费其中的循环依赖条目（见步骤 3）。
 
 
-阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base main` 产出，存在时必须消费）：命中约束清单中 dimensions 含本维度（monorepo-impact）的条目必须逐条核对——enforcement 为 review 的条目是本维度重点；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
+阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base main` 产出，存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-monorepo-impact` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
 
 ## 执行步骤
 

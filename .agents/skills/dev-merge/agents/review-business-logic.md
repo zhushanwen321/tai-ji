@@ -13,7 +13,7 @@ task prompt 中必须包含：
 - `output`：审查报告输出路径（绝对路径）
 
 
-阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base main` 产出，存在时必须消费）：命中约束清单中 dimensions 含本维度（business-logic）的条目必须逐条核对——enforcement 为 review 的条目是本维度重点；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
+阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base main` 产出，存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-business-logic` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
 
 ## 通用判据（read 引用，不内嵌）
 
@@ -26,7 +26,7 @@ task prompt 中必须包含：
 
 ## 项目特化检查
 
-本维度的项目检查项已收编 `docs/constraints.json`（登记 SSOT），经 `.review/constraints.md` 按本维度（business-logic）消费——清单中 dimensions 含 business-logic 的条目逐条核对（含全部 enforcement 为 review 且 agent 指向本维度的条目），约束内容全文以「权威源」列指向的文档为准。主要承接条目导航：
+本维度的项目检查项已收编 `docs/constraints.json`（登记 SSOT），经 `.review/constraints.md` 按本维度（business-logic）消费——清单执行列含 `review:review-business-logic` 的条目逐条核对，约束内容全文以「权威源」列指向的文档为准。主要承接条目导航：
 
 - emit 单 payload / listener refCount / 错误重置 isGenerating + streamingMessage → C-comm-11（authority: AGENTS.md）
 - streaming message 生命周期时序 → C-state-18（authority: STANDARDS.md §3.3）
@@ -39,7 +39,7 @@ task prompt 中必须包含：
 
 1. **获取变更范围**：在项目根目录执行 `git diff main...HEAD --stat` 确认变更文件列表，再执行 `git diff main...HEAD` 获取完整 diff。
 2. **按通用判据执行**：Read 两个技能文件，按 code-domain-review 五步协议过全部变更（意图判断 / 逻辑推演 / 副作用系统检查），按 code-harden 策略裁决表核对每个错误路径（分级输入 = 项目特化检查的 FEATURE-PRIORITIES 分级 + C-proc-21 契约）。
-3. **项目特化检查**：读 `.review/constraints.md`，对 dimensions 含 business-logic 的条目逐条核对（上方导航表 + 清单内其余命中条目）；约束内容需要完整表述时 Read 其 authority 文档原文。
+3. **项目特化检查**：读 `.review/constraints.md`，对执行列含 `review:review-business-logic` 的条目逐条核对（上方导航表 + 清单内其余命中条目）；约束内容需要完整表述时 Read 其 authority 文档原文。
 4. **输出审查报告**到 `output` 路径。
 
 ## 输出格式

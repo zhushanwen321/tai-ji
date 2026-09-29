@@ -477,7 +477,7 @@ async function main(): Promise<Record<string, unknown>> {
         `workflow dev-merge-gates branch-review 第 ${round} 轮——维度 ${dim}。`,
         `审查对象 = 分支增量 diff：git diff ${base}...HEAD（只审增量，不审全库；cwd = feature worktree 根）。`,
         `1. 读 agent 定义 ${agentPath} 全文，按其清单逐项执行。`,
-        `2. 读 .review/constraints.md，dimensions 含 ${dim} 的约束逐条核对。`,
+        `2. 读 .review/constraints.md，「执行」列含 review:review-${dim} 的约束逐条核对（条目归属以执行列 enforcement.agent 为权威，dimensions 分类值不参与归属判定）。`,
         `3. 报告写入 ${reportPath}（先建目录），逐条发现含 severity / files / evidence / guidance。`,
         `4. 只读审查：除报告文件外绝不修改任何文件。`,
         `5. 返回严格 JSON（无多余字段）：{ "reportFile": "${reportPath}", "mustFix": <critical+major 总数>, "suggestion": <minor 总数>, "issues": [ { "title", "severity", "files": [...], "evidence", "guidance" } ] }——mustFix/suggestion 必须与 issues 数组计数一致，无发现返回空 issues 与 0。`,
@@ -689,7 +689,7 @@ async function main(): Promise<Record<string, unknown>> {
       for (round = 1; round <= maxRounds; round++) {
         const openRecords = records.filter((r) => r.status === "open");
         const activeDims = round === 1 ? dims : [...new Set(openRecords.map((r) => r.dimension))];
-        phase("branch-review 审查修复循环（每轮重审活跃维度）");
+        phase(`branch-review 第 ${round} 轮（维度 ${activeDims.join("、")}）`);
         const verdicts = await mapBatch(activeDims, REVIEWER_BATCH, async (dim) => ({
           dim,
           v: await dispatchReviewer(dim, round, openRecords.filter((r) => r.dimension === dim)),

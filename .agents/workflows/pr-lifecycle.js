@@ -831,7 +831,7 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
               "第 " + round + "/" + maxRounds + " 轮评审（维度：" + d.name + "；topic=" + topic + "，round=" + round + "）。",
               "",
               "第一步：Read 评审定义文件 " + d.path + "——其中是你的完整审查 checklist，按它执行审查。",
-              "审查范围：先跑 git diff " + diffBase + "...HEAD 看已提交改动，再跑 git status --porcelain 与 git diff 看未提交工作区改动（统一 commit 的降级路径——fixes 未申报 affectedFiles / git add 全失败——会让修复停在工作区，属本次审查范围内），两路都要覆盖。约束清单存在时必读消费：.review/constraints.md（dimensions 含本维度的条目逐条核对，enforcement: review 的条目是重点；权威源文档按需 Read 原文）。",
+              "审查范围：先跑 git diff " + diffBase + "...HEAD 看已提交改动，再跑 git status --porcelain 与 git diff 看未提交工作区改动（统一 commit 的降级路径——fixes 未申报 affectedFiles / git add 全失败——会让修复停在工作区，属本次审查范围内），两路都要覆盖。约束清单存在时必读消费：.review/constraints.md（「执行」列含 review:review-" + d.name + " 的条目逐条核对——条目归属以执行列 enforcement.agent 为权威，dimensions 分类值不参与归属判定；权威源文档按需 Read 原文）。",
               skipSet.has("constraints") ? "注意：本次 constraints step 被跳过，.review/constraints.md 可能是旧 run 残留——清单与当前 diff 明显不符时以代码事实为准。" : "",
               "只读审查：禁止修改、新建、删除任何代码文件。",
               reconBlock,
