@@ -49,9 +49,7 @@ import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "
 // 全部经 core barrel 消费（生产消费纪律：extensions 源码不深路径 import core）。
 import {
   AgentCall,
-  ALL_RUN_OUTCOMES,
   Budget,
-  RUN_EVENT_TYPES,
   RUN_EVENT_JOURNAL_SUFFIX,
   STATE_DIR_NAME,
   Trace,
@@ -59,9 +57,15 @@ import {
   buildWorkflowRecordSettledEntryData,
   classifyWorkflowRecordEntryData,
   getLogger,
+  // [§3.2] 单行坏行判定规则单源在 core（requireSeq:false = 兼容档，存量无 seq 行放行）；
+  // 壳侧只保留自己的错误文案与 ENOENT 分流。本地词表投影（RUN_EVENT_TYPE_SET /
+  // hasEventEnvelope）与 outcome 判据副本已删。
+  parseRecordStreamLine,
+  parseLegacyArgsSummary as parseLegacyArgsSummaryCore,
   runSettledOutcomeToDoneReason,
   type AgentResult,
   type ExecutionTraceNode,
+  type RunEventLineIssue,
   type RunOutcome,
   type RunStore,
   type WorkflowRecordRegisteredEntryData,
@@ -172,21 +176,16 @@ export class RecordStreamCorruptionError extends Error {
   }
 }
 
-/** record 事件词表集合（[D2] 守卫判定的本地只读投影；词表 SSOT = run-events RUN_EVENT_TYPES）。 */
-const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>(RUN_EVENT_TYPES);
-
-/** 事件信封守卫（taste/no-unsafe-cast：结构断言改类型守卫——type/ts 可用性在守卫内收窄）。 */
-function hasEventEnvelope(v: object): v is { type: string; ts: number } {
-  const rec = v as Record<string, unknown>;
-  return typeof rec["type"] === "string" && rec["type"] !== "" && typeof rec["ts"] === "number" && Number.isFinite(rec["ts"]);
-}
-
 /**
  * record 流全量读（严格解析）：合法事件行按写入序返回；坏行（JSON 解析失败 /
- * 非对象 / 缺 type/ts 信封）与载荷完整性缺失（agent-settled 帧缺 result 全文）
+ * 非对象 / 缺 type/ts 信封 / 词表外 type 或 outcome / agent-settled 帧缺 result 全文）
  * 抛 {@link RecordStreamCorruptionError}——不静默跳过（场景 18 坏行停摆语义，
  * 与 core journal scan 活体投影的宽容跳过语义刻意分层：活体 fold 不能因单帧
  * 全停，恢复读面不能对损坏装瞎）。
+ *
+ * [§3.2] 判据经 core 单源原语 parseRecordStreamLine（requireSeq=false——本读面
+ * 兼容 W1 前无 seq 的存量行）消费；core 恢复读面用同一原语的严格档。两侧真差异只剩
+ * 错误文案与 ENOENT 分流。
  *
  * 文件不存在（ENOENT）原样上抛交调用方分流（新形态实体早期崩溃 vs 历史实体）。
  */
@@ -203,39 +202,34 @@ function readRecordStream(recordPath: string): WorkflowRunEvent[] {
           "record 流是 run 域唯一事实源（D1），坏行意味着截断/篡改/写入器缺陷。恢复：检查该文件是否被外部编辑" +
           "或写入器版本与载荷契约不符（dispatchRunCreated/dispatchAskSettled）；无法修复时接受该 run 不可续跑，勿手工删行。",
       );
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      throw corruption("非法 JSON（半截行/截断写入）");
-    }
-    if (typeof parsed !== "object" || parsed === null || !hasEventEnvelope(parsed)) {
-      throw corruption("缺事件信封（type/ts）或非对象行");
-    }
-    const event = parsed as WorkflowRunEvent;
-    // [D2] 词表/词值守卫（对齐 core isWorkflowRunEventLine 判定面）：type 落词表 +
-    // outcome（携带时）落词表——历史形态帧（旧词表成员/旧 outcome 值）按损坏拒绝
-    // （[D1] 历史数据处置：旧词表行不进解析路径；本 strict 读面不静默跳过坏行，
-    // 拒绝语义同半截行——调用方 storeHealthy=false fail-fast）。
-    if (!RUN_EVENT_TYPE_SET.has(event.type)) {
-      throw corruption(`词表外事件 type=${JSON.stringify(event.type)}（旧词表历史行——[D1] 不读旧两件）`);
-    }
-    if (event.type === "run-settled" || event.type === "agent-settled") {
-      // event 已窄化为 RunSettledEvent | AgentSettledEvent（两成员 outcome 均必填）；
-      // !== undefined 防御保留——旧格式历史行可能缺字段（读取面放行，词表判据兜底）。
-      const outcome = event.outcome;
-      if (outcome !== undefined && !(ALL_RUN_OUTCOMES as readonly string[]).includes(outcome as string)) {
-        throw corruption(`词表外 outcome=${JSON.stringify(outcome)}（[D2] 词表重构后的历史形态——interrupted 已入 lifecycle）`);
-      }
-    }
-    if (event.type === "agent-settled" && event.result === undefined) {
-      throw corruption(
-        "agent-settled 帧缺 result 全文（record 单源后为非法形态——流被篡改或写入器未携带全文，场景 18）",
-      );
-    }
-    events.push(event);
+    const result = parseRecordStreamLine(line, { requireSeq: false });
+    if (!result.ok) throw corruption(describeRecordStreamIssue(result.issue));
+    events.push(result.event);
   }
   return events;
+}
+
+/** 单行问题 → 壳 strict 读面的中文文案（core 恢复读面同问题出英文文案——本函数不共享）。 */
+function describeRecordStreamIssue(issue: RunEventLineIssue): string {
+  switch (issue.kind) {
+    case "invalid-json":
+      return "非法 JSON（半截行/截断写入）";
+    case "not-object":
+      return "非对象行（JSON 顶层不是对象）";
+    case "type-envelope":
+      return "缺事件信封（type 非字符串或为空）";
+    case "type-outside-vocabulary":
+      return `词表外事件 type=${JSON.stringify(issue.value)}（旧词表历史行——[D1] 不读旧两件）`;
+    case "ts-envelope":
+      return "缺事件信封 ts（非有限数值）";
+    case "seq-envelope":
+      // 兼容档（requireSeq=false）不校验 seq——本分支仅防御性保留（规则档位改动时文案已在）。
+      return `seq 信封非法 seq=${JSON.stringify(issue.value)}`;
+    case "outcome-outside-vocabulary":
+      return `词表外 outcome=${JSON.stringify(issue.value)}（[D2] 词表重构后的历史形态——interrupted 已入 lifecycle）`;
+    case "agent-settled-missing-result":
+      return "agent-settled 帧缺 result 全文（record 单源后为非法形态——流被篡改或写入器未携带全文，场景 18）";
+  }
 }
 
 /** 事件流尾向扫描取最后一帧 run-settled（单终局不变量下的防御性读取）。 */
@@ -308,20 +302,20 @@ interface CallDraft {
  * 语义限制，回落处置对齐 core 侧「尽力恢复」——core 同款分支 warn 留证，非静默）。
  */
 function parseLegacyArgsSummary(argsSummary: string | undefined): Record<string, unknown> {
-  if (argsSummary === undefined || argsSummary === "" || argsSummary.endsWith("…")) return {};
-  try {
-    const parsed: unknown = JSON.parse(argsSummary);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch (err) {
-    // 回落 {} 不变（$ARGS 语义限制），warn 留证旧格式数据异常（对齐 core
-    // parseArgsSummary 同分支的日志级别）
+  // [§3.2] 恢复规则单源（core parseLegacyArgsSummary，与 resume-run 的旧格式回落同一实现）；
+  // 本包装只补壳侧日志文案——截断分支此前壳侧静默、core 侧 warn，现两侧同留证。
+  const { args, issue } = parseLegacyArgsSummaryCore(argsSummary);
+  if (issue === "truncated-summary") {
     logger.warn(
-      `[subagent-workflow] legacy run-created argsSummary is not parseable JSON — $ARGS restored as {} (${toErrorMessage(err)})`,
+      "[subagent-workflow] legacy run-created argsSummary is truncated — $ARGS restored as {} " +
+        "(legacy record stream predates the full-args payload; rerun with a fresh run if the script needs exact args)",
     );
+  } else if (issue === "not-parseable") {
+    logger.warn("[subagent-workflow] legacy run-created argsSummary is not parseable JSON — $ARGS restored as {}");
+  } else if (issue === "not-object") {
+    logger.warn("[subagent-workflow] legacy run-created argsSummary is not a JSON object — $ARGS restored as {}");
   }
-  return {};
+  return args;
 }
 
 /** [foldRecordStreamToRun 拆分] 事件流 → call 重建中间形态（per taskIndex 聚合

@@ -41,9 +41,10 @@ import {
   runEventJournalPathOf,
 } from "./terminal-actions.ts";
 import {
-  ALL_RUN_OUTCOMES,
   foldRunEventFrames,
-  RUN_EVENT_TYPES,
+  parseLegacyArgsSummary,
+  parseRecordStreamLine,
+  type RunEventLineIssue,
   type WorkflowRunEvent,
 } from "./run-events.ts";
 import { AgentCall } from "./models/agent-call.ts";
@@ -87,19 +88,17 @@ export class ResumeRejectionError extends Error {
   }
 }
 
-const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
-
 /**
  * record 流全量严格读取（恢复读面专用）：非法 JSON / 缺信封 / 词表外 type /
  * agent-settled 缺 result 全文 → 拒绝（场景 18 的 resume 侧延伸，D12）。
  *
  * 与 core journal scan 的宽容跳过（活体投影面）刻意分层：活体 fold 不能因单帧
  * 全停，恢复读面不能对损坏装瞎——静默跳过会把「record 被截断/篡改」伪装成
- * 「无此调用」让残缺流上的 resume 继续跑。与壳侧 readRecordStream
- * （jsonl-run-store.ts；跨包单源结构性不可行——同 D5 core↔shared 约束先例，
- * 该函数未导出且属壳 Infra 层）语义同源但严格度有意分化：core 面多查 seq
- * 断档（见下 D12 检查①），壳面不查。
+ * 「无此调用」让残缺流上的 resume 继续跑。
  *
+ * [§3.2] 单行判据（词表/信封/outcome/agent-settled result）经 core 单源原语
+ * parseRecordStreamLine（requireSeq=true）消费——与壳侧 jsonl-run-store.ts 的
+ * readRecordStream 共用同一份规则，两侧只剩错误文案与「是否查 seq」两处真差异。
  * 本读面额外承担 seq 断档检测（D12 检查①）：行身份严格 +1 递增（首帧 1 起），
  * 跳号 = 截断/丢失行（core scan 宽容跳过坏行后断档即暴露；末尾半截行由 JSON
  * 解析失败直接拒绝——不依赖断档推断）。
@@ -130,29 +129,37 @@ function readRecordStreamStrict(recordPath: string, runId: string): WorkflowRunE
           "or a writer defect. Recovery: inspect the file for external edits; if unrepairable, accept " +
           "that this run cannot be resumed and start a new run. Do NOT hand-delete lines.",
       );
-    const parsed = tryParseJson(line);
-    if (parsed === undefined) throw reject("invalid JSON (truncated/half-written line)");
-    const rec = typeof parsed === "object" && parsed !== null
-      ? (parsed as { type?: unknown; ts?: unknown; seq?: unknown; outcome?: unknown; result?: unknown })
-      : undefined;
-    const bad = (cond: boolean, reason: string): void => {
-      if (cond) throw reject(reason);
-    };
-    bad(rec === undefined, "line is not a JSON object");
-    bad(typeof rec!.type !== "string" || !RUN_EVENT_TYPE_SET.has(rec!.type), `event type ${JSON.stringify(rec!.type)} outside the vocabulary`);
-    bad(typeof rec!.ts !== "number" || !Number.isFinite(rec!.ts), "missing/invalid ts envelope");
-    bad(typeof rec!.seq !== "number" || !Number.isSafeInteger(rec!.seq) || rec!.seq < 1, "missing/invalid seq envelope");
-    bad(
-      rec!.outcome !== undefined && !(ALL_RUN_OUTCOMES as readonly string[]).includes(rec!.outcome as string),
-      `outcome ${JSON.stringify(rec!.outcome)} outside the vocabulary`,
-    );
-    // [D12]「有 settled 事件但 result 全文缺失 = 损坏拒绝」（场景 18 resume 侧）
-    bad(rec!.type === "agent-settled" && rec!.result === undefined, "agent-settled frame carries no result payload (stream tampered or writer defect)");
+    const result = parseRecordStreamLine(line, { requireSeq: true });
+    if (!result.ok) throw reject(describeRunEventLineIssue(result.issue));
     // [D12] 检查①：seq 单调无断档（首帧 1 起、逐行 +1）——跳号 = 丢行/截断
-    bad(rec!.seq !== events.length + 1, `seq gap detected (expected ${events.length + 1}, got ${rec!.seq}) — truncated or lost lines`);
-    events.push(parsed as WorkflowRunEvent);
+    const seq = result.event.seq;
+    if (seq !== events.length + 1) {
+      throw reject(`seq gap detected (expected ${events.length + 1}, got ${seq}) — truncated or lost lines`);
+    }
+    events.push(result.event);
   }
   return events;
+}
+
+/** 单行问题 → core 恢复读面的英文文案（壳侧同问题出中文文案——本函数不共享）。 */
+function describeRunEventLineIssue(issue: RunEventLineIssue): string {
+  switch (issue.kind) {
+    case "invalid-json":
+      return "invalid JSON (truncated/half-written line)";
+    case "not-object":
+      return "line is not a JSON object";
+    case "type-envelope":
+    case "type-outside-vocabulary":
+      return `event type ${JSON.stringify(issue.value)} outside the vocabulary`;
+    case "ts-envelope":
+      return "missing/invalid ts envelope";
+    case "seq-envelope":
+      return "missing/invalid seq envelope";
+    case "outcome-outside-vocabulary":
+      return `outcome ${JSON.stringify(issue.value)} outside the vocabulary`;
+    case "agent-settled-missing-result":
+      return "agent-settled frame carries no result payload (stream tampered or writer defect)";
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -948,19 +955,16 @@ function parseAgentInput(input: string): AgentCallOpts | undefined {
  * 不可解析回落空对象 + warn（旧格式流的 $ARGS 语义限制，留痕可诊断）。
  */
 function parseArgsSummary(argsSummary: string | undefined): Record<string, unknown> {
-  if (argsSummary === undefined || argsSummary === "") return {};
-  if (argsSummary.endsWith("…")) {
+  // [§3.2] 恢复规则单源（parseLegacyArgsSummary，与壳 jsonl-run-store 的旧格式回落
+  // 同一实现）；本包装只补 core 侧日志文案。
+  const { args, issue } = parseLegacyArgsSummary(argsSummary);
+  if (issue === "truncated-summary") {
     logger.warn(
       "[workflow] resume: legacy run-created frame carries only a truncated argsSummary — $ARGS restored as {} " +
         "(legacy record stream predates the full-args payload; rerun with a fresh run if the script needs exact args)",
     );
-    return {};
-  }
-  try {
-    const parsed: unknown = JSON.parse(argsSummary);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
-  } catch {
+  } else if (issue === "not-parseable" || issue === "not-object") {
     logger.warn("[workflow] resume: run-created argsSummary is not parseable JSON — $ARGS restored as {}");
   }
-  return {};
+  return args;
 }

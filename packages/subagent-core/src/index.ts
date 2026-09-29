@@ -629,9 +629,19 @@ export {
   foldRunEventCheckpoint,
   INITIAL_RUN_EVENT_FOLD,
   RUN_EVENT_JOURNAL_SUFFIX,
+  // [§3.2] record 流单行坏行判定原语（core 恢复读面与壳 strict 读面共用单源——规则
+  // 在 core，错误文案由各调用方自持；此前两处各写一份判据，漂移即同一坏行一边拒绝
+  // 一边放行）。
+  parseRecordStreamLine,
+  parseLegacyArgsSummary,
+  type LegacyArgsSummaryIssue,
+  type LegacyArgsSummaryResult,
   type RunAskStepFold,
   type RunEventFoldCheckpoint,
   type RunEventJournal,
+  type RunEventLineIssue,
+  type RunEventLineIssueKind,
+  type RunEventLineResult,
   type RunJournalFold,
   type RunOutcome,
   type WorkflowRunEvent,
