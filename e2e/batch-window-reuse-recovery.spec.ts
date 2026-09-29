@@ -419,15 +419,6 @@ async function assertA8RecordMediaFace(
   run: { runId: string },
   agentDir: string,
 ): Promise<{ registered: Record<string, unknown>[] }> {
-  const sessionsNow = listFilesRecursive(sessionsDir, '.jsonl')
-  // record 介质面（W1 权威介质口径——「同一 record 多轮」的最硬证据）：
-  // ① 主 session 文件的 subagent-record v2 条目：registered 恰 1 + settled 恰 1
-  //    （origin=workflow + parentRunId=本 run；第二次调用若新建成员会有第二对条目）。
-  // ② record 事件文件（<recordsDir>/<sa-id>.events，注册条目 id 直接定址）：
-  //    record-round-started 恰 2（revive 续写轮）+ record-round-idle 恰 2。
-  // 注：pi 成员 session 文件（sessions/ 树）的落盘时序对本 spec 不可靠（多轮实测
-  // 只见主 session 落盘），不作为断言面——session 连续性由 record 单 id + 两轮
-  // 事件承载（BATCH-08 通过标准的介质同型锚）。
   const mainSessionFile = sessionsNow.find((f) => {
     try { return fs.readFileSync(f, 'utf8').includes('[a8-dispatch]') } catch { return false }
   })
@@ -536,6 +527,7 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
       '两条 agent 均应 done（revive 续写轮正常完成）',
     ).toBe(true)
 
+    const sessionsNow = listFilesRecursive(sessionsDir, '.jsonl')
     const { registered } = await assertA8RecordMediaFace(sessionsNow, run, agentDir)
 
     // record 事件文件：round 两轮（encodeCwd 同源公式：--<cwd 斜杠转->>--）
