@@ -1,5 +1,3 @@
-// @vitest-environment node
-
 /**
  * useAppUpdate · 手动通道衔接测试（update-network-resilience renderer 侧 D2/D9）。
  *
