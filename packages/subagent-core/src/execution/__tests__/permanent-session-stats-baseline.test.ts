@@ -31,8 +31,9 @@ import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
 import { createRecord, updateFromEvent } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { readRecordBinding, zcodeAnchorBasePath, writeRecordBinding } from "../persistence/state-marker.ts";
-import type { ExecutionRecord, TranscriptRef } from "../assembly/types.ts";
+import type { ExecutionRecord, SubagentRecord, TranscriptRef } from "../assembly/types.ts";
 import { ResurrectDeniedError } from "../assembly/types.ts";
+import { v2RegisteredEntry, v2SettledEntry } from "./helpers/v2-record-entry.ts";
 
 // ── fixture ──────────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ function writeIdentityChild(file: string, id: string): void {
 }
 
 /** 主 session 文件写一条 subagent-record entry（entry 源的磁盘供给形态）。 */
-function appendRecordEntryLine(mainSessionFile: string, data: Record<string, unknown>): void {
+function appendRecordEntryLine(mainSessionFile: string, data: unknown): void {
   const line = JSON.stringify({
     type: "custom",
     id: `e-${Math.random().toString(36).slice(2, 8)}`,
@@ -296,10 +297,10 @@ describe("U7③ zcode 锚 settle 快照与重启恢复", () => {
     storeA.register(rec);
     storeA.markSettled(rec, "gc");
 
-    // 主 session entry（settle entry 投影——reportRecordTransition 产物形态）。
+    // 主 session entry 族（v2 投影：注册 + 终态两条款——settle 条目承载统计/引擎锚；
+    // v1 全量快照形态已随兼容层删除）。
     const mainSessionFile = path.join(dir, "main-session.jsonl");
-    appendRecordEntryLine(mainSessionFile, {
-      v: 1,
+    const settled: SubagentRecord = {
       id: "zc-1",
       agent: "general-purpose",
       task: "do zcode things",
@@ -309,14 +310,20 @@ describe("U7③ zcode 锚 settle 快照与重启恢复", () => {
       mode: "background",
       startedAt: 1,
       rootSessionId: "root-1",
+      parentRecordId: undefined,
       depth: 0,
+      endedAt: 2,
       turns: 6,
       totalTokens: 800,
       model: "test/model",
-      round: 2,
+      thinkingLevel: undefined,
+      eventLog: [],
+      displayItems: [],
       engine: "zcode",
       engineHandle: { sessionRef: { sessionId: "s-1", dbPath }, poolKey: "shared" },
-    });
+    };
+    appendRecordEntryLine(mainSessionFile, v2RegisteredEntry(settled));
+    appendRecordEntryLine(mainSessionFile, v2SettledEntry(settled));
 
     // 重启：新 store + initSession 恢复入口（recoverOrphanRecords 记忆 mainSessionFile）。
     const storeB = newStore();
@@ -326,7 +333,6 @@ describe("U7③ zcode 锚 settle 快照与重启恢复", () => {
     expect(found?.engine).toBe("zcode");
     expect(found?.turns).toBe(6);
     expect(found?.totalTokens).toBe(800);
-    expect(found?.round).toBe(2);
     expect(found?.status).toBe("idle");
     // 锚恢复（cold-lookup 链等价断言）：engineHandle.sessionRef → zcode 锚。
     const anchor = transcriptAnchorOf(found ?? {});
