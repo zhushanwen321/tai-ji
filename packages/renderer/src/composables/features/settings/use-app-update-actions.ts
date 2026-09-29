@@ -8,6 +8,7 @@
  * 依赖方向：本模块 → use-app-update-state（读改 state + errorHandled flag）
  * + use-app-update-ipc。被 useAppUpdate.ts 消费（进生产返回对象）。
  */
+import { toErrorMessage } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
 import type { AppUpdateIpc } from './use-app-update-ipc'
@@ -62,7 +63,7 @@ export function createActionsAxis(deps: ActionsAxisDeps): ActionsAxis {
       // 去重：onUpdateError 已置 errorHandled=true 则不覆盖（SSOT 优先）
       if (!state.flags.errorHandled) {
         state.state.state = 'error'
-        state.state.errorMessage = e instanceof Error ? e.message : String(e)
+        state.state.errorMessage = toErrorMessage(e)
         // 兜底错误不携带 suggestion，清掉上一次错误遗留的陈旧恢复指引
         state.state.errorSuggestion = ''
       }
@@ -105,7 +106,7 @@ export function createActionsAxis(deps: ActionsAxisDeps): ActionsAxis {
     } catch (e) {
       if (!state.flags.errorHandled) {
         state.state.state = 'error'
-        state.state.errorMessage = e instanceof Error ? e.message : String(e)
+        state.state.errorMessage = toErrorMessage(e)
         // 兜底错误不携带 suggestion，清掉上一次错误遗留的陈旧恢复指引
         state.state.errorSuggestion = ''
       }

@@ -23,6 +23,7 @@
 import { ref, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { runOptimisticUpdate } from '@taiji/core/foundation/optimistic-update'
+import { toErrorMessage } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 
 /** 默认成功 toast key（System 设置项通用「已保存」文案）。 */
@@ -39,14 +40,9 @@ function snapshotOf<TValue>(value: TValue): TValue {
   return structuredClone(value)
 }
 
-/** saveFailed toast 的 reason 插值载荷。 */
+/** saveFailed toast 的 reason 插值载荷（错误文本归一见 @taiji/core toErrorMessage）。 */
 function reasonPayload(e: unknown): { reason: string } {
-  return { reason: e instanceof Error ? e.message : String(e) }
-}
-
-/** e → 用户可见错误文本（默认形态：Error message 原文，非 Error 走 String）。 */
-function reasonOf(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
+  return { reason: toErrorMessage(e) }
 }
 
 /**
@@ -220,7 +216,7 @@ export function createMirrorSave<T>(save: (arg: T) => Promise<void>): {
       await save(arg)
     } catch (e) {
       saveError.value = true
-      toastError(reasonOf(e))
+      toastError(toErrorMessage(e))
     }
   }
 
@@ -257,7 +253,7 @@ export function createExplicitSave<TArg = void>(opts: ExplicitSaveOptions<TArg>)
       await opts.run(arg)
       info(t(opts.savedToastKey))
     } catch (e) {
-      error(opts.onError ? opts.onError(e) : reasonOf(e))
+      error(opts.onError ? opts.onError(e) : toErrorMessage(e))
     } finally {
       saving.value = false
     }

@@ -12,6 +12,7 @@
  */
 import { ref, reactive, computed, watch, type Ref, type ComputedRef } from 'vue'
 import type { ProviderInfo, SetProviderData } from '@taiji/shared'
+import { toErrorMessage } from '../../utils/error-message'
 import { getSettingsTransport } from './transport'
 import type { FormSnapshot, SaveResult, Translate } from './provider-edit-types'
 import { formPatchFromProvider, reconcileBroadcast, type ProviderFormPatch } from './provider-edit-reconcile'
@@ -317,7 +318,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
       // 哨兵→''、空→undefined 均为 falsy：只有本次真正写入非空 key（明文或 $ENV 引用）才 true
       return { ok: true, wroteApiKey: Boolean(resolveApiKeyForSave(draft.apiKey)), quotaAutoEnabled: res?.quotaAutoEnabled }
     } catch (e) {
-      setActionError('save', e instanceof Error ? e.message : String(e))
+      setActionError('save', toErrorMessage(e))
       return { ok: false, wroteApiKey: false }
     } finally {
       saving.value = false

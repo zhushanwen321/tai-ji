@@ -81,7 +81,7 @@ export function ensureLedgerBound(pi: ExtensionAPI, ctx: ExtensionContext): void
 		bindNotifyLedgerHost(host).recoverFromSession();
 	} catch (err) {
 		logger.warn("[session-manager] notify ledger bind failed (record degrades until next session_start)", {
-			error: err instanceof Error ? err.message : String(err),
+			error: toErrorMessage(err),
 		});
 	}
 }
@@ -113,7 +113,7 @@ export function recordManagedNotify(
 		//（unregister 照常），warn 留痕可归因
 		logger.warn("[session-manager] notify ledger record failed", {
 			notifyId,
-			error: err instanceof Error ? err.message : String(err),
+			error: toErrorMessage(err),
 		});
 		return false;
 	}
@@ -133,7 +133,7 @@ export function runLedgerCompactionCheck(): void {
 		}
 	} catch (err) {
 		logger.warn("[session-manager] notify ledger compactionCheck failed", {
-			error: err instanceof Error ? err.message : String(err),
+			error: toErrorMessage(err),
 		});
 	}
 }

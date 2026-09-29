@@ -29,6 +29,7 @@ import {
 	type SessionManagerWatchReason,
 } from "@zhushanwen/extension-protocol";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 import { buildManagedNotifyContent, type ManagedNotifyDetails } from "./notify-content.ts";
 import { recordManagedNotify } from "./notify-ledger.ts";
@@ -117,7 +118,7 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 			// warn 留痕（STANDARDS §11.2 静默丢弃必须登记）
 			logger.warn("[session-manager] pending:register emit failed (stale bus?)", {
 				id,
-				error: err instanceof Error ? err.message : String(err),
+				error: toErrorMessage(err),
 			});
 		}
 	}
@@ -130,7 +131,7 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 		} catch (err) {
 			logger.warn("[session-manager] pending:unregister emit failed (stale bus?)", {
 				id,
-				error: err instanceof Error ? err.message : String(err),
+				error: toErrorMessage(err),
 			});
 		}
 	}
@@ -150,14 +151,14 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 				} catch (err) {
 					logger.error("[session-manager] watch respond handling failed", {
 						notifyId,
-						error: err instanceof Error ? err.message : String(err),
+						error: toErrorMessage(err),
 					});
 				}
 			},
 			(err: unknown) => {
 				logger.warn("[session-manager] watch select rejected", {
 					notifyId,
-					error: err instanceof Error ? err.message : String(err),
+					error: toErrorMessage(err),
 				});
 			},
 		);
@@ -313,7 +314,7 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 			entries = ctx.sessionManager.getEntries();
 		} catch (err) {
 			logger.warn("[session-manager] session_start recovery failed to read entries", {
-				error: err instanceof Error ? err.message : String(err),
+				error: toErrorMessage(err),
 			});
 			return;
 		}

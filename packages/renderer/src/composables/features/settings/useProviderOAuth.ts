@@ -28,7 +28,7 @@
 import { computed, onMounted, onScopeDispose, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { BuiltinProviderTemplate, ProviderInfo, ProviderId } from '@taiji/shared'
-import { getSettingsTransport } from '@taiji/core'
+import { getSettingsTransport, toErrorMessage } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 
 // OAuthDialog 的 .vue 导出类型在 plain tsc 下不可用（ui 包 shim 不导出命名类型），本地定义结构兼容
@@ -165,7 +165,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
       await getSettingsTransport().setProvider(target.id, { authMethod: 'oauth' })
       toast.info(t('settings.provider.builtinTemplate.oauthAuthorized', { name: target.name }))
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
+      toast.error(toErrorMessage(e))
     }
     await refreshOAuthPresence(providerId)
   }
@@ -312,7 +312,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
       toast.info(t('settings.providerEdit.credentialOauthLoggedOut', { name: p.name }))
     } catch (e) {
       // transport reject（断连/超时）：错误上屏（错误必须可见，不静默吞）
-      toast.error(e instanceof Error ? e.message : String(e))
+      toast.error(toErrorMessage(e))
       return
     }
     await refreshOAuthPresence(p.id)

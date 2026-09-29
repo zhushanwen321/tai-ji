@@ -11,6 +11,7 @@
  */
 import { ref, type Ref } from 'vue'
 import type { ConnectionTestResultRow, ProviderInfo } from '@taiji/shared'
+import { toErrorMessage } from '../../utils/error-message'
 import { getSettingsTransport } from './transport'
 import type { DiscoverModelsRequest, DiscoverModelsResponse } from './transport'
 import type { Translate } from './provider-edit-types'
@@ -143,7 +144,7 @@ export function createProviderEditDiscover(input: ProviderEditDiscoverInputs): P
       applyDiscoverResult(res)
     } catch (e) {
       if (isTest) testResult.value = 'error'
-      reportActionError(e instanceof Error ? e.message : String(e))
+      reportActionError(toErrorMessage(e))
     } finally {
       if (isTest) testing.value = false
       else discovering.value = false
