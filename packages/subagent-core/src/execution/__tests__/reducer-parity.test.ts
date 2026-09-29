@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import { updateFromEvent as sdkUpdateFromEvent } from "@zhushanwen/subagent-engine-sdk";
 import type { ReplayRecordView } from "@zhushanwen/subagent-engine-sdk";
 
-import type { AgentEvent, ExecutionRecord } from "../assembly/types.ts";
+import type { AgentEvent, AgentUsage, ExecutionRecord } from "../assembly/types.ts";
 import { createRecord, updateFromEvent } from "../persistence/execution-record.ts";
 
 function makeCore(): ExecutionRecord {
@@ -58,7 +58,7 @@ const FULL_SEQUENCE: AgentEvent[] = [
   { type: "text_delta", delta: "lo" },
   { type: "thinking_delta", delta: "plan" },
   { type: "tool_start", toolName: "read", args: { path: "/a/b/foo.ts" } },
-  { type: "tool_end", toolName: "read", args: { path: "/a/b/foo.ts" }, result: { ok: true } },
+  { type: "tool_end", toolName: "read", args: { path: "/a/b/foo.ts" }, result: { details: { ok: true } } },
   { type: "tool_start", toolName: "bash", args: { command: "ls" } },
   { type: "tool_end", toolName: "bash", args: { command: "ls" }, isError: true },
   { type: "message_end", usage: { input: 10, output: 20, cacheRead: 5, cacheWrite: 3 } },
@@ -66,7 +66,7 @@ const FULL_SEQUENCE: AgentEvent[] = [
   { type: "error", message: "transient" },
   { type: "compaction" },
   { type: "activity" },
-  { type: "armed" },
+  { type: "armed", schemaEnvVar: "PI_WORKFLOW_SCHEMA", extensionPkg: "@zhushanwen/pi-subagent-workflow" },
   { type: "turn_end" },
 ];
 
@@ -91,17 +91,20 @@ describe("reducer parity（core 活体 vs SDK 重放）", () => {
     const { core, sdk } = runBoth([
       { type: "tool_start", toolName: "grep", args: { pattern: "x" } },
       // 无配对的 tool_end（外部注入工具 / 丢帧）→ 两侧都应 push 已完成项
-      { type: "tool_end", toolName: "orphan", args: { q: 1 }, result: "r" },
+      { type: "tool_end", toolName: "orphan", args: { q: 1 }, result: { details: "r" } },
       { type: "turn_end" },
       // turn_end 之后的滞后 tool_end → 跨轮倒序配对兜底
-      { type: "tool_end", toolName: "grep", args: { pattern: "x" }, result: "hit" },
+      { type: "tool_end", toolName: "grep", args: { pattern: "x" }, result: { details: "hit" } },
     ]);
     expectParity(core, sdk);
   });
 
   it("分段断言：usage 归一与 totalTokens 等价（含缺省字段）", () => {
+    // 协议类型要求四字段齐全，但引擎实际可能只报部分字段——刻意以缺省形态喂入，
+    // 覆盖两侧「缺省字段按 0 归一」的分支（同 budget.test.ts 的 as 用法）。
+    const partialUsage = { input: 1, output: 2 } as AgentUsage;
     const { core, sdk } = runBoth([
-      { type: "message_end", usage: { input: 1, output: 2, cacheRead: undefined, cacheWrite: undefined } },
+      { type: "message_end", usage: partialUsage },
       { type: "message_end", usage: { input: 3, output: 4, cacheRead: 5, cacheWrite: 6 } },
     ]);
     expectParity(core, sdk);
