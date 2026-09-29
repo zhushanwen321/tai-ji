@@ -81,7 +81,7 @@ const PUBLISHED_REGISTRY_PACKAGES = new Set([
   '@zhushanwen/pi-plugin-bridge',
   '@zhushanwen/pi-system-prompt',
   '@zhushanwen/pi-system-prompt-trace',
-  // extensions/universal 组（16）
+  // extensions/universal 组（17）
   '@zhushanwen/pi-ask-user',
   '@zhushanwen/pi-base-tool-enhance',
   '@zhushanwen/pi-cache-probe',
@@ -90,6 +90,7 @@ const PUBLISHED_REGISTRY_PACKAGES = new Set([
   '@zhushanwen/pi-pending-notifications',
   '@zhushanwen/pi-permission',
   '@zhushanwen/pi-plan',
+  '@zhushanwen/pi-provider-live-sync',
   '@zhushanwen/pi-rename-session',
   '@zhushanwen/pi-scheduler',
   '@zhushanwen/pi-session-manager',
@@ -103,15 +104,18 @@ const PUBLISHED_REGISTRY_PACKAGES = new Set([
   '@zhushanwen/pi-extension-logger',
   '@zhushanwen/pi-file-lock',
   '@zhushanwen/pi-llm-shared',
-  // packages 组（7）
+  // packages 组（9）
   // extension-protocol / session-delivery：原 @taiji/* scope（npm 无 taiji org，
   // 2026-09-16 改发 @zhushanwen），随 npm-extension-protocol-first 首发登记
+  // session-core / zcode-session-source：随 v0.10.4 npm 批次首发登记
   '@zhushanwen/extension-protocol',
+  '@zhushanwen/session-core',
   '@zhushanwen/session-delivery',
   '@zhushanwen/pi-rpc',
   '@zhushanwen/pi-subagent-cli',
   '@zhushanwen/subagent-core',
   '@zhushanwen/subagent-engine-sdk',
+  '@zhushanwen/zcode-session-source',
   '@zhushanwen/zcode-subagent-cli',
 ])
 
