@@ -37,9 +37,6 @@
 | `evictDoneRunsBeyondCap(runs, keepDone)` | fn | done run 内存淘汰（按 completedAt 升序裁超出保留窗口的项） |
 | `MAX_RETAINED_DONE_RUNS` | const | done run 内存保留窗口（K=20），`evictDoneRunsBeyondCap` 生产入参 |
 | `scheduleTimeBudget(runId, deps, budgetTimeMs)` | fn | run 级墙钟预算计时器（到期 abortRun `time_limited`；溢出值 fail-fast） |
-| `runAndWait(name, args, deps, ...)` | fn | 阻塞至 done 的 launcher 入口（registry 查找 + lint + 轮询，返回 `WorkflowRunResult`） |
-| `executeNestedWorkflow(name, args, parentRun, deps)` | fn | 嵌套 `workflow()` 调用执行体（循环检测 + budget 共享；宿主 `onWorkflowCall` 注入用） |
-| `WorkflowRunResult` | type | `runAndWait` 返回（status 恒 done + reason/scriptResult/error） |
 | `LauncherDeps` | type | launcher 依赖（`LifecycleDeps` + `registry` 脚本发现） |
 | `WorkerHostImpl` | class | `WorkerHost` port 的 worker_threads 实现（`deps.workerHost` 默认装配） |
 | `WorkflowScriptRegistryImpl` | class | 脚本注册表 Infra 实现（`LauncherDeps.registry` 默认装配，config-loader 之上包装 `WorkflowScript` 实体） |
