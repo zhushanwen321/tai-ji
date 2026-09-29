@@ -442,7 +442,6 @@ function makeL2Env() {
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)
   return { lifecycle, getState }
@@ -613,7 +612,6 @@ function makeP2Env(userPresetsFile?: unknown) {
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)
   return {

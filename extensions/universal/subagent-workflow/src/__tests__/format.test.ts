@@ -5,21 +5,27 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 
 import {
+  foldRunEventCheckpoint,
+  INITIAL_RUN_EVENT_FOLD,
+  type ExecutionTraceNode,
+  type RunEventFoldCheckpoint,
+  type WorkflowRunEvent,
+} from "@zhushanwen/subagent-core";
+import {
+  buildPhaseGroups,
   formatElapsed,
   formatElapsedSeconds,
+  formatPhaseLine,
   formatRunStatusElapsed,
   formatTokens,
   formatToolCall,
-  padToVisible,
   sanitizeLabel,
-  segFillColored,
   shortId,
   spinnerGlyph,
   statusGlyph,
-  truncLine,
-  wrapText,
   type ThemeLike,
 } from "../interface/format.ts";
+import { padToVisible, segFillColored, truncLine, wrapText } from "../interface/tui-kit.ts";
 
 // ============================================================
 // formatTokens
@@ -137,12 +143,16 @@ describe("statusGlyph", () => {
     expect(statusGlyph("running")).toEqual({ icon: undefined, color: "accent" });
   });
 
-  it("done → checkmark, success", () => {
+  it("closed → checkmark, success", () => {
     expect(statusGlyph("closed")).toEqual({ icon: "✓", color: "success" });
   });
 
-  it("closed → checkmark, success", () => {
-    expect(statusGlyph("closed")).toEqual({ icon: "✓", color: "success" });
+  // [U2 两态] idle 承接旧 closed 分支视觉基线（✓ success）——实现中 idle/closed 是同
+  // 一个 case 分支，独立断言防未来拆分 idle case 时静默漂移。（F 修：原「done →
+  // checkmark」用例名实不符、与 closed 用例逐字重复，改测真实零覆盖缺口 idle 分支；
+  // 自 status-refactor.test.ts 迁并的 idle 条同契约，合并为一条。）
+  it("idle → checkmark, success（承接旧 closed 分支视觉基线）", () => {
+    expect(statusGlyph("idle")).toEqual({ icon: "✓", color: "success" });
   });
 });
 
@@ -618,5 +628,125 @@ describe("formatToolCall", () => {
     expect(formatToolCall("edit", { file_path: "/opt/x.ts" }, markingTheme)).toBe(
       "muted(edit )accent(/opt/x.ts)",
     );
+  });
+});
+
+// ============================================================
+// phase 分组消费折叠投影（[D3] phase 状态机与展示分组同源——workflow-run-resume-revision U3）
+// ============================================================
+
+/** fresh fold 初值：Map 半边逐用例独立实例（INITIAL_RUN_EVENT_FOLD 的 phases 是
+ * 模块级共享 Map，D3 自愈分支的原地写入会跨 fold 调用残留——独立初值使本组
+ * 断言只依赖单条流自身，不受用例执行序影响）。 */
+function freshFold(): RunEventFoldCheckpoint {
+  return { ...INITIAL_RUN_EVENT_FOLD, asks: new Map(), phases: new Map() };
+}
+
+/** record 事件帧构造 helper（seq 由数组序 +1 推导——fold 严格递增契约）。 */
+function seqEvents(events: Array<Omit<WorkflowRunEvent, "seq">>): WorkflowRunEvent[] {
+  return events.map((e, i) => ({ ...e, seq: i + 1 }) as WorkflowRunEvent);
+}
+
+/** trace 节点构造（settled → completed + completedAt；在途 → running）。 */
+function traceNode(
+  stepIndex: number,
+  agent: string,
+  phase: string | undefined,
+  settled: boolean,
+): ExecutionTraceNode {
+  return {
+    stepIndex,
+    agent,
+    task: "",
+    model: "",
+    status: settled ? "completed" : "running",
+    ...(phase !== undefined ? { phase } : {}),
+    startedAt: "2026-09-28T00:00:00.000Z",
+    ...(settled ? { completedAt: "2026-09-28T00:00:01.000Z" } : {}),
+  };
+}
+
+describe("buildPhaseGroups × fold 投影同源（D3/检查点 6 展示侧）", () => {
+  /** 基准流：p1 两 call 全落定（含 phase-settled）、p2 一 call 在途、崩溃收编。 */
+  const baseEvents = seqEvents([
+    { type: "run-created", ts: 1, runId: "wf-1", workflowName: "demo", argsSummary: "{}" },
+    { type: "phase-started", ts: 2, phase: "p1" },
+    { type: "agent-started", ts: 3, taskIndex: 1, agentName: "alpha", attempt: 1, phase: "p1" },
+    { type: "agent-settled", ts: 4, taskIndex: 1, attempt: 1, outcome: "done", durationMs: 10 },
+    { type: "agent-started", ts: 5, taskIndex: 2, agentName: "beta", attempt: 1, phase: "p1" },
+    { type: "agent-settled", ts: 6, taskIndex: 2, attempt: 1, outcome: "done", durationMs: 10 },
+    { type: "phase-settled", ts: 7, phase: "p1" },
+    { type: "phase-started", ts: 8, phase: "p2" },
+    { type: "agent-started", ts: 9, taskIndex: 3, agentName: "gamma", attempt: 1, phase: "p2" },
+    { type: "run-interrupted", ts: 10, errorCode: "crashed" },
+  ]);
+  const baseNodes = [
+    traceNode(1, "alpha", "p1", true),
+    traceNode(2, "beta", "p1", true),
+    traceNode(3, "gamma", "p2", false),
+  ];
+
+  it("分组归属同源：组名集 ≡ fold phases 投影键集（数据源 = agent-started 的 phase 载荷）", () => {
+    const fold = foldRunEventCheckpoint(baseEvents, () => {}, freshFold());
+    const groups = buildPhaseGroups(baseNodes, fold.phases);
+    expect(new Set(groups.map((g) => g.name))).toEqual(new Set([...fold.phases.keys()]));
+    expect(groups.map((g) => g.nodes.map((n) => n.stepIndex))).toEqual([[1, 2], [3]]);
+  });
+
+  it("完成判定同源：fold settledAt 有无 ⟷ 组 settled（p1 settled / p2 running）", () => {
+    const fold = foldRunEventCheckpoint(baseEvents, () => {}, freshFold());
+    const groups = buildPhaseGroups(baseNodes, fold.phases);
+    const p1 = groups.find((g) => g.name === "p1")!;
+    const p2 = groups.find((g) => g.name === "p2")!;
+    expect(fold.phases.get("p1")!.settledAt).toBeDefined();
+    expect(p1.settled).toBe(true);
+    expect(p1.doneCount).toBe(2);
+    expect(fold.phases.get("p2")!.settledAt).toBeUndefined();
+    expect(p2.settled).toBe(false);
+    expect(p2.doneCount).toBe(0);
+  });
+
+  it("完整事件流上，未注入投影的节点计数推导 ≡ fold 投影判定（活体既有调用形态的同源性）", () => {
+    const fold = foldRunEventCheckpoint(baseEvents, () => {}, freshFold());
+    const withProjection = buildPhaseGroups(baseNodes, fold.phases);
+    const derived = buildPhaseGroups(baseNodes);
+    expect(derived.map((g) => [g.name, g.settled])).toEqual(
+      withProjection.map((g) => [g.name, g.settled]),
+    );
+  });
+
+  it("D3 自愈窗口：phase-started 缺失（postMessage 丢失）→ fold 按 agent-started 载荷自愈建行，分组归组不受影响", () => {
+    const events = baseEvents.filter((e) => !(e.type === "phase-started" && e.phase === "p1"));
+    const fold = foldRunEventCheckpoint(events, () => {}, freshFold());
+    expect(fold.phases.has("p1")).toBe(true); // 自愈行在场（startedAt = 首 agent-started ts）
+    expect(fold.phases.get("p1")!.startedAt).toBe(3);
+    const groups = buildPhaseGroups(baseNodes, fold.phases);
+    expect(groups.map((g) => g.name).sort()).toEqual(["p1", "p2"]);
+  });
+
+  it("无 phase 归属节点 → (default) 匿名组；fold 投影无该行 → 计数推导兜底", () => {
+    const nodes = [traceNode(1, "alpha", undefined, true), traceNode(2, "beta", undefined, false)];
+    const fold = foldRunEventCheckpoint(seqEvents([
+      { type: "run-created", ts: 1, runId: "wf-2", workflowName: "d", argsSummary: "{}" },
+      { type: "agent-started", ts: 2, taskIndex: 1, agentName: "alpha", attempt: 1 },
+      { type: "agent-settled", ts: 3, taskIndex: 1, attempt: 1, outcome: "done", durationMs: 1 },
+      { type: "agent-started", ts: 4, taskIndex: 2, agentName: "beta", attempt: 1 },
+    ]), () => {}, freshFold());
+    const groups = buildPhaseGroups(nodes, fold.phases);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.name).toBe("");
+    expect(groups[0]!.settled).toBe(false); // doneCount 1/2 → 推导兜底 false
+    expect(fold.phases.size).toBe(0);
+  });
+
+  it("formatPhaseLine 的 dot 随组 settled 切换（settled → success 色 / 未 settled → warning 色）", () => {
+    const fold = foldRunEventCheckpoint(baseEvents, () => {}, freshFold());
+    const groups = buildPhaseGroups(baseNodes, fold.phases);
+    const p1Line = formatPhaseLine(groups.find((g) => g.name === "p1")!, 0, false, markingTheme, 40);
+    const p2Line = formatPhaseLine(groups.find((g) => g.name === "p2")!, 1, false, markingTheme, 40);
+    expect(p1Line).toContain("success(●)");
+    expect(p2Line).toContain("warning(●)");
+    expect(p1Line).toContain("1 p1 2/2");
+    expect(p2Line).toContain("2 p2 0/1");
   });
 });

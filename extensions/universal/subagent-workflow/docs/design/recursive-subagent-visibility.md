@@ -246,7 +246,7 @@ this.sessionRootId = envRoot ?? init.sessionId;  // 有 env = 子进程（贯穿
 
 ## 4. 验收
 
-> 用真实 pi CLI 本地实测（项目规范：pi extension 测试优先本地 pi 实测，非单测非 mock）。模型用 `xiaomi-token-plan-cn/mimo-v2.5-pro`。
+> 用真实 pi CLI 本地实测（项目规范：pi extension 测试优先本地 pi 实测，非单测非 mock）。模型用 `<本机可用模型>`。
 
 ### 场景 1：三层嵌套全树可见（回溯目标 1）
 
@@ -254,7 +254,7 @@ this.sessionRootId = envRoot ?? init.sessionId;  // 有 env = 子进程（贯穿
 
 **步骤**：
 1. 写 `recursive-worker.md`（强制递归 agent，深度到 3 停）。
-2. 本地起主 pi session（rpc 模式）：`pi --mode rpc --session-dir /tmp/acc-rec --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <subagent-workflow 路径>`
+2. 本地起主 pi session（rpc 模式）：`pi --mode rpc --session-dir /tmp/acc-rec --model <本机可用模型> --approve --extension <subagent-workflow 路径>`
 3. 发 prompt 让主 agent 用 `recursive-worker.md` spawn A（`agent({agent: <recursive-worker 绝对路径>, maxTurns: 3})`），A 强制 spawn B、B 强制 spawn C。
 4. 等全树完成后，主 session 发 `/subagents` 命令。
 

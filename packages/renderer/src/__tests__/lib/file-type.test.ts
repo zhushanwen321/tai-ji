@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * file-type 判定纯函数单测。
  *

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * FG5 单测 —— message-stream 回合分组纯逻辑 + chat store 块类型扩展。
  *

@@ -17,13 +17,10 @@
 
 import { getLogger } from "./logger.ts";
 import { toErrorMessage } from "./error-message.ts";
-import { engineTimeoutDetail, STDOUT_TAIL_ECHO_CHARS } from "./protocol/error-codes.ts";
+import { engineTimeoutDetail } from "./protocol/error-codes.ts";
 import type { AgentCallOpts, AgentOutcome } from "./protocol/contract-types.ts";
 
 const logger = getLogger("subagents");
-
-/** STDOUT_TAIL_ECHO_CHARS re-export（core 版同款导出面，调用方免跨模块 import）。 */
-export { STDOUT_TAIL_ECHO_CHARS };
 
 // ============================================================
 // 杀链（SIGTERM → grace → SIGKILL）
@@ -117,12 +114,82 @@ export async function killChain(
  * （zsub 实测经验）——幂等吞掉并 debug 留痕，不阻断杀链语义（对已退进程信号本就是
  * no-op）。收口自 zcode launcher 的内联实现（对齐点②：单一权威）。
  */
-function safeKill(child: KillableChild, signal: NodeJS.Signals): void {
+export function safeKill(child: KillableChild, signal: NodeJS.Signals): void {
   try {
     child.kill(signal);
   } catch (err) {
     logger.debug(
       `[kill-chain] ${signal} on exited process: ${toErrorMessage(err)}`,
+    );
+  }
+}
+
+// ============================================================
+// [D9-2 杀伤半径收窄] run 级 pid 杀链（宿主侧，单 pid 非组杀）
+// ============================================================
+
+/**
+ * 单 pid 存活探针（`process.kill(pid, 0)`）。
+ *
+ * 返回三态：true = 存活；false = 已死（ESRCH）；undefined = 不可判定（EPERM =
+ * 进程存在但属他人 / 探针异常）——undefined 按存活保守处理（杀链对已死进程发信号
+ * 本就是 no-op，误判存活只多一次空信号，误判死亡会漏杀）。
+ */
+export function probePidAlive(pid: number): boolean | undefined {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ESRCH") return false;
+    return undefined;
+  }
+}
+
+/** killPidChain 参数形状。 */
+export interface PidChainOptions {
+  /**
+   * SIGTERM 优雅窗口（ms）。缺省 DEFAULT_KILL_GRACE_MS。回收场景的调用方通常
+   * 已先行优雅停止（cancel 帧 SIGTERM），本窗只是宿主侧升级兜底，量级沿用组杀
+   * 收割惯例（5s）。
+   */
+  graceMs?: number;
+  /** SIGKILL 升级时的 warn 留痕语境（如 `run run-a topology kill`）。不传则静默升级。 */
+  note?: string;
+}
+
+/**
+ * [D9-2 半径收窄原语] run 级 pid 杀链：SIGTERM → graceMs → 仍存活则 SIGKILL，
+ * **只打单 pid，绝不组杀**（宿主对引擎孙进程只持镜像 pid、不持 ChildProcess——
+ * 引擎以 detached:true 自成进程组，孙进程在其组内而非自任组长，负 pid 组杀不可达；
+ * 本原语逐 pid 退化单杀，语义 = 「该 run 的进程拓扑」而非引擎组）。
+ *
+ * fire-and-forget：宿主非进程持有方，无 exit 事件可等（对齐 core reaper 的
+ * killProcessTree 形态——升级 timer unref，不阻塞调用方；收尸由 OS 完成）。
+ * 对已死 pid 全程 no-op（信号幂等吞掉）。
+ */
+export function killPidChain(pid: number, opts: PidChainOptions = {}): void {
+  const graceMs = opts.graceMs ?? DEFAULT_KILL_GRACE_MS;
+  signalPid(pid, "SIGTERM");
+  const escalation = setTimeout(() => {
+    // 升级前复核存活（grace 窗内可能已自退）；undefined（不可判定）按存活升级。
+    if (probePidAlive(pid) === false) return;
+    if (opts.note !== undefined) {
+      logger.warn(
+        `[kill-chain] ${opts.note} still alive ${graceMs / MS_PER_SECOND}s after SIGTERM, escalating to SIGKILL (pid ${pid})`,
+      );
+    }
+    signalPid(pid, "SIGKILL");
+  }, graceMs);
+  if (typeof escalation.unref === "function") escalation.unref();
+}
+
+/** 单 pid 发信号兜底包裹（safeKill 的 bare-pid 变体：目标恰在检查与 kill 间自退时 kill 抛 ESRCH——幂等吞掉）。 */
+function signalPid(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
+  } catch (err) {
+    logger.debug(
+      `[kill-chain] ${signal} to pid ${pid} failed (already dead = expected): ${toErrorMessage(err)}`,
     );
   }
 }

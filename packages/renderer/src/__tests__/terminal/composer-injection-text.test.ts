@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * composer-injection text 注入测试（Phase 4 V4.1）。
  *

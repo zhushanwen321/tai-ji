@@ -10,7 +10,7 @@
  *  - 工具模式切换：点 mode 按钮 → preset.update 被调用 + checkbox 列表出现/消失。
  *  - 设为默认：点设为默认 → preset.setDefault 被调用。
  *  - 模式提示词两卡：替换卡红字警示 / 合计计数一行且两卡联动 /
- *    替换保存二次确认（未确认不触发 update）/ 内置调度模式追加卡预置文案非空。
+ *    内置调度模式追加卡预置文案非空。
  *
  * mock 策略：
  *  - vi.mock('@/api') 把 preset 门面替成可断言的 mock。
@@ -389,39 +389,6 @@ describe('PiPresetsPage 模式提示词两卡', () => {
     expect(
       wrapper.find('[data-testid="preset-prompt-combined-count"]').text(),
     ).toContain('合计 9 / 16000')
-  })
-
-  it('替换卡保存走二次确认：未确认前不触发 preset.update', async () => {
-    const store = usePresetStore()
-    store.setPresets([promptPreset()])
-
-    wrapper = mount(PiPresetsPage, { attachTo: document.body })
-    await flushPromises()
-
-    // 改文本使替换卡 dirty（保存按钮解禁）
-    await wrapper.find('[data-testid="preset-prompt-replace-input"]').setValue('new replace text')
-    await flushPromises()
-
-    presetMock.update.mockClear()
-
-    // 点保存 → 只弹二次确认，不写盘
-    await wrapper.find('[data-testid="preset-prompt-replace-save"]').trigger('click')
-    await flushPromises()
-
-    const confirmBtn = Array.from(document.body.querySelectorAll('button'))
-      .find((b) => (b.textContent ?? '').includes('仍然保存'))
-    expect(confirmBtn).toBeTruthy()
-    expect(presetMock.update).not.toHaveBeenCalled()
-
-    // 确认后 → preset.update 被调用，替换段 = 新文本、追加段保留原值
-    confirmBtn!.click()
-    await flushPromises()
-
-    expect(presetMock.update).toHaveBeenCalledTimes(1)
-    const updated = presetMock.update.mock.calls[0][0] as PiLaunchPreset
-    expect(updated.prompt?.replace?.prompt).toBe('new replace text')
-    expect(updated.prompt?.replace?.enabled).toBe(true)
-    expect(updated.prompt?.append?.prompt).toBe('de')
   })
 
   it('内置「调度模式」的追加卡预置文案非空', async () => {

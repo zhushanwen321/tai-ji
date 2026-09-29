@@ -20,6 +20,10 @@ import {
   handleWorkerError,
   resetRebuildFailureInjectionForTest,
 } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+} from "../terminal-actions.ts";
+import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -116,9 +120,18 @@ afterEach(() => {
 
 // ── [OR-2] rebuild 抛错回灌重试矩阵 ──────────────────────────
 
+
+/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+ *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
+ *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
+async function seedRunCreated(run: WorkflowRun): Promise<void> {
+  await dispatchRunCreated(run);
+}
+
 describe("[OR-2] rebuildRuntime 抛错回灌重试矩阵", () => {
   it("rebuild 抛错 → workerErrorCount 递增回灌 → 下一次 rebuild 成功 → run 恢复（不卡 running）", async () => {
     const run = makeRealRun("wf-rebuild-1");
+    await seedRunCreated(run);
     const deps = makeDeps();
     // 第 1 次 start（rebuild #1）抛错，之后成功——模拟瞬时线程耗尽
     let calls = 0;
@@ -149,6 +162,7 @@ describe("[OR-2] rebuildRuntime 抛错回灌重试矩阵", () => {
 
   it("rebuild 连续失败耗尽（count > MAX=3）→ 收敛 done,failed + 持久化 + 注销 + onRunDone", async () => {
     const run = makeRealRun("wf-rebuild-2");
+    await seedRunCreated(run);
     const deps = makeDeps({ startThrows: true });
 
     // await 链本身不 reject——旧实现此处裸抛 → void handlers.onError → unhandledRejection
@@ -160,8 +174,8 @@ describe("[OR-2] rebuildRuntime 抛错回灌重试矩阵", () => {
     // 计数：崩溃 1 + rebuild 失败 3 = 4 > MAX
     expect(run.meta.workerErrorCount).toBe(4);
     // 收敛 done,failed（不卡 running）
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("failed");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.error).toContain("Runtime rebuild failed after 3 retries");
     expect(run.state.error).toContain("Resource temporarily unavailable");
     // workerHost.start 恰好试了 3 次（3 次 rebuild 全失败）
@@ -178,6 +192,7 @@ describe("[OR-2] rebuildRuntime 抛错回灌重试矩阵", () => {
 
   it("耗尽收敛前 run 已被 abort（退避窗口内转终态）→ 不再 rebuild 也不再误转 failed", async () => {
     const run = makeRealRun("wf-rebuild-3");
+    await seedRunCreated(run);
     const deps = makeDeps({ startThrows: true });
 
     const p = handleWorkerError(run, new Error("worker boom"), deps, makeHandlers());
@@ -200,6 +215,7 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
   it("env=1：rebuild 第 1 次起全部抛错 → 重试矩阵确定性耗尽 → done,failed（S-D 子场景②）", async () => {
     process.env[REBUILD_INJECT_ENV] = "1";
     const run = makeRealRun("wf-inject-1");
+    await seedRunCreated(run);
     const deps = makeDeps(); // start 本身不抛——抛错全部来自钩子注入
 
     const p = handleWorkerError(run, new Error("worker boom"), deps, makeHandlers());
@@ -210,8 +226,8 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
     expect(deps.workerHost.start).not.toHaveBeenCalled();
     // 注入错误进入重试矩阵并耗尽：崩溃 1 + 注入失败 3 = 4
     expect(run.meta.workerErrorCount).toBe(4);
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("failed");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.error).toContain("[S-D test hook]");
     expect(run.state.error).toContain("Runtime rebuild failed after 3 retries");
   });
@@ -220,6 +236,7 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
     process.env[REBUILD_INJECT_ENV] = "1";
     const loggerSpy = vi.spyOn(getLogger("subagents"), "warn");
     const run = makeRealRun("wf-inject-warn");
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     const p = handleWorkerError(run, new Error("worker boom"), deps, makeHandlers());
@@ -237,6 +254,7 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
     delete process.env[REBUILD_INJECT_ENV];
     const loggerSpy = vi.spyOn(getLogger("subagents"), "warn");
     const run = makeRealRun("wf-inject-off");
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     const p = handleWorkerError(run, new Error("worker boom"), deps, makeHandlers());
@@ -252,6 +270,7 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
     process.env[REBUILD_INJECT_ENV] = "abc";
     const loggerSpy = vi.spyOn(getLogger("subagents"), "warn");
     const run = makeRealRun("wf-inject-invalid");
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     const p = handleWorkerError(run, new Error("worker boom"), deps, makeHandlers());
@@ -291,6 +310,7 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
   it("钩子序数跨 rebuild 生效：env=2 时第 1 次 rebuild 正常、第 2 次起注入", async () => {
     process.env[REBUILD_INJECT_ENV] = "2";
     const run = makeRealRun("wf-inject-ordinal");
+    await seedRunCreated(run);
     const deps = makeDeps();
     const handlers = makeHandlers();
 
@@ -309,7 +329,7 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
     // rebuild #1 真实执行过；#2/#3 被注入拦截（start 不再增长）
     expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
     expect(run.meta.workerErrorCount).toBe(4);
-    expect(run.state.reason).toBe("failed");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.error).toContain("[S-D test hook]");
   });
 });

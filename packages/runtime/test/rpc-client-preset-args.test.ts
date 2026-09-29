@@ -16,6 +16,10 @@ import type { RpcClientOptions } from '../src/infra/pi/rpc-client.js'
 
 let spawnArgs: string[] = []
 
+// 测试注入：启动确认窗口归零（窗口语义不变，见 RpcClientOptions.startupDelayMs）——
+// 纯 mock args 断言无需等真实启动窗口，对齐 rpc-client.test.ts 同款注入
+const TEST_CLIENT_OPTS = { startupDelayMs: 0 } as const
+
 const fakeProc = {
   on: vi.fn((_event: string, _handler: (...args: unknown[]) => void) => fakeProc),
   off: vi.fn(),
@@ -107,7 +111,7 @@ describe('RpcClient preset args CLI', () => {
   })
 
   it('tools 非空 → args 含 --tools 和逗号连接值', async () => {
-    const options = { cwd: '/project', tools: ['read', 'grep'] } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS, tools: ['read', 'grep'] } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -117,7 +121,7 @@ describe('RpcClient preset args CLI', () => {
   })
 
   it('excludeTools 非空 → args 含 --exclude-tools 和逗号连接值', async () => {
-    const options = { cwd: '/project', excludeTools: ['bash', 'write'] } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS, excludeTools: ['bash', 'write'] } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -127,7 +131,7 @@ describe('RpcClient preset args CLI', () => {
   })
 
   it('noTools=true → args 含 --no-tools', async () => {
-    const options = { cwd: '/project', noTools: true } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS, noTools: true } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -135,7 +139,7 @@ describe('RpcClient preset args CLI', () => {
   })
 
   it('noSkills=true → args 含 --no-skills', async () => {
-    const options = { cwd: '/project', noSkills: true } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS, noSkills: true } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -143,7 +147,7 @@ describe('RpcClient preset args CLI', () => {
   })
 
   it('noContextFiles=true → args 含 --no-context-files', async () => {
-    const options = { cwd: '/project', noContextFiles: true } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS, noContextFiles: true } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -151,7 +155,7 @@ describe('RpcClient preset args CLI', () => {
   })
 
   it('thinkingLevel 非空 → args 含 --thinking 和级别值（非 --thinking-level）', async () => {
-    const options = { cwd: '/project', thinkingLevel: 'high' } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS, thinkingLevel: 'high' } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -163,7 +167,7 @@ describe('RpcClient preset args CLI', () => {
   })
 
   it('全字段未传 → args 不含 6 个新参数（零回归）', async () => {
-    const options = { cwd: '/project' } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -179,6 +183,7 @@ describe('RpcClient preset args CLI', () => {
   it('组合：tools + thinkingLevel + noSkills 同时生效', async () => {
     const options = {
       cwd: '/project',
+      ...TEST_CLIENT_OPTS,
       tools: ['read'],
       thinkingLevel: 'medium',
       noSkills: true,
@@ -222,7 +227,7 @@ describe('RpcClient systemPrompt CLI arg（自 rpc-client-system-prompt.test.ts 
   })
 
   it('options.systemPrompt 有值 → args 包含 --system-prompt 和该值（\n 前缀）', async () => {
-    const options = { cwd: '/project', systemPrompt: 'custom core prompt' } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS, systemPrompt: 'custom core prompt' } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -233,7 +238,7 @@ describe('RpcClient systemPrompt CLI arg（自 rpc-client-system-prompt.test.ts 
   })
 
   it('options.appendSystemPrompt 有值 → args 包含 --append-system-prompt 和该值（\n 前缀）', async () => {
-    const options = { cwd: '/project', appendSystemPrompt: 'mode append prompt' } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS, appendSystemPrompt: 'mode append prompt' } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -242,7 +247,7 @@ describe('RpcClient systemPrompt CLI arg（自 rpc-client-system-prompt.test.ts 
   })
 
   it('options.systemPrompt + appendSystemPrompt 同时给 → 两 flag 均出现（对称）', async () => {
-    const options = { cwd: '/project', systemPrompt: 'sys', appendSystemPrompt: 'app' } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS, systemPrompt: 'sys', appendSystemPrompt: 'app' } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -251,18 +256,18 @@ describe('RpcClient systemPrompt CLI arg（自 rpc-client-system-prompt.test.ts 
   })
 
   it('options.appendSystemPrompt 仅空白/未传 → args 不包含 --append-system-prompt', async () => {
-    const blank = { cwd: '/project', appendSystemPrompt: '   \t\n  ' } as unknown as RpcClientOptions
+    const blank = { cwd: '/project', ...TEST_CLIENT_OPTS, appendSystemPrompt: '   \t\n  ' } as unknown as RpcClientOptions
     await new RpcClientCtor(blank).start()
     expect(spawnArgs).not.toContain('--append-system-prompt')
 
     spawnArgs = []
-    const absent = { cwd: '/project' } as unknown as RpcClientOptions
+    const absent = { cwd: '/project', ...TEST_CLIENT_OPTS } as unknown as RpcClientOptions
     await new RpcClientCtor(absent).start()
     expect(spawnArgs).not.toContain('--append-system-prompt')
   })
 
   it('options.systemPrompt 仅空白 → args 不包含 --system-prompt', async () => {
-    const options = { cwd: '/project', systemPrompt: '   \t\n  ' } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS, systemPrompt: '   \t\n  ' } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -270,7 +275,7 @@ describe('RpcClient systemPrompt CLI arg（自 rpc-client-system-prompt.test.ts 
   })
 
   it('options.systemPrompt 未传 → args 不包含 --system-prompt', async () => {
-    const options = { cwd: '/project' } as unknown as RpcClientOptions
+    const options = { cwd: '/project', ...TEST_CLIENT_OPTS } as unknown as RpcClientOptions
     const client = new RpcClientCtor(options)
     await client.start()
 
@@ -310,6 +315,7 @@ describe('RpcClient spawn 日志 argv 脱敏（设计 §7.2 argv 日志脱敏 / 
       const secret = 'TOP SECRET MODE PROMPT BODY'
       const options = {
         cwd: '/project',
+        ...TEST_CLIENT_OPTS,
         systemPrompt: secret,
         appendSystemPrompt: `${secret} append`,
       } as unknown as RpcClientOptions

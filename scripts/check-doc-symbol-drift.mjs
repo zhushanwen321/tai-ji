@@ -338,8 +338,9 @@ function checkPathRefs() {
 /** 第三检查扫描的源码/测试扩展名（TS parser 可解析 + .vue 特判分流） */
 const COMMENT_REF_SRC_EXTS = new Set(['.ts', '.tsx', '.mts', '.cts', '.mjs', '.cjs', '.js', '.vue'])
 
-/** 全仓扫描（staged 含 .md 删除时触发）按目录名剪枝：依赖/产物/本地档案，无注释检查语义 */
-const FULL_SCAN_PRUNE_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', 'test-results', 'playwright-report', '.taiji-harness', 'resources'])
+/** 全仓扫描（staged 含 .md 删除时触发）按目录名剪枝：依赖/产物/本地档案，无注释检查语义。
+ *  .zcode 为 workflow 引擎工作区（agents 手工维护子目录除外，gitignored 产物目录不进扫描）。 */
+const FULL_SCAN_PRUNE_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', 'test-results', 'playwright-report', '.taiji-harness', 'resources', '.zcode'])
 
 /** Form A：docs/ 仓库相对引用。左边界断言防 URL 中缀误配（github.com/docs/x），
  *  与第二检查 REPO_PATH_RE 同口径。 */

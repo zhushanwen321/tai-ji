@@ -25,6 +25,7 @@
   "taiji": {
     "subagentEngine": {
       "id": "zcode",
+      "processModel": "shared-service",
       "bin": "zcode-subagent-cli",
       "protocol": 1,
       "envPrefixes": [

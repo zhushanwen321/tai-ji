@@ -2,37 +2,22 @@
  * P5 接线测试：SessionService.getSubagentHistory 的 record 路由段——engine 字段路由
  * 到分协议读取链（非 pi → readEngineSubagentHistory 三级降级；pi → 现有 JSONL 直读链）。
  *
- * 为什么 mock extractSubagentsFromSessionFile：record 的 engine/engineHandle 字段由
- * 并行任务在 shared SubagentRecord / extractor 投影写入（落地前端到端链路无写方），
- * 此处 mock 列表函数注入带 engine 的 record，只验证 session-service 的路由接线；
- * 降级链本体由 subagent-extractor-engine.test.ts 用真实现覆盖。
+ * [W1 / D6] record 注入点随读侧换源更新：getSubagents 读 journal 投影（会话文件
+ * 流式扫描 → 投影派生），不再调 extractSubagentsFromSessionFile——fixture 从
+ * mock 列表函数改为真实 v1 subagent-record entry 落盘（engine/engineHandle 字段
+ * 经投影真实透传），路由/降级链（extractRecordEngine / readEngineSubagentHistory /
+ * DEFAULT_SUBAGENT_ENGINE）全程真实现。
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { SubagentRecord } from '@taiji/shared'
 import type { ScannedSessionMeta } from '../src/infra/pi/session-file-utils.js'
 import type { ISessionStore } from '../src/services/ports/session.js'
 import { SessionService } from '../src/services/session/session-service.js'
 import { convertPiHistory } from '../src/infra/pi/message-converter.js'
-
-vi.mock('../src/services/session/subagent-extractor.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/services/session/subagent-extractor.js')>()
-  return {
-    ...actual,
-    // 只 mock 列表派生（record 注入点）；路由/降级链（extractRecordEngine /
-    // readEngineSubagentHistory / DEFAULT_SUBAGENT_ENGINE）用真实现
-    extractSubagentsFromSessionFile: vi.fn(),
-  }
-})
-
-// vi.mock 提升后此处 import 拿到的是 mock 版（extractSubagentsFromSessionFile 可配置）
-import { extractSubagentsFromSessionFile } from '../src/services/session/subagent-extractor.js'
-
-const mockExtract = vi.mocked(extractSubagentsFromSessionFile)
 
 function createMockSessionStore(mainSessionFile: string, mainSessionId: string): ISessionStore {
   const meta: ScannedSessionMeta = {
@@ -83,21 +68,30 @@ function createSvc(tempDir: string): SessionService {
   )
 }
 
-/** 带引擎字段的 record（U1 后 engine/engineHandle 已进 shared SubagentRecord 正式契约）。 */
-function zcodeRecord(engineHandle: unknown): SubagentRecord {
-  return {
-    subagentId: 'bg-route-1',
-    sessionFile: null,
-    agent: 'reviewer',
-    slug: 'rev',
-    task: 'routed task',
-    status: 'idle', // [U6] closed legacy 值已收窄出类型——终态 fixture 用归一后的两态词
-    startedAt: 1756000000000,
-    endedAt: 1756000005000,
-    result: 'routed outcome',
-    engine: 'zcode',
-    engineHandle: engineHandle as SubagentRecord['engineHandle'],
-  }
+/**
+ * 带引擎字段的 v1 subagent-record entry（U1 后 engine/engineHandle 已进 shared
+ * SubagentRecord 正式契约；投影层 projectEngineSpreadFields 真实透传）。
+ */
+function subagentRecordEntry(data: Record<string, unknown>): string {
+  return JSON.stringify({
+    type: 'custom',
+    customType: 'subagent-record',
+    id: 'e-1',
+    parentId: null,
+    timestamp: '2026-08-19T00:00:00Z',
+    data: {
+      v: 1,
+      id: 'bg-route-1',
+      agent: 'reviewer',
+      task: 'routed task',
+      slug: 'rev',
+      status: 'idle',
+      startedAt: 1756000000000,
+      endedAt: 1756000005000,
+      result: 'routed outcome',
+      ...data,
+    },
+  })
 }
 
 describe('SessionService.getSubagentHistory engine routing (P5)', () => {
@@ -110,20 +104,24 @@ describe('SessionService.getSubagentHistory engine routing (P5)', () => {
     // journal 前缀白名单按该 dataDir 推导
     prevDataDir = process.env.TAIJI_AGENT_DATA_DIR
     process.env.TAIJI_AGENT_DATA_DIR = tempDir
-    writeFileSync(join(tempDir, 'main.jsonl'), `${JSON.stringify({ type: 'session', id: 'main-sess-id', cwd: '/proj' })}\n`)
-    mockExtract.mockReset()
+    writeFileSync(
+      join(tempDir, 'main.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'main-sess-id', cwd: '/proj' })}\n`,
+    )
   })
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     if (prevDataDir === undefined) delete process.env.TAIJI_AGENT_DATA_DIR
     else process.env.TAIJI_AGENT_DATA_DIR = prevDataDir
-    vi.restoreAllMocks()
   })
 
   it('routes zcode record to the engine chain (tier3 outcome-only)', async () => {
-    // [G3] extractor 返回形状改为 {records, oversize}——mock 适配（oversize=false 走正常提取链）
-    mockExtract.mockReturnValue({ records: [zcodeRecord({ poolKey: 'reviewer', sessionRef: {} })], oversize: false })
+    writeFileSync(
+      join(tempDir, 'main.jsonl'),
+      `${subagentRecordEntry({ engine: 'zcode', engineHandle: { poolKey: 'reviewer', sessionRef: {} } })}\n`,
+      { flag: 'a' },
+    )
 
     const { messages } = await createSvc(tempDir).getSubagentHistory('main-sess-id', 'bg-route-1')
 
@@ -145,12 +143,14 @@ describe('SessionService.getSubagentHistory engine routing (P5)', () => {
       ].join('\n') + '\n',
       'utf-8',
     )
-    mockExtract.mockReturnValue({
-      records: [
-        zcodeRecord({ poolKey: 'reviewer', sessionRef: { dbPath: '.zcode/cli/db/db.sqlite', sessionId: 's1' }, journalPath }),
-      ],
-      oversize: false,
-    })
+    writeFileSync(
+      join(tempDir, 'main.jsonl'),
+      `${subagentRecordEntry({
+        engine: 'zcode',
+        engineHandle: { poolKey: 'reviewer', sessionRef: { dbPath: '.zcode/cli/db/db.sqlite', sessionId: 's1' }, journalPath },
+      })}\n`,
+      { flag: 'a' },
+    )
 
     const { messages } = await createSvc(tempDir).getSubagentHistory('main-sess-id', 'bg-route-1')
 
@@ -160,14 +160,16 @@ describe('SessionService.getSubagentHistory engine routing (P5)', () => {
 
   it('keeps pi records on the existing JSONL chain (sessionFile missing → [])', async () => {
     // pi record（无 engine 字段）：路由段落回现有链——sessionFile 为 null 时现有行为 = []
-    const record = zcodeRecord(undefined)
-    delete record.engine
-    delete record.engineHandle
-    mockExtract.mockReturnValue({ records: [record], oversize: false })
+    writeFileSync(join(tempDir, 'main.jsonl'), `${subagentRecordEntry({})}\n`, { flag: 'a' })
 
-    const { messages } = await createSvc(tempDir).getSubagentHistory('main-sess-id', 'bg-route-1')
+    const svc = createSvc(tempDir)
+    // 现有链路读取了主 session 文件（投影冷启动流式扫描定位 record）——路由前置
+    // 数据面真实经过了会话文件读取（record 命中即文件已读，路由确实落在 pi 分支）
+    const subagents = await svc.getSubagents('main-sess-id')
+    expect(subagents.records.map((r) => r.subagentId)).toEqual(['bg-route-1'])
+    expect(subagents.records[0]?.engine).toBeUndefined()
+
+    const { messages } = await svc.getSubagentHistory('main-sess-id', 'bg-route-1')
     expect(messages).toEqual([])
-    // 现有链路读取了主 session 文件（scanSessions 定位）——路由确实落在 pi 分支
-    expect(mockExtract).toHaveBeenCalled()
   })
 })

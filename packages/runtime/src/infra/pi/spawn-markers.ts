@@ -29,7 +29,7 @@
  *
  * 写语义：每次 spawn 全量重算并覆盖写（同目录 tmp + rename 原子替换），不 append——
  * 覆盖写天然清理已禁用 extension 的历史值；并发 spawn 各写各的全量集（tmp 名含
- * pid/时戳/序号不互撞），mandatory 18 包恒传保证最小集稳定（§11.11）。写入失败不阻断
+ * pid/时戳/序号不互撞），mandatory builtin 恒传保证最小集稳定（§11.11）。写入失败不阻断
  * spawn：console.error 出声后返回（宁漏不崩——reap 侧对清单缺失本就跳过收殓，
  * fail-safe 方向 = 宁漏不误杀）。
  *
@@ -37,7 +37,7 @@
  * 零 staged 值的 spawn 仍须写文件，§11.11）。
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { getConfigDir } from './pi-paths.js'
 
@@ -221,8 +221,61 @@ export function recordSpawnMarkers(
     )
     writeSpawnMarkersFile(selected, dataDir, fsDeps)
   } catch (e) {
-    // 降级策略（宁漏不崩，设计 §6.12）：清单写入失败不阻断 spawn——reap 侧对清单缺失
-    // 本就跳过收殓（fail-safe = 宁漏不误杀）；console.error 经 logger tee 进 runtime 日志出声
-    console.error('[rpc] write pi-spawn-markers.json failed (reap will skip this spawn, fail-safe):', e)
+    // 降级策略（宁漏不崩，设计 §6.12）：清单写入失败不阻断 spawn；console.error 经
+    // logger tee 进 runtime 日志出声。文案按失败后的终态文件现状分两形态——决定 reap
+    // 侧行为的是「文件在不在」而非失败原因：不在 = 首次写失败，reap 跳过本轮收殓
+    // （fail-safe 宁漏不误杀）；在 = 旧清单覆盖失败，reap 沿用旧清单（判据可能滞后于
+    // 最近一次 spawn 的 staged 集）。
+    const hadPreviousList = existsSync(getSpawnMarkersPath(dataDir))
+    console.error(
+      hadPreviousList
+        ? '[rpc] write pi-spawn-markers.json failed (previous marker list kept — reap will use the stale list, criteria may lag the latest spawn):'
+        : '[rpc] write pi-spawn-markers.json failed (no marker file yet — reap will skip this spawn, fail-safe: prefer missed reap over mis-kill):',
+      e,
+    )
   }
+}
+
+/** tmp 残片回收年龄阈值：超过该龄的原子写 tmp 残片视为崩溃残留（24h 内视为并发写入在途）。 */
+// eslint-disable-next-line no-magic-numbers -- 保留窗口时长表达式（24h，语义见上方 JSDoc）
+export const SPAWN_MARKER_TMP_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+/** 写侧原子 tmp 残片文件名形态（writeSpawnMarkersFile 的 `${finalPath}.tmp-<pid>-<ts>-<seq>`）。 */
+const TMP_RESIDUE_NAME_RE = /^pi-spawn-markers\.json\.tmp-\d+-\d+-\d+$/
+
+/**
+ * 启动期清扫写侧原子 tmp 残片（写进程在 write(tmp) 后 rename 前崩溃/断电留下的
+ * `.tmp-<pid>-<ts>-<seq>` 文件——残片只占磁盘，不参与读侧，无清理则永久堆积）。
+ * 按 mtime 超龄（SPAWN_MARKER_TMP_MAX_AGE_MS）回收，防误删并发 spawn 的在途 tmp。
+ * 静默容错：readdir 失败（run/ 不存在的首启常态 / 权限）与单文件 stat/rm 失败均按
+ * 跳过处理，不影响调用链。返回删除的残片数（诊断日志用）。
+ *
+ * 落点：spawn-markers 模块无自然初始化钩子（模块加载副作用不可取），挂载在
+ * startup-background-init 的孤儿收殓链定时器（启动期 sweep 链）。
+ */
+export function sweepStaleSpawnMarkerTmpFiles(dataDir: string, nowMs: number = Date.now()): number {
+  const dir = join(dataDir, RUN_DIR_NAME)
+  let names: string[]
+  try {
+    names = readdirSync(dir)
+  } catch {
+    // run/ 不存在（首启前常态）或目录读失败：无残片可清是合法形态，静默返回（下轮启动重试）
+    return 0
+  }
+  let removed = 0
+  for (const name of names) {
+    if (!TMP_RESIDUE_NAME_RE.test(name)) continue
+    try {
+      // throwIfNoEntry：stat 期间被并发删除时不抛（返回 undefined 按跳过处理）
+      const st = statSync(join(dir, name), { throwIfNoEntry: false })
+      if (!st?.isFile()) continue
+      if (nowMs - st.mtimeMs <= SPAWN_MARKER_TMP_MAX_AGE_MS) continue
+      rmSync(join(dir, name), { force: true })
+      removed++
+    // eslint-disable-next-line taste/no-silent-catch -- 单文件 stat/rm 失败（权限/竞态删除）只影响该残片，静默留下轮启动再试；residue 是纯磁盘垃圾，无日志价值
+    } catch {
+      // 跳过该残片
+    }
+  }
+  return removed
 }

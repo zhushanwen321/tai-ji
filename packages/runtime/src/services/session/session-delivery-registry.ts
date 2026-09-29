@@ -45,7 +45,7 @@ export interface SessionDeliveryDeps {
    * `msg.meta.notifyId/parentSid` 完成 armed→injected；rejected → 投递失败腿 disarm。
    * 注入点在组合根 index.ts（ClaimLedger 消费）；缺席（测试/退化装配）= 回执缺位，
    * claim 悬挂由 TTL 清扫兕底（D7）。内核同栈于 port.send 受理回执触发
-   *（P9 帧序：先于其后的 agent_settled 帧处理，PS-53）。
+   *（P9 帧序：先于其后的 agent_settled 帧处理，PS-57）。
    */
   onSettledMessage?: (sessionId: string, msg: DeliveryMessage, outcome: 'delivered' | 'rejected') => void
 }
@@ -162,7 +162,7 @@ export function createSessionDeliveryRegistry(
 
   const buildHandle = (sessionId: string): DeliveryHandle => {
     // notify-once D2 受理回执（per-message、meta 原样透传）；缺席（未注入）= 字段缺省，
-    // 内核行为零变化。内核同栈于 port.send 受理回执触发（P9 帧序：先于 settled 帧，PS-53）。
+    // 内核行为零变化。内核同栈于 port.send 受理回执触发（P9 帧序：先于 settled 帧，PS-57）。
     // 三元前提取局部常量：deps 属性收窄不跨闭包，闭包内引用局部量免去非空断言。
     const onSettledMessage = deps.onSettledMessage
     const notifyReceipt = onSettledMessage

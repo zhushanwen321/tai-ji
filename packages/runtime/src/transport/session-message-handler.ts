@@ -225,7 +225,7 @@ export class SessionMessageHandler {
       // B3：透传 modelOverride / thinkingOverride（Landing Chip 覆盖值，设计文档 §5.2）。
       // 优先级：Landing Chip override > preset.modelOverride/thinkingLevel > 全局默认。
       // 之前只透传了 hidden/presetId，覆盖值在 transport 层被丢弃，导致 Landing Chip 选型不生效。
-      // projectId：D14 语义修正（2026-08-04），创建时归属当前 activeProject（空 = 默认项目兑底）。
+      // projectId：D14 语义修正（2026-08-04），创建时归属当前 activeProject（空 = 默认项目兜底）。
       const session = await this.ctx.sessionService.create(msg.payload.cwd, msg.payload.label, {
         hidden: msg.payload.hidden,
         presetId: msg.payload.presetId,
@@ -965,7 +965,7 @@ export class SessionMessageHandler {
     // message.status{aborted}；sent=false（守卫短路：无 bash 在跑且无孤儿标记，或
     // abort_bash 发送失败）→ 不得谎报 aborted，走 error envelope（renderer useChat.abortBash
     // catch → stopFailed toast 兜底）。终态经 message.bashResult{cancelled:true} 广播推回
-    // （dispatcher.abortBash 兑底），不依赖 reply。
+    // （dispatcher.abortBash 兜底），不依赖 reply。
     const abortBashSid = msg.payload.sessionId
     const abortResult = await this.ctx.sessionService.abortBash(abortBashSid)
     if (!abortResult.sent) {

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * composer-density 纯状态机单测（D6 修订「三步聚合」版）。
  *

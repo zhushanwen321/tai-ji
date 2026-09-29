@@ -53,7 +53,7 @@ function makeView(id: string, cwd: string, sessionFilePath?: string): DriverView
     id,
     cwd,
     label: 'u6-e2e-child',
-    modelId: 'xiaomi-token-plan-cn/mimo-v2.5-pro',
+    modelId: 'xiaomi-token-plan-cn/mimo-v2.6-flash',
     createdAt: Date.now(),
     lastActiveAt: Date.now(),
     tokenCount: 0,

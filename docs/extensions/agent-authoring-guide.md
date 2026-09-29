@@ -1,16 +1,16 @@
 # Agent-Facing 功能编写指南（pi 专属）
 
-> **方法论入口**：设计或审查 agent prompt 前，先加载 `meta-prompt-creator` skill。
+> **方法论入口**：设计或审查 agent prompt 前，先加载 `meta-prompt-guidance` skill。
 > 它提供 15 条通用原则（P1-P15）+ 9 种载体模式（agent-prompt / tool-description / skill-design 等）+ 审查清单（`review/rubric-<carrier>.md`）。
-> 本文档**只补充 meta-prompt-creator 不覆盖的 pi 平台落地契约**——通用方法论不写在这里。
+> 本文档**只补充 meta-prompt-guidance 不覆盖的 pi 平台落地契约**——通用方法论不写在这里。
 
 ## 为什么单独有这份
 
-meta-prompt-creator 回答「怎么想」「怎么查」，是通用方法论 SSOT。pi 有几项平台特有的格式与调用约定，通用 skill 不该管（也不该重复），统一收在这里。两者关系：
+meta-prompt-guidance 回答「怎么想」「怎么查」，是通用方法论 SSOT。pi 有几项平台特有的格式与调用约定，通用 skill 不该管（也不该重复），统一收在这里。两者关系：
 
 | 文档 | 职责 | 何时读 |
 |------|------|--------|
-| `meta-prompt-creator` | 通用方法论 + 审查清单 | 设计/审任何 agent prompt 时 |
+| `meta-prompt-guidance` | 通用方法论 + 审查清单 | 设计/审任何 agent prompt 时 |
 | 本文档 | pi 专属格式契约 | 写 pi 的 agent.md / registerTool / workflow 时查 |
 
 ## 1. agent.md frontmatter 格式契约
@@ -19,7 +19,7 @@ meta-prompt-creator 回答「怎么想」「怎么查」，是通用方法论 SS
 |------|------|------|
 | `name` | 是 | kebab-case，与文件 basename 一致（AgentRegistry 按 basename 匹配）|
 | `description` | 是 | **能力摘要，不需触发词**——agent 不是概率匹配加载（区别于 SKILL.md 的 description）|
-| `tools` | 是 | 逗号分隔的 pi 工具名；最小权限原则（meta-prompt-creator P2）|
+| `tools` | 是 | 逗号分隔的 pi 工具名；最小权限原则（meta-prompt-guidance P2）|
 | `color` | 否 | 16 进制色值，仅 UI 标识 |
 | `model` | 否 | `inherit`（默认）或 `provider/modelId` |
 
@@ -65,7 +65,7 @@ builtin（包内 agents/）< npm global < user .pi/agent < user .agents
 
 **接入内置 workflow 的方式**：项目级 agent 放 `.agents/agents/<name>.md`，`batch1` 传该 agent 的 `.md` 绝对路径——即 `<available_subagents>` 注入的 `<location>`（裸名会被 resolveAgentDefs 拒收）。同名覆盖关系由 AgentRegistry 发现优先级决定：项目级源优先级高于内置，覆盖发生在注入 `<location>` 的解析时，调用侧无需感知。
 
-## 4. 防平铺守卫（弱模型兼容）
+## 4. 防平铺检查（弱模型兼容）
 
 弱模型常把 workflow args 子字段（`task`/`target`/`batchN`）平铺到 params 顶层，导致 `args={}` 静默启动缺参 run（P0）。
 
@@ -81,9 +81,9 @@ known keys 的来源是 **schema 即 SSOT**：workflow 资产在脚本头 `@pi-m
 
 `meta.description` 进 LLM context，决定主 agent 是否选用此 workflow。
 
-- **what + when + when-NOT**（与 tool description 同，meta-prompt-creator P1/P4）
+- **what + when + when-NOT**（与 tool description 同，meta-prompt-guidance P1/P4）
 - 必填参数显式标「必填」，枚举值列出
-- **参数语义别单行塞满**——长描述重点被稀释（meta-prompt-creator P14 约束衰减）。结构化分行或详解放 README，description 只留摘要 + 必填项
+- **参数语义别单行塞满**——长描述重点被稀释（meta-prompt-guidance P14 约束衰减）。结构化分行或详解放 README，description 只留摘要 + 必填项
 
 反面案例：把 8 个参数的完整语义压进 description 单行，LLM 选用时抓不住重点。
 
@@ -95,4 +95,4 @@ known keys 的来源是 **schema 即 SSOT**：workflow 资产在脚本头 `@pi-m
 
 ## 审查
 
-审查 agent-facing 改动时，走 `meta-prompt-creator` 的 `flow/review.md` + 对应 `review/rubric-<carrier>.md`（快速审查模式走 P0），再补本文档 §1-§5 的 pi 专属检查项。详见 `.agents/agents/review-extension-api.md` 的「Agent-facing 表面 checklist」章节。
+审查 agent-facing 改动时，走 `meta-prompt-guidance` 的 `flow/review.md` + 对应 `review/rubric-<carrier>.md`（快速审查模式走 P0），再补本文档 §1-§5 的 pi 专属检查项。详见 `.agents/agents/review-extension-api.md` 的「Agent-facing 表面 checklist」章节。

@@ -1,5 +1,10 @@
 /**
- * SystemPage · 重命名模型 Select 测试（SystemAutoRenameSection 子组件，经 SystemPage 入口 mount）。
+ * SystemPage · 重命名模型 Select 测试（SystemAutoRenameSection 子组件）。
+ *
+ * mount 分两级：首屏冒烟走 mountSystemPage 全页集成入口（容器编排回归锚 + 全页级联加载
+ * 的用户可见断言）；交互断言用例走 mountSystemSection 直挂 SystemAutoRenameSection——
+ * 全页集成树（6 Section + UpdateCheckCard 等）的编译成本对单 Section 交互断言是纯浪费，
+ * 且被测断言对象（setting-rename-model trigger 与其下拉选项）都落在该 Section 内。
  *
  * 覆盖：
  *  - 首屏冒烟：DOM 含 rename-model Select trigger（data-testid=setting-rename-model）。
@@ -29,6 +34,7 @@ import {
   ipcModule,
   resetSettingsApiMocks,
   mountSystemPage,
+  mountSystemSection,
   seedStore,
 } from '../helpers/system-page-mount'
 
@@ -49,6 +55,11 @@ let wrapper: Awaited<ReturnType<typeof mountSystemPage>> | null = null
 /** mount SystemPage（集成入口）并完成异步加载。 */
 async function mountPage(): Promise<void> {
   wrapper = await mountSystemPage()
+}
+
+/** 直挂 SystemAutoRenameSection（交互断言用例；依赖面裁剪依据见文件头 mount 分级说明）。 */
+async function mountSection(): Promise<void> {
+  wrapper = await mountSystemSection(() => import('@/components/settings/system/SystemAutoRenameSection.vue'))
 }
 
 beforeEach(() => {
@@ -74,7 +85,7 @@ describe('SystemPage 重命名模型 Select', () => {
   it('getRenameModel 返回可选列表内的 ref 时 trigger 显示模型名', async () => {
     settingsMock.getRenameModel.mockResolvedValue({ model: 'p1/m1' })
     seedStore()
-    await mountPage()
+    await mountSection()
     const trigger = wrapper!.find('[data-testid="setting-rename-model"]')
     expect(trigger.text()).toContain('Model One')
   })
@@ -82,7 +93,7 @@ describe('SystemPage 重命名模型 Select', () => {
   it('ref 不在可选列表时 trigger 显示该 ref + （不可用）', async () => {
     settingsMock.getRenameModel.mockResolvedValue({ model: 'gone/model-x' })
     seedStore()
-    await mountPage()
+    await mountSection()
     const trigger = wrapper!.find('[data-testid="setting-rename-model"]')
     expect(trigger.text()).toContain('gone/model-x')
     expect(trigger.text()).toContain('（不可用）')
@@ -91,27 +102,29 @@ describe('SystemPage 重命名模型 Select', () => {
   it('未设置时 trigger 显示「跟随会话模型」', async () => {
     settingsMock.getRenameModel.mockResolvedValue({ model: '' })
     seedStore()
-    await mountPage()
+    await mountSection()
     const trigger = wrapper!.find('[data-testid="setting-rename-model"]')
     expect(trigger.text()).toContain('跟随会话模型')
   })
 
   it('auto-rename 关闭时 trigger disabled，开启时可用', async () => {
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: false })
-    await mountPage()
+    await mountSection()
     const trigger = wrapper!.find('[data-testid="setting-rename-model"]')
     expect(trigger.attributes('disabled')).toBeDefined()
 
+    // 二段挂载前先卸载首段（直挂不 attachTo，残留实例的 watcher 不跨段存活）
+    wrapper!.unmount()
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: true })
     seedStore()
-    await mountPage()
+    await mountSection()
     const enabledTrigger = wrapper!.find('[data-testid="setting-rename-model"]')
     expect(enabledTrigger.attributes('disabled')).toBeUndefined()
   })
 
   it('下拉 option 只含已配凭证 provider 的模型；点选后 setRenameModel 收到 "p1/m1"', async () => {
     seedStore()
-    await mountPage()
+    await mountSection()
 
     // reka-ui SelectContent 仅在 open 时挂载（SelectPortal teleport 到 body）。
     // SelectTrigger 在 pointerdown 时打开，happy-dom 下需显式 dispatch

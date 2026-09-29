@@ -15,7 +15,7 @@
  * 运行：cd packages/runtime && npx vitest run src/__tests__/process-manager-exit.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { ProcessManager } from '../infra/pi/process-manager.js'
+import { ProcessManager } from '../infra/pi/process-manager.js'
 
 // ── Mocks（与 rpc-client-bash.test.ts 同构）──────────────────────
 
@@ -118,7 +118,6 @@ describe('ProcessManager onExit 死亡通知', () => {
     vi.stubEnv('TAIJI_AGENT_PACKAGED', '')
     procExitHandlers.length = 0
     fakeProc.kill.mockClear()
-    const { ProcessManager } = await import('../infra/pi/process-manager.js')
     pm = new ProcessManager('/mock/project-root')
   })
 
@@ -131,7 +130,8 @@ describe('ProcessManager onExit 死亡通知', () => {
     pm.onSessionExit((sessionId, code, stderr) => exitEvents.push({ sessionId, code, stderr }))
 
     // create 路径：tempId spawn → pi 返回真实 sessionId 后 rekey 改键
-    await pm.createSession('temp-id-1', '/project')
+    // （startupDelayMs 5：压缩启动确认窗口——exit 由测试在 createSession 之后手动 emit，恒在窗口外）
+    await pm.createSession('temp-id-1', '/project', { startupDelayMs: 5 })
     pm.rekey('temp-id-1', 'pi-session-id-real')
     expect(pm.hasClient('pi-session-id-real')).toBe(true)
 
@@ -151,7 +151,7 @@ describe('ProcessManager onExit 死亡通知', () => {
     const exitEvents: Array<{ sessionId: string; code: number | null; stderr: string }> = []
     pm.onSessionExit((sessionId, code, stderr) => exitEvents.push({ sessionId, code, stderr }))
 
-    await pm.createSession('s1', '/project')
+    await pm.createSession('s1', '/project', { startupDelayMs: 5 })
     expect(pm.hasClient('s1')).toBe(true)
 
     // destroySession：先删 Map 再 kill（kill mock 异步触发 exit，属主动清理路径）
@@ -174,7 +174,7 @@ describe('ProcessManager onExit 死亡通知', () => {
       pm.onSessionExit(() => { throw new Error('listener A exploded') })
       pm.onSessionExit((sessionId) => { received.push(sessionId) })
 
-      await pm.createSession('s1', '/project')
+      await pm.createSession('s1', '/project', { startupDelayMs: 5 })
       emitProcExit(null)
 
       expect(received).toEqual(['s1'])

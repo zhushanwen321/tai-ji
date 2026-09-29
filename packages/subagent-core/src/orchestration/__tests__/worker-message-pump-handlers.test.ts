@@ -24,6 +24,9 @@ import {
   postBudgetUpdate,
   rebuildRuntime,
 } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+} from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -32,10 +35,18 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import { flushMicrotasks } from "./helpers/flush-microtasks.ts";
+// [W2/V1] 六态机引导 + 终局断言换源（两态机字段停更——终局经注册表判定/派生）。
+import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number) {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
+
 /** 构造一个 status="running" 的 mock WorkflowRun，meta 可配置。 */
+let runSeq = 0;
 function makeRunningRun(opts: {
   workerErrorCount?: number;
   scriptErrorCount?: number;
@@ -45,6 +56,7 @@ function makeRunningRun(opts: {
   receivedTerminalMessage?: boolean;
 } = {}): WorkflowRun {
   return {
+    runId: `wf-handlers-${++runSeq}`, // [W2/V1] 模块级活体态/注册表按 runId 键控——唯一化防跨测试污染
     state: {
       status: "running",
       budget: { usedTokens: 50, usedCost: 0.1 },
@@ -78,6 +90,7 @@ function makeRunningRun(opts: {
     replaceRuntime(this: WorkflowRun, rt: NonNullable<WorkflowRun["runtime"]>): void {
       this.runtime = rt;
     },
+    releaseRuntime: vi.fn(),
   } as unknown as WorkflowRun;
 }
 
@@ -137,12 +150,21 @@ afterEach(() => {
 
 // ── handleWorkerExit ─────────────────────────────────────────
 
+
+/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+ *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
+ *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
+async function seedRunCreated(run: WorkflowRun): Promise<void> {
+  await dispatchRunCreated(run);
+}
+
 describe("handleWorkerExit", () => {
   it("code=0 且已收到终态消息：no-op（不 transition、不 save）", async () => {
     // [F1] 语义更新：exit(0) no-op 的前提是本代际已交付 return/error（正常收尾退出，
     // 或 script-error 重试退避窗口）。无终态消息的 exit(0) 现转 done,failed，
     // 见下方用例与 worker-exit-without-result.test.ts。
     const run = makeRunningRun({ receivedTerminalMessage: true });
+    await seedRunCreated(run);
     const deps = makeDeps();
     const handle = makeHandle(true);
 
@@ -156,13 +178,14 @@ describe("handleWorkerExit", () => {
 
   it("code=0 且无终态消息：[F1] 转 done,failed（不可克隆 return 被吞的悬挂防线）", async () => {
     const run = makeRunningRun();
+    await seedRunCreated(run);
     const deps = makeDeps();
     const handle = makeHandle(true);
 
     await handleWorkerExit(run, 0, handle, deps, makeHandlers());
 
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("failed");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.error).toContain("structured-cloneable");
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
@@ -171,13 +194,14 @@ describe("handleWorkerExit", () => {
   it("code!=0 异常退出：委托 handleWorkerError → 超 MAX 重试 → transition done,failed", async () => {
     // workerErrorCount 已达 MAX=3 → handleWorkerError 内 count=4 > 3 → failed
     const run = makeRunningRun({ workerErrorCount: 3 });
+    await seedRunCreated(run);
     const deps = makeDeps();
     const handle = makeHandle(true);
 
     await handleWorkerExit(run, 1, handle, deps, makeHandlers());
 
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("failed");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.error).toContain("Worker exited with code 1");
     // 持久化 + 完成通知
     expect(deps.store.save).toHaveBeenCalledTimes(1);
@@ -186,6 +210,7 @@ describe("handleWorkerExit", () => {
 
   it("stale handle（isCurrent=false）：丢弃 exit 事件，不处理", async () => {
     const run = makeRunningRun();
+    await seedRunCreated(run);
     const deps = makeDeps();
     const staleHandle = makeHandle(false);
 
@@ -198,6 +223,7 @@ describe("handleWorkerExit", () => {
 
   it("run 已终态（done）：stale 守卫前置丢弃", async () => {
     const run = makeRunningRun();
+    await seedRunCreated(run);
     run.state.status = "done";
     (run.state as { reason?: string }).reason = "completed";
     const deps = makeDeps();
@@ -215,17 +241,18 @@ describe("handleWorkerError", () => {
   it("count > MAX（3）：transition done,failed + save + 直落 pending:unregister", async () => {
     // workerErrorCount=3 → count=4 > MAX
     const run = makeRunningRun({ workerErrorCount: 3 });
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     await handleWorkerError(run, new Error("worker boom"), deps, makeHandlers());
 
     expect(run.meta.workerErrorCount).toBe(4);
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("failed");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.error).toBe("worker boom");
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
-      id: undefined, // mock run 无 runId
+      id: run.runId,
       reason: "failed",
       status: "failed",
     });
@@ -251,6 +278,7 @@ describe("handleWorkerError", () => {
 
   it("终态（done）：stale 守卫前置丢弃（不递增 workerErrorCount）", async () => {
     const run = makeRunningRun();
+    await seedRunCreated(run);
     run.state.status = "done";
     (run.state as { reason?: string }).reason = "completed";
     const deps = makeDeps();
@@ -267,6 +295,7 @@ describe("handleWorkerError", () => {
 describe("handleScriptError", () => {
   it("count > MAX（3）：transition done,failed + 捕获 workerLogs", async () => {
     const run = makeRunningRun({ scriptErrorCount: 3 }); // count=4 > MAX
+    await seedRunCreated(run);
     const deps = makeDeps();
     const workerLogs = [
       { level: "error" as const, message: "line 5 boom" },
@@ -275,8 +304,8 @@ describe("handleScriptError", () => {
     await handleScriptError(run, "TypeError: x is undefined", workerLogs, deps, makeHandlers());
 
     expect(run.meta.scriptErrorCount).toBe(4);
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("failed");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.error).toContain("Workflow failed after 3 retries");
     expect(run.state.error).toContain("TypeError: x is undefined");
     // workerLogs 捕获到 errorLogs
@@ -302,6 +331,7 @@ describe("handleScriptError", () => {
 
   it("terminal 状态：stale 守卫前置丢弃", async () => {
     const run = makeRunningRun();
+    await seedRunCreated(run);
     run.state.status = "done";
     (run.state as { reason?: string }).reason = "completed";
     const deps = makeDeps();
@@ -439,6 +469,7 @@ describe("race-F3: rebuild 时间预算折算", () => {
 
   it("重试前预算已耗尽（已耗 > 预算）→ 不 rebuild，直接 done,time_limited", async () => {
     const run = makeRunningRun({ budgetTimeMs: 5000 });
+    await seedRunCreated(run);
     // 已耗 6000ms > 预算 5000ms（退避 advance 1000ms 后已耗 7000ms，仍耗尽）
     run.meta.startedAt = new Date(Date.now() - 6000).toISOString();
     const scheduleTimeBudget = vi.fn((_runId: string, _budgetTimeMs: number) => undefined);
@@ -452,8 +483,8 @@ describe("race-F3: rebuild 时间预算折算", () => {
     expect(deps.workerHost.start).not.toHaveBeenCalled();
     expect(scheduleTimeBudget).not.toHaveBeenCalled();
     // 直接 time_limited 终态 + 持久化 + 注销直落 + onRunDone
-    expect(run.state.status).toBe("done");
-    expect(run.state.reason).toBe("time_limited");
+    expect(isRunSettled(run)).toBe(true);
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(deps.store.save).toHaveBeenCalled();
     expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
@@ -568,7 +599,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     // worker 崩溃 → rebuildRuntime：replaceRuntime（abort 旧 controller）+ 同步 discard 在飞 call
     rebuildRuntime(run, deps, handlers);
     expect(run.state.calls.has(1)).toBe(false);
-    expect(run.state.trace.find(1)).toBeUndefined();
+    expect(findByStep(run.state.trace, 1)).toBeUndefined();
 
     // 新 worker 重跑脚本：同 callId=1 再 dispatch（重跑实例 B 挂起在飞）
     const deferredB = createDeferred<AgentResult>();
@@ -612,7 +643,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
 
     expect(findAgentResultPost(newWorkerPost, 2)).toBeUndefined();
     expect(run.state.calls.has(2)).toBe(false);
-    expect(run.state.trace.find(2)).toBeUndefined();
+    expect(findByStep(run.state.trace, 2)).toBeUndefined();
   });
 
   it("catch 路径：discard 后旧 dispatch 的异常 reject 不投新 worker、不复活 Map 条目", async () => {
@@ -660,7 +691,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     expect(posted).toBeDefined();
     expect(posted?.result.content).toBe("real result");
     expect(run.state.calls.get(4)?.status).toBe("done");
-    expect(run.state.trace.find(4)?.status).toBe("completed");
+    expect(findByStep(run.state.trace, 4)?.status).toBe("completed");
   });
 
   it("U6/S3 场景重放：discard + 重跑替换后，旧 finalize 不污染重跑新 trace 节点（旧 call 实例仍 markDone）", async () => {
@@ -683,7 +714,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     // rebuild：discard 移除旧 call 条目 + trace 节点（replaceRuntime 同步 abort 旧 signal）
     rebuildRuntime(run, deps, handlers);
     expect(run.state.calls.has(9)).toBe(false);
-    expect(run.state.trace.find(9)).toBeUndefined();
+    expect(findByStep(run.state.trace, 9)).toBeUndefined();
 
     // 重跑 dispatch 同 callId=9：新实例 + 新 trace 节点 running，挂起在飞
     const deferredB = createDeferred<AgentResult>();
@@ -693,7 +724,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     const rerunCall = run.state.calls.get(9);
     expect(rerunCall).toBeDefined();
     expect(rerunCall).not.toBe(oldCall);
-    expect(run.state.trace.find(9)?.status).toBe("running");
+    expect(findByStep(run.state.trace, 9)?.status).toBe("running");
 
     // 旧 runner promise 以非 stale 失败 resolve——rebuild 已 abort 旧 signal，旧
     // executeAgentCall 醒来走 signal.aborted finalize 调用点（错误文案不含 stale
@@ -703,7 +734,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     await flushMicrotasks();
 
     // 新 trace 节点未被旧 finalize 污染：仍 running、无 result、无 completedAt
-    const newNode = run.state.trace.find(9);
+    const newNode = findByStep(run.state.trace, 9);
     expect(newNode?.status).toBe("running");
     expect(newNode?.result).toBeUndefined();
     expect(newNode?.completedAt).toBeUndefined();
@@ -717,7 +748,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     // 收尾：resolve 重跑 deferred，让挂起的 promise 链走完（非孤儿 → 正常完成路径）
     deferredB.resolve({ content: "rerun ok", durationMs: 1, error: undefined, toolCalls: [] });
     await flushMicrotasks();
-    expect(run.state.trace.find(9)?.status).toBe("completed");
+    expect(findByStep(run.state.trace, 9)?.status).toBe("completed");
   });
 });
 
@@ -803,8 +834,8 @@ describe("rebuildRuntime 可观察性（OB3 日志点）", () => {
     // 返回值（经 L3 暴露）与实际被弃 callId 一致：Map/trace 条目均已移除
     expect(run.state.calls.has(5)).toBe(false);
     expect(run.state.calls.has(3)).toBe(false);
-    expect(run.state.trace.find(5)).toBeUndefined();
-    expect(run.state.trace.find(3)).toBeUndefined();
+    expect(findByStep(run.state.trace, 5)).toBeUndefined();
+    expect(findByStep(run.state.trace, 3)).toBeUndefined();
 
     // 收尾：resolve 两个挂起的 deferred（孤儿守卫 drop，无投递无污染）
     deferreds[0]!.resolve({ content: "", durationMs: 1, error: undefined, toolCalls: [] });

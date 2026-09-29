@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useScopedModels composable 测试（A4 验收标准）。
  *

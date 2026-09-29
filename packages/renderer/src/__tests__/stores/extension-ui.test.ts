@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * extension-ui store 单测 —— TC1：ask-user/dialog pending 的 session 级 SSOT。
  *

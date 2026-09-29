@@ -1,21 +1,23 @@
 // src/__tests__/jsonl-run-store-retention.test.ts
 //
-// workflow-state 磁盘保留清理（OR-5 ⑥b 默认开；原 B1 opt-in 形态已由修复取代）。
+// [D1] record 单源存储收敛后 store 侧保留维护面的退役锚。
 //
-// 锁定的语义：
-// - 默认开：TAIJI_SUBAGENT_STATE_MAX_RUNS 未设/空串 → 按 DEFAULT_STATE_MAX_RUNS
-//   （core 单源常量，保守值 50）裁剪（OR-5 修复前「默认关」即跨 run 无界累积
-//   缺陷本身）；
-// - opt-out：显式非法值（0/负数/非数值）→ 不清理（用户意图不明时不动磁盘）；
-// - 显式覆盖：有效正数 → 上限 = env 值，每次新 run state 文件首写成功后，
-//   目录内 wf-*.jsonl 按 mtime 升序裁剪到上限（删最旧）；上限 3 写 5 个 → 剩最新 3；
-// - glob 外文件（非 wf- 前缀 / 非 .jsonl）与父目录 session JSONL 永不误删；
-// - 单个删除失败（unlink 目录 → EPERM，非 ENOENT）logger.warn 留证不抛，
-//   save 主链路不受影响。
+// 旧形态（[W1 / D5]）的「新 run state 文件首写触发维护轮 + abandon 收编接线」
+// 随 state 快照删除而整体退役：save = 显式 no-op，store 不再触发任何维护轮；
+// abandon 终局化接线（abandonElapsedInterruptedRuns 的 barrel 消费）同步拆除
+// （D9 store 侧部分——interrupted 的进入方收敛为 core 崩溃收编与 terminate）。
 //
-// mtime 确定性：每个文件落盘后立即 utimesSync 钉死 mtime（基线 + i 分钟，全部
-// 过去时），消除同毫秒写入的排序抖动——被删集合 = mtime 最旧的 (N - cap) 个，
-// 断言精确到文件名。
+// 保留维护的现行形态：
+// - 判定/执行单源在 core runRetentionMaintenanceRound（维护轮入口）；
+// - 触发点收敛为 session_start 兜底（session-lifecycle.ts，oncePerProcess 守卫）
+//   ——其行为断言在 session-lifecycle.test.ts；
+// - 旧格式两件套（旧 journal `.events.jsonl` + state 快照 `<runId>.jsonl`）不读、
+//   不写、**不主动删**——维护轮对窗外终态旧双源足迹的成对裁剪是既有清理通道的
+//   自然结果（D1 历史数据处置③：非新增删除动作，跟随裁决点 7 消亡）；
+// - record 流（`.record.jsonl` 新后缀）被 prune 候选枚举结构性排除（filter 用
+//   RUN_EVENT_JOURNAL_SUFFIX 单源）——唯一事实源不被旧快照面裁剪逻辑误删。
+//
+// mtime/时钟确定性：事件帧 ts 相对 Date.now 构造（天数偏移注入），不依赖写入时序。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -33,14 +35,19 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { Budget } from "@zhushanwen/subagent-core";
-import { Trace } from "@zhushanwen/subagent-core";
-import type { RunSpec } from "@zhushanwen/subagent-core";
-import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
-import { WorkflowRun } from "@zhushanwen/subagent-core";
-// DEFAULT_STATE_MAX_RUNS 仅测试消费符号（D3 标准不进 barrel），深路径直取
-import { DEFAULT_STATE_MAX_RUNS } from "@zhushanwen/subagent-core/orchestration/file-run-store.ts";
-import { JsonlRunStore, STATE_MAX_RUNS_ENV } from "../jsonl-run-store.ts";
+import {
+  Budget,
+  RUN_EVENT_JOURNAL_SUFFIX,
+  Trace,
+  WorkflowRun,
+  runRetentionMaintenanceRound,
+  type RunSpec,
+  type ExecutionTraceNode,
+} from "@zhushanwen/subagent-core";
+// STATE_TTL_MS_ENV 仅测试消费符号，深路径直取（[W1 / D5] 保留窗口 env 通道单源
+// core run-state-evidence）。
+import { STATE_TTL_MS_ENV } from "@zhushanwen/subagent-core/execution/persistence/run-state-evidence.ts";
+import { JsonlRunStore } from "../jsonl-run-store.ts";
 
 function makeSpec(): RunSpec {
   return {
@@ -52,13 +59,9 @@ function makeSpec(): RunSpec {
   };
 }
 
-function makeTraceNode(stepIndex: number): ExecutionTraceNode {
-  return { stepIndex, agent: "worker", task: "do thing", model: "default", status: "pending" };
-}
-
 function makeRunningRun(runId: string): WorkflowRun {
   const trace = new Trace();
-  trace.append(makeTraceNode(0));
+  trace.append({ stepIndex: 0, agent: "worker", task: "do thing", model: "default", status: "pending" });
   return WorkflowRun.reconstruct(runId, makeSpec(), {
     status: "running",
     budget: new Budget(),
@@ -77,148 +80,141 @@ function stateFile(stateDir: string, runId: string): string {
   return path.join(stateDir, `${runId}.jsonl`);
 }
 
-/** 把文件/目录 mtime 钉到过去（基线 + i 分钟）——排序判定不依赖真实写入时序。 */
-function pinMtime(fullPath: string, i: number, base: number): void {
-  const t = new Date(base + i * 60_000);
-  fs.utimesSync(fullPath, t, t);
+function legacyJournalFile(stateDir: string, runId: string): string {
+  return path.join(stateDir, `${runId}.events.jsonl`);
 }
 
-describe("workflow-state 保留清理（OR-5 ⑥b 默认开 TAIJI_SUBAGENT_STATE_MAX_RUNS）", () => {
+function recordFile(stateDir: string, runId: string): string {
+  return path.join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+}
+
+function manifestFile(stateDir: string, runId: string): string {
+  return path.join(stateDir, `${runId}.json`);
+}
+
+/** 「N 天前」的 epoch ms（事件帧 ts 注入用——资格判据锚 = 事件 ts）。 */
+function daysAgoMs(days: number): number {
+  return Date.now() - days * 86_400_000;
+}
+
+/**
+ * 预置旧格式终态 run 磁盘足迹（旧 journal + state 快照 + 终局 manifest——历史
+ * 遗留两件套的在盘形态，D1 后不读不写不主动删）。
+ */
+function seedLegacyTerminalRun(stateDir: string, runId: string, createdDaysAgo: number, settledDaysAgo: number, outcome: "done" | "failed" | "cancelled" = "completed"): void {
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(legacyJournalFile(stateDir, runId), [
+    JSON.stringify({ type: "run-created", ts: daysAgoMs(createdDaysAgo), runId, workflowName: "t", argsSummary: "{}" }),
+    JSON.stringify({ type: "run-settled", ts: daysAgoMs(settledDaysAgo), outcome, artifactsDir: "/tmp/artifacts" }),
+  ].join("\n") + "\n", "utf8");
+  fs.writeFileSync(stateFile(stateDir, runId), `{"runId":"${runId}","stub":true}\n`, "utf8");
+  fs.writeFileSync(manifestFile(stateDir, runId), JSON.stringify({ runId, outcome }), "utf8");
+}
+
+describe("store 侧保留维护面退役（[D1] record 单源）", () => {
   let tmpDir: string;
   let stateDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-retention-"));
     stateDir = path.join(tmpDir, "workflow-state");
-    // 双保险：vitest.setup 全局净化 + 本文件显式 delete（防用例间经 stub 栈泄漏）
-    delete process.env[STATE_MAX_RUNS_ENV];
+    delete process.env[STATE_TTL_MS_ENV];
     loggerMock.warn.mockClear();
     loggerMock.debug.mockClear();
   });
 
   afterEach(() => {
-    delete process.env[STATE_MAX_RUNS_ENV];
+    delete process.env[STATE_TTL_MS_ENV];
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("上限 3 写 5 个 → 剩最新 3（mtime 最旧的 2 个被删）", async () => {
-    process.env[STATE_MAX_RUNS_ENV] = "3";
+  it("save 零磁盘动作：旧触发点退役——窗外终态旧双源足迹不被 save 触发的维护轮裁剪", async () => {
+    process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
     const store = new JsonlRunStore({ sessionDir: tmpDir });
-    const base = Date.now() - 10 * 60_000;
+    seedLegacyTerminalRun(stateDir, runIdAt(0), 40, 35); // 窗外终态（旧触发点下会被裁——对照组）
 
-    for (let i = 0; i < 5; i++) {
-      const runId = runIdAt(i);
-      await store.save(makeRunningRun(runId));
-      // save 返回 = 首写 flush + 本轮 prune 已执行；此刻钉 mtime 供下一轮 prune 排序
-      pinMtime(stateFile(stateDir, runId), i, base);
-    }
+    // 冷/热路径多次 save：no-op，不触发维护轮、不产生 state 快照
+    await store.save(makeRunningRun(runIdAt(1)));
+    await store.save(makeRunningRun(runIdAt(1)));
 
-    // 最后一轮 prune 按钉死的 mtime（0<1<2<3<4 分钟）裁到 3：留 i=2,3,4，删 i=0,1
-    expect(fs.readdirSync(stateDir).sort()).toEqual(
-      [runIdAt(2), runIdAt(3), runIdAt(4)].map((id) => `${id}.jsonl`).sort(),
-    );
-    expect(loggerMock.warn).not.toHaveBeenCalled();
-  });
-
-  it("未设 / 空 → 默认上限 DEFAULT_STATE_MAX_RUNS 生效（默认开，OR-5 修复）", async () => {
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
-    const total = DEFAULT_STATE_MAX_RUNS + 1;
-
-    // 写默认上限 + 1 个 run：每轮首写成功都触发 prune
-    for (let i = 0; i < total; i++) {
-      await store.save(makeRunningRun(runIdAt(i)));
-    }
-
-    // 修复前（默认关）51 个全保留；现在裁到 50，最旧的 runIdAt(0) 被删
-    // （runId ts 段递增 → 文件名字典序 = 创建序 = mtime 升序，排序确定性不依赖 pin）
-    const rest = fs.readdirSync(stateDir).sort();
-    expect(rest).toHaveLength(DEFAULT_STATE_MAX_RUNS);
-    expect(rest).not.toContain(`${runIdAt(0)}.jsonl`);
-    expect(rest).toContain(`${runIdAt(total - 1)}.jsonl`);
-    expect(loggerMock.warn).not.toHaveBeenCalled();
+    // 窗外终态旧双源原样留置（删除通道收敛到维护轮入口 / 裁决点 7 对账清理）
+    expect(fs.existsSync(stateFile(stateDir, runIdAt(0)))).toBe(true);
+    expect(fs.existsSync(legacyJournalFile(stateDir, runIdAt(0)))).toBe(true);
+    // save 不再产生 state 快照（旧 `<runId>.jsonl` 投影退役锚）
+    expect(fs.existsSync(stateFile(stateDir, runIdAt(1)))).toBe(false);
     await store.dispose();
   });
 
-  it("显式非法值（0 / 负数 / 非数值）→ 不清理（opt-out 通道）", async () => {
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
-
-    for (let i = 0; i < 5; i++) {
-      await store.save(makeRunningRun(runIdAt(i)));
-    }
-    expect(fs.readdirSync(stateDir)).toHaveLength(5);
-
-    // 显式非法值同样不启用（解析回落 undefined = opt-out）：继续写、文件只增不减
-    for (const value of ["0", "-2", "abc", "NaN", "Infinity"]) {
-      process.env[STATE_MAX_RUNS_ENV] = value;
-      await store.save(makeRunningRun(runIdAt(5)));
-    }
-    // runIdAt(5) 首写（冷路径）flush 落盘第 6 个文件；后续 4 次为 running 热路径
-    // 去抖批（未 flush）——磁盘 6 个文件且全程无删除
-    expect(fs.readdirSync(stateDir)).toHaveLength(6);
-    expect(loggerMock.warn).not.toHaveBeenCalled();
-    await store.dispose();
+  it("D9 store 侧接线拆除的机器锚：core barrel 不再导出 abandonElapsedInterruptedRuns（壳侧唯一消费面已拆）", async () => {
+    const core = (await import("@zhushanwen/subagent-core")) as unknown as Record<string, unknown>;
+    expect(core["abandonElapsedInterruptedRuns"]).toBeUndefined();
   });
 
-  it("glob 外文件与父目录 session JSONL 不误删（只删本目录 wf-*.jsonl）", async () => {
+  it("glob 外文件与父目录 session JSONL 不被 store 任何动作触碰（零写面推论）", async () => {
+    const store = new JsonlRunStore({ sessionDir: tmpDir });
     fs.mkdirSync(stateDir, { recursive: true });
-    const bystanders = [
-      "notes.txt",
-      "keep-me.jsonl",
-      "wf-truncated-noext",
-      "xwf-1719500000000-notwf.jsonl",
-    ];
-    for (const name of bystanders) {
-      fs.writeFileSync(path.join(stateDir, name), "x");
-    }
-    // session JSONL 在父目录（sessionDir），结构性不在扫描范围，实测钉住
+    const bystanders = ["notes.txt", "keep-me.jsonl", "xwf-1719500000000-notwf.jsonl"];
+    for (const name of bystanders) fs.writeFileSync(path.join(stateDir, name), "x");
     const sessionFile = path.join(tmpDir, "main-session.jsonl");
-    fs.writeFileSync(sessionFile, "{}\n");
-
-    process.env[STATE_MAX_RUNS_ENV] = "1";
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
-    const base = Date.now() - 10 * 60_000;
+    fs.writeFileSync(sessionFile, "{}\n", "utf8");
 
     await store.save(makeRunningRun(runIdAt(0)));
-    pinMtime(stateFile(stateDir, runIdAt(0)), 0, base); // 钉成最旧
-    await store.save(makeRunningRun(runIdAt(1)));
+    await store.flushPendingSaves();
 
-    // 2 个 state 文件裁到 1：runIdAt(0) 被删，4 个旁观文件原封不动
-    expect(fs.readdirSync(stateDir).sort()).toEqual(
-      [...bystanders, `${runIdAt(1)}.jsonl`].sort(),
-    );
+    for (const name of bystanders) {
+      expect(fs.existsSync(path.join(stateDir, name))).toBe(true);
+    }
     expect(fs.existsSync(sessionFile)).toBe(true);
-    expect(loggerMock.warn).not.toHaveBeenCalled();
+    await store.dispose();
+  });
+});
+
+describe("维护轮入口（core 单源）对 run 域目录的行为——session_start 兜底触发点消费面", () => {
+  let tmpDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-retention-anchor-"));
+    stateDir = path.join(tmpDir, "workflow-state");
+    delete process.env[STATE_TTL_MS_ENV];
   });
 
-  it("删除失败（unlink 目录 → EPERM）→ logger.warn 留证不抛，save 正常 resolve", async () => {
+  afterEach(() => {
+    delete process.env[STATE_TTL_MS_ENV];
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("旧双源窗外终态不获裁剪资格（journal 判据换源后 scan 只认 record 后缀）；record 流不被候选枚举捕获、不误删", async () => {
+    process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
+    // 旧格式窗外终态：prune 资格 = journal run-settled 帧 fold（D5 判据①）——
+    // journal scan 经 RUN_EVENT_JOURNAL_SUFFIX 单源只认 record 后缀后，旧 journal
+    // 不进判定路径（空流 = 非终态 = 不获资格）——旧两件套「不读不写不主动删」
+    //（D1 历史数据处置）在保留通道的自然成立形态，留置原地。
+    seedLegacyTerminalRun(stateDir, runIdAt(0), 40, 35);
+    // 新形态 record 流（窗外终态帧）：快照候选锚（<runId>.jsonl）不存在 → 不进
+    // 候选枚举；即使在盘也被 journal 后缀 filter 结构性排除——唯一事实源不被旧
+    // 快照面裁剪逻辑误删（其清理资格归 u1a prune fold 判据换源后的新判据）
     fs.mkdirSync(stateDir, { recursive: true });
-    // 用「名字命中 glob 的目录」制造确定性 unlink 失败（unlink 目录 → EPERM）
-    const blockerDir = stateFile(stateDir, runIdAt(0));
-    fs.mkdirSync(blockerDir);
-    pinMtime(blockerDir, 0, Date.now() - 10 * 60_000); // 钉成最旧 → 成为删除受害者
+    fs.writeFileSync(recordFile(stateDir, runIdAt(1)), [
+      JSON.stringify({ type: "run-created", ts: daysAgoMs(40), runId: runIdAt(1), workflowName: "t", argsSummary: "{}" }),
+      JSON.stringify({ type: "run-settled", ts: daysAgoMs(35), outcome: "done", artifactsDir: "/tmp/artifacts" }),
+    ].join("\n") + "\n", "utf8");
 
-    process.env[STATE_MAX_RUNS_ENV] = "1";
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    await runRetentionMaintenanceRound(
+      { stateDir },
+      {},
+      {
+        warn: (msg) => loggerMock.warn(msg),
+        debug: (msg) => loggerMock.debug(msg),
+        toMsg: (err: unknown) => String(err),
+      },
+    );
 
-    // save 1 的 prune：受害者 = blockerDir → EPERM → warn，但 save 正常 resolve
-    await store.save(makeRunningRun(runIdAt(1)));
-    expect(fs.existsSync(stateFile(stateDir, runIdAt(1)))).toBe(true);
-    expect(fs.existsSync(blockerDir)).toBe(true);
-
-    // save 2 的 prune：3 项裁到 1，受害者 = dir（最旧，重试仍 EPERM）+ file1（次旧，删成）
-    await store.save(makeRunningRun(runIdAt(2)));
-    expect(fs.existsSync(stateFile(stateDir, runIdAt(1)))).toBe(false);
-    expect(fs.existsSync(stateFile(stateDir, runIdAt(2)))).toBe(true);
-    expect(fs.existsSync(blockerDir)).toBe(true);
-
-    // 每轮 prune 独立重试受害者：save1 与 save2 各 warn 一次（均指向 blockerDir），
-    // 不抛错、不阻断其余文件删除
-    expect(loggerMock.warn).toHaveBeenCalledTimes(2);
-    for (const call of loggerMock.warn.mock.calls) {
-      const msg = String(call[0] ?? "");
-      expect(msg).toContain("state retention");
-      expect(msg).toContain(blockerDir);
-    }
-    await store.dispose();
+    // 旧双源：整轮零删除（不获资格），留置原地
+    expect(fs.existsSync(stateFile(stateDir, runIdAt(0)))).toBe(true);
+    expect(fs.existsSync(legacyJournalFile(stateDir, runIdAt(0)))).toBe(true);
+    expect(fs.existsSync(manifestFile(stateDir, runIdAt(0)))).toBe(true);
+    // record 流：零触碰
+    expect(fs.existsSync(recordFile(stateDir, runIdAt(1)))).toBe(true);
   });
 });

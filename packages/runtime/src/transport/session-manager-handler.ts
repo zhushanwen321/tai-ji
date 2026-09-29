@@ -82,7 +82,7 @@ function logNotifyIdAbsence(action: 'send' | 'create'): void {
  * watch respond 写回通道（boolean 传导，D7①）：true = 已写入发起方 pi 进程 stdin
  * （写入失败 false 传导）；pi 侧无独立消费确认——rpc-mode 收行后按 id resolve 既有
  * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js:615-624，0.84.4 实读；既有锚
- * rpc-client.ts:1129-1133）。watch 长挂 select 无 timeout，pi 侧不超时清项（PS-55）；
+ * rpc-client.ts:1129-1133）。watch 长挂 select 无 timeout，pi 侧不超时清项（PS-59）；
  * 写成功未消费的残余由 TTL 清扫腿（D7③）兜底。
  */
 export type WatchRespondFn = (
@@ -546,7 +546,7 @@ export class SessionManagerHandler {
         .sendChecked({
           payload: { kind: 'text', content: prompt },
           // notifyId 穿 envelope additive meta（D2）：delivery 内核 onSettled delivered
-          // 回执读 meta 完成 armed→injected 受理锚定（P9 帧序保证先于 settled 帧，PS-53）；
+          // 回执读 meta 完成 armed→injected 受理锚定（P9 帧序保证先于 settled 帧，PS-57）；
           // parentSid 同携（回执侧无须反查归属）。rejected 回执 → 投递失败腿 disarm。
           ...(armed ? { meta: { notifyId: armedNotifyId, parentSid: parentSessionId } } : {}),
         })

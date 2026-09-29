@@ -60,7 +60,7 @@ interface EmptyResultStrikeGuard {
    *
    * 为什么 strike 连续计数（sidebar-sync-plan P1 + R1 business-logic S3，原三 store 注释单源）：
    * runtime 读盘失败时 catch 降级返回 []，瞬时读失败若当空列表覆盖会清掉分区历史——RPC
-   * 成功且空 + 分区非空时先保留旧分区。但「真实删空」（idle-gc/trash 清掉全部记录，删除
+   * 成功且空 + 分区非空时先保留旧分区。但「真实删空」（trash 清掉全部记录，删除
    * 动作无对应推送）同样表现为空结果，单次判定无法区分二者：用连续空命中计数（strike）
    * 区分——连续 LIMIT 次空结果判定真实删空放行覆盖（瞬时读失败不会连续命中，RPC 失败走
    * catch 且重置计数），非空结果即清零。推送路径是权威数据，不经此守卫。

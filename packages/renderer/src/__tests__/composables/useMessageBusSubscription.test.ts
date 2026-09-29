@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useMessageBusSubscription —— re-export shim 单元测试（wave:renderer-rebuild-v2 W2, T3）。
  *

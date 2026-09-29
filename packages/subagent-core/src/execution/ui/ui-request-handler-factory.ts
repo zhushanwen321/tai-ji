@@ -102,7 +102,8 @@ export function createUiRequestHandlerForMode(
   const realHandler = createRealHandler(ctx, hostMode, registry);
 
   return async (req: UiRequest): Promise<UiResponse> => {
-    // 维度 1：TUI 下 fire-and-forget 不透传（回 ack，不写 stdin——由 session-runner respond 处理）
+    // 维度 1：TUI 下 fire-and-forget 不透传（回 ack，不写 stdin——子进程 stdin 回写由
+    // 引擎侧 ui-request-queue 的 respond 承担，pi-subagent-cli/src/ui-request-queue.ts）
     if (hostMode === "tui" && !isDialogMethod(req.method)) {
       return { ack: true };
     }

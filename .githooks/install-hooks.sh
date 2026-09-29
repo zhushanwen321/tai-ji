@@ -69,7 +69,7 @@ cat > "$PRE_COMMIT_TMP" << 'HOOK_EOF'
 #!/bin/bash
 # Git pre-commit hook: 代码质量检查
 #
-# 原则：无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。
+# 原则：无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。
 # SKIP_* 环境变量仅为经明确批准的紧急逃生口，不应作为常规手段。
 
 set -e
@@ -99,6 +99,54 @@ NC='\033[0m'
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 cd "$PROJECT_ROOT"
 
+# ============================================================================
+# [skills-symlink-guard 第 0 段] .agents 实体 symlink 三分支判定（D5）
+#   .agents 实体已迁 workspace 根（<workspace>/.agents），各 worktree 以 symlink
+#   共享同一实体（脱离 git 跟踪，设计 cross-worktree-skill-sync.md）。本段只做
+#   部署形态检查与缺失自愈，不做内容检查：
+#   ① symlink 且实体可达且指向 workspace 实体 → 跳过（常态）；
+#   ② .agents 缺失且父目录下实体存在 → 幂等补建 symlink（误删自愈；
+#      父目录下无实体的场所——如 /tmp 下 fallow 临时 worktree——天然不命中，
+#      静默放行，与该类 worktree「无本地 .agents」的常态一致）；
+#   ③ 其余形态（检出未迁移 ref/tag 被 git 写回的真实目录、手工副本、悬空
+#      symlink、指错目标）→ 停手报错，按 bisect/detached 或常态分派指引，
+#      不做自动替换（自动替换会静默复活旧副本）。
+# ============================================================================
+SKILL_PROJECT_ROOT_P="$(cd "$PROJECT_ROOT" && pwd -P)"
+SKILL_WS_ROOT="$(dirname "$SKILL_PROJECT_ROOT_P")"
+SKILL_ENTITY="$SKILL_WS_ROOT/.agents"
+SKILL_LINK="$PROJECT_ROOT/.agents"
+
+if [ -L "$SKILL_LINK" ]; then
+    if [ ! -d "$SKILL_LINK/" ]; then
+        echo -e "${RED}[ERROR] .agents symlink 悬空——实体（$SKILL_ENTITY）丢失或不可达${NC}"
+        echo -e "${YELLOW}[FIX] 从快照还原：git archive refs/skills-snapshot | tar -x -C \"$SKILL_WS_ROOT\"${NC}"
+        echo -e "${YELLOW}      远端恢复：git fetch github refs/skills-snapshot:refs/skills-snapshot 后重试；详见 docs/TROUBLESHOOTING.md${NC}"
+        exit 1
+    fi
+    SKILL_RESOLVED="$(cd "$SKILL_LINK" && pwd -P)"
+    if [ "$SKILL_RESOLVED" != "$SKILL_ENTITY" ]; then
+        echo -e "${RED}[ERROR] .agents symlink 指向 $SKILL_RESOLVED，期望 $SKILL_ENTITY${NC}"
+        echo -e "${YELLOW}[FIX] 确认目标后重建：rm .agents && ln -sfn ../.agents .agents${NC}"
+        exit 1
+    fi
+elif [ ! -e "$SKILL_LINK" ]; then
+    if [ -d "$SKILL_ENTITY" ] && [ ! -L "$SKILL_ENTITY" ]; then
+        ln -sfn ../.agents "$SKILL_LINK"
+        echo -e "${GREEN}[OK] 已自动补建 .agents → 实体 symlink（自愈）${NC}"
+    fi
+    # 父目录下无实体（fallow 等临时场所）：无本地 .agents 属常态，静默放行
+else
+    SKILL_REF_STATE="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    echo -e "${RED}[ERROR] .agents 不是指向 workspace 实体的 symlink（实态：$([ -L "$SKILL_LINK" ] && echo "symlink→$(readlink "$SKILL_LINK")" || echo "真实目录/其他"))${NC}"
+    if [ "$SKILL_REF_STATE" = "HEAD" ] || [ -z "$SKILL_REF_STATE" ]; then
+        echo -e "${YELLOW}[FIX] bisect/detached 态：该目录与被测代码无关，直接重建后继续——rm -rf .agents && ln -sfn ../.agents .agents${NC}"
+    else
+        echo -e "${YELLOW}[FIX] 本分支检出的是迁移前的 .agents 跟踪内容：合并迁移 commit（git merge dev-0.10.5 或含迁移 commit 的集成分支）；确认目录可丢弃则 rm -rf .agents 后重跑 commit（symlink 将自动补建）${NC}"
+    fi
+    exit 1
+fi
+
 print_section() {
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -122,12 +170,12 @@ FRONTEND_FILES=$(echo "$STAGED_FILES" | grep "^packages/renderer/src/" || true)
 EXTENSION_FILES=$(echo "$STAGED_FILES" | grep -E "^extensions/.*\.ts$" | grep -vE "__tests__|\.test\.|/workflows/|/examples/|\.d\.ts$" || true)
 
 # ============================================================================
-# 0. pnpm store 布局守卫（翻转地雷：zsw 引擎 HOME 覆盖 × pnpm HOME 相对 store）
+# 0. pnpm store 布局检查（翻转地雷：zsw 引擎 HOME 覆盖 × pnpm HOME 相对 store）
 #    后续 validate-runtime-bundle → verify-* e2e 的自含 install 撞上翻转布局会以
 #    ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY 硬崩，先拦下给出指引。
 # ============================================================================
 if ! bash .githooks/check_pnpm_store_layout.sh; then
-    echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+    echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
     exit 1
 fi
 
@@ -135,7 +183,7 @@ fi
 # 0.5 gitignored 产物目录入库拦截（.tmp/ 等工作流产物 force-add 防再犯）
 #    全局 AGENTS.md「提交策略」：agent 工作流产物目录禁入 git——gitignore 只对
 #    untracked 生效，force-add 一次即永久跟踪、随 merge 传播（2026-09 实测多个
-#    session 把 .tmp/dev-flow 台账 add -f 入库）。check-ignore 纯规则匹配不看
+#    session 把 .tmp/dev-flow 流程产物 add -f 入库）。check-ignore 纯规则匹配不看
 #    跟踪态，已跟踪的 ignored 文件再次修改同样拦截。
 # ============================================================================
 if [ -n "$STAGED_FILES" ]; then
@@ -157,7 +205,7 @@ EOF
         echo -e "${YELLOW}[FIX] 撤出暂存区: git restore --staged <文件>${NC}"
         echo -e "${YELLOW}[FIX] 已被历史 commit 跟踪时: git rm -r --cached <路径>（文件留盘，解除跟踪）${NC}"
         echo -e "${YELLOW}[FIX] 确属合理入库: 在 .gitignore 加 ! 例外条目并注释理由${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
 fi
@@ -186,7 +234,7 @@ if [ -n "$FRONTEND_FILES" ]; then
             if ! ESLINT_OUTPUT=$(npx eslint --max-warnings=0 --no-warn-ignored $ESLINT_FILES 2>&1); then
                 echo -e "${RED}[ERROR] ESLint 检查失败:${NC}"
                 echo "$ESLINT_OUTPUT"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
 
@@ -223,7 +271,7 @@ if [ -n "$FRONTEND_FILES" ]; then
             if ! (cd packages/renderer && npx vue-tsc --noEmit 2>&1); then
                 echo ""
                 echo -e "${RED}[ERROR] vue-tsc 类型检查失败${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
 
@@ -238,7 +286,7 @@ if [ -n "$FRONTEND_FILES" ]; then
             if ! (cd packages/renderer && npx vue-tsc --noEmit -p tsconfig.typecheck-test.json 2>&1); then
                 echo ""
                 echo -e "${RED}[ERROR] vue-tsc 测试类型检查失败（测试桩与生产契约漂移）${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
 
@@ -269,7 +317,7 @@ if [ -n "$EXTENSION_FILES" ]; then
         if ! ESLINT_EXT_OUTPUT=$(npx eslint --quiet --no-warn-ignored $ESLINT_EXT_FILES 2>&1); then
             echo -e "${RED}[ERROR] extensions ESLint 检查失败:${NC}"
             echo "$ESLINT_EXT_OUTPUT"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
         echo -e "${GREEN}[OK] extensions ESLint 检查通过（warning 为技术债标记，不阻断）${NC}"
@@ -278,7 +326,7 @@ if [ -n "$EXTENSION_FILES" ]; then
         if ! (cd extensions && npx tsc --noEmit 2>&1); then
             echo ""
             echo -e "${RED}[ERROR] extensions tsc 类型检查失败${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
         echo -e "${GREEN}[OK] extensions tsc 类型检查通过${NC}"
@@ -330,7 +378,7 @@ if [ -n "$EXTENSION_FILES" ] || [ -n "$EXTENSION_PKG_FILES" ]; then
             echo -e "${RED}[ERROR] 发现废弃 namespace @mariozechner/pi-*（应改用 @earendil-works/pi-*）:${NC}"
             echo -e "$NS_HITS"
             echo -e "${YELLOW}[FIX] find extensions -type f \\( -name '*.ts' -o -name '*.json' \\) -exec sed -i '' 's|@mariozechner/pi-|@earendil-works/pi-|g' {} +${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
         echo -e "${GREEN}[OK] namespace 检查通过（无 @mariozechner/pi-* 引用）${NC}"
@@ -352,7 +400,7 @@ if [ -n "$EXTENSION_FILES" ] || [ -n "$EXTENSION_PKG_FILES" ]; then
             echo -e "${RED}[ERROR] extensions 中禁止使用 console.log/info（会泄漏到 TUI）:${NC}"
             echo -e "$CONSOLE_VIOLATIONS"
             echo -e "${YELLOW}[FIX] 用户可见消息 → ctx.ui.notify；内部诊断 → console.warn/error('[ext] ...')；不可恢复错误 → throw${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
         echo -e "${GREEN}[OK] console.log/info 检查通过${NC}"
@@ -459,7 +507,7 @@ print('OK' if matched else 'MISSING')
             if [ $MANIFEST_FAIL -ne 0 ]; then
                 echo ""
                 echo -e "${RED}[ERROR] pi manifest + package.json 检查失败${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
             echo -e "${GREEN}[OK] pi manifest + package.json 检查通过${NC}"
@@ -470,7 +518,7 @@ print('OK' if matched else 'MISSING')
 fi
 
 # ============================================================================
-# 2d. extension 结构一致性检查（分组目录 / role 字段 / 依赖台账 / 一层路径残留）
+# 2d. extension 结构一致性检查（分组目录 / role 字段 / 依赖清单 / 一层路径残留）
 #     scripts/check-extension-dependencies.mjs：①目录 ↔ taiji.role 一致
 #     ②taiji/ ⊆ mandatory 清单 ③extensions/ 一层禁放包 ④extension-dependencies.json
 #     双向一致 ⑤活文件一层路径残留。零第三方依赖，实测 ~0.3s（~2500 文件全仓扫描，
@@ -484,7 +532,7 @@ if echo "$STAGED_FILES" | grep -qE "^extensions/|^extension-dependencies\.json$|
     if [ "$SKIP_EXTENSION_LINT" != "1" ]; then
         if ! node scripts/check-extension-dependencies.mjs; then
             echo -e "${RED}[ERROR] extension 结构一致性检查失败，按上方 ✗ 明细修复后重试${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
@@ -493,7 +541,7 @@ if echo "$STAGED_FILES" | grep -qE "^extensions/|^extension-dependencies\.json$|
 fi
 
 # ============================================================================
-# 2e. extension npm 发布 files 白名单守卫（import 闭包 ⊆ files）
+# 2e. extension npm 发布 files 白名单检查（import 闭包 ⊆ files）
 #     scripts/check-extension-files.mjs：从发布入口解析静态 import 闭包 +
 #     pi.skills/agents/workflows 资源路径，逐一对照 package.json 的 files 白名单
 #     （npm 只打包白名单命中文件）。起因 pi-subagent-workflow@8.8.1：逐文件枚举
@@ -502,66 +550,66 @@ fi
 # ============================================================================
 
 if echo "$STAGED_FILES" | grep -qE "^extensions/.*/(package\.json|[^/]+\.ts)$|^extensions/.*/src/.*\.ts$|^scripts/check-extension-files\.mjs$"; then
-    print_section "[extension files 白名单守卫]"
+    print_section "[extension files 白名单检查]"
 
     if [ "$SKIP_EXTENSION_LINT" != "1" ]; then
         if ! node scripts/check-extension-files.mjs; then
-            echo -e "${RED}[ERROR] extension files 白名单守卫未通过——白名单外的文件不会进 npm tarball，按上方 ✗ 明细修复后重试${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[ERROR] extension files 白名单检查未通过——白名单外的文件不会进 npm tarball，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
-        echo -e "${YELLOW}[SKIP] extension files 白名单守卫已跳过${NC}"
+        echo -e "${YELLOW}[SKIP] extension files 白名单检查已跳过${NC}"
     fi
 fi
 
 # ============================================================================
-# 2f. vitest 防线挂载守卫（taijiTestConfig 工厂全覆盖）
+# 2f. vitest 防线挂载检查（taijiTestConfig 工厂全覆盖）
 #     scripts/check-vitest-guard.mjs：所有含 vitest 测试的包根，其 vitest.config.ts
-#     必须经仓库根 test-guard/factory 的 taijiTestConfig 包装（globalSetup 钉死
+#     必须经仓库根 test-guard/factory 的 taijiTestConfig 包装（globalSetup 固定
 #     TAIJI_AGENT_DATA_DIR + fs-guard 破坏性 fs 白名单切面）。起因 2026-09-16：
 #     从非包 cwd 误跑 workspace 全仓 vitest，包级防线未加载，测试删光用户真实
-#     ~/.taiji 数据目录——防线已仓库级化 + 根级兜底 config，本守卫拦「新包/新
+#     ~/.taiji 数据目录——防线已仓库级化 + 根级兜底 config，本检查拦「新包/新
 #     config 漏挂防线」回归。复用 SKIP_CODE_RULES_CHECK 开关（不新增逃生口）。
 # ============================================================================
 
 if echo "$STAGED_FILES" | grep -qE "^(packages|extensions|apps)/.*(\.test\.(ts|mjs)|vitest\.config\.ts)$|^test-guard/|^vitest\.config\.ts$|^scripts/check-vitest-guard\.mjs$"; then
-    print_section "[vitest 防线挂载守卫]"
+    print_section "[vitest 防线挂载检查]"
 
     if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
         if ! node scripts/check-vitest-guard.mjs; then
-            echo -e "${RED}[ERROR] vitest 防线挂载守卫未通过——漏挂防线的 config 会让测试直连真实数据目录，按上方 ✗ 明细修复后重试${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[ERROR] vitest 防线挂载检查未通过——漏挂防线的 config 会让测试直连真实数据目录，按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
-        echo -e "${YELLOW}[SKIP] vitest 防线挂载守卫已跳过${NC}"
+        echo -e "${YELLOW}[SKIP] vitest 防线挂载检查已跳过${NC}"
     fi
 fi
 
 # ============================================================================
-# 2g. review-fix-loop 双实现锁步守卫
+# 2g. review-fix-loop 双实现锁步检查
 #     scripts/check-rfl-parity.mjs：review+fix 循环有两份实现（pi 内置
 #     packages/subagent-core/workflows/review-fix-loop-utils.cjs / zcode 原生
 #     ~/.zcode/workflows/review-fix-loop.dwf.ts），共享语义靠注释文字约定维系同步。
-#     2026-09-20 比对证实该约定不可靠（调度去重修复只在 pi 侧、早退点台账守门
-#     只在 pi 侧），本守卫用同一语料跑两侧 planReviewerOrder 对账调度结果 + 池/
+#     2026-09-20 比对证实该约定不可靠（调度去重修复只在 pi 侧、早退点清单守门
+#     只在 pi 侧），本检查用同一语料跑两侧 planReviewerOrder 对账调度结果 + 池/
 #     阈值常量，并把「order 恒为输入排列」去重不变量双侧断言。zcode 文件不存在
 #     时跳过双实现对账，但 pi 侧去重不变量仍照跑（该失败不被 SKIP 吞掉）。
 #     复用 SKIP_CODE_RULES_CHECK 开关。
 # ============================================================================
 
 if echo "$STAGED_FILES" | grep -qE "^packages/subagent-core/workflows/review-fix-loop|^scripts/check-rfl-parity\.mjs$"; then
-    print_section "[review-fix-loop 双实现锁步守卫]"
+    print_section "[review-fix-loop 双实现锁步检查]"
 
     if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
         if ! node scripts/check-rfl-parity.mjs; then
             echo -e "${RED}[ERROR] 双实现已漂移——改一侧必须同步另一侧（pi: review-fix-loop-utils.cjs / zcode: ~/.zcode/workflows/review-fix-loop.dwf.ts）${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
-        echo -e "${YELLOW}[SKIP] review-fix-loop 双实现锁步守卫已跳过${NC}"
+        echo -e "${YELLOW}[SKIP] review-fix-loop 双实现锁步检查已跳过${NC}"
     fi
 fi
 
@@ -573,7 +621,7 @@ fi
 #     F4「本地绿产品挂」陷阱的同构盲区，同一断言集必须在 bun 运行时再跑一遍。
 #     fail-open 仅限 bun 缺失场景（输出安装指引后放行，bun 趟由 CI 承担）；
 #     测试失败必红，无放行分支。--require-bun（CI 用）把缺失翻转为红。
-#     注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底；
+#     注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底；
 #     AGENTS.md SKIP_* 清单登记成本见其清单注释）。
 # ============================================================================
 
@@ -582,7 +630,7 @@ if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^scripts/che
 
     if ! node scripts/check-bun-driver.mjs; then
         echo -e "${RED}[ERROR] bun 趟未通过——bun:sqlite 驱动路径（生产宿主实际路径）有断言未过，按上方明细修复后重试${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
     echo -e "${GREEN}[OK] bun 驱动双跑检查通过${NC}"
@@ -596,7 +644,7 @@ fi
 #     命中 staged 产物的两个源（reader 扩展 / zcode-session-source）或门脚本本体；
 #     CI invariants 免 staged 前提 --rebuild 全量兜底（D7 通则，与 2h 同一挂载理由）。
 #     --rebuild 先重建 staged（bundle-extensions <1s，防「检查的是滞后产物」）；
-#     不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#     不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^extensions/universal/session-reader/|^scripts/check-pbundle\.mjs$"; then
@@ -604,7 +652,7 @@ if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^extensions/
 
     if ! node scripts/check-pbundle.mjs --rebuild; then
         echo -e "${RED}[ERROR] P-bundle 门未通过——staged 产物内驱动 spec 被静态化，按上方 [FIX] 修复后重试${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
     echo -e "${GREEN}[OK] P-bundle 门检查通过${NC}"
@@ -638,7 +686,7 @@ if [ "$SKIP_CODE_RULES_CHECK" != "1" ]; then
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
                 echo -e "${RED}[ERROR] 代码规范检查失败${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
             echo -e "${GREEN}[OK] 代码规范检查通过${NC}"
@@ -670,7 +718,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_SIDECAR_SESSION_CHECK" != "1" ]; th
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
                 echo -e "${RED}[ERROR] Sidecar session 隔离检查失败${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
         fi
@@ -701,7 +749,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSS_TOKENS_CHECK" != "1" ]; then
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
                 echo -e "${RED}[ERROR] CSS tokens 检查失败${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
         fi
@@ -732,7 +780,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSS_TOKEN_SSOT_CHECK" != "1" ]; the
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
                 echo -e "${RED}[ERROR] CSS token SSOT 检查失败：DESIGN.md 投影值与 style.css 不一致${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
         fi
@@ -762,7 +810,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_RENDERER_DEPS_CHECK" != "1" ]; then
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
                 echo -e "${RED}[ERROR] Renderer 依赖完整性检查失败：存在 import 了但 package.json 未声明的包${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
         fi
@@ -790,7 +838,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_ENV_WHITELIST_CHECK" != "1" ]; then
             echo ""
             echo -e "${RED}[ERROR] ENV_WHITELIST_PREFIXES SSOT 检查失败${NC}"
             echo -e "${YELLOW}[INFO] 定义点应在 shared/constants.ts，main/runtime 只能 import${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     fi
@@ -804,7 +852,7 @@ fi
 #   buildOutboundChildEnv / composeChildEnvBase 构建（deny 剥 TAIJI_AGENT_PACKAGED /
 #   TAIJI_RUNTIME_TOKEN）；豁免名单逐条注明理由，详见 checker 脚本头注释。
 #   注：不设独立跳过开关——新增 SKIP_* 逃生口须同步登记 AGENTS.md 的 SKIP_* 清单，
-#   故本段仅受既有 SKIP_ALL_CHECKS 总闸管辖。
+#   故本段仅受既有 SKIP_ALL_CHECKS 总开关管辖。
 # ============================================================================
 
 SPAWN_ENV_BOUNDARY_CHECKER=".githooks/check_spawn_env_boundary.py"
@@ -823,7 +871,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
             echo ""
             echo -e "${RED}[ERROR] runtime 子进程 env 出站契约检查失败${NC}"
             echo -e "${YELLOW}[INFO] 新增子进程必须经 buildOutboundChildEnv 组装 env；修复指引见上方脚本输出；设计依据 docs/architecture/env-propagation-boundary.md${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
         echo -e "${GREEN}[OK] runtime 子进程 env 出站契约检查通过${NC}"
@@ -834,15 +882,15 @@ fi
 
 # ============================================================================
 # 引擎包边界检查（W9，subagent-engine-protocolization）
-#   ① check-engine-sdk-boundary（W1 守卫，随 W9 挂载进链——此前未挂载）：
+#   ① check-engine-sdk-boundary（W1 检查，随 W9 挂载进链——此前未挂载）：
 #     SDK 源码 + dist 不得 import @zhushanwen/subagent-core（不变量：SDK 不得
 #     import core，否则 core → SDK → core 成环）；
-#   ② check-engine-package-boundary（W9 新守卫）：packages/subagent-engine-* +
+#   ② check-engine-package-boundary（W9 新检查）：packages/subagent-engine-* +
 #     pi/zcode-subagent-cli 不得依赖/导入 core 内部路径 + DoD#2（exports 无
 #     ./engines/ 子入口、barrel 无引擎重导出）。
 #   设计依据：docs/architecture/subagent-engine-protocolization.md §3.7 / impl-plan §2.9。
 #   注：不设独立跳过开关——新增 SKIP_* 逃生口须同步登记 AGENTS.md 的 SKIP_* 清单，
-#   故本段仅受既有 SKIP_ALL_CHECKS 总闸管辖。
+#   故本段仅受既有 SKIP_ALL_CHECKS 总开关管辖。
 # ============================================================================
 
 ENGINE_SDK_BOUNDARY_CHECKER=".githooks/check-engine-sdk-boundary.mjs"
@@ -862,7 +910,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
             echo ""
             echo -e "${RED}[ERROR] 引擎包边界检查失败${NC}"
             echo -e "${YELLOW}[INFO] 引擎包只依赖 @zhushanwen/subagent-engine-sdk；共享实现下沉 SDK（core → SDK 是合法方向）；修复指引见上方脚本输出${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
         echo -e "${GREEN}[OK] 引擎包边界检查通过${NC}"
@@ -890,7 +938,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_TOOL_SCHEMA_CHECK" != "1" ]; then
             echo ""
             echo -e "${RED}[ERROR] Pi extension tool schema 合规检查失败${NC}"
             echo -e "${YELLOW}[INFO] parameters 顶层必须 Type.Object（OpenAI 兼容），禁止顶层 Type.Union${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     fi
@@ -917,7 +965,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_PATH_WHITELIST_CHECK" != "1" ]; the
             echo ""
             echo -e "${RED}[ERROR] 路径白名单动态化检查失败${NC}"
             echo -e "${YELLOW}[INFO] 路径白名单必须使用 getConfigDir()/getPiAgentDir() 动态生成${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     fi
@@ -929,7 +977,7 @@ fi
 # R1 pi session JSONL 直写检查（data-source-governance P0.3）
 #   拦截 runtime/scripts 代码对 pi session JSONL 本体的直写，报错指向登记表。
 #   注：不设独立跳过开关——新增 SKIP_* 逃生口须同步登记 AGENTS.md 的 SKIP_* 清单
-#   （W3 改动范围仅限本文件与 checker 本体），故本段仅受既有 SKIP_ALL_CHECKS 总闸管辖。
+#   （W3 改动范围仅限本文件与 checker 本体），故本段仅受既有 SKIP_ALL_CHECKS 总开关管辖。
 # ============================================================================
 
 PI_DIRECT_WRITE_CHECKER=".githooks/check_pi_direct_write.py"
@@ -948,7 +996,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
             echo ""
             echo -e "${RED}[ERROR] R1 pi session JSONL 直写检查失败${NC}"
             echo -e "${YELLOW}[INFO] session JSONL 本体唯一写方 = pi；例外与豁免登记见 docs/architecture/data-source-registry.md${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
         echo -e "${GREEN}[OK] R1 pi session 直写检查通过${NC}"
@@ -976,7 +1024,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_WS_SEND_CHECK" != "1" ]; then
             echo ""
             echo -e "${RED}[ERROR] ws-client send 直调检查失败${NC}"
             echo -e "${YELLOW}[INFO] renderer 禁止直调 ws-client.send，统一走 api client${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     fi
@@ -1003,7 +1051,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_NO_SERVICE_CYCLE_CHECK" != "1" ]; t
             echo ""
             echo -e "${RED}[ERROR] runtime services 循环依赖检查失败（D6c）${NC}"
             echo -e "${YELLOW}[INFO] service 间不得具体类循环 import，改用接口/事件解耦${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     fi
@@ -1021,9 +1069,9 @@ fi
 #   - check_runtime_meta_url.py     C-build-01：runtime 禁无 guard 的 import.meta.url / globalThis.__dirname
 #   - check_staged_forbidden_lines.py C-ext-07/C-proc-04：staged 新增行禁 extensions console.warn/error
 #                                    与无说明的 eslint-disable（行级增量，存量不拦）
-#   - check_layering_registry_sync.py S2②：runtime-layering §3 表行 ↔ 守卫
+#   - check_layering_registry_sync.py S2②：runtime-layering §3 表行 ↔ 检查
 #                                    DOCUMENTED_MODULES 双向对账（登记漂移即红，MF-5-1 形态）
-#   注：与 R1 同例不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总闸管辖。
+#   注：与 R1 同例不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总开关管辖。
 # ============================================================================
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
@@ -1042,7 +1090,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
             echo ""
             echo -e "${RED}[ERROR] $CONSTRAINT_CHECKER 检查失败${NC}"
             echo -e "${YELLOW}[INFO] 约束登记见 docs/constraints.json（机器 SSOT）${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     done
@@ -1052,14 +1100,14 @@ else
 fi
 
 # ============================================================================
-# 非.workspace 结构接线对账（S1，PR #20 组 D 守卫化）
+# 非.workspace 结构接线对账（S1，PR #20 组 D 检查化）
 #   node scripts/check-structure-wiring.mjs：管辖区（packages/ extensions/
 #   resources/plugins/）含 package.json 但不在 pnpm-workspace.yaml globs 内的包
-#   必须在 docs/structure-wiring.json 登记各管线接线面（CI typecheck / 测试装配 /
+#   必须在 docs/structure-wiring.json 登记各管线接线点（CI typecheck / 测试装配 /
 #   发布线 / coverage 测量面），登记锚点在目标文件中真实存在——新顶层结构
 #   第一笔 commit 只做接线与登记（ed6735b47 一 commit 三坑形态不允许再发生）。
 #   触发面：pnpm-workspace.yaml / docs/structure-wiring.json / 管辖区新增 package.json。
-#   注：不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总闸管辖。
+#   注：不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总开关管辖。
 # ============================================================================
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
@@ -1123,7 +1171,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSP_COMPAT_CHECK" != "1" ]; then
             echo -e "${RED}[ERROR] CSP 能力一致性检查失败${NC}"
             echo -e "${YELLOW}[INFO] 源码出现 eval/WebAssembly 用法但 CSP script-src 'self' 未放行——运行时会抛 CompileError${NC}"
             echo -e "${YELLOW}[INFO] 曾因此致全部 markdown 渲染静默降级纯文本（2026-08 v0.9.3+ 事故），改用无该能力的实现或显式改 CSP + 白名单${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     fi
@@ -1145,7 +1193,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_RUNTIME_BUNDLE_CHECK" != "1" ]; the
 
         if [ ! -f "$RUNTIME_BUNDLE_CHECKER" ]; then
             echo -e "${RED}[ERROR] 找不到验证脚本: $RUNTIME_BUNDLE_CHECKER${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
 
@@ -1155,7 +1203,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_RUNTIME_BUNDLE_CHECK" != "1" ]; the
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] Runtime Bundle 验证失败${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
@@ -1171,7 +1219,7 @@ fi
 # 声明与磁盘事实漂移）。packages/core/src 有变更时触发：
 # scripts/check-domain-boundaries.sh（AC10 跨域 import + AC11 清空派；
 # AC10 存量基线与 AC11 allowlist 在脚本内登记，新增违规直接拦）。
-# 注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+# 注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 DOMAIN_BOUNDARY_CHECKER="scripts/check-domain-boundaries.sh"
@@ -1185,7 +1233,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
             echo ""
             echo -e "${RED}[ERROR] core 域边界检查失败（C-state-04）${NC}"
             echo -e "${YELLOW}[INFO] AC10 跨域 import 经 '@taiji/core/domain/<域>' 公开 API；AC11 per-session 状态经 useSessionScopedState 分区${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
@@ -1202,7 +1250,7 @@ fi
 #   [HISTORICAL] 本段曾只写入 .bare/hooks 运行时副本而漏掉本安装源：任何
 #   worktree 的 pnpm install（prepare → 本脚本）都会用无护栏段的源覆盖运行时
 #   hook，护栏静默失效（2026-09-04 S2 验收实测拦截失效后定位）。SSOT = 本文件。
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 UNSAFE_STREAM_CHECKER="scripts/check-unsafe-stream-writes.mjs"
@@ -1214,7 +1262,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
 
         if [ ! -f "$UNSAFE_STREAM_CHECKER" ]; then
             echo -e "${RED}[ERROR] 找不到 $UNSAFE_STREAM_CHECKER${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
 
@@ -1222,7 +1270,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -ne 0 ]; then
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
@@ -1231,25 +1279,25 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
 fi
 
 # ============================================================================
-# 用户内容出站点守卫（A2 D-A2-3；原设计文档 adversarial-review-fixes.md 已删除，原则见 check_prompt_outposts.py 头注释）
+# 用户内容出站点检查（A2 D-A2-3；原设计文档 adversarial-review-fixes.md 已删除，原则见 check_prompt_outposts.py 头注释）
 #   packages/runtime/src 有变更时触发：.githooks/check_prompt_outposts.py
 #   扫描 .prompt( / .steer( / .followUp( 三方法全部调用点（任意接收者——防
 #   client 变量名改写逃逸），对照白名单（文件 + 行内子串指纹 + 内容性质 +
 #   注入状态 + 理由）；未登记新调用点即拦截——防新增用户内容出站通路忘挂
 #   SkillInjector（MF-B @ 定向 / MF-C landing 首发同类缺口复发）。
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 PROMPT_OUTPOSTS_CHECKER=".githooks/check_prompt_outposts.py"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     if echo "$STAGED_FILES" | grep -q "^$RUNTIME_SRC/"; then
-        print_section "[用户内容出站点守卫]"
+        print_section "[用户内容出站点检查]"
         echo -e "${BLUE}[INFO] runtime 源码有变更，扫描用户内容出站点...${NC}"
 
         if [ ! -f "$PROMPT_OUTPOSTS_CHECKER" ]; then
             echo -e "${RED}[ERROR] 找不到 $PROMPT_OUTPOSTS_CHECKER${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
 
@@ -1257,11 +1305,11 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -ne 0 ]; then
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
-        echo -e "${GREEN}[OK] runtime 源码无变更，跳过用户内容出站点守卫${NC}"
+        echo -e "${GREEN}[OK] runtime 源码无变更，跳过用户内容出站点检查${NC}"
     fi
 fi
 
@@ -1279,7 +1327,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_BOUNDARY_CHECK" != "1" ]; then
 
         if [ ! -f "$BOUNDARY_CHECKER" ]; then
             echo -e "${RED}[ERROR] 找不到验证脚本: $BOUNDARY_CHECKER${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
 
@@ -1289,7 +1337,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_BOUNDARY_CHECK" != "1" ]; then
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] AC7 边界检查失败：extension-host 消费端不得 import domain/stores/composables${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
@@ -1300,20 +1348,20 @@ else
 fi
 
 # ============================================================================
-# error 终态消息形态统一守卫（M2 形态统一机器护栏；core/ui/renderer 源码有变更时触发。
-# 无独立 SKIP 开关——R1 后惯例，仅 SKIP_ALL_CHECKS 总闸兜底）
+# error 终态消息形态统一检查（M2 形态统一机器护栏；core/ui/renderer 源码有变更时触发。
+# 无独立 SKIP 开关——R1 后惯例，仅 SKIP_ALL_CHECKS 总开关兜底）
 # ============================================================================
 
 EFI_CHECKER="scripts/check-error-form-invariant.mjs"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     if echo "$STAGED_FILES" | grep -qE "^packages/(core|ui|renderer)/src/"; then
-        print_section "[error-form-invariant 消息错误形态守卫]"
+        print_section "[error-form-invariant 消息错误形态检查]"
         echo -e "${BLUE}[INFO] chat 域源码有变更，扫描 error 终态消息字面量形态...${NC}"
 
         if [ ! -f "$EFI_CHECKER" ]; then
             echo -e "${RED}[ERROR] 找不到验证脚本: $EFI_CHECKER${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
 
@@ -1323,11 +1371,11 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] error-form-invariant 检查失败：role:'assistant' + status:'error' 字面量必须含 error: 键${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
-        echo -e "${GREEN}[OK] chat 域源码无变更，跳过 error-form-invariant 守卫${NC}"
+        echo -e "${GREEN}[OK] chat 域源码无变更，跳过 error-form-invariant 检查${NC}"
     fi
 fi
 
@@ -1344,7 +1392,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_PREFLIGHT_CHECK" != "1" ]; then
 
         if [ ! -f "$PREFLIGHT_CHECKER" ]; then
             echo -e "${RED}[ERROR] 找不到验证脚本: $PREFLIGHT_CHECKER${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
 
@@ -1354,7 +1402,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_PREFLIGHT_CHECK" != "1" ]; then
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] 打包配置预检查失败${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
 
@@ -1366,7 +1414,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_PREFLIGHT_CHECK" != "1" ]; then
             if [ $? -ne 0 ]; then
                 echo -e "${RED}[ERROR] Runtime bundle 验证失败（可能需要重新 build）${NC}"
                 echo -e "${YELLOW}[FIX] cd packages/runtime && pnpm run build，然后重新 commit${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
         fi
@@ -1395,7 +1443,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_DIRECTORY_RULES_CHECK" != "1" ]; th
         if [ $EXIT_CODE -ne 0 ]; then
             echo ""
             echo -e "${RED}[ERROR] 目录规范检查失败${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     fi
@@ -1429,7 +1477,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_I18N_CJK_CHECK" != "1" ]; then
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
                 echo -e "${RED}[ERROR] i18n CJK 残留检测失败：模板含硬编码中文${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
         fi
@@ -1459,7 +1507,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_I18N_LOCALE_SYNC_CHECK" != "1" ]; t
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
                 echo -e "${RED}[ERROR] i18n locale 双侧 key 不一致：zh-CN 与 en-US key 集合 desync${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
         fi
@@ -1470,10 +1518,10 @@ fi
 
 # ============================================================================
 # pi 边界可靠性护栏（pi-boundary-reliability §3.3 D7 G1/G3/G4，U7b 接线）
-#   - G1 pi 语义登记守卫：node scripts/check-pi-semantics.mjs（全仓校验：
+#   - G1 pi 语义登记检查：node scripts/check-pi-semantics.mjs（全仓校验：
 #     registry schema / 探针存在性 / pi 三包 + runtime pin 四包版本门禁；
 #     无 git index 依赖，每次必跑）
-#   - pi-sync 派生锚点守卫：node scripts/check-pi-sync.mjs（pi-evolution-consistency
+#   - pi-sync 派生锚点检查：node scripts/check-pi-sync.mjs（pi-evolution-consistency
 #     §3.2 D2：build.yml env / prepare 脚本默认值 / 快照 / extensions peerDeps /
 #     KNOWN_PI_API_TYPES / pi-tui / dev binary 8 项；与 G1 零重叠，按路径触发）
 #   - G3 思考档位差分探针：node scripts/diff-probe-thinking.mjs（registry
@@ -1481,73 +1529,73 @@ fi
 #   - G4 subagent 通道禁则：python3 .githooks/check_subagent_channels.py
 #     （C-ext-19：禁白名单外 deliverAs steer/nextTurn 与裸 "--model" 拼装）；
 #     staged 含 subagent-workflow 目录时全包扫描
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     print_section "[pi 边界可靠性护栏]"
 
-    # G1：pi 语义登记守卫
+    # G1：pi 语义登记检查
     if [ ! -f "scripts/check-pi-semantics.mjs" ]; then
         echo -e "${RED}[ERROR] 找不到 scripts/check-pi-semantics.mjs（U7a 交付物缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-pi-semantics.mjs; then
-        echo -e "${RED}[ERROR] G1 pi 语义登记守卫未通过——按上方 ✗ 明细逐条恢复（每条自带动作）后重试${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[ERROR] G1 pi 语义登记检查未通过——按上方 ✗ 明细逐条恢复（每条自带动作）后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
 
-    # pi-sync 派生锚点守卫（pi-evolution-consistency §3.2 D2，按路径触发——性能考虑，
+    # pi-sync 派生锚点检查（pi-evolution-consistency §3.2 D2，按路径触发——性能考虑，
     # 只在触碰派生锚点文件时全量跑：根 package.json / lockfile / build.yml / prepare 脚本 /
-    # 快照 / gen 脚本 / shared constants / extensions 任一 package.json / 守卫脚本自身）。
+    # 快照 / gen 脚本 / shared constants / extensions 任一 package.json / 检查脚本自身）。
     # 触发面在主 STAGED_FILES（ACMR）外并入 staged 删除列表（--diff-filter=D）：删除派生锚点
-    # 必须触发守卫——各 S 项对锚点文件不存在自带 fail 分支（S1/S2/S3/S6），漏触发 = 删除场景
+    # 必须触发检查——各 S 项对锚点文件不存在自带 fail 分支（S1/S2/S3/S6），漏触发 = 删除场景
     # 静默放行。主 STAGED_FILES 保持 ACMR 不放行 D：会把已删除的 .ts/package.json 路径喂给
-    # ESLint / manifest 等文件存在性检查段致 ERR，影响面大，仅守卫挂载点需要 D。
+    # ESLint / manifest 等文件存在性检查段致 ERR，影响面大，仅检查挂载点需要 D。
     # 与 G1 逐项零重叠（设计 §2.1 分工声明）；不占 G 编号（G1/G3/G4 属 pi-boundary-reliability 体系）。
     STAGED_DELETED=$(git diff --cached --name-only --diff-filter=D)
     PI_SYNC_TRIGGER_FILES="${STAGED_FILES}
 ${STAGED_DELETED}"
     if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "(^|/)(package\.json|pnpm-lock\.yaml)$|^(\.github/workflows/build\.yml|scripts/prepare-pi-resources\.sh|scripts/check-pi-sync\.mjs|packages/runtime/src/generated/builtin-providers\.json|packages/runtime/scripts/gen-builtin-providers\.mjs|packages/shared/src/constants\.ts)$|^extensions/.*/package\.json$"; then
-        echo -e "${BLUE}[INFO] pi 派生锚点文件有变更，运行 pi-sync 派生锚点守卫...${NC}"
+        echo -e "${BLUE}[INFO] pi 派生锚点文件有变更，运行 pi-sync 派生锚点检查...${NC}"
         if [ ! -f "scripts/check-pi-sync.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-pi-sync.mjs（u2 交付物缺失）${NC}"
             exit 1
         fi
         if ! node scripts/check-pi-sync.mjs; then
-            echo -e "${RED}[ERROR] pi-sync 派生锚点守卫未通过——按上方 ✗ 明细逐条恢复（每条自带动作）后重试${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[ERROR] pi-sync 派生锚点检查未通过——按上方 ✗ 明细逐条恢复（每条自带动作）后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
-        echo -e "${GREEN}[OK] 无 pi 派生锚点文件变更，跳过 pi-sync 守卫${NC}"
+        echo -e "${GREEN}[OK] 无 pi 派生锚点文件变更，跳过 pi-sync 检查${NC}"
     fi
 
-    # thinking 档位词表守卫（ext-simplify-17 §3.2 D5 机器守卫补强 + ext-simplify-18 §3.4
+    # thinking 档位词表检查（ext-simplify-17 §3.2 D5 机器检查补强 + ext-simplify-18 §3.4
     # D6 扩面，按路径触发）：
     # pi-ai ModelThinkingLevel 联合 ↔ 本地词表副本（llm-shared Set / pi-rpc 数组 /
     # subagent-core THINKING_ORDER 有序数组）双向比对。
     # 钉值单测只锚副本自身字面量，pi 升级改联合成员时副本静默过期（P1-a 漏 xhigh 实证），
-    # 仅此守卫红灯。触发面：pnpm-lock.yaml（pi-ai 版本变化）/ 三副本文件 / 守卫脚本自身；
+    # 仅此检查红灯。触发面：pnpm-lock.yaml（pi-ai 版本变化）/ 三副本文件 / 检查脚本自身；
     # 复用上方 pi-sync 段拼好的 PI_SYNC_TRIGGER_FILES（staged ACMR + deleted D——副本文件
     # 被删除也必须触发，脚本对文件缺失自带 fail 分支）。与 pi-sync 触发面有意部分重叠
     # （lockfile 同为触发文件）但职责不同：pi-sync 守构建派生锚点且 S6 只比 KnownApi，
-    # 本守卫守 extensions/pi-rpc/subagent-core 档位词表副本，互不覆盖。不设独立 SKIP_* 开关（R1 后惯例，
-    # 总闸 SKIP_ALL_CHECKS 兜底）。
+    # 本检查守 extensions/pi-rpc/subagent-core 档位词表副本，互不覆盖。不设独立 SKIP_* 开关（R1 后惯例，
+    # 总开关 SKIP_ALL_CHECKS 兜底）。
     if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^extensions/shared/llm-shared/src/resolve\.ts$|^packages/pi-rpc/src/types\.ts$|^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$|^packages/subagent-core/src/shared/model-ref\.ts$"; then
-        echo -e "${BLUE}[INFO] thinking 档位词表文件有变更，运行档位词表比对守卫...${NC}"
+        echo -e "${BLUE}[INFO] thinking 档位词表文件有变更，运行档位词表比对检查...${NC}"
         if [ ! -f "scripts/check-thinking-levels.mjs" ]; then
-            echo -e "${RED}[ERROR] 找不到 scripts/check-thinking-levels.mjs（D5 机器守卫交付物缺失）${NC}"
+            echo -e "${RED}[ERROR] 找不到 scripts/check-thinking-levels.mjs（D5 机器检查交付物缺失）${NC}"
             exit 1
         fi
         if ! node scripts/check-thinking-levels.mjs; then
-            echo -e "${RED}[ERROR] thinking 档位词表守卫未通过——按上方 ✗ 明细逐条恢复（每条自带动作）后重试${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[ERROR] thinking 档位词表检查未通过——按上方 ✗ 明细逐条恢复（每条自带动作）后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
-        echo -e "${GREEN}[OK] 无 thinking 档位词表文件变更，跳过档位词表比对守卫${NC}"
+        echo -e "${GREEN}[OK] 无 thinking 档位词表文件变更，跳过档位词表比对检查${NC}"
     fi
 
     # G3：registry vs pi-ai 差分探针（触发文件：档位链路四文件任一 staged，basename 匹配。
@@ -1557,7 +1605,7 @@ ${STAGED_DELETED}"
         if ! node scripts/diff-probe-thinking.mjs; then
             echo -e "${RED}[ERROR] G3 差分探针失败：registry 计算路径与 pi-ai 同源函数不一致${NC}"
             echo -e "${YELLOW}[INFO] 恢复动作：按上方 ✗ 明细核对 model-capability.ts 的档位计算后重试${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
@@ -1572,7 +1620,7 @@ ${STAGED_DELETED}"
         else
             if ! python3 .githooks/check_subagent_channels.py; then
                 echo -e "${RED}[ERROR] G4 subagent 通道禁则检查失败（C-ext-19）——按上方明细与修复指引处理${NC}"
-                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
         fi
@@ -1584,108 +1632,110 @@ else
 fi
 
 # ============================================================================
-# subagent-core 依赖闭包守卫（D9-① + 检查点 5，subagent-core 包抽离 u1-guards）
+# subagent-core 依赖闭包检查（D9-① + 检查点 5，subagent-core 包抽离 u1-guards）
 #   packages/subagent-core/** 变更时触发：scripts/check-subagent-core-closure.mjs
 #   校验 C 的 dependencies/peerDependencies/optionalDependencies/源码 import 闭包不含
 #   pi SDK 与宿主专属依赖（@earendil-works/*、pi-extension-logger、pi-pending-notifications、
 #   session-delivery、pi-file-lock），附版本双源一致性断言（src/index.ts
 #   CORE_PACKAGE_VERSION ≡ package.json version）与检查点 5 断言（worker 入口子图零
-#   host-services/notify-ports——worker 内零宿主服务）。守卫脚本自身变更同样触发。
+#   host-services/notify-ports——worker 内零宿主服务）。检查脚本自身变更同样触发。
 #   dist 回归门（D9-②：build + require CJS dist + golden 回放）不进 pre-commit
 #   （改构建面，秒级耗时也属发布门职责），挂发布管线 npm-prerelease.sh /
 #   release-npm.yml。
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # 触发面在主 STAGED_FILES（ACMR）外并入本路径范围的 staged 删除（不带 --diff-filter
-# 的 pathspec 清单，天然含 D）：单独 staged 删除守卫脚本也必须触发——下方 [ ! -f ]
+# 的 pathspec 清单，天然含 D）：单独 staged 删除检查脚本也必须触发——下方 [ ! -f ]
 # 存在性检查正是删除场景的防线，ACMR 过滤 D 导致漏触发 = 删除静默放行。主
 # STAGED_FILES 保持 ACMR 的理由见上方 pi-sync 段注释（D 喂给 ESLint/manifest 等
-# 文件存在性检查段会 ERR，仅守卫挂载点需要 D）。
+# 文件存在性检查段会 ERR，仅检查挂载点需要 D）。
 # ============================================================================
 
 SUBAGENT_CORE_STAGED=$(git diff --cached --name-only -- packages/subagent-core/ scripts/check-subagent-core-closure.mjs)
 if echo "$SUBAGENT_CORE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/check-subagent-core-closure\.mjs$"; then
-    print_section "[subagent-core 依赖闭包守卫]"
+    print_section "[subagent-core 依赖闭包检查]"
     if [ ! -f "scripts/check-subagent-core-closure.mjs" ]; then
         echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-closure.mjs（u1-guards 交付物缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-subagent-core-closure.mjs; then
-        echo -e "${RED}[ERROR] subagent-core 依赖闭包守卫未通过——pi SDK / 宿主专属依赖回流闭包，按上方 ✗ 明细处理${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[ERROR] subagent-core 依赖闭包检查未通过——pi SDK / 宿主专属依赖回流闭包，按上方 ✗ 明细处理${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] subagent-core 依赖闭包守卫通过${NC}"
+    echo -e "${GREEN}[OK] subagent-core 依赖闭包检查通过${NC}"
 fi
 
 # ============================================================================
-# subagent-service 聚合边界守卫（H3/R5，subagent-service-decomposition S3 依赖单向）
+# subagent-service 聚合边界检查（H3/R5，subagent-service-decomposition S3 依赖单向）
 #   staged 命中六聚合（packages/subagent-core/src/execution/service/）或壳
-#   （subagent-service.ts）或守卫脚本自身时触发：
+#   （subagent-service.ts）或检查脚本自身时触发：
 #   scripts/check-subagent-service-boundary.mjs —— 三方向检查（聚合→聚合 import
-#   台账门 + 环检测 / 聚合→壳 import 禁则 / 跨聚合私有访问 grep 门）+ 支撑文件
+#   清单门 + 环检测 / 聚合→壳 import 禁则 / 跨聚合私有访问 grep 门）+ 支撑文件
 #   方向门（service-bootstrap/service-constants，H3/R6 扩）。
-#   合法边台账（ALLOWED_EDGES）以符号级精确登记在守卫脚本内（现状两条：
+#   合法边清单（ALLOWED_EDGES）以符号级精确登记在检查脚本内（现状两条：
 #   ResolvedIdentity type-only ×2，依据 D-R4-8；[HISTORICAL] 建立时第三条
 #   ENV_SELF_RECORD_ID 常量单向 D-R3-2 已随 R6 常量归位删除）。
 #   触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
-#   守卫脚本也必须触发——下方 [ ! -f ] 存在性检查正是删除场景的防线。
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   检查脚本也必须触发——下方 [ ! -f ] 存在性检查正是删除场景的防线。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 SUBAGENT_SVC_BOUNDARY_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src/execution/service/ packages/subagent-core/src/execution/subagent-service.ts scripts/check-subagent-service-boundary.mjs)
 if echo "$SUBAGENT_SVC_BOUNDARY_STAGED" | grep -qE "^packages/subagent-core/src/execution/service/|^packages/subagent-core/src/execution/subagent-service\.ts$|^scripts/check-subagent-service-boundary\.mjs$"; then
-    print_section "[subagent-service 聚合边界守卫]"
+    print_section "[subagent-service 聚合边界检查]"
     if [ ! -f "scripts/check-subagent-service-boundary.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-service-boundary.mjs（H3/R5 守卫交付物缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-service-boundary.mjs（H3/R5 检查交付物缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-subagent-service-boundary.mjs; then
-        echo -e "${RED}[ERROR] subagent-service 聚合边界守卫未通过——聚合间协作走壳 deps 注入或显式接口，聚合读壳能力经注入函数非 import（设计 D4）${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[ERROR] subagent-service 聚合边界检查未通过——聚合间协作走壳 deps 注入或显式接口，聚合读壳能力经注入函数非 import（设计 D4）${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] subagent-service 聚合边界守卫通过${NC}"
+    echo -e "${GREEN}[OK] subagent-service 聚合边界检查通过${NC}"
 else
-    echo -e "${GREEN}[OK] 无 service 聚合/壳变更，跳过 subagent-service 聚合边界守卫${NC}"
+    echo -e "${GREEN}[OK] 无 service 聚合/壳变更，跳过 subagent-service 聚合边界检查${NC}"
 fi
 
 # ============================================================================
 # ============================================================================
-# record 持久化写面守卫（H4/S4/D7，subagent-record-persistence-consolidation）
+# record 持久化写面检查（H4/S4/D7，subagent-record-persistence-consolidation）
 #   staged 命中 record 写面载体（packages/subagent-core/src/）、extensions 扫描根
-#   全域（extensions/**/src，与守卫脚本扫描根对齐）或守卫脚本自身时触发：
+#   全域（extensions/**/src，与检查脚本扫描根对齐）或检查脚本自身时触发：
 #   [HISTORICAL] 原触发面仅 extensions/universal/subagent-workflow/src 一包，触发
 #   面外的包（如 session-reader）违规只能延迟暴露（阶段 3 一致性审查 P2）——扩为
 #   结构无关的 glob 全域匹配，新增分组/包零维护（同上方 EXTENSION_PKG_FILES
 #   两段式改造的教训：禁止与目录结构耦合的清单式写法）。
-#   scripts/check-record-write-surface.mjs —— grep 门兜底（R1 六名写函数直调 +
-#   R2 subagent-record entry 直写，store 外零命中）。一级拦截 = eslint
+#   scripts/check-record-write-surface.mjs —— grep 门兜底（R1 七名写函数直调 +
+#   R2 subagent-record entry 直写 + R3 workflow-record 三宿主白名单 + R4 v1 投影器
+#   + R5 v1 快照载荷 + R6 死字节 + R7 .events 直写，七族规则与脚本头注释/OK 输出
+#   同口径）。一级拦截 = eslint
 #   no-restricted-imports（eslint.config.mjs subagent-core 块，模块边界级）；
 #   本门拦的是 import 层拦不住的类方法调用（ManifestStore.writeManifest）与
 #   字面量写形态。触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：
-#   单独 staged 删除守卫脚本也必须触发——下方 [ ! -f ] 存在性检查正是删除场景
-#   的防线。不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   单独 staged 删除检查脚本也必须触发——下方 [ ! -f ] 存在性检查正是删除场景
+#   的防线。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 RECORD_WRITE_SURFACE_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src/ ':(glob)extensions/**/src/**' scripts/check-record-write-surface.mjs)
 if echo "$RECORD_WRITE_SURFACE_STAGED" | grep -qE "^packages/subagent-core/src/|^extensions/.*/src/|^scripts/check-record-write-surface\.mjs$"; then
-    print_section "[record 持久化写面守卫]"
+    print_section "[record 持久化写面检查]"
     if [ ! -f "scripts/check-record-write-surface.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-record-write-surface.mjs（H4/U5 守卫交付物缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-record-write-surface.mjs（H4/U5 检查交付物缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-record-write-surface.mjs; then
-        echo -e "${RED}[ERROR] record 持久化写面守卫未通过——store 外 record 写面直写，按上方 ✗ 明细与 Recovery 指引改调 RecordStore 意图原语${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[ERROR] record 持久化写面检查未通过——store 外 record 写面直写，按上方 ✗ 明细与 Recovery 指引改调 RecordStore 意图原语${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] record 持久化写面守卫通过${NC}"
+    echo -e "${GREEN}[OK] record 持久化写面检查通过${NC}"
 else
-    echo -e "${GREEN}[OK] 无 record 写面载体变更，跳过 record 持久化写面守卫${NC}"
+    echo -e "${GREEN}[OK] 无 record 写面载体变更，跳过 record 持久化写面检查${NC}"
 fi
 
-# 文档-代码符号漂移守卫（C-proc-10）
-#   触发面：映射设计文档（docs/design/）/ update 源码模块 / 守卫脚本及其单测 /
+# 文档-代码符号漂移检查（C-proc-10）
+#   触发面：映射设计文档（docs/design/）/ update 源码模块 / 检查脚本及其单测 /
 #   TEST-STRATEGY.md / docs/testing/，加任意源码文件（.ts/.tsx/.mts/.cts/.mjs/
 #   .cjs/.js/.vue，第三检查的扫描对象）与任意 .md（含 staged 删除——文档删除
 #   提交触发第三检查全仓扫描）：
@@ -1700,57 +1750,57 @@ fi
 #     起因 2026-09-17：panel-view-derivation 族等注释引用已删除设计文档悬空存活，
 #     无任何机器信号。历史性提及（同行标注「已删除，git 可追溯」等）豁免，
 #     其余走脚本内 COMMENT_DOC_REF_EXEMPT 登记。
-#   守卫脚本或其单测 staged 时同跑 vitest 单测（e2e-map 段同款惯例）。
-#   不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   检查脚本或其单测 staged 时同跑 vitest 单测（e2e-map 段同款惯例）。
+#   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 DOC_SYMBOL_STAGED=$(git diff --cached --name-only -- docs/design/ apps/electron/main/update/ scripts/check-doc-symbol-drift.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs TEST-STRATEGY.md docs/testing/ '*.ts' '*.tsx' '*.mts' '*.cts' '*.mjs' '*.cjs' '*.js' '*.vue' '*.md')
 if echo "$DOC_SYMBOL_STAGED" | grep -qE "^docs/design/|^apps/electron/main/update/|^scripts/check-doc-symbol-drift\.mjs$|^scripts/__tests__/check-doc-symbol-drift\.test\.mjs$|^TEST-STRATEGY\.md$|^docs/testing/|\.(ts|tsx|mts|cts|mjs|cjs|js|vue|md)$"; then
-    print_section "[文档-代码符号漂移守卫]"
+    print_section "[文档-代码符号漂移检查]"
     if [ ! -f "scripts/check-doc-symbol-drift.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-doc-symbol-drift.mjs（守卫脚本被删除）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-doc-symbol-drift.mjs（检查脚本被删除）${NC}"
         exit 1
     fi
     if ! node scripts/check-doc-symbol-drift.mjs; then
         echo -e "${RED}[ERROR] 文档符号/路径漂移或源码注释悬空 docs 引用——按上方 ✗ 明细与恢复动作修正后重试${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
     echo -e "${GREEN}[OK] 文档-代码符号一致性通过${NC}"
     if echo "$DOC_SYMBOL_STAGED" | grep -qE "^scripts/check-doc-symbol-drift\.mjs$|^scripts/__tests__/check-doc-symbol-drift\.test\.mjs$"; then
-        echo -e "${BLUE}[INFO] 运行 doc-symbol-drift 守卫逻辑单测...${NC}"
+        echo -e "${BLUE}[INFO] 运行 doc-symbol-drift 检查逻辑单测...${NC}"
         if ! npx vitest run scripts/__tests__/check-doc-symbol-drift.test.mjs --silent; then
             echo -e "${RED}[ERROR] check-doc-symbol-drift 单测失败——按上方失败明细修复后重试${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
-        echo -e "${GREEN}[OK] doc-symbol-drift 守卫单测通过${NC}"
+        echo -e "${GREEN}[OK] doc-symbol-drift 检查单测通过${NC}"
     fi
 else
-    echo -e "${GREEN}[OK] 无设计文档/源码注释检查面变更，跳过文档符号漂移守卫${NC}"
+    echo -e "${GREEN}[OK] 无设计文档/源码注释检查面变更，跳过文档符号漂移检查${NC}"
 fi
 
 # ============================================================================
-# 引擎开发指南契约投影守卫（docs/extensions/subagents/engine-development-guide.md §12 待建守卫行落地）
+# 引擎开发指南契约投影检查（docs/extensions/subagents/engine-development-guide.md §12 待建检查行落地）
 #   staged 命中指南或其投影源（errors.ts / error-codes.ts / engine-manifest.ts /
-#   contract-types.ts）或守卫脚本自身时触发：scripts/check-guide-contract-projection.mjs
+#   contract-types.ts）或检查脚本自身时触发：scripts/check-guide-contract-projection.mjs
 #   ——指南 §3 能力位表 / §4 两层词表 ↔ 源码词表投影一致性（引擎子进程域，2026-09-18
 #   引擎开发指南立项时同步落地）。
 #   契约源码 staged 而指南未同批 staged → 软提示（AGENT SMELL：语义漂移机器不可判，
 #   靠 AGENTS.md 主题索引「更新触发」义务 + 提示兜底；误报率数据出来前不收紧为硬门）。
-#   不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 GUIDE_PROJECTION_STAGED=$(git diff --cached --name-only -- docs/extensions/subagents/engine-development-guide.md packages/subagent-core/src/execution/engine/common/errors.ts packages/subagent-engine-sdk/src/protocol/error-codes.ts packages/subagent-core/src/execution/engine/engine-manifest.ts packages/subagent-engine-sdk/src/protocol/contract-types.ts packages/zcode-subagent-cli/package.json packages/zcode-subagent-cli/src/zcode-engine.ts scripts/check-guide-contract-projection.mjs)
 if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^docs/extensions/subagents/engine-development-guide\.md$|^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$|^scripts/check-guide-contract-projection\.mjs$"; then
-    print_section "[引擎指南契约投影守卫]"
+    print_section "[引擎指南契约投影检查]"
     if [ ! -f "scripts/check-guide-contract-projection.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-guide-contract-projection.mjs（守卫脚本被删除）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-guide-contract-projection.mjs（检查脚本被删除）${NC}"
         exit 1
     fi
     if ! node scripts/check-guide-contract-projection.mjs; then
         echo -e "${RED}[ERROR] 指南契约表与源码词表投影失同步——按上方 ✗ 明细同 commit 更新指南（更新触发义务见根 AGENTS.md 主题索引）后重试${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
     echo -e "${GREEN}[OK] 引擎指南契约投影一致${NC}"
@@ -1759,37 +1809,37 @@ if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^docs/extensions/subagents/engine
         echo -e "${BLUE}[INFO] 引擎契约面源码已变更且指南未同批 staged——核对 docs/extensions/subagents/engine-development-guide.md 是否需同步（更新触发义务见根 AGENTS.md 主题索引行；纯实现改动可忽略本提示）${NC}"
     fi
 else
-    echo -e "${GREEN}[OK] 无引擎契约面/指南变更，跳过引擎指南契约投影守卫${NC}"
+    echo -e "${GREEN}[OK] 无引擎契约面/指南变更，跳过引擎指南契约投影检查${NC}"
 fi
 
 # ============================================================================
-# 消息流滚动跟随链路守卫（约束 C-state-11，chat-pin-bottom-fix §4.4 护栏⑤）
-#   staged 命中跟随链路（composables/panel/ 或 MessageStream.vue）或守卫脚本自身时触发：
+# 消息流滚动跟随链路检查（约束 C-state-11，chat-pin-bottom-fix §4.4 护栏⑤）
+#   staged 命中跟随链路（composables/panel/ 或 MessageStream.vue）或检查脚本自身时触发：
 #   scripts/check-scroll-follow.mjs —— ① 跟随链路内 scrollToIndex 只许白名单
 #   （useVirtuaFollow 唯一原语 / useMessageStreamRail rail 导航）② packages/renderer/src
 #   禁 findItemIndex(...scrollSize 模式（排除 __tests__ 与 *.test.ts，注释行豁免）。
 #   [顺序依赖] M1（U1 索引直取 + D6 vlistBottom 修正）把禁用模式归零后 M2 才挂接
-#   （设计 §4.4⑤ 顺序依赖声明；守卫防复发而非清存量）。
+#   （设计 §4.4⑤ 顺序依赖声明；检查防复发而非清存量）。
 #   触发面在主 STAGED_FILES 外并入本路径范围的 staged 删除（pathspec 清单天然含 D）：
-#   单独 staged 删除守卫脚本也必须触发，存在性检查正是删除场景防线。
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兑底）。
+#   单独 staged 删除检查脚本也必须触发，存在性检查正是删除场景防线。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 SCROLL_FOLLOW_STAGED=$(git diff --cached --name-only -- packages/renderer/src/composables/panel/ packages/renderer/src/components/panel/MessageStream.vue scripts/check-scroll-follow.mjs)
 if echo "$SCROLL_FOLLOW_STAGED" | grep -qE "^packages/renderer/src/composables/panel/|^packages/renderer/src/components/panel/MessageStream\.vue$|^scripts/check-scroll-follow\.mjs$"; then
-    print_section "[消息流滚动跟随链路守卫]"
+    print_section "[消息流滚动跟随链路检查]"
     if [ ! -f "scripts/check-scroll-follow.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-scroll-follow.mjs（守卫脚本被删除）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-scroll-follow.mjs（检查脚本被删除）${NC}"
         exit 1
     fi
     if ! node scripts/check-scroll-follow.mjs; then
-        echo -e "${RED}[ERROR] 滚动跟随链路守卫失败——按上方 ✗ 明细与 [FIX] 指引修复后重试${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[ERROR] 滚动跟随链路检查失败——按上方 ✗ 明细与 [FIX] 指引修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] 滚动跟随链路守卫通过（C-state-11）${NC}"
+    echo -e "${GREEN}[OK] 滚动跟随链路检查通过（C-state-11）${NC}"
 else
-    echo -e "${GREEN}[OK] 无跟随链路变更，跳过滚动跟随守卫${NC}"
+    echo -e "${GREEN}[OK] 无跟随链路变更，跳过滚动跟随检查${NC}"
 fi
 
 # ============================================================================
@@ -1802,7 +1852,7 @@ fi
 #   F5 每次提交都跑（读一个 json，成本 ~0）；F3 仅 staged 命中测试文件 pattern
 #   （/test/、/__tests__/、.test.ts、.test.mjs、.spec.ts，排除 node_modules）时扫描，
 #   checker 内部按同一 pattern 过滤，无命中零成本。不设独立 SKIP_* 开关
-#   （R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   （R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 FLAKE_HYGIENE_CHECKER=".githooks/check_test_flake_hygiene.py"
@@ -1821,7 +1871,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     if ! python3 "$FLAKE_HYGIENE_CHECKER"; then
         echo ""
         echo -e "${RED}[ERROR] 测试 flake 卫生检查失败${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
     echo -e "${GREEN}[OK] 测试 flake 卫生检查通过${NC}"
@@ -1830,25 +1880,25 @@ else
 fi
 
 # ============================================================================
-# Provider 凭据读取单通道守卫（C-proc-14/15，catalog-provider-field-authority §3.3 D3/D6）
+# Provider 凭据读取单通道检查（C-proc-14/15，catalog-provider-field-authority §3.3 D3/D6）
 #   packages/runtime/src 有变更时触发：scripts/check-provider-credential-reads.mjs
-#   守卫 A——凭据直查禁令（getApiKeyForProvider / readAuthCredentials /
-#   getProviderConfig(...).apiKey，白名单 = resolver 唯一通道本体）；守卫 B——
+#   检查 A——凭据直查禁令（getApiKeyForProvider / readAuthCredentials /
+#   getProviderConfig(...).apiKey，白名单 = resolver 唯一通道本体）；检查 B——
 #   upsertProvider 直调清单（白名单 = 写入载体 / importer / 迁移链 / IConfigStore
 #   实现，堵防线载体被旁路的复发通道）。
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 PROVIDER_CRED_READS_CHECKER="scripts/check-provider-credential-reads.mjs"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     if echo "$STAGED_FILES" | grep -q "^$RUNTIME_SRC/"; then
-        print_section "[Provider 凭据读取单通道守卫]"
+        print_section "[Provider 凭据读取单通道检查]"
         echo -e "${BLUE}[INFO] runtime 源码有变更，扫描凭据直查与 upsertProvider 直调...${NC}"
 
         if [ ! -f "$PROVIDER_CRED_READS_CHECKER" ]; then
             echo -e "${RED}[ERROR] 找不到 $PROVIDER_CRED_READS_CHECKER${NC}"
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
 
@@ -1856,40 +1906,40 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -ne 0 ]; then
-            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
             exit 1
         fi
     else
-        echo -e "${GREEN}[OK] runtime 源码无变更，跳过 Provider 凭据读取守卫${NC}"
+        echo -e "${GREEN}[OK] runtime 源码无变更，跳过 Provider 凭据读取检查${NC}"
     fi
 fi
 
 # ============================================================================
-# 数据布局字面量守卫（C-pi-14，设计 §10 U18）
-#   staged 命中守卫范围（packages/ apps/ scripts/ 源码 + AGENTS.md +
-#   docs/TROUBLESHOOTING.md + 守卫脚本自身）时触发：
+# 数据布局字面量检查（C-pi-14，设计 §10 U18）
+#   staged 命中检查范围（packages/ apps/ scripts/ 源码 + AGENTS.md +
+#   docs/TROUBLESHOOTING.md + 检查脚本自身）时触发：
 #   scripts/check-layout-literals.mjs —— 旧布局 pi/ 兄弟层字面量（join 形态
 #   'pi','agent'|'sessions' 与路径形态 pi/agent|pi/sessions，显式排除 .pi 前缀）
 #   回流即拦截。合法持有（bundled 资源布局/迁移语义/历史证据）集中登记在
-#   守卫的 LAYOUT_LITERAL_EXEMPT 常量表（file 级 + 理由）。
-#   全量扫描毫秒级，无增量模式。不设独立 SKIP_* 开关（R1 后惯例，总闸兜底）。
+#   检查的 LAYOUT_LITERAL_EXEMPT 常量表（file 级 + 理由）。
+#   全量扫描毫秒级，无增量模式。不设独立 SKIP_* 开关（R1 后惯例，总开关兜底）。
 # ============================================================================
 
 LAYOUT_STAGED=$(git diff --cached --name-only -- packages/ apps/ scripts/ AGENTS.md docs/TROUBLESHOOTING.md scripts/check-layout-literals.mjs)
 if echo "$LAYOUT_STAGED" | grep -qE "^(packages/|apps/|scripts/)|^AGENTS\.md$|^docs/TROUBLESHOOTING\.md$"; then
-    print_section "[数据布局字面量守卫]"
+    print_section "[数据布局字面量检查]"
     if [ ! -f "scripts/check-layout-literals.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-layout-literals.mjs（C-pi-14 守卫交付物缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-layout-literals.mjs（C-pi-14 检查交付物缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-layout-literals.mjs; then
-        echo -e "${RED}[ERROR] 数据布局字面量守卫未通过——旧布局 pi/ 兄弟层引用回流（C-pi-14），按上方 ✗ 明细与恢复动作处理${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[ERROR] 数据布局字面量检查未通过——旧布局 pi/ 兄弟层引用回流（C-pi-14），按上方 ✗ 明细与恢复动作处理${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] 数据布局字面量守卫通过（C-pi-14）${NC}"
+    echo -e "${GREEN}[OK] 数据布局字面量检查通过（C-pi-14）${NC}"
 else
-    echo -e "${GREEN}[OK] 无守卫范围变更，跳过数据布局字面量守卫${NC}"
+    echo -e "${GREEN}[OK] 无检查范围变更，跳过数据布局字面量检查${NC}"
 fi
 
 # ============================================================================
@@ -1900,26 +1950,26 @@ fi
 #   ② npx vitest run scripts/__tests__/select-affected-e2e.test.mjs --silent ——
 #     select 的 diff→rules 匹配逻辑回归（命中/不命中/多 glob/删除文件/--check 语义）。
 #   触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
-#   守卫脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   检查脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 E2E_MAP_STAGED=$(git diff --cached --name-only -- docs/testing/e2e-map.json scripts/select-affected-e2e.mjs scripts/validate-e2e-map.mjs scripts/__tests__/select-affected-e2e.test.mjs)
 if echo "$E2E_MAP_STAGED" | grep -qE "^docs/testing/e2e-map\.json$|^scripts/select-affected-e2e\.mjs$|^scripts/validate-e2e-map\.mjs$|^scripts/__tests__/select-affected-e2e\.test\.mjs$"; then
     print_section "[e2e-map SSOT 结构校验]"
     if [ ! -f "scripts/validate-e2e-map.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/validate-e2e-map.mjs（守卫脚本被删除）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/validate-e2e-map.mjs（检查脚本被删除）${NC}"
         exit 1
     fi
     if ! node scripts/validate-e2e-map.mjs; then
         echo -e "${RED}[ERROR] docs/testing/e2e-map.json 结构校验失败——按上方明细修正登记后重试${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
     echo -e "${BLUE}[INFO] 运行 select-affected-e2e 匹配逻辑单测...${NC}"
     if ! npx vitest run scripts/__tests__/select-affected-e2e.test.mjs --silent; then
         echo -e "${RED}[ERROR] select-affected-e2e 单测失败——按上方失败明细修复后重试${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
     echo -e "${GREEN}[OK] e2e-map SSOT 结构校验通过${NC}"
@@ -1928,59 +1978,213 @@ else
 fi
 
 # ============================================================================
-# CI vitest 目标非空守卫（G2）
-#   staged 命中 ci.yml / 守卫脚本 / 其单测时触发：scripts/check-ci-vitest-targets.mjs
+# e2e 防漏登记门禁（--staged）：暂存文件落在 e2e-map 看护目录内但无任何 rule 覆盖 → 拦截
+#   防的形态：新增 e2e 测试/资产文件但漏改 e2e-map.json——上方结构校验段只在登记表自身
+#   被 staged 时触发，拦不住这个形态（登记表没动 → 条件不满足 → 什么都不查）。
+#   无条件运行：watched roots 的并集只存在于 e2e-map.json（脚本内 watchedRoots 推导），
+#   bash 侧复刻目录判断必然漂移成第二份事实源；非看护文件的提交脚本零命中静默通过。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+if [ ! -f "scripts/select-affected-e2e.mjs" ]; then
+    echo -e "${RED}[ERROR] 找不到 scripts/select-affected-e2e.mjs（检查脚本被删除）${NC}"
+    exit 1
+fi
+if ! node scripts/select-affected-e2e.mjs --staged; then
+    echo -e "${RED}[ERROR] e2e 防漏登记未通过——按上方明细在 docs/testing/e2e-map.json 登记后重试提交${NC}"
+    echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+    exit 1
+fi
+
+# ============================================================================
+# CI vitest 目标非空检查（G2）
+#   staged 命中 ci.yml / 检查脚本 / 其单测时触发：scripts/check-ci-vitest-targets.mjs
 #   解析 .github/workflows/ci.yml 全部 `vitest run` 调用（含经 package.json script 一层
 #   间接），逐目标 vitest list --filesOnly 干跑断言收集非空——防「目标被 config
 #   exclude / 路径漂移 → CI 步骤空跑」回归（taste-lint 步骤曾实发 No test files
 #   found，每轮 CI 烧到该步才红）。
 #   触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
-#   守卫脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+#   检查脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 CI_VITEST_STAGED=$(git diff --cached --name-only -- .github/workflows/ci.yml scripts/check-ci-vitest-targets.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs)
 if echo "$CI_VITEST_STAGED" | grep -qE "^\.github/workflows/ci\.yml$|^scripts/check-ci-vitest-targets\.mjs$|^scripts/__tests__/check-ci-vitest-targets\.test\.mjs$"; then
-    print_section "[CI vitest 目标非空守卫]"
+    print_section "[CI vitest 目标非空检查]"
     if [ ! -f "scripts/check-ci-vitest-targets.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-ci-vitest-targets.mjs（守卫脚本被删除）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-ci-vitest-targets.mjs（检查脚本被删除）${NC}"
         exit 1
     fi
     if ! node scripts/check-ci-vitest-targets.mjs; then
-        echo -e "${RED}[ERROR] CI vitest 目标非空守卫失败——按上方 ✗ 明细核对目标路径与 config 后重试${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[ERROR] CI vitest 目标非空检查失败——按上方 ✗ 明细核对目标路径与 config 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] CI vitest 目标非空守卫通过（G2）${NC}"
+    echo -e "${GREEN}[OK] CI vitest 目标非空检查通过（G2）${NC}"
 else
-    echo -e "${GREEN}[OK] 无 ci.yml/守卫变更，跳过 CI vitest 目标守卫${NC}"
+    echo -e "${GREEN}[OK] 无 ci.yml/检查变更，跳过 CI vitest 目标检查${NC}"
 fi
 
 # ============================================================================
-# hook 脚本反模式守卫（G3）
-#   staged 命中 install-hooks.sh / 守卫自身时触发：
+# hook 脚本反模式检查（G3）
+#   staged 命中 install-hooks.sh / 检查自身时触发：
 #   .githooks/check_hook_exitcode_antipattern.py —— install-hooks.sh 内 `VAR=$(cmd)`
 #   赋值后紧跟 `EXIT=$?` 捕获的组合在 set -e 下是死代码 + 吞诊断输出（赋值失败即
 #   整脚退出，$? 行永不可达；2026-09 实测 pre-commit 内 ESLint 失败 exit 2 零输出），
 #   一律 if ! VAR=$(cmd) 形态（诊断可见、失败分支可达）。
-#   注：不设独立 SKIP_* 开关（R1 后惯例，总闸兜底）。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关兜底）。
 # ============================================================================
 
 HOOK_ANTI_STAGED=$(git diff --cached --name-only -- .githooks/install-hooks.sh .githooks/check_hook_exitcode_antipattern.py)
 if echo "$HOOK_ANTI_STAGED" | grep -qE "^\.githooks/install-hooks\.sh$|^\.githooks/check_hook_exitcode_antipattern\.py$"; then
-    print_section "[hook 脚本反模式守卫]"
+    print_section "[hook 脚本反模式检查]"
     if [ ! -f ".githooks/check_hook_exitcode_antipattern.py" ]; then
-        echo -e "${RED}[ERROR] 找不到 .githooks/check_hook_exitcode_antipattern.py（守卫脚本被删除）${NC}"
+        echo -e "${RED}[ERROR] 找不到 .githooks/check_hook_exitcode_antipattern.py（检查脚本被删除）${NC}"
         exit 1
     fi
     if ! python3 .githooks/check_hook_exitcode_antipattern.py; then
-        echo -e "${RED}[ERROR] hook 脚本反模式守卫失败——按上方 [FIX] 指引改 if ! VAR=\$(cmd) 形态后重试${NC}"
-        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+        echo -e "${RED}[ERROR] hook 脚本反模式检查失败——按上方 [FIX] 指引改 if ! VAR=\$(cmd) 形态后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] hook 脚本反模式守卫通过（G3）${NC}"
+    echo -e "${GREEN}[OK] hook 脚本反模式检查通过（G3）${NC}"
 else
-    echo -e "${GREEN}[OK] 无 hook 安装脚本变更，跳过 hook 反模式守卫${NC}"
+    echo -e "${GREEN}[OK] 无 hook 安装脚本变更，跳过 hook 反模式检查${NC}"
+fi
+
+# ============================================================================
+# subagent-engine-sdk + subagent-core typecheck（协议演进宪法 D11 机器锁 + C-proc-23
+#   词表锁的执行点，workflow-architecture-redesign P7）
+#   staged 命中 packages/subagent-engine-sdk/ 或 packages/subagent-core/ 时触发：
+#   两包各跑 tsc --noEmit。
+#   SDK 侧锁：D11 的 C3 事件词表双向锁 / C4 task/ctx 双写禁令锁 / C2 能力位必填锁，
+#   全部是 SDK 包内编译期断言（contract-types.ts + contract-closure.test.ts）。
+#   core 侧锁：C-proc-23 四张词表锁的镜像面——SDK SSOT ↔ core 镜像类型双向可赋值 +
+#   engine-manifest 两表键集互等，断言在 packages/subagent-core/src/execution/engine/
+#   client/__tests__/protocol-closure.test.ts，只在 core 包 typecheck 下生效（SDK 类型
+#   改动只编译 SDK 恒绿，core 锚点不在其 include 内；缺 core 侧执行点则镜像锁为纸面）。
+#   检查路径自身变更不触发（typecheck 断言在两包内自持，由包 staged 必然连带触发）。
+#   触发面用 pathspec 清单式（与相邻段同款；天然含 staged 删除，删除不构成风险敞口）。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+SDK_CORE_TYPECHECK_STAGED=$(git diff --cached --name-only -- packages/subagent-engine-sdk/ packages/subagent-core/)
+if echo "$SDK_CORE_TYPECHECK_STAGED" | grep -qE "^packages/(subagent-engine-sdk|subagent-core)/"; then
+    print_section "[subagent-engine-sdk + subagent-core typecheck]"
+    if ! (cd packages/subagent-engine-sdk && npx tsc --noEmit 2>&1); then
+        echo ""
+        echo -e "${RED}[ERROR] subagent-engine-sdk typecheck 失败——协议演进宪法编译期锁（C3 词表 / C4 双写禁令 / C2 必填）检出漂移${NC}"
+        echo -e "${YELLOW}[INFO] 断言本体：packages/subagent-engine-sdk/src/protocol/contract-types.ts（AGENT_EVENT_TYPE_NAMES 双向锁）+ src/__tests__/contract-closure.test.ts（C3/C4/C2 const 锚点）；按上方 ✗ 明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    if ! (cd packages/subagent-core && npx tsc --noEmit 2>&1); then
+        echo ""
+        echo -e "${RED}[ERROR] subagent-core typecheck 失败——C-proc-23 引擎协议词表锁 core 侧锚点检出漂移（SDK SSOT ↔ core 镜像类型双向可赋值 / 能力位两表键集互等）${NC}"
+        echo -e "${YELLOW}[INFO] 断言本体：packages/subagent-core/src/execution/engine/client/__tests__/protocol-closure.test.ts + src/execution/engine/engine-manifest.ts（CONSERVATIVE_CAPABILITIES / CAPABILITY_ENUMS 两表）；SDK 与 core 任一侧漏同步即在此红，按上方 ✗ 明细修复后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] subagent-engine-sdk + subagent-core typecheck 通过（协议宪法 + C-proc-23 词表锁在案）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 SDK / subagent-core 变更，跳过双侧 typecheck${NC}"
+fi
+
+# ============================================================================
+# pi 引擎域资产模型引用漂移检查（workflow-architecture-redesign D8 机器检查）
+#   scripts/check-model-references.mjs：extensions/ 内 agent 资产 frontmatter 的
+#   model 声明 vs pi 内置 provider 目录快照（builtin-providers.json）diff——provider
+#   配置漂移（pi 升级后 provider 退役/模型 id 下架）时引用漂移在提交期红，不等
+#   run 烧 token（G4）。触发面 = extensions 下 .md 资产 / 快照本体 / 检查脚本自身；
+#   快照变更入触发面是关键——pi 升级重生成快照后，存量声明即时对账。
+#   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+MODEL_REF_STAGED=$(git diff --cached --name-only -- extensions/ packages/runtime/src/generated/builtin-providers.json scripts/check-model-references.mjs)
+if echo "$MODEL_REF_STAGED" | grep -qE "^extensions/.*\.md$|^packages/runtime/src/generated/builtin-providers\.json$|^scripts/check-model-references\.mjs$"; then
+    print_section "[pi 资产模型引用漂移检查]"
+    if ! node scripts/check-model-references.mjs; then
+        echo -e "${RED}[ERROR] 模型引用漂移——资产声明的 provider/model 不在内置 provider 目录快照内${NC}"
+        echo -e "${YELLOW}[FIX] 按上方 ✗ 明细修正声明，或（pi 升级后目录漂移）执行 pnpm gen:builtin-providers 重生成快照并对账后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] pi 资产模型引用漂移检查通过（D8 机器检查在案）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 extensions .md / 快照变更，跳过模型引用漂移检查${NC}"
+fi
+
+# ============================================================================
+# vitest 红线：测试文件 node:test import 拦截（review-pipeline-redesign 决策 4）
+#   docs/TEST-STRATEGY.md vitest 红线（禁 node:test）的机器承接分两半：
+#   非测试文件面 = eslint.config.mjs 的 no-restricted-syntax 两块（core 域 selector 追加 +
+#   全仓独立块）；测试文件面 = 本段 grep——taste-lint/base.mjs 的全局 ignores 把
+#   **/*.test.ts / **/*.spec.ts / **/__tests__/**/*.ts 三模式整体排除出 eslint 管线
+#   （global-ignores 硬语义，配置块无法复活），故测试文件面由 pre-commit 承载
+#   （「不在 eslint 管线的面用 pre-commit 承载」惯例，与「tsx --test 归红线文档不进 lint」
+#   同构）。本段文件面与该 ignores 三模式对齐：*.test.* / *.spec.* 后缀 case +
+#   __tests__/ 目录 case（ignores 的目录口径限 .ts，case 对齐该面；后缀 case 比 ignores
+#   后缀模式宽出的 .tsx/.mts/... 属无害超集——违规 import 无论如何该拦）。无豁免类目。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+NODE_TEST_HITS=""
+for f in $STAGED_FILES; do
+    case "$f" in
+        *.test.ts|*.test.tsx|*.test.mts|*.test.cts|*.test.mjs|*.test.cjs|*.test.js|*.spec.ts|*.spec.tsx|*.spec.mts|*.spec.mjs|*.spec.js)
+            ;;
+        __tests__/*.ts|*/__tests__/*.ts)
+            ;;
+        *)
+            continue
+            ;;
+    esac
+    [ -f "$f" ] || continue
+    hits=$(grep -nE "from ['\"]node:test['\"]|require\(['\"]node:test['\"]\)" "$f" 2>/dev/null || true)
+    if [ -n "$hits" ]; then
+        while IFS= read -r line; do
+            NODE_TEST_HITS="${NODE_TEST_HITS}  ${f}:${line}\n"
+        done <<< "$hits"
+    fi
+done
+if [ -n "$NODE_TEST_HITS" ]; then
+    print_section "[vitest 红线 node:test 拦截]"
+    echo -e "${RED}[ERROR] 测试文件禁止 node:test（测试框架统一 vitest）:${NC}"
+    echo -e "$NODE_TEST_HITS"
+    echo -e "${YELLOW}[FIX] 改用 vitest（import { test } from 'vitest'）；红线规范见 docs/TEST-STRATEGY.md${NC}"
+    echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+    exit 1
+fi
+
+# ============================================================================
+# [oe-assert 自动初筛] code-overdesign-audit pre-commit 断言（review-pipeline-redesign 决策 5）
+#   三断言（新增无调用方导出 no-reference / 新增单实现接口 single-impl / 新增纯转发方法
+#   pass-through）拦新增投机复杂度，目标单次提交 <10s。本仓 ports / SDK 契约 interface 的
+#   「接口先立、单实现常态」合法形态与 oe-exempt 豁免标记说明见 .githooks/oe-assert.sh
+#   头部注释区（部署副本特化）。卸载 = 删本段 + 删 .githooks/oe-assert.sh。
+#   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    print_section "[oe-assert 过度设计自动初筛]"
+    if [ ! -f ".githooks/oe-assert.sh" ]; then
+        echo -e "${RED}[ERROR] 找不到 .githooks/oe-assert.sh（调用行在位而脚本本体缺失）${NC}"
+        exit 1
+    fi
+    bash ".githooks/oe-assert.sh" # oe-audit-assert
+fi
+
+# ============================================================================
+# [skills-snapshot 尾部段] 实体快照（备份链 D3；失败非阻断）
+#   全部检查通过后对 workspace 根实体做快照（refs/skills-snapshot：临时 index +
+#   commit-tree，不碰工作树与真实 index）。失败仅日志放行本次提交，下次提交自动
+#   重试（push 失败同语义）；实体缺失/为空由脚本自身空树防御拦截（不覆盖好快照）。
+#   脚本未随分支检出的时序窗口（收敛 commit 之前）静默跳过。
+# ============================================================================
+if [ -f ".githooks/snapshot-skills.sh" ]; then
+    print_section "[skills 实体快照]"
+    if ! bash .githooks/snapshot-skills.sh; then
+        echo -e "${YELLOW}[WARN] skills 快照失败（非阻断，不影响本次提交）；下次提交自动重试${NC}"
+    fi
 fi
 
 # ============================================================================
@@ -1991,7 +2195,7 @@ print_section "[所有检查通过]"
 
 echo -e "${GREEN}代码质量检查全部通过！${NC}"
 echo ""
-echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。${NC}"
+echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
 echo ""
 
 exit 0
@@ -2046,8 +2250,8 @@ echo -e "  ${GREEN}[+]${NC} 前端 ESLint 代码检查"
 echo -e "  ${GREEN}[+]${NC} vue-tsc 类型检查（全量 + 测试 tsconfig，与 CI 等价）"
 echo -e "  ${GREEN}[+]${NC} pi extensions ESLint + tsc 类型检查（extensions/ 目录）"
 echo -e "  ${GREEN}[+]${NC} pi extensions manifest & convention 检查（禁废弃 namespace / 禁 console.log / pi manifest 字段）"
-echo -e "  ${GREEN}[+]${NC} extension 结构一致性检查（分组/role/依赖台账/一层路径残留）"
-echo -e "  ${GREEN}[+]${NC} extension npm 发布 files 白名单守卫（import 闭包 ⊆ files）"
+echo -e "  ${GREEN}[+]${NC} extension 结构一致性检查（分组/role/依赖清单/一层路径残留）"
+echo -e "  ${GREEN}[+]${NC} extension npm 发布 files 白名单检查（import 闭包 ⊆ files）"
 echo -e "  ${GREEN}[+]${NC} Vue 组件规范检查（禁止原生 HTML、Emoji、自定义 CSS）"
 echo -e "  ${GREEN}[+]${NC} Sidecar session 隔离检查"
 echo -e "  ${GREEN}[+]${NC} CSS tokens 检查"
@@ -2061,24 +2265,27 @@ echo -e "  ${GREEN}[+]${NC} runtime services 循环依赖检查（D6c 防护）"
 echo -e "  ${GREEN}[+]${NC} CSP 能力一致性检查（源码 eval/WebAssembly vs index.html CSP 指令）"
 echo -e "  ${GREEN}[+]${NC} Runtime Bundle 验证（依赖打包 + CJS 兼容 + 健康检查）"
 echo -e "  ${GREEN}[+]${NC} 流写逃逸护栏（runtime 变更时触发：R1 裸流写 / R2 socket error / R4 readline 转发）"
-echo -e "  ${GREEN}[+]${NC} 用户内容出站点守卫（runtime 变更时触发：prompt/steer/followUp 调用点白名单，防忘挂 SkillInjector）"
+echo -e "  ${GREEN}[+]${NC} 用户内容出站点检查（runtime 变更时触发：prompt/steer/followUp 调用点白名单，防忘挂 SkillInjector）"
 echo -e "  ${GREEN}[+]${NC} AC7 extension-host 边界检查（core 变更时触发，禁 domain/stores import）"
 echo -e "  ${GREEN}[+]${NC} 打包配置预检查（asarUnpack/files 一致性 + symlink 检查）"
 echo -e "  ${GREEN}[+]${NC} i18n CJK 残留检测（.vue 模板不得含硬编码中文）"
 echo -e "  ${GREEN}[+]${NC} i18n locale 双侧 key 对齐检查（zh-CN === en-US）"
-echo -e "  ${GREEN}[+]${NC} pi 边界可靠性护栏（G1 语义登记守卫 / G3 档位差分探针 / G4 subagent 通道禁则）"
-echo -e "  ${GREEN}[+]${NC} thinking 档位词表比对守卫（ext-simplify-17 D5：pi-ai ModelThinkingLevel ↔ llm-shared / pi-rpc 副本）"
-echo -e "  ${GREEN}[+]${NC} subagent-core 依赖闭包守卫（D9-① 闭包 + 检查点 5 worker 零宿主服务）"
-echo -e "  ${GREEN}[+]${NC} subagent-service 聚合边界守卫（H3/R5：聚合间 import 台账 + 聚合→壳禁则 + 私有互调门）"
-echo -e "  ${GREEN}[+]${NC} 文档-代码符号漂移守卫（C-proc-10：①符号漂移 ②测试文档路径存在性 ③[G5] 源码注释悬空 docs 引用，含守卫单测）"
-echo -e "  ${GREEN}[+]${NC} 消息流滚动跟随链路守卫（C-state-11：滚动到底唯一原语 + 禁 findItemIndex(scrollSize) 模式）"
+echo -e "  ${GREEN}[+]${NC} pi 边界可靠性护栏（G1 语义登记检查 / G3 档位差分探针 / G4 subagent 通道禁则）"
+echo -e "  ${GREEN}[+]${NC} thinking 档位词表比对检查（ext-simplify-17 D5：pi-ai ModelThinkingLevel ↔ llm-shared / pi-rpc 副本）"
+echo -e "  ${GREEN}[+]${NC} subagent-core 依赖闭包检查（D9-① 闭包 + 检查点 5 worker 零宿主服务）"
+echo -e "  ${GREEN}[+]${NC} subagent-service 聚合边界检查（H3/R5：聚合间 import 清单 + 聚合→壳禁则 + 私有互调门）"
+echo -e "  ${GREEN}[+]${NC} 文档-代码符号漂移检查（C-proc-10：①符号漂移 ②测试文档路径存在性 ③[G5] 源码注释悬空 docs 引用，含检查单测）"
+echo -e "  ${GREEN}[+]${NC} 消息流滚动跟随链路检查（C-state-11：滚动到底唯一原语 + 禁 findItemIndex(scrollSize) 模式）"
 echo -e "  ${GREEN}[+]${NC} 测试 flake 卫生检查（F5 scripts.test --no-bail + F3 recursive 删除 maxRetries）"
-echo -e "  ${GREEN}[+]${NC} Provider 凭据读取单通道守卫（runtime 变更时触发：凭据直查禁令 + upsertProvider 直调清单，C-proc-14/15）"
-echo -e "  ${GREEN}[+]${NC} 数据布局字面量守卫（C-pi-14：pi/ 兄弟布局引用回流拦截，豁免集中 LAYOUT_LITERAL_EXEMPT）"
+echo -e "  ${GREEN}[+]${NC} Provider 凭据读取单通道检查（runtime 变更时触发：凭据直查禁令 + upsertProvider 直调清单，C-proc-14/15）"
+echo -e "  ${GREEN}[+]${NC} 数据布局字面量检查（C-pi-14：pi/ 兄弟布局引用回流拦截，豁免集中 LAYOUT_LITERAL_EXEMPT）"
 echo -e "  ${GREEN}[+]${NC} e2e-map SSOT 结构校验（登记表 + 调度脚本变更时触发：结构/幽灵 asset 强校验 + select 匹配逻辑单测）"
-echo -e "  ${GREEN}[+]${NC} CI vitest 目标非空守卫（ci.yml/守卫变更时触发：vitest run 目标逐个 list 干跑非空，G2）"
-echo -e "  ${GREEN}[+]${NC} hook 脚本反模式守卫（install-hooks.sh 变更时触发：VAR=\$(cmd)+EXIT=\$? 组合拦截，G3）"
-echo -e "  ${GREEN}[+]${NC} review-fix-loop 双实现锁步守卫（workflows 变更时触发：pi/zcode 调度结果 + 池/阈值常量对账）"
+echo -e "  ${GREEN}[+]${NC} CI vitest 目标非空检查（ci.yml/检查变更时触发：vitest run 目标逐个 list 干跑非空，G2）"
+echo -e "  ${GREEN}[+]${NC} hook 脚本反模式检查（install-hooks.sh 变更时触发：VAR=\$(cmd)+EXIT=\$? 组合拦截，G3）"
+echo -e "  ${GREEN}[+]${NC} review-fix-loop 双实现锁步检查（workflows 变更时触发：pi/zcode 调度结果 + 池/阈值常量对账）"
+echo -e "  ${GREEN}[+]${NC} subagent-engine-sdk + subagent-core typecheck（两包变更时触发：D11 编译期机器锁 C3 词表 / C4 双写禁令 / C2 必填 + C-proc-23 词表锁 core 侧镜像锚点）"
+echo -e "  ${GREEN}[+]${NC} pi 资产模型引用漂移检查（extensions .md / 快照变更时触发：D8 agent 资产 model 声明 vs builtin-providers 快照 diff）"
+echo -e "  ${GREEN}[+]${NC} oe-assert 过度设计自动初筛（code-overdesign-audit 三断言：no-reference / single-impl / pass-through，oe-exempt 豁免标记）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

@@ -59,7 +59,6 @@ function makeLifecycle() {
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   })
   return { lifecycle, svc, store, pm }
 }

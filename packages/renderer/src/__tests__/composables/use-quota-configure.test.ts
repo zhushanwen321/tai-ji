@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useQuotaConfigure（QuotaConfigure module 实现）接口级单测（契约 v2，coding-plan-quota-config-ux
  * §7.1/§7.2；C1 收拢后测试面 = core QuotaConfigureModule 接口）。

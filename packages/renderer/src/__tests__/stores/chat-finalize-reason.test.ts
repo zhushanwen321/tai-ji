@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * fix-state-tearing 收口契约套件（finalizeSession reason→终态映射 + sealed guard 防污染；
  * 原 chat-sealed-guard.test.ts 已并入本文件——同一契约域、零 mock 差异）。

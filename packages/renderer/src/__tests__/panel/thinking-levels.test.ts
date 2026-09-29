@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * thinking-levels 纯函数单测（U6 改锚：可用档判定切 supportedLevels，map 只承担
  * key↔value 映射职责）。

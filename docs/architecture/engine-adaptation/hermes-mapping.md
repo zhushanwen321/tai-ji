@@ -129,7 +129,7 @@ messages 表（hermes_state.py:271-290）：id, session_id, role, content, tool_
 
 ResumeSession/ForkSession 语义：resume_session = 内存缺失时从 DB 恢复（仅 source=="acp" 行，session.py:476-548）+ cwd 更新 + 全量历史 replay 到客户端后应答（server.py:1130-1160, :979-1067）；fork_session = deepcopy history → 新 session_id（session.py:253-281）。压缩分叉：引擎自动压缩会在 SQLite 分裂出 parent_session_id 链（compress_context，agent/conversation_compression.py:275+）；read 全量需 `include_ancestors=True` 沿 lineage root→tip 遍历（hermes_state.py:2335-2337, :2409-2429）；ACP `/compact` 特意绕开分裂（临时置空 agent._session_db，server.py:1819-1829）——两条压缩路径的落盘形态不同，read 重建必须处理祖先链。
 
-ResumeAnchor.sessionRef 构成建议：`{sessionId: <uuid>, hermesHome: <get_hermes_home() 绝对路径>}`——hermes 无单文件 session 概念，库定位必须连 HERMES_HOME 一起钉死（多实例隔离）；journalPath 缺省。outcome.sessionId = ACP session_id（uuid4，session.py:215）；sessionFile 无对应（填 state.db 路径仅作诊断，语义登记见 §9）。
+ResumeAnchor.sessionRef 构成建议：`{sessionId: <uuid>, hermesHome: <get_hermes_home() 绝对路径>}`——hermes 无单文件 session 概念，库定位必须连 HERMES_HOME 一起固定（多实例隔离）；journalPath 缺省。outcome.sessionId = ACP session_id（uuid4，session.py:215）；sessionFile 无对应（填 state.db 路径仅作诊断，语义登记见 §9）。
 
 ## 7. 反向通道映射
 

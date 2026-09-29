@@ -347,7 +347,8 @@ describe('线终结分区处置（M4-a 消费面：reconcile 出册同拍 dispos
     subagent.applyRecords(vid, [{
       sessionFile: null, agent: 'a', slug: 's', task: 't', status: 'idle', subagentId: 's2',
     }])
-    workflow.applyRecords(vid, [{
+    // 种数据（applyRecords 已私有化，直写分区 ref）
+    workflow.recordsBySession = new Map(workflow.recordsBySession).set(vid, [{
       runId: 'r1', scriptName: 'w', status: 'running', startedAt: '2026-09-22T00:00:00.000Z',
       agentCalls: [], stateFilePath: '/tmp/wf.jsonl',
     }])

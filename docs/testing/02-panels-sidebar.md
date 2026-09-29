@@ -154,7 +154,7 @@ pnpm dev
 - runtime `file.tree` / `file.expand` / `file.read` 真实 RPC（字段是否与 protocol 契约一致）
 - 真实 git status 解析（pi 的 git 输出格式）
 - 大型项目性能（懒加载是否真的只加载一级）
-- 路径守卫（BC-3 白名单：file.read 允许 3 全局目录 + session.cwd 子树）
+- 路径检查（BC-3 白名单：file.read 允许 3 全局目录 + session.cwd 子树）
 
 ## 8. Playwright E2E 测试（已落地）
 
@@ -194,7 +194,7 @@ async function gotoFileTree(page: import('@playwright/test').Page): Promise<void
 | T4.1 | 过滤命中 | `file-tree-file-README.md` 可见 / `file-tree-file-package.json` count=0 | 输入 'readme' 后只 README 命中 |
 | T4.2 | 无匹配 → 空态 | `file-empty` | 输入 'zzz_no_match_zzz' 显示空态 |
 | T4.5 | 清空 → 恢复完整树 | `file-tree-file-package.json` | 清空过滤后恢复 |
-| D-020 | showIgnored 开关 | `file-tree-dir-node_modules` | 默认隐藏（前端 computed 过滤）；开关开后瞬时可见，无重拉闪烁 |
+| D-020 | showIgnored 开关 | `file-tree-dir-node_modules` | 默认隐藏（前端 computed 过滤）；开关开后瞬时可见，无重新拉取闪烁 |
 
 ### 8.4 完整 E2E 代码（现有，可作其他功能 E2E 的参考模板）
 
@@ -263,7 +263,7 @@ test.describe('文件树 E2E', () => {
     await expect(page.getByTestId('file-empty')).toBeVisible()
   })
 
-  test('D-020 showIgnored: 开关切换 → ignored 节点瞬时显示/隐藏（前端 computed 过滤，无重拉闪烁）', async ({ page }) => {
+  test('D-020 showIgnored: 开关切换 → ignored 节点瞬时显示/隐藏（前端 computed 过滤，无重新拉取闪烁）', async ({ page }) => {
     await gotoFileTree(page)
     // 默认被前端 computed 过滤（store 含 ignored 节点但不渲染）
     await expect(page.getByTestId('file-tree-dir-node_modules')).toHaveCount(0)
@@ -295,7 +295,7 @@ test.describe('文件树 E2E', () => {
 | ✅ 大数据量渲染 | [W28] FileView-virtua.test.ts 用真实 virtua 覆盖万级目录（10000 文件 → DOM 行数 < 200） |
 | ⚠️ 真实大项目性能 | mock 树小（约 10 节点），真实项目可能数千节点。懒加载/滚动体验只能非 MOCK 测 |
 | ❌ 真实 git status | mock fixtureGitStatus 是静态的，真实 git 输出格式（rename/copy 等）只能非 MOCK 测 |
-| ❌ 路径守卫 | BC-3 白名单（file.read 允许 3 全局目录 + cwd 子树）只能非 MOCK 测（mock 不校验） |
+| ❌ 路径检查 | BC-3 白名单（file.read 允许 3 全局目录 + cwd 子树）只能非 MOCK 测（mock 不校验） |
 
 ## 10. 相关文档
 
@@ -367,7 +367,7 @@ fileTreeStore.selectedPath 变化（点文件触发）
             → state.content = 结果；state.status = 'ready'
 ```
 
-**viewMode 切换**（detail-view-toggle）：`detail-view-toggle` 仅在 `hasGitChange=true` 时渲染。点击切换 viewMode 并**重新拉数据**（diff→preview 调 `fileApi.read`，preview→diff 调 `gitApi.getDiff`，设 `status:'loading'`）。守卫仅检查 `viewMode !== mode`，不额外校验「可读/可 diff」——无 git 改动的文件切 diff 会调 getDiff，若返回空则显空内容（不崩）。
+**viewMode 切换**（detail-view-toggle）：`detail-view-toggle` 仅在 `hasGitChange=true` 时渲染。点击切换 viewMode 并**重新拉数据**（diff→preview 调 `fileApi.read`，preview→diff 调 `gitApi.getDiff`，设 `status:'loading'`）。检查仅检查 `viewMode !== mode`，不额外校验「可读/可 diff」——无 git 改动的文件切 diff 会调 getDiff，若返回空则显空内容（不崩）。
 
 **XSS 安全**（约束登记 C-state-13，见 [docs/constraints.json](../constraints.json)）：DetailPane **禁用 v-html**，内容用 `<pre>{{ state.content }}</pre>` 文本插值。mock file.read / git.getDiff 含 `<script>` 路径用于验证 XSS 防护。
 
@@ -416,7 +416,7 @@ pnpm dev
 | 5 | 二进制文件（图片） | detail-binary 显示 |
 
 **关键验证点**（MOCK 测不出）：
-- runtime `file.read` / `git.getDiff` 真实 RPC（含 BC-3 路径守卫：read 允许 3 全局目录 + cwd 子树）
+- runtime `file.read` / `git.getDiff` 真实 RPC（含 BC-3 路径检查：read 允许 3 全局目录 + cwd 子树）
 - 真实 git diff 格式（binary/rename/copy）
 - 大文件截断逻辑（>1MB）
 - GitPanel 真实 git status + 暂存/提交流程
@@ -606,7 +606,7 @@ Esc / 再按⌘K / 点遮罩关闭
 
 **架构分层**（D-026：编排归 composable，非 domain；2026-09-11 起实现在 core `new-task-search` 域）：
 - `packages/core/src/domain/new-task-search/match-engine.ts`（纯函数：matchFilter 过滤 + segments 高亮）
-- `packages/core/src/domain/new-task-search/search.ts`（`useSearch`：编排 4 源 + loadSeq 守卫 + WS 超时 race #17）
+- `packages/core/src/domain/new-task-search/search.ts`（`useSearch`：编排 4 源 + loadSeq 检查 + WS 超时 race #17）
 - `packages/core/src/domain/new-task-search/search-jump.ts`（`useSearchJump`：跳转 type switch 分发）
 - `packages/core/src/domain/new-task-search/recents.ts`（`useRecents`：localStorage + FIFO）
 - `packages/core/src/domain/new-task-search/command-registry.ts` + `command-store.ts`（`useCommandRegistry` 应用命令 + slash 聚合 / pendingSlash 通道）
@@ -648,7 +648,7 @@ Sidebar keydown ⌘K → searchOpen toggle（AC-7.1）
 ```
 Input 输入 → watch(query) debounce 120ms（AC-7.15）→ loadResults(q)
   → useSearch.query(q, ctx)
-    → seq = ++loadSeq（BC-9 守卫）
+    → seq = ++loadSeq（BC-9 检查）
     → Promise.allSettled([
         queryCommandSource(),          // 内存：useCommandRegistry.list()
         queryFileSource(sid),          // WS：缓存优先，未命中 composer.getFileCandidates + #17 超时 race
@@ -671,10 +671,10 @@ Enter / click → confirmSel → useSearchJump.confirm(item, ctx)
   → 失败：{ok:false} → toast + 浮层保持打开（AC-6.7）
 ```
 
-### 生命周期 + 并发守卫（功能4）
+### 生命周期 + 并发检查（功能4）
 ```
-watch(open=false) → 清 query/selIdx/errorMsg + clearTimeout(debounce/loading)（AC-7.14, MR-7.1 孤儿查询守卫）
-close 触发 query='' → watch(query) debounce → loadResults，但 open flag 已 false → 实际不发 WS（useSearch 内 loadSeq 守卫 + SearchModal 已卸载）
+watch(open=false) → 清 query/selIdx/errorMsg + clearTimeout(debounce/loading)（AC-7.14, MR-7.1 孤儿查询检查）
+close 触发 query='' → watch(query) debounce → loadResults，但 open flag 已 false → 实际不发 WS（useSearch 内 loadSeq 检查 + SearchModal 已卸载）
 组件卸载 → onUnmounted clearTimeout（AC-8.4）
 ```
 
@@ -706,7 +706,7 @@ cd packages/renderer && npx vitest run src/__tests__/lib/match-engine.test.ts  #
 | T1.15 | `packages/ui/src/overlays/__tests__/search-modal.test.ts`（25 测）| 首屏冒烟（渲染 gate DoD）|
 | T1.1/T1.2/T1.3/T1.4 | | 唤起/空查询/↑↓导航/选中态 |
 | T1.6/T1.7/T1.11 | | 关闭/mark 高亮/未找到 |
-| T1.13/T1.14/T3.7/T3.8/T5.4 | | open/close 竞态/孤儿守卫/loading 防闪烁/容错 |
+| T1.13/T1.14/T3.7/T3.8/T5.4 | | open/close 竞态/孤儿检查/loading 防闪烁/容错 |
 | T1.5 | | Tab 切类（AC-9.1~9.4，P2）|
 
 **live 等价覆盖合计 84 测**（8 + 12 + 10 + 16 + 13 + 25）；原 execution-plan 基线 86 测为迁移前 renderer 口径，已随实现迁移失效。**口径注**：84 仅合计上表矩阵映射的文件；搜索域另有 `file-match.test.ts`（12 测，TC-9 系列，见 TEST-STRATEGY 基线行）与 renderer 侧 `__tests__/lib/match-engine.test.ts`（15 测，core 纯函数导出契约测试，见上方运行命令）不在本合计内。
@@ -716,7 +716,7 @@ cd packages/renderer && npx vitest run src/__tests__/lib/match-engine.test.ts  #
 ### 关键测试桩（高风险用例）
 
 - **T4.8 WS 断连超时 race**：mock `composer.getFileCandidates` 返回 `new Promise(()=>{})`（永不 settle，模拟 WS 断连 pending），`vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync(10001)` 推进 10s → withWsTimeout 触发 reject → allSettled settle → 不永久挂死。**禁止用立即 reject mock**（掩盖永不 settle 路径）
-- **T1.12 loadSeq 守卫**：第一次 query 慢（永不 resolve），第二次快速 query → 第一次旧结果不覆盖
+- **T1.12 loadSeq 检查**：第一次 query 慢（永不 resolve），第二次快速 query → 第一次旧结果不覆盖
 - **T3.9 stale cache**：断言 useSearch 初始化时 `useFileSearch().setupInvalidation` 被调用（AC-4.10 自绑失效）
 - **T3.7/T3.8 loading 防闪烁**：fake timers 控制查询延迟 >200ms / <200ms
 
@@ -730,7 +730,7 @@ cd packages/renderer && npx vitest run src/__tests__/lib/match-engine.test.ts  #
 
 ## 6. 非 MOCK 模式测试（手工冒烟）
 
-> **铁律**：MOCK 轨测试全绿 ≠ 功能可用。search 改了 SearchModal + 新增 5 个 composable/lib/store，必须手工 `pnpm run dev` 确认模块加载健康（[00 §1.3](./00-overview.md) dev 冒烟闸门）。
+> **铁律**：MOCK 轨测试全绿 ≠ 功能可用。search 改了 SearchModal + 新增 5 个 composable/lib/store，必须手工 `pnpm run dev` 确认模块加载健康（[00 §1.3](./00-overview.md) dev 冒烟门禁）。
 
 ```bash
 pnpm dev    # 非 MOCK 轨，起 runtime + pi
@@ -760,7 +760,7 @@ pnpm dev    # 非 MOCK 轨，起 runtime + pi
 |------|------|------|--------|
 | `registerApp` 无调用方 | 应用命令区运行时为空，搜索「命令」分组只显 slash 命令 | 测试用 mock 覆盖；功能不崩溃；slash 命令源工作 | P3（需产品决策命令清单）|
 | AC-10.1 未完全通用化 | Sidebar keydown 用本地 keymap 数组（未走 useCommandRegistry）| 硬编码 if/else 字面消除；⌘K toggle 已落地 | P3（需独立 keymap 注册表 + shortcut DSL）|
-| dev 冒烟闸门待建 | MOCK 全绿≠可用（模块加载盲区）| 手工 `pnpm run dev` 冒烟（见 §6）| 待 scripts/dev-smoke.mjs |
+| dev 冒烟门禁待建 | MOCK 全绿≠可用（模块加载盲区）| 手工 `pnpm run dev` 冒烟（见 §6）| 待 scripts/dev-smoke.mjs |
 | useSearch 单测 onScopeDispose warn | 测试输出不干净（harness 缺陷）| 生产无 warn（SearchModal setup 提供 scope）；测试全绿 | 低（测试 harness 优化）|
 
 ## 9. 设计文档溯源
@@ -936,7 +936,7 @@ testid 以组件 template 内 data-testid 属性为准。下列 testid 随 Agent
 
 ## §4 关键链路概述
 
-- **加载列表**：托盘挂载 / 切 session 时（原触发点 = Sidebar watch activeTab + activeId）经 `session.getSubagents` RPC → runtime 定位 session 文件 → extractor 解析 JSONL（提取 toolCalls / toolResults / bgNotifies / listItems）组装 `SubagentRecord[]` 回包 → 前端更新托盘行集与计数（计数恒由行集长度派生）。WS 重连腿仍归 `useSidebar.onConnected` 重拉。
+- **加载列表**：托盘挂载 / 切 session 时（原触发点 = Sidebar watch activeTab + activeId）经 `session.getSubagents` RPC → runtime 定位 session 文件 → extractor 解析 JSONL（提取 toolCalls / toolResults / bgNotifies / listItems）组装 `SubagentRecord[]` 回包 → 前端更新托盘行集与计数（计数恒由行集长度派生）。WS 重连路径仍归 `useSidebar.onConnected` 重新拉取。
 - **选中 subagent**：托盘行点击 → 记录原 session id → 经 `session.getSubagentHistory` 拉取 subagent JSONL 转 `Message[]` → `chatStore.hydrate('subagent:<id>', messages)` → Panel 切到虚拟 session 渲染（原卡片 emit select 同链）。
 - **返回主 session**：恢复原 sessionId，Panel header 与消息流还原。
 
@@ -1041,7 +1041,7 @@ mock 轨的 Playwright E2E（`e2e/*.spec.ts`）无法覆盖本功能——mock �
 | 无自动化 real-track spec | CI 不跑 subagent E2E | 手工冒烟清单 + vitest 单测保底 | P2 |
 | （已关）原「workflow tab 无后端逻辑」 | — | workflow 观察入口现为托盘 workflow 面板（有后端链路），空态占位已退役 | — |
 | （已关）原「subagent badge 只按 count 判断」 | — | 计数口径现由 `useTrayCounts` 按 SSOT 谓词派生（`isRunningProjection` + origin 过滤） | — |
-| 实时流式未接入 | 后台 subagent 完成不会实时更新列表 | 现行推送链 = subagent 广播 + 托盘挂载/切 session 首拉兜底（原「刷新 tab 重拉」已退役） | P2 |
+| 实时流式未接入 | 后台 subagent 完成不会实时更新列表 | 现行推送链 = subagent 广播 + 托盘挂载/切 session 首次拉取兜底（原「刷新 tab 重新拉取」已退役） | P2 |
 
 ## §9 设计文档溯源
 

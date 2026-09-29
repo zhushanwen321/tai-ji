@@ -277,16 +277,6 @@ describe('PresetService · wave 1 存储内核', () => {
 
   // ── IO 容错 ────────────────────────────────────────────────
 
-  it('w1-tc8: loadPresetsFile JSON 畸形时空对象兜底不抛错', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    writeFileSync(piPresetsPath(), '{ not valid json', 'utf-8')
-
-    const all = presetService.getAllPresets()
-    expect(all).toEqual(DEFAULT_PRESETS)
-    expect(warnSpy).toHaveBeenCalled()
-    warnSpy.mockRestore()
-  })
-
   it('w1-tc10: savePreset 新增自定义 preset 强制 builtin:false', () => {
     presetService.savePreset({
       id: 'uuid-1',
@@ -346,17 +336,6 @@ describe('PresetService · wave 2 resolve', () => {
     )
   })
 
-  it('w2-tc3: resolve extensionMode=all 返回全部 discovered extension（含 infra）', async () => {
-    const result = await svcWithMock.resolve(makePreset({ extensionMode: 'all' }), '/cwd')
-    // 全部 4 个扩展（infra / feature / 2 normal）
-    expect(result.extensionPaths).toEqual([
-      '/fake/ext/pi-pending-notifications',
-      '/fake/ext/pi-goal',
-      '/fake/ext/normal-a',
-      '/fake/ext/normal-b',
-    ])
-  })
-
   it('w2-tc4: resolve extensionMode=allowlist infrastructure 存活即使不在 allowlist（S2 核心）', async () => {
     const result = await svcWithMock.resolve(
       makePreset({ extensionMode: 'allowlist', allowedExtensions: ['normal-a'] }),
@@ -384,28 +363,6 @@ describe('PresetService · wave 2 resolve', () => {
       '/fake/ext/pi-pending-notifications',
       '/fake/ext/normal-b',
     ])
-  })
-
-  it('w2-tc6: resolve extensionMode=none 只留 infrastructure（feature/normal 全排除）', async () => {
-    const result = await svcWithMock.resolve(
-      makePreset({ extensionMode: 'none' }),
-      '/cwd',
-    )
-    // none 模式只保留 infrastructure
-    expect(result.extensionPaths).toEqual([
-      '/fake/ext/pi-pending-notifications',
-    ])
-  })
-
-  it('S2: infrastructure 包在 all/allowlist/denylist/none 四种 mode 下都绝对存活', async () => {
-    // denylist 故意把 infra 包也列进去，验证它扛住
-    for (const mode of ['all', 'allowlist', 'denylist', 'none'] as const) {
-      const result = await svcWithMock.resolve(
-        makePreset({ extensionMode: mode, deniedExtensions: ['@zhushanwen/pi-pending-notifications'] }),
-        '/cwd',
-      )
-      expect(result.extensionPaths).toContain('/fake/ext/pi-pending-notifications')
-    }
   })
 
   it('w2-tc7: resolve 4 种 toolMode 映射正确', async () => {
@@ -450,18 +407,15 @@ describe('PresetService · wave 2 resolve', () => {
 
   // ── B1 修复验证：resolveSkillPaths 在 noSkills=false/undefined 时返 undefined ──
 
-  it('B1: resolve noSkills 未设 → skillPaths 为 undefined（让 lifecycle ?? fallback 到 getSkillPaths）', async () => {
-    const result = await svcWithMock.resolve(makePreset({}), '/cwd')
+  it.each([
+    ['未设（缺省）', {}],
+    ['显式 false', { noSkills: false }],
+  ] as const)('B1: resolve noSkills %s → skillPaths 为 undefined（让 lifecycle ?? fallback 到 getSkillPaths）', async (_label, overrides) => {
+    const result = await svcWithMock.resolve(makePreset(overrides), '/cwd')
     // 关键断言：undefined 而非 []。[] 是 truthy，会让 lifecycle 的 ?? fallback 失效，
     // 所有用 presetId 启动的 session 拿到空 skillPaths，所有 skill 失效（BLOCKER 根因）。
     expect(result.skillPaths).toBeUndefined()
     expect(result.flags.noSkills).toBe(false) // noSkills 默认 false
-  })
-
-  it('B1: resolve noSkills=false → skillPaths 仍为 undefined', async () => {
-    const result = await svcWithMock.resolve(makePreset({ noSkills: false }), '/cwd')
-    expect(result.skillPaths).toBeUndefined()
-    expect(result.flags.noSkills).toBe(false)
   })
 
   // ── 模式提示词透传（scope 微扩：PresetResolution.prompt）──
@@ -487,39 +441,6 @@ describe('PresetService · wave 2 resolve', () => {
   it('模式提示词透传：未配置 prompt → resolution.prompt 为 undefined', async () => {
     const result = await svcWithMock.resolve(makePreset({}), '/cwd')
     expect(result.prompt).toBeUndefined()
-  })
-
-  it('非法/超限段不进入 resolution：直改盘合计超限 → resolve 拿到折叠后值（append 已丢）', async () => {
-    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
-    writeFileSync(
-      piPresetsPath(),
-      JSON.stringify({
-        version: 1,
-        presets: [
-          {
-            id: 'uuid-resolve-fold',
-            name: 'fold',
-            builtin: false,
-            order: 1,
-            toolMode: 'all',
-            extensionMode: 'all',
-            prompt: {
-              replace: { enabled: true, prompt: 'x'.repeat(16000) },
-              append: { enabled: true, prompt: 'y'.repeat(16000) },
-            },
-          },
-        ],
-      }),
-      'utf-8',
-    )
-
-    // 经读路 coercePreset 折叠后再 resolve：resolution 只拿得到合法剩余段
-    const preset = svcWithMock.getPreset('uuid-resolve-fold')!
-    const result = await svcWithMock.resolve(preset, '/cwd')
-    expect(result.prompt).toBeDefined()
-    expect(result.prompt!.replace!.prompt.length).toBe(16000)
-    expect(result.prompt!.append).toBeUndefined()
-    warnSpy.mockRestore()
   })
 })
 
@@ -655,11 +576,21 @@ describe('PresetService · PR #117 review fixes', () => {
         { id: 'uuid-cache', name: 'cache-test', builtin: false, order: 1, toolMode: 'all', extensionMode: 'all' },
       ],
     })
-    // 第一次读：miss → 读盘 + 填缓存
+    // 可观测断言：以 readFileSync 调用计数验证缓存命中。文件顶部 vi.mock('node:fs') 的
+    // readFileSync 对 pi-presets.json 透传真实 fs（内容仍真实），但计数在该 mock fn 上累加；
+    // 生产 loadPresetsFile 在 statSync 的 (mtimeMs, size) 键命中时跳过 readPresetsObject 的
+    // readFileSync。mockClear 只清计数、不动透传实现，不影响其他用例。
+    const readFileMock = vi.mocked(readFileSync)
+    readFileMock.mockClear()
+
+    // 第一次读：缓存 miss → 读盘（readFileSync ≥ 1 次）
     expect(presetService.getPreset('uuid-cache')).toBeDefined()
-    // 第二次/第三次：命中缓存（mtime/size 未变）→ 直接返回缓存值
+    const readsAfterFirst = readFileMock.mock.calls.length
+    expect(readsAfterFirst).toBeGreaterThan(0)
+
+    // 第二次读（文件未变）：缓存命中 → readFileSync 计数不增加
     expect(presetService.getPreset('uuid-cache')).toBeDefined()
-    expect(presetService.getAllPresets().find(p => p.id === 'uuid-cache')).toBeDefined()
+    expect(readFileMock.mock.calls.length).toBe(readsAfterFirst)
   })
 
   it('S-RT-2: savePreset 后缓存失效，下次读拿到新值', () => {

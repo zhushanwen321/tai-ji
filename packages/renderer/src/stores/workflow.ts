@@ -27,7 +27,7 @@
 import { defineStore } from 'pinia'
 import { getCurrentScope, onScopeDispose, ref } from 'vue'
 import type { ComputedRef } from 'vue'
-import type { WorkflowRunRecord } from '@taiji/shared'
+import type { WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
 // 虚拟 session ID 工厂 SSOT 迁至 @taiji/shared/virtual-session-id（跨层协议级约定）。
 // 此处 re-export 保持现有 import 路径向后兼容；本 store body 清理逻辑用本地 import。
 export {
@@ -36,8 +36,23 @@ export {
   isAgentCallVirtualId,
   extractAgentCallSessionId,
 } from '@taiji/shared'
+import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
 import { session as sessionApi } from '@/api'
 import { createEmptyResultStrikeGuard, createPartitionedRecords } from '../lib/partitioned-session-records'
+
+// ── [P3/D6] progress 投影消费（纯函数，drawer WorkflowTab 与托盘面板共用）──
+
+/**
+ * [P3/D6] 单 ask 已执行时长（「每 ask 已执行时长」槽）：running 且 trace.startedAt
+ * 可解析 → now - startedAt；其余（pending/done 或旧快照缺 startedAt）→ null
+ * （槽省略）。done ask 的耗时走既有 durationMs 通道，不经本函数。
+ */
+export function agentCallElapsedMs(call: WorkflowAgentCall, nowMs: number): number | null {
+  if (call.status !== 'running' || call.startedAt === undefined) return null
+  const started = Date.parse(call.startedAt)
+  if (Number.isNaN(started)) return null
+  return Math.max(0, nowMs - started)
+}
 
 export const useWorkflowStore = defineStore('workflow', () => {
   // ── state ──
@@ -91,6 +106,42 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const workflowReloadTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   /**
+   * [W0/D4] per-session in-flight 拉取登记（并发失效共享一次拉取）。
+   * 同 sid 在途期间的新调用（信号 / running 重试）不另起 RPC——返回在途 promise 并置
+   * dirty，由在途完成后的补拉兜底。renderer 的信号一次性不可重放，只合并不补拉会丢
+   * 更新（起步竞态 / 终态吞没两个真实交织，设计 D4）。
+   * 「同 key 复用 / settle 即清 / 引用比对防误删 / settle 清理链无 unhandled rejection」
+   * 四不变量收编于 createInflightDedup（C-data-18：D9 共享原语，禁手写同构实现）。
+   */
+  const inflightDedup = createInflightDedup<void>()
+
+  /**
+   * [W0/D4] per-session dirty 标志（可再武装）：在途拉取期间有新信号到达置位；在途完成
+   * 时若置位 → 清位补拉一次。补拉自身在途期间新信号同样置位 → 再补，不设递归上限
+   * （链深天然有界：每条信号至多驱动一次拉取——自启或转补拉）。一次性消费标志
+   * （delete 原子裁决）：同周期多个调用方各挂的 drain 中恰有一个消费到补拉。
+   * 与 in-flight 同为非响应式簿记，随 clearWorkflows / clearSession / onScopeDispose
+   * 三点清理（releaseLoadBookkeeping），防已删 session 的幻影补拉复活已删分区。
+   */
+  const dirtyWorkflows = new Map<string, boolean>()
+
+  /**
+   * [W0/D4] 释放 sid 的拉取收敛簿记 + running 重试 timer（clearSession / clearWorkflows /
+   * dispose 收口点共用）。timer 清理此前只在 clearWorkflows / onScopeDispose，clearSession
+   * 缺口是既有 bug（已删 session 的重试在 500ms 后对已清空的 store 触发 loadWorkflows），
+   * 本次顺手补齐。
+   */
+  function releaseLoadBookkeeping(sessionId: string): void {
+    inflightDedup.delete(sessionId)
+    dirtyWorkflows.delete(sessionId)
+    const timer = workflowReloadTimers.get(sessionId)
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      workflowReloadTimers.delete(sessionId)
+    }
+  }
+
+  /**
    * loadWorkflows 空结果守卫（R1 business-logic S3，与 subagent.ts 同款）：达到 LIMIT 判
    * 真实删空放行覆盖。strike 语义单源在 createEmptyResultStrikeGuard JSDoc
    * （lib/partitioned-session-records），此处只声明本 store 的阈值与 log tag。
@@ -107,6 +158,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
     onScopeDispose(() => {
       workflowReloadTimers.forEach((t) => clearTimeout(t))
       workflowReloadTimers.clear()
+      // [W0/D4] 拉取收敛簿记一并清：在途 promise 完成后的 drainDirty 读到空簿记 → 不补拉
+      inflightDedup.clear()
+      dirtyWorkflows.clear()
     })
   }
 
@@ -123,12 +177,20 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return partition.get(sessionId)
   }
 
-  /** 该 session 是否有进行中的 workflow（供 derivedStatus 计算 hasBackgroundWork） */
+  /**
+   * 该 session 是否有进行中的 workflow（供 derivedStatus 计算 hasBackgroundWork）。
+   * [D2] 三态维持现状语义：interrupted（暂停态）不计入进行中——判据 `status ===
+   * 'running'` 自然排除（显式裁决：中断 run 事件流静止，无后台工作量）。
+   */
   function hasRunningWorkflow(sessionId: string): boolean {
     return getRecordsBySession(sessionId).some((s) => s.status === 'running')
   }
 
-  /** 写入指定 session 的 workflow 列表（不可变写，确保 Map 响应性触发） */
+  /**
+   * 写入指定 session 的 workflow 列表（不可变写，确保 Map 响应性触发）。
+   * store 私有（仅 loadWorkflows 内部消费），不在导出面——分区写权威入口是 loadWorkflows
+   * 拉取，无生产直写场景；计数等派生一律从 recordsOf 分区读侧派生。
+   */
   function applyRecords(sessionId: string, list: WorkflowRunRecord[]): void {
     partition.apply(sessionId, list)
   }
@@ -140,27 +202,62 @@ export const useWorkflowStore = defineStore('workflow', () => {
     loadingBySession.value.delete(sessionId)
     loadErrorBySession.value.delete(sessionId)
     oversizeBySession.value.delete(sessionId)
-  }
-
-  // ── getters ──
-  /**
-   * 响应式视图：指定 session 的 workflow 计数（读取 recordsOf 分区）。
-   * 旧的无参 workflowCount() 已移除（store 拿不到 focusedSessionId，调用方传 sid）；
-   * 原「Sidebar badge 用」消费面随侧栏任务 tab 退役（现行计数面 = composer 任务托盘
-   * useTrayCounts，该处直接从 recordsOf 分区长度派生，不经本函数）。
-   */
-  function workflowCount(sessionId: string): number {
-    return getRecordsBySession(sessionId).length
+    // [W0/D4] 簿记 + running 重试 timer 随分区一并释放（dirty 不复活已删分区；timer 缺口补齐）
+    releaseLoadBookkeeping(sessionId)
   }
 
   // ── actions ──
   /**
-   * 加载 session 的 workflow 列表（写入该 sid 分区）。
+   * 加载 session 的 workflow 列表（写入该 sid 分区）——[W0/D4] 拉取收敛入口。
+   *
+   * 并发语义（per-session 键：split mode 双面板与 routeInbound 对所有 session 无条件
+   * 触发是常态，全局单例键会跨 session 互吞拉取）：
+   * - in-flight 合并：同 sid 在途期间的新调用共享在途 promise（不另起 RPC），同时置 dirty；
+   * - 可再武装 dirty 补拉：在途完成时 dirty 置位 → 清位补拉一次；补拉在途期间新信号
+   *   同样置 dirty → 再补，不设递归上限。只合并不补拉会丢更新（起步竞态：run-created
+   *   拉取在途期间 record 落盘；终态吞没：最后终态信号合并进 stale 在途拉取）；封顶版
+   *   dirty（只补一次）会在补拉在途窗口复刻终态吞没，故 dirty 必须可再武装。
+   *
    * 现行调用拓扑：托盘首拉/retry（useTrayCounts，D13 首拉触发迁移）、abort 后刷新
-   * （TrayNativePanel / drawer WorkflowTab）、WS 重连重拉（useSidebar.onConnected）。
+   * （TrayNativePanel / drawer WorkflowTab）、WS 重连重拉（useSidebar.onConnected）、
+   * workflowUpdate 信号（triggerWorkflowReload）。
    */
-  async function loadWorkflows(sessionId: string): Promise<void> {
-    if (!sessionId) return // 空 sid 不写分区
+  function loadWorkflows(sessionId: string): Promise<void> {
+    if (!sessionId) return Promise.resolve() // 空 sid 不写分区
+    if (inflightDedup.has(sessionId)) {
+      // 新信号到达：共享在途拉取 + 置 dirty，由在途完成后的补拉兜底（不丢更新）
+      dirtyWorkflows.set(sessionId, true)
+    }
+    const { promise } = inflightDedup.run(sessionId, () => performLoadWorkflows(sessionId))
+    // 执行体不 reject（失败写 loadError 分区），两分支同 drain——补拉判定在成功/失败
+    // 路径都成立（失败后的补拉由后续信号驱动，与成功路径语义一致）。drain 晚于 factory
+    // 内建的 settle 清理注册（promise 回调按注册序）：drain 执行时条目已清，补拉经
+    // loadWorkflows 重新登记在途，不会命中本周期残留条目形成自引用
+    return promise.then(
+      () => drainDirtyAfterLoad(sessionId),
+      () => drainDirtyAfterLoad(sessionId),
+    )
+  }
+
+  /**
+   * [W0/D4] 在途完成后的补拉判定（可再武装语义的收口点）：dirty 置位则清位补拉，补拉经
+   * loadWorkflows 重新登记在途，返回值串进本 drain 所属调用方的 promise 链。每个调用方
+   * （发起方与合并方）各挂一个 drain：dirty 是一次性消费标志（delete 原子裁决），恰有
+   * 一个 drain（注册最早的发起方）await 到「含补拉的完整收敛」，其余 drain no-op 先行
+   * settle——补拉写入分区后数据经响应式到达，合并方无需串行等待补拉完成。settle 即清 +
+   * 引用比对防误删（clearSession / clearWorkflows / dispose 清位后，旧 promise settle 不
+   * 动同 key 新登记的条目）由 createInflightDedup 内建；dirty 同点清理保证被清 session
+   * 无幻影补拉。
+   */
+  function drainDirtyAfterLoad(sessionId: string): Promise<void> {
+    if (dirtyWorkflows.delete(sessionId)) {
+      return loadWorkflows(sessionId)
+    }
+    return Promise.resolve()
+  }
+
+  /** 实际拉取执行体（loadWorkflows 收敛壳内调用；失败不抛——写 loadError 分区） */
+  async function performLoadWorkflows(sessionId: string): Promise<void> {
     loadingBySession.value.set(sessionId, true)
     loadErrorBySession.value.delete(sessionId)
     try {
@@ -211,7 +308,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * workflow-state-link 可能刚 append 还未 flush（pi 延迟写入时序）。延迟 RUNNING_RETRY_MS 再拉一次兜底。
    *
    * @param sessionId 信号归属的 session ID
-   * @param status 信号里的 workflow status（'running' 触发延迟重试，其他只拉一次）
+   * @param status 信号里的 workflow status（'running' 触发延迟重试，其他只拉一次。
+   *   [D2] 显式裁决维持：interrupted 落「其他」分支只拉一次——中断 run 事件流静止
+   *   无需轮询，resume 复活变 running 后自然进入重试分支）
    */
   function triggerWorkflowReload(sessionId: string, status: string): void {
     const sid = sessionId
@@ -246,6 +345,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
     oversizeBySession.value = new Map()
     workflowReloadTimers.forEach((t) => clearTimeout(t))
     workflowReloadTimers.clear()
+    // [W0/D4] 拉取收敛簿记一并清（同 clearSession / dispose 三点清理义务）
+    inflightDedup.clear()
+    dirtyWorkflows.clear()
   }
 
   /**
@@ -286,13 +388,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     isLoadingOf,
     loadErrorOf,
     oversizeOf,
-    // getters
-    workflowCount,
-    // per-session 分区读写（ADR-0049 Map 分区派）
+    // per-session 分区读（ADR-0049 Map 分区派；写权威入口 = loadWorkflows 拉取，
+    // applyRecords 为 store 私有）
     recordsOf,
     getRecordsBySession,
     hasRunningWorkflow,
-    applyRecords,
     clearSession,
     // actions
     loadWorkflows,

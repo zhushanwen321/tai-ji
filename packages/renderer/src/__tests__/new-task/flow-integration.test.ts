@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useNewTaskFlow 主流程 + 选目录 + submitFirstMessage 集成测试
  * （#1+#3+#4+#5，需求修正后「统一延迟 create」语义）。

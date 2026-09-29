@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * extractLocalizedNotes 单测（release notes 双语解析器，review round1 MF1）。
  *

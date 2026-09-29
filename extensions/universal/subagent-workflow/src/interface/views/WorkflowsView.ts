@@ -48,6 +48,9 @@ import {
   statusDotStr,
   type ThemeLike,
 } from "../format.ts";
+// [W2/V1 D1 分流表第 9 行] CLI 视图显示换源：投影二值 status（混合判源收拢在
+// displayStatusOf 单点——判源 = core runSummary 投影）。
+import { displayStatusOf } from "../tool-workflow.ts";
 import {
   b,
   dashes,
@@ -186,7 +189,7 @@ export function collectNodeLiveProgress(
  *
  * | 签名字段 | 消费点 |
  * |---|---|
- * | run.state.status | WorkflowsView.ts renderHeader（statusDotStr+statusLabel 同串源）/ detail-content.ts statusLabel（statusDotStr 调用处）/ renderFooter |
+ * | displayStatusOf(run) 投影二值（[W2/V1 D1 第 6 行] 混合判源单点——v2 fold/注册表投影 ∨ v1 聚合读面）| WorkflowsView.ts renderHeader（statusDotStr+statusLabel 同串源）/ detail-content.ts statusLabel（statusDotStr 调用处）/ renderFooter |
  * | 秒桶 Math.floor(now/1000) | renderHeader formatElapsed（现算 elapsed）+ detail-content.ts（now 参与未完成节点 elapsed）|
  * | completed/total（节点 status 推导）| renderHeader |
  * | budget 量化值（tokens round-k + cost toFixed(4)=BUDGET_COST_DECIMALS，与 renderHeader budgetStr 同精度——第 3-4 位小数变化是可见变化）| renderHeader / saveTraceToFile |
@@ -230,7 +233,7 @@ export function computeRenderSignature(
     const l = liveProgress.get(n.stepIndex);
     return `${n.stepIndex}:${n.status}:${n.sessionFile ?? "-"}:${l?.totalTokens ?? -1}:${l?.toolCallCount ?? -1}:${l?.elapsedSeconds ?? -1}:${l?.turns ?? -1}:${l?.eventLog.length ?? -1}:${l?.currentActivity ? `${l.currentActivity.type}:${l.currentActivity.label}` : "-"}:${l?.lastError ?? "-"}`;
   });
-  return [run.state.status, Math.floor(now / SECOND_MS), `${completed}/${traceArr.length}`, budgetPart, errorLogsPart, ...nodeParts].join("|");
+  return [displayStatusOf(run), Math.floor(now / SECOND_MS), `${completed}/${traceArr.length}`, budgetPart, errorLogsPart, ...nodeParts].join("|");
 }
 
 // ── View state ────────────────────────────────────────────────
@@ -281,7 +284,7 @@ function createInitialState(): ViewState {
 /**
  * 创建 workflow fullscreen view。
  *
- * @param run WorkflowRun 聚合根（读 state.status/spec/trace/meta）
+ * @param run WorkflowRun 聚合根（读 displayStatusOf 投影二值/spec/trace/meta）
  * @param theme ThemeLike（避免直接 import Pi runtime）
  * @param ctx ExtensionContext（调 ui.custom 渲染 + ui.notify 错误反馈）
  * @param actions lifecycle 操作（abort），由调用方注入
@@ -496,7 +499,7 @@ export function createWorkflowsView(
     function handleShortcutKeys(data: string): void {
  // ── Lifecycle shortcuts (no restart per D-9; no pause/resume — one-shot) ──
       if (data === "a") {
-        if (run.state.status === "running") {
+        if (displayStatusOf(run) === "running") {
           void actions.abort(run.runId)
             .then(() => { cache.key = undefined; requestRender(); })
             .catch((err: Error) => ctx.ui.notify(`Abort failed: ${err.message}`, "error"));
@@ -703,7 +706,7 @@ function renderHeader(
   const completed = traceArr.filter((n) => n.status === "completed").length;
   const total = traceArr.length;
   const elapsed = formatElapsed(run.meta.startedAt);
-  const headerRight = `${formatStatusBadge(run.state.status, theme)} · ${completed}/${total} agents · ${elapsed}`;
+  const headerRight = `${formatStatusBadge(displayStatusOf(run), theme)} · ${completed}/${total} agents · ${elapsed}`;
   const budget = run.state.budget;
   const budgetStr = `${Math.round(budget.usedTokens / BUDGET_TOKENS_DIVISOR)}k/${budget.maxTokens ? `${Math.round(budget.maxTokens / BUDGET_TOKENS_DIVISOR)}k` : "∞"} tok · $${budget.usedCost.toFixed(BUDGET_COST_DECIMALS)}`;
 
@@ -746,7 +749,7 @@ function renderFooter(
       ? "↑↓ agent · ⏎ detail"
       : "↑↓ agent · ⏎ prompt · PgUp/PgDn scroll";
   const actionParts: string[] = [];
-  if (run.state.status === "running") {
+  if (displayStatusOf(run) === "running") {
     actionParts.push("a abort");
   }
   actionParts.push("s save");
@@ -1055,7 +1058,7 @@ function saveTraceToFile(run: WorkflowRun, ctx: ExtensionContext): void {
 function traceHeaderLines(run: WorkflowRun): string[] {
   const lines: string[] = [];
   lines.push(`# Workflow Trace: ${run.spec.scriptName} (${run.runId})`, "");
-  lines.push(`Status: ${run.state.status} | Started: ${run.meta.startedAt ?? "-"} | Duration: ${formatElapsed(run.meta.startedAt)}`);
+  lines.push(`Status: ${displayStatusOf(run)} | Started: ${run.meta.startedAt ?? "-"} | Duration: ${formatElapsed(run.meta.startedAt)}`);
   const budget = run.state.budget;
   lines.push(`Budget: ${budget.usedTokens}/${budget.maxTokens ?? "unlimited"} tokens, $${budget.usedCost.toFixed(BUDGET_COST_DECIMALS)}`, "");
   return lines;

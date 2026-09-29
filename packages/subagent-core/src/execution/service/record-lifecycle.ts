@@ -20,17 +20,16 @@
 //   manifestStore/worktreeManager/modelService/notifyHost）为 #1 留壳共享依赖，getter
 //   现读同一实例——深绑测试的 FR 替换语义保持。
 // 2. 转发壳写法：壳保留同名方法（含原可见性）单行转发（D3 壳终态保留面：disposeAllRecords/
-//   onParentFork/onParentNew/startGcTimer/cancel/recoverManifestTmpFiles）；聚合内部
+//   onParentFork/onParentNew/cancel/recoverManifestTmpFiles）；聚合内部
 //   互调（cancelBackground/close 收起 markSettledOut——旧 closeChatIdle 已改优雅收口
-//   归档/finalizeRecord/promoteSessionFileFromEngineHandle/
-//   stopGcTimer）保持 private，不经壳。
+//   归档/finalizeRecord/promoteSessionFileFromEngineHandle）保持 private，不经壳。
 // 3. 跨聚合边收敛（r0-inventory 清单① C-4/C-5/C-6）：
 //    - C-5（onRecordFinalizedCleanup 跨域汇聚点，本体在壳 #14 Continuation 协作面）：
 //      deps.onRecordFinalizedCleanup 回调——disposeAllRecords/cancelBackground 直调点
 //      与 doFinalizeRecord deps.onFinalized 钩子闭包统一经此回调（现状显式注入形态
 //      天然兼容，清单①预判兑现）；R4 抽取 Continuation 协作面时回调改指聚合显式接口。
-//    - C-6（roundSupervisor/reconcile sweep 装配闭包调 finalizeRecord）：闭包经壳
-//      late-bound 读取壳转发方法——天然兼容聚合化，壳装配零改动（清单①预判兑现）。
+//    - C-6（reconcile sweep 装配闭包的终态化委托面）：闭包经壳 late-bound 读取壳
+//      转发方法——天然兼容聚合化，壳装配零改动（清单①预判兑现）。
 //    - C-4（壳 dispose 直调 continuations.clear）：#14 Continuation 状态清理，壳 dispose
 //      编排消费——R4 领地，本单元留置不动（壳直调壳字段，非跨聚合写）。
 //    - closeSubagent 对 Continuation 队列的清空（continuations.get(...)?.abortAndClearQueue）：
@@ -49,25 +48,22 @@ import { toErrorMessage } from "../../core/error-message.ts";
 import { getLogger } from "../../core/logger.ts";
 
 import { bestEffort } from "../assembly/best-effort.ts";
-import { tryTransition } from "../persistence/execution-record.ts";
+// [P1b-1] settle 链收口单点（finalizeFailed/finalizeAborted workflow origin 分支的
+// 终态收口迁入；execution/service → orchestration import 为既有先例方向）。
+import { settleWorkflowRecord } from "../../orchestration/terminal-actions.ts";
 import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
 // [u7a 生产补挂] 批量 dispose 收敛点推最新在途计数（D5 出口——engine 域叶子模块，
 // 本模块不得被 inflight-snapshot 反向依赖，import 方向单向安全）。
 import { notifyInFlightChanged } from "../engine/inflight-snapshot.ts";
-import { startIdleGc } from "../persistence/idle-gc.ts";
 // [V2 决策 3] lifecycle-manager idle timer：record 终态化/取消的 disarm 面
 // 路径防误杀）。
 import { disarmIdleTimer } from "../lifecycle/lifecycle-manager.ts";
 import { hasArmedIdleTimer, isResumable } from "../lifecycle/lifecycle-predicates.ts";
 import { doFinalizeRecord } from "../persistence/finalize-record.ts";
 import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
-import { FileRunStore } from "../../orchestration/file-run-store.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { NotifyHost, PiLike } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
-// [W4] 轮次活性监督器三态撤下 + settled watchdog disarm（终态路径防 timer 误触发）。
-import { disarmRoundFromProtocol, disarmSettledWatchdog } from "../lifecycle/settled-watchdog.ts";
-import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type { AgentResult, ClosedReason, ExecutionRecord, StopReason } from "../assembly/types.ts";
 
@@ -115,9 +111,6 @@ export interface RecordLifecycleDeps {
 
 /**
  * 域 #4/#11/#17/#18 聚合：record 终态迁移写面（R3 自 SubagentService 抽取）。
- *
- * 字段所有权（r0-inventory 清单①）：#29 stopIdleGc（GC timer stop 句柄）——本聚合
- * 唯一写者；壳经 startGcTimer/stopGcTimer 转发面触达，字段壳零感知。
  */
 export class RecordLifecycle {
   private readonly deps: RecordLifecycleDeps;
@@ -175,11 +168,9 @@ export class RecordLifecycle {
       // 感知打断）。幂等：已 aborted 的 controller.abort() 是 no-op。
       record.controller?.abort();
       // 回收面 ii：杀链记账（SIGTERM + 30s SIGKILL 升级，收敛 T2④同款）。
-      // 回收面 iii：disarm idle timer + settled watchdog（进程回收后 timer 只会误触发）。
+      // 回收面 iii：disarm idle timer（进程回收后 timer 只会误触发）。
       killRecordChildWithEscalation(record.id, `disposeAllRecords (${reason})`);
       disarmIdleTimer(record.id);
-      disarmSettledWatchdog(record.id);
-      disarmRoundFromProtocol(record.id);
       // 在飞轮打断 + 队列清空（Continuation 打断编排的 dispose 侧触发——立即打断
       // 不挂起，排队消息随主 session 分叉作废）。
       this.deps.abortContinuationQueue(record.id);
@@ -219,7 +210,7 @@ export class RecordLifecycle {
     }
     // [u7a 生产补挂] 批量 dispose 收敛点推一次终态快照（绝对计数语义下循环内逐条推
     // 与收敛后单推等价，单推省 N-1 次同步派发）。此刻镜像已由上方 kill/disarm 全量
-    // 清零（壳 dispose 链的 killAllSpawnedChildren 更先行——两清零路径正交幂等）。
+    // 清零（壳 dispose 链的 markAllSpawnedChildrenDead 更先行——两清零路径正交幂等）。
     notifyInFlightChanged();
     return count;
   }
@@ -254,27 +245,6 @@ export class RecordLifecycle {
     const sessionFile = record.engineHandle?.sessionRef.sessionFile;
     if (typeof sessionFile !== "string" || sessionFile === "") return;
     record.sessionFile = sessionFile;
-  }
-
-  /** SP-4: idle record GC（30 天 TTL，实现抽至 idle-gc.ts）。stop 函数（dispose 调）。 */
-  private stopIdleGc: (() => void) | undefined;
-
-  /** 启动 idle record GC 定时器（session_start 调用，幂等）。
-   *  [W4] WorkflowRun store（FileRunStore）同批纳入：running 且 startedAt 超 30 天
-   *  锚窗的 run 终态化归档（只终态化不补注销，见 idle-gc.ts 头注）。宿主未
-   *  configureCore 时 loadAll 抛错由 idle-gc 内部吞掉（单轮跳过）。
-   *  [F-1 修复] stateDir 与 pi 壳 JsonlRunStore 落盘布局同源
-   *  （resolvePiWorkflowStateDir → <sessionDir>/workflow-state/）——缺省 dataRoot 根
-   *  与 pi 生产落盘不相交，WorkflowRun GC 曾恒空转（W4 引入的装配错位）。 */
-  startGcTimer(): void {
-    if (this.stopIdleGc) return;
-    this.stopIdleGc = startIdleGc(this.deps.getStore(), new FileRunStore({ stateDir: resolvePiWorkflowStateDir() }));
-  }
-
-  /** 停止 idle record GC 定时器（dispose 调用）。 */
-  stopGcTimer(): void {
-    this.stopIdleGc?.();
-    this.stopIdleGc = undefined;
   }
 
   // ── 域 #11 close 三路 ──
@@ -398,11 +368,9 @@ export class RecordLifecycle {
    * （不终态化——record 留内存 idle + archived，message 寻回可续聊）。
    */
   async archiveIdleRecord(record: ExecutionRecord): Promise<void> {
-    // [T2④ / LC-2] SIGTERM 被无视时 30s 升级 SIGKILL；settled watchdog 同步撤下。
+    // [T2④ / LC-2] SIGTERM 被无视时 30s 升级 SIGKILL。
     // [W3] 实际终止在引擎进程内（kill 链记账 + abort 驱动）。
     disarmIdleTimer(record.id);
-    disarmSettledWatchdog(record.id);
-    disarmRoundFromProtocol(record.id);
     killRecordChildWithEscalation(record.id, "archiveIdleRecord");
     await this.archiveRecord(record, "close(idle)");
   }
@@ -418,8 +386,6 @@ export class RecordLifecycle {
    */
   async idleTimeoutRecycle(record: ExecutionRecord): Promise<void> {
     disarmIdleTimer(record.id);
-    disarmSettledWatchdog(record.id);
-    disarmRoundFromProtocol(record.id);
     killRecordChildWithEscalation(record.id, "idleTimeoutRecycle");
   }
 
@@ -461,12 +427,9 @@ export class RecordLifecycle {
   private cancelBackground(record: ExecutionRecord): boolean {
     record.controller?.abort();
     // [M6/T2④/LC-2] 显式 kill + disarm：abort 轮级 signal 驱动引擎停轮（cancel 帧 →
-    // grace → 杀链），killRecordChildWithEscalation 保证镜像/残留进程必死；settled
-    // watchdog 撤下（等待窗口随取消终结）。
+    // 收敛窗），killRecordChildWithEscalation 保证镜像/残留进程必死。
     killRecordChildWithEscalation(record.id, "cancelBackground");
     disarmIdleTimer(record.id);
-    disarmSettledWatchdog(record.id);
-    disarmRoundFromProtocol(record.id);
     // 在飞轮打断 + 队列清空（cancel 语义 = 停下这一轮——排队消息随用户显式叫停丢弃；
     // Continuation 实例保留：record 未消亡，续聊经 continuationFor 复用）。
     this.deps.abortContinuationQueue(record.id);
@@ -540,19 +503,23 @@ export class RecordLifecycle {
    * 同步段原子）。
    *
    * [W3 契约变更⑤退役] 旧 worktree cleanup 随终态化退役：失败轮 record 留内存，
-   * worktree 随续聊保留 / 随归档（close）回收 / 随 idle-gc（30 天）回收。
+   * worktree 随续聊保留 / 随归档（close）回收。
    */
   async finalizeFailed(record: ExecutionRecord, err: unknown): Promise<AgentResult> {
     const errMsg = toErrorMessage(err);
     // durationMs 用真实耗时（startedAt → now），避免失败统计恒为 0 失真。
     const failedResult: AgentResult = { text: "", turns: record.turnCount, durationMs: Date.now() - record.startedAt, success: false, error: errMsg, sessionId: record.id, toolCalls: [] };
     // [D7 例外族] workflow origin 失败 = 立即终态化（维持现状——workflow agent 结果
-    // 由脚本返回值承载，留内存 idle 会绑架 hasRunning / 恒挂 idle-gc / 被误升级 /
-    // goal defer 恒挂，设计 D7 四面连带；§1.4 out-of-scope）。
+    // 由脚本返回值承载，留内存 idle 会绑架 hasRunning / 被误升级 /
+    // goal defer 恒挂，设计 D7 连带理由；§1.4 out-of-scope）。
+    // [P1b-1] 直写通道删除：closed/gc 终态判定收口至 worker-message-pump 的
+    // settleWorkflowRecord 单点（与 settleOneShotOutcome 同款；agent-settled/run-settled
+    // 事件面由 pump 状态机接线段承载——静默吞失败路径（workflow-dispatch catch 等
+    // 多调用方）经本方法自动接入同一收口）。
     if (record.origin === "workflow") {
-      if (tryTransition(record, "closed", "gc")) {
-        await this.finalizeRecord(record, failedResult, "closed", "gc");
-      }
+      await settleWorkflowRecord(record, failedResult, "gc", {
+        finalizeRecord: (r, closedReason) => this.finalizeRecord(record, r, "closed", closedReason),
+      });
       return failedResult;
     }
     // CAS 前置：cancel/dispose 抢先 settle（status 已离 running）则跳过簿记。
@@ -569,10 +536,13 @@ export class RecordLifecycle {
    */
   async finalizeAborted(record: ExecutionRecord): Promise<AgentResult> {
     const cancelledResult: AgentResult = { text: "", turns: record.turnCount, durationMs: Date.now() - record.startedAt, success: false, error: "cancelled by user", sessionId: record.id, toolCalls: [] };
+    // [P1b-1] 直写通道删除：workflow origin 的 cancelled 终态化收口至
+    // settleWorkflowRecord 单点（run 域 cancel 语义的 journal 落账 =
+    // cancel-requested → 合成 run-settled(cancelled)，由 finalizeRun 单写点承载）。
     if (record.origin === "workflow") {
-      if (tryTransition(record, "closed", "cancelled")) {
-        await this.finalizeRecord(record, cancelledResult, "closed", "cancelled");
-      }
+      await settleWorkflowRecord(record, cancelledResult, "cancelled", {
+        finalizeRecord: (r, closedReason) => this.finalizeRecord(record, r, "closed", closedReason),
+      });
       return cancelledResult;
     }
     this.cancelBackground(record);

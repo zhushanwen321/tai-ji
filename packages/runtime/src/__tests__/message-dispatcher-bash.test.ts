@@ -290,7 +290,7 @@ describe('MessageDispatcher sendBash —— 正常路径（T5）', () => {
     })
     expect(typeof end!.payload.timestamp).toBe('number')
 
-    // isBashRunning 复位 false（finally 兑底）
+    // isBashRunning 复位 false（finally 兜底）
     expect(session.isBashRunning).toBe(false)
     // 正常返回
     expect(result).toEqual({ blocked: false })
@@ -442,7 +442,7 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
     expect(abortBashFn).toHaveBeenCalledTimes(1)
     // abort_bash 发出且 pi 确认 → sent:true（回执真实化，调用方可据此回 aborted）
     expect(result).toEqual({ sent: true })
-    // 兑底广播 message.bashResult{cancelled:true}
+    // 兜底广播 message.bashResult{cancelled:true}
     const end = findBashResult(broadcasts)
     expect(end).toBeDefined()
     expect(end!.payload).toMatchObject({
@@ -452,17 +452,17 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
       exitCode: null,
       truncated: false,
     })
-    // isBashRunning 复位（finally 兑底）
+    // isBashRunning 复位（finally 兜底）
     expect(session.isBashRunning).toBe(false)
   })
 
-  it('T8b: client.abortBash 抛异常 → 不向上抛 + sent:false（回执真实化：不得据此回 aborted）+ 兑底广播', async () => {
+  it('T8b: client.abortBash 抛异常 → 不向上抛 + sent:false（回执真实化：不得据此回 aborted）+ 兜底广播', async () => {
     const { dispatcher, broadcasts, session } = makeMocks({ isBashRunning: true, abortBashError: new Error('rpc dead') })
 
     // 不该 throw，且 sent=false（abort_bash 未被 pi 确认）
     await expect(dispatcher.abortBash('s1')).resolves.toEqual({ sent: false })
 
-    // 兑底终态仍广播
+    // 兜底终态仍广播
     const end = findBashResult(broadcasts)
     expect(end).toBeDefined()
     expect(end!.payload.cancelled).toBe(true)
@@ -486,7 +486,7 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
     // pi 确认取消 → 孤儿标记清除 + sent:true（handler 回 aborted 合理）
     expect(session.orphanBashRunning).toBe(false)
     expect(result).toEqual({ sent: true })
-    // 兑底 cancelled 哨兵帧广播（前端 executingBash 幂等清态）。broadcasts 含两条 bashResult
+    // 兜底 cancelled 哨兵帧广播（前端 executingBash 幂等清态）。broadcasts 含两条 bashResult
     // （超时合成终态 cancelled:false + abort 哨兵 cancelled:true），取最后一条（哨兵后发）。
     const sentinel = findBashResult([...broadcasts].reverse())
     expect(sentinel).toBeDefined()

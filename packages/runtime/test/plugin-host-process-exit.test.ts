@@ -21,9 +21,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const EXIT_MOCK = resolve(__dirname, 'fixtures/mock-bootstrap-exit0.cjs')
 const NOOP_ESM_LOADER = resolve(__dirname, 'fixtures/noop-esm-loader.cjs')
 
-// 与 src/services/plugin-service/plugin-host-process.ts 的 DISCONNECT_GRACE_MS 保持一致。
+// 测试注入的 disconnect 宽限（构造 disconnectGraceMs 传入宿主）。生产默认 250ms 不变；
 // 「不误报」断言的等待必须大于此窗口：否则区分不了「不会报」与「还没到报的时机」
-const DISCONNECT_GRACE_MS = 250
+const TEST_DISCONNECT_GRACE_MS = 50
 
 describe('PluginHostProcess exit 分流（L-5）', () => {
   let host: PluginHostProcess
@@ -37,6 +37,7 @@ describe('PluginHostProcess exit 分流（L-5）', () => {
       bootstrapPathOverride: EXIT_MOCK,
       // MF-1：sandbox fork 边界断言 execArgv 含 --import；测试用 noop loader 满足契约
       execArgv: ['--import', NOOP_ESM_LOADER],
+      disconnectGraceMs: TEST_DISCONNECT_GRACE_MS,
     })
     onCrash = vi.fn<(processId: string, pluginIds: string[], error: string) => void>()
     host.setCrashCallback(onCrash)
@@ -59,7 +60,7 @@ describe('PluginHostProcess exit 分流（L-5）', () => {
 
     // 再等超过 disconnect grace 窗口：兜底定时器到期后也不得补报 crash
     // （区分「不会报」与「还没到报的时机」）
-    await new Promise((r) => setTimeout(r, DISCONNECT_GRACE_MS + 200))
+    await new Promise((r) => setTimeout(r, TEST_DISCONNECT_GRACE_MS + 200))
     expect(onCrash).not.toHaveBeenCalled()
     // 反向索引同步清理：getProcessHandle 不再指向死进程（否则新分配会 child.send 落空）
     expect(host.getProcessHandle('clean-exit')).toBeUndefined()
@@ -73,7 +74,7 @@ describe('PluginHostProcess exit 分流（L-5）', () => {
     // fixture 收到后 process.disconnect() 且进程保持存活（无 exit 事件跟随）
     host.getProcessHandle('live-disconnect')!.postMessage({ type: 'ipc-disconnect' })
 
-    // grace 窗口（250ms）+ 轮询余量内应触发 onCrash——延迟分流没把真异常吞掉
+    // grace 窗口（TEST_DISCONNECT_GRACE_MS）+ 轮询余量内应触发 onCrash——延迟分流没把真异常吞掉
     await vi.waitFor(() => expect(onCrash).toHaveBeenCalledTimes(1), { timeout: 3000 })
     const [reportedId, pluginIds, error] = onCrash.mock.calls[0]
     expect(reportedId).toBe(processId)
@@ -92,7 +93,7 @@ describe('PluginHostProcess exit 分流（L-5）', () => {
 
     // 等待 kill 触发的 exit/disconnect 事件传播 + grace 窗口过期：pre-mark 的
     // terminated 守卫与 disconnect 幂等检查都不应误报 crash
-    await new Promise((r) => setTimeout(r, DISCONNECT_GRACE_MS + 300))
+    await new Promise((r) => setTimeout(r, TEST_DISCONNECT_GRACE_MS + 300))
     expect(onCrash).not.toHaveBeenCalled()
   }, 10_000)
 })

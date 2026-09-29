@@ -20,6 +20,8 @@ import {
   type InitializeParams,
   type ProbeReport,
   type SessionView,
+  configureLoggerSink,
+  resetLoggerSinkForTests,
 } from "@zhushanwen/subagent-engine-sdk";
 
 import { EngineProtocolServer } from "../server.ts";
@@ -327,13 +329,12 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
       method: "run",
       params: {
         runId: "run-1",
-        task: { prompt: "做点什么", denyTools: ["bash"] },
+        task: { prompt: "做点什么", denyTools: ["bash"], schema: { type: "object" } },
         ctx: {
-              cwd: "/w",
+          cwd: "/w",
           model: "prov/m1",
           ctxModel: "prov/ctx-model",
           streamMode: "stream",
-          schemaEnv: "SCHEMA_ENV=1",
           engineFallback: { from: "pi", reason: "manifest" },
         },
       },
@@ -355,11 +356,18 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     expect(p1).toMatchObject({ runId: "run-1", seq: 1, event: { type: "text_delta", delta: "你好" } });
     expect(p2).toMatchObject({ runId: "run-1", seq: 2, event: { type: "message_end" } });
 
-    // 本地全量 task 还原（ctx.model/cwd 合回；task 其余字段透传）+ RunContext 断言
-    expect(captured?.task).toEqual({ prompt: "做点什么", denyTools: ["bash"], model: "prov/m1", cwd: "/w" });
+    // 本地全量 task 还原（ctx.model/cwd 合回；task 其余字段透传——schema 本体在 task，
+    // D1 后 wire 不再有 schemaEnv 通道）+ RunContext 断言
+    expect(captured?.task).toEqual({
+      prompt: "做点什么",
+      denyTools: ["bash"],
+      schema: { type: "object" },
+      model: "prov/m1",
+      cwd: "/w",
+    });
     expect(captured?.ctx.taskId).toBe("run-1");
     expect(captured?.ctx.ctxModel).toEqual({ provider: "prov", id: "ctx-model" });
-    expect(captured?.ctx.schemaEnv).toBe("SCHEMA_ENV=1");
+    expect(captured?.ctx).not.toHaveProperty("schemaEnv");
     expect(captured?.ctx.engineFallback).toEqual({ from: "pi", reason: "manifest" });
     expect(captured?.ctx.stream).toBeDefined();
     expect(captured?.ctx.signal).toBeInstanceOf(AbortSignal);
@@ -513,5 +521,79 @@ describe("reverseRequest 客户端", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("run 期间反向请求 error 应答 → warnReverseFailure 留痕不断流：onDelta 失败只降级该次上报，run 终态照常", async () => {
+    const logs: Array<{ level: string; component: string; message: string }> = [];
+    configureLoggerSink({
+      log: (level, component, message) => logs.push({ level, component, message }),
+    });
+    try {
+      const engine = makeEngine({
+        run: vi.fn(async (_task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult> => {
+          ctx.stream?.onDelta("流片段");
+          return { handle: { data: { ...HANDLE } }, outcome: { ...FAKE_OUTCOME } };
+        }),
+      });
+      const { server, sink } = makeServer(engine);
+      await request(server, sink, 1, "initialize", INIT_PARAMS);
+
+      server.handleFrame({
+        id: 2,
+        method: "run",
+        params: { runId: "run-warn", task: { prompt: "p" }, ctx: { streamMode: "stream" } },
+      });
+      const delta = await sink.waitFor((f) => f.method === "host/streamDelta", "streamDelta");
+      expect(delta.params).toEqual({ runId: "run-warn", delta: "流片段" });
+      // 宿主 error 帧 → reverse promise reject → warnReverseFailure 吞掉（无 unhandled rejection）
+      server.handleFrame({
+        id: delta.id,
+        error: { code: "host_gone", message: "host busy", recovery: "drop" },
+      });
+
+      // 不断流：失败只降级该次通道上报，run 终态照常应答
+      const resp = await sink.waitFor(
+        (f) => f.id === 2 && (f.result !== undefined || f.error !== undefined),
+        "run response",
+      );
+      expect(resp.error).toBeUndefined();
+      expect(resp.result).toEqual({ handle: HANDLE, outcome: FAKE_OUTCOME });
+
+      // warn 留痕（logger.warn 经注入 sink 落账，含方法名与 run 上下文）
+      expect(logs).toContainEqual(expect.objectContaining({
+        level: "warn",
+        component: "subagents",
+        message: expect.stringContaining("host/streamDelta reverse request failed"),
+      }));
+    } finally {
+      resetLoggerSinkForTests();
+    }
+  });
+
+  it("write 同步抛错（stdout 已关）：就地收口 reject + clock.settled + pending 清理（异常不逃出 executor）", async () => {
+    const clockCalls: Array<{ op: string; id: string }> = [];
+    const throwingWrite = vi.fn(() => {
+      throw new Error("EPIPE: stdout closed");
+    });
+    const server = new EngineProtocolServer({
+      write: throwingWrite,
+      engine: makeEngine(),
+      reverseClock: {
+        started: (id: string) => clockCalls.push({ op: "started", id }),
+        acked: (id: string) => clockCalls.push({ op: "acked", id }),
+        settled: (id: string) => clockCalls.push({ op: "settled", id }),
+        dispose: () => clockCalls.push({ op: "dispose", id: "-" }),
+      },
+    });
+
+    await expect(server.reverseRequest("host/log", { message: "bye" })).rejects.toThrow(
+      /reverse request host\/log \(rev-1\) could not be written: EPIPE/,
+    );
+    // started 已记、write 抛错后 settled 收口（无 acked）；pending 条目已随 reject 清理
+    expect(clockCalls).toEqual([
+      { op: "started", id: "rev-1" },
+      { op: "settled", id: "rev-1" },
+    ]);
+    expect(throwingWrite).toHaveBeenCalledTimes(1);
   });
 });

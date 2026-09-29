@@ -24,7 +24,7 @@
 2. `extensions/` 一层禁止放 extension 包（`shared/` 共享库与 `tsconfig.json` 除外）；
 3. 判断标准是「离开 taiji 是否仍有功能」，不是「是否随应用打包」——goal/todo 等通用工具虽在 mandatory 清单随应用打包，但归 `universal/`；
 4. 新建/移动包时同步更新：分组目录 + role 字段 + `extension-dependencies.json`（含 directory 路径）+ 根 AGENTS.md 分组列举；
-5. **新增分组**（新开 `extensions/<group>/` 目录）时需同步登记分组名的代码点：`pnpm-workspace.yaml` glob、`scripts/check-extension-dependencies.mjs` 的 `GROUPS`、`scripts/bundle-extensions.mjs` 的 `srcDirFor`、`.agents/skills/dev-link/dev-link-lib.sh`（skill 自包含，无法共享常量）。其余消费点已 group 无关（runtime `extension-resolver.ts` 扫一层目录、pre-commit 2c/2d 模式不列组名），漏改时结构守卫会拦截 role 不一致。
+5. **新增分组**（新开 `extensions/<group>/` 目录）时需同步登记分组名的代码点：`pnpm-workspace.yaml` glob、`scripts/check-extension-dependencies.mjs` 的 `GROUPS`、`scripts/bundle-extensions.mjs` 的 `srcDirFor`、`.agents/skills/dev-link/dev-link-lib.sh`（skill 自包含，无法共享常量）。其余消费点已 group 无关（runtime `extension-resolver.ts` 扫一层目录、pre-commit 2c/2d 模式不列组名），漏改时结构检查会拦截 role 不一致。
 
 ## 运行环境
 
@@ -126,7 +126,7 @@ streamSink: ctx.mode === "rpc"
 - 新增/修改 SDK 调用必须有契约测试覆盖（模板：`extensions/universal/subagent-workflow/src/execution/__tests__/sdk-contract.test.ts`）
 - `registerTool` 的 schema 必填字段在所有执行模式下都必须真的必填；条件必填用 Optional + 运行时校验，避免 schema 与描述矛盾
 
-> 本项目已将 `@earendil-works/pi-coding-agent` 作为根 devDependency 安装（真实 SDK 类型，当前 0.84.4——版本不在文档写死，以根 `package.json` 为准并由 C-build-07 守卫 `scripts/check-pi-sync.mjs` 跟随），不再使用类型桩。extensions 的 tsconfig 直接从 node_modules 解析 SDK 类型。
+> 本项目已将 `@earendil-works/pi-coding-agent` 作为根 devDependency 安装（真实 SDK 类型，当前 0.84.4——版本不在文档写死，以根 `package.json` 为准并由 C-build-07 检查 `scripts/check-pi-sync.mjs` 跟随），不再使用类型桩。extensions 的 tsconfig 直接从 node_modules 解析 SDK 类型。
 
 ## Event handler 消息注入
 
@@ -156,7 +156,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 **可靠性分级（结果语义 vs 交互注入）[MANDATORY]**：event handler 里发消息必须先分清两类语义——
 
-- **结果语义通知**（subagent 完成、scheduler 触发、未来 webhook 等终态/结果类）：**必须走确认式送达**——持久账本 + 幂等键通道（`@zhushanwen/pi-session-delivery` 账本 / subagent-workflow 的 notify-ledger 设施，at-least-once）；**禁止**依赖 steer/nextTurn/followUp 内存队列的 at-most-once 投递（消费窗极窄，基线事故十余次完成仅送达 1 次）。约束登记 [docs/constraints.json](../constraints.json) C-ext-19，机器守卫 `check_subagent_channels.py`（pre-commit + CI）。
+- **结果语义通知**（subagent 完成、scheduler 触发、未来 webhook 等终态/结果类）：**必须走确认式送达**——持久账本 + 幂等键通道（`@zhushanwen/pi-session-delivery` 账本 / subagent-workflow 的 notify-ledger 设施，at-least-once）；**禁止**依赖 steer/nextTurn/followUp 内存队列的 at-most-once 投递（消费窗极窄，基线事故十余次完成仅送达 1 次）。约束登记 [docs/constraints.json](../constraints.json) C-ext-19，机器检查 `check_subagent_channels.py`（pre-commit + CI）。
 - **交互式注入**（非结果语义：实时 steer 用户意图、followUp 续推）：上表 deliverAs 两模式照常适用，不在禁令内——禁令对象是「结果语义的一次性通知」，不是交互式 steer。
 
 ## 模型引用解析 [MANDATORY]
@@ -164,7 +164,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 扩展域内任何「字符串 → 模型身份」的转换（用户输入、配置、workflow 参数里的模型名），只允许经 `assertCanonicalModelRef` 全等裁决（模块路径 `packages/subagent-core/src/shared/model-ref.ts`，已随执行域从 subagent-workflow 抽包迁移；其余扩展复用该模块或同等全等裁决实现）——**禁止裸串拼 `--model`、禁止本地 find/includes 式模糊匹配**。
 
 - **原因**：pi CLI 的 `--model` 是 pattern 非精确 ID（toLowerCase 相等 → canonical 双命中判歧义作废 → contains 模糊 → localeCompare 取最大，PS-01；机器登记 [docs/pi-semantics.json](../pi-semantics.json)）——「扩展层校验通过」不代表「子进程按此名执行」，models-store 刷新引入大小写家族条目后被静默换模 429（2026-08-27 事故 A）
-- **守卫**：`check_subagent_channels.py` 拦截白名单外的 `"--model"` 字面量（pre-commit + CI，行级豁免须给职责定性注释）；全等裁决不通过时 start 同步期拒单并给纠错候选
+- **检查**：`check_subagent_channels.py` 拦截白名单外的 `"--model"` 字面量（pre-commit + CI，行级豁免须给职责定性注释）；全等裁决不通过时 start 同步期拒单并给纠错候选
 - **约束登记**：[docs/constraints.json](../constraints.json) C-ext-19；能力档位同理由 C-pi-12 禁本地推断（只消费注册表下发的 supportedLevels）
 
 ## 扩展安装红线 [强制]
@@ -321,7 +321,7 @@ taiji 依赖 `@earendil-works/pi-coding-agent`，此约束对消费侧同样有�
 ## TypeScript 约定
 
 - 禁止 `any`，用 `unknown` 或具体类型
-- `(entry as any).customType` 这种模式改为类型守卫函数
+- `(entry as any).customType` 这种模式改为类型检查函数
 - `as never` / `as any` / `as unknown as T` 会绕过类型检查，`taste/no-unsafe-cast` 规则（extensions/ 专用）会 warn 标记。不可替代的断言必须有运行时 guard 或 SDK 契约测试兜底
 - import 顺序：Node 内置 → npm 包 → 项目内部
 

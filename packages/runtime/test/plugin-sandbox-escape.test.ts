@@ -248,6 +248,10 @@ describe('S1-W3: BLOCKED_BUILTINS SSOT 防退化', () => {
     expect(source.BLOCKED_BUILTINS).toContain('fs')
     expect(source.BLOCKED_BUILTINS).toContain('child_process')
     expect(source.BLOCKED_BUILTINS).toContain('module')
+    expect(source.BLOCKED_BUILTINS).toContain('cluster')
+    expect(source.BLOCKED_BUILTINS).toContain('dgram')
+    expect(source.BLOCKED_BUILTINS).toContain('dns')
+    expect(source.BLOCKED_BUILTINS).toContain('net')
   })
 
   it('ESM loader 消费同一数据源（源码含 require 引用，防回退为内联数组）', () => {

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * W6 D2 · settings 全量 i18n 接入测试（U10）。
  *

@@ -66,6 +66,50 @@ vi.mock('@/components/panel/TerminalView.vue', () => {
   }
 })
 
+// ── 静态重面板 + 壳层组件 vi.mock（import 期替换，砍掉 PanelContainer 整图 transform；本文件
+// 只开 detail/terminal tab，以下占位组件均无断言观测面，形态对齐 drawer-mode 测试。StatusBar
+// 来自 @taiji/ui/extension-host，mock 路径须与 PanelContainer 的 import 说明符一致）──
+vi.mock('@/components/panel/GitPanel.vue', () => ({
+  default: { name: 'GitPanel', template: '<div data-testid="git-panel" />' },
+}))
+vi.mock('@/components/panel/CommandDocPanel.vue', () => ({
+  default: { name: 'CommandDocPanel', template: '<div data-testid="doc-panel" />' },
+}))
+vi.mock('@/components/extension/BackgroundTaskDetailPanel.vue', () => ({
+  default: { name: 'BackgroundTaskDetailPanel', template: '<div data-testid="bash-task-detail-panel" />' },
+}))
+vi.mock('@/components/panel/plan/PlanDocsPanel.vue', () => ({
+  default: { name: 'PlanDocsPanel', template: '<div data-testid="plan-docs-panel" />' },
+}))
+vi.mock('@/components/panel/BtwPanel.vue', () => ({
+  default: { name: 'BtwPanel', template: '<div data-testid="btw-panel" />' },
+}))
+vi.mock('@/components/panel/Panel.vue', () => ({
+  default: {
+    name: 'Panel',
+    props: { panelId: String, sessionId: { type: String, default: null } },
+    template: '<div data-testid="panel" :data-panel-id="panelId" />',
+  },
+}))
+vi.mock('@/components/panel/PanelHeader.vue', () => ({
+  default: { name: 'PanelHeader', template: '<div />' },
+}))
+vi.mock('@/components/ui/ToastContainer.vue', () => ({
+  default: { name: 'ToastContainer', template: '<div />' },
+}))
+vi.mock('@/components/panel/trace/TraceInspector.vue', () => ({
+  default: { name: 'TraceInspector', template: '<div />' },
+}))
+vi.mock('@/components/panel/SubagentTab.vue', () => ({
+  default: { name: 'SubagentTab', template: '<div />' },
+}))
+vi.mock('@/components/panel/WorkflowTab.vue', () => ({
+  default: { name: 'WorkflowTab', template: '<div />' },
+}))
+vi.mock('@taiji/ui/extension-host', () => ({
+  StatusBar: { name: 'StatusBar', template: '<div />' },
+}))
+
 // ── 壳层依赖 mock（对齐 panel-container-drawer-mode.test.ts）──
 vi.mock('@/composables/features/file-tree/useGitStatus', () => ({
   GIT_STATUS_KEY: Symbol('git-status'),
@@ -95,21 +139,11 @@ vi.mock('@/stores/chat', () => ({
 }))
 chatMock.registerReader((sid) => reactiveMessages.get(sid) ?? [])
 
-// Panel stub：避免主 panel 的 chat/session 依赖（本测试聚焦 drawer 懒加载路径）
-const PanelStub = {
-  name: 'Panel',
-  props: ['panelId', 'sessionId'],
-  template: '<div data-testid="panel" />',
-}
-
 async function mountContainer() {
-  // 动态 import 让 vi.mock 先生效；不 stub DetailPane/TerminalView（本测试的被测对象）
+  // 动态 import 让 vi.mock 先生效；不 mock/stub DetailPane/TerminalView 的渲染面（本测试的被测对象，
+  // 两者的 vi.mock 工厂在文件头控制失败/成功）
   const PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
-  return mount(PanelContainer, {
-    global: {
-      stubs: { Panel: PanelStub },
-    },
-  })
+  return mount(PanelContainer)
 }
 
 beforeEach(() => {

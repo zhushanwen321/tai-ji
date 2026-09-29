@@ -5,7 +5,7 @@
  * runId 缺失、非 string、空串、details 非对象形态 → null（消息级中性）。
  *
  * 判据词表 = shared/src/workflow.ts 的 WorkflowDoneReason 镜像：
- * completed / failed / aborted / budget_limited / time_limited（invalid_args 无生产方不列入）。
+ * completed / failed / aborted / budget_limited / time_limited。
  *
  * 消费点：core message-turns notifySummary 派生（去重键 = runId；failed → failedCount，
  * neutral → neutralCount）。生产端 = extensions/universal/subagent-workflow notifyDone。
@@ -71,10 +71,9 @@ describe('parseWorkflowResultNotify reason 缺失/词表外 → 记录级 neutra
     }
   })
 
-  it('reason 词表外（枚举漂移：invalid_args / circular / 未知新值）→ neutral', () => {
-    // invalid_args：runAndWait 合成返回值，不进入 run.state.reason（无生产方、不入镜像词表）
-    expect(parseWorkflowResultNotify({ ...doneDetails, reason: 'invalid_args' })?.outcome).toBe('neutral')
+  it('reason 词表外（枚举漂移：circular / 未知新值）→ neutral', () => {
     expect(parseWorkflowResultNotify({ ...doneDetails, reason: 'circular' })?.outcome).toBe('neutral')
+    expect(parseWorkflowResultNotify({ ...doneDetails, reason: 'invalid_args' })?.outcome).toBe('neutral')
     expect(parseWorkflowResultNotify({ ...doneDetails, reason: 'completed ' })?.outcome).toBe('neutral')
   })
 })

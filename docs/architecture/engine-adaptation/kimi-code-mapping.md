@@ -63,7 +63,7 @@ CLI `-p` 降级路径：`kimi -p "<prompt>" --output-format stream-json`（apps/
 | tool.progress | （无独立事件） | 合成 activity（status 文本可作活性信号） | 是（仅 kind=status 且有 text，events-map.ts:332-347） | events.ts:802-807 |
 | tool.result | tool_end | 直接（output→result.content[单元素]，isError） | 是 | events.ts:844-851；session.ts:819-848 |
 | turn.started | （无） | 丢弃（taiji turn 边界由 run 生命周期承载） | 否 | events.ts:686-695 |
-| turn.ended | turn_end + message_end | 合成：reason/error→message_end{error}，turn 闭合→turn_end | 否（仅经 prompt 应答 stopReason 间接表达） | events.ts:697-705；session.ts:907-921 |
+| turn.ended | turn_end + message_end | 合成：reason/error→message_end{error}，turn 完成→turn_end | 否（仅经 prompt 应答 stopReason 间接表达） | events.ts:697-705；session.ts:907-921 |
 | turn.step.started / completed / retrying / interrupted | （无） | 丢弃；completed.usage 见 §5 | 否 | events.ts:707-762 |
 | agent.status.updated | activity | 合成（phase/contextTokens 变化即活性） | 否 | events.ts:542-555 |
 | compaction.started / completed / cancelled / blocked | compaction | 合成：任一 compaction 事件→一次 compaction{}（acp-server 现行做法是合成文本 chunk） | 是（文本 chunk） | events.ts:903-921；session.ts:882-905 |
@@ -143,7 +143,7 @@ ToolCallResult.content 装载口径：ToolResultEvent.output 为 unknown（event
 - 会话/配置：`session.meta.updated` / `config.update` / `profile.bind` / `prompt.accepted/completed/aborted/steered/queued` / `subagent.spawned/started/suspended/completed/failed`
 - 任务/杂项：`task.started/terminated/notified/waitDelivered` / `shell.started/output/completed` / `mcp.server.status` / `tool.list.updated` / `error` / `warning` / `metadata`
 
-官方 fold 语义（read 重建权威）：resume-replay.ts:20-46 给出 record→replay 映射——`context.append_message`→message（含由 loop event 拼装的 assistant/tool 消息：step.begin 开 assistant 消息、content.part/tool.call 原地变更、tool.result 闭合、中断的 tool 交换合成 interrupted 结果）；`full_compaction.begin`→compaction 记录、`context.apply_compaction` 回填 result；`goal.*`→goal_updated；`plan_mode.*`→plan_updated；`config.update`→config_updated；`permission.set_mode`→permission_updated；`tools.update_store`→工具库 last-wins；`turn.*`/`usage.record` 等只重建状态。
+官方 fold 语义（read 重建权威）：resume-replay.ts:20-46 给出 record→replay 映射——`context.append_message`→message（含由 loop event 拼装的 assistant/tool 消息：step.begin 开 assistant 消息、content.part/tool.call 原地变更、tool.result 完成、中断的 tool 交换合成 interrupted 结果）；`full_compaction.begin`→compaction 记录、`context.apply_compaction` 回填 result；`goal.*`→goal_updated；`plan_mode.*`→plan_updated；`config.update`→config_updated；`permission.set_mode`→permission_updated；`tools.update_store`→工具库 last-wins；`turn.*`/`usage.record` 等只重建状态。
 
 **session/load replayHistory 语义**（ACP 面重建第②通路）：`agent.getContext().history`（ContextMessage[]，role ∈ user/assistant/tool）投影为有序 `session/update` 批（packages/acp-server/src/replay.ts:36-76）——user 文本→user_message_chunk；assistant text/think part→agent_message_chunk/agent_thought_chunk（重放 turnId 合成自增）；assistant.toolCalls→tool_call CREATE（arguments JSON 解析，replay.ts:112-124）；tool 角色消息按 toolCallId 关联→tool_call_update 终态（isError→failed，replay.ts:126-155）；system 等无对应角色跳过。**适配层 read 通路建议**：对已有 sessionId 发 `session/load`，收集重放流聚合出 ReplayedTurn[]（text/thinking/toolCalls/closed=true），source 标 `native`；usage 不随重放供给（delta 类是 volatile，不入 journal 也不入 history），SessionView.usage 缺省或由 journal 的 usage.record 聚合补齐（source 仍标 native/journal 按数据源）。
 

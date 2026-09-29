@@ -30,7 +30,7 @@ function makeSource(entries: ReadonlyArray<{ provider: string; id: string }>): M
 const BASELINE: ReadonlyArray<{ provider: string; id: string }> = [
   { provider: "zai-coding-cn", id: "GLM-5.3-Flash" },
   { provider: "zai-coding-cn", id: "GLM-5.3" },
-  { provider: "xiaomi-token-plan-cn", id: "mimo-v2.5-pro" },
+  { provider: "xiaomi-token-plan-cn", id: "mimo-v2.6-flash" },
   { provider: "deepseek", id: "deepseek-v4-pro" },
 ];
 
@@ -141,7 +141,7 @@ describe("assertCanonicalModelRef — non-exact rejected synchronously (rule ⑤
     expect(msg).toMatch(/Available models:/);
     // 合法串全集（canonical 形态，可复制）
     expect(msg).toContain("zai-coding-cn/GLM-5.3-Flash");
-    expect(msg).toContain("xiaomi-token-plan-cn/mimo-v2.5-pro");
+    expect(msg).toContain("xiaomi-token-plan-cn/mimo-v2.6-flash");
     expect(msg).toMatch(/Or omit the `model` param to inherit the main agent model\./);
   });
 

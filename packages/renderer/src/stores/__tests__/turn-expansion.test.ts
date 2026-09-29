@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * turn-expansion store takeover API 单测（streaming-trace-window window wave T8 / MF-1）。
  *

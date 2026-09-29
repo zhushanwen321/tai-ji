@@ -120,7 +120,7 @@ describe("markRoundIdle 轮终派生 manifest 投影（B2 簿记⑫）", () => {
 
   it("回归对照：markFinalized 终态路径产物形态不变（closed + closedReason）", () => {
     const record = makeRecord("bg-final", { sessionFile });
-    // 终态内存冻结留调用方（completeRecord/tryTransition 桥接——markFinalized 只吸收
+    // 终态内存冻结留调用方（completeLegacyClosed/trySettleLegacyClosed——markFinalized 只吸收
     // 持久化面，不回写 record.closedReason，见 record-store 方法头）。
     record.closedReason = "gc";
     store.register(record);

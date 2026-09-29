@@ -33,7 +33,6 @@ import {
   registerSpawnedChildForRecord,
   _resetCoreSpawnedChildrenMirrorForTest,
 } from "../host/spawned-children.ts";
-import { createHostBridge } from "../host/host-bridge.ts";
 
 /** 最小 fake 子进程（EventEmitter + killed/pid 字段——hasLiveProcessHandle 消费面）。 */
 function makeFakeChild(): ChildProcess & EventEmitter {
@@ -126,23 +125,5 @@ describe("notifyInFlightChanged：迁移点 → 壳层监听者（同步 fire-an
     notifyInFlightChanged();
     expect(firstCalls).toBe(0);
     expect(secondCalls).toBe(1);
-  });
-
-  it("host-bridge armIdleTimer / disarmIdleTimer 委托点自动触发通知（迁移点接线证据）", () => {
-    // W3 镜像形态：register 本身不再通知（子进程终止经引擎反向通道），core 侧唯一挂
-    // notifyInFlightChanged 的委托面 = host-bridge 的 arm/disarm（u7a 迁移点新宿主）。
-    const seen: InFlightSnapshot[] = [];
-    setInFlightListener(() => seen.push(getInFlightSnapshot()));
-    registerSpawnedChildForRecord("sa-inflight-auto", makeFakeChild());
-
-    const bridge = createHostBridge({
-      service: {} as Parameters<typeof createHostBridge>[0]["service"],
-      onIdleTimeout: () => undefined,
-    });
-    bridge.armIdleTimer("sa-inflight-auto", 60_000);
-    expect(seen.at(-1)).toEqual({ inFlight: 0 });
-
-    bridge.disarmIdleTimer("sa-inflight-auto");
-    expect(seen.at(-1)).toEqual({ inFlight: 1 });
   });
 });

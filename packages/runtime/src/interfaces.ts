@@ -115,7 +115,7 @@ export interface SessionCreateOptions {
    * 优先级（设计文档 §5.2）：Landing Chip > preset.thinkingLevel > 全局默认。
    */
   thinkingOverride?: string
-  /** 归属 project id（D14 语义修正 2026-08-04）：创建时归属当前 activeProject；空 = 默认项目兑底。 */
+  /** 归属 project id（D14 语义修正 2026-08-04）：创建时归属当前 activeProject；空 = 默认项目兜底。 */
   projectId?: string
   /** 发起来源：'user' | 'agent'。agent-managed session 标记（session-manager create 链路传入）。 */
   spawnSource?: 'user' | 'agent'
@@ -287,18 +287,6 @@ export interface ISessionService {
    * setOnPlanAborted 注入，单一出口在 transport 层。
    */
   abortPlan(sessionId: string): Promise<void>
-  /** W5：session 是否空闲（进程存活且非生成中），供 ReloadOrchestrator 判断立即/排队 reload。 */
-  isSessionIdle(sessionId: string): boolean
-  /** W5：session 是否仍存活（未被 delete），供 ReloadOrchestrator 检测排队期删除。 */
-  hasSession(sessionId: string): boolean
-  /** W5：发 `/__taiji_reload__` 触发 pi reload（builtin extension handler 调 ctx.reload）。 */
-  promptReload(sessionId: string): Promise<void>
-  /**
-   * U3（composer 四符号 §3.3.5）：reload 成功后失效 commands 快照（markDirty 防抖重拉
-   * get_commands，经既有挂钩自动广播 session.commands）。供 ReloadOrchestrator 在
-   * promptReload resolve（= reload 完成，设计 F8）后调用；失败路径不调。
-   */
-  handleSessionReloaded(sessionId: string): void
   /** 查询 session 的扩展命令（pi getCommands）。纯查询无副作用，用于 renderer 主动拉取。 */
   getCommands(sessionId: string): Promise<Array<{ name: string; description?: string; source: string }>>
   /**
@@ -355,7 +343,8 @@ export interface ISessionService {
    * W18（data-source-governance P3.1）：自描述 record entry（subagent-record /
    * workflow-record）失效信号唯一入口（interpreter 经组合根注入；entry_appended 主信号
    * + subagent/workflow 事件兜底信号汇于此）。只做失效（防抖调度），事件 payload 不进
-   * 数据缓存——entry 扫描（get_entries 重拉）是派生缓存唯一数据写路径。
+   * 数据缓存——数据写路径唯一 = journal 投影重算（applyEntryBatch 双源单点合并，
+   * session-records 同口径）。
    */
   invalidateRecordEntries(sessionId: string, customType: string): void
   /**

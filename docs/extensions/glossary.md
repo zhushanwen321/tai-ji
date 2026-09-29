@@ -63,7 +63,7 @@ Extension + Skill + Prompt Template + Theme 的分发单元，通过 npm 或 git
 ### pi 边界可靠性（taiji ↔ pi，pi-boundary-reliability 2026-08-28）
 
 **语义吸收层**
-taiji 与 pi 之间对 pi 私有语义的统一适配层（ADR-0064）：推断与跨边界承诺只在边界一次吸收（能力注册表 / 生效回执 / 确认式送达 / 漂移守卫四支柱），域内只剩确定性。EventAdapter 只适配传输格式，语义适配归本层。
+taiji 与 pi 之间对 pi 私有语义的统一适配层（ADR-0064）：推断与跨边界承诺只在边界一次吸收（能力注册表 / 生效回执 / 确认式送达 / 漂移检查四支柱），域内只剩确定性。EventAdapter 只适配传输格式，语义适配归本层。
 
 **能力注册表**
 runtime `model-capability.ts` 单点服务面：模型全等 id / reasoning / 支持思考档位等 pi 能力事实唯一进入点（pi-ai 同源计算 + get_available_models 对账），以 supportedLevels 下发；renderer/扩展禁止本地推断档位（C-pi-12）。
@@ -72,7 +72,7 @@ runtime `model-capability.ts` 单点服务面：模型全等 id / reasoning / �
 改状态 RPC 的 reply 一律回 pi 实际生效值（钳制时 ≠ 请求值），消费方禁乐观写请求值（C-pi-13）。
 
 **确认式送达**
-结果语义通知的送达形态：持久账本 + 幂等键（notifyId）+ settled 边沿 courier（投递员，销账即确认）at-least-once 重放——账本、销账、courier 归并于本条。禁依赖 pi steer/nextTurn 内存队列的 at-most-once 通道（C-ext-19）；交互式注入仅限非结果语义。
+结果语义通知的送达形态：持久账本 + 幂等键（notifyId）+ settled 边沿 courier（投递员，逐条处理完毕即确认）at-least-once 重放——账本、逐条处理完毕、courier 归并于本条。禁依赖 pi steer/nextTurn 内存队列的 at-most-once 通道（C-ext-19）；交互式注入仅限非结果语义。
 
 ---
 

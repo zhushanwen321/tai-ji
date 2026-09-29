@@ -219,7 +219,7 @@ async function runFullChain(options: ChainOptions = {}): Promise<FullChain> {
           cwd: String(cwd ?? sessionDir),
           status: 'active',
           lastActiveAt: Date.now(),
-          modelId: 'xiaomi-token-plan-cn/mimo-v2.5-pro',
+          modelId: 'xiaomi-token-plan-cn/mimo-v2.6-flash',
           tokenCount: 0,
         }
       },

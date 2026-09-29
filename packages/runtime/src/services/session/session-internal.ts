@@ -83,7 +83,7 @@ export interface ManagedSession extends IManagedSessionRecord {
    * 归属 project id 的内存态持有（D14 语义修正，2026-08-04）。
    *
    * 与 launchPresetId 同模式：create 路径 sidecar 已放行落盘（V9-④ 根修），仅异常时序
-   * 下 .project.json 缺失，内存态兑底持有 projectId，供 forkSession 继承 / toSummary
+   * 下 .project.json 缺失，内存态兜底持有 projectId，供 forkSession 继承 / toSummary
    * 透传 / setProject 同步。
    */
   projectId?: string
@@ -91,7 +91,7 @@ export interface ManagedSession extends IManagedSessionRecord {
    * agent-managed session 标记的内存态持有（B-2）。
    *
    * 与 launchPresetId/projectId 同模式：create 路径 sidecar 已放行落盘（V9-④ 根修），
-   * 仅异常时序下 .agent.json 缺失，内存态兑底持有，
+   * 仅异常时序下 .agent.json 缺失，内存态兜底持有，
    * 供 session-manager list 按 spawnSource 过滤 / toSummary 透传（前端 AI badge）。
    */
   spawnSource?: 'user' | 'agent'
@@ -129,8 +129,6 @@ export interface ISessionRegisterDeps {
   getMessageBus(): IMessageBus | null
   /** 全局消息盲广播（broker.broadcast：无 sessionId payload 消息的防御兜底通道）。 */
   broadcastGlobal(msg: ServerMessage): void
-  /** message.complete 广播后通知 reload-orchestrator（未注入时 no-op）。 */
-  notifyMessageComplete(sessionId: string): void
 }
 
 /**

@@ -2,10 +2,9 @@
 //
 // [u7a 生产补挂] D5 在途推送的生产链路 wiring 测试（crash-forensics impl-plan §7 v6）。
 //
-// 背景：notifyInFlightChanged 此前唯一挂点 = host-bridge arm/disarm 委托，而
-// createHostBridge 全仓无生产调用点——生产迁移点（subagent-service 裸 arm/disarm/
-// 镜像置死、EngineClient 反向通道镜像）全部不推送，extension 监听者恒收不到帧，
-// runtime 侧 inflight 镜像恒 0（Gate B A4 BLOCKED 根因 a）。
+// 背景：notifyInFlightChanged 的生产迁移点（subagent-service 镜像置死 /
+// Continuation 裸 arm/disarm、EngineClient 反向通道镜像）若任一处漏挂推送，
+// extension 监听者收不到帧、runtime 侧 inflight 镜像恒 0——本文件逐迁移点接线验证。
 //
 // 三视角：
 //   ①使用者（extension reporter 视角）——注册 setInFlightListener 后，生产迁移点

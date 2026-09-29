@@ -5,7 +5,7 @@
 // 注销协议，只改本文件；Service 只保留编排与依赖注入（getPi / listRunning / isIdle）。
 
 import { displayAgentName } from "../../shared/agent-ref.ts";
-import { snapshot } from "../persistence/execution-record.ts";
+import { isLegacyClosedSettled, snapshot } from "../persistence/execution-record.ts";
 import { hasIdleTimer } from "../lifecycle/lifecycle-manager.ts";
 import { hasLiveProcessHandle, hasArmedIdleTimer, isResumable } from "../lifecycle/lifecycle-predicates.ts";
 import type { BgNotifier, NotifierHost } from "./notifier.ts";
@@ -132,11 +132,11 @@ export function createNotifyHost(deps: NotifyHostDeps): NotifyHost {
     // adopt 豁免对 workflow record 零触发。
     if (record.origin === "workflow") return undefined;
     const snap = snapshot(record);
-    // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态状态机
-    // 迁移不变量）。[U5] 新 settle 路径（markSettled/markRoundIdle）产的 idle/resumable
+    // [W2/V3 D5 桥接判据收敛] 旧「closed 终态」读形态 ⟺ isLegacyClosedSettled（唯一
+    // 权威谓词，execution-record.ts）。[U5] 新 settle 路径（markSettled/markRoundIdle）产的 idle/resumable
     // 不携带 closedReason——gate 三元组（notifier.notifyGateAllowsDelivery）在消费点
     // 承担归档静默/放弃轮标记阻断，本映射只管载荷形态。
-    const legacyClosed = record.status === "idle" && record.closedReason !== undefined;
+    const legacyClosed = isLegacyClosedSettled(record);
     // [N1] isResumable 放行：SP-5 one-shot 成功完成后 markRoundIdle 收口——失败轮
     // settle 同形态（[U5] 万物可续），失败通知可达。在跑轮的 record 有活进程，不会被
     // 误放行。

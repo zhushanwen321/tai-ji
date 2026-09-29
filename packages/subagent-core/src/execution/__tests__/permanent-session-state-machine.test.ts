@@ -6,8 +6,8 @@
 // （.state/binding/manifest/.alive 各面写断言）+ epoch 递增」）。
 //
 // 桥接不变量（U2 迁移契约）：旧「closed 终态」⟺ idle ∧ closedReason 有值——
-// 旧终态路径（tryTransition/completeRecord）双写 closedReason + stopReason；新
-// settle 路径（markSettled）只写 stopReason（不终态化）。
+// legacy 终态原语（trySettleLegacyClosed/completeLegacyClosed）双写 closedReason +
+// stopReason；新 settle 路径（markSettled）只写 stopReason（不终态化）。
 //
 // fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实数据目录。
 
@@ -18,11 +18,11 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  completeRecord,
+  completeLegacyClosed,
   createRecord,
   resurrectClosed,
   tryEnterRunning,
-  tryTransition,
+  trySettleLegacyClosed,
 } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { readRecordBinding, readStateMarker, writeRecordBinding } from "../persistence/state-marker.ts";
@@ -83,24 +83,24 @@ function newStore(): RecordStore {
 // ── ① CAS 语义：running↔idle 迁移 + 非法迁移拒绝 ────────────────────────────
 
 describe("两态状态机 CAS 语义", () => {
-  it("tryTransition（settle 方向）：running→idle 收口 + closedReason/stopReason 双写", () => {
+  it("trySettleLegacyClosed（settle 方向）：running→idle 收口 + closedReason/stopReason 双写", () => {
     const rec = runningRecord();
-    expect(tryTransition(rec, "closed", "gc")).toBe(true);
+    expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
     expect(rec.status).toBe("idle");
     expect(rec.closedReason).toBe("gc");
     expect(rec.stopReason).toBe("gc");
   });
 
-  it("tryTransition：非 running（已收口）重复 settle = 非法迁移拒绝（false，无副作用）", () => {
+  it("trySettleLegacyClosed：非 running（已收口）重复 settle = 非法迁移拒绝（false，无副作用）", () => {
     const rec = runningRecord();
-    expect(tryTransition(rec, "closed", "gc")).toBe(true);
-    expect(tryTransition(rec, "closed", "cancelled")).toBe(false);
+    expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
+    expect(trySettleLegacyClosed(rec, "cancelled")).toBe(false);
     expect(rec.closedReason).toBe("gc"); // 首次收口位不被二次收口覆盖
   });
 
   it("tryEnterRunning（wake 方向）：idle→running 翻转；running 重复 wake 拒绝", () => {
     const rec = runningRecord();
-    expect(tryTransition(rec, "closed", "gc")).toBe(true);
+    expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
     expect(tryEnterRunning(rec)).toBe(true);
     expect(rec.status).toBe("running");
     expect(tryEnterRunning(rec)).toBe(false); // 已 running：非法迁移拒绝
@@ -109,7 +109,7 @@ describe("两态状态机 CAS 语义", () => {
 
   it("running↔idle 往返迁移（settle → wake → settle）构造性成立", () => {
     const rec = runningRecord();
-    expect(tryTransition(rec, "closed", "user-close")).toBe(true);
+    expect(trySettleLegacyClosed(rec, "user-close")).toBe(true);
     expect(rec.status).toBe("idle");
     expect(tryEnterRunning(rec)).toBe(true);
     expect(rec.status).toBe("running");
@@ -138,7 +138,7 @@ describe("两态状态机 CAS 语义", () => {
 
   it("resurrectClosed：已收口 idle → running 接管翻回（清收口位）；running no-op", () => {
     const rec = runningRecord();
-    expect(tryTransition(rec, "closed", "gc")).toBe(true);
+    expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
     expect(resurrectClosed(rec)).toBe(true);
     expect(rec.status).toBe("running");
     expect(rec.closedReason).toBeUndefined();
@@ -149,12 +149,11 @@ describe("两态状态机 CAS 语义", () => {
     expect(rec.status).toBe("running");
   });
 
-  it("completeRecord 桥接：冻结 idle + closedReason/stopReason 双写 + outcome 派生", () => {
+  it("completeLegacyClosed 桥接：冻结 idle + closedReason/stopReason 双写 + outcome 派生", () => {
     const rec = runningRecord();
-    completeRecord(
+    completeLegacyClosed(
       rec,
       { text: "done", turns: 1, durationMs: 5, success: true, sessionId: "bg-1", toolCalls: [] },
-      "closed",
       "gc",
     );
     expect(rec.status).toBe("idle");
@@ -168,7 +167,7 @@ describe("两态状态机 CAS 语义", () => {
 // ── ② markSettled 副作用矩阵（.state / binding / manifest / .alive）──────────
 
 describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
-  it("内存面：status=idle + stopReason 写入 + idleSince 刷新；closedReason 不写（非终态）；record 留内存", () => {
+  it("内存面：status=idle + stopReason 写入；closedReason 不写（非终态）；record 留内存", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.round = 2;
@@ -177,7 +176,6 @@ describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
     expect(rec.status).toBe("idle");
     expect(rec.stopReason).toBe("interrupted");
     expect(rec.closedReason).toBeUndefined();
-    expect(rec.idleSince).toBeDefined();
     expect(rec.endedAt).toBeUndefined(); // 非终态，duration 语义保持
     expect(store.getMutable("bg-1")).toBe(rec); // 留内存（随时可续聊）
   });
@@ -388,9 +386,9 @@ describe("epoch 递增（reopen 防撞）", () => {
   });
 });
 
-// ── ⑤ markSettledOut / markIdleEvicted 副作用矩阵（写权声明 + 收口落账写面）──────────
+// ── ⑤ markSettledOut 副作用矩阵（写权声明 + 收口落账写面）──────────
 
-describe("markSettledOut / markIdleEvicted 副作用矩阵", () => {
+describe("markSettledOut 副作用矩阵", () => {
   it("markSettledOut：.alive release（release 出口①）+ entry 上报 + worktreeHandle 清句（占用位不动）", () => {
     const store = newStore();
     const rec = runningRecord();
@@ -413,24 +411,5 @@ describe("markSettledOut / markIdleEvicted 副作用矩阵", () => {
     expect(store.markSettledOut(rec)).toBe(true);
     expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
     expect(store.getMutable("bg-1")).toBe(rec);
-  });
-
-  it("markIdleEvicted：内存移除 + manifest 投影 + .alive release 后（写序 archive 先 release 后）", () => {
-    const store = newStore();
-    const rec = runningRecord();
-    rec.status = "running";
-    store.register(rec);
-    fs.writeFileSync(
-      `${rec.sessionFile}.alive`,
-      JSON.stringify({ pid: process.pid, id: "bg-1", startedAt: Date.now() }),
-      "utf-8",
-    );
-    store.markIdleEvicted(rec);
-    expect(store.getMutable("bg-1")).toBeUndefined(); // 内存回收
-    expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(manifestDir, "bg-1.json"), "utf-8"),
-    ) as Record<string, unknown>;
-    expect(manifest.status).toBe("running"); // 非终态化如实投影（磁盘仍可接管）
   });
 });

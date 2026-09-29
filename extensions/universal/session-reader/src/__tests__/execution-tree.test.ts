@@ -17,11 +17,9 @@ import { buildExecutionTree, formatExecutionTreeText, type ExecutionTreeNode } f
  * - TC-m3b-cycle-detection：workflow 指针环（A→B→A），visited Set 防环
  * - TC-m3b-single-node：单节点树（无后代，ES5）
  * - TC-m3b-source-priority：parentRecordId 三级数据源优先级（manifest>identity>flat，DM4）
- * - TC-m3b-real-data-guard：真实形态数据守卫（合成 fixture）。原直读本机 ~/.pi/agent 动态
- *   发现家族根（skipIf CI 无数据），真实数据演化后确定性红且触碰真实数据目录（TEST-STRATEGY
- *   红线），2026-09 数据面合成化：mkdtemp 临时目录仿真真实 agentDir 布局（时间戳前缀文件名 /
- *   新旧机制混合 / 孤儿 manifest / 坏 manifest / 外来家族），guard 语义不变——解析不抛错 /
- *   树非空 / 结构自洽，不锁 sourceMode 具体值
+ * - TC-m3b-real-data-guard：真实形态数据守卫（合成 fixture）：mkdtemp 临时目录仿真真实
+ *   agentDir 布局（时间戳前缀文件名 / 新旧机制混合 / 孤儿 manifest / 坏 manifest / 外来
+ *   家族），guard 语义断言——解析不抛错 / 树非空 / 结构自洽，不锁 sourceMode 具体值
  */
 
 // ---- fixture 常量（uuid 特征，互不为子串，满足 extractSessionIdFromFilename）----
@@ -685,13 +683,9 @@ describe('buildExecutionTree - fixture', () => {
 })
 
 // ============================================================
-// 真实形态数据守卫（合成 fixture，2026-09 测试债修复）
+// 真实形态数据守卫（合成 fixture）：mkdtemp 临时目录仿真真实 agentDir 布局，
+// guard 语义断言（解析不抛错 / 树非空 / 结构自洽 / sourceMode 值域），不触碰真实数据目录。
 // ============================================================
-//
-// 原用例直读本机 ~/.pi/agent（execSync 探测 + findRealTreeRoot 扫真实 records 动态发现
-// 家族根，skipIf CI 无数据）：真实数据演化后确定性红（impl-plan 台账登记根因），且触碰
-// 真实数据目录违反 TEST-STRATEGY 红线。数据面合成化——mkdtemp 临时目录仿真真实 agentDir
-// 布局，guard 语义断言（解析不抛错 / 树非空 / 结构自洽 / sourceMode 值域）原样保留。
 
 describe('buildExecutionTree - 真实形态数据守卫（合成）', () => {
   let dir: string
@@ -704,7 +698,7 @@ describe('buildExecutionTree - 真实形态数据守卫（合成）', () => {
   })
 
   it('TC-m3b-real-data-guard：真实形态布局（时间戳文件名/新旧机制混合/孤儿 manifest/坏 manifest/外来家族）解析不抛错，树非空且结构自洽', async () => {
-    // 仿真真实 agentDir 数据形态（原直读本机 ~/.pi/agent，合成化后确定性可重跑）：
+    // 仿真真实 agentDir 数据形态（全部 mkdtemp 自建自删，确定性可重跑）：
     // - session 文件名带时间戳前缀（<ISO 时间戳>_<sessionId>.jsonl，真实 pi 落盘形态）
     // - 混合新旧机制：A 顶层（无 parentRecordId）→ B 嵌套（manifest.parentRecordId 精确链）；
     //   C 旧机制顶层（manifest/identity 均无 parentRecordId → flat 挂 main）

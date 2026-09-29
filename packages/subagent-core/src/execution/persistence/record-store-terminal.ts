@@ -2,8 +2,8 @@
 //
 // [H4 三轴拆分 / 终态原语轴] RecordStore 终态/settle/收口动作原语的实现体：
 //   - legacy 终态族（markFinalized / markCancelled——workflow D7 例外族专用，U5 退役）；
-//   - settle / 收口动作族（markSettled / markReopened / markSettledOut /
-//     markIdleEvicted——永久会话模型 §3.2.2/§3.2.5）；
+//   - settle / 收口动作族（markSettled / markReopened / markSettledOut——
+//     永久会话模型 §3.2.2/§3.2.5）；
 //   - 磁盘终态位翻活（markResurrected）；[collect 退役] 原 sync 批终态
 //     （markBatchFinalized）已随批机制删除；
 //   - binding settle 快照族（settleSnapshotPatch / fullBindingPayload /
@@ -29,6 +29,13 @@ import type { RecordBinding } from "./state-marker.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 import { derivedManifestRecord, hydrateReviveBaseline, recordToSubagent, zcodeRefOf } from "./record-store-rebuild.ts";
 import { findForeignLiveInstance } from "./alive-store.ts";
+import type { RecordJournalEventInput, RecordJournalFoldState } from "./record-events.ts";
+// [W1 / U2a] v2 条目契约与 v2 定界判定（u0 契约层消费）。
+import { SUBAGENT_RECORD_CUSTOM_TYPE, SUBAGENT_RECORD_ENTRY_VERSION, classifySubagentRecordEntryData } from "./record-entry.ts";
+import type {
+  SubagentRecordRegisteredEntryData,
+  SubagentRecordSettledEntryData,
+} from "./record-entry.ts";
 import { ResurrectDeniedError, isPiTranscriptRef } from "../assembly/types.ts";
 import type { ClosedReason, ExecutionRecord, StopReason, SubagentRecord, TranscriptRef } from "../assembly/types.ts";
 
@@ -64,21 +71,57 @@ export interface TerminalCtx {
   writeManifestPersisted: (id: string, manifest: ManifestRecord) => void;
   /** 终态 manifest 落盘（record-store.ts 私有 writeTerminalManifest 注入位）。 */
   writeTerminalManifest: (record: ExecutionRecord) => void;
+  /**
+   * [W1 / D3 表行 5] 终局事件 + v2 终态条目（record-settled 帧，markSettled 写点；
+   * archive 真终局路径同款注入位）。幂等守卫（fold 已 settled 跳过）在被调侧。
+   */
+  settleViaJournal: (record: ExecutionRecord, endedAt: number) => void;
+  /** [W1 / D3] record 事件追加注入位（markReopened 的 record-reopened 帧）。 */
+  appendJournalEvent: (record: ExecutionRecord, input: RecordJournalEventInput) => void;
   notifyChange: () => void;
+}
+
+/**
+ * legacy 终态族的共用写序编排（D8 v7）：`.state` writeSync **先**（persist 失败 →
+ * 返回 false，零持久化副作用）→ binding usage 快照 → archive → 终态 manifest 后 →
+ * `.alive` 删除（release 出口①）。markFinalized / markCancelled 差异仅在 `.state`
+ * persist 注入与 warn 标签，编排规则单源于此。
+ *
+ * 失败语义（§3.4）：`.state` 重试耗尽仍未落 → 返回 false，**零持久化副作用**（不
+ * archive / 不写 manifest / 不 release 写权声明）——record 留 running 形态（磁盘无
+ * 终态位，下次 boot 孤儿恢复终态化承接）；错误已在 state-marker 层 error 级响亮暴露。
+ */
+function legacyTerminalWrite(
+  record: ExecutionRecord,
+  persist: (sessionFile: string) => boolean,
+  label: string,
+  ctx: TerminalCtx,
+): boolean {
+  if (record.sessionFile !== undefined) {
+    if (!persist(record.sessionFile)) return false;
+    // 终态 usage 快照随 binding 落盘（维持 doFinalizeRecord Step3a 现状——light
+    // 列表面的唯一低成本 usage 源）。binding 内部 best-effort（缺失不造残缺身份）。
+    updateRecordBinding(record.sessionFile, {
+      totalTokens: record.totalTokens,
+      turns: record.turnCount,
+      endedAt: record.endedAt,
+    });
+  } else {
+    logger.warn(`[subagents] ${label}: no sessionFile anchor, .state face skipped`, {
+      detail: { id: record.id },
+    });
+  }
+  ctx.archive(record);
+  ctx.writeTerminalManifest(record);
+  if (record.sessionFile !== undefined) ctx.releaseLease(record.sessionFile);
+  return true;
 }
 
 /**
  * 意图原语：正常终态（含 disposeAllRecords 编排性关闭，reason=parent-*，D8 矩阵）。
  * 只吸收**持久化面**——collectPatch / worktree cleanup / pending 注销① / onFinalized
- * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeRecord/tryTransition
- * 桥接：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
- *
- * 内部写序（D8 v7）：`.state` writeSync **先**（终态权威优先落）→ entry/archive →
- * manifest writeSync 后 → `.alive` 删除（release 出口①）。
- *
- * 失败语义（§3.4）：`.state` 重试耗尽仍未落 → 返回 false，**零持久化副作用**（不
- * archive / 不写 manifest / 不 release 写权声明）——record 留 running 形态（磁盘无
- * 终态位，下次 boot 孤儿恢复终态化承接）；错误已在 state-marker 层 error 级响亮暴露。
+ * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeLegacyClosed/
+ * trySettleLegacyClosed：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
  *
  * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 收口动作
  * 接线退役（正常收口归 markSettled、close 收口归 markSettledOut、编排性关闭归新编排）；
@@ -89,24 +132,7 @@ export interface TerminalCtx {
  */
 export function markFinalizedImpl(record: ExecutionRecord, closedReason: ClosedReason | undefined, ctx: TerminalCtx): boolean {
   const reason = closedReason ?? record.closedReason ?? "gc";
-  if (record.sessionFile !== undefined) {
-    if (!ctx.persistFinalized(record.sessionFile, reason)) return false;
-    // 终态 usage 快照随 binding 落盘（维持 doFinalizeRecord Step3a 现状——light
-    // 列表面的唯一低成本 usage 源）。binding 内部 best-effort（缺失不造残缺身份）。
-    updateRecordBinding(record.sessionFile, {
-      totalTokens: record.totalTokens,
-      turns: record.turnCount,
-      endedAt: record.endedAt,
-    });
-  } else {
-    logger.warn("[subagents] markFinalized: no sessionFile anchor, .state face skipped", {
-      detail: { id: record.id },
-    });
-  }
-  ctx.archive(record);
-  ctx.writeTerminalManifest(record);
-  if (record.sessionFile !== undefined) ctx.releaseLease(record.sessionFile);
-  return true;
+  return legacyTerminalWrite(record, (sessionFile) => ctx.persistFinalized(sessionFile, reason), "markFinalized", ctx);
 }
 
 /**
@@ -120,22 +146,12 @@ export function markFinalizedImpl(record: ExecutionRecord, closedReason: ClosedR
  * @deprecated U5 退役（cancel 语义归 markSettled("interrupted") + 放弃轮标记）。
  */
 export function markCancelledImpl(record: ExecutionRecord, ctx: TerminalCtx): boolean {
-  if (record.sessionFile !== undefined) {
-    if (!ctx.persistCancelled(record.sessionFile, record.endedAt ?? Date.now())) return false;
-    updateRecordBinding(record.sessionFile, {
-      totalTokens: record.totalTokens,
-      turns: record.turnCount,
-      endedAt: record.endedAt,
-    });
-  } else {
-    logger.warn("[subagents] markCancelled: no sessionFile anchor, .state face skipped", {
-      detail: { id: record.id },
-    });
-  }
-  ctx.archive(record);
-  ctx.writeTerminalManifest(record);
-  if (record.sessionFile !== undefined) ctx.releaseLease(record.sessionFile);
-  return true;
+  return legacyTerminalWrite(
+    record,
+    (sessionFile) => ctx.persistCancelled(sessionFile, record.endedAt ?? Date.now()),
+    "markCancelled",
+    ctx,
+  );
 }
 
 // [collect 退役] 原 markBatchFinalizedImpl（sync 批终态统一写点）已随批机制整体删除。
@@ -250,29 +266,6 @@ function commitDerivedTransition(record: ExecutionRecord, ctx: TerminalCtx): voi
 }
 
 /**
- * 意图原语：内存回收（evicted，§3.2.4 release 出口②）。30 天 TTL 内存回收，
- * 用户不可见，非终态化——磁盘不动、可重建。
- *
- * 写序（D3a/轮 5，语义不变）：store.archive **先**、`.alive` release **后**——
- * archive 抛错则原语整体失败、marker 必未删（持有与声明一致）；release 失败
- * best-effort 留痕（removeAliveMarker 内部 warn——GC 为旁路维护路径不阻断
- * interval，泄漏窗 = 至宿主退出，已接受）。回收 record 后续被接管时统一
- * acquireWriteLease 重新声明。
- *
- * [U4c / G2] 回收点补写 manifest（投影 running——磁盘确仍 running）：record 离开
- * 内存后，外部 session-reader 的 identity 富字段主路径只剩 manifest（子文件
- * identity entry 随 30 天 GC 衰减），回收时不落盘则该 record 在 manifest 面长期
- * 缺席。写失败走 writeTerminalManifest 同款响亮上报（终态写面共用通道）。
- */
-export function markIdleEvictedImpl(record: ExecutionRecord, ctx: TerminalCtx): void {
-  ctx.archive(record);
-  // [U4c / G2] 回收点补写：经状态派生投影（running 如实投影——非终态化语义，
-  // terminalManifestRecord 的 closed 硬编码不适用），响亮失败通道同终态写面。
-  persistDerivedManifest(record, ctx);
-  releaseWriteLeaseImpl(record, ctx);
-}
-
-/**
  * [U7 / §3.2.4 release 出口] 写权声明 release 的锚分派：pi = 子 session 文件
  * （现行键）；zcode = transcriptRef 派生锚基底（markResurrected acquire 的对称
  * 反向）。双锚皆缺（spawn 窗口期未确立锚）无声明可释——静默跳过（acquire 同形态
@@ -295,7 +288,7 @@ export function releaseWriteLeaseImpl(record: ExecutionRecord, ctx: TerminalCtx)
  * 携带旧终态遗留位）。
  *
  * CAS：仅 running 可收口（对 idle record 重复 settle = 非法迁移，拒绝返回 false
- * + warn 留痕——与 tryTransition 抢锁语义同族）。
+ * + warn 留痕——与 trySettleLegacyClosed 抢锁语义同族）。
  *
  * 写序（D8：`.state` 先 → binding → manifest 后）：
  *   ① `.state` 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState；
@@ -321,7 +314,6 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
   }
   record.status = "idle";
   record.stopReason = stopReason;
-  record.idleSince = Date.now();
   const settledAt = Date.now();
   // [U7 / §3.2.7 统计口径单基准] settle 快照锚分派（U6-D2 交接收编）：
   //   - pi：子 session 文件锚（现行——`.state` 收条 + binding 快照）；
@@ -353,6 +345,10 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
   }
   // ③ manifest 投影（D8 写序 manifest 后；派生投影——非终态如实 legacy running）。
   commitDerivedTransition(record, ctx);
+  // ④ [W1 / D3 表行 5] record-settled 帧 + v2 终态条目（markSettled 是终局写点
+  // 之一——D3 映射表「archive / markSettled / legacy 终态」；幂等守卫在被调侧）。
+  // endedAt 取收口时点（settle 非终态不写 record.endedAt——事件帧的终局时间戳）。
+  ctx.settleViaJournal(record, settledAt);
   return true;
 }
 
@@ -416,6 +412,14 @@ export function markReopenedImpl(record: ExecutionRecord, transcriptRef: Transcr
     );
     return false;
   }
+  // [W1 / D3 表行 6] record-reopened 帧（epoch 递增 + round 归零——binding 持久化
+  // 成功后落账：事件文件与 binding 的 epoch 同源单点，写失败拒绝重开时事件不落）。
+  ctx.appendJournalEvent(record, {
+    type: "record-reopened",
+    ts: Date.now(),
+    epoch: record.epoch ?? 0,
+    round: 0,
+  });
   ctx.reportRecordTransition(record);
   ctx.notifyChange();
   return true;
@@ -460,8 +464,12 @@ export function fullBindingPayload(record: ExecutionRecord, transcriptRef: Trans
     model: record.model,
     thinkingLevel: record.thinkingLevel,
     worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
+    // [W0 / D1] 来源身份三字段（origin/parentRunId + stepIndex）：merge-or-create 的
+    // create 腿与 reopen 新锚均经本载荷，漏拷贝则 binding 恒无该字段（schema 补键
+    // 不足以让字段落盘——载荷是显式逐字段拷贝）。
     origin: record.origin,
     parentRunId: record.parentRunId,
+    stepIndex: record.stepIndex,
     ...settleSnapshotPatch(record),
     ...(transcriptRef !== undefined ? { transcriptRef } : {}),
   };
@@ -521,4 +529,329 @@ export function markSettledOutImpl(record: ExecutionRecord, ctx: TerminalCtx): b
   releaseWriteLeaseImpl(record, ctx);
   commitDerivedTransition(record, ctx);
   return true;
+}
+
+// ============================================================
+// [W1 / U2a] v2 条目构造族 + v2 定界扫描 + 收编组装（纯函数族）
+// ============================================================
+//
+// 变化轴 = 「v2 条目与事件载荷的构造规则」（契约演化集中于此）——终局写点
+// （markSettled/archive/收编）的载荷构造单源。字段集契约单源 = record-entry.ts
+// （u0）；事件词表与 fold 单源 = record-events.ts（u0）。
+
+/** v2 注册条目 data（register 写点；undefined 身份域归一：origin → "tool"、rootSessionId → ""）。 */
+export function toRegisteredEntryData(
+  record: { id: string; agent: string; task: string; slug: string; origin?: string; parentRunId?: string; stepIndex?: number; rootSessionId?: string; parentRecordId?: string; depth: number; startedAt: number },
+): SubagentRecordRegisteredEntryData {
+  return {
+    v: SUBAGENT_RECORD_ENTRY_VERSION,
+    kind: "registered",
+    id: record.id,
+    agent: record.agent,
+    task: record.task,
+    slug: record.slug,
+    origin: record.origin === "workflow" ? "workflow" : "tool",
+    ...(record.parentRunId !== undefined ? { parentRunId: record.parentRunId } : {}),
+    ...(record.stepIndex !== undefined ? { stepIndex: record.stepIndex } : {}),
+    rootSessionId: record.rootSessionId ?? "",
+    ...(record.parentRecordId !== undefined ? { parentRecordId: record.parentRecordId } : {}),
+    depth: record.depth,
+    startedAt: record.startedAt,
+  };
+}
+
+/** v2 终态条目构造载荷（终局写点共用输入面——ExecutionRecord 的统计/终局域字段子集）。 */
+export interface SettledEntrySource {
+  id: string;
+  status: string;
+  stopReason?: StopReason;
+  outcome?: SubagentRecord["outcome"];
+  error?: string;
+  turnCount: number;
+  totalTokens: number;
+  model: string | undefined;
+  thinkingLevel: string | undefined;
+  engine?: string;
+  engineHandle?: SubagentRecord["engineHandle"];
+  sessionFile?: string;
+  result?: string;
+}
+
+/**
+ * ExecutionRecord → SettledEntrySource 映射（终局写点共用：容器终局写点与
+ * face 缺省分支同款消费——条目面独立于事件面工作时载荷构造单源）。
+ */
+export function settledEntrySourceOf(record: ExecutionRecord): SettledEntrySource {
+  return {
+    id: record.id,
+    status: record.status,
+    stopReason: record.stopReason,
+    outcome: record.outcome,
+    error: record.error !== undefined && record.error.length > 0 ? record.error : undefined,
+    turnCount: record.turnCount,
+    totalTokens: record.totalTokens,
+    model: record.model,
+    thinkingLevel: record.thinkingLevel,
+    engine: record.engine,
+    engineHandle: record.engineHandle,
+    sessionFile: record.sessionFile,
+    result: record.result,
+  };
+}
+
+/** v2 终态条目 data（终局写点共用：archive 真终局 / markSettled / 收编幂等补写）。 */
+export function toSettledEntryData(source: SettledEntrySource, endedAt: number): SubagentRecordSettledEntryData {
+  return {
+    v: SUBAGENT_RECORD_ENTRY_VERSION,
+    kind: "settled",
+    id: source.id,
+    status: "idle",
+    stopReason: source.stopReason ?? "interrupted-by-restart",
+    ...(source.outcome !== undefined ? { outcome: source.outcome } : {}),
+    ...(source.error !== undefined ? { error: source.error } : {}),
+    endedAt,
+    turns: source.turnCount,
+    totalTokens: source.totalTokens,
+    model: source.model,
+    thinkingLevel: source.thinkingLevel,
+    ...(source.engine !== undefined ? { engine: source.engine } : {}),
+    ...(source.engineHandle !== undefined ? { engineHandle: source.engineHandle } : {}),
+    ...(source.sessionFile !== undefined ? { sessionFile: source.sessionFile } : {}),
+    ...(source.result !== undefined ? { result: source.result } : {}),
+  };
+}
+
+/** record-settled 帧的 result 摘要锚长度（截断摘要——全文只在 v2 终态条目一次性写）。 */
+const SETTLED_RESULT_SUMMARY_MAX_CHARS = 200;
+
+export function summarizeResultForJournal(result: string | undefined): string | undefined {
+  if (result === undefined || result.length === 0) return undefined;
+  return result.length <= SETTLED_RESULT_SUMMARY_MAX_CHARS
+    ? result
+    : `${result.slice(0, SETTLED_RESULT_SUMMARY_MAX_CHARS)}…`;
+}
+
+/** v2 条目定界状态（registered 定界 + settled 幂等证据）。 */
+export interface V2EntryState {
+  registered: boolean;
+  settled: boolean;
+  /** 末条 settled 条目的停因（D4 双面证据第二条的判别输入——interrupted 族条目
+   * 不构成「非 interrupted 终态」跳过证据，收编须放行修复 journal）。 */
+  settledStopReason: StopReason | undefined;
+  rootSessionId: string | undefined;
+}
+
+/**
+ * 主 session 内容 → 每 id 的 v2 条目定界状态（收编双面证据第二条，D4）。
+ * v1 快照行不在本扫描面（v 门跳过——收编定界按注册条目形态分流：v1 实体保留
+ * v1 纠偏循环，D7 兼容层）。判定单源 = classifySubagentRecordEntryData（u2b），
+ * 快过滤与 collectLastRecordEntries 同款（customType 子串）。
+ */
+export function collectV2EntryState(content: string): Map<string, V2EntryState> {
+  const out = new Map<string, V2EntryState>();
+  for (const line of content.split("\n")) {
+    if (!line.includes(SUBAGENT_RECORD_CUSTOM_TYPE)) continue; // 快过滤（绝大多数行不是本类型）
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue; // 截断/异构行跳过（主文件末行可能正被写入）
+    }
+    if (typeof parsed !== "object" || parsed === null) continue;
+    const obj = parsed as Record<string, unknown>;
+    if (obj.type !== "custom" || obj.customType !== SUBAGENT_RECORD_CUSTOM_TYPE) continue;
+    const verdict = classifySubagentRecordEntryData(obj.data);
+    if (!verdict.ok && verdict.reason === "v2") {
+      const entry = verdict.entry;
+      const prev =
+        out.get(entry.id) ?? { registered: false, settled: false, settledStopReason: undefined, rootSessionId: undefined };
+      if (entry.kind === "registered") {
+        prev.registered = true;
+        prev.rootSessionId = entry.rootSessionId;
+      } else {
+        prev.settled = true;
+        prev.settledStopReason = entry.stopReason;
+      }
+      out.set(entry.id, prev);
+    }
+  }
+  return out;
+}
+
+/**
+ * interrupted 族停因（StopReason 的中断子族——重启收编语义；与 runtime
+ * workflow-step-merge 的状态映射常量同词表，消费形态不同不共享实体）。
+ */
+const INTERRUPTED_FAMILY_STOP_REASONS: readonly string[] = [
+  "interrupted",
+  "interrupted-by-restart",
+  "interrupted-by-parent",
+];
+
+/**
+ * D4 双面证据第二条的判别（「终态条目已存在且非 interrupted」）：settled 条目
+ * 在场且停因非 interrupted 族才构成跳过证据——interrupted 族条目是「条目面先行
+ * 写、journal 帧缺失」的不对称窗口残留（journalAppend fire-and-forget 失败 /
+ * 局部损坏），不构成跳过证据，收编须放行以追加 settled 帧修复 journal；停因
+ * 缺失（契约外残缺形态）保守计为真终态（宁保留不重复）。
+ */
+export function isNonInterruptedSettledEvidence(st: V2EntryState | undefined): boolean {
+  if (st?.settled !== true) return false;
+  if (st.settledStopReason === undefined) return true;
+  return !INTERRUPTED_FAMILY_STOP_REASONS.includes(st.settledStopReason);
+}
+
+/** 收编产物的 v2 终态条目（fold + 收编停因组装——model/thinkingLevel 收编形态 undefined 诚实缺省：journal 无此数据源）。 */
+export function buildAdoptedSettledEntry(
+  fold: RecordJournalFoldState,
+  id: string,
+  stopReason: StopReason,
+  now: number,
+): SubagentRecordSettledEntryData {
+  const bound = fold.bound;
+  return {
+    v: SUBAGENT_RECORD_ENTRY_VERSION,
+    kind: "settled",
+    id,
+    status: "idle",
+    stopReason,
+    endedAt: now,
+    turns: fold.roundIdle?.turns ?? 0,
+    totalTokens: fold.roundIdle?.totalTokens ?? 0,
+    model: undefined,
+    thinkingLevel: undefined,
+    ...(bound !== undefined ? { engine: bound.engine } : {}),
+    ...(bound !== undefined ? { engineHandle: bound.engineHandle } : {}),
+    ...(bound !== undefined && bound.sessionFile !== "" ? { sessionFile: bound.sessionFile } : {}),
+  };
+}
+
+/** 收编产物的 record-settled 帧（统计终值取 fold 轮终快照、缺帧诚实 0——判定半边在容器）。 */
+export function buildAdoptedSettledEvent(
+  fold: RecordJournalFoldState,
+  id: string,
+  stopReason: StopReason,
+  now: number,
+): RecordJournalEventInput {
+  return {
+    type: "record-settled",
+    ts: now,
+    stopReason,
+    endedAt: now,
+    turns: fold.roundIdle?.turns ?? 0,
+    totalTokens: fold.roundIdle?.totalTokens ?? 0,
+  };
+}
+
+/** 收编产物的 manifest 投影（derivedManifestRecord 同族形态——身份域取 created 帧、引擎域取 bound 帧、终局域取收编停因）。 */
+export function buildAdoptedManifestProjection(
+  fold: RecordJournalFoldState,
+  id: string,
+  stopReason: StopReason,
+  now: number,
+): ManifestRecord | undefined {
+  const identity = fold.identity;
+  if (identity === undefined) return undefined; // 坏链守卫在容器侧先行（skippedNoIdentity）
+  const bound = fold.bound;
+  return {
+    id,
+    rootSessionId: identity.rootSessionId || "",
+    agentName: identity.agent,
+    status: "running", // legacy 三态投影：无 closedReason → running（executionStatus 承载两态权威词）
+    executionStatus: "idle",
+    // [W4 收敛] 收编停因上投影：sweep 判据第三级（findAdoptedStopReasonSync）经它把
+    // 收编 record 判 terminal，注销条目 reason 落 interrupted 族（mapReasonToStatus
+    // → aborted），不再误走 missing 分支的 expired。
+    stopReason,
+    createdAt: identity.startedAt,
+    completedAt: now,
+    ...(bound !== undefined && bound.sessionFile !== "" ? { sessionFile: bound.sessionFile } : {}),
+    task: identity.task,
+    slug: identity.slug,
+    ...(bound !== undefined ? { engine: bound.engine } : {}),
+    ...(bound !== undefined ? { engineHandle: bound.engineHandle } : {}),
+  };
+}
+
+// ── [W1 / D3] 事件帧载荷构造与引擎域签名（record-created/bound/settled——容器写
+// ── 点的载荷构造半边；幂等判定与 append 编排留在容器）──────────────
+
+/** record-created 帧载荷（register 写点——D3 表行 1 身份域全量）。 */
+export function buildCreatedEventPayload(
+  record: ExecutionRecord,
+): RecordJournalEventInput {
+  return {
+    type: "record-created",
+    ts: record.startedAt,
+    id: record.id,
+    agent: record.agent,
+    task: record.task,
+    slug: record.slug,
+    origin: record.origin === "workflow" ? "workflow" : "tool",
+    ...(record.parentRunId !== undefined ? { parentRunId: record.parentRunId } : {}),
+    ...(record.stepIndex !== undefined ? { stepIndex: record.stepIndex } : {}),
+    rootSessionId: record.rootSessionId ?? "",
+    ...(record.parentRecordId !== undefined ? { parentRecordId: record.parentRecordId } : {}),
+    depth: record.depth,
+    mode: record.mode,
+    startedAt: record.startedAt,
+  };
+}
+
+/**
+ * 引擎域签名对比（reportRecordTransition 写点——D3 表行 2）。归一形态：pi record
+ * 的 engineHandle 缺省 = 空 sessionRef 桶（落账与对比共用同一归一，避免「record
+ * 缺省 undefined vs 落账归一值」的伪差异把每次过程 transition 都误判为引擎域变化，
+ * 事件面随高频调用放大）。签名三元组 = sessionFile/engine/engineHandle；**epoch
+ * 不参与签名**——epoch 递增由 record-reopened 帧单点承载（D3 表行 6），reopen 后
+ * 的 transition 再落 bound 帧会重复表达同一迁移。
+ */
+export function isBoundSignatureUnchanged(
+  bound: { sessionFile: string; engine: string; engineHandle: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string } } | undefined,
+  sessionFile: string | undefined,
+  engine: string | undefined,
+  engineHandle: ExecutionRecord["engineHandle"],
+): boolean {
+  if (bound === undefined) return false;
+  const normEngine = engine ?? "pi";
+  const normHandle = engineHandle ?? { sessionRef: {}, poolKey: "shared" };
+  return (
+    bound.sessionFile === (sessionFile ?? "") &&
+    bound.engine === normEngine &&
+    JSON.stringify(bound.engineHandle) === JSON.stringify(normHandle)
+  );
+}
+
+/** record-bound 帧载荷（spawn 回填——引擎域归一形态同签名对比）。 */
+export function buildBoundEventPayload(
+  record: ExecutionRecord,
+): RecordJournalEventInput {
+  return {
+    type: "record-bound",
+    ts: Date.now(),
+    sessionFile: record.sessionFile ?? "",
+    engine: record.engine ?? "pi",
+    engineHandle: record.engineHandle ?? { sessionRef: {}, poolKey: "shared" },
+    epoch: record.epoch ?? 0,
+  };
+}
+
+/** record-settled 帧载荷（终局写点——stopReason 缺省 interrupted 保守兜底）。 */
+export function buildSettledEventPayload(
+  record: ExecutionRecord,
+  endedAt: number,
+): RecordJournalEventInput {
+  return {
+    type: "record-settled",
+    ts: endedAt,
+    stopReason: record.stopReason ?? "interrupted",
+    ...(record.outcome !== undefined ? { outcome: record.outcome } : {}),
+    ...(record.error !== undefined && record.error.length > 0 ? { error: record.error } : {}),
+    endedAt,
+    turns: record.turnCount,
+    totalTokens: record.totalTokens,
+    ...(summarizeResultForJournal(record.result) !== undefined
+      ? { resultSummary: summarizeResultForJournal(record.result) }
+      : {}),
+  };
 }

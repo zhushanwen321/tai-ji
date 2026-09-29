@@ -21,9 +21,12 @@ import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h, ref } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useSubagentStore, subagentVirtualId } from '@/stores/subagent'
+import { useWorkflowStore } from '@/stores/workflow'
+import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
+import { agentCallVirtualId } from '@taiji/shared'
 import { openSubagent, bindDrawerSessionId, _resetDrawerForTest } from '@taiji/core/domain/drawer'
 import SubagentTab from '@/components/panel/SubagentTab.vue'
-import type { Message, SubagentRecord } from '@taiji/shared'
+import type { Message, SubagentRecord, WorkflowAgentCall } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
 
 vi.mock('virtua/vue', async () => {
@@ -175,7 +178,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     _resetDrawerForTest()
     // drawer control 是 per-session 分区（sidRef 绑定驱动）：绑定固定 sid 才能让 openSubagent
     // 的写入与 SubagentTab 的 useDrawerControl 读到同一分区（renderer 由 useSideDrawer 顶层
-    // 绑 focusedSessionId，测试直连 core 域同款手法——PanelContainer.test.ts 先例）
+    // 绑 focusedSessionId，测试直连 core 域同款手法——panel-container-drawer-mode.test.ts 先例）
     bindDrawerSessionId(ref(MAIN_SID))
     vi.stubGlobal('ResizeObserver', NoopResizeObserver)
     HTMLElement.prototype.scrollTo = vi.fn()
@@ -604,6 +607,69 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
     ])
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+})
+
+// ── [W0/V8] agentcall 标题 meta 锚定（findAgentCall 消费合并投影；显式预期变化：无值 → 有值）──
+// mock 输入按 D2-R3 契约形状（id/agent/slug/status/startedAt/sessionId、phase 可 undefined）；
+// U2 合并投影落地后由主 agent 复核真实形状。
+
+describe('SubagentTab [W0/V8] agentcall 标题 meta（findAgentCall 命中合并投影行）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    _resetDrawerForTest()
+    bindDrawerSessionId(ref(MAIN_SID))
+    vi.stubGlobal('ResizeObserver', NoopResizeObserver)
+    HTMLElement.prototype.scrollTo = vi.fn()
+    // findAgentCall 读 panelStore.focusedSessionId（agentcall 两段式虚拟 id 不含 mainSid）
+    usePanelStore().loadSession(ROOT_PANEL_ID, MAIN_SID)
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord()])
+  })
+
+  /** 种 workflow 分区（applyRecords 已私有化，直写分区 ref——不可变替换触发响应性） */
+  function seedWorkflowRecords(agentCalls: WorkflowAgentCall[]): void {
+    const workflowStore = useWorkflowStore()
+    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(MAIN_SID, [
+      {
+        runId: 'wf-v8',
+        scriptName: 'review-fix-loop',
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        agentCalls,
+        stateFilePath: '',
+      },
+    ])
+  }
+
+  it('盲区窗口 record-only 行已可命中：标题 meta 显示 agent 名（旧形态 agentCalls 空 → 「subagent」兜底）', async () => {
+    seedWorkflowRecords([
+      { id: 0, agent: 'reviewer-1', status: 'running', startedAt: new Date().toISOString(), sessionId: 'acs-v8-1' },
+      { id: 1, agent: 'reviewer-2', status: 'running', startedAt: new Date().toISOString(), sessionId: 'acs-v8-2' },
+    ])
+    vi.mocked(sessionApi.getAgentCallHistory).mockResolvedValue([])
+    openSubagent({ virtualId: agentCallVirtualId('acs-v8-1'), enteredFrom: 'workflow' })
+
+    const wrapper = mountTab()
+    await settle(wrapper)
+    // 标题栏 agent 名来自 findAgentCall（合并投影 record-only 行携带 sessionId + agent）
+    expect(wrapper.text()).toContain('reviewer-1')
+    // 从 workflow 进入：返回按钮在场（enteredFrom 语义不受影响）
+    expect(wrapper.find('[data-testid="drawer-subagent-back"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('无值形态对照：agentCalls 空（盲区旧形态）→ 标题回退「subagent」兜底，不炸', async () => {
+    seedWorkflowRecords([])
+    vi.mocked(sessionApi.getAgentCallHistory).mockResolvedValue([])
+    openSubagent({ virtualId: agentCallVirtualId('acs-v8-none'), enteredFrom: 'workflow' })
+
+    const wrapper = mountTab()
+    await settle(wrapper)
+    expect(wrapper.find('[data-testid="drawer-subagent-tab"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('subagent')
+    expect(wrapper.text()).not.toContain('reviewer-1')
     wrapper.unmount()
   })
 })

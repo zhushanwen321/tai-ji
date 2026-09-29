@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * 前端路径工具测试（mock 层；原 path-utils-improve.test.ts 已并入——同 SUT 补充用例，
  * U 编号各自从头无并存理由）。

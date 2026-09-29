@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useBtwInteraction 表单归一化纯函数群直测（test-coverage MF-3 补防线）。
  *

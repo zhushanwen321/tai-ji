@@ -110,6 +110,8 @@ describe('ProviderPage 首屏冒烟', () => {
     const addBtn = wrapper.findAll('button').find((b) => b.text().includes('添加供应商'))
     expect(addBtn).toBeTruthy()
     expect(wrapper.text()).toContain('还没有供应商')
+    // 并列的「从其他 Agent 导入」入口仍在
+    expect(wrapper.find('[data-testid="import-providers-menu"]').exists()).toBe(true)
   })
 })
 

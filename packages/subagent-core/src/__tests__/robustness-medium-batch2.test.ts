@@ -46,7 +46,8 @@ describe("M6: worktree cleanup not gated by patchOk", () => {
 // ── M9: store.save has .catch (not fire-and-forget) ──────────
 
 describe("M9: store.save not fire-and-forget in dispatchAgentCall", () => {
-  const src = readSrc(join("src", "orchestration", "worker-message-pump.ts"));
+  // [D15] finalizeRun 迁 terminal-actions（终局编排单一入口）——pump 薄化为消息路由/重试矩阵
+  const src = readSrc(join("src", "orchestration", "terminal-actions.ts"));
 
   it("no bare `void deps.store.save` without .catch", () => {
     // 查找所有 void deps.store.save(run) 的出现
@@ -60,11 +61,14 @@ describe("M9: store.save not fire-and-forget in dispatchAgentCall", () => {
 // ── M12: budget-done coda 经 finalizeRun 单写点（错误分离语义不变） ──
 
 describe("M12: budget-done separates transition and onRunDone error handling", () => {
-  const src = readSrc(join("src", "orchestration", "worker-message-pump.ts"));
+  // [D15] finalizeRun 迁 terminal-actions（终局编排单一入口）——pump 薄化为消息路由/重试矩阵。
+  // budget-done 触发块留在 pump（dispatchAgentCall 内），coda 本体在 terminal-actions——跨两文件锚定。
+  const pumpSrc = readSrc(join("src", "orchestration", "worker-message-pump.ts"));
+  const src = readSrc(join("src", "orchestration", "terminal-actions.ts"));
 
   it("budget-done branch delegates to finalizeRun (D5-② single coda write point)", () => {
-    // 找到 budget isExceeded 块
-    const budgetMatch = src.match(/budget\.isExceeded\(\)[\s\S]*?\}\s*\}\s*\)/);
+    // 找到 budget isExceeded 块（pump 侧触发点）
+    const budgetMatch = pumpSrc.match(/budget\.isExceeded\(\)[\s\S]*?\}\s*\}\s*\)/);
     expect(budgetMatch).toBeTruthy();
     const budgetBlock = budgetMatch![0];
     // coda 收敛后：budget-done 分支只调 finalizeRun（transition/save/unregister/onRunDone

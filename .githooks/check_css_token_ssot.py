@@ -7,7 +7,7 @@ CSS token SSOT 一致性检查（DESIGN.md frontmatter 投影 ↔ style.css 值�
 
 [2026-09-13] 页面设计目录（docs/page-design/）退役后的新形态：
 值真值 = style.css（运行时唯一源）；DESIGN.md = 视觉权威文档，其 frontmatter
-是面向 AI/impeccable 消费的关键值投影。本守卫保证投影不漂移——此前
+是面向 AI/impeccable 消费的关键值投影。本检查保证投影不漂移——此前
 v6-tokens.css 时代的名称集合校验只能防「漏登记」，防不了「值漂移」，本版
 升级为值相等比对。
 
@@ -128,7 +128,7 @@ def main() -> int:
     print(f"  值真值在 {STYLE_CSS}（运行时唯一源）——先改 style.css，")
     print(f"  再把 {DESIGN_MD} frontmatter 同步为一致值；两端必须逐字相等。")
     print()
-    print(f"\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m")
+    print(f"\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m")
     return 2
 
 

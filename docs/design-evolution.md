@@ -3,11 +3,11 @@
 > 记录 UI 设计系统从初始到当前形态的完整演变过程。每个阶段记录：方向、为什么转向、关键决策、标志文档。
 >
 > 当前态权威文档：
-> - 视觉设计权威：[docs/DESIGN.md](DESIGN.md)（v6 范式 + token 登记对照；2026-09-13 page-design 目录退役后收口并入）
-> - 值真值：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css)（运行时唯一源；DESIGN.md frontmatter 投影挂值相等守卫）
+> - 视觉设计权威：[docs/DESIGN.md](DESIGN.md)（v6 范式 + token 登记对照；2026-09-13 page-design 目录退役后收敛并入）
+> - 值真值：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css)（运行时唯一源；DESIGN.md frontmatter 投影挂值相等检查）
 > - 视觉规格稿：`v6-spec-*.html` 已删除（2026-09-13 退役，git 可追溯）；demo 活验证在 `.tmp/v6/`
 >
-> 已删除过程文档（2026-09-13 收口，残值并入 v6-master-spec.md，git 可追溯）：v6-design.md（五原则原始定稿）、v6-summary.md（索引/摘要）、design-system.md（v3 原语层，活跃裁决并入 master-spec §3.2/§5.1/§5.13/§6.1）
+> 已删除过程文档（2026-09-13 收尾，残值并入 v6-master-spec.md，git 可追溯）：v6-design.md（五原则原始定稿）、v6-summary.md（索引/摘要）、design-system.md（v3 原语层，活跃裁决并入 master-spec §3.2/§5.1/§5.13/§6.1）
 
 ---
 
@@ -51,7 +51,7 @@ Warm & Soft 被整体推翻。ADR-0019 裁决视觉方向收敛到**冷蓝暗色
 - 组织方法：L0-L4 递归骨架（recursive-skeleton），每个设计单元 = spec.md + draft HTML
 - 验收：W01-W20 共 20 波视觉验收全部 PASS
 
-v3 确立了设计 tokens SSOT（原 `design-tokens.md`，2026-09 已收口为 `v6-tokens.css`）和组件原语层（原 `design-system.md`，2026-09-13 已删除，活跃裁决并入 v6-master-spec.md）。
+v3 确立了设计 tokens SSOT（原 `design-tokens.md`，2026-09 已收敛为 `v6-tokens.css`）和组件原语层（原 `design-system.md`，2026-09-13 已删除，活跃裁决并入 v6-master-spec.md）。
 
 **标志文档**：
 - ADR-0019（视觉方向裁决，已否——见 [decisions.md](adr/decisions.md) 已否谱系）
@@ -76,7 +76,7 @@ v3 的设计系统工程化程度不弱于竞品（token SSOT、20 波验收）�
 visual-modernization 提案（v6 输入基线，内容已合并进 v6-master-spec）提出了五条设计原则：
 
 1. **层级代替边框**——静态信息容器只用表面色，不叠加 1px 边框；边框仅留给浮起可交互容器和 focus 态
-2. **圆角升档**——默认 3px → 6-8px；卡片 8-10px；浮层 12px；徽章胶囊化
+2. **圆角档位提升**——默认 3px → 6-8px；卡片 8-10px；浮层 12px；徽章胶囊化
 3. **正文提亮、meta 减量**——正文提亮一档，工具行参数从全绝对路径改为文件名加亮
 4. **内容列收窄**——对话流 max-width 720px 居中
 5. **彩色降噪**——状态指示极小化（图标 → 圆点），exit≠0 中性化表达
@@ -111,10 +111,10 @@ v6-design.md（2026-09-13 已删除，git 可追溯）在此基线上确立最�
 
 太极概念的三层拆解中，V3 只覆盖「色」层。「形」（圆/环，需加大圆角或 S 曲线分割）和「动」（周而复始，需太极旋转 loader）是独立工作线，不在本次换色范围。
 
-换色已落地到 `v6-tokens.css`（V3 纯灰值 SSOT，hook 守卫）和 `.tmp/v6/` Vue demo（taiji 预设）。
+换色已落地到 `v6-tokens.css`（V3 纯灰值 SSOT，hook 检查）和 `.tmp/v6/` Vue demo（taiji 预设）。
 
 **标志文档**：
-- [ADR-0066](adr/decisions.md)（换色决策与被否方案；原配色决策文档已删除，git 可追溯）
+- [ADR-0066](adr/decisions.md)（换色决策与不采用方案；原配色决策文档已删除，git 可追溯）
 - [`style.css`](../packages/renderer/src/style.css)（V3 纯灰值真值）
 
 ---
@@ -134,7 +134,7 @@ v6-spec-*.html（视觉标注参考）
 ```
 
 **色相**：太极 V3 纯灰（`--bg #131316` / `--accent #cfcfd4`）
-**范式**：v6 五原则（层级代边框 / 圆角升档 / 正文提亮 / 内容收窄 / 彩色降噪）
+**范式**：v6 五原则（层级代边框 / 圆角档位提升 / 正文提亮 / 内容收窄 / 彩色降噪）
 **字体**：Inter
 **架构**：三栏 shell（base 平铺 + sidebar 透明融合 + main float-panel 浮起）
 

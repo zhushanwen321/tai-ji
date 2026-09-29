@@ -4,7 +4,7 @@
 //
 // [U2a / §3.1 意图 API 迁移] 终态持久化四件套（.state 写 + entry/archive + manifest +
 // .alive 删）归口 store.markFinalized / markCancelled——本文件降级为**副作用编排层**
-// （collectPatch / completeRecord / worktree cleanup / pending 注销① / onFinalized 钩子，
+// （collectPatch / completeLegacyClosed / worktree cleanup / pending 注销① / onFinalized 钩子，
 // §3.1 副作用归属边界）。文件布局知识（写哪个文件、什么顺序）不再散落此处：D8 v7 写序
 //（.state writeSync 先 → manifest writeSync 后 → .alive 删）由 store 内部单点保证。
 //
@@ -13,7 +13,7 @@
 // 得跳过 worktree cleanup——磁盘满/权限错时 worktree 泄漏比索引缺失严重；终态写失
 // 败时 record 留 running 形态（磁盘无终态位），下次 boot 孤儿恢复终态化承接（§3.4）。
 //
-// B9 兜底：completeRecord/终态原语抛错→后续 cleanup 仍执行。
+// B9 兜底：completeLegacyClosed/终态原语抛错→后续 cleanup 仍执行。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -21,7 +21,7 @@ import * as path from "node:path";
 import { getLogger } from "../../core/logger.ts";
 
 import { bestEffort } from "../assembly/best-effort.ts";
-import { completeRecord } from "./execution-record.ts";
+import { completeLegacyClosed } from "./execution-record.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import type { RecordStore } from "./record-store.ts";
@@ -153,7 +153,7 @@ async function cleanupWorktreeIfBound(deps: FinalizeDeps, record: ExecutionRecor
 /**
  * 时序收尾（D-017，[U2a] 终态持久化面归口 store 意图原语后的编排形态）。
  *
- * 步骤：序言 sessionFile 反查 → Step 0 collectPatch → Step 1 completeRecord →
+ * 步骤：序言 sessionFile 反查 → Step 0 collectPatch → Step 1 completeLegacyClosed →
  * Step 2 终态原语（store.markFinalized / markCancelled：.state writeSync + entry/
  * archive + manifest + .alive 删，D8 v7 写序）→ Step 3b worktree cleanup →
  * pending 注销① → onFinalized 钩子。
@@ -175,11 +175,11 @@ export async function doFinalizeRecord(
   // ── Step 0: collectPatch（best-effort）──
   await collectPatchIfWorktree(deps, record);
 
-  // ── Step 1: completeRecord（B9: 抛错→后续仍执行）──
+  // ── Step 1: completeLegacyClosed（B9: 抛错→后续仍执行）──
   try {
-    completeRecord(record, result, status, closedReason);
+    completeLegacyClosed(record, result, closedReason);
   } catch (err) {
-    bestEffort(err, "completeRecord (finalizeRecord B9)", "error");
+    bestEffort(err, "completeLegacyClosed (finalizeRecord B9)", "error");
   }
 
   // ── Step 2: 终态持久化四件套归口（B1 迁移点）──
@@ -217,13 +217,13 @@ export async function doFinalizeRecord(
 
   // pending-notifications：终态注销（只记 registry 状态，通知由 BgNotifier 发）
   // [W4 发射点枚举归属①] 注销合法发射点枚举（设计 D2）第 ① 处：subagent record
-  // 终态化（finalizeRecord 路径，含监督器放弃）。其余合法发射点：② = store
+  // 终态化（finalizeRecord 路径）。其余合法发射点：② = store
   // .markRoundIdle 簿记⑧（U5 收口后编排层无直发；setPendingUnregister →
   // emitPendingUnregister 唯一发射）；③ workflow run 终态迁移
-  //（transition("done") 路径）；④ 监督器显式放弃（走本路径，终态化+注销同批）；
-  // ⑤ 注册对账 sweep 补发（round-supervisor/reconcile-sweep.ts）。进程退出本身
+  //（transition("done") 路径）；
+  // ⑤ 注册对账 sweep 补发（registry-reconcile/reconcile-sweep.ts）。进程退出本身
   // 永远不是注销理由（subagent-service disposeAllRecords 的 emit 属①——其同批
-  // completeRecord+archive 终态化）。
+  // completeLegacyClosed+archive 终态化）。
   deps.emitUnregister(record.id, status);
 
   // [F-5 修复] 宿主侧终态收口钩子（chat 轮路由注销的单一汇聚点，见 FinalizeDeps
@@ -251,16 +251,16 @@ export type RoundSettlementOutcome =
  *
  * [U2a/B5] 轮终簿记全集（①-⑫）归口 store.markRoundIdle——本方法瘦身为编排薄壳。
  * 簿记语义（细节与 result 写入规则见 record-store.markRoundIdle 方法头）：
- *   - 不调 completeRecord（record 不冻结，保留 turns[] 等运行时状态供续聊累积）
+ *   - 不调 completeLegacyClosed（record 不冻结，保留 turns[] 等运行时状态供续聊累积）
  *   - 不调 store.archive（record 留内存，getMutable 可查、list 可见）
  *   - 不 cleanup worktree（保留对话模式工作目录）
- *   - **[B5/D3a] `.alive` 不再删除**——写权声明跨轮延续（release = 终态原语或
- *     idle-GC 回收两出口；轮终 record 保持 idle 可续聊态、随时续聊 spawn 写同一
+ *   - **[B5/D3a] `.alive` 不再删除**——写权声明跨轮延续（release = 终态原语
+ *     markSettledOut 单出口；轮终 record 保持 idle 可续聊态、随时续聊 spawn 写同一
  *     sessionFile，删则轮后跨进程防御空窗）
  *   - [A3] 终态簿记已冻结（endedAt 已设）的调用由 store 内硬断言 fail-fast
  *     （复活终态的调用即 bug——S7 防御），throw 先于 store 簿记⑧的注销发射
  *
- * @throws Error record 终态簿记已冻结（completeRecord 已跑）仍被调用（store.markRoundIdle
+ * @throws Error record 终态簿记已冻结（completeLegacyClosed 已跑）仍被调用（store.markRoundIdle
  *   内硬断言——冻结权威判据 = endedAt 已设，写点枚举与两构造性调用面论证见其方法头）。
  */
 export async function doFinalizeRoundToIdle(

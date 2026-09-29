@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * formatShortSessionFile 纯函数单测。
  *

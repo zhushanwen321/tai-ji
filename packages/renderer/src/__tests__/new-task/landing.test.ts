@@ -151,7 +151,7 @@ describe('Landing 渲染条件（Panel v-if 分支）', () => {
     const wrapper = mountPanel({ sessionId: 'empty-session' })
     // 核心：Landing 不渲染 → directory/branch chip 不存在 → 不会触发 idle→dir-popover 非法 transition
     expect(wrapper.findComponent(Landing).exists()).toBe(false)
-    // 空对话态文案（区别于无 session 兑底的「选择左侧会话开始」）
+    // 空对话态文案（区别于无 session 兜底的「选择左侧会话开始」）
     expect(wrapper.text()).toContain('输入消息开始对话')
     // band composer 渲染（用户直输发该 session，不走 chip 流程）
     expect(wrapper.find('[data-testid="band-composer"]').exists()).toBe(true)

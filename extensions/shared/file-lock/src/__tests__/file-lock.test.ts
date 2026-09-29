@@ -4,6 +4,10 @@
 //   - sync 版临界区互斥（并发不交错）
 //   - unlock 后可再锁（finally 释放语义）
 //   - sync 版 fail-fast（ELOCKED 预算耗尽抛错，不用默认 1s——测试覆盖盖短预算）
+//   - 锁目录被外部删除的容忍路径（原 compromise 场景的自实现语义）：D1-A 自实现无保活
+//     touch（边界声明见 lock-core.ts 头注释），compromise 检测不存在——fn 执行期间
+//     锁目录被外部删除无定时器发现，release 时 rmdir 命中 ENOENT 静默成功
+//     （照抄 proper-lockfile removeLock 容忍），不外抛、不影响 fn 结果
 //   - 真实跨进程互斥：两个 node 子进程并发 RMW 同一 JSON 文件，计数零丢失
 //     （「两写方并发不丢条目」的 D5a/D1e 核心验收形态）
 
@@ -61,6 +65,49 @@ describe("withFileLockSync", () => {
 				{ staleMs: 60_000 },
 			),
 		).toThrowError(/ELOCKED 重试预算 30ms 耗尽/);
+	});
+});
+
+// 锁目录被外部删除的容忍路径：proper-lockfile onCompromised 的自实现替代形态对照
+// （proper-lockfile 靠保活定时器 stat 发现锁被删 → ERELEASED → debug 留痕；本实现
+// 无保活定时器，删除不可发现、release 容忍 ENOENT）。
+describe("withFileLockSync 锁目录被外部删除（原 compromise 场景的自实现语义）", () => {
+	let tmpDir: string;
+	let target: string;
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-lock-extrem-"));
+		target = path.join(tmpDir, "target.json");
+	});
+	afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }));
+
+	it("fn 执行期间锁被外部删除 → fn 正常返回 + release 静默成功 + 可立即再锁", () => {
+		const result = withFileLockSync(
+			target,
+			() => {
+				// 模拟外部清理（对端 stale 夺取会先 rmdir 再 mkdir；此处直接删）：
+				// 自实现无保活定时器，删除本身不触发任何回调
+				fs.rmSync(`${target}.lock`, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+				return "fn-done";
+			},
+			{ staleMs: 2000 },
+		);
+
+		// fn 结果原样返回（无 compromised 拦截——该机制随保活一并移除）
+		expect(result).toBe("fn-done");
+		// release 对已消失的锁目录静默成功（ENOENT 容忍）——由下一断言间接证明：
+		// 若 release 抛错，sync 版 finally 不吞错会直接外抛；直接再锁验证锁已释放
+		expect(withFileLockSync(target, () => "again")).toBe("again");
+	});
+
+	it("fn 抛错且锁目录已被外部删除 → 错误照常外抛 + release 不叠加失败", () => {
+		expect(() =>
+			withFileLockSync(target, () => {
+				fs.rmSync(`${target}.lock`, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+				throw new Error("boom");
+			}),
+		).toThrow("boom");
+		// finally 的 release 对 ENOENT 静默——不遮蔽原始 boom 错误（上方断言已过）
 	});
 });
 

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useCompactQueue 单测（compact-queued-messages W1，TC1-TC8 + S1/S2 加固 TC9-TC11
  * + u4a 确认机制 CD1-CD3 + u4b flush 投递确认驱动 F1-F5）。

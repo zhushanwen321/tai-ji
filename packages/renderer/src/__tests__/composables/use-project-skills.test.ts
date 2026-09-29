@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useProjectSkills / useGlobalSkills 单测（W4，cw-2026-07-21-fix-ask-user-ime）。
  *

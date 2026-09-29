@@ -11,7 +11,7 @@
 
 **VERDICT: PASS (must-fix 0 / suggestion 5)**
 
-设计的核心事实链全部经当前源码独立核实成立，四个决策（D1 删守卫 / D2 slot 回退 let / D3 出口收敛 / D4 移交边界）均通过四问核对，无投机抽象、无新增机制、「行为零变更」有构造性可证伪验收。5 条 suggestion 全部为文档级事实精度修正（行号漂移、版本号过时、一处测试路径表述失实、一处调用点计数失实、测试基线数字漂移），不阻塞实施，但建议实施前顺手更正以防误导实施者。
+设计的核心事实链全部经当前源码独立核实成立，四个决策（D1 删检查 / D2 slot 回退 let / D3 出口收敛 / D4 移交边界）均通过四问核对，无投机抽象、无新增机制、「行为零变更」有构造性可证伪验收。5 条 suggestion 全部为文档级事实精度修正（行号漂移、版本号过时、一处测试路径表述失实、一处调用点计数失实、测试基线数字漂移），不阻塞实施，但建议实施前顺手更正以防误导实施者。
 
 ---
 
@@ -21,12 +21,12 @@
 
 | # | 设计声称（章节） | 当前源码核实（file:line 实读） | 判定 |
 |---|---|---|---|
-| F1 | M24 守卫存在：`assertSafeTimerDelay` 双分支 throw，约 30 行（§3.1，记 :394-422） | `extensions/universal/structured-output/src/loop-gate.ts:395-423`：锚点注释 :395-402 + `MAX_TIMER_DELAY_MS` :403 + 函数体 :408-423（两 throw 分支：非有限值 / 超 2^31-1） | 属实（行号 +1） |
+| F1 | M24 检查存在：`assertSafeTimerDelay` 双分支 throw，约 30 行（§3.1，记 :394-422） | `extensions/universal/structured-output/src/loop-gate.ts:395-423`：锚点注释 :395-402 + `MAX_TIMER_DELAY_MS` :403 + 函数体 :408-423（两 throw 分支：非有限值 / 超 2^31-1） | 属实（行号 +1） |
 | F2 | 唯一生产调用点实参恒为字面量 `TEARDOWN_FORCE_EXIT_MS = 15_000`（§3.1，记 :484 / :438） | 调用点 `loop-gate.ts:485`（唯一，grep 全仓证实）；`TEARDOWN_FORCE_EXIT_MS = 15_000` 于 :439，`export const` 字面量 | 属实 |
 | F3 | 两个 throw 分支对 15000 永不可达（by construction） | 15000 是有限数且 < 2^31-1，数学事实 | 属实 |
 | F4 | SSOT 原版 `packages/subagent-core/src/shared/timer-delay.ts:37` 有 ≥8 个真实动态调用点（§3.1） | 实际 **7 个**调用点：settled-watchdog.ts:237/269/309（×3）+ lifecycle-manager.ts:142 + supervisor.ts:371 + lifecycle.ts:197 + launcher.ts:168。设计列举的 dialog-queue.ts:53 与 subagent-service（run-orchestration.ts:1604）实为**注释引用**非调用 | **部分属实**（计数失实；「原版守动态输入、副本喂字面量」的方向结论成立，见 S4） |
 | F5 | 锚点注释漂移：指向 `@zhushanwen/pi-subagent-workflow` 的 `shared/timer-delay.ts`，该路径不存在（§3.1） | 注释实文 `loop-gate.ts:396-398`；`find` 全仓 `timer-delay.ts` 唯一命中 `packages/subagent-core/src/shared/timer-delay.ts`；`extensions/universal/subagent-workflow/` 内无此文件 | 属实 |
-| F6 | 测试专设 5 条断言锁守卫（§3.1，记 :704-709） | `tests/loop-gate.test.ts:705-711`（it 块），5 断言在 :706-710（NaN / +Infinity / 2^31 超限 throw + 15000 放行 + 2^31-1 放行） | 属实（行号 +1~2） |
+| F6 | 测试专设 5 条断言锁检查（§3.1，记 :704-709） | `tests/loop-gate.test.ts:705-711`（it 块），5 断言在 :706-710（NaN / +Infinity / 2^31 超限 throw + 15000 放行 + 2^31-1 放行） | 属实（行号 +1~2） |
 | F7 | slot 三件套 17 行：SLOT_KEY + TeardownTimerSlot + getter，`armForceExitTeardown` 经 slot 读写（§3.2，记 :446-463 / :482-483 / :494） | `loop-gate.ts:447-464`（注释 :447-449 + key :450 + type :452 + getter :454-464）；读写点 :483（get）/ :484（clear）/ :495（set） | 属实（行号 +1） |
 | F8 | 注释自认 jiti 双实例失效模式良性——「至多双 timer 各自 process.exit，进程级幂等」（§3.2，记 :447-448） | 注释实文 `loop-gate.ts:447-449` 逐字一致 | 属实 |
 | F9 | 引入史 `c20f2b1ef`（2026-08-29 review round 2）以 **suggestion** 采纳 slot 化，非 bug 驱动；slot 化前原形态即模块级 `let teardownTimer`（§3.2） | `git show c20f2b1ef` 证实：commit message 明列「suggestions: loop-gate teardownTimer / notify-ledger 旗标 slot 化（C-ext-06）」；diff 显示删除的原注释为「已武装的兜底硬退 timer（模块级；terminal 全生命周期至多一次，防御性幂等再清）」+ `let teardownTimer` | 属实 |
@@ -40,7 +40,7 @@
 | F17 | SW 侧 vitest alias 指向 structured-output/src/index.ts 但无任何源文件 import（alias 为防御性基础设施）（§3.3） | `extensions/universal/subagent-workflow/vitest.config.ts:30` alias 实文；grep SW src 与 tests 均零 import（唯一命中 alias 配置自身） | 属实 |
 | F18 | 悬空 unified-hooks 引用：text-primitives.ts:43-44「见 extensions/universal/unified-hooks 的 extractErrorText 及其文档」（§3.3 / E7） | **当前已不存在**——`ext-simplify-01` 实施commit `bf7ee07d0`（09-12 02:36，其 impl-plan E5 明确认领同点「text-primitives.ts :43-44 直接删除该从句」）已清理，当前 text-primitives.ts 全文无 unified-hooks 字样。设计 §6.4 已预见此情况并写明「后做的一方幂等跳过」协议，E7 在当前现状下为 no-op | **已被 01 号实施改变**（设计协同协议已覆盖，非设计错误） |
 | F19 | redesign 文档 :275 有「`assertSafeTimerDelay` 包裹」表述需同批回写（E2，C-proc-10） | `docs/design/structured-output-redesign.md:275` 实文：「15s 兜底硬退 timer（`assertSafeTimerDelay` 包裹 + `unref` + terminal 路径幂等 clear；exit code 1……）」，位于 §6.3 v4 补记 SO 侧 terminal 动作链 | 属实（回写点定位准确） |
-| F20 | redesign 文档 :339 的 kill-chain 表述属 SW 包，不动（Out-of-scope） | `:339` 位于附录 D「加固机制清单」，其上文明确「本节回写 **SW 侧**与其余语义」——SIGKILL 升级链/watchdog 为 SW 侧机制（其 `assertSafeTimerDelay` 引用对应 subagent-core launcher.ts:168 等仍在用的守卫），不随本包 E1 删除而漂移 | 属实（划界成立） |
+| F20 | redesign 文档 :339 的 kill-chain 表述属 SW 包，不动（Out-of-scope） | `:339` 位于附录 D「加固机制清单」，其上文明确「本节回写 **SW 侧**与其余语义」——SIGKILL 升级链/watchdog 为 SW 侧机制（其 `assertSafeTimerDelay` 引用对应 subagent-core launcher.ts:168 等仍在用的检查），不随本包 E1 删除而漂移 | 属实（划界成立） |
 | F21 | 既有测试基线绿：8 文件 191 用例通过（2026-09-12 实跑）（证据基线） | 审查时实跑 `npx vitest run`：**8 文件 194 用例全部通过**（867ms）。差异 +3 = commit `bbfae6f19`（09-10）加入的 stale ctx ①②③ 三用例（loop-gate.test.ts :744+）。全绿结论成立，用例数已漂移 | 部分属实（见 S3） |
 | F22 | 包版本 v5.1.4，实施时 patch bump 5.1.4 → 5.1.5（§1 / §7） | 当前 `package.json` 已是 **5.1.5**——ext-simplify 批次收尾 bump `c79cd621c`（09-12 13:52「bte/plan/scheduler/structured-output/spt patch」）已占用该版本号。实施时应 bump 至 5.1.6 | **已被批次 bump 改变**（见 S2） |
 | F23 | 审计修正 1：`executeStructuredOutput` 的「抽出以便单元测试直接调用」注释属实（execute.ts:143），且被 tests/structured-output.test.ts:344+ 经 index 调用（§7） | `execute.ts:143` 注释实文；`tests/structured-output.test.ts:29` import 自 `../src/index.js` + :343 起 describe 直调 `executeStructuredOutput` | 属实 |
@@ -87,7 +87,7 @@
 ### S5：行号系统性 ±1~2 偏移（定位无歧义，建议实施前批量校准）
 
 - **设计文档位置**：§3.1 / §3.2 / §3.3 / §6.5 / §7 全部 file:line（设计自我声明「2026-09-12 实读当前源码值」）。
-- **核对结果**（设计值 → 审查实读值）：守卫段 :394-422 → :395-423；调用点 :484 → :485；TEARDOWN_FORCE_EXIT_MS :438 → :439；GATE_ENTRY_TYPE :392 → :393；同文件使用 :514 → :515；slot 段 :446-463 → :447-464；slot 读写 :482-483/:494 → :483-484/:495；reset :79-86 → :79-86（一致）；reset 用例 :105-119 → :106-121；守卫用例 :704-709 → :705-711；P1 引用 :674-700 → :676-703。
+- **核对结果**（设计值 → 审查实读值）：检查段 :394-422 → :395-423；调用点 :484 → :485；TEARDOWN_FORCE_EXIT_MS :438 → :439；GATE_ENTRY_TYPE :392 → :393；同文件使用 :514 → :515；slot 段 :446-463 → :447-464；slot 读写 :482-483/:494 → :483-484/:495；reset :79-86 → :79-86（一致）；reset 用例 :105-119 → :106-121；检查用例 :704-709 → :705-711；P1 引用 :674-700 → :676-703。
 - **问题**：偏移均为 1-2 行、语义定位无歧义，但设计声称行号为「实读当前值」与事实有出入（可能因 09-12 当天其他 commit 的细小改动）。
 - **建议修法**：实施时以符号名定位（grep），不照抄行号；或实施 PR 中附行号校准 diff。不要求设计文档逐行更正。
 
@@ -97,9 +97,9 @@
 
 以下检查点经实际读源码/跑测试/查 git 历史通过，附证据快照，防后续重复怀疑。
 
-### 5.1 M24 守卫的「编译期字面量前提已漂移」指控成立
+### 5.1 M24 检查的「编译期字面量前提已漂移」指控成立
 
-`loop-gate.ts:485` 是 `assertSafeTimerDelay` 在本包的唯一生产调用（grep 全仓证实：其余命中为定义 :408、注释 :397/:478、测试 :705-711），实参 `TEARDOWN_FORCE_EXIT_MS`（:439）为 `export const` 字面量 `15_000`。原版（subagent-core）守 7 个真实动态调用点（见 S4 证据）。守卫的 30 行 + 5 断言在本地副本上守一个 by construction 不可能的危害——设计的事实链成立，D1 整体删除裁决有据。E1 删除面正确排除了 `MS_PER_SECOND`（:405-406，teardown 日志 :488 仍在用，不在删除面）。
+`loop-gate.ts:485` 是 `assertSafeTimerDelay` 在本包的唯一生产调用（grep 全仓证实：其余命中为定义 :408、注释 :397/:478、测试 :705-711），实参 `TEARDOWN_FORCE_EXIT_MS`（:439）为 `export const` 字面量 `15_000`。原版（subagent-core）守 7 个真实动态调用点（见 S4 证据）。检查的 30 行 + 5 断言在本地副本上守一个 by construction 不可能的危害——设计的事实链成立，D1 整体删除裁决有据。E1 删除面正确排除了 `MS_PER_SECOND`（:405-406，teardown 日志 :488 仍在用，不在删除面）。
 
 ### 5.2 D2 裁决（slot 回退模块级 let）立论根基完整成立
 
@@ -114,7 +114,7 @@
 
 ### 5.3 强退链「本体不触碰」边界与「行为零变更」可证伪性
 
-- E1/E3 改动面 = `armForceExitTeardown` 的守卫前置调用与 timer 持有方式；链路本体（terminal 判定 :558 / 双通道日志 :504-529 / guardStaleCtx 包装 :567-578 / abort+shutdown / exit code 1 / stderr 文案）零分支改动。
+- E1/E3 改动范围 = `armForceExitTeardown` 的检查前置调用与 timer 持有方式；链路本体（terminal 判定 :558 / 双通道日志 :504-529 / guardStaleCtx 包装 :567-578 / abort+shutdown / exit code 1 / stderr 文案）零分支改动。
 - P1 的「既有用例零改动通过 = 行为未变的构造性证明」论证有效：teardown 行为已被三用例锁定（常量锁 :677-679 / 15s 到点 stderr+exit(1) :681-694 / 幂等重武装 :696-703——其中幂等用例两次直调 `armForceExitTeardown`，在 let 形态下直接覆盖新代码路径的重复武装 clear）；terminal 负面路径（真实 3 连败）由 mock pi 装配层用例驱动（loop-gate.test.ts:717-732 三连失败到 terminal+shutdown+不 steer；:744+ stale ①②③ 三用例覆盖 guardStaleCtx 分诊下的武装行为，bbfae6f19 加入）+ characterization-hook.test.ts 承担。设计 §8.1 对「负面路径本地不可稳定复现」的诚实边界声明与既有覆盖现状相符——验收覆盖强退路径的真实触发场景（事件驱动级），不缺口。
 - 审查时实跑全量 194 用例绿（F21），基线健康。
 
@@ -140,7 +140,7 @@ ext-simplify-01 实施 commit `bf7ee07d0`（09-12 02:36）已清理 text-primiti
 
 ### 5.8 E2（redesign 文档回写）定位准确且划界正确
 
-redesign.md:275 的「`assertSafeTimerDelay` 包裹」表述在 SO 侧 terminal 动作链段（E2 回写点）；:339 的同名引用在附录 D SW 侧加固机制段（其守卫对应 subagent-core launcher.ts:168 等仍在用的实装，不随本包删除漂移）。E2 只回写 :275、不动 :339 的范围划定正确。redesign 文档本身覆盖 SO+SW 两包（§实施范围明文「extensions/universal/subagent-workflow/」），「:339 属 SW 包」的归属描述与其文档结构一致。
+redesign.md:275 的「`assertSafeTimerDelay` 包裹」表述在 SO 侧 terminal 动作链段（E2 回写点）；:339 的同名引用在附录 D SW 侧加固机制段（其检查对应 subagent-core launcher.ts:168 等仍在用的实装，不随本包删除漂移）。E2 只回写 :275、不动 :339 的范围划定正确。redesign 文档本身覆盖 SO+SW 两包（§实施范围明文「extensions/universal/subagent-workflow/」），「:339 属 SW 包」的归属描述与其文档结构一致。
 
 ### 5.9 四项 low 移交登记完整可追溯（B 部分结论）
 
@@ -154,13 +154,13 @@ E4-E7 各含：精确位置（文件 + 行号 + 符号名）、改动内容、�
 
 | 机制 | ①赌的决策（会真变吗） | ②间接成本 vs 认知压缩 | ③已发生证据 or 想象未来 | ④反模式 | 结论 |
 |---|---|---|---|---|---|
-| D1 删守卫 + 一行 SSOT 指路注释 | 「TEARDOWN_FORCE_EXIT_MS 保持编译期字面量」——字面量改动必过 diff review，重审触发已登记（§9.3 代价 1） | 净删 30 行 + 5 断言，换 1 行注释；概念数 -2（assertSafeTimerDelay / Node 塌缩语义本地化） | 唯一调用点字面量实参（:485/:439 实读）+ 原版 7 动态调用点对照（已发生证据） | 删除的对象本身是 speculative guard（防 review 漏检的仪式守卫）——本设计消除而非引入 | 通过 |
+| D1 删检查 + 一行 SSOT 指路注释 | 「TEARDOWN_FORCE_EXIT_MS 保持编译期字面量」——字面量改动必过 diff review，重审触发已登记（§9.3 代价 1） | 净删 30 行 + 5 断言，换 1 行注释；概念数 -2（assertSafeTimerDelay / Node 塌缩语义本地化） | 唯一调用点字面量实参（:485/:439 实读）+ 原版 7 动态调用点对照（已发生证据） | 删除的对象本身是 speculative guard（防 review 漏检的仪式检查）——本设计消除而非引入 | 通过 |
 | D2 slot 回退模块级 let + 两行裁决注释 | 「teardown timer 永不成为跨 session 单例」——一次性武装 + process.exit 终结是机制固有属性，重审触发登记（§9.3 代价 2） | 净删 17 行 Reflect 机械；概念数 -3（SLOT_KEY / Slot 类型 / getter + C-ext-06 适用推理义务） | 引入史 suggestion 非 bug 驱动（c20f2b1ef commit message 实证）+ 先例三处前提核对（实读） | 保留 slot 才是 pass-through 反向问题（按模式对齐非按前提对齐的模式误配）；回退消除 | 通过 |
 | D3 出口按消费方真实性收敛 | 「深路径导出 + 测试契约锁定」现状已被消费（不赌未来） | 纯减法：删 3 个零消费导出 + 3 个零消费 re-export，无新增面 | 消费方 grep 全量清单（审查复核一致） | 无 | 通过 |
 | D4 移交边界（E1/E3 本设计、E4-E7 移交） | 无赌注：contested 项按纪律随裁决落地（E1/E3 同函数一批改完是空间局部性，非投机） | 无新增机制 | 审计定性 + 批 A 协同实证（E7 已被先做方消化） | 无 | 通过 |
 | 保留面（签名归一化族 / 强退本体 / 双变体 / isObjectRootSchema 跨包副本） | 设计声明不动（Out-of-scope） | 契约测试 cross-package-contract.test.ts:82-88 锁跨包字节相等（实读证实副本存在于 subagent-core agent-opts-resolver.ts:54） | 2026-09-11 审计四问记录（sa-ca793788），本设计不重开 | 不在本次审查范围（任务边界） | 豁免（非本设计引入） |
 
-**简化铁律核对**：概念数严格下降（守卫语义 -2、slot 机械 -3，新增机制 0——两处注释是知识锚定不是机制）；「简化后更难懂 = 失败」不触发（let + 一眼可见的 setTimeout 是 JS 最低共同形态）。**「改测试迁就简化 = 撤销」核对**：E1 删守卫专设用例、E4 删 reset 专设用例均为「被测对象已亡、其专设测试同亡」，行为面用例零改动（P1/P2 明文），不属于迁就。**second-system effect**：纯减法设计，无「顺便做进去」的通用性。**Greenspun / inner-platform / abstraction inversion / leaky abstraction / middle man**：本设计未引入任何新抽象层，无命中。
+**简化铁律核对**：概念数严格下降（检查语义 -2、slot 机械 -3，新增机制 0——两处注释是知识锚定不是机制）；「简化后更难懂 = 失败」不触发（let + 一眼可见的 setTimeout 是 JS 最低共同形态）。**「改测试迁就简化 = 撤销」核对**：E1 删检查专设用例、E4 删 reset 专设用例均为「被测对象已亡、其专设测试同亡」，行为面用例零改动（P1/P2 明文），不属于迁就。**second-system effect**：纯减法设计，无「顺便做进去」的通用性。**Greenspun / inner-platform / abstraction inversion / leaky abstraction / middle man**：本设计未引入任何新抽象层，无命中。
 
 ---
 

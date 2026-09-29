@@ -111,55 +111,6 @@ describe('PluginRegistry', () => {
     ).toBeTruthy()
   })
 
-  // ── TC-1-04: cacheDescriptors / getDescriptor / getAllDescriptors ─
-  it('TC-1-04: cacheDescriptors / getDescriptor / getAllDescriptors', async () => {
-    const registry = new PluginRegistry(tmpDir, tmpDir)
-
-    const descA = {
-      pluginId: 'plugin-a',
-      version: '1.0.0',
-      displayName: 'Plugin A',
-      description: '',
-      main: 'index.js',
-      activationEvents: ['onStartupFinished'],
-      trustLevel: 'sandbox' as const,
-      status: 'UNLOADED' as const,
-      contributes: {},
-      permissions: [],
-      engines: { 'taiji': '*' },
-      pluginPath: '/tmp/plugin-a',
-      source: 'external' as const,
-      extensionDependencies: [],
-    }
-    const descB = {
-      pluginId: 'plugin-b',
-      version: '2.0.0',
-      displayName: 'Plugin B',
-      description: 'Second plugin',
-      main: 'main.js',
-      activationEvents: ['onSlashCommand:test'],
-      trustLevel: 'trusted' as const,
-      status: 'UNLOADED' as const,
-      contributes: {},
-      permissions: [],
-      engines: { 'taiji': '*' },
-      pluginPath: '/tmp/plugin-b',
-      source: 'external' as const,
-      extensionDependencies: [],
-    }
-
-    registry.cacheDescriptors([descA, descB])
-
-    expect(registry.getDescriptor('plugin-a')).toEqual(descA)
-    expect(registry.getDescriptor('plugin-b')).toEqual(descB)
-    expect(registry.getDescriptor('nonexistent')).toBe(undefined)
-
-    const all = registry.getAllDescriptors()
-    expect(all.length).toBe(2)
-    const ids = all.map(d => d.pluginId).sort()
-    expect(ids).toEqual(['plugin-a', 'plugin-b'])
-  })
-
   // ── TC-1-05: reload() re-scans ────────────────────────────────
   it('TC-1-05: reload() re-scans', async () => {
     // 先扫描，此时应包含 hello-world

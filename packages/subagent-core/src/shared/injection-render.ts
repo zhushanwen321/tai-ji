@@ -16,6 +16,9 @@
 //   「内置优先保留」两段式）；models 段无预算参数，完整渲染永不截（设计钉死）；
 // - format 内部先排后截：pi 调用链数据已排时重排幂等，不破坏「pi 现调用
 //   形态下输出逐字节等价」（CA2 快照验收前提）。
+// - 空态显式化（D4-2）：subagents/workflows 两段新增空发现态渲染
+//   formatEmptyResourceList（(none discovered; roots: ...)）——条目 format
+//   函数空列表仍返回空串（判据契约），空态接管在工厂层（resource-list-injector）。
 // 设计锚点：红线 5（ModelEntry 守卫）与红线 7（分段条目预算），见上方差异定约。
 
 import { escapeXml, renderXmlSection } from "./xml-injection.ts";
@@ -38,26 +41,29 @@ export interface WorkflowEntry {
 	path: string;
 }
 
-/** reasoning 对象形态（zsw 投影的档位结构）；渲染面仅按 truthy 消费，字段值不进输出 */
-export interface ModelReasoningInfo {
-	variants?: unknown[];
-	defaultVariant?: unknown;
+/**
+ * 发现失败但具名上报的资源条目（P5 D4-3 invalid 具名上报）——损坏文件不再静默
+ * 跳过，字段形态对照 zcode ListSavedWorkflows 的 `invalid: [{path, reason}]`。
+ * path = 发现层拿到的绝对路径（文件可能存在但 meta 无效，也可能 manifest 声明
+ * 而实际缺失）；reason = 人类可读的失败原因（发现层/解析层填充）。
+ */
+export interface InvalidResource {
+	path: string;
+	reason: string;
 }
 
 /**
- * 注入段的最小模型投影——pi 与 zsw 两侧数据形态的并集（D-3 + 本仓 provider 补充）：
+ * 注入段的最小模型投影——pi 数据投影（D-3 + 本仓 provider 补充）：
  * id/name 为条目最小必填（缺则无渲染意义），其余字段 optional（红线 5）。
- * - pi 投影：provider/reasoning:boolean/input[]/contextWindow 全给；
- * - zsw 投影：reasoning:{variants} 档位对象、input 缺席；
- * - label 与 reasoning.variants 进类型并集但渲染面暂不消费（宿主按需再扩）。
+ * provider/reasoning:boolean/input[]/contextWindow 全给（pi 投影形态）；
+ * 渲染面消费 provider/reasoning/input/contextWindow。
  */
 export interface ModelEntry {
 	id: string;
 	name: string;
 	provider?: string;
-	label?: string;
 	contextWindow?: number;
-	reasoning?: boolean | ModelReasoningInfo;
+	reasoning?: boolean;
 	input?: string[];
 }
 
@@ -138,6 +144,18 @@ function applyEntryBudget<T>(
 }
 
 /**
+ * invalid 具名上报行（P5 D4-3）：每条渲染为段内 XML 元素（与条目元素形态一致，
+ * 两空格缩进对齐），path/reason 逐字段 escapeXml（路径与错误消息含 XML 特殊字符
+ * 会破坏注入段结构）。条目段与空态段共用本原语（两处的 invalid 行形态逐字一致）。
+ */
+function invalidResourceLines(invalids: readonly InvalidResource[]): string[] {
+  return invalids.map(
+    (inv) =>
+      `  <invalid><path>${escapeXml(inv.path)}</path><reason>${escapeXml(inv.reason)}</reason></invalid>`,
+  );
+}
+
+/**
  * 将 agent 列表格式化为 XML 注入段。
  *
  * 内部先按 name 码点序排序再渲染截断（超预算截尾语义依赖码点序；pi 调用链
@@ -179,15 +197,29 @@ export function formatAgentList(
   });
 }
 
+/** workflow 段渲染选项：通用条目段选项 + invalid 具名上报（P5 D4-3，workflow 域职责——
+ *  agents 段装配链无 invalid 产出面，不引入死参数）。 */
+export interface WorkflowListFormatOptions extends ListFormatOptions {
+	/**
+	 * 损坏 workflow 具名上报：非空时在条目行后、闭合标签前渲染 invalid 元素行
+	 * （escapeXml，形态 `invalid: [{path, reason}]` 的注入段投影）。缺省/空数组
+	 * 零渲染（CA2 字节锚定不受影响——不传即与既有输出逐字节一致）。条目为空时
+	 * 本参数不消费（返回空串，invalid 随空态段渲染——见 formatEmptyResourceList）。
+	 */
+	invalids?: readonly InvalidResource[];
+}
+
 /**
  * 将 workflow 列表格式化为 XML 注入段。
  *
  * 与 formatAgentList 同约：先按 name 码点序排序再渲染截尾；空列表返回空串
- * （不注入）；截断时追加宿主注入的兜底指引行（缺省不追加）。
+ * （空态接管见 formatEmptyResourceList——调用方以空串为判据切换空态渲染）；
+ * 截断时追加宿主注入的兜底指引行（缺省不追加）；invalids 非空时段内追加
+ * invalid 具名上报行（P5 D4-3，损坏文件不静默）。
  */
 export function formatWorkflowList(
   workflows: WorkflowEntry[],
-  opts: ListFormatOptions,
+  opts: WorkflowListFormatOptions,
 ): string {
   if (workflows.length === 0) return "";
 
@@ -200,6 +232,9 @@ export function formatWorkflowList(
   if (truncated && opts.truncationNotice !== undefined) {
     items.push(opts.truncationNotice);
   }
+  if (opts.invalids !== undefined && opts.invalids.length > 0) {
+    items.push(...invalidResourceLines(opts.invalids));
+  }
   return renderXmlSection({
     tag: "available_workflows",
     guide: opts.guide,
@@ -210,6 +245,36 @@ export function formatWorkflowList(
 /** 码点序比较（显式契约，禁 localeCompare——同 sortByCodepoint 注释） */
 function compareByCodepoint(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * 空发现态注入段（D4-2 空注入显式化）：零条目时渲染
+ * `(none discovered; roots: ...)`——注入段不再整段消失，agent 可区分
+ * 「功能关闭」（注入段缺席）与「确实没有」（空态段在场），并拿根清单自救。
+ *
+ * - kind → tag 映射与 formatAgentList/formatWorkflowList 的段标签一致
+ *   （本函数是 subagents/workflows 两段共用的空态形态，供工厂层在
+ *   format 返回空串时接管；models 段无文件发现根概念，不参与）；
+ * - roots 每项 escapeXml（路径含 XML 特殊字符会破坏注入段结构），
+ *   保序去重（同 turn 重建字节稳定，KV-cache 契约）；
+ * - invalids（P5 D4-3）：非空时在空态行后追加 invalid 具名上报行——
+ *   「条目为零」与「存在损坏文件」两个事实同段呈现（衔接点：空态文本
+ *   附近，与条目段的 invalid 行形态逐字一致，共用 invalidResourceLines）；
+ * - 空 roots 返回空串（不注入）：无清单可渲染时不输出 "roots: )" 空括号
+ *   （约定根恒在生产不可达，纯防御分支——invalid 同随不渲染）。
+ */
+export function formatEmptyResourceList(
+  kind: "agents" | "workflows",
+  roots: string[],
+  invalids: readonly InvalidResource[] = [],
+): string {
+  const unique = [...new Set(roots)];
+  if (unique.length === 0) return "";
+  const tag = kind === "agents" ? "available_subagents" : "available_workflows";
+  // 骨架手写不走 renderXmlSection：其 guide 必填，而空态段无引导语——
+  // agent 只需知道「没有 + 去哪找」，guide 行是条目段的消费语义
+  const line = `  (none discovered; roots: ${unique.map(escapeXml).join(", ")})`;
+  return [`\n\n<${tag}>`, line, ...invalidResourceLines(invalids), `</${tag}>`].join("\n");
 }
 
 /**
@@ -227,8 +292,7 @@ function compareModelEntries(a: ModelEntry, b: ModelEntry): number {
 }
 
 /**
- * 能力标记：reasoning truthy（布尔 true 或对象形态——zsw 的 {variants} 投影）
- * → "reasoning"；input 含 image → "vision"。空则省略 caps 段。
+ * 能力标记：reasoning true → "reasoning"；input 含 image → "vision"。空则省略 caps 段。
  * 红线 5 守卫：input 缺席经 optional chaining 不抛（pi 版此处对 undefined 抛
  * TypeError，本仓 L73 已核实）。
  */

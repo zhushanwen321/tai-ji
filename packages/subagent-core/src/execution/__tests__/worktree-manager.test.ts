@@ -34,9 +34,9 @@ vi.mock("../persistence/alive-store.ts", () => ({
   isProcessAlive: vi.fn(),
 }));
 
-// WorktreeRegistry mock：内存数组模拟，add/updatePid/remove/load 全部可追踪
-const { mockLoad, mockAdd, mockUpdatePid, mockRemove, registryEntries } = vi.hoisted(() => {
-  type Entry = { repo: string; branch: string; checkout: string; pid: number; createdAt: number; sessionFile?: string };
+// WorktreeRegistry mock：内存数组模拟，add/remove/load 全部可追踪
+const { mockLoad, mockAdd, mockRemove, registryEntries } = vi.hoisted(() => {
+  type Entry = { repo: string; branch: string; checkout: string; pid: number; createdAt: number };
   const entries: Entry[] = [];
   return {
     registryEntries: entries,
@@ -45,13 +45,6 @@ const { mockLoad, mockAdd, mockUpdatePid, mockRemove, registryEntries } = vi.hoi
       const idx = entries.findIndex((x) => x.branch === e.branch);
       if (idx >= 0) entries[idx] = e;
       else entries.push(e);
-    }),
-    mockUpdatePid: vi.fn((branch: string, pid: number, sessionFile?: string): void => {
-      const e = entries.find((x) => x.branch === branch);
-      if (e) {
-        e.pid = pid;
-        if (sessionFile !== undefined) e.sessionFile = sessionFile;
-      }
     }),
     mockRemove: vi.fn((branch: string): void => {
       const idx = entries.findIndex((x) => x.branch === branch);
@@ -63,7 +56,6 @@ const { mockLoad, mockAdd, mockUpdatePid, mockRemove, registryEntries } = vi.hoi
 vi.mock("../worktree/worktree-registry.ts", () => ({
   WorktreeRegistry: class {
     add = mockAdd;
-    updatePid = mockUpdatePid;
     remove = mockRemove;
     load = mockLoad;
   },
@@ -148,14 +140,13 @@ function setupCleanTree(): void {
 }
 
 /** 向注册表注入一条活条目（模拟 create 后的状态）。 */
-function injectEntry(overrides: Partial<{ branch: string; pid: number; checkout: string; repo: string; createdAt: number; sessionFile: string }> = {}): void {
+function injectEntry(overrides: Partial<{ branch: string; pid: number; checkout: string; repo: string; createdAt: number }> = {}): void {
   registryEntries.push({
     repo: overrides.repo ?? MAIN_CWD,
     branch: overrides.branch ?? "pi-sub-orphan1",
     checkout: overrides.checkout ?? path.join(os.tmpdir(), "pi-sub-orphan1"),
     pid: overrides.pid ?? 0,
     createdAt: overrides.createdAt ?? Date.now(),
-    sessionFile: overrides.sessionFile,
   });
 }
 

@@ -149,6 +149,8 @@ describe('SchedulerRuntime', () => {
   // 卡死）时，tick2 的 step2 再标 pending → step3 对同一 task 并发第二个 dispatch → 同一
   // prompt 双注入。守卫：同任务在途（Set<taskId>）
   // 时 skip 本轮并 warn；不同任务不受影响。
+  // 末两条为调用方 API 层验收：不经 tick，直接并发/串行调 dispatchTask，
+  // 验证守卫在调用方入口同样拦截（warn + 第二次 false）与完成后放行。
   describe('dispatchTask in-flight 守卫（R3-S1）', () => {
     beforeEach(() => {
       vi.useFakeTimers()
@@ -211,6 +213,54 @@ describe('SchedulerRuntime', () => {
       expect(backend.sendMessage).toHaveBeenCalledTimes(2)
       expect(task1.runCount).toBe(1)
       expect(task2.runCount).toBe(1)
+    })
+
+    // ── 调用方 API 层 ──
+    it('调用方守卫：同一 taskId 并发 dispatchTask → 第二次被拦截（send 只调 1 次 + warn）', async () => {
+      loggerMock.warn.mockClear()
+      // 可控延迟的 sendMessage：让第一次 dispatch 挂起
+      let resolveSend: (() => void) | undefined
+      const sendPromise = new Promise<void>(resolve => { resolveSend = resolve })
+      backend.sendMessage = vi.fn(() => sendPromise)
+
+      const task = await runtime.addTask('inflight-test', { mode: 'interval', intervalMs: 60_000 })
+
+      // 第一次 dispatch（挂起），sendMessage 被调 1 次
+      const first = runtime.dispatchTask(task)
+      expect(backend.sendMessage).toHaveBeenCalledTimes(1)
+
+      // 第二次 dispatch（同一 taskId，在途被拦截）
+      const second = await runtime.dispatchTask(task)
+      expect(second).toBe(false)
+
+      // warn 包含 in-flight 提示
+      const warnText = loggerMock.warn.mock.calls.map(c => String(c[0])).join('\n')
+      expect(warnText).toContain('already in flight')
+
+      // sendMessage 仍只有 1 次（拦截有效）
+      expect(backend.sendMessage).toHaveBeenCalledTimes(1)
+
+      // 放行第一次 dispatch
+      resolveSend!()
+      await first
+    })
+
+    it('调用方守卫：第一次完成后 → 第二次 dispatchTask 正常执行（send 调 2 次）', async () => {
+      const task = await runtime.addTask('serial-inflight', { mode: 'interval', intervalMs: 60_000 })
+
+      // 第一次 dispatch（串行等待完成）
+      const first = await runtime.dispatchTask(task)
+      expect(first).toBe(true)
+      expect(backend.sentMessages).toHaveLength(1)
+
+      // 第二次 dispatch（in-flight 已清除，正常执行）
+      // 需要重置 nextRunAt 让任务再次到期
+      task.nextRunAt = 0
+      const second = await runtime.dispatchTask(task)
+      expect(second).toBe(true)
+
+      // send 被调 2 次（串行完成）
+      expect(backend.sentMessages).toHaveLength(2)
     })
   })
 

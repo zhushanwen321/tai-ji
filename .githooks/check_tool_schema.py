@@ -122,7 +122,7 @@ def main() -> int:
         for e in errors:
             print(e)
         print()
-        print('\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m')
+        print('\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m')
         return 2
 
     print('[OK] Pi extension tool schema 顶层 Object 合规检查通过（所有 parameters 顶层均为 Object）')

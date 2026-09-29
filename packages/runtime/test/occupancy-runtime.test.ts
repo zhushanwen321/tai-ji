@@ -465,7 +465,6 @@ describe('SessionLifecycle.registerSession occupancy 初值（respawn 衔接）'
       adapterFactory: vi.fn(() => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter),
       getMessageBus: () => bus,
       broadcastGlobal: vi.fn(),
-      notifyMessageComplete: vi.fn(),
     }
     const lifecycle = new SessionLifecycle(
       svc, {} as unknown as IProcessManager,

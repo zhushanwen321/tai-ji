@@ -90,7 +90,7 @@ export const BINDING_FIELDS: Record<BindingFieldKey, BindingFieldSpec> = {
       create: 'options',
       handoff: 'none', // 源 preset 已消费（现状保持：承接 session 不继承启动 preset）
       restore: 'resolved-in-entry', // target.launchPresetId ?? BUILTIN_PRESET_IDS.FULL 在入口解析
-      fork: 'inherit-source', // forkPresetId：内存兑底 + 扫描 fallback 双源（入口解析）
+      fork: 'inherit-source', // forkPresetId：内存兜底 + 扫描 fallback 双源（入口解析）
     },
   },
   projectId: {

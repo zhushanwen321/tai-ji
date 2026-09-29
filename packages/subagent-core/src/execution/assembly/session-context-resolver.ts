@@ -22,6 +22,29 @@ import { getSubagentSessionDir } from "./path-encoding.ts";
 export const MAX_FORK_DEPTH = 10;
 
 /**
+ * 通用嵌套深度护栏（D-033，双层护栏第 2 层——见 MAX_FORK_DEPTH 注释）：入口 nesting
+ * 上下文 current() 产物（ExecutionNestingState 结构子集）→ depth+1 与 MAX_FORK_DEPTH
+ * 比较，超限同步抛 ForkDepthExceededError。三个执行入口（execute / executeAndAwait /
+ * executeWorkflowAgent）共用本单点，错误文案逐字一致。
+ *
+ * 计数基准：顶层 nestingDepth=0，nestingDepth>MAX 被拒。与第 1 层 fork 体积护栏
+ * （resolveSessionContext 的 parentForkDepth 检查）互补：本护栏更严（计所有嵌套——
+ * 非 fork 递归虽不累积 session 体积，但耗资源且 LLM 易陷入「委派→再委派」死循环），
+ * 混合链下先生效。须在所有副作用之前调用（拦截直达调用方，不产生孤儿 record）。
+ * current() 内含基线兜底（pi 事件回调模型下 enterWith 不贯穿，ALS 断裂修复）。
+ */
+export function assertNestingDepthWithinLimit(
+  parentNesting: { depth: number } | null | undefined,
+): void {
+  const nestingDepth = parentNesting ? parentNesting.depth + 1 : 0;
+  if (nestingDepth > MAX_FORK_DEPTH) {
+    throw new ForkDepthExceededError(
+      `subagent nesting depth ${nestingDepth} > ${MAX_FORK_DEPTH} (max recursion), refusing to spawn deeper`,
+    );
+  }
+}
+
+/**
  * 纯函数：解析 fork/worktree 意图 → 执行上下文。
  *
  * 只返回意图（shouldFork/forkSource/effectiveCwd/sessionDir），

@@ -69,12 +69,12 @@ onUnmounted(() => {
 })
 ```
 
-### 2.3 错误必须收口生成状态
+### 2.3 错误必须收敛生成状态
 
-任何错误处理路径都必须收口生成状态，否则 UI 会卡在 "思考中"。`setStreaming` / `streamingMessage` 符号已消亡（chat 域绞杀迁移 @taiji/core），现行统一收口单一入口：`finalizeSession` + `clearPendingSend`（正常/异常收口）与 `markSessionError`（session 级错误——追加 error assistant 消息 + finalize，见 `packages/core/src/domain/chat/effect-types.ts`）：
+任何错误处理路径都必须收敛生成状态，否则 UI 会卡在 "思考中"。`setStreaming` / `streamingMessage` 符号已消亡（chat 域绞杀迁移 @taiji/core），现行统一收敛单一入口：`finalizeSession` + `clearPendingSend`（正常/异常收尾）与 `markSessionError`（session 级错误——追加 error assistant 消息 + finalize，见 `packages/core/src/domain/chat/effect-types.ts`）：
 
 ```ts
-// 错误处理的标准模式（收口 + 错误入聊天流，不要用顶部 banner）
+// 错误处理的标准模式（收敛 + 错误入聊天流，不要用顶部 banner）
 function onError(sessionId: string, errorText: string) {
   chat.markSessionError(sessionId, errorText)
   // 有 streaming entity → finalizeSession('error')；否则追加 error assistant 消息
@@ -159,7 +159,7 @@ pi 的消息 content 是数组；taiji 侧 `Message.content` 为 `string | Segme
 
 ### 7.1 Border-radius 约束
 
-三档圆角：默认 8px / 小元素（chip、badge、指示点容器）3px / 大容器（面板、modal、float-panel）12px，圆形指示器与无圆角不受限。禁止硬编码 px，使用对应 Tailwind class（`rounded-sm` / `rounded` / `rounded-lg`）。数值权威 = [`style.css`](../packages/renderer/src/style.css)（值真值，运行时唯一源）；[DESIGN.md](DESIGN.md) §4 为登记对照，其 frontmatter 投影与 style.css 的值相等由 `.githooks/check_css_token_ssot.py` 机器守卫。
+三档圆角：默认 8px / 小元素（chip、badge、指示点容器）3px / 大容器（面板、modal、float-panel）12px，圆形指示器与无圆角不受限。禁止硬编码 px，使用对应 Tailwind class（`rounded-sm` / `rounded` / `rounded-lg`）。数值权威 = [`style.css`](../packages/renderer/src/style.css)（值真值，运行时唯一源）；[DESIGN.md](DESIGN.md) §4 为登记对照，其 frontmatter 投影与 style.css 的值相等由 `.githooks/check_css_token_ssot.py` 机器检查。
 
 ### 7.2 Markdown 文本元素样式规范
 

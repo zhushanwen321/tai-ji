@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * session push → store 同步测试（renamed / state_changed / thinkingLevelSet 三类推送；
  * 原 session-state-changed-sync.test.ts 已并入本文件——同 SUT ensureStreamSubscription

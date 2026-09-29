@@ -381,7 +381,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
       const record = makeMinimalRecord({
         id: "rec-wire-cancelled",
         sessionFile,
-        // 预设 endedAt 会被 Step 1 completeRecord 冻结值覆盖（见下方 endedAt 断言注释）
+        // 预设 endedAt 会被 Step 1 completeLegacyClosed 冻结值覆盖（见下方 endedAt 断言注释）
         endedAt: 5678,
       });
 
@@ -395,7 +395,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
         endedAt: number;
       };
       expect(marker.status).toBe("cancelled");
-      // endedAt 来自 completeRecord 冻结后的 record.endedAt（Step 1 先于 Step 3a，
+      // endedAt 来自 completeLegacyClosed 冻结后的 record.endedAt（Step 1 先于 Step 3a，
       // record 预设的 endedAt 会被冻结值覆盖）——sidecar 携带真实收尾时间戳
       expect(marker.endedAt).toBe(record.endedAt);
       expect(typeof marker.endedAt).toBe("number");
@@ -561,7 +561,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
   it("[B5/D3a] record 带 sessionFile → 轮终后 .alive marker 仍在（写权声明跨轮延续）+ record.status=running + round 0→1", async () => {
     const sessionFile = path.join(tmpDir, "session.jsonl");
     // 预写 .alive marker（[B5] 行为变化锚点：轮终**保留** marker——release = 终态原语
-    // 或 idle-GC 归档两出口，轮终 record 仍 resumable 随时续聊 spawn 写同一
+    // markSettledOut 单出口，轮终 record 仍 resumable 随时续聊 spawn 写同一
     // sessionFile，删则轮后跨进程防御空窗，D3a）
     fs.writeFileSync(
       `${sessionFile}.alive`,
@@ -570,7 +570,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     );
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-idle", sessionFile, round: 0 });
-    // tryTransition 已把 status 设为 done，模拟 runAndFinalize 调用前的状态
+    // 已手动置 idle：模拟 legacy close CAS（trySettleLegacyClosed）抢锁后、runAndFinalize 调用前的状态
     record.status = "idle";
     store.register(record);
 
@@ -583,10 +583,10 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
   });
 
-  it("[A3] 终态簿记已冻结（endedAt 已设 = completeRecord 已跑）→ store 内硬断言 throw（S7：禁复活已终态化 record）", async () => {
+  it("[A3] 终态簿记已冻结（endedAt 已设 = completeLegacyClosed 已跑）→ store 内硬断言 throw（S7：禁复活已终态化 record）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-frozen" });
-    // closeChatIdle / disposeAllRecords 等完整终态化路径的产物：completeRecord 已跑
+    // closeChatIdle / disposeAllRecords 等完整终态化路径的产物：completeLegacyClosed 已跑
     //（endedAt 冻结）+ status=closed。迟到的轮末分流调用必须被断言拒绝。
     record.status = "idle";
     record.closedReason = "user-close";
@@ -663,7 +663,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(unregisterSpy).toHaveBeenCalledWith("rec-emit", "running");
   });
 
-  it("不调 completeRecord：record 不冻结（endedAt / agentResult 仍 undefined）", async () => {
+  it("不调 completeLegacyClosed：record 不冻结（endedAt / agentResult 仍 undefined）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-nofreeze" });
     record.status = "idle";
@@ -701,7 +701,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(record.result).toBe("review done, found 3 issues");
   });
 
-  it("MF-2 兑底：失败轮次（无前值）record.result 用失败摘要填充（D7 outcome 入参：前值 ?? 失败摘要）", async () => {
+  it("MF-2 兜底：失败轮次（无前值）record.result 用失败摘要填充（D7 outcome 入参：前值 ?? 失败摘要）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-result-err" });
     record.status = "idle";

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * chat-store.test.ts — F7 失败路径验收测试。
  *

@@ -701,7 +701,7 @@ export class MessageDispatcher {
     const client = this.pm.getClient(sessionId)
     if (!client) {
       // 不在活跃进程表（已退出 / 未 spawn）：无可杀对象。菜单入口对 dead/idle
-      // 历史 session 隐藏，此分支是「菜单渲染后 session 恰好退出」的竞态兑底。
+      // 历史 session 隐藏，此分支是「菜单渲染后 session 恰好退出」的竞态兜底。
       // [U3 修复] 早退也须置 userStopped 标记：用户点「强制退出」的意图与进程死活无关
       // （与 K1 同源）——无 client 时 pi 可能已自行 spawn 恢复链（restore replay turn），
       // 缺标记会让后续 restore 的收敛环不设防，被杀的旧执行复活。
@@ -1082,7 +1082,7 @@ export class MessageDispatcher {
   /**
    * 取消进行中的 bash 执行（pi abort_bash）。
    *
-   * 与 abort() 对称：失败不 throw（console.error 兑底），finally 兑底广播 bashResult{cancelled:true}
+   * 与 abort() 对称：失败不 throw（console.error 兜底），finally 兜底广播 bashResult{cancelled:true}
    * 终态——与 abort 广播 message.complete{aborted} 对称，前端据 bashResult 收口 isBashRunning 态。
    *
    * 返回 sent = abort_bash 是否真的发出且 pi 确认（P6 断言④回执真实化）：调用方
@@ -1099,14 +1099,14 @@ export class MessageDispatcher {
     // 两态皆无（空闲 session 的重复/误触取消）→ 短路 { sent: false }，由调用方回执真实化。
     if (!activeSession?.isBashRunning && !activeSession?.orphanBashRunning) return { sent: false }
     // sent = abort_bash 是否发出且 pi 确认（sendCommand 对 success:false reject，resolve =
-    // pi 已执行 abort）。失败不提前 return：兑底 cancelled 哨兵广播必须照发（T8b 既有契约）。
+    // pi 已执行 abort）。失败不提前 return：兜底 cancelled 哨兵广播必须照发（T8b 既有契约）。
     let sent = true
     try {
       await client.abortBash()
       // pi 确认取消 → 孤儿标记清除（pi 单 bash slot，孤儿已终止）。
       if (activeSession) activeSession.orphanBashRunning = false
     } catch (e) {
-      // 与 abort() 的错误兑底一致：不 throw，避免请求级 envelope 双重报错。孤儿标记保留：
+      // 与 abort() 的错误兜底一致：不 throw，避免请求级 envelope 双重报错。孤儿标记保留：
       // abort_bash 失败（pi 卡死/管道断）时 bash 状态未知，标记残留只让下次 abortBash 再发
       // 一次幂等的 abort_bash，比误清（谎称无孤儿）更诚实。
       console.error(`[message-dispatcher] abortBash failed: sessionId=${sessionId}`, toErrorMessage(e))
@@ -1123,7 +1123,7 @@ export class MessageDispatcher {
         activeSession.bashRunToken = `abort_${Date.now()}_${randomTokenSuffix()}`
       }
     }
-    // 兑底终态：无论 pi 是否响应 abort_bash，都广播 cancelled=true 的 bashResult。
+    // 兜底终态：无论 pi 是否响应 abort_bash，都广播 cancelled=true 的 bashResult。
     // pi 卡死时不发任何事件，靠这条让前端 isBashRunning 复位（与 abort 广播 message.complete 同理）。
     const cancelMsg = {
       type: 'message.bashResult' as const,

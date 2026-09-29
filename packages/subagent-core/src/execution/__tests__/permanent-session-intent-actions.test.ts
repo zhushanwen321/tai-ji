@@ -55,7 +55,7 @@ vi.mock("../engine/host/spawned-children.ts", async (importOriginal) => {
 });
 
 const { mockLoad, mockAdd, mockRemove, registryEntries } = vi.hoisted(() => {
-  type Entry = { repo: string; branch: string; checkout: string; pid: number; createdAt: number; sessionFile?: string };
+  type Entry = { repo: string; branch: string; checkout: string; pid: number; createdAt: number };
   const entries: Entry[] = [];
   return {
     registryEntries: entries,
@@ -75,7 +75,6 @@ const { mockLoad, mockAdd, mockRemove, registryEntries } = vi.hoisted(() => {
 vi.mock("../worktree/worktree-registry.ts", () => ({
   WorktreeRegistry: class {
     add = mockAdd;
-    updatePid = vi.fn();
     remove = mockRemove;
     load = mockLoad;
   },
@@ -377,7 +376,6 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       },
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
-      killRoundChild: vi.fn(),
       engineSupportsConversation: () => true,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
@@ -412,7 +410,6 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
       notifyComplete: vi.fn(),
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
-      killRoundChild: vi.fn(),
       engineSupportsConversation: () => true,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
@@ -463,7 +460,6 @@ describe("[U5 / §3.2.2 事件表] 已收口会话 + message → revive 翻 runn
       notifyComplete: vi.fn(),
       notifyRecord: vi.fn(),
       killStaleChild: async () => {},
-      killRoundChild: vi.fn(),
       engineSupportsConversation: () => true,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,
@@ -535,7 +531,6 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
       notifyComplete: vi.fn(),
       notifyRecord: (n) => calls.notified.push(n),
       killStaleChild: async () => {},
-      killRoundChild: vi.fn(),
       engineSupportsConversation: () => gateAllows,
       reviveClosedRecord: vi.fn(),
       reopenRecord: () => true,

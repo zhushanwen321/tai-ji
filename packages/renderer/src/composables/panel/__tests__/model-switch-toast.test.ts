@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * U4 提示链单测（model-switch-live-provider-sync §4.2「单元（renderer）」）：
  *

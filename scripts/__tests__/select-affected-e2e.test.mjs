@@ -4,7 +4,9 @@
  * fixture 场景（内联 map，不依赖真实 e2e-map.json 的内容漂移）：
  *   - scope 命中 / 不命中（prefix/** startsWith 语义与精确路径全等）
  *   - 多 rule 同文件命中（目录 glob rule + 精确路径 rule 并存）
- *   - 删除文件（diff --name-only 含已删除路径——删除同样要触发受影响面）
+ *   - 删除形态的路径串（纯函数健壮性：selectRules 对输入无存在性要求；生产管线
+ *     changedFiles 已 --diff-filter=d 剔除删除文件——删除不产生登记义务，
+ *     validate-e2e-map 的 existsSync 强校验拒绝死资产条目，该输入生产不可达）
  *   - always rule 恒入选、--layer 过滤、--release 触发面选择
  *   - --check 防漏登记：watched root 下未覆盖文件 / 已覆盖文件 / 看护域外文件
  * 末组烟测加载真实 docs/testing/e2e-map.json，防 map 与脚本结构漂移无信号。
@@ -127,10 +129,10 @@ describe('selectRules（diff → rules）', () => {
     expect(rules.map((r) => r.id).sort()).toEqual(['E2E-FAKE-01', 'E2E-FAKE-02', 'E2E-FAKE-03'])
   })
 
-  it('删除文件：diff 里的已删除路径同样触发命中（--name-only 无存在性要求）', () => {
+  it('删除形态的路径串：纯函数按前缀匹配（生产管线已在 changedFiles 剔除删除文件，此输入不可达）', () => {
     const map = fixtureMap()
     const rules = selectRules(map, ['packages/runtime/src/infra/pi/pi-protocol.ts.deleted-on-branch'])
-    // 目录 glob prefix 命中（文件已删，路径仍落在看护前缀内）+ 精确路径不命中
+    // 目录 glob prefix 按路径串命中（selectRules 无存在性要求）+ 精确路径不命中
     expect(rules.map((r) => r.id)).toEqual(['E2E-FAKE-03', 'E2E-FAKE-01'])
   })
 

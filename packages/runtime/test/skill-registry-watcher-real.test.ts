@@ -34,10 +34,9 @@ const WATCH_DETECT_DEADLINE_MS = 12000
  * watcher baseline 预热时长（ms）。
  *
  * [HISTORICAL] 该等待源自 polling 时代的 first-tick baseline 竞态（新建文件若先于 first-tick
- * 落盘会被 baseline 吞掉）；原生事件路径无此竞态，保留 1700ms 作为 watcher 建立监听的保守余量，
- * 避免测试依赖隐式时序。
+ * 落盘会被 baseline 吞掉）；原生事件路径无此竞态，300ms 仅为 watcher 建立监听的保守余量。
  */
-const WATCH_BASELINE_WARMUP_MS = 1700
+const WATCH_BASELINE_WARMUP_MS = 300
 
 /**
  * 简易 scanFn：把 skill 容器目录下的子目录当作 skill 返回（每个含 SKILL.md 的子目录一项）。
@@ -102,15 +101,13 @@ describe('SkillRegistry watcher real fs (W5: 新建 skill 子目录触发 rescan
       const events: Array<{ scope: string; affectedSessionIds: string[] }> = []
       reg.onChange(e => events.push({ scope: e.scope, affectedSessionIds: e.affectedSessionIds }))
 
-      // 等 chokidar 轮询建好 baseline（含 existing-skill）。spawnSync 同步写盘，若在 first-tick 前
-      // 完成会被 baseline 吞掉（见 WATCH_BASELINE_WARMUP_MS 注释），必须先等 first-tick 跑完。
+      // 等 watcher 建立监听（原生事件路径无 first-tick baseline 竞态，见 WATCH_BASELINE_WARMUP_MS 注释）
       await new Promise(r => setTimeout(r, WATCH_BASELINE_WARMUP_MS))
 
       // 跨进程新建 skill 子目录（不经 settings，模拟用户直接磁盘操作）
       createSkillSubdir(skillDir, 'new-skill-w5a')
 
-      // 等 watcher 触发：usePolling interval(1500ms) + debounce(300ms) + 余量
-      // 最长等 WATCH_DETECT_DEADLINE_MS（polling 周期最多触发 8 次，足够稳定，CI 抖动有缓冲）
+      // 等 watcher 触发（原生事件驱动，亚秒级）；最长等 WATCH_DETECT_DEADLINE_MS（CI 抖动有缓冲）
       const deadline = Date.now() + WATCH_DETECT_DEADLINE_MS
       while (Date.now() < deadline && events.length === 0) {
         await new Promise(r => setTimeout(r, 200))
@@ -148,7 +145,7 @@ describe('SkillRegistry watcher real fs (W5: 新建 skill 子目录触发 rescan
         const events: Array<{ scope: string; cwd?: string }> = []
         reg.onChange(e => events.push({ scope: e.scope, cwd: e.cwd }))
 
-        // 等 chokidar 轮询建好 baseline（见 WATCH_BASELINE_WARMUP_MS 注释）。
+        // 等 watcher 建立监听（见 WATCH_BASELINE_WARMUP_MS 注释）。
         await new Promise(r => setTimeout(r, WATCH_BASELINE_WARMUP_MS))
 
         // 跨进程新建项目 skill 子目录

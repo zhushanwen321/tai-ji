@@ -20,8 +20,18 @@ describe('isGuiCapable', () => {
     expect(isGuiCapable({ mode: 'rpc', hasUI: true })).toBe(true)
   })
 
+  it('rpc 模式 + 无 UI 仍返回 true（hasUI 不影响判定，仅看 mode）', () => {
+    // isGuiCapable 只检查 mode === 'rpc'；hasUI 为 false 时 rpc 仍判定为 capable
+    //（宿主可能走非 widget 渲染路径）。
+    expect(isGuiCapable({ mode: 'rpc', hasUI: false })).toBe(true)
+  })
+
   it('tui 模式返回 false', () => {
     expect(isGuiCapable({ mode: 'tui', hasUI: true })).toBe(false)
+  })
+
+  it('print 模式返回 false', () => {
+    expect(isGuiCapable({ mode: 'print', hasUI: false })).toBe(false)
   })
 
   it('json 模式返回 false', () => {

@@ -46,6 +46,10 @@ export * from "./zcode-db-paths.ts";
 // 引擎包副本自本模块 re-export 收编，消 5 个 TAIJI_SUBAGENT_RELAY_* env 名双副本）。
 export * from "./relay-env.ts";
 
+// relay 通道帧词表 SSOT（kind / dir / reject reason）——runtime relay-registry import
+// 单源；零依赖 relay.mjs 内嵌镜像由 conformance relay 变体断言锁定（同 env 常量先例）。
+export * from "./relay-frames.ts";
+
 // 「错误 → 可读字符串」与 best-effort 吞错 helper 单源（round1-reuse R11：core 与
 // pi/zcode 引擎包的微副本 re-export 收编；toErrorMessage 含 A8 修复——非 Error
 // object 入参 JSON.stringify 结构化文本，Error 入参逐字节不变）。

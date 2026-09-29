@@ -351,7 +351,7 @@ notify 主 agent：isIdle()=false 时退避等 idle 再发（triggerTurn 只在�
 
 ## §4 验收（真实场景，非单测）
 
-**验收环境**：本地 pi CLI 实测（AGENTS.md [MANDATORY]：pi extension 优先在本地 pi 验证，不优先在 taiji）——`pi --mode rpc --session-dir <dir> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <ext-path>`，stdin JSONL 发 prompt，检查 session 文件 + `PI_EXT_DEBUG=1` 日志。改动规模：大（状态机重构 + 新 hook + 联动矩阵），以下场景全部真实环境验证，单测仅回归辅助。
+**验收环境**：本地 pi CLI 实测（AGENTS.md [MANDATORY]：pi extension 优先在本地 pi 验证，不优先在 taiji）——`pi --mode rpc --session-dir <dir> --model <本机可用模型> --approve --extension <ext-path>`，stdin JSONL 发 prompt，检查 session 文件 + `PI_EXT_DEBUG=1` 日志。改动规模：大（状态机重构 + 新 hook + 联动矩阵），以下场景全部真实环境验证，单测仅回归辅助。
 
 ### S1：one-shot upgrade 续聊（回溯 G1，SP-5）
 

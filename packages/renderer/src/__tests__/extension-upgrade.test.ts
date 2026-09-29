@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * extension domain upgrade / autoUpgrade 测试。
  *

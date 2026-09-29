@@ -8,11 +8,12 @@
 // facade 落宿主日志。字段级契约速览：
 //   id / bin / protocol 必需；capabilities 必需（缺键保守值 + warn；未知键忽略 + warn）；
 //   envPrefixes 可选（非法条目丢弃该前缀 + warn，包仍可用）；modelCatalog 可选
-//   （缺省 = 不注入，三态语义见 parseModelCatalog）；displayName/description 可选。
+//   （缺省 = 不注入，三态语义见 parseModelCatalog）；processModel 可选（缺省 =
+//   'per-window'，非法值 warn 回落缺省，见 parseProcessModel）；displayName/description 可选。
 
 import * as path from "node:path";
 
-import type { ModelCatalogEntry } from "@zhushanwen/subagent-engine-sdk";
+import type { EngineProcessModel, ModelCatalogEntry } from "@zhushanwen/subagent-engine-sdk";
 
 import { getLogger } from "../../core/logger.ts";
 import type { EngineCapabilities } from "./types.ts";
@@ -244,6 +245,25 @@ function parseModelCatalogEntry(id: string, item: unknown): ModelCatalogEntry | 
       ? { canonicalRef: (item as Record<string, unknown>)["canonicalRef"] as string }
       : {}),
   };
+}
+
+/**
+ * processModel 字段级解析（pi-workflow-run-resource-model §3.3 决策 3）：
+ *   缺省（未声明）→ 'per-window'（轻壳是引擎适配包的常态，重服务是显式特例——
+ *   对齐既有可选字段「缺省取保守可用值」的处理惯例）；
+ *   非法值 → warn + 回落 'per-window'（包仍可用；宿主实例管理走窗口作用域路径，
+ *   对 shared-service 引擎是误分流——由声明测试与两存量包显式声明兜住）。
+ * 进程形态不是任务能力（能力字段服务 run 前资格判定，本字段服务宿主实例管理），
+ * 不进 EngineCapabilities，也不入 CAPABILITY_ENUMS 词表（词表服务能力协商面）。
+ */
+export function parseProcessModel(id: string, raw: unknown): EngineProcessModel {
+  if (raw === undefined) return "per-window";
+  if (raw === "per-window" || raw === "shared-service") return raw;
+  logger.warn(
+    `[engine-discovery] engine '${id}': processModel=${describeValue(raw)} invalid ` +
+      `(expected "per-window" | "shared-service") — falling back to 'per-window'`,
+  );
+  return "per-window";
 }
 
 /** unknown 值的短描述（warn 文案；JSON.stringify 对 Symbol/BigInt 返回 undefined 不可靠）。 */

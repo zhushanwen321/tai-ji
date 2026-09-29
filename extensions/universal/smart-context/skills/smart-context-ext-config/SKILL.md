@@ -31,7 +31,7 @@ description: "配置 @zhushanwen/pi-smart-context（智能上下文压缩：agen
 ```json
 {
   "enabled": true,
-  "compactModel": { "type": "ref", "ref": "xiaomi-token-plan-cn/mimo-v2.5" },
+  "compactModel": { "type": "ref", "ref": "xiaomi-token-plan-cn/mimo-v2.6-flash" },
   "reminderThresholds": [400000, 500000, 600000],
   "excludedModels": ["deepseek/deepseek-chat"]
 }

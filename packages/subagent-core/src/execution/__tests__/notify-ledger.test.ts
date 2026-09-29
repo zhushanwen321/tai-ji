@@ -34,6 +34,10 @@
 //     host-services 动态解析宿主实现，见 agents-assembly.test.ts 同款）——
 //     移除 u-5c 期的 vi.mock(core/logger)，日志断言用例自行注入 logCalls sink。
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { configureNotifyDomain, resetNotifyDomainForTests } from "../../core/notify-ports.ts";
@@ -954,6 +958,50 @@ describe("createNotifier — ledger 四步接线（U2）", () => {
     notifier.dispose();
   });
 
+  it("[U5] close 终态提示（round 清空）reopen 后不与首轮 close 撞键：epoch>0 无轮 key=`id:epoch`，第二次通知可达", () => {
+    const ledgerMock = makeLedgerHost();
+    const notifierHost = makeNotifierHost();
+    // 桥接：ledger sendDelivery → notifier host.sendMessage（模拟 index.ts 装配）
+    ledgerMock.host.sendDelivery = (message) => {
+      notifierHost.sendMessage(message, { triggerTurn: true });
+      if (ledgerMock.deliverPersists.value) {
+        ledgerMock.sessionEntries.push({
+          type: "custom_message",
+          customType: message.customType,
+          content: message.content,
+          display: message.display,
+          details: message.details,
+        });
+      }
+    };
+    bindNotifyLedgerHost(ledgerMock.host);
+
+    const notifier = createNotifier(notifierHost);
+    // 首轮 close（epoch 缺省 = 0）：notifyId = 裸 id（旧格式，磁盘账本零迁移锚）
+    notifier.notify({ id: "sa-reopen", status: "closed", agent: "w", result: "first close", startedAt: 1, endedAt: 2 });
+    expect(notifierHost.sentMessages).toHaveLength(1);
+    expect(notifierHost.sentMessages[0]?.details).toMatchObject({ notifyId: "sa-reopen" });
+    // 回执销账（reopen 前的最后一次 close 已同步入账——notifyClosed 清 round 的
+    // 终态提示走无轮形态，修复前 reopen 后第二次 close 沿用裸 id 被「已 ack」永久拒绝）
+    fireSettled(ledgerMock);
+    expect(unsettledDiff(ledgerMock)).toEqual(new Set());
+
+    // reopen（epoch+1）后的第二次 close：无轮 + epoch=1 → key=`sa-reopen:1` ≠ 首轮
+    // 裸 id → 写账不被幂等拒绝，通知可达（不同 notifyId）
+    notifier.notify({ id: "sa-reopen", status: "closed", agent: "w", result: "second close", epoch: 1, totalRounds: 2, startedAt: 3, endedAt: 4 });
+    expect(notifierHost.sentMessages).toHaveLength(2);
+    expect(notifierHost.sentMessages[1]?.details).toMatchObject({ notifyId: "sa-reopen:1" });
+    fireSettled(ledgerMock);
+    expect(unsettledDiff(ledgerMock)).toEqual(new Set());
+
+    // 对照（旧语义保持）：epoch 缺省（0）的无轮 close 仍为裸 id——同 key 重复被
+    // ledger 幂等吞，首轮 close 幂等去重不因本修复放宽
+    notifier.notify({ id: "sa-reopen", status: "closed", agent: "w", result: "repeat", startedAt: 5, endedAt: 6 });
+    expect(notifierHost.sentMessages).toHaveLength(2);
+
+    notifier.dispose();
+  });
+
   it("dedupKey 显式覆盖 notifyId（drain 丢弃通知独立身份）：同轮失败通知 key 不互吞，同 key 重放仍幂等；缺省回退 `id` / `id:round` 不变", () => {
     const ledgerMock = makeLedgerHost();
     const notifierHost = makeNotifierHost();
@@ -1334,6 +1382,29 @@ describe("notify-ledger 常量锚", () => {
     expect(typeof notifierModule.createNotifier).toBe("function");
     ledger.dispose();
     _resetNotifyLedgerForTest();
+  });
+});
+
+// ─── 生产写点形态锁（迁自壳 contract.notify-custom-types.test.ts core 段） ──
+//
+// 壳侧跨包裸路径读 core 源码的形态锁迁回被测包内（同包相对路径，消除壳测试对
+// core 源码树位置的依赖）。锁两面：NOTIFY_CUSTOM_TYPE 必须保持 extension-protocol
+// SSOT 别名（非字面量赋值——回潮 = 新的裸字面量漂移面）；放弃分诊的通道判型不得
+// 裸写 customType 值字面量（判型点必须经常量/通道变量比较）。
+
+describe("notify-ledger 生产写点形态锁（SSOT 别名 + 分诊零裸字面量）", () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "notify", "notify-ledger.ts"),
+    "utf-8",
+  );
+
+  it("NOTIFY_CUSTOM_TYPE 为 SSOT 别名（= SUBAGENT_BG_NOTIFY_CUSTOM_TYPE，非字面量赋值）", () => {
+    expect(source).toMatch(/export const NOTIFY_CUSTOM_TYPE\s*=\s*SUBAGENT_BG_NOTIFY_CUSTOM_TYPE/);
+    expect(source).not.toMatch(/NOTIFY_CUSTOM_TYPE\s*=\s*["']/);
+  });
+
+  it("放弃分诊的通道判型不裸写 customType 值字面量（typeof 类型守卫不在断言面）", () => {
+    expect(source).not.toMatch(/item\.deliveryCustomType\s*(?:===|!==)\s*["']/);
   });
 });
 

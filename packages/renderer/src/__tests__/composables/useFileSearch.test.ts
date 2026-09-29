@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useFileSearch composable 单测（U24）。
  *

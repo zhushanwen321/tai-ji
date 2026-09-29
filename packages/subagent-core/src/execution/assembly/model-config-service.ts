@@ -177,7 +177,7 @@ export class ModelConfigService {
    * 失败 = 配置错误，必须显式报错——错误文案含 <available_subagents> 恢复指引
    * （对齐 workflow name not found 反馈风格），不允许静默降级为无配置
    * general-purpose 形态（systemPrompt/工具白名单全丢且零反馈）。默认形态
-   * （不传 agent）走 getAgentConfig：undefined = 合法缺省，走 override → ctxModel 兑底。
+   * （不传 agent）走 getAgentConfig：undefined = 合法缺省，走 override → ctxModel 兜底。
    */
   getRequiredAgentConfig(agentRef: string): AgentConfig {
     return this.agentRegistry.loadByPath(agentRef, true);

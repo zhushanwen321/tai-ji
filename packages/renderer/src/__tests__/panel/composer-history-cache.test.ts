@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * composer-shell deriveHistoryFromChatStore 引用键缓存测试（perf：↑/↓ 历史导航全量重建
  * 加 WeakMap 引用键缓存）。

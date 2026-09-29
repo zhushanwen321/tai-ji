@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 r"""
-hook 脚本反模式守卫（G3）：set -e 下「VAR=$(cmd) 赋值 + 紧跟 VAR=$? 捕获」组合拦截。
+hook 脚本反模式检查（G3）：set -e 下「VAR=$(cmd) 赋值 + 紧跟 VAR=$? 捕获」组合拦截。
 
 动机：install-hooks.sh（pre-commit 模板源头）有 set -e。在该模式下 `VAR=$(cmd)`
 赋值语句的退出码就是命令替换的退出码，cmd 失败时脚本随即终止，紧跟的
@@ -78,7 +78,7 @@ def main(argv: list[str]) -> int:
         violations.extend(scan_file(target))
 
     if violations:
-        print(f"[hook-antipattern] 守卫拦截：{len(violations)} 处「VAR=$(cmd) 赋值 + 紧跟 EXIT=$? 捕获」反模式\n")
+        print(f"[hook-antipattern] 检查拦截：{len(violations)} 处「VAR=$(cmd) 赋值 + 紧跟 EXIT=$? 捕获」反模式\n")
         for v in violations:
             print(
                 f"  ✗ {v['file']}:{v['line']} —— `{v['capture_var']}=$?` 不可达："

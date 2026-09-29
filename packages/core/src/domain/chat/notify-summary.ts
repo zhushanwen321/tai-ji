@@ -16,6 +16,8 @@ import {
   parseWorkflowResultNotify,
 } from '@taiji/shared'
 import type { BgNotifyRecord, Message } from '@taiji/shared'
+// notify 通道 customType 词表单源（extension-protocol，与壳写点同源）
+import { WORKFLOW_RESULT_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 
 /** bg-notify 单条记录的成败三态（D5 判据输出）：成功 / 失败 / 中性（取消、判据不可得）。 */
 export type NotifyOutcome = 'success' | 'failed' | 'neutral'
@@ -111,7 +113,7 @@ function parseManagedSessionNotify(details: unknown): { notifyId: string; outcom
  *  （去重键 details.notifyId，D9）。message 级 parse null
  *  → 零 record + unparsed 1。 */
 function extractNotifyRecords(msg: Message): NotifyExtraction {
-  if (msg.customType === 'workflow-result') {
+  if (msg.customType === WORKFLOW_RESULT_CUSTOM_TYPE) {
     const notify = parseWorkflowResultNotify(msg.details)
     if (!notify) return { records: [], unparsed: 1 }
     return {

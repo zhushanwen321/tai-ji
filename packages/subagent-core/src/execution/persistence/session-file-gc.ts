@@ -8,6 +8,11 @@
 // 与池时代 refs.json 残留。record 主数据（主 session 文件里的 subagent-record entry）
 // 由引擎侧管理，其删除对 core 无触发点——done record 的 journal 没有精确回收锚，
 // 只能靠此兜底；workflow 域（taskId 占位无 record 生命周期锚）同样依赖它。
+//
+// [W1 D5] journal 事件文件族（record 事件文件 *.events + run journal
+// *.record.jsonl，RUN_EVENT_JOURNAL_SUFFIX 现行值）被显式忽略（isEventJournalName）
+// ——它们的清理归统一保留维护轮（fold 终态 + 保留窗口），本 GC 不得触碰（见
+// 函数注释）。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -15,6 +20,10 @@ import * as path from "node:path";
 import { isProcessAlive, readAliveMarker } from "./alive-store.ts";
 import { getEngineDataDir } from "../engine/common/data-dir.ts";
 import { cleanupExpiredJournals } from "../engine/common/pool-manager.ts";
+// journal 事件文件后缀单源（run 域 = run-events；record 域 = record-events）——
+// 后缀字面量散布是静默漂移源（两常量的单源导出头注同款考量）。
+import { RECORD_EVENTS_SUFFIX } from "./record-events.ts";
+import { RUN_EVENT_JOURNAL_SUFFIX } from "../../orchestration/run-events.ts";
 
 /** 30 天 TTL（毫秒）。 */
 const TTL_DAYS = 30;
@@ -114,8 +123,26 @@ function cleanExpiredJsonl(full: string, now: number): void {
   }
 }
 
+/**
+ * journal 事件文件名判定（W1 D3/D5 显式忽略规则）：record 事件文件（*.events，
+ * records 目录内）与 run journal（*.record.jsonl——RUN_EVENT_JOURNAL_SUFFIX 现行值）
+ * 不是 session 文件——清理归统一保留维护轮（fold 终态 + 保留窗口判据，
+ * run-state-evidence.ts 单源），GC 不得触碰。
+ *
+ * 现状分发本不命中 *.events（无 .jsonl 后缀、不落任何清理分支），显式化是防
+ * 未来通配规则回归，不是行为改动；run journal 以 .jsonl 结尾、若进入扫描树会
+ * 命中 .jsonl 分支，故一并显式排除。legacy *.events.jsonl（[D1] 改名前旧写入方
+ * 产物）不在本排除面——run journal 落 workflow-state 目录（扫描树
+ * <agentDir>/subagents 之外），legacy 件消亡由 [D1] 处置（不读不写不主动删）+
+ * 裁决点 7 无引用回收顺带删除覆盖（run-state-evidence.ts 对账清理段同源）。
+ */
+function isEventJournalName(name: string): boolean {
+  return name.endsWith(RECORD_EVENTS_SUFFIX) || name.endsWith(RUN_EVENT_JOURNAL_SUFFIX);
+}
+
 /** 单条 dirent 分发。分支判断顺序与 fs 副作用时序保持与原实现一致：
- *  目录递归 →（records 内）manifest .json → .jsonl → 孤儿 sidecar。 */
+ *  目录递归 → journal 事件文件显式忽略（W1 D5）→（records 内）manifest .json →
+ *  .jsonl → 孤儿 sidecar。 */
 function cleanDirent(dir: string, entry: fs.Dirent, now: number, allowManifestJson: boolean): void {
   const full = path.join(dir, entry.name);
   if (entry.isDirectory()) {
@@ -123,6 +150,10 @@ function cleanDirent(dir: string, entry: fs.Dirent, now: number, allowManifestJs
     // records 在 <enc>/records/ 下递归自动覆盖；其他位置（如 subagents/worktrees.json）
     // 不能匹配 .json——否则会误删 worktree reaper 依赖的状态文件。
     walkAndClean(full, now, entry.name === "records");
+  } else if (isEventJournalName(entry.name)) {
+    // 显式忽略（W1 D5）：journal 事件文件不是 session 文件——清理归统一保留
+    // 维护轮（runRetentionMaintenanceRound），本 GC 零触碰（含超龄形态）。
+    return;
   } else if (
     allowManifestJson &&
     entry.name.endsWith(".json") &&

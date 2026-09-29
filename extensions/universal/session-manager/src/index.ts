@@ -95,7 +95,7 @@ function callSessionManager(
 		ui: { select: ctx.ui.select.bind(ctx.ui) },
 	};
 	return callMarkerRpc(guiCtx, SESSION_MANAGER_MARKER, payload, {
-		// watch 不传 timeout（D2/P1：无 timer 长挂不死，任意晚的 respond 按 id 精确 resolve；PS-55）
+		// watch 不传 timeout（D2/P1：无 timer 长挂不死，任意晚的 respond 按 id 精确 resolve；PS-59）
 		timeout: action === "watch" ? undefined : SELECT_TIMEOUT_MS[action],
 		log: (msg, detail) => logger.error(`[session-manager] ${msg}`, detail),
 	});

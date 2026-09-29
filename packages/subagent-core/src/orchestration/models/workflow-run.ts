@@ -45,6 +45,14 @@ export interface WorkflowRunMeta {
   startedAt: string;
  /** ISO 时间戳，transition("done") 时设置。 */
   completedAt?: string;
+ /**
+  * ISO 时间戳，最近一次中断（run-interrupted 转移事件）时刻；run-resumed 复活
+  * 时清除（[D2] interrupted 是 lifecycle 暂停态——聚合 status 词表保持两态
+  * running|done，中断态经本标记在投影面表达：runSummary 据此投影 'interrupted'，
+  * CLI/TUI 展示不再把重水合中断 run 显示为僵尸「运行中」）。写点 = 壳侧
+  * foldRecordStreamToRun（loadAll 重建）与 recoverCrashedRuns（收编链就地写入）。
+  */
+  interruptedAt?: string;
  /** Worker 线程错误计数（C.5：跨 runtime 存活，重试计数载体）。 */
   workerErrorCount?: number;
  /** 脚本错误计数（C.5：跨 runtime 存活）。 */

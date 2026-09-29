@@ -22,22 +22,22 @@ export type SubagentRpcAction =
 /** /workflows RPC action 判别联合。 */
 export type WorkflowRpcAction =
   | { action: "abort"; runId: string }
-  | { action: "lifecycle-missing-id"; verb: "abort" }
-  | { action: "lifecycle-removed"; verb: "pause" | "resume" }
+  | { action: "resume"; runId: string }
+  | { action: "lifecycle-missing-id"; verb: "abort" | "resume" }
+  | { action: "lifecycle-removed"; verb: "pause" }
   | { action: "noop" };
 
 /**
- * 已移除的 lifecycle verb 集合（pause/resume——run 一次性生命周期化后删除，
- * 解析为 lifecycle-removed 提示，而非 unknown noop）。
+ * 已移除的 lifecycle verb 集合（pause——run 一次性生命周期化后删除，解析为
+ * lifecycle-removed 提示，而非 unknown noop）。resume 不在此列：断点续跑能力
+ * 落地后 resume 是一等 action（workflow-run-resume-revision U3「action 词表
+ * 适配」覆盖 RPC 通道——taiji GUI 用户经 client.prompt 发 /workflows resume）。
  */
-const REMOVED_LIFECYCLE_VERBS: ReadonlySet<"pause" | "resume"> = new Set([
-  "pause",
-  "resume",
-]);
+const REMOVED_LIFECYCLE_VERBS: ReadonlySet<"pause"> = new Set(["pause"]);
 
-/** verb 是否为已移除的 lifecycle action（类型守卫，收窄到 "pause" | "resume"）。 */
-function isRemovedLifecycleVerb(verb: string): verb is "pause" | "resume" {
-  return REMOVED_LIFECYCLE_VERBS.has(verb as "pause" | "resume");
+/** verb 是否为已移除的 lifecycle action（类型守卫，收窄到 "pause"）。 */
+function isRemovedLifecycleVerb(verb: string): verb is "pause" {
+  return REMOVED_LIFECYCLE_VERBS.has(verb as "pause");
 }
 
 /**
@@ -128,8 +128,11 @@ export function parseSubagentRpcCommand(argsStr: string): SubagentRpcAction {
  * 支持格式：
  * - `abort <runId>` → { action: "abort", runId }
  * - `abort`（无 runId）→ { action: "lifecycle-missing-id", verb: "abort" }
- * - `pause|resume ...`（已移除的 lifecycle verb，带或不带 runId 均同）→
- *   { action: "lifecycle-removed", verb }——removed verb 优先于 missing-id 判定
+ * - `resume <runId>` → { action: "resume", runId }（断点续跑——与 TUI verb、
+ *   workflow tool action:"resume" 三通道同语义）
+ * - `resume`（无 runId）→ { action: "lifecycle-missing-id", verb: "resume" }
+ * - `pause ...`（已移除的 lifecycle verb，带或不带 runId 均同）→
+ *   { action: "lifecycle-removed", verb: "pause" }——removed verb 优先于 missing-id 判定
  *  （提示语义优先：用户应得知能力已删除并获 abort 指引，而非被引导补 runId）
  * - 其他（空 / 未知 action / 无参）→ { action: "noop" }
  */
@@ -141,10 +144,12 @@ export function parseWorkflowRpcCommand(argsStr: string): WorkflowRpcAction {
   if (isRemovedLifecycleVerb(verb)) {
     return { action: "lifecycle-removed", verb };
   }
-  // abort 是 lifecycle verb 单成员（pause/resume 已移除，见上），直判即可，无需集合机件
-  if (verb === "abort") {
-    if (!runId) return { action: "lifecycle-missing-id", verb: "abort" };
-    return { action: "abort", runId };
+  // abort/resume 是 lifecycle verb 现行成员（pause 已移除，见上），直判即可，无需集合机件
+  if (verb === "abort" || verb === "resume") {
+    if (!runId) return { action: "lifecycle-missing-id", verb };
+    return verb === "abort"
+      ? { action: "abort", runId }
+      : { action: "resume", runId };
   }
   return { action: "noop" };
 }

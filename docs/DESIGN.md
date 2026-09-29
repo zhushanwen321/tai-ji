@@ -51,8 +51,8 @@ components:
 
 # taiji 视觉设计系统（太极纯灰 · v6）
 
-> **权威链（2026-09-13 文档资产收口裁决）**：
-> - **值真值 = [`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root` tokens**（运行时唯一源）。本文件 §4 token 表与它挂值相等守卫（pre-commit 检查）。
+> **权威链（2026-09-13 文档资产收敛裁决）**：
+> - **值真值 = [`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root` tokens**（运行时唯一源）。本文件 §4 token 表与它挂值相等检查（pre-commit 检查）。
 > - **本文件（docs/DESIGN.md）= 视觉范式权威 + token 登记对照 + AI / impeccable 视觉上下文入口**。范式冲突以本文件为准；值冲突以 style.css 为准，并回修本文件。
 > - 原 `docs/page-design/` 目录整体退役（2026-09-13）：v6-master-spec.md 与 traffic-light-layout.md 的有价值内容已并入本文件，其余文件（v6-tokens.css / v6-spec-*.html / v6-spec-base.css / 各 demo html 等）已删除，git 可追溯。
 > - 设计演变史见 [docs/design-evolution.md](./design-evolution.md)；demo 活验证在 `.tmp/v6/`。
@@ -76,7 +76,7 @@ v6 重构的三个缘由：
 
 对标 Codex / Claude / Linear / Figma / Notion / Raycast / Stripe 的极简专业风格。一句话哲学：
 
-> **冷蓝暗色不变，shell 三栏不变，对标极简专业——「层级代替边框、圆角升档、正文提亮、内容收窄、彩色降噪」五原则更彻底地应用到全部页面。**
+> **冷蓝暗色不变，shell 三栏不变，对标极简专业——「层级代替边框、圆角档位提升、正文提亮、内容收窄、彩色降噪」五原则更彻底地应用到全部页面。**
 
 > **v2 演进（2026-08-02）**：色相从「冷蓝」演进为「太极阴阳 6 主题预设」（默认太极·玄，纯灰系）。五原则不变，色相成为可切换的表层。
 
@@ -112,7 +112,7 @@ v6 重构的三个缘由：
 | # | 原则 | 具体含义 |
 |---|------|---------|
 | 1 | **层级代替边框** | 静态容器只用一个表面色，不叠加 border；靠 bg 层级浮起分隔。border 仅保留给浮起可交互容器（popover/dialog/composer）和 focus 态 |
-| 2 | **圆角升档** | `--radius-sm` 6px（全局默认档）；卡片 10px；浮层/composer 12px；徽章/pill 999px 胶囊 |
+| 2 | **圆角档位提升** | `--radius-sm` 6px（全局默认档）；卡片 10px；浮层/composer 12px；徽章/pill 999px 胶囊 |
 | 3 | **正文提亮** | `--neutral-dim` 抬亮一档；正文位置统一用 `--neutral-mid`（过 WCAG AA ≥4.5:1）；仅装饰/极弱位置保留 dim/faint |
 | 4 | **内容收窄** | assistant 居中 720px（整 turn 居中，UserBubble 列内右浮）；设置内容列同 720px 左对齐；Composer 非 landing 对齐同列 |
 | 5 | **彩色降噪** | 保留 git 语义色（M/A/D 降为极小圆点或单字）+ accent + 真 failure 的 danger，其余降灰阶。从色块/pill 降级为极小圆点或单字 badge |
@@ -152,7 +152,7 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 - **TurnRail mini-map 节点**：active 用 `bg-accent-soft + inset accent-ring`（第三种视觉语言）。理由：mini-map 是「当前位置指示器」语义（非持久选中），且节点极小（224px 浮层内），accent-soft 染底 + ring 提供最强可见性。属瞬时高亮的延伸。
 - **SearchModal sm-item**：用 `bg-surface-hover` + accent 蓝字/蓝 icon（非列表项型默认的 bg-surface）。理由：dialog 底 = surface，sel 用 bg-surface 会同色淹没，改 surface-hover 靠蓝字区分（Linear/Raycast 范式）。
 
-### 3.5 实践原则（2026-08-02 demo 迭代沉淀）
+### 3.5 实践原则（2026-08-02 demo 迭代记录在案）
 
 > 以下 8 条来自 `.tmp/v6/` demo 多轮迭代的实际教训，是 §3.1 视觉五原则在具体场景的展开。涉及状态指示的已在 §5.6 / §9 对齐。
 
@@ -221,7 +221,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 ## §4 Design Tokens
 
-> **真相源**：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root`（token 值真值，运行时唯一源）。以下值与该文件逐字对齐，受挂值相等守卫保护（pre-commit）；运行时值更新时须同 commit 回写本表。
+> **真相源**：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root`（token 值真值，运行时唯一源）。以下值与该文件逐字对齐，受挂值相等检查保护（pre-commit）；运行时值更新时须同 commit 回写本表。
 > 本节取代 v6-design.md §2 / v6-summary.md §3（两文档已删除，残值并入本文档）与 v6-spec-tokens.html（已删除，2026-09-13 退役，git 可追溯）。
 
 ### 4.1 背景层级（阶梯上抬 + 加宽级差，暗端防糊）
@@ -543,7 +543,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | `↑↓`（SearchModal/nav） | 键盘导航 + Enter 确认 |
 | `Tab`（SettingsOverlay） | 焦点陷阱；nav 内 `↑↓/Home/End` 移动 |
 
-**IME 守卫**：Composer 的 `isComposing` 期间不拦截回车（中文/日文输入法 composing 态不发送）。
+**IME 检查**：Composer 的 `isComposing` 期间不拦截回车（中文/日文输入法 composing 态不发送）。
 
 **composer-bar popover 锚点范式**：absolute 相对 composer-bar，`bottom: calc(100% + 6px)`，`z-modal`，`bg-elevated + border-strong + shadow-2 + radius-lg`。popover open 时触发按钮 `.bar-btn--active` = `accent-soft 底 + accent 字`（锁高亮）。
 
@@ -599,7 +599,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   | 通知卡片 | 可交互（含链接/关闭按钮的 transient 反馈，如 ForkNotice） | bg-soft（语义色 12% 透明）单手段分隔无 border + `--radius` + `px-3 py-1.5` + text-sm |
   | 横线分隔行 | 静态元信息（无点击交互入口；悬停只读详情为方案 A 唯一例外），如 SystemNotice / 活动条行 | 无底色无框，两侧 `h-px` 横线（`border-strong` 色阶两端渐隐）+ 主文案 text-sm/fg/550（**恒为有界短语**）+ 居中 13px 图标（stroke 2.2，色=中性 / accent[background-bash 结构化行]）+ mono meta 钉右（text-2xs/500/tabular-nums/neutral-dim）+ py-1.5；语义色落 meta：成功绿 / 失败 warn 两档（后台任务边界行为族内例外——Turn.vue 的图标三态 + 状态点三色承载语义，meta 保持 neutral） |
 
-  **主体有界 + 悬停详情（2026-09-18 方案 A 裁决）**：横线分隔行主体只承载有界短语（i18n 文案 + 语义 meta）；无界载荷——background-bash 命令原文、超 40 字符的兑底 system 原文——一律移入 HoverCard 悬停详情（`bg-elevated + border-strong + shadow-2`，宽 `min(520px,85vw)`，mono 全文 + 事实片段 + 复制按钮；活动条 bash 执行行同构）。行内不再渲染命令/长文原文——长载荷把 flex-1 横线挤成几像素残端或零宽的形态塌缩自此结构性杜绝，横线长度不随载荷波动；background-bash「后台」chip 随短语语义并入退役；活动条 bash 行以 elapsed mono meta（「已 Ns」）维持执行期观察。「静态无交互」判据收窄为「无点击交互入口」——悬停只读详情（+复制）为族内唯一例外。裁决背景：长命令（如 `cd … && timeout 1200 npx vitest run`）使两侧渐隐横线塌成残端/归零，与 trigger 行的仪式形态同屏不同相。
+  **主体有界 + 悬停详情（2026-09-18 方案 A 裁决）**：横线分隔行主体只承载有界短语（i18n 文案 + 语义 meta）；无界载荷——background-bash 命令原文、超 40 字符的兜底 system 原文——一律移入 HoverCard 悬停详情（`bg-elevated + border-strong + shadow-2`，宽 `min(520px,85vw)`，mono 全文 + 事实片段 + 复制按钮；活动条 bash 执行行同构）。行内不再渲染命令/长文原文——长载荷把 flex-1 横线挤成几像素残端或零宽的形态塌缩自此结构性杜绝，横线长度不随载荷波动；background-bash「后台」chip 随短语语义并入退役；活动条 bash 行以 elapsed mono meta（「已 Ns」）维持执行期观察。「静态无交互」判据收窄为「无点击交互入口」——悬停只读详情（+复制）为族内唯一例外。裁决背景：长命令（如 `cd … && timeout 1200 npx vitest run`）使两侧渐隐横线塌成残端/归零，与 trigger 行的仪式形态同屏不同相。
 
   共同约束：宽度一律 `mx-auto max-w-[var(--content-max-w)]` 与对话流内容列同体系；动效 `notice-in` 200ms（-4px translateY 淡入）+ `motion-reduce:animate-none`；通知卡片内文字链接用 accent 色 + hover 下划线，**不用 hover 底色**（soft 底卡片内再叠 hover 底 = 卡中卡）。裁决背景：ForkNotice 早期实现为 border + bg-info-soft 双分隔 + 全宽（848px vs turn 720px），critique 后收敛。
 
@@ -607,7 +607,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 - 底色 `var(--bg)`；SegmentedTab 见 §5.3；SessionItem 选中态见 §5.4
 - **Project 一级导航**（D14）：nav 下方 ProjectSwitcher。**折叠态** = 当前 project 名 + ChevronDown（点击展开列表）；**展开态** = project 列表（popover 范式 bg-elevated + border-strong + shadow-2），每行 project 名 + hover 显删除按钮（Trash icon，danger 色，点击 window.confirm 后 removeProject），底部「+ 新建项目」按钮（点击变 input，Enter 创建 + 设活跃）；选中态 `bg-surface + accent 字`（列表项型）。session 按 workspace（目录）分组，worktree chip 用 `--reasoning` 紫（§3.5.7）
-- **3 tab**（sessions/files/plugins；plugins 为第 3 枚，Puzzle icon，plugin view 收口于此）
+- **3 tab**（sessions/files/plugins；plugins 为第 3 枚，Puzzle icon，plugin view 收敛于此）
 - 组标题去 uppercase；ForkGroup 去 border 改缩进，分支行单行（序号 pill + 标题 + 时间，不显示状态，§3.5.4）；FileTree 缩进 10px gap 4px
 - SessionList 状态信号见 §5.6A（左未读点 + 右异常 badge）；非列表行场景（GitPanel 等）用 §5.6B 的 7px 圆点
 - **Brand 区**（顶部）：TaijiLogo 28px 旋转（8s，reduced-motion 停，currentColor 适配主题）+ 产品名(base 600) + 版本号(2xs mid) + 可升级按钮（accent + 7px danger 红点角标）
@@ -639,12 +639,12 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - 11 个 page 分组卡片 `bg-card` + 10px 圆角 + 去 border；行分隔 hairline 0.05；每行 label 加 12px `neutral-mid` 描述
 - **ProviderEdit**：展开就地编辑（手风琴，取代 ProviderEditModal 双层 modal）
 - 表单 label 去 uppercase tracking-wider
-- **交互状态机**（有编辑态的页面）：dirty 快照 diff（净零翻转恢复 clean）/ 保存流（mock 延迟 + 已保存反馈）/ 离开守卫（dirty 拦截切页 + 放弃先还原快照防重入）/ beforeunload
+- **交互状态机**（有编辑态的页面）：dirty 快照 diff（净零翻转恢复 clean）/ 保存流（mock 延迟 + 已保存反馈）/ 离开检查（dirty 拦截切页 + 放弃先还原快照防重入）/ beforeunload
 
 ### 6.5 Overlays
 
 - **SearchModal**：手写覆盖层；命令/文件聚合（session 源待接入，demo 现有 2 group：建议命令 + 最近打开）；选中态见 §3.4 例外（surface-hover + 蓝字，dialog 底 surface 上 bg-surface 会淹没）；分组 header 去 uppercase；高亮 `<span class="sm-hit">` font-semibold 不染蓝（颜色继承父元素）；loading 防闪 200ms（见 §5.10）；default 态尾部 clock icon 表最近/历史
-- **FormOverlay**：内联（非 modal），统一提问表单协议（ui-form）的 GUI 唯一渲染面——ask-user / scheduler / plan 三方提问收口，覆盖 composer 挂载（多问 = 多 tab，单问 = 单视图；schedule 整表单 = ScheduleForm 渲染器，无边框一体化形态）
+- **FormOverlay**：内联（非 modal），统一提问表单协议（ui-form）的 GUI 唯一渲染面——ask-user / scheduler / plan 三方提问收尾，覆盖 composer 挂载（多问 = 多 tab，单问 = 单视图；schedule 整表单 = ScheduleForm 渲染器，无边框一体化形态）
   - **多问题切 tab**（form-tab：无 border / 全圆角 6px / active=bg-elevated+500 / 已答 tab 显 7px success 绿点）
   - **单选 radio**：16px，unchecked=`border-strong` 空心，checked=`accent` 实心 + `inset 2px bg-input` 形成环
   - **多选 checkbox**：16px 方块，checked=`accent` 实心 + `accent-fg` 勾 10px
@@ -722,7 +722,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 - 启用 coverage + 设观察门槛
 - E2E 进 CI（mock 轨 + real 轨独立 job）
-- 补建 dev-smoke 闸门
+- 补建 dev-smoke 门禁
 - 重写 TEST-STRATEGY.md
 
 ### 8.2 阶段 A：整体架构（3 项）
@@ -799,7 +799,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 | R11 | block icon | 14px |
 | R13 | SegmentedTab 圆角 | 12px（radius-lg） |
 | R14 | drawer 投影 | 弱投影 0.15-0.18 |
-| R22 | 圆角升档 | tr-git/fg-pill 等升 6px；tt-close 保留 3px 例外 |
+| R22 | 圆角档位提升 | tr-git/fg-pill 等升 6px；tt-close 保留 3px 例外 |
 
 ### 9.3 文档裁决
 
@@ -821,7 +821,7 @@ style.css（packages/renderer/src/style.css :root，值真值，运行时唯一�
   > .tmp/v6/ demo（组件实现活验证）
 ```
 
-**冲突处理**：范式冲突以本文件为准；值冲突以 style.css 为准并回修本文件（§4 挂值相等守卫，pre-commit 检查）。
+**冲突处理**：范式冲突以本文件为准；值冲突以 style.css 为准并回修本文件（§4 挂值相等检查，pre-commit 检查）。
 
 ### 10.1 终态表（原 28 份 v6 文档分类整合后）
 

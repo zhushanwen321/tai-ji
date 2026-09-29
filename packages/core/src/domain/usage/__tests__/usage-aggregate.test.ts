@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * usage-aggregate.ts 纯函数单测（用量统计增量覆盖 gate，随 aggregate 下沉 core 域）。
  *

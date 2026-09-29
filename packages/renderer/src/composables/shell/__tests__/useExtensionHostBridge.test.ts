@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useExtensionHostBridge.test.ts —— createWsPluginMessageSource 过滤条件单测（FR1/AC1）。
  *

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * customStart details 保留单测（审计项 A）。
  *

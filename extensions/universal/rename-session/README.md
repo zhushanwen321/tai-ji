@@ -131,7 +131,7 @@ node e2e/run-all.mjs   # 顺序全跑：单场景失败不阻断后续，汇总�
 - harness API 与断言纯函数（单测 `e2e/harness.test.mjs` 随 vitest 跑）：`e2e/harness.mjs`
 - A2 的标题记录与人工抽查表（词组形态/语义相关/语言跟随三列）：`e2e/RESULTS.md`（run-a2 自动追加，人工填写）
 - 保留现场调试：`E2E_KEEP_TMP=1 node e2e/run-all.mjs`
-- 测试模型固定 `xiaomi-token-plan-cn/mimo-v2.5-pro`（项目规范，禁 kimi）
+- 测试模型缺省 `xiaomi-token-plan-cn/mimo-v2.6-flash`（`E2E_MODEL` 环境变量可覆盖，禁 kimi）
 
 ## 子 session 自动排除
 

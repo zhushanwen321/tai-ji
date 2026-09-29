@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * subagent store 单测 —— state / getters / actions 覆盖（数据加载层）。
  *
@@ -387,7 +389,7 @@ describe('subagent store — fetchAndInject（drawer SubagentTab 数据加载入
 
     // 空结果不写入：E-4 已投影内容不被擦除（drawer-blank-fix §6.2）
     expect(chat.setMessages).not.toHaveBeenCalled()
-    // 返回值契约：调用方（u2 编排层）据此判定分区是否种兑底
+    // 返回值契约：调用方（u2 编排层）据此判定分区是否种兜底
     expect(history).toEqual([])
   })
 

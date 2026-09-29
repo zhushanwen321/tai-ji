@@ -32,6 +32,11 @@ vi.mock("node:fs", async (importOriginal) => {
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { RecordStore } from "../persistence/record-store.ts";
+// [W1 / U2a] 收编入口断言的观察面（u0 契约层 scan/路径原语）。
+import { createRecordEventJournal, recordEventsPath } from "../persistence/record-events.ts";
+import type { RecordJournalEvent } from "../persistence/record-events.ts";
+import { createRecord } from "../persistence/execution-record.ts";
+import type { ExecutionRecord } from "../assembly/types.ts";
 import { writeAliveMarker } from "../persistence/alive-store.ts";
 
 let tmpDir = "";
@@ -238,5 +243,287 @@ describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid �
     expect(appended).toHaveLength(1);
     expect(appended[0]?.data.status).toBe("idle");
     expect(appended[0]?.data.closedReason).toBeUndefined();
+  });
+});
+
+// ── [W1 / U2a] 收编入口段专属 helper（v2* 前缀防重名）──────────────
+
+function v2MakeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
+  const base = createRecord("bg-v2", {
+    agent: "worker",
+    model: "m",
+    mode: "background",
+    task: "t",
+    slug: "v2-journal",
+    startedAt: 1000,
+    rootSessionId: "sess-v2",
+  });
+  return { ...base, ...over };
+}
+
+function v2CapturePi(captured: unknown[]): { appendEntry: (customType: string, data: unknown) => void } {
+  return {
+    appendEntry: (customType: string, data: unknown) => {
+      captured.push({ customType, data });
+    },
+  };
+}
+
+function v2ReadEventLines(recordsDir: string, id: string): RecordJournalEvent[] {
+  const content = fs.readFileSync(recordEventsPath(recordsDir, id), "utf8");
+  const out: RecordJournalEvent[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    out.push(JSON.parse(trimmed) as RecordJournalEvent);
+  }
+  return out;
+}
+
+/** 主 session JSONL 行写入（appendEntry 落盘产物形态——与 pi 落盘同构）。 */
+function v2AppendMainSessionLine(mainFile: string, customType: string, data: unknown): void {
+  fs.appendFileSync(
+    mainFile,
+    `${JSON.stringify({
+      type: "custom",
+      id: `entry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      customType,
+      data,
+    })}\n`,
+    "utf8",
+  );
+}
+
+describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
+  let rootDir: string;
+  let sessionsDir: string;
+  let recordsDir: string;
+  let mainFile: string;
+
+  beforeEach(() => {
+    rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-v2-adopt-"));
+    sessionsDir = path.join(rootDir, "sessions");
+    recordsDir = path.join(rootDir, "records");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.mkdirSync(recordsDir, { recursive: true });
+    mainFile = path.join(rootDir, "main.jsonl");
+  });
+  afterEach(() => {
+    fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** 崩溃前形态种子：v2 注册条目 + created/bound 帧、无终态（kill -9 等价）。 */
+  function seedCrashedRecord(id: string): ExecutionRecord {
+    const captured: unknown[] = [];
+    const store = new RecordStore(sessionsDir, undefined, v2CapturePi(captured), recordsDir);
+    const rec = v2MakeRecord({ id });
+    store.register(rec);
+    const sessionFile = path.join(sessionsDir, `${id}.jsonl`);
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    store.reportRecordTransition(rec);
+    // 主 session 只落注册条目（崩溃前无终态条目）。
+    const registered = (captured[0] as { data: unknown }).data;
+    v2AppendMainSessionLine(mainFile, "subagent-record", registered);
+    return rec;
+  }
+
+  /** 收编链（等价 kill -9 重启）：新 store + 主文件 → recoverOrphanRecords。 */
+  function rebootStore(captured: unknown[]): RecordStore {
+    const store = new RecordStore(sessionsDir, undefined, v2CapturePi(captured), recordsDir);
+    store.recoverOrphanRecords(undefined, mainFile);
+    return store;
+  }
+
+  /** 手工 v2 settled 条目行（D4 双面证据条目面的夹具构造——stopReason 可指定）。 */
+  function appendManualSettledEntry(id: string, stopReason: string): void {
+    v2AppendMainSessionLine(mainFile, "subagent-record", {
+      v: 2,
+      kind: "settled",
+      id,
+      status: "idle",
+      stopReason,
+      endedAt: Date.now(),
+      turns: 0,
+      totalTokens: 0,
+      model: undefined,
+      thinkingLevel: undefined,
+    });
+  }
+
+  // [W1 / D4 双面证据第二面判别] interrupted 族条目 = 「条目面先行写、journal 帧
+  // 缺失」不对称窗口残留（journalAppend fire-and-forget 失败），不构成跳过证据：
+  // 收编放行 → 追加 settled 帧修复 journal（journal 唯一事实源承诺的自愈通道），
+  // 二次重启由 fold settled 拦截不重复。
+  it("夹具A journal 缺 settled 帧 + interrupted 终态条目 → 收编追加帧修复 journal，二次触发不重复", () => {
+    seedCrashedRecord("sa-adopt-orphix");
+    // 崩溃前条目面先行写了一条 interrupted settled（journal 帧因写失败缺失的形态）
+    appendManualSettledEntry("sa-adopt-orphix", "interrupted");
+
+    const captured: unknown[] = [];
+    rebootStore(captured);
+    const events = v2ReadEventLines(recordsDir, "sa-adopt-orphix");
+    // journal 帧修复：record-settled 已追加
+    expect(events.filter((e) => e.type === "record-settled")).toHaveLength(1);
+    // 条目补写跟随收编链（adopted settled，幂等语义见双面证据注释）
+    expect(captured.filter((c) => (c as { data: { kind?: string } }).data?.kind === "settled")).toHaveLength(1);
+
+    // 二次重启：fold 已 settled → 不再追加（幂等）
+    const captured2: unknown[] = [];
+    rebootStore(captured2);
+    expect(
+      v2ReadEventLines(recordsDir, "sa-adopt-orphix").filter((e) => e.type === "record-settled"),
+    ).toHaveLength(1);
+  });
+
+  it("夹具B journal 缺 settled 帧 + 非 interrupted 条目（completed）→ 保持跳过（双面证据成立）", () => {
+    seedCrashedRecord("sa-adopt-final");
+    appendManualSettledEntry("sa-adopt-final", "completed");
+
+    const captured: unknown[] = [];
+    rebootStore(captured);
+    // 非 interrupted 真终态条目在 → 跳过收编，journal 零追加、条目零回调
+    expect(
+      v2ReadEventLines(recordsDir, "sa-adopt-final").filter((e) => e.type === "record-settled"),
+    ).toHaveLength(0);
+    expect(captured).toHaveLength(0);
+  });
+
+  it("验收③收编幂等（双重启不重复追加）：record-settled 帧恰一条、终态条目恰一条", async () => {
+    seedCrashedRecord("sa-adopt-1");
+
+    const capturedA: unknown[] = [];
+    const storeA = rebootStore(capturedA);
+    const eventsA = v2ReadEventLines(recordsDir, "sa-adopt-1");
+    expect(eventsA.filter((e) => e.type === "record-settled")).toHaveLength(1);
+    const settled = eventsA.find((e) => e.type === "record-settled");
+    expect(settled).toMatchObject({ type: "record-settled", stopReason: "interrupted-by-restart" });
+    expect(capturedA.filter((c) => (c as { data: { kind?: string } }).data?.kind === "settled")).toHaveLength(1);
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(recordsDir, "sa-adopt-1.json"), "utf8") as string,
+    ) as { id: string; agentName: string; executionStatus: string; stopReason?: string };
+    expect(manifest).toMatchObject({ id: "sa-adopt-1", agentName: "worker", executionStatus: "idle" });
+    // [W4 收敛] 收编停因上投影——sweep 判据第三级（findAdoptedStopReasonSync）的读取源。
+    expect(manifest.stopReason).toBe("interrupted-by-restart");
+    // 判据第三级本体：收编 manifest → 停因；非收编形态（文件缺失）→ undefined。
+    expect(storeA.findAdoptedStopReasonSync("sa-adopt-1")).toBe("interrupted-by-restart");
+    expect(storeA.findAdoptedStopReasonSync("sa-never-existed")).toBeUndefined();
+
+    // 第二次重启：fold settled + 终态条目在（双面证据）→ 零追加。
+    const capturedB: unknown[] = [];
+    rebootStore(capturedB);
+    const eventsB = v2ReadEventLines(recordsDir, "sa-adopt-1");
+    expect(eventsB.filter((e) => e.type === "record-settled")).toHaveLength(1);
+    expect(capturedB).toHaveLength(0);
+  });
+
+  it("夹具C 收编→复活续轮（round-started 清 fold settled）→轮完成前再崩溃→二次收编追加新帧（D4 非 interrupted 谓词复合回归）", () => {
+    const id = "sa-adopt-relock";
+    const rec = seedCrashedRecord(id);
+
+    // 第一次收编（等价 kill -9 重启）：interrupted 收编帧 + 终态条目 + manifest。
+    const first: unknown[] = [];
+    rebootStore(first);
+    expect(v2ReadEventLines(recordsDir, id).filter((e) => e.type === "record-settled")).toHaveLength(1);
+
+    // 用户复活续跑：markResurrected 翻回活态 + markRoundStarted 落轮始帧——fold
+    // settled 被 round-started 清除（record-events.ts fold 转移），旧 interrupted
+    // 终态条目在（stopReason=interrupted-by-restart，中断族不构成跳过证据）。
+    const liveStore = new RecordStore(sessionsDir, undefined, v2CapturePi([]), recordsDir);
+    liveStore.markResurrected(rec, true);
+    expect(liveStore.markRoundStarted(id)).toBe(true);
+    expect(
+      v2ReadEventLines(recordsDir, id).filter((e) => e.type === "record-round-started"),
+    ).toHaveLength(1);
+
+    // 轮完成前再崩溃 → 重启二次收编：旧 any-settled 判定会被首次收编的 interrupted
+    // 条目误拦（实体永停 running 假活态）；非 interrupted 谓词放行 → 追加新
+    // record-settled + settled 条目补写 + manifest 物化。
+    const second: unknown[] = [];
+    rebootStore(second);
+    expect(v2ReadEventLines(recordsDir, id).filter((e) => e.type === "record-settled")).toHaveLength(2);
+    expect(second.filter((c) => (c as { data: { kind?: string } }).data?.kind === "settled")).toHaveLength(1);
+    expect(fs.existsSync(path.join(recordsDir, `${id}.json`))).toBe(true);
+
+    // 三次重启：fold 已 settled（第二次收编帧）→ 幂等零追加。
+    const third: unknown[] = [];
+    rebootStore(third);
+    expect(v2ReadEventLines(recordsDir, id).filter((e) => e.type === "record-settled")).toHaveLength(2);
+    expect(third).toHaveLength(0);
+  });
+
+  it("验收⑤v2 新路径：重启后 manifest 经收编物化恢复可见（rematerialize 桥接为 v1 兼容专属零依赖）", async () => {
+    seedCrashedRecord("sa-adopt-2");
+
+    // 重启前 manifest 面 = bound 物化的 running 投影（子文件在盘）。
+    const beforeManifest = JSON.parse(
+      fs.readFileSync(path.join(recordsDir, "sa-adopt-2.json"), "utf8") as string,
+    ) as { status: string };
+    expect(beforeManifest.status).toBe("running");
+
+    const captured: unknown[] = [];
+    rebootStore(captured);
+
+    // 重启后（收编物化）：executionStatus = idle（两态权威词）——manifest 可见性
+    // 恢复通道 = 收编物化本身，与 record-access.ts rematerialize 桥接（v1 兼容
+    // 专属——只认 v1 快照末条 closedReason）零依赖。
+    const afterManifest = JSON.parse(
+      fs.readFileSync(path.join(recordsDir, "sa-adopt-2.json"), "utf8") as string,
+    ) as { executionStatus: string; closedReason?: string };
+    expect(afterManifest.executionStatus).toBe("idle");
+    expect(afterManifest.closedReason).toBeUndefined();
+  });
+
+  it("活体保护：内存持有（在途）与异宿主在持（pi 锚探活）均不收编", async () => {
+    const capturedSeed: unknown[] = [];
+    const holdingStore = new RecordStore(sessionsDir, undefined, v2CapturePi(capturedSeed), recordsDir);
+    const rec = v2MakeRecord({ id: "sa-adopt-live" });
+    holdingStore.register(rec);
+    const sessionFile = path.join(sessionsDir, "sa-adopt-live.jsonl");
+    fs.writeFileSync(sessionFile, '{"type":"session","version":3}\n', "utf8");
+    rec.sessionFile = sessionFile;
+    holdingStore.reportRecordTransition(rec);
+    const registered = (capturedSeed[0] as { data: unknown }).data;
+    v2AppendMainSessionLine(mainFile, "subagent-record", registered);
+
+    // 同 store 持有（内存在册）：recoverOrphanRecords 的 v2 段跳过。
+    holdingStore.recoverOrphanRecords(undefined, mainFile);
+    const events = v2ReadEventLines(recordsDir, "sa-adopt-live");
+    expect(events.some((e) => e.type === "record-settled")).toBe(false);
+
+    // 新 store 无内存持有：正常收编（对照组——证明上一步跳过是活体保护所致）。
+    const capturedCtrl: unknown[] = [];
+    const ctrlStore = new RecordStore(sessionsDir, undefined, v2CapturePi(capturedCtrl), recordsDir);
+    ctrlStore.recoverOrphanRecords(undefined, mainFile);
+    expect(v2ReadEventLines(recordsDir, "sa-adopt-live").some((e) => e.type === "record-settled")).toBe(true);
+  });
+
+  it("空 journal / journal 未接线 / 坏链：skippedMissing / skippedNoIdentity 分类", async () => {
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    // 空 journal（从未落账）。
+    expect(store.adoptInterruptedRecord("sa-never-existed")).toBe("skippedMissing");
+
+    // 坏链：事件文件只有 bound 帧（created 帧损坏/缺失的残文件形态）。
+    fs.writeFileSync(
+      recordEventsPath(recordsDir, "sa-broken-chain"),
+      `${JSON.stringify({ type: "record-journal", id: "sa-broken-chain" })}\n`,
+      "utf8",
+    );
+    const journal = createRecordEventJournal(recordsDir);
+    await journal.append("sa-broken-chain", {
+      type: "record-bound",
+      ts: Date.now(),
+      sessionFile: "/tmp/x.jsonl",
+      engine: "pi",
+      engineHandle: { sessionRef: {}, poolKey: "shared" },
+      epoch: 0,
+    });
+    expect(store.adoptInterruptedRecord("sa-broken-chain")).toBe("skippedNoIdentity");
+
+    // journal 未接线（纯内存形态）：恒 skippedMissing。
+    const memStore = new RecordStore(sessionsDir);
+    expect(memStore.adoptInterruptedRecord("sa-any")).toBe("skippedMissing");
   });
 });

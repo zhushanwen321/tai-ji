@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * preset store 纯状态容器单测（pi-launch-presets wave1，TC-3）。
  *

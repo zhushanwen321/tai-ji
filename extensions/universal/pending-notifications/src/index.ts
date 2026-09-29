@@ -29,7 +29,7 @@
  * - subagent-core worker-message-pump.ts finalizeRun（reload-closeout D4：workflow
  *   run 终态注销直落，emit 发射点已删——reload 转换窗/factory 顺序窗内 emit 丢失
  *   即注销 entry 永缺位）；
- * - subagent-core round-supervisor/reconcile-sweep.ts（对账 sweep 补注销，对账走
+ * - subagent-core registry-reconcile/reconcile-sweep.ts（对账 sweep 补注销，对账走
  *   appendEntry 权威路径，不经 emit）；
  * - base-tool-enhance pending-reconcile.ts（session_start 对账，同款）。
  *

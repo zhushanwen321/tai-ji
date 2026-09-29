@@ -164,7 +164,8 @@ describe("协议黑盒：9 正向方法 × fake 引擎回放", () => {
       )) as { entries: unknown[] };
       expect(Array.isArray(view.entries)).toBe(true);
 
-      await h.client.ping(); // 诊断面：不 throw 即通
+      // ping 协议方法往返（诊断面：不 throw 即通——客户端便捷方法已删，走裸 request）
+      await h.client.request("ping", {}, { timeoutMs: 5_000 });
     } finally {
       await h.client.dispose();
     }

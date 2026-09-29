@@ -6,7 +6,7 @@
  * - models.json 新增独立 customProvider stub-hang（不动主 provider）
  * - settings.json enabledModels 追加 stub-hang/hang-model
  * - config/rename-session-ext-config.json 写 model ref 指向 stub
- * 主对话 --model mimo-v2.5-pro 不受影响。
+ * 主对话 --model mimo-v2.6-flash 不受影响。
  *
  * 断言：主 round 正常完成（turn_end stop）；rename LLM 调用约 30s 超时后 session JSONL 出现
  * 子串 `rename LLM call failed`（logger.warn(msg,{error}) 形态——error 详情在 entry 的结构化

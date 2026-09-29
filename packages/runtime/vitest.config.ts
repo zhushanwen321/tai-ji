@@ -34,10 +34,16 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  * 对所有 project 生效）。新 project 漏挂由 scripts/check-vitest-guard.mjs 第 5 条拦截。
  */
 const REAL_PI_TESTS = [
-  // L2.5 二批（2026-09-15）后当前为空：全部「真实 pi + 真实 LLM turn」equivalence 用例已
-  // 翻轨 faux（见上方维护契约）。数组保留为注册位——新增真实 LLM 轨文件必须登记于此
+  // L2.5 二批（2026-09-15）后：全部「真实 pi + 真实 LLM turn」equivalence 用例已翻轨
+  // faux（见上方维护契约）。数组保留为注册位——新增真实 LLM 轨文件必须登记于此
   // （守卫 session-manager-e2e-fixture-unit.test.ts 双向 diff；scalar-state-invalidation
   // 的真实轨 describe 已于 2026-09 测试舰队审查删除，纯 mock 文件的过期登记已清）。
+  // [HISTORICAL 2026-09-26 W1 Gate A] idle-pi-reclaim-integration（纯 faux 轨）自愿
+  // 登记：满并行下 pi 侧扩展冷编译与模型解析竞态（prompt 时 faux provider 未注册 →
+  // "No API key"），单跑 1.3s 恒绿、满并行 2/2 红——「faux 毫秒级轮次饿死结构性
+  // 不存在」前提对双 spawn + jiti 冷编译形态证伪。按池的调度语义（真进程隔离、
+  // main 组完整结束后顺序尾组）登记，非断言放宽。
+  'src/__tests__/services/idle-pi-reclaim-integration.test.ts',
 ] as const
 
 export default taijiTestConfig({

@@ -1,8 +1,8 @@
 /**
  * 内部 slash 命令过滤（W4，cw-2026-07-22-unify-slash-command-source）。
  *
- * 约定：skill name 或 slash 命令名以 `__` 开头的是内部触发命令（W5 reload-orchestrator
- * 的 /__taiji_reload__），不在用户可见的 slash 浮层显示。pi RegisteredCommand 无 hidden 标记，
+ * 约定：skill name 或 slash 命令名以 `__` 开头的是内部触发命令（host 内部命令，
+ * [HISTORICAL] 原 W5 /__taiji_reload__，2026-09-25 随 reload 编排退役），不在用户可见的 slash 浮层显示。pi RegisteredCommand 无 hidden 标记，
  * get_commands 会列出这类命令，靠前端按前缀过滤隐藏。
  */
 

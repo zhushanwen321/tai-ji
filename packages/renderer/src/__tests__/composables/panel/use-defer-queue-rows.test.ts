@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useDeferQueueRows 单测（compact-defer-composer-queue u1 拆分配套——自 Composer.vue
  * 原样搬移后的行为锁定；queue 本体的 enqueue/remove/flush 契约见 use-compact-queue.test.ts）。

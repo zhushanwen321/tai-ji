@@ -322,6 +322,12 @@ describe('event-adapter: ask-user ASK_USER_MARKER 检测 (U6-U8)', () => {
     expect(msg!.message.payload.allowCancel).toBe(false)
     // ask-user 分支不传 options（避免前端把 JSON payload 当下拉选项）
     expect(msg!.message.payload.options).toBeUndefined()
+    // legacy 键不再透传（归一在 runtime 单点完成）
+    expect(msg!.message.payload.askUser).toBeUndefined()
+    expect(msg!.message.payload.askUserQuestions).toBeUndefined()
+    // 与 schedule-create 源键互不串扰
+    expect(msg!.message.payload.scheduleCreate).toBeUndefined()
+    expect(msg!.message.payload.scheduleDraft).toBeUndefined()
   })
 
   it('U7: 普通 select（title≠marker）→ options 透传 string[]（.map(String)，不拍扁）', () => {
@@ -341,8 +347,11 @@ describe('event-adapter: ask-user ASK_USER_MARKER 检测 (U6-U8)', () => {
     expect(msg!.message.payload.askUser).toBeUndefined()
   })
 
-  it('U8: title=marker 但 options[0] 非法 JSON → 降级普通 select', () => {
-    const event = makeSelectEvent(ASK_USER_MARKER, ['not-valid-json{'], 'req-bad')
+  it.each([
+    ['options[0] 非法 JSON', ['not-valid-json{'], 'req-bad'],
+    ['options 为空数组', [], 'req-empty'],
+  ] as Array<[string, unknown[], string]>)('U8: title=marker 但 %s → 降级普通 select', (_desc, options, requestId) => {
+    const event = makeSelectEvent(ASK_USER_MARKER, options, requestId)
 
     const results = translate(event, 'sess-1')
 
@@ -352,18 +361,10 @@ describe('event-adapter: ask-user ASK_USER_MARKER 检测 (U6-U8)', () => {
     expect(msg!.message.payload.method).toBe('select')
     // 降级为普通 select（无 askUser/askUserQuestions 字段）
     expect(msg!.message.payload.askUser).toBeUndefined()
-    // options 经 .map(String) 透传
-    expect(msg!.message.payload.options).toEqual(['not-valid-json{'])
-  })
-
-  it('U8: title=marker 但 options 为空数组 → 降级普通 select', () => {
-    const event = makeSelectEvent(ASK_USER_MARKER, [], 'req-empty')
-
-    const results = translate(event, 'sess-1')
-
-    const msg = findMessage(results)
-    expect(msg).toBeDefined()
-    expect(msg!.message.payload.askUser).toBeUndefined()
+    // 与 schedule-create 源键互不串扰
+    expect(msg!.message.payload.scheduleCreate).toBeUndefined()
+    // options 经 .map(String) 透传（空数组 → []）
+    expect(msg!.message.payload.options).toEqual(options)
   })
 
   it('U8: title=marker 且 JSON 合法但 questions 为空数组 → 降级普通 select', () => {

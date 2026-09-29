@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * fileTreeStore 单测（#3，D-021 结构 + T2.2/T2.6/T2.7/T2.8/T2.8b/T2.9/T4.6）。
  *

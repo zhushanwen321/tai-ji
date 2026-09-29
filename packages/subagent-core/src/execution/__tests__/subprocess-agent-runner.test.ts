@@ -5,14 +5,12 @@
 // subagent-workflow-record-unification.md §5 W4 / §3.5 终态数据流）。
 //
 // 本文件只锁壳契约面：
-//   1. 构造签名（deps.subagentService + ctxModel 兼容——session-lifecycle.ts
-//      装配点零改定的锚点）；
+//   1. 构造签名（deps.subagentService——session-lifecycle.ts 装配点同形）；
 //   2. run() 纯转调（opts/signal/onEvent/stream 原样透传 + parentRunId 用直调
 //      占位 SAR_UNATTACHED_PARENT_RUN_ID + 返回值原样返回，零映射零吞错）；
-//   3. updateCtxModel 装配链兼容（model_select 刷新不炸；run() 不再消费 ctxModel）；
-//   4. mergeRunSignals re-export 可用（既有 import 路径契约）。
+//   3. mergeRunSignals re-export 可用（既有 import 路径契约）。
 //
-// [H2 W4 删除面] 旧编排内部用例（路由集成 / model 填底 / ctxModel 孪生守卫 /
+// [H2 W4 删除面] 旧编排内部用例（路由集成 / model 填底 /
 // timeoutMs 合并 / onEvent-journal 桥接 / 直传保真 / no-progress 守护落点 /
 // 全链 killAll）随 SAR 编排退役删除——service 落点的行为守护由
 // workflow-agent-dispatch.test.ts（W2 承接：注册面/池顺序/守护 arm 键 record.id/
@@ -22,7 +20,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
-import type { ModelInfo } from "../assembly/model-resolver.ts";
 import { SubagentStream } from "../assembly/stream-sink.ts";
 import type { SubagentService } from "../subagent-service.ts";
 import {
@@ -93,32 +90,6 @@ describe("SubprocessAgentRunner (H2 W4 纯转调壳)", () => {
     const sar = new SubprocessAgentRunner({ subagentService: createMockService(executeWorkflowAgent) });
 
     await expect(sar.run(makeOpts(), new AbortController().signal)).rejects.toThrow(boom);
-  });
-
-  it("构造签名兼容：ctxModel 可选注入（装配点零改定锚点）+ updateCtxModel 刷新不炸", async () => {
-    const ctxModel: ModelInfo = {
-      id: "test/model-x",
-      name: "Model X",
-      provider: "test",
-      reasoning: false,
-      contextWindow: 128_000,
-    };
-    const executeWorkflowAgent = vi.fn().mockResolvedValue(makeResult());
-    // ctxModel 注入构造（session-lifecycle.ts:537 形态）
-    const sar = new SubprocessAgentRunner({ subagentService: createMockService(executeWorkflowAgent), ctxModel });
-    // model_select 刷新链（extension index.ts 调用形态）：不炸且不影响转调
-    sar.updateCtxModel(undefined);
-    sar.updateCtxModel(ctxModel);
-
-    await sar.run(makeOpts(), new AbortController().signal);
-    // run() 不再消费 ctxModel：转调用参只有 opts/parentRunId/signal/onEvent/stream
-    expect(executeWorkflowAgent).toHaveBeenCalledWith(
-      makeOpts(),
-      SAR_UNATTACHED_PARENT_RUN_ID,
-      expect.any(AbortSignal),
-      undefined,
-      undefined,
-    );
   });
 
   it("re-export 契约：mergeRunSignals 经本模块路径可用（既有 import 面）", () => {

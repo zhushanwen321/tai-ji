@@ -25,6 +25,7 @@
   "taiji": {
     "subagentEngine": {
       "id": "pi",
+      "processModel": "per-window",
       "bin": "pi-subagent-cli",
       "protocol": 1,
       "envPrefixes": [
