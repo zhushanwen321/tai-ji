@@ -28,7 +28,7 @@
 
 跨级调用点的判定：P0/P1 主流程调用 P2/P3 能力时，**接入点按被调功能的契约降级隔离**（调用方不因辅助功能故障而崩），被调功能内部按自身级的契约处理。
 
-执行切入点：PR 审查维度见 `pr-cr-fix/agents/review-business-logic.md`（grading-error-policy 类别）；流水线审查见 dev-flow 阶段 3 reviewer 模板。
+执行切入点：分支审查维度见 `dev-merge/agents/review-business-logic.md`（grading-error-policy 类别）；流水线审查见 dev-flow 阶段 3 reviewer 模板。
 
 ## 2. P0 — 必不可少（挂了 = harness 对用户毫无价值）
 
