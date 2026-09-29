@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -1474,6 +1474,58 @@
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "E2E-RESUME-01 同资产（scenario-25）的门段触发面拆分。设计 §4 场景 25 行：真机 dev app 环境断 GUI workflow 列表；断言面 = 列表文案字面量「已中断（可续跑）」（非「运行中」）+ resume 后恢复 running 投影——色调已由 state-tone-lock L1 锁死，托盘桶归类（interrupted 计 ended 桶）不进真机断言（D2 宿主投影④登记不覆盖理由）。scope = 文案标签单源链（shared WORKFLOW_RUN_OUTCOME_LABELS → journal-projection 投影 → tray-tone 消费）+ spec 自身。数据面断言（中断形态条目契约 / 概览链三态 / session-reader 家族链）归 E2E-RESUME-01 常规跑，无门"
+    },
+    {
+      "id": "E2E-SESSMGR-01",
+      "summary": "session-manager cw mock 剧本（U4-E1/E2/E3：create/manage/malformed 三模式，全部委托 vitest 探针驱动仓库真实实现，零 token）",
+      "scope": [
+        "scripts/cw/session-manager-e2e.sh"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/cw/session-manager-e2e.sh"
+        },
+        {
+          "kind": "harness",
+          "ref": "scripts/cw/lib/red-phase-guard.sh"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/session-manager-e2e-probe.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "bash scripts/cw/session-manager-e2e.sh create && bash scripts/cw/session-manager-e2e.sh manage && bash scripts/cw/session-manager-e2e.sh malformed",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#2-测试分层",
+      "note": "剧本族之家 scripts/cw/ 落在 scripts/ 资产族看护根下，按防漏登记门禁显式登记（2026-09-29 暂存 full-e2e.sh 时实跑检出）。探针 import 实现符号，红阶段守卫（lib/red-phase-guard.sh）保区分力。真机全链路剧本另见 E2E-SESSMGR-02"
+    },
+    {
+      "id": "E2E-SESSMGR-02",
+      "summary": "session-manager 全链路真机冒烟剧本（U9-S1/S2：真 pi 进程 + 真 LLM spawn create_managed_session → marker UI 请求回写 → scanPiSessions 重启恢复）",
+      "scope": [
+        "scripts/cw/session-manager-full-e2e.sh"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/cw/session-manager-full-e2e.sh"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/session-manager-full-e2e.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "bash scripts/cw/session-manager-full-e2e.sh",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#2-测试分层",
+      "note": "真 LLM 轨：开发阶段按改动范围空载串行执行，无 CI/门禁触发面（同 EQUIV-01 note 对 equivalence real-pi 分池的裁决口径——本条只登记剧本文件的 coverage，剧本驱动的 test.ts 资产面归 E2E-EQUIV-01）。剧本自含 180s watchdog + trap 孤儿 pi 清理（session-dir 带 u9-smoke 标记）"
     }
   ]
 }
