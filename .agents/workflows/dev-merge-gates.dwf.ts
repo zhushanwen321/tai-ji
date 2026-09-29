@@ -60,11 +60,19 @@ const MAX_GATE_ROUNDS = 3; // gates FAIL 修复子循环上限（dev-merge SKILL
 const STUCK_THRESHOLD = 3; // 连续 N 轮 must-fix 不降判 stuck
 const FIXER_CONCURRENCY = 3; // fix 组并行上限（组间文件不相交才并行）
 const REVIEWER_BATCH = 4; // review 分批并行（同 review-fix-loop）
-const AGENT_DIR = ".agents/skills/pr-cr-fix/agents";
+const AGENT_DIR = ".agents/skills/dev-merge/agents";
 const REPORT_ROOT = ".tmp/dev-merge-review";
 const GATES_SCRIPT = "scripts/quality-gates.mjs";
 const CHANGESET_SCRIPT = "scripts/changeset-check.mjs";
 const ALWAYS_DIMS = ["business-logic", "arch-boundary", "data-governance"]; // 恒派 3 维（含降级红线——决策 1/3）
+// 维度 → agent 定义 read 引用的通用判据技能（相对 ~/.agents/skills/；纯项目特化维度无条目）。
+// 在盘检查用：缺失 fail-fast 指明路径，不静默降级为无判据审查（口径悄悄变窄比失败更危险）。
+// 引用本体在各 agent 定义的「通用判据（read 引用，不内嵌）」节，两处增删须同步。
+const AGENT_SKILLS: Record<string, string[]> = {
+  "business-logic": ["code-domain-review/SKILL.md", "code-harden/SKILL.md"],
+  "arch-boundary": ["code-arch-review/SKILL.md", "architecture-decay-audit/SKILL.md"],
+  "data-governance": ["architecture-decay-audit/SKILL.md"],
+};
 // 触发 3 维路径判定（与 dev-merge SKILL 1.7 第 3 步同款谓词，改任一侧须同步）
 const TRIGGER_RULES: { dim: string; re: RegExp }[] = [
   { dim: "electron-build", re: /(^|\/)(tsup\.config\.|electron-builder\.|\.github\/)/ },
@@ -74,6 +82,9 @@ const TRIGGER_RULES: { dim: string; re: RegExp }[] = [
 
 // node -e 通道（脚本无 fs/process：存在性探测/读盘/提交走 world.run，argv 传参无 shell 注入面）
 const EXISTS = "process.exit(require('fs').existsSync(process.argv[1])?0:1)";
+// HOME 相对路径存在性探测（通用判据技能在 ~/.agents/skills/ 下，~ 不被 fs 展开）
+const EXISTS_UNDER_HOME =
+  "process.exit(require('fs').existsSync(require('path').join(process.env.HOME||'',process.argv[1]))?0:1)";
 // 组级统一 commit：精确路径 add（-- 分隔防路径被当选项）+ 一笔 commit；失败退出码透传
 const NODE_COMMIT =
   "var cp=require('child_process');var files=JSON.parse(process.argv[1]);var msg=process.argv[2];" +
@@ -413,6 +424,20 @@ async function main(): Promise<Record<string, unknown>> {
       const p = `${AGENT_DIR}/review-${dim}.md`;
       if (!(await existsViaNode(p))) {
         throw new Error(`review agent 定义缺失：${p}——.agents 实体缺失或滞后，恢复通道 = refs/skills-snapshot 备份 ref；恢复后重新发起本 workflow`);
+      }
+    }
+
+    // 通用判据技能在盘检查（agent 定义「通用判据 read 引用」节声明的技能；缺失 fail-fast
+    // 指明路径——静默降级为无判据审查会让口径悄悄变窄，比失败更危险）
+    async function existsUnderHome(rel: string): Promise<boolean> {
+      const r = await world.run("node", ["-e", EXISTS_UNDER_HOME, rel]);
+      return r.exitCode === 0;
+    }
+    for (const dim of dims) {
+      for (const rel of AGENT_SKILLS[dim] ?? []) {
+        if (!(await existsUnderHome(`.agents/skills/${rel}`))) {
+          throw new Error(`维度 ${dim} 引用的通用判据技能缺失：~/.agents/skills/${rel}——先恢复该用户级技能后重新发起本 workflow；禁止在无判据状态下继续审查`);
+        }
       }
     }
 

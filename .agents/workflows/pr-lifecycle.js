@@ -65,7 +65,7 @@ parameters:
       description: cr-fix review→fix 循环轮次上限（1-50），默认 10
     reviewers:
       type: string
-      description: review 维度白名单，逗号分隔（对 .agents/skills/pr-cr-fix/agents/review-*.md 按路径子串匹配裁剪）；缺省不传 = cr-fix 代码审查维度不派（默认，与分支无关）；显式传入 = 按白名单派发审查
+      description: review 维度白名单，逗号分隔（对 .agents/skills/dev-merge/agents/review-*.md 按路径子串匹配裁剪；资产所有权归 dev-merge，本流程仅经此显式逃生舱引用）；缺省不传 = cr-fix 代码审查维度不派（默认，与分支无关）；显式传入 = 按白名单派发审查
     simplifyMode:
       type: string
       enum: [apply, report]
@@ -1678,7 +1678,7 @@ phase("条件评审修复循环");
 // step 7：cr-fix（内联 review-fix-loop；代码审查维度默认不派——重语义审查分层归
 // dev-merge，显式 reviewers 参数是唯一开启方式，与分支名无关；环境类失败自动重试 1 次）
 await step("cr-fix", async () => {
-  const agentsDir = ".agents/skills/pr-cr-fix/agents";
+  const agentsDir = ".agents/skills/dev-merge/agents";
   const relReviewers = !fileExists(agentsDir)
     ? []
     : fs.readdirSync(agentsDir).filter((f) => /^review-.*\.md$/.test(f)).sort().map((f) => agentsDir + "/" + f);

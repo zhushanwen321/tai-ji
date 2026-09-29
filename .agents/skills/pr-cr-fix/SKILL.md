@@ -302,7 +302,7 @@ node scripts/select-constraints.mjs --base main   # 产出 .review/constraints.m
 
 - worktree cwd（绝对路径，避免 multi-worktree cwd 陷阱）+ 审查 `git diff main...HEAD` 的全部变更
 - focus（见下方「维度 → Agent 映射」表对应审查焦点）
-- agent 定义文件路径（`<repo>/.agents/skills/pr-cr-fix/agents/review-<维度>.md`，subagent 须复读原文获得完整 checklist）
+- agent 定义文件路径（`<repo>/.agents/skills/dev-merge/agents/review-<维度>.md`——资产所有权归 dev-merge，本 skill 仅经显式 reviewers 逃生舱引用；subagent 须复读原文获得完整 checklist，含其通用判据 read 引用的用户级技能文件）
 - `.review/constraints.md` 命中约束清单（存在时必须消费：dimensions 含本维度的条目逐条核对，`enforcement: review` 的条目是重点；权威源文档按需 Read 原文）
 - `output 路径：<绝对路径>` + `Write report to: <绝对路径>`（双措辞兼容 agent 约定）
 - 「输出格式：YAML frontmatter（verdict/must_fix）+ Findings 表格（优先级 | 文件 | 行号 | 类别 | 描述 | 修复方向），优先级用 MUST_FIX/SUGGESTION/INFO」
@@ -324,7 +324,7 @@ node scripts/select-constraints.mjs --base main   # 产出 .review/constraints.m
 
 ### 维度 → Agent 映射（三路径共用）
 
-Agent 定义位于本 skill 目录 `agents/review-<维度>.md`（不全局暴露，仅本 skill 内部引用）。**现行 agent 定义 6 个**（显式 `reviewers` 参数时的可选范围，默认整集不派发，见「审查维度集」节）：
+Agent 定义位于 dev-merge skill 目录 `agents/review-<维度>.md`（2026-09 自本 skill 迁入 dev-merge——重语义审查分层归 dev-merge，资产所有权随之迁移；本 skill 仅经显式 reviewers 逃生舱引用同一批文件，不全局暴露）。**现行 agent 定义 6 个**（显式 `reviewers` 参数时的可选范围，默认整集不派发，见「审查维度集」节）：
 
 | 维度 | Agent 实体 | 审查焦点 |
 |------|-----------|---------|
@@ -443,7 +443,7 @@ push 了发布 tag（`v*`/`npm-*`）时必须等 CI 构建完成并验证产物�
 | 派发前凭语义判断跳过维度（不查路径映射表） | 不可审计、漏派无解释 |
 | 阶段 3a 直接跑 vitest 替代 pr-pre-merge.sh | marker 不写 |
 | 未获用户授权就 push | 违反 push 授权约束 |
-| 删/改 pr-cr-fix/agents/ 下的 review agent（经设计裁决退役的维度除外——以设计文档登记为准，本设计退役 test-coverage / type-safety） | 破坏 review 维度完整性 |
+| 删/改 dev-merge/agents/ 下的 review agent（经设计裁决退役的维度除外——以设计文档登记为准，本设计退役 test-coverage / type-safety） | 破坏 review 维度完整性 |
 
 ## 失败恢复
 
@@ -471,7 +471,7 @@ push 了发布 tag（`v*`/`npm-*`）时必须等 CI 构建完成并验证产物�
 ```
 .agents/skills/pr-cr-fix/
 ├── SKILL.md              # 本文件
-├── agents/               # 6 个 review agent 定义 review-<维度>.md + simplify-apply.md（pr-lifecycle simplify step 的 code-simplify 固化契约：覆盖声明 / 引用锚点 / 维护义务；不全局暴露）
+├── agents/               # simplify-apply.md（pr-lifecycle simplify step 的 code-simplify 固化契约：覆盖声明 / 引用锚点 / 维护义务；不全局暴露）。6 个 review-<维度>.md 已迁 dev-merge/agents/（2026-09 资产所有权裁决：重语义审查归 dev-merge），本 skill 经显式 reviewers 逃生舱引用
 ├── references/           # 触发场景才 read：coverage-industry-research.md（覆盖率调研）/ cot-leakage.md（CoT Leakage）/ mutation-testing.md（Mutation 深检）
 ├── scripts/              # metrics-gate.py / coverage-gate.py（含 --extra-packages）/ validate-skill-yaml.py
 └── workflows/

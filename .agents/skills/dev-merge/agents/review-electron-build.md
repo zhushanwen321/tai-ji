@@ -7,6 +7,8 @@ name: review-electron-build
 
 审查 `git diff main...HEAD` 中变更是否违反 Electron 打包约束。这是 taiji 事故最高发领域（参考项目 AGENTS.md 关键规则 #12「Electron 打包约束，违反必出 bug」）。打包配置错误会导致产物缺 runtime、子进程无法启动、pi 资源缺失等致命问题。
 
+本维度为纯项目特化维度，无通用判据技能引用；全部检查项按项目文档与登记约束执行。
+
 ## 输入
 
 task prompt 中必须包含：

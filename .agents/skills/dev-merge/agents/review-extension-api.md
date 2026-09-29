@@ -10,6 +10,8 @@ name: review-extension-api
 > **规范参考**：Pi 扩展强制约束见 `docs/extensions/extension-conventions.md`，完整开发模式见 `docs/extensions/development-guide.md`。
 > 原 SKILL.md「Pi Extension 接口契约 Checklist」四节（SDK 接口契约核对 / spec 偏差记录 / schema 描述一致性 / 类型断言）已并入本文执行步骤 2-5（pr-cr-fix 精简改造 D8），内容以本文为 SSOT。
 
+本维度为纯项目特化维度，无通用判据技能引用（agent-facing 表面清单的方法论引用见文末「Agent-facing 表面 checklist」节）。
+
 ## 输入
 
 task prompt 中必须包含：
@@ -45,6 +47,7 @@ task prompt 中必须包含：
    - `peerDependencies` 是否声明 `@earendil-works/pi-coding-agent`
 
 **配置 skill 约定**（agent 可发现性）：凡 agent 可能需要协助配置/使用/排查的 extension，**必须**带一个统一命名的 config skill，让 agent 通过 pi 的 progressive disclosure（skill description 进 `<available_skills>`，正文按需 read）自动发现说明。检查：
+
    - 有磁盘配置文件（读 `<agentDir>/` 下 .json 等）→ skill 含配置路径（getAgentDir 派生）+ schema + 默认值 + 示例
    - 无配置文件但有命令交互/复杂存储（如 event sourcing）→ skill 讲使用方式 + 存储机制（不硬套配置 schema 模板）
    - 命名：`skills/<extension简名>-ext-config/SKILL.md`（如 `permission-ext-config`、`model-switch-ext-config`）
@@ -53,6 +56,7 @@ task prompt 中必须包含：
    - 范例：`extensions/{rename-session,permission,model-switch,scheduler}/skills/*-ext-config/`
 
 **配置路径约定**（参考 extension-conventions §「配置路径约定」）：有磁盘配置文件的 extension，路径必须是 `<agentDir>/config/<extension简名>-ext-config.json`（与 config skill 名 `<简名>-ext-config` 对齐，禁语义名 / 无后缀简写 / `<名>-config.json`）。检查：
+
    - 配置路径是否落在 `config/` 子目录 + 文件名 = `<简名>-ext-config.json`（如 `permission-ext-config.json`、`model-switch-ext-config.json`，llm-shared `getConfigPath` 派生）
    - 历史路径迁移是否用 session_start hook（幂等 + 模块级 once flag；参考 extension-conventions §「历史路径迁移」）：代码含 `migrateLegacyConfig` 调用 + 版本注释（`Added in vX.Y.Z` / `Remove after vN.0.0`）
    - **禁止** `postinstall` / `pi.migrate` / `scripts/migrate-config.mjs`（已废弃，session_start 取代）

@@ -22,6 +22,16 @@ task prompt 中必须包含：
 
 阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base main` 产出，存在时必须消费）：命中约束清单中 dimensions 含本维度（data-governance）的条目必须逐条核对——enforcement 为 review 的条目是本维度重点；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
 
+## 通用判据（read 引用，不内嵌）
+
+执行检查前先 Read `~/.agents/skills/architecture-decay-audit/SKILL.md`，按其判据审查：
+
+- **「修复原则集」节全文**（唯一事实源 + 投影 / 拉是真理通道推是性能提示 / 事实在产生处带上标记直接传递 / 契约必填化 / 机器检查防复发）——本维度 SSOT、推拉模式、第二写入者、事件直写四类检查的判定原则全部从这里映射，禁止发明新原则。
+- **「元模式族」表**：族 B（持久化多轨无权威：一份状态写多个介质、恢复路径多条）与族 E（推断代替传递）的形态判据用于识别违规形态。
+- **「七条判别式」**中的对齐追踪法（判别式 3：对账函数的存在本身就是多份权威的证据）与兜底命中率（判别式 4）。
+
+**消费边界声明**：只消费上述技能的判据内容，不执行其流程语义——不跑六步审计流程、不写它自己的报告文件、不落盘 .tmp、不等用户裁决；你的唯一产出 = `output` 路径的报告 + 本 workflow 的结构化返回。
+
 ## 执行步骤
 
 1. **获取变更范围**：`git diff main...HEAD --stat` + `git diff main...HEAD`。
@@ -36,11 +46,9 @@ task prompt 中必须包含：
    - 一份状态写多个介质（文件 + 内存 store + 缓存 + 派生副本等）且无投影声明（谁是权威源、谁是投影、如何同步）= 红灯 MUST_FIX。
    - 重要事实是否落单一权威登记处并配自动机器检查——能确定性脚本判定的不留给人工/LLM 判断。
    - 与第二写入者检查同族不同面：第二写入者管「同介质多写方」，本条管「同状态多介质无投影」。
-   - 权威源 = [docs/adr/decisions.md](../../../../docs/adr/decisions.md) ADR-0062（单一数据 owner + 绝对写规则）+ 全局 AGENTS.md 架构偏好「SSOT + 机器检查」。
-5. **推拉模式检查**：
+5. **推拉模式检查**（判定原则 = 上方通用判据「拉是真理通道，推是性能提示」）：
    - 数据同步以拉为准（缓存优先、磁盘兜底），推送只允许作为可丢弃的性能提示（丢了靠下次拉取自愈，不承载正确性）。
    - 新增推送通道若承载正确性语义（推送丢失即状态错误、无拉取兜底）= MUST_FIX。
-   - 权威源 = architecture-decay-audit skill 修复原则集（「拉是真理通道，推是性能提示」）。
 6. **事件只做失效检查**：
    - 新增的 pi 事件 handler（event-adapter / event-interpreter / effects）是否直接改状态（应只标 dirty 触发快照重拉）。
    - 合法例外形态（登记在案）：消息流 `applyEntry` reducer、queue 内容的 queue_update 计数对账。例外之外的事件直写 = MUST_FIX。
@@ -54,11 +62,11 @@ task prompt 中必须包含：
    - 扩展持久化状态是否经 `pi.appendEntry` 自描述 entry（由 pi 写文件）；runtime 消费是否走 `entry_appended` + `get_entries`。
    - 新代码把状态编码进 message/toolCall 让读取方逆向解析 = MUST_FIX；`pi.sendMessage` custom message 用于用户可见通知合法，用于状态记录 = MUST_FIX。
 10. **登记表同步检查**：
-   - 改了数据流（写路径/缓存/事件消费/派生位置）的 PR 必须同步更新 `data-source-registry.md`；漏更新 = MUST_FIX。
+    - 改了数据流（写路径/缓存/事件消费/派生位置）的 PR 必须同步更新 `data-source-registry.md`；漏更新 = MUST_FIX。
 11. **会话数据落点检查（ADR-0063 I2，MUST）**：
-   - diff 中是否出现把**对话/会话内容**（session JSONL、消息、entry、会话拷贝产物）写入 `$TMPDIR` / `os.tmpdir()` / 其他临时目录的路径（`mkdtemp`/`tmpdir`/`/tmp` 与 writeFile/appendFile 组合）。会话内容合法位置只有 sessions 目录（pi 的写目标）与活跃进程内存；临时目录会被 OS 清空、不被 taiji 扫描——放进去 = 慢性数据丢失（2026-07-17 tmp 附着管线曾致 P0 数据丢失静默 40 天）。命中 = MUST_FIX（例外：①测试 fixture 的隔离 session-dir，须带清理断言；②zcode L3 恢复快照读通道——登记例外 data-source-registry §4 ⑰「读快照非存放」〔源库只读零触碰、副本即弃，2026-09-23 MF-1-4 登记〕，命中 `taiji-zcode-snap-` 前缀 mkdtemp 形态先对照该条）。
+    - diff 中是否出现把**对话/会话内容**（session JSONL、消息、entry、会话拷贝产物）写入 `$TMPDIR` / `os.tmpdir()` / 其他临时目录的路径（`mkdtemp`/`tmpdir`/`/tmp` 与 writeFile/appendFile 组合）。会话内容合法位置只有 sessions 目录（pi 的写目标）与活跃进程内存；临时目录会被 OS 清空、不被 taiji 扫描——放进去 = 慢性数据丢失（2026-07-17 tmp 附着管线曾致 P0 数据丢失静默 40 天）。命中 = MUST_FIX（例外：①测试 fixture 的隔离 session-dir，须带清理断言；②zcode L3 恢复快照读通道——登记例外 data-source-registry §4 ⑰「读快照非存放」〔源库只读零触碰、副本即弃，2026-09-23 MF-1-4 登记〕，命中 `taiji-zcode-snap-` 前缀 mkdtemp 形态先对照该条）。
 12. **pi 行为断言锚点检查（ADR-0063 I4，MUST）**：
-   - diff 中对 pi 内部行为的断言（注释 / 测试断言 / 文档声明「pi 会 / 不会 / 已 / 忽略 / 持久化 …」）是否附 pi-mono 源码锚点（文件 + 行号，本地 clone `~/Code/git-fork/pi-mono-workspace/main/packages/` 只读查阅）。无锚点的臆断（如「pi 已读入内存」——实为永久重绑写目标）= MUST_FIX；有锚点但只覆盖单层消费方（如只查 parse 层漏 index/append 层）= MUST_FIX（MF1 教训：单层「无害」≠ 整体无害）。
+    - diff 中对 pi 内部行为的断言（注释 / 测试断言 / 文档声明「pi 会 / 不会 / 已 / 忽略 / 持久化 …」）是否附 pi-mono 源码锚点（文件 + 行号，本地 clone `~/Code/git-fork/pi-mono-workspace/main/packages/` 只读查阅）。无锚点的臆断（如「pi 已读入内存」——实为永久重绑写目标）= MUST_FIX；有锚点但只覆盖单层消费方（如只查 parse 层漏 index/append 层）= MUST_FIX（MF1 教训：单层「无害」≠ 整体无害）。
 13. **输出审查报告**到 `output` 路径。
 
 ## 严重度判定

@@ -36,6 +36,14 @@ description: >-
 
 分支 commit 已是逻辑批次级（或只有个位数笔）→ 跳过本步直接合并，不为仪式感整理。
 
+### 审查失败分级（第 1.6-1.8 步共用语义）
+
+| 级别 | 判据（任一命中） | 动作 |
+|------|----------------|------|
+| **打回**（不进第 2 步合并） | quality-gates FAIL 经 3 轮修复子循环仍红；branch-review 终态 needs-human / stuck / max-rounds / review-failure / fix-failure（CR 门 fail-fast 语义，见 1.7）；must-fix 未全修；传播守卫硬检查红灯 | 停在合并之外，按各步失败输出的恢复指引处置后重跑对应步 |
+| **随分支带走** | branch-review minor（suggestion）残余；metrics/coverage 的 warn 档机器报告 | 不阻塞合并，登记进 commit message 或 TODO，终局 PR 期复核 |
+| **呈报后继续** | 传播守卫软提示（兄弟线线粒度呈报 + 文件交集）；gates / changeset-check / cross-branch-overlap 脚本缺失的存在性守卫披露；changeset WARN（自动分类处置，理由列明） | 呈报或披露后继续流程，不静默跳过 |
+
 ### 第 1.6 步：质量门与 changeset 前置（gates，恒跑）
 
 机器可判的合入门禁前置到分支边界（审查项唯一主责：质量门与 changeset 归分支边界承担，终局 PR 期只做复核兜底）。cwd = 当前 feat worktree 根，依次跑：
@@ -64,7 +72,7 @@ feature 分支的 diff 完整、上下文集中，是横切维度审查的天然
 **执行**（审查对象 = 分支增量 diff，非全 PR）：
 
 1. 约束动态加载：`node scripts/select-constraints.mjs --base $(git merge-base github/main HEAD)` 落 `.review/constraints.md`
-2. 派恒派 3 维 reviewer（agent 定义复用 pr-cr-fix 资产，不另建）：`business-logic`（含降级策略红线——catch 吞错假成功 / 错误信息可操作 / 用户可见降级必须显形，归 grading-error-policy 类别检查）/ `arch-boundary` / `data-governance`——pi 宿主用 `pi workflow run review-fix-loop --args '{targetType:"git-diff", target:"<merge-base-hash>", batch1:"<选中的 review-<维度>.md 绝对路径，逗号分隔>", autoCommit:true, ...}'`（batch1 点名上述 3 维）；zcode 宿主已由 dev-merge-gates.dwf.ts 的 branch-review 步承载（第 1.6 步一并发起），单独补审时用原生 `review-fix-loop` saved workflow（reviewers 传选中的 agent .md 绝对路径子集）
+2. 派恒派 3 维 reviewer（agent 定义在本 skill `agents/review-<维度>.md`，重语义审查的资产所有权归 dev-merge，pr-cr-fix 侧仅经其显式 reviewers 逃生舱引用同一批文件）：`business-logic`（含降级策略红线，判据本体 = agent 定义内 read 引用的 code-harden）/ `arch-boundary` / `data-governance`——agent 定义结构为三层：编排契约 + 通用判据 read 引用（指向 `~/.agents/skills/` 用户级技能 code-domain-review / code-harden / architecture-decay-audit / code-arch-review，缺失时 dev-merge-gates 的在盘检查 fail-fast，不静默降级为无判据审查）+ 项目特化检查（消费 `.review/constraints.md` 与项目文档）。pi 宿主用 `pi workflow run review-fix-loop --args '{targetType:"git-diff", target:"<merge-base-hash>", batch1:"<选中的 review-<维度>.md 绝对路径（本 skill agents/ 下），逗号分隔>", autoCommit:true, ...}'`（batch1 点名上述 3 维）；zcode 宿主已由 dev-merge-gates.dwf.ts 的 branch-review 步承载（第 1.6 步一并发起），单独补审时用原生 `review-fix-loop` saved workflow（reviewers 传选中的 agent .md 绝对路径子集）
 3. 触发式追加 3 维：diff 触及打包/构建配置（tsup/electron-builder/CI）→ 加 `electron-build`；触及包结构/发布线（package.json 增删/workspace/changeset 配置）→ 加 `monorepo-impact`；触及 `extensions/**/src/**` → 加 `extension-api`（tool/command schema、SDK 契约、spec 偏差登记与 data-governance 同属 dev-flow 审不到的横切关注点，且是本仓高频改动范围；SDK 签名核对要对照 node_modules dist、成本中等，故不恒派只触发）
 4. 终态处置：must-fix 全修后才进第 2 步合并；minor 残余随分支带走（commit message 或 TODO 登记），不阻塞
 

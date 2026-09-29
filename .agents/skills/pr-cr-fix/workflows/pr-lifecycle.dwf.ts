@@ -20,7 +20,7 @@ args:
     default: 10
   reviewers:
     type: json
-    description: review 维度白名单（字符串数组，对 .agents/skills/pr-cr-fix/agents/review-*.md 按路径子串匹配裁剪）；缺省不传 = cr-fix 代码审查维度不派（默认，与分支无关）；显式传入 = 按白名单派发审查
+    description: review 维度白名单（字符串数组，对 .agents/skills/dev-merge/agents/review-*.md 按路径子串匹配裁剪；资产所有权归 dev-merge，本流程仅经此显式逃生舱引用）；缺省不传 = cr-fix 代码审查维度不派（默认，与分支无关）；显式传入 = 按白名单派发审查
   simplifyMode:
     type: string
     description: code-simplify 档位：apply（A 档高置信项自动改码并独立 commit）/ report（只产报告不改码）
@@ -1503,7 +1503,7 @@ phase("条件评审修复循环");
 // 本流程的 LLM 层 = simplify + pr-meta 等流程环节；显式 reviewers 参数是唯一开启方式，
 // 对所有分支一律如此，流程不读分支名做决策；环境类失败自动重试 1 次）
 await step("cr-fix", async () => {
-  const relReviewers = (await files.glob(".agents/skills/pr-cr-fix/agents/review-*.md")).sort();
+  const relReviewers = (await files.glob(".agents/skills/dev-merge/agents/review-*.md")).sort();
   let picked: string[];
   if (reviewers.length > 0) {
     // 显式 reviewers 白名单裁剪（对现存 agent 文件按路径子串匹配）

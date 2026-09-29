@@ -9,6 +9,8 @@ name: review-monorepo-impact
 
 > **项目结构**：pnpm workspace 包含 `packages/*`（renderer/runtime/shared 等）+ `apps/*`（electron）+ `extensions/*`（pi 扩展，taiji 组 + universal 组共 21 个 role 包，数量以 `extension-dependencies.json` SSOT 为准）+ `extensions/shared/*`（4 个共享库：llm-shared / extension-logger / file-lock / ext-guards）。包间通过 `workspace:*` 依赖。
 
+本维度以项目特化检查为主（登记 SSOT + workspace 结构）；依赖方向的通用健康底线由 review-arch-boundary 维度承载（code-arch-review 依赖健康信号），本维度不重复。
+
 ## 输入
 
 task prompt 中必须包含：
