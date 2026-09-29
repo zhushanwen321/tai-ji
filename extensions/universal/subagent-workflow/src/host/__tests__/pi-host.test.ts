@@ -14,7 +14,7 @@
 
 import { join, dirname } from "node:path";
 import { createRequire } from "node:module";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { afterEach, beforeEach, afterAll, describe, expect, it, vi } from "vitest";
@@ -404,6 +404,69 @@ describe("resolveGrandchildExtensionPaths / createPiHostServices.extensionPaths�
 
   it("双源皆空（argv 无 --extension + peerDep 未安装）→ 空数组不炸", () => {
     expect(resolveGrandchildExtensionPaths(["node", "/pi", "--mode", "rpc"], () => undefined)).toEqual([]);
+  });
+
+  // e2e 门（faux 轨装配）：TAIJI_E2E=1 且 <agentDir>/extensions/faux-llm-ext.ts 在盘
+  // 时追加进孙进程显式 --extension 集；非 e2e 环境该路径恒被收窄（生产语义不变）。
+  describe("e2e 门：faux-llm-ext 放行（TAIJI_E2E=1）", () => {
+    let fauxAgentDir: string;
+
+    beforeEach(() => {
+      fauxAgentDir = mkdtempSync(join(tmpdir(), "pihost-e2e-faux-"));
+    });
+
+    afterEach(() => {
+      rmSync(fauxAgentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      vi.unstubAllEnvs();
+    });
+
+    function seedFauxExt(): string {
+      const extDir = join(fauxAgentDir, "extensions");
+      mkdirSync(extDir, { recursive: true });
+      const p = join(extDir, "faux-llm-ext.ts");
+      writeFileSync(p, "// faux provider stub\n");
+      return p;
+    }
+
+    it("TAIJI_E2E=1 + faux-llm-ext.ts 在盘 → 追加进白名单收窄集末尾", () => {
+      const fauxPath = seedFauxExt();
+      vi.mocked(getAgentDir).mockReturnValue(fauxAgentDir);
+      vi.stubEnv("TAIJI_E2E", "1");
+      const argv = [
+        "node", "/pi", "--mode", "rpc",
+        "--extension", "/staged/resources/extensions/@zhushanwen/pi-structured-output",
+      ];
+      expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
+        "/staged/resources/extensions/@zhushanwen/pi-structured-output",
+        fauxPath,
+      ]);
+    });
+
+    it("非 e2e（env 缺失）仍收窄：faux-llm-ext 在盘不追加，argv 显式携带也被白名单排除", () => {
+      seedFauxExt();
+      vi.mocked(getAgentDir).mockReturnValue(fauxAgentDir);
+      vi.stubEnv("TAIJI_E2E", "");
+      const argv = [
+        "node", "/pi", "--mode", "rpc",
+        "--extension", "/staged/resources/extensions/@zhushanwen/pi-structured-output",
+        "--extension", join(fauxAgentDir, "extensions", "faux-llm-ext.ts"),
+      ];
+      expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
+        "/staged/resources/extensions/@zhushanwen/pi-structured-output",
+      ]);
+    });
+
+    it("TAIJI_E2E=1 但 faux-llm-ext.ts 不在盘 → 不追加（非 faux e2e 用例行为不变）", () => {
+      vi.mocked(getAgentDir).mockReturnValue(fauxAgentDir);
+      vi.stubEnv("TAIJI_E2E", "1");
+      const argv = [
+        "node", "/pi", "--mode", "rpc",
+        "--extension", "/staged/resources/extensions/@zhushanwen/pi-structured-output",
+      ];
+      expect(resolveGrandchildExtensionPaths(argv, () => undefined)).toEqual([
+        "/staged/resources/extensions/@zhushanwen/pi-structured-output",
+      ]);
+    });
   });
 
   it("惰性求值：每次调用现解析（argv 变更后结果跟随，configureCore 只挂函数引用）", () => {

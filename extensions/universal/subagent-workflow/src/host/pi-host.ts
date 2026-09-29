@@ -31,6 +31,7 @@
 //     是结构超集成员，多不碍兼容）——结构兼容由本注入点 typecheck 守护，上游签名
 //     漂移即红（notify-ports.ts「闭包红线」段）。
 
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -252,17 +253,42 @@ const GRANDCHILD_EXTENSION_NPM_PKG = "@zhushanwen/pi-structured-output";
  *      判据 = argv 有 `--extension`（taiji spawn 恒带）。
  *   2. 独立 pi 形态（npm 安装、无 taiji runtime）：从包自身 optional peerDep 解析
  *      structured-output sibling 路径（安装了即解析、未安装则空）。
- * 双源皆空 = 空数组（不炸；带 schema run 的 fail-fast 属 H3 断言，非本通道职责）。
+ * e2e 门：resolveE2eFaux 命中（faux-llm-ext.ts 在盘）时追加进结果末尾——见
+ * resolveE2eFauxExtensionPath 注释。双源皆空且无 e2e faux = 空数组（不炸；带
+ * schema run 的 fail-fast 属 H3 断言，非本通道职责）。
  */
 export function resolveGrandchildExtensionPaths(
   argv: readonly string[],
   resolvePeer: () => string | undefined = resolveStructuredOutputPeer,
+  resolveE2eFaux: () => string | undefined = resolveE2eFauxExtensionPath,
 ): string[] {
   const stagedAll = collectExtensionFlagValues(argv);
   const whitelisted = stagedAll.filter(isGrandchildExtensionPath);
-  if (whitelisted.length > 0) return whitelisted;
+  const e2eFaux = resolveE2eFaux();
+  if (whitelisted.length > 0 || e2eFaux !== undefined) {
+    return e2eFaux !== undefined ? [...whitelisted, e2eFaux] : whitelisted;
+  }
   const peer = resolvePeer();
   return peer !== undefined ? [peer] : [];
+}
+
+/**
+ * e2e harness 专用的孙进程扩展放行门（faux 轨装配）。
+ *
+ * faux 轨（e2e/fixtures/launch-app-real.ts seedFauxDataDir）的孙进程 LLM 演员注入
+ * 靠 `<agentDir>/extensions/faux-llm-ext.ts` 自动发现装载——[D2 扩展加载显式化]
+ * 孙进程恒 `--no-extensions`（自动发现全关）+ 仅加载本文件白名单集后，该路径被
+ * 排除，孙进程报 `Model "faux/..." not found`。faux-llm-ext 是 e2e harness 复制进
+ * 临时数据目录的测试 provider 壳（非生产扩展，路径也不经主 pi argv——白名单
+ * filter 无法命中，须在此主动解析），故按装配归属放行：
+ * 仅 `process.env.TAIJI_E2E === "1"`（e2e harness 独有 env，生产进程无此值——
+ * 白名单收窄语义对生产不变）且文件在盘时返回该路径，由
+ * resolveGrandchildExtensionPaths 追加进孙进程显式 `--extension` 集。
+ */
+function resolveE2eFauxExtensionPath(): string | undefined {
+  if (process.env.TAIJI_E2E !== "1") return undefined;
+  const fauxExtPath = join(getAgentDir(), "extensions", "faux-llm-ext.ts");
+  return existsSync(fauxExtPath) ? fauxExtPath : undefined;
 }
 
 /** 路径是否命中孙进程扩展白名单：路径段序列包含白名单任一段集的连续匹配
