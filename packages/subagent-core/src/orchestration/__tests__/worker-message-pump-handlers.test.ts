@@ -17,10 +17,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  forgetRunResumedBudget,
   handleScriptError,
   handleWorkerError,
   handleWorkerExit,
   handleWorkerMessage,
+  noteRunResumedBudget,
   postBudgetUpdate,
   rebuildRuntime,
 } from "../worker-message-pump.ts";
@@ -505,6 +507,36 @@ describe("race-F3: rebuild 时间预算折算", () => {
     expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
     expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
     expect(run.state.status).toBe("running");
+  });
+
+  it("复活 run（spec 带继承预算 + D10 账本）：worker/script 错误重试按剩余活跃预算重排，不被 startedAt 墙钟误判耗尽", async () => {
+    // 修复 docs/todo §1.1 后的生产形态：resume 重建 spec 带 run-created 继承的预算
+    const BUDGET = 60 * 60_000;
+    const run = makeRunningRun({ budgetTimeMs: BUDGET });
+    await seedRunCreated(run);
+    // 跨天搁置：startedAt 墙钟 7 天前——若走墙钟算法 remaining ≈ 0 会直接 time_limited；
+    // D10 账本（活跃 40min + 本段 5min）折算 → 剩余 ≈15min，正常 rebuild
+    run.meta.startedAt = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
+    const scheduleTimeBudget = vi.fn((_runId: string, _budgetTimeMs: number) => undefined);
+    const deps = makeDeps({ scheduleTimeBudget });
+
+    try {
+      noteRunResumedBudget(run.runId, 40 * 60_000, Date.now() - 5 * 60_000);
+      const p = handleScriptError(run, "boom", [], deps, makeHandlers());
+      await vi.advanceTimersByTimeAsync(1000); // 退避 1s（Date 同步前进 1s）
+      await p;
+
+      // 不 time_limited：正常 rebuild + 计时器按剩余活跃预算重排（非满额 60min）
+      expect(run.state.status).toBe("running");
+      expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
+      expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
+      const rescheduled = scheduleTimeBudget.mock.calls[0]![1] as number;
+      expect(rescheduled).toBeGreaterThanOrEqual(14 * 60_000);
+      expect(rescheduled).toBeLessThanOrEqual(15 * 60_000);
+      expect(rescheduled).toBeLessThan(BUDGET);
+    } finally {
+      forgetRunResumedBudget(run.runId);
+    }
   });
 });
 

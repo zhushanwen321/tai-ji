@@ -344,6 +344,16 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
    * dispatchRunCreated，与 scriptSource 同款条件式）。
    */
   scriptPath?: string;
+  /**
+   * run 级时间预算上界（ms，RunSpec.budgetTimeMs 原文——run 创建时的墙钟预算）。
+   * record 单源后 resume 无法从别处恢复原预算约束，本字段是唯一数据面：resume
+   * 重建 spec 时据此恢复（未显式传 time 即继承），复活 run 在错误重试重建时按
+   * 「剩余活跃预算」（搁置时间不计）重排计时器；缺失 = 旧格式行（本载荷落地前的
+   * 流）或创建时未设预算，两种形态一律回落不限时（旧格式行为不劣化）。可选 =
+   * 读取面对旧格式行放行，写侧契约由写入方承担（写入点 = terminal-actions
+   * dispatchRunCreated，仅 > 0 时落字段——与 scriptPath/model 同款条件式）。
+   */
+  budgetTimeMs?: number;
 }
 
 /**

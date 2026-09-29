@@ -300,12 +300,13 @@ export function forgetRunResumedBudget(runId: string): void {
 /**
  * 计算 run 的剩余时间预算（ms）[race-F3 → D10 活跃段算式]。
  *
- * 账本消费现状（已登记缺陷，docs/todo/subagent-workflow-issues.md §1.1）：当前
- * resume 重建 spec（resume-run.ts rebuildRunFromRecord）不含 budgetTimeMs，本函数
- * 首行的预算缺失提前返回发生在查 [D10] resume 账本之前——账本消费在该形态下
- * 不可达（若可达，按 activeElapsedMs + 复活后墙钟折算，搁置时间不计）。无账目
- * 回落 startedAt 墙钟现状算法（非 resume 来源 run——重试不重置预算的既有语义
- * 保持）。未配置预算（budgetTimeMs 未设或 <=0，默认不限）返回 undefined。
+ * 账本消费（修复 docs/todo/subagent-workflow-issues.md §1.1 后可达）：resume 重建
+ * spec 时把生效预算写入 spec.budgetTimeMs（resume-run.ts rebuildRunFromRecord——
+ * 显式 options 覆盖 / 未提供则继承 run-created 帧），故带账目的复活 run 在错误重试
+ * 重建时走到本函数并消费账本：按 activeElapsedMs + 复活后墙钟折算（搁置时间不计）。
+ * 无账目回落 startedAt 墙钟现状算法（非 resume 来源 run——重试不重置预算的既有语义
+ * 保持）。未配置预算（budgetTimeMs 未设或 <=0，默认不限）返回 undefined——首行提前
+ * 返回对「旧格式帧 / 未设预算」形态仍然成立（该形态本就无账目可消费）。
  */
 function remainingTimeBudgetMs(run: WorkflowRun): number | undefined {
   const budget = run.spec.budgetTimeMs;

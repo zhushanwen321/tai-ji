@@ -382,9 +382,10 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
   /** journal 目录锚（缺省 = 模块锚解析——与 dispatch 链 resolveRunEventJournal 同源）。 */
   journalDir?: string;
   /**
-   * 时间预算上界（ms）。record 流 run-created 帧不携带预算字段（设计 §3.1 载荷
-   * 表与 [D1] 载荷裁决均未列 budget——resume 无法从流恢复原预算约束），由调用
-   * 方（U3 壳入口）按需传入；缺省 = 不限时（Budget 缺省语义）。
+   * 时间预算上界（ms）。取值优先级：显式提供 = 覆盖 run-created 帧记录的原预算；
+   * 缺省 = 继承该帧的预算；两者都没有 = 不限时（Budget 缺省语义）。生效值写入
+   * 重建 spec（错误重试重建时按剩余活跃预算重排计时器）并用于 D10 预算预检——
+   * 全链单值，不在别处二次折算。
    */
   budgetTimeMs?: number;
   /** 时钟注入（epoch ms）；缺省 Date.now()——run-resumed 帧 ts 与预算算式的确定性测试通道。 */
@@ -467,6 +468,10 @@ function resolveRecordPath(runId: string, journalDir?: string): string {
 /**
  * [resumeRunLocked 拆分] 资格校验（段 2）：run-created 帧 / interrupted 生命周期 /
  * D10 预算预检（场景 16：搁置不计，活跃已耗不退）。任一不过即拒绝（异常即返回值）。
+ *
+ * 预算预检与返回的 budgetTimeMs 均为「生效预算」（显式 options 覆盖，未提供则继承
+ * run-created 帧——见 ResumeRunOptions.budgetTimeMs）——继承形态下原预算已耗尽
+ * 同样拒绝，不把复活窗变成绕过预算的通道。
  */
 function assertResumeEligibility(
   runId: string,
@@ -501,7 +506,11 @@ function assertResumeEligibility(
         "interrupted before resuming.",
     );
   }
-  const budgetTimeMs = options?.budgetTimeMs;
+  // 生效预算单源（裁决：run-created 帧是预算记录面）：显式 options 覆盖，未提供
+  // 则继承 run-created 记录的创建预算，两者都没有 = 不限时（旧格式帧无该字段 +
+  // 未显式传 time → 与修复前完全一致）。本值同时供 D10 预检、首次挂表
+  // （adoptResumedRun）与 rebuildRunFromRecord 的 spec 消费——不出现第二处折算。
+  const budgetTimeMs = options?.budgetTimeMs ?? created.budgetTimeMs;
   const activeElapsedMs = computeActiveElapsedMs(events);
   if (budgetTimeMs !== undefined && budgetTimeMs > 0 && activeElapsedMs >= budgetTimeMs) {
     throw reject(
@@ -570,7 +579,14 @@ function adoptResumedRun(
   now: () => number,
 ): void {
   noteRunResumedBudget(runId, summary.activeElapsedMs, summary.resumedAt);
-  const run = rebuildRunFromRecord(runId, created, readRecordStreamStrict(recordPath, runId));
+  // 生效预算（summary.budgetTimeMs 与首次挂表同源）随 spec 落定——重试重建面读
+  // run.spec.budgetTimeMs，本处不另算一遍
+  const run = rebuildRunFromRecord(
+    runId,
+    created,
+    readRecordStreamStrict(recordPath, runId),
+    summary.budgetTimeMs,
+  );
   const handlers = makeHandlers(run, deps);
   // 剩余预算（D10）：budget −（累计活跃已耗 + 本段已跑）——搁置不计
   const remainingBudgetMs = summary.budgetTimeMs && summary.budgetTimeMs > 0
@@ -840,6 +856,7 @@ function rebuildRunFromRecord(
   runId: string,
   created: Extract<WorkflowRunEvent, { type: "run-created" }>,
   events: readonly WorkflowRunEvent[],
+  budgetTimeMs?: number,
 ): WorkflowRun {
   const spec = {
     scriptSource: created.scriptSource ?? "",
@@ -850,6 +867,12 @@ function rebuildRunFromRecord(
     // 缺失回落空串，由模板脚本内建 fail-fast 拒绝（壳侧 foldRecordStreamToRun
     // 同款恢复，两侧行为等价由测试锁定）
     scriptPath: created.scriptPath ?? "",
+    // 时间预算单源：调用方传入的「生效预算」（resume 显式覆盖，或继承 run-created
+    // 帧的创建预算——assertResumeEligibility 单一折算点）。spec 带预算后 pump 的
+    // 复活预算账本分支可达：错误重试重建按剩余活跃预算重排计时器（搁置不计），
+    // 引擎侧 run.state.budget.maxTimeMs 投影与 fresh run 同形。undefined/<=0 不落
+    // 字段 = 不限时（旧格式帧无该字段且未显式传 time 时与现状一致，不劣化）
+    ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
     ...(created.model !== undefined ? { model: created.model } : {}),
   };
   const drafts = collectCallDrafts(runId, events);
@@ -860,7 +883,15 @@ function rebuildRunFromRecord(
   return WorkflowRun.reconstruct(
     runId,
     spec,
-    { status: "running", budget: new Budget(), calls, trace, errorLogs: [] },
+    {
+      status: "running",
+      // fresh run 的 Budget 同源（lifecycle.createRunningRun：maxTimeMs=spec.budgetTimeMs）
+      // ——复活聚合形状与新建一致，避免展示/消费面按 maxTimeMs 判定时双形态
+      budget: new Budget(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { maxTimeMs: budgetTimeMs } : {}),
+      calls,
+      trace,
+      errorLogs: [],
+    },
     { startedAt: new Date(created.ts).toISOString() },
   );
 }

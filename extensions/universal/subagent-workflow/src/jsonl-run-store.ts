@@ -423,7 +423,10 @@ function draftsToAgentCalls(
  * argsSummary 尽力恢复（未截断可完整恢复，截断回落 {}——core parseArgsSummary
  * 同款语义；两侧行为等价由 record-mode 测试锁定）；scriptPath 锚定恢复（core
  * rebuildRunFromRecord 同款）：worker 沙箱 eval 模式无 __dirname，模板脚本靠
- * scriptPath 定位 _shared 族共享件；旧格式帧缺失回落空串。 */
+ * scriptPath 定位 _shared 族共享件；旧格式帧缺失回落空串。budgetTimeMs 恢复（core
+ * 同款，仅 > 0 落 spec）：引擎/展示投影按 run 自身创建预算读——resume 的显式覆盖
+ * 属编排期输入不入 record，本折叠只表达 record 事实（缺字段 = 旧格式/未设预算 =
+ * 不限时）。 */
 function rebuildRunSpecFromEntries(
   created: Extract<WorkflowRunEvent, { type: "run-created" }> | undefined,
   reg: WorkflowRecordRegisteredEntryData,
@@ -433,6 +436,11 @@ function rebuildRunSpecFromEntries(
     args: created?.args ?? parseLegacyArgsSummary(created?.argsSummary),
     scriptName: reg.scriptName,
     scriptPath: created?.scriptPath ?? "",
+    // 条件式与 core rebuildRunFromRecord 等价（> 0 才落字段）——旧格式帧/0/负值
+    // 一律不限时，两侧折叠结果同形
+    ...(created?.budgetTimeMs !== undefined && created.budgetTimeMs > 0
+      ? { budgetTimeMs: created.budgetTimeMs }
+      : {}),
     ...(reg.slug !== undefined ? { slug: reg.slug } : {}),
   };
 }
