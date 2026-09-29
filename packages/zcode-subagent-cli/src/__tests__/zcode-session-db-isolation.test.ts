@@ -264,7 +264,7 @@ let personalPath: string;
     const deps: ZcodeEngineDeps = {
       engineDataDir: () => dataDir,
       cliPath: FAKE_CLI,
-      sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath },
+      sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath, builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") },
       processEnv: {
         PATH: process.env.PATH ?? "",
         HOME: "/fake-host-home",

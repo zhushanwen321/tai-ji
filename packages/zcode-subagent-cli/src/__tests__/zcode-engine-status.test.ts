@@ -123,7 +123,7 @@ function makeEngine(overrides: ScenarioOverrides): EngineFixture {
   const deps: ZcodeEngineDeps = {
     engineDataDir: () => dataDir,
     cliPath: FAKE_CLI,
-    sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath },
+    sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath, builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") },
     processEnv: {
       PATH: process.env.PATH ?? "",
       // 钉扎 appserver 定向（定向不探不降，与 zcode-engine-appserver.test.ts 同款）

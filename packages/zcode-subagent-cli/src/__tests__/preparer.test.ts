@@ -10,7 +10,12 @@ import * as path from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { ZcodePrepareError, listZcodeModels, resolveZcodeModelRef } from "../preparer.ts";
+import {
+  ZcodePrepareError,
+  listZcodeModels,
+  resolveZcodeMinimalReasoningLevel,
+  resolveZcodeModelRef,
+} from "../preparer.ts";
 
 let tmpRoot: string;
 let personalPath: string;
@@ -131,5 +136,42 @@ describe("listZcodeModels（U7 可发现性）", () => {
 
   it("源缺失 → 空清单（失败安全）", () => {
     expect(listZcodeModels({ personalProviderConfigPath: path.join(tmpRoot, "absent.json") })).toEqual([]);
+  });
+});
+
+describe("resolveZcodeMinimalReasoningLevel（目录值域）", () => {
+  let catalogPath: string;
+
+  beforeEach(() => {
+    catalogPath = path.join(tmpRoot, "zcode-builtin.json");
+    writeJson(catalogPath, {
+      schemaVersion: 1,
+      revision: 1,
+      config: {
+        modelConfigRules: {
+          modelRules: [
+            { modelMatch: ".*", config: { optionSpecs: { reasoningLevel: { values: ["disabled", "enabled"] } } } },
+            { modelMatch: ".*mimo-v2\\.6-flash(?:[.\\-:/\\[].*)?", config: { optionSpecs: { reasoningLevel: { values: ["disabled", "enabled"] } } } },
+            { modelMatch: ".*glm-5\\.3(?:[.\\-:/\\[].*)?", config: { optionSpecs: { reasoningLevel: { values: ["low", "high", "max"] } } } },
+            { modelMatch: ".*no-values.*", config: { optionSpecs: { maxOutputTokens: { max: 1 } } } },
+          ],
+        },
+      },
+    });
+  });
+
+  it("通配规则命中 → 首值（最小档）；特异规则在后覆盖（glm 家族 low）", () => {
+    const sources = { builtinCatalogPath: catalogPath };
+    expect(resolveZcodeMinimalReasoningLevel(`${PROVIDER_B}/mimo-v2.6-flash`, sources)).toBe("disabled");
+    expect(resolveZcodeMinimalReasoningLevel(`${PROVIDER_B}/glm-5.3`, sources)).toBe("low");
+    expect(resolveZcodeMinimalReasoningLevel(`${PROVIDER_B}/other-model`, sources)).toBe("disabled");
+  });
+
+  it("命中但无值域的规则不参与 → 落回通配值域", () => {
+    expect(resolveZcodeMinimalReasoningLevel(`${PROVIDER_B}/no-values-x`, { builtinCatalogPath: catalogPath })).toBe("disabled");
+  });
+
+  it("目录缺失 → undefined（不携带，行为与未实现等价）", () => {
+    expect(resolveZcodeMinimalReasoningLevel(`${PROVIDER_B}/m1`, { builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") })).toBeUndefined();
   });
 });

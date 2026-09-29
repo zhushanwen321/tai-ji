@@ -331,11 +331,16 @@ export function extractResumeTotalTokens(resumeResult: unknown): number | undefi
 // 类型（R4 引擎 run 的消费面）
 // ============================================================
 
-/** session/create 的 per-session 模型（A.2 ①：strict 对象——字符串会被 -32602 拒收）。 */
+/** session/create 的 per-session 模型（A.2 ①：strict 对象——字符串会被 -32602 拒收）。
+ *  options.reasoningLevel（2026-09-29 account 迁移同步）：注册表模型普遍要求
+ *  （缺席 create 拒收「Reasoning level is required」；值域 per-model 见内建目录
+ *  modelConfigRules）——CLI 缺省解析路径自动补；本引擎的显式路径由
+ *  zcode-engine 按目录值域自动补最小档（minimalReasoningFor）。 */
 export interface SessionModelSpec {
   providerId: string;
   modelId: string;
   variant?: string;
+  options?: { reasoningLevel?: string };
 }
 
 /** session/create 参数（A.2 ① 键集逐字；workspaceKey 由 workspacePath 派生，不手传）。 */

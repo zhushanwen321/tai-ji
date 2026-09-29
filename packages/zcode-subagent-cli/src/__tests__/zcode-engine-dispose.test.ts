@@ -93,7 +93,7 @@ function makeEngine(): EngineFixture {
   const deps: ZcodeEngineDeps = {
     engineDataDir: () => dataDir,
     cliPath: FAKE_CLI,
-    sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath },
+    sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath, builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") },
     processEnv: {
       PATH: process.env.PATH ?? "",
       TAIJI_ZCODE_MODE: "appserver",

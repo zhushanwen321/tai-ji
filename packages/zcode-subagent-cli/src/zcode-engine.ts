@@ -98,6 +98,8 @@ import {
 import {
   defaultV2ConfigPath,
   listZcodeModels,
+  locateZcodeBuiltinCatalog,
+  resolveZcodeMinimalReasoningLevel,
   resolveZcodeModelRef,
   splitZcodeModelRef,
   type ZcodeSourcePaths,
@@ -463,8 +465,13 @@ export class ZcodeEngine implements EnginePort {
   ): Promise<AttemptResult> {
     const rt = this.ensureAppServerRuntime();
     // [R4/G3] modelRef 缺席 → create 帧不携带 model 键（zcode 自身缺省解析）；
-    // 显式 → 拆分为 per-session {providerId, modelId}。
-    const createParams = buildAppServerCreateParams(task, modelRef, cwd);
+    // 显式 → 拆分为 per-session {providerId, modelId}（+ 最小 reasoning 档，目录
+    // 值域解析——per-modelRef 记忆化，目录在进程生命周期内视为静态）。
+    const reasoningLevel =
+      modelRef !== undefined && modelRef !== ""
+        ? this.minimalReasoningFor(modelRef)
+        : undefined;
+    const createParams = buildAppServerCreateParams(task, modelRef, cwd, reasoningLevel);
 
     let currentSessionId: string | undefined;
     let signalSessionCreated: (() => void) | undefined;
@@ -900,9 +907,22 @@ export class ZcodeEngine implements EnginePort {
     for (const ev of synthesizeCoarseEvents(payload.response, payload.usage)) emit(ev);
   }
 
-  /** [U7] 模型可发现性：v2 桌面登录态聚合（带凭据 provider × models），失败安全返回清单本身可能为空。 */
+  /** [U7] 模型可发现性：provider_config 个人 provider 聚合（注册表实况对齐源），失败安全返回清单本身可能为空。 */
   listModels(): Array<{ id: string; name?: string }> {
     return listZcodeModels(this.deps.sources);
+  }
+
+  /** 显式模型的最小 reasoning 档（目录 modelRules 值域；per-modelRef 记忆化——
+   *  目录文件在引擎进程生命周期内视为静态，重复 run 不重读）。 */
+  private readonly reasoningMemo = new Map<string, string | undefined>();
+
+  private minimalReasoningFor(modelRef: string): string | undefined {
+    const memoKey = `${locateZcodeBuiltinCatalog(this.deps.sources) ?? "none"}|${modelRef}`;
+    const hit = this.reasoningMemo.get(memoKey);
+    if (hit !== undefined || this.reasoningMemo.has(memoKey)) return hit;
+    const level = resolveZcodeMinimalReasoningLevel(modelRef, this.deps.sources);
+    this.reasoningMemo.set(memoKey, level);
+    return level;
   }
 
   /**
@@ -913,11 +933,11 @@ export class ZcodeEngine implements EnginePort {
    *
    * [R4/D6-②] 缺席语义：本实现是进程内形态 + 协议诊断面（宿主 cli 形态消费的是
    * RemoteEngine 的 manifest 本地判定，不经本方法——SDK protocol methods.ts 明示
-   * validateModel 为诊断面）。缺席 modelRef 时返回 ZCODE_FALLBACK_DEFAULT_MODEL
-   * canonical 全名作为「引擎缺省模型」的呈现值（诊断面只读不 create，不参与
-   * create 缺席不携带的 G3 行为链）。帧应答形态维持 {canonicalRef: string}（SDK
-   * port-contract 契约必填——「帧字段缺席」的 optional 对齐需放宽 SDK 契约与
-   * server handler 签名，非本包单方面可完成）。
+   * validateModel 为诊断面）。缺席 modelRef 时返回空串 canonical（= create 帧省略
+   * model 键、CLI 自身缺省解析——2026-09-29 account 体系迁移后 plan 家族兜底 id
+   * 已不可用；record 留痕侧按 R4/D6-② 空串归一为「用户未指定」条件留空）。帧应答
+   * 形态维持 {canonicalRef: string}（SDK port-contract 契约必填——「帧字段缺席」
+   * 的 optional 对齐需放宽 SDK 契约与 server handler 签名，非本包单方面可完成）。
    */
   validateModel(modelRef: string | undefined): { canonicalRef: string } {
     return { canonicalRef: resolveZcodeModelRef(modelRef, this.deps.sources) };
@@ -1403,17 +1423,29 @@ function appendSchemaRetryDirective(basePrompt: string, validationError: string)
 /** create 参数组装（A.2 ① strict 键集：空白 thoughtLevel / 空 deny 清单不设键）。
  *  [R4/G3] modelRef 条件携带：显式（trim 非空，上游已裁决 canonical）拆分为
  *  per-session model；缺席不设键——zcode 走自身缺省解析（用户 defaultModelSelection
- *  优先），与 strict 键集纪律一致（缺席语义用「键不存在」表达，禁空串哨兵）。 */
+ *  优先），与 strict 键集纪律一致（缺席语义用「键不存在」表达，禁空串哨兵）。
+ *  [2026-09-29 account 迁移同步] 显式模型附 model.options.reasoningLevel（目录
+ *  modelRules 值域的最小档）：注册表模型普遍要求该选项（缺席 create 即拒收
+ *  「Reasoning level is required」），缺省解析路径 CLI 自动补、显式路径须调用方供数。 */
 function buildAppServerCreateParams(
   task: AgentCallOpts,
   modelRef: string | undefined,
   cwd: string,
+  reasoningLevel?: string,
 ): SessionCreateParams {
   const denyTools = (task.denyTools ?? []).filter((t) => typeof t === "string" && t.trim() !== "");
   // thinkingLevel → thoughtLevel（A.2 ① 键集内）：空白串归一为不设键——strict 对象下
   // 空值键位无语义且防 -32602 变形拒收（与 denyTools 空清单不设键同款纪律）
   const thoughtLevel = task.thinkingLevel?.trim();
-  const model = modelRef !== undefined && modelRef !== "" ? splitZcodeModelRef(modelRef) : undefined;
+  const model =
+    modelRef !== undefined && modelRef !== ""
+      ? {
+          ...splitZcodeModelRef(modelRef),
+          ...(reasoningLevel !== undefined && reasoningLevel !== ""
+            ? { options: { reasoningLevel } }
+            : {}),
+        }
+      : undefined;
   return {
     workspacePath: cwd,
     mode: "yolo",

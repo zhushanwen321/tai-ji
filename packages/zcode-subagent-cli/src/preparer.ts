@@ -13,9 +13,11 @@
 //     档位）——不再伪造 plan 家族兜底 id（该 id 在注册表侧已不可用）；
 //   - 凭据缺失/模型不可解析抛结构化 ZcodePrepareError（错误码对齐设计 §3.3.3：
 //     engine_credential_missing / model_not_available），一律先于进程创建。
-//   - 显式模型的 reasoningLevel：部分模型注册表要求 options.reasoningLevel（值域
-//     per-model，见内建目录 modelConfigRules）——create 帧当前不携带，引擎侧留待
-//     后续按需接线（登记：docs/todo/zcode-bare-cli-provider-registry.md）。
+//   - 显式模型的 reasoningLevel：注册表模型普遍要求 options.reasoningLevel（值域
+//     per-model，见内建目录 modelConfigRules）——本文件提供
+//     locateZcodeBuiltinCatalog（目录定位：显式 sources > env > runtime/provider
+//     扫描）与 resolveZcodeMinimalReasoningLevel（modelRules 匹配 modelId 值域取
+//     最小档）；引擎 run 期调用并经 buildAppServerCreateParams 附 create 帧。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -143,6 +145,8 @@ export interface ZcodeSourcePaths {
   personalProviderConfigPath?: string;
   /** launcher 凭据注入的 v2 config 源（ZCODE_ENG_V2_CONFIG 消费——凭据供数面，与模型校验源无关）。缺省 ~/.zcode/v2/config.json。 */
   v2ConfigPath?: string;
+  /** 内建 provider 目录源（reasoningLevel 值域解析）。缺省按 runtime/provider 目录扫描（与 launcher 同型）。 */
+  builtinCatalogPath?: string;
 }
 
 export function defaultPersonalProviderConfigPath(): string {
@@ -152,6 +156,110 @@ export function defaultPersonalProviderConfigPath(): string {
 /** launcher 凭据注入的 v2 config 缺省路径（ZCODE_ENG_V2_CONFIG 消费，与模型校验源无关）。 */
 export function defaultV2ConfigPath(): string {
   return path.join(os.homedir(), ...ZCODE_V2_CONFIG_PATH_SUFFIX);
+}
+
+// ============================================================
+// reasoningLevel 值域（内建目录 modelRules——create 帧 options 的供数面）
+// ============================================================
+
+/**
+ * 定位内建 provider 目录文件（zcode-builtin.json）。优先级：显式 sources >
+ * ZCODE_BUILTIN_PROVIDER_CONFIG_FILE env（launcher/宿主注入）> runtime/provider
+ * 目录扫描（平台目录 × semver 最大 × endpoint-*，与 appserver-launcher 的派生
+ * 同型——CLI 侧路径推导在 app 布局下不可用，外部 spawn 必须供数）。找不到返回
+ * undefined（reasoningLevel 解析降级为不携带，create 遇必需模型由对端报错）。
+ */
+export function locateZcodeBuiltinCatalog(sources?: ZcodeSourcePaths): string | undefined {
+  if (sources?.builtinCatalogPath !== undefined) return sources.builtinCatalogPath;
+  const fromEnv = process.env["ZCODE_BUILTIN_PROVIDER_CONFIG_FILE"]?.trim();
+  if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
+  try {
+    const providerRoot = path.join(os.homedir(), ".zcode", "v2", "runtime", "provider");
+    const prefix = `${process.platform}-`;
+    const platDirs = fs
+      .readdirSync(providerRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name.startsWith(prefix))
+      .map((d) => d.name);
+    const byVerDesc = (a: string, b: string): number => {
+      const pa = a.split(".");
+      const pb = b.split(".");
+      for (let i = 0; i < 3; i++) {
+        const na = Number.parseInt(pa[i] ?? "", 10) || 0;
+        const nb = Number.parseInt(pb[i] ?? "", 10) || 0;
+        if (na !== nb) return nb - na;
+      }
+      return 0;
+    };
+    for (const plat of platDirs) {
+      const rtRoot = path.join(providerRoot, plat);
+      let versions: string[] = [];
+      try {
+        versions = fs.readdirSync(rtRoot).filter((v) => /^\d+\.\d+/.test(v)).sort(byVerDesc);
+      } catch {
+        continue;
+      }
+      for (const ver of versions) {
+        const verDir = path.join(rtRoot, ver);
+        let endpoints: string[] = [];
+        try {
+          endpoints = fs.readdirSync(verDir).filter((e) => e.startsWith("endpoint-")).sort();
+        } catch {
+          continue;
+        }
+        for (const ep of endpoints) {
+          const candidate = path.join(verDir, ep, "zcode-builtin.json");
+          if (fs.existsSync(candidate)) return candidate;
+        }
+      }
+    }
+  } catch {
+    /* 目录缺失 → undefined */
+  }
+  return undefined;
+}
+
+/**
+ * 解析模型的最小 reasoning 档（create 帧 model.options.reasoningLevel 供数）。
+ * 目录 modelConfigRules.modelRules 的 modelMatch 逐条正则匹配 modelId，取**最末**
+ * 带值域的匹配规则（特异规则在后覆盖通配 `.*`，与目录条目序的覆盖直觉一致），
+ * 返回其 values[0]（各家族首值均为最小档：disabled/low/none——显式模型不携带
+ * options 时对端对必需模型直接拒收，值域供数使显式模型可用且默认轻推理）。
+ * 目录缺失/无匹配/无值域 → undefined（不携带，行为与未实现等价）。
+ */
+export function resolveZcodeMinimalReasoningLevel(modelRef: string, sources?: ZcodeSourcePaths): string | undefined {
+  const catalogPath = locateZcodeBuiltinCatalog(sources);
+  if (catalogPath === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+  } catch {
+    return undefined;
+  }
+  const modelId = modelShort(modelRef);
+  const rules = (parsed as Record<string, unknown>)["config"];
+  const modelRules =
+    isRecord(rules) && isRecord(rules["modelConfigRules"])
+      ? rules["modelConfigRules"]["modelRules"]
+      : undefined;
+  if (!Array.isArray(modelRules)) return undefined;
+  let values: string[] | undefined;
+  for (const rule of modelRules) {
+    if (!isRecord(rule)) continue;
+    const match = rule["modelMatch"];
+    if (typeof match !== "string") continue;
+    let re: RegExp;
+    try {
+      re = new RegExp(match);
+    } catch {
+      continue;
+    }
+    if (!re.test(modelId)) continue;
+    const spec = (rule["config"] as Record<string, unknown> | undefined)?.["optionSpecs"];
+    const level = isRecord(spec) ? spec["reasoningLevel"] : undefined;
+    const vals = isRecord(level) ? strArray(level["values"]) : [];
+    if (vals.length > 0) values = vals;
+  }
+  return values?.[0];
 }
 
 /**
