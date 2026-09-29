@@ -48,9 +48,10 @@ export default [
       '.taiji-harness/**',
       // zcode 动态工作流引擎产物（workflow-runs = run 脚本快照，workflow-drafts = 发起
       // 草稿）：引擎生成的 .mjs 非项目源码，已被 .gitignore；.zcode/agents/ 是 tracked
-      // 子代理定义，不在排除范围
-      '.zcode/workflow-runs/**',
-      '.zcode/workflow-drafts/**',
+      // 子代理定义，不在排除范围。**/ 前缀 = 引擎以包目录为 cwd 运行时产物落在
+      // packages/*/.zcode/（目录内自带 .gitignore 自忽略），根锚定 glob 盖不住嵌套位
+      '**/.zcode/workflow-runs/**',
+      '**/.zcode/workflow-drafts/**',
       // playwright 测试产物（trace/报告是工具生成的压缩 JS，非项目源码，已被 .gitignore）
       'playwright-report/**',
       'playwright/.cache/**',
@@ -735,10 +736,11 @@ export default [
   // 两态派据 + 注释）与轮终 result 仲裁（roundIdle.resultSummary 透传，contested
   // 裁决①）合并落地后折算 520 微超 20 行——按「微超即提额」提额 540 保留软上限
   // 告警；投影合并单点再拆属独立重构任务。
+  // [2026-09-29 gate 复测] 折算 545 再超 5——同型提额 560，「增长即告警」语义维持。
   {
     files: ['packages/runtime/src/services/session/journal-projection.ts'],
     rules: {
-      'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 560, skipBlankLines: true, skipComments: true }],
     },
   },
   // zcode-engine.ts：zcode app-server 常驻引擎的唯一聚合中心（连接池 + 会话生命周期 +
@@ -904,6 +906,45 @@ export default [
     files: ['packages/subagent-core/src/orchestration/worker-message-pump.ts'],
     rules: {
       'max-lines': ['warn', { max: 1400, skipBlankLines: true, skipComments: true }],
+    },
+  },
+
+  // [2026-09-29 gate static-gate 复测] 以下四文件随 workflow resume / run 状态机
+  // 收敛波次多轮追加（workflow-run-resume-revision 及后续修复批）折算行越过
+  // packages 域 500 基线，均为各自职责的唯一聚合点（见各块说明）。
+  // 按「微超即提额，保留软上限告警」惯例登记 override（先例：worker-message-pump
+  // 1240→1400 / run-orchestration 800 同型），拆分属独立重构任务，禁止再抬。
+  //
+  // run-events.ts：run 事件词表/类型层 + 状态机（合法转移表 + transition 纯函数）
+  // + journal 实装（append/scan）——三者同址支撑「词表 ↔ 转移表」可核验性。
+  {
+    files: ['packages/subagent-core/src/orchestration/run-events.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 650, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // terminal-actions.ts：[D15] 终局编排单一入口 + run 事件投递域（单写者链，
+  // dispatchRunTrigger 唯一投递入口）——两段共享 per-run 串行队列与活体态缓存。
+  {
+    files: ['packages/subagent-core/src/orchestration/terminal-actions.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 870, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // resume-run.ts：[U2] interrupted 态 run 的断点续跑编排（重放式恢复：资格校验 →
+  // v2 注册条目补写 → run-resumed 落 record → 活体注册，D7 锁段内单序列）。
+  {
+    files: ['packages/subagent-core/src/orchestration/resume-run.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 620, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // run-state-evidence.ts：run 终局证据判定核 + 磁盘保留期维护（journal 与
+  // manifest 是判定与清理的事实源，两职责共享同一事实源枚举）。
+  {
+    files: ['packages/subagent-core/src/execution/persistence/run-state-evidence.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 620, skipBlankLines: true, skipComments: true }],
     },
   },
 ];

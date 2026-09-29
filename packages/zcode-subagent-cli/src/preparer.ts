@@ -168,6 +168,9 @@ export function defaultV2ConfigPath(): string {
 // reasoningLevel 值域（内建目录 modelRules——create 帧 options 的供数面）
 // ============================================================
 
+/** semver 数值比较覆盖的版本段数（major.minor.patch）。 */
+const SEMVER_SEGMENTS = 3;
+
 /**
  * 定位内建 provider 目录文件（zcode-builtin.json）。优先级：显式 sources >
  * ZCODE_BUILTIN_PROVIDER_CONFIG_FILE env（launcher/宿主注入）> runtime/provider
@@ -189,7 +192,7 @@ export function locateZcodeBuiltinCatalog(sources?: ZcodeSourcePaths): string | 
     const byVerDesc = (a: string, b: string): number => {
       const pa = a.split(".");
       const pb = b.split(".");
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < SEMVER_SEGMENTS; i++) {
         const na = Number.parseInt(pa[i] ?? "", 10) || 0;
         const nb = Number.parseInt(pb[i] ?? "", 10) || 0;
         if (na !== nb) return nb - na;
@@ -219,7 +222,8 @@ export function locateZcodeBuiltinCatalog(sources?: ZcodeSourcePaths): string | 
       }
     }
   } catch {
-    /* 目录缺失 → undefined */
+    /* 目录缺失（~/.zcode 未初始化等）→ 走缺省 undefined */
+    return undefined;
   }
   return undefined;
 }

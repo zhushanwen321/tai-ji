@@ -1464,11 +1464,11 @@ function buildAppServerCreateParams(
   const model =
     modelRef !== undefined && modelRef !== ""
       ? {
-          ...splitZcodeModelRef(modelRef),
-          ...(reasoningLevel !== undefined && reasoningLevel !== ""
-            ? { options: { reasoningLevel } }
-            : {}),
-        }
+        ...splitZcodeModelRef(modelRef),
+        ...(reasoningLevel !== undefined && reasoningLevel !== ""
+          ? { options: { reasoningLevel } }
+          : {}),
+      }
       : undefined;
   return {
     workspacePath: cwd,

@@ -878,8 +878,9 @@ function parseAgentInput(input: string): AgentCallOpts | undefined {
     if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
       return parsed as AgentCallOpts;
     }
-  } catch {
-    // fallthrough 到 warn
+  } catch (err) {
+    // parse 异常细节记 debug（原始错误只在此可见）；warn 与非对象形态共用函数尾出口
+    logger.debug("[workflow] resume: agent-started input JSON.parse failed", err);
   }
   logger.warn("[workflow] resume: agent-started input payload is not parseable opts — replay input check falls back to placeholder skip");
   return undefined;

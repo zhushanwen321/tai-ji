@@ -766,7 +766,8 @@ function runFootprintMaxMtime(stateDir: string, runId: string): { exists: boolea
       exists = true;
       if (st.mtimeMs > maxMtime) maxMtime = st.mtimeMs;
     } catch {
-      // 不存在——继续探测其余件
+      // 不存在（ENOENT 属探测控制流）——继续探测其余件
+      continue;
     }
   }
   return { exists, maxMtime };

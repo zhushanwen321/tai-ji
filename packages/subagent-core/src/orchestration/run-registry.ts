@@ -30,7 +30,6 @@ import { getLogger } from "../core/logger.ts";
 import { readRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
 import {
   INITIAL_RUN_STATE,
-  IllegalTransitionError,
   foldRunEventFrames,
   type RunErrorCode,
   type RunEventJournal,
