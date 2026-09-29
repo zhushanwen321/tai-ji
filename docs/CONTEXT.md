@@ -135,7 +135,7 @@ subagent 跨 run 续聊时定位既有会话的凭据（引擎中立形态 `Resu
 
 ### Execution Record
 
-subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0078](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 快照条目走惰性兼容读）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外投影两态（`active` / `idle`，ended 随终态概念删除），轮终收尾写 `<session>.state` sidecar 与 manifest（均为物化投影）。
+subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0078](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 全量快照兼容层已整体删除，2026-09-30）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外投影两态（`active` / `idle`，ended 随终态概念删除），轮终收尾写 `<session>.state` sidecar 与 manifest（均为物化投影）。
 
 ### ToolCall
 
@@ -286,7 +286,7 @@ run 与 record 的运行态数据持久化形态（[ADR-0078](adr/decisions.md) 
 - **物化投影**：每次都能从事件流重新算出来的状态写成的落盘文件——record 侧 manifest 与 run 侧 manifest（后者 [ADR-0082] D1 起降格为 record 终局事件的派生缓存；run 侧 state 快照文件已删）——删了可重建；不是事实源。`.alive` 是操作租约，同样不计事实源。
 - **journal tail**：从上次读到的位置（offset）继续读新增事件行的增量读取方式（`packages/subagent-core/src/execution/persistence/journal-tail.ts`，run 与 record 两域共用）——runtime 内存投影的增量喂入源之一（另一源 = pi entry 游标）。
 - **收编**：把「有注册记录、无终态记录」的实体判定为中断并补齐记录的动作（本域领域词）——run 侧 = 落 `run-interrupted` 转移帧转 interrupted 暂停态（[ADR-0082] D15：壳侧 recoverCrashedRuns 与 runtime startupSweep 两链经终局编排单一入口），record 侧 = 幂等追加终态事件；事件流重放后幂等追加。
-- **惰性兼容读**：旧格式数据（v1 全量快照 entry）不做一次性迁移，读到的当下按旧格式解析（带失效版本，W4 legacy sunset 统一清理）。run 侧旧格式两件套（`.events.jsonl` journal + `<runId>.jsonl` 快照）无兼容读——不读、不写、不主动删（[ADR-0082] D1 历史数据处置，随裁决点 7 清理自然消亡）。
+- **惰性兼容读（run 侧存量）**：run 侧旧格式两件套（`.events.jsonl` journal + `<runId>.jsonl` 快照）无兼容读——不读、不写、不主动删（[ADR-0082] D1 历史数据处置）。subagent-record 的 v1 全量快照兼容层已整体删除（2026-09-30，无 v1 数据）。run 侧旧格式两件套（`.events.jsonl` journal + `<runId>.jsonl` 快照）无兼容读——不读、不写、不主动删（[ADR-0082] D1 历史数据处置，随裁决点 7 清理自然消亡）。
 - **保留窗口**：事件流的显式保留期限（默认 30 天）——窗口内全保留，窗口外的终态实体由统一保留维护轮清理（fold 终态资格判据；cap=50 已废除）。
 
 ### 武装回执（armed，workflow 域）

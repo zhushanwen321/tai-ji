@@ -83,11 +83,13 @@ workflow run 与 subagent record 的运行态持久化介质收敛（承接 ADR-
 
 **写面宿主扩充（2026-09-29，resume 修订 D15/D16 落地连带）**：workflow-record 条目写点宿主在原三写点（worker-message-pump.ts / lifecycle.ts / 壳 jsonl-run-store.ts）基础上新增 terminal-actions.ts（D15 终局编排单一入口的注册/终态条目写点）与 resume-run.ts（D16 resume 链注册条目写点）——条目构造仍全走 buildWorkflowRecord*EntryData 意图原语与 appendEntry 通路，写面唯一入口语义不变（宿主清单扩充非写点扩散）；`check-record-write-surface.mjs` R3 白名单同步为五写点宿主。
 
-**v1 兼容层失效版本清单（W4 legacy sunset 统一清理的登记载体，两层失效次序：事件兼容读层 ≥ 词表映射层——后者是 W2 产物）**：
-- core `record-store-rebuild.ts` v1 快照解析路径（行为门跳过 v2 后的 v1 残余消费方）；
-- runtime 两 extractor（`workflow-extractor.ts` / `subagent-extractor.ts`）的 v1 分支 + `session-file-extraction.ts` 全文读路径（32MB 预检仅存于此）；
-- core `record-store.ts` `reportSubagentRecord` 的 v1 快照纠偏写点（孤儿纠偏兼容层唯一活写点，写面检查 R4 白名单登记）；
-- session-reader discovery/workflows 的 v1 快照层与旧 workflow-state-link 指针 fallback（三档发现链的下两档）；
+**v1 兼容层已整体删除（2026-09-30 裁决：项目未上线、无 v1 数据，不迁移不兼容；登记 §3.3）**：原「W4 legacy sunset 失效版本清单」的 subagent-record 侧写读面全部落地删除——
+- core `record-entry.ts`：v1 快照接口 `SubagentRecordEntryData` 与写点 `toSubagentRecordEntry` 删除，`classifySubagentRecordEntryData` 收为 v2-only（`ok:true` = 当前版本条目；v1 形态归 `future-v`）；
+- core `record-store-rebuild.ts`：v1 收集/重建路径删除，改为 `collectV2EntryPairs` / `v2PairToRecord`（v2 注册 + 终态条目对；身份域损坏拒绝重建）；
+- core `record-store.ts`：`reportSubagentRecord`（v1 快照纠偏写点）删除；孤儿恢复改由 v2 形态承担——事件文件在者归 `adoptV2Orphans`，entry-only 形态（注册条目在、无事件文件、无子文件）归 `recoverEntryOnlyOrphans` 补写 v2 终态条目（stopReason=interrupted-by-restart）；
+- runtime `journal-projection.ts`：`v1Subagents`/`v1Workflows` 源与「v1 冻结定界优先」仲裁删除（该仲裁是「投影遮蔽事件流」的方向性缺陷本体）；
+- runtime `subagent-extractor.ts`：v1 快照分支删除，改按 v2 条目对重建；
+- 遗留未删（非 subagent-record v1 快照面）：`workflow-extractor.ts` 的 workflow 旧形态分支与 `session-file-extraction.ts` 全文读路径（32MB 预检——冷启动旧 session 兜底）；session-reader discovery/workflows 的旧 workflow-state-link 指针 fallback（三档发现链的下两档）；
 - state-marker 旧值（finalized/cancelled）上行映射等伴随面（`Atomics.wait` 同步睡重试已随 W1 D6 全量退役，无 W4 残余——state-marker.test.ts 断言锁定）。
 
 **第六读者失效登记**：`scripts/zcode-session-db-cleanup.mjs`（zcode 引擎存量宿主行清理工具）自持 customType 白名单解析带 `data.v !== 1` 版本门——v1 条目停写后对全部新记录恒跳过、白名单恒空 → 清理面恒空，属**功能性保守降级**（漏清不误删：新记录本来就不落宿主库，白名单空集 = 零删除，语义安全）；该脚本为一次性清理工具，不随 W4 sunset 强制退役，重跑时对存量 v1 数据仍有效。

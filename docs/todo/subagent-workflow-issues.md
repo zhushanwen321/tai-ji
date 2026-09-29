@@ -126,16 +126,15 @@
 - **[已修 2026-09-30]** 判据单源：core 导出 `parseRecordStreamLine(line, { requireSeq })`（规则集：JSON/信封/词表/outcome/agent-settled result/seq 宽容度开关）+ `parseLegacyArgsSummary`（旧格式 argsSummary 尽力恢复），两侧读面各留自己的错误文案与 ENOENT 分流；壳侧本地词表投影（`RUN_EVENT_TYPE_SET`）与信封检查（`hasEventEnvelope`）已删。真差异只剩「core 查 seq 断档 + 英文文案」vs「壳不查 seq + 中文文案」。
 - core readRecordStreamStrict / rebuildRunFromRecord（resume-run.ts）vs 壳 readRecordStream / foldRecordStreamToRun（jsonl-run-store.ts），其余严格度差异与 fold 面（两侧各自的投影构造）不在本次收敛范围。
 
-### 3.3 「v1 停写」前提被纠偏链打破（数据正确性窗口，建议优先裁决）
+### 3.3 「v1 停写」前提被纠偏链打破（数据正确性窗口）——[已修 2026-09-30]
 
-- 主链已全写 v2 小条目，但孤儿纠偏路径 reportSubagentRecord（record-store.ts:1235 → toSubagentRecordEntry 恒 v:1，调用点 :1299/:1374）**仍在写 v1 全量快照**；叠加 runtime journal-projection 的 v1 冻结定界优先仲裁（:595 `if (subagents.has(id)) continue`），同 id 的纠偏 v1 快照会遮蔽 v2 fold 投影（事件流事实源被投影遮蔽，方向反了）。触发场景窄（崩溃于轮中 + 纠偏触发）。
-- **[裁决 2026-09-30 用户口径]** 无 v1 数据（项目未上线）→ 不迁移不兼容，全量收敛到 v2、删除 v1 兼容层（不做「v1 只做无 v2 兜底」的中间态）。
-- **[现场核实 2026-09-30] 删除面与两个必须先补的缺口**（本轮只完成盘点，未落代码）：
-  1. 写侧：`reportSubagentRecord` / `toSubagentRecordEntry` + 纠偏循环（recoverOrphanRecords 的 v1 段、recoverEntryOnlyOrphans）→ 必须由 v2 形态取代。核实结论：`adoptV2Orphans` 只覆盖「注册条目 ∧ journal 在场」（`adoptInterruptedRecord` 在 `lastSeq === 0` 时返回 skippedMissing），**「注册条目在、journal 不在」的 entry-born 孤儿在 v2 世界没有任何纠偏通道**——删 v1 前必须先补「entry-only v2 孤儿 → 补写 v2 终态条目（interrupted-by-restart）」这一路径，否则该形态实体永久 spinner（v1 纠偏当初就是为这个 E2E 缺口加的）。
-  2. 读侧：core `isV1SnapshotEntry` / `collectLastRecordEntries` / rebuildEntryRecord 的 v1 分支 + classification 的 `ok:true = v1` 语义（改 v2-only）+ runtime `v1Subagents`/`v1Workflows` 源与冻结仲裁 + `scanSubagentEntries`/`scanWorkflowEntries` 的 v1 读取面（session-records / workflow-extractor 的冷路径入口）。
-  3. 面：`classifySubagentRecordEntryData` 的 ok 语义反转会牵动 ~20 个测试文件（core 用 `toSubagentRecordEntry` 播种 v1 条目 + runtime 三个 session 测试文件用 v1 播种）。本轮已实测：仅删 runtime 投影 v1 源（不改测试）即 29 例红（session-records 11 / session-records-reconcile 14 / workflow-step-merge 4）——测试播种必须同批迁到 v2（注册 + 终态两条 + 必要 journal 文件）。
-  4. 检查与文档：check-record-write-surface R4/R5/R6（v1 投影器 / v1 快照载荷 / eventLog+displayItems 死字节）与 `V1_PROJECTOR_ALLOWED_FILES` 的白名单随写点消亡收窄为「回潮即红」；ADR-0078 与 constraints 的 v1 兼容层表述同批回写。
-
+- 原问题：孤儿纠偏路径 `reportSubagentRecord`（恒写 `v:1` 全量快照）+ runtime journal-projection 的 v1 冻结定界优先仲裁（同 id 的 v1 快照遮蔽 v2 fold 投影）——「事件流事实源被投影遮蔽」，方向反了。
+- **[裁决]** 无 v1 数据（项目未上线）→ 不迁移不兼容，全量收敛 v2、删除兼容层。
+- **[已修] 写侧**：`toSubagentRecordEntry` / `reportSubagentRecord` 与两条 v1 纠偏循环删除；孤儿恢复改由 v2 形态承担——事件文件在者归 `adoptV2Orphans` → `adoptInterruptedRecord`（幂等追加 v2 终态事件 + 终态条目 + manifest 物化）；**新增 entry-only 通道** `recoverEntryOnlyOrphans`（注册条目在、无事件文件、无子文件锚、不在内存）→ 补写 v2 终态条目（`buildEntryOnlyOrphanSettledEntry`，stopReason=interrupted-by-restart）；身份域损坏（agent/task/startedAt 缺失）拒绝重建并 warn，不产无身份幻影条目。
+- **[已修] 读侧**：core classification 收为 v2-only（`ok:true` = 当前版本；v1 形态归 `future-v`）；`collectV2EntryPairs` / `v2PairToRecord` 取代 v1 收集/重建路径（含 `entrySourceRecords` 与 `scanLastRecordEntries`）；runtime `v1Subagents`/`v1Workflows` 源与冻结仲裁删除；`subagent-extractor` 与 session-reader 锚链（`entry-anchor` / `zcode-anchor-classify`）改按 v2 条目对读取。
+- **[已修] 检查与文档**：`check-record-write-surface` R4 白名单清空（`toSubagentRecordEntry` 回潮即红），R5/R6 保持全域拒绝；ADR-0078 失效清单改写为「已删除」记录、CONTEXT / TEST-STRATEGY / data-source-registry / subagents architecture / e2e-map 与 constraints C-data-20 同批回写。
+- 测试面：core 12 个文件、runtime 4 个文件、session-reader 2 个文件把 v1 播种迁移到 v2 条目族（新增 core 测试辅助 `helpers/v2-record-entry.ts`）；v1 专有断言（closedReason / batchFinalized / eventLog / displayItems / entry 携带 trace）随载体消亡删除。
+- **[遗留·已登记]** ① `engineFallback` 在 v2 没有任何持久化载体（原 v1 快照携带）——重启后 SubagentTab 的 fallback 提示不可达，需要一次载体裁决（manifest 投影 / binding / 终态条目三选一）；② `record-access.rematerializeReconnectableEntryManifests` 的 gate（`isLegacyClosedSettled ∧ isReconnectableFinalReason(closedReason)`）在 v2 无输入（终态条目不携带 closedReason）——本轮删除该不可达方法，物理判据版自愈（按「终态条目在场但查询面不可见」重物化）待裁决；③ workflow-record（run 族）的 v1 快照分支与 session-reader 旧指针 fallback 不在本轮范围（属 run 侧历史数据处置）。
 ---
 
 ## 4. record 域轮次轴 CAS 缺口

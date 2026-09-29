@@ -35,11 +35,11 @@
 //      jsonl-run-store.ts（loadAll 终态条目幂等补写）、terminal-actions.ts（D15
 //      终局编排单一入口的注册/终态条目写点）、resume-run.ts（D7/裁决点 7 resume 链
 //      注册条目写点）。其余文件（含 extension 域）一律违规。
-//   R4 v1 快照投影构造器白名单（W1 新增，subagent-record 族）：toSubagentRecordEntry
-//      调用只许 record-entry.ts（定义）与 record-store.ts（v1 实体孤儿纠偏兼容层
-//      reportSubagentRecord——ADR-0078 失效清单登记面，W4 sunset 统一退役）。
-//      其余文件引用即违规：v1 全量快照（含 eventLog/displayItems 死字节）写点
-//      已停写，新写点一律走 v2 条目构造器。
+//   R4 v1 快照投影构造器拒绝（W1 新增，subagent-record 族；登记 §3.3 后全域拒绝）：
+//      v1 全量快照写点与其兼容层（toSubagentRecordEntry / reportSubagentRecord）
+//      已随「项目未上线、无 v1 数据」整体删除——白名单清空，任何位置再出现
+//      toSubagentRecordEntry 调用即回潮（含定义文件本身）：新写点一律走 v2 条目
+//      构造器（toRegisteredEntryData / toSettledEntryData）。
 //   R5 workflow-record v1 快照载荷形态拒绝（W1 新增，全域无豁免）：workflow-record
 //      写点窗口内出现 v1 快照形态标记（`v: 1` 载荷字面量 / toWorkflowRecordEntryData
 //      构造器 / snapshot 直传）即违规——含 R3 白名单宿主自身（四宿主的写点必须
@@ -54,12 +54,12 @@
 //      R2-R6 同构，覆盖 prettier 拆行形态）。
 //
 // 白名单逐域（D7 ③ + ADR-0078 写面清单）：
-//   - store 家族：record-store.ts（R1+R2+R4 豁免，唯一写入口本体）+
+//   - store 家族：record-store.ts（R1+R2 豁免，唯一写入口本体）+
 //     record-store-rounds.ts（R2 豁免——RecordJournalWriteFace 容器，v2 两条款
 //     写面 + 事件追加注入位的共享写面基础设施）
 //   - 写面载体定义文件：state-marker.ts / alive-store.ts / sessions-index.ts /
 //     manifest-store.ts（R1 定义行豁免：函数/类方法定义处，非调用方）
-//   - 常量定义：record-entry.ts（R2/R4 豁免）、workflow-record-entry.ts（R3 天然
+//   - 常量定义：record-entry.ts（R2 豁免）、workflow-record-entry.ts（R3 天然
 //     不命中——定义行无 append 调用）
 //   - run 族四写点宿主：lifecycle.ts / 壳 jsonl-run-store.ts /
 //     terminal-actions.ts（D15）/ resume-run.ts（D7/裁决点 7）
@@ -150,12 +150,9 @@ const STORE_FILE = "packages/subagent-core/src/execution/persistence/record-stor
  *  W1 写面接线层，见 record-store-rounds.ts 头注释）。 */
 const JOURNAL_FACE_FILE = "packages/subagent-core/src/execution/persistence/record-store-rounds.ts";
 
-/** R4 白名单：v1 快照投影构造器定义 + v1 兼容层纠偏写点（reportSubagentRecord，
- *  ADR-0078 失效清单登记面）。 */
-const V1_PROJECTOR_ALLOWED_FILES = new Set([
-  "packages/subagent-core/src/execution/persistence/record-entry.ts",
-  STORE_FILE,
-]);
+/** R4 白名单：登记 §3.3 后清空——v1 全量快照的构造器定义与兼容层纠偏写点已整体删除
+ *  （无 v1 数据、不迁移不兼容）；本规则转为回潮拦截：任何位置再出现该构造器调用即红。 */
+const V1_PROJECTOR_ALLOWED_FILES = new Set([]);
 
 /** 写面载体定义文件（R1 白名单：定义处非调用方）。 */
 const WRITER_DEFINITION_FILES = new Set([
@@ -308,11 +305,10 @@ function scanWriteLineRules(rel, i, line, lines, flags, violations) {
   // R4：v1 快照投影构造器调用（白名单外违规——W1 停写面，兼容层除外）。
   if (V1_SNAPSHOT_PROJECTOR_RE.test(line) && !V1_PROJECTOR_ALLOWED_FILES.has(rel)) {
     violations.push(
-      `${rel}:${i + 1} [R4] v1 全量快照投影构造器 toSubagentRecordEntry 出现在登记面外——` +
-        `v1 快照 entry 已停写（ADR-0078），白名单仅 record-entry.ts（定义）与` +
-        `record-store.ts（v1 实体孤儿纠偏兼容层，W4 sunset 退役）。` +
-        `Recovery: 新写点改走 v2 条目构造器（toRegisteredEntryData / toSettledEntryData /` +
-        `buildAdoptedSettledEntry）；读侧兼容投影经 record-entry.ts 单源扩展。`,
+      `${rel}:${i + 1} [R4] v1 全量快照投影构造器 toSubagentRecordEntry 回潮——` +
+        `v1 快照写点与其兼容层已整体删除（登记 §3.3：项目未上线、无 v1 数据），` +
+        `白名单已清空。Recovery: 新写点走 v2 条目构造器（toRegisteredEntryData /` +
+        `toSettledEntryData / buildAdoptedSettledEntry）。`,
     );
     return;
   }
