@@ -7,7 +7,7 @@
  * - runWorkflow(spec, deps, signal?) → Promise<runId>
  * - abortRun(runId, deps, reason?, doneReason?) → Promise<void>（done no-op）
  * - terminateRunningRuns(deps, reason) → Promise<void>（session 切换/关闭终止；
- *   [D11] resume 来源 run 分叉落 interrupted 暂停态——可再 resume）
+ *   [D11] 统一落 interrupted 暂停态——可再 resume，2026-09-29 用户裁决）
  * - evictDoneRunsBeyondCap(runs, keepDone) → number（done run 内存淘汰）
  * - scheduleTimeBudget(runId, deps, budgetTimeMs) → timer（C.7 时间预算）
  *
@@ -138,37 +138,6 @@ function broadcastAbortToWorker(run: WorkflowRun, reason: string): void {
       `[workflow] abort broadcast to worker failed (runId=${run.runId}, worker likely already exited): ${msg}`,
     );
   }
-}
-
-// ── [D11] resume 来源 run 的进程内标记（terminate 分叉判据）────────
-
-/**
- * [D11] resume 接管来源标记（进程内注册表）。
- *
- * 设计原文「来源标记 = resume 编排注册时聚合上的 meta 布尔位」——meta 字段面
- * （models/workflow-run.ts）不在 U2 领地，落位为进程内注册表；语义等价论证：
- * 消费方 terminateRunningRuns 只终本进程 runs Map 的 run（resume 复活的 run 恰
- * 只在接管进程的 runs Map），进程重启后 run 已回 interrupted 态（崩溃收编链），
- * 来源标记的生命周期与本注册表（进程退出全清）完全一致——不存在「标记该在而不
- * 在」的窗口。驻留有界性：每 runId 至多一条字符串条目，随 evictDoneRunsBeyondCap
- * 淘汰回收（forgetRunResumedOrigin），session 结束进程退出全清（ADR-0081 同款
- * 有界性论证）。
- */
-const resumedOriginRunIds = new Set<string>();
-
-/** [D11] resume 编排（resume-run.ts）复活成功时标记——terminate 分叉的判据写入点。 */
-export function markRunResumedOrigin(runId: string): void {
-  resumedOriginRunIds.add(runId);
-}
-
-/** [D11] 终局/内存淘汰回收（evictDoneRunsBeyondCap 淘汰点调用）。 */
-export function forgetRunResumedOrigin(runId: string): void {
-  resumedOriginRunIds.delete(runId);
-}
-
-/** [D11] 是否 resume 接管来源 run（terminateRunningRuns 分叉消费）。 */
-export function isResumedOriginRun(runId: string): boolean {
-  return resumedOriginRunIds.has(runId);
 }
 
 // ── makeHandlers（路由 worker 事件到 worker-message-pump handle* 函数） ──────
@@ -545,126 +514,68 @@ export async function abortRun(
 
 // ── terminateRunningRuns（session 切换/关闭：终止全部 running run） ────────
 
-/** terminateRunningRuns 的可调项。 */
-export interface TerminateRunningRunsOptions {
-  /**
-   * 是否调 deps.onRunDone（Interface 层完成通知）。缺省 false——session 切换/关闭
-   * 语境下主 agent 已离开本 session，注入完成通知只会把消息发给已离开的 session
-   * （对齐 session_start 恢复先例）。
-   *
-   * [skill-reload D4] post-reload adoption 失败处置传 true：session 仍在（reload
-   * 是同会话原地重建），run 终止对用户必须可见（G3 不静默消失），onRunDone 是
-   * notifyDone 用户通知的单点汇聚（workflow-events makeDeps 注入）。
-   */
-  notifyDone?: boolean;
-}
-
 /**
  * 终止 deps.runs 中全部 running run（session 切换 / session 关闭时调用）。
  *
- * [D11] 两类 run 分叉：resume 接管来源 run（isResumedOriginRun 命中）被动失联
- * 转 interrupted 暂停态（落 run-interrupted(terminated)，可再 resume——session
- * 切换保活，场景 12）；其余 run 维持 failed 终局（现状语义，一次性生命周期）。
+ * [D11] 统一中断（2026-09-29 用户裁决）：全部 running run 被动失联一律转
+ * interrupted 暂停态（落 run-interrupted(terminated)，可再 resume）——被打断
+ * 不等于失败，failed 会谎报「执行失败」；来源不再分叉（原 resume 来源标记
+ * 进程内注册表随分叉消失整体删除）。
  *
- * 一次性生命周期（D-2）：session 离开当刻，running run 的 token 投入作废，转
- * done,failed 持久化落盘——重启后 kill-9 恢复不误判，也不再存在「挂起待恢复」
- * 的中间态。
+ * per-run 序列：`state.error = reason` → 优雅解阻（broadcastAbortToWorker）+
+ * signal listener 收口 → 中断转移（[D15] interruptRun 入口——零终局副作用：
+ * 不写 manifest 派生缓存、不发终局通知、不落 pending:unregister）→ 在途 call
+ * 观测面收口（closeOutInFlightCalls——record 侧无 settled 帧的 call 天然在
+ * 「未完成」侧，resume 按三档恢复处置）→ 执行资源释放（releaseRuntime + 引擎
+ * 窗口实例 dispose，时序红线对齐 finalizeRun：在途收敛之后释放实例）。
  *
- * per-run 行为：`state.error = reason` → `finalizeRun(run, deps, "failed",
- * {notifyDone: options?.notifyDone ?? false})`（transition("done","failed") 内部先
- * releaseRuntime，A4 → save best-effort → pending:unregister 直落 appendEntry
- * （status 经 mapReasonToStatus 映射）→ onRunDone）。
- *
- * **缺省不调 deps.onRunDone**（经 finalizeRun 的 notifyDone 承载，D5-②）：
- * 对齐 session_start 恢复先例（index.ts kill-9 恢复只发
- * unregister、不发 onRunDone）——session 切换/关闭语境下主 agent 已离开本 session，
- * 注入完成通知只会把消息发给已离开的 session。例外 = options.notifyDone:true
- * （adoption 失败处置，见 TerminateRunningRunsOptions）。
- *
- * **不调 discardInFlightCalls**：run 已转终态不再 replay（无恢复路径），在飞 call
- * 缓存清不清都不影响结果；该清理仅 rebuildRuntime 需要（崩溃重试会重放脚本，
- * 假失败结果会污染重跑输出）。
+ * 用户可见性：中断态经 v2 中断条目（appendInterruptedEntry）进 workflow 列表
+ * （「已中断（可续跑）」，场景 25 投影断言），无聊天流完成通知——session 切换/
+ * 关闭语境下主 agent 已离开本 session，注入完成通知只会把消息发给已离开的
+ * session（对齐 session_start 恢复先例）。
  *
  * 单 run 失败（try/catch + log 带 runId/reason）不中断其余 run——终止是批量收尾，
- * 一个 run 落盘失败不应放走其余 run 的 failed 状态。
+ * 一个 run 落盘失败不应放走其余 run 的中断状态。
  *
  * @param deps LifecycleDeps（runs/store/eventBus/log）
  * @param reason 终止原因（写入 run.state.error，如 "Session switched: run terminated"）
- * @param options 可调项（notifyDone 通道；缺省全走现状语义）
  */
-export async function terminateRunningRuns(
-  deps: LifecycleDeps,
-  reason: string,
-  options?: TerminateRunningRunsOptions,
-): Promise<void> {
+export async function terminateRunningRuns(deps: LifecycleDeps, reason: string): Promise<void> {
   for (const run of deps.runs.values()) {
     // [W2/V1] 已终局 run 跳过（判据换源 isRunSettled——原两态机 status 检查随
     // 活体写点删除停更）。
     if (isRunSettled(run)) continue;
-    // [D11] resume 接管来源 run 的分叉：session 切换是被动失联（用户表达过续跑
-    // 意图），语义对齐崩溃中断——落 run-interrupted（来源 = terminated）转暂停
-    // 态可再 resume，不走 failed 终局。正常 run 维持 failed 终局（现状语义有消费
-    // 方；「统一 interrupted」属独立语义变更待用户另裁，本设计不代裁）。
-    if (isResumedOriginRun(run.runId)) {
-      try {
-        deps.log?.("debug", "workflow:lifecycle", "terminateRunningRuns: resumed-origin run → interrupted", { runId: run.runId, reason });
-        run.state.error = reason;
-        // 与 failed 分支对称的优雅解阻 + signal listener 收口（中断同样终止执行）
-        broadcastAbortToWorker(run, reason);
-        disposeSignalAbortListener(run);
-        // 中断转移（[D15] interruptRun 入口——零终局副作用：不写 manifest 派生缓存、
-        // 不发终局通知、不落 pending:unregister）。幂等让位：重复 terminate 对已
-        // interrupted 的 run 表外转移 fail-fast → 返回 false，无重复帧。
-        const interrupted = await interruptRun(run.runId, {
-          errorCode: "terminated",
-          reason,
-          workflowName: run.spec?.scriptName,
-          appendInterruptedEntry:
-            deps.appendEntry !== undefined
-              ? (entry) => deps.appendEntry?.(WORKFLOW_RECORD_CUSTOM_TYPE, entry)
-              : undefined,
-        });
-        // 在途 call 观测面收口（内存翻取消终态——观测纪律不变；record 侧无 settled
-        // 帧的 call 天然在「未完成」侧，resume 按三档恢复处置）
-        closeOutInFlightCalls(run);
-        // 执行资源释放：worker/controller 停止（中断后无活体），引擎窗口实例
-        // dispose（时序红线对齐 finalizeRun：在途收敛之后释放实例）。
-        run.releaseRuntime();
-        await disposeWorkflowWindowEngineState(run.runId, "aborted", "terminateRunningRuns [D11] interrupted fork");
-        if (interrupted) {
-          deps.log?.("debug", "workflow:lifecycle", "run interrupted (resumed-origin, resumable)", { runId: run.runId, reason });
-        }
-      } catch (err) {
-        const msg = toErrorMessage(err);
-        logger.error(
-          `[workflow] terminateRunningRuns interrupted-fork failed for run ${run.runId}: ${msg} (reason: ${reason})`,
-        );
-      }
-      continue;
-    }
     try {
-      deps.log?.("debug", "workflow:lifecycle", "terminateRunningRuns", { runId: run.runId, reason });
+      deps.log?.("debug", "workflow:lifecycle", "terminateRunningRuns: run → interrupted", { runId: run.runId, reason });
       run.state.error = reason;
-      // [OR-3] 同 abortRun：先广播 abort 再 transition（worker 侧 pending 优雅解阻）
+      // [OR-3] 同 abortRun：先广播 abort 再转移（worker 侧 pending 优雅解阻）
       broadcastAbortToWorker(run, reason);
-      // [OR-7] run 终态：移除 signal abort listener（terminateRunningRuns 不走
-      // onRunDone——本路径显式收口，不依赖 finalizeRun 的 notifyDone 分支）
+      // [OR-7] 移除 signal abort listener（本路径不走 onRunDone——显式收口）
       disposeSignalAbortListener(run);
-      // A4 + C-4: transition 内部 releaseRuntime（cleanup before mutate）；done 终态 →
-      // 注销 pending-notification（D5-② 终态 coda 收敛为 finalizeRun 单写点）。
-      // notifyDone 缺省 false——**不调 deps.onRunDone**（真差异经参数承载）：对齐
-      // session_start 恢复先例（index.ts kill-9 恢复只发 unregister、不发
-      // onRunDone）——session 切换/关闭语境下主 agent 已离开本 session，注入完成
-      // 通知只会把消息发给已离开的 session。OR-8 in-flight 收口由 finalizeRun 承载。
-      await finalizeRun(run, deps, "failed", {
-        context: "terminateRunningRuns",
-        notifyDone: options?.notifyDone ?? false,
+      // 中断转移（[D15] interruptRun 入口）。幂等让位：重复 terminate 对已
+      // interrupted 的 run 表外转移 fail-fast → 返回 false，无重复帧。
+      const interrupted = await interruptRun(run.runId, {
+        errorCode: "terminated",
+        reason,
+        workflowName: run.spec?.scriptName,
+        appendInterruptedEntry:
+          deps.appendEntry !== undefined
+            ? (entry) => deps.appendEntry?.(WORKFLOW_RECORD_CUSTOM_TYPE, entry)
+            : undefined,
       });
-      deps.log?.("debug", "workflow:lifecycle", "run terminated", { runId: run.runId, reason: run.state.reason });
+      // 在途 call 观测面收口（内存翻取消终态——观测纪律不变）
+      closeOutInFlightCalls(run);
+      // 执行资源释放：worker/controller 停止（中断后无活体），引擎窗口实例
+      // dispose（时序红线：在途收敛之后释放实例）。
+      run.releaseRuntime();
+      await disposeWorkflowWindowEngineState(run.runId, "aborted", "terminateRunningRuns [D11] unified interrupted");
+      if (interrupted) {
+        deps.log?.("debug", "workflow:lifecycle", "run interrupted (resumable)", { runId: run.runId, reason });
+      }
     } catch (err) {
       const msg = toErrorMessage(err);
       logger.error(
-        `[workflow] terminateRunningRuns failed for run ${run.runId}: ${msg} (reason: ${reason})`,
+        `[workflow] terminateRunningRuns interrupted failed for run ${run.runId}: ${msg} (reason: ${reason})`,
       );
     }
   }
@@ -719,8 +630,7 @@ export function evictDoneRunsBeyondCap(
   for (const r of settled.slice(0, excess)) {
     runs.delete(r.runId);
     forgetSettledRecord(r.runId);
-    // [D10/D11] resume 侧进程内注册表同步回收（与终局记录注册表同生命周期）
-    forgetRunResumedOrigin(r.runId);
+    // [D10] resume 侧进程内注册表同步回收（与终局记录注册表同生命周期）
     forgetRunResumedBudget(r.runId);
   }
   return excess;

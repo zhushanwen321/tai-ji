@@ -52,7 +52,7 @@ import { Trace } from "./models/trace.ts";
 import { WorkflowRun } from "./models/workflow-run.ts";
 import type { LifecycleDeps } from "./models/ports.ts";
 import { RunRuntime } from "./models/run-runtime.ts";
-import { makeHandlers, markRunResumedOrigin } from "./lifecycle.ts";
+import { makeHandlers } from "./lifecycle.ts";
 import { noteRunResumedBudget } from "./worker-message-pump.ts";
 import { WORKFLOW_RECORD_CUSTOM_TYPE } from "./workflow-record-entry.ts";
 
@@ -358,23 +358,6 @@ export function computeActiveElapsedMs(events: readonly WorkflowRunEvent[]): num
 }
 
 // ══════════════════════════════════════════════════════════════
-// §4 D13 嵌套 workflow() 拒绝（词法检测）
-// ══════════════════════════════════════════════════════════════
-
-/**
- * D13 嵌套拒绝（场景 20）：词法检测 scriptSource 中的 `workflow(`——命中即拒绝。
- *
- * 嵌套 workflow() 功能已整体移除（裁决 b 形态独立立项）：含该词法的脚本在本仓
- * 现行 API 面不可执行（脚本只能用 agent/parallel/pipeline/phase/log），但历史
- * 脚本或用户误改后的脚本可能残留字样。误报即拒绝属保守方向（注释里的
- * `workflow(` 字样同样拒绝——设计期 grep 存量 11 份脚本 0 命中，误报面可忽略）；
- * 嵌套功能移除立项落地后本检测随之删除。
- */
-function containsNestedWorkflowCall(scriptSource: string | undefined): boolean {
-  return scriptSource?.includes("workflow(") ?? false;
-}
-
-// ══════════════════════════════════════════════════════════════
 // §5 resumeRun 编排原语
 // ══════════════════════════════════════════════════════════════
 
@@ -511,14 +494,6 @@ async function resumeRunLocked(
         "interrupted before resuming.",
     );
   }
-  // D13 嵌套拒绝（场景 20）
-  if (containsNestedWorkflowCall(created.scriptSource)) {
-    throw reject(
-      `Resume rejected: the script of run ${runId} contains a nested 'workflow(' call — nested workflow ` +
-        "orchestration has been removed and cannot be resumed. Recovery: rewrite the script without nested " +
-        "workflow() calls (use agent/parallel/pipeline), or start a new run with an equivalent flattened script.",
-    );
-  }
   // D10 预算预检（场景 16：搁置不计，活跃已耗不退）
   const budgetTimeMs = options?.budgetTimeMs;
   const activeElapsedMs = computeActiveElapsedMs(events);
@@ -582,8 +557,7 @@ async function resumeRunLocked(
     );
   }
 
-  // ── 6. 重建聚合 + D10/D11 标记 + worker 接管 + pending 信号 ──
-  markRunResumedOrigin(runId);
+  // ── 6. 重建聚合 + D10 预算标记 + worker 接管 + pending 信号 ──
   noteRunResumedBudget(runId, activeElapsedMs, resumedAt);
   // 补收帧落盘后重读全量流重建（帧的 seq 由 journal.append 分配——重读拿权威序）
   const run = rebuildRunFromRecord(runId, created, readRecordStreamStrict(recordPath, runId));

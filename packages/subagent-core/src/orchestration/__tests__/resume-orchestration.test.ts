@@ -337,13 +337,7 @@ describe("resumeRun — 资格校验（错了明说）", () => {
     await expectRejection(resumeRun("wf-live", deps), "not 'interrupted'");
   });
 
-  it("D13 嵌套词法命中（scriptSource 含 'workflow('）：拒绝 + Recovery 指引，不崩不挂", async () => {
-    await seedInterruptedRecord("wf-nested", { scriptSource: "// calls workflow(x)\nasync function execute() {}" });
-    const { deps } = makeDeps();
-    await expectRejection(resumeRun("wf-nested", deps), "nested 'workflow(' call");
-    const events = await scanEvents("wf-nested");
-    expect(events.some((e) => e.type === "run-resumed")).toBe(false);
-  });
+  // D13 嵌套词法拒绝已随嵌套 workflow() 功能移除而删除（检测对象不存在，场景 20 退役）
 });
 
 // ── D12 record 完整性校验（场景 18 resume 侧）─────────────────

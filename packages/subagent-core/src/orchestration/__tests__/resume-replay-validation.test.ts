@@ -14,9 +14,6 @@ import {
   handleWorkerMessage,
 } from "../worker-message-pump.ts";
 import {
-  forgetRunResumedOrigin,
-  isResumedOriginRun,
-  markRunResumedOrigin,
   terminateRunningRuns,
 } from "../lifecycle.ts";
 import { setRunEventJournalDirForTest } from "../terminal-actions.ts";
@@ -281,9 +278,9 @@ describe("pump replay 校验增强 — cached 命中的输入一致性", () => {
   });
 });
 
-// ── D11 terminate 分叉（场景 12 core 侧）────────────────────
+// ── D11 terminate 统一中断（场景 12 core 侧）────────────────────
 
-describe("D11 terminate 分叉 — resume 来源 run 被动失联转 interrupted（场景 12）", () => {
+describe("D11 terminate 统一中断 — 全部 running run 被动失联转 interrupted（场景 12）", () => {
   let journalDir: string;
 
   beforeEach(() => {
@@ -293,8 +290,6 @@ describe("D11 terminate 分叉 — resume 来源 run 被动失联转 interrupted
 
   afterEach(() => {
     setRunEventJournalDirForTest(undefined);
-    forgetRunResumedOrigin("wf-resumed-origin");
-    forgetRunResumedOrigin("wf-normal");
     fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
@@ -316,8 +311,6 @@ describe("D11 terminate 分叉 — resume 来源 run 被动失联转 interrupted
     const { run } = makeRunningRun(runId);
     const { deps, runs } = makeDeps();
     runs.set(runId, run);
-    markRunResumedOrigin(runId);
-    expect(isResumedOriginRun(runId)).toBe(true);
 
     await terminateRunningRuns(deps, "Session switched: run terminated");
 
@@ -337,7 +330,7 @@ describe("D11 terminate 分叉 — resume 来源 run 被动失联转 interrupted
     expect(runs.get(runId)!.state.status).toBe("running");
   });
 
-  it("正常 run（非 resume 来源）：维持 failed 终局现状语义（不代裁统一 interrupted）", async () => {
+  it("正常 run：terminate 同样转 interrupted 暂停态（D11 统一，2026-09-29 用户裁决——打断不记失败）", async () => {
     const runId = "wf-normal";
     const journal = createRunEventJournal(journalDir);
     await journal.append(runId, {
@@ -356,9 +349,15 @@ describe("D11 terminate 分叉 — resume 来源 run 被动失联转 interrupted
 
     const events = await createRunEventJournal(journalDir).scan(runId);
     const last = events.at(-1);
-    expect(last?.type).toBe("run-settled");
-    expect((last as { outcome?: string }).outcome).toBe("failed");
-    // 正常 run 终局后不可 resume（一次性生命周期）
-    expect(isResumedOriginRun(runId)).toBe(false);
+    expect(last?.type).toBe("run-interrupted");
+    expect((last as { errorCode?: string }).errorCode).toBe("terminated");
+    expect(events.some((e) => e.type === "run-settled")).toBe(false);
+    expect(run.runtime).toBeUndefined();
+    // 暂停态可再 resume（打断 ≠ 失败，续跑资格与 resume 来源 run 一致）
+    const { resumeRun } = await import("../resume-run.ts");
+    await expect(
+      resumeRun(runId, deps, { now: () => 1_770_000_100_000 }),
+    ).resolves.toBe(runId);
+    expect(runs.get(runId)!.state.status).toBe("running");
   });
 });

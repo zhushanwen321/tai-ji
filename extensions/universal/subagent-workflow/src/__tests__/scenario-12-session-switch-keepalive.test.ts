@@ -41,13 +41,13 @@ describe("场景 12：session 切换保活（terminate 分叉 → interrupted �
       }
       expect(sd.faux.dispatches).toHaveLength(1);
 
-      // 切 session（terminate 链——[D11] resumed-origin 分叉）
+      // 切 session（terminate 链——[D11] 统一中断）
       await terminateRunningRuns(sd.deps, "session switched by user");
 
       // run 为 interrupted 态（非 failed）：转移帧在场、无 failed 终局帧、fold interrupted
       const events = await scanScenarioEvents(env, RUN_ID);
       const interruptedFrames = events.filter((e) => e.type === "run-interrupted");
-      expect(interruptedFrames).toHaveLength(2); // 崩溃收编 + terminate 分叉
+      expect(interruptedFrames).toHaveLength(2); // 崩溃收编 + terminate 中断
       expect(interruptedFrames[1]).toMatchObject({ errorCode: "terminated" });
       expect(events.some((e) => e.type === "run-settled")).toBe(false);
       expect(foldRunEventFrames(events, () => {}).lifecycle).toBe("interrupted");

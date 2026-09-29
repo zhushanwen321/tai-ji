@@ -1353,10 +1353,6 @@
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-20-nested-false-positive.test.ts"
-        },
-        {
-          "kind": "spec",
           "ref": "extensions/universal/subagent-workflow/src/__tests__/scenario-21-retry-budget.test.ts"
         },
         {

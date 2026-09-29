@@ -414,13 +414,12 @@ export function setupWorkflowDomain(
   function makeLifecycleDeps(): SessionLifecycleDeps {
     return {
       onAdoptionFailed: async (existing, reason) => {
-        // notifyDone: true（D4/r4）——session 仍在（reload 是同会话原地重建），run
-        // 终止对用户必须可见（G3 不静默）；terminate 前的 rebind-first 已在
-        // failAdoption 完成，终态 flush 走新 pi 落权威 JSONL。
+        // [D11] 统一中断：run 转 interrupted 暂停态（非终局），用户可见性由 v2
+        // 中断条目承载（workflow 列表「已中断（可续跑）」）；terminate 前的
+        // rebind-first 已在 failAdoption 完成，中断条目落新 pi 权威 JSONL。
         await terminateRunningRuns(
           makeDeps(existing),
           `skill reload adoption failed: ${reason}`,
-          { notifyDone: true },
         );
         sessionState.delete(existing.sessionId);
       },

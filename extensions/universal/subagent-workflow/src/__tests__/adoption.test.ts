@@ -402,7 +402,7 @@ describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移�
     expect(result).not.toBe(existing);
   });
 
-  it("handler 级全链：健康检查不过 → failed entry 落新 pi 权威 JSONL + notifyDone 用户可见 + 条目移除 + 兜底装配", async () => {
+  it("handler 级全链：健康检查不过 → 中断条目落新 pi 权威 JSONL（可续跑可见）+ 条目移除 + 兜底装配", async () => {
     const { setupWorkflowDomain } = await import("../workflow-events.ts");
     const sid = "sess-fail-handler";
     const makeMount = () => {
@@ -451,30 +451,28 @@ describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移�
     const handle2 = setupWorkflowDomain(m2.pi, { inflightReporter: reporter });
     await m2.handlers.get("session_start")!({ type: "session_start", reason: "reload" }, makeFakeCtx(sid));
 
-    // run 终局 failed（terminate；[W2/V1] 断言换源终局记录——经同一动态 pump 实例）
-    expect(pump.isRunSettled(run)).toBe(true);
-    expect(pump.settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
-    // 终态完整性（rebind-first）：terminate → finalizeRun → store.save 冷路径 flush，
-    // failed 形态落 state 投影——[W1] 条目通道退役后投影是持久化面（journal 终局帧
-    // 经 finalizeRun 同步落账，绕开 rebind-first 则 flush 走旧 pi 且 journal 权威面
-    // 不受影响，但投影会停留在 running 误导恢复链）
+    // run 中断非终局（terminate；[D11] 统一中断——打断不记失败，可再 resume）
+    expect(pump.isRunSettled(run)).toBe(false);
+    // 中断完整性（rebind-first）：terminate → interruptRun → run-interrupted(terminated)
+    // 落 record（journal.append 直写权威面，不经 store flush）——rebind-first 保证
+    // deps.appendEntry 已指向新 pi，中断条目落新 pi 权威 JSONL
     await vi.waitFor(() => {
-      // [D1] 终局信号 = record 流 run-settled 帧（state 快照面已删除；帧 outcome
-      // 经 finalizeRun 同步落账——rebind-first 语义的权威验证面）
+      // [D1] 中断信号 = record 流 run-interrupted 帧（errorCode=terminated 承载来源）
       const raw = fs.readFileSync(path.join(agentDir, "workflow-state", "wf-fail-1.record.jsonl"), "utf8");
-      const last = JSON.parse(raw.trim().split("\n").filter((l) => l.trim()).at(-1)!) as { type?: string; outcome?: string };
-      expect(last.type).toBe("run-settled");
-      expect(last.outcome).toBe("failed");
+      const last = JSON.parse(raw.trim().split("\n").filter((l) => l.trim()).at(-1)!) as { type?: string; errorCode?: string };
+      expect(last.type).toBe("run-interrupted");
+      expect(last.errorCode).toBe("terminated");
     });
-    // [W1 / D1] 停写锚定：零 workflow-record entry（本场景无注册条目——run 是注入的
-    // 内存 run；journal 终局帧随 finalizeRun 落账，不经条目面）
-    expect(recordStatuses(m2.entries, "wf-fail-1")).toHaveLength(0);
-    // notifyDone 用户可见：onRunDone → notifyDone → 账本投递 → sendMessage workflow-result
+    // [D11] 用户可见性 = v2 中断条目（status "interrupted"）落新 pi JSONL——workflow
+    // 列表「已中断（可续跑）」投影源（场景 25 同源）；中断非终局，无 sendMessage
+    // workflow-result 完成通知
     await vi.waitFor(() => {
-      expect(m2.pi.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ customType: "workflow-result" }),
-        expect.anything(),
+      const interruptedEntry = m2.entries.find(
+        (e) => e.type === "custom" && e.customType === "workflow-record"
+          && (e.data as { runId?: string }).runId === "wf-fail-1"
+          && (e.data as { status?: string }).status === "interrupted",
       );
+      expect(interruptedEntry).toBeDefined();
     });
     // 条目移除后兜底全量装配：sessionState 是新条目（非 first，store 不残留半接管状态）
     const after = handle2.state.sessionState.get(sid);
