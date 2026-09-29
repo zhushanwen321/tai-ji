@@ -23,12 +23,13 @@ description: >-
 
 ### 第 1 步：处理未提交改动（AI 决策，脚本不代劳）
 
-脚本预检发现未提交的 **tracked** 改动会以 exit 1 停下（merge 预检不查 untracked；cleanup 门禁用 `status --short` 把 tracked + untracked 一并预检——删除动作是显式 `rm -rf`，无 git worktree remove 的内建拒删兜底，脏检查必须前置。[HISTORICAL] 旧版把 untracked 检查留给 git worktree remove 内建兜底，2026-09 半删态事故后前移）。此时**不要**用 `git add -A && git commit` 盲提交：
+第 1 步处理范围 = **tracked + untracked 全量**。脚本预检发现未提交的 **tracked** 改动会以 exit 1 停下（merge 预检不查 untracked，该缺口由本步判定与 dev-merge-gates workflow 预检覆盖；cleanup 门禁用 `status --short` 把 tracked + untracked 一并预检——删除动作是显式 `rm -rf`，无 git worktree remove 的内建拒删兜底，脏检查必须前置。[HISTORICAL] 旧版把 untracked 检查留给 git worktree remove 内建兜底，2026-09 半删态事故后前移）。任何一类都**不要**用 `git add -A && git commit` 盲提交：
 
-- 本次会话产生的改动 → 按全局提交策略正常 commit（完成即提交）
-- 非本次会话产生的改动 → **不提交、不修改、不丢弃**，先询问用户
+- 本次会话产生的 tracked 改动 → 按全局提交策略正常 commit（完成即提交）
+- 非本次会话产生的 tracked 改动 → **不提交、不修改、不丢弃**，先询问用户
+- untracked 文件（merge 预检不查、脚本不拦，由本步补位判定）→ 同样逐项判定去留：本次会话产物按需纳入跟踪或删除；来源不明先问用户
 
-处理完再进第 2 步。
+**发起 dev-merge-gates workflow 前工作区必须全干净**（tracked + untracked 均零残留）——workflow 开头有预检，脏则 fail-fast。处理完再进第 2 步。
 
 ### 第 1.5 步：commit 粒度整理（条件执行）
 
@@ -61,7 +62,7 @@ node scripts/changeset-check.mjs                  # changeset 完整性：diff �
 
 **存在性守卫（zcode/pi 两侧通用）**：跑前 `test -f scripts/quality-gates.mjs` 检查脚本存在——脚本随 git 分支传播，skill 实体经 symlink 即时生效，feature 分支未含新脚本 commit 时必然缺失（介质错速）。缺失 → 显式输出「quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露」，继续第 1.7 步；不崩溃、不静默。changeset-check.mjs 缺失同款处置。恢复通道：源 worktree `git merge dev-0.10.5`（或发布后 merge main）主动吸收后重跑。
 
-**宿主分工**：zcode 宿主 = 发起 saved workflow `.agents/workflows/dev-merge-gates.dwf.ts`，一次承载本步 + 第 1.7 步（gates + branch-review 两步前置，存在性守卫内建，失败以 failed 终态返回）；pi 宿主无对应 workflow（dev-merge 使用频率低，不维护双宿主镜像），主 agent 按本步与第 1.7 步手工编排——gates 走上述 node 脚本 + changeset WARN 起草指令，branch-review 走 review-fix-loop。
+**宿主分工**：zcode 宿主 = 发起项目 workflow（CreateWorkflow path 指向 `.agents/workflows/dev-merge-gates.dwf.ts`），一次承载本步 + 第 1.7 步（gates + branch-review 两步前置，存在性守卫内建，失败以 failed 终态返回）；pi 宿主无对应 workflow（dev-merge 使用频率低，不维护双宿主镜像），主 agent 按本步与第 1.7 步手工编排——gates 走上述 node 脚本 + changeset WARN 起草指令，branch-review 走 review-fix-loop。
 
 ### 第 1.7 步：合入点横切审查（3+3 维，触及源码即跑）
 
@@ -71,9 +72,9 @@ feature 分支的 diff 完整、上下文集中，是横切维度审查的天然
 
 **执行**（审查对象 = 分支增量 diff，非全 PR）：
 
-1. 约束动态加载：`node scripts/select-constraints.mjs --base $(git merge-base github/main HEAD)` 落 `.review/constraints.md`
+1. 约束动态加载：`node scripts/select-constraints.mjs --base $(git merge-base github/main HEAD)` 落 `.review/constraints.md`；脚本失败 = 本步终止不进合并（与 CR 门同语义），不得在无约束清单状态下派审查
 2. 派恒派 3 维 reviewer（agent 定义在本 skill `agents/review-<维度>.md`，重语义审查的资产所有权归 dev-merge，pr-cr-fix 侧仅经其显式 reviewers 逃生舱引用同一批文件）：`business-logic`（含降级策略红线，判据本体 = agent 定义内 read 引用的 code-harden）/ `arch-boundary` / `data-governance`——agent 定义结构为三层：编排契约 + 通用判据 read 引用（指向 `~/.agents/skills/` 用户级技能 code-domain-review / code-harden / architecture-decay-audit / code-arch-review，缺失时 dev-merge-gates 的在盘检查 fail-fast，不静默降级为无判据审查）+ 项目特化检查（消费 `.review/constraints.md` 与项目文档）。pi 宿主用 `pi workflow run review-fix-loop --args '{targetType:"git-diff", target:"<merge-base-hash>", batch1:"<选中的 review-<维度>.md 绝对路径（本 skill agents/ 下），逗号分隔>", autoCommit:true, ...}'`（batch1 点名上述 3 维）；zcode 宿主已由 dev-merge-gates.dwf.ts 的 branch-review 步承载（第 1.6 步一并发起），单独补审时用原生 `review-fix-loop` saved workflow（reviewers 传选中的 agent .md 绝对路径子集）
-3. 触发式追加 3 维：diff 触及打包/构建配置（tsup/electron-builder/CI）→ 加 `electron-build`；触及包结构/发布线（package.json 增删/workspace/changeset 配置）→ 加 `monorepo-impact`；触及 `extensions/**/src/**` → 加 `extension-api`（tool/command schema、SDK 契约、spec 偏差登记与 data-governance 同属 dev-flow 审不到的横切关注点，且是本仓高频改动范围；SDK 签名核对要对照 node_modules dist、成本中等，故不恒派只触发）。`electron-build` 本步只挂构建/发布配置面是有意收窄：runtime/electron **源码**改动的 CJS 兼容（`import.meta.url`）与 bundle 完整性由 pre-commit 的 `validate-runtime-bundle.sh` 机器门在每次 commit（含本步之后的 merge commit）拦截，LLM 维度不重审机器门已覆盖项；pr-cr-fix 回退集对 `packages/runtime/**` 宽派是终局兜底定位的保守取向（宁可多派不漏派），与本步收窄是两层定位差异、非谓词漂移
+3. 触发式追加 3 维：diff 触及打包/构建配置（tsup/electron-builder/CI）→ 加 `electron-build`；触及包结构/发布线（package.json / pnpm-workspace.yaml / .changeset/ 下任何变更）→ 加 `monorepo-impact`；触及 `extensions/**/src/**` → 加 `extension-api`（tool/command schema、SDK 契约、spec 偏差登记与 data-governance 同属 dev-flow 审不到的横切关注点，且是本仓高频改动范围；SDK 签名核对要对照 node_modules dist、成本中等，故不恒派只触发）；pr-cr-fix 侧回退集对 `extensions/**`（不限 src）宽派是终局兜底定位的保守取向，本侧收窄到 src 是合入点定位的有意差异、非谓词漂移。`electron-build` 本步只挂构建/发布配置面是有意收窄：runtime/electron **源码**改动的 CJS 兼容（`import.meta.url`）与 bundle 完整性由 pre-commit 的 `validate-runtime-bundle.sh` 机器门在每次 commit（含本步之后的 merge commit）拦截，LLM 维度不重审机器门已覆盖项；pr-cr-fix 回退集对 `packages/runtime/**` 宽派是终局兜底定位的保守取向（宁可多派不漏派），与本步收窄是两层定位差异、非谓词漂移
 4. 终态处置：must-fix 全修后才进第 2 步合并；minor 残余随分支带走（commit message 或 TODO 登记），不阻塞
 
 **CR 门 fail-fast 语义（2026-09-25 裁决）**：第 1.7 步 review-fix-loop 全链强结构化返回——reviewer/fixer/aggregator 任一结构化返回失败即立即终止整个 workflow（review-failure / fix-failure / aggregator-failure 终态 + 恢复指引），无降级完成形态。CR 门读到非 clean/converged 终态 = 环境或模型问题未修，按失败处置（不进合并），恢复动作见 run 返回值 message。

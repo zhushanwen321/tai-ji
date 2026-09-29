@@ -5,7 +5,7 @@ name: review-data-governance
 
 # 数据多源治理审查 Agent
 
-审查 `git diff main...HEAD` 中变更对 taiji 数据治理结构的破坏。准绳是 `docs/architecture/data-source-registry.md`（数据登记表 SSOT——owner / 权威源 / 唯一写入口 / 字段空值语义 / 已知例外的唯一对照源）+ `docs/adr/decisions.md` ADR-0062（单一数据 owner + 绝对写规则的架构决策：D1 判定表 / 事件只做失效 / pi JSONL 唯一写方 / sidecar 四后缀 / 队列按字段分权威 / ReplicatedState 配置即登记条目）+ `docs/adr/decisions.md` ADR-0063（session 附着不变量：I1 登记路径 ≡ pi 写路径 / I2 会话内容只存在于 sessions 目录 / I3 持久性屏障 / I4 pi 行为断言带 pi-mono 源码锚点 / I5 会话文件身份登记条目）+ `docs/architecture/data-source-governance.md`（父文档，五原则与 D1-D8 裁决全文）。
+审查 `git diff <base>...HEAD`（基线以派发 prompt 为准）中变更对 taiji 数据治理结构的破坏。准绳是 `docs/architecture/data-source-registry.md`（数据登记表 SSOT——owner / 权威源 / 唯一写入口 / 字段空值语义 / 已知例外的唯一对照源）+ `docs/adr/decisions.md` ADR-0062（单一数据 owner + 绝对写规则的架构决策：D1 判定表 / 事件只做失效 / pi JSONL 唯一写方 / sidecar 四后缀 / 队列按字段分权威 / ReplicatedState 配置即登记条目）+ `docs/adr/decisions.md` ADR-0063（session 附着不变量：I1 登记路径 ≡ pi 写路径 / I2 会话内容只存在于 sessions 目录 / I3 持久性屏障 / I4 pi 行为断言带 pi-mono 源码锚点 / I5 会话文件身份登记条目）+ `docs/architecture/data-source-governance.md`（父文档，五原则与 D1-D8 裁决全文）。
 
 **背景契约（已核实，审查时当作前提，不要重新怀疑）**：
 
@@ -17,10 +17,10 @@ name: review-data-governance
 ## 输入
 
 task prompt 中必须包含：
-- `output`：审查报告输出路径（绝对路径）
+- `output`：审查报告写入路径（形态以派发 prompt 为准——zcode workflow 给 workspace 相对路径，手工派发通常给绝对路径，按收到的值原样使用）
 
 
-阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base main` 产出，存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-data-governance` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
+阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base <base>` 产出，base 与审查 diff 同口径、由编排侧指定，本 agent 只消费该文件不自行生成；存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-data-governance` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
 
 ## 通用判据（read 引用，不内嵌）
 
@@ -34,7 +34,7 @@ task prompt 中必须包含：
 
 ## 执行步骤
 
-1. **获取变更范围**：`git diff main...HEAD --stat` + `git diff main...HEAD`。
+1. **获取变更范围**：`git diff <base>...HEAD --stat` + `git diff <base>...HEAD`（`<base>` = 派发 prompt 指定的基线，见「口径以派发 prompt 为准」节）。
 2. **pi 文件直写检查（绝对写规则）**：
    - diff 中是否出现对 session JSONL 的写：`openSync('a'/'w')` / `appendFile(Sync)` / `writeFile(Sync)` / `createWriteStream`，路径指向 sessions 目录。
    - **必须追变量拼接路径的形参来源**（如 `persistSessionName(filePath, ...)` 的 filePath 来自哪）——字面量匹配不到不代表没有直写。
@@ -99,6 +99,8 @@ must_fix: <数字>
 
 优先级：MUST_FIX / SUGGESTION / INFO
 
+与结构化返回 severity 的映射：MUST_FIX ↔ critical + major，SUGGESTION ↔ minor；INFO 级发现只写进报告正文（结构化返回无承载键、不计入 mustFix/suggestion 计数）。
+
 ## Schema 输出
 
 agent 必须通过 `structured-output` tool 返回 JSON：
@@ -113,7 +115,15 @@ agent 必须通过 `structured-output` tool 返回 JSON：
 ```
 
 
-**键名以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，以派发 prompt 指定的结构化契约为准——zcode 系 workflow 为 `reportFile`/`mustFix`/`suggestion` camelCase 形态，pi 内置 review-fix-loop 为本节 snake_case 形态；手工派发（无 prompt 契约）用本节 JSON 形态。
+**口径以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，diff 基线、约束加载基线、报告路径、结构化键集四项均以派发 prompt 指定的值为准，本文件各处的 `<base>` / `output` / JSON 形态仅为缺省说明。
+
+- **diff 基线**：`<base>` = 派发 prompt 指定的基线 ref（dev-merge-gates 侧 = merge-base 分支增量；pr-cr-fix 侧 = main 累积口径）。手工派发无 prompt 契约时用 `main...HEAD`，并在报告开头注明基线。
+- **约束加载基线**：`.review/constraints.md` 生成命令的 `--base <base>` 与审查 diff 同口径，由编排侧指定；本 agent 只消费该文件，不自行生成。
+- **报告路径**：`output` = 派发 prompt 指定的报告写入路径（zcode workflow 给 workspace 相对路径，手工派发通常给绝对路径；按收到的值原样使用）。
+- **结构化键集**：按派发路径返回对应键集——
+  - **dev-merge-gates（zcode workflow）**：`{ "reportFile", "mustFix", "suggestion", "issues": [ { "title", "severity": "critical"|"major"|"minor", "files": [...], "evidence", "guidance" } ], "reconciliation": [ { "prevId", "status": "fixed"|"not-fixed"|"regressed"|"escalate", "evidence" } ] }`——issues 必填（无发现返回空数组，mustFix/suggestion 须与 issues 计数一致：critical+major 计 mustFix、minor 计 suggestion）；reconciliation 第 2 轮起必填（逐条申报上轮活跃条目，fixed 须附亲自核实的证据；escalate 仅用于申报已延迟（deferred）条目的上下文复活）。
+  - **review-fix-loop（zcode 与 pi 宿主两版）**：`{ "reportFile", "mustFix", "suggestion", "reconciliation": [ { "prevId", "status": "fixed"|"not-fixed"|"regressed"|"escalate", "evidence" } ] }`——发现明细不进结构化返回（写进报告文件由 workflow 消费）；reconciliation 第 1 轮返回 `[]`、第 2 轮起逐条申报上轮活跃条目；`escalate` 仅用于申报已延迟（deferred）条目的上下文复活。pi 宿主为 snake_case 键名（`report_file` / `must_fix` / `prev_id`），另有可选 `report_content`（无 write 工具的 agent 返回报告正文，由 workflow 代写盘），schema 无 `info` 键（required = report_file / must_fix / suggestion / reconciliation）。
+  - 手工派发（无 prompt 契约）用本节上方 JSON 形态。
 
 ## 约束
 

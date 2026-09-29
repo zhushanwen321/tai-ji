@@ -283,7 +283,7 @@ CreateWorkflow:
 
 ##### 派发前：按 diff 选维度（主 agent 自己跑）
 
-路径 3 与 pr-lifecycle 的 preflight 回退语义对齐：目标维度集 = **6 agent 回退集（3 恒派 + 3 触发路径判定）**，type-safety / test-coverage 已按设计裁决退役不进集。按**路径匹配**（不做语义判断——不可审计、漏派无解释），`git diff main...HEAD --name-only` 对照「审查维度集」节的回退集触发条件表：
+路径 3 与 pr-lifecycle 的 preflight 回退语义对齐：目标维度集 = **6 agent 回退集（3 恒派 + 3 触发路径判定）**，type-safety / test-coverage 已按设计裁决退役不进集。按**路径匹配**（不做语义判断——不可审计、漏派无解释），`git diff main...HEAD --name-only` 对照下方「派发前：按 diff 选维度」处的回退集触发条件表：
 
 - **恒派 3 维**：business-logic / arch-boundary / data-governance 无条件派
 - **触发 3 维**：electron-build（diff 含 `packages/runtime/**`、`apps/electron/**` 或 runtime `package.json` 依赖变更才派）、monorepo-impact（diff 触及任一 workspace 包面或根级依赖声明才派）、extension-api（diff 含 `extensions/**` 才派）

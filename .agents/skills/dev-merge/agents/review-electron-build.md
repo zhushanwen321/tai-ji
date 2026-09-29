@@ -5,21 +5,21 @@ name: review-electron-build
 
 # Electron 打包约束审查 Agent
 
-审查 `git diff main...HEAD` 中变更是否违反 Electron 打包约束。这是 taiji 事故最高发领域（参考项目 AGENTS.md 关键规则 #12「Electron 打包约束，违反必出 bug」）。打包配置错误会导致产物缺 runtime、子进程无法启动、pi 资源缺失等致命问题。
+审查 `git diff <base>...HEAD`（基线以派发 prompt 为准）中变更是否违反 Electron 打包约束。这是 taiji 事故最高发领域（参考项目 AGENTS.md 关键规则 #12「Electron 打包约束，违反必出 bug」）。打包配置错误会导致产物缺 runtime、子进程无法启动、pi 资源缺失等致命问题。
 
 本维度为纯项目特化维度，无通用判据技能引用；全部检查项按项目文档与登记约束执行。
 
 ## 输入
 
 task prompt 中必须包含：
-- `output`：审查报告输出路径（绝对路径）
+- `output`：审查报告写入路径（形态以派发 prompt 为准——zcode workflow 给 workspace 相对路径，手工派发通常给绝对路径，按收到的值原样使用）
 
 
-阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base main` 产出，存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-electron-build` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
+阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base <base>` 产出，base 与审查 diff 同口径、由编排侧指定，本 agent 只消费该文件不自行生成；存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-electron-build` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
 
 ## 执行步骤
 
-1. **获取变更范围**：`git diff main...HEAD --stat` + `git diff main...HEAD`。
+1. **获取变更范围**：`git diff <base>...HEAD --stat` + `git diff <base>...HEAD`（`<base>` = 派发 prompt 指定的基线，见「口径以派发 prompt 为准」节）。
 2. **tsup 配置（`packages/runtime/tsup.config.ts`）**：
    - 是否 `platform: 'node'`，且 `target` 与 Electron 内置 Node 版本匹配（查 `apps/electron/package.json` 的 electron 版本 → 对应 Node，实测：Electron 42.3.3 = Node 24.15.0，Electron 33.4.11 = Node 20.18.3）。核对方法：`ELECTRON_RUN_AS_NODE=1 <electron-bin> -e "console.log(process.versions.node)"`。**若 tsup target 与实际 electron 内置 Node 主版本不符则标 MUST_FIX**（如 electron=42 但 target='node20' 是滞后多个大版本）
    - `noExternal` 是否覆盖**所有** runtime `dependencies`——新增 npm 依赖时是否同步追加（遗漏 → `asar.unpacked` 运行时 `Cannot find module`）
@@ -70,6 +70,8 @@ must_fix: <数字>
 
 优先级：MUST_FIX / SUGGESTION / INFO
 
+与结构化返回 severity 的映射：MUST_FIX ↔ critical + major，SUGGESTION ↔ minor；INFO 级发现只写进报告正文（结构化返回无承载键、不计入 mustFix/suggestion 计数）。
+
 ## Schema 输出
 
 agent 必须通过 `structured-output` tool 返回 JSON：
@@ -84,7 +86,15 @@ agent 必须通过 `structured-output` tool 返回 JSON：
 ```
 
 
-**键名以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，以派发 prompt 指定的结构化契约为准——zcode 系 workflow 为 `reportFile`/`mustFix`/`suggestion` camelCase 形态，pi 内置 review-fix-loop 为本节 snake_case 形态；手工派发（无 prompt 契约）用本节 JSON 形态。
+**口径以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，diff 基线、约束加载基线、报告路径、结构化键集四项均以派发 prompt 指定的值为准，本文件各处的 `<base>` / `output` / JSON 形态仅为缺省说明。
+
+- **diff 基线**：`<base>` = 派发 prompt 指定的基线 ref（dev-merge-gates 侧 = merge-base 分支增量；pr-cr-fix 侧 = main 累积口径）。手工派发无 prompt 契约时用 `main...HEAD`，并在报告开头注明基线。
+- **约束加载基线**：`.review/constraints.md` 生成命令的 `--base <base>` 与审查 diff 同口径，由编排侧指定；本 agent 只消费该文件，不自行生成。
+- **报告路径**：`output` = 派发 prompt 指定的报告写入路径（zcode workflow 给 workspace 相对路径，手工派发通常给绝对路径；按收到的值原样使用）。
+- **结构化键集**：按派发路径返回对应键集——
+  - **dev-merge-gates（zcode workflow）**：`{ "reportFile", "mustFix", "suggestion", "issues": [ { "title", "severity": "critical"|"major"|"minor", "files": [...], "evidence", "guidance" } ], "reconciliation": [ { "prevId", "status": "fixed"|"not-fixed"|"regressed"|"escalate", "evidence" } ] }`——issues 必填（无发现返回空数组，mustFix/suggestion 须与 issues 计数一致：critical+major 计 mustFix、minor 计 suggestion）；reconciliation 第 2 轮起必填（逐条申报上轮活跃条目，fixed 须附亲自核实的证据；escalate 仅用于申报已延迟（deferred）条目的上下文复活）。
+  - **review-fix-loop（zcode 与 pi 宿主两版）**：`{ "reportFile", "mustFix", "suggestion", "reconciliation": [ { "prevId", "status": "fixed"|"not-fixed"|"regressed"|"escalate", "evidence" } ] }`——发现明细不进结构化返回（写进报告文件由 workflow 消费）；reconciliation 第 1 轮返回 `[]`、第 2 轮起逐条申报上轮活跃条目；`escalate` 仅用于申报已延迟（deferred）条目的上下文复活。pi 宿主为 snake_case 键名（`report_file` / `must_fix` / `prev_id`），另有可选 `report_content`（无 write 工具的 agent 返回报告正文，由 workflow 代写盘），schema 无 `info` 键（required = report_file / must_fix / suggestion / reconciliation）。
+  - 手工派发（无 prompt 契约）用本节上方 JSON 形态。
 
 ## 约束
 

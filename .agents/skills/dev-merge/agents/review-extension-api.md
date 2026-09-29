@@ -10,19 +10,19 @@ name: review-extension-api
 > **规范参考**：Pi 扩展强制约束见 `docs/extensions/extension-conventions.md`，完整开发模式见 `docs/extensions/development-guide.md`。
 > 原 SKILL.md「Pi Extension 接口契约 Checklist」四节（SDK 接口契约核对 / spec 偏差记录 / schema 描述一致性 / 类型断言）已并入本文执行步骤 2-5（pr-cr-fix 精简改造 D8），内容以本文为 SSOT。
 
-本维度为纯项目特化维度，无通用判据技能引用（agent-facing 表面清单的方法论引用见文末「Agent-facing 表面 checklist」节）。
+恒派检查无通用判据引用；agent-facing 表面 checklist 节条件引用 meta-prompt-guidance，消费边界见该节。
 
 ## 输入
 
 task prompt 中必须包含：
-- `output`：审查报告输出路径（绝对路径）
+- `output`：审查报告写入路径（形态以派发 prompt 为准——zcode workflow 给 workspace 相对路径，手工派发通常给绝对路径，按收到的值原样使用）
 
 
-阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base main` 产出，存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-extension-api` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
+阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base <base>` 产出，base 与审查 diff 同口径、由编排侧指定，本 agent 只消费该文件不自行生成；存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-extension-api` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
 
 ## 执行步骤
 
-1. **获取变更范围**：`git diff main...HEAD --stat` + `git diff main...HEAD`。
+1. **获取变更范围**：`git diff <base>...HEAD --stat` + `git diff <base>...HEAD`（`<base>` = 派发 prompt 指定的基线，见「口径以派发 prompt 为准」节）。
 2. **Tool/Command Schema 与描述一致性检查**（参考 development-guide §7-8；`[MANDATORY]` 逐条核对）：
    - 新增 tool 的参数是否用 `Type.Object()` + `StringEnum()` 定义 schema
    - `execute` 返回值是否符合 `{ content: [...], details: {...} }` 结构
@@ -78,6 +78,8 @@ task prompt 中必须包含：
 > 完整审查方法论走 `meta-prompt-guidance` skill（`flow/review.md` + `review/rubric-<carrier>.md`，快速审查走 P0）；
 > pi 专属格式契约见 `docs/extensions/agent-authoring-guide.md`。本清单只列必查的 P0 要点 + pi 专属补充项。
 
+**消费边界声明（本节激活时生效）**：本节引用的 `meta-prompt-guidance` 判据文件（`flow/review.md` 与对应 `review/rubric-<carrier>.md`）Read 失败时，立即停止审查并报错（指明缺失路径）——禁止在无判据状态下继续核对本清单；触发条件未命中时本节整体跳过，不受此句约束。该在盘检查由本 agent 以 Read 失败即停的方式自查承担，所有派发路径一致（dev-merge-gates 的技能在盘检查不覆盖本维度）。
+
 **触发条件**（任一命中即激活，否则跳过本节）：
 
 - `extensions/**/agents/*.md` 或 `**/.agents/agents/*.md`
@@ -128,6 +130,8 @@ must_fix: <数字>
 
 优先级：MUST_FIX / SUGGESTION / INFO
 
+与结构化返回 severity 的映射：MUST_FIX ↔ critical + major，SUGGESTION ↔ minor；INFO 级发现只写进报告正文（结构化返回无承载键、不计入 mustFix/suggestion 计数）。
+
 ## Schema 输出
 
 agent 必须通过 `structured-output` tool 返回 JSON：
@@ -142,7 +146,15 @@ agent 必须通过 `structured-output` tool 返回 JSON：
 ```
 
 
-**键名以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，以派发 prompt 指定的结构化契约为准——zcode 系 workflow 为 `reportFile`/`mustFix`/`suggestion` camelCase 形态，pi 内置 review-fix-loop 为本节 snake_case 形态；手工派发（无 prompt 契约）用本节 JSON 形态。
+**口径以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，diff 基线、约束加载基线、报告路径、结构化键集四项均以派发 prompt 指定的值为准，本文件各处的 `<base>` / `output` / JSON 形态仅为缺省说明。
+
+- **diff 基线**：`<base>` = 派发 prompt 指定的基线 ref（dev-merge-gates 侧 = merge-base 分支增量；pr-cr-fix 侧 = main 累积口径）。手工派发无 prompt 契约时用 `main...HEAD`，并在报告开头注明基线。
+- **约束加载基线**：`.review/constraints.md` 生成命令的 `--base <base>` 与审查 diff 同口径，由编排侧指定；本 agent 只消费该文件，不自行生成。
+- **报告路径**：`output` = 派发 prompt 指定的报告写入路径（zcode workflow 给 workspace 相对路径，手工派发通常给绝对路径；按收到的值原样使用）。
+- **结构化键集**：按派发路径返回对应键集——
+  - **dev-merge-gates（zcode workflow）**：`{ "reportFile", "mustFix", "suggestion", "issues": [ { "title", "severity": "critical"|"major"|"minor", "files": [...], "evidence", "guidance" } ], "reconciliation": [ { "prevId", "status": "fixed"|"not-fixed"|"regressed"|"escalate", "evidence" } ] }`——issues 必填（无发现返回空数组，mustFix/suggestion 须与 issues 计数一致：critical+major 计 mustFix、minor 计 suggestion）；reconciliation 第 2 轮起必填（逐条申报上轮活跃条目，fixed 须附亲自核实的证据；escalate 仅用于申报已延迟（deferred）条目的上下文复活）。
+  - **review-fix-loop（zcode 与 pi 宿主两版）**：`{ "reportFile", "mustFix", "suggestion", "reconciliation": [ { "prevId", "status": "fixed"|"not-fixed"|"regressed"|"escalate", "evidence" } ] }`——发现明细不进结构化返回（写进报告文件由 workflow 消费）；reconciliation 第 1 轮返回 `[]`、第 2 轮起逐条申报上轮活跃条目；`escalate` 仅用于申报已延迟（deferred）条目的上下文复活。pi 宿主为 snake_case 键名（`report_file` / `must_fix` / `prev_id`），另有可选 `report_content`（无 write 工具的 agent 返回报告正文，由 workflow 代写盘），schema 无 `info` 键（required = report_file / must_fix / suggestion / reconciliation）。
+  - 手工派发（无 prompt 契约）用本节上方 JSON 形态。
 
 ## 约束
 
