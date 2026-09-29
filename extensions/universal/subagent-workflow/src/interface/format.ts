@@ -6,8 +6,8 @@
 //   `·` 同级并列字段/thinking 图标;`()` 元数据分组;`›` 工具;`>` 输出;`·` thinking.
 //   禁用 `│` 做 stats 分隔、`├─`/`└─` 做 eventLog 前缀.
 //
-// 截断/填充/换行（truncLine / padToVisible / segFillColored / wrapText）已迁
-// ./tui-kit.ts（post-convergence C4 零依赖叶），本文件 re-export 维持既有导入面.
+// 截断/填充/换行（truncLine / padToVisible / segFillColored / wrapText）单定义
+// ./tui-kit.ts（零依赖叶），消费方直接从 tui-kit import。
 
 import os from "node:os";
 
@@ -20,16 +20,11 @@ import { DEFAULT_AGENT_NAME } from "@zhushanwen/subagent-core";
 import type {
   DoneReason,
   ExecutionTraceNode,
+  RunEventFoldCheckpoint,
   RunStatus,
   ToolCallEntry,
 } from "@zhushanwen/subagent-core";
 import { displayAgentName } from "@zhushanwen/subagent-core";
-
-import { padToVisible, segFillColored, truncLine, wrapText } from "./tui-kit.ts";
-
-// ANSI 可见宽度布局家族单定义在 ./tui-kit.ts（零依赖叶）；此处 re-export 保持
-// 既有消费方（tool-render / bg-notify-render / 测试等）导入面零改动。
-export { padToVisible, segFillColored, truncLine, wrapText };
 
 /**
  * ThemeLike:TUI 语义 token 着色接口(duck-typed,兼容 Pi Theme).
@@ -419,7 +414,7 @@ export function formatDisplayItem(item: DisplayItem, theme: ThemeLike): string {
 // 自 views/format.ts 并入（D7-① 双轨合并）：workflow 视图特有的 badge/phase/
 // trace 行格式化在此作差异段保留。并入时收敛的同构构件——ThemeLike、
 // formatElapsedSeconds（本文件版含小时分支，>1h 显示 "1h15m" 而非 "75m30s"）、
-// segFillColored、padToVisible（后者已随 C4 迁 ./tui-kit.ts，经 re-export 复用）。
+// segFillColored、padToVisible（后者已随 C4 迁 ./tui-kit.ts，消费方直接 import）。
 // ============================================================
 
 // ── Workflow view 布局常量 ────────────────────────────────────
@@ -437,14 +432,16 @@ const MS_PER_SEC = 1000;
 /**
  * 可显示的状态文本集合。
  *
- * 包含 RunStatus（"running"|"done" 不直接显示，转 reason）+ DoneReason
- * （completed/failed/aborted/budget_limited/time_limited）+ ExecutionTraceNode.status
- * （含 "pending"——trace 节点的初始态）。
+ * 包含 RunStatus（"running"|"done" 不直接显示，转 reason）+ 中断投影态
+ * "interrupted"（[D2] 重水合中断 run 经 meta.interruptedAt 投影——displayStatusOf
+ * 三态输出的第三值）+ DoneReason（completed/failed/aborted/budget_limited/
+ * time_limited）+ ExecutionTraceNode.status（含 "pending"——trace 节点的初始态）。
  *
  * 收窄自 string → 显式联合，编译器会在新增 status 时强制 switch 补齐分支。
  */
 export type StatusText =
   | RunStatus
+  | "interrupted"
   | DoneReason
   | "pending";
 
@@ -476,6 +473,7 @@ export function formatStatusBadge(
 ): string {
   switch (status) {
     case "running": return theme.fg("warning", "\u25CF running");
+    case "interrupted": return theme.fg("muted", "\u25CB interrupted");
     case "completed": return theme.fg("success", "\u2713 completed");
     case "failed": return theme.fg("error", "\u2717 failed");
     case "aborted": return theme.fg("error", "\u2717 aborted");
@@ -589,10 +587,28 @@ export function formatActivityLine(entry: ToolCallEntry, maxWidth: number): stri
 
 // ── Workflow phase group（filters empty phases）──────────────
 
+/**
+ * phase 折叠投影的展示消费面（[D3] phase 状态机与展示分组同源）。
+ *
+ * 数据源 = core fold 的 phases 半边（RunEventFoldCheckpoint["phases"]：
+ * phase 名 → { startedAt, settledAt? }——settledAt 有无即 running/settled 态，
+ * 由 phase-settled 转移事件驱动）。展示分组的 phase 完成判定读它而非「组内节点
+ * 全部 completed」的推导——「续聊时算不算完成」的唯一答案：phase 看 call 落定
+ * 事件（fold 权威），agent 会话续聊是另一层。
+ */
+export type PhaseFoldProjection = RunEventFoldCheckpoint["phases"];
+
 export interface PhaseGroup {
   name: string;
   nodes: ExecutionTraceNode[];
   doneCount: number;
+  /**
+   * [D3] phase 状态机态的展示位：true = phase-settled 转移已落账（fold 投影
+   * settledAt 有值）。注入折叠投影时读投影（权威）；未注入（活体聚合 trace 的
+   * 既有调用形态）回落「组内全部节点 completed」推导——两者的同源性由测试
+   * 断言钉住（同一事件流喂两侧恒等）。
+   */
+  settled: boolean;
 }
 
 /** Group trace nodes by phase. Nodes without phase go to "(no phase)". */
@@ -617,16 +633,34 @@ function groupByPhase(nodes: ExecutionTraceNode[]): Map<string, ExecutionTraceNo
 /** The fallback phase name when node has no explicit phase. */
 const NO_PHASE = "(default)";
 
-/** Build phase groups. Nodes without a phase are placed in an unnamed group. */
-export function buildPhaseGroups(nodes: ExecutionTraceNode[]): PhaseGroup[] {
+/**
+ * Build phase groups. Nodes without a phase are placed in an unnamed group.
+ *
+ * @param nodes trace 节点（活体聚合或 fold 重建的 calls 投影）
+ * @param phaseFold 可选的 phase 折叠投影（[D3] 状态机权威）——在场时组完成判定
+ *   读投影（phase 名 → settledAt 有无）；(default) 组（无 phase 归属节点）在投影
+ *   中无对应行（fold 只登记显式 phase），恒走节点计数推导兜底。
+ */
+export function buildPhaseGroups(
+  nodes: ExecutionTraceNode[],
+  phaseFold?: PhaseFoldProjection,
+): PhaseGroup[] {
   const map = groupByPhase(nodes);
   const result: PhaseGroup[] = [];
   for (const [name, phaseNodes] of map) {
     if (phaseNodes.length > 0) {
+      const doneCount = phaseNodes.filter((n) => n.status === "completed").length;
+      // 投影在场且该 phase 有行 → 读投影（行存在即权威——running 行 settledAt
+      // undefined 判 false，不回落推导）；未注入投影 / 无该行（(default) 组）→ 推导兜底
+      const foldRow = phaseFold?.get(name);
+      const settled = foldRow !== undefined
+        ? foldRow.settledAt !== undefined
+        : doneCount === phaseNodes.length;
       result.push({
         name: name === NO_PHASE ? "" : name,
         nodes: phaseNodes,
-        doneCount: phaseNodes.filter((n) => n.status === "completed").length,
+        doneCount,
+        settled,
       });
     }
   }
@@ -643,7 +677,7 @@ export function formatPhaseLine(
   maxWidth: number,
 ): string {
   const pointer = isSelected ? "❯ " : "  ";
-  const dot = statusDotStr(pg.doneCount === pg.nodes.length ? "completed" : "running", theme);
+  const dot = statusDotStr(pg.settled ? "completed" : "running", theme);
   const name = pg.name || "(unnamed)";
   const label = `${idx + 1} ${name} ${pg.doneCount}/${pg.nodes.length}`;
   // pointer(2) + dot(1) + space(1)

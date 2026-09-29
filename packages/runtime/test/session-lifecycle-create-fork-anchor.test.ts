@@ -147,7 +147,6 @@ function makeEnv(opts: {
     },
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
 
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)
@@ -324,7 +323,7 @@ describe('forkSession 特征锚定（复杂度债务偿还 W3）', () => {
   it('A10: projectId 继承优先级——active 内存态 > 扫描 sidecar 值（W-RT-5 同模式）', async () => {
     const { lifecycle, svc, sessionStore } = makeEnv()
     mockSource(svc, { projectId: 'sidecar-proj' })
-    // 源 session active 且内存态带 projectId（延迟写入窗口的内存兑底形态）
+    // 源 session active 且内存态带 projectId（延迟写入窗口的内存兜底形态）
     await lifecycle.registerSession('src', {} as unknown as IPiEngine, '/repo', 'src')
     const record = lifecycle.get('src') as unknown as { projectId?: string }
     record.projectId = 'mem-proj'

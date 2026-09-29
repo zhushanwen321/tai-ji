@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useSessionStreamSync wave w2 边界验证测试（TC1-TC5）。
  *

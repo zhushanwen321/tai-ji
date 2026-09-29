@@ -122,7 +122,7 @@ describe('isScheduleDraft 守卫', () => {
     kind: 'recurring',
     schedule: '0 9 * * *',
     prompt: '总结昨天的工作进展',
-    models: ['deepseek-flash', 'mimo-v2.5-pro'],
+    models: ['deepseek-flash', 'mimo-v2.6-flash'],
   }
 
   it('最小合法 draft（必填字段齐）→ true', () => {
@@ -138,7 +138,7 @@ describe('isScheduleDraft 守卫', () => {
       name: '每日总结',
       expires: '7d',
       models: ['deepseek-flash'],
-      currentModel: 'mimo-v2.5-pro',
+      currentModel: 'mimo-v2.6-flash',
     })).toBe(true)
   })
 

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * cron-preview.ts 纯函数单测（R1 评审补：段解析步进/周域英文名/非法分支此前零测试，
  * 预览引擎是 ScheduleForm 预览行唯一数据源）。

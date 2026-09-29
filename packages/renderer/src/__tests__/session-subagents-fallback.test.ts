@@ -199,8 +199,11 @@ describe('session.subagents routeInbound 兜底', () => {
     // 焦点为 B（A 非活跃）
     panel.loadSession(panel.panels[0].id, 'sess-B')
 
-    // 预填 A 分区 running workflow（模拟侧栏菊花）
-    workflowStore.applyRecords('sess-A', [makeWorkflow({ runId: 'w1', status: 'running' })])
+    // 预填 A 分区 running workflow（模拟侧栏菊花；applyRecords 已私有化，直写分区 ref）
+    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(
+      'sess-A',
+      [makeWorkflow({ runId: 'w1', status: 'running' })],
+    )
     expect(workflowStore.hasRunningWorkflow('sess-A')).toBe(true)
 
     // getWorkflows 返回 done（终态）

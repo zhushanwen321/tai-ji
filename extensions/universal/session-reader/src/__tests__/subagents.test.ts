@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
-import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
-import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import {
   buildFamilyFromFs,
@@ -10,43 +8,13 @@ import {
   extractSessionIdFromFilename,
   type RecordManifest,
 } from '../discovery/subagents.js'
-import { REAL_AGENT_DIR, REAL_DATA_TIMEOUT_MS } from './real-data.js'
+import { resolveSessionRoots } from '../discovery/roots.js'
+import { parseSessionHeader, readSessionHeaderFirstLine } from '../discovery/session-header.js'
 
 // ---- fixture 常量（uuid 特征，满足 extractSessionIdFromFilename + 互不为子串）----
 const ROOT = '0aaaaaaa-bbbb-7ccc-dddd-000000000001'
 const FORK = '0aaaaaaa-bbbb-7ccc-dddd-000000000002'
 const SUB_REAL = '0aaaaaaa-bbbb-7ccc-dddd-000000000003'
-
-// 同步探测真实 session 是否存在（不存在则 skip，避免在无该数据的机器上硬失败）
-function hasRealSession(sid: string): boolean {
-  try {
-    return (
-      execSync(
-        `find ${REAL_AGENT_DIR}/sessions -name '*${sid}*' -name '*.jsonl' ! -name '*.finalized' 2>/dev/null | head -1`,
-        { encoding: 'utf8' },
-      ).trim().length > 0
-    )
-  } catch {
-    return false
-  }
-}
-
-// 双目录版探测：subagent session 文件在 subagents/ 下，hasRealSession 扫不到。
-// 用于对活跃数据目录中具体文件（fork 子代/隔代 subagent）存在性的守卫。
-function hasAnyRealSession(fragment: string): boolean {
-  try {
-    return (
-      execSync(
-        `find ${REAL_AGENT_DIR}/sessions ${REAL_AGENT_DIR}/subagents -name '*${fragment}*' -name '*.jsonl' ! -name '*.finalized' 2>/dev/null | head -1`,
-        { encoding: 'utf8' },
-      ).trim().length > 0
-    )
-  } catch {
-    return false
-  }
-}
-const HAS_REAL_ROOT = hasRealSession('019fe620-8ae1-78a7-b76a-43a1ba4cc3c7')
-const HAS_REAL_WF = hasRealSession('019fdcda-75c7-74b7-a160-f67f6bf88384')
 
 // ---- fixture helpers ----
 
@@ -449,49 +417,55 @@ describe('buildFamilyFromFs - fixture', () => {
 })
 
 // ============================================================
-// 真实数据集成测试（~/.pi/agent）
+// family workflows 富 run（多 call）契约（fixture）
 // ============================================================
 
-describe.skipIf(!HAS_REAL_ROOT)('buildFamilyFromFs - 真实数据 ~/.pi/agent', () => {
-  it('019fe620 family：fork 019fe632（跨 cwd）+ 隔代 subagent 019fe635（真实 id）', async () => {
-    // 数据守卫：019fe632（sessions/）与 019fe635（subagents/）位于活跃数据目录，
-    // 被 GC/重命名时跳过而非失败（同 TC14-TC18 守卫模式），避免偶发红。
-    if (!hasAnyRealSession('019fe632') || !hasAnyRealSession('019fe635')) return
-    const family = await buildFamilyFromFs(
-      '019fe620-8ae1-78a7-b76a-43a1ba4cc3c7',
-      REAL_AGENT_DIR,
-    )
-    // fork 019fe632（cwd feat-optimize-todo-goal，与 root 的 fix-cw-tool-wroktree 不同）
-    const fork = family.forks.find((f) => f.sessionId.startsWith('019fe632'))
-    expect(fork).toBeDefined()
-    // 隔代 subagent：rootSessionId=019fe632（fork 子代），sessionId 真实（019fe635 开头，非 sa-）
-    const sub = family.subagents.find(
-      (s) => s.rootSessionId.startsWith('019fe632') && s.sessionId.startsWith('019fe635'),
-    )
-    expect(sub).toBeDefined()
-    expect(sub!.sessionId.startsWith('sa-')).toBe(false)
-  }, REAL_DATA_TIMEOUT_MS)
-})
+describe('buildFamilyFromFs - workflow 富 run（多 call）', () => {
+  let dir: string
 
-describe.skipIf(!HAS_REAL_WF)('buildFamilyFromFs - 真实 workflow 数据', () => {
-  it('019fdcda：workflows 非空，至少一个 workflow calls>=4', async () => {
-    // 数据守卫：workflow-state 快照文件可能被清理（wf-state 是会话运行产物），
-    // 019fdcda 的 workflow-state-link 指向的快照不存在时跳过而非失败。
-    const wfFile = execSync(
-      `find ${REAL_AGENT_DIR}/sessions -name '*019fdcda*' -name '*.jsonl' ! -name '*.finalized' 2>/dev/null | head -1`,
-      { encoding: 'utf8' },
-    ).trim()
-    if (!wfFile) return
-    const raw = execSync(`grep -c 'workflow-state-link' '${wfFile}' 2>/dev/null || true`, {
-      encoding: 'utf8',
-    }).trim()
-    if (raw === '0' || raw === '') return
-    const family = await buildFamilyFromFs(
-      '019fdcda-75c7-74b7-a160-f67f6bf88384',
-      REAL_AGENT_DIR,
-    )
+  beforeEach(async () => {
+    dir = await makeAgentDir()
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('workflows 非空，多 call（4 个）workflow 的 fileName/stateFile/runId 契约', async () => {
+    await writeMainSession(dir, '--root-cwd--', ROOT, { cwd: '/proj/root' })
+    // 1 个存活 subagent（pathToRef 命中 → 完整 ref）+ 3 个 GC 路径（未命中 → 最小 ref，
+    // fileName 仍非空——calls 的 sessionFile 路径恒落入 fileName）
+    const subPath = await writeSubagentSession(dir, '--root-cwd--', SUB_REAL, {
+      rootSessionId: ROOT,
+      slug: 'wf-rich',
+    })
+    const ghost = (n: number): string =>
+      join(
+        dir,
+        'subagents',
+        '--root-cwd--',
+        'sessions',
+        `2026-08-0${n}T00-00-00-000Z_019fdd55-1111-1111-1111-11111111111${n}.jsonl`,
+      )
+    const wfPath = await writeWfState(dir, '--root-cwd--', [
+      JSON.stringify({
+        v: 'wf-run-v1',
+        runId: 'wf-rich-run-1',
+        state: {
+          status: 'done',
+          calls: [
+            { id: 0, status: 'done', sessionFile: subPath, sessionId: SUB_REAL },
+            { id: 1, status: 'done', sessionFile: ghost(1) },
+            { id: 2, status: 'done', sessionFile: ghost(2) },
+            { id: 3, status: 'done', sessionFile: ghost(3) },
+          ],
+        },
+      }),
+    ])
+    await writeWfLink(dir, '--root-cwd--', ROOT, { runId: 'wf-rich-run-1', path: wfPath })
+
+    const family = await buildFamilyFromFs(ROOT, dir)
+
     expect(family.workflows.length).toBeGreaterThan(0)
-    // wf-1786121387659-5voqzc 有 4 个 agent() calls（sessionFile 持久化）
     const rich = family.workflows.find((w) => w.calls.length >= 4)
     expect(rich).toBeDefined()
     // calls 的 sessionFile 路径已落入 fileName（sessionRefFromPath）
@@ -499,7 +473,7 @@ describe.skipIf(!HAS_REAL_WF)('buildFamilyFromFs - 真实 workflow 数据', () =
     // stateFile 是 wf-state 文件绝对路径
     expect(rich!.stateFile.endsWith('.jsonl')).toBe(true)
     expect(rich!.runId.startsWith('wf-')).toBe(true)
-  }, REAL_DATA_TIMEOUT_MS)
+  })
 })
 
 // ============================================================
@@ -680,6 +654,86 @@ describe('U4 buildFamilyFromFs 富化（manifest 主 / P-fallback）', () => {
 })
 
 // ============================================================
+// .events 文件族结构性忽略（W1 D3 落点裁决 + 设计检查点④）
+// ============================================================
+//
+// record 事件文件族（<recordsDir>/<sa-id>.events，无 .jsonl 后缀）与 manifest 同目录
+// 同主名。session-reader 的两层兼容形态在此断言：
+// ① 结构性忽略——subagents 树扫描只收 .jsonl，.events 天然不进候选集（D3「无后缀
+//    的结构性收益」：被忽略或被误读两类风险一次排空）；
+// ② 首行头行读者兼容——.events 首行是自描述头行 {"type":"record-journal","id":...}
+//    （写侧 record-events.ts toRecordJournalHeader 契约），session-reader 对未知文件
+//    读首行判 header 时命中非 session header 即忽略（检查点④：零成本兼容——不改
+//    扫描器即可与该文件族共存）。
+
+describe('.events 文件族结构性忽略（W1 D3 / 检查点④）', () => {
+  let dir: string
+
+  beforeEach(async () => {
+    dir = await makeAgentDir()
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  /** 写 record 事件文件（首行头行 + 事件行集，形态对齐写侧 record-events.ts）。 */
+  async function writeEventsFile(slug: string, saId: string): Promise<string> {
+    const recordsDir = join(dir, 'subagents', slug, 'records')
+    await mkdir(recordsDir, { recursive: true })
+    const path = join(recordsDir, `${saId}.events`)
+    const lines = [
+      JSON.stringify({ type: 'record-journal', id: saId }),
+      JSON.stringify({ type: 'record-created', seq: 1, ts: 1, agent: 'dev', task: 't', slug: 's', origin: 'tool', rootSessionId: ROOT, depth: 0, mode: 'sync', startedAt: 1 }),
+      JSON.stringify({ type: 'record-settled', seq: 2, ts: 2, stopReason: 'end_turn', endedAt: 2, turns: 1, totalTokens: 5 }),
+    ]
+    await writeFile(path, lines.join('\n') + '\n')
+    return path
+  }
+
+  it('subagent 树扫描不收 .events：resolveSessionRoots 的 subagent 根 files 含 .jsonl 不含 .events', async () => {
+    await writeMainSession(dir, '--root-cwd--', ROOT, { cwd: '/proj/root' })
+    const subPath = await writeSubagentSession(dir, '--root-cwd--', SUB_REAL, {
+      rootSessionId: ROOT,
+      slug: 'ev-sibling',
+    })
+    await writeEventsFile('--root-cwd--', 'sa-ev-1')
+
+    const roots = await resolveSessionRoots({ agentDir: dir })
+    const subRoot = roots.find((r) => r.kind === 'subagent')
+
+    expect(subRoot).toBeDefined()
+    expect(subRoot!.files.map((f) => f.path)).toContain(subPath)
+    expect(subRoot!.files.some((f) => f.path.endsWith('.events'))).toBe(false)
+  })
+
+  it('首行头行命中非 session header 即忽略：record-journal 头行 → parseSessionHeader 返回 null', async () => {
+    const eventsPath = await writeEventsFile('--root-cwd--', 'sa-ev-1')
+    // 检查点④形态：session-reader 对未知文件读首行判 header，非 session 行 → null
+    //（即使未来通配规则把 .events 收进候选集，该文件也不会被误认成 session）
+    const firstLine = await readSessionHeaderFirstLine(eventsPath)
+    expect(firstLine).toBeDefined()
+    expect(parseSessionHeader(firstLine)).toBeNull()
+  })
+
+  it('家族扫描：.events 与正常 subagent 同目录共存 → 家族正常、不产幻影 subagent 节点', async () => {
+    await writeMainSession(dir, '--root-cwd--', ROOT, { cwd: '/proj/root' })
+    await writeSubagentSession(dir, '--root-cwd--', SUB_REAL, {
+      rootSessionId: ROOT,
+      slug: 'ev-coexist',
+    })
+    await writeEventsFile('--root-cwd--', 'sa-ev-1')
+
+    const family = await buildFamilyFromFs(ROOT, dir)
+
+    // 正常 subagent 在场
+    expect(family.subagents.some((s) => s.sessionId === SUB_REAL)).toBe(true)
+    // .events 的 record id 不进任何集合（无幻影）
+    expect(family.subagents.some((s) => s.sessionId === 'sa-ev-1')).toBe(false)
+    expect(family.subagents.some((s) => s.sessionId.startsWith('sa-ev'))).toBe(false)
+  })
+})
+
+// ============================================================
 // U4 C4 契约：extractSessionIdFromFilename 导出（仅加 export，不改逻辑，供 w4 复用）
 // ============================================================
 
@@ -702,37 +756,6 @@ describe('U4 extractSessionIdFromFilename 导出（C4 契约）', () => {
   })
 })
 
-// ============================================================
-// U4 真实数据守卫（TC-u4-real-data-guard）：~/.pi/agent 富字段从 manifest 正确透传
-// ============================================================
-
-const HAS_REAL_SUBAGENTS_DIR = existsSync(join(REAL_AGENT_DIR, 'subagents'))
-
-describe.skipIf(!HAS_REAL_ROOT || !HAS_REAL_SUBAGENTS_DIR)('U4 真实数据守卫：~/.pi/agent', () => {
-  it('TC-u4-real-data-guard: 019fe620 subagents 富字段透传（manifest 主 task 非空率 > 80%）', async () => {
-    // 数据守卫：019fe635 是 019fe620 家族已知的隔代 subagent（含 task 富字段的锚点），
-    // 被 GC 后跳过富字段验证（manifest 数据不可复现，跳过比失败合理）。
-    if (!hasAnyRealSession('019fe635')) return
-    const family = await buildFamilyFromFs(
-      '019fe620-8ae1-78a7-b76a-43a1ba4cc3c7',
-      REAL_AGENT_DIR,
-    )
-    // 有 subagent 才验证富字段（019fe620 确有隔代 subagent，见既有真实数据测试）
-    expect(family.subagents.length).toBeGreaterThan(0)
-
-    // manifest 主的 subagent（model !== undefined 近似判定，探针 manifest 20/20 有 model）：
-    // task 非空率应 > 80%（探针 20/20 manifest 全有 task）
-    const manifestSourced = family.subagents.filter((s) => s.model !== undefined)
-    if (manifestSourced.length > 0) {
-      const withTask = manifestSourced.filter((s) => s.task !== undefined && s.task !== '')
-      expect(withTask.length / manifestSourced.length).toBeGreaterThan(0.8)
-    }
-
-    // P-fallback 的 subagent（model === undefined）：status 必 undefined（identity 不可回退 status）
-    const pfallback = family.subagents.filter((s) => s.model === undefined)
-    expect(pfallback.every((s) => s.status === undefined)).toBe(true)
-
-    // 所有 subagent 的 sessionFile 非空（manifest.sessionFile 或 alive meta.path）
-    expect(family.subagents.every((s) => typeof s.sessionFile === 'string' && s.sessionFile.length > 0)).toBe(true)
-  }, REAL_DATA_TIMEOUT_MS)
-})
+// U4 富字段透传契约由 fixture 侧逐条覆盖：manifest 主（TC-u4-manifest-enrich，task/slug/
+// model/status 全字段 + sessionFile 非空）、P-fallback（TC-u4-pfallback-identity，status 必
+// undefined）、孤儿（TC-u4-orphan-manifest）、旧 manifest 兼容（TC-u4-recordmanifest-compat）。

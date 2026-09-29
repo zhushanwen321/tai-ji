@@ -12,7 +12,7 @@
 //                   的原始缺陷已由「identity 字段创建时一次确定」的收口本身消解，
 //                   undefined 是合法缺席语义而非丢失）
 //   updateFromEvent 唯一事件更新入口（累积进 turns[]，消灭闭包旁路累积器）
-//   completeRecord  唯一完成入口（冻结状态）
+//   completeLegacyClosed 唯一 legacy 终态冻结入口（D7 例外族 / 监督器放弃，W4 sunset）
 //   project/snapshot 唯一投影入口（两路径字段一致）
 //
 // Core 层叶子原语：仅依赖 types.ts。零 Pi / Runtime / TUI 依赖。
@@ -36,7 +36,6 @@ import type {
   StopReason,
   SubagentToolDetails,
   ToolCall,
-  ToolCallResult,
   Turn,
 } from "../assembly/types.ts";
 
@@ -222,7 +221,7 @@ export function createRecord(
     // 全 record 自增（万物可续）。
     round: 0,
 
-    // 完成（completeRecord 唯一写点）
+    // 完成（completeLegacyClosed 唯一写点）
     endedAt: undefined,
     result: undefined,
     error: undefined,
@@ -483,6 +482,12 @@ export function updateFromEvent(record: ExecutionRecord, event: AgentEvent): voi
     case "activity":
       return;
 
+    // ── armed：武装确认回执（[D3 协议版 P6]，协议语义见 SDK contract-types）——
+    //    监控信号不进 record 投影，消费方 = 宿主等待门 + run 事件 journal（C3 第④步
+    //    双侧 reducer no-op 义务的 core 侧）
+    case "armed":
+      return;
+
     default: {
       // 穷尽性检查：新增 AgentEvent variant 时编译期报错
       const _exhaustive: never = event;
@@ -655,7 +660,7 @@ function stripInternal(tc: InternalToolCall): ToolCall {
  * 聚合所有 turn 的 usageDelta 为完整 usage（含 total + cost）。
  * 全零则返回 undefined（与旧 toUsageTotal 语义一致）。
  *
- * cost 来自 SdkEvent.message.usage.cost.total（message_end 时透传到 usageDelta）。
+ * cost 来自 SDK 事件的 message.usage.cost.total（message_end 时透传到 usageDelta）。
  * 旧 toUsageTotal/session-runner 累积 cost；本重构保留该行为。
  */
 export function getTotalUsage(record: ExecutionRecord): AgentUsageTotal | undefined {
@@ -676,33 +681,32 @@ export function getTotalUsage(record: ExecutionRecord): AgentUsageTotal | undefi
 }
 
 // ============================================================
-// 完成（唯一入口）
+// 意图原语（record 两态机内存面：CAS 收口 / 冻结 / 回边）
 // ============================================================
 
 /**
- * status 状态机的 CAS 互斥锁（settle 方向：running → idle）。仅当
- * `record.status === "running"` 时收口并返回 true，否则返回 false。**status 状态机
- * 本身就是互斥锁**——check-then-set 在 JS 单线程事件循环里天然原子。
+ * 意图原语：legacy closed 终态收口的 CAS 抢锁（settle 方向：running → idle）。
+ * 仅当 `record.status === "running"` 时收口并返回 true，否则返回 false。**status
+ * 状态机本身就是互斥锁**——check-then-set 在 JS 单线程事件循环里天然原子。
  *
- * 用途：executor 的收尾竞争。cancelBackground 与 background detached 完成回调
- * 都调 tryTransition 抢锁：抢到负责完整收尾，没抢到闭嘴不做事。
+ * [W2/V3 说谎签名退役] 前身函数的 target 参数被 void 丢弃（说谎签名），本原语是
+ * 同一行为的诚实命名——无目标参数：收口
+ * 目标恒为 legacy closed 形态（idle + closedReason/stopReason 双写，桥接不变量
+ * 「closed ⟺ idle ∧ closedReason≠undefined」的写侧半边）。
  *
- * [U2 桥接] 永久会话模型两态下旧「closed 终态」不再存在——本函数桥接为
- * running→idle 收口 + closedReason/stopReason 双写（桥接不变量「closed ⟺ idle ∧
- * closedReason≠undefined」的写侧半边，保持全部既有读侧 gate 语义零漂移）。
- * target 参数保留旧字面量（调用方零改动）；新代码应改调 store.markSettled
- * （U5 意愿动作接线时本函数随旧终态编排一并退役）。
+ * 写侧生产者仅剩两处（types.ts ExecutionStatus 头注登记）：workflow D7 例外族
+ * （settleWorkflowRecord 收口单点）与监督器放弃产出（service-binding giveUp）；
+ * 读侧对偶 = isLegacyClosedSettled 单一谓词。轮收口（非终态）走 store.markSettled
+ * （不写 closedReason），与本原语语义分界清晰。
  *
  * @param closedReason 旧终态 L2 原因（同时镜像进 stopReason 展示位）。
  *   缺省 "gc"（通用完成/失败）。
  */
-export function tryTransition(
+export function trySettleLegacyClosed(
   record: ExecutionRecord,
-  target: "closed",
   closedReason?: ClosedReason,
 ): boolean {
   if (record.status !== "running") return false;
-  void target; // 桥接期唯一合法值（类型位保留）；新两态下收口目标恒 idle。
   record.status = "idle";
   record.closedReason = closedReason ?? "gc";
   record.stopReason = record.closedReason;
@@ -712,7 +716,7 @@ export function tryTransition(
 /**
  * status 状态机的 CAS 互斥锁（wake 方向：idle → running，U2 新增）。仅当
  * `record.status === "idle"` 时翻回 running 并返回 true；running（一轮已在飞）/
- * 其他形态一律拒绝。与 tryTransition（settle 方向）共同构成两态状态机的
+ * 其他形态一律拒绝。与 trySettleLegacyClosed（settle 方向）共同构成两态状态机的
  * running↔idle 迁移面，非法迁移（对 running 重复 settle / 对 running 重复 wake）
  * 由 CAS 前置判据拒绝。
  *
@@ -756,7 +760,7 @@ export function resurrectClosed(
  *
  * 仅用于 session-reconstructor 从 session.jsonl 重建终态 record 时——
  * 重建的 record 没有 running 状态需要保护，直接赋值即可。
- * 禁止在正常执行流程中使用此函数（应使用 tryTransition）。
+ * 禁止在正常执行流程中使用此函数（应使用 trySettleLegacyClosed）。
  */
 export function markReconstructedStatus(
   record: { status: ExecutionStatus },
@@ -766,24 +770,24 @@ export function markReconstructedStatus(
 }
 
 /**
- * 唯一完成入口。冻结状态（写 endedAt/agentResult/result/error/outcome）。
- * 不修改 turns/totalTokens——已由 updateFromEvent 累积，completeRecord 只读不重置。
+ * 意图原语：legacy closed 终态冻结（D7 例外族 / 监督器放弃的终态写点）。
+ * 冻结状态（写 endedAt/agentResult/result/error/outcome）。
+ * 不修改 turns/totalTokens——已由 updateFromEvent 累积，本函数只读不重置。
  *
- * ⚠ 前置条件：调用方必须先通过 tryTransition 抢到锁（status 已被 CAS 设为 target）。
+ * ⚠ 前置条件：调用方必须先通过 trySettleLegacyClosed 抢到锁（status 已被 CAS 置 idle）。
  *
- * [U2 桥接] status 参数保留旧字面量（调用方零改动）；两态下冻结为 idle +
- * closedReason/stopReason 双写（桥接不变量写侧半边，与 tryTransition 同构）。
- * U5 意愿动作接线后本函数随旧终态编排退役（轮收口归 markSettled）。
+ * [W2/V3 说谎签名退役] 前身函数的 status 参数被 void 丢弃（说谎签名），本原语是
+ * 同一行为的诚实命名——无目标
+ * 参数：冻结目标恒为 legacy closed 形态（idle + closedReason/stopReason 双写，
+ * 与 trySettleLegacyClosed 同构）。唯一 outcome 写入点（U3 C-outcome）。
  *
  * @param closedReason 旧终态 L2 关闭原因（同时镜像进 stopReason 展示位）。
  */
-export function completeRecord(
+export function completeLegacyClosed(
   record: ExecutionRecord,
   result: AgentResult,
-  status: "closed",
   closedReason?: ClosedReason,
 ): void {
-  void status; // 桥接期唯一合法值（类型位保留）；两态下冻结目标恒 idle。
   record.status = "idle";
   record.closedReason = closedReason ?? "gc";
   record.stopReason = record.closedReason;
@@ -821,7 +825,7 @@ export function completeRecord(
  * "failed"——语义为「父进程关闭时子 agent 未完成即失败」，选定行为而非疏漏，
  * 勿当 bug 改回 cancelled 造成派生矛盾。
  *
- * 唯一写点 completeRecord 调用本函数冻结 record.outcome；通知 payload（notifier 投影
+ * 唯一写点 completeLegacyClosed 调用本函数冻结 record.outcome；通知 payload（notifier 投影
  * 边界）与无 outcome 字段的存量/重建 record 由 projectOutcome 兜底复用本函数。
  */
 export function deriveOutcome(
@@ -834,8 +838,31 @@ export function deriveOutcome(
 }
 
 /**
+ * 旧「closed 终态」读判定的单一谓词（[W2/V3 D5] 桥接判据收敛——历史 6 文件 9 处
+ * 手抄 `status === "idle" && closedReason !== undefined` 的唯一权威实现，判定语义
+ * 一字不变；新增读点禁止手抄，一律 import 本函数）。
+ *
+ * 桥接不变量（两态迁移，U2 起）：旧 closed 终态读形态 ⟺ idle ∧ closedReason 有值。
+ * markSettled/markRoundIdle 产出的轮间 idle 不携带 closedReason（新侧语义——settle
+ * 不是终态），不命中本谓词；旧终态遗留（D7 例外族终态、监督器放弃、v1 数据、manifest
+ * 读侧）命中。
+ *
+ * [W2 D5 兼容位] closedReason 是读侧兼容位（设计 D5：随 W4 sunset 退役），本谓词是
+ * 其唯一读点——兼容位收缩时只改此处。
+ *
+ * @param record 结构子集（ExecutionRecord / SubagentRecord / entry 快照均满足）——
+ *   谓词只消费两态状态位与 closedReason 遗留位，不要求完整 record。
+ */
+export function isLegacyClosedSettled(record: {
+  status: ExecutionStatus;
+  closedReason?: ClosedReason;
+}): boolean {
+  return record.status === "idle" && record.closedReason !== undefined;
+}
+
+/**
  * 投影层 outcome 唯一出口：running / 轮间 idle → undefined（outcome 语义只适用
- * 旧终态遗留形态）；旧终态（桥接不变量：idle ∧ closedReason 有值）→ 一等 outcome
+ * 旧终态遗留形态）；旧终态（isLegacyClosedSettled 命中）→ 一等 outcome
  * 字段直读优先，字段缺失（存量/磁盘重建 record——outcome 持久化不在 U3 领地内）
  * 时回退 deriveOutcome(closedReason, error) 兜底——单一权威函数，消费方零手写推导。
  * 返回值联合含 "closed-legacy" 预留态，消费方必须处理。
@@ -846,9 +873,9 @@ export function projectOutcome(record: {
   closedReason?: ClosedReason;
   error?: string;
 }): ProjectedOutcome | undefined {
-  // 桥接判据：旧「closed」读形态 ⟺ idle ∧ closedReason 有值（markSettled 的轮间
-  // idle 无 closedReason，不投影 outcome——非终态语义）。
-  if (!(record.status === "idle" && record.closedReason !== undefined)) return undefined;
+  // [W2/V3 D5] 桥接判据收敛：旧「closed」读形态 ⟺ isLegacyClosedSettled（markSettled
+  // 的轮间 idle 无 closedReason，不投影 outcome——非终态语义）。
+  if (!isLegacyClosedSettled(record)) return undefined;
   return record.outcome ?? deriveOutcome(record.closedReason, record.error);
 }
 
@@ -889,30 +916,6 @@ export function project(record: ExecutionRecord): SubagentToolDetails {
 }
 
 /**
- * 投影到 live 进度快照。elapsedSeconds/currentActivity/eventLog 均现算派生。
- * 供 WorkflowsView 在 agent 运行期间读取实时进度。
- */
-export function projectLiveProgress(record: ExecutionRecord): {
-  status: ExecutionRecord["status"];
-  turns: number;
-  totalTokens: number;
-  elapsedSeconds: number;
-  eventLog: AgentEventLogEntry[];
-  currentActivity: ReturnType<typeof getCurrentActivity>;
-  lastError: string | undefined;
-} {
-  return {
-    status: record.status,
-    turns: record.turnCount,
-    totalTokens: record.totalTokens,
-    elapsedSeconds: computeElapsedSeconds(record),
-    eventLog: getEventLog(record),
-    currentActivity: getCurrentActivity(record),
-    lastError: record.lastError,
-  };
-}
-
-/**
  * 投影到只读快照（TUI list / poll 消费）。
  * 浅拷贝 turns[]，字段标 readonly 阻止 TUI 回写。
  */
@@ -934,136 +937,4 @@ export function snapshot(record: ExecutionRecord): RecordSnapshot {
     error: record.error,
     sessionFile: record.sessionFile,
   };
-}
-
-// ============================================================
-// JSONL → AgentEvent 翻译（从 live/jsonl-to-agent-event 迁入）
-// ============================================================
-
-/** subprocess JSONL 事件（JSON.parse 结果）。duck-typed，对应 SDK SdkEvent。 */
-type JsonlEvent = Record<string, unknown>;
-
-// ── 各 case 翻译器（jsonlToAgentEvent 按 case 分发，每个翻译器单一职责）──
-
-/** tool_execution_start → tool_start。toolName 非字符串归一空串（与原实现一致）。 */
-function translateToolExecutionStart(raw: JsonlEvent): AgentEvent[] {
-  const toolName = typeof raw.toolName === "string" ? raw.toolName : "";
-  return [{ type: "tool_start", toolName, args: raw.args }];
-}
-
-/** tool_execution_end → tool_end。isError 仅在 === true 时成立；result 原样透传。 */
-function translateToolExecutionEnd(raw: JsonlEvent): AgentEvent[] {
-  const toolName = typeof raw.toolName === "string" ? raw.toolName : "";
-  const isError = raw.isError === true;
-  return [{
-    type: "tool_end",
-    toolName,
-    args: raw.args,
-    result: raw.result as ToolCallResult | undefined,
-    isError,
-  }];
-}
-
-/**
- * message_update → thinking_delta / text_delta。
- *   ame.type === "thinking_delta"（delta 非字符串归一空串）
- *   其余 ame（delta 有值）→ text_delta（delta 非字符串 String() 归一）
- *   ame 缺失 / delta 缺失 → 不产出。
- */
-function translateMessageUpdate(raw: JsonlEvent): AgentEvent[] {
-  const ame = raw.assistantMessageEvent as Record<string, unknown> | undefined;
-  if (ame?.type === "thinking_delta") {
-    const delta = typeof ame.delta === "string" ? ame.delta : "";
-    return [{ type: "thinking_delta", delta }];
-  }
-  if (ame !== undefined && ame.delta !== undefined) {
-    const delta = typeof ame.delta === "string" ? ame.delta : String(ame.delta);
-    return [{ type: "text_delta", delta }];
-  }
-  return [];
-}
-
-/**
- * 把一条 JSONL 事件翻译成 AgentEvent。
- *
- * 返回 undefined 表示该事件不映射到任何 AgentEvent（如 session header、message_start），
- * 调用方应跳过。
- *
- * 一个 JSONL 事件可能产出**多条** AgentEvent（message_end 的 usage + error 各一条），
- * 故返回数组。绝大多数情况长度为 0 或 1；message_end 最多 2 条。
- */
-export function jsonlToAgentEvent(raw: JsonlEvent): AgentEvent[] {
-  const type = raw.type;
-
-  switch (type) {
-    case "session":
-    case "message_start":
-    case "turn_start":
-      return [];
-
-    // 工具执行期活性信号（与 pi 侧 spawn-event-translator 的 TOOL_ACTIVITY_EVENT 同
-    // 语义）：不产数据，只驱动宿主无进展守护刷新。
-    case "tool_execution_update":
-      return [{ type: "activity" }];
-
-    case "tool_execution_start":
-      return translateToolExecutionStart(raw);
-
-    case "tool_execution_end":
-      return translateToolExecutionEnd(raw);
-
-    case "message_update":
-      return translateMessageUpdate(raw);
-
-    case "turn_end": {
-      return [{ type: "turn_end" }];
-    }
-
-    case "message_end": {
-      return accumulateMessageEndForRecord(raw);
-    }
-
-    case "compaction_start": {
-      return [{ type: "compaction" }];
-    }
-
-    default:
-      return [];
-  }
-}
-
-/** message_end 翻译：usage 拍平 + stopReason=error/aborted 额外产 error 事件。 */
-function accumulateMessageEndForRecord(raw: JsonlEvent): AgentEvent[] {
-  const events: AgentEvent[] = [];
-  const msg = raw.message as Record<string, unknown> | undefined;
-  const usageRaw = (typeof msg?.usage === "object" && msg.usage !== null) 
-    ? msg.usage as Record<string, unknown> 
-    : undefined;
-
-  if (usageRaw) {
-    const costObj = (typeof usageRaw.cost === "object" && usageRaw.cost !== null)
-      ? usageRaw.cost as Record<string, unknown>
-      : undefined;
-    // MF-3 fix: 显式提取字段 + Number.isFinite 守卫，不使用 spread + as 断言
-    const numOrZero = (v: unknown): number =>
-      typeof v === "number" && Number.isFinite(v) ? v : 0;
-    const usage: AgentUsage = {
-      input: numOrZero(usageRaw.input),
-      output: numOrZero(usageRaw.output),
-      cacheRead: numOrZero(usageRaw.cacheRead),
-      cacheWrite: numOrZero(usageRaw.cacheWrite),
-      cost: typeof costObj?.total === "number" ? costObj.total : undefined,
-    };
-    events.push({ type: "message_end", usage });
-  }
-
-  const stopReason = msg?.stopReason;
-  if (stopReason === "error" || stopReason === "aborted") {
-    const errorMessage = typeof msg?.errorMessage === "string"
-      ? msg.errorMessage
-      : (typeof raw.reason === "string" ? raw.reason : String(stopReason));
-    events.push({ type: "error", message: errorMessage });
-  }
-
-  return events;
 }

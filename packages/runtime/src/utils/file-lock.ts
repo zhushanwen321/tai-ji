@@ -114,6 +114,11 @@ export interface AsyncFileLockOptions {
   ensure: () => void
   /** release 失败 warn 的日志前缀（如 'auth-storage' / 'provider-extras-store'）。 */
   logTag: string
+  /**
+   * 指数退避的下限等待 ms（缺省 RETRY_MIN_TIMEOUT_MS，对齐 pi 侧）。测试并发用例
+   * 注入小值压缩退避总时长；生产调用方勿传。
+   */
+  minRetryTimeoutMs?: number
 }
 
 // 退避参数（语义对齐旧版 proper-lockfile retries 参数，即内部 retry 库调用
@@ -130,8 +135,8 @@ const RETRY_MAX_TIMEOUT_MS = 10_000
  *   randomize ? round((random()+1) * minTimeout * factor**attempt) capped maxTimeout
  * 倍率区间 [1, 2)，故第 attempt 次等待 ∈ [minTimeout*factor**attempt, 2*...)，上限 10s。
  */
-function backoffDelayMs(attempt: number): number {
-  const exponential = RETRY_MIN_TIMEOUT_MS * RETRY_FACTOR ** attempt
+function backoffDelayMs(attempt: number, minTimeoutMs: number): number {
+  const exponential = minTimeoutMs * RETRY_FACTOR ** attempt
   return Math.min(Math.round((Math.random() + 1) * exponential), RETRY_MAX_TIMEOUT_MS)
 }
 
@@ -153,6 +158,7 @@ export async function withFileLockAsync<T>(
 ): Promise<T> {
   opts.ensure()
   let release: LockRelease | undefined
+  const minRetryTimeoutMs = opts.minRetryTimeoutMs ?? RETRY_MIN_TIMEOUT_MS
   for (let attempt = 0; release === undefined; attempt++) {
     try {
       release = await acquireLock(filePath, { staleMs: DEFAULT_STALE_MS })
@@ -160,7 +166,7 @@ export async function withFileLockAsync<T>(
       if (!isElocked(err)) throw err
       // 首试 + retries 次重试全部失败 → 抛 ELOCKED（对齐 retry 库 retries 次数语义）
       if (attempt >= DEFAULT_RETRIES) throw err
-      await sleep(backoffDelayMs(attempt))
+      await sleep(backoffDelayMs(attempt, minRetryTimeoutMs))
     }
   }
   try {

@@ -100,7 +100,7 @@ routeInbound 只做三件事：pending 分流、seq 中间件、查表执行。*
 
 ## §3 ws-client 与迁移边界（历史裁决，保留约束）
 
-- **ws-client 不预拆**：P1 从 remote-use 原样整体迁入，拆分后置按实测耦合定边界；不变量从「本地模式逐字节不变」修正为**「特征测试覆盖的关键行为不变」**（连接状态机/auth 握手/close code 分流/seq 回放/重连退避）——规格沉淀于 `packages/core/src/transport/__tests__/ws-client.invariants.test.ts` 头部注释（现行 SSOT）。
+- **ws-client 不预拆**：P1 从 remote-use 原样整体迁入，拆分后置按实测耦合定边界；不变量从「本地模式逐字节不变」修正为**「特征测试覆盖的关键行为不变」**（连接状态机/auth 握手/close code 分流/seq 回放/重连退避）——规格记录在案于 `packages/core/src/transport/__tests__/ws-client.invariants.test.ts` 头部注释（现行 SSOT）。
 - **PlatformPort 收敛裁决**：不为假设中的 web 版预付全量抽象——P0 只做 storage/websocket/ipc 三端口，其余保留隐式降级、迭代收编（每 domain 迁移波次顺手收编，不设独立大波次）。终态规则：core 内禁止直接出现 `window.electronAPI` / `localStorage` / `new WebSocket`——lint 强制。
 
 ---
@@ -123,7 +123,7 @@ extension-host/
 
 渲染件（ui/src/extension-host/）：`ViewHost.vue`、`StatusBar.vue`（main-panel 局部底栏）、`PluginSettingsPage.vue`、`PermissionRequestDialog.vue`。
 
-提问表单渲染面（renderer/src/components/extension/form/，桌面壳）：`FormOverlay.vue`（壳：表头 / 多问 tab 条 / Submit 门 / 取消）+ `ChoiceQuestion.vue` / `TextQuestion.vue` / `ScheduleForm.vue` 三类型渲染器——统一提问表单协议（ui-form，ask-user / scheduler / plan 三方提问收口）的 GUI 唯一渲染面，Panel 内联覆盖 composer 挂载。
+提问表单渲染面（renderer/src/components/extension/form/，桌面壳）：`FormOverlay.vue`（壳：表头 / 多问 tab 条 / Submit 门 / 取消）+ `ChoiceQuestion.vue` / `TextQuestion.vue` / `ScheduleForm.vue` 三类型渲染器——统一提问表单协议（ui-form，ask-user / scheduler / plan 三方提问收尾）的 GUI 唯一渲染面，Panel 内联覆盖 composer 挂载。
 
 ### 4.2 三套 UI 接口统一（pi ctx.ui × plugin api.ui × GuiComponent）
 
@@ -132,7 +132,7 @@ extension-host/
 | 对话框原语 | pi `ctx.ui.select/confirm/input` + plugin `api.ui.showSelect/Confirm/Input` → 统一 `DialogRequest` 内部协议，渲染统一走 companion-band |
 | 状态展示 | pi `setStatus` + plugin `updateStatusBarItem` → 统一 StatusBarController。**信息流向**：只消费「runtime 广播的消息」，不主动读 domain store（与 §2.1「ExtensionHost 不 import domain」一致） |
 | 结构化渲染 | 统一 GuiComponent（§5） |
-| 提问表单 | 统一表单协议（ui-form，select + `UI_FORM_MARKER` 双向通道）：ask-user / scheduler / plan 三方提问收口一个入口（`uiFormInteract`）+ 一个渲染器（renderer FormOverlay），覆盖 composer 挂载；不并入单向 GuiComponent（需等用户回传） |
+| 提问表单 | 统一表单协议（ui-form，select + `UI_FORM_MARKER` 双向通道）：ask-user / scheduler / plan 三方提问收敛一个入口（`uiFormInteract`）+ 一个渲染器（renderer FormOverlay），覆盖 composer 挂载；不并入单向 GuiComponent（需等用户回传） |
 | overlay lifecycle | plugin 只 await 结果，不感知 expanded/minimized/restored；状态机集中在 overlay-lifecycle.ts |
 
 ### 4.3 挂载点注册表（desktop 全集 vs mobile 子集）

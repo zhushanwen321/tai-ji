@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * summarizeTurnForRail 纯函数测试（TC-w3-9 / TC-w3-10，w3 wave）。
  *

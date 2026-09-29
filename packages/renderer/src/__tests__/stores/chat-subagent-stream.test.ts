@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * W4 —— chat store subagent streaming 收口测试（U8/U9）。
  *

@@ -163,7 +163,7 @@ describe.skipIf(!sessionManager?.SessionManager)(
 
     it('rename-session custom entry 落盘形态：六字段齐全、data 同引用、timestamp 为可解析 ISO 串', () => {
       const { host, captured } = makeHost()
-      const data = { model: 'xiaomi-token-plan-cn/mimo-v2.5', usage: { input: 10, output: 5 } }
+      const data = { model: 'xiaomi-token-plan-cn/mimo-v2.6-flash', usage: { input: 10, output: 5 } }
       host.appendCustomEntry('rename-session', data)
 
       expect(captured).toHaveLength(1)
@@ -172,7 +172,7 @@ describe.skipIf(!sessionManager?.SessionManager)(
       expect(entry.customType).toBe('rename-session')
       // 同一引用 = 逐字透传（克隆/重建对象会 here 红）
       expect(entry.data).toBe(data)
-      expect((entry.data as Record<string, unknown>).model).toBe('xiaomi-token-plan-cn/mimo-v2.5')
+      expect((entry.data as Record<string, unknown>).model).toBe('xiaomi-token-plan-cn/mimo-v2.6-flash')
       expect((entry.data as Record<string, unknown>).usage).toEqual({ input: 10, output: 5 })
       expect(typeof entry.id).toBe('string')
       expect((entry.id as string).length).toBeGreaterThan(0)

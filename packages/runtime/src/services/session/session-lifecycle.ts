@@ -116,7 +116,7 @@ interface CreateOptions {
   hidden?: boolean
   /** Launch preset id（设计文档 §5，绑定到新 session 并解析为 pi 启动参数）。 */
   presetId?: string
-  /** 归属 project id（D14 语义修正，2026-08-04）：创建时归属当前 activeProject；空 = 默认项目兑底。 */
+  /** 归属 project id（D14 语义修正，2026-08-04）：创建时归属当前 activeProject；空 = 默认项目兜底。 */
   projectId?: string
   /**
    * 模型覆盖。D5 契约快照化：landing 新建路径恒传 renderer resolveLaunchConfig 解析
@@ -238,8 +238,6 @@ export interface ReclaimSessionDeps {
    * （复用 background-task-reaper 单 session 入口，与 removeSessionEntry 汇聚点同款触发面）。
    */
   reapBackgroundTasks?(sessionId: string): Promise<void>
-  /** pendingReload 定向清（D3 第 6 步）——u3 装配绑 ReloadOrchestrator.clearPending。 */
-  clearPendingReload?(sessionId: string): void
   /**
    * 定向清挂起 UI 请求（v6 第四案纵深防御）——只清属于**被回收代际**的 pending。
    * 挂点 = 下方代际校验通过后的成功分支（`this.get(sessionId) !== session ||
@@ -383,12 +381,6 @@ export class SessionLifecycle implements ISessionRegistry {
         this.registerDeps.getMessageBus()?.publish(sid, msg)
       } else {
         this.registerDeps.broadcastGlobal(msg)
-      }
-      // W5：message.complete 广播后通知 reload-orchestrator（消费 pendingReload 队）。
-      // 覆盖所有 message.complete 路径（event-interpreter turn-end 主路径 + dispatcher abort
-      // 手动广播）。onMessageComplete 未注入时为 no-op。
-      if (msg.type === 'message.complete' && sid) {
-        this.registerDeps.notifyMessageComplete(sid)
       }
     }
     // #8 G1：传 cwd 给 EventAdapter（write added/modified 判定 + agent_end git 对账用）
@@ -805,7 +797,7 @@ export class SessionLifecycle implements ISessionRegistry {
       this.sessionStore.persistPresetBinding(session.sessionFilePath, presetId, sidecarOpts)
     }
     // 持久化归属 project 到 .project.json sidecar（D14 语义修正，2026-08-04）。
-    // 空 projectId（默认项目创建）不写 sidecar——等价于未归类，读取侧一致兑底默认项目。
+    // 空 projectId（默认项目创建）不写 sidecar——等价于未归类，读取侧一致兜底默认项目。
     if (options?.projectId && session.sessionFilePath) {
       this.sessionStore.persistProjectBinding(session.sessionFilePath, options.projectId, sidecarOpts)
     }
@@ -948,7 +940,7 @@ export class SessionLifecycle implements ISessionRegistry {
     }
     const session = this.get(sessionId)
     // [M4-a] 级联 cwd 解析（两分支各取真值；分支抛出则级联随之跳过——主已删形态由
-    // 启动孤儿补账兑底清理线目录）。
+    // 启动孤儿补账兜底清理线目录）。
     let cascadeCwd: string | undefined
     if (session) {
       cascadeCwd = session.cwd
@@ -976,7 +968,7 @@ export class SessionLifecycle implements ISessionRegistry {
     // cleanupSessionState 的 evictVirtualKeys 腿——m7/agentcall 先例同构，本处只管 runtime
     // 半边）。单入口收敛：closeAllForMain 内部逐线转调 closeLine（与 btw.remove / 批内直删
     // 同一原语），三路并发处置幂等不重复；abort 幂等 = pm.destroySession 无条目静默跳过。
-    // best-effort：级联失败只 warn 不阻断主删除（P2 降级隔离；漏删残留由启动孤儿补账兑底）。
+    // best-effort：级联失败只 warn 不阻断主删除（P2 降级隔离；漏删残留由启动孤儿补账兜底）。
     if (btwCascadeOps && cascadeCwd !== undefined) {
       try {
         await btwCascadeOps.closeAllForMain(sessionId, cascadeCwd)
@@ -1360,10 +1352,8 @@ export class SessionLifecycle implements ISessionRegistry {
         console.warn(`[session-lifecycle] reclaim ${sessionId} cancelled: session was re-created concurrently (generation check, D6-3)`)
         return false
       }
-      // ⑥b 最小摘除：lifecycle sessions Map 删条目 + pendingReload 定向清（防御性 no-op：
-      // pendingReload 有条目 ⇒ session busy ⇒ 恒非回收候选，真发生的窗口极窄）。
+      // ⑥b 最小摘除：lifecycle sessions Map 删条目。
       this.removeEntry(sessionId)
-      deps.clearPendingReload?.(sessionId)
       // v6 第四案：回收定向清挂起 UI 请求（防 stale pending 在重激活时拉回死表单）。
       // 挂代际校验通过后的分支：此处必为被回收的旧代际（新进程存在 ⇒ 上方校验已返回 false），
       // 并发的取消分支不执行本步——新进程的活请求不被误清。
@@ -1623,7 +1613,7 @@ export class SessionLifecycle implements ISessionRegistry {
    * 最后兜底 'builtin:full'（FR-10，历史 session 无 sidecar）。
    *
    * fork 继承源 session 的归属 project（D14 语义修正，2026-08-04）：
-   * 与 preset 同模式——active 内存态兑底（延迟写入窗口），fallback 扫描 sidecar 值。
+   * 与 preset 同模式——active 内存态兜底（延迟写入窗口），fallback 扫描 sidecar 值。
    * 无归属（undefined）= 默认项目，不写 fork sidecar。
    */
   private resolveForkInheritedBindings(srcSessionId: string, source: ScannedSession): {

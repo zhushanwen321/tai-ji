@@ -5,7 +5,7 @@
 // sendMessage 三键 vi.fn），收敛到本 module 单源——桩形变更此文件，消费方同步生效。
 //
 // 迁移状态（2026-09-17 批量收敛完成）：内联 function 形态 25 个已迁 24；仅
-// round-supervisor/service-binding.test.ts 有意保留内联——其 TestPi 在三键外额外携带
+// registry-reconcile/sweep-binding.test.ts 有意保留内联——其 TestPi 在三键外额外携带
 // sent/appended/emitted 捕获数组（全文件断言消费面），helper 不提供该形态。
 // orchestration pump 测试的三键对象字面量形态已同批迁移。
 // **新测试强制走本 helper**，禁止再内联本地 makePi。

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * file-basename.ts 单测 —— basename 反查 + 扁平化工具。
  *

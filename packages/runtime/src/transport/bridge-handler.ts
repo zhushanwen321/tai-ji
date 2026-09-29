@@ -89,7 +89,7 @@ export class BridgeHandler {
     } finally {
       // B6（memory-leak-remediation §3.2-B6）应答即删：runtime 内部应答的 bridge 请求在
       // 回包完成点从登记所摘除——此前 removeBridgeRequest 全仓唯一调用点是前端误发
-      // ui_response 的防御分支，runtime 应答的正常路径零删除，仅 session 销毁兑底清，
+      // ui_response 的防御分支，runtime 应答的正常路径零删除，仅 session 销毁兜底清，
       // 长会话单调累积。finally 收敛成功+异常双路（await 完成点 / 外层 catch 回错包后），
       // 覆盖 sync / tool_execute / intercept / malformed / unknown-method 全部回包点；
       // bridge:event 未登记不摘（与入口登记守卫对称）。幂等（Set.delete）。

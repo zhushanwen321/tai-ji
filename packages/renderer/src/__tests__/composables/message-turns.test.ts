@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * expandAssistantBlocks 纯函数单测 —— 单条 assistant Message 内部块按真实时序展开。
  *

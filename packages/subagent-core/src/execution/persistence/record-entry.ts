@@ -1,21 +1,26 @@
 // src/execution/persistence/record-entry.ts
 //
-// W16 [D4]：subagent record 自描述持久化 entry 的形态权威。
+// subagent record 自描述持久化 entry 的形态权威。
 //
-// pi 文件（session JSONL）是扩展数据持久化权威：record 状态每次迁移都经
-// pi.appendEntry 落一条自描述完整快照（字段即 SubagentRecord），读取方无需
-// 逆向解析 toolCall/toolResult。内存 record-store 保持运行时权威，entry 是
-// 重建源（两者不冲突）。
+// v1（W16 [D4]，兼容读面保留）：pi 文件（session JSONL）是扩展数据持久化权威：
+// record 状态每次迁移都经 pi.appendEntry 落一条自描述完整快照（字段即
+// SubagentRecord），读取方无需逆向解析 toolCall/toolResult。
+//
+// v2（W1 [D1]，当前版本）：主 session 条目从「全量快照」改为「注册 + 终态两条
+// 小条目」——运行态数据移出主 session JSONL（eventLog/displayItems 端到端死字节
+// 停写），事实源 = record 事件文件（record-events.ts）。v1 类型与投影函数全保留
+//（旧读者按版本跳过 v2 / 新读者兼容读 v1，D7 惰性兼容读）；v1 写点停写归 U2a。
 //
 // customType 与既有 `subagent-identity`（session 文件首行身份 entry）同族命名
-//（连字符风格）；写点见 record-store.ts 的状态迁移点（register/archive/
-// reportRecordTransition），custom entry 由 pi 写进 session JSONL，不进 LLM context。
+//（连字符风格）；v2 写点（注册条目诞生时 / 终态条目结束时）接线归 U2a，custom
+// entry 由 pi 写进 session JSONL，不进 LLM context。
 
 import type {
   AgentEventLogEntry,
   ClosedReason,
   DisplayItem,
   ExecutionMode,
+  ExecutionOutcome,
   ExecutionStatus,
   RecordOrigin,
   StopReason,
@@ -129,6 +134,13 @@ export interface SubagentRecordEntryData {
    * W2/W3 run 视图按 collectRecordsByParentRunId 从本字段回查本 run 的 record 集。
    */
   parentRunId?: string;
+  /**
+   * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（与 origin/parentRunId 同族
+   * 身份域，run 视图按 (parentRunId, stepIndex) 关联 record）。additive 字段，
+   * v 不 bump（对齐 stopReason 先例）：undefined（存量 entry / tool 来源）经
+   * JSON.stringify 自然缺省零迁移，读侧守卫归一。
+   */
+  stepIndex?: number;
 }
 
 /** SubagentRecord → 自描述 entry data（快照投影，不 mutate 源）。
@@ -168,9 +180,142 @@ export function toSubagentRecordEntry(record: SubagentRecord): SubagentRecordEnt
     // [modeless 波3] collectMode 投影随字段消亡删除；batchFinalized（U1 foundation）
     // undefined 经 JSON.stringify 自然缺省，旧 entry 序列化产物字节不变（零迁移）。
     batchFinalized: record.batchFinalized,
-    // 来源身份两字段（H2 W1）：undefined 经 JSON.stringify 自然缺省，存量 entry
-    // 序列化字节不变（零迁移）。
+    // 来源身份两字段（H2 W1）+ 步骤索引（[W0 / D1] 同族身份域）：undefined 经
+    // JSON.stringify 自然缺省，存量 entry 序列化字节不变（零迁移）。
     origin: record.origin,
     parentRunId: record.parentRunId,
+    stepIndex: record.stepIndex,
   };
+}
+
+// ── v2 条目契约（W1 / D1：注册 + 终态两条小条目）──────────────
+
+/**
+ * `subagent-record` entry 的 data schema 版本（W1 起当前版本 = 2）。
+ *
+ * 消费方按 v 判别解析（classifySubagentRecordEntryData 单源），不认识的版本跳过
+ * 而非猜测。v1 全量快照形态见上方 {@link SubagentRecordEntryData}（兼容读面，
+ * 随 W4 legacy sunset 统一退役）。
+ */
+export const SUBAGENT_RECORD_ENTRY_VERSION = 2;
+
+/** v2 条目判别键词表（两族同构：workflow-record v2 同款 registered/settled）。 */
+export const SUBAGENT_RECORD_ENTRY_KINDS = ["registered", "settled"] as const;
+
+export type SubagentRecordEntryKind = (typeof SUBAGENT_RECORD_ENTRY_KINDS)[number];
+
+/**
+ * v2 注册条目 data（设计 D1 条目契约表 subagent-record 行·注册列）。
+ *
+ * 诞生时写一条：身份 + 家族链锚点。字段集对照三个消费面枚举核对（session-reader
+ * 锚链 / runtime 投影构造集 / SubagentTab 展示集）——身份域一次定清。事件文件
+ * 寻址不经本条目（D3：注册条目 id 直接定址 `<recordsDir>/<sa-id>.events`，无需
+ * journalPath 锚点字段）。
+ */
+export interface SubagentRecordRegisteredEntryData {
+  v: typeof SUBAGENT_RECORD_ENTRY_VERSION;
+  kind: "registered";
+  id: string;
+  agent: string;
+  task: string;
+  slug: string;
+  origin: RecordOrigin;
+  /** origin="workflow" 时所属 run id（tool 来源缺省）。 */
+  parentRunId?: string;
+  /** origin="workflow" 时在 run 内的步骤索引（tool 来源缺省）。 */
+  stepIndex?: number;
+  /** 根 session id（session 隔离过滤用）。 */
+  rootSessionId: string;
+  /** 直接父 record id（层级树构建用；顶层缺省）。 */
+  parentRecordId?: string;
+  /** subagent 递归深度（顶层 = 0）。 */
+  depth: number;
+  startedAt: number;
+}
+
+/**
+ * v2 终态条目 data（设计 D1 条目契约表 subagent-record 行·终态列）。
+ *
+ * 结束时写一条（收编幂等补写同一形态）：终局 + 摘要 + session-reader 锚链载荷。
+ * result 完整文本一次性写（SubagentTab 重启视图依赖，D1 增量裁决）；统计终值与
+ * record-settled 事件（record-events.ts）同源——条目是 journal 的投影锚，不是
+ * 第二事实源。
+ */
+export interface SubagentRecordSettledEntryData {
+  v: typeof SUBAGENT_RECORD_ENTRY_VERSION;
+  kind: "settled";
+  id: string;
+  /** 占用两态（永久会话模型）：终态收敛为 idle + stopReason 表达「为什么停」。 */
+  status: "idle";
+  stopReason: StopReason;
+  outcome?: ExecutionOutcome;
+  error?: string;
+  endedAt: number;
+  /** 统计终值（record-settled 事件同源）。 */
+  turns: number;
+  totalTokens: number;
+  model: string | undefined;
+  thinkingLevel: string | undefined;
+  engine?: string;
+  /**
+   * 引擎自描述定位符（session-reader 末条锚定依赖——sessionRef 双键取自本条，
+   * 不升级则 zcode 锚链兜底对新记录失效，D1 版本门补齐清单同款义务）。
+   */
+  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+  sessionFile?: string;
+  /** 终局结果全文（一次性写——事件文件只存摘要锚，本条目是全文唯一落点）。 */
+  result?: string;
+}
+
+/** v2 条目判别联合（判别键 = kind）。 */
+export type SubagentRecordEntryV2 =
+  | SubagentRecordRegisteredEntryData
+  | SubagentRecordSettledEntryData;
+
+/** v2 分类判别联合（与 workflow-record-entry 的同构裁决见 classify 注释）。 */
+export type SubagentRecordEntryClassification =
+  /** v1 全量快照（兼容读面）——data 未做形状校验透传，解码归消费方。 */
+  | { ok: true; data: unknown }
+  /** v2 新形态——载荷已过 kind 判定（形状校验归消费方解码层）。 */
+  | { ok: false; reason: "v2"; entry: SubagentRecordEntryV2 }
+  | {
+      ok: false;
+      reason: "wrong-type" | "missing-v" | "future-v" | "unknown-kind";
+    };
+
+/**
+ * entry data → v1/v2 分类（纯函数，无 IO 无日志；判定与策略分离，日志策略留消费方）。
+ *
+ * 分支语义（对齐 workflow-record-entry.classifyWorkflowRecordEntryData 同构裁决）：
+ * - wrong-type：data 非对象（截断/半写）；
+ * - missing-v：对象但 v 缺失（写点恒定写 v，缺失即形态损坏）；
+ * - future-v：v 有值但非 1/2（含类型漂移——升级前旧版读取属正常降级）；
+ * - unknown-kind：v2 但 kind 不在词表内；
+ * - reason:"v2"：v2 合法形态——**归入 ok:false 是刻意裁决**：ok 的语义是「v1 快照
+ *   契约可消费」，旧消费方（record-store-rebuild 等）的 `!ok → 跳过` 分支即 v2
+ *   的版本门（U2b 补门消费本函数），新消费方按 reason === "v2" 取载荷；
+ * - ok：v1（v1 无最小载荷检查——id 等字段校验归消费方解码层，与 v1 既有读路径
+ *   的宽容面一致）。
+ */
+export function classifySubagentRecordEntryData(data: unknown): SubagentRecordEntryClassification {
+  if (typeof data !== "object" || data === null) {
+    return { ok: false, reason: "wrong-type" };
+  }
+  const record = data as { v?: unknown; kind?: unknown };
+  if (record.v === undefined) {
+    return { ok: false, reason: "missing-v" };
+  }
+  if (record.v === SUBAGENT_RECORD_ENTRY_VERSION) {
+    if (
+      record.kind === "registered" ||
+      record.kind === "settled"
+    ) {
+      return { ok: false, reason: "v2", entry: data as SubagentRecordEntryV2 };
+    }
+    return { ok: false, reason: "unknown-kind" };
+  }
+  if (record.v === 1) {
+    return { ok: true, data };
+  }
+  return { ok: false, reason: "future-v" };
 }

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * composer-density 纯状态机单测（设计 mode-system-composer-density §6.6 决策 D6）。
  *

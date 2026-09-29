@@ -27,7 +27,7 @@
 // 未知 status 永久保留（未来 v3 格式的回滚安全性同构）。
 //
 // 写侧语义（record 持久化收敛 §3.4 / D8 v7）：**权威同步写 + 响亮重试**——写失败
-// 重试 3 次指数退避（100ms 起），仍失败 logger.error 响亮暴露并返回 false（不抛出）。
+// 重试 3 次（零退避立即连发，[W1 / D6] 同步睡退役），仍失败 logger.error 响亮暴露并返回 false（不抛出）。
 // 迁移已完成（D7）：写函数唯一生产调用方 = record-store 内部（意图原语消费返回值）。
 //
 // [UF-1] record 绑定 sidecar（`.record-binding`）同挂本载体族：宿主侧在 record.sessionFile
@@ -45,8 +45,15 @@
 import * as fs from "node:fs";
 
 import { getLogger } from "../../core/logger.ts";
+// 原子写单源原语（tmp+rename）：.state 半写（进程死在 writeFileSync 中段）会让
+// 读侧落入「JSON 损坏 → finalized 存在性降级」的死因不可考窗口，rename 原子性
+// 把该窗口收到读侧不可见的层面。
+import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 
 import type { AbandonedRoundMark, Epoch, RecordOrigin, StopReason, TranscriptRef } from "../assembly/types.ts";
+// 类型面依赖（D5 终局投影词表单源）——run-events 不回指 execution 层，无循环；
+// ALL_RUN_OUTCOMES 是值导入（读侧 outcome 守卫的词表集合，SSOT 单源不复制）。
+import { ALL_RUN_OUTCOMES, type RunErrorCode, type RunOutcome } from "../../orchestration/run-events.ts";
 
 const logger = getLogger("subagents");
 
@@ -64,38 +71,14 @@ const LEGACY_CANCELLED_EXT = ".cancelled";
 
 /** 写失败重试次数（初始尝试之外再试 3 次）。 */
 const STATE_WRITE_RETRY_COUNT = 3;
-/** 指数退避基准：100ms → 200ms → 400ms（磁盘满/权限错通常是暂时状态，立即放弃
- *  会让「同步写必落」在可恢复故障上静默失效）。 */
-const STATE_WRITE_RETRY_BASE_DELAY_MS = 100;
 
-/** 同步退避等待的 SharedArrayBuffer 字长（Atomics.wait 最小载体，单 int32 字）。 */
-const SLEEP_WAIT_INT32_WORDS = 1;
-/** int32 每字 4 字节（Atomics 载体分配换算常数）。 */
-const INT32_BYTES_PER_WORD = 4;
-/** 指数退避底数（100ms → 200ms → 400ms 的倍率来源）。 */
-const BACKOFF_EXPONENT_BASE = 2;
-
-/**
- * 同步 sleep（重试退避用）。Atomics.wait 是 Node 侧标准同步等待原语：不烧 CPU、
- * 不依赖 event loop——写函数运行在同步收尾路径（disposeAllRecords 等同步链），
- * 无法 await。测试经 _setStateMarkerSleepForTest 注入替身（免真实 700ms 等待，
- * 形态对齐 settled-watchdog `_resetSettledWatchdogsForTest` 模块级测试钩子先例）。
- */
-function defaultRetrySleep(ms: number): void {
-  Atomics.wait(
-    new Int32Array(new SharedArrayBuffer(SLEEP_WAIT_INT32_WORDS * INT32_BYTES_PER_WORD)),
-    0,
-    0,
-    ms,
-  );
-}
-
-let retrySleep: (ms: number) => void = defaultRetrySleep;
-
-/** 测试钩子：注入退避替身（fn=undefined 恢复实装）。 */
-export function _setStateMarkerSleepForTest(fn: ((ms: number) => void) | undefined): void {
-  retrySleep = fn ?? defaultRetrySleep;
-}
+// [W1 / D6] 同步退避退役（主线程同步等待原语拆除）：写失败重试改为
+// 立即连发（零退避）——原实现同步睡至多 700ms 会停顿全进程的 session 推送。
+// 重试语义保持（瞬时故障的短窗二连击仍被覆盖）；退避间隔在同步收尾路径
+// （disposeAllRecords 等同步链）无异步等待通道可用，「写挪 worker 线程」形态
+// 的改造成本与 sidecar 写失败本身 <0.1% 的极端场景不匹配（重复保险式过度工程）。
+// 写失败语义不变：重试耗尽 logger.error 响亮 + 返回 false，record 留 running
+// 由 boot 孤儿恢复承接。
 
 // ============================================================
 // 类型
@@ -116,6 +99,14 @@ export interface StateMarker {
   /** idle = 收口时间（新格式）；cancelled 的精确结束时间（重建判定消费）；
    *  finalized 恒 undefined（重建走 jsonl 末 entry ts）。 */
   endedAt?: number;
+  /**
+   * [P1b-2 / D5 终局投影] run 终局形态（completed/failed/cancelled）。仅新格式
+   * 写入面（writeSettledState）携带；旧 `.state`（存量三值形态）无此字段 →
+   * undefined（读守卫归一，不炸）。finalized/cancelled 旧值分支不投影本字段。
+   */
+  outcome?: RunOutcome;
+  /** [P1b-2 / D5 终局投影] 失败终局的结构化编码（outcome=failed 时有意义）。 */
+  errorCode?: RunErrorCode;
 }
 
 /** sidecar stat 戳（结构对齐 record-store 的 Stamp——缓存校验用，避免跨模块类型耦合）。 */
@@ -163,41 +154,52 @@ export function writeCancelledState(sessionFile: string, endedAt: number): boole
  * 分支 → buildRecord 单规则映射 idle + stopReason）已随 U3 切换，live ≡ reload
  * 构造性成立。
  *
+ * [P1b-2 / D5] payload 扩展 outcome/errorCode（终局投影字段，向后兼容——缺省
+ * undefined 不写字段，存量调用方零变化）。run 域不消费本扩展（run 终局事实经
+ * 事件 journal + terminal manifest 落账，无 .state sidecar）；record 域终态链
+ *（markSettled）现未传参（缺省 undefined，读侧守卫归一兼容存量 .state）。
+ *
  * @param stopReason 收口展示值（成功/失败/中断，值域见 types.ts StopReason）；
  *        undefined = 未指定停因（读侧兜底 interrupted-by-restart 同族语义）。
  * @param endedAt 收口时间（收条精度；调用方传 Date.now()）。
+ * @param outcome run 终局形态（[P1b-2 / D5] 终局投影；undefined = 不投影）。
+ * @param errorCode 失败终局的结构化编码（undefined = 不投影）。
  * @returns true = 已落盘；false = 重试耗尽仍未落（错误已 error 级留痕）。
  */
 export function writeSettledState(
   sessionFile: string,
-  payload: { stopReason?: StopReason; endedAt?: number },
+  payload: { stopReason?: StopReason; endedAt?: number; outcome?: RunOutcome; errorCode?: RunErrorCode },
 ): boolean {
   return writeStateMarker(sessionFile, {
     status: "idle",
     ...(payload.stopReason !== undefined ? { reason: payload.stopReason } : {}),
     ...(payload.endedAt !== undefined ? { endedAt: payload.endedAt } : {}),
+    ...(payload.outcome !== undefined ? { outcome: payload.outcome } : {}),
+    ...(payload.errorCode !== undefined ? { errorCode: payload.errorCode } : {}),
   });
 }
 
 /**
  * .state 写入 + 旧名清理（互斥由单文件单状态字段构造性保证）。
- * 响亮重试（§3.4）：初始尝试 + 3 次指数退避重试（100/200/400ms）；仍失败
- * logger.error（终态权威未落必须可见）并返回 false——**不抛出**（收尾路径同步链
- * 不因重试耗尽中断，record 留 running 的处置由意图原语按返回值编排）。
+ * 响亮重试（§3.4）：初始尝试 + 3 次重试（[W1 / D6] 零退避立即连发——同步睡退役，
+ * 见上方重试参数注释）；仍失败 logger.error（终态权威未落必须可见）并返回
+ * false——**不抛出**（收尾路径同步链不因重试耗尽中断，record 留 running 的处置
+ * 由意图原语按返回值编排）。
  */
 function writeStateMarker(sessionFile: string, marker: StateMarker): boolean {
   let lastError: unknown;
   for (let attempt = 0; attempt <= STATE_WRITE_RETRY_COUNT; attempt++) {
-    if (attempt > 0) {
-      // 指数退避：attempt=1 → 100ms、2 → 200ms、3 → 400ms。
-      retrySleep(STATE_WRITE_RETRY_BASE_DELAY_MS * BACKOFF_EXPONENT_BASE ** (attempt - 1));
-    }
     try {
       // 旧名清理放在写成功之后（S12 修复）：读侧 .state 优先，旧名残留无害（仅多一次
       // stat 与「旧名在 .state 缺失/损坏时充当兼容读序兜底」），删除只是 stat 优化非正确性
       // 依赖——若在写前删而写失败（重试耗尽），存量终态标记已被删而新标记未落，
       // .cancelled tombstone 静默降级为无终态形态（重建回落 running，死因/时间丢失）。
-      fs.writeFileSync(`${sessionFile}${STATE_SIDECAR_EXT}`, JSON.stringify(marker), "utf-8");
+      // ensureDir:false——session 目录被外部删除属异常态，保持由下方响亮重试 +
+      // error 留痕暴露的既有失败语义，不静默重建目录掩盖。
+      writeAtomicFileSync(`${sessionFile}${STATE_SIDECAR_EXT}`, JSON.stringify(marker), {
+        encoding: "utf-8",
+        ensureDir: false,
+      });
       // force:true 静默 ENOENT（未写过旧名的 session 正常路径）。
       fs.rmSync(`${sessionFile}${LEGACY_FINALIZED_EXT}`, { force: true });
       fs.rmSync(`${sessionFile}${LEGACY_CANCELLED_EXT}`, { force: true });
@@ -265,11 +267,15 @@ function readNewStateMarker(sessionFile: string): StateMarker | undefined {
     const parsed = JSON.parse(raw) as Partial<StateMarker>;
     // 新格式收条（§3.2.4）：{status:"idle", reason?=stopReason, endedAt?}——可选域
     // 类型守卫归一（非法/缺省 → undefined，重建面按「无则」兜底，见 buildRecord）。
+    // [P1b-2 / D5] outcome/errorCode 同款守卫归一：outcome 需落 ALL_RUN_OUTCOMES
+    // 词表（词表外/缺省 → undefined = 不投影，旧 .state 存量形态零迁移）。
     if (parsed.status === "idle") {
       return {
         status: "idle",
         ...(typeof parsed.reason === "string" ? { reason: parsed.reason } : {}),
         ...(typeof parsed.endedAt === "number" ? { endedAt: parsed.endedAt } : {}),
+        ...(isRunOutcome(parsed.outcome) ? { outcome: parsed.outcome } : {}),
+        ...(typeof parsed.errorCode === "string" ? { errorCode: parsed.errorCode } : {}),
       };
     }
     if (parsed.status === "cancelled") {
@@ -396,6 +402,13 @@ export interface RecordBinding {
    * collectRecordsByParentRunId 从本字段回查本 run 的 record 集。
    */
   parentRunId?: string;
+  /**
+   * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（与 origin/parentRunId 同族
+   * 身份域）。undefined（存量 binding / tool 来源）= 不投影（读侧守卫归一）；
+   * identityFromBinding 重建路径据此恢复，漏本字段则重启后 record 无 stepIndex
+   * （run 视图关联键静默缺失——同族字段漏投影事故先例 H2 S3）。
+   */
+  stepIndex?: number;
   /**
    * 终态 usage 快照（[H2 A3]，终态写点 Step3a 随 .state 同步更新 binding）：
    * totalTokens/turns/endedAt 三字段的 record 终值。light 列表面据此恢复 usage
@@ -547,6 +560,7 @@ export function readRecordBinding(sessionFile: string): RecordBinding | undefine
     worktree: parsed.worktree === true,
     origin: optional.origin,
     parentRunId: optional.parentRunId,
+    stepIndex: optional.stepIndex,
     totalTokens: optional.totalTokens,
     turns: optional.turns,
     endedAt: optional.endedAt,
@@ -604,6 +618,7 @@ function normalizeOptionalBindingFields(
   | "thinkingLevel"
   | "origin"
   | "parentRunId"
+  | "stepIndex"
   | "totalTokens"
   | "turns"
   | "endedAt"
@@ -626,6 +641,10 @@ function normalizeOptionalBindingFields(
     // 对齐 record-store.readEntryOriginFields 主 entry 重建侧的同名守卫。
     origin: originOrUndefined(parsed.origin),
     parentRunId: strOrUndefined(parsed.parentRunId),
+    // [W0 / D1] 步骤索引：number 守卫（非法/缺省 → undefined = 不投影，存量 binding
+    // 零迁移）；normalize 白名单含本键是 updateRecordBinding read-modify-write
+    // round-trip 不丢字段的结构性保证（读出保留 → spread 合并 → 重写带回）。
+    stepIndex: numOrUndefined(parsed.stepIndex),
     // 终态 usage 快照三字段（H2 A3）：number 守卫（非法/缺省 → undefined = 不投影）。
     totalTokens: numOrUndefined(parsed.totalTokens),
     turns: numOrUndefined(parsed.turns),
@@ -646,6 +665,11 @@ function normalizeOptionalBindingFields(
 /** string 守卫（非法/缺省 → undefined）。 */
 function strOrUndefined(v: string | undefined): string | undefined {
   return typeof v === "string" ? v : undefined;
+}
+
+/** [P1b-2 / D5] run 终局形态守卫（词表成员判定；词表外/缺省 → 不投影）。 */
+function isRunOutcome(v: unknown): v is RunOutcome {
+  return typeof v === "string" && (ALL_RUN_OUTCOMES as readonly string[]).includes(v);
 }
 
 /**

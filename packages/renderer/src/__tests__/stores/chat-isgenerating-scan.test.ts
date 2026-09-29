@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * isGenerating 派生 scan + finalizeAllStreaming 多 session 收口单测。
  *

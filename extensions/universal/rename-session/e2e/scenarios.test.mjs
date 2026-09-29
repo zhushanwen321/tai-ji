@@ -1,6 +1,9 @@
 /**
  * E2E 场景 A1-A7 的 vitest 包装（cw test gate 兼容）。
  *
+ * 门控与显式运行方式：真实 pi + 真实模型，仅在 TAIJI_PI_LIVE=1 时执行（未设即整体 skip）：
+ *   cd extensions/universal/rename-session && TAIJI_PI_LIVE=1 npx vitest run --config e2e/vitest.e2e.config.ts
+ *
  * 背景：cw test gate 用 vitest 输出解析器统计 `N passed` / `N failed`，
  * `node e2e/run-all.mjs` 的自定义表格输出解析不到（passed=0）。本文件把 7 个
  * 场景包装成 vitest test（从 run-aN.mjs import 场景函数），gate 即可统计。
@@ -61,7 +64,7 @@ function toGate(result) {
 // 清理兜底说明：各 run-aN 场景函数内部 try/finally 已负责 pi/fixture 清理；wrapper 超时
 // ≥ 内部最坏和后 vitest 不会在场景自身清理前掐断，无需额外 afterEach（场景句柄不外泄，
 // 全局注册表需改 harness 内部，成本与收益不成比例）。
-describe("E2E 场景 A1-A7（真实 pi + 真实模型）", () => {
+describe.skipIf(process.env.TAIJI_PI_LIVE !== "1")("E2E 场景 A1-A7（真实 pi + 真实模型）", () => {
 	it("A1 工具型首轮：round 末触发 + 两段输入证据链", async () => {
 		toGate(await runA1());
 	}, 300_000);

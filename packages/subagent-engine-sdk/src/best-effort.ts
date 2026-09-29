@@ -21,7 +21,7 @@ export type BestEffortLevel = "debug" | "error";
  * 吞咽 best-effort IO 的错误，按 level 经共享 logger 记录。
  *
  *   - debug（默认）：次要清理（sidecar/worktree/alive marker），失败属预期路径
- *   - error：关键步骤抛错但需继续后续清理（如 finalizeRecord 的 B9 链：completeRecord
+ *   - error：关键步骤抛错但需继续后续清理（如 finalizeRecord 的 B9 链：completeLegacyClosed
  *     抛错后仍要执行 finalized/cleanup，错误需可见但不阻断）
  *
  * 错误对象优先取 message（避免打印巨大堆栈/对象），其他类型原样传入。

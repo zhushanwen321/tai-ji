@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * B1 stream_warn effect 单测：WARN（pi 静默卡死提示）不收口 session。
  *

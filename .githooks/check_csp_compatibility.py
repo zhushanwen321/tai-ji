@@ -125,7 +125,7 @@ def main() -> int:
         print("             并在本脚本 ALLOWLIST 登记该文件，把能力变更变成显式决策")
         print("\n".join(errors))
         print()
-        print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m")
+        print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m")
         return 2
 
     print("[OK] CSP 能力一致性检查通过（源码无未放行的 eval/WebAssembly 用法）")

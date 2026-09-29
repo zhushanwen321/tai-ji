@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * W6 D16 · 快捷键配置测试（U12）—— 降级只读版。
  *

@@ -3,8 +3,8 @@
 禁止 renderer 直调 ws-client.send 或 window.electronAPI —— 落实 D3/R4 统一门面
 （phase-5 guardrails 5.3 + B1 IPC 门面）。
 
-背景：Phase 1 把 ws send 直调收口到 api client；B1 把 window.electronAPI.* IPC 直调
-收口到 api（window/dialog/runtime-port/system domain）。本脚本把这两条不变量固化为
+背景：Phase 1 把 ws send 直调收敛到 api client；B1 把 window.electronAPI.* IPC 直调
+收敛到 api（window/dialog/runtime-port/system domain）。本脚本把这两条不变量固化为
 pre-commit 检查，防止 store/composable/组件回退到直调底层通道。
 
 白名单（合法直调点）：
@@ -121,7 +121,7 @@ def main() -> int:
         print("\n".join(ipc_errors))
     if ws_errors or ipc_errors:
         print()
-        print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m")
+        print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m")
         return 2
     print("[OK] ws-client send + electronAPI 直调检查通过（仅白名单文件合法）")
     return 0

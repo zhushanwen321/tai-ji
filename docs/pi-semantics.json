@@ -58,13 +58,13 @@
   },
   {
     "id": "PS-04",
-    "claim": "setThinkingLevel 同值不落账不发声（isChanging = effective !== previous 才走 appendThinkingLevelChange + thinking_level_changed 事件）；effective ≠ previous 时必发事件——isChanging=false 仅覆盖「值未变」场景，不构成对账缺口（D9 删 30s 轮询的依据）",
+    "claim": "setThinkingLevel 同值不登记不发声（isChanging = effective !== previous 才走 appendThinkingLevelChange + thinking_level_changed 事件）；effective ≠ previous 时必发事件——isChanging=false 仅覆盖「值未变」场景，不构成对账缺口（D9 删 30s 轮询的依据）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/agent-session.js",
         "symbol": "setThinkingLevel(level, options = {})",
-        "note": ":1358-1376 —— clamp 后 isChanging 判定 + 条件落账/发声（claim 本体逐行未变）；0.84.4 起签名加 options.persist，全局默认写入仅 persist:true 时发生（:1365，写原始 level，无 supportsThinking 门控）——taiji 单参 RPC 调用不触发，与 model-service「per-session runtime state — no persistence needed」一致，全局默认由 pi-provider-store 独立通路读写"
+        "note": ":1358-1376 —— clamp 后 isChanging 判定 + 条件登记/发声（claim 本体逐行未变）；0.84.4 起签名加 options.persist，全局默认写入仅 persist:true 时发生（:1365，写原始 level，无 supportsThinking 门控）——taiji 单参 RPC 调用不触发，与 model-service「per-session runtime state — no persistence needed」一致，全局默认由 pi-provider-store 独立通路读写"
       }
     ],
     "guard": {
@@ -132,7 +132,7 @@
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/agent-session.js",
         "symbol": "sendCustomMessage(message, options)",
-        "note": ":1099-1132 —— 直达分支 :1120-1121 await this._runAgentPrompt(appMessage)；0.84.4 将 else 内联 append 抽成 _appendCustomMessage :1134-1140（push + appendCustomMessageEntry 落账 + message_start/end 双发，逐行等价）并新增 defer 分支 :1123（isStreaming && triggerTurn===false → _pendingCustomMessages，turn 末尾 _flushPendingCustomMessages 落账——修 replay 顺序 bug；taiji 全侧调用形态 triggerTurn:true / nextTurn / 非流式无 options 均不可达该分支）"
+        "note": ":1099-1132 —— 直达分支 :1120-1121 await this._runAgentPrompt(appMessage)；0.84.4 将 else 内联 append 抽成 _appendCustomMessage :1134-1140（push + appendCustomMessageEntry 登记 + message_start/end 双发，逐行等价）并新增 defer 分支 :1123（isStreaming && triggerTurn===false → _pendingCustomMessages，turn 末尾 _flushPendingCustomMessages 登记——修 replay 顺序 bug；taiji 全侧调用形态 triggerTurn:true / nextTurn / 非流式无 options 均不可达该分支）"
       }
     ],
     "guard": {
@@ -194,7 +194,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "运行时防御：切片 1 孪生守卫（start 同步期拒单）+ U5 能力注册表对账 drift 日志；pi 升级时人工复核 models-store 刷新行为（file mtime/checkedAt）"
+      "note": "运行时防御：切片 1 孪生检查（start 同步期拒单）+ U5 能力注册表对账 drift 日志；pi 升级时人工复核 models-store 刷新行为（file mtime/checkedAt）"
     },
     "verifiedWith": "0.84.4"
   },
@@ -296,7 +296,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：sw notify-ledger 的『跨重启不丢』限定语义 = OS 崩溃/断电窗口（无 fsync 的真实残余面），进程强杀不丢已 append entry。pi 升级时重验：_appendEntry 是否引入异步 flush/debounce"
+      "note": "消费方：sw notify-ledger 的『跨重启不丢』限定语义 = OS 崩溃/断电窗口（无 fsync 的真实残余面），进程强杀不丢已 append entry。pi 升级时重验：_appendEntry 是否引入异步 flush/debounce"
     },
     "verifiedWith": "0.84.4"
   },
@@ -319,7 +319,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "sw 子进程单写者不变量（extensions/universal/subagent-workflow session-runner.ts 的 buildSpawnArgs / runSpawn 注释）的 pi 侧机制依据；resume/续聊冷路径须先确认旧进程已死（resumesInFlight 守卫）。pi 升级时重验：compaction 是否仍 append-only、_rewriteFile 触发面是否仍限于加载期"
+      "note": "sw 子进程单写者不变量（extensions/universal/subagent-workflow session-runner.ts 的 buildSpawnArgs / runSpawn 注释）的 pi 侧机制依据；resume/续聊冷路径须先确认旧进程已死（resumesInFlight 检查）。pi 升级时重验：compaction 是否仍 append-only、_rewriteFile 触发面是否仍限于加载期"
     },
     "verifiedWith": "0.84.4"
   },
@@ -342,7 +342,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "sw jsonl-run-store B1 retention（TAIJI_SUBAGENT_STATE_MAX_RUNS opt-in mtime 裁剪）的承重依据——pi 不清理则扩展自担磁盘保留。pi 升级时重验：SessionManager 是否新增自动清理/retention"
+      "note": "扩展侧磁盘保留的承重依据（W1 介质归位后口径，ADR-0078）：pi 不清理则 taiji 自担——journal/record 事件文件经统一保留维护轮清理（fold 终态资格判据 + 默认 30 天保留窗口，state 快照成对删、manifest 永不随裁；cap=50 计数裁剪已废除）。pi 升级时重验：SessionManager 是否新增自动清理/retention"
     },
     "verifiedWith": "0.84.4"
   },
@@ -371,13 +371,13 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "共同承重机制：structured-output loop-gate 的 tool_execution_end 计数通道选型（参数层失败只经 tool_execution_end 可观测）+ workflow 变体 execute 透传不做第二校验（D2 单一校验权威 = 本链）+ subagent tool schema pattern/maxLength 运行时强制（工具层守卫定位为 defense-in-depth）。探针锚点：structured-output cross-package-contract.test.ts ③ 真实 SDK 冒烟对 SW schema 跑 validateToolArguments。pi 升级时重验：校验是否仍在 beforeToolCall/execute 之前、immediate 分支是否仍 emitToolExecutionEnd、错误消息格式（Received arguments: 回显）是否稳定"
+      "note": "共同承重机制：structured-output loop-gate 的 tool_execution_end 计数通道选型（参数层失败只经 tool_execution_end 可观测）+ workflow 变体 execute 透传不做第二校验（D2 单一校验权威 = 本链）+ subagent tool schema pattern/maxLength 运行时强制（工具层检查定位为 defense-in-depth）。探针锚点：structured-output cross-package-contract.test.ts ③ 真实 SDK 冒烟对 SW schema 跑 validateToolArguments。pi 升级时重验：校验是否仍在 beforeToolCall/execute 之前、immediate 分支是否仍 emitToolExecutionEnd、错误消息格式（Received arguments: 回显）是否稳定"
     },
     "verifiedWith": "0.84.4"
   },
   {
     "id": "PS-24",
-    "claim": "/skill:name 的展开格式 = `<skill name=\"<skillName>\" location=\"<SKILL.md abs path>\">\\nReferences are relative to <skillDir>.\\n\\n<body>\\n</skill>`（body = stripFrontmatter 剥 frontmatter 后 trim；args 有则 block + \"\\n\\n\" + args；name 缺 frontmatter 时回退父目录名）；且 get_commands 的 skill 项 name 恒带 `skill:` 前缀（`skill:${skill.name}`），sourceInfo.path 为 resolve 后绝对路径（baseDir 不可依赖：extension 覆盖链可改写、兜底形态缺字段，References 行以 dirname(path) 为准）——runtime 注入器（skill-injector）对同输入的展开输出与 pi 落盘文本逐字 golden diff 由 PS-24 探针守卫（composer-multi-skill-injection D5 / 场景 8；编号自 PS-22 改——与 session-occupancy-send-closure 的 PS-22 撞号）",
+    "claim": "/skill:name 的展开格式 = `<skill name=\"<skillName>\" location=\"<SKILL.md abs path>\">\\nReferences are relative to <skillDir>.\\n\\n<body>\\n</skill>`（body = stripFrontmatter 剥 frontmatter 后 trim；args 有则 block + \"\\n\\n\" + args；name 缺 frontmatter 时回退父目录名）；且 get_commands 的 skill 项 name 恒带 `skill:` 前缀（`skill:${skill.name}`），sourceInfo.path 为 resolve 后绝对路径（baseDir 不可依赖：extension 覆盖链可改写、兜底形态缺字段，References 行以 dirname(path) 为准）——runtime 注入器（skill-injector）对同输入的展开输出与 pi 落盘文本逐字 golden diff 由 PS-24 探针检查（composer-multi-skill-injection D5 / 场景 8；编号自 PS-22 改——与 session-occupancy-send-closure 的 PS-22 撞号）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -389,7 +389,7 @@
         "pkg": "pi-coding-agent",
         "distPath": "dist/modes/rpc/jsonl.js",
         "symbol": "serializeJsonLine / attachJsonlLineReader",
-        "note": "帧协议 LF-only（:5-17 注释明示 readline 按 Unicode 分隔符拆帧的坑）——runtime rpc-client 的 LF-only 读取器是它的对端（D10），同一探针文件族守卫"
+        "note": "帧协议 LF-only（:5-17 注释明示 readline 按 Unicode 分隔符拆帧的坑）——runtime rpc-client 的 LF-only 读取器是它的对端（D10），同一探针文件族检查"
       }
     ],
     "guard": {
@@ -429,7 +429,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "承重：subagent-workflow U3「ASP 单点注入、删 task 后缀」（agent-opts-resolver.ts formatSchemaInstruction 与 session-runner.ts runSpawn 头注引用本条）——若 pi 升级后不再把注册工具 parameters 下发进请求体，模型将失去 schema 展示面，structured-output 指令链断裂且 ASP 的 {value} 包装契约失去对位；PS-20 的 observe 守卫只覆盖校验链不覆盖展示面。pi 升级时重验：convertTools 是否仍原样映射 tool.parameters、state.tools 是否仍随流式调用上下文下发。观察记录：bcadf4c22 live-verification（structured-output 全链实测，schema 经工具定义对模型生效）"
+      "note": "承重：subagent-workflow U3「ASP 单点注入、删 task 后缀」（agent-opts-resolver.ts formatSchemaInstruction 与 session-runner.ts runSpawn 头注引用本条）——若 pi 升级后不再把注册工具 parameters 下发进请求体，模型将失去 schema 展示面，structured-output 指令链断裂且 ASP 的 {value} 包装契约失去对位；PS-20 的 observe 检查只覆盖校验链不覆盖展示面。pi 升级时重验：convertTools 是否仍原样映射 tool.parameters、state.tools 是否仍随流式调用上下文下发。观察记录：bcadf4c22 live-verification（structured-output 全链实测，schema 经工具定义对模型生效）"
     },
     "verifiedWith": "0.84.4"
   },
@@ -603,7 +603,7 @@
   },
   {
     "id": "PS-30",
-    "claim": "extension stale ctx 错误文案契约：session 替换（newSession/fork/switchSession/reload）后 runner.invalidate() 把默认 message（含 'stale after session replacement'）写入 staleMessage，此后 pi API（loader.js 的 sendMessage/sendUserMessage/appendEntry 等）与 ctx 全部方法（runner.js createContext 的 compact/abort/shutdown/getContextUsage/isIdle 等）经 assertActive() 同步 throw new Error(this.staleMessage)——跨 session 存活的异步回调触碰捕获 pi/ctx 即同步抛错，无人接即 pi 进程崩溃（E1）。该文案是 ext-guards guardStaleCtx 的兜底分诊词（代际检测为主判，文案覆盖 reload 产生全新模块环境后旧闭包代数冻结的盲区）；文案变更时守卫退化为全部上抛（回到现状崩溃链路，不更危险），门禁报红提示同步 STALE_CTX_MARKER",
+    "claim": "extension stale ctx 错误文案契约：session 替换（newSession/fork/switchSession/reload）后 runner.invalidate() 把默认 message（含 'stale after session replacement'）写入 staleMessage，此后 pi API（loader.js 的 sendMessage/sendUserMessage/appendEntry 等）与 ctx 全部方法（runner.js createContext 的 compact/abort/shutdown/getContextUsage/isIdle 等）经 assertActive() 同步 throw new Error(this.staleMessage)——跨 session 存活的异步回调触碰捕获 pi/ctx 即同步抛错，无人接即 pi 进程崩溃（E1）。该文案是 ext-guards guardStaleCtx 的兜底分诊词（代际检测为主判，文案覆盖 reload 产生全新模块环境后旧闭包代数冻结的盲区）；文案变更时检查退化为全部上抛（回到现状崩溃链路，不更危险），门禁报红提示同步 STALE_CTX_MARKER",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -626,7 +626,7 @@
   },
   {
     "id": "PS-29",
-    "claim": "appendCustomEntry 落盘形态含 customType/data/timestamp：ExtensionAPI 的 core 绑定 appendEntry(customType, data) 直接委托 sessionManager.appendCustomEntry（同参数序、零中间变换），后者 entry 字面量固定 {type:\"custom\", customType, data, id, parentId, timestamp}——data 原样引用入参（无克隆/无字段白名单），经 _appendEntry 落盘并 emit entry_appended。rename-session 计量落账（usage-page-fixes §3.3 ③④）依赖该形态（U5 已本地 CLI 实测 P-appendEntry ✅：落盘行恰为该六字段，见实施计划状态表 U5 证据）；pi 升级若改字段名/裁剪 data/timestamp 改形，scanner ④ 分类静默失效（rename 账整桶消失，不报错），由本探针拦截",
+    "claim": "appendCustomEntry 落盘形态含 customType/data/timestamp：ExtensionAPI 的 core 绑定 appendEntry(customType, data) 直接委托 sessionManager.appendCustomEntry（同参数序、零中间变换），后者 entry 字面量固定 {type:\"custom\", customType, data, id, parentId, timestamp}——data 原样引用入参（无克隆/无字段白名单），经 _appendEntry 落盘并 emit entry_appended。rename-session 计量登记（usage-page-fixes §3.3 ③④）依赖该形态（U5 已本地 CLI 实测 P-appendEntry ✅：落盘行恰为该六字段，见实施计划状态表 U5 证据）；pi 升级若改字段名/裁剪 data/timestamp 改形，scanner ④ 分类静默失效（rename 账整桶消失，不报错），由本探针拦截",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -660,7 +660,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：session-reader [env] 根信号读该变量定位托管 session 根（方案 B 先行路径不注入，U4 仅退路；纯 pi 用户手工设置同变量生效）。pi 升级时重验：dist/config.js 的 ENV_SESSION_DIR 模板与 APP_NAME 默认值是否漂移"
+      "note": "消费方：session-reader [env] 根信号读该变量定位托管 session 根（方案 B 先行路径不注入，U4 仅退路；纯 pi 用户手工设置同变量生效）。pi 升级时重验：dist/config.js 的 ENV_SESSION_DIR 模板与 APP_NAME 默认值是否漂移"
     },
     "verifiedWith": "0.84.4"
   },
@@ -677,7 +677,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：runtime rpc-client 删 --session-dir（U16）后，pi 的 session 根解析完全落在链的缺省分支，链顺序是该改造行为等价性的前提。pi 升级时重验：main.js 三级 ?? 链顺序与 expandTildePath 语义是否漂移"
+      "note": "消费方：runtime rpc-client 删 --session-dir（U16）后，pi 的 session 根解析完全落在链的缺省分支，链顺序是该改造行为等价性的前提。pi 升级时重验：main.js 三级 ?? 链顺序与 expandTildePath 语义是否漂移"
     },
     "verifiedWith": "0.84.4"
   },
@@ -700,7 +700,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：session-reader index.ts 信号采集以可选链 ctx?.sessionManager?.getSessionDir?.() 读 [live] 根（ctx === undefined 时降级，u3）。pi 升级时重验：ExtensionContext 是否仍无条件携带 sessionManager、ReadonlySessionManager Pick 是否仍含 getSessionDir"
+      "note": "消费方：session-reader index.ts 信号采集以可选链 ctx?.sessionManager?.getSessionDir?.() 读 [live] 根（ctx === undefined 时降级，u3）。pi 升级时重验：ExtensionContext 是否仍无条件携带 sessionManager、ReadonlySessionManager Pick 是否仍含 getSessionDir"
     },
     "verifiedWith": "0.84.4"
   },
@@ -723,7 +723,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：session-reader roots.ts 的 [live] 根识别（根本身 vs encodeCwd 子目录剥层）与 P-6（RPC 模式 getSessionDir() 实跑值）依赖此双形态语义。pi 升级时重验：create 三目分支与实例 getSessionDir 是否仍无再派生"
+      "note": "消费方：session-reader roots.ts 的 [live] 根识别（根本身 vs encodeCwd 子目录剥层）与 P-6（RPC 模式 getSessionDir() 实跑值）依赖此双形态语义。pi 升级时重验：create 三目分支与实例 getSessionDir 是否仍无再派生"
     },
     "verifiedWith": "0.84.4"
   },
@@ -752,7 +752,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：session-reader 四根标签（[live] 剥层 / [default]）与 taiji 方案 B 布局对齐（U15 SSOT 改值）以本构造式为基准；数据目录下全部 <encoded-cwd> 形态子目录须与本编码式一致才能被 pi 原生 listAll 枚举。pi 升级时重验：编码式（分隔符集合与 -- 包裹）与 sessions 挂载层是否漂移"
+      "note": "消费方：session-reader 四根标签（[live] 剥层 / [default]）与 taiji 方案 B 布局对齐（U15 SSOT 改值）以本构造式为基准；数据目录下全部 <encoded-cwd> 形态子目录须与本编码式一致才能被 pi 原生 listAll 枚举。pi 升级时重验：编码式（分隔符集合与 -- 包裹）与 sessions 挂载层是否漂移"
     },
     "verifiedWith": "0.84.4"
   },
@@ -769,7 +769,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：方案 B（taiji 数据布局与 pi 同构）成立前提之一——托管数据目录内 settings.json 的 sessionDir 恒空，pi 才走默认派生（PS-34）；该字段被清除时方走默认派生（无写入方应设置它）。pi 升级时重验：getSessionDir 是否仍直读 settings.sessionDir 且无副作用、是否新增 sessionDir 写入路径"
+      "note": "消费方：方案 B（taiji 数据布局与 pi 同构）成立前提之一——托管数据目录内 settings.json 的 sessionDir 恒空，pi 才走默认派生（PS-34）；该字段被清除时方走默认派生（无写入方应设置它）。pi 升级时重验：getSessionDir 是否仍直读 settings.sessionDir 且无副作用、是否新增 sessionDir 写入路径"
     },
     "verifiedWith": "0.84.4"
   },
@@ -786,7 +786,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：rename-session first-prompt 谓词（pure.ts countUserMessages，设计 rename-session-three-modes.md D2）——message_end(user) handler 内 entries 计数 === 0 ⇔ 本条即 session 首条 user；顺序反转则首 turn 标题生成停触发（首条被判非首条）。单测 TC-M1/M3（index.test.ts）以 entries 空/含 user 编码该契约（mock 不验证 pi 侧真实顺序）。pi 升级时重验：_emitExtensionEvent 与 appendMessage 的相对顺序"
+      "note": "消费方：rename-session first-prompt 谓词（pure.ts countUserMessages，设计 rename-session-three-modes.md D2）——message_end(user) handler 内 entries 计数 === 0 ⇔ 本条即 session 首条 user；顺序反转则首 turn 标题生成停触发（首条被判非首条）。单测 TC-M1/M3（index.test.ts）以 entries 空/含 user 编码该契约（mock 不验证 pi 侧真实顺序）。pi 升级时重验：_emitExtensionEvent 与 appendMessage 的相对顺序"
     },
     "verifiedWith": "0.84.4"
   },
@@ -809,7 +809,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：taiji 经 get_available_models（PS-10 读面）拿到的可用模型清单由该巡检快照承载——oauth 凭据临近过期的 provider 刷新失败时该轮快照不更新，清单滞后属 pi 侧行为非 taiji 缓存失真（cache-governance 审计 A-1 登记的 pi 语义断言依赖）。pi 升级时重验：resolveProviderAuth 调用点是否补 catch、Promise.all 是否改 allSettled 化部分成功、availabilityError 记录后是否有自动重试收敛"
+      "note": "消费方：taiji 经 get_available_models（PS-10 读面）拿到的可用模型清单由该巡检快照承载——oauth 凭据临近过期的 provider 刷新失败时该轮快照不更新，清单滞后属 pi 侧行为非 taiji 缓存失真（cache-governance 审计 A-1 登记的 pi 语义断言依赖）。pi 升级时重验：resolveProviderAuth 调用点是否补 catch、Promise.all 是否改 allSettled 化部分成功、availabilityError 记录后是否有自动重试收敛"
     },
     "verifiedWith": "0.84.4"
   },
@@ -826,7 +826,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：taiji 读 pi 模型状态（get_state 的 model 字段等，PS-10 读面同族）遇未初始化窗口拿到的是 unknown 占位而非空值——按对象真值判定会误判「已有模型」。pi 升级时重验：占位字段集与 ?? 兜底位置是否漂移（如改回 undefined 或新增独立 hasModel 标志）"
+      "note": "消费方：taiji 读 pi 模型状态（get_state 的 model 字段等，PS-10 读面同族）遇未初始化窗口拿到的是 unknown 占位而非空值——按对象真值判定会误判「已有模型」。pi 升级时重验：占位字段集与 ?? 兜底位置是否漂移（如改回 undefined 或新增独立 hasModel 标志）"
     },
     "verifiedWith": "0.84.4"
   },
@@ -843,7 +843,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：packages/runtime/src/services/session/history-rebuild-cache.ts 的 since=leafId 游标翻页（头注 :25 自述「compact 是 append-only → since 不会因 compact 失效」）+ cache-governance 批 3 extractLatestModelFromJsonl 尾扫（U7/U8 落地后生效）。pi 升级时重验与 PS-18 同点：_rewriteFile 触发面是否仍限加载期、是否新增删除/改写路径——PS-18 登记 pi 侧机制，本条登记 taiji 消费侧前提，pi bump 双条同验"
+      "note": "消费方：packages/runtime/src/services/session/history-rebuild-cache.ts 的 since=leafId 游标翻页（头注 :25 自述「compact 是 append-only → since 不会因 compact 失效」）+ cache-governance 批 3 extractLatestModelFromJsonl 尾扫（U7/U8 落地后生效）。pi 升级时重验与 PS-18 同点：_rewriteFile 触发面是否仍限加载期、是否新增删除/改写路径——PS-18 登记 pi 侧机制，本条登记 taiji 消费侧前提，pi bump 双条同验"
     },
     "verifiedWith": "0.84.4"
   },
@@ -924,13 +924,13 @@
   },
   {
     "id": "PS-44",
-    "claim": "pi 读面对 assistant 消息的 usage 无守卫：getSessionStats 对每条 assistant 裸调 addUsageToTotals(usage)（读 .input），turn 前上下文扫描对 stopReason 非 aborted/error 的 assistant 裸调 calculateContextTokens(usage)（读 .totalTokens）——「终态 stopReason + 无 usage 键」的 assistant entry 会让会话恢复后续聊即崩、stats 恒败。pi 原生写侧连错误轮都写全零 usage（全零 = 无测量数据的合法编码，守卫按无效跳过），zcode 导入产物必须遵守同一不变量（converter zeroUsage 兜底 + unsealedStopReason 把取消/失败轮映射 aborted/error）",
+    "claim": "pi 读面对 assistant 消息的 usage 无检查：getSessionStats 对每条 assistant 裸调 addUsageToTotals(usage)（读 .input），turn 前上下文扫描对 stopReason 非 aborted/error 的 assistant 裸调 calculateContextTokens(usage)（读 .totalTokens）——「终态 stopReason + 无 usage 键」的 assistant entry 会让会话恢复后续聊即崩、stats 恒败。pi 原生写侧连错误轮都写全零 usage（全零 = 无测量数据的合法编码，检查按无效跳过），zcode 导入产物必须遵守同一不变量（converter zeroUsage 兜底 + unsealedStopReason 把取消/失败轮映射 aborted/error）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/agent-session.js",
         "symbol": "getSessionStats / addUsageToTotals",
-        "note": ":2678 assistant 分支裸传 assistantMsg.usage（toolResult 分支 :2668 有 if (message.usage) 守卫）；无 usage → Cannot read properties of undefined (reading 'input')——get_session_stats RPC 恒败即此形态"
+        "note": ":2678 assistant 分支裸传 assistantMsg.usage（toolResult 分支 :2668 有 if (message.usage) 检查）；无 usage → Cannot read properties of undefined (reading 'input')——get_session_stats RPC 恒败即此形态"
       },
       {
         "pkg": "pi-coding-agent",
@@ -942,7 +942,7 @@
         "pkg": "pi-agent-core",
         "distPath": "dist/harness/compaction/compaction.js",
         "symbol": "getAssistantUsage / calculateContextTokens",
-        "note": ":92 usage.totalTokens || input+output+cacheRead+cacheWrite；getAssistantUsage 跳过 aborted/error/零 usage——pi 自己的守卫面（对照：agent-session 两处未守卫）"
+        "note": ":92 usage.totalTokens || input+output+cacheRead+cacheWrite；getAssistantUsage 跳过 aborted/error/零 usage——pi 自己的检查面（对照：agent-session 两处未检查）"
       }
     ],
     "guard": {
@@ -953,7 +953,7 @@
   },
   {
     "id": "PS-45",
-    "claim": "rpc 模式扩展 UI 应答（extension_ui_response）只 resolve 扩展持有的 Promise 并在命令分派前退出——应答路径可达效应集（分派块 ∪ 模块内被调函数展开 ∪ 全部 resolve 应答回调体）不含对话回灌（prompt/sendMessage/sendUserMessage/steer/followUp/appendMessage/appendEntry 等 session 写入与续轮投递）、不开 turn（agent 轮次启动）、不进命令分派（handleCommand）、不发任何 stdout 帧（message/turn 事件串与 output() 全缺席）；这是 taiji ADR-0072 分型与 expectTurn 通路（form-submit-busy-convergence 前提 1：pi select 应答从不回灌对话、不开 turn）的 pi 侧承重语义——pi 升级若在此路径引入对话效应，D1 全链失锚且无显式信号，由本探针拦为红灯。探针断言语义非源码结构：按 wire 协议串定位分派、效应集做缺席断言、控制流只锁「分派前终止」（块尾 exit 或紧邻 else），不绑行号/处理函数名/代码形状，pi 重构形态变而语义不变不误报",
+    "claim": "rpc 模式扩展 UI 应答（extension_ui_response）只 resolve 扩展持有的 Promise 并在命令分派前退出——应答路径可达效应集（分派块 ∪ 模块内被调函数展开 ∪ 全部 resolve 应答回调体）不含对话回灌（prompt/sendMessage/sendUserMessage/steer/followUp/appendMessage/appendEntry 等 session 写入与续轮投递）、不开 turn（agent 轮次启动）、不进命令分派（handleCommand）、不发任何 stdout 帧（message/turn 事件串与 output() 全缺席）；这是 taiji ADR-0072 分型与 expectTurn 通路（form-submit-busy-convergence 前提 1：pi select 应答从不回灌对话、不开 turn）的 pi 侧承重语义——pi 升级若在此路径引入对话效应，D1 全链定位失败且无显式信号，由本探针拦为红灯。探针断言语义非源码结构：按 wire 协议串定位分派、效应集做缺席断言、控制流只锁「分派前终止」（块尾 exit 或紧邻 else），不绑行号/处理函数名/代码形状，pi 重构形态变而语义不变不误报",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -993,7 +993,7 @@
   },
   {
     "id": "PS-47",
-    "claim": "pi-ai 全族流式实现凡产 text/thinking/toolcall delta 必先产对应 *_start（composer-genstats-ttft 首输出结算前提，设计 §3.2「单点收无 interpreter 兜底」+ 否决表 E 的依据）：六个具体实现分三族——① lazy 工厂族（openai-completions 的 ensure*Block：blocks.push 唯三处全在 ensure 内且 120 字符内紧跟对应 *_start 推送；openai-responses-shared 的 createSlot+getSlot：三创建分支各播报 *_start，getSlot 类型不匹配返回 undefined，delta 站点经 if (!slot) continue 守卫）；② wire 事件映射族（anthropic-messages：content_block_start 分支建块即播报三种 *_start，content_block_delta 分支按 index 查块 + block 类型守卫，无块不产 delta；bedrock-converse-stream：toolUse 块唯一创建点 handleContentBlockStart 播报 toolcall_start，delta 处理器 text/thinking 无块先建块播报、toolcall 前置既有 toolCall 块守卫）；③ 守卫分支紧邻族（google-generative-ai / mistral-conversations：if (!currentBlock) 建块分支播报 *_start 与 delta push 同迭代紧邻）。openai-responses / openai-codex-responses / azure-openai-responses 均委托 openai-responses-shared.processResponsesStream（无独立流式实现，探针钉住委托关系防新增独立实现漏探）。taiji 依赖面：adapter 仅对 text_start / thinking_start / toolcall_start 三子类型产 llm-first-output——pi 若出现产 delta 不先产 *_start 的 provider，该模型 TTFT 恒 null 静默降级（前端显 —），本探针在 pi bump 门禁先红",
+    "claim": "pi-ai 全族流式实现凡产 text/thinking/toolcall delta 必先产对应 *_start（composer-genstats-ttft 首输出结算前提，设计 §3.2「单点收无 interpreter 兜底」+ 否决表 E 的依据）：六个具体实现分三族——① lazy 工厂族（openai-completions 的 ensure*Block：blocks.push 唯三处全在 ensure 内且 120 字符内紧跟对应 *_start 推送；openai-responses-shared 的 createSlot+getSlot：三创建分支各播报 *_start，getSlot 类型不匹配返回 undefined，delta 站点经 if (!slot) continue 检查）；② wire 事件映射族（anthropic-messages：content_block_start 分支建块即播报三种 *_start，content_block_delta 分支按 index 查块 + block 类型检查，无块不产 delta；bedrock-converse-stream：toolUse 块唯一创建点 handleContentBlockStart 播报 toolcall_start，delta 处理器 text/thinking 无块先建块播报、toolcall 前置既有 toolCall 块检查）；③ 检查分支紧邻族（google-generative-ai / mistral-conversations：if (!currentBlock) 建块分支播报 *_start 与 delta push 同迭代紧邻）。openai-responses / openai-codex-responses / azure-openai-responses 均委托 openai-responses-shared.processResponsesStream（无独立流式实现，探针钉住委托关系防新增独立实现漏探）。taiji 依赖面：adapter 仅对 text_start / thinking_start / toolcall_start 三子类型产 llm-first-output——pi 若出现产 delta 不先产 *_start 的 provider，该模型 TTFT 恒 null 静默降级（前端显 —），本探针在 pi bump 门禁先红",
     "piAnchor": [
       {
         "pkg": "pi-ai",
@@ -1011,31 +1011,31 @@
         "pkg": "pi-ai",
         "distPath": "dist/api/anthropic-messages.js",
         "symbol": "content_block_start / content_block_delta 分支",
-        "note": "start 分支 :412-458 四子型（text/thinking/redacted_thinking/tool_use）建块 output.content.push 后即播报对应 *_start；delta 分支 :459-496 每站点 blocks.findIndex((b) => b.index === event.index) 查块 + if (block && block.type === ...) 守卫（blocks = output.content :389，块只在 start 分支创建）"
+        "note": "start 分支 :412-458 四子型（text/thinking/redacted_thinking/tool_use）建块 output.content.push 后即播报对应 *_start；delta 分支 :459-496 每站点 blocks.findIndex((b) => b.index === event.index) 查块 + if (block && block.type === ...) 检查（blocks = output.content :389，块只在 start 分支创建）"
       },
       {
         "pkg": "pi-ai",
         "distPath": "dist/api/bedrock-converse-stream.js",
         "symbol": "handleContentBlockStart / handleContentBlockDelta",
-        "note": "Start 处理器 :425-433 toolUse 块创建播报 toolcall_start :432；Delta 处理器 :434 起——text :444-452 if (!block) 建块播报 text_start :447 后 text_delta :451；toolcall :456 前置 block?.type === \"toolCall\" 守卫（块由 Start 处理器创建）；thinking :460-475 if (!thinkingBlock) 建块播报 thinking_start :467（redacted 二站点同分支）"
+        "note": "Start 处理器 :425-433 toolUse 块创建播报 toolcall_start :432；Delta 处理器 :434 起——text :444-452 if (!block) 建块播报 text_start :447 后 text_delta :451；toolcall :456 前置 block?.type === \"toolCall\" 检查（块由 Start 处理器创建）；thinking :460-475 if (!thinkingBlock) 建块播报 thinking_start :467（redacted 二站点同分支）"
       },
       {
         "pkg": "pi-ai",
         "distPath": "dist/api/google-generative-ai.js",
-        "symbol": "part.text 守卫分支 + functionCall toolcall 三连",
+        "symbol": "part.text 检查分支 + functionCall toolcall 三连",
         "note": ":80-91 if (!currentBlock) 建块分支按 isThinking 播报 thinking_start :84 / text_start :89；:92-111 同迭代 delta push（thinking_delta :96 / text_delta :106，距 start ~840/~1072 字符——间夹 heuristics 分支，窗口 1300）；:145-151 toolcall_start :147 → toolcall_delta :149 紧邻"
       },
       {
         "pkg": "pi-ai",
         "distPath": "dist/api/mistral-conversations.js",
-        "symbol": "contentItems 守卫分支 + tool_calls 建块",
+        "symbol": "contentItems 检查分支 + tool_calls 建块",
         "note": "text（string item）:458-470 与 text item :497-509 两站点 if (!currentBlock || type !== \"text\") 建块播报 text_start :460/:500 后 text_delta :464/:504（~200 字符）；thinking :481-491 同款 :483→:487；toolcall :522-552 if (!block) 建块播报 toolcall_start :540 后 toolcall_delta :548（~474 字符，间夹 id/key 解析）"
       },
       {
         "pkg": "pi-ai",
         "distPath": "dist/api/openai-codex-responses.js",
         "symbol": "processResponsesStream 委托（含 azure-openai-responses.js 同款）",
-        "note": "codex :14 import + :476/:1183 调用；azure-openai-responses.js :11 import + :92 调用——responses 系包装无独立流式实现，*_start 前提由 openai-responses-shared 单源承载；若 pi 升级引入独立实现，探针族闭合断言先红"
+        "note": "codex :14 import + :476/:1183 调用；azure-openai-responses.js :11 import + :92 调用——responses 系包装无独立流式实现，*_start 前提由 openai-responses-shared 单源承载；若 pi 升级引入独立实现，探针族全量断言先红"
       }
     ],
     "guard": {
@@ -1057,13 +1057,13 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：structured-output workflow-hook RETRY_REMINDER_CUSTOM_TYPE 注释 / decisions.md ADR-0068 语义① / extension-conventions「Event handler 消息注入」三处引用本条。pi 升级时重验：case \"custom\" 是否仍无条件 role:\"user\"——若引入 display/其它条件门控，custom 注入的 LLM 可见性语义变化，三处消费面同审"
+      "note": "消费方：structured-output workflow-hook RETRY_REMINDER_CUSTOM_TYPE 注释 / decisions.md ADR-0068 语义① / extension-conventions「Event handler 消息注入」三处引用本条。pi 升级时重验：case \"custom\" 是否仍无条件 role:\"user\"——若引入 display/其它条件门控，custom 注入的 LLM 可见性语义变化，三处消费方同审"
     },
     "verifiedWith": "0.84.4"
   },
   {
     "id": "PS-49",
-    "claim": "prompt() 对 / 开头文本（expandPromptTemplates 默认 true）先 await _tryExecuteExtensionCommand，命令命中时 preflightResult?.(true) 后立即 return——纯扩展命令（如 /schedule list）不进 agent 轮、不产任何 turn 事件（turn_start/agent_start/agent_settled 全缺席）。taiji CP6 occupancy 收口窗的 pi 侧前提：dispatcher 在 client.prompt 前已置 occupancy.turn=dispatching，纯命令路径无 turn 事件驱动其回落，必须 prompt resolve 后武装 2s 短窗兜底回落 idle，否则该维度永久卡 dispatching（stop 按钮态 + busy 预检拒下一条消息）",
+    "claim": "prompt() 对 / 开头文本（expandPromptTemplates 默认 true）先 await _tryExecuteExtensionCommand，命令命中时 preflightResult?.(true) 后立即 return——纯扩展命令（如 /schedule list）不进 agent 轮、不产任何 turn 事件（turn_start/agent_start/agent_settled 全缺席）。taiji CP6 occupancy 收敛窗的 pi 侧前提：dispatcher 在 client.prompt 前已置 occupancy.turn=dispatching，纯命令路径无 turn 事件驱动其回落，必须 prompt resolve 后武装 2s 短窗兜底回落 idle，否则该维度永久卡 dispatching（stop 按钮态 + busy 预检拒下一条消息）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1074,7 +1074,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：packages/runtime/src/services/session/event-interpreter.ts OccupancySettleWindow 头注（CP6，scheduler-trigger-inversion §11 CP6）——arm（dispatcher 在 prompt resolve 后武装 2s 短窗）/ cancel（agent_start、turn_start 到达即取消）语义整体承重于「纯命令零 turn 事件」；命令 handler 自身经 ctx sendMessage 开轮属命令副作用，产生的 turn 事件会 cancel 短窗，语义不冲突。pi 升级时重验：handled 分支是否仍早退于 agent 轮启动、preflightResult 回调时序是否变化——若命令路径开始产 turn 事件，CP6 的「窗口内无 turn 事件 ⇔ 纯命令」判据失效，须复审收口设计"
+      "note": "消费方：packages/runtime/src/services/session/event-interpreter.ts OccupancySettleWindow 头注（CP6，scheduler-trigger-inversion §11 CP6）——arm（dispatcher 在 prompt resolve 后武装 2s 短窗）/ cancel（agent_start、turn_start 到达即取消）语义整体承重于「纯命令零 turn 事件」；命令 handler 自身经 ctx sendMessage 开轮属命令副作用，产生的 turn 事件会 cancel 短窗，语义不冲突。pi 升级时重验：handled 分支是否仍早退于 agent 轮启动、preflightResult 回调时序是否变化——若命令路径开始产 turn 事件，CP6 的「窗口内无 turn 事件 ⇔ 纯命令」判据失效，须复审收敛设计"
     },
     "verifiedWith": "0.84.4"
   },
@@ -1103,24 +1103,24 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：extensions/universal/scheduler/src/ack-provider.ts computeAckAvailability 判据②注释（no-base 短路先于 available 判定）。pi 升级时重验三断言：registerProvider 是否仍无条件删 native 层（若改为保留/合并 native 条目，覆写不再顶掉第三方注册，判据②可放宽）；unregisterProvider 是否仍两层同删无恢复；getRegisteredProviderIds 是否仍两层并集（若改为仅扩展层，isProviderRegistered 漏看 native 层注册）——任一漂移须复审 scheduler ack 判据②的 no-base 前提"
+      "note": "消费方：extensions/universal/scheduler/src/ack-provider.ts computeAckAvailability 判据②注释（no-base 短路先于 available 判定）。pi 升级时重验三断言：registerProvider 是否仍无条件删 native 层（若改为保留/合并 native 条目，覆写不再顶掉第三方注册，判据②可放宽）；unregisterProvider 是否仍两层同删无恢复；getRegisteredProviderIds 是否仍两层并集（若改为仅扩展层，isProviderRegistered 漏看 native 层注册）——任一漂移须复审 scheduler ack 判据②的 no-base 前提"
     },
     "verifiedWith": "0.84.4"
   },
   {
     "id": "PS-51",
-    "claim": "forkFrom 写序：先 writeFileSync(新 header, flag:'wx') 建文件，后同步 appendFileSync 循环逐条复制全部非 header entry——文件可见先于内容写完；复制循环为同步 Node 调用，信号不打断 → 进程退出即写入侧封闭。btw fork bootstrap「await exited 后读到的必是完整静止文件」保证（btw-fork-exec.ts forkViaCliPi 成功分支）以此为承重前提：pi 若改异步/流式落盘即漂移失效，宿主须改为等待可观测写入完成信号。守卫面：源空/无 header → throw（CLI 语境 exit 1 'Cannot fork: source session file is empty or invalid'）；header-only 源不 throw，产出仅 header 快照（宿主 inspectSourceState 前置判 empty 更严一档）",
+    "claim": "forkFrom 写序：先 writeFileSync(新 header, flag:'wx') 建文件，后同步 appendFileSync 循环逐条复制全部非 header entry——文件可见先于内容写完；复制循环为同步 Node 调用，信号不打断 → 进程退出即写入侧封闭。btw fork bootstrap「await exited 后读到的必是完整静止文件」保证（btw-fork-exec.ts forkViaCliPi 成功分支）以此为承重前提：pi 若改异步/流式落盘即漂移失效，宿主须改为等待可观测写入完成信号。检查面：源空/无 header → throw（CLI 语境 exit 1 'Cannot fork: source session file is empty or invalid'）；header-only 源不 throw，产出仅 header 快照（宿主 inspectSourceState 前置判 empty 更严一档）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/session-manager.js",
-        "symbol": "forkFrom（fork 写序 + 守卫）",
-        "note": ":1237 定义 —— :1241-1246 守卫（源空 :1241-1242 / 无 header :1245-1246 throw）；:1269 writeFileSync(newSessionFile, header, { flag: 'wx' }) 排他建文件；:1271-1275 for 循环 appendFileSync(newSessionFile, entry) 同步复制全部非 header entry（无 await/流式；header-only 源零 append 仍产出文件）"
+        "symbol": "forkFrom（fork 写序 + 检查）",
+        "note": ":1237 定义 —— :1241-1246 检查（源空 :1241-1242 / 无 header :1245-1246 throw）；:1269 writeFileSync(newSessionFile, header, { flag: 'wx' }) 排他建文件；:1271-1275 for 循环 appendFileSync(newSessionFile, entry) 同步复制全部非 header entry（无 await/流式；header-only 源零 append 仍产出文件）"
       }
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：packages/runtime/src/services/session/btw-fork-exec.ts forkViaCliPi 成功分支 await 注释（锚点 pi@0.84.4 dist/core/session-manager.js:1237/:1269/:1271-1275）+ inspectSourceState JSDoc；btw-service.ts 设计前提核实块①回指本条。pi 升级重验：forkFrom 是否仍先同步 writeFileSync(header) 后同步 appendFileSync 循环（改异步/流式即漂移——「退出即写入侧封闭」失效）；守卫 throw 与 header-only 行为有 durable 探针 packages/runtime/src/services/session/__tests__/btw-pi-fork-semantics.test.ts（forkFrom 实装直驱，断言最终逐字节等价/throw/零 entry 快照）；写序时序本身无探针（时序断言探针化成本高，靠锚点行号复审）"
+      "note": "消费方：packages/runtime/src/services/session/btw-fork-exec.ts forkViaCliPi 成功分支 await 注释（锚点 pi@0.84.4 dist/core/session-manager.js:1237/:1269/:1271-1275）+ inspectSourceState JSDoc；btw-service.ts 设计前提核实块①回指本条。pi 升级重验：forkFrom 是否仍先同步 writeFileSync(header) 后同步 appendFileSync 循环（改异步/流式即漂移——「退出即写入侧封闭」失效）；检查 throw 与 header-only 行为有 durable 探针 packages/runtime/src/services/session/__tests__/btw-pi-fork-semantics.test.ts（forkFrom 实装直驱，断言最终逐字节等价/throw/零 entry 快照）；写序时序本身无探针（时序断言探针化成本高，靠锚点行号复审）"
     },
     "verifiedWith": "0.84.4"
   },
@@ -1137,7 +1137,24 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费面：packages/runtime/src/infra/pi/pi-paths.ts isPiSessionId JSDoc + packages/zcode-session-source/src/normalize.ts 头注（两处均带锚点行号）。漂移形态 = pi 放宽/收紧字符集时 taiji 侧 fail-fast 响亮拒绝（getBtwThreadDir throw / normalizeZcodeSessionId throw），非静默错路由。pi 升级重验：比对 assertValidSessionId 正则字面量与 taiji 侧 PI_SESSION_ID_PATTERN 是否仍逐字符一致"
+      "note": "消费方：packages/runtime/src/infra/pi/pi-paths.ts isPiSessionId JSDoc + packages/zcode-session-source/src/normalize.ts 头注（两处均带锚点行号）。漂移形态 = pi 放宽/收紧字符集时 taiji 侧 fail-fast 响亮拒绝（getBtwThreadDir throw / normalizeZcodeSessionId throw），非静默错路由。pi 升级重验：比对 assertValidSessionId 正则字面量与 taiji 侧 PI_SESSION_ID_PATTERN 是否仍逐字符一致"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-53",
+    "claim": "pi 会话消息 content 的双形态：AssistantMessage.content 恒为 blocks 数组（TextContent | ThinkingContent | ToolCall——text 块携带文本）；string 形态属 UserMessage（content: string | (TextContent | ImageContent)[]）。taiji 消费方：subagent-core resume 档 1 补收的 extractAssistantTextContent——提取口径 = type==='text' 块的 text 拼接（string 分支为防御宽面，assistant 流不命中；thinking/toolCall 块排除）",
+    "piAnchor": [
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/types.d.ts",
+        "symbol": "AssistantMessage / UserMessage",
+        "note": "AssistantMessage.content: (TextContent | ThinkingContent | ToolCall)[]（:307-309）；UserMessage.content: string | (TextContent | ImageContent)[]（:302-304）；ToolResultMessage.content 同 blocks 形态（:328-332）"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：packages/subagent-core/src/orchestration/resume-run.ts extractAssistantTextContent JSDoc（带锚点行号）。漂移形态 = pi 改 content 块词表（新增块类型/更名 text 块）时提取口径漏收新正文形态——档 1 判档退化为档 2 重派（多花一次生成，功能不阻断）。pi 升级重验：比对 types.d.ts 三 Message 接口的 content 联合类型是否仍为上述形态"
     },
     "verifiedWith": "0.84.4"
   }

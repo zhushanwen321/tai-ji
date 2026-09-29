@@ -68,8 +68,8 @@ SSE 帧通用形状 `{id, type, properties}`。**双轨以 v1 族为锚**（§0 
 | 源 type | 载荷要点 | taiji 事件 | 映射方式 | 证据 |
 |---|---|---|---|---|
 | `message.part.delta` | {sessionID, messageID, partID, field, delta}（field 恒 "text"） | `text_delta` / `thinking_delta` | 合成：按适配器维护的 partID→part.type 分流（text part→text_delta；reasoning part→thinking_delta） | v1/session.ts:632-641；发射 processor.ts:299-305,517-523 |
-| `message.part.updated` | {sessionID, part, time}（Part 12 种） | `tool_start` / `tool_end` / compaction 判定 / text|thinking 全量校正 | 合成：tool part 状态机（§4）；text/reasoning part 用于 delta 校正与闭合 | v1/session.ts:612-620；发射 session.ts:637、processor.ts 全部 updatePart |
-| `message.updated` | {sessionID, info: User\|Assistant} | `turn_end`（assistant 闭合时） | 合成：assistant message 出现 `time.completed` 且 `finish` 落定 → 一个 taiji turn 闭合；最后一个 turn 闭合即 `message_end` | v1/session.ts:596-603；发射 session.ts:631、processor.ts:470,610 |
+| `message.part.updated` | {sessionID, part, time}（Part 12 种） | `tool_start` / `tool_end` / compaction 判定 / text|thinking 全量校正 | 合成：tool part 状态机（§4）；text/reasoning part 用于 delta 校正与收尾 | v1/session.ts:612-620；发射 session.ts:637、processor.ts 全部 updatePart |
+| `message.updated` | {sessionID, info: User\|Assistant} | `turn_end`（assistant 完成时） | 合成：assistant message 出现 `time.completed` 且 `finish` 落定 → 一个 taiji turn 完成；最后一个 turn 完成即 `message_end` | v1/session.ts:596-603；发射 session.ts:631、processor.ts:470,610 |
 | `message.removed` | {sessionID, messageID} | — | 丢弃（revert/delete 面适配不用） | v1/session.ts:604-611 |
 | `message.part.removed` | {sessionID, messageID, partID} | — | 丢弃 | v1/session.ts:621-629 |
 | `session.created` / `session.updated` / `session.deleted` | {sessionID, info: SessionInfo} | —（handleReady 数据源，§7） | 直接（不进事件流；session.created 用于 handle 回填） | v1/session.ts:572-595；发射 session.ts:535,622,746 |
@@ -189,7 +189,7 @@ opencode 两层 message/part（user message → N 个 assistant message，各含
 | 位 | 值 | 依据 |
 |---|---|---|
 | schemaEnforcement | `emulated` | StructuredOutput 工具注入 + toolChoice:"required" + system 提示（prompt.ts:1243-1250,1271,1285,1565-1598）；未调用 → StructuredOutputError（schema_deterministic 分诊可用） |
-| steer | `emulated` | busy 期间 POST prompt **不拒绝**：Runner.ensureRunning 排队（`packages/opencode/src/effect/runner.ts:109-116` 等待当前 run done），新 user message 已先行落库，活跃 run 下一轮迭代读到并继续处理（prompt.ts:1092,1096-1098）——语义 = 消息并入当前 run 的后续 turn，非即时注入；空闲时起新 run。BusyError 仅 shell/revert/deleteMessage 路径（run-state.ts:71-75,96-105,145-147） |
+| steer | `emulated` | busy 期间 POST prompt **不拒绝**：Runner.ensureRunning 排队（`packages/opencode/src/effect/runner.ts:109-116` 等待当前 run done），新 user message 已先行入库，活跃 run 下一轮迭代读到并继续处理（prompt.ts:1092,1096-1098）——语义 = 消息并入当前 run 的后续 turn，非即时注入；空闲时起新 run。BusyError 仅 shell/revert/deleteMessage 路径（run-state.ts:71-75,96-105,145-147） |
 | conversation | `native` | serve 常驻 + session 持久 sqlite；续聊 = 同 sessionID 再 POST prompt，无冷恢复成本（§2 resume 行） |
 | personaInjection | `file` | agent 按名引用约定目录 .md（config/agent.ts:13-31）；适配器负责把 taiji agent .md 落盘到该目录 |
 | eventGranularity | `stream` | SSE message.part.delta 流式（§3.1） |

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
-import { mkdtemp, mkdir, readdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import {
   resolveSessionRoots,
@@ -9,7 +9,7 @@ import {
   type SessionRootSignals,
 } from '../discovery/roots.js'
 import { buildFamilyFromFs } from '../discovery/subagents.js'
-import { REAL_AGENT_DIR, HAS_E6, HAS_REAL_AGENT_DIR, HAS_REAL_SUBAGENTS_DIR, REAL_DATA_TIMEOUT_MS } from './real-data.js'
+import { FIX_E6 } from './fixtures.js'
 
 // ============================================================
 // A3（ext-simplify-04 U4）：listMainSessions/listSubagentSessions 薄包装已删除，
@@ -35,7 +35,7 @@ async function writeJsonl(path: string, content = '{"type":"session","id":"x"}\n
   await writeFile(path, content)
 }
 
-/** 真实形态的 cwd 编码目录名（encodeCwd：`--` 开头 `--` 结尾，实证见 real-data.ts） */
+/** 真实形态的 cwd 编码目录名（encodeCwd：`--` 开头 `--` 结尾） */
 const SLUG = '--Users-foo--'
 
 describe('main 根过滤（原 listMainSessions 等价式，A3 退役后保覆盖）', () => {
@@ -100,8 +100,18 @@ describe('main 根过滤（原 listMainSessions 等价式，A3 退役后保覆�
     await expect(mainSessionFiles(join(dir, 'no-such-dir'))).resolves.toEqual([])
   })
 
-  it.skipIf(!HAS_E6)('真实数据：扫描 ~/.pi/agent，含 019e6c96，不含 .finalized 与 wf-', async () => {
-    const result = await mainSessionFiles(REAL_AGENT_DIR)
+  it('扫描 sessions/：含目标 session，排除 .finalized 与 workflow-state 目录（019e6c96 锚）', async () => {
+    // wf-state 文件（wf-*.jsonl）经 workflow-state 目录跳过排除——main 根无独立的
+    // wf- 文件名前缀过滤，slug 顶层放 wf-*.jsonl 会被收进候选集（该形态不在真实
+    // 落盘布局中出现：wf-state 恒在 workflow-state/ 目录内）
+    const slug = '--Users-foo--'
+    const slugDir = join(dir, 'sessions', slug)
+    await mkdir(join(slugDir, 'workflow-state'), { recursive: true })
+    await writeFile(join(slugDir, `${FIX_E6}.jsonl`), `{"type":"session","id":"${FIX_E6}"}\n`)
+    await writeFile(join(slugDir, 'b.jsonl.finalized'), '{"type":"session","id":"b"}\n')
+    await writeFile(join(slugDir, 'workflow-state', 'wf-inner.jsonl'), '{"v":"wf-run-v1"}\n')
+
+    const result = await mainSessionFiles(dir)
     expect(result.length).toBeGreaterThan(0)
     // 含目标 session
     expect(result.some((m) => m.path.includes('019e6c96'))).toBe(true)
@@ -109,11 +119,9 @@ describe('main 根过滤（原 listMainSessions 等价式，A3 退役后保覆�
     expect(result.every((m) => !m.path.endsWith('.finalized'))).toBe(true)
     // 排除 workflow-state 目录
     expect(result.every((m) => !m.path.includes('workflow-state'))).toBe(true)
-    // 排除 wf- 前缀文件名
-    expect(result.every((m) => !m.path.split('/').pop()!.startsWith('wf-'))).toBe(true)
     // mtime/size 真实
     expect(result.every((m) => m.mtime > 0 && m.size > 0)).toBe(true)
-  }, REAL_DATA_TIMEOUT_MS)
+  })
 })
 
 describe('subagent 根选择（原 listSubagentSessions 等价式，A3 退役后保覆盖）', () => {
@@ -156,12 +164,6 @@ describe('subagent 根选择（原 listSubagentSessions 等价式，A3 退役后
   it('无 subagents 目录返回 []，不抛错', async () => {
     await expect(subagentSessionFiles(dir)).resolves.toEqual([])
   })
-
-  it.skipIf(!HAS_REAL_SUBAGENTS_DIR)('真实数据：扫描 ~/.pi/agent/subagents 返回非空', async () => {
-    const result = await subagentSessionFiles(REAL_AGENT_DIR)
-    expect(result.length).toBeGreaterThan(0)
-    expect(result.every((m) => !m.path.endsWith('.finalized'))).toBe(true)
-  }, REAL_DATA_TIMEOUT_MS)
 })
 
 // ============================================================
@@ -320,26 +322,22 @@ describe('resolveSessionRoots', () => {
     await expect(resolveSessionRoots({ agentDir: '' })).resolves.toEqual([])
   })
 
-  it.skipIf(!HAS_REAL_AGENT_DIR)(
-    '§11.2 真实路径集合回归：encodeCwd 判据在真实 sessions 子目录上自洽，剥层分支被真实数据覆盖',
-    async () => {
-      const sessionsDir = join(REAL_AGENT_DIR, 'sessions')
-      const entries = await readdir(sessionsDir, { withFileTypes: true })
-      const dirs = entries.filter((e) => e.isDirectory())
-      expect(dirs.length).toBeGreaterThan(0)
-      let encodeCwdCount = 0
-      for (const d of dirs) {
-        const asLive = join(sessionsDir, d.name)
-        const matchesShape = d.name.startsWith('--') && d.name.endsWith('--')
-        // 判据自洽：匹配形态 → 剥层到父目录；不匹配（如 permission-forwarding/）→ 取自身
-        expect(normalizeLiveSessionDir(asLive)).toBe(matchesShape ? sessionsDir : asLive)
-        if (matchesShape) encodeCwdCount++
-      }
-      // 真实集合以 encodeCwd 目录为主体——剥层分支确实被真实数据覆盖
-      expect(encodeCwdCount).toBeGreaterThan(0)
-    },
-    30000,
-  )
+  it('encodeCwd 判据自洽：--xx-- 形态子目录剥层到 sessions 根，普通名子目录取自身', async () => {
+    // 两种目录形态各造一个：encodeCwd 编码目录（剥层分支）与普通目录名（取自身分支）
+    const tmp = await mkdtemp(join(tmpdir(), 'roots-encode-'))
+    try {
+      const sessionsDir = join(tmp, 'agent', 'sessions')
+      const encoded = join(sessionsDir, '--Users-foo--')
+      const plain = join(sessionsDir, 'permission-forwarding')
+      await writeJsonl(join(encoded, 'a.jsonl'))
+      await writeJsonl(join(plain, 'p.jsonl'))
+      // 判据自洽：匹配 encodeCwd 形态 → 剥层到父目录；不匹配（如 permission-forwarding/）→ 取自身
+      expect(normalizeLiveSessionDir(encoded)).toBe(sessionsDir)
+      expect(normalizeLiveSessionDir(plain)).toBe(plain)
+    } finally {
+      await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
 })
 
 describe('buildFamilyFromFs not-found 文案（U1 并入：列实际扫描候选根）', () => {

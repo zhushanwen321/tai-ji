@@ -463,13 +463,21 @@ describe("U7④ 归零覆盖回归：冷复活 entry 投影不再以归零值覆
     const rec = piRecord("bg-1", child);
     storeB.markResurrected(rec, true);
 
-    // 回归断言：register 的 entry 投影 turns/totalTokens = binding 水合值——
-    // 修复前形态 = createRecord 归零（0/0）经 entry last-writer-wins 覆盖磁盘原值。
+    // 回归断言（[W1/D2 停写写点] 改写面）：register 内置上报的 turns 投影停写——
+    // v2 注册条目只承载身份域（kind=registered，turns/totalTokens/round 零携带），
+    // 「entry last-writer-wins 覆盖磁盘原值」的原始威胁面（GUI 快修批次⑤）随之消灭。
     expect(entries.length).toBeGreaterThan(0);
     const last = entries[entries.length - 1]!;
-    expect(last.turns).toBe(5);
-    expect(last.totalTokens).toBe(1500);
-    expect(last.round).toBe(2);
+    expect(last.kind).toBe("registered");
+    const persisted = JSON.parse(JSON.stringify(last)) as Record<string, unknown>;
+    expect(Object.keys(persisted)).not.toContain("turns");
+    expect(Object.keys(persisted)).not.toContain("totalTokens");
+
+    // 水合保真的新承载面：内存 record 基线 = binding 水合值（后续轮终 round-idle
+    // 事件/条目据此携带正确统计——覆盖原断言的回归意图）。
+    expect(rec.turnCount).toBe(5);
+    expect(rec.totalTokens).toBe(1500);
+    expect(rec.round).toBe(2);
 
     // 磁盘 binding 原值未被覆盖（merge 读侧不变）。
     expect(readRecordBinding(child)?.turns).toBe(5);

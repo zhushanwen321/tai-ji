@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useExtensionUI 统一表单判定矩阵 + view-ready 帧双路径消费单测（ui-presentation-protocol
  * u4 / MF-1-5 归一上移后形态）。

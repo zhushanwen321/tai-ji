@@ -16,7 +16,7 @@
  * （./staging-mode），本模块 = fork 配置对象 + 薄包装：公开 API（返回面 9 项）与
  * ForkDeps 注入契约保持不变，消费方零改动。fork 差异全部经配置表达（P2 清单见
  * staging-mode.ts 头注）：send 目标 = forkSessionAsk（空 content 守卫在 features 层
- * 退化为纯 fork → allowsEmptySend=true）；无 enter 守卫 / 互斥退出 / 发送兑底守卫 /
+ * 退化为纯 fork → allowsEmptySend=true）；无 enter 守卫 / 互斥退出 / 发送兜底守卫 /
  * B 阶段（isInProgress 恒 false、abort 无）。
  *
  * 发送/清空输入等副作用通过 deps 注入（Composer 持有 draft/isSending/clearInput/restoreInput 真源），

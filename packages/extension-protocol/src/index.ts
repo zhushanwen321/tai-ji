@@ -170,6 +170,15 @@ export {
   isInFlightReportAck,
 } from './extensions/subagent-inflight/types'
 
+// ── subagent-notify 词表（subagent-workflow 通知通道 custom_message customType 单源：
+// 写侧 = 壳 sendMessage / subagent-core notifier+ledger，读侧 = shared/runtime/core；
+// 等值锁在壳 __tests__/contract.notify-custom-types.test.ts）──
+export {
+  WORKFLOW_RESULT_CUSTOM_TYPE,
+  SUBAGENT_BG_NOTIFY_CUSTOM_TYPE,
+  SUBAGENT_DIRECTIVE_CUSTOM_TYPE,
+} from './extensions/subagent-notify/custom-types'
+
 // ── plugin-bridge 协议（plugin system bridge：插件工具/事件/拦截经 select 通道 + marker 桥接；实现在 extensions/taiji/plugin-bridge + runtime bridge-handler）──
 export type {
   BridgeMethod,

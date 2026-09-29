@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * W3: useSessionDerivations statusOf 缓存化 + invalidateStatusCache。
  *

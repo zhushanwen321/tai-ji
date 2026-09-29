@@ -6,6 +6,8 @@
 // [W3] 追加：EngineDescriptor 双模（inproc 快捷 / cli portFactory 代理透明——
 // cli 形态 EnginePort 实例 = W2 RemoteEngine）+ D4 displayName 稳定序 +
 // 全不可用 engine_not_found 文案（「未发现任何引擎包」+ 安装指引）。
+// normalizeEngineId 缺省归一直测（undefined/空白 → 'pi'、非 pi 透传）+
+// 注册表重建后注入渲染输出不变（渲染无跨重建状态）。
 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,10 +27,12 @@ import {
   hasEngine,
   listEngines,
   listEnginesByDisplayName,
+  normalizeEngineId,
   registerEngine,
   registerEngineDescriptor,
   type EngineManifestSnapshot,
 } from "../registry.ts";
+import { buildEngineModelsPromptAppend, buildSubagentEngineSection } from "../model-prompt.ts";
 import type { SessionView } from "../types.ts";
 import type { AgentCallOpts } from "../../../orchestration/models/types.ts";
 
@@ -56,6 +60,14 @@ function makeFakeEngine(id: string): EnginePort {
     read: (_handle: Parameters<EnginePort["read"]>[0]): Promise<SessionView> =>
       Promise.resolve({ engineId: id, turns: [], source: "outcome-only" }),
   };
+}
+
+/** 带模型清单的假引擎（引擎模型段渲染的输入面；listModels 每次返回新数组实例——渲染必须与实例无关）。 */
+function makeFakeEngineWithModels(
+  id: string,
+  models: Array<{ id: string; name?: string }>,
+): EnginePort {
+  return { ...makeFakeEngine(id), listModels: () => models.map((m) => ({ ...m })) };
 }
 
 describe("engine registry", () => {
@@ -133,6 +145,36 @@ describe("engine registry", () => {
     expect(DEFAULT_ENGINE_ID).toBe("pi");
   });
 
+  // ── normalizeEngineId（缺省归一单一权威源）────────────────────────────
+
+  it("normalizeEngineId：undefined 缺省归一到 'pi'", () => {
+    expect(normalizeEngineId(undefined)).toBe("pi");
+  });
+
+  it("normalizeEngineId：空白字符串归一到 'pi'（sanitize 拦非字符串，防御空白透传）", () => {
+    expect(normalizeEngineId("   ")).toBe("pi");
+  });
+
+  it("normalizeEngineId：非 pi 引擎 id 透传", () => {
+    expect(normalizeEngineId("zcode")).toBe("zcode");
+  });
+
+  it("注册表重建（clearEngines + 同 id 同清单重注册）后注入渲染输出不变（渲染无跨重建状态）", () => {
+    const models = [
+      { id: "builtin:bigmodel-coding-plan/GLM-5.3", name: "GLM-5.3" },
+      { id: "builtin:bigmodel-coding-plan/GLM-5.3-Flash" },
+    ];
+    registerEngine("zcode", () => makeFakeEngineWithModels("zcode", models));
+    const firstSection = buildSubagentEngineSection("zcode");
+    const firstAppend = buildEngineModelsPromptAppend("zcode");
+
+    clearEngines();
+    registerEngine("zcode", () => makeFakeEngineWithModels("zcode", models));
+
+    expect(buildSubagentEngineSection("zcode")).toBe(firstSection);
+    expect(buildEngineModelsPromptAppend("zcode")).toBe(firstAppend);
+  });
+
   // ── [R1 D6②] 重注册同名：先 dispose 已实例化的旧单例（防常驻资源泄漏）──
 
   it("重注册同名：已实例化的旧单例 dispose 被调用一次，新工厂实例生效", () => {
@@ -180,7 +222,7 @@ describe("engine registry", () => {
     expect(() => registerEngine("fake", () => makeFakeEngine("fake-v2"))).not.toThrow();
   });
 
-  // ── [R1 D6③] disposeEngines：宿主收割（killAllSpawnedChildren）前的触发遍历 ──
+  // ── [R1 D6③] disposeEngines：宿主收割（markAllSpawnedChildrenDead）前的触发遍历 ──
 
   describe("disposeEngines（D6③）", () => {
     it("只对已实例化的引擎触发 dispose（绝不实例化未用引擎）", () => {
@@ -242,6 +284,10 @@ function makeManifestSnapshot(displayName?: string): EngineManifestSnapshot {
       maxTurns: false,
     },
     modelCatalog: { dynamic: true, models: [{ id: "glm-4.6", canonicalRef: "zai/glm-4.6" }] },
+    // [u5 D6] 本文件用例锁定 registry 单例语义（D2b/双模透明/收割可达）——声明
+    // shared-service 使 descriptor 走单例路径；per-window 代理语义由
+    // registry-window-model.test.ts 承载。
+    processModel: "shared-service",
     ...(displayName !== undefined ? { displayName } : {}),
   };
 }
@@ -288,7 +334,11 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
       args: ["-e", ""],
       capabilities: manifest.capabilities,
       portFactory,
-      manifest: { modelCatalog: manifest.modelCatalog, displayName: manifest.displayName },
+      manifest: {
+        modelCatalog: manifest.modelCatalog,
+        displayName: manifest.displayName,
+        processModel: manifest.processModel,
+      },
     });
     const engine = getEngine("zcode-cli");
     // 两形态透明：上层拿到的是同一个 EnginePort 面；cli 实例 = W2 RemoteEngine
@@ -309,6 +359,7 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
       args: [],
       capabilities: manifest.capabilities,
       portFactory,
+      manifest: { processModel: manifest.processModel },
     });
     // 注册本身不触发 portFactory（descriptor 首次使用才解析——§3.5.3 代理形态）
     expect(portFactory).not.toHaveBeenCalled();
@@ -330,6 +381,7 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
       args: [],
       capabilities: manifest.capabilities,
       portFactory: () => oldPort as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     getEngine("overwrite");
     const newPort = makeRemoteEngine("overwrite", manifest);
@@ -341,6 +393,7 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
       args: [],
       capabilities: { ...manifest.capabilities, maxTurns: true },
       portFactory: () => newPort as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("overwrite")).toBe(newPort);
@@ -369,7 +422,14 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       capabilities: manifest.capabilities,
       portFactory,
       ...(manifest.modelCatalog !== undefined || manifest.displayName !== undefined
-        ? { manifest: { modelCatalog: manifest.modelCatalog, displayName: manifest.displayName } }
+          || manifest.processModel !== undefined
+        ? {
+          manifest: {
+            modelCatalog: manifest.modelCatalog,
+            displayName: manifest.displayName,
+            processModel: manifest.processModel,
+          },
+        }
         : {}),
     });
   }
@@ -424,6 +484,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       args: [],
       capabilities: manifest.capabilities,
       portFactory: () => makeRemoteEngine("cmd-change", manifest) as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("cmd-change")).not.toBe(oldPort);
@@ -443,6 +504,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       args: ["--changed"],
       capabilities: manifest.capabilities,
       portFactory: () => makeRemoteEngine("args-change", manifest) as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("args-change")).not.toBe(oldPort);
@@ -502,6 +564,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       args: [],
       capabilities: manifest.capabilities,
       portFactory: () => makeRemoteEngine("kind-change", manifest) as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("kind-change")).not.toBe(inprocSingleton);
@@ -521,6 +584,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       capabilities: manifest.capabilities,
       packageVersion: "1.2.3",
       portFactory: () => oldPort as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     const singleton = getEngine("ver-same");
 
@@ -532,6 +596,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       capabilities: manifest.capabilities,
       packageVersion: "1.2.3",
       portFactory: secondFactory,
+      manifest: { processModel: manifest.processModel },
     });
     expect(getEngine("ver-same")).toBe(singleton);
     expect(dispose).not.toHaveBeenCalled();
@@ -550,6 +615,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       capabilities: manifest.capabilities,
       packageVersion: "1.2.3",
       portFactory: () => oldPort as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     getEngine("ver-change");
 
@@ -563,6 +629,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       capabilities: manifest.capabilities,
       packageVersion: "1.3.0",
       portFactory: () => newPort as EnginePort,
+      manifest: { processModel: manifest.processModel },
     });
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("ver-change")).toBe(newPort);

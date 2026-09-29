@@ -14,9 +14,9 @@
 //
 // [2026-09-13 design-code-sync 兑现] [G1] 段预留的备选预案（第三文件再拆 Continuation
 // 协作面）落地：本文件折算 845 破 800 零余量锁定线，拆出 chat-rounds.ts（chat 域轮次
-// 编排——Continuation 实例表 + 统一投递入口 + kickOffChatRound 轮次主干 + one-shot
-// settled-watchdog fire 处置 + 轮末收口协作 + SP-5 升级 gate + Continuation 生命周期
-// 显式接口）。两文件零互调零 import（workflow-dispatch 同款形态）：
+// 编排——Continuation 实例表 + 统一投递入口 + kickOffChatRound 轮次主干 + 轮末收口协作
+// + SP-5 升级 gate + Continuation 生命周期显式接口）。两文件零互调零 import
+//（workflow-dispatch 同款形态）：
 //   - 本聚合 → chat-rounds：executeViaEngine 的首轮派发调用点，经 deps 回调
 //     startFirstChatRound（壳装配闭包指 ChatRounds 实例方法；[modeless 波1] 四象限
 //     坍缩后唯一派发路径，kickOffChatRound 回调已删）；
@@ -37,15 +37,12 @@
 //   executeWorkflowAgent → WorkflowDispatch / engineSupportsConversation + deliverChatMessage
 //   → ChatRounds，2026-09-13 接线）；聚合内部互调（executeViaEngine/
 //   settleOneShotOutcome 族等）不经壳。
-// 3. 跨聚合边收敛（r0-inventory 清单① C-4/C-5 + B-6）：
+// 3. 跨聚合边收敛（r0-inventory 清单① C-4/C-5）：
 //   - C-4（壳 dispose 直调 continuations.clear）：字段所有权随 Continuation 协作面迁
 //     chat-rounds.ts，壳经其 clearContinuations() 显式接口（R4 兑现，接线 2026-09-13）。
 //   - C-5（onRecordFinalizedCleanup 跨域汇聚点 + abortContinuationQueue 队列清空）：
 //     本体迁 chat-rounds.ts；RecordLifecycle deps 回调（R3 装配时指壳方法）改指聚合
 //     显式接口（R4 兑现，接线 2026-09-13）。
-//   - B-6（roundSupervisor 归属争议）：留壳——boot 分区（initSession）与 dispose 时序
-//     消费在壳、装配闭包 finalizeClosed 经壳转发 late-bound（C-6 天然兼容）；本聚合
-//     经 deps.getRoundSupervisor() 现读（noteRun*/adoptOnProcessDeath）。
 // 4. 只搬不改：方法体除依赖通道替换（this.X → this.deps.getY()）外逐字节保留
 //   （审计 /tmp/r4-move-audit.py）；r0-inventory 清单② A 通道直写 14 处（#12 域
 //   executeAndAwait 1 处 + #14 域 13 处——任务口径 12 处按「#14 域 adopt 三行并 1」
@@ -61,21 +58,26 @@ import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
-import { project, tryTransition } from "../persistence/execution-record.ts";
+import { project } from "../persistence/execution-record.ts";
+// [P1b-1] settle 链收口单点（settleOneShotOutcome workflow origin 分支的终态收口
+// 迁入；execution/service → orchestration import 为既有先例方向——run-state-evidence）。
+import { settleWorkflowRecord } from "../../orchestration/terminal-actions.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
-import { registerSpawnedChildForRecord } from "../engine/host/spawned-children.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
-import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
-import { type EngineRouteResult, routeEngineForHost } from "../engine/routing.ts";
+import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
+import {
+  type EngineRouteResult,
+  resolveWorkflowWindowEnginePort,
+  routeEngineForHost,
+} from "../engine/routing.ts";
 import type { AgentOutcome } from "../engine/types.ts";
 // [V2 决策 3] lifecycle-manager：[T4②] DEFAULT_IDLE_TIMEOUT_MS 是 assertIdleTimeoutMsSafe
 // 错误文案的缺省时长基准（[R4] 唯一消费主体随域迁入本聚合）。
 import { DEFAULT_IDLE_TIMEOUT_MS } from "../lifecycle/lifecycle-manager.ts";
-import { disarmRoundFromProtocol } from "../lifecycle/settled-watchdog.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { AgentConfig, ModelInfo, ResolvedModel } from "../assembly/model-resolver.ts";
 import type { NotifyHost } from "../notify/notify-host.ts";
@@ -83,8 +85,8 @@ import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import type { RoundSupervisor } from "../round-supervisor/index.ts";
-import { MAX_FORK_DEPTH } from "../assembly/session-context-resolver.ts";
+// 嵌套深度护栏单点（D-033 共享判据 + MAX_FORK_DEPTH 上限常量同源）。
+import { assertNestingDepthWithinLimit } from "../assembly/session-context-resolver.ts";
 import type { SubagentStream } from "../assembly/stream-sink.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
@@ -98,10 +100,8 @@ import type {
   ExecutionMode,
   ExecutionRecord,
 } from "../assembly/types.ts";
-import { DEFAULT_AGENT_NAME, ForkDepthExceededError } from "../assembly/types.ts";
+import { DEFAULT_AGENT_NAME } from "../assembly/types.ts";
 // [R6/D-R4-4] 跨聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
-// [2026-09-13 design-code-sync] MS_PER_SECOND / SECONDS_PER_MINUTE 消费主体
-//（onOneShotSettledWatchdogTimeout）已迁 chat-rounds.ts，本聚合余 PRIORITY_BACKGROUND。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
 
 /**
@@ -111,8 +111,8 @@ import { PRIORITY_BACKGROUND } from "./service-constants.ts";
  * - 断言面（assertReady）：execute/executeAndAwait 入口就绪门
  *  （本体在 SessionBaselines，壳转发）。
  * - #1 留壳共享依赖 getter（getStore/getModelService/getNotifyHost/
- *   getPool/getWorktreeManager/getCwd/getRoundSupervisor）：
- *   getter 现读同一实例（B-6 roundSupervisor 留壳、C-6 装配闭包经壳 late-bound）。
+ *   getPool/getWorktreeManager/getCwd）：
+ *   getter 现读同一实例（C-6 装配闭包经壳 late-bound）。
  * - 会话基线 getter（getExecNesting/getSessionRootId）：
  *   initSession 注入的运行时可变态现读（SessionBaselines 经壳 getter 透传）。
  * - R3 聚合显式接口（resolveIdentity/resolveIdentityForEngine/createRecordForMode/
@@ -135,7 +135,7 @@ export interface RunOrchestrationDeps {
   readonly getCwd: () => string;
   /** WorktreeManager（worktree 创建/清理 + FinalizeDeps）。 */
   readonly getWorktreeManager: () => WorktreeManager;
-  /** NotifyHost（pending emit + one-shot watchdog 失败通知 + FinalizeDeps 注销面）。 */
+  /** NotifyHost（pending emit + FinalizeDeps 注销面）。 */
   readonly getNotifyHost: () => NotifyHost;
   /** ConcurrencyPool（DefaultConcurrencyPool 共享池——execute/executeAndAwait/
    *  chat 轮次/引擎任务的并发槽）。 */
@@ -144,8 +144,6 @@ export interface RunOrchestrationDeps {
   readonly getSessionRootId: () => string | null;
   /** 嵌套身份基线（BC-12 嵌套护栏深度检查）。 */
   readonly getExecNesting: () => ExecutionNestingContext;
-  /** [B-6 留壳] 轮次活性监督器（在途记账/死亡分诊 adoptOnProcessDeath）。 */
-  readonly getRoundSupervisor: () => RoundSupervisor;
   /** [R3 RecordAccess 显式接口] 步骤 1 身份解析（三层：override → agentConfig → 主
    *  agent model；含 pi 未命中跨引擎候选文案）。 */
   readonly resolveIdentity: (
@@ -249,20 +247,8 @@ export class RunOrchestration {
     // [T4② / PS-4] idleTimeoutMs 配置错误在首个副作用前同步 fail-fast（错误含合法范围）。
     this.assertIdleTimeoutMsSafe(opts);
 
-    // 通用嵌套深度护栏（D-033）：嵌套上下文（[D3-⑤] 公共层 ExecutionNestingContext）
-    // 记录所有 subagent 嵌套层级（fork + 非 fork），每层 +1。MAX_FORK_DEPTH 同时限
-    // fork 链与通用嵌套——非 fork 递归虽不累积 session 体积，但耗资源且 LLM 易陷入
-    // 「委派→再委派」死循环。在所有副作用之前拦截，错误直达调用方。
-    // 计数基准：顶层 nestingDepth=0，nestingDepth>MAX 被拒。与 fork 体积护栏（parentForkDepth 检查）
-    // 互补：本护栏更严（计所有嵌套），混合链下先生效；两者共享 MAX_FORK_DEPTH 上限不漂移。
-    // [ALS 断裂修复] current() 内含基线兜底（pi 事件回调模型下 enterWith 不贯穿）。
-    const parentNesting = this.deps.getExecNesting().current();
-    const nestingDepth = parentNesting ? parentNesting.depth + 1 : 0;
-    if (nestingDepth > MAX_FORK_DEPTH) {
-      throw new ForkDepthExceededError(
-        `subagent nesting depth ${nestingDepth} > ${MAX_FORK_DEPTH} (max recursion), refusing to spawn deeper`,
-      );
-    }
+    // 通用嵌套深度护栏（D-033，单源 session-context-resolver）：在所有副作用之前拦截。
+    assertNestingDepthWithinLimit(this.deps.getExecNesting().current());
 
     // mode 固定 background（sync 模式已删除）
     const mode: ExecutionMode = "background";
@@ -298,7 +284,12 @@ export class RunOrchestration {
       // 恒非空会把一切兜底误判为 model 绑定命中）
       taskModel: opts.model,
       strict: this.deps.getModelService().getGlobalConfig().engineRouting?.strict === true,
-      probe: (engineId) => getEngine(engineId).probe(),
+      // [U2 pi-workflow-run-resource-model] probe 通道经窗口实例解析单点改道（不再
+      // 直连 registry getEngine——惰性单例是薄壳跨窗口常驻的根源）。本入口（GUI 直派
+      // 链）的窗口 = chat record 轮次，其窗口实例挂载归 U3 接线；窗口键 undefined =
+      // 解析单点内透传 registry（shared-service 保形 + per-window 引擎不被创建成
+      // 无人登记的孤儿实例），U3 接线后改为携带轮窗口键。
+      probe: (engineId) => resolveWorkflowWindowEnginePort(undefined, engineId).probe(),
       // [W3] chat 域 pi 路由 = registry cli 形态 port（协议客户端）——inproc DI 实例
       // 随 inproc pi 引擎目录 删除消亡，chat 与 run 域同路（G1 单一 CLI 形态）。
       piEngine: this.resolveChatEnginePort(),
@@ -327,15 +318,8 @@ export class RunOrchestration {
     // [T4② / PS-4] 与 execute() 同款入口校验（两入口共享 runAndFinalize → armIdleTimer 链）。
     this.assertIdleTimeoutMsSafe(opts);
 
-    // ── BC-12 嵌套护栏：复用 execute() 的嵌套上下文深度检查 ──
-    // [ALS 断裂修复] current() 内含基线兜底（与 execute 同）。
-    const parentNesting = this.deps.getExecNesting().current();
-    const nestingDepth = parentNesting ? parentNesting.depth + 1 : 0;
-    if (nestingDepth > MAX_FORK_DEPTH) {
-      throw new ForkDepthExceededError(
-        `subagent nesting depth ${nestingDepth} > ${MAX_FORK_DEPTH} (max recursion), refusing to spawn deeper`,
-      );
-    }
+    // ── BC-12 嵌套护栏：与 execute() 同款单点检查（session-context-resolver）──
+    assertNestingDepthWithinLimit(this.deps.getExecNesting().current());
 
     // ── 步骤 1: IDENTITY 解析 ──
     const identity = await this.deps.resolveIdentity(opts);
@@ -463,8 +447,11 @@ export class RunOrchestration {
       worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
       // [H2 S3] 来源身份随绑定落盘：引擎子文件身份面（binding sidecar）是磁盘重建
       // origin 的唯一现行载体，漏写则收口/重启后 workflow record 逃过 D1 投影过滤。
+      // [W0 / D1] stepIndex 同族随绑定落盘——漏写则 identityFromBinding 重建路径
+      // 恢复不出步骤索引（run 视图关联键静默缺失）。
       origin: record.origin,
       parentRunId: record.parentRunId,
+      stepIndex: record.stepIndex,
     });
   }
 
@@ -662,8 +649,6 @@ export class RunOrchestration {
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),
-        // D10 终止链：引擎 spawn 的子进程注册进 spawnedChildren 镜像记账
-        onChildSpawned: (child) => registerSpawnedChildForRecord(record.id, child),
       };
       const { handle, outcome } = await engine.run(this.taskSpecWithModel(opts, record.model), runCtx);
       record.engineHandle = {
@@ -712,29 +697,18 @@ export class RunOrchestration {
     result: AgentResult,
     aborted: boolean,
   ): Promise<void> {
-    // [轮终 disarm 根修] run 应答到达 = 该轮等待窗终结：撤 mid-round/settled 两段
-    // watch（Continuation 轮由 conversation-continuation 轮终守护自管 disarm/drain
-    // 重挂，不经过本收口）。此前缺失导致正常完成后 armed entry 残留：one-shot settle
-    // 后 record 保持 running-resumable（SP-5），watchdog fire 处置的 status!=='running'
-    // 守卫放行 → 窗口到期误 kill + 误报 failed（2026-09-14 实测「已交付会话残留槽
-    // 被看门狗当 no valid protocol event 清理报 failed」×7+ 的根因）。幂等：无
-    // armed entry 时 no-op。
-    disarmRoundFromProtocol(record.id);
     // [H2 W2 / D7 例外族维持现状（§1.4 out-of-scope）] workflow origin 成功 = 立即
     // 终态化（closed/"gc"）；aborted/失败 = closed+cancelled/gc——workflow agent 结果
-    // 由脚本返回值承载、无 message 对端，留内存 idle 会绑架 hasRunning / 恒挂
-    // idle-gc / 被误升级为对话容器 / goal defer 恒挂（设计 D7 四面连带）。自带 CAS
+    // 由脚本返回值承载、无 message 对端，留内存 idle 会绑架 hasRunning / 被误升级
+    // 为对话容器 / goal defer 恒挂（设计 D7 连带理由）。自带 CAS
     // 抢锁（承接现状「cancel/dispose 抢先 → 静默跳过」守卫语义）。
+    // [P1b-1] 直写通道删除：closed/cancelled 终态判定不再在本方法直写——收口至
+    // worker-message-pump 的 settleWorkflowRecord 单点（D7 例外族 CAS + finalize 对
+    // 的唯一剩余处）；agent-settled/run-settled 事件面由同文件状态机接线段承载。
     if (record.origin === "workflow") {
-      if (!aborted && result.success) {
-        if (tryTransition(record, "closed", "gc")) {
-          await this.deps.finalizeRecord(record, result, "closed", "gc");
-        }
-      } else {
-        if (tryTransition(record, "closed", aborted ? "cancelled" : "gc")) {
-          await this.deps.finalizeRecord(record, result, "closed", aborted ? "cancelled" : "gc");
-        }
-      }
+      await settleWorkflowRecord(record, result, aborted ? "cancelled" : "gc", {
+        finalizeRecord: (r, closedReason) => this.deps.finalizeRecord(record, r, "closed", closedReason),
+      });
       return;
     }
     // CAS 前置 + 簿记之间无 await（单线程同步段原子——cancel/dispose 抢先判定可靠）。
@@ -784,9 +758,13 @@ export class RunOrchestration {
 
   /** [W3] pi 引擎 port 解析（execute 路由 / runAndFinalize 派发 / ChatRounds 协作回调
    *  三面共用——chat 域经壳装配闭包消费）：registry cli 形态 port，
-   *  未注册 = 不可用 stub（engine_not_found，见 pi-host-binding）。 */
-  resolveChatEnginePort(): EnginePort {
-    return resolveHostPiEnginePort(() => null);
+   *  未注册 = 不可用 stub（engine_not_found，见 pi-host-binding）。
+   *  [U2 pi-workflow-run-resource-model] windowKey（workflow 成员派发 = parentRunId）
+   *  非 undefined 时经窗口实例解析单点取用（per-window 引擎窗口内 get-or-create、
+   *  probe 与 run 同实例、随窗口收尾 dispose）；缺省 = registry 直取（调用方仅同步
+   *  只读消费的既有面保形）。 */
+  resolveChatEnginePort(windowKey?: string): EnginePort {
+    return resolveHostPiEnginePort(() => null, windowKey);
   }
 
   /**
@@ -807,10 +785,12 @@ export class RunOrchestration {
   ): Promise<AgentResult | undefined> {
     try {
       await this.deps.getPool().acquire(priority, this.effectiveMaxConcurrentFor(record), signal);
-    } catch {
-      // S1: 排队中被 abort（signal.aborted）走 cancelled，与已运行被 abort 一致。
+    } catch (err) {
+      // S1: 排队中被 abort（signal.aborted）走 cancelled，与已运行被 abort 一致；
+      // 非 abort 的池内故障透传原始 err——改写为 new Error("aborted") 会把池内真实
+      // 故障（如池 dispose / 内部异常）误标为 aborted，误导排障方向。
       if (signal?.aborted) return this.deps.finalizeAborted(record);
-      return this.deps.finalizeFailed(record, new Error("aborted"));
+      return this.deps.finalizeFailed(record, err);
     }
     return undefined;
   }

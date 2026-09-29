@@ -109,6 +109,11 @@ export interface PluginPoolOptions {
   execArgv?: string[]
   /** loadPlugin 超时（测试注入短超时用；默认 10s） */
   loadTimeoutMs?: number
+  /**
+   * disconnect 后等 exit 的兜底窗口（测试注入小值用；默认 DISCONNECT_GRACE_MS）。
+   * 窗口语义不变（exit 权威分流 + 存活断连报 crash），只调宽度。
+   */
+  disconnectGraceMs?: number
 }
 
 export class PluginHostProcess implements PluginHostProcessContract {
@@ -121,6 +126,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
   private readonly bootstrapPathOverride?: string
   private readonly execArgv: string[]
   private readonly loadTimeoutMs: number
+  private readonly disconnectGraceMs: number
 
   /** pluginId → processId 反向索引（D2-5：getProcessHandle O(1)，替代全进程线性扫） */
   private pluginToProcess = new Map<string, string>()
@@ -130,6 +136,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
     this.bootstrapPathOverride = options?.bootstrapPathOverride
     this.execArgv = options?.execArgv ?? []
     this.loadTimeoutMs = options?.loadTimeoutMs ?? LOAD_PLUGIN_TIMEOUT_MS
+    this.disconnectGraceMs = options?.disconnectGraceMs ?? DISCONNECT_GRACE_MS
   }
 
   /** 设置 crash callback（子进程崩溃时触发，含 pluginIds） */
@@ -528,7 +535,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
         // exit 已到但 handle 尚未被清理的窄窗防御：code 0 的分流归 exit handler
         if (child.exitCode === 0) return
         this.handleProcessCrash(processId, 'Child process IPC channel disconnected while process alive')
-      }, DISCONNECT_GRACE_MS)
+      }, this.disconnectGraceMs)
       // 兜底定时器不得阻塞 runtime 退出（进程退出场景 exit 已分流，timer 到期即空转）
       graceTimer.unref?.()
     })

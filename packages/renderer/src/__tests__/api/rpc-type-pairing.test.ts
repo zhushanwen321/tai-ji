@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * RPC 类型配对契约测试（方案 C 精简版）。
  *

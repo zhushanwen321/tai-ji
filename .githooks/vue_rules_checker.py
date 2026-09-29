@@ -571,7 +571,7 @@ def main():
         print()
         if exit_code == 2:
             print("检查失败：请修复上述问题后重试。", file=sys.stderr)
-            print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m", file=sys.stderr)
+            print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m", file=sys.stderr)
 
     sys.exit(exit_code)
 
@@ -589,7 +589,7 @@ if __name__ == '__main__':
             print()
             if exit_code == 2:
                 print("检查失败：请修复上述问题后重试。", file=sys.stderr)
-                print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m", file=sys.stderr)
+                print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m", file=sys.stderr)
         sys.exit(exit_code)
     else:
         main()

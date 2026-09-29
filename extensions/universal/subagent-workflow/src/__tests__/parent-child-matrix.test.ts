@@ -2,7 +2,7 @@
 //
 // SP-4: 父子联动测试（真实 SubagentService + index.ts 事件接线）。
 //
-// [M2/M7 重写] 旧套件在测试内手写 tryTransition/completeRecord/recentlyCascaded 模拟
+// [M2/M7 重写] 旧套件在测试内手写 legacy 终态桥接原语（已随 W2/V3 说谎签名退役）/recentlyCascaded 模拟
 // （平行复刻生产逻辑），生产代码任何回归恒绿。现改为两层真实驱动：
 //   Block 1: 真实 SubagentService.onParentFork / onParentNew / disposeAllRecords
 //            → 断言 record 转 closed + closedReason + archive + pending:unregister
@@ -38,14 +38,14 @@ vi.mock("@zhushanwen/subagent-core/core/logger.ts", () => ({
   getLogger: () => loggerMock,
 }));
 
-// mock session-runner（import 链需要 runSpawn/killAllSpawnedChildren/getChildByRecord；
+// mock session-runner（import 链需要 runSpawn/markAllSpawnedChildrenDead/getChildByRecord；
 // 避免真实 kill，且 dispose 收割路径可断言）
-const { killAllSpawnedChildrenMock } = vi.hoisted(() => ({
-  killAllSpawnedChildrenMock: vi.fn(),
+const { markAllSpawnedChildrenDeadMock } = vi.hoisted(() => ({
+  markAllSpawnedChildrenDeadMock: vi.fn(),
 }));
 vi.mock("@zhushanwen/subagent-core/execution/engine/engines/pi/session-runner.ts", () => ({
   runSpawn: vi.fn(),
-  killAllSpawnedChildren: killAllSpawnedChildrenMock,
+  markAllSpawnedChildrenDead: markAllSpawnedChildrenDeadMock,
   killRecordChildWithEscalation: vi.fn(),
   getChildByRecord: vi.fn(() => undefined),
 }));
@@ -248,7 +248,7 @@ describe("SP-4 index.ts 事件接线", () => {
     processOnSpy = vi.spyOn(process, "on").mockImplementation((() => process) as never);
 
     registered.clear();
-    killAllSpawnedChildrenMock.mockReset();
+    markAllSpawnedChildrenDeadMock.mockReset();
 
     const ctx = setupRealService();
     agentDir = ctx.agentDir;

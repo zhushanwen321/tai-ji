@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * bashStart / bashResult effect 单测（composer-bash-execute W3 TK7 → W1 fix-chat-flow-order 语义更新）。
  *

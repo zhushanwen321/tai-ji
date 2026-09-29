@@ -46,9 +46,10 @@ const STEP_TIMEOUT_MS = 120_000
 const PROBE_MARK = 'PROBE-SD1:'
 /** PROBE turn 的 assistant 定局标记（run 尾部边沿锚点） */
 const ACK_MARK = 'SD1-ACK'
-/** 长任务的 faux 节流（tokens/s）：1..40 数字串 ≈ 37 tokens → ~9s 流式窗口，足够
- *  覆盖 get_state 结构化断言 + sendChecked + 队列观察的测试侧耗时 */
-const FAUX_TPS = '4'
+/** 长任务的 faux 节流（tokens/s）：1..40 数字串 ≈ 37 tokens → ~3s 流式窗口（窗口宽度 ≈
+ *  token/TPS，保持远宽于测试注入动作），足够覆盖 get_state 结构化断言 + sendChecked +
+ *  队列观察的测试侧耗时 */
+const FAUX_TPS = '12'
 /** 长任务的 faux 回复文本（计数序列——断言只锚 user entry 与 PROBE/ACK，回复内容不参与） */
 const LONG_TASK_TEXT = Array.from({ length: 40 }, (_, i) => String(i + 1)).join('\n')
 
@@ -58,7 +59,7 @@ function makeView(id: string, cwd: string, label: string): IManagedSessionView {
     id,
     cwd,
     label,
-    modelId: 'xiaomi-token-plan-cn/mimo-v2.5-pro',
+    modelId: 'xiaomi-token-plan-cn/mimo-v2.6-flash',
     createdAt: Date.now(),
     lastActiveAt: Date.now(),
     tokenCount: 0,

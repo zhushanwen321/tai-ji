@@ -322,7 +322,7 @@ describe('SystemNotice background-bash 结构化行（U3 / D2 / 方案 A）', ()
 
 describe('SystemNotice 悬停详情（方案 A）', () => {
   afterEach(() => {
-    // portal 残留兑底清理（unmount 正常路径已移除，防御性兑底防串测）
+    // portal 残留兜底清理（unmount 正常路径已移除，防御性兜底防串测）
     document.querySelector('[data-testid="system-notice-detail"]')?.remove()
   })
 

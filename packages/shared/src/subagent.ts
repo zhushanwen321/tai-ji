@@ -130,9 +130,11 @@ export interface SubagentRecord {
    * result 残留的 running 形态只存在于 U4 部署边界旧 entry（runtime 第五归一
    * `running && resumable===true → idle` 承接，two-state-convergence D5）。
    *
-   * 来源：自描述 subagent-record entry（W16 v1，reportRecordTransition 轮终迁移携带
-   * result 字段）；轮终迁移写点对空文本轮写占位（本轮正文 / 错误兜底文本 /
-   * "(no output this round)" / "(empty)"）。首轮未完成前恒 undefined。
+   * 来源（W1 后双形态终态）：v2 record-settled 终态条目一次性写全文（终局写点 =
+   * core settleViaJournal → toSettledEntryData，事件文件只存摘要锚、本字段是全文
+   * 唯一落点）；存量 v1 快照条目兼容读同名字段（W16 写点 reportRecordTransition
+   * 轮终迁移已停写，留 D7 兼容层）。轮终迁移写点对空文本轮写占位（本轮正文 /
+   * 错误兜底文本 / "(no output this round)" / "(empty)"）。首轮未完成前恒 undefined。
    */
   result?: string
   /**
@@ -169,6 +171,19 @@ export interface SubagentRecord {
    */
   origin?: 'tool' | 'workflow'
   /**
+   * [W0 / D1] origin='workflow' 时所属 workflow run id（subagent-record entry data
+   * 投影透传；与 origin/stepIndex 同族身份域）。runtime 合并投影按 (parentRunId,
+   * stepIndex) 关联 run 视图。additive：undefined（存量 record / tool 来源）零迁移。
+   */
+  parentRunId?: string
+  /**
+   * [W0 / D1] origin='workflow' 时在 run 内的步骤索引（单源 = pump dispatch 的
+   * callId/taskIndex，entry data 投影透传）。additive：undefined（存量 entry / tool
+   * 来源）= 不参与 run 视图合并（无 stepIndex 的 record 不成行——旧 session 回落
+   * trace-only 视图的守卫判据）。
+   */
+  stepIndex?: number
+  /**
    * 实际执行引擎 id（P4 路由留痕，设计 D9①/D3：engine 三字段贯通）。缺省 = pi，
    * 由读侧映射（runtime subagent-engine-history 的 extractRecordEngine：undefined/
    * 空串 → 'pi'，非空透传）——投影层只透传不填默认值，存量 record 零迁移。
@@ -191,8 +206,8 @@ export interface SubagentRecord {
 
 /**
  * closed 统一终态的展示语义（[U6/D5] 消费方迁移：renderer 侧侧栏任务卡片的 closed 三分行
- * 及其状态表已随该视图退役一并删除，本函数改由 runtime 归一层消费——legacy
- * closed 归一为 idle 时经本函数派生展示语义并映射为 stopReason 注入（cancelled→
+ * 及其状态表已随该视图退役一并删除，本函数改由 runtime 归一层消费——legacy closed 归一为
+ * idle 时经本函数派生展示语义并映射为 stopReason 注入（cancelled→
  * 'cancelled' / failed→'failed' / done→'completed'，「deriveClosedDisplay 改 stopReason
  * 派生」），closedReason 字段同时保留作诊断位）。
  *
@@ -233,3 +248,84 @@ export function deriveClosedDisplay(input: { closedReason?: string; error?: stri
 export function projectSubagentExecutionStatus(status: SubagentStatus): 'running' | 'idle' {
   return status === 'running' ? 'running' : 'idle'
 }
+
+// ── subagent-record v2 条目契约（W1 / D1：注册 + 终态两条小条目）──
+//
+// 主 session JSONL 里每 record 只写两条小条目（customType 不变 = 'subagent-record'，
+// v 升格 2，kind 判别）；运行态事实源 = record 事件文件（core record-events.ts）。
+// 本节是 shared 侧镜像（runtime 投影 / renderer 消费面）——core 侧权威定义在
+// packages/subagent-core/src/execution/persistence/record-entry.ts（shared 不依赖
+// core，两份同构；字段集漂移由 shared __tests__/subagent.test.ts 的形状断言 +
+// core record-entry 测试双侧互证把守）。v1 全量快照形态 = 旧读者按 v 跳过、
+// 新读者兼容读（D7 惰性兼容读）。
+
+/**
+ * subagent-record entry data schema 版本（W1 起 = 2；与 core SUBAGENT_RECORD_ENTRY_VERSION 同构镜像）。
+ * （const 声明 + 字面量初始化使类型收窄为字面量 2，无需 `as const`。）
+ */
+export const SUBAGENT_RECORD_ENTRY_VERSION = 2
+
+/** subagent-record v2 条目判别键词表（与 core SUBAGENT_RECORD_ENTRY_KINDS 同构）。 */
+export const SUBAGENT_RECORD_ENTRY_KINDS = ['registered', 'settled'] as const
+
+export type SubagentRecordEntryKind = (typeof SUBAGENT_RECORD_ENTRY_KINDS)[number]
+
+/**
+ * v2 注册条目 data（诞生时一条）：身份 + 家族链锚点。
+ *
+ * 字段语义与 SubagentRecord 同名字段一致（origin/parentRunId/stepIndex 的缺省
+ * 语义见其注释）；core 侧权威 = SubagentRecordRegisteredEntryData。
+ */
+export interface SubagentRecordRegisteredEntry {
+  v: typeof SUBAGENT_RECORD_ENTRY_VERSION
+  kind: 'registered'
+  id: string
+  agent: string
+  task: string
+  slug: string
+  origin: 'tool' | 'workflow'
+  /** origin='workflow' 时所属 run id（tool 来源缺省）。 */
+  parentRunId?: string
+  /** origin='workflow' 时在 run 内的步骤索引（tool 来源缺省）。 */
+  stepIndex?: number
+  /** 根 session id（session 隔离过滤用）。 */
+  rootSessionId: string
+  /** 直接父 record id（顶层缺省）。 */
+  parentRecordId?: string
+  depth: number
+  startedAt: number
+}
+
+/**
+ * v2 终态条目 data（结束时一条，收编幂等补写同一形态）：终局 + 摘要 + 锚链载荷。
+ *
+ * 字段语义与 SubagentRecord 同名字段一致（engineHandle.sessionRef 双键是
+ * session-reader 末条锚定依赖）；result 完整文本一次性写。core 侧权威 =
+ * SubagentRecordSettledEntryData。
+ */
+export interface SubagentRecordSettledEntry {
+  v: typeof SUBAGENT_RECORD_ENTRY_VERSION
+  kind: 'settled'
+  id: string
+  /** 占用两态（永久会话模型）：终态收敛为 idle + stopReason。 */
+  status: 'idle'
+  /** 上一轮为什么停（值域 = StopReason 词表，shared 侧 string 透传）。 */
+  stopReason: string
+  /** 终局展示形态（completed/failed/cancelled；缺省 = 无三分色信息）。 */
+  outcome?: 'completed' | 'failed' | 'cancelled'
+  error?: string
+  endedAt: number
+  /** 统计终值（record-settled 事件同源）。 */
+  turns: number
+  totalTokens: number
+  model?: string
+  thinkingLevel?: string
+  engine?: string
+  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string }
+  sessionFile?: string
+  /** 终局结果全文（一次性写——事件文件只存摘要锚，本条目是全文唯一落点）。 */
+  result?: string
+}
+
+/** v2 条目判别联合（判别键 = kind）。 */
+export type SubagentRecordEntryV2 = SubagentRecordRegisteredEntry | SubagentRecordSettledEntry

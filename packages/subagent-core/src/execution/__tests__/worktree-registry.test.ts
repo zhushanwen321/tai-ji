@@ -2,7 +2,7 @@
 //
 // WorktreeRegistry 单元测试。
 // 用真实 tmpdir 做文件 IO（不 mock fs），验证：
-//   - add/updatePid/remove/load 语义
+//   - add/remove/load 语义
 //   - 同 branch 覆盖（去重）
 //   - 文件不存在 / 损坏 / IO 错误的降级
 //   - 原子写（.tmp → rename）
@@ -71,33 +71,6 @@ describe("WorktreeRegistry", () => {
       const loaded = registry.load();
       expect(loaded).toHaveLength(1);
       expect(loaded[0].pid).toBe(999);
-    });
-  });
-
-  describe("updatePid", () => {
-    it("补全 pid（create 占位 → first header 补全）", async () => {
-      await registry.add(makeEntry({ branch: "pi-sub-bg-1", pid: 0 }));
-      await registry.updatePid("pi-sub-bg-1", 12345);
-      const loaded = registry.load();
-      expect(loaded[0].pid).toBe(12345);
-    });
-
-    it("branch 不存在时忽略（幂等）", async () => {
-      await registry.add(makeEntry({ branch: "pi-sub-bg-1" }));
-      await registry.updatePid("pi-sub-nonexistent", 12345);
-      const loaded = registry.load();
-      expect(loaded).toHaveLength(1);
-      expect(loaded[0].pid).toBe(0); // 原条目未变
-    });
-
-    it("update 不改变其他字段", async () => {
-      const entry = makeEntry({ branch: "pi-sub-bg-1", repo: REPO_A, checkout: "/tmp/x" });
-      await registry.add(entry);
-      await registry.updatePid("pi-sub-bg-1", 999);
-      const loaded = registry.load();
-      expect(loaded[0].repo).toBe(REPO_A);
-      expect(loaded[0].checkout).toBe("/tmp/x");
-      expect(loaded[0].branch).toBe("pi-sub-bg-1");
     });
   });
 

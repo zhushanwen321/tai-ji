@@ -419,7 +419,7 @@ export interface ClientMessageMap {
     label?: string
     hidden?: boolean
     presetId?: string
-    /** 归属 project id（D14 语义修正）：创建时归属当前 activeProject；空 = 默认项目兑底。 */
+    /** 归属 project id（D14 语义修正）：创建时归属当前 activeProject；空 = 默认项目兜底。 */
     projectId?: string
     modelOverride?: string
     thinkingOverride?: ThinkingLevel
@@ -1699,11 +1699,15 @@ export interface ServerMessageMapBase {
   // 与 ClientMessageMap 同名 request 一一对应；失败走 error envelope（code 见 ImportErrorCode）。
   'session.importCandidates': ImportCandidatesReply
   'session.import': ImportReply
-  // session.subagents：当前 session 派生的 subagent 列表（runtime 从主 session JSONL 提取）。
-  // oversize（RT-4#8）：session 文件超 runtime 读取预检阈值（>32MB）时列表不可用（subagents
-  // 恒空）——true 让「列表不可用」与「无 subagent」显式分形，面板据此显示降级提示；缺省
-  // false（mock / 旧 runtime / 广播帧不带，消费方按 false 处理）。协议先例 = traceEntries 的
-  // source='oversize'。
+  // session.subagents：当前 session 派生的 subagent 列表。
+  // [W1 读路径换源] 数据源 = runtime 每会话内存投影（pi entry 游标 + record 事件文件 journal tail
+  //   双增量源喂入，主 session JSONL 不再全文重读——v2 注册/终态条目稀疏化后 entry 通道只承载
+  //   锚点与终态，运行态细粒度来自 journal）。信号形态与字段不动（W3 领地）。
+  // oversize（RT-4#8）：W1 起仅旧格式惰性兼容读路径可产生（v1 全量快照 entry 时代的 32MB 预检
+  //   降级保留在兼容层；v2 条目时代主 session 不再被运行态撑大，该形态对新会话结构性消失）。
+  //   true 让「列表不可用」与「无 subagent」显式分形，面板据此显示降级提示；缺省 false
+  //   （mock / 旧 runtime / 广播帧不带，消费方按 false 处理）。协议先例 = traceEntries 的
+  //   source='oversize'。
   'session.subagents': { sessionId: string; subagents: SubagentRecord[]; oversize?: boolean }
   // session.planState：plan 模式状态投影（runtime 读 session JSONL 最后一条 plan-state entry
   // 派生，冷热两路径共用同一份派生代码）。live 腿 = 投影链 stateSnapshot('plan') 广播；
@@ -1731,16 +1735,23 @@ export interface ServerMessageMapBase {
     subagentId: string
     entries: Array<import('./pi-entry').PiEntry | import('./pi-entry').PiToolCallEntryForm>
   }
-  // session.workflows：当前 session 派生的 workflow 列表（runtime 从主 session JSONL 的 workflow-state-link 提取）。
-  // oversize（RT-4#8）：与 session.subagents 同款降级标志（文件 >32MB 时列表不可用，恒空数组）。
+  // session.workflows：当前 session 派生的 workflow 列表。
+  // [W1 读路径换源] 数据源 = runtime 每会话内存投影（pi entry 游标 + run journal（workflow-state
+  //   目录）tail 双增量源喂入）——主 session JSONL 全文重读退役；条目源自 workflow-record v2
+  //   注册/终态两条小条目（W17 前旧指针 / W17~W1 v1 快照为兼容读层）。信号形态不动（W3 领地）。
+  // oversize（RT-4#8）：与 session.subagents 同款降级标志——W1 起仅旧格式惰性兼容读路径可产生
+  //   （32MB 预检保留在兼容层），恒空数组语义不变。
   'session.workflows': { sessionId: string; workflows: WorkflowRunRecord[]; oversize?: boolean }
   // session.agentCallHistory：workflow 内 agent call 的对话流消息（runtime 按 trace[].sessionId 查找 JSONL）。
   // truncated：u4b（D5①）巨型 JSONL 超预检阈值后逆序窗口降级标志（optional，消费方按 false 处理）。
   'session.agentCallHistory': { sessionId: string; agentCallSessionId: string; messages: import('./message').Message[]; truncated?: boolean }
   // session.agentCallFilePath：agent call 对话流 JSONL 绝对路径（PanelHeader overlay 文件名展示用，找不到为空串）
   'session.agentCallFilePath': { sessionId: string; agentCallSessionId: string; filePath: string }
-  // session.workflowUpdate：workflow 状态变化增量信号（event-interpreter 推送，发起/结束时刻）。
+  // session.workflowUpdate：workflow 状态变化增量信号（三字段信号形态，发起/结束时刻）。
   // 前端收到后调 loadWorkflows RPC 拉取完整列表。与 session.workflows（RPC reply 全量列表）区分。
+  // [W1 驱动源换投影] 信号形态、三字段载荷与消费时序不动（W3 领地纪律——换驱动源不换协议）；
+  //   产出侧从「entry 失效重拉比对」改为「内存投影变更」（entry 游标 + journal tail 双源喂入的
+  //   投影单点合并，journal 事件胜出仲裁）——renderer 零适配。
   'session.workflowUpdate': { sessionId: string; update: { runId: string; status: string; reason?: string } }
   // ── session-trace（design D4 数据通路 A1，trace-runtime 单元）──
   // session.traceEntries：session.getTraceEntries 的 reply。source 区分数据通路：

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useQuotaConfigure composable 单测（契约 v2，coding-plan-quota-config-ux §7.1/§7.2）。
  *

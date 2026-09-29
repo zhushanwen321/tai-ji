@@ -30,7 +30,8 @@ describe("M4: [H2 W3] dispatchAgentCall 不再写 node.live", () => {
     // .then 的 stale guard 仍在（原顺序断言的对象消失，守卫本身保留）
     const thenMatch = src.match(/\.then\(\(\)\s*=>\s*\{[\s\S]*?\}\)/);
     expect(thenMatch).toBeTruthy();
-    expect(thenMatch![0]).toContain('run.state.status !== "running"');
+    // [W2/V1] stale guard 判据换源（两态机 status recheck → isRunSettled 注册表判定）
+    expect(thenMatch![0]).toContain("isRunSettled(run)");
   });
 });
 

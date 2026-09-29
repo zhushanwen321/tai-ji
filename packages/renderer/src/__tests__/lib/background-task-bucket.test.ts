@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * background-task-bucket 单测 —— 分桶 / 筛选 / 计数 / statusIcon SSOT
  *（u-renderer-store 验收条款：分桶判据谓词复用 isActive/isTerminal；statusIcon 判定顺序

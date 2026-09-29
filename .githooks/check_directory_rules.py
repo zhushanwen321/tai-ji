@@ -34,7 +34,7 @@ PI_ALLOWED_SUBDIRS = {"workflows"}
 
 # extensions/ 目录 md 白名单（防止临时文件/杂散文档污染包根）。
 # [HISTORICAL] .tmp-architecture-review.md / .tmp-competitive-research.md 曾散落
-# extensions/ 根目录（认知外临时研究文档）。规范：extensions/ 根禁止任何 md；
+# extensions/ 根目录（来源不明临时研究文档）。规范：extensions/ 根禁止任何 md；
 # extensions/<pkg>/ 根只允许标准文档，其他 md 应放 docs/ 子目录或项目 docs/。
 EXTENSIONS_PKG_ALLOWED_MD = {"README.md", "CHANGELOG.md", "ARCHITECTURE.md", "AGENTS.md"}
 
@@ -329,7 +329,7 @@ def main():
         for err in errors:
             print(f"  - {err}")
         print()
-        print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m")
+        print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m")
         sys.exit(2)
 
     print("\033[0;32m[OK] 目录规范检查通过\033[0m")

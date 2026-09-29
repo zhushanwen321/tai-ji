@@ -353,4 +353,14 @@ describe('U4-E3 malformed e2e probe', () => {
     expect(uiEvent.action).toBe('__malformed__')
     expect(uiEvent.params).toEqual({})
   })
+
+  it('marker 翻译：action 不在 SESSION_MANAGER_ACTIONS 枚举 → 折叠 __malformed__ 哨兵（枚举守卫）', () => {
+    // JSON 合法但 action 是非枚举值——与上一条（JSON 解析失败）不同的 malformed 输入维度
+    const events = translate(JSON.parse(buildUiRequestLine('req-enum-guard', 'evil', {})) as PiEvent, 'sid-parent')
+    const uiEvent = events.find((e) => e.kind === 'session-manager-ui')
+    expect(uiEvent).toBeDefined()
+    if (uiEvent?.kind !== 'session-manager-ui') return
+    expect(uiEvent.action).toBe('__malformed__')
+    expect(uiEvent.params).toEqual({})
+  })
 })

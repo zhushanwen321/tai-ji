@@ -203,7 +203,7 @@ deny 应答的 `interrupt:true`（src/utils/permissions/PermissionPromptToolResu
 - host/streamDelta：无宿主 UI 回推通道
 
 **语义错配**（同名不同义，映射时需显式转译）：
-- **turn 定义**：taiji turn = assistant 响应回合（turn_end 闭合）；claude num_turns 按 user 消息计数（`messages.length - 1` 或每 user 消息 turnCount++，src/QueryEngine.ts:624, 753-755）——工具往返各计一 turn，数值口径不同，AgentOutcomeUsage.turns 直接透传 num_turns 会在 UI 呈现偏大
+- **turn 定义**：taiji turn = assistant 响应回合（turn_end 完成）；claude num_turns 按 user 消息计数（`messages.length - 1` 或每 user 消息 turnCount++，src/QueryEngine.ts:624, 753-755）——工具往返各计一 turn，数值口径不同，AgentOutcomeUsage.turns 直接透传 num_turns 会在 UI 呈现偏大
 - **session 概念**：taiji sessionRef 是引擎自定义定位键值对；claude session = `~/.claude/projects/<dir>/<uuid>.jsonl` 单文件 + session_id，且 `--continue`（最近会话）与 `--resume`（指定会话）并存（src/main.tsx:989），锚点必须显式落 sessionId 不能依赖 continue
 - **compaction 时机**：taiji compaction 是离散事件；claude 的 compact_boundary 是消息流内边界（带 trigger manual/auto + pre_tokens + preserved_segment 重链元数据，src/entrypoints/sdk/coreSchemas.ts:1506-1531），且压缩前后 transcript 通过 relink 拼接——read 重建需处理边界分割语义
 - **tool result 双载体**：tool_result block（content 数组，对话流载体）与 toolUseResult 顶层字段（结构化 Output，诊断/展示载体）并存（src/utils/messages.ts:481），ToolCallResult.content/details 的装填需二选一约定（§4 建议）

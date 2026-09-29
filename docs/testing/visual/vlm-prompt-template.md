@@ -107,7 +107,7 @@ interface VlmVerificationResult {
 ## 归档约定
 
 - 截图 + result.json 同目录：`.taiji-harness/visual/<YYYY-MM-DD>-<page>/`（不进 git，在 `.gitignore` 的 `.taiji-harness/` 下）
-- result.json 副本进 git：`docs/testing/visual/baselines/<page>-<target>.json`（便于团队追溯与基线沉淀）
+- result.json 副本进 git：`docs/testing/visual/baselines/<page>-<target>.json`（便于团队追溯与基线记录在案）
 - 多次验证按日期 / page 区分，避免覆盖
 
 ## 注意事项

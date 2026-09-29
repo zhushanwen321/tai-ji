@@ -120,10 +120,6 @@ export const CRASH_REBUILD_BACKOFF_MS = [
 /** stderr 内存环形缓冲保留的尾部字符数（engine_crashed 帧携带崩溃现场）。 */
 export const STDERR_TAIL_CHARS = 400;
 
-/** 事件合并开关 env 名（设计级默认关闭 = 值 "0"；A1 要求事件逐字段等价，合并不可开）。 */
-export const ENGINE_EVENT_COALESCE_ENV = "TAIJI_ENGINE_EVENT_COALESCE";
-export const ENGINE_EVENT_COALESCE_DEFAULT = "0";
-
 /**
  * 反向请求超时二分（帧④注释，R9-2）：
  * - 数据面类（host/log / host/streamDelta / host/handleReady /

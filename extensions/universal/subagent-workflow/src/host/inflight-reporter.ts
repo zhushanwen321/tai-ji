@@ -26,12 +26,12 @@
 // （session_start 是 pi 启动序列里最早带 ctx 的钩子 = 「session 就绪」，即设计所指
 // 加载完成时点；不挂任何懒触发（无 subagent 的 session 也必上报）。
 //
-// 失败语义（D5 缺席语义②，2026-09-13 oe-audit 修订）：select 失败（超时/通道异常/
-// 非确认回包）折叠后延迟重试，**累计 MAX_REPORT_ATTEMPTS 次放弃**（原「重试直至
-// 成功一次」的无界语义为「旧版 runtime」版本错配场景设计——该场景已被同 bundle
-// 发布 + pi 随 runtime 退出销毁两条事实证伪；有界化的防挂死兜底对齐 plugin-bridge
-// MAX_SYNC_ATTEMPTS 形态。session_start 首帧早于 runtime adapter attach 的竞态
-// （R2 实证）在 30×2s=60s 窗口内必然自愈）。送达判据 = runtime resolve 的确认回包
+// 失败语义（D5 缺席语义②）：select 失败（超时/通道异常/非确认回包）折叠后延迟重试，
+// **累计 MAX_REPORT_ATTEMPTS（3）次放弃**。上限刻意取小（增强面降级）：GUI live
+// 在途镜像短暂滞后可接受，重试 3 次封顶后放弃，不做长尾可达保证——子任务完成通知
+// 另有账本必达通道，不依赖此镜像。session_start 首帧早于 runtime adapter attach 的
+// 竞态（R2 实证）在 3×2s=6s 窗口内自愈，错过窗口即放弃。送达判据 = runtime resolve
+// 的确认回包
 // （INFLIGHT_REPORT_ACK）——fire-and-forget 下 resolve(undefined) 与超时不可区分，
 // 靠显式 ack 区分「已送达」与「无路由」；放弃后镜像按 absent-report 走 errs 推迟
 // （30min 有界），不丢 errs-safe 兜底。
@@ -44,15 +44,18 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 /** select 通道级超时（控制面单请求，秒级校准——超时默认原则规则 19）。取值对齐
  *  plugin-bridge 启动 sync 的 2s 自愈闸：session_start 首帧可能早于 runtime adapter
- *  attach（R2 实证），超时折叠后重试必然自愈；fire-and-forget 帧不留 pending 挂死面。 */
+ *  attach（R2 实证），超时折叠后靠有限次重试覆盖 attach 竞态窗口（约 6s，见
+ *  MAX_REPORT_ATTEMPTS）；fire-and-forget 帧不留 pending 挂死面。 */
 const SELECT_TIMEOUT_MS = 2_000;
 
 /** 失败重试退避（对齐 plugin-bridge SYNC_RETRY_MS 控制面节奏）。 */
 const RETRY_DELAY_MS = 2_000;
 
-/** 累计失败放弃上限（对齐 plugin-bridge MAX_SYNC_ATTEMPTS：60s 窗口覆盖 attach 竞态，
- *  有界防 rpc-but-非-taiji orchestrator 场景的永久空转）。 */
-const MAX_REPORT_ATTEMPTS = 30;
+/** 累计失败放弃上限（刻意取小——增强面降级）：GUI live 在途镜像短暂滞后可接受，
+ *  3 次封顶（约 6s）后放弃，不做长尾可达保证；完成通知另有账本必达通道，不依赖
+ *  此镜像。重试窗口同时覆盖 session_start 首帧早于 runtime adapter attach 的竞态
+ *  （R2 实证），并有界防 rpc-but-非-taiji orchestrator 场景的永久空转。 */
+const MAX_REPORT_ATTEMPTS = 3;
 
 /** 在途上报器（组合根 index.ts 持有；per-factory 实例，session_start/shutdown 驱动）。 */
 export interface InFlightReporter {

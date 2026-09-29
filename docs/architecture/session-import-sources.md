@@ -105,7 +105,7 @@ export interface SessionImportSource {
 | I7 | **无法保真的内容显式降级**：源有而 pi 格式无对应的内容（二进制 artifact 引用、UI 事件等）——丢弃 + degradations 登记 + warning，**禁止伪造**（如为无摘要文本的源压缩记录伪造 pi compaction summary 会污染 LLM 上下文） | 导入产物携带伪造内容误导续聊 |
 | I8 | **自造 entry id 合法性**：pi 对 session 内 entry id **零格式语义解析**（消费点全为 opaque map key / leaf 指针 / 相等比较；pi 0.84.4 `dist/core/session-manager.js:681-682,758-759`——`_buildIndex`/`_appendEntry` 均 `byId.set(entry.id, entry)` + `leafId = entry.id`，自身 id 生成 = `randomUUID().slice(0,8)`）。导入源转换器据此可自造确定性 id 链（zcode 源：`packages/zcode-session-source/src/converter.ts` EntryChain（原 `packages/runtime/src/services/session/zcode-import/converter.ts`，随共享基座实施迁出 runtime，git 可追溯）——8-hex 递增 + parentId 顺序链） | pi 未来版本若给 entry id 引入格式语义（时间戳编码/字典序排序等），自造 id 链产物语义漂移——pi 版本 bump 探针族重验覆盖（C-proc-08） |
 
-## 6. zcode 源格式速查（探明事实沉淀）
+## 6. zcode 源格式速查（探明事实记录在案）
 
 存储：单 SQLite 库（WAL），宿主路径由 `ZCODE_HOST_DB_SUFFIX` 常量推导（`~/.zcode/cli/db/db.sqlite` 形态）；schema 版本看 `schema_migration` 表（探明时点 0.16.5，24 表）。三级表：
 
@@ -152,12 +152,12 @@ compact_summary 特判（kind==='compact_summary' 或 info.summary 存在）→ 
   timelineStatus∨summaryMessageId 的 compaction part）→ timelineOnly；
   messageSource==='fork'（独立分支，覆盖 semantics.source / part 级 source 通道——漏掉会穿透成
   realUserInput，即合成消息冒充用户气泡在 fork 来源复发）→ timelineOnly；
-  已知 source ∨ 遗留文本特征 → providerContextOnly；synthetic → hiddenSynthetic；按 role 收口
+  已知 source ∨ 遗留文本特征 → providerContextOnly；synthetic → hiddenSynthetic；按 role 收敛
 ```
 
 **策略 → pi entry 落点**：`realUserInput` → `message` role=user；`visibleAssistant` → `message` role=assistant + toolResult；`compactSummary` → `compaction` entry（见 §6.2）；`providerContextOnly`/`hiddenSynthetic`/`timelineOnly` → 丢弃 + 降级计数；闭集外的 kind/source → 丢弃 + `conversion_unclassified` 独立告警（不 fail-fast、不静默按 role 兜底）。
 
-**assistant 产物的 pi 读面不变量（2026-09-21 毒消息事故后 [HISTORICAL] 强制）**：① 每条 assistant entry **恒带 usage 对象**（step-finish tokens 可解 → 真实值；缺失/不可解 → 全零兜底）——pi 0.84.4 读面无守卫（pi-semantics PS-41：stats 聚合 `agent-session.js:2678` 读 `.input`、turn 前上下文扫描 `:2721` 读 `.totalTokens`），缺键即「导入后 stats 恒败 / 续聊即死」（排障见 TROUBLESHOOTING §20）；② 未收口段（无 step-finish 闭合——典型 = zcode 取消轮，消息级 `data.error.turnResult='cancelled'`）的 stopReason 由消息级 error 裁决：cancelled → `aborted`（pi 语义 = 用户中止）、其余 error 家族 → `error`——段自身的 step-finish finish 仅在收口时采信；③ 空内容段不产 entry（step-start-only 取消消息自然消失，行为由测试钉住）。
+**assistant 产物的 pi 读面不变量（2026-09-21 毒消息事故后 [HISTORICAL] 强制）**：① 每条 assistant entry **恒带 usage 对象**（step-finish tokens 可解 → 真实值；缺失/不可解 → 全零兜底）——pi 0.84.4 读面无检查（pi-semantics PS-41：stats 聚合 `agent-session.js:2678` 读 `.input`、turn 前上下文扫描 `:2721` 读 `.totalTokens`），缺键即「导入后 stats 恒败 / 续聊即死」（排障见 TROUBLESHOOTING §25）；② 未收敛段（无 step-finish 完成——典型 = zcode 取消轮，消息级 `data.error.turnResult='cancelled'`）的 stopReason 由消息级 error 裁决：cancelled → `aborted`（pi 语义 = 用户中止）、其余 error 家族 → `error`——段自身的 step-finish finish 仅在收敛时采信；③ 空内容段不产 entry（step-start-only 取消消息自然消失，行为由测试钉住）。
 
 **实测分布（全库，0.16.5）**：user 消息约 3.3 万条，真人 `user_prompt` 约 1.1 万，**合成消息约 2.2 万（67%）**——`todo_reminder` 2.4 万 / `background_notification` 6.1 千 / `system_reminder` 1.9 千 / `subagent_notification` 391 / `fork_notice` 15。assistant 消息 32.3 万条（`assistant_response` 25.1 万 + 无 kind 6.7 万 + `timeline_event` 4.5 千）。
 
@@ -178,7 +178,7 @@ compact_summary 特判（kind==='compact_summary' 或 info.summary 存在）→ 
 - **applyEntry 重放锚**（I1 的机器断言）：产物经 `replayEntries(applyEntry)` 重放无异常、消息序列/toolCall↔toolResult 全配对/usage 聚合符合预期。每个 fixture 会话都跑。
 - **不变量断言**（I2）：产物文件名剥 `.jsonl` 后 `lastIndexOf('_')` 尾段 === header.id；归一化函数后置条件边界（空串/含 `_`/非法字符）单独用例。
 - **编排层回归**：pi 源现有测试族（import-service / scan-external / session-message-handler-import / dialog）全绿——重构编排层不破坏 pi 行为。
-- **真机验收**：由实施期验收计划承接（场景清单以当轮设计文档的验收章节为准，不在本文件固化编号），开发阶段按改动面执行（`node scripts/select-affected-e2e.mjs --base <ref>` 圈定既有 e2e 子集）。
+- **真机验收**：由实施期验收计划承接（场景清单以当轮设计文档的验收章节为准，不在本文件固化编号），开发阶段按改动范围执行（`node scripts/select-affected-e2e.mjs --base <ref>` 圈定既有 e2e 子集）。
 
 ## 8. 维护
 

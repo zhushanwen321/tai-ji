@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useMemoryPressure 单元测试（crash-forensics-and-watchdog §3.3 D4，u6 验收 A5）。
  *

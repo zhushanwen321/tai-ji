@@ -9,10 +9,8 @@
 
 import type { GuiRenderResult } from "@zhushanwen/extension-protocol";
 import type {
-  AgentUsage,
   AgentUsageTotal,
   ToolCall,
-  ToolCallResult,
   Turn,
   WorktreeHandle,
 } from "@zhushanwen/subagent-engine-sdk";
@@ -72,11 +70,12 @@ export type RecordOrigin = "tool" | "workflow";
 /**
  * 旧 closed 终态的 L2 关闭原因子枚举。
  *
- * [U2 桥接期地位] 终态概念已删除（{@link ExecutionStatus} 两态），本枚举退役为
- * **读侧兼容位**：值域完整并入 {@link StopReason}（旧 7 值 = 旧 closed 的展示迁移）。
- * 迁移期旧终态路径（tryTransition/completeRecord 桥接、`.state`/entry/manifest 读侧
- * 迁移映射）继续写本字段 + stopReason 双写，消费方（deriveOutcome/notifier 等）
- * 零改动；U3+ 逐单元收缩后本字段随旧原语一并退役。
+ * [U2 桥接期地位 → W2/V3 后现状] 终态概念已删除（{@link ExecutionStatus} 两态），
+ * 本枚举退役为**读侧兼容位**：值域完整并入 {@link StopReason}（旧 7 值 = 旧 closed
+ * 的展示迁移）。写侧遗留终态原语（trySettleLegacyClosed / completeLegacyClosed——
+ * workflow D7 例外族 + 监督器放弃两个生产者）继续写本字段 + stopReason 双写，
+ * 消费方（deriveOutcome/notifier 等）零改动；本字段随读侧谓词 isLegacyClosedSettled
+ * 一并在 W4 sunset 退役。
  *
  * 值语义（历史）：
  *   parent-shutdown  — 父进程 session_shutdown 时回收子进程
@@ -143,9 +142,17 @@ export const CLOSED_REASONS: readonly ClosedReason[] = [
 /**
  * 终态三态对外语义（U3 C-outcome 一等披露）。
  *
- * 由 completeRecord 唯一写入点按 deriveOutcome 一次计算（判定顺序：cancelled 优先
- * → error 非空 → completed），消费方（project/list/notify 文案/渲染器）只读本字段，
- * 不再各自手写成败推导 switch（三处同构 switch 已随 U3 收敛删除）。
+ * [W2 D5 词表单源 → D2 实施期裁决]（workflow-run-resume-revision）：原
+ * `Exclude<RunOutcome, "interrupted">` 派生别名取消——interrupted 已移出
+ * RunOutcome，Exclude 失去意义。本域（execution/subagent-record）词表改为独立
+ * 实体字面量、与 RunOutcome 解耦：设计 D2 只裁决了 run 域词表改名
+ * （completed→done）与 call 级（run 域 agent-settled 帧）随改传导，未裁决
+ * execution/subagent-record 域（Out of scope 射程外——本域 outcome 语义是 record
+ * 终局形态，与 run 域 status/outcome 同词原则无涉），本域写入值保持不变。消费方
+ * （project/list/notify 文案/渲染器）只读本字段，不再各自手写成败推导 switch。
+ *
+ * 由 completeLegacyClosed 唯一写入点按 deriveOutcome 一次计算（判定顺序：cancelled 优先
+ * → error 非空 → completed）。
  *
  * [D6 显式取舍] parent-shutdown/parent-fork/parent-new 合成关闭（subagent-service
  * disposeAllRecords 合成 result 恒写 error:"closed due to ..."）落 "failed"——语义为
@@ -365,28 +372,6 @@ export interface DisplayItem {
 // Agent 结果（一次执行的 outcome）
 // ============================================================
 
-/**
- * SDK AgentSessionEvent 的最小可用子集（duck-typed，避免强耦合 SDK 类型）。
- * 由 session-runner 内部消费，驱动累积器和事件翻译。
- */
-export type SdkEvent = {
-  type: string;
-  toolCallId?: string;
-  toolName?: string;
-  args?: unknown;
-  result?: ToolCallResult;
-  isError?: boolean;
-  message?: {
-    usage?: AgentUsage & { cost?: { total: number } };
-    stopReason?: string;
-    errorMessage?: string;
-    /** 消息角色（message_start 事件携带，user/assistant/toolResult/custom）。 */
-    role?: string;
-  };
-  assistantMessageEvent?: { type?: string; delta?: string };
-  reason?: string;
-};
-
 /** 一次 session 执行的完整结果。collectResult 产出，写入 Record.outcome。 */
 export interface AgentResult {
   text: string;
@@ -418,7 +403,7 @@ export interface AgentResult {
 
 // [S4 簇 3 收编] WorktreeHandle 本地定义已删除，自 SDK re-export（原为结构等价
 // 副本，单源化后 SDK contract-types 是唯一定义点；「仅 worktree:true 时持有、
-// Object.freeze 守卫不可变」的语义注释见消费方 worktree-manager / worktree-git-ops）。
+// Object.freeze 守卫不可变」的语义注释见消费方 worktree-manager）。
 export type { WorktreeHandle } from "@zhushanwen/subagent-engine-sdk";
 
 /** alive marker：跨进程写权声明载体（写者 = 宿主进程；acquire/release 见
@@ -483,7 +468,7 @@ export class DirtyWorktreeError extends Error {
  * （getEventLog / getCurrentActivity / getFullText），不再独立存储切片或缓冲。
  *
  * 生命周期：createRecord() 创建 → updateFromEvent() 实时更新（累积进 turns）→
- *           completeRecord() 冻结 → archive 立即移出内存（读时从 session.jsonl 重建）。
+ *           completeLegacyClosed() 冻结 → archive 立即移出内存（读时从 session.jsonl 重建）。
  *
  * TUI 永远拿 RecordSnapshot（.slice() 快照），不直接持此可变对象。
  */
@@ -529,6 +514,13 @@ export interface ExecutionRecord {
    */
   readonly parentRunId?: string;
   /**
+   * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（派发单源 = pump dispatch 的
+   * callId/taskIndex，创建时随 originFields 写入）。additive：undefined（存量 record /
+   * tool 来源）零迁移。持久化经 subagent-record entry 与 binding sidecar（两持久化面
+   * 漏投影则重启后本字段回落 undefined，run 视图关联键缺失）。
+   */
+  readonly stepIndex?: number;
+  /**
    * [modeless 波1·已删除字段] chatMode（对话模式标志）停写删除：万物可续后
    * 「模式」不再是 record 状态——每个 record 轮终落 idle 可续聊（message 即续、
    * fork 可继承）。旧持久化数据（entry / binding / session identity）残留键读侧
@@ -572,7 +564,7 @@ export interface ExecutionRecord {
    */
   closedReason?: ClosedReason;
   /**
-   * 终态三态对外语义（U3 C-outcome）。completeRecord 唯一写入点按 deriveOutcome
+   * 终态三态对外语义（U3 C-outcome）。completeLegacyClosed 唯一写入点按 deriveOutcome
    * 一次计算，消费方只读本字段不再自行推导。向后兼容：旧 record / 磁盘重建
    * record 无此字段，投影层按 projectOutcome 兜底（closed-legacy 语义）。
    */
@@ -626,11 +618,9 @@ export interface ExecutionRecord {
   // [H1 U6 / D7 ③] roundBaseTurnIndex（增量通知 base 记账）已退役删除——消费函数
   // getFullTextFrom/nextRoundBaseTurnIndex 与唯一写点 settleChatRoundFromResponse 随
   // chat 域载体退役，生产零调用（base 推进 = 死记账）。
-  /**
-   * record 进入 idle 态的时间戳（ms）。finalizeRoundToIdle 设值；GC 定时器据此计算
-   * 剩余 TTL。undefined = 非 idle 态（running/closed/cancelled）或旧 record 缺失字段。
-   */
-  idleSince?: number;
+  // [ADR-0081 空闲回收机制退役] idleSince（GC 定时器 TTL 判据锚）已退役删除——机制删除
+  // 后生产零读点（写点 markSettledImpl / markRoundIdle 随删）；磁盘存量字段的读取
+  // 按宽容形状处理（多余 JSON 字段无害）。
   /**
    * close 优雅关闭标志（M2-B3）。record 运行中调 `close {force:false}` 时置 true；
    * 收口轮的轮次通知送达后收口落账消费（Continuation settle 分支 / one-shot 主干尾部，
@@ -738,11 +728,8 @@ export interface ExecuteOptions {
   skillPath?: string;
   appendSystemPrompt?: string[];
   schema?: Record<string, unknown>;
-  /** D-A6 bridge: workflow schemaEnv 经 ExecuteOptions 透传到 runSpawn childEnv。 */
-  schemaEnv?: string;
   /**
-   * Turn 上限 limiter。显式 0/负 = 显式不限：压过 SPAWN_WATCHDOG_ENV 兑底不挂
-   * watchdog（SP-6 参数 > env，U5）；undefined 未传才由 env 兑底。
+   * Turn 上限 limiter。显式 0/负 = 显式不限 turn；undefined 未传同样不限。
    */
   maxTurns?: number;
   graceTurns?: number;
@@ -970,6 +957,12 @@ export interface SubagentRecord {
    * W2/W3 run 视图下钻按 collectRecordsByParentRunId 查询；tool 来源恒 undefined。
    */
   parentRunId?: string;
+  /**
+   * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（与 ExecutionRecord.stepIndex
+   * 同源投影 / entry 与 binding 重建）。additive：undefined（存量磁盘重建源 / tool
+   * 来源）零迁移，读侧不参与 run 视图关联（无 stepIndex 的 record 不成行）。
+   */
+  stepIndex?: number;
   endedAt: number | undefined;
   turns: number;
   totalTokens: number;

@@ -15,7 +15,8 @@ vi.mock('../src/infra/pi/pi-paths.js', async (importOriginal) => {
 })
 
 import { extractSubagentsFromSessionFile, scanSubagentEntries } from '../src/services/session/subagent-extractor.js'
-import { SUBAGENT_RECORD_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
+import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 
 describe('encodeCwd', () => {
   it('encodes Unix cwd path correctly', () => {
@@ -122,7 +123,7 @@ describe('extractSubagentsFromSessionFile', () => {
                       agent: 'worker',
                       status: 'running',
                       sessionFile: subagentSessionFile,
-                      model: 'mimo-router/mimo-v2.5-pro',
+                      model: 'mimo-router/mimo-v2.6-flash',
                       totalTokens: 567852,
                       duration: 86,
                     },
@@ -142,7 +143,7 @@ describe('extractSubagentsFromSessionFile', () => {
           id: bgSubagentId,
           status: 'done',
           agent: 'worker',
-          model: 'mimo-router/mimo-v2.5-pro',
+          model: 'mimo-router/mimo-v2.6-flash',
           startedAt: 1783751909029,
           endedAt: 1783752218705,
         },
@@ -856,6 +857,42 @@ describe('extractSubagentsFromSessionFile — background sessionFile 回退查�
     expect(records[0].sessionFile).toBe(subagentJsonl)
     expect(records[0].status).toBe('idle')
     expect(records[0].slug).toBe('scan-dir')
+  })
+
+  // [W1 / D3] record 事件文件族（<sa-id>.events，无 .jsonl 后缀）结构性忽略断言：
+  // 后缀白名单天然排除；显式断言防未来通配规则回归把事件行当 session 行误读。
+  it('[W1] 目录内 *.events 文件族被结构性忽略（匹配不命中事件文件；纯 .events 目录 → null）', () => {
+    // 共存形态：jsonl 与 .events 同目录（records 目录与本目录同 cwd 树相邻）——匹配只落 jsonl
+    writeFileSync(join(mockSubagentDir.dir, 'sa-9.events'), '{"type":"record-journal","id":"sa-9"}\n')
+    const subagentJsonl = join(mockSubagentDir.dir, '2026-07-12T17-09-01-293Z_019f574d-c0ed.jsonl')
+    writeFileSync(subagentJsonl, JSON.stringify({ type: 'session', id: 'sub-1', cwd: '/proj', timestamp: '2026-07-12T17:09:01Z' }) + '\n')
+    const sessionFile = join(tempDir, 'events-coexist.jsonl')
+    writeFileSync(sessionFile, [
+      JSON.stringify({ type: 'session', id: 'main-ev', cwd: '/proj', timestamp: '2026-07-12T17:08:53Z' }),
+      JSON.stringify({
+        type: 'message', id: 'msg-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'call_ev', name: 'subagent', arguments: { action: 'start', startParam: { agent: 'worker', slug: 's', task: 't' } } }],
+        },
+      }),
+      JSON.stringify({
+        type: 'message', id: 'msg-2',
+        message: {
+          role: 'toolResult', toolCallId: 'call_ev', toolName: 'subagent',
+          content: [{ type: 'text', text: JSON.stringify({ action: 'start', subagentId: 'bg-ev-1-1783876141075', sessionFile: null, bgResponse: { status: 'running' } }) }],
+        },
+      }),
+    ].join('\n'))
+
+    const { records } = extractSubagentsFromSessionFile(sessionFile)
+    expect(records).toHaveLength(1)
+    expect(records[0].sessionFile).toBe(subagentJsonl)
+
+    // 纯 .events 目录：无 jsonl 可匹配 → null（事件文件不被时间戳匹配捡起）
+    rmSync(subagentJsonl, { force: true, maxRetries: 5, retryDelay: 20 })
+    const after = extractSubagentsFromSessionFile(sessionFile)
+    expect(after.records[0].sessionFile).toBeNull()
   })
 
   it('目录不存在时 sessionFile 保持 null', () => {

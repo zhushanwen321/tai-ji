@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useChat submitSegments 统一编排器单测（阶段 3a：renderer composables 层重构）。
  *

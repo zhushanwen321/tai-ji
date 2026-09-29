@@ -603,7 +603,7 @@ export async function closeHandler(
  *
  * 用于 subagent 因会话重启/进程退出而断联后的恢复：新进程以 --fork 指向旧 session
  * 文件（copy-on-write 建分支会话），继承全部对话历史；源文件只读不续写。
- * 旧记录本身不动——tryTransition 语义均不触碰。
+ * 旧记录本身不动——trySettleLegacyClosed 语义均不触碰。
  *
  * [U4 / §3.2.3 万物可续] 语义分野写死：fork-from = **历史在**分叉新 id；reopen
  * （markReopened，经 message 触发）= 历史亡同 id 重启。守卫链按 transcript 锚

@@ -206,31 +206,15 @@ describe('buildPiSubagentSpawnArgs（subagent 模板）', () => {
     expect(args[args.indexOf('--skill') + 1]).toBe('/skills/x')
   })
 
-  it('mirror 规则：noExtensions/approve/noContextFiles/extensionPaths 段在末尾；全 false 不追加', () => {
-    const args = buildPiSubagentSpawnArgs({
-      ...baseParams,
-      mirrorFlags: { noExtensions: true, approve: true, noContextFiles: true, extensionPaths: ['/e1', '/e2'] },
-    })
-    // mirror 段在最末（skill 之后）
-    expect(args.lastIndexOf('--extension')).toBeGreaterThan(args.indexOf('--mode'))
-    expect(args.filter(a => a === '--extension')).toHaveLength(2)
-    expect(args).toContain('--no-extensions')
-    expect(args).toContain('--approve')
-    expect(args).toContain('--no-context-files')
-
-    const none = buildPiSubagentSpawnArgs({
-      ...baseParams,
-      mirrorFlags: { noExtensions: false, approve: false, noContextFiles: false, extensionPaths: [] },
-    })
-    expect(none).toEqual(['--mode', 'rpc', '--session-dir', '/sessions/dir', '--model', 'openai/gpt-4o'])
+  it('不拼基座 flag：--no-extensions/--approve/--extension/--no-context-files 由引擎侧显式拼装（D2），本函数零基座段', () => {
+    const args = buildPiSubagentSpawnArgs(baseParams)
+    expect(args).not.toContain('--no-extensions')
+    expect(args).not.toContain('--approve')
+    expect(args).not.toContain('--extension')
+    expect(args).not.toContain('--no-context-files')
   })
 
-  it('mirrorFlags undefined → 行为等同旧版（无任何 mirror flag）', () => {
-    expect(buildPiSubagentSpawnArgs(baseParams)).not.toContain('--no-extensions')
-    expect(buildPiSubagentSpawnArgs(baseParams)).not.toContain('--approve')
-  })
-
-  it('快照等价：典型全参数集 argv 与切换前（pi-subagent-cli buildSpawnArgs）逐字节一致', () => {
+  it('快照锚定：典型全参数集 argv 形态（基座 flag 段已退役，引擎侧 spawn-args 显式拼装）', () => {
     const args = buildPiSubagentSpawnArgs({
       modelRef: { provider: 'openai', id: 'gpt-4o' },
       thinkingLevel: 'low',
@@ -240,7 +224,6 @@ describe('buildPiSubagentSpawnArgs（subagent 模板）', () => {
       sessionFile: '/s/resume.jsonl',
       forkSource: '/parent.jsonl',
       skillPaths: ['/skills/x'],
-      mirrorFlags: { noExtensions: true, approve: true, extensionPaths: ['/e1'], noContextFiles: true },
     })
     expect(args).toEqual([
       '--mode', 'rpc', '--session-dir', '/s', '--session', '/s/resume.jsonl',
@@ -249,7 +232,6 @@ describe('buildPiSubagentSpawnArgs（subagent 模板）', () => {
       '--append-system-prompt', '/tmp/p.md',
       '--fork', '/parent.jsonl',
       '--skill', '/skills/x',
-      '--no-extensions', '--approve', '--no-context-files', '--extension', '/e1',
     ])
   })
 })

@@ -24,14 +24,17 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
-  RELAY_ENV_NODE,
   RELAY_ENV_RECORD_ID,
-  RELAY_ENV_SCRIPT,
   RELAY_ENV_SESSION_ID,
   RELAY_ENV_SOCKET,
   RELAY_EXIT_CODES,
   RELAY_PROTOCOL_VERSION,
 } from "@zhushanwen/subagent-core/relay-env";
+import {
+  RELAY_FRAME_DIRS,
+  RELAY_FRAME_KINDS,
+  RELAY_REJECT_REASONS,
+} from "@zhushanwen/subagent-engine-sdk";
 
 /** 被锁定的代理脚本：包根 relay/relay.mjs（与 src/ 平行的零依赖脚本）。 */
 const RELAY_SCRIPT_PATH = path.resolve(
@@ -80,15 +83,65 @@ describe("relay 变体 C-镜像：relay.mjs 内嵌常量与 relay-env.ts SSOT �
   });
 });
 
-// SSOT 面回归锚（原 C-通道段消费的两个常量随段废弃——保留导入面活性断言，防
-// SSOT 导出被静默删除而镜像测试仍误绿）：
-describe("relay 变体 SSOT 导出面：代理启动键仍在 relay-env.ts", () => {
-  it("RELAY_ENV_NODE / RELAY_ENV_SCRIPT 非空（代理进程启动键）", () => {
-    expect(RELAY_ENV_NODE).toBeTruthy();
-    expect(RELAY_ENV_SCRIPT).toBeTruthy();
-    // 代理启动键不进 relay.mjs 镜像（上方「镜像面不扩充」锁死）——两断言互证：
-    // SSOT 有、镜像无 = 代理经 env 接收启动键而非内嵌，契约面自洽。
-    expect(RELAY_ENV_NODE).not.toBe(RELAY_ENV_SOCKET);
-    expect(RELAY_ENV_SCRIPT).not.toBe(RELAY_ENV_SOCKET);
+// ── 2. 帧词表镜像一致性（relay-frames.ts SSOT ↔ relay.mjs 内嵌字面量）──
+//
+// relay.mjs 对帧词表是「值字面量内嵌」（kind/dir 出现在构造与比较点，非命名常量——
+// 零依赖脚本保持无声明面）。断言按源内实际形态锁定每个协议点，值来自 SSOT 导出，
+// 词表改值/改形态双侧不同步即此处转红（与上方 env 常量段同款纪律）。
+
+describe("relay 变体 C-帧词表：relay.mjs 内嵌帧字面量与 relay-frames.ts SSOT 一致", () => {
+  const source = fs.readFileSync(RELAY_SCRIPT_PATH, "utf8");
+
+  it("握手帧构造：kind 与 SSOT handshake 一致", () => {
+    expect(source).toMatch(new RegExp(`kind:\\s*["']${RELAY_FRAME_KINDS.handshake}["']`));
+  });
+
+  it("下行数据帧构造：kind / dir 与 SSOT data / down 一致", () => {
+    expect(source).toMatch(
+      new RegExp(`kind:\\s*["']${RELAY_FRAME_KINDS.data}["']`),
+    );
+    expect(source).toMatch(new RegExp(`dir:\\s*["']${RELAY_FRAME_DIRS.down}["']`));
+  });
+
+  it("协商应答比较：reject / accept 与 SSOT 一致", () => {
+    expect(source).toMatch(
+      new RegExp(`frame\\.kind\\s*===\\s*["']${RELAY_FRAME_KINDS.reject}["']`),
+    );
+    expect(source).toMatch(
+      new RegExp(`frame\\.kind\\s*===\\s*["']${RELAY_FRAME_KINDS.accept}["']`),
+    );
+  });
+
+  it("上行数据帧比较：kind data + dir up / up-stderr 与 SSOT 一致", () => {
+    expect(source).toMatch(
+      new RegExp(`frame\\.kind\\s*===\\s*["']${RELAY_FRAME_KINDS.data}["']`),
+    );
+    expect(source).toMatch(new RegExp(`frame\\.dir\\s*===\\s*["']${RELAY_FRAME_DIRS.up}["']`));
+    expect(source).toMatch(
+      new RegExp(`frame\\.dir\\s*===\\s*["']${RELAY_FRAME_DIRS.upStderr}["']`),
+    );
+  });
+
+  it("终局帧比较：exit 与 SSOT 一致", () => {
+    expect(source).toMatch(
+      new RegExp(`frame\\.kind\\s*===\\s*["']${RELAY_FRAME_KINDS.exit}["']`),
+    );
+  });
+
+  it("goodbye 预告帧构造（宿主终止预告）：kind 与 SSOT goodbye 一致", () => {
+    expect(source).toMatch(
+      new RegExp(`kind:\\s*["']${RELAY_FRAME_KINDS.goodbye}["']`),
+    );
+  });
+
+  it("reject reason 语义键（代理对 version 退出码 10 的行为耦合）在 SSOT 词表内", () => {
+    // 代理侧对 reject 只统一处理（非零退出），不逐 reason 分支——但 E-1 的
+    // version→10 耦合登记在 SSOT 注释里，词表成员变更时此断言强制人工复核。
+    const reasons = Object.values(RELAY_REJECT_REASONS);
+    expect(reasons).toContain("version");
   });
 });
+
+// SSOT 面回归锚（原「SSOT 导出面」describe）：RELAY_ENV_NODE / RELAY_ENV_SCRIPT 的
+// 字面量断言与「≠ SOCKET」防呆已迁 core relay-env.test.ts（宿主侧无额外契约可锁——
+// 两常量由 runtime 注入、extension 消费，归属 core SSOT 测试）。

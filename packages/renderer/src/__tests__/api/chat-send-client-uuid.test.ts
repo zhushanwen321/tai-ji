@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * chat domain send clientUuid 透传单测（session-occupancy-send-closure——已删除，git 可追溯——u3-p1-renderer 验收 4）。
  *

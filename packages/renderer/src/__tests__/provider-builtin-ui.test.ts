@@ -1,14 +1,17 @@
 /**
- * 内置 Provider 模板 UI 渲染测试（wave 3 · builtin-provider-ui）。
+ * 内置 Provider 模板 UI 测试（wave 3 · builtin-provider-ui）。
  *
  * 覆盖用例：
- *  - t1-t3 ProviderTemplatePicker：菜单→Dialog 两级结构下列表渲染 / 搜索过滤 / 选中 emit select
- *  - t4-t9 ProviderQuickSetup：信息+凭据渲染 / 明文保存构造 SetProviderData / $ENV 保存 apiKey=$VAR / 自定义变量 / OAuth / ambient / 模型列表
- *  - t7/t11 ProviderPage 首屏冒烟：入口含「添加供应商」菜单（与「从其他 Agent 导入」并列）
+ *  - ProviderQuickSetup 组件级：默认凭据模式（t4b/t4c）/ 自定义环境变量（t6b）/ ambient（t9）/
+ *    env 自定义变量留空守卫（t12）/ 已存 OAuth 恢复（t13）/ 恢复分支真差异（s1b/s1d）
+ *    ——组件渲染与 emit 的权威断言在 @taiji/ui 包测试（ProviderTemplatePicker / ProviderQuickSetup），
+ *    本文件只保留 renderer 侧环境（zh-CN i18n 真实翻译）下的默认链路分支用例
+ *  - ProviderPage 保存集成链路（t10 系列）：选模板 → 保存 → setProvider payload / toast / Dialog 收尾 /
+ *    失败重试 / apikey 自动启用 / OAuth 形态与已存凭据恢复
  *
  * mock 策略：
  *  - vue-i18n 由 vitest-i18n-setup.ts 全局 mock（t() 从 zh-CN locale 取值）
- *  - @/api 仅 t7 需要（ProviderPage onMounted 调 listBuiltinProviders）
+ *  - @/api 为 ProviderPage 集成链路 mock（listBuiltinProviders 返回内置模板 / setProvider spy）
  *
  * reka-ui Popover/Dialog 经 Portal teleport 到 document.body：mount attachTo body 后，
  * portal 内容用 document.body.querySelector 查询；事件用原生 HTMLElement.click()
@@ -21,11 +24,12 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { BuiltinProviderTemplate } from '@taiji/shared'
 
-import { ProviderTemplatePicker as Picker, ProviderQuickSetup as QuickSetup } from '@taiji/ui/features/settings'
+import { ProviderQuickSetup as QuickSetup } from '@taiji/ui/features/settings'
 import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
 import { useToast } from '@/composables/useToast'
 
-// t7 需 mock @/api：listBuiltinProviders 返回空数组（不阻塞页面），setProvider 桩。
+// @/api mock：ProviderPage onMounted 调 listBuiltinProviders（默认空数组，集成用例
+// mockResolvedValueOnce 覆盖为模板）；setProvider 桩供保存链路断言。
 // vi.mock 被 vitest 提升到 import 之前，保证 ProviderPage import 时 @/api 已 mock。
 const configMock = vi.hoisted(() => ({
   listBuiltinProviders: vi.fn(async () => [] as BuiltinProviderTemplate[]),
@@ -153,140 +157,9 @@ function pointerBody(selector: string, type: 'pointerdown' | 'pointerup'): void 
   el.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0 }))
 }
 
-// ── t1-t3 ProviderTemplatePicker ──
-
-describe('ProviderTemplatePicker', () => {
-  it('t1 渲染 provider 列表（打开 Popover 后每项含 name + authMode 徽章）', async () => {
-    wrapper = mount(Picker, {
-      props: { providers: TEMPLATES },
-      attachTo: document.body,
-    })
-    await flushPromises()
-    // F2：点 trigger 先进入菜单视图，再点「从内置模板」进入选择器
-    clickBody('[data-testid="provider-template-picker"]')
-    await flushPromises()
-    clickBody('[data-testid="add-menu-builtin"]')
-    await flushPromises()
-    // 选择器网格内的卡片（wave-picker-b 重写后 item 在 Dialog grid 内，非 Popover 顶层）
-    const grid = document.body.querySelector<HTMLElement>('[data-testid="provider-template-grid"]')
-    expect(grid).toBeTruthy()
-    const items = grid!.querySelectorAll<HTMLElement>('[data-testid^="provider-template-"]')
-    expect(items.length).toBe(4)
-    // 含 name + authMode 徽章文案（API Key / OAuth）
-    expect(document.body.textContent).toContain('OpenAI')
-    expect(document.body.textContent).toContain('Anthropic')
-  })
-
-  it('t1b F2 入口菜单：打开后默认显示「从内置模板（推荐）+ 自定义」两条目，内置模板默认高亮', async () => {
-    wrapper = mount(Picker, {
-      props: { providers: TEMPLATES },
-      attachTo: document.body,
-    })
-    await flushPromises()
-    clickBody('[data-testid="provider-template-picker"]')
-    await flushPromises()
-    expect(document.body.querySelector('[data-testid="add-menu-builtin"]')).toBeTruthy()
-    expect(document.body.querySelector('[data-testid="add-menu-custom"]')).toBeTruthy()
-    // 内置模板条目带「推荐」标识 + 高亮底色（bg-surface-2）
-    const builtin = document.body.querySelector<HTMLElement>('[data-testid="add-menu-builtin"]')
-    expect(builtin!.textContent).toContain('推荐')
-    expect(builtin!.className).toContain('bg-surface-2')
-    // 此时不显示选择器搜索框（二级视图未进入）
-    expect(document.body.querySelector('[data-testid="provider-template-search"]')).toBeNull()
-  })
-
-  it('t1c F2 菜单「自定义」条目 → emit custom 并关闭 Popover', async () => {
-    wrapper = mount(Picker, {
-      props: { providers: TEMPLATES },
-      attachTo: document.body,
-    })
-    await flushPromises()
-    clickBody('[data-testid="provider-template-picker"]')
-    await flushPromises()
-    clickBody('[data-testid="add-menu-custom"]')
-    await flushPromises()
-    expect(wrapper.emitted('custom')).toBeTruthy()
-    // 关闭后选择器隐藏
-    expect(document.body.querySelector('[data-testid="add-menu-custom"]')).toBeNull()
-  })
-
-  it('t1d F5 列表项渲染首字母色块（语义色类，非硬编码颜色）', async () => {
-    wrapper = mount(Picker, {
-      props: { providers: TEMPLATES },
-      attachTo: document.body,
-    })
-    await flushPromises()
-    clickBody('[data-testid="provider-template-picker"]')
-    await flushPromises()
-    clickBody('[data-testid="add-menu-builtin"]')
-    await flushPromises()
-    // 首个 provider 的色块：首字母 + 品牌色（brand-colors.ts 16 色表经 inline style 绑定，wave-picker-b 起非语义 Tailwind 类）
-    const item = document.body.querySelector<HTMLElement>('[data-testid="provider-template-openai"]')
-    const avatar = item!.querySelector('.size-7')
-    expect(avatar).toBeTruthy()
-    expect(avatar!.textContent).toBe('O')
-    expect(avatar!.getAttribute('style')).toMatch(/background-color/)
-  })
-
-  it('t2 搜索过滤：输入 openai 后只显示 id 含 openai 的项', async () => {
-    wrapper = mount(Picker, {
-      props: { providers: TEMPLATES },
-      attachTo: document.body,
-    })
-    await flushPromises()
-    clickBody('[data-testid="provider-template-picker"]')
-    await flushPromises()
-    clickBody('[data-testid="add-menu-builtin"]')
-    await flushPromises()
-    setBodyInput('[data-testid="provider-template-search"]', 'openai')
-    await flushPromises()
-    const grid = document.body.querySelector<HTMLElement>('[data-testid="provider-template-grid"]')
-    const items = grid!.querySelectorAll<HTMLElement>('[data-testid^="provider-template-"]')
-    // openai + openai-codex（id 含 openai），anthropic 不含
-    expect(items.length).toBe(2)
-  })
-
-  it('t3 选中项 emit select 并关闭 Popover', async () => {
-    wrapper = mount(Picker, {
-      props: { providers: TEMPLATES },
-      attachTo: document.body,
-    })
-    await flushPromises()
-    clickBody('[data-testid="provider-template-picker"]')
-    await flushPromises()
-    clickBody('[data-testid="add-menu-builtin"]')
-    await flushPromises()
-    clickBody('[data-testid="provider-template-openai"]')
-    await flushPromises()
-    const emitted = wrapper.emitted('select')
-    expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toStrictEqual(TEMPLATES[0])
-    // sa4 Major #2 剩余：选中后 Popover 立即关闭，选择器内容从 body 消失
-    expect(document.body.querySelector('[data-testid="provider-template-search"]')).toBeNull()
-    expect(document.body.querySelector('[data-testid="provider-template-openai"]')).toBeNull()
-  })
-})
-
-// ── t4-t6 ProviderQuickSetup ──
+// ── ProviderQuickSetup 组件级（默认凭据模式 / 自定义环境变量 / ambient / 恢复分支；渲染与 emit 权威断言在 @taiji/ui 包测试）──
 
 describe('ProviderQuickSetup', () => {
-  it('t4 渲染 template 元信息（name/baseUrl/api）+ 凭据区 + 取消/保存按钮', async () => {
-    wrapper = mount(QuickSetup, {
-      props: { template: TEMPLATES[1], open: true }, // anthropic
-      attachTo: document.body,
-    })
-    await flushPromises()
-    const bodyText = document.body.textContent ?? ''
-    expect(bodyText).toContain('Anthropic')
-    expect(bodyText).toContain('https://api.anthropic.com')
-    expect(bodyText).toContain('anthropic-messages')
-    // 凭据方式 radio 选项存在（wave-quick-setup-c 重写：credential-mode-* → auth-option-*）
-    expect(document.body.querySelector('[data-testid="auth-option-plaintext"]')).toBeTruthy()
-    expect(document.body.querySelector('[data-testid="auth-option-env"]')).toBeTruthy()
-    // 保存按钮存在
-    expect(document.body.querySelector('[data-testid="provider-quick-setup-save"]')).toBeTruthy()
-  })
-
   it('t4b F3 默认凭据模式：envVars 非空默认环境变量（env select 可见，无需手动切）', async () => {
     wrapper = mount(QuickSetup, {
       props: { template: TEMPLATES[0], open: true }, // openai, envVars=[OPENAI_API_KEY]
@@ -308,51 +181,6 @@ describe('ProviderQuickSetup', () => {
     expect(document.body.querySelector('[data-testid="credential-ambient"]')).toBeTruthy()
     expect(document.body.querySelector('[data-testid="credential-apikey-input"]')).toBeNull()
     expect(document.body.querySelector('[data-testid="credential-envvar-select"]')).toBeNull()
-  })
-
-  it('t5 明文模式保存：emit save payload.data.apiKey=明文 + name=template.name（方案 B 占位无 models）', async () => {
-    wrapper = mount(QuickSetup, {
-      props: { template: TEMPLATES[1], open: true }, // anthropic
-      attachTo: document.body,
-    })
-    await flushPromises()
-    // 默认 env 模式（F3），先切明文（wave-quick-setup-c：radio 选项 testid 为 auth-option-*）
-    clickBody('[data-testid="auth-option-plaintext"]')
-    await flushPromises()
-    setBodyInput('[data-testid="credential-apikey-input"]', 'sk-xxx')
-    await flushPromises()
-    // 渲染 gate：明文输入框存在且输入生效（DOM 断言）
-    const keyInput = document.body.querySelector<HTMLInputElement>('[data-testid="credential-apikey-input"]')
-    expect(keyInput).toBeTruthy()
-    expect(keyInput!.value).toBe('sk-xxx')
-    clickBody('[data-testid="provider-quick-setup-save"]')
-    await flushPromises()
-    const emitted = wrapper.emitted('save')
-    expect(emitted).toBeTruthy()
-    const payload = emitted![0][0] as { providerId: string; data: Record<string, unknown> }
-    expect(payload.providerId).toBe('anthropic')
-    expect(payload.data.apiKey).toBe('sk-xxx')
-    expect(payload.data.name).toBe('Anthropic')
-    // 方案 B 占位：不写 models
-    expect(payload.data.models).toBeUndefined()
-  })
-
-  it('t6 $ENV 模式保存：apiKey=$OPENAI_API_KEY（envVar 默认预填 envVars[0]，且默认即 env 模式）', async () => {
-    wrapper = mount(QuickSetup, {
-      props: { template: TEMPLATES[0], open: true }, // openai, envVars=[OPENAI_API_KEY]
-      attachTo: document.body,
-    })
-    await flushPromises()
-    // 渲染 gate：默认 env 模式 select 渲染（DOM 断言）
-    expect(document.body.querySelector('[data-testid="credential-envvar-select"]')).toBeTruthy()
-    // F3：默认 env 模式，直接保存
-    clickBody('[data-testid="provider-quick-setup-save"]')
-    await flushPromises()
-    const emitted = wrapper.emitted('save')
-    expect(emitted).toBeTruthy()
-    const payload = emitted![0][0] as { providerId: string; data: Record<string, unknown> }
-    expect(payload.providerId).toBe('openai')
-    expect(payload.data.apiKey).toBe('$OPENAI_API_KEY')
   })
 
   it('t6b F4 自定义环境变量：下拉选「自定义变量名」→ 输入框出现 → 保存 apiKey=$自定义名', async () => {
@@ -391,51 +219,6 @@ describe('ProviderQuickSetup', () => {
     expect(payload.data.apiKey).toBe('$MY_OPENAI_KEY')
   })
 
-  it('t8 F1 oauth-only 模板：无 key 输入、仅 OAuth 选项、保存禁用', async () => {
-    wrapper = mount(QuickSetup, {
-      props: { template: TEMPLATES[2], open: true }, // openai-codex
-      attachTo: document.body,
-    })
-    await flushPromises()
-    // wave-quick-setup-c：oauth-only 模板渲染 OAuth radio 选项（credential-oauth-only 已废弃）
-    expect(document.body.querySelector('[data-testid="auth-option-oauth"]')).toBeTruthy()
-    expect(document.body.querySelector('[data-testid="credential-apikey-input"]')).toBeNull()
-    expect(document.body.querySelector('[data-testid="auth-option-plaintext"]')).toBeNull()
-    const save = document.body.querySelector<HTMLButtonElement>('[data-testid="provider-quick-setup-save"]')
-    expect(save!.disabled).toBe(true)
-  })
-
-  it('t8b F1 oauth-only 模板：保存不可触发（无 save emit）', async () => {
-    wrapper = mount(QuickSetup, {
-      props: { template: TEMPLATES[2], open: true }, // openai-codex
-      attachTo: document.body,
-    })
-    await flushPromises()
-    // 渲染 gate：OAuth 选项可见 + 保存按钮 disabled（DOM 断言）
-    expect(document.body.querySelector('[data-testid="auth-option-oauth"]')).toBeTruthy()
-    const saveBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="provider-quick-setup-save"]')
-    expect(saveBtn).toBeTruthy()
-    expect(saveBtn!.disabled).toBe(true)
-    clickBody('[data-testid="provider-quick-setup-save"]')
-    await flushPromises()
-    expect(wrapper.emitted('save')).toBeFalsy()
-  })
-
-  it('t8c F1 both 模板：OAuth 选项存在，选中后显示登录按钮（oauth-login-button）', async () => {
-    wrapper = mount(QuickSetup, {
-      props: { template: TEMPLATES[1], open: true }, // anthropic
-      attachTo: document.body,
-    })
-    await flushPromises()
-    expect(document.body.querySelector('[data-testid="auth-option-oauth"]')).toBeTruthy()
-    // 选中 OAuth 选项 → body 展开显示登录按钮（oauthAuthorized 未回写时为登录态）
-    clickBody('[data-testid="auth-option-oauth"]')
-    await flushPromises()
-    const loginBtn = document.body.querySelector('[data-testid="oauth-login-button"]')
-    expect(loginBtn).toBeTruthy()
-    expect(loginBtn!.textContent).toContain('登录')
-  })
-
   it('t9 F1 ambient 模板：无 key 输入、保存可用、payload 不塞 apiKey', async () => {
     wrapper = mount(QuickSetup, {
       props: { template: TEMPLATES[3], open: true }, // google-vertex
@@ -458,20 +241,6 @@ describe('ProviderQuickSetup', () => {
     expect('baseUrl' in payload.data).toBe(false)
     expect('api' in payload.data).toBe(false)
     expect(payload.data.models).toBeUndefined()
-  })
-
-  it('t9b F7b 信息区显示内置模型列表（template.models chips）', async () => {
-    wrapper = mount(QuickSetup, {
-      props: { template: TEMPLATES[1], open: true }, // anthropic, models 3 条
-      attachTo: document.body,
-    })
-    await flushPromises()
-    // wave-quick-setup-c：信息块 builtin-models 渲染 template.models 的 id chips
-    const modelsBlock = document.body.querySelector('[data-testid="builtin-models"]')
-    expect(modelsBlock).toBeTruthy()
-    expect(modelsBlock!.textContent).toContain('claude-3-5-sonnet')
-    expect(modelsBlock!.textContent).toContain('claude-3-7-sonnet')
-    expect(modelsBlock!.textContent).toContain('claude-sonnet-4')
   })
 
   it('t12 MF-1 env 模式自定义变量为空 → 保存禁用（不产生 apiKey:"" 清 OAuth）', async () => {
@@ -525,16 +294,6 @@ describe('ProviderQuickSetup', () => {
 
   // ── S-1：resolveInitialAuthMethod 恢复分支覆盖（MF-1 主路径修复的既有回退语义不破坏）──
 
-  it('s1a 已存 env_var 配置重开：默认恢复 env 选项（非 plaintext）', async () => {
-    wrapper = mount(QuickSetup, {
-      props: { template: TEMPLATES[0], open: true, existingAuthMethod: 'env_var' }, // openai envVars=[OPENAI_API_KEY]
-      attachTo: document.body,
-    })
-    await flushPromises()
-    expect(document.body.querySelector('[data-testid="credential-envvar-select"]')).toBeTruthy()
-    expect(document.body.querySelector('[data-testid="credential-apikey-input"]')).toBeNull()
-  })
-
   it('s1b 已存 api_key 配置重开：默认恢复明文选项', async () => {
     wrapper = mount(QuickSetup, {
       props: { template: TEMPLATES[0], open: true, existingAuthMethod: 'api_key' },
@@ -545,15 +304,6 @@ describe('ProviderQuickSetup', () => {
     expect(document.body.querySelector('[data-testid="credential-envvar-select"]')).toBeNull()
   })
 
-  it('s1c 已存 ambient 配置重开：默认恢复云凭证选项', async () => {
-    wrapper = mount(QuickSetup, {
-      props: { template: TEMPLATES[3], open: true, existingAuthMethod: 'ambient' }, // google-vertex
-      attachTo: document.body,
-    })
-    await flushPromises()
-    expect(document.body.querySelector('[data-testid="credential-ambient"]')).toBeTruthy()
-  })
-
   it('s1d 恢复分支不适用时回退默认：oauth 标注但模板仅 api_key 模式（openai）→ 默认 env', async () => {
     wrapper = mount(QuickSetup, {
       props: { template: TEMPLATES[0], open: true, existingAuthMethod: 'oauth' },
@@ -562,43 +312,6 @@ describe('ProviderQuickSetup', () => {
     await flushPromises()
     expect(document.body.querySelector('[data-testid="credential-envvar-select"]')).toBeTruthy()
     expect(document.body.querySelector('[data-testid="credential-apikey-input"]')).toBeNull()
-  })
-})
-
-// ── t7 ProviderPage 首屏冒烟 ──
-
-describe('ProviderPage 入口', () => {
-  it('t7 首屏渲染含「添加供应商」入口按钮（data-testid=provider-template-picker）', async () => {
-    wrapper = mount(ProviderPage, {
-      props: { providers: [] },
-      attachTo: document.body,
-    })
-    await flushPromises()
-    expect(
-      wrapper.find('[data-testid="provider-template-picker"]').exists(),
-    ).toBe(true)
-    // 并列的「从其他 Agent 导入」入口仍在
-    expect(
-      wrapper.find('[data-testid="import-providers-menu"]').exists(),
-    ).toBe(true)
-  })
-
-  it('t11 F2 入口聚合：点「添加供应商」→ 菜单含内置模板/自定义 → 点自定义走 createAndExpand 原流程', async () => {
-    wrapper = mount(ProviderPage, {
-      props: { providers: [] },
-      attachTo: document.body,
-    })
-    await flushPromises()
-    // 点 trigger 打开菜单
-    clickBody('[data-testid="provider-template-picker"]')
-    await flushPromises()
-    expect(document.body.querySelector('[data-testid="add-menu-builtin"]')).toBeTruthy()
-    expect(document.body.querySelector('[data-testid="add-menu-custom"]')).toBeTruthy()
-    // 点「自定义」→ 原流程：新建合成行并展开就地编辑体
-    clickBody('[data-testid="add-menu-custom"]')
-    await flushPromises()
-    expect(wrapper.find('[data-testid="provider-expand-body"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="provider-edit-name"]').exists()).toBe(true)
   })
 })
 

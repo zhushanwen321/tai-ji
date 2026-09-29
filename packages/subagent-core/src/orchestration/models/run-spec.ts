@@ -11,8 +11,6 @@
  * 层归属：Engine。
  */
 
-import type { Budget } from "./budget.ts";
-
 /**
  * RunSpec——一次 workflow run 的不可变输入规格。
  *
@@ -26,7 +24,7 @@ export interface RunSpec {
  * 参数契约（JSON Schema draft-07，来自 script.meta.parameters 整对象透传，m3 DM2）。
  *
  * undefined = 不校验（安全退化——漏拷 parameters 退化是「不校验」非「校验错」）。
- * 由调用方（actionRun/runAndWait/executeNestedWorkflow）从 script.meta.parameters 拷贝。
+ * 由调用方（actionRun）从 script.meta.parameters 拷贝。
  * lifecycle.runWorkflow 首行经 validateRunArgs 校验 spec.args（coerceTypes 原地规范化
  * args 对象内容，字段引用不变；worker 启动与崩溃重建共用同一对象）。
  */
@@ -51,14 +49,6 @@ export interface RunSpec {
   readonly budgetTokens?: number;
  /** 时间预算上限（ms，wall-clock，由 lifecycle.scheduleTimeBudget 调度）。 */
   readonly budgetTimeMs?: number;
- /**
- * 父 Budget 共享引用（嵌套 workflow() 时由 executeNestedWorkflow 传入）。
- *
- * 设置时 lifecycle.runWorkflow 直接复用此 Budget 实例，而非 new 一个独立 Budget——
- * 子 run 的 consume 直接反映到父 Budget，消除并行嵌套下的超支窗口（F-7 方案 B）。
- * 顶层 run 无此字段（budgetTokens 走独立 Budget 构造）。
- */
-  readonly budgetRef?: Budget;
  /** 脚本名（meta.name 或文件名 stem）。 */
   readonly scriptName: string;
  /**
@@ -71,11 +61,4 @@ export interface RunSpec {
   readonly scriptPath: string;
  /** 人类可读描述（meta.description）。 */
   readonly description?: string;
- /**
- * 父 workflow 调用链（嵌套 workflow() 时自动填充，循环检测用）。
- *
- * 顶层 run 无此字段。子 run 的 chain = [...parentChain, parentScriptName]。
- * executeNestedWorkflow 检查目标 name 是否已在 chain 中，防止 A→B→A 死循环。
- */
-  readonly parentWorkflowChain?: readonly string[];
 }

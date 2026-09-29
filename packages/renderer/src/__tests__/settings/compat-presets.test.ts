@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * compat 预设配置测试。
  *

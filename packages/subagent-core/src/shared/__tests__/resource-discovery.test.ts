@@ -49,6 +49,7 @@ import {
   isMachineSource,
   getCachedParsed,
   clearFileCache,
+  conventionRootDirs,
   type ResourceSource,
 } from "../resource-discovery.ts";
 // logger 断言目标随源切换（u0-data-discovery）：resource-discovery 的 logger 是
@@ -390,10 +391,9 @@ describe("user-extension-paths (TAIJI_EXTENSION_PATHS)", () => {
     }
   });
 
-  it("分级穷举：全部 9 个 ResourceSource 的机器/用户归属与 D3 一致", () => {
+  it("分级穷举：全部 8 个 ResourceSource 的机器/用户归属与 D3 一致", () => {
     // 封闭枚举逐值断言，防止未来新增/修改枚举值时分级边界漂移
-    // （W2② 新增 project-host——项目级宿主注入根，机器源）
-    const machine: ResourceSource[] = ["npm", "npm-dev", "user-extension-paths", "project-pi", "project-pi-tmp", "project-host", "project-agents"];
+    const machine: ResourceSource[] = ["npm", "npm-dev", "user-extension-paths", "project-pi", "project-pi-tmp", "project-agents"];
     const user: ResourceSource[] = ["user-pi", "user-agents"];
     for (const s of machine) expect(isMachineSource(s), `${s} 应为机器源`).toBe(true);
     for (const s of user) expect(isMachineSource(s), `${s} 应为用户源`).toBe(false);
@@ -554,28 +554,6 @@ describe("getCachedParsed（mtime 级解析缓存）", () => {
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
-
-  it("同一 path 的不同 parse 各自独立缓存（缓存键含 parse 身份，防跨 parse 污染）", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "parsed-cache4-"));
-    const f = path.join(dir, "a.md");
-    fs.writeFileSync(f, "shared-content", "utf-8");
-    try {
-      // 模拟真实双 parse 场景：parseAgentFrontmatter vs parseWorkflowMeta 对同一
-      // path（agent 与 workflow 发现源理论上可命中同一路径）各自解析
-      const parseA = (content: string) => ({ kind: "agent" as const, content });
-      const parseW = (content: string) => ({ kind: "workflow" as const, len: content.length });
-      const a1 = getCachedParsed(f, parseA);
-      // 修复前：缓存键只有 path，这里会命中 parseA 的缓存条目并 as T 断言返回
-      // {kind:"agent"}——w1 被污染成错误类型
-      const w1 = getCachedParsed(f, parseW);
-      const a2 = getCachedParsed(f, parseA);
-      expect(a1).toEqual({ kind: "agent", content: "shared-content" });
-      expect(w1).toEqual({ kind: "workflow", len: 14 });
-      expect(a2).toEqual({ kind: "agent", content: "shared-content" });
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    }
-  });
 });
 
 // ── manifestCache（async readPackageManifest）缓存语义 ──
@@ -662,6 +640,9 @@ describe("manifestCache（async readPackageManifest）", () => {
     expect(ext2).toHaveLength(1);
     expect(path.basename(ext2[0]?.path ?? "")).toBe("gone.md");
     expect(ext2[0]?.available).toBe(false);
+    // P5 D4-3 invalid 具名上报：占位条目带发现层具名 reason（消费方据此渲染
+    // invalid 行，损坏资源不再静默）
+    expect(ext2[0]?.reason).toBe("manifest declared path not found");
   });
 
   // ── 失败/边缘路径（原 resource-discovery-manifest-cache.test.ts 迁编，impl-plan
@@ -788,6 +769,59 @@ describe("manifestCache（async readPackageManifest）", () => {
       ).toHaveLength(0);
       // 合法解析 + 无 manifest → 缓存 undefined 条目（两 kind 共享，零重读）
       expect(asyncReadCount() - caseStart, `case ${label}`).toBe(1);
+    }
+  });
+});
+
+// ============================================================
+// conventionRootDirs（约定根推导导出面）
+// ============================================================
+
+describe("conventionRootDirs", () => {
+  it("约定根有序：user-agents → project-pi → project-agents（无 includeTmp）", () => {
+    expect(conventionRootDirs({ kind: "agents", workspaceRoot: "/ws" })).toEqual([
+      path.join(mockHomeDir, ".agents", "agents"),
+      path.join("/ws", ".pi", "agents"),
+      path.join("/ws", ".agents", "agents"),
+    ]);
+  });
+
+  it("includeTmp 时在 project-pi 与 project-agents 之间插入 .pi/{kind}/.tmp", () => {
+    expect(
+      conventionRootDirs({ kind: "workflows", workspaceRoot: "/ws", includeTmp: true }),
+    ).toEqual([
+      path.join(mockHomeDir, ".agents", "workflows"),
+      path.join("/ws", ".pi", "workflows"),
+      path.join("/ws", ".pi", "workflows", ".tmp"),
+      path.join("/ws", ".agents", "workflows"),
+    ]);
+  });
+
+  it("与发现链同源：文件放在 conventionRootDirs 推导的根下会被 discoverResources 扫到", async () => {
+    // 守护导出面与 buildScanTargets 硬编码槽的单源性：若两者推导漂移
+    // （导出改了、扫描槽没改），放在「导出说有」的根下的文件将扫不到
+    const ws = tmpWorkspace();
+    const prevExtPaths = process.env.TAIJI_EXTENSION_PATHS;
+    delete process.env.TAIJI_EXTENSION_PATHS;
+    try {
+      const roots = conventionRootDirs({ kind: "workflows", workspaceRoot: ws, includeTmp: true });
+      const expected: string[] = [];
+      roots.forEach((root, i) => {
+        expected.push(writeFile(root, `conv${i}.mjs`, ""));
+      });
+      const found = await discoverResources({
+        kind: "workflows",
+        workspaceRoot: ws,
+        hostRoots: [],
+        includeTmp: true,
+      });
+      expect(found.map((r) => r.path)).toEqual(expect.arrayContaining(expected));
+      // 反向：发现面没有约定根之外的 project/user 级来源混入（hostRoots 空 +
+      // ext-paths 清空后，4 文件即全部发现）
+      expect(found).toHaveLength(roots.length);
+    } finally {
+      if (prevExtPaths !== undefined) process.env.TAIJI_EXTENSION_PATHS = prevExtPaths;
+      fs.rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
 });

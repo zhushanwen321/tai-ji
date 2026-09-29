@@ -9,9 +9,9 @@
 // 同名透传）。不 import 任何具体引擎模块（registry.ts 依赖方向纪律：上层按中立类型
 // 组装声明，引擎细节归引擎）。
 //
-// schemaEnv 不透传（与原 AgentTaskSpec 形态一致的字段面）：pi 边界直出时 schema 派生
-// 优先——透传会在 chat 域引入「opts.schemaEnv 原值 vs compact 派生值」的取值源变化，
-// 维持派生优先保证与合流前行为逐字节一致。
+// schema 只传本体（budgetFields）：PI_WORKFLOW_SCHEMA env 值由引擎侧从 wire task.schema
+// 派生（H1 schema 传输归位），宿主侧无 env 预编码通道——chat 域与 workflow 域同源，
+// 不存在两个取值源。
 //
 // fork 族在调用本 mapper 前已被 capability-gate 预检拒绝（[D3-④]
 // capabilities 驱动的调用前拒绝，非 pi 引擎 unsupported），透传仅保持映射完整性——

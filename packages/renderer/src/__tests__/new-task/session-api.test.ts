@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * sessionApi.create cwd 透传契约单测（#1，T1.1 配套 api 层片段）。
  *

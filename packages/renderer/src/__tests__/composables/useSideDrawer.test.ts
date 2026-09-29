@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useSideDrawer per-session 控制态隔离单测（W3: U1-U10）。
  *

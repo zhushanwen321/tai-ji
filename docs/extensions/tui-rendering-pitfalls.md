@@ -258,7 +258,7 @@ function truncVisible(s: string, maxWidth: number): string {
 | Application mode | `\x1bOA` | **Pi TUI 常启用** |
 | Kitty CSI u | `\x1b[1;1A` / `\x1b[<cp>;<mod>u` | Kitty/Ghostty/WezTerm |
 
-> 注：方向键的 `case "up"`（`keys.ts:1044-1057`）收口上述三族 + legacy 修饰序列（shift/ctrl），但**不调用 `matchesModifyOtherKeys`**（`modifyOtherKeys` 格式如 `\x1b[27;1;65~` 仅在 escape/enter/space 等键的分支处理）。对绝大多数终端三族已够用；若你的终端只发 modifyOtherKeys 格式的方向键，需额外补 fallback。
+> 注：方向键的 `case "up"`（`keys.ts:1044-1057`）收敛上述三族 + legacy 修饰序列（shift/ctrl），但**不调用 `matchesModifyOtherKeys`**（`modifyOtherKeys` 格式如 `\x1b[27;1;65~` 仅在 escape/enter/space 等键的分支处理）。对绝大多数终端三族已够用；若你的终端只发 modifyOtherKeys 格式的方向键，需额外补 fallback。
 
 **另一个关键点**：`matchesKey` 对**无修饰的可打印字母**返回 **true**（`keys.ts:1200` `data === key`），并非 false。这意味着如果你用 `matchesKey(data, "k")` 做导航，字母 k 会命中——这正是 j/k 导航与 filter 冲突的根因（见 §3）。避免冲突的正确方式是导航**只用功能键**（`Key.up` 等非字母 keyId），让字母落到 printable 分支。
 
@@ -352,11 +352,11 @@ processKey 里直接调 `wrappedDone()`，**不在 processKey 里手动 set disp
 
 **场景**：sync subagent 流式输出时，每个 token 触发 `text_delta`/`thinking_delta`，经 event-bridge 到 `onEvent`。
 
-**坑（`8160a5d13`，viewport snap-back）**：若 `onEvent` 无脑调 `onUpdate`，就是 ~60/s 的 `requestRender`。Pi 的 `doRender()` 末尾（`tui.ts:1445`）无条件执行 `previousViewportTop = Math.max(prevViewportTop, finalCursorRow - height + 1)`——**没有 isAtBottom 守卫**，任何对末尾 block 的 onUpdate 都会把用户已向上滚动的位置拽回底部，用户无法滚动。
+**坑（`8160a5d13`，viewport snap-back）**：若 `onEvent` 无脑调 `onUpdate`，就是 ~60/s 的 `requestRender`。Pi 的 `doRender()` 末尾（`tui.ts:1445`）无条件执行 `previousViewportTop = Math.max(prevViewportTop, finalCursorRow - height + 1)`——**没有 isAtBottom 检查**，任何对末尾 block 的 onUpdate 都会把用户已向上滚动的位置拽回底部，用户无法滚动。
 
 **对比验证**：`pi-subagents` 的 `execution.ts` 的 `processLine` 只在离散边界调 `fireUpdate()`——`tool_execution_start`/`tool_execution_end`/`tool_result_end`/`message_end`，`message_update`（delta）从不调。**它没有 snap-back 不是因为用了更聪明的渲染路径，而纯粹是触发频率低。**
 
-**正确做法**：在 `onEvent` 里加 `shouldTriggerUpdate(event)` 守卫：
+**正确做法**：在 `onEvent` 里加 `shouldTriggerUpdate(event)` 检查：
 
 ```typescript
 export function shouldTriggerUpdate(event: AgentEvent): boolean {
@@ -370,7 +370,7 @@ export function shouldTriggerUpdate(event: AgentEvent): boolean {
 }
 ```
 
-delta 类事件只走 `updateStateFromEvent` 累积 eventLog 文本缓冲，不触发 onUpdate。sync 和 background 的 onEvent 回调、`notifyChange()` 都必须过这个守卫（`ba1c80327` P1b 专门补了 background 路径漏过滤）。
+delta 类事件只走 `updateStateFromEvent` 累积 eventLog 文本缓冲，不触发 onUpdate。sync 和 background 的 onEvent 回调、`notifyChange()` 都必须过这个检查（`ba1c80327` P1b 专门补了 background 路径漏过滤）。
 
 ---
 
@@ -561,7 +561,7 @@ streamSink: ctx.mode === "rpc"
 
 | Commit | 坑 | 正确做法 |
 |---|---|---|
-| `8160a5d13` | streaming delta 触发 onUpdate → viewport snap-back | `shouldTriggerUpdate` 守卫，delta 只累积不触发 |
+| `8160a5d13` | streaming delta 触发 onUpdate → viewport snap-back | `shouldTriggerUpdate` 检查，delta 只累积不触发 |
 | `ba1c80327` P1a | 每秒 new 组件 → GC 压力 | 复用 `context.lastComponent`，调 `update(d, theme)` |
 | `ba1c80327` P1b | background onEvent 每 token 触发 requestRender | background 也要过 `shouldTriggerUpdate` |
 | `ba1c80327` P2 | eventLog 引用别名 → 归档被后续 mutate 污染 | `.slice()` 切断别名 |
@@ -569,7 +569,7 @@ streamSink: ctx.mode === "rpc"
 | `4ecc9f5a1` | background 完成双 block | `sendMessage` 用 `display:false` |
 | `1f0acc192` | sync/background eventLog slicing 不一致 | 统一调 `updateWidgetFromEvent` |
 | `c68ce754a` | widget 渲染层独立状态镜像 → drift | 删 `AgentWidgetManager`，runtime 唯一真源 |
-| `f38e00fe0` | streamSink 无条件启用 → TUI 下 widget 被 raw text 淹没 | 守卫 `ctx.mode === 'rpc'`（`hasUI` 在 TUI 和 RPC 都为 true，不能区分） |
+| `f38e00fe0` | streamSink 无条件启用 → TUI 下 widget 被 raw text 淹没 | 检查 `ctx.mode === 'rpc'`（`hasUI` 在 TUI 和 RPC 都为 true，不能区分） |
 
 ---
 
@@ -618,5 +618,5 @@ streamSink: ctx.mode === "rpc"
   - `tui/category-confirm.ts` — 自定义 overlay 组件范式
   - `tools/subagent-tool.ts` — renderShell 决策 / lastComponent 复用 / shouldTriggerUpdate / 终态 return
   - `utils/throttle.ts` — leading+trailing+flush
-  - `state/execution-state.ts` — shouldTriggerUpdate 守卫
+  - `state/execution-state.ts` — shouldTriggerUpdate 检查
   - `mocks/pi-tui.ts` — vitest mock（Key/matchesKey/visibleWidth/truncateToWidth）

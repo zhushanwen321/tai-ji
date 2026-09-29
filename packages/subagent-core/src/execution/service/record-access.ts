@@ -33,7 +33,7 @@ import { toErrorMessage } from "../../core/error-message.ts";
 
 import { bestEffort } from "../assembly/best-effort.ts";
 import { COLD_LOOKUP_SCAN_LIMIT, coldLookupForAction, type ColdLookupDeps } from "../assembly/cold-lookup.ts";
-import { createRecord, project, snapshot } from "../persistence/execution-record.ts";
+import { createRecord, isLegacyClosedSettled, project, snapshot } from "../persistence/execution-record.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import {
   joinEngineModelRef,
@@ -216,8 +216,8 @@ export class RecordAccess {
     for (const rec of this.deps.getStore().scanLastRecordEntries(this.deps.getMainSessionFile())) {
       if (visibleIds.has(rec.id)) continue; // 查询面已可见：磁盘锚或 manifest 幸存
       if (rec.rootSessionId !== this.deps.getSessionRootId()) continue; // 只治本 session 树
-      // [U2 桥接判据] 旧「closed 终态」读形态 ⟺ idle ∧ closedReason 有值（两态迁移不变量）。
-      if (!(rec.status === "idle" && rec.closedReason !== undefined)
+      // [W2/V3 D5 桥接判据收敛] 旧「closed 终态」读判定 ⟺ isLegacyClosedSettled（唯一权威谓词）。
+      if (!isLegacyClosedSettled(rec)
         || !isReconnectableFinalReason(rec.closedReason)) continue;
       // manifest 投影补写走 store 公开原语（[H4 收口 / G1] store 外零 manifest 直写；
       // status 恒 closed——entry 的 closed 即终态自描述，无 running 形态可达此处）。
@@ -279,7 +279,7 @@ export class RecordAccess {
     // 静默回落 override→主 agent model，用户拿到的 subagent 无 systemPrompt/工具白名单
     // 且零反馈。require:true 让失败抛出带 <available_subagents> 指引的错误（对齐
     // workflow name not found 反馈风格）；不传 agent = 默认 general-purpose 语义，
-    // agentConfig 保持 undefined（合法缺省，走 override → ctxModel 兑底）。
+    // agentConfig 保持 undefined（合法缺省，走 override → ctxModel 兜底）。
     // [u-h2 D2-1] execute() 已在路由前解析 agentConfig（pre 通道），此处复用不二次加载。
     const agentConfig = pre
       ? pre.agentConfig
@@ -357,12 +357,15 @@ export class RecordAccess {
   /** 步骤 2：按 mode 生成 id + controller，创建 record 并注册。
    *  [L-1] ExecutionMode 类型固定 "background"（sync 已删除），id/controller 分支简化。
    *  [H2 W2] originFields：workflow 域派发（executeWorkflowAgent）的来源身份——
-   *  origin:"workflow" + parentRunId 进 record（D1）；缺省不传 = tool 来源（存量零迁移）。 */
+   *  origin:"workflow" + parentRunId 进 record（D1）；缺省不传 = tool 来源（存量零迁移）。
+   *  [W0 / D1] stepIndex（可选）：origin="workflow" 时在 run 内的步骤索引（pump
+   *  dispatch 的 callId 单源），run 视图按 (parentRunId, stepIndex) 关联 record；
+   *  undefined（SAR 直调占位路径 / 旧调用方）经 JSON.stringify 自然缺省零迁移。 */
   createRecordForMode(
     identity: ResolvedIdentity,
     opts: ExecuteOptions,
     mode: ExecutionMode,
-    originFields?: { origin: "workflow"; parentRunId: string },
+    originFields?: { origin: "workflow"; parentRunId: string; stepIndex?: number },
   ): ExecutionRecord {
     // FR-1: record id 用全局 UUID，不依赖 transcript/PID
     const id = `sa-${crypto.randomUUID()}`;
@@ -408,9 +411,15 @@ export class RecordAccess {
     });
     // [H2 W2] 来源身份在对象构造点落位（origin/parentRunId 为 readonly，创建期一次性
     // 写入——与 createRecord 的 identity 语义同款「创建时确定，不可变」）。
+    // [W0 / D1] stepIndex 同族落位（readonly 身份域；undefined 自然缺省）。
     const record: ExecutionRecord =
       originFields !== undefined
-        ? { ...base, origin: originFields.origin, parentRunId: originFields.parentRunId }
+        ? {
+          ...base,
+          origin: originFields.origin,
+          parentRunId: originFields.parentRunId,
+          stepIndex: originFields.stepIndex,
+        }
         : base;
 
     this.deps.getStore().register(record);
@@ -444,7 +453,7 @@ export class RecordAccess {
    *
    * 与 getRecordForAction 的差异：不做归属/直接父校验、不重建可变 record 入内存，
    * 只读快照（light 形态可能缺详情重数据，身份/sidecar 状态字段齐全）。查询顺序与
-   * getRecordForAction 冷路径同款（idToFile 索引直查 → collectRecords 全扫兑底），
+   * getRecordForAction 冷路径同款（idToFile 索引直查 → collectRecords 全扫兜底），
    * 不限 status——终态（sidecar closed）记录也能查到。
    *
    * 返回 undefined：id 在内存与磁盘均不存在。

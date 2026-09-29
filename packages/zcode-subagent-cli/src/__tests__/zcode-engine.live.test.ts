@@ -22,7 +22,7 @@ import { ZcodeEngine } from "../zcode-engine.ts";
 import { assertAgentEventInvariants } from "./agent-event-invariants.ts";
 
 const LIVE = process.env["ENGINE_CONFORMANCE_LIVE"] === "1";
-const E2E_MODEL = process.env["ZCODE_E2E_MODEL"] ?? "e512d53e-0bfc-4915-9081-860d4aa13cd0/mimo-v2.5-pro";
+const E2E_MODEL = process.env["ZCODE_E2E_MODEL"] ?? "e512d53e-0bfc-4915-9081-860d4aa13cd0/mimo-v2.6-flash";
 const AS_DATA_ROOT = path.join(fs.realpathSync(os.tmpdir()), "zcode-appserver-e2e-data");
 const AS_WORK_CWD = path.join(fs.realpathSync(os.tmpdir()), "zcode-appserver-e2e-cwd");
 

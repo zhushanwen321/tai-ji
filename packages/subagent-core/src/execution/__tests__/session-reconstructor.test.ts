@@ -204,7 +204,7 @@ describe("reconstructFromFile", () => {
       expect(rec!.depth).toBe(2);
     });
 
-    it("旧文件无 parentRecordId/depth → 兑底 undefined/0（顶层）", () => {
+    it("旧文件无 parentRecordId/depth → 兜底 undefined/0（顶层）", () => {
       writeJsonl([
         headerLine(),
         identityEntry({ id: "bg-1", agent: "w", mode: "background", task: "t", startedAt: 100, rootSessionId: "sess-A" }),

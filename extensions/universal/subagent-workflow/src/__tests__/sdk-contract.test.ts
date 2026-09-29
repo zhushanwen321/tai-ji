@@ -15,6 +15,7 @@
 // 注释：modelRegistry/cwd/ui 不在 event 上）。
 
 import { describe, expect, it, vi } from "vitest";
+import type { ExtensionHandler, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 
 // registerSubagentTool 经 subagent-tool.ts 值导入 StringEnum（pi-ai）+ Type（typebox）。
 // stub 是 .d.ts（仅类型），pnpm optional-peer-dep 插件拦截值导入 → vi.mock 兜底。
@@ -161,6 +162,8 @@ describe("subagent tool contract [MANDATORY]", () => {
     });
     registerSubagentTool(pi);
     expect(typeof registeredTool?.execute).toBe("function");
+    expect(typeof registeredTool?.renderCall).toBe("function");
+    expect(typeof registeredTool?.renderResult).toBe("function");
   });
 
   // SDK 契约：ToolDefinition.execute 是 5 参数 (toolCallId, params, signal, onUpdate, ctx)。
@@ -271,11 +274,18 @@ describe("subagent tool contract [MANDATORY]", () => {
 // ============================================================
 describe("session_start handler signature (compile-time guarantee)", () => {
   it("ExtensionHandler<SessionStartEvent> is (event, ctx) two-param — enforced by stub type", () => {
-    // 此测试是编译期断言：stub 类型声明
+    // stub 类型声明
     //   ExtensionHandler<E, R> = (event: E, ctx: ExtensionContext) => Promise<R|void> | R | void;
     // 且 SessionStartEvent 注释明确 modelRegistry/cwd/ui 不在 event 上（在 ctx）。
-    // index.ts:66 `pi.on("session_start", (_event, ctx) => {...})` 通过此类型检查即证明契约。
-    // tsc --noEmit 零错误 = 此契约成立。此 it() 占位让套件非空（实际断言在编译期）。
-    expect(true).toBe(true);
+    // index.ts `pi.on("session_start", (_event, ctx) => {...})` 通过此类型检查即证明契约。
+    //
+    // 类型层赋值断言（可红形态，替代原恒真占位）：参数元组 length 必须可赋给
+    // 字面量 2——签名漂移（增/减参数）改变元组长度，tsc --noEmit 阶段即红。
+    // 注意：断言全部置于类型位置（vitest 走 esbuild transform 剥类型不做类型
+    // 检查，红面在 tsc）；运行时 _compileTimeProof 是被类型注解钉住的常量占位。
+    type SessionStartHandlerArity = Parameters<ExtensionHandler<SessionStartEvent>>["length"];
+    type ArityMustBeTwo = SessionStartHandlerArity extends 2 ? true : never;
+    const _compileTimeProof: ArityMustBeTwo = true;
+    expect(_compileTimeProof).toBe(true);
   });
 });

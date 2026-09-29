@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * genStats i18n 双侧对齐定向测试（composer-gen-stats）。
  *

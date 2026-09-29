@@ -322,7 +322,7 @@ dsh（deepseek-harness，master @ 47f9438）在同进程约束下把同样的多
 
 **本章结论：6 个真实 pi CLI 场景逐一回溯 G1~G4，机制侧断言（spawn 次数 / parentId 链 / grep / 进程存活 / 拒绝信息）优先于 LLM 表现。**
 
-**验收环境**：本地 pi CLI 实测（项目规范 [MANDATORY]：pi extension 优先在本地 pi 实测，不优先在 taiji 验证）——`pi --mode rpc --session-dir <dir> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <ext-path>`，stdin JSONL 发 prompt，检查 session 文件 + `PI_EXT_DEBUG=1` 日志。测试模型用 `xiaomi-token-plan-cn/mimo-v2.5-pro`（禁止 kimi）。**改动规模：大（A 期 5 项 + B 期状态机重构）**；单测仅作回归辅助，不计入验收。**注入点声明**：S1/S2 的测试后门/注入只负责**制造竞态窗口**（真实的并发竞态与进程死亡无法天然编排），被验证的代码路径是真实 pi 子进程、真实锁、真实 session 文件——不是整体 mock；另以「自然发生（非注入）的长跑观察」（S1 步骤 ④、S2 步骤 ④）作为补充，避免验收被注入点局限。
+**验收环境**：本地 pi CLI 实测（项目规范 [MANDATORY]：pi extension 优先在本地 pi 实测，不优先在 taiji 验证）——`pi --mode rpc --session-dir <dir> --model <本机可用模型> --approve --extension <ext-path>`，stdin JSONL 发 prompt，检查 session 文件 + `PI_EXT_DEBUG=1` 日志。测试模型用 `<本机可用模型>`（禁止 kimi）。**改动规模：大（A 期 5 项 + B 期状态机重构）**；单测仅作回归辅助，不计入验收。**注入点声明**：S1/S2 的测试后门/注入只负责**制造竞态窗口**（真实的并发竞态与进程死亡无法天然编排），被验证的代码路径是真实 pi 子进程、真实锁、真实 session 文件——不是整体 mock；另以「自然发生（非注入）的长跑观察」（S1 步骤 ④、S2 步骤 ④）作为补充，避免验收被注入点局限。
 
 ### S1：子进程死亡 → message 自动冷路径恢复（回溯 G1，A-1）
 

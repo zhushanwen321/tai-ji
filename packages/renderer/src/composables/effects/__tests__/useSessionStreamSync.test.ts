@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useSessionStreamSync wave w1 测试（TC1-TC10）。
  *

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * i18n-frontend-p2 U7 + U8: locale key 双侧对齐 + 组件模板 CJK 残留扫描（W5）。
  *

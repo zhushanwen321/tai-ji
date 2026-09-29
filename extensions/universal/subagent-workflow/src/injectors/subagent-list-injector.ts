@@ -29,7 +29,6 @@ import {
 	discoverAgents,
 	formatAgentList,
 	getHostServices,
-	parseResourceMeta,
 } from "@zhushanwen/subagent-core";
 
 import { createResourceListInjector } from "./resource-list-injector.ts";
@@ -47,46 +46,23 @@ export const SUBAGENT_LIST_GUIDE =
 	"The following subagents are available. PRIORITY: when a task involves reading 3+ files, writing 100+ lines, parallel research, or specialized review, delegate to a matching subagent FIRST instead of doing it yourself — this keeps your context focused on orchestration. Do NOT call list to discover available subagents; use list only for running state. When using the subagent tool, ONLY use agents from this list — pass the <location> path (absolute .md path) as the agent param. If no agent matches your task, omit agent (a general-purpose agent is used) and put all role-specific instructions in the task text.";
 
 /**
- * 解析 markdown 文件的 YAML frontmatter（name + description）。
- *
- * m2 收敛：删本地单行 key:value parser，改调 shared/meta-parser.ts parseResourceMeta
- * （IF1 统一 parser，支持 block scalar）。无有效 frontmatter 或缺 name/description 返 null。
- * 投影 {name, description} 注入用（examples 注入留 m5）。
- *
- * U11 后装配循环（含本函数的装配内消费）单源 core discoverAgents；保留导出作为
- * 严格注入投影语义锚（parseResourceMeta 消费面）。
- */
-export function parseAgentFrontmatter(content: string): AgentEntry | null {
-	const meta = parseResourceMeta(content, "agent");
-	if (!meta || meta.kind !== "agent") return null;
-	return {
-		name: meta.name,
-		description: meta.description,
-		when: meta.when,
-		examples: meta.examples,
-		path: "", // 装配时由 core discoverAgents 从 DiscoveredResource.path 填充
-	};
-}
-
-/**
  * agent 清单实例：缓存生命周期 / 三 handler 经工厂骨架；装配循环经 assemble 覆写
- * 委托 core discoverAgents（U11 单源，parse/onParseNull 不参与工厂装配——warn 口径
+ * 委托 core discoverAgents（U11 单源，parse 不参与工厂装配——warn 口径
  * 内聚 core：仅「有 frontmatter 但严格校验未通过」才 warn，README 等无 frontmatter
  * 的 .md 静默跳过）。
  */
 const injector = createResourceListInjector<AgentEntry>({
 	kind: "agents",
 	logTag: "[subagent-list-injector]",
-	format: (agents) => formatAgentList(agents, { guide: SUBAGENT_LIST_GUIDE }),
+	// agents 段无 invalid 产出面（assemble 路径 invalids 恒空），第二参忽略——
+	// 签名对齐工厂 config.format（P5 D4-3 invalid 上报仅 workflow 域接线）。
+	format: (agents, _invalids) => formatAgentList(agents, { guide: SUBAGENT_LIST_GUIDE }),
 	assemble: (workspaceRoot) =>
 		discoverAgents(
 			workspaceRoot,
 			getHostServices().discoveryRoots?.()?.agents ?? [],
 		),
 });
-
-/** 发现所有可用 agent（装配骨架见工厂；装配算法单源 core discoverAgents，U11）。 */
-export const discoverAllAgents = injector.discover;
 
 /** 注册 session 生命周期 handler，注入 `<available_subagents>` 段（三 handler 语义见工厂）。 */
 export const setupSubagentListInjector = injector.setup;

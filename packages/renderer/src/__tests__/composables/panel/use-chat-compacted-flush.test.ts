@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useChat defer 队列 flush 触发集成测试（session-occupancy u5b —— 触发源切换）。
  *

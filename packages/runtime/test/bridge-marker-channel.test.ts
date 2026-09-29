@@ -293,7 +293,7 @@ describe('bridge-handler: sendExtensionUiResponse 序列化形状', () => {
 // ── bridgeRequestIds 登记 ──
 
 describe('bridgeRequestIds 登记（marker 命中 → timeout-manager 有记录）', () => {
-  it('handleBridgeRequest 到达即登记（含 malformed），B6 应答即删，clearForSession 兑底仍有效', async () => {
+  it('handleBridgeRequest 到达即登记（含 malformed），B6 应答即删，clearForSession 兜底仍有效', async () => {
     const mgr = new ExtensionTimeoutManager()
     const addSpy = vi.spyOn(mgr, 'addBridgeRequest')
     const handler = new BridgeHandler(null, mgr)
@@ -328,7 +328,7 @@ describe('bridgeRequestIds 登记（marker 命中 → timeout-manager 有记录�
     await pending
     expect(mgr.isBridgeRequest('req-inflight')).toBe(false)
 
-    // session 级跟踪：clearForSession（session 销毁兑底路径）仍清理 bridgeRequestIds
+    // session 级跟踪：clearForSession（session 销毁兜底路径）仍清理 bridgeRequestIds
     mgr.addBridgeRequest('sess-1', 'req-manual')
     mgr.clearForSession('sess-1')
     expect(mgr.isBridgeRequest('req-manual')).toBe(false)

@@ -41,7 +41,13 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { AgentCallOpts } from "../models/types.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
-import { handleWorkerMessage } from "../worker-message-pump.ts";
+import {
+  handleWorkerMessage,
+} from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+  isRunSettled,
+} from "../terminal-actions.ts";
 import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
 import type { RecordStore } from "../../execution/persistence/record-store.ts";
 import { SubagentService } from "../../execution/subagent-service.ts";
@@ -51,6 +57,11 @@ import { CTX_MODEL as ctxModel, emptyRegistry } from "../../execution/__tests__/
 import { makePi, type PiMock } from "../../execution/__tests__/helpers/pi-mock.ts";
 
 // ── harness ──────────────────────────────────────────────────
+
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number) {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
 
 interface PumpHarness {
   service: SubagentService;
@@ -150,6 +161,7 @@ afterEach(() => {
 describe("pump → executeWorkflowAgent 端到端", () => {
   it("record 进 store（origin=workflow + parentRunId）→ settle → 回包/终态摘要/D7 终态化全链", async () => {
     const h = makePumpHarness("wf-pump-e2e-1");
+    await dispatchRunCreated(h.run); // [W2/V1] 六态机引导（journal 首帧——run 级终局裁决前置）
     await handleWorkerMessage(
       h.run,
       { type: "agent-call", callId: 1, opts: { prompt: "调研 A", description: "research-a" } },
@@ -193,7 +205,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     expect(posted!.result!.error).toBeUndefined();
     // node 终态摘要（D2：live 删除后 node 保留 result——数据源 = executeWorkflowAgent
     // 的 AgentResult 出口，经 executeAgentCall finalizeCall 写入）
-    const node = h.run.state.trace.find(1);
+    const node = findByStep(h.run.state.trace, 1);
     expect(node?.status).toBe("completed");
     expect(node?.result?.content).toBe("ok");
     expect(node?.result?.sessionFile).toBe(sessionFile);
@@ -215,7 +227,8 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     const runUnregister = h.deps.appendEntry as ReturnType<typeof vi.fn>;
     const runUnregCall = runUnregister.mock.calls.find((c) => c[0] === "pending:unregister");
     expect(runUnregCall?.[1]).toMatchObject({ id: "wf-pump-e2e-1", status: "completed" });
-    expect(h.run.state.status).toBe("done");
+    // [W2/V1] 终局断言换源（两态机字段停更）
+    expect(isRunSettled(h.run)).toBe(true);
   });
 
   it("失败结果：引擎 error outcome → 回包 error + trace failed 终态摘要", async () => {
@@ -241,7 +254,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     const posted = findAgentResultPost(h.postMessage, 2);
     expect(posted).toBeDefined();
     expect(posted!.result!.error).toBe("engine blew up");
-    const node = h.run.state.trace.find(2);
+    const node = findByStep(h.run.state.trace, 2);
     expect(node?.status).toBe("failed");
     expect(node?.result?.error).toBe("engine blew up");
     expect(h.run.state.calls.get(2)?.status).toBe("done");

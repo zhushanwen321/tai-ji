@@ -155,7 +155,7 @@ def main():
             print(f'{RED}{v}{NC}')
         print()
         print(f'{YELLOW}规则: style.css 只放 design tokens（CSS 变量）和 base reset{NC}')
-        print('\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m')
+        print('\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m')
         sys.exit(2)
 
     # 检查 scoped style 警告（非阻塞）

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * U-3 一致性审查补丁：providerEdit 命名空间的 i18n key 存在性机器闸门。
  *

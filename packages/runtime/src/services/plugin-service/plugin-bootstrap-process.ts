@@ -48,3 +48,11 @@ process.on('message', (msg: unknown) => {
     })
   })
 })
+
+// 宿主死亡自灭守卫：runtime 崩溃/SIGKILL 后 IPC channel 被内核关闭，子进程收到
+// 'disconnect'——本 stdin 为 'ignore' 无 EOF 可监听，IPC disconnect 是唯一的宿主
+// 存活信号，缺此守卫则插件宿主被 reparent 后永久残留。正常停止路径 host 侧
+// child.kill() 信号先于 channel 关闭到达，本守卫不改变既有停机语义。
+process.on('disconnect', () => {
+  process.exit(0)
+})

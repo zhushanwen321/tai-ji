@@ -2,12 +2,11 @@
 //
 // [U1 / record 持久化收敛 §3.1] RecordStore 意图级操作 API 立面专属测试。
 //
-// 覆盖（验收条款 A1/A2/A5/A6）：
+// 覆盖（验收条款 A1/A5/A6）：
 //   - A1 九意图原语齐备（register/appendEvent/markRoundStarted/markRoundIdle/
-//     markFinalized/markCancelled/adoptEngineDeath/markResurrected/markIdleEvicted，
+//     markFinalized/markCancelled/adoptEngineDeath/markResurrected，
 //     [collect 退役] 原 markBatchFinalized 已删；[u-arch] 原 markArchived 更名
 //     markSettledOut 随意图机制退役收口）+ acquireWriteLease（A6）；
-//     archive 先 release 后（archive 抛错 marker 必未删）；
 //   - A5 markResurrected D3c 三中间形态（(ii) acquire 后中断 / (iii) 全成 /
 //     acquire 失败）+ running 候选接管形态（跳删终态位仍 acquire）；
 //   - §3.4 失败语义：`.state` 写失败 → 零持久化副作用、record 留 running 形态。
@@ -93,7 +92,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 import { writeAliveMarker, readAliveMarker } from "../persistence/alive-store.ts";
 import * as stateMarker from "../persistence/state-marker.ts";
-import { createRecord, tryTransition } from "../persistence/execution-record.ts";
+import { createRecord, trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 
@@ -171,6 +170,20 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
   const manifestPathOf = (id: string): string => path.join(manifestDir, `${id}.json`);
 
+  /** [W1/D3] 事件文件末条事件行（观察面独立于被测 store——直读 .events 文件）。 */
+  const lastJournalEvent = (dir: string, id: string): Record<string, unknown> | undefined => {
+    try {
+      const lines = fs
+        .readFileSync(path.join(dir, `${id}.events`), "utf8")
+        .split("\n")
+        .filter((l) => l.trim().length > 0)
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+      return lines.filter((e) => e.type !== "record-journal").at(-1);
+    } catch {
+      return undefined;
+    }
+  };
+
   const readManifestJson = (id: string): Record<string, unknown> =>
     JSON.parse(fs.readFileSync(manifestPathOf(id), "utf-8")) as Record<string, unknown>;
 
@@ -188,7 +201,6 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
         "markCancelled",
         "adoptEngineDeath",
         "markResurrected",
-        "markIdleEvicted",
         "markSettledOut",
         "acquireWriteLease", // A6
       ] as const;
@@ -207,7 +219,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       record.sessionFile = sessionFile;
       store.acquireWriteLease(sessionFile, "bg-1"); // 持有期写权声明（release 前置形态）
       store.register(record);
-      tryTransition(record, "closed", "user-close");
+      trySettleLegacyClosed(record, "user-close");
       record.endedAt = 5000;
       probe.manifestPath = manifestPathOf("bg-1");
 
@@ -244,7 +256,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       record.sessionFile = sessionFile;
       store.acquireWriteLease(sessionFile, "bg-2");
       store.register(record);
-      tryTransition(record, "closed", "user-close");
+      trySettleLegacyClosed(record, "user-close");
       appendEntryMock.mockClear();
 
       vi.mocked(stateMarker.writeFinalizedState).mockReturnValueOnce(false);
@@ -264,7 +276,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
     it("sessionFile 缺失 → .state 面跳过（warn 留痕），manifest/entry 照常", () => {
       const record = makeRecord("bg-3");
       store.register(record);
-      tryTransition(record, "closed", "gc");
+      trySettleLegacyClosed(record, "gc");
 
       expect(store.markFinalized(record, "gc")).toBe(true);
       expect(loggerMock.warn).toHaveBeenCalled();
@@ -279,7 +291,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       record.sessionFile = sessionFile;
       store.register(record);
       store.acquireWriteLease(sessionFile, "bg-c1");
-      tryTransition(record, "closed", "cancelled");
+      trySettleLegacyClosed(record, "cancelled");
       record.endedAt = 7777;
       probe.manifestPath = manifestPathOf("bg-c1");
 
@@ -299,7 +311,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       const record = makeRecord("bg-c2");
       record.sessionFile = sessionFile;
       store.register(record);
-      tryTransition(record, "closed", "cancelled");
+      trySettleLegacyClosed(record, "cancelled");
 
       vi.mocked(stateMarker.writeCancelledState).mockReturnValueOnce(false);
 
@@ -326,10 +338,9 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(store.markRoundStarted("chat-1")).toBe(true);
       expect(record.status).toBe("running");
       expect(record.result).toBeUndefined();
-      expect(appendEntryMock).toHaveBeenCalledWith(
-        "subagent-record",
-        expect.objectContaining({ id: "chat-1" }),
-      );
+      // [W1/D3 表行 3] 轮始迁移落 record-round-started 帧（v1 entry 过程面上报停写）
+      expect(appendEntryMock).not.toHaveBeenCalled();
+      expect(lastJournalEvent(manifestDir, "chat-1")).toMatchObject({ type: "record-round-started" });
     });
 
     it("[U6/D4 轮始清点族扩字段] 上轮 stopReason 随轮始清除（第 2+ 轮在飞 record 不携带 stale 停因——renderer isOccupied 终态判据 `running && stopReason===undefined` 的直接守卫）", () => {
@@ -351,7 +362,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   });
 
   describe("markRoundIdle（簿记全集①-⑨；簿记⑦ .alive 保留）", () => {
-    it("成功轮：result=content、round+1、closedReason 清、翻 idle、idleSince 刷新、注销②、entry 携带新 round", () => {
+    it("成功轮：result=content、round+1、closedReason 清、翻 idle、注销②、entry 携带新 round", () => {
       const record = makeRecord("chat-2", { round: 1 });
       record.closedReason = "gc"; // [S10]：前置残留不清则泄漏进 list 投影
       record.sessionFile = sessionFile;
@@ -368,14 +379,17 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(record.result).toBe("round done"); // ②
       expect(record.round).toBe(2); // ③
       expect(record.closedReason).toBeUndefined(); // ④
-      expect(record.idleSince).toBeGreaterThan(0); // ⑥
+      // ⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081）——无簿记动作。
       expect(order).toEqual([]); // ⑦ `.alive` 保留——无 release 动作
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true); // ⑦ 落盘面仍持声明
       expect(unregister).toHaveBeenCalledWith("chat-2", "running"); // ⑧ 发射点②
-      expect(appendEntryMock).toHaveBeenCalledWith(
-        "subagent-record",
-        expect.objectContaining({ id: "chat-2", round: 2, result: "round done" }), // ⑨
-      );
+      // [W1/D3 表行 4] ⑨ 过程面改走事件文件——record-round-idle 帧携带轮统计快照
+      //（result 全文不进事件行，轮结果留在内存/条目；stopReason=completed）。
+      expect(appendEntryMock).not.toHaveBeenCalled();
+      expect(lastJournalEvent(manifestDir, "chat-2")).toMatchObject({
+        type: "record-round-idle",
+        stopReason: "completed",
+      });
     });
 
     it("失败轮：lastError 写原因、result=前值??失败摘要", () => {
@@ -389,7 +403,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
     it("终态簿记已冻结（endedAt 已设）→ fail-fast 抛错", () => {
       const record = makeRecord("chat-4");
-      record.endedAt = 123; // completeRecord 已跑的冻结判据
+      record.endedAt = 123; // completeLegacyClosed 已跑的冻结判据
       store.register(record);
 
       expect(() => store.markRoundIdle("chat-4", { kind: "success", content: "x" })).toThrow(
@@ -413,11 +427,13 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(store.appendEvent("ev-1", { type: "text_delta", delta: "hi" })).toBe(true);
       expect(record.turns[0]?.text).toBe("hi"); // ⑧ turns 归约
-      expect(appendEntryMock).toHaveBeenCalledTimes(1);
+      // [W1/D2 停写写点] 事件归约后的过渡 entry 上报停写——turn 粒度不进事件文件
+      //（轮统计在轮终 round-idle 帧快照），引擎域未变零追加。
+      expect(appendEntryMock).not.toHaveBeenCalled();
       expect(store.appendEvent("nope", { type: "text_delta", delta: "x" })).toBe(false);
     });
 
-    it("adoptEngineDeath：error/result/stopReason 三写（[U5/D4] stopReason='failed' W4 新态）+ entry；id 不在内存 → false", () => {
+    it("adoptEngineDeath：error/result/stopReason 三写（[U5/D4] stopReason='failed' W4 新态）；[W1/D2] 过程 entry 停写；id 不在内存 → false", () => {
       const record = makeRecord("adopt-1");
       record.result = "partial";
       store.register(record);
@@ -426,10 +442,9 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(store.adoptEngineDeath("adopt-1", { error: "engine crashed" })).toBe(true);
       expect(record.error).toBe("engine crashed"); // ⑩
       expect(record.result).toBeUndefined();
-      expect(appendEntryMock).toHaveBeenCalledWith(
-        "subagent-record",
-        expect.objectContaining({ id: "adopt-1", stopReason: "failed" }),
-      );
+      expect(record.stopReason).toBe("failed"); // 内存三写保真（[U5/D4] W4 新态）
+      // [W1/D2 停写写点] 过程 entry 停写——纳管态留内存（监督器接管/轮终链续写）
+      expect(appendEntryMock).not.toHaveBeenCalled();
       expect(store.adoptEngineDeath("nope", { error: "x" })).toBe(false);
     });
   });
@@ -441,7 +456,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
     const makeClosedCandidate = (id: string): ExecutionRecord => {
       const record = makeRecord(id);
       record.sessionFile = sessionFile;
-      tryTransition(record, "closed", "parent-shutdown");
+      trySettleLegacyClosed(record, "parent-shutdown");
       record.endedAt = 4000;
       return record;
     };
@@ -529,40 +544,6 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       const record = makeRecord("rs-5"); // 无 sessionFile
       expect(() => store.markResurrected(record, true)).toThrow(/no sessionFile anchor/);
       expect(store.getMutable("rs-5")).toBeUndefined();
-    });
-  });
-
-  // ============================================================
-  // A2 markIdleEvicted（archive 先、release 后）
-  // ============================================================
-  describe("markIdleEvicted（A2 写序）", () => {
-    it("回收成功 → 内存移除 + .alive release（磁盘仍 running 可接管，不写 .state）", () => {
-      const record = makeRecord("idle-1");
-      record.sessionFile = sessionFile;
-      store.register(record);
-      store.acquireWriteLease(sessionFile, "idle-1");
-      order.length = 0;
-
-      store.markIdleEvicted(record);
-
-      expect(store.getMutable("idle-1")).toBeUndefined(); // archive 先
-      expect(order).toEqual(["alive-release"]); // release 后
-      expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(false); // 非终态化
-    });
-
-    it("archive 抛错 → 原语整体失败、marker 必未删（持有与声明一致）", () => {
-      const record = makeRecord("idle-2");
-      record.sessionFile = sessionFile;
-      store.register(record);
-      store.acquireWriteLease(sessionFile, "idle-2");
-      const archiveSpy = vi.spyOn(store, "archive").mockImplementationOnce(() => {
-        throw new Error("archive boom");
-      });
-
-      expect(() => store.markIdleEvicted(record)).toThrow(/archive boom/);
-      expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true); // marker 未删
-      expect(archiveSpy).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -15,12 +15,12 @@
 //
 // 未知正向 method 的应答义务（未知成员宽容语义②，条文权威 = ADR-0071）：宿主演进
 // 会派出本引擎未知的正向 method（协议 additive 演进的跨代窗口）——引擎必须回 error
-// 帧 `engine_method_unsupported`（engine_ 前缀透传面新码，不进 core 消费词表，
-// isEngineErrorPassthroughCode 原样透传，旧宿主收到不崩），不得静默挂起/无应答/
-// 崩溃。当前登记未实装（全仓无消费方，C 型「无消费方不进协议」纪律）：引擎实装
-// 义务 + conformance 用例随下一引擎适配层立项随批带上——义务成文 =
-// docs/extensions/subagents/engine-development-guide.md §2.1/§13；码登记 =
-// error-codes.ts 头注。
+// 帧，不得静默挂起/无应答/崩溃。实装码现状：两引擎 server（pi/zcode dispatch 表
+// 落空分支）对未知 method 回 `engine_protocol_unknown_method`（engine_ 前缀透传面，
+// 不进 core 消费词表，isEngineErrorPassthroughCode 原样透传，旧宿主收到不崩）；
+// 条文名码 `engine_method_unsupported` 全仓零消费方（C 型「无消费方不进协议」纪律，
+// 登记 = error-codes.ts 头注）——义务成文 =
+// docs/extensions/subagents/engine-development-guide.md §2.1/§13。
 
 import type {
   AgentCallOpts,
@@ -75,8 +75,6 @@ export interface RunContextParams {
   cwd?: string;
   /** 请求模型 ref（未传 = 引擎缺省模型）。 */
   model?: string;
-  /** 结构化输出 schema 的 env 注入形态（schemaEnv 降级通道）。 */
-  schemaEnv?: string;
   /** 上下文模型 ref（与 run 模型分离的 ctx 模型）。 */
   ctxModel?: string;
   /** fallback 留痕（引擎回填 outcome.engineFallback 的种子）。 */
@@ -97,6 +95,14 @@ export interface RunContextParams {
    * 未知字段，undefined 不上 wire。
    */
   sessionDir?: string;
+  /**
+   * [D2 扩展加载显式化] 孙进程显式加载的扩展路径集（pi 引擎侧逐项拼
+   * `--extension` argv）。per-host 常量而非 per-run 变量，故落 ctx。宿主侧来源
+   * 双形态：taiji 宿主 = extension-service 下发的白名单收窄集（经 pi-host 注入）；
+   * 独立 pi = subagent-workflow 自身 optional peerDep 解析回退。additive 可选：
+   * 旧引擎忽略未知字段，undefined 不上 wire。
+   */
+  extensionPaths?: string[];
 }
 
 // ============================================================
@@ -180,7 +186,10 @@ export interface CancelResult {
 
 export interface ReadParams {
   handle: EngineHandleData;
-  /** 数据根必填：存量池时代引擎自算池/journal 相对 dbPath 的定位需要它（设计钉死）。 */
+  /** 数据根（core 每次 read 都发送——remote-engine 构造注入的数据目录）。两引擎
+   *  server 现行均不消费该字段：定位走 handle.data（journalPath 等）或引擎自身
+   *  数据目录。保留为协议帧字段（历史：存量池时代引擎自算池/journal 相对 dbPath
+   *  的定位需要它）。 */
   dataDir: string;
 }
 

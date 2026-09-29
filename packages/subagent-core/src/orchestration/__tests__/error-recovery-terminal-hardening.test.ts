@@ -11,30 +11,38 @@
  *   未知 type warn 留痕（协议漂移防线）
  * - OR-8：脚本 return 时残留 fire-and-forget in-flight call 收口为取消终态
  *   （call done + trace failed + Cancelled 文案 + completedAt；[H2 W3] trace.live
- *   字段已删除——节点无运行期附属对象可滞留），先收口再落盘——done 快照不含
+ *   字段已删除——节点无运行期附属对象可滞留），先收口再终态——done 聚合面不含
  *   running 节点
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getLogger } from "../../core/logger.ts";
 import {
-  closeOutInFlightCalls,
   handleScriptError,
   handleWorkerError,
   handleWorkerExit,
   handleWorkerMessage,
 } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+  closeOutInFlightCalls,
+} from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
-import { toRunSnapshot } from "../run-snapshot.ts";
 import { Trace } from "../models/trace.ts";
 import type { AgentResult, WorkerLogEntry } from "../models/types.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import { flushMicrotasks } from "./helpers/flush-microtasks.ts";
+import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
 
 // ── helpers ──────────────────────────────────────────────────
+
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number) {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
 
 const MAX_ERROR_LOGS = 500;
 
@@ -133,16 +141,25 @@ afterEach(() => {
 
 // ── [OR-4] 终态收尾围栏 ──────────────────────────────────────
 
+
+/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+ *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
+ *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
+async function seedRunCreated(run: WorkflowRun): Promise<void> {
+  await dispatchRunCreated(run);
+}
+
 describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejection）", () => {
   it("handleReturn：appendEntry 同步抛错 → promise resolve + error 留痕（save 已发生）", async () => {
     const run = makeRealRun("wf-fence-1");
+    await seedRunCreated(run);
     const deps = makeDeps({ appendThrows: true });
 
     await expect(
       handleWorkerMessage(run, { type: "return", result: { ok: true } }, deps, makeHandlers()),
     ).resolves.toBeUndefined();
 
-    expect(run.state.status).toBe("done");
+    expect(isRunSettled(run)).toBe(true);
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     // [B-4] 独立围栏：直落故障不再跳过 onRunDone（旧实现同一 try 会跳过）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
@@ -150,49 +167,58 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
 
   it("handleReturn：onRunDone 同步抛错 → promise resolve + error 留痕", async () => {
     const run = makeRealRun("wf-fence-2");
+    await seedRunCreated(run);
     const deps = makeDeps({ onRunDoneThrows: true });
 
     await expect(
       handleWorkerMessage(run, { type: "return", result: { ok: true } }, deps, makeHandlers()),
     ).resolves.toBeUndefined();
 
-    expect(run.state.status).toBe("done");
+    expect(isRunSettled(run)).toBe(true);
     expect(deps.store.save).toHaveBeenCalledTimes(1);
-    expect(deps.appendEntry).toHaveBeenCalledTimes(1); // 直落正常发生后才抛
+    // [W1] workflow-record 终态条目（先）+ unregister 直落（后）各恰一次——
+    // onRunDone 抛错不被两条 entry 路径短路
+    expect(
+      deps.appendEntry.mock.calls.filter((c) => c[0] === "pending:unregister"),
+    ).toHaveLength(1);
   });
 
   it("handleWorkerError 超限：直落抛错 → resolve（旧实现裸调 → unhandledRejection）", async () => {
     const run = makeRealRun("wf-fence-3");
+    await seedRunCreated(run);
     (run.meta as { workerErrorCount?: number }).workerErrorCount = 3; // count=4 > MAX
     const deps = makeDeps({ appendThrows: true });
 
     await expect(handleWorkerError(run, new Error("boom"), deps, makeHandlers())).resolves.toBeUndefined();
-    expect(run.state.reason).toBe("failed");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(deps.store.save).toHaveBeenCalledTimes(1);
   });
 
   it("handleScriptError 超限：onRunDone 抛错 → resolve", async () => {
     const run = makeRealRun("wf-fence-4");
+    await seedRunCreated(run);
     (run.meta as { scriptErrorCount?: number }).scriptErrorCount = 3;
     const deps = makeDeps({ onRunDoneThrows: true });
 
     await expect(handleScriptError(run, "boom", [], deps, makeHandlers())).resolves.toBeUndefined();
-    expect(run.state.reason).toBe("failed");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(deps.store.save).toHaveBeenCalledTimes(1);
   });
 
   it("handleWorkerExit 无终态消息路径：直落抛错 → resolve", async () => {
     const run = makeRealRun("wf-fence-5");
+    await seedRunCreated(run);
     const deps = makeDeps({ appendThrows: true });
     const handle = { isCurrent: true } as unknown as WorkerHandle;
 
     await expect(handleWorkerExit(run, 0, handle, deps, makeHandlers())).resolves.toBeUndefined();
-    expect(run.state.reason).toBe("failed");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(deps.store.save).toHaveBeenCalledTimes(1);
   });
 
   it("time_limited 路径（预算耗尽 + 超限重试）：直落抛错 → resolve", async () => {
     const run = makeRealRun("wf-fence-6", { budgetTimeMs: 5000 });
+    await seedRunCreated(run);
     // 已耗 6000ms > 预算 5000ms（fake timers 冻结 Date）
     run.meta.startedAt = new Date(Date.now() - 6000).toISOString();
     const deps = makeDeps({ appendThrows: true });
@@ -201,7 +227,7 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
     await vi.advanceTimersByTimeAsync(1000); // 退避
     await expect(p).resolves.toBeUndefined();
 
-    expect(run.state.reason).toBe("time_limited");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     // [B-4] 独立围栏：直落故障不再跳过 onRunDone（旧实现同一 try 会跳过）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
@@ -210,6 +236,7 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
   it("围栏捕获后 error 留痕（shared logger）", async () => {
     const errorSpy = vi.spyOn(getLogger("subagents"), "error");
     const run = makeRealRun("wf-fence-7");
+    await seedRunCreated(run);
     const deps = makeDeps({ onRunDoneThrows: true });
 
     await handleWorkerMessage(run, { type: "return", result: 1 }, deps, makeHandlers());
@@ -221,11 +248,12 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
   it("[B-4] 直落 appendEntry 抛错 → onRunDone 仍执行（独立围栏，完成回调不被直落故障吞掉）", async () => {
     const errorSpy = vi.spyOn(getLogger("subagents"), "error");
     const run = makeRealRun("wf-fence-8");
+    await seedRunCreated(run);
     const deps = makeDeps({ appendThrows: true });
 
     await handleWorkerMessage(run, { type: "return", result: 1 }, deps, makeHandlers());
 
-    expect(run.state.reason).toBe("completed");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
     expect(deps.onRunDone).toHaveBeenCalledTimes(1); // 旧实现同一 try：直落抛错会跳过
     const errLogs = errorSpy.mock.calls.map((c) => String(c[0]));
     expect(
@@ -244,6 +272,7 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
 describe("[OR-6] log 消息消费 + 未知类型 default 留痕", () => {
   it("{type:\"log\"} 计入 run.state.errorLogs + deps.log debug 留痕（不触发终态）", async () => {
     const run = makeRealRun("wf-log-1");
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     await handleWorkerMessage(run, { type: "log", phase: "build", message: "step 1 done" }, deps, makeHandlers());
@@ -260,6 +289,7 @@ describe("[OR-6] log 消息消费 + 未知类型 default 留痕", () => {
 
   it("log 超上限（MAX_ERROR_LOGS）时裁剪保留尾部（与 workerLogs 通路同语义）", async () => {
     const run = makeRealRun("wf-log-2");
+    await seedRunCreated(run);
     const deps = makeDeps();
     const prefill: WorkerLogEntry[] = Array.from({ length: MAX_ERROR_LOGS }, (_, i) => ({
       level: "log",
@@ -279,6 +309,7 @@ describe("[OR-6] log 消息消费 + 未知类型 default 留痕", () => {
     // log() 只发独立 {type:"log"} 消息，return 的 workerLogs 只含 console.* 捕获条目。
     // 主线程两条消息各走各的入账 → 同一日志在 errorLogs 恰一份（旧双通路为 2 份）。
     const run = makeRealRun("wf-log-dup");
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     await handleWorkerMessage(run, { type: "log", phase: "build", message: "step-1" }, deps, makeHandlers());
@@ -296,6 +327,7 @@ describe("[OR-6] log 消息消费 + 未知类型 default 留痕", () => {
   it("未知消息类型：warn 留痕后丢弃（协议漂移防线），不写状态不终态", async () => {
     const warnSpy = vi.spyOn(getLogger("subagents"), "warn");
     const run = makeRealRun("wf-log-3");
+    await seedRunCreated(run);
     const deps = makeDeps();
 
     await handleWorkerMessage(run, { type: "future-unknown-type", payload: 1 }, deps, makeHandlers());
@@ -313,8 +345,9 @@ describe("[OR-6] log 消息消费 + 未知类型 default 留痕", () => {
 // ── [OR-8] run done 时 in-flight call 收口 cancelled ─────────
 
 describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
-  it("fire-and-forget agent() 后 return：call 收口 done + trace failed（Cancelled 文案），快照无 running 节点", async () => {
+  it("fire-and-forget agent() 后 return：call 收口 done + trace failed（Cancelled 文案），聚合面无 running 节点", async () => {
     const run = makeRealRun("wf-or8-1");
+    await seedRunCreated(run);
     const deps = makeDeps();
     // fire-and-forget dispatch：runner 永不 settle（脚本不 await，模拟在飞子进程）
     deps.runner.run.mockImplementation(() => new Promise<AgentResult>(() => {}));
@@ -325,24 +358,24 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     // 脚本 return（fire-and-forget call 仍在飞）
     await handleWorkerMessage(run, { type: "return", result: "done early" }, deps, makeHandlers());
 
-    expect(run.state.status).toBe("done");
+    expect(isRunSettled(run)).toBe(true);
     const call = run.state.calls.get(1);
     // call 收口为 done + 取消文案（不删除条目——保留调用痕迹）
     expect(call?.status).toBe("done");
     expect(call?.result?.error).toContain("Cancelled");
     // trace 节点 failed + completedAt（快照/GUI 不再显示 running 步骤）
-    const node = run.state.trace.find(1);
+    const node = findByStep(run.state.trace, 1);
     expect(node?.status).toBe("failed");
     expect(node?.error).toContain("Cancelled");
     expect(node?.completedAt).toBeDefined();
-    // 持久化快照（收口先于 save）不含 running 形态
-    const snap = toRunSnapshot(run);
-    expect(snap.state.calls.map((c) => c.status)).toEqual(["done"]);
-    expect(snap.state.trace.map((n) => n.status)).toEqual(["failed"]);
+    // 收口后聚合面无 running 形态（call 全 done、trace 全 failed——收口先于终态）
+    expect(Array.from(run.state.calls.values()).map((c) => c.status)).toEqual(["done"]);
+    expect(run.state.trace.toArray().map((n) => n.status)).toEqual(["failed"]);
   });
 
   it("handleWorkerError 超限路径同样收口（failed 快照一致）", async () => {
     const run = makeRealRun("wf-or8-2");
+    await seedRunCreated(run);
     const deps = makeDeps();
     deps.runner.run.mockImplementation(() => new Promise<AgentResult>(() => {}));
     await handleWorkerMessage(run, makeAgentCallMsg(2), deps, makeHandlers());
@@ -352,10 +385,10 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     (run.meta as { workerErrorCount?: number }).workerErrorCount = 3;
     await handleWorkerError(run, new Error("final boom"), deps, makeHandlers());
 
-    expect(run.state.reason).toBe("failed");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.calls.get(2)?.status).toBe("done");
     expect(run.state.calls.get(2)?.result?.error).toContain("Cancelled");
-    expect(run.state.trace.find(2)?.status).toBe("failed");
+    expect(findByStep(run.state.trace, 2)?.status).toBe("failed");
   });
 
   it("closeOutInFlightCalls 对 pending 状态 call 补齐状态机（markRunning→markDone）", () => {
@@ -376,6 +409,7 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
 
   it("无 in-flight call 时收口为 no-op（正常完成的 call 不受影响）", async () => {
     const run = makeRealRun("wf-or8-4");
+    await seedRunCreated(run);
     const deps = makeDeps();
     deps.runner.run.mockImplementation(
       async () => ({ content: "ok", durationMs: 1, error: undefined, toolCalls: [] }) as AgentResult,
@@ -388,6 +422,6 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
 
     // 已完成 call 的结果原样保留（不被取消文案覆盖）
     expect(run.state.calls.get(4)?.result?.content).toBe("ok");
-    expect(run.state.trace.find(4)?.status).toBe("completed");
+    expect(findByStep(run.state.trace, 4)?.status).toBe("completed");
   });
 });

@@ -10,7 +10,7 @@
  * - source 形状（fork 含 fromMessageId，handoff 仅 srcSessionId）→ 泛型参数 S
  * - enter 前置守卫（handoff 的 isSessionActive streaming 拦截 + toast）→ config.enterGuard
  * - enter 互斥副作用（handoff 退出 fork 模式）→ config.beforeEnter
- * - handleSend 前置兑底守卫（handoff 发送时 isSessionActive 竞态窗口兜底）→ config.beforeSend
+ * - handleSend 前置兜底守卫（handoff 发送时 isSessionActive 竞态窗口兜底）→ config.beforeSend
  * - send 目标 action 与文本归一化（fork 原样 text / handoff trim→undefined reply）→ config.sendAction 闭包
  * - send 失败 toast 文案 key → config.sendFailedKey
  * - B 阶段（fork 无 inflight 可取消；handoff isInProgress=isHandingOff + abort）→ config.isInProgress / config.abort 可选
@@ -88,7 +88,7 @@ export interface StagingModeConfig<S extends StagingModeSource> {
    */
   beforeEnter?: (source: S) => void
   /**
-   * handleSend 前置兑底守卫：返回 true 表示已消费（不走发送、不清草稿、不退模式——
+   * handleSend 前置兜底守卫：返回 true 表示已消费（不走发送、不清草稿、不退模式——
    * 回复结束后可直接重发）。handoff 用 isSessionActive 兑 enter 拦截后的竞态窗口
    * （进入模式后 session 才变 streaming）。
    */

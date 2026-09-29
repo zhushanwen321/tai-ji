@@ -26,7 +26,7 @@
 | 6 | 「不要传 Other」四处软约束声明（§1） | types.ts:44（QuestionSchema options description）/ types.ts:75（InputSchema options description）/ index.ts:246（tool description Don't 清单末条）/ index.ts:255（promptGuidelines 末条），四处均无运行时强制 | **属实** |
 | 7 | validateInput 是 execute 第 1 步、execute 路径唯一入参闸口（§4/§6.6） | index.ts:271-276（execute 步骤 1 调 validateInput，失败 throw）；execute（:259-336）是 TUI/RPC 两条渲染路径的唯一构造入口；`renderCall`（:338-347）只读 header/question 不渲染 options | **属实** |
 | 8 | channel 透传路径不经 validateInput（D1 边界声明） | `src/channel-handler.ts:52-66` protoToInternalQuestions 直接映射、`:107-131` runTuiProtoInteraction 直接 `ctx.ui.custom` 构造 AskUserComponent——链路上无 validateInput 调用 | **属实**（设计已显式裁决接受此边界，论证链成立，见 §4-B3） |
-| 9 | AnswerValueSchema/ResultSchema 零引用死导出（§3.2 F3/L1） | 全仓 grep（*.ts/*.vue/*.mjs/*.js，排除 node_modules）仅命中 `src/types.ts:96/:101/:104/:106/:110` 五处（定义 + Static 派生 + ResultSchema 内引用 AnswerValueSchema）；types.test.ts 不引用；`QuestionSchema` 被 InputSchema（types.ts:70）使用故保留的判断正确 | **属实** |
+| 9 | AnswerValueSchema/ResultSchema 零引用且无调用方的导出（§3.2 F3/L1） | 全仓 grep（*.ts/*.vue/*.mjs/*.js，排除 node_modules）仅命中 `src/types.ts:96/:101/:104/:106/:110` 五处（定义 + Static 派生 + ResultSchema 内引用 AnswerValueSchema）；types.test.ts 不引用；`QuestionSchema` 被 InputSchema（types.ts:70）使用故保留的判断正确 | **属实** |
 | 10 | TUI 启动样板同包双份且已漂移（§3.2 F3/L2） | index.ts:62-78 与 channel-handler.ts:115-125 各写一遍 `ctx.ui.custom` + `new AskUserComponent` 构造；**漂移点核实**：仅 index 版挂 signal abort 监听（index.ts:72-74，channel-handler 版无）——此半属实；但「channel-handler 版把 tui 断言内联为字面量而不用同包 TUILike」**不是两版差异**：index.ts:66 与 channel-handler.ts:119 都是 `tui as { requestRender(): void }` 内联字面量，`TUILike`（component.ts:27-29）两处都没用 | **部分属实**（见 suggestion S1） |
 | 11 | ChannelRegistry 本地接口 resolve/list 死成员（§3.2 F3/L3） | `src/channel-registry-register.ts:44-48` interface 定义 register/resolve/list；包内生产调用仅 :110 `slot.registry.register(ASK_USER_CHANNEL, handler)`——resolve/list 零调用（仅类型面） | **属实** |
 | 12 | gui_widget 路由位空置（D4.3） | `packages/subagent-engine-sdk/src/ui-channels.ts:22/:33-37/:83` 预留 "gui_widget" channel 名；全仓生产代码零注册方（仅 `packages/subagent-core/src/__tests__/ui-channels.test.ts:168` 与 pi-subagent-cli 同名测试用 `registry.register("gui_widget", vi.fn())`）；`packages/subagent-core/src/execution/ui-request-handler-factory.ts:252-256` factory 对 `req.channel === "gui_widget"`（带 marker 未注册）特判 `{ack:true}` 不转发 | **属实** |
@@ -91,7 +91,7 @@
 
 ### B3 验收 P1/P2 是否真实场景验证
 
-P1 = 本地 pi CLI（`--mode rpc --session-dir --model mimo-v2.5-pro --approve --extension`）+ stdin JSONL 诱导 prompt + grep session JSONL 的 toolResult——真实 LLM、真实工具调用、真实保留字 label，符合 AGENTS.md 的 extension 实测规定形态。P2 同会话 TUI 观察单 Other 行 + 自由文本提交。V1/V2 分别锚定 P1/P2，V3 含负面回归（"Other database" 子串标签放行 + 既有 e2e `e2e/ask-user-real.spec.ts` A1/A2/A3 全绿）+ 双渲染路径各跑一次。模型服从性风险已在 §9.3 诚实标注并给了降级路径（换话术 → TUI 人工诱导 + PR 记录摘录）。**验收为真实场景验证，非单测自证。**
+P1 = 本地 pi CLI（`--mode rpc --session-dir --model <本机可用模型> --approve --extension`）+ stdin JSONL 诱导 prompt + grep session JSONL 的 toolResult——真实 LLM、真实工具调用、真实保留字 label，符合 AGENTS.md 的 extension 实测规定形态。P2 同会话 TUI 观察单 Other 行 + 自由文本提交。V1/V2 分别锚定 P1/P2，V3 含负面回归（"Other database" 子串标签放行 + 既有 e2e `e2e/ask-user-real.spec.ts` A1/A2/A3 全绿）+ 双渲染路径各跑一次。模型服从性风险已在 §9.3 诚实标注并给了降级路径（换话术 → TUI 人工诱导 + PR 记录摘录）。**验收为真实场景验证，非单测自证。**
 
 ## 5. 方案自身过度设计检查（C 四问逐项）
 
@@ -104,7 +104,7 @@ P1 = 本地 pi CLI（`--mode rpc --session-dir --model mimo-v2.5-pro --approve -
 | E2 两条测试 | 无 | 最小 | 既有 21 用例零改动共存（实读 validate.test.ts 确认） | 无 | 通过 |
 | E3 ARCHITECTURE.md 登记（单注册方 / gui_widget 空置 / 发现 6 裁决） | 登记**当前事实**而非引入机制；「未来注册方出现无需改 ask-user」是对事实的说明，不是承诺开发 | 文档行 | 三项事实本次全部核实（核对表 #12/#14/#15） | 无（doc-right 处置） | 通过 |
 | L1 删两个死 schema + 类型改直接结构定义 | 纯减法 | 概念数下降（少 2 个 schema 概念） | 零引用核实（核对表 #9） | 无 | 通过 |
-| L2 提取共用 TUI 启动 helper | 同一变化轴（AskUserComponent 构造样板）的第 2 个真实变体去重——落在通用性边界「为已观察到的第 2-3 个变体泛化（证据驱动，合法）」内 | helper 接口 = 1 个可选参数（signal abort 差异点），远低于两份样板重复 | 2 处真实样板 + 1 处真实漂移（signal abort 单侧） | 无 second-system（未趁机加配置面） | 通过 |
+| L2 提取共用 TUI 启动 helper | 同一变化原因（AskUserComponent 构造样板）的第 2 个真实变体去重——落在通用性边界「为已观察到的第 2-3 个变体泛化（证据驱动，合法）」内 | helper 接口 = 1 个可选参数（signal abort 差异点），远低于两份样板重复 | 2 处真实样板 + 1 处真实漂移（signal abort 单侧） | 无 second-system（未趁机加配置面） | 通过 |
 | L3 删接口死成员 | 纯类型面减法 | 零 | resolve/list 零调用（核对表 #11） | 无 | 通过 |
 | L4 常量/接口去 export | 纯减法 | 零 | 引用清点核实（核对表 #20），SURROGATE_PAIR_LEN 因跨文件引用正确地未被列入 | 无 | 通过 |
 | L5 注释限定语境 + e2e 头注释修正 | 纯文档修正 | 零 | 陈旧程度核实（核对表 #18，实为直接矛盾） | 无 | 通过 |

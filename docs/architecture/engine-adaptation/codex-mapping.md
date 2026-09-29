@@ -155,7 +155,7 @@ ReplayedTurn 映射（Turn.items 投影）：
 | text | items 中全部 AgentMessage.text 依序拼接 | v2/item.rs:247-256 |
 | thinking | items 中全部 Reasoning（summary + content 依序 join） | :267-273 |
 | toolCalls | CommandExecution / McpToolCall / DynamicToolCall / FileChange / WebSearch 依序 → ToolCall（§4 装载） | userMessage 等非工具项跳过 |
-| closed | 恒 true | Turn.status ∈ {completed,interrupted,failed} 即闭合；inProgress 不应出现在 read 结果 |
+| closed | 恒 true | Turn.status ∈ {completed,interrupted,failed} 即完成；inProgress 不应出现在 read 结果 |
 
 SessionView：engineId="codex"；sessionId=thread.id；usage=read 面不可得（rollout 不存汇总 usage，缺省）；source="native"（thread/read 成功）/ "outcome-only"（仅 run 终态可用时）。exec 轨 read：`codex exec resume --json` 重放（exec/src/cli.rs:150-151），能力受限。
 

@@ -40,12 +40,22 @@ export function getActiveChild(recordId: string): ChildProcess | undefined {
   return activeChildren.get(recordId);
 }
 
-/** 全量收割（dispose）：SIGTERM + 30s SIGKILL 升级；返回收割数。 */
+/**
+ * 全量收割（dispose）：SIGTERM + 30s SIGKILL 升级；返回收割数。
+ *
+ * 杀决策落盘（2026-09-24 事故取证补口）：dispose 全量收割会连坐杀掉**正在运行**的
+ * record 子进程（relay 形态下 = relay.mjs 代理 → runtime kill-on-disconnect 连坐真
+ * pi child）——该决策此前零日志，主 pi 侧先杀代理的断连形态第一现场不可考。收割
+ * 必记 warn：record 清单 + 各自进程态（在跑被杀 / 已退出仅销账）。
+ */
 export function killAllActiveChildren(signal: NodeJS.Signals = "SIGTERM"): number {
   let killed = 0;
+  const victims: string[] = [];
+  const finished: string[] = [];
   for (const [recordId, child] of activeChildren) {
     if (child.exitCode === null && child.signalCode === null) {
       killed++;
+      victims.push(`${recordId}(pid=${String(child.pid)})`);
       child.kill(signal);
       void killPiProcess(child, {
         graceMs: PI_KILL_GRACE_MS,
@@ -56,8 +66,18 @@ export function killAllActiveChildren(signal: NodeJS.Signals = "SIGTERM"): numbe
           );
         },
       });
+    } else {
+      finished.push(recordId);
     }
     activeChildren.delete(recordId);
+  }
+  if (killed > 0) {
+    // 运行中 record 被 dispose 连坐杀：这是「主 pi 侧先断 → runtime kill-on-disconnect」
+    // 断连形态的上游触发指纹，warn 级必达（TAIJI_AGENT_EXT_LOG=1 即落盘，无需 DEBUG 档）
+    logger.warn(
+      `[session-runner] dispose killAll: killing ${killed} active child(ren) [${victims.join(", ")}]` +
+        (finished.length > 0 ? `; ${finished.length} already-exited record(s) unregistered only [${finished.join(", ")}]` : ""),
+    );
   }
   return killed;
 }

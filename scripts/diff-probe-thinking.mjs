@@ -48,9 +48,17 @@ const RUNTIME_SRC_URL_PREFIX = pathToFileURL(join(REPO_ROOT, 'packages', 'runtim
 // 是 bundler resolution 风格的无扩展名相对 import（'./protocol'）——Node ESM 严格解析吃不下，
 // 与 runtime src 的 .js 后缀问题同型，hook 同款兜底（.ts 回退，bare specifier 不碰）。
 const SHARED_SRC_URL_PREFIX = pathToFileURL(join(REPO_ROOT, 'packages', 'shared', 'src') + '/').href
+// [merge dev-0.10.5 2026-09] extension-protocol/src 前缀：档位链路经 extension-protocol
+// 转出后（thinking 档位词表 types），其内部同为 bundler resolution 风格无扩展名相对
+// import（'./core/types'）——shared 同型问题，hook 同款兜底。
+const EXTENSION_PROTOCOL_SRC_URL_PREFIX = pathToFileURL(join(REPO_ROOT, 'packages', 'extension-protocol', 'src') + '/').href
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (specifier.endsWith('.js') && (context.parentURL ?? '').startsWith(RUNTIME_SRC_URL_PREFIX)) {
+    if (
+      specifier.endsWith('.js') &&
+      ((context.parentURL ?? '').startsWith(RUNTIME_SRC_URL_PREFIX) ||
+        (context.parentURL ?? '').startsWith(EXTENSION_PROTOCOL_SRC_URL_PREFIX))
+    ) {
       try {
         return nextResolve(`${specifier.slice(0, -3)}.ts`, context)
       } catch {
@@ -58,7 +66,8 @@ registerHooks({
       }
     }
     if (
-      (context.parentURL ?? '').startsWith(SHARED_SRC_URL_PREFIX) &&
+      ((context.parentURL ?? '').startsWith(SHARED_SRC_URL_PREFIX) ||
+        (context.parentURL ?? '').startsWith(EXTENSION_PROTOCOL_SRC_URL_PREFIX)) &&
       (specifier.startsWith('./') || specifier.startsWith('../')) &&
       !/\.(js|ts|json|mjs|cjs|node|css)$/.test(specifier)
     ) {

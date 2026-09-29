@@ -7,8 +7,7 @@
  *   （禁异步 bus/microtask 的设计约束在此可证伪）
  * - 扇出异常直接传播（不设隔离——与迁移前 Facade 体内顺序调用等价），异常中断后续
  *   订阅者且 Map 条目已写入（迁移前 registerReplicatedStates 抛错时 sessions.set 已发生）
- * - send 闭包窄依赖：带 sid payload → bus publish；无 sid → broadcastGlobal 兜底；
- *   message.complete → notifyMessageComplete（wave:perf-w09 D1-2 单通道语义随迁）
+ * - send 闭包窄依赖：带 sid payload → bus publish；无 sid → broadcastGlobal 兜底
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-lifecycle-register.test.ts
  */
@@ -52,18 +51,16 @@ function makeEnv() {
   })
   const busPublish = vi.fn()
   const broadcastGlobal = vi.fn()
-  const notifyMessageComplete = vi.fn()
   const registerDeps: ISessionRegisterDeps = {
     adapterFactory,
     getMessageBus: () => ({ publish: busPublish }) as never,
     broadcastGlobal,
-    notifyMessageComplete,
   }
 
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)
   return {
     lifecycle, svc, configStore, attach, detach, adapterFactory,
-    busPublish, broadcastGlobal, notifyMessageComplete,
+    busPublish, broadcastGlobal,
     getSend: () => capturedSend,
     client: {} as unknown as IPiEngine,
   }
@@ -157,17 +154,6 @@ describe('SessionLifecycle.registerSession（S3 写点归位）', () => {
     const noSid: ServerMessage = { type: 'message.delta', payload: {} } as unknown as ServerMessage
     send!(noSid)
     expect(env.broadcastGlobal).toHaveBeenCalledWith(noSid)
-  })
-
-  it('send 闭包窄依赖：message.complete 且带 sid 时触发 notifyMessageComplete', async () => {
-    const env = makeEnv()
-    await env.lifecycle.registerSession('s8', env.client, '/repo', 't')
-    const send = env.getSend()!
-    send({ type: 'message.complete', payload: { sessionId: 's8' } } as unknown as ServerMessage)
-    expect(env.notifyMessageComplete).toHaveBeenCalledWith('s8')
-    // 非 message.complete 不触发
-    send({ type: 'message.delta', payload: { sessionId: 's8' } } as unknown as ServerMessage)
-    expect(env.notifyMessageComplete).toHaveBeenCalledTimes(1)
   })
 
   it('removeEntry 纯删除：Map 条目消失，不触发任何订阅/通知', async () => {

@@ -195,7 +195,7 @@ describe('useThinkingLevelSync', () => {
     const currentThinkingLevel = ref<string | undefined>('xhigh') // mimo 无此档
     const onReset = vi.fn()
     const deps: ThinkingLevelSyncDeps = {
-      getThinkingLevelMap: vi.fn(() => undefined), // xiaomi-token-plan-cn/mimo-v2.5-pro 场景
+      getThinkingLevelMap: vi.fn(() => undefined), // xiaomi-token-plan-cn/mimo-v2.6-flash 场景
       getSupportedLevels: vi.fn(() => supportedDefault),
     }
     useThinkingLevelSync(currentModelId, computed(() => currentThinkingLevel.value), onReset, deps)

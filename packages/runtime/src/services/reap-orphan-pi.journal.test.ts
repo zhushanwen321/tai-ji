@@ -142,7 +142,7 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
     expect(records[0]!.pid).toBe(702)
   })
 
-  it('④ 防误记：处置失败（SIGTERM 抛非 ESRCH）→ 进 failed、不记 reaped 事件', async () => {
+  it('④ 处置失败（SIGTERM 抛非 ESRCH）→ 进 failed，台账记 reap-failed（不记 reaped）', async () => {
     initCrashJournal(dataDir)
     const boom = new Error('operation not permitted')
     const result = await reapOrphanPiProcesses(makeOptions(
@@ -153,7 +153,14 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
 
     expect(result.reaped).toEqual([])
     expect(result.failed).toEqual([801])
-    expect(readJournalRecords()).toEqual([])
+    const records = readJournalRecords()
+    expect(records).toHaveLength(1)
+    const rec = records[0]!
+    expect(rec.event).toBe('reap-failed')
+    expect(rec.layer).toBe('pi')
+    expect(rec.pid).toBe(801)
+    expect(rec.ppid).toBe(1)
+    expect(String(rec.detailDigest)).toContain('disposal failed')
   })
 
   it('多孤儿逐一记事件：每 pid 一条，事件 pid 集与 reaped 结果一致', async () => {

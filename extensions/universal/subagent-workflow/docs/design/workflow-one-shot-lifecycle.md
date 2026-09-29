@@ -178,7 +178,7 @@
 
 | 方案 | 长期架构合理性 | 短期实现成本 | 风险 | 裁决 |
 |---|---|---|---|---|
-| **A 一次性化（本方案）**：删 paused 态 + pauseRun/resumeRun + pause 场景 replay；崩溃重试及 replay 保留；接口面清除；session 切换作废（已确认接受的行为变更） | ✅ 状态机两态与 subagent record 模型同构（active/closed + 派生态）；守卫清零；为极窄场景不征税 | 中：净删 ~400-500 行（lifecycle 两个函数 + error-recovery 守卫分支 + 接口面 + 视图 + index.ts 两处 handler），无新增机制 | 低-中：消费方已显式处置（作废确认）；崩溃重试独立保留；风险集中在「漏删某处 paused 引用」→ 编译期类型 + grep 验收兑底 | ✅ **推荐** |
+| **A 一次性化（本方案）**：删 paused 态 + pauseRun/resumeRun + pause 场景 replay；崩溃重试及 replay 保留；接口面清除；session 切换作废（已确认接受的行为变更） | ✅ 状态机两态与 subagent record 模型同构（active/closed + 派生态）；守卫清零；为极窄场景不征税 | 中：净删 ~400-500 行（lifecycle 两个函数 + error-recovery 守卫分支 + 接口面 + 视图 + index.ts 两处 handler），无新增机制 | 低-中：消费方已显式处置（作废确认）；崩溃重试独立保留；风险集中在「漏删某处 paused 引用」→ 编译期类型 + grep 验收兜底 | ✅ **推荐** |
 | **B 保留 pause 并修复**：内容寻址 callId（hash 替代自增）+ 确定性原语（$NOW/$RANDOM 入日志）+ 事件日志替代快照 | ⚠️ 修复了 P1/P3 但 paused 散布守卫（P2）仍在；为一个消费场景极窄的能力新增三个机制（hash、原语注入、日志格式），方向与「减法优先」相反 | 高：三个新机制 + 迁移 | 中：机制增多、契约仍在（内容寻址容忍分叉但 replay 命中率下降时 token 重复消耗） | ❌ 否决 |
 | **C 更激进一次性**：连 worker 崩溃重试也删（worker 死 → 直接 done,failed） | ⚠️ 最简，但丢弃真实价值：长 workflow 已完成 N 个 agent 调用（已花 token）因一次 worker 基础设施错误全部作废 | 低（删得更多） | 中：worker 崩溃在长任务中虽罕见但非零，发生时损失大；replay 机制本身经过验证（resumeRun 与重试共用），保留成本低 | ❌ 否决 |
 
@@ -243,7 +243,7 @@
 
 ## §4 验收（真实 pi 环境，非单测非 mock）
 
-**验收环境**：本地 pi CLI RPC mode（`pi --mode rpc --session-dir <dir> --model <m> --approve --extension <本包路径>`），测试模型 `xiaomi-token-plan-cn/mimo-v2.5-pro`；通过 stdin JSONL 发 prompt 驱动主 agent 调 workflow 工具，或直接调工具等价 RPC。内置 workflow 用本仓 `workflows/chain.js`（短）与 `workflows/review-fix-loop.js`（长）。
+**验收环境**：本地 pi CLI RPC mode（`pi --mode rpc --session-dir <dir> --model <m> --approve --extension <本包路径>`），测试模型 `<本机可用模型>`；通过 stdin JSONL 发 prompt 驱动主 agent 调 workflow 工具，或直接调工具等价 RPC。内置 workflow 用本仓 `workflows/chain.js`（短）与 `workflows/review-fix-loop.js`（长）。
 
 | # | 场景（回溯目标） | 步骤 | 通过标准 |
 |---|---|---|---|

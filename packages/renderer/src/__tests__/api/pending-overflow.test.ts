@@ -1,10 +1,15 @@
-/** [已裁剪] 原 6 用例中 4 个（超限驱逐/迟到 resolve/timeoutMs=0/deadline 重挂）与 core
- *  pending-sweep.test.ts 用例逐一重复，已删；保留 core 侧未显式锁定的 2 个增量：
- *  共享 sweep timer 计数（无 per-request timer 泄漏）+ 迟到 error envelope 对称路径。
- *  （findings 原裁决为「迁移增量到 core 后删」——本 wave 只动 renderer 测试，改为原地保留。）
- *
+// @vitest-environment node
 
- * pending 容量上限 + 共享超时 timer 单测（Q1-5）。
+/** [已裁剪] 原 6 用例中 4 个（超限驱逐/迟到 resolve/timeoutMs=0/deadline 重挂）与 core
+ *  pending-sweep.test.ts 用例逐一重复，已删；原 5 用例中「全部 reject + map 清空」与
+ *  core pending-sweep.test.ts:119 逐字重复、「空 map 不抛错」是 Map.forEach 空迭代的
+ *  平凡传导，已删。保留 core 侧未显式锁定的增量：
+ *  - overflow 侧：共享 sweep timer 计数（无 per-request timer 泄漏）+ 迟到 error envelope 对称路径
+ *  - rejectAll 侧：no-op 幂等 / 新注册不受影响 / error 对象透传含 code
+ *  （findings 原裁决为「迁移增量到 core 后删」——本 wave 只动 renderer 测试，原地保留。）
+
+
+ * pending 容量上限 + 共享超时 timer + rejectAll 单测（Q1-5 / R4）。
  *
  * 覆盖：
  * 1. 超 256 驱逐最老（Map 插入序首个），reject 带 code:'overflow'；新请求正常注册
@@ -14,10 +19,13 @@
  * 5. resolve/reject 删除条目后重算 sweep timer（W04 review：最后带 deadline 的
  *    pending 正常完成时 timer 立即 disarm，不空转到原触发点）
  * 6. 被驱逐 id 的迟到 error envelope 同样静默丢弃（对称路径）
+ * 7. rejectAll（WS 断连 / runtime 崩溃时批量 reject 防永挂）：no-op 幂等、
+ *    后续注册不受影响、error 对象透传含附加属性
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as pending from '@taiji/core/transport/api'
 import type { ServerMessage } from '@taiji/shared'
+import { RPC_BACKSTOP_TIMEOUT_MS } from '../../../../core/src/transport/api/pending'
 
 /** 构造 resolveEnvelope 入参（payload 用 as 断言对齐 ServerMessage 联合 payload） */
 function envelopeMsg(type: string, id: string, payload: Record<string, unknown>): ServerMessage {
@@ -88,5 +96,32 @@ describe('pending 容量上限 + 共享 sweep timer（Q1-5）', () => {
     // newcomer 不受影响（未被误 reject），仍可正常 settle
     pending.resolve(newcomer, 'ok')
     await expect(pNew).resolves.toBe('ok')
+  })
+})
+
+describe('pending.rejectAll', () => {
+  beforeEach(() => {
+    // 确保模块单例 pendingMap 在每个用例前为空
+    pending.rejectAll(new Error('setup cleanup'))
+  })
+
+  it('rejectAll 后新注册的请求不受影响（可正常 resolve）', async () => {
+    pending.rejectAll(new Error('first batch'))
+
+    const id = pending.createCommandId()
+    const p = pending.register<string>(id, RPC_BACKSTOP_TIMEOUT_MS)
+    pending.resolve(id, 'new value')
+
+    await expect(p).resolves.toBe('new value')
+  })
+
+  it('rejectAll 透传 error 对象（含 code 等附加属性的场景）', async () => {
+    const id = pending.createCommandId()
+    const p = pending.register<string>(id, RPC_BACKSTOP_TIMEOUT_MS)
+
+    const customError = Object.assign(new Error('runtime crashed'), { code: 'E_RUNTIME' })
+    pending.rejectAll(customError)
+
+    await expect(p).rejects.toMatchObject({ message: 'runtime crashed', code: 'E_RUNTIME' })
   })
 })

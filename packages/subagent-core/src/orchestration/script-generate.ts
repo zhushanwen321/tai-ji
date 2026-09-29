@@ -31,6 +31,41 @@ import { resolve } from "node:path";
 import { parseResourceMetaDetailed } from "../shared/meta-parser.ts";
 import { DEFAULT_WORKFLOW_TMP_DIR } from "./workflow-files.ts";
 
+/**
+ * Worker 执行时在用户脚本作用域（async IIFE 顶层）预先声明的名字全集——
+ * 镜像 worker-script-builder.ts 的宿主段（`(async () => {` 起至「User workflow
+ * script」注释行止的全部声明）。语法闸（checkSyntax）以假声明拼接复现真实包裹
+ * 作用域：脚本顶层重声明任一名字 = 真机 SyntaxError，必须在生成期拦下（曾因
+ * 闸只包脚本文本、未拼宿主段，产物 `const args` 撞宿主别名仅在真机崩、生成期
+ * 零信号）。
+ *
+ * 同步义务：worker-script-builder.ts 宿主段增删名字时本清单必须同改；守卫 =
+ * __tests__/script-generate.test.ts 的宿主声明对账用例（从 builder 源文本提取
+ * 声明名与本清单互查）。
+ */
+export const WORKER_IIFE_HOST_DECLARED_NAMES = [
+  "parentPort",
+  "workerData",
+  "_callIdCounter",
+  "_agentCallCount",
+  "_pendingCalls",
+  "_callCache",
+  "_currentPhase",
+  "$ARGS",
+  "args",
+  "$WORKSPACE",
+  "_budgetData",
+  "$BUDGET",
+  "$MODEL",
+  "$THINKING_LEVEL",
+  "WorkflowAbortedError",
+  "phase",
+  "log",
+  "agent",
+  "parallel",
+  "pipeline",
+] as const;
+
 /** generate 目录注入参数：tmp 落盘目录宿主注入（缺省 DEFAULT_WORKFLOW_TMP_DIR）。 */
 export interface GenerateWorkflowScriptOptions {
   tmpDir?: string;
@@ -84,11 +119,13 @@ function checkAgentUsage(stripped: string): string | undefined {
   return undefined;
 }
 
-/** 闸 4：语法检查（包 async IIFE，与 runtime 包裹形态一致）。 */
+/** 闸 4：语法检查（async IIFE + 宿主预声明假拼接——与 worker 真实包裹作用域一致，
+ *  脚本顶层重声明宿主名（args/$ARGS/agent/…）在此红，而非真机 SyntaxError）。 */
 function checkSyntax(script: string): string | undefined {
   const cjsScript = script.replace(/\bexport\s+const\s+meta\b/, "const meta");
+  const hostDecls = WORKER_IIFE_HOST_DECLARED_NAMES.map((n) => `const ${n} = null;`).join("\n");
   try {
-    new Function(`(async () => { ${cjsScript} })();`);
+    new Function(`(async () => {\n${hostDecls}\n${cjsScript} })();`);
     return undefined;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

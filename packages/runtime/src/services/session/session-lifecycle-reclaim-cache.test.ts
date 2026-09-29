@@ -73,7 +73,6 @@ function makeEnv() {
     adapterFactory: () => makeFakeAdapter(),
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
 
   const lifecycle = new SessionLifecycle(svc, pm, configStore, sessionStore, workspaceService, registerDeps)

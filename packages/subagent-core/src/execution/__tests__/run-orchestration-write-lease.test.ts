@@ -39,10 +39,6 @@ import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
-import {
-  _resetSettledWatchdogsForTest,
-  hasSettledWatchdog,
-} from "../lifecycle/settled-watchdog.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
 import type { AgentResult, ExecutionRecord } from "../assembly/types.ts";
 
@@ -98,7 +94,6 @@ beforeEach(() => {
 
 afterEach(() => {
   _resetLifecycleState();
-  _resetSettledWatchdogsForTest();
   _resetCoreSpawnedChildrenMirrorForTest();
   if (prevDataDirEnv === undefined) delete process.env["TAIJI_AGENT_DATA_DIR"];
   else process.env["TAIJI_AGENT_DATA_DIR"] = prevDataDirEnv;
@@ -122,7 +117,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
       expect(record?.sessionFile).toBe(sessionFile);
       // [D3a 时机①] 锚点确立即声明写权（kickOffChatRound 回填点）
       expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: handle.subagentId });
-      // [D3a/B5] 轮终跨轮保留——release 出口只有终态原语/idle-GC 归档
+      // [D3a/B5] 轮终跨轮保留——release 出口只有终态原语（markSettledOut）
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
       // [UF-1] 绑定 sidecar 同步落盘（既有行为不回归）
       expect(fs.existsSync(`${sessionFile}.record-binding`)).toBe(true);
@@ -133,14 +128,9 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
     }
   });
 
-  it("[modeless 波1·adopt 链退役] 引擎死亡（run reject）→ Continuation 失败分支收口：record 落 idle 可恢复 + 失败通知，无监督器 adopt 接管", async () => {
+  it("[modeless 波1·adopt 链退役] 引擎死亡（run reject）→ Continuation 失败分支收口：record 落 idle 可恢复 + 失败通知", async () => {
     const h = makeService();
     try {
-      const adoptSpy = vi.spyOn(
-        (h.service as unknown as { roundSupervisor: { adoptOnProcessDeath: (r: unknown, m: string) => void } })
-          .roundSupervisor,
-        "adoptOnProcessDeath",
-      );
       const record = createRecord("bg-engine-death", {
         agent: "general-purpose",
         model: "prov/model-1",
@@ -167,7 +157,6 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
         expect(record.lastError).toContain("engine process exited");
       });
       expect(record.round).toBe(1);
-      expect(adoptSpy).not.toHaveBeenCalled();
     } finally {
       h.service.dispose();
       clearEngines();
@@ -200,35 +189,6 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
   });
 });
 
-describe("轮终 disarm 根修：one-shot 正常收敛即撤两段 watch（settleOneShotOutcome）", () => {
-  it("run 应答收敛后 armed entry 清零——已收敛的槽不再被 watchdog 误 kill + 误报 failed", async () => {
-    // 2026-09-14 实测误报链：one-shot settle 后 armed entry 残留 → 窗口到期 fire →
-    // onOneShotSettledWatchdogTimeout 的 status!=='running' 守卫放行 → kill +
-    // markRoundIdle(failed) + 失败通知（「已交付会话残留槽被看门狗当 no valid
-    // protocol event 清理报 failed」×7+）。根修 = settleOneShotOutcome 收敛点补
-    // disarmRoundFromProtocol（F-2 注释「轮终两段一并清」的 one-shot 落点）。
-    const h = makeService();
-    try {
-      const sessionFile = path.join(h.agentDir, "disarm-session.jsonl");
-      const handle = await h.service.execute({ task: "disarm probe", slug: "disarm" });
-      await vi.waitFor(() => expect(h.fake.runs.length).toBe(1));
-      h.fake.runs[0]!.settle({ content: "done", sessionFile });
-
-      const record = h.store.getMutable(handle.subagentId);
-      await vi.waitFor(() => expect(record?.status).toBe("idle"));
-      // 收敛即撤窗：mid-round/settled 两段 armed entry 不残留（否收尾段将在窗到期后
-      // 对该已收敛槽 fire）
-      expect(hasSettledWatchdog(handle.subagentId)).toBe(false);
-      // 收敛语义本身不回归：翻边 idle（two-state 收敛）+ 结果已写
-      expect(record?.status).toBe("idle");
-      expect(record?.result).toBe("done");
-    } finally {
-      h.service.dispose();
-      clearEngines();
-      fs.rmSync(h.agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    }
-  });
-});
 
 describe("settleOneShotOutcome SP-5 成功分支 → store.markRoundIdle 接线（U2b/C3）", () => {
   it("markRoundIdle 簿记 + `.alive` 不删（D3a 跨轮保留）+ pending:unregister 发射点② store 簿记⑧单轨发射恰好一次", async () => {

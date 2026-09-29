@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * extension-host-dialog C4 过滤排除表单类单测（ui-presentation-protocol u4 版，原名
  * schedule-create 排除面职责扩展为统一表单排除面）。

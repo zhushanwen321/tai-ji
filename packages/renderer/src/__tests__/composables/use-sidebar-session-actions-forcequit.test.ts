@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useSidebarSessionActions.onForceQuitSession 测试（sidebar 强制退出 handler）。
  *

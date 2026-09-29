@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * W2 红灯测试：truncateToolOutput 共享截断工具。
  *

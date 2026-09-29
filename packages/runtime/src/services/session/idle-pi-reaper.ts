@@ -364,7 +364,7 @@ interface ReapTickContext {
   hasInflightRelayChildren(sid: string): boolean
 }
 
-/** 构造一拍上下文（阈值/窗口/tick 默认值内联兑底，权威值由 u3 装配传入 config）。 */
+/** 构造一拍上下文（阈值/窗口/tick 默认值内联兜底，权威值由 u3 装配传入 config）。 */
 function createReapTickContext(options: IdlePiReaperOptions): ReapTickContext {
   const { seat, exemptions } = options
   const tickSnapshots = new Map<string, RuntimeCheckpointRefresh>()

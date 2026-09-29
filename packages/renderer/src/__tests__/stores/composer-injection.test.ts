@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * composer-injection store 单元测试（W2, U5）。
  *

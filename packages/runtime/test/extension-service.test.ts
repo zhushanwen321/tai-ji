@@ -164,18 +164,44 @@ describe('ExtensionService', () => {
       }), 'utf-8')
 
       const extensions = await service.scanExtensions()
+      // 无条件断言条目存在：扫描回归致 pi-ask-user 条目消失时必须红，
+      // 不能让断言包在 if 守卫内静默绿
       const askUser = extensions.find(e => e.name === 'pi-ask-user')
-      if (askUser) {
-        expect(askUser.enabled).toBe(false)
-      }
+      expect(askUser).toBeDefined()
+      expect(askUser!.enabled).toBe(false)
     })
 
     it('returns empty array when no extensions found', async () => {
-      writeFileSync(join(testSettingsDir, 'settings.json'), JSON.stringify({}), 'utf-8')
-      rmSync(join(testSettingsDir, 'npm'), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      // 独立空环境实例：共享 setup 的 projectRoot=process.cwd() 会让 bundled dev 分支
+      // 扫到真实仓库 extensions 树，空环境前提不成立。此处 projectRoot 指向仓库外自建
+      // tmpdir（bundled dev 分支的 <root>/../../extensions 与 npm 源的 <root>/package.json
+      // 均不存在），settings 源经 setSettingsPath 指向同目录的空 settings.json，
+      // bundled/npm/settings/third-party/user/discovery 源全为空。
+      const emptyDir = mkdtempSync(join(tmpdir(), 'ext-service-empty-'))
+      writeFileSync(join(emptyDir, 'settings.json'), JSON.stringify({ packages: [] }), 'utf-8')
+      setSettingsPath(join(emptyDir, 'settings.json'))
+      try {
+        const emptyService = new ExtensionService({
+          settingsDir: emptyDir,
+          projectRoot: emptyDir,
+          packaged: false,
+          installer: new NpmGitInstaller(),
+          resolver: new ExtensionResolver({
+            settingsDir: emptyDir,
+            thirdPartyDir: join(emptyDir, 'extensions'),
+            npmDir: join(emptyDir, 'npm'),
+          }),
+          extensionSettings: new PiExtensionSettings(emptyDir),
+          extensionsDir: join(emptyDir, 'extensions'),
+          npmDir: join(emptyDir, 'npm'),
+          tmpDir: join(emptyDir, 'tmp'),
+        })
 
-      const extensions = await service.scanExtensions()
-      expect(Array.isArray(extensions)).toBe(true)
+        const extensions = await emptyService.scanExtensions()
+        expect(extensions).toHaveLength(0)
+      } finally {
+        rmSync(emptyDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      }
     })
   })
 
@@ -186,19 +212,6 @@ describe('ExtensionService', () => {
       // Task 4.3 要求 getRecommendedExtensions 过滤掉 mandatory 项 → 返回空列表。
       // 这是新契约：mandatory 扩展不进推荐列表（它们由 boot 强制安装）。
       expect(recommended.length).toBe(0)
-    })
-
-    it('marks matching non-mandatory recommended package as installed', async () => {
-      // recommended-extensions.json 当前所有条目都是 mandatory，无法直接测 installed 标记。
-      // 这里改为间接验证：getRecommendedExtensions 过滤 mandatory 后只返回非 mandatory 项，
-      // 且对返回的每一项 installed 字段为 boolean（契约形状检查）。
-      const recommended = await service.getRecommendedExtensions()
-      expect(recommended.every(r => typeof r.installed === 'boolean')).toBe(true)
-      // 所有返回项都不是 mandatory 包
-      expect(recommended.every(r => !['@zhushanwen/pi-ask-user',
-        '@zhushanwen/pi-goal', '@zhushanwen/pi-todo',
-        '@zhushanwen/pi-pending-notifications', '@zhushanwen/pi-subagent-workflow',
-        '@zhushanwen/pi-structured-output'].includes(r.name))).toBe(true)
     })
   })
 
@@ -225,11 +238,10 @@ describe('ExtensionService', () => {
       expect(goal!.mandatory).toBe(true)
       // S10：tier 直接从 resolveExtensions 透传（pi-goal 是 feature mandatory）
       expect(goal!.tier).toBe('feature')
-      // 非 mandatory 包 mandatory 字段为 false
+      // 非 mandatory 包 mandatory 字段为 false（无条件断言，防条目消失时静默绿）
       const askUser = extensions.find(e => e.name === 'pi-ask-user')
-      if (askUser) {
-        expect(askUser.mandatory).toBe(false)
-      }
+      expect(askUser).toBeDefined()
+      expect(askUser!.mandatory).toBe(false)
     })
 
     it('uninstallExtension rejects builtin packages', async () => {
@@ -238,13 +250,8 @@ describe('ExtensionService', () => {
       await expect(service.uninstallExtension('@zhushanwen/pi-goal'))
         .rejects.toThrow(/Builtin extension cannot be uninstalled/)
     })
-
-    it('uninstallExtension allows non-builtin packages', async () => {
-      // pi-ask-user 非 builtin，卸载不应抛 builtin 守卫错误
-      // （后续 npm uninstall 是 mock 的，不会真正报错）
-      await expect(service.uninstallExtension('pi-ask-user'))
-        .resolves.toBeUndefined()
-    })
+    // 非 builtin 包可卸载的 resolves 语义由 uninstallExtension「removes from settings.json」
+    // 用例覆盖（test-pkg 非 builtin，uninstall 若 rejects 该用例即红）
   })
 
   describe('getExtensionPaths', () => {
@@ -317,17 +324,10 @@ describe('ExtensionService', () => {
       expect(found!.path).toBe(userExtDir)
     })
 
-    it('getExtensionPaths 返回的路径包含 user extension 目录', async () => {
-      const paths = await service.getExtensionPaths()
-      expect(paths).toContain(userExtDir)
-    })
-
-    it('无效路径静默跳过，不抛错', async () => {
-      process.env.TAIJI_EXTENSION_PATHS = `/nonexistent/path${delimiter}${userExtDir}`
-      const extensions = await service.scanExtensions()
-      // 无效路径被跳过，有效的仍在
-      expect(extensions.find(e => e.name === 'my-dev-extension')).toBeDefined()
-    })
+    // 「getExtensionPaths 返回的路径包含 user extension 目录」与「无效路径静默跳过」
+    // 两条已删：前者是「scan 能扫到」+「get 返回 scan 结果」两个已证契约的组合复测；
+    // 后者 owner 层覆盖在 test/extension-resolver.test.ts（skips non-existent paths），
+    // 且其断言只验有效项仍在，无独立失败信号。
 
     it('多个路径用分隔符隔开都能扫到', async () => {
       const userExtDir2 = mkdtempSync(join(tmpdir(), 'ext-user-path2-'))
@@ -367,20 +367,8 @@ describe('ExtensionService', () => {
         expect((e as Error).message).toMatch(/already built in/i)
       }
     })
-
-    it('throws when package is not a valid pi extension', async () => {
-      // installPackage succeeds but the installed package lacks pi manifest fields
-      mockedInstallPackage.mockResolvedValue(undefined)
-      mockedUninstallPackage.mockResolvedValue(undefined)
-      const pkgDir = join(testSettingsDir, 'npm', 'node_modules', 'invalid-pkg')
-      mkdirSync(pkgDir, { recursive: true })
-      writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({
-        name: 'invalid-pkg',
-        version: '1.0.0',
-      }), 'utf-8')
-
-      await expect(service.installExtension('npm:invalid-pkg')).rejects.toThrow('not a valid pi extension')
-    })
+    // 非 pi extension 安装的 message 文案断言已并入 installExtension error classification
+    // 「classifies invalid pi extension as not_extension」（code + message 一处断言）
   })
 
   describe('uninstallExtension', () => {
@@ -445,10 +433,8 @@ describe('ExtensionService', () => {
       const raw = readFileSync(disabledPath, 'utf-8')
       const data = JSON.parse(raw)
       expect(data.disabled).toContain('npm:@zhushanwen/pi-goal')
-    })
 
-    it('allows enabling builtin packages', async () => {
-      // 开启 builtin 扩展允许（守卫只拦截禁用，开启无害）
+      // [3] builtin 可 enable（守卫只拦截禁用，开启无害；原「allows enabling builtin packages」并入）
       await expect(service.toggleExtension('@zhushanwen/pi-goal', true))
         .resolves.toBeUndefined()
     })
@@ -458,18 +444,19 @@ describe('ExtensionService', () => {
 
   describe('ExtensionInstallError', () => {
     it('has code, message, and optional hint', () => {
-      const err = new ExtensionInstallError('not_found', 'Package not found', 'Check the package name')
-      expect(err.code).toBe('not_found')
-      expect(err.message).toBe('Package not found')
-      expect(err.hint).toBe('Check the package name')
-      expect(err).toBeInstanceOf(Error)
-      expect(err).toBeInstanceOf(ExtensionInstallError)
-    })
+      // 带 hint 构造
+      const withHint = new ExtensionInstallError('not_found', 'Package not found', 'Check the package name')
+      expect(withHint.code).toBe('not_found')
+      expect(withHint.message).toBe('Package not found')
+      expect(withHint.hint).toBe('Check the package name')
+      expect(withHint).toBeInstanceOf(Error)
+      expect(withHint).toBeInstanceOf(ExtensionInstallError)
 
-    it('works without hint', () => {
-      const err = new ExtensionInstallError('network', 'Connection timeout')
-      expect(err.code).toBe('network')
-      expect(err.hint).toBeUndefined()
+      // 不带 hint 构造（原「works without hint」用例并入）
+      const withoutHint = new ExtensionInstallError('network', 'Connection timeout')
+      expect(withoutHint.code).toBe('network')
+      expect(withoutHint.message).toBe('Connection timeout')
+      expect(withoutHint.hint).toBeUndefined()
     })
   })
 
@@ -526,6 +513,8 @@ describe('ExtensionService', () => {
       } catch (e) {
         expect(e).toBeInstanceOf(ExtensionInstallError)
         expect((e as ExtensionInstallError).code).toBe('not_extension')
+        // message 文案（原「throws when package is not a valid pi extension」用例的断言并入）
+        expect((e as Error).message).toMatch(/not a valid pi extension/)
       }
     })
   })
@@ -766,7 +755,10 @@ describe('ExtensionService', () => {
         name: 'pi-ext-b', version: '1.0.0', description: 'B', keywords: ['pi-package'],
       }), 'utf-8')
 
-      await service.finishInstall(tempDir, ['ext-a', 'ext-b'])
+      // 全新安装（destDir 不存在）走 tmp+rename 直装，返回空失败清单
+      // （原「全新安装（destDir 不存在）：tmp+rename 直装成功，返回空失败清单」并入）
+      const failures = await service.finishInstall(tempDir, ['ext-a', 'ext-b'])
+      expect(failures).toEqual([])
 
       const extensionsDir = join(testSettingsDir, 'extensions')
       expect(existsSync(join(extensionsDir, 'ext-a', 'package.json'))).toBe(true)
@@ -949,21 +941,6 @@ describe('ExtensionService', () => {
         warnSpy.mockRestore()
       }
     })
-
-    it('全新安装（destDir 不存在）：tmp+rename 直装成功，返回空失败清单', async () => {
-      const tempDir = join(testSettingsDir, 'tmp', 'ext-scan-test-fresh-atomic')
-      const src = join(tempDir, 'ext-fresh')
-      mkdirSync(src, { recursive: true })
-      writeFileSync(join(src, 'package.json'), JSON.stringify({
-        name: 'pi-ext-fresh', version: '1.0.0', description: 'F', keywords: ['pi-package'],
-      }), 'utf-8')
-
-      const failures = await service.finishInstall(tempDir, ['ext-fresh'])
-
-      expect(failures).toEqual([])
-      expect(existsSync(join(testSettingsDir, 'extensions', 'ext-fresh', 'package.json'))).toBe(true)
-      expect(readdirSync(join(testSettingsDir, 'extensions')).some((e) => e.includes('.tmp-'))).toBe(false)
-    })
   })
 
   describe('cancelInstall', () => {
@@ -1134,21 +1111,42 @@ describe('ExtensionService', () => {
 
   describe('installLocalDirectory path security', () => {
     it('rejects paths outside home and tmp', async () => {
-      await expect(service.installLocalDirectory('/etc/passwd'))
-        .rejects.toThrow(/not a directory|does not exist/)
+      // 传白名单外的已存在目录（/etc，macOS 上 realpath 为 /private/etc，同样是白名单外
+      // 真目录）：先过 exists 与 isDirectory 判定，拒绝真正来自白名单分支。
+      // （此前传 /etc/passwd 文件，拒绝来自 not-a-directory 分支，白名单检查从未被触达）
+      await expect(service.installLocalDirectory('/etc'))
+        .rejects.toThrow(/Source path must be under home directory or \/tmp/)
     })
 
-    it('rejects non-directory paths under home', async () => {
-      // fs-guard：家目录在白名单外不可写。HOME 临时指向 tmp——installLocalDirectory 的
-      // home 判定经 homedir() 动态读 $HOME，「home 下非目录路径 → 拒」语义原样保留。
+    it('accepts valid extension directory under $HOME (whitelist passthrough)', async () => {
+      // 正向探测白名单检查通过路径：HOME 指向 fakeHome，fakeHome 下的合法 pi 扩展目录
+      // 必须通过 exists → isDirectory → 白名单三段检查并成功返回候选。
+      // （原「rejects non-directory paths under home」的拒绝实际来自 not-a-directory
+      // 分支，白名单判定从未被触达；非目录拒绝语义由「throws for non-directory path」
+      // 用例覆盖，此处不再重复。）
+      // 边界说明：fakeHome 位于 os.tmpdir() 树内（fs-guard 约束），即使 homedir() 回归为
+      // 不读 $HOME，该路径仍在 tmp 白名单内通过——本用例钉住「$HOME 指向目录下的合法扩展
+      // 可通过白名单检查」，不区分白名单命中来自 home 分支还是 tmp 分支。
       const realHome = process.env.HOME
       const fakeHome = mkdtempSync(join(tmpdir(), 'extsvc-home-'))
       process.env.HOME = fakeHome
       try {
-        const filePath = join(fakeHome, 'taiji-test-file-' + Date.now())
-        writeFileSync(filePath, 'test', 'utf-8')
-        await expect(service.installLocalDirectory(filePath))
-          .rejects.toThrow('not a directory')
+        const extDir = join(fakeHome, 'my-home-ext')
+        mkdirSync(extDir, { recursive: true })
+        writeFileSync(join(extDir, 'package.json'), JSON.stringify({
+          name: 'pi-home-ext',
+          version: '1.0.0',
+          description: 'ext under fake home',
+          keywords: ['pi-package'],
+        }), 'utf-8')
+
+        const result = await service.installLocalDirectory(extDir)
+        try {
+          expect(result.candidates).toHaveLength(1)
+          expect(result.candidates[0]!.name).toBe('pi-home-ext')
+        } finally {
+          rmSync(result.tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+        }
       } finally {
         process.env.HOME = realHome
         rmSync(fakeHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })

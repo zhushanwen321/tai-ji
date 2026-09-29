@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * extension-host-dialog.test.ts —— CompanionBand 适配层单测（FR2/FR7，AC2/AC6/AC9）。
  *

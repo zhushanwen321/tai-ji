@@ -117,7 +117,7 @@ cd packages/renderer && npx vitest run src/__tests__/new-task/
 - `startFlow()` 后 `state.value === 'landing'`，`currentSessionId.value === null`（延迟 create）
 - `selectWorkspace(cwd)` 只更新 `pendingCwd`，不调 `sessionApi.create`
 - `submitFirstMessage(text)` 调用链：`sessionApi.create(cwd)` → `session.appendSession` → `session.activeId =` → `panel.loadSession` → `chat.send` → `transition('completed')`
-- 双击并发守卫：`createInFlight` 防止 create 调两次
+- 双击并发检查：`createInFlight` 防止 create 调两次
 
 ### 5.3 集成测试如何 mock
 
@@ -261,7 +261,7 @@ test.describe('新建任务 E2E', () => {
 |------|------|---------|--------|
 | 选目录后取消 | 点 directory chip → ESC 关 popover → cwd 不变 | E2E（popover 关闭断言） | 中 |
 | OS dialog 路径 | `action-open-dir` → Electron `dialog.showOpenDialog` | `[需手工]`（OS 原生 dialog 无法自动化） | 中 |
-| 并发守卫 | 双击发送按钮 → `createInFlight` 防 create 调两次 | 集成测试（flow-integration.test.ts 已覆盖），E2E 难模拟快速双击 | 低 |
+| 并发检查 | 双击发送按钮 → `createInFlight` 防 create 调两次 | 集成测试（flow-integration.test.ts 已覆盖），E2E 难模拟快速双击 | 低 |
 | 非 git 目录 branch chip 隐藏 | 选非 git 目录 → `chip-branch` 不渲染 | E2E（需 fixture 非 git 工作区） | 中 |
 | create 失败恢复 | `session.create` reject → 草稿恢复 + state 留 landing | 集成测试（flow-integration.test.ts E2/E3 已覆盖），mock 不模拟失败 | 低 |
 | 重试历史 | `historyError=true` → `retry-history` 按钮可见 + 点击重试 | E2E（需触发 getHistory 失败，mock 难造） | 低 |
@@ -723,8 +723,8 @@ testid 以组件 template 内 data-testid 属性为准。对话流相关已落�
 
 ```
 Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑定，不读全局 session.activeId，防 standby panel 串台）
-  ├─ 守卫1: segmentsToPrompt(segments).trim() 空 → return
-  ├─ 守卫2: chat.isActive(sid) === true → 自动转 steer(sid, segments)（busy 时追加上下文，不丢弃）
+  ├─ 检查1: segmentsToPrompt(segments).trim() 空 → return
+  ├─ 检查2: chat.isActive(sid) === true → 自动转 steer(sid, segments)（busy 时追加上下文，不丢弃）
   ├─ chat.appendUser(sid, segments)           ← 立即写 user 消息；返回 clientUuid（segments 数组 + clientUuid↔pi 映射 + inflight 占位挂钩）
   ├─ ensureStreamSubscription(sid, chat)     ← 幂等：首次订阅，二次 no-op
   │    └─ chatApi.streamSubscribe(sid, handler)
@@ -757,7 +757,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 
 | type | payload 关键字段 | 前端处理 |
 |------|----------------|---------|
-| `message.message_start` | `{ sessionId, messageId }` | 新建 streaming assistant（status:'streaming', content=''）；G-023 条件清 queueState（仅快照深度==0 才清 + 同点僵尸清理；快照是腿 2 includes 判据源） |
+| `message.message_start` | `{ sessionId, messageId }` | 新建 streaming assistant（status:'streaming', content=''）；G-023 条件清 queueState（仅快照深度==0 才清 + 同点僵尸清理；快照是路径 2 includes 判据源） |
 | `message.text_delta` | `{ sessionId, delta }` | content += delta（追加最后 assistant） |
 | `message.thinking_start` | `{ sessionId, thinkingId }` | 追加 ThinkingBlock（content:'', collapsed:true） |
 | `message.thinking_delta` | `{ sessionId, delta }` | 追加最后 ThinkingBlock.content |
@@ -765,7 +765,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 | `message.tool_call_start` | `{ sessionId, toolCallId, toolName, input }` | 追加 ToolCall（status:'running'） |
 | `message.tool_call_end` | `{ sessionId, toolCallId, output, status, error }` | **按 toolCallId 锚定**更新（非最后 assistant） |
 | `message.tool_call_update` | `{ sessionId, toolCallId, detail }` | 按 toolCallId 锚定更新 detail |
-| `message.complete` | `{ sessionId, messageId, stopReason, usage }` | status → complete/error；收口残留 running toolCall；回填 usage |
+| `message.complete` | `{ sessionId, messageId, stopReason, usage }` | status → complete/error；收敛残留 running toolCall；回填 usage |
 | `message.error` | `{ sessionId, message }` | 最后 streaming assistant → status:'error' + 并入 errorText；否则新建 error 消息 |
 | `message.stream_error` | `{ sessionId, content }` | 无前置流则合成 error；有则 content 追加 + status:'error' |
 | `message.bashExecution` | `{ sessionId, command, exitCode, ... }` | 新建 system 消息 |
@@ -844,7 +844,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 - ❌ 错误流（mock 永远成功；错误路径只能单测注入 `message.error`）
 - ❌ deleted fileChanges（只 modified/added/unmerged）
 - ✅ retry（仅当输入含 'retry' 关键词触发）
-- ✅ md-table（仅当输入含 `md[-_ ]?table` 哨兵词触发：text 回复体从 CANNED_REPLY 换成复刻宽表 TABLE_REPLY——CJK 短标签列 + 长 inline code token 组合，表格前留空行分段；供 e2e/markdown-table-layout.spec.ts 的列宽地板布局守卫取数。哨兵词取 ASCII 形态避免自然语言误触发，同 'ui-select' 纪律）
+- ✅ md-table（仅当输入含 `md[-_ ]?table` 哨兵词触发：text 回复体从 CANNED_REPLY 换成复刻宽表 TABLE_REPLY——CJK 短标签列 + 长 inline code token 组合，表格前留空行分段；供 e2e/markdown-table-layout.spec.ts 的列宽地板布局检查取数。哨兵词取 ASCII 形态避免自然语言误触发，同 'ui-select' 纪律）
 
 ## 8. MOCK 模式测试
 
@@ -852,7 +852,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 
 | 测试文件 | 覆盖 |
 |---------|------|
-| [`__tests__/useChat.test.ts`](../../packages/renderer/src/__tests__/useChat.test.ts) | ensureStreamSubscription 幂等；send 三守卫；事件驱动 setStreaming；compact 状态机 |
+| [`__tests__/useChat.test.ts`](../../packages/renderer/src/__tests__/useChat.test.ts) | ensureStreamSubscription 幂等；send 三检查；事件驱动 setStreaming；compact 状态机 |
 | [`__tests__/chat-streaming-reset.test.ts`](../../packages/renderer/src/__tests__/chat-streaming-reset.test.ts) | **规则#3 复位**：error 路径重置 streaming/streamingMessage（否则 UI 卡死） |
 | [`__tests__/fg5-message-stream.test.ts`](../../packages/renderer/src/__tests__/fg5-message-stream.test.ts)（18KB 最全） | applyChunk 全分支：thinking/tool/error/retry/queue/fileChanges；session 隔离；system 消息；历史 fixture |
 | [`__tests__/panel/block-working.test.ts`](../../packages/renderer/src/__tests__/panel/block-working.test.ts) | Block working 态折叠（thinking/tool/end_not_received） |

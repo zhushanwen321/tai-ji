@@ -24,6 +24,7 @@ import baseToolEnhanceExtension from "../index.ts";
 function createMockPi() {
 	return {
 		registerTool: vi.fn(),
+		registerCommand: vi.fn(),
 		on: vi.fn(),
 		appendEntry: vi.fn(),
 		events: { emit: vi.fn(), on: vi.fn() },
@@ -70,6 +71,75 @@ describe("baseToolEnhanceExtension entry", () => {
 		baseToolEnhanceExtension(pi as unknown as ExtensionAPI);
 
 		expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
+	});
+
+	it("registers the __taiji_bg_reconcile__ internal command with a non-empty description", () => {
+		setupOfficialFactory();
+		const pi = createMockPi();
+
+		baseToolEnhanceExtension(pi as unknown as ExtensionAPI);
+
+		expect(pi.registerCommand).toHaveBeenCalledTimes(1);
+		const [name, def] = pi.registerCommand.mock.calls[0] as [
+			string,
+			{ description: string; handler: (args: string, ctx: unknown) => Promise<void> },
+		];
+		expect(name).toBe("__taiji_bg_reconcile__");
+		expect(typeof def.description).toBe("string");
+		expect(def.description.length).toBeGreaterThan(0);
+		expect(typeof def.handler).toBe("function");
+	});
+});
+
+describe("__taiji_bg_reconcile__ command: runtime-resume trigger face (bg-task-notify-durability)", () => {
+	it("handler runs the same maintenance chain as session_start (zombie settle via appendEntry on the SAME pi reference)", async () => {
+		setupOfficialFactory();
+		// 独立临时 dataDir（同 session_start 用例：维护链只读不扫），registry 预置终态僵尸条目
+		const dataDir = mkdtempSync(join(tmpdir(), "bte-bgcmd-"));
+		dataDirRef.dir = dataDir;
+		try {
+			const sessionId = "sess-bgcmd";
+			writeRegistryEntry(getRegistryPath(dataDir, sessionId), {
+				taskId: "bt-1700000000-bgc001",
+				pid: 12345,
+				command: "sleep 3600",
+				outputFile: "/tmp/bgc.log",
+				startedAt: 1_700_000_000_000,
+				state: "orphaned",
+				ownerPiPid: 1,
+				sessionId,
+			});
+			const pi = createMockPi();
+			baseToolEnhanceExtension(pi as unknown as ExtensionAPI);
+
+			const [, def] = pi.registerCommand.mock.calls[0] as [
+				string,
+				{ description: string; handler: (args: string, ctx: unknown) => Promise<void> },
+			];
+			// handler 返回维护链 promise（runtime 侧 fire-and-forget 消费；本测试 await 落定）
+			await def.handler("", {
+				sessionManager: {
+					getSessionId: () => sessionId,
+					getEntries: () => [
+						{
+							customType: "pending:register",
+							data: { id: "bt-1700000000-bgc001", type: "bash", name: "sleep 3600" },
+						},
+					],
+				},
+			});
+
+			expect(pi.appendEntry).toHaveBeenCalledWith("pending:unregister", {
+				id: "bt-1700000000-bgc001",
+				reason: "cancelled",
+				status: "cancelled",
+			});
+			expect(pi.events.emit).not.toHaveBeenCalled();
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+			dataDirRef.dir = "/tmp/bte-fake-agent-dir";
+			resetNotifyForTest();
+		}
 	});
 });
 

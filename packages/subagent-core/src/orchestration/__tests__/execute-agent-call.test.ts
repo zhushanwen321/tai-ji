@@ -3,7 +3,7 @@
 // U2: executeAgentCall 透传 stream 给 runner.run
 // U3: executeAgentCall retry 递归也透传 stream（不丢、不重建）
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   classifyFailureKind,
@@ -51,6 +51,11 @@ function makeTraceNode(stepIndex = 0): ExecutionTraceNode {
     model: "default",
     status: "pending",
   };
+}
+
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number): ExecutionTraceNode | undefined {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
 }
 
 /** 构造 AgentCall + 关联的 Trace（call.id 与 trace 节点 stepIndex 对齐） */
@@ -131,7 +136,7 @@ describe("U1: finalizeCall sessionFile → trace 节点", () => {
 
     await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-    const node = trace.find(0);
+    const node = findByStep(trace, 0);
     expect(node).toBeDefined();
     expect(node!.sessionFile).toBe(sessionFilePath);
     expect(node!.sessionId).toBe("session-abc");
@@ -146,7 +151,7 @@ describe("U1: finalizeCall sessionFile → trace 节点", () => {
 
     await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
-    const node = trace.find(0);
+    const node = findByStep(trace, 0);
     expect(node).toBeDefined();
     expect(node!.sessionFile).toBeUndefined();
   });
@@ -251,7 +256,7 @@ describe("isOrphaned 守卫", () => {
     await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
     expect(updateSpy).toHaveBeenCalledTimes(1);
-    expect(trace.find(0)?.status).toBe("completed");
+    expect(findByStep(trace, 0)?.status).toBe("completed");
     expect(call.status).toBe("done");
   });
 
@@ -321,7 +326,7 @@ describe("W4b: stale 分诊对齐 pi 真实文案", () => {
     expect(runner.run).toHaveBeenCalledTimes(1);
     expect(call.status).toBe("done");
     expect(call.result?.error).toBe(PI_REAL_STALE_MESSAGE);
-    expect(trace.find(0)?.status).toBe("failed");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
   it("普通 transient 错误 → 不命中 stale（照常进入重试路径，现状回归）", () => {
@@ -374,7 +379,7 @@ describe("MF-1: 确定性 schema 失败不重试", () => {
     expect(runner.run).toHaveBeenCalledTimes(1);
     expect(call.attempts).toBe(1);
     expect(call.status).toBe("done");
-    expect(trace.find(0)?.status).toBe("failed");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
   it("态①真实产物（never called，缺 extension 环境确定性）→ 同样不重试", async () => {
@@ -389,7 +394,7 @@ describe("MF-1: 确定性 schema 失败不重试", () => {
 
     expect(runner.run).toHaveBeenCalledTimes(1);
     expect(call.attempts).toBe(1);
-    expect(trace.find(0)?.status).toBe("failed");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
   it("MF-2 计数不再低估：retry 不发生 → usage consume 恰一次、totalCallCount=1", async () => {
@@ -491,7 +496,7 @@ describe("D5-③: failureKind 三态分诊", () => {
     expect(call.attempts).toBe(1);
     expect(call.status).toBe("done");
     expect(call.result?.error).toBe(PI_REAL_STALE_MESSAGE);
-    expect(trace.find(0)?.status).toBe("failed");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
   it("schema_deterministic → 不重试特判维持：runner.run 恰 1 次（V5③ 同族）", async () => {
@@ -508,7 +513,7 @@ describe("D5-③: failureKind 三态分诊", () => {
     await executeAgentCall(call, runner, budget, new AbortController().signal, trace);
 
     expect(runner.run).toHaveBeenCalledTimes(1);
-    expect(trace.find(0)?.status).toBe("failed");
+    expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
   it("unknown → 默认退避重试：瞬态错误（模拟 provider 5xx）退避后第二次成功（V5④ 正向）", async () => {
@@ -532,7 +537,7 @@ describe("D5-③: failureKind 三态分诊", () => {
       expect(runner.run).toHaveBeenCalledTimes(2);
       expect(call.status).toBe("done");
       expect(call.result?.error).toBeUndefined();
-      expect(trace.find(0)?.status).toBe("completed");
+      expect(findByStep(trace, 0)?.status).toBe("completed");
     } finally {
       vi.useRealTimers();
     }
@@ -584,6 +589,86 @@ describe("D5-③: failureKind 三态分诊", () => {
 
       expect(runner.run).toHaveBeenCalledTimes(2);
       expect(call.status).toBe("done");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("AGENT_RETRY_BACKOFF_BASE_ENV 退避基数通道", () => {
+  const ENV = "TAIJI_SUBAGENT_TEST_AGENT_RETRY_BACKOFF_BASE_MS";
+
+  afterEach(() => {
+    delete process.env[ENV];
+  });
+
+  it("合法正整数 → 激活覆盖：退避按覆盖基数计时（1ms 快速重试，fake timers 推进 1ms 即第二轮）", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env[ENV] = "1";
+      const { call, trace } = makeAgentCallAndTrace();
+      const runner = createMockRunner(
+        vi.fn()
+          .mockResolvedValueOnce(makeMockResult({ error: "transient", failureKind: "unknown" }))
+          .mockResolvedValueOnce(makeMockResult()),
+      );
+      const budget = new Budget();
+
+      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
+      // 覆盖基数 1 → 首次重试退避 1×2^0 = 1ms：推进 1ms 第二轮立即启动（默认基数下
+      // 此推进量不足，用例将超时——即覆盖生效的行为判据）
+      await vi.advanceTimersByTimeAsync(1);
+      await promise;
+
+      expect(runner.run).toHaveBeenCalledTimes(2);
+      expect(call.status).toBe("done");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("非法值（非正整数）→ 不激活 + 默认基数维持：退避仍按 1000ms 计（推进 1ms 不进第二轮）", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env[ENV] = "not-a-number";
+      const { call, trace } = makeAgentCallAndTrace();
+      const runner = createMockRunner(
+        vi.fn()
+          .mockResolvedValueOnce(makeMockResult({ error: "transient", failureKind: "unknown" }))
+          .mockResolvedValueOnce(makeMockResult()),
+      );
+      const budget = new Budget();
+
+      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
+      await vi.advanceTimersByTimeAsync(1);
+      // 默认基数下首次退避 1000ms：1ms 内不得出现第二轮
+      expect(runner.run).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2000);
+      await promise;
+      expect(runner.run).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("空串 → 等同未设：默认基数（resolveBackoffBaseMs 未设分支回归）", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env[ENV] = "";
+      const { call, trace } = makeAgentCallAndTrace();
+      const runner = createMockRunner(
+        vi.fn()
+          .mockResolvedValueOnce(makeMockResult({ error: "transient", failureKind: "unknown" }))
+          .mockResolvedValueOnce(makeMockResult()),
+      );
+      const budget = new Budget();
+
+      const promise = executeAgentCall(call, runner, budget, new AbortController().signal, trace);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(runner.run).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2000);
+      await promise;
+      expect(runner.run).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
