@@ -89,6 +89,10 @@ import type { ResolvedIdentity } from "./record-access.ts";
 import { assertNestingDepthWithinLimit } from "../assembly/session-context-resolver.ts";
 import type { SubagentStream } from "../assembly/stream-sink.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
+// [§3.1.5 binding 载荷单源] 身份域载荷与 settle 全载荷共用同一构造器
+// （identityBindingPayload；差异段由 fullBindingPayload 追加）——两处手写的人肉
+// 同步面已删（漏拷贝事故先例 H2 S3 / W0 D1）。
+import { identityBindingPayload } from "../persistence/record-store-terminal.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type {
   AgentEvent,
@@ -430,29 +434,13 @@ export class RunOrchestration {
     const sessionFile = record.sessionFile;
     if (!sessionFile) return;
     this.deps.getStore().acquireWriteLease(sessionFile, record.id);
-    writeRecordBinding(sessionFile, {
-      v: 1,
-      recordId: record.id,
-      rootSessionId: record.rootSessionId,
-      parentRecordId: record.parentRecordId,
-      depth: record.depth,
-      agent: record.agent,
-      task: record.task,
-      slug: record.slug,
-      mode: record.mode,
-      startedAt: record.startedAt,
-      round: record.round,
-      model: record.model,
-      thinkingLevel: record.thinkingLevel,
-      worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
-      // [H2 S3] 来源身份随绑定落盘：引擎子文件身份面（binding sidecar）是磁盘重建
-      // origin 的唯一现行载体，漏写则收口/重启后 workflow record 逃过 D1 投影过滤。
-      // [W0 / D1] stepIndex 同族随绑定落盘——漏写则 identityFromBinding 重建路径
-      // 恢复不出步骤索引（run 视图关联键静默缺失）。
-      origin: record.origin,
-      parentRunId: record.parentRunId,
-      stepIndex: record.stepIndex,
-    });
+    // 身份域载荷经单源构造器（identityBindingPayload，登记 §3.1.5）——本处不再逐字段
+    // 手写：新增身份字段只改构造器一处，settle/reopen 全载荷路径自动同步。
+    // [H2 S3] 来源身份随绑定落盘：引擎子文件身份面（binding sidecar）是磁盘重建
+    // origin 的唯一现行载体，漏写则收口/重启后 workflow record 逃过 D1 投影过滤。
+    // [W0 / D1] stepIndex 同族随绑定落盘——漏写则 identityFromBinding 重建路径
+    // 恢复不出步骤索引（run 视图关联键静默缺失）。
+    writeRecordBinding(sessionFile, identityBindingPayload(record));
   }
 
   /**

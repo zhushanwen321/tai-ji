@@ -441,12 +441,39 @@ export function settleSnapshotPatch(
   };
 }
 
+/** binding 身份域子载荷的字段集合（spawn 回填点与 settle/reopen 全载荷共用的那一段）。 */
+export type BindingIdentityPayload = Pick<
+  RecordBinding,
+  | "v"
+  | "recordId"
+  | "rootSessionId"
+  | "parentRecordId"
+  | "depth"
+  | "agent"
+  | "task"
+  | "slug"
+  | "mode"
+  | "startedAt"
+  | "round"
+  | "model"
+  | "thinkingLevel"
+  | "worktree"
+  | "origin"
+  | "parentRunId"
+  | "stepIndex"
+>;
+
 /**
- * [U7] record → 完整 binding 载荷（merge-or-create 的 create 腿与 markReopened
- * 新锚旁落盘共用——身份域取 settle/reopen 时点的内存 record（齐全非残缺），对齐
- * 「binding 缺失不造残缺身份」原则的合法例外：调用时点 record 身份已定型）。
+ * binding 身份域载荷（单源）——写 binding 的两条路径共用：spawn 回填点
+ * （run-orchestration.writeBindingForRecord，落地 id→file 身份映射）与
+ * settle/reopen 全载荷（fullBindingPayload 的第 1 段）。
+ *
+ * 为什么必须单源（登记 §3.1.5，两处事故先例 H2 S3 / W0 D1）：载荷是显式逐字段拷贝，
+ * schema 补键不会让字段落盘——两处手写时新增身份字段只能靠人肉同步，漏一处即静默
+ * 丢字段（origin/parentRunId/stepIndex 都因此出过事故）。差异部分（统计快照与
+ * transcriptRef）由 fullBindingPayload 追加。
  */
-export function fullBindingPayload(record: ExecutionRecord, transcriptRef: TranscriptRef | undefined): RecordBinding {
+export function identityBindingPayload(record: ExecutionRecord): BindingIdentityPayload {
   return {
     v: 1,
     recordId: record.id,
@@ -456,17 +483,32 @@ export function fullBindingPayload(record: ExecutionRecord, transcriptRef: Trans
     agent: record.agent,
     task: record.task,
     slug: record.slug,
-    mode: "background",
+    mode: record.mode,
     startedAt: record.startedAt,
+    // 回填点早于轮终 +1（恢复值可滞后一拍，RecordBinding.round 注释）；全载荷路径的
+    // settle 快照段会用 `record.round ?? 0` 覆盖本值（两路径语义各自保持原样）。
+    round: record.round,
     model: record.model,
     thinkingLevel: record.thinkingLevel,
     worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
-    // [W0 / D1] 来源身份三字段（origin/parentRunId + stepIndex）：merge-or-create 的
-    // create 腿与 reopen 新锚均经本载荷，漏拷贝则 binding 恒无该字段（schema 补键
-    // 不足以让字段落盘——载荷是显式逐字段拷贝）。
+    // [H2 S3 / W0 D1] 来源身份三字段：引擎子文件身份面在本 sidecar 上，漏写则重启后
+    // workflow record 逃过 D1 投影过滤 / run 视图步骤索引静默缺失。
     origin: record.origin,
     parentRunId: record.parentRunId,
     stepIndex: record.stepIndex,
+  };
+}
+
+/**
+ * [U7] record → 完整 binding 载荷（merge-or-create 的 create 腿与 markReopened
+ * 新锚旁落盘共用——身份域取 settle/reopen 时点的内存 record（齐全非残缺），对齐
+ * 「binding 缺失不造残缺身份」原则的合法例外：调用时点 record 身份已定型）。
+ *
+ * 结构 = 身份域子载荷（identityBindingPayload 单源）+ 统计快照 + 可选 transcriptRef。
+ */
+export function fullBindingPayload(record: ExecutionRecord, transcriptRef: TranscriptRef | undefined): RecordBinding {
+  return {
+    ...identityBindingPayload(record),
     ...settleSnapshotPatch(record),
     ...(transcriptRef !== undefined ? { transcriptRef } : {}),
   };
