@@ -10,8 +10,9 @@
 // 只能靠此兜底；workflow 域（taskId 占位无 record 生命周期锚）同样依赖它。
 //
 // [W1 D5] journal 事件文件族（record 事件文件 *.events + run journal
-// *.events.jsonl）被显式忽略（isEventJournalName）——它们的清理归统一保留维护轮
-// （fold 终态 + 保留窗口），本 GC 不得触碰（见函数注释）。
+// *.record.jsonl，RUN_EVENT_JOURNAL_SUFFIX 现行值）被显式忽略（isEventJournalName）
+// ——它们的清理归统一保留维护轮（fold 终态 + 保留窗口），本 GC 不得触碰（见
+// 函数注释）。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -124,12 +125,16 @@ function cleanExpiredJsonl(full: string, now: number): void {
 
 /**
  * journal 事件文件名判定（W1 D3/D5 显式忽略规则）：record 事件文件（*.events，
- * records 目录内）与 run journal（*.events.jsonl）不是 session 文件——清理归统一
- * 保留维护轮（fold 终态 + 保留窗口判据，file-run-store.ts 单源），GC 不得触碰。
+ * records 目录内）与 run journal（*.record.jsonl——RUN_EVENT_JOURNAL_SUFFIX 现行值）
+ * 不是 session 文件——清理归统一保留维护轮（fold 终态 + 保留窗口判据，
+ * run-state-evidence.ts 单源），GC 不得触碰。
  *
  * 现状分发本不命中 *.events（无 .jsonl 后缀、不落任何清理分支），显式化是防
- * 未来通配规则回归，不是行为改动；*.events.jsonl 以 .jsonl 结尾、若进入扫描树
- * 会命中 .jsonl 分支，故一并显式排除。
+ * 未来通配规则回归，不是行为改动；run journal 以 .jsonl 结尾、若进入扫描树会
+ * 命中 .jsonl 分支，故一并显式排除。legacy *.events.jsonl（[D1] 改名前旧写入方
+ * 产物）不在本排除面——run journal 落 workflow-state 目录（扫描树
+ * <agentDir>/subagents 之外），legacy 件消亡由 [D1] 处置（不读不写不主动删）+
+ * 裁决点 7 无引用回收顺带删除覆盖（run-state-evidence.ts 对账清理段同源）。
  */
 function isEventJournalName(name: string): boolean {
   return name.endsWith(RECORD_EVENTS_SUFFIX) || name.endsWith(RUN_EVENT_JOURNAL_SUFFIX);

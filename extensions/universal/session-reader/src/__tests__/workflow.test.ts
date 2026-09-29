@@ -3,14 +3,16 @@ import { tmpdir } from 'node:os'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import {
-  RUN_EVENT_JOURNAL_SUFFIX,
-  WORKFLOW_RECORD_CUSTOM_TYPE,
-  WORKFLOW_RECORD_ENTRY_VERSION,
-} from '@zhushanwen/subagent-core'
+import { WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } from '@zhushanwen/subagent-core'
 
 import { parseRunSnapshot, renderWorkflowOverview } from '../core/workflow.js'
-import { extractCallSessionFiles, readRunSnapshot, resolveWorkflows } from '../discovery/workflows.js'
+import {
+  extractCallSessionFiles,
+  extractRecordStreamSessionFiles,
+  readRunSnapshot,
+  resolveWorkflows,
+  RUN_RECORD_STREAM_SUFFIX,
+} from '../discovery/workflows.js'
 
 // ============================================================
 // fixture（结构对齐真实 wf-state 探针数据）
@@ -423,6 +425,15 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
     return path
   }
 
+  /** 写 record 流文件（[D16③] v2 档数据源——目录自建）。 */
+  async function writeRecordStream(runId: string, lines: string[]): Promise<string> {
+    const wfDir = join(dir, 'workflow-state')
+    await mkdir(wfDir, { recursive: true })
+    const p = join(wfDir, `${runId}.record.jsonl`)
+    await writeFile(p, lines.join('\n') + '\n')
+    return p
+  }
+
   /** workflow-record v2 注册条目行（journalPath 锚点）。 */
   function v2RegisteredLine(runId: string, journalPath: string): string {
     return JSON.stringify({
@@ -489,48 +500,60 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
   const CALL_A = '/abs/subagents/--proj--/sessions/call-a.jsonl'
   const CALL_B = '/abs/subagents/--proj--/sessions/call-b.jsonl'
 
-  it('v2 journalPath 主源：注册条目 → 同目录 state 快照提 calls，stateFile 为推导路径', async () => {
+  it('v2 journalPath 主源（[D16③] 重锚）：注册条目 → record 流直读提 calls，stateFile = 流路径', async () => {
     dir = await mkdtemp(join(tmpdir(), 'wf-v2-tier-'))
-    const journalPath = join(dir, 'workflow-state', 'wf-v2-1.events.jsonl')
-    const stateFile = await writeStateFile('wf-v2-1', v1Snapshot('wf-v2-1', [CALL_A]))
-    const { sessionIdToPath } = await writeMain([v2RegisteredLine('wf-v2-1', journalPath)])
+    // record 流内容：run-created + agent-started + agent-settled（result 携带 sessionFile）
+    const recordPath = await writeRecordStream('wf-v2-1', [
+      JSON.stringify({ type: 'run-created', seq: 1, ts: 1000, runId: 'wf-v2-1', workflowName: 'v2-flow', argsSummary: '{}' }),
+      JSON.stringify({ type: 'agent-started', seq: 2, ts: 1100, taskIndex: 0, agentName: 'step-0', attempt: 1 }),
+      JSON.stringify({ type: 'agent-settled', seq: 3, ts: 1500, taskIndex: 0, attempt: 1, outcome: 'done', durationMs: 400, result: { content: 'ok', sessionFile: CALL_A } }),
+    ])
+    const { sessionIdToPath } = await writeMain([v2RegisteredLine('wf-v2-1', recordPath)])
 
     const workflows = await resolveWorkflows('main-session-1', sessionIdToPath, new Map())
 
     expect(workflows).toHaveLength(1)
     expect(workflows[0].runId).toBe('wf-v2-1')
-    // stateFile = journalPath 去尾段换 .jsonl（同目录同主名的 state 快照）
-    expect(workflows[0].stateFile).toBe(stateFile)
-    expect(workflows[0].stateFile).not.toBe(journalPath)
+    // stateFile = record 流路径（journalPath 锚点语义重定义——[D16③]）
+    expect(workflows[0].stateFile).toBe(recordPath)
     expect(workflows[0].calls).toHaveLength(1)
     expect(workflows[0].calls[0].fileName).toBe(CALL_A)
-    // journal 本体（.events.jsonl）不参与 calls 提取
   })
 
-  it('v2 档窗外：journalPath 指向的快照已成对删 → calls=[]，runId 存在性兜底（与旧链窗外同构）', async () => {
+  it('v2 档窗外：record 流已被保留期清理 → calls=[]，runId 存在性兜底（stateFile 仍是流路径）', async () => {
     dir = await mkdtemp(join(tmpdir(), 'wf-v2-gc-'))
-    const journalPath = join(dir, 'workflow-state', 'wf-gc-1.events.jsonl')
-    const { sessionIdToPath } = await writeMain([v2RegisteredLine('wf-gc-1', journalPath)])
+    const recordPath = join(dir, 'workflow-state', 'wf-gc-1.record.jsonl')
+    const { sessionIdToPath } = await writeMain([v2RegisteredLine('wf-gc-1', recordPath)])
 
     const workflows = await resolveWorkflows('main-session-1', sessionIdToPath, new Map())
 
     expect(workflows).toHaveLength(1)
     expect(workflows[0].runId).toBe('wf-gc-1')
     expect(workflows[0].calls).toEqual([])
-    // stateFile 仍是推导路径（窗外语义 = 路径在、文件不在，readRunSnapshot undefined）
-    expect(workflows[0].stateFile).toBe(join(dir, 'workflow-state', 'wf-gc-1.jsonl'))
+    // 窗外语义 = 锚点路径在、流文件不在（readFile undefined → calls 空）
+    expect(workflows[0].stateFile).toBe(recordPath)
   })
 
-  it('v2 档 journalPath 形态损坏（无 .events.jsonl 尾段）→ stateFile 空串 + calls 空（不伪造路径）', async () => {
+  it('v2 档旧后缀锚点（.events.jsonl 形态 = [D1] 历史实体）与形态损坏 → stateFile 原样保留 + calls 空（不读旧两件、不伪造数据）', async () => {
     dir = await mkdtemp(join(tmpdir(), 'wf-v2-bad-'))
-    const { sessionIdToPath } = await writeMain([v2RegisteredLine('wf-bad-1', '/abs/odd/path.txt')])
+    // 旧后缀锚点：[D1] 历史数据处置——旧两件不读（calls 退空，run 存在性兜底）
+    const legacyPath = join(dir, 'workflow-state', 'wf-legacy-1.events.jsonl')
+    await mkdir(join(dir, 'workflow-state'), { recursive: true })
+    await writeFile(legacyPath, JSON.stringify({ type: 'ask-settled', ts: 1 }) + '\n')
+    const legacyMain = await writeMain([v2RegisteredLine('wf-legacy-1', legacyPath)])
+    const legacy = await resolveWorkflows('main-session-1', legacyMain.sessionIdToPath, new Map())
+    expect(legacy).toHaveLength(1)
+    expect(legacy[0].runId).toBe('wf-legacy-1')
+    expect(legacy[0].stateFile).toBe(legacyPath)
+    expect(legacy[0].calls).toEqual([])
 
-    const workflows = await resolveWorkflows('main-session-1', sessionIdToPath, new Map())
-
-    expect(workflows).toHaveLength(1)
-    expect(workflows[0].runId).toBe('wf-bad-1')
-    expect(workflows[0].stateFile).toBe('')
-    expect(workflows[0].calls).toEqual([])
+    // 形态损坏（无已知尾段）：同旧锚点分流
+    const oddMain = await writeMain([v2RegisteredLine('wf-bad-1', '/abs/odd/path.txt')])
+    const odd = await resolveWorkflows('main-session-1', oddMain.sessionIdToPath, new Map())
+    expect(odd).toHaveLength(1)
+    expect(odd[0].runId).toBe('wf-bad-1')
+    expect(odd[0].stateFile).toBe('/abs/odd/path.txt')
+    expect(odd[0].calls).toEqual([])
   })
 
   it('v1 快照层（W17~W1 中间档恢复）：v1 快照条目直接提 snapshot.calls，无指针条目也可见', async () => {
@@ -560,16 +583,19 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
     expect(workflows[0].calls.map((c) => c.fileName)).toEqual([CALL_B])
   })
 
-  it('三档混合会话：三个 run 各处一档 → 各自正确，按条目首见序输出', async () => {
+  it('三档混合会话：三个 run 各处一档 → 各自正确，按条目首见序输出（[D16③] v2 档 = record 流直读）', async () => {
     dir = await mkdtemp(join(tmpdir(), 'wf-mixed-'))
-    const journalPath = join(dir, 'workflow-state', 'wf-v2-1.events.jsonl')
-    await writeStateFile('wf-v2-1', v1Snapshot('wf-v2-1', [CALL_A]))
+    const recordPath = await writeRecordStream('wf-v2-1', [
+      JSON.stringify({ type: 'run-created', seq: 1, ts: 1000, runId: 'wf-v2-1', workflowName: 'v2-flow', argsSummary: '{}' }),
+      JSON.stringify({ type: 'agent-started', seq: 2, ts: 1100, taskIndex: 0, agentName: 's0', attempt: 1 }),
+      JSON.stringify({ type: 'agent-settled', seq: 3, ts: 1500, taskIndex: 0, attempt: 1, outcome: 'done', durationMs: 400, result: { content: 'ok', sessionFile: CALL_A } }),
+    ])
     const oldState = await writeStateFile('wf-old-1', v1Snapshot('wf-old-1', [CALL_B]))
     // 首见序：指针（早）→ v1 快照（中）→ v2 注册（晚）
     const { sessionIdToPath } = await writeMain([
       linkLine('wf-old-1', oldState),
       v1SnapshotLine('wf-mid-1', [CALL_A]),
-      v2RegisteredLine('wf-v2-1', journalPath),
+      v2RegisteredLine('wf-v2-1', recordPath),
     ])
 
     const workflows = await resolveWorkflows('main-session-1', sessionIdToPath, new Map())
@@ -577,7 +603,7 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
     expect(workflows.map((w) => w.runId)).toEqual(['wf-old-1', 'wf-mid-1', 'wf-v2-1'])
     expect(workflows[0].stateFile).toBe(oldState)
     expect(workflows[1].stateFile).toBe('')
-    expect(workflows[2].stateFile).toBe(join(dir, 'workflow-state', 'wf-v2-1.jsonl'))
+    expect(workflows[2].stateFile).toBe(recordPath)
     expect(workflows[2].calls[0].fileName).toBe(CALL_A)
   })
 
@@ -590,29 +616,32 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
     expect(workflows).toEqual([])
   })
 
-  it('同 runId 跨档坏数据防御：v2 注册条目在 → 用 v2 档（高档在即用高档）', async () => {
+  it('同 runId 跨档坏数据防御：v2 注册条目在 → 用 v2 档（高档在即用高档；[D16③] v2 档 = record 流）', async () => {
     dir = await mkdtemp(join(tmpdir(), 'wf-tier-prio-'))
-    const journalPath = join(dir, 'workflow-state', 'wf-both-1.events.jsonl')
-    await writeStateFile('wf-both-1', v1Snapshot('wf-both-1', [CALL_A]))
+    const recordPath = await writeRecordStream('wf-both-1', [
+      JSON.stringify({ type: 'run-created', seq: 1, ts: 1000, runId: 'wf-both-1', workflowName: 'both', argsSummary: '{}' }),
+      JSON.stringify({ type: 'agent-started', seq: 2, ts: 1100, taskIndex: 0, agentName: 's0', attempt: 1 }),
+      JSON.stringify({ type: 'agent-settled', seq: 3, ts: 1500, taskIndex: 0, attempt: 1, outcome: 'done', durationMs: 400, result: { content: 'ok', sessionFile: CALL_A } }),
+    ])
     const oldState = await writeStateFile('wf-both-1-old', v1Snapshot('wf-both-1', [CALL_B]))
     const { sessionIdToPath } = await writeMain([
       linkLine('wf-both-1', oldState),
-      v2RegisteredLine('wf-both-1', journalPath),
+      v2RegisteredLine('wf-both-1', recordPath),
     ])
 
     const workflows = await resolveWorkflows('main-session-1', sessionIdToPath, new Map())
 
     expect(workflows).toHaveLength(1)
-    // v2 档胜出：stateFile 是 journalPath 推导路径（非 link 的 oldState），calls 来自 v2 档快照
-    expect(workflows[0].stateFile).toBe(join(dir, 'workflow-state', 'wf-both-1.jsonl'))
+    // v2 档胜出：stateFile 是 record 流路径（非 link 的 oldState），calls 来自流
+    expect(workflows[0].stateFile).toBe(recordPath)
     expect(workflows[0].calls.map((c) => c.fileName)).toEqual([CALL_A])
   })
 
-  it('跨包契约守卫：三档判别的本地字面量 === subagent-core 写侧单源', () => {
+  it('跨包契约守卫：三档判别的本地字面量 === subagent-core 写侧单源（[D1] record 后缀）', () => {
     // 源码本地持有磁盘协议字符串与版本/尾段（生产依赖面不引 subagent-core），锚定两侧同值
     expect(WORKFLOW_RECORD_CUSTOM_TYPE).toBe('workflow-record')
     expect(WORKFLOW_RECORD_ENTRY_VERSION).toBe(2)
-    expect(RUN_EVENT_JOURNAL_SUFFIX).toBe('.events.jsonl')
+    expect(RUN_RECORD_STREAM_SUFFIX).toBe('.record.jsonl')
   })
 })
 

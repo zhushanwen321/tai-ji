@@ -58,7 +58,7 @@ describe('extractWorkflowsFromSessionFile', () => {
             status: 'done',
             attempts: 1,
             sessionId: '019f4b91-e826-7d34-a5ad-4206aa7c5d13',
-            traceNode: { stepIndex: 0, agent: 'dev-W1', task: 'task 1', model: 'default', status: 'completed', phase: 'Dev-w0(W1)' },
+            traceNode: { stepIndex: 0, agent: 'dev-W1', task: 'task 1', model: 'default', status: 'done', phase: 'Dev-w0(W1)' },
           },
           {
             id: 1,
@@ -66,7 +66,7 @@ describe('extractWorkflowsFromSessionFile', () => {
             status: 'done',
             attempts: 1,
             sessionId: '019f4b9e-0982-7645-8300-55dda1ec20de',
-            traceNode: { stepIndex: 1, agent: 'dev-W2', task: 'task 2', model: 'default', status: 'completed', phase: 'Dev-w1(W2)' },
+            traceNode: { stepIndex: 1, agent: 'dev-W2', task: 'task 2', model: 'default', status: 'done', phase: 'Dev-w1(W2)' },
           },
         ],
         trace: [
@@ -75,7 +75,7 @@ describe('extractWorkflowsFromSessionFile', () => {
             agent: 'dev-W1',
             task: 'task 1',
             model: 'default',
-            status: 'completed',
+            status: 'done',
             phase: 'Dev-w0(W1)',
             startedAt: '2026-07-10T10:28:01.191Z',
             completedAt: '2026-07-10T10:36:01.191Z',
@@ -92,7 +92,7 @@ describe('extractWorkflowsFromSessionFile', () => {
             agent: 'dev-W2',
             task: 'task 2',
             model: 'default',
-            status: 'completed',
+            status: 'done',
             phase: 'Dev-w1(W2)',
             startedAt: '2026-07-10T10:36:01.191Z',
             completedAt: '2026-07-10T10:43:01.191Z',
@@ -143,7 +143,7 @@ describe('extractWorkflowsFromSessionFile', () => {
     // agentCalls 映射
     expect(record.agentCalls).toHaveLength(2)
     expect(record.agentCalls[0].agent).toBe('dev-W1')
-    expect(record.agentCalls[0].status).toBe('completed')
+    expect(record.agentCalls[0].status).toBe('done')
     expect(record.agentCalls[0].phase).toBe('Dev-w0(W1)')
     expect(record.agentCalls[0].sessionId).toBe('019f4b91-e826-7d34-a5ad-4206aa7c5d13')
     expect(record.agentCalls[0].inputTokens).toBe(219882)
@@ -354,7 +354,7 @@ describe('extractWorkflowsFromSessionFile', () => {
         status: 'running',
         budget: { usedTokens: 1000, usedCost: 0 },
         calls: [],
-        trace: [{ stepIndex: 0, agent: 'dev-W1', status: 'completed' }],
+        trace: [{ stepIndex: 0, agent: 'dev-W1', status: 'done' }],
       },
       meta: { startedAt: '2026-07-10T10:00:00Z' },
     }) + '\n')
@@ -397,7 +397,7 @@ describe('extractWorkflowsFromSessionFile', () => {
         calls: [],
         trace: [
           null,
-          { stepIndex: 0, agent: 'dev-W1', status: 'completed', phase: 'P1' },
+          { stepIndex: 0, agent: 'dev-W1', status: 'done', phase: 'P1' },
           null,
         ],
       },
@@ -422,6 +422,48 @@ describe('extractWorkflowsFromSessionFile', () => {
     expect(result[0].agentCalls).toHaveLength(1)
     expect(result[0].agentCalls[0].agent).toBe('dev-W1')
     expect(result[0].agentCalls[0].phase).toBe('P1')
+  })
+
+  // [D2] 词表变更登记第 4 条：call 级投影词表 completed→done 同词贯穿。冻结读面
+  // （存量 v2 快照的旧词表 'completed'）不兼容读——词表外 trace status 按坏 run
+  // 丢弃（对齐 state.status 守卫口径）：直透会在 renderer 的 default-never 穷尽锁
+  // 运行时抛错（编译锁拦不住绕过类型的脏数据），面板渲染即崩。
+  it('边界：trace 节点 status 旧词表 completed → 存量兼容映射为 done 放行（真脏值仍整 run 丢弃）', () => {
+    const sessionFile = join(tempDir, 'main-session.jsonl')
+    const stateFilePath = join(tempDir, 'wf-legacy-vocab.jsonl')
+
+    const snapshot = {
+      v: 'wf-run-v2',
+      runId: 'wf-legacy-vocab',
+      spec: { scriptName: 'legacy-vocab-flow' },
+      state: {
+        status: 'done',
+        budget: { usedTokens: 0, usedCost: 0 },
+        calls: [],
+        trace: [{ stepIndex: 0, agent: 'dev-W1', status: 'completed', phase: 'P1' }],
+      },
+      meta: { startedAt: '2026-07-10T10:00:00Z' },
+    }
+    writeFileSync(stateFilePath, JSON.stringify(snapshot) + '\n')
+
+    const sessionEntries = [
+      { type: 'session', version: 3, id: 'main-sess', cwd: '/proj', timestamp: '2026-07-10T10:00:00Z' },
+      {
+        type: 'custom',
+        customType: 'workflow-state-link',
+        data: { runId: 'wf-legacy-vocab', path: stateFilePath, updatedAt: '2026-07-10T10:01:00Z' },
+        timestamp: '2026-07-10T10:01:00Z',
+      },
+    ]
+    writeFileSync(sessionFile, sessionEntries.map((e) => JSON.stringify(e)).join('\n') + '\n')
+
+    // [D2] 词表变更登记第 4 条「call 级 completed→done 同词贯穿」的存量兼容：
+    // 'completed' 是 D2 前本仓写入的合法历史值（非脏数据），读面映射为 'done'
+    // 放行——丢弃会把升级后打开存量 session 的整条 run 投影判死（renderer
+    // 穷尽锁安全由映射保证：进投影的值恒在新词表内）。真词表外值仍走整 run 丢弃。
+    const { records: result } = extractWorkflowsFromSessionFile(sessionFile)
+    expect(result).toHaveLength(1)
+    expect(result[0].agentCalls[0].status).toBe('done')
   })
 
   // [review 修复 R4] 版本不匹配不再静默跳过——extension（mandatory + autoUpgrade）
@@ -481,22 +523,17 @@ describe('extractWorkflowsFromSessionFile', () => {
     expect(coreMatch, 'subagent-core 侧 SNAPSHOT_VERSION 导出字面量未找到——导出形式是否变了？').not.toBeNull()
     const current = coreMatch![1]
 
-    // 源 1 留壳防分叉：extension jsonl-run-store.ts 必须仍以 import 绑定消费 core 权威源
-    // （u-2b 归一后为 barrel import——barrel re-export 同一物理定义，同步性构造性成立；
-    // 深路径形态为归一前的旧口径，两形态任一即满足 import 绑定），
-    // 且不得出现本地字面量定义（否则该副本脱离三源守卫覆盖，版本可静默分叉）
+    // 源 1 留壳（[D1] record 单源化后）：extension jsonl-run-store.ts 的快照 codec
+    // 留壳整体退役——SNAPSHOT_VERSION 零 import 零本地定义（快照消费面已随 state
+    // 快照删除退出壳侧；出现任一形态 = 留壳复活的分叉信号）
     const extShellSrc = readFileSync(
       join(__dirname, '..', '..', '..', 'extensions', 'universal', 'subagent-workflow', 'src', 'jsonl-run-store.ts'),
       'utf-8',
     )
     expect(
-      extShellSrc.match(/import\s*\{[\s\S]*?\bSNAPSHOT_VERSION\b[\s\S]*?\}\s*from\s*"@zhushanwen\/subagent-core(?:\/orchestration\/run-snapshot\.ts)?"/),
-      'extension jsonl-run-store.ts 不再从 subagent-core（barrel 或 run-snapshot.ts 深路径）import SNAPSHOT_VERSION——留壳消费形态是否变了？',
-    ).not.toBeNull()
-    expect(
-      extShellSrc.match(/const\s+SNAPSHOT_VERSION\s*=/),
-      'extension jsonl-run-store.ts 出现本地 SNAPSHOT_VERSION 定义——应消费 subagent-core 权威源，禁止在留壳重新分叉版本字面量',
-    ).toBeNull()
+      extShellSrc.includes('SNAPSHOT_VERSION'),
+      'extension jsonl-run-store.ts 出现 SNAPSHOT_VERSION 消费/定义——[D1] record 单源化后快照留壳已退役，出现即分叉信号',
+    ).toBe(false)
 
     // 源 2：runtime 侧为 barrel import 单源消费（与权威源同一物理定义，同步性构造性
     // 成立），禁止回退成本地字面量副本（脱离单源绑定后版本可静默分叉）
@@ -567,7 +604,7 @@ describe('extractWorkflowsFromSessionFile', () => {
             agent: 'dev-W1',
             task: 'task 1',
             model: 'glm-4.6',
-            status: 'completed',
+            status: 'done',
             phase: 'Phase1',
             sessionId: 'sess-001',
             startedAt: '2026-07-10T10:00:00Z',
@@ -620,8 +657,8 @@ describe('extractWorkflowsFromSessionFile', () => {
     expect(record.completedAt).toBeUndefined()
     expect(record.agentCalls).toHaveLength(3)
 
-    // completed 节点
-    expect(record.agentCalls[0].status).toBe('completed')
+    // done 节点
+    expect(record.agentCalls[0].status).toBe('done')
     expect(record.agentCalls[0].sessionId).toBe('sess-001')
     expect(record.agentCalls[0].inputTokens).toBe(50000)
 

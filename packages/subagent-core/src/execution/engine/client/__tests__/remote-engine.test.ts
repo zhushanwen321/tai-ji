@@ -113,7 +113,7 @@ function makeEngine(
         dynamic: true,
         models: [
           { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
-          { id: "mimo-v2.5-pro", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.5-pro" },
+          { id: "mimo-v2.6-flash", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash" },
         ],
       },
       ...manifestOverrides,
@@ -174,7 +174,7 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
     const listed = makeEngine();
     expect(listed.engine.listModels()).toEqual([
       { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
-      { id: "mimo-v2.5-pro", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.5-pro" },
+      { id: "mimo-v2.6-flash", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash" },
     ]);
     await Promise.all([omitted, nullForm, dynamicEmpty, explicitEmpty, listed].map((f) => f.cleanup()));
   });
@@ -190,8 +190,8 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
     const { engine } = makeEngine();
     expect(engine.validateModel("zai/glm-4.6")).toEqual({ canonicalRef: "zai/glm-4.6" });
     expect(engine.validateModel("glm")).toEqual({ canonicalRef: "zai/glm-4.6" }); // alias
-    expect(engine.validateModel("mimo-v2.5-pro")).toEqual({
-      canonicalRef: "xiaomi-token-plan-cn/mimo-v2.5-pro",
+    expect(engine.validateModel("mimo-v2.6-flash")).toEqual({
+      canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash",
     });
     // dynamic:true：未命中放行、原样 ref（运行期引擎为权威；无斜杠 ref 拆分 = 契约变更④归 W3）
     expect(engine.validateModel("custom/new-model")).toEqual({ canonicalRef: "custom/new-model" });
@@ -448,7 +448,7 @@ describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
     const result = await runPromise; // 注入 500ms 兜底窗超时 → 本地合成终态
     expect(result.outcome.error).toContain("aborted before terminal answer");
     // [D1] shared-service 降级出口：不杀任何进程、不触发 dispose（dispose 对其是
-    // 宿主停机/退役语义）——stall warn 出声（ADR-0047；通知通道 = workflow-stall）。
+    // 宿主停机/退役语义）——无进展 warn 出声（ADR-0047 静默 ≠ 卡死）。
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("stalled, not stopped"));
     warnSpy.mockRestore();
     expect(client.currentState).toBe("ready");

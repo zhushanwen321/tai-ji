@@ -3,8 +3,8 @@
  *
  * 同域两层的组织性收敛（非去重）：
  * - 解析纯函数层：parseSubagentRpcCommand / parseWorkflowRpcCommand——正常路径、
- *   missing-id 边界、removed 边界（run 一次性生命周期后 pause/resume 不可用）、
- *   noop 边界（空串 / 未知 action / 无参列表查看）。纯函数无外部依赖，直接断言返回值。
+ *   missing-id 边界、removed 边界（run 一次性生命周期后 pause 不可用；resume 是
+ *   断点续跑一等 action）、noop 边界（空串 / 未知 action / 无参列表查看）。纯函数无外部依赖，直接断言返回值。
  * - handler 接线层：switch dispatch + try/catch + notify 文案。
  *
  * handler 测试手法：调 register*Command(pi_mock) 后，从 pi_mock.registerCommand 的调用中
@@ -22,9 +22,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── module mocks（必须在 import 被测模块之前声明）──────────────
 
-/** 桩化 lifecycle——abortRun 为 vi.fn，由测试控制 resolve/reject。 */
+/** 桩化 lifecycle/resume-run——abortRun / resumeRun 为 vi.fn，由测试控制 resolve/reject。 */
 vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", () => ({
   abortRun: vi.fn(),
+}));
+vi.mock("@zhushanwen/subagent-core/orchestration/resume-run.ts", () => ({
+  resumeRun: vi.fn(),
 }));
 
 // ── 延迟 import 被测模块（取 mock 后的实现）──────────────────
@@ -38,7 +41,7 @@ import {
   parseSubagentRpcCommand,
   parseWorkflowRpcCommand,
 } from "../interface/command-actions.ts";
-import { abortRun } from "@zhushanwen/subagent-core";
+import { abortRun, resumeRun } from "@zhushanwen/subagent-core";
 
 // ── 访问器槽注入 helpers ─────────────────────────────────────
 
@@ -269,10 +272,10 @@ describe("parseWorkflowRpcCommand", () => {
     });
   });
 
-  it("resume + runId → { action: 'lifecycle-removed', verb: 'resume' }（run 一次性生命周期，不可恢复）", () => {
+  it("resume + runId → { action: 'resume', runId }（断点续跑一等 action——与 TUI verb、tool action 同语义）", () => {
     expect(parseWorkflowRpcCommand("resume run-def")).toEqual({
-      action: "lifecycle-removed",
-      verb: "resume",
+      action: "resume",
+      runId: "run-def",
     });
   });
 
@@ -290,9 +293,9 @@ describe("parseWorkflowRpcCommand", () => {
     });
   });
 
-  it("resume 无 runId → lifecycle-removed（removed verb 优先于 missing-id 判定）", () => {
+  it("resume 无 runId → lifecycle-missing-id with verb（Usage 引导补 runId）", () => {
     expect(parseWorkflowRpcCommand("resume")).toEqual({
-      action: "lifecycle-removed",
+      action: "lifecycle-missing-id",
       verb: "resume",
     });
   });
@@ -762,14 +765,37 @@ describe("registerWorkflowsCommand — RPC 分支 dispatch", () => {
     );
   });
 
-  it("RPC + resume（已移除 verb）→ removed 提示 warning", async () => {
+  it("RPC + resume + runId → resumeRun 调用 + info 文案（GUI 通道断点续跑接通）", async () => {
+    const mockedResumeRun = vi.mocked(resumeRun);
+    mockedResumeRun.mockResolvedValue("run-def");
+
     await runHandler("resume run-def");
 
+    expect(mockedResumeRun).toHaveBeenCalledTimes(1);
+    expect(mockedResumeRun).toHaveBeenCalledWith("run-def", expect.anything());
     expect(mockedAbortRun).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Workflow resume has been removed — runs are one-shot. To stop a run early: /workflows abort <runId>",
+      "Workflow run-def: resuming — completed calls replay at zero token cost, unfinished calls re-dispatched",
+      "info",
+    );
+  });
+
+  it("RPC + resume 失败（资格拒绝等）→ warning 文案含拒绝原因，不向上抛", async () => {
+    const mockedResumeRun = vi.mocked(resumeRun);
+    mockedResumeRun.mockRejectedValue(new Error("only interrupted runs can be resumed"));
+
+    await runHandler("resume run-def");
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Failed to resume workflow run-def: only interrupted runs can be resumed",
       "warning",
     );
+  });
+
+  it("RPC + resume 无 runId → Usage 提示 warning", async () => {
+    await runHandler("resume");
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /workflows resume <runId>", "warning");
   });
 
   it("RPC + abort 无 runId → Usage 提示 warning", async () => {

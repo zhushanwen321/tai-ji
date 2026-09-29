@@ -194,7 +194,8 @@ export interface EnginePort {
    * 「引擎与模型不配套」错误，见 engine/model-validation.ts）。
    *
    * modelRef undefined = 查询引擎缺省模型（D2-1：主 agent 的 pi id 不透传给非 pi 引擎，
-   * 缺省语义归引擎——zcode 落 ZCODE_FALLBACK_DEFAULT_MODEL）。缺席输入的裁决值仅作
+   * 缺省语义归引擎——zcode 裁决为空串 = create 帧省略 model 键、CLI 自身缺省解析，
+   * 2026-09-29 account 体系迁移后不再有可用的 plan 家族兜底 id）。缺席输入的裁决值仅作
    * 诊断呈现，不进留痕；显式 model 经裁决 canonicalRef 盖章（alias 解析产物），
    * 缺席不产生留痕（resolveIdentityForEngine 条件留空，R4/D6-②）。
    * [W3 契约变更④] 协议化后 canonicalRef 允许**无斜杠**形态

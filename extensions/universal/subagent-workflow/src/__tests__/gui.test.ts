@@ -5,16 +5,16 @@
  *   1. gui-mappers —— mapRunStatus / mapRunIcon（状态字符串 → 协议三态 + 图标）与
  *      toGuiCtx（ExtensionContext → GuiContext 最小子集）
  *   2. adapter     —— ctx.mode 分发契约（rpc → __gui__ 附加，其余模式不附加）
- *   3. 构造器      —— buildGuiComponent（subagent）/ buildWorkflowGui（workflow）/
- *      buildScriptGui（script）按 action 构造对应 GuiComponent，验证 type 字段 +
- *      子组件结构
+ *   3. 构造器      —— buildGuiComponent（subagent）/ buildScriptGui（script）按
+ *      action 构造对应 GuiComponent，验证 type 字段 + 子组件结构（workflow tool 走
+ *      isWorkflow 块分支不消费 `__gui__`，无构造器——D8）
  *
  * isGuiCapable 属协议包符号，其模式判定矩阵由 packages/extension-protocol 的
  * helpers.test.ts 锁定，不在此重复。
  *
- * 构造器入参是纯数据类型（AdapterInput / WorkflowToolDetails / WorkflowScriptToolDetails
- * 联合），不需 mock 领域 service，直接构造对象字面量即可。状态/icon 映射的正确性
- * 已在 mapRunStatus/mapRunIcon 用例里独立覆盖，构造器用例只验证「正确组件 type +
+ * 构造器入参是纯数据类型（AdapterInput / WorkflowScriptToolDetails 联合），不需
+ * mock 领域 service，直接构造对象字面量即可。状态/icon 映射的正确性已在
+ * mapRunStatus/mapRunIcon 用例里独立覆盖，构造器用例只验证「正确组件 type +
  * items 结构 + 映射联动」。
  */
 import type { GuiContext } from "@zhushanwen/extension-protocol";
@@ -25,8 +25,6 @@ import { adapter, buildGuiComponent } from "../interface/subagent-actions.ts";
 import type { AdapterInput } from "../interface/subagent-actions.ts";
 import { buildScriptGui } from "../interface/tool-workflow-script.ts";
 import type { WorkflowScriptToolDetails } from "../interface/tool-workflow-script.ts";
-import type { WorkflowToolDetails } from "../interface/tool-workflow.ts";
-import { buildWorkflowGui } from "../interface/tool-workflow.ts";
 
 // ============================================================
 // mapRunStatus —— 状态字符串 → list-tree 三态 status
@@ -351,124 +349,6 @@ describe("buildGuiComponent", () => {
       expect(props.items[1].label).toBe("new subagent");
       expect(props.items[1].value).toBe("sub-005");
       expect(props.items[1].severity).toBe("ok");
-    });
-  });
-});
-
-// ============================================================
-// buildWorkflowGui —— workflow tool details 的 GUI 构造
-// ============================================================
-//
-// WorkflowToolDetails 是 run/status/abort 联合。run→list-tree(1 item)，
-// status→list-tree(N items)，abort→stats-line。
-
-describe("buildWorkflowGui", () => {
-  describe("action: run", () => {
-    it("running → list-tree，单 item status=running icon=circle", () => {
-      const details: WorkflowToolDetails = {
-        action: "run",
-        runId: "abcdefgh1234",
-        status: "running",
-        name: "build",
-        slug: "ci",
-      };
-      const comp = buildWorkflowGui(details);
-
-      expect(comp.type).toBe("list-tree");
-      const props = comp.props as { items: Array<{ label: string; status: string; icon: string }> };
-      expect(props.items).toHaveLength(1);
-      expect(props.items[0].status).toBe("running");
-      expect(props.items[0].icon).toBe("circle");
-      // label = name + slug + runId 前 8 字符
-      expect(props.items[0].label).toBe("build ci abcdefgh");
-    });
-
-    it("not_found → stats-line danger（错误状态不渲染为成功）", () => {
-      const details: WorkflowToolDetails = {
-        action: "run",
-        runId: "",
-        status: "not_found",
-        name: "missing",
-      };
-      const comp = buildWorkflowGui(details);
-
-      // not_found 是脚本未找到的逻辑错误（isError:true），短路为 stats-line danger，
-      // 不走通用 mapper 的 done/check 成功映射（避免绿色对勾与错误文案矛盾）。
-      expect(comp.type).toBe("stats-line");
-      const props = comp.props as { items: Array<{ label: string; value: string; severity: string }> };
-      expect(props.items[0].label).toBe("run");
-      expect(props.items[0].value).toBe("not found");
-      expect(props.items[0].severity).toBe("danger");
-    });
-
-    it("无 slug 时 label 不含双空格（filter(Boolean).join 生效）", () => {
-      const details: WorkflowToolDetails = {
-        action: "run",
-        runId: "1234567890",
-        status: "running",
-        name: "deploy",
-      };
-      const comp = buildWorkflowGui(details);
-      const props = comp.props as { items: Array<{ label: string }> };
-      // slug 缺失 → filter(Boolean) 过滤掉空段 → "deploy 12345678"（单空格）
-      expect(props.items[0].label).toBe("deploy 12345678");
-    });
-  });
-
-  describe("action: status", () => {
-    it("多 runs → list-tree，每个 run 的 status+reason 拼接后映射", () => {
-      const details: WorkflowToolDetails = {
-        action: "status",
-        runs: [
-          { runId: "run11111", name: "build", slug: "b", status: "running" },
-          { runId: "run22222", name: "test", slug: "t", status: "done", reason: "completed" },
-          { runId: "run33333", name: "deploy", slug: "d", status: "done", reason: "failed" },
-        ],
-      };
-      const comp = buildWorkflowGui(details);
-
-      expect(comp.type).toBe("list-tree");
-      const props = comp.props as { items: Array<{ label: string; status: string; icon: string }> };
-      expect(props.items).toHaveLength(3);
-
-      // running
-      expect(props.items[0].status).toBe("running");
-      expect(props.items[0].icon).toBe("circle");
-
-      // done (completed) — reason 为 completed，statusStr = "done (completed)"
-      // 含 "done" → done；无 failed 子串 → check
-      expect(props.items[1].status).toBe("done");
-      expect(props.items[1].icon).toBe("check");
-
-      // done (failed) — statusStr = "done (failed)"，含 "failed" → failed/cross
-      expect(props.items[2].status).toBe("failed");
-      expect(props.items[2].icon).toBe("cross");
-    });
-
-    it("空 runs → list-tree with empty items", () => {
-      const details: WorkflowToolDetails = { action: "status", runs: [] };
-      const comp = buildWorkflowGui(details);
-
-      expect(comp.type).toBe("list-tree");
-      const props = comp.props as { items: unknown[] };
-      expect(props.items).toEqual([]);
-    });
-  });
-
-  describe("abort → stats-line", () => {
-    it("abort → stats-line，label=abort value=runId 前 8 字符，severity=warn（破坏性终止非成功完成）", () => {
-      const details: WorkflowToolDetails = {
-        action: "abort",
-        runId: "abortId1234",
-        status: "aborted",
-        reason: "user",
-      };
-      const comp = buildWorkflowGui(details);
-      expect(comp.type).toBe("stats-line");
-      const props = comp.props as { items: Array<{ label: string; value: string; severity: string }> };
-      expect(props.items[0].label).toBe("abort");
-      expect(props.items[0].value).toBe("abortId1");
-      expect(props.items[0].severity).toBe("warn");
     });
   });
 });

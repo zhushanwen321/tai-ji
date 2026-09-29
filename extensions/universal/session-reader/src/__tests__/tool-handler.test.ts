@@ -1640,6 +1640,88 @@ describe('doWorkflow（w6，fixture）', () => {
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
+  // ---- [D16③] v2 record 流档概览（journalPath 锚点 = record 流路径）----
+
+  /** 向 main session 追加 workflow-record v2 注册条目行（journalPath 锚点指向 record 流）。 */
+  async function wfV2Registered(
+    dir: string,
+    slug: string,
+    id: string,
+    runId: string,
+    recordPath: string,
+  ): Promise<void> {
+    const sessionPath = join(dir, 'sessions', slug, `${id}.jsonl`)
+    const line = JSON.stringify({
+      type: 'custom',
+      id: `wf-reg-${runId}`,
+      parentId: id,
+      customType: 'workflow-record',
+      data: { v: 2, kind: 'registered', runId, workflowName: 'rec-flow', scriptName: 'rec-flow', slug: 'rec-flow', startedAt: 1758000000000, journalPath: recordPath },
+      timestamp: '2026-09-28T00:00:00Z',
+    })
+    await writeFile(sessionPath, line + '\n', { flag: 'a' })
+  }
+
+  it('[D16③] v2 档 record 流概览：注册条目锚点直读流——steps 提 sessionFile、status 三态、不进 skippedRuns（活跃 run 红线）', async () => {
+    const slug = '--wf-record--'
+    await wfMainSession(dir, slug, WF_ROOT)
+    const callSession = join(dir, 'sessions', slug, `${WF_CALL}.jsonl`)
+    const recordPath = await wfStateFile(dir, slug, 'wf-rec-1.record.jsonl', [
+      JSON.stringify({ type: 'run-created', seq: 1, ts: 1758000000000, runId: 'wf-rec-1', workflowName: 'rec-flow', argsSummary: '{}' }),
+      JSON.stringify({ type: 'agent-started', seq: 2, ts: 1758000000100, taskIndex: 0, agentName: 'rec-step', attempt: 1 }),
+      JSON.stringify({ type: 'agent-settled', seq: 3, ts: 1758000001500, taskIndex: 0, attempt: 1, outcome: 'done', durationMs: 1400, result: { content: 'ok', sessionId: WF_CALL, sessionFile: callSession } }),
+      JSON.stringify({ type: 'run-settled', seq: 4, ts: 1758000002000, outcome: 'done', artifactsDir: '/tmp/wf' }),
+    ])
+    await wfV2Registered(dir, slug, WF_ROOT, 'wf-rec-1', recordPath)
+
+    const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
+    const d = r.details as {
+      runs: Array<{ runId: string; status: string; script?: string; steps: Array<{ sessionId?: string; sessionFile?: string }> }>
+      skippedRuns?: unknown[]
+    }
+    // 红线：record 流 run 正常解析——不退化为 skippedRuns
+    expect(d.skippedRuns).toBeUndefined()
+    expect(d.runs).toHaveLength(1)
+    expect(d.runs[0].runId).toBe('wf-rec-1')
+    expect(d.runs[0].status).toBe('done')
+    expect(d.runs[0].script).toBe('rec-flow')
+    expect(d.runs[0].steps).toHaveLength(1)
+    expect(d.runs[0].steps[0].sessionFile).toBe(callSession)
+    expect(d.runs[0].steps[0].sessionId).toBe(WF_CALL)
+    expect(r.content[0].type).toBe('text')
+    expect((r.content[0] as { text: string }).text).toContain('wf-rec-1')
+    expect((r.content[0] as { text: string }).text).toContain('rec-step')
+  })
+
+  it('[D16③][D2] v2 档活跃 run（流无终局帧）→ status running、概览不退化为 skippedRuns；中断转移帧 → interrupted', async () => {
+    const slug = '--wf-running--'
+    await wfMainSession(dir, slug, WF_ROOT)
+    // 活跃：run-created + agent-started（无 settled/终局帧）
+    const activePath = await wfStateFile(dir, slug, 'wf-run-1.record.jsonl', [
+      JSON.stringify({ type: 'run-created', seq: 1, ts: 1758000000000, runId: 'wf-run-1', workflowName: 'run-flow', argsSummary: '{}' }),
+      JSON.stringify({ type: 'agent-started', seq: 2, ts: 1758000000100, taskIndex: 0, agentName: 'in-flight', attempt: 1 }),
+    ])
+    await wfV2Registered(dir, slug, WF_ROOT, 'wf-run-1', activePath)
+    const r1 = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
+    const d1 = r1.details as { runs: Array<{ runId: string; status: string }>; skippedRuns?: unknown[] }
+    expect(d1.skippedRuns).toBeUndefined()
+    expect(d1.runs.find((x) => x.runId === 'wf-run-1')?.status).toBe('running')
+
+    // 中断：追加 run-interrupted 转移帧 → status interrupted（[D2] 暂停态）
+    // 同 slug 同 main session 追加条目（第二个 slug 目录会触发同 id 多匹配消歧）
+    const slug2 = slug
+    const intPath = await wfStateFile(dir, slug2, 'wf-int-1.record.jsonl', [
+      JSON.stringify({ type: 'run-created', seq: 1, ts: 1758000000000, runId: 'wf-int-1', workflowName: 'int-flow', argsSummary: '{}' }),
+      JSON.stringify({ type: 'agent-started', seq: 2, ts: 1758000000100, taskIndex: 0, agentName: 'crashed-step', attempt: 1 }),
+      JSON.stringify({ type: 'run-interrupted', seq: 3, ts: 1758000009000, errorCode: 'crashed', reason: 'process killed' }),
+    ])
+    await wfV2Registered(dir, slug2, WF_ROOT, 'wf-int-1', intPath)
+    const r2 = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
+    const d2 = r2.details as { runs: Array<{ runId: string; status: string }>; skippedRuns?: unknown[] }
+    expect(d2.skippedRuns).toBeUndefined()
+    expect(d2.runs.find((x) => x.runId === 'wf-int-1')?.status).toBe('interrupted')
+  })
+
   it('TC-w6-single-run：单 run 概览，content 含 run 头行/budget/step，details.runs/runIds 非空', async () => {
     const slug = '--wf-single--'
     await wfMainSession(dir, slug, WF_ROOT)

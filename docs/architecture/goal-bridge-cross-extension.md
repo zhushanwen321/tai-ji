@@ -228,7 +228,7 @@ function tryGoalInit(planFilePath: string, ctx: ExtensionContext): GoalBridgeOut
 
 ### 4.2 验收场景
 
-环境基准：本地 pi CLI 实测（AGENTS.md MANDATORY：`pi --mode rpc -ne --session-dir <tmp> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <本地 plan> --extension <本地 goal>` + stdin JSONL，`-ne` 禁全局扩展防工具名冲突——probe-06 实测踩坑）；GUI 场景 `TAIJI_DEV_BACKGROUND=1 pnpm dev` + browser-automation 连 CDP。
+环境基准：本地 pi CLI 实测（AGENTS.md MANDATORY：`pi --mode rpc -ne --session-dir <tmp> --model <本机可用模型> --approve --extension <本地 plan> --extension <本地 goal>` + stdin JSONL，`-ne` 禁全局扩展防工具名冲突——probe-06 实测踩坑）；GUI 场景 `TAIJI_DEV_BACKGROUND=1 pnpm dev` + browser-automation 连 CDP。
 
 | 场景 | 回溯目标 | 真实流程 | 通过标准 |
 |------|---------|---------|---------|

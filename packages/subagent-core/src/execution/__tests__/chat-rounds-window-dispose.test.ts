@@ -174,7 +174,6 @@ function makeChatRounds(record: ExecutionRecord): ChatRounds {
     getSessionRootId: vi.fn(() => null),
     getStreamSink: vi.fn(() => null),
     getUiObservability: vi.fn(() => ({ getMode: () => undefined })),
-    getRoundSupervisor: vi.fn(() => ({ noteRunStarted: vi.fn(), noteRunEnded: vi.fn() })),
     finalizeFailed: vi.fn(),
     finalizeAborted: vi.fn(),
     idleTimeoutRecycle: vi.fn(),

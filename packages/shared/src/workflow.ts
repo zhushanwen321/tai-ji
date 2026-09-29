@@ -1,28 +1,28 @@
 /**
- * Workflow 数据模型 —— 从主 session JSONL 的 workflow-state-link entry 提取。
+ * Workflow 数据模型 —— runtime 投影链的 shared 消费契约。
  *
  * 数据来源：pi-subagent-workflow 扩展注册的 `workflow` tool。主 agent 调用该 tool
  * (action=run) 时，扩展在独立 worker 线程执行 workflow run。
  *
- * workflow run 的状态持久化在 `<sessionDir>/workflow-state/<runId>.jsonl`（单行
- * RunSnapshot，rewrite mode）。主 session JSONL 里通过 pi.appendEntry 写入
- * `workflow-state-link` custom entry 指向 state 文件路径。
+ * workflow run 的唯一持久化 = record 事件流（`<sessionDir>/workflow-state/
+ * <runId>.record.jsonl`，append-only——[D1] record 单源存储收敛，快照文件已删）。
+ * 主 session JSONL 里每 run 写 `workflow-record` v2 注册/终态两条小条目（身份 +
+ * record 流路径锚点 / 终局摘要，appendEntry 通路）；runtime 投影（journal-
+ * projection）以注册条目定界、record 流 fold 为骨架合成 WorkflowRunRecord。
+ * v1 全量快照条目与 `workflow-state-link` 指针条目仅作历史 run 的 v1 冻结兼容
+ * 读（[D16②]：不再新增事件、不可 resume，跟随裁决点 7 清理消亡）。
  *
- * runtime 的 workflow-extractor 从主 session JSONL 提取 workflow-state-link，
- * 读 path 指向的 state 文件，映射 RunSnapshot → WorkflowRunRecord[]。
- *
- * RunSnapshot 格式版本：`wf-run-v2`（D-5 版本守卫，v1 旧格式跳过——extension 侧
- * 声明的接受边界，旧 run 历史价值低，不做兼容迁移）。
- * 扩展源码：extensions/universal/subagent-workflow/src/jsonl-run-store.ts
+ * 扩展源码：extensions/universal/subagent-workflow/src/jsonl-run-store.ts（record
+ * store 单模式）；快照格式版本 `wf-run-v2` 的常量单源 = core run-snapshot.ts。
  */
 
 /**
- * workflow run 状态机（一次性生命周期，subagent-workflow D-2：pause/resume 已移除，
- * 提前停止唯一方式 = abort）。wf-run-v2 快照只产出 running/done 两态。
- * [2026-09-16] 'paused' legacy 值随 renderer 侧 Pause/Resume 按钮链路退役一并删除
- * （composer 任务托盘验收发现死按钮链，修复对齐扩展语义）。
+ * workflow run 状态投影三态（[D2] workflow-run-resume-revision）：running（进行中）/
+ * interrupted（已中断、可续跑——暂停态，非终局）/ done（终局）。中断 run 在 GUI
+ * 显示「已中断（可续跑）」而非「运行中」；[D2] dispatched 并入 running 后快照层
+ * 无预备段区分。'paused' legacy 值已随 Pause/Resume 按钮链路退役删除。
  */
-export type WorkflowRunStatus = 'running' | 'done'
+export type WorkflowRunStatus = 'running' | 'interrupted' | 'done'
 
 /** done 终态原因（WorkflowRun 不变式 I2：done 时必有 reason）。 */
 export type WorkflowDoneReason =
@@ -46,7 +46,7 @@ export interface WorkflowAgentCall {
   /** phase 分组名（trace.phase，如 "Dev-w0(W1)"） */
   phase?: string
   /** call 状态（trace.status） */
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'done' | 'failed'
   /** 执行所用 model（trace.model，'default' 表示 pi 默认 model） */
   model?: string
   /** pi session ID（trace.sessionId，uuidv7，定位 agent call 对话流 JSONL） */
@@ -77,19 +77,19 @@ export interface WorkflowAgentCall {
  * [P3/D6] run 终局形态（RunSnapshot.state.outcome，事件 journal fold 投影）。
  * 与 status/reason（DoneReason）正交——「run 自身怎么死的」维度（harness 系统层）。
  *
- * [W2 D5] 四值终态词表，归类为**投影派生输出**（单一生产者 = runtime extractor
+ * [W2 D5 → D2] 四值终态词表（done/failed/cancelled/time_limited），归类为**投影派生输出**（单一生产者 = runtime extractor
  * 投影构建点，renderer 消费投影载荷字段、不自行翻译）：core↔shared 依赖方向
  * （@taiji/shared 为 private 包、subagent-core 为 npm 发布包）不允许物理单源，
  * 值域跟随由两道锚承载——① runtime extractor 值级判定集合 WORKFLOW_RUN_OUTCOMES
  * （漏升 = interrupted 经提取链被静默丢弃）；② runtime 双包值级等价断言
  * （core ALL_RUN_OUTCOMES ≡ extractor 集合 ≡ 本词表成员，runtime 单测）。
  *
- * 值语义：completed=成功 / failed=失败 / cancelled=已取消（用户主动）/
- * interrupted=已中断（被动终局：崩溃收编 / abandon / idle 回收，细分语境由
- * 帧 errorCode 承载）——「已取消」与「已中断」禁混用，显示名见
- * WORKFLOW_RUN_OUTCOME_LABELS。
+ * 值语义（[D2] 后四值）：done=成功 / failed=失败 / cancelled=已取消（用户主动）/
+ * time_limited=已超时（活体墙钟预算超时，升格独立 outcome——错误处理分级双路
+ * 判定的超时通道）。中断语义已移出 outcome（入 status 三态 'interrupted'——
+ * 暂停态显示「已中断（可续跑）」，非终局），显示名见 WORKFLOW_RUN_OUTCOME_LABELS。
  */
-export type WorkflowRunOutcome = 'completed' | 'failed' | 'cancelled' | 'interrupted'
+export type WorkflowRunOutcome = 'done' | 'failed' | 'cancelled' | 'time_limited'
 
 /**
  * WorkflowRunOutcome 值全集（[W2 D5] 值级跟随锚的 shared 侧载体；形态对齐
@@ -101,10 +101,10 @@ export type WorkflowRunOutcome = 'completed' | 'failed' | 'cancelled' | 'interru
  * 反向（联合扩值漏改元组）由下方覆盖编译锁拦截。
  */
 export const WORKFLOW_RUN_OUTCOME_ALL = [
-  'completed',
+  'done',
   'failed',
   'cancelled',
-  'interrupted',
+  'time_limited',
 ] as const satisfies readonly WorkflowRunOutcome[]
 
 /**
@@ -132,10 +132,10 @@ export const WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK: _WorkflowRunOutcomeCoversAll = 
  * 即编译红（编译期穷尽锁）。
  */
 export const WORKFLOW_RUN_OUTCOME_LABELS: Record<WorkflowRunOutcome, string> = {
-  completed: '成功',
+  done: '成功',
   failed: '失败',
   cancelled: '已取消',
-  interrupted: '已中断',
+  time_limited: '已超时',
 }
 
 /**

@@ -18,7 +18,8 @@
 import { copyFileSync, existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_MODEL, PI_PATH } from './pi-fixture.js'
+// 从叶子模块 pi-environment 取用（原 import pi-fixture 与其动态 import 本文件构成循环依赖）
+import { DEFAULT_MODEL, PI_PATH } from './pi-environment.js'
 
 const DEFAULT_PROVIDER = DEFAULT_MODEL.split('/')[0]!
 

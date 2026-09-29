@@ -10,9 +10,8 @@
 //（kickOffChatRound，one-shot 与 Continuation 轮同路）+ 轮末收口协作（finalizeRoundToIdle / consumePendingArchive）+ message
 // 资格引擎轴 gate（engineSupportsConversation——[modeless 波1] SP-5 记录级升级门
 // canUpgradeToConversation 消亡后的唯一资格判据）+ Continuation 生命周期显式接口（清理/清队/在飞轮
-// 查询）。run 域执行入口（execute/executeAndAwait/executeViaEngine）、引擎死亡
-// 分诊（adoptOnProcessDeath）、终态收口（settleOneShotOutcome）与
-// pool/worktree 资源装配留 run-orchestration。
+// 查询）。run 域执行入口（execute/executeAndAwait/executeViaEngine）、终态收口
+//（settleOneShotOutcome）与 pool/worktree 资源装配留 run-orchestration。
 //
 // [G2 / R1 打样模式 3] 与 run-orchestration 零互调零 import：跨文件协作经壳 deps
 // 回调编排（workflow-dispatch.ts 同款形态）——
@@ -29,7 +28,7 @@
 //
 // [R1 打样模式——R4 落地]（模式权威定义见 session-baselines.ts 文件头）
 // 1. 依赖注入形态：deps 全晚绑定闭包（构造期零求值）——#1 留壳共享依赖
-//   （store/modelService/notifyHost/pool/worktreeManager/roundSupervisor）
+//   （store/modelService/notifyHost/pool/worktreeManager）
 //   getter 现读同一实例；会话基线运行时可变态
 //   （sessionRootId/streamSink/uiObservability/pi/cwd）经壳 getter 现读；R3 聚合显式
 //    接口（finalizeFailed/finalizeAborted/idleTimeoutRecycle/archiveRecord）壳装配指
@@ -76,7 +75,6 @@ import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态，边界守卫台账登记边）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import type { RoundSupervisor } from "../round-supervisor/index.ts";
 import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
 import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
@@ -114,7 +112,7 @@ function delay(ms: number): Promise<void> {
  * - 断言面（assertReady）：deliverChatMessage 入口就绪门（本体在 SessionBaselines，
  *   壳转发）。
  * - #1 留壳共享依赖 getter（getStore/getModelService/getNotifyHost/getPool/
- *   getWorktreeManager/getCwd/getPi/getRoundSupervisor）：
+ *   getWorktreeManager/getCwd/getPi）：
  *   getter 现读同一实例。
  * - 会话基线 getter（getSessionRootId/getStreamSink/getUiObservability）：initSession
  *   注入的运行时可变态现读（SessionBaselines 经壳 getter 透传）。
@@ -150,8 +148,6 @@ export interface ChatRoundsDeps {
   readonly getStreamSink: () => StreamSink | null;
   /** UI observability（stream 通道形态判据 getMode）。 */
   readonly getUiObservability: () => UiRequestObservability;
-  /** [B-6 留壳] 轮次活性监督器（轮次在途记账 noteRunStarted/noteRunEnded）。 */
-  readonly getRoundSupervisor: () => RoundSupervisor;
   /** [R3 RecordLifecycle 显式接口] 轮次 run 失败的收尾（kickOffChatRound catch 面）。 */
   readonly finalizeFailed: (record: ExecutionRecord, err: unknown) => Promise<AgentResult>;
   /** [R3 RecordLifecycle 显式接口] one-shot 轮排队中被 abort 的收尾（[U5] cancel 语义
@@ -305,9 +301,6 @@ export class ChatRounds {
     // 复用、shared-service 透传 registry；未注册同步 throw 的失败轮末分流承接不变。
     const engine = this.resolveRoundEnginePort(record);
 
-    // [W4] 会话形态轮的在途记账：死亡纳管 record 被主 agent resume = 决策收敛
-    // （清指引标记与看门狗，回归「该等」）。conversation 形态本就豁免监督域（D8）。
-    this.deps.getRoundSupervisor().noteRunStarted(record.id);
     void (async () => {
       try {
         await this.deps.getPool().acquire(priority, this.deps.effectiveMaxConcurrentFor(record), signal);
@@ -358,8 +351,6 @@ export class ChatRounds {
         this.deps.getPool().release();
         // streaming widget 清除（轮终，幂等——续轮 delta 落已 dispose 的 stream 为 no-op）。
         stream?.dispose();
-        // [W4] 轮收口重评估（死亡纳管 record 的轮终 → 驱动可能又死 → 重新三态判定）。
-        this.deps.getRoundSupervisor().noteRunEnded(record.id);
       }
     })();
   }

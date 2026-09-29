@@ -1,10 +1,10 @@
 // trace.test.ts —— Trace 首个直接单测（W1TC1-W1TC12，.cw/swf-perf-impl/rt-w1-design.json）。
 // 被测对象（Trace / executeAgentCall）全在 core——自 pi 壳迁移落位；W1TC11（jsonl
 // save-load round-trip）的 JsonlRunStore 归属 pi 壳，留壳侧 session-file 件。
-// - W1TC1-3/9：byIndex 倒排索引一致性与 no-op 防御语义
+// - W1TC1-3/9：节点数组一致性与 no-op 防御语义
 // - W1TC4-8：result.content 裁剪（append/update 入口、8000 边界、patch 缺省、fromArray 原样保留）
 // - W1TC10：集成——executeAgentCall 真链路（call.result 全量、trace 节点持裁剪副本）
-// - W1TC12：重复 stepIndex 违规语义锚定（last-wins + remove 后 desync 孤儿）
+// - W1TC12：重复 stepIndex 违规语义锚定（数组序保留 + remove 后 desync 孤儿）
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -28,6 +28,11 @@ function makeTraceNode(stepIndex: number): ExecutionTraceNode {
   };
 }
 
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number): ExecutionTraceNode | undefined {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
+
 /** 构造指定长度 content 的 AgentResult（sessionId 等可选字段透传）。 */
 function makeResult(content: string, extras: Partial<AgentResult> = {}): AgentResult {
   return { content, ...extras };
@@ -48,18 +53,18 @@ describe("Trace byIndex 索引一致性", () => {
     trace.update(1, { status: "completed" });
 
     // byIndex 与 nodes 引用共享非拷贝
-    expect(trace.find(0)).toBe(node0);
-    expect(trace.find(1)).toBe(node1);
-    expect(trace.find(2)).toBe(node2);
+    expect(findByStep(trace, 0)).toBe(node0);
+    expect(findByStep(trace, 1)).toBe(node1);
+    expect(findByStep(trace, 2)).toBe(node2);
     // Map 值是节点引用，update 字段 mutate 可见
-    expect(trace.find(1)!.status).toBe("completed");
+    expect(findByStep(trace, 1)!.status).toBe("completed");
 
     trace.removeByStepIndex(1);
-    expect(trace.find(1)).toBeUndefined();
+    expect(findByStep(trace, 1)).toBeUndefined();
     expect(trace.length).toBe(2);
     // 其余节点不受影响
-    expect(trace.find(0)).toBe(node0);
-    expect(trace.find(2)).toBe(node2);
+    expect(findByStep(trace, 0)).toBe(node0);
+    expect(findByStep(trace, 2)).toBe(node2);
   });
 });
 
@@ -75,7 +80,7 @@ describe("Trace remove 后 re-append 同 stepIndex", () => {
     const nodeB = makeTraceNode(0);
     trace.append(nodeB);
 
-    expect(trace.find(0)).toBe(nodeB);
+    expect(findByStep(trace, 0)).toBe(nodeB);
     expect(trace.toArray()).toHaveLength(1);
     expect(trace.toArray()[0]).toBe(nodeB);
   });
@@ -84,28 +89,27 @@ describe("Trace remove 后 re-append 同 stepIndex", () => {
 // ── 重复 stepIndex 违规语义锚定（W1TC12）──────────────────────
 
 describe("Trace 重复 stepIndex 违规语义锚定（W1TC12）", () => {
-  it("W1TC12: 重复 append find last-wins；重复 append 后 remove 呈 desync 孤儿", () => {
-    // ① 重复 append 同 stepIndex 且未 remove：find 返回第二个节点（Map
-    //    last-wins；旧线性扫 first-match 会返回第一个）
+  it("W1TC12: 重复 append 数组序保留；重复 append 后 remove 呈 desync 孤儿", () => {
+    // ① 重复 append 同 stepIndex 且未 remove：nodes 数组按 append 序保留两节点
+    //    （byIndex 键 last-wins 属内部索引实现，公共查询面只见数组序）
     const t1 = new Trace();
     const first = makeTraceNode(0);
     const second = makeTraceNode(0);
     t1.append(first);
     t1.append(second);
-    expect(t1.find(0)).toBe(second);
     expect(t1.length).toBe(2);
+    expect(t1.toArray()[0]).toBe(first);
+    expect(t1.toArray()[1]).toBe(second);
 
     // ② 重复 append 后 removeByStepIndex：findIndex 命中首个旧节点 splice、
-    //    byIndex.delete 删掉整个键——第二个节点残留为孤儿（find 不可达但
-    //    nodes.length=1）。desync 行为锚定：防未来改回线性扫时静默漂移
-    //    （线性扫实现下 find(0) 会命中残留节点 second，本断言即失败）
+    //    byIndex.delete 删掉整个键——第二个节点残留为孤儿（nodes.length=1）。
+    //    desync 行为锚定：防未来改动时静默漂移
     const t2 = new Trace();
     const a = makeTraceNode(0);
     const b = makeTraceNode(0);
     t2.append(a);
     t2.append(b);
     t2.removeByStepIndex(0);
-    expect(t2.find(0)).toBeUndefined();
     expect(t2.length).toBe(1);
     expect(t2.toArray()[0]).toBe(b);
   });
@@ -123,16 +127,16 @@ describe("Trace.fromArray 重建", () => {
     const trace = Trace.fromArray(src);
 
     expect(trace.length).toBe(3);
-    // fromArray push {...node} 副本——find(i) 与 toArray()[i] 同引用（byIndex 命中副本）
+    // fromArray push {...node} 副本——toArray()[i] 与源数组元素脱钩
     for (let i = 0; i < 3; i++) {
-      expect(trace.find(i)).toBe(trace.toArray()[i]);
+      expect(trace.toArray()[i]).not.toBe(src[i]);
     }
 
     // 传入数组后续 mutate 不影响 trace（浅拷贝语义保持）
     src.push(makeTraceNode(3));
     expect(trace.length).toBe(3);
     src[0]!.status = "failed";
-    expect(trace.find(0)!.status).toBe("pending");
+    expect(findByStep(trace, 0)!.status).toBe("pending");
   });
 });
 
@@ -175,7 +179,7 @@ describe("Trace update patch.result 超长裁剪", () => {
     const full = makeResult("y".repeat(9000), { sessionId: "s1" });
     trace.update(0, { result: full });
 
-    const stored = trace.find(0)!.result!;
+    const stored = findByStep(trace, 0)!.result!;
     const marker = `\n…[trace result truncated, original 9000 chars]…\n`;
     expect(stored.content.length).toBe(4000 + marker.length + 4000);
     expect(stored.content).toContain("original 9000 chars");
@@ -199,15 +203,15 @@ describe("Trace 裁剪边界（严格大于 TRACE_RESULT_MAX_CHARS）", () => {
     // 恰好 8000：不裁
     const exact = makeResult("a".repeat(TRACE_RESULT_MAX_CHARS));
     trace.update(0, { result: exact });
-    expect(trace.find(0)!.result).toBe(exact);
-    expect(trace.find(0)!.result!.content).toHaveLength(8000);
-    expect(trace.find(0)!.result!.content).not.toContain("truncated");
+    expect(findByStep(trace, 0)!.result).toBe(exact);
+    expect(findByStep(trace, 0)!.result!.content).toHaveLength(8000);
+    expect(findByStep(trace, 0)!.result!.content).not.toContain("truncated");
 
     // 8001：裁剪（head/tail 固定 4000 比例，重叠段属预期）
     const over = makeResult("b".repeat(TRACE_RESULT_MAX_CHARS + 1));
     trace.update(1, { result: over });
-    expect(trace.find(1)!.result!.content).toContain("original 8001 chars");
-    expect(trace.find(1)!.result!.content).not.toBe(over.content);
+    expect(findByStep(trace, 1)!.result!.content).toContain("original 8001 chars");
+    expect(findByStep(trace, 1)!.result!.content).not.toBe(over.content);
   });
 });
 
@@ -221,12 +225,12 @@ describe("Trace update patch.result 缺省", () => {
     trace.append(node);
 
     trace.update(0, { status: "completed", completedAt: "2026-08-15T00:00:00Z" });
-    expect(trace.find(0)!.result!.content).toBe("keep");
-    expect(trace.find(0)!.result).toBe(origResult);
+    expect(findByStep(trace, 0)!.result!.content).toBe("keep");
+    expect(findByStep(trace, 0)!.result).toBe(origResult);
 
     // 其他字段路径同样不影响 result
     trace.update(0, { sessionId: "s9" });
-    expect(trace.find(0)!.result).toBe(origResult);
+    expect(findByStep(trace, 0)!.result).toBe(origResult);
   });
 });
 
@@ -240,14 +244,14 @@ describe("Trace.fromArray 原样保留", () => {
       result: makeResult("z".repeat(20000)),
     };
     const trace = Trace.fromArray([long]);
-    expect(trace.find(0)!.result!.content).toHaveLength(20000);
-    expect(trace.find(0)!.result!.content).not.toContain("truncated");
+    expect(findByStep(trace, 0)!.result!.content).toHaveLength(20000);
+    expect(findByStep(trace, 0)!.result!.content).not.toContain("truncated");
 
     // 新快照 round-trip：已裁剪含标记的 content 经 fromArray 后逐字节不变（无标记嵌套）
     const marker = `\n…[trace result truncated, original 10000 chars]…\n`;
     const trimmed = "x".repeat(4000) + marker + "x".repeat(4000);
     const trace2 = Trace.fromArray([{ ...makeTraceNode(0), result: makeResult(trimmed) }]);
-    expect(trace2.find(0)!.result!.content).toBe(trimmed);
+    expect(findByStep(trace2, 0)!.result!.content).toBe(trimmed);
   });
 });
 
@@ -261,7 +265,7 @@ describe("Trace no-op 防御语义", () => {
     expect(() => trace.update(999, { status: "completed" })).not.toThrow();
     expect(() => trace.removeByStepIndex(999)).not.toThrow();
     expect(trace.length).toBe(1);
-    expect(trace.find(999)).toBeUndefined();
+    expect(findByStep(trace, 999)).toBeUndefined();
   });
 });
 
@@ -284,11 +288,11 @@ describe("W1TC10: executeAgentCall 真链路——call.result 全量、trace 节
     // AgentCall.result 全量（worker cached replay 数据源保真）
     expect(call.result!.content).toHaveLength(12000);
     // trace 节点持裁剪副本
-    const stored = trace.find(0)!.result!;
+    const stored = findByStep(trace, 0)!.result!;
     const marker = `\n…[trace result truncated, original 12000 chars]…\n`;
     expect(stored.content).toBe(content.slice(0, 4000) + marker + content.slice(-4000));
     expect(stored.content.length).toBe(4000 + marker.length + 4000);
     expect(stored.sessionId).toBe("s1");
-    expect(trace.find(0)!.status).toBe("completed");
+    expect(findByStep(trace, 0)!.status).toBe("completed");
   });
 });

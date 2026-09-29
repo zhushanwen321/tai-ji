@@ -28,8 +28,8 @@
 //      deps.onRecordFinalizedCleanup 回调——disposeAllRecords/cancelBackground 直调点
 //      与 doFinalizeRecord deps.onFinalized 钩子闭包统一经此回调（现状显式注入形态
 //      天然兼容，清单①预判兑现）；R4 抽取 Continuation 协作面时回调改指聚合显式接口。
-//    - C-6（roundSupervisor/reconcile sweep 装配闭包调 finalizeRecord）：闭包经壳
-//      late-bound 读取壳转发方法——天然兼容聚合化，壳装配零改动（清单①预判兑现）。
+//    - C-6（reconcile sweep 装配闭包的终态化委托面）：闭包经壳 late-bound 读取壳
+//      转发方法——天然兼容聚合化，壳装配零改动（清单①预判兑现）。
 //    - C-4（壳 dispose 直调 continuations.clear）：#14 Continuation 状态清理，壳 dispose
 //      编排消费——R4 领地，本单元留置不动（壳直调壳字段，非跨聚合写）。
 //    - closeSubagent 对 Continuation 队列的清空（continuations.get(...)?.abortAndClearQueue）：
@@ -50,7 +50,7 @@ import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 // [P1b-1] settle 链收口单点（finalizeFailed/finalizeAborted workflow origin 分支的
 // 终态收口迁入；execution/service → orchestration import 为既有先例方向）。
-import { settleWorkflowRecord } from "../../orchestration/worker-message-pump.ts";
+import { settleWorkflowRecord } from "../../orchestration/terminal-actions.ts";
 import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
 // [u7a 生产补挂] 批量 dispose 收敛点推最新在途计数（D5 出口——engine 域叶子模块，
 // 本模块不得被 inflight-snapshot 反向依赖，import 方向单向安全）。
@@ -513,7 +513,7 @@ export class RecordLifecycle {
     // 由脚本返回值承载，留内存 idle 会绑架 hasRunning / 被误升级 /
     // goal defer 恒挂，设计 D7 连带理由；§1.4 out-of-scope）。
     // [P1b-1] 直写通道删除：closed/gc 终态判定收口至 worker-message-pump 的
-    // settleWorkflowRecord 单点（与 settleOneShotOutcome 同款；ask-settled/run-settled
+    // settleWorkflowRecord 单点（与 settleOneShotOutcome 同款；agent-settled/run-settled
     // 事件面由 pump 状态机接线段承载——静默吞失败路径（workflow-dispatch catch 等
     // 多调用方）经本方法自动接入同一收口）。
     if (record.origin === "workflow") {

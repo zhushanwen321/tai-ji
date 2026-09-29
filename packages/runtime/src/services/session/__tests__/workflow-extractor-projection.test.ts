@@ -80,8 +80,8 @@ describe('workflow-extractor [P3/D6] additive 投影消费', () => {
     expect(record.agentCalls[1]!.lastProgressAt).toBe(4000)
     // calls 条目与 trace 节点按 id（stepIndex）关联——id 错位的坏项只丢进度字段
     expect(record.health).toEqual({ lastProgressAt: 5000 })
-    // 三态直读：trace status 原样透传
-    expect(record.agentCalls.map((c) => c.status)).toEqual(['running', 'completed'])
+    // trace status 透传（[D2] 词表：终态词 done；D2 前 'completed' 经存量映射归一）
+    expect(record.agentCalls.map((c) => c.status)).toEqual(['running', 'done'])
   })
 
   it('终局投影：outcome/errorCode（failed + engine_crashed）进入 record', () => {

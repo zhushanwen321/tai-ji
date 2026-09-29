@@ -50,15 +50,16 @@
  * settings.json 缺失安全（settings-manager loadFromStorage 空 content 返回 {}，不报错不创建）。
  */
 
-import { spawn, execSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
-/** 低成本测试模型（workspace AGENTS.md pi 实测流程同款，验收契约锁定）。导出供附着恢复用例做 CLI-model 对照断言。 */
-export const DEFAULT_MODEL = 'xiaomi-token-plan-cn/mimo-v2.5-pro'
+import { DEFAULT_MODEL, PI_PATH } from './pi-environment.js'
+
+export { DEFAULT_MODEL, PI_PATH }
 /** 冷启动就绪等待上限（探针结论中位数 ~500ms，取 10 倍余量） */
 const DEFAULT_COLD_START_TIMEOUT_MS = 5_000
 /** faux 轨冷启动就绪等待下限（jiti 冷编译 extension + 满并行负载余量；见 spawnPiFixture） */
@@ -174,24 +175,8 @@ export interface PiFixture {
   dispose(): Promise<void>
 }
 
-/** 探测 pi 可执行文件路径（命令形态与生产 process-manager.ts 一致；失败返回 null） */
-function detectPi(): string | null {
-  const isWindows = process.platform === 'win32'
-  const whichCmd = isWindows ? 'where pi' : 'which pi'
-  try {
-    const which = execSync(whichCmd, { encoding: 'utf-8' }).trim()
-    // Windows 'where' 可能返回多行，取第一条（与生产逻辑一致）
-    const firstMatch = which.split('\n')[0]?.trim()
-    if (firstMatch && existsSync(firstMatch)) return firstMatch
-    return null
-  } catch {
-    // expected: pi not in PATH —— 进入 skip 语义
-    return null
-  }
-}
-
-/** 模块顶层探测结果（skip-if-no-pi 契约的唯一引用点，见文件头注释；FAUX 门控与 real-pi-gate 消费） */
-export const PI_PATH: string | null = detectPi()
+// PI_PATH / detectPi 已下沉 ./pi-environment.ts（叶子模块，解与 real-pi-gate 的循环依赖；
+// 本文件 re-export 维持既有消费方 import 路径不变）
 
 // ==================== 真实 LLM 凭证探测（等价性基线双轨，goal-audit 问题 1 修复） ====================
 // REAL 轨门控与凭证拷贝通道已整体迁至 ./real-pi-gate.ts（独立模块——探测读本机真实

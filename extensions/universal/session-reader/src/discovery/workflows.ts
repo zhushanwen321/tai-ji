@@ -10,14 +10,21 @@ import { extractSessionIdFromFilename } from './subagents.js'
 //
 // 本文件持有 workflow run 的发现与 sessionFile 提取逻辑（IO 适配层）：
 // - resolveWorkflows：三档发现链（按 runId 合并，高档条目在即用高档）——
-//   ① v2 journalPath 主源：workflow-record v2 注册条目（journalPath 锚点 → 保留窗口内
-//     读 state 快照提 calls；窗口外 journal+state 成对删 → calls=[] 仅 run 存在性兜底）；
+//   ① v2 journalPath 主源（[D16③] 发现链重锚：journalPath 锚点语义 = record 流路径）：
+//     workflow-record v2 注册条目的 journalPath 指向 <runId>.record.jsonl（[D1] record
+//     单源事件流），发现链读 record 流行自提 calls——sessionFile 取 agent-settled 帧
+//     result 全文携带的 sessionFile（[D1] 载荷表：result 全文入事件，AgentResult
+//     自带 sessionFile 字段——家族链数据源同 record 流，无第二承载位）；旧后缀锚点
+//     （.events.jsonl 形态）= 历史实体（[D1] 历史数据处置：旧两件不读）→ calls=[]
+//     仅 run 存在性兜底；
 //   ② v1 快照层：workflow-record v1 快照条目（W17~W1 期间创建的 run——快照是全量的，
 //     直接从 snapshot.calls 提 sessionFile，家族链数据完整）；
 //   ③ 旧指针 fallback：workflow-state-link 指针条目（W17 前的 run，照旧读 link 指向的
 //     wf-state 文件）。
 // - readRunSnapshot：读 wf-state 文件尾向找首个可解析行，返回原始对象（unknown，格式收窄交 core 层）。
 // - extractCallSessionFiles：从快照对象提 calls 的 sessionFile 绝对路径数组（NEW/OLD 双格式）。
+// - extractRecordStreamSessionFiles：[D16③] 从 record 事件流提 calls 的 sessionFile
+//   （agent-settled 帧 result.sessionFile——活跃 run 与已收编 run 同源可用）。
 // - sessionRefFromPath：sessionFile 路径 → SessionRef（命中 pathToRef 取完整，否则文件名提取最小 ref）。
 //
 // 分层约定（w5 TC-wf-core-pure-logic）：IO 全在 discovery/，core/workflow.ts 的
@@ -156,11 +163,12 @@ const WORKFLOW_RECORD_CUSTOM_TYPE = 'workflow-record'
 const WORKFLOW_RECORD_ENTRY_V2 = 2
 
 /**
- * run journal 文件名尾段（`<runId>.events.jsonl`）。写侧 subagent-core
- * RUN_EVENT_JOURNAL_SUFFIX 同值——v2 注册条目的 journalPath 锚点推导 state 快照
- * 路径用（同目录同主名、仅尾段不同），本地持有 + 测试守卫漂移。
+ * run record 流文件名尾段（`<runId>.record.jsonl`）。写侧 subagent-core
+ * RUN_EVENT_JOURNAL_SUFFIX 同值（[D1] record 单源后缀）——v2 注册条目的
+ * journalPath 锚点后缀判定用（新锚点直读 record 流；旧 `.events.jsonl` 锚点 =
+ * 历史实体分流），本地持有 + 测试守卫漂移。
  */
-const RUN_EVENT_JOURNAL_SUFFIX = '.events.jsonl'
+export const RUN_RECORD_STREAM_SUFFIX = '.record.jsonl'
 
 /** 单遍扫描 entries 的三档收集结果（档内同 runId 后写覆盖前写，跨档优先级见 resolveWorkflows）。 */
 interface WorkflowEntryTiers {
@@ -199,42 +207,102 @@ function collectWorkflowEntryTiers(entries: readonly Entry[]): WorkflowEntryTier
   for (const e of entries) {
     const data = e.data as Record<string, unknown> | undefined
     if (e.customType === WORKFLOW_RECORD_CUSTOM_TYPE && data !== undefined) {
-      if (data.v === WORKFLOW_RECORD_ENTRY_V2 && data.kind === 'registered') {
-        const runId = data.runId
-        const journalPath = data.journalPath
-        if (typeof runId === 'string' && runId !== '' && typeof journalPath === 'string' && journalPath !== '') {
-          tiers.v2ByRunId.set(runId, journalPath)
-          noteRunId(runId)
-        }
-      } else if (data.v === 1 && typeof data.snapshot === 'object' && data.snapshot !== null) {
-        const snapshotRunId = (data.snapshot as Record<string, unknown>).runId
-        if (typeof snapshotRunId === 'string' && snapshotRunId !== '') {
-          tiers.v1ByRunId.set(snapshotRunId, data.snapshot)
-          noteRunId(snapshotRunId)
-        }
-      }
+      collectWorkflowRecordEntryTier(tiers, noteRunId, data)
       continue
     }
     if (e.customType === 'workflow-state-link') {
-      const runId = data?.runId
-      const path = data?.path
-      if (typeof runId === 'string' && typeof path === 'string') {
-        tiers.linkByRunId.set(runId, { runId, path }) // 后写覆盖前写（取最新 link）
-        noteRunId(runId)
-      }
+      collectWorkflowStateLinkTier(tiers, noteRunId, data)
     }
   }
   return tiers
 }
 
+/** [collectWorkflowEntryTiers 拆分] workflow-record 条目两代分流（v2 注册 / v1 快照）。 */
+function collectWorkflowRecordEntryTier(
+  tiers: WorkflowEntryTiers,
+  noteRunId: (runId: string) => void,
+  data: Record<string, unknown>,
+): void {
+  if (data.v === WORKFLOW_RECORD_ENTRY_V2 && data.kind === 'registered') {
+    const runId = data.runId
+    const journalPath = data.journalPath
+    if (typeof runId === 'string' && runId !== '' && typeof journalPath === 'string' && journalPath !== '') {
+      tiers.v2ByRunId.set(runId, journalPath)
+      noteRunId(runId)
+    }
+  } else if (data.v === 1 && typeof data.snapshot === 'object' && data.snapshot !== null) {
+    const snapshotRunId = (data.snapshot as Record<string, unknown>).runId
+    if (typeof snapshotRunId === 'string' && snapshotRunId !== '') {
+      tiers.v1ByRunId.set(snapshotRunId, data.snapshot)
+      noteRunId(snapshotRunId)
+    }
+  }
+}
+
+/** [collectWorkflowEntryTiers 拆分] workflow-state-link 指针条目（后写覆盖前写——取最新 link）。 */
+function collectWorkflowStateLinkTier(
+  tiers: WorkflowEntryTiers,
+  noteRunId: (runId: string) => void,
+  data: Record<string, unknown> | undefined,
+): void {
+  const runId = data?.runId
+  const path = data?.path
+  if (typeof runId === 'string' && typeof path === 'string') {
+    tiers.linkByRunId.set(runId, { runId, path }) // 后写覆盖前写（取最新 link）
+    noteRunId(runId)
+  }
+}
+
 /**
- * journalPath（`<stateDir>/<runId>.events.jsonl`）→ 同目录同主名的 state 快照路径
- * （`<runId>.jsonl`）。尾段不符（形态损坏）→ 空串 = 无快照路径可读（calls 退空，
- * run 存在性兜底保留）。
+ * [D16③] journalPath 后缀分流：`.record.jsonl` 锚点 = 新形态（record 流直读）；
+ * 其余（含旧 `.events.jsonl` 锚点）= 历史实体（[D1] 历史数据处置——旧两件不读
+ * 不写，历史 run 从发现链数据面退空即预期行为）。
  */
-function journalPathToStateFile(journalPath: string): string {
-  if (!journalPath.endsWith(RUN_EVENT_JOURNAL_SUFFIX)) return ''
-  return journalPath.slice(0, -RUN_EVENT_JOURNAL_SUFFIX.length) + '.jsonl'
+function isNewRecordStreamAnchor(journalPath: string): boolean {
+  return journalPath.endsWith(RUN_RECORD_STREAM_SUFFIX)
+}
+
+/** agent-settled 帧的最小消费视图（record 流宽容解析只消费 taskIndex 与
+ *  result.sessionFile 两字段，其余载荷不读取）。 */
+interface AgentSettledSessionFileView {
+  taskIndex: number
+  result: { sessionFile: string }
+}
+
+/** [extractRecordStreamSessionFiles 守卫] 单帧是否为携带非空 result.sessionFile
+ *  的 agent-settled 帧：逐字段 typeof 校验（type → taskIndex → result →
+ *  sessionFile），不过关 = 宽容跳过（与 readRunSnapshot 同容忍度）。 */
+function isAgentSettledSessionFileFrame(v: unknown): v is AgentSettledSessionFileView {
+  if (typeof v !== 'object' || v === null) return false
+  const rec = v as Record<string, unknown>
+  if (rec.type !== 'agent-settled' || typeof rec.taskIndex !== 'number') return false
+  const result: unknown = rec.result
+  if (typeof result !== 'object' || result === null) return false
+  const sessionFile: unknown = (result as Record<string, unknown>).sessionFile
+  return typeof sessionFile === 'string' && sessionFile !== ''
+}
+
+/**
+ * [D16③] record 事件流 → calls 的 sessionFile 绝对路径数组：逐行宽容解析
+ * （跳过坏行/空行——与 readRunSnapshot 同容忍度），agent-settled 帧（含
+ * result 全文）按 taskIndex 归位——首见生效（重试波多帧时终局帧 result 后到
+ * 覆盖，与 fold 后到覆盖语义一致）。
+ */
+export function extractRecordStreamSessionFiles(content: string): string[] {
+  const byIndex = new Map<number, string>()
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      continue // 坏行（截断行）跳过
+    }
+    if (!isAgentSettledSessionFileFrame(parsed)) continue
+    byIndex.set(parsed.taskIndex, parsed.result.sessionFile)
+  }
+  return [...byIndex.entries()].sort((a, b) => a[0] - b[0]).map(([, sf]) => sf)
 }
 
 /**
@@ -245,8 +313,10 @@ function journalPathToStateFile(journalPath: string): string {
  *
  * **签名与返回值结构（WorkflowRef[]{runId,stateFile,calls:SessionRef[]}）完全不变**
  * （C-resolveworkflows-signature，保 m1 已冻结交付的消费者）。三档的 stateFile 语义：
- * - v2 档：journalPath 推导的 state 快照路径（窗口外文件已删 → readRunSnapshot
- *   undefined → calls=[]，run 存在性兜底——与旧链窗外行为同构）；
+ * - v2 档：stateFile = journalPath 本身（record 流路径——[D16③] 锚点语义重定义，
+ *   D1 后 v2 条目携带的锚点即 record 事件流文件）；record 流直读提 calls
+ *   （agent-settled.result.sessionFile），流被清理/不可读 → calls=[]（run 存在性
+ *   兜底）；
  * - v1 档：空串（v1 快照条目不携带 state 路径，快照数据直接从条目提 calls；概览
  *   消费面 readRunSnapshot('') 自然落「快照不可读」跳过，家族链 calls 不受影响）；
  * - 旧指针档：link 的 path（现状）。
@@ -270,13 +340,22 @@ export async function resolveWorkflows(
   for (const runId of tiers.runIdOrder) {
     const journalPath = tiers.v2ByRunId.get(runId)
     if (journalPath !== undefined) {
-      // ① v2 档：journalPath → state 快照（保留窗口内提 calls；窗外成对删 → calls=[]）
-      const stateFile = journalPathToStateFile(journalPath)
-      const snap = stateFile === '' ? undefined : await readRunSnapshot(stateFile)
-      const sessionFiles = snap === undefined ? [] : extractCallSessionFiles(snap)
+      // ① v2 档（[D16③] 重锚）：journalPath = record 流路径——新后缀锚点直读流提
+      // calls（agent-settled.result.sessionFile）；旧后缀锚点 = 历史实体（[D1]
+      // 不读旧两件）→ calls=[] 仅 run 存在性兜底。
+      let sessionFiles: string[] = []
+      if (isNewRecordStreamAnchor(journalPath)) {
+        let content: string | undefined
+        try {
+          content = await readFile(journalPath, 'utf8')
+        } catch {
+          content = undefined // 流被保留期清理/不可读 → calls=[]（run 存在性兜底）
+        }
+        sessionFiles = content === undefined ? [] : extractRecordStreamSessionFiles(content)
+      }
       workflows.push({
         runId,
-        stateFile,
+        stateFile: journalPath,
         calls: sessionFiles.map((sf) => sessionRefFromPath(sf, pathToRef)),
       })
       continue

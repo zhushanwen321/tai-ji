@@ -117,10 +117,9 @@ import type { V2EntryState } from "./record-store-terminal.ts";
 // 轮次簿记轴承载（事件落账调用面主体 = RoundsCtx/TerminalCtx 注入位）。RecordStore
 // 是 record 域事件的唯一合法写者（单写者纪律，face 是容器的单点封装）。
 import { RecordJournalWriteFace } from "./record-store-rounds.ts";
-// [W1 / U7·D5] 统一保留维护轮入口（record 域触发点）：core 内部深路径直取
-// （barrel 面只约束壳生产消费；execution → orchestration 深路径先例 =
-// round-supervisor/service-binding.ts 的 FileRunStore import）。
-import { runRetentionMaintenanceRound } from "../../orchestration/file-run-store.ts";
+// [W1 / U7·D5] 统一保留维护轮入口（record 域触发点）：同域 run-state-evidence
+// 直取（barrel 面只约束壳生产消费）。
+import { runRetentionMaintenanceRound } from "./run-state-evidence.ts";
 import type { ManifestRecord, ManifestStore } from "./manifest-store.ts";
 import { INDEX_WRITE_MIN_INTERVAL_MS, loadIndex, saveIndex } from "./sessions-index.ts";
 import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "./sessions-index.ts";
@@ -586,12 +585,11 @@ export class RecordStore {
   // batchFinalized 落标 entry）已随批机制整体删除。
 
   /**
-   * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] W4 新态
-   * running + stopReason=failed 交监督器接管，禁 completed 谎报 / closed 直接终局）。
+   * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] 新态
+   * running + stopReason=failed 表驱动死亡，禁 completed 谎报 / closed 直接终局）。
    * 归口调用面已随 adopt 派发链退役：one-shot engine-run 编排不再经本原语收口
    * （原归口调用点随 U2b 修复轮移除），现仅测试直调可达
-   * （run-orchestration-write-lease.test.ts 用例 2/5 为退役与归口语义锚）；监督器
-   * adoptOnProcessDeath 只消费已写入的纳管态、不再经本原语，编排留调用方。
+   * （run-orchestration-write-lease.test.ts 用例 2/5 为退役与归口语义锚）。
    *
    * @returns false = id 不在内存（debug 留痕，无副作用）。
    */

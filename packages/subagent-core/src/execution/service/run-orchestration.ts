@@ -37,15 +37,12 @@
 //   executeWorkflowAgent → WorkflowDispatch / engineSupportsConversation + deliverChatMessage
 //   → ChatRounds，2026-09-13 接线）；聚合内部互调（executeViaEngine/
 //   settleOneShotOutcome 族等）不经壳。
-// 3. 跨聚合边收敛（r0-inventory 清单① C-4/C-5 + B-6）：
+// 3. 跨聚合边收敛（r0-inventory 清单① C-4/C-5）：
 //   - C-4（壳 dispose 直调 continuations.clear）：字段所有权随 Continuation 协作面迁
 //     chat-rounds.ts，壳经其 clearContinuations() 显式接口（R4 兑现，接线 2026-09-13）。
 //   - C-5（onRecordFinalizedCleanup 跨域汇聚点 + abortContinuationQueue 队列清空）：
 //     本体迁 chat-rounds.ts；RecordLifecycle deps 回调（R3 装配时指壳方法）改指聚合
 //     显式接口（R4 兑现，接线 2026-09-13）。
-//   - B-6（roundSupervisor 归属争议）：留壳——boot 分区（initSession）与 dispose 时序
-//     消费在壳、装配闭包 finalizeClosed 经壳转发 late-bound（C-6 天然兼容）；本聚合
-//     零消费（真实消费方在兄弟聚合 workflow-dispatch / chat-rounds，各自 deps 通道）。
 // 4. 只搬不改：方法体除依赖通道替换（this.X → this.deps.getY()）外逐字节保留
 //   （审计 /tmp/r4-move-audit.py）；r0-inventory 清单② A 通道直写 14 处（#12 域
 //   executeAndAwait 1 处 + #14 域 13 处——任务口径 12 处按「#14 域 adopt 三行并 1」
@@ -63,8 +60,8 @@ import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
 import { project } from "../persistence/execution-record.ts";
 // [P1b-1] settle 链收口单点（settleOneShotOutcome workflow origin 分支的终态收口
-// 迁入；execution/service → orchestration import 为既有先例方向——file-run-store）。
-import { settleWorkflowRecord } from "../../orchestration/worker-message-pump.ts";
+// 迁入；execution/service → orchestration import 为既有先例方向——run-state-evidence）。
+import { settleWorkflowRecord } from "../../orchestration/terminal-actions.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
@@ -707,7 +704,7 @@ export class RunOrchestration {
     // 抢锁（承接现状「cancel/dispose 抢先 → 静默跳过」守卫语义）。
     // [P1b-1] 直写通道删除：closed/cancelled 终态判定不再在本方法直写——收口至
     // worker-message-pump 的 settleWorkflowRecord 单点（D7 例外族 CAS + finalize 对
-    // 的唯一剩余处）；ask-settled/run-settled 事件面由同文件状态机接线段承载。
+    // 的唯一剩余处）；agent-settled/run-settled 事件面由同文件状态机接线段承载。
     if (record.origin === "workflow") {
       await settleWorkflowRecord(record, result, aborted ? "cancelled" : "gc", {
         finalizeRecord: (r, closedReason) => this.deps.finalizeRecord(record, r, "closed", closedReason),

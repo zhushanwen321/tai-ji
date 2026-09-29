@@ -8,7 +8,7 @@
 //    run-settled(cancelled)——journal 词表恰无 cancel-requested 帧）。
 // 2. 终局后让位：并发终态化（抢先 transition）→ finalizeRun 让位返回 false，journal
 //    零追加（M12 语义 + 单写者纪律）。
-// 3. dispatchAgentCall 的 ask 事件链：ask-dispatched（派发时）+ ask-settled(completed，
+// 3. dispatchAgentCall 的 ask 事件链：agent-started（派发时）+ agent-settled(completed，
 //    完成回调时)——taskIndex = callId 单源、attempt = call.attempts。
 // 4. journal 目录测试注入（setRunEventJournalDirForTest + mkdtemp 自建自删，测试红线：
 //    不触真实数据目录）。
@@ -22,12 +22,14 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  handleWorkerMessage,
+} from "../worker-message-pump.ts";
+import {
   dispatchRunCreated,
   dispatchRunTrigger,
   finalizeRun,
-  handleWorkerMessage,
   setRunEventJournalDirForTest,
-} from "../worker-message-pump.ts";
+} from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { AgentCall } from "../models/agent-call.ts";
 import { Budget } from "../models/budget.ts";
@@ -57,14 +59,14 @@ function scanRunEvents(runId: string) {
 }
 
 /** 构造真实 WorkflowRun（真实状态机 transition）。 */
-function makeRealRun(runId: string): WorkflowRun {
+function makeRealRun(runId: string, specOverrides: { scriptPath?: string } = {}): WorkflowRun {
   const run = new WorkflowRun(
     runId,
     {
       scriptName: "test-wf",
       scriptSource: "agent('hi')",
       args: {},
-      scriptPath: "/tmp/test-wf.js",
+      scriptPath: specOverrides.scriptPath ?? "/tmp/test-wf.js",
     },
     {
       status: "running",
@@ -136,7 +138,22 @@ describe("finalizeRun 落 run-settled（终态单写点）", () => {
     const events = await scanRunEvents("wf-ev-1");
     // 零 ask run：正点 run-created + run-settled
     expect(events.map((e) => e.type)).toEqual(["run-created", "run-settled"]);
-    expect(events[1]).toMatchObject({ type: "run-settled", outcome: "completed" });
+    expect(events[1]).toMatchObject({ type: "run-settled", outcome: "done" });
+  });
+
+  it("run-created 帧携带 scriptPath 锚定载荷（spec.scriptPath 非空才落字段——空值防御形态不落）", async () => {
+    const run = makeRealRun("wf-ev-anchor");
+    await dispatchRunCreated(run);
+
+    const events = await scanRunEvents("wf-ev-anchor");
+    expect(events[0]).toMatchObject({ type: "run-created", scriptPath: "/tmp/test-wf.js" });
+
+    const empty = makeRealRun("wf-ev-anchor-empty", { scriptPath: "" });
+    await dispatchRunCreated(empty);
+
+    const emptyEvents = await scanRunEvents("wf-ev-anchor-empty");
+    expect(emptyEvents[0]).toMatchObject({ type: "run-created" });
+    expect("scriptPath" in emptyEvents[0]).toBe(false);
   });
 
   it("failed → run-settled(failed)，reason 承载诊断文本", async () => {
@@ -194,7 +211,7 @@ describe("finalizeRun 落 run-settled（终态单写点）", () => {
 // ── 2. dispatchAgentCall 的 ask 事件链 ───────────────────────
 
 describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
-  it("agent-call 派发 → ask-dispatched；完成 → ask-settled(completed, attempt=1)", async () => {
+  it("agent-call 派发 → agent-started；完成 → agent-settled(completed, attempt=1)", async () => {
     const run = makeRealRun("wf-ev-6");
     await dispatchRunCreated(run);
     const deps = makeDeps();
@@ -217,12 +234,12 @@ describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
 
     expect(run.state.status).toBe("running"); // 正常完成不触发终局
     const events = await scanRunEvents("wf-ev-6");
-    expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "ask-settled"]);
+    expect(events.map((e) => e.type)).toEqual(["run-created", "agent-started", "agent-settled"]);
     expect(events[1]).toMatchObject({ taskIndex: 3, agentName: "reviewer", attempt: 1 });
     expect(events[2]).toMatchObject({
       taskIndex: 3,
       attempt: 1,
-      outcome: "completed",
+      outcome: "done",
       durationMs: 7,
     });
   });
@@ -251,8 +268,8 @@ describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
 
     const events = await scanRunEvents("wf-ev-7");
     // 终局帧存在（runner 内抢先 finalizeRun 不发生——本用例只 transition 不 finalize，
-    // journal 无 run-settled；核心断言 = 无 ask-settled 迟到帧）
-    expect(events.some((e) => e.type === "ask-settled")).toBe(false);
+    // journal 无 run-settled；核心断言 = 无 agent-settled 迟到帧）
+    expect(events.some((e) => e.type === "agent-settled")).toBe(false);
   });
 });
 
@@ -263,7 +280,7 @@ describe("run-created 正点接线（无双帧 + 引导退役）", () => {
     const run = makeRealRun("wf-ev-dual");
     await dispatchRunCreated(run);
 
-    // 正点后的 ask 事件照常落账（fold 出 dispatched，ask-dispatched 合法转移）
+    // 正点后的 ask 事件照常落账（fold 出 dispatched，agent-started 合法转移）
     const deps = makeDeps();
     deps.runner.run = vi.fn(async () =>
       ({ content: "ok", durationMs: 1, toolCalls: [] }) as AgentResult,
@@ -285,7 +302,7 @@ describe("run-created 正点接线（无双帧 + 引导退役）", () => {
     // 双帧不存在：run-created 恰好一帧（正点），后续触发零补投
     expect(events.filter((e) => e.type === "run-created")).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: "run-created", workflowName: "test-wf" });
-    expect(events.slice(1).map((e) => e.type)).toEqual(["ask-dispatched", "ask-settled"]);
+    expect(events.slice(1).map((e) => e.type)).toEqual(["agent-started", "agent-settled"]);
 
     // 正点重复发射 = 表外转移 fail-fast（ask 全链后 fold 停在 running——无论哪个
     // 非 created 态，run-created 均无表行，双帧构造性排除）
@@ -297,7 +314,7 @@ describe("run-created 正点接线（无双帧 + 引导退役）", () => {
 
     await expect(
       dispatchRunTrigger(run, {
-        type: "ask-dispatched",
+        type: "agent-started",
         taskIndex: 1,
         agentName: "a",
         attempt: 1,
@@ -338,21 +355,24 @@ describe("finalizeRun 的 run-settled errorCode 构造（DoneReason → RunError
     });
   });
 
-  it("budget_limited → errorCode=budget_limited；time_limited → time_limited（run 级终局码恒等映射）", async () => {
-    for (const reason of ["budget_limited", "time_limited"] as const) {
-      const run = makeRealRun(`wf-ev-${reason}`);
-      await dispatchRunCreated(run);
-      const deps = makeDeps();
-
-      await finalizeRun(run, deps, reason, { context: "test" });
-
-      const events = await scanRunEvents(`wf-ev-${reason}`);
-      expect(events.at(-1)).toMatchObject({
-        type: "run-settled",
-        outcome: "failed",
-        errorCode: reason,
-      });
-    }
+  it("budget_limited → failed + errorCode=budget_limited；time_limited → outcome 直判无码（[D2] 升格——新写入方不产出该 errorCode）", async () => {
+    // budget_limited：维持 failed && errorCode 分级（预算耗尽仍是 failed 终局的错误码）
+    const budgetRun = makeRealRun("wf-ev-budget_limited");
+    await dispatchRunCreated(budgetRun);
+    await finalizeRun(budgetRun, makeDeps(), "budget_limited", { context: "test" });
+    expect((await scanRunEvents("wf-ev-budget_limited")).at(-1)).toMatchObject({
+      type: "run-settled",
+      outcome: "failed",
+      errorCode: "budget_limited",
+    });
+    // time_limited：[D2] 升格为独立 outcome，errorCode 缺省（超时终局直判）
+    const timeRun = makeRealRun("wf-ev-time_limited");
+    await dispatchRunCreated(timeRun);
+    await finalizeRun(timeRun, makeDeps(), "time_limited", { context: "test" });
+    expect((await scanRunEvents("wf-ev-time_limited")).at(-1)).toMatchObject({
+      type: "run-settled",
+      outcome: "time_limited",
+    });
   });
 
   it("failed + failureKind（无协议码前缀）→ failureKind 落码（ask 级分诊标签兜底）", async () => {
@@ -390,7 +410,7 @@ describe("finalizeRun 的 run-settled errorCode 构造（DoneReason → RunError
     await dispatchRunCreated(runDone);
     await finalizeRun(runDone, makeDeps(), "completed", { context: "test" });
     const doneEvents = await scanRunEvents("wf-ev-ok2");
-    expect(doneEvents.at(-1)).toMatchObject({ type: "run-settled", outcome: "completed" });
+    expect(doneEvents.at(-1)).toMatchObject({ type: "run-settled", outcome: "done" });
     expect(doneEvents.at(-1)).not.toHaveProperty("errorCode");
 
     const runAbort = makeRealRun("wf-ev-abort");
@@ -402,9 +422,9 @@ describe("finalizeRun 的 run-settled errorCode 构造（DoneReason → RunError
   });
 });
 
-// ── 5. dispatchAgentCall 重试轨迹（ask-retrying 帧补投 + 静默反向） ──
+// ── 5. dispatchAgentCall 重试轨迹（agent-retrying 帧补投 + 静默反向） ──
 
-describe("dispatchAgentCall 重试轨迹（ask-retrying 帧 + 静默反向）", () => {
+describe("dispatchAgentCall 重试轨迹（agent-retrying 帧 + 静默反向）", () => {
   it("两次失败后成功 → journal dispatched→retrying{attempt:1}→retrying{attempt:2}→settled{attempt:3}（backoffMs 实测 = 退避调度值）", async () => {
     vi.useFakeTimers();
     try {
@@ -442,7 +462,7 @@ describe("dispatchAgentCall 重试轨迹（ask-retrying 帧 + 静默反向）", 
       await vi.advanceTimersByTimeAsync(1000); // 首退避（BACKOFF 1000ms）→ attempt 2
       await flushMicrotasks();
       await vi.advanceTimersByTimeAsync(2000); // 次退避（BACKOFF 2000ms）→ attempt 3 成功
-      await flushMicrotasks(); // ask-settled 投递链落账
+      await flushMicrotasks(); // agent-settled 投递链落账
 
       expect(run.state.status).toBe("running"); // call 成功不触发终局
       // 静默反向（D7）：重试窗口零终局通知（journal 事件落账 ≠ 通知）
@@ -450,22 +470,22 @@ describe("dispatchAgentCall 重试轨迹（ask-retrying 帧 + 静默反向）", 
       const events = await scanRunEvents("wf-ev-retry");
       expect(events.map((e) => e.type)).toEqual([
         "run-created",
-        "ask-dispatched",
-        "ask-retrying",
-        "ask-retrying",
-        "ask-settled",
+        "agent-started",
+        "agent-retrying",
+        "agent-retrying",
+        "agent-settled",
       ]);
-      expect(events[2]).toMatchObject({ type: "ask-retrying", taskIndex: 2, attempt: 1, backoffMs: 1000 });
-      expect(events[3]).toMatchObject({ type: "ask-retrying", taskIndex: 2, attempt: 2, backoffMs: 2000 });
+      expect(events[2]).toMatchObject({ type: "agent-retrying", taskIndex: 2, attempt: 1, backoffMs: 1000 });
+      expect(events[3]).toMatchObject({ type: "agent-retrying", taskIndex: 2, attempt: 2, backoffMs: 2000 });
       // reason 摘要：首退避帧携带失败文案（engine 码前缀保留）
       expect((events[2] as { reason?: string }).reason).toContain("engine_crashed");
-      expect(events[4]).toMatchObject({ type: "ask-settled", taskIndex: 2, attempt: 3, outcome: "completed" });
+      expect(events[4]).toMatchObject({ type: "agent-settled", taskIndex: 2, attempt: 3, outcome: "done" });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("非重试终局（stale_context 不重试）→ 零 ask-retrying 帧（构造性零假帧）", async () => {
+  it("非重试终局（stale_context 不重试）→ 零 agent-retrying 帧（构造性零假帧）", async () => {
     const run = makeRealRun("wf-ev-noretry");
     await dispatchRunCreated(run);
     const deps = makeDeps();
@@ -487,7 +507,7 @@ describe("dispatchAgentCall 重试轨迹（ask-retrying 帧 + 静默反向）", 
     await flushMicrotasks();
 
     const events = await scanRunEvents("wf-ev-noretry");
-    expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "ask-settled"]);
+    expect(events.map((e) => e.type)).toEqual(["run-created", "agent-started", "agent-settled"]);
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 });

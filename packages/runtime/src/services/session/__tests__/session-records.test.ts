@@ -1209,11 +1209,11 @@ describe('[W1] 读侧换源：v1 旧会话冻结对照 / v2 读投影 / 全文�
         JSON.stringify({ type: 'session', id: 's1', cwd }),
         JSON.stringify(subagentRegisteredV2('sa-1')),
         JSON.stringify(subagentSettledV2('sa-1')),
-        JSON.stringify(workflowRegisteredV2('wf-1', join(world.runJournalDir, 'wf-1.events.jsonl'))),
+        JSON.stringify(workflowRegisteredV2('wf-1', join(world.runJournalDir, 'wf-1.record.jsonl'))),
       ].join('\n') + '\n')
-      writeFileSync(join(world.runJournalDir, 'wf-1.events.jsonl'), [
+      writeFileSync(join(world.runJournalDir, 'wf-1.record.jsonl'), [
         JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'test-flow', argsSummary: '', ts: 1000 }),
-        JSON.stringify({ type: 'ask-dispatched', taskIndex: 0, agentName: 'worker', attempt: 1, ts: 1100 }),
+        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'worker', attempt: 1, ts: 1100 }),
       ].join('\n') + '\n')
       const { records } = makeRecords({
         sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: world.sessionFile, cwd }]) } as unknown as ISessionStore,
@@ -1252,11 +1252,11 @@ describe('[W1] 读侧换源：v1 旧会话冻结对照 / v2 读投影 / 全文�
       ].join('\n') + '\n')
       writeFileSync(world.sessionFile, [
         JSON.stringify(subagentRegisteredV2('sa-1')),
-        JSON.stringify(workflowRegisteredV2('wf-1', join(world.runJournalDir, 'wf-1.events.jsonl'))),
+        JSON.stringify(workflowRegisteredV2('wf-1', join(world.runJournalDir, 'wf-1.record.jsonl'))),
       ].join('\n') + '\n')
-      writeFileSync(join(world.runJournalDir, 'wf-1.events.jsonl'), [
+      writeFileSync(join(world.runJournalDir, 'wf-1.record.jsonl'), [
         JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'test-flow', argsSummary: '', ts: 1000 }),
-        JSON.stringify({ type: 'ask-dispatched', taskIndex: 0, agentName: 'worker', attempt: 1, ts: 1100 }),
+        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'worker', attempt: 1, ts: 1100 }),
       ].join('\n') + '\n')
       const { records, publish } = makeRecords({
         sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: world.sessionFile, cwd }]) } as unknown as ISessionStore,

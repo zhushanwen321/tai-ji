@@ -61,8 +61,8 @@ landing 页 chip 区（`packages/renderer/src/components/new-task/Landing.vue` �
 1. 用户此前在某 session 显式切到模型 `zai-coding-cn/glm-5.3` → `onModelSelect` 非 staging 分支写 `lastUsedModel` KV（`model-thinking.ts:385/402`，key `taiji:last-used-model`）
 2. 用户回到 landing 新建任务，**没有碰模型 chip**。chip 按显示链兜底：`pendingModel(null) → lastUsedModel('zai-coding-cn/glm-5.3')` → **显示 GLM-5.3**
 3. 用户输入消息发送 → `submitFirstMessage` 只透传 `pendingModel.value`（null，`flow.ts:264`）→ `session.create` 无 `modelOverride`
-4. runtime 创建链：`modelOverride(无) → preset.modelOverride(无 preset) → pi 全局默认`（`launch-params.ts:165` → `rpc-client.ts:169-173` 读 pi settings.json `defaultProvider/defaultModel`，用户机器上 = `xiaomi-token-plan-cn/mimo-v2.5-pro`）
-5. 进入对话流，composer 切「已建态」读 session 真值（get_state 读回播种）→ **显示 MiMo-V2.5-Pro**；trace 同
+4. runtime 创建链：`modelOverride(无) → preset.modelOverride(无 preset) → pi 全局默认`（`launch-params.ts:165` → `rpc-client.ts:169-173` 读 pi settings.json `defaultProvider/defaultModel`，即本机 pi 配置的默认模型，模型无关）
+5. 进入对话流，composer 切「已建态」读 session 真值（get_state 读回播种）→ **显示该默认模型对应名称**；trace 同
 
 用户视角：「我明明选中的是 A」——实际上他选中的是显示层的兜底值，生效层从未见过它。
 

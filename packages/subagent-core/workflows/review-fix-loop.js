@@ -102,7 +102,13 @@ function fail(msg) {
 // （D1 加固），缺席即 fail-fast，不回退 cwd——消除从用户目录误加载/被植入同名
 // review-fix-loop-utils.cjs 的代码加载面。
 // 校验先于 $ARGS 白名单执行；fail 为函数声明（提升可用），沿用同一失败输出协议。
-if (typeof workerData === "undefined" || !workerData || typeof workerData.scriptPath !== "string") {
+// 空串形态 = record 流为 scriptPath 载荷落地前的旧格式（resume 重建无锚可恢复），
+// 与缺席同拦——不回退 cwd 的安全语义不变。
+if (typeof workerData === "undefined" || !workerData || typeof workerData.scriptPath !== "string" || workerData.scriptPath === "") {
+  if (workerData && typeof workerData.scriptPath === "string") {
+    fail("core_module_load_failed: workerData.scriptPath 为空串（record 流为旧格式，无 scriptPath 载荷），无法定位 review-fix-loop-utils.cjs。" +
+      "恢复动作：重跑该 workflow——旧 run 不支持 resume 续跑。");
+  }
   fail("core_module_load_failed: workerData.scriptPath 缺失，无法定位 review-fix-loop-utils.cjs。" +
     "恢复动作：worker 宿主（WorkerHost）启动 worker 时必须经 workerData 注入 scriptPath" +
     "（指向本脚本真实路径，注入点见 src/orchestration/worker-host.ts 的 workerData 组装处），" +
@@ -249,7 +255,7 @@ const convergeRounds = coerceInt($ARGS.convergeRounds, 2);
 const MODEL = $MODEL;
 // rfl aggregator 降档（tier-1 6.4，T8）：聚合是机械去重/格式化工作，可降档到便宜
 // 模型。模型路由参考全局/项目 AGENTS.md（当前用户全局有条目：
-// xiaomi-token-plan-cn/mimo-v2.5-pro，thinking 开非 max）；无条目请先与主人确认
+// xiaomi-token-plan-cn/mimo-v2.6-flash，thinking 开非 max）；无条目请先与主人确认
 // 并写入 AGENTS.md。缺省回退主模型（行为与现状一致）。
 const AGG_MODEL = resolveAggregatorModel($ARGS.aggregatorModel, MODEL);
 

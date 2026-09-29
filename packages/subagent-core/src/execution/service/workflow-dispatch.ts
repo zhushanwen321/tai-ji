@@ -19,8 +19,8 @@
 //
 // [R1 打样模式——R4 落地]（模式权威定义见 session-baselines.ts 文件头）
 // 1. 依赖注入形态：deps 全晚绑定闭包（构造期零求值）——execNesting / streamSink /
-//    sessionRootId 等会话基线运行时可变态经壳 getter 现读；modelService /
-//    roundSupervisor 等 #1 留壳共享依赖 getter 现读同一实例。
+//    sessionRootId 等会话基线运行时可变态经壳 getter 现读；modelService 等 #1 留壳
+//    共享依赖 getter 现读同一实例。
 // 2. 模块常量 SSOT：PRIORITY_BACKGROUND 已 [R6/D-R4-4] 归一常量叶子文件
 //    service-constants.ts（原两聚合重复声明消除，改 import 消费）。
 // 3. 只搬不改：两方法 + 类外 5 helper 自壳文件迁移，方法体除依赖通道替换
@@ -38,13 +38,14 @@ import { assertModelInCatalog } from "../../orchestration/model-catalog.ts";
 // [D3 协议版 P6] armed 回执落账投递（runId 键入口；observedEvent 消费点）。value
 // import 方向 execution/service → orchestration/pump：pump 的传递闭包（persistence/
 // assembly/orchestration 内部）不 import execution/service，无循环。
-// [U4 pi-workflow-run-resource-model] 同文件的 dispatchRunTrigger / scanRunEvents
-// 供成员复用池的 journal 读写注入面（MemberReusePoolIo 生产装配）。
+// [U4 → D15/D6] dispatchRunTrigger / scanRunEvents 迁 terminal-actions（终局编排
+// 入口 + 投递域单写者链），供成员复用绑定的 record 读注入面（MemberReusePoolIo
+// 生产装配）。dispatchRunArmedReceipt 随 [D5] armed 词表成员删除而退役——引擎
+// armed 回执的消费落账面整体删除（占位事件无生产语义）。
 import {
-  dispatchRunArmedReceipt,
   dispatchRunTrigger,
   scanRunEvents,
-} from "../../orchestration/worker-message-pump.ts";
+} from "../../orchestration/terminal-actions.ts";
 // [U4] 成员复用池（决策 4/9/10 的机制本体；orchestration → execution 零反向依赖，
 // 池的 journal 读写经 io 注入，无环）。
 import {
@@ -77,7 +78,6 @@ import type { NotifyHost } from "../notify/notify-host.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import type { RoundSupervisor } from "../round-supervisor/index.ts";
 import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
 // 嵌套深度护栏单点（与 run-orchestration 同源；聚合间零互调不受影响——共同 import
 // 叶子 helper 文件是既有形态，G2 禁的是两聚合互相 import）。
@@ -121,7 +121,7 @@ export type MemberReviveOutcome =
  *   getSessionRootId / getPi 通道外的 NotifyHost 投影）：initSession 注入的运行时可变
  *   态现读。
  * - R3 聚合显式接口（resolveIdentity / resolveIdentityForEngine / createRecordForMode）
- *   与 #1 留壳共享依赖（getModelService / getNotifyHost / getRoundSupervisor）。
+ *   与 #1 留壳共享依赖（getModelService / getNotifyHost）。
  * - 同域跨文件协作回调（经壳编排指 run-orchestration 实例方法，零 import）：
  *   resolveChatEnginePort / acquirePoolOrFinalize / outcomeToAgentResult /
  *   settleOneShotOutcome / releaseRoundResources；finalizeFailed 指 RecordLifecycle。
@@ -166,8 +166,6 @@ export interface WorkflowDispatchDeps {
   readonly getUiObservability: () => UiRequestObservability;
   /** 根 session id（relay 归属键 SESSION_ID 权威源；SessionBaselines 现读）。 */
   readonly getSessionRootId: () => string | null;
-  /** [B-6 留壳] 轮次活性监督器（在途记账 noteRunStarted/noteRunEnded）。 */
-  readonly getRoundSupervisor: () => RoundSupervisor;
   /** [RunOrchestration 协作回调] 池槽获取（失败路径含 S1 cancelled 终态收口）。 */
   readonly acquirePoolOrFinalize: (
     record: ExecutionRecord,
@@ -205,12 +203,12 @@ export class WorkflowDispatch {
   private readonly deps: WorkflowDispatchDeps;
 
   /**
-   * [U4] 成员复用池的 journal 读写注入面（本聚合单点装配；与 pump finalizeRun 清空
-   * 侧同款——append 经 dispatchRunTrigger 单写者链、scan 经 scanRunEvents 同源
-   * 防线，池侧不自建 journal 实例）。
+   * [U4 → D6] 成员复用绑定的 record 读注入面（本聚合单点装配；scan 经
+   * terminal-actions 的 scanRunEvents 同源防线，不自建 journal 实例）。append
+   * 通道随 [D6] 绑定消解删除——绑定随 agent-started 帧落账（pump dispatchAgentCall
+   * 链），登记收尾只改内存（member-reuse-pool.registerMemberRecord）。
    */
   private readonly memberReusePoolIo: MemberReusePoolIo = {
-    appendEvent: (runId, event) => dispatchRunTrigger({ runId }, event),
     scanEvents: (runId) => scanRunEvents(runId),
   };
 
@@ -483,9 +481,6 @@ export class WorkflowDispatch {
 
     const journal = wireEventJournal({ engineId: engine.id, taskId: record.id, forwardEvents: onEvent });
     let runSignal: MergedRunSignalHandle | undefined;
-    // [W4] 在途记账（监督器「该等」判据源；与 kickOffChatRound 同款
-    //——运行期监督对 workflow record 照旧纳管，只豁免 adopt 接管）。
-    this.deps.getRoundSupervisor().noteRunStarted(record.id);
     try {
       // timeoutMs + 外部 signal 并入同一合流。
       runSignal = mergeRunSignals(
@@ -494,14 +489,9 @@ export class WorkflowDispatch {
       );
       const journalOnEvent = journal.onEvent;
       const observedEvent = (event: AgentEvent): void => {
-        // [D3 协议版 P6] armed 回执消费落账：引擎武装回执经宿主 run 事件路由到达本
-        // 编排点，投递 dispatchRunArmedReceipt 落 run 事件 journal（dispatched/running
-        // 自环行；run 聚合不出 orchestration 层——runId 键入口）。宿主等待门
-        // （remote-engine）之外的第二消费面 = journal 取证通道。非 workflow origin
-        // record 无 parentRunId（chat 域无 run journal），回执不落账。
-        if (event.type === "armed" && record.parentRunId !== undefined) {
-          dispatchRunArmedReceipt(record.parentRunId, event);
-        }
+        // [D5] armed 回执的落账消费点已随占位事件删除（占位形态协议版落地前无
+        // 生产写入方——词表无死成员裁决；宿主等待门 remote-engine 的消费面不受
+        // 影响，journal 取证通道不再接收回执）。
         // [H2 A3 修复] live reducer 喂入恢复：W3 删 inproc pi 引擎时，原
         // engines/pi/session-runner.ts agentEvent 出口的 updateFromEvent(record, event)
         // 一并消失，协议化 service 侧未重建——record.turns/totalTokens 在 live 通路
@@ -551,10 +541,10 @@ export class WorkflowDispatch {
     } catch (err) {
       // swallow（不 re-throw）：脚本观察到合成 failed result 而非异常（引擎死亡
       // engine_crashed 同路）；record 由失败路径立即终态化（finalizeFailed CAS →
-      // finalizeRecord；adopt 豁免——workflow record 不保持纳管态交监督器）。
+      // finalizeRecord），不保持 running 态。
       // [P1b-1] 静默吞失败路径的终态写入已经 transition 体系收口：deps.finalizeFailed
       // 内部改调 worker-message-pump 的 settleWorkflowRecord 单点（原直写对删除），
-      // ask-settled 事件面由 pump call 完成链投递——失败不再绕过状态机体系无痕。
+      // agent-settled 事件面由 pump call 完成链投递——失败不再绕过状态机体系无痕。
       const failed = await this.deps.finalizeFailed(record, err);
       return mapToWorkflowAgentResult(failed);
     } finally {
@@ -563,7 +553,6 @@ export class WorkflowDispatch {
       runSignal?.dispose();
       this.deps.releaseRoundResources(record, pooled && acquired, effectiveStream);
       await journal.close();
-      this.deps.getRoundSupervisor().noteRunEnded(record.id);
     }
   }
 }
@@ -589,7 +578,7 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
     sessionFile: outcome.sessionFile,
     worktreePath: outcome.worktreePath,
     // [D5 诊断引用落账] 失败伴随的 stderr tee 路径透传（引擎终态应答 → call.result
-    // → dispatchAskSettled 载荷；上报判据见 AgentOutcome.stderrTeePath 注释）。
+    // → dispatchAgentSettled 载荷；上报判据见 AgentOutcome.stderrTeePath 注释）。
     ...(outcome.stderrTeePath !== undefined ? { stderrTeePath: outcome.stderrTeePath } : {}),
     toolCalls: outcome.toolCalls,
   };

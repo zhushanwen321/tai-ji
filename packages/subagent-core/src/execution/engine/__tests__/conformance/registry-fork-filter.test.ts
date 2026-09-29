@@ -34,7 +34,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // session 档机器已整体删除，entries 是唯一状态源（跨包语义耦合面收敛到该函数）。
 import { countActiveFromEntries } from "../../../../../../../extensions/universal/pending-notifications/src/state.ts";
 
-import { runReconcileSweep } from "../../../round-supervisor/index.ts";
+import { runReconcileSweep } from "../../../registry-reconcile/index.ts";
 
 /** pending:register entry 的落盘形态（对齐 pending-notifications 写入侧契约）。 */
 function registerEntry(

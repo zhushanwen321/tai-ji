@@ -20,7 +20,7 @@
 
 ### 1.2 系统是什么（受众认知铺垫）
 
-**RecordStore** 是所有 subagent record 的统一注册表：内存持有 running、终态从 session.jsonl 重建，持久化/恢复/对账/GUI 列表投影都挂在它上面。**AgentRunner** 是 workflow 引擎调用子代理的 port（`orchestration/models/ports.ts:35`），现由 `SubprocessAgentRunner` 实现——它内部委托 `executeAndAwait`（真实执行），但自持一套**编排**（路由/预检/journal/守护的调度顺序）。**WorkflowRun** 是 workflow 聚合根（含 trace 节点树），持久化在 FileRunStore（JSONL）——run 级状态与 record 级状态是两层，本设计只动 record 级与进度通道。
+**RecordStore** 是所有 subagent record 的统一注册表：内存持有 running、终态从 session.jsonl 重建，持久化/恢复/对账/GUI 列表投影都挂在它上面。**AgentRunner** 是 workflow 引擎调用子代理的 port（`orchestration/models/ports.ts:35`），现由 `SubprocessAgentRunner` 实现——它内部委托 `executeAndAwait`（真实执行），但自持一套**编排**（路由/预检/journal/守护的调度顺序）。**WorkflowRun** 是 workflow 聚合根（含 trace 节点树），持久化在 run journal（事件流单源，折叠即完整状态）——run 级状态与 record 级状态是两层，本设计只动 record 级与进度通道。
 
 ### 1.3 设计目标
 
@@ -31,7 +31,7 @@
 ### 1.4 in / out scope
 
 **in**：record `origin`/`parentRunId` 字段与投影层过滤；workflow origin 成功收尾分支（settleOneShotOutcome）；编排归一（executeWorkflowAgent 接管 SAR.run）；pump 进度 record 删除与 trace.live 退役；views/run-snapshot 的 live 消费方改造；`pending:unregister` 发射面按域分明回写；约束回写。
-**out**：workflow 脚本语言/script-lint 本体；WorkflowRun 聚合根与 FileRunStore（run 级状态保留原状）；workflow 视图 UI 改版（只换数据源）；H4 持久化收敛；run 级 pending 注册/注销对（lifecycle ↔ pump，本就配对，不动）。
+**out**：workflow 脚本语言/script-lint 本体；WorkflowRun 聚合根与 run 持久化面（run 级状态保留原状）；workflow 视图 UI 改版（只换数据源）；H4 持久化收敛；run 级 pending 注册/注销对（lifecycle ↔ pump，本就配对，不动）。
 
 ---
 
@@ -39,7 +39,7 @@
 
 ### 2.1 使用者视角的现状（真实链路）
 
-用户在 GUI 跑一个 workflow：`parallel(() => agent("调研 A"), () => agent("调研 B"), () => agent("写总结"))`。每个 agent() 调用：worker 发消息 → pump `dispatchAgentCall`（`:700-792`）**先建游离 progress record**（挂 trace.live，TUI 进度用）→ `runner.run(opts)` → SAR.run 平行编排（路由/预检/journal/`armMidRoundNoProgress(taskId)`）→ 委托 `executeAndAwait` → **真实 record 注册进 store**（emitPendingRegister `:1849-1850`）→ 池 acquire → 执行 → 成功走 `settleOneShotOutcome` **保持 running-idle**（`:2536-2538`）→ AgentResult 回填 `node.result`、progress record 清除。重启后：WorkflowRun 由 FileRunStore 重水合（trace result 摘要在，进度即失）；真实 record 经 store 孤儿恢复——恢复成什么状态取决于崩溃时点，成功完成的 record 已长期 idle 驻留。
+用户在 GUI 跑一个 workflow：`parallel(() => agent("调研 A"), () => agent("调研 B"), () => agent("写总结"))`。每个 agent() 调用：worker 发消息 → pump `dispatchAgentCall`（`:700-792`）**先建游离 progress record**（挂 trace.live，TUI 进度用）→ `runner.run(opts)` → SAR.run 平行编排（路由/预检/journal/`armMidRoundNoProgress(taskId)`）→ 委托 `executeAndAwait` → **真实 record 注册进 store**（emitPendingRegister `:1849-1850`）→ 池 acquire → 执行 → 成功走 `settleOneShotOutcome` **保持 running-idle**（`:2536-2538`）→ AgentResult 回填 `node.result`、progress record 清除。重启后：WorkflowRun 由 run journal 折叠重建（trace result 摘要在，进度即失）；真实 record 经 store 孤儿恢复——恢复成什么状态取决于崩溃时点，成功完成的 record 已长期 idle 驻留。
 
 ### 2.2 问题清单（带证据）
 
@@ -69,7 +69,7 @@ workflow 域早于引擎协议化演进定型。协议化（D3 系列）把真�
 → workflow run 视图实时进度 = store 订阅（parentRunId 查询本 run 的 record 集，
    getEventLog/getCurrentActivity 同源）；trace 节点保留终态摘要（result）
 → agent() 成功 → record 即终态化（closed/gc 自然完成，D7）——GUI working 态不被绑架
-→ 重启后：run 视图照常（FileRunStore）+ 各步 record 终态由 store 恢复
+→ 重启后：run 视图照常（journal 折叠重建）+ 各步 record 终态由 store 恢复
 → GUI subagent 列表 / TUI /subagents 默认不显示（投影层 origin 过滤；
    list includeFinished:true (add includeWorkflow:true to also see workflow-dispatched subagents)
    可查——排查通道保留）
@@ -80,7 +80,7 @@ workflow 域早于引擎协议化演进定型。协议化（D3 系列）把真�
 | 场景 | 行为 | 恢复指引 |
 |------|------|---------|
 | agent() 失败 | record 标 failed 终态（现状语义不变）+ trace node 终态 | 脚本重跑该步 |
-| 宿主重启于 agent() 在途 | record 经 store 孤儿恢复终态化；WorkflowRun 经 FileRunStore 恢复 | run 视图重开显示各步终态 |
+| 宿主重启于 agent() 在途 | record 经 store 孤儿恢复终态化；WorkflowRun 经 journal 折叠重建 | run 视图重开显示各步终态 |
 | record 与 trace 摘要不一致 | **record 为真相**，trace node 是摘要缓存（详情视图读 store） | 无需动作 |
 | 排查 workflow 子代理 | `subagents action:'list' includeFinished:true` (add includeWorkflow:true to also see workflow-dispatched subagents)（或 run 视图详情按 parentRunId 下钻） | 指引文案随 runner 改造更新 |
 
@@ -102,7 +102,7 @@ workflow 域早于引擎协议化演进定型。协议化（D3 系列）把真�
   ⑤ 磁盘重建投影不过滤（record 全量持久化，重建后投影层同规则生效）；
   ⑥ 通知恢复链（`recoverOrphanRecords`/revive）全量可见（治理面）。
   **不采用**：store 查询层默认过滤（破治理面）；按 slug 前缀推导（隐式约定，规则 19 之鉴）。
-  **[演进注记 2026-09-13，design-code-sync 追认 code-right]** 上述「过滤在投影/查询层，不在 store 层」与「不采用 store 查询层默认过滤」的字面口径已被实施现实取代：store 查询面 `includeWorkflow` 缺省 `false`（record-store.ts:1718，W1 单元的实施落点），治理面枚举全走缺省——workflow record 对 round-supervisor 运行期监督不可见。治理面全量的本意由「治理调用显式传 `includeWorkflow:true` 或不经该查询面」承接；见下方决策表 round-supervisor 行演进注记。
+  **[演进注记 2026-09-13，design-code-sync 追认 code-right]** 上述「过滤在投影/查询层，不在 store 层」与「不采用 store 查询层默认过滤」的字面口径已被实施现实取代：store 查询面 `includeWorkflow` 缺省 `false`（record-store.ts:1718，W1 单元的实施落点），治理面枚举全走缺省——workflow record 对设计时点的轮次监督器运行期监督不可见。治理面全量的本意由「治理调用显式传 `includeWorkflow:true` 或不经该查询面」承接；见下方决策表轮次监督器行演进注记。
 - **D2 进度源切换**：trace node 的 `live` 字段删除；views 改 store 订阅（parentRunId 查询 + record 事件 `getEventLog`/`getCurrentActivity` 同源 API）；`run-snapshot.ts` 剥离 live 序列化分支；node 保留 `result` 终态摘要。**stream 通道承接**：pump 的 `new SubagentStream`（`:790-792`）随 progress record 一并删除，streaming 由 service 派发路径既有通道承载（`executeAndAwait` stream 透传）。**查询域显式（v3）**：parentRunId 查询域 = **内存 ∪ 磁盘重建**（`collectRecords` 现状即内存 + 磁盘重建合并，`record-store.ts:8`）——D7 成功即 archive 出内存后，先完成步骤的 record 从磁盘重建面回查，run 视图不丢行；archive 终态快照的**实现锚点（v3 终审补）= 复用 archive 内置 notifyChange tick（订阅方收 tick 后经 parentRunId 查询域重查取终态 record）+ archive 内置终态 entry 同步落盘，store 侧零改动、不新增带 payload 的事件类型**；查询上限沿用 `LIST_LIMIT` 口径（`subagents.ts:236` 现状），超限分页不在本设计范围。
 - **D3 并发共享池（定性修正：回归验证非新行为）**：现状 SAR 委托 `executeAndAwait` → `runAndFinalize` → `acquirePoolOrFinalize`——**已走共享池**（v1 检查点①就此定案）[H2 实施勘误：H1 后 SAR 直调 engine.run、无 record，本条仅在 22f77c157 基线成立——共享池实为 W2 新增，见 impl-plan 偏差表 W2]。编排归一后保持「路由/预检**先于** acquire」的现行顺序（失败零池占用语义保留）；全局上限默认值实施期从 settings 读实际数入验收表。
 - **D4 守护单点**：no-progress 守护 arm 键从 taskId 归一为 record.id，service 派发路径统一 arm/disarm；**双刷新源包裹（journal.onEvent ∪ stream.onDelta）与 fire 恢复指引追注逐项复刻**（M3 语义不变，与 H1 Continuation 同模式；追注原 SAR 符号 `noteIfNoProgressFired` 已随编排归一消亡，现行落点 = runWorkflowEngineTask 内联追注 + armWorkflowNoProgressWatchdog 的 fired 判定）。
@@ -114,8 +114,8 @@ workflow 域早于引擎协议化演进定型。协议化（D3 系列）把真�
 
 | 机制 | 处置 |
 |------|------|
-| round-supervisor 运行期监督 | 纳管照旧（非 chatMode 全量纳管，H1 D8 定案；reconcile-sweep 对 workflow record 走标准对账）。**[演进注记 2026-09-13，design-code-sync 追认 code-right]** 现实口径：D7 成功即终态化后运行期监督对象稀薄（成功 record 不驻留 store 内存面）；store 查询面 `includeWorkflow` 缺省 `false`（record-store.ts:1718，W1 落点，见 D1 演进注记）使 workflow record 对 round-supervisor 不可见；workflow 域另有 `armWorkflowNoProgressWatchdog` 专属守护（settled-watchdog.ts）——「纳管照旧」以现状为准 |
-| round-supervisor **adopt 接管**（v3 改判） | **豁免**——豁免落点 = **service 分诊条件两处**（`runEngineTask`（已删）catch 的 engine_crashed 分支 :2379 与 `finalizeEngineOutcome`（已删）的 exitCode===null 分支 :2437，`chatMode !== true` 并列处加 origin，落空即 `finalizeFailed` 立即终态化）**+ supervisor 域分类**（domain.ts:39）双点，防单点豁免留下「无监督、永不终态化、pending 永不注销」的 resumable 僵尸（比现状更差）；理由 = 引擎死亡即 run 失败即 record 终态化（失败路径表），adopt 链的「唤醒→guidance→2h 看门狗→giveUp」对无脚本可回的 record 全程无意义且制造 2h 挂着不处理（watchdog 默认 `WATCHDOG_DEFAULT_HOURS=2`，`supervisor.ts:53`）；v2「纳管照旧」被轮 2 影响面 SUG-1/SUG-2 击穿后改判 |
+| 轮次监督器运行期监督 | 纳管照旧（非 chatMode 全量纳管，H1 D8 定案；reconcile-sweep 对 workflow record 走标准对账）。**[演进注记 2026-09-13，design-code-sync 追认 code-right]** 现实口径：D7 成功即终态化后运行期监督对象稀薄（成功 record 不驻留 store 内存面）；store 查询面 `includeWorkflow` 缺省 `false`（record-store.ts:1718，W1 落点，见 D1 演进注记）使 workflow record 对轮次监督器不可见；workflow 域另有 `armWorkflowNoProgressWatchdog` 专属守护（settled-watchdog.ts）——「纳管照旧」以现状为准 |
+| 轮次监督器 **adopt 接管**（v3 改判） | **豁免**——豁免落点 = **service 分诊条件两处**（`runEngineTask`（已删）catch 的 engine_crashed 分支 :2379 与 `finalizeEngineOutcome`（已删）的 exitCode===null 分支 :2437，`chatMode !== true` 并列处加 origin，落空即 `finalizeFailed` 立即终态化）**+ supervisor 域分类**（domain.ts:39）双点，防单点豁免留下「无监督、永不终态化、pending 永不注销」的 resumable 僵尸（比现状更差）；理由 = 引擎死亡即 run 失败即 record 终态化（失败路径表），adopt 链的「唤醒→guidance→2h 看门狗→giveUp」对无脚本可回的 record 全程无意义且制造 2h 挂着不处理（watchdog 默认 `WATCHDOG_DEFAULT_HOURS=2`，`supervisor.ts:53`）；v2「纳管照旧」被轮 2 影响面 SUG-1/SUG-2 击穿后改判 |
 | superseded 分类（v3 新增行） | **workflow origin 豁免**——classifyReplacement（`supervisor.ts:319-337`）按 same root/agent/slug 判定，parallel 同 slug 并行是 workflow 常态而非替代关系（v2「可接受」定性被击穿：replacedNotice 文案「was already replaced by your new task」把并行任务误述为替代关系） |
 | notifyHost 完成/关闭/失败回注 | **静默**（D6：toNotifyRecord 单漏斗 origin gate） |
 | 监督器通知族（supervisorNotify steer 通道） | 随 adopt 豁免自然零触发（D6 出口枚举） |
@@ -158,7 +158,7 @@ worker agent() → pump（薄：消息转调 + run 级收尾）→ service.execu
 | S2 | 重启恢复 | S1 在途时重启宿主 | run 视图重开后各步终态正确（record 为真相）；每个子代理 record 经 `list includeFinished:true` (add includeWorkflow:true to also see workflow-dispatched subagents) 可查 | G1/G2 |
 | S3 | 列表隐藏 | S1 完成后开 GUI subagent 列表 + TUI `/subagents` | 两处默认均不含 workflow 子代理；`includeFinished:true + includeWorkflow:true` 成对可见（S1 完成后 record 已终态，缺 includeFinished 不可见）；手动派 subagent 照常显示 | G2 |
 | S4 | 并发共享池回归 | workflow parallel(4) + 同时手动派 2 个 subagent（上限值 N = 实施期读 settings 默认值入表） | 任一时刻在途总数 ≤ N（池统计口径一致）；**饿死判定口径**：上限释放后排队任务全部最终执行完成（完成序断言） | G3 |
-| S5 | 删除面回归 | 删路完成后 | `grep -n "createRecord(" packages/subagent-core/src/orchestration/` 零命中；views 三文件 + run-snapshot 编译零 live 引用；四包全量测试绿；workflow 崩溃恢复（FileRunStore）行为不变 | G1 |
+| S5 | 删除面回归 | 删路完成后 | `grep -n "createRecord(" packages/subagent-core/src/orchestration/` 零命中；views 三文件 + run-snapshot 编译零 live 引用；四包全量测试绿；workflow 崩溃恢复（journal 折叠重建）行为不变 | G1 |
 | S6 | 治理表面不变（反向场景） | workflow run 正常结束 + 注入单步失败 + **注入引擎死亡（v3 变体）**各跑一次；另验宿主重启于在途 | ① pending 注册表差集归零（run 级 + record 级；引擎死亡路径经失败路径**立即**终态化，不等 2h 看门狗——adopt 豁免；pending-notifications 列表无 workflow 残留条目）；② 完成不产生回注通知、不产生 pending 通知条目（D6 负面断言，覆盖 toNotifyRecord 漏斗 + 监督器 steer 族零触发）；③ 失败 record = closed + outcome failed（两态模型口径）+ run 视图终态一致 + 无回注通知；④ goal 检查口径恢复基线；⑤ 成功 record 不出现在 hasBackgroundWork | G1/G2 |
 
 ---
@@ -186,10 +186,10 @@ worker agent() → pump（薄：消息转调 + run 级收尾）→ service.execu
 | ⑦ spawned-children 注册（dispose killAll 收割兜底） | 复刻——engine host 层单点复用 |
 | ⑧ ctxModel 孪生检查 | 放弃迁移——service 侧 resolveIdentity 已有 model 解析，不双轨 |
 
-**文件改动地图**：core `execution/assembly/types.ts`（origin 字段）/ `execution/persistence/record-entry.ts`（entry schema 加字段）/ `execution/persistence/record-store.ts`（recordToSubagent 投影 + 重建透传 + 查询面）/ `execution/subagent-service.ts`（executeWorkflowAgent + settleOneShotOutcome origin 分支 + adopt 豁免 origin 分支）/ `execution/assembly/subprocess-agent-runner.ts`（归位——注意在 execution/ 非 orchestration/）/ `execution/engine/routing.ts` 与 `engine/common/{capability-gate,journal-wiring}.ts`（复用，无改动或 mergeRunSignals 抽取入 common）/ `execution/round-supervisor/service-binding.ts`（adopt origin 豁免分支）；`orchestration/worker-message-pump.ts`（删 progress record/SubagentStream/emit 不动 run 级注销）/ `orchestration/lifecycle.ts`（零改动，D5 配对保留）/ `orchestration/run-snapshot.ts`（剥 live）；extension `subagent-workflow/src/interface/views/{detail-content,WorkflowsView}.ts` + `interface/subagents.ts`（includeWorkflow）；`session-lifecycle.ts` 零改动（W4 壳形态）。
+**文件改动地图**：core `execution/assembly/types.ts`（origin 字段）/ `execution/persistence/record-entry.ts`（entry schema 加字段）/ `execution/persistence/record-store.ts`（recordToSubagent 投影 + 重建透传 + 查询面）/ `execution/subagent-service.ts`（executeWorkflowAgent + settleOneShotOutcome origin 分支 + adopt 豁免 origin 分支）/ `execution/assembly/subprocess-agent-runner.ts`（归位——注意在 execution/ 非 orchestration/）/ `execution/engine/routing.ts` 与 `engine/common/{capability-gate,journal-wiring}.ts`（复用，无改动或 mergeRunSignals 抽取入 common）/ 设计时点的监督器绑定文件（adopt origin 豁免分支；[2026-09-28 后记] 已随监督器整机清理删除）；`orchestration/worker-message-pump.ts`（删 progress record/SubagentStream/emit 不动 run 级注销）/ `orchestration/lifecycle.ts`（零改动，D5 配对保留）/ `orchestration/run-snapshot.ts`（剥 live）；extension `subagent-workflow/src/interface/views/{detail-content,WorkflowsView}.ts` + `interface/subagents.ts`（includeWorkflow）；`session-lifecycle.ts` 零改动（W4 壳形态）。
 **H1/H2 重叠咬合点**：subagent-service.ts（H1 重写编排核 + Continuation；H2 增 executeWorkflowAgent 与 origin 分支）——串行执行（H1 先行），H2 实施时行号以符号 grep 锚定；settled-watchdog 键空间（H1 改刷新源、H2 arm 键 record.id 同模式）。
 
-**待验证检查点（实施期门）**：① ~~runner 是否绕池~~（已定案：不绕，D3）；② TUI 渲染面对 `getEventLog`/`getCurrentActivity` 的精确依赖与 `projectLiveProgress` 字段清单（S1 等价表依据）；③ workflow run 视图 GUI 数据源现状链（views 的 trace 投影）；④ FileRunStore 重水合与 store 孤儿恢复的终态对齐（不一致以 record 为真相的实现点）；⑤ 全局并发上限默认值（读 settings 入 S4 验收表）；⑥ D7 成功终态 reason=`gc` 在 GUI 列表/详情与通知投影的显示兼容。
+**待验证检查点（实施期门）**：① ~~runner 是否绕池~~（已定案：不绕，D3）；② TUI 渲染面对 `getEventLog`/`getCurrentActivity` 的精确依赖与 `projectLiveProgress` 字段清单（S1 等价表依据）；③ workflow run 视图 GUI 数据源现状链（views 的 trace 投影）；④ journal 折叠重建与 store 孤儿恢复的终态对齐（不一致以 record 为真相的实现点）；⑤ 全局并发上限默认值（读 settings 入 S4 验收表）；⑥ D7 成功终态 reason=`gc` 在 GUI 列表/详情与通知投影的显示兼容。
 
 ---
 

@@ -36,36 +36,11 @@ export {
   isAgentCallVirtualId,
   extractAgentCallSessionId,
 } from '@taiji/shared'
+import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
 import { session as sessionApi } from '@/api'
 import { createEmptyResultStrikeGuard, createPartitionedRecords } from '../lib/partitioned-session-records'
 
-// ── [P3/D6] health / progress 投影消费（纯函数，drawer WorkflowTab 与托盘面板共用）──
-
-/** 停滞阈值换算因子（15 分钟；具名消 magic number——no-magic-numbers 对声明器父节点的单字面量形态不报，乘法表达式才会触发）。 */
-const STALL_THRESHOLD_MINUTES = 15
-const MINUTES_PER_HOUR = 60
-const MS_PER_SECOND = 1000
-
-/**
- * [P3/D6] UI 停滞判定阈值：running run 距最近事件边沿（health.lastProgressAt）超过
- * 该窗口即呈现「无进展」信号（G3：卡 15 分钟无事件可判停滞）。与通知侧 20 分钟
- * 阈值（D6-2，P4 单元）有意分离——UI 提示档先于通知档，两档不共用常量。
- */
-export const WORKFLOW_STALL_THRESHOLD_MS =
-  STALL_THRESHOLD_MINUTES * MINUTES_PER_HOUR * MS_PER_SECOND
-
-/**
- * [P3/D6] stalledSince 推导（消费侧单点，不落快照——D6 字段策略）：
- * running 且 health.lastProgressAt 距 now 超阈值 → 返回停滞起点（= lastProgressAt）；
- * 其余 → null。health 缺省（旧快照 additive 读）一律 null——无数据不判定停滞
- * （ADR-0047：静默 ≠ 卡死，缺数据更不是）。
- */
-export function deriveStalledSince(record: WorkflowRunRecord, nowMs: number): number | null {
-  if (record.status !== 'running') return null
-  const last = record.health?.lastProgressAt
-  if (last === undefined) return null
-  return nowMs - last > WORKFLOW_STALL_THRESHOLD_MS ? last : null
-}
+// ── [P3/D6] progress 投影消费（纯函数，drawer WorkflowTab 与托盘面板共用）──
 
 /**
  * [P3/D6] 单 ask 已执行时长（「每 ask 已执行时长」槽）：running 且 trace.startedAt
@@ -77,15 +52,6 @@ export function agentCallElapsedMs(call: WorkflowAgentCall, nowMs: number): numb
   const started = Date.parse(call.startedAt)
   if (Number.isNaN(started)) return null
   return Math.max(0, nowMs - started)
-}
-
-/**
- * [P3/D6] 单 ask 停滞判定：running 且 calls[] 投影的 lastProgressAt 距 now 超阈值。
- * lastProgressAt 缺省（旧快照）→ false（不判定）。
- */
-export function agentCallStalled(call: WorkflowAgentCall, nowMs: number): boolean {
-  if (call.status !== 'running' || call.lastProgressAt === undefined) return false
-  return nowMs - call.lastProgressAt > WORKFLOW_STALL_THRESHOLD_MS
 }
 
 export const useWorkflowStore = defineStore('workflow', () => {
@@ -144,13 +110,16 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * 同 sid 在途期间的新调用（信号 / running 重试）不另起 RPC——返回在途 promise 并置
    * dirty，由在途完成后的补拉兜底。renderer 的信号一次性不可重放，只合并不补拉会丢
    * 更新（起步竞态 / 终态吞没两个真实交织，设计 D4）。
+   * 「同 key 复用 / settle 即清 / 引用比对防误删 / settle 清理链无 unhandled rejection」
+   * 四不变量收编于 createInflightDedup（C-data-18：D9 共享原语，禁手写同构实现）。
    */
-  const inflightWorkflows = new Map<string, Promise<void>>()
+  const inflightDedup = createInflightDedup<void>()
 
   /**
    * [W0/D4] per-session dirty 标志（可再武装）：在途拉取期间有新信号到达置位；在途完成
    * 时若置位 → 清位补拉一次。补拉自身在途期间新信号同样置位 → 再补，不设递归上限
-   * （链深天然有界：每条信号至多驱动一次拉取——自启或转补拉）。
+   * （链深天然有界：每条信号至多驱动一次拉取——自启或转补拉）。一次性消费标志
+   * （delete 原子裁决）：同周期多个调用方各挂的 drain 中恰有一个消费到补拉。
    * 与 in-flight 同为非响应式簿记，随 clearWorkflows / clearSession / onScopeDispose
    * 三点清理（releaseLoadBookkeeping），防已删 session 的幻影补拉复活已删分区。
    */
@@ -163,7 +132,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * 本次顺手补齐。
    */
   function releaseLoadBookkeeping(sessionId: string): void {
-    inflightWorkflows.delete(sessionId)
+    inflightDedup.delete(sessionId)
     dirtyWorkflows.delete(sessionId)
     const timer = workflowReloadTimers.get(sessionId)
     if (timer !== undefined) {
@@ -190,7 +159,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       workflowReloadTimers.forEach((t) => clearTimeout(t))
       workflowReloadTimers.clear()
       // [W0/D4] 拉取收敛簿记一并清：在途 promise 完成后的 drainDirty 读到空簿记 → 不补拉
-      inflightWorkflows.clear()
+      inflightDedup.clear()
       dirtyWorkflows.clear()
     })
   }
@@ -208,7 +177,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return partition.get(sessionId)
   }
 
-  /** 该 session 是否有进行中的 workflow（供 derivedStatus 计算 hasBackgroundWork） */
+  /**
+   * 该 session 是否有进行中的 workflow（供 derivedStatus 计算 hasBackgroundWork）。
+   * [D2] 三态维持现状语义：interrupted（暂停态）不计入进行中——判据 `status ===
+   * 'running'` 自然排除（显式裁决：中断 run 事件流静止，无后台工作量）。
+   */
   function hasRunningWorkflow(sessionId: string): boolean {
     return getRecordsBySession(sessionId).some((s) => s.status === 'running')
   }
@@ -251,32 +224,32 @@ export const useWorkflowStore = defineStore('workflow', () => {
    */
   function loadWorkflows(sessionId: string): Promise<void> {
     if (!sessionId) return Promise.resolve() // 空 sid 不写分区
-    const inflight = inflightWorkflows.get(sessionId)
-    if (inflight) {
+    if (inflightDedup.has(sessionId)) {
       // 新信号到达：共享在途拉取 + 置 dirty，由在途完成后的补拉兜底（不丢更新）
       dirtyWorkflows.set(sessionId, true)
-      return inflight
     }
+    const { promise } = inflightDedup.run(sessionId, () => performLoadWorkflows(sessionId))
     // 执行体不 reject（失败写 loadError 分区），两分支同 drain——补拉判定在成功/失败
-    // 路径都成立（失败后的补拉由后续信号驱动，与成功路径语义一致）。显式类型标注：
-    // promise 被自身初始化器内的 drain 回调引用（所有权校验参数），无标注会 TS7022
-    const promise: Promise<void> = performLoadWorkflows(sessionId).then(
-      () => drainDirtyAfterLoad(sessionId, promise),
-      () => drainDirtyAfterLoad(sessionId, promise),
+    // 路径都成立（失败后的补拉由后续信号驱动，与成功路径语义一致）。drain 晚于 factory
+    // 内建的 settle 清理注册（promise 回调按注册序）：drain 执行时条目已清，补拉经
+    // loadWorkflows 重新登记在途，不会命中本周期残留条目形成自引用
+    return promise.then(
+      () => drainDirtyAfterLoad(sessionId),
+      () => drainDirtyAfterLoad(sessionId),
     )
-    inflightWorkflows.set(sessionId, promise)
-    return promise
   }
 
   /**
-   * [W0/D4] 在途完成后的补拉判定（可再武装语义的收口点）：
-   * 先清在途登记（所有权校验——clearSession / clearWorkflows / dispose 已清位、或被
-   * 更新周期替换登记时不动别人的条目），dirty 置位则清位补拉。补拉经 loadWorkflows
-   * 重新登记在途，返回值串进 promise 链——合并进来的调用方 await 到的是「含补拉的
-   * 完整收敛」，非仅触发它的那次原始拉取。
+   * [W0/D4] 在途完成后的补拉判定（可再武装语义的收口点）：dirty 置位则清位补拉，补拉经
+   * loadWorkflows 重新登记在途，返回值串进本 drain 所属调用方的 promise 链。每个调用方
+   * （发起方与合并方）各挂一个 drain：dirty 是一次性消费标志（delete 原子裁决），恰有
+   * 一个 drain（注册最早的发起方）await 到「含补拉的完整收敛」，其余 drain no-op 先行
+   * settle——补拉写入分区后数据经响应式到达，合并方无需串行等待补拉完成。settle 即清 +
+   * 引用比对防误删（clearSession / clearWorkflows / dispose 清位后，旧 promise settle 不
+   * 动同 key 新登记的条目）由 createInflightDedup 内建；dirty 同点清理保证被清 session
+   * 无幻影补拉。
    */
-  function drainDirtyAfterLoad(sessionId: string, self: Promise<void>): Promise<void> {
-    if (inflightWorkflows.get(sessionId) === self) inflightWorkflows.delete(sessionId)
+  function drainDirtyAfterLoad(sessionId: string): Promise<void> {
     if (dirtyWorkflows.delete(sessionId)) {
       return loadWorkflows(sessionId)
     }
@@ -335,7 +308,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * workflow-state-link 可能刚 append 还未 flush（pi 延迟写入时序）。延迟 RUNNING_RETRY_MS 再拉一次兜底。
    *
    * @param sessionId 信号归属的 session ID
-   * @param status 信号里的 workflow status（'running' 触发延迟重试，其他只拉一次）
+   * @param status 信号里的 workflow status（'running' 触发延迟重试，其他只拉一次。
+   *   [D2] 显式裁决维持：interrupted 落「其他」分支只拉一次——中断 run 事件流静止
+   *   无需轮询，resume 复活变 running 后自然进入重试分支）
    */
   function triggerWorkflowReload(sessionId: string, status: string): void {
     const sid = sessionId
@@ -371,7 +346,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     workflowReloadTimers.forEach((t) => clearTimeout(t))
     workflowReloadTimers.clear()
     // [W0/D4] 拉取收敛簿记一并清（同 clearSession / dispose 三点清理义务）
-    inflightWorkflows.clear()
+    inflightDedup.clear()
     dirtyWorkflows.clear()
   }
 

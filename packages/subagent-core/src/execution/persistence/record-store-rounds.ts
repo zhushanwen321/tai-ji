@@ -278,14 +278,13 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
 }
 
 /**
- * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] W4 新态
+ * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] 新态
  * entry = running + error + stopReason=failed + result=∅——status 保持 running，core
- * 机器语义不变（supervisor 接管链照旧），展示面靠 stopReason 子句排除（U6 终态判据
+ * 机器语义不变，展示面靠 stopReason 子句排除（U6 终态判据
  * isOccupied 消费）；禁 completed 谎报 / closed 直接终局）。归口调用面已随 adopt
  * 派发链退役：one-shot engine-run 编排不再经本原语收口（原归口调用点随 U2b 修复轮
  * 移除），现仅测试直调可达（run-orchestration-write-lease.test.ts 用例 2/5 为退役
- * 与归口语义锚）；监督器 adoptOnProcessDeath 只消费已写入的纳管态、不再经本原语，
- * 编排留调用方。
+ * 与归口语义锚）。
  *
  * @returns false = id 不在内存（debug 留痕，无副作用）。
  */

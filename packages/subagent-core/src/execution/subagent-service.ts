@@ -47,20 +47,14 @@ import { getBoundNotifyLedger, NOTIFY_LEDGER_CUSTOM_TYPE } from "./notify/notify
 import { getSubagentRecordsDir, getSubagentSessionDir } from "./assembly/path-encoding.ts";
 import type { StatusFilter } from "./persistence/record-store.ts";
 import { RecordStore } from "./persistence/record-store.ts";
-// [W4] 轮次活性监督器（D2「等待有主」权威层；机制与注释见 round-supervisor/，
-// 装配绑定面在 service-binding.ts——变化轴独立）。[B-6/R4] 字段留壳（boot/dispose
-// 时序消费在壳 + C-6 装配闭包经壳转发 late-bound）。
-import type { RoundSupervisor } from "./round-supervisor/index.ts";
-import {
-  createRoundSupervisorForService,
-  runPendingReconcileSweepForService,
-} from "./round-supervisor/service-binding.ts";
+// 注册表对账 sweep（initSession 挂点；绑定面在 registry-reconcile/sweep-binding.ts
+// ——变化轴独立）。
+import { runPendingReconcileSweepForService } from "./registry-reconcile/sweep-binding.ts";
 import type { StreamSink, SubagentStream } from "./assembly/stream-sink.ts";
 // [R4] state-marker（writeRecordBinding）已迁 run-orchestration；EngineSdkError/
 // ResumeAnchor（引擎死亡分诊）已迁 run-orchestration。
 import type {
   AgentEvent,
-  AgentResult,
   ClosedReason,
   ExecuteOptions,
   ExecutionHandle,
@@ -229,15 +223,12 @@ export class SubagentService {
         getNotifyHost: () => this.notifyHost,
         // [跨域编排回调] initSession 复活后编排（R3/R4 域方法；抽取后改指聚合显式接口）。
         recoverOrphans: () => this.recoverOrphansIfRootProcess(),
-        bootRoundSupervisor: () => this.roundSupervisor.bootPartition(),
         runPendingReconcileSweep: () =>
           runPendingReconcileSweepForService(
             {
               getStore: () => this.store,
               getPi: () => this.pi,
-              getSessionRootId: () => this.sessionRootId,
               getMainSessionFile: () => this.mainSessionFile,
-              finalizeClosed: (record, result) => this.finalizeRecord(record, result, "closed", "gc"),
             },
             (process.env[ENV_SELF_RECORD_ID] ?? "") !== "",
           ),
@@ -285,8 +276,8 @@ export class SubagentService {
     // [R3] 域 #4/#11/#17/#18 聚合（[U5] 意愿动作写面：dispose 批量收起/close 归档三路/
     // cancel 中断/finalize 簇——D5「store 与写面入口的唯一宿主」，H4 落点）。跨聚合边
     // 收敛：C-5（onRecordFinalizedCleanup 汇聚点 + Continuation 队列清空，本体在壳
-    // #14 协作面）经 deps 回调。C-6（roundSupervisor/reconcile sweep 装配闭包调
-    // finalizeRecord）经壳转发方法 late-bound 读取，装配点零改动。
+    // #14 协作面）经 deps 回调。reconcile sweep 装配闭包调 finalizeRecord 经壳转发
+    // 方法 late-bound 读取，装配点零改动。
     this.recordLifecycle = new RecordLifecycle({
       assertReady: () => this.assertReady(),
       getStore: () => this.store,
@@ -314,9 +305,7 @@ export class SubagentService {
     // [2026-09-13 design-code-sync] Continuation 协作面已迁 ChatRounds，chat 域轮次
     // 派发经下方 deps 回调编排）。deps 全晚绑定闭包（构造期零求值——#1 留壳共享依赖经 getter
     // 现读同一实例；R3 聚合显式接口直指 recordAccess/recordLifecycle，聚合间零私有
-    // 互调 G2）。[B-6] roundSupervisor 留壳（boot/dispose 时序消费在壳 + C-6 装配
-    // 闭包经壳转发 late-bound 天然兼容）；本聚合不消费（真实消费方在
-    // workflow-dispatch / chat-rounds，各自 deps 通道）。
+    // 互调 G2）。
     this.runOrchestration = new RunOrchestration({
       assertReady: () => this.assertReady(),
       getStore: () => this.store,
@@ -360,7 +349,6 @@ export class SubagentService {
       getSessionRootId: () => this.sessionRootId,
       getStreamSink: () => this.streamSink,
       getUiObservability: () => this.uiObservability,
-      getRoundSupervisor: () => this.roundSupervisor,
       finalizeFailed: (record, err) => this.recordLifecycle.finalizeFailed(record, err),
       finalizeAborted: (record) => this.recordLifecycle.finalizeAborted(record),
       idleTimeoutRecycle: (record) => this.recordLifecycle.idleTimeoutRecycle(record),
@@ -396,7 +384,6 @@ export class SubagentService {
       getStreamSink: () => this.streamSink,
       getUiObservability: () => this.uiObservability,
       getSessionRootId: () => this.sessionRootId,
-      getRoundSupervisor: () => this.roundSupervisor,
       acquirePoolOrFinalize: (record, signal, priority) =>
         this.runOrchestration.acquirePoolOrFinalize(record, signal, priority),
       outcomeToAgentResult: (record, outcome) =>
@@ -777,46 +764,11 @@ export class SubagentService {
     return this.chatRounds.deliverChatMessage(record, text);
   }
 
-  // ── 域 #18 finalize 簇 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts；
-  // H4 落点 D5）──
-  // [R4] finalizeFailed / finalizeAborted 两转发已删（R3 过渡期消费方 = R4 域派发链，
-  // 已随域迁 RunOrchestration/WorkflowDispatch，经 deps 装配闭包直指 recordLifecycle
-  // ——壳内与全仓零剩余消费，删转发判据满足）。finalizeRecord 转发保留：消费方 =
-  // C-6 装配闭包（roundSupervisor/reconcile sweep 的 finalizeClosed——经壳转发方法
-  // late-bound 读取，装配点零改动，清单①预判兑现）。
-
-  /**
-   * D-017 时序收尾：委托 doFinalizeRecord（finalize-record.ts 独立模块）。本体已迁
-   * RecordLifecycle（FinalizeDeps 装配经 deps 现读 + onFinalized 钩子经 C-5 回调）；
-   * 壳纯转发，签名不变。
-   */
-  private finalizeRecord(
-    record: ExecutionRecord,
-    result: AgentResult,
-    status: "closed",
-    closedReason?: ClosedReason,
-  ): Promise<void> {
-    return this.recordLifecycle.finalizeRecord(record, result, status, closedReason);
-  }
-
-  /**
-   * [W4] 轮次活性监督器（D2「等待有主」权威层）：死亡事件纳管（run failed / 引擎
-   * exited → adoptOnProcessDeath）+ boot 分区重认领（initSession）+ 三态判定
-   * （record 级视图）+ 该放弃（终态化 failed + 注销 + 终止通知）。装配绑定面
-   * （deps/giveUp 编排/sweep 挂点）在 round-supervisor/service-binding.ts——变化轴
-   * 独立（通知文案 / 终态化编排 / store 读侧判据只动该文件），本字段只持实例。
-   */
-  private readonly roundSupervisor: RoundSupervisor = createRoundSupervisorForService({
-    getStore: () => this.store,
-    getPi: () => this.pi,
-    getSessionRootId: () => this.sessionRootId,
-    getMainSessionFile: () => this.mainSessionFile,
-    finalizeClosed: (record, result) => this.finalizeRecord(record, result, "closed", "gc"),
-  });
-
-
-
-
+  // 域 #18 finalize 簇壳转发（本体 execution/service/record-lifecycle.ts，H4 落点 D5）
+  // 已全部删除：finalizeFailed / finalizeAborted 消费方随 R4 域派发链迁聚合 deps 直指
+  // recordLifecycle；finalizeRecord 的最后消费方（reconcile sweep 装配闭包的
+  // finalizeClosed 委托）随轮次活性监督器清退删除——sweep 实装只消费
+  // getStore/getPi/getMainSessionFile 三通道，壳侧零剩余消费。
 
   /** [D4 聚合连带] 原引擎服务面适配器（piEngineServiceAdapter + asEngineService getter）
    *  已删除：SAR 构造 resolveHostPiEnginePort 的 getService 兼容位消费随 W8 收口消失，
@@ -872,9 +824,6 @@ export class SubagentService {
     // 账面差集重放补投——「不丢」由落盘账本承接而非本次 flush。
     this.persistUndeliveredNotificationsForReplay();
     this.notifyHost.dispose();
-    // [W4] 监督器停机（清 timer + 纳管记账；注册/record 不动——process 档跨 shutdown
-    // 存活，重开 session 由 boot 分区重认领 + sweep 对账收口）。
-    this.roundSupervisor.dispose();
     this.store.dispose();
   }
 

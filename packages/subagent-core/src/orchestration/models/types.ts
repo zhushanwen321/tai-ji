@@ -39,9 +39,7 @@ export type DoneReason =
   | "failed"
   | "aborted"
   | "budget_limited"
-  | "time_limited"
-  // m3：runAndWait 合成返回值专用——参数校验失败（run 从未创建，不进入 run.state.reason）
-  | "invalid_args";
+  | "time_limited";
 
 /** 合法的状态转换。空数组 = 无出边（done 终态）。 */
 export const VALID_RUN_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
@@ -55,7 +53,6 @@ export const ALL_DONE_REASONS: readonly DoneReason[] = [
   "completed",
   "failed",
   "aborted",
-  "invalid_args",
   "budget_limited",
   "time_limited",
 ] as const;
@@ -83,7 +80,6 @@ export function isTerminalDoneReason(reason: DoneReason): boolean {
       return false;
     case "failed":
     case "aborted":
-    case "invalid_args":
     case "budget_limited":
     case "time_limited":
       return true;
@@ -121,7 +117,7 @@ export const SLUG_MAX_LENGTH = 35;
  *     opts 均以 prompt 字段落盘，改名会破坏旧快照重水合。
  *
  * 引擎中立字段的并入方式（可选字段，原 AgentTaskSpec 独有字段去向）：
- *   - graceTurns / idleTimeoutMs / denyTools / permissionMode：可选并入；
+ *   - graceTurns / idleTimeoutMs：可选并入；
  *   - persona.agentRef：裁撤（无生产写入方、无消费者——pi 走 agent 字段解析身份）；
  *   - requires：裁撤（P4 形状预留、无生产写入方；且并入需 import EngineCapabilities
  *     形成 orchestration↔engine 类型环）。将来能力依赖声明下钻时在本形状上加回。
@@ -240,20 +236,6 @@ export interface AgentCallOpts {
   * idle GC。chat 域经 host-task-spec 填充。
   */
  idleTimeoutMs?: number;
- /**
-  * 工具 denylist（原 AgentTaskSpec.denyTools 并入，中立新增面）：各引擎做语法映射
-  * （zcode buildZcodeArgv 消费；pi 链路暂无对应面）。按 ADR-0071「无消费方不进协议」
-  * 对照：源头零写入方（workflow 脚本层无此 API），字段仅作为 zcode 消费端已沉淀的
-  * 透传链保留；删除触发条件 = 下批协议面审计仍零写入方时，随批删除透传链与 zcode 映射。
-  */
-  denyTools?: string[];
- /**
-  * 中立权限模式（原 AgentTaskSpec.permissionMode 并入，预留形状）：映射按各引擎
-  * capabilities.permissionMode。按 ADR-0071「无消费方不进协议」对照：源头零写入方
-  * （workflow 脚本层无此 API）且零消费方；删除触发条件 = 下批协议面审计仍零写入方
-  * 时，随批删除本字段与各引擎映射面。
-  */
-  permissionMode?: string;
 }
 
 // [S4 簇 3 收编] 以下三个契约类型本地定义已删除，自 @zhushanwen/subagent-engine-sdk
@@ -318,7 +300,7 @@ export interface AgentResult {
  * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。
  * 产出侧 = 引擎终态应答 AgentOutcome.stderrTeePath（SDK contract-types，上报判据
  * 见彼处注释），经 workflow-dispatch outcomeToWorkflowResult 透传到本形态；消费侧
- * worker-message-pump dispatchAskSettled 读本字段填 ask-settled 事件载荷。
+ * worker-message-pump dispatchAgentSettled 读本字段填 agent-settled 事件载荷。
  */
   stderrTeePath?: string;
  /**

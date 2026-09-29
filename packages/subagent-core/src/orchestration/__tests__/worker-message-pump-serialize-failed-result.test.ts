@@ -3,10 +3,9 @@
 // makeSerializeFailedResult 独立单测（W2 防御关键纯函数）。
 //
 // 背景：postMessage 序列化失败时，主线程需回发「必可克隆」的 fallback result
-// 让 worker 内 pending Promise resolve（否则 agent()/workflow() 永久挂起，只能靠
-// timeout 兜底）。两条 fallback 路径（postAgentResult / dispatchWorkflowCall.postResult）
-// 共享 makeSerializeFailedResult 构造逻辑——本测试锁住其返回 shape，确保两条路径
-// 不漂移。
+// 让 worker 内 pending Promise resolve（否则 agent() 永久挂起，只能靠
+// timeout 兜底）。消费方 postAgentResult 经 makeSerializeFailedResult 构造
+// fallback——本测试锁住其返回 shape 不漂移。
 //
 // 验证点：
 //   1. content 恒为 ""（纯字符串 fallback，必可克隆——不含 function/Symbol/循环引用）

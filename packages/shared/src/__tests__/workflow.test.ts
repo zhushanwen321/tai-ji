@@ -15,11 +15,12 @@ import {
 
 describe('WORKFLOW_RUN_OUTCOME_ALL（[W2 D5] 四值词表全集常量）', () => {
   it('四成员与预期全表一致（扩缩值时本用例红——强制显式重审）', () => {
+    // [D2]（workflow-run-resume-revision）四值：done/failed/cancelled/time_limited
     expect([...WORKFLOW_RUN_OUTCOME_ALL].sort()).toEqual([
       'cancelled',
-      'completed',
+      'done',
       'failed',
-      'interrupted',
+      'time_limited',
     ])
   })
 
@@ -29,15 +30,17 @@ describe('WORKFLOW_RUN_OUTCOME_ALL（[W2 D5] 四值词表全集常量）', () =>
 })
 
 describe('WORKFLOW_RUN_OUTCOME_LABELS（[W2 D8] 状态中文显示名单源词表）', () => {
-  it('四条显示名与章程 D2 中文词表一致', () => {
-    expect(WORKFLOW_RUN_OUTCOME_LABELS.completed).toBe('成功')
+  it('四条显示名（[D2] 后词表：done/failed/cancelled/time_limited）', () => {
+    expect(WORKFLOW_RUN_OUTCOME_LABELS.done).toBe('成功')
     expect(WORKFLOW_RUN_OUTCOME_LABELS.failed).toBe('失败')
     expect(WORKFLOW_RUN_OUTCOME_LABELS.cancelled).toBe('已取消')
-    expect(WORKFLOW_RUN_OUTCOME_LABELS.interrupted).toBe('已中断')
+    expect(WORKFLOW_RUN_OUTCOME_LABELS.time_limited).toBe('已超时')
   })
 
-  it('「已取消」（用户主动）与「已中断」（被动终局）是两个不同值（禁混用的词表前提）', () => {
-    expect(WORKFLOW_RUN_OUTCOME_LABELS.cancelled).not.toBe(WORKFLOW_RUN_OUTCOME_LABELS.interrupted)
+  it('「已取消」（用户主动）与「已超时」（预算超时）是两个不同值（禁混用的词表前提）；中断语义已移出 outcome 入 status 三态', () => {
+    expect(WORKFLOW_RUN_OUTCOME_LABELS.cancelled).not.toBe(WORKFLOW_RUN_OUTCOME_LABELS.time_limited)
+    // [D2] 中断非 outcome——status 三态 'interrupted' 的显示归 WorkflowRunStatus 面
+    expect(WORKFLOW_RUN_OUTCOME_ALL).not.toContain('interrupted')
   })
 
   it('显示名覆盖与词表全集键数一致（Record 键型穷尽，扩值漏配编译红）', () => {

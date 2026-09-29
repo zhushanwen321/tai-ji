@@ -6,7 +6,8 @@
  *   活跃会话经既有 get_entries 游标通道喂入（applyEntryBatch），冷会话经
  *   scanRecordFamilyEntriesFromSessionFile 流式扫描喂入（同一入口）；
  * - journal 源：record 事件文件（`<recordsDir>/<sa-id>.events`）与 run journal
- *   （`<sessionDir>/workflow-state/<runId>.events.jsonl`）——经 u0 journal-tail
+ *   （`<sessionDir>/workflow-state/<runId>.record.jsonl`，后缀常量
+ *   RUN_EVENT_JOURNAL_SUFFIX 单源）——经 u0 journal-tail
  *   目录 tailer（watch + offset 续读 + 周期复查）增量 fold。run 域 fold 自
  *   [W2 D7] 起单源 core run-events foldRunEventCheckpoint（状态机检查点 + 投影
  *   骨架 created/asks/runSettled 一体产出），runtime 不再自建 fold。
@@ -45,6 +46,7 @@ import {
   type RecordCreatedEvent,
   type RecordJournalEvent,
   type RecordJournalFoldState,
+  type RunAskStepFold,
   type RunEventFoldCheckpoint,
   type SubagentRecordRegisteredEntryData,
   type SubagentRecordSettledEntryData,
@@ -63,17 +65,20 @@ import { mergeWorkflowStepRecords } from './workflow-step-merge.js'
  * run 事件 type 词表的运行时镜像（barrel 未导出 RUN_EVENT_TYPES 常量数组）。
  * Record 键型 = WorkflowRunEvent['type'] 的全联合——core 词表增删成员时本处的
  * 记录字面量缺键/多键即编译红（编译期穷尽守卫，替代运行时漂移）。
- * [W2 D2] core 死形态清退后 7 键：ask-executing 删除（无生产写入方——其历史
- * journal 行经本镜像的词表外判定返回 undefined，由 tailer 跳过计日志）；member-pool
- * 补键（U4 additive 扩容的镜像补齐）。
+ * 现态 9 键（[D4] 对齐 pi 后定稿）：ask-* 三词改 agent-*，新增 phase-started/
+ * phase-settled（D3）与 run-interrupted/run-resumed（D2）；ask-executing 已随
+ * [W2 D2] 死形态清退删除（其历史 journal 行经本镜像的词表外判定返回 undefined，
+ * 由 tailer 跳过计日志）；member-pool 已随 [D6] 绑定消解删除。
  */
 const RUN_EVENT_TYPE_PROBE: Record<WorkflowRunEvent['type'], true> = {
   'run-created': true,
-  'ask-dispatched': true,
-  'ask-retrying': true,
-  'ask-settled': true,
-  'member-pool': true,
-  armed: true,
+  'phase-started': true,
+  'agent-started': true,
+  'agent-retrying': true,
+  'agent-settled': true,
+  'phase-settled': true,
+  'run-interrupted': true,
+  'run-resumed': true,
   'run-settled': true,
 }
 
@@ -83,7 +88,7 @@ const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set(Object.keys(RUN_EVENT_TY
  * run journal 文件行解析器（journal-tail parseLine 注入面，run 域）。
  *
  * 守卫对齐 core run-events isWorkflowRunEventLine 的最宽共同判定面：JSON 对象 +
- * type 落词表 + ts 有限数值 + outcome（ask-settled / run-settled 携带时）落词表。
+ * type 落词表 + ts 有限数值 + outcome（agent-settled / run-settled 携带时）落词表。
  * 坏行返回 undefined 交 tailer 计数（宽容跳过，不卡游标）。
  */
 export function parseWorkflowRunEventFileLine(line: string): WorkflowRunEvent | undefined {
@@ -131,6 +136,34 @@ export interface V2EntryScan {
   workflowSettled: Map<string, WorkflowRecordSettledEntryData>
 }
 
+/** [scanV2RecordEntries 拆分] subagent 域 v2 条目收编（classify 单源判 v/kind，id 键守卫归本层）。 */
+function scanSubagentV2Entry(data: unknown, result: V2EntryScan): void {
+  const classification = classifySubagentRecordEntryData(data)
+  if (classification.ok || classification.reason !== 'v2') return
+  const v2 = classification.entry
+  if (v2.kind === 'registered' && typeof v2.id === 'string') {
+    result.subagentRegistered.set(v2.id, v2)
+  } else if (v2.kind === 'settled' && typeof v2.id === 'string') {
+    result.subagentSettled.set(v2.id, v2)
+  }
+}
+
+/** [scanV2RecordEntries 拆分] workflow 域 v2 条目收编（runId/journalPath 键守卫归本层）。 */
+function scanWorkflowV2Entry(data: unknown, result: V2EntryScan): void {
+  const classification = classifyWorkflowRecordEntryData(data)
+  if (classification.ok || classification.reason !== 'v2') return
+  const v2 = classification.entry
+  if (
+    v2.kind === 'registered' &&
+    typeof v2.runId === 'string' &&
+    typeof v2.journalPath === 'string'
+  ) {
+    result.workflowRegistered.set(v2.runId, v2)
+  } else if (v2.kind === 'settled' && typeof v2.runId === 'string') {
+    result.workflowSettled.set(v2.runId, v2)
+  }
+}
+
 /**
  * entry 批 → v2 注册/终态条目（classify 单源判 v/kind，字段守卫归本层）。
  *
@@ -149,27 +182,9 @@ export function scanV2RecordEntries(entries: readonly unknown[]): V2EntryScan {
     const e = entry as { type?: unknown; customType?: unknown; data?: unknown }
     if (e.type !== 'custom') continue
     if (e.customType === SUBAGENT_RECORD_CUSTOM_TYPE) {
-      const classification = classifySubagentRecordEntryData(e.data)
-      if (classification.ok || classification.reason !== 'v2') continue
-      const v2 = classification.entry
-      if (v2.kind === 'registered' && typeof v2.id === 'string') {
-        result.subagentRegistered.set(v2.id, v2)
-      } else if (v2.kind === 'settled' && typeof v2.id === 'string') {
-        result.subagentSettled.set(v2.id, v2)
-      }
+      scanSubagentV2Entry(e.data, result)
     } else if (e.customType === WORKFLOW_RECORD_CUSTOM_TYPE) {
-      const classification = classifyWorkflowRecordEntryData(e.data)
-      if (classification.ok || classification.reason !== 'v2') continue
-      const v2 = classification.entry
-      if (
-        v2.kind === 'registered' &&
-        typeof v2.runId === 'string' &&
-        typeof v2.journalPath === 'string'
-      ) {
-        result.workflowRegistered.set(v2.runId, v2)
-      } else if (v2.kind === 'settled' && typeof v2.runId === 'string') {
-        result.workflowSettled.set(v2.runId, v2)
-      }
+      scanWorkflowV2Entry(e.data, result)
     }
   }
   return result
@@ -209,6 +224,119 @@ function deriveElapsedSeconds(
 }
 
 /**
+ * [projectV2Subagent 拆分] status 两态判据（journal 胜出仲裁的字段级子函数）。
+ *
+ * status 是两态判据不是终局吸收位判据：轮终收条（record-round-idle，v1 权威词
+ * idle 同源）与 reopened（CAS 只接受 idle、不翻 running）都映射 idle；不能用
+ * roundIdle 在场判 idle（round-started 不清 roundIdle），以 lastEvent.type 判。
+ * fold 在场（含事件文件）时由 fold 定态；窗外无 fold 时终态条目兜底。
+ */
+function resolveSubagentStatus(
+  fold: RecordJournalFoldState | undefined,
+  settledEntry: SubagentRecordSettledEntryData | undefined,
+): SubagentRecord['status'] {
+  if (fold === undefined) {
+    return settledEntry !== undefined ? 'idle' : 'running'
+  }
+  const lastType = fold.lastEvent?.type
+  if (fold.settled !== undefined || lastType === 'record-round-idle' || lastType === 'record-reopened') {
+    return 'idle'
+  }
+  return 'running'
+}
+
+/**
+ * [projectV2Subagent 拆分] 停因供源（随 status 判据同构分流，v1 写侧语义延续）：
+ * settled 终局停因 → 轮终收条停因（lastEvent 为 round-idle 时 roundIdle 即最新收条）
+ * → reopened 窗口展示词（事件词表 record-reopened 无停因载荷，由 lastEvent.type 映射
+ * ——对齐 v1 markReopenedImpl 写 stopReason='reopened'）；在飞（round-started /
+ * created / bound）轮始清点无停因——roundIdle/settledEntry 的旧值不得透传（v1
+ * markRoundStartedImpl 上轮停因随轮始清点 + isOccupied 的 stopReason 子句依赖；
+ * F2-1：第二轮 running + 「completed」矛盾组合即旧值透传所致）。
+ */
+function resolveSubagentStopReason(
+  fold: RecordJournalFoldState | undefined,
+  settled: RecordJournalFoldState['settled'],
+  roundIdle: RecordJournalFoldState['roundIdle'],
+  settledEntry: SubagentRecordSettledEntryData | undefined,
+): string | undefined {
+  if (fold === undefined) return settledEntry?.stopReason
+  if (settled !== undefined) return settled.stopReason
+  const lastType = fold.lastEvent?.type
+  if (lastType === 'record-round-idle') return roundIdle?.stopReason
+  if (lastType === 'record-reopened') return 'reopened'
+  return undefined
+}
+
+/**
+ * [projectV2Subagent 拆分] error 供源（与 stopReason 分流同构，W1 终态同步 F2-2
+ * 裁决）：settled 终局原文 → 轮终失败收条（round-started 后 lastEvent 非
+ * round-idle，上轮失败原文随轮始清点语义不透传——对齐 v1 markRoundStartedImpl
+ * 清残留死因）→ 条目面兜底（fold 缺席 = journal 未接线的旧实体）。
+ */
+function resolveSubagentError(
+  fold: RecordJournalFoldState | undefined,
+  settled: RecordJournalFoldState['settled'],
+  roundIdle: RecordJournalFoldState['roundIdle'],
+  settledEntry: SubagentRecordSettledEntryData | undefined,
+): string | undefined {
+  if (fold === undefined) return settledEntry?.error
+  if (settled !== undefined) return settled.error
+  if (fold.lastEvent?.type === 'record-round-idle') return roundIdle?.error
+  return undefined
+}
+
+/**
+ * [projectV2Subagent 拆分] result 供源（W1 轮终粒度裁决：record-round-idle 携带
+ * result 摘要锚，承接 v1 U8b 轮终 result 显示信号）：轮终收条晚于终局面（settled
+ * 已被 reopened / round-started 清除，或 roundIdle.seq 更新）时轮终摘要胜出——
+ * 否则终局面优先（v2 终态条目全文是 D1 唯一全文落点，摘要锚兜底）。
+ */
+function resolveSubagentResult(
+  settled: RecordJournalFoldState['settled'],
+  roundIdle: RecordJournalFoldState['roundIdle'],
+  settledEntry: SubagentRecordSettledEntryData | undefined,
+): string | undefined {
+  if (roundIdle !== undefined && (settled === undefined || roundIdle.seq > settled.seq)) {
+    return roundIdle.resultSummary ?? settledEntry?.result ?? settled?.resultSummary
+  }
+  return settledEntry?.result ?? settled?.resultSummary
+}
+
+/**
+ * [projectV2Subagent 拆分] 统计字段归并：settled 终局 → 轮终收条（roundIdle）→
+ * 条目面兜底（journal 缺席 = journal 未接线的旧实体）。
+ */
+function resolveSubagentStats(
+  settled: RecordJournalFoldState['settled'],
+  roundIdle: RecordJournalFoldState['roundIdle'],
+  settledEntry: SubagentRecordSettledEntryData | undefined,
+): { turns: number | undefined; totalTokens: number | undefined } {
+  return {
+    turns: settled?.turns ?? roundIdle?.turns ?? settledEntry?.turns,
+    totalTokens:
+      settled?.totalTokens ?? roundIdle?.totalTokens ?? settledEntry?.totalTokens,
+  }
+}
+
+/**
+ * [projectV2Subagent 拆分] 绑定半边归并：engine 绑定（record-bound 事件）优先，
+ * 条目面兜底；sessionFile 同构（bound 携带则胜出，null 为契约缺省）。engineHandle
+ * 两侧形态不同（bound = 结构化 sessionRef 整体透传，entry = 同形字符串）——返回
+ * 类型按原组装表达式自然推导（union），不在此窄化。
+ */
+function resolveSubagentBinding(
+  bound: RecordJournalFoldState['bound'],
+  settledEntry: SubagentRecordSettledEntryData | undefined,
+) {
+  return {
+    sessionFile: bound?.sessionFile ?? settledEntry?.sessionFile ?? null,
+    engine: bound?.engine ?? settledEntry?.engine,
+    engineHandle: bound?.engineHandle ?? settledEntry?.engineHandle,
+  }
+}
+
+/**
  * v2 subagent 实体的合并投影（journal 胜出仲裁的核心）。
  *
  * - 身份域：journal fold 的 record-created（事实源）优先，注册条目兜底（journal
@@ -229,79 +357,132 @@ export function projectV2Subagent(
   if (identity === undefined) return null
   const settled = fold?.settled
   const roundIdle = fold?.roundIdle
-  const bound = fold?.bound
   const startedAt = identity.startedAt
   const endedAt = settled?.endedAt ?? settledEntry?.endedAt
+  const stats = resolveSubagentStats(settled, roundIdle, settledEntry)
+  const binding = resolveSubagentBinding(fold?.bound, settledEntry)
   return {
     subagentId: identity.id,
-    sessionFile: bound?.sessionFile ?? settledEntry?.sessionFile ?? null,
+    sessionFile: binding.sessionFile,
     agent: identity.agent,
     slug: identity.slug,
     task: identity.task,
-    // journal 胜出：fold 在场（含事件文件）时由 fold 定态；窗外无 fold 时终态条目兜底。
-    // status 是两态判据不是终局吸收位判据：轮终收条（record-round-idle，v1 权威词
-    // idle 同源）与 reopened（CAS 只接受 idle、不翻 running）都映射 idle；不能用
-    // roundIdle 在场判 idle（round-started 不清 roundIdle），以 lastEvent.type 判。
-    status:
-      fold !== undefined
-        ? fold.settled !== undefined ||
-          fold.lastEvent?.type === 'record-round-idle' ||
-          fold.lastEvent?.type === 'record-reopened'
-          ? 'idle'
-          : 'running'
-        : settledEntry !== undefined
-          ? 'idle'
-          : 'running',
-    // 停因供源随 status 判据同构分流（v1 写侧语义延续）：settled 终局停因 → 轮终
-    // 收条停因（lastEvent 为 round-idle 时 roundIdle 即最新收条）→ reopened 窗口
-    // 展示词（事件词表 record-reopened 无停因载荷，由 lastEvent.type 映射——对齐 v1
-    // markReopenedImpl 写 stopReason='reopened'）；在飞（round-started / created /
-    // bound）轮始清点无停因——roundIdle/settledEntry 的旧值不得透传（v1
-    // markRoundStartedImpl 上轮停因随轮始清点 + isOccupied 的 stopReason 子句依赖；
-    // F2-1：第二轮 running + 「completed」矛盾组合即旧值透传所致）。
-    stopReason:
-      fold !== undefined
-        ? settled !== undefined
-          ? settled.stopReason
-          : fold.lastEvent?.type === 'record-round-idle'
-            ? roundIdle?.stopReason
-            : fold.lastEvent?.type === 'record-reopened'
-              ? 'reopened'
-              : undefined
-        : settledEntry?.stopReason,
-    turns: settled?.turns ?? roundIdle?.turns ?? settledEntry?.turns,
-    totalTokens:
-      settled?.totalTokens ?? roundIdle?.totalTokens ?? settledEntry?.totalTokens,
+    status: resolveSubagentStatus(fold, settledEntry),
+    stopReason: resolveSubagentStopReason(fold, settled, roundIdle, settledEntry),
+    turns: stats.turns,
+    totalTokens: stats.totalTokens,
     model: settledEntry?.model,
     thinkingLevel: settledEntry?.thinkingLevel,
     startedAt,
     endedAt,
     elapsedSeconds: deriveElapsedSeconds(startedAt, endedAt),
-    // error 供源与 stopReason 分流同构（W1 终态同步 F2-2 裁决）：settled 终局
-    // 原文 → 轮终失败收条（round-started 后 lastEvent 非 round-idle，上轮失败
-    // 原文随轮始清点语义不透传——对齐 v1 markRoundStartedImpl 清残留死因）→
-    // 条目面兜底（fold 缺席 = journal 未接线的旧实体）。
-    error:
-      fold !== undefined
-        ? settled !== undefined
-          ? settled.error
-          : fold.lastEvent?.type === 'record-round-idle'
-            ? roundIdle?.error
-            : undefined
-        : settledEntry?.error,
+    error: resolveSubagentError(fold, settled, roundIdle, settledEntry),
     origin: identity.origin,
     parentRunId: identity.parentRunId,
     stepIndex: identity.stepIndex,
-    engine: bound?.engine ?? settledEntry?.engine,
-    engineHandle: bound?.engineHandle ?? settledEntry?.engineHandle,
-    // result 供源（W1 轮终粒度裁决：record-round-idle 携带 result 摘要锚，承接 v1
-    // U8b 轮终 result 显示信号）：轮终收条晚于终局面（settled 已被 reopened /
-    // round-started 清除，或 roundIdle.seq 更新）时轮终摘要胜出——否则终局面优先
-    // （v2 终态条目全文是 D1 唯一全文落点，摘要锚兜底）。
-    result:
-      roundIdle !== undefined && (settled === undefined || roundIdle.seq > settled.seq)
-        ? roundIdle.resultSummary ?? settledEntry?.result ?? settled?.resultSummary
-        : settledEntry?.result ?? settled?.resultSummary,
+    engine: binding.engine,
+    engineHandle: binding.engineHandle,
+    result: resolveSubagentResult(settled, roundIdle, settledEntry),
+  }
+}
+
+/**
+ * [projectV2Workflow 拆分] 三态投影（journal 胜出仲裁的判据面）。
+ *
+ * [D2] fold 在场 = journal 已接线，三态全由 fold 定，条目 status 不参与——条目是
+ * append-only last-wins 快照，resume 复活只补写 registered 条目、留存的中断形态
+ * 条目不被覆盖，条目值在 fold 在场时会陈旧；resume 后 fold 已回 running，此时按
+ * 留存中断条目判 interrupted 会把复活 run 误显示「已中断（可续跑）」直到终局：
+ * - fold 在场：runSettled 终帧 → done；状态机停 interrupted 暂停态
+ *   （run-interrupted 帧在盘、无终局）→ interrupted（GUI 显示「已中断
+ *   （可续跑）」）；其余 → running；
+ * - fold 缺席（entry-only 降级投影：runJournalDir 缺席或 record 流被外部
+ *   清理，条目是唯一来源）：settledEntry 三态自描述（schema 契约见 core
+ *   workflow-record-entry），中断 run 不得回落显示「运行中」。
+ */
+function resolveWorkflowStatus(
+  fold: RunEventFoldCheckpoint | undefined,
+  runSettled: RunEventFoldCheckpoint['runSettled'],
+  settledEntry: WorkflowRecordSettledEntryData | undefined,
+): WorkflowRunRecord['status'] {
+  if (fold === undefined) {
+    if (settledEntry?.status === 'done') return 'done'
+    if (settledEntry?.status === 'interrupted') return 'interrupted'
+    return 'running'
+  }
+  if (runSettled !== undefined) return 'done'
+  if (fold.state.lifecycle === 'interrupted') return 'interrupted'
+  return 'running'
+}
+
+/** [projectV2Workflow 拆分] ask 步骤行 → agentCalls（骨架映射，taskIndex 升序）。 */
+function projectAskStepsToAgentCalls(fold: RunEventFoldCheckpoint): WorkflowAgentCall[] {
+  const agentCalls: WorkflowAgentCall[] = []
+  const indexes = Array.from(fold.asks.keys()).sort((a, b) => a - b)
+  for (const taskIndex of indexes) {
+    const ask = fold.asks.get(taskIndex)!
+    agentCalls.push(projectAskStepToAgentCall(ask))
+  }
+  return agentCalls
+}
+
+/** 单个 ask 骨架行映射（phase 供源透传（W1 D6）——renderer hasExplicitPhases 判据 `phase !== undefined` 由此成立；fold 缺 phase（旧行）不造键保持平铺）。 */
+function projectAskStepToAgentCall(ask: RunAskStepFold): WorkflowAgentCall {
+  const stepStatus: WorkflowAgentCall['status'] =
+    ask.settled === undefined
+      ? 'running'
+      : ask.settled.outcome === 'done'
+        ? 'done'
+        : 'failed'
+  return {
+    id: ask.taskIndex,
+    agent: ask.agentName,
+    ...(ask.phase !== undefined ? { phase: ask.phase } : {}),
+    status: stepStatus,
+    startedAt: toIso(ask.startedAt),
+    ...(ask.settled !== undefined ? { completedAt: toIso(ask.settled.ts) } : {}),
+    ...(ask.settled?.durationMs !== undefined ? { durationMs: ask.settled.durationMs } : {}),
+    ...(ask.settled?.errorCode !== undefined ? { error: ask.settled.errorCode } : {}),
+    lastProgressAt: ask.lastProgressAt,
+  }
+}
+
+/**
+ * [projectV2Workflow 拆分] 身份半边归并：runId/scriptName/slug/startedAt 的
+ * 注册条目 → fold 骨架兜底链（stateFilePath = 注册条目 journalPath 承载，v2 无
+ * state 文件锚；v1 快照路径恒 '' 由 workflow-extractor 对空串隐藏）。
+ */
+function resolveWorkflowIdentity(
+  registered: WorkflowRecordRegisteredEntryData | undefined,
+  settledEntry: WorkflowRecordSettledEntryData,
+  fold: RunEventFoldCheckpoint | undefined,
+): Pick<WorkflowRunRecord, 'runId' | 'scriptName' | 'slug' | 'startedAt' | 'stateFilePath'> {
+  return {
+    runId: registered?.runId ?? settledEntry.runId,
+    scriptName: registered?.scriptName ?? fold?.created?.workflowName ?? '(unknown)',
+    slug: registered?.slug,
+    startedAt: toIso(registered?.startedAt ?? fold?.created?.ts ?? 0),
+    stateFilePath: registered?.journalPath ?? '',
+  }
+}
+
+/**
+ * [projectV2Workflow 拆分] 终局半边归并：统计摘要（条目独有）+ outcome/errorCode
+ * （journal 终帧优先、条目兜底）；条件展开保持「键缺席」语义（与原组装逐字节同构）。
+ */
+function resolveWorkflowSettlement(
+  settledEntry: WorkflowRecordSettledEntryData | undefined,
+  runSettled: RunEventFoldCheckpoint['runSettled'],
+): Partial<Pick<WorkflowRunRecord, 'completedAt' | 'usedTokens' | 'totalCallCount' | 'outcome' | 'errorCode'>> {
+  const outcome: WorkflowRunRecord['outcome'] | undefined =
+    runSettled?.outcome ?? settledEntry?.outcome
+  const errorCode: string | undefined = runSettled?.errorCode ?? settledEntry?.errorCode
+  return {
+    ...(settledEntry !== undefined ? { completedAt: toIso(settledEntry.settledAt) } : {}),
+    ...(settledEntry !== undefined ? { usedTokens: settledEntry.usedTokens } : {}),
+    ...(settledEntry !== undefined ? { totalCallCount: settledEntry.callCount } : {}),
+    ...(outcome !== undefined ? { outcome } : {}),
+    ...(errorCode !== undefined ? { errorCode } : {}),
   }
 }
 
@@ -319,59 +500,21 @@ export function projectV2Workflow(
 ): WorkflowRunRecord | null {
   if (registered === undefined && settledEntry === undefined) return null
   const runSettled = fold?.runSettled
-  const status: WorkflowRunRecord['status'] =
-    runSettled !== undefined || settledEntry !== undefined ? 'done' : 'running'
+  const status = resolveWorkflowStatus(fold, runSettled, settledEntry)
   // reason 词表收窄：core DoneReason ⊃ shared WorkflowDoneReason（core 另含
   // invalid_args 等扩展值，shared 信号面不认——词表外按缺省归一，不硬透传）
   const reason =
     settledEntry?.reason !== undefined && isWorkflowDoneReason(settledEntry.reason)
       ? settledEntry.reason
       : undefined
-  const agentCalls: WorkflowAgentCall[] = []
-  if (fold !== undefined) {
-    const indexes = Array.from(fold.asks.keys()).sort((a, b) => a - b)
-    for (const taskIndex of indexes) {
-      const ask = fold.asks.get(taskIndex)!
-      const stepStatus: WorkflowAgentCall['status'] =
-        ask.settled === undefined
-          ? 'running'
-          : ask.settled.outcome === 'completed'
-            ? 'completed'
-            : 'failed'
-      agentCalls.push({
-        id: ask.taskIndex,
-        agent: ask.agentName,
-        // phase 分组供源透传（W1 D6）——renderer hasExplicitPhases 判据
-        // `phase !== undefined` 由此成立；fold 缺 phase（旧行）不造键保持平铺
-        ...(ask.phase !== undefined ? { phase: ask.phase } : {}),
-        status: stepStatus,
-        startedAt: toIso(ask.startedAt),
-        ...(ask.settled !== undefined ? { completedAt: toIso(ask.settled.ts) } : {}),
-        ...(ask.settled?.durationMs !== undefined ? { durationMs: ask.settled.durationMs } : {}),
-        ...(ask.settled?.errorCode !== undefined ? { error: ask.settled.errorCode } : {}),
-        lastProgressAt: ask.lastProgressAt,
-      })
-    }
-  }
-  const outcome: WorkflowRunRecord['outcome'] | undefined =
-    runSettled?.outcome ?? settledEntry?.outcome
-  const errorCode: string | undefined = runSettled?.errorCode ?? settledEntry?.errorCode
+  const identity = resolveWorkflowIdentity(registered, settledEntry!, fold)
+  const settlement = resolveWorkflowSettlement(settledEntry, runSettled)
   return {
-    runId: registered?.runId ?? settledEntry!.runId,
-    scriptName: registered?.scriptName ?? fold?.created?.workflowName ?? '(unknown)',
-    slug: registered?.slug,
+    ...identity,
     status,
     reason,
-    startedAt: toIso(registered?.startedAt ?? fold?.created?.ts ?? 0),
-    ...(settledEntry !== undefined ? { completedAt: toIso(settledEntry.settledAt) } : {}),
-    ...(settledEntry !== undefined ? { usedTokens: settledEntry.usedTokens } : {}),
-    ...(settledEntry !== undefined ? { totalCallCount: settledEntry.callCount } : {}),
-    agentCalls,
-    // v2 无 state 文件锚：stateFilePath 承载注册条目 journalPath（详情面板「run 关联
-    // 持久化文件」展示位）；v1 快照路径恒 ''（workflow-extractor 对空串隐藏）。
-    stateFilePath: registered?.journalPath ?? '',
-    ...(outcome !== undefined ? { outcome } : {}),
-    ...(errorCode !== undefined ? { errorCode } : {}),
+    agentCalls: fold !== undefined ? projectAskStepsToAgentCalls(fold) : [],
+    ...settlement,
   }
 }
 
@@ -421,6 +564,25 @@ export function mergeJournalProjection(
   sources: JournalProjectionSources,
   sessionId: string,
 ): { subagents: Map<string, SubagentRecord>; workflows: Map<string, WorkflowRunRecord> } {
+  const subagents = mergeSubagentHalf(sources, sessionId)
+  const workflows = mergeWorkflowHalf(sources)
+
+  // W0 输入换源：合并快照上做步骤视图合并（① run 骨架 × ② record 状态）
+  const mergedWorkflows = mergeWorkflowStepRecords(
+    Array.from(workflows.values()),
+    Array.from(subagents.values()),
+  )
+  for (const record of mergedWorkflows) {
+    workflows.set(record.runId, record)
+  }
+  return { subagents, workflows }
+}
+
+/** [mergeJournalProjection 拆分] subagent 半边：v1 冻结透传 + v2 三源 id 并集投影。 */
+function mergeSubagentHalf(
+  sources: JournalProjectionSources,
+  sessionId: string,
+): Map<string, SubagentRecord> {
   const subagents = new Map<string, SubagentRecord>()
   for (const [id, record] of sources.v1Subagents) {
     subagents.set(id, record)
@@ -443,7 +605,11 @@ export function mergeJournalProjection(
     )
     if (record !== null) subagents.set(id, record)
   }
+  return subagents
+}
 
+/** [mergeJournalProjection 拆分] workflow 半边：v1 冻结透传 + v2 条目定界 × journal fold 合并。 */
+function mergeWorkflowHalf(sources: JournalProjectionSources): Map<string, WorkflowRunRecord> {
   const workflows = new Map<string, WorkflowRunRecord>()
   for (const [runId, record] of sources.v1Workflows) {
     workflows.set(runId, record)
@@ -460,16 +626,7 @@ export function mergeJournalProjection(
     )
     if (record !== null) workflows.set(runId, record)
   }
-
-  // W0 输入换源：合并快照上做步骤视图合并（① run 骨架 × ② record 状态）
-  const mergedWorkflows = mergeWorkflowStepRecords(
-    Array.from(workflows.values()),
-    Array.from(subagents.values()),
-  )
-  for (const record of mergedWorkflows) {
-    workflows.set(record.runId, record)
-  }
-  return { subagents, workflows }
+  return workflows
 }
 
 // ── 有状态投影（tailer 接线 + 单点合并）────────────────────────

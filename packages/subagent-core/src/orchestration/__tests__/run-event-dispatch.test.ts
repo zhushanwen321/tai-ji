@@ -3,8 +3,8 @@
 // [P1b-1] run 事件状态机接线单测（D5-④ 唯一入口的编排侧消费面）。
 //
 // 锁四面（设计 workflow-architecture-redesign D5 事件枚举表 + 转移表）：
-// 1. 事件序列落账：ask 重试轨迹完整（run-created → ask-dispatched → ask-retrying →
-//    ask-settled(failed, errorCode) → ask-settled(completed, attempt 递增) →
+// 1. 事件序列落账：ask 重试轨迹完整（run-created → agent-started → agent-retrying →
+//    agent-settled(failed, errorCode) → agent-settled(completed, attempt 递增) →
 //    run-settled(completed)）——对照设计 D5 事件枚举表的字段验收（attempt/errorCode）。
 // 2. 终态三形态（journal 侧写读闭环）：成功=completed、失败=failed+errorCode、
 //    取消=cancelled（经 cancel-requested 控制事件合成 run-settled 路径——控制事件
@@ -24,13 +24,13 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  dispatchAskDispatched,
-  dispatchAskRetrying,
-  dispatchAskSettledFailed,
+  dispatchAgentStarted,
+  dispatchAgentRetrying,
+  dispatchAgentSettledFailed,
   dispatchRunCreated,
   dispatchRunTrigger,
   setRunEventJournalDirForTest,
-} from "../worker-message-pump.ts";
+} from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
@@ -104,14 +104,14 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
       ts,
     });
     await dispatchRunTrigger(run, {
-      type: "ask-dispatched",
+      type: "agent-started",
       taskIndex: 1,
       agentName: "reviewer",
       attempt: 1,
       ts,
     });
     await dispatchRunTrigger(run, {
-      type: "ask-retrying",
+      type: "agent-retrying",
       taskIndex: 1,
       attempt: 1,
       backoffMs: 1000,
@@ -119,7 +119,7 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
       ts,
     });
     await dispatchRunTrigger(run, {
-      type: "ask-settled",
+      type: "agent-settled",
       taskIndex: 1,
       attempt: 1,
       outcome: "failed",
@@ -129,16 +129,16 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
       ts,
     });
     await dispatchRunTrigger(run, {
-      type: "ask-settled",
+      type: "agent-settled",
       taskIndex: 1,
       attempt: 2,
-      outcome: "completed",
+      outcome: "done",
       durationMs: 5000,
       ts,
     });
     await dispatchRunTrigger(run, {
       type: "run-settled",
-      outcome: "completed",
+      outcome: "done",
       artifactsDir: journalDir,
       ts,
     });
@@ -146,16 +146,16 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
     const events = await scanRunEvents(journalDir, run.runId);
     expect(events.map((e) => e.type)).toEqual([
       "run-created",
-      "ask-dispatched",
-      "ask-retrying",
-      "ask-settled",
-      "ask-settled",
+      "agent-started",
+      "agent-retrying",
+      "agent-settled",
+      "agent-settled",
       "run-settled",
     ]);
     // 重试轨迹字段验收（D5 载荷表：attempt/errorCode/退避/原因）
-    const retrying = events[2] as Extract<WorkflowRunEvent, { type: "ask-retrying" }>;
+    const retrying = events[2] as Extract<WorkflowRunEvent, { type: "agent-retrying" }>;
     expect(retrying).toMatchObject({ taskIndex: 1, attempt: 1, backoffMs: 1000 });
-    const firstSettled = events[3] as Extract<WorkflowRunEvent, { type: "ask-settled" }>;
+    const firstSettled = events[3] as Extract<WorkflowRunEvent, { type: "agent-settled" }>;
     expect(firstSettled).toMatchObject({
       taskIndex: 1,
       attempt: 1,
@@ -163,11 +163,11 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
       errorCode: "engine_crashed",
       stderrTeePath: "/tmp/stderr-tee.jsonl",
     });
-    const secondSettled = events[4] as Extract<WorkflowRunEvent, { type: "ask-settled" }>;
-    expect(secondSettled).toMatchObject({ taskIndex: 1, attempt: 2, outcome: "completed" });
+    const secondSettled = events[4] as Extract<WorkflowRunEvent, { type: "agent-settled" }>;
+    expect(secondSettled).toMatchObject({ taskIndex: 1, attempt: 2, outcome: "done" });
     expect(secondSettled.errorCode).toBeUndefined();
     const final = events[5] as Extract<WorkflowRunEvent, { type: "run-settled" }>;
-    expect(final).toMatchObject({ outcome: "completed", artifactsDir: journalDir });
+    expect(final).toMatchObject({ outcome: "done", artifactsDir: journalDir });
   });
 
   it("[Q2] created 引导已退役：无 run-created 前史时首个编排触发表外转移 fail-fast（不静默补齐）", async () => {
@@ -175,7 +175,7 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
 
     await expect(
       dispatchRunTrigger(run, {
-        type: "ask-dispatched",
+        type: "agent-started",
         taskIndex: 7,
         agentName: "fixer",
         attempt: 1,
@@ -188,18 +188,18 @@ describe("事件序列落账（D5 事件枚举表对照）", () => {
   });
 });
 
-// ── 1.5 ask-dispatched phase 承载（W1 D6 phase 分组供源） ────
+// ── 1.5 agent-started phase 承载（W1 D6 phase 分组供源） ────
 
-describe("ask-dispatched phase 承载（W1 D6 分组供源）", () => {
-  it("dispatchAskDispatched 透传 phase：journal 帧携带剧本归属", async () => {
+describe("agent-started phase 承载（W1 D6 分组供源）", () => {
+  it("dispatchAgentStarted 透传 phase：journal 帧携带剧本归属", async () => {
     const run = makeRun("wf-phase-1");
     await dispatchRunCreated(run);
-    dispatchAskDispatched(run, 0, "reviewer", "Dev-w0(W1)");
+    dispatchAgentStarted(run, 0, "reviewer", "Dev-w0(W1)");
     await dispatchRunTrigger(run, { type: "cancel-requested", reason: "test-drain" });
 
     const events = await scanRunEvents(journalDir, run.runId);
     const dispatched = events.find(
-      (e): e is Extract<WorkflowRunEvent, { type: "ask-dispatched" }> => e.type === "ask-dispatched",
+      (e): e is Extract<WorkflowRunEvent, { type: "agent-started" }> => e.type === "agent-started",
     )!;
     expect(dispatched.phase).toBe("Dev-w0(W1)");
   });
@@ -207,13 +207,13 @@ describe("ask-dispatched phase 承载（W1 D6 分组供源）", () => {
   it("无归属（缺参 / 空串）不写 phase 键——载荷紧凑，旧读侧零兼容成本", async () => {
     const run = makeRun("wf-phase-2");
     await dispatchRunCreated(run);
-    dispatchAskDispatched(run, 0, "reviewer");
-    dispatchAskDispatched(run, 1, "fixer", "");
+    dispatchAgentStarted(run, 0, "reviewer");
+    dispatchAgentStarted(run, 1, "fixer", "");
     await dispatchRunTrigger(run, { type: "cancel-requested", reason: "test-drain" });
 
     const events = await scanRunEvents(journalDir, run.runId);
     const dispatched = events.filter(
-      (e): e is Extract<WorkflowRunEvent, { type: "ask-dispatched" }> => e.type === "ask-dispatched",
+      (e): e is Extract<WorkflowRunEvent, { type: "agent-started" }> => e.type === "agent-started",
     );
     expect(dispatched).toHaveLength(2);
     for (const frame of dispatched) {
@@ -230,13 +230,13 @@ describe("终态写读三形态（验收 b：journal 侧）", () => {
     await dispatchRunCreated(run); // [Q2] 正点发射（引导已删）
     await dispatchRunTrigger(run, {
       type: "run-settled",
-      outcome: "completed",
+      outcome: "done",
       artifactsDir: journalDir,
       ts: Date.now(),
     });
 
     const events = await scanRunEvents(journalDir, run.runId);
-    expect(events.at(-1)).toMatchObject({ type: "run-settled", outcome: "completed" });
+    expect(events.at(-1)).toMatchObject({ type: "run-settled", outcome: "done" });
   });
 
   it("失败 = failed + errorCode", async () => {
@@ -263,7 +263,7 @@ describe("终态写读三形态（验收 b：journal 侧）", () => {
     const run = makeRun("wf-term-cancel");
     await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
-      type: "ask-dispatched",
+      type: "agent-started",
       taskIndex: 1,
       agentName: "a",
       attempt: 1,
@@ -273,8 +273,37 @@ describe("终态写读三形态（验收 b：journal 侧）", () => {
 
     const events = await scanRunEvents(journalDir, run.runId);
     // journal 词表恰无 cancel-requested——合成形态 = run-settled(cancelled)
-    expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "run-settled"]);
+    expect(events.map((e) => e.type)).toEqual(["run-created", "agent-started", "run-settled"]);
     expect(events.at(-1)).toMatchObject({ type: "run-settled", outcome: "cancelled", reason: "user abort" });
+  });
+
+  it("派发前置失败形态（resolveAgentOpts 失败）= failed + errorCode unknown + result 全文随帧", async () => {
+    // [U6 回归] agent-settled 帧缺 result 是 record 恢复读面（loadAll 严格解析 /
+    // D12 完整性校验）的拒绝形态——本帧是合法写入方（agent 名/skill 解析失败路径），
+    // result 必须随帧落账，否则一次普通用户错误（agent 名拼错）在重启后使整个
+    // workflow 域停初始化。errorResult 与 worker-message-pump resolveAgentOpts
+    // 失败分支构造的 run 内形态同源（{content:"", error}）。
+    const run = makeRun("wf-pre-dispatch-fail");
+    await dispatchRunCreated(run);
+    dispatchAgentSettledFailed(run, 0, { content: "", error: "skill not found: reviewer-x" });
+    await dispatchRunTrigger(run, {
+      type: "run-settled",
+      outcome: "failed",
+      errorCode: "unknown",
+      reason: "agent opts resolve failed",
+      artifactsDir: journalDir,
+      ts: Date.now(),
+    });
+
+    const events = await scanRunEvents(journalDir, run.runId);
+    const settled = events.find((e) => e.type === "agent-settled");
+    expect(settled).toMatchObject({
+      type: "agent-settled",
+      taskIndex: 0,
+      outcome: "failed",
+      errorCode: "unknown",
+      result: { content: "", error: "skill not found: reviewer-x" },
+    });
   });
 });
 
@@ -286,7 +315,7 @@ describe("terminal 后追加让位（终局纪律守卫）", () => {
     await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "run-settled",
-      outcome: "completed",
+      outcome: "done",
       artifactsDir: journalDir,
       ts: Date.now(),
     });
@@ -295,10 +324,10 @@ describe("terminal 后追加让位（终局纪律守卫）", () => {
 
     await expect(
       dispatchRunTrigger(run, {
-        type: "ask-settled",
+        type: "agent-settled",
         taskIndex: 1,
         attempt: 1,
-        outcome: "completed",
+        outcome: "done",
         durationMs: 1,
         ts: Date.now(),
       }),
@@ -317,17 +346,17 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
     const run = makeRun(runId);
     await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
-      type: "ask-dispatched",
+      type: "agent-started",
       taskIndex: 1,
       agentName: "a",
       attempt: 1,
       ts: Date.now(),
     });
     await dispatchRunTrigger(run, {
-      type: "ask-settled",
+      type: "agent-settled",
       taskIndex: 1,
       attempt: 1,
-      outcome: "completed",
+      outcome: "done",
       durationMs: 1,
       ts: Date.now(),
     });
@@ -337,7 +366,7 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
     const run2 = makeRun(runId);
     await dispatchRunTrigger(run2, {
       type: "run-settled",
-      outcome: "completed",
+      outcome: "done",
       artifactsDir: journalDir,
       ts: Date.now(),
     });
@@ -345,8 +374,8 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
     const events = await scanRunEvents(journalDir, runId);
     expect(events.map((e) => e.type)).toEqual([
       "run-created",
-      "ask-dispatched",
-      "ask-settled",
+      "agent-started",
+      "agent-settled",
       "run-settled",
     ]);
   });
@@ -357,7 +386,7 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
     await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
       type: "run-settled",
-      outcome: "completed",
+      outcome: "done",
       artifactsDir: journalDir,
       ts: Date.now(),
     });
@@ -366,7 +395,7 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
     const run2 = makeRun(runId);
     await expect(
       dispatchRunTrigger(run2, {
-        type: "ask-dispatched",
+        type: "agent-started",
         taskIndex: 1,
         agentName: "a",
         attempt: 1,
@@ -390,9 +419,9 @@ describe("run 启动竞态回归（created 落账前到达的 ask 帧零丢失�
     for (let i = 0; i < 20; i++) {
       const run = makeRun(`wf-race-${i}`);
       const createdPromise = dispatchRunCreated(run);
-      dispatchAskDispatched(run, 0, "reviewer");
-      dispatchAskRetrying(run, 0, 1, 1000, "engine_run_failed: race probe");
-      dispatchAskSettledFailed(run, 0);
+      dispatchAgentStarted(run, 0, "reviewer");
+      dispatchAgentRetrying(run, 0, 1, 1000, "engine_run_failed: race probe");
+      dispatchAgentSettledFailed(run, 0, { content: "", error: "skill not found: nope" });
       await dispatchRunTrigger(run, {
         type: "cancel-requested",
         reason: "race-probe",
@@ -402,9 +431,9 @@ describe("run 启动竞态回归（created 落账前到达的 ask 帧零丢失�
       const events = await scanRunEvents(journalDir, run.runId);
       expect(events.map((e) => e.type), `round ${i}`).toEqual([
         "run-created",
-        "ask-dispatched",
-        "ask-retrying",
-        "ask-settled",
+        "agent-started",
+        "agent-retrying",
+        "agent-settled",
         "run-settled",
       ]);
     }
@@ -415,7 +444,7 @@ describe("run 启动竞态回归（created 落账前到达的 ask 帧零丢失�
     // 本用例的让位行为（journal 缺 ask 帧）+ lifecycle 时序锁用例会双双红灯。
     const run = makeRun("wf-race-inverted");
     void dispatchRunTrigger(run, {
-      type: "ask-dispatched",
+      type: "agent-started",
       taskIndex: 0,
       agentName: "reviewer",
       attempt: 1,

@@ -275,31 +275,17 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
   });
 });
 
-// ── GUI attach（RPC 模式分发；attach 实现单点在 tool-shared withGuiAttach）──
+// ── details 不含 GUI 描述符（isWorkflow 块分支恒折叠单行不消费 __gui__，构造即
+//    死代码——D8 裁决，execute 级不 attach）──
 
-describe("GUI attach（execute 级 RPC/非 RPC 分发）", () => {
-  /** details 的 __gui__ 投影形态（协议 GuiRenderResult 的断言子集）。 */
-  type GuiProjection = { __gui__?: { component?: { type?: string; props?: { items?: unknown[] } } } };
-
-  it("RPC ctx → details 附带 __gui__（status → list-tree 组件）", async () => {
-    const tool = captureRegisteredTool<StatusToolView>(new Map());
+describe("details 形状（execute 级无 GUI attach）", () => {
+  it("RPC ctx → details 不含 __gui__ 键（workflow tool 不构造 GUI 描述符）", async () => {
+    const tool = captureRegisteredTool<Record<string, unknown>>(new Map());
     const r = await tool.execute("id", { action: "status" }, undefined, undefined, {
       mode: "rpc",
       hasUI: true,
     });
-    const gui = (r.details as unknown as GuiProjection).__gui__;
-    expect(gui).toBeDefined();
-    expect(gui?.component?.type).toBe("list-tree");
-    expect(gui?.component?.props?.items).toEqual([]);
-  });
-
-  it("TUI ctx → details 无 __gui__（走 pi 原生渲染）", async () => {
-    const tool = captureRegisteredTool<StatusToolView>(new Map());
-    const r = await tool.execute("id", { action: "status" }, undefined, undefined, {
-      mode: "tui",
-      hasUI: true,
-    });
-    expect((r.details as unknown as GuiProjection).__gui__).toBeUndefined();
+    expect(Object.keys(r.details as object)).not.toContain("__gui__");
   });
 });
 

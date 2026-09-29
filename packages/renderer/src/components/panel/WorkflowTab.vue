@@ -36,16 +36,14 @@
         <span v-if="workflow.slug" class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim">
           {{ workflow.slug }}
         </span>
+        <!-- [D2] 中断 run 状态徽标（status 徽标面——state-tone-lock 登记的「已中断（可续跑）」
+             显示位）：非终局不出 outcome 终态文案，暂停态可 resume 复活（回 running 后本徽标消失） -->
+        <span v-if="workflow.status === 'interrupted'" data-testid="drawer-workflow-interrupted"
+          class="shrink-0 rounded-sm border border-hairline px-1.5 py-px text-[length:var(--text-3xs)] text-neutral-dim">
+          {{ t('panel.tray.workflowInterrupted') }}
+        </span>
         <!-- workflow 一次性生命周期（subagent-workflow D-2）：仅 abort，pause/resume 已移除 -->
         <div v-if="workflow.status === 'running'" class="flex shrink-0 items-center gap-0.5">
-          <!-- [P3/D6] run 级 health：停滞信号（stalledSince 消费侧推导；旧快照 health 缺省不判定） -->
-          <span
-            v-if="stalledSince !== null"
-            data-testid="drawer-workflow-stalled"
-            class="shrink-0 font-mono text-[length:var(--text-3xs)] text-warn"
-          >
-            {{ t('sidebar.workflowDetail.stalledNoProgress', { duration: formatDuration(stalledAgeMs) }) }}
-          </span>
           <Button
             variant="ghost"
             size="icon"
@@ -93,19 +91,17 @@
               <div class="flex items-center gap-2">
                 <Loader2
                   v-if="call.status === 'running'"
-                  class="size-[11px] shrink-0 animate-spin"
-                  :class="callStalled(call) ? 'text-warn' : 'text-accent'"
+                  class="size-[11px] shrink-0 animate-spin text-accent"
                 />
                 <span v-else class="size-1.5 shrink-0 rounded-full" :class="callDotClass(call.status)" />
                 <span class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-2xs)] font-medium text-neutral-fg">
                   {{ call.agent }}
                 </span>
-                <!-- [P3/D6] running ask：已执行时长槽（elapsed 可得时）+ 停滞信号（lastProgressAt 超阈值）；
-                     旧快照缺 startedAt/lastProgressAt → 缺省渲染（槽省略、不判定停滞） -->
+                <!-- [P3/D6] running ask：已执行时长槽（elapsed 可得时）；
+                     旧快照缺 startedAt → 缺省渲染（槽省略） -->
                 <span
                   v-if="call.status === 'running'"
-                  class="shrink-0 font-mono text-[length:var(--text-3xs)]"
-                  :class="callStalled(call) ? 'text-warn' : 'text-accent'"
+                  class="shrink-0 font-mono text-[length:var(--text-3xs)] text-accent"
                 >
                   {{ callStatusLabel(call) }}
                 </span>
@@ -143,8 +139,6 @@ import { useDrawerControl, openSubagent } from '@taiji/core/domain/drawer'
 import {
   agentCallVirtualId,
   agentCallElapsedMs,
-  agentCallStalled,
-  deriveStalledSince,
   useWorkflowStore,
 } from '@/stores/workflow'
 import { usePanelStore } from '@/stores/panel'
@@ -218,7 +212,7 @@ const hasExplicitPhases = computed(() =>
 // 全部 switch 用 default-never 穷尽锁：call.status 词表扩值而分支漏配 = vue-tsc 红。
 
 /** phase 聚合输出词表（[W2 D8] 四值） */
-type PhaseAggregateStatus = 'completed' | 'failed' | 'running' | 'pending'
+type PhaseAggregateStatus = 'done' | 'failed' | 'running' | 'pending'
 
 /** never 穷尽断言（default 分支消费：漏配分支时 value 不再是 never → 编译红） */
 function assertNever(value: never): never {
@@ -228,7 +222,7 @@ function assertNever(value: never): never {
 /** 终态判据（输入侧全集锁：call.status 扩值落 default → 编译红，不再静默判 pending） */
 function isTerminalCallStatus(status: WorkflowAgentCall['status']): boolean {
   switch (status) {
-    case 'completed':
+    case 'done':
     case 'failed':
       return true
     case 'running':
@@ -239,18 +233,18 @@ function isTerminalCallStatus(status: WorkflowAgentCall['status']): boolean {
   }
 }
 
-/** 组内状态聚合：有 running → running；全终态 → 含 failed 即 failed、否则 completed；否则 pending */
+/** 组内状态聚合：有 running → running；全终态 → 含 failed 即 failed、否则 done；否则 pending */
 function aggregatePhaseStatus(calls: WorkflowAgentCall[]): PhaseAggregateStatus {
   if (calls.some((c) => c.status === 'running')) return 'running'
   if (calls.every((c) => isTerminalCallStatus(c.status))) {
-    return calls.some((c) => c.status === 'failed') ? 'failed' : 'completed'
+    return calls.some((c) => c.status === 'failed') ? 'failed' : 'done'
   }
   return 'pending'
 }
 
 function phaseDotClass(status: PhaseAggregateStatus): string {
   switch (status) {
-    case 'completed': return 'bg-success'
+    case 'done': return 'bg-success'
     case 'failed': return 'bg-danger'
     case 'running': return 'bg-accent'
     case 'pending': return 'bg-neutral-dim opacity-40'
@@ -260,7 +254,7 @@ function phaseDotClass(status: PhaseAggregateStatus): string {
 
 function callDotClass(status: WorkflowAgentCall['status']): string {
   switch (status) {
-    case 'completed': return 'bg-success'
+    case 'done': return 'bg-success'
     case 'failed': return 'bg-danger'
     case 'running': return 'bg-accent'
     case 'pending': return 'bg-neutral-dim opacity-40'
@@ -273,8 +267,8 @@ function formatDuration(ms: number): string {
   return formatCompactDuration(Math.floor(ms / MS_PER_SECOND), { hours: false })
 }
 
-// ── [P3/D6] health / progress 消费（推导纯函数单源在 stores/workflow）────────
-// 1s tick 只驱动「已执行时长」槽与停滞信号重算（data 面仍由 records 推送驱动；
+// ── [P3/D6] progress 消费（推导纯函数单源在 stores/workflow）────────
+// 1s tick 只驱动「已执行时长」槽重算（data 面仍由 records 推送驱动；
 // interval 随组件 scope 自动回收）。
 const now = ref(Date.now())
 const TICK_INTERVAL_MS = 1000
@@ -283,32 +277,16 @@ const tickTimer = setInterval(() => {
 }, TICK_INTERVAL_MS)
 onScopeDispose(() => clearInterval(tickTimer))
 
-/** run 级停滞起点（null = 非停滞 / health 缺省不可判定） */
-const stalledSince = computed(() =>
-  workflow.value ? deriveStalledSince(workflow.value, now.value) : null,
-)
-const stalledAgeMs = computed(() =>
-  stalledSince.value === null ? 0 : now.value - stalledSince.value,
-)
-
-function callStalled(call: WorkflowAgentCall): boolean {
-  return agentCallStalled(call, now.value)
-}
-
-/** running ask 的状态标签：停滞 → 无进展文案；其余 → 运行中（+ 已执行时长槽，可得时） */
+/** running ask 的状态标签：运行中（+ 已执行时长槽，可得时） */
 function callStatusLabel(call: WorkflowAgentCall): string {
-  if (callStalled(call)) {
-    const age = call.lastProgressAt === undefined ? 0 : now.value - call.lastProgressAt
-    return t('sidebar.workflowDetail.stalledNoProgress', { duration: formatDuration(age) })
-  }
   const elapsed = agentCallElapsedMs(call, now.value)
   const label = t('panel.sideDrawer.workflowRunning')
   return elapsed === null ? label : `${label} · ${formatDuration(elapsed)}`
 }
 
-/** agent call 是否终态（completed/failed，显示 token/turns 第二行；running/pending 不显） */
+/** agent call 是否终态（done/failed，显示 token/turns 第二行；running/pending 不显） */
 function isCallDone(status: WorkflowAgentCall['status']): boolean {
-  return status === 'completed' || status === 'failed'
+  return status === 'done' || status === 'failed'
 }
 
 /** agent call 的 token 总量（input + output 合并，精简显示） */

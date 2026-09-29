@@ -34,7 +34,7 @@ import {
   settleRunAccounting,
   settledRecordOf,
   setRunEventJournalDirForTest,
-} from "../worker-message-pump.ts";
+} from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { Trace } from "../models/trace.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
@@ -87,7 +87,7 @@ describe("settleRunAccounting 原语（[W2/V1 D1] journal 帧 + manifest 两件�
 
     await settleRunAccounting(
       { runId: "wf-sa-1" },
-      { outcome: "interrupted", errorCode: "idle-evicted", reason: "idle run evicted after retention TTL", settledAt },
+      { outcome: "failed", errorCode: "idle-evicted", reason: "idle run evicted after retention TTL", settledAt },
       { workflowName: "sig-wf" },
     );
 
@@ -96,7 +96,7 @@ describe("settleRunAccounting 原语（[W2/V1 D1] journal 帧 + manifest 两件�
       | Extract<WorkflowRunEvent, { type: "run-settled" }>
       | undefined;
     expect(settled).toBeDefined();
-    expect(settled).toMatchObject({ outcome: "interrupted", errorCode: "idle-evicted" });
+    expect(settled).toMatchObject({ outcome: "failed", errorCode: "idle-evicted" });
     expect(settled?.ts).toBe(settledAt);
     // manifest 补写（冷路径 spec 缺省 → 原语承接；原子写有 IO 窗——轮询落定）
     await vi.waitFor(() => {
@@ -107,7 +107,7 @@ describe("settleRunAccounting 原语（[W2/V1 D1] journal 帧 + manifest 两件�
       errorCode?: string;
       workflowName?: string;
     };
-    expect(manifest).toMatchObject({ outcome: "interrupted", errorCode: "idle-evicted", workflowName: "sig-wf" });
+    expect(manifest).toMatchObject({ outcome: "failed", errorCode: "idle-evicted", workflowName: "sig-wf" });
   });
 
   it("注册表：terminal 落账即 note → isRunSettled / settledRecordOf 可查询 → forget 回收", async () => {
@@ -115,10 +115,10 @@ describe("settleRunAccounting 原语（[W2/V1 D1] journal 帧 + manifest 两件�
     const run = makeRun("wf-sa-2");
     expect(isRunSettled(run)).toBe(false);
 
-    await settleRunAccounting({ runId: "wf-sa-2" }, { outcome: "interrupted", settledAt: Date.now() });
+    await settleRunAccounting({ runId: "wf-sa-2" }, { outcome: "failed", settledAt: Date.now() });
 
     expect(isRunSettled(run)).toBe(true);
-    expect(settledRecordOf("wf-sa-2")).toMatchObject({ outcome: "interrupted" });
+    expect(settledRecordOf("wf-sa-2")).toMatchObject({ outcome: "failed" });
     forgetSettledRecord("wf-sa-2");
     expect(isRunSettled(run)).toBe(false);
     expect(settledRecordOf("wf-sa-2")).toBeUndefined();
@@ -126,10 +126,10 @@ describe("settleRunAccounting 原语（[W2/V1 D1] journal 帧 + manifest 两件�
 
   it("让位（幂等第二道）：已终局 run 再投终局触发 → IllegalTransitionError 上抛（调用方分类）", async () => {
     await seedCreated("wf-sa-3");
-    await settleRunAccounting({ runId: "wf-sa-3" }, { outcome: "interrupted", settledAt: Date.now() });
+    await settleRunAccounting({ runId: "wf-sa-3" }, { outcome: "failed", settledAt: Date.now() });
 
     await expect(
-      settleRunAccounting({ runId: "wf-sa-3" }, { outcome: "interrupted", settledAt: Date.now() }),
+      settleRunAccounting({ runId: "wf-sa-3" }, { outcome: "failed", settledAt: Date.now() }),
     ).rejects.toMatchObject({ name: "IllegalTransitionError" });
     // 单终局不变量：run-settled 恰一帧
     const events = await journal.scan("wf-sa-3");
@@ -142,7 +142,7 @@ describe("双帧 fold 停帧（[W2 D3 竞态防护] 单测锚——先到帧为�
     // 构造双帧事件流（两帧 run-settled——跨进程 TOCTOU 双写的 journal 形态）
     const dual = [
       { type: "run-created", runId: "wf-dual", workflowName: "sig-wf", argsSummary: "{}", ts: 1_000, seq: 1 },
-      { type: "ask-dispatched", taskIndex: 1, agentName: "a", attempt: 1, ts: 2_000, seq: 2 },
+      { type: "agent-started", taskIndex: 1, agentName: "a", attempt: 1, ts: 2_000, seq: 2 },
       { type: "run-settled", outcome: "interrupted", errorCode: "idle-evicted", artifactsDir: dir, ts: 3_000, seq: 3 },
       { type: "run-settled", outcome: "failed", artifactsDir: dir, ts: 4_000, seq: 4 },
     ] as unknown as readonly WorkflowRunEvent[];

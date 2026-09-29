@@ -91,7 +91,7 @@
 
 ### B3 验收 P1/P2 是否真实场景验证
 
-P1 = 本地 pi CLI（`--mode rpc --session-dir --model mimo-v2.5-pro --approve --extension`）+ stdin JSONL 诱导 prompt + grep session JSONL 的 toolResult——真实 LLM、真实工具调用、真实保留字 label，符合 AGENTS.md 的 extension 实测规定形态。P2 同会话 TUI 观察单 Other 行 + 自由文本提交。V1/V2 分别锚定 P1/P2，V3 含负面回归（"Other database" 子串标签放行 + 既有 e2e `e2e/ask-user-real.spec.ts` A1/A2/A3 全绿）+ 双渲染路径各跑一次。模型服从性风险已在 §9.3 诚实标注并给了降级路径（换话术 → TUI 人工诱导 + PR 记录摘录）。**验收为真实场景验证，非单测自证。**
+P1 = 本地 pi CLI（`--mode rpc --session-dir --model <本机可用模型> --approve --extension`）+ stdin JSONL 诱导 prompt + grep session JSONL 的 toolResult——真实 LLM、真实工具调用、真实保留字 label，符合 AGENTS.md 的 extension 实测规定形态。P2 同会话 TUI 观察单 Other 行 + 自由文本提交。V1/V2 分别锚定 P1/P2，V3 含负面回归（"Other database" 子串标签放行 + 既有 e2e `e2e/ask-user-real.spec.ts` A1/A2/A3 全绿）+ 双渲染路径各跑一次。模型服从性风险已在 §9.3 诚实标注并给了降级路径（换话术 → TUI 人工诱导 + PR 记录摘录）。**验收为真实场景验证，非单测自证。**
 
 ## 5. 方案自身过度设计检查（C 四问逐项）
 

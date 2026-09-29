@@ -38,7 +38,7 @@ function makeManifest(overrides: Partial<RunTerminalManifest> = {}): RunTerminal
   return {
     id: "wf-1719500000000-abcd",
     workflowName: "review-fix-loop",
-    outcome: "completed",
+    outcome: "done",
     settledAt: 1719500001000,
     ...overrides,
   };
@@ -48,13 +48,13 @@ function makeManifest(overrides: Partial<RunTerminalManifest> = {}): RunTerminal
 
 describe("run 终局投影三形态写读（验收 a：manifest 侧）", () => {
   it("成功 = completed（errorCode 缺省不落键）", async () => {
-    await writeRunTerminalManifest(dir, makeManifest({ outcome: "completed" }));
+    await writeRunTerminalManifest(dir, makeManifest({ outcome: "done" }));
 
     const read = await readRunTerminalManifest(dir, "wf-1719500000000-abcd");
     expect(read).toEqual({
       id: "wf-1719500000000-abcd",
       workflowName: "review-fix-loop",
-      outcome: "completed",
+      outcome: "done",
       settledAt: 1719500001000,
     });
     expect(read).not.toHaveProperty("errorCode");
@@ -100,10 +100,11 @@ describe("旧读侧兼容（无 outcome 字段读回 null/undefined 不炸）", 
   it("outcome 词表外值（漂移形态）→ null 降级，不误判已终局", async () => {
     await fs.promises.writeFile(
       path.join(dir, "wf-1719500000000-abcd.json"),
-      JSON.stringify({ id: "x", workflowName: "w", outcome: "done", settledAt: 1 }),
+      JSON.stringify({ id: "x", workflowName: "w", outcome: "interrupted", settledAt: 1 }),
       "utf-8",
     );
 
+    // [D2] interrupted 已出 outcome 词表（历史写入方产物形态）→ 词表外值降级 null
     expect(await readRunTerminalManifest(dir, "wf-1719500000000-abcd")).toBeNull();
   });
 

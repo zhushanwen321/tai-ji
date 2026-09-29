@@ -11,32 +11,38 @@
  *   未知 type warn 留痕（协议漂移防线）
  * - OR-8：脚本 return 时残留 fire-and-forget in-flight call 收口为取消终态
  *   （call done + trace failed + Cancelled 文案 + completedAt；[H2 W3] trace.live
- *   字段已删除——节点无运行期附属对象可滞留），先收口再落盘——done 快照不含
+ *   字段已删除——节点无运行期附属对象可滞留），先收口再终态——done 聚合面不含
  *   running 节点
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getLogger } from "../../core/logger.ts";
 import {
-  dispatchRunCreated,
-  closeOutInFlightCalls,
   handleScriptError,
   handleWorkerError,
   handleWorkerExit,
   handleWorkerMessage,
 } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+  closeOutInFlightCalls,
+} from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
-import { toRunSnapshot } from "../run-snapshot.ts";
 import { Trace } from "../models/trace.ts";
 import type { AgentResult, WorkerLogEntry } from "../models/types.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import { flushMicrotasks } from "./helpers/flush-microtasks.ts";
-import { isRunSettled, settledRecordOf } from "../worker-message-pump.ts";
+import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
 
 // ── helpers ──────────────────────────────────────────────────
+
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number) {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
 
 const MAX_ERROR_LOGS = 500;
 
@@ -221,7 +227,7 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
     await vi.advanceTimersByTimeAsync(1000); // 退避
     await expect(p).resolves.toBeUndefined();
 
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     // [B-4] 独立围栏：直落故障不再跳过 onRunDone（旧实现同一 try 会跳过）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
@@ -247,7 +253,7 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
 
     await handleWorkerMessage(run, { type: "return", result: 1 }, deps, makeHandlers());
 
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
     expect(deps.onRunDone).toHaveBeenCalledTimes(1); // 旧实现同一 try：直落抛错会跳过
     const errLogs = errorSpy.mock.calls.map((c) => String(c[0]));
     expect(
@@ -339,7 +345,7 @@ describe("[OR-6] log 消息消费 + 未知类型 default 留痕", () => {
 // ── [OR-8] run done 时 in-flight call 收口 cancelled ─────────
 
 describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
-  it("fire-and-forget agent() 后 return：call 收口 done + trace failed（Cancelled 文案），快照无 running 节点", async () => {
+  it("fire-and-forget agent() 后 return：call 收口 done + trace failed（Cancelled 文案），聚合面无 running 节点", async () => {
     const run = makeRealRun("wf-or8-1");
     await seedRunCreated(run);
     const deps = makeDeps();
@@ -358,14 +364,13 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     expect(call?.status).toBe("done");
     expect(call?.result?.error).toContain("Cancelled");
     // trace 节点 failed + completedAt（快照/GUI 不再显示 running 步骤）
-    const node = run.state.trace.find(1);
+    const node = findByStep(run.state.trace, 1);
     expect(node?.status).toBe("failed");
     expect(node?.error).toContain("Cancelled");
     expect(node?.completedAt).toBeDefined();
-    // 持久化快照（收口先于 save）不含 running 形态
-    const snap = toRunSnapshot(run);
-    expect(snap.state.calls.map((c) => c.status)).toEqual(["done"]);
-    expect(snap.state.trace.map((n) => n.status)).toEqual(["failed"]);
+    // 收口后聚合面无 running 形态（call 全 done、trace 全 failed——收口先于终态）
+    expect(Array.from(run.state.calls.values()).map((c) => c.status)).toEqual(["done"]);
+    expect(run.state.trace.toArray().map((n) => n.status)).toEqual(["failed"]);
   });
 
   it("handleWorkerError 超限路径同样收口（failed 快照一致）", async () => {
@@ -383,7 +388,7 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
     expect(run.state.calls.get(2)?.status).toBe("done");
     expect(run.state.calls.get(2)?.result?.error).toContain("Cancelled");
-    expect(run.state.trace.find(2)?.status).toBe("failed");
+    expect(findByStep(run.state.trace, 2)?.status).toBe("failed");
   });
 
   it("closeOutInFlightCalls 对 pending 状态 call 补齐状态机（markRunning→markDone）", () => {
@@ -417,6 +422,6 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
 
     // 已完成 call 的结果原样保留（不被取消文案覆盖）
     expect(run.state.calls.get(4)?.result?.content).toBe("ok");
-    expect(run.state.trace.find(4)?.status).toBe("completed");
+    expect(findByStep(run.state.trace, 4)?.status).toBe("completed");
   });
 });

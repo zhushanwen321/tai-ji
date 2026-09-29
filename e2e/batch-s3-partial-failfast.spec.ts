@@ -28,15 +28,16 @@
  *   前置：real renderer bundle（VITE_E2E=true pnpm run build:e2e，不带 VITE_MOCK）。
  * - 预算：S3a 600s（真实 LLM：一好一坏双成员）/ S3b 180s（单 turn 拒绝）/ S3c 300s
  *   （fail-fast 快速终局 + 通知落盘）。窗口不足属预算校准，禁止放宽断言换绿灯。
- * - 失败归因：writeDiag 落 /tmp/batch-s3-*.json + console 抓取 + 全页截图 +
- *   <dataDir>/logs/。重试禁令：失败先归因，禁止不归因直接重试。
+ * - 失败归因：writeDiag 落 testInfo.outputPath（batch-s3-*.json，不落 /tmp——诊断载荷
+ *   可含 session entry 正文，/tmp 非其合法落盘位置，ADR-0063 I2）+ console 抓取 +
+ *   全页截图 + <dataDir>/logs/。重试禁令：失败先归因，禁止不归因直接重试。
  *
  * 形态说明：三个子场景共享一个真实 app 实例与同一会话（serial describe——S3b 依赖
  * S3a 产出的 record id；任一失败后续跳过，天然依赖链）。断言 ground truth =
  * 主 session JSONL + journal 文件（磁盘事实）。good agent 为 spec 自建 fixture
  * （mkdtemp 内写 agent .md——只依赖成员引擎的 agent 解析，不依赖本机 agent 清单）。
  */
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import {
   launchRealApp,
   waitForRuntime,
@@ -134,9 +135,13 @@ function seedRealCredentials(dataDir: string): void {
 
 // ── 诊断与扫描 helpers ──────────────────────────────────────────────────
 
-function writeDiag(name: string, data: Record<string, unknown>): void {
-  fs.writeFileSync(`/tmp/${name}`, JSON.stringify(data, null, 2))
-  console.log(`[batch-s3] diag → /tmp/${name}`)
+/** 诊断落 Playwright 托管产物位（testInfo.outputPath，随 output 目录管理）——
+ *  载荷可含 session entry 正文，/tmp 不是其合法落盘位置（ADR-0063 I2）。 */
+function writeDiag(testInfo: TestInfo, name: string, data: Record<string, unknown>): void {
+  const target = testInfo.outputPath(name)
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, JSON.stringify(data, null, 2))
+  console.log(`[batch-s3] diag → ${target}`)
 }
 
 async function waitUntil(pred: () => boolean, deadlineMs: number, intervalMs = 200): Promise<boolean> {
@@ -300,7 +305,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
    *  健康在途（message.complete 仅在 agent_end 广播——runtime event-adapter.ts
    *  handleAgentEnd，真实 LLM 调工具的 turn 常超探测窗，r6 实测 20.1s 误判证据），
    *  继续等满总判定窗，全预算到期仍无 complete 才落 diag + 超时断言红。 */
-  async function sendAndWaitTurn(content: string, tag: string, timeoutMs: number): Promise<void> {
+  async function sendAndWaitTurn(testInfo: TestInfo, content: string, tag: string, timeoutMs: number): Promise<void> {
     const s = shared!
     const BUSY_PROBE_MS = 20_000
     const BUSY_SETTLE_MS = 8_000
@@ -335,7 +340,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
         remainMs,
       )
       if (!done) {
-        writeDiag(`batch-s3-${tag}-turn.json`, {
+        writeDiag(testInfo, `batch-s3-${tag}-turn.json`, {
           seen: [...new Set(s.sub.events.map((e) => String(e.type)))],
           runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
           busyRejected,
@@ -360,7 +365,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
       `agents = "${s.goodAgentPath},${BAD_AGENT_PATH}" (one agent per task, same order — the second path is intentionally broken). ` +
       `After the tool call returns, reply with only the word DISPATCHED. [${MAIN_MARKER}]`
 
-    await sendAndWaitTurn(prompt, 's3a-send', MAIN_TURN_TIMEOUT_MS)
+    await sendAndWaitTurn(testInfo, prompt, 's3a-send', MAIN_TURN_TIMEOUT_MS)
 
     // 会话文件定位（首条消息已发，pi flush 后文件必在——本用例起供 S3b/S3c 共用）
     s.sessionFile = await locateSessionFile(path.join(s.dataDir, 'agent'))
@@ -369,7 +374,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     const agentDir = path.join(s.dataDir, 'agent')
     const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
     if (!journalFound) {
-      writeDiag('batch-s3a-journal-missing.json', {
+      writeDiag(testInfo, 'batch-s3a-journal-missing.json', {
         runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
         piLogsTail: readPiLogs(s.dataDir).slice(-3000),
       })
@@ -382,7 +387,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     const notifyId = `wf-done:${runId}`
     const notifyArrived = await waitUntil(() => fs.readFileSync(s.sessionFile, 'utf8').includes(notifyId), NOTIFY_TIMEOUT_MS)
     if (!notifyArrived) {
-      writeDiag('batch-s3a-notify-missing.json', {
+      writeDiag(testInfo, 'batch-s3a-notify-missing.json', {
         journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
         piLogsTail: readPiLogs(s.dataDir).slice(-3000),
       })
@@ -400,7 +405,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     try {
       scriptResult = JSON.parse((scriptResultMatch![1] || '').trim()) as typeof scriptResult
     } catch {
-      writeDiag('batch-s3a-script-result-unparsable.json', { contentHead: content.slice(0, 2000) })
+      writeDiag(testInfo, 'batch-s3a-script-result-unparsable.json', { contentHead: content.slice(0, 2000) })
       throw new Error('Script Result 段应为合法 JSON')
     }
     expect(scriptResult.status, `批收口 status 应为 partial（收到 "${String(scriptResult.status)}"）`).toBe('partial')
@@ -447,7 +452,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     let rejectArrived = false
     for (let round = 1; round <= 2 && !rejectArrived; round += 1) {
       const offsetBefore = fs.statSync(s.sessionFile).size
-      await sendAndWaitTurn(round === 1 ? basePrompt : retryPrompt, `s3b-send-r${round}`, MAIN_TURN_TIMEOUT_MS)
+      await sendAndWaitTurn(testInfo, round === 1 ? basePrompt : retryPrompt, `s3b-send-r${round}`, MAIN_TURN_TIMEOUT_MS)
       s.sessionFile = await locateSessionFile(path.join(s.dataDir, 'agent'))
       rejectArrived = await waitUntil(
         () => {
@@ -461,7 +466,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
       }
     }
     if (!rejectArrived) {
-      writeDiag('batch-s3b-reject-missing.json', {
+      writeDiag(testInfo, 'batch-s3b-reject-missing.json', {
         sessionTail: fs.readFileSync(s.sessionFile, 'utf8').slice(-3000),
         runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
       })
@@ -488,7 +493,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
       `After the tool call returns, reply with only the word DISPATCHED.`
 
     const journalsBefore = listFilesRecursive(path.join(s.dataDir, 'agent'), '.events.jsonl').length
-    await sendAndWaitTurn(prompt, 's3c-send', MAIN_TURN_TIMEOUT_MS)
+    await sendAndWaitTurn(testInfo, prompt, 's3c-send', MAIN_TURN_TIMEOUT_MS)
 
     // 会话文件幂等重定位（同会话同文件；S3c 的 notify/v2 条目断言读它）
     s.sessionFile = await locateSessionFile(path.join(s.dataDir, 'agent'))
@@ -499,7 +504,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
       JOURNAL_TIMEOUT_MS,
     )
     if (!newJournalFound) {
-      writeDiag('batch-s3c-journal-missing.json', { runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000) })
+      writeDiag(testInfo, 'batch-s3c-journal-missing.json', { runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000) })
     }
     expect(newJournalFound, '错配批的 run journal 应落盘（run-created 先于模板入口校验）').toBe(true)
     const journals = listFilesRecursive(agentDir, '.events.jsonl')
@@ -509,7 +514,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     const notifyId = `wf-done:${runId}`
     const notifyArrived = await waitUntil(() => fs.readFileSync(s.sessionFile, 'utf8').includes(notifyId), NOTIFY_TIMEOUT_MS)
     if (!notifyArrived) {
-      writeDiag('batch-s3c-notify-missing.json', {
+      writeDiag(testInfo, 'batch-s3c-notify-missing.json', {
         journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
         piLogsTail: readPiLogs(s.dataDir).slice(-3000),
       })
@@ -538,7 +543,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
       sessionText.includes(MISMATCH_SNIPPET) ||
       journalReason.includes(MISMATCH_SNIPPET)
     if (!mismatchEvidence) {
-      writeDiag('batch-s3c-mismatch-snippet-missing.json', {
+      writeDiag(testInfo, 'batch-s3c-mismatch-snippet-missing.json', {
         notifyContentHead: notifyContent.slice(0, 2000),
         journalSettled: settledFrames[0],
       })

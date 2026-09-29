@@ -28,7 +28,8 @@
  *   进行中 = `isRunningProjection`（running 且无 stopReason——死亡纳管态 running+failed 不落
  *   进行中）；已结束 = `!isRunningProjection`（两态语义：idle 与死亡纳管态全落此桶）。
  * - workflow：`workflowStore.recordsOf(sid)`；进行中 = `status === 'running'`，
- *   已结束 = 其余（done）。
+ *   已结束 = 其余（done / interrupted——[D2] 显式裁决：interrupted 计 ended 桶，
+ *   托盘计数语义 = 正在进行的活动，interrupted 是无活体暂停态不算进行中）。
  * - session（第 4 件，u7）：**native 直连 session store**（`useSessionStore().list`），过滤
  *   `parentAgentSessionId === 当前 sessionId`（agent 经 session-manager 派发的子会话），
  *   **零新协议**（不新增 RPC/订阅——子会话标记 live 从内存透传、reload 从 `.agent.json` 读）。

@@ -28,6 +28,15 @@ import {
 } from "../lifecycle.ts";
 import { ArgsValidationError } from "../args-validator.ts";
 import { createRunEventJournal } from "../run-events.ts";
+import { getLogger } from "../../core/logger.ts";
+import { AgentCall } from "../models/agent-call.ts";
+import type { ExecutionTraceNode } from "../models/types.ts";
+import {
+  resetWorkflowWindowEngineStatesForTest,
+  resolveWorkflowWindowEnginePort,
+  setWorkflowWindowEngineGateway,
+} from "../../execution/engine/routing.ts";
+import type { EnginePort } from "../../execution/engine/port.ts";
 import { projectRunRegistryState } from "../run-registry.ts";
 import {
   dispatchRunCreated,
@@ -35,7 +44,7 @@ import {
   isRunSettled,
   settledRecordOf,
   setRunEventJournalDirForTest,
-} from "../worker-message-pump.ts";
+} from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -164,7 +173,7 @@ describe("scheduleTimeBudget", () => {
     await flushMicrotasks();
 
     expect(isRunSettled(run)).toBe(true);
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(run.state.error).toContain("Time budget exceeded");
     // 完成通知（[reload-closeout D4] 直落）
     expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
@@ -318,7 +327,8 @@ describe("runWorkflow", () => {
         activeRunIds: new Set(deps.runs.keys()),
       });
       expect(projection.phase).toBe("active");
-      expect(projection.state.lifecycle).toBe("dispatched");
+      // [D2] dispatched 并入 running——run-created 首帧后 fold 即 running
+      expect(projection.state.lifecycle).toBe("running");
       // [W1 / D1] v2 注册条目（两写点之一）：journal 首帧落账成功后经
       // appendEntry 写主 session——journalPath 锚点指向真实 journal 文件
       const registered = deps.appendEntry.mock.calls.find((c) => c[0] === "workflow-record");
@@ -332,7 +342,7 @@ describe("runWorkflow", () => {
         slug: "test-wf",
       });
       const regData = registered![1] as { journalPath: string; startedAt: number };
-      expect(regData.journalPath).toBe(path.join(journalDir, `${runId}.events.jsonl`));
+      expect(regData.journalPath).toBe(path.join(journalDir, `${runId}.record.jsonl`));
       expect(fs.existsSync(regData.journalPath)).toBe(true);
       expect(typeof regData.startedAt).toBe("number");
     } finally {
@@ -351,13 +361,13 @@ describe("runWorkflow", () => {
       const deps = makeDeps();
       const spec = makeSpec();
       // 模拟 worker 极快的竞态形态：workerHost.start 同步段内首个 agent() 的
-      // ask-dispatched 已到达宿主（修复前此帧在 created 态表外让位被吞）
+      // agent-started 已到达宿主（修复前此帧在 created 态表外让位被吞）
       vi.spyOn(deps.workerHost, "start").mockImplementation((startSpec: RunSpec) => {
         const raceRunId = (startSpec.args as Record<string, unknown>)["_runId"];
         if (typeof raceRunId === "string") {
           void dispatchRunTrigger(
             { runId: raceRunId },
-            { type: "ask-dispatched", taskIndex: 0, agentName: "fast-worker", attempt: 1, ts: Date.now() },
+            { type: "agent-started", taskIndex: 0, agentName: "fast-worker", attempt: 1, ts: Date.now() },
           ).catch(() => {});
         }
         return { postMessage: vi.fn(), terminate: vi.fn(async () => {}) };
@@ -372,10 +382,10 @@ describe("runWorkflow", () => {
         { type: "cancel-requested", reason: "race-probe" },
       );
 
-      // 修复前形态：ask-dispatched 先入队先执行 → created 态表外让位吞帧，
+      // 修复前形态：agent-started 先入队先执行 → created 态表外让位吞帧，
       // journal 只剩 run-created；修复后帧序 created 先行、零丢帧
       const events = await createRunEventJournal(journalDir).scan(runId);
-      expect(events.map((e) => e.type)).toEqual(["run-created", "ask-dispatched", "run-settled"]);
+      expect(events.map((e) => e.type)).toEqual(["run-created", "agent-started", "run-settled"]);
     } finally {
       setRunEventJournalDirForTest(undefined);
       fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
@@ -422,7 +432,7 @@ describe("runWorkflow", () => {
     await flushMicrotasks();
 
     expect(isRunSettled(run)).toBe(true);
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(run.state.error).toContain("Time budget exceeded");
     expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
       id: runId,
@@ -546,7 +556,7 @@ describe("abortRun", () => {
     await abortRun("wf-abort-3", deps, "timeout", "time_limited");
 
     // [W2/V1] reason 细分经终局记录联合派生（failed + time_limited）
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(run.state.error).toBe("timeout");
   });
 
@@ -559,7 +569,34 @@ describe("abortRun", () => {
 // ── terminateRunningRuns ─────────────────────────────────────
 
 describe("terminateRunningRuns", () => {
-  it("多 run 中仅未终局 run 被终止（已终局 run 不动；[W2/V1] 判据换源）", async () => {
+  /** 断言某 run 的 record 流末帧 = run-interrupted(terminated)（[D11] 统一中断语义）。 */
+  async function expectInterruptedFrame(runId: string): Promise<void> {
+    const events = await createRunEventJournal(journalDirOfTest()).scan(runId);
+    const last = events.at(-1);
+    expect(last?.type).toBe("run-interrupted");
+    expect((last as { errorCode?: string }).errorCode).toBe("terminated");
+  }
+
+  function journalDirOfTest(): string {
+    return terminateJournalDir!;
+  }
+
+  let terminateJournalDir: string | undefined;
+
+  beforeEach(() => {
+    terminateJournalDir = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-terminate-"));
+    setRunEventJournalDirForTest(terminateJournalDir);
+  });
+
+  afterEach(() => {
+    setRunEventJournalDirForTest(undefined);
+    if (terminateJournalDir !== undefined) {
+      fs.rmSync(terminateJournalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      terminateJournalDir = undefined;
+    }
+  });
+
+  it("多 run 中仅未终局 run 被中断（已终局 run 不动；[W2/V1] 判据换源；[D11] 统一中断）", async () => {
     const { run: running1 } = makeRunningRealRun("wf-term-1");
     const { run: running2 } = makeRunningRealRun("wf-term-2");
     const { run: doneRun } = makeRunningRealRun("wf-term-done");
@@ -573,17 +610,17 @@ describe("terminateRunningRuns", () => {
 
     await terminateRunningRuns(deps, "Session switched: run terminated");
 
-    // running 全部终局（failed + errorCode 细分承载 terminate 语境）
-    expect(isRunSettled(running1)).toBe(true);
-    expect(settledRecordOf(running1.runId)).toMatchObject({ outcome: "failed" });
-    expect(isRunSettled(running2)).toBe(true);
-    expect(settledRecordOf(running2.runId)).toMatchObject({ outcome: "failed" });
+    // running 全部转 interrupted 暂停态（非 failed 终局——打断不记失败）
+    expect(isRunSettled(running1)).toBe(false);
+    expect(isRunSettled(running2)).toBe(false);
+    await expectInterruptedFrame("wf-term-1");
+    await expectInterruptedFrame("wf-term-2");
     // 已终局 run 不被重写（恢复写点聚合 done 保留）
     expect(doneRun.state.status).toBe("done");
     expect(doneRun.state.reason).toBe("completed");
   });
 
-  it("每个被终止的 run 发 pending:unregister（reason=failed）且不调 onRunDone", async () => {
+  it("中断零终局副作用：不落 pending:unregister、不调 onRunDone（[D11] interruptRun 零终局 coda）", async () => {
     const { run: r1 } = makeRunningRealRun("wf-term-3");
     const { run: r2 } = makeRunningRealRun("wf-term-4");
     const deps = makeDeps();
@@ -594,21 +631,13 @@ describe("terminateRunningRuns", () => {
 
     await terminateRunningRuns(deps, "Session shutdown: run terminated");
 
-    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
-      id: "wf-term-3",
-      reason: "failed",
-      status: "failed",
-    });
-    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
-      id: "wf-term-4",
-      reason: "failed",
-      status: "failed",
-    });
+    // 中断非终局：pending 通知登记保留（resume 后终局时仍可通知），不幽灵注销
+    expect(deps.appendEntry).not.toHaveBeenCalledWith("pending:unregister", expect.anything());
     // 对齐 session_start 恢复先例：主 agent 已离开本 session，不发完成通知
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
-  it("state.error = reason、终局 outcome=failed、run 落盘（releaseRuntime 解绑 runtime）", async () => {
+  it("state.error = reason、run-interrupted(terminated) 落 record、releaseRuntime 解绑（store 不再写）", async () => {
     const { run, terminate } = makeRunningRealRun("wf-term-5");
     const deps = makeDeps();
     await seedRunCreated(run);
@@ -617,67 +646,96 @@ describe("terminateRunningRuns", () => {
     await terminateRunningRuns(deps, "Session switched: run terminated");
 
     expect(run.state.error).toBe("Session switched: run terminated");
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
+    await expectInterruptedFrame("wf-term-5");
     expect(run.runtime).toBeUndefined();
     expect(terminate).toHaveBeenCalledTimes(1);
-    expect(deps.store.save).toHaveBeenCalledTimes(1);
-    expect(deps.store.save).toHaveBeenCalledWith(run);
+    // [D11] 中断路径不经 finalizeRun——record 直写（journal.append），无 store.save
+    expect(deps.store.save).not.toHaveBeenCalled();
   });
 
-  it("[B-4] eventBus listener 抛错 → 不向调用方抛错、本 run 收尾完成、其余 run 继续终止", async () => {
-    const { run: a, terminate: terminateA } = makeRunningRealRun("wf-term-fence-a");
+  it("重复 terminate 让位：已 interrupted 的 run 不重复落帧，其余 run 照常中断（批量收尾健壮性）", async () => {
+    const { run: a } = makeRunningRealRun("wf-term-fence-a");
     const { run: b, terminate: terminateB } = makeRunningRealRun("wf-term-fence-b");
     const deps = makeDeps();
     await seedRunCreated(a);
     await seedRunCreated(b);
     deps.runs.set("wf-term-fence-a", a);
     deps.runs.set("wf-term-fence-b", b);
-    // 仅 runA 的 emit 抛错（按 payload id 判别模拟坏 listener）
-    deps.eventBus.emit = vi.fn((_event: string, payload: { id: string }) => {
-      if (payload.id === "wf-term-fence-a") throw new Error("listener exploded");
-    });
+    // runA 预先中断一次（模拟崩溃收编先行/重复 terminate 语境）
+    const { interruptRun } = await import("../terminal-actions.ts");
+    await interruptRun("wf-term-fence-a", { errorCode: "terminated", reason: "prior interrupt" });
 
     await expect(terminateRunningRuns(deps, "Session switched: run terminated")).resolves.toBeUndefined();
 
-    // 两个 run 都走到终局（runA 的 emit 故障不中断批量收尾）
-    expect(settledRecordOf(a.runId)).toMatchObject({ outcome: "failed" });
-    expect(settledRecordOf(b.runId)).toMatchObject({ outcome: "failed" });
-    expect(terminateA).toHaveBeenCalledTimes(1);
+    // runA 无重复帧（恰好 1 条 run-interrupted），runB 正常中断（让位不炸批量）
+    const events = await createRunEventJournal(terminateJournalDir!).scan("wf-term-fence-a");
+    expect(events.filter((e) => e.type === "run-interrupted")).toHaveLength(1);
+    await expectInterruptedFrame("wf-term-fence-b");
     expect(terminateB).toHaveBeenCalledTimes(1);
   });
 
-  it("单 run save 抛错不中断其余（save best-effort：unregister 仍发 + 其余 run 照常落盘）", async () => {
-    const { run: bad } = makeRunningRealRun("wf-term-err");
-    const { run: good } = makeRunningRealRun("wf-term-ok");
+  // [D15 回调围栏回归] 中断条目宿主回调（appendInterruptedEntry → 宿主
+  // resolveCurrentPi().appendEntry）在 reload/替换窗口抛 assertActive 时，
+  // interruptRun 必须就地围栏消化——修复前该抛错穿透到 terminateRunningRuns 的
+  // 单 run try 块，排在后面的三步收尾（closeOutInFlightCalls / releaseRuntime /
+  // disposeWorkflowWindowEngineState）全部被跳过：record 已 interrupted 但执行
+  // 资源继续活着。
+  it("中断条目宿主回调抛错不吞收尾链：三步收尾仍执行、中断帧已落、错误留痕", async () => {
+    const runId = "wf-term-entry-throw";
+    const { run, terminate } = makeRunningRealRun(runId);
+    // 在途 call（running 态）——第一步 closeOutInFlightCalls 的收口对象
+    const traceNode: ExecutionTraceNode = {
+      stepIndex: 1, agent: "worker", task: "in-flight", model: "test", status: "running",
+    };
+    run.state.trace.append(traceNode);
+    const call = new AgentCall(1, { prompt: "test task", agent: "worker" }, traceNode);
+    call.markRunning();
+    run.state.calls.set(1, call);
+    await seedRunCreated(run);
+    // 引擎窗口实例——第三步 disposeWorkflowWindowEngineState 的可观察对象
+    //（经 gateway 注入缝登记 per-window 实例，dispose 计数即收尾证据）
+    const disposedPorts: EnginePort[] = [];
+    setWorkflowWindowEngineGateway({
+      processModelOf: () => "per-window",
+      createPort: () => {
+        const port = {
+          dispose: () => {
+            disposedPorts.push(port);
+            return Promise.resolve();
+          },
+        } as unknown as EnginePort;
+        return port;
+      },
+    });
+    resolveWorkflowWindowEnginePort(runId, "pw");
+    const errorSpy = vi.spyOn(getLogger("run-event-dispatch"), "error");
+
     const deps = makeDeps();
-    await seedRunCreated(bad);
-    await seedRunCreated(good);
-    deps.runs.set("wf-term-err", bad);
-    deps.runs.set("wf-term-ok", good);
-    deps.store.save = vi.fn(async (r: WorkflowRun) => {
-      if (r.runId === "wf-term-err") throw new Error("disk full");
+    // 宿主回调抛错（pi reload 切换窗口的 assertActive 形态）
+    deps.appendEntry.mockImplementation(() => {
+      throw new Error("assertActive: session was replaced");
     });
+    deps.runs.set(runId, run);
 
-    await terminateRunningRuns(deps, "Session shutdown: run terminated");
+    try {
+      await terminateRunningRuns(deps, "Session switched: run terminated");
 
-    // [D5-② finalizeRun 收敛] save 失败 best-effort（SW-DATA-3 统一）：六态机落账先于
-    // save，状态已终局；与收敛前不同，unregister 不再被 save 失败短路——否则
-    // pending 通知幽灵注销（列表残留永不清理的 running 条目）
-    expect(isRunSettled(bad)).toBe(true);
-    expect(settledRecordOf(bad.runId)).toMatchObject({ outcome: "failed" });
-    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
-      id: "wf-term-err",
-      reason: "failed",
-      status: "failed",
-    });
-    // 其余 run 正常走完落盘 + unregister（单 run 失败不中断批量终止）
-    expect(isRunSettled(good)).toBe(true);
-    expect(deps.store.save).toHaveBeenCalledWith(good);
-    expect(deps.appendEntry).toHaveBeenCalledWith("pending:unregister", {
-      id: "wf-term-ok",
-      reason: "failed",
-      status: "failed",
-    });
+      // 三步收尾仍执行（修复前全部被跳过）
+      expect(call.status).toBe("done"); // ① closeOutInFlightCalls：在途 call 收口取消
+      expect(call.result?.error).toContain("Cancelled");
+      expect(run.runtime).toBeUndefined(); // ② releaseRuntime：worker 解绑停机
+      expect(terminate).toHaveBeenCalledTimes(1);
+      expect(disposedPorts).toHaveLength(1); // ③ disposeWorkflowWindowEngineState
+      // 中断帧已落（journal 事实源不受回调失败影响）
+      await expectInterruptedFrame(runId);
+      // 错误留痕（含 runId 的 error 级日志）
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`workflow-record interrupted entry append failed (runId=${runId})`),
+      );
+    } finally {
+      errorSpy.mockRestore();
+      resetWorkflowWindowEngineStatesForTest();
+    }
   });
 });
 
@@ -779,7 +837,7 @@ describe("evictDoneRunsBeyondCap（done run 内存淘汰，K=MAX_RETAINED_DONE_R
   it("W3TC3: 反序 fixture——创建最早、完成最晚的 run 不被淘汰（GAP-1 回归锚点）", () => {
     // 嵌套 workflow 竞态背景：父 run 创建最早（Map 首元素）、完成最晚（completedAt
     // 全局最新）。同 session 累计 21 个 done 时父 run 完成瞬间触发同步裁剪——若按
-    // Map 插入序淘汰，父 run 被淘汰，runAndWait 轮询窗口内 get 不到 → 误返
+    // Map 插入序淘汰，晚终局的 run 被淘汰，消费方轮询窗口内 get 不到 → 误返
     // "Run not found"。completedAt 排序结构性消除。
     const runs = new Map<string, WorkflowRun>();
     // 插入序 = 创建序：wf-parent 最先插入，completedAt=t100 全局最新（先创建后完成）

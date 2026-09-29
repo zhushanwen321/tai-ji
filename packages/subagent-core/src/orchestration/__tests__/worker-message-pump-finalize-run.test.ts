@@ -5,7 +5,7 @@
  * 序列的唯一定义点（worker-message-pump.ts）。收敛前 8 处逐字复制（本文件 6 处 +
  * lifecycle 2 处）——本文件锁定：
  * 1. 四步恰好一次且有序（transition 先于 save 先于直落先于 onRunDone）
- * 2. notifyDone:false 真差异承载（terminateRunningRuns 不发 onRunDone、直落仍发）
+ * 2. notifyDone:false 真差异承载（finalizeRun 的 notifyDone 参数语义：false 时不调 onRunDone、直落 unregister 仍发）
  * 3. transition 让位（并发终态化）→ 后三步全不执行
  * 4. save best-effort（SW-DATA-3）→ 直落/onRunDone 不被落盘失败短路
  * 5. [reload-closeout D4] 直落 entry 三字段（id/reason/status∈mapReasonToStatus
@@ -25,12 +25,14 @@ import { describe, expect, it, vi } from "vitest";
 import { collectActivePendingIds } from "@zhushanwen/extension-protocol";
 
 import {
+  handleWorkerMessage,
+} from "../worker-message-pump.ts";
+import {
   dispatchRunCreated,
   finalizeRun,
-  handleWorkerMessage,
   isRunSettled,
   settledRecordOf,
-} from "../worker-message-pump.ts";
+} from "../terminal-actions.ts";
 import { getLogger } from "../../core/logger.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
@@ -143,7 +145,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     // 六态机 dispatch 链（isRunSettled / 终局记录注册表）判定。
     expect(isRunSettled(run)).toBe(true);
     expect(run.state.status).toBe("running");
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
     // 各步恰好一次（终局帧经 no-op journal 防线零写——投递链空转一次）
     expect(deps.store.save).toHaveBeenCalledTimes(1);
     expect(appendedUnregister(deps)).toBeDefined();
@@ -174,7 +176,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
       runId: "wf-fin-v2entry",
       status: "done",
       reason: "completed",
-      outcome: "completed",
+      outcome: "done",
       callCount: 0,
       usedTokens: 0,
     });
@@ -223,7 +225,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     expect(appendedUnregister(deps)?.data).toMatchObject({ id: "wf-fin-noemit" });
   });
 
-  it("notifyDone:false → onRunDone 不调、直落仍发（terminateRunningRuns 真差异经参数承载）", async () => {
+  it("notifyDone:false → onRunDone 不调、直落仍发（finalizeRun 参数语义锁）", async () => {
     const run = makeRealRun("wf-fin-2");
     const deps = makeTracingDeps();
     await seedRunCreated(run);
@@ -304,7 +306,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
 
     expect(ok).toBe(true);
     expect(isRunSettled(run)).toBe(true);
-    // onRunDone 不被直落故障吞掉（runAndWait 轮询依赖其收口）
+    // onRunDone 不被直落故障吞掉（终局链依赖其收口）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
     const errLogs = errorSpy.mock.calls.map((c) => String(c[0]));
     expect(

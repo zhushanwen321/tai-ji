@@ -426,8 +426,6 @@ export type WorkflowResultOutcome = 'completed' | 'failed' | 'neutral'
  *
  * Record<WorkflowDoneReason, ...> 穷尽性由编译器强制：shared/workflow.ts 的
  * WorkflowDoneReason（只导出类型、无运行时值）增删值本处即编译期报错，不静默漂移。
- * invalid_args 不在镜像词表内（runAndWait 合成返回值——run 从未创建、不进入
- * run.state.reason，无生产方）。
  */
 const WORKFLOW_DONE_REASON_OUTCOME: Record<WorkflowDoneReason, WorkflowResultOutcome> = {
   completed: 'completed',

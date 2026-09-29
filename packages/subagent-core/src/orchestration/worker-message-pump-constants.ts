@@ -53,7 +53,7 @@ export const RETRY_BACKOFF_BASE_ENV = "TAIJI_SUBAGENT_TEST_RETRY_BACKOFF_BASE_MS
  *
  * 最常见根因：execute() 返回值含 function/Symbol/循环引用等不可克隆成员 → worker 侧
  * _safePost 吞掉 DataCloneError → return 消息从未发出 → worker exit(0)。旧实现
- * handleWorkerExit 对 code===0 no-op → run 永久 running、runAndWait 悬挂。
+ * handleWorkerExit 对 code===0 no-op → run 永久 running、无终态。
  */
 export const WORKER_EXITED_WITHOUT_RESULT_MSG =
   "worker exited before delivering a result (return value may not be structured-cloneable)";

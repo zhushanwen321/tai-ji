@@ -49,10 +49,10 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 
 新增/删包时更新此列举与所在分组。校验：`pnpm extensions:typecheck` / `extensions:lint` / `extensions:test`。
 
-- **[MANDATORY] extension 改动优先在本地 pi CLI 实测**（不是 taiji 桌面）：`pi -ne --mode rpc --session-dir <dir> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <绝对路径>` + stdin JSONL 发 prompt；`TAIJI_AGENT_DEBUG=1` 看 `~/.pi/agent/logs/` 扩展日志。taiji 的 builtin 打包/数据隔离/runtime 中转层会掩盖版本差异。**`-ne` 必带 [HISTORICAL]**（2026-09-13 实测事故：settings 清单 `npm:` 版与 `--extension` 本地版同进程双载——jiti 模块独立但 `Symbol.for` 单例槽跨实例共享，版本错配交叉读写炸 `Cannot read properties of undefined (reading 'set')`，且报错路径指向 npm 版误导排查方向；`-ne` 跳过 settings 清单 + 绝对路径避免 cwd 依赖）
+- **[MANDATORY] extension 改动优先在本地 pi CLI 实测**（不是 taiji 桌面）：`pi -ne --mode rpc --session-dir <dir> --model <本机可用模型> --approve --extension <绝对路径>` + stdin JSONL 发 prompt；`TAIJI_AGENT_DEBUG=1` 看 `~/.pi/agent/logs/` 扩展日志。taiji 的 builtin 打包/数据隔离/runtime 中转层会掩盖版本差异。**`-ne` 必带 [HISTORICAL]**（2026-09-13 实测事故：settings 清单 `npm:` 版与 `--extension` 本地版同进程双载——jiti 模块独立但 `Symbol.for` 单例槽跨实例共享，版本错配交叉读写炸 `Cannot read properties of undefined (reading 'set')`，且报错路径指向 npm 版误导排查方向；`-ne` 跳过 settings 清单 + 绝对路径避免 cwd 依赖）
 - **structured-output 方案 A [HISTORICAL]**：workflow 模式 `PI_WORKFLOW_SCHEMA` 注入的权威 schema 是唯一校验权威，LLM 自报 schema 不参与校验（曾因校验自报 schema 致修复静默丢失）。终态补强（structured-output-redesign D1/D3/D4）：workflow 模式已重设计为单参数合成工具——parameters 即权威 schema（根级 `additionalProperties:false` 结构性拒绝 schema 字段，模型结构上不可自报）+ 同签名 3 次门禁硬终止
 - 本地开发调试（live edit ↔ npm 版切换）：`.agents/skills/dev-link/`
-- **Review 工作流**：`pr-cr-fix` skill 是 PR 完整生命周期入口（开 PR → 机器门禁兜底 + changeset 复核 → simplify → 终局 gate → push；默认零 LLM 审查维度——分支增量审查由 dev-merge 承接，非 dev 线回退集 6 agent、`reviewers` 参数为人工逃生舱；review agent 内化在 `pr-cr-fix/agents/`，不全局暴露）
+- **Review 工作流**：`pr-cr-fix` skill 是 PR 完整生命周期入口（开 PR → 机器门禁兜底 + changeset 复核 → simplify → 终局 gate → push；默认零 LLM 审查维度——分支增量审查由 dev-merge 承接，非 dev 线回退集 6 agent、`reviewers` 参数为人工逃生舱；review agent 定义在 `dev-merge/agents/`（2026-09 自 pr-cr-fix 迁入，重语义审查资产所有权归 dev-merge），不全局暴露）
 
 ## 常用命令
 
@@ -97,7 +97,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 
 **架构机制**：
 
-12. **Electron 打包约束（事故最高发）**：① runtime 源码禁止 `import.meta.url` / `globalThis.__dirname`（CJS bundle 下失效），路径用 `typeof __dirname !== 'undefined' ? __dirname : undefined`；② 新增 runtime 依赖必须同步加 `tsup.config.ts` 的 `noExternal`；③ 打包子系统改动逐个 commit 逐个验证。细节核对见 `pr-cr-fix/agents/review-electron-build.md`；验证三阶段（preflight → build → postbuild）+ validate-runtime-bundle 由脚本自动化
+12. **Electron 打包约束（事故最高发）**：① runtime 源码禁止 `import.meta.url` / `globalThis.__dirname`（CJS bundle 下失效），路径用 `typeof __dirname !== 'undefined' ? __dirname : undefined`；② 新增 runtime 依赖必须同步加 `tsup.config.ts` 的 `noExternal`；③ 打包子系统改动逐个 commit 逐个验证。细节核对见 `dev-merge/agents/review-electron-build.md`；验证三阶段（preflight → build → postbuild）+ validate-runtime-bundle 由脚本自动化
 13. **目录规范**：禁止 `demos/` / `impeccable/` 目录；禁止外部绝对路径 symlink（pre-commit 检查）；`.taiji-harness/` 是本地决策/工作流档案，**不入库**（2026-09-13 裁决：gitignore，决策追溯靠 commit message 与 docs）；视觉设计权威 = `docs/DESIGN.md`（Warm&Soft 旧根 DESIGN.md 已删除，git 可追溯）
 14. **项目 skill 必须自包含 [HISTORICAL]**：skill 引用的脚本复制到该 skill 目录内（`merge/scripts/` 已自包含），禁止依赖 `~/.agents/skills/` 全局脚本或 symlink。`.agents` 整体**不入 git 跟踪**（2026-09-25 起：实体在 workspace 根 `<workspace>/.agents/`，各 worktree 经 symlink 共享同一实体，改动跨 worktree 实时生效；备份 = `refs/skills-snapshot`，由 pre-commit 尾部段自动维护；恢复 = `git archive refs/skills-snapshot | tar -x -C <workspace 根>`，见 ADR-0074 与 docs/TROUBLESHOOTING.md）——编辑 skill 后 `git status` 干净是常态而非异常，skill 改动不经 PR review，YAML 评审靠实体内 pr-cr-fix 的 validate-skill-yaml
 15. **排查规则（untracked 展开 `-uall` / 禁止写死绝对路径用 `getDataDir()` 等动态推导 / 跨层机制要查遍所有层直到 pi extension 层）**：详见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) 的「历史排查规则」

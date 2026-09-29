@@ -28,7 +28,6 @@
     "src/model-events.ts",
     "src/subagents-events.ts",
     "src/workflow-events.ts",
-    "src/workflow-stall-watchdog.ts",
     "src/workflow-notify.ts",
     "src/host/",
     "src/injectors/",

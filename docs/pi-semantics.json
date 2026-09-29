@@ -1140,5 +1140,22 @@
       "note": "消费方：packages/runtime/src/infra/pi/pi-paths.ts isPiSessionId JSDoc + packages/zcode-session-source/src/normalize.ts 头注（两处均带锚点行号）。漂移形态 = pi 放宽/收紧字符集时 taiji 侧 fail-fast 响亮拒绝（getBtwThreadDir throw / normalizeZcodeSessionId throw），非静默错路由。pi 升级重验：比对 assertValidSessionId 正则字面量与 taiji 侧 PI_SESSION_ID_PATTERN 是否仍逐字符一致"
     },
     "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-53",
+    "claim": "pi 会话消息 content 的双形态：AssistantMessage.content 恒为 blocks 数组（TextContent | ThinkingContent | ToolCall——text 块携带文本）；string 形态属 UserMessage（content: string | (TextContent | ImageContent)[]）。taiji 消费方：subagent-core resume 档 1 补收的 extractAssistantTextContent——提取口径 = type==='text' 块的 text 拼接（string 分支为防御宽面，assistant 流不命中；thinking/toolCall 块排除）",
+    "piAnchor": [
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/types.d.ts",
+        "symbol": "AssistantMessage / UserMessage",
+        "note": "AssistantMessage.content: (TextContent | ThinkingContent | ToolCall)[]（:307-309）；UserMessage.content: string | (TextContent | ImageContent)[]（:302-304）；ToolResultMessage.content 同 blocks 形态（:328-332）"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：packages/subagent-core/src/orchestration/resume-run.ts extractAssistantTextContent JSDoc（带锚点行号）。漂移形态 = pi 改 content 块词表（新增块类型/更名 text 块）时提取口径漏收新正文形态——档 1 判档退化为档 2 重派（多花一次生成，功能不阻断）。pi 升级重验：比对 types.d.ts 三 Message 接口的 content 联合类型是否仍为上述形态"
+    },
+    "verifiedWith": "0.84.4"
   }
 ]

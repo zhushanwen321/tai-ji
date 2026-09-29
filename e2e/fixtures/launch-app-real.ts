@@ -127,10 +127,11 @@ const FAUX_PROVIDER_EXT_DIR = path.join(REPO_ROOT, 'e2e', 'fixtures', 'faux-prov
  * ——runtime 门禁与 pi 模型解析同源）。
  *
  * 子进程注入面（workflow agent() / subagent 的 pi 孙进程）：
- * - extensions/faux-llm-ext.ts 复制：协议化引擎的 argv-mirror 读引擎自身 argv（无
- *   主 pi 的显式 --extension），孙进程拿不到 TAIJI_EXTENSION_PATHS 注入——经
- *   <agentDir>/extensions/ 自动发现装载（此前的探针先例已随 collect 退役删除，git 可追溯）。
- *   主 pi 带 --no-extensions 不受自动发现影响（显式注入不受抑制）。
+ * - extensions/faux-llm-ext.ts 复制：孙进程扩展加载显式化（D2）后孙进程恒
+ *   --no-extensions（自动发现全关）+ 仅加载白名单集，faux-llm-ext 不在生产白名单
+ *   ——由 subagent-workflow pi-host 的 e2e 门放行（process.env.TAIJI_E2E=1 且
+ *   <agentDir>/extensions/faux-llm-ext.ts 在盘时追加进孙进程显式 --extension 集）。
+ *   本 harness 的 Electron env 已设 TAIJI_E2E=1，随 spawn 链透传到主 pi。
  * - subagents/config.json（L3 引擎注册）：workflow 域 agent() 走引擎 registry，
  *   pi 引擎 cli descriptor 需显式注册（command=node + pi-subagent-cli bin）。
  *   TAIJI_FAUX_SCRIPT env 经 shared buildOutboundChildEnv 白名单透传到孙进程。

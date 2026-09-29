@@ -14,12 +14,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  dispatchRunCreated,
   handleScriptError,
   handleWorkerMessage,
+} from "../orchestration/worker-message-pump.ts";
+import {
+  dispatchRunCreated,
   isRunSettled,
   settledRecordOf,
-} from "../orchestration/worker-message-pump.ts";
+} from "../orchestration/terminal-actions.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../orchestration/models/ports.ts";
 import type { DoneReason, RunStatus } from "../orchestration/models/types.ts";
 import type { WorkflowRun } from "../orchestration/models/workflow-run.ts";
@@ -229,7 +231,7 @@ describe("L9: handleReturn 追加 errorLogs（非覆盖）", () => {
     expect(run.state.scriptResult).toBe("final-result");
     // [W2/V1] 终局断言换源（两态机字段停更——终局经注册表判定）
     expect(isRunSettled(run)).toBe(true);
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "completed" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
   });
 });
 

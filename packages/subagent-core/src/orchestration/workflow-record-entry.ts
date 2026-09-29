@@ -2,10 +2,8 @@
  * workflow-record 自描述 entry 的 schema 契约单源（W17 [D4]；词表/guard 收敛
  * 二轮复审候选 2；W1 [D1] v 升格 2）。
  *
- * 三方消费格局（壳写点 / 壳 loadAll 重建 / runtime 投影扫描）此前各自持有
- * customType 字面量与 v1 判定逻辑（壳 collectRecordRun / runtime
- * parseSelfDescribedWorkflowSnapshot 双实现、shared 另持一份字面量），独立演化
- * 即静默漂移——本模块收敛两件事：
+ * 消费格局（core 写点 / 壳 loadAll v2 定界 / runtime 投影扫描）各自需要
+ * customType 字面量与版本判定，独立演化即静默漂移——本模块收敛两件事：
  * 1. customType 与 entry schema 版本常量（版本 bump 单点，写点与读判定同源）；
  * 2. 纯判定函数 classifyWorkflowRecordEntryData——entry data 的 v1/v2 分类。
  *
@@ -20,11 +18,10 @@
  * runtime warnOnce 去重是两消费方各自的可观测性选择，收敛判定不收敛日志。
  *
  * 不在本模块的：
- * - snapshot 层解码（SNAPSHOT_VERSION 守卫 + fromRunSnapshot）——run-snapshot.ts
- *   codec 单源；entry 层 v 与 snapshot 层 v 是两级独立版本（entry schema 演化
- *   vs 快照格式演化）；
+ * - snapshot 格式版本（SNAPSHOT_VERSION）——run-snapshot.ts 常量单源；entry 层 v
+ *   与 snapshot 层 v 是两级独立版本（entry schema 演化 vs 快照格式演化）；
  * - runtime 投影的 runId 存在性守卫——投影键需求（record 需要 runId 做 Map 键），
- *   非 entry schema 面，壳解码链自有等价校验（fromRunSnapshot）。
+ *   非 entry schema 面，runtime 解码链自有等价校验。
  */
 
 import type { DoneReason } from "./models/types.ts";
@@ -56,8 +53,7 @@ export type WorkflowRecordEntryKind = (typeof WORKFLOW_RECORD_ENTRY_KINDS)[numbe
  * v2 注册条目 data（设计 D1 条目契约表 workflow-record 行·注册列）。
  *
  * run 创建时写一条：身份 + journal 锚点。journalPath 是 session-reader workflow
- * 发现链的主源数据基础（D10 断链修复——旧 workflow-state-link 指针在 W17 已停写，
- * v2 注册条目接续发现通道）；写点接线归 U1。
+ * 发现链的主源数据基础（v2 注册条目是 run 步骤级详情读面的唯一发现锚点）。
  */
 export interface WorkflowRecordRegisteredEntryData {
   v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
@@ -71,9 +67,12 @@ export interface WorkflowRecordRegisteredEntryData {
   slug: string;
   startedAt: number;
   /**
-   * journal 绝对路径锚点（`<sessionDir>/workflow-state/<runId>.events.jsonl`）——
-   * v2 条目的 journalPath 锚点字段（任务书 U0 职责 1）；保留窗口内 journal 在盘
-   * 即可按锚点读步骤级家族链，窗口外回落 manifest 摘要级（D10 三档发现链）。
+   * record 事件流绝对路径锚点（`<sessionDir>/workflow-state/<runId>.record.jsonl`
+   * ——后缀经 core RUN_EVENT_JOURNAL_SUFFIX 单源常量，[D1] record 单源流命名；
+   * 写侧锚点与实写面同源见 terminal-actions.runEventJournalPathOf）——v2 条目
+   * 的 journalPath 锚点字段（任务书 U0 职责 1）；保留窗口内 record 流在盘即可
+   * 按锚点读步骤级家族链，窗口外回落 manifest 摘要级（session-reader 发现链
+   * 三档，[D16③] 适配）。
    */
   journalPath: string;
 }
@@ -81,21 +80,28 @@ export interface WorkflowRecordRegisteredEntryData {
 /**
  * v2 终态条目 data（设计 D1 条目契约表 workflow-record 行·终态列）。
  *
- * run 终局时写一条（收编幂等补写同一形态，U1 接线）：终局 + 摘要。字段与
- * run-settled journal 帧同源（条目是 journal 的投影锚，不是第二事实源）。
+ * run 终局时写一条（[D2] 宿主投影裁决②：settled 终态条目仅 terminal 时写——
+ * 现状收编补写 settled 条目的行为随 D2 终止）：终局 + 摘要。字段与
+ * run-settled record 帧同源（条目是 record 的投影锚，不是第二事实源）。
  */
 export interface WorkflowRecordSettledEntryData {
   v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
   kind: "settled";
   runId: string;
-  /** 终态收敛词（run 一次性生命周期：终局即 done）。 */
-  status: "done";
-  /** 终态原因（= DoneReason，run.state.reason 同源）。 */
-  reason: DoneReason;
-  /** 终局形态（run-settled 帧 outcome 同源，与 reason 正交维度）。 */
-  outcome: RunOutcome;
-  /** 失败终局的结构化编码（completed/cancelled 缺省）。 */
+  /**
+   * 收敛词（[D2] 宿主投影裁决②——schema 契约单源在本字段）：terminal 终局 =
+   * 'done'（reason/outcome 必带）；interrupted 暂停态 = 'interrupted'（中断非终局
+   * ——reason/outcome 缺省，细分语境由 errorCode 承载中断来源标记，可 resume，
+   * runtime 读侧三态投影的消费面）。
+   */
+  status: "done" | "interrupted";
+  /** 终态原因（= DoneReason，run.state.reason 同源；interrupted 形态缺省）。 */
+  reason?: DoneReason;
+  /** 终局形态（run-settled 帧 outcome 同源，与 reason 正交维度；interrupted 形态缺省——中断非终局）。 */
+  outcome?: RunOutcome;
+  /** 失败终局的结构化编码（done/cancelled/time_limited 缺省；interrupted 形态 = 中断来源标记）。 */
   errorCode?: RunErrorCode;
+  /** 收敛时刻（终局帧 ts / 中断转移帧 ts 同源）。 */
   settledAt: number;
   /** 摘要：call 计数（终局 trace 规模）。 */
   callCount: number;
@@ -118,11 +124,9 @@ export type WorkflowRecordEntryV2 =
  * 最宽共同判定面一致）。
  *
  * reason:"v2" = v2 合法形态（载荷已过 kind 判定，形状校验归消费方解码层）——
- * **归入 ok:false 是刻意裁决**：ok 的语义是「v1 快照契约可消费」，既有消费方
- * （壳 collectRecordRun / runtime parseSelfDescribedWorkflowSnapshot）的
- * `!ok → 跳过` 分支即 v2 的版本门（D8 中间态「不产幻影」的构造性保证——本
- * 模块不改动它们的领地）；新消费方（U1 壳 loadAll / U3 投影）按
- * reason === "v2" 取载荷。
+ * **归入 ok:false 是刻意裁决**：ok 的语义是「v1 快照契约可消费」（runtime
+ * parseSelfDescribedWorkflowSnapshot 的 `!ok → 跳过` 分支即 v2 的版本门）；
+ * v2 消费方（壳 loadAll 定界 / runtime 投影扫描）按 reason === "v2" 取载荷。
  */
 export type WorkflowRecordEntryClassification =
   | { ok: true; snapshot: unknown }

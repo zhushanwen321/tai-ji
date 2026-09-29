@@ -46,7 +46,7 @@ import net from "node:net";
 // ──────────────────────── 常量 ────────────────────────
 
 /** 测试模型（项目规范：禁 kimi；A1-A7 主对话模型）。 */
-export const E2E_MODEL = "xiaomi-token-plan-cn/mimo-v2.5-pro";
+export const E2E_MODEL = "xiaomi-token-plan-cn/mimo-v2.6-flash";
 
 const E2E_DIR = fileURLToPath(new URL(".", import.meta.url));
 /** 本 extension 目录（--extension 参数目标）。 */

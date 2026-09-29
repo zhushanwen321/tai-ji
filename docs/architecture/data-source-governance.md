@@ -30,7 +30,7 @@
 2. **pi 内操作原则**：pi 能力缺口由 pi 扩展在 pi 进程内补齐（持久化经 `appendEntry`，上报经 `entry_appended` + `get_entries`），runtime 只经 RPC 存取。runtime 对 pi 数据只有两种动作：调 RPC 命令、订阅事件。
 3. **投影只发生一次**：runtime 是唯一投影宿主。所有派生逻辑（merge / normalize / 计数对账 / 状态推导）在 runtime（或 core 包唯一实现）发生一次；renderer 零派生，stores 是视图模型容器，唯一写入口是 `applySnapshot`。多 pane / 多窗口是 runtime 副本的下游扇出，绝不出现两个消费者各自从 pi 独立推导。
 4. **两种复制模式按数据形态分流**：标量 session 状态走通用快照复制原语 `ReplicatedState<T>`（快照拉取 + 事件只做失效）；append-only 日志（消息流）走单一 `applyEntry` reducer 双路喂入。不发明第三种模式；权威源能力缺失处（队列内容）降级该通道为对账信号 + 按字段重划权威，而非绕过权威源另起炉灶。
-5. **治理即代码**：数据登记表的终态是可执行配置——驱动 `ReplicatedState` 实例、lint/pre-commit 许可表、契约测试参数。护栏是双层：机器检查（模式级：R1 直写检查 / R2 写入口 / R3 `@data-owner` 注解）+ pr-cr-fix review-data-governance agent（语义级，长期存在，因为跨文件语义「第二写方」机器只能拦直呼形态）。
+5. **治理即代码**：数据登记表的终态是可执行配置——驱动 `ReplicatedState` 实例、lint/pre-commit 许可表、契约测试参数。护栏是双层：机器检查（模式级：R1 直写检查 / R2 写入口 / R3 `@data-owner` 注解）+ dev-merge review-data-governance agent（语义级，长期存在，因为跨文件语义「第二写方」机器只能拦直呼形态）。
 
 ---
 

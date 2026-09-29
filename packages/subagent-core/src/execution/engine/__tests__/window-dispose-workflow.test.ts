@@ -22,7 +22,10 @@ import type {
 import { WorkflowRun } from "../../../orchestration/models/workflow-run.ts";
 import type { LifecycleDeps } from "../../../orchestration/models/ports.ts";
 import type { WorkerHandle } from "../../../orchestration/worker-handle.ts";
-import { dispatchRunCreated, finalizeRun } from "../../../orchestration/worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+  finalizeRun,
+} from "../../../orchestration/terminal-actions.ts";
 import {
   resetWorkflowWindowEngineStatesForTest,
   resolveWorkflowWindowEnginePort,

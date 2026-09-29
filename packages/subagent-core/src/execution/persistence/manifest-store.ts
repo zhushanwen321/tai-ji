@@ -529,7 +529,7 @@ export interface RunTerminalManifest {
   errorCode?: RunErrorCode;
   /**
    * [D5 诊断引用落账] 失败终局的子进程 stderr tee 文件绝对路径（成功/cancelled
-   * 缺省）。取值 = 事件 journal 中最后一帧带 stderrTeePath 的 ask-settled（事件流
+   * 缺省）。取值 = 事件 journal 中最后一帧带 stderrTeePath 的 agent-settled（事件流
    * 投影，D6「权威在事件流」同款推导纪律——写侧在 persistTerminalProjection，
    * 本类型只定磁盘形状）。旧 manifest 无此字段（undefined = 无取证指针，读侧
    * 守卫归一，不炸）；仅诊断引用——文件受引擎侧轮转/过期清理管辖，读侧不得假设

@@ -1514,9 +1514,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * background 任务完成通知补投的 runtime 触发（bg-task-notify-durability 第二触发面）。
    *
    * 背景：桌面「切走会话再切回」是同进程重新挂接——pi 进程存活、不重发 session_start
-   * （真机实证），扩展侧挂在 session_start 上的维护链在「投递失败但进程存活」场景
-   * （设计 G2 核心场景）永不触发。getCommands 是切回后 renderer 主动拉取的必经查询
-   * （broadcast 与订阅时序竞争的既有补偿点），在此按节流补触发。
+   * （真机实证；pi 0.84.4 实装锚点：session_start 事件 per AgentSession 只发一次——
+   * dist/core/agent-session.js:152 构造时赋值、:1919 bindExtensions 内唯一 emit、
+   * :2230 reload 场景显式 reason="reload"；切回 = runtime 重新挂接同一存活进程，
+   * 不经 AgentSession 构造），扩展侧挂在 session_start 上的维护链在「投递失败但
+   * 进程存活」场景（设计 G2 核心场景）永不触发。getCommands 是切回后 renderer
+   * 主动拉取的必经查询（broadcast 与订阅时序竞争的既有补偿点），在此按节流补触发。
    *
    * 执行形态：fire-and-forget——不 await（getCommands 延迟敏感，补投结果不阻塞查询）、
    * 失败只 console.warn（补投失败无害：扩展侧三判据幂等，下次触发重查）。命令通道

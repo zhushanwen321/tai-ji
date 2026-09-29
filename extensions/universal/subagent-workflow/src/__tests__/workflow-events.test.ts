@@ -68,7 +68,6 @@ import type { LauncherDeps, WorkflowRun } from "@zhushanwen/subagent-core";
 import { setSubagentService } from "@zhushanwen/subagent-core";
 import type { InFlightReporter } from "../host/inflight-reporter.ts";
 import type { WorkflowDomainHandle } from "../workflow-events.ts";
-import { peekStallWatchdog } from "../workflow-stall-watchdog.ts";
 import { runSettledEffects, type RunSettledEffectsEnv } from "../workflow-events.ts";
 
 // 槽 key（Symbol.for 同 key 即同一 symbol——与被测实现登记的 key 一致）
@@ -77,7 +76,6 @@ const DIALOG_QUEUE_KEY = Symbol.for("@zhushanwen/pi-subagents.dialogQueue");
 const SERVICE_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.service");
 // notify ledger 槽（notify-ledger.ts NOTIFY_LEDGER_SLOT_KEY）：清空保证降级直发路径
 const NOTIFY_LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger");
-const STALL_WATCHDOG_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.workflow-stall-watchdog");
 
 // ── fake 组件（合并去重：makePi/makeCtx/makeReporter/resetSlots/mount 各一处定义） ──
 
@@ -87,7 +85,7 @@ const queueRejectAllSpy = vi.fn();
 const reporterAttachSpy = vi.fn();
 const reporterDetachSpy = vi.fn();
 
-/** notifyDone 降级直发的 pi.sendMessage 首参形状（helpers.ts WorkflowNotifyDetails）。 */
+/** notifyDone 降级直发的 pi.sendMessage 首参形状（workflow-notify.ts WorkflowNotifyDetails）。 */
 type SentMessage = {
   customType: string;
   content: string;
@@ -95,7 +93,6 @@ type SentMessage = {
   details: {
     runId: string;
     notifyId: string;
-    __gui__?: unknown;
   };
 };
 
@@ -139,7 +136,7 @@ function makeRun(shape: FakeRunShape): WorkflowRun {
 }
 
 /** mode 是 GuiContext 面的唯一判定维度（isGuiCapable = mode==='rpc'）——
- *  tui（非 capable，无 __gui__）/ rpc（capable，有 __gui__）构造可翻转差异。 */
+ *  tui 门控在飞上报等 rpc-only 行为（组合根接线测试用 tui 防重试 timer 悬挂）。 */
 function makeCtx(sessionId: string, mode: "rpc" | "tui" = "rpc"): ExtensionContext {
   return {
     cwd: "/home/user/project",
@@ -218,7 +215,7 @@ function mount(): { handle: WorkflowDomainHandle; handlers: HandlerMap } {
   return { handle, handlers };
 }
 
-/** 挂载 + session_start 装配受控条目（getWorkflowDeps 守卫要求条目 + storeHealthy）。 */
+/** 挂载 + session_start 装配受控条目（deps 守卫要求条目 + storeHealthy）。 */
 async function mountWithSession(
   sessionId: string,
   opts: { mode?: "rpc" | "tui"; runs?: WorkflowRun[] } = {},
@@ -235,17 +232,16 @@ async function mountWithSession(
   mockSetupSessionLifecycle.mockResolvedValue(result);
   const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() });
   await handlers.get("session_start")!({ type: "session_start" }, ctx);
-  const resolution = handle.getWorkflowDeps(sessionId);
-  if (!resolution.ok) throw new Error(`getWorkflowDeps failed: ${resolution.reason}`);
-  return { pi, handle, handlers, deps: resolution.deps, ctx, runs };
+  // deps = lazyDeps 本体（getter 形态）：属性访问触发守卫 + makeDeps 现读——
+  // D3 volatile 现读语义（pi 切换后旧 deps 解析新 pi）依赖 getter 不被展开求值。
+  const deps: LauncherDeps = handle.lazyDeps;
+  return { pi, handle, handlers, deps, ctx, runs };
 }
 
 // ── 槽隔离（提权后槽是进程级共享态，防跨用例 / 跨测试文件串扰） ────────────────
 
 function resetSlots(): void {
-  // watchdog 实例先 dispose 再删槽（arm 起的 interval 防 timer 泄漏干扰后续用例）
-  peekStallWatchdog()?.dispose();
-  for (const key of [WORKFLOW_DOMAIN_SLOT_KEY, DIALOG_QUEUE_KEY, NOTIFY_LEDGER_SLOT_KEY, STALL_WATCHDOG_SLOT_KEY]) {
+  for (const key of [WORKFLOW_DOMAIN_SLOT_KEY, DIALOG_QUEUE_KEY, NOTIFY_LEDGER_SLOT_KEY]) {
     Reflect.deleteProperty(globalThis, key);
   };
   const serviceSlot = Reflect.get(globalThis, SERVICE_SLOT_KEY) as { current: unknown } | undefined;
@@ -326,23 +322,6 @@ describe("D3 makeDeps volatile 现读：pi 切换（模拟 reload factory 重跑
   });
 });
 
-// ── ① D3：onRunDone 的 GuiContext 从 state.ctx 现读 ───────────────────────────
-
-describe("D3 onRunDone 的 GuiContext：从槽上 sessionState 条目 state.ctx 现读", () => {
-  it("adoption 换新 ctx（mode tui → rpc）后 details.__gui__ 跟进翻转——ctx 解析源是存活位置非构造期快照", async () => {
-    const { pi, handle, deps } = await mountWithSession("sess-ctx", { mode: "tui" });
-
-    deps.onRunDone?.(makeRun({ runId: "run-old-ctx", status: "done" }));
-    expect(sentMessages(pi).at(-1)?.details.__gui__).toBeUndefined(); // tui：非 gui capable
-
-    // 模拟 adoption rebind：sessionState 条目（槽上存活对象）的 ctx 换新
-    handle.state.sessionState.get("sess-ctx")!.ctx = makeCtx("sess-ctx", "rpc");
-
-    deps.onRunDone?.(makeRun({ runId: "run-new-ctx", status: "done" }));
-    expect(sentMessages(pi).at(-1)?.details.__gui__).toBeDefined(); // rpc：gui capable，__gui__ 生成
-  });
-});
-
 // ── ① D3：currentPi 登记点 ─────────────────────────────────────────────────────
 
 describe("D3 currentPi 登记点：factory 重跑覆盖槽上 volatile 绑定", () => {
@@ -360,7 +339,7 @@ describe("D3 currentPi 登记点：factory 重跑覆盖槽上 volatile 绑定", 
 
 // ── ① lazyDeps 语义不回归 ─────────────────────────────────────────────────────
 
-describe("lazyDeps 语义不回归：属性访问经 getWorkflowDeps → makeDeps 现读链路", () => {
+describe("lazyDeps 语义不回归：属性访问经 deps 守卫 → makeDeps 现读链路", () => {
   it("pi 切换后经 lazyDeps 的 eventBus/log/onRunDone 属性访问同样解析新 pi", async () => {
     const { pi: pi1, handle } = await mountWithSession("sess-lazy");
     expect(handle.lazyDeps.eventBus).toBe(pi1.events); // 守卫 + 转发语义不变（切换前）
@@ -587,19 +566,18 @@ describe("session_start 围栏：装配链异常不逃逸", () => {
   });
 });
 
-// ── ④ runSettledEffects：四步固定顺序直测 ─────────────────────────────────────
+// ── ④ runSettledEffects：三步固定顺序直测 ─────────────────────────────────────
 //
 // 管线原是 makeDeps 闭包内嵌策略（顺序固化无独立测试面），提级具名导出后在此
 // 直测：不挂 fake pi 全装配、不挂 index.ts、不 mock 兄弟功能模块（notifyDone /
 // trackNotifiedRunId / evictDoneRunsBeyondCap 均真实实现）——只注入 fake env
-//（stallWatchdog 转发 / 最小发送面 pi / 真 Set / 真 runs Map）。
+//（最小发送面 pi / 真 Set / 真 runs Map）。
 //
-// 四步顺序的可观测钉法：
-// - step1（noteRunSettled）与 step2（notifyDone 的 sendMessage）的相对序经
-//   步进哨兵数组直接断言；
-// - step2 失败（中途失败分支）时 step3（track）与 step4（evict）不发生
-//   ——证明 3/4 排在 2 之后；
-// - 成功分支断言 step3（notifiedRunIds 纳入）与 step4（runs 淘汰）均已执行。
+// 三步顺序的可观测钉法：
+// - step1（notifyDone 的 sendMessage）经步进哨兵数组记录；
+// - step1 失败（中途失败分支）时 step2（track）与 step3（evict）不发生
+//   ——证明 2/3 排在 1 之后；
+// - 成功分支断言 step2（notifiedRunIds 纳入）与 step3（runs 淘汰）均已执行。
 //
 // notifyDone 走降级直发路径（ledger 槽未 bind → getBoundNotifyLedger() 为
 // undefined）；stale 判定依据 ext-guards STALE_CTX_MARKER 文案子串，测试注入的
@@ -617,21 +595,16 @@ type EnvHarness = {
 function makeEnv(): EnvHarness {
   const seq: string[] = [];
   const sendMessage = vi.fn(() => {
-    seq.push("2:notifyDone(sendMessage)");
+    seq.push("1:notifyDone(sendMessage)");
     return true;
   });
   const pi = { sendMessage } as unknown as ExtensionAPI;
   const notifiedRunIds = new Set<string>();
   const runs = new Map<string, WorkflowRun>();
   const env: RunSettledEffectsEnv = {
-    stallWatchdog: {
-      noteRunSettled: (runId) => {
-        seq.push(`1:noteRunSettled(${runId})`);
-      },
-    },
     resolvePi: () => pi,
     notifiedRunIds,
-    state: { ctx: makeCtx("sess-run-settled", "tui"), sessionDir: "/tmp/run-settled-test-session", runs },
+    state: { sessionDir: "/tmp/run-settled-test-session", runs },
     // [W2/V1 D1 第 7 行] 终局记录查询注入（生产 = JsonlRunStore.settledRecordOf；
     // 直测按 makeRun 的 completed 形态给帧同源记录）
     settledRecordOf: () => ({ outcome: "completed", settledAt: 0 }),
@@ -645,7 +618,7 @@ function makeEnv(): EnvHarness {
     sendMessage,
     failSend: (err) => {
       sendMessage.mockImplementation(() => {
-        seq.push("2:notifyDone(sendMessage)");
+        seq.push("1:notifyDone(sendMessage)");
         throw err;
       });
     },
@@ -670,24 +643,24 @@ function seedRunsWithCapOverflow(h: EnvHarness, currentRun: WorkflowRun): void {
   }
 }
 
-describe("runSettledEffects：四步固定顺序", () => {
-  it("noteRunSettled 先于 notifyDone 发送；track 纳入去重窗口；evict 按单源 cap 裁剪最旧 done run", () => {
+describe("runSettledEffects：三步固定顺序", () => {
+  it("notifyDone 发送后 track 纳入去重窗口；evict 按单源 cap 裁剪最旧 done run", () => {
     const h = makeEnv();
     const run = makeRun({ runId: "wf-current", status: "done", completedAt: new Date(10_000).toISOString() });
     seedRunsWithCapOverflow(h, run);
 
     runSettledEffects(h.env, run);
 
-    // step1 < step2（步进哨兵直接断言相对序）
-    expect(h.seq.slice(0, 2)).toEqual(["1:noteRunSettled(wf-current)", "2:notifyDone(sendMessage)"]);
-    // step3：去重窗口纳入本轮 runId（notifyDone 降级直发受理后 track + 管线幂等 track）
+    // step1（发送哨兵）已执行
+    expect(h.seq).toEqual(["1:notifyDone(sendMessage)"]);
+    // step2：去重窗口纳入本轮 runId（notifyDone 降级直发受理后 track + 管线幂等 track）
     expect(h.notifiedRunIds.has("wf-current")).toBe(true);
-    // step4：done 总数 = cap+1 → 恰淘汰最旧 1 个（seed-0），本轮 run（completedAt 最新）保留
+    // step3：done 总数 = cap+1 → 恰淘汰最旧 1 个（seed-0），本轮 run（completedAt 最新）保留
     expect(h.runs.size).toBe(MAX_RETAINED_DONE_RUNS);
     expect(h.runs.has("seed-0")).toBe(false);
     expect(h.runs.has("seed-1")).toBe(true);
     expect(h.runs.has("wf-current")).toBe(true);
-    // step4 的日志入参：keep 单源 cap + session 归属现读 lsRef
+    // step3 的日志入参：keep 单源 cap + session 归属现读 lsRef
     expect(loggerFns.debug).toHaveBeenCalledWith("[subagent-workflow] evicted done runs beyond cap", {
       evicted: 1,
       keep: MAX_RETAINED_DONE_RUNS,
@@ -713,11 +686,11 @@ describe("runSettledEffects：四步固定顺序", () => {
     // 管线不吞错：上抛交由调用方 finalizeRun 的 onRunDone 独立 try 围栏（OR-4/B-4）
     expect(() => runSettledEffects(h.env, run)).toThrowError("relay send boom");
 
-    // step1 已执行（先于失败点），step2 到达且失败
-    expect(h.seq).toEqual(["1:noteRunSettled(wf-boom)", "2:notifyDone(sendMessage)"]);
-    // step3 未执行：去重窗口不含 runId（notifyDone 降级路径发送失败不标记——重试通道保持）
+    // step1 到达且失败
+    expect(h.seq).toEqual(["1:notifyDone(sendMessage)"]);
+    // step2 未执行：去重窗口不含 runId（notifyDone 降级路径发送失败不标记——重试通道保持）
     expect(h.notifiedRunIds.has("wf-boom")).toBe(false);
-    // step4 未执行：runs 原样
+    // step3 未执行：runs 原样
     expect(h.runs.size).toBe(runsSizeBefore);
     expect(h.runs.has("seed-0")).toBe(true);
   });
@@ -732,8 +705,8 @@ describe("runSettledEffects：四步固定顺序", () => {
 
     // notifyDone 首行去重早退 → 发送面零调用
     expect(h.sendMessage).not.toHaveBeenCalled();
-    // step1 / step3（幂等）/ step4 照常执行
-    expect(h.seq).toEqual(["1:noteRunSettled(wf-dup)"]);
+    // step2（幂等）/ step3 照常执行（seq 恒空——发送面零调用）
+    expect(h.seq).toEqual([]);
     expect(h.notifiedRunIds.has("wf-dup")).toBe(true);
     expect(h.runs.size).toBe(MAX_RETAINED_DONE_RUNS);
     expect(h.runs.has("seed-0")).toBe(false);
@@ -757,8 +730,8 @@ describe("runSettledEffects：四步固定顺序", () => {
     );
     // track 不标：未发通知不占去重窗口（允许后续语义修正重试）
     expect(h.notifiedRunIds.has("wf-nosettlement")).toBe(false);
-    // evict 照常：内存有界性独立于通知（stall 回收同样照常——seq 恒只有 step1）
-    expect(h.seq).toEqual(["1:noteRunSettled(wf-nosettlement)"]);
+    // evict 照常：内存有界性独立于通知（seq 恒空——发送面零调用）
+    expect(h.seq).toEqual([]);
     expect(h.runs.size).toBe(MAX_RETAINED_DONE_RUNS);
     expect(h.runs.has("seed-0")).toBe(false);
     expect(h.runs.has("wf-nosettlement")).toBe(true);

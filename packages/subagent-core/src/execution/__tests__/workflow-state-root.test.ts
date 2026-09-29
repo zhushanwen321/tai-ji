@@ -2,17 +2,17 @@
 //
 // [F-1 修复] pi 宿主 WorkflowRun state 读侧装配同源布局测试。
 //
-// 背景（装配错位事故面）：round-supervisor sweep 曾用 FileRunStore 缺省根
+// 背景（装配错位事故面）：对账 sweep 曾用缺省根
 // `<dataRoot>/workflow-state`（zcode 宿主布局）读 workflow run state，而 pi 宿主真实
 // 落盘 = JsonlRunStore 的 `<sessionDir>/workflow-state/<runId>.jsonl`——两目录生产不
-// 相交 → findStateByIdSync 恒 missing → sweep 按终态补注销**活跃 run**。修复后装配点
+// 相交 → 判据恒 missing → sweep 按终态补注销**活跃 run**。修复后装配点
 // 传 resolvePiWorkflowStateDir()（execution/workflow-state-root.ts
 // ——pi 宿主 sessionDir 布局单源 resolvePiSessionScopedDir 的 workflow-state 后缀
 // 派生，壳 session-lifecycle.resolveSessionDir 薄消费同一单源）。
 //
 // 本套件用 mkdtemp 真实目录布局（非 mock fs）证明三件事：
 //   ① resolvePiWorkflowStateDir 探测语义两分支（sessionScopedDir 存在/不存在）；
-//   ② FileRunStore({stateDir}) findSettlementEvidenceSync（[W2/V1 D6] 判据源改接
+//   ② findRunSettlementEvidence(stateDir, runId)（[W2/V1 D6] 判据源改接
 //      journal/manifest 终态证据）在真实布局命中 running/终态/missing；
 //   ③ sweep 装配链（runPendingReconcileSweepForService，env 指向 tmp agentDir）端到端：
 //      running run 不补注销（修复前被误注销的事故方向）、终态 run 补注销。
@@ -25,12 +25,14 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FileRunStore } from "../../orchestration/file-run-store.ts";
-import { createRunEventJournal } from "../../orchestration/run-events.ts";
-import { setRunEventJournalDirForTest } from "../../orchestration/worker-message-pump.ts";
+import { findRunSettlementEvidence } from "../persistence/run-state-evidence.ts";
+import { createRunEventJournal, RUN_EVENT_JOURNAL_SUFFIX } from "../../orchestration/run-events.ts";
+import {
+  setRunEventJournalDirForTest,
+} from "../../orchestration/terminal-actions.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { runPendingReconcileSweepForService } from "../round-supervisor/service-binding.ts";
-import type { RoundSupervisorBinding } from "../round-supervisor/service-binding.ts";
+import { runPendingReconcileSweepForService } from "../registry-reconcile/sweep-binding.ts";
+import type { ReconcileSweepBinding } from "../registry-reconcile/sweep-binding.ts";
 import { resolvePiSessionScopedDir, resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
 
 let tmpDir: string;
@@ -110,23 +112,23 @@ describe("resolvePiWorkflowStateDir 探测语义（resolvePiSessionScopedDir 后
   });
 });
 
-describe("FileRunStore({stateDir}) × 真实 JsonlRunStore 布局（findSettlementEvidenceSync 读侧判据——[W2/V1 D6] 改接）", () => {
+describe("findRunSettlementEvidence(stateDir) × 真实 JsonlRunStore 布局（读侧判据——[W2/V1 D6] 改接）", () => {
   it("真实布局命中：journal 运行中帧 → running；run-settled 帧 → terminal+派生 reason；无文件 → missing", async () => {
     const stateDir = path.join(tmpDir, "sessions", slugOf("/x/y"), "workflow-state");
-    const store = new FileRunStore({ stateDir });
     setRunEventJournalDirForTest(stateDir);
     try {
       const journal = createRunEventJournal(stateDir);
       await journal.append("wf-live", { type: "run-created", runId: "wf-live", workflowName: "test-script", argsSummary: "{}", ts: Date.now() });
-      await journal.append("wf-live", { type: "ask-dispatched", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
+      await journal.append("wf-live", { type: "agent-started", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
       await journal.append("wf-done", { type: "run-created", runId: "wf-done", workflowName: "test-script", argsSummary: "{}", ts: Date.now() });
-      await journal.append("wf-done", { type: "run-settled", outcome: "completed", artifactsDir: stateDir, ts: Date.now() });
+      await journal.append("wf-done", { type: "run-settled", outcome: "done", artifactsDir: stateDir, ts: Date.now() });
 
-      expect(store.findSettlementEvidenceSync("wf-live")).toEqual({ kind: "running" });
-      expect(store.findSettlementEvidenceSync("wf-done")).toEqual({ kind: "terminal", reason: "completed" });
-      expect(store.findSettlementEvidenceSync("wf-never")).toEqual({ kind: "missing" });
-      // journal 落盘路径形状与 pi 壳 JsonlRunStore 同构：<sessionDir>/workflow-state/<runId>.events.jsonl
-      expect(fs.existsSync(path.join(stateDir, "wf-live.events.jsonl"))).toBe(true);
+      expect(findRunSettlementEvidence(stateDir, "wf-live")).toEqual({ kind: "running" });
+      expect(findRunSettlementEvidence(stateDir, "wf-done")).toEqual({ kind: "terminal", reason: "completed" });
+      expect(findRunSettlementEvidence(stateDir, "wf-never")).toEqual({ kind: "missing" });
+      // journal 落盘路径形状与 pi 壳 JsonlRunStore 同构：<sessionDir>/workflow-state/<runId>.record.jsonl
+      //（后缀经 RUN_EVENT_JOURNAL_SUFFIX 单源，防再改名漂移）。
+      expect(fs.existsSync(path.join(stateDir, `wf-live${RUN_EVENT_JOURNAL_SUFFIX}`))).toBe(true);
     } finally {
       setRunEventJournalDirForTest(undefined);
     }
@@ -136,7 +138,7 @@ describe("FileRunStore({stateDir}) × 真实 JsonlRunStore 布局（findSettleme
 describe("sweep 装配链端到端（runPendingReconcileSweepForService × 真实布局）", () => {
   /**
    * 装配 harness：env 指向 tmp agentDir（生产装配 resolvePiWorkflowStateDir() 无参走
-   * env + process.cwd()），run state 由 FileRunStore({stateDir}) 写入解析出的目录——
+   * env + process.cwd()），run state 判据直接读解析出的目录——
    * 证明「生产装配点读的目录 = run state 真实落盘目录」（同源布局闭环）。
    */
   function setupSweep(): { agentDir: string; stateDir: string } {
@@ -148,18 +150,18 @@ describe("sweep 装配链端到端（runPendingReconcileSweepForService × 真�
     return { agentDir, stateDir };
   }
 
-  async function seedJournalIn(dir: string, runId: string, settled?: { outcome: "completed" | "failed" | "cancelled" | "interrupted" }): Promise<void> {
+  async function seedJournalIn(dir: string, runId: string, settled?: { outcome: "done" | "failed" | "cancelled" | "time_limited" }): Promise<void> {
     const journal = createRunEventJournal(dir);
     await journal.append(runId, { type: "run-created", runId, workflowName: "test-script", argsSummary: "{}", ts: Date.now() });
     if (settled !== undefined) {
-      await journal.append(runId, { type: "ask-dispatched", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
+      await journal.append(runId, { type: "agent-started", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
       await journal.append(runId, { type: "run-settled", outcome: settled.outcome, artifactsDir: dir, ts: Date.now() });
     } else {
-      await journal.append(runId, { type: "ask-dispatched", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
+      await journal.append(runId, { type: "agent-started", taskIndex: 1, agentName: "a", attempt: 1, ts: Date.now() });
     }
   }
 
-  function makeBinding(sessionFile: string, appended: Array<{ customType: string; data: unknown }>): RoundSupervisorBinding {
+  function makeBinding(sessionFile: string, appended: Array<{ customType: string; data: unknown }>): ReconcileSweepBinding {
     return {
       getStore: () => new RecordStore(path.join(tmpDir, "records")),
       getPi: () =>
@@ -167,10 +169,8 @@ describe("sweep 装配链端到端（runPendingReconcileSweepForService × 真�
           appendEntry: (type: string, data: unknown) => appended.push({ customType: type, data }),
           events: { emit: vi.fn() },
           sendMessage: vi.fn(),
-        }) as unknown as NonNullable<ReturnType<RoundSupervisorBinding["getPi"]>>,
-      getSessionRootId: () => "root",
+        }) as unknown as NonNullable<ReturnType<ReconcileSweepBinding["getPi"]>>,
       getMainSessionFile: () => sessionFile,
-      finalizeClosed: vi.fn(),
     };
   }
 
@@ -199,7 +199,7 @@ describe("sweep 装配链端到端（runPendingReconcileSweepForService × 真�
 
   it("终态 workflow run（journal run-settled 帧在盘）→ sweep 补注销（reason 经联合派生）", async () => {
     const { agentDir, stateDir } = setupSweep();
-    await seedJournalIn(stateDir, "wf-done", { outcome: "completed" });
+    await seedJournalIn(stateDir, "wf-done", { outcome: "done" });
 
     const sessionFile = path.join(agentDir, "main-session.jsonl");
     writeRegister(sessionFile, "wf-done");

@@ -16,7 +16,7 @@
 
 import type { RunStatus, DoneReason } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
-import { isRunSettled, runSettledOutcomeToDoneReason, settledRecordOf } from "./worker-message-pump.ts";
+import { runSettledOutcomeToDoneReason, settledRecordOf } from "./terminal-actions.ts";
 
 /**
  * WorkflowRun 的可序列化摘要（status action / 列表渲染用）。
@@ -30,7 +30,12 @@ export interface WorkflowRunSummary {
   name: string;
   /** run 级简短标签（可选，旧持久化 run 缺失）。 */
   slug?: string;
-  status: RunStatus;
+  /**
+   * 投影三态（[D2]）：done（终局）> interrupted（重水合中断标记——聚合 status
+   * 词表保持两态，中断态经 meta.interruptedAt 在投影面表达，与 shared
+   * WorkflowRunStatus 三态同词）> running。
+   */
+  status: RunStatus | "interrupted";
   reason?: DoneReason;
   /** ISO 时间戳，run 创建/启动时刻。 */
   startedAt: string;
@@ -51,7 +56,12 @@ export function runSummary(run: WorkflowRun): WorkflowRunSummary {
     runId: run.runId,
     name: run.spec.scriptName,
     slug: run.spec.slug,
-    status: settled !== undefined || run.state.status === "done" ? "done" : "running",
+    status:
+      settled !== undefined || run.state.status === "done"
+        ? "done"
+        : run.meta.interruptedAt !== undefined
+          ? "interrupted"
+          : "running",
     reason:
       settled !== undefined
         ? runSettledOutcomeToDoneReason(settled.outcome, settled.errorCode)
@@ -65,21 +75,3 @@ export function runSummary(run: WorkflowRun): WorkflowRunSummary {
   };
 }
 
-/**
- * 判断是否存在指定名字、仍在 running 的 workflow script。
- *
- * pi 版遍历全部 session 的 runs（两层循环）；core 版收口为单 runs Map——
- * per-session 隔离由调用方（宿主逐 session 调用或传入聚合 Map）负责。
- *
- * [W2/V1 D1 分流表] 判活换源单一判源函数 isRunSettled（活体终局经注册表判定，
- * 恢复写点 / v1 条目经聚合 done 判定——原两态机 status 读随写点删除退役）。
- *
- * @param runs run 注册表（runId → WorkflowRun）
- * @param name script 名（按 spec.scriptName 精确匹配）
- */
-export function isScriptRunning(runs: Map<string, WorkflowRun>, name: string): boolean {
-  for (const run of runs.values()) {
-    if (run.spec.scriptName === name && !isRunSettled(run)) return true;
-  }
-  return false;
-}

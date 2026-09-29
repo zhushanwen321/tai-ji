@@ -38,22 +38,21 @@ export interface AgentRunner {
 // ── Port 2: RunStore ──────────────────────────────────────────
 
 /**
- * WorkflowRun 持久化 port（写侧语义）。Infra 实现：pi 壳 JsonlRunStore（session
- * 锚定）与 core FileRunStore（宿主数据根锚定，zsw 等无 pi session 设施的宿主）。
+ * WorkflowRun 持久化 port（写侧语义）。生产唯一实现 = pi 壳 JsonlRunStore
+ * （session 锚定；core 侧通用文件写实现已随写身份退役删除）。
  *
- * save 在每次状态变更后持久化整个 WorkflowRun（聚合根）——W1 写通道语义收敛后
- * 快照 = journal fold 的物化投影（写点收敛到 journal 追加后的统一物化步）；
- * loadAll 在 session_start 时重水合（D-5：JSONL 不向后兼容旧 session，旧格式返回空）。
- * stateFilePath 返回 run 状态文件的绝对路径（供 overlay/GUI 暴露给用户）。
+ * save = 显式 no-op（state 快照已删，唯一事实源 = record 事件流，ADR-0082 D1；
+ * 接口保留为 port 契约）；loadAll 在 session_start 折叠 record 流重建 run 聚合。
+ * stateFilePath 返回 run record 流文件的绝对路径（供 overlay/GUI 暴露给用户）。
  *
- * 读写分离装配事实：pi 宿主 = 写侧 JsonlRunStore + 读侧对账直接消费 FileRunStore
- * 具体类（findStateByIdSync 为端口外同步读方法——单实现单消费方 [round-supervisor
- * 对账 sweep]，不为其设端口：一个 adapter 是假想 seam）。
+ * 读侧职责不经本 port：终局证据判定核与保留期维护位于
+ * execution/persistence/run-state-evidence.ts（journal/manifest 事实源直读，
+ * 对账 sweep 与启动扫描枚举共用同一份判据）。
  */
 export interface RunStore {
   save(run: WorkflowRun): Promise<void>;
   loadAll(): Promise<WorkflowRun[]>;
-  /** 返回 run 状态快照文件的绝对路径：<sessionDir>/workflow-state/<runId>.jsonl */
+  /** 返回 run record 流文件的绝对路径：<sessionDir>/workflow-state/<runId>.record.jsonl（供 overlay/GUI 暴露） */
   stateFilePath(runId: string): string;
 }
 
@@ -160,20 +159,6 @@ export interface LifecycleDeps {
     runId: string,
     budgetTimeMs: number,
   ) => ReturnType<typeof setTimeout> | undefined;
- /**
- * workflow() 嵌套调用回调（可选）。Worker 脚本内调 workflow(name, args) 时触发。
- *
- * 由 Interface 层 makeDeps 注入（闭包捕获 registry + deps）。Engine 层的
- * worker-message-pump.handleWorkerMessage 收到 workflow-call 消息后调本回调，
- * 拿到子 workflow 执行结果后 postMessage(workflow-result) 回 worker。
- *
- * 不注入时 workflow() 返回 error result（向后兼容，不影响非嵌套场景）。
- */
-  onWorkflowCall?: (
-    name: string,
-    args: Record<string, unknown>,
-    parentRun: WorkflowRun,
-  ) => Promise<unknown>;
  /**
   * [H2 W3] workflow 域 agent() 统一派发入口（SubagentService.executeWorkflowAgent 的
   * deps 注入形态，设计 §3.5 终态数据流）。窄函数类型——不引 execution 层具体类，

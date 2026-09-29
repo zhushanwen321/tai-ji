@@ -17,7 +17,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  dispatchRunCreated,
   handleScriptError,
   handleWorkerError,
   handleWorkerExit,
@@ -25,6 +24,9 @@ import {
   postBudgetUpdate,
   rebuildRuntime,
 } from "../worker-message-pump.ts";
+import {
+  dispatchRunCreated,
+} from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -34,9 +36,14 @@ import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import { flushMicrotasks } from "./helpers/flush-microtasks.ts";
 // [W2/V1] 六态机引导 + 终局断言换源（两态机字段停更——终局经注册表判定/派生）。
-import { isRunSettled, settledRecordOf } from "../worker-message-pump.ts";
+import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
 
 // ── helpers ──────────────────────────────────────────────────
+
+/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+function findByStep(trace: Trace, stepIndex: number) {
+  return trace.toArray().find((n) => n.stepIndex === stepIndex);
+}
 
 /** 构造一个 status="running" 的 mock WorkflowRun，meta 可配置。 */
 let runSeq = 0;
@@ -477,7 +484,7 @@ describe("race-F3: rebuild 时间预算折算", () => {
     expect(scheduleTimeBudget).not.toHaveBeenCalled();
     // 直接 time_limited 终态 + 持久化 + 注销直落 + onRunDone
     expect(isRunSettled(run)).toBe(true);
-    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "time_limited" });
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "time_limited" });
     expect(deps.store.save).toHaveBeenCalled();
     expect(deps.appendEntry).toHaveBeenCalledWith(
       "pending:unregister",
@@ -592,7 +599,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     // worker 崩溃 → rebuildRuntime：replaceRuntime（abort 旧 controller）+ 同步 discard 在飞 call
     rebuildRuntime(run, deps, handlers);
     expect(run.state.calls.has(1)).toBe(false);
-    expect(run.state.trace.find(1)).toBeUndefined();
+    expect(findByStep(run.state.trace, 1)).toBeUndefined();
 
     // 新 worker 重跑脚本：同 callId=1 再 dispatch（重跑实例 B 挂起在飞）
     const deferredB = createDeferred<AgentResult>();
@@ -636,7 +643,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
 
     expect(findAgentResultPost(newWorkerPost, 2)).toBeUndefined();
     expect(run.state.calls.has(2)).toBe(false);
-    expect(run.state.trace.find(2)).toBeUndefined();
+    expect(findByStep(run.state.trace, 2)).toBeUndefined();
   });
 
   it("catch 路径：discard 后旧 dispatch 的异常 reject 不投新 worker、不复活 Map 条目", async () => {
@@ -684,7 +691,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     expect(posted).toBeDefined();
     expect(posted?.result.content).toBe("real result");
     expect(run.state.calls.get(4)?.status).toBe("done");
-    expect(run.state.trace.find(4)?.status).toBe("completed");
+    expect(findByStep(run.state.trace, 4)?.status).toBe("completed");
   });
 
   it("U6/S3 场景重放：discard + 重跑替换后，旧 finalize 不污染重跑新 trace 节点（旧 call 实例仍 markDone）", async () => {
@@ -707,7 +714,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     // rebuild：discard 移除旧 call 条目 + trace 节点（replaceRuntime 同步 abort 旧 signal）
     rebuildRuntime(run, deps, handlers);
     expect(run.state.calls.has(9)).toBe(false);
-    expect(run.state.trace.find(9)).toBeUndefined();
+    expect(findByStep(run.state.trace, 9)).toBeUndefined();
 
     // 重跑 dispatch 同 callId=9：新实例 + 新 trace 节点 running，挂起在飞
     const deferredB = createDeferred<AgentResult>();
@@ -717,7 +724,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     const rerunCall = run.state.calls.get(9);
     expect(rerunCall).toBeDefined();
     expect(rerunCall).not.toBe(oldCall);
-    expect(run.state.trace.find(9)?.status).toBe("running");
+    expect(findByStep(run.state.trace, 9)?.status).toBe("running");
 
     // 旧 runner promise 以非 stale 失败 resolve——rebuild 已 abort 旧 signal，旧
     // executeAgentCall 醒来走 signal.aborted finalize 调用点（错误文案不含 stale
@@ -727,7 +734,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     await flushMicrotasks();
 
     // 新 trace 节点未被旧 finalize 污染：仍 running、无 result、无 completedAt
-    const newNode = run.state.trace.find(9);
+    const newNode = findByStep(run.state.trace, 9);
     expect(newNode?.status).toBe("running");
     expect(newNode?.result).toBeUndefined();
     expect(newNode?.completedAt).toBeUndefined();
@@ -741,7 +748,7 @@ describe("orphan call guard（rebuild 后迟到 completion 不投递新 worker�
     // 收尾：resolve 重跑 deferred，让挂起的 promise 链走完（非孤儿 → 正常完成路径）
     deferredB.resolve({ content: "rerun ok", durationMs: 1, error: undefined, toolCalls: [] });
     await flushMicrotasks();
-    expect(run.state.trace.find(9)?.status).toBe("completed");
+    expect(findByStep(run.state.trace, 9)?.status).toBe("completed");
   });
 });
 
@@ -827,8 +834,8 @@ describe("rebuildRuntime 可观察性（OB3 日志点）", () => {
     // 返回值（经 L3 暴露）与实际被弃 callId 一致：Map/trace 条目均已移除
     expect(run.state.calls.has(5)).toBe(false);
     expect(run.state.calls.has(3)).toBe(false);
-    expect(run.state.trace.find(5)).toBeUndefined();
-    expect(run.state.trace.find(3)).toBeUndefined();
+    expect(findByStep(run.state.trace, 5)).toBeUndefined();
+    expect(findByStep(run.state.trace, 3)).toBeUndefined();
 
     // 收尾：resolve 两个挂起的 deferred（孤儿守卫 drop，无投递无污染）
     deferreds[0]!.resolve({ content: "", durationMs: 1, error: undefined, toolCalls: [] });

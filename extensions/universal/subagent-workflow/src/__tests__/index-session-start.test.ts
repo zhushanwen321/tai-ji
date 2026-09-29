@@ -183,7 +183,7 @@ async function runSessionAssembly(mode: "tui" | "rpc" | "json" | "print", entrie
 }
 
 /** 挂载 index.ts 并跑一次 session_start（store loadAll 行为可配），返回守卫观察面：
- *  pi（含 __workflowRun）/ session_shutdown handler / registerWorkflowsCommand 捕获。 */
+ *  pi / session_shutdown handler / registerWorkflowsCommand 捕获。 */
 async function mountWithLoadAll(loadAll: () => Promise<unknown[]>): Promise<{
   pi: ExtensionAPI;
   shutdownHandler: (event: unknown, ctx: unknown) => Promise<void>;

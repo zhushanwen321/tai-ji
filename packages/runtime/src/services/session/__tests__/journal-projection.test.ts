@@ -175,7 +175,7 @@ function workflowSettledEntry(runId: string, over: Record<string, unknown> = {})
       runId,
       status: 'done',
       reason: 'completed',
-      outcome: 'completed',
+      outcome: 'done',
       settledAt: 3000,
       callCount: 2,
       usedTokens: 800,
@@ -188,8 +188,8 @@ function workflowSettledEntry(runId: string, over: Record<string, unknown> = {})
 
 describe('parseWorkflowRunEventFileLine（run 域 tail 行解析器）', () => {
   it('词表内事件解析透传；空行/坏 JSON/词表外 type/坏信封 → undefined', () => {
-    const ok = parseWorkflowRunEventFileLine(JSON.stringify({ type: 'ask-dispatched', ts: 1, taskIndex: 0, agentName: 'w', attempt: 1 }))
-    expect(ok).toMatchObject({ type: 'ask-dispatched', taskIndex: 0 })
+    const ok = parseWorkflowRunEventFileLine(JSON.stringify({ type: 'agent-started', ts: 1, taskIndex: 0, agentName: 'w', attempt: 1 }))
+    expect(ok).toMatchObject({ type: 'agent-started', taskIndex: 0 })
     expect(parseWorkflowRunEventFileLine('')).toBeUndefined()
     expect(parseWorkflowRunEventFileLine('not-json')).toBeUndefined()
     expect(parseWorkflowRunEventFileLine(JSON.stringify({ type: 'unknown-type', ts: 1 }))).toBeUndefined()
@@ -207,15 +207,19 @@ describe('parseWorkflowRunEventFileLine（run 域 tail 行解析器）', () => {
         JSON.stringify({ type: 'ask-executing', ts: 1, taskIndex: 0, agentName: 'w', attempt: 1 }),
       ),
     ).toBeUndefined()
-    // member-pool（U4 additive 成员，PROBE 补键）照常放行
+    // [D5]/[D6] armed / member-pool 历史行（词表成员删除）→ 词表外坏行 undefined
     expect(
       parseWorkflowRunEventFileLine(
         JSON.stringify({ type: 'member-pool', ts: 1, action: 'clear' }),
       ),
-    ).toMatchObject({ type: 'member-pool', action: 'clear' })
+    ).toBeUndefined()
     expect(
       parseWorkflowRunEventFileLine(JSON.stringify({ type: 'armed', ts: 1, frame: {} })),
-    ).toMatchObject({ type: 'armed' })
+    ).toBeUndefined()
+    // [D2] run-interrupted / run-resumed 新成员照常放行
+    expect(
+      parseWorkflowRunEventFileLine(JSON.stringify({ type: 'run-interrupted', ts: 1, errorCode: 'crashed' })),
+    ).toMatchObject({ type: 'run-interrupted', errorCode: 'crashed' })
   })
 })
 
@@ -225,20 +229,20 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
   /** 合法序列（写入序）：created → 两 ask 派发 → ask-0 终局 → run 终局。 */
   const legalEvents: WorkflowRunEvent[] = [
     runSeqEvent(1, { type: 'run-created', runId: 'wf-1', workflowName: 'flow', argsSummary: '' }),
-    runSeqEvent(2, { type: 'ask-dispatched', taskIndex: 0, agentName: 'w1', attempt: 1 }),
-    runSeqEvent(3, { type: 'ask-dispatched', taskIndex: 1, agentName: 'w2', attempt: 1 }),
-    runSeqEvent(4, { type: 'ask-settled', taskIndex: 0, attempt: 1, outcome: 'completed', durationMs: 800 }),
-    runSeqEvent(5, { type: 'run-settled', outcome: 'completed', artifactsDir: '/tmp/a' }),
+    runSeqEvent(2, { type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1 }),
+    runSeqEvent(3, { type: 'agent-started', taskIndex: 1, agentName: 'w2', attempt: 1 }),
+    runSeqEvent(4, { type: 'agent-settled', taskIndex: 0, attempt: 1, outcome: 'done', durationMs: 800 }),
+    runSeqEvent(5, { type: 'run-settled', outcome: 'done', artifactsDir: '/tmp/a' }),
   ]
 
   it('骨架投影：created 定首帧、dispatched 成骨架行、settled 定步骤终局、run-settled 定 run 终局', () => {
     const fold = foldRunEventCheckpoint(legalEvents, noop)
     expect(fold.created).toEqual({ runId: 'wf-1', workflowName: 'flow', ts: 1100 })
-    expect(fold.asks.get(0)).toMatchObject({ agentName: 'w1', startedAt: 1200, settled: { outcome: 'completed' } })
+    expect(fold.asks.get(0)).toMatchObject({ agentName: 'w1', startedAt: 1200, settled: { outcome: 'done' } })
     expect(fold.asks.get(1)?.settled).toBeUndefined()
-    expect(fold.runSettled).toMatchObject({ outcome: 'completed', ts: 1500 })
+    expect(fold.runSettled).toMatchObject({ outcome: 'done', ts: 1500 })
     // 状态半边同源于一次 fold：终帧 terminal + seq 水位 = 末帧
-    expect(fold.state).toEqual({ lifecycle: 'terminal', outcome: 'completed' })
+    expect(fold.state).toEqual({ lifecycle: 'terminal', outcome: 'done' })
     expect(fold.lastSeq).toBe(5)
   })
 
@@ -258,21 +262,31 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
     expect(replayed).toEqual(once)
   })
 
-  it('member-pool 帧进 fold 不炸不改骨架（池登记/清空属 run 域附属投影，无 per-call 语义）', () => {
-    const fold = foldRunEventCheckpoint(
+  it('[D6] member-pool 历史行进 fold 停帧（词表成员删除后表外转移——骨架停在最近一致态）；[D3] phase 骨架随转移事件产出', () => {
+    // member-pool 历史行（[D6] 删除成员）：fold 在该帧撞表外转移 → 保守停帧
+    const stopped = foldRunEventCheckpoint(
       [
         runSeqEvent(1, { type: 'run-created', runId: 'wf-mp', workflowName: 'flow', argsSummary: '' }),
         runSeqEvent(2, { type: 'member-pool', action: 'register', name: 'w1', recordId: 'sa-1' }),
-        runSeqEvent(3, { type: 'ask-dispatched', taskIndex: 0, agentName: 'w1', attempt: 1 }),
-        runSeqEvent(4, { type: 'member-pool', action: 'clear' }),
-        runSeqEvent(5, { type: 'run-settled', outcome: 'completed', artifactsDir: '/tmp/a' }),
       ],
       noop,
     )
-    expect(fold.created).toMatchObject({ runId: 'wf-mp' })
-    expect(fold.asks.size).toBe(1) // member-pool 不造 ask 行
-    expect(fold.asks.get(0)).toMatchObject({ agentName: 'w1' })
-    expect(fold.runSettled).toMatchObject({ outcome: 'completed' })
+    expect(stopped.created).toMatchObject({ runId: 'wf-mp' })
+    expect(stopped.lastSeq).toBe(1) // member-pool 帧未应用（水位停在 run-created）
+    // [D3] phase 状态机骨架：phase-started/phase-settled 落投影半边
+    const folded = foldRunEventCheckpoint(
+      [
+        runSeqEvent(1, { type: 'run-created', runId: 'wf-ph', workflowName: 'flow', argsSummary: '' }),
+        runSeqEvent(2, { type: 'phase-started', phase: 'impl' }),
+        runSeqEvent(3, { type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, phase: 'impl' }),
+        runSeqEvent(4, { type: 'phase-settled', phase: 'impl' }),
+        runSeqEvent(5, { type: 'run-settled', outcome: 'done', artifactsDir: '/tmp/a' }),
+      ],
+      noop,
+    )
+    expect(folded.phases.get('impl')).toMatchObject({ phase: 'impl' })
+    expect(folded.phases.get('impl')?.settledAt).toBeDefined()
+    expect(folded.runSettled).toMatchObject({ outcome: 'done' })
   })
 
   it('被动终局帧透传：收编/回收路径 run-settled（interrupted + errorCode 细分）落骨架与投影', () => {
@@ -309,7 +323,7 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
     const dual = foldRunEventCheckpoint(
       [
         runSeqEvent(1, { type: 'run-created', runId: 'wf-dual', workflowName: 'flow', argsSummary: '' }),
-        runSeqEvent(2, { type: 'ask-dispatched', taskIndex: 0, agentName: 'w1', attempt: 1 }),
+        runSeqEvent(2, { type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1 }),
         runSeqEvent(3, { type: 'run-settled', outcome: 'interrupted', errorCode: 'idle-evicted', artifactsDir: '/tmp/a' }),
         runSeqEvent(4, { type: 'run-settled', outcome: 'failed', artifactsDir: '/tmp/a' }),
       ],
@@ -319,14 +333,14 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
     expect(dual.state).toEqual({ lifecycle: 'terminal', outcome: 'interrupted' })
   })
 
-  it('占位行兜底：合法转移下跨 taskIndex 错位的 ask-settled（dispatched 缺席）成占位行不丢终局', () => {
-    // 转移表不校验 taskIndex 归属：running 态下 settled 的 taskIndex 无 dispatched
+  it('占位行兜底：合法转移下跨 taskIndex 错位的 agent-settled（agent-started 缺席）成占位行不丢终局', () => {
+    // 转移表不校验 taskIndex 归属：running 态下 settled 的 taskIndex 无 agent-started
     // 行 = 残形态——骨架兜底 '(unknown)' 占位行，终局不丢（record overlay 会覆盖）
     const fold = foldRunEventCheckpoint(
       [
         runSeqEvent(1, { type: 'run-created', runId: 'wf-mis', workflowName: 'flow', argsSummary: '' }),
-        runSeqEvent(2, { type: 'ask-dispatched', taskIndex: 0, agentName: 'w1', attempt: 1 }),
-        runSeqEvent(3, { type: 'ask-settled', taskIndex: 7, attempt: 1, outcome: 'failed', errorCode: 'unknown', durationMs: 5 }),
+        runSeqEvent(2, { type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1 }),
+        runSeqEvent(3, { type: 'agent-settled', taskIndex: 7, attempt: 1, outcome: 'failed', errorCode: 'unknown', durationMs: 5 }),
       ],
       noop,
     )
@@ -773,7 +787,7 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
       runId: 'wf-1',
       status: 'done' as const,
       reason: 'completed' as const,
-      outcome: 'completed' as const,
+      outcome: 'done' as const,
       settledAt: 3000,
       callCount: 2,
       usedTokens: 800,
@@ -781,10 +795,10 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
     const fold = foldRunEventCheckpoint(
       [
         runEvent({ type: 'run-created', runId: 'wf-1', workflowName: 'flow', argsSummary: '', ts: 1000 }),
-        runEvent({ type: 'ask-dispatched', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
-        runEvent({ type: 'ask-dispatched', taskIndex: 1, agentName: 'w2', attempt: 1, ts: 1200 }),
-        runEvent({ type: 'ask-settled', taskIndex: 1, attempt: 1, outcome: 'failed', errorCode: 'engine_crashed', durationMs: 300, ts: 1500 }),
-        runEvent({ type: 'run-settled', outcome: 'completed', artifactsDir: '/tmp/a', ts: 3000 }),
+        runEvent({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
+        runEvent({ type: 'agent-started', taskIndex: 1, agentName: 'w2', attempt: 1, ts: 1200 }),
+        runEvent({ type: 'agent-settled', taskIndex: 1, attempt: 1, outcome: 'failed', errorCode: 'engine_crashed', durationMs: 300, ts: 1500 }),
+        runEvent({ type: 'run-settled', outcome: 'done', artifactsDir: '/tmp/a', ts: 3000 }),
       ],
       () => {},
     )
@@ -796,16 +810,16 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
     expect(record.usedTokens).toBe(800)
     expect(record.agentCalls.map((c) => [c.id, c.status])).toEqual([[0, 'running'], [1, 'failed']])
     expect(record.agentCalls[1]!.error).toBe('engine_crashed')
-    expect(record.outcome).toBe('completed')
+    expect(record.outcome).toBe('done')
   })
 
-  it('ask-dispatched 带 phase → fold 骨架与投影 call.phase 透传；无 phase 行 undefined（W1 D6 分组供源）', () => {
+  it('agent-started 带 phase → fold 骨架与投影 call.phase 透传；无 phase 行 undefined（W1 D6 分组供源）', () => {
     const fold = foldRunEventCheckpoint(
       [
         runEvent({ type: 'run-created', runId: 'wf-phase', workflowName: 'flow', argsSummary: '', ts: 1000 }),
-        runEvent({ type: 'ask-dispatched', taskIndex: 0, agentName: 'w1', attempt: 1, phase: 'Dev-w0(W1)', ts: 1100 }),
+        runEvent({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, phase: 'Dev-w0(W1)', ts: 1100 }),
         // 无 phase 帧 = 停写期 journal 行 / 未标注剧本——fold 不造键
-        runEvent({ type: 'ask-dispatched', taskIndex: 1, agentName: 'w2', attempt: 1, ts: 1200 }),
+        runEvent({ type: 'agent-started', taskIndex: 1, agentName: 'w2', attempt: 1, ts: 1200 }),
       ],
       () => {},
     )
@@ -826,6 +840,56 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
     // renderer hasExplicitPhases（phase !== undefined）的供源：带 phase 步骤进分组，旧行保持平铺
     expect(record.agentCalls[0]!.phase).toBe('Dev-w0(W1)')
     expect(record.agentCalls[1]!.phase).toBeUndefined()
+  })
+
+  it('中断形态条目（status=interrupted）在 fold 缺席兜底层 → interrupted（entry-only 降级投影不回落 running）', () => {
+    const registered = {
+      v: 2 as const,
+      kind: 'registered' as const,
+      runId: 'wf-intr',
+      workflowName: 'flow',
+      scriptName: 'test-flow',
+      slug: 'tf',
+      startedAt: 1000,
+      journalPath: '/tmp/ws/wf-intr.record.jsonl',
+    }
+    const interruptedEntry = {
+      v: 2 as const,
+      kind: 'settled' as const,
+      runId: 'wf-intr',
+      status: 'interrupted' as const,
+      errorCode: 'crashed' as const,
+      settledAt: 3000,
+      callCount: 1,
+      usedTokens: 0,
+    }
+    // fold 缺席（runJournalDir 缺席的 entry-only 降级投影 / record 流被外部清理）
+    const record = projectV2Workflow(registered, interruptedEntry, undefined)!
+    expect(record.status).toBe('interrupted')
+    // 主链路不受影响：record 流在场时 fold 判据仍权威
+    const folded = foldRunEventCheckpoint(
+      [
+        runEvent({ type: 'run-created', runId: 'wf-intr', workflowName: 'flow', argsSummary: '', ts: 1000 }),
+        runEvent({ type: 'run-interrupted', errorCode: 'crashed', ts: 2500 }),
+      ],
+      () => {},
+    )
+    const record2 = projectV2Workflow(registered, interruptedEntry, folded)!
+    expect(record2.status).toBe('interrupted')
+    // F2-1：resume 复活窗口——run-resumed 已被 fold（lifecycle 回 running），中断
+    // 形态条目留存不被覆盖（resume 只补写 registered 条目，appendResumeRegisteredEntry）。
+    // 条目陈旧值不得劫持 fold 权威态：复活 run 整个执行期显示 running 而非「已中断」
+    const resumedFold = foldRunEventCheckpoint(
+      [
+        runEvent({ type: 'run-created', runId: 'wf-intr', workflowName: 'flow', argsSummary: '', ts: 1000 }),
+        runEvent({ type: 'run-interrupted', errorCode: 'crashed', ts: 2500 }),
+        runEvent({ type: 'run-resumed', ts: 4000 }),
+      ],
+      () => {},
+    )
+    expect(resumedFold.state.lifecycle).toBe('running')
+    const record3 = projectV2Workflow(registered, interruptedEntry, resumedFold)!
+    expect(record3.status).toBe('running')
   })
 })
 
@@ -871,7 +935,7 @@ describe('mergeJournalProjection（单点合并）', () => {
       foldRunEventCheckpoint(
         [
           runEvent({ type: 'run-created', runId: 'wf-1', workflowName: 'f', argsSummary: '', ts: 1000 }),
-          runEvent({ type: 'ask-dispatched', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
+          runEvent({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
         ],
         () => {},
       ),
@@ -884,7 +948,7 @@ describe('mergeJournalProjection（单点合并）', () => {
     })
     const merged = mergeJournalProjection(sources, 's1')
     // run 骨架行 running 被 record 终态 overlay 为 completed（mergeWorkflowStepRecords 同一纯函数）
-    expect(merged.workflows.get('wf-1')?.agentCalls[0]).toMatchObject({ status: 'completed', sessionId: 'sa-1' })
+    expect(merged.workflows.get('wf-1')?.agentCalls[0]).toMatchObject({ status: 'done', sessionId: 'sa-1' })
   })
 })
 
@@ -952,10 +1016,10 @@ describe('SessionJournalProjection（冷启动 + 增量 + dispose）', () => {
   it('冷启动：attach 全量读两域 journal → 合并快照（entry 批先行喂 v2 条目）', () => {
     writeFileSync(join(recordsDir, 'sa-1.events'), recordJournalLines('sa-1', [createdEvent('sa-1')]).join('\n') + '\n')
     writeFileSync(
-      join(runDir, 'wf-1.events.jsonl'),
+      join(runDir, 'wf-1.record.jsonl'),
       [
         JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'f', argsSummary: '', ts: 1000 }),
-        JSON.stringify({ type: 'ask-dispatched', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
+        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
       ].join('\n') + '\n',
     )
     const projection = new SessionJournalProjection({
@@ -978,10 +1042,10 @@ describe('SessionJournalProjection（冷启动 + 增量 + dispose）', () => {
 
   it('run journal 增量：周期复查拾取追加帧 → [W2 D7] 单源 fold 推进 → run 投影到终局', async () => {
     writeFileSync(
-      join(runDir, 'wf-1.events.jsonl'),
+      join(runDir, 'wf-1.record.jsonl'),
       [
         JSON.stringify({ type: 'run-created', runId: 'wf-1', workflowName: 'f', argsSummary: '', ts: 1000 }),
-        JSON.stringify({ type: 'ask-dispatched', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
+        JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
       ].join('\n') + '\n',
     )
     const projection = new SessionJournalProjection({
@@ -998,17 +1062,17 @@ describe('SessionJournalProjection（冷启动 + 增量 + dispose）', () => {
 
       // journal 追加步骤终局 + run 终局（offset 续读增量批次，经 core fold 接续）
       appendFileSync(
-        join(runDir, 'wf-1.events.jsonl'),
+        join(runDir, 'wf-1.record.jsonl'),
         [
-          JSON.stringify({ type: 'ask-settled', taskIndex: 0, attempt: 1, outcome: 'completed', durationMs: 700, ts: 1900 }),
-          JSON.stringify({ type: 'run-settled', outcome: 'completed', artifactsDir: '/tmp/a', ts: 2000 }),
+          JSON.stringify({ type: 'agent-settled', taskIndex: 0, attempt: 1, outcome: 'done', durationMs: 700, ts: 1900 }),
+          JSON.stringify({ type: 'run-settled', outcome: 'done', artifactsDir: '/tmp/a', ts: 2000 }),
         ].join('\n') + '\n',
       )
       await vi.advanceTimersByTimeAsync(120)
       const record = projection.workflows.get('wf-1')!
       expect(record.status).toBe('done')
-      expect(record.outcome).toBe('completed')
-      expect(record.agentCalls[0]).toMatchObject({ status: 'completed', durationMs: 700 })
+      expect(record.outcome).toBe('done')
+      expect(record.agentCalls[0]).toMatchObject({ status: 'done', durationMs: 700 })
     } finally {
       projection.dispose()
     }

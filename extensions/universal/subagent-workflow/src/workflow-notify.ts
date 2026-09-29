@@ -8,9 +8,9 @@
  * errorCode 与证据指针、取消亦通知——载荷 outcome/errorCode/resultSummary/
  * artifactsDir/eventsJournalPath（details 层，content 追加指针段）。
  *
- * 层归属：workflow 域（与 workflow-events.ts / workflow-stall-watchdog.ts 同层；
- * 唯一生产消费方 = workflow-events.ts。原名 interface/helpers.ts，2026-09-24
- * 名实归位——内容自始是通知生产而非 interface 注册面杂项）。
+ * 层归属：workflow 域（与 workflow-events.ts 同层；唯一生产消费方 =
+ * workflow-events.ts。原名 interface/helpers.ts，2026-09-24 名实归位——内容自始
+ * 是通知生产而非 interface 注册面杂项）。
  *
  * 事件注册面：setupNotifyLedgerCompactionGuard（pi compaction 事件的 ledger
  * 补写守卫——notify 账本的家内事务，随跨域 handler 迁出从 workflow-events.ts
@@ -44,15 +44,7 @@ import { runSettledOutcomeToDoneReason, type RunSettlementRecord } from "./jsonl
 // 模块级 logger（与 session-lifecycle.ts / index.ts 同 component 名）
 const logger = getLogger("subagents");
 
-import {
-  guiComponent,
-  type GuiContext,
-  type GuiRenderResult,
-  WORKFLOW_RESULT_CUSTOM_TYPE,
-} from "@zhushanwen/extension-protocol";
-import { mapRunIcon, mapRunStatus } from "./interface/gui-mappers.ts";
-import { ID_PREVIEW_LENGTH } from "./interface/id-preview.ts";
-import { withGuiAttach } from "./interface/tool-shared.ts";
+import { WORKFLOW_RESULT_CUSTOM_TYPE } from "@zhushanwen/extension-protocol";
 
 // ── 常量 ─────────────────────────────────────────────────────
 
@@ -64,12 +56,6 @@ const MAX_RESULT_SUMMARY_LENGTH = 500;
 
 /** 写账失败 error 留痕的 content 摘要截断长度（诊断定位用，非消费契约）。 */
 const RECORD_FAIL_CONTENT_PREVIEW_LENGTH = 200;
-
-/** 毫秒/分钟换算（stall 阈值与文案展示共用，禁魔法数）。 */
-const MS_PER_MINUTE = 60_000;
-
-/** [D6-2] stall 阈值缺省（分钟）：20 分钟（对齐 zcode 语义）。 */
-const WORKFLOW_STALL_THRESHOLD_MINUTES = 20;
 
 /**
  * [D7] 事件 journal 文件名（run store 旁，artifactsDir 内）：`<runId>.events.jsonl`
@@ -113,7 +99,7 @@ export const MAX_NOTIFIED_RUN_IDS = 1000;
 /**
  * notifyDone 的 details 结构（通过 pi.sendMessage 透传给前端）。
  *
- * 抽取为显式接口替代裸 Record<string, unknown>，明确 __gui__ 契约。
+ * 抽取为显式接口替代裸 Record<string, unknown>。
  * 模块私有（原 export 已删）：无跨文件消费者，测试经 notifyDone 公共入口
  * 观察并内联类型。
  */
@@ -156,7 +142,6 @@ interface WorkflowNotifyDetails {
    * 证据的入口载荷（D5-3 诊断引用落账的消费面）。
    */
   eventsJournalPath?: string;
-  __gui__?: GuiRenderResult;
 }
 
 /**
@@ -185,7 +170,6 @@ interface WorkflowNotifyDetails {
  * @param runId run 标识
  * @param run WorkflowRun 聚合根（读 spec.scriptName + trace + scriptResult；status/reason/outcome 载荷源 = 终局记录 settlement——[W2/V1 D1 第 7 行] 换源，不读两态机字段）
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
- * @param ctx GuiContext（GUI 协议渲染载荷；可选）
  * @param artifactsDir [D7] 产物目录指针（`<sessionDir>/workflow-state`，onRunDone
  *   桥注入；缺省 undefined = 旧调用兼容，载荷与文案指针段双双省略）
  */
@@ -261,7 +245,7 @@ function buildDoneNotifyContent(
 }
 
 /**
- * notifyDone 的 details 构建面（baseDetails + GUI attach）。
+ * notifyDone 的 details 构建面（baseDetails 成型）。
  *
  * 送达通道保持 "workflow-result"（runtime W18 失效信号 + taiji display 覆写 SSOT
  * 按该类型识别；迁移不改变消息类型与文案字节，只改变投递可靠性机制）。
@@ -269,7 +253,6 @@ function buildDoneNotifyContent(
 function buildDoneNotifyDetails(
   run: WorkflowRun,
   runId: string,
-  notifiedCtx: GuiContext | undefined,
   artifactsDir: string | undefined,
   eventsJournalPath: string | undefined,
   settlement: RunSettlementRecord,
@@ -293,7 +276,7 @@ function buildDoneNotifyDetails(
   if (settlement.errorCode !== undefined) {
     baseDetails.errorCode = settlement.errorCode;
   }
-  if (settlement.outcome === "completed" && run.state.scriptResult !== undefined && run.state.scriptResult !== null) {
+  if (settlement.outcome === "done" && run.state.scriptResult !== undefined && run.state.scriptResult !== null) {
     baseDetails.resultSummary = boundedPrettySerialize(run.state.scriptResult, MAX_RESULT_SUMMARY_LENGTH);
   }
   if (artifactsDir !== undefined && eventsJournalPath !== undefined) {
@@ -301,25 +284,7 @@ function buildDoneNotifyDetails(
     baseDetails.eventsJournalPath = eventsJournalPath;
   }
 
-  // GUI 协议：RPC 模式下附加结构化渲染数据。attach 经 interface 层单点 withGuiAttach
-  // （第四处 GUI 点收敛，返回新对象替代就地 mutation——details 为本函数局部对象，
-  // 下游 record/sendMessage 均经返回值消费，无人依赖 mutation 副作用，字节等价）。
-  // label 对齐 buildWorkflowGui 的格式：name + slug + runId 前 8 字符（I#3）；
-  // 非 RPC 模式 build 回调不执行（零构造成本）。
-  return withGuiAttach(baseDetails, notifiedCtx, () => {
-    const statusStr = `done (${reason})`;
-    const slug = run.spec.slug;
-    const label = [name, slug, runId.slice(0, ID_PREVIEW_LENGTH)]
-      .filter(Boolean)
-      .join(" ");
-    return guiComponent("list-tree", {
-      items: [{
-        label,
-        status: mapRunStatus(statusStr),
-        icon: mapRunIcon(statusStr),
-      }],
-    });
-  });
+  return baseDetails;
 }
 
 /**
@@ -414,13 +379,12 @@ export function notifyDone(
   runId: string,
   run: WorkflowRun,
   notifiedRunIds: Set<string>,
-  ctx: GuiContext | undefined,
   artifactsDir: string | undefined,
   settlement: RunSettlementRecord,
 ): void {
   if (notifiedRunIds.has(runId)) return;
   const { content, eventsJournalPath } = buildDoneNotifyContent(run, runId, artifactsDir, settlement);
-  const details = buildDoneNotifyDetails(run, runId, ctx, artifactsDir, eventsJournalPath, settlement);
+  const details = buildDoneNotifyDetails(run, runId, artifactsDir, eventsJournalPath, settlement);
   deliverDoneNotify(pi, runId, notifiedRunIds, content, details);
 }
 
@@ -460,73 +424,6 @@ export function trackNotifiedRunId(
     notifiedRunIds.delete(oldest);
   }
 }
-
-/**
- * [D6-2] stall informational 通知：run 长时间无进展时告诉主 agent「仍在运行、
- * 无需干预、不自动终止」——「还在等 provider」与「死了」分开表达（对齐
- * ADR-0047「静默 ≠ 卡死」）。
- *
- * 与 notifyDone（终局必达）的通道差异是有意为之：
- * - **informational 语义**：不进 NotifyLedger（账本 = 必达 + triggerTurn 唤醒，
- *   at-least-once 重放——stall 是可丢失的进展提示，进账本会把「提示」升格为
- *   「必达打断」）；不传 triggerTurn（消息展示不唤醒主 agent turn）。
- * - **送达通道为新 customType "workflow-stall"**：不复用 "workflow-result"——
- *   runtime event-interpreter 按后者识别 run 完成驱动 W18 失效信号，stall 走
- *   同通道会被误判为终局。
- * - **恰好一次**由调用方承载（stallNotifiedRunIds Set，本函数不做去重——
- *   与 notifyDone 的 notifiedRunIds 同型分工）。
- *
- * stale ctx 防御与 notifyDone 降级路径同款（guardStaleCtx：stale 静默降级 +
- * warn 留痕；非 stale 错误原样上抛——调用方 tick 循环有兜底 catch）。
- *
- * @param pi ExtensionAPI（发送面）
- * @param runId run 标识
- * @param name 脚本名（文案）
- * @param stalledMs 已无进展的毫秒数（文案展示分钟）
- * @param lastProgressAt 最近进展时间戳 epoch ms（details 诊断面）
- */
-export function notifyStall(
-  pi: ExtensionAPI,
-  runId: string,
-  name: string,
-  stalledMs: number,
-  lastProgressAt: number,
-): void {
-  const stalledMinutes = Math.max(1, Math.round(stalledMs / MS_PER_MINUTE));
-  const content =
-    `Workflow '${name}' (${runId}) has shown no progress for about ${stalledMinutes} minutes. ` +
-    "It is still running - no action is needed, and it will NOT be terminated automatically. " +
-    'Inspect it via the workflow tool (action:"status") if you want details.';
-  guardStaleCtx(
-    () =>
-      pi.sendMessage({
-        customType: WORKFLOW_STALL_CUSTOM_TYPE,
-        content,
-        display: true,
-        details: {
-          runId,
-          name,
-          stalledMs,
-          lastProgressAt,
-          thresholdMs: WORKFLOW_STALL_THRESHOLD_MS,
-        },
-      }),
-    {
-      label: "subagent-workflow:notifyStall",
-      onStale: (error) =>
-        logger.warn("workflow stall notice delivery skipped (stale ctx)", {
-          runId,
-          error: toErrorMessage(error),
-        }),
-    },
-  );
-}
-
-/** [D6-2] stall 阈值缺省：20 分钟（对齐 zcode 语义）。 */
-export const WORKFLOW_STALL_THRESHOLD_MS = WORKFLOW_STALL_THRESHOLD_MINUTES * MS_PER_MINUTE;
-
-/** [D6-2] stall 通知的送达 customType（新通道值——W18 失效信号互斥，见 notifyStall）。 */
-export const WORKFLOW_STALL_CUSTOM_TYPE = "workflow-stall";
 
 // ── notify 域事件注册（跨域 handler 迁入） ────────────────────────────────────
 

@@ -188,7 +188,7 @@ const ANSWERED_CAPABILITIES = CAPS_OVERRIDE
 
 const MODELS = [
   { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
-  { id: "mimo-v2.5-pro", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.5-pro" },
+  { id: "mimo-v2.6-flash", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash" },
 ];
 
 if (MODE === "crash") {

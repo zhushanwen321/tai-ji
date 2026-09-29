@@ -8,8 +8,8 @@
 //   ② D4 接管：adoption 后 sessionState.get(sid) 与 reload 前同一引用（store/runs
 //      不换实例）、ctx 换新、rebind 后 appendEntry 走新 pi；
 //   ③ D4 失败处置（顺序敏感 r4）：健康检查不过 → rebind-first 后 terminate 的
-//      failed entry 落新 pi 权威 JSONL + notifyDone 用户可见（sendMessage
-//      workflow-result）+ sessionState 条目移除 + 全量装配兜底。
+//      中断条目（status "interrupted"）落新 pi 权威 JSONL（workflow 列表「已中断
+//      （可续跑）」可见性载体）+ sessionState 条目移除 + 全量装配兜底。
 //
 // store 本体面（rebind 补写 / 投影重发保序 / stale guard 直测）归属
 // jsonl-run-store-session-file.test.ts（测试审计裁决：被测对象是 JsonlRunStore
@@ -227,7 +227,9 @@ describe("D4 恢复门控：session_start(reason=reload) 不跑 kill-9 恢复", 
     // 门控在 adoption 分流内（不进 createSessionRunState / recoverCrashedRuns）
     expect(result).toBe(existing);
     expect(store.rebind).toHaveBeenCalledTimes(1);
-    expect(store.resendSnapshots).toHaveBeenCalledWith(existing.runs);
+    // [D1] record 单源后 store 无投影物化面——resendSnapshots 随 state 快照删除
+    // 退役，接管收敛为 rebind（v2 终态条目补写自动走新 pi）
+    expect(store.resendSnapshots).not.toHaveBeenCalled();
   });
 
   it("条目缺失（reload 落首次装配 await 链中）：全量装配但跳过恢复（磁盘 running entry 不收编）", async () => {
@@ -254,7 +256,7 @@ describe("D4 恢复门控：session_start(reason=reload) 不跑 kill-9 恢复", 
     expect(result.runs.size).toBe(0);
   });
 
-  it("非 reload（startup）：现状恢复语义保持（磁盘 running entry 转 failed）——门控是 reason 驱动", async () => {
+  it("非 reload（startup）：磁盘 running entry 走中断收编（run-interrupted，非 done,failed）——门控是 reason 驱动", async () => {
     const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const diskRun = makeRun("wf-gate-3", "running");
     const deps = makeSeamDeps({
@@ -270,8 +272,9 @@ describe("D4 恢复门控：session_start(reason=reload) 不跑 kill-9 恢复", 
       reason: "startup",
     });
 
-    expect(diskRun.state.status).toBe("done");
-    expect(diskRun.state.reason).toBe("failed");
+    // [D2]/[D15] kill-9 语义 = 中断收编（run-interrupted 转移帧，非 done,failed）：
+    // 内存观测面 status 维持 running（终局判据归 record fold）
+    expect(diskRun.state.status).toBe("running");
   });
 });
 
@@ -352,8 +355,9 @@ describe("D4 接管：同引用接管 + ctx 换新", () => {
     expect(first!.runs.get("wf-live-1")).toBe(run);
     // run 存活：不误杀
     expect(run.state.status).toBe("running");
-    // [W1] 投影重发：adoption 经串行链把在飞 run 的投影重发落 state 文件
-    expect(readStateStatus(agentDir, "wf-live-1")).toBe("running");
+    // [D1] state 快照面整体删除——接管无投影重发（record 流是唯一持久化，接管
+    // 动作收敛为 rebind；不存在 state 文件是预期形态）
+    expect(fs.existsSync(path.join(agentDir, "workflow-state", "wf-live-1.jsonl"))).toBe(false);
     // [W1 / D1] 停写锚定：条目通道退役——新旧 pi 零 workflow-record entry
     expect(recordStatuses(m2.entries, "wf-live-1")).toHaveLength(0);
     expect(recordStatuses(m1.entries, "wf-live-1")).toHaveLength(0);
@@ -362,7 +366,7 @@ describe("D4 接管：同引用接管 + ctx 换新", () => {
 
 // ── ③ D4 adoption 失败处置：rebind-first 终态完整性 + 用户可见 + 条目移除 ────────
 
-describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移除条目 → 全量装配兜底", () => {
+describe("D4 失败处置：rebind-first → terminate 中断转移 → 移除条目 → 全量装配兜底", () => {
   it("seam 级：rebind 抛错 → rebind-first 兜底再试 + onAdoptionFailed 触发（terminate+移除注入回调）", async () => {
     const { setupSessionLifecycle } = await import("../session-lifecycle.ts");
     const run = makeRun("wf-fail-seam", "running");
@@ -398,7 +402,7 @@ describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移�
     expect(result).not.toBe(existing);
   });
 
-  it("handler 级全链：健康检查不过 → failed entry 落新 pi 权威 JSONL + notifyDone 用户可见 + 条目移除 + 兜底装配", async () => {
+  it("handler 级全链：健康检查不过 → 中断条目落新 pi 权威 JSONL（可续跑可见）+ 条目移除 + 兜底装配", async () => {
     const { setupWorkflowDomain } = await import("../workflow-events.ts");
     const sid = "sess-fail-handler";
     const makeMount = () => {
@@ -429,7 +433,7 @@ describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移�
     // dispatch 链（fold/append）走模块 journal 单写者域，测试注入指向本 session 的
     // workflow-state 目录（与真 store 的 tail 读同域）。注入经动态 import 取与
     // workflow-events 同一 pump 模块实例（beforeEach vi.resetModules 双实例隔离）。
-    const pump = await import("@zhushanwen/subagent-core/orchestration/worker-message-pump.ts");
+    const pump = await import("@zhushanwen/subagent-core/orchestration/terminal-actions.ts");
     pump.setRunEventJournalDirForTest(path.join(first.sessionDir, "workflow-state"));
     const journal = createRunEventJournal(path.join(first.sessionDir, "workflow-state"));
     await journal.append(run.runId, {
@@ -447,28 +451,28 @@ describe("D4 失败处置：rebind-first → terminate(notifyDone:true) → 移�
     const handle2 = setupWorkflowDomain(m2.pi, { inflightReporter: reporter });
     await m2.handlers.get("session_start")!({ type: "session_start", reason: "reload" }, makeFakeCtx(sid));
 
-    // run 终局 failed（terminate；[W2/V1] 断言换源终局记录——经同一动态 pump 实例）
-    expect(pump.isRunSettled(run)).toBe(true);
-    expect(pump.settledRecordOf(run.runId)).toMatchObject({ outcome: "failed" });
-    // 终态完整性（rebind-first）：terminate → finalizeRun → store.save 冷路径 flush，
-    // failed 形态落 state 投影——[W1] 条目通道退役后投影是持久化面（journal 终局帧
-    // 经 finalizeRun 同步落账，绕开 rebind-first 则 flush 走旧 pi 且 journal 权威面
-    // 不受影响，但投影会停留在 running 误导恢复链）
+    // run 中断非终局（terminate；[D11] 统一中断——打断不记失败，可再 resume）
+    expect(pump.isRunSettled(run)).toBe(false);
+    // 中断完整性（rebind-first）：terminate → interruptRun → run-interrupted(terminated)
+    // 落 record（journal.append 直写权威面，不经 store flush）——rebind-first 保证
+    // deps.appendEntry 已指向新 pi，中断条目落新 pi 权威 JSONL
     await vi.waitFor(() => {
-      // [W2/V1] 投影终态信号 = state.outcome（fold 富集；status 字段停更 running）
-      const raw = fs.readFileSync(path.join(agentDir, "workflow-state", "wf-fail-1.jsonl"), "utf8");
-      const last = JSON.parse(raw.trim().split("\n").filter((l) => l.trim()).at(-1)!) as { state?: { outcome?: string } };
-      expect(last.state?.outcome).toBe("failed");
+      // [D1] 中断信号 = record 流 run-interrupted 帧（errorCode=terminated 承载来源）
+      const raw = fs.readFileSync(path.join(agentDir, "workflow-state", "wf-fail-1.record.jsonl"), "utf8");
+      const last = JSON.parse(raw.trim().split("\n").filter((l) => l.trim()).at(-1)!) as { type?: string; errorCode?: string };
+      expect(last.type).toBe("run-interrupted");
+      expect(last.errorCode).toBe("terminated");
     });
-    // [W1 / D1] 停写锚定：零 workflow-record entry（本场景无注册条目——run 是注入的
-    // 内存 run；journal 终局帧随 finalizeRun 落账，不经条目面）
-    expect(recordStatuses(m2.entries, "wf-fail-1")).toHaveLength(0);
-    // notifyDone 用户可见：onRunDone → notifyDone → 账本投递 → sendMessage workflow-result
+    // [D11] 用户可见性 = v2 中断条目（status "interrupted"）落新 pi JSONL——workflow
+    // 列表「已中断（可续跑）」投影源（场景 25 同源）；中断非终局，无 sendMessage
+    // workflow-result 完成通知
     await vi.waitFor(() => {
-      expect(m2.pi.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ customType: "workflow-result" }),
-        expect.anything(),
+      const interruptedEntry = m2.entries.find(
+        (e) => e.type === "custom" && e.customType === "workflow-record"
+          && (e.data as { runId?: string }).runId === "wf-fail-1"
+          && (e.data as { status?: string }).status === "interrupted",
       );
+      expect(interruptedEntry).toBeDefined();
     });
     // 条目移除后兜底全量装配：sessionState 是新条目（非 first，store 不残留半接管状态）
     const after = handle2.state.sessionState.get(sid);

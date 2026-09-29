@@ -8,9 +8,10 @@
 // running run 收编），但它跑在 pi 进程内，而 runtime 派生的 pi 在空闲态停止调度
 // 一切周期任务——生产常态（宿主挂机）下停摆，是死机制。替代 = runtime 启动序列
 // 的一次性全量收编扫描：单实例锁确立后、先于任何 pi spawn 的时点，全量枚举 pi
-// 宿主形态 run（createPiHostRunEnumeration），对磁盘 status=running 且事件流静止
-// 超宽限窗的 run 逐个收编（adoptInterruptedRun 两件直落：journal run-settled 帧 +
-// manifest 物化）。
+// 宿主形态 run（createPiHostRunEnumeration——[D16⑥] 枚举判据换源：候选 = record
+// 事件流文件族，status = 共享判定核 fold record 读折叠投影，不读快照行），对
+// 判读 running 且事件流静止超宽限窗的 run 逐个收编（adoptInterruptedRun →
+// [D15] interruptRun 中断编排入口，run-interrupted 转移帧一件直落）。
 //
 // 判僵尸依据 = 双防线（决策 1）：①时序事实——扫描时点先于任何新 pi spawn（runtime
 // 启动段不 spawn，挂点注释为时序硬声明）；②事件流静止宽限窗
@@ -18,9 +19,11 @@
 // 的末帧新鲜形态防御），下次启动再收。「残活且末帧已超窗」形态（长 ask 静默期崩溃）
 // 不设防，按四要素登记为已接受代价（决策 1）。
 //
-// 收编形态一律两件直落（决策 3）：不写终态条目 / 注销条目——runtime 进程无 session
-// 文件，条目写达域不存在；宿主 session 重开由 reconcile-sweep 依 journal fold /
-// manifest 终态证据自愈补写。故收编调用不传 appendSettledEntry。
+// 收编形态一件直落（[D15] 中断目标态）：只追加 run-interrupted 转移帧——不写
+// manifest 派生缓存（manifest-write 仅 terminal 输出，interrupted 是 [D2] 暂停态
+// 非终局、可 resume）、不写终态条目 / 注销条目（runtime 进程无 session 文件，条目
+// 写达域不存在；宿主 session 重开由 reconcile-sweep 依 record 折叠 / manifest
+// 终态证据自愈补写）。
 //
 // 失败语义（规格 5 / 决策 6）：单 run 收编失败 = warn 留痕 + 继续其余；枚举整体
 // 失败（EACCES/EIO 等真 IO 故障——枚举读错分通道改造后该路径可达）= error 留痕。
@@ -65,12 +68,12 @@ export const STARTUP_SWEEP_GRACE_WINDOW_MS = 60_000;
 
 /** startupSweep 的结果（计数 + 错误摘要，供调用方日志与单测断言）。 */
 export interface StartupSweepResult { // oe-exempt:20260928:framework:startupSweep 返回契约——runtime 挂点与单测断言消费的跨包结构类型
-  /** 收编成功数（journal run-settled 帧 + manifest 两件直落完成）。 */
+  /** 收编成功数（run-interrupted 转移帧一件直落完成）。 */
   adopted: number;
   /**
    * 未收编的 running run 数 = 收编判定未通过（幂等跳过 / 宽限窗 / 坏链 / 空
-   * journal）+ 单 run 收编失败（warn 留痕）的总和。恒等式 adopted + skipped =
-   * 本次枚举出的 running run 数（非 running 的终态快照不进收编判定，两侧都不计）。
+   * record 流）+ 单 run 收编失败（warn 留痕）的总和。恒等式 adopted + skipped =
+   * 本次枚举出的 running run 数（非 running 的终态 run 不进收编判定，两侧都不计）。
    */
   skipped: number;
   /** skipped 中宽限窗跳过数（skippedGraceWindow——事件流静止不足窗，下轮再收）。 */
@@ -121,12 +124,15 @@ export async function startupSweep(
   }
   result.stateDirs = new Set(runs.map((run) => run.stateDir)).size;
   for (const run of runs) {
-    // 只收编磁盘 status=running 的 run——终态快照（failed/completed 等）不是
-    // 僵尸，不进收编判定（adopted/skipped 两侧都不计数）。
+    // 只收编判定核 fold record 判读 running 的 run——终态（判定核终态词，done
+    // 派生族）不是僵尸，不进收编判定（adopted/skipped 两侧都不计数）。
     if (run.status !== "running") continue;
     try {
+      // [D15 接线终态]：收编经 adoptInterruptedRun → interruptRun 中断编排入口，
+      // 落 run-interrupted 转移事件（[D2] 后 run-settled(outcome=interrupted)
+      // 形态非法——interrupted 是 lifecycle 暂停态）；中断来源由 errorCode 承载
+      //（startup-sweep 为 RunErrorCode 现行成员复用，设计 §3.1 事件表明示）。
       const outcome: AdoptInterruptedRunOutcome = await adoptInterruptedRun(run.runId, {
-        outcome: "interrupted",
         errorCode: "startup-sweep",
         reason: "runtime startup sweep: process-local run without live executor",
         // journalDir = 枚举出的 stateDir（per-call 目录参数——runtime 进程的

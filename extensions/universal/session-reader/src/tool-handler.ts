@@ -58,7 +58,7 @@ import {
   parseSessionFile,
   type ParseResult,
 } from '@zhushanwen/session-core'
-import { parseRunSnapshot, renderWorkflowOverview, type WorkflowOverview } from './core/workflow.js'
+import { parseRunRecordStream, parseRunSnapshot, renderWorkflowOverview, type WorkflowOverview } from './core/workflow.js'
 import { buildTreeView } from './core/tree.js'
 import { segmentTurns } from './core/turns.js'
 import { renderOutline, renderExpand, renderDetail, type OutlineOptions } from './core/render.js'
@@ -1098,7 +1098,8 @@ interface SkippedRun {
 /**
  * workflow：workflow run 概览（design §3.4 workflow，m2 IF-doWorkflow）。
  *
- * 流程：① resolveSessionId（multi 走 disambiguate）→ ② 读目标 session 的 workflow-state-link
+ * 流程：① resolveSessionId（multi 走 disambiguate）→ ② 读目标 session 的 workflow 条目三档
+ * 发现链（v2 注册条目 record 流主源 > v1 快照 > 旧 workflow-state-link 指针）
  * → ③ 无 run → ES-wf-no-runs（提示+👉family，不抛错）→ ④ runId 过滤，无匹配 →
  * ES-wf-runid-not-found（列候选+👉，不抛错）→ ⑤ 逐 run readRunSnapshot+parseRunSnapshot，
  * 不可读/不可解析 → skippedRuns（不中断其他 run，ES-wf-snapshot-read-fail/unparseable）
@@ -1116,6 +1117,81 @@ interface SkippedRun {
  * step 的 call sessionId/sessionFile 是 LLM 跳 outline/detail 的入口（m0 resolveSessionId
  * 三形态复用：sessionId/绝对路径/sa-id 均可深读，TC-wf-step-sessionfile-link）。
  */
+
+/** [doWorkflow 拆分] 单 run 概览产出（⑤⑥ 的逐 run 半边）：record 流直读档与快照档分流，
+ * 产出聚合进 ctx 四容器（runs/runIds/skippedRuns/contentParts）。 */
+async function renderSingleWorkflowRun(
+  wf: WorkflowRef,
+  ctx: {
+    runs: WorkflowOverview[]
+    runIds: string[]
+    skippedRuns: SkippedRun[]
+    contentParts: string[]
+  },
+): Promise<void> {
+  // [D16③] 概览链换源：v2 档的 stateFile = record 流路径（journalPath 锚点语义
+  // 重定义）——直读流经 parseRunRecordStream 概览（[D2] 三态 status；空流/读失败
+  // 投影 running，活跃 run 概览不退化为 skipped——红线）。record 后缀以外的
+  // stateFile（v1 快照档空串 / 旧指针档 link path）走原快照链。
+  if (wf.stateFile.endsWith('.record.jsonl')) {
+    await renderRunFromRecordStream(wf, ctx)
+    return
+  }
+  const snap = await readRunSnapshot(wf.stateFile)
+  if (snap === undefined) {
+    // ES-wf-snapshot-read-fail：文件不存在/读失败/全行不可解析 → 跳过，不中断其他 run
+    skipRun(ctx, wf, 'snapshot-unreadable', '快照不可读')
+    return
+  }
+  const overview = parseRunSnapshot(snap, wf.runId, wf.stateFile)
+  if (overview === null) {
+    // ES-wf-snapshot-unparseable：对象既非 NEW 也非 OLD → 跳过
+    skipRun(ctx, wf, 'snapshot-unparseable', '快照格式不可识别')
+    return
+  }
+  ctx.runs.push(overview)
+  ctx.runIds.push(wf.runId)
+  ctx.contentParts.push(renderWorkflowOverview(overview))
+}
+
+/** [renderSingleWorkflowRun 拆分] record 流直读档（读失败 → 空流解析，running 兜底不 skipped）。 */
+async function renderRunFromRecordStream(
+  wf: WorkflowRef,
+  ctx: {
+    runs: WorkflowOverview[]
+    runIds: string[]
+    skippedRuns: SkippedRun[]
+    contentParts: string[]
+  },
+): Promise<void> {
+  let content: string | undefined
+  try {
+    content = await readFile(wf.stateFile, 'utf8')
+  } catch {
+    content = undefined // 流被清理/不可读 → 空流解析（running 兜底，不 skipped）
+  }
+  const overview = parseRunRecordStream(content, wf.runId, wf.stateFile)
+  ctx.runs.push(overview)
+  ctx.runIds.push(wf.runId)
+  ctx.contentParts.push(renderWorkflowOverview(overview))
+}
+
+/** [renderSingleWorkflowRun 拆分] 跳过登记（不中断其他 run）。 */
+function skipRun(
+  ctx: {
+    runs: WorkflowOverview[]
+    runIds: string[]
+    skippedRuns: SkippedRun[]
+    contentParts: string[]
+  },
+  wf: WorkflowRef,
+  reason: SkippedRun['reason'],
+  label: string,
+): void {
+  ctx.skippedRuns.push({ runId: wf.runId, stateFile: wf.stateFile, reason })
+  ctx.contentParts.push(`run ${wf.runId}: ${label}（stateFile=${wf.stateFile}）已跳过`)
+}
+
 async function doWorkflow(
   params: SessionReadParams,
   agentDir: string,
@@ -1180,23 +1256,7 @@ async function doWorkflow(
   const contentParts: string[] = []
 
   for (const wf of selected) {
-    const snap = await readRunSnapshot(wf.stateFile)
-    if (snap === undefined) {
-      // ES-wf-snapshot-read-fail：文件不存在/读失败/全行不可解析 → 跳过，不中断其他 run
-      skippedRuns.push({ runId: wf.runId, stateFile: wf.stateFile, reason: 'snapshot-unreadable' })
-      contentParts.push(`run ${wf.runId}: 快照不可读（stateFile=${wf.stateFile}）已跳过`)
-      continue
-    }
-    const overview = parseRunSnapshot(snap, wf.runId, wf.stateFile)
-    if (overview === null) {
-      // ES-wf-snapshot-unparseable：对象既非 NEW 也非 OLD → 跳过
-      skippedRuns.push({ runId: wf.runId, stateFile: wf.stateFile, reason: 'snapshot-unparseable' })
-      contentParts.push(`run ${wf.runId}: 快照格式不可识别（stateFile=${wf.stateFile}）已跳过`)
-      continue
-    }
-    runs.push(overview)
-    runIds.push(wf.runId)
-    contentParts.push(renderWorkflowOverview(overview))
+    await renderSingleWorkflowRun(wf, { runs, runIds, skippedRuns, contentParts })
   }
 
   const details: WorkflowDetails = { runs, runIds }

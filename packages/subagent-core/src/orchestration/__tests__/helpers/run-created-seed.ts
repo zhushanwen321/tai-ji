@@ -10,7 +10,7 @@
 // append 零写但 liveRunStates 推进正常——状态机裁决与 journal 写面解耦）。
 
 import type { WorkflowRun } from "../../models/workflow-run.ts";
-import { dispatchRunCreated } from "../../worker-message-pump.ts";
+import { dispatchRunCreated } from "../../terminal-actions.ts";
 
 /** 引导 run 的六态机到 dispatched（run-created 首帧落账；await 确保队列任务
  *  已执行——后续 finalizeRun 的终局投递在 liveRunStates 命中非 terminal 态）。 */

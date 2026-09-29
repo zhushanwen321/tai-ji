@@ -6,12 +6,16 @@
  * 5 个导出函数：
  * - runWorkflow(spec, deps, signal?) → Promise<runId>
  * - abortRun(runId, deps, reason?, doneReason?) → Promise<void>（done no-op）
- * - terminateRunningRuns(deps, reason) → Promise<void>（session 切换/关闭终止）
+ * - terminateRunningRuns(deps, reason) → Promise<void>（session 切换/关闭终止；
+ *   [D11] 统一落 interrupted 暂停态——可再 resume，2026-09-29 用户裁决）
  * - evictDoneRunsBeyondCap(runs, keepDone) → number（done run 内存淘汰）
  * - scheduleTimeBudget(runId, deps, budgetTimeMs) → timer（C.7 时间预算）
  *
- * 第 6 个导出：recoverCrashedRuns(store, runs, reason, hooks?) —— 崩溃恢复四步
- * 装配（loadAll→failed→save→evict，D8/B1），宿主专属事件经 hooks 外置。
+ * 第 6 个导出：recoverCrashedRuns(store, runs, reason, hooks?) —— 崩溃恢复装配
+ * （loadAll → 中断收编 → evict），宿主专属事件经 hooks 外置。[D15] 后收编动作改经
+ * terminal-actions.interruptRun 终局编排入口（落 run-interrupted 转移事件——[D2]
+ * interrupted 暂停态，非终局），v1 兼容尾段（transition("done","failed") + store.save
+ * 整文件覆盖写）随 [D1] store 单模式重写即刻删除。
  *
  * 私有 makeHandlers(run, deps) → WorkerHandlers：
  * - onMessage → handleWorkerMessage(run, raw, deps, handlers)
@@ -19,40 +23,43 @@
  * - onExit(code, handle) → handleWorkerExit(run, code, handle, deps, handlers)
  * （G-025：handle.isCurrent 检查内化在 handleWorkerExit 内）
  *
- * **A4 原子性**：abort/terminate 内部 transition 先 releaseRuntime（cleanup before
- * mutate），失败时 status 不变。transition("done") 在 WorkflowRun.transition 内已实现
- * 「releaseRuntime → 改 status」原子顺序。
+ * **[D15] 发起面接线**：abortRun / terminateRunningRuns / recoverCrashedRuns 三路
+ * 发起全部改经 terminal-actions 终局编排入口（第四路 startupSweep 在 u1b 接线、
+ * 第五路正常终局链在 pump 消息面）——「谁在什么条件下把 run 推向哪个终局/中断」
+ * 可在一处审计。
  *
  * **G3-001**（run 一次性生命周期）：AbortController 一次性无法复用，runtime 释放后
  * 只有两类重建——rebuildRuntime（worker-message-pump，崩溃重试路径，run 保持 running、
- * replaceRuntime 原子换新）与 abort/terminate 的终态释放（transition("done") 内
- * releaseRuntime，run 不再恢复）。
- * （旧并发门闩 gate 抽象已删——no-op 无生产语义，实际并发由 SubagentService
- * ConcurrencyPool 管理；原 D-13 maxConcurrency=4 无消费方。）
+ * replaceRuntime 原子换新）与 abort/terminate 的终态释放（finalizeRun 内 releaseRuntime，
+ * run 不再恢复）。
  *
  * 层归属：Engine。依赖 LifecycleDeps + WorkerHost via port +
- * WorkflowRun + handleWorker* 函数。
+ * WorkflowRun + handleWorker* 函数 + terminal-actions（[D15] 终局编排入口）。
  */
 
 import { getLogger } from "../core/logger.ts";
 
 import { assertSafeTimerDelay } from "../shared/timer-delay.ts";
 import { validateRunArgs } from "./args-validator.ts";
-import { finalRunErrorCodeOf } from "./run-events.ts";
+// [D11] 引擎窗口实例 dispose（中断分叉的执行资源释放；execution/engine 叶子
+// 方向——terminal-actions 同款 import 先例，orchestration → execution/service
+// 才成环）。
+import { disposeWorkflowWindowEngineState } from "../execution/engine/routing.ts";
 import {
   appendWorkflowRecordRegisteredEntry,
-  buildWorkflowRecordSettledEntryData,
   closeOutInFlightCalls,
   dispatchRunCreated,
   finalizeRun,
   forgetSettledRecord,
+  interruptRun,
+  isRunSettled,
+  settledRecordOf,
+} from "./terminal-actions.ts";
+import {
+  forgetRunResumedBudget,
   handleWorkerError,
   handleWorkerExit,
   handleWorkerMessage,
-  isRunSettled,
-  runSettledOutcomeToDoneReason,
-  settleRunAccounting,
-  settledRecordOf,
 } from "./worker-message-pump.ts";
 import { Budget } from "./models/budget.ts";
 import type { LifecycleDeps, RunStore, WorkerHandlers } from "./models/ports.ts";
@@ -149,8 +156,11 @@ function broadcastAbortToWorker(run: WorkflowRun, reason: string): void {
  * 注意 handleWorkerError 内部也会递增——这里 onError 递增是 worker 事件层面的
  * 「error 事件到达」计数，handleWorkerError 内的是「错误处理决策」计数。
  * 实际 handleWorkerError 会做最终计数（含重试上限判断），onError 不重复递增。
+ *
+ * [U2] export：resume-run.ts 的 worker 接管复用同一 handlers 构造（复活 run 与
+ * 新建 run 的消息路由同构——lifecycle 私有会让 resume 侧复制整段闭包逻辑）。
  */
-function makeHandlers(run: WorkflowRun, deps: LifecycleDeps): WorkerHandlers {
+export function makeHandlers(run: WorkflowRun, deps: LifecycleDeps): WorkerHandlers {
   // [OR-7] per-run deps 视图：包装 onRunDone，把「run 终态」转译为「移除 signal abort
   // listener」。worker-message-pump 全部终态路径（handleReturn / handleWorkerError /
   // handleScriptError / handleWorkerExit / 预算终止 / time_limited / [OR-2] rebuild
@@ -241,8 +251,8 @@ export function scheduleTimeBudget(
 // ── runWorkflow ──────────────────────────────────────────────
 
 /**
- * rfl 仪表（tier-1 §7.1）：向 spec.args 原地注入稳定 _runId。runAndWait 与
- * executeNestedWorkflow 两个 args 入口都经 runWorkflow 这一 choke point；
+ * rfl 仪表（tier-1 §7.1）：向 spec.args 原地注入稳定 _runId。全部 args 入口都经
+ * runWorkflow 这一 choke point；
  * rebuildRuntime 复用 run.spec.args 同一对象（worker-message-pump.ts），worker rebuild
  * 后脚本侧 $ARGS._runId 不漂移——修复「rebuild 回退 run-<Date.now()> 导致同一
  * 逻辑 run 碎裂到多个 state 目录」。注入在 validateRunArgs 之后，不参与脚本
@@ -261,14 +271,14 @@ function assertSignalNotAborted(signal: AbortSignal | undefined): void {
   }
 }
 
-/** 创建 running 态 WorkflowRun（budget 共享引用优先，否则按 spec 上限新建）。 */
+/** 创建 running 态 WorkflowRun（按 spec 上限新建 Budget）。 */
 function createRunningRun(runId: string, spec: RunSpec): WorkflowRun {
   return new WorkflowRun(
     runId,
     spec,
     {
       status: "running",
-      budget: spec.budgetRef ?? new Budget({
+      budget: new Budget({
         maxTokens: spec.budgetTokens,
         maxTimeMs: spec.budgetTimeMs,
       }),
@@ -393,9 +403,9 @@ export async function runWorkflow(
   // [Q2/D5] run-created 正点发射（journal 首帧，唯一生产落点）。入队先于 worker
   // 启动（竞态结构性消除，L4 A4 附带发现 8 跑 1 实测）：dispatchRunCreated 经
   // enqueueRunDispatch 同步入队（执行异步），startWorkerGuarded 之后 worker 首个
-  // agent() 的 ask-dispatched 必然排在 created 之后执行——旧实现 created 在
+  // agent() 的 agent-started 必然排在 created 之后执行——旧实现 created 在
   // store.save（await 让出事件循环）之后才入队，worker 极快时 ask 帧先入队，在
-  // created 态表外转移被 yielded 吞（丢 6 帧：3×ask-dispatched + 3×ask-settled）。
+  // created 态表外转移被 yielded 吞（丢 6 帧：3×agent-started + 3×agent-settled）。
   // 修复形态裁决：run-created 入队先行（候选②），候选①「created 态缓冲重放」被
   // 否——重放 = 靠引导静默补齐时序倒置，与 pump dispatchRunTrigger 的既有裁决
   // （表外转移 fail-fast 不补投）冲突。await 留在 store.save 之后原位，保持
@@ -440,7 +450,7 @@ export async function runWorkflow(
     );
   }
 
-  // pending-notifications: run 启动 → 注册（runAndWait / actionRun / 未来入口全覆盖）
+  // pending-notifications: run 启动 → 注册（actionRun / 未来入口全覆盖）
   deps.log?.("debug", "workflow:lifecycle", "emit pending:register", { runId });
   emitPendingRegister(runId, deps, spec);
   deps.log?.("debug", "workflow:lifecycle", "emit pending:register done", { runId });
@@ -504,81 +514,68 @@ export async function abortRun(
 
 // ── terminateRunningRuns（session 切换/关闭：终止全部 running run） ────────
 
-/** terminateRunningRuns 的可调项。 */
-export interface TerminateRunningRunsOptions {
-  /**
-   * 是否调 deps.onRunDone（Interface 层完成通知）。缺省 false——session 切换/关闭
-   * 语境下主 agent 已离开本 session，注入完成通知只会把消息发给已离开的 session
-   * （对齐 session_start 恢复先例）。
-   *
-   * [skill-reload D4] post-reload adoption 失败处置传 true：session 仍在（reload
-   * 是同会话原地重建），run 终止对用户必须可见（G3 不静默消失），onRunDone 是
-   * notifyDone 用户通知的单点汇聚（workflow-events makeDeps 注入）。
-   */
-  notifyDone?: boolean;
-}
-
 /**
  * 终止 deps.runs 中全部 running run（session 切换 / session 关闭时调用）。
  *
- * 一次性生命周期（D-2）：session 离开当刻，running run 的 token 投入作废，转
- * done,failed 持久化落盘——重启后 kill-9 恢复不误判，也不再存在「挂起待恢复」
- * 的中间态。
+ * [D11] 统一中断（2026-09-29 用户裁决）：全部 running run 被动失联一律转
+ * interrupted 暂停态（落 run-interrupted(terminated)，可再 resume）——被打断
+ * 不等于失败，failed 会谎报「执行失败」；来源不再分叉（原 resume 来源标记
+ * 进程内注册表随分叉消失整体删除）。
  *
- * per-run 行为：`state.error = reason` → `finalizeRun(run, deps, "failed",
- * {notifyDone: options?.notifyDone ?? false})`（transition("done","failed") 内部先
- * releaseRuntime，A4 → save best-effort → pending:unregister 直落 appendEntry
- * （status 经 mapReasonToStatus 映射）→ onRunDone）。
+ * per-run 序列：`state.error = reason` → 优雅解阻（broadcastAbortToWorker）+
+ * signal listener 收口 → 中断转移（[D15] interruptRun 入口——零终局副作用：
+ * 不写 manifest 派生缓存、不发终局通知、不落 pending:unregister）→ 在途 call
+ * 观测面收口（closeOutInFlightCalls——record 侧无 settled 帧的 call 天然在
+ * 「未完成」侧，resume 按三档恢复处置）→ 执行资源释放（releaseRuntime + 引擎
+ * 窗口实例 dispose，时序红线对齐 finalizeRun：在途收敛之后释放实例）。
  *
- * **缺省不调 deps.onRunDone**（经 finalizeRun 的 notifyDone 承载，D5-②）：
- * 对齐 session_start 恢复先例（index.ts kill-9 恢复只发
- * unregister、不发 onRunDone）——session 切换/关闭语境下主 agent 已离开本 session，
- * 注入完成通知只会把消息发给已离开的 session。例外 = options.notifyDone:true
- * （adoption 失败处置，见 TerminateRunningRunsOptions）。
- *
- * **不调 discardInFlightCalls**：run 已转终态不再 replay（无恢复路径），在飞 call
- * 缓存清不清都不影响结果；该清理仅 rebuildRuntime 需要（崩溃重试会重放脚本，
- * 假失败结果会污染重跑输出）。
+ * 用户可见性：中断态经 v2 中断条目（appendInterruptedEntry）进 workflow 列表
+ * （「已中断（可续跑）」，场景 25 投影断言），无聊天流完成通知——session 切换/
+ * 关闭语境下主 agent 已离开本 session，注入完成通知只会把消息发给已离开的
+ * session（对齐 session_start 恢复先例）。
  *
  * 单 run 失败（try/catch + log 带 runId/reason）不中断其余 run——终止是批量收尾，
- * 一个 run 落盘失败不应放走其余 run 的 failed 状态。
+ * 一个 run 落盘失败不应放走其余 run 的中断状态。
  *
  * @param deps LifecycleDeps（runs/store/eventBus/log）
  * @param reason 终止原因（写入 run.state.error，如 "Session switched: run terminated"）
- * @param options 可调项（notifyDone 通道；缺省全走现状语义）
  */
-export async function terminateRunningRuns(
-  deps: LifecycleDeps,
-  reason: string,
-  options?: TerminateRunningRunsOptions,
-): Promise<void> {
+export async function terminateRunningRuns(deps: LifecycleDeps, reason: string): Promise<void> {
   for (const run of deps.runs.values()) {
     // [W2/V1] 已终局 run 跳过（判据换源 isRunSettled——原两态机 status 检查随
     // 活体写点删除停更）。
     if (isRunSettled(run)) continue;
     try {
-      deps.log?.("debug", "workflow:lifecycle", "terminateRunningRuns", { runId: run.runId, reason });
+      deps.log?.("debug", "workflow:lifecycle", "terminateRunningRuns: run → interrupted", { runId: run.runId, reason });
       run.state.error = reason;
-      // [OR-3] 同 abortRun：先广播 abort 再 transition（worker 侧 pending 优雅解阻）
+      // [OR-3] 同 abortRun：先广播 abort 再转移（worker 侧 pending 优雅解阻）
       broadcastAbortToWorker(run, reason);
-      // [OR-7] run 终态：移除 signal abort listener（terminateRunningRuns 不走
-      // onRunDone——本路径显式收口，不依赖 finalizeRun 的 notifyDone 分支）
+      // [OR-7] 移除 signal abort listener（本路径不走 onRunDone——显式收口）
       disposeSignalAbortListener(run);
-      // A4 + C-4: transition 内部 releaseRuntime（cleanup before mutate）；done 终态 →
-      // 注销 pending-notification（D5-② 终态 coda 收敛为 finalizeRun 单写点）。
-      // notifyDone 缺省 false——**不调 deps.onRunDone**（真差异经参数承载）：对齐
-      // session_start 恢复先例（index.ts kill-9 恢复只发 unregister、不发
-      // onRunDone）——session 切换/关闭语境下主 agent 已离开本 session，注入完成
-      // 通知只会把消息发给已离开的 session。OR-8 in-flight 收口由 finalizeRun 承载。
-      await finalizeRun(run, deps, "failed", {
-        context: "terminateRunningRuns",
-        notifyDone: options?.notifyDone ?? false,
+      // 中断转移（[D15] interruptRun 入口）。幂等让位：重复 terminate 对已
+      // interrupted 的 run 表外转移 fail-fast → 返回 false，无重复帧。
+      const interrupted = await interruptRun(run.runId, {
+        errorCode: "terminated",
+        reason,
+        workflowName: run.spec?.scriptName,
+        appendInterruptedEntry:
+          deps.appendEntry !== undefined
+            ? (entry) => deps.appendEntry?.(WORKFLOW_RECORD_CUSTOM_TYPE, entry)
+            : undefined,
       });
-      deps.log?.("debug", "workflow:lifecycle", "run terminated", { runId: run.runId, reason: run.state.reason });
+      // 在途 call 观测面收口（内存翻取消终态——观测纪律不变）
+      closeOutInFlightCalls(run);
+      // 执行资源释放：worker/controller 停止（中断后无活体），引擎窗口实例
+      // dispose（时序红线：在途收敛之后释放实例）。
+      run.releaseRuntime();
+      await disposeWorkflowWindowEngineState(run.runId, "aborted", "terminateRunningRuns [D11] unified interrupted");
+      if (interrupted) {
+        deps.log?.("debug", "workflow:lifecycle", "run interrupted (resumable)", { runId: run.runId, reason });
+      }
     } catch (err) {
       const msg = toErrorMessage(err);
       logger.error(
-        `[workflow] terminateRunningRuns failed for run ${run.runId}: ${msg} (reason: ${reason})`,
+        `[workflow] terminateRunningRuns interrupted failed for run ${run.runId}: ${msg} (reason: ${reason})`,
       );
     }
   }
@@ -605,11 +602,11 @@ export async function terminateRunningRuns(
  * 4. **淘汰执行**：超限数 excess = settledCount - keepDone（<=0 时 no-op 返回 0），
  *    对升序前 excess 项逐个 `runs.delete(runId)`，并同步回收终局记录注册表条目
  *    （forgetSettledRecord——注册表与内存 run 同生命周期）。
- * 5. **边界不变式**：禁止按 Map 插入序直接淘汰——嵌套 workflow 父 run 创建最早、
- *    完成最晚，插入序淘汰会在其自身 onRunDone 同步裁剪中淘汰它，runAndWait 轮询
- *    窗口内 get 不到 → 误返 "Run not found"。
- * 6. **副作用边界**：只清内存 runs Map 与终局记录注册表，不动磁盘 state 文件、
- *    不删 workflow-state-link 指针条目、不发任何事件。
+ * 5. **边界不变式**：禁止按 Map 插入序直接淘汰——插入序 = 创建序，与终局序可能
+ *    相反（先创建的 run 完成最晚），插入序淘汰会在其自身 onRunDone 同步裁剪中
+ *    淘汰它，消费方轮询窗口内 get 不到 → 误判 run 丢失。
+ * 6. **副作用边界**：只清内存 runs Map 与终局记录注册表，不动磁盘 state 文件与
+ *    manifest、不发任何事件。
  *
  * @param runs per-session 的 run 注册表（原地裁剪）
  * @param keepDone 已终局 run 保留数（生产传 MAX_RETAINED_DONE_RUNS）
@@ -633,92 +630,87 @@ export function evictDoneRunsBeyondCap(
   for (const r of settled.slice(0, excess)) {
     runs.delete(r.runId);
     forgetSettledRecord(r.runId);
+    // [D10] resume 侧进程内注册表同步回收（与终局记录注册表同生命周期）
+    forgetRunResumedBudget(r.runId);
   }
   return excess;
 }
 
-// ── recoverCrashedRuns（kill-9/崩溃恢复四步装配，D8/B1） ────────────────
+// ── recoverCrashedRuns（kill-9/崩溃恢复装配，D8/B1 → [D2]/[D15] 中断收编） ────
 
 /**
  * 崩溃恢复循环的宿主事件外置 hooks（core 平台中立，宿主注入专属行为）。
  *
  * pi 宿主在 onRunRecovered 中发射 `pending:unregister` 事件（pending-notifications
  * 扩展的注销信号灯）；zsw/第三宿主可接自己的通知通道。不注入 = 无宿主事件，
- * 恢复语义（failed 转换 + 落盘 + 淘汰）不受影响。
+ * 恢复语义（中断转移 + 淘汰）不受影响。
  */
 export interface RecoverCrashedRunsHooks {
   /**
-   * 每个 running → done,failed 转换的 run 恰好调用一次。
+   * 每个 running 遗留被中断收编的 run 恰好调用一次。
    *
-   * payload 形状对齐 pi `pending:unregister` 事件：`{ id: runId, reason: "failed" }`
+   * payload 形状对齐 pi `pending:unregister` 事件：`{ id: runId, reason: "interrupted" }`
    * ——宿主可直接把 payload 转发到自己的事件总线。
    *
    * 错误围栏：回调同步 throw 经 core logger facade warn 留痕后被吞掉，恢复循环
-   * 继续其余 run（转换/落盘不受影响）——与 save 步骤「单 run 失败不中断其余」
-   * 容错口径对称。
+   * 继续其余 run（转移/条目不受影响）——与「单 run 失败不中断其余」容错口径对称。
    */
   onRunRecovered?: (payload: { id: string; reason: string }) => void;
   /**
-   * [W1 / D1] v2 终态条目补写通道（主 session appendEntry 面；缺省 = 不写条目）。
-   * 收编的 journal 终态事件落账后、state 快照直改前调用——收编产物的条目半边
-   * （D4 序列：追加终态事件 → 补写条目 → 物化）。错误围栏与 onRunRecovered 同款。
+   * [D2] 中断条目补写通道（主 session appendEntry 面；缺省 = 不写条目）。
+   * run-interrupted 转移事件落账后调用——收编产物的条目半边（status 'interrupted'
+   * 暂停态收敛词，[D2] 宿主投影裁决②）。错误围栏与 onRunRecovered 同款。
    */
   appendSettledEntry?: (customType: string, data: unknown) => void;
-  /**
-   * [W1 / D4 收编定界] v2 注册条目定界注入面：runId 是否被 v2 注册条目定界
-   * （宿主 loadAll 扫主 session entry 时采出的 registered 集——pi 壳经
-   * JsonlRunStore.hasV2RegisteredEntry 供给）。设计 §3.3 D4：收编定界按注册
-   * 条目形态分流——true = v2 实体，收编走 journal dispatch 链（下方 appendSettledEntry
-   * 随行）；false / 未注入 = v1 快照条目实体（或宿主未接线定界），走 v1 兼容
-   * 旧分支（state 旁路直改，不落 journal / manifest / 条目——D7「旧会话行为
-   * 完全不变」，随 W4 sunset 退役）。
-   */
-  isV2RegisteredEntry?: (runId: string) => boolean;
 }
 
 /**
  * recoverCrashedRuns 的计数结果（宿主启动日志/健康面用）。
  *
- * `recovered` 只计 running 遗留被转换为 done,failed 的条数；`loaded` 是 loadAll
- * 重水合的全量数（含 done 历史快照）——两者分开口径，避免宿主把「重水合 N 条」
+ * `recovered` 只计 running 遗留被中断收编的条数；`loaded` 是 loadAll
+ * 重水合的全量数（含 done 历史）——两者分开口径，避免宿主把「重水合 N 条」
  * 误报为「恢复 N 条」。
  */
 export interface RecoverCrashedRunsResult {
-  /** loadAll 重水合的 run 总数（含 done 历史快照）。 */
+  /** loadAll 重水合的 run 总数（含 done 历史）。 */
   loaded: number;
-  /** running 遗留被转换为 done,failed 的条数（0 = 无崩溃遗留）。 */
+  /** running 遗留被中断收编的条数（0 = 无崩溃遗留）。 */
   recovered: number;
 }
 
 /**
- * 崩溃恢复四步装配（设计 D8/B1）：loadAll → failed → save → evict。
+ * 崩溃恢复装配（原 D8/B1 四步 → [D2]/[D15]/[D1] 后三步）：loadAll → 中断收编 →
+ * evict。
  *
- * 平移自 pi 壳 session_start 恢复循环（subagent-workflow index.ts:578-627）与
- * zsw orchestration-host recoverOrphans（逐行同构，pending:unregister 为唯一
- * 宿主差异点——经 {@link RecoverCrashedRunsHooks} 外置）。
+ * 平移自 pi 壳 session_start 恢复循环与 zsw orchestration-host recoverOrphans
+ * （pending:unregister 为唯一宿主差异点——经 {@link RecoverCrashedRunsHooks} 外置）。
  *
  * 步骤语义：
- * 1. **loadAll**：从 store 全量重水合。失败向上抛——fail-fast 策略（pi 的
- *    storeHealthy=false 停初始化）是宿主职责，调用方 catch 后自行决定；
- * 2. **failed**：残留 running run（进程被杀，worker 必死）逐个
- *    `state.error = reason` → `transition("done","failed")`（A4：transition 内部
- *    先 releaseRuntime），并发宿主事件（hooks）；done run 原样保留；
- * 3. **save**：转换后的 run 落盘（恢复终态必须持久化，不 save 则下次启动重水合
- *    仍见 running，侧栏永久卡 running）。单 run save 失败仅记日志不中断其余
- *    run——恢复天然幂等，下次启动重开重试；
- * 4. **evict**：全量重水合后立即 `evictDoneRunsBeyondCap(runs,
+ * 1. **loadAll**：从 store 全量重水合（[D1] record 流 fold 重建）。失败向上抛
+ *    ——fail-fast 策略（pi 的 storeHealthy=false 停初始化）是宿主职责，调用方
+ *    catch 后自行决定；
+ * 2. **中断收编**（[D15] 发起面第三路，经 terminal-actions.interruptRun 入口）：
+ *    残留 running run（进程被杀，worker 必死）逐个落 run-interrupted 转移事件
+ *    （[D2] running → interrupted 暂停态——崩溃 ≠ 失败，可 resume）+ 中断条目
+ *    补写 + 宿主事件（hooks）。**v1 兼容尾段已删除**（[D15] 豁免条款删除：原
+ *    `run.transition("done","failed") → store.save(run)` 依赖的覆盖写语义在
+ *    [D1] store 单模式重写后不存在——收编不再覆盖任何文件，只追加转移事件；
+ *    启动收编触达 v1 形态实体由 loadAll 的只认 record 流构造性跳过——v1 历史
+ *    run 不复活，其两件遗留文件按 [D1] 历史数据处置不读不写，跟随裁决点 7 清理
+ *    消亡）。单 run 收编失败仅记日志不中断其余 run——恢复天然幂等，下次启动重试；
+ * 3. **evict**：全量重水合后立即 `evictDoneRunsBeyondCap(runs,
  *    MAX_RETAINED_DONE_RUNS)`（K=20）——done run 内存有界性；只 delete 内存
- *    Map 条目，磁盘 state 文件不动（对齐 pi，历史审计保留）。
+ *    Map 条目，磁盘文件不动。
  *
- * 所有 loaded run（含 done）都注册进 runs Map（runId → WorkflowRun）——与 pi
- * 一致，done run 也入 Map 供列表/查询消费。
+ * 所有 loaded run（含 done）都注册进 runs Map（runId → WorkflowRun）——done run
+ * 也入 Map 供列表/查询消费。
  *
- * @param store RunStore port（loadAll/save）
+ * @param store RunStore port（loadAll）
  * @param runs per-session 的 run 注册表（原地写入 + 淘汰）
- * @param reason 恢复原因（写入 running run 的 state.error，如
+ * @param reason 恢复原因（run-interrupted 帧载荷 reason，如
  *   "Process killed (kill-9 or crash recovery)"）
  * @param hooks 宿主事件外置（可选）
- * @returns 计数 `{ loaded, recovered }`——recovered 只计 running→failed 转换条数
+ * @returns 计数 `{ loaded, recovered }`——recovered 只计中断收编条数
  * @throws store.loadAll 失败时原样抛出（步骤 1）
  */
 export async function recoverCrashedRuns(
@@ -733,87 +725,58 @@ export async function recoverCrashedRuns(
 
   for (const run of loaded) {
     if (run.state.status === "running") {
-      // [W1 / D4 收编定界分流] 设计 §3.3 D4：收编定界按注册条目形态分流——v2
-      // 注册条目定界的实体走 journal 收编；v1 快照条目实体保留 W1 前旁路直改为
-      // 兼容层（决策记录 11：与 D7「旧会话行为完全不变」互斥矛盾的唯一解）。
-      const isV2Entity = hooks?.isV2RegisteredEntry?.(run.runId) === true;
       run.state.error = reason;
-      if (isV2Entity) {
-        // v2 实体：journal 收编先于 state 快照直改（事实源介质归位：run-settled 帧
-        // 经 settleRunAccounting 终局记录原语走状态机裁决 + manifest 物化——与活体
-        // 终局同一 dispatch 链，证据落点对称）。
-        // [W2/V1 D2/D3] outcome='interrupted'：进程死亡是被动终局（崩溃 ≠ 失败，
-        // 章程 D2 四值词表裁决）；kill 语境由 errorCode 承载（保持 extractFailedRunErrorCode
-        // 提取语义——重水合最小聚合无失败 call 时落 "unknown" 保守可诊断）。
-        // 双重启幂等由原语三面证据 + dispatch 链 fold-terminal 让位承接（terminal ×
-        // run-settled 表外转移 fail-fast，warn 后 state 快照恢复继续）；loadAll 侧
-        // 条目幂等由 settledEntries 抑制（壳 rebuildRunsFromJournals 双面证据拦截）。
-        // 失败围栏：journal IO / 坏链（IllegalTransitionError）留痕后继续 state 快照
-        // 恢复（A-5 语义降级不阻断——快照面照旧收敛 failed）。
-        try {
-          const errorCode = finalRunErrorCodeOf(run, "failed");
-          const record = {
-            outcome: "interrupted" as const,
-            ...(errorCode !== undefined ? { errorCode } : {}),
-            reason: run.state.error,
-            settledAt: Date.now(),
-          };
-          await settleRunAccounting(run, record);
-          hooks?.appendSettledEntry?.(
-            WORKFLOW_RECORD_CUSTOM_TYPE,
-            buildWorkflowRecordSettledEntryData({
-              runId: run.runId,
-              // [W2 D5] reason 经联合派生单点（interrupted → "failed" 诊断兜底容器，
-              // 细分语境由帧 errorCode 保留可辨）。
-              reason: runSettledOutcomeToDoneReason(record.outcome, record.errorCode),
-              outcome: record.outcome,
-              ...(record.errorCode !== undefined ? { errorCode: record.errorCode } : {}),
-              settledAt: record.settledAt,
-              callCount: run.state.calls.size,
-              usedTokens: run.state.budget.usedTokens,
-            }),
-          );
-        } catch (err) {
-          const msg = toErrorMessage(err);
-          logger.warn(
-            `[workflow] recoverCrashedRuns journal settle failed for run ${run.runId} (state recovery continues): ${msg}`,
-          );
-        }
-      }
-      // v1 实体（含宿主未注入定界的保守形态）：W1 前旁路直改（D7 兼容层——不落
-      // journal / manifest / 条目，随 W4 sunset 退役），此处仅 state 面收敛 failed。
-      run.transition("done", "failed");
-      // [OR-8] 重水合 running 快照可携带 in-flight call（崩溃瞬间的 running 节点）——
-      // 终态收口为 cancelled，先收口再落盘
-      closeOutInFlightCalls(run);
-      recovered += 1;
-      // 宿主事件外置点：pi 发 pending:unregister，位置在 transition 后、save 前
-      // （对齐 pi emit 位置——先解除挂起通知再落盘，事件观察者不依赖落盘完成）。
-      // 错误围栏：宿主回调同步 throw 只 warn 不中断循环——与步骤 3 save 的
-      // 「单 run 失败不中断其余」容错口径对称（通知通道故障不等价于恢复失败；
-      // 恢复天然幂等，未送达的通知随下次启动重试，见步骤 3 注释）。
+      // 步骤 2：中断收编（[D15] 入口接线——run-interrupted 转移事件 + 中断条目，
+      // [D2] interrupted 暂停态非终局；收编不再覆盖任何文件，v1 尾段已删）。
+      // 双重启幂等由入口两道承接（三面证据前置 + 表外转移 fail-fast 让位——
+      // IllegalTransitionError 返回 false 不计数不补条目）；loadAll 侧条目幂等由
+      // 壳 rebuildRunsFromRecordStreams 的条目抑制承接。
+      // 失败围栏：record IO error 留痕后继续（收编是旁路维护不放大失败——A-5
+      // 语义降级，run 保持 running 形态待下次启动重试收编）。
       try {
-        hooks?.onRunRecovered?.({ id: run.runId, reason: "failed" });
+        const adopted = await interruptRun(run.runId, {
+          // [D2] 中断来源标记：崩溃收编 = crashed（RunErrorCode 中断族新成员——
+          // 设计 §3.1 事件表已登记）。
+          errorCode: "crashed",
+          reason,
+          workflowName: run.spec?.scriptName,
+          appendInterruptedEntry:
+            hooks?.appendSettledEntry !== undefined
+              ? (entry) => hooks.appendSettledEntry?.(WORKFLOW_RECORD_CUSTOM_TYPE, entry)
+              : undefined,
+        });
+        if (adopted) {
+          recovered += 1;
+          // 内存投影同步（[D2] 中断标记）：record 侧转移事件已落，聚合侧
+          // meta.interruptedAt 同步置位——runSummary 投影 'interrupted'（CLI/TUI
+          // 不显示僵尸「运行中」；fold 重建路径同款写点见壳 foldRecordStreamToRun）。
+          run.meta.interruptedAt = new Date().toISOString();
+        }
+      } catch (err) {
+        const msg = toErrorMessage(err);
+        logger.warn(
+          `[workflow] recoverCrashedRuns interrupt dispatch failed for run ${run.runId} (recovery continues): ${msg}`,
+        );
+      }
+      // [OR-8] 重水合 running 聚合可携带 in-flight call（崩溃瞬间的 running 节点）——
+      // 内存观测面收口为取消终态（观测纪律不变；[D2] 中断非终局，record 侧无
+      // settled 帧的可续语义由 fold 承接——在途 call 天然在「未完成」侧）。
+      closeOutInFlightCalls(run);
+      // 宿主事件外置点：pi 发 pending:unregister（对齐既有 emit 位置——中断转移
+      // 后）。错误围栏：宿主回调同步 throw 只 warn 不中断循环。
+      try {
+        hooks?.onRunRecovered?.({ id: run.runId, reason: "interrupted" });
       } catch (err) {
         const msg = toErrorMessage(err);
         logger.warn(
           `[workflow] recoverCrashedRuns onRunRecovered hook failed for run ${run.runId} (recovery continues): ${msg}`,
         );
       }
-      // 步骤 3：恢复终态落盘（单 run 失败不中断其余 run——幂等恢复，下次重试）
-      try {
-        await store.save(run);
-      } catch (err) {
-        const msg = toErrorMessage(err);
-        logger.error(
-          `[workflow] recoverCrashedRuns store.save failed for run ${run.runId}: ${msg} (reason: ${reason})`,
-        );
-      }
     }
     runs.set(run.runId, run);
   }
 
-  // 步骤 4：done run 内存有界性（K=20）。kill-9 恢复转换出的 failed run
+  // 步骤 3：done run 内存有界性（K=20）。kill-9 恢复转出的 done run
   // completedAt 为 transition 时刻（全局最新）必在保留端；多条恢复 run 同 ms
   // completedAt → tie 稳定排序（evictDoneRunsBeyondCap 契约）。
   const evicted = evictDoneRunsBeyondCap(runs, MAX_RETAINED_DONE_RUNS);

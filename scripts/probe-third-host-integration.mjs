@@ -12,8 +12,11 @@
 //   S5① 列 agents        —— discoverAgents（tmp fixture agentDir）
 //   S5② run workflow      —— normalizeWorkflowRef + loadWorkflowScriptByPath
 //                             （内置 chain.js，断言 @pi-meta parameters 参数解析）
-//   S5③ 崩溃恢复          —— recoverCrashedRuns（kill -9 模拟：手工构造 running
-//                             快照 store 文件 → loadAll → recover，含 hooks 回调）
+//   S5③ 崩溃恢复          —— recoverCrashedRuns（kill -9 模拟：createRunEventJournal
+//                             落 run-created + agent-started 帧构造 running 残留 →
+//                             宿主 record fold loadAll → recover 中断收编，断言
+//                             interrupted 暂停态 + run-interrupted 帧 + hooks 回调
+//                             + 幂等重跑）
 //   S1  资产一致性        —— t-sink.md（block-scalar description + maxTurns: 2 +
 //                             多行 `- item` tools）经 parseAgentProfile/discoverAgents
 //                             断言；`/x/../etc/passwd.md` 经 normalizeRef /
@@ -37,6 +40,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -62,6 +66,10 @@ const core = coreRequire(CORE_ENTRY);
 // 责任就是一次 configureCore（错误规格：core_host_not_configured 指向恢复动作）。
 // log 端口把 warn/error 引到 stderr（出声，不参与断言）。
 const fixtureRoot = join(tmpdir(), `sink-probe-third-host-${process.pid}-${Date.now()}`);
+// journal 模块锚重定向（Part C 前置，全进程生效）：recoverCrashedRuns → interruptRun
+// 的 run-interrupted 帧落账目录走模块锚生产推导（PI_CODING_AGENT_DIR env 指向目录
+// 下的 workflow-state 后缀），探针指进 fixture——收编链写盘不触真实 ~/.pi 数据目录。
+process.env.PI_CODING_AGENT_DIR = join(fixtureRoot, "pi-agent");
 core.configureCore({
   dataRoot: () => fixtureRoot,
   log: (level, component, message, data) => {
@@ -286,93 +294,249 @@ async function partB() {
   );
 }
 
+
+// ── [partC 拆分] 第三宿主最小 RunStore 的 loadAll 实装（投影语义锚定壳
+// foldRecordStreamToRun：lifecycle terminal → status done + DoneReason；其余（含
+// interrupted）→ status running，中断态经 meta.interruptedAt 表达——聚合 status
+// 词表保持两态）──────────────────────────────────────────────
+
+async function rebuildRunsFromRecordDir(runsDir, journal) {
+  const runs = [];
+  for (const file of readdirSync(runsDir)) {
+    if (!file.endsWith(core.RUN_EVENT_JOURNAL_SUFFIX)) continue;
+    const id = file.slice(0, -core.RUN_EVENT_JOURNAL_SUFFIX.length);
+    const events = await journal.scan(id);
+    runs.push(rebuildSingleRunFromRecord(id, file, events, runsDir));
+  }
+  return runs;
+}
+
+function rebuildSingleRunFromRecord(id, file, events, runsDir) {
+  const fold = core.foldRunEventCheckpoint(events, () => {});
+  const createdEvent = events.find((e) => e.type === "run-created");
+  const done = fold.state.lifecycle === "terminal";
+  const reason =
+    fold.runSettled !== undefined
+      ? core.runSettledOutcomeToDoneReason(fold.runSettled.outcome, fold.runSettled.errorCode)
+      : done
+        ? "completed" // run-settled 帧缺失的 terminal 残形态：I2（done ⟹ reason）保守归因
+        : undefined;
+  return new core.WorkflowRun(
+    id,
+    {
+      scriptSource: createdEvent?.scriptSource ?? "",
+      args: createdEvent?.args ?? {},
+      scriptName: createdEvent?.workflowName ?? id,
+      scriptPath: join(runsDir, file),
+    },
+    {
+      status: done ? "done" : "running",
+      ...(reason !== undefined ? { reason } : {}),
+      budget: { usedTokens: 0, usedCost: 0, totalCallCount: 0 },
+      calls: new Map(),
+      trace: [],
+      errorLogs: [],
+    },
+    {
+      startedAt: new Date(createdEvent?.ts ?? 0).toISOString(),
+      ...(fold.interrupted !== undefined
+        ? { interruptedAt: new Date(fold.interrupted.ts).toISOString() }
+        : {}),
+    },
+  );
+}
+
+
+/** [partC 拆分] kill -9 崩溃残留落盘：run-created + agent-started 两帧、无 settled 尾
+ * （fold 停 running 的残留形态）。帧载荷对照 dist/index.d.ts RunCreatedEvent /
+ * AgentStartedEvent（seq 由 journal 单写者分配，调用方不传）。返回 record 流绝对路径。 */
+async function seedPartCCrashFixture(journal, runsDir, runId) {
+  const scriptSource = "log('probe: crashed before recovery');";
+  const args = { task: "probe" };
+  const createdTs = Date.now() - 60_000;
+  await journal.append(runId, {
+    type: "run-created",
+    runId,
+    workflowName: "probe-crash",
+    argsSummary: JSON.stringify(args),
+    args,
+    scriptSource,
+    ts: createdTs,
+  });
+  await journal.append(runId, {
+    type: "agent-started",
+    taskIndex: 0,
+    agentName: "t-sink",
+    attempt: 1,
+    ts: createdTs + 10,
+  });
+  return join(runsDir, `${runId}${core.RUN_EVENT_JOURNAL_SUFFIX}`);
+}
+
 // ══════════════════════════════════════════════════════════════
 // Part C — S5③ recoverCrashedRuns 崩溃恢复（kill -9 模拟 + hooks 回调）
 // ══════════════════════════════════════════════════════════════
 
-async function partC() {
-  section("Part C · S5③ recoverCrashedRuns（kill -9 崩溃恢复装配）");
 
-  // kill -9 模拟：进程崩溃前 FileRunStore.save 落盘的 running 快照行残留在
-  // workflow-state 目录；「重启后」新宿主仅凭 barrel 完成 loadAll → recover。
-  const runsDir = join(fixtureRoot, "workflow-state");
-  mkdirSync(runsDir, { recursive: true });
-  const store = new core.FileRunStore(runsDir);
+
+/** [partC 拆分] D15 收编落账证据：record 流追加恰 1 条 run-interrupted 帧
+ * （errorCode=crashed、reason 透传恢复原因）；2 前置帧 + 1 中断帧 = 3——append
+ * 追加语义，无覆盖改写；收编零文件覆盖。 */
+async function verifyPartCJournalAppendEvidence(journal, runsDir, runId) {
+  // D15 收编落账证据：record 流追加恰 1 条 run-interrupted 帧（errorCode=crashed、
+  // reason 透传恢复原因）；2 前置帧 + 1 中断帧 = 3——append 追加语义，无覆盖改写。
+  const afterEvents = await journal.scan(runId);
+  const interruptedFrames = afterEvents.filter((e) => e.type === "run-interrupted");
+  check(
+    "S5③ run-interrupted 帧恰 1 条落账（errorCode=crashed）",
+    interruptedFrames.length === 1 && interruptedFrames[0].errorCode === "crashed",
+    JSON.stringify(interruptedFrames),
+  );
+  check(
+    "S5③ 中断帧 reason 透传恢复原因",
+    interruptedFrames.length === 1 &&
+      typeof interruptedFrames[0].reason === "string" &&
+      interruptedFrames[0].reason.includes("SIGKILL"),
+    JSON.stringify(interruptedFrames[0]?.reason),
+  );
+  check(
+    "S5③ record 流恰 3 帧（追加语义，无覆盖改写）",
+    afterEvents.length === 3,
+    String(afterEvents.length),
+  );
+  check(
+    "S5③ 收编零文件覆盖: runsDir 恰 1 个文件（record 流——无快照/manifest 派生落盘）",
+    readdirSync(runsDir).length === 1 &&
+      readdirSync(runsDir)[0] === `${runId}${core.RUN_EVENT_JOURNAL_SUFFIX}`,
+    JSON.stringify(readdirSync(runsDir)),
+  );
+}
+
+/** [partC 拆分] 收编后断言段：interrupted 暂停态投影 / hooks 计数 / run-interrupted
+ * 落账证据（追加语义、零覆盖）——D15 中断收编语义（崩溃 ≠ 失败，可 resume）。 */
+async function verifyPartCRecoveryOutcome(journal, runsDir, runId, runs, recovery, recoveredPayloads) {
+  const recovered = runs.get(runId);
+  // D15 中断收编：running 遗留 → interrupted 暂停态（非终局——崩溃 ≠ 失败，
+  // 可 resume）。聚合面 meta.interruptedAt 置位，runSummary 投影 'interrupted'。
+  check(
+    "S5③ recoverCrashedRuns: run 进 runs Map 且转 interrupted 暂停态（meta.interruptedAt 置位）",
+    !!recovered && typeof recovered.meta.interruptedAt === "string",
+    JSON.stringify(recovered && { interruptedAt: recovered.meta.interruptedAt }),
+  );
+  check(
+    "S5③ runSummary 投影 status=interrupted（不显示僵尸「运行中」）",
+    !!recovered && core.runSummary(recovered).status === "interrupted",
+    JSON.stringify(recovered ? core.runSummary(recovered) : null),
+  );
+  check(
+    "S5③ isRunSettled=false（interrupted 非终局——D2 语义反转面）",
+    !!recovered && core.isRunSettled(recovered) === false,
+    String(recovered ? core.isRunSettled(recovered) : "no-run"),
+  );
+  check(
+    "S5③ state.error 携带恢复 reason（收编链诊断面）",
+    !!recovered &&
+      typeof recovered.state.error === "string" &&
+      recovered.state.error.includes("SIGKILL"),
+    JSON.stringify(recovered?.state?.error),
+  );
+  check(
+    "S5③ 计数结果 {loaded:1, recovered:1}",
+    recovery.loaded === 1 && recovery.recovered === 1,
+    JSON.stringify(recovery),
+  );
+  check(
+    "S5③ hooks.onRunRecovered 恰被调一次，payload {id, reason:'interrupted'}",
+    recoveredPayloads.length === 1 &&
+      recoveredPayloads[0].id === runId &&
+      recoveredPayloads[0].reason === "interrupted",
+    JSON.stringify(recoveredPayloads),
+  );
+
+  await verifyPartCJournalAppendEvidence(journal, runsDir, runId);
+}
+
+async function partC() {
+  section("Part C · S5③ recoverCrashedRuns（kill -9 崩溃恢复装配 · D1 record 单源 + D15 中断收编）");
+
+  // kill -9 模拟（D1 record 单源后）：崩溃残留 = journal 目录的 record 流——
+  // run-created + agent-started 两帧、无 settled 尾 → fold 停 running。「重启后」
+  // 新宿主仅凭 barrel 完成 record fold loadAll → recover（D15 中断收编语义）。
+  const runsDir = join(fixtureRoot, "pi-agent", "workflow-state");
+  const journal = core.createRunEventJournal(runsDir);
 
   const runId = "probe-crash-run-1";
-  // 快照行形态依据 dist/index.d.ts RunSnapshot（v = SNAPSHOT_VERSION）。
-  const crashedSnapshot = {
-    v: core.SNAPSHOT_VERSION,
-    runId,
-    spec: {
-      scriptSource: "log('probe: crashed before recovery');",
-      args: { task: "probe" },
-    },
-    state: {
-      status: "running",
-      budget: { usedTokens: 0, usedCost: 0, totalCallCount: 0 },
-      calls: [],
-      trace: [],
-      errorLogs: [],
-    },
-    meta: { startedAt: new Date().toISOString() },
-  };
-  const stateFile = store.stateFilePath(runId);
-  mkdirSync(dirname(stateFile), { recursive: true });
-  writeFileSync(stateFile, JSON.stringify(crashedSnapshot) + "\n");
-  check("S5③ 前置: running 快照已落盘（模拟 kill -9 残留）", existsSync(stateFile), stateFile);
-
-  // 重启后重水合：独立 store 实例 loadAll 见残留 running。
-  const hydrated = await new core.FileRunStore(runsDir).loadAll();
+  const recordPath = await seedPartCCrashFixture(journal, runsDir, runId);
   check(
-    "S5③ loadAll 重水合: 恰恢复 1 个 running run",
+    "S5③ 前置: record 流已落盘恰 2 帧（run-created + agent-started，模拟 kill -9 残留）",
+    existsSync(recordPath) && readFileSync(recordPath, "utf8").trim().split("\n").length === 2,
+    recordPath,
+  );
+
+  // 第三宿主最小 RunStore 内存双（RunStore port 三方法，D1 后形态）：
+  // - loadAll = 逐 record 流 foldRunEventCheckpoint 重建聚合（投影语义锚定壳
+  //   foldRecordStreamToRun：lifecycle terminal → status done + DoneReason；
+  //   其余（含 interrupted）→ status running，中断态经 meta.interruptedAt 表达
+  //   ——聚合 status 词表保持两态）；
+  // - save = 显式 no-op（D1 快照删除后 port 写侧契约即 no-op——收编不覆盖任何
+  //   文件，中断帧由收编链经 journal append 落账）；
+  // - stateFilePath = record 流绝对路径。
+  const store = {
+    async save() {},
+    stateFilePath(id) {
+      return join(runsDir, `${id}${core.RUN_EVENT_JOURNAL_SUFFIX}`);
+    },
+    async loadAll() {
+      return rebuildRunsFromRecordDir(runsDir, journal);
+    },
+  };
+
+  // 重水合：record fold loadAll 见残留 running 聚合（无 settled 尾 → running）。
+  const hydrated = await store.loadAll();
+  check(
+    "S5③ record fold loadAll: 恰重建 1 个 running run（无 settled 尾）",
     hydrated.length === 1 && hydrated[0].runId === runId && hydrated[0].state.status === "running",
     JSON.stringify(hydrated.map((r) => ({ id: r.runId, status: r.state.status }))),
   );
 
-  // 崩溃恢复四步装配（loadAll → failed → save → evict），hooks 回调注入样例。
+  // 崩溃恢复三步装配（loadAll → 中断收编 → evict），hooks 回调注入样例。
   const recoveredPayloads = [];
   const runs = new Map();
-  await core.recoverCrashedRuns(store, runs, "probe: process killed by SIGKILL (kill -9)", {
-    onRunRecovered: (payload) => recoveredPayloads.push(payload),
-  });
-
-  const recovered = runs.get(runId);
-  check(
-    "S5③ recoverCrashedRuns: run 进 runs Map 且转 failed 终态",
-    !!recovered && recovered.state.status === "done" && recovered.state.reason === "failed",
-    JSON.stringify(recovered && { status: recovered.state.status, reason: recovered.state.reason }),
-  );
-  check(
-    "S5③ state.error 携带恢复 reason",
-    !!recovered && typeof recovered.state.error === "string" && recovered.state.error.includes("SIGKILL"),
-    JSON.stringify(recovered?.state?.error),
-  );
-  check(
-    "S5③ hooks.onRunRecovered 恰被调一次，payload {id, reason:'failed'}",
-    recoveredPayloads.length === 1 &&
-      recoveredPayloads[0].id === runId &&
-      recoveredPayloads[0].reason === "failed",
-    JSON.stringify(recoveredPayloads),
+  const recovery = await core.recoverCrashedRuns(
+    store,
+    runs,
+    "probe: process killed by SIGKILL (kill -9)",
+    {
+      onRunRecovered: (payload) => recoveredPayloads.push(payload),
+    },
   );
 
-  // save 步生效：磁盘回读为 failed 终态（下次启动不再见 running）。
-  const reread = await new core.FileRunStore(runsDir).loadAll();
-  check(
-    "S5③ save 步: 磁盘回读 status=done/reason=failed（终态已持久化）",
-    reread.length === 1 && reread[0].state.status === "done" && reread[0].state.reason === "failed",
-    JSON.stringify(reread.map((r) => ({ status: r.state.status, reason: r.state.reason }))),
-  );
+  await verifyPartCRecoveryOutcome(journal, runsDir, runId, runs, recovery, recoveredPayloads);
 
-  // 幂等：对已恢复态再次 recover 不产生二次转换、无 hooks 回调。
+  // 幂等（D15 收编幂等两道：三面证据前置 + 表外转移 fail-fast 让位）：已收编
+  // run 重跑 recover 零二次转换——recovered 计数 0、run-interrupted 帧不增。
+  // onRunRecovered 的触发条件是「running 遗留候选」而非「本路径完成转换」，
+  // 二次重跑回调可再现——幂等证据锚定帧与计数，不锚回调次数。
   const secondPayloads = [];
-  await core.recoverCrashedRuns(store, new Map(), "probe: idempotent rerun", {
+  const secondRuns = new Map();
+  const secondRecovery = await core.recoverCrashedRuns(store, secondRuns, "probe: idempotent rerun", {
     onRunRecovered: (p) => secondPayloads.push(p),
   });
+  const secondFrames = (await journal.scan(runId)).filter((e) => e.type === "run-interrupted");
   check(
-    "S5③ 幂等: 已恢复态重跑 recover 零回调",
-    secondPayloads.length === 0,
-    JSON.stringify(secondPayloads),
+    "S5③ 幂等: 已收编 run 重跑 recover 零二次转换（recovered=0）",
+    secondRecovery.recovered === 0 && secondRecovery.loaded === 1,
+    JSON.stringify(secondRecovery),
+  );
+  check(
+    "S5③ 幂等: run-interrupted 帧仍恰 1 条（无二次落账）",
+    secondFrames.length === 1,
+    String(secondFrames.length),
+  );
+  check(
+    "S5③ 幂等: 二次重水合聚合仍携带中断标记（投影面 interrupted 保持）",
+    typeof secondRuns.get(runId)?.meta.interruptedAt === "string",
+    JSON.stringify(secondRuns.get(runId)?.meta.interruptedAt),
   );
 }
 

@@ -5,7 +5,7 @@
  * 职责：以 workflow 投影的 trace 节点为骨架（stepIndex/phase/agent/task），subagent
  * 投影按 (parentRunId, stepIndex) 圈定候选集后合并——「① 供编排结构，② 供运行时
  * 状态」。phase 供源两代（W1 D6）：v1 快照 trace 节点自带 phase（停写，兼容读）；
- * v2 = journal ask-dispatched 载荷 phase（现役——journal-projection fold 恢复 +
+ * v2 = journal agent-started 载荷 phase（现役——journal-projection fold 恢复 +
  * projectV2Workflow 透传）。
  *
  * 三条规则（设计 D2）：
@@ -88,7 +88,7 @@ export function mapStepStatusFromRecord(record: Pick<SubagentRecord, 'status' | 
   if (record.status === 'running') return { status: 'running', error: undefined }
   // idle（终态概念在 stopReason）
   const reason = record.stopReason
-  if (reason === 'completed') return { status: 'completed', error: record.error }
+  if (reason === 'completed') return { status: 'done', error: record.error }
   if (reason === 'failed') return { status: 'failed', error: record.error }
   if (reason === 'gc') {
     // 双语义值按 error 分叉（写侧依据 = D7 例外族，subagent-core run-orchestration.ts
@@ -96,7 +96,7 @@ export function mapStepStatusFromRecord(record: Pick<SubagentRecord, 'status' | 
     // 区分——成功 result.error 空、失败恒带错误文本）。truthy 判定与写侧 outcome 权威
     // 派生 deriveOutcome 同构（空串不构成失败）；error 空判 completed，否则 failed。
     if (record.error) return { status: 'failed', error: record.error }
-    return { status: 'completed', error: undefined }
+    return { status: 'done', error: undefined }
   }
   if (reason === 'cancelled') {
     return { status: 'failed', error: record.error ?? CANCELLED_FILL_TEXT }

@@ -211,6 +211,31 @@ describe("失败折叠 + 延迟重试（有界：累计 MAX_REPORT_ATTEMPTS 次�
     channel.settleAll(INFLIGHT_REPORT_ACK);
     await advance(0);
   });
+
+  it("累计失败达默认上限（3 次）即放弃：不再重试，后续迁移也不再发帧", async () => {
+    const channel = makeSelectChannel();
+    // 未注入 maxAttempts：锁默认上限 MAX_REPORT_ATTEMPTS = 3（增强面降级语义）。
+    const reporter = createInFlightReporter({ retryDelayMs: RETRY_MS, selectTimeoutMs: SELECT_TIMEOUT_MS });
+    reporter.attachSession(makeCtx(channel));
+    await advance(0);
+    expect(channel.calls).toHaveLength(1);
+
+    // 三帧全部失败落定：首帧 + 2 次退避重试；第 3 次失败触顶
+    channel.settle(0, undefined);
+    await advance(RETRY_MS);
+    expect(channel.calls).toHaveLength(2);
+    channel.settle(1, undefined);
+    await advance(RETRY_MS);
+    expect(channel.calls).toHaveLength(3);
+    channel.settle(2, undefined);
+
+    // 达到上限：放弃为 session 内终态——时间推进与后续迁移都不再发帧
+    await advance(RETRY_MS * 10);
+    expect(channel.calls).toHaveLength(3);
+    reporter.onInFlightChanged();
+    await advance(RETRY_MS * 10);
+    expect(channel.calls).toHaveLength(3);
+  });
 });
 
 describe("不阻塞生命周期主链（D5 接线约束①）", () => {

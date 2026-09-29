@@ -1266,14 +1266,9 @@ describe("集成：引擎死亡 → Continuation 单发失败通知（D8 监督�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("chatMode 轮 run reject（engine_crashed）→ 失败通知单发 + record 落 idle 可续聊（不走监督器接管）", async () => {
+  it("chatMode 轮 run reject（engine_crashed）→ 失败通知单发 + record 落 idle 可续聊", async () => {
     const record = makeChatRecord("sa-engine-death", agentDir);
     store.register(record);
-    const adoptSpy = vi.spyOn(
-      (service as unknown as { roundSupervisor: { adoptOnProcessDeath: (r: ExecutionRecord, m: string) => void } })
-        .roundSupervisor,
-      "adoptOnProcessDeath",
-    );
 
     await service.chatActions.deliverChatMessage(record, "risky round");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
@@ -1286,9 +1281,7 @@ describe("集成：引擎死亡 → Continuation 单发失败通知（D8 监督�
     // MF-6：record 轮终落 idle 可续聊（容器不被销毁——用户再 message 自动 resume；
     // [two-state-convergence U4/D3] 翻边后 idle 即 resumable）
     await vi.waitFor(() => expect(record.status).toBe("idle"));
-    // D8 豁免维持：chatMode 不进监督域接管链（adopt 调用 gate = chatMode !== true）
-    expect(adoptSpy).not.toHaveBeenCalled();
-    // 单发：Continuation 失败通知恰一条（不存在 supervisor merged notice 双发面）
+    // 单发：Continuation 失败通知恰一条
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalledTimes(1));
     const calls = pi.sendMessage.mock.calls;
     expect(calls[0]?.[0]?.content).toContain("engine process exited unexpectedly");

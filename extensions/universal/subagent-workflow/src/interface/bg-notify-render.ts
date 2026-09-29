@@ -25,7 +25,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { displayAgentName } from "@zhushanwen/subagent-core";
 import { deriveOutcome } from "@zhushanwen/subagent-core";
 import { CLOSED_REASONS } from "@zhushanwen/subagent-core";
-import type { ClosedReason, RunOutcome } from "@zhushanwen/subagent-core";
+import type { ClosedReason } from "@zhushanwen/subagent-core";
 import {
   firstLineSanitized,
   shortId,
@@ -52,10 +52,12 @@ const MIN_BORDER_WIDTH = BORDER_CHARS + INNER_PAD_TOTAL + 1;
 /**
  * record 域轮终 outcome 子集（[W2 D5] 单源 RunOutcome 收窄别名——interrupted 只由
  * run 收编/回收路径写入，record 轮终构造性不可达）。本文件原经 core 的
- * ExecutionOutcome 消费同值联合；词表单源后换源直引 RunOutcome 派生，与 core
- * execution/assembly/types.ts 的收窄子集同构。
+ * ExecutionOutcome 消费同值联合；[D2]（workflow-run-resume-revision）RunOutcome
+ * 词表重构后 Exclude 派生失效（interrupted 已移出），本域改独立实体字面量、与
+ * core execution/assembly/types.ts 的 ExecutionOutcome 三值同构（record 域终局
+ * 形态不含 run 级 time_limited）。
  */
-type RecordOutcome = Exclude<RunOutcome, "interrupted">;
+type RecordOutcome = "completed" | "failed" | "cancelled";
 
 /**
  * background 完成通知的 record 形态（从 message.details 提取）。

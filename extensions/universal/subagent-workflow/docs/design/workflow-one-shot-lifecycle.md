@@ -243,7 +243,7 @@
 
 ## §4 验收（真实 pi 环境，非单测非 mock）
 
-**验收环境**：本地 pi CLI RPC mode（`pi --mode rpc --session-dir <dir> --model <m> --approve --extension <本包路径>`），测试模型 `xiaomi-token-plan-cn/mimo-v2.5-pro`；通过 stdin JSONL 发 prompt 驱动主 agent 调 workflow 工具，或直接调工具等价 RPC。内置 workflow 用本仓 `workflows/chain.js`（短）与 `workflows/review-fix-loop.js`（长）。
+**验收环境**：本地 pi CLI RPC mode（`pi --mode rpc --session-dir <dir> --model <m> --approve --extension <本包路径>`），测试模型 `<本机可用模型>`；通过 stdin JSONL 发 prompt 驱动主 agent 调 workflow 工具，或直接调工具等价 RPC。内置 workflow 用本仓 `workflows/chain.js`（短）与 `workflows/review-fix-loop.js`（长）。
 
 | # | 场景（回溯目标） | 步骤 | 通过标准 |
 |---|---|---|---|

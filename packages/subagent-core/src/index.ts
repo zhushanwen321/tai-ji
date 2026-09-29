@@ -405,15 +405,13 @@ export { isProcessAlive } from "./execution/persistence/alive-store.ts";
 // zsw 侧装配注入，core 公共面只留 ConcurrencyPool 契约类型。
 export type { ConcurrencyPool } from "./execution/assembly/concurrency-pool.ts";
 
-// 模型引用切分原语（U1 契约面批件）：provider/model 引用切分与缺省值（两宿主
+// 模型引用切分原语（U1 契约面批件）：provider/model 引用切分（两宿主
 // maxTurns/model 换算同源）。[W11/H2] 实现体随 engines/zcode 删除迁至
-// shared/zcode-model-ref.ts（宿主侧原语，与引擎包各自单源）。
-export {
-  DEFAULT_PROVIDER_ID,
-  hasApiKey,
-  splitZcodeModelRef,
-  ZCODE_FALLBACK_DEFAULT_MODEL,
-} from "./shared/zcode-model-ref.ts";
+// shared/zcode-model-ref.ts（宿主侧原语，与引擎包各自单源）。[2026-09-29 account
+// 体系迁移同步] DEFAULT_PROVIDER_ID / ZCODE_FALLBACK_DEFAULT_MODEL / hasApiKey
+// 删除——plan 家族 id 经 entitlement 门控后宿主侧无消费场景（引擎侧模型源已切换
+// provider_config.json，见 zcode-subagent-cli preparer.ts）。
+export { splitZcodeModelRef } from "./shared/zcode-model-ref.ts";
 
 // ── worktree git 内核（U5 / D5）───────────────────────────────
 // git 语义纯函数单源：保真读（gitRun）、SafeId 校验、dirty 谓词、
@@ -457,33 +455,48 @@ export {
 // 已出公共面（定义文件内部类型闭包），hooks 形状经函数签名隐式约束。
 export { recoverCrashedRuns } from "./orchestration/lifecycle.ts";
 
-// launcher 层：runAndWait / executeNestedWorkflow（workflow 域嵌套编排入口）
-// + deps / 结果类型。
+// [U2/U3]（workflow-run-resume-revision）resume 编排原语：interrupted 态 run 的
+// 断点续跑入口（壳 tool/命令通道消费，D14 args 校验在壳入口 tool-workflow）。
+// 编排内部收敛 D7 跨进程锁 / D8 三档恢复 / D12 record 完整性校验 / D13 嵌套
+// 拒绝 / D10 预算预检；资格拒绝统一 ResumeRejectionError（文案含恢复指引，
+// 壳入口原样透出）。
+export {
+  resumeRun,
+  ResumeRejectionError,
+  type ResumeRunOptions,
+} from "./orchestration/resume-run.ts";
+
+// launcher 层：deps 类型 + 拒单文案单点。
 // formatAvailableWorkflowRefs / workflowNotFoundMessage：not found 拒单清单与
 // 文案单点（extension 顶层 workflow tool 同案消费，副本已删）。
+// runAndWait / executeNestedWorkflow（编程阻塞入口与脚本内嵌套调用实现）已随
+// 嵌套 workflow() 编排 API 退役整体删除。
 export {
-  runAndWait,
-  executeNestedWorkflow,
   formatAvailableWorkflowRefs,
   workflowNotFoundMessage,
   type LauncherDeps,
-  type WorkflowRunResult,
 } from "./orchestration/launcher.ts";
 
-// worker-message-pump 内核件（execution 生产域消费，A2a）：finalizeRun run 终态
-// 收口、closeOutInFlightCalls 在飞 call 批量清算。
-// [2026-09-13 barrel 收窄] makeSerializeFailedResult / postBudgetUpdate /
-// resetRebuildFailureInjectionForTest / FinalizeRunOptions 已出公共面（前三者仅
-// 测试深路径消费，后者为定义文件内部类型闭包）。
-// [W1 / D1] buildWorkflowRecord{Registered,Settled}EntryData：v2 条目构造器单源
-// （字段集机器锚点）——壳写点（JsonlRunStore loadAll 收编补写 / recoverCrashedRuns
-// hooks 链）经 barrel 复用同一构造，防字段集手抄漂移成 SubagentTab 空行。
+// worker-message-pump 内核件（execution 生产域消费，A2a）→ [D15] 迁移：终局编排
+// 面与 v2 条目构造器迁 terminal-actions（终局编排单一入口——五路收敛），pump 薄化
+// 为「消息路由 + 重试矩阵」（消息面符号仍自 pump 出 barrel：makeSerializeFailedResult
+// 等测试深路径消费面）。
+// [D15] terminal-actions 终局编排入口：finalizeRun 五步 coda（终局目标态）+
+// interruptRun 中断编排（[D2] interrupted 暂停态转移）+ isRunSettled 判定 +
+// buildWorkflowRecord{Registered,Settled,Interrupted}EntryData 条目构造器单源。
+// [G1 跨包单源] runSettledOutcomeToDoneReason：壳侧曾持同语义本地实现（值表靠
+// 双侧测试锁定），收敛为 core 单源——壳经 barrel import 消费。
 export {
   finalizeRun,
+  interruptRun,
+  isRunSettled,
+  runSettledOutcomeToDoneReason,
   closeOutInFlightCalls,
   buildWorkflowRecordRegisteredEntryData,
   buildWorkflowRecordSettledEntryData,
-} from "./orchestration/worker-message-pump.ts";
+  buildWorkflowRecordInterruptedEntryData,
+  type FinalizeRunOptions,
+} from "./orchestration/terminal-actions.ts";
 
 // workflow 领域模型族：run / call / trace / budget / 状态与规格（壳 store 与
 // interface 渲染层共同消费）。
@@ -565,28 +578,26 @@ export type {
   WorkflowSource,
 } from "./orchestration/config-loader.ts";
 
-// FileRunStore：RunStore port 的宿主无关文件实现（D2 设计件）——落盘
-// <dataRoot>/workflow-state/<runId>.jsonl，zsw 等无 pi session 设施的宿主装配
-// LifecycleDeps.store 用；pi 壳继续用 session 锚定的 JsonlRunStore。
-// u-2c 删 ./* 通配后深路径仅测试侧 vitest alias 可解析，生产消费必须走 barrel。
+// 终局证据判定核与保留期维护（workflow-run-store-convergence U3+U4：自
+// orchestration/file-run-store.ts 迁入 execution/persistence/，RunStore 写实现
+// 身份已退役——生产唯一实现 = pi 壳 JsonlRunStore）。
 // pruneTerminalRunFiles：已终局 run 磁盘足迹裁剪单源（[W1 / D5 清理规则①②]——
 // fold 终态资格 + 保留窗口 + journal 成对删）；resolveStateTtlMs / STATE_TTL_MS_ENV /
 // DEFAULT_STATE_TTL_MS：保留窗口 env 通道单源（[P1b-2] 引入、[W1] 起 run+record
 // 两域统一窗口）。cap 族与节流族导出（数量上限常量 / cap env 通道名与解析函数 /
 // 节流间隔常量与节流器工厂）已随 W1 cap 语义废除与写通道收敛整体退役。
 // [C3 常量上收] STATE_DIR_NAME：pi 壳 workflow-events / jsonl-run-store 的
-// `<sessionDir>/workflow-state` 与 core `<dataRoot>/workflow-state` 同名分量单源
-// ——壳侧字面量改 import 消费，防布局分量漂移。
+// `<sessionDir>/workflow-state` 与 pi 宿主枚举的 agentDir 根回退目录同名分量
+// 单源——壳侧字面量改 import 消费，防布局分量漂移。
 export {
   DEFAULT_STATE_TTL_MS,
   STATE_DIR_NAME,
   STATE_TTL_MS_ENV,
-  FileRunStore,
   pruneTerminalRunFiles,
   resolveStateTtlMs,
   type PruneTerminalRunFilesOptions,
   type PruneTerminalRunFilesResult,
-} from "./orchestration/file-run-store.ts";
+} from "./execution/persistence/run-state-evidence.ts";
 
 // [W1 / D5] 统一保留维护轮入口：run journal prune + record 事件文件 prune 同轮
 // 幂等扫描 + 判据②候选数日志。三触发点（新 run 首写 / 新 record 事件文件首写 /
@@ -597,7 +608,20 @@ export {
   type RetentionMaintenanceInput,
   type RetentionMaintenanceOptions,
   type RetentionMaintenanceResult,
-} from "./orchestration/file-run-store.ts";
+} from "./execution/persistence/run-state-evidence.ts";
+
+// [裁决点 7]（workflow-run-resume-revision）孤儿 run 对账清理：无主 run 的唯一
+// 磁盘清理通道（run 数据生命周期跟随 session 归属——引用集三代解析 + 宽限窗登记
+// + 三件删除）。壳生产消费（session-lifecycle 装配的引用集注入面）走 barrel。
+export {
+  reapOrphanRuns,
+  resolveOrphanRunGraceWindowMs,
+  DEFAULT_ORPHAN_RUN_GRACE_WINDOW_MS,
+  ORPHAN_RUN_GRACE_WINDOW_MS_ENV,
+  type OrphanRunReapDeps,
+  type OrphanRunReapOptions,
+  type OrphanRunReapResult,
+} from "./execution/persistence/run-state-evidence.ts";
 
 // [W1 / D5] session_start 兜底触发点的 record 域目录锚（与 SubagentService 构造点
 // 同源同式推导）：getSubagentRecordsDir 给出 records 目录布局，ENV_ROOT_CWD 是
@@ -627,7 +651,7 @@ export { startupSweep } from "./execution/assembly/startup-sweep.ts";
 
 // run 级终局投影 manifest（[P1b-2 / D5]）读写原语：「已终局」单源锚定（outcome
 // 非空）。消费全在 core 内部深路径（run-registry abandon 终局化 /
-// worker-message-pump finalizeRun / file-run-store pruneTerminalRunFiles 资格
+// worker-message-pump finalizeRun / run-state-evidence pruneTerminalRunFiles 资格
 // 判定），壳零消费——按 D3 判定标准不进 barrel。
 
 // ── workflow-record entry 契约（词表/guard 收敛单源）──────────
@@ -652,18 +676,11 @@ export {
   type WorkflowRecordSettledEntryData,
 } from "./orchestration/workflow-record-entry.ts";
 
-// ── 快照 codec（U8 / D4）──────────────────────────────────────
-// WorkflowRun ↔ 落盘快照的单一投影：版本常量沿用 pi "wf-run-v2"（存量逐字节
-// 可读）、live 字段 strip、更高版本跳过（宿主侧 warn 可见性自决）。
-// [P3/D6] projectRunEvents = 事件 journal fold 投影的唯一推导点（宿主 store
-// flush 时消费——pi 壳 jsonl-run-store.ts；additive 字段策略见函数注释）。
-export {
-  fromRunSnapshot,
-  projectRunEvents,
-  SNAPSHOT_VERSION,
-  toRunSnapshot,
-  type RunSnapshot,
-} from "./orchestration/run-snapshot.ts";
+// ── 快照格式版本（U8 / D4）────────────────────────────────────
+// workflow-state/<runId>.jsonl 快照行的格式版本常量单源（消费方 = runtime
+// workflow-extractor 版本守卫，经 barrel import 不落第二份字面量；additive
+// 字段策略与 bump 代价见 run-snapshot.ts 常量注释）。
+export { SNAPSHOT_VERSION } from "./orchestration/run-snapshot.ts";
 
 // [P3/D6] run 事件 journal 读面（宿主 store fold 投影的数据源——journal scan 的
 // 坏行容忍与日志语义单源；生产源码只从 barrel 消费 core 符号先例同上）。
@@ -673,6 +690,7 @@ export {
 // 词表与映射的语义锚点注释见 run-events.ts 对应定义。
 export {
   ALL_RUN_OUTCOMES,
+  RUN_EVENT_TYPES,
   createRunEventJournal,
   doneReasonToRunOutcome,
   foldRunEventCheckpoint,
@@ -686,26 +704,18 @@ export {
   type WorkflowRunEvent,
 } from "./orchestration/run-events.ts";
 
-// [Q2/D9-1] run 注册表（D5 状态机投影面）：interrupted 放弃窗终局化（D5 清理
-// 规则③：abandon 写 manifest 后 journal 获清理资格）——pi 宿主 jsonl-run-store
-// 的 retention 维护轮生产消费（H4 偏差先例同构：extensions 生产源码只从 barrel
-// 消费 core 符号，不进 barrel 无法接线）。journal fold 投影函数族
-//（projectRunRegistryEvents / projectRunRegistryState / abandon 窗 env 通道与
-// 投影类型）消费全在 core 内部，壳零消费——按 D3 判定标准不进 barrel。
-export { abandonElapsedInterruptedRuns } from "./orchestration/run-registry.ts";
+// [Q2/D9-1] run 注册表（D5 状态机投影面）。[D9]（workflow-run-resume-revision）
+// abandon 放弃窗终局化（abandonElapsedInterruptedRuns 及常量/env 通道）已随功能
+// 整体移除——「数天后回来仍可 resume」的 run 不再被判死，无主 run 磁盘清理归裁决
+// 点 7 对账清理（persistence/run-state-evidence 维护轮族）。中断收编原语 adoptInterruptedRun 与
+// 投影函数族消费全在 core 内部（收编链 u1b 接线）——按 D3 判定标准不进 barrel。
 
-// run 投影（U7 / D8）：isScriptRunning / runSummary 以 core WorkflowRun 为准的
-// 投影（runSummary 双投影分叉收口）。
-export {
-  isScriptRunning,
-  runSummary,
-} from "./orchestration/workflow-run-summary.ts";
+// run 投影（U7 / D8）：runSummary 以 core WorkflowRun 为准的投影（双投影分叉收口）。
+export { runSummary } from "./orchestration/workflow-run-summary.ts";
 
 // ── schema 助手（U9 / D9）─────────────────────────────────────
 // workflow 资产 @pi-meta parameters 的 schema→已知键集与平铺参数检测
 // （pi tool-workflow 消费面下沉；宿主白名单退役入口）。
-// [2026-09-13 barrel 收窄] normalizeArgsByMeta 与本组类型族已出公共面（仅测试
-// 深路径消费），归一化留在模块内部。
 export {
   argKeysFromMeta,
   findFlattenedArgKeys,

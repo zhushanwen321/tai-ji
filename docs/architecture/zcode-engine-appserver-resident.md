@@ -69,7 +69,7 @@
 |---|------|-----------|
 | G1 | 长驻进程 + 零冷启动 | zsw 用户跑 map-reduce 多任务，第 2 个起 subagent 启动耗时从 ~1.5s 降为 ~0 |
 | G2 | 实时事件流（coarse→stream） | 引擎以 stream 粒度实时流出事件：zsw workflow 终端 live 输出实时刷新；taiji 侧 journal 增量落盘且**运行中**的 record entry 即携带 ①②级读取钥匙（sessionRef/poolKey/journalPath，W4 回填机制——①级命中依赖 sessionRef），subagent 详情页中途打开可见当时进度快照、重开与 live 一致。GUI live 逐字推送（`subagent.stream_delta` WS 帧）依赖 relay 通道建设（subagent-realtime-channel.md 已论证 launcher 层模式可复制——该文档已删除，git 可追溯，机制记录在案在 relay/relay.mjs 与 pi-invocation.ts 注释），**不属本设计**——chat 域 engine 任务的 onEvent 现只接 journal 落盘，无 GUI 广播通道（subagent-service.ts runEngineTask） |
-| G3 | per-session model | 同一常驻进程上，任务 A 用 GLM-5.3、任务 B 用 mimo-v2.5，互不干扰 |
+| G3 | per-session model | 同一常驻进程上，任务 A 与任务 B 各用不同模型，互不干扰 |
 | G4 | 宿主零改动 | pi 壳与 zsw 壳不改一行代码、不发 breaking 版本即获得上述收益 |
 | G5 | 漂移防御内化 | zcode 平台升级导致协议漂移时，core probe/golden/conformance 承接，宿主无感或按 capabilities 声明自适应 |
 
@@ -259,7 +259,7 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 |---|------|------|---------|------|
 | A1 | zsw 多任务零冷启动 | 真机 `zsw run` 一个 map-reduce（主任务 + 3 subagent），对比改造前同 workflow | 第 2-4 个 subagent 任务无进程启动段（record 耗时显著低于首任务；`ps` 全程只见 1 个 app-server 进程，**探针窗口的独立短命连接除外**）；结果与改造前等价 | G1 |
 | A2 | stream 事件流出 + 快照一致性 | ①zsw 真机跑 workflow，观察终端 live 输出实时刷新；②taiji dev 起 zcode 引擎 subagent，任务运行中打开详情页、任务中途重开 session | ①workflow live 输出随任务运行实时出现（非终态一次性）；②详情页打开可见当时进度快照，重开后渲染与 live 一致（①级 sqlite / ②级 journal 无论哪级命中，内容一致） | G2 |
-| A3 | per-session model | 同进程上并发两任务：任务 A `model: glm-5.3`，任务 B `model: mimo-v2.5` | 两任务各自成功、响应面无串线（sessionId/usage 各归各）；record 各自留痕正确 model | G3 |
+| A3 | per-session model | 同进程上并发两任务：任务 A 与任务 B 各指定不同模型（如 `model: <model-a>` / `model: <model-b>`） | 两任务各自成功、响应面无串线（sessionId/usage 各归各）；record 各自留痕正确 model | G3 |
 | A4 | abort 不连坐 | 两任务并发在途，取消其一 | 被取消任务终态 exitCode=null；另一任务正常完成不受影响（session/stop 只作用于目标会话） | G1/G3 |
 | A5 | 漂移降级 + 重探重建——**已作废**（2026-09 breaking：降级链与探针随 spawn 通道删除，协议漂移直接报错） | — | — | — |
 | A6 | 崩溃重建 | 任务运行中 `kill -9` 常驻进程 | 在途任务失败（错误含 stderr 尾）；紧接的下一任务自动重建进程并成功 | G1 |

@@ -125,7 +125,7 @@ function workflowRecordEntry(
 
 describe('合并矩阵全形态（D2 R2/R3）', () => {
   it('trace 独有（无有效候选——候选集空 / 同 run 候选全被守卫排除）：骨架行维持原样，record 原对象引用保持', () => {
-    const record = wf([traceCall(0, { status: 'completed', phase: 'R1' })])
+    const record = wf([traceCall(0, { status: 'done', phase: 'R1' })])
     // 形态一：候选集空（派发前置失败早退路径——无 record 产生）
     expect(mergeWorkflowStepRecords([record], [])[0]).toBe(record)
     // 形态二：候选存在但全部无 stepIndex（守卫排除后 run 无有效候选）——trace-only 视图
@@ -133,7 +133,7 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
     const merged = mergeWorkflowStepRecords([record], guarded)
     expect(merged[0]).toBe(record)
     expect(merged[0]!.agentCalls).toHaveLength(1)
-    expect(merged[0]!.agentCalls[0]).toEqual(traceCall(0, { status: 'completed', phase: 'R1' }))
+    expect(merged[0]!.agentCalls[0]).toEqual(traceCall(0, { status: 'done', phase: 'R1' }))
   })
 
   it('record 独有（trace 无该 stepIndex）：成行 + phase undefined + sessionId=subagentId + 顺序按 stepIndex 升序追加', () => {
@@ -178,7 +178,7 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
     ]
     const merged = mergeWorkflowStepRecords([record], candidates)[0]!
     const row = merged.agentCalls[0]!
-    expect(row.status).toBe('completed')
+    expect(row.status).toBe('done')
     expect(row.phase).toBe('R1') // 编排结构来自 trace（P7）
     expect(row.model).toBe('m1')
     expect(row.sessionId).toBe('sa-1')
@@ -214,7 +214,7 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
       }),
     ]
     const merged = mergeWorkflowStepRecords([record], candidates)[0]!
-    expect(merged.agentCalls[0]!.status).toBe('completed')
+    expect(merged.agentCalls[0]!.status).toBe('done')
     expect(merged.agentCalls[0]!.sessionId).toBe('sa-att2')
   })
 
@@ -250,8 +250,8 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
 
   it('旧 session 回落 trace-only：无 stepIndex 的 record 全员不参与，视图 ≡ 纯 trace 扫描（V5）', () => {
     const trace = [
-      { stepIndex: 0, agent: 'dev', status: 'completed', phase: 'D1' },
-      { stepIndex: 1, agent: 'rev', status: 'completed', phase: 'R1' },
+      { stepIndex: 0, agent: 'dev', status: 'done', phase: 'D1' },
+      { stepIndex: 1, agent: 'rev', status: 'done', phase: 'R1' },
     ]
     const entries = [
       workflowRecordEntry({ runId: 'run-legacy', trace, status: 'done' }),
@@ -301,9 +301,9 @@ describe('R1 两态→四态映射矩阵（D2 R1，StopReason 13 值域逐行）
   // 文案填充；中断族三值原文填充；legacy 家族剩余四值 + disconnected + reopened
   // 走通用文案兜底。第四列 = 注入 record.error（其余行 undefined = 不注入）。
   it.each([
-    ['completed', 'completed', undefined, undefined],
+    ['completed', 'done', undefined, undefined],
     ['failed', 'failed', undefined, undefined],
-    ['gc', 'completed', undefined, undefined],
+    ['gc', 'done', undefined, undefined],
     ['gc', 'failed', 'engine crashed', 'engine crashed'],
     ['cancelled', 'failed', 'cancelled by run abort', undefined],
     ['interrupted', 'failed', 'interrupted', undefined],
@@ -425,7 +425,7 @@ describe('V3 fixture 重放：冷热同代码（全量重放 ≡ 分波增量合
     expect(hot).toEqual(cold)
     // 终态语义抽查（非只比形状）：4 行、1 failed（error 透传）、3 completed、sessionId = record id
     expect(cold[0]!.agentCalls).toHaveLength(4)
-    expect(cold[0]!.agentCalls.map((c) => c.status)).toEqual(['completed', 'completed', 'failed', 'completed'])
+    expect(cold[0]!.agentCalls.map((c) => c.status)).toEqual(['done', 'done', 'failed', 'done'])
     expect(cold[0]!.agentCalls[2]!.error).toBe('engine crashed')
     expect(cold[0]!.agentCalls[0]!.sessionId).toBe('sa-v3-1')
     expect(cold[0]!.agentCalls.every((c) => c.phase === 'Review')) // trace 归组后 phase 不丢
@@ -550,7 +550,7 @@ describe('水位终态计数维度（D4）与 V10 信号量上界', () => {
     await h.invalidate('s1', [
       workflowRecordEntry({
         runId: 'run-s2',
-        trace: [{ stepIndex: 0, agent: 'reviewer', phase: 'Review', status: 'completed' }],
+        trace: [{ stepIndex: 0, agent: 'reviewer', phase: 'Review', status: 'done' }],
       }),
     ], 'e3')
     expect(h.workflowUpdates()).toHaveLength(before)
@@ -630,7 +630,7 @@ describe('V9 重试三段序列', () => {
       startedAt: 3000, endedAt: 8000, elapsedSeconds: 5,
     })
     const row3 = mergeWorkflowStepRecords([record], [att1Settled, att2Done])[0]!.agentCalls[0]!
-    expect(row3.status).toBe('completed')
+    expect(row3.status).toBe('done')
     expect(row3.sessionId).toBe('sa-v9-att2')
     expect(row3.startedAt).toBe(new Date(3000).toISOString())
     expect(row3.completedAt).toBe(new Date(8000).toISOString())

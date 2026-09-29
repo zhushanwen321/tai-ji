@@ -44,7 +44,7 @@ import { resolvePiSessionScopedDir } from "@zhushanwen/subagent-core";
 // [W1 / D5] session_start 兜底触发点的统一保留维护轮：入口 + record 域目录锚
 // （getSubagentRecordsDir 布局 + ENV_ROOT_CWD 贯穿 env 名单源）+ state 目录分量
 // 单源 STATE_DIR_NAME——全部经 barrel 消费（壳生产消费纪律）。
-import { runRetentionMaintenanceRound } from "@zhushanwen/subagent-core";
+import { reapOrphanRuns, runRetentionMaintenanceRound } from "@zhushanwen/subagent-core";
 import { getSubagentRecordsDir } from "@zhushanwen/subagent-core";
 import { ENV_ROOT_CWD } from "@zhushanwen/subagent-core";
 import { STATE_DIR_NAME } from "@zhushanwen/subagent-core";
@@ -91,6 +91,13 @@ function getCachedMainSessionFile(): string | undefined {
  * 时（AGENTS.md 规则 6：首条 assistant 消息前可能不存在）返回 undefined，调用方
  * （fork 解析 / 孤儿恢复）对该场景本就无 entry 可读。
  *
+ * 布局对齐 pi 实装 getSessionsDir（config.js）：session 文件落
+ * `<agentDir>/sessions/<encoded-cwd>/` 子目录（session-manager.js——`--<cwd 编码>--`
+ * 目录内 `<ts>_<sessionId>.jsonl`；与 collectAliveWorkflowRunReferences 同一布局
+ * 锚点）。子目录枚举 + 文件名后缀段 `<ts>_<sessionId>.jsonl` 匹配，slug 目录名不
+ * 解析（pi 编码规则演进不影响按 id 命中）。任一层 readdir 失败（sessions 根不存在
+ * 等）返回 undefined，调用方回落 getSessionFile()。
+ *
  * [pi 锚点 ADR-0063 I4] getSessionFile attach 语义：返回 `this.sessionFile` 字段
  * （pi-mono coding-agent/src/core/session-manager.ts :1011-1013），该字段仅在
  * _setSessionFile（:884/:895-896，constructor 显式路径或 setSessionFile）与
@@ -99,20 +106,33 @@ function getCachedMainSessionFile(): string | undefined {
  * 仍回旧值（与 E2E 实测一致）。clone v0.84.2 核对，实装 0.84.4。
  */
 function resolveMainSessionFileById(sessionId: string): string | undefined {
-  const sessionsDir = path.join(getAgentDir(), "..", "sessions");
+  const sessionsRoot = path.join(getAgentDir(), "sessions");
+  let slugDirs: string[];
   try {
-    const match = fs.readdirSync(sessionsDir).find((f) => f.endsWith(`_${sessionId}.jsonl`));
-    return match === undefined ? undefined : path.join(sessionsDir, match);
+    slugDirs = fs
+      .readdirSync(sessionsRoot, { withFileTypes: true })
+      .filter((ent) => ent.isDirectory())
+      .map((ent) => path.join(sessionsRoot, ent.name));
   } catch {
     return undefined;
   }
+  const suffix = `_${sessionId}.jsonl`;
+  for (const dir of slugDirs) {
+    try {
+      const match = fs.readdirSync(dir).find((f) => f.endsWith(suffix));
+      if (match !== undefined) return path.join(dir, match);
+    } catch {
+      continue; // 单子目录读失败继续其余（宁回落 getSessionFile，不中断装配）
+    }
+  }
+  return undefined;
 }
 
 /**
  * workflow 域 per-session state 目录探测（随迁为 module 私有，唯一消费方是随迁块）。
  *
  * [已知限制·登记] slug 锚 process.cwd()（进程 cwd）而非 session cwd：pi CLI 在
- * 目录 B resume cwd 为 A 的 session 时，新 run 的 state 文件/journal 落 B 的 slug
+ * 目录 B resume cwd 为 A 的 session 时，新 run 的 record 事件流落 B 的 slug
  * 目录、旧 run 的在 A——GC/retention sweep（core 同源推导）读不到旧 run 的磁盘
  * 足迹，兜底失效。主数据不受影响（权威 entry 在 session 文件里，跨 cwd 可重建）。
  * 布局单源在 core resolvePiSessionScopedDir（workflow-state-root.ts）——修复改锚
@@ -122,6 +142,130 @@ function resolveMainSessionFileById(sessionId: string): string | undefined {
 function resolveSessionDir(): string {
   // F2：agentDir 走 pi SDK 活源注入（实例隔离）；slug + 探测布局单源在 core。
   return resolvePiSessionScopedDir({ agentDir: getAgentDir() });
+}
+
+// ── [裁决点 7] 存活 session 引用集采集（壳侧注入面，core 不 import pi SDK）──────
+//
+// 全池 session 文件流式扫描（sessions 根 + 全 slug 子目录的 *.jsonl），逐文件
+// 提 workflow run 的注册引用并集——三代形态都解析（v2 注册条目 / v1 全量快照
+// 条目 / pre-W17 link 指针）：
+// - v2：workflow-record custom entry，data.kind === "registered" → data.runId；
+// - v1：data.v === 1 且 data.snapshot.runId 为 string → snapshot.runId；
+// - link：workflow-state-link custom entry → data.runId。
+// 只认 v2 会把存量 run 首轮误判无主并不可逆删除（设计裁决点 7「引用集三代形态」）。
+//
+// 行预过滤（customType 子串）+ 逐行 JSON.parse 的宽容扫描：单文件解析失败跳过
+// （坏文件不阻断整轮——引用集缺侧 = 宁保留方向：少采集到的 run 引用会使其
+// 进观察期而非直接删除，宽限窗兜底）。成本量级 = 全池文件流式扫描，秒级～
+// 十秒级（设计「实现落点」登记的实测预期——每 session_start 一次，oncePerProcess
+// 守卫下进程内单跑）。
+
+/** Node fs 错误 code 判定（ENOENT = 路径不存在；core shared/fs-error 的 errorCodeOf
+ *  未进 barrel——本地等价 helper，判据与 pi-host-run-store 的读错分通道同款）。 */
+function isEnoent(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+/** workflow custom entry 的最小消费视图（宽容扫描用）：customType 保持 unknown
+ *  （值域分流在调用方），data 已过对象校验（字段级读取仍走 unknown 判型）。 */
+interface WorkflowCustomEntryView {
+  customType: unknown;
+  data: Record<string, unknown>;
+}
+
+/** [extractRunReferencesFromLine 守卫] 是否为 data 载荷成形的 workflow custom
+ *  entry（type=custom 且 data 为对象；customType 免判型——分流在调用方）。 */
+function isWorkflowCustomEntry(v: unknown): v is WorkflowCustomEntryView {
+  if (typeof v !== "object" || v === null) return false;
+  const rec = v as Record<string, unknown>;
+  return rec.type === "custom" && typeof rec.data === "object" && rec.data !== null;
+}
+
+function extractRunReferencesFromLine(line: string, out: Set<string>): void {
+  const trimmed = line.trim();
+  if (trimmed === "" || !trimmed.includes("workflow")) return; // 行级预过滤
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+  if (!isWorkflowCustomEntry(parsed)) return;
+  const d: Record<string, unknown> = parsed.data;
+  if (parsed.customType === "workflow-record") {
+    extractWorkflowRecordRunReference(d, out);
+  } else if (parsed.customType === "workflow-state-link") {
+    if (typeof d.runId === "string" && d.runId !== "") out.add(d.runId);
+  }
+}
+
+/** [extractRunReferencesFromLine 拆分] workflow-record 条目两代引用提取
+ * （v2 registered 的 runId / v1 快照内 runId）。 */
+function extractWorkflowRecordRunReference(
+  d: Record<string, unknown>,
+  out: Set<string>,
+): void {
+  if (d.kind === "registered" && typeof d.runId === "string" && d.runId !== "") {
+    out.add(d.runId);
+  } else if (d.v === 1 && typeof d.snapshot === "object" && d.snapshot !== null) {
+    const snapRunId: unknown = (d.snapshot as Record<string, unknown>).runId;
+    if (typeof snapRunId === "string" && snapRunId !== "") out.add(snapRunId);
+  }
+}
+
+/**
+ * [裁决点 7] 采集全部存活 session 的 workflow run 引用并集（agentDir 活源）。
+ *
+ * sessions 布局对齐 pi 实装 getSessionsDir（config.js）：`<agentDir>/sessions`
+ * 下的 encoded-cwd 子目录（session-manager.js——`--<cwd 编码>--` 目录内
+ * `<ts>_<sessionId>.jsonl`）。指向错误层级会静默扫出空集，裁决点 7 的引用
+ * 保护整体落空（活跃 run 误判无主）——布局锚点以 pi dist 实装为准。
+ */
+async function collectAliveWorkflowRunReferences(
+  agentDir: string,
+): Promise<ReadonlySet<string>> {
+  const refs = new Set<string>();
+  const sessionsRoot = path.join(agentDir, "sessions");
+  let slugDirs: string[];
+  try {
+    slugDirs = fs.readdirSync(sessionsRoot, { withFileTypes: true })
+      .filter((ent) => ent.isDirectory())
+      .map((ent) => path.join(sessionsRoot, ent.name));
+  } catch (err) {
+    // 读错分通道（对齐 core pi-host-run-store 同款纪律）：ENOENT = 从未落盘的
+    // 正常空态，空集返回（core reapOrphanRuns 按「无引用」正常判定）；非 ENOENT
+    // （EACCES/EIO 等真 IO 故障）上抛——空集会把「引用状态不可知」折叠成「无任何
+    // 引用」的成功返回，core 的「采集失败 = 整轮跳过（宁保留）」防御（reapOrphan
+    // Runs 的 collectAliveRunReferences catch）在生产路径将不可达，持续 IO 权限
+    // 故障下被存活 session 引用的 run 会在宽限窗后被不可逆删除。
+    if (isEnoent(err)) return refs;
+    throw err;
+  }
+  const readOpts = { encoding: "utf8" as const };
+  for (const dir of slugDirs) {
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir);
+    } catch (err) {
+      // 同款分通道：ENOENT = 该 slug 目录被并发清走（会话删除竞态），跳过；真 IO
+      // 故障上抛整轮跳过（该目录下 session 的引用集缺席只延后删除——但「缺席的
+      // 原因不可知」时按失败处置，不冒充空集）。
+      if (!isEnoent(err)) throw err;
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+      try {
+        const content = fs.readFileSync(path.join(dir, file), readOpts);
+        for (const line of content.split("\n")) {
+          extractRunReferencesFromLine(line, refs);
+        }
+      } catch {
+        continue; // 单文件读失败跳过（宁保留——该文件的引用缺席只延后删除）
+      }
+    }
+  }
+  return refs;
 }
 
 // ── 进程级单例（dialog queue；原 index.ts module 级随域搬移） ────────────────────
@@ -391,8 +535,8 @@ export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext
           }),
       });
     },
-    // abandon 对会话补显形（T4③ 放弃终态）：不唤醒的 display 消息（无 triggerTurn
-    // ——notifyStall 同款形态），让主 agent/用户在会话里看到「通知已放弃」线索。
+    // abandon 对会话补显形（T4③ 放弃终态）：不唤醒的 display 消息（无 triggerTurn），
+    // 让主 agent/用户在会话里看到「通知已放弃」线索。
     // 与 sendDelivery（triggerTurn 唤醒）分工，通道不复用。
     sendDisplayMessage: (message) => {
       guardStaleCtx(() => pi.sendMessage(message), {
@@ -521,6 +665,54 @@ async function runProcessLevelMaintenance(
           toMsg: (err: unknown) => toErrorMessage(err),
         },
       );
+      // [裁决点 7]（workflow-run-resume-revision）孤儿 run 对账清理：引用集采集 =
+      // 壳侧注入面（core 不 import pi SDK——全池 session 文件流式扫描，v2 注册
+      // 条目 ∪ v1 快照条目 ∪ pre-W17 link 指针三代解析的并集）。同维护轮触发点、
+      // 同 oncePerProcess 守卫（幂等整轮）；宽限窗缺省 7 天（env 可调）。
+      // 触发面 = 全部 state 目录（对齐 core pi-host-run-store 枚举口径：agentDir
+      // 根回退 + sessions/<slug>/workflow-state 全目录 + 本 session 锚定目录）——
+      // 「引用 session 全删的目录」的残留 run 对本 session 维护轮结构性可达，判定
+      // 与删除判据归 core reapOrphanRuns，本处只做目录枚举。引用集预采集一次复用
+      // 全部目录（同轮同快照，逐目录重复全池扫描无增益）；登记文件
+      // （orphan-run-reap.json）落各自 stateDir，多目录天然隔离。
+      const stateDirs = new Set<string>([
+        path.join(resolveSessionDir(), STATE_DIR_NAME),
+        path.join(agentDir, STATE_DIR_NAME),
+      ]);
+      try {
+        for (const ent of fs.readdirSync(path.join(agentDir, "sessions"), { withFileTypes: true })) {
+          if (ent.isDirectory()) {
+            stateDirs.add(path.join(agentDir, "sessions", ent.name, STATE_DIR_NAME));
+          }
+        }
+      } catch (err) {
+        // sessions 根不可枚举：ENOENT = 从未落盘（首次运行形态），仅保留上方两
+        // 目录锚；非 ENOENT（EACCES/EIO 等真 IO 故障）debug 留痕不放大——枚举
+        // 缺侧 = 少扫目录（宁保留方向，宽限窗兜底），对齐读错分通道纪律。
+        if (!isEnoent(err)) {
+          logger.debug(
+            `[subagent-workflow] sessions 根目录枚举失败，state 目录触发面缺侧：${toErrorMessage(err)}`,
+          );
+        }
+      }
+      // 引用集惰性单次采集（同轮同快照，逐目录重复全池扫描无增益）：promise 在
+      // core reapOrphanRuns 的 await 表达式内才创建——采集器上抛（真 IO 故障，
+      // 读错分通道）时拒绝被该 await 的 try/catch 即时接住，不产生提前创建导致的
+      // 未处理拒绝告警；登记文件（orphan-run-reap.json）落各自 stateDir，多目录天然隔离。
+      let aliveRefsPromise: Promise<ReadonlySet<string>> | undefined;
+      const collectAliveRefsOnce = (): Promise<ReadonlySet<string>> => {
+        aliveRefsPromise ??= collectAliveWorkflowRunReferences(agentDir);
+        return aliveRefsPromise;
+      };
+      const reapDeps = {
+        collectAliveRunReferences: collectAliveRefsOnce,
+        warn: (msg: string) => logger.warn(`[subagent-workflow] ${msg}`),
+        debug: (msg: string) => logger.debug(`[subagent-workflow] ${msg}`),
+        toMsg: (err: unknown) => toErrorMessage(err),
+      };
+      for (const dir of stateDirs) {
+        await reapOrphanRuns({ stateDir: dir }, reapDeps);
+      }
     });
   } catch (err) {
     logger.warn("[subagents] retention maintenance round failed", {
@@ -571,16 +763,20 @@ async function createSessionRunState(
   let storeHealthy = true;
   // [skill-reload D4] 恢复门控：session_start(reason==='reload') 全程不跑
   // recoverCrashedRuns（无论条目有无）。暗礁（设计 §2.4）：recoverCrashedRuns 判
-  // 「crashed」只看磁盘快照 status=running、内存活 run 不参与判定且会被重建对象
-  // 覆盖——契约前提是「拥有这些 run 的进程已死」，而 reload 恰恰证明进程没死，
-  // 跑恢复即误杀窗口内存活的 run。条目缺失场景同理门控：磁盘可能有本 session 的
-  // running entry（前一轮 adoption 未完成又 reload 的窗口），由下一次**非 reload**
-  // 的 session_start（真重启/切换）按既有 kill-9 语义收编。跳过 loadAll 时无从
-  // 证伪健康度：storeHealthy 保持 true（workflow 域可用，可派发新 run）。
+  // 「crashed」只看 record fold 出的 running 态（loadAll 产物；runs Map 内存活
+  // run 不参与判定）——loadAll 折叠重建出 running 态即经 interruptRun（终局编排
+  // 单一入口）收编，事件流不含进程存活信息、窗口内存活 run 的流同样是 running
+  // 形态——契约前提是「拥有这些 run 的进程已死」，而 reload 恰恰证明进程没死，
+  // 跑恢复即误杀窗口内存活的 run。条目缺失场景同理
+  // 门控：磁盘可能有本 session 的 running entry（前一轮 adoption 未完成又
+  // reload 的窗口），由下一次**非 reload** 的 session_start（真重启/切换）按既有
+  // kill-9 语义收编。跳过 loadAll 时无从证伪健康度：storeHealthy 保持 true
+  // （workflow 域可用，可派发新 run）。
   if (!opts.skipRecovery) {
     try {
-      // [B1 修复] 恢复不挂 oncePerProcess：W17 后 loadAll 只读当前 session 的
-      // entries（本 session 权威面）、save 只写自身 runId 的 state 文件——恢复是
+      // [B1 修复] 恢复不挂 oncePerProcess：loadAll 只认本 session 的 v2 注册
+      // 条目（record 流折叠重建，W17 定界的现行形态）、收编即向本 run 的 record
+      // 流追加 run-interrupted 转移事件（不覆盖任何文件，天然幂等）——恢复是
       // session 级幂等操作，挂进程级守卫会让同进程的后续 session_start（如 /new
       // 后 /resume 一个上次崩溃退出的 session）重放首次 Promise、跳过 loadAll，
       // 该 session 的 running 残留既不收编也不进 run 列表。reload 的防误杀由上方
@@ -612,14 +808,6 @@ async function createSessionRunState(
           appendSettledEntry: (customType, data) => {
             pi.appendEntry(customType, data);
           },
-          // [W1 / D4 收编定界分流] v2 注册条目定界供给（loadAll 缓存的 registered
-          // 集）：v2 实体走 journal 收编，v1 快照实体走兼容旧分支（D7 旧会话行为
-          // 完全不变）——定界数据与恢复循环同源（同一次 loadAll 采出）。运行时
-          // 防御式探测：测试 mock store 未实现定界查询时不注入（core 侧未注入 =
-          // 保守走 v1 兼容分支，恢复语义 state 面不变）。
-          ...(typeof store.hasV2RegisteredEntry === "function"
-            ? { isV2RegisteredEntry: (runId: string) => store.hasV2RegisteredEntry(runId) }
-            : {}),
         },
       );
       logger.debug(
@@ -641,7 +829,7 @@ async function createSessionRunState(
 /**
  * adoption 主体：接管既有条目（同引用原地改写）。成功返回原 SessionLifecycleResult
  * （sessionState.get(sid) 与 reload 前同一引用——探针红线，store/runs 不换实例）；
- * 失败（健康检查不过 / rebind / 快照重发抛错）走 {@link failAdoption} 后返回
+ * 失败（健康检查不过 / rebind 抛错）走 {@link failAdoption} 后返回
  * undefined（调用方落到全量装配）。
  */
 async function tryAdoptExistingSession(
@@ -658,13 +846,11 @@ async function tryAdoptExistingSession(
     return undefined;
   }
   try {
-    // D3 rebind：在飞去抖批与串行 flush 链持有 store（this），原地改写 .pi/.ctx
-    // 对后续 flush 天然可见；换入的 appendEntry 源带 stale guard（D5）。
+    // D3 rebind：store 实例跨 reload 存活（this 引用不变），原地改写 .pi/.ctx；
+    // 换入的 appendEntry 源带 stale guard（D5）。[D1] record 单源后 store 无投影
+    // 物化面（原 D4 快照重发随 state 快照删除而退役）——接管动作收敛为 rebind，
+    // 后续 v2 终态条目补写自动走新 pi。
     existing.store.rebind(pi, ctx);
-    // D4 快照重发：经 store 既有 per-runId 串行 flush 链重发当前快照权威 entry
-    //（设计红线：禁止绕链直接 pi.appendEntry——物理乱序会让 last-ways 读回
-    // running → 崩溃恢复误判）。任何 IO 失败上抛 → 失败处置。
-    await existing.store.resendSnapshots(existing.runs);
   } catch (err) {
     await failAdoption(pi, ctx, deps, existing, toErrorMessage(err));
     return undefined;

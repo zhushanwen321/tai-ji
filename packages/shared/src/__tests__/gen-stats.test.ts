@@ -217,9 +217,9 @@ describe('session.getGenStats RPC 登记', () => {
       speed: { current: 35, day: 28, d7: 22, d30: 19 },
       cacheRatio: { current: 91, day: 87 },
       ttft: { current: 1240, day: 1100, d7: 990, d30: 1020 },
-      model: 'xiaomi-token-plan-cn/mimo-v2.5-pro',
+      model: 'xiaomi-token-plan-cn/mimo-v2.6-flash',
     }
-    expect(reply.model).toBe('xiaomi-token-plan-cn/mimo-v2.5-pro')
+    expect(reply.model).toBe('xiaomi-token-plan-cn/mimo-v2.6-flash')
     expect(reply.ttft.day).toBe(1100)
     // 无任何数据时：全 null + model 缺省（D4 恢复腿兜底形态）
     const empty: ReplyPayloadMap['session.getGenStats'] = {

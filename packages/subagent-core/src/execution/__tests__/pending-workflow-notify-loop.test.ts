@@ -30,7 +30,7 @@ import type { WorkerHandle } from "../../orchestration/worker-handle.ts";
 import {
   dispatchRunCreated,
   finalizeRun,
-} from "../../orchestration/worker-message-pump.ts";
+} from "../../orchestration/terminal-actions.ts";
 import { WorkflowRun } from "../../orchestration/models/workflow-run.ts";
 
 // ── harness ──────────────────────────────────────────────────
