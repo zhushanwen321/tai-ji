@@ -382,10 +382,12 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
   /** journal 目录锚（缺省 = 模块锚解析——与 dispatch 链 resolveRunEventJournal 同源）。 */
   journalDir?: string;
   /**
-   * 时间预算上界（ms）。取值优先级：显式提供 = 覆盖 run-created 帧记录的原预算；
-   * 缺省 = 继承该帧的预算；两者都没有 = 不限时（Budget 缺省语义）。生效值写入
-   * 重建 spec（错误重试重建时按剩余活跃预算重排计时器）并用于 D10 预算预检——
-   * 全链单值，不在别处二次折算。
+   * 时间预算上界（ms）。生效预算三档回落（单点在 assertResumeEligibility）：
+   * 显式提供 = 覆盖；缺省 = 继承最近一条 run-resumed 帧记录的生效值（跨崩溃存续
+   * ——上次显式覆盖不会在下次无参 resume 时退回创建预算）；再缺省 = 继承 run-created
+   * 帧的创建预算；三处都没有 = 不限时（Budget 缺省语义）。生效值写入重建 spec
+   * （错误重试重建时按剩余活跃预算重排计时器）、用于 D10 预算预检、并随本次
+   * run-resumed 帧落盘——全链单值，不在别处二次折算。
    */
   budgetTimeMs?: number;
   /** 时钟注入（epoch ms）；缺省 Date.now()——run-resumed 帧 ts 与预算算式的确定性测试通道。 */
@@ -466,12 +468,28 @@ function resolveRecordPath(runId: string, journalDir?: string): string {
 }
 
 /**
+ * 最近一条 `run-resumed` 帧（无 = undefined）。它记录该次复活实际生效的预算，是
+ * 「创建后经 resume 变更过的预算」的权威来源（三档回落的中档）。取流尾最近一条
+ * 而非「最近一条带字段」：后者会让更晚的「不限时复活」（0/负值不落字段）错误地
+ * 回退到更早的覆盖值。`findLast` 属 ES2023 lib（本包 target ES2022）——
+ * 从尾向头手写（run-registry 同款）。
+ */
+function findLatestRunResumed(
+  events: readonly WorkflowRunEvent[],
+): Extract<WorkflowRunEvent, { type: "run-resumed" }> | undefined {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]!;
+    if (event.type === "run-resumed") return event;
+  }
+  return undefined;
+}
+
+/**
  * [resumeRunLocked 拆分] 资格校验（段 2）：run-created 帧 / interrupted 生命周期 /
  * D10 预算预检（场景 16：搁置不计，活跃已耗不退）。任一不过即拒绝（异常即返回值）。
  *
- * 预算预检与返回的 budgetTimeMs 均为「生效预算」（显式 options 覆盖，未提供则继承
- * run-created 帧——见 ResumeRunOptions.budgetTimeMs）——继承形态下原预算已耗尽
- * 同样拒绝，不把复活窗变成绕过预算的通道。
+ * 预算预检与返回的 budgetTimeMs 均为「生效预算」（三档回落单点，见下方解析）——
+ * 继承形态下原预算已耗尽同样拒绝，不把复活窗变成绕过预算的通道。
  */
 function assertResumeEligibility(
   runId: string,
@@ -506,11 +524,13 @@ function assertResumeEligibility(
         "interrupted before resuming.",
     );
   }
-  // 生效预算单源（裁决：run-created 帧是预算记录面）：显式 options 覆盖，未提供
-  // 则继承 run-created 记录的创建预算，两者都没有 = 不限时（旧格式帧无该字段 +
-  // 未显式传 time → 与修复前完全一致）。本值同时供 D10 预检、首次挂表
-  // （adoptResumedRun）与 rebuildRunFromRecord 的 spec 消费——不出现第二处折算。
-  const budgetTimeMs = options?.budgetTimeMs ?? created.budgetTimeMs;
+  // 生效预算三档回落（单点，勿散）：显式 options 覆盖 > 最近一条 run-resumed 帧的
+  // 生效值（跨崩溃存续——上次显式覆盖不因下次无参 resume 退回创建预算）> run-created
+  // 记录的创建预算；三处都没有 = 不限时。本值同时供 D10 预检、首次挂表
+  // （adoptResumedRun）、rebuildRunFromRecord 的 spec 与本次 run-resumed 帧消费——
+  // 不出现第二处折算。旧格式帧（无字段）自然回落 run-created，行为不劣化。
+  const lastResumed = findLatestRunResumed(events);
+  const budgetTimeMs = options?.budgetTimeMs ?? lastResumed?.budgetTimeMs ?? created.budgetTimeMs;
   const activeElapsedMs = computeActiveElapsedMs(events);
   if (budgetTimeMs !== undefined && budgetTimeMs > 0 && activeElapsedMs >= budgetTimeMs) {
     throw reject(
@@ -650,6 +670,10 @@ async function resumeRunLocked(
       type: "run-resumed",
       ...(tierSummary !== undefined ? { reason: tierSummary } : {}),
       ...(options?.host !== undefined ? { host: options.host } : {}),
+      // 本次复活实际生效的预算随帧落盘（跨崩溃存续的数据面）：仅 > 0 落字段——
+      // 未设/0/负值不落（与 run-created 同款条件式），读取面按「最近一条
+      // run-resumed 的字段 ?? run-created 的字段」回落
+      ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
       ts: resumedAt,
     });
   } catch (err) {

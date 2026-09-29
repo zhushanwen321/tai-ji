@@ -418,18 +418,38 @@ function draftsToAgentCalls(
 }
 
 
+/**
+ * spec 重建预算的读取面三档回落（与 core resume-run.assertResumeEligibility 等价，
+ * 少 options 档——resume 的显式覆盖已由 core 写进 run-resumed 帧，本折叠只表达
+ * record 事实）：最近一条 run-resumed 的生效值 > run-created 的创建预算；两者
+ * 皆无/<=0 = 不限时。取流尾最近一条 run-resumed 而非「最近一条带字段」——更晚的
+ * 「不限时复活」（0/负值不落字段）须回落 created，而非错误地沿用更早的覆盖值。
+ * `findLast` 属 ES2023 lib（本包 target ES2022）——从尾向头手写。
+ */
+function resolveSpecBudgetMs(
+  created: Extract<WorkflowRunEvent, { type: "run-created" }> | undefined,
+  events: readonly WorkflowRunEvent[],
+): number | undefined {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]!;
+    if (event.type === "run-resumed") return event.budgetTimeMs ?? created?.budgetTimeMs;
+  }
+  return created?.budgetTimeMs;
+}
+
 /** [foldRecordStreamToRun 拆分] run spec 重建（run-created 帧优先，注册条目兜底）：
  * args 全文优先（设计 §3.1 载荷表 run-created 行「args」）；旧格式帧回落
  * argsSummary 尽力恢复（未截断可完整恢复，截断回落 {}——core parseArgsSummary
  * 同款语义；两侧行为等价由 record-mode 测试锁定）；scriptPath 锚定恢复（core
  * rebuildRunFromRecord 同款）：worker 沙箱 eval 模式无 __dirname，模板脚本靠
  * scriptPath 定位 _shared 族共享件；旧格式帧缺失回落空串。budgetTimeMs 恢复（core
- * 同款，仅 > 0 落 spec）：引擎/展示投影按 run 自身创建预算读——resume 的显式覆盖
- * 属编排期输入不入 record，本折叠只表达 record 事实（缺字段 = 旧格式/未设预算 =
- * 不限时）。 */
+ * 同款三档回落的 record 侧：最近一条 run-resumed 的生效值 > run-created 的创建
+ * 预算，仅 > 0 落 spec）：引擎/展示投影按 run 生效预算读（缺字段 = 旧格式/未设
+ * 预算 = 不限时）。 */
 function rebuildRunSpecFromEntries(
   created: Extract<WorkflowRunEvent, { type: "run-created" }> | undefined,
   reg: WorkflowRecordRegisteredEntryData,
+  budgetTimeMs: number | undefined,
 ) {
   return {
     scriptSource: created?.scriptSource ?? "",
@@ -438,9 +458,7 @@ function rebuildRunSpecFromEntries(
     scriptPath: created?.scriptPath ?? "",
     // 条件式与 core rebuildRunFromRecord 等价（> 0 才落字段）——旧格式帧/0/负值
     // 一律不限时，两侧折叠结果同形
-    ...(created?.budgetTimeMs !== undefined && created.budgetTimeMs > 0
-      ? { budgetTimeMs: created.budgetTimeMs }
-      : {}),
+    ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
     ...(reg.slug !== undefined ? { slug: reg.slug } : {}),
   };
 }
@@ -456,7 +474,7 @@ function foldRecordStreamToRun(
   const startedAtMs =
     created?.ts ?? (Number.isFinite(reg.startedAt) ? reg.startedAt : Date.now());
   const startedAtIso = new Date(startedAtMs).toISOString();
-  const spec = rebuildRunSpecFromEntries(created, reg);
+  const spec = rebuildRunSpecFromEntries(created, reg, resolveSpecBudgetMs(created, events));
 
   const drafts = collectRunCallDrafts(events);
 

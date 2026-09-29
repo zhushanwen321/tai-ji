@@ -30,6 +30,7 @@ import {
 import { abortRun } from "../lifecycle.ts";
 import { forgetRunResumedBudget, rebuildRuntime } from "../worker-message-pump.ts";
 import {
+  interruptRun,
   resetPhaseSettlementTrackerForTest,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
@@ -398,6 +399,96 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
       "has exhausted its time budget",
     );
     expect(runs.has("wf-budget-exhausted")).toBe(false);
+  });
+
+  it("写侧：显式覆盖预算随 run-resumed 帧落盘；未设/0 → 不落字段（与 run-created 同款条件式）", async () => {
+    // 显式覆盖 120min（run-created 60min）→ 帧带 120min
+    await seedWithBudget("wf-budget-frame-override", { budgetTimeMs: 60 * MIN, activeElapsedMs: 40 * MIN });
+    await resumeRun("wf-budget-frame-override", makeDeps().deps, {
+      now: () => Date.now(),
+      budgetTimeMs: 120 * MIN,
+    });
+    const resumed = (await scanEvents("wf-budget-frame-override")).find((e) => e.type === "run-resumed")!;
+    expect(resumed).toMatchObject({ type: "run-resumed", budgetTimeMs: 120 * MIN });
+
+    // 未传 + run-created 也无 → 不限时 → 帧不落字段
+    await seedInterruptedRecord("wf-budget-frame-none");
+    await resumeRun("wf-budget-frame-none", makeDeps().deps, { now: () => Date.now() });
+    const noneResumed = (await scanEvents("wf-budget-frame-none")).find((e) => e.type === "run-resumed")!;
+    expect("budgetTimeMs" in noneResumed).toBe(false);
+
+    // 显式 0 → 不限时 → 帧不落字段
+    await seedInterruptedRecord("wf-budget-frame-zero");
+    await resumeRun("wf-budget-frame-zero", makeDeps().deps, { now: () => Date.now(), budgetTimeMs: 0 });
+    const zeroResumed = (await scanEvents("wf-budget-frame-zero")).find((e) => e.type === "run-resumed")!;
+    expect("budgetTimeMs" in zeroResumed).toBe(false);
+  });
+
+  it("跨崩溃存续：第一次显式 120min → 第二次无参 resume 生效 120min（非创建预算 60min），重试按剩余重排", async () => {
+    const runId = "wf-budget-durable";
+    const createdBudget = 60 * MIN;
+    const override = 120 * MIN;
+    const active = 40 * MIN;
+    try {
+      await seedWithBudget(runId, { budgetTimeMs: createdBudget, activeElapsedMs: active });
+      const first = makeDeps();
+      await resumeRun(runId, first.deps, { now: () => Date.now(), budgetTimeMs: override });
+      const firstResumed = (await scanEvents(runId)).find((e) => e.type === "run-resumed")!;
+      expect(firstResumed).toMatchObject({ budgetTimeMs: override });
+
+      // 第二次崩溃（生产等价：崩溃收编写 run-interrupted）
+      await interruptRun(runId, { errorCode: "crashed", reason: "second crash" });
+
+      // 第二次 resume 无参 → 三档回落命中上一条 run-resumed 的 120min（不是 created 60min）
+      const second = makeDeps();
+      await resumeRun(runId, second.deps, { now: () => Date.now() });
+      const run = second.runs.get(runId)!;
+      expect(run.spec.budgetTimeMs).toBe(override);
+      expect(run.state.budget.maxTimeMs).toBe(override);
+
+      // 重试重建按剩余（≈80min）重排——判别不是退回 created 60min 的 ≈20min
+      second.budgetSchedules.length = 0;
+      rebuild(run, second.deps);
+      const rescheduled = second.budgetSchedules[0]!.ms;
+      expect(rescheduled).toBeGreaterThan(createdBudget);
+      expect(rescheduled).toBeLessThanOrEqual(override - active);
+    } finally {
+      forgetRunResumedBudget(runId);
+      resetPhaseSettlementTrackerForTest();
+    }
+  });
+
+  it("旧格式 run-resumed（无字段）→ 回落 run-created 创建预算（旧格式行为不劣化）", async () => {
+    const runId = "wf-budget-legacy-resumed";
+    const journal = createRunEventJournal(journalDir);
+    await journal.append(runId, {
+      type: "run-created",
+      runId,
+      workflowName: "test-wf",
+      argsSummary: "{}",
+      scriptSource: SCRIPT_SOURCE,
+      budgetTimeMs: 60 * MIN,
+      ts: T0,
+    });
+    await journal.append(runId, { type: "agent-started", taskIndex: 0, agentName: "collector", attempt: 1, ts: T0 + 1_000 });
+    await journal.append(runId, {
+      type: "agent-settled",
+      taskIndex: 0,
+      attempt: 1,
+      outcome: "done",
+      durationMs: 1_000,
+      result: { content: "r" },
+      ts: T0 + 40 * MIN - 1_000,
+    });
+    await journal.append(runId, { type: "run-interrupted", errorCode: "crashed", ts: T0 + 40 * MIN });
+    // 旧格式 run-resumed（本载荷落地前的流：无 budgetTimeMs）
+    await journal.append(runId, { type: "run-resumed", ts: T0 + 40 * MIN + 1_000 });
+    await journal.append(runId, { type: "run-interrupted", errorCode: "crashed", ts: T0 + 40 * MIN + 2_000 });
+
+    const { deps, runs } = makeDeps();
+    await resumeRun(runId, deps, { now: () => Date.now() });
+
+    expect(runs.get(runId)!.spec.budgetTimeMs).toBe(60 * MIN);
   });
 });
 

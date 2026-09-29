@@ -510,6 +510,17 @@ export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:f
   reason?: string;
   /** 宿主标识（跨进程锁裁决的胜出方语境，自由文本；可缺省）。 */
   host?: string;
+  /**
+   * 本次复活实际生效的时间预算上界（ms）——即 resume 生效预算三档回落的落定值，
+   * 使「显式传入的覆盖预算」跨崩溃存续（否则下次无参 resume 会退回 run-created 的
+   * 创建预算）。读取面三档回落：显式 options > 最近一条 run-resumed 的本字段 >
+   * run-created 的创建预算；三处都没有 = 不限时。缺席有两种形态——本次复活不限时
+   * （未设/0/负值），或旧格式帧（本载荷落地前的流，一律回落 run-created，不劣化）：
+   * 读取面按「最近一条 run-resumed 的本字段 ?? run-created」处理，与 run-created
+   * 同款条件式（仅 > 0 落字段；写入点 = resume-run.resumeRunLocked 的 run-resumed
+   * 派发）。
+   */
+  budgetTimeMs?: number;
 }
 
 /** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */
