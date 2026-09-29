@@ -1070,9 +1070,10 @@
     },
     {
       "id": "E2E-PIPE-02",
-      "summary": "pre-commit 检查检测核心单测：validate-constraints（constraints.json 结构校验器）+ check-prompt-outposts（prompt 注入哨兵检测核心）",
+      "summary": "约束管线脚本轨：validate-constraints（constraints.json 结构校验器，检测核心单测）+ select-constraints（CR 约束动态加载，渲染 .review/constraints.md 供 reviewer 消费）+ check-prompt-outposts（prompt 注入哨兵检测核心）",
       "scope": [
         "scripts/validate-constraints.mjs",
+        "scripts/select-constraints.mjs",
         "scripts/__tests__/validate-constraints.test.mjs",
         "scripts/__tests__/check-prompt-outposts.test.mjs"
       ],
@@ -1081,6 +1082,10 @@
         {
           "kind": "script",
           "ref": "scripts/validate-constraints.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/select-constraints.mjs"
         },
         {
           "kind": "spec",
@@ -1096,7 +1101,7 @@
       "run": "npx vitest run scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-prompt-outposts.test.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "pre-commit 检查的检测核心单测登记（2026-09-27 补登）：检查自身判定行为机器锁定——误放行让「忘挂注入」回到人责，误拦逼人加豁免瓦解白名单治理。check_prompt_outposts.py 实体在 .agents（不入 git 跟踪），不可登记为 asset，经 test.mjs 子进程 --root 指向 tmp fixture 树覆盖（退出码契约面）"
+      "note": "pre-commit 检查的检测核心单测登记（2026-09-27 补登）：检查自身判定行为机器锁定——误放行让「忘挂注入」回到人责，误拦逼人加豁免瓦解白名单治理。check_prompt_outposts.py 实体在 .agents（不入 git 跟踪），不可登记为 asset，经 test.mjs 子进程 --root 指向 tmp fixture 树覆盖（退出码契约面）。select-constraints.mjs（2026-09-29 补登，与 validate-constraints 同族同源 docs/constraints.json）：消费方 = dev-merge 1.7 步 / pr-lifecycle constraints step，条目归属路由口径（执行列 enforcement.agent）由渲染头部自述；无独立单测——结构面由 validate-constraints.test 覆盖 constraints.json 本体，选择/渲染行为变更随消费方审查流程人工验证"
     },
     {
       "id": "E2E-PIPE-03",
