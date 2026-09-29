@@ -3,15 +3,16 @@
  *
  * 两个独立场景（各自 session、各自 run、空载串行）：
  *  - A6/V6 窗口内薄壳崩溃自愈：自定义模板顺序两条 agent()（不同名），第一条在飞期
- *    剧本 kill 薄壳进程 → journal ask-settled{outcome:failed, errorCode:engine_crashed}
- *    （既有合成路径）；第二条 agent() respawn 新薄壳（pid 更替证据）完成其任务，run
- *    不被放大失败（run-settled completed）。设计 D7 保留语义的真机复核。
+ *    剧本 kill 薄壳进程 → record 流 agent-settled{outcome:failed}（崩溃合成路径；
+ *    errorCode 口径见用例内注记）；第二条 agent() respawn 新薄壳（pid 更替证据）完成
+ *    其任务，run 不被放大失败（run-settled outcome done）。设计 D7 保留语义的真机复核。
  *  - A8/V8 同名续写同一子代理：自定义模板同名 agent()（description 同为 solo-worker）
- *    顺序两次 → journal member-pool register 恰 1（name → 同一 recordId，第二次调用
- *    若新建成员会有第二帧）、ask-dispatched 恰 2 同 agentName、ask-settled 恰 2 全
- *    completed；record 介质面（W1 权威介质）= 主 session 文件 subagent-record v2
- *    registered/settled 各恰 1 + record 事件文件 record-round-started/idle 各恰 2
- *    （同一 record 两轮 revive 续写）。
+ *    顺序两次 → record 流 agent-started 恰 2 且恰 1 条携带 memberRecordId（D6 绑定
+ *    消解：成员复用池「name→recordId」路由承载于 agent-started 载荷字段——第二条
+ *    调用复用既有成员，若误建新成员会出现第二条缺省绑定的 started 帧）、agentName
+ *    同为 solo-worker、agent-settled 恰 2 全 done；record 介质面（W1 权威介质）=
+ *    主 session 文件 subagent-record v2 registered/settled 各恰 1 + record 事件
+ *    文件 record-round-started/idle 各恰 2（同一 record 两轮 revive 续写）。
  *
  * 自定义模板：e2e/fixtures/wl-seq-two.js / wl-name-reuse.js（@pi-meta 头齐全；经
  * workflow tool run action 的绝对路径 name 派发——subagents tool 恒转译 fan-out，
@@ -192,9 +193,10 @@ interface JournalView { // oe-exempt:20260927:test:e2e 剧本内视图形状声�
 }
 
 function readJournal(agentDir: string): JournalView[] {
-  return listFilesRecursive(agentDir, '.events.jsonl').map((f) => ({
+  // run 域 record 事件流后缀（<runId>.record.jsonl，core RUN_EVENT_JOURNAL_SUFFIX 同源；D1 起唯一 journal 介质）
+  return listFilesRecursive(agentDir, '.record.jsonl').map((f) => ({
     file: f,
-    runId: path.basename(f).replace(/\.events\.jsonl$/, ''),
+    runId: path.basename(f).replace(/\.record\.jsonl$/, ''),
     frames: parseJsonlLines(f).entries,
   }))
 }
@@ -349,22 +351,21 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
     }
     expect(sleep2Up, 'r2 成员 sleep 20 进程应出现（respawn 薄壳承载第二条 ask）').toBe(true)
 
-    // run 收口：completed（r1 crashed 是设计内合成 outcome，不放大 run 失败）
+    // run 收口：done（r1 crashed 是设计内合成形态，不放大 run 失败）
     const run = await waitForRunSettled(agentDir, SETTLE_TIMEOUT_MS, 'a6')
     const settledFrames = run.frames.filter((f) => f['type'] === 'run-settled')
     expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
-    expect(settledFrames[0]?.['outcome'], 'run 应 completed 收口（崩溃不放大失败）').toBe('completed')
+    expect(settledFrames[0]?.['outcome'], 'run 应 done 收口（崩溃不放大失败）').toBe('done')
 
-    // journal ask 面：r1 failed + r2 completed。
-    // errorCode 断言口径：ask 级 errorCode 实装 = result.failureKind（枚举
-    // stale_context/schema_deterministic/unknown，dispatchAskSettled 映射），崩溃
+    // record 流 agent 面：r1 failed + r2 done。
+    // errorCode 断言口径：agent 级 errorCode 实装 = result.failureKind（枚举
+    // stale_context/schema_deterministic/unknown，dispatchAgentSettled 映射），崩溃
     // 分诊不在该枚举面（engine_crashed 是 run 级 RunErrorCode 值）——r1 的
-    // errorCode 现状恒 unknown，不作断言（run-events.ts AskSettledEvent 注释示例
-    // 与该实装的漂移已另行登记）。
-    const askSettled = run.frames.filter((f) => f['type'] === 'ask-settled')
-    expect(askSettled.length, 'ask-settled 应恰 2 帧（两条 agent()）').toBe(2)
-    const failed = askSettled.find((f) => f['outcome'] === 'failed')
-    const ok = askSettled.find((f) => f['outcome'] === 'completed')
+    // errorCode 现状恒 unknown，不作断言。
+    const agentSettled = run.frames.filter((f) => f['type'] === 'agent-settled')
+    expect(agentSettled.length, 'agent-settled 应恰 2 帧（两条 agent()）').toBe(2)
+    const failed = agentSettled.find((f) => f['outcome'] === 'failed')
+    const ok = agentSettled.find((f) => f['outcome'] === 'done')
     expect(failed, 'r1 ask 应 failed（kill 注入的崩溃形态）').toBeDefined()
     // 失败时点确证：失败帧 ts 应晚于 kill 注入时刻（失败应答的 durationMs 缺省 0，
     // 不可作时点证据——帧 ts 为权威）
@@ -388,7 +389,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
       writeDiag('batch-wrr-a6-console-errors.json', { errors: consoleCap.errors.slice(-50) })
       console.warn(`[batch-wrr] A6 renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言面）`)
     }
-    console.log(`[batch-wrr] A6 PASS：kill pid=${killedPid} → respawn pid=${respawnPid} → r2 completed → run completed`)
+    console.log(`[batch-wrr] A6 PASS：kill pid=${killedPid} → respawn pid=${respawnPid} → r2 done → run done`)
   } finally {
     try {
       listen?.ws.close()
@@ -403,7 +404,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
 
 // ── A8/V8：同名续写同一子代理 ────────────────────────────────────────────
 
-test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（member-pool register 恰 1 + session 文件连续）', async ({ }, testInfo) => {
+test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（memberRecordId 绑定恰 1 + session 文件连续）', async ({ }, testInfo) => {
   test.setTimeout(600_000)
   test.skip(process.env['TAIJI_PI_LIVE'] !== '1', '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行')
   const credSkip = realCredentialSkipReason()
@@ -445,26 +446,33 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
     const run = await waitForRunSettled(agentDir, SETTLE_TIMEOUT_MS, 'a8')
     const settledFrames = run.frames.filter((f) => f['type'] === 'run-settled')
     expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
-    expect(settledFrames[0]?.['outcome'], 'run 应 completed 收口').toBe('completed')
+    expect(settledFrames[0]?.['outcome'], 'run 应 done 收口').toBe('done')
 
-    // journal 复用面：member-pool register 恰 1（同 name 同 recordId）+ ask ×2
-    const memberPool = run.frames.filter((f) => f['type'] === 'member-pool' && f['action'] === 'register')
-    if (memberPool.length !== 1) {
-      writeDiag('batch-wrr-a8-member-pool.json', {
-        memberPoolFrames: run.frames.filter((f) => String(f['type']).includes('member')),
+    // record 流复用面（D6 绑定消解后语义）：member-pool 事件已删，「同名复用」
+    // 承载于 agent-started 载荷字段 memberRecordId——首派（新建成员）缺省，续写
+    // （复用既有成员）携带。恰 1 条携带 = 第二次调用复用；2 条全缺省 = 第二次
+    // 误建新成员（复用通道未命中）。
+    const agentStarted = run.frames.filter((f) => f['type'] === 'agent-started')
+    if (agentStarted.length !== 2) {
+      writeDiag('batch-wrr-a8-agent-started.json', {
+        startedFrames: agentStarted,
         types: run.frames.map((f) => String(f['type'])),
       })
     }
-    expect(memberPool.length, `同名两次调用 member-pool register 应恰 1 帧（实际 ${memberPool.length}——0 = 复用通道未命中，2 = 第二次误建新成员）`).toBe(1)
-    const askDispatched = run.frames.filter((f) => f['type'] === 'ask-dispatched')
-    expect(askDispatched.length, 'ask-dispatched 应恰 2 帧（两条同名调用）').toBe(2)
-    const agentNames = new Set(askDispatched.map((f) => String(f['agentName'])))
-    expect(agentNames.size, `两条 ask 的 agentName 应同为 solo-worker（实际 ${[...agentNames].join(',')}）`).toBe(1)
-    const askSettled = run.frames.filter((f) => f['type'] === 'ask-settled')
-    expect(askSettled.length, 'ask-settled 应恰 2 帧').toBe(2)
+    expect(agentStarted.length, `agent-started 应恰 2 帧（两条同名调用；实际 ${agentStarted.length}）`).toBe(2)
+    const rebound = agentStarted.filter((f) => typeof f['memberRecordId'] === 'string' && f['memberRecordId'] !== '')
+    expect(rebound.length, `携带 memberRecordId 的 agent-started 应恰 1 帧（实际 ${rebound.length}——0 = 复用通道未命中，2 = 形态非法）`).toBe(1)
     expect(
-      askSettled.every((f) => f['outcome'] === 'completed'),
-      '两条 ask 均应 completed（revive 续写轮正常完成）',
+      String(rebound[0]?.['memberRecordId']),
+      'memberRecordId 应非空（复用绑定的 record id）',
+    ).not.toBe('')
+    const agentNames = new Set(agentStarted.map((f) => String(f['agentName'])))
+    expect(agentNames.size, `两条 agent-started 的 agentName 应同为 solo-worker（实际 ${[...agentNames].join(',')}）`).toBe(1)
+    const agentSettled = run.frames.filter((f) => f['type'] === 'agent-settled')
+    expect(agentSettled.length, 'agent-settled 应恰 2 帧').toBe(2)
+    expect(
+      agentSettled.every((f) => f['outcome'] === 'done'),
+      '两条 agent 均应 done（revive 续写轮正常完成）',
     ).toBe(true)
 
     const sessionsNow = listFilesRecursive(sessionsDir, '.jsonl')
@@ -527,8 +535,8 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
     expect(createdFrames.length, `record 事件文件 record-created 应恰 1 帧（单 record；实际 ${createdFrames.length}）`).toBe(1)
     // 多轮证据注记：workflow 成员复用的 revive 续轮 = engine.run(resume) 直发
     //（runWorkflowEngineTask），不经 chat 域 Continuation 轮始簿记——record-round-started
-    // 帧只存在于 chat 域续轮，A8 的多轮证据由 member-pool register 单帧 + v2 条目对 +
-    // ask-dispatched/settled ×2 承载（帧型清单落 diag 供人工复核）。
+    // 帧只存在于 chat 域续轮，A8 的多轮证据由 agent-started memberRecordId 绑定单帧 +
+    // v2 条目对 + agent-started/settled ×2 承载（帧型清单落 diag 供人工复核）。
     writeDiag('batch-wrr-a8-record-events.json', {
       runRecordId,
       frameTypes: recordEvents.map((e) => String(e['type'])),
@@ -543,7 +551,7 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
       writeDiag('batch-wrr-a8-console-errors.json', { errors: consoleCap.errors.slice(-50) })
       console.warn(`[batch-wrr] A8 renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言面）`)
     }
-    console.log(`[batch-wrr] A8 PASS：member-pool register 恰 1、两轮同 session 文件、run completed`)
+    console.log(`[batch-wrr] A8 PASS：memberRecordId 绑定恰 1、两轮同 session 文件、run done`)
   } finally {
     try {
       listen?.ws.close()

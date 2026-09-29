@@ -1194,7 +1194,7 @@
       "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行（双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证，缺一 skip 不 fail；空载串行）：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-window-reuse-recovery.spec.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "pi-workflow-run-resource-model D3 验收 A6/A8（场景 V6/V8）落建（2026-09-27 D3 真机绿：A6 kill→respawn→r2 completed→run completed（errorCode 断言口径 = failureKind 值域，engine_crashed 为 run 级词表值不适用 ask 级）；A8 member-pool register 恰 1 + v2 条目对 + record-created 恰 1——同 record 多轮的介质证据；workflow 成员 revive 续轮不经 chat 域 continuation，无 record-round-started 帧，为已知实现语义）。自定义模板经 workflow tool run action 绝对路径派发。"
+      "note": "pi-workflow-run-resource-model D3 验收 A6/A8（场景 V6/V8）落建。断言口径（workflow-run-resume-revision 词表后）：A6 kill→respawn→r2 done→run done（errorCode 断言口径 = failureKind 值域，engine_crashed 为 run 级词表值不适用 agent 级）；A8 同名复用承载于 agent-started 载荷 memberRecordId（绑定恰 1 条携带 = 复用命中，member-pool 词表成员已删、绑定消解进 agent-started 帧字段）+ v2 条目对 + record-created 恰 1——同 record 多轮的介质证据；workflow 成员 revive 续轮不经 chat 域 continuation，无 record-round-started 帧，为已知实现语义。run journal 介质 = record 流（<runId>.record.jsonl 单源后缀）。自定义模板经 workflow tool run action 绝对路径派发。"
     },
     {
       "id": "E2E-BATCH-12",
