@@ -723,8 +723,7 @@ function rebuildRunFromRecord(
     // 重派集成员（result 缺省）不建条目：worker 重放脚本到断点处重新发
     // agent-call(callId=N) → dispatchAgentCall miss → 真实派发（D8 档 2/3 经
     // 成员复用通道续写/新建）。回放集直接构造 done 终态（bypass markRunning/
-    // markDone 状态机守卫——重建已知良好持久态，fromRunSnapshot/rehydrateCall
-    // 先例）。
+    // markDone 状态机守卫——重建已知良好持久态的既定先例）。
     if (d.result === undefined) continue;
     const linked = sharedNodes.get(taskIndex) ?? nodes.find((n) => n.stepIndex === taskIndex)!;
     // opts 恢复（[U13]）：agent-started 帧的入参全文（canonical 序列化，写点 =

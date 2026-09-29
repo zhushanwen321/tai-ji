@@ -11,7 +11,7 @@
  *   未知 type warn 留痕（协议漂移防线）
  * - OR-8：脚本 return 时残留 fire-and-forget in-flight call 收口为取消终态
  *   （call done + trace failed + Cancelled 文案 + completedAt；[H2 W3] trace.live
- *   字段已删除——节点无运行期附属对象可滞留），先收口再落盘——done 快照不含
+ *   字段已删除——节点无运行期附属对象可滞留），先收口再终态——done 聚合面不含
  *   running 节点
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,7 +29,6 @@ import {
 } from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
-import { toRunSnapshot } from "../run-snapshot.ts";
 import { Trace } from "../models/trace.ts";
 import type { AgentResult, WorkerLogEntry } from "../models/types.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
@@ -346,7 +345,7 @@ describe("[OR-6] log 消息消费 + 未知类型 default 留痕", () => {
 // ── [OR-8] run done 时 in-flight call 收口 cancelled ─────────
 
 describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
-  it("fire-and-forget agent() 后 return：call 收口 done + trace failed（Cancelled 文案），快照无 running 节点", async () => {
+  it("fire-and-forget agent() 后 return：call 收口 done + trace failed（Cancelled 文案），聚合面无 running 节点", async () => {
     const run = makeRealRun("wf-or8-1");
     await seedRunCreated(run);
     const deps = makeDeps();
@@ -369,10 +368,9 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     expect(node?.status).toBe("failed");
     expect(node?.error).toContain("Cancelled");
     expect(node?.completedAt).toBeDefined();
-    // 持久化快照（收口先于 save）不含 running 形态
-    const snap = toRunSnapshot(run);
-    expect(snap.state.calls.map((c) => c.status)).toEqual(["done"]);
-    expect(snap.state.trace.map((n) => n.status)).toEqual(["failed"]);
+    // 收口后聚合面无 running 形态（call 全 done、trace 全 failed——收口先于终态）
+    expect(Array.from(run.state.calls.values()).map((c) => c.status)).toEqual(["done"]);
+    expect(run.state.trace.toArray().map((n) => n.status)).toEqual(["failed"]);
   });
 
   it("handleWorkerError 超限路径同样收口（failed 快照一致）", async () => {

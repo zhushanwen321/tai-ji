@@ -50,8 +50,8 @@ function makeSlugStateDirIn(root: string, slug: string): string {
   return stateDir;
 }
 
-/** toRunSnapshot 最小合法行（fromRunSnapshot 可重水合；与 pi-host-run-store.test.ts
- * 同源 fixture——budget 六字段缺一会被形状校验拒绝）。 */
+/** 最小合法快照行（v2 状态文件形态——budget 六字段缺一会被读侧形状校验拒绝；
+ *  与 pi-host-run-store.test.ts 同源 fixture）。 */
 function snapshotLine(runId: string, startedAtIso: string): string {
   return `${JSON.stringify({
     v: "wf-run-v2",

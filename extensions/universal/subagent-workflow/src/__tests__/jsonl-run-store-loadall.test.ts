@@ -25,7 +25,6 @@ import * as path from "node:path";
 
 import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 
-import { toRunSnapshot } from "@zhushanwen/subagent-core";
 import { WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } from "@zhushanwen/subagent-core";
 import { JsonlRunStore } from "../jsonl-run-store.ts";
 import { mkCtx } from "@zhushanwen/subagent-core/testing/orchestration/__tests__/test-mocks.ts";

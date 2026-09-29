@@ -9,9 +9,9 @@
 // - state 快照物化触发源/串行链/批合并（W4-W8）→ 无物化面，写面纪律锚在
 //   jsonl-run-store-event-edge.test.ts；
 // - save 兜底容错（W3 mkdir ENOENT/EACCES）→ save 恒 no-op 零 IO，锚同上；
-// - 快照版本守卫（W9）/ codec golden 字节锚（⛔5）→ 无快照字节面；
-//   toRunSnapshot/fromRunSnapshot codec 的消费方 = 壳 store 物化（run 快照投影），
-//   其行为锚在 core 侧测试；
+// - 快照版本守卫（W9）/ codec golden 字节锚（⛔5）→ 无快照字节面（codec 已删，
+//   快照格式版本常量单源 = core SNAPSHOT_VERSION，读侧版本守卫锚在 runtime
+//   workflow-extractor）；
 // - adoption 投影重发保序（D4 resendSnapshots）→ 无投影可重发，接管动作收敛为
 //   rebind（session-lifecycle.ts）；
 // - 坏行宽容收编 → [D1] 反转为读失败拒绝（场景 18），见本件与 record-mode 族。

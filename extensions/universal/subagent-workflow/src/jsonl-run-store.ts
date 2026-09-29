@@ -265,8 +265,7 @@ function lastInterruptedAt(events: readonly WorkflowRunEvent[]): string | undefi
 
 /**
  * 单个 call 的重建中间形态（fold 循环产出；AgentCall 构造延迟到 Trace 建立后
- * ——traceNode 需与 Trace 共享同一节点副本（D-10 引用共享，fromRunSnapshot
- * linkTraceNode 同款）。
+ * ——traceNode 需与 Trace 共享同一节点副本，D-10 引用共享）。
  */
 interface CallDraft {
   taskIndex: number;
@@ -375,7 +374,7 @@ function foldRecordStreamToRun(
   }
 
   // Trace 先重建：call 的 traceNode 回链到 Trace 副本（D-10 引用共享；匹配不到
-  // 退化为独立浅拷贝，仅保构造不炸——fromRunSnapshot linkTraceNode 同款取舍）。
+  // 退化为独立浅拷贝，仅保构造不炸）。
   const nodes: ExecutionTraceNode[] = [...drafts.values()].map((d) => ({
     stepIndex: d.taskIndex,
     agent: d.agentName,
@@ -397,7 +396,7 @@ function foldRecordStreamToRun(
   for (const d of drafts.values()) {
     const linked = sharedNodes.get(d.taskIndex) ?? nodes.find((n) => n.stepIndex === d.taskIndex)!;
     // 直接构造 done/running 终态（bypass markRunning/markDone 状态机守卫——
-    // 重建已知良好持久态，同 fromRunSnapshot.rehydrateCall 先例）。
+    // 重建已知良好持久态的既定先例）。
     // opts 最小形态：record 流现行载荷不携带入参全文（入参入载荷归后续词表批），
     // 重建聚合的 opts 仅满足 AgentCallOpts 契约形状（prompt 占位空串）。
     const call = new AgentCall(d.taskIndex, { prompt: "" }, linked);

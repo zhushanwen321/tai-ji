@@ -33,12 +33,12 @@ import {
   classifyWorkflowRecordEntryData,
 } from '@zhushanwen/subagent-core'
 // RunSnapshot 格式版本（D-5 版本守卫判据）单源 import 自 subagent-core barrel（权威定义
-// orchestration/run-snapshot.ts；extension 侧 jsonl-run-store.ts 留壳消费同一常量）——
-// 无本地字面量副本，runtime 与 extension 的快照格式版本对齐由 workspace 依赖承载。
+// orchestration/run-snapshot.ts；runtime 是该常量唯一 barrel 消费方）——无本地字面量
+// 副本，快照格式版本对齐由 workspace 依赖承载。
 // [P3/D6] additive 字段策略：同版本内新增的可选字段（calls[] 条目的 startedAt/
 // lastProgressAt、state.health/outcome/errorCode）读侧无需同步——格式重构（字段改形/
 // 删改）才 bump 版本，additive 面旧读侧按缺省渲染（本文件对缺字段逐项 `??` 缺省，历史
-// run 投影保留）。字段集演进时对照权威源的 projectRunEvents 注释核对（fold 填充面）。
+// run 投影保留）。字段集演进时对照 run-snapshot.ts 常量注释的 additive 策略核对。
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { scanSubagentEntries } from './subagent-extractor.js'
 import { mergeWorkflowStepRecords } from './workflow-step-merge.js'

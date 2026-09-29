@@ -18,11 +18,10 @@
  * runtime warnOnce 去重是两消费方各自的可观测性选择，收敛判定不收敛日志。
  *
  * 不在本模块的：
- * - snapshot 层解码（SNAPSHOT_VERSION 守卫 + fromRunSnapshot）——run-snapshot.ts
- *   codec 单源；entry 层 v 与 snapshot 层 v 是两级独立版本（entry schema 演化
- *   vs 快照格式演化）；
+ * - snapshot 格式版本（SNAPSHOT_VERSION）——run-snapshot.ts 常量单源；entry 层 v
+ *   与 snapshot 层 v 是两级独立版本（entry schema 演化 vs 快照格式演化）；
  * - runtime 投影的 runId 存在性守卫——投影键需求（record 需要 runId 做 Map 键），
- *   非 entry schema 面，runtime 解码链自有等价校验（fromRunSnapshot）。
+ *   非 entry schema 面，runtime 解码链自有等价校验。
  */
 
 import type { DoneReason } from "./models/types.ts";
