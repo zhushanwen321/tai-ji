@@ -5,8 +5,8 @@
 // 夹具原则（与 helpers.ts 同源，扩展到 resume 真链路）：
 // - 崩溃前置态 = record 流经 core journal 生产写入器构造（createRunEventJournal
 //   append——与生产单写者落盘形态逐字节同源；写侧载荷完整：dispatchRunCreated
-//   写 scriptSource 全文、dispatchAgentSettled 写 result 全文，全文落账随
-//   terminal-actions 闭合——真跑 runWorkflow 产生的流与夹具构造的流同构可换，
+//   写 scriptSource 全文、dispatchAgentSettled 写 result 全文，全文写入随
+//   terminal-actions 闭环——真跑 runWorkflow 产生的流与夹具构造的流同构可换，
 //   夹具构造形态是可控性选择）。场景以「构造崩溃态 → resume 起全真链路」形态
 //   覆盖（resumeRun 锁/校验/三档/重建、worker 真线程重放、收编/维护轮真代码
 //   全部执行，唯一被夹具替代的是 dispatch 层活体聚合构造——直接写流，避免
