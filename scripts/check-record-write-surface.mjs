@@ -85,8 +85,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** R1 七名模式：真实导出名（D7 v2，含 .alive 写/删两名——轮 5 补；含 U2 轮收口写面）。 */
-export const WRITE_FN_RE = /\b(writeFinalizedState|writeCancelledState|writeSettledState|writeManifest|saveIndex|writeAliveMarker|removeAliveMarker)\s*\(/;
+/** R1 八名模式：真实导出名（D7 v2，含 .alive 写/删两名——轮 5 补；含 U2 轮收口写面；
+ *  manifest-store 的 bound 物化写面 materializeBoundRecordManifest——2026-09-29 补，
+ *  此前它不在名单内，record-store-rounds.ts 直接 import 调用可整条绕过本检查）。 */
+export const WRITE_FN_RE = /\b(writeFinalizedState|writeCancelledState|writeSettledState|writeManifest|materializeBoundRecordManifest|saveIndex|writeAliveMarker|removeAliveMarker)\s*\(/;
 
 /** R2 subagent-record custom entry 写形态（单行双序，字面量形态——窗口判定的
  *  快路径导出，行为回归锚定见 scripts/__tests__/check-record-write-surface.test.mjs）。
@@ -385,7 +387,7 @@ function main() {
   }
   console.log(
     `[record-write-surface] OK：${files.length} 个源文件（packages/*/src + extensions/**/src，tests 豁免）` +
-      ` 写面守卫零命中（R1 七名函数 + R2 subagent-record + R3 workflow-record 白名单 +` +
+      ` 写面守卫零命中（R1 八名函数 + R2 subagent-record + R3 workflow-record 白名单 +` +
       ` R4 v1 投影器 + R5 v1 快照载荷 + R6 死字节 + R7 .events 直写，ADR-0078）`,
   );
   return 0;

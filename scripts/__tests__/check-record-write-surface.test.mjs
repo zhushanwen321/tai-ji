@@ -75,11 +75,12 @@ describe('collectTsFiles 遍历边界', () => {
 // ── 正则/判定原语 ──────────────────────────────────────────────────────
 
 describe('规则原语', () => {
-  it('WRITE_FN_RE 命中七名真实导出（含 .alive 写/删两名 + U2 轮收口写面）', () => {
-    for (const name of ['writeFinalizedState', 'writeCancelledState', 'writeSettledState', 'writeManifest', 'saveIndex', 'writeAliveMarker', 'removeAliveMarker']) {
+  it('WRITE_FN_RE 命中八名真实导出（含 .alive 写/删两名 + U2 轮收口写面 + bound 物化写面）', () => {
+    for (const name of ['writeFinalizedState', 'writeCancelledState', 'writeSettledState', 'writeManifest', 'materializeBoundRecordManifest', 'saveIndex', 'writeAliveMarker', 'removeAliveMarker']) {
       expect(WRITE_FN_RE.test(`${name}(f)`)).toBe(true)
     }
     expect(WRITE_FN_RE.test('writeStateMarker(f)')).toBe(false) // v1 假绿教训：模块私有名不命中
+    expect(WRITE_FN_RE.test('materializeManifest(f)')).toBe(false) // 近名不命中：名单须精确到真实导出名
   })
 
   it('RECORD_ENTRY_WRITE_RE 双向同行形态命中，读面不命中', () => {

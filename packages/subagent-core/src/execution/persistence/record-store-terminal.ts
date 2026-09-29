@@ -26,6 +26,7 @@ import { getLogger } from "../../core/logger.ts";
 import { resurrectClosed } from "./execution-record.ts";
 import { updateRecordBinding, writeRecordBinding, readRecordBinding, zcodeAnchorBasePath, STATE_SIDECAR_EXT } from "./state-marker.ts";
 import type { RecordBinding } from "./state-marker.ts";
+import { MANIFEST_INDENT_SPACES } from "./manifest-store.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 import { derivedManifestRecord, hydrateReviveBaseline, recordToSubagent, zcodeRefOf } from "./record-store-rebuild.ts";
 import { findForeignLiveInstance } from "./alive-store.ts";
@@ -40,10 +41,6 @@ import { ResurrectDeniedError, isPiTranscriptRef } from "../assembly/types.ts";
 import type { ClosedReason, ExecutionRecord, StopReason, SubagentRecord, TranscriptRef } from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
-
-/** [D8 v7] manifest 同步写的 JSON 缩进空格数——与 ManifestStore.writeManifest 字节
- *  形态一致（读写两侧格式互认，外部 session-reader 直读不感知差异）。 */
-export const MANIFEST_INDENT_SPACES = 2;
 
 /**
  * 终态原语实现的 store 通道（D7 写面注入）。record-store.ts 构造时绑定真实写函数

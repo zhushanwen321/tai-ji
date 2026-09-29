@@ -12,16 +12,18 @@
 // 轮次语义演进（SP-5 升级链、A-lite 展示位、U7 统计口径的轮终快照）集中在此。
 // binding settle 快照本体在终态原语轴（record-store-terminal.ts），本文件消费。
 //
-// [D7 写面约束] 同终态轴：`.state` 写函数与 manifest 落盘均经 RoundsCtx 注入
-//（persistSettledState / writeDerivedManifest，注入名避开七名），本文件零 R1 字面、
-// 零七名 import。依赖方向单向：rounds → {terminal, rebuild}，不回 import store。
+// [D7 写面约束] 同终态轴：`.state` 写函数与两个 manifest 物化面（轮终派生投影
+// writeDerivedManifest / bound 物化 materializeBoundManifest）均经 ctx 或写面构造
+// 参数注入，本文件零 R1 字面、零写函数 import（manifest-store 写函数调用字面只留
+// record-store.ts——写面检查 R1 的豁免面）。依赖方向单向：rounds → {terminal, rebuild}，
+// 不回 import store。
 
 import { getLogger } from "../../core/logger.ts";
 
 import { updateFromEvent } from "./execution-record.ts";
 import { zcodeAnchorBasePath } from "./state-marker.ts";
 import { persistSettleSnapshot, summarizeResultForJournal } from "./record-store-terminal.ts";
-import { derivedManifestRecord, recordToSubagent, zcodeRefOf } from "./record-store-rebuild.ts";
+import { zcodeRefOf } from "./record-store-rebuild.ts";
 // [W1 / U2a] 事件文件写面接线层（fold 缓存 + 写点幂等判定 + 物化编排）的依赖面：
 // u0 契约层原语（词表/fold/seq 单源）+ terminal 轴载荷构造 + manifest 物化写面。
 import * as fs from "node:fs";
@@ -41,7 +43,6 @@ import type {
   RecordJournalEventInput,
   RecordJournalFoldState,
 } from "./record-events.ts";
-import { materializeBoundRecordManifest } from "./manifest-store.ts";
 import {
   buildBoundEventPayload,
   buildCreatedEventPayload,
@@ -338,6 +339,11 @@ export class RecordJournalWriteFace {
     private readonly recordsDir: string,
     /** 主 session 条目上报通道（v2 两条款经 pi appendEntry 落主 session——D1）。 */
     private readonly appendEntry: (customType: string, data: unknown) => void,
+    /** bound manifest 物化写面（D2 决策 9）——record-store.ts 构造点绑定
+     *  materializeBoundRecordManifest(recordsDir, derivedManifestRecord(recordToSubagent(rec)))。
+     *  经构造参数注入的理由同 RoundsCtx 的 writeDerivedManifest：manifest 写函数调用
+     *  字面只留 record-store.ts（R1 豁免面），本文件不 import 写函数。 */
+    private readonly materializeBoundManifest: (record: ExecutionRecord) => void,
   ) {
     this.journal = createRecordEventJournal(recordsDir);
   }
@@ -402,8 +408,9 @@ export class RecordJournalWriteFace {
     }
     this.journalAppend(record.id, buildBoundEventPayload(record));
     // bound manifest 物化（与轮终簿记⑫同款派生投影——manifest 是物化投影不是
-    // 条目；守卫（pi 子文件存在性 / zcode 零探查）与写失败降级在被调函数内。
-    materializeBoundRecordManifest(this.recordsDir, derivedManifestRecord(recordToSubagent(record)));
+    // 条目；守卫（pi 子文件存在性 / zcode 零探查）与写失败降级在被调函数内）。
+    // 经构造参数注入调用（本文件不 import manifest 写函数，见构造函数注释）。
+    this.materializeBoundManifest(record);
   }
 
   /**

@@ -88,8 +88,11 @@ export interface ManifestRecord {
   errorCode?: RunErrorCode;
 }
 
-/** JSON.stringify 缩进空格数（no-magic-numbers 合规）。 */
-const MANIFEST_INDENT_SPACES = 2;
+/** manifest JSON.stringify 缩进空格数（no-magic-numbers 合规）。
+ *  **唯一权威源**：manifest 字节形态由本模块定义，全部生产侧（本文件、
+ *  record-store-terminal.ts 的 binding 快照族、record-store.ts 的同步物化点）
+ *  经 import 消费——读写两侧格式互认靠单一定义，不靠两处巧合同值。 */
+export const MANIFEST_INDENT_SPACES = 2;
 
 /** [perf] 缓存校验戳（与 record-store.ts Stamp 同构；manifest 是小文件，mtime+size 足够）。 */
 interface Stamp {

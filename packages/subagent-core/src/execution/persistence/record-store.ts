@@ -120,6 +120,7 @@ import { RecordJournalWriteFace } from "./record-store-rounds.ts";
 // [W1 / U7·D5] 统一保留维护轮入口（record 域触发点）：同域 run-state-evidence
 // 直取（barrel 面只约束壳生产消费）。
 import { runRetentionMaintenanceRound } from "./run-state-evidence.ts";
+import { MANIFEST_INDENT_SPACES, materializeBoundRecordManifest } from "./manifest-store.ts";
 import type { ManifestRecord, ManifestStore } from "./manifest-store.ts";
 import { INDEX_WRITE_MIN_INTERVAL_MS, loadIndex, saveIndex } from "./sessions-index.ts";
 import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "./sessions-index.ts";
@@ -152,7 +153,6 @@ import type { FileCacheEntry, FileCacheValue, FileStamps, Stamp } from "./record
 // 依赖方向单向：store → terminal → {rebuild}（terminal 不回 import store，无环）。
 import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 import {
-  MANIFEST_INDENT_SPACES,
   markCancelledImpl,
   markFinalizedImpl,
   markReopenedImpl,
@@ -193,8 +193,8 @@ const logger = getLogger("subagents");
 // ============================================================
 // 常量
 // ============================================================
-// [D8 v7] manifest 同步写缩进常量（MANIFEST_INDENT_SPACES）已随终态原语轴外迁
-// record-store-terminal.ts（本文件经 import 消费）。
+// [D8 v7] manifest JSON 缩进常量单源 = manifest-store.ts（manifest 字节形态定义处，
+// 本文件与 record-store-terminal.ts 经 import 消费——两处巧合同值的双定义已删）。
 
 /** store 变更监听器（返回取消订阅函数）。 */
 export type ChangeListener = () => void;
@@ -348,6 +348,11 @@ export class RecordStore {
       manifestDir !== undefined
         ? new RecordJournalWriteFace(manifestDir, (customType, data) => {
           this.pi?.appendEntry?.(customType, data);
+        }, (rec) => {
+          // [D2 决策 9] bound 物化写面（锚定就绪守卫与写失败降级在被调函数内）——
+          // 与轮终派生投影同款「manifest 是物化投影不是条目」语义。调用字面只留本
+          // 文件（R1 豁免面），轴文件经构造参数注入消费。
+          materializeBoundRecordManifest(manifestDir, derivedManifestRecord(recordToSubagent(rec)));
         })
         : undefined;
     // 终态轴通道绑定：写函数经箭头闭包**调用时解引用**（与原方法体内联调用同款
