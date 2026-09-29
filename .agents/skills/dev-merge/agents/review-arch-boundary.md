@@ -27,11 +27,11 @@ task prompt 中必须包含：
 1. `~/.agents/skills/code-arch-review/SKILL.md`——按其「结构合规视角：依赖健康核对」的通用底线信号核对 diff 触及的模块（业务规则 import 基础设施 / 跨上下文直引内部实体 / 入口层跳过编排直写数据）。场景适配：该技能定位「审现状形态非 diff」，本维度以 **diff 触及的模块**为审查范围套用其判据；其候选卡/停回流程语义不适用（见下方消费边界声明）。
 2. `~/.agents/skills/architecture-decay-audit/SKILL.md`——按其「元模式族」表核对：族 A（状态机未收敛：多套状态词表并存、签名说谎、靠修饰字段区分终态、表外转移静默吞）与族 B（持久化多轨无权威）的形态判据是本维度状态机收敛检查的判定词汇；「七条判别式」中的对齐追踪法（判别式 3）用于识别多权威信号。
 
-**消费边界声明**：只消费上述技能的判据内容，不执行其流程语义——不跑六步审计流程、不写它们各自的报告文件、不落盘 .tmp、不等用户裁决；你的唯一产出 = `output` 路径的报告 + 本 workflow 的结构化返回。
+**消费边界声明**：只消费上述技能的判据内容，不执行其流程语义——不跑六步审计流程、不写它们各自的报告文件、不落盘 .tmp、不等用户裁决；你的唯一产出 = `output` 路径的报告 + 本 workflow 的结构化返回。引用的判据文件 Read 失败时立即停止审查并报错（指明缺失路径）——禁止在无判据状态下继续；此句是 pi 手工编排与手工派发路径的等价在盘检查（zcode workflow 路径由 dev-merge-gates 的 AGENT_SKILLS 在盘检查先行拦截）。
 
 ## 项目特化检查
 
-1. **Electron 四层分层职责**（已收编 C-comm-22，经 constraints.md 消费；authority: AGENTS.md）：renderer 经 preload electronAPI / main 只管窗口与 runtime 生命周期 / shared 唯一类型源。
+1. **Electron 四层分层职责**（已收编 C-comm-22，经 constraints.md 消费；authority: AGENTS.md）：renderer 经 preload electronAPI / main 只管窗口与 runtime 生命周期 / shared 唯一类型源。main 侧定位锚点：M2 Window Manager = `window/window-manager.ts`，M3 Process Supervisor = `supervisor/runtime-supervisor.ts` Facade（port-discoverer / health-checker / process-control / port-file / safe-env 子模块）；协议源 `shared/src/protocol.ts`。
 2. **runtime 三层边界（runtime-layering.md）**：
    - **transport/**：纯路由（server.ts + router.ts + handlers/），不碰 node: 内置、不做业务决策
    - **services/**：业务编排，**禁止 import infra**、**禁止出现 `Pi*` 类型**（应经 ports 接口访问外部能力）
@@ -111,6 +111,9 @@ agent 必须通过 `structured-output` tool 返回 JSON：
   "info": <数字>
 }
 ```
+
+
+**键名以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，以派发 prompt 指定的结构化契约为准——zcode 系 workflow 为 `reportFile`/`mustFix`/`suggestion` camelCase 形态，pi 内置 review-fix-loop 为本节 snake_case 形态；手工派发（无 prompt 契约）用本节 JSON 形态。
 
 ## 约束
 

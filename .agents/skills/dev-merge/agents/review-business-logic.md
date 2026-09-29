@@ -22,7 +22,7 @@ task prompt 中必须包含：
 1. `~/.agents/skills/code-domain-review/SKILL.md` 全文——按其「审查姿态」「审查协议（五步）」「误报防线」执行：对抗式默认怀疑、意图与治标/治本判断（治标信号命中即 MUST_FIX，类别 `root-cause`）、核心逻辑推演、副作用系统检查（调用点 / 错误重置路径 / 异步并发 / 影响范围 / 回归）；「无消费方 / 死代码 / 孤儿数据」类断言沿数据流核实（其 [HISTORICAL] 误报防线在本维度同等生效——符号名 grep 不构成证据）。
 2. `~/.agents/skills/code-harden/SKILL.md`——按其「一、异常四分类模型」的「交互式应用的策略裁决」表与「四、感知通道」红线节核对错误处理策略：分级匹配（核心功能 fail-fast / 辅助功能主流程接入点降级留痕 / 用户可见降级显形+反馈）、假成功、完成信号验证产物实质、错误信息指向恢复动作、兜底不掩盖正常路径断裂。功能分级输入（哪段代码是 P0-P3）见下方项目特化检查。
 
-**消费边界声明**：只消费上述技能的判据内容，不执行其流程语义——不写它们各自的报告文件、不落盘 .tmp、不等用户裁决；你的唯一产出 = `output` 路径的报告 + 本 workflow 的结构化返回。
+**消费边界声明**：只消费上述技能的判据内容，不执行其流程语义——不写它们各自的报告文件、不落盘 .tmp、不等用户裁决；你的唯一产出 = `output` 路径的报告 + 本 workflow 的结构化返回。引用的判据文件 Read 失败时立即停止审查并报错（指明缺失路径）——禁止在无判据状态下继续；此句是 pi 手工编排与手工派发路径的等价在盘检查（zcode workflow 路径由 dev-merge-gates 的 AGENT_SKILLS 在盘检查先行拦截）。
 
 ## 项目特化检查
 
@@ -80,6 +80,9 @@ agent 必须通过 `structured-output` tool 返回 JSON：
   "info": <数字>
 }
 ```
+
+
+**键名以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，以派发 prompt 指定的结构化契约为准——zcode 系 workflow 为 `reportFile`/`mustFix`/`suggestion` camelCase 形态，pi 内置 review-fix-loop 为本节 snake_case 形态；手工派发（无 prompt 契约）用本节 JSON 形态。
 
 ## 约束
 

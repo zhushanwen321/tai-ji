@@ -83,6 +83,9 @@ agent 必须通过 `structured-output` tool 返回 JSON：
 }
 ```
 
+
+**键名以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，以派发 prompt 指定的结构化契约为准——zcode 系 workflow 为 `reportFile`/`mustFix`/`suggestion` camelCase 形态，pi 内置 review-fix-loop 为本节 snake_case 形态；手工派发（无 prompt 契约）用本节 JSON 形态。
+
 ## 约束
 
 - 禁止使用 subagent 工具

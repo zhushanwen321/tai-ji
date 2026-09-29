@@ -30,7 +30,7 @@ task prompt 中必须包含：
 - **「元模式族」表**：族 B（持久化多轨无权威：一份状态写多个介质、恢复路径多条）与族 E（推断代替传递）的形态判据用于识别违规形态。
 - **「七条判别式」**中的对齐追踪法（判别式 3：对账函数的存在本身就是多份权威的证据）与兜底命中率（判别式 4）。
 
-**消费边界声明**：只消费上述技能的判据内容，不执行其流程语义——不跑六步审计流程、不写它自己的报告文件、不落盘 .tmp、不等用户裁决；你的唯一产出 = `output` 路径的报告 + 本 workflow 的结构化返回。
+**消费边界声明**：只消费上述技能的判据内容，不执行其流程语义——不跑六步审计流程、不写它自己的报告文件、不落盘 .tmp、不等用户裁决；你的唯一产出 = `output` 路径的报告 + 本 workflow 的结构化返回。引用的判据文件 Read 失败时立即停止审查并报错（指明缺失路径）——禁止在无判据状态下继续；此句是 pi 手工编排与手工派发路径的等价在盘检查（zcode workflow 路径由 dev-merge-gates 的 AGENT_SKILLS 在盘检查先行拦截）。
 
 ## 执行步骤
 
@@ -111,6 +111,9 @@ agent 必须通过 `structured-output` tool 返回 JSON：
   "info": <数字>
 }
 ```
+
+
+**键名以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，以派发 prompt 指定的结构化契约为准——zcode 系 workflow 为 `reportFile`/`mustFix`/`suggestion` camelCase 形态，pi 内置 review-fix-loop 为本节 snake_case 形态；手工派发（无 prompt 契约）用本节 JSON 形态。
 
 ## 约束
 
