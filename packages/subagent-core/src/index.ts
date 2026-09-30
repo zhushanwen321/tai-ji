@@ -344,7 +344,7 @@ export {
 } from "./execution/persistence/record-events.ts";
 export {
   createEventDirectoryTailer,
-  readJournalTail,
+  readEventTail,
   splitCompleteLines,
   type EventDirectoryTailer,
   type JournalDirectoryTailerOptions,

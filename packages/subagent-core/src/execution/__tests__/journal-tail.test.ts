@@ -23,7 +23,7 @@ import {
 } from "../persistence/record-events.ts";
 import {
   createEventDirectoryTailer,
-  readJournalTail,
+  readEventTail,
   splitCompleteLines,
   type JournalTailChunk,
 } from "../persistence/journal-tail.ts";
@@ -75,7 +75,7 @@ describe("splitCompleteLines（纯函数：完整行边界）", () => {
   });
 });
 
-describe("readJournalTail（offset 续读原语）", () => {
+describe("readEventTail（offset 续读原语）", () => {
   it("首次全量读：头行 + 事件行（域解析器注入）", async () => {
     const journal = createRecordEventJournal(workDir);
     await journal.append("sa-1", {
@@ -92,7 +92,7 @@ describe("readJournalTail（offset 续读原语）", () => {
       startedAt: 1,
     });
     const filePath = path.join(workDir, "sa-1.events");
-    const chunk = readJournalTail(filePath, 0, parseRecordEventFileLine);
+    const chunk = readEventTail(filePath, 0, parseRecordEventFileLine);
     expect(chunk.events).toHaveLength(1);
     expect(chunk.events[0]?.type).toBe("record-created");
     expect(chunk.skippedLines).toBe(1); // 头行 = 解析器拒绝的合法行（计数语义见 JournalTailChunk 注释）
@@ -103,23 +103,23 @@ describe("readJournalTail（offset 续读原语）", () => {
   it("offset 续读：只返回新增行（尾组一）", async () => {
     const filePath = path.join(workDir, "plain.jsonl");
     fs.writeFileSync(filePath, lineOf({ a: 1 }) + lineOf({ a: 2 }));
-    const first = readJournalTail(filePath, 0, rawLineParser);
+    const first = readEventTail(filePath, 0, rawLineParser);
     expect(first.events).toEqual(['{"a":1}', '{"a":2}']);
     fs.appendFileSync(filePath, lineOf({ a: 3 }));
-    const second = readJournalTail(filePath, first.nextOffset, rawLineParser);
+    const second = readEventTail(filePath, first.nextOffset, rawLineParser);
     expect(second.events).toEqual(['{"a":3}']);
   });
 
   it("部分行：无尾随换行的末段不返回、offset 不推进；补齐换行后下次续读拼齐（尾组二）", () => {
     const filePath = path.join(workDir, "partial.jsonl");
     fs.writeFileSync(filePath, lineOf({ a: 1 }) + '{"a":2'); // 第二行不完整（无 \n）
-    const first = readJournalTail(filePath, 0, rawLineParser);
+    const first = readEventTail(filePath, 0, rawLineParser);
     expect(first.events).toEqual(['{"a":1}']);
     const offsetAfterFirst = fs.statSync(filePath).size - '{"a":2'.length;
     expect(first.nextOffset).toBe(offsetAfterFirst);
     // 写侧补齐行尾 → 同一 offset 续读拿到完整第二行
     fs.appendFileSync(filePath, "}\n");
-    const second = readJournalTail(filePath, first.nextOffset, rawLineParser);
+    const second = readEventTail(filePath, first.nextOffset, rawLineParser);
     expect(second.events).toEqual(['{"a":2}']);
   });
 
@@ -129,7 +129,7 @@ describe("readJournalTail（offset 续读原语）", () => {
       filePath,
       lineOf({ type: "x", seq: 1, ts: 1 }) + "{broken json\n" + lineOf({ type: "y", seq: 2, ts: 2 }),
     );
-    const chunk = readJournalTail(filePath, 0, jsonLineParser);
+    const chunk = readEventTail(filePath, 0, jsonLineParser);
     expect(chunk.events).toHaveLength(2);
     expect(chunk.skippedLines).toBe(1);
   });
@@ -137,25 +137,25 @@ describe("readJournalTail（offset 续读原语）", () => {
   it("截断/重建（offset > 文件大小）：从文件头全量重读并置 truncated（幂等全量重读原语）", () => {
     const filePath = path.join(workDir, "truncated.jsonl");
     fs.writeFileSync(filePath, lineOf({ a: 1 }) + lineOf({ a: 2 }) + lineOf({ a: 3 }));
-    const first = readJournalTail(filePath, 0, rawLineParser);
+    const first = readEventTail(filePath, 0, rawLineParser);
     // 文件被轮转重建为更短内容
     fs.writeFileSync(filePath, lineOf({ b: 1 }));
-    const second = readJournalTail(filePath, first.nextOffset, rawLineParser);
+    const second = readEventTail(filePath, first.nextOffset, rawLineParser);
     expect(second.truncated).toBe(true);
     expect(second.events).toEqual(['{"b":1}']);
     expect(second.nextOffset).toBe(fs.statSync(filePath).size);
   });
 
   it("ENOENT → 空结果 + 偏移归零（文件未创建/已清理的缺省语义）", () => {
-    const chunk = readJournalTail(path.join(workDir, "absent.jsonl"), 100, rawLineParser);
+    const chunk = readEventTail(path.join(workDir, "absent.jsonl"), 100, rawLineParser);
     expect(chunk).toEqual({ events: [], nextOffset: 0, skippedLines: 0, truncated: false } satisfies JournalTailChunk<string>);
   });
 
   it("size === offset → 零成本快路径（无新内容偏移不动）", () => {
     const filePath = path.join(workDir, "stable.jsonl");
     fs.writeFileSync(filePath, lineOf({ a: 1 }));
-    const first = readJournalTail(filePath, 0, rawLineParser);
-    const second = readJournalTail(filePath, first.nextOffset, rawLineParser);
+    const first = readEventTail(filePath, 0, rawLineParser);
+    const second = readEventTail(filePath, first.nextOffset, rawLineParser);
     expect(second.events).toEqual([]);
     expect(second.nextOffset).toBe(first.nextOffset);
   });
@@ -185,12 +185,12 @@ describe("验收⑤：续读拼接 ≡ 全量 fold（fixture 含中部坏行 + �
     const filePath = path.join(recordsDir, "sa-1.events");
 
     // 段 1：读走头行 + created
-    const seg1 = readJournalTail(filePath, 0, parseRecordEventFileLine);
+    const seg1 = readEventTail(filePath, 0, parseRecordEventFileLine);
     expect(seg1.events).toHaveLength(1);
 
     // 段间注入①：不完整尾行（无换行结尾——模拟磁盘半写进行中）
     fs.appendFileSync(filePath, '{"type":"record-bound","seq":2');
-    const seg2 = readJournalTail(filePath, seg1.nextOffset, parseRecordEventFileLine);
+    const seg2 = readEventTail(filePath, seg1.nextOffset, parseRecordEventFileLine);
     expect(seg2.events).toEqual([]); // 不完整行不返回
     expect(seg2.skippedLines).toBe(0); // 且不计坏行（完整行边界外的字节不属于任何行）
     expect(seg2.nextOffset).toBe(seg1.nextOffset); // 偏移停在完整行边界
@@ -203,13 +203,13 @@ describe("验收⑤：续读拼接 ≡ 全量 fold（fixture 含中部坏行 + �
 
     // 段 3：坏行之后的 settled 事件照常续读
     appended.push(await journal.append("sa-1", { type: "record-settled", ts: 3, stopReason: "completed", endedAt: 3, turns: 1, totalTokens: 10 }));
-    const seg3 = readJournalTail(filePath, seg2.nextOffset, parseRecordEventFileLine);
+    const seg3 = readEventTail(filePath, seg2.nextOffset, parseRecordEventFileLine);
     expect(seg3.events.map((e) => e.type)).toEqual(["record-bound", "record-settled"]);
     expect(seg3.skippedLines).toBe(1); // 中部坏行：跳过 + 计数
 
     // 续读拼接 ≡ 全量读（验收⑤等价性）：事件序列逐条相等 + fold 等价双锚
     const tailEvents = [...seg1.events, ...seg2.events, ...seg3.events];
-    const fullChunk = readJournalTail(filePath, 0, parseRecordEventFileLine);
+    const fullChunk = readEventTail(filePath, 0, parseRecordEventFileLine);
     expect(tailEvents).toEqual(fullChunk.events);
     expect(foldRecordJournalEvents(tailEvents)).toEqual(foldRecordJournalEvents(fullChunk.events));
     // 全量读 skipped = 头行 1 + 坏行 1（tail 续读不重算头行）

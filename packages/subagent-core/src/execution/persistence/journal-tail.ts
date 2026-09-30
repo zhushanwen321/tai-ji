@@ -7,7 +7,7 @@
 // 读侧（runtime）每请求全文解析同理。tail = 从上次读到的字节偏移继续读新增行。
 //
 // 三原语（设计 D6 词面）：
-// 1. offset 续读（readJournalTail）：per-file 字节偏移，只推进到完整行边界；
+// 1. offset 续读（readEventTail）：per-file 字节偏移，只推进到完整行边界；
 // 2. 幂等全量重读：文件变短（截断/重建）→ 偏移归零重读——重复行的去重归域
 //    fold（record 域 seq 单调守卫构造性保证；run 域 seq 由 U1 补齐）；
 // 3. watch 目录（createEventDirectoryTailer）：目录级 fs.watch（不 per-file，
@@ -81,7 +81,7 @@ export interface JournalTailChunk<T> { // oe-exempt:20260929:framework:workflow/
  *   归域 fold）；
  * - 换行边界按字节判定（0x0A 不出现在 UTF-8 多字节序列内部，字节级切割安全）。
  */
-export function readJournalTail<T>(
+export function readEventTail<T>(
   filePath: string,
   offset: number,
   parseLine: JournalLineParser<T>,
@@ -283,7 +283,7 @@ class DirectoryJournalTailer<T> implements EventDirectoryTailer {
 
   private readOne(filename: string): void {
     const offset = this.offsets.get(filename) ?? 0;
-    const chunk = readJournalTail(join(this.opts.dir, filename), offset, this.opts.parseLine);
+    const chunk = readEventTail(join(this.opts.dir, filename), offset, this.opts.parseLine);
     if (chunk.truncated) this.opts.onReset?.(filename);
     if (chunk.events.length > 0) this.opts.onEvents(filename, chunk.events);
     if (chunk.skippedLines > 0) this.opts.onSkippedLines?.(filename, chunk.skippedLines);

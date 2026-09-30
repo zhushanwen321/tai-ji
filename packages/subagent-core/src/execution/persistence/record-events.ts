@@ -325,7 +325,7 @@ export function parseRecordEventLine(value: unknown): RecordJournalEvent | null 
 
 /**
  * 文件行解析器（journal-tail / scan 共用）：空行静默跳过、头行静默跳过（合法
- * 存在，非坏行——计数语义见 readJournalTail 的 skippedLines 注释）、坏行（JSON
+ * 存在，非坏行——计数语义见 readEventTail 的 skippedLines 注释）、坏行（JSON
  * 解析失败 / 词表外 / 信封坏值）返回 undefined 交调用方计数。
  */
 export function parseRecordEventFileLine(line: string): RecordJournalEvent | undefined {
