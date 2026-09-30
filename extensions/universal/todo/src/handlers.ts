@@ -3,8 +3,9 @@
  * before_agent_start / agent_end。
  */
 
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
+import { filterActivePath } from "@zhushanwen/pi-session-path";
 
 import {
 	migrateTodo,
@@ -50,27 +51,10 @@ export function buildBeforeAgentStartMessage(state: TodoSessionState): { message
 
 // ── 状态重建 ────────────────────────────────────────
 
-/**
- * 活跃路径裁剪：从 leafId 沿 parentId 回溯得活跃路径 id 集合，按文件序过滤 entries。
- * 撤回（navigateTree 树回退）后被撤子树的 entry 不再进入重建输入——被撤子树的 todo
- * 快照不得经 `<todo_context>` 注入模型上下文。与 runtime 侧 entry-tree-builder 的
- * 裁剪是设计登记的并行同构实现（extension 不能 import runtime 包）。
- * leafId 缺失/失效时回退文件尾（pi buildSessionPath 同构防御；线性文件回溯链 =
- * 全部 entries，行为与裁剪前一致）。
- */
-function filterActivePath(sessionManager: ExtensionContext["sessionManager"]): SessionEntry[] {
-	const entries = sessionManager.getEntries();
-	if (entries.length === 0) return entries;
-	const byId = new Map(entries.map((e) => [e.id, e]));
-	const leafId = sessionManager.getLeafId();
-	let current: SessionEntry | undefined = (leafId ? byId.get(leafId) : undefined) ?? entries[entries.length - 1];
-	const activeIds = new Set<string>();
-	while (current && !activeIds.has(current.id)) {
-		activeIds.add(current.id);
-		current = current.parentId ? byId.get(current.parentId) : undefined;
-	}
-	return entries.filter((e) => activeIds.has(e.id));
-}
+// 活跃路径裁剪（leafId 沿 parentId 回溯，撤回后被撤子树的 todo 快照不进重建输入）
+// 收敛于 @zhushanwen/pi-session-path 单一实现（四包同构副本收编，防御语义与回退
+// 口径见该包 filterActivePath 注释；runtime 侧 entry-tree-builder 保持独立——
+// extension 不能 import runtime 包）。
 
 /**
  * 回放活跃路径内最后一条 todo toolResult 重建 state（纯读，不修改 entries）。

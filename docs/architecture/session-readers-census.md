@@ -32,7 +32,7 @@
 ## 2. 机器锚点（清单闭合的复现命令）
 
 ```bash
-# E1 · extension 侧 getEntries 全量读者（9 包族 / 19 文件）
+# E1 · extension 侧 getEntries 全量读者（11 包族 / 20 文件，含 extensions/shared 两库：notify-ledger-host 装配工厂 / session-path 活跃路径裁剪单一实现）
 grep -rln 'getEntries(' extensions/ --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 
 # E2 · extension 侧 fs 直读 .jsonl 审计工具面（唯一包：session-reader；两个 pattern 取并集）
@@ -42,7 +42,7 @@ grep -rln 'createReadStream' extensions/ --include='*.ts' | grep -v '\.test\.' |
 # R1 · runtime 侧 jsonl 解析原语消费（6 文件）
 grep -rln "utils/jsonl" packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__ | grep -v 'src/utils/jsonl.ts'
 
-# R2 · runtime 侧提取器/扫描器/header 函数族（38 文件，含消费面委托）
+# R2 · runtime 侧提取器/扫描器/header 函数族（39 文件，含消费面委托）
 grep -rln 'FromSessionFile\|scanPiSessions\|scanExternalSessions\|getHistoryFromFilePath\|extractLatestModelFromJsonl\|extractSessionName\|extractSessionOutcome\|scanSessionMeta\|scanSubagentEntries\|scanWorkflowEntries\|scanPlanStateEntries\|readSessionHeader\|parseSessionHeader' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 
 # R3 · runtime 侧流式逐行扫描（2 文件：usage-stats-service 读者 + logger 写流排除项）
@@ -68,10 +68,15 @@ grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' 
 | subagent-workflow | `jsonl-run-store.ts` `loadAll()`（workflow-record entry 重建 run 记录） | 照实 | run 真实执行过，与 runtime 侧 workflow-extractor 同概念域同口径 | — |
 | subagent-workflow | `session-lifecycle.ts` `bindLedgerHostAndRecover`（notify ledger/ack 差集恢复） | 照实 | 通知发送/销账是已发生事实；对账照实才能幂等 | — |
 | pending-notifications | `index.ts` 每 turn 全量扫描（pending register/unregister 对账） | 照实 | 后台任务活跃性是已发生事实；run 在跑则照实（撤回遇活跃 run 由编排前置检查阻止，两口径互斥不冲突） | — |
+| session-manager | `watch-coordinator.ts` `recoverStaleRegisters`（session_start 重启收口腿：`scanPendingEntries` 差集对账后逐条重开活跃 type 'session' 的 watch，D7③） | 照实 | pending 注册活跃性是已发生事实——与 §3 pending-notifications 行同口径（同一 protocol 差集单点对账，撤回遇活跃 run 由编排前置检查阻止） | — |
+| notify-ledger-host（extensions/shared） | `src/index.ts` 装配工厂 `readSessionEntries: () => ctx.sessionManager.getEntries()`（NotifyLedgerHost 的 pi 扩展侧装配点） | 消费面委托（照实） | 锚点命中但读取语义落在装配方——session-manager（`notify-ledger.ts`）与 subagent-workflow（§3 `session-lifecycle.ts` 行）的 notify/ack 差集恢复均经此工厂，照实对账才幂等 | — |
+| session-path（extensions/shared） | `src/index.ts` `filterActivePath`（活跃路径裁剪单一实现：todo/plan/goal/scheduler 四包状态重建输入的共用读点——四包原同构副本收编于此，回退取值口径随之统一） | 随树（随消费方） | 防御语义与 pi `buildSessionPath` 同构（leafId 缺失/失效回退文件尾，详见 §4.1 异源登记）；读取语义落在四消费包（§3 各行随树判定不变）；runtime/plugin 两侧不经本包（有意异源） | U6b / U6c（四包各自承接） |
 | base-tool-enhance | `index.ts` / `background/pending-reconcile.ts` `reconcilePendingEntries` | 照实 | bash 后台 pending 对账 = 已发生事实 | — |
 | rename-session | `index.ts` / `llm.ts` / `landing.ts`（`countUserMessages` / `extractUserPromptText` 起名输入） | 照实 | 会话起名是历史事实分析（用户确实说过）；输出为展示性标签，被撤消息进入起名视野属可接受残影（见 §7 边界 ①） | — |
 | smart-context | `index.ts` / `tool.ts` `countCompactions`（压缩计数 + 分档提醒） | 照实 | 压缩已发生、provider 已消耗（与 usage 统计同口径）；分档提醒按真实历史校准 | — |
 | session-reader | `@zhushanwen/session-core` 读取原语（`readTailIdentity` / `createReadStream`，fs 直读 `.jsonl`） | 豁免登记 | 审计工具面，G2「不从文件/日志中抹除」口径——撤回后旧分支经 session_read 仍可查（A1 验收锚「session 文件仍含 M」的消费面） | — |
+
+> **§3 收编注记**：todo / plan / goal / scheduler 四行的活跃路径裁剪读点 = `extensions/shared/session-path`（E1 锚点命中该库 `src/index.ts`）。收编后 `plan/src/state.ts` 不再直接命中 E1（读取语义不变，经共享库流转）；`todo/src/handlers.ts` 的命中为既有 H1 注释提及（`getEntries()` filter-copy 语义说明，非读取点）。
 
 ## 4. Runtime 侧读者清单（R1 + R2 + R3）
 
@@ -85,7 +90,7 @@ grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' 
 | `services/session/history-rebuild-cache.ts` | 全量重建缓存 | 随树 | 缓存基线语义 = 活跃路径投影（非全文件）；撤回编排显式清缓存强制全量重建 | U6a |
 | `services/plugin-service/api/session-api.ts` | `readEntries` handler（plugin 族读面的 runtime 投影点：pi get_entries → `filterEntriesToActivePath` 活跃路径过滤 → 五字段投影，parentId 不出 runtime） | 随树 | 插件镜像的折叠输入 = 本投影回包——过滤在投影前使被撤子树 op 构造性不达任何插件（scheduler-manager 面板残留缺陷的 runtime 数据面落点，U7）；防御语义与 extensions 裁剪同构但有意异源：leafId 缺失/悬空 → **不过滤**（增量批不丢数据优先，extensions 侧按文件尾回退是全量语义），环状 parentId `!activeIds.has` 防环 | U7（撤回信号广播同批） |
 
-> **§4.1 防御语义异源登记（R2 审查采纳，防后续审查误报）**：extensions 侧四包（todo/plan/goal/scheduler）的活跃路径防御与 pi `buildSessionPath` 同构——leafId 缺失/失效**回退文件尾**（全量语义，宁全勿漏）；runtime 重建链（entry-tree-builder 族）同构同源。与两者有意异源的是 §4.1 末行 plugin 投影点（leafId 悬空**不过滤**——增量批部分数据，不丢数据优先）与 runtime 侧「降级 warn + 原样返回」的 SSOT 形态（对话流宁多显 vs 注入面宁裁勿漏——G2 二分准则在各面的落地形态差异，均为有意设计非漂移）。
+> **§4.1 防御语义异源登记（R2 审查采纳，防后续审查误报）**：extensions 侧的活跃路径防御已收编为单一共享实现 `extensions/shared/session-path`（todo/plan/goal/scheduler 四包原同构副本收编——收编前四包回退取值口径已分叉：plan/todo 取数组尾条目 vs goal/scheduler 取最后一条带 string id 条目，统一为后者；真实 pi SessionEntry 恒有 id，生产行为不变），与 pi `buildSessionPath` 同构——leafId 缺失/失效**回退文件尾**（全量语义，宁全勿漏）；runtime 重建链（entry-tree-builder 族）同构同源、不经共享库（extension 不能 import runtime 包，跨面异源为有意设计）。与两者有意异源的是 §4.1 末行 plugin 投影点（leafId 悬空**不过滤**——增量批部分数据，不丢数据优先）与 runtime 侧「降级 warn + 原样返回」的 SSOT 形态（对话流宁多显 vs 注入面宁裁勿漏——G2 二分准则在各面的落地形态差异，均为有意设计非漂移）。
 
 ### 4.2 派生提取器族（随树）
 
@@ -101,6 +106,7 @@ grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' 
 |------|--------|------|----------|----------|
 | `services/session/subagent-extractor.ts`（经 `session-file-extraction.ts` 共享骨架） | `scanSubagentEntries` / `extractSubagentsFromSessionFile` | 照实 | run 真实执行过，与工具副作用残留同口径 | — |
 | `services/session/workflow-extractor.ts`（同上骨架） | `scanWorkflowEntries` / `extractWorkflowsFromSessionFile` | 照实 | 同上 | — |
+| `services/session/journal-projection.ts` | journal 投影的 session entry 冷启动腿（`scanSubagentEntries` / `scanWorkflowEntries` 喂入 v1 源——import :59-60、消费 :742-743） | 照实（随消费方） | 与 subagent/workflow-extractor 同概念域同口径——run 真实执行过，v1 源按文件事实恢复进投影（与 journal tail 增量合并为同一投影源表） | — |
 | `services/session/session-file-extraction.ts` | `extractRecordsFromSessionFile` 读取骨架 | 随消费方 | subagent/workflow 照实；plan（U6d）随树——骨架自身不判语义 | — |
 | `services/usage/usage-stats-service.ts` | `createReadStream` + readline 逐行扫描 sessions 目录（R3 读者） | 照实 | token 真实消耗过；usage 页照计被撤子树消耗（A14 验收锚） | — |
 | `infra/pi/session-file-utils.ts` | `extractSessionName`（侧栏名 fallback） | 照实 + 已知边界 | 名字是已发生事实，残影可接受（见 §7 边界 ②） | U6d（注释登记） |
@@ -120,7 +126,7 @@ grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' 
 
 ### 4.5 消费面委托（锚点命中、自身不读文件）
 
-`infra/pi/session-store.ts`（session-file-utils 聚合 port）、`services/session/session-internal.ts` / `session-service.ts` / `session-lifecycle.ts` / `session-scanner.ts` / `session-model-control.ts` / `event-interpreter.ts` / `import-*` 编排、`services/session-history.ts` 之外的 `session-entry-mapper` re-export 链、`transport/session-message-handler.ts`、`services/preset-service.ts`、`services/ports/session.ts`、`interfaces.ts` / `types.ts` / `index.ts`、`utils/history-reverse-read.ts`（共享工具，随消费方归类）、`session-binding-fields.ts` / `session-binding-sidecar-io.ts`（sidecar 读写，非 jsonl 读者）、`session-residue-cleanup.ts` / `session-scan-degraded.ts`（扫描辅助）——读取语义全部落在上表已登记的实现模块。
+`infra/pi/session-store.ts`（session-file-utils 聚合 port）、`services/session/session-internal.ts` / `session-service.ts` / `session-lifecycle.ts` / `session-scanner.ts` / `session-model-control.ts` / `event-interpreter.ts` / `import-*` 编排、`services/session-history.ts` 之外的 `session-entry-mapper` re-export 链、`transport/session-message-handler.ts`、`services/preset-service.ts`、`services/ports/session.ts`、`interfaces.ts` / `types.ts` / `index.ts`、`utils/history-reverse-read.ts`（共享工具，随消费方归类）、`session-binding-fields.ts` / `session-binding-sidecar-io.ts`（sidecar 读写，非 jsonl 读者）、`session-residue-cleanup.ts` / `session-scan-degraded.ts`（扫描辅助）、`services/session/workflow-step-merge.ts`（纯函数合并模块——头部注释提及 `extractWorkflowsFromSessionFile` 致 R2 锚点命中，自身不读文件，输入为内存投影数组）、`utils/jsonl.ts`（jsonl 解析原语，§1 普查通道本体——R2 命中为注释提及 `extractSessionName`）——读取语义全部落在上表已登记的实现模块。
 
 ## 5. 非文件读者（session_tree 事件消费者，知悉登记）
 

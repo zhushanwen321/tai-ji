@@ -66,6 +66,11 @@
           "package": "@zhushanwen/pi-pending-notifications",
           "type": "package",
           "reason": "代码层静态 import countActiveFromEntries（src/adapters/event-handlers/agent-end.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-session-path",
+          "type": "package",
+          "reason": "代码层静态 import filterActivePath（src/session.ts top-level import，活跃路径裁剪单一实现——todo/plan/goal/scheduler 四包同构副本收编于该共享库），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -77,6 +82,11 @@
           "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import guiComponent/guiResult/TreeItem 等 GUI 类型与构造函数（src/model.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-session-path",
+          "type": "package",
+          "reason": "代码层静态 import filterActivePath（src/handlers.ts top-level import，活跃路径裁剪单一实现——todo/plan/goal/scheduler 四包同构副本收编于该共享库），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -108,6 +118,11 @@
           "package": "@zhushanwen/pi-llm-shared",
           "type": "package",
           "reason": "top-level 静态 import readUiLocale（src/i18n.ts，经 ./ui-locale 子路径出口，ui-preferences.json locale 读取单点），缺失即模块加载抛 Cannot find module"
+        },
+        {
+          "package": "@zhushanwen/pi-session-path",
+          "type": "package",
+          "reason": "代码层静态 import filterActivePath（src/state.ts top-level import，活跃路径裁剪单一实现——todo/plan/goal/scheduler 四包同构副本收编于该共享库），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -177,6 +192,11 @@
           "package": "@zhushanwen/pi-llm-shared",
           "type": "package",
           "reason": "top-level 静态 import readUiLocale（src/i18n.ts，经 ./ui-locale 子路径出口，ui-preferences.json locale 读取单点），缺失即模块加载抛 Cannot find module"
+        },
+        {
+          "package": "@zhushanwen/pi-session-path",
+          "type": "package",
+          "reason": "代码层静态 import filterActivePath（src/backend.ts top-level import，活跃路径裁剪单一实现——todo/plan/goal/scheduler 四包同构副本收编于该共享库），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

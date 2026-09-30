@@ -11,6 +11,8 @@
  * FR-3: 崩溃后保持原状态（active 重启计时；paused/blocked 保持；终态保持）
  */
 
+import { filterActivePath } from "@zhushanwen/pi-session-path";
+
 import type { GoalRuntimeState } from "./engine/types";
 import { deserializeState, ENTRY_TYPE } from "./persistence";
 import type { SessionEntryLike, UiPort } from "./ports";
@@ -61,62 +63,10 @@ export interface ActivePathSessionView {
 	getLeafId?(): string | null;
 }
 
-/**
- * SessionEntryLike 的树结构字段视图（duck-typed 收窄，无断言）。含 type?: unknown
- * 只为通过 weak-type 检查（全 optional 目标须与源共享属性名）；真实 pi SessionEntry
- * 恒有 id/parentId（SessionEntryBase），缺失时按线性文件语义处理（见 filterActivePath）。
- */
-interface TreeEntryFields {
-	type?: unknown;
-	id?: unknown;
-	parentId?: unknown;
-}
-
-/**
- * 活跃路径裁剪：从 leafId 沿 parentId 回溯得活跃路径 id 集合，按文件序过滤 entries。
- * 撤回（navigateTree 树回退）后被撤子树的 goal-state entry 不再进入重建输入——被撤
- * goal 不得经 before_agent_start 逐轮注入模型上下文。与 runtime 侧 entry-tree-builder
- * 及 todo/plan 侧的裁剪是设计登记的并行同构实现（extension 不能 import runtime 包）。
- * leafId 缺失/失效时回退文件尾（pi buildSessionPath 同构防御；线性文件回溯链 =
- * 全部 entries，行为与裁剪前一致）。无 id 的 entry（duck-typed 最小形状 / legacy
- * fixture）按线性文件语义保留——真实 pi SessionEntry 恒有 id（SessionEntryBase）。
- */
-function filterActivePath(view: ActivePathSessionView): SessionEntryLike[] {
-	const entries = view.getEntries();
-	if (entries.length === 0) return entries;
-
-	const byId = new Map<string, { id: string; parentId: string | null }>();
-	for (const entry of entries) {
-		const tree: TreeEntryFields = entry;
-		if (typeof tree.id === "string") {
-			byId.set(tree.id, {
-				id: tree.id,
-				parentId: typeof tree.parentId === "string" ? tree.parentId : null,
-			});
-		}
-	}
-	// 无任何树信息（legacy 线性 fixture）→ 不过滤，保持裁剪前行为
-	if (byId.size === 0) return entries;
-
-	const leafId = view.getLeafId?.();
-	let current =
-		(leafId ? byId.get(leafId) : undefined) ?? lastOfMapValues(byId);
-	const activeIds = new Set<string>();
-	while (current && !activeIds.has(current.id)) {
-		activeIds.add(current.id);
-		current = current.parentId ? byId.get(current.parentId) : undefined;
-	}
-	return entries.filter((entry) => {
-		const tree: TreeEntryFields = entry;
-		return typeof tree.id !== "string" || activeIds.has(tree.id);
-	});
-}
-
-function lastOfMapValues(map: Map<string, { id: string; parentId: string | null }>): { id: string; parentId: string | null } | undefined {
-	let last: { id: string; parentId: string | null } | undefined;
-	for (const value of map.values()) last = value;
-	return last;
-}
+// 活跃路径裁剪（leafId 沿 parentId 回溯，撤回后被撤子树的 goal-state entry 不进
+// 重建输入）收敛于 @zhushanwen/pi-session-path 单一实现（四包同构副本收编，防御
+// 语义与回退口径见该包 filterActivePath 注释；runtime 侧 entry-tree-builder 保持
+// 独立——extension 不能 import runtime 包）。
 
 // ── reconstructGoalState（session_start / session_tree 时调）──────────
 

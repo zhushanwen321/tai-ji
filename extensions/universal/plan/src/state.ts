@@ -5,6 +5,7 @@ import type { PlanDocMeta } from "@zhushanwen/extension-protocol";
 import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
+import { filterActivePath } from "@zhushanwen/pi-session-path";
 
 const logger = getLogger("pi-plan");
 
@@ -297,27 +298,10 @@ function applyPlanStateEntry(state: PlanState, data: Partial<PlanState> | undefi
   state.lastSubmitReviewDocsFingerprint = readDocsFingerprint(entryData);
 }
 
-/**
- * 活跃路径裁剪：从 leafId 沿 parentId 回溯得活跃路径 id 集合，按文件序过滤 entries。
- * 撤回（navigateTree 树回退）后被撤子树的 plan-state entry 不再进入重建输入——被撤
- * requirement 不得经压缩摘要 / 计划面板注入。与 runtime 侧 plan-state 提取器及 todo
- * 侧 handlers.ts 的裁剪是设计登记的并行同构实现（extension 不能 import runtime 包）。
- * leafId 缺失/失效时回退文件尾（pi buildSessionPath 同构防御；线性文件回溯链 =
- * 全部 entries，行为与裁剪前一致）。
- */
-function filterActivePath(sessionManager: ExtensionContext["sessionManager"]): SessionEntry[] {
-  const entries = sessionManager.getEntries();
-  if (entries.length === 0) return entries;
-  const byId = new Map(entries.map((e) => [e.id, e]));
-  const leafId = sessionManager.getLeafId();
-  let current: SessionEntry | undefined = (leafId ? byId.get(leafId) : undefined) ?? entries[entries.length - 1];
-  const activeIds = new Set<string>();
-  while (current && !activeIds.has(current.id)) {
-    activeIds.add(current.id);
-    current = current.parentId ? byId.get(current.parentId) : undefined;
-  }
-  return entries.filter((e) => activeIds.has(e.id));
-}
+// 活跃路径裁剪（leafId 沿 parentId 回溯，撤回后被撤子树的 plan-state entry 不进
+// 重建输入）收敛于 @zhushanwen/pi-session-path 单一实现（四包同构副本收编，防御
+// 语义与回退口径见该包 filterActivePath 注释；runtime 侧 plan-state 提取器保持
+// 独立——extension 不能 import runtime 包）。
 
 export function reconstructPlanState(ctx: ExtensionContext): PlanState {
   const state = { ...DEFAULT_PLAN_STATE };
