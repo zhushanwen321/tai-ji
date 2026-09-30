@@ -51,7 +51,7 @@ type SeedTerminalRecordInput = {
  *
  * 写的是冻结形态（非 process.cwd 依赖）——所有字段来自入参，seq = 1 / 2。
  */
-function seedTerminalRecord(recordsDir: string, input: SeedTerminalRecordInput): string {
+export function seedTerminalRecord(recordsDir: string, input: SeedTerminalRecordInput): string {
   const endedAt = input.endedAt ?? input.startedAt + 1000;
   const created = {
     type: "record-created",

@@ -41,12 +41,12 @@ import { clearEngines } from "../engine/registry.ts";
 import { _resetCoreSpawnedChildrenMirrorForTest } from "../engine/host/spawned-children.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
-import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { getSubagentSessionDir, getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { RecordStore } from "../persistence/record-store.ts";
+import { seedTerminalRecord } from "./helpers/seed-terminal-record.ts";
 import {
   readRecordBinding,
   updateRecordBinding,
-  writeFinalizedState,
   writeRecordBinding,
   RECORD_BINDING_SIDECAR_EXT,
 } from "../persistence/state-marker.ts";
@@ -222,7 +222,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
   it("collectRecords：无 identity 子文件 + 绑定 → 重建 idle light（id/rootSessionId/round/sessionFile）", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
@@ -241,7 +241,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
   it("findLightById：冷启动空索引先 miss → collectRecords 全扫填充 → 索引命中（coldLookup 步骤 1 链）", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
 
     // 重启后 idToFile 未热：直查 miss
     expect(store.findLightById("sa-bind-1")).toBeUndefined();
@@ -257,7 +257,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
   it("rootSessionId 过滤仍生效：异树过滤排除绑定 record（session 隔离不因绑定旁路）", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
 
     expect(store.collectRecords(10, "all", "other-root")).toHaveLength(0);
     expect(store.collectRecords(10, "all", "root-session")).toHaveLength(1);
@@ -265,7 +265,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
 
   it("负缓存打破：先仅子文件（无绑定）扫描为空 → 绑定后到落盘 → 再次扫描命中", () => {
     const file = writePlainChildSession(sessionsDir);
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0); // 无身份无绑定 → 负缓存
 
     writeBindingFixture(file); // run 应答回填点后到：绑定戳变化
@@ -276,7 +276,7 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
 
   it("无 identity 无绑定 → 不重建（负缓存语义保持，不误建幽灵 record）", () => {
     writePlainChildSession(sessionsDir);
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     expect(store.findLightById("sa-bind-1")).toBeUndefined();
   });
@@ -379,7 +379,7 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
   it("binding(workflow) → collectRecords 重建 origin/parentRunId 保真；缺省过滤排除；includeWorkflow / parentRunId 下钻可见", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file, { origin: "workflow", parentRunId: "wf-run-1" });
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
 
     // 默认 list（includeWorkflow 缺省 false）：workflow record 被排除（S3 FAIL 的验收面）
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
@@ -395,7 +395,7 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
   it("binding(tool 缺省) → 重建 origin undefined，默认 list 保留（零迁移）", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file); // 不带 origin（存量形态）
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
@@ -406,8 +406,8 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
   it("归档（.state finalized）后重建仍保 origin：终态 workflow record 默认 list 不出现（S3 真机场景）", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file, { origin: "workflow", parentRunId: "wf-run-2" });
-    writeFinalizedState(file, "gc"); // 模拟归档/重启后终态重建
-    const store = new RecordStore(sessionsDir);
+    seedTerminalRecord(getSubagentRecordsDir(agentDir, agentDir), { id: "sa-bind-1", startedAt: STARTED_AT, stopReason: "disconnected" }); // 模拟归档/重启后终态重建（事件帧）
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
 
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     const visible = store.collectRecords(10, "all", undefined, true);
@@ -420,10 +420,10 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
   it("[H2 A3] 终态快照补投影：collectRecords 重建 light 恢复 totalTokens/turns/endedAt（list 面不再恒 0）", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file, { origin: "workflow", parentRunId: "wf-run-u" });
-    // 终态写点同款：.state + binding usage 快照
-    writeFinalizedState(file, "gc");
+    // 终态写点同款：终态事件帧 + binding usage 快照
+    seedTerminalRecord(getSubagentRecordsDir(agentDir, agentDir), { id: "sa-bind-1", startedAt: STARTED_AT, stopReason: "disconnected" });
     updateRecordBinding(file, { totalTokens: 60725, turns: 4, endedAt: STARTED_AT + 55_000 });
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
 
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
@@ -435,7 +435,7 @@ describe("[H2 S3] record-store 据绑定重建 origin（D1 投影过滤端到端
   it("[H2 A3] 快照缺省（存量 binding）→ 不投影，保持 light 缺省 0/0/undefined（零迁移）", () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
@@ -547,7 +547,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与 identityFro
     }).runOrchestration;
     runOrchestration.writeBindingForRecord(record);
 
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
     expect(visible[0]!.origin).toBe("workflow");
@@ -559,7 +559,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与 identityFro
     const file = writePlainChildSession(sessionsDir);
     // 存量形态：H2 S3 时代的 binding（origin/parentRunId 有、stepIndex 无）
     writeBindingFixture(file, { origin: "workflow", parentRunId: "wf-run-old" });
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, getSubagentRecordsDir(agentDir, agentDir));
 
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
@@ -709,7 +709,7 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
   it("④ [U4 万物可续] 绑定 + .state(旧终态遗留位) → getRecordForAction 重建放行（binding 不再被终态位阻断）", async () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
-    writeFinalizedState(file, "gc");
+    seedTerminalRecord(getSubagentRecordsDir(agentDir, agentDir), { id: "sa-bind-1", startedAt: STARTED_AT, stopReason: "disconnected" });
 
     // [U4 / §3.2.3] 旧终态遗留位只是展示位：binding 身份在 + 锚可解析 → 冷查重建
     // 注册放行（终态单向语义随终态概念消亡），续聊 resume 续写原文件。
