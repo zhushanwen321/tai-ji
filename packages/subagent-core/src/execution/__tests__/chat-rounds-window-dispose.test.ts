@@ -37,6 +37,7 @@ import type { AgentOutcome } from "@zhushanwen/subagent-engine-sdk";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { ExecuteOptions } from "../assembly/types.ts";
 import { createRecord } from "../persistence/execution-record.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 
 // ── 替身 ─────────────────────────────────────────────────────
 
@@ -148,8 +149,9 @@ function makeRunningRecord(id: string): ExecutionRecord {
   return record;
 }
 
-/** ChatRounds 直构（stdout-wedge 单测同款；本测试触达面补齐 store/pool/通知面）。 */
-function makeChatRounds(record: ExecutionRecord): ChatRounds {
+/** ChatRounds 直构（stdout-wedge 单测同款；本测试触达面补齐 store/pool/通知面）。
+ *  overrides = 逐成员覆盖注入面（[§1.4 (a)] 等待排序用例消费）。 */
+function makeChatRounds(record: ExecutionRecord, overrides: Partial<ChatRoundsDeps> = {}): ChatRounds {
   const store = {
     // 轮终簿记的最小语义 mimic：翻 idle + round+1（revive 资格判定依赖 status 翻边）。
     markRoundIdle: vi.fn((_id: string, _outcome: unknown) => {
@@ -173,6 +175,9 @@ function makeChatRounds(record: ExecutionRecord): ChatRounds {
     })),
     getPool: vi.fn(() => ({ acquire: vi.fn(async () => {}), release: vi.fn() })),
     getPi: vi.fn(() => null),
+    // [§1.4 (a)] 轮终「句柄就绪」等待：本测试 pi 恒 null（从未注入形态）——直通 null
+    //（waitForUsablePi 对从未注入立即返回，语义等价）。
+    waitForPiReady: vi.fn(async () => null),
     getSessionRootId: vi.fn(() => null),
     getStreamSink: vi.fn(() => null),
     getUiObservability: vi.fn(() => ({ getMode: () => undefined })),
@@ -190,7 +195,7 @@ function makeChatRounds(record: ExecutionRecord): ChatRounds {
     effectiveMaxConcurrentFor: vi.fn(() => 4),
     resolveChatEnginePort: vi.fn(),
   } as unknown as ChatRoundsDeps;
-  return new ChatRounds(deps);
+  return new ChatRounds({ ...deps, ...overrides });
 }
 
 // ── 用例 ─────────────────────────────────────────────────────
@@ -298,5 +303,37 @@ describe("chat 轮窗口实例接线（U3）", () => {
     // 缺省路径保形：无 engine 且无锚 → pi 缺省走能力位判定（不抛）
     const plain = makeRunningRecord("u3-win-plain-engine");
     expect(chatRounds.engineSupportsConversation(plain)).toBe(true);
+  });
+});
+
+// ── [§1.4 (a)] 轮终收尾的「句柄就绪」有界等待：等待期间簿记不执行，新代际注入后
+// 完成写（FinalizeDeps.pi 读取发生在等待 resolve 之后——写携带新句柄）。
+
+describe("[§1.4 (a)] 轮终收尾句柄就绪等待（finalizeRoundToIdle × waitForPiReady）", () => {
+  it("waitForPiReady 挂起期间不读 pi（簿记未开始）；resolve 新句柄后完成写", async () => {
+    const record = makeRunningRecord("sa-wait-pi");
+    const newPi = makePi();
+    let resolveWait: ((pi: unknown) => void) | undefined;
+    const waitForPiReady = vi.fn(
+      () =>
+        new Promise<unknown>((resolve) => {
+          resolveWait = resolve;
+        }) as never as Promise<null>,
+    );
+    const getPi = vi.fn(() => newPi as never);
+    const chatRounds = makeChatRounds(record, { waitForPiReady, getPi });
+
+    const done = chatRounds.finalizeRoundToIdle(record, { kind: "success", content: "ok" });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(waitForPiReady).toHaveBeenCalledTimes(1);
+    // 等待期间：FinalizeDeps 组装未开始（pi 读取 = 簿记写面入口，未触达）。
+    expect(getPi).not.toHaveBeenCalled();
+
+    resolveWait!(newPi);
+    await done;
+    // 等待结束后才读 pi——轮终条目写携带新代际句柄（reload 后落新权威 session）。
+    expect(getPi).toHaveBeenCalledTimes(1);
+    expect(getPi.mock.results[0]?.value).toBe(newPi);
   });
 });

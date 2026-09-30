@@ -89,6 +89,8 @@ import * as path from "node:path";
 
 import { toErrorMessage } from "../../core/error-message.ts";
 import { getLogger } from "../../core/logger.ts";
+// [§1.4 (b)] 条目上报通道 best-effort 执行（stale pi 抛错留痕不冒泡）。
+import { bestEffortPiCall } from "../assembly/best-effort.ts";
 
 import { snapshot as toSnapshot } from "./execution-record.ts";
 import { RECORD_EVENTS_SUFFIX, recordEventsPath } from "./record-events.ts";
@@ -358,7 +360,11 @@ export class RecordStore {
     this.eventStreamFace =
       manifestDir !== undefined
         ? new RecordEventsWriteFace(manifestDir, (customType, data) => {
-          this.pi?.appendEntry?.(customType, data);
+          // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（可选链只防 null 不防
+          // stale——PS-30 assertActive，登记 §1.4）。
+          bestEffortPiCall(this.pi, `record event entry (${customType})`, (active) => {
+            active.appendEntry?.(customType, data);
+          });
         }, (rec) => {
           // [D2 决策 9] bound 物化写面（锚定就绪守卫与写失败降级在被调函数内）——
           // 与轮终派生投影同款「manifest 是物化投影不是条目」语义。调用字面只留本
@@ -436,7 +442,10 @@ export class RecordStore {
       this.eventStreamFace.syncCreation(record);
       if (isFirstEventWrite) this.triggerRecordRetentionRound();
     } else {
-      this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toRegisteredEntryData(record));
+      // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（PS-30，登记 §1.4）。
+      bestEffortPiCall(this.pi, `record registered entry (${record.id})`, (active) => {
+        active.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toRegisteredEntryData(record));
+      });
     }
     this.notifyChange();
   }
@@ -472,7 +481,13 @@ export class RecordStore {
     this.records.delete(record.id);
     if (record.endedAt !== undefined) {
       if (this.eventStreamFace !== undefined) this.eventStreamFace.settleViaJournal(record, record.endedAt);
-      else this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toSettledEntryData(settledEntrySourceOf(record), record.endedAt));
+      // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（PS-30，登记 §1.4）。
+      else {
+        const endedAt = record.endedAt; // 闭包内收窄保持（属性访问不跨函数保留窄化）
+        bestEffortPiCall(this.pi, `record settled entry (${record.id})`, (active) => {
+          active.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toSettledEntryData(settledEntrySourceOf(record), endedAt));
+        });
+      }
     }
     this.notifyChange();
   }
@@ -894,7 +909,8 @@ export class RecordStore {
   }
 
   /** manifest 写失败的双通道上报（error 日志给开发者 + entry 给用户，对齐
-   *  writeManifestBestEffort 现状）。 */
+   *  writeManifestBestEffort 现状）。[§1.4 (b)] entry 腿 best-effort：stale pi 抛错
+   *  留痕不冒泡（PS-30，登记 §1.4）。 */
   private static reportManifestWriteFailure(
     id: string,
     err: unknown,
@@ -902,7 +918,9 @@ export class RecordStore {
   ): void {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error(`[subagents] manifest write failed (record=${id}): ${msg}`);
-    pi?.appendEntry?.("subagent:manifest-write-failed", { id, error: msg });
+    bestEffortPiCall(pi, `manifest-write-failed entry (${id})`, (active) => {
+      active.appendEntry?.("subagent:manifest-write-failed", { id, error: msg });
+    });
   }
 
   /** 按 id 查找。返回可变 record（仅 runtime 内部用）。 */
@@ -1097,11 +1115,14 @@ export class RecordStore {
           logger.warn("[subagents] skip manifest with invalid status", {
             detail: { id: manifest.id, status: manifest.status },
           });
-          this.pi?.appendEntry?.("subagent:manifest-invalid-status", {
-            id: manifest.id,
-            status: manifest.status,
-            rootSessionId: manifest.rootSessionId,
-            agentName: manifest.agentName,
+          // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（PS-30，登记 §1.4）。
+          bestEffortPiCall(this.pi, `manifest-invalid-status entry (${manifest.id})`, (active) => {
+            active.appendEntry?.("subagent:manifest-invalid-status", {
+              id: manifest.id,
+              status: manifest.status,
+              rootSessionId: manifest.rootSessionId,
+              agentName: manifest.agentName,
+            });
           });
           continue;
         }
@@ -1202,7 +1223,10 @@ export class RecordStore {
     this.eventStreamFace.appendJournal(id, buildAdoptedSettledEvent(state, id, stopReason, now));
     // 载荷构造半边在终态原语轴（v2 条目与事件载荷构造规则）；判定半边（fold 缓存
     // 与活跃保护）留在容器。
-    this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, buildAdoptedSettledEntry(state, id, stopReason, now));
+    // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（PS-30，登记 §1.4）。
+    bestEffortPiCall(this.pi, `adopted settled entry (${id})`, (active) => {
+      active.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, buildAdoptedSettledEntry(state, id, stopReason, now));
+    });
     const manifest = buildAdoptedManifestProjection(state, id, stopReason, now);
     if (manifest !== undefined) this.writeManifestPersisted(id, manifest);
     logger.warn(`[subagents] interrupted record adopted (id=${id}, stopReason=${stopReason}, lastSeq=${state.lastSeq}) — record-settled appended, manifest materialized`);
@@ -1322,10 +1346,15 @@ export class RecordStore {
         continue;
       }
       this.orphanJudged.add(id);
-      this.pi?.appendEntry?.(
-        SUBAGENT_RECORD_CUSTOM_TYPE,
-        buildEntryOnlyOrphanSettledEntry(id, "interrupted-by-restart", Date.now()),
-      );
+      // [§1.4 (b)] stale pi 抛错留痕降级不冒泡（PS-30）；非 stale 原样重抛——本写点的
+      // 失败传播是设计契约（生产由 record-access try/catch 吸收，orphanJudged 防重
+      // 缓存语义与重判测试锁定传播面），不得吞真实异常。
+      bestEffortPiCall(this.pi, `entry-only orphan settled entry (${id})`, (active) => {
+        active.appendEntry?.(
+          SUBAGENT_RECORD_CUSTOM_TYPE,
+          buildEntryOnlyOrphanSettledEntry(id, "interrupted-by-restart", Date.now()),
+        );
+      }, { rethrowNonStale: true });
       logger.warn(
         `[subagents] entry-only orphan adopted (id=${id}) — settled entry appended (no journal, no child session file)`,
       );

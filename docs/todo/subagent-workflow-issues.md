@@ -10,7 +10,7 @@
 
 ### 1.1 resume 复活 run 的时间预算在首次错误重试后静默失效（P1）
 
-- 状态：**已修**（2026-09-30 批次，main 线）；run-created 载预算 + resume 三档回落 + 生效预算随 run-resumed 落盘 + spec 重建读取——重试重建与引擎投影同源。遗留：`budgetTokens` 仍未恢复（resume 后 token 上限失效，与墙钟同族，见本批次报告）。
+- 状态：**已修**（2026-09-30 批次，main 线）；run-created 载预算 + resume 三档回落 + 生效预算随 run-resumed 落盘 + spec 重建读取——重试重建与引擎投影同源。遗留的 `budgetTokens` 同族缺口已随 2026-09-30 第二批修复：token 轴与时间轴完全同构（run-created / run-resumed 帧载 `budgetTokens`、三档回落 `options?.budgetTokens ?? lastResumed?.budgetTokens ?? created.budgetTokens`、spec 重建 + `rebuildBudget` maxTokens 投影），并补 D10 token 预检——已耗加权 tokens（`runAccountingFromEvents` 帧推导下界口径）≥ 生效上限即拒绝 resume；壳侧 fold（`jsonl-run-store.ts`）与 tool resume 入口（`tokens` 形参透传）同批对齐。
 
 证据链三环（2026-09-29 逐一核实）：
 - `packages/subagent-core/src/orchestration/resume-run.ts:838-847`：rebuildRunFromRecord 构造的 spec 只含 scriptSource/args/scriptName/scriptPath/model，**结构性不含 budgetTimeMs**（RunSpec.budgetTimeMs 是 readonly 也无法写回）。
@@ -33,17 +33,13 @@
 - create 前置 rmSync 清目录（:176-182）但不清 git 元数据；上次 create 回滚的 `worktree remove` 失败被 bestEffort 吞掉（:221-224）留下 `<repo>/.git/worktrees/<branch>` 陈旧登记后，`worktree add` 报 already registered 恒失败。reconstruct 对同形态有 prune+重试（:296-305），create 没有。
 - 关联登记：keepBranch 保留的 pi-sub-* 分支无终局回收（单调累积），回收策略（TTL / 数量上限 / 显式清理）待裁决。
 
-### 1.4 轮终收尾遇陈旧 extension 上下文崩溃（P1，间歇性，2026-09-22 登记；机制 2026-09-30 核实）
+### 1.4 轮终收尾遇陈旧 extension 上下文崩溃（P1，间歇性，2026-09-22 登记；机制 2026-09-30 核实；已修 2026-09-30 三段组合）
 
-- 症状：GUI 派发 subagent，轮终收尾时 **pi 会话进程** exit 1（登记原文写「runtime 进程」不准确：runtime 只写 `pi-crash-*.log` 并把会话重新拉起，runtime 自身的未处理拒绝只记日志不退出），当轮 record 丢失、轮终 manifest 投影未执行；复验 3 轮仅第 1 轮触发。「supervisor 重启循环约 6 分钟」未能核实（现场证据目录已不在盘上）。
-- 调用链（11 跳全无捕获）：onRunSettled（conversation-continuation.ts:337-348）→ settleRoundSuccess / settleRoundFailed（:667 / :701）→ finalizeRoundOutcome（chat-rounds.ts:569）→ finalizeRoundToIdle（:729-745）→ doFinalizeRoundToIdle（finalize-record.ts:266-278）→ store.markRoundIdle → markRoundIdleImpl（record-store-rounds.ts:251，登记原文的行号 :207 已漂移）→ notify-host.ts:82 的 `pi?.events.emit("pending:unregister", …)` → pi 侧 assertActive() 抛错。该步排在 manifest 投影（同文件 :275）之前，所以 manifest 丢失。
-- 死亡通道：conversation-continuation.ts:344/:347 用 `void this.settleRoundX(...)` 起了一条无人接的 promise 链，异步抛错变成未处理的 promise 拒绝；pi 在 rpc 模式下没有安装未处理拒绝 / 未捕获异常处理器（0.84.4 只在交互模式注册）→ Node 默认退出，exit 1。
-- 陈旧上下文机制（本次核实到窗口级）：pi 在会话替换（newSession / fork / switchSession / reload）时把旧 runner 标记失效——teardownCurrent 的顺序是 session_shutdown → session.dispose()（即失效）→ `await createRuntime()` → 新 session_start → initSession(新 pi)。失效后旧 api 的每个方法首行断言并抛错，文案含 `stale after session replacement`（已登记为 pi 语义断言 PS-30，探针随 pi 版本门禁重验）。
-- 命中窗口：SessionBaselines._pi（session-baselines.ts:169）全文只有 initSession（:257）一处赋值、**从不置空**；SubagentService.dispose()（subagent-service.ts:784-823）只置 `_disposed`；reload 分支（workflow-events.ts:540-548）直接返回、跳过清理（有意保留在途 run 交给 reload 后的接管）→ 在途 run 的轮终收尾正好落在「旧句柄已失效、新句柄尚未注入」的窗口里。该窗口已在 workflow-events.ts:138-152 显式登记为设计接受的窗口（降级检查放在消费侧）。
-- 缺口定位：陈旧上下文的普查与机器检查只覆盖 `extensions/` 三组目录，`packages/subagent-core` 不在扫描范围内。core 全域同形无保护的 `pi?.` / `getPi()?.` 共 **15 处**（notify-host 4 处 :70/:82/:95/:110；record-store 族 7 处含 :425/:461 的轮终与注册条目写点；subagent-service / finalize-record / sweep-binding / chat-rounds 各 1 处）。只给通知面加捕获，等于把崩溃挪到下一跳（条目写点）且不留痕。
-- 修复方向（三者组合，缺一即掩盖或留后门）：(a) 从根源消窗口——session-baselines 增 pi 绑定代际，代际不符时 `get pi()` 返回 null；dispose() 与 reload 分支都显式作废句柄；轮终收尾给有界的「句柄就绪」等待，避免窗口内丢写。(b) 通知路径 best-effort 化（notify-host.ts:69-86 及 :95、:110；core 不能 import `@zhushanwen/pi-ext-guards`，需包内极小分类常量并注释指向 PS-30）。(c) 把 `void this.settleRoundX(...)` 改成带 `.catch(bestEffort)`——消灭「任何轮终链异常 → 整进程退出」这一最坏后果，不只陈旧上下文一种成因。
-- 为什么 (b) 单独做属掩盖：注销被吞后 pending 差集残留（要靠下一轮对账补），而同一窗口的条目写点仍会抛；且静默降级的影响面尚无登记。
-- 证据与取证：原证据目录 `.tmp/dev-flow/b1b2-verify/` 已不在盘上；复核建议先在 `<dataDir>/logs/` 找 `pi-crash-*.log` 核对崩溃栈是否含上述文案，并与同一 `pi-<date>-<sid>.jsonl` 的 shutdown / start 时间戳对齐。
+- 状态：**已修**（2026-09-30，三段组合，缺一即掩盖或留后门）。症状与机制（现行有效事实）：pi 在会话替换（newSession / fork / switchSession / reload）时把旧 runner 标记失效——teardownCurrent 顺序 = session_shutdown → session.dispose()（即失效）→ `await createRuntime()` → 新 session_start → initSession(新 pi)；失效后旧 api 每个方法首行 assertActive 抛错，文案含 `stale after session replacement`（pi 语义断言 PS-30，探针随 pi 版本门禁重验）。崩溃通道 = 轮终收尾链的 fire-and-forget promise 抛错无人接 + pi rpc 模式无未处理拒绝处理器（0.84.4 只在交互模式注册）→ Node 默认 exit 1，当轮 record 丢失、轮终 manifest 投影未执行。
+- 修复 (a) 根源消窗口（core `execution/service/session-baselines.ts` + `extensions/universal/subagent-workflow/src/workflow-events.ts`）：SessionBaselines 增 pi 绑定代际（`_piGeneration` 只在 initSession 注入时递增）+ 可用性旗标；`invalidatePiBinding` 作废句柄可用性——dispose 收尾与 extension 侧 reload / session_tree 分支显式调用（reload 分支只作废句柄判定、不动在途 run 纳管，adoption 接管设计不变），作废同时清空 RecordStore 的句柄快照；作废后 late-bound 读面（`get pi()`）统一返回 null（debug 留痕一次），全部 `pi?.` / `getPi()?.` 调用点结构性不再触达失效句柄。轮终收尾（chat-rounds.finalizeRoundToIdle）经 `waitForPiReady`（本体 `SessionBaselines.waitForUsablePi`：2s 上界、事件驱动等新 initSession 注入唤醒）等句柄就绪——等到 = 条目写落进 reload 后的新权威 session（正常路径完成写）；超时 = 降级跳过 + warn 含恢复指引；从未注入（headless / 纯内存形态）零等待立即返回。`assertReady` 对作废态给出可操作错误（区分「从未注入」；dispose 后仍报 disposed 契约文案）。
+- 修复 (b) 通知/条目通道 best-effort 化：包内极小分类 `isPiStaleCtxError`（判错误文案含 PS-30 标记，`assembly/best-effort.ts`；core 不能 import `@zhushanwen/pi-ext-guards`，标记值与 ext-guards `STALE_CTX_MARKER` 同值、由 ext-guards 探针测试双侧锁定）+ `bestEffortPiCall` 包装——notify-host 4 处（pending:register/unregister emit、sendMessage、agent_settled 订阅）、record-store 6 处（journal 条目闭包、注册/终态条目、manifest 双通道上报、invalid-status、收编条目）、finalize-record 1 处（state-write-failed）、subagent-service 1 处（pending ledger 复写）、chat-rounds 1 处（worktree 冲突提示），共 13 处吞掉不冒泡（stale 类 warn 一次进程级去重，非 stale 逐次 warn）；`recoverEntryOnlyOrphans` 纠偏 entry 写点（第 14 处）启用 `rethrowNonStale`——stale 照吞，非 stale 原样重抛（失败传播是该写点的设计契约：record-access try/catch 吸收 + orphanJudged 防重语义 + 测试锁定）。`registry-reconcile/sweep-binding.ts:109` 的 `binding.getPi()?.appendEntry` 不在 core 修复批改动面，经 (a) 的 getter 收口同样不触达失效句柄；其非 stale 失败仍沿上游对账语义。
+- 修复 (c) 轮终链断头 promise 消灭（`assembly/conversation-continuation.ts`）：`voidRoundFinalChain` 统一包装 onRunSettled 成功/失败两分支、onRoundRejected、dispatchRoundAsync 四处 fire-and-forget（同族排查后唯一剩余 `closeNow` 调用本就带 catch）——任何轮终链异常（不只 stale 上下文一种成因）降级 error 留痕，不再升格为未处理 promise 拒绝。
+- 测试锚点：`session-baselines-pi-generation.test.ts`（代际翻转 / 作废 null / store 快照清空 / 有界等待注入唤醒与超时降级 / 作废态错误文案）、`best-effort-pi-call.test.ts`（分诊命中与不命中 / 进程级去重 / rethrowNonStale）、`conversation-continuation.test.ts` 断头保护组（三链异常降级留痕）、`chat-rounds-window-dispose.test.ts`（等待期间不写、resolve 后携带新句柄完成写）、`subagent-service.test.ts`（invalidatePiBinding 转发 + dispose 收尾作废）、extension `workflow-events.test.ts`（reload / session_tree 分支作废调用 + 纳管不破坏）。
 
 ### 1.5 resume 档 1 补收丢失结构化调用的对象形态（2026-09-30 用户裁决：删除该通道，见 [ADR-0092](../adr/decisions.md)）
 
@@ -286,10 +282,10 @@
 
 ## 6. 已实施待验证（收尾跟踪）
 
-### 6.1 notify 陈旧上下文崩溃（见 §1.4）——机制已核实（2026-09-30），修复方向定为三段组合
+### 6.1 notify 陈旧上下文崩溃（见 §1.4）——已修（2026-09-30 三段组合落地）
 
-- 修改方向：从根源消窗口（pi 绑定代际 + dispose/reload 显式作废句柄 + 轮终收尾有界等待）+ 通知路径 best-effort 化（含 core 其余同形无保护的 `pi?.`，清单见 §1.4）+ 轮终链改为带 `.catch(bestEffort)`。三段缺一即掩盖或留后门，理由与落点见 §1.4。
-- 未核实项：本例与轮终重叠的那一次具体会话替换（需现场日志取证）、「supervisor 重启循环约 6 分钟」的归因。
+- 状态：**已修**（2026-09-30）。三段机制（根源消窗口 / 通知条目通道 best-effort 化 / 轮终链断头保护）的现行机制、写点清单与测试锚点见 §1.4，此处不重复。
+- 剩余：真机复验——在途 run 运行中触发 reload / /new 的替换窗场景（单测已锁窗口语义，真机未复跑）；原「supervisor 重启循环约 6 分钟」的归因仍未核实（现场证据目录已不在盘上）。
 
 ### 6.2 zcode 引擎 Provider Registry / reasoningLevel 接线（2026-09-29 已落地，剩真机复验）
 

@@ -483,6 +483,13 @@ export function setupWorkflowDomain(
     const sessionId = ctx.sessionManager.getSessionId();
     lsRef.lastSessionId = sessionId;
 
+    // [§1.4 (a) switchSession 替换窗作废] switchSession 是 pi 会话替换的四个触发形态之一
+    //（§1.4 机制登记），且不触发 session_shutdown（SessionShutdownReason 枚举无该成员）
+    //——旧 runner 失效后 core 读面的旧句柄同样进入「已失效、新 initSession 未到」窗口。
+    //与 reload 分支同机制：只作废句柄可用性判定（在途 run 的 terminate 由本 handler
+    //下方原逻辑承接，互不影响）。方法本身不抛。
+    getSubagentService()?.invalidatePiBinding("session replacement (switchSession / session_tree)");
+
     const state = sessionState.get(sessionId);
     if (state) {
       // 一次性生命周期（D-2）：running run 转 done,failed 落盘（helper 内部自过滤
@@ -527,6 +534,14 @@ export function setupWorkflowDomain(
   // ════════════════════════════════════════════════════════════
   pi.on("session_shutdown", async (event: SessionShutdownEvent, _ctx: ExtensionContext) => {
     if (event.reason === "reload") {
+      // [§1.4 (a) reload 分支显式作废句柄] reload 有意跳过全部破坏性清理（下方 D1 分支
+      // 说明——在途 run 交给 reload 后 adoption 接管），但 pi 会话替换会使旧 runner
+      // 失效（PS-30：assertActive 抛 stale after session replacement），core SubagentService
+      // 的 late-bound pi 读面在旧失效句柄上会一路命中 assertActive 抛错（在途 run 的
+      // 轮终收尾正落该窗口）。此处只作废「句柄可用性判定」，不动在途 run 纳管：
+      // 作废后读面降级 null（轮终收尾经有界等待挂到新 initSession 注入），新 session_start
+      // 注入新代际句柄后自然恢复。方法本身不抛（字段写 + 唤醒等待者）。
+      getSubagentService()?.invalidatePiBinding("session replacement (reload)");
       // b 动作保留（理由见上方 D1 分支说明）。
       inflightReporter.detachSession();
 

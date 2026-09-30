@@ -7,7 +7,7 @@
 import { getLogger } from "../core/logger.ts";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../orchestration/models/types.ts";
-import { bestEffort } from "./assembly/best-effort.ts";
+import { bestEffort, bestEffortPiCall } from "./assembly/best-effort.ts";
 // [V2 决策 3] lifecycle-manager idle timer：record 终态化/取消的 disarm 面
 // 路径防误杀）——[R3] 消费已随终态写面迁 service/record-lifecycle.ts；[R4]
 // DEFAULT_IDLE_TIMEOUT_MS 消费（assertIdleTimeoutMsSafe 错误文案基准）已随 run 域
@@ -50,7 +50,9 @@ import { RecordStore } from "./persistence/record-store.ts";
 // 注册表对账 sweep（initSession 挂点；绑定面在 registry-reconcile/sweep-binding.ts
 // ——变化轴独立）。
 import { runPendingReconcileSweepForService } from "./registry-reconcile/sweep-binding.ts";
-import type { StreamSink, SubagentStream } from "./assembly/stream-sink.ts";
+// [§1.4 修复批顺手修] SubagentStream 未使用导入删除（HEAD 既有 lint error，本文件
+// 入暂存清单时 pre-commit 会拦）；StreamSink 仍被 streamSink getter 消费保留。
+import type { StreamSink } from "./assembly/stream-sink.ts";
 // [R4] state-marker（writeRecordBinding）已迁 run-orchestration；EngineSdkError/
 // ResumeAnchor（引擎死亡分诊）已迁 run-orchestration。
 import type { ClosedReason } from "./domain/record-types.ts";
@@ -206,9 +208,10 @@ export class SubagentService {
     this.baselines = new SessionBaselines(
       { cwd: init.cwd, uiRequestHandler: init.uiRequestHandler },
       {
-        // [D4 late-bound getter `() => ({pi, disposed})`] assertReady 断言状态现读：
-        // pi（initSession 时点注入，经壳 getter 透传聚合）+ disposed（壳旗标）。
-        readAssertState: () => ({ pi: this.pi, disposed: this._disposed }),
+        // [D4 late-bound getter `() => ({pi, disposed, piGeneration})`] assertReady 断言状态现读：
+        // pi（initSession 时点注入，经壳 getter 透传聚合，作废窗内聚合读面降级 null——[§1.4 (a)]）
+        // + disposed（壳旗标）+ piGeneration（绑定代际，随 initSession 注入递增）。
+        readAssertState: () => ({ pi: this.pi, disposed: this._disposed, piGeneration: this.baselines.piGeneration }),
         // session 复活（initSession 内 revive 步骤回调）——旗标写点留壳（断言面同源）。
         reviveDisposed: () => {
           this._disposed = false;
@@ -340,6 +343,8 @@ export class SubagentService {
       getNotifyHost: () => this.notifyHost,
       getPool: () => this.pool,
       getPi: () => this.pi,
+      // [§1.4 (a)] 轮终收尾「句柄就绪」有界等待（本体 SessionBaselines.waitForUsablePi）。
+      waitForPiReady: (timeoutMs, context) => this.baselines.waitForUsablePi(timeoutMs, context),
       getSessionRootId: () => this.sessionRootId,
       getStreamSink: () => this.streamSink,
       getUiObservability: () => this.uiObservability,
@@ -448,6 +453,17 @@ export class SubagentService {
    *  逐行等价随迁）；壳纯转发，对外签名不变。 */
   initSession(init: SubagentServiceSessionInit): void {
     this.baselines.initSession(init);
+  }
+
+  /**
+   * [§1.4 (a)] 显式作废 pi 句柄绑定（本体 SessionBaselines.invalidatePiBinding）。
+   * 消费方 = reload / session 替换的 extension 事件分支（workflow-events.ts）：会话
+   * 替换后旧句柄已失效（PS-30），reload 分支有意跳过 dispose（在途 run 交给 reload
+   * 后 adoption 接管），但句柄可用性判定必须作废——杜绝替换窗内的轮终收尾把失效
+   * 句柄传进 pi 调用。不抛错。
+   */
+  invalidatePiBinding(reason: string): void {
+    this.baselines.invalidatePiBinding(reason);
   }
 
   /**
@@ -815,6 +831,11 @@ export class SubagentService {
     this.persistUndeliveredNotificationsForReplay();
     this.notifyHost.dispose();
     this.store.dispose();
+    // [§1.4 (a)] dispose 收尾显式作废 pi 句柄绑定（flush/persist 链之后的最后一步——
+    // 排在其前的关停投递链保留对旧句柄的最后一次尽力写；此后 late-bound 读面统一
+    // 降级 null，下一次 initSession 注入新代际句柄恢复）。与 reload 分支的显式作废
+    // 同机制（本体 SessionBaselines.invalidatePiBinding）。
+    this.baselines.invalidatePiBinding("service dispose (session ended)");
   }
 
   /**
@@ -833,15 +854,19 @@ export class SubagentService {
       if (pending.length === 0) return;
       if (this.isIdleFn?.() !== false) return; // idle：flush 已投出（或无 gate 场景照旧）
       for (const item of pending) {
-        this.pi?.appendEntry(NOTIFY_LEDGER_CUSTOM_TYPE, {
-          v: 1,
-          notifyId: item.notifyId,
-          content: item.content,
-          record: item.record,
-          // 通道字段必须透传（与 ledger.record 同 schema）：恢复扫描按 notifyId 后写
-          // 覆盖，缺省 entry 会把 wf-done 改判成默认通道——workflow-result 失效信号
-          // 失联（W18 不触发，workflows 增量不刷新）。
-          ...(item.deliveryCustomType !== undefined ? { deliveryCustomType: item.deliveryCustomType } : {}),
+        // [§1.4 (b)] best-effort：stale pi 抛错分诊留痕不冒泡（外层 catch 仍兜底其余
+        // 异常——统一包装后 stale 类走 warn 一次通道，不与真实异常混报）。
+        bestEffortPiCall(this.pi, "pending notify ledger replay write", (active) => {
+          active.appendEntry(NOTIFY_LEDGER_CUSTOM_TYPE, {
+            v: 1,
+            notifyId: item.notifyId,
+            content: item.content,
+            record: item.record,
+            // 通道字段必须透传（与 ledger.record 同 schema）：恢复扫描按 notifyId 后写
+            // 覆盖，缺省 entry 会把 wf-done 改判成默认通道——workflow-result 失效信号
+            // 失联（W18 不触发，workflows 增量不刷新）。
+            ...(item.deliveryCustomType !== undefined ? { deliveryCustomType: item.deliveryCustomType } : {}),
+          });
         });
       }
       logger.warn(

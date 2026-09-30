@@ -50,6 +50,18 @@ import type { ExecutionRecord } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
 
+/**
+ * [§1.4 (c)] 轮终链 fire-and-forget 的统一断头保护：链上任何异常（stale pi 抛错、
+ * 簿记/通知失败等，成因不限）降级为 error 留痕，不得升格为未处理 promise 拒绝——
+ * pi rpc 模式没有安装未处理拒绝处理器（0.84.4 只在交互模式注册），Node 默认 exit 1，
+ * 后果 = 当轮 record 丢失、manifest 投影未执行（登记 §1.4 死亡通道）。
+ */
+function voidRoundFinalChain(promise: Promise<void>, what: string): void {
+  promise.catch((err: unknown) => {
+    bestEffort(err, `${what} (round-final chain)`, "error");
+  });
+}
+
 // [T2-③/LC-1] 失败恢复指引尾段：定义在 notify/notifier.ts（notifier 与本文件
 // 互相消费——尾段放 notifier 侧保持依赖方向单一：本文件已 import notifier）。
 import { FAILURE_RECOVERY_TAIL } from "../notify/notifier.ts";
@@ -342,17 +354,17 @@ export class ConversationContinuation {
       return;
     }
     if (outcome.error !== undefined) {
-      void this.settleRoundFailed(outcome.error);
+      voidRoundFinalChain(this.settleRoundFailed(outcome.error), "settleRoundFailed (onRunSettled)");
       return;
     }
-    void this.settleRoundSuccess(outcome);
+    voidRoundFinalChain(this.settleRoundSuccess(outcome), "settleRoundSuccess (onRunSettled)");
   }
 
   /** run reject（prepare 期失败——进程创建前）：合成失败轮末分流。 */
   onRoundRejected(err: unknown): void {
     this.clearActiveRound();
     if (this.record.status !== "running") return;
-    void this.settleRoundFailed(toErrorMessage(err));
+    voidRoundFinalChain(this.settleRoundFailed(toErrorMessage(err)), "settleRoundFailed (onRoundRejected)");
   }
 
   /** acquire 被打断/排队窗取消（无 run 产生）：不终态化、不通知，直接 drain。 */
@@ -438,7 +450,12 @@ export class ConversationContinuation {
     // 首轮/续聊/drain 三路派发的唯一同步入口，单挂点覆盖全部「翻回正在执行」）。
     disarmIdleTimer(record.id);
     notifyInFlightChanged();
-    void this.dispatchRoundAsync(msgs, firstRound, freshSession, summaryPrefix, firstRoundSpec);
+    // [§1.4 (c) 同族] 派发链同样断头保护：主干同步段 try/catch 之外的 await 段
+    //（worktree 重建 / markRoundStarted 前）抛错时不得升格为未处理拒绝。
+    voidRoundFinalChain(
+      this.dispatchRoundAsync(msgs, firstRound, freshSession, summaryPrefix, firstRoundSpec),
+      "dispatchRoundAsync",
+    );
   }
 
   private async dispatchRoundAsync(

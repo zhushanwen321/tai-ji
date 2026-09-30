@@ -82,6 +82,9 @@ const NOTIFY_LEDGER_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.notifyLedger);
 // ── fake 组件（合并去重：makePi/makeCtx/makeReporter/resetSlots/mount 各一处定义） ──
 
 const serviceDisposeSpy = vi.fn();
+// [§1.4 (a)] reload / session_tree 分支的句柄作废调用 spy（fake service 必须携带该成员
+// ——生产 handler 直调 `service?.invalidatePiBinding(...)`，缺成员即 TypeError）。
+const serviceInvalidatePiBindingSpy = vi.fn();
 const storeDisposeSpy = vi.fn(async () => {});
 const queueRejectAllSpy = vi.fn();
 const reporterAttachSpy = vi.fn();
@@ -266,6 +269,7 @@ function injectFakeService(): void {
     recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
     getStreamSink: () => null,
     dispose: serviceDisposeSpy,
+    invalidatePiBinding: serviceInvalidatePiBindingSpy,
   } as never);
 }
 
@@ -443,6 +447,32 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
       "[workflow-events] session_shutdown reason=reload preserved={runs:0, records:0, stores:0}",
     );
     expect(reporterDetachSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // [§1.4 (a)] reload 分支显式作废句柄：只作废 core 读面的句柄可用性判定（PS-30 窗口
+  // 消除），不动在途 run 纳管（上两例的「不 dispose / 条目保留」即纳管面证据）。
+  it("[§1.4 (a)] reload：core service 的 invalidatePiBinding 被调（reason 含 reload），dispose 不被调", async () => {
+    const { handlers, ctx } = await mountWithSession("sess-reload-invalidate");
+    await handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "reload" }, ctx);
+    expect(serviceInvalidatePiBindingSpy).toHaveBeenCalledTimes(1);
+    expect(String(serviceInvalidatePiBindingSpy.mock.calls[0]?.[0])).toContain("reload");
+    expect(serviceDisposeSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ── ② D1：session_tree（switchSession 替换窗）句柄作废 ─────────────────────────
+
+describe("[§1.4 (a)] session_tree：switchSession 替换窗同样作废句柄（不触发 session_shutdown 的替换形态）", () => {
+  it("session_tree：invalidatePiBinding 被调 + 在途 run 照常 terminate", async () => {
+    const run = makeRun({ runId: "run-sess-tree", callCount: 1 });
+    const { handle, handlers, ctx } = await mountWithSession("sess-tree", { runs: [run] });
+    expect(handle.state.sessionState.size).toBe(1);
+
+    await handlers.get("session_tree")!({ type: "session_tree" }, ctx);
+
+    expect(serviceInvalidatePiBindingSpy).toHaveBeenCalledTimes(1);
+    expect(String(serviceInvalidatePiBindingSpy.mock.calls[0]?.[0])).toContain("switchSession");
+    expect(mockTerminateRunningRuns).toHaveBeenCalledTimes(1);
   });
 });
 

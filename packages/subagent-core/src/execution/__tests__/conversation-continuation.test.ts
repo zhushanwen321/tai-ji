@@ -1981,3 +1981,77 @@ describe("集成：锚失效处置真链（pi reopen 链 + U1b 循环专防 + D1
     expect("model" in zcode.runs[0]!.task).toBe(false);
   });
 });
+
+// ============================================================
+// [§1.4 (c)] 轮终链断头保护：链上异常降级 error 留痕，不升格为未处理 promise 拒绝
+// （pi rpc 模式无未处理拒绝处理器 → Node 默认 exit 1——登记 §1.4 死亡通道；成因不限
+// stale pi 一种）。vitest 对未处理拒绝默认判红 = 本组用例的隐式断言面。
+// ============================================================
+
+describe("[§1.4 (c)] 轮终链断头保护（voidRoundFinalChain）", () => {
+  it("onRunSettled 成功形态：finalizeRoundOutcome 抛错（stale pi 文案）→ error 留痕，不崩、不通知、不 drain", async () => {
+    loggerMock.error.mockClear();
+    const record = makeRecord({});
+    const { host, calls } = makeHost(record);
+    host.finalizeRoundOutcome = async () => {
+      throw new Error("This extension ctx is stale after session replacement or reload.");
+    };
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onRunSettled(makeOutcome({ content: "ok" }));
+
+    await vi.waitFor(() => expect(loggerMock.error).toHaveBeenCalled());
+    const [msg, detail] = loggerMock.error.mock.calls.at(-1)! as [string, { detail: unknown }];
+    expect(msg).toContain("settleRoundSuccess (onRunSettled) (round-final chain)");
+    expect(String(detail.detail)).toContain("stale after session replacement");
+    // 链在簿记步降级：通知不达、后续 drain 不执行。
+    expect(calls.routed).toEqual([]);
+    expect(calls.dispatched).toEqual([]);
+  });
+
+  it("onRunSettled 失败形态与 onRoundRejected：settleRoundFailed 抛错同样降级留痕", async () => {
+    loggerMock.error.mockClear();
+    const record = makeRecord({ id: "sa-cont-fail" });
+    const { host } = makeHost(record);
+    host.finalizeRoundOutcome = async () => {
+      throw new Error("bookkeeping exploded");
+    };
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onRunSettled(makeOutcome({ content: "", error: "engine_run_failed" }));
+    await vi.waitFor(() => expect(loggerMock.error).toHaveBeenCalled());
+    expect(String(loggerMock.error.mock.calls.at(-1)?.[0])).toContain(
+      "settleRoundFailed (onRunSettled) (round-final chain)",
+    );
+
+    const record2 = makeRecord({ id: "sa-cont-reject" });
+    const host2 = makeHost(record2).host;
+    host2.finalizeRoundOutcome = async () => {
+      throw new Error("bookkeeping exploded 2");
+    };
+    const cont2 = new ConversationContinuation(record2, host2);
+    cont2.onRoundRejected(new Error("prepare failed"));
+    await vi.waitFor(() =>
+      expect(String(loggerMock.error.mock.calls.at(-1)?.[0])).toContain(
+        "settleRoundFailed (onRoundRejected) (round-final chain)",
+      ),
+    );
+  });
+
+  it("dispatchRoundAsync：主干同步段之外（markRoundStarted）抛错 → error 留痕，不升格未处理拒绝", async () => {
+    loggerMock.error.mockClear();
+    const record = makeRecord({ id: "sa-cont-dispatch" });
+    const { host } = makeHost(record);
+    host.markRoundStarted = () => {
+      throw new Error("round-start bookkeeping exploded");
+    };
+    const cont = new ConversationContinuation(record, host);
+
+    cont.onMessage("hello");
+
+    await vi.waitFor(() => expect(loggerMock.error).toHaveBeenCalled());
+    const [msg, detail] = loggerMock.error.mock.calls.at(-1)! as [string, { detail: unknown }];
+    expect(msg).toContain("dispatchRoundAsync (round-final chain)");
+    expect(String(detail.detail)).toContain("round-start bookkeeping exploded");
+  });
+});

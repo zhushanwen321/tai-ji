@@ -86,6 +86,8 @@ import type { AgentEvent, ExecuteOptions } from "../assembly/types.ts";
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 // [R6/D-R4-4] 值语义纯量消费常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
+// [§1.4 (b)] pi 条目通道 best-effort 执行（stale pi 抛错留痕不冒泡）。
+import { bestEffortPiCall } from "../assembly/best-effort.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 
 /**
@@ -96,6 +98,15 @@ import type { AgentStreamSink } from "../../shared/agent-stream.ts";
  * 引擎存活期状态错配频次 × 窗内未退出概率，罕见）。
  * [D-R4-1 兑现] 随唯一消费主体（killStaleChildBeforeDispatch）自 run-orchestration 迁入。 */
 const STALE_CHILD_EXIT_WAIT_MS = 300;
+
+/**
+ * [§1.4 (a)] 轮终收尾「句柄就绪」等待的上界（ms）：pi 会话替换（reload / new / fork /
+ * switch）作废旧句柄后，下一次 initSession 注入新代际的窗口量级 = extension 模块图
+ * 重求值 + session_start 装配链（实测亚秒~秒级）。等到 = 轮终 pi 条目写落进新权威
+ * session（正常路径完成写）；超时 = 降级跳过（磁盘 journal/manifest 面不受影响）+
+ * warn 留痕含恢复指引。控制面单请求粒度，禁止放大为任务级墙钟预算。
+ */
+const ROUND_FINAL_PI_READY_WAIT_MS = 2_000;
 
 /** 有界 delay（stale-child 退出窗消费；fire-and-forget 场景不引入 timer 依赖）。
  *  [D-R4-1 兑现] 随唯一消费主体（killStaleChildBeforeDispatch）自 run-orchestration 迁入。 */
@@ -148,6 +159,10 @@ export interface ChatRoundsDeps {
   readonly getStreamSink: () => StreamSink | null;
   /** UI observability（stream 通道形态判据 getMode）。 */
   readonly getUiObservability: () => UiRequestObservability;
+  /** [§1.4 (a)] 轮终收尾的「句柄就绪」有界等待（本体 SessionBaselines.waitForUsablePi）：
+   *  pi 绑定被会话替换作废时，短暂等待下一次 initSession 注入新代际；超时返回 null
+   *  （调用方降级跳过 pi 写，磁盘面不受影响）。 */
+  readonly waitForPiReady: (timeoutMs: number, context: string) => Promise<PiLike | null>;
   /** [R3 RecordLifecycle 显式接口] 轮次 run 失败的收尾（kickOffChatRound catch 面）。 */
   readonly finalizeFailed: (record: ExecutionRecord, err: unknown) => Promise<AgentResult>;
   /** [R3 RecordLifecycle 显式接口] one-shot 轮排队中被 abort 的收尾（[U5] cancel 语义
@@ -618,10 +633,13 @@ export class ChatRounds {
         this.deps.getWorktreeManager().reconstruct(this.deps.getCwd(), rec.id, rec.patchFile),
       // [U5 / §3.2.5 形态②] apply 冲突用户可见提示（entry 落主 session，含 patch
       // 备份路径——prompt 前缀通道由 Continuation worktreeNotice 承担，双通道互补）。
+      // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（PS-30，登记 §1.4）。
       notifyWorktreeConflict: (recordId, patchFile) => {
-        this.deps.getPi()?.appendEntry?.("subagent:worktree-rebuild-conflict", {
-          id: recordId,
-          patchFile,
+        bestEffortPiCall(this.deps.getPi(), `worktree-rebuild-conflict entry (${recordId})`, (active) => {
+          active.appendEntry?.("subagent:worktree-rebuild-conflict", {
+            id: recordId,
+            patchFile,
+          });
         });
       },
     });
@@ -751,6 +769,15 @@ export class ChatRounds {
     record: ExecutionRecord,
     outcome: RoundSettlementOutcome,
   ): Promise<void> {
+    // [§1.4 (a)] 轮终收尾的「句柄就绪」有界等待：pi 会话替换窗（reload/替换作废旧句柄、
+    // 新 initSession 未到）内，短暂等待新代际注入再执行簿记——等到 = 轮终 pi 条目写
+    // 落进 reload 后的新权威 session（正常路径完成写）；超时 = 降级 null（下方
+    // FinalizeDeps.pi 走可选链跳过 pi 写，磁盘 journal/manifest 面不受影响）。
+    // 从未注入过 pi 的宿主形态（headless / 纯内存测试）恒立即返回，零等待。
+    await this.deps.waitForPiReady(
+      ROUND_FINAL_PI_READY_WAIT_MS,
+      `round final to idle (record=${record.id}, outcome=${outcome.kind})`,
+    );
     await doFinalizeRoundToIdle(
       {
         worktreeManager: this.deps.getWorktreeManager(),

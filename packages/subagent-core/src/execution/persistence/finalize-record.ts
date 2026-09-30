@@ -21,7 +21,7 @@ import * as path from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 
-import { bestEffort } from "../assembly/best-effort.ts";
+import { bestEffort, bestEffortPiCall } from "../assembly/best-effort.ts";
 import { completeLegacyClosed } from "./execution-record.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "./record-store.ts";
@@ -202,10 +202,14 @@ export async function doFinalizeRecord(
       `[subagent] terminal state primitive failed unexpectedly (record=${record.id}, reason=${reasonDesc}); ` +
         `record stays running on disk — boot orphan recovery will finalize it`,
     );
-    deps.pi?.appendEntry?.("subagent:state-write-failed", {
-      id: record.id,
-      status,
-      closedReason: reasonDesc,
+    // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（PS-30，登记 §1.4）——终态写
+    // 已失败的响亮上报本身不得成为新的崩溃源。
+    bestEffortPiCall(deps.pi, `state-write-failed entry (${record.id})`, (active) => {
+      active.appendEntry?.("subagent:state-write-failed", {
+        id: record.id,
+        status,
+        closedReason: reasonDesc,
+      });
     });
   }
 
