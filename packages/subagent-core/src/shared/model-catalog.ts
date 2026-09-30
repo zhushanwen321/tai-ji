@@ -24,7 +24,7 @@
  * 套餐族）是 zcode 派发域概念，本期跳过校验不误拒。
  */
 
-import { parseModelSelector } from "../shared/model-ref.ts";
+import { parseModelSelector } from "./model-ref.ts";
 
 /** 报错信息中列出的可用模型上限（防超长错误信息；与 shared/model-ref 同量级口径）。 */
 const MODEL_LIST_LIMIT = 20;

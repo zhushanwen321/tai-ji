@@ -46,8 +46,8 @@ export interface LintResult {
 }
 
 /** 必须命中其一——workflow 脚本不调用任何编排函数等于空跑。 */
-import type { AgentMeta } from "../shared/resource-meta.ts";
-import { parseResourceMeta } from "../shared/meta-parser.ts";
+import type { AgentMeta } from "./resource-meta.ts";
+import { parseResourceMeta } from "./meta-parser.ts";
 
 const ENTRY_POINT_PATTERNS = [/\bagent\s*\(/, /\bparallel\s*\(/, /\bpipeline\s*\(/] as const;
 

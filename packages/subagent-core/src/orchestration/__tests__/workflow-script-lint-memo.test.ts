@@ -13,8 +13,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const lintCalls = vi.hoisted(() => ({ count: 0 }));
 
-vi.mock("../script-lint.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../script-lint.ts")>();
+vi.mock("../../shared/script-lint.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../shared/script-lint.ts")>();
   const realLintScript = actual.lintScript;
   const countingLintScript = ((source: string) => {
     lintCalls.count++;

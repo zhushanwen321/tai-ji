@@ -17,7 +17,7 @@ import {
 } from "../../shared/resource-discovery.ts";
 import { normalizeRef, AGENT_REF_EXT } from "../../shared/agent-ref.ts";
 import { parseResourceMeta } from "../../shared/meta-parser.ts";
-import { lintAgentMeta } from "../../orchestration/script-lint.ts";
+import { lintAgentMeta } from "../../shared/script-lint.ts";
 import type { AgentMeta, RoutingExample } from "../../shared/resource-meta.ts";
 import type { AgentConfig } from "./model-resolver.ts";
 import { EngineNotFoundError, listEngines } from "../engine/registry.ts";

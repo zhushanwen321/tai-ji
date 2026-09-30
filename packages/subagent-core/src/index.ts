@@ -244,7 +244,7 @@ export {
   type PiRegistryModelEntry,
   type ModelCatalogOptions,
   type ModelCatalogSource,
-} from "./orchestration/model-catalog.ts";
+} from "./shared/model-catalog.ts";
 
 // notify ledger：宿主通知账本端口（bind / getBound）——组合根装配 + workflow 域消费。
 export {
@@ -501,8 +501,8 @@ export {
   WorkflowScript,
 } from "./orchestration/workflow-script-registry-impl.ts";
 // lintScript：workflow 脚本静态检查（执行前 fail-fast，宿主 list/validate 面消费）。
-export { lintScript } from "./orchestration/script-lint.ts";
-export type { LintResult } from "./orchestration/script-lint.ts";
+export { lintScript } from "./shared/script-lint.ts";
+export type { LintResult } from "./shared/script-lint.ts";
 export { saveWorkflow, deleteWorkflow } from "./orchestration/workflow-files.ts";
 export { clearSkillPathCache } from "./orchestration/skill-discovery.ts";
 export { WorkerHostImpl } from "./orchestration/worker-host.ts";

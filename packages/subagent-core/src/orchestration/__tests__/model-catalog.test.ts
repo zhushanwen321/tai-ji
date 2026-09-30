@@ -13,7 +13,7 @@ import {
   resolveModelInCatalog,
   type PiRegistryModelEntry,
   type ModelCatalogSource,
-} from "../model-catalog.ts";
+} from "../../shared/model-catalog.ts";
 import { assertCanonicalModelRef } from "../../shared/model-ref.ts";
 
 function makeSource(entries: ReadonlyArray<PiRegistryModelEntry>): ModelCatalogSource {

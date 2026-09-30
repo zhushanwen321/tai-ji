@@ -34,7 +34,7 @@ import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../or
 import { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 // [D8 派发期对称校验] pi 引擎模型目录分类裁决（创建期同源消费 model-catalog；
 // orchestration → shared 叶子方向，无环）。
-import { assertModelInCatalog } from "../../orchestration/model-catalog.ts";
+import { assertModelInCatalog } from "../../shared/model-catalog.ts";
 // [D3 协议版 P6] armed 回执落账投递（runId 键入口；observedEvent 消费点）。value
 // import 方向 execution/service → orchestration/pump：pump 的传递闭包（persistence/
 // assembly/orchestration 内部）不 import execution/service，无循环。
