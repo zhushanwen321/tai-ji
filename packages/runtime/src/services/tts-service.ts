@@ -412,8 +412,8 @@ export class TtsService {
           if ('error' in resolved) return { ok: false, error: resolved.error }
           resolvedKeys.set(keyProviderId, resolved.key)
           // baseUrl 联动仅 MiMo 家（D4）：该家 baseUrl 为空或仍为出厂默认值时，
-          // 经 resolveProviderBaseUrl 两级数据源读 provider 实际生效值写入
-          if (keyProviderId === 'mimo') this.applyMimoBaseUrlLinkage(validated, formModel)
+          // 按「Key 实际命中」的 provider id 读集群地址写入（与带入严格同源）
+          if (keyProviderId === 'mimo') this.applyMimoBaseUrlLinkage(validated, formModel, resolved.hitId)
         } else {
           resolvedKeys.set(keyProviderId, input === '' ? null : input)
         }
@@ -519,12 +519,12 @@ export class TtsService {
    */
   private async resolveFromProviderKey(
     providerId: TtsProviderId,
-  ): Promise<{ key: string } | { error: string }> {
+  ): Promise<{ key: string; hitId: string } | { error: string }> {
     const guidance = '该供应商凭据形态不支持自动带入，请手动粘贴 API Key'
     for (const modelProviderId of TTS_PROVIDER_TO_MODEL_PROVIDER_IDS[providerId]) {
       const resolved = await this.credentialResolver.resolveProviderCredential(modelProviderId)
       if (resolved === undefined) continue
-      if ('key' in resolved) return { key: resolved.key }
+      if ('key' in resolved) return { key: resolved.key, hitId: modelProviderId }
       return { error: guidance }
     }
     return { error: '未检测到供应商配置的 Key，请手动粘贴 API Key' }
@@ -532,21 +532,19 @@ export class TtsService {
 
   /**
    * MiMo baseUrl 预填（D4，仅该家；MiniMax 不联动）：当前 baseUrl 为空或仍等于该家表单投影
-   * baseUrlOptions 中 isDefault 项 url（「未手动改过」的判定代理）时，经 resolveProviderBaseUrl
-   * 两级数据源（models.json 网关值 → 内置 catalog 兜底）读 provider 实际生效值写入；
-   * 两级皆无值（undefined）→ 只带 Key、baseUrl 留当前值不写。手动改过的值任何家不覆盖。
+   * baseUrlOptions 中 isDefault 项 url（「未手动改过」的判定代理）时，按 keyHitId（Key 带入
+   * 实际命中的 provider id）经 resolveProviderBaseUrl 两级数据源（models.json 网关值 → 内置
+   * catalog 兜底）读该 id 实际生效集群写入；undefined → 只带 Key、baseUrl 留当前值不写。
+   * 手动改过的值任何家不覆盖。D3 验收实测缺陷修复：预填 id 必须与 Key 带入命中 id 同源——
+   * 此前独立遍历映射表时首位 'xiaomi'（无集群绑定语义）经 catalog 恒返回默认集群并短路，
+   * 实际凭据所属集群（token-plan-cn）永远轮不到。
    */
-  private applyMimoBaseUrlLinkage(config: TtsConfig, formModel: TtsFormModel): void {
+  private applyMimoBaseUrlLinkage(config: TtsConfig, formModel: TtsFormModel, keyHitId: string): void {
     const isDefaultUrl = formModel.baseUrlOptions.find((option) => option.isDefault)?.url
     const untouched = config.baseUrl === '' || (isDefaultUrl !== undefined && config.baseUrl === isDefaultUrl)
     if (!untouched) return
-    for (const modelProviderId of TTS_PROVIDER_TO_MODEL_PROVIDER_IDS.mimo) {
-      const baseUrl = this.credentialResolver.resolveProviderBaseUrl(modelProviderId)
-      if (baseUrl !== undefined) {
-        config.baseUrl = baseUrl
-        return
-      }
-    }
+    const baseUrl = this.credentialResolver.resolveProviderBaseUrl(keyHitId)
+    if (baseUrl !== undefined) config.baseUrl = baseUrl
   }
 
   // ── tts.json / secrets / cache 的 fs 读写（写入点归属见文件头注释）─────────

@@ -121,8 +121,9 @@ function makeResolver(
   baseUrls: Record<string, string | undefined> = {},
 ): IProviderCredentialResolver {
   return {
-    hasProviderCredential: () => false,
-    listCredentialBackedProviderIds: () => new Set<string>(),
+    // 与生产语义对齐：凭据 outcomes 登记过的 id = 持凭据（D3 验收后守卫依赖此判定）
+    hasProviderCredential: (id) => id in outcomes,
+    listCredentialBackedProviderIds: () => new Set<string>(Object.keys(outcomes)),
     resolveProviderCredential: async (id) => outcomes[id],
     resolveProviderBaseUrl: (id) => baseUrls[id],
   }
@@ -604,8 +605,9 @@ describe('configure Key 联动（D4）', () => {
 
   it('MiMo baseUrl 联动：出厂默认值时经 resolveProviderBaseUrl 预填实际生效集群；手动改过不覆盖', async () => {
     const deps = makeServiceDeps()
+    // 凭据在 xiaomi-token-plan-cn（生产形态）→ 带入命中该 id → 预填其集群地址
     deps.resolver = makeResolver(
-      { xiaomi: { key: 'sk-1', source: 'auth.json' } },
+      { 'xiaomi-token-plan-cn': { key: 'sk-1', source: 'auth.json' } },
       { 'xiaomi-token-plan-cn': 'https://token-plan-cn.xiaomimimo.com/v1' },
     )
     const svc = makeService(deps)
@@ -626,6 +628,27 @@ describe('configure Key 联动（D4）', () => {
     })
     const store2 = JSON.parse(readFileSync(join(dir, 'tts.json'), 'utf-8')) as { providers: Record<string, TtsConfig> }
     expect(store2.providers.mimo.baseUrl).toBe('https://my-own.example.com/v1')
+  })
+
+  it('MiMo baseUrl 联动跟随 Key 带入命中 id（D3 验收缺陷回归：独立遍历映射表时首位无凭据 id 经 catalog 短路成默认集群）', async () => {
+    const deps = makeServiceDeps()
+    // 真实 catalog 形态复现：xiaomi（无集群绑定语义）恒有默认集群 catalog 值，凭据实际在
+    // xiaomi-token-plan-cn 下——带入与预填必须命中同一 id，选 token plan 集群
+    deps.resolver = makeResolver(
+      { 'xiaomi-token-plan-cn': { key: 'sk-plan', source: 'auth.json' } },
+      {
+        xiaomi: 'https://api.xiaomimimo.com/v1',
+        'xiaomi-token-plan-cn': 'https://token-plan-cn.xiaomimimo.com/v1',
+      },
+    )
+    const svc = makeService(deps)
+    await svc.configure({
+      providerId: 'mimo',
+      config: baseStepfunConfig({ baseUrl: DEFAULT_BASE_URL }),
+      apiKeys: { mimo: 'from-provider' },
+    })
+    const store = JSON.parse(readFileSync(join(dir, 'tts.json'), 'utf-8')) as { providers: Record<string, TtsConfig> }
+    expect(store.providers.mimo.baseUrl).toBe('https://token-plan-cn.xiaomimimo.com/v1')
   })
 
   it('MiniMax 不联动 baseUrl（默认值保留）', async () => {
