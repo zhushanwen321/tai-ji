@@ -40,7 +40,7 @@ RECORDED="$(grep -m1 '^storeDir:' "$MODULES_YAML" | sed 's/^storeDir:[[:space:]]
 if [ "$EXPECTED" != "$RECORDED" ]; then
     echo -e "${RED}[FAIL] pnpm store 布局翻转：.modules.yaml 记录 ${RECORDED} ，当前环境解析 ${EXPECTED} ${NC}"
     echo -e "${YELLOW}[根因] 沙箱执行体（zsw 引擎 worker / CI）覆写 HOME → store 路径分叉，见 docs/TROUBLESHOOTING.md「pnpm store 布局双向翻转」${NC}"
-    echo -e "${YELLOW}[FIX] cd ${PROJECT_ROOT} && CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install  （约 6-7s 重建后重试 commit）${NC}"
+    echo -e "${YELLOW}[FIX] cd ${PROJECT_ROOT} && rm -f node_modules/.modules.yaml && CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install  （约 6-7s 重建后重试 commit；先删清单强制重写 storeDir——清单 up-to-date 时 install 会跳过重写）${NC}"
     exit 1
 fi
 
