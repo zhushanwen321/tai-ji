@@ -17,7 +17,11 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { BuiltinProviderTemplate, ProviderInfo } from '@taiji/shared'
 import { getSettingsStore, provideSettingsTransport, provideSettingsStore, createSettingsStore } from '@taiji/core'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的组件 import 求值
+// （vi.hoisted 同族 TDZ 坑，settings-modal-smoke.test.ts 先例）。
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { apiProjectMock } from '../helpers/api-facade-mock'
+import { authEventCbs } from '../helpers/oauth-auth-events-mock'
 
 const configMock = vi.hoisted(() => ({
   onProviders: vi.fn(() => () => {}),
@@ -39,18 +43,20 @@ const configMock = vi.hoisted(() => ({
   oauthLogin: vi.fn(async () => ({ started: false, error: 'mock' })),
   oauthCancel: vi.fn(async () => ({ cancelled: false })),
   hasOAuth: vi.fn(async () => false),
-  onAuthDeviceCode: vi.fn(() => () => {}),
-  onAuthAuthUrl: vi.fn(() => () => {}),
-  onAuthSuccess: vi.fn(() => () => {}),
-  onAuthError: vi.fn(() => () => {}),
   listBuiltinProviders: vi.fn(async () => []),
   // ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
   refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [] })),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  config: configMock,
-  default: { config: configMock },
+// wave-oauth：useProviderOAuth onMounted 订阅 4 个 auth.* 事件（缺则 TypeError 崩 mount）。
+// vi.hoisted 工厂不能引用 import 绑定（TDZ），auth 订阅捕获集单源在 helper——顶层装配
+// 后并入门面 config 域（同 use-provider-oauth.test.ts 先例）。
+const authCbs = authEventCbs()
+const configWithAuth = { ...configMock, ...authCbs }
+
+vi.mock('@/api', () => ({ project: apiProjectMock(),
+  config: configWithAuth,
+  default: { config: configWithAuth },
 }))
 
 import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
@@ -93,8 +99,8 @@ beforeEach(() => {
   configMock.toggleProviderEnabled.mockClear()
   configMock.removeProviderByKind.mockClear()
   configMock.setDefaultModel.mockClear()
-  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映）
-  provideSettingsTransport(makeSettingsTransportStub(configMock))
+  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映；含 auth 订阅捕获集）
+  provideSettingsTransport(makeSettingsTransportStub(configWithAuth))
 })
 
 afterEach(() => {

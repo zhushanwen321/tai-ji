@@ -33,7 +33,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { NormalizedQuotaRow } from '@taiji/shared'
-import type { QuotaConfigureModule, QuotaFailureKind, QuotaTestStatus } from '@taiji/core'
+import type { QuotaConfigureModule, QuotaFailureKind, QuotaTestStatus, ReadinessMissing } from '@taiji/core'
 import CodingPlanSection from '../coding-plan/CodingPlanSection.vue'
 import { QUOTA_CONFIGURE_MODULE_KEY } from '../injection-keys'
 import { makeQuotaModuleStub } from '@taiji/core/testing'
@@ -77,10 +77,59 @@ function mountSection(): ReturnType<typeof mount> {
   })
 }
 
-/** 布置失败态（test 透镜）：分档 + cookie 形态 + 兜底消息 */
-function arrangeFailure(kind: QuotaFailureKind, opts: { cookieAuth?: boolean; message?: string; status?: QuotaTestStatus } = {}): void {
+/**
+ * 布置失败态（test 透镜）：分档 + cookie 形态 + 兜底消息。
+ * opts.form 供 cookie 类失败场景顺带布置 view.credential.form（两态高频成对出现）。
+ */
+function arrangeFailure(kind: QuotaFailureKind, opts: { cookieAuth?: boolean; message?: string; status?: QuotaTestStatus; form?: 'cookie' } = {}): void {
   quota.test.value.status = opts.status ?? 'error'
   quota.test.value.failure = { kind, cookieAuth: opts.cookieAuth ?? false, message: opts.message ?? '' }
+  if (opts.form) quota.view.value.credential.form = opts.form
+}
+
+/** 布置「未选类型 / preset 未命中」态：readiness 恒 missing ['type']（module 派生契约，两分支 UI 同形态 §7.2） */
+function arrangeTypeUndetermined(selected: string | undefined): void {
+  quota.view.value.type.selected = selected
+  quota.view.value.type.undetermined = true
+  quota.view.value.readiness = { ready: false, missing: ['type'] }
+}
+
+/** 布置 cookie 类（mimo）+ 指定 missing 键的齐备性态 */
+function arrangeCookieMissing(missing: ReadinessMissing[]): void {
+  quota.view.value.credential.form = 'cookie'
+  quota.view.value.type.selected = 'mimo'
+  quota.view.value.readiness = { ready: false, missing }
+}
+
+/** 布置 cookie 类（opencode-go 资源维度类型）+ workspace 必填 + 指定 missing 键 */
+function arrangeCookieWorkspaceMissing(missing: ReadinessMissing[]): void {
+  quota.view.value.credential.form = 'cookie'
+  quota.view.value.type.selected = 'opencode-go'
+  quota.view.value.workspace.required = true
+  quota.view.value.readiness = { ready: false, missing }
+}
+
+/** 布置专属 Key 失效态：草稿来源 exclusive + Key 空 + minimax，readiness 报 missing ['apiKey']（typeChanged 归属失效） */
+function arrangeExclusiveKeyInvalid(): void {
+  quota.draft.value.credentialSource = 'exclusive'
+  quota.draft.value.apiKey = ''
+  quota.view.value.type.selected = 'minimax'
+  quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
+}
+
+/** 断言三键字段级提示（cookie / apiKey / workspace）均不渲染（'type' 在 §7.4 白名单外，结构性无文案） */
+function expectNoFieldHints(w: ReturnType<typeof mount>): void {
+  expect(w.find('[data-testid="quota-missing-cookie"]').exists()).toBe(false)
+  expect(w.find('[data-testid="quota-missing-apikey"]').exists()).toBe(false)
+  expect(w.find('[data-testid="quota-missing-workspace"]').exists()).toBe(false)
+}
+
+/** 断言未选类型态的首屏说明：类型下拉仍在 + quotaTypeFirstHint 一句文案（D8 与探针③同形态） */
+function expectNoTypeHint(w: ReturnType<typeof mount>): void {
+  expect(w.find('[data-testid="quota-type-select"]').exists()).toBe(true)
+  const hint = w.find('[data-testid="quota-no-type-hint"]')
+  expect(hint.exists()).toBe(true)
+  expect(hint.text()).toContain('settings.providerEdit.quotaTypeFirstHint')
 }
 
 /** 单按钮（唯一主动作） */
@@ -91,17 +140,12 @@ const SAVE_TEST = '[data-testid="quota-save-test-btn"]'
 describe('① D8 未选类型态：只渲染下拉 + 一句说明', () => {
   it('type.undetermined → 渲染类型下拉与 quotaTypeFirstHint，且不渲染开关/凭证区/按钮/结果块', async () => {
     // 契约里未选类型的 readiness 恒为 { ready:false, missing:['type'] }（module 派生）
-    quota.view.value.type.selected = undefined
-    quota.view.value.type.undetermined = true
-    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    arrangeTypeUndetermined(undefined)
     wrapper = mountSection()
     await flushPromises()
 
     // 用户可见：下拉仍在（区块对所有 provider 显示）+ 说明文案
-    expect(wrapper.find('[data-testid="quota-type-select"]').exists()).toBe(true)
-    const hint = wrapper.find('[data-testid="quota-no-type-hint"]')
-    expect(hint.exists()).toBe(true)
-    expect(hint.text()).toContain('settings.providerEdit.quotaTypeFirstHint')
+    expectNoTypeHint(wrapper)
 
     // 观察者：参数区 / 动作区 / 结果区整体缺席（D8 的「不渲染」）
     expect(wrapper.find('[data-testid="quota-enabled-switch"]').exists()).toBe(false)
@@ -114,15 +158,11 @@ describe('① D8 未选类型态：只渲染下拉 + 一句说明', () => {
   })
 
   it('未选类型时 missing=["type"] 不产生字段级提示（白名单三键之外无文案，§7.4）', async () => {
-    quota.view.value.type.selected = undefined
-    quota.view.value.type.undetermined = true
-    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    arrangeTypeUndetermined(undefined)
     wrapper = mountSection()
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="quota-missing-cookie"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="quota-missing-apikey"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="quota-missing-workspace"]').exists()).toBe(false)
+    expectNoFieldHints(wrapper)
   })
 })
 
@@ -165,9 +205,7 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   })
 
   it('missing=["cookie"]（cookie 类）→ 字段下方渲染 quotaMissingCookie 提示', async () => {
-    quota.view.value.credential.form = 'cookie'
-    quota.view.value.type.selected = 'mimo'
-    quota.view.value.readiness = { ready: false, missing: ['cookie'] }
+    arrangeCookieMissing(['cookie'])
     wrapper = mountSection()
     await flushPromises()
 
@@ -193,10 +231,7 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   })
 
   it('missing=["workspace"]（资源维度类型）→ workspace 输入下方渲染 quotaMissingWorkspace 提示', async () => {
-    quota.view.value.workspace.required = true
-    quota.view.value.type.selected = 'opencode-go'
-    quota.view.value.credential.form = 'cookie'
-    quota.view.value.readiness = { ready: false, missing: ['workspace'] }
+    arrangeCookieWorkspaceMissing(['workspace'])
     wrapper = mountSection()
     await flushPromises()
 
@@ -206,10 +241,7 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   })
 
   it('missing 同时含多键 → 逐键各渲染自己的提示（不写兜底循环，§7.4 显式白名单）', async () => {
-    quota.view.value.credential.form = 'cookie'
-    quota.view.value.type.selected = 'opencode-go'
-    quota.view.value.workspace.required = true
-    quota.view.value.readiness = { ready: false, missing: ['cookie', 'workspace'] }
+    arrangeCookieWorkspaceMissing(['cookie', 'workspace'])
     wrapper = mountSection()
     await flushPromises()
 
@@ -224,15 +256,11 @@ describe('② D1 齐备性门控：唯一按钮「保存并测试」的置灰矩
   it("missing 含 'type'（preset 未命中）→ 走 D8 同形态：三键提示与参数区按钮全不渲染（'type' 结构性无文案）", async () => {
     // 草稿有值但不在预设表（历史数据 / 手工编辑 providers.json）是「有值 + missing=['type']」的
     // 唯一可达来源；readiness 该分支与「未选类型」同形态（§7.2），UI 必须同样收起到下拉 + 说明。
-    quota.view.value.type.selected = 'legacy-unknown'
-    quota.view.value.type.undetermined = true
-    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    arrangeTypeUndetermined('legacy-unknown')
     wrapper = mountSection()
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="quota-missing-cookie"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="quota-missing-apikey"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="quota-missing-workspace"]').exists()).toBe(false)
+    expectNoFieldHints(wrapper)
     // 参数区整体不渲染（类型未定不展示永远无法生效的控件，D8），故没有「保存并测试」按钮
     expect(wrapper.find(SAVE_TEST).exists()).toBe(false)
   })
@@ -433,9 +461,7 @@ describe('⑤ D7 去掩码：输入框只放草稿，「已配置」是独立标
   })
 
   it('cookie 未配置 → 标 quotaRequiredBadge（必填），与「已配置」互斥', async () => {
-    quota.view.value.credential.form = 'cookie'
-    quota.view.value.type.selected = 'mimo'
-    quota.view.value.readiness = { ready: false, missing: ['cookie'] }
+    arrangeCookieMissing(['cookie'])
     wrapper = mountSection()
     await flushPromises()
 
@@ -478,10 +504,7 @@ describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不参与，
     // 复现 D5 的核心场景：已保存 MiMo cookie，用户把类型改成 opencode-go（同为 cookie 类）后
     // 旧 cookie 归属失效 → readiness 报 ['cookie']。徽标唯一来源是 readiness.missing；若改回读
     // 磁盘标记就会与下方「这里必须填」提示同屏矛盾（S7 反例）。
-    quota.view.value.credential.form = 'cookie'
-    quota.view.value.type.selected = 'opencode-go'
-    quota.view.value.workspace.required = true
-    quota.view.value.readiness = { ready: false, missing: ['cookie', 'workspace'] }
+    arrangeCookieWorkspaceMissing(['cookie', 'workspace'])
     wrapper = mountSection()
     await flushPromises()
 
@@ -495,10 +518,7 @@ describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不参与，
   })
 
   it('反向：missing 含 apiKey（类型切换后旧专属 Key 失效）→ 徽标「必填」', async () => {
-    quota.draft.value.credentialSource = 'exclusive'
-    quota.draft.value.apiKey = ''
-    quota.view.value.type.selected = 'minimax'
-    quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
+    arrangeExclusiveKeyInvalid()
     wrapper = mountSection()
     await flushPromises()
 
@@ -511,11 +531,8 @@ describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不参与，
   })
 
   it('反向：missing 含 workspace（草稿被清空）→ 徽标「必填」（D13 屏幕即真相）', async () => {
-    quota.view.value.credential.form = 'cookie'
-    quota.view.value.type.selected = 'opencode-go'
-    quota.view.value.workspace.required = true
+    arrangeCookieWorkspaceMissing(['workspace'])
     quota.draft.value.workspace = ''
-    quota.view.value.readiness = { ready: false, missing: ['workspace'] }
     wrapper = mountSection()
     await flushPromises()
 
@@ -532,11 +549,8 @@ describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不参与，
 
 describe('⑤c 定向复审探针：三条复现路径的真实 DOM 锁定', () => {
   it('探针①：类型已变（D5 旧专属 Key 归属失效）+ 草稿空 → 字段块内无任何「已配置」语义（徽标与占位）', async () => {
-    quota.draft.value.credentialSource = 'exclusive'
     // 磁盘仍有旧专属 Key，readiness 因 typeChanged 判定该归属失效
-    quota.draft.value.apiKey = ''
-    quota.view.value.type.selected = 'minimax'
-    quota.view.value.readiness = { ready: false, missing: ['apiKey'] }
+    arrangeExclusiveKeyInvalid()
     wrapper = mountSection()
     await flushPromises()
 
@@ -557,11 +571,9 @@ describe('⑤c 定向复审探针：三条复现路径的真实 DOM 锁定', () 
   })
 
   it('探针②：preset 未命中 + exclusive + 磁盘无 Key → 不出现「已配置」徽标（未判定不得被读成已配置）', async () => {
-    quota.view.value.type.selected = 'legacy-unknown'
-    quota.view.value.type.undetermined = true
-    quota.view.value.readiness = { ready: false, missing: ['type'] }
     quota.draft.value.credentialSource = 'exclusive'
     quota.draft.value.apiKey = ''
+    arrangeTypeUndetermined('legacy-unknown')
     wrapper = mountSection()
     await flushPromises()
 
@@ -573,15 +585,11 @@ describe('⑤c 定向复审探针：三条复现路径的真实 DOM 锁定', () 
   })
 
   it('探针③：preset 未命中 → 渲染「重选类型」指引，且参数区不渲染（与 D8 同形态）', async () => {
-    quota.view.value.type.selected = 'legacy-unknown'
-    quota.view.value.type.undetermined = true
-    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    arrangeTypeUndetermined('legacy-unknown')
     wrapper = mountSection()
     await flushPromises()
 
-    const hint = wrapper.find('[data-testid="quota-no-type-hint"]')
-    expect(hint.exists()).toBe(true)
-    expect(hint.text()).toContain('settings.providerEdit.quotaTypeFirstHint')
+    expectNoTypeHint(wrapper)
     // 参数区（开关 / 凭证区 / 动作区）整体不渲染
     expect(wrapper.find('[data-testid="quota-enabled-switch"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="quota-credential-source"]').exists()).toBe(false)
@@ -604,8 +612,7 @@ describe('⑥ §5.2 失败路径文案（module 归一分档 + cookie 变体）'
   })
 
   it('unauthorized + cookie 类 → quotaFetchFailUnauthorizedCookie（改指「重新复制 Cookie」）', async () => {
-    arrangeFailure('unauthorized', { cookieAuth: true })
-    quota.view.value.credential.form = 'cookie'
+    arrangeFailure('unauthorized', { cookieAuth: true, form: 'cookie' })
     wrapper = mountSection()
     await flushPromises()
 
@@ -624,8 +631,7 @@ describe('⑥ §5.2 失败路径文案（module 归一分档 + cookie 变体）'
   })
 
   it('no-credential + cookie 类 → quotaFetchFailNoCredentialCookie（重贴 Cookie，非填 API Key）', async () => {
-    arrangeFailure('no-credential', { cookieAuth: true })
-    quota.view.value.credential.form = 'cookie'
+    arrangeFailure('no-credential', { cookieAuth: true, form: 'cookie' })
     wrapper = mountSection()
     await flushPromises()
 
@@ -637,8 +643,7 @@ describe('⑥ §5.2 失败路径文案（module 归一分档 + cookie 变体）'
   })
 
   it('no-subscription + cookie 类 → 既有两可文案（Cookie 变体先例，S5）', async () => {
-    arrangeFailure('no-subscription', { cookieAuth: true })
-    quota.view.value.credential.form = 'cookie'
+    arrangeFailure('no-subscription', { cookieAuth: true, form: 'cookie' })
     wrapper = mountSection()
     await flushPromises()
 
@@ -790,10 +795,7 @@ describe('B-3 失败态「查看上次成功数据」折叠', () => {
 
 describe('workspace 地址块（required 条件渲染 + 输入直写草稿）', () => {
   it('cookie 类 + workspace.required → 渲染块；输入直写 draft.workspace', async () => {
-    quota.view.value.credential.form = 'cookie'
-    quota.view.value.type.selected = 'opencode-go'
-    quota.view.value.workspace.required = true
-    quota.view.value.readiness = { ready: false, missing: ['workspace'] }
+    arrangeCookieWorkspaceMissing(['workspace'])
     wrapper = mountSection()
     await flushPromises()
 
@@ -849,8 +851,7 @@ describe('交互补口：写动作与草稿直写（开关 / 输入草稿 / 重�
   })
 
   it('失败态点「更新 Cookie」→ 清空 draft.cookie（清空草稿引导重贴，非清盘）', async () => {
-    arrangeFailure('unauthorized', { cookieAuth: true })
-    quota.view.value.credential.form = 'cookie'
+    arrangeFailure('unauthorized', { cookieAuth: true, form: 'cookie' })
     quota.draft.value.cookie = 'stale-cookie'
     wrapper = mountSection()
     await flushPromises()
@@ -860,9 +861,7 @@ describe('交互补口：写动作与草稿直写（开关 / 输入草稿 / 重�
   })
 
   it('类型下拉重选 → selectType 收到选中值（非字符串守卫在 module 内）', async () => {
-    quota.view.value.type.selected = undefined
-    quota.view.value.type.undetermined = true
-    quota.view.value.readiness = { ready: false, missing: ['type'] }
+    arrangeTypeUndetermined(undefined)
     quota.view.value.type.options = [
       { value: 'alpha', label: 'Alpha Plan' },
       { value: 'beta', label: 'Beta Plan' },

@@ -24,22 +24,23 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ServerMessage } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
+import { apiProjectMock } from '../helpers/api-facade-mock'
+import { makeStreamSubscribeMock } from '../helpers/stream-subscribe-mock'
+// mock 实例（工厂内创建）的清除入口：经 mock 后的 '@/api' 取引用（同 settings quota 域范式）
+import { chat as apiChatMock } from '@/api'
 
 type StreamCb = (msg: ServerMessage) => void
 
-const { streamCbHolder, streamSubscribeMock, sendMock } = vi.hoisted(() => ({
+// vi.hoisted 工厂被 hoist 到 import 之前执行，不能引用 import 绑定（TDZ）；
+// streamSubscribe mock 本体经 helper 在 '@/api' 工厂内创建（工厂惰性执行期才解引用 import）
+const { streamCbHolder, sendMock } = vi.hoisted(() => ({
   streamCbHolder: { current: null as StreamCb | null },
   sendMock: vi.fn(() => Promise.resolve()),
-  streamSubscribeMock: vi.fn((_sid: string, cb: StreamCb) => {
-    streamCbHolder.current = cb
-    return () => {
-      streamCbHolder.current = null
-    }
-  }),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: sendMock, steer: vi.fn(() => Promise.resolve()), streamSubscribe: streamSubscribeMock },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
+  chat: { send: sendMock, steer: vi.fn(() => Promise.resolve()), streamSubscribe: makeStreamSubscribeMock(streamCbHolder) },
   session: { writeSegments: vi.fn(() => Promise.resolve()) },
 }))
 
@@ -49,7 +50,7 @@ import { useChat, resetChatModuleState } from '@/composables/features/chat/useCh
 beforeEach(() => {
   setActivePinia(createPinia())
   streamCbHolder.current = null
-  streamSubscribeMock.mockClear()
+  vi.mocked(apiChatMock.streamSubscribe).mockClear()
   sendMock.mockClear()
   resetChatModuleState()
 })

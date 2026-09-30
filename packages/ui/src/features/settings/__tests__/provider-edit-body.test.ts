@@ -51,6 +51,7 @@ import {
   QUOTA_CONFIGURE_FACTORY_KEY,
   type SettingsToast,
 } from '../injection-keys'
+import { inMemoryStorage, pickSelectOption, expectTestHints } from './helpers'
 import { makeQuotaModuleStub } from '@taiji/core/testing'
 
 // ── fixture ──
@@ -176,15 +177,6 @@ function makeTransport(): SettingsTransport {
   })
 }
 
-function inMemoryStorage() {
-  const map = new Map<string, string>()
-  return {
-    get: async (k: string) => map.get(k) ?? null,
-    set: async (k: string, v: string) => { map.set(k, v) },
-    remove: async (k: string) => { map.delete(k) },
-  }
-}
-
 let wrapper: VueWrapper | null = null
 
 beforeEach(() => {
@@ -204,8 +196,8 @@ beforeEach(() => {
 
 afterEach(() => {
   wrapper?.unmount()
-  wrapper = null
   document.body.innerHTML = ''
+  wrapper = null
 })
 
 /** mount ProviderEditBody（provide injection stub；attachTo 供 Dialog teleport 查询） */
@@ -884,10 +876,7 @@ describe('M3b 接线：测试连接分组结果与模型发现门控（应用级
     expect(wrapper.find('[data-testid="provider-test-overall-error"]').exists()).toBe(false)
 
     // 失败指引的 {baseUrl} = 宿主下发的生效端点（默认 '' 时 mock 不 append，故此断言即接线证据）
-    const hints = wrapper.find('[data-testid="provider-test-hints"]')
-    expect(hints.exists()).toBe(true)
-    expect(hints.text()).toContain('settings.providerEdit.testHintHttpError')
-    expect(hints.text()).toContain(CATALOG_GATEWAY_URL)
+    expectTestHints(wrapper, 'settings.providerEdit.testHintHttpError', CATALOG_GATEWAY_URL)
   })
 
   it('测试连接整体失败（success=false）→ 编辑体内渲染整体失败原因 + 指引（testError 接线）', async () => {
@@ -930,19 +919,6 @@ describe('M3b 接线：测试连接分组结果与模型发现门控（应用级
  * 观察者 = 全部 DOM / payload / 注入 stub 断言，无组件内部 spy。
  */
 describe('R4 补口：类型 Select / compat providerApi', () => {
-  /** reka Select 交互（happy-dom 需显式 pointer 事件；同 renderer rename-model 测试模式） */
-  async function pickSelectOption(triggerEl: HTMLElement, label: string): Promise<void> {
-    triggerEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-    triggerEl.click()
-    await flushPromises()
-    const target = Array.from(document.body.querySelectorAll('[role="option"]'))
-      .find((el): el is HTMLElement => (el.textContent ?? '').includes(label))
-    expect(target).toBeTruthy()
-    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-    target!.click()
-    await flushPromises()
-  }
-
   it('custom 类型 Select 可改：选 openai-responses → dirty → payload.type 跟随', async () => {
     wrapper = mountBody(CUSTOM_P)
     await flushPromises()
@@ -996,19 +972,6 @@ describe('R4 补口：类型 Select / compat providerApi', () => {
  * - 观察者形态：全部 DOM / payload 断言，无组件内部 spy。
  */
 describe('行级模型 Select：ctx / 策略守卫透传', () => {
-  /** reka Select 交互（happy-dom 需显式 pointer 事件；同场景⑩ pickSelectOption 模式） */
-  async function pickSelectOption(triggerEl: HTMLElement, label: string): Promise<void> {
-    triggerEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-    triggerEl.click()
-    await flushPromises()
-    const target = Array.from(document.body.querySelectorAll('[role="option"]'))
-      .find((el): el is HTMLElement => (el.textContent ?? '').includes(label))
-    expect(target).toBeTruthy()
-    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-    target!.click()
-    await flushPromises()
-  }
-
   it('行内 ctx Select 选 128K → trigger 显示更新；策略 Select 选 On/Off → payload 双字段落盘', async () => {
     wrapper = mountBody(APIKEY_P)
     await flushPromises()

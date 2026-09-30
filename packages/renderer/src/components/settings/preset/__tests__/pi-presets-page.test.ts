@@ -12,57 +12,30 @@
  * 替换段未变更时不误拦 / 替换卡入口既有语义不回归。
  * 替换卡入口的等价既有用例在 `src/__tests__/settings/pi-presets-page.test.ts`（本次修复领地外，未改动）。
  *
- * mock 策略：mock 脚手架（presetMock 形状/默认 impl / @/api / @taiji/ui stub /
- * transport 接线 / promptPreset fixture）收敛 @/__tests__/helpers/preset-page-mount
- * 单源，与 settings 版同组件测试共享。
+ * mock 策略：mock 脚手架收敛单源——presetMock 单例 / '@/api' 与 @taiji/ui mock 注册 /
+ * beforeEach 接线在 @/__tests__/helpers/preset-page-mock（import 即注册，settings 版同
+ * 组件测试共享）；工厂 / 默认 impl / promptPreset fixture 在 @/__tests__/helpers/preset-page-mount。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/settings/preset/__tests__/pi-presets-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
 import type { PiLaunchPreset } from '@taiji/shared'
-import {
-  presetApiModule,
-  presetUiModule,
-  primePresetDefaults,
-  promptPreset,
-  wirePresetTransport,
-  type PresetMock,
-} from '@/__tests__/helpers/preset-page-mount'
-
-/** mock preset API（update 是「是否落盘」的唯一可观测量）。 */
-const presetMock = vi.hoisted((): PresetMock => ({
-  list: vi.fn(),
-  getDefault: vi.fn(),
-  setDefault: vi.fn(),
-  create: vi.fn(),
-  update: vi.fn(),
-  remove: vi.fn(),
-}))
-
-vi.mock('@/api', () => presetApiModule(presetMock))
-vi.mock('@taiji/ui/features/settings', () => presetUiModule())
+import { promptPreset } from '@/__tests__/helpers/preset-page-mount'
+import { presetMock, setupPresetPageTest, teardownPresetPage } from '@/__tests__/helpers/preset-page-mock'
 
 import PiPresetsPage from '@/components/settings/preset/PiPresetsPage.vue'
 import { usePresetStore } from '@/stores/preset'
-import { useToast } from '@/composables/useToast'
 
 let wrapper: ReturnType<typeof mount> | null = null
 
-beforeEach(() => {
-  setActivePinia(createPinia())
-  primePresetDefaults(presetMock)
-  const { toasts } = useToast()
-  toasts.value = []
-  // [C3] preset 域调用经 SettingsTransport seam 桩注入（接线收敛 helpers/preset-page-mount）
-  wirePresetTransport(presetMock)
-})
+// mock 注册 + beforeEach 重置（pinia / 默认 impl / toast / transport 桩）单源在
+// helpers/preset-page-mock，顶层调用一次
+setupPresetPageTest()
 
 afterEach(() => {
-  wrapper?.unmount()
+  teardownPresetPage(wrapper)
   wrapper = null
-  document.body.innerHTML = ''
 })
 
 /** 挂载页面并让「替换段 + 追加段」都进入 dirty 态（追加卡保存按钮因此解禁）。 */

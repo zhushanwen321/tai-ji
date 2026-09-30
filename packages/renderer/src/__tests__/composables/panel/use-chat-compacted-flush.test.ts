@@ -14,7 +14,7 @@
  * - TC11：occupancy idle 触发 flush 但重放失败（send RPC reject）→ toast「发送失败: {原因}」
  *   + 队列保留（A1：原 queueFlushFailed 固定文案退役）；TC11b：S1 busy 拒绝留队静默自愈无 toast
  *
- * 结构对齐 __tests__/useChat.test.ts：vi.hoisted apiMock（streamSubscribe 捕获 handler）+ emit helper
+ * 结构对齐 __tests__/useChat.test.ts：chatStreamApiSpy 单例（streamSubscribe 捕获 holder）+ emitChatStreamMessage 注入
  * + beforeEach resetChatModuleState()（useChat 模块级状态隔离）。
  * useCompactQueue 单例经 effectScope 创建 + _clearAllForTest() 隔离（useSessionScopedState 工厂契约）。
  *
@@ -24,30 +24,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { effectScope } from 'vue'
 import type { EffectScope } from 'vue'
-import type { ServerMessage } from '@taiji/shared'
 import { dispatchSession } from '@taiji/core/transport/api'
-import { apiProjectMock } from '../../helpers/api-facade-mock'
-
-
-// vi.hoisted 保证 mock 工厂在模块加载前就绪；holder 捕获 streamSubscribe 注册的 handler
-const apiMock = vi.hoisted(() => {
-  const holder: { handler: ((msg: ServerMessage) => void) | null } = { handler: null }
-  return {
-    holder,
-    streamSubscribe: vi.fn((_sid: string, handler: (msg: ServerMessage) => void) => {
-      holder.handler = handler
-      return () => {
-        holder.handler = null
-      }
-    }),
-    send: vi.fn(() => Promise.resolve()),
-    getHistory: vi.fn(() => Promise.resolve([])),
-    abort: vi.fn(() => Promise.resolve()),
-    compact: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
-    followUp: vi.fn(() => Promise.resolve()),
-  }
-})
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
+import { apiProjectMock, chatApiStreamGroup, chatStreamApiSpy, emitChatStreamMessage } from '../../helpers/api-facade-mock'
 
 // toast spy：TC10 验证 compacted error 分支不重复 toast（handler 不 toast，compact() catch 是唯一 toast 源）
 const toastSpy = vi.hoisted(() => ({
@@ -56,16 +35,9 @@ const toastSpy = vi.hoisted(() => ({
   warning: vi.fn(),
 }))
 
-vi.mock('@/api', () => ({ project: apiProjectMock(),
-  chat: {
-    streamSubscribe: apiMock.streamSubscribe,
-    send: apiMock.send,
-    getHistory: apiMock.getHistory,
-    abort: apiMock.abort,
-    compact: apiMock.compact,
-    steer: apiMock.steer,
-    followUp: apiMock.followUp,
-  },
+vi.mock('@/api', () => ({
+  project: apiProjectMock(),
+  chat: chatApiStreamGroup(),
   session: {},
 }))
 
@@ -88,7 +60,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   resetChatModuleState()
   vi.clearAllMocks()
-  apiMock.holder.handler = null
+  chatStreamApiSpy.holder.current = null
   // useCompactQueue 单例：active effect scope 内确保创建 + 清空分区（单例跨用例共享）
   scope = effectScope()
   scope.run(() => {
@@ -102,11 +74,6 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-/** 向被测 useChat 订阅的 handler 注入一条 ServerMessage */
-function emit(msg: ServerMessage): void {
-  if (apiMock.holder.handler) apiMock.holder.handler(msg)
-}
-
 describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）', () => {
   /** [簇 A2] flush 提交文本 = 原文 + 尾部投递确认标记（submitQueuedEntry 附加，身份通道） */
   const marked = (text: string, id: string): string => `${text}\n<!--taiji:msg:${id}-->`
@@ -116,8 +83,8 @@ describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）
     const { compact } = useChat()
     await compact('c-f')
     // 建立 compact 生命周期：compacting（occupancy 帧 + reason 文案）→ compacted → occupancy idle
-    emit({ type: 'session.compacting', payload: { sessionId: 'c-f', status: 'compacting', reason: 'manual' } })
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-f', turn: 'idle', compacting: true, bash: false } })
+    emitChatStreamMessage({ type: 'session.compacting', payload: { sessionId: 'c-f', status: 'compacting', reason: 'manual' } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-f', turn: 'idle', compacting: true, bash: false } })
     expect(chat.isCompacting('c-f')).toBe(true)
 
     // 压缩期间用户消息入队
@@ -125,11 +92,11 @@ describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）
 
     // 压缩成功广播（无 error）+ occupancy 全 idle（compacting=false 三路复位）→ flush 触发。
     // [u5b] compacted 帧本身不再触发 flush（触发源切换），idle 条件由 occupancy 帧判定。
-    emit({ type: 'session.compacted', payload: { sessionId: 'c-f', status: 'compacted' } })
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-f', turn: 'idle', compacting: false, bash: false } })
+    emitChatStreamMessage({ type: 'session.compacted', payload: { sessionId: 'c-f', status: 'compacted' } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-f', turn: 'idle', compacting: false, bash: false } })
     await vi.waitFor(() => {
       // [u4b / D5.1] send 等价编排：clientUuid = 条目 id 透传（S1 归属 + core ① 匹配资格）
-      expect(apiMock.send).toHaveBeenCalledWith('c-f', marked('queued msg', entry.id), undefined, { clientUuid: entry.id })
+      expect(chatStreamApiSpy.send).toHaveBeenCalledWith('c-f', marked('queued msg', entry.id), undefined, { clientUuid: entry.id })
     })
 
     // [u4b] 提交 ≠ 出队（E2「成功即清队」退役）：条目保持 mode 已写等确认帧逐条出队 +
@@ -148,9 +115,9 @@ describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）
     // flush 首条 send RPC 失败 → doFlush 留队回滚后原始错误上抛 → handler toast
     // 「发送失败: {原因}」（设计 §3.5 错误规格表；原 queueFlushFailed 固定文案退役——
     // 与 rejected 帧路径构成双 toast，A1 一并消除），队列保留，恢复后自动重试
-    apiMock.send.mockRejectedValueOnce(new Error('rpc fail'))
+    chatStreamApiSpy.send.mockRejectedValueOnce(new Error('rpc fail'))
 
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-g', turn: 'idle', compacting: false, bash: false } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-g', turn: 'idle', compacting: false, bash: false } })
     await vi.waitFor(() => {
       // renderer 包装注入真实 i18n（zh-CN）：composable.sendFailed = '消息发送失败：{msg}'
       expect(toastSpy.error).toHaveBeenCalledWith('消息发送失败：rpc fail')
@@ -170,14 +137,14 @@ describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）
     // 模拟 runtime busy 预检：广播 send.rejected（带条目 id）后 reply resolve——
     // dispatchSession 直投真实 events 通路（doFlush 的 S1 窗口订阅面，同 use-compact-queue.test 惯例）
     const entryId = useCompactQueue().peek('c-s1')[0]!.id
-    apiMock.send.mockImplementationOnce(async () => {
+    chatStreamApiSpy.send.mockImplementationOnce(async () => {
       dispatchSession('c-s1', {
         type: 'send.rejected',
         payload: { sessionId: 'c-s1', reason: 'busy', message: 'Agent 正在处理', clientUuid: entryId },
       })
     })
 
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-s1', turn: 'idle', compacting: false, bash: false } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-s1', turn: 'idle', compacting: false, bash: false } })
     await vi.waitFor(() => {
       // S1 判定生效：条目留队、占位回滚（重试时重挂重标）
       expect(useCompactQueue().peek('c-s1')[0]!.mode).toBe(undefined)
@@ -196,16 +163,16 @@ describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）
     const chat = useChatStore()
     const { compact } = useChat()
     await compact('c-e')
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-e', turn: 'idle', compacting: true, bash: false } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-e', turn: 'idle', compacting: true, bash: false } })
     const entryE = useCompactQueue().enqueue('c-e', 'q')
 
-    emit({
+    emitChatStreamMessage({
       type: 'session.compacted',
       payload: { sessionId: 'c-e', status: 'compacted', error: 'Cannot compact while agent generating' },
     })
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-e', turn: 'idle', compacting: false, bash: false } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-e', turn: 'idle', compacting: false, bash: false } })
     await vi.waitFor(() => {
-      expect(apiMock.send).toHaveBeenCalledWith('c-e', marked('q', entryE.id), undefined, { clientUuid: entryE.id })
+      expect(chatStreamApiSpy.send).toHaveBeenCalledWith('c-e', marked('q', entryE.id), undefined, { clientUuid: entryE.id })
     })
 
     // 消息已投递（条目保持待确认出队）+ 压缩失败不阻塞投递 + handler 不额外 toast
@@ -218,10 +185,10 @@ describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）
   it('TC10b: occupancy 非 idle（compacting=true）→ 不触发 flush（触发条件含三维 idle 判定）', async () => {
     // 占用中即使 compacted 到达（时序乱序防御）也不投递——防止向压缩中的 pi 发 send 被拒循环
     useCompactQueue().enqueue('c-h', 'q')
-    emit({ type: 'session.compacted', payload: { sessionId: 'c-h', status: 'compacted' } })
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-h', turn: 'idle', compacting: true, bash: false } })
+    emitChatStreamMessage({ type: 'session.compacted', payload: { sessionId: 'c-h', status: 'compacted' } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-h', turn: 'idle', compacting: true, bash: false } })
     await Promise.resolve()
-    expect(apiMock.send).not.toHaveBeenCalled()
+    expect(chatStreamApiSpy.send).not.toHaveBeenCalled()
     expect(useCompactQueue().count('c-h')).toBe(1)
   })
 
@@ -229,13 +196,13 @@ describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）
     const { compact } = useChat()
     await compact('c-i') // 建立会话订阅（emit 依赖 streamSubscribe handler）
     const entryI = useCompactQueue().enqueue('c-i', 'q')
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-i', turn: 'idle', compacting: false, bash: true } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-i', turn: 'idle', compacting: false, bash: true } })
     await Promise.resolve()
-    expect(apiMock.send).not.toHaveBeenCalled()
+    expect(chatStreamApiSpy.send).not.toHaveBeenCalled()
     // bash 结束（bash=false 广播）→ flush 触发
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-i', turn: 'idle', compacting: false, bash: false } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-i', turn: 'idle', compacting: false, bash: false } })
     await vi.waitFor(() => {
-      expect(apiMock.send).toHaveBeenCalledWith('c-i', marked('q', entryI.id), undefined, { clientUuid: entryI.id })
+      expect(chatStreamApiSpy.send).toHaveBeenCalledWith('c-i', marked('q', entryI.id), undefined, { clientUuid: entryI.id })
     })
   })
 
@@ -249,7 +216,7 @@ describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）
     await compact('c-cb') // 建立会话订阅（emit 依赖 streamSubscribe handler）
     const entry = useCompactQueue().enqueue('c-cb', 'q')
     // 持续 busy：每次 flush 的 send 都广播 send.rejected（回带条目 id → S1 判定留队，不丢条目）
-    apiMock.send.mockImplementation(async () => {
+    chatStreamApiSpy.send.mockImplementation(async () => {
       dispatchSession('c-cb', {
         type: 'send.rejected',
         payload: { sessionId: 'c-cb', reason: 'busy', message: 'Agent 正在处理', clientUuid: entry.id },
@@ -257,18 +224,18 @@ describe('useChat occupancy 全 idle → flush 触发（session-occupancy u5b）
     })
 
     // occupancy 全 idle 帧 → 第 1 次 flush（失败 → 计 1 → arm 1s timer）
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-cb', turn: 'idle', compacting: false, bash: false } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-cb', turn: 'idle', compacting: false, bash: false } })
     await vi.advanceTimersByTimeAsync(0)
-    expect(apiMock.send).toHaveBeenCalledTimes(1)
+    expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(1)
 
     // timer 自驱动重投：第 2..5 次（恰第 5 次达阈值）
     for (const expected of [2, 3, 4, 5]) {
       await vi.advanceTimersByTimeAsync(1000)
-      expect(apiMock.send).toHaveBeenCalledTimes(expected)
+      expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(expected)
     }
     // 熔断：其后 10s 无第 6 次投递（不再是 1 秒 1 次的拒绝风暴）；条目留队不丢
     await vi.advanceTimersByTimeAsync(10000)
-    expect(apiMock.send).toHaveBeenCalledTimes(5)
+    expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(5)
     expect(useCompactQueue().count('c-cb')).toBe(1)
 
     // 用户可见断言：提示恰一次 + 真实 zh-CN 文案（i18n 未 mock）= 说明卡死嫌疑 + 可操作指引

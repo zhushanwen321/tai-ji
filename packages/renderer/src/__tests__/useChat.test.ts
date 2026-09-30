@@ -18,72 +18,41 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { ServerMessage, Segment } from '@taiji/shared'
+import type { Segment } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
+import { apiProjectMock, chatApiStreamGroup, chatStreamApiSpy, emitChatStreamMessage, sessionSubscribeBaselineMock } from './helpers/api-facade-mock'
 
-// vi.hoisted 保证 mock 工厂在模块加载前就绪；holder 捕获 streamSubscribe 注册的 handler
-const apiMock = vi.hoisted(() => {
-  const holder: { handler: ((msg: ServerMessage) => void) | null } = { handler: null }
-  return {
-    holder,
-    streamSubscribe: vi.fn((_sid: string, handler: (msg: ServerMessage) => void) => {
-      holder.handler = handler
-      return () => {
-        holder.handler = null
-      }
-    }),
-    send: vi.fn(() => Promise.resolve()),
-    getHistory: vi.fn(() => Promise.resolve([])),
-    abort: vi.fn(() => Promise.resolve()),
-    compact: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
-    followUp: vi.fn(() => Promise.resolve()),
-    // useChat subagent 定向消息转发（原 useChat-subagent-directive.test.ts 并入）
-    subagentAction: vi.fn(() => Promise.resolve()),
-  }
-})
+// subagentAction 是本文件专属断言锚（chatStreamApiSpy 不含），vi.hoisted 提升供工厂安全引用
+const sessionActionMock = vi.hoisted(() => ({ subagentAction: vi.fn(() => Promise.resolve()) }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: {
-    streamSubscribe: apiMock.streamSubscribe,
-    send: apiMock.send,
-    getHistory: apiMock.getHistory,
-    abort: apiMock.abort,
-    compact: apiMock.compact,
-    steer: apiMock.steer,
-    followUp: apiMock.followUp,
-  },
+vi.mock('@/api', () => ({
+  project: apiProjectMock(),
+  chat: chatApiStreamGroup(),
   session: {
     // wave:runtime-patch W2：useChat 现从 @/api import session（writeSegments），
     // useMessageBusSubscription 调 session.subscribe——补 stub 避免 not-a-function
-    subscribe: vi.fn().mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 0 }),
-    unsubscribe: vi.fn().mockResolvedValue(undefined),
-    writeSegments: vi.fn().mockResolvedValue(undefined),
-    subagentAction: apiMock.subagentAction,
+    ...sessionSubscribeBaselineMock(),
+    subagentAction: sessionActionMock.subagentAction,
   },
 }))
 
-import { useChatStore } from '@/stores/chat'
 import { useChat, resetChatModuleState } from '@/composables/features/chat/useChat'
+import { useChatStore } from '@/stores/chat'
 
 beforeEach(() => {
   setActivePinia(createPinia())
   resetChatModuleState()
   vi.clearAllMocks()
-  apiMock.holder.handler = null
+  chatStreamApiSpy.holder.current = null
 })
-
-/** 向被测 useChat 订阅的 handler 注入一条 ServerMessage */
-function emit(msg: ServerMessage): void {
-  if (apiMock.holder.handler) apiMock.holder.handler(msg)
-}
 
 describe('useChat 流式状态机', () => {
   it('首次 send 订阅流式事件恰好一次', async () => {
     const { send } = useChat()
     await send('s-subscribe', textToSegments('hello'))
-    expect(apiMock.streamSubscribe).toHaveBeenCalledTimes(1)
-    expect(apiMock.send).toHaveBeenCalledTimes(1)
+    expect(chatStreamApiSpy.streamSubscribe).toHaveBeenCalledTimes(1)
+    expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(1)
   })
 
   it('同 session 二次 send 不重复订阅（ensureStreamSubscription 幂等）', async () => {
@@ -91,11 +60,11 @@ describe('useChat 流式状态机', () => {
     await send('s-idempotent', textToSegments('one'))
     // 第一轮流式周期结束（message_start 清 dispatching + 设 isStreaming，complete 清 isStreaming），
     // 否则 isActive guard 会拦截第二次 send（dispatching 残留）
-    emit({ type: 'message.message_start', payload: { sessionId: 's-idempotent', messageId: 'a1' } })
-    emit({ type: 'message.complete', payload: { sessionId: 's-idempotent' } })
+    emitChatStreamMessage({ type: 'message.message_start', payload: { sessionId: 's-idempotent', messageId: 'a1' } })
+    emitChatStreamMessage({ type: 'message.complete', payload: { sessionId: 's-idempotent' } })
     await send('s-idempotent', textToSegments('two'))
-    expect(apiMock.streamSubscribe).toHaveBeenCalledTimes(1)
-    expect(apiMock.send).toHaveBeenCalledTimes(2)
+    expect(chatStreamApiSpy.streamSubscribe).toHaveBeenCalledTimes(1)
+    expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(2)
   })
 
   it('message.message_start → isGenerating=true', async () => {
@@ -103,7 +72,7 @@ describe('useChat 流式状态机', () => {
     const { send } = useChat()
     await send('s-start', textToSegments('hi'))
     expect(chat.isGenerating('s-start')).toBe(false)
-    emit({ type: 'message.message_start', payload: { sessionId: 's-start', messageId: 'a1' } })
+    emitChatStreamMessage({ type: 'message.message_start', payload: { sessionId: 's-start', messageId: 'a1' } })
     expect(chat.isGenerating('s-start')).toBe(true)
   })
 
@@ -111,9 +80,9 @@ describe('useChat 流式状态机', () => {
     const chat = useChatStore()
     const { send } = useChat()
     await send('s-complete', textToSegments('hi'))
-    emit({ type: 'message.message_start', payload: { sessionId: 's-complete', messageId: 'a1' } })
+    emitChatStreamMessage({ type: 'message.message_start', payload: { sessionId: 's-complete', messageId: 'a1' } })
     expect(chat.isGenerating('s-complete')).toBe(true)
-    emit({ type: 'message.complete', payload: { sessionId: 's-complete' } })
+    emitChatStreamMessage({ type: 'message.complete', payload: { sessionId: 's-complete' } })
     expect(chat.isGenerating('s-complete')).toBe(false)
   })
 
@@ -121,9 +90,9 @@ describe('useChat 流式状态机', () => {
     const chat = useChatStore()
     const { send } = useChat()
     await send('s-error', textToSegments('hi'))
-    emit({ type: 'message.message_start', payload: { sessionId: 's-error', messageId: 'a1' } })
+    emitChatStreamMessage({ type: 'message.message_start', payload: { sessionId: 's-error', messageId: 'a1' } })
     expect(chat.isGenerating('s-error')).toBe(true)
-    emit({ type: 'message.error', payload: { sessionId: 's-error', message: 'boom' } })
+    emitChatStreamMessage({ type: 'message.error', payload: { sessionId: 's-error', message: 'boom' } })
     expect(chat.isGenerating('s-error')).toBe(false)
   })
 
@@ -131,10 +100,10 @@ describe('useChat 流式状态机', () => {
     const chat = useChatStore()
     const { send } = useChat()
     await send('s-stream-err', textToSegments('hi'))
-    emit({ type: 'message.message_start', payload: { sessionId: 's-stream-err', messageId: 'a1' } })
+    emitChatStreamMessage({ type: 'message.message_start', payload: { sessionId: 's-stream-err', messageId: 'a1' } })
     expect(chat.isGenerating('s-stream-err')).toBe(true)
     // 若 pi 发了 message_update{error} 后不再发 agent_end，必须在此复位
-    emit({ type: 'message.stream_error', payload: { sessionId: 's-stream-err', content: 'err' } })
+    emitChatStreamMessage({ type: 'message.stream_error', payload: { sessionId: 's-stream-err', content: 'err' } })
     expect(chat.isGenerating('s-stream-err')).toBe(false)
   })
 
@@ -142,20 +111,20 @@ describe('useChat 流式状态机', () => {
     const { send } = useChat()
     await send('s-empty', textToSegments('   '))
     await send('s-empty', textToSegments(''))
-    expect(apiMock.streamSubscribe).not.toHaveBeenCalled()
-    expect(apiMock.send).not.toHaveBeenCalled()
+    expect(chatStreamApiSpy.streamSubscribe).not.toHaveBeenCalled()
+    expect(chatStreamApiSpy.send).not.toHaveBeenCalled()
   })
 
   it('send busy 时转 steer（B 策略：不打断当前回合，不重复 send）', async () => {
     const chat = useChatStore()
     const { send } = useChat()
     await send('s-busy', textToSegments('first'))
-    emit({ type: 'message.message_start', payload: { sessionId: 's-busy', messageId: 'a1' } })
+    emitChatStreamMessage({ type: 'message.message_start', payload: { sessionId: 's-busy', messageId: 'a1' } })
     expect(chat.isGenerating('s-busy')).toBe(true)
     await send('s-busy', textToSegments('second'))
     // B 策略：busy 时 send 自动转 steer（不重复 send）
-    expect(apiMock.send).toHaveBeenCalledTimes(1)
-    expect(apiMock.steer).toHaveBeenCalledTimes(1)
+    expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(1)
+    expect(chatStreamApiSpy.steer).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -182,7 +151,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     const { send } = useChat()
     await send('s-switch', textToSegments('hi'))
     expect(chat.pendingSend.has('s-switch')).toBe(true)
-    emit({ type: 'message.message_start', payload: { sessionId: 's-switch', messageId: 'a1' } })
+    emitChatStreamMessage({ type: 'message.message_start', payload: { sessionId: 's-switch', messageId: 'a1' } })
     expect(chat.pendingSend.has('s-switch')).toBe(false)
     expect(chat.isGenerating('s-switch')).toBe(true)
     expect(chat.isActive('s-switch')).toBe(true) // 合并态仍 true
@@ -194,14 +163,14 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     await send('s-terminal', textToSegments('hi'))
     expect(chat.pendingSend.has('s-terminal')).toBe(true)
     // 模拟 pi 未发 message_start 直接 complete（异常但需兜底）
-    emit({ type: 'message.complete', payload: { sessionId: 's-terminal' } })
+    emitChatStreamMessage({ type: 'message.complete', payload: { sessionId: 's-terminal' } })
     expect(chat.pendingSend.has('s-terminal')).toBe(false)
     expect(chat.isActive('s-terminal')).toBe(false)
   })
 
   it('send 失败清 pendingSend（catch 路径）', async () => {
     const chat = useChatStore()
-    apiMock.send.mockRejectedValueOnce(new Error('network'))
+    chatStreamApiSpy.send.mockRejectedValueOnce(new Error('network'))
     const { send } = useChat()
     // [W2] send 失败不再 throw（与 steer/followUp/abort 对齐：clearPendingSend + toast，不 throw）；
     // [form-hang-fix] send 契约 Promise<boolean>：直发失败已 toast 消化 → true（false 仅属 B 策略）
@@ -216,13 +185,13 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     await send('s-steer', textToSegments('first')) // 置 pendingSend，isActive=true 但 isGenerating=false
     expect(chat.isGenerating('s-steer')).toBe(false)
     await steer('s-steer', textToSegments('补充'))
-    expect(apiMock.steer).toHaveBeenCalledTimes(1)
+    expect(chatStreamApiSpy.steer).toHaveBeenCalledTimes(1)
   })
 
   it('steer 非活跃时早退（不发送）', async () => {
     const { steer } = useChat()
     await steer('s-idle', textToSegments('补充'))
-    expect(apiMock.steer).not.toHaveBeenCalled()
+    expect(chatStreamApiSpy.steer).not.toHaveBeenCalled()
   })
 
   it('steer/followUp 调 pushPending 入 buffer（m1：pending 不进 messages）', async () => {
@@ -249,7 +218,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     await send('s-abort', textToSegments('first'))
     expect(chat.pendingSend.has('s-abort')).toBe(true)
     // abort 即使 RPC 失败也清 pendingSend（乐观清理 + catch 兜底）
-    apiMock.abort.mockRejectedValueOnce(new Error('session not found'))
+    chatStreamApiSpy.abort.mockRejectedValueOnce(new Error('session not found'))
     await abort('s-abort') // 不抛（catch 吞掉）
     expect(chat.pendingSend.has('s-abort')).toBe(false)
     expect(chat.isActive('s-abort')).toBe(false)
@@ -300,7 +269,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     const chat = useChatStore()
     const { send, steer } = useChat()
     await send('s-rollback', textToSegments('first'))
-    apiMock.steer.mockRejectedValueOnce(new Error('ws disconnected'))
+    chatStreamApiSpy.steer.mockRejectedValueOnce(new Error('ws disconnected'))
     // 不抛（错误已消化：pending 回滚 + toast 提示），避免 unhandled rejection
     // [D2] steer 返回值契约：RPC 失败 return false（成功 true）
     await expect(steer('s-rollback', textToSegments('补充'))).resolves.toBe(false)
@@ -313,7 +282,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     const chat = useChatStore()
     const { send, followUp } = useChat()
     await send('s-fu-rollback', textToSegments('first'))
-    apiMock.followUp.mockRejectedValueOnce(new Error('ws disconnected'))
+    chatStreamApiSpy.followUp.mockRejectedValueOnce(new Error('ws disconnected'))
     await expect(followUp('s-fu-rollback', textToSegments('下轮'))).resolves.toBeUndefined()
     const msgs = chat.getMessages('s-fu-rollback')
     expect(msgs.some((m) => m.status === 'pending')).toBe(false)
@@ -325,8 +294,8 @@ describe('useChat compact 状态机（#6）', () => {
     const { compact } = useChat()
     await compact('c-sub')
     // compact(sessionId, customInstructions?) → chatApi.compact(sid, undefined)（未传自定义指令）
-    expect(apiMock.compact).toHaveBeenCalledWith('c-sub', undefined)
-    expect(apiMock.streamSubscribe).toHaveBeenCalledTimes(1)
+    expect(chatStreamApiSpy.compact).toHaveBeenCalledWith('c-sub', undefined)
+    expect(chatStreamApiSpy.streamSubscribe).toHaveBeenCalledTimes(1)
   })
 
   it('session.compacting + occupancy{compacting:true} → isCompacting=true；occupancy{false} 帧 → false（u5b 投影驱动）', async () => {
@@ -335,20 +304,20 @@ describe('useChat compact 状态机（#6）', () => {
     await compact('c-flow')
     // [u5b] membership 由 occupancy 投影派生（interpreter 同一挂点先发 session.compacting
     // 再发 occupancy——帧序镜像 runtime 实发）；session.compacting 只承载 reason 文案源。
-    emit({ type: 'session.compacting', payload: { sessionId: 'c-flow', status: 'compacting', reason: 'manual' } })
+    emitChatStreamMessage({ type: 'session.compacting', payload: { sessionId: 'c-flow', status: 'compacting', reason: 'manual' } })
     expect(chat.getCompactingReason('c-flow')).toBe('manual')
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-flow', turn: 'idle', compacting: true, bash: false } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-flow', turn: 'idle', compacting: true, bash: false } })
     expect(chat.isCompacting('c-flow')).toBe(true)
     // compaction_end 三路复位（含失败）→ occupancy compacting=false 帧 → 投影复位
-    emit({ type: 'session.compacted', payload: { sessionId: 'c-flow', status: 'compacted' } })
-    emit({ type: 'session.occupancy', payload: { sessionId: 'c-flow', turn: 'idle', compacting: false, bash: false } })
+    emitChatStreamMessage({ type: 'session.compacted', payload: { sessionId: 'c-flow', status: 'compacted' } })
+    emitChatStreamMessage({ type: 'session.occupancy', payload: { sessionId: 'c-flow', turn: 'idle', compacting: false, bash: false } })
     expect(chat.isCompacting('c-flow')).toBe(false)
     expect(chat.getCompactingReason('c-flow')).toBeUndefined()
   })
 
   it('compact 失败（pending reject）→ toast 错误提示，不抛出（不卡 UI，M8 toast 方案）', async () => {
     const chat = useChatStore()
-    apiMock.compact.mockRejectedValueOnce(new Error('Session not found'))
+    chatStreamApiSpy.compact.mockRejectedValueOnce(new Error('Session not found'))
     const { compact } = useChat()
     await expect(compact('c-err')).resolves.toBeUndefined()
     // M8: compact 错误走 toast 而非 appendSystemNotice，不再插入 system 消息
@@ -365,7 +334,7 @@ describe('useChat subagent 定向消息转发（@ chip）', () => {
     setActivePinia(createPinia())
     resetChatModuleState()
     vi.clearAllMocks()
-    apiMock.holder.handler = null
+    chatStreamApiSpy.holder.current = null
   })
 
   it('send 含 subagent 段（subagentId 非空）→ 调 session.subagentAction(message)，不走主 agent send', async () => {
@@ -376,15 +345,15 @@ describe('useChat subagent 定向消息转发（@ chip）', () => {
     ]
     await send('s-directive', segments)
 
-    expect(apiMock.subagentAction).toHaveBeenCalledTimes(1)
-    expect(apiMock.subagentAction).toHaveBeenCalledWith('s-directive', 'message', {
+    expect(sessionActionMock.subagentAction).toHaveBeenCalledTimes(1)
+    expect(sessionActionMock.subagentAction).toHaveBeenCalledWith('s-directive', 'message', {
       subagentId: 'rec-1',
       // 前导空格 = subagent(chip)→text 边界补格（segmentsToText，chip 产出空串后
       // 补格残留）——8f93d7feb 已裁决该形态「保真随行发出」并同步其测试期望，此处对齐。
       text: ' 展开讲讲',
     })
     // 无主 agent turn（§3.3.8：不经 message.send 通道）
-    expect(apiMock.send).not.toHaveBeenCalled()
+    expect(chatStreamApiSpy.send).not.toHaveBeenCalled()
   })
 
   it('subagentId 空串（新建占位 chip）→ subagentAction(start)，slug 自动生成', async () => {
@@ -395,11 +364,11 @@ describe('useChat subagent 定向消息转发（@ chip）', () => {
     ]
     await send('s-start-action', segments)
 
-    expect(apiMock.subagentAction).toHaveBeenCalledWith('s-start-action', 'start', {
+    expect(sessionActionMock.subagentAction).toHaveBeenCalledWith('s-start-action', 'start', {
       slug: expect.stringMatching(/^chat-/),
       // 同上：chip→text 边界补格的前导空格，保真透传（8f93d7feb 口径）
       task: ' 帮我修 bug',
     })
-    expect(apiMock.send).not.toHaveBeenCalled()
+    expect(chatStreamApiSpy.send).not.toHaveBeenCalled()
   })
 })

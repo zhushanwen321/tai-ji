@@ -21,6 +21,7 @@ import type { Component } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from './settings-transport-stub'
+import { authEventCbs } from './oauth-auth-events-mock'
 
 /** 系统提示词配置形状（replace / append 双卡） */
 export interface SystemPromptConfig { // oe-exempt:20260930:test:测试 mock 的参数/返回值契约形状，捕获单例与默认工厂共用同一类型标注
@@ -44,11 +45,9 @@ export const systemPromptConfigMock = {
   refreshProviderCatalogs: vi.fn(() => Promise.resolve({ refreshed: [], failed: [] })),
   setSkillDirs: vi.fn(() => Promise.resolve()),
   setAgentDirs: vi.fn(() => Promise.resolve()),
-  // wave-oauth：SettingsModal → ProviderPage → useProviderOAuth onMounted 订阅 4 个 auth.* 事件（缺则 TypeError 崩 mount）
-  onAuthDeviceCode: vi.fn(() => () => {}),
-  onAuthAuthUrl: vi.fn(() => () => {}),
-  onAuthSuccess: vi.fn(() => () => {}),
-  onAuthError: vi.fn(() => () => {}),
+  // wave-oauth：SettingsModal → ProviderPage → useProviderOAuth onMounted 订阅 4 个 auth.* 事件
+  // （缺则 TypeError 崩 mount）；订阅捕获集单源在 oauth-auth-events-mock（ProviderPage 域测试同源）
+  ...authEventCbs(),
   // P2：ProviderPage 默认 pill + 默认修复 toast（缺则 TypeError 崩 mount）
   onDefaultsWithSource: vi.fn(() => () => {}),
 }

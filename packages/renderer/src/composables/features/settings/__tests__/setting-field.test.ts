@@ -18,6 +18,9 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
+// useToast 工厂绑定 import 须先于被测模块 import 求值（setting-field 顶层消费 useToast，
+// 触发 mock 工厂；晚初始化的绑定在 TDZ——vi.hoisted 同族坑，见 helpers/i18n-toast-mock.ts）
+import { toastSpyMock, toastSpyModule } from '@/__tests__/helpers/i18n-toast-mock'
 import {
   createSettingFieldGroup,
   createMirrorSave,
@@ -25,11 +28,8 @@ import {
   type SettingField,
 } from '../setting-field'
 
-const toastMock = vi.hoisted(() => ({ info: vi.fn(), error: vi.fn(), warning: vi.fn() }))
-
-vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ info: toastMock.info, error: toastMock.error, warning: toastMock.warning }),
-}))
+// toast spy 单源（helpers/i18n-toast-mock.ts 的 toastSpyMock 单例，断言经该单例取）
+vi.mock('@/composables/useToast', () => toastSpyModule())
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -39,9 +39,9 @@ vi.mock('vue-i18n', () => ({
 }))
 
 beforeEach(() => {
-  toastMock.info.mockClear()
-  toastMock.error.mockClear()
-  toastMock.warning.mockClear()
+  toastSpyMock.info.mockClear()
+  toastSpyMock.error.mockClear()
+  toastSpyMock.warning.mockClear()
 })
 
 describe('createSettingFieldGroup · loadAll 归并', () => {
@@ -139,7 +139,7 @@ describe('field · persist 编排', () => {
 
     await f.persist(false)
     expect(f.value.value).toBe(true)
-    expect(toastMock.error).toHaveBeenCalledWith('settings.system.saveFailed?{"reason":"ws down"}')
+    expect(toastSpyMock.error).toHaveBeenCalledWith('settings.system.saveFailed?{"reason":"ws down"}')
   })
 
   it('saveFailedToastKey 覆盖 + 非 Error reject 走 String(reason)', async () => {
@@ -151,7 +151,7 @@ describe('field · persist 编排', () => {
 
     await f.persist('b')
     expect(f.value.value).toBe('a')
-    expect(toastMock.error).toHaveBeenCalledWith('settings.system.customFailed?{"reason":"plain-failure"}')
+    expect(toastSpyMock.error).toHaveBeenCalledWith('settings.system.customFailed?{"reason":"plain-failure"}')
   })
 
   it('成功回填权威值并更新基准：后续失败回滚到权威值（而非更早的初始值）', async () => {
@@ -167,7 +167,7 @@ describe('field · persist 编排', () => {
 
     await f.persist('next')
     expect(f.value.value).toBe('authoritative')
-    expect(toastMock.info).toHaveBeenCalledWith('settings.system.saved')
+    expect(toastSpyMock.info).toHaveBeenCalledWith('settings.system.saved')
 
     await f.persist('again')
     expect(f.value.value).toBe('authoritative')
@@ -179,7 +179,7 @@ describe('field · persist 编排', () => {
 
     await f.persist(true)
     expect(f.value.value).toBe(true)
-    expect(toastMock.info).toHaveBeenCalledWith('settings.system.saved')
+    expect(toastSpyMock.info).toHaveBeenCalledWith('settings.system.saved')
   })
 
   it('validate 非法：不调 RPC、回弹已保存基准、专属 toast（不叠 saveFailed）', async () => {
@@ -194,8 +194,8 @@ describe('field · persist 编排', () => {
     await f.persist([300, -1])
     expect(save).not.toHaveBeenCalled()
     expect(f.value.value).toEqual([200, 400])
-    expect(toastMock.error).toHaveBeenCalledTimes(1)
-    expect(toastMock.error).toHaveBeenCalledWith('settings.system.smartContextThresholdInvalid')
+    expect(toastSpyMock.error).toHaveBeenCalledTimes(1)
+    expect(toastSpyMock.error).toHaveBeenCalledWith('settings.system.smartContextThresholdInvalid')
   })
 
   it('validate 通过（null）→ 正常走 save 并回填权威值', async () => {
@@ -209,7 +209,7 @@ describe('field · persist 编排', () => {
     await f.persist([300, 500])
     expect(save).toHaveBeenCalledWith([300, 500])
     expect(f.value.value).toEqual([300000, 500000])
-    expect(toastMock.info).toHaveBeenCalledWith('settings.system.saved')
+    expect(toastSpyMock.info).toHaveBeenCalledWith('settings.system.saved')
   })
 
   it('回滚锚点 = 已保存基准而非 persist 入口值：v-model 原地直改脏值后失败回到基准', async () => {
@@ -235,11 +235,11 @@ describe('field · persist 编排', () => {
     })
 
     await mode.persist('agent-tool')
-    expect(toastMock.info).toHaveBeenCalledWith('mode.switched')
+    expect(toastSpyMock.info).toHaveBeenCalledWith('mode.switched')
 
     toggle.reset(false)
     await mode.persist('first-prompt')
-    expect(toastMock.info).toHaveBeenCalledWith('mode.switchedAutoDisabled')
+    expect(toastSpyMock.info).toHaveBeenCalledWith('mode.switchedAutoDisabled')
   })
 })
 
@@ -254,8 +254,8 @@ describe('field · 同值短路（blur 形态字段）', () => {
     await f.persist('saved')
     expect(save).not.toHaveBeenCalled()
     expect(validate).not.toHaveBeenCalled()
-    expect(toastMock.info).not.toHaveBeenCalled()
-    expect(toastMock.error).not.toHaveBeenCalled()
+    expect(toastSpyMock.info).not.toHaveBeenCalled()
+    expect(toastSpyMock.error).not.toHaveBeenCalled()
   })
 
   it('数组值域同值短路：元素相同的新数组实例不触发 save（JSON 序列化值比较）', async () => {
@@ -268,6 +268,23 @@ describe('field · 同值短路（blur 形态字段）', () => {
     expect(save).not.toHaveBeenCalled()
   })
 })
+
+/** 「恒拒校验 inline 字段 + 首次非法 persist」共用前置（同值清 inline / reset 清 inline
+ *  两用例的单源形态）：field(60) 的 validate 恒拒 → persist(0) 后 inline 已置 timeoutInvalid、
+ *  值回弹基准 60。末尾断言 = 每个用例的前置自检，随用例一并执行。 */
+async function rejectedInlineFieldAfterInvalidPersist() {
+  const group = createSettingFieldGroup()
+  const invalidInline = ref<string | null>(null)
+  const f = group.field<number>(60, {
+    save: async () => undefined,
+    validate: () => 'settings.worktree.timeoutInvalid',
+    invalidInline,
+  })
+
+  await f.persist(0)
+  expect(invalidInline.value).toBe('settings.worktree.timeoutInvalid')
+  return { f, invalidInline }
+}
 
 describe('field · validate inline 通道（invalidInline，RD-4#7 表单红字形态）', () => {
   it('提供 invalidInline：validate 拒绝 → inline key 置入 + 不弹 toast + 回弹基准 + 不调 RPC', async () => {
@@ -285,8 +302,8 @@ describe('field · validate inline 通道（invalidInline，RD-4#7 表单红字�
     expect(invalidInline.value).toBe('settings.worktree.timeoutInvalid')
     expect(save).not.toHaveBeenCalled()
     expect(f.value.value).toBe(60)
-    expect(toastMock.error).not.toHaveBeenCalled()
-    expect(toastMock.info).not.toHaveBeenCalled()
+    expect(toastSpyMock.error).not.toHaveBeenCalled()
+    expect(toastSpyMock.info).not.toHaveBeenCalled()
   })
 
   it('不提供 invalidInline：validate 拒绝仍走专属 toast（System sections 形态不受影响）', async () => {
@@ -297,8 +314,8 @@ describe('field · validate inline 通道（invalidInline，RD-4#7 表单红字�
     })
 
     await f.persist([300, -1])
-    expect(toastMock.error).toHaveBeenCalledTimes(1)
-    expect(toastMock.error).toHaveBeenCalledWith('settings.system.smartContextThresholdInvalid')
+    expect(toastSpyMock.error).toHaveBeenCalledTimes(1)
+    expect(toastSpyMock.error).toHaveBeenCalledWith('settings.system.smartContextThresholdInvalid')
   })
 
   it('persist 尝试起点清 inline：拒绝后再合法保存成功 → inline 复位 + saved toast', async () => {
@@ -315,20 +332,11 @@ describe('field · validate inline 通道（invalidInline，RD-4#7 表单红字�
 
     await f.persist(120)
     expect(invalidInline.value).toBe(null)
-    expect(toastMock.info).toHaveBeenCalledWith('settings.system.saved')
+    expect(toastSpyMock.info).toHaveBeenCalledWith('settings.system.saved')
   })
 
   it('同值 persist 同样清 inline（先清后短路：再次 blur 带走旧 error 的既有 UI 行为）', async () => {
-    const group = createSettingFieldGroup()
-    const invalidInline = ref<string | null>(null)
-    const f = group.field<number>(60, {
-      save: async () => undefined,
-      validate: () => 'settings.worktree.timeoutInvalid',
-      invalidInline,
-    })
-
-    await f.persist(0)
-    expect(invalidInline.value).toBe('settings.worktree.timeoutInvalid')
+    const { f, invalidInline } = await rejectedInlineFieldAfterInvalidPersist()
 
     // 拒绝路径已回弹基准（60），再次 blur → 同值短路，但旧 inline error 被起点复位带走
     await f.persist(60)
@@ -336,16 +344,7 @@ describe('field · validate inline 通道（invalidInline，RD-4#7 表单红字�
   })
 
   it('reset 更新基准时清 inline（重试加载成功后旧校验错误不再适用）', async () => {
-    const group = createSettingFieldGroup()
-    const invalidInline = ref<string | null>(null)
-    const f = group.field<number>(60, {
-      save: async () => undefined,
-      validate: () => 'settings.worktree.timeoutInvalid',
-      invalidInline,
-    })
-
-    await f.persist(0)
-    expect(invalidInline.value).toBe('settings.worktree.timeoutInvalid')
+    const { f, invalidInline } = await rejectedInlineFieldAfterInvalidPersist()
 
     f.reset(90)
     expect(invalidInline.value).toBe(null)
@@ -361,7 +360,7 @@ describe('createMirrorSave（dirs 镜像保存）', () => {
 
     await mirror.run('a')
     expect(mirror.saveError.value).toBe(true)
-    expect(toastMock.error).toHaveBeenCalledWith('disk full')
+    expect(toastSpyMock.error).toHaveBeenCalledWith('disk full')
 
     shouldFail = false
     await mirror.run('b')
@@ -383,13 +382,13 @@ describe('createExplicitSave（显式保存动作）', () => {
     resolveRun()
     await first
     expect(action.saving.value).toBe(false)
-    expect(toastMock.info).toHaveBeenCalledWith('x.saved')
+    expect(toastSpyMock.info).toHaveBeenCalledWith('x.saved')
   })
 
   it('失败不上抛：默认 toast e.message 原文；onError 覆盖文案', async () => {
     const failing = createExplicitSave({ run: () => Promise.reject(new Error('boom')), savedToastKey: 'x.saved' })
     await expect(failing.run()).resolves.toBeUndefined()
-    expect(toastMock.error).toHaveBeenCalledWith('boom')
+    expect(toastSpyMock.error).toHaveBeenCalledWith('boom')
 
     const custom = createExplicitSave({
       run: () => Promise.reject(new Error('raw')),
@@ -397,7 +396,7 @@ describe('createExplicitSave（显式保存动作）', () => {
       onError: () => 'custom text',
     })
     await custom.run()
-    expect(toastMock.error).toHaveBeenCalledWith('custom text')
+    expect(toastSpyMock.error).toHaveBeenCalledWith('custom text')
   })
 
   it('带参形态（LlmRetry 整体 config 形态）：run 收到调用方域校验产物', async () => {
@@ -406,6 +405,6 @@ describe('createExplicitSave（显式保存动作）', () => {
 
     await action.run({ n: 1 })
     expect(body).toHaveBeenCalledWith({ n: 1 })
-    expect(toastMock.info).toHaveBeenCalledWith('x.saved')
+    expect(toastSpyMock.info).toHaveBeenCalledWith('x.saved')
   })
 })

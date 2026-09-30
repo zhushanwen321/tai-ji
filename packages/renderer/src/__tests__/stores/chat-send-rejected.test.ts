@@ -16,126 +16,20 @@
  *
  * 运行：npx vitest run src/__tests__/stores/chat-send-rejected.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
-import type { ServerMessage } from '@taiji/shared'
+import { describe, it, expect } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import { textToSegments } from '@taiji/shared'
-
-const apiMock = vi.hoisted(() => {
-  const holder: { handler: ((msg: ServerMessage) => void) | null } = { handler: null }
-  return {
-    holder,
-    streamSubscribe: vi.fn((_sid: string, handler: (msg: ServerMessage) => void) => {
-      holder.handler = handler
-      return () => { holder.handler = null }
-    }),
-    send: vi.fn(() => Promise.resolve()),
-    getHistory: vi.fn(() => Promise.resolve([])),
-    abort: vi.fn(() => Promise.resolve()),
-    compact: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
-    followUp: vi.fn(() => Promise.resolve()),
-  }
-})
-
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: {
-    streamSubscribe: apiMock.streamSubscribe,
-    send: apiMock.send,
-    getHistory: apiMock.getHistory,
-    abort: apiMock.abort,
-    compact: apiMock.compact,
-    steer: apiMock.steer,
-    followUp: apiMock.followUp,
-  },
-  session: {
-    subscribe: vi.fn().mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 0 }),
-    unsubscribe: vi.fn().mockResolvedValue(undefined),
-    writeSegments: vi.fn().mockResolvedValue(undefined),
-    // useModel.setThinkingLevel 依赖（thinking-level-sync watch 在 mount 时触发）
-    setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })),
-  },
-  config: {
-    getGlobalSkills: vi.fn().mockResolvedValue([]),
-    getProjectSkills: vi.fn().mockResolvedValue([]),
-    onSkillCacheInvalidated: () => () => {},
-  },
-}))
-
-// mount(Composer) 用例：mock 较深依赖（useChat 保留真实，验证 send.rejected 回滚链路）
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({
-    submitFirstMessage: vi.fn(),
-    currentModel: { value: null },
-    currentCwd: { value: null },
-    setPendingModel: vi.fn(),
-  }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ toasts: { value: [] }, error: vi.fn(), remove: vi.fn() }),
-}))
-vi.mock('@/composables/panel/useComposerModelThinking', () => ({
-  useComposerModelThinking: () => ({
-    currentModelId: { value: '' },
-    currentThinkingLevel: { value: undefined },
-    currentThinkingLevelMap: { value: undefined },
-    localThinkingLevel: { value: undefined },
-    onModelSelect: vi.fn(),
-    onThinkingSelect: vi.fn(),
-  }),
-}))
+// Composer 集成装配单源：import 即注册 '@/api'（chat 组 = chatStreamApiSpy 断言锚）+
+// useNewTaskFlow/useToast/useComposerModelThinking 三深依赖，并提供 ComposerInput stub 与
+// mountComposer——import 必须先于被测组件 import（'@/api' 工厂 TDZ 坑，同族先例见 helper 头注释）。
+import { setupComposerChatIntegrationHarness } from '@/__tests__/helpers/composer-integration-mount'
+import { chatStreamApiSpy, emitChatStreamMessage } from '@/__tests__/helpers/api-facade-mock'
 
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useChat } from '@/composables/features/chat/useChat'
-import Composer from '@/components/panel/Composer.vue'
 
-// ── Composer 子组件 stub（参照 composer-three-states.test.ts，最小化 mount 开销）──
-// getSegments 通过 emits 验证器捕获 input payload，用 textToSegments 还原（ADR-0043）。
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    expose({ clear: vi.fn(), setText: vi.fn(), insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
-const otherStubs = {
-  ComposerInput: ComposerInputMock,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
-}
-
-beforeEach(() => {
-  setActivePinia(createPinia())
-  vi.clearAllMocks()
-  apiMock.holder.handler = null
-  lastInputText.value = ''
-})
-
-function emit(msg: ServerMessage): void {
-  if (apiMock.holder.handler) apiMock.holder.handler(msg)
-}
+const { ComposerInputMock, mountComposer } = setupComposerChatIntegrationHarness()
 
 describe('send.rejected 回滚（D-006 独立通道）', () => {
   it('send.rejected → clearPendingSend（isActive 恢复 false）', async () => {
@@ -145,9 +39,9 @@ describe('send.rejected 回滚（D-006 独立通道）', () => {
     // send 后 pendingSend 置位 → isActive=true（空窗期）
     expect(chat.isActive('s-reject-1')).toBe(true)
     // 必须先订阅才能 emit
-    expect(apiMock.holder.handler).not.toBeNull()
+    expect(chatStreamApiSpy.holder.current).not.toBeNull()
     // runtime 预检拒绝
-    emit({
+    emitChatStreamMessage({
       type: 'send.rejected',
       payload: { sessionId: 's-reject-1', reason: 'busy', message: 'Agent 正在处理' },
     })
@@ -160,7 +54,7 @@ describe('send.rejected 回滚（D-006 独立通道）', () => {
     const { send } = useChat()
     await send('s-reject-2', textToSegments('hello'))
     const msgsBefore = chat.getMessages('s-reject-2')
-    emit({
+    emitChatStreamMessage({
       type: 'send.rejected',
       payload: { sessionId: 's-reject-2', reason: 'busy', message: 'Agent 正在处理' },
     })
@@ -174,7 +68,7 @@ describe('send.rejected 回滚（D-006 独立通道）', () => {
     await send('s-reject-3', textToSegments('hello'))
     // send.rejected 时无 streaming entity → isGenerating=false
     expect(chat.isGenerating('s-reject-3')).toBe(false)
-    emit({
+    emitChatStreamMessage({
       type: 'send.rejected',
       payload: { sessionId: 's-reject-3', reason: 'busy', message: 'busy' },
     })
@@ -191,7 +85,7 @@ describe('send.rejected 回滚（D-006 独立通道）', () => {
     chat.addPendingSend('s-other')
     expect(chat.isActive('s-other')).toBe(true)
     // session A 收到 send.rejected
-    emit({
+    emitChatStreamMessage({
       type: 'send.rejected',
       payload: { sessionId: 's-reject-4', reason: 'busy', message: 'busy' },
     })
@@ -211,10 +105,7 @@ describe('send.rejected Composer DOM 断言（用户可见行为）', () => {
     const session = useSessionStore()
     session.activeId = 's-dom-reject'
     const chat = useChatStore()
-    const wrapper = mount(Composer, {
-      props: { sessionId: 's-dom-reject' },
-      global: { stubs: otherStubs },
-    })
+    const wrapper = mountComposer('s-dom-reject')
     // 用户输入 → Enter 触发真实 useChat.send（mock api.send resolve → addPendingSend）
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'hello')
     await wrapper.vm.$nextTick()
@@ -230,7 +121,7 @@ describe('send.rejected Composer DOM 断言（用户可见行为）', () => {
     expect(chat.isActive('s-dom-reject')).toBe(true)
     expect(wrapper.find('.stop-btn').exists()).toBe(true)
     // runtime 预检拒绝：注入 send.rejected
-    emit({
+    emitChatStreamMessage({
       type: 'send.rejected',
       payload: { sessionId: 's-dom-reject', reason: 'busy', message: 'Agent 正在处理' },
     })

@@ -24,13 +24,6 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { BuiltinProviderTemplate } from '@taiji/shared'
 
-import { ProviderQuickSetup as QuickSetup } from '@taiji/ui/features/settings'
-import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
-import { useToast } from '@/composables/useToast'
-import { provideSettingsTransport } from '@taiji/core'
-import { makeSettingsTransportStub } from './helpers/settings-transport-stub'
-import { clickBody, setBodyInput, pointerBody } from './helpers/body-portal-harness'
-
 // @/api mock：ProviderPage onMounted 调 listBuiltinProviders（默认空数组，集成用例
 // mockResolvedValueOnce 覆盖为模板）；setProvider 桩供保存链路断言。
 // vi.mock 被 vitest 提升到 import 之前，保证 ProviderPage import 时 @/api 已 mock。
@@ -44,20 +37,32 @@ const configMock = vi.hoisted(() => ({
   onProviders: vi.fn(() => () => {}),
   listProviders: vi.fn(async () => ({ providers: [] })),
   deleteProvider: vi.fn(async () => {}),
-  // wave-oauth：ProviderPage → useProviderOAuth onMounted 订阅 4 个 auth.* 事件（缺则 TypeError 崩 mount）
-  onAuthDeviceCode: vi.fn(() => () => {}),
-  onAuthAuthUrl: vi.fn(() => () => {}),
-  onAuthSuccess: vi.fn(() => () => {}),
-  onAuthError: vi.fn(() => () => {}),
   // MF-1：QuickSetup 打开前查 auth.json OAuth 凭据（默认无）
   hasOAuth: vi.fn(async () => false),
   // P2：ProviderPage 默认 pill + 默认修复 toast（缺则 TypeError 崩 mount）
   onDefaultsWithSource: vi.fn(() => () => {}),
 }))
+
+// wave-oauth：useProviderOAuth onMounted 订阅 4 个 auth.* 事件（缺则 TypeError 崩 mount）。
+// vi.hoisted 工厂不能引用 import 绑定（TDZ），auth 订阅捕获集单源在 helper——顶层装配
+// 后并入门面 config 域（ProviderPage.test.ts / use-provider-oauth.test.ts 先例）。
+// 下面的组件 import 必须排在本装配与 vi.mock 注册之后：vite-node 按源码顺序执行 import，
+// 组件链首次拉入 '@/api' 即触发 mock 工厂，装配晚于工厂执行即 TDZ。
+import { authEventCbs } from './helpers/oauth-auth-events-mock'
+
+const configWithAuth = { ...configMock, ...authEventCbs() }
+
 vi.mock('@/api', () => ({
-  config: configMock,
-  default: { config: configMock },
+  config: configWithAuth,
+  default: { config: configWithAuth },
 }))
+
+import { ProviderQuickSetup as QuickSetup } from '@taiji/ui/features/settings'
+import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
+import { useToast } from '@/composables/useToast'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from './helpers/settings-transport-stub'
+import { clickBody, setBodyInput, pointerBody } from './helpers/body-portal-harness'
 
 // ── fixture：3 个内置 provider 模板 ──
 const TEMPLATES: BuiltinProviderTemplate[] = [
@@ -121,8 +126,8 @@ beforeEach(() => {
   // 集成链路用例需从零计数断言 setProvider/toggleProviderEnabled 调用次数
   configMock.setProvider.mockClear()
   configMock.toggleProviderEnabled.mockClear()
-  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映）
-  provideSettingsTransport(makeSettingsTransportStub(configMock))
+  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映，含 auth.* 订阅捕获集）
+  provideSettingsTransport(makeSettingsTransportStub(configWithAuth))
 })
 afterEach(() => {
   wrapper?.unmount()

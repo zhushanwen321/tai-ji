@@ -70,10 +70,12 @@ export function useChatMockModule() {
   }
 }
 
-/** '@/composables/features/sidebar/useSidebar' mock 工厂（壳依赖：useSidebar 窄面）。 */
+/** '@/composables/features/sidebar/useSidebar' mock 工厂（壳依赖：useSidebar 窄面）。
+ *  selectSession 为 ActivityStrip 集成用例（挂真实 MessageStream）的无害多余键——
+ *  i18n-toast-mock warning 键同款先例，不消费方不读取即无影响。 */
 export function useSidebarMockModule() {
   return {
-    useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn() }),
+    useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn(), selectSession: vi.fn() }),
   }
 }
 

@@ -822,6 +822,14 @@ describe('coding-plan 额度显示自动开启（新增即默认同意，quota-a
     return { svc, extras }
   }
 
+  /** 「不自动开启」标准腿：固定 zai-coding-cn 明文 setProvider → quotaAutoEnabled 与 quota extras 双 undefined 断言。 */
+  async function setPlainZaiAndExpectNoAutoEnable(svc: ConfigService, extras: TaijiProviderStore): Promise<void> {
+    const res = await svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: 'sk-plain' })
+
+    expect(res.quotaAutoEnabled).toBeUndefined()
+    expect(extras.getExtrasSync('zai-coding-cn')?.quota).toBeUndefined()
+  }
+
   it('quick-setup 形态 catalog 新建（明文 key，不回传模板 baseUrl）→ 写 quota { enabled, fetcher: zhipu }（模板身份匹配）', async () => {
     const { svc, extras } = makeAutoEnableService()
 
@@ -899,18 +907,12 @@ describe('coding-plan 额度显示自动开启（新增即默认同意，quota-a
   it('编辑既有条目（非新建）→ 不自动开启（只对新增生效）', async () => {
     const { svc, extras } = makeAutoEnableService({ existing: { name: 'Z.AI Coding CN' } })
 
-    const res = await svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: 'sk-plain' })
-
-    expect(res.quotaAutoEnabled).toBeUndefined()
-    expect(extras.getExtrasSync('zai-coding-cn')?.quota).toBeUndefined()
+    await setPlainZaiAndExpectNoAutoEnable(svc, extras)
   })
 
   it('catalog + credentialWriter 未注入（apiKey 被丢弃，M5-01）→ 不自动开启（无凭证可用只会有 no-credential）', async () => {
     const { svc, extras } = makeAutoEnableService({ hasWriter: false })
 
-    const res = await svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: 'sk-plain' })
-
-    expect(res.quotaAutoEnabled).toBeUndefined()
-    expect(extras.getExtrasSync('zai-coding-cn')?.quota).toBeUndefined()
+    await setPlainZaiAndExpectNoAutoEnable(svc, extras)
   })
 })

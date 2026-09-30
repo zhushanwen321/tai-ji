@@ -92,6 +92,13 @@ function armCreated(l: ClaimLedger, claimId: string, lifetimeId: string, withPro
   l.openWatch(P, lifetimeId, `w-${lifetimeId}`)
 }
 
+/** 静默 settle 投影：settle 产空兑现批 + 零送达通知（矩阵「不通知」列的本层断言形态）。 */
+function expectSilentSettle(l: ClaimLedger, outcome: SettleOutcome): void {
+  const b = l.settle(S, outcome)
+  expect(b.fulfilled).toHaveLength(0)
+  expect(deliveredCount(b.targets)).toBe(0)
+}
+
 // ═══ A 族：主发起（A1-A8）═════════════════════════════════════════════════
 
 describe('D10-A 主发起（附A A1-A8）', () => {
@@ -132,11 +139,7 @@ describe('D10-A 主发起（附A A1-A8）', () => {
   it('A4 create 无 prompt → 用户续聊 settle → 不通知（lifetime 不被 settle 兑现）', () => {
     const l = makeLedger()
     armCreated(l, 'sm-a4', 'sm-a4-lt', false)
-    for (let i = 0; i < 3; i++) {
-      const b = l.settle(S, 'done')
-      expect(b.fulfilled).toHaveLength(0)
-      expect(deliveredCount(b.targets)).toBe(0)
-    }
+    for (let i = 0; i < 3; i++) expectSilentSettle(l, 'done')
     expect(l.getClaim(P, 'sm-a4-lt')?.state).toBe('armed') // lifetime 仅在死亡时发声
   })
 
@@ -186,9 +189,7 @@ describe('D10-A 主发起（附A A1-A8）', () => {
     // 只读 action 在桥接层不接任何 ledger 入口（不 inject、不 settle、不 arm）——
     // 读窗口内记录状态原样，且只读不诱发任何兑现
     expect(l.getClaim(P, 'sm-a8')?.state).toBe('armed')
-    const b = l.settle(S, 'done')
-    expect(b.fulfilled).toHaveLength(0) // armed 不被兑
-    expect(deliveredCount(b.targets)).toBe(0)
+    expectSilentSettle(l, 'done') // armed 不被兑
     expect(l.count()).toBe(1)
   })
 })
@@ -201,19 +202,13 @@ describe('D10-B 用户与第三方发起（附B B1-B4）', () => {
     armCreated(l, 'sm-b1', 'sm-b1-lt', true)
     expect(deliveredCount(l.settle(S, 'done').targets)).toBe(1)
     l.onRespond(P, 'sm-b1', true)
-    for (let i = 0; i < 3; i++) {
-      const b = l.settle(S, 'done') // 用户续聊轮：UI 不 arm → 零兑现
-      expect(b.fulfilled).toHaveLength(0)
-      expect(deliveredCount(b.targets)).toBe(0)
-    }
+    for (let i = 0; i < 3; i++) expectSilentSettle(l, 'done') // 用户续聊轮：UI 不 arm → 零兑现
     expect(l.count()).toBe(1) // 仅 lifetime
   })
 
   it('B2 用户 run 中再插话 → 不通知（无主请求）', () => {
     const l = makeLedger()
-    const b = l.settle(S, 'done') // 插话轮结束的 settle：账本无任何债权
-    expect(b.fulfilled).toHaveLength(0)
-    expect(deliveredCount(b.targets)).toBe(0)
+    expectSilentSettle(l, 'done') // 插话轮结束的 settle：账本无任何债权
     expect(l.count()).toBe(0)
   })
 
@@ -322,9 +317,7 @@ describe('D10-D 生命周期（附D D1-D7b）', () => {
     expect(deliveredCount(ab.targets)).toBe(0) // aborted → 静默（D3 例外1）
     expect(l.onRespond(P, 'sm-d3', true)).toBe('deleted')
     // abort 后 await 间隙的 settled('stopped') 不得抢先兑现
-    const b = l.settle(S, 'stopped')
-    expect(b.fulfilled).toHaveLength(0)
-    expect(deliveredCount(b.targets)).toBe(0)
+    expectSilentSettle(l, 'stopped')
     expect(l.undeliveredCount(S)).toBe(0)
     expect(l.count()).toBe(1) // lifetime 不受 abort 影响
   })
@@ -492,9 +485,7 @@ describe('D10-E 结构性（附E E1-E8）', () => {
     expect(l.disarmDeliveryFailed(P, 'sm-e7')).toBe(true)
     expect(l.count()).toBe(0)
     expect(l.disarmDeliveryFailed(P, 'sm-e7')).toBe(false) // 已删：重复 disarm 幂等拒绝
-    const b = l.settle(S, 'done')
-    expect(b.fulfilled).toHaveLength(0)
-    expect(deliveredCount(b.targets)).toBe(0)
+    expectSilentSettle(l, 'done')
     expect(l.undeliveredCount(S)).toBe(0) // 不入 TTL→orphaned 幽灵提示
     expect(l.openWatch(P, 'sm-e7', 'w-e7')).toEqual({ action: 'fail-closed' }) // 迟到开表静默
     clock += TTL * 2

@@ -18,46 +18,21 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { ServerMessage } from '@taiji/shared'
 
-// ── api mock（chatApi.send/steer/streamSubscribe 等）──
-const apiMock = vi.hoisted(() => {
-  const holder: { handler: ((msg: ServerMessage) => void) | null } = { handler: null }
-  return {
-    holder,
-    streamSubscribe: vi.fn((_sid: string, handler: (msg: ServerMessage) => void) => {
-      holder.handler = handler
-      return () => {
-        holder.handler = null
-      }
-    }),
-    send: vi.fn(() => Promise.resolve()),
-    getHistory: vi.fn(() => Promise.resolve([])),
-    abort: vi.fn(() => Promise.resolve()),
-    compact: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
-    followUp: vi.fn(() => Promise.resolve()),
-  }
-})
-
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: {
-    streamSubscribe: apiMock.streamSubscribe,
-    send: apiMock.send,
-    getHistory: apiMock.getHistory,
-    abort: apiMock.abort,
-    compact: apiMock.compact,
-    steer: apiMock.steer,
-    followUp: apiMock.followUp,
-  },
-  session: {
-    writeSegments: sessionDomainMock.writeSegments,
-  },
-}))
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
+import { apiProjectMock, chatApiStreamGroup, chatStreamApiSpy } from '../../helpers/api-facade-mock'
 
 // ── session domain mock：writeSegments 捕获 sidecar 写入（clientUuid + segments 回填用）──
 const sessionDomainMock = vi.hoisted(() => ({
   writeSegments: vi.fn(() => Promise.resolve()),
+}))
+
+vi.mock('@/api', () => ({
+  project: apiProjectMock(),
+  chat: chatApiStreamGroup(),
+  session: {
+    writeSegments: sessionDomainMock.writeSegments,
+  },
 }))
 
 import { useChatStore } from '@/stores/chat'
@@ -67,7 +42,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   resetChatModuleState()
   vi.clearAllMocks()
-  apiMock.holder.handler = null
+  chatStreamApiSpy.holder.current = null
   sessionDomainMock.writeSegments.mockResolvedValue(undefined)
 })
 
@@ -81,8 +56,8 @@ describe('submitSegments 统一通路：send', () => {
       { type: 'image', id: 'img-x', path: '/tmp/x.png', fileName: 'x-uuid.png', displayName: 'x.png' },
     ])
 
-    expect(apiMock.send).toHaveBeenCalledTimes(1)
-    const call = apiMock.send.mock.calls[0]!
+    expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(1)
+    const call = chatStreamApiSpy.send.mock.calls[0]!
     expect(call[0]).toBe('ss-send')
     // promptText 含裸路径（图片走路径模式，对齐 pi TUI）
     expect(call[1]).toContain('/tmp/x.png')
@@ -115,8 +90,8 @@ describe('submitSegments 统一通路：send', () => {
     const { send } = useChat()
     await send('ss-send-text', [{ type: 'text', text: '纯文本消息' }])
 
-    expect(apiMock.send).toHaveBeenCalledTimes(1)
-    const call = apiMock.send.mock.calls[0]!
+    expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(1)
+    const call = chatStreamApiSpy.send.mock.calls[0]!
     expect(call[0]).toBe('ss-send-text')
     // 纯文本轮不加标记（textToSegments 降级与结构化回填渲染等价，无需映射）
     expect(call[1]).toBe('纯文本消息')
@@ -142,8 +117,8 @@ describe('submitSegments 统一通路：editAndResend', () => {
       { type: 'image', id: 'img-edit', path: '/tmp/edit.png', fileName: 'edit-uuid.png', displayName: 'edit.png' },
     ])
 
-    expect(apiMock.send).toHaveBeenCalledTimes(1)
-    const call = apiMock.send.mock.calls[0]!
+    expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(1)
+    const call = chatStreamApiSpy.send.mock.calls[0]!
     expect(call[0]).toBe('ss-edit')
     // promptText 含编辑后文本 + 裸路径
     expect(call[1]).toContain('edited text')
@@ -161,8 +136,8 @@ describe('submitSegments 统一通路：editAndResend', () => {
     const { editAndResend } = useChat()
     await editAndResend('ss-edit-text', userMsg.id, [{ type: 'text', text: 'edited' }])
 
-    expect(apiMock.send).toHaveBeenCalledTimes(1)
-    const call = apiMock.send.mock.calls[0]!
+    expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(1)
+    const call = chatStreamApiSpy.send.mock.calls[0]!
     expect(call[0]).toBe('ss-edit-text')
     // promptText 含编辑后文本；纯文本轮不加 clientUuid 标记后缀（最小写入，与 send 同通路）
     expect(call[1]).toContain('edited')

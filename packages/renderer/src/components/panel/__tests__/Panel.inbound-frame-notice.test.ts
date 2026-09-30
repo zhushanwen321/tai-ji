@@ -18,9 +18,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, ref, nextTick } from 'vue'
+import { ref, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { InboundFrameDroppedInfo } from '@taiji/core'
+// Panel 挂载壳 mock 三连（useSidebar/useToast/useExtensionUI）由 panel-mount-mocks 导入即
+// 注册——置于 Panel import 之前，注册早于其导入链加载（useToast 工厂绑定 TDZ 坑，
+// 见 helpers/i18n-toast-mock.ts；本文件不断言 toast，仅隔离副作用）
+import { MessageStreamStub } from '@/__tests__/helpers/panel-mount-mocks'
 import { ROOT_PANEL_ID, usePanelStore } from '@/stores/panel'
 import Panel from '../Panel.vue'
 import {
@@ -70,34 +74,6 @@ vi.mock('@/stores/session', () => ({ useSessionStore: () => sessionMock }))
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: () => ({ state: ref('idle'), isActive: ref(false) }),
 }))
-
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({
-    restoreSession: vi.fn(async () => {}),
-    retryHistory: vi.fn(async () => {}),
-    deleteSession: vi.fn(async () => {}),
-  }),
-}))
-
-vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
-}))
-
-vi.mock('@/composables/useExtensionUI', () => ({
-  useExtensionUI: () => ({
-    currentFormRequest: { value: undefined as unknown },
-    respond: vi.fn(),
-    cancel: vi.fn(),
-  }),
-  formFilter: () => true,
-  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
-  planReviewFilter: () => true,
-}))
-
-const MessageStreamStub = defineComponent({
-  name: 'MessageStream',
-  render: () => h('div', { 'data-testid': 'message-stream-stub' }),
-})
 
 function mountPanel(sessionId: string) {
   return mount(Panel, {

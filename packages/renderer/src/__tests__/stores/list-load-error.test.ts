@@ -11,6 +11,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { WorkflowRunRecord } from '@taiji/shared'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（stores 链）求值
+import { apiProjectMock } from '../helpers/api-facade-mock'
 
 // ── mock api 域（workflow/subagent store 用 @/api/domains/session，useSidebar 用 @/api）──
 const listMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])))
@@ -28,7 +30,7 @@ vi.mock('@taiji/core/transport/api/domains/session', () => ({
   rename: vi.fn(() => Promise.resolve()),
   remove: vi.fn(() => Promise.resolve()),
 }))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
   chat: { getHistory: vi.fn(() => Promise.resolve([])) },
   session: {
     create: vi.fn(() => Promise.resolve({})),

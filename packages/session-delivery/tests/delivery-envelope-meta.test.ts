@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
 import type { DeliveryPort } from '../src/types.js'
-import { makeMockPort, textMsg } from './helpers.js'
+import { makeBusyParkPort, makeMockPort, expectSettledMsg, textMsg } from './helpers.js'
 
 function makePort(overrides?: Partial<DeliveryPort>): ReturnType<typeof makeMockPort> {
   return makeMockPort(overrides)
@@ -48,18 +48,8 @@ describe('envelope additive meta（notifyId 穿 envelope）', () => {
   })
 
   it('busy park 合批 2 条（各自 notifyId）→ per-message 回调各自 meta 不串键', () => {
-    let idle = false
-    let settledCb: (() => void) | undefined
     const onSettled = vi.fn()
-    const port = makePort({
-      isIdle: () => idle,
-      subscribeSettled: (cb) => {
-        settledCb = cb
-        return () => {
-          settledCb = undefined
-        }
-      },
-    })
+    const { port, setIdle, fireSettled } = makeBusyParkPort()
     const handle = createDelivery(port, { onSettled })
 
     const msgA = textMsg('claim A', { meta: { notifyId: 'sm-a' } })
@@ -68,14 +58,14 @@ describe('envelope additive meta（notifyId 穿 envelope）', () => {
     handle.send(msgB)
     expect(onSettled).not.toHaveBeenCalled()
 
-    idle = true
-    settledCb!() // settled 边沿 → 合批投出
+    setIdle(true)
+    fireSettled() // settled 边沿 → 合批投出
 
     expect(port.sendCalls).toHaveLength(1) // 物理合批仍是一次 port.send
     expect(onSettled).toHaveBeenCalledTimes(2)
-    expect(onSettled.mock.calls[0]![0]).toBe(msgA)
+    expectSettledMsg(onSettled, 0, msgA)
     expect(onSettled.mock.calls[0]![0].meta?.notifyId).toBe('sm-a')
-    expect(onSettled.mock.calls[1]![0]).toBe(msgB)
+    expectSettledMsg(onSettled, 1, msgB)
     expect(onSettled.mock.calls[1]![0].meta?.notifyId).toBe('sm-b')
     handle.dispose()
   })

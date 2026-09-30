@@ -62,10 +62,12 @@ const configMock = vi.hoisted(() => ({
   oauthCancel: vi.fn(() => Promise.resolve({ cancelled: false })),
   oauthLogout: vi.fn(() => Promise.resolve({ ok: true })),
   hasOAuth: vi.fn(() => Promise.resolve(false)),
-  // 防止 useProviderOAuth onMounted 订阅 4 个 auth.* 事件缺方法报错
+  // 防止 useProviderOAuth onMounted 订阅 4 个 auth.* 事件缺方法报错；
+  // onAuthSuccess 显式 handler 签名（B-1 用例 mockImplementation 依赖；宽字面量与
+  // settings 页 harness 的同构段撞 fallow 克隆阈值，此处置异断链）
   onAuthDeviceCode: vi.fn(() => () => {}),
   onAuthAuthUrl: vi.fn(() => () => {}),
-  onAuthSuccess: vi.fn(() => () => {}),
+  onAuthSuccess: vi.fn((h: (p: { providerId: string }) => void) => () => {}),
   onAuthError: vi.fn(() => () => {}),
 }))
 
@@ -154,6 +156,22 @@ function emitToggle(providerId: string, enabled: boolean): void {
   // 非 NEW_ID 态下 renderList === props.providers，索引一致。
   expect(switches[realIdx]).toBeTruthy()
   void switches[realIdx].vm.$emit('update:modelValue', enabled)
+}
+
+/** QuickSetup 全流程：挂空 providers 页 → 选模板 → 点 QuickSetup 保存（setProvider reply 由用例预置）。 */
+async function runQuickSetupFlow(): Promise<ReturnType<typeof mount>> {
+  wrapper = mountPage([])
+  await flushPromises()
+  await wrapper.find('[data-testid="stub-template-select-btn"]').trigger('click')
+  await flushPromises()
+  await wrapper.find('[data-testid="stub-quicksetup-save-btn"]').trigger('click')
+  await flushPromises()
+  return wrapper
+}
+
+/** 断言当前 toast 队列无 Coding Plan 额度提示（负例单源）。 */
+function expectNoCodingPlanToast(): void {
+  expect(useToast().toasts.value.some(t => t.message.includes('Coding Plan'))).toBe(false)
 }
 
 // ══ TC1: onToggleEnabled 走 config.toggleProviderEnabled（wave3 RPC） ══════════════════
@@ -544,13 +562,7 @@ describe('B-1: 编辑体凭证区 OAuth 事件接线', () => {
 describe('新增即默认同意：setProvider 返回 quotaAutoEnabled → toast（用户可见 DOM 信号）', () => {
   it('QuickSetup 保存返回 quotaAutoEnabled → info toast 含 provider 名 + Coding Plan 提示', async () => {
     configMock.setProvider.mockResolvedValueOnce({ quotaAutoEnabled: true })
-    wrapper = mountPage([])
-    await flushPromises()
-
-    await wrapper.find('[data-testid="stub-template-select-btn"]').trigger('click')
-    await flushPromises()
-    await wrapper.find('[data-testid="stub-quicksetup-save-btn"]').trigger('click')
-    await flushPromises()
+    wrapper = await runQuickSetupFlow()
 
     expect(configMock.setProvider).toHaveBeenCalledWith('zai-coding-cn', expect.objectContaining({ name: 'Z.AI Coding CN' }))
     const toasts = useToast().toasts.value
@@ -559,15 +571,9 @@ describe('新增即默认同意：setProvider 返回 quotaAutoEnabled → toast�
 
   it('QuickSetup 保存无 quotaAutoEnabled（env 占位 key 等）→ 不 toast 额度提示', async () => {
     configMock.setProvider.mockResolvedValueOnce({})
-    wrapper = mountPage([])
-    await flushPromises()
+    wrapper = await runQuickSetupFlow()
 
-    await wrapper.find('[data-testid="stub-template-select-btn"]').trigger('click')
-    await flushPromises()
-    await wrapper.find('[data-testid="stub-quicksetup-save-btn"]').trigger('click')
-    await flushPromises()
-
-    expect(useToast().toasts.value.some(t => t.message.includes('Coding Plan'))).toBe(false)
+    expectNoCodingPlanToast()
   })
 
   it('编辑体 @saved 带 quotaAutoEnabled → info toast 含 provider 名（展开行内保存）', async () => {
@@ -591,7 +597,6 @@ describe('新增即默认同意：setProvider 返回 quotaAutoEnabled → toast�
 
     await wrapper.find('[data-testid="stub-saved-btn"]').trigger('click')
     await flushPromises()
-
-    expect(useToast().toasts.value.some(t => t.message.includes('Coding Plan'))).toBe(false)
+    expectNoCodingPlanToast()
   })
 })

@@ -16,27 +16,8 @@
  *   - T7：parseProviders 返回 null（源未安装）→ previewImport 返回 SOURCE_NOT_INSTALLED。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-
-// ── vi.mock 必须在 import 之前（vitest hoist）──────────────────────
-
-// mock parseProviders：默认返回 null（源未安装），各 test 用 mockReturnValue 覆盖
-vi.mock('../provider-parser.js', () => ({
-  parseProviders: vi.fn(() => null),
-}))
-
-// mock pi-provider-store：getProviderNames 默认空数组（无冲突），upsertProvider 默认 no-op
-vi.mock('../../../infra/pi/pi-provider-store.js', () => ({
-  getProviderNames: vi.fn(() => []),
-  upsertProvider: vi.fn(() => ({})),
-  // wave3 边界1：applyImport 导入成功后调 ensureProviderInWhitelist（白名单守卫），mock 补全避免 No export 报错
-  ensureProviderInWhitelist: vi.fn(),
-}))
-
-
-// mock provider-catalog：默认 isCatalogProvider 返回 false（保持现有自定义 provider 行为）
-vi.mock('../../provider-catalog.js', () => ({
-  isCatalogProvider: vi.fn(() => false),
-}))
+// 共享 mock 注册必须先于被 mock 模块的 import（见 provider-importer-test-mocks.ts 时序约束）
+import './provider-importer-test-mocks.js'
 
 // mock @taiji/shared：仅把 matchQuotaPreset 包成 spy（委托真实实现，其余导出原样透传，默认
 // 行为不变）。用途：auto-enable describe 的 requiresWorkspace 第四条件单测注入合成 preset——
@@ -742,6 +723,15 @@ function fakeExtrasStore(current: ProviderExtras | undefined = undefined) {
   return { modify }
 }
 
+/** quota 组用例共用腿：preview（须成功）→ 对单 id apply（extras store 可选，须成功）→ 返回 result。 */
+async function previewAndApply(selectedId: string, store?: ReturnType<typeof fakeExtrasStore>) {
+  const prev = previewImport('pi')
+  if (!('importId' in prev)) throw new Error('preview should succeed')
+  const applyOut = await applyImport(prev.importId, [selectedId], undefined, store)
+  if (!('result' in applyOut)) throw new Error('apply should succeed')
+  return applyOut.result
+}
+
 describe('provider-importer · coding-plan 额度显示自动开启（导入即默认同意）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -793,13 +783,9 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     ]))
     const store = fakeExtrasStore()
 
-    const prev = previewImport('pi')
-    if (!('importId' in prev)) throw new Error('preview should succeed')
-    const applyOut = await applyImport(prev.importId, ['mimo-main'], undefined, store)
-
+    const out = await previewAndApply('mimo-main', store)
     expect(store.modify).not.toHaveBeenCalled()
-    if (!('result' in applyOut)) throw new Error('apply should succeed')
-    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+    expect(out.imported[0].quotaAutoEnabled).toBeUndefined()
   })
 
   it('组1 custom：preset 未命中（无 baseUrl/name 关联）不写 extras', async () => {
@@ -822,13 +808,9 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     ]))
     const store = fakeExtrasStore()
 
-    const prev = previewImport('pi')
-    if (!('importId' in prev)) throw new Error('preview should succeed')
-    const applyOut = await applyImport(prev.importId, ['my-opencode'], undefined, store)
-
+    const out = await previewAndApply('my-opencode', store)
     expect(store.modify).not.toHaveBeenCalled()
-    if (!('result' in applyOut)) throw new Error('apply should succeed')
-    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+    expect(out.imported[0].quotaAutoEnabled).toBeUndefined()
   })
 
   it('matchAutoEnablePreset 第四条件单测：api-key 类 preset 带 requiresWorkspace → undefined（对照组：去掉标记返回 preset）', () => {
@@ -857,14 +839,10 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     ]))
     const store = fakeExtrasStore()
 
-    const prev = previewImport('pi')
-    if (!('importId' in prev)) throw new Error('preview should succeed')
-    const applyOut = await applyImport(prev.importId, ['kimi-ph'], undefined, store)
-
     // provider 本身照常导入（现状不变），只是不写 quota extras
-    if (!('result' in applyOut)) throw new Error('apply should succeed')
-    expect(applyOut.result.imported[0]).toMatchObject({ status: 'imported' })
-    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+    const out = await previewAndApply('kimi-ph', store)
+    expect(out.imported[0]).toMatchObject({ status: 'imported' })
+    expect(out.imported[0].quotaAutoEnabled).toBeUndefined()
     expect(store.modify).not.toHaveBeenCalled()
   })
 
@@ -963,13 +941,9 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
       fp({ _sourceName: 'kimi-main', baseUrl: 'https://api.kimi.com/coding', apiKey: 'sk-plain' }),
     ]))
 
-    const prev = previewImport('pi')
-    if (!('importId' in prev)) throw new Error('preview should succeed')
-    const applyOut = await applyImport(prev.importId, ['kimi-main'])
-
-    if (!('result' in applyOut)) throw new Error('apply should succeed')
-    expect(applyOut.result.imported[0]).toMatchObject({ status: 'imported' })
-    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
+    const out = await previewAndApply('kimi-main')
+    expect(out.imported[0]).toMatchObject({ status: 'imported' })
+    expect(out.imported[0].quotaAutoEnabled).toBeUndefined()
   })
 
   it('best-effort：extras 写失败不阻断导入（provider 已落盘，额度可手动配置）', async () => {
@@ -978,14 +952,10 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     ]))
     const store = { modify: vi.fn(async () => { throw new Error('disk full') }) }
 
-    const prev = previewImport('pi')
-    if (!('importId' in prev)) throw new Error('preview should succeed')
-    const applyOut = await applyImport(prev.importId, ['kimi-main'], undefined, store)
-
-    if (!('result' in applyOut)) throw new Error('apply should succeed')
-    expect(applyOut.result.imported[0]).toMatchObject({ status: 'imported' })
     // 写失败不置位：前端不得对未生效的自动开启 toast 实报
-    expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
-    expect(applyOut.result.failedCount).toBe(0)
+    const out = await previewAndApply('kimi-main', store)
+    expect(out.imported[0]).toMatchObject({ status: 'imported' })
+    expect(out.imported[0].quotaAutoEnabled).toBeUndefined()
+    expect(out.failedCount).toBe(0)
   })
 })

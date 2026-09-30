@@ -107,8 +107,10 @@ async function settle(w: VueWrapper): Promise<void> {
  * 固定 settle 后立即断言对调度器微时序有隐性依赖——CI 并行负载下偶发
  * 不达（CI 偶发 run 36585066332），改带超时轮询去依赖。超时后先输出
  * 失败现场快照，再以 expect 收尾（保持 vitest 断言失败形态）。
+ * 预算 8000ms：全量套件 16 worker 抢占下单用例调度延迟可达 2s+（本地实测），
+ * 2s 预算会被纯负载压过线；轮询只在到达后提前返回，上限加大不影响绿路耗时。
  */
-async function waitForUnread(w: VueWrapper, expected: string, timeoutMs = 2000): Promise<void> {
+async function waitForUnread(w: VueWrapper, expected: string, timeoutMs = 8000): Promise<void> {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     await flushPromises()

@@ -389,6 +389,24 @@ async function openClaimWatchChain(): Promise<WatchChain> {
   }
 }
 
+/** 开表挂等共用腿（U9-S3 / U9-D1 前置）：真实通道喂入 watch → deferred（wait）路由，断言零 respond。 */
+async function feedWatchDeferring(w: WatchChain): Promise<void> {
+  await w.feedUiRequest(w.watchEvent)
+  expect(w.responds.filter((r) => r.requestId === w.watchRequestId), 'deferred 阶段不应有 respond').toHaveLength(0)
+}
+
+/** watch 回写断言共用腿：按 requestId 过滤恰一条 respond + JSON 解析 payload toMatchObject。 */
+function expectSingleWatchRespond(w: WatchChain, payload: Record<string, unknown>, message: string): void {
+  const watchResponds = w.responds.filter((r) => r.requestId === w.watchRequestId)
+  expect(watchResponds, message).toHaveLength(1)
+  expect(JSON.parse(watchResponds[0]?.value ?? 'null')).toMatchObject(payload)
+}
+
+/** claim 已销账断言（settle 兑现回收 / clearSession 清账 / 死亡收口后共用）。 */
+function expectClaimRecycled(w: WatchChain): void {
+  expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)).toBeUndefined()
+}
+
 describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY ? '' : `（skip：${FAUX_PI_SKIP_REASON}）`}`, () => {
   it('U9-S1 真 pi 全链路 create：agent 调 create_managed_session → marker 通道 → 真实 handler → 回写 → 工具返回 + sidecar 写入', { timeout: 80_000 }, async () => {
     const { result, fx, cleanup } = await runFullChain()
@@ -462,8 +480,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
     const w = await openClaimWatchChain()
     try {
       // 1. 开表：真实通道入站 → 路由 deferred（wait）——零 respond，watch 槽已登记
-      await w.feedUiRequest(w.watchEvent)
-      expect(w.responds.filter((r) => r.requestId === w.watchRequestId), 'deferred 阶段不应有 respond').toHaveLength(0)
+      await feedWatchDeferring(w)
       expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)?.watchId, 'wait 路由应登记 watch 槽').toBe(w.watchRequestId)
 
       // 2. 后续 settle 兑现：injected → fulfilled + 经同一写回通道 respond
@@ -472,16 +489,9 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
       expect(batch.targets, '已挂 watch 的 injected claim 应进 respond 批').toHaveLength(1)
       deliverRespondTargets(w.claims, batch.targets, w.handler.watchRespond)
 
-      const watchResponds = w.responds.filter((r) => r.requestId === w.watchRequestId)
-      expect(watchResponds, 'settle 后应恰有一条经真实通道回写的 respond').toHaveLength(1)
-      expect(JSON.parse(watchResponds[0]?.value ?? 'null')).toMatchObject({
-        reason: 'completed',
-        sessionId: w.result.childId,
-        settleSeq: 1,
-        fulfillsN: 1,
-      })
+      expectSingleWatchRespond(w, { reason: 'completed', sessionId: w.result.childId, settleSeq: 1, fulfillsN: 1 }, 'settle 后应恰有一条经真实通道回写的 respond')
       // onRespond(true) → 记录回收（extension 应答后的下一次 watch 将 fail-closed）
-      expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)).toBeUndefined()
+      expectClaimRecycled(w)
     } finally {
       await w.fx.dispose().catch(() => {})
       w.cleanup()
@@ -498,15 +508,9 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
 
       // 2. 晚达 watch → 立即快照 respond（catch-up 分支，本次 handle 内收口）
       await w.feedUiRequest(w.watchEvent)
-      const watchResponds = w.responds.filter((r) => r.requestId === w.watchRequestId)
-      expect(watchResponds, 'catch-up 应在 handle 内立即回写').toHaveLength(1)
-      expect(JSON.parse(watchResponds[0]?.value ?? 'null')).toMatchObject({
-        reason: 'failed', // outcome 'error' → 协议词形 failed（映射单点 toWatchRespondPayload）
-        sessionId: w.result.childId,
-        settleSeq: 1,
-        fulfillsN: 1,
-      })
-      expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)).toBeUndefined()
+      // reason 'failed'：outcome 'error' → 协议词形 failed（映射单点 toWatchRespondPayload）
+      expectSingleWatchRespond(w, { reason: 'failed', sessionId: w.result.childId, settleSeq: 1, fulfillsN: 1 }, 'catch-up 应在 handle 内立即回写')
+      expectClaimRecycled(w)
     } finally {
       await w.fx.dispose().catch(() => {})
       w.cleanup()
@@ -519,7 +523,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
       // 1. 构造「查无 claim」：清空该 session 全部记录 ≙ D8-v1 runtime 重启内存账本全失形态
       const removed = w.claims.clearSession(w.result.childId)
       expect(removed, 'claim + lifetime 双记录应被清空').toBe(2)
-      expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)).toBeUndefined()
+      expectClaimRecycled(w)
 
       // 2. watch 经真实通道到达 → fail-closed 立即应答（防长挂 select 泄漏）
       await w.feedUiRequest(w.watchEvent)
@@ -542,8 +546,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
     const w = await openClaimWatchChain()
     try {
       // 1. 开表挂等：真实通道入站 → handler wait 路由登记 watch 槽（U9-S3 同款，零 respond）
-      await w.feedUiRequest(w.watchEvent)
-      expect(w.responds.filter((r) => r.requestId === w.watchRequestId), 'deferred 阶段不应有 respond').toHaveLength(0)
+      await feedWatchDeferring(w)
 
       // 2. 子会话进程意外退出 → 死亡收口三步（偏离登记④）：「session 不在内存」腿 =
       //    fake SessionService.getSession 恒 undefined 的生产同判形态；退出现场 exitCode/
@@ -559,16 +562,14 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
       w.claims.clearSession(w.result.childId)
 
       // 3. 恰一条经真实通道回写的 death respond：词形 exited + deathSeq/fulfillsN + 退出现场三件
-      const watchResponds = w.responds.filter((r) => r.requestId === w.watchRequestId)
-      expect(watchResponds, '死亡收口应恰有一条 respond').toHaveLength(1)
-      expect(JSON.parse(watchResponds[0]?.value ?? 'null')).toMatchObject({
+      expectSingleWatchRespond(w, {
         reason: 'exited',
         sessionId: w.result.childId,
         deathSeq: 1,
         fulfillsN: 1,
         exitCode: 1,
         stderrTail: collectStderrTail(stderr),
-      })
+      }, '死亡收口应恰有一条 respond')
 
       // 4. destroy 迟到二次发声：死亡腿重放对已销账账本空批空转（组合根 speakSessionDeath
       //    幂等——「重复调用空批空转」），watch 通道不再收第二条
@@ -577,7 +578,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
       deliverRespondTargets(w.claims, replay.targets, w.handler.watchRespond)
       w.claims.clearSession(w.result.childId)
       expect(w.responds.filter((r) => r.requestId === w.watchRequestId), 'destroy 迟到不得二次发声').toHaveLength(1)
-      expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)).toBeUndefined()
+      expectClaimRecycled(w)
     } finally {
       await w.fx.dispose().catch(() => {})
       w.cleanup()

@@ -73,6 +73,15 @@ function mountOpenModalWithSpyToasts(): ReturnType<typeof mount> {
   })
 }
 
+/** mock 平台注入（in-memory storage + 立即关闭的 no-op WebSocket，避免 WS 连接）。 */
+function provideMockPlatform(): void {
+  providePlatform({
+    kind: 'mock',
+    storage: inMemoryStorage(),
+    webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
+  })
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetPlatformForTesting()
@@ -84,11 +93,7 @@ enableAutoUnmount(afterEach)
 
 describe('SettingsModal 首屏冒烟（AC12 渲染 gate）', () => {
   it('open=true 时渲染 Dialog 标题 + provider 导航项 + provider 页区', async () => {
-    providePlatform({
-      kind: 'mock',
-      storage: inMemoryStorage(),
-      webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
-    })
+    provideMockPlatform()
     provideSettingsTransport(makeSettingsTransportStub())
 
     mountOpenModalWithSpyToasts()
@@ -106,11 +111,7 @@ describe('SettingsModal 首屏冒烟（AC12 渲染 gate）', () => {
 
 describe('SettingsModal 懒加载挂载即 open 的 open 语义（W31 review major-1 回归防护）', () => {
   it('挂载即 open=true：refreshProviders 被调用 + 首个 nav 项获得焦点', async () => {
-    providePlatform({
-      kind: 'mock',
-      storage: inMemoryStorage(),
-      webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
-    })
+    provideMockPlatform()
     // refreshProviders → getSettingsTransport().listProviders()（模块级单例）→ spy 在此
     const listProvidersSpy = vi.fn(async () => ({ providers: [] }))
     provideSettingsTransport({ ...makeSettingsTransportStub(), listProviders: listProvidersSpy })
@@ -131,11 +132,7 @@ describe('SettingsModal 懒加载挂载即 open 的 open 语义（W31 review maj
 
 describe('SettingsModal onUpdateSkillDirs 错误反馈（W2 D10，原 settings-modal-skill-dirs.test.ts 并入）', () => {
   it('transport.setSkillDirs reject → 触发 error toast（非静默失败）', async () => {
-    providePlatform({
-      kind: 'mock',
-      storage: inMemoryStorage(),
-      webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
-    })
+    provideMockPlatform()
     provideSettingsTransport(makeSettingsTransportStub({ setSkillDirs: () => Promise.reject(new Error('network down')) }))
 
     // toast 断言走真实 useToast 单例（SETTINGS_TOAST_KEY 桥接到 useToast）
@@ -181,11 +178,7 @@ describe('SettingsModal 路径保存失败回弹（RD-4#1：失败强制回弹 U
    * 重拉（saveError 通道驱动），行为级断言即「勾选态回弹 + 常驻红字」。
    */
   function mountModalWithFailingSkillDirs(): ReturnType<typeof mount> {
-    providePlatform({
-      kind: 'mock',
-      storage: inMemoryStorage(),
-      webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
-    })
+    provideMockPlatform()
     provideSettingsTransport(makeSettingsTransportStub({ setSkillDirs: () => Promise.reject(new Error('disk full')) }))
     return mount(SettingsModal, {
       props: { open: true },

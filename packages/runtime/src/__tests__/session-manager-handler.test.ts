@@ -20,7 +20,7 @@ import type { SessionManagerHandlerOptions } from '../transport/session-manager-
 import { deliverRespondTargets, runClaimSweep } from '../transport/session-manager-handler.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import { createClaimLedger } from '../services/session/notify-claims.js'
-import type { ClaimLedger } from '../services/session/notify-claims.js'
+import type { ClaimLedger, SettleOutcome } from '../services/session/notify-claims.js'
 import type { ISessionService, SessionCreateOptions } from '../interfaces.js'
 import type { SessionSummary } from '@taiji/shared'
 
@@ -94,6 +94,33 @@ function makeSessionSummary(overrides: Partial<SessionSummary> = {}): SessionSum
     parentAgentSessionId: 'sid-parent',
     ...overrides,
   }
+}
+
+/** 第 n 次 sendExtensionUiResponse 的 JSON payload */
+function respondAt(opts: SessionManagerHandlerOptions, call = 0): Record<string, unknown> {
+  const mock = opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>
+  return JSON.parse(mock.mock.calls[call][2] as string) as Record<string, unknown>
+}
+
+/**
+ * watch 路由族用例共用脚手架：mock options + getSummary 覆盖 + claim arm→injected（sendDirect
+ * 受理回执锚形态）+ 可选 settle 预兑现。summaryOverrides 传 undefined → getSummary 返回
+ * undefined（二次校验①「session 已不在」腿）；传 {} 即默认归属材料。返回 opts 与已接线的
+ * handler，供用例续做 openWatch / handle 断言。
+ */
+function makeWatchFixture(
+  notifyId: string,
+  summaryOverrides?: Partial<SessionSummary>,
+  settleOutcome?: SettleOutcome,
+): { opts: SessionManagerHandlerOptions; handler: SessionManagerHandler } {
+  const opts = makeMockOptions()
+  opts.sessionService.getSummary = vi.fn().mockReturnValue(
+    summaryOverrides === undefined ? undefined : makeSessionSummary({ id: 's1', ...summaryOverrides }),
+  )
+  opts.claims!.arm({ parentSid: 'sid-parent', notifyId, kind: 'claim', sessionId: 's1' })
+  opts.claims!.markInjected('sid-parent', notifyId)
+  if (settleOutcome !== undefined) opts.claims!.settle('s1', settleOutcome)
+  return { opts, handler: new SessionManagerHandler(opts) }
 }
 
 describe('SessionManagerHandler', () => {
@@ -823,12 +850,6 @@ describe('SessionManagerHandler', () => {
     const VALID_NID = 'sm-12345678-1234-4234-8234-123456789012'
     const VALID_NID2 = 'sm-12345678-1234-4234-8234-123456789013'
 
-    /** 第 n 次 sendExtensionUiResponse 的 JSON payload */
-    function respondAt(opts: SessionManagerHandlerOptions, call = 0): Record<string, unknown> {
-      const mock = opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>
-      return JSON.parse(mock.mock.calls[call][2] as string) as Record<string, unknown>
-    }
-
     it('params 守卫通过：封闭单键 {notifyId}（sm- 形态）→ 进入路由零 error', async () => {
       const opts = makeMockOptions()
       const handler = new SessionManagerHandler(opts)
@@ -880,13 +901,7 @@ describe('SessionManagerHandler', () => {
     })
 
     it('deferred 晚达应答：wait 后 settle → 经写回通道回 req-watch（reason/settleSeq/fulfillsN/sessionFilePath）', async () => {
-      const opts = makeMockOptions()
-      opts.sessionService.getSummary = vi.fn().mockReturnValue(
-        makeSessionSummary({ id: 's1', sessionFile: '/tmp/s1.jsonl' }),
-      )
-      const handler = new SessionManagerHandler(opts)
-      opts.claims!.arm({ parentSid: 'sid-parent', notifyId: VALID_NID, kind: 'claim', sessionId: 's1' })
-      opts.claims!.markInjected('sid-parent', VALID_NID)
+      const { opts, handler } = makeWatchFixture(VALID_NID, { sessionFile: '/tmp/s1.jsonl' })
       await handler.handle('req-watch', 'sid-parent', 'watch', { notifyId: VALID_NID })
       expect(opts.sendExtensionUiResponse).not.toHaveBeenCalled() // 挂起
 
@@ -908,14 +923,8 @@ describe('SessionManagerHandler', () => {
     })
 
     it('catch-up：watch 晚于兑现到达 → 立即 respond 快照 + onRespond 删记录', async () => {
-      const opts = makeMockOptions()
-      opts.sessionService.getSummary = vi.fn().mockReturnValue(
-        makeSessionSummary({ id: 's1', sessionFile: '/tmp/s1.jsonl' }),
-      )
-      const handler = new SessionManagerHandler(opts)
-      opts.claims!.arm({ parentSid: 'sid-parent', notifyId: VALID_NID, kind: 'claim', sessionId: 's1' })
-      opts.claims!.markInjected('sid-parent', VALID_NID)
-      opts.claims!.settle('s1', 'error') // 兑现时无 watch（fulfilled-no-watch）
+      // 'error' 预兑现：兑现时无 watch（fulfilled-no-watch）
+      const { opts, handler } = makeWatchFixture(VALID_NID, { sessionFile: '/tmp/s1.jsonl' }, 'error')
 
       await handler.handle('req-watch-late', 'sid-parent', 'watch', { notifyId: VALID_NID })
       expect(opts.sendExtensionUiResponse).toHaveBeenCalledWith(
@@ -928,12 +937,7 @@ describe('SessionManagerHandler', () => {
     })
 
     it('二次校验两态①：应答时 session 已不在（getSummary 缺失）→ 按 exited 应答（死亡通知不凭空消失）', async () => {
-      const opts = makeMockOptions()
-      opts.sessionService.getSummary = vi.fn().mockReturnValue(undefined)
-      const handler = new SessionManagerHandler(opts)
-      opts.claims!.arm({ parentSid: 'sid-parent', notifyId: VALID_NID, kind: 'claim', sessionId: 's1' })
-      opts.claims!.markInjected('sid-parent', VALID_NID)
-      opts.claims!.settle('s1', 'done')
+      const { opts, handler } = makeWatchFixture(VALID_NID, undefined, 'done')
 
       await handler.handle('req-watch', 'sid-parent', 'watch', { notifyId: VALID_NID })
       expect(respondAt(opts)).toEqual({ reason: 'exited', sessionId: 's1' })
@@ -941,25 +945,14 @@ describe('SessionManagerHandler', () => {
     })
 
     it('二次校验两态②：session 仍在但归属失效 → 按 cancelled 应答（静默，不伪造死亡通知）', async () => {
-      const opts = makeMockOptions()
-      opts.sessionService.getSummary = vi.fn().mockReturnValue(
-        makeSessionSummary({ id: 's1', parentAgentSessionId: 'another-agent' }),
-      )
-      const handler = new SessionManagerHandler(opts)
-      opts.claims!.arm({ parentSid: 'sid-parent', notifyId: VALID_NID, kind: 'claim', sessionId: 's1' })
-      opts.claims!.markInjected('sid-parent', VALID_NID)
-      opts.claims!.settle('s1', 'done')
+      const { opts, handler } = makeWatchFixture(VALID_NID, { parentAgentSessionId: 'another-agent' }, 'done')
 
       await handler.handle('req-watch', 'sid-parent', 'watch', { notifyId: VALID_NID })
       expect(respondAt(opts)).toEqual({ reason: 'cancelled', sessionId: 's1' })
     })
 
     it('已终结态 catch-up：aborted → cancelled / orphaned → orphaned（终态词形直达）', async () => {
-      const opts = makeMockOptions()
-      opts.sessionService.getSummary = vi.fn().mockReturnValue(makeSessionSummary({ id: 's1' }))
-      const handler = new SessionManagerHandler(opts)
-      opts.claims!.arm({ parentSid: 'sid-parent', notifyId: VALID_NID, kind: 'claim', sessionId: 's1' })
-      opts.claims!.markInjected('sid-parent', VALID_NID)
+      const { opts, handler } = makeWatchFixture(VALID_NID, {})
       opts.claims!.openWatch('sid-parent', VALID_NID, 'w-old')
       const abortBatch = opts.claims!.abortClaims('s1')
       deliverRespondTargets(opts.claims!, abortBatch.targets, handler.watchRespond)
@@ -1006,13 +999,19 @@ describe('SessionManagerHandler', () => {
     const VALID_NID = 'sm-12345678-1234-4234-8234-123456789012'
     const VALID_NID2 = 'sm-12345678-1234-4234-8234-123456789013'
 
+    /** create 双键用例共用腿：发起 create（携 prompt+notifyId 固定参数）→ 取回 respond 信封。 */
+    async function createAndRespond(opts: SessionManagerHandlerOptions, handler: SessionManagerHandler): Promise<Record<string, unknown>> {
+      await handler.handle('req-1', 'sid-parent', 'create', { cwd: '/t', prompt: 'init', notifyId: VALID_NID })
+      return respondAt(opts)
+    }
+
     it('send 带合法 notifyId → arm + willNotify:true + notifyId/parentSid 穿 envelope meta', async () => {
       const opts = makeMockOptions()
       const handler = new SessionManagerHandler(opts)
       await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 's1', prompt: 'hello', notifyId: VALID_NID })
 
       expect(opts.claims!.getClaim('sid-parent', VALID_NID)?.state).toBe('armed')
-      const respond = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2] as string)
+      const respond = respondAt(opts)
       expect(respond).toEqual({ queued: true, willNotify: true })
       const handle = (opts.delivery.getOrCreateDelivery as ReturnType<typeof vi.fn>).mock.results[0].value as {
         sendChecked: ReturnType<typeof vi.fn>
@@ -1028,7 +1027,7 @@ describe('SessionManagerHandler', () => {
       const handler = new SessionManagerHandler(opts)
       await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 's1', prompt: 'a', notifyId: VALID_NID })
       await handler.handle('req-2', 'sid-parent', 'send', { sessionId: 's1', prompt: 'b', notifyId: VALID_NID })
-      const second = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[1][2] as string)
+      const second = respondAt(opts, 1)
       expect(second.error).toMatch(/duplicate notifyId/)
     })
 
@@ -1048,7 +1047,7 @@ describe('SessionManagerHandler', () => {
       await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 's1', prompt: 'hello', notifyId: VALID_NID })
       expect(opts.claims!.getClaim('sid-parent', VALID_NID)).toBeUndefined()
       expect(opts.claims!.undeliveredCount('s1')).toBe(0)
-      const respond = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2] as string)
+      const respond = respondAt(opts)
       expect(respond.error).toBe('target session unreachable')
       expect(respond.willNotify).toBeUndefined() // error 结果不携 willNotify
     })
@@ -1060,9 +1059,7 @@ describe('SessionManagerHandler', () => {
         }),
       })
       const handler = new SessionManagerHandler(opts)
-      await handler.handle('req-1', 'sid-parent', 'create', { cwd: '/t', prompt: 'init', notifyId: VALID_NID })
-
-      const respond = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2] as string)
+      const respond = await createAndRespond(opts, handler)
       expect(respond.willNotify).toBe(true)
       const lifetime = respond.lifetimeNotifyId as string
       expect(lifetime).toMatch(/^sm-/)
@@ -1080,9 +1077,7 @@ describe('SessionManagerHandler', () => {
         delivery: makeMockDelivery({ sendDirect: vi.fn().mockRejectedValue(new Error('restore failed')) }),
       })
       const handler = new SessionManagerHandler(opts)
-      await handler.handle('req-1', 'sid-parent', 'create', { cwd: '/t', prompt: 'init', notifyId: VALID_NID })
-
-      const respond = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2] as string)
+      const respond = await createAndRespond(opts, handler)
       expect(respond.error).toBe('restore failed')
       expect(respond.sessionId).toBe('created-1')
       expect(respond.hint).toBe('use send_to_session to retry')
@@ -1130,11 +1125,8 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-status', 'sid-parent', 'status', { sessionId: 's1' })
       await handler.handle('req-list', 'sid-parent', 'list', {})
-      const mock = opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>
-      const status = JSON.parse(mock.mock.calls[0][2] as string)
-      const list = JSON.parse(mock.mock.calls[1][2] as string)
-      expect(status.undeliveredResults).toBe(1)
-      expect(list.undeliveredResults).toBe(1)
+      expect(respondAt(opts).undeliveredResults).toBe(1)
+      expect(respondAt(opts, 1).undeliveredResults).toBe(1)
     })
 
     it('claims 停用象限（未注入）：send 不 arm、willNotify:false、watch fail-closed、计数 0', async () => {
@@ -1143,10 +1135,9 @@ describe('SessionManagerHandler', () => {
       await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 's1', prompt: 'hi', notifyId: VALID_NID })
       await handler.handle('req-2', 'sid-parent', 'watch', { notifyId: VALID_NID })
       await handler.handle('req-3', 'sid-parent', 'status', { sessionId: 's1' })
-      const mock = opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>
-      expect(JSON.parse(mock.mock.calls[0][2] as string)).toEqual({ queued: true, willNotify: false })
-      expect(JSON.parse(mock.mock.calls[1][2] as string)).toEqual({ reason: 'cancelled' })
-      expect(JSON.parse(mock.mock.calls[2][2] as string).undeliveredResults).toBe(0)
+      expect(respondAt(opts)).toEqual({ queued: true, willNotify: false })
+      expect(respondAt(opts, 1)).toEqual({ reason: 'cancelled' })
+      expect(respondAt(opts, 2).undeliveredResults).toBe(0)
     })
   })
 

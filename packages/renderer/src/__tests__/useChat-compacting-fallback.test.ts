@@ -12,9 +12,9 @@
  *   busy 拒绝入队等 bash/turn 结束即投递，不再有「等不到触发源」滞留）
  * - 验收④ clientUuid 经 renderer chatApi 实现透传（options.clientUuid = 乐观气泡 id）
  *
- * mock 策略对齐 src/__tests__/useChat.test.ts：vi.hoisted 捕获 streamSubscribe handler，
- * 测试注入 ServerMessage。时序模拟 WS FIFO：rejected 广播先于 RPC reply（emit 在 send
- * await 收口前）。每用例唯一 sid + beforeEach 清队列分区与模块级状态（测试隔离）。
+ * mock 策略对齐 src/__tests__/useChat.test.ts：chatStreamApiSpy 单例捕获 streamSubscribe
+ * 回调，测试经 emitChatStreamMessage 注入 ServerMessage。时序模拟 WS FIFO：rejected 广播先于
+ * RPC reply（emit 在 send await 收口前）。每用例唯一 sid + beforeEach 清队列分区与模块级状态（测试隔离）。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/useChat-compacting-fallback.test.ts
  */
@@ -23,42 +23,13 @@ import { effectScope } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ServerMessage } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
-
-const apiMock = vi.hoisted(() => {
-  const holder: { handler: ((msg: ServerMessage) => void) | null } = { handler: null }
-  return {
-    holder,
-    streamSubscribe: vi.fn((_sid: string, handler: (msg: ServerMessage) => void) => {
-      holder.handler = handler
-      return () => {
-        holder.handler = null
-      }
-    }),
-    send: vi.fn((_sid: string, _text: string, _options?: { clientUuid?: string }) => Promise.resolve()),
-    getHistory: vi.fn(() => Promise.resolve([])),
-    abort: vi.fn(() => Promise.resolve()),
-    compact: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
-    followUp: vi.fn(() => Promise.resolve()),
-  }
-})
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
+import { apiProjectMock, chatApiStreamGroup, chatStreamApiSpy, emitChatStreamMessage, sessionSubscribeBaselineMock } from './helpers/api-facade-mock'
 
 vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: {
-    streamSubscribe: apiMock.streamSubscribe,
-    send: apiMock.send,
-    getHistory: apiMock.getHistory,
-    abort: apiMock.abort,
-    compact: apiMock.compact,
-    steer: apiMock.steer,
-    followUp: apiMock.followUp,
-  },
-  session: {
-    subscribe: vi.fn().mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 0 }),
-    unsubscribe: vi.fn().mockResolvedValue(undefined),
-    writeSegments: vi.fn().mockResolvedValue(undefined),
-  },
+  project: apiProjectMock(),
+  chat: chatApiStreamGroup(),
+  session: sessionSubscribeBaselineMock(),
 }))
 
 import { useChatStore } from '@/stores/chat'
@@ -69,16 +40,11 @@ beforeEach(() => {
   setActivePinia(createPinia())
   resetChatModuleState()
   vi.clearAllMocks()
-  apiMock.holder.handler = null
+  chatStreamApiSpy.holder.current = null
   // 预创建 compactQueue 单例（绑定测试 effect scope——App.vue setup 是生产作用域，
   // 测试内显式 scope 等价），并清空分区防跨用例泄漏
   effectScope(true).run(() => useCompactQueue())!._clearAllForTest()
 })
-
-/** 向被测 useChat 订阅的 handler 注入一条 ServerMessage */
-function emit(msg: ServerMessage): void {
-  if (apiMock.holder.handler) apiMock.holder.handler(msg)
-}
 
 describe('send.rejected compacting 兜底入队（renderer 集成）', () => {
   it('验收① compacting 拒绝 → 真实队列入队恰一次 + 乐观气泡/inflight 回滚', async () => {
@@ -88,7 +54,7 @@ describe('send.rejected compacting 兜底入队（renderer 集成）', () => {
 
     // WS FIFO 时序：send 同步段（乐观插入 + 记录 + 订阅）完成后、RPC reply 前注入 rejected
     const p = send('f1', textToSegments('压缩结束后再发'))
-    emit({
+    emitChatStreamMessage({
       type: 'send.rejected',
       payload: { sessionId: 'f1', reason: 'compacting', message: 'Agent 正在处理' },
     } as ServerMessage)
@@ -118,7 +84,7 @@ describe('send.rejected compacting 兜底入队（renderer 集成）', () => {
     const { send } = useChat()
 
     const p = send('f2', textToSegments('hi'))
-    emit({
+    emitChatStreamMessage({
       type: 'send.rejected',
       payload: { sessionId: 'f2', reason: 'busy', message: 'Agent 正在处理' },
     } as ServerMessage)
@@ -145,10 +111,10 @@ describe('send.rejected compacting 兜底入队（renderer 集成）', () => {
 
     await send('f3', textToSegments('hello'))
 
-    expect(apiMock.send).toHaveBeenCalledTimes(1)
+    expect(chatStreamApiSpy.send).toHaveBeenCalledTimes(1)
     // 域函数 4 参形态（sessionId, text, images, options）：images 位不传，options.clientUuid
     // 经 ChatApiPort 适配转发（薄包装 chatApiPort.send）
-    const [sid, text, images, options] = apiMock.send.mock.calls[0] as unknown as [
+    const [sid, text, images, options] = chatStreamApiSpy.send.mock.calls[0] as unknown as [
       string, string, Array<unknown> | undefined, { clientUuid?: string },
     ]
     expect(sid).toBe('f3')

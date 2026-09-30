@@ -35,6 +35,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { provideSettingsTransport, type SystemSettings } from '@taiji/core'
 import type { RenameMode } from '@taiji/shared'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { openRekaDropdown, pickRekaOptionFrom } from '../helpers/reka-select-harness'
 import SystemAutoRenameSection from '@/components/settings/system/SystemAutoRenameSection.vue'
 import SystemPage from '@/components/settings/system/SystemPage.vue'
 import SystemAppearanceSection from '@/components/settings/system/SystemAppearanceSection.vue'
@@ -151,25 +152,13 @@ afterEach(() => {
 })
 
 /** 挂载 SystemAutoRenameSection 并展开指定 Select 下拉，返回 option 元素清单
- *  （reka-ui SelectContent 仅 open 时挂载，teleport 到 body；happy-dom 需显式 dispatch）。 */
+ *  （reka-ui SelectContent 仅 open 时挂载，teleport 到 body；展开交互序列单源在
+ *  helpers/reka-select-harness 的 openRekaDropdown）。 */
 async function mountAndOpenOptions(testid: string): Promise<HTMLElement[]> {
   const w = mount(SystemAutoRenameSection)
   wrapper = w
   await flushPromises()
-  const trigger = w.find(`[data-testid="${testid}"]`).element as HTMLElement
-  trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-  trigger.click()
-  await flushPromises()
-  return Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'))
-}
-
-/** 在已展开的下拉选项中点选 label 匹配项（断言存在 → pointerup+click 选中 → flush）。 */
-async function pickOption(options: HTMLElement[], label: string): Promise<void> {
-  const target = options.find((el) => (el.textContent ?? '').includes(label))
-  expect(target).toBeTruthy()
-  target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-  target!.click()
-  await flushPromises()
+  return openRekaDropdown(w.find(`[data-testid="${testid}"]`).element)
 }
 
 describe('SystemAutoRenameSection 会话自动重命名开关', () => {
@@ -238,7 +227,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
     expect(labels).toContain('首轮回复完成')
     expect(labels).toContain('agent 自主命名')
 
-    await pickOption(options, 'agent 自主命名')
+    await pickRekaOptionFrom(options, 'agent 自主命名')
     expect(settingsMock.setRenameMode).toHaveBeenCalledWith('agent-tool')
     // 开关开（默认 true）→ 原「已生效」文案（toast 分流的正向对照）
     expect(toastMock.info).toHaveBeenCalledWith(expect.stringContaining('已生效'))
@@ -250,7 +239,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
     settingsMock.getRenameMode.mockResolvedValue({ mode: 'first-prompt' })
     settingsMock.setRenameMode.mockResolvedValue({ mode: 'first-stop' })
     const options = await mountAndOpenOptions('setting-rename-mode')
-    await pickOption(options, 'agent 自主命名')
+    await pickRekaOptionFrom(options, 'agent 自主命名')
 
     expect(settingsMock.setRenameMode).toHaveBeenCalledWith('agent-tool')
     const triggerAfter = wrapper!.find('[data-testid="setting-rename-mode"]')
@@ -277,7 +266,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
       },
     ]
     const options = await mountAndOpenOptions('setting-rename-model')
-    await pickOption(options, 'prov/req-model')
+    await pickRekaOptionFrom(options, 'prov/req-model')
 
     expect(settingsMock.setRenameModel).toHaveBeenCalledWith('prov/req-model')
     const triggerAfter = wrapper!.find('[data-testid="setting-rename-model"]')
@@ -298,7 +287,7 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
   it('开关关 + 切自动模式 → 成功 toast 提示需开启开关（不承诺已生效）', async () => {
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: false })
     const options = await mountAndOpenOptions('setting-rename-mode')
-    await pickOption(options, '首次请求时')
+    await pickRekaOptionFrom(options, '首次请求时')
 
     expect(settingsMock.setRenameMode).toHaveBeenCalledWith('first-prompt')
     // 自动路径被 enabled flag 拦截——toast 不承诺「已生效」，指向恢复动作

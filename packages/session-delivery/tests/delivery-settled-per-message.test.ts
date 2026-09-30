@@ -8,35 +8,30 @@
  * 合批形态对齐 scheduler 真实装配（§4 物理数据流）：不配 mergeWindowMs，合批来自
  * busy park 队列积累 + settled 边沿 flush 整队出队（queue.splice(0)）。
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
-import { makeMockPort, textMsg } from './helpers.js'
+import type { DeliveryMessage } from '../src/types.js'
+import { expectSettledMsg, makeBusyParkPort, makeMockPort, setupFakeTimersSilencedWarn, textMsg } from './helpers.js'
 
 describe('合批 per-message settled（P1）', () => {
-  let consoleWarnSpy: ReturnType<typeof vi.spyOn>
+  setupFakeTimersSilencedWarn()
 
-  beforeEach(() => {
-    vi.useFakeTimers()
-    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-    consoleWarnSpy.mockRestore()
-  })
+  /** 断言第 index 条 settled 回调：原始消息引用 + dedupeKey + 终态 outcome。 */
+  function expectSettledEntry(
+    onSettled: ReturnType<typeof vi.fn>,
+    index: number,
+    msg: DeliveryMessage,
+    outcome: 'delivered' | 'rejected',
+    dedupeKey: string,
+  ): void {
+    expectSettledMsg(onSettled, index, msg)
+    expect(onSettled.mock.calls[index]![0].dedupeKey).toBe(dedupeKey)
+    expect(onSettled.mock.calls[index]![1]).toBe(outcome)
+  }
 
   it('合批 2 条 → onSettled 恰 2 次，各自原始消息/dedupeKey + delivered（按入队序）', () => {
-    let idle = false
-    let settledCb: (() => void) | undefined
     const onSettled = vi.fn()
-    const port = makeMockPort({
-      isIdle: () => idle,
-      subscribeSettled: (cb) => {
-        settledCb = cb
-        return () => {
-          settledCb = undefined
-        }
-      },
-    })
+    const { port, setIdle, fireSettled } = makeBusyParkPort()
     const handle = createDelivery(port, { onSettled })
 
     const msgA = textMsg('check CI', { dedupeKey: 'task-a' })
@@ -46,8 +41,8 @@ describe('合批 per-message settled（P1）', () => {
     expect(port.sendCalls).toHaveLength(0)
     expect(onSettled).not.toHaveBeenCalled()
 
-    idle = true
-    settledCb!() // settled 边沿 → busy 复核通过 → flush 合批投出
+    setIdle(true)
+    fireSettled() // settled 边沿 → busy 复核通过 → flush 合批投出
 
     // 投递形态不变：仍是一次 port.send、composed content join
     expect(port.sendCalls).toHaveLength(1)
@@ -55,12 +50,8 @@ describe('合批 per-message settled（P1）', () => {
 
     // per-message 终态：每条各一次、msg 为原始消息引用（非 composed）
     expect(onSettled).toHaveBeenCalledTimes(2)
-    expect(onSettled.mock.calls[0]![0]).toBe(msgA)
-    expect(onSettled.mock.calls[0]![0].dedupeKey).toBe('task-a')
-    expect(onSettled.mock.calls[0]![1]).toBe('delivered')
-    expect(onSettled.mock.calls[1]![0]).toBe(msgB)
-    expect(onSettled.mock.calls[1]![0].dedupeKey).toBe('task-b')
-    expect(onSettled.mock.calls[1]![1]).toBe('delivered')
+    expectSettledEntry(onSettled, 0, msgA, 'delivered', 'task-a')
+    expectSettledEntry(onSettled, 1, msgB, 'delivered', 'task-b')
     expect(handle.depth()).toBe(0)
 
     handle.dispose()
@@ -93,12 +84,8 @@ describe('合批 per-message settled（P1）', () => {
 
     vi.advanceTimersByTime(1) // 重试再败 → attempts=2 > max=1 → 终态
     expect(onSettled).toHaveBeenCalledTimes(2)
-    expect(onSettled.mock.calls[0]![0]).toBe(msgA)
-    expect(onSettled.mock.calls[0]![0].dedupeKey).toBe('task-a')
-    expect(onSettled.mock.calls[0]![1]).toBe('rejected')
-    expect(onSettled.mock.calls[1]![0]).toBe(msgB)
-    expect(onSettled.mock.calls[1]![0].dedupeKey).toBe('task-b')
-    expect(onSettled.mock.calls[1]![1]).toBe('rejected')
+    expectSettledEntry(onSettled, 0, msgA, 'rejected', 'task-a')
+    expectSettledEntry(onSettled, 1, msgB, 'rejected', 'task-b')
     expect(handle.depth()).toBe(0)
 
     handle.dispose()

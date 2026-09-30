@@ -35,6 +35,8 @@ import { defineComponent, ref, h, nextTick } from 'vue'
 import type { Message, MessageTurn, SessionSummary, SessionGroup } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
 import { composerChatApiSpy } from '../helpers/composer-mount'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（被测组件链）求值
+import { apiProjectMock } from '../helpers/api-facade-mock'
 
 // ── mock 最底层 api domain（层 1 只 mock RPC 返回，不 mock 编排）──
 // 真实 useForkActions / useSidebar 内部 import { chat as chatApi, session as sessionApi } from '@/api'，
@@ -54,7 +56,7 @@ const { sessionApiMock, useChatAbortMock } = vi.hoisted(() => ({
   // 软停止上层联动断言锚点（useSidebarSessionActions.onAbortSession → useChat().abort）
   useChatAbortMock: vi.fn(() => Promise.resolve()),
 }))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
   session: sessionApiMock,
   chat: composerChatApiSpy,
   model: { switchModel: vi.fn() },
