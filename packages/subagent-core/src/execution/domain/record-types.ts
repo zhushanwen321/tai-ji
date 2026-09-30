@@ -60,10 +60,11 @@ export type RecordOrigin = "tool" | "workflow";
  *   user-close      — 用户手动 close action（含对话模式 close）
  *   cancelled       — 用户取消（close(force:true) / cancelBackground）
  *   gc              — 通用完成/失败（一次执行自然结束、超时、错误等无专属 reason 的终态）
- *   disconnected    — .finalized sidecar 存在但无 reason 内容（磁盘重建兜底）：
- *                     正常结束但死因不可考——旧格式 sidecar（v8.5 前写入的是空文件）、
- *                     或外部工具手工创建。替代旧的误导性 "gc" 兜底（自然完成 vs 断联
- *                     不分），message/fork-from 据此给出可行动指引。
+ *   disconnected    — 历史数据读面兜底（读 sidecar 空内容/损坏 → disconnected：正常结束
+ *                     但死因不可考）。现行事件流 fold 与 binding 快照读面都不产该值
+ *                     （「死因不可考」的现行兜底展示 = interrupted-by-restart）；值域
+ *                     成员保留供磁盘/内存历史数据（sidecar 时代写入）的读面判定与
+ *                     RECONNECTABLE 集合成员资格。
  */
 export type ClosedReason = 'parent-shutdown' | 'parent-fork' | 'parent-new' | 'user-close' | 'cancelled' | 'gc' | 'disconnected';
 
@@ -71,8 +72,9 @@ export type ClosedReason = 'parent-shutdown' | 'parent-fork' | 'parent-new' | 'u
  * [v8.5 D] 可透明重生的终态原因集：message action 对这些 closed 记录同 id 续写原
  * sessionFile（resurrectClosed 回边），不再要求 fork-from 换新 id。
  *
- * 取值以 `.finalized` sidecar 实际写入的 ClosedReason 字面量为准：
- *   disconnected    — 断联（sidecar 空/损坏兜底；in-proc 时代写点已随 engine-CLI 化消失）
+ * 取值以读面实际判定的 ClosedReason 字面量为准：
+ *   disconnected    — 断联（历史数据读面兜底：sidecar 时代空/损坏收条；现行读面不产出，
+ *                     集合成员资格为历史数据保留）
  *   parent-shutdown — 父进程 session_shutdown 回收
  * 其余 reason 刻意排除：user-close/cancelled 是用户主动告别（close 语义不可旁路）；
  * gc 是自然完成（追问走 fork-from 或新 start）；parent-fork/parent-new 同理是编排性
@@ -92,7 +94,7 @@ export class ResurrectDeniedError extends Error {}
 
 /**
  * ClosedReason 中 6 个可写终态原因（运行时守卫用——防御性解析外部输入时校验成员资格）。
- * disconnected 是读侧兜底产出、无写点（.finalized sidecar 空内容兜底），不在本清单；
+ * disconnected 是历史数据读面兜底、现行链路无写点（sidecar 读面已退场），不在本清单；
  * StopReason 全枚举 = 本清单 + disconnected + NEW_STOP_REASONS + ROUND_TERMINAL_STOP_REASONS。
  */
 export const CLOSED_REASONS: readonly ClosedReason[] = [

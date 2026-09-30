@@ -366,11 +366,11 @@ export function sameStamp(a: Stamp, b: Stamp): boolean {
   return a.mtimeMs === b.mtimeMs && a.size === b.size;
 }
 
-/** ClosedReason 合法值集合（sidecar 内容校验用：外部损坏/手写垃圾内容 → disconnected）。
+/** ClosedReason 合法值集合（binding 快照 closedReason 校验用：外部损坏/手写垃圾内容 → 视为缺失）。
  * SSOT = types.ts CLOSED_REASONS 可写终态原因清单，此处仅建 Set 索引（避免第二份字面量清单漂移）。 */
 const CLOSED_REASONS: ReadonlySet<string> = new Set(CLOSED_REASON_LIST);
 
-/** sidecar 内容是否为合法的 ClosedReason 字面量（disconnected 只作兜底产出，不接受写入）。 */
+/** 值是否为合法的 ClosedReason 字面量（disconnected 只作历史数据读面兜底，不接受写入）。 */
 export function isValidClosedReason(value: string | undefined): value is ClosedReason {
   return value !== undefined && CLOSED_REASONS.has(value);
 }
@@ -709,42 +709,21 @@ export function buildRecord(
     };
   }
 
-  // ── [U3 / §3.2.4] 重建单规则：重建一律得 idle，stopReason 取自 `.state`
-  //（无则 interrupted-by-restart）。崩溃恢复不再区分「终态不可逆 / 纳管可保留 /
-  //  直断 gc」——不存在不可逆终态；崩溃后 running 只在轮次在飞时有意义，必然空闲。
+  // ── [U3 / §3.2.4] 重建单规则：重建一律得 idle，stopReason 取自事件流收条
+  //（fold 折出的终局/轮终帧；无收条则 interrupted-by-restart）。崩溃恢复不再区分
+  //「终态不可逆 / 纳管可保留 / 直断 gc」——不存在不可逆终态；崩溃后 running 只在
+  // 轮次在飞时有意义，必然空闲。
   markReconstructedStatus(rec, "idle");
-  if (m.state !== undefined && m.state.status === "idle") {
-    // 新格式收条（markSettled 写面）：stopReason = 收口 reason（值域 StopReason；
-    // 非法/缺失 → interrupted-by-restart——「死因不可考 = 被打断」同族兜底）。
-    // closedReason 不写（桥接不变量新侧：settle 产出的 idle 无旧终态遗留位，
-    // live ≡ reload 与内存 markSettled 形态构造性一致）；endedAt 不投影（内存
-    // settle 非终态不写 endedAt——收条时间留给 binding 快照面，U7 统计口径消费）。
+  if (m.state !== undefined) {
+    // 收条（markSettled 写面经 stateMarkerFromFold 折出，恒 status=idle）：stopReason =
+    // 收口 reason（值域 StopReason；非法/缺失 → interrupted-by-restart——「死因不可考
+    // = 被打断」同族兜底）。closedReason 不写（settle 产出的 idle 无旧终态遗留位，
+    // live ≡ reload 与内存 markSettled 形态构造性一致）；endedAt 不投影（内存 settle
+    // 非终态不写 endedAt——收条时间留给 binding 快照面，U7 统计口径消费）。
+    // 旧 sidecar 收条的上行映射（cancelled/finalized → interrupted/disconnected）已随
+    // `.state` 读侧退场删除：m.state 唯一来源 = stateMarkerFromFold，不产旧格式 status。
     const reason = m.state.reason?.trim();
     rec.stopReason = isValidStopReason(reason) ? reason : "interrupted-by-restart";
-  } else if (m.state !== undefined && m.state.status === "cancelled") {
-    // 旧值上行映射（§3.2.4：cancelled → interrupted）：closedReason 保留
-    // "cancelled"（U2 桥接判据 idle ∧ closedReason 有值 → legacy closed/cancelled
-    // 投影，旧 session-reader 兼容面）；stopReason 切新词表。
-    rec.closedReason = "cancelled";
-    rec.stopReason = "interrupted";
-    rec.error = "cancelled by user";
-    // endedAt 用 sidecar 携带的精确值（原 tombstone.endedAt）；缺失（旧写侧恒携带，
-    // 兼容手写残留）回落全量末 entry ts / light mtime。
-    rec.endedAt = m.state.endedAt ?? m.fullEndedAt ?? m.jsonlMtimeMs;
-  } else if (m.state !== undefined) {
-    // 旧值上行映射（finalized → idle + stopReason=reason）：closedReason 优先用
-    // sidecar 内容携带的真实原因（[v8.5 A2] doFinalizeRecord Step3 写入）。空内容
-    // （旧格式空文件 / 未携 reason 的外部写入）→ disconnected 兜底：死因不可考，
-    // 但「正常结束过」信号仍在；非枚举值（外部损坏/手写垃圾内容）同 treated as
-    // unknown → disconnected。**旧版读新值的回滚降级链**（§3.2.4 双向兼容②）：
-    // 未知 status 在 readNewStateMarker 落 {status:"finalized"} 无 reason → 本分支
-    // disconnected ∈ 旧版可重连集，回滚方向良性。
-    const reason = m.state.reason?.trim();
-    rec.closedReason = isValidClosedReason(reason) ? (reason as ClosedReason) : "disconnected";
-    rec.stopReason = rec.closedReason;
-    // 全量路径用最后 entry ts（精确）；light 路径用 jsonl mtime 近似（finalize 后
-    // 文件不再变化，误差 <1s），避免重建后耗时随墙钟无限增长。
-    rec.endedAt = m.fullEndedAt ?? m.jsonlMtimeMs;
   } else {
     // 无 sidecar：在途中断（崩溃）或尚未收口（§3.2.4「文件不存在」行）——
     // interrupted-by-restart 展示值（G2：为什么停；U6 起参与 isOccupied 判定）。
