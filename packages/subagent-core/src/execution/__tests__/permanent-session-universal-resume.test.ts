@@ -1,7 +1,8 @@
 // src/execution/__tests__/permanent-session-universal-resume.test.ts
 //
 // [U4 / §3.2.3 准入判据切换] 万物可续集成矩阵（验收条款 4 对应）：
-//   ① closedReason（旧 7 值）× message → 全部放行或自动降级 reopen（形态枚举 gate 消亡）；
+//   ① 停因（旧 closedReason 7 值，均 ∈ StopReason）× message → 全部放行或自动降级
+//      reopen（形态枚举 gate 消亡）；
 //   ② 唯一拒绝 = 异进程活实例（ResurrectDeniedError 文案含 pid，统一占用句式）；
 //   ③ reopen 触发：锚失效 + message → markReopened（round 归零 + epoch+1 +
 //      stopReason=reopened + binding 落盘）+ resume:undefined + 摘要 prompt 注入；
@@ -10,8 +11,8 @@
 //      totalTokens/turns + 末轮 result；缺省 fail-soft）。
 //
 // mock 手法：registerFakePiEngine 协议替身 + 真实 store/state-marker/alive-store
-//（fixture 用临时目录写真实 .jsonl + .state + .record-binding，自建自删，不触碰
-// 真实数据目录——测试红线）。
+//（fixture 用临时目录写真实 .jsonl + 事件流终态帧（.events）+ .record-binding，
+// 自建自删，不触碰真实数据目录——测试红线）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -28,8 +29,9 @@ import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engi
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { findForeignLiveInstance } from "../persistence/alive-store.ts";
-import { writeFinalizedState, readRecordBinding } from "../persistence/state-marker.ts";
-import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { readRecordBinding } from "../persistence/state-marker.ts";
+import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { seedTerminalRecordForSessionFile } from "./helpers/seed-terminal-record.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { buildReopenSummaryPrompt } from "../assembly/conversation-continuation.ts";
@@ -110,6 +112,7 @@ function writeAliveMarker(sessionFile: string, pid: number, startedAt: number): 
 describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一拒绝 + reopen 降级 + 归属", () => {
   let agentDir: string;
   let sessionsDir: string;
+  let recordsDir: string;
   let service: SubagentService;
   let pi: PiMock;
   let fake: FakePiEnginePort;
@@ -118,6 +121,7 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "ps-universal-"));
     sessionsDir = getSubagentSessionDir(agentDir, agentDir);
+    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
 
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
@@ -157,9 +161,10 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
     "gc",
     "parent-fork",
     "parent-new",
-  ] as const)("closedReason=%s 的磁盘 record 收 message → 同 id 续聊（resume 触达原文件）", async (reason) => {
+  ] as const)("停因=%s（旧 closedReason 值）的磁盘 record 收 message → 同 id 续聊（resume 触达原文件）", async (reason) => {
     const file = writeSessionJsonl(sessionsDir, { id: `sa-u4-${reason}`, rootSessionId: "root-session-cur" });
-    writeFinalizedState(file, reason);
+    // 终态收条已换源到事件流（record-settled 帧）——`.state` sidecar 退场。
+    seedTerminalRecordForSessionFile(file, recordsDir, { stopReason: reason });
 
     const result = await messageHandler(service, { subagentId: `sa-u4-${reason}`, text: "follow up" });
     expect(result.response.delivered).toBe(true);
@@ -181,7 +186,7 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
 
   it("异进程活实例（.alive + 恒活外部 pid）→ ResurrectDeniedError 含 pid 的统一占用句式（唯一拒绝形态）", async () => {
     const file = writeSessionJsonl(sessionsDir, { id: "sa-u4-alive", rootSessionId: "root-session-cur" });
-    writeFinalizedState(file, "disconnected");
+    seedTerminalRecordForSessionFile(file, recordsDir, { stopReason: "disconnected" });
     writeAliveMarker(file, FOREIGN_LIVE_PID, Date.now());
     expect(findForeignLiveInstance(file)).toBeDefined(); // 探针前置自检
 
@@ -264,7 +269,7 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
   it("fork-from 对跨树源放行（锚可解析即分叉——fork-from 不做归属校验）", async () => {
     // 锚可解析：分叉新 id。[U4 守卫 4 删除] 主动告别（user-close）源放行。
     const file = writeSessionJsonl(sessionsDir, { id: "sa-u4-fk", rootSessionId: "old-root" });
-    writeFinalizedState(file, "user-close");
+    seedTerminalRecordForSessionFile(file, recordsDir, { stopReason: "user-close" });
     const r = await forkFromHandler(service, { sourceSubagentId: "sa-u4-fk", prompt: "branch off" });
     expect(r.response.newSubagentId).not.toBe("sa-u4-fk");
     expect(r.response.sourceSessionFile).toBe(file);
