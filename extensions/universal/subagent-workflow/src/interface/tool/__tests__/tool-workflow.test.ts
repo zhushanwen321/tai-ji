@@ -871,7 +871,7 @@ function rflParams(): object {
   const src = readFileSync(
     join(
       __dirname,
-      "../../../node_modules/@zhushanwen/subagent-core/workflows/review-fix-loop.js",
+      "../../../../node_modules/@zhushanwen/subagent-core/workflows/review-fix-loop.js",
     ),
     "utf-8",
   );

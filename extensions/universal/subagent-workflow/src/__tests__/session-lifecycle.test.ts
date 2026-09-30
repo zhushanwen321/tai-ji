@@ -96,7 +96,7 @@ vi.mock("../jsonl-run-store.ts", () => ({
 const { mockRegisterWorkflowTool } = vi.hoisted(() => ({
   mockRegisterWorkflowTool: vi.fn(),
 }));
-vi.mock("../interface/subagent-tool.ts", () => ({
+vi.mock("../interface/tool/subagent-tool.ts", () => ({
   registerSubagentTool: vi.fn(),
 }));
 vi.mock("../interface/command/subagents.ts", () => ({
@@ -105,15 +105,15 @@ vi.mock("../interface/command/subagents.ts", () => ({
 vi.mock("../interface/gui/bg-notify-render.ts", () => ({
   renderBgNotifyMessage: vi.fn(),
 }));
-vi.mock("../interface/tool-workflow.ts", () => ({
+vi.mock("../interface/tool/tool-workflow.ts", () => ({
   registerWorkflowTool: mockRegisterWorkflowTool,
 }));
 // subagents 批量 tool（u2）：与其余注册调用同一处理——本文件的 fake pi 无
 // registerTool（挂载用例只需 factory 跑到 session 生命周期装配）。
-vi.mock("../interface/tool-subagents.ts", () => ({
+vi.mock("../interface/tool/tool-subagents.ts", () => ({
   registerSubagentsTool: vi.fn(),
 }));
-vi.mock("../interface/tool-workflow-script.ts", () => ({
+vi.mock("../interface/tool/tool-workflow-script.ts", () => ({
   registerWorkflowScriptTool: vi.fn(),
 }));
 vi.mock("../interface/command/commands.ts", () => ({
@@ -140,7 +140,7 @@ import type { SessionLifecycleDeps } from "../session-lifecycle.ts";
 import { bindLedgerHostAndRecover, setupSessionLifecycle } from "../session-lifecycle.ts";
 import subagentsExtension from "../index.ts";
 // 组 6 域隔离条的调用断言面；vi.mock 已在文件顶部拦截同路径（同一 mock 实例）。
-import { registerSubagentTool } from "../interface/subagent-tool.ts";
+import { registerSubagentTool } from "../interface/tool/subagent-tool.ts";
 // 组 1「new 分支」/ 组 3 观察面：单例访问器 + 双 Service 假类（mock 实例，与被测
 // 装配消费同一模块图——模块图单实例后静态引用即被测引用）。
 import {

@@ -49,12 +49,12 @@ import { setupSubagentListInjector } from "./injectors/subagent-list-injector.ts
 import { setupWorkflowListInjector } from "./injectors/workflow-list-injector.ts";
 import { renderBgNotifyMessage } from "./interface/gui/bg-notify-render.ts";
 import { registerWorkflowsCommand } from "./interface/command/commands.ts";
-import { registerSubagentTool } from "./interface/subagent-tool.ts";
+import { registerSubagentTool } from "./interface/tool/subagent-tool.ts";
 // ═══ interface/ 层（tools/commands/tui 合并） ═══
 import { registerSubagentsCommand } from "./interface/command/subagents.ts";
-import { registerSubagentsTool } from "./interface/tool-subagents.ts";
-import { registerWorkflowTool } from "./interface/tool-workflow.ts";
-import { registerWorkflowScriptTool } from "./interface/tool-workflow-script.ts";
+import { registerSubagentsTool } from "./interface/tool/tool-subagents.ts";
+import { registerWorkflowTool } from "./interface/tool/tool-workflow.ts";
+import { registerWorkflowScriptTool } from "./interface/tool/tool-workflow-script.ts";
 // ═══ workflow 域事件族装配 seam（7 个 pi.on handler + makeDeps/lazyDeps；
 // 与 session-lifecycle.ts 同构，D2 原样搬移 + lazyDeps 样板收敛） ═══
 import { setupWorkflowDomain } from "./workflow-events.ts";

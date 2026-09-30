@@ -26,7 +26,7 @@ import type {
 } from "@zhushanwen/subagent-core";
 import { mapRunIcon, mapRunStatus } from "./gui-mappers.ts";
 import { ID_PREVIEW_LENGTH } from "../format/id-preview.ts";
-import { withGuiAttach } from "../tool-shared.ts";
+import { withGuiAttach } from "../tool/tool-shared.ts";
 
 // ============================================================
 // 渲染层常量 / 类型（pi TUI 渲染族，按设计留壳）

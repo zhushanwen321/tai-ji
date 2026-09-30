@@ -1,4 +1,4 @@
-// src/interface/tool-render.ts
+// src/interface/tool/tool-render.ts
 //
 // 对话流 tool block 渲染。renderCall（标题行）+ renderResult（背景色 block）。
 //
@@ -32,8 +32,8 @@ import {
   formatElapsedSeconds,
   statusGlyph,
   type ThemeLike,
-} from "./format/format.ts";
-import { truncLine } from "./tui/tui-kit.ts";
+} from "../format/format.ts";
+import { truncLine } from "../tui/tui-kit.ts";
 
 // ============================================================
 // 常量

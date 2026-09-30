@@ -23,8 +23,8 @@ import { describe, expect, it } from "vitest";
 import { mapRunIcon, mapRunStatus, toGuiCtx } from "../interface/gui/gui-mappers.ts";
 import { adapter, buildGuiComponent } from "../interface/gui/subagent-actions.ts";
 import type { AdapterInput } from "../interface/gui/subagent-actions.ts";
-import { buildScriptGui } from "../interface/tool-workflow-script.ts";
-import type { WorkflowScriptToolDetails } from "../interface/tool-workflow-script.ts";
+import { buildScriptGui } from "../interface/tool/tool-workflow-script.ts";
+import type { WorkflowScriptToolDetails } from "../interface/tool/tool-workflow-script.ts";
 
 // ============================================================
 // mapRunStatus / mapRunIcon —— 子代理执行状态（ExecutionStatus）→ 三态 + 图标

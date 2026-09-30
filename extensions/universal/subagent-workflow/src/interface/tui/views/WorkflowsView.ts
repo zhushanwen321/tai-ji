@@ -54,7 +54,7 @@ import {
 } from "../../format/format.ts";
 // [W2/V1 D1 分流表第 9 行] CLI 视图显示换源：投影二值 status（混合判源收拢在
 // displayStatusOf 单点——判源 = core runSummary 投影）。
-import { displayStatusOf } from "../../tool-workflow.ts";
+import { displayStatusOf } from "../../tool/tool-workflow.ts";
 import {
   b,
   dashes,

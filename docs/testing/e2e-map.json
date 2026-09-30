@@ -623,7 +623,7 @@
       "assets": [
         {
           "kind": "harness",
-          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/tool-subagents.ts"
         },
         {
           "kind": "script",
@@ -645,13 +645,13 @@
       "id": "E2E-BATCH-02",
       "summary": "S2 三审真实负载：真实 LLM 三路并行审查收齐（人工验收形态，R3 归档）",
       "scope": [
-        "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+        "extensions/universal/subagent-workflow/src/interface/tool/tool-subagents.ts"
       ],
       "layer": "L3",
       "assets": [
         {
           "kind": "harness",
-          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/tool-subagents.ts"
         }
       ],
       "trigger": "on-pi-bump",
@@ -704,7 +704,7 @@
       "assets": [
         {
           "kind": "harness",
-          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/tool-subagents.ts"
         },
         {
           "kind": "script",
@@ -779,7 +779,7 @@
       "id": "E2E-BATCH-05",
       "summary": "S5 collect 退役回归：存量调用无批副作用（pi 静默放行）+ 存量 batchFinalized entry 旧 session 可读",
       "scope": [
-        "extensions/universal/subagent-workflow/src/interface/subagent-tool-schema.ts",
+        "extensions/universal/subagent-workflow/src/interface/tool/subagent-tool-schema.ts",
         "packages/subagent-core/src/execution/persistence/**",
         "extensions/universal/session-reader/src/**"
       ],
@@ -787,7 +787,7 @@
       "assets": [
         {
           "kind": "harness",
-          "ref": "extensions/universal/subagent-workflow/src/interface/subagent-tool-schema.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/subagent-tool-schema.ts"
         },
         {
           "kind": "harness",
@@ -1436,7 +1436,7 @@
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/interface/__tests__/tool-workflow-resume.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/__tests__/tool-workflow-resume.test.ts"
         },
         {
           "kind": "spec",

@@ -21,21 +21,21 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// 共享桩（./mocks/runtime-stubs.ts 相对本文件 = ../../__tests__/mocks/runtime-stubs.ts）：
+// 共享桩（./mocks/runtime-stubs.ts 相对本文件 = ../../../__tests__/mocks/runtime-stubs.ts）：
 // vi.mock 工厂提升到文件顶部，体内不能引用普通顶层变量，一律经 async 工厂 +
 // 动态 import 取桩。
 vi.mock("@earendil-works/pi-ai", async () => {
-  const { piAiStringEnumStub } = await import("../../__tests__/mocks/runtime-stubs.ts");
+  const { piAiStringEnumStub } = await import("../../../__tests__/mocks/runtime-stubs.ts");
   return piAiStringEnumStub();
 });
 vi.mock("typebox", async () => {
-  const { typeboxStub } = await import("../../__tests__/mocks/runtime-stubs.ts");
+  const { typeboxStub } = await import("../../../__tests__/mocks/runtime-stubs.ts");
   return typeboxStub;
 });
 
 import { setSubagentService } from "@zhushanwen/subagent-core";
 
-import { registerSubagentTool } from "../../interface/subagent-tool.ts";
+import { registerSubagentTool } from "../subagent-tool.ts";
 import { mockExtensionApi } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/mock-extension-api.ts";
 import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 

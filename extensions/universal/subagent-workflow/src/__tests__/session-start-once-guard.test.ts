@@ -169,7 +169,7 @@ vi.mock("../jsonl-run-store.ts", () => ({
 }));
 
 // interface 层 mock：避免触发真实 pi.registerTool（pi 是 Proxy）。
-vi.mock("../interface/subagent-tool.ts", () => ({
+vi.mock("../interface/tool/subagent-tool.ts", () => ({
   registerSubagentTool: vi.fn(),
 }));
 vi.mock("../interface/command/subagents.ts", () => ({
@@ -178,10 +178,10 @@ vi.mock("../interface/command/subagents.ts", () => ({
 vi.mock("../interface/gui/bg-notify-render.ts", () => ({
   renderBgNotifyMessage: vi.fn(),
 }));
-vi.mock("../interface/tool-workflow.ts", () => ({
+vi.mock("../interface/tool/tool-workflow.ts", () => ({
   registerWorkflowTool: vi.fn(),
 }));
-vi.mock("../interface/tool-workflow-script.ts", () => ({
+vi.mock("../interface/tool/tool-workflow-script.ts", () => ({
   registerWorkflowScriptTool: vi.fn(),
 }));
 vi.mock("../interface/command/commands.ts", () => ({

@@ -57,7 +57,7 @@ vi.mock(
 );
 
 import { registerWorkflowsCommand } from "../interface/command/commands.ts";
-import { registerSubagentTool } from "../interface/subagent-tool.ts";
+import { registerSubagentTool } from "../interface/tool/subagent-tool.ts";
 import { registerSubagentsCommand } from "../interface/command/subagents.ts";
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
 import { mockExtensionApi } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/mock-extension-api.ts";

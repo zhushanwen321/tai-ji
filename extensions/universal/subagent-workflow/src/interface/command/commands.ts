@@ -31,7 +31,7 @@ import { createWorkflowsView, type ViewActions } from "../tui/views/WorkflowsVie
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { LIST_LIMIT } from "../tui/list-shared.ts";
 import { ID_PREVIEW_LENGTH } from "../format/id-preview.ts";
-import { displayStatusOf } from "../tool-workflow.ts";
+import { displayStatusOf } from "../tool/tool-workflow.ts";
 
 /** status 显示顺序：running 优先（活跃态在前），interrupted 次之（[D2] 暂停态
  *  ——无活体但可续跑，排活体后、终局前），再 startedAt 倒序。

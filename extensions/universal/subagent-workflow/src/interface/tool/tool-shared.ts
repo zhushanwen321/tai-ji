@@ -29,7 +29,7 @@ import type { GuiComponent, GuiContext, GuiRenderResult } from "@zhushanwen/exte
 import { guiResult, isGuiCapable } from "@zhushanwen/extension-protocol";
 import type { RunSpec, WorkflowScript } from "@zhushanwen/subagent-core";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
-import { renderTextFallback } from "./format/format.ts";
+import { renderTextFallback } from "../format/format.ts";
 
 /** renderResult 回调的宽入参形态（content 可缺省，由 renderTextFallback 兜底）。 */
 export interface RenderableToolResult {

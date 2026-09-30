@@ -1,4 +1,4 @@
-// src/interface/subagent-tool.ts
+// src/interface/tool/subagent-tool.ts
 //
 // `subagent` LLM 工具。薄壳——参数解析 + 调 runtime.execute。
 // 不创建 state、不节流 onUpdate、不持久化（全部在 runtime 层统一）。
@@ -27,9 +27,9 @@ import {
   messageHandler,
   startHandler,
 } from "@zhushanwen/subagent-core";
-import { extractAgentName } from "./format/format.ts";
-import { toGuiCtx } from "./gui/gui-mappers.ts";
-import { adapter } from "./gui/subagent-actions.ts";
+import { extractAgentName } from "../format/format.ts";
+import { toGuiCtx } from "../gui/gui-mappers.ts";
+import { adapter } from "../gui/subagent-actions.ts";
 import { SubagentParams } from "./subagent-tool-schema.ts";
 import { type RenderContext,renderSubagentCall, renderSubagentResult } from "./tool-render.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";

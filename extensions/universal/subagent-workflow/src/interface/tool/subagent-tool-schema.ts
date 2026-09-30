@@ -1,4 +1,4 @@
-// src/interface/subagent-tool-schema.ts
+// src/interface/tool/subagent-tool-schema.ts
 //
 // `subagent` 工具的参数 schema 纯常量叶子（零运行时依赖）。
 //

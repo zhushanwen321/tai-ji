@@ -2,7 +2,7 @@
  * Subagent Workflow Extension — subagents tool（批量派发入口，一跳扁平 schema）。
  *
  * ⚠️ 命名同名不同命名空间，互指防混淆：本文件是 **tool**（模型调用的批量派发面，
- * 名为 `subagents`），`interface/subagents.ts` 是 **slash 命令**壳（`/subagents`：
+ * 名为 `subagents`），`interface/command/subagents.ts` 是 **slash 命令**壳（`/subagents`：
  * TUI list overlay + GUI 定向消息通道）。两者无共享状态、无调用关系——改本文件
  * 不影响命令壳，反之亦然。
  *

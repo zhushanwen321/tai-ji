@@ -142,7 +142,7 @@ interface SharedConstantsModule {
 
 /** 动态 import 真 constants 模块（文本断言会漏「值被改」的漂移，故取真值）。 */
 async function loadSharedConstants(): Promise<SharedConstantsModule> {
-  const url = pathToFileURL(join(__dirname, "../../../../../../packages/shared/src/constants.ts")).href;
+  const url = pathToFileURL(join(__dirname, "../../../../../../../packages/shared/src/constants.ts")).href;
   const mod: Record<string, unknown> = await import(/* @vite-ignore */ url);
   const workflows = mod.WORKFLOW_TOOL_NAMES;
   const subagents = mod.SUBAGENT_TOOL_NAMES;
@@ -213,8 +213,8 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
     expect(TOOL_SRC).toContain("SLUG_MAX_LENGTH");
   });
 
-  it("文件头与 interface/subagents.ts（/subagents 命令壳）互指防混淆", () => {
-    expect(TOOL_SRC).toContain("interface/subagents.ts");
+  it("文件头与 interface/command/subagents.ts（/subagents 命令壳）互指防混淆", () => {
+    expect(TOOL_SRC).toContain("interface/command/subagents.ts");
     // 指认对面是 slash 命令（同名不同命名空间）
     expect(TOOL_SRC.toLowerCase()).toContain("slash");
   });

@@ -39,7 +39,7 @@ import {
   saveWorkflow,
 } from "@zhushanwen/subagent-core";
 import type { WorkflowScriptRegistry } from "@zhushanwen/subagent-core";
-import { toGuiCtx } from "./gui/gui-mappers.ts";
+import { toGuiCtx } from "../gui/gui-mappers.ts";
 import type { WorkflowToolResult } from "./tool-result.ts";
 import { assertNotAborted, renderTextResult, throwPrefixed, withGuiAttach } from "./tool-shared.ts";
 
