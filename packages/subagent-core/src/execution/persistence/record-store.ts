@@ -300,7 +300,7 @@ export class RecordStore {
    * pi appendEntry 通道工作（register/archive 的 face 缺省分支）。fold 缓存与写点
    * 幂等判定封装在 face 内部，容器只做薄转发。
    */
-  private readonly journalFace: RecordJournalWriteFace | undefined;
+  private readonly eventStreamFace: RecordJournalWriteFace | undefined;
 
   /**
    * [§3.1 markRoundIdle 簿记⑧] pending-notifications 轮终注销（发射点②）的注入面。
@@ -344,7 +344,7 @@ export class RecordStore {
     // [W1 / D3] 事件 journal 与 manifest 同目录接线（manifestDir = recordsDir，
     // subagent-service 构造点同语句保证不漂移）。缺省分支（纯内存测试形态）= 事件
     // 面空转，条目面独立工作（register/archive 的 face 缺省分支）。
-    this.journalFace =
+    this.eventStreamFace =
       manifestDir !== undefined
         ? new RecordJournalWriteFace(manifestDir, (customType, data) => {
           this.pi?.appendEntry?.(customType, data);
@@ -372,10 +372,10 @@ export class RecordStore {
       writeManifestPersisted: (id, m) => this.writeManifestPersisted(id, m),
       writeTerminalManifest: (r) => this.writeTerminalManifest(r),
       // [W1 / D3] 终局事件 + v2 终态条目（markSettled 写点；archive 真终局路径同款）。
-      settleViaJournal: (r, endedAt) => this.journalFace?.settleViaJournal(r, endedAt),
+      settleViaJournal: (r, endedAt) => this.eventStreamFace?.settleViaJournal(r, endedAt),
       // [W1 / D3] 事件追加注入位（markReopened 的 record-reopened 帧）。
       appendJournalEvent: (r, input) => {
-        this.journalFace?.appendJournal(r.id, input);
+        this.eventStreamFace?.appendJournal(r.id, input);
       },
       notifyChange: () => this.notifyChange(),
     };
@@ -392,7 +392,7 @@ export class RecordStore {
       // [W1 / D3] 事件追加注入位（markRoundStarted/markRoundIdle 的轮次粒度帧——
       // record 轮次事件进 journal 是 D5 增量裁决：不进则 .state 仍是事实源）。
       appendJournalEvent: (r, input) => {
-        this.journalFace?.appendJournal(r.id, input);
+        this.eventStreamFace?.appendJournal(r.id, input);
       },
       notifyChange: () => this.notifyChange(),
     };
@@ -419,11 +419,11 @@ export class RecordStore {
     // [W1 / D3 表行 1] record-created 帧（唯一事实写）+ v2 注册条目（身份与锚点）。
     // 幂等：事件文件已有创建帧（revive / 重启后重注册）时跳过两面；事件面未接线
     // （纯内存形态）时条目面独立工作（无幂等面——无 journal 证据源可判）。
-    if (this.journalFace !== undefined) {
+    if (this.eventStreamFace !== undefined) {
       // 首写判定先于 syncCreation（其内部幂等判定同源 = fold identity——语义
       // 单源，判定时机由本点承接以驱动维护轮触发）。
-      const isFirstEventWrite = this.journalFace.foldOf(record.id).identity === undefined;
-      this.journalFace.syncCreation(record);
+      const isFirstEventWrite = this.eventStreamFace.foldOf(record.id).identity === undefined;
+      this.eventStreamFace.syncCreation(record);
       if (isFirstEventWrite) this.triggerRecordRetentionRound();
     } else {
       this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toRegisteredEntryData(record));
@@ -461,7 +461,7 @@ export class RecordStore {
   archive(record: ExecutionRecord): void {
     this.records.delete(record.id);
     if (record.endedAt !== undefined) {
-      if (this.journalFace !== undefined) this.journalFace.settleViaJournal(record, record.endedAt);
+      if (this.eventStreamFace !== undefined) this.eventStreamFace.settleViaJournal(record, record.endedAt);
       else this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, toSettledEntryData(settledEntrySourceOf(record), record.endedAt));
     }
     this.notifyChange();
@@ -478,7 +478,7 @@ export class RecordStore {
    * 前）语义不变——不阻断主流程。
    */
   reportRecordTransition(record: ExecutionRecord): void {
-    this.journalFace?.syncBoundEvent(record);
+    this.eventStreamFace?.syncBoundEvent(record);
   }
 
   // ════════════════════════════════════════════════════════════
@@ -1157,9 +1157,9 @@ export class RecordStore {
       stopReason?: StopReason;
     },
   ): AdoptInterruptedRecordOutcome {
-    if (this.journalFace === undefined) return "skippedMissing";
+    if (this.eventStreamFace === undefined) return "skippedMissing";
     if (this.records.has(id)) return "skippedActive";
-    const state = this.journalFace.foldOf(id);
+    const state = this.eventStreamFace.foldOf(id);
     if (state.lastSeq === 0) return "skippedMissing";
     if (state.settled !== undefined) return "skippedTerminal";
     if (opts?.hasSettledEntry?.(id)) return "skippedTerminal";
@@ -1167,7 +1167,7 @@ export class RecordStore {
     if (identity === undefined) return "skippedNoIdentity"; // 坏链：created 帧损坏/缺失
     const now = opts?.now ?? Date.now();
     const stopReason = opts?.stopReason ?? "interrupted-by-restart";
-    this.journalFace.appendJournal(id, buildAdoptedSettledEvent(state, id, stopReason, now));
+    this.eventStreamFace.appendJournal(id, buildAdoptedSettledEvent(state, id, stopReason, now));
     // 载荷构造半边在终态原语轴（v2 条目与事件载荷构造规则）；判定半边（fold 缓存
     // 与活跃保护）留在容器。
     this.pi?.appendEntry?.(SUBAGENT_RECORD_CUSTOM_TYPE, buildAdoptedSettledEntry(state, id, stopReason, now));
@@ -1179,7 +1179,7 @@ export class RecordStore {
 
   /** v2 孤儿收编共用守卫（root 过滤 + 异宿主活体保护 + 定界判定）。 */
   private adoptV2Orphans(v2State: Map<string, V2EntryState>, rootSessionFilter: string | undefined): void {
-    if (this.journalFace === undefined) return; // 事件面未接线：收编不可用（与调用方守卫同判）
+    if (this.eventStreamFace === undefined) return; // 事件面未接线：收编不可用（与调用方守卫同判）
     for (const [id, st] of v2State) {
       // 定界 = registered ∧ 无「非 interrupted 终态」条目（interrupted 族条目不构成
       // 跳过证据——journal 帧缺失的不对称窗口残留，放行收编修复 journal，D4）。
@@ -1189,7 +1189,7 @@ export class RecordStore {
       // 活体保护：pi 锚在且异宿主在持（与 v1 段 findForeignLiveInstance 同判）——
       // zcode 锚（sessionFile 空串形态）零探查（cold-lookup 探针面只覆盖 sessionFile
       // 形态，对齐 markResurrected 的 zcode 分支语义）。
-      const bound = this.journalFace.foldOf(id).bound;
+      const bound = this.eventStreamFace.foldOf(id).bound;
       if (
         bound !== undefined &&
         bound.sessionFile !== "" &&
@@ -1225,7 +1225,7 @@ export class RecordStore {
     // [登记 §3.3] v1 快照纠偏循环已随兼容层删除（无 v1 数据、旧形态不进解析路径）——
     // 本方法只做「注册条目定界（registered ∧ ¬settled）→ 收编」：事件文件在场的实体
     // 归一入口。事件文件缺席的 entry-only 形态归 recoverEntryOnlyOrphans（另一入口）。
-    if (this.journalFace !== undefined && mainSessionFile !== undefined) {
+    if (this.eventStreamFace !== undefined && mainSessionFile !== undefined) {
       let content: string;
       try {
         content = fs.readFileSync(mainSessionFile, "utf-8");
@@ -1279,8 +1279,8 @@ export class RecordStore {
       if (anchoredIds.has(id)) continue; // 有子文件锚：磁盘/收编面已判（或 sidecar 已收口）
       if (this.records.has(id)) continue; // 内存活 record：在途 spawn，不得误杀
       if (this.orphanJudged.has(id)) continue; // 防重（同 init 内两个恢复入口共用）
-      if (this.journalFace !== undefined && this.journalFace.foldOf(id).lastSeq > 0) continue; // 事件文件在场：归收编入口
-      if (v2PairToRecord(id, pair, this.journalFace?.foldOf(id).bound) === null) {
+      if (this.eventStreamFace !== undefined && this.eventStreamFace.foldOf(id).lastSeq > 0) continue; // 事件文件在场：归收编入口
+      if (v2PairToRecord(id, pair, this.eventStreamFace?.foldOf(id).bound) === null) {
         // 损坏身份域：纠偏产物会是无身份的幻影终态条目。跳过但必须留痕——静默
         // continue 会把「身份域损坏」伪装成「无孤儿可判」，排障无从下手。
         this.orphanJudged.add(id); // 防重：不重复 warn / 不重复判
@@ -1316,7 +1316,7 @@ export class RecordStore {
     }
     const out: SubagentRecord[] = [];
     for (const [id, pair] of collectV2EntryPairs(content)) {
-      const bound = this.journalFace?.foldOf(id).bound;
+      const bound = this.eventStreamFace?.foldOf(id).bound;
       const rec = v2PairToRecord(id, pair, bound);
       if (rec !== null) out.push(rec);
     }
@@ -1362,7 +1362,7 @@ export class RecordStore {
     this.mainEntryCache = [];
     // [W1 / D3] 事件 fold 缓存随 session 结束释放（revive 后按需重装载——磁盘事件
     // 文件可能已被外部/清理通道改变）。
-    this.journalFace?.resetFoldCache();
+    this.eventStreamFace?.resetFoldCache();
   }
 
   /**
@@ -1386,7 +1386,7 @@ export class RecordStore {
     this.mainEntryStamp = null;
     this.mainEntryCache = [];
     // [W1 / D3] 事件 fold 缓存同款复位（/resume 后事件文件可能已被上代宿主续写）。
-    this.journalFace?.resetFoldCache();
+    this.eventStreamFace?.resetFoldCache();
   }
 
   // ── 内部 ──────────────────────────────────────────────────
