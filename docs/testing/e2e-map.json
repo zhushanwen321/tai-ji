@@ -1645,6 +1645,26 @@
       "owner": "packages/renderer",
       "authority": "docs/adr/decisions.md#ADR-0049",
       "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 任意 .ts/.tsx/.vue staged + 本脚本自身——与检查脚本全仓扫描面同构的结构无关 glob，快照清单横跨 core/dom-core/renderer/ui，目录清单式触发面必有洞；看护对象是全仓调用点而非本脚本；退出码契约 0=合规 / 3=census 与快照不符 / 1=脚本自身异常）；本表 run = 自含冒烟（与 pre-commit 同一命令，全仓扫描 ~0.2s）。同源约束 = docs/constraints.json C-state-01（enforcement 为 review 维度，本脚本是其入口静态锁机器载体）"
+    },
+    {
+      "id": "E2E-XPROCLIT-01",
+      "summary": "跨进程契约字面量多侧对账守卫（cross-process-literals）：'taiji.client-msg-id'（runtime entry-tree-builder / revoke-orchestrator × msg-id-mapper 扩展三侧）与 'taiji:revoked'（revoke-orchestrator × agent-ext × scheduler-manager 插件三侧）全部生产定义点同串 AST 机检——定义点分属互不可 import 的包，编译期拦截不可行",
+      "scope": [
+        "scripts/check-cross-process-literals.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-cross-process-literals.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-cross-process-literals.mjs",
+      "owner": "packages/runtime",
+      "authority": "scripts/check-cross-process-literals.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 登记定义文件 + 本脚本自身的 pathspec 清单，见 .githooks/install-hooks.sh 同名段，staged 删除含在触发面；看护对象是六侧登记定义文件而非本脚本；退出码契约 0=同串 / 1=漂移 / 2=守卫输入故障）；本表 run = 自含冒烟（与 pre-commit 同一命令，全量对账毫秒级）。新契约串在脚本 GROUPS 登记表登记并同步 hook 段 pathspec；无独立约束/ADR 登记，设计决策（含串断言 vs 定义点比等值）记录在脚本头注释块，故 authority 自指"
     }
   ]
 }
