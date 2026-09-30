@@ -1,5 +1,11 @@
 # @zhushanwen/pi-session-reader
 
+## 0.8.1
+
+### Patch Changes
+
+- 8aa4b40e8: chore: refresh dependency range (triggered by @zhushanwen/zcode-session-source@0.2.1 → @zhushanwen/zcode-session-source@0.2.2)
+
 ## 0.8.0
 
 ### Minor Changes

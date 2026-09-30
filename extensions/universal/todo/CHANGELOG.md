@@ -1,5 +1,11 @@
 # @zhushanwen/pi-todo
 
+## 0.9.9
+
+### Patch Changes
+
+- 8aa4b40e8: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.15.0 → @zhushanwen/extension-protocol@0.16.0)
+
 ## 0.9.8
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @zhushanwen/pi-base-tool-enhance
 
+## 0.7.1
+
+### Patch Changes
+
+- 8aa4b40e8: Source-only annotation pass: oe-exempt framework markers added to protocol contract type exports (ReconciledMarkerData / ModelCatalogEntry); no behavior change.
+
 ## 0.7.0
 
 ### Minor Changes
