@@ -340,7 +340,7 @@ export function adoptEngineDeathImpl(id: string, opts: { error: string }, ctx: R
 //   fold 语义单源复用，不重复实现）；
 // - append 走 u0 原语（createRecordEventJournal——seq 分配权与头行契约单点），
 //   fire-and-forget 但落盘同步完成（appendFileSync 在调用轮内执行）；缓存增量
-//   推进同步预推进 + then 校验（见 journalAppend）。
+//   推进同步预推进 + then 校验（见 appendEvent）。
 // - 写失败（fs 错）响亮 error 日志——事件文件是唯一事实源，静默丢失不可接受；
 //   主流程不中断（同步写点无重抛通道，缓存回滚 = 状态如实滞后，下次全量装载自愈）。
 
@@ -406,7 +406,7 @@ export class RecordJournalWriteFace {
    */
   syncCreation(record: ExecutionRecord): void {
     if (this.foldOf(record.id).identity !== undefined) return;
-    this.journalAppend(record.id, buildCreatedEventPayload(record));
+    this.appendEvent(record.id, buildCreatedEventPayload(record));
     this.appendEntry(SUBAGENT_RECORD_CUSTOM_TYPE, toRegisteredEntryData(record));
   }
 
@@ -424,7 +424,7 @@ export class RecordJournalWriteFace {
     if (isBoundSignatureUnchanged(this.foldOf(record.id).bound, sessionFile, engine, engineHandle)) {
       return; // 引擎域签名未变：零追加（事件面不随过程调用放大）
     }
-    this.journalAppend(record.id, buildBoundEventPayload(record));
+    this.appendEvent(record.id, buildBoundEventPayload(record));
     // bound manifest 物化（与轮终簿记⑫同款派生投影——manifest 是物化投影不是
     // 条目；守卫（pi 子文件存在性 / zcode 零探查）与写失败降级在被调函数内）。
     // 经构造参数注入调用（本文件不 import manifest 写函数，见构造函数注释）。
@@ -439,14 +439,14 @@ export class RecordJournalWriteFace {
    */
   settleViaJournal(record: ExecutionRecord, endedAt: number): void {
     if (this.foldOf(record.id).settled !== undefined) return;
-    this.journalAppend(record.id, buildSettledEventPayload(record, endedAt));
+    this.appendEvent(record.id, buildSettledEventPayload(record, endedAt));
     this.appendEntry(SUBAGENT_RECORD_CUSTOM_TYPE, toSettledEntryData(settledEntrySourceOf(record), endedAt));
   }
 
   /** 通用事件追加注入位（round-started / round-idle / reopened / 收编 settled——
    *  轴文件 ctx 注入与容器收编入口共用；幂等判定由调用方先行）。 */
   appendJournal(id: string, input: RecordJournalEventInput): void {
-    this.journalAppend(id, input);
+    this.appendEvent(id, input);
   }
 
   /**
@@ -460,7 +460,7 @@ export class RecordJournalWriteFace {
    * - fs 错误响亮 error（唯一事实源写失败不可静默），缓存回滚（预推进撤销——
    *   落盘未发生，缓存不得持有幽灵事件）。
    */
-  private journalAppend(id: string, input: RecordJournalEventInput): Promise<void> {
+  private appendEvent(id: string, input: RecordJournalEventInput): Promise<void> {
     const cur = this.foldOf(id);
     const predicted = { ...input, seq: cur.lastSeq + 1 } as RecordJournalEvent;
     this.foldCache.set(id, applyRecordEvent(cur, predicted));

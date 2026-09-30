@@ -731,7 +731,7 @@ const INTERRUPTED_FAMILY_STOP_REASONS: readonly string[] = [
 /**
  * D4 双面证据第二条的判别（「终态条目已存在且非 interrupted」）：settled 条目
  * 在场且停因非 interrupted 族才构成跳过证据——interrupted 族条目是「条目面先行
- * 写、journal 帧缺失」的不对称窗口残留（journalAppend fire-and-forget 失败 /
+ * 写、journal 帧缺失」的不对称窗口残留（appendEvent fire-and-forget 失败 /
  * 局部损坏），不构成跳过证据，收编须放行以追加 settled 帧修复 journal；停因
  * 缺失（契约外残缺形态）保守计为真终态（宁保留不重复）。
  */

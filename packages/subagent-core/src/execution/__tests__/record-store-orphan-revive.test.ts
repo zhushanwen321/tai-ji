@@ -386,7 +386,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
   }
 
   // [W1 / D4 双面证据第二面判别] interrupted 族条目 = 「条目面先行写、journal 帧
-  // 缺失」不对称窗口残留（journalAppend fire-and-forget 失败），不构成跳过证据：
+  // 缺失」不对称窗口残留（appendEvent fire-and-forget 失败），不构成跳过证据：
   // 收编放行 → 追加 settled 帧修复 journal（journal 唯一事实源承诺的自愈通道），
   // 二次重启由 fold settled 拦截不重复。
   it("夹具A journal 缺 settled 帧 + interrupted 终态条目 → 收编追加帧修复 journal，二次触发不重复", () => {
