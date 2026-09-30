@@ -164,6 +164,8 @@ export {
 // session-view 归一符号（post-convergence D3）：runtime 读取侧 2 处深路径
 // （subagent-extractor / subagent-engine-history）归一 barrel 的前置——不新增
 // 子入口（D9：每条子入口 bundle 多一份 host-services 副本）。
+// 模型引用串解析单点（runtime / 壳侧消费）：字符串只在入口解析一次，内部传结构体。
+export { isModelRef, parseModelSelector, type ParsedModelSelector } from "./shared/model-ref.ts";
 export { parseEngineHandle } from "./execution/engine/common/session-view-types.ts";
 export { readSubagentHistoryMessages } from "./execution/engine/common/session-view-service.ts";
 // 引擎路由身份域裁决单点（runtime 读链同源消费——本地副本会让「有锚无 engine」的

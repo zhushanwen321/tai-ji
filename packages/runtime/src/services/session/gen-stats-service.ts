@@ -36,6 +36,7 @@
  */
 
 import type { GenStatsCacheMiss, GenStatsCacheRatio, GenStatsFrame, GenStatsSpeed, GenStatsTtft, ServerMessage } from '@taiji/shared'
+import { parseModelSelector } from '@zhushanwen/subagent-core'
 import { logger } from '../../infra/logger.js'
 import type { ISessionService } from '../../interfaces.js'
 import { getOrCreate } from '../../utils/collections.js'
@@ -143,9 +144,9 @@ function rollingWindowCutoff(now: Date, days: number): string {
  * 两侧生产方拼接规则一致 → 复合 key 可逆）。无 '/'（理论不可达，防御）→ 整体作 model。
  */
 function splitModelKey(modelKey: string): { provider: string; model: string } {
-  const idx = modelKey.indexOf('/')
-  if (idx < 0) return { provider: '', model: modelKey }
-  return { provider: modelKey.slice(0, idx), model: modelKey.slice(idx + 1) }
+  // 切分规则单点 = core 的 parseModelSelector（首 '/' 切分；model 侧可含 '/'）。
+  const { provider, id } = parseModelSelector(modelKey)
+  return { provider, model: id }
 }
 
 /**

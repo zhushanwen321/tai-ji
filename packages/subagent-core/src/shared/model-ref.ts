@@ -131,6 +131,15 @@ export function parseModelSelector(input: string): ParsedModelSelector {
   };
 }
 
+/**
+ * `provider/id` 形态判据（与解析同源；provider 与 id 都必须非空）。
+ * 供「先校验格式、再落盘/回显」的调用方使用，替代各自手写的正则或切分。
+ */
+export function isModelRef(input: string): boolean {
+  const { provider, id } = parseModelSelector(input);
+  return provider.length > 0 && id.length > 0;
+}
+
 // ============================================================
 // 规则④：孪生守卫（两条路径共用）
 // ============================================================

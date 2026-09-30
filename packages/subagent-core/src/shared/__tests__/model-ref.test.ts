@@ -14,6 +14,7 @@ import {
   assertThinkingLevel,
   modelRefFromVerified,
   parseModelSelector,
+  isModelRef,
   THINKING_ORDER,
 } from "../model-ref.ts";
 
@@ -317,6 +318,22 @@ describe("parseModelSelector（语法单点，档位随串返回）", () => {
     expect(parseModelSelector("/m")).toMatchObject({ provider: "", id: "" });
     // "p/" 切成 {provider:"p", id:""}——放行判据要求两侧都非空，故仍按未命中处理
     expect(parseModelSelector("p/")).toMatchObject({ provider: "p", id: "" });
+  });
+});
+
+describe("isModelRef（provider/id 形态判据）", () => {
+  it("两侧都非空即成立（含 id 带 / 与带档位后缀）", () => {
+    expect(isModelRef("p/m")).toBe(true);
+    expect(isModelRef("a/b/c")).toBe(true);
+    expect(isModelRef("p/m:high")).toBe(true);
+    expect(isModelRef("p/m:foo")).toBe(true);
+  });
+
+  it("缺 / 或任一侧为空即不成立", () => {
+    expect(isModelRef("m")).toBe(false);
+    expect(isModelRef("/m")).toBe(false);
+    expect(isModelRef("p/")).toBe(false);
+    expect(isModelRef("")).toBe(false);
   });
 });
 
