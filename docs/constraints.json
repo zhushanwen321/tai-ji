@@ -392,9 +392,11 @@
     },
     {
       "id": "C-data-08",
-      "summary": "队列按字段分权威：深度 = pi 计数快照；内容 = renderer 提交日志；taiji 扩展禁 sendUserMessage 注入队列；消费按计数 FIFO 禁文本匹配",
+      "summary": "队列区单一数据源：队列状态帧 = `session.delivery`（内核条目投影视图：活跃态全量 + delivered 最近 50 条完整条目 + lane，cancelled 不投影；renderer 队列区唯一取数口）；`queue_update` 帧降级为内核内部回执（不直驱 UI）；队列内容权威 = runtime 投递所有权内核（全部发送方只提交，车道判定不在消费侧）；taiji 扩展禁 sendUserMessage 直接注入 pi 队列，pi 槽位滞留的外来文本由对账器收养；送达确认与判重按裸标记 id 精确匹配（禁计数 FIFO、禁文本匹配）",
       "scope": [
         "packages/renderer/src/**",
+        "packages/core/src/**",
+        "packages/runtime/src/**",
         "extensions/**"
       ],
       "authority": [
@@ -2188,7 +2190,7 @@
     },
     {
       "id": "C-data-20",
-      "summary": "record 持久化写面唯一入口：subagent record 状态（.state 上一轮收条 / .alive 写权声明 / manifest 投影 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写面全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收尾：.state 新格式收条 status=idle + stopReason/endedAt，binding 统计快照锚分派 pi sessionFile 路径 / zcode 锚键路径）/ markReopened（锚失效同 id 带历史重开）/ markSettledOut（close 终态写点：worktreeHandle 清句 + .alive release + manifest 投影，幂等恒 true）/ markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。检查两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/终态持久化写入点全同步（.state writeSync 先 + manifest writeSync 后，D8 v7 写序在两态下不变），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）。【W1 介质归位写面刷新（ADR-0078，2026-09-26）】record 运行态的事实写 = 事件文件追加（RecordJournalWriteFace，record-store-rounds.ts——record-created/bound/round-started/round-idle/settled/reopened 六类事件 + 单调 seq，唯一写者 record-events.ts）；主 session 条目面 = 每实体注册 + 终态两条 v2 小条目（register/archive/收编入口内置——register 与 archive 真终局写，reportRecordTransition 的 v1 全量快照写点退役，改落 record-bound 帧 + bound manifest 物化）；v1 快照唯一残余写点 = reportSubagentRecord（v1 实体孤儿纠偏兼容层，W4 sunset 退役）；state/manifest/.record-binding 均为 fold 物化投影（.alive 操作租约不计事实源）。检查两级不变，grep 门断言面扩为 R1-R7（R2 加宽常量形态 + 白名单扩 rounds face；R3 workflow-record 三写点宿主白名单（worker-message-pump / lifecycle / 壳 jsonl-run-store）；R4 v1 快照投影构造器白名单（record-entry 定义 + store 兼容层）；R5 workflow-record v1 快照载荷形态全域拒绝；R6 eventLog/displayItems 死字节载荷全域拒绝；R7 .events 直写白名单（record-events / run-events））",
+      "summary": "record 持久化写面唯一入口：subagent record 状态（.state 上一轮收条 / .alive 写权声明 / manifest 投影 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写面全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收尾：.state 新格式收条 status=idle + stopReason/endedAt，binding 统计快照锚分派 pi sessionFile 路径 / zcode 锚键路径）/ markReopened（锚失效同 id 带历史重开）/ markSettledOut（close 终态写点：worktreeHandle 清句 + .alive release + manifest 投影，幂等恒 true）/ markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。检查两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/终态持久化写入点全同步（.state writeSync 先 + manifest writeSync 后，D8 v7 写序在两态下不变），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）。【W1 介质归位写面刷新（ADR-0094，2026-09-26）】record 运行态的事实写 = 事件文件追加（RecordJournalWriteFace，record-store-rounds.ts——record-created/bound/round-started/round-idle/settled/reopened 六类事件 + 单调 seq，唯一写者 record-events.ts）；主 session 条目面 = 每实体注册 + 终态两条 v2 小条目（register/archive/收编入口内置——register 与 archive 真终局写，reportRecordTransition 的 v1 全量快照写点退役，改落 record-bound 帧 + bound manifest 物化）；v1 快照唯一残余写点 = reportSubagentRecord（v1 实体孤儿纠偏兼容层，W4 sunset 退役）；state/manifest/.record-binding 均为 fold 物化投影（.alive 操作租约不计事实源）。检查两级不变，grep 门断言面扩为 R1-R7（R2 加宽常量形态 + 白名单扩 rounds face；R3 workflow-record 三写点宿主白名单（worker-message-pump / lifecycle / 壳 jsonl-run-store）；R4 v1 快照投影构造器白名单（record-entry 定义 + store 兼容层）；R5 workflow-record v1 快照载荷形态全域拒绝；R6 eventLog/displayItems 死字节载荷全域拒绝；R7 .events 直写白名单（record-events / run-events））",
       "scope": [
         "packages/subagent-core/src/**",
         "extensions/**"
@@ -2819,6 +2821,35 @@
       ]
     },
     {
+      "id": "C-data-25",
+      "summary": "投递所有权单一所有者：全部发送方（composer / session_manager send / completion-backflow / plugin / landing 首发）一律经 runtime 投递所有权内核（`packages/session-delivery` 状态机 + `session-delivery-registry.ts` 适配层）提交；lane（direct/steer/queued）判定单一源 = runtime 权威 occupancy 投影（C-data-19）+ 内核队列态，renderer 与 extension 禁做投递车道判定（`resolveSendRoute` 仅为发送位 UI 预测）；条目终态以送达回执（`message_end(user)` 标记命中）为准——受理（prompt 受理 / 文本入 pi 槽位）≠ 送达，只拿受理的条目由对账器兜底；内核条目判重按裸标记 id 精确匹配、跨 runtime 重启回落 transcript 标记扫描",
+      "scope": [
+        "packages/session-delivery/src/**",
+        "packages/runtime/src/**",
+        "packages/core/src/**",
+        "packages/renderer/src/**",
+        "extensions/**"
+      ],
+      "authority": [
+        "adr/decisions.md#ADR-0074",
+        "architecture/pi-boundary-reliability.md"
+      ],
+      "dimensions": [
+        "arch-boundary",
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        },
+        {
+          "type": "review",
+          "agent": "review-data-governance"
+        }
+      ]
+    },
+{
       "id": "C-proc-21",
       "summary": "错误处理策略裁决契约：错误路径按业务角色选策略——核心功能 fail-fast（禁吞错/禁静默降级出错误数据，错误日志含恢复动作）；辅助功能在主流程接入点降级（辅助故障不拖垮核心，降级 ≠ 吞错必须 warn 留痕）；用户可见的辅助能力失败必须有可见失败反馈（合理结果 + 失败原因，禁静默空值）。分通道纪律：读失败（非 ENOENT IO 故障）不得与合法缺省同判；静默丢弃必须注释登记为设计裁决 + 测试锁定（登记即可，不强制加日志）。两种伪防御按反缺陷对待：合法产出当错误拦、吞掉损坏状态的错误续跑",
       "scope": [
@@ -3019,14 +3050,14 @@
     },
     {
       "id": "C-ext-26",
-      "summary": "注册操作终局通知必达：workflow run 成功/失败/取消一律出终局通知（C-ext-19 确认式送达在 workflow 域的细化，D7）；终局投影由 run 显式状态机统一裁决（ADR-0074）——persistTerminalProjection 单写点、errorCode/stderrTeePath 从事件流读回，禁止旁路补发第二通知面",
+      "summary": "注册操作终局通知必达：workflow run 成功/失败/取消一律出终局通知（C-ext-19 确认式送达在 workflow 域的细化，D7）；终局投影由 run 显式状态机统一裁决（ADR-0091）——persistTerminalProjection 单写点、errorCode/stderrTeePath 从事件流读回，禁止旁路补发第二通知面",
       "scope": [
         "extensions/universal/subagent-workflow/**",
         "packages/subagent-core/src/orchestration/**"
       ],
       "authority": [
         "adr/decisions.md#adr-0075-workflow-域四支柱平移与-schema-通道终态2026-09-21",
-        "adr/decisions.md#adr-0074-workflow-run-显式状态机转移表裁决--事件流权威投影2026-09-21"
+        "adr/decisions.md#adr-0091-workflow-run-显式状态机转移表裁决--事件流权威投影2026-09-21"
       ],
       "dimensions": [
         "extension-api",
@@ -3080,15 +3111,37 @@
       ]
     },
     {
+      "id": "C-proc-28",
+      "summary": "session 文件读者普查闭合（message-revoke G2）：全部读取 pi session .jsonl 内容（extension 侧 ctx.sessionManager.getEntries() / runtime 侧 jsonl 解析原语与提取扫描函数族）的读者必须登记于 docs/architecture/session-readers-census.md 并按二分准则归类——未来状态随树（可由活跃路径确定性重建的当前状态，撤回后按活跃路径重算）/ 已发生事实照实（重建即伪造事实：run 执行、token 消耗、通知账本、名字结局）；新增派生读者时同 commit 在该清单登记归类（含归类理由与接入单元指针），未归类的新读者不得合入。可执行检查 = 重跑普查清单 §2 机器锚点命令族（E1 getEntries / E2 session-core 直读 / R1 utils-jsonl 消费 / R2 提取扫描函数族 / R3 createReadStream 流扫），任一锚点出现清单未登记的新命中即先补登记再合入",
+      "scope": [
+        "extensions/**",
+        "packages/runtime/src/**",
+        "docs/architecture/session-readers-census.md"
+      ],
+      "authority": [
+        "architecture/session-readers-census.md"
+      ],
+      "dimensions": [
+        "data-governance"
+      ],
+      "enforcement": [
+        {
+          "type": "review",
+          "agent": "review-data-governance"
+        }
+      ]
+    }
+,
+    {
       "id": "C-proc-30",
-      "summary": "集成线传播检查（2026-09-24 dev-0.10.6 打包事故检查化）：打包（prerelease）/ 集成合并（dev-merge）前必须运行 scripts/check-line-propagation.mjs 且 --target 解析为打包/集成线——常态 = 目标线 worktree 内 --target HEAD；目标 worktree 不存在的挂接分支可在源 worktree 内以分支名变量跑（见 dev-merge skill 1.8 步）；禁把 --target 写死为 'main' 等恒绿字面量——'main' 在任何 worktree 跑都恒绿，接线即空转；硬检查 = 目标线 ⊇ main（git merge-base --is-ancestor main <target>），红灯 block（exit 1 + 缺失提交清单 + 恢复指引 merge main），仅可经 --allow-diverged 一次性越过（不做持久豁免登记）；软提示 = 兄弟 dev-* 线触及目标线共享文件的未传播 commit 清单（commit 总量 + 最老停留天数头条 + 明细），无状态恒常呈报（无本地基线文件）、不阻塞 exit code，裁决粒度 = 线粒度（吸收/暂缓），执行 agent 须将头条摘要呈报用户后才继续；机器只保证 target ⊇ main，「修复滞留兄弟线未进 main」与正常 WIP 在 git 形态上无差别——该残余类主防线 = ADR-0076 纪律① fix 优先回流 main。（2026-09-25 scope 失效处置：.agents 已脱离 git 跟踪（ADR-0086），scope 内两条 .agents/skills 路径自该日期起在 git diff 中恒不出现，select-constraints 按 diff 匹配不再命中本约束——约束本体仍有效（机器 enforcement 走 prerelease/dev-merge skill 步骤驱动），改 skill 实体文件时按 ADR-0086 自查，不依赖 diff 匹配）",
+      "summary": "集成线传播检查（2026-09-24 dev-0.10.6 打包事故检查化）：打包（prerelease）/ 集成合并（dev-merge）前必须运行 scripts/check-line-propagation.mjs 且 --target 解析为打包/集成线——常态 = 目标线 worktree 内 --target HEAD；目标 worktree 不存在的挂接分支可在源 worktree 内以分支名变量跑（见 dev-merge skill 1.8 步）；禁把 --target 写死为 'main' 等恒绿字面量——'main' 在任何 worktree 跑都恒绿，接线即空转；硬检查 = 目标线 ⊇ main（git merge-base --is-ancestor main <target>），红灯 block（exit 1 + 缺失提交清单 + 恢复指引 merge main），仅可经 --allow-diverged 一次性越过（不做持久豁免登记）；软提示 = 兄弟 dev-* 线触及目标线共享文件的未传播 commit 清单（commit 总量 + 最老停留天数头条 + 明细），无状态恒常呈报（无本地基线文件）、不阻塞 exit code，裁决粒度 = 线粒度（吸收/暂缓），执行 agent 须将头条摘要呈报用户后才继续；机器只保证 target ⊇ main，「修复滞留兄弟线未进 main」与正常 WIP 在 git 形态上无差别——该残余类主防线 = ADR-0092 纪律① fix 优先回流 main。（2026-09-25 scope 失效处置：.agents 已脱离 git 跟踪（ADR-0086），scope 内两条 .agents/skills 路径自该日期起在 git diff 中恒不出现，select-constraints 按 diff 匹配不再命中本约束——约束本体仍有效（机器 enforcement 走 prerelease/dev-merge skill 步骤驱动），改 skill 实体文件时按 ADR-0086 自查，不依赖 diff 匹配）",
       "scope": [
         "scripts/check-line-propagation.mjs",
         ".agents/skills/prerelease/SKILL.md",
         ".agents/skills/dev-merge/SKILL.md"
       ],
       "authority": [
-        "adr/decisions.md#ADR-0076",
+        "adr/decisions.md#ADR-0092",
         "../scripts/check-line-propagation.mjs"
       ],
       "dimensions": [],
@@ -3164,7 +3217,7 @@
       ]
     },
     {
-      "id": "C-data-25",
+      "id": "C-data-26",
       "summary": "文件持久化与内存 Store 同步三规则（同数据双介质必守）：①启动时加载（初始化从文件加载进 store）；②写后刷新（修改文件后立即更新 store，不留过期读窗）；③防竞争（异步写操作队列串行化，防并发写入丢失）",
       "scope": [
         "packages/runtime/src/**",
@@ -3295,8 +3348,8 @@
       ]
     },
     {
-      "id": "C-data-26",
-      "summary": "subagent-core 包内依赖图禁止值依赖环：静态 import/export-from、动态 import()、require() 构成的值边不得成环（含自环）；`import type` / 全 `type` 修饰具名导入 / `export type from` 属编译期擦除边，不参与判定（仅打印提示）。判据机器化于 scripts/check-subagent-core-value-cycles.mjs——execution（记录/执行域）与 orchestration（编排域）互指会在此红；修复方向 = 具体值依赖经端口反转 + 装配期注入，或把跨域共享词汇下沉契约层（§2.3 仲裁见 docs/todo/subagent-workflow-issues.md）。",
+      "id": "C-data-27",
+      "summary": "subagent-core 包内依赖图禁止值依赖环：静态 import/export-from、动态 import()、require() 构成的值边不得成环（含自环）；`import type` / 全 `type` 修饰具名导入 / `export type from` 属编译期擦除边，不参与判定（仅打印提示）。判据机器化于 scripts/check-subagent-core-value-cycles.mjs——execution（记录/执行域）与 orchestration（编排域）互指会在此红；修复方向 = 具体值依赖经端口反转 + 装配期注入，或把跨域共享词汇下沉契约层（决策记录见 docs/adr/decisions.md）。",
       "scope": [
         "packages/subagent-core/src/**"
       ],

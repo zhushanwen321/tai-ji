@@ -1,11 +1,14 @@
 /**
  * envelope additive meta 透传（notify-once 设计 D2：notifyId 穿 envelope）。
  *
- * 锁死契约：
- * - sendChecked 单条带 meta.notifyId → onSettled(delivered) 收到**同一消息对象引用**，
- *   meta 原样完好（runtime 债权桥接据此锚定 armed→injected 受理回执）。
- * - busy park 合批两条（各自 notifyId）→ settled 边沿合批投出 → onSettled 恰 2 次，
- *   各自原始消息、各自 meta（per-message 透传不串键——合批不得把首条 meta 抹到全批）。
+ * 锁死契约（delivered 口径 = 送达回执驱动，D9⑤：受理只转 in-flight 不回调；本套件
+ * 经 receiptAnchor 申报 / confirmDelivered 送达回执两形态驱动 delivered 终态）：
+ * - sendChecked 申报 receiptAnchor:'acceptance'（agent 通路真实形态，见 runtime
+ *   session-manager-handler notify send）→ 受理即 delivered，onSettled 收到**同一消息
+ *   对象引用**，meta 原样完好（runtime 债权桥接据此锚定 armed→injected 受理回执）。
+ * - busy park 合批两条（各自 notifyId，marker 锚）→ settled 边沿合批投出 → 逐条
+ *   confirmDelivered → onSettled 恰 2 次，各自原始消息、各自 meta（per-message 透传
+ *   不串键——合批不得把首条 meta 抹到全批）。
  * - 错误重试耗尽 rejected 终态 → meta 同样随原消息到达（失败腿也要能定位债权）。
  * - 无 meta 消息 → meta undefined（additive 字段零回归：不带 meta 的存量消息形态不变）。
  *
@@ -31,13 +34,13 @@ describe('envelope additive meta（notifyId 穿 envelope）', () => {
     vi.restoreAllMocks()
   })
 
-  it('sendChecked 单条带 meta.notifyId → onSettled delivered 收到同一对象引用，meta 完好', async () => {
+  it('sendChecked 带 meta.notifyId 申报 acceptance → 受理即 delivered，同一对象引用，meta 完好', async () => {
     const onSettled = vi.fn()
     const port = makePort()
     const handle = createDelivery(port, { onSettled })
 
     const msg = textMsg('run tests', { meta: { notifyId: 'sm-nid-1' } })
-    await handle.sendChecked(msg)
+    await handle.sendChecked(msg, { receiptAnchor: 'acceptance' })
 
     expect(onSettled).toHaveBeenCalledTimes(1)
     const settledMsg = onSettled.mock.calls[0]![0]
@@ -47,21 +50,25 @@ describe('envelope additive meta（notifyId 穿 envelope）', () => {
     handle.dispose()
   })
 
-  it('busy park 合批 2 条（各自 notifyId）→ per-message 回调各自 meta 不串键', () => {
+  it('busy park 合批 2 条（各自 notifyId）→ 逐条 confirmDelivered，per-message 回调各自 meta 不串键', () => {
     const onSettled = vi.fn()
     const { port, setIdle, fireSettled } = makeBusyParkPort()
     const handle = createDelivery(port, { onSettled })
 
     const msgA = textMsg('claim A', { meta: { notifyId: 'sm-a' } })
     const msgB = textMsg('claim B', { meta: { notifyId: 'sm-b' } })
-    handle.send(msgA) // busy → park 入队
-    handle.send(msgB)
+    handle.send(msgA, { id: 'a' }) // busy → park 入队（marker 锚缺省）
+    handle.send(msgB, { id: 'b' })
     expect(onSettled).not.toHaveBeenCalled()
 
     setIdle(true)
     fireSettled() // settled 边沿 → 合批投出
 
     expect(port.sendCalls).toHaveLength(1) // 物理合批仍是一次 port.send
+    expect(onSettled).not.toHaveBeenCalled() // 受理只转 in-flight（D9⑤ 送达口径）
+    // 送达回执逐条驱动（marker 锚正规路径 = 外部 confirmDelivered）
+    handle.confirmDelivered('a')
+    handle.confirmDelivered('b')
     expect(onSettled).toHaveBeenCalledTimes(2)
     expectSettledMsg(onSettled, 0, msgA)
     expect(onSettled.mock.calls[0]![0].meta?.notifyId).toBe('sm-a')
@@ -91,7 +98,8 @@ describe('envelope additive meta（notifyId 穿 envelope）', () => {
 
     const plain = textMsg('legacy message')
     expect(plain.meta).toBeUndefined()
-    await handle.sendChecked(plain)
+    await handle.sendChecked(plain, { id: 'legacy-1' })
+    handle.confirmDelivered('legacy-1') // marker 锚正规送达路径
 
     expect(onSettled).toHaveBeenCalledTimes(1)
     expect(onSettled.mock.calls[0]![0].meta).toBeUndefined()

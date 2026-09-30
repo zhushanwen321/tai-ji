@@ -76,7 +76,6 @@ function stripVolatile(m: Message): Record<string, unknown> {
 function normState(st: ChatViewState) {
   return {
     messages: st.messages.map(stripVolatile),
-    clientUuidMap: st.clientUuidMap,
     orphanToolResults: st.orphanToolResults,
     lastAssistantWithToolCalls: st.lastAssistantWithToolCalls,
   }

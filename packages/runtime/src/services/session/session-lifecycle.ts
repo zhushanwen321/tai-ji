@@ -1678,7 +1678,7 @@ export class SessionLifecycle implements ISessionRegistry {
    * fork 的继承绑定解析（preset + 归属 project）。
    *
    * W-RT-5：优先读 active 源 session 的内存态 launchPresetId（pi 延迟写入窗口下
-   * sidecar 未写时，内存态兜底——getSession 返回 ManagedSession 实例，as 读 launchPresetId 字段），
+   * sidecar 未写时，内存态兜底——launchPresetId 已收编进 IManagedSessionView，直接读），
    * 再 fallback 到扫描结果的 sidecar 值（source.launchPresetId），
    * 最后兜底 'builtin:full'（FR-10，历史 session 无 sidecar）。
    *
@@ -1690,7 +1690,9 @@ export class SessionLifecycle implements ISessionRegistry {
     forkPresetId: string
     forkProjectId: string | undefined
   } {
-    const active = this.get(srcSessionId) as { launchPresetId?: string; projectId?: string } | undefined
+    // launchPresetId/projectId 已收编进 IManagedSessionView（照 handedOffTo 先例），
+    // Registry 记录直接读，无需 as-cast。
+    const active = this.get(srcSessionId)
     return {
       forkPresetId: active?.launchPresetId ?? source.launchPresetId ?? BUILTIN_PRESET_IDS.FULL,
       forkProjectId: active?.projectId ?? source.projectId,

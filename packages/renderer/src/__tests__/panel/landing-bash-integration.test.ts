@@ -49,6 +49,8 @@ const flowMock = {
   currentModel: { value: null },
   setPendingModel: vi.fn(),
   currentCwd: ref(null),
+  // landing 态 launchConfigView 解析消费（model-thinking 单一解析层输入）
+  pendingPreset: ref(null),
 }
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: () => flowMock,

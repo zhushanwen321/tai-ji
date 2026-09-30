@@ -111,7 +111,7 @@ product
 | 模块 | 关键能力 |
 |------|----------|
 | 多 Session/Panel | 按 cwd 分组、CRUD、切换、搜索；flat `.jsonl` 持久化；Panel↔Session 全局唯一绑定 |
-| Session Tree | navigate/fork/clone（经 pi extension，leafId 指针移动） |
+| Session Tree | fork/clone（经 pi extension）；树内 navigate 已随消息撤回能力回归（ADR-0076，`__taiji_nav__`） |
 | Composer | contenteditable 富文本（slash chip / @mention / #file）、发送/steer/followUp 双队列、slash 命令浮层 |
 | Slash 命令 | local（/clear /help）/ protocol（/compact）/ skill（/skill:\<name>）三类；CMD/SK tag 分类 |
 | AgentRunBlock | 折叠渲染（thinking/tool 合并 MergeBlock，write/edit 独立卡片，chip 摘要条） |

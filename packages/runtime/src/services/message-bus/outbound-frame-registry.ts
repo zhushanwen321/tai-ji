@@ -77,13 +77,21 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 // - message.error / message.status / message.stream_error / send.rejected /
 //   message.complete / message.message_start / message.customStart / message.tool_call_update：
 //   短文本控制帧，payload 无无上界字段（dispatcher :236/:323/:348/:365/:375/:420/:438/:846 等全部实证为短文案）。
-// - message.bashStart / message.queue_update / message.auto_retry_start|end /
+// - message.bashStart / message.bashAborted（services/session/bash-dispatcher.ts:450，
+//   abortBash 兜底终态帧 msg-pipeline-debloat D4-3，payload 仅 sessionId + timestamp 标量）/
+//   message.auto_retry_start|end /
 //   message.changeSetInvalidated（server.ts:330）/ message.file_changes（diff 文件名列表）：
 //   命令行 / 状态码 / 文件路径级载荷。
 // - message.compactionSummary / message.branchSummary：LLM 生成摘要文本（KB 级）。
 // - session.exited（session-service.ts:311 / dispatcher:488）：reason 含 stderr 尾部——pi
 //   崩溃堆栈可 MB 级但 32MB 级极罕见，且 pi-crash log 已全量落盘（D6）；若真超限走 miss
 //   整条丢弃 + error 日志（可观测），不登记。
+// - session.delivery（transport/session-delivery-topic.ts:181 publish；TOPIC_TABLE state 类
+//   last-value 快照，投递所有权内核 D5 新增帧）：队列状态帧，payload.entries 单条 preview
+//   按 DELIVERY_PREVIEW_MAX_CHARS（@taiji/shared = 80 字符，session-delivery-topic.ts:80）
+//   截断、delivered 侧仅投影最近 DEFAULT_DELIVERED_WINDOW（session-delivery = 50 条，
+//   delivery.ts 投影规则）——载荷双重有界，不登记；未来投影放大（preview 放宽 / 窗口取消）
+//   必须登记 LARGE_FIELD_REGISTRY。
 // - session.occupancy / session.state_changed / context.update / session.commands /
 //   session.subagents / session.workflowUpdate / session.stats_update / session.skillNotice /
 //   session.planState（session-records.ts:545，PlanStateView = requirement 文本 + 产物文档/

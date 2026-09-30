@@ -2,7 +2,8 @@
  * Session 层 — 运行时句柄 + 状态重建（entry 不做 GC，只读最新一条）
  *
  * GoalSession 是进程内瞬态句柄（不持久化）。
- * reconstructGoalState 从 entry 恢复状态（session_start 时调）。
+ * reconstructGoalState 从 entry 恢复状态（session_start / session_tree 时调，
+ * U6c：重建输入接活跃路径裁剪——被撤子树的 goal-state 不进重建态）。
  *
  * FR-6.4: 删除 hasPendingInjection（僵尸字段）
  * FR-6.7: 删除 pendingPause（ESC 改用 aborted 守卫）
@@ -10,9 +11,11 @@
  * FR-3: 崩溃后保持原状态（active 重启计时；paused/blocked 保持；终态保持）
  */
 
+import { filterActivePath } from "@zhushanwen/pi-session-path";
+
 import type { GoalRuntimeState } from "./engine/types";
 import { deserializeState, ENTRY_TYPE } from "./persistence";
-import type { SessionEntryLike, SessionPort, UiPort } from "./ports";
+import type { SessionEntryLike, UiPort } from "./ports";
 
 // ── 运行时句柄 ────────────────────────────────────────
 
@@ -47,10 +50,28 @@ export function createGoalSession(): GoalSession {
 // 复用价值场景请参照 scheduler 的已验证方案：runtime.ts STALE_CTX_MARKER
 // 'stale after session replacement'（子串匹配真实文案）+ 代际计数治本（G1）。
 
-// ── reconstructGoalState（session_start 时调）──────────
+// ── 活跃路径裁剪（U6c）────────────────────────────────
 
 /**
- * 从 session entries 恢复 goal state。
+ * 活跃路径回溯所需的最小 session 视图（U6c）。getLeafId 可选：SessionPort
+ * （buildPorts 产物）不携带时按文件尾回退——session_start 时点 pi 树重放规则
+ * （叶子 = 文件最后一条 entry）使两锚等价；session_tree handler 传
+ * ctx.sessionManager（含 getLeafId），覆盖运行中树回退后 leaf ≠ 文件尾的形态。
+ */
+export interface ActivePathSessionView {
+	getEntries(): SessionEntryLike[];
+	getLeafId?(): string | null;
+}
+
+// 活跃路径裁剪（leafId 沿 parentId 回溯，撤回后被撤子树的 goal-state entry 不进
+// 重建输入）收敛于 @zhushanwen/pi-session-path 单一实现（四包同构副本收编，防御
+// 语义与回退口径见该包 filterActivePath 注释；runtime 侧 entry-tree-builder 保持
+// 独立——extension 不能 import runtime 包）。
+
+// ── reconstructGoalState（session_start / session_tree 时调）──────────
+
+/**
+ * 从 session entries 恢复 goal state（U6c：重建输入 = 活跃路径投影，非全文件）。
  *
  * Pi SDK 的 session 是 append-only，getEntries() 返回 filter-copy——splice
  * 无法修改真实 entries。Entry GC（goal-state 留 1、goal-history 留 20）在生产
@@ -60,11 +81,11 @@ export function createGoalSession(): GoalSession {
  *   paused/blocked 保持（用户/agent 主动叫停不被抹除），终态保持。
  * FR-8.1 G-024: deserialize throw → state=null（部分损坏全丢）
  */
-export function reconstructGoalState(session: GoalSession, sessionPort: SessionPort): void {
+export function reconstructGoalState(session: GoalSession, sessionPort: ActivePathSessionView): void {
 	session.state = null;
-	const entries = sessionPort.getEntries();
+	const entries = filterActivePath(sessionPort);
 
-	// 找到最新的 goal-state entry（从后往前）
+	// 找到最新的 goal-state entry（活跃路径内从后往前）
 	let latestStateIdx = -1;
 	for (let i = entries.length - 1; i >= 0; i--) {
 		if (isGoalStateEntry(entries[i]!)) {

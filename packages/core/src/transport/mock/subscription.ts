@@ -19,9 +19,18 @@ export function makeMockSubscription<T>(initial: () => T) {
         handlers.delete(handler)
       }
     },
-    /** 向所有订阅者推送新值（模拟 runtime 广播状态变更） */
+    /** 向所有订阅者推送新值（模拟 runtime 广播状态变更）。单 handler 异常隔离（对齐 real
+     *  events.ts safeForEach 语义 + mock emit 同批）：一个订阅者抛错不中断其余订阅者，
+     *  也不穿透调用方 await 的 mock 动作。 */
     broadcast(value: T): void {
-      handlers.forEach((h) => h(value))
+      for (const h of handlers) {
+        try {
+          h(value)
+        } catch (e) {
+          // 隔离降级：留痕后继续遍历（辅助分发通道，单订阅者故障不炸整个 mock 动作）
+          console.error('[mock] subscription handler threw, continuing broadcast:', e)
+        }
+      }
     },
     /** 取当前初始值快照（供 mock 动作读最新态） */
     snapshot(): T {

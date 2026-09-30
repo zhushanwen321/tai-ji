@@ -522,7 +522,7 @@ describe("race-F3: rebuild 时间预算折算", () => {
   });
 
   it("复活 run（spec 带继承预算 + D10 账本）：worker/script 错误重试按剩余活跃预算重排，不被 startedAt 墙钟误判耗尽", async () => {
-    // 修复 docs/todo §1.1 后的生产形态：resume 重建 spec 带 run-created 继承的预算
+    // 修复 已归档设计档案（决策记录见 docs/adr/decisions.md） §1.1 后的生产形态：resume 重建 spec 带 run-created 继承的预算
     const BUDGET = 60 * 60_000;
     const run = makeRunningRun({ budgetTimeMs: BUDGET });
     await seedRunCreated(run);

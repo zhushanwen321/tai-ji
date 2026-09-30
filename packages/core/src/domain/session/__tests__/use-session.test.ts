@@ -617,15 +617,18 @@ describe('newSession（延迟 create 语义）', () => {
     f.dispose()
   })
 
-  it('TC-12 flow 产出 session → selectSession(created.id) + 返回 id', async () => {
+  it('TC-12 延迟 create 终态锁：flow 内部残留 session 也不被消费——恒返回 null + push chat 空态 + 不 switchSession', async () => {
     const f = makeFixture({ withFlow: true })
+    // 对抗输入：旧世界「flow 产出 session → selectSession」链已退役（C-W3-2 延迟 create
+    // 终态，startFlow 末尾恒 bindCurrentSession(null)，session 由首发提交创建绑定）。
+    // 即便 flow.currentSession 残留非空（生产不可能态），编排也不得消费它走旧链。
     f.flow.currentSession.mockReturnValue(summary('new1'))
     const result = await f.session.newSession('/b')
-    expect(result).toBe('new1')
+    expect(result).toBeNull()
     expect(f.flow.startFlow).toHaveBeenCalledWith('/b')
-    expect(f.api.switchSession).toHaveBeenCalledWith('new1')
-    expect(f.store.activeId.value).toBe('new1')
-    expect(f.navigation.push).toHaveBeenCalledWith({ view: 'chat', sessionId: 'new1' })
+    expect(f.api.switchSession).not.toHaveBeenCalled()
+    expect(f.store.activeId.value).not.toBe('new1')
+    expect(f.navigation.push).toHaveBeenCalledWith({ view: 'chat' })
     f.dispose()
   })
 

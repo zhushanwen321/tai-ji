@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-line-propagation.mjs —— 集成线传播守卫（ADR-0076 / C-proc-30）。
+ * check-line-propagation.mjs —— 集成线传播守卫（ADR-0092 / C-proc-30）。
  *
  * 背景：多条 dev-x.x.x 集成线数周并行 + 修复落在其中一条 + 打包/合并从另一条，
  * 传播全靠人记——2026-09-24 dev-0.10.6 打包版事故（review-fix-loop 全员

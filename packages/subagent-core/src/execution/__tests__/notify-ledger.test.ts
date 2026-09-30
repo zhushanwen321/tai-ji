@@ -69,8 +69,8 @@ import { createNotifier, type BgNotifyRecord, type NotifierHost } from "../notif
 // src/delivery.ts 同名实现）：
 //   - send()：payload 能力 fail-fast → dedupe → 入队 → 无合批依赖时立即
 //     scheduleFlush(0)（mergeHoldActive()=false 路径，notifier 单条通知即时投）
-//   - busy gate：isIdle() + hasPendingMessages() 双条件，busy 时退避轮询
-//     （无 subscribeSettled 装配的形态——notifier 测试 host 均不注入 onAgentSettled）
+//   - busy gate：isIdle() 单查（D2 拆除后内核在途内查在本桩队列形态恒空），busy 时
+//     退避轮询（无 subscribeSettled 装配的形态——notifier 测试 host 均不注入 onAgentSettled）
 //   - attemptSend()：同步 port.send（notifier port 契约返回 void = 受理成功）；
 //     同步抛错 → onSendFail → warn("port.send failed, retrying with backoff")
 //     + 退避重试，达上限终态 warn
@@ -81,7 +81,6 @@ function createDelivery(port: DeliveryPort, options?: DeliveryConfig): DeliveryH
     intent: options?.intent ?? ("interrupt-at-turn-boundary" as const),
     mergeWindowMs: options?.mergeWindowMs ?? 0,
     mergeHoldActive: options?.mergeHoldActive,
-    busyPolicy: options?.busyPolicy ?? ("retry-force" as const),
     backoff: options?.backoff ?? { ms: 100, max: 50 },
     warn: options?.warn ?? ((msg: string, err?: unknown) => { console.warn(`[session-delivery] ${msg}`, err ?? ""); }),
   };
@@ -123,9 +122,10 @@ function createDelivery(port: DeliveryPort, options?: DeliveryConfig): DeliveryH
   }
 
   function isBusy(): boolean {
+    // D2 自镜像拆除后内核 busy gate = isIdle + 在途内查（active 表）；本桩队列无条目
+    // 状态机（受理即清批，无 in-flight 条目形态），在途内查恒空，等价退化为 isIdle 单查。
     try {
-      if (!port.isIdle()) return true;
-      return port.hasPendingMessages();
+      return !port.isIdle();
     } catch {
       return true;
     }
@@ -178,7 +178,6 @@ function createDelivery(port: DeliveryPort, options?: DeliveryConfig): DeliveryH
 
   function scheduleFlush(attempt: number): void {
     if (disposed || queue.length === 0 || inFlight) return;
-    if (cfg.busyPolicy === "park" && attempt > 0) return;
     if (backoffTimer !== undefined) {
       clearTimeout(backoffTimer);
       backoffTimer = undefined;

@@ -7,8 +7,9 @@
 //
 // 闭包红线：本文件是 core 对上述两包的唯一替代面——下方 Delivery* 结构化类型为手工
 // 转写（与 packages/session-delivery/src/types.ts 逐字段结构兼容），禁止 import 两包
-// （D9 闭包守卫扫描对象）。结构兼容由注入点 typecheck 守护：pi 壳直传真实
-// createDelivery、拆 CountActiveResult.count 时，上游签名漂移即 typecheck 红。
+// （D9 闭包守卫扫描对象）。上游增删字段须手工同步本转写类型，漏同步由
+// extensions/universal/subagent-workflow/src/__tests__/notifier-receipt-anchor.test.ts
+// 行为锁拦截——typecheck 对删字段形态不亮红（bivariance + optional 吸收漂移）。
 //
 // 缺席语义（设计 §3.4 core_port_missing 精神：可选端口缺席是合法形态，不报错）：
 //   - 计数器缺席 → 恒 0（零活跃）：pending 门全开，缺省内聚在本端口层。
@@ -59,9 +60,10 @@ export interface DeliveryPort {
   supportedPayloads: readonly DeliveryPayload["kind"][];
   /** 主 agent 是否空闲（gate 投递时机）。 */
   isIdle(): boolean;
-  /** 是否有排队中的消息。 */
-  hasPendingMessages(): boolean;
-  /** 投递消息。返回受理回执或 void（扩展位——旧实现返回 void 兼容）。 */
+  /** 投递消息。返回受理回执或 void（扩展位——旧实现返回 void 兼容）。
+   *  settle 契约（与 session-delivery DeliveryPort.send 一致）：返回 promise 时实现
+   *  必须 settle——内核按控制面粒度设有界兜底，超时按发送失败收口（迟到原请求与
+   *  重试可能构成重复投递，通道内判重由适配器/对端按裸标记负责）。 */
   send(
     msg: DeliveryMessage,
     intent: DeliveryIntent,
@@ -73,7 +75,6 @@ export interface DeliveryPort {
 /** 投递工厂 options（notifier 实际消费的字段集；其余策略字段未入端口面）。 */
 export interface DeliveryConfig {
   intent?: DeliveryIntent;
-  busyPolicy?: "retry-force" | "park";
   /** 合批窗口（ms）：0 = 关；>0 = 滑动窗口合批。 */
   mergeWindowMs?: number;
   /** 合批依赖谓词（禁止用 isIdle 代替——D4 must-fix 语义）。 */
@@ -84,10 +85,27 @@ export interface DeliveryConfig {
   warn?: (msg: string, err?: unknown) => void;
 }
 
+/**
+ * 提交选项转写（与 session-delivery 的 DeliverySubmitOptions 消费面字段结构兼容——
+ * 手工转写契约，上游增删字段须同步本类型，漏同步由
+ * extensions/universal/subagent-workflow/src/__tests__/notifier-receipt-anchor.test.ts
+ * 行为锁拦截——typecheck 对删字段形态不亮红）。
+ */
+export interface DeliverySubmitOptions {
+  /** 合批窗口判定覆盖。 */
+  merge?: boolean;
+  /**
+   * 送达回执锚申报（D1 申报制转写）：'marker' = 等裸标记回执（缺省）；'acceptance' =
+   * 无回执锚点条目（notifier 通知出站文本无标记），受理即落 delivered 终态。
+   * 无标记提交点漏申报 = 死锁形态复发（in-flight 永挂、gate 恒关）。
+   */
+  receiptAnchor?: "marker" | "acceptance";
+}
+
 /** 投递句柄（notifier 消费面：send / flush / dispose——诊断面 depth 等不入端口）。 */
 export interface DeliveryHandle {
   /** 唯一常规入口（合批窗口 + 空闲零延迟立即投）。 */
-  send(msg: DeliveryMessage, opts?: { merge?: boolean }): void;
+  send(msg: DeliveryMessage, opts?: DeliverySubmitOptions): void;
   /** 强制投递尝试（shutdown flush 等）。 */
   flush(): void;
   /** 销毁（清队列 + 清 timer + 退订）。 */

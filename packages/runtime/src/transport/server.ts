@@ -264,6 +264,9 @@ export class RuntimeServer implements IMessageBroker {
       // 审批条/表单不知道请求已死）。覆盖主动删 / 进程退出 / restore 清场全部销毁路径。
       this.invalidatePendingUiRequests(summary.id, 'session-destroyed')
       this.clearExtensionTimeoutsForSession(summary.id)
+      // delivery 域（u3a）：解绑该 session 的 session.delivery onChange 订阅（per-session 资源
+      // 生命周期）；内核条目本身由组合根的 registry.dispose 清理（同一销毁汇聚点，各自一类资源）。
+      this.sessionHandler?.releaseDeliveryTopic(summary.id)
     })
     // P2-2 失效链（MF-1-7 abortPlan 编排下沉）：session.abortPlan prompt 成功后经回调
     // 上抛至此——失效链消费保持 server.ts 单一出口（与 session-destroyed 同点注册）。
@@ -370,6 +373,9 @@ export class RuntimeServer implements IMessageBroker {
       importService: this.importService,
       // composer-gen-stats（u3）：session.getGenStats 恢复腿 RPC 路由依赖。
       genStatsService: this.genStatsService,
+      // 投递所有权内核（u3a）：delivery.* 四 RPC + session.delivery state topic 装配。
+      // 与 SessionManagerHandler 同一注册表实例（sessionId 单例约束，见 assembleSessionManagerHandler）。
+      deliveryRegistry: optional.delivery,
       // wave:runtime-wiring：注入 MessageBus 供 session.subscribe/unsubscribe RPC 用。
       messageBus: this.messageBus,
       nextPushId: () => this.broker.nextPushId(),
@@ -535,7 +541,7 @@ export class RuntimeServer implements IMessageBroker {
     const usageHandler = this.usageMessageHandler
     const presetHandler = this.presetMessageHandler
     const btwHandler = this.btwMessageHandler
-    return new Map([
+    const entries = [
       ['ping', (msg, ws) => this.broker.reply(ws, msg.id, 'pong', {})],
       // u7c（crash-forensics D5）：滚动重启状态只读查询（与 request 同名 reply；provider
       // 缺席回 idle 形态——renderer 拉到 idle 即「横幅不重现」，见 RollingRestartStatusPayload）。
@@ -556,7 +562,19 @@ export class RuntimeServer implements IMessageBroker {
       ...(presetHandler ? presetHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => presetHandler.handlePresetMessage(msg, ws)] as const) : []),
       // btw 三帧（btw-question M2-b / D6）：create/list/remove → BtwMessageHandler。
       ...(btwHandler ? btwHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => btwHandler.handleBtwMessage(msg, ws)] as const) : []),
-    ] as Array<[ClientMessageType, (msg: ClientMessage, ws: WsType) => Promise<unknown> | unknown]>)
+    ] as Array<[ClientMessageType, (msg: ClientMessage, ws: WsType) => Promise<unknown> | unknown]>
+    // b26-F2：Map 构造对重复 key 后写覆盖——两 handler 的 handles 清单重叠时后者静默接管
+    //（错误路由以合法形态运行，编译零信号）。装配期撞键 fail-fast，错误信息列出全部撞键名。
+    const seen = new Set<ClientMessageType>()
+    const duplicates = entries.map(([type]) => type).filter((type) => {
+      if (seen.has(type)) return true
+      seen.add(type)
+      return false
+    })
+    if (duplicates.length > 0) {
+      throw new Error(`[server] duplicate route registration: ${duplicates.join(', ')} — handler handles lists must be disjoint (check the handles arrays of all message handlers)`)
+    }
+    return new Map(entries)
   }
 
   // ── IMessageBroker 委托（index.ts 把 server 当 broker 注入 PluginService/SessionService）──
@@ -599,6 +617,10 @@ export class RuntimeServer implements IMessageBroker {
         this.broker.sendError(ws, 'unknown_type', `Unknown message type: ${rawMsg.type}`, msg.id, { sessionId: rawMsg.payload?.sessionId })
       }
     } catch (e) {
+      // S-1（b22）：服务端留痕——error envelope 只达当前 ws（关闭/刷新即丢），runtime
+      // 落盘日志是唯一持久取证面；一行覆盖全部裸跑 handler 异常族（对照同文件
+      // steer/follow_up 局部 console.error 先例）。
+      console.error(`[server] handler error: type=${msg.type} id=${msg.id}:`, e)
       const message = toErrorMessage(e)
       // RT-1#3：payload 可能缺省/为原始值（畸形帧已过 JSON.parse 层）——`'sessionId' in msg.payload`
       // 在 undefined 上抛 TypeError，会替换掉原 handler 异常（catch 内二次抛）。可选链消除二次抛。
@@ -716,8 +738,35 @@ export class RuntimeServer implements IMessageBroker {
   }
 
   async stop(): Promise<void> {
-    if (this.pluginService) await this.pluginService.shutdown()
-    await this.sessionService.destroyAll()
-    await this.conn.stop()
+    // A9（b26-F1）：三段清理逐段隔离——单段失败不跳过其余段（pluginService.shutdown 抛错
+    // 不得跳过 pi 进程收割与 WS 优雅关闭），逐段留痕后聚合上抛（组合根 shutdown 大 catch
+    // 接住，后续 closeCrashJournal/closeLogger 收口链照走）。
+    const failures: unknown[] = []
+    if (this.pluginService) {
+      try {
+        await this.pluginService.shutdown()
+      } catch (e) {
+        failures.push(e)
+        console.error('[server] stop: pluginService.shutdown failed:', e)
+      }
+    }
+    try {
+      await this.sessionService.destroyAll()
+    } catch (e) {
+      failures.push(e)
+      console.error('[server] stop: sessionService.destroyAll failed:', e)
+    }
+    try {
+      await this.conn.stop()
+    } catch (e) {
+      failures.push(e)
+      console.error('[server] stop: conn.stop failed:', e)
+    }
+    if (failures.length > 0) {
+      throw new Error(
+        `[server] stop completed with ${failures.length} failure(s): ${failures.map((f) => toErrorMessage(f)).join('; ')}`,
+        { cause: failures[0] },
+      )
+    }
   }
 }

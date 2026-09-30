@@ -16,7 +16,6 @@ function makePort(overrides?: Partial<DeliveryPort>): DeliveryPort {
   return {
     supportedPayloads: ['text'],
     isIdle: () => true,
-    hasPendingMessages: () => false,
     send: () => {},
     ...overrides,
   }

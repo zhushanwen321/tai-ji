@@ -207,7 +207,7 @@ interface NotifyDomainPorts {
 }
 ```
 
-  RunStore / AgentRunner / WorkerHost 三个既有 port 不动——jsonl-run-store（写 pi 会话）留 pi 壳；core 不持有 store 实现（RunStore 生产实现唯一 = 壳 JsonlRunStore，读侧统一 journal 判定核，见 ADR-0078）。
+  RunStore / AgentRunner / WorkerHost 三个既有 port 不动——jsonl-run-store（写 pi 会话）留 pi 壳；core 不持有 store 实现（RunStore 生产实现唯一 = 壳 JsonlRunStore，读侧统一 journal 判定核，见 ADR-0094）。
 
   **端口演进纪律（治理条款，随下一层接口契约产物固化）**：①新增宿主触点默认以**可选方法**或**独立窄端口**（RunStore/AgentRunner 先例）承载——HostServices 只收环境服务语义（数据根/日志/发现/通知），不收业务能力；②新增方法必须有 ≥1 个真实宿主触点证据，禁止推测性预留；③方法签名禁止出现宿主特有类型（pi SDK / zcode 类型泄漏即 D9 检查红线）；④方法数达 8 触发拆分评审（按域拆为独立端口）。P3 的每项演进（file: 入口 / 材料注入 / 常驻引擎）引入新触点时按此过闸。
 - **不采用**：①把 pi extension API 全量抽象成宿主接口——过度设计，CLI 宿主不需要 ask-user/GUI，端口按「core 实际触点」收尾；②HostServices 经 postMessage 传 worker thread——workflow 脚本跑在 worker，但 agent 调用经 agent-call 消息回主线程执行（AgentRunner 在主线程），worker 内无需 HostServices；③把 30 处模块顶层 `getLogger` 下沉为函数内惰性获取——改动范围大且每调用一次解析是纯噪音，facade 代理在保持既有顶层缓存惯例下达成同样的时序安全（P0 因此仍是机械替换）。

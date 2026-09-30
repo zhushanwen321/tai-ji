@@ -9,11 +9,10 @@
  * - forkBoxClass / forkPlaceholder：fork 模式派生的 class 与 placeholder 文案
  * - handleForkEsc：Esc 退出（清空输入 + exitForkMode），返回是否已消费
  * - handleForkSend：fork 模式发送（调 forkSessionAsk + 退出），返回是否已消费
- * - forkModeRef：{ value: boolean } 包装对象，给 defineExpose 用（避免 Vue 解包顶层 ref 导致 vm.forkMode 变 boolean）
  *
  * [D8 泛化] fork 与 handoff 曾约 75% 逐字镜像（enter/exit/signal watch 守卫/handleEsc/
- * handleSend 骨架/modeRef getter，设计 §2 例 5）。行为骨架已收敛到 createStagingMode
- * （./staging-mode），本模块 = fork 配置对象 + 薄包装：公开 API（返回面 9 项）与
+ * handleSend 骨架，设计 §2 例 5）。行为骨架已收敛到 createStagingMode
+ * （./staging-mode），本模块 = fork 配置对象 + 薄包装：公开 API（返回面 8 项）与
  * ForkDeps 注入契约保持不变，消费方零改动。fork 差异全部经配置表达（P2 清单见
  * staging-mode.ts 头注）：send 目标 = forkSessionAsk（空 content 守卫在 features 层
  * 退化为纯 fork → allowsEmptySend=true）；无 enter 守卫 / 互斥退出 / 发送兜底守卫 /
@@ -88,8 +87,6 @@ export function useComposerForkMode(
   deps: ForkDeps,
 ): {
   forkMode: Ref<boolean>
-  /** { value: boolean } 包装对象，给 defineExpose 用（不被 Vue 解包，对齐 vm.forkMode.value 访问契约） */
-  forkModeRef: { readonly value: boolean }
   enterForkMode: (srcSessionId: string, fromMessageId: string) => void
   exitForkMode: () => void
   /** fork 模式 composer-box class（accent 边 + 3px ring glow + accent 底）；非 fork 模式返回空串 */
@@ -138,7 +135,6 @@ export function useComposerForkMode(
 
   return {
     forkMode: staging.mode,
-    forkModeRef: staging.modeRef,
     enterForkMode: (srcSessionId, fromMessageId) => staging.enter({ srcSessionId, fromMessageId }),
     exitForkMode: staging.exit,
     forkBoxClass: staging.boxClass,

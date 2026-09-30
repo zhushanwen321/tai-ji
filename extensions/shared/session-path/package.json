@@ -1,0 +1,26 @@
+{
+  "name": "@zhushanwen/pi-session-path",
+  "version": "0.0.0",
+  "description": "Active-path clipping for pi session entries — single shared implementation for state-rebuilding extensions (todo/plan/goal/scheduler), so revoked subtrees stay out of rebuild inputs (shared library, not a Pi extension, zero dependencies).",
+  "type": "module",
+  "main": "src/index.ts",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "session",
+    "active-path",
+    "shared"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  }
+}

@@ -111,11 +111,12 @@ const aiCopyKey = computed(() => `ai-${props.turn.index}`)
 const aiMdKey = computed(() => `md-${props.turn.index}`)
 
 /**
- * summary 文本：copy 按钮内容来源（仅最后一条 assistant.content，streaming/complete 都渲染）。
+ * summary 文本：copy 按钮内容来源（末条 assistant.content，streaming/complete 都渲染）。
+ * 读既有 lastAssistant prop（Turn.vue 单点推导后传入），不在本组件重推导取尾公式——
+ * 「末条 assistant」语义变化时只改 Turn.vue 一处；该 prop 同时承托 copy-md/fork/handoff。
  */
 const summaryText = computed(() => {
-  const as = props.turn.assistants
-  const last = as[as.length - 1]
+  const last = props.lastAssistant
   if (!last?.content) return ''
   const text = normalizeContent(last.content)
   return text.trim() ? text : ''

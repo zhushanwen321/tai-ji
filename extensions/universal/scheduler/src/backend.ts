@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import { filterActivePath } from '@zhushanwen/pi-session-path'
 
 import { replayFoldEntries, type SchedulerEntryLike } from './replay.js'
 import { TASK_ENTRY_TYPE } from './types.js'
@@ -70,6 +71,14 @@ export interface SchedulerBackend {
    * 不触发任何写入（项目规则 #6）。
    */
   getEntries(): SchedulerEntryLike[]
+  /**
+   * U6c：session_tree（树回退）重折叠订阅。生产注册面在 extension factory 顶层
+   * （index.ts：pi.on('session_tree') 每代恰一，事件经 activeBackend 委托
+   * PiSchedulerBackend.refoldSessionTree），事件到达时按活跃路径重折叠任务集并回调
+   * listener——落点是 SchedulerRuntime 的内存任务 Map（runtime 构造时订阅，backend
+   * 不能反向持有 runtime）。测试替身可不实现（构造侧 ?. 订阅为 no-op，既有单测路径不变）。
+   */
+  onSessionTree?(listener: (tasks: ScheduledTask[]) => void): void
 }
 
 /**
@@ -81,6 +90,14 @@ export interface SchedulerBackendCtx {
   sessionManager: {
     getEntries(): SchedulerEntryLike[]
     getSessionFile(): string | undefined
+    /**
+     * 当前叶子 entry id（U6c 活跃路径回溯锚）。可选：真实 ExtensionContext 恒存在
+     * （ReadonlySessionManager Pick 清单含 getLeafId）；最小 duck-typed ctx（单测）
+     * 缺失时按文件尾回退——session_start 时点与 pi 树重放规则（叶子 = 文件最后
+     * 一条 entry）等价，session_tree 时点由生产 ctx 携带精确锚。
+     * （pi 树重放规则实锚登记 pi-semantics PS-60：dist/core/session-manager.js:673 _buildIndex）
+     */
+    getLeafId?(): string | null
   }
   /**
    * 会话是否空闲（not streaming）。真实 ExtensionContext 保证存在（SDK
@@ -95,6 +112,14 @@ export interface SchedulerBackendCtx {
    */
   model?: SchedulerCurrentModel
 }
+
+// ── 活跃路径裁剪（U6c）──
+
+// 活跃路径裁剪（leafId 沿 parentId 回溯，撤回后被撤子树的任务 op 不进折叠输入，
+// 被撤任务不得恢复 pending、到点触发真实 turn——A14）收敛于
+// @zhushanwen/pi-session-path 单一实现（四包同构副本收编，防御语义与回退口径见
+// 该包 filterActivePath 注释；runtime 侧 entry-tree-builder 保持独立——extension
+// 不能 import runtime 包）。
 
 // ── 生产实现 ──
 
@@ -111,22 +136,47 @@ export class PiSchedulerBackend implements SchedulerBackend {
     ExtensionAPI,
     'sendMessage' | 'appendEntry' | 'registerProvider' | 'unregisterProvider'
   >
+  private sessionTreeListener: ((tasks: ScheduledTask[]) => void) | null = null
 
   constructor(
     ctx: SchedulerBackendCtx,
-    pi: Pick<ExtensionAPI, 'sendMessage' | 'appendEntry' | 'registerProvider' | 'unregisterProvider'>,
+    pi: Pick<
+      ExtensionAPI,
+      'sendMessage' | 'appendEntry' | 'registerProvider' | 'unregisterProvider'
+    >,
   ) {
     this.ctx = ctx
     this.pi = pi
   }
 
+  /** U6c：SchedulerRuntime 构造时订阅重折叠回调（见 SchedulerBackend.onSessionTree）。 */
+  onSessionTree(listener: (tasks: ScheduledTask[]) => void): void {
+    this.sessionTreeListener = listener
+  }
+
+  /**
+   * U6c：session_tree（树回退）事件委托体，由 extension factory 顶层注册的 handler
+   * 经 activeBackend 调用（index.ts；不在本类构造函数注册，注册面理由见该处注释）。
+   * 纯重建体：只按活跃路径重折叠任务集（loadTasks）并回调 runtime 换 Map——不做
+   * 任何 sendMessage / appendEntry / tickTimer 启停（tick 常驻循环照常消费新任务集，
+   * 被撤子树任务不在集内即到点不触发，A14）。
+   */
+  refoldSessionTree(): void {
+    this.sessionTreeListener?.(this.loadTasks())
+  }
+
   /**
    * 读路径：折叠当前 session 的 TASK_ENTRY_TYPE custom entries 恢复任务（非接口成员，
-   * 由装配点 session_start 调用）。replayFoldEntries 内部含 fork owner 过滤与异常兜底。
+   * 由装配点 session_start / session_tree 重折叠调用）。replayFoldEntries 内部含 fork
+   * owner 过滤与异常兜底。U6c：折叠输入接活跃路径裁剪——从 leafId 沿 parentId 回溯，
+   * 被撤子树的任务 op 不再恢复 pending（否则被撤任务到点照常触发真实 turn，A14）。
    */
   loadTasks(): ScheduledTask[] {
     return [
-      ...replayFoldEntries(this.ctx.sessionManager.getEntries(), this.ctx.sessionManager.getSessionFile()).values(),
+      ...replayFoldEntries(
+        filterActivePath(this.ctx.sessionManager),
+        this.ctx.sessionManager.getSessionFile(),
+      ).values(),
     ]
   }
 

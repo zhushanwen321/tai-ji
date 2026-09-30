@@ -462,7 +462,7 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
 
 // ── ② D1：session_tree（同进程分支导航，非会话替换）不作废句柄 ─────────────────
 //
-// [PS-61] pi 的 session_tree 发射 = 同进程分支导航（原地换叶子后 emit）：不 teardown、
+// [PS-68] pi 的 session_tree 发射 = 同进程分支导航（原地换叶子后 emit）：不 teardown、
 // 不失效 runner——pi 绑定保持有效，handler 不作废句柄。作废即断裂：唯一重臂点
 // initSession 只由 session_start 触发，tree 导航不触发 session_start，本 session 余生
 // record/notify 的 pi 写入将静默 no-op。一次性生命周期（在途 run terminate）独立成立。

@@ -1,8 +1,8 @@
 /**
  * useConstantHeightAssert —— dev-only 像素常量漂移检测（B2）。
  *
- * MessageStream 用若干像素常量（LOAD_MORE_RESERVED_HEIGHT / COMPACTING_NOTICE_HEIGHT）
- * 参与 absolute 定位 top 计算。这些常量与对应 DOM 块的真实高度强绑定——若模板调整了
+ * MessageStream 用像素常量（LOAD_MORE_RESERVED_HEIGHT）参与布局计算（virta Virtualizer
+ * startMargin）。这些常量与对应 DOM 块的真实高度强绑定——若模板调整了
  * padding / 字号 / icon size 却忘了同步常量，占位会静默漂移致重叠或留空，且生产无任何报错。
  *
  * 本 composable 在 dev 下挂 ResizeObserver 实测 DOM 高度对比常量，差值 > 1px（避开亚像素

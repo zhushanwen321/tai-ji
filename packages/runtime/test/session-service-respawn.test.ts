@@ -21,6 +21,12 @@
  * - shutdown 入口：cancelAllPendingRespawns 清 pending（index.ts shutdown 序列接线，
  *   先于 server.stop→destroyAll 的顺序由组合根代码保证，编排器层 timer 清理断言见
  *   pi-respawn.test.ts ⑦）。
+ * - [D3 msg-pipeline-debloat] 发布判别四入口矩阵（组装级）：session.restored 唯一发布点 =
+ *   restoreSession facade 成功尾部三合一出口（onRestoreSuccess）；自动首试成功（信号②）/
+ *   fire 前惰性抢占（信号①）/ fire 后 join（信号②）/ 跨 fire 子态不发布（D7-41 行为
+ *   基线，收口归 message_start gate）/ 熔断后手动（信号③）发布 / 无崩溃上下文 restore
+ *  （普通懒 spawn / startup-reattach 形态）静默不发布。restoreSession 替身一律按生产
+ *   契约在成功尾部调用 service.onRestoreSuccess（spy 掉 lifecycle FS 链后出口须补齐）。
  *
  * restore 内核以 spyOn(service, 'restoreSession') 模拟（不触碰 lifecycle spawn 链 /
  * 真实文件系统 / 真实 ~/.taiji——fs 红线；spawn 进程数断言经 mock impl 内对
@@ -86,7 +92,6 @@ interface Setup {
 function createSetup(): Setup {
   const clientMap = new Map<string, MockClient>()
   let exitCb: ((sessionId: string, code: number | null, stderr: string) => void) | null = null
-
   const createSessionSpy = vi.fn(async (id: string) => {
     const client = makeMockClient()
     clientMap.set(id, client)
@@ -187,6 +192,9 @@ function createSetup(): Setup {
         rejectFn = (e: unknown) => rej(e)
       })
       await pm.createSession(id, tmpdir())
+      // [D3] 被替身替换的 facade 跳过 lifecycle 链，但成功尾部三合一出口必须按生产契约
+      // 补齐——session.restored 的唯一发布点在 facade 尾部（onRestoreSuccess）。
+      service.onRestoreSuccess(id)
       return { id } as never
     })
     return {
@@ -213,6 +221,19 @@ function createSetup(): Setup {
   }
 }
 
+/** [D3] 恢复成功替身：跳过 lifecycle FS 链 + 按生产契约在成功尾部收尾三合一出口。 */
+function spyRestoreSuccessWithFacadeTail(setup: Setup, summary: Record<string, unknown> = { id: 's1' }): ReturnType<typeof vi.fn> {
+  return vi.spyOn(setup.service, 'restoreSession').mockImplementation(async (id: string) => {
+    setup.service.onRestoreSuccess(id)
+    return summary as never
+  })
+}
+
+/** [D3] session.restored 发布帧收集（S3①「恰好一条」断言面）。 */
+function restoredPublishCalls(setup: Setup): Array<[string, ServerMessage]> {
+  return vi.mocked(setup.messageBus.publish).mock.calls.filter(([, m]) => (m as ServerMessage).type === 'session.restored') as Array<[string, ServerMessage]>
+}
+
 describe('u8-pi-respawn 组装级（SessionService 接线，crash-resilience D7）', () => {
   beforeEach(() => {
     // 只 fake setTimeout/clearTimeout（恢复编排只消费这对）——SessionService 构造的
@@ -225,10 +246,10 @@ describe('u8-pi-respawn 组装级（SessionService 接线，crash-resilience D7�
     vi.restoreAllMocks()
   })
 
-  it('①集成：非主动退出 → 5s 后自动 restore 恰好一次，推 session.restored（sessionId 必带 ⑨）', async () => {
+  it('①集成：非主动退出 → 5s 后自动 restore 恰好一次，facade 尾部出口推 session.restored 恰好一条（sessionId 必带 ⑨）', async () => {
     const setup = createSetup()
     setup.register('s1', '/fake/s1.jsonl')
-    const restoreSpy = vi.spyOn(setup.service, 'restoreSession').mockResolvedValue({ id: 's1' } as never)
+    const restoreSpy = spyRestoreSuccessWithFacadeTail(setup)
     setup.triggerExit('s1', 1, 'boom')
     // 进程退出链：session.exited 照常发布（既有行为不回归）
     expect(setup.messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'session.exited' }))
@@ -239,13 +260,15 @@ describe('u8-pi-respawn 组装级（SessionService 接线，crash-resilience D7�
     expect(restoreSpy).toHaveBeenCalledTimes(1)
     expect(restoreSpy).toHaveBeenCalledWith('s1')
     await vi.runAllTimersAsync()
-    const restored = vi.mocked(setup.messageBus.publish).mock.calls.find(([, m]) => (m as ServerMessage).type === 'session.restored')
-    expect(restored).toBeDefined()
-    const [, msg] = restored as [string, ServerMessage]
-    expect(msg.payload).toMatchObject({ sessionId: 's1' })
+    // [D3] 首试成功（timer 已删 + 计数 0）：信号② attemptInFlight 命中 → 恰好一条（S3①）
+    const restored = restoredPublishCalls(setup)
+    expect(restored).toHaveLength(1)
+    expect(restored[0][0]).toBe('s1')
+    expect(restored[0][1].payload).toMatchObject({ sessionId: 's1', attempts: 1 })
     // 且只一次
     await vi.runAllTimersAsync()
     expect(restoreSpy).toHaveBeenCalledTimes(1)
+    expect(restoredPublishCalls(setup)).toHaveLength(1)
   })
 
   it('②反向（A7）：forceQuit 不触发自动恢复（forceQuitSession 手工编排不经 onSessionExit 链）', async () => {
@@ -323,6 +346,11 @@ describe('u8-pi-respawn 组装级（SessionService 接线，crash-resilience D7�
     expect(deferred.spy).toHaveBeenCalledTimes(1)
     expect(setup.createSessionSpy).toHaveBeenCalledTimes(1)
     expect(setup.clientMap.get('s9')).toBe(client)
+    // [D3] 矩阵「fire 后 join 子态」：信号② attemptInFlight 命中 → 恰好一条 restored
+    //（join 方经同一 Promise 收口，不重复发布）
+    const restored = restoredPublishCalls(setup)
+    expect(restored).toHaveLength(1)
+    expect(restored[0][1].payload).toMatchObject({ sessionId: 's9', attempts: 1 })
   })
 
   it('⑧session 删除取消：removeSessionEntry 汇聚点（lifecycle.delete 主动删的汇聚路径）取消 pending timer', async () => {
@@ -361,5 +389,71 @@ describe('u8-pi-respawn 组装级（SessionService 接线，crash-resilience D7�
     }
     expect((failures[0][1] as ServerMessage).payload).toMatchObject({ willRetry: true })
     expect((failures[1][1] as ServerMessage).payload).toMatchObject({ willRetry: false })
+  })
+
+  // ── [D3] 发布判别四入口矩阵（组装级，msg-pipeline-debloat）──
+
+  it('D3-①b fire 前惰性抢占（信号①）：5s 窗口内 ensureActive 完成恢复 → 恰好一条 restored；timer 到点 attempt 让位不双发', async () => {
+    const setup = createSetup()
+    setup.register('s1', '/fake/s1.jsonl')
+    const deferred = setup.spyRestoreWithDeferred('s1')
+    setup.triggerExit('s1', 1, 'boom')
+    // 窗口内用户发消息 → 惰性恢复启动（pending timer 仍在册）
+    const userCall = setup.service.ensureActive('s1')
+    expect(deferred.spy).toHaveBeenCalledTimes(1)
+    deferred.resolve()
+    await userCall
+    // facade 尾部出口：pendingTimers 在册命中（信号①）→ 恰好一条
+    const restored = restoredPublishCalls(setup)
+    expect(restored).toHaveLength(1)
+    expect(restored[0][1].payload).toMatchObject({ sessionId: 's1', attempts: 1 })
+    // timer 到点：attempt 复查 isActive（createSession 已置活 client）→ 让位，无双发
+    await vi.runAllTimersAsync()
+    expect(setup.createSessionSpy).toHaveBeenCalledTimes(1)
+    expect(restoredPublishCalls(setup)).toHaveLength(1)
+  })
+
+  it('D3-①c 跨 fire 子态（D7-41 行为基线）：惰性恢复 fire 前发起、fire 后完成 → 无 restored 帧（收口归 message_start gate）', async () => {
+    const setup = createSetup()
+    setup.register('s1', '/fake/s1.jsonl')
+    const deferred = setup.spyRestoreWithDeferred('s1')
+    setup.triggerExit('s1', 1, 'boom')
+    // fire 前惰性恢复发起
+    const userCall = setup.service.ensureActive('s1')
+    // timer 到点：attempt 复查 isRestoring → 让位裸 return（early return 不置 attemptInFlight）
+    await vi.advanceTimersByTimeAsync(RESPAWN_DELAY_MS)
+    expect(deferred.spy).toHaveBeenCalledTimes(1)
+    // fire 后惰性恢复完成：timer 已删 / 标志未置 / 计数 0 → 三信号皆 miss，不发布
+    deferred.resolve()
+    await userCall
+    expect(restoredPublishCalls(setup)).toHaveLength(0)
+    // 恢复事实成立（client 可用），仅缺 restored 帧——该格收口靠保留的 useChat
+    // consumeRespawnWindowOnTurnStart（message_start gate），D7-41 登记
+    expect(setup.clientMap.get('s1')).toBeDefined()
+  })
+
+  it('D3-⑥ 熔断后手动恢复（信号③）：restoreFailed×2 熔断 → 手动 restoreSession 成功 → 恰好一条 restored（attempts=3）', async () => {
+    const setup = createSetup()
+    setup.register('s1', '/fake/s1.jsonl')
+    vi.spyOn(setup.service, 'restoreSession').mockRejectedValue(new Error('attach hard-fail'))
+    setup.triggerExit('s1', 1, 'boom')
+    await vi.runAllTimersAsync()
+    expect(restoredPublishCalls(setup)).toHaveLength(0)
+    // 用户手动「恢复会话」：改成功替身（同契约尾部出口）直调 facade
+    spyRestoreSuccessWithFacadeTail(setup, { id: 's1' })
+    await setup.service.restoreSession('s1')
+    const restored = restoredPublishCalls(setup)
+    expect(restored).toHaveLength(1)
+    // attempts 语义 = 成功前连续失败次数 + 1（2 次自动失败后手动成功 = 3）
+    expect(restored[0][1].payload).toMatchObject({ sessionId: 's1', attempts: 3 })
+  })
+
+  it('D3-反向 无崩溃上下文的 restore（普通懒 spawn / startup-reattach 形态）→ 静默不发布 restored', async () => {
+    const setup = createSetup()
+    const restoreSpy = spyRestoreSuccessWithFacadeTail(setup, { id: 's-fresh' })
+    // 从未崩溃（无 pending timer / 无 attemptInFlight / 无失败计数）的恢复入口
+    await setup.service.restoreSession('s-fresh')
+    expect(restoreSpy).toHaveBeenCalledTimes(1)
+    expect(restoredPublishCalls(setup)).toHaveLength(0)
   })
 })

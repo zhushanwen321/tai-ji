@@ -26,7 +26,7 @@ function makePi() {
 
 function makeCtx() {
   return {
-    sessionManager: { getSessionId: () => "test-session", getEntries: () => [] as unknown[] },
+    sessionManager: { getSessionId: () => "test-session", getLeafId: () => null, getEntries: () => [] as unknown[] },
     ui: { notify: vi.fn() },
   };
 }

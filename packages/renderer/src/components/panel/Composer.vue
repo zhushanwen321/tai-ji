@@ -3,10 +3,10 @@
   <!--
     容器组件 · composer（panel/spec.md zone ④，draft-composer-states）。
     发送位四态（u6b / D6 表）：send（↑ idle 直发）/ stop（■ turn 活跃 / settling 单独）/
-    queue（↑ 时钟角标：compacting/bash/settling+compacting，点击入 defer 队列）/
+    queue（↑ 时钟角标：compacting/bash/settling+compacting，点击统一提交——排队 lane 由内核裁定）/
     spinner（isSending）。staging 模式优先（fork/handoff）。
-    steer/followUp/defer 路由：⏎/Alt+⏎ 全部汇入统一发送分发器（D6，composer-shell
-    sendRoute——turn 活跃→steer、占用→defer、idle→direct），Alt+⏎ 在 steer 路由行保留
+    steer/followUp/queued 路由：⏎/Alt+⏎ 全部汇入统一发送分发器（D6，composer-shell
+    sendRoute——turn 活跃→steer、占用→queued、idle→direct），Alt+⏎ 在 steer 路由行保留
     followUp 语义。
     staging 优先（fork/handoff，与视觉层 boxClass/placeholder 优先级对齐）：staging 活跃时 ⏎/Alt+⏎
       均提交 staging（发送位也替换为 staging 发送按钮，streaming 中同样生效）；handoff 的
@@ -24,14 +24,13 @@
          composer-box 内 focus 算 inside 不触发 dismiss，键盘路由见 onKeydown。
          cwd：landing 态 $ 候选的 cwd 通道（landing-composer-session-file-symbols D2；
          panel 有 sid 不消费。flow.currentCwd 是普通对象内嵌套 ComputedRef，模板不自动
-         解包，须显式 .value；可选链 + ?? null 兑容无 currentCwd 字段的旧 mock/flow 形态，
-         缺失即无 cwd 不弹，与 S4b 空态语义一致） -->
+         解包，须显式 .value；缺失即无 cwd 不弹，与 S4b 空态语义一致） -->
     <CommandPopover
       ref="commandPopoverRef"
       v-model:open="cmdOpen"
       :type="cmdType"
       :session-id="sessionId ?? undefined"
-      :cwd="flow.currentCwd?.value ?? null"
+      :cwd="flow.currentCwd.value"
       :variant="variant"
       :project-skills="projectSkills"
       :global-skills="globalSkills"
@@ -51,15 +50,14 @@
         @drop.prevent="onDrop"
       >
         <!-- QueueBubble（v6 §8.5：内嵌 composer-box 顶部，去独立卡片/pulse/标签/chevron，
-             仅 border-b 分隔，Zap/Clock/Hourglass icon + truncate 文本）——6 区第 1 位。
-             [compact-defer-composer-queue u1] defer 行三 props（deferEntries/deferChip/deferHint）
-             由本组件从 useCompactQueue + sessionPhase 算好传入；@remove-defer 撤销未提交条目 -->
+             仅 border-b 分隔）——6 区第 1 位。
+             [u3c/D7 单源化] 行数据 = session.delivery 状态帧投影（useQueueRows），
+             × 撤销 → delivery.cancel、failed 行重试 → delivery.resync -->
         <QueueBubble
-          :state="queueState"
-          :defer-entries="deferEntries"
-          :defer-chip="deferChip"
-          :defer-hint="deferHint"
-          @remove-defer="onRemoveDefer"
+          :rows="queueRows"
+          :hint="queueHint"
+          @cancel="onCancelQueueEntry"
+          @retry="onRetryQueueEntry"
         />
         <!-- Staging 模式标识 chip（fork/handoff 统一）：顶部 accent chip 提示当前 staging 类型 + × 退出。
              经 staging.activeStaging 统一渲染（ADR-0057），退出调 staging.exit() -->
@@ -310,7 +308,7 @@ import { useSessionStore } from '@/stores/session'
 import { useProjectSkills, useGlobalSkills } from '@/composables/features/settings/useProjectSkills'
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { useCommandPopoverTrigger } from '@/composables/panel/useCommandPopoverTrigger'
-import { useDeferQueueRows } from '@/composables/panel/useDeferQueueRows'
+import { useQueueRows } from '@/composables/panel/useQueueRows'
 import { useComposerModeChip } from '@/composables/panel/useComposerModeChip'
 import { useComposerFocusRing } from '@/composables/panel/composer-focus-ring'
 import {
@@ -346,27 +344,24 @@ const sessionStore = useSessionStore()
 const flow = useNewTaskFlow()
 // 对话态只读模式 chip（u4，判据与 E7 三态闸见 useComposerModeChip）
 const { modeChipPresetId, modeChipFallbackTo } = useComposerModeChip(() => props.sessionId, () => props.variant)
-// 项目 skill 的 cwd 源（ADR-0050 修订）：panel 态 = sessionStore 投影的 session cwd（创建时锁定，
-// split mode 各 pane 各自 session 天然分流）；landing 态 = flow.currentCwd（嵌套 ComputedRef 须显式 .value）
+// 项目 skill 的 cwd 源（ADR-0050 修订）：panel 态 = sessionStore 投影的 session cwd（创建时锁定，split 各 pane 天然分流）；landing 态 = flow.currentCwd（嵌套 ComputedRef 须显式 .value）
 const projectSkillsCwd = computed<string | null>(() => {
   if (props.variant === 'panel') {
     if (!props.sessionId) return null
     return sessionStore.list.find((s) => s.id === props.sessionId)?.cwd ?? null
   }
-  return flow.currentCwd?.value ?? null
+  return flow.currentCwd.value
 })
 const { projectSkills } = useProjectSkills(projectSkillsCwd) // W3 ADR-0051：当前 cwd 项目 skill（两态接线见上）
 const { globalSkills } = useGlobalSkills() // W4 FR-5：全局 skill（skill 段两态共用）
 const isActive = computed(() => (props.sessionId ? chatStore.isActive(props.sessionId) : false))
 
-/** #13 retry/queue 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应） */
+/** #13 retry 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应）。[u3c] queueState 已退役：队列区数据源收敛为 session.delivery 帧投影（useQueueRows）。 */
 const retryState = computed(() => (props.sessionId ? chatStore.getRetryState(props.sessionId) : undefined))
-const queueState = computed(() => (props.sessionId ? chatStore.getQueueState(props.sessionId) : undefined))
 
 const draft = ref('')
 const inputRef = ref<InstanceType<typeof ComposerInput> | null>(null)
-// W4：shell 的 input 契约是结构类型 ShellInputInstance（ui 包 ComposerInput 实例含全部 expose
-// 方法，与契约结构兼容）——Vue 实例类型含 props/emits，无法直接赋给结构契约 ref，故此处断言传递
+// W4：shell input 契约是结构类型 ShellInputInstance（ComposerInput 实例结构兼容）——Vue 实例类型含 props/emits 无法直接赋给结构契约 ref，故断言传递
 const shellInputRef = inputRef as Ref<ShellInputInstance | null>
 // 模板顶层 ref 会被渲染代理解包成值——经普通对象字段中转保活「传引用」语义（通道缺口③，fail-closed 见 CommandPopover）
 const shellInputHolder = { ref: shellInputRef }
@@ -383,8 +378,6 @@ const isSwitching = computed(
   () => switching.value !== null && switching.value.sessionId === sessionIdRef.value,
 )
 
-// [compact-defer-composer-queue u1] defer 行四出口（行数约束拆出 useDeferQueueRows，逻辑零改动）
-const { deferEntries, deferChip, deferHint, onRemoveDefer } = useDeferQueueRows(sessionIdRef)
 const {
   cmdOpen,
   cmdType,
@@ -453,20 +446,20 @@ const {
   handleArrowUp,
   handleArrowDown,
   resetBrowsing,
-  isBrowsing,
+  isBrowsingFor,
+  getSavedDraft,
   attachedItems,
   refreshAttachedItems,
   onRemoveContextChip,
   onDragOver,
   onDragLeave,
   onDrop,
-  fork,
-  handoff,
   staging,
-  // [u5b] onSteer 解构退役：Enter 路由收口在分发器（onSend 内部 steer 分支），组件内无直调消费方
   onFollowUp,
   onAbort,
   onSend,
+  // [u3c] 队列条目撤销/回收的文本回草稿（useQueueRows 的 restoreDraft 注入）
+  restoreToDraft,
   sendRoute,
   sendButtonState,
   canSubmit,
@@ -476,6 +469,11 @@ const {
   // 传 ComposerInput suppressTriggers——bash 模式下 $/#/@/ 全部不触发浮层（设计 D6 豁免）
   isBashMode,
 } = shell
+
+// [u3c/D7] 队列区行（session.delivery 帧投影）+ 撤销/重试编排（行数约束拆出 useQueueRows；
+// 依赖 shell 的 restoreToDraft，故在解构后调用）
+const { rows: queueRows, hint: queueHint, onCancelEntry: onCancelQueueEntry, onRetryEntry: onRetryQueueEntry } =
+  useQueueRows(sessionIdRef, { restoreDraft: restoreToDraft })
 
 // composer-box 聚焦态 + 聚焦环视觉（v6 §6.1 .focused）：从本组件拆出（script 行数约束，
 // 见 composer-focus-ring.ts）；依赖 shell 的 boxClass/staging，故在解构后调用
@@ -488,8 +486,11 @@ watch(
   () => props.sessionId,
   (newId, oldId) => {
     if (oldId) {
-      // browsing 态 getText() 返回历史条目，存用户实际输入
-      drafts.saveDraft(oldId, isBrowsing.value ? (draft.value || '') : (inputRef.value?.getText() ?? ''))
+      // browsing 态 getText() 已被历史条目替换，用户真实输入存在 history navState.savedDraft。
+      // browsing 判定与草稿读取都按旧 sid 显式取分区——watch 回调触发时 sessionIdRef 已指向
+      // 新 session，isBrowsing 只能读到新分区恒 false（R2-A6：此前该分支恒死、存入的恒是
+      // 历史条目文本，用户切回后草稿不可见、重新输入即永久丢失）。
+      drafts.saveDraft(oldId, isBrowsingFor(oldId) ? getSavedDraft(oldId) : (inputRef.value?.getText() ?? ''))
     }
     // 切 session 退出活跃 staging 模式（fork/handoff），避免来源残留指向错误 session
     staging.exit()
@@ -525,7 +526,7 @@ function onInputChange(text: string): void {
 const { composing } = useCompositionFlag()
 
 /** 键盘分发（composer-keydown.ts，U02 拆出）：staging 优先 ⏎ 提交（fork/handoff，含 streaming 中）；
- *  ⏎ / Alt+⏎ 全部汇入统一发送分发器（D6，u5b——Enter 按 sessionPhase 路由 direct/steer/defer；
+ *  ⏎ / Alt+⏎ 全部汇入统一发送分发器（D6，u5b——Enter 按 sessionPhase 路由 direct/steer/queued；
  *  Alt+⏎ 保留 followUp 语义：steer 路由行走 followUp 下一轮，其余经分发器）；⇧⏎ 换行，↑/↓ 翻历史。
  *  命令浮层 open 时优先路由到浮层。[HISTORICAL] isActive→onSteer 与 isCompacting→onSend 两套
  *  分散判定（优先级倒挂根因）已退役，路由判定收口在 useComposerSend（core dispatch/send）。 */
@@ -584,16 +585,4 @@ const composerInputDeps: ComposerInputDeps = {
   t: (key: string) => t(key),
 }
 provide(ComposerInputDepsKey, composerInputDeps)
-
-// Fork/Handoff 模式 API 暴露：modeRef 是 {value} 包装对象（非 ref 不被 defineExpose 解包）
-defineExpose({
-  forkMode: fork.forkModeRef,
-  enterForkMode: fork.enterForkMode,
-  exitForkMode: fork.exitForkMode,
-  handoffMode: handoff.handoffModeRef,
-  enterHandoffMode: handoff.enterHandoffMode,
-  exitHandoffMode: handoff.exitHandoffMode,
-  // 派生提交守卫（ref 解包为 boolean）：测试断言 staging 双发锁 / streaming 放行分支用
-  canSubmit,
-})
 </script>

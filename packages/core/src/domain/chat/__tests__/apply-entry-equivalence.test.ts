@@ -27,7 +27,7 @@
  * 运行：cd packages/core && pnpm exec vitest run src/domain/chat/__tests__/apply-entry-equivalence.test.ts
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { effectScope } from 'vue'
+import { effectScope, toRaw } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { replayEntries } from '../apply-entry'
 import type { ChatViewState, PiEntry } from '../apply-entry'
@@ -35,6 +35,13 @@ import { toRenderItems } from '../message-turns'
 import type { RenderItem } from '../message-turns'
 import { createChatStore } from '../store'
 import type { ChatStoreInstance } from '../store'
+// [u3b 内核回执] 显示回执链的生产实现模块：session.delivery 投影（内核单一数据源）+
+// morph 段捕获（回执按原段回填）——E5 组的 live 腿由这两个入口 + 真实 registry 帧驱动
+import {
+  captureMorphSegments,
+  replaceDeliveryProjection,
+  resetDeliveryProjectionForTest,
+} from '../effects/user-delivery'
 import type { Message, Segment, ServerMessage, SubagentRecord } from '@taiji/shared'
 import {
   convertPiHistory,
@@ -63,12 +70,57 @@ import {
 function expectDeterministic(raw: unknown[], entryIds?: string[]): ChatViewState {
   const first = replayEntries(liftHistoryToEntries(raw, entryIds))
   const second = replayEntries(liftHistoryToEntries(raw, entryIds))
-  // 全量 state（messages + clientUuidMap + orphanToolResults + 配对锚点）非消息级抽样
+  // 全量 state（messages + orphanToolResults + 配对锚点）非消息级抽样
   expect(first).toEqual(second)
   // Map 在 toEqual 中按内容比较 ✓；确定性含「无 Date.now/randomUUID 渗入」——
   // 同序列两次产出引用不同但内容全等，是 replay 重建（W21 对账）的构造性依据。
   return first
 }
+
+// ── 断言基建共享 helper（原各组逐字重复的本地副本收敛至此；只合并归一/时钟/假 id
+// 生成器等断言策略设施。各组 fixture 消息体「两侧独立手写」的等价性惯例不受影响——
+// 那条约束防的是假等价，本区不是等价性证据）────────────────────────────────────
+
+/** ms → ISO（fixture 统一 timestamp 形态） */
+const ts = (ms: number) => new Date(ms).toISOString()
+
+/** uuidv7 形态假 id（replay 侧专用 fixture 约定，模拟 pi 持久化 id 空间） */
+const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-00000000000${n}`
+
+/**
+ * id 口径澄清（全文同口径，勿误读）：真实 pi entryId = 8 位 hex（`randomUUID().slice(0, 8)`，
+ * pi 实装 generateId；uuidv7 仅用于 pi session id）——本文件 fixture 的 uuidv7 形态假 id 只是
+ * 测试内部约定（异源于真实 entryId 不影响等价性断言：归一按内容比对、id 形态本就两侧异源）。
+ * 消息撤回 U8 的 8 位 hex 形态判别见 revoke-orchestrator BARE_UUID_RE。
+ */
+
+/**
+ * 归一：剥消息 id 与 piEntryId（live 客户端前缀 id / reducer e<N> 派生 vs replay pi
+ * uuidv7 entry id——id 空间异源属 W21 已裁决差异类，等价性按内容断言）。
+ * 剥除后回填占位 id，保持 ChatViewState 形态（对比内容不受影响——两侧同规则剥除 + 同占位）。
+ */
+function normalizeIds(state: ChatViewState): ChatViewState {
+  const messages = state.messages.map(({ id: _id, piEntryId: _piEntryId, ...rest }) => ({
+    ...rest,
+    id: 'normalized',
+  })) as Message[]
+  return { ...state, messages }
+}
+
+/** turn 骨架投影（分组断言：turn 数 / user / assistants / trigger / noticeCommands / 非消息项） */
+const skeleton = (state: ChatViewState, msgs: Message[]) =>
+  toRenderItems(normalizeIds({ ...state, messages: msgs }).messages)
+    .map((item) =>
+      item.kind === 'turn'
+        ? {
+            kind: 'turn' as const,
+            user: item.turn.user?.content ?? null,
+            assistants: item.turn.assistants.map((a) => a.content),
+            trigger: item.turn.trigger ?? null,
+            noticeCommands: (item.turn.notices ?? []).map((n) => n.bashExecution?.command ?? n.content),
+          }
+        : { kind: item.kind, content: item.message.content },
+    )
 
 describe('applyEntry reducer 确定性 —— 同序列两次喂入 state 全等', () => {
   it('user + assistant 文本消息（message-converter.test L6 fixture）', () => {
@@ -256,25 +308,7 @@ describe('lift 保真（shim 路径 == 直接 entry 喂入）', () => {
 // pi 落盘时刻，差值为投递延迟）均为 W21 已裁决并在各构造点注释登记的差异类——归一只
 // 剥 id/piEntryId，timestamp 两侧 fixture 用同值隔离无关变量。
 describe('live ≡ reload 构造性等价（W6 全类型）', () => {
-  /** ms → ISO（fixture 统一 timestamp 形态） */
-  const ts = (ms: number) => new Date(ms).toISOString()
-
-  /** uuidv7 形态假 id（replay 侧专用，模拟 pi 持久化 id 空间） */
-  const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-00000000000${n}`
-
-  /**
-   * 归一：剥消息 id 与 piEntryId（live 客户端前缀 id / reducer e<N> 派生 vs replay pi
-   * uuidv7 entry id——id 空间异源属 W21 已裁决差异类，等价性按内容断言）。
-   */
-  // 剥除 id/piEntryId（uuidv7 异源差异）后回填占位 id，保持 ChatViewState 形态
-  // （对比内容不受影响——两侧同规则剥除 + 同占位）
-  function normalizeIds(state: ChatViewState): ChatViewState {
-    const messages = state.messages.map(({ id: _id, piEntryId: _piEntryId, ...rest }) => ({
-      ...rest,
-      id: 'normalized',
-    })) as Message[]
-    return { ...state, messages }
-  }
+  // ts / piId / normalizeIds / skeleton 用文件级共享 helper（见「断言基建共享 helper」区）
 
   /** live 侧 entry 序列：各构造点真实 id 形态（appendUser u- / bashResultEffect bash- / customStart cm- / compactionSummary cmp- / message_end 无 id） */
   const liveEntries: PiEntry[] = [
@@ -349,9 +383,10 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
   })
 
   it('E3: abort 等价（D1 closure——sendBash 解除丢弃后真实 cancelled 结果照常发布 entry 化，两侧同位同值）', () => {
-    // 语义链（dispatcher D1 closure 修订 + bash-effects 哨兵帧分支）：
-    // 用户 abort bash → abortBash 广播哨兵帧 bashResult{command:'', cancelled:true}
-    // → bashResultEffect 只清 executingBash 不产 entry；sendBash await 返回后 token 虽被
+    // 语义链（dispatcher D1 closure 修订 + abortBash 兜底终态独立帧 message.bashAborted，
+    // msg-pipeline-debloat D4-3）：
+    // 用户 abort bash → abortBash 广播 message.bashAborted
+    // → bashAbortedEffect 只清 executingBash 不产 entry；sendBash await 返回后 token 虽被
     // 旋转但**不再跳过**——真实 cancelled 结果（bash-executor abort 返回 cancelled 结果
     // 而非 throw）经双分支发布 → bashResultEffect entry 化。pi 侧 recordBashResult 同数据
     // 落盘 → live/replay 同位（run 级联末）同值，原登记例外①（live 无 / 文件有）消灭。
@@ -379,31 +414,18 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
 
     // ② 分组骨架一致：cancelled bash 是 turn 内 inline notice（W3 规则），两侧 turn 数 /
     //    user / assistants / notices 全等（含 noticeCommands——不再需要剥离分歧点）
-    const skeleton = (state: ChatViewState) =>
-      toRenderItems(normalizeIds(state).messages)
-        .map((item) =>
-          item.kind === 'turn'
-            ? {
-                kind: 'turn' as const,
-                user: item.turn.user?.content ?? null,
-                assistants: item.turn.assistants.map((a) => a.content),
-                trigger: item.turn.trigger ?? null,
-                noticeCommands: (item.turn.notices ?? []).map((n) => n.bashExecution?.command ?? n.content),
-              }
-            : { kind: item.kind, content: item.message.content },
-        )
-    expect(skeleton(liveState)).toEqual(skeleton(replayState))
-    expect(skeleton(liveState)).toHaveLength(2) // 两个 user 锚 turn
-    expect(skeleton(liveState)[0]).toMatchObject({ kind: 'turn', noticeCommands: ['sleep 300'] }) // cancelled 归首 turn notices
+    expect(skeleton(liveState, liveState.messages)).toEqual(skeleton(replayState, replayState.messages))
+    expect(skeleton(liveState, liveState.messages)).toHaveLength(2) // 两个 user 锚 turn
+    expect(skeleton(liveState, liveState.messages)[0]).toMatchObject({ kind: 'turn', noticeCommands: ['sleep 300'] }) // cancelled 归首 turn notices
   })
 
   it('E3b: transport 抛错例外锁定（收窄后唯一残余分歧——abort 且 await 抛错时 live 无 cancelled entry、pi 独立落盘有）', () => {
     // 语义链（收窄例外，dispatcher catch 分支维持 skip）：abort 后 sendBash await **抛错**
     // （transport 断 / pi 死——与正常 resolve 的 cancelled result 不同路径）→ 无真实数据可
-    // 发布，catch 守卫跳过（哨兵帧已清态）。pi 进程若独立存活仍 recordBashResult 落盘 →
+    // 发布，catch 守卫跳过（bashAborted 帧已清态）。pi 进程若独立存活仍 recordBashResult 落盘 →
     // 重开侧多一条 cancelled bash 记录。触发条件「abort 且 transport 抛错」——比原例外①
     // 「任何 abort」窄，登记 data-source-registry #7。
-    // live 侧：无 bash entry（哨兵帧不产 entry、catch 无数据）
+    // live 侧：无 bash entry（bashAborted 帧不产 entry、catch 无数据）
     const liveState = replayEntries([
       { type: 'message', id: 'u-1', parentId: null, timestamp: ts(1000), message: { role: 'user', content: [{ type: 'text', text: '跑个长命令' }], timestamp: 1000 } },
       { type: 'message', id: undefined, parentId: null, timestamp: ts(2000), message: { role: 'assistant', content: [{ type: 'text', text: '执行中' }], timestamp: 2000 } },
@@ -427,19 +449,6 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
 
     // ② 分组不因它变化：turn 骨架（turn 数 / user / assistants / trigger）两侧一致，
     //    差异仅首 turn 的 notices 多一条——bash 是 inline notice，不影响 turn 边界
-    const skeleton = (state: ChatViewState, msgs: Message[]) =>
-      toRenderItems(normalizeIds({ ...state, messages: msgs }).messages)
-        .map((item) =>
-          item.kind === 'turn'
-            ? {
-                kind: 'turn' as const,
-                user: item.turn.user?.content ?? null,
-                assistants: item.turn.assistants.map((a) => a.content),
-                trigger: item.turn.trigger ?? null,
-                noticeCommands: (item.turn.notices ?? []).map((n) => n.bashExecution?.command ?? n.content),
-              }
-            : { kind: item.kind, content: item.message.content },
-        )
     const liveSkeleton = skeleton(liveState, liveState.messages)
     const replaySkeleton = skeleton(replayState, replayState.messages)
     expect(liveSkeleton).toHaveLength(2) // 两个 user 锚 turn，两侧一致
@@ -755,29 +764,46 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
   })
 })
 
-// ── steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 表述修正 + §4 AC-7）──
+// ── steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + §4 AC-7）→ [投递所有权内核 u3b] 机制迁移 ──
 //
-// 锁定对象：steer/followUp 投递的用户气泡。live 侧走**真实 store + applyMessageEvent**
-// （真 registry 腿 1 / 腿 2 消费链，custom-start-equivalence 同款范式），重放侧 = 同内容
-// pi 持久化 entry（uuidv7 id）直接 replayEntries——归一后逐字段 deep-equal。
+// 锁定对象（断言强度不变）：steer/followUp 等非 direct 车道投递的用户气泡，live 通路与
+// reload 通路逐字段等价。live 侧走**真实 store + 真实 registry 回执链 + session.delivery
+// 投影**（applyMessageEvent，custom-start-equivalence 同款范式），重放侧 = 同内容 pi 持久化
+// entry（uuidv7 id）直接 replayEntries——归一后逐字段 deep-equal。
 //
-// [D3 表述修正] 腿 2 插入与重放投影是**形态同构、id 异源**：live ref 气泡 id 是 appendUser
-// 客户端 `u-<uuid>`（clientUuid 契约），重放投影 id 是 pi uuidv7 entry id——属 W21 已裁决
-// 差异类。归一只剥 id / piEntryId / timestamp 三异源字段，**断言 id 异源形态而非相等**；
-// timestamp 用时钟窗容差（ref 侧 = appendUser 客户端时钟，重放侧 = pi 落盘时刻，差值为
-// 投递延迟）。其余字段（role / content segments / status / contentBlocks …）逐字段相等。
+// [u3b 机制迁移] 前身三腿（腿 1 queue_update 计数差集 → drainN / 腿 2 includes 兜底 / defer
+// 分区 FIFO）随 defer 队列与 pendingBuffer 计数腿整体退役（设计 §3.1 删除面；D7 队列区数据源
+// 改 session.delivery 状态帧单一源）。新机制的两条显示通路与原三例职责一一对应：
+// - morph 回填（E5a/E5c）：统一 submit 的乐观气泡（appendUser，原 segments 引用）→
+//   session.delivery 帧非 direct 车道 morph（truncateFrom 移出对话流 + captureMorphSegments
+//   捕获原段）→ message_end(user) 裸标记 id 命中投影条目 → appendUser(原 segments) 回填
+//   （非降级恢复）。morph 编排的锁定点 = useChat.test.ts「session.delivery 帧消费与气泡
+//   morph」组（本文件只驱动同一组原语，不复制编排）。
+// - 纯文本降级（E5b）：无本地乐观气泡的投递（外来注入 / reattach 恢复形态——前身 = 腿 2
+//   includes 兜底的职责域）→ 回执命中投影且无 morph 段 → 按 reload 投影同规则剥标记入流。
 //
-// 内容前提（P2 探针 ✅）：plain 文本下入队文本 = 投递 contentText = 帧数组文本三处同源，
-// 故提交 segments 与重放投影内容恒等。已知例外：file/mention 徽章 segments 无法从 entry
-// 反解（重开降级纯文本，D5 已裁决维持现状 + segments sidecar 回填）——不进本组断言范围。
+// [D3 表述修正] live ref 气泡 id 是 appendUser 客户端 `u-<uuid>`（clientUuid 契约），重放投影
+// id 是 pi uuidv7 entry id——属 W21 已裁决差异类。归一只剥 id / piEntryId / timestamp 三异源
+// 字段，**断言 id 异源形态而非相等**；timestamp 用时钟窗容差（ref 侧 = appendUser 客户端时钟，
+// 重放侧 = pi 落盘时刻，差值为投递延迟）。其余字段（role / content segments / status /
+// contentBlocks …）逐字段相等。
+//
+// 内容前提（P2 探针 ✅ + u3b 契约桥）：帧文本尾 = 投递文本 + `\n<!--taiji:msg:<id>-->` 裸标记
+// （标记 id = 条目 clientUuid 去 u- 前缀；u- 原文形态同样命中，见 effects/user-delivery 双形态
+// 收口）。已知例外：file/mention 徽章 segments 无法从 entry 反解（重开降级纯文本，D5 已裁决
+// 维持现状 + segments sidecar 回填）——不进本组断言范围。
 describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + AC-7）', () => {
-  beforeEach(() => setActivePinia(createPinia()))
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    // 内核投影是模块级 per-session 分区（ADR-0049 键控纪律）：用例间必须复位，否则上一用例
+    // 的条目会让裸标记回执误命中（跨用例污染）。
+    resetDeliveryProjectionForTest()
+  })
 
-  /** ms → ISO（fixture 统一 timestamp 形态） */
-  const ts = (ms: number) => new Date(ms).toISOString()
-
-  /** uuidv7 形态假 id（重放侧专用，模拟 pi 持久化 id 空间；独立于 W6 块的同形 helper） */
-  const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-0000000000${n}0`
+  // ts 用文件级共享 helper；本组假 id 保留异形本地副本（尾组编码 = n×10，与共享版不同形，
+  // 独立命名防混淆——不强行并入共享参数化，保 id 形态覆盖面）
+  /** uuidv7 形态假 id（重放侧专用，模拟 pi 持久化 id 空间） */
+  const steerPiId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-0000000000${n}0`
 
   /** 构造独立 store 实例（effectScope 包裹 onScopeDispose 注册 + 测试隔离）。 */
   function makeStore(): { store: ChatStoreInstance; dispose: () => void } {
@@ -787,8 +813,9 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
   }
 
   /** message_end(user) 帧构造（event-adapter handleMessageEnd 重构形态：entry **无 id**——
-   * pi 在 emit 之后才 appendMessage 分配 uuidv7；content parts 数组为 P2 探针实证形态）。 */
-  function userEndFrame(sid: string, text: string, at: number): ServerMessage {
+   * pi 在 emit 之后才 appendMessage 分配 uuidv7；content parts 数组为 P2 探针实证形态）。
+   * markerId 非空时按内核出站形态在文本尾附加裸标记（`\n<!--taiji:msg:<id>-->`）。 */
+  function userEndFrame(sid: string, text: string, at: number, markerId?: string): ServerMessage {
     return {
       type: 'message.message_end',
       payload: {
@@ -797,7 +824,11 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
           type: 'message',
           parentId: null,
           timestamp: ts(at),
-          message: { role: 'user', content: [{ type: 'text', text }], timestamp: at },
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: markerId ? `${text}\n<!--taiji:msg:${markerId}-->` : text }],
+            timestamp: at,
+          },
         },
       },
     } as ServerMessage
@@ -812,6 +843,27 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
       timestamp: ts(at),
       message: { role: 'user', content: [{ type: 'text', text }], timestamp: at },
     }
+  }
+
+  /** session.delivery 帧条目落位（handleSessionDelivery 第一步 = replaceDeliveryProjection，
+   *  D7 单一数据源——回执的命中依据） */
+  function seedDeliveryEntry(
+    sid: string,
+    clientUuid: string,
+    lane: 'direct' | 'steer' | 'queued',
+  ): void {
+    replaceDeliveryProjection(sid, [{ clientUuid, preview: 'p', state: 'in-flight', lane }])
+  }
+
+  /** 非 direct 车道 morph（handleSessionDelivery 第二步：气泡移出对话流 + 原 segments 捕获；
+   *  编排锁定点见 useChat.test.ts「session.delivery 帧消费与气泡 morph」组）。返回捕获引用。 */
+  function morphBubbleOut(store: ChatStoreInstance, sid: string, clientUuid: string): Segment[] {
+    const bubble = store.getMessages(sid).find((m) => m.id === clientUuid)
+    expect(bubble, 'morph 前乐观气泡应在对话流中（appendUser 契约：气泡 id = clientUuid）').toBeDefined()
+    const segments = toRaw(bubble!.content) as Segment[]
+    store.truncateFrom(sid, clientUuid, true)
+    captureMorphSegments(sid, clientUuid, segments)
+    return segments
   }
 
   /** ref 气泡归一：剥 W21 已裁决三异源字段——id（live u-<uuid> vs 重放 uuidv7）、piEntryId
@@ -840,32 +892,36 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     expect(replay.timestamp).toBe(replayTs)
   }
 
-  it('E5a: 腿 2 includes 消费（drainN 回填 segments）ref 气泡 ≡ 重放投影——F1 兜底路径', () => {
+  it('E5a: morph 段回执（captureMorphSegments 捕获）ref 气泡 ≡ 重放投影——非降级恢复路径', () => {
     const s = makeStore()
-    const sid = 's-leg2-segments'
+    const sid = 's-morph-segments'
     const text = 'streaming 中追加的补充说明'
     const segments: Segment[] = [{ type: 'text', text }]
-    // live 前置链：提交 steer 暂存 → pi 入队帧写快照（F1：splice 失败 / drain 帧未达——
-    // 快照停留于入队帧，投递时腿 1 无 prev，显示由腿 2 兜底）
-    s.store.pushPending(sid, segments, 'steer')
-    s.store.applyMessageEvent(sid, {
-      type: 'message.queue_update',
-      payload: { sessionId: sid, steering: [text], pendingMessageCount: 1 },
-    } as ServerMessage)
+    // live 前置链：统一 submit 乐观气泡（appendUser + inflight 占位）→ 内核判定非 direct 车道
+    // → session.delivery 帧 morph（气泡移出对话流，原段暂存待回执回填）
+    const bubbleId = s.store.appendUser(sid, segments)
+    s.store.incrementInflight(sid, 1)
+    seedDeliveryEntry(sid, bubbleId, 'steer')
+    expect(morphBubbleOut(s.store, sid, bubbleId)).toBe(segments)
+    expect(s.store.getMessages(sid).some((m) => m.id === bubbleId)).toBe(false)
 
-    // pi 投递：message_end(user) 帧到达 → inflight 0 → includes 命中 → drainN 回填 segments
+    // 内核送达：message_end(user) 帧携带裸标记（标记 id = clientUuid 去 u- 前缀）→ ① 命中投影
+    // → 原 segments 回填入流
     const t0 = Date.now()
-    s.store.applyMessageEvent(sid, userEndFrame(sid, text, t0))
+    s.store.applyMessageEvent(sid, userEndFrame(sid, text, t0, bubbleId.slice(2)))
     const t1 = Date.now()
 
-    // G1 用户可见：气泡恰一条（G2：segments 回填非降级）
+    // G1 用户可见：气泡恰一条（G2：segments 回填非降级，且引用原样搬运——badge 不丢）
     const refUsers = s.store.getMessages(sid).filter((m) => m.role === 'user')
     expect(refUsers).toHaveLength(1)
     const live = refUsers[0]!
     expect(live).toMatchObject({ role: 'user', status: 'complete', content: segments })
+    expect(toRaw(live.content)).toBe(segments)
+    // 投递占位由回执回收（本帧即其确认帧；② 计数兜底不再重复扣）
+    expect(s.store.getInflight(sid)).toBe(0)
 
     // 重放投影：同内容持久化 entry（uuidv7 id，pi 落盘 timestamp = 帧 timestamp）
-    const replayState = replayEntries([persistedUserEntry(piId(1), text, t0)])
+    const replayState = replayEntries([persistedUserEntry(steerPiId(1), text, t0)])
     expect(replayState.messages.filter((m) => m.role === 'user')).toHaveLength(1)
     const replay = replayState.messages[0]!
 
@@ -876,7 +932,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     // reducer 权威镜像同构：live 侧帧 entry（无 id → 位置派生 e<N>）与重放（uuidv7）
     // 剥 id/piEntryId 后逐字段一致——timestamp 两侧 fixture 同值可直比（差异只在 ref 侧
     // appendUser 客户端时钟，上方窗断言已覆盖）。此维度对三条路径共用（message_end 帧
-    // 恒先喂 reducer，E5b/E5c 不再重复）。
+    // 恒先喂 reducer，E5c 不再重复）。
     const liveReducer = s.store.testInternals._entryStatesForTest.get(sid)!.messages
     expect(liveReducer).toHaveLength(1)
     const { id: _li, piEntryId: _lp, ...liveReducerMsg } = liveReducer[0]!
@@ -885,19 +941,19 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     s.dispose()
   })
 
-  it('E5b: 腿 2 纯文本降级（暂存空 → 帧内文本插入）ref 气泡 ≡ 重放投影——多 text part 拼接同源', () => {
+  it('E5b: 无本地气泡的投递（外来注入形态）→ 纯文本降级入流 ref 气泡 ≡ 重放投影——多 text part 拼接同源', () => {
     const s = makeStore()
-    const sid = 's-leg2-plain'
-    // 暂存空（扩展 deliverAs 注入场景）：pendingBuffer 无货 → drainN 取空 → 纯文本降级。
+    const sid = 's-foreign-plain'
+    // 外来条目（session_manager send / 收养形态）：内核投影有条目、renderer 无乐观气泡
+    //（未经本地 submit → 无 appendUser、无 morph 段）——显示责任由回执的纯文本降级分支
+    // 承接（前身 = 腿 2 includes 兜底的职责域）。clientUuid 用内核裸 uuid 形态。
+    const foreignId = '3f2504e0-4f89-41d3-9a0c-0305e82c3301'
+    seedDeliveryEntry(sid, foreignId, 'steer')
     // 帧内容用多 text part：live extractUserContentText 顺序拼接与重放 reducer
     // collectTextPart 累加是同语义（apply-entry-convert，P2：pi 不 trim）
     const joined = 'first part ' + 'second part'
-    // 快照含拼接文本（入队帧数组文本 = 投递 contentText，P2 三处同源）
+    const marker = `\n<!--taiji:msg:${foreignId}-->`
     const t0 = Date.now()
-    s.store.applyMessageEvent(sid, {
-      type: 'message.queue_update',
-      payload: { sessionId: sid, followUp: [joined], pendingMessageCount: 1 },
-    } as ServerMessage)
     s.store.applyMessageEvent(sid, {
       type: 'message.message_end',
       payload: {
@@ -908,7 +964,10 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
           timestamp: ts(2000),
           message: {
             role: 'user',
-            content: [{ type: 'text', text: 'first part ' }, { type: 'text', text: 'second part' }],
+            content: [
+              { type: 'text', text: 'first part ' },
+              { type: 'text', text: 'second part' + marker },
+            ],
             timestamp: 2000,
           },
         },
@@ -919,67 +978,84 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
     const refUsers = s.store.getMessages(sid).filter((m) => m.role === 'user')
     expect(refUsers).toHaveLength(1)
     const live = refUsers[0]!
-    // G2 降级形态：帧内拼接文本包成单 text segment（降级可见不静默）
+    // G2 降级形态：拼接文本包成单 text segment（降级可见不静默）
     expect(live.content).toEqual([{ type: 'text', text: joined }])
+    // 显示层纯度：内核裸标记不入气泡文本（与 reload 投影同规则剥离；上一条 toEqual 已含
+    // 全等语义，此处对标记字面量再显式断言一条，防后续断言弱化时标记泄漏回气泡）
+    expect(JSON.stringify(live.content)).not.toContain('<!--taiji:msg:')
 
-    // 重放侧独立构造（本文件惯例：两侧消息体独立手写不共享字面量）：同内容多 part entry
+    // 重放侧独立构造（本文件惯例：两侧消息体独立手写不共享字面量）：同内容多 part entry。
+    // pi 落盘文本同样携带标记（标记随文本进 transcript），重放投影剥标记后与本侧同形——
+    // 两侧剥标记同点同规则（apply-entry-convert DEFER_FLUSH_MARKER_RE 复用）即本断言对象。
     const replayState = replayEntries([{
       type: 'message',
-      id: piId(2),
+      id: steerPiId(2),
       parentId: null,
       timestamp: ts(2000),
       message: {
         role: 'user',
-        content: [{ type: 'text', text: 'first part ' }, { type: 'text', text: 'second part' }],
+        content: [
+          { type: 'text', text: 'first part ' },
+          { type: 'text', text: 'second part' + `\n<!--taiji:msg:3f2504e0-4f89-41d3-9a0c-0305e82c3301-->` },
+        ],
         timestamp: 2000,
       },
     }])
     const replay = replayState.messages[0]!
 
     expect(stripHetero(live)).toEqual(stripHetero(replay))
-    // timestamp 异源容差：live 客户端时钟窗 / 重放 pi 落盘时刻 2000（fixture 值），不直比
-    expectIdShapeAndTsWindow(live, replay, [t0, t1], 2000)
+    // [消息撤回 U8] id 保号（外来形态单列断言，不走共享 helper 的 u- 形态断言）：live
+    // 气泡 id = 内核条目 clientUuid（外来形态为裸 uuid——保号语义优先于 u- 形态约束，
+    // store.appendUser 注释）；重放 id 沿用 fixture entry id（形态独立于真实 pi entryId
+    // 的 8 位 hex 口径），异源不等
+    expect(live.id).toBe(foreignId)
+    expect(replay.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(live.id).not.toBe(replay.id)
+    // timestamp 异源容差（共享 helper 同款断言）：live 客户端时钟窗 / 重放 pi 落盘时刻 2000
+    expect(live.timestamp).toBeGreaterThanOrEqual(t0)
+    expect(live.timestamp).toBeLessThanOrEqual(t1)
+    expect(replay.timestamp).toBe(2000)
+
+    // reducer 权威镜像同构（多 text part 拼接 + 标记剥离两处同源点的直接断言）
+    const liveReducer = s.store.testInternals._entryStatesForTest.get(sid)!.messages
+    expect(liveReducer).toHaveLength(1)
+    const { id: _li, piEntryId: _lp, ...liveReducerMsg } = liveReducer[0]!
+    const { id: _ri, piEntryId: _rp, ...replayMsg } = replay
+    expect(liveReducerMsg).toEqual(replayMsg)
     s.dispose()
   })
 
-  it('E5c: 腿 1（queue_update drain → drainN FIFO 回填）ref 气泡 ≡ 重放投影；确认帧抵消无双插', () => {
+  it('E5c: 回执入流后迟到确认帧不双插（① 已 delivered 拒命 + ② 计数兜底）ref 气泡 ≡ 重放投影', () => {
     const s = makeStore()
-    const sid = 's-leg1-eq'
+    const sid = 's-receipt-idempotent'
     const text = '注意用中文回复'
     const segments: Segment[] = [{ type: 'text', text }]
-    s.store.pushPending(sid, segments, 'steer')
-    s.store.applyMessageEvent(sid, {
-      type: 'message.queue_update',
-      payload: { sessionId: sid, steering: [text], pendingMessageCount: 1 },
-    } as ServerMessage)
-    // pi 投递：drain 帧先于 message_end（P1）——countDrained 差集 1 → drainN FIFO 取出
-    // → appendUser（segments 原引用入流）；投递侧不裁剪（D4），buffer 清空由 drainN 自身完成
-    const d0 = Date.now()
-    s.store.applyMessageEvent(sid, {
-      type: 'message.queue_update',
-      payload: { sessionId: sid, steering: [], pendingMessageCount: 0 },
-    } as ServerMessage)
-    const d1 = Date.now()
+    // live 前置链：统一 submit 乐观气泡 → queued 车道帧 morph（气泡移出，段暂存）
+    const bubbleId = s.store.appendUser(sid, segments)
+    s.store.incrementInflight(sid, 1)
+    seedDeliveryEntry(sid, bubbleId, 'queued')
+    morphBubbleOut(s.store, sid, bubbleId)
 
-    const refUsers = s.store.getMessages(sid).filter((m) => m.role === 'user')
-    expect(refUsers).toHaveLength(1)
-    const live = refUsers[0]!
-    // 腿 1 消费置确认配额（D2 维护点 1：已显示待 message_end 确认）
-    expect(s.store.getInflight(sid)).toBe(1)
-
-    // 确认帧到达（正常路径后置）：inflight 抵消零动作——不查 includes、不再 appendUser
-    //（多插盯防：AC-1 的 D2 互斥裁决在等价性用例里的直接表现）
+    // 内核送达回执（首个确认帧）：投影转 delivered + 段回填入流 + 占位回收
     const t0 = Date.now()
-    s.store.applyMessageEvent(sid, userEndFrame(sid, text, t0))
+    s.store.applyMessageEvent(sid, userEndFrame(sid, text, t0, bubbleId.slice(2)))
+    const t1 = Date.now()
     expect(s.store.getInflight(sid)).toBe(0)
     expect(s.store.getMessages(sid).filter((m) => m.role === 'user')).toHaveLength(1)
+    const live = s.store.getMessages(sid).filter((m) => m.role === 'user')[0]!
 
-    // 腿 1 ref 气泡 vs 同 entry 重放投影（ref timestamp = drain 帧消费点时钟，窗口取 d0/d1）
-    const replayState = replayEntries([persistedUserEntry(piId(3), text, t0)])
+    // 迟到重复确认帧（pi 重复事件 / 帧重放形态）：① 条目已 delivered 不命中 → ② 计数兜底
+    // （inflight 已归零 → 零动作）——不二次入流（多插盯防 = 前身「确认帧抵消无双插」同判据）
+    s.store.applyMessageEvent(sid, userEndFrame(sid, text, t0, bubbleId.slice(2)))
+    expect(s.store.getMessages(sid).filter((m) => m.role === 'user')).toHaveLength(1)
+    expect(s.store.getInflight(sid)).toBe(0)
+
+    // 回执 ref 气泡 vs 同 entry 重放投影（ref timestamp = 回执 appendUser 点时钟，窗口 t0/t1）
+    const replayState = replayEntries([persistedUserEntry(steerPiId(3), text, t0)])
     const replay = replayState.messages[0]!
     expect(stripHetero(live)).toEqual(stripHetero(replay))
     expect(live).toMatchObject({ role: 'user', status: 'complete', content: segments })
-    expectIdShapeAndTsWindow(live, replay, [d0, d1], t0)
+    expectIdShapeAndTsWindow(live, replay, [t0, t1], t0)
     s.dispose()
   })
 })
@@ -997,7 +1073,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
 // toolCallId」。entry 按生产构造点形态手写（tool_call_end：event-adapter
 // handleToolExecutionEnd；message_end：handleMessageEnd——同内容同构、均无 entry id）。
 describe('双入口等价（R2-TC S1）——同 toolCallId 双帧喂入 ≡ 单帧喂入', () => {
-  const ts = (ms: number) => new Date(ms).toISOString()
+  // ts 用文件级共享 helper（见「断言基建共享 helper」区）
 
   const assistantWithTc1: PiEntry = {
     type: 'message',
@@ -1086,19 +1162,7 @@ describe('双入口等价（R2-TC S1）——同 toolCallId 双帧喂入 ≡ 单
 // 同一 reducer 承担：live 累积（分区最终内容）与重开重放（get_entries 全量重放）对
 // 同一 entry 序列，经同一窗口函数投影后必得同一页。
 describe('预算窗口内 live ≡ reload（u6 re-scope）', () => {
-  /** ms → ISO（fixture 统一 timestamp 形态；独立于 W6 块的同形 helper） */
-  const ts = (ms: number) => new Date(ms).toISOString()
-  /** uuidv7 形态假 id（replay 侧专用；独立于 W6 块的同形 helper） */
-  const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-00000000000${n}`
-
-  /** 归一（W6 同款：剥消息 id 与 piEntryId 后回填占位，uuidv7 异源差异类） */
-  function normalizeIds(state: ChatViewState): ChatViewState {
-    const messages = state.messages.map(({ id: _id, piEntryId: _piEntryId, ...rest }) => ({
-      ...rest,
-      id: 'normalized',
-    })) as Message[]
-    return { ...state, messages }
-  }
+  // ts / piId / normalizeIds 用文件级共享 helper（见「断言基建共享 helper」区）
 
   it('W1: 同序列两侧各自经预算窗口投影后仍 deep-equal（窗口外翻页恢复，不在等价域）', () => {
     // 多 turn 序列（每条 user 开新 turn），体量超默认窗口（RECENT_TURNS=20）——
@@ -1343,18 +1407,15 @@ describe('[two-state-convergence U7] subagent-record 轮终翻边 entry 序列�
 // plan-state 是 extension appendEntry 落盘的 type:'custom' 纯数据 entry（D1 schema：旧四
 // 字段 isActive/planFilePath/requirement/templateName；新七字段 + skills/docs/reviewState
 // 三 optional——D4 字段级判存在兼容）。两条通路的对话流语义：
-// - live：event-adapter 白名单（u1-proj）认出后走 record-entry-appended 失效信号 → runtime
+// - live：event-adapter 对任意 string customType 产出失效信号（D5 放宽）→ runtime
 //   scanPlanStateEntries 派生 → stateSnapshot('plan') 独立通道——不经 message_end 进对话流
 //   reducer（D1 显式决策：plan 不进 chat reducer）；
-// - reload：get_entries 重放序列含 plan-state entry → reducer case 'custom' 对非
-//   taiji.client-msg-id 早退（no-op），同样零对话流投影。
+// - reload：get_entries 重放序列含 plan-state entry → reducer case 'custom' 纯数据
+//   no-op（跳过语义，D6-4 死簿记删除后对所有 customType 一致），同样零对话流投影。
 // 「live ≡ reload 对话流呈现一致」由「reload 侧多出的 entry 被 reducer 忽略」构造性成立，
 // 本组钉住且断言新旧两种 schema 行为一致（schema 扩展不改对话流——plan 投影走独立通道）。
 describe('plan-state entry：不进对话流，live ≡ reload 构造性（A7）', () => {
-  /** ms → ISO（fixture 统一 timestamp 形态；独立于 W6 块的同形 helper） */
-  const ts = (ms: number) => new Date(ms).toISOString()
-  /** uuidv7 形态假 id（reload 侧专用，模拟 pi 持久化 id 空间） */
-  const piId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-00000000000${n}`
+  // ts / piId / normalizeIds 用文件级共享 helper（见「断言基建共享 helper」区）
 
   /** 旧四字段 plan-state entry（JSONL 落盘形态：type:'custom'，设计 §2.1 现状实态） */
   const legacyPlanEntry: PiEntry = {
@@ -1404,15 +1465,6 @@ describe('plan-state entry：不进对话流，live ≡ reload 构造性（A7）
 
   /** reload 侧完整序列：对话流载体之间插入新旧两种 schema 的 plan-state entry */
   const reloadWithPlan: PiEntry[] = [reloadChat[0]!, legacyPlanEntry, reloadChat[1]!, extendedPlanEntry]
-
-  /** 归一（W6 同款：剥消息 id 与 piEntryId 后回填占位，uuidv7 异源差异类） */
-  function normalizeIds(state: ChatViewState): ChatViewState {
-    const messages = state.messages.map(({ id: _id, piEntryId: _piEntryId, ...rest }) => ({
-      ...rest,
-      id: 'normalized',
-    })) as Message[]
-    return { ...state, messages }
-  }
 
   it('新旧两种 schema 的 plan-state entry 均不进对话流，两 schema 对话流行为一致', () => {
     const state = replayEntries(reloadWithPlan)

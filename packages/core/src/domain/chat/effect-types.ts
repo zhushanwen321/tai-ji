@@ -13,15 +13,14 @@ import type {
   FileChange,
   PiEntry,
   Segment,
-  SteerFollowUpMode,
 } from '@taiji/shared'
-import type { RetryState, QueueState, FinalizeReason } from './store-types'
+import type { RetryState, FinalizeReason } from './store-types'
 import type { MessagesRef } from './mutations'
 
 /**
  * message.* 事件副作用上下文（store refs + 跨方法回调，模块级函数据此更新）。
  *
- * - messages/retryStates/queueStates：原 ChunkContext，chunk 状态写入目标。
+ * - messages/retryStates：原 ChunkContext，chunk 状态写入目标（[u5a] queueStates 维度退役）。
  * - applyFileChanges/markChangeSetsSuperseded：原 ChunkContext 回调（store 内合并逻辑）。
  * - finalizeSession + clearPendingSend：统一收口出口（替代 setStreaming flag 翻转）。
  */
@@ -29,7 +28,6 @@ export interface MessageEffectContext {
   /** D-1 容器范式：读数组需 `.value.get(sid)?.value ?? []`（内层是 per-session ShallowRef） */
   messages: MessagesRef
   retryStates: { value: Map<string, RetryState> }
-  queueStates: { value: Map<string, QueueState> }
   /** file_changes case 调 store.applyFileChanges（合并逻辑在 store 内） */
   applyFileChanges: (
     sessionId: string,
@@ -48,24 +46,14 @@ export interface MessageEffectContext {
   clearPendingSend: (sessionId: string) => void
   /**
    * 追加 user 消息（Segment[]，ADR-0043）。
-   * m2 阶段 queue_update 投递时经 drainN 计数 FIFO 取 segments 后 appendUser 进对话流。
+   * 可选 id：提供则气泡沿用该 id，缺省自生成 `u-<uuid>`。保号消费方 = 送达回执的两分支
+   * 入流（① morph 段 / ② 外来纯文本降级，effects/user-delivery）——重建气泡沿用提交时
+   * clientUuid，使 live 窗口（未刷新，reconcile 仅切入/重试触发）的已送达消息可按
+   * clientUuid 定位（消息撤回入口的结构前提：换号不在映射、不匹配文件末尾标记，撤回
+   * 定位双通道会构造性 miss）。乐观插入（统一提交）不传 id，保持自生成现行为。
+   * [B1 退役] 前身 queue_update 计数腿（drainN/reconcilePending）已随投递所有权内核删除。
    */
-  appendUser: (sessionId: string, segments: Segment[]) => string
-  /**
-   * [W14] queue_update 投递信号：计数 FIFO 取前 n 条 pending segments（D1 表末行 + D6）。
-   * 不按文本匹配——pi 入队存 skill 展开后文本 ≠ 提交原文，文本相等匹配必挂。
-   * queue_update handler 经 countDrained 差集算出被投递条数 N，调 drainN(sid, mode, N)。
-   */
-  drainN: (sessionId: string, sendMode: SteerFollowUpMode, n: number) => Segment[][]
-  /**
-   * [W14] 深度结构性对账（D6：深度权威 = pi pendingMessageCount，经帧数组 steering/followUp
-   * 等值投影——pendingMessageCount 字段本身投递侧裁剪移除后前端已无直接消费方）——偏差时
-   * 全量重对 pendingBuffer（见 store.reconcilePending）。
-   * [steer-bubble u2 / D4] 投递侧（queue_update 每帧）调用已移除（会吃掉腿 2 还没回填的
-   * segments，F3 不可逆放大器）；现调用点：G-023 时点（message_start(assistant)）僵尸清理
-   * （传快照深度；abort 不再调用——pi abort 不清队列，buffer 随 pi 保留，D4 修订 2026-08-30）。
-   */
-  reconcilePending: (sessionId: string, depth: number) => void
+  appendUser: (sessionId: string, segments: Segment[], id?: string) => string
   /**
    * [W21] 重构 entry 喂 store 内 per-session reducer state（applyEntry）。
    * message_end / tool_call_end 等 entry 载体帧的 handler 经此把实时 feed 喂入与文件重放
@@ -75,16 +63,12 @@ export interface MessageEffectContext {
   applyEntryFrame: (sessionId: string, entry: PiEntry) => void
   /**
    * [steer-bubble u0 / D2] per-session
-   * inflight 投递确认计数读写——语义 = **已显示待确认的投递数**（steer/followUp 气泡已
-   * 进对话流或 send 乐观插入，其确认帧 message_end(user) 未到）。不变式 ≥ 0（decrement
-   * 钳制，配额漂移不产生负值），正常路径逐投递归零。实现在 store（getInflight 等），
-   * 本单元只注入契约，消费接线归 u1（message_end 确认 −1）与 u2（腿 1 消费 +m /
-   * abort 清零）。
+   * inflight 投递确认计数读写——语义 = **已挂账待确认的投递数**（统一提交的乐观气泡其
+   * 确认帧 message_end(user) 未到）。不变式 ≥ 0（decrement 钳制，配额漂移不产生负值），
+   * 正常路径逐投递归零。实现在 store（getInflight 等）。
    */
   /** 读 per-session inflight 计数（无记录 = 0）。 */
   getInflight: (sessionId: string) => number
-  /** inflight += n（默认 1；腿 1 消费按 drainN 实取数传 m，send 乐观插入 +1）。n ≤ 0 no-op。 */
-  incrementInflight: (sessionId: string, n?: number) => void
   /** inflight -= n（默认 1；message_end(user) 确认 / send 失败回滚）。钳制 ≥ 0，归零删条目。 */
   decrementInflight: (sessionId: string, n?: number) => void
   /** inflight 清零（abort（message.complete{aborted}）挂点，D4：确认基线随队列作废）。幂等。 */

@@ -66,9 +66,10 @@ function createDelivery(port: DeliveryPort, options?: DeliveryConfig): DeliveryH
   const dedupSet = options?.dedupe ? new Set<string>() : null;
 
   function isBusy(): boolean {
+    // V2 内核（msg-pipeline-debloat D2）：busy 判定 = isIdle() 单条件——hasPendingMessages
+    // 自镜像四件套已拆除，在途队列判定内查 port 实装的 active 表，port 消费方不可见。
     try {
-      if (!port.isIdle()) return true;
-      return port.hasPendingMessages();
+      return !port.isIdle();
     } catch {
       return true;
     }

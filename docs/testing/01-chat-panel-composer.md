@@ -54,6 +54,7 @@ testid 以组件 template 内 `data-testid` / `test-id` 属性为准（下表为
 | `branch-name-error` | CreateBranchModal.vue | 新建分支名校验错误 |
 | `submit-btn` | CreateBranchModal.vue | 新建分支提交按钮 |
 | `composer-box` | Composer.vue | composer 容器（Landing + Panel 态都有） |
+| `msg-revoke-button` | packages/ui `UserBubble.vue` | hover user 气泡显示；生成中 `aria-disabled=true` + title「生成中，停止后可撤回」（消息撤回，ADR-0076） |
 
 ## 4. 状态机（useNewTaskFlow）
 
@@ -208,7 +209,7 @@ test.describe('新建任务 E2E', () => {
     // 若点 .first()（sample-project），与预填 cwd 相同 → selectWorkspace 走 noop 分支
     //（useNewTaskFlow：cwd===currentCwd 仅关 popover 不改 chip）→ 测不出回灌。
     // 故点 .nth(1)（第 2 个，fixtureSessions 去 cwd 重后 = taiji，s1/s2/s5 的 cwd
-    // ~/Code/taiji 末段）。
+    // <家目录>/Code/taiji 末段）。
     await page.getByTestId('chip-directory').click()
     await expect(page.getByTestId('dir-select-popover')).toBeVisible({ timeout: 5_000 })
     // 点第 2 个工作区（非预填的 sample-project）
@@ -725,7 +726,7 @@ testid 以组件 template 内 data-testid 属性为准。对话流相关已落�
 ```
 Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑定，不读全局 session.activeId，防 standby panel 串台）
   ├─ 检查1: segmentsToPrompt(segments).trim() 空 → return
-  ├─ 检查2: chat.isActive(sid) === true → 自动转 steer(sid, segments)（busy 时追加上下文，不丢弃）
+  ├─ 检查2（投递所有权内核 D1）：不再本地判车道——统一乐观气泡 + delivery.submit，lane 判定在 runtime 内核（busy 期由内核 queued/steer 承接，气泡按 session.delivery 帧 lane morph 为队列条目）
   ├─ chat.appendUser(sid, segments)           ← 立即写 user 消息；返回 clientUuid（segments 数组 + clientUuid↔pi 映射 + inflight 占位挂钩）
   ├─ ensureStreamSubscription(sid, chat)     ← 幂等：首次订阅，二次 no-op
   │    └─ chatApi.streamSubscribe(sid, handler)
@@ -734,7 +735,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
   │           + 按类型翻转 isStreaming:
   │             message.message_start → setStreaming(true)
   │             message.complete / error / stream_error → setStreaming(false)
-  └─ await chatApi.send(sid, promptText)      ← ack（pi 已接收，非生成完成）
+  └─ await chatApi.submitDelivery(sid, content, clientUuid, images?)   ← 受理回执（reply 携带初始 lane + 条目态；送达由 message_end(user) 裸标记回执照会，状态演进经 session.delivery 帧）
 ```
 
 ### 4.2 关键设计点（[HISTORICAL]）
@@ -749,8 +750,8 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 |------|------|------|
 | `chat.appendUser(sid, segments)` | `(sid, segments: Segment[])` | messages Map[sid] 追加 `{id:'u-{uuid}', role:'user', status:'complete'}`；返回 clientUuid |
 | `chatApi.streamSubscribe(sid, handler)` | `(sid, handler)` | 返回 unsub 函数；handler 接收 ServerMessage |
-| `chatApi.send(sid, text)` | `(sid, text)` | `Promise<void>`（ack 即 resolve） |
-| mock `chat.send` | `(sid, text)` | sleep(40ms) → resolve；同时 `void runSendStream(...)` fire-and-forget |
+| `chatApi.submitDelivery(sid, content, clientUuid, images?)` | `(sid, content, clientUuid, images?)` | `Promise<DeliverySubmitReply>`（受理回执：初始 lane + 条目态） |
+| mock `chat.submitDelivery` | 同上 | sleep(40ms) → 协议合法最小响应；同时 `void runSendStream(...)` fire-and-forget |
 
 ## 5. ServerMessage 类型表（流式 chunk）
 
@@ -758,7 +759,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 
 | type | payload 关键字段 | 前端处理 |
 |------|----------------|---------|
-| `message.message_start` | `{ sessionId, messageId }` | 新建 streaming assistant（status:'streaming', content=''）；G-023 条件清 queueState（仅快照深度==0 才清 + 同点僵尸清理；快照是路径 2 includes 判据源） |
+| `message.message_start` | `{ sessionId, messageId }` | 新建 streaming assistant（status:'streaming', content=''）；无队列区副作用（队列区数据源 = `session.delivery` 内核状态帧，queueStates 分区已退役） |
 | `message.text_delta` | `{ sessionId, delta }` | content += delta（追加最后 assistant） |
 | `message.thinking_start` | `{ sessionId, thinkingId }` | 追加 ThinkingBlock（content:'', collapsed:true） |
 | `message.thinking_delta` | `{ sessionId, delta }` | 追加最后 ThinkingBlock.content |
@@ -774,7 +775,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 | `message.file_changes` | `{ sessionId, messageId, fileChanges[], changeSetStatus, isFullSet }` | accumulating 增量合并 / ready 全集替换 |
 | `message.auto_retry_start` | `{ sessionId, attempt, maxAttempts?, ... }` | 写 retryStates[sid] |
 | `message.auto_retry_end` | `{ sessionId, success, attempt, ... }` | 清 retryStates[sid] |
-| `message.queue_update` | `{ sessionId, steering?, followUp? }` | 写/清 queueStates[sid] |
+| `message.queue_update` | `{ sessionId, steering?, followUp? }` | 内核内部回执（受理/滞留判定用），不直驱 UI——队列区渲染读 `session.delivery` 状态帧（内核条目投影） |
 
 **ToolCall.status 枚举**：`'running' | 'completed' | 'error' | 'end_not_received'`
 **ChangeSetStatus 5 态**：`'accumulating' | 'ready' | 'partially-reviewed' | 'resolved' | 'superseded'`
@@ -1097,7 +1098,7 @@ expect(m.tableScrollW).toBeLessThanOrEqual(m.hostW + 1)         // 不撑爆宿�
 | tool 失败流式 | tool_call_end status='error' → 红框 + 强制展开 | 集成测试（block-working.test.ts U8），E2E 用 s1 历史 fixture（CF-5 已覆盖静态态） | 低 |
 | thinking 完整文本 | 收起态点展开 → 完整 thinking 可见 | E2E（点击「思考」header toggle 后断言全文） | 低 |
 | ChangeSetCard 审查交互 | 用户 Accept/Reject → partially-reviewed/resolved | E2E（需补 ChangeSetCard testid + 审查按钮锚点） | 中 |
-| queue steer/followUp | 流式中 steer → queue_update → QueueBubble 指示 | E2E（需补 QueueBubble testid） | 低 |
+| queue steer/followUp | 流式中发送 → 内核判 lane=steer → 队列条目（in-flight 行）→ 送达回执入流 | E2E（队列区 testid 已备：`queue-bubble` / `queue-item-<uuid>`） | 低 |
 
 ## 12. 约束与盲区
 

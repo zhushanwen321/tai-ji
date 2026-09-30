@@ -89,7 +89,7 @@ describe("SubagentService", () => {
     });
 
     it("dispose 回收 session 句柄：替换窗口内迟到的写面不触达 stale pi（不崩进程）", () => {
-      // [HISTORICAL] 2026-09-22 真机崩溃（登记见 docs/todo/subagent-workflow-issues.md §1.4，已根治）：
+      // [HISTORICAL] 2026-09-22 真机崩溃（登记见 已归档设计档案 §1.4，已根治）：
       // session 替换（newSession/fork）后 pi 旧 handle 全方法抛 stale 错（runner.invalidate
       // → assertActive），单例 Service 的 _pi 残留指向旧 session——替换窗口内迟到的
       // 异步收尾（轮终 markRoundIdle 簿记⑧ pending 注销 / 迟到 register 的 appendEntry）

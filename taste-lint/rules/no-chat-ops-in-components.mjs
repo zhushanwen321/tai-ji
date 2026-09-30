@@ -26,28 +26,35 @@
  *
  * OPS_FIELDS 清单 SSOT = ChatStoreOps（packages/core/src/domain/chat/store.ts，
  * ChatStoreOps 与 ChatStoreReaders 的差集）；store.ts 内有编译期完备性/互斥断言
- * （_FacetCoversAllKeys / _FacetsDisjoint），return 面增删字段时两处同步改。
+ * （_FacetCoversAllKeys / _FacetsDisjoint），字段增删时两处同步改，漂移由
+ * scripts/check-chat-ops-sync.mjs 机器守卫拦截（双清单任一侧增删未同步即红灯）。
  *
  * 误报豁免：无行内豁免通道（facet 边界是类型级事实不是裁量判断——字段该在哪个
  * 面由 store.ts 的编译期断言锚定，豁免诉求应改为修 facet 划分或下沉 composable）。
  */
 
-/** chat store ops 面字段清单（= ChatStoreOps 键集，与 ChatStoreReaders 互斥不重叠） */
+/** chat store ops 面字段清单（= ChatStoreOps 键集，与 ChatStoreReaders 互斥不重叠；
+ *  排序同 store.ts facet，漂移由 scripts/check-chat-ops-sync.mjs 守卫拦截） */
 const OPS_FIELDS = new Set([
   // 写操作
   'setChangeSetStatus', 'markChangeSetsSuperseded', 'markHistoryFailed',
   'clearHistoryError', 'hydrate', 'setMessages', 'reconcileHistory',
   'prependHistory', 'applySubagentStreamDelta', 'finalizeSubagentStream',
-  'applySubagentEntries', 'appendUser', 'pushPending', 'drainN',
-  'reconcilePending', 'abortPending', 'applyMessageEvent', 'finalizeSession',
+  'applySubagentEntries', 'appendUser',
+  'applyMessageEvent', 'finalizeSession',
   'finalizeAllStreaming', 'resetTransientStates', 'addPendingSend',
-  'clearPendingSend', 'markSessionError', 'setCompacting', 'setHandingOff',
-  'appendSystemNotice', 'appendSubagentDirective', 'truncateFrom',
+  'clearPendingSend', 'markSessionError', 'setHandingOff',
+  'setOccupancy', 'clearOccupancy', 'setCompactingReason',
+  'appendSystemNotice', 'appendRespawnNotice', 'appendSubagentDirective', 'truncateFrom',
+  'markRespawnPending', 'clearRespawnPending',
   'applyFileChanges', 'disposeSession', 'markStreamingBashError',
   // LRU（组 5a sessionEntry 端口吸收后的显式驱逐/触达动作）
   'touchLru', 'evictIfNeeded', 'evictSessionWithVirtual', 'evictVirtualKey',
   // inflight 投递确认计数（steer-bubble u0/D2，main 合并带入）
   'incrementInflight', 'decrementInflight', 'clearInflight',
+  // 截断历史窗口写口（u4d truncated-window；写方 hydrate/reconcileHistory/loadMoreHistory，
+  // 清理随 disposeSession/LRU 驱逐同点）
+  'setHistoryWindow', 'clearHistoryWindow',
   // 测试逃生舱（生产零消费是其存在前提）
   'testInternals',
 ])

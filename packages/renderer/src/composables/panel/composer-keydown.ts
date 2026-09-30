@@ -24,9 +24,9 @@
  *   修饰键 + ↑/↓ → 放行原生（选区扩展/按词移动/段首段尾跳转）
  *   ⇧⏎ → 放行原生换行
  *   ⏎（preventDefault 后）：staging 活跃 → onSend；Alt+⏎ → steer 路由行 onFollowUp /
- *   其余（defer/direct）onSend；裸 ⏎ → onSend（统一分发器：steer 路由并入当前回合 /
- *   defer 入队 / direct 直发——[HISTORICAL] isActive→onSteer 与 isCompacting→onSend
- *   两套分散判定（优先级倒挂根因）已退役）
+ *   其余（queued/direct）onSend；裸 ⏎ → onSend（统一分发器提交：steer 并入当前回合 /
+ *   queued 排队 / direct 直发——lane 判定收归 runtime 内核；[HISTORICAL] isActive→onSteer 与
+ *   isCompacting→onSend 两套分散判定（优先级倒挂根因）已退役）
  */
 import type { ComputedRef, Ref } from 'vue'
 import type { SendRoute } from '@taiji/core/domain/composer'
@@ -47,7 +47,7 @@ export interface ComposerKeydownDeps {
   inputRef: Readonly<Ref<ShellInputInstance | null>>
   /** staging 聚合路由（core dispatch/staging，ADR-0057）：Esc 路由 + activeStaging 守卫 */
   staging: Pick<ComposerShellReturn['staging'], 'handleEsc' | 'activeStaging'>
-  /** 当前 session 的发送路由（D6 表 direct/steer/defer；Alt+⏎ steer 行保留 followUp 语义） */
+  /** 当前 session 的发送路由（D6 表 direct/steer/queued；Alt+⏎ steer 行保留 followUp 语义） */
   sendRoute: ComputedRef<SendRoute>
   /**
    * 命令动作表处理器（composer-shortcut-actions，composer-pi-shortcuts U1）：四键位命中
@@ -61,7 +61,7 @@ export interface ComposerKeydownDeps {
   handleArrowDown: () => void
   /** Alt+⏎：追加 follow-up（不打断当前回合；steer 路由行语义） */
   onFollowUp: () => void
-  /** 发送 / staging 提交 / steer 路由并入 / defer 入队（core dispatch/send 统一入口） */
+  /** 发送 / staging 提交 / steer 路由并入 / queued 排队（core dispatch/send 统一入口） */
   onSend: () => void
 }
 
@@ -92,8 +92,8 @@ function createBareArrowNav(
  * 在时 Enter/Alt+Enter 均提交 staging，不注入当前对话（streaming 中 fork-ask 合法——对源
  * session 只读；handoff 的 streaming 拦截在 enterHandoffMode 入口 + handleHandoffSend 兜底，
  * 此处无需区分）。Alt+⏎ 按 D6 路由行分流：steer 行（turn 活跃）保留 followUp 下一轮语义
- * （现状 isActive→onFollowUp 等价）；defer/direct 行经分发器（[u5b] 原 isCompacting→onSend
- * 特判由 defer 路由自然覆盖）。裸 ⏎ 统一 onSend（steer 路由并入当前回合 / defer 入队 /
+ * （现状 isActive→onFollowUp 等价）；queued/direct 行经分发器（[u5b] 原 isCompacting→onSend
+ * 特判由 queued 路由自然覆盖）。裸 ⏎ 统一 onSend（steer 路由并入当前回合 / queued 排队 /
  * direct 直发——优先级倒挂消除：turn 活跃 + compacting（行 3）按 D6 表走 steer 而非误排队）。
  */
 function createEnterDispatcher(

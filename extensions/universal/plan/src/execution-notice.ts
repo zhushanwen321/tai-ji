@@ -52,7 +52,7 @@ function getGoalInit(): GoalInitFn | undefined {
 /**
  * goal 桥侧 slug（仅 widget 标题 + history 展示用，不注入 prompt）。生产输入恒为
  * <project>/.tmp/plans/<slug>/plan.md（enter.ts 构造）——展示名取目录名（requirement
- * slug 段，2026-09-27 用户裁决；docs/todo/plan-cjk-slug-data-loss.md 缺陷 3 同源修复）。
+ * slug 段，2026-09-27 用户裁决；已归档缺陷档案（plan-cjk-slug-data-loss） 缺陷 3 同源修复）。
  * kebab 链对 enter slug 幂等，只防 planFilePath 非生产形态的通用输入；提取为空回
  * "plan-execution"。中文需求且缺陷 2（enter 期目录唯一性）未修的窗口内，plan.md 直落
  * .tmp/plans 使本函数取到骨架名 "plans"——该形态随缺陷 2 修复消除。

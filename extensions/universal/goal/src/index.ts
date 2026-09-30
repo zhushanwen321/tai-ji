@@ -29,8 +29,9 @@ import { handleSessionStart } from "./adapters/event-handlers/session-start";
 import { handleTurnEnd } from "./adapters/event-handlers/turn-end";
 import { registerGoalControlTool } from "./adapters/goal-control-adapter";
 import { buildPorts } from "./adapters/ports";
+import { updateWidget } from "./projection/widget";
 import { createGoal } from "./service";
-import { createGoalSession, type GoalSession } from "./session";
+import { createGoalSession, reconstructGoalState, type GoalSession } from "./session";
 
 // ── Extension Factory ─────────────────────────────────
 
@@ -86,6 +87,21 @@ export default function goalExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx: ExtensionContext) => {
 		await handleSessionStart(pi, session, ctx);
+	});
+
+	// U6c：树回退（撤回 __taiji_nav__ → navigateTree / 用户树跳转）后即时重建 goal
+	// 内存态——before_agent_start 注入读内存态不重算（现状契约），新鲜度由本 handler
+	// 保证；缺席时运行中撤回后被撤 goal 逐轮注入模型上下文（A14）。
+	// 纯重建体（todo 的 session_tree handler 同款）——只做 reconstruct + widget 刷新，
+	// 绝不加 sendMessage / appendEntry 副作用：本事件由撤回编排触发，注入会让撤回编排
+	// 自己发出消息（违背「被撤内容从未发生」语义），落盘会向回退后的新分支追加 entry
+	// 污染文件尾。
+	// updateWidget 无条件调用（session_start 仅 state 非空时刷新——那是启动期无残留可清；
+	// 此处撤回点早于 goal 创建时重建态为 null，条件刷新会让被撤 goal 的 widget 残留）。
+	pi.on("session_tree", async (_event: unknown, ctx: ExtensionContext) => {
+		const ports = buildPorts(pi, ctx);
+		reconstructGoalState(session, ctx.sessionManager);
+		updateWidget(session, ports.ui);
 	});
 
 	// MF-R2-1 根修：session_shutdown 在 runner invalidate 之前触发（此刻 pi/ctx

@@ -68,6 +68,9 @@ session 导入统一入口的多 coding-agent 抽象：一个导入源负责「�
 ### 消息投影（Message Projection）
 源 coding-agent 对单条消息「给谁看」的裁决，与 `role` 是**两个正交维度**：`role` 只表达角色（user/assistant），不表达这条消息是真人输入还是运行时注入。zcode 用四字段（`semantics` / `visibility` / `source` / `synthetic`）联合判定出六种投影策略（`realUserInput` / `visibleAssistant` / `compactSummary` / `providerContextOnly` / `hiddenSynthetic` / `timelineOnly`），导入转换器按策略映射到 pi entry 类型。**教训**：只按 `role` 分派会让源系统的合成消息（提醒/通知/引用回放）冒充用户消息——zcode 全库 user 消息 67% 是合成。完整判据与闭集枚举：[session-import-sources.md §6.1](architecture/session-import-sources.md)。
 
+### 消息撤回（Message Revoke）
+撤回 = 把一条已发出的 user 消息（连同其引发的回复与派生）从模型上下文移出，原文回草稿。机制 = pi `navigateTree` **树内回退**（被撤内容移出活跃路径，非删除——session 文件保留完整历史），LabelEntry（label `taiji:revoked`）落文件尾 = 持久化锚（重启/空闲回收后回退不复活）。**派生面口径二分准则**：未来状态随树回退（plan/todo/goal/scheduler/模型绑定——经 session_tree 重建或失效信号重建），已发生事实照实保留（subagent/workflow run 记录、usage 消耗）。撤回 ≠ 抹除：tee 日志、provider 侧已收请求、工具副作用均如实保留，UI 按此表述。机制裁决与重审触发：[decisions.md ADR-0076](adr/decisions.md)。
+
 ### 会话读取基座（session-core / zcode-session-source）
 session「发现 → 读取 → 归一化 → 序列化」的零依赖共享实现，两层：`packages/session-core/`（canonical 原语——`NormalizedSession` 归一化模型 `{header, entries, degradations}`、JSONL parse/serialize、首行读取、session/zcode sa-id 工具）与 `packages/zcode-session-source/`（zcode 宿主 SQLite 库只读访问层——sqlite 驱动双形态适配、**四级恢复阶梯**（L1 直开 → L2 immutable 逃逸 → L3 快照 → L4 SqliteUnreadableError）、transcript 转换）。两个消费方：session-reader 扩展（通知链 `session_read` 的 zcode 读链）与 runtime zcode 导入源——同一套实现，禁止各自复制副本。`degradations` 承载无法保真的内容（显式登记，禁止伪造）；sa-id → zcode 会话的路由经 manifest/entry 锚双键（`engine: 'zcode'` + sessionRef）判别，db 路径白名单闸放行。
 
@@ -135,7 +138,7 @@ subagent 跨 run 续聊时定位既有会话的凭据（引擎中立形态 `Resu
 
 ### Execution Record
 
-subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0078](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 全量快照兼容层已整体删除，2026-09-30）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外投影两态（`active` / `idle`，ended 随终态概念删除），轮终收条由 `record-settled` / `record-round-idle` 事件帧承载（事件流是唯一事实源），manifest 为物化投影。
+subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0094](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 全量快照兼容层已整体删除，2026-09-30）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外投影两态（`active` / `idle`，ended 随终态概念删除），轮终收条由 `record-settled` / `record-round-idle` 事件帧承载（事件流是唯一事实源），manifest 为物化投影。
 
 ### ToolCall
 
@@ -264,6 +267,26 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 > **术语演进（2026-09）**：`streamingMessage` 实体已消亡——流式态 = 末位消息 `status:'streaming'` + turn 级 `isStreaming` 派生；UI 活跃态 SSOT 是 `isActive`（含 pendingSend 空窗期，`packages/core/src/domain/chat/derive-status.ts` W1）。
 
+### 投递所有权内核（delivery-ownership kernel）
+
+用户消息（composer）、agent 消息（session_manager send）、回流消息（completion-backflow）等全部发送方的唯一投递所有者：runtime 侧每 session 单例——纯逻辑状态机在 `packages/session-delivery/`，pi 适配与对账在 `packages/runtime/src/services/session/session-delivery-registry.ts`。pi 的 steer/followUp 内存队列降级为**交接槽位**（消息从「前端持有」到「进入 transcript」之间的临时存放格），所有权在消息进 transcript 之前属于本内核；renderer 只提交（`delivery.submit`）与渲染（`session.delivery` 状态帧，队列区单一数据源），不做车道判定。
+
+**lane（投递车道）**：一条消息交给 pi 的方式，三档——`direct`（pi 空闲，直接 prompt 起新 run）/ `steer`（pi 有活跃 run，入 steeringQueue 等 turn 边界注入）/ `queued`（pi 暂不可收，内核 FIFO 持有等时机）。lane 判定单一源 = runtime 权威 occupancy 投影（C-data-19 单写原语）+ 内核队列态；renderer 的 `resolveSendRoute` 降级为发送位按钮形态（send/stop/queue）的 UI 预测，真实车道以 `session.delivery` 帧的 lane 字段为准。
+
+**条目五态（`DeliveryEntryState`）**：内核条目状态机——`queued`（内核持有排队）/ `in-flight`（已交 pi 槽位、未确认）/ `delivered`（拿到送达回执；marker 锚 = `message_end` 回执命中，acceptance 锚 = 受理即落地，ADR-0074 申报制）/ `failed`（重试耗尽，等用户处置：重试钮经 `delivery.resync` 单条重报，或 × 移除）/ `cancelled`（用户撤销或 drain 回收）。进入 `session.delivery` 帧的是**投影视图**而非五态全量：活跃态（queued / in-flight / failed）全量 + delivered 最近 50 条完整条目，**cancelled 不投影**（撤销即从队列区消失，全文经 `delivery.cancel` reply 回草稿）——该帧是队列区行形态的唯一来源。
+
+**两类回执（两阶段 receipt）**：①**受理** = pi 收下消息（direct 车道 = prompt 受理；steer 车道 = 文本进入 pi 槽位）；②**送达** = `message_end(user)` 文本命中裸标记 = 消息已写入 transcript（durable）。受理 ≠ 送达：只拿受理的条目停留 `in-flight`、由对账器盯（marker 锚情形；acceptance 锚条目受理即落地，见 `receiptAnchor`）。`sendChecked` 的同步 settle 时点维持**受理口径**（session_manager send 的 `{queued:true}` 契约锚定在受理时点，后移到送达会让 agent 工具调用阻塞至目标 session 当前 turn 结束）——onSettled 记账回调为送达口径，两者显式分离。
+
+**receiptAnchor（回执锚）**：投递条目级回执锚申报（`DeliverySubmitOptions.receiptAnchor`），`'marker'` 缺省 / `'acceptance'` 无标记 agent 通路受理即落地，来源清单 SSOT 在 [decisions.md ADR-0074](adr/decisions.md)。
+
+**对账器（Reconciler）**：registry 侧组件，在五个触发点（agent_settled / compaction_end / abort 完成 / pi restored / 30s watchdog；`delivery.cancel` 复用同一路径为撤销兜底入口）执行对账，条件 = 「空闲 + pi 槽位非空」，处置 = `clear_queue` 全收后按裸标记**三分**——**reclaim**（内核在册条目回队首重投，保持原相对序）/ **rebuild**（**尾附锚**标记但内核无记录 = runtime 重启 reattach，先按标记对 transcript 全量扫描判 delivered：已送达只重建记账不重投）/ **adopt**（无身份承接的外来文本——notifyDone / scheduler 提醒等存量注入，或标记字面量全部非尾附锚——以新身份入内核 FIFO 正常投递，不丢弃）。pi 只有队列级 `clear_queue` 原语（无条目级撤回），条目级收回以「全收 + 标记识别 + 其余重投」实现。
+
+**裸标记（bare marker）**：出站文本尾附的 `<!--taiji:msg:<uuid>-->`（裸 uuid 形态）作为逐消息身份，随文本进 transcript，供送达回执与判重匹配按 id 精确查找（身份非内容匹配——skill 注入 / BeforeSend 文本改写不影响）。与 msg-id-mapper 的 `u-<uuid>` 前缀标记空间互斥（mapper 只剥 u- 形态且仅覆盖富内容直发通路；裸标记在 steer/followUp 通路不被剥离而存活）——两者正交共存，rich 通路同时携带双标记各司其职。展示层剥离 SSOT = `packages/core/src/domain/chat/apply-entry-convert.ts`（live / reload 同点）。
+
+**投递身份（delivery identity）**：一条出站消息的逐消息身份载体 = 裸标记携带的 id。「这是不是投递身份」的判定权威 = `DELIVERY_MARKER_ID_RE`（`packages/runtime/src/services/session/session-delivery-registry.ts`，shared `MSG_ID_TAG_RE` source 派生的严格 uuid 双形态 ∪ 本地收养条目 `m-<base36>-<seq>` 形态）——uuid 段禁止手写正则，SSOT 形态变化自动跟随。_Avoid_：把任意形似标记的文本当身份（宽松 `[^>]*` 形态仅授权剥除面，判定宽松会让用户文本中的字面假标记产生重复投递）。**出站尾附锚（outbound tail anchor）** = rebuild 重投的附加判据：仅精确文末（原文串 endsWith，不 trimEnd 尾换行）的标记构成 rebuild 身份（剥标记不吞尾换行，P5 口径，与 ADR-0077 一致；出站标记恒尾附，与写侧 `withDeliveryMarker` 读写同形），文本中部/前部的合法形态标记字面量不构成投递身份。判据形态二分裁决：[decisions.md ADR-0077](adr/decisions.md)。
+
+**tombstone 判重锚**：已终态条目（delivered / cancelled）的轻量记录（id / 终态 / lane / settledAt），在 **runtime 存活期内全量保留、不设数量窗口**——`delivery.resync` 断连重报去重与 reattach 收养判重的查询表；cancelled tombstone 防「撤销确认帧在断连窗口丢失 → 已撤销消息被 resync 复活」。判重表栖身 runtime 进程内存、不跨 runtime 重启，reattach（滚动重启后）判重锚回落 **transcript 全量标记扫描**（按重报集/滞留集 uuid 查找，transcript 是唯一跨进程持久事实源）。
+
 ### Side Drawer（原 Side Inspector）
 
 > **术语演进**：原 `Side Inspector`（terminology R4 计划改 `SideInspector`）在 v3 重构中收敛为 **Side Drawer**。v3 版更通用：不再限于运行时状态面板，而是 header 多 tab 通用容器。
@@ -304,7 +327,7 @@ run 与 record 两域状态词表的单源口径，消费方按维取值、禁�
 - **投影相 ≠ 状态**：注册表投影 = record fold 四相（missing/active/terminal/interrupted，`run-registry.ts` 的 `RunRegistryPhase`）——interrupted 相是投影判读（`run-interrupted` 转移帧已写入 record，或事件流停止且活体未命中的 host-died 判读），对应 lifecycle 暂停态而非终局（[ADR-0082] 后投影相与 lifecycle 同构，interrupted 相可流转回 active）。manifest 的投影持久化格式（record 终局事件的派生缓存，单一生产者）不计入消费方状态词表口径。
 
 ### 介质归位（run/record 运行态持久化，W1）
-run 与 record 的运行态数据持久化形态（[ADR-0078](adr/decisions.md) / [ADR-0082](adr/decisions.md) D1）：**事件流是唯一事实源**——run 侧 = record 事件流（`<runId>.record.jsonl`，[ADR-0082] D1 由 journal 更名并升格：全文入事件、state 快照删除），record 侧 = 事件文件 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀，既有 .jsonl 扫描器结构性忽略；首行 `{"type":"record-events"}` 头行自描述）。子术语：
+run 与 record 的运行态数据持久化形态（[ADR-0094](adr/decisions.md) / [ADR-0082](adr/decisions.md) D1）：**事件流是唯一事实源**——run 侧 = record 事件流（`<runId>.record.jsonl`，[ADR-0082] D1 由 journal 更名并升格：全文入事件、state 快照删除），record 侧 = 事件文件 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀，既有 .jsonl 扫描器结构性忽略；首行 `{"type":"record-events"}` 头行自描述）。子术语：
 
 - **注册条目 / 终态条目**：主 session JSONL 里每实体只写的两条小 entry（v:2，kind 判别 registered/settled，customType 不变）——注册条记身份与锚点（诞生时写；workflow-record 族携带 recordPath 锚点），终态条记终局与摘要（结束时写，含 result 全文与 engineHandle 双键）。旧读者按版本门跳过 v2。
 - **落盘键的旧词裁决（已完成）**：事件流升格前的旧词（journal）在代码符号与落盘键里的残留已全部改成现行词，不做迁移、不留兼容读——项目未上线，不存在需要兼容的 v1 数据。三处落盘键现状：事件文件头行 = `{"type":"record-events"}`（`RECORD_EVENTS_HEADER_TYPE`，`record-events.ts`）；engineHandle 落盘键 = `engineHandle.eventsPath`（引擎侧事件文件路径——SDK `EngineHandleData`/`ResumeAnchor` wire 契约、core record/manifest/entry 形状、读写两侧与扫描守卫同批改名）；workflow-record 注册条目锚点键 = `recordPath`（record 流路径，D16③ 后锚点语义 = `<runId>.record.jsonl`）。

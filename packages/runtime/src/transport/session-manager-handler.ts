@@ -577,15 +577,22 @@ export class SessionManagerHandler {
     }
     const armed = armedNotifyId !== undefined
     try {
+      // D1 申报制：agent 通路出站文本不附裸标记（无回执锚点），申报 'acceptance' = 受理
+      // 即落地（缺省 'marker' 会让该条目永挂 in-flight，死锁形态复发——接入义务见 ADR-0074）
       await this.opts.delivery
         .getOrCreateDelivery(sessionId)
-        .sendChecked({
-          payload: { kind: 'text', content: prompt },
-          // notifyId 穿 envelope additive meta（D2）：delivery 内核 onSettled delivered
-          // 回执读 meta 完成 armed→injected 受理锚定（P9 帧序保证先于 settled 帧，PS-57）；
-          // parentSid 同携（回执侧无须反查归属）。rejected 回执 → 投递失败腿 disarm。
-          ...(armed ? { meta: { notifyId: armedNotifyId, parentSid: parentSessionId } } : {}),
-        })
+        .sendChecked(
+          {
+            payload: { kind: 'text', content: prompt },
+            // notifyId 穿 envelope additive meta（D2）：delivery 内核 onSettled 回执读 meta
+            // 完成 armed→injected 受理锚定；parentSid 同携（回执侧无须反查归属）。
+            // rejected 回执 → 投递失败腿 disarm。
+            ...(armed ? { meta: { notifyId: armedNotifyId, parentSid: parentSessionId } } : {}),
+          },
+          // D1 申报制：agent 通路出站文本不附裸标记（无回执锚点），申报 'acceptance' = 受理
+          // 即落地（缺省 'marker' 会让该条目永挂 in-flight，死锁形态复发——接入义务见 ADR-0074）
+          { receiptAnchor: 'acceptance' },
+        )
       return { queued: true, willNotify: armed }
     } catch (e) {
       // 投递失败腿（D2 状态机）：armed → 静默删除（主 agent 已同步收到工具 error）

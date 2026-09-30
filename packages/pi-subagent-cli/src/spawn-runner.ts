@@ -194,7 +194,7 @@ export interface SpawnRunResult extends Omit<CollectedOutcome, "sessionId"> {
  *   - worktree：引擎自身 env 或本次 run 声明任一为真即写 "true"。
  *   - slug / startedAt：引擎无从得知（record 级字段，协议未携带）→ 不写；壳读者
  *     分别按「可选」与「Date.now()」回落。补齐它们需要把 record 身份挂上协议（登记见
- *     docs/todo/subagent-workflow-issues.md §2.7 遗留）。
+ *     已归档设计档案 §2.7 遗留）。
  */
 /** 链路定位键写入（applyIdentityEnvToChildEnv 拆出）：root 链 / 深度 / 父 record。
  * 值源分层见主函数注释——run 参数优先、引擎自身 env 回落（嵌套链贯穿）。 */
@@ -597,7 +597,7 @@ export async function runSpawnOnce(
       // 模型 id 一部分处理返回 model:undefined（:185-190；缺省 ?? true 放宽仅 scope
       // 模式走）→ resolveCliModel 收敛为 error "Model ... not found" → dist/main.js
       // 打印 Error 后 process.exit(1)（:719-729）→ spawn run 失败可见。实装 0.84.4；
-      // 语义登记 PS-62。pi 升级重验：:383/:419 是否仍传 false——若 CLI 链改用缺省
+      // 语义登记 PS-69。pi 升级重验：:383/:419 是否仍传 false——若 CLI 链改用缺省
       // 放宽，非法档位将静默剥后缀降级为「没指定」（docs/pi-semantics.json PS-62）。
       thinkingLevel:
         typeof params.thinkingLevel === "string" && params.thinkingLevel.length > 0

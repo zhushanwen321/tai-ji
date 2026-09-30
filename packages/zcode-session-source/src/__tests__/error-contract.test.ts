@@ -249,8 +249,8 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
       // 归因以探测错误为准：close 错误吞掉不参与（失败路径错误面不污染）
       expect(err.message).toContain('fake probe NOTADB')
       expect(err.message).not.toContain('fake close broken')
-      // L3 失败路径收尾：快照目录读后即清
-      expect(countSnapshotDirs()).toBe(snapshotsBefore)
+      // L3 失败路径收尾：快照目录读后即清（<= 语义见下方失败路径组注释——并发清理噪声容忍）
+      expect(countSnapshotDirs()).toBeLessThanOrEqual(snapshotsBefore)
     } finally {
       fx.cleanup()
     }
@@ -288,7 +288,10 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
       expect(caught).toBeInstanceOf(Error)
       expect((caught as Error).message).toContain('table-set validation')
       expect((caught as Error).message).toContain('session/message/part')
-      expect(countSnapshotDirs()).toBe(snapshotsBefore)
+      // 差分断言只锁「本路径不新增快照」（<=）：SNAPSHOT_TMP_PREFIX 住全局共享 tmpdir，
+      // vitest 并发 worker 下其他用例/文件的快照可能在采样窗口内被其所有者清理——
+      // 「恰好相等」会被合法清理噪声打破（全包并发跑稳定红、单文件跑绿的竞态形态）。
+      expect(countSnapshotDirs()).toBeLessThanOrEqual(snapshotsBefore)
     } finally {
       fx.cleanup()
     }

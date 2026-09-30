@@ -5,7 +5,7 @@
  * handoff「交接」模式状态 + 行为 composable）。
  *
  * 覆盖全部公共 API：
- * - handoffMode / handoffModeRef（状态真源 + defineExpose 包装）
+ * - handoffMode（状态真源）
  * - enterHandoffMode / exitHandoffMode（互斥退出 fork + staging 进入/退出 + 聚焦）
  * - handleHandoffEsc（Esc 退出消费契约）
  * - handleHandoffSend（发送消费契约：成功/失败/staging 透传/空文本）
@@ -161,20 +161,6 @@ describe('exitHandoffMode', () => {
     api.exitHandoffMode()
     expect(api.handoffMode.value).toBe(false)
     expect(deps.exitStagingMode).toHaveBeenCalledTimes(1)
-  })
-})
-
-// ── handoffModeRef（defineExpose 包装）──────────────────────────────────────
-describe('handoffModeRef', () => {
-  it('value 跟随 handoffMode ref（getter 代理）', () => {
-    const { api } = setup()
-    expect(api.handoffModeRef.value).toBe(false)
-
-    api.enterHandoffMode('src-1')
-    expect(api.handoffModeRef.value).toBe(true)
-
-    api.exitHandoffMode()
-    expect(api.handoffModeRef.value).toBe(false)
   })
 })
 
@@ -493,12 +479,11 @@ describe('asStagingAction', () => {
     expect(deps.exitStagingMode).toHaveBeenCalledTimes(1)
   })
 
-  it('send(text) 调 handleHandoffSend（忽略传入的 staging 参数，内部自取 getStagingConfig）', async () => {
+  it('send(text) 调 handleHandoffSend（内部自取 getStagingConfig，审计候选 10 后无 staging 透传参）', async () => {
     const { deps, api } = setup()
     api.enterHandoffMode('src-1')
 
-    // 传入 staging 参数应被忽略（handleHandoffSend 内部调 deps.getStagingConfig）
-    await api.asStagingAction().send('hello', { modelOverride: 'ignored' })
+    await api.asStagingAction().send('hello')
 
     expect(deps.handoff).toHaveBeenCalledWith('src-1', 'hello', {})
     expect(deps.getStagingConfig).toHaveBeenCalled()

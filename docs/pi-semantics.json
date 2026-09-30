@@ -342,7 +342,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "扩展侧磁盘保留的承重依据（W1 介质归位后口径，ADR-0078）：pi 不清理则 taiji 自担——journal/record 事件文件经统一保留维护轮清理（fold 终态资格判据 + 默认 30 天保留窗口，state 快照成对删、manifest 永不随裁；cap=50 计数裁剪已废除）。pi 升级时重验：SessionManager 是否新增自动清理/retention"
+      "note": "扩展侧磁盘保留的承重依据（W1 介质归位后口径，ADR-0094）：pi 不清理则 taiji 自担——journal/record 事件文件经统一保留维护轮清理（fold 终态资格判据 + 默认 30 天保留窗口，state 快照成对删、manifest 永不随裁；cap=50 计数裁剪已废除）。pi 升级时重验：SessionManager 是否新增自动清理/retention"
     },
     "verifiedWith": "0.84.4"
   },
@@ -1245,7 +1245,7 @@
     "verifiedWith": "0.84.4"
   },
   {
-    "id": "PS-60",
+    "id": "PS-67",
     "claim": "exec-skills 共享包消费的技能加载语义：① 四根组装序 = addAutoDiscoveredResources 内 .pi/skills → 祖先链 .agents/skills（近→远，git root 级含）→ <agentDir>/skills → ~/.agents/skills；untrusted 跳过前两族；settings skills 数组 '+/-/!' 三级优先级（'-' 强排 > '+' 强含 > '!' 排除）按根挂载过滤；同名先到先得（realPath 去重）。② 单根枚举公开导出 loadSkillsFromDir——name 派生（frontmatter name 优先）与 description 必填门 / ignore / 递归遍历横切规则随实装；坏 YAML skill 不进加载集（loader 侧拒收）。③ CONFIG_DIR_NAME = \".pi\"（node 实测）；parseFrontmatter 返回 frontmatter 供 plan-exec marker 二次读取（严格 === true，字符串 \"true\" 不误判）",
     "piAnchor": [
       {
@@ -1280,7 +1280,7 @@
     "verifiedWith": "0.84.4"
   },
   {
-    "id": "PS-61",
+    "id": "PS-68",
     "claim": "session_tree 是同进程分支导航，非会话替换形态：navigateTree 换叶子（this.agent.state.messages = sessionContext.messages 原地替换）后 emit session_tree，不 teardown、不失效 runner（runner.invalidate() 调用点全集 = dispose 内 :595 与 reload 内 :2214，两处均不在 tree 路径上），也不触发 session_start / session_shutdown；session_tree 全 dist 唯一发射点 = navigateTree（agent-session.js:2612），与 switchSession 无调用关系。互补登记替换形态触发词表：真正的会话替换全部形态都发 session_shutdown——new/fork/resume 经 teardownCurrent(reason) emit 后 dispose（agent-session-runtime.js:102-113），quit 经 dispose 直发，reload 在 oldRunner 上显式 emit（agent-session.js:2213）后 invalidate（:2214）；switchSession 亦为真替换形态：emitBeforeSwitch(\"resume\") 后 await teardownCurrent(\"resume\")（emit session_shutdown(reason:\"resume\") 后 dispose）→ createRuntime + session_start(reason:\"resume\")（agent-session-runtime.js:128-148），借 reason=\"resume\"（SessionShutdownReason 枚举 = quit|reload|new|resume|fork，无 switchSession 专用成员），入口经 commandContextActions 注入暴露（dist/modes/print-mode.js / dist/modes/interactive/interactive-mode.js / dist/modes/rpc/rpc-mode.js）；agent-session.js:595 的 ctx.switchSession() 字面量是 stale 文案对替换形态的并列列举（newSession/fork/switchSession/reload），非 tree 路径。承重：subagent-workflow 的 pi 绑定作废只允许挂在真替换形态上（reload 分支 invalidatePiBinding / 其余——含 switchSession——经 session_shutdown 非 reload 分支 dispose 收尾）——禁止挂 session_tree（作废后唯一重臂点 initSession 只由 session_start 触发，tree 导航不触发 session_start，作废即本 session 余生 record/notify 的 pi 写入静默 no-op）",
     "piAnchor": [
       {
@@ -1303,7 +1303,7 @@
     "verifiedWith": "0.84.4"
   },
   {
-    "id": "PS-62",
+    "id": "PS-69",
     "claim": "CLI --model 模式串的档位后缀（'id:level'）严格解析：非法后缀 = 解析失败报错。parseModelPattern 对无法识别的 :level 后缀按 allowInvalidThinkingLevelFallback 分叉——缺省（?? true，仅 scope/模糊匹配模式走）剥后缀按前缀递归匹配并 warn；严格模式（false）把非法后缀按模型 id 一部分处理，返回 model:undefined → resolveCliModel 各 fallback 全部落空，收敛为 error 'Model ... not found' → main.js 打印 Error 后 process.exit(1)（子进程退出码 1）。pi-subagent-cli spawn 链 thinkingLevel 原样透传进 --model 后缀（无白名单收窄）正依赖此语义：非法档位显式失败（spawn run 失败可见）而非静默降级为「没指定」。pi 升级时重验：:185 缺省值是否仍 ?? true、:383/:419 严格调用点是否仍传 false——若 CLI 链改用缺省放宽，非法档位将从显式失败静默变为剥后缀降级",
     "piAnchor": [
       {
@@ -1322,6 +1322,173 @@
     "guard": {
       "type": "observe",
       "note": "消费方 = pi-subagent-cli spawn 链：packages/pi-subagent-cli/src/spawn-runner.ts runSpawnOnce 档位透传注释（[pi 锚点] 块）+ packages/pi-rpc/src/spawn-args.ts buildPiSubagentSpawnArgs（:222-227 --model 后缀改写）。pi 升级时人工重验 model-resolver.js :185 缺省值与 :383/:419 严格实参；无独立单测探针——非法后缀的承重行为是真实 CLI 子进程报错退出（e2e 面），单测层直调 resolveCliModel 需 stub modelRuntime，收益低"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-60",
+    "claim": "pi session 树重放规则：SessionManager 加载路径（_setSessionFile → loadEntriesFromFile → _buildIndex）重建内存 leafId = 文件序最后一条非 header entry 的 id（_buildIndex 循环内逐条赋 this.leafId = entry.id，type==='session' header 被跳过）——重启/空闲回收后活跃叶子 = 文件尾，活跃上下文路径由 buildSessionPath 从该叶子沿 parentId 回溯到根构成。配套不变量：①运行时追加恒落文件尾且推进 leafId（_appendEntry 置 leafId=entry.id，全部 append* 的 parentId=旧 leafId）；②navigateTree 树内回退 = branch() 仅移内存指针不重写文件（被撤子树保留在文件里），随后 appendLabelChange 以 parentId=回退后 leaf 追加 LabelEntry 到文件尾——故撤回（summarize:false + label:'taiji:revoked'）后文件尾 = 新路径上的 label entry，重启重放所得叶子的 parentId 链不含被撤子树（回退不复活）；③label entry 不投影为 LLM 消息（sessionEntryToContextMessages 对 type==='label' 落入末尾 return []）。承重（ADR-0076 撤回持久化安全 + message-revoke U6a/U6d 文件腿裁剪 leaf=文件尾取数）：taiji 文件源活跃路径裁剪（trimFileEntriesToActivePath / computeActivePathEntries 取文件尾 entry id 回溯）与 pi 重放语义同构全靠本条；pi 若改为按持久化 leaf 指针/其他准则重放，文件尾≠叶子，撤回复活或裁剪错叶。pi 升级时重验：_buildIndex 的文件序赋值循环与 header 跳过、_setSessionFile 加载路径调 _buildIndex、navigateTree 的 branch+appendLabelChange 两步形态",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/session-manager.js",
+        "symbol": "_buildIndex / _setSessionFile（加载路径）",
+        "note": ":673-695 _buildIndex——:678-680 文件序 for 循环跳过 type==='session' header，:682 this.leafId = entry.id（循环终值 = 最后一条非 header entry）；加载路径 :616 _setSessionFile → :619 fileEntries = preloadedFileEntries ?? loadEntriesFromFile(sessionFile) → :638 this._buildIndex()"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/session-manager.js",
+        "symbol": "buildSessionPath / _appendEntry / appendLabelChange / branch",
+        "note": ":124-144 buildSessionPath 从叶子沿 parentId 回溯（:133 leaf 缺失兜底 = entries 末条）；:756-762 _appendEntry :759 this.leafId = entry.id（追加即推进叶子 = 文件尾）；:917-929 appendLabelChange :925 parentId: this.leafId（LabelEntry 落文件尾，父 = 当前叶子）；:1035-1041 branch :1040 this.leafId = branchFromId（仅移指针，不重写文件——被撤子树保留）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "navigateTree(targetId, options) 的 branch + appendLabelChange 两步",
+        "note": ":2464 方法体——:2581 非 user 目标 newLeafId = targetId；:2597/:2601 无摘要时 resetLeaf()/branch(newLeafId)；:2605 label && !summaryText → appendLabelChange(targetId, label)（revoke 形态 summarize:false 恒走此腿，label entry 落文件尾）"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-session-replay.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-61",
+    "claim": "manual 压缩掐断语义与事件序：AgentSession.compact() 第一步 await this.abort() 掐当前 run（abort() 只置 activeRun.abortController 为 aborted——不清 steering/followUp 队列、无补投副作用），JSDoc 明文 \"Manual compaction never retries or continues the interrupted agent turn\"；被掐 run 以 agent_end（末条 assistant message stopReason='aborted'，实机探针 P-reason(c) 断言）收尾且该事件先于 compaction_start 到达（compact 头 await this.abort() 先于 compaction_start emit 的 await 序形态 + P-reason(c) 真机实测）。承重（delivery-ownership-kernel D4② 续跑判定条件①③）：runtime 以「reason==='manual' + compaction_start 前 turn 被掐断」判定补投续跑——pi 若在 abort 后自动续跑/补投队列，续跑投递即变重复起 run",
+    "piAnchor": [
+      {
+        "pkg": "pi-agent-core",
+        "distPath": "dist/agent.js",
+        "symbol": "abort()",
+        "note": ":201-204 —— 单行体 this.activeRun?.abortController.abort()（纯 signal 置位；全文件唯一 abort() 方法）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "compact(customInstructions)（manual 压缩入口）",
+        "note": ":1463-1464 JSDoc 'Aborts the current agent operation first. Manual compaction never retries or continues the interrupted agent turn'；:1468 方法体 → :1469 await this.abort()（全文件唯一 await this.abort() 点）→ :1470 _compactionAbortController 置位 → :1471 compaction_start emit"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-62",
+    "claim": "compaction_start/end 的 reason 词表恒三值：manual 路径（AgentSession.compact）start 恒字面量 'manual'（全 dist 唯一 emit 点），end 成功/aborted 两处均 'manual'；auto 路径 _runAutoCompaction(reason, willRetry) 变量透传，reason 仅 'threshold'（阈值命中，2 调用点）与 'overflow'（溢出/截断恢复，2 调用点）两值。auto 路径收尾有 hasQueuedMessages→continue 补投（设计 F6：不丢消息、不掐 turn，无需续跑），与 manual 路径无补投（PS-61）互为对照——runtime 续跑判定以 reason==='manual' 识别「掐 turn 的压缩」；pi 引入第四 reason 值或改 manual 判定名时判定面须复审（漏判 = 不续跑；误判 = 多一条被投递内核吸收的投递）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "compact 的 manual reason 字面量（start + end ×2）",
+        "note": ":1471 _emit({type:\"compaction_start\", reason:\"manual\"})；:1560-1565 end 成功分支 reason:\"manual\"；:1574-1580 end aborted/失败分支 reason:\"manual\""
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_runAutoCompaction(reason, willRetry) 透传 + 调用点",
+        "note": ":1733 签名 → :1747 compaction_start reason 透传 → :1844 compaction_end reason 透传；threshold 调用点 :282/:1719、overflow 调用点 :1659/:1689；溢出恢复失败另有 :1665-1672 end{reason:\"overflow\"} 直发与 :1673-1679 session_compact_failed{reason:\"overflow\"}"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "auto 压缩收尾 hasQueuedMessages→continue 补投（设计 F6）",
+        "note": ":807-810（post-run 队列检查：'The agent loop drains both queues before emitting agent_end' 注释 + return this.agent.hasQueuedMessages()）；:1856-1860（auto compaction 收尾：'Auto-compaction can complete while follow-up/steering/custom messages are waiting. Continue once so queued messages are delivered'）"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-63",
+    "claim": "extension slash 命令的 args 切分 = 首个空格原样切：_tryExecuteExtensionCommand 以 text.indexOf(\" \") 定位首个空格，commandName = 首空格前（剥 / 前缀），args = 首个空格后的原样余串（text.slice(spaceIndex + 1)——无 trim、无多空格折叠、无引号解析；无空格时 args=''）。单空格形态 '/<cmd> <id>' 下 handler 收到的 args 精确等于 id 本体。承重（message-revoke D1）：runtime revoke 信令 sendSystemCommand(`/${TAIJI_NAV_COMMAND} ${entryId}`) 单空格拼接（revoke-orchestrator.ts）→ agent-ext __taiji_nav__ handler 的 entryId 直用（navigateTree 回退目标）；pi 改切分规则（trim/引号解析/多空格容忍）则 id 失真 → nav mismatch，失败形态 = navigateTree 找不到目标报 nav-failed 可重试（安全降级，非破坏）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_tryExecuteExtensionCommand 的切分三行",
+        "note": ":956-958 —— :956 const spaceIndex = text.indexOf(\" \")；:957 commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex)；:958 args = spaceIndex === -1 ? \"\" : text.slice(spaceIndex + 1)"
+      }
+    ],
+      "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-64",
+    "claim": "pi 队列条目无身份、无条目级收回原语：待注入队列（_steeringMessages/_followUpMessages）只存纯文本串，全 dist 唯一的队列条目移除点 = message_start(user) 事件回流时按全文 indexOf 文本匹配出队（无 id 字段参与）；唯一批量收回原语 clearQueue() 是队列级全清（返回两队列拷贝并整体置空 + agent.clearAllQueues()），不存在按 id 撤单条的方法。承重（delivery-ownership-kernel 收回原语，原挂不入库设计文档 F8 节）：投递所有权内核的条目级收回只能建在「clear_queue 全收 → 按裸标记识别 → 自有条目重投 / 外来文本收养」的 runtime 对账器上（rpc-client.clearQueue 注释与 session-delivery-registry Reconciler 的机制依据）；pi 若引入条目级收回 API 或队列条目携带 id，对账器可换窄接口，本条漂移即复审信号",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_handleAgentEvent 的 message_start(user) 文本匹配出队块",
+        "note": ":360-382 —— :363 message_start && role==='user' 门控、:365 contentText 取全文、:368 this._steeringMessages.indexOf(messageText) → :370 splice、:375 this._followUpMessages.indexOf(messageText) → :377 splice；全文件队列数组 splice 恰此两处（0.84.4 实测计数 1+1），均文本匹配"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "clearQueue()（唯一批量收回原语，队列级）",
+        "note": ":1195-1203 —— :1196-1197 返回两队列拷贝、:1198-1199 整体置空、:1200 this.agent.clearAllQueues()、:1202 return { steering, followUp }；方法全文件唯一定义"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-65",
+    "claim": "pi RPC 面的投递原语族恒五条且全部队列级：prompt（streamingBehavior 直透 session.prompt）/ steer / follow_up / abort / clear_queue（→ session.clearQueue() 队列级全清）——命令面无任何条目级寻址或按 id 撤回形态。session-delivery-registry 对账器（Reconciler）的存在理由（原挂不入库设计文档 F9 节）：runtime 侧条目级收回/重投只能以「clear_queue 全收 + 标记识别 + 三分处置」在 pi 之上实现（pi 词汇封闭层 rpc-client.clearQueue 的协议面依据）；pi 若新增条目级收回命令，对账器三步机制可被窄接口替代，复审信号",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/modes/rpc/rpc-mode.js",
+        "symbol": "投递原语族 dispatch case ×5",
+        "note": ":298 case \"prompt\"（:303-305 streamingBehavior 直透 session.prompt）、:321 case \"steer\"、:325 case \"follow_up\"、:329 case \"abort\"、:333-335 case \"clear_queue\" → session.clearQueue()；各 case 0.84.4 实测计数恒 1，reclaim/remove 类 case 全文件 0 命中"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "clearQueue 队列级实现（PS-64 同锚）",
+        "note": ":1195-1203 队列级全清——pi 收回粒度上界即队列级，投递原语族无条目级寻址"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-66",
+    "claim": "非流式时 pi 忽略 streamingBehavior 参数：prompt() 对该参数的全部消费都在流式前提下调制——:843 extension input hook 按 this.isStreaming 三元传参（非流式传 undefined）、:860-872 isStreaming 块（:861 缺参 throw（PS-23 分支）/ :864 followUp 分流 / :868 steer 入队）；非流式路径（:874 起 flush pending → model 校验 → compaction 检查 → 起轮）零读取——非流式提交带 streamingBehavior 既不抛错也不产生队列副作用，参数静默失效。session-delivery-registry lane 判定的旁证承重（原挂不入库设计文档 F12 节）：direct lane（session 非流式）恒带 toStreamingBehavior(intent) 提交（pi 词汇封闭，无条件分支），行为正确性依赖「非流式忽略」；pi 若改为非流式也消费 streamingBehavior（如预排队），direct 投递会被错误排队",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "prompt(text, options) 的流式门控消费点与非流式路径",
+        "note": ":821 方法体；:843 emitInput(…, this.isStreaming ? options?.streamingBehavior : undefined)（非流式传 undefined）；:860 if (this.isStreaming)、:861-863 throw、:864-868 followUp/steer 分流——块后 :874-875 _flushPendingBashMessages/_flushPendingCustomMessages 起非流式路径，streamingBehavior 在窗口内最后出现于 :864（先于 :874）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "sendUserMessage(content, options) 透传（extension 通道同语义）",
+        "note": ":1161 方法体 → :1185 streamingBehavior: options?.deliverAs 直透 prompt——deliverAs 在非流式同样被忽略"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
     },
     "verifiedWith": "0.84.4"
   }

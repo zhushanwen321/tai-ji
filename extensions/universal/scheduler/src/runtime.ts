@@ -125,6 +125,13 @@ export class SchedulerRuntime {
     this.backend = backend
     this.isCtxStale = isCtxStale
     this.modelOps = modelOps
+    // U6c：session_tree（树回退）重折叠接线——生产 backend 在 pi.on('session_tree')
+    // 时按活跃路径重折叠任务集并回调；落点 = 本 tasks Map（loadTasks 换集）。
+    // 纯重建：不 dispatch、不 append op、不动 tickTimer 启停（常驻循环照常消费
+    // 新任务集，被撤子树任务不在集内即到点不触发）也不动 pendingModelSwitch
+    // （撤回编排前置 = 会话空闲，无在途模型切换记录）。测试替身不实现
+    // onSessionTree 时 ?. 订阅为 no-op，既有单测路径不变。
+    backend.onSessionTree?.((tasks) => this.loadTasks(tasks))
   }
 
   // ── 任务 CRUD ──
@@ -702,7 +709,10 @@ export class SchedulerRuntime {
 
   // ── 装配与回调 ──
 
-  /** 装配点注入初始任务数组（读盘/重放由 backend 完成，runtime 只持有内存态）。 */
+  /**
+   * 任务集换装入口（装配点 session_start 注入初始数组 + U6c session_tree 重折叠共用；
+   * 读盘/重放由 backend 完成，runtime 只持有内存态）。
+   */
   loadTasks(tasks: ScheduledTask[]): void {
     this.tasks = new Map(tasks.map(t => [t.id, t]))
   }

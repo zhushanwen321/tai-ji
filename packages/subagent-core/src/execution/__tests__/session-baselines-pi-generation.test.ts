@@ -1,6 +1,6 @@
 // src/execution/__tests__/session-baselines-pi-generation.test.ts
 //
-// [§1.4 (a)] pi 绑定代际机制单测（登记 docs/todo/subagent-workflow-issues.md §1.4 修复 (a)）：
+// [§1.4 (a)] pi 绑定代际机制单测（登记 已归档设计档案 §1.4 修复 (a)）：
 //   1. initSession 注入递增代际、pi getter 返回句柄、readAssertState 携带代际；
 //   2. invalidatePiBinding 作废后旧句柄消费返回 null（代际不符 = pi 不在场）+
 //      RecordStore 快照同步清空 + 重复作废幂等；

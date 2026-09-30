@@ -231,10 +231,14 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 's1', prompt: 'hello' })
 
-      // 走 sessionId 单例注册表取 handle，sendChecked 收到 text payload
+      // 走 sessionId 单例注册表取 handle，sendChecked 收到 text payload + D1 申报（agent
+      // 通路无标记出站，'acceptance' = 受理即落地）
       expect(delivery.getOrCreateDelivery).toHaveBeenCalledWith('s1')
       const handle = (delivery.getOrCreateDelivery as ReturnType<typeof vi.fn>).mock.results[0].value as { sendChecked: ReturnType<typeof vi.fn> }
-      expect(handle.sendChecked).toHaveBeenCalledWith({ payload: { kind: 'text', content: 'hello' } })
+      expect(handle.sendChecked).toHaveBeenCalledWith(
+        { payload: { kind: 'text', content: 'hello' } },
+        { receiptAnchor: 'acceptance' },
+      )
       // respond {queued: true, willNotify: false}（sd-u5 不再出现 {blocked, rejected}；notify-once：未带 notifyId 不 arm）
       expect(opts.sendExtensionUiResponse).toHaveBeenCalledWith(
         'sid-parent',
@@ -994,10 +998,14 @@ describe('SessionManagerHandler', () => {
       const handle = (opts.delivery.getOrCreateDelivery as ReturnType<typeof vi.fn>).mock.results[0].value as {
         sendChecked: ReturnType<typeof vi.fn>
       }
-      expect(handle.sendChecked).toHaveBeenCalledWith({
-        payload: { kind: 'text', content: 'hello' },
-        meta: { notifyId: VALID_NID, parentSid: 'sid-parent' },
-      })
+      // 两参形态（融合：notifyId 穿 envelope meta（theirs D2）+ receiptAnchor 申报制第二参（ours D1））
+      expect(handle.sendChecked).toHaveBeenCalledWith(
+        {
+          payload: { kind: 'text', content: 'hello' },
+          meta: { notifyId: VALID_NID, parentSid: 'sid-parent' },
+        },
+        { receiptAnchor: 'acceptance' },
+      )
     })
 
     it('send 重复 notifyId（同父同键）→ isError 回包（幂等不变量执行点）+ 不重复建债', async () => {

@@ -15,7 +15,7 @@ import type { Timing } from '../run-send-stream'
 
 const FAST_TIMING: Timing = {
   ack: 1, startGap: 1, chunk: 1, done: 1, switchCmd: 1, thinkingGap: 1,
-  toolGap: 1, fileChangesGap: 1, retryGap: 1, steerDrain: 1, bashDelay: 1,
+  toolGap: 1, fileChangesGap: 1, retryGap: 1, bashDelay: 1,
 }
 
 setMockTiming(FAST_TIMING)

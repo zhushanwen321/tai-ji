@@ -11,10 +11,6 @@ import {
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 
-/** steer / follow-up 发送模式（pushPending / drainPending / abortPending 共用）。
- *  从 Message.sendMode 的子集抽出，避免 'steer' | 'follow-up' 字面量在三处手写漂移。 */
-export type SteerFollowUpMode = 'steer' | 'follow-up'
-
 /**
  * 完成通知类 customType SSOT（conversation-renderer-model-unification §3.3.2：
  * 黑名单已删，收敛为 display 单一判别）。
@@ -65,6 +61,27 @@ export interface SubagentDirectiveData {
   text: string
 }
 
+// ── details 对象守卫（防御解析器族共用）────────────────────────────
+/** details 收窄为 Record：非对象形态（null / 原始类型 / 数组）→ null（防御性解析，不信任运行时形状）。 */
+function asDetailsRecord(details: unknown): Record<string, unknown> | null {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
+  // as 安全性：上方 typeof + Array.isArray 守卫已排除全部非 Record 形态。
+  return details as Record<string, unknown>
+}
+
+/**
+ * 还原 runtime encodeDirectiveText（runtime session-records.ts）的定向文本转义编码：
+ * 字面 `\n`（反斜杠 + n）→ 真实换行，字面 `\\`（两反斜杠）→ 单反斜杠。
+ *
+ * composer 多行输入在 client.prompt 传输前把真实换行编码为字面 \n、原生反斜杠编码为
+ * \\（命令保持单行），本函数是其互逆还原。反斜杠转义必须与换行转义在**单次遍历**里
+ * 成对处理（交替分支 `\\\\|\\n`，两反斜杠优先匹配）——若只处理 \n，原文里的字面
+ * 反斜杠 + n（如路径 `C:\new`）会被误解码为换行，产生往返歧义。
+ */
+export function decodeNewlineEscapes(s: string): string {
+  return s.replace(/\\\\|\\n/g, (m) => (m === '\\\\' ? '\\' : '\n'))
+}
+
 /**
  * 防御性解析 subagent-directive custom message → 定向数据。
  *
@@ -77,8 +94,8 @@ export interface SubagentDirectiveData {
  * 降级不崩溃）；content 非 string 时 text 归空串（details 有效则气泡仍携带去向信息）。
  */
 export function parseSubagentDirective(content: unknown, details: unknown): SubagentDirectiveData | null {
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
-  const d = details as Record<string, unknown>
+  const d = asDetailsRecord(details)
+  if (!d) return null
   if (typeof d.subagentId !== 'string' || typeof d.slug !== 'string' || d.direction !== 'user') return null
   return {
     subagentId: d.subagentId,
@@ -110,10 +127,90 @@ export type PiRespawnNoticeVariant = 'restored' | 'restoreFailed'
  * 解析失败（details 畸形 / variant 非法）→ null（消费侧降级为普通 system 文本行，不崩溃）。
  */
 export function parseRespawnNoticeVariant(details: unknown): PiRespawnNoticeVariant | null {
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
-  const v = (details as Record<string, unknown>).variant
+  const d = asDetailsRecord(details)
+  if (!d) return null
+  const v = d.variant
   return v === 'restored' || v === 'restoreFailed' ? v : null
 }
+
+/**
+ * uuid 字符结构单点（8-4-4-4-12 hex）：下方三个标记正则形态（MSG_ID_TAG_RE /
+ * MSG_ID_TAG_BARE_RE / BARE_UUID_RE）的 uuid 段全部由本串构造——uuid 模式段禁止在
+ * 本仓他处手写（[MF-1-11]；PS-26 探针锁定全仓单处手写体，msg-id-mapper extension
+ * 的同构正则属「extension 独立发布不依赖 shared」登记豁免，不在收敛面）。
+ */
+const MSG_ID_UUID_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+/**
+ * 投递身份标记正则（`<!--taiji:msg:<uuid>-->` 全文匹配 SSOT，双形态）：
+ * `u-<uuid>`（renderer 气泡 id 写入面，msg-id-mapper TAG_MATCH 同构）与裸 `<uuid>`
+ * （内核出站标记形态，刻意不被 msg-id-mapper 剥离——出站身份必须存活进 transcript
+ * 供送达回执匹配）。两形态指向同一 clientUuid，回归期（renderer 拼 u- 形态 + 内核
+ * 追加裸形态）首个命中即正确值。
+ *
+ * 捕获组：1 = 可选 `u-` 前缀；2 = 裸 uuid。i 旗标 + 小写字符类等价覆盖大写十六进制，
+ * 消费方统一 toLowerCase 归一。无 /g 无 lastIndex 状态，模块级单例可安全跨消费方共享。
+ * （收敛自 core user-delivery.ts 与 runtime skill-notice-publisher.ts 两份已漂移手写体。）
+ */
+export const MSG_ID_TAG_RE = new RegExp(`<!--taiji:msg:(u-)?(${MSG_ID_UUID_SEGMENT})-->`, 'i')
+
+/**
+ * 裸形态标记正则（uuid 双形态中只认裸 `<uuid>`，DEFER 判定专用——**不是投递身份判定
+ * 正则**，后者 = runtime session-delivery-registry 的 DELIVERY_MARKER_ID_RE，复合
+ * `m-` 收养条目形态；严格/宽松二分见 ADR-0077）。捕获组 1 = 裸 uuid。
+ *
+ * 消费方（core apply-entry-convert 的 DEFER_FLUSH_MARKER_RE 面 / runtime
+ * entry-tree-builder 的 deferId 提取）一律 import 本常量：uuid 段与 MSG_ID_TAG_RE
+ * 同源（MSG_ID_UUID_SEGMENT 单点），无独立派生器、无双侧同步纪律。
+ * id 空间互斥语义：uuid 字符集不含字母 u，结构上不命中 `u-` 前缀标记（反之 TAG_MATCH
+ * 不命中裸标记）——锚定 PS-26 探针行为断言。
+ */
+export const MSG_ID_TAG_BARE_RE = new RegExp(`<!--taiji:msg:(${MSG_ID_UUID_SEGMENT})-->`, 'i')
+
+/**
+ * 裸 uuid 全串锚定正则（8-4-4-4-12 hex，i 旗标）。消费方 = runtime revoke-orchestrator
+ * 的 targetId 形态分派（撤回 U8 保号子形态锚）：与 pi entryId 的 8 位 hex 形态构造性
+ * 区分（无连字符不匹配）。uuid 结构与 MSG_ID_TAG_RE 同源（MSG_ID_UUID_SEGMENT 单点），
+ * 禁单侧漂移。
+ */
+export const BARE_UUID_RE = new RegExp(`^${MSG_ID_UUID_SEGMENT}$`, 'i')
+
+/**
+ * 出站投递标记字面量唯一构造点（`<!--taiji:msg:<裸 id>-->`，msg-pipeline-debloat D5-6）。
+ * 内核尾附（withDeliveryMarker）、对账 needle、尾附锚文末判定等消费方统一经本函数构造，
+ * 禁手拼字面量。入参 = 裸 id 形态（`u-` 前缀由调用方先剥——runtime bareMarkerId）。
+ */
+export function markerLiteral(bareId: string): string {
+  return `<!--taiji:msg:${bareId}-->`
+}
+
+/**
+ * sendMessage 回执 reason 词表单点（msg-pipeline-debloat D4-6：原 runtime
+ * message-dispatcher / interfaces / session-api / session-service 与 plugin-sdk 五处
+ * 手写词表收敛至此，消费方一律 import 本类型）。
+ *
+ * 值语义（投递所有权内核架构下受理段实际产出）：
+ * - 'command-missing'：requireCommand 前置校验未命中拒发（命令串不进模型）；
+ * - 'hook-blocked'：BeforeSend hook 拦截；
+ * - 'error'：传输/装配级失败收口（session-api 异常收口、plugin-rpc-setup 装配缺失等）。
+ *
+ * busy/compacting/bash 三退役值已删：「排队取代拒绝」后投递内核对暂不可收时态只排队
+ * 不回拒，运行面只产上述三值。收窄裁决（P7 定案，非 breaking）：plugin-sdk
+ * private:true 不发布 npm（词表非外部发布契约面）+ 运行面只看 blocked/rejected 布尔
+ * （reason 是诊断/文案面，插件不得依赖精确值做行为分支）。词表收窄的传播义务：
+ * 仓内消费方（含插件与测试 mock）不得比较或注入退役值——出现即属收窄未同步清扫，
+ * 须一并删除。
+ *
+ * 另一语境勿混淆：WS 广播 send.rejected 的 reason（protocol.ts，'busy' | 'compacting'
+ * | 'processing'）是 bash 通道 busy 预检的防御反馈词表，不经本类型。
+ */
+export type SendPromptReason = 'command-missing' | 'hook-blocked' | 'error'
+
+/**
+ * 帧条目 preview 截断长度（投递队列展示投影）。runtime transport 与 core mock 轨共用
+ * 同值——mock 轨/real 轨帧形态一致（否则 mock 型前端测试的基线会与真机分叉）。
+ */
+export const DELIVERY_PREVIEW_MAX_CHARS = 80
 /** 消息生命周期状态（steer/followup 解耦后 pending 不再进消息流——m4 清理）。 */
 export type MessageStatus = 'streaming' | 'complete' | 'error'
 export type ToolCallStatus = 'running' | 'completed' | 'error' | 'end_not_received'
@@ -135,8 +232,6 @@ export interface ToolCall {
   outputTruncated?: boolean
   /** pi tool_execution_end result.details — 结构化扩展数据 */
   details?: Record<string, unknown>
-  /** Extension tool_call_update 进度百分比 (0-100) */
-  progress?: number
   /** Extension tool_call_update 详细信息。
    *  subagent sync 模式下存 pi-subagents 推送的 AgentProgress 快照（聚合摘要：
    *  currentTool/turnCount/tokens/recentTools 等），前端据此滚动更新 subagent 行。 */
@@ -145,7 +240,8 @@ export interface ToolCall {
   error?: string
   /**
    * 工具结果携带的图片（W5 提取，pi toolResult content 的 image 块：base64 data + mimeType）。
-   * core apply-entry 保字段写入（normalizePiToolResult 归一）；渲染消费待后续 wave。
+   * core apply-entry 保字段写入（normalizePiToolResult 归一）；渲染消费 = ui ToolResultImages
+   * （Block 按字段有值挂载）。
    */
   images?: Array<{ data: string; mimeType: string }>
   status: ToolCallStatus
@@ -221,12 +317,10 @@ export interface BashExecutionData {
 /**
  * Background subagent 完成通知的单条记录。
  *
- * 对应 pi-subagent-workflow 扩展 notifier.ts 的 BgNotifyRecord，经 customType:"subagent-bg-notify"
- * 的 CustomMessage details 传递。扩展在主对话流注入此通知，triggerTurn:true 唤醒
- * 父 agent 接力处理结果。
- *
- * 来源：extensions/universal/subagent-workflow/src/execution/notifier.ts（本仓源码；
- * 运行时安装在 ~/.taiji/npm/node_modules/@zhushanwen/pi-subagent-workflow/）
+ * 生产端权威 = packages/subagent-core/src/execution/notify/notifier.ts 的 BgNotifyRecord，
+ * 经 customType:"subagent-bg-notify" 的 CustomMessage details 传递。写侧在主对话流注入
+ * 此通知，triggerTurn:true 唤醒父 agent 接力处理结果。本接口是 wire 契约镜像：
+ * 增删字段须与写侧字段表对齐（OPTIONAL_RECORD_FIELD_WRITERS 按接口属性序拷贝）。
  */
 export interface BgNotifyRecord {
   id: string
@@ -249,10 +343,23 @@ export interface BgNotifyRecord {
   /** fork+worktree 模式下子 agent 改动的 patch 路径（worktree cleanup 后留存）。
    *  closed 时通知显式提示 git apply，否则改动会静默丢失。 */
   patchFile?: string
-  /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。对齐 notifier.ts ClosedReason。 */
+  /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。词表对齐
+   *  packages/subagent-core/src/execution/assembly/types.ts 的 ClosedReason。 */
   closedReason?: string
+  /**
+   * 终态三态对外语义（仅 closed 通知携带；running 轮次通知语义上无 outcome，缺省）。
+   * 写侧在 notify() 投影边界物化（closed 缺省时按 closedReason+error 派生）——消费侧
+   * 读本字段即得一等成败判定，无需自行从 closedReason 派生。
+   */
+  outcome?: 'completed' | 'failed' | 'cancelled'
   /** 对话轮次计数（仅 running 轮次通知有意义，非轮次通知恒定）。dedup key 按 id:round 去重。 */
   round?: number
+  /**
+   * 通知身份键（写侧 notify() 投影边界物化 = 去重/回执匹配键：`id` / `id:round`，
+   * 世代 epoch>0 扩为 `id:epoch:round`）。凭此可跨进程识别「同一条通知的重复注入」；
+   * 只进 details 不进 LLM 文案。
+   */
+  notifyId?: string
 }
 
 /**
@@ -266,7 +373,8 @@ export type BgNotifyDetails = BgNotifyRecord | { batch: true; items: BgNotifyRec
 /**
  * 防御性解析 customType:"subagent-bg-notify" 的 details 字段。
  *
- * details 两种形态（notifier.ts flushPendingNotifications）：
+ * details 两种形态（写侧 packages/subagent-core/src/execution/notify/notifier.ts
+ * flushPendingNotifications）：
  *   - 单条：BgNotifyRecord
  *   - 批量：{ batch: true, items: BgNotifyRecord[] }
  *
@@ -320,7 +428,7 @@ function parseRequiredRecordFields(d: Record<string, unknown>): Pick<BgNotifyRec
 /** 单个可选字段的拷贝 writer（窄化 + 条件写入） */
 type RecordFieldWriter = (record: BgNotifyRecord, d: Record<string, unknown>) => void
 
-function stringFieldWriter(field: 'model' | 'result' | 'error' | 'patchFile' | 'closedReason'): RecordFieldWriter {
+function stringFieldWriter(field: 'model' | 'result' | 'error' | 'patchFile' | 'closedReason' | 'notifyId'): RecordFieldWriter {
   return (record, d) => {
     const value = asRecordString(d[field])
     if (value !== null) record[field] = value
@@ -334,6 +442,17 @@ function numberFieldWriter(field: 'endedAt' | 'round'): RecordFieldWriter {
   }
 }
 
+/** outcome 字面量校验：=== 链与 BgNotifyRecord.outcome 联合逐一对齐（终态三态），非法值 → null */
+function asBgNotifyOutcome(v: unknown): BgNotifyRecord['outcome'] | null {
+  return v === 'completed' || v === 'failed' || v === 'cancelled' ? v : null
+}
+
+/** outcome 专用 writer：字面量联合不落宽 string（与 status 校验同款 === 链范式） */
+function outcomeFieldWriter(record: BgNotifyRecord, d: Record<string, unknown>): void {
+  const value = asBgNotifyOutcome(d.outcome)
+  if (value !== null) record.outcome = value
+}
+
 /** 可选字段拷贝表：数组顺序 = record 属性写入顺序（JSON.stringify 序列化依赖属性序，重排即 WS 帧/落盘字节漂移） */
 const OPTIONAL_RECORD_FIELD_WRITERS: ReadonlyArray<RecordFieldWriter> = [
   stringFieldWriter('model'),
@@ -342,7 +461,9 @@ const OPTIONAL_RECORD_FIELD_WRITERS: ReadonlyArray<RecordFieldWriter> = [
   numberFieldWriter('endedAt'),
   stringFieldWriter('patchFile'),
   stringFieldWriter('closedReason'),
+  outcomeFieldWriter,
   numberFieldWriter('round'),
+  stringFieldWriter('notifyId'),
 ]
 
 function copyOptionalRecordFields(d: Record<string, unknown>, record: BgNotifyRecord): void {
@@ -404,8 +525,8 @@ function asBackgroundBashEndReason(v: unknown): BackgroundBashEndReason | null {
  *   其余非 number 值 → 整体拒绝（字段类型异常不静默吞）
  */
 export function parseBackgroundBashDetails(details: unknown): BackgroundBashDetails | null {
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
-  const d = details as Record<string, unknown>
+  const d = asDetailsRecord(details)
+  if (!d) return null
   const taskId = asRecordString(d.taskId)
   const command = asRecordString(d.command)
   const durationMs = asRecordNumber(d.durationMs)
@@ -456,7 +577,8 @@ export interface WorkflowResultNotify {
   runId: string
   /** 三态判定（消费侧映射：failed → failedCount；neutral → neutralCount；completed → 成功计数） */
   outcome: WorkflowResultOutcome
-  /** 词表内的 reason 原值；词表外/缺失时不写入（保持 undefined，消费侧只看 outcome） */
+  /** 词表内的 reason 原值；词表外/缺失时不写入（保持 undefined，消费侧只看 outcome）。
+   *  诊断透传字段：当前零生产读取，成败判定一律走 outcome。 */
   reason?: WorkflowDoneReason
 }
 
@@ -472,8 +594,8 @@ export interface WorkflowResultNotify {
  * - reason 缺失 / 词表外 → outcome:'neutral'：记录级中性
  */
 export function parseWorkflowResultNotify(details: unknown): WorkflowResultNotify | null {
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
-  const d = details as Record<string, unknown>
+  const d = asDetailsRecord(details)
+  if (!d) return null
   const runId = asRecordString(d.runId)
   if (!runId) return null
   const reason = asWorkflowDoneReason(d.reason)
@@ -491,8 +613,10 @@ export function parseWorkflowResultNotify(details: unknown): WorkflowResultNotif
  * - write 新建文件 → added；覆盖既有文件 → modified
  * - edit 永远 → modified
  * - bash 驱动的删除/移动 → deleted（需 git 对账判定，见 ADR-0024）
- * - unmerged → git 冲突态（由 runtime git.status 推送，见 protocol.ts GitFileStatus；
- *   file_changes 与 git.status 共用本枚举，FR-11/C15）
+ * - unmerged → git 冲突态
+ *
+ * 与 git.ts GitFileStatus 是两个词表、不共用：后者面向 git.status 全量投影，多
+ * renamed/untracked 两值——file_changes 通道只消费 pi 工具语义面，不收 renamed/untracked。
  */
 export type FileChangeStatus = 'added' | 'modified' | 'deleted' | 'unmerged'
 
@@ -518,12 +642,6 @@ export interface FileChange {
  * superseded：agent 又改了一轮，旧变更集折叠归档
  */
 export type ChangeSetStatus = 'accumulating' | 'ready' | 'partially-reviewed' | 'resolved' | 'superseded'
-
-/**
- * 单文件审查决策（W14 ChangeSet Detail Accept/Reject 用）。
- * pending 为初始默认值，accepted/rejected 由用户在 Side Drawer 落定。
- */
-export type ReviewDecision = 'pending' | 'accepted' | 'rejected'
 
 export interface Message {
   id: string
@@ -565,8 +683,6 @@ export interface Message {
    * 仅 assistant 消息有值；user/system 消息不设置。
    */
   fileChanges?: FileChange[]
-  /** 发送模式，仅 user 消息有值（'send' 成员已删——无写入点，§3.3.6） */
-  sendMode?: 'steer' | 'follow-up'
   /** 是否被 abort 中断，仅 assistant 消息有值 */
   isInterrupted?: boolean
   /**
@@ -586,10 +702,11 @@ export interface Message {
   customType?: string
   /** pi CustomMessage 的 display 字段透传（ADR-0048）。
    *  pi 协议层是必填 boolean：false=隐藏不渲染，true=用区别于 user message 的样式渲染。
-   *  taiji 当前只消费 false 分支（filterDisplayableMessages 按 `!== false` 过滤），
-   *  true 与 undefined 在渲染上等价（ADR-0048 决策点 3 scope 只做过滤，未实现区别样式）。
+   *  taiji 只消费 false 分支，现役消费方 = core message-turns 分组管线：display===false 的
+   *  完成通知（customType ∈ COMPLETE_NOTIFY_CUSTOM_TYPES）作 turn 边界触发器，其余
+   *  display===false 消息在分组输入透明跳过（不产出渲染项）；true 与 undefined 在渲染上
+   *  等价（ADR-0048 决策点 3 scope 只做过滤，未实现区别样式）。
    *  shared.Message 是聚合类型含非 custom 消息，故 optional——
-   *  消费侧（renderer filterDisplayableMessages）按 `display !== false` 判断：
    *  仅 false 隐藏，undefined/true 都显示（undefined 来自无 customType 的普通消息或旧数据）。 */
   display?: boolean
   /** Bash 执行结果（composer-bash-execute）。system 消息有值：实时经 message.bashResult
@@ -614,8 +731,10 @@ export interface Message {
   piEntryId?: string
   /**
    * live-only 消息标记（conversation-turn-attribution D4）：该消息在 pi session 文件中
-   * 无对应 entry（如 stream_warn 健康警告），重开 session 后不存在。唯一写入点 = 消息
-   * 创建处（registry stream_warn handler）；分组层据此归为 turn 内 notice（不切断 turn），
+   * 无对应 entry（如 stream_warn 非终结提示——pi 静默卡死健康警告 / busy 拒绝等，见
+   * ADR-0078），重开 session 后不存在。写入点两处 = core effects registry 的
+   * stream_warn handler 与 store.appendRespawnNotice（respawn 恢复提示条）；
+   * 分组层据此归为 turn 内 notice（不切断 turn），
    * 不参与「live ≡ reload」等价性断言。
    */
   liveOnly?: boolean

@@ -2,7 +2,7 @@
  * mock 门面 + mock file/git domain 单测 —— VITE_MOCK 演示轨道的行为契约：
  * fixture 快照隔离（深拷贝）、session CRUD + 不存在抛错、config/extension/composer/
  * search/workspace/quota/project/preset 各域签名同构（facade 三元）、
- * chat 流式闭环（send → complete）、queue（steer/followUp drain）、bash 四态分流。
+ * chat 流式闭环（submitDelivery → complete，chat.send 已降 ack stub）、queue（steer/followUp drain）、bash 四态分流。
  * 时序：setMockTiming 全键压至 1ms（mock 默认节奏面向人眼演示 40ms～2s/步，真实等待
  * 无契约价值——阶段经历顺序不变，只消墙钟），afterAll 还原默认。
  */
@@ -20,7 +20,7 @@ import { e2eTestSession } from '../data'
 /** 测试压缩时序：全键 1ms/步（file/git 的 ack 由 setMockTiming 同步压缩） */
 const FAST_TIMING: Timing = {
   ack: 1, startGap: 1, chunk: 1, done: 1, switchCmd: 1, thinkingGap: 1,
-  toolGap: 1, fileChangesGap: 1, retryGap: 1, steerDrain: 1, bashDelay: 1,
+  toolGap: 1, fileChangesGap: 1, retryGap: 1, bashDelay: 1,
 }
 
 /** 轮询等待条件成立（mock 异步推送节奏用，超时 fail） */
@@ -272,13 +272,16 @@ describe('mock chat domain', () => {
     un()
   })
 
-  it('send：完整流式闭环（message_start → … → complete(usage)）', async () => {
+  // [R3-b03-1 降 stub 连带] chat.send 已降 ack stub（u3b 后生产零调用，协议镜像保留），
+  // 流式闭环断言改从 submitDelivery 驱动（同一 runSendStream 流，覆盖不缩水）。
+  // submitDelivery 先广播一条 session.delivery 快照帧，序列断言过滤该帧保持原语义。
+  it('submitDelivery：完整流式闭环（message_start → … → complete(usage)）', async () => {
     const frames: ServerMessageUnion[] = []
     const un = chat.streamSubscribe('s-send', (m) => frames.push(m))
-    await chat.send('s-send', 'hello')
+    await chat.submitDelivery('s-send', 'hello', 'u-send-1')
     await waitFor(() => frames.some((m) => m.type === 'message.complete'), 20_000)
     un()
-    const types = frames.map((m) => m.type)
+    const types = frames.filter((m) => m.type !== 'session.delivery').map((m) => m.type)
     expect(types[0]).toBe('message.message_start')
     expect(types).toContain('message.thinking_start')
     expect(types).toContain('message.tool_call_start')
@@ -286,7 +289,7 @@ describe('mock chat domain', () => {
     expect(types[types.length - 1]).toBe('message.complete')
   })
 
-  it('bash：happy path exitCode 0 + abortBash 推 cancelled', async () => {
+  it('bash：happy path exitCode 0 + abortBash 推 message.bashAborted 兜底终态', async () => {
     const frames: ServerMessageUnion[] = []
     const un = chat.streamSubscribe('s-bash', (m) => frames.push(m))
     await chat.bash('s-bash', 'ls')
@@ -295,7 +298,8 @@ describe('mock chat domain', () => {
     expect(result.output).toBe('(mock) ls')
     expect(result.exitCode).toBe(0)
     await chat.abortBash('s-bash')
-    await waitFor(() => frames.filter((m) => m.type === 'message.bashResult').length >= 2)
+    // 兜底终态走独立帧 message.bashAborted（msg-pipeline-debloat D4-3，与 runtime abortBash 同形）
+    await waitFor(() => frames.some((m) => m.type === 'message.bashAborted'))
     un()
   })
 
@@ -308,28 +312,34 @@ describe('mock chat domain', () => {
     un()
   })
 
-  // 压缩时序下 steer/followUp drain 全链 ~ms 级；30s timeout 保留为宽松上界（防御回归，非真实耗时）
-  it('steer/followUp：入队 queue_update → drain（队列清空 + assistant 补发）', { timeout: 30_000 }, async () => {
-    const queue: Array<{ steering?: string[]; followUp?: string[] }> = []
-    let completes = 0
-    const un = chat.streamSubscribe('s-queue', (m) => {
-      if (m.type === 'message.queue_update') {
-        queue.push(m.payload as { steering?: string[]; followUp?: string[] })
-      }
-      if (m.type === 'message.complete') completes += 1
-    })
-    await chat.steer('s-queue', 'steer-text')
-    await waitFor(() => completes >= 1, 20_000)
-    // 入队帧含 steering，drain 帧（队列清空）两键皆空
-    expect(queue.some((q) => q.steering?.includes('steer-text'))).toBe(true)
-    expect(queue.some((q) => !q.steering && !q.followUp)).toBe(true)
-    queue.length = 0
-    completes = 0
-    await chat.followUp('s-queue', 'fu-text')
-    await waitFor(() => completes >= 1, 20_000)
-    expect(queue.some((q) => q.followUp?.includes('fu-text'))).toBe(true)
-    expect(queue.some((q) => !q.steering && !q.followUp)).toBe(true)
+  // [u5a 退役] 前身用例「steer/followUp：入队 queue_update → drain（队列清空 + assistant 补发）」
+  // 已删：mock 的 steer/followUp 镜像与其唯一职责（喂 queue_update 快照）整体退役——u3b 退役
+  // queue_update 消费腿、u3c 队列区转 session.delivery 单源后该链零消费方（mock-domains 与
+  // dbg-steer 是仅存的消费面，属测试对被测机制的自证，非回归防线）。
+  it('submitDelivery：提交 → session.delivery 快照帧（in-flight/direct）+ 流式闭环', async () => {
+    const frames: ServerMessageUnion[] = []
+    const un = chat.streamSubscribe('s-queue', (m) => frames.push(m))
+    const reply = await chat.submitDelivery('s-queue', 'queue-text', 'u-queue-1')
+    expect(reply).toEqual({ clientUuid: 'u-queue-1', state: 'in-flight', lane: 'direct' })
+    const snapshot = frames.find((m) => m.type === 'session.delivery')
+    expect(snapshot, 'submitDelivery 应广播 session.delivery 快照帧').toBeTruthy()
+    const entries = (snapshot!.payload as { entries: Array<{ clientUuid: string; preview: string; state: string; lane: string }> }).entries
+    expect(entries).toEqual([{ clientUuid: 'u-queue-1', preview: 'queue-text', state: 'in-flight', lane: 'direct' }])
+    await waitFor(() => frames.some((m) => m.type === 'message.complete'), 20_000)
     un()
+  })
+
+  // [u5a 收编] cancel/drain/resync 三方法（前身由 renderer delivery 门面的自建 mock 分支承担，
+  // core mock 补齐后回归门面范式）——断言「协议合法最小响应，不伪造投递事实」。
+  it('cancelDelivery/drainDelivery/resyncDelivery：协议合法最小响应（不伪造投递事实）', async () => {
+    const cancelled = await chat.cancelDelivery('s-del', 'u-del-1')
+    expect(cancelled).toEqual({
+      clientUuid: 'u-del-1',
+      cancelled: false,
+      reason: 'mock: no kernel backing for s-del',
+    })
+    expect(await chat.drainDelivery('s-del')).toEqual({ sessionId: 's-del', entries: [] })
+    expect(await chat.resyncDelivery('s-del', [])).toEqual({ sessionId: 's-del', deduped: [] })
   })
 })
 
@@ -538,12 +548,11 @@ describe('mock model / extension / plugin / composer / search domain', () => {
 
 // ── mock workspace / quota / project / preset ───────────────────────────────
 describe('mock workspace / quota / project / preset domain', () => {
-  it('workspace：listRecent/record 同源 + detectBare 非 bare + detect not-repo', async () => {
+  it('workspace：listRecent/record 同源 + detect not-repo', async () => {
     const recent = await workspace.listRecent()
     expect(recent).toHaveLength(3)
     // lastUsedAt 按调用时刻取 Date.now()（ms 级漂移），比对 cwd 序列而非全等
     expect((await workspace.record('/any')).map((r) => r.cwd)).toEqual(recent.map((r) => r.cwd))
-    expect(await workspace.detectBare('/any')).toMatchObject({ isBare: false })
     expect(await workspace.detect('/any')).toMatchObject({ mode: 'not-repo' })
   })
 

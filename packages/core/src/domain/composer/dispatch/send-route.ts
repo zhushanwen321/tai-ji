@@ -1,18 +1,30 @@
 /**
- * D6 发送路由表（session-occupancy-send-closure u5b / 设计 §3.3 D6）。
+ * 发送位四态预测表（session-occupancy u5b D6 → 投递所有权内核 u3b/D1 降级为 UI 预测）。
  *
- * 统一发送分发器的路由判定纯函数：sessionPhase（occupancy 的 renderer 投影，chat store
- * session.occupancy 帧驱动）→ sendRoute。Composer 的 onSend / Enter / Alt+Enter 全部汇入
- * 单一分发器后按本表路由，替换此前 isActive→steer 与 isCompacting→queue-send 两套分散
- * 判定（优先级倒挂根因——分发逻辑不同源，行为随代码路径漂移）。
+ * [u3b/D1 降级] 本表**不再是投递决策**：lane 判定（direct/steer/queued）已收归 runtime
+ * 投递所有权内核（单一判定源 = runtime 权威 occupancy 投影 + 内核队列态），renderer 发送
+ * 链统一 delivery.submit，不做任何车道判定。本函数保留的唯一职责 = **发送位按钮形态的
+ * UI 预测**——Composer 发送位按 sessionPhase 预测「提交即送达 / 排队 / 停止」的按钮形态
+ * （send/stop/queue），供壳层渲染；真实车道以 session.delivery 帧的 lane 字段为准
+ * （提交后帧到达即校正预测偏差，渲染层不依赖本预测的正确性）。
  *
- * 「turn 活跃」的精确定义 = turn ∈ {dispatching, generating}（**不含** settling——settling
- * 是 pi post-run 收尾不是活跃 turn；generating+compacting 仅 threshold turn 内压缩可达）。
- * 路由判定顺序即优先级：先 turn 活跃 → steer（行 2/3）；否则任一维度忙 → defer（行 4/5/6）；
- * 全 idle → direct（行 1）。
+ * 保留原六行表语义作预测依据（与 runtime 内核判定同构——同读 occupancy 三维投影、
+ * 同 hold 优先判定序：任一 hold 维度先于活跃 turn 判，对齐 laneOf/holdReasonOf。
+ * generating∧compacting 组合现实可达——compacting-start 只 patch compacting 不动 turn——
+ * 对该组合权威 lane 为 queued，故 compacting 必须先于 turn 活跃集判定）：
  *
- * flush 触发（useChat occupancy handler）与 defer 语义同源：sendRoute 解除（= resolveSendRoute
- * 返回 'direct' 的三维形态）即投递时机——flush 条件按三维全 idle 判定，与本表行 1 对齐。
+ * | # | sessionPhase                                       | 预测形态 |
+ * |---|----------------------------------------------------|-----------|
+ * | 1 | 全 idle                                            | direct    |
+ * | 2 | compacting=true（任意 turn）                        | queued    |
+ * | 3 | bash=true（未压缩）                                 | queued    |
+ * | 4 | turn=settling（未压缩、无 bash）                     | queued    |
+ * | 5 | turn=dispatching 或 generating（无上述 hold 维度）   | steer     |
+ * | 6 | 其余（turn=idle 且无 hold 维度）                     | direct    |
+ *
+ * 命名说明：'defer' 字面随 defer 队列退役改为 'queued'（内核车道语义，DeliveryFrameEntry
+ * lane 同名）；SendRoute 类型字面保持 'direct' | 'steer' | 'queued'。TOCTOU 本质（renderer
+ * 投影与 pi 真实状态间的窗口）不再有正确性后果——误预测只影响按钮形态一帧，内核判定权威。
  *
  * 类型从 shared wire 契约提取（SessionPhase = session.occupancy payload 去 sessionId），
  * 与 chat store 的 occupancy 投影同源（shared protocol 是唯一权威，无双真源）。
@@ -22,30 +34,22 @@ import type { ServerMessageMap } from '@taiji/shared'
 /** sessionPhase —— occupancy 的 renderer 投影三维（P4 ActivityStrip / 发送位同源取数）。 */
 export type SessionPhase = Omit<ServerMessageMap['session.occupancy'], 'sessionId'>
 
-/** occupancy 缺省值（session 无 occupancy 记录时 = 全 idle，路由 direct / flush 可触发）。 */
+/** occupancy 缺省值（session 无 occupancy 记录时 = 全 idle，预测 direct）。 */
 export const IDLE_SESSION_PHASE: SessionPhase = { turn: 'idle', compacting: false, bash: false }
 
-/** 发送路由三态：direct 直发 / steer 并入当前回合 / defer 入 defer 队列占用解除后投递。 */
-export type SendRoute = 'direct' | 'steer' | 'defer'
+/** 发送位预测三态（[u3b/D1] UI 预测非投递决策）：direct 直达 / steer 并入当前回合 / queued 排队。 */
+export type SendRoute = 'direct' | 'steer' | 'queued'
 
 /**
- * D6 路由表（六行）：
+ * 发送位四态预测表（六行，语义见文件头注）。纯函数、零副作用——只做按钮形态预测，
+ * 投递行为与本表返回值无关（内核 lane 判定权威，session.delivery 帧 lane 字段校正）。
  *
- * | # | sessionPhase                                | sendRoute |
- * |---|---------------------------------------------|-----------|
- * | 1 | 全 idle                                     | direct    |
- * | 2 | turn=dispatching 或 generating（无 compacting）| steer    |
- * | 3 | turn=generating + compacting（threshold）    | steer     |
- * | 4 | turn=settling（无论是否 compacting）          | defer     |
- * | 5 | turn=idle + compacting                       | defer     |
- * | 6 | bash=true 且 turn=idle                       | defer     |
- *
- * 行 3（generating+compacting → steer）即「优先级倒挂」的消除形态：turn 活跃优先于
- * compacting 维度——压缩后 turn 继续跑，消息经 steer 在压缩完成后的下一次 LLM 调用前
- * 投递（不产生 pending 气泡，steer 分档正确）。
+ * 判定序与 runtime laneOf 同构：先 hold（任一不可收维度 → queued；内部序 compacting →
+ * bash → settling 对齐 holdReasonOf，三者同返回值故序不影响行为，仅保持同构可读），
+ * 再 steer（活跃 run），后 direct。
  */
 export function resolveSendRoute(phase: SessionPhase): SendRoute {
+  if (phase.compacting || phase.bash || phase.turn === 'settling') return 'queued'
   if (phase.turn === 'dispatching' || phase.turn === 'generating') return 'steer'
-  if (phase.turn === 'settling' || phase.compacting || phase.bash) return 'defer'
   return 'direct'
 }

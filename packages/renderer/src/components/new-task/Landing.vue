@@ -167,13 +167,11 @@ const isWorktreeModalOpen = computed(() => flow.state.value === 'worktree-modal'
 /** 当前 cwd 所在 workspace 的已有 worktree 列表（BranchSelectPopover Worktree tab 数据源）。 */
 const worktreeItems = computed(() => flow.worktreeItems?.value ?? [])
 
-/** 短名去尾缀后的最小保留长度（低于此值回退全名，避免「模式」二字模式名被去空） */
-const MIN_SHORT_NAME_LENGTH = 2
-
 /**
  * 当前显示 / 将生效的模式（u4b 接线）：与 PresetSelectChip 内部同一 resolve 链
- * （explicit > 全局默认 > builtin:full，D3 单一解析层）。renderer 侧算好全名 / 短名 /
- * 信任标记文案，经 props 传给 ui chip（ui 包不耦合 renderer i18n——u4a 的 props 契约）。
+ * （explicit > 全局默认 > builtin:full，D3 单一解析层）。renderer 侧算好全名 /
+ * 信任标记文案，经 props 传给 ui chip（ui 包不耦合 renderer i18n——u4a 的 props 契约；
+ * 短名不在传参面——chip 内 fallback 是唯一实现，避免去尾缀启发式双实现漂移）。
  */
 const displayPreset = computed<PiLaunchPreset | null>(() => {
   const presets = deps.presets.value
@@ -189,13 +187,6 @@ const displayPreset = computed<PiLaunchPreset | null>(() => {
 })
 /** 模式全名（缺省 undefined → ui chip 回落其内部解析名，既有接入零改动） */
 const modeName = computed(() => displayPreset.value?.name)
-/** 模式短名（中文本土模式名去「模式」尾缀；无尾缀保持全名） */
-const modeShortName = computed(() => {
-  const name = modeName.value
-  if (!name) return undefined
-  const stripped = name.replace(/模式$/, '')
-  return stripped.length >= MIN_SHORT_NAME_LENGTH ? stripped : name
-})
 /** 信任标记判据（设计 §7.1：`replace.enabled && 文案非空`） */
 const modeHasReplace = computed(() => {
   const seg = displayPreset.value?.prompt?.replace
@@ -355,7 +346,6 @@ function onPresetSelect(payload: { presetId: string }): void {
             :launch-preset-id="flow.currentSession.value?.launchPresetId"
             :accent="isNonDefaultPreset"
             :mode-name="modeName"
-            :short-name="modeShortName"
             :has-replace-prompt="modeHasReplace"
             :replace-hint="modeReplaceHint"
             v-model:preset-open="isPresetOpen"

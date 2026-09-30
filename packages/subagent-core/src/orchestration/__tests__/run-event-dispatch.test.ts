@@ -222,7 +222,7 @@ describe("agent-started phase 承载（W1 D6 分组供源）", () => {
   });
 });
 
-// ── 1.6 run-created 时间预算载荷（预算单源，docs/todo §1.1） ──
+// ── 1.6 run-created 时间预算载荷（预算单源，已归档设计档案（决策记录见 docs/adr/decisions.md） §1.1） ──
 
 describe("run-created 时间预算载荷（resume 预算单源）", () => {
   it("spec.budgetTimeMs > 0 → 帧携带该字段（resume 继承恢复的数据面）", async () => {

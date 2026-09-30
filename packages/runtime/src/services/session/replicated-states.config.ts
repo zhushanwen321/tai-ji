@@ -20,7 +20,8 @@
  *
  * W8 二条目（usage / commands，四实例齐备）：
  * - usage：fetch = get_session_stats().contextUsage（投影对齐既有 fetchContext 口径：
- *   inputTokens = tokens、contextLimit = contextWindow、usagePercent = Math.round(percent ?? 0)）；
+ *   inputTokens = tokens、contextLimit = contextWindow、usagePercent = Math.round(percent)，
+ *   percent 无值时字段缺省——[RT-4#7] 无值纪律，不折 0）；
  *   失效 = context 相关事件 turn_end / agent_end / compaction（接线汇聚点 =
  *   session-service.applyContextUpdate——三事件路径均经 interpreter onContextUpdate 到达）；
  *   空值语义 = 无（tokens=null 是 pi compact 后无新 turn 的合法「无值」态，投影为空快照
@@ -195,12 +196,16 @@ export function createUsageStateConfig(
       const tokens = record.tokens
       if (typeof tokens !== 'number') return {} // tokens=null = compact 后合法无值态，保持旧值
       const contextWindow = record.contextWindow
-      // 投影口径对齐既有 fetchContext：contextWindow=number、percent ?? 0 后取整
-      const percent = typeof record.percent === 'number' ? record.percent : 0
+      // 投影口径对齐既有 fetchContext：contextWindow=number；percent 无值不折 0
+      //（[RT-4#7] 无值纪律——usagePercent 字段缺省 = 快照「无值」态，merge 保持旧值，
+      // 发布门（publishContextFromSnapshot）对缺字段快照不发布假 0% 帧）
+      const percent = typeof record.percent === 'number' ? record.percent : undefined
       return {
         inputTokens: tokens,
         contextLimit: typeof contextWindow === 'number' ? contextWindow : 0,
-        usagePercent: Math.min(Math.round(percent), MAX_USAGE_PERCENT),
+        ...(percent !== undefined
+          ? { usagePercent: Math.min(Math.round(percent), MAX_USAGE_PERCENT) }
+          : {}),
       }
     },
     debounceMs: SCALAR_STATE_DEBOUNCE_MS,

@@ -115,6 +115,7 @@ describe("reconstructState dirty entry degradation", () => {
 	function makeCtx(details: unknown): Parameters<typeof reconstructState>[1] {
 		return {
 			sessionManager: {
+				getLeafId: () => null,
 				getEntries: () => [
 					{ type: "message", message: { role: "toolResult", toolName: "todo", details } },
 				],

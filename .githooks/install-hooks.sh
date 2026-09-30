@@ -2240,6 +2240,106 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
 fi
 
 # ============================================================================
+# chat store facet 双清单对账检查（E2E-CHATOPS-01 的 pre-commit 执行点；
+#   code-overdesign-audit 候选 6 / msg-pipeline-debloat D5-4）
+#   staged 命中两清单载体或检查脚本自身时触发：
+#   scripts/check-chat-ops-sync.mjs —— store.ts 的 ChatStoreOps Pick 字段清单
+#   （类型面 SSOT）× taste-lint/rules/no-chat-ops-in-components.mjs 的
+#   OPS_FIELDS 手写 Set（lint 拦截面）双侧机械提取做双向差集，幽灵/漏拦任一
+#   非空即红——「两处同步改」人工契约机器化（曾实测漂移 13 项无任何机器信号，
+#   靠事后对抗审查才抓出）。触发面 = 两载体 + 脚本自身：对账结果只由这三
+#   文件决定，其余 staged 不影响结果。触发面并入本路径范围的 staged 删除
+#   （pathspec 清单天然含 D）：单独 staged 删除检查脚本也必须触发，下方
+#   [ ! -f ] 存在性检查正是删除场景的防线。全量对账毫秒级，无增量模式。
+#   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+CHAT_OPS_SYNC_STAGED=$(git diff --cached --name-only -- packages/core/src/domain/chat/store.ts taste-lint/rules/no-chat-ops-in-components.mjs scripts/check-chat-ops-sync.mjs)
+if echo "$CHAT_OPS_SYNC_STAGED" | grep -qE "^packages/core/src/domain/chat/store\.ts$|^taste-lint/rules/no-chat-ops-in-components\.mjs$|^scripts/check-chat-ops-sync\.mjs$"; then
+    print_section "[chat store facet 双清单对账]"
+    if [ ! -f "scripts/check-chat-ops-sync.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-chat-ops-sync.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-chat-ops-sync.mjs; then
+        echo -e "${RED}[ERROR] facet 双清单漂移——按上方幽灵/漏拦明细，以 store.ts 的 ChatStoreOps 为唯一清单同步 OPS_FIELDS 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] facet 双清单对账通过（E2E-CHATOPS-01）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 facet 双清单载体变更，跳过对账检查${NC}"
+fi
+
+# ============================================================================
+# 跨进程契约字面量多侧对账检查
+#   staged 命中任一登记定义文件或检查脚本自身时触发：
+#   scripts/check-cross-process-literals.mjs —— 断言两组跨进程契约串的全部
+#   生产定义点同串：'taiji.client-msg-id'（runtime entry-tree-builder /
+#   revoke-orchestrator × msg-id-mapper 扩展三侧）与 'taiji:revoked'
+#   （revoke-orchestrator × agent-ext × scheduler-manager 插件三侧）。定义点
+#   分属互相不可 import 的包，编译期拦截不可行，多侧手抄仅靠注释纪律——本
+#   检查以 AST 提取代码字符串字面量（注释不算），任一侧漂移即红并指明需
+#   同步的各侧文件。触发面 = 登记定义文件 + 脚本自身：对账结果只由这些文件
+#   决定；触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D），单独
+#   staged 删除检查脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的
+#   防线。全量对账毫秒级，无增量模式。新契约串在脚本 GROUPS 登记表登记，
+#   登记文件变更须同步本段 pathspec。不设独立 SKIP_* 开关（R1 后惯例，
+#   总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+CROSS_PROC_LIT_PATHS="packages/runtime/src/infra/pi/entry-tree-builder.ts packages/runtime/src/services/session/revoke-orchestrator.ts extensions/taiji/msg-id-mapper/src/index.ts extensions/taiji/agent-ext/src/index.ts resources/plugins/scheduler-manager/index.ts scripts/check-cross-process-literals.mjs"
+CROSS_PROC_LIT_STAGED=$(git diff --cached --name-only -- $CROSS_PROC_LIT_PATHS)
+if echo "$CROSS_PROC_LIT_STAGED" | grep -qE "^packages/runtime/src/infra/pi/entry-tree-builder\.ts$|^packages/runtime/src/services/session/revoke-orchestrator\.ts$|^extensions/taiji/msg-id-mapper/src/index\.ts$|^extensions/taiji/agent-ext/src/index\.ts$|^resources/plugins/scheduler-manager/index\.ts$|^scripts/check-cross-process-literals\.mjs$"; then
+    print_section "[跨进程契约字面量对账]"
+    if [ ! -f "scripts/check-cross-process-literals.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-cross-process-literals.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-cross-process-literals.mjs; then
+        echo -e "${RED}[ERROR] 跨进程契约字面量漂移——按上方明细把登记的各侧文件同步回登记串值（或契约串确属变更时同步全部侧与 GROUPS 登记表）后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 跨进程契约字面量对账通过${NC}"
+else
+    echo -e "${GREEN}[OK] 无跨进程契约字面量载体变更，跳过对账检查${NC}"
+fi
+
+# ============================================================================
+# useSessionScopedState 调用点 census 静态锁（ADR-0049 入口边界，E2E-CENSUS-01
+#   的 pre-commit 执行点）
+#   staged 命中任意 .ts/.tsx/.vue 或检查脚本自身时触发：
+#   scripts/check-session-scoped-state-census.mjs —— 快照清单外出现新调用点
+#   （新文件或既有文件新增）即红，先审阅其 scope 上下文是否满足 ADR-0049
+#   分区范式，有意变更按脚本头注释更新 CENSUS_SNAPSHOT。触发面 = 与检查脚本
+#   全仓扫描面同构的结构无关 glob（快照清单横跨 core/dom-core/renderer/ui，
+#   目录清单式触发面必有洞——同 record-write-surface 段扩为 glob 全域的教训：
+#   禁止与目录结构耦合的清单式写法）。触发面天然含 staged 删除（快照内文件
+#   被删 = 消失调用点，同样必须红）：单独 staged 删除检查脚本也必须触发，
+#   下方 [ ! -f ] 存在性检查正是删除场景的防线。全仓扫描 ~0.2s，无增量模式。
+#   退出码 0=合规 / 3=census 与快照不符 / 1=脚本自身异常，非零一律拦截。
+#   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+SESSION_CENSUS_STAGED=$(git diff --cached --name-only -- '*.ts' '*.tsx' '*.vue' scripts/check-session-scoped-state-census.mjs)
+if echo "$SESSION_CENSUS_STAGED" | grep -qE "\.(tsx?|vue)$|^scripts/check-session-scoped-state-census\.mjs$"; then
+    print_section "[useSessionScopedState 调用点 census]"
+    if [ ! -f "scripts/check-session-scoped-state-census.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-session-scoped-state-census.mjs（检查脚本被删除）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-session-scoped-state-census.mjs; then
+        echo -e "${RED}[ERROR] census 与快照不符——清单外新调用点先审阅 scope 上下文（ADR-0049 分区范式），有意变更按脚本头注释更新 CENSUS_SNAPSHOT 后重试${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 调用点 census 与快照一致（E2E-CENSUS-01）${NC}"
+else
+    echo -e "${GREEN}[OK] 无 .ts/.tsx/.vue 变更，跳过调用点 census 检查${NC}"
+fi
+
+# ============================================================================
 # [skills-snapshot 尾部段] 实体快照（备份链 D3；失败非阻断）
 #   全部检查通过后对 workspace 根实体做快照（refs/skills-snapshot：临时 index +
 #   commit-tree，不碰工作树与真实 index）。失败仅日志放行本次提交，下次提交自动
@@ -2352,6 +2452,9 @@ echo -e "  ${GREEN}[+]${NC} review-fix-loop 双实现锁步检查（workflows �
 echo -e "  ${GREEN}[+]${NC} subagent-engine-sdk + subagent-core typecheck（两包变更时触发：D11 编译期机器锁 C3 词表 / C4 双写禁令 / C2 必填 + C-proc-23 词表锁 core 侧镜像锚点）"
 echo -e "  ${GREEN}[+]${NC} pi 资产模型引用漂移检查（extensions .md / 快照变更时触发：D8 agent 资产 model 声明 vs builtin-providers 快照 diff）"
 echo -e "  ${GREEN}[+]${NC} oe-assert 过度设计自动初筛（code-overdesign-audit 三断言：no-reference / single-impl / pass-through，oe-exempt 豁免标记）"
+echo -e "  ${GREEN}[+]${NC} chat store facet 双清单对账（E2E-CHATOPS-01：store.ts ChatStoreOps × taste-lint OPS_FIELDS 双向差集，载体变更时触发）"
+echo -e "  ${GREEN}[+]${NC} useSessionScopedState 调用点 census 静态锁（E2E-CENSUS-01：ADR-0049 入口边界快照对账，.ts/.tsx/.vue 变更时触发）"
+echo -e "  ${GREEN}[+]${NC} 跨进程契约字面量多侧对账（taiji.client-msg-id / taiji:revoked 登记侧变更时触发：AST 字面量同串断言）"
 echo ""
 echo -e "${CYAN}Hook 脚本位置:${NC} .githooks/"
 echo ""

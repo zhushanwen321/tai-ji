@@ -4,7 +4,7 @@
  * 域内容（一个概念域的两半，冷热同源）：
  * - W18 派生缓存族：recordEntriesCaches + get_entries 增量重拉编排（entry_appended
  *   失效信号 → 防抖 → cursor 三路径拉取 → merge → 送达水位发布；plan 模式重设计 D1③④
- *   扩容第三族——第二道 customType 早退门 + scanPlanStateEntries 派生 + session.planState
+ *   扩容第三族——record 三族 customType 早退门 + scanPlanStateEntries 派生 + session.planState
  *   publish diff；[reload-closeout D2] 发布门基线从 merge 变化信号换成已发布快照水位，
  *   守卫/发布门处丢帧 = 水位滞留 → agent_settled / 15s 定时两腿对账补发，稳态零帧）；
  * - 磁盘读侧/动作/引擎配置：getSubagents/getWorkflows（[W1 / D6] 读请求只读 journal
@@ -111,6 +111,14 @@ export interface RecordEntriesCache {
   /** in-flight 拉取 promise（并发失效共享一次拉取，消除重复 RPC）。 */
   inflight: Promise<void> | null
   /**
+   * [message-revoke U6d] 撤回失效标记：invalidateDerivedState 置位——在途增量轮的
+   * cursor 回写不得复活增量通道（check-then-act 竞态：失效落在增量 getEntries 在途时，
+   * 轮末 `cursor = fetched.leafId` 会把刚丢掉的 cursor 写回去，失效静默失效）。消费点
+   * 两处：fetchRecordEntriesRound 增量门（置位期间强制走全量）+ refreshRecordEntries
+   * 轮末复查（在途增量轮作废重跑全量）；全量轮入口清位（失效已兑现）。
+   */
+  forceFullRebuild: boolean
+  /**
    * [reload-closeout D2] 送达水位：已发布 subagents 快照（publish 完成后镜像派生缓存
    * id 集；引用共享安全——scan 每轮产新对象，旧引用不可变，equals 走字段级比对）。
    */
@@ -183,9 +191,10 @@ interface WorkflowUpdateSignal {
 }
 
 /**
- * [RT-4#9] 未知 customType warn 去重表（模块级：类型字符串有限集合，无清理必要）。
- * 三道 customType 运行时字符串门（event-adapter 白名单 / 本模块早退门 / entry 扫描器）
- * 扩容不同步时，本 warn 是失效链断链的唯一显形信号。
+ * [RT-4#9] 非 record 族 customType warn 去重表（模块级：类型字符串有限集合，无清理必要）。
+ * customType 运行时字符串门共两道（D5 放宽后：第一道 = invalidateRecordEntries 的三族
+ * 早退门，第二道 = entry 扫描器族；event-adapter 已放宽为任意 string 透传，不再是门）——
+ * record 族新成员漏扩两道门时失效链静默断链，本 warn 是唯一显形信号。
  */
 const warnedCustomTypes = new Set<string>()
 
@@ -193,8 +202,10 @@ function warnUnknownCustomTypeOnce(customType: string): void {
   if (warnedCustomTypes.has(customType)) return
   warnedCustomTypes.add(customType)
   console.warn(
-    `[session-records] invalidateRecordEntries: unknown customType '${customType}' dropped —` +
-    ` if this is a new record family, extend the gate set here + event-adapter whitelist + entry scanners together`,
+    `[session-records] invalidateRecordEntries: non-record customType '${customType}' reached the gate, no-op —` +
+    ` if this is a new record family, extend the three-family gate here + entry scanners together;` +
+    ` otherwise it is a legit non-record customType (e.g. rename-session / pi-scheduler / pending-notifications entries)` +
+    ` expected to pass through — no action needed`,
   )
 }
 
@@ -347,10 +358,12 @@ export class SessionRecords {
    * 的磁盘扫描承接。
    */
   invalidateRecordEntries(sessionId: string, customType: string): void {
-    // 第二道 customType 早退门（D1③）：与 event-adapter 白名单（第一道门）同批扩容——
-    // 白名单放行而此处早退则 live 链静默 no-op（三道运行时字符串门之一，编译器不保护）。
-    // [RT-4#9] 未知 customType 落 warn 显形（按类型字符串去重防刷屏）：三道门扩容漏改时
-    // 该类型 record 的失效链静默断链，无日志不可排查——此前纯早退 = 永久静默丢弃。
+    // 第一道 customType 早退门（D1③）：record 三族之外一律早退。D5 放宽后 event-adapter
+    // 对任意 string customType 透传（不再是门），生产侧合法非 record 族 customType
+    // （rename-session / pi-scheduler / pending-notifications 等 extension entry）会到达
+    // 此处预期穿透（编译器不保护）。
+    // [RT-4#9] 非 record 族 customType 落 warn 显形（按类型字符串去重防刷屏）：record 族
+    // 新成员漏扩本门/扫描器时失效链静默断链，无日志不可排查——此前纯早退 = 永久静默丢弃。
     if (
       customType !== SUBAGENT_RECORD_CUSTOM_TYPE &&
       customType !== WORKFLOW_RECORD_CUSTOM_TYPE &&
@@ -378,6 +391,38 @@ export class SessionRecords {
       cache.debounceTimer = null
       void this.refreshRecordEntries(sessionId, 'invalidate')
     }, SCALAR_STATE_DEBOUNCE_MS)
+  }
+
+  /**
+   * [message-revoke U6d] 撤回路径的派生态失效契约（设计 §5 U6「SessionRecords 失效契约
+   * （定死）」+ D2 ④）：**丢 cursor 强制全量重建**。防抖增量通道不适用——增量批 plan 派生
+   * null 显式「保持基线」（mergePlanState），被撤回合的 plan 残影清不掉；清 Map 形态破坏
+   * 豁免族照实保留（subagent/workflow run 真实执行过）。全量重建时 plan 扫描接 leafId
+   * 活跃路径裁剪（被撤子树 plan-state 不进派生态）、subagent/workflow 扫描不裁（照实
+   * 构造性保持）。
+   *
+   * 三水位字段（publishedSubagents/publishedWorkflows/publishedPlanState）**同批处置 =
+   * 刻意存续**（[reload-closeout D2] fullRebuild 只重置派生 Map、水位存续的既有裁决）：
+   * plan 腿撤回后派生值变化由水位 diff 自然触发收敛帧（含被撤子树含唯一 plan entry →
+   * 活跃路径空 → mergePlanState 全量收敛 null → 水位 null↔View 差异发缺省帧）；
+   * subagent/workflow 照实族全量重派生内容不变 → 水位 diff 恒空零冗余帧——清水位反而
+   * 会发整帧冗余广播。
+   *
+   * 同步立即触发一轮重算（fire-and-forget；与在途增量轮经 forceFullRebuild 标记 +
+   * inflight 合并竞态安全，见 RecordEntriesCache.forceFullRebuild 注释）——撤回 reply 前
+   * 面板残影窗口收敛到本轮拉取时延。调用方 = revoke-orchestrator（⑥ 树回退校验通过后
+   * 注入窄接口 invalidateDerivedState——失效触发的重算消费调用时点的树快照，信令前调用
+   * 会消费撤回前树重建出被撤残影；组合根 no-op 占位由本方法替换接线，主 agent 核销）。
+   *
+   * session 未激活（无缓存条目）→ no-op：冷启动路径（getSubagents/getWorkflows/
+   * getPlanState 磁盘扫描）已各自接活跃路径/照实语义，无需失效。
+   */
+  invalidateDerivedState(sessionId: string): void {
+    const cache = this.recordEntriesCaches.get(sessionId)
+    if (!cache) return
+    cache.cursor = null // 丢 cursor：下次拉取强制全量重建
+    cache.forceFullRebuild = true
+    void this.refreshRecordEntries(sessionId, 'invalidate').catch((e) => this.warnReconcileRoundFailed(sessionId, e))
   }
 
   /**
@@ -419,6 +464,7 @@ export class SessionRecords {
       planState: null,
       debounceTimer: null,
       inflight: null,
+      forceFullRebuild: false,
       publishedSubagents: new Map(),
       publishedWorkflows: new Map(),
       publishedPlanState: null,
@@ -542,8 +588,12 @@ export class SessionRecords {
             console.warn(`[session-service] refresh record entries via getEntries failed for ${sessionId}: ${toErrorMessage(e)}`)
             return
           }
-          const frames = this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild)
+          const frames = this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild, fetched.leafId)
           if (fetched.leafId !== undefined) cache.cursor = fetched.leafId
+          // [message-revoke U6d] 撤回失效在途命中：本轮是失效前捕获的增量轮（cursor 已被
+          // 上方回写复活）——作废本轮结果，重跑全量（flag 在全量轮入口清除；两轮上限恰好
+          // 覆盖「一轮增量竞态 + 一轮全量兑现」）
+          if (cache.forceFullRebuild) continue
           // [pull-push W0] 首拉未决解除（拉取 + merge + 发布判定已完成一轮；发布与否随
           // 水位 diff——零帧轮同样解除，缓存腿健康即为目标状态）。
           cache.awaitingFirstPull = false
@@ -648,6 +698,8 @@ export class SessionRecords {
   /**
    * W18：单轮 get_entries 拉取——按 cursor 有无分流增量/全量（fullRebuild 随返回值上浮，
    * 供 plan 收敛语义分流，见 mergePlanState）。
+   * [message-revoke U6d] 增量门加 forceFullRebuild：撤回失效置位期间强制走全量（丢 cursor
+   * 的失效语义不被在途增量通道绕过）；全量轮入口清位（失效已兑现，后续轮次恢复增量）。
    * 全量重建时 Map 族派生缓存整体重置（纯派生语义——全量扫描结果就是新基线）；plan 基线
    * **不**在此复位：「重建前基线」正是 entry 被外部清空时收敛发布的 diff 依据，复位会把
    * 基线抹成 null 使收敛分支失去触发条件，语义由 mergePlanState 的 isFullRebuild 分支承接。
@@ -659,10 +711,11 @@ export class SessionRecords {
     client: IPiEngine,
     cache: RecordEntriesCache,
   ): Promise<{ entries: unknown[]; leafId: string | undefined; fullRebuild: boolean }> {
-    if (cache.cursor !== null) {
+    if (cache.cursor !== null && !cache.forceFullRebuild) {
       const inc = await client.getEntries(cache.cursor) as EntriesSinceResult
       return { entries: inc.data?.entries ?? [], leafId: inc.data?.leafId ?? undefined, fullRebuild: false }
     }
+    cache.forceFullRebuild = false
     const full = await client.getEntries() as EntriesSinceResult
     // [W1 / D6] 全量基线重置移驻投影（applyEntryBatch fullRebuild：entry 源两代
     // 整体重置；journal 源不动——事实源不随 entry 游标自愈重置）
@@ -692,6 +745,7 @@ export class SessionRecords {
     entries: unknown[],
     sessionId: string,
     isFullRebuild: boolean,
+    leafId?: string,
   ): string[] {
     // [W1 / D6] entry 批换投影入口：v1 快照扫描 + v2 条目分类 + journal fold 双源
     // 单点合并（journal 胜出仲裁）全在投影内完成；步骤视图合并的输入源也从本处的
@@ -703,7 +757,12 @@ export class SessionRecords {
     const projection = this.ensureProjection(sessionId, cache)
     projection.applyEntryBatch(entries, { fullRebuild: isFullRebuild })
     this.syncCacheFromProjection(cache, projection)
-    mergePlanState(cache, scanPlanStateEntries(entries), isFullRebuild)
+    // [message-revoke U6d] G2 二分在此落点：plan 腿（随树）仅全量重建传 leafId 活跃路径
+    // 裁剪（scanPlanStateEntries 第二参——被撤子树的 plan-state entry 不进派生态）；
+    // subagent/workflow 腿（照实）刻意不裁——run 真实执行过，投影语义天然保持照实保留。
+    // 增量轮（isFullRebuild=false）不传 leafId：delta 是活跃路径后缀切片，统一裁剪
+    // 会在窗口越界误裁（U6a 调用点契约同款）。
+    mergePlanState(cache, scanPlanStateEntries(entries, isFullRebuild ? leafId : undefined), isFullRebuild)
 
     if (!this.deps.hasSession(sessionId)) return [] // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
     return this.publishRecordChanges(cache, sessionId)

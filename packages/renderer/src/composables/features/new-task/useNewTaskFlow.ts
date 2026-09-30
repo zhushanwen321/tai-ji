@@ -11,8 +11,7 @@
  * - createSessionFlow：core domain/session createSessionFlow(ctx, input) 包一层
  *   （ctx 的 store/api/defaultCwd/onCwdFallback 由本壳组装）
  * - chat：useChat().send / sendBash
- * - navigation：useSessionStore().activeId + usePanelStore().loadSession +
- *   useNavigationStore().push + useWorkspaceStore().defaultCwd
+ * - navigation：useSessionStore().activeId + usePanelStore().loadSession + useNavigationStore().push
  * - toast：useToast().error / warning
  * - fileTree：useFileTree().loadTree + useFileTreeStore().selectFile
  * - t：i18n.global.t
@@ -23,7 +22,7 @@
  * - gitApi：@/api git domain（checkout/checkoutByCwd/createBranch）
  * - directoryPicker：lib/ipc pickDirectory
  * - workspaceApi：@/api workspace.detect + worktreeApi.list
- * - workspaceState：useWorkspaceStore().defaultCwd / record
+ * - workspaceState：useWorkspaceStore().record
  *
  * 公共 API 兼容：useNewTaskFlow() 返回类型与旧版逐字段对齐（core flow 返回面一致）；
  * resetNewTaskFlow / NewTaskFlowState / GitInfo 重导出改从 @taiji/core（旧消费方
@@ -85,9 +84,9 @@ function buildLaunchConfigPort(
     getInput: () => ({
       presets: presetStore.presets,
       defaultPresetId: presetStore.defaultPresetId || null,
-      providers: settings.providers?.value,
+      providers: settings.providers.value,
       defaultModel: settings.defaultModel.value,
-      getSupportedLevels: (modelId) => supportedLevelsOf(modelId, settings.providers?.value ?? []),
+      getSupportedLevels: (modelId) => supportedLevelsOf(modelId, settings.providers.value),
       lastUsedModel: lookupLastUsedModel(),
       getRememberedThinkingLevel: (modelId) => lookupRememberedLevel(modelId),
     }),
@@ -161,7 +160,6 @@ export function useNewTaskFlow() {
           session.activeId = sid
         },
         pushChat: (sid) => navigation.push({ view: 'chat', sessionId: sid }),
-        defaultCwd: () => workspaceStore.defaultCwd ?? null,
       },
       toast: {
         error: (msg) => toastError(msg),
@@ -189,7 +187,6 @@ export function useNewTaskFlow() {
       listWorktrees: (cwd) => worktreeApi.list(cwd),
     },
     workspaceState: {
-      defaultCwd: () => workspaceStore.defaultCwd ?? null,
       record: (cwd) => workspaceStore.record(cwd),
     },
   })

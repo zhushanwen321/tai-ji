@@ -36,6 +36,7 @@ import type {
   ProviderId,
   LlmRetryConfig,
   RenameMode,
+  SendPromptReason,
 } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type { SaveAppConfigResult } from './services/app-config-store.js'
@@ -44,6 +45,7 @@ import type { SessionTraceSnapshot } from './services/session/trace-sync.js'
 import type { Credential } from './services/auth/auth-storage.js'
 import type { IPiEngine, PiEventListener } from './services/ports/pi-engine.js'
 import type { IManagedSessionView } from './services/session/types.js'
+import type { DeliverySubmitResult } from './services/session/session-delivery-registry.js'
 import type { OversizeAwareResult } from './services/session/session-records.js'
 import type { CatalogRefreshResult } from './services/provider-catalog-refresh.js'
 
@@ -58,11 +60,6 @@ import type { CatalogRefreshResult } from './services/provider-catalog-refresh.j
  * @deprecated 从 services/ports/pi-engine.js 导入 IPiEngine / IProcessManager。
  */
 export type { IPiEngine, IProcessManager } from './services/ports/pi-engine.js'
-/**
- * IRpcClient 是 IPiEngine 的兼容别名（D24 合并遗留）。
- * @deprecated 改用 IPiEngine（见 services/ports/pi-engine.js）。
- */
-export type IRpcClient = IPiEngine
 
 // ── IMessageBroker ────────────────────────────────────────────────
 
@@ -138,7 +135,8 @@ export interface ISessionService {
   /** 手动归类（D14 语义修正 2026-08-04）：写 session 归属 project sidecar（空 = 归回默认项目）。 */
   setProject(sessionId: string, projectId: string): Promise<void>
   /**
-   * 发送用户消息。
+   * 发送用户消息（message.send / delivery.submit 两条 RPC 共用的受理组合点：
+   * 入口 touch + BeforeSend hook + 内核提交）。
    *
    * images 透传给 pi prompt（message.send 的 images 字段，shared 形状 {data;base64;mimeType}）。
    * 类型组装（补 pi 私有 type:'image'）在 infra 层 RpcClient 内完成，本接口只暴露 shared 形状。
@@ -148,15 +146,17 @@ export interface ISessionService {
    * 拒绝广播（预检与 pi 转译两路）原样带回；正常路径不消费。
    *
    * requireCommand（plugin-header-action-modal-points D6/u5a）：插件写路径前置原子校验的
-   * 命令名（可选；既有调用方不传 = 行为不变）。dispatcher 在 restore 之后、busy 预检之前
-   * 直连 client.getCommands() 校验（不走 getCommands 的 markDirty 查询语义），未命中短重试
+   * 命令名（可选；既有调用方不传 = 行为不变）。dispatcher 在受理段 hook 之后直连
+   * client.getCommands() 校验（不走 getCommands 的 markDirty 查询语义），未命中短重试
    * （P9 定案 500ms × 6）后仍失败即拒发，回执 reason:'command-missing'——命令串永不漏进
    * 模型（E14 结构性防线）。
    *
-   * reason 回执词表（AP-4）：'busy' | 'compacting' | 'bash'（busy 预检三态，bash 分类为本
-   * 设计新增）| 'command-missing' | 'hook-blocked'（hook 管道既有 reason 经 message.error
-   * 上浮）| 'error'（其余失败）。与 message-dispatcher.ts 的 SendPromptReason 对齐（interface
-   * 层不反向 import service 实现文件——既有内联惯例）；既有布尔消费方按字段兼容不受影响。
+   * receipt：内核受理回执（delivery.submit reply 消费；hook 否决或装配缺失时缺席）。
+   *
+   * reason 回执词表（AP-4）：受理段实际产出 'command-missing' | 'hook-blocked'（投递
+   * 内核「排队取代拒绝」后拒绝路径已退役）；词表单点 = shared SendPromptReason（D4-6
+   * 收敛，busy/compacting/bash 退役值已删——收窄裁决见 shared 定义处），跨包 import
+   * 消费；既有布尔消费方按字段兼容不受影响。
    */
   sendMessage(
     sessionId: string,
@@ -167,8 +167,10 @@ export interface ISessionService {
   ): Promise<{
     blocked: boolean
     rejected?: boolean
-    reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+    receipt?: DeliverySubmitResult
+    reason?: SendPromptReason
   }>
+
   // [HISTORICAL] sendSubagentMessage 已删除（composer 四符号设计 D2，marker 半成品通道废弃）：
   // 定向消息改走 subagentAction(message/start) 直达 subagent。
   abort(sessionId: string): Promise<void>
@@ -292,9 +294,10 @@ export interface ISessionService {
   /**
    * 拉取 session 上下文用量（pi getSessionStats → contextUsage）。
    * contextUsage.tokens=null（compaction 后未跑新 turn）或 session 未激活时返回 null。
+   * usagePercent 可选（无值 = 字段缺省，[RT-4#7] 无值纪律：pi percent=null 不折 0）。
    * 用于 renderer 切 session 后主动拉取（修复 broadcast 与订阅时序竞争）。
    */
-  fetchContext(sessionId: string): Promise<{ inputTokens: number; contextLimit: number; usagePercent: number } | null>
+  fetchContext(sessionId: string): Promise<{ inputTokens: number; contextLimit: number; usagePercent?: number } | null>
   /** 活跃 session id 列表（含公共 session）。供 SkillRegistry 计算 skill 变更广播的 affectedSessionIds。 */
   getActiveSessionIds(): string[]
   /** 取 session 的 cwd（未激活/不存在返回 undefined）。供 SkillRegistry 按项目 skill 变更定位受影响 session。 */
@@ -359,14 +362,14 @@ export interface ISessionService {
    */
   getUsagePercent(sessionId: string): number | null
   /** Get the underlying RpcClient for direct command sending (e.g., extension responses). */
-  getRpcClient(sessionId: string): IRpcClient | undefined
+  getRpcClient(sessionId: string): IPiEngine | undefined
 
   /**
    * Ensure a session is active (has a running pi process). If not, auto-restore it.
-   * @returns The active RpcClient
+   * @returns The active pi engine handle
    * @throws if restore fails or session not found
    */
-  ensureActive(sessionId: string): Promise<IRpcClient>
+  ensureActive(sessionId: string): Promise<IPiEngine>
 
   listPersistedSessions(): SessionGroup[]
   destroyAll(): Promise<void>
@@ -399,10 +402,9 @@ export interface ISessionService {
   setOnPlanAborted(handler: (sessionId: string) => void): void
   /** Set thinking level for a session's pi subprocess. Returns pi-effective level (P3: pi clamps unsupported levels). */
   setThinkingLevel(sessionId: string, level: string): Promise<string>
-  /** Steer an actively generating session */
-  steerMessage(sessionId: string, content: string): Promise<void>
-  /** Queue a follow-up message for a session */
-  followUpMessage(sessionId: string, content: string): Promise<void>
+  // [MF-1-8 退役] steerMessage / followUpMessage 已删除：renderer/core 消费方经
+  // delivery.submit 统一提交（u3b），协议侧 message.steer / message.follow_up 条目随
+  // runtime transport 路由 + dispatcher 转发腿删除同批退役（u5a 退役条件兑现）。
 
   // ── wave:runtime-patch ipc-converge-a3 W2：业务持久化写（从 main IPC 迁 WS，安全校验原样搬 TC3）──
   /** 写入粘贴截图（base64→attachments/tmpdir）。安全校验：mimeType image/* + 20MB 上限 + name sanitize */
@@ -498,15 +500,29 @@ export interface IConfigService {
   migrateSettingsSkillsToDiscovery(): void
   loadSkills(projectRoot: string): SkillInfo[]
   saveSkills(projectRoot: string, skills: SkillInfo[]): void
-  /** @deprecated ADR-0021 §5：目录级管道模型，无文件级 CRUD。保留为兼容 no-op。 */
+  /**
+   * @deprecated ADR-0021 §5：config.setSkill RPC 的兼容期服务端实现（core config.setSkill
+   * 发送方仍在）。实做 = 按 skill.sourcePath 把目录并入 discovery.json skillPaths（非 no-op）。
+   * 目录级模型的正规入口 = setSkillDirs。
+   */
   upsertSkill(skill: SkillInfo): void
-  /** @deprecated ADR-0021 §5：目录级管道模型，无文件级 CRUD。保留为兼容 no-op。 */
+  /**
+   * @deprecated ADR-0021 §5：config.deleteSkill RPC 的兼容期服务端实现（core config.deleteSkill
+   * 发送方仍在）。实做 = 从 discovery.json skillPaths 移除 skill 所在目录（非 no-op）。
+   * 目录级模型的正规入口 = setSkillDirs。
+   */
   deleteSkill(skillId: string): void
   loadAgents(projectRoot: string): AgentInfo[]
   saveAgents(projectRoot: string, agents: AgentInfo[]): void
-  /** @deprecated ADR-0021 §5：目录级管道模型，无文件级 CRUD。保留为兼容 no-op。 */
+  /**
+   * @deprecated ADR-0021 §5：config.setAgent RPC 的兼容期服务端实现（core config.setAgent
+   * 发送方仍在）。实做 = 写 .md agent 文件（非 no-op）。目录级模型的正规入口 = setAgentDirs。
+   */
   upsertAgent(agent: AgentInfo): void
-  /** @deprecated ADR-0021 §5：目录级管道模型，无文件级 CRUD。保留为兼容 no-op。 */
+  /**
+   * @deprecated ADR-0021 §5：config.deleteAgent RPC 的兼容期服务端实现（core config.deleteAgent
+   * 发送方仍在）。实做 = 删 .md agent 文件（非 no-op）。目录级模型的正规入口 = setAgentDirs。
+   */
   deleteAgent(agentId: string): void
   scanSkills(sources: string[], existingIds: Set<string>): ScannedSkillInfo[]
   scanAgents(sources: string[], existingIds: Set<string>): ScannedAgentInfo[]

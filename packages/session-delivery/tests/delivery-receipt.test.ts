@@ -7,6 +7,9 @@
  *
  * 本套件锁死内核对 receipt 三形态的分流行为——SendReceipt 是 B-ledger 销账链的
  * 底层口径（扩展侧 courier 的受理事实），内核不得把 accepted:false 当成功吞掉。
+ *
+ * [D9⑤ 口径升级] 受理成功只把条目转 in-flight（两阶段回执第一阶段），onSettled
+ * 'delivered' 回调由 confirmDelivered（送达回执）驱动——受理 ≠ 送达的机制化落地。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -17,7 +20,6 @@ function makePort(overrides?: Partial<DeliveryPort>): DeliveryPort {
   return {
     supportedPayloads: ['text'],
     isIdle: () => true,
-    hasPendingMessages: () => false,
     send: () => {},
     ...overrides,
   }
@@ -69,7 +71,7 @@ describe('port.send receipt（U2 回执口径）', () => {
     handle.dispose()
   })
 
-  it('accepted:true → delivered（显式成功回执）', () => {
+  it('accepted:true → 受理成功（条目 in-flight）；confirmDelivered 后 delivered（D9⑤ 送达口径）', () => {
     const onSettled = vi.fn()
     const port = makePort({
       send: (): SendReceipt => ({ accepted: true }),
@@ -77,18 +79,28 @@ describe('port.send receipt（U2 回执口径）', () => {
     const handle = createDelivery(port, { onSettled })
 
     handle.send(textMsg('m3'))
+    // 受理 ≠ 送达：受理成功只转 in-flight，不触发 'delivered' 回调
+    expect(onSettled).not.toHaveBeenCalled()
+    expect(handle.entriesFull().active[0]?.state).toBe('in-flight')
+
+    // 送达回执（适配器 confirmDelivered）驱动终态回调
+    expect(handle.confirmDelivered(handle.entriesFull().active[0]!.id)).toBe(true)
     expect(onSettled).toHaveBeenCalledTimes(1)
     expect(onSettled.mock.calls[0]?.[1]).toBe('delivered')
 
     handle.dispose()
   })
 
-  it('void 返回（旧 port 实现）→ 兼容按成功处理（delivered）', () => {
+  it('void 返回（旧 port 实现）→ 兼容按受理成功处理（in-flight，D9⑤ 下不误报送达）', () => {
     const onSettled = vi.fn()
     const port = makePort({ send: (): void => {} })
     const handle = createDelivery(port, { onSettled })
 
     handle.send(textMsg('m4'))
+    expect(onSettled).not.toHaveBeenCalled()
+    expect(handle.entriesFull().active[0]?.state).toBe('in-flight')
+
+    handle.confirmDelivered(handle.entriesFull().active[0]!.id)
     expect(onSettled).toHaveBeenCalledTimes(1)
     expect(onSettled.mock.calls[0]?.[1]).toBe('delivered')
 

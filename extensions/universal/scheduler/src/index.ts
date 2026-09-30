@@ -70,6 +70,9 @@ const WIDGET_KEEPALIVE_INTERVAL_MS = WIDGET_KEEPALIVE_MINUTES * MS_PER_MINUTE
  */
 export default function schedulerExtension(pi: ExtensionAPI): void {
   let service: SchedulerService | null = null
+  // U6c：当代 backend（session_start 装配点更新）。factory 顶层 session_tree handler
+  // 经它委托当代重折叠（注册面理由见下方 session_tree 注册点注释）。
+  let activeBackend: PiSchedulerBackend | null = null
   // IMPORT-FLUSH-GUARD（MF-1）：importLegacyStore 对未 flush 的新 session 返回延迟删除 .imported
   // 的 cleanup——turn_end / session_shutdown 时执行：确认 flush（sessionFile 已出现）则删，
   // 未 flush 保留供崩溃恢复重导入（否则未 flush 即退出 → 全部旧任务丢失且源文件已销毁）。
@@ -105,6 +108,9 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     service?.runtime.stopScheduler()
     // 装配点：backend（ctx.sessionManager 读 entries / pi.appendEntry 写 op）→ runtime（内存态 + 调度）→ service（业务入口）
     const backend = new PiSchedulerBackend(ctx, pi)
+    // U6c：同步给 factory 顶层 session_tree handler（下方注册）——同代 session_start
+    // 复发时本赋值覆盖为最新 backend，委托恒指当代 ctx 的实例。
+    activeBackend = backend
     // 旧 store 原子导入（CL3 方案A）：必须在 backend.loadTasks() 之前执行——
     // append 的 upsert entry 进入 pi 内存 fileEntries，紧接的 loadTasks replay 统一重放读到导入任务。
     // ctx.cwd 类型为 string（SDK ExtensionContext 必填），无需 ?? process.cwd() 兜底（CL2）。
@@ -186,7 +192,24 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     refreshWidget(ctx)
   })
 
-  // turn_end 单注册共用（MF-1 cleanup 与 ack 安全网同事件）：真实 pi 的 on 是 handler 列表
+  // U6c：树回退（撤回 __taiji_nav__ → navigateTree / 用户树跳转）后重折叠任务集。
+  // 注册在 factory 顶层而非 PiSchedulerBackend 构造函数：pi 的 on 是追加语义（loader.js
+  // on 实现 list.push，无去重无 off，0.84.4 实装核对），且 RPC 模式下每次 session 替换
+  // session_start 在同一代内触发两次（agent-session-runtime finishSessionReplacement
+  // 内部 rebindSession 一路 + RPC handler 再 rebindSession 一路，均经 bindExtensions
+  // emit session_start）——构造函数注册会同代线性累积 handler（残留旧代 backend 在旧
+  // ctx 上重复执行幂等 loadTasks，handler 数随替换无界缓增）。factory 每代恰好运行一次
+  // （loader.js initializeExtension 每代新建 handlers Map 并重跑 factory），顶层注册
+  // 结构性保证每代恰一 handler；委托 activeBackend（session_start 装配点更新）保证折叠
+  // 输入恒为当代实例，事件早于首个 session_start 时 no-op。
+  // 纯重建体（goal/plan/todo 的 session_tree handler 同款）：只按活跃路径重折叠任务集
+  // 并回调 runtime 换 Map——不做任何 sendMessage / appendEntry / tickTimer 启停（tick
+  // 常驻循环照常消费新任务集，被撤子树任务不在集内即到点不触发，A14）。
+  pi.on('session_tree', (_event: unknown, _ctx: ExtensionContext) => {
+    activeBackend?.refoldSessionTree()
+  })
+
+  // turn_end 单注册共用（U4 恢复挂点与 MF-1 cleanup 同事件）：真实 pi 的 on 是 handler 列表
   // 追加，但测试仿真 mock 为覆盖式单 handler，且同事件单注册与「listener 防重复注册」纪律一致。
   // （U4 模型恢复不在本事件：D1 归属简化后恢复唯一事件通道 = agent_settled，见 runtime.handleRunSettled）
   pi.on('turn_end', () => {

@@ -494,6 +494,30 @@
       "note": "golden 快照锚定 pi 实装行为（runtime vitest main 组成员，pi-semantics 体系的等价物兄弟件）；pi bump 后 golden diff 是语义漂移的合法信号，按重验后更新快照处理"
     },
     {
+      "id": "E2E-EQUIV-05",
+      "summary": "压缩窗口投递 e2e（投递所有权内核 V1 自动化形态：真 pi + faux LLM，压缩中提交两条 → 压缩窗口零投递 → 压缩结束按序逐条到达 + 标记确认 + delivered）",
+      "scope": [
+        "packages/runtime/src/index.ts",
+        "packages/runtime/src/services/session/**",
+        "packages/runtime/src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts",
+        "packages/session-delivery/src/**",
+        "extensions/universal/smart-context/**"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "cd packages/runtime && npx vitest run src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 触发条件（可判定）：改动 runtime session 服务（投递内核适配 registry / message-dispatcher / 组合根投递触发）或 smart-context 通知与续跑通路时重跑（脚本头注同登记）。serial=true：spawn 真实 pi 进程，按 e2e 执行准则空载串行；与 E2E-EQUIV-01 的 TAIJI_SKIP_REAL_PI=1 子集不同，本 asset 不受该 env 门控（faux 轨 = 真进程 + 假 LLM，凭证无关）。同族资产触发面拆分先例见 E2E-EQUIV-02/03/04（trigger 单值纪律）。【V9/V10/V11 自动化形态评估登记】内核 V9（queued 单条撤销）/ V10（投递中撤销·队列级收回）/ V11（forceQuit 全量回收回草稿）的自动化形态 = renderer 侧 u3c 单测族（L1 常驻件，属单测不属 e2e 资产，故不拆 rule 只在此登记）：`packages/renderer/src/__tests__/panel/composer-compact-queue.test.ts`（V9 × → delivery.cancel + DOM setText 回草稿；V10 不可撤 toast；failed 行 resync）、`packages/renderer/src/__tests__/composables/panel/use-queue-rows.test.ts`（撤销三态 / 重试两态 / 投影过滤）、`packages/renderer/src/__tests__/panel/queue-bubble-s8.test.ts`（in-flight 行 × 可撤 + failed 重试钮 + 三态 chip DOM 断言）、`packages/renderer/src/__tests__/sidebar/force-quit-queue-recovery.test.ts` + `packages/renderer/src/__tests__/composables/use-sidebar-session-actions-forcequit.test.ts`（V11 drain RPC → 草稿注入 → N 条提示）；运行时侧收回-重投语义由内核单测（cancel in-flight 两段式 / 收回-重投）与 registry 单测（cancel/drain/resync + clear_queue 三分处置 fake port 重放）覆盖，pi 队列原语（clear_queue 全量返回）由 P-F9a 探针真机锁定——评估结论 = 等价覆盖成立，不再造重复 L3 撤销脚本"
+    },
+    {
       "id": "E2E-MODELS-01",
       "summary": "M1 models.json 脏数据 → bundled pi 拒载 → sanitize 自愈（真机零 mock）",
       "scope": [
@@ -942,7 +966,7 @@
     },
     {
       "id": "E2E-PROP-01",
-      "summary": "集成线传播检查（ADR-0076 / C-proc-30）：目标线 ⊇ main 硬检查 + 兄弟 dev-* 线未传播 commit 软提示——本表登记自含冒烟形态（用法面 exit 2 契约 + --allow-diverged 旁路主链路恒绿）",
+      "summary": "集成线传播检查（ADR-0092 / C-proc-30）：目标线 ⊇ main 硬检查 + 兄弟 dev-* 线未传播 commit 软提示——本表登记自含冒烟形态（用法面 exit 2 契约 + --allow-diverged 旁路主链路恒绿）",
       "scope": [
         "scripts/check-line-propagation.mjs"
       ],
@@ -957,7 +981,7 @@
       "serial": false,
       "run": "node scripts/check-line-propagation.mjs --bogus; test $? -eq 2 && node scripts/check-line-propagation.mjs --target HEAD --allow-diverged",
       "owner": "scripts/",
-      "authority": "docs/adr/decisions.md#ADR-0076",
+      "authority": "docs/adr/decisions.md#ADR-0092",
       "note": "R2 态：真实运行形态 = prerelease / dev-merge skill 前置人工触发（约束 C-proc-30：常态在目标线 worktree 内 --target HEAD 不带旁路；硬检查红 = 目标线落后 main，红灯 block 属合法失败形态），非 pre-commit / 非 CI——集成线门不是逐 commit 门。真实检查的绿红取决于集成线拓扑而非代码正确性（目标线落后 main 即红），不能作为确定性 run；本表 run = 改检查自身时的自含冒烟：①--bogus 走用法错误路径断言 exit 2（退出码契约面）②--allow-diverged 旁路形态走完主链路（ref 解析 + merge-base 硬检查越过 + 兄弟线枚举软提示），exit 0 由设计契约保证（软提示恒不阻塞 exit code，见脚本头注释两级检查约定）。scope 仅脚本自身：传播检查的触发时机是打包/集成事件而非代码 diff，挂接纪律权威源 = docs/constraints.json C-proc-30"
     },
     {
@@ -983,7 +1007,7 @@
     },
     {
       "id": "E2E-RECORD-01",
-      "summary": "run/record 写面唯一入口 grep 检查（ADR-0078 口径 R1-R7：写函数直调 / 两族 entry 写面白名单 / v1 快照投影构造器回潮拒绝（白名单已清空）与载荷形态拒绝 / 死字节拒绝 / .events 直写拒绝）",
+      "summary": "run/record 写面唯一入口 grep 检查（ADR-0094 口径 R1-R7：写函数直调 / 两族 entry 写面白名单 / v1 快照投影构造器回潮拒绝（白名单已清空）与载荷形态拒绝 / 死字节拒绝 / .events 直写拒绝）",
       "scope": [
         "scripts/check-record-write-surface.mjs",
         "scripts/__tests__/check-record-write-surface.test.mjs"
@@ -1004,7 +1028,7 @@
       "run": "node scripts/check-record-write-surface.mjs",
       "owner": "packages/subagent-core",
       "authority": "docs/adr/decisions.md",
-      "note": "R1 态（CI invariants 固定环节 + pre-commit 按路径触发双接线——SSOT = ci.yml invariants 步与 install-hooks.sh RECORD_WRITE_SURFACE 段，触发面 packages/subagent-core/src、extensions/**/src、脚本自身；单测 scripts/__tests__/check-record-write-surface.test.mjs 同在 CI vitest 轨）。设计基线 = ADR-0078（W1 介质归位：journal 唯一事实源 + 注册/终态两条 v2 条目 + 物化投影；写面检查断言随写点收敛更新为 R1-R7——新写点白名单 = 事件文件双写者（record-events/run-events）+ 三 run 条目宿主（pump/lifecycle/壳 jsonl-run-store）+ store 家族（record-store/rounds face），拒绝对象 = v1 快照投影构造器（回潮）与载荷形态、eventLog/displayItems 死字节、.events 白名单外直写）；历史基线 = subagent-record-persistence-consolidation §3.3 D7（写面 9 处收敛 RecordStore 唯一写入口）。grep 门是文本级兜底，模块边界一级拦截 = eslint no-restricted-imports（eslint.config.mjs subagent-core 块）——本表登记脚本资产的 coverage 与最小触发面，路径级触发面由 pre-commit/CI 承担"
+      "note": "R1 态（CI invariants 固定环节 + pre-commit 按路径触发双接线——SSOT = ci.yml invariants 步与 install-hooks.sh RECORD_WRITE_SURFACE 段，触发面 packages/subagent-core/src、extensions/**/src、脚本自身；单测 scripts/__tests__/check-record-write-surface.test.mjs 同在 CI vitest 轨）。设计基线 = ADR-0094（W1 介质归位：journal 唯一事实源 + 注册/终态两条 v2 条目 + 物化投影；写面检查断言随写点收敛更新为 R1-R7——新写点白名单 = 事件文件双写者（record-events/run-events）+ 三 run 条目宿主（pump/lifecycle/壳 jsonl-run-store）+ store 家族（record-store/rounds face），拒绝对象 = v1 快照投影构造器（回潮）与载荷形态、eventLog/displayItems 死字节、.events 白名单外直写）；历史基线 = subagent-record-persistence-consolidation §3.3 D7（写面 9 处收敛 RecordStore 唯一写入口）。grep 门是文本级兜底，模块边界一级拦截 = eslint no-restricted-imports（eslint.config.mjs subagent-core 块）——本表登记脚本资产的 coverage 与最小触发面，路径级触发面由 pre-commit/CI 承担"
     },
     {
       "id": "E2E-THIRDHOST-01",
@@ -1302,7 +1326,7 @@
     },
     {
       "id": "E2E-RESUME-01",
-      "summary": "workflow run 断点续跑确定性场景族（scenario-01…25 无门段：主链回放 / 拒绝族 / 恢复重派（[ADR-0092] 只复用已提交结果）/ 预算 / 重建保真 / D14 args 校验）+ record-mode 夹具族 + 壳层与 core 侧 resume 单测（进程内真 resumeRun + faux runner，零 token；含内置模板 scriptPath 守卫探针族 review-fix-loop-scriptpath-failfast——空串形态 = 旧 record 流 resume）",
+      "summary": "workflow run 断点续跑确定性场景族（scenario-01…25 无门段：主链回放 / 拒绝族 / 三档恢复 / 预算 / 重建保真 / D14 args 校验）+ record-mode 夹具族 + 壳层与 core 侧 resume 单测（进程内真 resumeRun + faux runner，零 token；含内置模板 scriptPath 守卫探针族 review-fix-loop-scriptpath-failfast——空串形态 = 旧 record 流 resume）",
       "scope": [
         "extensions/universal/subagent-workflow/src/**",
         "packages/subagent-core/src/orchestration/**",
@@ -1464,7 +1488,7 @@
       "run": "cd extensions/universal/subagent-workflow && npx vitest run src/__tests__/scenario- src/__tests__/record-mode/ src/interface/__tests__/tool-workflow-resume.test.ts src/interface/command/__tests__/commands-resume.test.ts && cd ../../../packages/subagent-core && npx vitest run src/orchestration/__tests__/resume-orchestration.test.ts src/orchestration/__tests__/resume-replay-validation.test.ts src/orchestration/__tests__/resume-tier-budget.test.ts src/orchestration/__tests__/review-fix-loop-scriptpath-failfast.test.ts",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态（来源设计 workflow-run-resume-revision §4 e2e 影响面「场景 1-25 新族」行——设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-MODELREF-01 同款先例；登记零实现依赖复审 F3 的校验由 u4b 完成收尾）。触发面 = resume/record 链路（壳 interface/jsonl-run-store + core orchestration/resume-run/run-events）改动时按改动范围跑。分层形态：进程内真 resumeRun + 真 WorkerHost + 真 record IO，LLM 层 = faux runner（AgentRunner 协议替身，派发捕获 + 行为队列），崩溃前置态经生产 journal 写入器 seed——写侧载荷完整：dispatchRunCreated 写 scriptSource 全文、dispatchAgentSettled 写 result 全文（全文写入随 terminal-actions 闭环，真跑 runWorkflow 产生的流与夹具构造的流同构可换，夹具构造形态是可控性选择——scenario-kit.ts 头注现行措辞）。场景 24（D14 args 不一致拒绝）驱动壳层入口 actionResume（D14 校验唯一所在层），其余场景直驱 core resumeScenarioRun。scenario-22/25 各含环境门段（节点级默认 skip），门段触发面拆分至 E2E-RESUME-02/03（同 asset 重复引用，E2E-EQUIV-01/02 拆分先例）；record-mode 两 spec（损坏拒绝/重建保真）与夹具四件（helpers/scenario-kit/driver-resume/driver-session-reader）随族登记——driver-* 为 tsx 子进程 driver（D16 ③ 跨包断言载体）。core 三件 = resumeRun 编排原语 / replay 校验增强 / 恢复计划计数与预算算式。[ADR-0092] 修订：resume 只复用已提交结果（档 1 补收通道删除，恢复链不读取子代理会话文件），原 E2E-RESUME-02（真实会话文件档位门段）随之退役——scenario-22 现锁「已提交调用零 token 回放 + 未完成调用真实重派 + 不合成补收帧」；interface 两件 = workflow tool resume action（D14 单元层）+ /workflows 命令 resume verb 契约"
+      "note": "R2 态（来源设计 workflow-run-resume-revision §4 e2e 影响面「场景 1-25 新族」行——设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-MODELREF-01 同款先例；登记零实现依赖复审 F3 的校验由 u4b 完成收尾）。触发面 = resume/record 链路（壳 interface/jsonl-run-store + core orchestration/resume-run/run-events）改动时按改动范围跑。分层形态：进程内真 resumeRun + 真 WorkerHost + 真 record IO，LLM 层 = faux runner（AgentRunner 协议替身，派发捕获 + 行为队列），崩溃前置态经生产 journal 写入器 seed——写侧载荷完整：dispatchRunCreated 写 scriptSource 全文、dispatchAgentSettled 写 result 全文（全文写入随 terminal-actions 闭环，真跑 runWorkflow 产生的流与夹具构造的流同构可换，夹具构造形态是可控性选择——scenario-kit.ts 头注现行措辞）。场景 24（D14 args 不一致拒绝）驱动壳层入口 actionResume（D14 校验唯一所在层），其余场景直驱 core resumeScenarioRun。scenario-22/25 各含环境门段（节点级默认 skip），门段触发面拆分至 E2E-RESUME-02/03（同 asset 重复引用，E2E-EQUIV-01/02 拆分先例）；record-mode 两 spec（损坏拒绝/重建保真）与夹具四件（helpers/scenario-kit/driver-resume/driver-session-reader）随族登记——driver-* 为 tsx 子进程 driver（D16 ③ 跨包断言载体）。core 三件 = resumeRun 编排原语 / replay 校验增强 / 恢复计划计数与预算算式。[ADR-0099] 修订：resume 只复用已提交结果（档 1 补收通道删除，恢复链不读取子代理会话文件），原 E2E-RESUME-02（真实会话文件档位门段）随之退役——scenario-22 现锁「已提交调用零 token 回放 + 未完成调用真实重派 + 不合成补收帧」；interface 两件 = workflow tool resume action（D14 单元层）+ /workflows 命令 resume verb 契约"
     },
     {
       "id": "E2E-RESUME-02",
@@ -1657,7 +1681,7 @@
       "serial": false,
       "run": "node scripts/check-domain-type-path.mjs",
       "owner": "packages/subagent-core",
-      "authority": "docs/todo/subagent-workflow-issues.md",
+      "authority": "docs/adr/decisions.md",
       "note": "D2 守卫（register §2.0 D2 / §2.4）：领域名清单动态读自 domain 两模块的导出，assembly 允许内部 import、禁止 export；双接线 = ci.yml invariants 步 + install-hooks.sh DOMAIN_TYPE_PATH_STAGED 段。"
     },
     {
@@ -1744,6 +1768,106 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态：**触发条件 = scripts/check-extension-dependencies.mjs 自身 diff 命中**时开发期执行 run（守卫自跑，零 token 秒级）。归宿裁决（2026-09-24 plan-mode-state-machine D-5）：L0 pre-commit 守卫类**无需 e2e 用例**——select-affected-e2e.mjs 无独立豁免机制（watched root 下文件只有「scope/asset 覆盖」与「修订 watched-root 登记」两条出路，后者会解除 scripts/ 看护、违背防漏登记本意），故按登记机制以守卫自回归 rule 表达（check-rfl-parity.mjs 并入 E2E-BATCH-07 run 的同款先例）；守卫本体由 pre-commit（SKIP_EXTENSION_LINT 段）常态执行，PR/merge/CI 门禁不重复跑"
+    },
+    {
+      "id": "E2E-PROVCRED-01",
+      "summary": "Provider 凭据读取单通道守卫（C-proc-14）+ upsertProvider 直调清单守卫（C-proc-15）：新代码自建第 6 条凭据解析链 / 旁路防线载体直写 models.json 的 pre-commit 机检（纯文本模式匹配，白名单 = resolver 唯一通道本体）",
+      "scope": [
+        "scripts/check-provider-credential-reads.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-provider-credential-reads.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-provider-credential-reads.mjs",
+      "owner": "packages/runtime",
+      "authority": "docs/constraints.json#C-proc-14",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（扫描范围 packages/runtime/src/** 生产代码，触发面同域）；本表 run = 改检查自身时的自含冒烟（全量扫描恒绿形态——白名单当前恰 1 文件 = D3 唯一通道成立的机器证据，白名单膨胀 >1 文件即收口失效信号）。scope 仅脚本自身：守卫的触发时机是 runtime 源码 diff 而非本脚本 diff，挂接纪律权威源 = docs/constraints.json C-proc-14/C-proc-15"
+    },
+    {
+      "id": "E2E-CHATOPS-01",
+      "summary": "chat store facet 双清单对账守卫（chat-ops-sync）：store.ts 的 ChatStoreOps Pick 字段清单（类型面 SSOT）× taste-lint no-chat-ops-in-components 的 OPS_FIELDS 手写 Set（lint 拦截面）零漂移机检（TypeScript AST 双侧机械提取，字段增删自动跟随）",
+      "scope": [
+        "scripts/check-chat-ops-sync.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-chat-ops-sync.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-chat-ops-sync.mjs",
+      "owner": "packages/renderer",
+      "authority": "scripts/check-chat-ops-sync.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = packages/core/src/domain/chat/store.ts + taste-lint/rules/no-chat-ops-in-components.mjs + 本脚本自身——对账结果只由这三文件决定；看护对象是两清单载体文件而非本脚本）；本表 run = 自含冒烟（42×42 零漂移恒绿形态，与 pre-commit 同一命令）。无独立约束/ADR 登记，设计决策（独立脚本 vs lint 规则 import 类型的 D5-4 权衡）记录在脚本头注释块，故 authority 自指"
+    },
+    {
+      "id": "E2E-CENSUS-01",
+      "summary": "useSessionScopedState 全仓调用点 census 守卫：per-session 状态 composable（ADR-0049 Map 分区工厂）的调用入口静态锁——快照清单外出现新调用点（新文件或既有文件新增）即红",
+      "scope": [
+        "scripts/check-session-scoped-state-census.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-session-scoped-state-census.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-session-scoped-state-census.mjs",
+      "owner": "packages/renderer",
+      "authority": "docs/adr/decisions.md#ADR-0049",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 任意 .ts/.tsx/.vue staged + 本脚本自身——与检查脚本全仓扫描面同构的结构无关 glob，快照清单横跨 core/dom-core/renderer/ui，目录清单式触发面必有洞；看护对象是全仓调用点而非本脚本；退出码契约 0=合规 / 3=census 与快照不符 / 1=脚本自身异常）；本表 run = 自含冒烟（与 pre-commit 同一命令，全仓扫描 ~0.2s）。同源约束 = docs/constraints.json C-state-01（enforcement 为 review 维度，本脚本是其入口静态锁机器载体）"
+    },
+    {
+      "id": "E2E-XPROCLIT-01",
+      "summary": "跨进程契约字面量多侧对账守卫（cross-process-literals）：'taiji.client-msg-id'（runtime entry-tree-builder / revoke-orchestrator × msg-id-mapper 扩展三侧）与 'taiji:revoked'（revoke-orchestrator × agent-ext × scheduler-manager 插件三侧）全部生产定义点同串 AST 机检——定义点分属互不可 import 的包，编译期拦截不可行",
+      "scope": [
+        "scripts/check-cross-process-literals.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-cross-process-literals.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-cross-process-literals.mjs",
+      "owner": "packages/runtime",
+      "authority": "scripts/check-cross-process-literals.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 登记定义文件 + 本脚本自身的 pathspec 清单，见 .githooks/install-hooks.sh 同名段，staged 删除含在触发面；看护对象是六侧登记定义文件而非本脚本；退出码契约 0=同串 / 1=漂移 / 2=守卫输入故障）；本表 run = 自含冒烟（与 pre-commit 同一命令，全量对账毫秒级）。新契约串在脚本 GROUPS 登记表登记并同步 hook 段 pathspec；无独立约束/ADR 登记，设计决策（含串断言 vs 定义点比等值）记录在脚本头注释块，故 authority 自指"
+    },
+    {
+      "id": "E2E-PRSUBMIT-01",
+      "summary": "PR 提交一体化脚本（pr-cr-fix 阶段 1.3 对应物）：push + gh pr create/edit 一体化——自动检测既有 PR、title/body 有变化才更新、--review-report 追加、--dry-run 全程无网络动作",
+      "scope": [
+        "scripts/pr-submit.sh"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/pr-submit.sh"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "bash scripts/pr-submit.sh --base main --dry-run --title e2e-smoke --body smoke",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：真实运行形态 = pr-cr-fix 阶段 1.3 人工触发（真 push / gh pr create）；本表 run = 改脚本自身时的自含冒烟（--dry-run 不 push 不 create，入参校验与既有 PR 检测路径零网络执行）"
     }
   ]
 }

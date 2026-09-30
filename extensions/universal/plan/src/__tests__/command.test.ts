@@ -48,6 +48,7 @@ function createMocks() {
     cwd: "/tmp/test-project",
     sessionManager: {
       getSessionId: () => "test-session",
+      getLeafId: () => null,
       getEntries: () => [] as unknown[],
     },
     ui: {
@@ -242,6 +243,7 @@ describe("registerPlanCommand", () => {
       ...ctx,
       sessionManager: {
         getSessionId: () => "test-session",
+        getLeafId: () => null,
         getEntries: () => [
           {
             type: "custom",

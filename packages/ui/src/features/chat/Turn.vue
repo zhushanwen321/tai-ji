@@ -1,4 +1,5 @@
 <template>
+  <!-- split-justified: main 侧合并带入（turn 编排器，单语义域）；script 超 300 为存量（base 175 → 317），拆分属独立重构任务（长期方向：trace 窗口化编排抽 useTurnTrace composable） -->
   <!--
     编排器 · Turn（message-stream 单个回合，W4 拆分后）。
     组合 UserBubble + TurnMeta + TurnSummary 三个子组件。
@@ -352,8 +353,7 @@ const emit = defineEmits<{
 }>()
 
 const deps = useChatViewDeps()
-// isTakeover/setTakeover 为 optional（窗口增强，非所有壳层 provide）：未提供时兜底 false / no-op
-const { isExpanded, collapse, getChangeSetStatus, isActive, isTakeover = () => false, setTakeover } = deps
+const { isExpanded, collapse, getChangeSetStatus, isActive, isTakeover, setTakeover } = deps
 
 /** 最后一条 assistant */
 const lastAssistant = computed(() => {
@@ -447,9 +447,9 @@ const assistantById = computed(() => {
   return m
 })
 
-/** 切换 takeover（展开全部 ↔ 恢复精简），落 store（D6，非本地 ref）。未 provide setTakeover 时 no-op。 */
+/** 切换 takeover（展开全部 ↔ 恢复精简），落 store（D6，非本地 ref）。 */
 function onToggleTakeover(): void {
-  setTakeover?.(turnStableId(props.turn), !takeover.value)
+  setTakeover(turnStableId(props.turn), !takeover.value)
 }
 
 /**

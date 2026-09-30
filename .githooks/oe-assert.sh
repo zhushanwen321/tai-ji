@@ -19,9 +19,21 @@
 # ② count_refs 先剥 git grep 输出的路径前缀再排注释行——git grep 输出行首是文件路径，
 #   模板本体的注释排除正则永不命中、注释行提及被误计入引用；ci-assertions.md 断言 1
 #   口径明文「排除注释行」，本副本使其真实生效，模板本体同缺陷由 skill 侧处置。
+# ③ count_refs 对定义文件只排除 export 声明行，不再整文件排除——原口径把「CLI 检查脚本
+#   导出纯函数 + 同文件主流程自调」的本仓惯例形态（check-chat-ops-sync.mjs /
+#   check-cross-process-literals.mjs 同款：导出供 import 消费，主流程自己也要用）误判
+#   no-reference（同文件调用点被整文件排除一并清零）。[HISTORICAL] 2026-10-01 实拦
+#   cross-process-literals 新脚本 extractStringLiterals。真死导出（定义文件内亦无调用）
+#   仍零引用照拦，漏拦面不因此放大。
 #
 # 权威模板与断言口径：code-overdesign-audit skill 的 references/ci-assertions.md（模板 v1）。
 set -u
+
+# merge 中间态跳过：断言扫描「staged 新增」，而 merge 带入的是对方分支已过其 review
+# 流程的既成代码——本检查的行尾豁免通道（oe-exempt 标记）在 merge 场景会向对方分支
+# 的既有行写入标记，制造后续同步的永久冲突。merge 产物的复杂度审查由 dev-merge 的
+# branch-review 横切维度承担（不在此重复拦截）。
+[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] && { echo "[oe-audit] skipped: merge in progress (对方分支既成代码，复杂度横切审查由 dev-merge branch-review 承担)"; exit 0; }
 
 # --- skip 纪律：工具级故障打印 skipped，不阻塞提交（失败要出声）
 command -v git  >/dev/null 2>&1 || { echo "[oe-audit] skipped: git unavailable";  exit 0; }
@@ -49,12 +61,14 @@ check_exempt() {
   echo ok   # framework 无期限
 }
 
-# 引用计数：$1=符号 $2=定义文件。git grep 限 tracked；排除注释行/re-export 行/定义文件。
+# 引用计数：$1=符号 $2=定义文件。git grep 限 tracked；排除注释行/re-export 行/定义文件
+# 的 export 声明行（分叉③：声明行非调用，同文件主流程调用点计入引用）。
 # 部署副本特化（分叉②见头部注释区）：先剥 git grep 输出的路径前缀再排注释行——注释排除
-# 正则锚定行首，对「path:content」原始输出永不命中；定义文件排除必须先于剥前缀（按完整路径）
+# 正则锚定行首，对「path:content」原始输出永不命中；export 声明行排除必须先于剥前缀（按
+# 「定义路径:行首 export」锚定，剥前缀后无法区分文件归属）。
 count_refs() {
   git grep -I -w -F "$1" -- ':!*.md' ':!*.mdx' 2>/dev/null \
-    | grep -v "^$2:" \
+    | grep -vE "^$2:[[:space:]]*export([[:space:]{]|$)" \
     | sed -E 's/^[^:]*://' \
     | grep -vE '^[[:space:]]*(//|/\*|\*|#)' \
     | grep -vE 'export[^(]*from' \

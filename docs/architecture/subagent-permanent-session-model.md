@@ -139,7 +139,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 | 2 | stdin JSONL prompt 帧 | rpc-client.ts:728 起 `sendCommand`（pending/超时） | stdin-writer.ts:85-101 `sendPromptCommand`（fire-and-forget） | 帧形状相同（`{id?,type:'prompt',message,streamingBehavior?}`） |
 | 3 | stdout LF-only 行分帧 | rpc-client.ts:46-74 `attachLfOnlyLineReader` | engine-client.ts:440 同型 | 高 |
 | 4 | get_state 握手/身份读回 | rpc-client.ts:1019-1022 | get-state-handshake.ts:54-96 | 高 |
-| 5 | 「追加消息」busy 语义 | 三层：occupancy 预检拒绝（message-dispatcher.ts:338-351）→ renderer defer 队列 → pi 拒绝转译 classifyPromptRejection（:180-184） | 引擎侧不预检：streamingBehavior 直传交 pi 裁决（stdin-writer.ts:85-101 上游调用链） | **语义同构、决策点位置相反（刻意差异）** |
+| 5 | 「追加消息」busy 语义 | 内核统一受理（lane 判定 + 排队取代拒绝，D1/D5）：pi 的 busy 拒绝经 classifyPromptRejection 转译 → 条目回 queued + occupancy 'reject-processing' 反转 | 引擎侧不预检：streamingBehavior 直传交 pi 裁决（stdin-writer.ts:85-101 上游调用链） | **语义同构、决策点位置相反（刻意差异）** |
 | 6 | 杀链 | rpc-client.ts:1079-1115（SIGCONT→SIGTERM→grace→SIGKILL） | spawn-runner.ts / active-children.ts + subagent-core engine/common/kill-chain.ts | 三处同型 |
 | 7 | 投递内核（排队/busy gate/重试） | —（GUI 直连 dispatcher） | — | `@zhushanwen/session-delivery` 已存在（agent-managed session 在用），是公共化的现成先例 |
 
@@ -431,8 +431,8 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 | `env` | buildPiOutboundEnv / buildOutboundChildEnv 组装（已有共享惯例，归位本包） | process-manager / spawn-runner |
 
 **刻意不统一的**（写进包 README 防后人「顺手统一」）：
-- **busy 判定位置**：主 agent 前置预检（GUI 要用户可见反馈 + renderer defer 队列）vs subagent 后置交 pi 裁决（agent 驱动不阻塞）——这是**真差异**（消费方不同）。判读器 `classifyPromptRejection`（pi 错误原文 → busy/compacting 分类）为单消费方实现，落位 runtime message-dispatcher（不进公共包——单消费方不公共化，K8 精神由公共包的 StreamingBehavior 占用词汇承载）；
-- **投递策略**：排队/重试归 session-delivery，按消费方注入（GUI 不排队直拒、subagent 排队续投）。
+- **busy 判定位置**：主 agent 经投递内核统一受理（队列取代拒绝，GUI 全程可见条目态 + occupancy 反转）vs subagent 后置交 pi 裁决（agent 驱动不阻塞）——这是**真差异**（消费方不同）。判读器 `classifyPromptRejection`（pi 错误原文 → busy/compacting 分类）为单消费方实现，落位 runtime 投递内核适配层（`session-delivery-registry.ts`，message-dispatcher re-export 保持既有 import 路径；不进公共包——单消费方不公共化，K8 精神由公共包的 StreamingBehavior 占用词汇承载）；
+- **投递策略**：排队/重试归 session-delivery，按消费方注入（GUI 用户消息经内核排队投递；subagent 引擎侧不排队、busy 交 pi 裁决）——差异点是排队归属方（内核 vs pi），不是内核能力的去留。
 
 #### 3.3.3 subagent 操作逻辑的统一收敛点
 

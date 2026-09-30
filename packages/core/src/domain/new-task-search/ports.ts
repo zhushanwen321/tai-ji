@@ -17,7 +17,7 @@
  *   （cwd/presetId/pendingModel/segments/bashCommand → {session, migratedSegments} | null，
  *   含 INV-7 cwd 降级比对 + migrateImages）
  */
-import type { Segment } from '@taiji/shared'
+import type { Segment, ServerMessageMap } from '@taiji/shared'
 // AC10 跨域铁律：session 域经 '@taiji/core/domain/session' 公开 index API 消费（禁内部模块相对路径）
 import type {
   CreateSessionFlowInput,
@@ -40,11 +40,13 @@ export interface SessionFlowPort {
 /** chat 发送端口（壳适配 useChat().send / useChat().sendBash）。 */
 export interface ChatSendPort {
   /** 普通发送（segments 结构化段；壳适配 useChat().send）。
-   *  返回值随 useChat.send 契约（form-hang-fix D2）：false = B 策略转 steer 未消费；
+   *  返回值随 useChat.send 契约（[R2-A5 失败信号] Promise<boolean>：true = 提交成功或
+   *  无事发生；false = RPC 失败——内部已 toast 消化不 throw）。
    *  flow 消费方（submitFirstMessage）不取返回值——send 成败属 session 错误通道（W2）。 */
   send(sessionId: string, segments: Segment[]): Promise<boolean>
-  /** bash 首发（landing 态 !/!! 前缀；壳适配 useChat().sendBash，不经 LLM turn） */
-  sendBash(sessionId: string, command: string, excludeFromContext: boolean): Promise<void>
+  /** bash 首发（landing 态 !/!! 前缀；壳适配 useChat().sendBash，不经 LLM turn）。
+   *  返回值随 useChat.sendBash 契约（Promise<boolean>：true = RPC 受理；false = 失败，内部已 toast）。 */
+  sendBash(sessionId: string, command: string, excludeFromContext: boolean): Promise<boolean>
 }
 
 /**
@@ -65,8 +67,6 @@ export interface NavigationPanelPort {
   setActiveSession(sessionId: string): void
   /** 导航到 chat 视图（壳适配 navigation.push({ view: 'chat', sessionId })） */
   pushChat(sessionId: string): void
-  /** 默认 cwd（壳适配 workspaceStore.defaultCwd ?? null） */
-  defaultCwd(): string | null
 }
 
 /** toast 端口（壳适配 useToast().error / useToast().warning）。 */
@@ -107,18 +107,16 @@ export interface DirectoryPickerPort {
   pickDirectory(p?: { defaultPath?: string }): Promise<{ canceled: boolean; path?: string | null }>
 }
 
-/** workspace 三态模式（对齐 shared protocol workspace.detected 的 mode 字段）。 */
-export type WorkspaceMode = 'bare-workspace' | 'plain-repo' | 'not-repo'
-
-/** workspace.detect 的 reply（core 域内自声明，对齐 shared protocol workspace.detected）。 */
-export interface WorkspaceDetectReply {
-  mode: WorkspaceMode
-}
-
-/** worktree.list 的 reply（core 域内自声明，对齐 shared protocol worktree.list:result）。 */
-export interface WorktreeListReply {
-  items: Array<{ path: string; branch: string; HEAD: boolean; bare: boolean }>
-}
+/**
+ * workspace/worktree reply 类型：shared protocol 权威形状索引派生（对齐
+ * transport/api/domains/workspace.ts:14 先例）。原手写影子版已失步（WorkspaceDetectReply
+ * 仅声明 mode 一字段，权威形状 5 字段）——收编后零漂移。
+ */
+export type WorkspaceDetectReply = ServerMessageMap['workspace.detected']
+/** workspace 三态模式（派生自 workspace.detected 的 mode 字段）。 */
+export type WorkspaceMode = WorkspaceDetectReply['mode']
+/** worktree.list 的 reply（shared protocol 权威形状索引派生）。 */
+export type WorktreeListReply = ServerMessageMap['worktree.list:result']
 
 /** workspace/worktree 后端端口（壳适配 @/api workspace + worktree domains）。 */
 export interface WorkspaceApiPort {
@@ -134,8 +132,6 @@ export interface WorkspaceApiPort {
  * workspaceStore.record(cwd) 热更新最近工作区列表（fire-and-forget，失败静默降级）。
  */
 export interface WorkspaceStatePort {
-  /** 默认 cwd（records[0]?.cwd；壳适配 workspaceStore.defaultCwd ?? null） */
-  defaultCwd(): string | null
   /** 记录一次工作区使用（热更新最近工作区列表；壳适配 workspaceStore.record） */
   record(cwd: string): Promise<void>
 }

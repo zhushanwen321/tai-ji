@@ -91,6 +91,11 @@
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
           "reason": "代码层静态 import getLogger（src/adapters/goal-control-adapter.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-session-path",
+          "type": "package",
+          "reason": "代码层静态 import filterActivePath（src/session.ts top-level import，活跃路径裁剪单一实现——todo/plan/goal/scheduler 四包同构副本收编于该共享库），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -107,6 +112,11 @@
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
           "reason": "代码层静态 import getLogger（src/handlers.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-session-path",
+          "type": "package",
+          "reason": "代码层静态 import filterActivePath（src/handlers.ts top-level import，活跃路径裁剪单一实现——todo/plan/goal/scheduler 四包同构副本收编于该共享库），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -143,6 +153,11 @@
           "package": "@zhushanwen/pi-exec-skills",
           "type": "package",
           "reason": "代码层静态 import resolveSkills/SkillResolution（src/enter.ts top-level re-export，export { resolveSkills } from \"@zhushanwen/pi-exec-skills\"，ADR-0074 执行门禁单源）与 detectExecSkills/ExecSkill（src/tool.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-session-path",
+          "type": "package",
+          "reason": "代码层静态 import filterActivePath（src/state.ts top-level import，活跃路径裁剪单一实现——todo/plan/goal/scheduler 四包同构副本收编于该共享库），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -232,6 +247,11 @@
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
           "reason": "代码层静态 import getLogger（src/ack-provider.ts、src/replay.ts、src/runtime.ts 等 top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-session-path",
+          "type": "package",
+          "reason": "代码层静态 import filterActivePath（src/backend.ts top-level import，活跃路径裁剪单一实现——todo/plan/goal/scheduler 四包同构副本收编于该共享库），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -303,6 +323,11 @@
           "reason": "代码层静态 import toErrorMessage/isRecord（src/index.ts、src/fingerprint.ts top-level import，ext-simplify-18 D1/D2 采用批），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
+    },
+    {
+      "name": "@zhushanwen/pi-session-path",
+      "directory": "extensions/shared/session-path",
+      "dependsOn": []
     },
     {
       "name": "@zhushanwen/pi-agent-ext",

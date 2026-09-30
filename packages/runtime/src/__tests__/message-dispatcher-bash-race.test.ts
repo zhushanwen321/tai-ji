@@ -4,7 +4,8 @@
  * 锁定：
  * - W1: sendBash 在 await client.bash() 期间被 abortBash 抢先收口时，
  *   pi 响应到达后 sendBash 静默跳过终态广播（不重复广播 bashResult / message.error）。
- *   验证两条终态不会同时出现：cancelled bashResult（来自 abortBash）+ 真实 output bashResult（来自 sendBash）。
+ *   abortBash 兜底终态走独立帧 message.bashAborted（msg-pipeline-debloat D4-3，原
+ *   bashResult{command:''} 哨兵退役）；真实 output bashResult（来自 sendBash）照常发布。
  * - W1b: sendBash await 抛错时若已被 abortBash 抢先收口，也不广播 message.error（避免双重报错）。
  * - W3: compact() 在 isBashRunning=true 或 isGenerating=true 时被拒（广播 session.compacted{error} + throw）。
  *
@@ -21,9 +22,13 @@ import type { ServerMessage } from '@taiji/shared'
 import type { WorkspaceService } from '../services/workspace/workspace-service.js'
 
 type BashResultMsg = ServerMessage<'message.bashResult'>
+type BashAbortedMsg = ServerMessage<'message.bashAborted'>
 /** 返回所有 message.bashResult 广播（W1 竞态需断言「总数==1」故需数组而非首条）。 */
 function findBashResults(b: ServerMessage[]): BashResultMsg[] {
   return b.filter((m): m is BashResultMsg => m.type === 'message.bashResult')
+}
+function findBashAborted(b: ServerMessage[]): BashAbortedMsg | undefined {
+  return b.find((m): m is BashAbortedMsg => m.type === 'message.bashAborted')
 }
 
 function makeMockSession(overrides: Partial<IManagedSessionView> = {}): IManagedSessionView {
@@ -103,29 +108,26 @@ describe('MessageDispatcher —— W1 abortBash/sendBash 竞态守卫', () => {
     expect(broadcasts.some((m) => m.type === 'message.bashStart')).toBe(true)
     expect(abortBashFn).not.toHaveBeenCalled()
 
-    // 用户调 abortBash：广播哨兵帧 cancelled bashResult（command:''，bash-effects 只清态不产 entry）
+    // 用户调 abortBash：广播兜底终态 message.bashAborted（bashAbortedEffect 只清态不产 entry）
     await dispatcher.abortBash('s1')
     expect(abortBashFn).toHaveBeenCalledTimes(1)
-    const cancelledResults = broadcasts.filter(
-      (m) => m.type === 'message.bashResult' && (m as BashResultMsg).payload.cancelled === true,
-    )
-    expect(cancelledResults).toHaveLength(1)
+    const aborted = findBashAborted(broadcasts)
+    expect(aborted).toBeDefined()
+    expect(aborted!.payload).toMatchObject({ sessionId: 's1' })
 
     // pi 响应到达：client.bash resolve 带真实 output
     bashResolve({ output: 'real output', exitCode: 0, cancelled: false, truncated: false })
     const result = await sendPromise
 
     // 关键断言（D1 closure 修订，conversation-turn-attribution-closure D1）：旧逻辑静默跳过
-    // 导致 pi 文件有 entry 而 live 无（登记例外①）；新逻辑发布真实数据——两条帧职责正交
-    // （哨兵只清态、真实帧产 entry，均幂等），双终态担忧不成立。bashResult 总数 = 2。
+    // 导致 pi 文件有 entry 而 live 无（登记例外①）；新逻辑发布真实数据——bashAborted 只清态、
+    // 真实 bashResult 产 entry，两帧职责正交（均幂等），双终态担忧不成立。bashResult 总数 = 1
+    //（abort 兜底走独立 bashAborted 帧，不再是 bashResult 哨兵——msg-pipeline-debloat D4-3）。
     const allResults = findBashResults(broadcasts)
-    expect(allResults).toHaveLength(2)
-    // 第一条 = abortBash 哨兵（command:'' + cancelled:true 两字段共同构成哨兵形态，缺一不可——
-    // bash-effects 判定依赖该不变式，锁定防未来改字段）
-    expect(allResults[0]!.payload).toMatchObject({ command: '', cancelled: true })
-    // 第二条 = sendBash 发布的真实数据（token 已旋转仍发布；cancelled 随 pi 返回值透传——
+    expect(allResults).toHaveLength(1)
+    // sendBash 发布的真实数据（token 已旋转仍发布；cancelled 随 pi 返回值透传——
     // mock 刻意用 cancelled:false 显式验证「guard 命中与结果 cancelled 与否正交、照发不筛」）
-    expect(allResults[1]!.payload).toMatchObject({ output: 'real output', cancelled: false })
+    expect(allResults[0]!.payload).toMatchObject({ output: 'real output', cancelled: false })
 
     // 不广播 message.error（pi 是正常 resolve，无错误）
     expect(broadcasts.some((m) => m.type === 'message.error')).toBe(false)
@@ -140,25 +142,21 @@ describe('MessageDispatcher —— W1 abortBash/sendBash 竞态守卫', () => {
     const sendPromise = dispatcher.sendBash('s1', 'doomed-cmd', false)
     await Promise.resolve()
 
-    // abortBash 抢先收口（广播 cancelled bashResult）
+    // abortBash 抢先收口（广播 message.bashAborted 兜底终态）
     await dispatcher.abortBash('s1')
-    const cancelledCount = broadcasts.filter(
-      (m) => m.type === 'message.bashResult' && (m as BashResultMsg).payload.cancelled === true,
-    ).length
-    expect(cancelledCount).toBe(1)
+    expect(findBashAborted(broadcasts)).toBeDefined()
 
     // pi 响应到达：client.bash reject
     bashReject(new Error('stream closed by abort'))
     const result = await sendPromise
 
     // 关键断言：sendBash 检测到被 abort 抢先收口，不广播 message.error
-    // （cancelled bashResult 已是终态，再补 message.error 会双重报错）。
+    //（bashAborted 已是收口帧，再补 message.error 会双重报错）。
     expect(broadcasts.some((m) => m.type === 'message.error')).toBe(false)
 
-    // 仍只有 abortBash 广播的那条 cancelled bashResult，无 S2 兜底 bashResult（因已被 abort 抢先）
+    // catch abort-skip：无 bashResult 兜底帧（D4-3 后兜底终态只走 bashAborted 独立帧）
     const allResults = findBashResults(broadcasts)
-    expect(allResults).toHaveLength(1)
-    expect(allResults[0]!.payload.cancelled).toBe(true)
+    expect(allResults).toHaveLength(0)
 
     expect(result).toEqual({ blocked: true })
   })

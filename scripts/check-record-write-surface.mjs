@@ -7,7 +7,7 @@
 // 设计基线：
 //   - docs/architecture/subagent-record-persistence-consolidation.md §3.3 D7
 //     （record 持久化收敛，写面从 9 处收口为 RecordStore 唯一写入口）
-//   - docs/adr/decisions.md ADR-0078（W1 介质归位：journal 唯一事实源 + 主 session
+//   - docs/adr/decisions.md ADR-0094（W1 介质归位：journal 唯一事实源 + 主 session
 //     每实体注册/终态两条 v2 小条目 + 物化投影；v1 全量快照写点停写，唯一残余 =
 //     v1 实体孤儿纠偏兼容层）
 //
@@ -45,7 +45,7 @@
 //      构造器 / snapshot 直传）即违规——含 R3 白名单宿主自身（四宿主的写点必须
 //      全部是 v2 形态，回潮 v1 快照即守卫红）。
 //   R6 entry 载荷死字节拒绝（W1 新增，全域无豁免）：append 条目调用窗口内出现
-//      `eventLog:` / `displayItems:` 字段写形态即违规（ADR-0078：运行态死字节
+//      `eventLog:` / `displayItems:` 字段写形态即违规（ADR-0094：运行态死字节
 //      不进主 session 条目；v1 兼容层的整对象投影不经字段字面量，不误伤）。
 //   R7 事件文件直写拒绝（W1 新增）：appendFileSync/appendFile 调用行起 4 行
 //      窗口内含 `.events` 路径字面量只许 record-events.ts（record 事件文件唯一
@@ -119,7 +119,7 @@ export const V1_SNAPSHOT_PROJECTOR_RE = /\btoSubagentRecordEntry\s*\(/;
  *  回潮即红）/ snapshot 直传。 */
 export const WF_V1_PAYLOAD_RE = /\bv:\s*1\b|\btoWorkflowRecordEntryData\s*\(|\bsnapshot\b/;
 
-/** R6 entry 载荷死字节字段写形态（eventLog/displayItems——ADR-0078 停写面）。 */
+/** R6 entry 载荷死字节字段写形态（eventLog/displayItems——ADR-0094 停写面）。 */
 export const ENTRY_DEAD_BYTES_RE = /\beventLog\s*:|\bdisplayItems\s*:/;
 
 /** R7 事件文件直写形态（两段窗口判定）：调用行锚 = appendFile(Sync) 调用；
@@ -347,14 +347,14 @@ function scanWindowRules(rel, i, window, flags, violations) {
         `run 族条目写面只许 lifecycle.ts（收编终态条目补写）、壳 jsonl-run-store.ts` +
         `（loadAll 幂等补写）、terminal-actions.ts（D15 终局编排注册/终态条目）与` +
         `resume-run.ts（D7/裁决点 7 resume 链注册条目）。` +
-        `Recovery: 经 core run 写链（terminal-actions 终局编排 / 收编入口）落条目，勿在消费侧直写（ADR-0078）。`,
+        `Recovery: 经 core run 写链（terminal-actions 终局编排 / 收编入口）落条目，勿在消费侧直写（ADR-0094）。`,
     );
   }
   // R5：workflow-record v1 快照载荷形态（全域拒绝，含四宿主自身）。
   if (hasWorkflowType && WF_V1_PAYLOAD_RE.test(window)) {
     violations.push(
       `${rel}:${i + 1} [R5] workflow-record 写点携带 v1 快照载荷形态（v:1 / snapshot 直传）——` +
-        `v1 全量快照 entry 已停写（ADR-0078）：主 session 每实体只写注册 + 终态两条 v2` +
+        `v1 全量快照 entry 已停写（ADR-0094）：主 session 每实体只写注册 + 终态两条 v2` +
         `小条目（buildWorkflowRecordRegisteredEntryData / buildWorkflowRecordSettledEntryData）。` +
         `Recovery: 运行态数据落 run journal（run-events.ts），条目面改 v2 构造器。`,
     );
@@ -364,7 +364,7 @@ function scanWindowRules(rel, i, window, flags, violations) {
     violations.push(
       `${rel}:${i + 1} [R6] entry 载荷携带 eventLog/displayItems 字段写形态——` +
         `两字段是端到端死字节（读侧全部置空或不进 runtime 契约），W1 起禁入主 session` +
-        `条目（ADR-0078）。Recovery: 详情数据留在子 session 文件与事件流，条目面只写` +
+        `条目（ADR-0094）。Recovery: 详情数据留在子 session 文件与事件流，条目面只写` +
         `身份/终局/摘要字段。`,
     );
   }
@@ -379,7 +379,7 @@ function main() {
     for (const v of violations) console.error(`  ✗ ${v}`);
     console.error("");
     console.error("  权威源：docs/architecture/subagent-record-persistence-consolidation.md §3.3 D7");
-    console.error("          docs/adr/decisions.md ADR-0078（W1 介质归位写面清单）");
+    console.error("          docs/adr/decisions.md ADR-0094（W1 介质归位写面清单）");
     console.error("  一级拦截（模块边界）：eslint no-restricted-imports（subagent-core 块）");
     return 1;
   }

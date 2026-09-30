@@ -4,8 +4,8 @@
  * applyEntry 单条走 copy-on-write collector，replayEntries 走 mutable collector 原地累积；
  * 两条 fold 路径共享同一派生段（deriveXxxMessage）与 dispatch 骨架（apply-entry.ts 文件头
  * collector 叙事）——本文件以三个维度机器守卫「内部累积、产物同构」约定：
- * 1. 产物同构：混合全类型序列两条路径全量 state deep-equal（messages / clientUuidMap /
- *    orphanToolResults / deliveredToolResultIds / lastAssistantWithToolCalls 非抽样）；
+ * 1. 产物同构：混合全类型序列两条路径全量 state deep-equal（messages / orphanToolResults /
+ *    deliveredToolResultIds / lastAssistantWithToolCalls 非抽样）；
  * 2. 输入纯度：entries 与 initial（含非空 initial 接续场景）均不被 mutable fold mutate；
  * 3. 长序列形态：10k 条无 id entry 的 fold 正确性 + `e<N>` 确定性 id 全程唯一（O(n) 路径
  *    的结构验证，不计时——性能画像归基准工具）。
@@ -50,7 +50,7 @@ function mixedEntries(): PiEntry[] {
 }
 
 describe('replayEntries(mutable fold) ≡ reduce(applyEntry) 元断言', () => {
-  it('混合全类型序列：全量 state deep-equal（messages/clientUuidMap/orphan/delivered/配对锚点）', () => {
+  it('混合全类型序列：全量 state deep-equal（messages/orphan/delivered/配对锚点）', () => {
     const entries = mixedEntries()
     const viaFold = replayEntries(entries)
     const viaReduce = entries.reduce(applyEntry, createInitialChatViewState())
@@ -65,7 +65,8 @@ describe('replayEntries(mutable fold) ≡ reduce(applyEntry) 元断言', () => {
     expect(viaFold.messages.filter((m) => m.compactionSummary !== undefined)).toHaveLength(2)
     expect(viaFold.messages.filter((m) => m.branchSummary !== undefined)).toHaveLength(1)
     expect(viaFold.messages.filter((m) => m.customType === 'goal-context')).toHaveLength(1)
-    expect(viaFold.clientUuidMap.get('e-user-1')).toBe('u-1')
+    // custom（client-msg-id）纯数据 entry：两路径同为 no-op（零对话流投影，D6-4 死簿记已删）
+    expect(viaFold.messages.every((m) => m.customType !== 'taiji.client-msg-id')).toBe(true)
     // 幂等簿记：同 id 双投递收敛单投递（deliveredToolResultIds 两路径同构）
     expect(viaFold.deliveredToolResultIds).toEqual(new Set(['tc-1', 'tc-none']))
     expect(viaFold.lastAssistantWithToolCalls).toBe(1)

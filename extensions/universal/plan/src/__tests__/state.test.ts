@@ -42,7 +42,7 @@ describe("PlanState", () => {
     sessions.set("session-1", cached);
 
     const mockCtx = {
-      sessionManager: { getEntries: () => [] },
+      sessionManager: { getLeafId: () => null, getEntries: () => [] },
     } as unknown as ExtensionContext;
 
     const result = getPlanState(sessions, "session-1", mockCtx);
@@ -53,6 +53,7 @@ describe("PlanState", () => {
     const sessions: PlanSessionMap = new Map();
     const mockCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           {
             type: "custom",
@@ -110,7 +111,7 @@ describe("State persistence", () => {
 
   it("reconstructPlanState returns DEFAULT_PLAN_STATE when no entries", () => {
     const mockCtx = {
-      sessionManager: { getEntries: () => [] },
+      sessionManager: { getLeafId: () => null, getEntries: () => [] },
     } as unknown as ExtensionContext;
 
     const state = reconstructPlanState(mockCtx);
@@ -120,6 +121,7 @@ describe("State persistence", () => {
   it("reconstructPlanState restores state/selfReview/resumeHint from new-schema entries (D1/D2)", () => {
     const mockCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           {
             type: "custom",
@@ -177,6 +179,7 @@ describe("State persistence", () => {
   it("old four-field entries (no new fields) reconstruct with field-level fallback (D4 兼容读)", () => {
     const mockCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           {
             type: "custom",
@@ -206,6 +209,7 @@ describe("State persistence", () => {
   it("malformed new-field values are dropped, not propagated (垃圾数据不进内存态)", () => {
     const mockCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           {
             type: "custom",
@@ -243,6 +247,7 @@ describe("State persistence", () => {
     // 旧版（含 phase）写的 entry：重开后 plan mode 重建正常，phase 被白名单式读取自然忽略
     const mockCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           {
             type: "custom",
@@ -285,13 +290,14 @@ describe("State persistence", () => {
     // 重提交无变化检测仍能比对到上次基线）
     const persisted = (mockPi.appendEntry as ReturnType<typeof vi.fn>).mock.calls[0][1];
     const reopenCtx = {
-      sessionManager: { getEntries: () => [{ type: "custom", customType: "plan-state", data: persisted }] },
+      sessionManager: { getLeafId: () => null, getEntries: () => [{ type: "custom", customType: "plan-state", data: persisted }] },
     } as unknown as ExtensionContext;
     expect(reconstructPlanState(reopenCtx).lastSubmitReviewDocsFingerprint).toBe("design.md:1");
 
     // 垃圾数据不进内存态：非 string 指纹按无既往提交处理（不警告语义）
     const badCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           {
             type: "custom",
@@ -322,13 +328,14 @@ describe("State persistence", () => {
     // 持久化 entry 走冷启动重建：resubmit 等待态跨重开可恢复（E3 重挂同款受益）
     const persisted = (mockPi.appendEntry as ReturnType<typeof vi.fn>).mock.calls[0][1];
     const reopenCtx = {
-      sessionManager: { getEntries: () => [{ type: "custom", customType: "plan-state", data: persisted }] },
+      sessionManager: { getLeafId: () => null, getEntries: () => [{ type: "custom", customType: "plan-state", data: persisted }] },
     } as unknown as ExtensionContext;
     expect(reconstructPlanState(reopenCtx).resumeHint).toBe("resubmit");
 
     // 旧 entry（升级前落盘）无该字段且无旧 reviewStateSource → 无值（renderer 渲染通用降级文案）
     const legacyCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           {
             type: "custom",
@@ -343,6 +350,7 @@ describe("State persistence", () => {
     // 旧版 'explain' 存量值（explain 交互已删）与垃圾值一并按无值处理（值域守卫白名单只认 'resubmit'）
     const explainCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           { type: "custom", customType: "plan-state", data: { ...persisted, resumeHint: "explain" } },
         ],
@@ -353,6 +361,7 @@ describe("State persistence", () => {
     // 值域守卫：'resubmit' 之外的垃圾值按无值处理（与 readResumeHint 同风格）
     const badCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           { type: "custom", customType: "plan-state", data: { ...persisted, resumeHint: "bogus" } },
         ],
@@ -451,7 +460,7 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
   function setupActiveSession() {
     const sessions: PlanSessionMap = new Map();
     const mockCtx = {
-      sessionManager: { getEntries: () => [] },
+      sessionManager: { getLeafId: () => null, getEntries: () => [] },
     } as unknown as ExtensionContext;
     sessions.set("session-1", {
       isActive: true,
@@ -515,7 +524,7 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
     // 模拟重开：用 reset 落盘的 entry 数据走冷启动重建
     const persisted = (mockPi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1];
     const reopenCtx = {
-      sessionManager: { getEntries: () => [{ type: "custom", customType: "plan-state", data: persisted }] },
+      sessionManager: { getLeafId: () => null, getEntries: () => [{ type: "custom", customType: "plan-state", data: persisted }] },
     } as unknown as ExtensionContext;
 
     const state = reconstructPlanState(reopenCtx);
@@ -572,7 +581,7 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
       const planFilePath = makePlanRoot(false);
       const slugDir = join(planFilePath, "..");
       const sessions: PlanSessionMap = new Map();
-      const mockCtx = { sessionManager: { getEntries: () => [] } } as unknown as ExtensionContext;
+      const mockCtx = { sessionManager: { getLeafId: () => null, getEntries: () => [] } } as unknown as ExtensionContext;
       sessions.set("s1", { ...DEFAULT_PLAN_STATE, isActive: true, planFilePath, requirement: "r", templateName: "", skills: [], docs: [] });
       const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
 
@@ -585,7 +594,7 @@ describe("resetPlanState 终态矩阵（D5/E10）", () => {
       const planFilePath = makePlanRoot(true);
       const slugDir = join(planFilePath, "..");
       const sessions: PlanSessionMap = new Map();
-      const mockCtx = { sessionManager: { getEntries: () => [] } } as unknown as ExtensionContext;
+      const mockCtx = { sessionManager: { getLeafId: () => null, getEntries: () => [] } } as unknown as ExtensionContext;
       sessions.set("s1", { ...DEFAULT_PLAN_STATE, isActive: true, planFilePath, requirement: "r", templateName: "", skills: [], docs: [] });
       const mockPi = { appendEntry: vi.fn() } as unknown as ExtensionAPI;
 
@@ -681,6 +690,7 @@ describe("requirement 长度封顶（MF-1-3：session.planState 帧不登记 LAR
     const oversized = "z".repeat(MAX_PLAN_REQUIREMENT_LENGTH * 2);
     const mockCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           { type: "custom", customType: "plan-state", data: { isActive: true, requirement: oversized } },
         ],
@@ -695,6 +705,7 @@ describe("requirement 长度封顶（MF-1-3：session.planState 帧不登记 LAR
   it("非 string requirement（含缺失）仍归空串（白名单读取语义不变）", () => {
     const mockCtx = {
       sessionManager: {
+        getLeafId: () => null,
         getEntries: () => [
           { type: "custom", customType: "plan-state", data: { isActive: false, requirement: 123 } },
         ],

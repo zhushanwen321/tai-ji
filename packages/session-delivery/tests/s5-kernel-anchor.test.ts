@@ -18,7 +18,6 @@ describe('S5-kernel-unit-tests 聚合冒烟（根单元验收锚）', () => {
     const port: DeliveryPort = {
       supportedPayloads: ['text'],
       isIdle: () => idle,
-      hasPendingMessages: () => false,
       send: (msg, intent) => {
         sendCalls.push({ msg, intent })
       },
@@ -48,7 +47,6 @@ describe('S5-kernel-unit-tests 聚合冒烟（根单元验收锚）', () => {
     const port: DeliveryPort = {
       supportedPayloads: ['text'],
       isIdle: () => false, // 僵尸 busy 标志
-      hasPendingMessages: () => false,
       send: () => {
         throw new Error('pi process died')
       },
@@ -73,7 +71,6 @@ describe('S5-kernel-unit-tests 聚合冒烟（根单元验收锚）', () => {
     const port: DeliveryPort = {
       supportedPayloads: ['text'],
       isIdle: () => idle,
-      hasPendingMessages: () => false,
       send: (msg, intent) => {
         sendCalls.push({ msg, intent })
       },

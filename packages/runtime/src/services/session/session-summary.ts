@@ -39,14 +39,14 @@ export function buildSessionSummary(
     handedOffTo: s.handedOffTo,
     sessionFile: s.sessionFilePath,
     // W-RT-4/§4.2：active session 的 launchPresetId 透传到 summary（内存态与 sidecar 并列）。
-    // ManagedSession 实例携带此字段；普通 IManagedSessionView 无此字段时为 undefined（安全）。
-    launchPresetId: (s as ManagedSession).launchPresetId,
+    // 字段已收编进 IManagedSessionView（照 handedOffTo 先例）；sidecar 缺失的异常时序下为 undefined（安全）。
+    launchPresetId: s.launchPresetId,
     // F1 披露（设计 `mode-system-composer-density` §7.5 E4）：restore 回落
     // 到 builtin:full 的事实随内存态透传（scanner 磁盘路径无此字段——回落态是「本进程本次
     // 运行」的内存态事实，进程重开即归零，不持久化，避免「未重启也声称已回落」的假陈述）。
     launchPresetFallbackTo: (s as ManagedSession).launchPresetFallbackTo,
-    // D14 语义修正：归属 project 透传到 summary（内存态兜底，sidecar 扫描路径在 scanner）。
-    projectId: (s as ManagedSession).projectId,
+    // D14 语义修正：归属 project 透传到 summary（内存态兑底，sidecar 扫描路径在 scanner）。
+    projectId: s.projectId,
     // B-2：agent-managed 标记透传——list 按 spawnSource/parentAgentSessionId 过滤时
     // active session 走本路径（scanned 路径被 activeFilePaths 排除），漏透传 = 过滤失效。
     spawnSource: (s as ManagedSession).spawnSource,

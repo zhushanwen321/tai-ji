@@ -483,7 +483,7 @@ export function setupWorkflowDomain(
     const sessionId = ctx.sessionManager.getSessionId();
     lsRef.lastSessionId = sessionId;
 
-    // [PS-61] tree 导航 = 同进程分支导航，非会话替换：pi 原地换叶子
+    // [PS-68] tree 导航 = 同进程分支导航，非会话替换：pi 原地换叶子
     //（agent.state.messages = sessionContext.messages）后 emit，不 teardown、不失效
     // runner——pi 绑定保持有效，此处不作废。替换形态 = new/fork/resume/quit +
     // switchSession（借 reason="resume"，无专用枚举成员），全部发 session_shutdown；

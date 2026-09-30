@@ -12,9 +12,11 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  MSG_ID_TAG_RE,
   COMPLETE_NOTIFY_CUSTOM_TYPES,
   PI_RESPAWN_NOTICE_CUSTOM_TYPE,
   SUBAGENT_DIRECTIVE_CUSTOM_TYPE,
+  decodeNewlineEscapes,
   parseRespawnNoticeVariant,
   parseSubagentDirective,
 } from '../message'
@@ -141,5 +143,71 @@ describe('parseSubagentDirective content 非 string → text 归空串', () => {
   it('content 异常 + details 异常 → 以 details 判定为准返回 null', () => {
     expect(parseSubagentDirective(undefined, null)).toBeNull()
     expect(parseSubagentDirective(100, { subagentId: 'a', slug: 'b', direction: 'agent' })).toBeNull()
+  })
+})
+
+describe('MSG_ID_TAG_RE 双形态匹配（投递身份标记 SSOT）', () => {
+  const bare = '0a1b2c3d-11e2-42f3-8a44-556677889900'
+
+  it('裸 uuid 形态：命中且捕获组 1 缺省、组 2 = 裸 uuid', () => {
+    const m = MSG_ID_TAG_RE.exec(`prefix <!--taiji:msg:${bare}--> suffix`)
+    expect(m).not.toBeNull()
+    expect(m![1]).toBeUndefined()
+    expect(m![2]).toBe(bare)
+  })
+
+  it('u- 前缀形态：捕获组 1 = u-、组 2 = 裸 uuid（同 clientUuid 双形态收口）', () => {
+    const m = MSG_ID_TAG_RE.exec(`<!--taiji:msg:u-${bare}-->`)
+    expect(m![1]).toBe('u-')
+    expect(m![2]).toBe(bare)
+  })
+
+  it('大写十六进制命中（i 旗标等价覆盖，消费方 toLowerCase 归一）', () => {
+    expect(MSG_ID_TAG_RE.test(`<!--taiji:msg:${bare.toUpperCase()}-->`)).toBe(true)
+  })
+
+  it('非标记文本 / 非 uuid 形状 → 不命中', () => {
+    expect(MSG_ID_TAG_RE.test('plain text without marker')).toBe(false)
+    expect(MSG_ID_TAG_RE.test('<!--taiji:msg:not-a-uuid-->')).toBe(false)
+    expect(MSG_ID_TAG_RE.test('<!--taiji:msg:0a1b2c3d-11e2-42f3-8a44-55667788990-->')).toBe(false)
+  })
+
+  it('/i 无 lastIndex 状态：模块级单例连续 exec 同输入结果恒定', () => {
+    const text = `<!--taiji:msg:${bare}-->`
+    expect(MSG_ID_TAG_RE.exec(text)?.[2]).toBe(bare)
+    expect(MSG_ID_TAG_RE.exec(text)?.[2]).toBe(bare)
+  })
+})
+
+describe('decodeNewlineEscapes（与 runtime encodeDirectiveText 互逆）', () => {
+  // 与 runtime session-records.ts encodeDirectiveText 逐字同型的镜像（shared 不依赖 runtime），
+  // 互逆性以此为往返基准。
+  const encodeDirectiveText = (text: string): string =>
+    text.replace(/\\/g, '\\\\').replace(/\n/g, '\\n')
+
+  it('字面 \\n → 真实换行；字面 \\\\ → 单反斜杠', () => {
+    expect(decodeNewlineEscapes('a\\nb')).toBe('a\nb')
+    expect(decodeNewlineEscapes('a\\\\b')).toBe('a\\b')
+  })
+
+  it('单次遍历优先匹配两反斜杠：字面「反斜杠+n」不被误解码为换行（路径 C:\\new 场景）', () => {
+    expect(decodeNewlineEscapes('C:\\\\new')).toBe('C:\\new')
+    expect(decodeNewlineEscapes('a\\nb')).not.toBe('a\\nb')
+  })
+
+  it('互逆性：decode(encode(s)) === s 对转义敏感样本恒成立', () => {
+    const samples = [
+      'plain',
+      'multi\nline\ntext',
+      'windows path C:\\new\\thing',
+      'trailing backslash \\',
+      'backslash-n literal \\n inside',
+      '\\\\n doubled backslash then n',
+      '换行\n与反斜杠\\混合',
+      '',
+    ]
+    for (const s of samples) {
+      expect(decodeNewlineEscapes(encodeDirectiveText(s))).toBe(s)
+    }
   })
 })

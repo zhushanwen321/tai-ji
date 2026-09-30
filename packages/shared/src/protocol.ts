@@ -3,6 +3,8 @@
 import type { ProviderInfo, SkillInfo, AgentInfo, ModelInfo, SkillDirConfig, ScannedSkillInfo, ScannedAgentInfo, BuiltinProviderTemplate, ProviderId } from './provider'
 import type { SessionGroup, SessionSummary, SessionStatus, SessionDataSource } from './session'
 import type { FileChange, ChangeSetStatus, Message } from './message'
+// delivery 域帧 DTO（投递所有权内核 D7/ADR-0043）：segments 快照供草稿恢复
+import type { Segment } from './segments'
 import type { PiMessageEntry, PiToolCallEntryForm } from './pi-entry'
 import type { FileNode } from './file-tree'
 // 领域 DTO 已下沉到各自领域文件（E2 架构候选）：protocol.ts 仅保留 type→payload 映射 SSOT，
@@ -92,7 +94,7 @@ export type ClientMessageType =
   | 'session.handoff' | 'session.abortHandoff'
   // runtime-message-bus（slice:runtime-message-bus，wave:protocol-seq）：
   // session.subscribe 订阅某 session 的 live 事件流（bus.publish 推送的带 seq 消息），
-  // reply { snapshot, lastSeq, gap? }（见 ReplyPayloadMap）。
+  // reply { snapshot, stateSnapshot, lastSeq, gap? }（见 ReplyPayloadMap）。
   // session.unsubscribe 取消订阅，reply message.status ack。
   // wave:runtime-wiring 已在 ClientMessageMap 补登记 request payload 形状（见下方）。
   | 'session.subscribe' | 'session.unsubscribe'
@@ -109,6 +111,10 @@ export type ClientMessageType =
   | 'session.workflowAction' | 'session.subagentAction'
   // session.forceQuit：强制退出卡死 session（杀 pi 子进程 + stopped 收敛，区别于 message.abort 的协作式中止）。
   | 'session.forceQuit'
+  // session.revokeMessage（消息撤回设计 D2）：已送达消息的 session 树内回退撤回（S8 已消费层）。
+  // 归 session 域而非 delivery 域——语义是 session 树操作不是投递操作；在途态由 UI 路由
+  // 既有 delivery.cancel（D6 统一入口，RPC 层不合并），错开两域职责。
+  | 'session.revokeMessage'
   // wave:runtime-patch ipc-converge-a3 W2：业务持久化写迁 WS（session 数据单一出口归 runtime）。
   // session.writeImage 粘贴截图落地 attachments；session.migrateImage landing tmpdir→attachments 迁移；
   // session.writeSegments 追加/覆盖 segments.json sidecar。原 main IPC handler，现 runtime session-service。
@@ -116,7 +122,14 @@ export type ClientMessageType =
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：导入 pi 会话
   // 两步流——importCandidates 拉候选列表，import 执行导入；reply 同名（request/reply 同名模式）。
   | 'session.importCandidates' | 'session.import'
-  | 'message.send' | 'message.abort' | 'message.steer' | 'message.follow_up'
+  | 'message.send' | 'message.abort'
+  // delivery.*（投递所有权内核 D5，ADR-0046 配对）：renderer 统一提交/单条撤销/全量回收回草稿/
+  // 断连重报四 RPC。submit 后内核永不拒绝（排队取代拒绝）。
+  // [MF-1-8 退役] message.steer / message.follow_up 条目已删除（u5a 退役条件兑现：runtime
+  // transport 路由 + dispatcher 转发腿同 commit 删除；消费方经 delivery.submit 统一提交）。
+  // [u5a 部分保留] send.rejected 条目仍保留：runtime bash 通道 busy 时 publish（reserveBashSlot，
+  // bash 通道属设计 §1.3 Out of Scope）——renderer handler 已删，frames 面仅此一处生产腿。
+  | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
   | 'message.bash' | 'message.abortBash'
   | 'config.getProviders' | 'config.setProvider' | 'config.deleteProvider' | 'config.setToolPermissions'
   | 'config.refreshProviderCatalogs'
@@ -128,6 +141,9 @@ export type ClientMessageType =
   | 'config.setSkillDirs' | 'config.setAgentDirs' | 'config.setExtensionDirs'
   | 'config.getSystemPrompt' | 'config.setSystemPrompt'
   | 'model.list' | 'model.switch' | 'session.setThinkingLevel'
+  // [退役待删 R2-D] tool.approve/deny/always_allow 三条目已死：renderer 从不发送，runtime
+  // 无 handler（发即收 unknown_type 错误信封）。真实审批路径 = extension.ui_request/ui_response
+  // 交互通道 + config.setToolPermissions；随 runtime 裁决同批删条目。
   | 'tool.approve' | 'tool.deny' | 'tool.always_allow'
   | 'extension.ui_response' | 'extension.toggle' | 'extension.list'
   | 'extension.install' | 'extension.uninstall'
@@ -157,7 +173,7 @@ export type ClientMessageType =
   | 'git.diff'
   | 'file.write.create' | 'file.write.rename' | 'file.write.delete'
   | 'git.status' | 'git.stage' | 'git.unstage' | 'git.commit' | 'git.checkout' | 'git.checkoutCwd' | 'git.createBranch'
-  | 'workspace.listRecent' | 'workspace.record' | 'workspace.detectBare' | 'workspace.detect'
+  | 'workspace.listRecent' | 'workspace.record' | 'workspace.detect'
   | 'project.load' | 'project.save'
   | 'worktree.create' | 'worktree.listBranches' | 'worktree.list'
   | 'terminal.spawn' | 'terminal.write' | 'terminal.resize' | 'terminal.kill' | 'terminal.attach'
@@ -436,6 +452,14 @@ export interface ClientMessageMap {
   'session.switch': { sessionId: string }
   'session.restore': { sessionId: string }
   'session.forceQuit': { sessionId: string }
+  // session.revokeMessage（消息撤回设计 D2）：targetId = 消息 id 原样（不钉 clientUuid 形态）。
+  // renderer 消息 id 有两个互斥空间——live 乐观气泡 `u-<uuid>`（= clientUuid）与 history
+  // 基线 / 重开后的 pi entryId（8 位 hex）；把 clientUuid 定死为入参会使「同一 session 第二次
+  // 撤回 / 重开后撤回」对全部消息失效（刷新后 clientUuid 不再可从消息取到）。两形态的运行时
+  // 分派定位是编排侧职责（U4），契约层统一为 string。例外：U8 外来条目保号可为裸 uuid 形态
+  // （chat store appendUser 无前缀校验）——撤回分派对 uuid 形态目标走裸标记通道 b 收编
+  // （见 revoke-orchestrator locateTarget）。
+  'session.revokeMessage': { sessionId: string; targetId: string }
   // session.history 参数（D4 中期分页协议，u6-paging-protocol）：
   // - 不带 cursor：最近窗口（u4b 双预算现状）——「打开/切入 session」与 hydrate 通路。
   // - 带 cursor：游标翻页——cursor = turn 边界锚点 entryId（renderer 当前窗口最早消息的
@@ -482,8 +506,8 @@ export interface ClientMessageMap {
     /** Staging Mode（ADR-0056）：composer 暂存的模型覆盖（"provider/modelId" 格式）。
      *  存在时优先于源 session preset 的 modelOverride；不存在时继承源 preset。 */
     modelOverride?: string
-    /** Staging Mode：composer 暂存的思考等级覆盖（合法值见 VALID_THINKING_LEVELS）。 */
-    thinkingOverride?: string
+    /** Staging Mode：composer 暂存的思考等级覆盖（合法值见 PI_THINKING_LEVELS，shared 权威词表）。 */
+    thinkingOverride?: ThinkingLevel
   }
   // handoff：在源 session 触发 fast-handoff（agent-driven 模式）——runtime HandoffService 让源 session
   // 跑 handoff turn（内置 HANDOFF_PROMPT_TEMPLATE）生成文档 → 从 agent_end 提取 text → 新建 session
@@ -496,7 +520,7 @@ export interface ClientMessageMap {
     sessionId: string
     reply?: string
     modelOverride?: string
-    thinkingOverride?: string
+    thinkingOverride?: ThinkingLevel
   }
   // abortHandoff：中断进行中的 handoff（runtime client.abort + 清 listener/timer/inflight）。
   // onTurnEnd 检测 aborted 标记跳过新建/注入。无进行中 handoff 时 no-op。
@@ -550,20 +574,44 @@ export interface ClientMessageMap {
   // message.send：images 是 Cmd+V 富呈现通路的图片数据（base64，不含 data: 前缀）。
   // runtime 适配层（rpc-client）补 type:'image' 组装成 pi 的 ImageContent。
   // 不带 type 字段（type 是 pi 私有，runtime 适配层负责补）。
-  // clientUuid（session-occupancy-send-closure D2/D5）：客户端生成的幂等 id，runtime 拒绝时在
-  // send.rejected 广播原样带回，renderer 据此消歧发送来源（flush 重放的拒绝不重入队）。
+  // clientUuid（session-occupancy-send-closure D2/D5）：客户端生成的幂等 id（内核条目 id /
+  // 出站裸标记身份源，投递所有权内核 D2）——[u5a 注记] 前身「拒绝时经 send.rejected 广播原样
+  // 带回供 renderer 消歧」的消费腿已退役（内核排队取代拒绝），字段保留为投递身份透传。
   // [HISTORICAL] subagent 可选字段已删除（composer 四符号设计 D2）：曾经的 marker 半成品通道
   // （base64 隐藏注释前缀拼进主 agent prompt，extension 侧零消费方，且经主 agent 转发违背
   // 「直达 subagent」目标）——定向消息改走 session.subagentAction(message/start)。
   'message.send': { sessionId: string; content: string; images?: Array<{ data: string; mimeType: string }>; clientUuid?: string }
   'message.abort': { sessionId: string }
-  'message.steer': { sessionId: string; content: string }
-  'message.follow_up': { sessionId: string; content: string }
+  // [MF-1-8 退役] message.steer / message.follow_up payload 条目已删除：runtime transport
+  // 路由 + dispatcher 转发腿同 commit 删除（u5a 退役条件兑现），消费方经 delivery.submit
+  // 统一提交（lane 由内核判定；追加语义 = intent 字段）。
   // message.bash：composer 直接执行 bash 命令（不经 LLM turn）。command 原样透传 pi bash RPC，
   // excludeFromContext 控制是否进 LLM 上下文（pi bash excludeFromContext 参数，透传不转换）。
   'message.bash': { sessionId: string; command: string; excludeFromContext?: boolean }
   // message.abortBash：取消进行中的 bash 执行（调 pi abort_bash）。
   'message.abortBash': { sessionId: string }
+  // ── delivery 域（投递所有权内核 D1/D5，u-contracts 契约先行；行为实现归 u1/u2/u3a）──
+  // delivery.submit：renderer 统一提交入口（D1——renderer 不做 lane 路由，乐观气泡后一律
+  // submit，lane 判定单一实现归 runtime 内核）。clientUuid 必填（D2 裸标记身份源 + 判重锚）；
+  // images 可选（形态对齐 message.send，D9④ TextPayload.images 协议面）。reply 携带初始
+  // lane 与条目态（D5）；同步失败走 error envelope（内核 FIFO 无界，正常路径无拒绝态）。
+  // segments 可选（ADR-0043 快照）：富消息提交时随 payload 上网，runtime 按 clientUuid
+  // 持有快照——cancel/drain reply 回草稿时原样返回（提交侧不传 = 纯文本恢复，不携带）。
+  'delivery.submit': { sessionId: string; content: string; images?: Array<{ data: string; mimeType: string }>; clientUuid: string; segments?: Segment[] }
+  // delivery.cancel：单条撤销（V9/V10）。queued 态立即移除；投递中（在底层通道槽位）走
+  // 队列级收回-重投路径（D3 复用对账回收）；已 delivered 或收回失败 = 不可撤（§3.4，
+  // 条目由对账器下轮兜底）。reply 携带全文 + segments 快照（D7/ADR-0043）——segments 源 =
+  // 提交时随 delivery.submit 上网的快照（runtime 持有），renderer 刷新后从 session.delivery
+  // 帧恢复的条目本地无原始 segments，chips 回草稿依赖 reply。
+  'delivery.cancel': { sessionId: string; clientUuid: string }
+  // delivery.drain：forceQuit 全量回收（D10——abort 不清队列，仅 forceQuit drain），V11。
+  // reply 返回全部条目文本（发送序）供草稿恢复，含 segments 快照（D7/ADR-0043；快照源同上）。
+  'delivery.drain': { sessionId: string }
+  // delivery.resync：断连/刷新重连后 renderer 重报本地未确认条目（D5），clientUuid 幂等
+  // 去重（内核查 tombstone 判重表，D5②）。reply.deduped = 命中终态判重记录的 uuid（已
+  // delivered/cancelled，renderer 据此丢弃本地残留）；存留条目的权威状态经 session.delivery
+  // 全量快照帧恢复（last-value 单源，reply 不重复携带，防双源分叉）。
+  'delivery.resync': { sessionId: string; clientUuids: string[] }
   'config.getProviders': Record<string, never>
   // 进入 Settings Provider 页时触发远程模型目录刷新（无参：刷新列表内全部 catalog provider）
   'config.refreshProviderCatalogs': Record<string, never>
@@ -617,6 +665,8 @@ export interface ClientMessageMap {
   'model.list': Record<string, never>
   'model.switch': { sessionId: string; provider: ProviderId; modelId: string }
   'session.setThinkingLevel': { sessionId: string; level: string }
+  // [退役待删 R2-D] 三条目已死（无发送方无 handler，见 ClientMessageType 段退役注释），
+  // payload 形状仅为协议登记完整性保留，勿据此实现消费方。
   'tool.approve': { sessionId: string; toolCallId?: string }
   'tool.deny': { sessionId: string; toolCallId?: string; reason?: string }
   'tool.always_allow': { sessionId: string; toolName?: string }
@@ -678,11 +728,8 @@ export interface ClientMessageMap {
   // 对齐 recent-workspaces.json 模式；localStorage 仅首启迁移源）。
   'project.load': Record<string, never>
   'project.save': ProjectStoreState
-  /** workspace.detectBare：向后兼容别名，等价于 workspace.detect。 */
-  'workspace.detectBare': { cwd: string }
   /** workspace.detect：检测 cwd 所在 git 仓库模式（bare-workspace / plain-repo / not-repo）。
-   *  返回三态 { mode, wsRoot, barePath, repoRoot, defaultBranch }。
-   *  workspace.detectBare 为此接口的向后兼容别名。 */
+   *  返回三态 { mode, wsRoot, barePath, repoRoot, defaultBranch }。 */
   'workspace.detect': { cwd: string }
   /** worktree.listBranches：列出 cwd 所在仓库的本地和远程分支。 */
   'worktree.listBranches': { cwd: string }
@@ -889,12 +936,54 @@ export type WorktreeUnknownErrorCode = 'worktree_failed'
 /** envelope code 字段的完整联合（业务码 + 兜底） */
 export type WorktreeEnvelopeCode = WorktreeErrorCode | WorktreeUnknownErrorCode
 
+/**
+ * session.compact RPC 失败的分类码（msg-pipeline-debloat D4-2，runtime ↔ renderer 契约 SSOT）。
+ *
+ * 产生点：session-message-handler.handleSessionCompact 的 error envelope——
+ * - compact_busy：dispatcher.compact busy 预检拒绝（压缩/bash/生成互斥，throw 扁平错误
+ *   携带 code，handler 原样透传）。
+ * - compact_failed：compact 执行失败（pi 层失败——interpreter 已编排对话流呈现；
+ *   ensureActive 恢复失败——session 状态面呈现）。
+ *
+ * 消费点：core useChat 的 compact/sendBash toast 抑制判别——envelope 携带分类码 =
+ * runtime 已编排用户可见呈现（对话流内联 / 状态面），抑制全局错误 toast。
+ *
+ * 新增分类码必须在此登记（编译器强制两端同步）；未登记/未知 code 在 renderer 侧
+ * 保守回退为 toast 兜底（错误可见性优先）。
+ */
+export type CompactErrorCode = 'compact_busy' | 'compact_failed'
+
+/**
+ * hook 否决类 RPC 失败的分类码（msg-pipeline-debloat D4-2，runtime ↔ renderer 契约 SSOT）。
+ *
+ * 产生点：session-message-handler 的 message.send / message.bash / delivery.submit 三
+ * handler 对 BeforeSend hook 否决（blocked 失败）统一落的 error envelope code——否决时
+ * dispatcher 已广播 message.error 错误气泡（用户可见呈现已编排）。
+ *
+ * 消费点：core useChat 的 send / sendBash / delivery toast 抑制判别——envelope 携带本码 =
+ * 抑制全局错误 toast（与 CompactErrorCode 同判别框架；未登记/未知 code 保守回退为 toast
+ * 兜底，错误可见性优先）。
+ *
+ * 值常量 MESSAGE_BLOCKED_CODE 供 runtime 落码点与 core 判别点统一引用，
+ * 禁止跨包手抄字面量（手抄码名漂移时 tsc 不拦，静默退化为保守 toast 路径）。
+ */
+export type MessageBlockedCode = 'message_blocked'
+/** MessageBlockedCode 的值形态（runtime 落码点 / core 判别点统一引用） */
+export const MESSAGE_BLOCKED_CODE: MessageBlockedCode = 'message_blocked'
+
 export type ServerMessageType =
   | 'session.created' | 'session.deleted' | 'session.deletedByCwd' | 'config.sessions' | 'session.history' | 'session.switched'
   | 'session.compacting' | 'session.compacted' | 'session.renamed' | 'session.forkNotice' | 'session.skillNotice' | 'session.handoffStarted' | 'session.handoffComplete' | 'session.handoffAborted' | 'session.setProject'
   // session.occupancy（session-occupancy-send-closure P3）：占用三维快照广播（state topic，
   // last-value 语义——重连/切回 session 自动恢复，不依赖广播时序），renderer sessionPhase 唯一数据源。
   | 'session.occupancy'
+  // session.delivery（投递所有权内核 D5）：队列状态全量快照帧（state topic，last-value 语义，
+  // 与 session.occupancy 同模式——重连/切回 session 自动恢复，不依赖广播时序）。
+  // 数据源 = 内核 entries() 投影视图（D9②，D5③ 修剪规则）。QueueBubble 单一数据源（D7）。
+  | 'session.delivery'
+  // session.revokeMessage（消息撤回设计 D2/D8）：revokeMessage RPC 的 reply type（与 request
+  // 同名——delivery.* / session.subscribe 同款 payload 消费型同名模式）。
+  | 'session.revokeMessage'
   | 'project.loaded'
   | 'session.subagents' | 'session.subagentHistory'
   // plan 模式状态投影广播（plan 模式重设计 D1）：stateSnapshot 'plan' typeKey 的 live 载体帧
@@ -915,7 +1004,7 @@ export type ServerMessageType =
   | 'message.message_start' | 'message.text_delta' | 'message.thinking_delta'
   | 'message.thinking_start' | 'message.thinking_end'
   | 'message.tool_call_start' | 'message.tool_call_end'
-  | 'message.bashStart' | 'message.bashResult'
+  | 'message.bashStart' | 'message.bashResult' | 'message.bashAborted'
   | 'message.complete' | 'message.error' | 'message.status'
   | 'context.update'
   // composer-gen-stats（D4）：生成指标帧——双发送点同形：
@@ -938,9 +1027,8 @@ export type ServerMessageType =
   // config.uiLocaleSet：config.setUiLocale 的 ack 型 reply（u-locale-channel，payload 空）。
   | 'config.uiLocaleSet'
   | 'model.list' | 'model.switched'
-  // model:capabilityDrift：能力注册表在线对账漂移上报（U6，pi-boundary-reliability D2 ②）。
-  // 全局诊断通道（无 sessionId 路由需求，消费方=设置页/composer 档位显示的自省入口）。
-  | 'model:capabilityDrift'
+  // [退役 R3-b33] model:capabilityDrift 条目已删除：U6 接通的上报通道 renderer 零消费方
+  //（data-source-registry.md #20）。对账漂移发现仍由 runtime 记日志，不再占协议帧。
   | 'session.thinkingLevelSet'
   | 'session.state_changed'
   // wave:runtime-wiring：session.subscribe 的 RPC reply type（payload 消费型，含 snapshot/lastSeq/gap）。
@@ -995,11 +1083,15 @@ export type ServerMessageType =
   | 'plugin:headerActionUpdate'
   | 'extension:widget' | 'extension:widgetGui' | 'extension:status' | 'extension:notify'
   | 'extension:setEditorText'
+  | 'extension:requestsInvalidated'
   | 'message.compactionSummary' | 'message.branchSummary'
-  | 'message.auto_retry_start' | 'message.auto_retry_end' | 'message.queue_update'
+  | 'message.auto_retry_start' | 'message.auto_retry_end'
   | 'message.stream_error'
   | 'message.stream_warn'
   | 'send.rejected'
+  // delivery.* 四 RPC 的 reply 帧（投递所有权内核 D5，u-contracts）：与 request 同名
+  //（backgroundTask 域 / session.subscribe 同款 payload 消费型同名模式，ADR-0046 配对）。
+  | 'delivery.submit' | 'delivery.cancel' | 'delivery.drain' | 'delivery.resync'
   | 'message.file_changes'
   | 'message.changeSetInvalidated'
   | 'message.customStart'
@@ -1011,7 +1103,6 @@ export type ServerMessageType =
   | 'session.writeImage:result' | 'session.migrateImage:result' | 'session.writeSegments:result'
   | 'git.status:result'
   | 'workspace.recentList'
-  | 'workspace.bareDetected'
   | 'workspace.detected'
   | 'worktree.created'
   | 'terminal.data' | 'terminal.exit' | 'terminal.alive' | 'terminal.ack' | 'terminal.writeFailed'
@@ -1082,18 +1173,6 @@ export type ServerMessageType =
 
 /** skill 缓存失效广播的作用域：global=全局 skill 变动，project=某项目 cwd 的 skill 变动。 */
 export type SkillCacheScope = 'global' | 'project'
-
-/**
- * 能力注册表对账漂移项（'model:capabilityDrift' 的 drifts 元素形状，U6）。
- * 三类（与 runtime model-capability.ts CapabilityDrift 同构）：
- * - config_only：配置有而 pi 合并清单无全等命中（且无大小写孪生）；
- * - reasoning_mismatch：全等命中但 reasoning 归一值不一致（config 缺失按 false 归一）；
- * - case_twin：pi 无全等 id 但存在仅大小写不同的条目（pi pattern 引擎静默换模形态）。
- */
-export type ModelCapabilityDriftItem =
-  | { kind: 'config_only'; providerId: string; modelId: string }
-  | { kind: 'reasoning_mismatch'; providerId: string; modelId: string; configReasoning?: boolean; piReasoning: boolean }
-  | { kind: 'case_twin'; providerId: string; modelId: string; piModelId: string }
 
 // ── session-trace payload 辅助类型（design D4，trace-runtime 单元）──
 // 字段镜像 core domain/session-trace 的 TraceSessionHeader / TraceSessionEndMeta——shared 不依赖
@@ -1445,6 +1524,112 @@ export interface SessionSetProjectMutationReply {
   projectId: string
 }
 
+// ── 消息撤回具名 DTO（message revoke，设计 §3.3 D2/D7/D8——D8 错误规格表为 SSOT）──────
+
+/**
+ * `__taiji_nav__` internal command 名（消息撤回设计 D1 信令通道）：runtime 编排经
+ * sendSystemCommand 直连 `client.prompt('/__taiji_nav__ <entryId>')` 触发 pi
+ * navigateTree；注册方 = extensions/taiji/agent-ext（mandatory infrastructure，不可禁）。
+ * `__` 前缀经 internal-command-filter 过滤，不出现在用户 slash 浮层；command 不进模型、
+ * 无 turn（P2 前提），故不走用户消息链路（不经 hook / 不经内核）。
+ */
+export const TAIJI_NAV_COMMAND = '__taiji_nav__'
+
+/**
+ * session.revokeMessage 的错误码闭集（消息撤回设计 §3.3 D8 错误规格表——字面量与
+ * 触发条件逐字对齐；改码须先改设计表再同步此处，renderer 呈现按码分流）。
+ */
+export type RevokeMessageErrorCode =
+  // isStreaming / isCompacting / settling / isBashRunning / revoking 进行中（D2 ① 检查全维）
+  | 'busy'
+  // targetId 定位失败（clientUuid 空间双通道均 miss，或 entryId 空间目标不在文件——基线 stale）
+  | 'no-mapping'
+  // __taiji_nav__ 命令探测耗尽（agent-ext 为 mandatory infrastructure 不可禁，正常不触达）
+  | 'extension-missing'
+  // reply 后 get_entries 校验不过（含 navigateTree throw 形态与 get_entries RPC 自身失败）
+  | 'nav-failed'
+  // pi 已被空闲回收且编排 ensureActive 拉活失败（终态码，区别于命令真缺失的 extension-missing）
+  | 'pi-reclaimed'
+  // session 有在跑 workflow run（D2 ① 扩展检查——撤回不得静默终止后台任务）
+  | 'workflow-running'
+
+/**
+ * session.revokeMessage 的 reply（消息撤回设计 D2 ⑦/D7/D8）。
+ *
+ * 成功形态：revoked:true + content——transcript entry 原文 raw 不剥投递裸标记（标记是
+ * renderer 切条锚点，runtime 剥掉则 renderer 无锚；剥标记与整批切条还原在 renderer 侧
+ * D7 两层规则，见 shared/revoke-restore），供 renderer 草稿回填；幂等重试（目标已被
+ * 前序撤回带走，D2 ⑤ 二次判定命中）同样回成功形态，重试安全。
+ * 错误形态：revoked:false + error 六码闭集（见 RevokeMessageErrorCode）。六码不走统一
+ * error envelope——它们是设计内领域回执（renderer 按码驱动置灰 / toast / 刷新建议，
+ * D8 呈现列），不是传输错误；判别字段 revoked。
+ */
+export type SessionRevokeMessageReply =
+  | { sessionId: string; revoked: true; content: string }
+  | { sessionId: string; revoked: false; error: RevokeMessageErrorCode }
+
+// ── delivery 域具名 DTO（投递所有权内核 D5/D7，u-contracts 契约先行）────────────
+
+/**
+ * session.delivery 帧条目（D5）：{clientUuid, preview, state, lane}。
+ *
+ * - clientUuid = 内核条目 id（出站裸标记身份源 D2，resync/收养判重锚 D5②）。
+ * - preview 为文本预览（runtime 侧可能截断），**禁止当全文消费**——草稿恢复一律用
+ *   delivery.cancel / delivery.drain reply 的全文 + segments 快照（D7/ADR-0043）。
+ * - state 四态（无 'cancelled'——D5③ 规定 cancelled 不投影；delivered 有投影窗口，
+ *   仅最近 deliveredWindow 条完整条目出现）。
+ * - state/lane 字面量与 @zhushanwen/session-delivery 内核状态机类型（DeliveryEntryState
+ *   D9① / DeliveryLane D1）逐字面对齐。两包互不依赖（session-delivery 是零依赖包，
+ *   shared 亦不反向依赖），对齐义务由 runtime 适配层赋值兼容守卫（session.occupancy
+ *   帧与 event-interpreter 同款先例）——改动任一侧必须同步另一侧，错位在 u3a 装配处
+ *   编译期红。
+ */
+export interface DeliveryFrameEntry {
+  clientUuid: string
+  preview: string
+  state: 'queued' | 'in-flight' | 'delivered' | 'failed'
+  lane: 'direct' | 'steer' | 'queued'
+}
+
+/** delivery.submit 的 reply（D5）：初始 lane 与条目态（同帧条目字段语义，见 DeliveryFrameEntry）。 */
+export interface DeliverySubmitReply {
+  clientUuid: string
+  state: DeliveryFrameEntry['state']
+  lane: DeliveryFrameEntry['lane']
+}
+
+/** delivery.cancel 的 reply：cancelled=false = 不可撤（已 delivered 或收回失败，§3.4——条目由对账器下轮兜底，前端提示「已投递不可撤」）。 */
+export interface DeliveryCancelReply {
+  clientUuid: string
+  cancelled: boolean
+  /** 撤销成功时携带完整文本与 segments 快照（D7/ADR-0043），供文本回输入框草稿（V9）。 */
+  content?: string
+  /** 撤销成功时携带原始 segments 快照（提交时随 delivery.submit 上网、runtime 按 clientUuid 持有；rebuild/adopt 等无提交快照的条目不带）。 */
+  segments?: Segment[]
+  /** cancelled=false 时的人类可读原因。 */
+  reason?: string
+}
+
+/** delivery.drain 的 reply 条目（D7/ADR-0043）：全文 + segments 快照，草稿恢复最小单元。 */
+export interface DeliveryDrainReplyEntry {
+  clientUuid: string
+  content: string
+  /** 提交时随 delivery.submit 上网的原始 segments 快照（无提交快照的条目不带）。 */
+  segments?: Segment[]
+}
+
+/** delivery.drain 的 reply（D10/V11）：全部被回收条目（发送序），forceQuit 后文本回草稿。 */
+export interface DeliveryDrainReply {
+  sessionId: string
+  entries: DeliveryDrainReplyEntry[]
+}
+
+/** delivery.resync 的 reply（D5）：deduped = 命中终态判重记录（D5② tombstone）的 uuid；存留条目权威状态经 session.delivery 快照帧恢复（last-value 单源）。 */
+export interface DeliveryResyncReply {
+  sessionId: string
+  deduped: string[]
+}
+
 /**
  * 计划产物文档元数据（plan 模式重设计 D1）。
  * 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 同形（值形状镜像惯例）——
@@ -1586,12 +1771,6 @@ export interface ServerMessageMapBase {
   // miss noop 幂等（P-11：旧版前端未消费此帧时无异常回退）。
   'plugin:permissionRequestExpired': { pluginId: string } & Record<string, unknown>
   'model.list': { models: ModelInfo[] }
-  // model:capabilityDrift：runtime 能力注册表在线对账（reconcileModelCapabilities）发现
-  // 配置聚合与 pi 合并清单漂移时经 setCapabilityDriftSink 广播（drift 项已同步记 runtime
-  // 日志，本帧供前端后续消费——U6 先接通上报通道）。drifts 形状与 runtime
-  // model-capability.ts CapabilityDrift 结构兼容（shared 不依赖 runtime，结构同构即协议兼容，
-  // 与 SessionTraceHeaderPayload 先例同款）。
-  'model:capabilityDrift': { drifts: ModelCapabilityDriftItem[] }
   'config.sessions': { groups: SessionGroup[] }
   /** config.systemPrompt：reply + broadcast + 初始推送三用。corrupted=true 表示磁盘配置损坏已回退默认（SR5）。 */
   'config.systemPrompt': { config: SystemPromptConfig; corrupted?: boolean }
@@ -1615,13 +1794,14 @@ export interface ServerMessageMapBase {
   'message.stream_warn': { sessionId: string; content: string }
   // send.rejected：runtime 预检拦截（busy 时发送），防御性反馈通道（D-006）。
   // 语义：操作拒绝，区别于 message.error（流终止）。不进对话流，不翻流式态。
-  // useChat 收到后回滚 pendingSend + toast。
+  // [HISTORICAL] 「useChat 收到后回滚 pendingSend + toast」「renderer 按 reason 分型兜底入队」
+  // 的消费腿已全部退役（u3b：内核排队取代拒绝）——renderer 零 handler。
+  // [u5a 退役裁决] 条目仍存续：**唯一生产方 = runtime `bash-dispatcher.ts` reserveBashSlot**
+  // （bash 运行中/压缩中执行 bash 的预检拒绝；bash 通道属设计 §1.3 Out of Scope，本次不动），
+  // 用户消息路径的 busy 预检已随 u2 退役（排队取代拒绝）。协议条目与生产方同批删除。
   // reason（session-occupancy-send-closure D2）：'busy' = runtime 预检（generating/bash 忙，存量）；
-  // 'compacting' | 'processing' = pi 侧拒绝经 runtime 转译——前者 manual 压缩中（pi 抛
-  // "Cannot submit a prompt while compaction is in progress"），后者 auto 压缩 / post-run settling
-  // 窗口（pi 抛 "Agent is already processing"）。renderer 按 reason 分型兜底入队（'busy' 兼容存量）。
-  // clientUuid：renderer 发送时经 message.send RPC 透传的客户端幂等 id，拒绝广播原样带回——
-  // 兜底 handler 见 uuid 命中 defer 队列已有条目即跳过重入队（flush 来源消歧，防双条目双投递）。
+  // 'compacting' | 'processing' = pi 侧拒绝经 runtime 转译（用户消息路径已退役，保留字段语义）。
+  // clientUuid：客户端幂等 id 原样带回（message.send 透传），消歧发送来源。
   'send.rejected': { sessionId: string; reason: 'busy' | 'compacting' | 'processing'; message: string; clientUuid?: string }
   // session.exited：pi 进程异常退出（区别于 message.error 的「单次消息失败」）。
   // 前端 routeInbound 收到后标记 session 为 dead 态 + 插入 error 消息 + toast。
@@ -1701,10 +1881,27 @@ export interface ServerMessageMapBase {
   // threshold 模式 turn 内自动压缩则 generating+compacting）。session.compacting/compacted 事件
   // 保留（浮层 reason 文案源），isCompacting 改由本消息派生。
   'session.occupancy': { sessionId: string; turn: 'idle' | 'dispatching' | 'generating' | 'settling'; compacting: boolean; bash: boolean }
+  // session.delivery（投递所有权内核 D5/D9②）：条目状态全量快照（展示投影），state topic
+  // last-value 语义（message-bus 不入 ring，重连/切回经 stateSnapshot 回放自动恢复）。
+  // 数据源 = 内核 entries() 投影视图：活跃条目（queued/in-flight/failed）全量 + delivered
+  // 仅最近 deliveredWindow 条完整条目；cancelled 不投影（D5③）——稳态帧体积有界。
+  // QueueBubble 的单一数据源（D7）。
+  'session.delivery': { sessionId: string; entries: DeliveryFrameEntry[] }
+  // session.revokeMessage（消息撤回设计 D2/D8）：revokeMessage RPC 的 reply（与 request 同名，
+  // payload 消费型）。形状见 SessionRevokeMessageReply——成功 = revoked:true + 消息原文
+  //（草稿回填，D7）；错误 = revoked:false + error 六码闭集（D8 错误规格表 SSOT）。
+  'session.revokeMessage': SessionRevokeMessageReply
+  // ── delivery 域四 RPC reply（投递所有权内核 D5，u-contracts；与 ClientMessageMap request 同名配对）──
+  'delivery.submit': DeliverySubmitReply
+  'delivery.cancel': DeliveryCancelReply
+  'delivery.drain': DeliveryDrainReply
+  'delivery.resync': DeliveryResyncReply
   // session.subscribe（wave:runtime-wiring）：session.subscribe RPC 的 reply payload（IF6 契约）。
   // snapshot：订阅时刻 bus ring 内当前事件序列（元素为带 seq 的 ServerMessage），renderer 据此 reconcile。
-  // stateSnapshot：6 个 state topic（commands/context/subagents/workflows/state_changed/occupancy）
-  //   的 last-value 数组拷贝（wave:remove-bandaids 新增，后补 state_changed/occupancy 两键）。
+  // stateSnapshot：全部 state topic 的 last-value 数组拷贝——快照来源清单不在此枚举，以
+  //   packages/runtime/src/services/message-bus/message-bus.ts 的 STATE_TYPE_KEY_MAP（静态
+  //   typeKey）与 STATE_TYPE_KEY_PAYLOAD_DERIVED（载荷派生 typeKey）为权威；新增 state topic
+  //   登记进表即自动进快照，无需同步本注释。
   //   让 renderer subscribe 后一次性把 commands/context/subagents 的
   //   当前状态灌入对应 store（dispatch 到 events 通道 → routeInbound 兜底分支 applyRecords），
   //   替代 selectSession/submitFirstMessage 内的主动拉取 RPC 兜底。stateSnapshot 与 snapshot 独立：
@@ -1920,12 +2117,6 @@ export interface ServerMessageMapBase {
    * 已记录列表（RPC 契约要求 pending Promise 必然 resolve）。可选字段，正常路径缺省。
    */
   'workspace.recentList': { records: RecentWorkspaceRecord[]; degraded?: boolean }
-  /**
-   * workspace.bareDetected：workspace.detectBare 的向后兼容 reply（isBare/wsRoot/barePath）。
-   * degraded=true：探测降级形态（cwd 无效 / detector 抛错）——isBare:false 是兜底值而非
-   * 真实探测结果，hint 携带恢复指引。可选字段，真实探测路径缺省。
-   */
-  'workspace.bareDetected': { isBare: boolean; wsRoot: string; barePath: string; degraded?: boolean; hint?: string }
   /** workspace.detected：workspace.detect 的三态 reply。 */
   'workspace.detected': {
     mode: 'bare-workspace' | 'plain-repo' | 'not-repo'
@@ -2046,13 +2237,15 @@ export interface ServerMessageMapBase {
     preview?: string
   }
   // session.skillNotice：composer 多 skill 注入的发送前处理结果提示广播（composer-multi-skill-injection
-  // D6/D8，范式对齐 session.forkNotice 的 session 级 push）。时机：message-dispatcher 三入口
-  // （sendPrompt/steerMessage/followUpMessage）在 client.prompt/steer/followUp 成功之后，
+  // D6/D8，范式对齐 session.forkNotice 的 session 级 push）。时机：prompt 受理成功之后由发布方
   // 按注入器产出的 notices 逐条发布——消息已真正入队，提示描述的注入形态才成立；prompt 失败
-  // 路径不发（message.error 已覆盖）。renderer（u5）据此呈现 toast + 消息内联提示。
-  // clientUuid：sendPrompt 路径从发送文本中的 `<!--taiji:msg:<uuid>-->` 标记提取（非纯文本消息才有，
-  // 与 pi 侧 msg-id-mapper TAG_MATCH 同款全文正则）；steer/followUp 路径无 sidecar/clientUuid
-  // 链路，字段缺省（类型如实标注可选，u5 消费时按可空处理）。
+  // 路径不发（message.error 已覆盖）。现役发布点共三处，共享 publishSkillNotices
+  // （skill-notice-publisher.ts）：投递内核 deliverOne（session-delivery-registry.ts）与
+  // subagentAction 的 message/start 两分支（session-records.ts）。renderer（u5）据此呈现
+  // toast + 消息内联提示。
+  // clientUuid：由 publishSkillNotices 从发送文本中的 `<!--taiji:msg:<uuid>-->` 标记提取
+  // （MSG_ID_TAG_RE 全文正则）；deliverOne 通路的标记文本命中提取，subagentAction 定向文本
+  // 无该标记，字段缺省（类型如实标注可选，u5 消费时按可空处理）。
   // skills：受影响 skill 名列表（去重，保持首次出现顺序）；marker_malformed 的残缺片段无法
   // 可靠提取 name 时可为空数组。
   'session.skillNotice': {
@@ -2208,12 +2401,9 @@ export interface ServerMessageMapBase {
   // ── 消息流控制（W11+ 审查补充类型）──
   'message.auto_retry_start': { sessionId: string; attempt: number; maxAttempts?: number; delayMs?: number; errorMessage?: string }
   'message.auto_retry_end': { sessionId: string; success: boolean; attempt: number; finalError?: string }
-  // message.queue_update：队列深度变化广播。pendingMessageCount = steering + followUp 条数和
-  //（event-adapter 翻译恒附，W8 补声明——renderer 窄读取此前读不到该字段类型；帧内值 =
-  // pi 队列深度的推送投影，与 get_state().pendingMessageCount 同公式同源、数值恒等，
-  // PR #185 MF2 定口径：renderer 对账直读帧值，原「queue 实例快照权威、帧仅事件即时信号」
-  // 口径作废——queue ReplicatedState 实例已撤销）。
-  'message.queue_update': { sessionId: string; steering?: string[]; followUp?: string[]; pendingMessageCount: number }
+  // [u5a 退役] message.queue_update 条目已删除（R1-A5）：UI 消费随 u3b/u5a 退役后帧零消费方
+  //（core registry / store / mock 消费腿均已删），队列深度展示归 session.delivery 快照帧（D7
+  // QueueBubble 单一数据源）。runtime 生产腿（event-adapter queue_update 翻译）同批删除。
   // message.bashStart：bash 执行开始广播（与 message.bashResult 对称的实时反馈）。
   // excludeFromContext 透传自请求（前端据此渲染「不进上下文」标记）。
   'message.bashStart': {
@@ -2224,7 +2414,8 @@ export interface ServerMessageMapBase {
   }
   // message.bashResult：bash 执行结束广播（含 output/exitCode/cancelled 等终态字段）。
   // exitCode 用 number|null：pi 返回 number|undefined，runtime 广播时统一 `?? null` 防 JSON 丢值。
-  // cancelled=true 也可能是 abortBash 触发的兜底终态（与 abort 广播 message.complete{aborted} 对称）。
+  // cancelled=true 是真实 abort 结果（pi bash-executor abort 返回 cancelled 而非 throw，
+  // 与 pi recordBashResult 落盘同位同值）。
   'message.bashResult': {
     sessionId: string
     command: string
@@ -2236,6 +2427,14 @@ export interface ServerMessageMapBase {
     timestamp: number
     /** pi truncated 时的完整输出文件路径（前端按需读取全文） */
     fullOutputPath?: string
+  }
+  // message.bashAborted：abortBash 兜底终态（msg-pipeline-debloat D4-3 独立帧化，原哨兵形态
+  // bashResult{command:''} 退役）。abort_bash 无论 pi 是否确认都广播——前端只清 executingBash
+  // 执行态（UI 中止态），无 pi 文件对应物不产 entry；真实 abort 结果仍经 message.bashResult
+  // {cancelled:true} 照常发布（sendBash await 返回路径），与本帧职责正交。
+  'message.bashAborted': {
+    sessionId: string
+    timestamp: number
   }
   // pi CustomMessage 注入（扩展经 pi.sendMessage 向对话流注入结构化通知，如 subagent-bg-notify）。
   // event-adapter 把 pi message_start{role:'custom', customType, content, details} 翻译为此帧。
@@ -2386,8 +2585,6 @@ export type ServerMessageUnion = {
  * 换模）必须 payload 消费型引用携带生效值字段的 `XxxMutationReply` 具名类型，禁 void；
  * 分支二（后端原样存储）reply 携带回显字段，确需 ack 型的须在 ADR-0065 豁免清单登记理由。
  * 新增 mutation 必须同步登记 runtime 契约测试 MUTATION_RPC_REGISTRY（不入清单即测试红）。
- *
- * 运行时漂移防御（RequestReplyMap 双向校验）在后续 wave，此处仅一级映射。
  */
 export interface ReplyPayloadMap {
   // ── payload 消费型（value 引用 ServerMessageMap[<reply type>]）──
@@ -2456,6 +2653,9 @@ export interface ReplyPayloadMap {
   'session.getPlanState': ServerMessageMap['session.planState']
   'session.getWorkflows': ServerMessageMap['session.workflows']
   'session.history': ServerMessageMap['session.history']
+  // session.revokeMessage（消息撤回设计 D2/D3）：payload 消费型——renderer 读 revoked/content
+  //（成功 → 重拉 session.history + 草稿回填，reply 即成功信号）与 error 六码（按 D8 呈现列分流）。
+  'session.revokeMessage': ServerMessageMap['session.revokeMessage']
   'config.sessions': ServerMessageMap['config.sessions']
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request 同名
   'session.importCandidates': ServerMessageMap['session.importCandidates']
@@ -2482,7 +2682,6 @@ export interface ReplyPayloadMap {
   'workspace.record': ServerMessageMap['workspace.recentList']
   'project.load': ServerMessageMap['project.loaded']
   'project.save': void                  // ack 型（保存成功即 resolve）
-  'workspace.detectBare': ServerMessageMap['workspace.detected']
   'workspace.detect': ServerMessageMap['workspace.detected']
   'worktree.create': ServerMessageMap['worktree.created']
   'config.getTerminalConfig': ServerMessageMap['config.terminalConfig']
@@ -2568,12 +2767,11 @@ export interface ReplyPayloadMap {
   'git.unstage': void             // reply message.status
   'message.abort': void           // reply message.status
   // message.bash / message.abortBash：reply message.status（sent/rejected/aborted ack）。
-  // bash 是 fire-and-forget 型——实际结果经 message.bashStart/bashResult 广播通道推回（不走 reply）。
+  // bash 是 fire-and-forget 型——实际结果经 message.bashStart/bashResult 广播通道推回
+  //（abortBash 的兜底终态走 message.bashAborted，不走 reply）。
   'message.bash': void             // reply message.status
   'message.abortBash': void        // reply message.status
-  'message.follow_up': void       // reply message.status
   'message.send': void            // reply message.status
-  'message.steer': void           // reply message.status
   'model.switch': ServerMessageMap['model.switched'] // reply model.switched（回执修型 U6：transport 层在
             // model.switch case 消费 switchModel 返回的生效值（session-service 读回 get_state 生效模型）
             // 拆解回填 provider/modelId，对齐 C-pi-13 改状态 RPC 一律回生效值）
@@ -2595,10 +2793,11 @@ export interface ReplyPayloadMap {
   // payload 消费型——renderer 读 snapshot 做 reconcile（订阅时刻 bus ring 内当前事件序列，
   // 元素为带 seq 的 ServerMessage），记 lastSeq 作为后续 gap 检测基线；gap=true 标记本次
   // snapshot 因 ring 容量溢出存在缺口（renderer 需全量重拉而非增量 backfill）。
-  // stateSnapshot（wave:remove-bandaids）：6 个 state topic（commands/context/subagents/
-  // workflows/state_changed/occupancy）的 last-value 数组拷贝，让 renderer
-  // subscribe 后一次性把 commands/context/subagents 的当前状态灌入对应 store，替代主动拉取兜底。
-  'session.subscribe': { snapshot: ServerMessage[]; stateSnapshot: ServerMessage[]; lastSeq: number; gap?: boolean }
+  // stateSnapshot（wave:remove-bandaids）：全部 state topic 的 last-value 数组拷贝——快照来源
+  // 清单以 packages/runtime/src/services/message-bus/message-bus.ts 的 STATE_TYPE_KEY_MAP /
+  // STATE_TYPE_KEY_PAYLOAD_DERIVED 为权威，让 renderer subscribe 后一次性把
+  // commands/context/subagents 的当前状态灌入对应 store，替代主动拉取兜底。
+  'session.subscribe': ServerMessageMap['session.subscribe']
   // session.unsubscribe（runtime-message-bus wave:protocol-seq）：取消订阅，ack 型。
   // 与 session.handoff/session.abortHandoff/message.abort 同模式，renderer register<void>
   // 不读 reply payload，取消订阅的副作用由后续 live 事件停发体现。
@@ -2615,13 +2814,20 @@ export interface ReplyPayloadMap {
   'session.switch': ServerMessageMap['session.switched'] // reply session.switched（R-11 瘦身：无 messages；前端 register<void> 不读 payload）
   'session.workflowAction': void  // reply session.workflowActionDone
   // ── scoped model 域──
-  'config.setScopedModels': { scopedModels: string[] }  // reply config.scopedModels（去重保序后结果）
+  'config.setScopedModels': ServerMessageMap['config.scopedModels']  // reply config.scopedModels（去重保序后结果）
   // ── backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）──
   // 三个 RPC 全部 payload 消费型（renderer 读回执字段）；backgroundTask:updated 是 session 级
   // 广播（非 RPC reply），不走本映射——消费侧经 events 通道订阅。
   'backgroundTask.list': ServerMessageMap['backgroundTask.tasks']
   'backgroundTask.output': ServerMessageMap['backgroundTask.outputResult']
   'backgroundTask.kill': ServerMessageMap['backgroundTask.killResult']
+  // ── delivery 域（投递所有权内核 D5，u-contracts 契约先行；行为实现归 u1/u2/u3a）──
+  // 四 RPC 全部 payload 消费型，reply 与 request 同名（backgroundTask 域同款模式）。
+  // 同步失败走 error envelope（内核 FIFO 无界接受，正常路径无拒绝 reply 态——D5）。
+  'delivery.submit': ServerMessageMap['delivery.submit']
+  'delivery.cancel': ServerMessageMap['delivery.cancel']
+  'delivery.drain': ServerMessageMap['delivery.drain']
+  'delivery.resync': ServerMessageMap['delivery.resync']
   // rollingRestart.status（crash-forensics-and-watchdog §3.3 D5，u7b）：只读查询 reply
   //（payload 消费型；与 request 同名——session.subscribe / backgroundTask.list 同款模式）。
   'rollingRestart.status': ServerMessageMap['rollingRestart.status']
@@ -2666,10 +2872,9 @@ export interface ReplyPayloadMap {
 /**
  * session 级 view-ready 快照 DTO（W13 data-source-governance P2.1，D7 原则）。
  *
- * 单 session 的 owner 权威投影：runtime 侧 state 话题（state_changed/queue_update/
- * commands/context/subagents-类，W12 起）publish 以 owner 数据源为基准（ReplicatedState
- * 实例快照，或事件帧投影——如 queue_update 的 pendingMessageCount，见 message.queue_update
- * 注释，PR #185 MF2 定口径），本 DTO 是这些 payload 的
+ * 单 session 的 owner 权威投影：runtime 侧 state 话题（state_changed/commands/context/
+ * subagents-类，W12 起）publish 以 owner 数据源为基准（ReplicatedState 实例快照，或事件
+ * 帧投影），本 DTO 是这些 payload 的
  * renderer 渲染字段并集——renderer 收到后直接渲染，零 merge/normalize/推导。core
  * createSessionStore.applySnapshot 以此为单 session 快照入参（session store 唯一写入口）。
  *
@@ -2682,7 +2887,7 @@ export interface ReplyPayloadMap {
  * - label：session.renamed（pi 改名）/ config.sessions（整表 SessionSummary.label）
  * - status：SessionStatus 六态（session.exited → dead 等）
  * - modelId / thinkingLevel：session.state_changed
- * - pendingMessageCount：message.queue_update（帧 = pi 队列深度推送投影，与 get_state 同公式同源，PR #185 MF2 撤销 W8 实例后帧即权威）
+ * - pendingMessageCount：pi 队列深度（steering + followUp 条数和，与 get_state 同公式同源）
  * - commands：session.commands（pi 扩展命令清单，形状与广播 payload 一致）
  * - tokenCount：SessionSummary.tokenCount（磁盘扫描占位值 0，守卫对象）
  *
@@ -2698,9 +2903,9 @@ export interface SessionViewSnapshot {
   status?: SessionStatus
   /** 当前模型复合串 "provider/modelId"（Composer 工具条）。 */
   modelId?: string
-  /** 思考等级（前端 6 级枚举串）。undefined = 未设置，快照省略不覆盖。 */
+  /** 思考等级（PI_THINKING_LEVELS 全集 7 值枚举串）。undefined = 未设置，快照省略不覆盖。 */
   thinkingLevel?: string
-  /** 队列深度（steering + followUp 条数和，QueueBubble 计数）。 */
+  /** 队列深度（steering + followUp 条数和）。 */
   pendingMessageCount?: number
   /** slash 命令清单（Composer 补全数据源）。 */
   commands?: ServerMessageMap['session.commands']['commands']

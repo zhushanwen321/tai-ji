@@ -8,45 +8,17 @@
  * mock 策略（design-review mockStrategyNote）：provide mock ChatViewDeps（vi.fn 各回调），
  * 零真 store。
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ChatView, ChatViewDepsKey } from '@taiji/ui'
-import type { ChatViewDeps } from '@taiji/ui'
+import { ChatView } from '@taiji/ui'
 import type { Message } from '@taiji/shared'
-
-/** 构造 mock ChatViewDeps（所有字段 vi.fn 或合理默认，零真 store） */
-function createMockDeps(): ChatViewDeps {
-  return {
-    getMessages: () => [],
-    isActive: () => false,
-    isHandingOff: () => false,
-    getChangeSetStatus: () => undefined,
-    isExpanded: () => false,
-    toggleExpand: vi.fn(),
-    collapse: vi.fn(),
-    abortBash: vi.fn(),
-    editAndResend: vi.fn(),
-    onFork: vi.fn(),
-    onForkAsk: vi.fn(),
-    onHandoff: vi.fn(),
-    onHandoffAsk: vi.fn(),
-    openDrawer: vi.fn(),
-    onFileClick: vi.fn(),
-    onAmbiguousSelect: vi.fn(),
-    loadFileCandidates: vi.fn().mockResolvedValue([]),
-    renderMarkdown: vi.fn().mockResolvedValue([]),
-    renderMermaid: vi.fn().mockResolvedValue({ svg: '' }),
-    toMarkdown: vi.fn().mockReturnValue(''),
-  }
-}
+import { mockChatProvide } from './helpers'
 
 function mountChatView(messages: Message[]) {
   return mount(ChatView, {
     props: { messages, sessionId: 's1', isSessionActive: false },
     global: {
-      provide: {
-        [ChatViewDepsKey as symbol]: createMockDeps(),
-      },
+      provide: mockChatProvide(),
     },
   })
 }

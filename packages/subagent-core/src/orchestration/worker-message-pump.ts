@@ -300,7 +300,7 @@ export function forgetRunResumedBudget(runId: string): void {
 /**
  * 计算 run 的剩余时间预算（ms）[race-F3 → D10 活跃段算式]。
  *
- * 账本消费（修复 docs/todo/subagent-workflow-issues.md §1.1 后可达）：resume 重建
+ * 账本消费（修复 已归档设计档案 §1.1 后可达）：resume 重建
  * spec 时把生效预算写入 spec.budgetTimeMs（resume-run.ts rebuildRunFromRecord——
  * 显式 options 覆盖 / 未提供则继承 run-created 帧），故带账目的复活 run 在错误重试
  * 重建时走到本函数并消费账本：按 activeElapsedMs + 复活后墙钟折算（搁置时间不计）。

@@ -28,7 +28,7 @@ import type { DoneReason, WorkerLogEntry } from "./types.ts";
  * 宿主经 record 流 fold 重建 run（`jsonl-run-store.loadAll` / core `rebuildRunFromRecord`），
  * 重建面覆盖 reason/calls/trace 与 spec；**budget 计数与 errorLogs 不重建**
  *（前者只有终态条目带 usedTokens 可 seed，后者无持久面）——读到 0 值/空数组属已知形态，
- * 不是「状态丢失 = 内存态权威」（详见 docs/todo/subagent-workflow-issues.md §2.1）。
+ * 不是「状态丢失 = 内存态权威」（详见 已归档设计档案 §2.1）。
  *
  * [D6(a)] 生命周期轴（status 字段）已退役：终局判定唯一走进程内终局记录注册表
  * （isRunSettled / settledRecordOf），展示投影走 runSummary（三态投影词表）——

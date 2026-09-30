@@ -41,8 +41,9 @@ import type {
   RenameMode,
   UsageStatsResult,
   UiLocale,
+  Segment,
 } from '@taiji/shared'
-import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS } from '@taiji/shared'
+import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
 import { fixtureProviders, fixtureSkills, fixtureAgents, fixtureExtensions, toCandidate } from './settings-data'
 import { MOCK_MODELS, mockModelToInfo, FILE_CANDIDATES } from './composer-data'
@@ -258,7 +259,6 @@ const DEFAULT_TIMING: Timing = {
   toolGap: 90, // tool_call 各阶段间隔（进度感）
   fileChangesGap: 120, // accumulating → ready 间隔
   retryGap: 800, // auto_retry_start → end 间隔（让指示位可见）
-  steerDrain: 1500, // steer/followUp 入队 → 模拟 drain（pi 投递）间隔，让 QueueBubble 可见
   bashDelay: 2000, // bashStart→bashResult 间隔（loading 态可见）
 }
 /** 运行时时序（对象引用共享给 run-send-stream/branches——注入走原地 merge，消费点运行时读） */
@@ -298,18 +298,31 @@ const cancelled = new Set<string>()
 /** 运行中的 setTimeout 句柄，resolve 后自动移除，避免 Set 无限增长 */
 // taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock 定时器句柄集合
 const timers = new Set<ReturnType<typeof setTimeout>>()
+// session.delivery mock 帧的 preview 截断长度（展示投影字段，非全文——与真实 runtime 帧同语义）。
+// 值 SSOT = @taiji/shared DELIVERY_PREVIEW_MAX_CHARS（msg-pipeline-debloat D5-5 下沉：
+// runtime transport 与本 mock 同源同值，原「注释互指」双定义删除）。
+
 /**
- * mock 队列状态镜像（steer/followUp pending）。
- * steer/followUp 入队时 push + emit 全量 queue_update（QueueBubble 渲染），
- * 延迟后 splice 模拟 drain（pi 投递）+ emit 全量（移除该项）→ drainPending 取 segments + appendUser（complete user 进对话流）。
+ * 已广播 in-flight 投递条目、且流式序列尚未走完的 session（abort 终态帧依据）。
+ * submitDelivery 登记、runSendStream settle（complete 或 aborted 中断退出）时清除——
+ * abort 据此区分「有在飞投递可补终态帧」与「流已自然走完」（后者 abort 不补帧，保持既有行为）。
  */
-// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock 队列缓冲
-const mockQueues = new Map<string, { steering: string[]; followUp: string[] }>()
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：在飞投递条目跟踪（abort 终态帧依据，非 GUI 数据）
+const inflightDeliveryEntries = new Map<string, { clientUuid: string; preview: string }>()
+
+/** 在飞 sleep 的 resolve 句柄（__clearTimers teardown 时统一 settle，防在飞 runSendStream 永久悬挂在 await sleep） */
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：在飞 sleep resolve 句柄（teardown settle 用，非 GUI 数据）
+const pendingSleepResolves = new Set<() => void>()
 
 /** 清理所有未触发的 timer（测试 teardown / 模块卸载时调用） */
 export function __clearTimers(): void {
   for (const t of timers) clearTimeout(t)
   timers.clear()
+  // 清 timer 的同时 settle 全部挂起的 sleep promise：只 clearTimeout 不 settle 会把在飞的
+  // runSendStream 永久悬挂在 await sleep（promise 泄漏）；settle 后其下一轮 cancelled
+  // 检查静默退出，teardown 不悬挂。
+  for (const resolve of [...pendingSleepResolves]) resolve()
+  pendingSleepResolves.clear()
 }
 
 let idSeq = 0
@@ -320,59 +333,34 @@ function nextId(prefix: string): string {
 }
 
 function emit(sessionId: string, msg: ServerMessageUnion): void {
-  streamHandlers.get(sessionId)?.forEach((h) => h(msg))
-}
-
-/** emit 全量 queue_update（steering + followUp 镜像），驱动 QueueBubble 渲染 */
-function emitQueueUpdate(sessionId: string): void {
-  const q = mockQueues.get(sessionId)
-  // 发副本而非活引用：drain splice 会原地改 q.steering，按引用 emit 会让订阅方
-  // 已收到的入队帧事后被改空（快照语义）
-  const steering = q?.steering.length ? [...q.steering] : undefined
-  const followUp = q?.followUp.length ? [...q.followUp] : undefined
-  // 两者皆空时仍 emit（空 payload），让 store 侧 queue_update handler delete queueState
-  // pendingMessageCount = steering + followUp 条数和（W8 契约必填，对齐 event-adapter 翻译口径）
-  emit(sessionId, {
-    type: 'message.queue_update',
-    payload: {
-      sessionId,
-      steering,
-      followUp,
-      pendingMessageCount: (q?.steering.length ?? 0) + (q?.followUp.length ?? 0),
-    },
-  })
-}
-
-/**
- * steer/followUp drain（pi 投递）后补发 assistant turn（m4）：message_start → text_delta×N → complete。
- *
- * drain 只 emit queue_update 会让用户消息入流后无后续 assistant——dangling streaming bubble
- * （demo / E2E 下 steer 后看不到回复）。补一个最小 assistant turn 让 mock 与真实 pi 行为同构
- * （pi drain steer 后开新一轮 LLM turn，发 message_start + 流式回复 + complete）。
- * 内容简化为固定文案逐字流式，让 streaming 气泡可见；全程检查 cancelled。
- */
-async function emitDrainAssistantTurn(sessionId: string, steeredText: string): Promise<void> {
-  const messageId = nextId('m')
-  emit(sessionId, { type: 'message.message_start', id: messageId, payload: { sessionId, messageId } })
-  await sleep(TIMING.startGap)
-  const reply = `（mock）已处理："${steeredText}"`
-  for (const ch of reply) {
-    if (cancelled.has(sessionId)) return
-    await sleep(TIMING.chunk)
-    emit(sessionId, { type: 'message.text_delta', id: messageId, payload: { sessionId, messageId, delta: ch } })
+  const handlers = streamHandlers.get(sessionId)
+  if (!handlers) return
+  for (const h of handlers) {
+    try {
+      h(msg)
+    } catch (e) {
+      // 订阅者异常隔离，语义对齐 real 侧 events.ts safeForEach（M4）：单 handler 抛错不中断
+      // 同通道其余订阅者，也不穿透 runSendStream——否则 mock 流以「无 complete/error 帧」的
+      // 合法形态中断，isGenerating 卡至 pendingSend 30s 兜底才复位。console.error 留痕非静默吞。
+      console.error(`[mock] stream handler threw for session ${sessionId}, continuing dispatch:`, e)
+    }
   }
-  if (cancelled.has(sessionId)) return
-  await sleep(TIMING.done)
-  emit(sessionId, { type: 'message.complete', id: messageId, payload: { sessionId, messageId, stopReason: 'complete' } })
 }
+
+// [u5a 退役] mock 的 `queue_update` 镜像链（mockQueues / emitQueueUpdate /
+// emitDrainAssistantTurn + TIMING.steerDrain）已随 `chat.steer` / `chat.followUp` 删除——
+// 该链唯一职责是喂 QueueBubble 的 queue_update 快照（u3b 退役该消费腿，u3c 转 session.delivery
+// 单源），删除后 mock 轨的提交链路只剩 submitDelivery（与真实 runtime 同通道）。
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const t = setTimeout(() => {
       timers.delete(t)
+      pendingSleepResolves.delete(resolve)
       resolve()
     }, ms)
     timers.add(t)
+    pendingSleepResolves.add(resolve)
   })
 }
 
@@ -764,6 +752,16 @@ const sessionImpl = {
     const normalized = raw.replace(/^sess_/, '').replace(/_/g, '-')
     return { sessionId: normalized, targetPath: `/mock/taiji/sessions/zcode-demo/${normalized}.jsonl` }
   },
+
+  /**
+   * [U5 消息撤回] mock 无 runtime 编排（无树回退），协议合法最小响应 = no-mapping 错误臂
+   * （cancelDelivery mock 同款「不伪造事实」哲学：撤回能力在 mock 模式如实不可用，
+   * 消费侧按 D8 no-mapping 呈现兜底 toast，不谎报撤销成功）。
+   */
+  async revokeMessage(sessionId: string, _targetId: string): Promise<import('@taiji/shared').SessionRevokeMessageReply> {
+    await sleep(TIMING.ack)
+    return { sessionId, revoked: false, error: 'no-mapping' }
+  },
 }
 
 // [G4] 参数全等断言：mock session 任一方法少参/多参/错型（含 override 参数）在此行编译失败
@@ -836,27 +834,19 @@ const chatImpl = {
     return { messages, truncated: false, loadedTurns: messages.filter((m) => m.role === 'user').length, totalTurnsEstimate: messages.filter((m) => m.role === 'user').length }
   },
 
-  // options.clientUuid（session-occupancy D2）：mock 不模拟 send.rejected，参数仅签名对齐
-  // real 域（门面三元要求两侧同构），运行时忽略。
+  /**
+   * [降级 stub] u3b 统一提交后生产零调用，协议镜像保留：core 编排侧发送链已收敛
+   * submitDelivery（useChat / new-task 全走 composable 提交通路），本方法仅剩门面三元
+   * 同构要求（G4 锚定成员存在、签名不动）。实现降为 ack stub——不再驱动流式序列
+   * （mock 流式演示由 submitDelivery 承担，同一 runSendStream 流）。
+   */
   async send(
-    sessionId: string,
-    text: string,
+    _sessionId: string,
+    _text: string,
     _images?: Array<{ data: string; mimeType: string }>,
     _options?: { clientUuid?: string },
   ): Promise<void> {
-    cancelled.delete(sessionId)
-    // ack 语义：仅模拟 pi 接收命令，立即 resolve；流式序列 fire-and-forget（不 await）。
-    // isStreaming 由 message_start/complete 事件驱动（useChat.ts），不受此处 resolve 时机影响，
-    // 故 Composer :disabled=isSending 不会全程 true，流式中可 steer/retry。
     await sleep(TIMING.ack)
-    void runSendStream(sessionId, text, {
-      nextId,
-      emit,
-      sleep,
-      pushSession,
-      isCancelled: (s) => cancelled.has(s),
-      TIMING,
-    })
   },
 
   /**
@@ -876,6 +866,21 @@ const chatImpl = {
   async abort(sessionId: string): Promise<void> {
     // 标记取消，send 循环下一轮检测后退出
     cancelled.add(sessionId)
+    // [mock 投递状态机不悬挂] abort 时对在飞的 submitDelivery 条目补发终态帧：state 取
+    // 'failed'——shared DeliveryFrameEntry 投影态无 'aborted'（D5③ cancelled 不投影），
+    // 'delivered' 会伪造送达事实，'failed' 是唯一诚实表达「未送达」的投影终态。仅当该
+    // session 有未走完的投递流时发（流已自然走完的 session abort 保持既有行为，不补帧）。
+    const delivery = inflightDeliveryEntries.get(sessionId)
+    if (delivery) {
+      inflightDeliveryEntries.delete(sessionId)
+      emit(sessionId, {
+        type: 'session.delivery',
+        payload: {
+          sessionId,
+          entries: [{ clientUuid: delivery.clientUuid, preview: delivery.preview, state: 'failed', lane: 'direct' }],
+        },
+      })
+    }
     emit(sessionId, {
       type: 'message.complete',
       payload: { sessionId, stopReason: 'aborted' },
@@ -914,61 +919,89 @@ const chatImpl = {
 
   async abortBash(sessionId: string): Promise<void> {
     await sleep(TIMING.ack)
+    // 兜底终态走独立帧 message.bashAborted（msg-pipeline-debloat D4-3，与 runtime
+    // BashDispatcher.abortBash 同形）——原 bashResult{command:''} 哨兵形态已退役。
     emit(sessionId, {
-      type: 'message.bashResult',
-      payload: {
-        sessionId,
-        command: '',
-        output: '',
-        exitCode: null,
-        cancelled: true,
-        truncated: false,
-        excludeFromContext: false,
-        timestamp: Date.now(),
-      },
+      type: 'message.bashAborted',
+      payload: { sessionId, timestamp: Date.now() },
     })
   },
 
   /**
-   * steer：ack 后推 queue_update（steering 入队），延迟后模拟 drain（pi 投递：splice 移除 + emit）。
-   * 入队 → QueueBubble 渲染；drain → drainPending 取 segments + appendUser（complete user 进对话流）。
-   * drain 时机简化为固定延迟（真实 pi 在「当前回合工具调用结束后、下次 LLM 调用前」）。
+   * [投递所有权内核 u3b] 统一提交 mock：与 send 同流（ack + 流式序列），并广播一条
+   * session.delivery 快照帧（direct/in-flight）供前端投影/morph 链路在 mock 模式可见。
+   * 内核状态机不在 mock 层复刻（真实形态由 runtime 侧 u2/u3a 提供）——mock 只保证
+   * 「提交 → 快照帧 → 回执」三帧在 mock 模式可达。
    */
-  async steer(sessionId: string, text: string): Promise<void> {
+  async submitDelivery(
+    sessionId: string,
+    text: string,
+    clientUuid: string,
+    _images?: Array<{ data: string; mimeType: string }>,
+    _segments?: Segment[],
+  ): Promise<ServerMessageMap['delivery.submit']> {
+    cancelled.delete(sessionId)
     await sleep(TIMING.ack)
-    const q = mockQueues.get(sessionId) ?? { steering: [], followUp: [] }
-    q.steering.push(text)
-    mockQueues.set(sessionId, q)
-    emitQueueUpdate(sessionId)
-    // 延迟模拟 drain（投递后移除该项）+ 补发 assistant turn（m4：避免 dangling streaming bubble）
-    const t = setTimeout(() => {
-      const cur = mockQueues.get(sessionId)
-      if (!cur || cancelled.has(sessionId)) return
-      const idx = cur.steering.indexOf(text)
-      if (idx !== -1) cur.steering.splice(idx, 1)
-      emitQueueUpdate(sessionId)
-      void emitDrainAssistantTurn(sessionId, text)
-    }, TIMING.steerDrain)
-    timers.add(t)
+    emit(sessionId, {
+      type: 'session.delivery',
+      payload: {
+        sessionId,
+        entries: [{ clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS), state: 'in-flight', lane: 'direct' }],
+      },
+    })
+    // 登记在飞条目（abort 终态帧依据）：流序列 settle（complete 或 cancelled 退出）即清，
+    // 避免流走完后 session 再 abort 被误补 failed 帧。
+    inflightDeliveryEntries.set(sessionId, { clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS) })
+    // fire-and-forget 补 .catch 留痕（红线 1）：内部异常不落成无痕 unhandled rejection
+    void runSendStream(sessionId, text, {
+      nextId,
+      emit,
+      sleep,
+      pushSession,
+      isCancelled: (s) => cancelled.has(s),
+      TIMING,
+    })
+      .catch((e) => {
+        console.error('[mock] send stream failed:', e)
+      })
+      .finally(() => {
+        if (inflightDeliveryEntries.get(sessionId)?.clientUuid === clientUuid) {
+          inflightDeliveryEntries.delete(sessionId)
+        }
+      })
+    return { clientUuid, state: 'in-flight', lane: 'direct' }
   },
 
-  /** followUp：ack 后推 queue_update（followUp 入队），延迟后模拟 drain。语义同 steer。 */
-  async followUp(sessionId: string, text: string): Promise<void> {
+  /**
+   * [u5a 收编] cancel / drain / resync 三方法的 mock 实现（前身由 renderer 侧
+   * `api/domains/delivery.ts` 自建临时分支承担——core mock 缺方法致门面三元无法取自 mock，
+   * u5a 补齐后回归「门面只做 real/mock 切换」的既有范式）。
+   *
+   * 协议合法最小响应，**不伪造投递事实**：mock 无服务端内核（条目只由 submitDelivery 帧
+   * 产生，无收回语义），故——
+   * - cancel：cancelled=false → UI 走「已投递不可撤」文案（§3.4 合法分支），不谎报撤销成功、
+   *   不产生「草稿凭空回填」的假象；
+   * - drain：空条目集 → forceQuit 提示 N=0 不显示（与「队列本就没有条目」同形）；
+   * - resync：空去重集 → 无本地残留可去重。
+   */
+  async cancelDelivery(sessionId: string, clientUuid: string): Promise<ServerMessageMap['delivery.cancel']> {
     await sleep(TIMING.ack)
-    const q = mockQueues.get(sessionId) ?? { steering: [], followUp: [] }
-    q.followUp.push(text)
-    mockQueues.set(sessionId, q)
-    emitQueueUpdate(sessionId)
-    const t = setTimeout(() => {
-      const cur = mockQueues.get(sessionId)
-      if (!cur || cancelled.has(sessionId)) return
-      const idx = cur.followUp.indexOf(text)
-      if (idx !== -1) cur.followUp.splice(idx, 1)
-      emitQueueUpdate(sessionId)
-      void emitDrainAssistantTurn(sessionId, text)
-    }, TIMING.steerDrain)
-    timers.add(t)
+    return { clientUuid, cancelled: false, reason: `mock: no kernel backing for ${sessionId}` }
   },
+
+  async drainDelivery(sessionId: string): Promise<ServerMessageMap['delivery.drain']> {
+    await sleep(TIMING.ack)
+    return { sessionId, entries: [] }
+  },
+
+  async resyncDelivery(sessionId: string, _clientUuids: string[]): Promise<ServerMessageMap['delivery.resync']> {
+    await sleep(TIMING.ack)
+    return { sessionId, deduped: [] }
+  },
+
+  // [u5a/MF-1-8 退役] `steer` / `followUp` mock 镜像已删除（连同其 queue_update 镜像链，见上方注）：
+  // u3b 统一 submit 化后 core 编排零调用，u3c 后队列区数据源 = session.delivery 帧，本链
+  // 无任何消费方。协议侧 message.steer / message.follow_up 条目已随 runtime 通路删除同批退役。
 
   streamSubscribe(sessionId: string, handler: (msg: ServerMessageUnion) => void): () => void {
     let set = streamHandlers.get(sessionId)
@@ -1003,6 +1036,15 @@ const providersSubWithScoped = makeMockSubscription(() => ({
 const skillsSub = makeMockSubscription(() => fixtureSkills.map((s) => ({ ...s })))
 const agentsSub = makeMockSubscription(() => fixtureAgents.map((a) => ({ ...a })))
 const defaultsSub = makeMockSubscription(() => 'Anthropic/claude-sonnet-4.5')
+
+/** 向 skills 订阅者广播最新 fixture 快照（模拟 runtime 动作后广播；同 broadcastProviders 先例） */
+function broadcastSkills(): void {
+  skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+}
+/** 向 agents 订阅者广播最新 fixture 快照（同 broadcastProviders 先例） */
+function broadcastAgents(): void {
+  agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+}
 
 // ADR-0021 §1 discovery 加载路径配置（v2 嵌套 project/global，UI 层 A 勾选/↑↓ 用）。
 // preset 直接引 shared SSOT（PRESET_*_DIRS），scope 按路径特征拆（相对→project / ~或/开头→global），
@@ -1244,7 +1286,7 @@ const configImpl = {
   async scanSkills(_sources: string[]): Promise<ScannedSkillInfo[]> {
     await sleep(TIMING.ack)
     // 扫描后广播当前 skills 快照（runtime scan 后会刷新 config.skills）
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
     return []
   },
   // W2（ADR-0051）：按 session cwd 拉 project skill。mock 返回空（mock 模式无真实文件系统扫描）。
@@ -1267,24 +1309,24 @@ const configImpl = {
     await sleep(TIMING.ack)
     mockSkillDirs = dirs.map((d) => ({ ...d }))
     skillDirsSub.broadcast(buildMockDirConfigs(mockSkillDirs, PRESET_SKILL_DIRS_PROJECT, PRESET_SKILL_DIRS_GLOBAL).map((d) => ({ ...d })))
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
   },
   async setSkill(skill: SkillInfo) {
     await sleep(TIMING.ack)
     const idx = fixtureSkills.findIndex((s) => s.id === skill.id)
     if (idx >= 0) fixtureSkills[idx] = { ...skill }
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
   },
   async deleteSkill(skillId: string) {
     await sleep(TIMING.ack)
     const idx = fixtureSkills.findIndex((s) => s.id === skillId)
     if (idx >= 0) fixtureSkills.splice(idx, 1)
-    skillsSub.broadcast(fixtureSkills.map((s) => ({ ...s })))
+    broadcastSkills()
   },
   /** [G4 锚定 ConfigDomain] 返回类型补齐（同 scanSkills——real 返回 ScannedAgentInfo[]，mock 无扫描返回空） */
   async scanAgents(_sources: string[]): Promise<ScannedAgentInfo[]> {
     await sleep(TIMING.ack)
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
     return []
   },
   /**
@@ -1332,7 +1374,7 @@ const configImpl = {
     await sleep(TIMING.ack)
     mockAgentDirs = dirs.map((d) => ({ ...d }))
     agentDirsSub.broadcast(buildMockDirConfigs(mockAgentDirs, PRESET_AGENT_DIRS_PROJECT, PRESET_AGENT_DIRS_GLOBAL).map((d) => ({ ...d })))
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
   },
   /** Phase 4 目录级管道写入（v2 scope 穿越）：更新 mock extensionDirs + 广播目录配置（靠后端权威值推回） */
   async setExtensionDirs(dirs: SkillDirConfig[]) {
@@ -1344,13 +1386,13 @@ const configImpl = {
     await sleep(TIMING.ack)
     const idx = fixtureAgents.findIndex((a) => a.id === agent.id)
     if (idx >= 0) fixtureAgents[idx] = { ...agent }
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
   },
   async deleteAgent(agentId: string) {
     await sleep(TIMING.ack)
     const idx = fixtureAgents.findIndex((a) => a.id === agentId)
     if (idx >= 0) fixtureAgents.splice(idx, 1)
-    agentsSub.broadcast(fixtureAgents.map((a) => ({ ...a })))
+    broadcastAgents()
   },
   // ── 系统提示词配置（W6 FR-4/FR-5，与 real domains/config 同构）──
   // mock 持内存默认配置；setSystemPrompt 广播 config.systemPrompt，与 runtime 行为一致。
@@ -1445,12 +1487,17 @@ export const model: ModelDomain = modelImpl
 
 const extensionsSub = makeMockSubscription(() => fixtureExtensions.map((e) => ({ ...e })))
 
+/** 向 extensions 订阅者广播最新 fixture 快照（同 broadcastProviders 先例） */
+function broadcastExtensions(): void {
+  extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+}
+
 export const extension = {
   onExtensions: (h: GlobalHandler<unknown>) => extensionsSub.subscribe(h),
   /** 主动重拉（对齐 runtime extension.list → 广播 config.extensions 刷新） */
   async scan() {
     await sleep(TIMING.ack)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   async toggle(name: string, enabled: boolean): Promise<{ extensions: ReturnType<typeof toCandidate>[] }> {
     await sleep(TIMING.ack)
@@ -1461,7 +1508,7 @@ export const extension = {
     // （toCandidate 覆盖 ExtensionInfo 必需字段，类型可赋给 Ref<ExtensionInfo[]>）。
     // broadcast 保留以模拟连接级 onExtensions 推送（幂等，值一致）。
     const snapshot = fixtureExtensions.map(toCandidate)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
     return { extensions: snapshot }
   },
   /**
@@ -1476,13 +1523,13 @@ export const extension = {
     if (!fixtureExtensions.some((e) => e.name === name)) {
       fixtureExtensions.push({ name, version: '0.0.0', description: `mock-installed: ${name}`, enabled: true, tools: [] })
     }
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   async uninstall(name: string) {
     await sleep(TIMING.ack)
     const idx = fixtureExtensions.findIndex((e) => e.name === name)
     if (idx >= 0) fixtureExtensions.splice(idx, 1)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   /** dir/git 多步第一步：返回发现的候选（mock 把现有 fixture 当候选） */
   async installDir(_path: string) {
@@ -1496,7 +1543,7 @@ export const extension = {
   /** 多步第二步：选中即视为已装（mock 已在 fixture 中，仅广播刷新） */
   async finishInstall(_tempDir: string, _selected: string[]) {
     await sleep(TIMING.ack)
-    extensionsSub.broadcast(fixtureExtensions.map((e) => ({ ...e })))
+    broadcastExtensions()
   },
   async cancelInstall(_tempDir: string) {
     await sleep(TIMING.ack)
@@ -1814,10 +1861,6 @@ const workspaceImpl = {
   async record(_cwd: string): Promise<import('@taiji/shared').RecentWorkspaceRecord[]> {
     // Mock record：模拟写入后返回最新列表（与 listRecent 一致，简化实现）
     return listRecentRecords()
-  },
-  // detectBare：mock 恒返非 bare（landing 态 isBare 演示由 real 轨驱动，mock 轨无需真实检测）
-  async detectBare(_cwd: string): Promise<{ isBare: boolean; wsRoot: string; barePath: string }> {
-    return { isBare: false, wsRoot: '', barePath: '' }
   },
   // detect：mock 恒返 not-repo（三态检测，real 轨驱动）
   async detect(_cwd: string): Promise<import('@taiji/shared').ServerMessageMap['workspace.detected']> {

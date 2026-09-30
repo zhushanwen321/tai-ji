@@ -27,6 +27,10 @@
  *      机器信号；此检查把「登记表声称有注解」变成可机检的失败。注解采集走
  *      `git grep`（索引级，毫秒级），无 git 上下文时降级跳过。
  *
+ * 退出码契约：0=全部通过；1=存在违规；2=检查器配置故障（DOC_MODULE_MAP 登记路径
+ * 缺失/不可访问——守卫自身输入坏了，恢复动作指向映射表，与「检查不通过」可区分）。
+ * 不可读文件/目录不静默：计入 skipped 台账，报告尾部一行显形（违规判定可能少报）。
+ *
  * 书写约定：反引号 = 现行代码符号。历史性提及已删除/改名的符号（如描述事故成因）
  * 不带反引号——带反引号即按现状引用检查，这正是本守卫的判定口径。
  *
@@ -91,7 +95,7 @@ const EXPORTED_DECL_KINDS = ['FunctionDeclaration', 'ClassDeclaration', 'Interfa
 // 不带反引号或加入下方豁免表（须附理由）。
 
 /** 检查范围：回归基线 SSOT + 测试手册目录（递归 .md） */
-const PATH_REF_FILES = ['TEST-STRATEGY.md']
+const PATH_REF_FILES = ['docs/TEST-STRATEGY.md']
 const PATH_REF_DIRS = ['docs/testing']
 
 /** 反引号 span 内的仓库相对文件路径候选（必须带扩展名，防误伤命令行目录与散文）。
@@ -213,14 +217,23 @@ function extractExportedSymbols(sourceFile) {
   return { symbols, objKeys }
 }
 
-/** 汇总一组源码路径的合法符号表 */
+/** 汇总一组源码路径的合法符号表；登记路径缺失时按检查器配置故障 exit 2（≠违规码 1） */
 function buildSymbolTable(modulePaths) {
   const exported = new Set()
   const objKeys = new Set()
   const files = []
   for (const p of modulePaths) {
     const abs = path.join(PROJECT_ROOT, p)
-    if (statSync(abs).isDirectory()) files.push(...collectTsFiles(abs))
+    let st
+    try {
+      st = statSync(abs)
+    } catch {
+      console.error(`[doc-symbol-drift] 检查器配置故障：DOC_MODULE_MAP 登记路径不存在或不可访问: ${p}`)
+      console.error('恢复动作：更新 scripts/check-doc-symbol-drift.mjs 的 DOC_MODULE_MAP 映射表')
+      console.error('（改为现行路径；文档或模块已删除时移除该条目）。此为守卫自身配置错误，非文档违规。')
+      process.exit(2)
+    }
+    if (st.isDirectory()) files.push(...collectTsFiles(abs))
     else files.push(abs)
   }
   for (const f of files) {
@@ -262,8 +275,11 @@ function extractDocCandidates(mdText) {
 
 // ─── 主流程 ─────────────────────────────────────────────────────────
 
-/** 收集路径检查域的文档（明列文件 + 目录递归 .md） */
-function collectPathRefDocs() {
+/**
+ * 收集路径检查域的文档（明列文件 + 目录递归 .md）。
+ * @param {{files: number, dirs: number}} skipped 不可读跳过台账（调用方传入，报告尾部显形）
+ */
+function collectPathRefDocs(skipped) {
   const docs = []
   for (const rel of PATH_REF_FILES) docs.push(rel)
   for (const dirRel of PATH_REF_DIRS) {
@@ -282,20 +298,23 @@ function collectPathRefDocs() {
       }
       walk(absDir)
     } catch {
-      // 目录不存在：映射随之调整，不算错误
+      // 目录不存在/不可读：不算错误（映射随之调整），但计入 skipped 显形——
+      // 该目录下的文档此次未参与检查，违规判定可能少报
+      skipped.dirs++
     }
   }
   return docs
 }
 
-/** 路径存在性检查：返回悬空引用列表 */
-function checkPathRefs() {
+/** 路径存在性检查：返回悬空引用列表（单文档读失败计入 skipped，不静默） */
+function checkPathRefs(docs, skipped) {
   const missing = []
-  for (const docRel of collectPathRefDocs()) {
+  for (const docRel of docs) {
     let mdText
     try {
       mdText = readFileSync(path.join(PROJECT_ROOT, docRel), 'utf-8')
     } catch {
+      skipped.files++
       continue
     }
     const lines = mdText.split('\n')
@@ -370,6 +389,7 @@ const COMMENT_DOC_REF_EXEMPT = new Map([
   ['packages/renderer/src/__tests__/composables/markdown-filepath.test.ts::docs/My', 'markdown 链接解析测试叙述中的空格切断反例（docs/My Document.md），非仓库路径引用'],
   ['apps/electron/main/diagnostics/export-diagnostic-bundle.ts::summary.md', '运行时生成物文件名（诊断 zip 内置 summary.md，代码自身生成），非 docs 引用'],
   ['*::aggregated.md', 'zsw review-fix-loop 工作流脚本（.zcode/workflow-drafts，gitignored 产物目录）自述其产物文件名，非本仓 docs 引用'],
+  ['*::delivery-ownership-kernel.md', '投递所有权内核设计文档为 dev-flow 工作流产物（.tmp/dev-flow/，按规不入库）；决策沉淀 ADR-0074，设计章节锚点（§/D 编号）指工作盘文档'],
 ])
 
 /**
@@ -446,10 +466,13 @@ export function extractDocRefsInComment(commentText) {
  * Form B 裸 .md 文件名的合法名字集：git ls-files '*.md'（读 index——提交预览语义：
  * staged 删除的文档名字即失效，文档删除提交当场暴露引用悬空；staged 新增即时合法）。
  * git 不可用时回退 docs/ 递归 + 仓库根一级（降级覆盖，.agents 等非 docs 树收不进）。
+ * @param {{files: number, dirs: number}} [skipped] 不可读跳过台账（可选，测试注入用）
  */
-export function buildDocsMdNameIndex() {
+export function buildDocsMdNameIndex(skipped) {
   const names = new Set()
-  const res = spawnSync('git', ['ls-files', '-z', '--', '*.md'], { cwd: PROJECT_ROOT, encoding: 'utf-8' })
+  // timeout：控制面单请求秒级上界（git index.lock 竞争等异常不给 pre-commit 无界挂起）；
+  // 超时 spawnSync 返回 status null → 走下方回退分支，与 git 不可用同路径降级
+  const res = spawnSync('git', ['ls-files', '-z', '--', '*.md'], { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 })
   if (res.status === 0 && typeof res.stdout === 'string') {
     for (const f of res.stdout.split('\0')) {
       if (f) names.add(path.basename(f))
@@ -458,11 +481,11 @@ export function buildDocsMdNameIndex() {
   }
   const walk = (abs) => {
     let entries
-    try { entries = readdirSync(abs) } catch { return }
+    try { entries = readdirSync(abs) } catch { if (skipped) skipped.dirs++; return }
     for (const name of entries) {
       const full = path.join(abs, name)
       let st
-      try { st = statSync(full) } catch { continue }
+      try { st = statSync(full) } catch { if (skipped) skipped.files++; continue }
       if (st.isDirectory()) {
         if (name === 'node_modules') continue
         walk(full)
@@ -478,18 +501,18 @@ export function buildDocsMdNameIndex() {
   return names
 }
 
-/** 全仓源码文件收集（staged 含 .md 删除时用；剪枝 FULL_SCAN_PRUNE_DIRS） */
-function collectAllSourceFiles() {
+/** 全仓源码文件收集（staged 含 .md 删除时用；剪枝 FULL_SCAN_PRUNE_DIRS；不可读计入 skipped） */
+function collectAllSourceFiles(skipped) {
   const out = []
   const walk = (abs, rel) => {
     let entries
-    try { entries = readdirSync(abs) } catch { return }
+    try { entries = readdirSync(abs) } catch { skipped.dirs++; return }
     for (const name of entries.sort()) {
       if (FULL_SCAN_PRUNE_DIRS.has(name)) continue
       const full = path.join(abs, name)
       const relChild = rel ? `${rel}/${name}` : name
       let st
-      try { st = statSync(full) } catch { continue }
+      try { st = statSync(full) } catch { skipped.files++; continue }
       if (st.isDirectory()) walk(full, relChild)
       else if (COMMENT_REF_SRC_EXTS.has(path.extname(name))) out.push({ rel: relChild, abs: full })
     }
@@ -526,12 +549,13 @@ function skipReason({ ref, lineText, precedingText, rel, exempt }) {
  * @param {Array<{rel: string, abs: string}>} files
  * @param {Set<string>} docsMdNames Form B 合法名字集
  * @param {Map<string, string>} exempt 豁免表（缺省 = COMMENT_DOC_REF_EXEMPT；测试注入用）
+ * @param {{files: number, dirs: number}} [skipped] 不可读跳过台账（可选，测试注入用）
  */
-export function checkCommentDocRefs(files, docsMdNames, exempt = COMMENT_DOC_REF_EXEMPT) {
+export function checkCommentDocRefs(files, docsMdNames, exempt = COMMENT_DOC_REF_EXEMPT, skipped) {
   const violations = []
   for (const { rel, abs } of files) {
     let text
-    try { text = readFileSync(abs, 'utf-8') } catch { continue }
+    try { text = readFileSync(abs, 'utf-8') } catch { if (skipped) skipped.files++; continue }
     const ranges = rel.endsWith('.vue') ? extractVueCommentRanges(text) : extractJsCommentRanges(text)
     const seenPerFile = new Set()
     for (const [s, e] of ranges) {
@@ -557,9 +581,10 @@ export function checkCommentDocRefs(files, docsMdNames, exempt = COMMENT_DOC_REF
   return violations
 }
 
-/** staged 文件清单（指定 diff-filter）；git 不可用返回 null（无 git 上下文时跳过本检查面） */
+/** staged 文件清单（指定 diff-filter）；git 不可用返回 null（无 git 上下文时跳过本检查面）。
+ *  timeout：控制面单请求秒级上界，超时（status null）按 git 不可用同路径降级显形。 */
 function gitStagedFiles(diffFilter) {
-  const res = spawnSync('git', ['diff', '--cached', '--name-only', '-z', `--diff-filter=${diffFilter}`], { cwd: PROJECT_ROOT, encoding: 'utf-8' })
+  const res = spawnSync('git', ['diff', '--cached', '--name-only', '-z', `--diff-filter=${diffFilter}`], { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 })
   if (res.status !== 0 || typeof res.stdout !== 'string') return null
   return res.stdout.split('\0').filter(Boolean)
 }
@@ -568,7 +593,7 @@ function gitStagedFiles(diffFilter) {
  * 第三检查入口：staged 源码/测试文件注释扫描；staged 含 .md 删除时扩为全仓
  * （被删文档可能被任意源码注释引用，引用面无法局部化）。
  */
-function checkStagedCommentDocRefs() {
+function checkStagedCommentDocRefs(skipped) {
   const staged = gitStagedFiles('ACMR')
   const deleted = gitStagedFiles('D')
   if (staged === null || deleted === null) return { available: false }
@@ -576,14 +601,14 @@ function checkStagedCommentDocRefs() {
   const deletedMd = deleted.filter((f) => f.endsWith('.md'))
   const fullScan = deletedMd.length > 0
   const files = fullScan
-    ? collectAllSourceFiles()
+    ? collectAllSourceFiles(skipped)
     : stagedSrc.map((rel) => ({ rel, abs: path.join(PROJECT_ROOT, rel) }))
   return {
     available: true,
     fullScan,
     deletedMd,
     fileCount: files.length,
-    violations: checkCommentDocRefs(files, buildDocsMdNameIndex()),
+    violations: checkCommentDocRefs(files, buildDocsMdNameIndex(skipped), COMMENT_DOC_REF_EXEMPT, skipped),
   }
 }
 
@@ -610,10 +635,6 @@ function collectSymbolDrifts() {
   return drifts
 }
 
-/**
- * 三层违规报告（符号 / 路径 / 注释）：有违规即 exit 1（pre-commit/CI 只吃退出码与
- * stderr 文本），无违规直接返回由调用方出 OK 行；三段前缀与「恢复动作：」footer 逐字保留。
- */
 /** 报告段 1：符号漂移（无违规返回 false） */
 function reportSymbolDrifts(drifts) {
   if (drifts.length === 0) return false
@@ -672,33 +693,45 @@ function reportDataOwnerAnchors(dataOwner) {
   return ownerMissing.length > 0 || ownerUnknown.length > 0
 }
 
+/** skipped 台账收尾显形（0 时静默）：计数为 0 即无输出，不打扰正常通过流 */
+function reportSkipped(skipped) {
+  const n = skipped.files + skipped.dirs
+  if (n === 0) return
+  console.error(`[doc-symbol-drift] 注意：${n} 个不可读文件/目录被跳过未参与检查（${skipped.files} 文件 / ${skipped.dirs} 目录）——违规判定可能少报`)
+}
+
 /**
  * 四段违规报告编排：任一段有违规则全量打印（各段自带内部 footer），最后统一 footer
- * + exit 1（pre-commit/CI 只吃退出码与 stderr 文本）。段顺序与文案逐字保留。
+ * + skipped 显形行 + exit 1（pre-commit/CI 只吃退出码与 stderr 文本）。段顺序与文案逐字保留。
  */
-function reportFailures({ drifts, missingPaths, commentScan, dataOwner }) {
+function reportFailures({ drifts, missingPaths, commentScan, dataOwner, skipped }) {
   const anyPrinted = [
     reportSymbolDrifts(drifts),
     reportMissingPaths(missingPaths),
     reportCommentRefs(commentScan),
     reportDataOwnerAnchors(dataOwner),
   ].some(Boolean)
-  if (!anyPrinted) return
+  if (!anyPrinted) {
+    reportSkipped(skipped)
+    return
+  }
   console.error('')
   console.error('恢复动作：该符号/路径已被删除或改名——同步修正文档（改用现行导出名/现路径或文字描述），')
   console.error('或在 scripts/check-doc-symbol-drift.mjs 登记：符号走 DOC_MODULE_MAP 映射，路径走 PATH_REF_EXEMPT（须附理由）。')
+  reportSkipped(skipped)
   process.exit(1)
 }
 
 /** 零违规收尾行（注释面扫描模式随 staged 上下文变化） */
-function reportOk(commentScan, dataOwner) {
+function reportOk(commentScan, dataOwner, pathRefDocs, skipped) {
   const commentPart = commentScan.available
     ? `注释 docs 引用（${commentScan.fullScan ? '全仓' : 'staged'} ${commentScan.fileCount} 文件）零悬空`
     : '注释 docs 引用（无 git staged 上下文，跳过）'
   const ownerPart = dataOwner.available
     ? `数据源登记锚点（${dataOwner.claims.length} 条「声明处」声明 × 源码 ${dataOwner.annotationCount} 个注解）零悬空`
     : '数据源登记锚点（无 git 上下文，跳过）'
-  console.log(`[doc-symbol-drift] OK：${Object.keys(DOC_MODULE_MAP).length} 个映射文档 × 源码导出表，零悬空符号；${collectPathRefDocs().length} 个活跃测试文档 × 路径存在性，零悬空引用；${commentPart}；${ownerPart}`)
+  console.log(`[doc-symbol-drift] OK：${Object.keys(DOC_MODULE_MAP).length} 个映射文档 × 源码导出表，零悬空符号；${pathRefDocs.length} 个活跃测试文档 × 路径存在性，零悬空引用；${commentPart}；${ownerPart}`)
+  reportSkipped(skipped)
 }
 
 // ── 检查面 5：数据源登记锚点反向校验（登记表 → 源码注解）──────────────────
@@ -731,12 +764,13 @@ export function extractDataOwnerAnnotations(text) {
   return out
 }
 
-/** git grep 采集全仓注解（索引级毫秒级；无 git 上下文降级 available:false）。 */
+/** git grep 采集全仓注解（索引级毫秒级；无 git 上下文降级 available:false）。
+ *  timeout：控制面单请求秒级上界，超时（status null）按 git 不可用同路径降级显形。 */
 function collectDataOwnerAnnotations() {
   const res = spawnSync(
     'git',
     ['grep', '-h', '-o', '-E', '@data-owner[[:space:]]+#[0-9]+', '--', 'packages', 'apps', 'extensions'],
-    { cwd: PROJECT_ROOT, encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024 },
+    { cwd: PROJECT_ROOT, encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024, timeout: 30_000 },
   )
   if (res.status === 1) return { available: true, entries: new Set() } // 有 git、零命中
   if (res.status !== 0 || typeof res.stdout !== 'string') return { available: false, entries: new Set() }
@@ -764,12 +798,14 @@ function checkDataOwnerAnchors() {
 }
 
 function main() {
+  const skipped = { files: 0, dirs: 0 }
+  const pathRefDocs = collectPathRefDocs(skipped)
   const drifts = collectSymbolDrifts()
-  const missingPaths = checkPathRefs()
-  const commentScan = checkStagedCommentDocRefs()
+  const missingPaths = checkPathRefs(pathRefDocs, skipped)
+  const commentScan = checkStagedCommentDocRefs(skipped)
   const dataOwner = checkDataOwnerAnchors()
-  reportFailures({ drifts, missingPaths, commentScan, dataOwner })
-  reportOk(commentScan, dataOwner)
+  reportFailures({ drifts, missingPaths, commentScan, dataOwner, skipped })
+  reportOk(commentScan, dataOwner, pathRefDocs, skipped)
 }
 
 // 缺省 CLI 形态：全量符号/路径检查 + staged 注释 docs 引用检查（不依赖 cwd）。

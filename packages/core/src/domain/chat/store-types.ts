@@ -14,15 +14,6 @@ export interface RetryState {
 }
 
 /**
- * 消息队列运行态（W06-B）。auto_retry 与 steer/follow_up 排队无关；
- * queue_update 反映 pi 队列里的 steering（steer 排队）和 followUp（follow-up 排队）。
- */
-export interface QueueState {
-  steering?: string[]
-  followUp?: string[]
-}
-
-/**
  * finalizeSession 收口原因（与 system-arch §5 reason 字段对齐）。
  *
  * reason → 终态映射（finalizeSession 内部不变式）：

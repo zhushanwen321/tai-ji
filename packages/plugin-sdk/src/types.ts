@@ -1,30 +1,37 @@
 /**
  * 插件系统契约类型 —— single source of truth（D28 方向反转，2026-09-05）。
  *
- * 本文件是 taiji 插件契约的权威定义：面向插件作者对外发布（第三方插件作者无需
- * 装整个 monorepo）；除 Bridge* 回包形状与 GUI 协议段定义源在
- * @zhushanwen/extension-protocol（见下方 D4 单源化说明）外无运行时依赖。
+ * 本文件是 taiji 插件契约的权威定义：仅 workspace 内消费（本包 private，无 npm
+ * 发布链，插件作者不安装本包）；无运行时依赖。类型依赖仅两处，均为 workspace 包
+ * （private 与否见各自 package.json）：
+ * @zhushanwen/extension-protocol（Bridge* 回包形状与 GUI 协议段定义源，见下方
+ * D4 单源化说明）与 @taiji/shared（SendPromptReason 回执词表，msg-pipeline-debloat
+ * D4-6）。
  *
  * 消费方（runtime 侧薄壳，保持其既有导入面不变）：
  *   packages/runtime/src/services/plugin-service/plugin-types.ts          （主域 + Bridge/AgentAPI/Tool 等）
  *   packages/runtime/src/services/plugin-service/plugin-types/hook-types.ts（Hook 域）
  *   descriptor / rpc 子域亦经本文件（SDK）re-export 消费，无本地副本。
  *
- * 修改契约：直接编辑本文件（对外类型名/结构零变化承诺——published API 兼容）。
+ * 修改契约：直接编辑本文件（类型名/结构零变化承诺——runtime 薄壳 re-export 依赖
+ * 导入面稳定）。
  *
  * 历史：2026-09-05 前本文件由 packages/plugin-sdk/scripts/sync-types.sh 从
  * runtime 的 plugin-types 自动生成（runtime 为真相源的镜像方向）；D28 审计
  * 记录了当时的刻意重复理由。方向反转为「SDK 为 SSOT、runtime re-export」后
  * sync-types.sh 已删除（生成方向不再存在），依赖方向 = runtime → SDK 单向。
  * D4 单源化（ext-simplify-16）后 Bridge* 回包形状定义源上收
- * @zhushanwen/extension-protocol（唯一定义点，下方 re-export 消费），本文件
- * 不再零依赖，但除该类型依赖外仍无运行时依赖。
+ * @zhushanwen/extension-protocol（唯一定义点，下方 re-export 消费）。
  */
 
 // D4 单源化：Bridge* 回包形状唯一定义源 = @zhushanwen/extension-protocol。
 // import 供本文件内 ToolExecuteHandler / update(guiTree) 等类型引用；export 保持既有
 // `BridgeInterceptResponse`/`BridgeToolExecuteResponse` 导入面不变。
 import type { BridgeInterceptResponse, BridgeToolExecuteResponse, GuiComponent } from '@zhushanwen/extension-protocol'
+
+// sendMessage 回执 reason 词表单点 = @taiji/shared（msg-pipeline-debloat D4-6：原五处
+// 手写词表归一；shared 与本包同为 private workspace 包，无 npm 发布链）。
+import type { SendPromptReason } from '@taiji/shared'
 
 /**
  * GUI 渲染协议核心类型定义（单源化：定义源 = @zhushanwen/extension-protocol）。
@@ -36,7 +43,7 @@ import type { BridgeInterceptResponse, BridgeToolExecuteResponse, GuiComponent }
  * extension-protocol/src/core/types.ts 逐字手工镜像的 167 行副本（另有一套文本探针
  * 守卫测试）；依赖方向本就允许 plugin-sdk → extension-protocol（Bridge* 回包形状
  * 已如此），故改单行 re-export，镜像副本与守卫测试一并删除。导出名与类型面零变化
- * （published API 兼容承诺不变）。
+ * （SDK 类型面零变化承诺不变）。
  *
  * @see docs/architecture/extension-gui-protocol.md
  */
@@ -508,16 +515,18 @@ export interface Phase1AgentAPI {
     /**
      * [plugin-header-action-modal-points D6/u5b] 写路径回执：sessionId 必填（E15——缺省
      * 在 runtime 层拒绝 INVALID_SESSION_ID）；requireCommand 为写路径前置原子校验的命令名
-     * （restore 后、busy 预检前校验，未命中拒发 reason:'command-missing'——命令串永不漏进模型）；
+     * （restore 后校验，未命中拒发 reason:'command-missing'——命令串永不漏进模型）；
      * present 但空串/全空白在 runtime 入口拒绝（INVALID_REQUIRE_COMMAND）。
-     * 回执 reason 词表：运行面分支只看 accepted，reason 是诊断/文案面。
+     * 回执 reason 词表 = @taiji/shared 的 SendPromptReason 单点（D4-6）：busy/compacting/bash
+     * 退役值已删（「排队取代拒绝」，运行面只产 command-missing/hook-blocked/error）；分支
+     * 只看 accepted，reason 是诊断/文案面。
      */
     sendMessage(params: {
       sessionId: string
       role: 'user' | 'system'
       content: string
       requireCommand?: string
-    }): Promise<{ accepted: boolean; reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error' }>
+    }): Promise<{ accepted: boolean; reason?: SendPromptReason }>
     /**
      * [AP-4/u2d] 条目镜像读：live only（无活跃 pi 进程抛 SESSION_NOT_ACTIVE），
      * customType 服务端精确过滤，sinceEntryId 游标增量。
@@ -628,7 +637,7 @@ export type WorkerToHostMessage =
 // ── 通用类型 ─────────────────────────────────────────────────────
 
 // Disposable 在本文件定义（SDK 为 SSOT，runtime 经 taiji-plugin-sdk re-export 消费）。
-// @taiji/shared 无同名定义；本文件是对外发布契约面（除 Bridge* 回包形状经
+// @taiji/shared 无同名定义；本文件是插件契约面（除 Bridge* 回包形状经
 // @zhushanwen/extension-protocol 外无依赖），无需跨包提升。
 /**
  * @stable — 可释放资源契约（Disposable 是插件生命周期的基础设施）。

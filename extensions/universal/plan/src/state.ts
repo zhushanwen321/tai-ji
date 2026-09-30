@@ -11,6 +11,7 @@ import { PLAN_STATE_CUSTOM_TYPE, readLifecycleState, readResumeHint, transition,
 import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
+import { filterActivePath } from "@zhushanwen/pi-session-path";
 
 const logger = getLogger("pi-plan");
 
@@ -494,9 +495,14 @@ function applyPlanStateEntry(state: PlanState, data: LegacyPlanEntryData | undef
   state.lastSubmitReviewDocsFingerprint = readDocsFingerprint(entryData);
 }
 
+// 活跃路径裁剪（leafId 沿 parentId 回溯，撤回后被撤子树的 plan-state entry 不进
+// 重建输入）收敛于 @zhushanwen/pi-session-path 单一实现（四包同构副本收编，防御
+// 语义与回退口径见该包 filterActivePath 注释；runtime 侧 plan-state 提取器保持
+// 独立——extension 不能 import runtime 包）。
+
 export function reconstructPlanState(ctx: ExtensionContext): PlanState {
   const state = { ...DEFAULT_PLAN_STATE };
-  const entries = ctx.sessionManager.getEntries();
+  const entries = filterActivePath(ctx.sessionManager);
 
   for (let i = entries.length - 1; i >= 0; i--) {
     // entries[i] 是复杂表达式（TS 不收窄），守卫移到 const 变量上

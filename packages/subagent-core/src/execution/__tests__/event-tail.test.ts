@@ -378,9 +378,9 @@ describe("createEventDirectoryTailer（周期复查 / offset 续读状态）", (
       parseLine: parseRecordEventFileLine,
       onEvents: (_filename, events) => seen.push(events.length),
       debounceMs: 20,
-      // fs.watch 静默丢事件有平台前科（本模块头注），重负载下 2s 预算内 watch 腿不可依赖
-      // ——注入短周期复查，让断言注释所称「双保险」的另一条腿在预算内实际参战；
-      // 正常路径 watch 仍是首要送达腿（毫秒级），周期复查只在丢事件/饥饿时接管
+      // 周期复查兜底必须在断言窗口内真实可用（默认 30s 落不进 2s 窗口——「双保险」
+      // 名不副实）：注入短间隔后，fs.watch 事件在负载下迟到/丢失时由复查轮兜住，
+      // 断言与窗口均不变
       recheckIntervalMs: 200,
     });
     try {

@@ -133,10 +133,9 @@ describe.skipIf(!FAUX_PI_READY)(
       const reloadState = replayEntries(reloadEntries)
 
       // store 级快照 deep equal（逐字段：messages 的 role/content/toolCalls/contentBlocks/
-      // usage/thinking + clientUuidMap + orphanToolResults + 配对锚点）。
+      // usage/thinking + orphanToolResults + 配对锚点）。
       // 协议依据（W5）：message_end.message ≡ 持久化 entry.message（同一对象）。
       expect(liveState.messages).toEqual(reloadState.messages)
-      expect(liveState.clientUuidMap).toEqual(reloadState.clientUuidMap)
       expect(liveState.orphanToolResults).toEqual(reloadState.orphanToolResults)
       expect(liveState.lastAssistantWithToolCalls).toBe(reloadState.lastAssistantWithToolCalls)
 

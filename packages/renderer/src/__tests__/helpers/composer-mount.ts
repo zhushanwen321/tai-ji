@@ -1,13 +1,20 @@
 /**
- * Composer 集成测试共享 mock 骨架（composer-file/session/slash-injection +
- * force-quit-draft-recovery-dom 四文件，范式同 sidebar-mount.ts / chat-stream-mount.ts；
- * session mock / 子组件 stub / ComposerInput 共用面另供 composer-bar-density-wiring 与
- * composer-smoke 复用）。
+ * Composer 集成测试共享 mock 骨架（范式同 sidebar-mount.ts / chat-stream-mount.ts）。
  *
- * 收敛测试文件间逐字重复的 mock 段（质量审查 C-2 测试脚手架重复收敛批）：useChat /
- * useNewTaskFlow / @/api / stores/chat / stores/session 五个 mock 模块工厂 + Composer
- * 兄弟子组件空 stub 收敛到本 helper 单源；vi.mock 注册留在测试文件（mock 是文件作用域，
- * 工厂经顶层 import 转发本 helper 导出——同 sidebar-mount.ts 先例）。
+ * 用法契约：vi.mock 注册留在测试文件（mock 是文件作用域），测试文件以
+ * `vi.mock(mod, () => composerXxxModule())` 顶层转发本 helper 导出——同 sidebar-mount.ts
+ * 先例。工厂每次调用返回新对象；composerChatModule 的 api 对象在工厂体内创建一次
+ * （vi.mock factory 每模块图只执行一次）：测试经 `import { useChat }` 拿到与组件同一
+ * 实例的 spy 做断言（每调用新建 = 断言空转假绿）。
+ *
+ * 现役消费文件与形态（两侧清单并集）：
+ * - composer-fork-mode：useChat 委托 composerChatModule + composerChildStubs
+ * - composer-slash-injection / composer-file-injection / composer-session-injection /
+ *   force-quit-draft-recovery-dom：stores/chat + stores/session 委托工厂或仅
+ *   composerChildStubs，mock 段各自内联（见下方差异化清单）
+ * - composer-bar-density-wiring / composer-smoke：session mock / 子组件 stub /
+ *   ComposerInput 共用面复用
+ * - composer-history-cache：仅 composerChildStubs
  *
  * 另供两类变体工厂：makeComposerChatApiMock（useChat 的 spy 对象——断言需直接引用
  * send/steer/followUp 的文件持有单例后自建 vi.mock 包装）；makeFocusableComposerInputMock
@@ -23,7 +30,7 @@
  *
  * W4：useNewTaskFlow 的 currentCwd 必须是真实 Vue ref（Composer 的
  * useProjectSkills(flow.currentCwd) 对它 watch，裸 { value } 对象触发 Vue warn）——
- * 修复单点落在本 helper 的 composerFlowModule（composer-smoke 的 hoisted 超集另在工厂内联真 ref）。
+ * composerFlowModule 与各文件内联 flow mock 的 currentCwd 都必须给真 ref。
  *
  * vitest 按测试文件隔离模块图：本 helper 导出在每个测试文件内是独立实例（文件内 mock
  * 工厂与断言共享同一批 vi.fn）。
@@ -35,8 +42,8 @@
  *   input 事件捕获）收敛为 makeComposerInputMock 工厂
  * - composer-session-injection：sessionStore 需可变 active（vi.hoisted sessionState），
  *   保留本地；本 helper 只提供静态 active: undefined 版
- * - composer-smoke：flow mock 是 hoisted 超集（断言引用字段），只在工厂内联真 ref
- *   修 currentCwd，不整体换 composerFlowModule
+ * - composer-file-injection：flow mock 带 pendingPreset（landing 态 launchConfigView
+ *   解析消费），相对 composerFlowModule 为超集，内联自足
  */
 import { ref } from 'vue'
 import { beforeEach, vi } from 'vitest'
@@ -46,19 +53,20 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
 
-/** '@/composables/features/chat/useChat' mock 工厂（Composer 消费面 7 键全量）。 */
+/** '@/composables/features/chat/useChat' mock 工厂（Composer 消费面 7 键全量）。
+ *  api 对象在工厂内创建一次（vi.mock factory 每模块图只执行一次）：测试经
+ *  `import { useChat }` 拿到与组件同一实例的 spy 做断言（每调用新建 = 断言空转假绿）。 */
 export function composerChatModule() {
-  return {
-    useChat: () => ({
-      send: vi.fn(),
-      steer: vi.fn(),
-      followUp: vi.fn(),
-      abort: vi.fn(),
-      compact: vi.fn(),
-      editAndResend: vi.fn(),
-      hydrateHistory: vi.fn(),
-    }),
+  const api = {
+    send: vi.fn(),
+    steer: vi.fn(),
+    followUp: vi.fn(),
+    abort: vi.fn(),
+    compact: vi.fn(),
+    editAndResend: vi.fn(),
+    hydrateHistory: vi.fn(),
   }
+  return { useChat: () => api }
 }
 
 /**
@@ -156,6 +164,7 @@ export function composerFlowModule() {
       submitFirstMessage: vi.fn(),
       currentModel: ref<string | null>(null),
       setPendingModel: vi.fn(),
+      pendingPreset: ref(null),
       state: ref('idle'),
       currentSessionId: ref<string | null>(null),
       currentCwd: ref<string | null>(null),
@@ -196,7 +205,6 @@ export function composerChatStoreModule() {
       isStreaming: ref(false),
       isActive: () => false,
       getRetryState: () => undefined,
-      getQueueState: () => undefined,
       isCompacting: () => false,
       // [u6b] 发送位四态渲染即读 occupancy 投影（sendButtonState ← effectivePhase），mock 需提供
       sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),

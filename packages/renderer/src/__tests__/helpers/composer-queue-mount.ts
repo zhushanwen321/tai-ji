@@ -15,11 +15,9 @@
  * import）；消费文件的 useCompactQueue import 亦须排在本模块之后。
  */
 import { beforeEach, vi } from 'vitest'
-import { effectScope } from 'vue'
 import './composer-shell-mount'
 import { composerApiModuleWithChat, makeComposerInputMock, composerChildStubs, resetComposerMountState } from './composer-mount'
 import { toastSpyModule } from './i18n-toast-mock'
-import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import { resetChatModuleState } from '@/composables/features/chat/useChat'
 
 export { composerChatApiSpy } from './composer-mount'
@@ -34,12 +32,6 @@ export function setupComposerQueueHarness() {
   const otherStubs = { ComposerInput: ComposerInputMock, ...composerChildStubs }
   beforeEach(() => {
     resetComposerMountState(lastInputText)
-    // 单例首次创建放 active effect scope（onScopeDispose 注册 cleanup，对齐 W1 测试契约）
-    effectScope().run(() => {
-      useCompactQueue()
-    })
-    // 单例跨用例共享，不 reset 会泄漏到下一用例
-    useCompactQueue()._clearAllForTest()
     resetChatModuleState()
   })
   return { ComposerInputMock, otherStubs }

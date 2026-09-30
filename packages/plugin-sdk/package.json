@@ -8,6 +8,7 @@
   "types": "src/index.ts",
   "license": "MIT",
   "dependencies": {
+    "@taiji/shared": "workspace:*",
     "@zhushanwen/extension-protocol": "workspace:*"
   }
 }

@@ -230,7 +230,7 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
 
 // ── 预算单源（run-created 载荷继承/覆盖 + 重试重建重排）──────────
 //
-// 修复 docs/todo/subagent-workflow-issues.md §1.1：resume 重建 spec 曾结构性不含
+// 修复 已归档设计档案 §1.1：resume 重建 spec 曾结构性不含
 // budgetTimeMs——复活 run 命中一次 worker/script 错误重试后 rebuildRuntime 不重排
 // 计时器（预算静默失效，直到下次 resume）。修复后 run-created 帧是预算单源：
 // resume 显式 options 覆盖 / 未提供则继承该帧，生效值写入 spec。
@@ -495,7 +495,7 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
 
 // ── token 预算单源（budgetTokens 与时间轴同构）─────────────────
 //
-// 与上方时间预算同族缺口（docs/todo/subagent-workflow-issues.md §1.1 遗留项）：
+// 与上方时间预算同族缺口（已归档设计档案 §1.1 遗留项）：
 // resume 重建 spec 曾结构性不含 budgetTokens——复活 run 的引擎侧 maxTokens 投影
 // （lifecycle.createRunningRun / worker-host budget 注入读 spec.budgetTokens）静默
 // 失效。修复后 token 轴与时间轴完全同构：run-created 载预算 + 三档回落 + 生效值

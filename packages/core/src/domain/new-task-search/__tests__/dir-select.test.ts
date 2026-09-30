@@ -25,7 +25,6 @@ function makeDeps(): {
       listWorktrees: vi.fn().mockResolvedValue({ items: [] }),
     },
     workspaceState: {
-      defaultCwd: vi.fn(() => '/default'),
       record: vi.fn(),
     },
   }

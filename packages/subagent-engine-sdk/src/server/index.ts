@@ -276,7 +276,7 @@ export function initializeEngine(
 // （无 `buildRunContext` 方法，含 ctxModel 解析 / stream / onHandleReady 三个反向通道）。
 // 把这些差异用 5 个钩子包成一个 `dispatchRun` 会得到一个全是 unknown 接缝的配置对象，
 // 净收益为负——故 run 段**只抽两处纯逻辑**，其余按引擎差异保留（结论登记见
-// docs/todo/subagent-workflow-issues.md §2.11）。
+// 已归档设计档案 §2.11）。
 
 /** run 前门未初始化拒绝（两引擎逐字一致的协议错误）。 */
 export function notInitializedError(): EngineSdkError {

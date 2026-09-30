@@ -38,9 +38,11 @@ import type { PresetResolution } from '../preset-service.js'
 
 /**
  * sessions Map 元素类型（原 Facade 私有 ManagedSession 的运行时句柄半段，S3 随 Map
- * 所有权迁 lifecycle 落入共享契约）。binding 扩展字段（launchPresetId / projectId /
- * spawnSource / parentAgentSessionId）由 hydrateBindingMeta 动态 patch，类型面经
- * as 转换读写（lifecycle fork / Facade toSummary 的既有模式），不入本形状。
+ * 所有权迁 lifecycle 落入共享契约）。binding 扩展字段中 launchPresetId / projectId /
+ * projectBindingPersisted 已收编进 IManagedSessionView（照 handedOffTo 先例）；
+ * 余下 launchPresetFallbackTo / spawnSource / parentAgentSessionId 仍由 hydrateBindingMeta
+ * 动态 patch、类型面经 as 转换读写（lifecycle fork / Facade toSummary 的既有模式），
+ * 不入本形状。
  */
 export interface IManagedSessionRecord extends IManagedSessionView {
   /** EventAdapter 运行时句柄（pi 事件订阅唯一持有者，detach 即收口）。 */
@@ -50,22 +52,9 @@ export interface IManagedSessionRecord extends IManagedSessionView {
 // 自 session-service.ts 原样迁移（max-lines 行为保持抽取）：类型随消费者归位内部协议
 // 文件（toSummary 实现体迁 session-summary.ts 后经本文件共享），仅加 export 供跨文件
 // 引用，字段与语义零改动。
-/** Facade 内部完整 session:Registry 记录(adapter 句柄)+ binding 扩展字段(hydrateBindingMeta 动态 patch)。 */
+/** Facade 内部完整 session:Registry 记录(adapter 句柄)+ 余下 binding 扩展字段(hydrateBindingMeta 动态 patch)。 */
 export interface ManagedSession extends IManagedSessionRecord {
   adapter: IEventAdapter
-  /**
-   * launch preset id 的内存态持有（W-RT-4，设计文档 §4.2）。
-   *
-   * create 路径 sidecar 已随 V9-④ 根修放行 existsSync 守卫落盘（2026-09-09）；
-   * 仅 sessionFilePath 缺失（pi 异常未返回路径）等异常时序下 .preset.json 缺失，
-   * 此时内存态兜底持有 presetId，供 forkSession 在 active 期读源 session preset（W-RT-5）。
-   *
-   * 不放 IManagedSessionView（types.ts 非 slice 范围）也不入 IManagedSessionRecord
-   * （binding 扩展字段归 Facade 域）：session-lifecycle 经 Registry get(id) 拿到
-   * 记录后，as 转换读写此字段（patch 模式，见 lifecycle W-RT-4/5 实现注释）。
-   * toSummary 一并透传到 SessionSummary.launchPresetId。
-   */
-  launchPresetId?: string
   /**
    * restore 回落事实的内存态持有（F1，设计 `mode-system-composer-density` §7.5 E4）。
    *
@@ -74,7 +63,6 @@ export interface ManagedSession extends IManagedSessionRecord {
    * **不持久化**（不写 sidecar）：回落是「本进程本次运行」的内存态事实，进程重开、
    * 未 restore 时并不成立——持久化会让未重启的会话产生假陈述。
    *
-   * 与 launchPresetId 同模式：不入 IManagedSessionView / IManagedSessionRecord，
    * 由 session-lifecycle restore 路径 as 转换写入，toSummary 透传到
    * SessionSummary.launchPresetFallbackTo（UI 披露位仅 restore 置位）。
    */
