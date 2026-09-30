@@ -7,7 +7,7 @@ import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 import { writeAtomicFile, writeAtomicFileSync } from "../../shared/atomic-write.ts";
 import { isMissingFsError } from "./fs-error.ts";
-import type { ClosedReason, ExecutionStatus } from "../assembly/types.ts";
+import type { ClosedReason, ExecutionStatus } from "../domain/record-types.ts";
 // 类型面依赖（D5 终局投影词表单源）——纯 type import，无运行时循环
 //（run-events 只依赖 core/logger 与 orchestration/models，不回指 execution 层）。
 import type { RunErrorCode, RunOutcome } from "../../orchestration/run-events.ts";

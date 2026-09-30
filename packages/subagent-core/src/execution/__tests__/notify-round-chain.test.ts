@@ -49,7 +49,7 @@ import { _resetLifecycleState } from "../lifecycle/lifecycle-manager.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import { SubagentService } from "../subagent-service.ts";
 
 // ─── 投递内核等价桩（与 notifier.test.ts 同款切片：dedupe / busy gate / 合批窗口）──

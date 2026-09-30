@@ -80,14 +80,10 @@ import { createBackgroundStream, type StreamSink, type SubagentStream } from "..
 // 叶子 helper 文件是既有形态，G2 禁的是两聚合互相 import）。
 import { assertNestingDepthWithinLimit } from "../assembly/session-context-resolver.ts";
 import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
-import {
-  DEFAULT_AGENT_NAME,
-  type AgentEvent,
-  type AgentResult,
-  type ExecuteOptions,
-  type ExecutionMode,
-  type ExecutionRecord,
-} from "../assembly/types.ts";
+import { DEFAULT_AGENT_NAME } from "../domain/record-model.ts";
+import type { ExecutionMode } from "../domain/record-types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import { type AgentEvent, type ExecuteOptions } from "../assembly/types.ts";
 // [R6/D-R4-4] 跨两聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";

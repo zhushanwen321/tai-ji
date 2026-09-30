@@ -50,7 +50,7 @@ import { getLogger } from "../../core/logger.ts";
 // 把该窗口收到读侧不可见的层面。
 import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 
-import type { AbandonedRoundMark, Epoch, RecordOrigin, StopReason, TranscriptRef } from "../assembly/types.ts";
+import type { AbandonedRoundMark, Epoch, RecordOrigin, StopReason, TranscriptRef } from "../domain/record-types.ts";
 // 类型面依赖（D5 终局投影词表单源）——run-events 不回指 execution 层，无循环；
 // ALL_RUN_OUTCOMES 是值导入（读侧 outcome 守卫的词表集合，SSOT 单源不复制）。
 import { ALL_RUN_OUTCOMES, type RunErrorCode, type RunOutcome } from "../../orchestration/run-events.ts";

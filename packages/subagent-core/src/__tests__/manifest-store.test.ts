@@ -16,7 +16,7 @@ import { createRecord } from "../execution/persistence/execution-record";
 import { createRecordEventJournal, recordEventsPath } from "../execution/persistence/record-events";
 import type { RecordJournalEvent } from "../execution/persistence/record-events";
 import { RecordStore } from "../execution/persistence/record-store";
-import type { ExecutionRecord } from "../execution/assembly/types";
+import type { ExecutionRecord } from "../execution/domain/record-model.ts";
 
 // [C10] 磁盘满测试需要可控的 fs.promises.rename（拖 ENOSPC/EACCES）。
 // hoisted flag + vi.mock 透传：默认 renameErrorRef.current=null 走真实 rename，

@@ -11,7 +11,8 @@ import { hasLiveProcessHandle, hasArmedIdleTimer, isResumable } from "../lifecyc
 import type { BgNotifier, NotifierHost } from "./notifier.ts";
 import { createNotifier } from "./notifier.ts";
 import type { BgNotifyRecord } from "./notifier.ts";
-import type { ExecutionRecord, RecordSnapshot } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { RecordSnapshot } from "../assembly/types.ts";
 
 /** Pi ExtensionAPI 的最小接口（duck-typed）——原定义于 subagent-service.ts，随通知簇
  *  （piAdapter / emitPending* 的依赖）搬移至此并导出（Service 的 session 注入参数仍引用）。

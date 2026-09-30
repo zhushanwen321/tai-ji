@@ -34,7 +34,8 @@ import { clearEngines, registerEngine } from "../engine/registry.ts";
 import type { EngineCapabilities, EngineHandle, ProbeReport, SessionView } from "../engine/types.ts";
 import type { EnginePort, EngineRunResult, RunContext } from "../engine/port.ts";
 import type { AgentOutcome } from "@zhushanwen/subagent-engine-sdk";
-import type { ExecuteOptions, ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { ExecuteOptions } from "../assembly/types.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 
 // ── 替身 ─────────────────────────────────────────────────────

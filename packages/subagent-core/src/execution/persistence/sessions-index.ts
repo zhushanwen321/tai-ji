@@ -28,7 +28,7 @@ import { getLogger } from "../../core/logger.ts";
 import { writeAtomicFile } from "../../shared/atomic-write.ts";
 import { errorCodeOf } from "../../shared/fs-error.ts";
 
-import type { ExecutionMode, RecordOrigin } from "../assembly/types.ts";
+import type { ExecutionMode, RecordOrigin } from "../domain/record-types.ts";
 
 const logger = getLogger("subagents");
 

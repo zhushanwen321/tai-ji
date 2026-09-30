@@ -96,17 +96,10 @@ import { writeRecordBinding } from "../persistence/state-marker.ts";
 // 同步面已删（漏拷贝事故先例 H2 S3 / W0 D1）。
 import { identityBindingPayload } from "../persistence/record-store-terminal.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
-import type {
-  AgentEvent,
-  AgentResult,
-  ClosedReason,
-  WorktreeHandle,
-  ExecuteOptions,
-  ExecutionHandle,
-  ExecutionMode,
-  ExecutionRecord,
-} from "../assembly/types.ts";
-import { DEFAULT_AGENT_NAME } from "../assembly/types.ts";
+import type { ClosedReason, ExecutionMode } from "../domain/record-types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import type { AgentEvent, WorktreeHandle, ExecuteOptions, ExecutionHandle } from "../assembly/types.ts";
+import { DEFAULT_AGENT_NAME } from "../domain/record-model.ts";
 // [R6/D-R4-4] 跨聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";

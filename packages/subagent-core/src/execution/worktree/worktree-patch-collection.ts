@@ -13,7 +13,7 @@ import * as path from "node:path";
 
 import { bestEffort } from "../assembly/best-effort.ts";
 import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { WorktreeManager } from "./worktree-manager.ts";
 
 export interface CollectWorktreePatchOptions {

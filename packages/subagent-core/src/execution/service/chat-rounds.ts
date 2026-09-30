@@ -81,12 +81,8 @@ import type { ResolvedIdentity } from "./record-access.ts";
 import { createBackgroundStream, type StreamSink } from "../assembly/stream-sink.ts";
 import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
-import type {
-  AgentEvent,
-  AgentResult,
-  ExecuteOptions,
-  ExecutionRecord,
-} from "../assembly/types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import type { AgentEvent, ExecuteOptions } from "../assembly/types.ts";
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 // [R6/D-R4-4] 值语义纯量消费常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";

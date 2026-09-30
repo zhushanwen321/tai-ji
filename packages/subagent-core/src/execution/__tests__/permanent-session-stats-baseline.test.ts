@@ -31,8 +31,10 @@ import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
 import { createRecord, updateFromEvent } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { readRecordBinding, zcodeAnchorBasePath, writeRecordBinding } from "../persistence/state-marker.ts";
-import type { ExecutionRecord, SubagentRecord, TranscriptRef } from "../assembly/types.ts";
-import { ResurrectDeniedError } from "../assembly/types.ts";
+import type { TranscriptRef } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 import { v2RegisteredEntry, v2SettledEntry } from "./helpers/v2-record-entry.ts";
 
 // ── fixture ──────────────────────────────────────────────────────────────────

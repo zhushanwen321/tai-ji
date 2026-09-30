@@ -17,7 +17,8 @@ import { describe, expect, it } from "vitest";
 import { updateFromEvent as sdkUpdateFromEvent } from "@zhushanwen/subagent-engine-sdk";
 import type { ReplayRecordView } from "@zhushanwen/subagent-engine-sdk";
 
-import type { AgentEvent, AgentUsage, ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { AgentEvent, AgentUsage } from "../assembly/types.ts";
 import { createRecord, updateFromEvent } from "../persistence/execution-record.ts";
 
 function makeCore(): ExecutionRecord {

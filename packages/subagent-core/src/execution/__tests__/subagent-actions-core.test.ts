@@ -40,14 +40,10 @@ import {
   startHandler,
   wrapForkFromPrompt,
 } from "../assembly/subagent-actions-core.ts";
-import { ResurrectDeniedError } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 import { writeAliveMarker } from "../persistence/alive-store.ts";
-import type {
-  ExecutionHandle,
-  ExecutionRecord,
-  SubagentRecord,
-  SubagentToolDetails,
-} from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { ExecutionHandle, SubagentRecord, SubagentToolDetails } from "../assembly/types.ts";
 import type { SubagentService } from "../subagent-service.ts";
 
 // ── 时钟固定（duration 快照确定性，见文件头）──

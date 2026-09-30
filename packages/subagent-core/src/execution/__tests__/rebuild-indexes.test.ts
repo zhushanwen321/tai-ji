@@ -20,7 +20,8 @@ import { RecordStore } from "../persistence/record-store.ts";
 import { ManifestStore } from "../persistence/manifest-store.ts";
 import { INDEX_FILENAME, INDEX_VERSION } from "../persistence/sessions-index.ts";
 import { writeCancelledState, writeFinalizedState } from "../persistence/state-marker.ts";
-import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 
 // [teardown 竞态修复] 被测链（rebuild/store/manifest 降级路径）的 logger 输出经
 // console 落 stderr，满并行下文件结束与 worker rpc 关闭竞态会触发 vitest

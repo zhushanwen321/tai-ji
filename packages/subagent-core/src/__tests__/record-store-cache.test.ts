@@ -19,7 +19,7 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { RecordStore } from "../execution/persistence/record-store";
-import type { ExecutionRecord } from "../execution/assembly/types";
+import type { ExecutionRecord } from "../execution/domain/record-model.ts";
 
 describe("RecordStore per-file cache + light scan [perf]", () => {
   let rootDir: string;

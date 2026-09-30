@@ -49,16 +49,11 @@ import {
   readIdentityTail,
   IDENTITY_HEAD_BYTES,
 } from "./session-reconstructor.ts";
-import type {
-  ClosedReason,
-  ExecutionMode,
-  ExecutionRecord,
-  ExecutionStatus,
-  RecordOrigin,
-  SubagentRecord,
-  ZcodeTranscriptRef,
-} from "../assembly/types.ts";
-import { CLOSED_REASONS as CLOSED_REASON_LIST, isZcodeTranscriptRef, isValidStopReason } from "../assembly/types.ts";
+import type { ClosedReason, ExecutionMode, ExecutionStatus, RecordOrigin, ZcodeTranscriptRef } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
+import { CLOSED_REASONS as CLOSED_REASON_LIST } from "../domain/record-types.ts";
+import { isZcodeTranscriptRef, isValidStopReason } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
 

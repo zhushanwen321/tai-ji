@@ -52,7 +52,9 @@ import {
   toRegisteredEntryData,
   toSettledEntryData,
 } from "./record-store-terminal.ts";
-import type { AgentEvent, ExecutionRecord, StopReason } from "../assembly/types.ts";
+import type { StopReason } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { AgentEvent } from "../assembly/types.ts";
 import type { RoundSettlementOutcome } from "./finalize-record.ts";
 
 const logger = getLogger("subagents");

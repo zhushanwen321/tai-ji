@@ -53,15 +53,9 @@ import { runPendingReconcileSweepForService } from "./registry-reconcile/sweep-b
 import type { StreamSink, SubagentStream } from "./assembly/stream-sink.ts";
 // [R4] state-marker（writeRecordBinding）已迁 run-orchestration；EngineSdkError/
 // ResumeAnchor（引擎死亡分诊）已迁 run-orchestration。
-import type {
-  AgentEvent,
-  ClosedReason,
-  ExecuteOptions,
-  ExecutionHandle,
-  ExecutionRecord,
-  RecordSnapshot,
-  SubagentRecord,
-} from "./assembly/types.ts";
+import type { ClosedReason } from "./domain/record-types.ts";
+import type { ExecutionRecord } from "./domain/record-model.ts";
+import type { AgentEvent, ExecuteOptions, ExecutionHandle, RecordSnapshot, SubagentRecord } from "./assembly/types.ts";
 // [R4] ExecutionMode / ForkDepthExceededError / DEFAULT_AGENT_NAME / WorktreeHandle 消费
 // 已随 run 域迁聚合——types import 收窄为转发签名所需类型面。
 // [R1] 转发 getter 返回类型标注（实例已迁聚合，仅 type 引用）。

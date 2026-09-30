@@ -33,7 +33,7 @@ import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { buildReopenSummaryPrompt } from "../assembly/conversation-continuation.ts";
-import { ResurrectDeniedError } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 import { forkFromHandler, messageHandler } from "../assembly/subagent-actions-core.ts";
 
 const IDENTITY_ENV_KEYS = [

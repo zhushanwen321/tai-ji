@@ -30,7 +30,7 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 // 每轮 = 新 run + resume 锚点，续聊守卫链归 Continuation（dispatchRoundGuarded）。
 
 import { writeFinalizedState } from "../persistence/state-marker.ts";
-import { ResurrectDeniedError } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";

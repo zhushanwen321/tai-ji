@@ -260,7 +260,7 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
 import * as path from "node:path";
 import { RecordLifecycle, type RecordLifecycleDeps } from "../service/record-lifecycle.ts";
 import { createRecord } from "../persistence/execution-record.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { WorktreeManager as WorktreeManagerType } from "../worktree/worktree-manager.ts";
 
 function makeIntentRecord(id: string, overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {

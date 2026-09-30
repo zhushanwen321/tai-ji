@@ -64,7 +64,7 @@ import type { AgentCall } from "./models/agent-call.ts";
 import { canonicalJsonStringify } from "./canonical-json.ts";
 import { toErrorMessage } from "../core/error-message.ts";
 import { trySettleLegacyClosed } from "../execution/persistence/execution-record.ts";
-import type { AgentResult as ExecutionAgentResult, ExecutionRecord } from "../execution/assembly/types.ts";
+import type { AgentResult as ExecutionAgentResult, ExecutionRecord } from "../execution/domain/record-model.ts";
 import type {
   AgentCallOpts,
   AgentResult,

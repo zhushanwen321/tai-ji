@@ -62,7 +62,8 @@ import type { NotifyHost, PiLike } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import { collectWorktreePatch } from "../worktree/worktree-patch-collection.ts";
-import type { AgentResult, ClosedReason, ExecutionRecord, StopReason } from "../assembly/types.ts";
+import type { ClosedReason, StopReason } from "../domain/record-types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
 

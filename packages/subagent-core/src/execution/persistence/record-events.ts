@@ -35,13 +35,7 @@ import { getLogger } from "../../core/logger.ts";
 // [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-journal.ts（与 run journal
 // 共用同一实现体，差异经策略注入——本文件只提供 record 域策略）。
 import { JsonlEventJournal } from "../../shared/jsonl-event-journal.ts";
-import type {
-  Epoch,
-  ExecutionMode,
-  ExecutionOutcome,
-  RecordOrigin,
-  StopReason,
-} from "../assembly/types.ts";
+import type { Epoch, ExecutionMode, ExecutionOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
 import type { AbandonedRoundMark, TranscriptRef } from "../domain/record-types.ts";
 
 const journalLogger = getLogger("record-event-journal");

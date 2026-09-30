@@ -32,7 +32,8 @@ import { RecordStore } from "../persistence/record-store.ts";
 import { createRecordEventJournal, recordEventsPath } from "../persistence/record-events.ts";
 import type { RecordJournalEvent } from "../persistence/record-events.ts";
 import { createRecord } from "../persistence/execution-record.ts";
-import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 import { writeAliveMarker } from "../persistence/alive-store.ts";
 // [登记 §3.3] v2 条目族（v1 全量快照写点已删——播种形态 = 注册/终态两条款）。
 import {

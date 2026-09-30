@@ -53,7 +53,7 @@ import {
 import type { RecordBinding } from "../persistence/state-marker.ts";
 import { fullBindingPayload } from "../persistence/record-store-terminal.ts";
 import { SubagentService } from "../subagent-service.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";

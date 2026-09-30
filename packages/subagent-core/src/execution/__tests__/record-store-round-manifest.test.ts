@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRecord } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 
 /** 构造 ExecutionRecord（running 基线，over 覆盖）。 */
 function makeRecord(id: string, over: Partial<ExecutionRecord> = {}): ExecutionRecord {

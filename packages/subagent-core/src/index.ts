@@ -188,33 +188,11 @@ export { registerNativeSessionReader } from "./execution/engine/common/session-v
 // stopReason 词表族（NEW_STOP_REASONS 中断+重开 4 值 / ROUND_TERMINAL_STOP_REASONS
 // 正常轮终 2 值 / STOP_REASONS 13 值全集）单源在 types.ts——runtime workflow-step-merge
 // 的步骤状态映射按词表判定（消费方引用常量，勿手抄字面量清单）。
-export {
-  CLOSED_REASONS,
-  DEFAULT_AGENT_NAME,
-  NEW_STOP_REASONS,
-  ROUND_TERMINAL_STOP_REASONS,
-  STOP_REASONS,
-  ResurrectDeniedError,
-} from "./execution/assembly/types.ts";
-export type {
-  AgentEventLogEntry,
-  BgResponse,
-  CancelResponse,
-  CloseResponse,
-  ClosedReason,
-  DisplayItem,
-  ExecutionMode,
-  ExecutionOutcome,
-  ExecutionRecord,
-  ExecutionStatus,
-  ExternalState,
-  ForkFromResponse,
-  ListResponse,
-  MessageResponse,
-  SubagentListItem,
-  SubagentRecord,
-  SubagentToolResult,
-} from "./execution/assembly/types.ts";
+export { CLOSED_REASONS, NEW_STOP_REASONS, ROUND_TERMINAL_STOP_REASONS, STOP_REASONS, ResurrectDeniedError } from "./execution/domain/record-types.ts";
+export { DEFAULT_AGENT_NAME } from "./execution/domain/record-model.ts";
+export type { AgentEventLogEntry, BgResponse, CancelResponse, CloseResponse, DisplayItem, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentRecord, SubagentToolResult } from "./execution/assembly/types.ts";
+export type { ClosedReason, ExecutionMode, ExecutionOutcome, ExecutionStatus, ExternalState } from "./execution/domain/record-types.ts";
+export type { ExecutionRecord } from "./execution/domain/record-model.ts";
 
 // execution-record 投影函数族：record → 渲染态投影（outcome / elapsed / tool
 // calls），interface 渲染层唯一消费入口（live 进度投影面 = SubagentRecord 投影族）。
@@ -361,10 +339,7 @@ export { parseAgentProfile } from "./execution/assembly/agent-registry.ts";
 
 // 错误类型族（error-recovery.ts 计划路径实测不存在，实测散布于下列源文件）：
 // resurrect/fork-depth/dirty-worktree 为动作层守卫抛出点（types.ts）。
-export {
-  DirtyWorktreeError,
-  ForkDepthExceededError,
-} from "./execution/assembly/types.ts";
+export { DirtyWorktreeError, ForkDepthExceededError } from "./execution/assembly/types.ts";
 
 // 动作层领域内核（@experimental U10 / D6）：六 handler 的校验/守卫链/归属判定/
 // 终态映射，产出领域对象，宿主 adapter 负责包装渲染。

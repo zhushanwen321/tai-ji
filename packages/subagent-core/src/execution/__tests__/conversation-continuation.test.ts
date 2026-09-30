@@ -73,7 +73,7 @@ import {
   _resetCoreSpawnedChildrenMirrorForTest,
   registerSpawnedChildForRecord,
 } from "../engine/host/spawned-children.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE, type SubagentRecordEntryV2 } from "../persistence/record-entry.ts";
 
 // [U4] 锚可解析性 fixture（模块级——makeRecord 缺省锚消费）：每个用例独立 tmp 文件。

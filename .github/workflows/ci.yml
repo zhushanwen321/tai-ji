@@ -647,6 +647,9 @@ jobs:
       - name: Global slot-key ownership guard (C-state-20)
         run: node scripts/check-global-slot-keys.mjs
 
+      - name: 领域类型路径单源（D2 守卫）
+        run: node scripts/check-domain-type-path.mjs
+
       # H3 subagent-service 聚合边界守卫（与 pre-commit 同源直调；守卫全量扫描
       # SERVICE_DIR 不依赖 staged 上下文）：聚合间值 import 禁 / 聚合→壳 import 禁 /
       # 跨聚合私有访问禁 / 支撑文件方向门 + 环检测——本地 hook 仅单一 worktree 生效

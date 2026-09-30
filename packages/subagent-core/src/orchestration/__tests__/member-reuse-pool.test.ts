@@ -50,7 +50,7 @@ import type { WorkflowRunEvent } from "../run-events.ts";
 import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";
 import type { RecordStore } from "../../execution/persistence/record-store.ts";
 import { SubagentService } from "../../execution/subagent-service.ts";
-import type { ExecutionRecord } from "../../execution/assembly/types.ts";
+import type { ExecutionRecord } from "../../execution/domain/record-model.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "../../execution/__tests__/helpers/fake-engine-port.ts";
 import { CTX_MODEL as ctxModel, emptyRegistry } from "../../execution/__tests__/helpers/model-registry-mock.ts";
 import { makePi } from "../../execution/__tests__/helpers/pi-mock.ts";

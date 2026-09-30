@@ -17,27 +17,9 @@
 //
 // Core 层叶子原语：仅依赖 types.ts。零 Pi / Runtime / TUI 依赖。
 
-import type {
-  AgentEvent,
-  AgentEventLogEntry,
-  AgentResult,
-  AgentUsage,
-  AgentUsageTotal,
-  ClosedReason,
-  DisplayItem,
-  ExecutionMode,
-  ExecutionOutcome,
-  ExecutionRecord,
-  ExecutionStatus,
-  InternalToolCall,
-  ProjectedOutcome,
-  RecordOrigin,
-  RecordSnapshot,
-  StopReason,
-  SubagentToolDetails,
-  ToolCall,
-  Turn,
-} from "../assembly/types.ts";
+import type { ClosedReason, ExecutionMode, ExecutionOutcome, ExecutionStatus, ProjectedOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import type { AgentEvent, AgentEventLogEntry, AgentUsage, AgentUsageTotal, DisplayItem, InternalToolCall, RecordSnapshot, SubagentToolDetails, ToolCall, Turn } from "../assembly/types.ts";
 
 // ============================================================
 // 常量

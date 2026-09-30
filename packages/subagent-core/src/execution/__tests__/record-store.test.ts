@@ -51,7 +51,8 @@ import { RecordStore } from "../persistence/record-store.ts";
 import { manifestToSubagent, stateMarkerFromFold, v2PairToRecord } from "../persistence/record-store-rebuild.ts";
 import type { V2EntryPair } from "../persistence/record-store-rebuild.ts";
 import { foldRecordEvents } from "../persistence/record-events.ts";
-import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
 // [登记 §3.3] v2 两条款条目播种辅助（v1 全量快照写点已随兼容层删除）。
 import { v2RegisteredEntry, v2SettledEntry } from "./helpers/v2-record-entry.ts";

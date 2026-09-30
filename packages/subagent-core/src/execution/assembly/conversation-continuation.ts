@@ -46,7 +46,7 @@ import { DEFAULT_IDLE_TIMEOUT_MS, armIdleTimer, disarmIdleTimer } from "../lifec
 import { isAnchorResolvable, transcriptAnchorOf } from "./cold-lookup.ts";
 // [U5 / §3.2.5] worktree 续聊重建 outcome（三失败形态判别联合）。
 import type { WorktreeRebuildOutcome } from "../worktree/worktree-manager.ts";
-import type { ExecutionRecord } from "./types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
 

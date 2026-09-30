@@ -21,7 +21,8 @@ import {
   trySettleLegacyClosed,
   updateFromEvent,
 } from "../persistence/execution-record.ts";
-import type { AgentResult, ExecutionRecord, SubagentRecord, Turn } from "../assembly/types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord, Turn } from "../assembly/types.ts";
 // [v1 兼容层删除] v1 全量快照写点（toSubagentRecordEntry）已整体删除——现行主 session
 // 条目契约 = 「注册 + 终态两条小条目」（record-entry.ts v2），终局域（engine/engineHandle）
 // 的条目载体 = 终态条目，测试播种经 helpers/v2-record-entry.ts。

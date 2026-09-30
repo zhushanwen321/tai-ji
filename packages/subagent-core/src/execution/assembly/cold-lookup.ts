@@ -24,8 +24,11 @@ import { getLogger } from "../../core/logger.ts";
 import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import type { StatusFilter } from "../persistence/record-store.ts";
-import type { ExecutionRecord, SubagentRecord, TranscriptRef } from "./types.ts";
-import { isZcodeTranscriptRef, ResurrectDeniedError } from "./types.ts";
+import type { TranscriptRef } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "./types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
+import { isZcodeTranscriptRef } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
 

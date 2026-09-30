@@ -25,7 +25,7 @@ import { getNotifyDomainPorts, type DeliveryHandle, type DeliveryPort } from "..
 
 import { deriveOutcome } from "../persistence/execution-record.ts";
 import { getBoundNotifyLedger, NOTIFY_CUSTOM_TYPE } from "./notify-ledger.ts";
-import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome } from "../assembly/types.ts";
+import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome } from "../domain/record-types.ts";
 
 // ============================================================
 // [T4① / PS-2 → U5 二元组] notify 门（H1 U2 自 subagent-service.ts 迁入——

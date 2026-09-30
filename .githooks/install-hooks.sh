@@ -1693,6 +1693,27 @@ fi
 #   —— Symbol.for 字面量只允许出现在两处声明文件，前缀/唯一性同时校验。
 # ============================================================================
 
+# ============================================================================
+# 领域类型路径单源检查（D2 配套，register §2.0/§2.4）
+#   subagent-core 源码或检查脚本自身变更时触发：scripts/check-domain-type-path.mjs
+#   —— execution/domain/ 是领域类型唯一权威路径；assembly 禁 re-export、消费面禁绕道。
+# ============================================================================
+
+DOMAIN_TYPE_PATH_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src scripts/check-domain-type-path.mjs)
+if echo "$DOMAIN_TYPE_PATH_STAGED" | grep -qE "^packages/subagent-core/src/|^scripts/check-domain-type-path\.mjs$"; then
+    print_section "[领域类型路径单源检查]"
+    if [ ! -f "scripts/check-domain-type-path.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-domain-type-path.mjs（D2 守卫缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-domain-type-path.mjs; then
+        echo -e "${RED}[ERROR] 领域类型路径出现双源（D2）——领域名只在 execution/domain/ 声明，assembly 不得 re-export，消费面不得绕道${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 领域类型路径单源检查通过${NC}"
+fi
+
 GLOBAL_SLOT_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src packages/subagent-engine-sdk/src extensions/universal/subagent-workflow/src scripts/check-global-slot-keys.mjs)
 if echo "$GLOBAL_SLOT_STAGED" | grep -qE "^packages/subagent-(core|engine-sdk)/src/|^extensions/universal/subagent-workflow/src/|^scripts/check-global-slot-keys\.mjs$"; then
     print_section "[进程级全局槽键归属检查]"

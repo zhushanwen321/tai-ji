@@ -23,7 +23,8 @@ import { ManifestStore } from "../persistence/manifest-store.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
-import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { v2RegisteredEntry, v2SettledEntry } from "./helpers/v2-record-entry.ts";
 

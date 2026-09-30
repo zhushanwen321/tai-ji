@@ -41,8 +41,8 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 import { RecordStore } from "../persistence/record-store.ts";
 import type { SubagentRecord } from "../assembly/types.ts";
-import type { ClosedReason } from "../assembly/types.ts";
-import { ResurrectDeniedError } from "../assembly/types.ts";
+import type { ClosedReason } from "../domain/record-types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 
 /** [U1/A4] 「异进程且存活」的确定性模拟 pid：1 号进程（launchd/init）必然存在且非
  *  本测试进程——kill(1, 0) 对普通用户返回 EPERM，isProcessAlive 按「存在但无权限」

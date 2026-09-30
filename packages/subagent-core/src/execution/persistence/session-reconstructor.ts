@@ -20,15 +20,8 @@
 
 import * as fs from "node:fs";
 
-import type {
-  AgentEventLogEntry,
-  AgentUsage,
-  ExecutionMode,
-  ExecutionStatus,
-  InternalToolCall,
-  RecordOrigin,
-  Turn,
-} from "../assembly/types.ts";
+import type { ExecutionMode, ExecutionStatus, RecordOrigin } from "../domain/record-types.ts";
+import type { AgentEventLogEntry, AgentUsage, InternalToolCall, Turn } from "../assembly/types.ts";
 import { addUsage, deriveEventLog, emptyTurn, joinTurnText } from "./execution-record.ts";
 
 // ============================================================
@@ -196,7 +189,7 @@ export interface ReconstructedRecord extends RecordIdentityFields {
   status: ExecutionStatus;
   /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。SP-1 新增。
    *  从 stopReason 推导：error/aborted → gc；其余 → gc。 */
-  closedReason?: import("../assembly/types.ts").ClosedReason;
+  closedReason?: import("../domain/record-types.ts").ClosedReason;
   turns: Turn[];
   turnCount: number;
   totalTokens: number;
@@ -481,7 +474,7 @@ function buildReconstructedRecord(
   // closedReason="gc" 保留（buildRecord sidecar 矩阵随后覆盖/校正）。
   const status: ExecutionStatus = "idle";
   // closedReason 统 gc（通用完成/失败）。error/aborted 的区分由 error 字段保留。
-  const closedReason: import("../assembly/types.ts").ClosedReason = "gc";
+  const closedReason: import("../domain/record-types.ts").ClosedReason = "gc";
 
   const turnCount = rebuilt.turns.length;
   // 正文拼接经单源 helper（execution-record.joinTurnText——与活态 getFullText 同规则）。

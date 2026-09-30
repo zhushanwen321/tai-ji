@@ -47,7 +47,7 @@ import { recordToSubagent } from "../persistence/record-store-rebuild.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
 import type { SubagentRecordEntryV2 } from "../persistence/record-entry.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import { v2RegisteredEntry } from "./helpers/v2-record-entry.ts";
 
 /** 构造 ExecutionRecord（base 默认 running one-shot，over 覆盖任意字段）。 */

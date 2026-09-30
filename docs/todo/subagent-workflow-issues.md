@@ -66,7 +66,7 @@
 | # | 议题 | 终态方向（已裁决） | 阶段 |
 |---|---|---|---|
 | D1 | §2.3 双向依赖终态形态 | **整体拆边**：终局编排（terminal-actions 一族）归 orchestration；execution 只暴露端口（persistence / engine / ui / worktree），反向边收窄为「execution → orchestration 端口接口」 | ① 盘清 20 条 execution→orchestration 导入面并分类（端口可承接 / 需搬迁 / 可消除）；② 逐类收窄，每类一个 commit；③ 终局编排搬迁 |
-| D2 | §2.4 re-export 过渡 | **收掉**：`execution/domain/` 成为领域类型的唯一权威路径，`assembly/types.ts` 不再 re-export | ① 全仓 import 改路径（~89 文件）；② 删 re-export 块；③ 加机器检查防回退（domain 类型不得再从 assembly 导出） |
+| D2 | §2.4 re-export 过渡 | **收掉**：`execution/domain/` 成为领域类型的唯一权威路径，`assembly/types.ts` 不再 re-export | ✅① 全仓 import 改路径（71 文件 / 80 条语句 + barrel + 无扩展名与 inline `type` 修饰两形态）；✅② 删 re-export 块；✅③ 新增 `scripts/check-domain-type-path.mjs`（领域名清单动态读自 domain 两模块；assembly 禁 re-export、消费面禁绕道）+ 4 例 fixture 单测 + E2E-PIPE-09 + ci.yml 与 pre-commit 双接线 |
 | D3 | §2.5 `interface/` 职责归位 | **排期拆开**：按 command / format / gui / tool / tui 五类归位（独立设计，不并入 §2 其它项） | ① 先出「文件 → 类别」映射与目标目录结构设计；② 分五批搬迁，每批保持行为等价 |
 | D4 | §2.7 身份三字段上协议 | **补齐**：`slug` / `startedAt` / 精确 `mode` 挂 `RunContextParams`（additive，形态 = 单个 `identity` 信封——平铺 `slug` 会撞 wire 双写禁令），引擎写入子 env，壳读者由回落改直读；同批更新 C-proc-23 词表锁 | ✅① SDK 协议加字段（commit ee4ed417c）；✅② 引擎写回（协议 ctx → RunContext → SpawnRunParams → 子 env，含 3 例信封单测）；✅③ 宿主填充（`identityEnvelopeOf` 单点 + 三处 run 组装点接线 + 3 例单测）；✅④⑤ 壳直读（env 值已到位，回落分支保留给未发信封的引擎/独立运行）+ 词表锁通过 + 引擎义务与机制文档同批更新 |
 | D5 | §2.7 真机嵌套验收 | **跑**：父→子→孙真实派发，核对 `/subagents` 树、`subagent-identity` 条目与 core 三读者 | ① 确认本机可用模型与 CLI 形态；② 空载串行跑；③ 结果登记（含失败形态） |

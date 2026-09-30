@@ -26,7 +26,8 @@ import type { ModelConfigService } from "../assembly/model-config-service.ts";
 import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import type { RecordStore } from "./record-store.ts";
 import { readIdentityHeader, readIdentityTail } from "./session-reconstructor.ts";
-import type { AgentResult, ClosedReason, ExecutionRecord } from "../assembly/types.ts";
+import type { ClosedReason } from "../domain/record-types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import { collectWorktreePatch } from "../worktree/worktree-patch-collection.ts";
 

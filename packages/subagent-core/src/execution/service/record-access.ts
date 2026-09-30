@@ -51,15 +51,10 @@ import type { RecordStore, StatusFilter } from "../persistence/record-store.ts";
 // service-constants.ts（原 SSOT 在 session-baselines.ts，R3 时的聚合间单向 import
 // 合法边随之消除）——聚合→支撑文件方向（import 常量），守卫允许。
 import { ENV_SELF_RECORD_ID } from "./service-constants.ts";
-import {
-  DEFAULT_AGENT_NAME,
-  type ExecuteOptions,
-  type ExecutionHandle,
-  type ExecutionMode,
-  type ExecutionRecord,
-  type RecordSnapshot,
-  type SubagentRecord,
-} from "../assembly/types.ts";
+import { DEFAULT_AGENT_NAME } from "../domain/record-model.ts";
+import type { ExecutionMode } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import { type ExecuteOptions, type ExecutionHandle, type RecordSnapshot, type SubagentRecord } from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
 

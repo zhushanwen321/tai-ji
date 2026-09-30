@@ -15,56 +15,11 @@ import type { GuiRenderResult } from "@zhushanwen/extension-protocol";
 import type { WorktreeHandle } from "@zhushanwen/subagent-engine-sdk";
 import type { ModelInfo } from "./model-resolver.ts";
 
-// ── [§2.4 归位] record 域词汇与聚合的权威定义已迁 execution/domain/ ──
-//   · record-types.ts：状态与身份词汇
-//   · record-model.ts：聚合 ExecutionRecord / 调用结果 AgentResult / 判定谓词
-// 本文件保留两模块全部导出的 **re-export**（消费面 ~100 处 import、barrel、壳零改动，
-// 过渡形态）；assembly 自身仍使用的名字经下面的 import。收掉 re-export 的时机 =
-// 后续批次把只读视图与装配族也理清后（登记 §2.4）。
-import type {
-  ClosedReason,
-  ExecutionMode,
-  ExecutionOutcome,
-  ExecutionStatus,
-  ExternalState,
-  ProjectedOutcome,
-  RecordOrigin,
-  StopReason,
-} from "../domain/record-types.ts";
+// [§2.4/D2] 领域词汇与聚合的权威路径 = execution/domain/（本文件不再 re-export）
+import type { ExecutionStatus, RecordOrigin, ClosedReason, ExecutionOutcome, ProjectedOutcome, ExternalState, ExecutionMode, StopReason, AliveMarker } from "../domain/record-types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
 
-export type {
-  AbandonedRoundMark,
-  AliveMarker,
-  ClosedReason,
-  Epoch,
-  ExecutionMode,
-  ExecutionOutcome,
-  ExecutionStatus,
-  ExternalState,
-  PiTranscriptRef,
-  ProjectedOutcome,
-  RecordOrigin,
-  ReconnectableFinalReason,
-  StopReason,
-  TranscriptRef,
-  ZcodeTranscriptRef,
-} from "../domain/record-types.ts";
-export {
-  CLOSED_REASONS,
-  NEW_STOP_REASONS,
-  RECONNECTABLE_FINAL_REASONS,
-  ROUND_TERMINAL_STOP_REASONS,
-  ResurrectDeniedError,
-  STOP_REASONS,
-} from "../domain/record-types.ts";
-export type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
-export {
-  DEFAULT_AGENT_NAME,
-  isPiTranscriptRef,
-  isReconnectableFinalReason,
-  isValidStopReason,
-  isZcodeTranscriptRef,
-} from "../domain/record-model.ts";
+
 
 
 // ============================================================

@@ -23,20 +23,10 @@ import { SLUG_MAX_LENGTH } from "../../orchestration/models/types.ts";
 import type { ModelInfo } from "./model-resolver.ts";
 import type { SubagentService } from "../subagent-service.ts";
 import { displayAgentName } from "../../shared/agent-ref.ts";
-import type {
-  BgResponse,
-  CancelResponse,
-  CloseResponse,
-  ExecutionRecord,
-  ExecutionStatus,
-  ExternalState,
-  ForkFromResponse,
-  ListResponse,
-  MessageResponse,
-  SubagentListItem,
-  SubagentRecord,
-} from "./types.ts";
-import { ResurrectDeniedError } from "./types.ts";
+import type { ExecutionStatus, ExternalState } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { BgResponse, CancelResponse, CloseResponse, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentRecord } from "./types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 // [modeless 波1] message 资格 gate 的错误构造（文案/错误码/恢复指引单一权威，与
 // Continuation revive 翻边格写点②共用）+ 引擎路由裁决单点（engine 留痕缺省 = pi；
 // 带原生引擎锚却无 engine 字段 = 身份域损坏，显式抛错）。

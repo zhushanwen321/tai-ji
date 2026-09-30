@@ -28,7 +28,7 @@ import type { UiRequest, UiRequestHandler } from "../ui/dialog-queue.ts";
 import { SubagentService } from "../subagent-service.ts";
 // [H3/R6] 单例访问器外移支撑文件 service/service-bootstrap.ts（壳不再导出）。
 import { getSubagentService, setSubagentService } from "../service/service-bootstrap.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService ──

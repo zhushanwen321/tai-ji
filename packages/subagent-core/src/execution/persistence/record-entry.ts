@@ -13,7 +13,7 @@
 // customType 与既有 `subagent-identity`（session 文件首行身份 entry）同族命名
 //（连字符风格）；custom entry 由 pi 写进 session JSONL，不进 LLM context。
 
-import type { ExecutionOutcome, RecordOrigin, StopReason } from "../assembly/types.ts";
+import type { ExecutionOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
 
 /** 自描述 record entry 的 customType。写点字面量与本常量的等值由
  *  __tests__/record-store.test.ts 断言钉住（消费方引用本常量，勿用裸字符串）。

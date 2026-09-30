@@ -34,7 +34,7 @@ import {
 } from "../../orchestration/terminal-actions.ts";
 import { RunOrchestration } from "../service/run-orchestration.ts";
 import { RecordLifecycle } from "../service/record-lifecycle.ts";
-import type { AgentResult, ExecutionRecord } from "../assembly/types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
