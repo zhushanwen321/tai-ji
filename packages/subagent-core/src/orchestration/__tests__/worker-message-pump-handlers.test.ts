@@ -16,6 +16,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
 import {
   forgetRunResumedBudget,
   handleScriptError,
@@ -38,7 +42,8 @@ import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import { flushMicrotasks } from "./helpers/flush-microtasks.ts";
 // [W2/V1] 六态机引导 + 终局断言换源（两态机字段停更——终局经注册表判定/派生）。
-import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
+import { isRunSettled, setRunEventJournalDirForTest, settledRecordOf } from "../terminal-actions.ts";
+import { createRunEventJournal } from "../run-events.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -873,5 +878,85 @@ describe("rebuildRuntime 可观察性（OB3 日志点）", () => {
     deferreds[0]!.resolve({ content: "", durationMs: 1, error: undefined, toolCalls: [] });
     deferreds[1]!.resolve({ content: "", durationMs: 1, error: undefined, toolCalls: [] });
     await flushMicrotasks();
+  });
+});
+
+// ── agent-call 的 schema 入参形状：调用方错误 fail-fast，不静默降级成文本调用 ──
+
+/** agent-call 消息 + 指定 schema 入参（形状检查用）。 */
+function makeSchemaMsg(callId: number, schema: unknown): unknown {
+  return {
+    type: "agent-call",
+    callId,
+    opts: { prompt: "test task", agent: "worker", description: "test-slug", schema },
+  };
+}
+
+describe("agent-call schema 入参形状（fail-fast）", () => {
+  let journalDir: string;
+
+  beforeEach(() => {
+    journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "pump-schema-"));
+    setRunEventJournalDirForTest(journalDir);
+  });
+
+  afterEach(() => {
+    setRunEventJournalDirForTest(undefined);
+    fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it.each([
+    ["字符串", '{"type":"object"}'],
+    ["数字", 42],
+    ["布尔", true],
+    ["数组", [{ type: "object" }]],
+  ])("schema 为%s → 立即失败：不派发 / call 落 failed / 失败帧入 record / 错误回传 worker", async (_label, schema) => {
+    const run = makeRealRun("wf-schema-bad");
+    const deps = makeDeps();
+    const handlers = makeHandlers();
+    // record 流首帧（fold 起点）：agent-settled 需从 running 态转移，缺 run-created 会
+    // 被状态机判为表外转移而静默丢弃
+    await createRunEventJournal(journalDir).append("wf-schema-bad", {
+      type: "run-created",
+      runId: "wf-schema-bad",
+      workflowName: "test-wf",
+      argsSummary: "{}",
+      scriptSource: "async function execute() {}",
+      ts: Date.now(),
+    });
+
+    await handleWorkerMessage(run, makeSchemaMsg(1, schema), deps, handlers);
+    await flushMicrotasks();
+
+    // fail-fast 的关键断言：没有真实派发（否则会退化成文本调用，脚本静默拿到字符串）
+    expect(deps.runner.run).not.toHaveBeenCalled();
+    const call = run.state.calls.get(1);
+    expect(call?.status).toBe("done");
+    expect(String(call?.result?.error ?? "")).toContain("Invalid schema param");
+    expect(String(call?.result?.error ?? "")).toContain("Recovery:");
+
+    // 失败帧入 record（来源可追溯，不是只回一条 IPC 错误）——落帧是异步投递，轮询等它
+    await vi.waitFor(async () => {
+      const events = await createRunEventJournal(journalDir).scan("wf-schema-bad");
+      const settled = events.filter((e) => e.type === "agent-settled").at(-1) as
+        | { result?: { error?: string } }
+        | undefined;
+      expect(String(settled?.result?.error ?? "")).toContain("Invalid schema param");
+    });
+
+    // 错误回传 worker：agent() 的 pending 收敛，不悬挂
+    const postMessage = run.runtime!.worker.postMessage as unknown as ReturnType<typeof vi.fn>;
+    expect(String(findAgentResultPost(postMessage, 1)?.result.error ?? "")).toContain("Invalid schema param");
+  });
+
+  it("schema 缺省 / null → 视为未提供，正常派发", async () => {
+    for (const [i, schema] of [undefined, null].entries()) {
+      const run = makeRealRun(`wf-schema-absent-${i}`);
+      const deps = makeDeps();
+      const handlers = makeHandlers();
+      await handleWorkerMessage(run, makeSchemaMsg(1, schema), deps, handlers);
+      await flushMicrotasks();
+      expect(deps.runner.run).toHaveBeenCalledTimes(1);
+    }
   });
 });

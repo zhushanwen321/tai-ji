@@ -51,7 +51,7 @@ import {
   notePhaseDispatched,
   settlePhaseLedger,
 } from "./terminal-actions.ts";
-import { finalizeRun } from "./terminal-actions.ts";
+import { appendRunDiagnosticEvent, finalizeRun } from "./terminal-actions.ts";
 import { RunRuntime } from "./models/run-runtime.ts";
 import type { WorkerLogEntry } from "./models/types.ts";
 import type {
@@ -516,12 +516,25 @@ export async function handleWorkerMessage(
  * 计入 run.state.errorLogs（与 workerLogs 通路的 L9 追加/上限语义一致）+ deps.log
  * debug 留痕。终态守卫（isRunSettled）已由 handleWorkerMessage 前置——此处只管写入。
  */
-function handleWorkerLog(run: WorkflowRun, msg: LogMsg, deps: LifecycleDeps): void {
-  const message = typeof msg.message === "string" ? msg.message : String(msg.message);
-  run.state.errorLogs.push({ level: "log", message });
+/**
+ * errorLogs 追加 + 诊断落账（[§2.1 errorLogs 持久化] ADR-0093）。
+ *
+ * 活体写入与落账的唯一单点：追加语义 + 尾部上限裁剪（`MAX_ERROR_LOGS`）与
+ * `errorLogsFromEvents` 重建面同构；落账经 terminal-actions 的
+ * `appendRunDiagnosticEvent`（journal 单写者纪律）。
+ */
+function appendErrorLogs(run: WorkflowRun, entries: readonly WorkerLogEntry[]): void {
+  if (entries.length === 0) return;
+  run.state.errorLogs.push(...entries);
   if (run.state.errorLogs.length > MAX_ERROR_LOGS) {
     run.state.errorLogs = run.state.errorLogs.slice(-MAX_ERROR_LOGS);
   }
+  for (const entry of entries) appendRunDiagnosticEvent(run.runId, entry);
+}
+
+function handleWorkerLog(run: WorkflowRun, msg: LogMsg, deps: LifecycleDeps): void {
+  const message = typeof msg.message === "string" ? msg.message : String(msg.message);
+  appendErrorLogs(run, [{ level: "log", message }]);
   deps.log?.("debug", "workflow:worker-message-pump", "worker log", {
     runId: run.runId,
     phase: msg.phase,
@@ -551,6 +564,29 @@ function handleWorkerLog(run: WorkflowRun, msg: LogMsg, deps: LifecycleDeps): vo
  * M4: agent-call 消息 IPC 字段校验谓词——畸形（opts 非对象/缺失、callId 非数字、
  * prompt 缺失）= true。提取为谓词保持 dispatchAgentCall 主流程可读（圈复杂度门禁）。
  */
+/**
+ * agent-call 入参的 schema 形状检查（IPC 边界；调用方错误 = fail-fast 明确报错，
+ * 不静默降级成文本调用）。
+ *
+ * 判定：undefined / null = 未提供（兼容动态脚本的 falsy 写法）；非对象（字符串 /
+ * 数字 / 布尔等）与数组 = 调用方错误；其余对象放行（「无关键字 / 不可编译」的
+ * schema 归子进程 structured-output 明确报错：no recognized keyword /
+ * Invalid JSON Schema）。
+ *
+ * @returns 错误文案（含恢复指引）或 undefined（形状可接受）。
+ */
+function describeSchemaParamError(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object") {
+    const hint = typeof raw === "string" ? " (a JSON string is not a schema — JSON.parse it first)" : "";
+    return `Invalid schema param at the agent-call IPC boundary: expected a JSON Schema object, got ${typeof raw}${hint}. Recovery: pass an object schema, or omit schema to run in text mode; retrying the same call fails the same way.`;
+  }
+  if (Array.isArray(raw)) {
+    return "Invalid schema param at the agent-call IPC boundary: expected a JSON Schema object, got an array. Recovery: pass an object schema, or omit schema to run in text mode; retrying the same call fails the same way.";
+  }
+  return undefined;
+}
+
 function isMalformedAgentCallMsg(msg: AgentCallMsg): boolean {
   return typeof msg.callId !== "number" || !Number.isFinite(msg.callId) ||
     typeof msg.opts !== "object" || msg.opts === null ||
@@ -578,12 +614,21 @@ function detectReplayInputMismatch(cached: AgentCall, currentRaw: AgentCallMsg["
   const recordedKeys = Object.keys(recorded).filter((k) => recorded[k] !== undefined);
   if (cached.opts.prompt === "" && recordedKeys.length <= 1) return false; // 占位形态
   if (cached.result?.error !== undefined) return false; // 失败历史照放
+  // schema 形状非法：本次调用已 done，回放照走历史结果，但不参与哈希比对——否则
+  // 会被误报成「脚本非确定性漂移」；调用方错误在正常派发路径由 describeSchemaParamError
+  // fail-fast 报出，此处只留痕。
+  if (describeSchemaParamError(currentRaw.schema) !== undefined) {
+    logger.warn(
+      `[workflow] replay hit with a malformed schema param — skipping input comparison (callId=${cached.id})`,
+    );
+    return false;
+  }
   const current = resolveAgentOpts({
     ...currentRaw,
     schema:
-      typeof currentRaw.schema === "object" && currentRaw.schema !== null
-        ? (currentRaw.schema as Record<string, unknown>)
-        : undefined,
+      currentRaw.schema === undefined || currentRaw.schema === null
+        ? undefined
+        : (currentRaw.schema as Record<string, unknown>),
   });
   if (current.error) return false; // 本次 resolve 失败——错误结果回放路径
   return canonicalJsonHash(cached.opts) !== canonicalJsonHash(current.opts);
@@ -674,23 +719,29 @@ function dispatchAgentCall(
   notePhaseDispatched(run.runId, msg.phase);
 
   // 构建 AgentCall（opts 形状对齐 AgentCallOpts；schema: unknown → Record）
-  // 跨进程 IPC 边界的 schema 为 unknown，窄化前加 typeof guard 兜底。
+  // 跨进程 IPC 边界的 schema 为 unknown：非对象类型（字符串/数字/布尔/数组）是调用方
+  // 错误，fail-fast 拒绝，不静默降级为文本调用——结果形态不得静默漂移；undefined /
+  // null 视为「未提供」（兼容动态脚本的 falsy 写法）。schema 是对象但无关键字 /
+  // 不可编译的情形归子进程 structured-output 明确报错（no recognized keyword /
+  // Invalid JSON Schema）。
   const rawSchema = msg.opts.schema;
+  const schemaParamError = describeSchemaParamError(rawSchema);
   const opts: AgentCallOpts = {
     ...msg.opts,
     schema:
-      typeof rawSchema === "object" && rawSchema !== null
+      schemaParamError === undefined && rawSchema !== null && rawSchema !== undefined
         ? (rawSchema as Record<string, unknown>)
         : undefined,
   };
 
   // BL-1：解析 skill/schema → skillPath / appendSystemPrompt。
-  // 解析失败（skill 未找到）走 error 路径，不发 slot、不 spawn。
+  // 解析失败（skill 未找到）或 schema 入参形状非法走 error 路径，不发 slot、不 spawn。
   const resolved = resolveAgentOpts(opts);
-  if (resolved.error) {
+  const earlyError = schemaParamError ?? resolved.error;
+  if (earlyError) {
     const call = new AgentCall(msg.callId, opts, node);
     call.markRunning();
-    const errorResult: AgentResult = { content: "", error: resolved.error };
+    const errorResult: AgentResult = { content: "", error: earlyError };
     call.markDone(errorResult);
     run.state.calls.set(msg.callId, call);
     run.state.trace.update(msg.callId, {
@@ -961,10 +1012,7 @@ async function handleReturn(
   // 捕获 worker 诊断日志（P2-2）
   // L9: 追加而非覆盖——保留重试历史的诊断日志（各 worker 实例的 console 输出）
   if (msg.workerLogs && msg.workerLogs.length > 0) {
-    run.state.errorLogs.push(...msg.workerLogs);
-    if (run.state.errorLogs.length > MAX_ERROR_LOGS) {
-      run.state.errorLogs = run.state.errorLogs.slice(-MAX_ERROR_LOGS);
-    }
+    appendErrorLogs(run, msg.workerLogs);
   }
   run.state.scriptResult = msg.result;
   // C-4: run 到达 done 终态 → 注销 pending-notification + 通知 Interface 层
@@ -1106,10 +1154,7 @@ export async function handleScriptError(
   // P2-2: 捕获 worker 诊断日志
   // L9: 追加而非覆盖
   if (workerLogs.length > 0) {
-    run.state.errorLogs.push(...workerLogs);
-    if (run.state.errorLogs.length > MAX_ERROR_LOGS) {
-      run.state.errorLogs = run.state.errorLogs.slice(-MAX_ERROR_LOGS);
-    }
+    appendErrorLogs(run, workerLogs);
   }
 
   const count = (run.meta.scriptErrorCount ?? 0) + 1;
