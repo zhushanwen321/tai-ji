@@ -2,7 +2,7 @@
 
 > **本文件定位**：subagent 体系（`packages/subagent-core` / `packages/subagent-engine-sdk` / `packages/pi-subagent-cli` / `packages/zcode-subagent-cli` / `extensions/universal/subagent-workflow` 及 runtime 投影消费链）的剩余问题、待裁决项与收尾跟踪的**单一登记处**。已修复条目随修复批次移出本文件（追溯 = git log 中 2026-09-29 的 fix(subagent) 快速修复批 commit）。
 >
-> **来源**：2026-09-29 三轮对抗式架构审查（DDD 与六边形视角，关键发现全部经源码核实）+ 既有分散登记合并。修复优先级：§1 行为级缺陷各自独立可单独修；§2 结构性需 tech-design 排期；§3/§4 为一致性收敛；§5 为裁决输入。
+> **来源**：2026-09-29 三轮对抗式架构审查（DDD 与六边形视角，关键发现全部经源码核实）+ 既有分散登记合并；§1.4 / §1.5 / §2.1 / §2.2 / §2.3 的正文于 2026-09-30 按源码复核结果修正。修复优先级：§1 行为级缺陷各自独立可单独修；§2 结构性需 tech-design 排期；§3/§4 为一致性收敛；§5 为已裁决记录（四项均已定案）。
 
 ---
 
@@ -188,16 +188,21 @@
 - 真机写入侧证据：记录里字段正确携带、fold 完整走完、无 `Cannot find module _shared`；真机 kill/resume 阶段被无关缺陷（§6.2 zcode provider）阻断，**不再作为关闭前置**。
 - 语义不变：内置模板 scriptPath 缺席即报错是防注入安全设计（回退 `process.cwd()` 会打开用户目录误加载通道），修复不改变该语义。
 
-### 5.4 args 撞名防御只盖一个入口
+### 5.4 args 撞名防御只盖一个入口——裁决：**扩到所有派发入口（已实现 2026-09-30）**
 
-- 闸 4 词表（script-generate.ts:46-67 WORKER_IIFE_HOST_DECLARED_NAMES，20 名与模板 IIFE 作用域精确一致）只在 AI 生成工具路径（tool-workflow-script.ts:242）生效；手工编写/入库的 workflow 脚本顶层 `const/let/var args` 依然运行时 SyntaxError → 三次重试全灭，失败形态远离根因。
-- 待裁决：防御扩大到 resume/run 入口统一检查 vs 接受现状。
+- 问题：宿主预声明名单（20 名，与模板 IIFE 作用域机器对账）原先只在 AI 生成路径生效；手工编写或拷进来的脚本顶层重声明宿主名（`args` / `$ARGS` / `agent` / …）只会在 Worker 启动后以**异步**语法错暴露，被 worker 错误矩阵吃满 3 次重试才失败，且丢分类与行号。
+- 实现（commit `60a628383`）：新增 `orchestration/script-syntax.ts` 承载名单、语法检查与派发期错误类（`WorkflowScriptSyntaxError`）；`runWorkflow` 与 `resumeRun` 在一切副作用之前断言脚本可编译（run 未注册、run-resumed 未落），空脚本文本跳过（旧格式记录无全文）；生成路径的诊断文案保持逐字不变（CA2 前提）。
+- 回归网：两个入口各一条用例（失败零副作用）+ 内置模板对账用例（六个模板必须全部通过本闸）+ 原有无效夹具 `execute() {}` 换成合法源码。
+- 追溯 = commit `60a628383`；本条移出登记。
 
 ---
 
 ## 6. 已实施待验证（收尾跟踪）
 
-### 6.1 notify stale ctx 崩溃（见 §1.4）——待排查根因后裁决修复方向
+### 6.1 notify 陈旧上下文崩溃（见 §1.4）——机制已核实（2026-09-30），修复方向定为三段组合
+
+- 修改方向：从根源消窗口（pi 绑定代际 + dispose/reload 显式作废句柄 + 轮终收尾有界等待）+ 通知路径 best-effort 化（含 core 其余同形无保护的 `pi?.`，清单见 §1.4）+ 轮终链改为带 `.catch(bestEffort)`。三段缺一即掩盖或留后门，理由与落点见 §1.4。
+- 未核实项：本例与轮终重叠的那一次具体会话替换（需现场日志取证）、「supervisor 重启循环约 6 分钟」的归因。
 
 ### 6.2 zcode 引擎 Provider Registry / reasoningLevel 接线（2026-09-29 已落地，剩真机复验）
 
