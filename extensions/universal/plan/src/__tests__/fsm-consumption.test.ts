@@ -304,6 +304,34 @@ describe("六 action 状态写走 transition()（D1 边表接线）", () => {
     expect(states.at(-1)).toBe("approved"); // later 边
   });
 
+  it("complete later 档转移被拒（挂起窗口内 exit 交错已落终态）→ 中性 state-changed 出口，不落 approved", async () => {
+    const h = setup({ ...planningState(), state: "approved" });
+    (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
+      { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
+    ]);
+    // select 应答受控（忽略 signal，解散不代答）：挂起窗口内先让 /plan abort 介入
+    //（fresh-read 后已非 dispatching），再以「Not now」落定——later 选择与交错退出
+    // 同窗到达的真实竞态形态
+    let settleSelect: (label: string | undefined) => void = () => {};
+    (h.ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise<string | undefined>((resolve) => { settleSelect = resolve; }),
+    );
+    const pending = h.exec({ action: "complete" });
+    void h.handleCommand("abort");
+    settleSelect("Not now");
+    const res = await pending;
+
+    // later 边被 FSM 拒（现值已落 exited）：中性 state-changed 出口（与 exec_chosen
+    // ok:false 同型），不复用 APPROVED 成功文案——与真实退出态相反会误导 agent 下一步
+    expect(res.details).toEqual({ action: "review-error", reason: "out-of-order" });
+    const text = (res as { content: Array<{ text: string }> }).content[0].text;
+    expect(text).toContain("state changed");
+    expect(text).not.toContain("APPROVED");
+    // 落盘终态：dispatching（complete 入口 approve 边）→ exited（abort 介入）——无 approved 新落盘
+    const states = entries(h.pi).map((e) => e.state);
+    expect(states).toEqual(["dispatching", "exited"]);
+  });
+
   it("complete 未经审批闸口（planning 直调）→ out-of-order 纠偏，不落盘（执行前用户审批结构性保证）", async () => {
     const h = setup(planningState());
     const res = await h.exec({ action: "complete" });

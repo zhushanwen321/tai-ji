@@ -1168,9 +1168,17 @@ async function executeComplete(
     if (choice.via === "later") {
       // later 边（D1）：dispatching --later--> approved——用户显式「暂不执行」是明确选择，
       // **不是解散**，不得进 review_aborted/外部解散文案桶（否则 A9 反向重演）。
-      // 现状「Staying in plan mode」文案失真已改写；终态上 ok:false 不落盘（双保险）
       const movedLater = applyPlanEvent(current, "later");
-      if (movedLater.ok) persistPlanState(pi, current);
+      // ok:false（fresh-read 后已非 dispatching，如 exitPlanMode 交错已落 exited）不落盘
+      //（终态上不落盘 = 归口点双保险），走与下方 exec_chosen ok:false 同型的中性
+      // state-changed 出口——此时复用 APPROVED 成功文案会与真实状态相反，误导 agent 下一步
+      if (!movedLater.ok) {
+        return reviewErrorResult(
+          "out-of-order",
+          "The plan state changed while the execution-method prompt was pending — nothing was dispatched and no changes were made. Check the current plan state with the user before proceeding.",
+        );
+      }
+      persistPlanState(pi, current);
       return {
         content: [{
           type: "text" as const,
@@ -1254,7 +1262,11 @@ export function registerPlanTool(
     label: "Plan Mode",
     // 串行声明（D-B1-4）：全部 action 就地突变共享 PlanState，声明串行消除并行交错类
     //（A1 死锁机理的调度半边）。pi 0.84.4 声明粒度是工具级——同批任一 sequential 工具
-    // 使整批工具顺序执行；单行回退通道 = 移除本声明即回默认并行。
+    // 使整批工具顺序执行。pi 实装锚点：dist/core/extensions/types.d.ts:363-370（0.84.4，
+    // executionMode 是 per-tool 声明，"sequential" = this tool must execute one at a time
+    // with other tool calls）+ @earendil-works/pi-agent-core dist/agent-loop.js:287-288
+    //（0.84.4，hasSequentialToolCall = toolCalls.some(...) 命中即整批走
+    // executeToolCallsSequential）。单行回退通道 = 移除本声明即回默认并行。
     executionMode: "sequential",
     description:
       "Manages plan mode lifecycle (enter, template selection, document registration, review, state transitions). " +

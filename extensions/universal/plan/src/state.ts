@@ -53,7 +53,8 @@ export interface PlanState {
   /**
    * 生命周期状态（D1 八值，D2 取代式演进）：每次转移落盘，取代 reviewState/reviewStateSource
    * 的隐含编码（两旧键停写，仅旧 entry 映射读——见 applyPlanStateEntry）。生命周期写唯一
-   * 通道 = applyPlanEvent（transition 纯函数）。
+   * 通道 = applyPlanEvent（transition 纯函数）；登记例外 = resetPlanState 的终态直写
+   * （归口落点，非第二转移通道——因果序与幂等性质见其函数注释）。
    */
   state: PlanLifecycleState;
   /**
@@ -89,7 +90,9 @@ export const DEFAULT_PLAN_STATE: PlanState = {
  *
  * ask_user（D10/F9）：提示词 Phase B 本就指示「Use ask_user tool if available」，白名单
  * 曾把它排除（结构性禁言）。feature-tier 依赖降级：ask-user 是可禁扩展，pi setActiveTools
- * 对不存在的工具名静默跳过（0.84.4 已核实）——被禁时不报错不生效，提示词 "if available"
+ * 对不存在的工具名静默跳过——pi 实装锚点：dist/core/agent-session.js:655（0.84.4，
+ * setActiveToolsByName docstring "Only tools in the registry can be enabled. Unknown
+ * tool names are ignored."）——被禁时不报错不生效，提示词 "if available"
  * 条件语义即降级（回退对话流提问）。
  */
 export const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "plan", "ask_user"];
@@ -236,7 +239,8 @@ export function createPlanCtx(): PlanCtx {
 /**
  * 生命周期写唯一通道（D1）：六 action 的状态写全走本函数——转移成功才改 state.state，
  * 副作用（persist / 注入 / 工具集）由调用方内联在转移成功后执行；`ok:false` 不落盘、
- * 不执行副作用（终态上 ok:false 不落盘 = 归口点的兜底保险）。
+ * 不执行副作用（终态上 ok:false 不落盘 = 归口点的兜底保险）。登记例外 = resetPlanState
+ * 的终态直写（归口落点，见其函数注释）。
  */
 export function applyPlanEvent(state: PlanState, event: PlanLifecycleEvent): PlanTransitionResult {
   const result = transition(state.state, event);
@@ -334,13 +338,20 @@ export function clearRoundFields(state: PlanState): void {
 }
 
 /**
- * Reset plan state to idle, persist, and clean up session cache.
+ * Reset plan state to its inactive resting form, persist, and clean up session cache.
  *
  * 终态矩阵（D5/E10/D3 连带段）：isActive=false + state=terminal（默认 'exited'，complete
  * 终局传 'completed'）+ selfReview/resumeHint/指纹清空 + skills 清空（挂载声明失效）+
  * docs 保留——产物 tab 由 docs.length 驱动、与 isActive 解耦，执行期（approve 后）与
  * 退出后（abort 后）都可回看产物文档；reset entry 持久，重开 session 后冷启动首拉仍恢复
  * docs 显示，至下次 /plan 同 slug 覆写。
+ *
+ * 终态直写例外登记（applyPlanEvent 之外唯一 state.state 写点）：因果序 = 正常路径调用点
+ * 先行经 applyPlanEvent 完成转移（exitPlanMode 的 'exit' / executeComplete 的
+ * 'exec_chosen'），本函数随后幂等重写同值（落 isActive=false 清洗 entry，state 值不变）；
+ * 坏数据清洗腿（isActive=true 的终态/idle 残留，exitPlanMode ok:false 例外）无先行转移
+ * 可依赖，终态落点由本直写承载。非第二转移通道——不经本函数产生任何 FSM 边，19 边表
+ * 语义不受影响。
  */
 /** 空 slug 目录清理（状态审查 P3-10）：enter 即 mkdir，未产任何文档即退出会留空目录残盘。
  * 仅删「真正为空」的 slug 目录——目录里有任何残留文件（含未登记杂文件）一律保留（保守，
