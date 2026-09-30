@@ -238,8 +238,7 @@ describe("handleWorkerExit", () => {
   it("run 已终态（done）：stale 守卫前置丢弃", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
-    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：直改聚合状态的终态 fixture 须
-    // 同步注入终局事实（生产经 dispatch 链 note / 重建点 noteRebuiltSettlement）。
+    // [D6(a)] 终态 fixture 注入注册表条目（生产经 dispatch 链 note）。
     markRunTerminalDone(run);
     const deps = makeDeps();
     const handle = makeHandle(true);
@@ -294,8 +293,7 @@ describe("handleWorkerError", () => {
   it("终态（done）：stale 守卫前置丢弃（不递增 workerErrorCount）", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
-    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：直改聚合状态的终态 fixture 须
-    // 同步注入终局事实（生产经 dispatch 链 note / 重建点 noteRebuiltSettlement）。
+    // [D6(a)] 终态 fixture 注入注册表条目（生产经 dispatch 链 note）。
     markRunTerminalDone(run);
     const deps = makeDeps();
 
@@ -348,8 +346,7 @@ describe("handleScriptError", () => {
   it("terminal 状态：stale 守卫前置丢弃", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
-    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：直改聚合状态的终态 fixture 须
-    // 同步注入终局事实（生产经 dispatch 链 note / 重建点 noteRebuiltSettlement）。
+    // [D6(a)] 终态 fixture 注入注册表条目（生产经 dispatch 链 note）。
     markRunTerminalDone(run);
     const deps = makeDeps();
 

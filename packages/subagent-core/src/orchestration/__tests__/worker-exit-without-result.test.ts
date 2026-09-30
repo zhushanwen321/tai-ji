@@ -59,7 +59,6 @@ function makeRunningRun(opts: RunMockOpts = {}): WorkflowRun {
   return {
     runId: `wf-test-${++runSeq}`,
     state: {
-      status: "running",
       budget: { usedTokens: 0, usedCost: 0, isExceeded: () => false },
       errorLogs: [],
       calls: new Map(),

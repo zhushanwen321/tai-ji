@@ -135,7 +135,6 @@ function makeRun(shape: FakeRunShape): WorkflowRun {
     runId: shape.runId,
     spec: {},
     state: {
-      status: shape.status ?? "running",
       reason: shape.reason,
       scriptResult: shape.scriptResult,
       calls,

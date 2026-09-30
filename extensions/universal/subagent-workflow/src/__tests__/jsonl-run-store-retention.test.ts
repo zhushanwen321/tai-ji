@@ -63,7 +63,6 @@ function makeRunningRun(runId: string): WorkflowRun {
   const trace = new Trace();
   trace.append({ stepIndex: 0, agent: "worker", task: "do thing", model: "default", status: "pending" });
   return WorkflowRun.reconstruct(runId, makeSpec(), {
-    status: "running",
     budget: new Budget(),
     calls: new Map(),
     trace,

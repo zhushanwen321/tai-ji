@@ -45,8 +45,7 @@ function makeRun(runId: string): WorkflowRun {
     runId,
     makeSpec(),
     {
-      status: "running",
-      budget: new Budget(),
+        budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),
       errorLogs: [],

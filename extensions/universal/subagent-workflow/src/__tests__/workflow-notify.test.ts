@@ -505,7 +505,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
     const { pi, sendMessage } = makePi();
     const run: RunMock = {
       spec: { scriptName: "build" },
-      state: { status: "done", trace: { toArray: () => [] } },
+      state: { trace: { toArray: () => [] } },
     };
 
     notifyDone(pi, "wf-noreason", runAsParam(run), new Set(), undefined, settlementFor((run as { state?: { reason?: string } }).state?.reason));

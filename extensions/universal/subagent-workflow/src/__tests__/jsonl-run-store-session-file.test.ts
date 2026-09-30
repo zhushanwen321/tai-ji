@@ -367,7 +367,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     const run = WorkflowRun.reconstruct(
       runId,
       { scriptSource: "agent('x')", args: {}, scriptName: "test-script", scriptPath: "/tmp/x.js" },
-      { status: "running", budget: new Budget(), calls: new Map(), trace: new Trace(), errorLogs: [] },
+      { budget: new Budget(), calls: new Map(), trace: new Trace(), errorLogs: [] },
       { startedAt: new Date().toISOString() },
     );
     await store.save(run);
@@ -608,7 +608,7 @@ describe("D5 store stale guard：rebind 后窗口内 stale appendEntry 统一 de
       const run = WorkflowRun.reconstruct(
         "wf-stale-2",
         { scriptSource: "agent('x')", args: {}, scriptName: "test-script", scriptPath: "/tmp/x.js" },
-        { status: "done", reason: "completed", budget: new Budget(), calls: new Map(), trace: new Trace(), errorLogs: [] },
+        { reason: "completed", budget: new Budget(), calls: new Map(), trace: new Trace(), errorLogs: [] },
         { startedAt: new Date().toISOString() },
       );
       await expect(store.save(run)).resolves.toBeUndefined();

@@ -67,8 +67,8 @@ function makeRun(
   } = {},
 ): WorkflowRun {
   const status = opts.status ?? "running";
+  // [D6(a)] 聚合快照不持生命周期轴——status 选择器仅决定 reason 与注册表条目。
   const state = {
-    status,
     ...(status === "done"
       ? { reason: opts.reason ?? "completed" }
       : {}),
