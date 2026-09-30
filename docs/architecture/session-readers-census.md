@@ -139,11 +139,11 @@ grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' 
 
 **runtime 侧插件读者（readEntries 通道，非 session_tree）**：`resources/plugins/scheduler-manager`——per-session 任务镜像（累计 task op 折叠 + sinceEntryId 增量），随树语义经两通道兑现：①runtime readEntries 投影点活跃路径过滤（§4.1 末行，被撤 op 构造性不达插件）；②撤回信号 `'taiji:revoked'`（revoke-orchestrator 失效点广播 → pluginService.notifyEntryInvalidation）驱动插件丢弃累计镜像全量重建（U7）。插件不能 import runtime/extensions 包，filterActivePath 语义在插件消费面由 runtime 投影层代偿——同构实现的有意分层，非漏接。
 
-`session_tree` / `session_before_tree` 不经 RPC 事件流（extension 进程内专属）；runtime 侧完成确认走 reply + get_entries 校验。
+`session_tree` / `session_before_tree` 不经 RPC 事件流（extension 进程内专属）；runtime 侧完成确认走 reply + get_entries 校验（该读者归类登记见 §6 N13）。
 
 ## 6. 设计判定清单之外的新发现读者（已裁决）
 
-以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入面判定）：**N1-N12 全部维持照实 / 非投影归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。
+以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入面判定）：**N1-N12 全部维持照实 / 非投影归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13 为分支审查补登（2026-10-01，理由见行内）：其读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类。
 
 | # | 读者 | 归类（已裁决） | 判定理由 |
 |---|------|----------|------|
@@ -159,6 +159,7 @@ grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' 
 | N10 | runtime `btw-service` / `btw-fork-exec` | 照实 | 独立旁路文件 |
 | N11 | runtime `restore-seeding` + `session-file-streaming` | 非投影 | 逐行透传无投影可裁（文件维护管线，裁剪反而丢数据） |
 | N12 | runtime 导入族（import-source / external-scan） | 照实（非投影） | 外部目录，撤回机制不触及 |
+| N13 | runtime `revoke-orchestrator` `readTreeSnapshot`（get_entries 快照——③ 定位 / ⑤ 信令前校验共用一次拉取，⑥ 回退后校验复用同款读点；非投影构建） | 照实 | 树回退定位与活跃路径校验读者，非投影构建：校验对象是树回退定位所需的活跃路径状态（与 §4.1 U6a 重建链同语义域），但读 get_entries 全文件快照、不派生展示投影、不注入模型上下文——⑤ 幂等判定「目标不在活跃路径但全文件存在 → 已撤」正需全文件事实，按活跃路径裁剪反而使读者失效。归类照实（已发生文件事实），零追加单元；机制裁决见 ADR-0076（decisions.md:295「完成确认 = reply 后 get_entries 校验」） |
 
 ## 7. 已知边界登记
 
