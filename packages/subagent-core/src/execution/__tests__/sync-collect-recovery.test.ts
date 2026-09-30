@@ -268,8 +268,8 @@ describe("[collect 退役] 存量 entry 读侧守卫 + entry-born orphan 收编�
     expect(overwritten.stopReason).toBe("completed");
     expect(overwritten.result).toBe("kill-9 full result body");
     expect(overwritten.model).toBe("prov/round-m");
-    // 不写 .state 防重锚（writeFinalizedState(file,"gc") 写点已删；幂等由「纠偏
-    // entry 落盘后末条变 idle，判据不再命中」构造性承接）
+    // 不写 .state 防重锚（`.state` 收条已整体退场；幂等由「纠偏 entry 落盘后末条
+    // 变 idle，判据不再命中」构造性承接）
     expect(fs.existsSync(`${childFile}.state`)).toBe(false);
     void recovery; // [collect 退役] 原批恢复调用已随批机制删除，实例仅供下方自检链复用
 

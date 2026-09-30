@@ -62,7 +62,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     manifestDir = path.join(tmpDir, "records");
     store = makeStore(sessionsDir, manifestDir);
     sessionFile = path.join(sessionsDir, "2026-01-01_uuid.jsonl");
-    fs.writeFileSync(sessionFile, "{}\n", "utf-8"); // 锚文件在盘（writeSettledState 写 sidecar 同目录）
+    fs.writeFileSync(sessionFile, "{}\n", "utf-8"); // 锚文件在盘（binding 快照写 sidecar 同目录）
   });
 
   afterEach(() => {

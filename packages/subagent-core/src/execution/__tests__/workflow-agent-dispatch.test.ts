@@ -391,9 +391,8 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     const run = soleRun(fake);
     const record = runningRecord(store);
 
-    // [H4/U5 适配] sessionFile 必须是真实可写路径（mkdtemp 下）——假路径触发
-    // writeFinalizedState ENOENT 重试耗尽 → markFinalized false 不 archive，
-    // 旧断言（终态化 + archive）随终态原语同步写权威化而失效。
+    // [H4/U5 适配] sessionFile 必须是真实可写路径（mkdtemp 下）——假路径会让
+    // 终态落账（事件 + binding 快照）失败，旧断言（终态化 + archive）随之失效。
     fs.mkdirSync(path.join(tmpRoot, "wf"), { recursive: true });
     const sessionFile = path.join(tmpRoot, "wf", "session.jsonl");
     run.settle({
