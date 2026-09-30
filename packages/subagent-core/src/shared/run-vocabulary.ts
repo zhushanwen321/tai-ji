@@ -132,3 +132,27 @@ export const RUN_EVENT_JOURNAL_SUFFIX = ".record.jsonl";
  * 与壳侧 tool schema maxLength 共享引用。
  */
 export const SLUG_MAX_LENGTH = 35;
+
+/**
+ * [D1 Class B1] run journal 事件词表（**词表本体**下沉；事件载荷接口仍留
+ * orchestration/run-events.ts，因为它们引用 workflow 侧 AgentResult——那是待归位的
+ * 同名类型）。
+ *
+ * 为什么先下沉词表：journal 实现要搬到 `execution/persistence/`（Class B2），行校验
+ * 需要 `RUN_EVENT_TYPES` 这个**值**；值不能反向依赖 orchestration（值依赖环检查禁），
+ * 而事件接口只作**类型**导入即可（类型边被值依赖环检查忽略）。故词表下沉、接口留原位，
+ * B2 才成立。
+ */
+export const RUN_EVENT_TYPES = [
+  "run-created",
+  "phase-started",
+  "agent-started",
+  "agent-retrying",
+  "agent-settled",
+  "phase-settled",
+  "run-interrupted",
+  "run-resumed",
+  "run-settled",
+  "worker-log",
+] as const;
+export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
