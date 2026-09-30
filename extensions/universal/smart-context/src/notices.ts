@@ -37,7 +37,10 @@ export type SmartContextNoticeSource =
  *
  * `deliverAs:'nextTurn'` 是投递车道（pi 实装分支序：nextTurn 分支先命中，`triggerTurn`
  * 不再参与判定）；`triggerTurn:false` 是意图的显式声明（双写防未来实现分支序漂移）。
- * `display:true` 保持通知在对话流可见（改造前 sendUserMessage 的用户消息形态等价物）。
+ * `display:true` 使通知在对话流可见——分车道语义（D4①）：compact-result 两条（complete/
+ * failed）改造前即 display:true 系统消息，可见性保持；阈值提醒/模型跨界/downshift 三条
+ * 改造前 display:false 静默（只进 LLM 上下文，不进对话流），随 nextTurn 车道统一转
+ * display:true 可见。
  */
 export function sendSmartContextNotice(
 	pi: Pick<ExtensionAPI, "sendMessage">,
