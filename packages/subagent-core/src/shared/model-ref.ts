@@ -39,15 +39,14 @@ export interface ModelRefSource {
 /**
  * thinking level 支持顺序（低→高）。spawn 侧 `:level` 后缀仅接受本白名单值。
  *
- * 本数组为 packages 侧有序数组副本；其余两处——extensions 侧 llm-shared 一处
- * （isThinkingLevel，extensions/shared/llm-shared/src/resolve.ts）与 packages 侧
- * pi-rpc 协议包被迫独立一处（packages/pi-rpc/src/types.ts THINKING_LEVELS，
- * 禁 subagent-core 依赖所致）。
- * 词表变更须三处同步（词表守卫 scripts/check-thinking-levels.mjs 比对
- * pi-ai ↔ llm-shared + pi-rpc + 本数组三副本，本数组为 T3 比对面
- * 〔ext-simplify-18 D6〕——成员集合一致性校验，不判低→高顺序）。
- * ext-simplify-17 D5 双登记裁决：两侧注释互指关联，不建跨包 import
- * （universal 角色包禁 import subagent-core，反向则 shared 库依赖 packages/ 破坏分层）。
+ * 本数组是宿主侧校验用的有序词表副本，为词表守卫 scripts/check-thinking-levels.mjs
+ * 的 T3 比对面〔ext-simplify-18 §3.4 D6〕：守卫在提交期把 pi-ai 实装的
+ * ModelThinkingLevel 联合与两份职责不同的词表单向比对——本数组（宿主校验用）+
+ * 前端派生源 shared PI_THINKING_LEVELS（packages/shared/src/pi-preset.ts，T4）。
+ * 比对语义 = 成员集合一致性，不判低→高顺序；顺序语义由本包自身测试锚定
+ * （__tests__/model-ref.test.ts「THINKING_ORDER SSOT：白名单全集顺序稳定」）。
+ * 与 PI_THINKING_LEVELS 分层约束禁跨包 import，故两份共存（pi-preset.ts 头注
+ * 同款互指），不建跨包 import。
  */
 export const THINKING_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
