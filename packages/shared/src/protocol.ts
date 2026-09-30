@@ -1861,8 +1861,10 @@ export interface ServerMessageMapBase {
   'delivery.resync': DeliveryResyncReply
   // session.subscribe（wave:runtime-wiring）：session.subscribe RPC 的 reply payload（IF6 契约）。
   // snapshot：订阅时刻 bus ring 内当前事件序列（元素为带 seq 的 ServerMessage），renderer 据此 reconcile。
-  // stateSnapshot：6 个 state topic（commands/context/subagents/workflows/state_changed/occupancy）
-  //   的 last-value 数组拷贝（wave:remove-bandaids 新增，后补 state_changed/occupancy 两键）。
+  // stateSnapshot：全部 state topic 的 last-value 数组拷贝——快照来源清单不在此枚举，以
+  //   packages/runtime/src/services/message-bus/message-bus.ts 的 STATE_TYPE_KEY_MAP（静态
+  //   typeKey）与 STATE_TYPE_KEY_PAYLOAD_DERIVED（载荷派生 typeKey）为权威；新增 state topic
+  //   登记进表即自动进快照，无需同步本注释。
   //   让 renderer subscribe 后一次性把 commands/context/subagents 的
   //   当前状态灌入对应 store（dispatch 到 events 通道 → routeInbound 兜底分支 applyRecords），
   //   替代 selectSession/submitFirstMessage 内的主动拉取 RPC 兜底。stateSnapshot 与 snapshot 独立：
@@ -2754,9 +2756,10 @@ export interface ReplyPayloadMap {
   // payload 消费型——renderer 读 snapshot 做 reconcile（订阅时刻 bus ring 内当前事件序列，
   // 元素为带 seq 的 ServerMessage），记 lastSeq 作为后续 gap 检测基线；gap=true 标记本次
   // snapshot 因 ring 容量溢出存在缺口（renderer 需全量重拉而非增量 backfill）。
-  // stateSnapshot（wave:remove-bandaids）：6 个 state topic（commands/context/subagents/
-  // workflows/state_changed/occupancy）的 last-value 数组拷贝，让 renderer
-  // subscribe 后一次性把 commands/context/subagents 的当前状态灌入对应 store，替代主动拉取兜底。
+  // stateSnapshot（wave:remove-bandaids）：全部 state topic 的 last-value 数组拷贝——快照来源
+  // 清单以 packages/runtime/src/services/message-bus/message-bus.ts 的 STATE_TYPE_KEY_MAP /
+  // STATE_TYPE_KEY_PAYLOAD_DERIVED 为权威，让 renderer subscribe 后一次性把
+  // commands/context/subagents 的当前状态灌入对应 store，替代主动拉取兜底。
   'session.subscribe': ServerMessageMap['session.subscribe']
   // session.unsubscribe（runtime-message-bus wave:protocol-seq）：取消订阅，ack 型。
   // 与 session.handoff/session.abortHandoff/message.abort 同模式，renderer register<void>
