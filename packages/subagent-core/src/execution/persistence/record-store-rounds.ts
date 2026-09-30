@@ -33,7 +33,7 @@ import {
   INITIAL_RECORD_EVENT_FOLD_STATE,
   applyRecordEvent,
   createRecordEventJournal,
-  foldRecordJournalEvents,
+  foldRecordEvents,
   parseRecordEventFileLine,
   recordEventsPath,
 } from "./record-events.ts";
@@ -334,7 +334,7 @@ export function adoptEngineDeathImpl(id: string, opts: { error: string }, ctx: R
 // 同步性设计（写点是同步方法，pi 工具 handler 同步链直调）：
 // - foldOf **同步**返回——缓存 miss 时 readFileSync 全量 fold 装载（u0 scan 的
 //   async 形态面向 U3 tail 消费；写点判定链需要同步值，此处用导出的
-//   parseRecordEventFileLine + foldRecordJournalEvents 组合同义装载，行解析与
+//   parseRecordEventFileLine + foldRecordEvents 组合同义装载，行解析与
 //   fold 语义单源复用，不重复实现）；
 // - append 走 u0 原语（createRecordEventJournal——seq 分配权与头行契约单点），
 //   fire-and-forget 但落盘同步完成（appendFileSync 在调用轮内执行）；缓存增量
@@ -385,7 +385,7 @@ export class RecordJournalWriteFace {
       const event = parseRecordEventFileLine(line);
       if (event !== undefined) events.push(event); // 空行/头行/坏行跳过（u0 行解析器内消化）
     }
-    const state = foldRecordJournalEvents(events);
+    const state = foldRecordEvents(events);
     this.foldCache.set(id, state);
     return state;
   }

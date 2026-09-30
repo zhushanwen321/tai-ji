@@ -28,7 +28,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   applyRecordEvent,
   createRecordEventJournal,
-  foldRecordJournalEvents,
+  foldRecordEvents,
   INITIAL_RECORD_EVENT_FOLD_STATE,
   isRecordJournalHeader,
   parseRecordEventFileLine,
@@ -234,7 +234,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
   }
 
   it("全量 fold：身份/绑定/轮/epoch/水位逐字段落位", () => {
-    const state = foldRecordJournalEvents(lifecycleEvents());
+    const state = foldRecordEvents(lifecycleEvents());
     expect(state.identity?.id).toBe("sa-test-1");
     expect(state.bound?.engine).toBe("pi");
     expect(state.epoch).toBe(1);
@@ -245,37 +245,37 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
   });
 
   it("settled 非吸收：record-settled 落终态，reopened/round-started 清除（可续实体回边）", () => {
-    const throughSettle = foldRecordJournalEvents(lifecycleEvents().slice(0, 5));
+    const throughSettle = foldRecordEvents(lifecycleEvents().slice(0, 5));
     expect(throughSettle.settled?.stopReason).toBe("completed");
-    const afterReopen = foldRecordJournalEvents(lifecycleEvents().slice(0, 6));
+    const afterReopen = foldRecordEvents(lifecycleEvents().slice(0, 6));
     expect(afterReopen.settled).toBeUndefined();
     expect(afterReopen.epoch).toBe(1);
     expect(afterReopen.round).toBe(0);
   });
 
   it("fold 幂等：同一序列重放产出逐字段相等 state（验收①）", () => {
-    const first = foldRecordJournalEvents(lifecycleEvents());
-    const second = foldRecordJournalEvents(lifecycleEvents());
+    const first = foldRecordEvents(lifecycleEvents());
+    const second = foldRecordEvents(lifecycleEvents());
     expect(second).toEqual(first);
   });
 
   it("增量 fold = 全量 fold：分两段以中间 state 续 fold，结果等价", () => {
     const events = lifecycleEvents();
-    const midState = foldRecordJournalEvents(events.slice(0, 4));
-    const incremental = foldRecordJournalEvents(events.slice(4), midState);
-    expect(incremental).toEqual(foldRecordJournalEvents(events));
+    const midState = foldRecordEvents(events.slice(0, 4));
+    const incremental = foldRecordEvents(events.slice(4), midState);
+    expect(incremental).toEqual(foldRecordEvents(events));
   });
 
   it("seq 重放去重：同一序列两遍拼接（截断重读形态）不重复应用（onSkipped 出声）", () => {
     const events = lifecycleEvents();
     const skipped: Array<{ seq: number; why: string }> = [];
-    const state = foldRecordJournalEvents(
+    const state = foldRecordEvents(
       [...events, ...events],
       INITIAL_RECORD_EVENT_FOLD_STATE,
       (event, why) => skipped.push({ seq: event.seq, why }),
     );
     // 重放段全部被 seq 守卫拦下，状态与单遍 fold 等价
-    expect(state).toEqual(foldRecordJournalEvents(events));
+    expect(state).toEqual(foldRecordEvents(events));
     expect(skipped).toHaveLength(events.length);
     expect(skipped.every((s) => s.why === "seq-regression")).toBe(true);
   });
@@ -287,7 +287,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
       events[4]!,
       events[1]!, // 回退：seq 2 ≤ 水位 5 → 跳过
     ];
-    const state = foldRecordJournalEvents(regressed);
+    const state = foldRecordEvents(regressed);
     expect(state.lastSeq).toBe(5);
     expect(state.settled?.seq).toBe(5);
     expect(state.bound).toBeUndefined(); // 被跳过的回退行未应用
@@ -302,8 +302,8 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
   });
 
   it("空序列 / 残文件（无 created 帧）宽容：identity 缺席不炸", () => {
-    expect(foldRecordJournalEvents([])).toEqual(INITIAL_RECORD_EVENT_FOLD_STATE);
-    const orphan = foldRecordJournalEvents([{ type: "record-round-idle", seq: 1, ts: 1, stopReason: "completed", turns: 1, totalTokens: 1 }]);
+    expect(foldRecordEvents([])).toEqual(INITIAL_RECORD_EVENT_FOLD_STATE);
+    const orphan = foldRecordEvents([{ type: "record-round-idle", seq: 1, ts: 1, stopReason: "completed", turns: 1, totalTokens: 1 }]);
     expect(orphan.identity).toBeUndefined();
     expect(orphan.roundIdle?.turns).toBe(1);
   });
@@ -324,7 +324,7 @@ describe("journal 写读闭环（append → scan → fold）", () => {
     );
     appended.push(await journal.append("sa-1", settledInput()));
     const scanned = await journal.scan("sa-1");
-    expect(foldRecordJournalEvents(scanned)).toEqual(foldRecordJournalEvents(appended));
+    expect(foldRecordEvents(scanned)).toEqual(foldRecordEvents(appended));
   });
 
   it("scan 非头行起始的文件：头行缺席时事件照常解析（头行是写侧契约，读侧宽容）", async () => {

@@ -329,7 +329,7 @@ export {
 } from "./execution/persistence/record-entry.ts";
 export {
   createRecordEventJournal,
-  foldRecordJournalEvents,
+  foldRecordEvents,
   INITIAL_RECORD_EVENT_FOLD_STATE,
   parseRecordEventFileLine,
   recordEventsPath,

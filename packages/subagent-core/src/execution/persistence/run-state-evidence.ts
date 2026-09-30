@@ -28,7 +28,7 @@ import type {
 } from "./record-events.ts";
 import {
   createRecordEventJournal,
-  foldRecordJournalEvents,
+  foldRecordEvents,
   RECORD_EVENTS_SUFFIX,
 } from "./record-events.ts";
 import {
@@ -364,7 +364,7 @@ async function pruneTerminalRecordEventFiles(
       deps.debug(`state retention: record events scan failed, skipped ${name}: ${deps.toMsg(err)}`);
       continue;
     }
-    const fold = foldRecordJournalEvents(events);
+    const fold = foldRecordEvents(events);
     if (fold.settled !== undefined) {
       result.eligible += 1;
       if (retentionMs !== undefined && now - fold.settled.ts > retentionMs) {

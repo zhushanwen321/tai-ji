@@ -50,7 +50,7 @@ import type { StatusFilter } from "../persistence/record-store.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { manifestToSubagent, stateMarkerFromFold, v2PairToRecord } from "../persistence/record-store-rebuild.ts";
 import type { V2EntryPair } from "../persistence/record-store-rebuild.ts";
-import { foldRecordJournalEvents } from "../persistence/record-events.ts";
+import { foldRecordEvents } from "../persistence/record-events.ts";
 import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
 // [登记 §3.3] v2 两条款条目播种辅助（v1 全量快照写点已随兼容层删除）。
@@ -1792,7 +1792,7 @@ describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
   };
 
   it("settled 在场 → 终局收条（reason/endedAt 取 settled）", () => {
-    const fold = foldRecordJournalEvents([idleEvent, settledEvent]);
+    const fold = foldRecordEvents([idleEvent, settledEvent]);
     expect(stateMarkerFromFold(fold)).toEqual({
       status: "idle",
       reason: "completed",
@@ -1801,7 +1801,7 @@ describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
   });
 
   it("仅 round-idle 在场 → 轮终收条（endedAt 取该事件时间）", () => {
-    const fold = foldRecordJournalEvents([idleEvent]);
+    const fold = foldRecordEvents([idleEvent]);
     expect(stateMarkerFromFold(fold)).toEqual({
       status: "idle",
       reason: "completed",
@@ -1810,7 +1810,7 @@ describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
   });
 
   it("轮终收条之后又有轮开始 → undefined（续轮记录不继承上一轮停因）", () => {
-    const fold = foldRecordJournalEvents([
+    const fold = foldRecordEvents([
       idleEvent,
       { type: "record-round-started", seq: 3, ts: 3000, round: 2, epoch: 0 },
     ]);
@@ -1819,6 +1819,6 @@ describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
 
   it("无收条事件 / 无折叠 → undefined（在途中断，与 sidecar 缺席同语义）", () => {
     expect(stateMarkerFromFold(undefined)).toBeUndefined();
-    expect(stateMarkerFromFold(foldRecordJournalEvents([]))).toBeUndefined();
+    expect(stateMarkerFromFold(foldRecordEvents([]))).toBeUndefined();
   });
 });

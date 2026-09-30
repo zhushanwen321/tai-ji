@@ -17,7 +17,7 @@
 //    即忽略，零成本）；
 // 4. journal 读写原语（createRecordEventJournal：append 单调分配 seq + scan 坏行
 //    宽容跳过）；
-// 5. fold 纯函数族（applyRecordEvent 单步 + foldRecordJournalEvents 全量/
+// 5. fold 纯函数族（applyRecordEvent 单步 + foldRecordEvents 全量/
 //    增量共用——增量 = 以既有 state 为 initial 重入，seq 单调守卫保证幂等）。
 //
 // 落点裁决（D3）：`<recordsDir>/<sa-id>.events`（与 manifest 同目录同主名，寻址 =
@@ -130,7 +130,7 @@ export type RecordEventType = (typeof RECORD_EVENT_TYPES)[number];
  *
  * seq（1 起严格递增，同一文件内全序）：同一事件的唯一行身份——W2 通知去重键
  * （终态事件身份）的载体 + tail 截断重建后全量重读的 fold 去重依据（seq ≤ 已见
- * 水位的行按重放跳过，见 foldRecordJournalEvents）。ts 对齐 run 侧 EventEnvelope
+ * 水位的行按重放跳过，见 foldRecordEvents）。ts 对齐 run 侧 EventEnvelope
  * 的投影需求（fold 派生统计/新鲜度判据消费墙钟）。
  */
 export interface RecordEventEnvelope {
@@ -384,7 +384,7 @@ export const INITIAL_RECORD_EVENT_FOLD_STATE: RecordJournalFoldState = {
 /**
  * 单步应用（纯函数，不可变更新）。
  *
- * seq 守卫不在此层——apply 假定调用方已去重（foldRecordJournalEvents 统一把关；
+ * seq 守卫不在此层——apply 假定调用方已去重（foldRecordEvents 统一把关；
  * U1/U3 直接复用 fold 入口而非手写 apply 循环，守卫单点）。
  */
 export function applyRecordEvent(
@@ -432,7 +432,7 @@ export function applyRecordEvent(
  * - seq 跳号（gap）宽容放行——单写者 append-only 下 gap 仅在外部编辑时出现，
  *   宽容跳过语义不炸投影（与 run 侧 foldRunEventFrames 的坏帧行为同一精神）。
  */
-export function foldRecordJournalEvents(
+export function foldRecordEvents(
   events: readonly RecordJournalEvent[],
   initial: RecordJournalFoldState = INITIAL_RECORD_EVENT_FOLD_STATE,
   onSkipped?: (event: RecordJournalEvent, why: "seq-regression") => void,

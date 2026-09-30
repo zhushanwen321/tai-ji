@@ -1230,7 +1230,7 @@ function applyAskFoldEvent(
  * 不写，骨架与状态同停在最近一致态。纯函数：初值 checkpoint（含 asks/phases
  * Map）不被变异（applyAskFoldEvent 写时克隆）。
  *
- * seq 守卫（幂等语义，与 record 侧 foldRecordJournalEvents 同构）：
+ * seq 守卫（幂等语义，与 record 侧 foldRecordEvents 同构）：
  * - seq ≤ 既有水位的事件行按重放跳过——tail 截断/重建后的幂等全量重读（D6
  *   原语）靠它构造性去重，重读不产生重复应用；
  * - seq 跳号（gap）宽容放行——单写者 append-only 下 gap 仅在外部编辑时出现；

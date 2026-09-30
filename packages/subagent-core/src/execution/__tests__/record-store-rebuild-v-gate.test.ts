@@ -29,7 +29,7 @@ import type {
   SubagentRecordSettledEntryData,
 } from "../persistence/record-entry.ts";
 import {
-  foldRecordJournalEvents,
+  foldRecordEvents,
   type RecordBoundEvent,
   type RecordCreatedEvent,
   type RecordJournalEvent,
@@ -337,7 +337,7 @@ const MANIFEST: ManifestRecord = {
 };
 
 function foldOf(events: readonly RecordJournalEvent[]): RecordJournalFoldState {
-  return foldRecordJournalEvents(events);
+  return foldRecordEvents(events);
 }
 
 describe("resolveRecordIdentity：三级优先级（fold > binding > manifest）", () => {

@@ -40,7 +40,7 @@ import {
   classifySubagentRecordEntryData,
   classifyWorkflowRecordEntryData,
   createEventDirectoryTailer,
-  foldRecordJournalEvents,
+  foldRecordEvents,
   INITIAL_RECORD_EVENT_FOLD_STATE,
   parseRecordEventFileLine,
   RECORD_EVENTS_SUFFIX,
@@ -749,7 +749,7 @@ export class SessionJournalProjection {
     if (this.disposed || events.length === 0) return
     const id = recordIdOfFilename(filename)
     const current = this.sources.recordFolds.get(id) ?? INITIAL_RECORD_EVENT_FOLD_STATE
-    this.sources.recordFolds.set(id, foldRecordJournalEvents([...events], current))
+    this.sources.recordFolds.set(id, foldRecordEvents([...events], current))
     this.recompute()
     this.fireChange()
   }

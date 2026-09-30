@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createRecordEventJournal,
-  foldRecordJournalEvents,
+  foldRecordEvents,
   parseRecordEventFileLine,
   type RecordJournalEvent,
 } from "../persistence/record-events.ts";
@@ -211,7 +211,7 @@ describe("验收⑤：续读拼接 ≡ 全量 fold（fixture 含中部坏行 + �
     const tailEvents = [...seg1.events, ...seg2.events, ...seg3.events];
     const fullChunk = readEventTail(filePath, 0, parseRecordEventFileLine);
     expect(tailEvents).toEqual(fullChunk.events);
-    expect(foldRecordJournalEvents(tailEvents)).toEqual(foldRecordJournalEvents(fullChunk.events));
+    expect(foldRecordEvents(tailEvents)).toEqual(foldRecordEvents(fullChunk.events));
     // 全量读 skipped = 头行 1 + 坏行 1（tail 续读不重算头行）
     expect(fullChunk.skippedLines).toBe(2);
   });
