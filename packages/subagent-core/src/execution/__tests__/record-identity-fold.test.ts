@@ -25,9 +25,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import {
-  createRecordEventJournal,
+  createRecordEventStream,
   recordEventsPath,
-  toRecordJournalHeader,
+  toRecordEventHeader,
 } from "../persistence/record-events.ts";
 import { RECORD_BINDING_SIDECAR_EXT } from "../persistence/state-marker.ts";
 
@@ -66,7 +66,7 @@ function writeIdentityLessChildSession(sessionsDir: string): string {
 /** 事件流身份 fixture：record-created（全身份域 + model/thinkingLevel/worktree）。
  *  经生产 journal 写入（非手写帧——seq 分配与头行契约单源）。 */
 async function seedCreatedFrame(recordsDir: string): Promise<void> {
-  const journal = createRecordEventJournal(recordsDir);
+  const journal = createRecordEventStream(recordsDir);
   await journal.append(RECORD_ID, {
     type: "record-created",
     ts: STARTED_AT,
@@ -116,14 +116,14 @@ function seedCorruptCreatedFrame(recordsDir: string, sessionFile: string): void 
   };
   fs.writeFileSync(
     recordEventsPath(recordsDir, RECORD_ID),
-    `${JSON.stringify(toRecordJournalHeader(RECORD_ID))}\n${JSON.stringify(created)}\n${JSON.stringify(bound)}\n`,
+    `${JSON.stringify(toRecordEventHeader(RECORD_ID))}\n${JSON.stringify(created)}\n${JSON.stringify(bound)}\n`,
     "utf-8",
   );
 }
 
 /** record-bound 帧（折叠腿与子文件的唯一结构链接：sessionFile）。 */
 async function seedBoundFrame(recordsDir: string, sessionFile: string): Promise<void> {
-  const journal = createRecordEventJournal(recordsDir);
+  const journal = createRecordEventStream(recordsDir);
   await journal.append(RECORD_ID, {
     type: "record-bound",
     ts: STARTED_AT + 500,
@@ -136,7 +136,7 @@ async function seedBoundFrame(recordsDir: string, sessionFile: string): Promise<
 
 /** 终局帧（收条换源面：终态收条 = 折叠结果，非 .state sidecar）。 */
 async function seedSettledFrame(recordsDir: string): Promise<void> {
-  const journal = createRecordEventJournal(recordsDir);
+  const journal = createRecordEventStream(recordsDir);
   await journal.append(RECORD_ID, {
     type: "record-settled",
     ts: STARTED_AT + 2000,

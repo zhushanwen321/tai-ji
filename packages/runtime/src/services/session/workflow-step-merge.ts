@@ -1,11 +1,11 @@
 /**
  * workflow 步骤视图合并投影（W0 / 设计 workflow-step-visibility-data-source D2；
- * W1 换源后输入改喂 journal 投影，纯函数本体保留）。
+ * W1 换源后输入改喂 事件投影，纯函数本体保留）。
  *
  * 职责：以 workflow 投影的 trace 节点为骨架（stepIndex/phase/agent/task），subagent
  * 投影按 (parentRunId, stepIndex) 圈定候选集后合并——「① 供编排结构，② 供运行时
  * 状态」。phase 供源两代（W1 D6）：v1 快照 trace 节点自带 phase（停写，兼容读）；
- * v2 = journal agent-started 载荷 phase（现役——events-projection fold 恢复 +
+ * v2 = 事件流 agent-started 载荷 phase（现役——events-projection fold 恢复 +
  * projectV2Workflow 透传）。
  *
  * 三条规则（设计 D2）：
@@ -20,7 +20,7 @@
  *   trace 有而候选无（派发前置失败早退，无 record）→ 维持 ① 原样。
  *
  * 纯函数模块：冷启动（extractWorkflowsFromSessionFile 组合扫描）与实时增量
- * （events-projection.recompute → mergeJournalProjection 内单点跑本函数的
+ * （events-projection.recompute → mergeEventProjection 内单点跑本函数的
  * mergeWorkflowStepRecords，W1 D6 换源——session-records 缓存是投影合并快照的镜像）
  * 共用本函数（D5 冷热同代码）；合并消费内存中的已解析投影数组，不触碰文件系统
  * （D5 禁双读盘约束）。

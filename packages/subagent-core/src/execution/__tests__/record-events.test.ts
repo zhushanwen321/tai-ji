@@ -27,20 +27,20 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   applyRecordEvent,
-  createRecordEventJournal,
+  createRecordEventStream,
   foldRecordEvents,
   INITIAL_RECORD_EVENT_FOLD_STATE,
-  isRecordJournalHeader,
+  isRecordEventHeader,
   parseRecordEventFileLine,
   parseRecordEventLine,
   RECORD_EVENT_TYPES,
   recordEventsPath,
   RECORD_EVENTS_SUFFIX,
   RECORD_EVENTS_HEADER_TYPE,
-  toRecordJournalHeader,
+  toRecordEventHeader,
   type RecordCreatedEvent,
-  type RecordJournalEvent,
-  type RecordJournalEventInput,
+  type RecordEvent,
+  type RecordEventInput,
   type RecordSettledEvent,
 } from "../persistence/record-events.ts";
 
@@ -114,25 +114,25 @@ describe("词表钉住（D3 映射表逐项对应——恰好 6 类）", () => {
 
 describe("首行头行形态（写侧契约：文件创建时恰一行）", () => {
   it("头行序列化形态 = {\"type\":\"record-events\",\"id\":...}", () => {
-    expect(JSON.stringify(toRecordJournalHeader("sa-1"))).toBe('{"type":"record-events","id":"sa-1"}');
+    expect(JSON.stringify(toRecordEventHeader("sa-1"))).toBe('{"type":"record-events","id":"sa-1"}');
   });
 
-  it("isRecordJournalHeader 判定（id 非空字符串）", () => {
-    expect(isRecordJournalHeader({ type: "record-events", id: "sa-1" })).toBe(true);
-    expect(isRecordJournalHeader({ type: "record-events" })).toBe(false);
-    expect(isRecordJournalHeader({ type: "record-events", id: "" })).toBe(false);
-    expect(isRecordJournalHeader({ type: "record-created", id: "sa-1" })).toBe(false);
-    expect(isRecordJournalHeader(null)).toBe(false);
+  it("isRecordEventHeader 判定（id 非空字符串）", () => {
+    expect(isRecordEventHeader({ type: "record-events", id: "sa-1" })).toBe(true);
+    expect(isRecordEventHeader({ type: "record-events" })).toBe(false);
+    expect(isRecordEventHeader({ type: "record-events", id: "" })).toBe(false);
+    expect(isRecordEventHeader({ type: "record-created", id: "sa-1" })).toBe(false);
+    expect(isRecordEventHeader(null)).toBe(false);
   });
 
   it("首写自动落头行 + 首事件（文件创建点）；续写不重复头行", async () => {
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     await journal.append("sa-1", createdInput());
     await journal.append("sa-1", settledInput());
     const content = fs.readFileSync(recordEventsPath(recordsDir, "sa-1"), "utf8");
     const lines = content.split("\n").filter((l) => l.trim().length > 0);
     expect(lines).toHaveLength(3);
-    expect(isRecordJournalHeader(JSON.parse(lines[0]!))).toBe(true);
+    expect(isRecordEventHeader(JSON.parse(lines[0]!))).toBe(true);
     expect(JSON.parse(lines[1]!).type).toBe("record-created");
     expect(JSON.parse(lines[2]!).type).toBe("record-settled");
   });
@@ -140,7 +140,7 @@ describe("首行头行形态（写侧契约：文件创建时恰一行）", () =
 
 describe("journal 读写原语（seq 单调分配 / scan 宽容解析）", () => {
   it("append 分配行级单调 seq（1 起严格递增）并返回完整事件", async () => {
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     const first = await journal.append("sa-1", createdInput());
     const second = await journal.append("sa-1", {
       type: "record-round-started",
@@ -154,13 +154,13 @@ describe("journal 读写原语（seq 单调分配 / scan 宽容解析）", () =>
   });
 
   it("跨 journal 实例续写：seq 从文件末水位 +1（重启后续写不回退）", async () => {
-    await createRecordEventJournal(recordsDir).append("sa-1", createdInput());
-    const second = await createRecordEventJournal(recordsDir).append("sa-1", settledInput());
+    await createRecordEventStream(recordsDir).append("sa-1", createdInput());
+    const second = await createRecordEventStream(recordsDir).append("sa-1", settledInput());
     expect(second.seq).toBe(2);
   });
 
   it("scan 返回写入序事件（头行不在其中）", async () => {
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     await journal.append("sa-1", createdInput());
     await journal.append("sa-1", settledInput());
     const events = await journal.scan("sa-1");
@@ -168,11 +168,11 @@ describe("journal 读写原语（seq 单调分配 / scan 宽容解析）", () =>
   });
 
   it("scan 对不存在文件返回空流（record 未落账 / 已清理）", async () => {
-    expect(await createRecordEventJournal(recordsDir).scan("sa-none")).toEqual([]);
+    expect(await createRecordEventStream(recordsDir).scan("sa-none")).toEqual([]);
   });
 
   it("scan 中部坏行宽容跳过（不完整 JSON 行）——事件流不因坏行截断", async () => {
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     await journal.append("sa-1", createdInput());
     await journal.append("sa-1", settledInput());
     // 手工注入坏行于两事件之间（模拟磁盘半写/外部编辑）
@@ -213,7 +213,7 @@ describe("行解析（parseRecordEventLine / parseRecordEventFileLine）", () =>
 
 describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
   /** 全生命周期样例序列（含 round 往返与 reopen 回边）。 */
-  function lifecycleEvents(): RecordJournalEvent[] {
+  function lifecycleEvents(): RecordEvent[] {
     return [
       { ...createdInput(), seq: 1 },
       {
@@ -282,7 +282,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
 
   it("seq 回退边界：乱序行（seq ≤ 水位）跳过、不炸、不回滚状态", () => {
     const events = lifecycleEvents();
-    const regressed: RecordJournalEvent[] = [
+    const regressed: RecordEvent[] = [
       events[0]!,
       events[4]!,
       events[1]!, // 回退：seq 2 ≤ 水位 5 → 跳过
@@ -311,8 +311,8 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
 
 describe("journal 写读闭环（append → scan → fold）", () => {
   it("落盘事件经 scan 回读后 fold，与内存构造的事件 fold 等价", async () => {
-    const journal = createRecordEventJournal(recordsDir);
-    const appended: RecordJournalEvent[] = [];
+    const journal = createRecordEventStream(recordsDir);
+    const appended: RecordEvent[] = [];
     appended.push(await journal.append("sa-1", createdInput()));
     appended.push(
       await journal.append("sa-1", {
@@ -335,7 +335,7 @@ describe("journal 写读闭环（append → scan → fold）", () => {
       `${JSON.stringify({ ...createdInput({ id: "sa-2" }), seq: 1 })}\n`,
       "utf8",
     );
-    const events = await createRecordEventJournal(recordsDir).scan("sa-2");
+    const events = await createRecordEventStream(recordsDir).scan("sa-2");
     expect(events.map((e) => e.type)).toEqual(["record-created"]);
     expect(events[0]?.seq).toBe(1);
   });

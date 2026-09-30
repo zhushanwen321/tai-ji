@@ -36,7 +36,7 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
-import { createRecordEventJournal } from "../persistence/record-events.ts";
+import { createRecordEventStream } from "../persistence/record-events.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { SubagentService } from "../subagent-service.ts";
@@ -146,7 +146,7 @@ function readDisposedState(
 }
 
 async function seedCreatedJournalFrame(recordsDir: string, id: string): Promise<void> {
-  await createRecordEventJournal(recordsDir).append(id, {
+  await createRecordEventStream(recordsDir).append(id, {
     type: "record-created",
     ts: 1000,
     id,

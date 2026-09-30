@@ -513,7 +513,7 @@ describe('U4 buildFamilyFromFs 富化（manifest 主 / P-fallback）', () => {
 // ① 结构性忽略——subagents 树扫描只收 .jsonl，.events 天然不进候选集（D3「无后缀
 //    的结构性收益」：被忽略或被误读两类风险一次排空）；
 // ② 首行头行读者兼容——.events 首行是自描述头行 {"type":"record-journal","id":...}
-//    （写侧 record-events.ts toRecordJournalHeader 契约），session-reader 对未知文件
+//    （写侧 record-events.ts toRecordEventHeader 契约），session-reader 对未知文件
 //    读首行判 header 时命中非 session header 即忽略（检查点④：零成本兼容——不改
 //    扫描器即可与该文件族共存）。
 

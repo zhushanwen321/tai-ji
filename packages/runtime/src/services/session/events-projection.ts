@@ -1,21 +1,21 @@
 /**
- * journal 投影（W1 [D6]：runtime 读侧换源——每会话内存投影，读请求唯一数据源）。
+ * 事件投影（W1 [D6]：runtime 读侧换源——每会话内存投影，读请求唯一数据源）。
  *
  * 双源单点合并（设计 w1-run-record-journal-authority §3.1 环节 B / §3.3 D6）：
  * - entry 源：主 session 条目（v2 注册/终态两条小条目）——
  *   活跃会话经既有 get_entries 游标通道喂入（applyEntryBatch），冷会话经
  *   scanRecordFamilyEntriesFromSessionFile 流式扫描喂入（同一入口）；
- * - journal 源：record 事件文件（`<recordsDir>/<sa-id>.events`）与 run journal
+ * - 事件源：record 事件文件（`<recordsDir>/<sa-id>.events`）与 run journal
  *   （`<sessionDir>/workflow-state/<runId>.record.jsonl`，后缀常量
  *   RUN_EVENTS_SUFFIX 单源）——经 u0 event-tail
  *   目录 tailer（watch + offset 续读 + 周期复查）增量 fold。run 域 fold 自
  *   [W2 D7] 起单源 core run-events foldRunEventCheckpoint（状态机检查点 + 投影
  *   骨架 created/asks/runSettled 一体产出），runtime 不再自建 fold。
  *
- * 仲裁规则（journal 胜出 / 窗外条目兜底）：同实体两源都有数据时 journal 事件
- * 胜出（事实源）；journal 被保留通道清理（窗外终态实体）后 entry 终态条目是
+ * 仲裁规则（事件源胜出 / 窗外条目兜底）：同实体两源都有数据时 事件流 事件
+ * 胜出（事实源）；事件源被保留通道清理（窗外终态实体）后 entry 终态条目是
  * 唯一来源。v1 全量快照兼容层已随「项目未上线、无 v1 数据」整体删除（登记 §3.3，
- * 2026-09-30）——投影只认 v2 条目 + journal fold，不再有「v1 冻结定界优先」的实体级
+ * 2026-09-30）——投影只认 v2 条目 + 事件 fold，不再有「v1 冻结定界优先」的实体级
  * 拦截（那正是「投影遮蔽事件流」的方向性缺陷本体）。
  *
  * 与 W0 的衔接（水位/合并喂入退役）：步骤视图合并（mergeWorkflowStepRecords
@@ -24,7 +24,7 @@
  *
  * 流式读上界（32MB 预检退役为旧格式兼容路径专属的对应面）：新路径的会话文件
  * 流式扫描（session-file-extraction.ts 的 scanRecordFamilyEntriesFromSessionFile，
- * 按块读 + 行预过滤，扫描字节上界 = READ_PRECHECK_MAX_BYTES）；journal 文件按
+ * 按块读 + 行预过滤，扫描字节上界 = READ_PRECHECK_MAX_BYTES）；事件文件按
  * tail 原语只读完整行边界。
  */
 
@@ -46,7 +46,7 @@ import {
   RECORD_EVENTS_SUFFIX,
   type EventDirectoryTailer,
   type RecordCreatedEvent,
-  type RecordJournalEvent,
+  type RecordEvent,
   type RecordEventFoldState,
   type RunAskStepFold,
   type RunEventFoldCheckpoint,
@@ -84,7 +84,7 @@ const _assertRunEventTypeWordlist: Exclude<
  *
  * 守卫对齐 core run-events isWorkflowRunEventLine 的最宽共同判定面：JSON 对象 +
  * type 落词表 + ts 有限数值 + seq（携带时）正安全整数 + outcome（agent-settled /
- * run-settled 携带时）落词表。seq 缺失放行——W1 前存量 journal 行无该字段（D7
+ * run-settled 携带时）落词表。seq 缺失放行——W1 前存量 事件行无该字段（D7
  * 惰性兼容读，旧行为不变）。坏行返回 undefined 交 tailer 计数（宽容跳过，不卡游标）。
  */
 export function parseWorkflowRunEventFileLine(line: string): WorkflowRunEvent | undefined {
@@ -192,7 +192,7 @@ export function scanV2RecordEntries(entries: readonly unknown[]): V2EntryScan {
   return result
 }
 
-// ── 合并仲裁纯函数（journal 胜出 / 窗外条目兜底）─────
+// ── 合并仲裁纯函数（事件源胜出 / 窗外条目兜底）─────
 
 /** ms → ISO（WorkflowAgentCall/WorkflowRunRecord 时间契约是 ISO 字符串）。 */
 function toIso(ms: number): string {
@@ -226,7 +226,7 @@ function deriveElapsedSeconds(
 }
 
 /**
- * [projectV2Subagent 拆分] status 两态判据（journal 胜出仲裁的字段级子函数）。
+ * [projectV2Subagent 拆分] status 两态判据（事件源胜出仲裁的字段级子函数）。
  *
  * status 是两态判据不是终局吸收位判据：轮终收条（record-round-idle，v1 权威词
  * idle 同源）与 reopened（CAS 只接受 idle、不翻 running）都映射 idle；不能用
@@ -274,7 +274,7 @@ function resolveSubagentStopReason(
  * [projectV2Subagent 拆分] error 供源（与 stopReason 分流同构，W1 终态同步 F2-2
  * 裁决）：settled 终局原文 → 轮终失败收条（round-started 后 lastEvent 非
  * round-idle，上轮失败原文随轮始清点语义不透传——对齐 v1 markRoundStartedImpl
- * 清残留死因）→ 条目面兜底（fold 缺席 = journal 未接线的旧实体）。
+ * 清残留死因）→ 条目面兜底（fold 缺席 = 事件流未接线的旧实体）。
  */
 function resolveSubagentError(
   fold: RecordEventFoldState | undefined,
@@ -307,7 +307,7 @@ function resolveSubagentResult(
 
 /**
  * [projectV2Subagent 拆分] 统计字段归并：settled 终局 → 轮终收条（roundIdle）→
- * 条目面兜底（journal 缺席 = journal 未接线的旧实体）。
+ * 条目面兜底（事件 fold 缺席 = 事件流未接线的旧实体）。
  */
 function resolveSubagentStats(
   settled: RecordEventFoldState['settled'],
@@ -339,12 +339,12 @@ function resolveSubagentBinding(
 }
 
 /**
- * v2 subagent 实体的合并投影（journal 胜出仲裁的核心）。
+ * v2 subagent 实体的合并投影（事件源胜出仲裁的核心）。
  *
- * - 身份域：journal fold 的 record-created（事实源）优先，注册条目兜底（journal
+ * - 身份域：事件 fold 的 record-created（事实源）优先，注册条目兜底（事件源
  *   被清理的窗外实体）；两者皆缺（无身份锚点）返回 null——正常流注册条目先于
  *   终态条目落盘，终态单独在场属半写残形态。
- * - 运行态（status/stopReason/统计/engine 绑定）：journal fold 优先；journal 缺席
+ * - 运行态（status/stopReason/统计/engine 绑定）：事件 fold 优先；事件 fold 缺席
  *   （窗外）时终态条目兜底。
  * - 仅条目有的字段（model/thinkingLevel/result 全文）：条目填充——事件文件只存
  *   result 摘要锚（D3），全文唯一落点是 v2 终态条目。
@@ -389,9 +389,9 @@ export function projectV2Subagent(
 }
 
 /**
- * [projectV2Workflow 拆分] 三态投影（journal 胜出仲裁的判据面）。
+ * [projectV2Workflow 拆分] 三态投影（事件源胜出仲裁的判据面）。
  *
- * [D2] fold 在场 = journal 已接线，三态全由 fold 定，条目 status 不参与——条目是
+ * [D2] fold 在场 = 事件流 已接线，三态全由 fold 定，条目 status 不参与——条目是
  * append-only last-wins 快照，resume 复活只补写 registered 条目、留存的中断形态
  * 条目不被覆盖，条目值在 fold 在场时会陈旧；resume 后 fold 已回 running，此时按
  * 留存中断条目判 interrupted 会把复活 run 误显示「已中断（可续跑）」直到终局：
@@ -470,7 +470,7 @@ function resolveWorkflowIdentity(
 
 /**
  * [projectV2Workflow 拆分] 终局半边归并：统计摘要（条目独有）+ outcome/errorCode
- * （journal 终帧优先、条目兜底）；条件展开保持「键缺席」语义（与原组装逐字节同构）。
+ * （事件终帧优先、条目兜底）；条件展开保持「键缺席」语义（与原组装逐字节同构）。
  */
 function resolveWorkflowSettlement(
   settledEntry: WorkflowRecordSettledEntryData | undefined,
@@ -489,11 +489,11 @@ function resolveWorkflowSettlement(
 }
 
 /**
- * v2 workflow 实体的合并投影：journal fold 供骨架（ask 步骤行）与终局，注册/
+ * v2 workflow 实体的合并投影：事件 fold 供骨架（ask 步骤行）与终局，注册/
  * 终态条目供 scriptName/slug/reason 词表与统计摘要。
  *
  * 定界（run 域的 session 归属）：注册或终态条目缺席 = 该 run 非本会话实体
- * （workflow-state 目录按 cwd 共享，其他会话的 run 只存在于 journal——不进投影）。
+ * （workflow-state 目录按 cwd 共享，其他会话的 run 只存在于 run journal——不进投影）。
  */
 export function projectV2Workflow(
   registered: WorkflowRecordRegisteredEntryData | undefined,
@@ -520,8 +520,8 @@ export function projectV2Workflow(
   }
 }
 
-/** 投影双源持有态（entry 源 + journal 源两域；v1 全量快照兼容层已删，登记 §3.3）。 */
-export interface JournalProjectionSources { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+/** 投影双源持有态（entry 源 + 事件源两域；v1 全量快照兼容层已删，登记 §3.3）。 */
+export interface EventProjectionSources { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   v2SubagentRegistered: Map<string, SubagentRecordRegisteredEntryData>
   v2SubagentSettled: Map<string, SubagentRecordSettledEntryData>
   v2WorkflowRegistered: Map<string, WorkflowRecordRegisteredEntryData>
@@ -532,7 +532,7 @@ export interface JournalProjectionSources { // oe-exempt:20260929:framework:work
   runFolds: Map<string, RunEventFoldCheckpoint>
 }
 
-export function initialJournalProjectionSources(): JournalProjectionSources {
+export function initialEventProjectionSources(): EventProjectionSources {
   return {
     v2SubagentRegistered: new Map(),
     v2SubagentSettled: new Map(),
@@ -546,17 +546,17 @@ export function initialJournalProjectionSources(): JournalProjectionSources {
 /**
  * 双源单点合并（纯函数）：sources → 合并快照。
  *
- * - v2 subagent：journal fold 的 record-created.rootSessionId === sessionId 才进
+ * - v2 subagent：事件 fold 的 record-created.rootSessionId === sessionId 才进
  *   投影（records 目录按 cwd 共享跨会话，rootSessionId 是 record 域 session 归属
  *   权威）；v2 注册条目在 applyEntryBatch 摄入侧按 rootSessionId 过滤；终态条目
- *   与 journal fold 的会话归属分别信任 append-only 文件同源性（注册先行）与
+ *   与 事件 fold 的会话归属分别信任 append-only 文件同源性（注册先行）与
  *   record-created.rootSessionId 合并侧过滤（终态条目不携 rootSessionId）；
- * - v2 workflow：注册/终态条目在场（run 域定界）即投影，journal fold 按同 runId
- *   合并（journal 胜出）；
+ * - v2 workflow：注册/终态条目在场（run 域定界）即投影，事件 fold 按同 runId
+ *   合并（事件源胜出）；
  * - 步骤视图合并（W0 输入换源）：合并快照上跑 mergeWorkflowStepRecords 纯函数。
  */
-export function mergeJournalProjection(
-  sources: JournalProjectionSources,
+export function mergeEventProjection(
+  sources: EventProjectionSources,
   sessionId: string,
 ): { subagents: Map<string, SubagentRecord>; workflows: Map<string, WorkflowRunRecord> } {
   const subagents = mergeSubagentHalf(sources, sessionId)
@@ -573,9 +573,9 @@ export function mergeJournalProjection(
   return { subagents, workflows }
 }
 
-/** [mergeJournalProjection 拆分] subagent 半边：v2 三源 id 并集投影（v1 冻结层已删）。 */
+/** [mergeEventProjection 拆分] subagent 半边：v2 三源 id 并集投影（v1 冻结层已删）。 */
 function mergeSubagentHalf(
-  sources: JournalProjectionSources,
+  sources: EventProjectionSources,
   sessionId: string,
 ): Map<string, SubagentRecord> {
   const subagents = new Map<string, SubagentRecord>()
@@ -585,7 +585,7 @@ function mergeSubagentHalf(
   sources.recordFolds.forEach((fold, id) => { if (fold.identity !== undefined) v2Ids.add(id) })
   for (const id of v2Ids) {
     const fold = sources.recordFolds.get(id)
-    // journal 源的 session 归属过滤：fold 有身份但 rootSessionId 非本会话 → 排除
+    // 事件源的 session 归属过滤：fold 有身份但 rootSessionId 非本会话 → 排除
     if (fold?.identity !== undefined && fold.identity.rootSessionId !== sessionId) {
       continue
     }
@@ -599,8 +599,8 @@ function mergeSubagentHalf(
   return subagents
 }
 
-/** [mergeJournalProjection 拆分] workflow 半边：v2 条目定界 × journal fold 合并（v1 冻结层已删）。 */
-function mergeWorkflowHalf(sources: JournalProjectionSources): Map<string, WorkflowRunRecord> {
+/** [mergeEventProjection 拆分] workflow 半边：v2 条目定界 × 事件 fold 合并（v1 冻结层已删）。 */
+function mergeWorkflowHalf(sources: EventProjectionSources): Map<string, WorkflowRunRecord> {
   const workflows = new Map<string, WorkflowRunRecord>()
   const v2RunIds = new Set<string>()
   for (const runId of sources.v2WorkflowRegistered.keys()) v2RunIds.add(runId)
@@ -633,27 +633,27 @@ function runIdOfFilename(filename: string): string {
 export interface SessionEventProjectionOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 本会话 id（record 域 rootSessionId 过滤的归属键）。 */
   sessionId: string
-  /** record 事件文件目录（`<agentDir>/subagents/<enc(cwd)>/records`）；undefined = 无 journal 源（entry-only 降级形态）。 */
+  /** record 事件文件目录（`<agentDir>/subagents/<enc(cwd)>/records`）；undefined = 无 事件源（entry-only 降级形态）。 */
   recordsDir: string | undefined
-  /** run journal 目录（`<sessionDir>/workflow-state`）；undefined = 无 journal 源。 */
+  /** run journal 目录（`<sessionDir>/workflow-state`）；undefined = 无 事件源。 */
   runJournalDir: string | undefined
-  /** 投影变更回调（journal 源驱动的发布腿；entry 批路径由调用方统一发布，本回调被抑制）。 */
+  /** 投影变更回调（事件源驱动的发布腿；entry 批路径由调用方统一发布，本回调被抑制）。 */
   onProjectionChange: () => void
   /** tailer 周期复查间隔（测试注入短值；缺省 30s）。 */
   recheckIntervalMs?: number
 }
 
 /**
- * 每会话 journal 投影：entry 源（applyEntryBatch）与 journal 源（tail 目录
+ * 每会话 事件投影：entry 源（applyEntryBatch）与 事件源（tail 目录
  * watcher）双源喂入，单点合并成 subagents/workflows 快照。
  *
  * 冷启动协议：构造后调用方先 applyEntryBatch（会话文件流式扫描或 get_entries
  * 全量）再 attach()（tailer rescan 从文件头全量读）——两源幂等，次序不敏感。
- * journal 源目录缺席（会话 meta 不可得，如 pi 延迟写入窗口）→ 无 tailer 的
+ * 事件源目录缺席（会话 meta 不可得，如 pi 延迟写入窗口）→ 无 tailer 的
  * entry-only 降级投影，行为退化为 entry 通道单源。
  */
 export class SessionEventProjection {
-  readonly sources: JournalProjectionSources = initialJournalProjectionSources()
+  readonly sources: EventProjectionSources = initialEventProjectionSources()
   /** 合并快照（每次重算整体替换；读请求唯一数据源）。 */
   subagents: Map<string, SubagentRecord> = new Map()
   workflows: Map<string, WorkflowRunRecord> = new Map()
@@ -703,7 +703,7 @@ export class SessionEventProjection {
 
   /**
    * entry 批应用（v2 条目分类 → 源持有态；fullRebuild = 游标全量重拉，entry 源
-   * 整体重置为新基线，journal 源不动——journal 是事实源，不随 entry 游标自愈重置）。
+   * 整体重置为新基线，事件源不动——事件流 是事实源，不随 entry 游标自愈重置）。
    *
    * v2 注册条目按 rootSessionId 定界摄入（records 目录按 cwd 共享，注册条目是
    * 本会话实体登记簿）；终态条目/快照不携 rootSessionId，信任 append-only 文件
@@ -733,7 +733,7 @@ export class SessionEventProjection {
     }
   }
 
-  /** journal 源冷启动 / 手动复查入口（幂等）。 */
+  /** 事件源冷启动 / 手动复查入口（幂等）。 */
   attach(): void {
     this.recordTailer?.rescan()
     this.runTailer?.rescan()
@@ -745,7 +745,7 @@ export class SessionEventProjection {
     this.runTailer?.dispose()
   }
 
-  private applyRecordEvents(filename: string, events: readonly RecordJournalEvent[]): void {
+  private applyRecordEvents(filename: string, events: readonly RecordEvent[]): void {
     if (this.disposed || events.length === 0) return
     const id = recordIdOfFilename(filename)
     const current = this.sources.recordFolds.get(id) ?? INITIAL_RECORD_EVENT_FOLD_STATE
@@ -776,7 +776,7 @@ export class SessionEventProjection {
 
   /** 单点合并重算（合并快照整体替换）。 */
   private recompute(): void {
-    const merged = mergeJournalProjection(this.sources, this.sessionId)
+    const merged = mergeEventProjection(this.sources, this.sessionId)
     this.subagents = merged.subagents
     this.workflows = merged.workflows
   }

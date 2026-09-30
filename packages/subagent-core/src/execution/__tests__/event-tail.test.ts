@@ -16,10 +16,10 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createRecordEventJournal,
+  createRecordEventStream,
   foldRecordEvents,
   parseRecordEventFileLine,
-  type RecordJournalEvent,
+  type RecordEvent,
 } from "../persistence/record-events.ts";
 import {
   createEventDirectoryTailer,
@@ -77,7 +77,7 @@ describe("splitCompleteLines（纯函数：完整行边界）", () => {
 
 describe("readEventTail（offset 续读原语）", () => {
   it("首次全量读：头行 + 事件行（域解析器注入）", async () => {
-    const journal = createRecordEventJournal(workDir);
+    const journal = createRecordEventStream(workDir);
     await journal.append("sa-1", {
       type: "record-created",
       ts: 1,
@@ -165,8 +165,8 @@ describe("验收⑤：续读拼接 ≡ 全量 fold（fixture 含中部坏行 + �
   it("分三段续读（中途注入坏行/部分行）的事件并集，与一次全量读 + fold 等价", async () => {
     const recordsDir = path.join(workDir, "records");
     fs.mkdirSync(recordsDir);
-    const journal = createRecordEventJournal(recordsDir);
-    const appended: RecordJournalEvent[] = [];
+    const journal = createRecordEventStream(recordsDir);
+    const appended: RecordEvent[] = [];
     appended.push(
       await journal.append("sa-1", {
         type: "record-created",
@@ -221,7 +221,7 @@ describe("createEventDirectoryTailer（周期复查 / offset 续读状态）", (
   it("rescan 冷启动全量读 + 后续 rescan 增量续读（onEvents 按文件回调）", async () => {
     const recordsDir = path.join(workDir, "records");
     fs.mkdirSync(recordsDir);
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     await journal.append("sa-1", {
       type: "record-created",
       ts: 1,
@@ -325,7 +325,7 @@ describe("createEventDirectoryTailer（周期复查 / offset 续读状态）", (
       expect(seen).toEqual([]);
 
       // watch 静默丢事件形态：直接写文件（不依赖 fs.watch 通知），周期复查兜底
-      const journal = createRecordEventJournal(recordsDir);
+      const journal = createRecordEventStream(recordsDir);
       await journal.append("sa-9", {
         type: "record-created",
         ts: 1,
@@ -357,7 +357,7 @@ describe("createEventDirectoryTailer（周期复查 / offset 续读状态）", (
   it("watch 事件路径（真实 fs.watch + 短 debounce）：文件追加经 watch 触发续读", async () => {
     const recordsDir = path.join(workDir, "records");
     fs.mkdirSync(recordsDir);
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     await journal.append("sa-1", {
       type: "record-created",
       ts: 1,

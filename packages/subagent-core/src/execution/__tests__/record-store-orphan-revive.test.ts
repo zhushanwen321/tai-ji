@@ -29,8 +29,8 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { RecordStore } from "../persistence/record-store.ts";
 // [W1 / U2a] 收编入口断言的观察面（u0 契约层 scan/路径原语）。
-import { createRecordEventJournal, recordEventsPath } from "../persistence/record-events.ts";
-import type { RecordJournalEvent } from "../persistence/record-events.ts";
+import { createRecordEventStream, recordEventsPath } from "../persistence/record-events.ts";
+import type { RecordEvent } from "../persistence/record-events.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { SubagentRecord } from "../assembly/types.ts";
@@ -302,13 +302,13 @@ function v2CapturePi(captured: unknown[]): { appendEntry: (customType: string, d
   };
 }
 
-function v2ReadEventLines(recordsDir: string, id: string): RecordJournalEvent[] {
+function v2ReadEventLines(recordsDir: string, id: string): RecordEvent[] {
   const content = fs.readFileSync(recordEventsPath(recordsDir, id), "utf8");
-  const out: RecordJournalEvent[] = [];
+  const out: RecordEvent[] = [];
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
-    out.push(JSON.parse(trimmed) as RecordJournalEvent);
+    out.push(JSON.parse(trimmed) as RecordEvent);
   }
   return out;
 }
@@ -544,7 +544,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
       `${JSON.stringify({ type: "record-journal", id: "sa-broken-chain" })}\n`,
       "utf8",
     );
-    const journal = createRecordEventJournal(recordsDir);
+    const journal = createRecordEventStream(recordsDir);
     await journal.append("sa-broken-chain", {
       type: "record-bound",
       ts: Date.now(),

@@ -39,7 +39,7 @@ vi.mock('../../../infra/pi/pi-paths.js', async (importOriginal) => {
 
 // [W1 / D6] 全文读路径 call-through spy（验收③「getWorkflows/getSubagents 不再调全文
 // 读路径」的代码断言载体）：行为保持真实实现（既有测试零影响），仅计数调用——
-// 正常体量会话走 journal 投影不触达；oversize 分流（旧格式兼容路径）触达。
+// 正常体量会话走 事件投影不触达；oversize 分流（旧格式兼容路径）触达。
 vi.mock('../subagent-extractor.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../subagent-extractor.js')>()
   return {
@@ -295,7 +295,7 @@ describe('refreshRecordEntries：拉取与发布', () => {
       piAgentDirRef.dir = dir
       const { records, publish, client } = makeRecords({
         sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: join(dir, 's1.jsonl') }]) } as unknown as ISessionStore,
-        journalTailerRecheckMs: 50,
+        eventTailerRecheckMs: 50,
       })
       const fire = registerSession(records)
       client.getEntries.mockResolvedValue({
@@ -1167,12 +1167,12 @@ describe('plan-state 投影（D1③④）', () => {
   })
 })
 
-// ── [W1 / D6] journal 投影读侧换源 ────────────────────────────
+// ── [W1 / D6] 事件投影读侧换源 ────────────────────────────
 //
-// 验收对照：① 磁盘 v2 会话 entry-only 降级读投影（无 journal 源时 getSubagents/
-// getWorkflows 经投影直接读 v2 注册/终态条目）；② v2 会话读投影（journal 胜出仲裁
+// 验收对照：① 磁盘 v2 会话 entry-only 降级读投影（无 事件源时 getSubagents/
+// getWorkflows 经投影直接读 v2 注册/终态条目）；② v2 会话读投影（事件源胜出仲裁
 // + 条目摘要合并 + fold 供步骤骨架）；③ 全文读路径不调用断言（正常体量走投影，
-// oversize 分流才触达兼容路径）；④ 投影驱动信号（journal 事件 → tail 复查 → 投影
+// oversize 分流才触达兼容路径）；④ 投影驱动信号（事件流 事件 → tail 复查 → 投影
 // 变更 → publish）。
 
 /** v2 subagent-record 注册条目 entry（W1 D1 契约）。 */
@@ -1188,7 +1188,7 @@ function subagentRegisteredV2(id: string): Record<string, unknown> {
   }
 }
 
-/** v2 subagent-record 终态条目 entry（载荷与 journal 冲突——断言 journal 胜出）。 */
+/** v2 subagent-record 终态条目 entry（载荷与 事件流 冲突——断言 事件源胜出）。 */
 function subagentSettledV2(id: string): Record<string, unknown> {
   return {
     type: 'custom', customType: 'subagent-record', id: 'e-s1', parentId: null,
@@ -1242,7 +1242,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
     piAgentDirRef.dir = ''
   })
 
-  it('磁盘 v2 会话 entry-only 降级：无 journal 时 getSubagents/getWorkflows 经投影读 v2 条目', async () => {
+  it('磁盘 v2 会话 entry-only 降级：无 事件流 时 getSubagents/getWorkflows 经投影读 v2 条目', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'session-records-v2disk-'))
     const filePath = join(dir, 'session.jsonl')
     writeFileSync(filePath, jsonlLines([
@@ -1268,21 +1268,21 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
       // [W1 / D6] 步骤视图换源：v2 条目不内嵌 trace；无 run journal fold 时步骤行由
       // subagent record overlay（[W0 / D1] parentRunId + stepIndex 合并）合成——
       // 原「v1 快照 trace → agentCalls」断言随兼容层删除，fold 供骨架的覆盖面由
-      // 本 describe 后续 journal 用例承担。
+      // 本 describe 后续 事件流 用例承担。
       expect(workflows.records[0]!.agentCalls[0]).toMatchObject({ id: 0, agent: 'worker', status: 'running', sessionId: 'sa-1' })
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 
-  it('v2 读投影：journal fold 胜出条目冲突（status/stopReason），条目独有字段（model/result）照常填充', async () => {
+  it('v2 读投影：事件 fold 胜出条目冲突（status/stopReason），条目独有字段（model/result）照常填充', async () => {
     const cwd = '/tmp/w1-proj'
     const world = makeV2World(cwd)
     piAgentDirRef.dir = world.agentDir
     try {
-      // journal：created（无 settled）→ running；条目：settled(interrupted) → journal 胜出显示 running
+      // 事件源：created（无 settled）→ running；条目：settled(interrupted) → 事件源胜出显示 running
       writeFileSync(join(world.recordsDir, 'sa-1.events'), [
-        JSON.stringify({ type: 'record-journal', id: 'sa-1' }),
+        JSON.stringify({ type: 'record-events', id: 'sa-1' }),
         JSON.stringify({ type: 'record-created', seq: 1, ts: 1000, id: 'sa-1', agent: 'worker', task: 'Do work', slug: 'work', origin: 'workflow', parentRunId: 'wf-1', stepIndex: 0, rootSessionId: 's1', depth: 0, mode: 'bg', startedAt: 1000 }),
       ].join('\n') + '\n')
       writeFileSync(world.sessionFile, [
@@ -1302,7 +1302,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
       expect(subagents.records).toHaveLength(1)
       expect(subagents.records[0]).toMatchObject({
         subagentId: 'sa-1',
-        status: 'running', // journal 胜出（条目 settled idle 不生效）
+        status: 'running', // 事件源胜出（条目 settled idle 不生效）
         model: 'p/m', // 条目独有字段
         result: 'full result text',
         parentRunId: 'wf-1',
@@ -1311,7 +1311,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
       const workflows = await records.getWorkflows('s1')
       expect(workflows.records).toHaveLength(1)
       expect(workflows.records[0]).toMatchObject({ runId: 'wf-1', status: 'running', scriptName: 'test-flow' })
-      // 步骤视图合并（W0 输入换源）：record 投影 overlay 到 journal 骨架行
+      // 步骤视图合并（W0 输入换源）：record 投影 overlay 到 事件 fold 骨架行
       expect(workflows.records[0]!.agentCalls[0]).toMatchObject({ status: 'running', sessionId: 'sa-1' })
       // 验收③：正常体量会话零调用全文读路径
       expect(extractSubagentsMock).not.toHaveBeenCalled()
@@ -1321,13 +1321,13 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
     }
   })
 
-  it('投影驱动信号：journal 追加终态事件 → tail 复查 → 投影变更 publish（subagents 帧 + workflowUpdate 转态信号）', async () => {
+  it('投影驱动信号：事件文件追加终态事件 → tail 复查 → 投影变更 publish（subagents 帧 + workflowUpdate 转态信号）', async () => {
     const cwd = '/tmp/w1-signal'
     const world = makeV2World(cwd)
     piAgentDirRef.dir = world.agentDir
     try {
       writeFileSync(join(world.recordsDir, 'sa-1.events'), [
-        JSON.stringify({ type: 'record-journal', id: 'sa-1' }),
+        JSON.stringify({ type: 'record-events', id: 'sa-1' }),
         JSON.stringify({ type: 'record-created', seq: 1, ts: 1000, id: 'sa-1', agent: 'worker', task: 'Do work', slug: 'work', origin: 'workflow', parentRunId: 'wf-1', stepIndex: 0, rootSessionId: 's1', depth: 0, mode: 'bg', startedAt: 1000 }),
       ].join('\n') + '\n')
       writeFileSync(world.sessionFile, [
@@ -1340,7 +1340,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
       ].join('\n') + '\n')
       const { records, publish } = makeRecords({
         sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: world.sessionFile, cwd }]) } as unknown as ISessionStore,
-        journalTailerRecheckMs: 50,
+        eventTailerRecheckMs: 50,
       })
       const fire = registerSession(records)
       fire('s1')
@@ -1351,7 +1351,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
       expect(subFrames).toHaveLength(1)
       expect((subFrames[0]![1] as { payload: { subagents: Array<{ status: string }> } }).payload.subagents[0]!.status).toBe('running')
 
-      // journal 追加 record-settled（completed）→ 复查周期拾取 → 投影变更 publish
+      // 事件文件追加 record-settled（completed）→ 复查周期拾取 → 投影变更 publish
       publish.mockClear()
       writeFileSync(join(world.recordsDir, 'sa-1.events'), [
         JSON.stringify({ type: 'record-settled', seq: 2, ts: 3000, stopReason: 'completed', endedAt: 3000, turns: 2, totalTokens: 500 }),
@@ -1377,19 +1377,19 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
   // 更强的混沌）下，唯一驱动 = bg-notify 兜底失效链（invalidateRecordEntries 即
   // event-interpreter 经组合根注入的同一入口）→ 投影冷启动 → record 事件文件 fold
   // （事实源）独立重建，收敛值与信号在位时等价。
-  it('[W1 双形态] v2 混沌：entry 通道整体空转 → 兜底失效触发投影冷启动，journal fold 独立收敛', async () => {
+  it('[W1 双形态] v2 混沌：entry 通道整体空转 → 兜底失效触发投影冷启动，事件 fold 独立收敛', async () => {
     const cwd = '/tmp/w1-chaos'
     const world = makeV2World(cwd)
     piAgentDirRef.dir = world.agentDir
     try {
-      // journal：created + settled(completed) 已落盘；会话文件仅注册条目（终态条目缺席）
+      // 事件源：created + settled(completed) 已落盘；会话文件仅注册条目（终态条目缺席）
       writeFileSync(join(world.recordsDir, 'sa-1.events'), [
-        JSON.stringify({ type: 'record-journal', id: 'sa-1' }),
+        JSON.stringify({ type: 'record-events', id: 'sa-1' }),
         JSON.stringify({ type: 'record-created', seq: 1, ts: 1000, id: 'sa-1', agent: 'worker', task: 'Do work', slug: 'work', origin: 'workflow', parentRunId: 'wf-1', stepIndex: 0, rootSessionId: 's1', depth: 0, mode: 'background', startedAt: 1000 }),
         JSON.stringify({ type: 'record-settled', seq: 2, ts: 3000, stopReason: 'completed', endedAt: 3000, turns: 2, totalTokens: 500 }),
       ].join('\n') + '\n')
       writeFileSync(world.sessionFile, `${JSON.stringify(subagentRegisteredV2('sa-1'))}\n`)
-      // 混沌注入：get_entries 恒空（entry 源两代都不产出）——投影只能来自 journal 源
+      // 混沌注入：get_entries 恒空（entry 源两代都不产出）——投影只能来自 事件源
       const { records, publish, client } = makeRecords({
         sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: world.sessionFile, cwd }]) } as unknown as ISessionStore,
       })
@@ -1402,7 +1402,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
       await flushDebounce()
       expect(client.getEntries).toHaveBeenCalledTimes(1)
 
-      // 收敛断言：journal fold 独立重建（entry 通道空）——帧内容 = 事件文件的权威值
+      // 收敛断言：事件 fold 独立重建（entry 通道空）——帧内容 = 事件文件的权威值
       const subFrames = publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.subagents')
       expect(subFrames).toHaveLength(1)
       expect((subFrames[0]![1] as { payload: { subagents: Array<{ subagentId: string; status: string; stopReason: string }> } }).payload.subagents)

@@ -37,8 +37,8 @@ vi.mock("../persistence/sessions-index.ts", async (importOriginal) => {
 
 import { writeAliveMarker } from "../persistence/alive-store.ts";
 // [W1 / U2a] record 事件文件观察点（u0 契约层 scan/路径原语——被测面独立性）。
-import { createRecordEventJournal, recordEventsPath } from "../persistence/record-events.ts";
-import type { RecordJournalEvent } from "../persistence/record-events.ts";
+import { createRecordEventStream, recordEventsPath } from "../persistence/record-events.ts";
+import type { RecordEvent } from "../persistence/record-events.ts";
 import { completeLegacyClosed, createRecord, projectOutcome, trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import type { ManifestRecord } from "../persistence/manifest-store.ts";
 import { ManifestStore } from "../persistence/manifest-store.ts";
@@ -1307,17 +1307,17 @@ function v2CapturePi(captured: unknown[]): { appendEntry: (customType: string, d
   };
 }
 
-function v2ScanEvents(recordsDir: string, id: string): Promise<readonly RecordJournalEvent[]> {
-  return createRecordEventJournal(recordsDir).scan(id);
+function v2ScanEvents(recordsDir: string, id: string): Promise<readonly RecordEvent[]> {
+  return createRecordEventStream(recordsDir).scan(id);
 }
 
-function v2ReadEventLines(recordsDir: string, id: string): RecordJournalEvent[] {
+function v2ReadEventLines(recordsDir: string, id: string): RecordEvent[] {
   const content = fs.readFileSync(recordEventsPath(recordsDir, id), "utf8");
-  const out: RecordJournalEvent[] = [];
+  const out: RecordEvent[] = [];
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
-    out.push(JSON.parse(trimmed) as RecordJournalEvent);
+    out.push(JSON.parse(trimmed) as RecordEvent);
   }
   return out;
 }

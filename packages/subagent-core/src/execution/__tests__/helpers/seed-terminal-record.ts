@@ -25,9 +25,9 @@ import * as fs from "node:fs";
 import type { AbandonedRoundMark, Epoch, ExecutionMode, RecordOrigin, StopReason } from "../../domain/record-types.ts";
 import {
   recordEventsPath,
-  toRecordJournalHeader,
+  toRecordEventHeader,
 } from "../../persistence/record-events.ts";
-import type { RecordJournalEventInput } from "../../persistence/record-events.ts";
+import type { RecordEventInput } from "../../persistence/record-events.ts";
 import { IDENTITY_CUSTOM_TYPE } from "../../persistence/session-reconstructor.ts";
 
 /** 终态事件流播种载荷（身份域缺省值与 session.jsonl fixture 同款；仅本 helper 消费，故内联不抽象）。 */
@@ -89,11 +89,11 @@ type SeedTerminalRecordInput = {
 };
 
 /** 播种载荷 → 事件帧序列（seq 自动 1..n；created 恒首帧）。 */
-function buildSeedFrames(input: SeedTerminalRecordInput): RecordJournalEventInput[] {
+function buildSeedFrames(input: SeedTerminalRecordInput): RecordEventInput[] {
   const endedAt = input.endedAt ?? input.startedAt + 1000;
   const epoch = input.epoch ?? 0;
   const stopReason = input.stopReason ?? "completed";
-  const created: RecordJournalEventInput = {
+  const created: RecordEventInput = {
     type: "record-created",
     ts: input.startedAt,
     id: input.id,
@@ -112,7 +112,7 @@ function buildSeedFrames(input: SeedTerminalRecordInput): RecordJournalEventInpu
     ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
     ...(input.worktree === true ? { worktree: true } : {}),
   };
-  const bound: RecordJournalEventInput | undefined =
+  const bound: RecordEventInput | undefined =
     input.boundSessionFile !== undefined
       ? {
           type: "record-bound",
@@ -124,7 +124,7 @@ function buildSeedFrames(input: SeedTerminalRecordInput): RecordJournalEventInpu
         }
       : undefined;
   if (input.idleRound !== undefined) {
-    const idleRound: RecordJournalEventInput = {
+    const idleRound: RecordEventInput = {
       type: "record-round-idle",
       ts: input.idleRound.ts ?? input.startedAt + 1000,
       // 轮终累计轮数（[② 读侧换源] ——fold.round 的轮终推进帧）。
@@ -152,7 +152,7 @@ function buildSeedFrames(input: SeedTerminalRecordInput): RecordJournalEventInpu
   if (input.inFlight === true) {
     return [created, ...(bound !== undefined ? [bound] : [])];
   }
-  const settled: RecordJournalEventInput = {
+  const settled: RecordEventInput = {
     type: "record-settled",
     ts: endedAt,
     stopReason,
@@ -173,7 +173,7 @@ export function seedTerminalRecord(recordsDir: string, input: SeedTerminalRecord
   fs.mkdirSync(recordsDir, { recursive: true });
   // seq 按数组序 1..n 落盘（帧构造不含 seq——与 journal 单写者的单调分配同构）。
   const lines = [
-    JSON.stringify(toRecordJournalHeader(input.id)),
+    JSON.stringify(toRecordEventHeader(input.id)),
     ...frames.map((frame, i) => JSON.stringify({ ...frame, seq: i + 1 })),
   ];
   fs.writeFileSync(file, `${lines.join("\n")}\n`, "utf-8");

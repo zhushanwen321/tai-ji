@@ -499,7 +499,7 @@ export type WorkflowRunEvent =
 
 /**
  * 写侧入参形态：事件去掉 seq（seq 由 journal 单写者分配——单调性的构造性保证，
- * 调用方无法传错；与 record 侧 RecordJournalEventInput（execution/persistence/
+ * 调用方无法传错；与 record 侧 RecordEventInput（execution/persistence/
  * record-events.ts）同构）。DistributiveOmit
  * 使联合逐成员 Omit（保持判别键窄化能力）。
  *
@@ -525,7 +525,7 @@ export interface RunEventJournal {
   /**
    * 追加一条事件（JSONL 单行），返回落盘的完整事件（含分配的 seq）——调用方据
    * 此同步构造 v2 终态条目 / 物化投影（同一事件的单点载荷源；与 record 侧
-   * RecordEventJournal.append 契约同构）。入参是无 seq 的 input 形态（seq 分配权
+   * RecordEventStream.append 契约同构）。入参是无 seq 的 input 形态（seq 分配权
    * 在 journal 实装内，构造性单调）；runId 显式传参而非从事件取——仅 run-created
    * 携带 runId，目标文件定位不依赖事件形态。
    *

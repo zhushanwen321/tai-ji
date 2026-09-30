@@ -24,10 +24,10 @@ import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 import type {
-  RecordJournalEvent,
+  RecordEvent,
 } from "./record-events.ts";
 import {
-  createRecordEventJournal,
+  createRecordEventStream,
   foldRecordEvents,
   RECORD_EVENTS_SUFFIX,
 } from "./record-events.ts";
@@ -343,12 +343,12 @@ async function pruneTerminalRecordEventFiles(
   const eventNames = names.filter((n) => n.endsWith(RECORD_EVENTS_SUFFIX));
   result.scanned = eventNames.length;
 
-  const journal = createRecordEventJournal(recordsDir);
+  const journal = createRecordEventStream(recordsDir);
   const now = Date.now();
   const windowForCandidates = retentionMs ?? DEFAULT_STATE_TTL_MS;
   for (const name of eventNames) {
     const id = name.slice(0, -RECORD_EVENTS_SUFFIX.length);
-    let events: readonly RecordJournalEvent[];
+    let events: readonly RecordEvent[];
     try {
       events = await journal.scan(id);
     } catch (err) {

@@ -32,15 +32,15 @@ import { SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
 import {
   INITIAL_RECORD_EVENT_FOLD_STATE,
   applyRecordEvent,
-  createRecordEventJournal,
+  createRecordEventStream,
   foldRecordEvents,
   parseRecordEventFileLine,
   recordEventsPath,
 } from "./record-events.ts";
 import type {
-  RecordEventJournal,
-  RecordJournalEvent,
-  RecordJournalEventInput,
+  RecordEventStream,
+  RecordEvent,
+  RecordEventInput,
   RecordEventFoldState,
 } from "./record-events.ts";
 import {
@@ -85,7 +85,7 @@ export interface RoundsCtx {
    * 粒度事件进 journal 是 D5 增量裁决：不进则 .state 仍是事实源，事实源介质数
    * 降不到 1）。幂等/落盘收在被调侧（容器 appendJournal 单点）。
    */
-  appendJournalEvent: (record: ExecutionRecord, input: RecordJournalEventInput) => void;
+  appendJournalEvent: (record: ExecutionRecord, input: RecordEventInput) => void;
   notifyChange: () => void;
 }
 
@@ -276,7 +276,7 @@ function buildRoundIdleEvent(
   stopReason: StopReason,
   nextResult: string | undefined,
   outcome: RoundSettlementOutcome,
-): Extract<RecordJournalEventInput, { type: "record-round-idle" }> {
+): Extract<RecordEventInput, { type: "record-round-idle" }> {
   return {
     type: "record-round-idle",
     ts: Date.now(),
@@ -398,7 +398,7 @@ export function adoptEngineDeathImpl(id: string, opts: { error: string }, ctx: R
 //   async 形态面向 U3 tail 消费；写点判定链需要同步值，此处用导出的
 //   parseRecordEventFileLine + foldRecordEvents 组合同义装载，行解析与
 //   fold 语义单源复用，不重复实现）；
-// - append 走 u0 原语（createRecordEventJournal——seq 分配权与头行契约单点），
+// - append 走 u0 原语（createRecordEventStream——seq 分配权与头行契约单点），
 //   fire-and-forget 但落盘同步完成（appendFileSync 在调用轮内执行）；缓存增量
 //   推进同步预推进 + then 校验（见 appendEvent）。
 // - 写失败（fs 错）响亮 error 日志——事件文件是唯一事实源，静默丢失不可接受；
@@ -407,7 +407,7 @@ export function adoptEngineDeathImpl(id: string, opts: { error: string }, ctx: R
 const faceLogger = getLogger("subagents");
 
 export class RecordEventsWriteFace {
-  private readonly journal: RecordEventJournal;
+  private readonly journal: RecordEventStream;
   /** id → fold 当前态（写点幂等判定与 append 增量推进的单点状态；dispose/revive
    *  由容器调 resetFoldCache 重置——事件文件可能已被外部/清理通道改变）。 */
   private readonly foldCache = new Map<string, RecordEventFoldState>();
@@ -423,7 +423,7 @@ export class RecordEventsWriteFace {
      *  字面只留 record-store.ts（R1 豁免面），本文件不 import 写函数。 */
     private readonly materializeBoundManifest: (record: ExecutionRecord) => void,
   ) {
-    this.journal = createRecordEventJournal(recordsDir);
+    this.journal = createRecordEventStream(recordsDir);
   }
 
   // ── fold 读面 ─────────────────────────────────────────────
@@ -442,7 +442,7 @@ export class RecordEventsWriteFace {
       this.foldCache.set(id, INITIAL_RECORD_EVENT_FOLD_STATE);
       return INITIAL_RECORD_EVENT_FOLD_STATE;
     }
-    const events: RecordJournalEvent[] = [];
+    const events: RecordEvent[] = [];
     for (const line of content.split("\n")) {
       const event = parseRecordEventFileLine(line);
       if (event !== undefined) events.push(event); // 空行/头行/坏行跳过（u0 行解析器内消化）
@@ -505,7 +505,7 @@ export class RecordEventsWriteFace {
 
   /** 通用事件追加注入位（round-started / round-idle / reopened / 收编 settled——
    *  轴文件 ctx 注入与容器收编入口共用；幂等判定由调用方先行）。 */
-  appendJournal(id: string, input: RecordJournalEventInput): void {
+  appendJournal(id: string, input: RecordEventInput): void {
     this.appendEvent(id, input);
   }
 
@@ -520,9 +520,9 @@ export class RecordEventsWriteFace {
    * - fs 错误响亮 error（唯一事实源写失败不可静默），缓存回滚（预推进撤销——
    *   落盘未发生，缓存不得持有幽灵事件）。
    */
-  private appendEvent(id: string, input: RecordJournalEventInput): Promise<void> {
+  private appendEvent(id: string, input: RecordEventInput): Promise<void> {
     const cur = this.foldOf(id);
-    const predicted = { ...input, seq: cur.lastSeq + 1 } as RecordJournalEvent;
+    const predicted = { ...input, seq: cur.lastSeq + 1 } as RecordEvent;
     this.foldCache.set(id, applyRecordEvent(cur, predicted));
     return this.journal
       .append(id, input)

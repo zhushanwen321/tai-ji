@@ -28,7 +28,7 @@ import type { RecordBinding } from "./state-marker.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 import { derivedManifestRecord, hydrateReviveBaseline, recordToSubagent, zcodeRefOf } from "./record-store-rebuild.ts";
 import { findForeignLiveInstance } from "./alive-store.ts";
-import type { RecordJournalEventInput, RecordEventFoldState } from "./record-events.ts";
+import type { RecordEventInput, RecordEventFoldState } from "./record-events.ts";
 // [W1 / U2a] v2 条目契约与 v2 定界判定（u0 契约层消费）。
 import { SUBAGENT_RECORD_CUSTOM_TYPE, SUBAGENT_RECORD_ENTRY_VERSION, classifySubagentRecordEntryData } from "./record-entry.ts";
 import type {
@@ -68,7 +68,7 @@ export interface TerminalCtx {
    */
   settleViaJournal: (record: ExecutionRecord, endedAt: number) => void;
   /** [W1 / D3] record 事件追加注入位（markReopened 的 record-reopened 帧）。 */
-  appendJournalEvent: (record: ExecutionRecord, input: RecordJournalEventInput) => void;
+  appendJournalEvent: (record: ExecutionRecord, input: RecordEventInput) => void;
   /**
    * [② 读侧换源] fold 访问注入位（markResurrected 的 revive 基线水合消费——
    * record-store 构造点绑定 `this.eventStreamFace?.foldOf`；事件面未接线返回
@@ -785,7 +785,7 @@ export function buildAdoptedSettledEvent(
   id: string,
   stopReason: StopReason,
   now: number,
-): RecordJournalEventInput {
+): RecordEventInput {
   return {
     type: "record-settled",
     ts: now,
@@ -832,7 +832,7 @@ export function buildAdoptedManifestProjection(
 /** record-created 帧载荷（register 写点——D3 表行 1 身份域全量）。 */
 export function buildCreatedEventPayload(
   record: ExecutionRecord,
-): RecordJournalEventInput {
+): RecordEventInput {
   return {
     type: "record-created",
     ts: record.startedAt,
@@ -883,7 +883,7 @@ export function isBoundSignatureUnchanged(
 /** record-bound 帧载荷（spawn 回填——引擎域归一形态同签名对比）。 */
 export function buildBoundEventPayload(
   record: ExecutionRecord,
-): RecordJournalEventInput {
+): RecordEventInput {
   return {
     type: "record-bound",
     ts: Date.now(),
@@ -900,7 +900,7 @@ export function buildBoundEventPayload(
 export function buildSettledEventPayload(
   record: ExecutionRecord,
   endedAt: number,
-): RecordJournalEventInput {
+): RecordEventInput {
   return {
     type: "record-settled",
     ts: endedAt,

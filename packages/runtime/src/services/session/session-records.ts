@@ -7,8 +7,8 @@
  *   扩容第三族——record 三族 customType 早退门 + scanPlanStateEntries 派生 + session.planState
  *   publish diff；[reload-closeout D2] 发布门基线从 merge 变化信号换成已发布快照水位，
  *   守卫/发布门处丢帧 = 水位滞留 → agent_settled / 15s 定时两腿对账补发，稳态零帧）；
- * - 磁盘读侧/动作/引擎配置：getSubagents/getWorkflows（[W1 / D6] 读请求只读 journal
- *   投影——entry 游标 + journal tail 双源单点合并，见 events-projection.ts；v1 巨文件
+ * - 磁盘读侧/动作/引擎配置：getSubagents/getWorkflows（[W1 / D6] 读请求只读事件
+ *   投影——entry 游标 + 事件 tail 双源单点合并，见 events-projection.ts；v1 巨文件
  *   会话 oversize 分流走旧格式惰性兼容读路径）、getPlanState（冷启动磁盘扫描不变）、
  *   getSubagentHistory/getAgentCall*（record.sessionFile 直读）、
  *   workflowAction/subagentAction（经扩展 slash command 的生命周期/定向消息操作）、
@@ -79,7 +79,7 @@ import type { SessionRegisteredSource } from './session-state-projection.js'
  * - 失效自愈：游标指向的 entry 不在 pi 当前集合（"Entry not found"，session 文件被外部
  *   改写 / pi 重启）→ 丢 cursor 全量重拉重建（纯派生缓存可随时丢弃，正确性优先）。
  *
- * 数据写路径唯一 = journal 投影重算（[W1 / D6] entry 扫描与 journal fold 在投影内
+ * 数据写路径唯一 = 事件投影重算（[W1 / D6] entry 扫描与 事件 fold 在投影内
  * 单点合并；派生 Map 是投影合并快照的镜像——syncCacheFromProjection）；发布经
  * messageBus stateSnapshot（'subagents' / 'workflows' typeKey，W12 语义延续）。
  *
@@ -128,7 +128,7 @@ export interface RecordEntriesCache {
   /** [reload-closeout D2] 送达水位：已发布 planState view（null = 从未发布过）。 */
   publishedPlanState: PlanStateView | null
   /**
-   * [W1 / D6] journal 投影（读请求唯一数据源）：entry 游标 + journal tail 双源
+   * [W1 / D6] 事件投影（读请求唯一数据源）：entry 游标 + 事件 tail 双源
    * 单点合并。惰性创建（首个失效拉取 / 读 RPC / 对账触达时）；销毁随 cache。
    */
   projection: SessionEventProjection | null
@@ -149,7 +149,7 @@ export interface RecordEntriesCache {
  * 中 trace 逐步落盘，若只比 status/reason（恒 running），GUI 详情的 agentCalls 整个 run
  * 期间收不到任何 reload 触发）。
  *
- * [W1 / D6] W0 的 settledSteps 终态计数维度退役，换步骤状态全序列：journal 投影变更
+ * [W1 / D6] W0 的 settledSteps 终态计数维度退役，换步骤状态全序列：事件投影变更
  * （record 转态 / run 事件边沿）驱动信号后，「steps 不变但步骤行 running↔终态翻转」
  * 由 stepStatuses 序列差异承载（状态向量覆盖原终态计数的全部检测面且更精确——计数
  * 对同 run 两步骤互换状态盲，状态序列不盲）。结构补全（phase/agent 补齐、状态不变）
@@ -240,11 +240,11 @@ export interface SessionRecordsDeps {
    */
   getSessionCwd?(sessionId: string): string | undefined
   /**
-   * [W1 / D6] journal tailer 周期复查间隔注入面：生产缺省走 u0 tailer 缺省值
+   * [W1 / D6] 事件 tailer 周期复查间隔注入面：生产缺省走 u0 tailer 缺省值
    * （30s，macOS fs.watch 静默丢事件兜底上界）；测试注入短值驱动确定性增量
    * （fake timers 下 advance 复查周期即续读，不依赖真实 watch 事件时序）。
    */
-  journalTailerRecheckMs?: number
+  eventTailerRecheckMs?: number
 }
 
 /** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定）。 */
@@ -476,12 +476,12 @@ export class SessionRecords {
   }
 
   /**
-   * [W1 / D6] 取/建 per-session journal 投影（读请求唯一数据源；惰性创建）。
+   * [W1 / D6] 取/建 per-session 事件投影（读请求唯一数据源；惰性创建）。
    *
    * 冷启动协议（设计 D6「冷启动 = 从头流式读一次，此后全增量」）：
    * 1. entry 源就位——scanRecordFamilyEntriesFromSessionFile 流式扫描会话文件
    *    （v1 快照 + v2 注册/终态条目，32MB 扫描上界，超界返回 null 留给兼容路径）；
-   * 2. journal 源 attach——两域目录 tailer 从文件头全量读（offset 续读此后增量）。
+   * 2. 事件源 attach——两域目录 tailer 从文件头全量读（offset 续读此后增量）。
    * 两源幂等、次序不敏感；活跃会话的 get_entries 游标通道继续增量喂 entry 源。
    *
    * 目录派生：records = core getSubagentRecordsDir(agentDir, cwd)（单源，不再本侧
@@ -504,9 +504,9 @@ export class SessionRecords {
       sessionId,
       recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
       runJournalDir: meta !== undefined ? join(dirname(meta.filePath), 'workflow-state') : undefined,
-      onProjectionChange: () => this.onJournalProjectionChange(sessionId),
-      ...(this.deps.journalTailerRecheckMs !== undefined
-        ? { recheckIntervalMs: this.deps.journalTailerRecheckMs }
+      onProjectionChange: () => this.onEventProjectionChange(sessionId),
+      ...(this.deps.eventTailerRecheckMs !== undefined
+        ? { recheckIntervalMs: this.deps.eventTailerRecheckMs }
         : {}),
     })
     if (meta !== undefined) {
@@ -514,7 +514,7 @@ export class SessionRecords {
       projection.applyEntryBatch(entries ?? [])
     }
     // attach 前落位：冷启动 attach 的 tail 折叠即时触发 onProjectionChange →
-    // onJournalProjectionChange 需读到 cache.projection 才能发布首帧
+    // onEventProjectionChange 需读到 cache.projection 才能发布首帧
     cache.projection = projection
     projection.attach()
     this.syncCacheFromProjection(cache, projection)
@@ -522,11 +522,11 @@ export class SessionRecords {
   }
 
   /**
-   * [W1 / D6] journal 源驱动的发布腿（信号形态不动，驱动源换投影变更）：tail 事件
+   * [W1 / D6] 事件源驱动的发布腿（信号形态不动，驱动源换投影变更）：tail 事件
    * → 投影重算 → 水位 diff → 按差异发布。与 entry 批路径（applyRecordEntries 统一
    * 发布）共用同一 publishRecordChanges 与送达水位，发布门单点。
    */
-  private onJournalProjectionChange(sessionId: string): void {
+  private onEventProjectionChange(sessionId: string): void {
     const cache = this.recordEntriesCaches.get(sessionId)
     if (!cache || cache.projection === null) return
     this.syncCacheFromProjection(cache, cache.projection)
@@ -718,7 +718,7 @@ export class SessionRecords {
     cache.forceFullRebuild = false
     const full = await client.getEntries() as EntriesSinceResult
     // [W1 / D6] 全量基线重置移驻投影（applyEntryBatch fullRebuild：entry 源两代
-    // 整体重置；journal 源不动——事实源不随 entry 游标自愈重置）
+    // 整体重置；事件源不动——事实源不随 entry 游标自愈重置）
     return { entries: full.data?.entries ?? [], leafId: full.data?.leafId ?? undefined, fullRebuild: true }
   }
 
@@ -747,8 +747,8 @@ export class SessionRecords {
     isFullRebuild: boolean,
     leafId?: string,
   ): string[] {
-    // [W1 / D6] entry 批换投影入口：v1 快照扫描 + v2 条目分类 + journal fold 双源
-    // 单点合并（journal 胜出仲裁）全在投影内完成；步骤视图合并的输入源也从本处的
+    // [W1 / D6] entry 批换投影入口：v1 快照扫描 + v2 条目分类 + 事件 fold 双源
+    // 单点合并（事件源胜出仲裁）全在投影内完成；步骤视图合并的输入源也从本处的
     // 两缓存喂入退役（投影合并快照内跑 mergeWorkflowStepRecords——W0 输入换源）。
     // 已销毁 session 也完成投影 merge，只拦发布（D3 登记卫生债，水位机制下无害：
     // publish 未发生 → 水位滞留 → session 恢复后下轮触发补发）。
@@ -873,7 +873,7 @@ export class SessionRecords {
     if (!record) return { messages: [], truncated: false }
 
     // P5 分协议路由：非 pi 引擎（record.engine 字段路由，缺省 pi）走 extractor 的
-    // 三级降级读取链（①引擎原生 reader ②journal ③outcome-only）。pi 的现有直读链
+    // 三级降级读取链（①引擎原生 reader ②事件流 ③outcome-only）。pi 的现有直读链
     // 零变化（A1 守护）
     const engine = extractRecordEngine(record)
     if (engine !== DEFAULT_SUBAGENT_ENGINE) {
@@ -984,7 +984,7 @@ export class SessionRecords {
   /**
    * 获取 session 派生的 workflow 列表。
    *
-   * [W1 / D6] 读请求只读内存投影（run 骨架经 journal fold + v2 条目定界；v1 快照
+   * [W1 / D6] 读请求只读内存投影（run 骨架经 事件 fold + v2 条目定界；v1 快照
    * 实体走冻结兼容数据）；oversize（>32MB）走旧格式惰性兼容读路径（预检语义专属域，
    * 与 getSubagents 同款）。
    */
@@ -1129,7 +1129,7 @@ export class SessionRecords {
     const cache = this.recordEntriesCaches.get(sessionId)
     if (cache) {
       if (cache.debounceTimer !== null) clearTimeout(cache.debounceTimer)
-      // [W1 / D6] journal 投影随 cache 同批销毁（停两域 tailer 的 watcher 与周期复查）
+      // [W1 / D6] 事件投影随 cache 同批销毁（停两域 tailer 的 watcher 与周期复查）
       cache.projection?.dispose()
       this.recordEntriesCaches.delete(sessionId)
       this.syncReconcileTimer()
@@ -1140,7 +1140,7 @@ export class SessionRecords {
 // ── record 家族 merge helpers ──
 //
 // [W1 / D6] mergeSubagentRecords / mergeWorkflowRecords 已随读侧换源退役——数据写
-// 路径唯一化为 journal 投影（applyEntryBatch → recompute → syncCacheFromProjection），
+// 路径唯一化为 事件投影（applyEntryBatch → recompute → syncCacheFromProjection），
 // 「同 id 后到覆盖」语义由投影源持有态承载；plan 家族的 merge helper 保留在下方。
 
 /**
@@ -1185,7 +1185,7 @@ function subagentsDifferFromPublished(current: Map<string, SubagentRecord>, publ
 
 /**
  * workflows 水位 diff：按差异 run 构造增量信号（新 run / status / reason / 步骤数 /
- * [W1 / D6] 步骤状态全序列任一变化一条——journal 投影驱动的转态在 steps 不变时由
+ * [W1 / D6] 步骤状态全序列任一变化一条——事件投影驱动的转态在 steps 不变时由
  * stepStatuses 序列承载信号）。run 消失（fullRebuild 后全集不再含该 run）不构造信号
  * ——信号面无删除形态，硬造旧状态帧只会发 stale 信息；消费端由下次真实变化或冷拉收敛。
  */

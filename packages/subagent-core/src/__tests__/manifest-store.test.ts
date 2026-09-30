@@ -13,8 +13,8 @@ import {
 import type { ManifestRecord } from "../execution/persistence/manifest-store";
 // [W1 / U2a] bound 物化守卫断言的观察面（RecordStore 写点 → records/<id>.json 投影）。
 import { createRecord } from "../execution/persistence/execution-record";
-import { createRecordEventJournal, recordEventsPath } from "../execution/persistence/record-events";
-import type { RecordJournalEvent } from "../execution/persistence/record-events";
+import { createRecordEventStream, recordEventsPath } from "../execution/persistence/record-events";
+import type { RecordEvent } from "../execution/persistence/record-events";
 import { RecordStore } from "../execution/persistence/record-store";
 import type { ExecutionRecord } from "../execution/domain/record-model.ts";
 
@@ -386,13 +386,13 @@ describe("ManifestStore", () => {
 
 // ── [W1 / U2a] bound 物化守卫段专属 helper（v2* 前缀防重名）────────
 
-function v2ReadEventLines(recordsDir: string, id: string): RecordJournalEvent[] {
+function v2ReadEventLines(recordsDir: string, id: string): RecordEvent[] {
   const content = fs.readFileSync(recordEventsPath(recordsDir, id), "utf8");
-  const out: RecordJournalEvent[] = [];
+  const out: RecordEvent[] = [];
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
-    out.push(JSON.parse(trimmed) as RecordJournalEvent);
+    out.push(JSON.parse(trimmed) as RecordEvent);
   }
   return out;
 }
