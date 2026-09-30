@@ -214,7 +214,7 @@ export interface BtwServiceDeps {
   /**
    * 交互中转 pending 快照（BU2/D1 闲置豁免的派生**解除**通道）：respond / expired / 失效
    * 三终态的共同落点 = ExtensionTimeoutManager 的 per-session pending 表（respond →
-   * removePendingRequest、失效 → invalidatePendingForSession），组合根经
+   * removeRequest、失效 → invalidatePendingForSession），组合根经
    * server.getPendingUiRequests 薄委托注入（主 idle reaper 豁免 #8 同款先例）。idleTick 见
    * 「已置位但中转已空」即派生解除——三终态统一覆盖，无须逐终态推挽接线（置位推送通道见
    * index.ts onExtensionUIRequest）。缺省缺席 = 纯推送形态（解除走结构腿/显式调用）。

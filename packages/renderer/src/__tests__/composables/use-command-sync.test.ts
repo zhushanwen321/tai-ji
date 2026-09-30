@@ -3,7 +3,7 @@
  *
  * 覆盖（三视角）：
  * 1. 构建者（白盒）：watch(sessionIdRef, immediate) 拉取 → commandStore.applyCommands(reply.sessionId, reply.commands)
- * 2. 使用者（黑盒）：onOpenPull 触发拉取；in-flight 去重（同 sid 并发只 1 次 RPC）
+ * 2. 使用者（黑盒）：in-flight 去重（同 sid 并发只 1 次 RPC）
  * 3. 观察者（形态）：失败 → store 保留旧值、不抛、console.warn；sid null 不拉
  *
  * [测试缺口登记] 原 FM4 describe 已删：它在测试内手写 events.on handler 复刻
@@ -58,28 +58,24 @@ const mountedWrappers: VueWrapper[] = []
 
 interface HostHandle {
   sidRef: ReturnType<typeof ref<string | null>>
-  /** 手动触发 onOpenPull（模拟浮层打开） */
-  openPull: () => void
 }
 
 /**
  * 测试宿主组件：在 setup 内调 useCommandSync（useSessionEvents 的 getCurrentInstance
- * 守卫要求组件 setup 上下文），expose 返回值。
+ * 守卫要求组件 setup 上下文）。
  */
 function mountHost(initialSid: string | null): HostHandle {
   const sidRef = ref<string | null>(initialSid)
-  let capturedOpenPull: () => void = () => {}
   const wrapper = mount(
     defineComponent({
       setup() {
-        const { onOpenPull } = useCommandSync(sidRef as ReturnType<typeof ref<string | null | undefined>>)
-        capturedOpenPull = onOpenPull
+        useCommandSync(sidRef as ReturnType<typeof ref<string | null | undefined>>)
       },
       render: () => h('div'),
     }),
   )
   mountedWrappers.push(wrapper)
-  return { sidRef, openPull: capturedOpenPull }
+  return { sidRef }
 }
 
 /** 排空在途异步链。 */
@@ -179,34 +175,12 @@ describe('挂载/sid 变化触发拉取', () => {
   })
 })
 
-describe('onOpenPull 触发拉取 + in-flight 去重', () => {
-  it('onOpenPull 触发拉取（同 sid 在途时复用 Promise，不重复 RPC）', async () => {
-    const store = useCommandStore()
-    const host = mountHost('A')
-    await settle() // 挂载拉取在途
-
-    // 连续调用 onOpenPull 两次（模拟快速开关浮层）
-    host.openPull()
-    host.openPull()
-    await settle()
-
-    // 仍然只有 1 次 RPC（挂载的 + onOpenPull 的合并，因为同 sid 在途）
-    expect(getCommandsMock).toHaveBeenCalledTimes(1)
-
-    resolveForSid('A', {
-      sessionId: 'A',
-      commands: [{ name: 'compact', source: 'builtin' }],
-    })
-    await settle()
-
-    expect(store.getCommands('A').map((c) => c.name)).toEqual(['compact'])
-  })
-
+describe('in-flight 去重（同 sid 并发只 1 次 RPC）', () => {
   it('两次并发同 sid 只发 1 次 RPC（模块级 in-flight 去重）', async () => {
     // 双实例模拟 split panel
-    const host1 = mountHost('A')
+    mountHost('A')
     await settle()
-    const host2 = mountHost('A')
+    mountHost('A')
     await settle()
 
     // 两个实例都挂载了 A，但模块级去重 → 只 1 次 RPC
@@ -220,33 +194,6 @@ describe('onOpenPull 触发拉取 + in-flight 去重', () => {
 
     const store = useCommandStore()
     expect(store.getCommands('A').map((c) => c.name)).toEqual(['goal'])
-  })
-
-  it('完成后清 in-flight 条目 → 下次同 sid 触发重新拉取', async () => {
-    const host = mountHost('A')
-    await settle()
-    resolveForSid('A', {
-      sessionId: 'A',
-      commands: [{ name: 'old', source: 'extension' }],
-    })
-    await settle()
-
-    // 第一次拉取完成
-    expect(getCommandsMock).toHaveBeenCalledTimes(1)
-
-    // onOpenPull 触发第二次拉取（条目已清）
-    host.openPull()
-    await settle()
-    expect(getCommandsMock).toHaveBeenCalledTimes(2)
-
-    resolveForSid('A', {
-      sessionId: 'A',
-      commands: [{ name: 'new', source: 'skill' }],
-    })
-    await settle()
-
-    const store = useCommandStore()
-    expect(store.getCommands('A').map((c) => c.name)).toEqual(['new'])
   })
 })
 

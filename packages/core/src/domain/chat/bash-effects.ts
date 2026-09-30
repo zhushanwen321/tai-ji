@@ -31,6 +31,7 @@ import type { MessageEffectContext, MessageEffectHandler } from './effect-types'
 import { readString, readNumber, readBool } from './readers'
 import { commitMessages, type MessagesRef } from './mutations'
 import { applyEntryFrameWithOverlay } from './effects/entry-overlay'
+import { markDigestConsumed } from './reject-digest'
 import { shallowRef } from 'vue'
 
 /** payload 读取用宽松 record（与主文件其他 effect 一致，readers 安全窄化） */
@@ -135,6 +136,9 @@ export const bashResultEffect: MessageEffectHandler = (ctx: MessageEffectContext
   // 抛错」，登记 data-source-registry #7。
   if (command === '' && cancelled) {
     clearExecutingBash(sid)
+    // D6 消化标记：哨兵帧也是合成终态，与真终态帧同点置位（sendBash reject catch 的
+    // 抑制判定依赖「帧处理点必置位」时序契约）
+    markDigestConsumed('bash', sid)
     return
   }
   const ts = readNumber(payload, 'timestamp') ?? Date.now()
@@ -166,6 +170,9 @@ export const bashResultEffect: MessageEffectHandler = (ctx: MessageEffectContext
   applyEntryFrameWithOverlay(ctx, sid, entry)
   // 终态到达清执行态（与 bashStartEffect 置位成对）
   clearExecutingBash(sid)
+  // D6 消化标记：终态帧渲染进对话流与置位同点（时序契约第 2 条——sendBash reject
+  // catch 据此判定「错误已被对话流呈现」而抑制 toast）
+  markDigestConsumed('bash', sid)
 }
 
 /** 供 messageEffects 表展开的类型化入口 */
@@ -196,6 +203,9 @@ export function markBashError(
 ): void {
   // 错误路径清执行态（写方成对保证的第三腿：bashStart 置 / bashResult 清 / 此处兜底清）
   clearExecutingBash(sessionId)
+  // D6 消化标记：兜底错误呈现也是终态呈现（abortBash RPC 失败时 bashResult 帧永不到达，
+  // 本点是该形态的唯一「终态已呈现」置位点）
+  markDigestConsumed('bash', sessionId)
   const prev = messages.value.get(sessionId)?.value ?? []
   // [S7] 复用 findLastStreamingBashIndex（手动注入 streaming bash 消息的种子场景防御）。
   const realIdx = findLastStreamingBashIndex(prev, sessionId)

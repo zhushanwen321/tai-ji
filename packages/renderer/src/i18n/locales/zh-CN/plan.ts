@@ -7,15 +7,22 @@ export default {
     commentsCount: '{count} 条评论',
     submitRevise: '提交评论并要求修订',
     confirmExecute: '确认并执行',
-    // 2026-09-21 两键+忽略裁决：解释键删除；忽略 = 停止 agent turn 并关闭本次提问
-    ignore: '忽略',
-    ignoreTip: '停止 agent 并关闭本次提问，计划保持不变',
-    ignoreError: '忽略失败：{message}。agent 可能已停止响应，可重试或用左区退出按钮退出计划模式',
+    // D3 搁置（协议级 dismiss 决策，取代「忽略 = 杀 turn」）：非破坏（不杀 turn、不丢状态），
+    // 文案含「暂存待办」提示（计划进度与评论草稿保留）
+    dismiss: '搁置',
+    dismissTip: '暂存待办：暂不审阅本次提交，计划进度与评论草稿保留',
     revising: 'agent 正在根据评论修订文档，完成后会在这里更新版本',
-    waitingResubmit: '等待 agent 重新提交审批',
-    // §3.4 降级态（精简单源 + 旧 entry 缺省通用）：共用恢复入口指引；退出入口收敛到左区
-    degradedResubmit: 'agent 会话已重启，尚未重新提交',
-    degradedRecoverHint: '在对话输入框发送任意消息，提醒 agent 重新提交审批',
+    // D8 降级态可行动化（分源文案）：resubmit = E3 会话重启后 agent 尚未重提；其余不猜测来源
+    degradedResubmit: '审批提问已随会话重启失效',
+    degradedMissing: '审批提问未挂起',
+    // D8 恢复按钮（复用消息发送通道注入固定文案 user 消息，agent 重调 submit-review）；
+    // 失败双分支：发送失败 / agent 未响应（turn 结束未重挂）
+    resubmit: '重新提交审批',
+    resubmitNudge: '请重新提交计划审批',
+    resubmitError: '重新提交失败：{message}。可重试，或点击左侧的『退出』按钮退出计划模式',
+    resubmitNoResponse: 'agent 未响应：未重新提交审批。可重试，或点击左侧的『退出』按钮退出计划模式',
+    // D9③ agent 自审结论行（ready 分支截断展示 + Popover 全文）
+    selfReviewLabel: 'agent 自审结论',
     // §3.5 守卫与回看：0 评论时「提交评论修订」禁用的 tooltip 说明；评论计数可点（回看草稿）
     reviseEmptyDisabled: '先在文档中划选添加评论，再提交修订',
     viewDrafts: '查看评论草稿',
@@ -47,7 +54,8 @@ export default {
     // key 落 plan 域文件——tab 语义属 plan 模式域，不并入 panel.sideDrawer
     tabPlan: '计划产物',
     noPlan: '暂无计划产物',
-    planHint: '进入计划模式后，agent 产出的文档会显示在这里',
+    // D13⑩ 空态指引含「输入 /plan 开始规划」（S13 断言文案锚点）
+    planHint: '输入 /plan 开始规划，agent 产出的文档会显示在这里',
     // pending 态矩阵（plan-mode-ux-refactor §3.2，u-drawer-gate）：isActive && docs 空期间
     // 计划产物面板的两态。#1 与 derivePlanStage 的 exploring 语义对齐（中性进行时，不断言
     // 具体动作）；#2 空闲等待态（isGenerating 惰性派生存在误显窗口，文案中性不断言

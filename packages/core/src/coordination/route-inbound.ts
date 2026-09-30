@@ -365,6 +365,12 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   'extension:status': { crossSession: true },
   'extension:notify': { crossSession: true },
   'extension.ui_request': { crossSession: true }, // 点号：runtime wire 实际格式（见 ROUTE_TABLE 注释）
+  // P2-2 失效链（D-recheck2-1）：非 respond 终结（abort turn / 退出 plan / 回收 / session
+  // 销毁）的挂起 UI 请求失效广播。bridge EXTENSION_HANDLERS 有解析器（归一 'requests-invalidated'
+  // 事件 → useExtensionUI 摘审批条/表单），但本表此前漏声明——帧只进 session 通道、bridge
+  // （onGlobal/onCrossSession 双订阅）永收不到，审批条僵尸 ready 残留（plugin:modalState
+  // 同款失败模式，见下条注释）。
+  'extension:requestsInvalidated': { crossSession: true },
   // plugin:* 带 sid 下行（runtime 广播注入 sessionId）：ExtensionHost 全局单例消费者需同时收
   // session 通道 + crossSession 通道（ViewHostStore / DialogRequestQueue 按 per-session 分区）
   'plugin:uiRequest': { crossSession: true },

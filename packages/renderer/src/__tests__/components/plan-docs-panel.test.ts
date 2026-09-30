@@ -3,7 +3,8 @@
  * G3 / D4 降级 / D10 空态 / E2 占位）。
  *
  * 覆盖（plan-mode-redesign impl-plan u1-docs-panel（历史项目，未入库）验收条款）：
- * - L2 tab 渲染（多文档 tab 数、sourceSkill chip / version meta / ellipsis 截断）
+ * - L2 tab 渲染（多文档 tab 数、version meta / ellipsis 截断；sourceSkill 只在 meta 行，
+ *   D13③ 删 tab chip 重复）
  * - tab 切换渲染对应正文（file.read mock 参数带 sessionId 断言——cwd 守门契约）
  * - file.read 失败 → E2 占位错误态（条目不清，agent 可重新产出提示）
  * - 旧 schema 降级（D4，§3.2 矩阵 #3 加 !isActive 门）：!isActive 且无 docs 字段 →
@@ -14,9 +15,14 @@
  * - docs 空 / 无 plan 状态 → 空态不渲染主体（D10 联动；isActive=false 且 docs 空同场景——
  *   isActive=false 但 docs 非空仍渲染，D5 终态矩阵「产物 tab 与 isActive 解耦」钉死）
  * - 划选评论草稿（quote 捕获后经 Popover emit → 草稿新增 / 删除；浮条细节归 plan-comment-popover.test.ts）
- * - 修订刷新（G3）：version bump / reviewState 离开 revising → 重新 file.read
+ * - 修订刷新（G3）：version bump / state 离开 revising → 重新 file.read
  * - 草稿回看消费（§3.5，u-review-source-ui）：审批条计数点击 → plan-store 回看请求 →
  *   本面板滚动到草稿列表（挂载补消费 + 已挂载 watch 消费 + consumed 防重滚 + 空草稿 no-op）
+ * - D13 合规断言（视觉/文案合规包，S13 降级兑现——本文件锁①③④⑤⑩⑪的面板/浮层侧）：
+ *   ①「评论草稿」标题无 uppercase/tracking-wider；③ sourceSkill 只留 meta chip 一份；
+ *   ④ L2 tab 选中色 = bg-bg-elevated；⑤ 小字无 opacity 叠乘；⑩ 空态图标 +「输入 /plan
+ *   开始规划」；⑪ 草稿列表区划选不弹评论浮条 + 浮层 Esc 可关（清单全表见
+ *   plan-mode-bar.test.ts 头部 D13 索引）
  *
  * mock 形态照 plan-mode-bar.test.ts（command spread actual 保真实 events 通道）+
  * command-doc-panel.test.ts（file.read mock + MarkdownRenderer 按名 stub + useChatViewDeps
@@ -25,7 +31,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/plan-docs-panel.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -98,17 +104,21 @@ async function flushAsync(): Promise<void> {
 
 /**
  * 挂载面板：首拉经 commandMock 返回 view（可覆写），file.read 由 readMock 承接。
- * PlanCommentPopover stub（浮条细节归 plan-comment-popover.test.ts；本文件经组件实例
- * emit submit 驱动草稿链，stub 保留实例供 findComponent）。
+ * PlanCommentPopover 默认 stub（浮条细节归 plan-comment-popover.test.ts；本文件经组件实例
+ * emit submit 驱动草稿链，stub 保留实例供 findComponent）；opts.stubCommentPopover=false
+ * 时挂真实浮条（D13⑪ 划选/Esc 行为断言用）。
  */
-async function mountPanel(view: PlanStateView): Promise<VueWrapper> {
+async function mountPanel(
+  view: PlanStateView,
+  opts: { stubCommentPopover?: boolean } = {},
+): Promise<VueWrapper> {
   commandMock.mockResolvedValue({ sessionId: SID, planState: view })
   const wrapper = mount(PlanDocsPanel, {
     props: { sessionId: SID },
     global: {
       stubs: {
         MarkdownRenderer: { template: '<div class="md-stub">{{ content }}</div>', props: ['content'] },
-        PlanCommentPopover: true,
+        PlanCommentPopover: opts.stubCommentPopover !== false,
       },
     },
   })
@@ -125,20 +135,24 @@ beforeEach(() => {
 })
 
 describe('PlanDocsPanel L2 文档 tab 渲染', () => {
-  it('多文档 → tab 数与 docs 一致；fileName / 来源技能 chip / version v{N} 逐 tab 断言', async () => {
+  it('多文档 → tab 数与 docs 一致；fileName / version v{N} 逐 tab 断言（sourceSkill 只在 meta，D13③）', async () => {
     const wrapper = await mountPanel(viewOf())
     const tabs = wrapper.findAll('[data-testid="plan-docs-tab"]')
     expect(tabs).toHaveLength(3)
     expect(tabs[0]!.text()).toContain('auth-token-renewal.design.md')
     expect(tabs[1]!.text()).toContain('auth-token-renewal.impl-plan.md')
-    // 来源技能 chip（非空 sourceSkill 才渲染）
-    expect(tabs[0]!.find('[data-testid="plan-docs-tab-skill"]').text()).toBe('tech-design')
-    expect(tabs[1]!.find('[data-testid="plan-docs-tab-skill"]').text()).toBe('dev-flow')
+    // D13③ sourceSkill 只留 meta chip 一份：tab 内不再渲染技能 chip（删重复）
+    expect(tabs[0]!.find('[data-testid="plan-docs-tab-skill"]').exists()).toBe(false)
+    expect(tabs[1]!.find('[data-testid="plan-docs-tab-skill"]').exists()).toBe(false)
+    // meta 行来源技能 chip 是唯一一份（选中首个文档，非空 sourceSkill 才渲染）
+    expect(wrapper.find('[data-testid="plan-docs-meta-skill"]').text()).toContain('tech-design')
     // version meta「v{N}」
     expect(tabs[0]!.find('[data-testid="plan-docs-tab-version"]').text()).toBe('v1')
     expect(tabs[2]!.find('[data-testid="plan-docs-tab-version"]').text()).toBe('v2')
-    // sourceSkill 为空（模板流程产出）→ 无 chip
-    expect(tabs[2]!.find('[data-testid="plan-docs-tab-skill"]').exists()).toBe(false)
+    // sourceSkill 为空（模板流程产出）→ meta chip 同样不渲染
+    usePlanStore().applyFrame(SID, viewOf({ docs: [DOCS[2]!] }))
+    await nextTick()
+    expect(wrapper.find('[data-testid="plan-docs-meta-skill"]').exists()).toBe(false)
   })
 
   it('超长 fileName ellipsis 截断（demo 形态）：fileName span 带 truncate（text-ellipsis）类', async () => {
@@ -372,18 +386,21 @@ describe('PlanDocsPanel 修订刷新（G3）', () => {
     expect(readMock).toHaveBeenLastCalledWith('/data/A/.tmp/plans/auth/design.md', SID)
   })
 
-  it('reviewState 离开 revising → 重新 file.read（修订收尾刷新）', async () => {
-    const wrapper = await mountPanel(viewOf({ reviewState: 'revising' }))
+  it('真形态（View 携带 state）：state=revising 驱动修订中视觉 + 评论禁用；state 离开 → 重新 file.read', async () => {
+    // 回归契约（真实链路形态）：归一点产出的 View 恒携带 state（批次 3 条目 1 后旧字段已退出契约）
+    const wrapper = await mountPanel(viewOf({ state: 'revising' }), { stubCommentPopover: false })
     expect(readMock).toHaveBeenCalledTimes(1)
-    // revising 态视觉：tab 圆点 + meta 提示
     expect(wrapper.find('[data-testid="plan-docs-tab-revising"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="plan-docs-meta-revising"]').exists()).toBe(true)
-
-    usePlanStore().applyFrame(SID, viewOf({ reviewState: 'awaiting' }))
+    // 修订中禁评（PlanCommentPopover disabled 同一判定源）
+    expect(wrapper.findComponent({ name: 'PlanCommentPopover' }).props('disabled')).toBe(true)
+    usePlanStore().applyFrame(SID, viewOf({ state: 'reviewing' }))
     await flushAsync()
 
+    // 刷新键第三段随解析 state 变化 → 重新 file.read（修订收尾刷新）
     expect(readMock).toHaveBeenCalledTimes(2)
     expect(wrapper.find('[data-testid="plan-docs-meta-revising"]').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'PlanCommentPopover' }).props('disabled')).toBe(false)
   })
 })
 
@@ -501,6 +518,132 @@ describe('PlanDocsPanel 草稿回看消费（§3.5：审批条计数点击 → �
     expect(scrollIntoViewMock).not.toHaveBeenCalled()
     expect(store.draftsRevealPending).toBe(false)
     expect(wrapper.find('[data-testid="plan-comment-drafts"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+// ── D13 合规断言（drawer 面板/浮层侧①④⑤⑩⑪；清单索引见 plan-mode-bar.test.ts 头部）──
+
+describe('D13 合规断言（drawer 面板）', () => {
+  it('D13①「评论草稿」标题无 uppercase/tracking-wider（DESIGN.md 禁 AI slop）', async () => {
+    const wrapper = await mountPanel(viewOf())
+    wrapper.findComponent({ name: 'PlanCommentPopover' })!.vm.$emit('submit', { quote: '引文', comment: '评语' })
+    await nextTick()
+
+    const title = wrapper.find('[data-testid="plan-comment-drafts"]').find('p')
+    expect(title.exists()).toBe(true)
+    expect(title.text()).toContain('评论草稿')
+    expect(title.classes()).not.toContain('uppercase')
+    expect(title.classes()).not.toContain('tracking-wider')
+    wrapper.unmount()
+  })
+
+  it('D13④ L2 tab 选中色 = bg-bg-elevated（§3.4 tab 型规则），未选中不带该类', async () => {
+    const wrapper = await mountPanel(viewOf())
+    const tabs = wrapper.findAll('[data-testid="plan-docs-tab"]')
+    expect(tabs[0]!.classes()).toContain('bg-bg-elevated')
+    expect(tabs[0]!.classes()).toContain('text-neutral-fg')
+    expect(tabs[0]!.classes()).not.toContain('bg-surface-hover')
+    expect(tabs[1]!.classes()).not.toContain('bg-bg-elevated')
+    wrapper.unmount()
+  })
+
+  it('D13⑤ 小字无 opacity 叠乘：pending 等待提示 / 空态提示均无 opacity-* 类', async () => {
+    const idle = await mountPanel(viewOf({ docs: [] }))
+    for (const p of idle.find('[data-testid="plan-docs-pending-idle"]').findAll('p')) {
+      expect(p.classes().some((c) => c.startsWith('opacity-'))).toBe(false)
+    }
+    idle.unmount()
+
+    const empty = await mountPanel(viewOf({ isActive: false, docs: [], planFilePath: '' }))
+    for (const p of empty.find('[data-testid="plan-docs-empty"]').findAll('p')) {
+      expect(p.classes().some((c) => c.startsWith('opacity-'))).toBe(false)
+    }
+    empty.unmount()
+  })
+
+  it('D13⑩ 空态有图标与「输入 /plan 开始规划」指引', async () => {
+    const wrapper = await mountPanel(viewOf({ isActive: false, docs: [], planFilePath: '' }))
+    const empty = wrapper.find('[data-testid="plan-docs-empty"]')
+    expect(empty.find('svg').exists()).toBe(true)
+    expect(empty.text()).toContain('输入 /plan 开始规划')
+    wrapper.unmount()
+  })
+})
+
+describe('D13⑪ 评论浮层（草稿列表区划选不触发 + Esc 可关）', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** mock 划选（照 plan-comment-popover.test.ts 先例；anchorNode 指向指定元素） */
+  function mockSelectionAt(anchor: Element, text: string): void {
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      rangeCount: 1,
+      anchorNode: anchor,
+      anchorOffset: 0,
+      focusNode: anchor,
+      focusOffset: text.length,
+      toString: () => text,
+      removeAllRanges: vi.fn(),
+      getRangeAt: () => ({
+        getBoundingClientRect: () => ({ left: 100, top: 200, width: 120, height: 20 }),
+      }),
+    } as unknown as Selection)
+  }
+
+  /** 浮层查询（Teleport to body → document 通道） */
+  function popEl(): Element | null {
+    return document.querySelector('[data-testid="plan-comment-popover"]')
+  }
+
+  it('划选草稿列表引文不弹评论浮条（target = 文档内容区）；正文划选照常弹（正向对照）', async () => {
+    const wrapper = await mountPanel(viewOf(), { stubCommentPopover: false })
+    wrapper.findComponent({ name: 'PlanCommentPopover' })!.vm.$emit('submit', { quote: '草稿引文', comment: '评语' })
+    await nextTick()
+
+    // 正向对照：文档内容区划选 → 浮条出现（机制活着，排除项不是哑实现）
+    mockSelectionAt(wrapper.find('.md-stub').element, 'token 刷新段落')
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await nextTick()
+    expect(popEl()).not.toBeNull()
+
+    // 关闭浮条后草稿列表区划选 → 不触发（D13⑪）
+    document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    await nextTick()
+    expect(popEl()).toBeNull()
+    mockSelectionAt(wrapper.find('[data-testid="plan-comment-draft-item"] p').element, '草稿引文')
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await nextTick()
+    expect(popEl()).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('浮层 Esc 可关：浮条态 / 编辑态均整体关闭（安全选择 = 不提交）', async () => {
+    const wrapper = await mountPanel(viewOf(), { stubCommentPopover: false })
+    mockSelectionAt(wrapper.find('.md-stub').element, 'token 刷新段落')
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await nextTick()
+    expect(popEl()).not.toBeNull()
+
+    // 浮条态 Esc → 关闭
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(popEl()).toBeNull()
+
+    // 编辑态 Esc → 同样关闭（不 emit submit）
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await nextTick()
+    document.querySelector('[data-testid="plan-comment-trigger"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true }),
+    )
+    await nextTick()
+    expect(document.querySelector('[data-testid="plan-comment-editor"]')).not.toBeNull()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(popEl()).toBeNull()
+    expect(wrapper.findAll('[data-testid="plan-comment-draft-item"]')).toHaveLength(0)
     wrapper.unmount()
   })
 })

@@ -518,8 +518,8 @@ describe('A5 反向：无 reload 演进序列', () => {
     expect(lastSubagents).toEqual([expect.objectContaining({ subagentId: 'sa-1', status: 'idle', result: 'round output' })])
     const lastWf = (framesOf(publish, 'session.workflowUpdate').at(-1)![1] as { payload: { update: { runId: string; status: string; reason?: string } } }).payload.update
     expect(lastWf).toEqual({ runId: 'run-1', status: 'done', reason: 'completed' })
-    const lastPlan = (framesOf(publish, 'session.planState').at(-1)![1] as { payload: { planState: { reviewState: string } } }).payload.planState
-    expect(lastPlan.reviewState).toBe('awaiting')
+    const lastPlan = (framesOf(publish, 'session.planState').at(-1)![1] as { payload: { planState: { state: string } } }).payload.planState
+    expect(lastPlan.state).toBe('reviewing')
   })
 })
 

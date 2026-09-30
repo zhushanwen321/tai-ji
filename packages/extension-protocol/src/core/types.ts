@@ -192,8 +192,9 @@ export type TreeItemIcon = 'arrow' | 'check' | 'cross' | 'circle' | 'dot' | 'pau
 // 与 ask-user 家族同构的「marker select + JSON payload」跨层契约：
 // extension 序列化 payload 进 select options，runtime event-adapter 按 marker 分流，
 // 前端审批条渲染并经 respond 回传 PlanReviewResponse。
-// shared 侧 PlanStateView.docs 与 PlanDocMeta 同形（shared 是最底层包不能反向依赖
-// 本包，同形状漂移由双端注释互指 + 投影链契约测试守卫）。
+// shared 侧 PlanStateView.docs 与 PlanDocMeta 同形（PlanDocMeta 保持同形镜像——
+// 值形状惯例；PlanLifecycleState 已 type-only 直引本包，D2 裁决：plan 状态机处
+// 同形惯例不适用）。形状漂移由双端注释互指 + 投影链契约测试守卫。
 
 /**
  * 计划产物文档元数据——agent 调 register-doc 登记的一份产物。
@@ -214,13 +215,25 @@ export interface PlanDocMeta {
 /**
  * submit-review 挂起审批时的 select payload（序列化为 options[0] JSON）。
  * extension 侧解析失败走 E5（logger.warn + tool result 报错提示重挂，垃圾数据不进对话流）。
+ *
+ * selfReview（自审结论，D9①③）：agent 提交审批前的自审摘要，投影面到审批请求帧为止
+ * （不进 PlanStateView / session.planState 帧）；有界性由写侧 4KB 单点截断保证
+ * （canonical 上限与截断 = src/extensions/plan/review-contract.ts，R3）。**optional 是兼容契约**：
+ * 旧扩展不携带 → 宿主自审行不渲染的降级形态；submit-review 的必填硬门在 tool 层执行
+ * （缺失/空 → tool result 错误纠偏，不 throw），wire 帧不设必填。
  */
 export interface PlanReviewRequest {
   docs: PlanDocMeta[]
+  selfReview?: string
 }
 
-/** 审批两键裁决。revise 携带评论、approve 不携带（结构上不可混带）。 */
-export type PlanReviewDecision = 'approve' | 'revise'
+/**
+ * 审批三键裁决（D3）：approve 确认执行 / revise 提交修订（必带评论）/ dismiss 搁置
+ * （非破坏：不杀 turn、不丢状态，计划进度保留）。revise 携带评论、approve/dismiss
+ * 不携带（结构上不可混带）。值域守卫 canonical 版 = src/extensions/plan/review-contract.ts
+ * （运行时判别 TS 穷尽性管不到——未知值域降级语义见该模块「降级双分源」）。
+ */
+export type PlanReviewDecision = 'approve' | 'revise' | 'dismiss'
 
 /** 用户对某文档划选段落的一条评论：quote 是划选引文（agent 定位段落用），comment 是评语。 */
 export interface PlanReviewComment {
@@ -229,10 +242,15 @@ export interface PlanReviewComment {
 }
 
 /**
- * 审批条 respond 回传（判别联合：approve 无评论字段，revise 必带评论数组）。
- * extension 消费：approve → 走现状 complete 执行方式 select；revise → 评论清单以
- * 显式 deliverAs:'steer' 注入 + reviewState=revising。
+ * 审批条 respond 回传（判别联合：approve/dismiss 无评论字段，revise 必带评论数组）。
+ * extension 消费：approve → 走 complete 执行方式 select（transfer：reviewing→dispatching）；
+ * revise → 评论清单以显式 deliverAs:'steer' 注入 + 转移 reviewing→revising；
+ * dismiss（D3 搁置）→ 转移 reviewing→planning 落盘，tool result 告知 agent「用户搁置了
+ * 本次审阅：plan 模式保持、文档与进度不变；简短告知用户已搁置并询问下一步，不要实施改动」。
+ * 未知 decision 值域降级 = 版本错配信号：与 malformed 同款 bad-response 出口引导重挂，
+ * 消费方额外 logger.warn 留痕（D3①）——判别与降级枚举见 src/extensions/plan/review-contract.ts。
  */
 export type PlanReviewResponse =
   | { decision: 'approve' }
   | { decision: 'revise'; comments: PlanReviewComment[] }
+  | { decision: 'dismiss' }

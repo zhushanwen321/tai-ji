@@ -374,6 +374,64 @@ describe('GenStatsService 映射三写一清 + 扩展广播（D4）', () => {
   })
 })
 
+// ── 帧归属：openrouter 系复合 key 完整性（A4/S18 归属上移的 runtime 权威锚）──────────────
+// S18 误杀修复（plan-mode-audit-remediation A4）：Model.id 自含 '/'（openrouter 系
+// "vendor/model"）时，帧 model 字段必须原样携带完整复合 key `${provider}/${Model.id}`，
+// 不被尾段截取——renderer 已删除消费侧 model 比对（纯显示），本侧归属判定是唯一权威，
+// 三条推帧路径的 key 完整性在此锚定。对照组 = Model.id 不含 '/' 的常规系行为不变。
+
+describe('GenStatsService 帧归属：openrouter 系复合 key 完整性（A4/S18）', () => {
+  /** openrouter 系样本：Model.id 自含 '/'（"vendor/model" 形态） */
+  const OPENROUTER_SAMPLE = { ...NORMAL_SAMPLE, provider: 'openrouter', model: 'anthropic/claude-3' }
+
+  it('误杀修复（写 1 扩展广播）：openrouter 系采样帧 model = 完整复合 key，广播 sid 正确；对照组常规系不变', () => {
+    const { service, published } = makeOfflineService()
+
+    // openrouter 系：modelKey = 'openrouter/anthropic/claude-3'（含两个 '/'，尾段截取只余
+    // 'claude-3'——曾因此形态歧义在 renderer 侧被误杀丢弃，修复后 runtime 权威携带完整 key）
+    service.recordSample('s1', { ...OPENROUTER_SAMPLE })
+    expect(service.sessionsOfModel('openrouter/anthropic/claude-3')).toEqual(['s1'])
+    const frame = published[0]!.msg.payload as GenStatsFrame
+    expect(published[0]!.sid).toBe('s1')
+    expect(frame.sessionId).toBe('s1')
+    expect(frame.model).toBe('openrouter/anthropic/claude-3')
+    expect(frame.speed.current).toBe(50)
+    // 落盘路径按 (provider, model) 切分且 model 段含 '/' 时逆可展（splitModelKey 首个 '/'
+    // 切分契约）：读回聚合不串档
+    expect(readJson(speedFilePath('openrouter', 'anthropic/claude-3'))).toEqual({
+      [localDayKey()]: [[100, 2000]],
+    })
+
+    // 对照组（非 openrouter 帧归属不变）：Model.id 不含 '/' 的常规系同场景行为不变
+    service.recordSample('s2', { ...NORMAL_SAMPLE })
+    const plain = published[1]!.msg.payload as GenStatsFrame
+    expect(plain.model).toBe('prov/mdl')
+    expect(plain.speed.current).toBe(50)
+  })
+
+  it('误杀修复（写 2 onModelSwitched）：openrouter 系 key 重登记 + 快照帧 model 完整回填（无记录全 null 帧 MF8）', () => {
+    const { service, published } = makeOfflineService()
+    service.onModelSwitched('s1', 'openrouter/anthropic/claude-3')
+
+    expect(service.sessionsOfModel('openrouter/anthropic/claude-3')).toEqual(['s1'])
+    const frame = published[0]!.msg.payload as GenStatsFrame
+    expect(frame.model).toBe('openrouter/anthropic/claude-3')
+    expect(frame.speed).toEqual({ current: null, day: null, d7: null, d30: null })
+  })
+
+  it('误杀修复（恢复腿降级链①）：get_state 的 Model.id 自含 / → 复合解析完整 key + 写 3 回填', async () => {
+    const { service, getClient, getState } = makeService(async () => ({
+      model: { id: 'anthropic/claude-3', provider: 'openrouter' },
+    }))
+    const frame = await service.getSnapshotForSession('sLive')
+    expect(getClient).toHaveBeenCalledWith('sLive')
+    expect(getState).toHaveBeenCalled()
+    expect(frame.model).toBe('openrouter/anthropic/claude-3')
+    // 写 3：完整 openrouter 系 key 登记，live 帧此后可达（归属判定以本侧映射为权威）
+    expect(service.sessionsOfModel('openrouter/anthropic/claude-3')).toContain('sLive')
+  })
+})
+
 describe('GenStatsService.frameFor（混合视角：current 会话槽 + 聚合模型全局 + MF8 model 恒回填）', () => {
   it('本会话样本驱动 current；day/d7/d30=窗口加权聚合；model 恒回填', () => {
     const { service } = makeOfflineService()

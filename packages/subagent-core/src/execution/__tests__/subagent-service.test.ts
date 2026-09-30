@@ -88,6 +88,51 @@ describe("SubagentService", () => {
       expect(() => service.queries.findRecord("any")).toThrow(/session ended|session_start|new session/i);
     });
 
+    it("dispose 回收 session 句柄：替换窗口内迟到的写面不触达 stale pi（不崩进程）", () => {
+      // [HISTORICAL] 2026-09-22 真机崩溃（登记见 docs/todo/subagent-workflow-issues.md §1.4，已根治）：
+      // session 替换（newSession/fork）后 pi 旧 handle 全方法抛 stale 错（runner.invalidate
+      // → assertActive），单例 Service 的 _pi 残留指向旧 session——替换窗口内迟到的
+      // 异步收尾（轮终 markRoundIdle 簿记⑧ pending 注销 / 迟到 register 的 appendEntry）
+      // 触达它即抛未捕获异常崩 runtime。根治 = dispose 尾部 clearSessionHandles 回收
+      // _pi/_streamSink/_isIdleFn + store pi，消费点经 `pi?.` 短路为 no-op。
+      const STALE_MSG = "This extension ctx is stale after session replacement or reload.";
+      const stalePi = makePi();
+      stalePi.appendEntry.mockImplementation(() => {
+        throw new Error(STALE_MSG);
+      });
+      stalePi.events.emit.mockImplementation(() => {
+        throw new Error(STALE_MSG);
+      });
+      stalePi.sendMessage.mockImplementation(() => {
+        throw new Error(STALE_MSG);
+      });
+
+      const service = new SubagentService({ cwd: agentDir, modelService });
+      service.initSession({ pi: stalePi, sessionId: "s1" });
+      service.dispose();
+      // dispose 后 queries 面被 disposed 守卫拦截（上一用例锚定），迟到写面走 store 直驱
+      const store = Reflect.get(service, "store") as RecordStore;
+
+      // 替换窗口内迟到的 record 写面（形态：dispose 未覆盖到的 running record 收尾）
+      const record = createRecord("late-round", {
+        agent: "general-purpose",
+        model: "test/model",
+        mode: "background",
+        task: "late task",
+        slug: "late",
+        startedAt: 1_000_000,
+        rootSessionId: "s1",
+      });
+      // register 的 appendEntry 上报 + markRoundIdle 簿记⑧ pending 注销——句柄已回收，
+      // 两路都不触达 stale pi（修复前：直接抛 STALE_MSG → 崩进程）
+      expect(() => store.register(record)).not.toThrow();
+      expect(() =>
+        store.markRoundIdle("late-round", { kind: "success", content: "late round done" }),
+      ).not.toThrow();
+      // 簿记⑧ 确实走到了（record 翻边 idle）——no-op 是句柄短路不是路径没走
+      expect(Reflect.get(store, "records").get("late-round").status).toBe("idle");
+    });
+
     it("dispose 幂等(多次调用不抛)", () => {
       const service = new SubagentService({ cwd: agentDir, modelService });
       service.initSession({ pi: makePi(), sessionId: "s1" });
@@ -139,7 +184,7 @@ describe("SubagentService", () => {
       const service = new SubagentService({ cwd: agentDir, modelService });
       service.initSession({ pi: makePi(), sessionId: "s1" });
       const records = service.queries.collectRecords(100);
-      expect(Array.isArray(records)).toBe(true);
+      expect(records).toEqual([]);
     });
 
     it("onChange 返回 unsubscribe 函数,调用后停止通知", () => {
@@ -148,7 +193,34 @@ describe("SubagentService", () => {
       const listener = vi.fn();
       const unsubscribe = service.queries.onChange(listener);
       expect(typeof unsubscribe).toBe("function");
-      expect(() => unsubscribe()).not.toThrow();
+      // 正向通路：store 变更必须通知 listener（通知链断裂时此处红——
+      // 修复前本用例只验 unsubscribe 可调用，「停止通知」无从验证）
+      const store = Reflect.get(service, "store") as RecordStore;
+      const record = createRecord("notify-probe", {
+        agent: "general-purpose",
+        model: "test/model",
+        mode: "background",
+        slug: "notify-probe",
+        task: "notify probe",
+        startedAt: 1_000_000,
+        rootSessionId: "s1",
+      });
+      store.register(record);
+      expect(listener).toHaveBeenCalledTimes(1);
+      // 退订后变更不再通知
+      unsubscribe();
+      store.register(
+        createRecord("notify-probe-2", {
+          agent: "general-purpose",
+          model: "test/model",
+          mode: "background",
+          slug: "notify-probe-2",
+          task: "notify probe 2",
+          startedAt: 1_000_000,
+          rootSessionId: "s1",
+        }),
+      );
+      expect(listener).toHaveBeenCalledTimes(1);
     });
   });
 

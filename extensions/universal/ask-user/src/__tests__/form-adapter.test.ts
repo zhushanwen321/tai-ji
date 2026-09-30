@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 
 import {
 	askUserToFormQuestions,
-	formToAskUserQuestions,
 	formToInternalQuestions,
 	internalToFormQuestions,
 } from "../form-adapter";
@@ -76,49 +75,6 @@ describe("askUserToFormQuestions（D9 旧 payload 归一）", () => {
 	it("无 options → text（协议值域完备保留）", () => {
 		const [q] = askUserToFormQuestions([{ question: "free text q", header: "h" }]);
 		expect(q).toEqual({ type: "text", header: "h", question: "free text q" });
-	});
-});
-
-describe("formToAskUserQuestions（解码视图）", () => {
-	it("choice：multi 还原为 multiSelect，保持解码 helper 契约", () => {
-		const [q] = formToAskUserQuestions([
-			{ type: "choice", question: "q", options: [{ label: "A" }], multi: true },
-		]);
-		expect(q).toEqual({ question: "q", options: [{ label: "A" }], multiSelect: true });
-	});
-
-	it("text：无 options 字段（答案经 __other 键解码）", () => {
-		const [q] = formToAskUserQuestions([{ type: "text", question: "q" }]);
-		expect(q).toEqual({ question: "q" });
-	});
-
-	it("schedule：跳过（ask-user 链路不产生）", () => {
-		const out = formToAskUserQuestions([
-			{ type: "schedule", question: "when?" },
-			{ type: "text", question: "q" },
-		]);
-		expect(out).toEqual([{ question: "q" }]);
-	});
-
-	it("round trip：internal → Form → AskUser 与旧 toProtoQuestions 语义等价", () => {
-		const form = internalToFormQuestions([internalSingle, internalMulti]);
-		const decodeView = formToAskUserQuestions(form);
-		expect(decodeView[0]).toEqual({
-			question: "Which DB?",
-			options: [
-				{ label: "Postgres", description: "Mature" },
-				{ label: "SQLite" },
-			],
-			allowOther: true,
-		});
-		expect(decodeView[1]).toEqual({
-			question: "Which tools?",
-			header: "Tools",
-			context: "pick many",
-			options: [{ label: "A" }, { label: "B" }],
-			multiSelect: true,
-			allowOther: true,
-		});
 	});
 });
 

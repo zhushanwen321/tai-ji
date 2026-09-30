@@ -1,0 +1,47 @@
+{
+  "name": "repro-exec-form-pending",
+  "description": "F5 症状复现剧本（现版 executeComplete 行为模拟）：审批 select 挂起 → respond(approve) 后『先清 reviewState 落盘』再挂执行方式表单 select。预期：表单挂起期持久态 = isActive + docs>0 + 无 reviewState → derivePlanStage 判『②文档撰写』（阶段倒退）。",
+  "params": {
+    "selectRegisterDelayMs": 0,
+    "abortMode": "dissolve"
+  },
+  "onPrompt": {
+    "planStateEntry": {
+      "isActive": true,
+      "planFilePath": "/fixture/plans/fixture-requirement/plan.md",
+      "requirement": "给设置页加主题切换",
+      "templateName": null,
+      "skills": [],
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }],
+      "reviewState": "awaiting"
+    },
+    "assistant": ["计划文档已写好并登记，提交审批。"],
+    "select": {
+      "kind": "plan-review",
+      "id": "pr-repro-f5",
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }]
+    },
+    "agentEnd": false
+  },
+  "onSelectResponse": {
+    "planStateEntry": {
+      "isActive": true,
+      "planFilePath": "/fixture/plans/fixture-requirement/plan.md",
+      "requirement": "给设置页加主题切换",
+      "templateName": null,
+      "skills": ["fixture-exec-skill"],
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }]
+    },
+    "select": {
+      "kind": "ui-form",
+      "id": "uf-repro-f5",
+      "skills": ["fixture-exec-skill"]
+    },
+    "agentEnd": false
+  },
+  "onAbort": {
+    "planStateEntry": null,
+    "assistant": ["已停止。"],
+    "agentEnd": true
+  }
+}

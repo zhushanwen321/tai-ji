@@ -1,0 +1,33 @@
+{
+  "name": "repro-dismiss-no-persist",
+  "description": "F1/F3 症状复现剧本（现版扩展行为模拟）：submit-review 落 reviewState=awaiting + select 挂起 → abort 解散 → 现版 cancelled 分支『不改 reviewState 不落盘』+ 已停止解散文案。预期：session 末条 plan-state 仍 awaiting（F1 显示公式输入残留 / F3 重启复活前提）。",
+  "params": {
+    "selectRegisterDelayMs": 0,
+    "abortMode": "dissolve"
+  },
+  "onPrompt": {
+    "planStateEntry": {
+      "isActive": true,
+      "planFilePath": "/fixture/plans/fixture-requirement/plan.md",
+      "requirement": "给设置页加主题切换",
+      "templateName": null,
+      "skills": [],
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }],
+      "reviewState": "awaiting"
+    },
+    "assistant": ["计划文档已写好并登记，提交审批。"],
+    "select": {
+      "kind": "plan-review",
+      "id": "pr-repro-f1",
+      "docs": [{ "fileName": "plan.md", "absPath": "/fixture/plans/fixture-requirement/plan.md", "sourceSkill": "", "version": 1 }]
+    },
+    "agentEnd": false
+  },
+  "onAbort": {
+    "planStateEntry": null,
+    "assistant": [
+      "The review was cancelled — the user dismissed the approval dialog or exited plan mode. This is NOT an approval. Do not implement any changes. Stop the review loop: briefly tell the user you have stopped, then wait for further user instructions."
+    ],
+    "agentEnd": true
+  }
+}

@@ -26,7 +26,7 @@
 import { readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { SubagentRecord, WorkflowRunRecord, PlanStateView, PlanDocMeta } from '@taiji/shared'
-import { PLAN_STATE_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
+import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 // subagent-record / workflow-record 词表均已收 core 单源（runtime 投影经 core barrel 消费；
 // shared 的 subagent-record 副本仅剩 renderer 消费）
 import {
@@ -35,8 +35,11 @@ import {
   getSubagentRecordsDir,
 } from '@zhushanwen/subagent-core'
 import { extractPlanStateFromSessionFile, scanPlanStateEntries, INACTIVE_PLAN_STATE_VIEW } from './plan-state-extractor.js'
+// PLAN_STATE_CUSTOM_TYPE canonical = extension-protocol legacy-entries（D-B4-1 从 shared
+// constants 迁出——plan-state entry 契约与 legacy 读取同域单源；包依赖，与下方 engines
+// 契约同引法）
 import type { SubagentEngineConfigView, SubagentEnginesFile } from '@zhushanwen/extension-protocol'
-import { SUBAGENTS_ENGINES_FILENAME } from '@zhushanwen/extension-protocol'
+import { SUBAGENTS_ENGINES_FILENAME, PLAN_STATE_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（见 shared/src/index.ts L32 注释），
 // Node 端从子路径 import
 import { getDataDir } from '@taiji/shared/paths'
@@ -52,6 +55,7 @@ import { extractWorkflowsFromSessionFile } from './workflow-extractor.js'
 import { scanRecordFamilyEntriesFromSessionFile } from './session-file-extraction.js'
 import { SessionJournalProjection } from './journal-projection.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
+import { logger } from '../../infra/logger.js'
 import { discoverAndRegisterEngines } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
 import { isStrictlyUnder } from '../../utils/path-utils.js'
 import type { ISessionStore } from '../ports/session.js'
@@ -120,6 +124,15 @@ export interface RecordEntriesCache {
    * 单点合并。惰性创建（首个失效拉取 / 读 RPC / 对账触达时）；销毁随 cache。
    */
   projection: SessionJournalProjection | null
+  /**
+   * [pull-push W0] 首拉未决标志：收到过 record 失效信号但尚未成功完成一轮拉取。
+   * 置位 = invalidateRecordEntries 通过 customType 门；清除 = refreshRecordEntries 成功
+   * 完成一轮 fetch→merge→publish。作用 = 纳入对账域（isInReconcileDomain）：首拉窗口
+   * 失败（pi client 短暂不可得 / RPC 错误）后 agent_settled 腿持续重试直至成功——修复
+   * R11/6c3「planState 全程零发布」持续态（修复前纯 plan session 的 planState 恒 null
+   * 不在对账域，首拉失败后两腿全跳过、零重试、零日志）。
+   */
+  awaitingFirstPull: boolean
 }
 
 /**
@@ -144,6 +157,13 @@ export interface PublishedWorkflowRunState {
 
 /** get_entries RPC 响应的域内收窄（u-s4 EntriesSinceResult 同款先例，见 fetchRecordEntriesRound）。 */
 type EntriesSinceResult = { data?: { entries?: unknown[]; leafId?: string | null } }
+
+/**
+ * [pull-push W0] refreshRecordEntries 的触发腿标注（发布观测事件的「原因」字段）：
+ * invalidate = entry_appended 失效防抖腿；reconcile-settled = agent_settled 对账腿；
+ * reconcile-timer = 15s 定时对账腿。
+ */
+type RecordRefreshTrigger = 'invalidate' | 'reconcile-settled' | 'reconcile-timer'
 
 /**
  * [RT-4#8] getSubagents/getWorkflows 的读面结果：records + oversize 降级标志。
@@ -340,11 +360,23 @@ export class SessionRecords {
       return
     }
     const cache = this.recordEntriesCaches.get(sessionId)
-    if (!cache) return
+    if (!cache) {
+      // [pull-push W0] 断点显形：无缓存条目的失效信号此前静默 no-op 零日志（R11/6c3
+      // 排障盲点）。可达形态 = session 注册时序窗口 / 已销毁 session 的在途信号；本条
+      // 信号丢弃后无补发，后续信号与 agent_settled 腿接续（awaitingFirstPull 对账域）。
+      logger.warn('[session-records] invalidate dropped: no record cache for session (not registered or already disposed)', {
+        sessionId,
+        customType,
+      })
+      return
+    }
+    // [pull-push W0] 首拉未决置位（幂等）：通过 customType 门即视为「该 session 有过
+    // record 数据诉求」，在首轮拉取成功前保持对账域内（防抖合并分支也置位）。
+    cache.awaitingFirstPull = true
     if (cache.debounceTimer !== null) return // 已在防抖等待中：合并
     cache.debounceTimer = setTimeout(() => {
       cache.debounceTimer = null
-      void this.refreshRecordEntries(sessionId)
+      void this.refreshRecordEntries(sessionId, 'invalidate')
     }, SCALAR_STATE_DEBOUNCE_MS)
   }
 
@@ -360,7 +392,7 @@ export class SessionRecords {
   reconcileRecordEntries(sessionId: string): void {
     const cache = this.recordEntriesCaches.get(sessionId)
     if (!cache || !isInReconcileDomain(cache)) return
-    void this.refreshRecordEntries(sessionId).catch((e) => this.warnReconcileRoundFailed(sessionId, e))
+    void this.refreshRecordEntries(sessionId, 'reconcile-settled').catch((e) => this.warnReconcileRoundFailed(sessionId, e))
   }
 
   /**
@@ -391,6 +423,7 @@ export class SessionRecords {
       publishedWorkflows: new Map(),
       publishedPlanState: null,
       projection: null,
+      awaitingFirstPull: false,
     }
     this.recordEntriesCaches.set(sessionId, cache)
     return cache
@@ -470,8 +503,12 @@ export class SessionRecords {
    * session.workflowUpdate 增量信号 / session.planState 全量帧，水位 diff 差异集构造）。
    * 失败语义：Entry not found → 丢 cursor 就地重试一次全量自愈（两轮上限，防坏 pi 反复全量）；
    * 其他 RPC 错误 → warn 后保留 cursor（下次失效重试仍走增量），不发布（快照未变）。
+   *
+   * [pull-push W0] trigger 参数标注本轮触发腿（invalidate / reconcile-settled /
+   * reconcile-timer），随发布观测事件落日志（S5 排障口径「哪条腿补的帧」）；成功完成
+   * 一轮后清 awaitingFirstPull（首拉未决解除，对账域判定回归内容域）。
    */
-  private async refreshRecordEntries(sessionId: string): Promise<void> {
+  private async refreshRecordEntries(sessionId: string, trigger: RecordRefreshTrigger): Promise<void> {
     const cache = this.recordEntriesCaches.get(sessionId)
     if (!cache) return
     if (cache.inflight) return cache.inflight // 并发失效共享一次拉取
@@ -479,7 +516,15 @@ export class SessionRecords {
       const startedAt = Date.now()
       try {
         const client = this.deps.pm.getClient(sessionId)
-        if (!client) return // session 已死：缓存冻结（onSessionDisposed 会清），冷启动走磁盘路径
+        if (!client) {
+          // [pull-push W0] 断点显形：pi client 不可得（spawn 窗口 / 已死未清理）此前
+          // 静默 return 零日志。awaitingFirstPull 保持置位——agent_settled 腿会持续重试。
+          logger.warn('[session-records] refresh skipped: pi client unavailable (round not executed, awaiting reconcile retry)', {
+            sessionId,
+            trigger,
+          })
+          return // session 已死：缓存冻结（onSessionDisposed 会清），冷启动走磁盘路径
+        }
         // 两轮：第 1 轮按 cursor 增量；Entry not found 丢 cursor 后第 2 轮全量自愈
         const MAX_REFRESH_ROUNDS = 2
         for (let round = 0; round < MAX_REFRESH_ROUNDS; round++) {
@@ -497,8 +542,21 @@ export class SessionRecords {
             console.warn(`[session-service] refresh record entries via getEntries failed for ${sessionId}: ${toErrorMessage(e)}`)
             return
           }
-          this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild)
+          const frames = this.applyRecordEntries(cache, fetched.entries, sessionId, fetched.fullRebuild)
           if (fetched.leafId !== undefined) cache.cursor = fetched.leafId
+          // [pull-push W0] 首拉未决解除（拉取 + merge + 发布判定已完成一轮；发布与否随
+          // 水位 diff——零帧轮同样解除，缓存腿健康即为目标状态）。
+          cache.awaitingFirstPull = false
+          // [pull-push W0] 发布观测：水位门后有帧才落（稳态零帧零日志——S5 无噪声锚）；
+          // reconcile 触发的补发轮即 S5「缓存兜底」可检索事件（域键=frames、原因=trigger、耗时=elapsedMs）。
+          if (frames.length > 0) {
+            logger.info('[session-records] record frames published', {
+              sessionId,
+              trigger,
+              frames,
+              elapsedMs: Date.now() - startedAt,
+            })
+          }
           return
         }
       } finally {
@@ -548,7 +606,7 @@ export class SessionRecords {
         const cache = this.recordEntriesCaches.get(sessionId)
         if (!cache) continue
         if (cache.cursor === null) continue // 实施期门③
-        void this.refreshRecordEntries(sessionId).catch((e) => this.warnReconcileRoundFailed(sessionId, e))
+        void this.refreshRecordEntries(sessionId, 'reconcile-timer').catch((e) => this.warnReconcileRoundFailed(sessionId, e))
       }
     } catch (e) {
       // 定时器单轮 try 围栏：异常不杀 timer，下轮恢复（对账循环自身挂死处置，§3.4）
@@ -634,19 +692,21 @@ export class SessionRecords {
     entries: unknown[],
     sessionId: string,
     isFullRebuild: boolean,
-  ): void {
+  ): string[] {
     // [W1 / D6] entry 批换投影入口：v1 快照扫描 + v2 条目分类 + journal fold 双源
-    // 单点合并（journal 胜出仲裁）全在投影内完成；步骤视图合并的输入源也从本处
-    // 的两缓存喂入退役（投影合并快照内跑 mergeWorkflowStepRecords——W0 输入换源）。
+    // 单点合并（journal 胜出仲裁）全在投影内完成；步骤视图合并的输入源也从本处的
+    // 两缓存喂入退役（投影合并快照内跑 mergeWorkflowStepRecords——W0 输入换源）。
     // 已销毁 session 也完成投影 merge，只拦发布（D3 登记卫生债，水位机制下无害：
     // publish 未发生 → 水位滞留 → session 恢复后下轮触发补发）。
+    // [pull-push W0] plan 家族不进投影（单例状态直扫直并，见下方 mergePlanState）；
+    // 返回本轮实际发布的帧类型序列（观测事件域键载荷，空数组 = 零帧轮）。
     const projection = this.ensureProjection(sessionId, cache)
     projection.applyEntryBatch(entries, { fullRebuild: isFullRebuild })
     this.syncCacheFromProjection(cache, projection)
     mergePlanState(cache, scanPlanStateEntries(entries), isFullRebuild)
 
-    if (!this.deps.hasSession(sessionId)) return // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
-    this.publishRecordChanges(cache, sessionId)
+    if (!this.deps.hasSession(sessionId)) return [] // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
+    return this.publishRecordChanges(cache, sessionId)
   }
 
   /**
@@ -658,10 +718,18 @@ export class SessionRecords {
    * 三条内部失败路径——序列化失败/出站守卫 drop/ws.send 被吞——均不向调用方抛错，断连
    * 空投照样完成调用，u0 校准维持「调用完成即推进」，不因 bus 内部跳下移）。bus 未注入
    * → publish 短路且水位滞留（真实可观测的滞留形态），等对账腿补发。
+   *
+   * [pull-push W0] 返回本轮实际发布的帧类型序列（观测事件的域键载荷；空数组 = 零帧轮，
+   * 调用方不落观测日志）。bus 未注入短路时 warn 显形（此前静默 return 零日志——R11
+   * 排障盲点：水位滞留无痕）。
    */
-  private publishRecordChanges(cache: RecordEntriesCache, sessionId: string): void {
+  private publishRecordChanges(cache: RecordEntriesCache, sessionId: string): string[] {
     const bus = this.deps.getMessageBus()
-    if (!bus) return // bus 未注入窗口：不发布不推进（水位滞留，下轮触发补发）
+    if (!bus) {
+      logger.warn('[session-records] publish skipped: message bus not injected (watermark retained, reconcile leg will re-publish)', { sessionId })
+      return []
+    }
+    const frames: string[] = []
 
     if (subagentsDifferFromPublished(cache.subagents, cache.publishedSubagents)) {
       bus.publish(sessionId, {
@@ -669,6 +737,7 @@ export class SessionRecords {
         payload: { sessionId, subagents: Array.from(cache.subagents.values()) },
       })
       cache.publishedSubagents = new Map(cache.subagents) // publish 完成即推进（镜像当前派生 id 集）
+      frames.push('session.subagents')
     }
 
     const workflowSignals = workflowSignalsAgainstPublished(cache.workflows, cache.publishedWorkflows)
@@ -680,6 +749,7 @@ export class SessionRecords {
     }
     if (workflowSignals.length > 0) {
       cache.publishedWorkflows = projectPublishedWorkflowStates(cache.workflows)
+      frames.push('session.workflowUpdate')
     }
 
     if (planStateDiffersFromPublished(cache.planState, cache.publishedPlanState)) {
@@ -688,7 +758,9 @@ export class SessionRecords {
         payload: { sessionId, planState: cache.planState ?? INACTIVE_PLAN_STATE_VIEW },
       })
       cache.publishedPlanState = cache.planState
+      frames.push('session.planState')
     }
+    return frames
   }
 
   /**
@@ -1110,9 +1182,15 @@ function planStateDiffersFromPublished(current: PlanStateView | null, published:
  * plan record）。纯聊天 session 天然排除（无 record 无可对账）；事故形态 session
  * （record 存在、run 已终态）天然包含——「仅含 running 态」门控已被设计 D2 否决
  * （事故形态下 run 已 done，门控会形成完全零触发）。
+ *
+ * [pull-push W0] awaitingFirstPull 纳入（R11/6c3 根修）：首拉失败过的 session（如纯
+ * plan session 的 planState 恒 null——修复前不在域内）保持对账域内，agent_settled 腿
+ * 持续重试直至首轮拉取成功。代价校准：cursor=null 的重试走全量 RPC，但 getEntries 是
+ * pi 内存过滤零磁盘 IO（session-manager.js:982-984 锚点），频率 = agent_settled 每
+ * turn 一次；定时腿仍受实施期门③约束（cursor=null 跳过），无高频放大。
  */
 function isInReconcileDomain(cache: RecordEntriesCache): boolean {
-  return cache.subagents.size > 0 || cache.workflows.size > 0 || cache.planState !== null
+  return cache.awaitingFirstPull || cache.subagents.size > 0 || cache.workflows.size > 0 || cache.planState !== null
 }
 
 /**
@@ -1122,10 +1200,17 @@ function isInReconcileDomain(cache: RecordEntriesCache): boolean {
  * subagentRecordEquals 的 diff 先例）。null 与 View 恒不等（无 entry → 有 entry 是真变化，
  * 由 applyRecordEntries 分支显式处理，本函数只管 View vs View）。
  *
- * 结构固定（shared PlanStateView 八字段），逐字段比对而非 JSON.stringify（顺序无关、
- * 无序列化抖动）；optional 字段以 undefined === undefined 参与比对（两 View 同缺某
- * optional 字段 = 相等，单缺 = 不等——「无新字段区」的差异是真实显示差异，必须 publish；
- * 旧 entry 无 reviewStateSource，两 View 同缺 = 相等，天然兼容）；
+ * 比对维度随 PlanStateView 字段域同步（plan 状态机显式化 D2 归一——本函数是 consumers.md
+ * §二④ 登记的隐性消费面，清单漏项 U3b fix 轮 1 补登）：派生归一后 View 恒携带
+ * state/resumeHint、旧字段 reviewState/reviewStateSource 恒缺——比对维度必须落在
+ * state/resumeHint 上（沿用旧字段比对 = state/resumeHint 单维变化被判「无变化」抑制
+ * session.planState 广播，谎言 UI 族回归）。
+ * 结构固定（八维逐字段比对而非 JSON.stringify——顺序无关、无序列化抖动：四必填 +
+ * state/resumeHint/skills/docs；deprecated 只读兼容位 reviewState/reviewStateSource 刻意
+ * 不比对——新派生恒缺、其语义差异已由 state/resumeHint 归一等价覆盖）；optional 字段以
+ * undefined === undefined 参与比对（两 View 同缺某 optional 字段 = 相等，单缺 = 不等——
+ * 「无新字段区」的差异是真实显示差异，必须 publish；旧 entry 派生恒有 state，两 View
+ * 同缺 resumeHint = 相等，天然兼容）；
  * skills/docs 数组逐元素比对（数组引用每轮重新派生，=== 引用比较对同值也判不等）。
  */
 function planStateEquals(a: PlanStateView, b: PlanStateView): boolean {
@@ -1133,8 +1218,8 @@ function planStateEquals(a: PlanStateView, b: PlanStateView): boolean {
   if (a.planFilePath !== b.planFilePath) return false
   if (a.requirement !== b.requirement) return false
   if (a.templateName !== b.templateName) return false
-  if (a.reviewState !== b.reviewState) return false
-  if (a.reviewStateSource !== b.reviewStateSource) return false
+  if (a.state !== b.state) return false
+  if (a.resumeHint !== b.resumeHint) return false
   if (!stringArrayEquals(a.skills, b.skills)) return false
   return planDocListEquals(a.docs, b.docs)
 }

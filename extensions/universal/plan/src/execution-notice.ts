@@ -1,64 +1,24 @@
+/**
+ * plan complete 后的执行通知投递 + goal 桥。
+ *
+ * execute 档经 goal 桥 slot 注册执行跟踪（失败显式化五出口，不阻断执行），
+ * steer 指令承载执行方式裁决（goal 工作流 / skill / 直接执行三形态）。
+ * 压缩/分叉时的 plan 摘要由 pi 内置压缩机制承载（确定性文件操作清单 +
+ * keepRecentTokens 近端原文保留），本扩展不再接管压缩摘要。
+ */
 import * as fs from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 
-import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent, SessionBeforeTreeEvent } from "@earendil-works/pi-coding-agent";
-import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import type { GoalInitFn } from "@zhushanwen/pi-goal";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import { t } from "./i18n.js";
-import type { PlanSessionMap, PlanState } from "./state.js";
-import { PLAN_CONTEXT_CUSTOM_TYPE, getPlanState } from "./state.js";
+import type { PlanState } from "./state.js";
+import { PLAN_CONTEXT_CUSTOM_TYPE } from "./state.js";
 
 const logger = getLogger("pi-plan");
-
-export function registerPlanEventHandlers(
-  pi: ExtensionAPI,
-  sessions: PlanSessionMap,
-): void {
-  pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx: ExtensionContext) => {
-    const sessionId = ctx.sessionManager.getSessionId();
-    const state = getPlanState(sessions, sessionId, ctx);
-    if (!state.isActive) return {};
-
-    const prep = event.preparation;
-
-    // Read plan file content for recovery after compact
-    const planContent = readPlanFileSafe(state.planFilePath);
-
-    // handler 已有 isActive 门——能走到这里的 plan 必然进行中（D6：phase 删除，原 phase="complete" 分支为死状态）
-    const progressNote = "\nPlan was in progress — review and continue.";
-
-    return {
-      compaction: {
-        summary:
-          `Plan mode active. Plan file: ${state.planFilePath}\n\n` +
-          `## Plan Content\n${planContent}\n\n` +
-          `Requirement: ${state.requirement}` +
-          progressNote,
-        firstKeptEntryId: prep?.firstKeptEntryId,
-        tokensBefore: prep?.tokensBefore,
-      },
-    };
-  });
-
-  pi.on("session_before_tree", async (_event: SessionBeforeTreeEvent, ctx: ExtensionContext) => {
-    const sessionId = ctx.sessionManager.getSessionId();
-    const state = getPlanState(sessions, sessionId, ctx);
-    if (!state.isActive) return {};
-
-    const planContent = readPlanFileSafe(state.planFilePath);
-
-    return {
-      summary: {
-        summary:
-          `Plan mode active. Plan file: ${state.planFilePath}\n\n` +
-          `## Plan Content\n${planContent}\n\n` +
-          `Read the plan file and execute the implementation.`,
-      },
-    };
-  });
-}
 
 /** Read plan file: ok=false 是显式信号（GoalBridgeOutcome 的 plan-unreadable 出口消费），消除哨兵字符串比较 */
 type PlanFileContent = { ok: true; content: string } | { ok: false };
@@ -71,12 +31,6 @@ function readPlanFile(planFilePath: string): PlanFileContent {
   }
 }
 
-/** Read plan file, return content or human-readable marker (for prompt embedding) */
-function readPlanFileSafe(planFilePath: string): string {
-  const result = readPlanFile(planFilePath);
-  return result.ok ? result.content : "(plan file could not be read)";
-}
-
 /**
  * goalInit slot key——goal 扩展的跨扩展编程式入口（goal-bridge-cross-extension.md）。
  * ⚠️ 必须与 `extensions/universal/goal/src/index.ts` 的 GOAL_INIT_SLOT_KEY 字符串完全一致：
@@ -87,7 +41,6 @@ const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");
 
 /**
  * goal 桥的单一断言点：goal 扩展挂在 globalThis slot 上的编程式接口（发现 7——
- * 此前 detectGoalCapability / tryGoalInit 两处 inline 断言收敛于此；
  * 桥通道从 pi API 对象挂载迁到 slot：pi 0.84.4 per-extension API 隔离使
  * pi.__goalInit 形态跨扩展恒不可见，slot 是 C-ext-06 惯例的进程级共享形态）。
  */
@@ -96,18 +49,16 @@ function getGoalInit(): GoalInitFn | undefined {
   return typeof fn === "function" ? (fn as GoalInitFn) : undefined;
 }
 
-/** Detect whether goal extension is available via its programming interface */
-export function detectGoalCapability(): boolean {
-  return getGoalInit() !== undefined;
-}
-
 /**
- * 从 plan 文件路径推导 goal slug（kebab-case；无有效字符时 fallback）。
- * 仅 widget 标题 + history 展示用，不注入 prompt。
+ * goal 桥侧 slug（仅 widget 标题 + history 展示用，不注入 prompt）。生产输入恒为
+ * <project>/.tmp/plans/<slug>/plan.md（enter.ts 构造）——展示名取目录名（requirement
+ * slug 段，2026-09-27 用户裁决；docs/todo/plan-cjk-slug-data-loss.md 缺陷 3 同源修复）。
+ * kebab 链对 enter slug 幂等，只防 planFilePath 非生产形态的通用输入；提取为空回
+ * "plan-execution"。中文需求且缺陷 2（enter 期目录唯一性）未修的窗口内，plan.md 直落
+ * .tmp/plans 使本函数取到骨架名 "plans"——该形态随缺陷 2 修复消除。
  */
 function buildPlanSlug(planFilePath: string): string {
-  const stem = basename(planFilePath)
-    .replace(/\.md$/i, "")
+  const stem = basename(dirname(planFilePath))
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
@@ -137,12 +88,12 @@ function truncatePreview(text: string): string {
  * 从 plan 步骤构造可检查的 successCriteria（plan 完成 = 所有步骤执行并验证）。
  * goal 的 complete 判定会对照本字段逐条做证据审计。
  *
- * 形态固定：1 条总述 `All N steps of <basename> executed and verified`
+ * 形态固定：1 条总述 `All N steps of <plan slug> executed and verified`
  * + 前 PREVIEW_COUNT 条 step preview（编号前缀、单条截断 ≤PREVIEW_MAX_CHARS），
  * 合计 ≤4 条（goal schema maxItems:8），每条单行不含 \r\n。
  */
 export function buildPlanSuccessCriteria(planFilePath: string, tasks: string[]): string[] {
-  const planName = toSingleLine(basename(planFilePath).replace(/\.md$/i, ""));
+  const planName = toSingleLine(buildPlanSlug(planFilePath));
   const items = [`All ${tasks.length} steps of ${planName} executed and verified`];
   const previews = tasks
     .slice(0, PREVIEW_COUNT)
@@ -260,7 +211,7 @@ function deliverExecutionNotice(
   skillEntryPath?: string,
 ): GoalBridgeOutcome | undefined {
   // execute 档整合 goal 桥：tryGoalInit 内部含 goal-unavailable gate（goal 未挂载走
-  // started:false 降级），无需前置 detectGoalCapability 探测
+  // started:false 降级），无需前置探测
   const outcome = execMode === "execute" ? tryGoalInit(planFilePath, ctx) : undefined;
 
   let modeHint: string;
@@ -297,58 +248,19 @@ function deliverExecutionNotice(
 }
 
 /**
- * complete 的 isolation 分发（D1 后仅 compact | direct，两档都投递执行通知）。
+ * complete 后的执行通知投递（plan-mode-audit-remediation D-B1-6：执行前压缩档
+ * 砍除——原 compact | direct 两档分发退化为单一直接投递路径）。
  *
- * 返回值：execMode=execute 且 isolation=direct 时同步返回 goalInit 的 outcome
- * （executeComplete 写进 result content 与 details）；其余情形返回 undefined——
- * skill 档无 goalInit，compact 档 goalInit 在 onComplete 回调内执行（goal 状态
- * entry 须在压缩后的世界里创建，提前到 compact 前有被压缩边界丢弃的风险，时序
- * 不动——设计 §6.2 D2），该档 result 已返回，失败报告走 steer + notify 通道。
+ * 返回值：execMode=execute 时同步返回 goalInit 的 outcome（executeComplete 写进
+ * result content 与 details）；skill 档无 goalInit，返回 undefined——该档 result
+ * 已返回，失败报告走 steer + notify 通道。
  */
 export function handlePlanComplete(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: PlanState,
-  isolation: string,
   execMode: string,
   skillEntryPath?: string,
 ): GoalBridgeOutcome | undefined {
-  const planFilePath = state.planFilePath;
-
-  switch (isolation) {
-    case "compact": {
-      ctx.compact({
-        customInstructions: `Plan file: ${planFilePath}. Read plan and execute implementation.`,
-        // E1 同构崩溃点（crash-resilience D1）：onComplete/onError 由 compact 内部
-        // Promise 链异步调用、不在 pi runner emit() 的 try/catch 内——压缩进行中用户
-        // 切换/重载 session 后，回调触碰捕获的 pi/ctx 命中 stale 同步抛错即杀 pi 进程。
-        // 守卫 stale 静默降级（执行消息不投递，用户可手动 Read plan 文件执行），非
-        // stale 错误原样上抛。plan 未注入代际计数器（低频路径），分诊依赖 PS-30 门禁
-        // 守卫的 stale 文案兜底（D1 降级语义声明的合法形态）。
-        onComplete: () => {
-          guardStaleCtx(() => {
-            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
-          }, {
-            label: "plan:compact-onComplete",
-            onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
-          });
-        },
-        onError: (_error: Error) => {
-          guardStaleCtx(() => {
-            ctx.ui.notify("Compact failed, continuing without isolation.", "warning");
-            deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
-          }, {
-            label: "plan:compact-onError",
-            onStale: (error) => logger.warn("plan execution notice delivery skipped (stale ctx)", { error: toErrorMessage(error) }),
-          });
-        },
-      });
-      return undefined;
-    }
-
-    case "direct":
-    default: {
-      return deliverExecutionNotice(pi, ctx, planFilePath, execMode, skillEntryPath);
-    }
-  }
+  return deliverExecutionNotice(pi, ctx, state.planFilePath, execMode, skillEntryPath);
 }

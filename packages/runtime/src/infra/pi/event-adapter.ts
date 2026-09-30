@@ -848,8 +848,9 @@ function tryTranslateScheduleCreateSelect(
 }
 
 /**
- * plan 审批请求检测（plan 模式重设计 D5）：select title 为 PLAN_REVIEW_MARKER → options[0]
- * 是 PlanReviewRequest JSON（extension-protocol 契约 { docs: PlanDocMeta[] }）。
+ * plan 审批请求检测（plan 模式重设计 D5 + 状态机显式化 D9③）：select title 为
+ * PLAN_REVIEW_MARKER → options[0] 是 PlanReviewRequest JSON（extension-protocol 契约
+ * { docs: PlanDocMeta[]; selfReview?: string }）。
  * 检测成功广播 extension.ui_request 带 planReview: true 标记（与 form: true 同构分流——
  * 前端 C4 过滤器识别后路由审批条三键 + 行内评论，不得落入 CompanionBand 渲染 marker
  * 控制符 title）；挂起请求由前端 respond 回传（select 挂起不超时语义同 ask-user 分支注释）。SUBAGENT_INFLIGHT 是唯一不广播例外（文件头 D5 例外登记），plan-review 走
@@ -863,7 +864,7 @@ function tryTranslatePlanReviewSelect(
   requestId: string,
   dialogMethod: ExtensionInteractMethod,
 ): PiTranslatedEvent[] | undefined {
-  const planReviewData = parseSelectOptionsPayload(event) as { docs?: unknown } | undefined
+  const planReviewData = parseSelectOptionsPayload(event) as { docs?: unknown; selfReview?: unknown } | undefined
   if (!Array.isArray(planReviewData?.docs)) {
     return undefined
   }
@@ -873,6 +874,13 @@ function tryTranslatePlanReviewSelect(
     method: 'select',              // 仍是 select（复用 respond 回传通道）
     planReview: true,              // 标记 plan 审批富交互，前端据此路由到审批条（C4 过滤器）
     // docs 不透传进帧：审批条文档清单由 usePlanState 投影链（session.planState）唯一承载
+    // selfReview 条件落键（D9③，plan 状态机显式化）：docs 不透传纪律保留，仅加这一个
+    // 有界字段。截断在扩展写侧（canonical 上限与截断 = packages/extension-protocol/src/extensions/plan/review-contract.ts
+    // 的 PLAN_SELF_REVIEW_MAX_BYTES / truncateSelfReview）——本透传层不截不拒（上限已在写侧
+    // 达成，超限形态防御式原样过）；非 string（含缺席——旧扩展「自审行不渲染」降级形态）
+    // 不落键（帧上永不出现 undefined 值键，与 tryTranslateFormSelect 的 expectTurn
+    // 条件落键同纪律）。
+    ...(typeof planReviewData.selfReview === 'string' ? { selfReview: planReviewData.selfReview } : {}),
   }
   return [
     // ★ extension-ui kind 事件：interpreter 暂停 watchdog + server 跟踪请求 + 缓存 pending

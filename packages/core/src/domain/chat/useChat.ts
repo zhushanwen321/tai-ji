@@ -31,7 +31,14 @@ import type { ChatStoreInstance } from './store'
 import { historyWindowFromReply } from './truncated-window'
 import { collectImagesFromMessages, persistImagesNewestFirst, disposeImageCacheForSession } from './image-cache'
 import { createMessageCoalescer } from './delta-coalescer'
-import { getExecutingBash } from './bash-effects'
+import {
+  markDigestInitiated,
+  markDigestConsumed,
+  isDigestConsumed,
+  clearDigest,
+  clearDigestSession,
+  clearAllDigests,
+} from './reject-digest'
 import { toErrorMessage } from '../../utils/error-message'
 import { isDevMode } from '../../platform/dev-mode'
 import type { EnsureStreamSubDeps, SessionStoreLike, SubmitQueuedEntryDeps, UseChatDeps } from './use-chat-types'
@@ -92,15 +99,12 @@ const coalescer = createMessageCoalescer()
 // 由 hasMoreHistory 派生读——同一 truncated 事实不再两处存储。
 
 /**
- * MF-1：manual compact 的 compaction_end 到达标记（per-session）。
- * key 存在 = manual compact() in-flight；value=true = compaction_end 已到达（session.compacted
- * handler 置）。compact() catch 据此区分失败类型：ended=true（compaction 级——pi 已处理，
- * interpreter 经 message.error 进对话流，确定可见）→ 不 toast；ended=false（transport/busy 级——
- * RPC 未达 pi / dispatcher busy 预检拒绝，pi 未发 compaction_end，interpreter 不参与，零反馈）→ toast 兜底。
- * 仅 manual compact() 路径读写 key——auto-compaction 的 compaction_end handler 见 key 不在则跳过（不污染）。
+ * MF-1：manual compact 的 compaction_end 到达标记已并入 reject-digest 原语（D6 收敛，
+ * key='compact'）：compact() catch 据「终态帧已消化」区分失败类型——已消化（compaction 级，
+ * interpreter 经 message.error 进对话流确定可见）→ 不 toast；未消化（transport/busy 级，
+ * pi 未发 compaction_end，interpreter 不参与，零反馈）→ toast 兜底。语义与生命周期
+ * 管理见 ./reject-digest（bash 的 sendBash reject 消歧同原语 key='bash'）。
  */
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：manual compact in-flight 到达标记（流程状态，非 GUI 数据）
-const manualCompactionState = new Map<string, boolean>()
 
 /**
  * [session-occupancy-send-closure D2] per-session 未决直发记录（sid → 本次 send 的
@@ -113,7 +117,7 @@ const manualCompactionState = new Map<string, boolean>()
  *   经 clientUuid 命中队列条目识别后静默，A1）。
  * payload.clientUuid 回带命中记录时为强确认（u2 落地后）；现状 runtime 未回带时以记录存在性兜底
  * 判定（WS FIFO 保证 rejected 帧先于 RPC reply 到达，故 send await resolve 后清除记录安全）。
- * 与 streamSubscriptions/manualCompactionState 同模式：模块级 Map + resetChatModuleStateForTest
+ * 与 streamSubscriptions 同模式：模块级 Map + resetChatModuleStateForTest
  * 清理 + disposeSession 按 sid 删除（ADR-0049 全局 sid 协调器例外）。
  */
 // taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：未决直发记录（流程状态，非 GUI 数据）
@@ -256,8 +260,8 @@ export function resetChatModuleStateForTest(): void {
   // （指向已 dispose 的 store）带进下一用例的 microtask flush，跨 fixture 污染。
   coalescer.clear()
   // [u4d] 截断窗口状态随 chat store per-instance，无需模块级 reset
-  // MF-1：清 manual compact 标记（测试间不 reset 会泄漏到下一用例）
-  manualCompactionState.clear()
+  // D6：清 reject 消化标记（compact/bash 两 key——测试间不 reset 会泄漏到下一用例）
+  clearAllDigests()
   // D2：清未决直发记录（测试间不 reset 会把上一用例的 send 记录泄漏进下一用例的
   // rejected handler，误触发回滚/入队分支）
   pendingDirectSends.clear()
@@ -473,19 +477,19 @@ function handleSessionCompacting(
 
 /** #6：compact 生命周期结束（成功/失败/取消均广播）。清除 reason 文案源（occupancy 的
  * compacting=false 由本事件之后的 session.occupancy 帧驱动）。
- * MF-1：compaction_end 到达标记（供 compact() catch 区分失败类型）。仅 manual compact
- * in-flight 时标记——auto-compaction 的 compaction_end handler 见 key 不在则跳过（不污染）。
- * 成功/失败/aborted 均置 true：只要 compaction_end 到达，说明 pi 已处理 compact，结果（含错误）
- * 由 interpreter 进对话流，catch 不再 toast（避免双提示 / 对 aborted 误提示失败）。
+ * MF-1：compaction_end 到达标记（供 compact() catch 区分失败类型）——D6 起经 reject-digest
+ * 原语（key='compact'）：仅 manual compact 发起时置位（原语「不污染」守卫——auto-compaction
+ * 的 compaction_end handler 见未决条目不在则跳过）。成功/失败/aborted 均置已消化：只要
+ * compaction_end 到达，说明 pi 已处理 compact，结果（含错误）由 interpreter 进对话流，
+ * catch 不再 toast（避免双提示 / 对 aborted 误提示失败）。
  * [u5b / D6] flush 触发源切换：session.compacted 不再直接 flush——统一由 session.occupancy
  * handler 的「全 idle 且队列非空」判定触发（sendRoute 解除语义）。
  * 行为变化（设计 §3.5 错误规格表已声明）：压缩失败（compacted{error}）后 occupancy
  * 三路复位 compacting=false → 同样满足 idle 条件 → 队列照常投递（消息不丢优先）。 */
 function handleSessionCompacted(sid: string, chat: ChatStoreInstance): void {
   chat.setCompactingReason(sid, undefined)
-  // MF-1：仅 manual compact in-flight 时标记——auto-compaction 的 compaction_end handler
-  // 见 key 不在则跳过（不污染）。
-  if (manualCompactionState.has(sid)) manualCompactionState.set(sid, true)
+  // MF-1 / D6：终态帧渲染进对话流与「已消化」置位同点（reject-digest 时序契约第 2 条）
+  markDigestConsumed('compact', sid)
 }
 
 /** [u5b / D1+D3] occupancy 投影消费（state topic：live 广播 + subscribeSession 的
@@ -1145,24 +1149,32 @@ export function createUseChat(deps: UseChatDeps) {
   async function sendBash(sessionId: string, command: string, excludeFromContext: boolean): Promise<void> {
     const sid = sessionId
     ensureStreamSubscription(sid, chat, session, subDeps)
+    // D6：置消化标记未决（RPC 发出前）——终态帧处理点（bashResultEffect 两出口 /
+    // markBashError）置已消化，本函数 catch 据此消歧（与 compact 同一原语，key='bash'）。
+    markDigestInitiated('bash', sid)
     try {
       await deps.chatApi.bash(sid, command, excludeFromContext)
     } catch (e) {
-      // [①b timeout-slow-flow-wallclock D2/r4 极性修正] RPC 错误 reject（error envelope /
-      // backstop 超时）与 bashResult 合成终态帧的到达时序：runtime 先广播终态帧再回 error
-      // envelope，本 catch 执行时终态帧已被 bashResultEffect 消费。executingBash 是「命令
-      // 执行中」瞬时态（bashStart 置 / bashResult·markBashError 清），「已收合成终态」=
-      // 查询为空（取反）——为空 → 气泡已呈现终态（超时三步指引或错误输出），它是权威
-      // 呈现面，再弹「失败」措辞 toast 冗余且误导（如超时后命令仍在跑，toast 却说 failed），
-      // 抑制；非空（命令仍在执行 = env 逃生门下 renderer backstop 先到的形态）→ toast 是
-      // 唯一提示，不抑制。与 compact 先例极性相反：manualCompactionState 是正向标志（终态
-      // 到达置 true），此处是反向标志（终态到达清空）——「查到非空」绝不抑制。
-      if (!getExecutingBash(sid)) {
+      // [①b timeout-slow-flow-wallclock D2/r4 极性修正 / D6 统一正向标记] RPC 错误 reject
+      //（error envelope / backstop 超时）与 bashResult 合成终态帧的到达时序：runtime 先广播
+      // 终态帧再回 error envelope，本 catch 执行时终态帧已被 bashResultEffect 消费（渲染进
+      // 对话流与置位同点，时序契约见 reject-digest）。原反向查询「executingBash 为空 = 已
+      // 消化」由 isDigestConsumed 取代：true = 气泡已呈现终态（超时三步指引或错误输出），
+      // 它是权威呈现面，再弹「失败」措辞 toast 冗余且误导（如超时后命令仍在跑，toast 却说
+      // failed），抑制；false = 无终态可呈现（transport 级失败 bashStart 从未广播 / 延迟
+      // 分支终态帧未到，命令仍在执行 = env 逃生门下 renderer backstop 先到的形态）→ toast
+      // 是唯一提示，不抑制。与 compact 极性统一（D6 收敛点）——行为差仅 transport 级失败
+      // 场景：原反查把「列表为空」误读为「已消化」而静默（含误导 warn），统一后 toast 兜底。
+      if (isDigestConsumed('bash', sid)) {
         console.warn(`[useChat] sendBash RPC failed after terminal frame already rendered, toast suppressed, sid=${sid}`, e)
         return
       }
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.bashFailed', { msg }))
+    } finally {
+      // D6：判定消费后单点收口——防已消化残留跨轮误抑制下一轮判定（新一轮发起会重置，
+      // 此处与 compact finally 对称的防泄漏兜底）。
+      clearDigest('bash', sid)
     }
   }
 
@@ -1194,8 +1206,8 @@ export function createUseChat(deps: UseChatDeps) {
    * （agent-session.js catch 块），故 RPC 必 reject 到此 catch。三类失败经同一 catch：
    *   - compaction 级（pi 已处理）：compaction_end{errorMessage} → interpreter 广播 message.error 进
    *     对话流（确定可见的错误源）；aborted → interpreter 视作非错误（不提示，取消语义）。compaction_end
-   *     均先于 RPC error reply 经 stdout 到达 → session.compacted handler 先置 manualCompactionState=true，
-   *     此处 catch 见 ended=true → 不 toast（避免与 interpreter 双提示 / 对 aborted 误提示失败）。
+   *     均先于 RPC error reply 经 stdout 到达 → session.compacted handler 先置已消化（reject-digest，
+   *     key='compact'），此处 catch 见 ended=true → 不 toast（避免与 interpreter 双提示 / 对 aborted 误提示失败）。
    *   - transport/busy 级（RPC 未达 pi / dispatcher busy 预检拒绝）：pi 未发 compaction_end，interpreter
    *     不参与 → 零反馈。此处 catch 见 ended=false → toast 兜底（AGENTS.md 规则 #3 错误必须可见）。
    * 不 throw（consumer fire-and-forget）。compacting 态由 session.compacted 复位（interpreter 发，必达）。
@@ -1205,12 +1217,12 @@ export function createUseChat(deps: UseChatDeps) {
   async function compact(sessionId: string, customInstructions?: string): Promise<void> {
     const sid = sessionId
     ensureStreamSubscription(sid, chat, session, subDeps)
-    // MF-1：标记 manual compact in-flight（key 存在），compaction_end 到达时 handler 置 value=true
-    manualCompactionState.set(sid, false)
+    // MF-1 / D6：置消化标记未决（key='compact'），compaction_end 到达时 handler 置已消化
+    markDigestInitiated('compact', sid)
     try {
       await deps.chatApi.compact(sid, customInstructions)
     } catch (e) {
-      const compactionEnded = manualCompactionState.get(sid) === true
+      const compactionEnded = isDigestConsumed('compact', sid)
       if (!compactionEnded) {
         // transport/busy 级失败：pi 未发 compaction_end（RPC 未达 pi / busy 预检拒绝），interpreter 不参与，
         // 零用户反馈——toast 兜底（AGENTS.md 规则 #3）。compaction 级失败由 interpreter 进对话流，不在此 toast。
@@ -1219,7 +1231,7 @@ export function createUseChat(deps: UseChatDeps) {
       }
       console.warn(`[useChat] compact RPC failed (compaction-ended=${compactionEnded}, surfaced via ${compactionEnded ? 'interpreter/dialog flow' : 'toast fallback'})`, e)
     } finally {
-      manualCompactionState.delete(sid)
+      clearDigest('compact', sid)
     }
   }
 
@@ -1385,7 +1397,7 @@ export function createUseChat(deps: UseChatDeps) {
     // 用 flush(sid) 而非 flushAll：其他 session 的合并窗口不应被本 session 的销毁提前打断。
     coalescer.flush(sessionId)
     // [u4d] 截断窗口状态由下方 chat.disposeSession 内统一清理（store 分区），无需单独清
-    manualCompactionState.delete(sessionId) // MF-1：清 manual compact 标记
+    clearDigestSession(sessionId) // MF-1 / D6：清 reject 消化标记（compact/bash 两 key 一并）
     pendingDirectSends.delete(sessionId) // D2：清未决直发记录（session 已销毁，rejected 不再有意义）
     clearDeferFlushRetryTimer(sessionId) // [簇 A1] 清 flush 重投 timer（session 已销毁，重投无意义）
     // wave:renderer-subscribe：清除 MessageBus 订阅状态（SubscriptionState）。
@@ -1433,7 +1445,8 @@ export function createUseChat(deps: UseChatDeps) {
  *   UI 卡「进行中…」而回复实际已生成。
  *
  * 与 disposeSession 的区别：session 仍存在（dead 占位 UI 可「重新打开」），只失效订阅，
- * 不清 chat store 分区/截断窗口状态/manualCompaction 等业务状态。
+ * 不清 chat store 分区/截断窗口状态等业务状态（reject 消化标记的清理在
+ * disposeSession 的 clearDigestSession，本函数不动）。
  */
 export function invalidateStreamSubscription(sessionId: string): void {
   const unsub = streamSubscriptions.get(sessionId)

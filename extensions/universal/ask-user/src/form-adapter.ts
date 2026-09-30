@@ -68,30 +68,6 @@ export function askUserToFormQuestions(legacy: AskUserQuestion[]): FormQuestion[
 	});
 }
 
-/** FormQuestion[] → legacy AskUserQuestion[]（解码视图：复用协议包
- *  getAskUserAnswer/getAskUserOther 的解码 SSOT，multi 还原为 multiSelect）。
- *  保持顺序、跳过 schedule（ask-user 链路不产生；与 formToInternalQuestions 同规则）。 */
-export function formToAskUserQuestions(form: FormQuestion[]): AskUserQuestion[] {
-	return form.flatMap((q: FormQuestion): AskUserQuestion[] => {
-		if (q.type === "schedule") return [];
-		const common = {
-			header: q.header,
-			question: q.question,
-			context: q.context,
-		};
-		return [
-			q.type === "choice"
-				? {
-						...common,
-						options: q.options,
-						multiSelect: q.multi,
-						allowOther: q.allowOther,
-					}
-				: common,
-		];
-	});
-}
-
 /** FormQuestion[] → internal Question[]（TUI 组件渲染形态）。
  *  choice → options 原样（multiSelect 还原）；text → 空 options（组件渲染为仅 Other
  *  行的自由输入，与旧 payload 无 options 问题的现状处理一致）；schedule 跳过

@@ -75,7 +75,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | zcode 引擎 | app-server RPC、会话库隔离、凭据注入（边界判例 #4） |
 | session-reader | 通知链 session_read 指针解析、跨进程读（pi 与 zcode 引擎 subagent 均覆盖） |
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
-| structured-output / plan / todo 面板 | workflow 结构化输出、计划面板、todo 渲染、plan 执行方式选择（develop 内置 / plan-exec skill / goal） |
+| structured-output / plan / todo 面板 | workflow 结构化输出、计划面板（审批闸口三决策：修订/执行/搁置 + 降级「重新提交审批」），todo 渲染、plan 执行方式选择（无 plan-exec 技能时直通不弹表单；goal 桥派发 / plan-exec skill / goal） |
 | i18n | zh/en 切换、消息键完整（边界判例 #1） |
 | 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05） |
 | session 导入 | 多源统一入口：来源选择（pi/zcode）、候选列表、导入；zcode 源真实宿主库只读转换（session-import-sources 指南；SessionImportSource SPI） |
@@ -116,7 +116,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | provider-live-sync | universal | **P0** | 挂了 = 运行中会话看不到新增/变更的 provider·模型·凭据，切新模型报 `Model not found` 且只能重开会话（模型控制主链路的实时性前提；与 ask-user/subagent-workflow 同族的「能力静默失效」形态，故 tier=infrastructure 不可禁） |
 | system-prompt | taiji | P1 | 挂了 agent 裸人格、所有会话质量崩 |
 | pending-notifications | universal | P2 | 通知汇聚 |
-| plan | universal | P2 | 面板能力 + 执行方式选择 |
+| plan | universal | P2 | 面板能力 + 审批闸口（修订/执行/搁置 + 降级重新提交）+ 执行方式选择（2026-09-24 状态机显式化后行为描述核对：挂掉后果不变，P 级语义不变） |
 | session-reader | universal | P2 | 通知链依赖（2026-09-21 起覆盖 zcode 引擎 subagent 回读；挂掉后果不变，zcode 引擎自身 P2 封顶） |
 | smart-context | universal | P2 | 手动 compact 兜底 |
 | structured-output | universal | P2 | workflow 模式依赖 |

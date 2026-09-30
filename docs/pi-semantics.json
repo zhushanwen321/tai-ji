@@ -1243,5 +1243,40 @@
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-tool-error-flag.test.ts"
     },
     "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-60",
+    "claim": "exec-skills 共享包消费的技能加载语义：① 四根组装序 = addAutoDiscoveredResources 内 .pi/skills → 祖先链 .agents/skills（近→远，git root 级含）→ <agentDir>/skills → ~/.agents/skills；untrusted 跳过前两族；settings skills 数组 '+/-/!' 三级优先级（'-' 强排 > '+' 强含 > '!' 排除）按根挂载过滤；同名先到先得（realPath 去重）。② 单根枚举公开导出 loadSkillsFromDir——name 派生（frontmatter name 优先）与 description 必填门 / ignore / 递归遍历横切规则随实装；坏 YAML skill 不进加载集（loader 侧拒收）。③ CONFIG_DIR_NAME = \".pi\"（node 实测）；parseFrontmatter 返回 frontmatter 供 plan-exec marker 二次读取（严格 === true，字符串 \"true\" 不误判）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/package-manager.js",
+        "symbol": "addAutoDiscoveredResources",
+        "note": ":1939 四根组装与 settings overrides 按根挂载、同名先到先得；untrusted 跳过 project 两族"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/skills.js",
+        "symbol": "loadSkillsFromDir / loadSkillsFromDirInternal",
+        "note": ":121 公开导出（单根枚举横切规则：name 派生 / description 门 / ignore / 递归遍历）；坏 YAML 在 loader 侧拒收不进加载集"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/config.js",
+        "symbol": "CONFIG_DIR_NAME / getAgentDir",
+        "note": "CONFIG_DIR_NAME = \".pi\"（0.84.4 实装 node 实测）；项目根 = <cwd>/.pi"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/utils/frontmatter.js",
+        "symbol": "parseFrontmatter",
+        "note": "frontmatter 解析导出（:index.js:42 re-export）——共享包 plan-exec marker 二次读取依赖"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "extensions/shared/exec-skills/src/__tests__/exec-skills.test.ts"
+    },
+    "verifiedWith": "0.84.4"
   }
 ]

@@ -10,16 +10,31 @@
  * 的逆序取首同构——entry 顺序即时间顺序，每次状态迁移整体重写快照，无 per-key merge）。
  *
  * schema 兼容（D4）：entry data 无版本字段（版本号字段 + 迁移逻辑已被 D1 明文否决），新旧
- * schema 靠**字段级 optional 判存在**消解——旧 entry（仅四必填字段）派生出无新字段区的
- * PlanStateView，新字段（skills/docs/reviewState/reviewStateSource）逐字段守卫透传，不做
+ * schema 靠**字段级 optional 判存在**消解——skills/docs 逐字段守卫透传，不做
  * v 守卫（与 subagent/workflow extractor 的 v !== 1 早退是刻意差异，依据 D4「版本号字段被否」）。
  *
+ * 派生归一（plan 状态机显式化 D2 读方②）：产出 View **恒携带 `state`**（新 entry 直读 /
+ * 旧 entry 经 reviewState 映射（awaiting→reviewing、revising→revising、无→planning|idle
+ * 按 isActive）），resumeHint 直读或由 reviewStateSource:'resubmit' 同义映射；**旧字段
+ * （reviewState/reviewStateSource）只作映射输入、永不透出进 View**（取代式演进；
+ * selfReview 不投影，D9③：消费面止于审批请求帧 + entry 比较基线）。映射实现单源 =
+ * extension-protocol legacy-entries（plan-mode-audit-remediation D-B4-1 下沉——原内联
+ * 拷贝删除，扩展读方①同引一份；契约断言面 = protocol 包内 legacy-entries.test.ts）。
+ *
  * runtime 不 import extensions/ 源码（依赖方向不允许，同 subagent-extractor:194 先例），
- * entry data 按防御式逐字段守卫消费。
+ * entry data 按防御式逐字段守卫消费；extension-protocol 是包依赖（tsup noExternal 已打包，
+ * 与 event-adapter 的 marker 常量同引法）。
  */
 import { readFileSync, statSync } from 'node:fs'
 import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
-import { PLAN_STATE_CUSTOM_TYPE, READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
+import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
+// 生命周期值域与 legacy entry 映射 canonical = extension-protocol（包依赖，非 extensions/
+// 源码——tsup noExternal 已打包该包，与 event-adapter 的 marker 常量同引法）
+import {
+  PLAN_STATE_CUSTOM_TYPE,
+  readLifecycleState,
+  readResumeHint,
+} from '@zhushanwen/extension-protocol'
 import { parseJsonl } from '../../utils/jsonl.js'
 import { isEnoent } from '../../utils/errors.js'
 
@@ -79,9 +94,9 @@ export function scanPlanStateEntries(entries: unknown[]): PlanStateView | null {
  * data 返回 null）。字段映射规则：
  * - 四必填字段：isActive 严格 `=== true`（其他形态归 false——View 契约是 boolean，防御
  *   extension 侧异常写入）；三个 string 字段空串归一 null（normalizeNonEmptyString）。
- * - 四 optional 新字段（D4）：字段存在且形状合法才透传（不存在 → View 上不设键，而非
- *   显式 undefined——「旧 entry 派生出无新字段区」的字面语义），下沉到
- *   applyOptionalPlanFields（守卫判定顺序与拆分前逐一等价）。
+ * - optional 字段区（D4 + D2 归一）：skills/docs 字段存在且形状合法才透传（不存在 → View
+ *   上不设键，而非显式 undefined——「旧 entry 派生出无新字段区」的字面语义）；state 恒携带
+ *   （派生归一）、resumeHint 条件落键，全部下沉到 applyOptionalPlanFields。
  */
 function parsePlanStateEntry(entry: unknown): PlanStateView | null {
   if (typeof entry !== 'object' || entry === null) return null
@@ -123,10 +138,10 @@ function normalizeNonEmptyString(v: unknown, capTo?: number): string | null {
 }
 
 /**
- * D4 optional 新字段透传（守卫通过才挂键，optional 字段缺省不设、禁显式 undefined 占位）：
- * skills 要求 string[]、docs 逐元素守卫（坏元素过滤）、reviewState 限两字面量、
- * reviewStateSource 仅 'resubmit'（explain 交互已删——漏透传 =
- * 字段在派生处静默丢弃、renderer 恒渲染通用降级文案）。
+ * optional 字段派生（D4 + D2 读方② 归一）：skills 要求 string[]、docs 逐元素守卫（坏元素
+ * 过滤）；state 恒携带（readLifecycleState 归一）、resumeHint 条件落键（readResumeHint）；
+ * 旧字段 reviewState/reviewStateSource **只作映射输入、不透出进 View**（D2 取代式演进）；
+ * selfReview 不投影（D9③——投影面止于审批请求帧，planState 帧有界前提不扩展）。
  */
 function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>): void {
   if (isStringArray(d.skills)) {
@@ -135,14 +150,13 @@ function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>
   if (Array.isArray(d.docs)) {
     view.docs = d.docs.map(parsePlanDocMeta).filter((doc): doc is PlanDocMeta => doc !== null)
   }
-  if (d.reviewState === 'awaiting' || d.reviewState === 'revising') {
-    view.reviewState = d.reviewState
-  }
-  // 只认 'resubmit'：旧 entry 的 'explain' 存量值归无值（explain 交互已删，与 extension
-  // 读侧 readReviewStateSource 白名单对齐——renderer 缺省分支渲染通用文案）
-  if (d.reviewStateSource === 'resubmit') {
-    view.reviewStateSource = d.reviewStateSource
-  }
+  // View 恒携带 state（D2 读方②）：新 entry 直读、旧 entry 经 reviewState 映射——映射
+  // 实现单源直引 extension-protocol legacy-entries（D-B4-1 下沉，扩展读方①同引一份）
+  view.state = readLifecycleState(d, view.isActive)
+  // resumeHint 只认 'resubmit' 一字面量：新 entry 直读，旧 entry 由 reviewStateSource
+  // 同义映射（'explain' 等存量值归无值——explain 交互已删，renderer 缺省分支渲染通用文案）
+  const resumeHint = readResumeHint(d)
+  if (resumeHint !== undefined) view.resumeHint = resumeHint
 }
 
 /** string[] 守卫（skills 透传前置条件，空数组合法——extension 侧语义由其自行定义）。 */

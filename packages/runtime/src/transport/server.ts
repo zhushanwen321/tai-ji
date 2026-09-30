@@ -622,15 +622,15 @@ export class RuntimeServer implements IMessageBroker {
   // ── Extension UI request lifecycle delegation ─────────────────────
 
   registerExtensionTimeout(sessionId: string, requestId: string, method: string, payload: Record<string, unknown>): void {
-    // 只做 session 跟踪登记 + pending 缓存：交互式 UI 请求无超时（2026-07-16 取消），
-    // block 等待用户决策，session 结束由 clearExtensionTimeoutsForSession 统一清理
-    this.extensionTimeoutMgr.trackUiRequest(sessionId, requestId, method)
-    // 缓存 pending 请求（ask-user 等阻塞式请求），session 重新激活时推送
-    this.extensionTimeoutMgr.cachePendingRequest(sessionId, requestId, method, payload)
+    // 挂起单表登记（D-B2-2：session 跟踪 + pending 缓存合一 entry，一次登记）：
+    // 交互式 UI 请求无超时（2026-07-16 取消），block 等待用户决策，session 结束由
+    // clearExtensionTimeoutsForSession 统一清理；缓存的 pending 请求在 session 重新
+    // 激活时推送
+    this.extensionTimeoutMgr.registerRequest(sessionId, requestId, method, payload)
   }
 
   clearExtensionTimeout(requestId: string): void {
-    this.extensionTimeoutMgr.clearTimeout(requestId)
+    this.extensionTimeoutMgr.removeRequest(requestId)
   }
 
   clearExtensionTimeoutsForSession(sessionId: string): void {

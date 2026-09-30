@@ -1560,7 +1560,66 @@
       "run": "bash scripts/cw/session-manager-full-e2e.sh",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#2-测试分层",
-      "note": "真 LLM 轨：开发阶段按改动范围空载串行执行，无 CI/门禁触发面（同 EQUIV-01 note 对 equivalence real-pi 分池的裁决口径——本条只登记剧本文件的 coverage，剧本驱动的 test.ts 资产面归 E2E-EQUIV-01）。剧本自含 180s watchdog + trap 孤儿 pi 清理（session-dir 带 u9-smoke 标记）"
+      "note": "真 LLM 轨：开发阶段按改动范围空载串行执行，无 CI/门禁触发面（同 EQUIV-01 note 对 equivalence real-pi 分池的裁决口径——本条只登记剧本文件的 coverage，剧本驱动的 test.ts 资产面归 E2E-EQUIV-01）。剧本自含 180s watchdog + trap 孤儿 pi 清理（session-dir 带 u9-smoke 标记）"    },
+    {
+      "id": "E2E-PLANMODE-01",
+      "summary": "plan 模式验收资产族（U0 预建，R2 按改动面）：mock pi 脚本族 / S5 fixture 技能模板 / CDP 等待断言脚本三自测入口零 token 确定性回归（真机场景 S1-S16 执行归阶段 5 验收窗口，PR/merge/CI 门禁不跑）",
+      "scope": [
+        "scripts/acceptance/plan-mode/**"
+      ],
+      "layer": "L2.5",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/acceptance/plan-mode/mock-pi/selftest.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/acceptance/plan-mode/fixture-skill/selftest.mts"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/acceptance/plan-mode/cdp/selftest.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/acceptance/plan-mode/repro/repro-baseline.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/acceptance/plan-mode/exit-chain/verify-A1a.sh"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/acceptance/plan-mode/exit-chain/verify-A1a.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/acceptance/plan-mode/mock-pi/selftest.mjs && node_modules/.bin/tsx scripts/acceptance/plan-mode/fixture-skill/selftest.mts && node scripts/acceptance/plan-mode/cdp/selftest.mjs && bash scripts/acceptance/plan-mode/exit-chain/verify-A1a.sh",
+      "owner": "scripts/acceptance/plan-mode",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（e2e 资产归宿纪律三态）：**触发条件 = scripts/acceptance/plan-mode/** diff 命中**（验收资产/剧本/自测自身变更）时开发期执行 run（三自测入口零 token 确定性，~20s；mock-pi 自测的装/恢复用例用 mkdtemp 假 bin 目录 + stub symlink，不触碰真实 node_modules/.bin/pi，与 AGENTS.md「验收构造 mock pi」窗口纪律不冲突，serial=false）。真机段（S1-S16 场景表 / CDP 断言连 dev 实例）执行归阶段 5 验收五窗口空载串行，PR/merge/CI 门禁不跑（AGENTS.md e2e 执行准则）；cdp/selftest 的 dev-instance-reachable 用例无 dev 实例时 SKIP（真机连跑归 U6）。资产全集（25 文件，经本 rule scope 全覆盖）与剧本表 / 能力面见 scripts/acceptance/plan-mode/README.md（含 S12 三证恢复纪律）；F1-F5 复现 runner（repro/repro-baseline.mjs）产物落 .tmp/dev-flow/ 不入库。[2026-09-24 plan-mode-state-machine D-5] 实施计划 §4 与本表承诺的「实施落地后以 --base 复跑对账补核」于本 rule 兑现：基线 595b9cbaa2d2553191bc629335ec85af277d1da4 的 diff 未登记面（25 本族文件）经本 rule 覆盖、check-extension-dependencies.mjs 经 E2E-EXTDEPS-01 覆盖，select-affected-e2e --check 转绿。exit-chain/（2026-09-26 增补）：V1 exit 链八场景 L3 剧本（真实 pi -ne + 本地 mock LLM 零 token），plan-mode-audit-remediation D3 交付后转为可复用回归资产（R2 态同批触发），产物落 .tmp/acceptance/exit-chain/"
+    },
+    {
+      "id": "E2E-EXTDEPS-01",
+      "summary": "extension 分组守卫自回归（L0 守卫脚本）：taiji.role 分组一致性校验逻辑变更 → 守卫自跑 exit 0（改守卫须自证不破坏分组校验）",
+      "scope": [
+        "scripts/check-extension-dependencies.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-extension-dependencies.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-extension-dependencies.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：**触发条件 = scripts/check-extension-dependencies.mjs 自身 diff 命中**时开发期执行 run（守卫自跑，零 token 秒级）。归宿裁决（2026-09-24 plan-mode-state-machine D-5）：L0 pre-commit 守卫类**无需 e2e 用例**——select-affected-e2e.mjs 无独立豁免机制（watched root 下文件只有「scope/asset 覆盖」与「修订 watched-root 登记」两条出路，后者会解除 scripts/ 看护、违背防漏登记本意），故按登记机制以守卫自回归 rule 表达（check-rfl-parity.mjs 并入 E2E-BATCH-07 run 的同款先例）；守卫本体由 pre-commit（SKIP_EXTENSION_LINT 段）常态执行，PR/merge/CI 门禁不重复跑"
     }
   ]
 }

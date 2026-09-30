@@ -55,6 +55,7 @@
   ],
   "dependencies": {
     "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-exec-skills": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
     "@zhushanwen/pi-llm-shared": "workspace:*"

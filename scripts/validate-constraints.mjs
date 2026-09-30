@@ -13,7 +13,8 @@
  *   - scope 非空：["global"] 或路径 glob（<prefix>/** 或精确路径）
  *   - authority 非空且文件存在（剥离 #锚点后按相对 docs/ 解析，../ 前缀相对仓库根）
  *   - enforcement：machine 项 hook 须存在于 .githooks/ / scripts/ / 仓库根（含 "§" 的内联段特例跳过）；
- *     review 项 agent 须存在于 .agents/skills/dev-merge/agents/<agent>.md
+ *     review 项 agent 须存在于 .agents/skills/<skill>/agents/<agent>.md（skills 一级子目录任一命中即
+ *     通过——skill 实体 workspace 根共享不入库，ADR-0074/0076，agent 归属 skill 不固定）
  *
  * 退出码：0 成功 / 2 校验失败（含 JSON 解析失败）
  *
@@ -22,7 +23,7 @@
  * 被测试 import 时不触发 process.exit。
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -30,6 +31,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const DOCS_DIR = join(REPO_ROOT, "docs");
 const JSON_PATH = join(DOCS_DIR, "constraints.json");
+const DEFAULT_SKILLS_DIR = join(REPO_ROOT, ".agents", "skills");
 
 // ---------- 结构校验 ----------
 
@@ -75,29 +77,42 @@ export function validateAuthority(c, at, errors) {
   for (const a of c.authority) validateAuthorityPath(a, errors);
 }
 
-export function validateEnforcementItem(e, at, errors) {
+/**
+ * review agent 存在性：枚举 skills 一级子目录的 agents/<agent>.md，任一命中即通过。
+ * skill 实体在 workspace 根共享、不入库（ADR-0074/0076），agent 不固定属于哪个 skill，
+ * 故按目录形态扫描而非写死 skill 名。skillsDir 参数化供测试注入临时树。
+ */
+export function validateAgentExists(agent, skillsDir = DEFAULT_SKILLS_DIR) {
+  if (!existsSync(skillsDir)) return false;
+  for (const skill of readdirSync(skillsDir)) {
+    if (existsSync(join(skillsDir, skill, "agents", `${agent}.md`))) return true;
+  }
+  return false;
+}
+
+export function validateEnforcementItem(e, at, errors, skillsDir) {
   if (e.type === "machine") {
     if (!e.hook) errors.push(`${at}: machine enforcement 缺 hook`);
     else if (!validateHookExists(e.hook)) errors.push(`${at}: hook 不存在于 .githooks/ / scripts/ / 根: ${e.hook}`);
   } else if (e.type === "review") {
     if (!e.agent) errors.push(`${at}: review enforcement 缺 agent`);
-    else if (!existsSync(join(REPO_ROOT, ".agents/skills/dev-merge/agents", `${e.agent}.md`)))
-      errors.push(`${at}: review agent 不存在: ${e.agent}`);
+    else if (!validateAgentExists(e.agent, skillsDir))
+      errors.push(`${at}: review agent 不存在于 .agents/skills/*/agents/: ${e.agent}`);
   } else if (e.type !== "none") {
     errors.push(`${at}: enforcement.type 非法: ${e.type}`);
   }
 }
 
-export function validateEnforcement(c, at, errors) {
+export function validateEnforcement(c, at, errors, skillsDir) {
   if (!Array.isArray(c.enforcement) || c.enforcement.length === 0) {
     errors.push(`${at}: enforcement 为空`);
     return;
   }
-  for (const e of c.enforcement) validateEnforcementItem(e, at, errors);
+  for (const e of c.enforcement) validateEnforcementItem(e, at, errors, skillsDir);
 }
 
-/** 校验整个登记表，返回错误清单（空数组 = 通过）。 */
-export function validate(data) {
+/** 校验整个登记表，返回错误清单（空数组 = 通过）。skillsDir 参数化供测试注入临时 skills 树。 */
+export function validate(data, skillsDir) {
   const errors = [];
   const constraints = data?.constraints;
   if (!Array.isArray(constraints) || constraints.length === 0) errors.push("constraints 为空数组");
@@ -108,7 +123,7 @@ export function validate(data) {
     validateId(c, seenIds, at, errors);
     validateScope(c, at, errors);
     validateAuthority(c, at, errors);
-    validateEnforcement(c, at, errors);
+    validateEnforcement(c, at, errors, skillsDir);
     if (c.dimensions !== undefined && !Array.isArray(c.dimensions)) errors.push(`${at}: dimensions 须为数组`);
   }
   return errors;

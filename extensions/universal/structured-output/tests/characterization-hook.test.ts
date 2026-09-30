@@ -86,7 +86,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     expect(pi.ctx.shutdown).not.toHaveBeenCalled(); // 2 次 < 阈值 3
-    // 第 3 次同签名失败：闸门 terminal → onTerminal 标记 RetryState.terminal + shutdown
+    // 第 3 次同签名失败：合一状态机 terminal 置位（单字段，steer 守卫链直接可读）+ shutdown
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     expect(pi.ctx.shutdown).toHaveBeenCalledTimes(1);
     expect(pi.appendEntry).toHaveBeenCalledWith(

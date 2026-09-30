@@ -7,7 +7,7 @@
  * → 按设计 D8 降级路径：五类请求（ask-user 富表单 / scheduler 表单 / plan 审批 /
  * 权限审批 / confirm·input·editor 简单 dialog）统一由 drawer 内联确认条独立轻实现
  * 呈现，富表单降档（choice→选项按钮、text→单行输入、schedule→预填草稿一键确认、
- * plan→两键+单行意见、editor→单行输入），**不回退主视图模态面**；降档契约登记于
+ * plan→三键+单行意见、editor→单行输入），**不回退主视图模态面**；降档契约登记于
  * 实施计划偏差表。提交回路契约与降级态同源：走 D8 终态机表（useBtwTabData 簿记）；
  * 投递失败可重试（仅限未送达/未终结 requestId）；已终结 requestId 的应答丢弃并提示失效。
  *
@@ -18,7 +18,7 @@ import { computed, watch, type Ref } from 'vue'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import type { DialogRequest as UiDialogRequest } from '@taiji/ui/extension-host'
 import { btwBarDrafts, emptyBtwBarDraft, useExtensionUI, type BtwBarDraft } from '@/composables/useExtensionUI'
-import { firstBtwDialogReq, noteBtwRequestResolved } from '@/composables/panel/btw-pending-bookkeeping'
+import { firstBtwDialogReq } from '@/composables/panel/btw-pending-bookkeeping'
 import { ensureBtwPendingBookkeeping, respondBtwDialog } from '@/composables/panel/useBtwTabData'
 
 /** 确认条当前活动请求（按 receivedAt 与 store 族/dialog 族合并排序取最早——多请求并发呈现有序） */
@@ -32,7 +32,7 @@ export interface BtwBarRequest {
   dialog?: UiDialogRequest
 }
 
-/** 降档表单选项（本地同形，renderer 不反向依赖 extension-protocol——PlanReviewComment 惯例） */
+/** 降档表单选项（形状对齐 extension-protocol 的 PlanReviewComment——契约已直引，本地收窄仅为降档最小渲染面） */
 export interface BtwBarOption {
   label: string
   description?: string
@@ -301,8 +301,9 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     return a.form?.allowCancel !== false
   })
 
-  /** 应答出口（三 kind 共用；送达才出账——未送达保持挂起可重试、草稿随挂起保留，D8 提交回路契约；
-   *  终结即清本请求草稿分键（D7⑤） */
+  /** 应答出口（三 kind 共用；送达才出队——未送达保持挂起可重试、草稿随挂起保留，D8 提交回路契约；
+   *  终结即清本请求草稿分键（D7⑤）。store 族挂起出队在 extensionUIStore（ui.respond 内
+   *  removeRequest），badge 派生公式随之自动回落，无需第二簿记出账 */
   function respondActive(result: boolean | string | null): void {
     const a = active.value
     const vid = vidRef.value
@@ -310,7 +311,6 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     const key = `${vid}:${a.requestId}`
     if (a.kind === 'dialog') { if (respondBtwDialog(vid, a.requestId, result)) btwBarDrafts.delete(key); return }
     if (ui.respond(a.requestId, result)) {
-      noteBtwRequestResolved(vid, a.requestId)
       btwBarDrafts.delete(key)
     }
   }
@@ -385,12 +385,14 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     if (other.length > 0) answers[`${key}__other`] = other
   }
 
-  /** plan 审批降档回传（PlanReviewResponse 本地同形；revise 单行意见 = 降档契约登记面） */
-  function submitPlan(decision: 'approve' | 'revise'): void {
+  /** plan 审批降档回传（payload 形状 = extension-protocol PlanReviewResponse 判别联合——契约直引，手工序列化走 respond 通道；revise 单行意见 = 降档契约登记面；dismiss = 协议第三键搁置（非破坏），与主审批面同键集，无评论负载） */
+  function submitPlan(decision: 'approve' | 'revise' | 'dismiss'): void {
     const payload =
       decision === 'approve'
         ? JSON.stringify({ decision: 'approve' })
-        : JSON.stringify({ decision: 'revise', comments: [{ quote: '', comment: planComment.value.trim() }] })
+        : decision === 'revise'
+          ? JSON.stringify({ decision: 'revise', comments: [{ quote: '', comment: planComment.value.trim() }] })
+          : JSON.stringify({ decision: 'dismiss' })
     respondActive(payload)
   }
 

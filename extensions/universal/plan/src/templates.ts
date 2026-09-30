@@ -102,21 +102,6 @@ export function listTemplates(sources?: TemplateSources): TemplateInfo[] {
   return [...merged.values()];
 }
 
-/**
- * 按名解析模板内容（发现视图的读取侧）。sources 透传给 listTemplates——
- * 测试与后续合并视图消费方（select-template）注入目录用；缺省走默认路径。
- */
-export function loadTemplate(name: string, sources?: TemplateSources): string | null {
-  const template = listTemplates(sources).find((t) => t.name === name);
-  if (!template) return null;
-
-  try {
-    return fs.readFileSync(template.path, "utf-8");
-  } catch {
-    return null;
-  }
-}
-
 // ── <available-plans> 段拼装（D6） ─────────────────────────────────
 
 /** XML 特殊字符转义：注入段进 LLM 上下文，字段含 < > & 等会破坏 XML 结构（自写，不引 subagent-core——plan 是轻量 universal 包） */

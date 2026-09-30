@@ -4,7 +4,6 @@ import type { AgentToolResult, AgentToolUpdateCallback, ExtensionAPI, ExtensionC
 import { type Static } from "typebox";
 import {
 	type AskUserAnswers,
-	type AskUserQuestion,
 	getAskUserAnswer,
 	getAskUserOther,
 	uiFormInteract,
@@ -110,46 +109,25 @@ function renderExpandedOptions(
 }
 
 /**
- * 把 ask-user 内部 Question[] 映射为协议包 AskUserQuestion[]（RPC 交互声明）。
- *
- * ask-user 的 Question.options 只有 label/description（协议 AskUserOption 也无 value
- * 字段——回传值统一用 label，与 ask-user 语义一致）。
- * allowOther 固定 true：ask-user 无条件自动追加 Other（schema 不暴露此字段）。
- */
-function toProtoQuestions(questions: Question[]): AskUserQuestion[] {
-	return questions.map((q: Question) => ({
-		header: q.header,
-		question: q.question,
-		context: q.context,
-		options: q.options.map((o: Option) => ({
-			label: o.label,
-			description: o.description,
-		})),
-		multiSelect: q.multiSelect,
-		allowOther: true,
-	}));
-}
-
-/**
  * 把协议包 AskUserAnswers 转换为 ask-user 内部 Result.answers（结构化 AnswerValue）。
  *
  * 协议格式：key=header/question, 单选=string, 多选=JSON数组, Other=__other
  * ask-user 格式：key=question 全文, value=AnswerValue（selected=label 数组、other=自由文本）
  *
- * 解码走协议包 helper（getAskUserAnswer/getAskUserOther，proto 格式的唯一解码 SSOT）；
+ * 解码直接以内部 Question 调协议包 helper（getAskUserAnswer/getAskUserOther，proto
+ * 格式的唯一解码 SSOT）——internal Question 结构上就是 proto 视图（header/question/
+ * multiSelect 同名同义），无需再构造一份 AskUserQuestion[] 副本；
  * selected 空 && other 无 → 该问题未答，跳过不写入。
  */
 function protoAnswersToResult(
 	questions: Question[],
-	protoQuestions: AskUserQuestion[],
 	answers: AskUserAnswers,
 ): Record<string, AnswerValue> {
 	const out: Record<string, AnswerValue> = {};
 	for (let i = 0; i < questions.length; i++) {
 		const q = questions[i]!;
-		const iq = protoQuestions[i]!;
-		const selected = getAskUserAnswer(answers, iq);
-		const other = getAskUserOther(answers, iq) ?? null;
+		const selected = getAskUserAnswer(answers, q);
+		const other = getAskUserOther(answers, q) ?? null;
 
 		let selectedArr: string[];
 		if (Array.isArray(selected)) {
@@ -194,7 +172,6 @@ async function runRpcInteraction(
 	signal: AbortSignal | undefined,
 	ctx: ExtensionContext,
 ): Promise<Result> {
-	const protoQuestions = toProtoQuestions(questions);
 	const formQuestions = internalToFormQuestions(questions);
 	const guiCtx = {
 		mode: ctx.mode,
@@ -226,7 +203,7 @@ async function runRpcInteraction(
 	}
 	return {
 		questions,
-		answers: protoAnswersToResult(questions, protoQuestions, interact.answers),
+		answers: protoAnswersToResult(questions, interact.answers),
 		cancelled: false,
 	};
 }

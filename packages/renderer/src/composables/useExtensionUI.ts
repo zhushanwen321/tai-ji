@@ -22,7 +22,7 @@
  * - 事件按**事件 sid** 写入分区（M1 竞态语义：切 session 后旧 sid 迟到事件写旧分区，不污染新分区）
  * - getPendingRequests（切回拉取）保留 RPC 路径（C3）；其应答落 store 前执行**快照差集剔除**
  *   （renderer 侧僵尸表单修剪主算法，§6.2 采用项④ v6.1：不在快照中的旧条目一律移除，
- *   空快照也执行；帧入口超龄过滤仅作兜底）
+ *   空快照也执行）
  *
  * filter 仅用于读取分流 + 入队第二道闸（富交互硬过滤之后）：store 存全量 pending，
  * 多个 composable 实例（Panel 入 overlay 读取、审批条入 planReview 读取——D5）各按
@@ -39,8 +39,8 @@
  */
 import { computed, reactive, watch, onScopeDispose, type Ref } from 'vue'
 import type { InternalEvent, DialogRequest } from '@taiji/core'
-import { isBtwVirtualId } from '@taiji/shared'
 import type { ExtensionInteractMethod } from '@taiji/shared'
+import type { PlanReviewRequest } from '@zhushanwen/extension-protocol'
 import { getExtensionBus } from '@/composables/shell/useExtensionHostBridge'
 import { notifyUiResponseNotDelivered } from '@/composables/shell/extension-host-dialog'
 import i18n from '@/i18n'
@@ -48,7 +48,7 @@ import { useToast } from '@/composables/useToast'
 import { sendExtensionUIResponse, getPendingRequests, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChatStore } from '@/stores/chat'
-import { BTW_EXPIRED_REASON_SNAPSHOT_PRUNED, invalidateBtwStaleFromSnapshot } from '@/composables/panel/btw-pending-bookkeeping'
+import { usePlanStore, registerPlanReviewColdSink } from '@/stores/plan-store'
 
 /** 入队过滤谓词：返回 true 的请求才入队 */
 export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
@@ -61,35 +61,26 @@ export type UIRequestFilter = (req: ExtensionUIRequest) => boolean
  */
 export const formFilter: UIRequestFilter = (req) => req.form === true
 
-/**
- * 帧入口兜底超龄阈值（renderer 本地常量，非主算法）。
- *
- * 主算法 = `getPendingRequests` 快照差集剔除（见 subscribe 内 retainOnly 调用点），**不依赖
- * 任何阈值**——renderer 拿不到 runtime 的 `TAIJI_RUNTIME_PI_RECLAIM_FORM_MAX_AGE_MS`（env 隔离），
- * 且快照本身就是 runtime 权威 pending 集。本常量只作 `extension_ui_request` 逐帧入口的
- * 兜底（设计 scheduler-trigger-inversion §6.2 采用项④ v6.1）：帧若携带陈旧 `receivedAt`
- *（异常积压 / 未来 runtime 在广播帧上附带入队时间），超龄即丢弃，防极端积压污染 store。
- * 量级对齐 runtime 侧上界默认 6h（人填表窗口远超 6h 已无意义）。
- */
-const FRAME_STALE_MAX_AGE_HOURS = 6
-const MINUTES_PER_HOUR = 60
-const SECONDS_PER_MINUTE = 60
-const MS_PER_SECOND = 1000
-export const FRAME_STALE_MAX_AGE_MS =
-  FRAME_STALE_MAX_AGE_HOURS * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND
-
-// ── planReview 分流（plan 模式重设计 u1-banner，设计 D5 PLAN_REVIEW_MARKER select 通道）──
+// ── planReview 分流（plan 模式状态机显式化 D3/D4/D9，PLAN_REVIEW_MARKER select 通道）──
 
 /**
  * planReview 审批请求（runtime event-adapter 检测 PLAN_REVIEW_MARKER 后在 extension.ui_request
- * 上附加的 `planReview: true` 标记，与 askUser 同构分流）。
+ * 上附加的 `planReview: true` 标记，与 form 同构分流）。
  *
- * core 的 ExtensionUIRequest 契约未加员（runtime 侧路由归 u1-rpc），本地同形扩展——与
- * plan-store.ts 的 PlanReviewComment 本地同形惯例一致（renderer 不依赖 extension-protocol，
- * 最底层共享包不反向加员；字段运行时存在，经 isPlanReviewRequest 类型守卫收窄）。
+ * core 的 ExtensionUIRequest 契约不携带 plan 标记键（core 不反向依赖 extension-protocol，
+ * 本地扩展惯例）；但响应回传的 `PlanReviewResponse` 与请求载荷字段**直接 import extension-protocol**
+ *（D2/D3④ regime——旧「renderer 不依赖 extension-protocol」表述已过时，renderer 早已依赖它；
+ * PlanReviewComment / PlanReviewResponse 本地同形副本已删除迁移，consumers.md 一④）。
+ * `selfReview`（D9③）：agent 自审结论，与 canonical `PlanReviewRequest.selfReview` 同名同义，
+ * 帧搬运走 pickPlanFields 白名单（热帧）/ 快照全量解包（冷补）双入店路径。
+ * 本文件的 `isPlanReviewRequest` 是**帧标记守卫**（入 store 的请求面），与 canonical
+ * `@zhushanwen/extension-protocol` 的同名**载荷形状守卫**（select options JSON 解析面）
+ * 输入域不同、互不替代。
  */
 export interface PlanReviewUIRequest extends ExtensionUIRequest {
   planReview: true
+  /** agent 自审结论（D9③，可选 = 旧扩展不携带的降级形态：自审行不渲染） */
+  selfReview?: PlanReviewRequest['selfReview']
 }
 
 /**
@@ -154,12 +145,47 @@ export function __resetExtensionBusSubscriptionForTesting(): void {
 type RequestsInvalidatedEvent = Extract<InternalEvent, { kind: 'requests-invalidated' }>
 let invalidatedUnsub: (() => void) | null = null
 
+/**
+ * planReview 挂起镜像同步（D4 稳定窗输入面，store 禁 import store 的漏斗单写）：
+ * 本模块是 planReview 请求入店/出店的唯一漏斗（热帧 / 冷补 / respond / 失效 / 快照修剪），
+ * 每个漏斗点 mutation 后按 registry 现值同步一次（幂等）——setPlanReviewPending 内含
+ * 「新 pending 到达解除已应答标记」语义。
+ */
+function syncPlanReviewWindow(sid: string): void {
+  const store = useExtensionUIStore()
+  const has = store.getRequestsBySession(sid).some(isPlanReviewRequest)
+  usePlanStore().setPlanReviewPending(sid, has)
+}
+
+// ── 冷拉对账 pending 再入店 sink（plan-store D4③：10s 兑底冷拉的 registry 写入缝）──
+// store 禁 import store：plan-store 只广播冷拉真值，registry 落店由本 sink 完成
+// （呈 ready 需可枚举 requestId，respond 定位随之可用）。模块级一次注册，惰性取店
+//（事件到达时点 pinia 必已 active，同 invalidated 订阅的「现取」纪律）。
+let coldSinkRegistered = false
+function ensurePlanReviewColdSink(): void {
+  if (coldSinkRegistered) return
+  coldSinkRegistered = true
+  registerPlanReviewColdSink((sid, records) => {
+    const store = useExtensionUIStore()
+    for (const r of records) {
+      store.addRequest(sid, { ...r, receivedAt: r.receivedAt ?? Date.now() })
+    }
+  })
+}
+
 function ensureInvalidatedSubscription(): void {
   if (invalidatedUnsub) return
   const bus = getExtensionBus()
   invalidatedUnsub = bus.on('requests-invalidated', (e: RequestsInvalidatedEvent) => {
     if (!e.sessionId) return
     const store = useExtensionUIStore()
+    // D4 抑制窗触发面（respond 外的另一路 planReview 摘除源——覆盖 turn abort / /plan abort
+    // 全部解散源）：先按移除前快照判定本次失效是否摘除 planReview 挂起
+    const beforeRemoval = store.getRequestsBySession(e.sessionId)
+    const removedPlanReview = e.requestIds.some((rid) => {
+      const r = beforeRemoval.find((x) => x.requestId === rid)
+      return r !== undefined && isPlanReviewRequest(r)
+    })
     for (const requestId of e.requestIds) {
       store.removeRequest(e.sessionId, requestId)
     }
@@ -173,6 +199,9 @@ function ensureInvalidatedSubscription(): void {
     useChatStore().clearPendingSend(e.sessionId)
     // D7⑤ 终结清理（失效支）：挂起终结后对应分键草稿即删（切走切回不丢 ≠ 终结后残留）
     clearBtwBarDrafts(e.sessionId, e.requestIds)
+    // D4 审批窗口漏斗（出店）：镜像同步 + planReview 被摘除则置「已应答待帧」标记
+    syncPlanReviewWindow(e.sessionId)
+    if (removedPlanReview) usePlanStore().markPlanReviewAnswered(e.sessionId)
   })
 }
 
@@ -229,6 +258,22 @@ function pickLegacyFields(
 }
 
 /**
+ * planReview 源键搬运（白名单漏补 = 字段静默剥离——selfReview 是 D9③ 投影链终点，漏补即
+ * 「切回 session 有自审行、实时挂起无」半残形态）：planReview 标记（挂起枚举依赖）+
+ * selfReview（自审结论，非 string 值不入店）。热帧（bus→toExtensionUIRequest）走本白名单，
+ * 冷补（getPendingRequests 快照全量解包）不经本函数但同样携带两键——双入店路径的
+ * selfReview 存在性契约测试见 use-extension-ui-plan-review.test.ts。
+ */
+function pickPlanFields(
+  request: DialogRequest,
+): Partial<Pick<PlanReviewUIRequest, 'planReview' | 'selfReview'>> {
+  return {
+    ...(request.planReview === true ? { planReview: true } : {}),
+    ...(typeof request.selfReview === 'string' ? { selfReview: request.selfReview } : {}),
+  }
+}
+
+/**
  * bus 事件 request（DialogRequest）→ ExtensionUIRequest 适配（IF3）。
  *
  * DialogRequest 是 parseUiRequest/parseExtensionUiRequest 经 ...payload 展开构造的——
@@ -237,8 +282,8 @@ function pickLegacyFields(
  * method 用原始 method（可能超界如 editor）?? kind 兜底（kind 已归一 select/confirm/input）。
  */
 function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIRequest {
-  // receivedAt：优先采信帧携带的数值（异常积压场景可判定超龄），缺失则由本层打戳
-  //（当前 runtime 广播帧不带该键，故常态恒为 Date.now()——兜底判定的输入面）。
+  // receivedAt：优先采信帧携带的数值，缺失则由本层打戳（当前 runtime 广播帧不带该键，
+  // 故常态恒为 Date.now()）——合并排序消费方（useBtwInteraction 确认条最早优先）的时序基准。
   const rawReceivedAt = request.receivedAt
   return {
     sessionId: sid,
@@ -247,9 +292,9 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
     ...pickDialogFields(request),
     ...pickFormFields(request),
     ...pickLegacyFields(request),
-    // planReview 标记透传（D5）：DialogRequest 索引签名读原始 payload，守卫后携带进 store——
-    // 挂起枚举（currentPlanReviewRequests）依赖该字段识别审批请求。
-    ...(request.planReview !== undefined ? { planReview: request.planReview === true } : {}),
+    // planReview 标记 + selfReview 白名单搬运（D5/D9③）：挂起枚举（currentPlanReviewRequests）
+    // 依赖 planReview 标记识别审批请求，自审行渲染依赖 selfReview（见 pickPlanFields 注释）。
+    ...pickPlanFields(request),
     // expectTurn 源元数据透传（form-submit-busy-convergence D1 段 4）：帧上仅显式 false 落键
     //（runtime event-adapter 条件落键），undefined 缺键 = 缺省桥接态——按帧原样透传进 store，
     // respond 分型据其三态判定；非 boolean 值不入帧（守卫即透传闸）。
@@ -270,6 +315,8 @@ export function useExtensionUI(
   const chatStore = useChatStore()
   // P2-2 失效链订阅（模块级单例；首个使用者挂上后永驻，与 store 生命周期一致）
   ensureInvalidatedSubscription()
+  // 冷拉对账 pending 再入店 sink（模块级一次；plan-store D4③ 的 registry 写入缝）
+  ensurePlanReviewColdSink()
 
   let unsubFns: Array<() => void> = []
 
@@ -302,17 +349,10 @@ export function useExtensionUI(
         if (raw.form !== true && !isPlanReview) return // C4：富交互标记放行
         const adapted = toExtensionUIRequest(eventSid, raw)
         if (filter && !filter(adapted)) return // filter 第二道闸
-        // 兜底超龄过滤（非主算法）：主算法是 getPendingRequests 快照差集剔除（见下方 .then）；
-        // 此处只防「帧携带陈旧 receivedAt」的极端积压。常态帧收到即打戳（receivedAt ≈ now），
-        // 判定不命中故无行为差异。
-        if (Date.now() - (adapted.receivedAt ?? Date.now()) > FRAME_STALE_MAX_AGE_MS) {
-          console.warn(
-            '[useExtensionUI] 超龄 ui-request 帧已丢弃（兜底过滤，非快照差集主算法）:',
-            adapted.requestId,
-          )
-          return
-        }
         store.addRequest(eventSid, adapted)
+        // D4 审批窗口漏斗（入店）：新 planReview pending 登记到达 → 镜像同步（内含解除
+        // 已应答标记语义——挂起 = 唯一交互权威、ready 优先于抑制）
+        syncPlanReviewWindow(eventSid)
       }),
     )
     // C3 保留：拉取 runtime 缓存的 pending 请求（切换 session 后重新订阅时，runtime 会推送缓存的请求）
@@ -337,14 +377,6 @@ export function useExtensionUI(
         const keepIds = new Set(pendingRequests.map((r) => r.requestId))
         const beforeIds = store.getRequestsBySession(sid).map((r) => r.requestId)
         store.retainOnly(sid, keepIds)
-        // btw 修剪路失效（D8 失效支两路收口之一，与事件路同函数单入口）：runtime 重启后
-        // pending 内存表清零，进程死亡切面恒空清单不广播失效帧（server invalidate 单出口）——
-        // 本地挂起簿记有、权威快照无的 requestId 据本次对账差集补走失效支，遗留挂起转为
-        // 行内「请求已失效」提示。快照仍含的请求不动；主会话 sid 不入（isBtwVirtualId 守卫）；
-        // 触发面 = 本 retainOnly 调用点，不新增轮询。
-        if (isBtwVirtualId(sid)) {
-          invalidateBtwStaleFromSnapshot(sid, keepIds, BTW_EXPIRED_REASON_SNAPSHOT_PRUNED)
-        }
         // D7⑤ 终结清理（快照修剪支）：被剔除的僵尸请求（重附着/回收后 runtime 已清）
         // 对应分键草稿随之删除——快照剔除 = 失效语义的同族终结点（空集幂等）
         clearBtwBarDrafts(sid, beforeIds.filter((id) => !keepIds.has(id)))
@@ -355,9 +387,13 @@ export function useExtensionUI(
         for (const req of pendingRequests) {
           // pending 帧经 runtime {...r,...r.payload} 解包——payload 即 marker 分支产出的
           // view-ready 帧（form:true 原生携带，legacy 归一已在 runtime 侧完成），直接入
-          // store；该路径不经 toExtensionUIRequest（切回 session / respawn 恢复路径）
+          // store；该路径不经 toExtensionUIRequest（切回 session / respawn 恢复路径；
+          // planReview + selfReview 双键随 payload 全量解包同覆——冷补入店路径）
           store.addRequest(sid, { ...req, receivedAt: req.receivedAt ?? Date.now() })
         }
+        // D4 审批窗口漏斗（冷补/修剪后收口）：按 registry 现值同步镜像（快照剔除 planReview
+        // 置镜像 false 但不置已应答标记——标记触发面只有 respond 成功 / 失效帧两路，D4①）
+        syncPlanReviewWindow(sid)
       })
       .catch((err) => {
         console.warn('[useExtensionUI] Failed to get pending requests:', err)
@@ -432,6 +468,11 @@ export function useExtensionUI(
     // store.removeRequest 按 requestId 精确移除（不区分 form/dialog），requestId 全局唯一，
     // 故即使本实例 filter 不同也能正确移除。
     store.removeRequest(sid, requestId)
+    // D4 审批窗口漏斗（出店）：respond 成功 = planReview 挂起被摘除的主路径——置「已应答
+    // 待帧」标记（抑制 degraded/revising 到预期后态帧）+ 镜像同步（非 planReview 请求同样
+    // 同步镜像，幂等）。
+    syncPlanReviewWindow(sid)
+    if (isPlanReviewRequest(target)) usePlanStore().markPlanReviewAnswered(sid)
     // D1 分型锚点（form-hang-fix）：cancel 型（result === null——Esc / 取消按钮 / cancel()
     // 同链）送达后 pi 无后续 turn 事件预期，pendingSend 等 message_start 必然空等（假忙
     // 窗口病灶）——送达即收口。提交型（result !== null）不清：pi 起 turn，pendingSend

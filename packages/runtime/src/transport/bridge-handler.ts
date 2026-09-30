@@ -23,15 +23,16 @@ export class BridgeHandler {
     private readonly pluginService: IPluginService | null,
     /**
      * bridge 请求登记所（marker 通道识别后的登记点）：新通道 method 恒为 'select'，
-     * 识别出的请求到达本 handler 时登记进 ExtensionTimeoutManager 的 bridgeRequestIds
-     * ——供 extension-message-handler 拦截前端误发的 ui_response（bridge 请求由 runtime
-     * 内部应答，前端不得抢答）；clearForSession 按 session 跟踪清理。bridge:event 例外
-     * 不登记（见 handleBridgeRequest 入口注释）。结构类型：生产注入 ExtensionTimeoutManager。
+     * 识别出的请求到达本 handler 时登记进 ExtensionTimeoutManager 挂起单表
+     * （isBridge=true entry）——供 extension-message-handler 拦截前端误发的 ui_response
+     * （bridge 请求由 runtime 内部应答，前端不得抢答）；clearForSession 按 session 跟踪
+     * 清理。bridge:event 例外不登记（见 handleBridgeRequest 入口注释）。结构类型：
+     * 生产注入 ExtensionTimeoutManager。
      */
     private readonly timeoutManager?: {
       addBridgeRequest(sessionId: string, requestId: string): void
       /** B6 应答即删（尾部 finally 调用）：结构类型，生产注入 ExtensionTimeoutManager，测试可注入桩 */
-      removeBridgeRequest(requestId: string): void
+      removeRequest(requestId: string): void
     },
   ) {}
 
@@ -88,13 +89,13 @@ export class BridgeHandler {
       }
     } finally {
       // B6（memory-leak-remediation §3.2-B6）应答即删：runtime 内部应答的 bridge 请求在
-      // 回包完成点从登记所摘除——此前 removeBridgeRequest 全仓唯一调用点是前端误发
-      // ui_response 的防御分支，runtime 应答的正常路径零删除，仅 session 销毁兜底清，
+      // 回包完成点从登记所摘除——此前（B6 前）应答完成点无删除，唯一删除点是前端误发
+      // ui_response 的防御分支，runtime 应答的正常路径零删除，仅 session 销毁兑底清，
       // 长会话单调累积。finally 收敛成功+异常双路（await 完成点 / 外层 catch 回错包后），
       // 覆盖 sync / tool_execute / intercept / malformed / unknown-method 全部回包点；
-      // bridge:event 未登记不摘（与入口登记守卫对称）。幂等（Set.delete）。
+      // bridge:event 未登记不摘（与入口登记守卫对称）。幂等（单表 entry 摘除）。
       if (tracked) {
-        this.timeoutManager?.removeBridgeRequest(requestId)
+        this.timeoutManager?.removeRequest(requestId)
       }
     }
   }

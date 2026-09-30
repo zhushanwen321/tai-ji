@@ -935,11 +935,27 @@ export class SessionMessageHandler {
     // D(round5-must-fix-1): 必须回复 ack，否则 renderer pending.register(id) 的 Promise 永挂，pendingMap 泄漏无上限。
     // 与 message.send/steer/follow_up 对称，走 message.status 回复。
     const abortSid = msg.payload.sessionId
-    await this.ctx.sessionService.abort(abortSid)
     // P2-2 失效链：turn abort 级联解散挂起交互（审批 select / 执行方式 form / ask-user），
     // 响应永不可达——摘除 runtime pending 缓存 + 广播失效帧，renderer 移除本屏请求
     //（「忽略」按钮的审批条消失即由本链驱动）。
-    this.ctx.invalidatePendingUiRequests(abortSid, 'turn-aborted')
+    // D6（plan-mode-state-machine F4①）失效帧前置 + try/finally 补摘：
+    // ① 前置腿 = 「失效帧必达」的唯一保障——invalidate 是纯本地缓存操作 + 广播（空清单
+    //    不发布、重复摘除天然幂等，不产生第二帧），无依赖 abort 结果；同步执行先于下方
+    //    await abort，故 abort 抛错（getClientOrThrow 不在 dispatcher try 内 / RPC 阶梯）
+    //    时失效帧已发布，renderer 不留僵尸 ready。先行执行同时使 abort RPC 60s 超时阶梯
+    //    期间失效帧不迟到（被否形态：只补 try/finally 不调序——分钟级阶梯期间失效帧仍
+    //    迟到，renderer 65s backstop 先报错）。
+    // ② finally 腿不承担必达（abort 抛错时它对帧无增量、空转）；它覆盖前置腿管不到的两类
+    //    形态：前置 invalidate 自身抛错时的重试、abort 在途窗口内新到挂起的追加摘除
+    //    （窗口内新挂起不会被前置腿摘除，只能在 abort 后补摘；server 侧空清单不发布，
+    //    补摘无挂起时零成本）。abort 极端失败的其余行为（异常传播、不 reply ack）保持
+    //    不变（D6「行为不变、概率不增」）。判别断言见 session-message-handler-plan.test.ts。
+    try {
+      this.ctx.invalidatePendingUiRequests(abortSid, 'turn-aborted')
+      await this.ctx.sessionService.abort(abortSid)
+    } finally {
+      this.ctx.invalidatePendingUiRequests(abortSid, 'turn-aborted')
+    }
     return this.ctx.reply(ws, msg.id, 'message.status', { sessionId: abortSid, status: 'aborted' })
   }
 

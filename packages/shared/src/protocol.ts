@@ -29,6 +29,11 @@ import type { UsageStatsResult } from './usage-stats'
 import type { GenStatsFrame } from './gen-stats'
 // quota.configure payload 形状 SSOT 引用（coding-plan-quota-config-ux §7.1 契约收敛）
 import type { QuotaConfigurePayload } from './quota-types'
+// plan 生命周期状态类型（plan 状态机显式化 D2）：经包出口（@zhushanwen/extension-protocol）
+// 直接引用 PlanLifecycleState（canonical = packages/extension-protocol/src/extensions/plan/state-machine，barrel 已 re-export），
+// type-only 零运行时面（shared 不因此获得对该包的运行时依赖；类型解析由 devDependency 承载，
+// plan-protocol.test.ts 的跨包 AssertExact 锁镜像漂移）。
+import type { PlanLifecycleState } from '@zhushanwen/extension-protocol'
 
 /**
  * 测试连接按协议分组的单行结果（SSOT，2026-09-10 review S-9 手写重复收编）：
@@ -1134,7 +1139,8 @@ export interface SkillCacheInvalidatedPayload {
 }
 
 // ── backgroundTask 域 payload 辅助类型（docs/architecture/background-task-sidebar-view.md §3.3 D3/D9，u-proto）──
-// shared 不依赖 @zhushanwen/extension-protocol（SubagentEngineConfigView / SessionTraceHeaderPayload
+// shared 仅 type-only 直引 @zhushanwen/extension-protocol（PlanLifecycleState 直引先例）；
+// 本域仍走值形状镜像惯例（SubagentEngineConfigView / SessionTraceHeaderPayload
 // 同先例：契约 SSOT 在彼处，shared 侧放结构镜像，结构兼容即协议兼容）。任务条目逐字段镜像
 // extension-protocol background-task.ts 的 BackgroundTaskRegistryEntry（D9 数据契约零新造——
 // 字段名/枚举/可选性禁止单侧改名）；镜像 ⇔ 契约的逐字段全等由 core transport api domain
@@ -1441,8 +1447,9 @@ export interface SessionSetProjectMutationReply {
 
 /**
  * 计划产物文档元数据（plan 模式重设计 D1）。
- * 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 同形——shared 是最底层
- * 共享包不能反向依赖 extension-protocol，同形状漂移由双端契约测试守卫。
+ * 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 同形（值形状镜像惯例）——
+ * PlanLifecycleState 已 type-only 直引 extension-protocol（D2 裁决：plan 状态机处
+ * 同形惯例不适用），同形状漂移由双端契约测试守卫。
  */
 export interface PlanDocMeta {
   /** 文件名（drawer 文档 tab 标题，不含目录） */
@@ -1458,13 +1465,24 @@ export interface PlanDocMeta {
 /**
  * plan 模式状态视图——session JSONL 内最后一条 plan-state entry 的派生投影（D1）。
  *
- * 四个必填字段是 entry schema v1 原有字段；四个 optional 字段是 schema 扩展
- * （D4 向后兼容契约）：旧 entry 无新字段，前端逐字段判存在降级显示
+ * 生命周期状态 `state`（plan 状态机显式化 D1/D2）：类型**直接引用 extension-protocol 的
+ * `PlanLifecycleState`**（零依赖纯模块 type-only 引入，零运行时面；「本地同形」惯例在此不适用，
+ * 直接引用消除镜像漂移面）。归一点（runtime plan-state-extractor / 扩展 reconstructPlanState）
+ * 恒携带 `state`：新 entry 直读，旧 entry（reviewState 字段族，磁盘数据真实跨版本）由归一点
+ * 完成映射（awaiting→reviewing / revising→revising / 无→planning|idle 按 isActive）——映射
+ * 只存在于 entry 读取侧，本契约不携带旧字段（plan-mode-audit-remediation 批次 3 条目 1：
+ * renderer 混装格兜底映射随 deprecated 双字段删除；映射实现单源 = extension-protocol
+ * legacy-entries，D-B4-1 下沉，契约断言面 = 其包内 legacy-entries.test.ts）。
+ *
+ * resumeHint（D2）：降级态等待原因——仅 E3 重挂时落 'resubmit'，清除点三处
+ * （resetPlanState / 进入重置组 / submit-review 转移落盘）；不变量：只描述当前降级
+ * 等待的原因，不跨轮残留。仅 state 降级等待态有语义。
+ *
+ * selfReview **不投影进本帧**（D9③：消费面 = 审批请求帧 + E3 扩展内读 + entry 比较基线，
+ * 到此为止）；planState 帧有界前提不扩展。
+ * 四个必填字段是 entry schema v1 原有字段；optional 字段逐字段判存在降级显示
  * （skills 缺 → 前端按未挂载技能降级，不常驻展示；docs 缺 → 产物区显示
- * planFilePath 单文件；reviewStateSource 缺 → 降级态渲染通用文案）。
- * optional 性是兼容契约，禁改必填（契约测试断言守卫）。
- * reviewState 无值 = 进行中（三步阶段推导：① 激活无文档 / ② 激活有文档无审阅态 /
- * ③ awaiting|revising——阶段指示由推导承载，不落盘，ext-simplify-06 D6 延续）。
+ * planFilePath 单文件）。optional 性是兼容契约，禁改必填（契约测试断言守卫）。
  */
 export interface PlanStateView {
   isActive: boolean
@@ -1475,16 +1493,17 @@ export interface PlanStateView {
   skills?: string[]
   /** 产物文档清单（产物 tab 由 docs.length 驱动，与 isActive 解耦——退出/执行后仍可回看） */
   docs?: PlanDocMeta[]
-  /** awaiting = 文档就绪等审批；revising = 修订中；无值 = 进行中 */
-  reviewState?: 'awaiting' | 'revising'
   /**
-   * 降级态来源标记（reviewState='awaiting' 且无挂起审批时区分等待原因）：
-   * 'resubmit' = 会话重启（E3）后 agent 尚未重新提交审批。
-   * optional 性是 D4 兼容契约：旧 entry（升级前落盘）无此字段，消费方惰性——
-   * 缺省 = 来源未知，渲染通用降级文案（恢复入口 + 退出照给，不猜测来源）。
-   * 仅 reviewState 有值时有语义。
+   * plan 生命周期状态（D1 八值）——归一产物恒携带（旧 entry 映射 / 新 entry 直读，见头注释）；
+   * 缺失/垃圾值 = 旧 runtime 混装格降级，读侧落 idle。阶段指示（①②③）由 derivePhase/推导
+   * 承载，不落盘（ext-simplify-06 D6 延续）。
    */
-  reviewStateSource?: 'resubmit'
+  state?: PlanLifecycleState
+  /**
+   * 降级态等待原因（D2 resumeHint）：'resubmit' = 会话重启（E3）后 agent 尚未重新提交审批。
+   * 不跨轮残留（清除点三处，见头注释）。
+   */
+  resumeHint?: 'resubmit'
 }
 
 export interface ServerMessageMapBase {

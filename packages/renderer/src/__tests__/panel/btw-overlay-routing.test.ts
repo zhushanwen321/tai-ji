@@ -22,7 +22,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
-import { nextTick, ref } from 'vue'
+import { nextTick, ref, effectScope } from 'vue'
 import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
@@ -43,7 +43,7 @@ import {
   createUiResponseTransport,
   __resetDialogRequestIdSessionsForTest,
 } from '@/composables/shell/extension-host-dialog'
-import { __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
+import { __resetExtensionBusSubscriptionForTesting, useExtensionUI } from '@/composables/useExtensionUI'
 import { setBtwReclaimReminder } from '@/composables/panel/btw-pending-bookkeeping'
 import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
@@ -220,7 +220,7 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
     expect(band.find('[data-testid="companion-band-message"]').text()).not.toContain('rm -rf')
   })
 
-  it('plan 审批降档：两键（执行/修订）现 drawer；批准回传 PlanReviewResponse JSON', async () => {
+  it('plan 审批降档：三键（执行/修订/搁置）现 drawer；批准回传 PlanReviewResponse JSON', async () => {
     const w = mountPanel(MAIN)
     await settle(w)
     emitUIRequest(VID, planFrame('r-plan'))
@@ -228,12 +228,29 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
 
     expect(w.find('[data-testid="btw-plan-approve"]').exists()).toBe(true)
     expect(w.find('[data-testid="btw-plan-revise"]').exists()).toBe(true)
+    // 协议第三键搁置在 btw 面可达（键集对齐主审批面 PlanReviewDecision 全值域）
+    expect(w.find('[data-testid="btw-plan-dismiss"]').exists()).toBe(true)
     expect(w.find('[data-testid="btw-plan-revise"]').attributes('disabled')).toBeDefined() // 0 意见禁用
 
     await w.find('[data-testid="btw-plan-approve"]').trigger('click')
     await settle(w)
     expect(extMock.sendExtensionUIResponse).toHaveBeenCalledWith(
       VID, 'r-plan', 'select', JSON.stringify({ decision: 'approve' }),
+    )
+    expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false) // 应答 → 撤下
+  })
+
+  it('plan 审批降档 dismiss：搁置键经 respond 同通道回传 {decision:"dismiss"}（无评论负载），应答后撤下', async () => {
+    const w = mountPanel(MAIN)
+    await settle(w)
+    emitUIRequest(VID, planFrame('r-plan-dismiss'))
+    await settle(w)
+
+    // 搁置不依赖意见草稿（无输入可直接点）
+    await w.find('[data-testid="btw-plan-dismiss"]').trigger('click')
+    await settle(w)
+    expect(extMock.sendExtensionUIResponse).toHaveBeenCalledWith(
+      VID, 'r-plan-dismiss', 'select', JSON.stringify({ decision: 'dismiss' }),
     )
     expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false) // 应答 → 撤下
   })
@@ -322,10 +339,10 @@ describe('②③ badge 待处理态 + 终态机四行（D8 SSOT 表）', () => {
     expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
   })
 
-  it('行2/3 撤回·失效：requestsInvalidated → 条撤下 + 待处理清 + 行内「请求已失效」，可关闭', async () => {
+  it('行2/3 撤回·失效（dialog 族）：requestsInvalidated → 条撤下 + 待处理清 + 行内「请求已失效」，可关闭', async () => {
     const w = mountPanel(MAIN)
     await settle(w)
-    emitUIRequest(VID, formFrame('r-inv', '将失效的问题？'))
+    emitUIRequest(VID, dialogFrame('r-inv'))
     await settle(w)
     expect(w.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
 
@@ -356,6 +373,21 @@ describe('②③ badge 待处理态 + 终态机四行（D8 SSOT 表）', () => {
     expect(w.find('[data-testid="btw-thread-pending"]').exists()).toBe(false)
   })
 
+  it('快照镜像重挂：已入快照的 store 族挂起不被修剪误伤（条与待处理保留、无失效提示）', async () => {
+    const w = mountPanel(MAIN)
+    await settle(w)
+    emitUIRequest(VID, formFrame('r-alive', '仍在处理的问题？'))
+    await settle(w)
+
+    w.unmount() // 快照 mock 保持镜像 store 现态 = runtime 存活且认识该请求
+    const w2 = mountPanel(MAIN)
+    await settle(w2)
+
+    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(true)
+    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
+    expect(w2.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
+  })
+
   it('提交回路：投递失败（未送达）保持挂起可重试；重投成功才出账', async () => {
     const w = mountPanel(MAIN)
     await settle(w)
@@ -382,13 +414,23 @@ describe('②③ badge 待处理态 + 终态机四行（D8 SSOT 表）', () => {
     await settle(w)
     emitUIRequest(VID, formFrame('r-gone', '问题？'))
     await settle(w)
-    // 模拟已终结（失效链已移除 store 记录）后迟到的提交
+    // 模拟已终结（失效链已移除 store 记录）后迟到的提交：active 已随 store 清空 →
+    // 确认条不在 DOM、无按钮可点——改直调 useExtensionUI 的 respond 语义面
+    // （同 useBtwInteraction 挂载形态：vid ref + 全放行 filter）
     useExtensionUIStore().removeRequest(VID, 'r-gone')
-    const before = useToast().toasts.value.length
-    await w.find('[data-testid="btw-form-submit"]').trigger('click').catch(() => undefined)
     await settle(w)
-    // active 已随 store 清空重派生 → 无条可点；直接断言 respond 语义面
-    expect(useToast().toasts.value.length).toBeGreaterThanOrEqual(before)
+    expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
+
+    // toast 是模块级单例且 error 停留 8s（长于用例时长），先清掉前置用例遗留再断言增量
+    for (const t of [...useToast().toasts.value]) useToast().remove(t.id)
+    const scope = effectScope()
+    const ui = scope.run(() => useExtensionUI(ref(VID), () => true))!
+    const delivered = ui.respond('r-gone', '迟到的应答')
+    scope.stop()
+
+    // 应答丢弃（返回 false）+ 失效 toast 用户可见（不静默）+ store 不受污染
+    expect(delivered).toBe(false)
+    expect(useToast().toasts.value.map((t) => t.message)).toEqual(['请求已失效，应答已丢弃'])
     expect(useExtensionUIStore().getRequestsBySession(VID)).toHaveLength(0)
   })
 })
@@ -510,7 +552,46 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
     expect((again.element as HTMLInputElement).value).toBe('')
   })
 
-  it('失效终结同样清草稿：切走期间 requestsInvalidated → 切回无表单 + 行内失效提示；重建为空', async () => {
+  it('分键 vid 维度负向锚定：同 requestId 两条线各填不同草稿，切换互不串', async () => {
+    apiMock.list.mockResolvedValue([{ vid: 'btw:d7a' }, { vid: 'btw:d7b' }])
+    const w = mountPanel(MAIN)
+    await settle(w)
+    // 默认选中最新线 d7b → 切到 d7a 填草稿
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7a"]').trigger('click')
+    await nextTick()
+    emitUIRequest('btw:d7a', formFrame('r-vid-key', 'A 线问题？'))
+    await settle(w)
+    await w.find('[data-testid="btw-form-text"]').setValue('A 线草稿')
+    await nextTick()
+
+    // 切到 d7b：同 requestId 再挂一个表单，填另一份草稿
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7b"]').trigger('click')
+    await nextTick()
+    emitUIRequest('btw:d7b', formFrame('r-vid-key', 'B 线问题？'))
+    await settle(w)
+    await w.find('[data-testid="btw-form-text"]').setValue('B 线草稿')
+    await nextTick()
+
+    // 切回 A：A 的问题 + A 的草稿原样（分键若退化为裸 requestId，B 线草稿会覆写 A → 此处红）
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7a"]').trigger('click')
+    await nextTick()
+    const aBar = w.find('[data-testid="btw-inline-confirm"]')
+    expect(aBar.exists()).toBe(true)
+    expect(aBar.text()).toContain('A 线问题？')
+    const aInput = w.find('[data-testid="btw-form-text"]')
+    expect((aInput.element as HTMLInputElement).value).toBe('A 线草稿')
+
+    // 再切 B：B 的问题 + B 的草稿同样原样
+    await w.find('[data-testid="btw-thread-chip"][data-vid="btw:d7b"]').trigger('click')
+    await nextTick()
+    const bBar = w.find('[data-testid="btw-inline-confirm"]')
+    expect(bBar.exists()).toBe(true)
+    expect(bBar.text()).toContain('B 线问题？')
+    const bInput = w.find('[data-testid="btw-form-text"]')
+    expect((bInput.element as HTMLInputElement).value).toBe('B 线草稿')
+  })
+
+  it('失效终结同样清草稿：切走期间 requestsInvalidated → 切回无表单、条撤下即失效反馈（store 族无行内提示）；重建为空', async () => {
     const w = mountPanel(MAIN)
     await settle(w)
     emitUIRequest(VID, formFrame('r-d7x', '将失效草稿？'))
@@ -518,11 +599,12 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
     await w.find('[data-testid="btw-form-text"]').setValue('未提交草稿')
     await nextTick()
 
-    // 切走期间失效（撤下 + 草稿终结清理）
+    // 切走期间失效（撤下 + 草稿终结清理）。store 族失效的行内反馈 = 条撤下
+    // （extensionUIStore removeRequest）——失效行内提示是 dialog 族（FIFO）的失效支
     emitInvalidated(VID, ['r-d7x'], 'turn-aborted')
     await settle(w)
     expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
-    expect(w.find('[data-testid="btw-request-expired"]').exists()).toBe(true)
+    expect(w.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
 
     // 同 requestId 重建（簿记幂等重入）→ 输入为空（终结草稿不残留）
     emitUIRequest(VID, formFrame('r-d7x', '将失效草稿？'))
@@ -530,62 +612,5 @@ describe('D7⑤ 提交态 per-vid/表单实例隔离：切走切回草稿不丢�
     const again = w.find('[data-testid="btw-form-text"]')
     expect(again.exists()).toBe(true)
     expect((again.element as HTMLInputElement).value).toBe('')
-    // 新请求顶掉失效提示（入账支已清）
-    expect(w.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
-  })
-})
-
-describe('D8 失效支两路收口：快照修剪路（重启后遗留挂起首次对账 → 行内失效提示）', () => {
-  // 场景（A6b）：runtime 重启后 pending 内存表清零，进程死亡切面恒空清单不广播失效帧——
-  // 事件路结构性不可达；本地遗留挂起须由 retainOnly 对账差集（快照修剪路）补失效。
-  it('store 族遗留 + 快照空（runtime 重启）：重挂对账 → 条撤下 + 待处理清 + 行内「请求已失效」', async () => {
-    const w = mountPanel(MAIN)
-    await settle(w)
-    emitUIRequest(VID, formFrame('r-left', '遗留问题？'))
-    await settle(w)
-    expect(w.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
-
-    extMock.getPendingRequests.mockResolvedValue([]) // 重启后权威快照为空
-    w.unmount() // 重挂 = 首次对账（subscribe retainOnly 差集；模块簿记跨挂载存活）
-    const w2 = mountPanel(MAIN)
-    await settle(w2)
-
-    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
-    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(false)
-    const notice = w2.find('[data-testid="btw-request-expired"]')
-    expect(notice.exists()).toBe(true)
-    expect(notice.text()).toContain('请求已失效')
-  })
-
-  it('dialog 族遗留（仅模块簿记，不经 store）+ 快照空：重挂对账 → 确认条撤下 + 行内失效提示', async () => {
-    const w = mountPanel(MAIN)
-    await settle(w)
-    emitUIRequest(VID, dialogFrame('r-left-dlg'))
-    await settle(w)
-    expect(w.find('[data-testid="btw-inline-confirm"]').exists()).toBe(true)
-
-    extMock.getPendingRequests.mockResolvedValue([])
-    w.unmount()
-    const w2 = mountPanel(MAIN)
-    await settle(w2)
-
-    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(false)
-    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(false)
-    expect(w2.find('[data-testid="btw-request-expired"]').exists()).toBe(true)
-  })
-
-  it('正例保护：快照仍含的请求不置提示（镜像快照重挂 → 条与待处理保留、无失效提示）', async () => {
-    const w = mountPanel(MAIN)
-    await settle(w)
-    emitUIRequest(VID, formFrame('r-alive', '仍在处理的问题？'))
-    await settle(w)
-
-    w.unmount() // 快照 mock 保持镜像 store 现态 = runtime 存活且认识该请求
-    const w2 = mountPanel(MAIN)
-    await settle(w2)
-
-    expect(w2.find('[data-testid="btw-inline-confirm"]').exists()).toBe(true)
-    expect(w2.find('[data-testid="btw-thread-pending"]').exists()).toBe(true)
-    expect(w2.find('[data-testid="btw-request-expired"]').exists()).toBe(false)
   })
 })

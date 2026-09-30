@@ -69,7 +69,7 @@ export interface AddOptions {
 // 与单测夹具共同消费。
 
 /**
- * ack 触发器 custom message 的 customType 前缀：避让 dispatch 归属前缀 `pi-scheduler:`，
+ * ack 触发器 custom message 的 customType 前缀：避让 dispatch 消息标记前缀 `pi-scheduler:`，
  * 使 `message_start` 武装判别（startsWith）不会把 dispatch / 任务消息误识别为触发器。
  */
 export const ACK_CUSTOM_TYPE_PREFIX = 'pi-scheduler-ack:'

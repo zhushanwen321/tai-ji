@@ -1,6 +1,8 @@
 /**
- * createFrameBookkeeping 单测：recency 序号表 + suppressed 抑制表的原语行为
- * （消费方 useGenStats / useContextUsage 收敛自此处，见模块头注登记）。
+ * createFrameBookkeeping 单测：recency 序号表的原语行为
+ * （消费方 useGenStats / useContextUsage 收敛自此处，见模块头注登记；
+ * 原 suppressed 抑制表随 D-B2-1 退役——已删分区拦截收进 useSessionScopedState
+ * 工厂单点，拦截断言在 use-session-scoped-state.test.ts）。
  *
  * 运行：cd packages/core && npx vitest run src/foundation/create-frame-bookkeeping.test.ts
  */
@@ -34,23 +36,5 @@ describe('createFrameBookkeeping recency 序号表', () => {
     bk.bumpSeq('a')
     expect(bk.seqAt('b')).toBe(0)
     expect(bk.hasNewerFrame('b', 0)).toBe(false)
-  })
-})
-
-describe('createFrameBookkeeping suppressed 抑制表', () => {
-  it('suppress → isSuppressed true；release → false（重新进入视图新生命周期）', () => {
-    const bk = createFrameBookkeeping()
-    expect(bk.isSuppressed('s1')).toBe(false)
-    bk.suppress('s1')
-    expect(bk.isSuppressed('s1')).toBe(true)
-    bk.release('s1')
-    expect(bk.isSuppressed('s1')).toBe(false)
-  })
-
-  it('release 未抑制的 sid 是 no-op，各 sid 独立', () => {
-    const bk = createFrameBookkeeping()
-    bk.release('never')
-    bk.suppress('s1')
-    expect(bk.isSuppressed('s2')).toBe(false)
   })
 })

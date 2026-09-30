@@ -44,6 +44,15 @@ import {
 } from './outbound-frame-registry.js'
 import { getCrashJournal } from '../../infra/crash-journal.js'
 import { warnIfBacklogged } from '../../utils/backpressure-warn.js'
+// pull-push W0 观测面：订阅生命周期 + state 类投递失败的结构化日志（R11/6c3 零日志根修）。
+import {
+  clearBusObserveState,
+  observeClearSession,
+  observeDeliverDropped,
+  observeSubscribe,
+  observeUnsubscribe,
+  observeUnsubscribeAll,
+} from './bus-observe.js'
 // 组合根（index.ts）经本模块导入守卫默认值——省一条独立 import 行（index.ts max-lines 门禁），
 // 阈值 SSOT 仍在 outbound-frame-registry（shared 常量的 registry 出口）。
 export { DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS } from './outbound-frame-registry.js'
@@ -424,6 +433,8 @@ export class MessageBus implements IMessageBus {
    *   message.seq（mutate 入参），transient 类保持原样不写字段）
    */
   publish(sessionId: string, message: ServerMessage): void {
+    // W0 观测口径：publish 全程耗时（投递失败事件携带——pull-push S5「域键+原因+耗时」）。
+    const startedAt = Date.now()
     const state = this.getOrCreateSession(sessionId)
     const topic = topicOf(message.type)
     const isTransient = topic === 'transient'
@@ -488,7 +499,7 @@ export class MessageBus implements IMessageBus {
           this.ringPush(state.streamRing, truncated, truncatedBytes)
         }
       }
-      this.broadcastText(state.subscribers, truncatedJson)
+      this.broadcastText(sessionId, truncated.type, topic, startedAt, state.subscribers, truncatedJson)
       return
     }
     if (bytes > this.guardOptions.warnBytes) {
@@ -505,7 +516,7 @@ export class MessageBus implements IMessageBus {
     if (isTransient) {
       // transient：不占 seq、不进 ring、不写快照——高频流直传，丢失可接受
       // （routeInbound 对无 seq 消息直接 dispatch，不做 gap 检测）。
-      this.broadcastText(state.subscribers, payload)
+      this.broadcastText(sessionId, message.type, topic, startedAt, state.subscribers, payload)
       return
     }
     if (topic === 'state') {
@@ -521,7 +532,7 @@ export class MessageBus implements IMessageBus {
       // stream：入 O(1) 环形缓冲（满则覆盖最旧 + B7 字节记账/超预算加速淘汰）。
       this.ringPush(state.streamRing, message, bytes)
     }
-    this.broadcastText(state.subscribers, payload)
+    this.broadcastText(sessionId, message.type, topic, startedAt, state.subscribers, payload)
   }
 
   /**
@@ -551,6 +562,14 @@ export class MessageBus implements IMessageBus {
     const state = this.getOrCreateSession(sessionId)
     state.subscribers.add(ws)
     this.getOrCreateWsSubs(ws).add(sessionId)
+    // W0 观测：订阅生命周期事件（R11/6c3 排障第一问「订阅建立时快照里有没有 plan 帧」
+    // ——stateKeys 即 stateSnapshot 当前键集，低频事件逐条落）。
+    observeSubscribe(sessionId, {
+      stateKeys: [...state.stateSnapshot.keys()],
+      ringSize: state.streamRing.size,
+      lastSeq: state.seqCounter,
+      subscribers: state.subscribers.size,
+    })
     return {
       snapshot: this.exportRing(state.streamRing),
       stateSnapshot: [...state.stateSnapshot.values()],
@@ -570,7 +589,7 @@ export class MessageBus implements IMessageBus {
   unsubscribe(sessionId: string, ws: BusClient): void {
     const state = this.sessions.get(sessionId)
     if (!state) return
-    state.subscribers.delete(ws)
+    const wasSubscribed = state.subscribers.delete(ws)
     const subs = this.wsSubscriptions.get(ws)
     if (subs) {
       subs.delete(sessionId)
@@ -578,6 +597,8 @@ export class MessageBus implements IMessageBus {
         this.wsSubscriptions.delete(ws)
       }
     }
+    // W0 观测：仅真实移除落事件（幂等重入不产生噪声）。
+    if (wasSubscribed) observeUnsubscribe(sessionId, state.subscribers.size)
   }
 
   /**
@@ -595,6 +616,8 @@ export class MessageBus implements IMessageBus {
       this.sessions.get(sid)?.subscribers.delete(ws)
     }
     this.wsSubscriptions.delete(ws)
+    // W0 观测：连接断开的批量退订（订阅生命周期事件，低频）。
+    observeUnsubscribeAll([...subs])
   }
 
   /**
@@ -618,6 +641,9 @@ export class MessageBus implements IMessageBus {
       }
     }
     this.sessions.delete(sessionId)
+    // W0 观测：session 状态整体清除（订阅生命周期事件）+ 限频窗口清理（键集随 session 生命周期有界）。
+    observeClearSession(sessionId, state.subscribers.size)
+    clearBusObserveState(sessionId)
   }
 
   /**
@@ -720,12 +746,25 @@ export class MessageBus implements IMessageBus {
    * 遍历推送订阅者（三类 topic 共用出口）。接收 publish 已序列化的文本（w09 TC-V1 契约：
    * 单条消息全程恰好 1 次 stringify——序列化在 publish 顶部完成，本方法不再 stringify）。
    * readyState!==1 跳过；单个 ws.send 抛错 ES4 兜底（不 rethrow，继续下一个 ws）。
+   *
+   * W0 观测：零送达 + state 类 → 投递失败观测事件（R11/6c3 此前在此零日志——「没人订 /
+   * 连接不在线」与「没发」不可区分）。stream/transient 不观测（ring 回放兜底 / 设计内可丢，
+   * 见 bus-observe.ts 头注）。
    */
-  private broadcastText(subscribers: Set<BusClient>, payload: string): void {
+  private broadcastText(
+    sessionId: string,
+    messageType: string,
+    topic: TopicKind,
+    startedAt: number,
+    subscribers: Set<BusClient>,
+    payload: string,
+  ): void {
+    let delivered = 0
     for (const ws of subscribers) {
       if (ws.readyState !== 1) continue
       try {
         ws.send(payload)
+        delivered += 1
         // RT-1#7：发送侧背压观测（ws.send 后 bufferedAmount 已计入本帧；bufferedAmount
         // 是 BusClient 的可选成员，mock 实现缺省时 helper 内部 no-op）。
         warnIfBacklogged(ws, 'publish')
@@ -733,6 +772,9 @@ export class MessageBus implements IMessageBus {
         // ES4：单个 ws.send 抛错（连接已断 / 内部异常）不应影响其它订阅者或 publish 主流程。
         console.warn('[message-bus] ws.send failed during publish:', e)
       }
+    }
+    if (delivered === 0 && topic === 'state') {
+      observeDeliverDropped(sessionId, messageType, subscribers.size, Date.now() - startedAt)
     }
   }
 

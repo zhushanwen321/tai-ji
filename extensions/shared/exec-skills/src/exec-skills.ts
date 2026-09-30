@@ -11,10 +11,17 @@ import {
 import type { Skill } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
-const logger = getLogger("pi-plan");
+const logger = getLogger("pi-exec-skills");
 
 /**
- * plan-exec skill 检测（D10 选项集 v2 的 skill 数据源）。
+ * 技能目录扫描共享能力（ADR-0074 落地包）：项目内一切「发现可执行 skill」的磁盘
+ * 扫描单源，禁止各扩展自扫目录或直用 pi 注册表快照形成第二实现（pi 的
+ * getCommands 返回 resource loader 启动加载集——reload 才刷新的滞后快照）。
+ *
+ * 与 ./resolve-skills.js 的两段消费语义闭环（ADR-0074）：
+ * - 本模块 = 「发现」：自研扫描直读磁盘，技能安装即时可见；用于向用户提议
+ *   （表单列出可用执行方式）。
+ * - resolve-skills = 「执行门禁」：注入前经 pi 注册表确认 pi 实际认得该技能。
  *
  * 检测语义 = 「向用户提议的执行 skill」，以 pi 本体加载集为基线做意图/信任对齐：
  * - 单根枚举复用 pi 公开导出 loadSkillsFromDir——单根内横切规则（ignore / description
@@ -37,11 +44,10 @@ const logger = getLogger("pi-plan");
  * （漏提议）；`.pi/skills` 源两侧同构。settings npm 源不扫（现无 npm 发布形态
  * plan-exec skill，出现时补第五根）。
  *
- * 降级规格（检测失败最坏后果 = skill 选项空集，绝不允许炸 executeComplete 的
- * 核心交互闭环；pi 对坏 skill 也只产 diagnostics 不中断加载）：每根 existsSync
- * 守卫 + 整根 try/catch（EACCES 等任何 fs 错 → 跳过该根 + warn）；单 skill
- * frontmatter 读/解析失败 → 跳过该项 + warn；settings 读取/解析失败 → 视为
- * 无 overrides。
+ * 降级规格（检测失败最坏后果 = skill 选项空集，绝不允许炸消费方的核心交互闭环；
+ * pi 对坏 skill 也只产 diagnostics 不中断加载）：每根 existsSync 守卫 + 整根
+ * try/catch（EACCES 等任何 fs 错 → 跳过该根 + warn）；单 skill frontmatter 读/解析
+ * 失败 → 跳过该项 + warn；settings 读取/解析失败 → 视为无 overrides。
  */
 
 /** 降级留痕（warn 级）：缺省走 pi-extension-logger，测试注入收集器 */
@@ -121,7 +127,7 @@ function readSkillsOverrides(settingsPath: string, log: LogFn): string[] {
     if (!Array.isArray(skills)) return [];
     return skills.filter((p): p is string => typeof p === "string");
   } catch (error) {
-    log("plan: exec-skill settings parse failed (treated as no overrides)", {
+    log("exec-skills: settings parse failed (treated as no overrides)", {
       path: settingsPath,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -254,7 +260,7 @@ export function hasPlanExecMarker(skillFilePath: string, log: LogFn = defaultLog
     const { frontmatter } = parseFrontmatter(fs.readFileSync(skillFilePath, "utf-8"));
     return frontmatter[PLAN_EXEC_MARKER_FIELD] === true;
   } catch (error) {
-    log("plan: exec-skill frontmatter read failed (skill skipped)", {
+    log("exec-skills: frontmatter read failed (skill skipped)", {
       path: skillFilePath,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -292,15 +298,14 @@ interface SkillRoot {
 
 /**
  * 检测入口：枚举 pi 本体加载集的四根，返回带 plan-exec marker 的 skill 清单
- * （root 序去重后）。complete 时现扫、无缓存（低频路径 + 技能热装可见性）。
- * 永不 throw（降级规格）。
+ * （root 序去重后）。现扫、无缓存（低频路径 + 技能热装可见性）。永不 throw（降级规格）。
  */
 export function detectExecSkills(options: DetectExecSkillsOptions): ExecSkill[] {
   const log: LogFn = options.log ?? defaultLog;
   try {
     return detectExecSkillsInternal(options, log);
   } catch (error) {
-    log("plan: exec-skill detection failed (degraded to empty option set)", {
+    log("exec-skills: detection failed (degraded to empty option set)", {
       error: error instanceof Error ? error.message : String(error),
     });
     return [];
@@ -359,7 +364,7 @@ function scanSkillRoot(
   try {
     skills = loadSkillsFromDir({ dir: root.dir, source: "detect" }).skills;
   } catch (error) {
-    log("plan: exec-skill root scan failed (root skipped)", {
+    log("exec-skills: root scan failed (root skipped)", {
       dir: root.dir,
       error: error instanceof Error ? error.message : String(error),
     });

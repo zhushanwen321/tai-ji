@@ -27,11 +27,12 @@
 - create 前置 rmSync 清目录（:176-182）但不清 git 元数据；上次 create 回滚的 `worktree remove` 失败被 bestEffort 吞掉（:221-224）留下 `<repo>/.git/worktrees/<branch>` 陈旧登记后，`worktree add` 报 already registered 恒失败。reconstruct 对同形态有 prune+重试（:296-305），create 没有。
 - 关联登记：keepBranch 保留的 pi-sub-* 分支无终局回收（单调累积），回收策略（TTL / 数量上限 / 显式清理）待裁决。
 
-### 1.4 轮终收尾遇 stale extension ctx 崩溃 runtime 进程（P1，间歇性，2026-09-22 登记）
+### 1.4 轮终收尾遇 stale extension ctx 崩溃 runtime 进程（P1，间歇性，2026-09-22 登记，2026-09-27 已根治）
 
 - 症状：GUI 派发 subagent，轮终收尾时 runtime 进程 exit 1，当轮 record 丢失、manifest 轮终投影未执行；supervisor 重启循环约 6 分钟。复验 3 轮仅第 1 轮触发。
-- 根因（已核实部分）：簿记⑧ emitPendingUnregister（`record-store-rounds.ts:207`）→ notify-host 的 `pi?.events.emit("pending:unregister", …)`——`pi?.` 只挡 null 不挡「非空但已失效」的 stale 适配器，emit 抛错沿 markRoundIdle 调用链未捕获，进程死亡。**stale ctx 产生机制未核实，修复前需先排查**（不查清根因就加 try/catch 属掩盖）。
-- 同族风险：notify-host 其他 emit 面（register 等）共用同一 `pi?.events.emit` 形态。
+- 根因（已核实闭环，pi 0.84.4 dist 实装）：pi 官方生命周期契约——session 替换（`newSession`/`fork`/`switchSession`/`reload`）的 `teardownCurrent` 先对扩展发 `session_shutdown`，再调 `session.dispose()` → `runner.invalidate()`，此后旧 pi ExtensionAPI 的所有方法调用一律抛 stale 错（`loader.js` 各方法首行 `assertActive()`；契约原文在 `runner.js` invalidate 默认消息）。缺陷形态：SubagentService 是跨 session 单例，`_pi`（session_start 注入）在 `dispose()` 后残留指向旧 session 的 handle；session 替换窗口内迟到的异步收尾（轮终 `markRoundIdle` 簿记⑧ `emitPendingUnregister` → `pi.events.emit`、迟到 register 的 `appendEntry`）触达 stale handle → 未捕获异常 → 进程崩。间歇性来源：仅「session 替换 × 恰有收尾在飞行中」交叠时触发。
+- 修复（根治 = 不在失效对象上调用，commit 32c7db264）：`SessionBaselines.clearSessionHandles()`（单写者）在 dispose 链最末尾（flush 与 pending 落盘复写两步合法 pi 消费之后）回收 `_pi` / `_streamSink`（ctx.ui.setWidget 闭包）/ `_isIdleFn`（ctx.isIdle 闭包）+ `RecordStore.setPi(null)`；消费点全部已有 `pi?.` 空短路 → 迟到写面降级为干净 no-op（旧 session 的通知本就无人消费，丢弃是正确语义）；新 `session_start` 经 `initSession` 重新注入。回归锚：`packages/subagent-core/src/execution/__tests__/subagent-service.test.ts`「dispose 回收 session 句柄：替换窗口内迟到的写面不触达 stale pi」。
+- 同族面核查结论：notify-host 其余 emit 面（`emitPendingRegister` 等）与 `appendEntry`/`sendMessage` 消费点全部经 `deps.getPi()` 单点取 handle——句柄回收后全族构造性安全，无需逐点防御（防御性 try/catch 不采用：pi 契约下正确修法是不触达，不是捕获后吞）。
 - 证据：`.tmp/dev-flow/b1b2-verify/`（崩溃日志/重启截图）。
 
 ### 1.5 resume 档 1 补收丢失结构化调用的对象形态（用户已裁决应修）
@@ -157,7 +158,7 @@
 
 ## 6. 已实施待验证（收尾跟踪）
 
-### 6.1 notify stale ctx 崩溃（见 §1.4）——待排查根因后裁决修复方向
+### 6.1 notify stale ctx 崩溃（见 §1.4）——已根治（commit 32c7db264，根因/修复/回归锚见 §1.4）
 
 ### 6.2 zcode 引擎 Provider Registry / reasoningLevel 接线（2026-09-29 已落地，剩真机复验）
 

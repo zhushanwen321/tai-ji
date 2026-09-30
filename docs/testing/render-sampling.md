@@ -13,9 +13,9 @@
 | 环节 | 做什么 | 本项目已核实参数 | lib 函数 |
 |------|--------|-----------------|----------|
 | ① 连接 | 连 dev 实例调试端口并定位页面 | 端口来自 `node apps/electron/scripts/dev-instance.mjs --print`（禁硬编码；`--data-dir` 隔离实例端口互不相同） | `connectPage` |
-| ② 定位 | 选择器锚定目标容器 | composer = `.composer-input[contenteditable="true"]`（contenteditable 非 textarea，fill 前须 click 聚焦） | 常量 `COMPOSER_SELECTOR` |
-| ③ 注入 | 样本送进渲染管线 | 用户气泡粘贴同管线同宿主；发送优先按钮探测、fallback Enter | `injectToComposer` / `clickSendOrSubmit` |
-| ④ 等待 | 「渲染完成」判定信号 | 图片加载完成 = `img.naturalWidth > 0`（`complete` 属性加载失败时也为 true，不能作信号；0x0 = 失败） | `waitForRenderSettled` |
+| ② 定位 | 选择器锚定目标容器 | composer = `.composer-input[contenteditable="true"]`（contenteditable 非 textarea，fill 前须 click 聚焦）；plan 划选 = `selectTextInElement`（DOM Range 注入） | 常量 `COMPOSER_SELECTOR` |
+| ③ 注入 | 样本送进渲染管线 | 用户气泡粘贴同管线同宿主；发送优先按钮探测、fallback Enter；划选注入（评论/引文类场景）DOM Range + Selection | `injectToComposer` / `clickSendOrSubmit` / `selectTextInElement` |
+| ④ 等待 | 「渲染完成」判定信号 | 图片加载完成 = `img.naturalWidth > 0`（`complete` 属性加载失败时也为 true，不能作信号；0x0 = 失败）；真机 LLM 节奏第二等待信号 = session JSONL entry 命中/计数 | `waitForRenderSettled` / `session-jsonl.waitForMatch` |
 | ⑤ 采样 | DOM 形态 + 截图 | 与基线同构的元素序列 JSON（tag/class/rect/text/img natural）+ 计算样式抽查 | `sampleDomShape` |
 | ⑥ 落盘 | 统一命名 | `<name>-dom.json` / `<name>-console.log` / `<name>-fullpage.png` | `saveArtifacts` |
 | 附：窗口 resize | Electron 窄窗验收的视口调整与恢复 | `setViewportSize` 在 Electron CDP 页面常不生效，fallback CDP `Browser.setWindowBounds`（外框 = 目标内容区 + 实测边框余量） | `resizeViewport` / `restoreViewport` |
@@ -36,7 +36,8 @@ import { connectPage, sampleDomShape } from '../../../scripts/render-sampling/li
 
 | 资产 | 覆盖环节 | 说明 | 最近验证 |
 |------|---------|------|---------|
-| `scripts/render-sampling/lib.mjs` | ①-⑥ 全部 + 窗口 resize | 共享函数库 + 关键选择器/信号常量 + `resizeViewport`/`restoreViewport`；判定逻辑在 decisions.mjs | 2026-09-23 判定层抽取接单测（审查 MF-1-22） |
+| `scripts/render-sampling/lib.mjs` | ①-⑥ 全部 + 窗口 resize | 共享函数库 + 关键选择器/信号常量 + `resizeViewport`/`restoreViewport` + `selectTextInElement`（划选注入）；判定逻辑在 decisions.mjs | 2026-09-24 划选注入（plan 模式验收预编译） |
+| `scripts/render-sampling/session-jsonl.mjs` | ④⑤（等待信号 + 断言读取面） | session JSONL 读取/深度搜索/计数/等待（`readSessionFile`/`deepFind`/`countMatches`/`waitForMatch`）；只读 + `~/.taiji` 真实数据目录 fail-safe 拒读 + 坏行容错；场景谓词由验收脚本自带 | 2026-09-24 建立（plan 模式验收预编译，dry-run 对 mock-pi fixtures 跑通） |
 | `scripts/render-sampling/decisions.mjs` | 判定层 | 发送按钮探测 / 渲染判稳 / CDP 边框余量算术 / CLI 参数解析；浏览器侧函数自包含（page.evaluate 序列化无闭包），单测 `scripts/__tests__/render-sampling-decisions.test.mjs`（CI scripts guards 轨） | 2026-09-23 建立（31 例全绿） |
 | `scripts/render-sampling/cli.mjs` | 端到端 | 冒烟入口（连接→注入→采样→落盘） | 2026-09-19 建立 |
 
@@ -49,6 +50,8 @@ import { connectPage, sampleDomShape } from '../../../scripts/render-sampling/li
 - **console 抓取先挂**：`captureConsole` 必须在触发渲染的操作前挂上，否则丢启动期告警。
 - **pointer 可达性测量的禁用键伪影**（2026-09-21 plan-mode-ux 验收）：`elementFromPoint` 会穿透 `pointer-events: none` 的元素——disabled 按钮的中心命中返回祖先容器，测出来「不可达」是伪影非缺陷；几何断言须先排除 disabled 键（只报 disabled 事实），或把「命中祖先」视为该点无遮挡。
 - **agent 会话依赖的临时文件会被系统清理**：验收会话的计划文档落 `/private/tmp/` 时，隔轮验收可能遇「文档不存在或已删除」空态（macOS tmp 清理），划选类断言无文本可选——跨轮复用同一会话前先确认注册路径文件存活，必要时从留存副本补回。
+- **session JSONL 延迟写入**：pi 首条 assistant 前文件可能不存在；等待侧用 `waitForMatch` 轮询，禁止任何代码创建/触碰 session 文件（AGENTS 规则 #6）；读到 append 中途的半行属常态（`badLines` 留证不 throw）。
+- **pi 解析链与 mock 置换目标**：dev 下 `find-pi-executable` 优先 `apps/electron/resources/pi/pi-<plat>-<arch>`（prepare-pi-resources 产物存在时 node_modules/.bin/pi 不在解析链内）——mock 注入只能置换「实际解析到的那条路径」的文件；装/恢复前先确认解析目标（runtime 日志 `using pi at:` 行）。
 
 ## closeout 纪律（dev-flow 验收收尾执行）
 
