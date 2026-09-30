@@ -357,6 +357,8 @@ export interface RecordJournalFoldState { // oe-exempt:20260929:framework:workfl
   roundIdle: RecordRoundIdleEvent | undefined;
   /** 当前终态（record-settled 落账、reopened/round-started 清除；undefined = 未终态）。 */
   settled: RecordSettledEvent | undefined;
+  /** 最近一次重开帧（record-reopened 落账；transcriptRef / epoch·round 归零的折叠载体）。 */
+  reopened: RecordReopenedEvent | undefined;
   /** fold 水位：已接受事件的最高 seq（增量续读/截断重读的去重依据）。 */
   lastSeq: number;
   /** 已接受的最后一条事件（空文件/全坏行 = undefined）。 */
@@ -371,6 +373,7 @@ export const INITIAL_RECORD_EVENT_FOLD_STATE: RecordJournalFoldState = {
   epoch: undefined,
   roundIdle: undefined,
   settled: undefined,
+  reopened: undefined,
   lastSeq: 0,
   lastEvent: undefined,
 };
@@ -407,6 +410,7 @@ export function applyRecordEvent(
     case "record-reopened":
       return {
         ...state,
+        reopened: event,
         epoch: event.epoch,
         round: event.round,
         settled: undefined,

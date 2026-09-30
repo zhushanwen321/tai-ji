@@ -446,6 +446,79 @@ export function stateMarkerFromFold(fold: RecordJournalFoldState | undefined): S
 }
 
 // ============================================================
+// [② 读侧换源] fold 统计域投影（binding 统计快照的读侧接替面）
+// ============================================================
+
+/** fold 统计域投影（undefined = 该维无事件可投影，调用方保持缺省）。 */
+export type FoldStatistics = {
+  /** 当前轮计数（round-started / reopened 携带）。 */
+  round: number | undefined;
+  /** 轮统计快照（settled 终值或轮终过程快照）。 */
+  turns: number | undefined;
+  totalTokens: number | undefined;
+  /** 收条时间（settled.endedAt / 轮终收条 ts）。 */
+  endedAt: number | undefined;
+};
+
+const EMPTY_FOLD_STATISTICS: FoldStatistics = {
+  round: undefined,
+  turns: undefined,
+  totalTokens: undefined,
+  endedAt: undefined,
+};
+
+const emptyStatsWithRound = (round: number | undefined): FoldStatistics =>
+  round === undefined ? { ...EMPTY_FOLD_STATISTICS } : { ...EMPTY_FOLD_STATISTICS, round };
+
+/**
+ * [② 读侧换源] 收条形统计（light 重建投影用）：`record-settled` 在场取终值
+ * （turns/totalTokens/endedAt 均为终局定稿）；未终局且轮终收条是**最后一条事件**
+ * 时取轮终快照（endedAt 用该事件 ts）；其余（在途 / 轮中续跑）不投影。
+ *
+ * 「轮终收条须是最后一条事件」与 {@link stateMarkerFromFold} 同一条 lastEvent
+ * 语义：续轮记录若按上一条 round-idle 投影，会把上一轮的统计当成当前态写进
+ * 运行中的记录。
+ */
+export function receiptStatisticsFromFold(fold: RecordJournalFoldState | undefined): FoldStatistics {
+  if (fold === undefined) return EMPTY_FOLD_STATISTICS;
+  const settled = fold.settled;
+  const idleReceipt =
+    settled !== undefined
+      ? settled
+      : fold.roundIdle !== undefined && fold.lastEvent === fold.roundIdle
+        ? fold.roundIdle
+        : undefined;
+  if (idleReceipt === undefined) {
+    return emptyStatsWithRound(fold.round);
+  }
+  return {
+    round: fold.round,
+    turns: idleReceipt.turns,
+    totalTokens: idleReceipt.totalTokens,
+    endedAt: settled !== undefined ? settled.endedAt : idleReceipt.ts,
+  };
+}
+
+/**
+ * [② 读侧换源] 基线形统计（revive 水合用）：settled ?? 最近轮终快照——**无**
+ * last-event 守卫。对齐 binding settle 快照的原语义（settle 写点落终值，轮中崩溃
+ * 时上一轮快照仍是有效基线）：max 合并语义下取最近快照比取空更接近真值。
+ */
+export function baselineStatisticsFromFold(fold: RecordJournalFoldState | undefined): FoldStatistics {
+  if (fold === undefined) return { ...EMPTY_FOLD_STATISTICS };
+  const snapshot = fold.settled ?? fold.roundIdle;
+  if (snapshot === undefined) {
+    return emptyStatsWithRound(fold.round);
+  }
+  return {
+    round: fold.round,
+    turns: snapshot.turns,
+    totalTokens: snapshot.totalTokens,
+    endedAt: fold.settled !== undefined ? fold.settled.endedAt : snapshot.ts,
+  };
+}
+
+// ============================================================
 // 身份基底 → light/full 缓存条目 → 重建单规则
 // ============================================================
 
