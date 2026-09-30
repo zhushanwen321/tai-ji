@@ -703,9 +703,12 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         const batch = ordered.slice(i, i + REVIEWER_BATCH);
         log(`  review 批次 ${Math.floor(i / REVIEWER_BATCH) + 1}/${Math.ceil(ordered.length / REVIEWER_BATCH)}：${batch.map((d) => d.name).join(", ")}`);
         const part = await Promise.all(
-          batch.map((d) =>
-            agent(`reviewer-${d.name}-a${attempt}-r${round}`, "你是资深代码评审员：只读审查，绝不修改任何文件；每个发现都要有你亲自读到的代码证据。").ask<ReviewerVerdict>(
-              [
+          batch.map(async (d) => {
+            // 结构化返回失败防御（对齐 review-fix-loop / dev-merge-gates 同源机制 2026-09-30）：
+            // 同一 reviewer 回注失败原因重试一次——报告通常已写盘，重试只需重出有效 JSON；
+            // 两次均败才抛给外层 catch 走 review-failure 终态。
+            const reviewer = agent(`reviewer-${d.name}-a${attempt}-r${round}`, "你是资深代码评审员：只读审查，绝不修改任何文件；每个发现都要有你亲自读到的代码证据。");
+            const promptLines = [
                 `第 ${round}/${maxRounds} 轮评审（维度：${d.name}；topic=${topic}，round=${round}）。`,
                 "",
                 `第一步：Read 评审定义文件 ${d.path}——其中是你的完整审查 checklist，按它执行审查。`,
@@ -715,12 +718,22 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
                 reconBlock,
                 "",
                 `把完整报告写到 ${rDir}/review-${d.name}.md（workspace 相对路径，需要时先创建目录）：每条问题一节，含 [critical|major|minor] file:line、描述、修复方向（guidance，一句可执行的修复指引）、证据（你读到的代码事实）。这份文档是聚合器的唯一输入——审查结果与修复指南全部以文档承载，不通过返回值传递。`,
-                `完成后返回 JSON：reportFile、mustFix（critical+major 数，与报告一致）、suggestion（minor 数）、reconciliation（${round > 1 ? "对上一轮台账逐条申报" : "本轮返回空数组 []"}）。`,
-              ]
-                .filter(Boolean)
-                .join("\n"),
-            ),
-          ),
+                `完成后返回 JSON：reportFile、mustFix（critical+major 数，与报告一致）、suggestion（minor 数）、reconciliation（${round > 1 ? "对上一轮问题清单逐条申报" : "本轮返回空数组 []"}）。`,
+            ];
+            let lastErr = "";
+            for (let retryAttempt = 1; retryAttempt <= 2; retryAttempt++) {
+              try {
+                const retryNote = retryAttempt > 1
+                  ? ["", `上一次返回被判为无效（原因：${lastErr}）。报告 ${rDir}/review-${d.name}.md 若已写好，以已有报告为准重新输出有效 JSON；未写好则补齐报告与 JSON 后重出。`]
+                  : [];
+                return await reviewer.ask<ReviewerVerdict>([...promptLines, ...retryNote].filter(Boolean).join("\n"));
+              } catch (e) {
+                lastErr = e instanceof Error ? e.message : String(e);
+                if (retryAttempt === 1) log(`reviewer ${d.name} 第 ${round} 轮返回无效（${lastErr}）——回注失败原因重试一次`);
+              }
+            }
+            throw new Error(`reviewer ${d.name} 两次返回均无效：${lastErr}`);
+          }),
         );
         raw.push(...part);
       }
@@ -1127,9 +1140,31 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         }
         if (staged.length > 0) {
           const commitMsg = `fix: review round ${round} — ${mustFix} must-fix`;
-          const commitRes = await world.run("git", ["commit", "-m", commitMsg]);
+          let commitRes = await world.run("git", ["commit", "-m", commitMsg]);
           if (commitRes.exitCode !== 0) {
-            return finish("fix-failure", round, `统一 git commit 失败（exit ${commitRes.exitCode}）：${commitRes.stderr.trim() || commitRes.stdout.trim()}；改动已 staged 未提交`);
+            // 提交前自动检查（pre-commit hook）拦截 → 环境恢复 agent 读报错、执行报错写明的
+            // 环境恢复命令后重跑同一 commit（对齐 review-fix-loop / dev-merge-gates 同源机制
+            // 2026-09-30）。git 命令仍由脚本执行，重跑结果即裁判；需改文件/检查器本体的
+            // 失败照常终止交人工。
+            const firstErr = (commitRes.stderr.trim() || commitRes.stdout.trim()).slice(0, 4000);
+            log(`统一 git commit 失败（exit ${commitRes.exitCode}）——派环境恢复 agent 处置后重试：${firstErr.split("\n")[0] ?? ""}`);
+            const envFixer = agent(`commit-env-fix-r${round}`, "你是环境恢复执行员：只执行提交前检查报错中写明的环境恢复命令（如包管理器存储路径修复）。绝不修改任何文件内容，绝不执行 git add/commit，绝不跳过检查（禁 --no-verify 与 SKIP_* 变量）。无法靠环境命令解决的失败如实说明，绝不绕过。");
+            const envReply = await envFixer.ask<string>(
+              [
+                "git commit 被提交前自动检查（pre-commit hook）拦截，报错输出如下。",
+                "若报错文本写明了恢复动作（环境修复命令），执行它们，然后回复「已执行：<命令与结果>」；",
+                "若需要修改仓库内任何文件才能恢复，不要动手——回复「需人工处置：<原因>」。",
+                "",
+                "报错输出：",
+                firstErr,
+              ].join("\n"),
+            );
+            log(`环境恢复 agent 回复（末 15 行）：\n${envReply.split("\n").slice(-15).join("\n")}`);
+            commitRes = await world.run("git", ["commit", "-m", commitMsg]);
+            if (commitRes.exitCode !== 0) {
+              return finish("fix-failure", round, `统一 git commit 环境恢复重试后仍失败（exit ${commitRes.exitCode}）：${commitRes.stderr.trim() || commitRes.stdout.trim()}；改动已 staged 未提交，人工检查 git status 后显式路径处置（环境恢复 agent 回复末段：${String(envReply).slice(-300)}）`);
+            }
+            log("环境恢复后 commit 重试成功");
           }
           merged.commitMessage = commitMsg;
         } else {

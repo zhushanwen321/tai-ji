@@ -869,12 +869,40 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
             returnMeta: true,
           }),
         ));
-        for (const raw of part) {
+        for (let bi = 0; bi < part.length; bi++) {
+          const raw = part[bi];
           if (raw && typeof raw === "object" && raw.error) {
             failedReview = "reviewer 调用失败：" + raw.error;
             break;
           }
-          const parsed = parseResult(raw && typeof raw === "object" && "value" in raw ? raw.value : raw);
+          let parsed = parseResult(raw && typeof raw === "object" && "value" in raw ? raw.value : raw);
+          if (!parsed || typeof parsed.mustFix !== "number") {
+            // 解析失败 → 原位重试一次（对齐 review-fix-loop 同源机制 2026-09-30）：报告
+            // 通常已写盘，以已有报告为准重出有效 JSON 即可；重试 prompt 带 reconBlock
+            //（R2+ 对账申报必填不缺席）。仍败才 review-failure——偶发返回畸形不再终止
+            // 整个 cr-fix（外层 CR_FIX_RETRY 整体重跑是最后防线，原位重试消除其大部分触发）。
+            log("  reviewer 结果无效（" + batch[bi].name + "）——回注失败原因重试一次");
+            try {
+              const retryRaw = await agent({
+                prompt: [
+                  "你的上一次返回未能通过 schema 解析（缺 mustFix 或格式非法）。重新返回有效 JSON。",
+                  "报告文件 " + rDir + "/review-" + batch[bi].name + ".md 若已写好保持不变，以其为准。",
+                  reconBlock,
+                  "返回 JSON：reportFile、mustFix（critical+major 数，与报告一致）、suggestion（minor 数）、reconciliation（" + (round > 1 ? "对上一轮问题清单逐条申报，每条必填" : "本轮返回空数组 []") + "）。",
+                ].filter(Boolean).join("\n"),
+                schema: reviewerVerdictSchema,
+                description: "reviewer-" + batch[bi].name + "-a" + attempt + "-r" + round + "-retry",
+                model: $MODEL,
+                returnMeta: true,
+              });
+              if (!(retryRaw && typeof retryRaw === "object" && retryRaw.error)) {
+                parsed = parseResult(retryRaw && typeof retryRaw === "object" && "value" in retryRaw ? retryRaw.value : retryRaw);
+              }
+              if (parsed && typeof parsed.mustFix === "number") log("  reviewer 重试成功（" + batch[bi].name + "）");
+            } catch (retryErr) {
+              log("  reviewer 重试调用失败（" + batch[bi].name + "）：" + (retryErr && retryErr.message ? retryErr.message : String(retryErr)));
+            }
+          }
           if (!parsed || typeof parsed.mustFix !== "number") {
             failedReview = "reviewer 结果无效（缺 mustFix） " + JSON.stringify(raw && raw.value !== undefined ? raw.value : raw).slice(0, 200);
             break;
@@ -1295,9 +1323,39 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
         }
         if (staged.length > 0) {
           const commitMsg = "fix: review round " + round + " — " + mustFix + " must-fix";
-          const commitRes = await runCmd("git", ["commit", "-m", commitMsg]);
+          let commitRes = await runCmd("git", ["commit", "-m", commitMsg]);
           if (commitRes.exitCode !== 0) {
-            return finish("fix-failure", round, "统一 git commit 失败（exit " + commitRes.exitCode + "）：" + (commitRes.stderr.trim() || commitRes.stdout.trim()) + "；改动已 staged 未提交");
+            // 提交前自动检查（pre-commit hook）拦截 → 环境恢复 agent 读报错、执行报错写明的
+            // 环境恢复命令，然后重跑同一 commit（对齐 review-fix-loop 同源机制 2026-09-30）。
+            // git 命令仍由脚本执行，重跑结果即裁判；需改文件/检查器本体的失败照常终止交人工。
+            const firstErr = (commitRes.stderr.trim() || commitRes.stdout.trim()).slice(0, 4000);
+            log("  统一 git commit 失败（exit " + commitRes.exitCode + "）——派环境恢复 agent 处置后重试");
+            let envNote = "";
+            try {
+              const envRaw = await agent({
+                prompt: [
+                  "git commit 被提交前自动检查（pre-commit hook）拦截，报错输出如下。",
+                  "若报错文本写明了恢复动作（环境修复命令，如包管理器存储路径修复），执行它们，然后回复「已执行：<命令与结果>」；",
+                  "若需要修改仓库内任何文件才能恢复，不要动手——回复「需人工处置：<原因>」。",
+                  "红线：绝不修改任何文件内容；绝不执行 git add/commit；绝不跳过检查（禁 --no-verify 与 SKIP_* 变量）；无法靠环境命令解决的失败如实说明，绝不绕过。",
+                  "",
+                  "报错输出：" + firstErr,
+                ].join("\n"),
+                description: "commit-env-fix-r" + round,
+                model: $MODEL,
+                returnMeta: true,
+              });
+              envNote = envRaw && typeof envRaw.value === "string" ? envRaw.value : "";
+              log("  环境恢复 agent 回复末段：" + envNote.slice(-200));
+            } catch (envErr) {
+              envNote = "env-fix agent failed: " + (envErr && envErr.message ? envErr.message : String(envErr));
+              log("  " + envNote);
+            }
+            commitRes = await runCmd("git", ["commit", "-m", commitMsg]);
+            if (commitRes.exitCode !== 0) {
+              return finish("fix-failure", round, "统一 git commit 环境恢复重试后仍失败（exit " + commitRes.exitCode + "）：" + (commitRes.stderr.trim() || commitRes.stdout.trim()) + "；改动已 staged 未提交，人工检查 git status 后显式路径处置（环境恢复 agent 回复末段：" + envNote.slice(-200) + "）");
+            }
+            log("  环境恢复后 commit 重试成功");
           }
           merged.commitMessage = commitMsg;
         } else {
