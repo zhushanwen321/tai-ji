@@ -60,6 +60,7 @@ import {
 } from "../execution/persistence/run-event-journal.ts";
 export {
   runEventJournalDirOf,
+  runEventJournalPathIn,
   runEventJournalPathOf,
   scanRunEvents,
 } from "../execution/persistence/run-event-journal.ts";

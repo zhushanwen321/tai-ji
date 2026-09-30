@@ -30,7 +30,6 @@
 // 会话文件（[ADR-0092]：恢复只复用已提交结果，不解析对话日志）。
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import * as lockfile from "proper-lockfile";
 
 import { getLogger } from "../core/logger.ts";
@@ -40,8 +39,10 @@ import {
   buildWorkflowRecordRegisteredEntryData,
   dispatchRunTrigger,
   interruptRun,
+  runEventJournalPathIn,
   runEventJournalPathOf,
 } from "./terminal-actions.ts";
+import { RUN_EVENTS_SUFFIX } from "../shared/run-vocabulary.ts";
 import {
   foldRunEventFrames,
   parseLegacyArgsSummary,
@@ -52,7 +53,6 @@ import {
 } from "./run-events.ts";
 import { checkWorkflowScriptSyntax, WORKER_IIFE_HOST_DECLARED_NAMES } from "./script-syntax.ts";
 import { AgentCall } from "./models/agent-call.ts";
-import { Budget } from "./models/budget.ts";
 import type { AgentCallOpts, AgentResult, ExecutionTraceNode } from "./models/types.ts";
 import { Trace } from "./models/trace.ts";
 import { WorkflowRun } from "./models/workflow-run.ts";
@@ -68,15 +68,6 @@ const logger = getLogger("subagents");
 
 /** 毫秒→秒换算（预算预检文案的展示单位）。 */
 const MS_PER_SECOND = 1000;
-
-/** canonical JSON 单行解析助手：坏行（半截/非法 JSON）返回 undefined，消费点区分语义。 */
-function tryParseJson(line: string): unknown {
-  try {
-    return JSON.parse(line);
-  } catch {
-    return undefined;
-  }
-}
 
 // ══════════════════════════════════════════════════════════════
 // §1 资格拒绝 + record 流严格读取（D12 检查①② 的读侧）
@@ -324,7 +315,10 @@ export async function resumeRun(
   const recordPath = resolveRecordPath(runId, options?.journalDir);
 
   // ── 1. D7 跨进程锁（锁段覆盖：资格校验 → v2 条目 → run-resumed 落盘 → 活体注册）──
-  const lockTarget = `${recordPath.slice(0, -".record.jsonl".length)}.resume`;
+  // 锁名 = recordPath 剥 RUN_EVENTS_SUFFIX（词表单源）+ `.resume`：两个分支
+  // （注入 / 模块锚）的 recordPath 都经 runEventJournalPathIn 拼接，后缀必在，
+  // 剥离长度与文件名策略同源——后缀改名时锁名不漂移，跨进程互斥不失效。
+  const lockTarget = `${recordPath.slice(0, -RUN_EVENTS_SUFFIX.length)}.resume`;
   let release: (() => Promise<void>) | undefined;
   try {
     release = await lockfile.lock(lockTarget, {
@@ -355,12 +349,15 @@ export async function resumeRun(
 }
 
 /**
- * record 流绝对路径（resume 读面与锁文件同目录锚定）。测试防线（vitest 未注入
- * 目录 → runEventJournalPathOf 返回 undefined）下不可寻址 = 锁与读面都不可用，
+ * record 流绝对路径（resume 读面与锁文件同目录锚定）。文件名策略单源 =
+ * runEventJournalPathIn（`<runId><RUN_EVENTS_SUFFIX>`，与 journal 实写面同源——
+ * 后缀改名时读面/锁面跟随，不再自拼字面量）。测试防线（vitest 未注入目录 →
+ * runEventJournalPathOf 返回 undefined）下不可寻址 = 锁与读面都不可用，
  * 按「锁不可用即拒绝」保守拒绝（前提 2 降级语义）。
  */
 function resolveRecordPath(runId: string, journalDir?: string): string {
-  const anchor = journalDir !== undefined ? join(journalDir, `${runId}.record.jsonl`) : runEventJournalPathOf(runId);
+  const anchor =
+    journalDir !== undefined ? runEventJournalPathIn(journalDir, runId) : runEventJournalPathOf(runId);
   if (anchor === undefined) {
     throw new ResumeRejectionError(
       `Resume rejected: workflow-state directory is not addressable for run ${runId} (no journal dir ` +
