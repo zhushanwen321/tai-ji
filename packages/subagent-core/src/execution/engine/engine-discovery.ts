@@ -23,6 +23,9 @@ import { SUBAGENTS_ENGINES_FILENAME, type SubagentEnginesFile } from "@zhushanwe
 import { listEngines } from "./registry.ts";
 import { discoverAndRegisterEngines, loadedDiscoveryIds } from "./engine-discovery-scan.ts";
 import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
+import { getLogger } from "../../core/logger.ts";
+
+const logger = getLogger("subagents");
 
 /** engines.json 落盘缩进（与 subagent-core 其他 JSON store 的 JSON_INDENT 约定一致）。 */
 const JSON_INDENT = 2;
@@ -47,8 +50,9 @@ export function getEnginesFilePath(agentDir: string): string {
  *
  * 幂等：内容与现文件一致时零写入（mtime 不动——读侧无谓失效）；写入走 tmp+rename
  * 原子替换（shared/atomic-write 统一原语，U6b 迁移——与池 config 同防线）。
- * fail-safe：发现与 IO 异常都吞掉（可发现性降级不阻塞 session 启动——GUI 兜底显示
- * 既有清单）。
+ * fail-safe：发现与 IO 异常都在本函数内收敛（可发现性降级不阻塞 session 启动），但
+ * 收敛必须留可诊断信号——warn 携带失败原因与后果（engines.json 未更新、GUI 仍在读
+ * 旧清单），静默吞错会把「引擎清单停旧值」伪装成「无变化」。
  */
 /** 发现注入面（测试密闭化）：透传 discoverAndRegisterEngines 的隔离选项——
  * env 覆盖 L1 宿主发现根读取，nodeModuleRoots 覆盖 L2 宿主 node_modules 解析域。
@@ -88,7 +92,11 @@ export function syncEnginesFile(agentDir: string, opts?: SyncEnginesFileOptions)
     }
     writeAtomicFileSync(filePath, serialized);
   } catch (err) {
-    // 吞掉：见文件头 fail-safe 说明
-    void err;
+    // 控制流不变（异常不向 session 启动传播）：发现/序列化/IO 任一步失败 → engines.json
+    // 保持旧值（GUI 继续读旧清单）。warn 是消费方可诊断的唯一信号——含失败原因与后果。
+    logger.warn(
+      `[engine-discovery] engines.json sync failed — the previous engine list stays in use ` +
+        `(path=${getEnginesFilePath(agentDir)}): ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }

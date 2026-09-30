@@ -33,6 +33,7 @@ import type { SubagentRecord, Message } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import {
   readSubagentHistoryMessages,
+  resolveEngineRouteId,
   registerNativeSessionReader,
   setEngineDiscoveryRescanOptions,
   type EnginePort,
@@ -280,14 +281,18 @@ export function disposeRuntimeEngineClients(capMs: number = DISPOSE_AGGREGATE_CA
  * 行为等价）。
  */
 export function extractRecordEngine(record: SubagentRecord): string {
-  const engine = (record as { engine?: unknown }).engine
-  return typeof engine === 'string' && engine.length > 0 ? engine : DEFAULT_SUBAGENT_ENGINE
+  // 单一裁决点委派 core：engine 缺失且无原生引擎锚 → pi 缺省（存量零迁移）；
+  // 缺失但带原生锚（engineHandle.sessionRef 非空）→ 抛 RecordEngineIdentityError。
+  // 本地复刻一份「缺省即 pi」会让损坏 record 在此先被判成 pi，core 侧守卫永不触达。
+  return resolveEngineRouteId(record, record.subagentId)
 }
 
 /**
  * 非 pi record 的历史详情读取（runtime ①级 = 协议 read → ②journal → ③outcome）。
  *
- * 每级失败留 warn/debug 日志不抛崩溃（GUI 详情页永不白屏报错）。pi record 返回 []：
+ * 每级读取失败留 warn/debug 日志、不因「读不到」崩溃；但「record 身份域损坏」
+ * （有原生引擎锚却无 engine）会抛 RecordEngineIdentityError —— 那是数据损坏，不是
+ * 空历史，静默返回 [] 会把损坏伪装成「这个 record 没有历史」。pi record 返回 []：
  * pi 的①级 = 调用方现有 JSONL 直读链（session-records.getSubagentHistory），A1 守护。
  *
  * 类型说明：core 返回 HistoryMessage[]（shared Message 的结构子集，core 不 import

@@ -724,6 +724,35 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
     expect(deliverChatMessage).not.toHaveBeenCalled();
   });
 
+  it("[引擎身份域损坏] 有原生引擎锚却无 engine 字段 → 显式抛错（不按 pi 生成误导性拒绝文案）", async () => {
+    const deliverChatMessage = vi.fn(async () => {});
+    const corrupt = makeExecRecord({
+      id: "bg-corrupt",
+      status: "running",
+      engine: undefined,
+      engineHandle: {
+        sessionRef: { sessionId: "sess-corrupt", dbPath: "db.sqlite" },
+        poolKey: "shared",
+      },
+    });
+    const err = await errOf(() =>
+      messageHandler(
+        makeService({
+          getRecordForAction: vi.fn(() => corrupt),
+          deliverChatMessage,
+          // 资格判据拒绝 → 拒绝文案的引擎 id 解析点被损坏守卫拦截
+          engineSupportsConversation: vi.fn(() => false),
+        }),
+        { subagentId: "bg-corrupt", text: "hi" },
+      ),
+    );
+    expect(err.errorName).toBe("RecordEngineIdentityError");
+    expect(err.message).toContain('record "bg-corrupt"');
+    expect(err.message).toContain("refusing to route it to the default engine 'pi'");
+    expect(err.message).not.toContain("cannot continue this subagent by message");
+    expect(deliverChatMessage).not.toHaveBeenCalled();
+  });
+
   it("[S3 域边界] workflow-origin record 收 message → 硬拒，文案含 list 检查指引 + subagents 重派指引", async () => {
     const deliverChatMessage = vi.fn(async () => {});
     const wfRec = makeExecRecord({ id: "bg-wf", origin: "workflow" });

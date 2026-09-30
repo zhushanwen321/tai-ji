@@ -45,6 +45,25 @@ describe('extractRecordEngine（record 路由段）', () => {
       'zcode',
     )
   })
+
+  it('有原生引擎锚却缺 engine → 抛身份域错误（不按 pi 走直读链）', () => {
+    const damaged = makeRecord({
+      engine: undefined,
+      engineHandle: {
+        sessionRef: { sessionId: 'z-1', dbPath: '/tmp/zcode.sqlite' },
+        poolKey: 'shared',
+      },
+    } as unknown as Partial<SubagentRecord>)
+    let thrown: unknown
+    try {
+      extractRecordEngine(damaged)
+    } catch (err) {
+      thrown = err
+    }
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as { code?: string }).code).toBe('record_engine_identity_missing')
+    expect((thrown as Error).message).toContain('sub-1')
+  })
 })
 
 describe('readEngineSubagentHistory（薄调用 core 单一实现）', () => {

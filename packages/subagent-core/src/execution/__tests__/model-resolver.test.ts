@@ -1,5 +1,11 @@
 // src/__tests__/model-resolver.test.ts
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// core logger 桩：断言缺省推导路径留 debug 痕迹（显式不可用路径为抛错，不经日志）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import {
   availableThinkingLevels,
@@ -39,6 +45,12 @@ function makeRegistry(models: ModelInfo[], authed: string[] = models.map((m) => 
 
 /** 主 agent model（第三层兼底）。 */
 const ctxModel = makeModel({ id: "main-model", provider: "main" });
+
+beforeEach(() => {
+  loggerMock.debug.mockClear();
+  loggerMock.warn.mockClear();
+  loggerMock.error.mockClear();
+});
 
 // ============================================================
 // resolveModel — 三层优先级
@@ -153,7 +165,7 @@ describe("resolveModel — thinkingLevel resolution", () => {
     expect(r.thinkingLevel).toBe("high");
   });
 
-  it("override path: clamps down to highest available when requested unsupported", () => {
+  it("override path: explicit unsupported thinkingLevel → throws (no silent clamp)", () => {
     const m = makeModel({
       id: "limited-model",
       provider: "lp",
@@ -161,8 +173,61 @@ describe("resolveModel — thinkingLevel resolution", () => {
       thinkingLevelMap: { low: 1, medium: 2 }, // 不含 xhigh
     });
     const reg = makeRegistry([m]);
-    const r = resolveModel(undefined, reg, { model: "lp/limited-model", thinkingLevel: "xhigh" });
-    expect(r.thinkingLevel).toBe("medium");
+    let msg = "";
+    try {
+      resolveModel(undefined, reg, { model: "lp/limited-model", thinkingLevel: "xhigh" });
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    // 显式指定了档位 → 不可用即抛错（不静默降到最高可用档），错误含请求值 + 可用档位 + 恢复指引
+    expect(msg).toContain('thinkingLevel "xhigh" is not available for model "limited-model"');
+    expect(msg).toContain("Available levels for this model: low, medium");
+    expect(msg).toContain("Recovery:");
+    expect(msg).toContain("never silently");
+  });
+
+  it("agentConfig.thinkingLevel explicit unsupported → throws too（配置显式同权）", () => {
+    const m = makeModel({
+      id: "cfg-model",
+      provider: "cp",
+      reasoning: true,
+      thinkingLevelMap: { low: 1, medium: 2 },
+    });
+    const reg = makeRegistry([m]);
+    expect(() =>
+      resolveModel(
+        { name: "worker", systemPrompt: "", model: "cp/cfg-model", thinkingLevel: "xhigh" },
+        reg,
+        undefined,
+        ctxModel,
+      ),
+    ).toThrow(/thinkingLevel "xhigh" is not available/);
+  });
+
+  it("paramOverride.thinkingLevel（无 model）+ agentConfig.model → 显式档位不被丢弃，按该模型校验", () => {
+    const m = makeModel({
+      id: "cross-model",
+      provider: "xp",
+      reasoning: true,
+      thinkingLevelMap: { low: 1 },
+    });
+    const reg = makeRegistry([m]);
+    expect(() =>
+      resolveModel(
+        { name: "worker", systemPrompt: "", model: "xp/cross-model" },
+        reg,
+        { thinkingLevel: "high" },
+        ctxModel,
+      ),
+    ).toThrow(/thinkingLevel "high" is not available for model "cross-model"/);
+    // 可用档位时按调用方显式档位生效（同一条组合链的放行面）
+    const ok = resolveModel(
+      { name: "worker", systemPrompt: "", model: "xp/cross-model" },
+      reg,
+      { thinkingLevel: "low" },
+      ctxModel,
+    );
+    expect(ok.thinkingLevel).toBe("low");
   });
 
   it("override path: returns undefined when model.reasoning === false", () => {
@@ -231,6 +296,23 @@ describe("resolveModel — thinkingLevel resolution", () => {
     const reg = makeRegistry([m]);
     const r = resolveModel(undefined, reg, { model: "dt/default-thinking" });
     expect(r.thinkingLevel).toBe("high");
+  });
+
+  it("override path: no thinkingLevel param + map without xhigh → highest available, no throw（缺省推导收敛）", () => {
+    const m = makeModel({
+      id: "default-limited",
+      provider: "dl",
+      reasoning: true,
+      thinkingLevelMap: { low: 1, medium: 2 },
+    });
+    const reg = makeRegistry([m]);
+    const r = resolveModel(undefined, reg, { model: "dl/default-limited" });
+    // 缺省（未显式请求档位）→ 收敛到最高可用档，不抛错
+    expect(r.thinkingLevel).toBe("medium");
+    // 缺省推导留痕（可追溯「为什么跑这个档」）
+    expect(loggerMock.debug).toHaveBeenCalledWith(
+      expect.stringContaining("no explicit thinkingLevel for model 'default-limited'"),
+    );
   });
 });
 

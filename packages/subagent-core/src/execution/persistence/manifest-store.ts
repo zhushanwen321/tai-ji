@@ -173,6 +173,9 @@ export class ManifestStore {
   /**
    * 按 id 读 manifest。文件不存在/JSON 损坏/schema 不合法均返回 null。
    * 调用方需处理 null。
+   *
+   * 可诊断性分档：ENOENT = 合法缺省（静默）；JSON 损坏 = warn（路径 + 原因，投影
+   * 等待重建）；非 ENOENT 读错误 = error 留证。
    */
   async readManifest(id: string): Promise<ManifestRecord | null> {
     const filePath = path.join(this.dir, `${id}.json`);
@@ -191,8 +194,13 @@ export class ManifestStore {
     try {
       const parsed: unknown = JSON.parse(content);
       return isValidManifest(parsed) ? parsed : null;
-    } catch {
-      // JSON 损坏（SyntaxError）降级为 null
+    } catch (err) {
+      // JSON 损坏（SyntaxError）：该投影按「不存在」消费（下个物化点重建），但损坏
+      // 必须留 warn（含路径与原因）——静默返回 null 与「本来就没有 manifest」不可区分。
+      logger.warn(
+        `[subagents] readManifest: corrupted JSON, treated as absent (projection awaits rebuild): ${filePath}`,
+        { detail: err instanceof Error ? err.message : String(err) },
+      );
       return null;
     }
   }
@@ -451,6 +459,9 @@ export async function writeRunTerminalManifest(
  * outcome 字段的存量形态）一律返回 null（未终局语义，消费方按「无投影」处理，
  * 不炸）；errorCode / stderrTeePath 非法值由 isRunTerminalManifest 整体拒绝
  * （同 null 降级）；两字段缺省（旧 manifest）= undefined 合法通过（读侧兼容）。
+ *
+ * 可诊断性分档：ENOENT（未终局/已清理）静默；JSON 损坏 warn（路径 + 原因）；
+ * 非 ENOENT 读错误 warn。
  */
 export async function readRunTerminalManifest(
   dir: string,
@@ -474,8 +485,14 @@ export async function readRunTerminalManifest(
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
-  } catch {
-    return null; // 损坏 JSON——按「无投影」降级。
+  } catch (err) {
+    // JSON 损坏：按「无投影」降级（未终局语义），warn 留证（路径 + 原因）——
+    // 损坏与「未终局」在返回值上不可区分，只有日志能分辨。
+    logger.warn(
+      `[subagents] readRunTerminalManifest: corrupted JSON, treated as absent (projection awaits rebuild): ${filePath}`,
+      { detail: err instanceof Error ? err.message : String(err) },
+    );
+    return null;
   }
   return isRunTerminalManifest(parsed) ? parsed : null;
 }

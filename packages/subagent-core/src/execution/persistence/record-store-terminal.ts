@@ -22,6 +22,7 @@
 import * as fs from "node:fs";
 
 import { getLogger } from "../../core/logger.ts";
+import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 
 import { resurrectClosed } from "./execution-record.ts";
 import { updateRecordBinding, writeRecordBinding, readRecordBinding, zcodeAnchorBasePath, STATE_SIDECAR_EXT } from "./state-marker.ts";
@@ -891,7 +892,9 @@ export function buildBoundEventPayload(
     type: "record-bound",
     ts: Date.now(),
     sessionFile: record.sessionFile ?? "",
-    engine: record.engine ?? "pi",
+    // 写侧同源裁决：损坏 record（有锚无 engine）不得被写成 engine='pi'——那是把
+    // 读数损坏固化成合法投影；正常 pi record 仍按缺省写 pi。
+    engine: resolveEngineRouteId(record, record.id),
     engineHandle: record.engineHandle ?? { sessionRef: {}, poolKey: "shared" },
     epoch: record.epoch ?? 0,
   };

@@ -30,6 +30,15 @@ vi.mock("@zhushanwen/subagent-core/orchestration/resume-run.ts", () => ({
   resumeRun: vi.fn(),
 }));
 
+/** 桩化扩展日志：断言 /workflows runId 补全数据源不可用时的 warn 留痕。 */
+const { loggerFns } = vi.hoisted(() => ({
+  loggerFns: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("@zhushanwen/pi-extension-logger", () => ({
+  getLogger: () => loggerFns,
+  setPiHandle: vi.fn(),
+}));
+
 // ── 延迟 import 被测模块（取 mock 后的实现）──────────────────
 
 // 被 mock 的模块——vi.mock 路径与被测源文件解析到同一物理模块，确保 vitest 拦截同一模块实例。
@@ -68,10 +77,13 @@ type CtxMock = Pick<ExtensionCommandContext, "mode" | "hasUI" | "ui" | "isIdle">
 /** ExtensionAPI 的最小子集：registerCommand 捕获 handler + sendMessage 捕获留痕调用。 */
 type PiMock = Pick<ExtensionAPI, "registerCommand" | "sendMessage">;
 
-/** registerCommand 第二参数形状（{ description, handler }）。 */
+/** registerCommand 第二参数形状（{ description, handler, getArgumentCompletions }）。 */
 interface CommandDef {
   description: string;
   handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
+  getArgumentCompletions?: (
+    prefix: string,
+  ) => Array<{ label: string; value: string; description: string }> | null;
 }
 
 // ============================================================
@@ -814,5 +826,46 @@ describe("registerWorkflowsCommand — RPC 分支 dispatch", () => {
       "View workflows in the composer task tray",
       "info",
     );
+  });
+});
+
+// ============================================================
+// registerWorkflowsCommand — runId 补全的降级可诊断性
+// ============================================================
+
+describe("registerWorkflowsCommand — runId 补全数据源不可用", () => {
+  /** 注册命令并取出 command def（补全面直测，不经 handler）。 */
+  function captureCommand(getRuns: () => Map<string, never>): CommandDef {
+    let captured: CommandDef | undefined;
+    const pi = {
+      registerCommand: vi.fn((_name: string, def: CommandDef) => {
+        captured = def;
+      }),
+    } as unknown as PiMock;
+    registerWorkflowsCommand(pi as ExtensionAPI, getRuns as never, {} as never);
+    expect(captured).toBeDefined();
+    return captured as CommandDef;
+  }
+
+  it("getRuns 抛错 → 补全返回 null（返回语义不变）+ warn 留痕（原因可见）", () => {
+    loggerFns.warn.mockClear();
+    const def = captureCommand(() => {
+      throw new Error("runs store unavailable");
+    });
+
+    const completions = def.getArgumentCompletions?.("abort r");
+
+    expect(completions).toBeNull();
+    expect(loggerFns.warn).toHaveBeenCalledTimes(1);
+    expect(String(loggerFns.warn.mock.calls[0]?.[0])).toContain("runId completion unavailable");
+    expect(loggerFns.warn.mock.calls[0]?.[1]).toEqual({ reason: "runs store unavailable" });
+  });
+
+  it("无 run（正常空态）→ 补全返回 null 且零 warn（与数据源不可用可区分）", () => {
+    loggerFns.warn.mockClear();
+    const def = captureCommand(() => new Map());
+
+    expect(def.getArgumentCompletions?.("abort r")).toBeNull();
+    expect(loggerFns.warn).not.toHaveBeenCalled();
   });
 });

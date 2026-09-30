@@ -27,6 +27,7 @@ vi.mock("../lifecycle/lifecycle-manager.ts", async (importOriginal) => {
 });
 
 import { ChatRounds, type ChatRoundsDeps } from "../service/chat-rounds.ts";
+import { RecordEngineIdentityError } from "../engine/common/session-view-service.ts";
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
 import { resetWorkflowWindowEngineStatesForTest, setWorkflowWindowEngineGateway } from "../engine/routing.ts";
 import { clearEngines, registerEngine } from "../engine/registry.ts";
@@ -269,5 +270,32 @@ describe("chat 轮窗口实例接线（U3）", () => {
     // 非 pi 分支经窗口解析单点透传 registry：run 走注册表单例本体（缺省网关零创建）
     // 轮 idle 收尾不误杀 shared-service 单例（dispose 通道归 registry/停机链，现状保形）
     expect(sharedPort.disposed).toBe(0);
+  });
+
+  it("引擎身份域损坏守卫：record 带原生引擎锚却无 engine 字段 → 显式抛错（不按 pi 判定/派发）", () => {
+    registerEngine("pi", () => new FakeWindowEnginePort("pi-registry"));
+    const record = makeRunningRecord("u3-win-corrupt-engine");
+    // 原生引擎锚在场（zcode 形态）但没有 engine 字段 = 写侧身份域丢失
+    record.engineHandle = {
+      sessionRef: { sessionId: "sess-corrupt", dbPath: "db.sqlite" },
+      poolKey: "shared",
+    };
+    const chatRounds = makeChatRounds(record);
+
+    let err: unknown;
+    try {
+      chatRounds.engineSupportsConversation(record);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(RecordEngineIdentityError);
+    expect((err as RecordEngineIdentityError).recordId).toBe("u3-win-corrupt-engine");
+    expect((err as RecordEngineIdentityError).message).toContain(
+      "refusing to route it to the default engine 'pi'",
+    );
+
+    // 缺省路径保形：无 engine 且无锚 → pi 缺省走能力位判定（不抛）
+    const plain = makeRunningRecord("u3-win-plain-engine");
+    expect(chatRounds.engineSupportsConversation(plain)).toBe(true);
   });
 });

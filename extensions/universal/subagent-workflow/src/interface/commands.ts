@@ -21,6 +21,7 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
 import { abortRun, getSubagentService, resumeRun } from "@zhushanwen/subagent-core";
@@ -94,8 +95,15 @@ export function registerWorkflowsCommand(
             value: r.runId,
             description: `${r.spec.scriptName} [${displayStatusOf(r)}]`,
           }));
-        } catch {
-          // 拿不到运行时数据（getRuns 抛错）→ 静默降级，补全失败不影响 command
+        } catch (err) {
+          // runs 补全数据源不可用 → 补全缺失（返回 null，不改变 command 行为），warn 留痕
+          // ——补全静默消失与「当前 session 没有 run」不可区分。
+          // getLogger 惰性调用（catch 是冷路径——测试环境对 pi-extension-logger 的
+          // module-level mock 可能返回 undefined，模块级持有会在 import 期踩 undefined）
+          getLogger("subagent-workflow").warn(
+            "[commands] /workflows runId completion unavailable — runs data source failed, completion omitted",
+            { reason: toErrorMessage(err) },
+          );
           return null;
         }
       }

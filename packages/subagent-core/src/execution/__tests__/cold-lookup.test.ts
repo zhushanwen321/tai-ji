@@ -33,6 +33,12 @@ import {
   transcriptAnchorOf,
   type ColdLookupDeps,
 } from "../assembly/cold-lookup.ts";
+
+// core logger 桩：断言 zcode 锚查询异常走 warn（下游按锚失效重开对话基线，代价大）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 import { RecordStore } from "../persistence/record-store.ts";
 import type { SubagentRecord } from "../assembly/types.ts";
 import type { ClosedReason } from "../assembly/types.ts";
@@ -562,6 +568,23 @@ describe("[U6] transcriptAnchorOf / isAnchorResolvable 引擎分派", () => {
       engineHandle: { sessionRef: { sessionId: "sess_z_1", dbPath: path.join(zcodeDir, "nope.sqlite") }, poolKey: "shared" },
     };
     expect(isAnchorResolvable(noDb)).toBe(false); // db 文件缺失（fail-closed）
+  });
+
+  it("zcode 锚查询异常（库文件存在但读不了）→ false + warn 留痕（库路径 + sessionId）", async () => {
+    const corruptDb = path.join(zcodeDir, "corrupt.sqlite");
+    fs.writeFileSync(corruptDb, "definitely not a sqlite database", "utf8");
+    loggerMock.warn.mockClear();
+
+    const rec = {
+      engine: "zcode",
+      engineHandle: { sessionRef: { sessionId: "sess_corrupt", dbPath: corruptDb }, poolKey: "shared" },
+    };
+    expect(isAnchorResolvable(rec)).toBe(false); // fail-closed 方向保留
+
+    const warnCalls = loggerMock.warn.mock.calls;
+    expect(warnCalls).toHaveLength(1);
+    expect(String(warnCalls[0]?.[0])).toContain("zcode 锚存在性查询异常");
+    expect(warnCalls[0]?.[1]).toMatchObject({ dbPath: corruptDb, sessionId: "sess_corrupt" });
   });
 
   it("pi 锚现行判据不变：sessionFile 在盘可读（`{sessionFile}` 字面量入参兼容）", () => {

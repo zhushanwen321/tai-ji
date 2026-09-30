@@ -34,6 +34,7 @@ import { tryEnterRunning } from "../persistence/execution-record.ts";
 import { type RoundSettlementOutcome } from "../persistence/finalize-record.ts";
 export type { RoundSettlementOutcome };
 import { engineConversationMessageUnsupportedError } from "../engine/common/capability-gate.ts";
+import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 import { type BgNotifyRecord, notifyGateAllowsDelivery } from "../notify/notifier.ts";
 // [u7a 生产补挂] idle timer 原语（lifecycle-manager 叶子模块）：轮终 arm（翻入保活）
 // + 新轮 disarm（翻回正在执行）是 D5 在途双谓词（hasLiveProcessHandle &&
@@ -917,7 +918,7 @@ export class ConversationContinuation {
     // 引擎能力轴的 message 资格检查保留（与 record 无关：pi native / zcode cold
     // 均可续；unsupported 引擎硬拒 + fork/重派指引，防续聊行为悬空）。
     if (!this.host.engineSupportsConversation(record)) {
-      throw engineConversationMessageUnsupportedError(record.engine ?? "pi");
+      throw engineConversationMessageUnsupportedError(resolveEngineRouteId(record, record.id));
     }
     if (!tryEnterRunning(record)) {
       // 判据刚确认 idle——竞态窗口（close/cancel 抢先翻位）的防御分支。

@@ -107,7 +107,9 @@ export function transcriptAnchorOf(record: AnchorProbeShape): TranscriptRef | un
  *（app-server 落库滞后于 create 应答，分钟级窗 + 部分行永不落库，滞后窗内查询
  * 恒 false，会把完全有效的锚误降级 reopen，理由详见 conversation-continuation
  * reviveOrThrow 注）。fail-closed（运行时不支持 / db 缺失 / 查询异常 = false）的
- * 保守方向保留：误判可解析仍是有害方向，宁报失效不虚报在库。
+ * 保守方向保留：误判可解析仍是有害方向，宁报失效不虚报在库。降级留痕分档——驱动
+ * 缺席 / 库文件缺失 = 正常降级面（静默或既有 warn）；查询抛错 = warn（库不可读是
+ * 故障，且下游按锚失效重开对话基线，代价大）。
  */
 function zcodeSessionEntryExists(dbPath: string, sessionId: string): boolean {
   try {
@@ -132,8 +134,12 @@ function zcodeSessionEntryExists(dbPath: string, sessionId: string): boolean {
       db.close();
     }
   } catch (err) {
-    logger.debug(
-      `[subagents] zcode 锚存在性查询失败（按锚失效降级 reopen）: ${err instanceof Error ? err.message : String(err)}`,
+    // 查询异常（库不可读 / SQL 结构不符 / 驱动异常）≠「锚不存在」：消费方按 false 会把
+    // 该 record 判为锚失效并重开对话基线（换基线，代价大）。warn 带定位面（库路径 +
+    // sessionId）与恢复指向——排查方向是「会话库为何读不到」而非「会话被清了」。
+    logger.warn(
+      `[subagents] zcode 锚存在性查询异常（按锚失效降级 → 该 record 将重开对话基线；` +
+        `请检查会话库可读性与 schema）: ${err instanceof Error ? err.message : String(err)}`,
       { dbPath, sessionId },
     );
     return false;

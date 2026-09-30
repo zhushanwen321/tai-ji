@@ -66,6 +66,8 @@ import {
   resolveWorkflowWindowEnginePort,
 } from "../engine/routing.ts";
 import { splitEngineModelRef } from "../engine/model-validation.ts";
+// 引擎路由裁决单点（engine 缺省 = pi / 带原生引擎锚却无 engine 字段 = 身份域损坏抛错）。
+import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
 import type { AgentOutcome } from "../engine/types.ts";
 import { hasLiveProcessHandle } from "../lifecycle/lifecycle-predicates.ts";
@@ -75,7 +77,7 @@ import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态，边界守卫台账登记边）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
+import { createBackgroundStream, type StreamSink } from "../assembly/stream-sink.ts";
 import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type {
@@ -540,8 +542,13 @@ export class ChatRounds {
    *     只剩 workflow 域 runAndFinalize），窗口收尾归 U2 的 finalizeRun 接线管辖。
    * 故 chat 域轮 idle 释放接线点 = finalizeRoundToIdle（①）。
    */
-  private resolveRoundEnginePort(record: Pick<ExecutionRecord, "engine" | "id">): EnginePort {
-    const engineId = record.engine ?? DEFAULT_ENGINE_ID;
+  private resolveRoundEnginePort(
+    record: Pick<ExecutionRecord, "engine" | "engineHandle" | "id">,
+  ): EnginePort {
+    // 引擎路由裁决单点（resolveEngineRouteId）：engine 缺省 → pi；带原生引擎锚却无
+    // engine 字段（身份域损坏）→ 显式抛 RecordEngineIdentityError，禁止静默把原生引擎
+    // record 投给 pi 引擎进程。
+    const engineId = resolveEngineRouteId(record, record.id);
     if (engineId === DEFAULT_ENGINE_ID) return resolveHostPiEnginePort(undefined, record.id);
     return resolveWorkflowWindowEnginePort(record.id, engineId);
   }
@@ -682,15 +689,29 @@ export class ChatRounds {
 
   /**
    * [modeless 波1] message 资格的引擎能力轴检查（原 SP-5 升级 gate 的 canUpgradeTo
-   * Conversation 记录级门删除后保留的引擎轴）：record 所属引擎（engine 留痕 ??
-   * 默认引擎）capabilities.conversation 非 'unsupported' 才放行（pi native /
-   * zcode cold 均可续）。与 record 无关——万物可续后不存在「一次性 record 不可续」
-   * 的记录级形态。引擎未注册 = 无法验证续聊能力，fail-closed 拒绝。消费双写点：
-   * ①messageHandler 入口（subagent-actions-core）②Continuation revive 翻边格。
+   * Conversation 记录级门删除后保留的引擎轴）：record 所属引擎经引擎路由裁决单点
+   * resolveEngineRouteId 解析（engine 留痕 ?? 默认引擎；带原生引擎锚却无 engine
+   * 字段 = 身份域损坏，显式抛错不回落 pi）——该引擎 capabilities().conversation 非
+   * 'unsupported' 才放行（pi native / zcode cold 均可续）。与 record 无关——万物可续
+   * 后不存在「一次性 record 不可续」的记录级形态。引擎未注册 = 无法验证续聊能力，
+   * fail-closed 拒绝。消费双写点：①messageHandler 入口（subagent-actions-core）
+   * ②Continuation revive 翻边格。
+   *
+   * 入参型面 = Pick<engine> + 可选 engineHandle/id：壳侧与 Continuation 的声明面只
+   * 保证 engine 字段，运行期传入的是完整 record；锚判据与错误定位需读 engineHandle/id
+   * （领地外签名不因此改动）。
+   *
+   * @throws RecordEngineIdentityError record 带原生引擎锚却无 engine 字段（身份域损坏）
    */
-  engineSupportsConversation(record: Pick<ExecutionRecord, "engine">): boolean {
+  engineSupportsConversation(
+    record: Pick<ExecutionRecord, "engine"> & {
+      engineHandle?: ExecutionRecord["engineHandle"];
+      id?: string;
+    },
+  ): boolean {
+    const engineId = resolveEngineRouteId(record, record.id);
     try {
-      const engine = getEngine(record.engine ?? DEFAULT_ENGINE_ID);
+      const engine = getEngine(engineId);
       return engine.capabilities().conversation !== "unsupported";
     } catch {
       return false;

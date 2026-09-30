@@ -15,8 +15,9 @@
 //   - 写侧（saveIndex）：tmp(pid+seq)+fsync+rename+目录 fsync 原子写（逐环复刻
 //     ManifestStore.writeManifest 的生产模式）。失败本身向上抛；fire-and-forget 的
 //     .catch 兜底在 RecordStore 侧。
-//   - 损坏/降级走 logger.debug（PI_EXT_DEBUG=1 可见，默认 no-op），不 console.error
-//     ——索引是纯性能缓存，降级自愈不应告警。
+//   - 损坏/降级走 logger.warn（含文件路径与原因）：索引是纯性能缓存，回退空索引 +
+//     本轮全量重扫是自愈路径，但「缓存被弃用」与「本来就没有缓存」必须可区分——
+//     损坏静默回退会把性能回退与外部改写掩盖成正常首跑。
 //
 // 无状态纯函数模块：不依赖 RecordStore 任何内部状态。
 
@@ -214,29 +215,36 @@ type ValidIndexTop = {
 };
 
 /** 读索引文件文本。读失败 → null：ENOENT = 正常首跑保持静默；其余读失败（EACCES 等
- * 长期权限异常）留 debug 线索——空索引回退本身可自愈，但权限类异常不会自己消失，需可诊断。 */
+ * 长期权限异常）warn——索引缺失会被当作「无缓存」全量重扫，权限类异常不会自己消失，
+ * 需要可诊断信号区分「首跑无缓存」与「缓存读不到」。 */
 function readIndexFile(indexPath: string, encDir: string): string | null {
   try {
     return fs.readFileSync(indexPath, "utf-8");
   } catch (err) {
     const code = errorCodeOf(err);
     if (code !== "ENOENT") {
-      logger.debug("[subagents] sessions-index read failed, fallback to empty", {
-        detail: { dir: encDir, code },
+      logger.warn("[subagents] sessions-index read failed, fallback to empty index and rescan", {
+        detail: { path: indexPath, dir: encDir, code },
       });
     }
     return null;
   }
 }
 
-/** JSON.parse 索引内容。损坏（截断/外部编辑）→ null，走 debug：可降级自愈场景，不 console.error。 */
+/** JSON.parse 索引内容。损坏（截断/外部编辑）→ null：索引是纯性能缓存，回退空索引后
+ * 本轮全量重扫并重写；warn 是「缓存损坏已被弃用」的唯一可见信号（与「文件不存在」的
+ * 静默首跑区分）。 */
 function parseIndexJson(raw: string, indexPath: string): unknown {
   try {
     return JSON.parse(raw);
   } catch (err) {
-    logger.debug("[subagents] sessions-index corrupted JSON, fallback to empty", {
-      detail: { path: indexPath, error: err instanceof Error ? err.message : String(err) },
-    });
+    logger.warn(
+      "[subagents] sessions-index corrupted JSON — falling back to an empty index " +
+        "(rebuilt after this scan)",
+      {
+        detail: { path: indexPath, error: err instanceof Error ? err.message : String(err) },
+      },
+    );
     return null;
   }
 }
@@ -251,19 +259,24 @@ function isIndexTopHeader(v: Record<string, unknown>): v is ValidIndexTop {
   );
 }
 
-/** 顶层结构校验（DM1）。不符 → null（两条 debug 文案与判定条件一一对应）。 */
+/** 顶层结构校验（DM1）。不符 → null（两条 warn 文案与判定条件一一对应）。
+ * 缓存形态坏 = 整份索引弃用并本轮重扫，warn 留痕（否则与「无缓存首跑」不可区分）。 */
 function readTopLevel(parsed: unknown, indexPath: string): ValidIndexTop | null {
   if (typeof parsed !== "object" || parsed === null) {
-    logger.debug("[subagents] sessions-index invalid top-level shape, fallback to empty", {
-      detail: { path: indexPath },
-    });
+    logger.warn(
+      "[subagents] sessions-index invalid top-level shape — falling back to an empty index " +
+        "(rebuilt after this scan)",
+      { detail: { path: indexPath } },
+    );
     return null;
   }
   const top = parsed as Record<string, unknown>;
   if (!isIndexTopHeader(top)) {
-    logger.debug("[subagents] sessions-index invalid header fields, fallback to empty", {
-      detail: { path: indexPath },
-    });
+    logger.warn(
+      "[subagents] sessions-index invalid header fields — falling back to an empty index " +
+        "(rebuilt after this scan)",
+      { detail: { path: indexPath } },
+    );
     return null;
   }
   return top;

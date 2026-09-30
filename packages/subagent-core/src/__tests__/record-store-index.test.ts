@@ -41,6 +41,12 @@ import { RecordStore } from "../execution/persistence/record-store";
 import { INDEX_FILENAME, INDEX_VERSION, loadIndex, saveIndex } from "../execution/persistence/sessions-index";
 import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "../execution/persistence/sessions-index";
 
+// core logger 桩：断言索引缓存损坏的可诊断性（warn）与 ENOENT 首跑的静默。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../core/logger.ts", () => ({ getLogger: () => loggerMock }));
+
 /** chmod 000 零探测用例的环境守卫：win32 上 chmod 000 仅映射 read-only（读仍被允许）、
  *  root 无视 000——两种环境下「零内容读取」断言静默退化为恒真（实现退化回读也不失败），
  *  跳过防假绿。平台短路在前，getuid 仅 POSIX 存在。 */
@@ -141,6 +147,40 @@ describe("sessions-index 模块（S1TC10-12）", () => {
     // ⑤ version:0（低于自身）：整体丢弃 → 空索引可写（下轮 dirty 重写自愈）
     fs.writeFileSync(indexPath, JSON.stringify({ version: 0, pid: 1, entries: { "a.jsonl": positiveEntry() } }));
     expect(loadIndex(encDir)).toEqual({ entries: new Map(), higherVersion: false });
+  });
+
+  it("S1TC11B: 缓存损坏/形态坏 → 空索引回退 + warn 留痕（含路径与重建说明）；ENOENT 首跑静默", () => {
+    // ① 文件不存在 = 正常首跑（空索引）：静默，零 warn
+    loggerMock.warn.mockClear();
+    expect(loadIndex(encDir)).toEqual({ entries: new Map(), higherVersion: false });
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+
+    // ② JSON 损坏 → 空索引 + warn（路径在 detail）
+    fs.writeFileSync(indexPath, "{{{");
+    expect(loadIndex(encDir).entries.size).toBe(0);
+    expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+    expect(String(loggerMock.warn.mock.calls[0]?.[0])).toContain("sessions-index corrupted JSON");
+    expect(String(loggerMock.warn.mock.calls[0]?.[0])).toContain("rebuilt after this scan");
+    expect(loggerMock.warn.mock.calls[0]?.[1]).toMatchObject({ detail: { path: indexPath } });
+
+    // ③ 顶层 header 形态坏（entries 为数组）→ 空索引 + warn
+    loggerMock.warn.mockClear();
+    fs.writeFileSync(indexPath, JSON.stringify({ version: 1, pid: 1, entries: [1, 2] }));
+    expect(loadIndex(encDir).entries.size).toBe(0);
+    expect(String(loggerMock.warn.mock.calls[0]?.[0])).toContain("invalid header fields");
+
+    // ④ 顶层非 object → 空索引 + warn
+    loggerMock.warn.mockClear();
+    fs.writeFileSync(indexPath, JSON.stringify(42));
+    expect(loadIndex(encDir).entries.size).toBe(0);
+    expect(String(loggerMock.warn.mock.calls[0]?.[0])).toContain("invalid top-level shape");
+
+    // ⑤ 非 ENOENT 读失败（父段被文件占据 → ENOTDIR）→ 空索引 + warn
+    loggerMock.warn.mockClear();
+    const blocked = path.join(encDir, "blocker");
+    fs.writeFileSync(blocked, "occupied");
+    expect(loadIndex(blocked)).toEqual({ entries: new Map(), higherVersion: false });
+    expect(String(loggerMock.warn.mock.calls[0]?.[0])).toContain("sessions-index read failed");
   });
 
   it("S1TC12: 单条目字段损坏仅丢弃该条目，其余条目正常保留", () => {
@@ -345,7 +385,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     const parsed = JSON.parse(fs.readFileSync(indexPath, "utf-8")) as { version?: number; entries: Record<string, unknown> };
     expect(parsed.version).toBe(INDEX_VERSION);
     expect(Object.keys(parsed.entries).sort()).toEqual(["a.jsonl", "b.jsonl"]);
-    expect(errSpy).not.toHaveBeenCalled(); // 损坏走 debug 日志（PI_EXT_DEBUG=1 可见），不 console.error
+    expect(errSpy).not.toHaveBeenCalled(); // 损坏走 logger.warn（共享日志通道），不 console.error
     errSpy.mockRestore();
   });
 

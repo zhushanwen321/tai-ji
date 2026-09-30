@@ -166,6 +166,13 @@ export {
 // 子入口（D9：每条子入口 bundle 多一份 host-services 副本）。
 export { parseEngineHandle } from "./execution/engine/common/session-view-types.ts";
 export { readSubagentHistoryMessages } from "./execution/engine/common/session-view-service.ts";
+// 引擎路由身份域裁决单点（runtime 读链同源消费——本地副本会让「有锚无 engine」的
+// 损坏 record 在 runtime 侧先被当成 pi，core 侧守卫永不触达）。
+export {
+  hasNativeEngineAnchor,
+  RecordEngineIdentityError,
+  resolveEngineRouteId,
+} from "./execution/engine/common/session-view-service.ts";
 // [W8] registerNativeSessionReader：runtime 成为协议客户端的①级接入点——宿主把
 // 「协议 read」注册为引擎原生 reader，core 三级降级链（①协议 read → ②journal →
 // ③outcome）自动编排（含投影），宿主零投影代码。壳消费 = runtime

@@ -17,10 +17,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { JournalWriter } from "../../common/event-journal.ts";
 import {
+  RECORD_ENGINE_IDENTITY_MISSING_CODE,
+  RecordEngineIdentityError,
   extractEngineId,
+  hasNativeEngineAnchor,
   readSubagentHistoryMessages,
   registerNativeSessionReader,
   resetNativeSessionReaders,
+  resolveEngineRouteId,
 } from "../../common/session-view-service.ts";
 import { parseEngineHandle } from "../../common/session-view-types.ts";
 import type { SubagentRecordSnapshot } from "../../common/session-view-types.ts";
@@ -107,17 +111,60 @@ describe("parseEngineHandle（唯一 guard）", () => {
   });
 });
 
-describe("extractEngineId", () => {
-  it("非 string / 空串 → 缺省 pi（存量 record 零迁移）；非空透传", () => {
-    expect(extractEngineId(makeRecord({ engine: undefined }))).toBe("pi");
-    expect(extractEngineId(makeRecord({ engine: 1 }))).toBe("pi");
-    expect(extractEngineId(makeRecord({ engine: "" }))).toBe("pi");
+describe("extractEngineId / resolveEngineRouteId（引擎路由裁决单点）", () => {
+  it("engine 缺席（非 string / 空串）且无原生引擎锚 → 缺省 pi（存量 record 零迁移）；非空透传", () => {
+    expect(extractEngineId(makeRecord({ engine: undefined, engineHandle: undefined }))).toBe("pi");
+    expect(extractEngineId(makeRecord({ engine: 1, engineHandle: undefined }))).toBe("pi");
+    expect(extractEngineId(makeRecord({ engine: "", engineHandle: undefined }))).toBe("pi");
     expect(extractEngineId(makeRecord({ engine: "zcode" }))).toBe("zcode");
+  });
+
+  it("engineHandle 在场但 sessionRef 为空（无原生锚）→ 仍走 pi 缺省", () => {
+    expect(
+      extractEngineId(makeRecord({ engine: undefined, engineHandle: { sessionRef: {}, poolKey: "shared" } })),
+    ).toBe("pi");
+  });
+
+  it("引擎身份域损坏：有原生引擎锚却无 engine 字段 → 抛结构化错误（含 record id / 错误码 / 恢复指引）", () => {
+    for (const engine of [undefined, "", 1]) {
+      let err: unknown;
+      try {
+        extractEngineId(makeRecord({ engine }));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(RecordEngineIdentityError);
+      const e = err as RecordEngineIdentityError;
+      expect(e.code).toBe(RECORD_ENGINE_IDENTITY_MISSING_CODE);
+      expect(e.recordId).toBe("sub-1");
+      expect(e.message).toContain('record "sub-1"');
+      expect(e.message).toContain("refusing to route it to the default engine 'pi'");
+      expect(e.message).toContain(e.recovery);
+      expect(e.recovery).toMatch(/Restore the engine id recorded at spawn/);
+    }
+  });
+
+  it("resolveEngineRouteId 无 record id 入参 → 错误信息用 (unknown) 占位", () => {
+    expect(() =>
+      resolveEngineRouteId({ engine: undefined, engineHandle: { sessionRef: { sessionId: "s" } } }),
+    ).toThrow(/record "\(unknown\)"/);
+  });
+
+  it("hasNativeEngineAnchor 判据：非对象 / 数组 / sessionRef 非法 / 空 sessionRef → false", () => {
+    expect(hasNativeEngineAnchor(undefined)).toBe(false);
+    expect(hasNativeEngineAnchor("x")).toBe(false);
+    expect(hasNativeEngineAnchor([])).toBe(false);
+    expect(hasNativeEngineAnchor({})).toBe(false);
+    expect(hasNativeEngineAnchor({ sessionRef: [] })).toBe(false);
+    expect(hasNativeEngineAnchor({ sessionRef: {} })).toBe(false);
+    expect(hasNativeEngineAnchor({ sessionRef: { sessionId: "s" } })).toBe(true);
   });
 
   it("缺省引擎 id 与 registry 的 DEFAULT_ENGINE_ID 同值（本地锚定防漂移守护）", async () => {
     const { DEFAULT_ENGINE_ID } = await import("../../registry.ts");
-    expect(extractEngineId(makeRecord({ engine: undefined }))).toBe(DEFAULT_ENGINE_ID);
+    expect(extractEngineId(makeRecord({ engine: undefined, engineHandle: undefined }))).toBe(
+      DEFAULT_ENGINE_ID,
+    );
   });
 });
 
@@ -127,10 +174,19 @@ describe("extractEngineId", () => {
 
 describe("降级链编排", () => {
   it("pi 引擎返回 []（A1 守护：pi 历史走调用方 JSONL 直读链）", async () => {
-    expect(await readSubagentHistoryMessages(makeRecord({ engine: undefined }), dataDir)).toEqual(
-      [],
-    );
+    expect(
+      await readSubagentHistoryMessages(
+        makeRecord({ engine: undefined, engineHandle: undefined }),
+        dataDir,
+      ),
+    ).toEqual([]);
     expect(await readSubagentHistoryMessages(makeRecord({ engine: "pi" }), dataDir)).toEqual([]);
+  });
+
+  it("引擎身份域损坏的 record 显式失败（不降级、不投 pi 读链）", async () => {
+    await expect(
+      readSubagentHistoryMessages(makeRecord({ engine: undefined }), dataDir),
+    ).rejects.toBeInstanceOf(RecordEngineIdentityError);
   });
 
   it("①级命中：registry 查表分发到 native reader，SessionView 投影（usage 挂末 turn）", async () => {
