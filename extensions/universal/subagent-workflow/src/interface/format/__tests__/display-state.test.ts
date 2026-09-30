@@ -7,7 +7,12 @@
 //（后者是本批修掉的三处可见错误之一的防线）。
 import { describe, expect, it } from "vitest";
 
-import type { WorkflowRun } from "@zhushanwen/subagent-core";
+import {
+  doneReasonToRunOutcome,
+  noteRebuiltSettlement,
+  type DoneReason,
+  type WorkflowRun,
+} from "@zhushanwen/subagent-core";
 
 import {
   formatRunBadge,
@@ -28,6 +33,9 @@ const markingTheme: ThemeLike = {
   underline: (text) => `u(${text})`,
 };
 
+/** 每次构造唯一 runId——终局记录注册表按 runId 分区，跨用例不复用条目。 */
+let displayRunSeq = 0;
+
 /** 最小 run 形态（display-state 读 runSummary：runId/spec/meta/state 四组字段）。 */
 function makeRun(shape: {
   status?: string;
@@ -35,12 +43,25 @@ function makeRun(shape: {
   interruptedAt?: string;
   budget?: { usedTokens: number; maxTokens?: number; usedCost: number };
 } = {}): WorkflowRun {
+  const runId = `wf-display-${displayRunSeq++}`;
+  const status = shape.status ?? "running";
+  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 必须携带注册表
+  // 条目（生产 = 壳重建点 noteRebuiltSettlement 注入 run-settled 帧事实）——
+  // doneReason 经 outcome 往返（budget_limited 需 errorCode 同载）。
+  if (status === "done") {
+    const doneReason = (shape.reason ?? "completed") as DoneReason;
+    noteRebuiltSettlement(runId, {
+      outcome: doneReasonToRunOutcome(doneReason),
+      ...(doneReason === "budget_limited" ? { errorCode: "budget_limited" as const } : {}),
+      settledAt: Date.parse("2026-09-30T02:00:00.000Z"),
+    });
+  }
   return {
-    runId: "wf-display",
+    runId,
     spec: { scriptName: "display-wf" },
     meta: { startedAt: "2026-09-30T00:00:00.000Z", ...(shape.interruptedAt ? { interruptedAt: shape.interruptedAt } : {}) },
     state: {
-      status: shape.status ?? "running",
+      status,
       ...(shape.reason !== undefined ? { reason: shape.reason } : {}),
       budget: shape.budget ?? { usedTokens: 0, maxTokens: 200_000, usedCost: 0 },
       trace: { toArray: () => [] },

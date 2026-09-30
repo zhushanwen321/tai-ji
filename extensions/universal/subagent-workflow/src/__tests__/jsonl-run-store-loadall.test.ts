@@ -25,7 +25,17 @@ import * as path from "node:path";
 
 import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 
-import { WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } from "@zhushanwen/subagent-core";
+import {
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_RECORD_ENTRY_VERSION,
+  evictDoneRunsBeyondCap,
+  isRunSettled,
+  runSummary,
+} from "@zhushanwen/subagent-core";
+import type { WorkflowRun } from "@zhushanwen/subagent-core";
+// [D6(a) 第 1 步] 注册表清零面（setRunEventJournalDirForTest 同实现内清 liveRunStates
+// 与终局记录注册表）——换源后注册表是 isRunSettled / runSummary 的唯一判源。
+import { setRunEventJournalDirForTest } from "@zhushanwen/subagent-core/orchestration/terminal-actions.ts";
 import { JsonlRunStore } from "../jsonl-run-store.ts";
 import { mkCtx } from "@zhushanwen/subagent-core/testing/orchestration/__tests__/test-mocks.ts";
 
@@ -214,5 +224,80 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
     expect(loaded[0]!.state.reason).toBe("failed");
     const call = loaded[0]!.state.calls.get(0);
     expect(call?.result).toMatchObject({ content: "", error: "skill not found: nope" });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// [D6(a) 第 1 步] 重启后重水合 run 的终局判定换源：判据 = 重建 fold 结果
+//
+// loadAll 从 record 流 fold 出「有 run-settled 帧」这一事实后，经
+// noteRebuiltSettlement 注入 core 终局记录注册表——展示投影（runSummary）、
+// isRunSettled、evictDoneRunsBeyondCap 白名单三处据此判定，不再读聚合 status
+// 字段。本节 = 设计 §1.7 第 1 步判据点名的三处行为断言（重启后 done run 不回退
+// running / 判终局为真 / 可被淘汰，内存有界）。
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("[D6(a) 第 1 步] 重水合 run 的终局判定源 = 重建 fold 结果", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-rehydrate-finality-"));
+    // 注册表清零（换源后它是 isRunSettled / runSummary 的唯一判源）——防跨用例污染
+    setRunEventJournalDirForTest(undefined);
+  });
+
+  afterEach(() => {
+    setRunEventJournalDirForTest(undefined);
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** 写 record 流 + v2 注册条目 → loadAll 重建该 run。 */
+  async function rebuild(runId: string, lines: string[]): Promise<WorkflowRun> {
+    const journalPath = journalPathOf(tmpDir, runId);
+    fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+    fs.writeFileSync(journalPath, `${lines.join("\n")}\n`, "utf8");
+    const store = new JsonlRunStore({
+      sessionDir: tmpDir,
+      ctx: mkCtx([v2RegisteredEntry(runId, journalPath)]),
+    });
+    const loaded = await store.loadAll();
+    expect(loaded.map((r) => r.runId)).toEqual([runId]);
+    return loaded[0]!;
+  }
+
+  it("① 重启后 done run 的 runSummary 仍投影 done（展示不回退 running）", async () => {
+    const run = await rebuild("wf-rehydrated-done", [settledLine()]);
+
+    const summary = runSummary(run);
+    expect(summary.status).toBe("done");
+    expect(summary.reason).toBe("completed");
+    expect(summary.completedAt).toBeDefined();
+  });
+
+  it("② isRunSettled 对重水合 done run 为真；无 run-settled 帧的重水合 run 为假", async () => {
+    const done = await rebuild("wf-rehydrated-settled", [settledLine()]);
+    expect(isRunSettled(done)).toBe(true);
+
+    const running = await rebuild("wf-rehydrated-running", [
+      JSON.stringify({
+        type: "run-created",
+        seq: 1,
+        ts: Date.now(),
+        runId: "wf-rehydrated-running",
+        workflowName: "test-script",
+        argsSummary: "{}",
+        scriptSource: "agent('a')",
+      }),
+    ]);
+    expect(isRunSettled(running)).toBe(false);
+    expect(runSummary(running).status).toBe("running");
+  });
+
+  it("③ 重水合 done run 进入 evictDoneRunsBeyondCap 白名单（runs Map 内存有界性）", async () => {
+    const run = await rebuild("wf-rehydrated-evict", [settledLine()]);
+    const runs = new Map<string, WorkflowRun>([[run.runId, run]]);
+
+    expect(evictDoneRunsBeyondCap(runs, 0)).toBe(1);
+    expect(runs.has(run.runId)).toBe(false);
   });
 });

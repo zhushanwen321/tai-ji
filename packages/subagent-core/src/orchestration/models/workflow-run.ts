@@ -9,7 +9,9 @@
  *
  * 关键不变式（必须全测）：
  * I1: state.status === "running" ⟺ runtime !== undefined
- * I2: state.status === "done" ⟹ state.reason !== undefined
+ * （原 I2「终局 ⟹ reason 非空」随 [D6(a) 第 1 步] 终局判定换源退役：终局判定不再
+ * 读聚合状态字段，reason 完整性由 transition 的 done 入参校验与重建 fold 的构造
+ * 唯一保证——详见 validateInvariants 注释。）
  *
  * 状态机（一次性生命周期，2 态）：
  * 构造（status="running"，I1 构造期跳过——runtime 由 assignRuntime 注入）
@@ -17,8 +19,8 @@
  * done ──(no out edges, zombie)
  *
  * 「创建即 running」与 I1 的协调（F4）：构造瞬间 running 而 runtime 尚未注入，
- * I1 在构造期跳过（仅查 I2），完整校验由 assignRuntime/transition/replaceRuntime
- * 末尾的 validateInvariants 维持；构造到 assignRuntime 的 I1 窗口由调用方
+ * I1 在构造期跳过；完整校验由 assignRuntime/transition/replaceRuntime 末尾的
+ * validateInvariants 维持；构造到 assignRuntime 的 I1 窗口由调用方
  * （lifecycle.runWorkflow 在 assignRuntime 之后才 runs.set）保证对外不可见。
  *
  * worker-error-retry（G5-001 + G6-001）：
@@ -91,9 +93,6 @@ export class WorkflowRun {
     // runtime 在构造时始终为 undefined——run 创建时无活 worker，loadAll 重水合
     // 时也不恢复 runtime（worker 必须由 lifecycle 重新 start）。
     this.runtime = undefined;
-    // 构造期仅校验 I2（I1 跳过，见方法 doc）；I1 由 assignRuntime 末尾
-    // validateInvariants 恢复。
-    this.validateInvariantI2();
   }
 
   /**
@@ -101,8 +100,6 @@ export class WorkflowRun {
  * running 状态没有 worker，进程被杀后 worker 不可能还活着）。保留独立工厂
  * 标注重水合意图；调用方（D-4 kill-9 恢复）负责在 session_start 时把残留
  * running 转 done,failed，恢复 I1。
- *
- * @throws I2 违反（done 快照缺 reason 仍是 bug，不可跳过）
  */
   static reconstruct(runId: string, spec: RunSpec, state: RunExecutionSnapshot, meta: WorkflowRunMeta): WorkflowRun {
     return new WorkflowRun(runId, spec, state, meta);
@@ -111,11 +108,14 @@ export class WorkflowRun {
   // ── 不变式校验 ─────────────────────────────────────────────
 
   /**
- * 校验不变式 I1 + I2。违反抛错（聚合根自我保护，fail-fast）。
+ * 校验不变式 I1。违反抛错（聚合根自我保护，fail-fast）。
  * 在每个 mutation 方法末尾调用（防御式编程 + 测试可断言）。
+ *
+ * 原 I2（终局 ⟹ reason 非空）已随 [D6(a) 第 1 步] 终局判定换源退役：终局判定不再
+ * 读聚合状态字段，reason 完整性由 transition 的 done 入参校验与重建 fold（恒携带
+ * runSettledOutcomeToDoneReason 产物）唯一保证，聚合侧不再重复判定。
  */
   private validateInvariants(): void {
-    this.validateInvariantI2();
     // I1: status==="running" ⟺ runtime!==undefined
     if (this.state.status === "running" && this.runtime === undefined) {
       throw new Error(
@@ -125,18 +125,6 @@ export class WorkflowRun {
     if (this.state.status !== "running" && this.runtime !== undefined) {
       throw new Error(
         `WorkflowRun invariant I1 violated: status!=="running" but runtime is defined (runId=${this.runId})`,
-      );
-    }
-  }
-
-  /**
- * 仅校验不变式 I2（done ⟹ reason）。构造期用——「创建即 running」与重水合的
- * running 快照都无 runtime（I1 构造期跳过），但 I2 必须保证（done 缺 reason 是真 bug）。
- */
-  private validateInvariantI2(): void {
-    if (this.state.status === "done" && this.state.reason === undefined) {
-      throw new Error(
-        `WorkflowRun invariant I2 violated: status==="done" but reason is undefined (runId=${this.runId})`,
       );
     }
   }
@@ -153,7 +141,7 @@ export class WorkflowRun {
  * - →done: releaseRuntime + 设 state.reason + meta.completedAt
  *
  * @param target 目标状态（不允许 "running"——runtime 注入只走 assignRuntime/replaceRuntime）
- * @param reason →done 时必填（done ⟹ reason，不变式 I2）
+ * @param reason →done 时必填（终局 ⟹ reason 非空；原 I2 的写侧单点保证）
  * @throws 非法转换 / done 缺 reason / target==="running"
  */
   transition(target: RunStatus, reason?: DoneReason): void {
@@ -170,7 +158,7 @@ export class WorkflowRun {
       );
     }
 
-    // →done 需 reason（不变式 I2）
+    // →done 需 reason（原 I2 的写侧单点保证）
     if (target === "done" && reason === undefined) {
       throw new Error(
         `WorkflowRun.transition: transition to "done" requires a reason (runId=${this.runId})`,

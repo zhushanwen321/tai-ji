@@ -497,8 +497,9 @@ export async function abortRun(
 
   deps.log?.("debug", "workflow:lifecycle", "abortRun", { runId, status: run.state.status, reason, doneReason });
 
-  // 已终局 no-op（[W2/V1] 判据换源 isRunSettled——原两态机 status 检查随活体
-  // 写点删除停更；活体终局经注册表判定，恢复路径写点 run 经聚合 done 判定）。
+  // 已终局 no-op（[W2/V1] → [D6(a) 第 1 步] 判据换源 isRunSettled = 进程内终局记录
+  // 注册表；活体终局经 dispatch 链 note、重水合终局经重建点 noteRebuiltSettlement
+  // 注入，聚合状态字段不再参与判定）。
   if (isRunSettled(run)) {
     deps.log?.("debug", "workflow:lifecycle", "abortRun no-op: already settled", { runId });
     return;
@@ -553,8 +554,8 @@ export async function abortRun(
  */
 export async function terminateRunningRuns(deps: LifecycleDeps, reason: string): Promise<void> {
   for (const run of deps.runs.values()) {
-    // [W2/V1] 已终局 run 跳过（判据换源 isRunSettled——原两态机 status 检查随
-    // 活体写点删除停更）。
+    // [W2/V1 → D6(a) 第 1 步] 已终局 run 跳过（判据换源 isRunSettled——终局记录
+    // 注册表；重水合 done run 的注册表条目由重建点 noteRebuiltSettlement 注入）。
     if (isRunSettled(run)) continue;
     try {
       deps.log?.("debug", "workflow:lifecycle", "terminateRunningRuns: run → interrupted", { runId: run.runId, reason });
@@ -598,15 +599,14 @@ export async function terminateRunningRuns(deps: LifecycleDeps, reason: string):
  * 淘汰 runs Map 中超出保留窗口的已终局 run，返回本次淘汰数量。
  *
  * 规则（契约 W3C1；[W2/V1 D1] 判据与排序键换源后的形态）：
- * 1. **终局白名单**：仅 `isRunSettled` 可淘汰（活体终局经注册表判定 / 恢复路径
- *    写点 run 经聚合 done 判定——原两态机 `state.status === "done"` 白名单随活体
- *    写点删除对活体终局失效）。活跃执行 run 永不淘汰，即使排序键缺失也绝不参与
- *    排序淘汰。
+ * 1. **终局白名单**：仅 `isRunSettled` 可淘汰——判据 = 进程内终局记录注册表，
+ *    活体终局经 dispatch 链 note、重水合终局经重建点 noteRebuiltSettlement 注入
+ *    （[D6(a) 第 1 步] 换源后不再读聚合状态字段）。活跃执行 run 永不淘汰，即使排序
+ *    键缺失也绝不参与排序淘汰。
  * 2. **排序**：[W2/V1 D1] 排序键换终局帧时间戳——settledRecordOf().settledAt
  *    （journal run-settled 帧自带时序；活体终局后 meta.completedAt 不再更新）。
- *    恢复路径写点 run（无注册表记录）回落 `meta.completedAt`（恢复写点仍写它，
- *    I2 在恢复域成立）。两者均缺失（防御异常形态）fallback 0——数值最小=最旧，
- *    先被淘汰。
+ *    注册表 miss（防御异常形态：终局记录已被回收而 run 仍在册）回落
+ *    `meta.completedAt`，两者均缺失 fallback 0——数值最小=最旧，先被淘汰。
  * 3. **tie 稳定排序**：比较器三态返回（相等返回 0），Array#sort 稳定性（Node≥12）
  *    保持元素原序——原序 = Map 插入序 = 创建序，tie 组内先创建者视为更旧先被淘汰
  *    （kill-9 批量恢复同 ms 时间戳场景的确定性保证）。
@@ -631,7 +631,8 @@ export function evictDoneRunsBeyondCap(
   const settled = Array.from(runs.values()).filter((r) => isRunSettled(r));
   const excess = settled.length - keepDone;
   if (excess <= 0) return 0;
-  // [W2/V1 D1] 排序键 = 终局帧时间戳（注册表）→ 恢复写点 completedAt 回落 → 0 兜底；
+  // [W2/V1 D1] 排序键 = 终局帧时间戳（注册表；重水合 run 的条目 = 重建 fold 注入的
+  // run-settled 帧时序）→ 注册表 miss 回落 meta.completedAt → 0 兜底；
   // 数值升序 = 时间升序，缺失 fallback 最小 = 最旧先淘汰
   const keyOf = (r: WorkflowRun): number =>
     settledRecordOf(r.runId)?.settledAt ?? (Date.parse(r.meta.completedAt ?? "") || 0);

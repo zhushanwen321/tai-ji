@@ -38,6 +38,8 @@ import {
   Trace,
   WorkflowRun,
   WorkflowScriptRegistryImpl,
+  doneReasonToRunOutcome,
+  noteRebuiltSettlement,
   parseResourceMeta,
   setModelConfigService,
 } from "@zhushanwen/subagent-core";
@@ -49,6 +51,9 @@ import {
 // 被 mock 的模块——import 路径与被测源文件的等值实例（vi.mock hoist 后 barrel
 // re-export 与深路径指向同一 mock 实例）
 import { runWorkflow, abortRun } from "@zhushanwen/subagent-core/orchestration/lifecycle.ts";
+// [D6(a) 第 1 步] 终局记录注册表清零面（换源后 done 判定唯一源 = 注册表，且注册表
+// 按 runId 全局分区——用例间不清零会让复用 runId 的 fixture 跨用例污染）。
+import { setRunEventJournalDirForTest } from "@zhushanwen/subagent-core/orchestration/terminal-actions.ts";
 
 import { actionRun, registerWorkflowTool, TOOL_TOP_LEVEL } from "../tool-workflow.ts";
 import { REENTRY_BUSY_MESSAGE, type ReentryGuardRef } from "../reentry-guard.ts";
@@ -65,6 +70,8 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", () => ({
 beforeEach(() => {
   vi.mocked(runWorkflow).mockReset();
   vi.mocked(runWorkflow).mockResolvedValue("run-id-1");
+  // 终局记录注册表清零（setRunEventJournalDirForTest 同实现内清注册表 + 活体态）
+  setRunEventJournalDirForTest(undefined);
 });
 
 afterEach(() => {
@@ -162,7 +169,7 @@ function makeRun(opts: {
   startedAt: string;
   completedAt?: string;
 }): WorkflowRun {
-  return WorkflowRun.reconstruct(
+  const run = WorkflowRun.reconstruct(
     opts.runId,
     {
       scriptSource: "// stub source",
@@ -181,6 +188,16 @@ function makeRun(opts: {
     },
     { startedAt: opts.startedAt, completedAt: opts.completedAt },
   );
+  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重水合
+  // done run」时必须携带注册表条目（生产 = 壳重建点 noteRebuiltSettlement 注入
+  // run-settled 帧事实；settledAt = 快照 completedAt = 帧时序）。
+  if (opts.status === "done") {
+    noteRebuiltSettlement(opts.runId, {
+      outcome: doneReasonToRunOutcome(opts.reason ?? "completed"),
+      settledAt: opts.completedAt !== undefined ? Date.parse(opts.completedAt) : 0,
+    });
+  }
+  return run;
 }
 
 describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
@@ -790,14 +807,18 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
     ) => Promise<AbortResult>;
   };
 
-  /** mock abortRun 落位终态（模拟 lifecycle transition 语义：status=done + 可选 reason）。 */
-  function stubAbortTransition(opts: { reason?: string }): void {
+  /** mock abortRun 落位终态（模拟 lifecycle transition 语义：status=done + 可选 reason）。
+   *  `settle: false` = abort 未产生终局记录（换源后 run 保持 running 投影）。 */
+  function stubAbortTransition(opts: { reason?: string; settle?: boolean }): void {
     vi.mocked(abortRun).mockReset();
     vi.mocked(abortRun).mockImplementation(async (runId, deps) => {
       const run = deps.runs.get(runId);
-      if (run) {
+      if (run && (opts.settle ?? true)) {
         run.state.status = "done";
         run.state.reason = opts.reason;
+        // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：stub 直改状态须同步注入终局
+        // 事实（生产 abortRun 经 dispatch 链 note）——否则 runSummary 投影回退 running。
+        noteRebuiltSettlement(runId, { outcome: "cancelled", settledAt: Date.now() });
       }
     });
   }
@@ -817,8 +838,11 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
     expect(r.details).toMatchObject({ action: "abort", runId: run.runId, status: "done", reason: "aborted" });
   });
 
-  it("无 reason → 转移段无后缀（reasonSuffix 条件拼接）", async () => {
-    stubAbortTransition({ reason: undefined });
+  it("无终局记录 → 转移段无后缀（reasonSuffix 条件拼接；[D6(a) 第 1 步] 换源后「未终局」不再投影 done/reason）", async () => {
+    // 换源前本用例靠「聚合 done 而注册表 miss」造出 done+无 reason 形态——该形态随
+    // R6 判据换源消失（done ⟺ 注册表有条目 ⟺ reason 由 (outcome,errorCode) 恒派生）。
+    // 现锁同一条拼接分支的可达形态：无终局记录 = 未终局，status 与 reason 都不投影。
+    stubAbortTransition({ settle: false });
     const run = makeRun({
       runId: "wf-1719600000000-z9y8x7",
       scriptName: "cleanup-wf",
@@ -828,8 +852,8 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
     const tool = captureRegisteredTool<AbortToolView>(new Map([[run.runId, run]]));
 
     const r = await tool.execute("id", { action: "abort", runId: run.runId }, undefined, undefined, {});
-    expect(r.content[0]?.text).toBe("Workflow 'cleanup-wf' (wf-1719600000000-z9y8x7): running → done");
-    expect(r.details).toMatchObject({ action: "abort", runId: run.runId, status: "done" });
+    expect(r.content[0]?.text).toBe("Workflow 'cleanup-wf' (wf-1719600000000-z9y8x7): running → running");
+    expect(r.details).toMatchObject({ action: "abort", runId: run.runId, status: "running" });
   });
 });
 

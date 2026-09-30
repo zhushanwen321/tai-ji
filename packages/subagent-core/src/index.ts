@@ -446,10 +446,15 @@ export {
 // buildWorkflowRecord{Registered,Settled,Interrupted}EntryData 条目构造器单源。
 // [G1 跨包单源] runSettledOutcomeToDoneReason：壳侧曾持同语义本地实现（值表靠
 // 双侧测试锁定），收敛为 core 单源——壳经 barrel import 消费。
+// [D6(a) 第 1 步] noteRebuiltSettlement / settlementRecordOfRunSettledFrame：恢复
+// 路径重建点把 fold 出的 run-settled 事实注入终局记录注册表（壳
+// foldRecordStreamToRun 消费）——终局判定不再绕道聚合状态字段。
 export {
   finalizeRun,
   interruptRun,
   isRunSettled,
+  noteRebuiltSettlement,
+  settlementRecordOfRunSettledFrame,
   runSettledOutcomeToDoneReason,
   closeOutInFlightCalls,
   buildWorkflowRecordRegisteredEntryData,

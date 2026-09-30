@@ -43,6 +43,7 @@ import {
   dispatchRunCreated,
   dispatchRunTrigger,
   isRunSettled,
+  noteRebuiltSettlement,
   settledRecordOf,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
@@ -619,6 +620,10 @@ describe("terminateRunningRuns", () => {
     await seedRunCreated(running1);
     await seedRunCreated(running2);
     doneRun.transition("done", "completed");
+    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：生产里 done run 的条目由活体
+    // dispatch 链 note（本 fixture 走死方法 transition 直改状态，故手工注入等价
+    // 事实）——否则该 run 会被判未终局并进入中断收编。
+    noteRebuiltSettlement("wf-term-done", { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
     deps.runs.set("wf-term-1", running1);
     deps.runs.set("wf-term-2", running2);
@@ -761,16 +766,22 @@ describe("terminateRunningRuns", () => {
  * 构造可重水合的 WorkflowRun 快照（对齐 crash-recovery.test.ts makeRun 模式——
  * WorkflowRun.reconstruct 与构造同语义：I1 构造期跳过，running 快照合法）。
  *
+ * [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态必须同时注入注册表条目
+ * （生产 = 壳重建点 noteRebuiltSettlement 把 run-settled 帧事实带进消费面）；
+ * settledAt 缺省取快照 completedAt（重水合 run 的条目 = run-settled 帧时序）。
+ *
  * @param runId run 标识
  * @param opts.completedAt 完成时刻 ISO 串（缺省=缺失场景，模拟旧格式/异常快照）
  * @param opts.status 状态（默认 done；running 用于白名单验证）
+ * @param opts.settledAt 注册表排序键覆盖（缺省 = completedAt；用于锁定「排序键 =
+ *   注册表 settledAt，meta.completedAt 不参与」的换源语义）
  */
 function makeEvictableRun(
   runId: string,
-  opts: { completedAt?: string; status?: "running" | "done" } = {},
+  opts: { completedAt?: string; status?: "running" | "done"; settledAt?: number } = {},
 ): WorkflowRun {
   const status = opts.status ?? "done";
-  return WorkflowRun.reconstruct(
+  const run = WorkflowRun.reconstruct(
     runId,
     {
       scriptSource: "async function execute() {}",
@@ -791,6 +802,14 @@ function makeEvictableRun(
       ...(opts.completedAt !== undefined ? { completedAt: opts.completedAt } : {}),
     },
   );
+  if (status === "done") {
+    noteRebuiltSettlement(runId, {
+      outcome: "done",
+      settledAt:
+        opts.settledAt ?? (opts.completedAt !== undefined ? Date.parse(opts.completedAt) : 0),
+    });
+  }
+  return run;
 }
 
 /** ISO 基准时刻（过去时刻），isoAt(n) = 基准 + n 分钟。 */
@@ -874,18 +893,19 @@ describe("evictDoneRunsBeyondCap（done run 内存淘汰，K=MAX_RETAINED_DONE_R
     }
   });
 
-  it("W3TC4: completedAt 缺失 fallback 视为最旧（排序键空串字典序最小）", () => {
+  it("W3TC4: 排序键 = 注册表 settledAt（meta.completedAt 不参与排序）", () => {
     const runs = new Map<string, WorkflowRun>();
-    // 插入序 [runC, runA, runB]——缺失者 runA 居中，防「碰巧首元素」假通过
-    runs.set("wf-runC", makeEvictableRun("wf-runC", { completedAt: isoAt(2) }));
-    runs.set("wf-runA", makeEvictableRun("wf-runA"));
-    runs.set("wf-runB", makeEvictableRun("wf-runB", { completedAt: isoAt(1) }));
+    // [D6(a) 第 1 步] 排序键换源锁定：三个 run 的 meta.completedAt 序与注册表
+    // settledAt 序刻意相反——淘汰集合必须跟随 settledAt（run-settled 帧时序），
+    // 若实现回落到 meta.completedAt，删的将是 runC 而非 runA。
+    runs.set("wf-runA", makeEvictableRun("wf-runA", { completedAt: isoAt(2), settledAt: Date.parse(isoAt(0)) }));
+    runs.set("wf-runB", makeEvictableRun("wf-runB", { completedAt: isoAt(1), settledAt: Date.parse(isoAt(1)) }));
+    runs.set("wf-runC", makeEvictableRun("wf-runC", { completedAt: isoAt(0), settledAt: Date.parse(isoAt(2)) }));
 
     const evicted = evictDoneRunsBeyondCap(runs, 2);
 
-    // runA 缺失 completedAt = 空串排序键 → 字典序最小=最旧 → 先被淘汰
     expect(evicted).toBe(1);
-    expect(runs.has("wf-runA")).toBe(false);
+    expect(runs.has("wf-runA")).toBe(false); // settledAt 最旧（尽管 completedAt 最新）
     expect(runs.has("wf-runB")).toBe(true);
     expect(runs.has("wf-runC")).toBe(true);
   });

@@ -25,6 +25,7 @@ import type { LiveProgressView } from "../detail-content.ts";
 import { buildDetailContent } from "../detail-content.ts";
 import type { ThemeLike } from "../../../format/format.ts";
 import { collectNodeLiveProgress, computeRenderSignature } from "../WorkflowsView.ts";
+import { noteRebuiltSettlement } from "@zhushanwen/subagent-core";
 import type { AgentEventLogEntry } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode, WorkerLogEntry } from "@zhushanwen/subagent-core";
 import type { SubagentRecord } from "@zhushanwen/subagent-core";
@@ -74,15 +75,21 @@ function makeRun(shape: RunShape = {}): WorkflowRun {
 }
 
 /** [W2/V1] runId 唯一化 + spec 最小面（displayStatusOf → core runSummary 投影
- *  读 runId/spec.scriptName——签名测试的 mock 需携带该最小字段集）。 */
+ *  读 runId/spec.scriptName——签名测试的 mock 需携带该最小字段集）。
+ *  [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 必须携带注册表
+ *  条目（生产 = 壳重建点 noteRebuiltSettlement 注入 run-settled 帧事实）。 */
 let signatureRunSeq = 0;
 function makeRunWithId(runId: string, shape: RunShape): WorkflowRun {
+  const status = shape.status ?? "running";
+  if (status === "done") {
+    noteRebuiltSettlement(runId, { outcome: "done", settledAt: Date.parse("2026-09-27T00:00:00.000Z") });
+  }
   return {
     runId,
     spec: { scriptName: "sig-wf" },
     meta: { startedAt: "2026-09-27T00:00:00.000Z" },
     state: {
-      status: shape.status ?? "running",
+      status,
       budget: shape.budget ?? { usedTokens: 0, maxTokens: 200_000, usedCost: 0 },
       trace: { toArray: () => shape.nodes ?? [] },
       errorLogs: shape.errorLogs ?? [],

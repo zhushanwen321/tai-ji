@@ -32,7 +32,9 @@ import {
 } from "../worker-message-pump.ts";
 import {
   dispatchRunCreated,
+  noteRebuiltSettlement,
 } from "../terminal-actions.ts";
+import { doneReasonToRunOutcome } from "../run-events.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -165,6 +167,18 @@ async function seedRunCreated(run: WorkflowRun): Promise<void> {
   await dispatchRunCreated(run);
 }
 
+/** [D6(a) 第 1 步] 直改聚合状态的终态 fixture：status/reason 与终局记录注册表条目
+ *  同写（换源后 isRunSettled 只认注册表——生产经 dispatch 链 note / 重建点
+ *  noteRebuiltSettlement 注入；stale 守卫用例的「已终态」形态由本 helper 构造）。 */
+function markRunTerminalDone(run: WorkflowRun, reason: DoneReason = "completed"): void {
+  run.state.status = "done";
+  run.state.reason = reason;
+  noteRebuiltSettlement(run.runId, {
+    outcome: doneReasonToRunOutcome(reason),
+    settledAt: Date.now(),
+  });
+}
+
 describe("handleWorkerExit", () => {
   it("code=0 且已收到终态消息：no-op（不 transition、不 save）", async () => {
     // [F1] 语义更新：exit(0) no-op 的前提是本代际已交付 return/error（正常收尾退出，
@@ -231,8 +245,9 @@ describe("handleWorkerExit", () => {
   it("run 已终态（done）：stale 守卫前置丢弃", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
-    run.state.status = "done";
-    (run.state as { reason?: string }).reason = "completed";
+    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：直改聚合状态的终态 fixture 须
+    // 同步注入终局事实（生产经 dispatch 链 note / 重建点 noteRebuiltSettlement）。
+    markRunTerminalDone(run);
     const deps = makeDeps();
     const handle = makeHandle(true);
 
@@ -286,8 +301,9 @@ describe("handleWorkerError", () => {
   it("终态（done）：stale 守卫前置丢弃（不递增 workerErrorCount）", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
-    run.state.status = "done";
-    (run.state as { reason?: string }).reason = "completed";
+    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：直改聚合状态的终态 fixture 须
+    // 同步注入终局事实（生产经 dispatch 链 note / 重建点 noteRebuiltSettlement）。
+    markRunTerminalDone(run);
     const deps = makeDeps();
 
     await handleWorkerError(run, new Error("stale"), deps, makeHandlers());
@@ -339,8 +355,9 @@ describe("handleScriptError", () => {
   it("terminal 状态：stale 守卫前置丢弃", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
-    run.state.status = "done";
-    (run.state as { reason?: string }).reason = "completed";
+    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：直改聚合状态的终态 fixture 须
+    // 同步注入终局事实（生产经 dispatch 链 note / 重建点 noteRebuiltSettlement）。
+    markRunTerminalDone(run);
     const deps = makeDeps();
 
     await handleScriptError(run, "late error", [], deps, makeHandlers());

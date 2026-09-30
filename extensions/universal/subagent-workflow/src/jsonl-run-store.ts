@@ -62,6 +62,10 @@ import {
   parseRecordStreamLine,
   parseLegacyArgsSummary as parseLegacyArgsSummaryCore,
   runSettledOutcomeToDoneReason,
+  // [D6(a) 第 1 步] 恢复路径重建的终局事实注入（fold 出 run-settled 帧 → 终局记录
+  // 注册表），与 core isRunSettled / runSummary 的判据同源。
+  noteRebuiltSettlement,
+  settlementRecordOfRunSettledFrame,
   type AgentResult,
   type ExecutionTraceNode,
   type RunEventLineIssue,
@@ -740,6 +744,13 @@ export class JsonlRunStore implements RunStore {
       }
       const run = foldRecordStreamToRun(runId, reg, events, settledEntries.get(runId));
       runs.push(run);
+      // [D6(a) 第 1 步] 终局事实随重建产物带到消费面：fold 判定出「该 run 的 record
+      // 流里有 run-settled 帧」后，把帧载荷登记进 core 终局记录注册表——重启后
+      // runSummary 投影（展示仍为 done）与 isRunSettled / evictDoneRunsBeyondCap
+      // （done run 内存淘汰白名单）据此判定，不再绕道聚合 status 字段读回。
+      if (settledEvent !== undefined) {
+        noteRebuiltSettlement(runId, settlementRecordOfRunSettledFrame(settledEvent));
+      }
       // 终态条目幂等补写：record 已终局而主 session 终态条目缺失（终局 coda 的
       // 条目半边写失败 / 旧版本写点形态）→ 补写；条目已在 → 跳过（双重启不重复
       // 追加的构造性保证）。无 pi（测试/非 Pi 环境）跳过。

@@ -63,7 +63,7 @@ vi.mock("../interface/command/commands.ts", () => ({
 }));
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { MAX_RETAINED_DONE_RUNS } from "@zhushanwen/subagent-core";
+import { MAX_RETAINED_DONE_RUNS, noteRebuiltSettlement } from "@zhushanwen/subagent-core";
 import type { LauncherDeps, WorkflowRun } from "@zhushanwen/subagent-core";
 import { setSubagentService } from "@zhushanwen/subagent-core";
 import type { InFlightReporter } from "../host/inflight-reporter.ts";
@@ -116,10 +116,21 @@ type FakeRunShape = {
 
 /** 统一 WorkflowRun 构造：notifyDone 读 trace/spec/scriptResult/calls，evict 读
  *  status/completedAt（meta.completedAt 缺省 = evict 排序不感知），preserved 统计读
- *  runId + state.calls。 */
+ *  runId + state.calls。
+ *  [D6(a) 第 1 步] evict 白名单源 = core 终局记录注册表：done 形态 fixture 必须
+ *  注入注册表条目（生产 = 活体 dispatch 链 note / 重建点 noteRebuiltSettlement），
+ *  排序键 settledAt 取 completedAt（= 帧时序）——本文件的 env.settledRecordOf 是
+ *  注入 stub，通知步语义不受影响。 */
 function makeRun(shape: FakeRunShape): WorkflowRun {
   const calls = new Map<number, unknown>();
   for (let i = 1; i <= (shape.callCount ?? 0); i += 1) calls.set(i, {});
+  const status = shape.status ?? "running";
+  if (status === "done") {
+    noteRebuiltSettlement(shape.runId, {
+      outcome: "done",
+      settledAt: shape.completedAt !== undefined ? Date.parse(shape.completedAt) : 0,
+    });
+  }
   return {
     runId: shape.runId,
     spec: {},

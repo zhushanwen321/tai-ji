@@ -28,6 +28,7 @@ import {
   dispatchRunCreated,
   dispatchRunTrigger,
   finalizeRun,
+  noteRebuiltSettlement,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
@@ -250,6 +251,9 @@ describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
     deps.runner.run = vi.fn(async () => {
       // runner 执行窗内 run 被终态化（模拟 abort 竞态）
       run.transition("done", "aborted");
+      // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：竞态终态化须同步注入终局事实
+      // （生产 abortRun 经 dispatch 链 note）——stale 守卫据此拦截迟到 call 完成。
+      noteRebuiltSettlement(run.runId, { outcome: "cancelled", settledAt: Date.now() });
       return { content: "late", durationMs: 1, toolCalls: [] } as AgentResult;
     });
     const handlers: WorkerHandlers = {

@@ -76,7 +76,6 @@ import type {
   AgentCallOpts,
   AgentResult,
   DoneReason,
-  RunStatus,
   WorkerLogEntry,
 } from "./models/types.ts";
 
@@ -215,12 +214,7 @@ function journalEventOf(trigger: TransitionTrigger, journalDir?: string): Workfl
  */
 function settlementRecordOfTrigger(trigger: TransitionTrigger, next: RunLifecycleState): RunSettlementRecord {
   if (trigger.type === "run-settled") {
-    return {
-      outcome: trigger.outcome,
-      ...(trigger.errorCode !== undefined ? { errorCode: trigger.errorCode } : {}),
-      ...(trigger.reason !== undefined ? { reason: trigger.reason } : {}),
-      settledAt: trigger.ts,
-    };
+    return settlementRecordOfRunSettledFrame(trigger);
   }
   return {
     outcome: next.outcome ?? "cancelled",
@@ -714,19 +708,52 @@ export interface RunSettlementRecord { // oe-exempt:20260929:framework:settlemen
   settledAt: number;
 }
 
-/** 进程内终局记录注册表（key = runId；dispatch 链 terminal 落账时 note，随
- *  runs Map 淘汰回收——条目数与终局 run 同生命周期，有界）。 */
+/** 进程内终局记录注册表（key = runId；两个记源——活体 dispatch 链 terminal 落账
+ *  与恢复路径重建 fold 注入；随 runs Map 淘汰回收——条目数与终局 run 同生命周期，
+ *  有界）。 */
 const settledRunRecords = new Map<string, RunSettlementRecord>();
 
-/** [W2/V1 D1] 单一判源函数（终局判定）：聚合 done（恢复路径写点 / v1 兼容层
- *  读面，W4 sunset）∨ 进程内终局记录（本进程活体终局——dispatch 链 note）。
- *  本进程未持有且聚合 running 的 run（重水合待收编形态）判未终局——恢复链的
- *  收编候选筛选据此保留。interrupted 暂停态（[D2]）不判终局——可 resume。 */
-export function isRunSettled(run: { runId: string; state: { status: RunStatus } }): boolean {
-  return run.state.status === "done" || settledRunRecords.has(run.runId);
+/**
+ * run-settled 帧载荷 → 终局记录（纯映射）。两个记源共用：活体
+ * {@link settlementRecordOfTrigger}（cancel-requested 走合成分支）与恢复路径重建点
+ * {@link noteRebuiltSettlement}。
+ */
+export function settlementRecordOfRunSettledFrame(frame: {
+  outcome: RunOutcome;
+  errorCode?: RunErrorCode;
+  reason?: string;
+  ts: number;
+}): RunSettlementRecord {
+  return {
+    outcome: frame.outcome,
+    ...(frame.errorCode !== undefined ? { errorCode: frame.errorCode } : {}),
+    ...(frame.reason !== undefined ? { reason: frame.reason } : {}),
+    settledAt: frame.ts,
+  };
 }
 
-/** 终局记录查询（注册表 miss = 本进程无活体终局记录——恢复域 run 由聚合面判读）。 */
+/**
+ * [D6(a) 第 1 步换源] 恢复路径重建 fold 的终局事实注入。
+ *
+ * 重建点（壳 `foldRecordStreamToRun` 的 run-settled 分支）本就持有「该 run 的
+ * record 流里有 run-settled 帧」这一事实；重建产物入 runs Map 前经本函数把它登记
+ * 进进程内注册表——与活体 dispatch 链（{@link appendTransition} terminal 落账）
+ * 同一记源。换源后终局判定不再绕道聚合 `state.status` 字段读回（重水合 done run
+ * 与活体 done run 在注册表上同形）。
+ */
+export function noteRebuiltSettlement(runId: string, record: RunSettlementRecord): void {
+  settledRunRecords.set(runId, record);
+}
+
+/** [W2/V1 D1 → D6(a) 第 1 步换源] 单一判源函数（终局判定）= 进程内终局记录注册表：
+ *  活体终局由 dispatch 链 note，重水合终局由重建点 {@link noteRebuiltSettlement}
+ *  注入。注册表 miss 的 run（重水合待收编形态 / 中断暂停态）判未终局——恢复链的
+ *  收编候选筛选据此保留；interrupted 暂停态（[D2]）不判终局——可 resume。 */
+export function isRunSettled(run: { runId: string }): boolean {
+  return settledRunRecords.has(run.runId);
+}
+
+/** 终局记录查询（注册表 miss = 本进程两源都未注入终局记录）。 */
 export function settledRecordOf(runId: string): RunSettlementRecord | undefined {
   return settledRunRecords.get(runId);
 }

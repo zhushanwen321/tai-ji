@@ -36,7 +36,7 @@ import type { DoneReason, RunStatus } from "../models/types.ts";
 import type { WorkflowRun } from "../models/workflow-run.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 // [W2/V1] 六态机引导 + 终局断言换源（两态机字段停更——终局经注册表判定/派生）。
-import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
+import { isRunSettled, noteRebuiltSettlement, settledRecordOf } from "../terminal-actions.ts";
 
 /** [F1] 归因文案——与 worker-message-pump.ts 常量一致（不直接 import 常量以锚定对外文案）。 */
 const EXITED_WITHOUT_RESULT_MSG =
@@ -180,6 +180,9 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     run.transition("done", "completed");
+    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：直改聚合状态的终态 fixture 须
+    // 同步注入终局事实（生产经 dispatch 链 note）——stale 守卫据此判「已终态」。
+    noteRebuiltSettlement(run.runId, { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
 
     await handleWorkerExit(run, 0, makeHandle(), deps, makeHandlers());

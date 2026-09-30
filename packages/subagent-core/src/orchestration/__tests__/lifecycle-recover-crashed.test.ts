@@ -29,6 +29,7 @@ import {
   recoverCrashedRuns,
 } from "../lifecycle.ts";
 import {
+  noteRebuiltSettlement,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
@@ -80,7 +81,18 @@ function makeRun(
     startedAt: "2026-08-30T00:00:00.000Z",
     ...(opts.completedAt !== undefined ? { completedAt: opts.completedAt } : {}),
   };
-  return WorkflowRun.reconstruct(runId, makeSpec(opts.scriptName), state, meta);
+  const run = WorkflowRun.reconstruct(runId, makeSpec(opts.scriptName), state, meta);
+  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重水合
+  // done run」时必须携带注册表条目（生产 = 壳重建点 noteRebuiltSettlement 注入
+  // run-settled 帧事实）；settledAt 缺省取快照 completedAt（重水合 run 的条目 =
+  // 帧时序），否则 0（最旧——仅用于防御排序，非本文件断言面）。
+  if (status === "done") {
+    noteRebuiltSettlement(runId, {
+      outcome: "done",
+      settledAt: opts.completedAt !== undefined ? Date.parse(opts.completedAt) : 0,
+    });
+  }
+  return run;
 }
 
 /** mock RunStore：loadAll 返回预置 runs，save 可观察。 */

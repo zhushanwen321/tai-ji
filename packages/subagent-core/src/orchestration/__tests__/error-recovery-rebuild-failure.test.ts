@@ -23,7 +23,7 @@ import {
 import {
   dispatchRunCreated,
 } from "../terminal-actions.ts";
-import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
+import { isRunSettled, noteRebuiltSettlement, settledRecordOf } from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
@@ -196,8 +196,10 @@ describe("[OR-2] rebuildRuntime 抛错回灌重试矩阵", () => {
     const deps = makeDeps({ startThrows: true });
 
     const p = handleWorkerError(run, new Error("worker boom"), deps, makeHandlers());
-    // 退避窗口内外部 abort（done,aborted）
+    // 退避窗口内外部 abort（done,aborted）——[D6(a) 第 1 步] 终局判定源 = 终局记录
+    // 注册表：生产 abort 经 dispatch 链 note，本 fixture 直改状态故手工注入等价事实
     run.transition("done", "aborted");
+    noteRebuiltSettlement(run.runId, { outcome: "cancelled", settledAt: Date.now() });
     await advance(1000);
     await expect(p).resolves.toBeUndefined();
 
