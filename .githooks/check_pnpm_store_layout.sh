@@ -25,7 +25,13 @@ MODULES_YAML="$PROJECT_ROOT/node_modules/.modules.yaml"
 # pnpm 缺失时后续检查自会失败，不在此添噪
 command -v pnpm >/dev/null 2>&1 || exit 0
 
-EXPECTED="$(cd "$PROJECT_ROOT" && pnpm store path 2>/dev/null)" || exit 0
+# [HISTORICAL 2026-10-01] 基准必须取「与 install 同源的 pnpm」。全局 pnpm 是 launcher
+# （bin/pnpm.mjs 实体可能已是更高版本，如 11.7.0），在项目内按 packageManager 字段把
+# install 自举到钉定版本（如 pnpm@10.27.0）执行——两版 store 版本段不同（v11 vs v10），
+# 裸 `pnpm store path` 与 install 写入的 storeDir 恒劈叉，护栏恒红。此前的全局 rc
+# （store-dir=...）钉住位置掩盖了该劈叉，配置清理后暴露。故 EXPECTED 优先经 corepack
+# 按 packageManager 解析（与 install 同源），corepack 缺失时回退裸 pnpm（旧环境形态）。
+EXPECTED="$(cd "$PROJECT_ROOT" && { command -v corepack >/dev/null 2>&1 && corepack pnpm store path 2>/dev/null || pnpm store path 2>/dev/null; })" || exit 0
 RECORDED="$(grep -m1 '^storeDir:' "$MODULES_YAML" | sed 's/^storeDir:[[:space:]]*//')"
 
 # 记录缺失属 install 语义问题，不是翻转问题，不在此判

@@ -168,20 +168,23 @@ mv /Applications/TaiJi.app.new /Applications/TaiJi.app   # 改用手动装新版
 
 补充：`.old` 或 `.new` 单独残留（`TaiJi.app` 在位且可启动）属良性残留，下次启动自动清理；从 DMG 只读卷运行时升级会被拒绝（update-result 写 `read-only volume`），请先将 `TaiJi.app` 拖入「应用程序」文件夹再触发升级。
 
-### 11. pnpm install 报 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY（间歇，单跑却成功）
+### 11. pnpm store 布局翻转（pre-commit 护栏红 / install 报 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY）
 
-**现象**：commit / e2e 脚本里 `pnpm install` 间歇失败（非 TTY abort）；同一命令单独重跑有时成功（假象：管道 `| tail` 后 `$?` 是 tail 的退出码）。
+**现象**：commit 被护栏 `.githooks/check_pnpm_store_layout.sh` 拦截（报「store 布局翻转」）；或 `pnpm install` 间歇非 TTY abort（`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`）。
 
-**根因**（2026-09-03 PR #196）：pnpm store 路径默认随 **HOME** 解析。引擎侧（覆写 HOME 的沙箱）pre-commit 内 verify-*.sh 自含 install 把引擎侧 store 写进 `node_modules/.modules.yaml` 的 `storeDir`；本地（正常 HOME）install 发现布局过期 → 判定删除重建 → 非 TTY abort。**双向翻转**：谁最后 install 谁的 storeDir 生效。
+**判定**：比对 `node_modules/.modules.yaml` 的 `storeDir` 与当前环境解析的 store 路径（`grep storeDir node_modules/.modules.yaml`）。两个已知劈叉源：
+
+1. **沙箱 HOME 覆写**（引擎 worker 侧 install 写入自身 store）——记录路径含引擎沙箱目录即此形态。
+2. **pnpm launcher 双版本**（全局 pnpm 是 launcher，bin/pnpm.mjs 实体版本可能高于项目 `packageManager` 钉定版本，两版 store 版本段不同，如 v11 vs v10）——裸 `pnpm store path` 与 install 写入劈叉。**判定基准必须与 install 同源**：护栏用 `corepack pnpm store path`（按项目 packageManager 解析；corepack 缺失回退裸 pnpm）。
+
+**恢复**（`.modules.yaml` up-to-date 时 install 跳过重写，须删清单强制）：
 
 ```bash
-grep storeDir node_modules/.modules.yaml
-# ~/.pnpm-store/v10 = 本地布局（健康）；~/.zcode/zsw/... = 被引擎侧翻转（先恢复再 commit）
-
-CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install   # 约 6-7s 重建本地布局，然后重试 commit
+rm node_modules/.modules.yaml
+CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install   # 约 7s 重建，然后重试 commit
 ```
 
-**防护**：护栏 `.githooks/check_pnpm_store_layout.sh`（pre-commit 第 0 段 + validate-runtime-bundle Gate 0），翻转即红并输出 [FIX] 指引。根治已落地（引擎共享宿主 HOME），护栏语义 = 防 HOME 覆写回退（正常恒绿，红 = 回退信号）。
+**防护**：护栏 `.githooks/check_pnpm_store_layout.sh`（pre-commit 第 0 段 + validate-runtime-bundle Gate 0），翻转即红并输出 [FIX] 指引。根治已落地（引擎共享宿主 HOME），护栏语义 = 防 HOME 覆写回退与版本段劈叉（正常恒绿，红 = 上述两形态之一复发）。
 
 ### 12. subagent 完成后不回收 / 回收慢：sessionFile 获取链与 workflow 域守护特征串（2026-09-10 重放移植重写；2026-09-11 H1 续聊链修订）
 
