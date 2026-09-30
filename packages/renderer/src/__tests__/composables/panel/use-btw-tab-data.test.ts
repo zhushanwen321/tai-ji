@@ -9,7 +9,8 @@
  *   三函数（get/clear/reconcile——M4-a 消费面先写后读）+ 出册线观察停止
  *
  * mock 策略（TEST-STRATEGY §5）：vi.mock('@/api') 局部替换 btw 域（spread actual 保门面
- * 其余域，btw-panel 同款）；真实 chat store（setMessages 真实分区增长驱动未读 watch）+
+ * 其余域，btw-panel 同款）+ chat.getHistory 桩（见 mock 处注释——回放链不产生墙钟竞争）；
+ * 真实 chat store（setMessages 真实分区增长驱动未读 watch）+
  * 真实 core drawer 域（视口判定与抽屉活动触发面）。i18n 走全局 setup（本文件无文案断言）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/panel/use-btw-tab-data.test.ts
@@ -54,15 +55,23 @@ import { subagentVirtualId } from '@taiji/shared'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { useChatStore } from '@/stores/chat'
 
-// ── @/api 门面局部 mock：只替换 badge 数据源 btw 域 ──
+// ── @/api 门面局部 mock：替换 badge 数据源 btw 域 + 回放链 getHistory 桩 ──
 const btwMock = vi.hoisted(() => ({
   list: vi.fn(),
   create: vi.fn(),
   remove: vi.fn(),
 }))
+// getHistory 桩（微任务即回的空历史，语义 = 线从未 flush）：drawer 开 + 选中线会触发
+// stores/btw-replay 的真实回放链，mock transport 的 TIMING.ack 是 40ms setTimeout
+//（settle 只冲刷微任务，等不到它），迟到的空历史 hydrate 会清掉用例刚 seed 的线分区、
+// 未读 watch 的 prev 基线随之归零——重负载下定时器落点漂移，未读计数随机翻错。
+// 本文件断言面是 badge 计数不是回放，桩成同步空历史后回放链不再产生墙钟竞争。
+const chatGetHistoryMock = vi.hoisted(() =>
+  vi.fn(async () => ({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })),
+)
 vi.mock('@/api', async (importActual) => {
   const actual = await importActual<typeof import('@/api')>()
-  return { ...actual, btw: btwMock }
+  return { ...actual, btw: btwMock, chat: { ...actual.chat, getHistory: chatGetHistoryMock } }
 })
 
 const SID_A = 's-btw-data-a'
