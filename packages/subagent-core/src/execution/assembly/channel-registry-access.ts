@@ -19,7 +19,7 @@
 // 接收后续 ask-user 推入的 pending。
 //
 // ── 跨扩展协议契约（必须与 ask-user 侧严格一致）──────────────
-// key 字面量：     "@zhushanwen/pi-subagents.channelHandshake"
+// key 字面量：     "@zhushanwen/subagent-core.channelHandshake"
 //                  ↑ 必须与 ask-user/src/channel-registry-register.ts 完全一致
 // handshake 形状： ChannelRegistryHandshake（version=1）
 // version 守卫：    slot.version !== 1 时 console.warn + 丢弃重建（向前兼容未来升级）
@@ -33,7 +33,7 @@ const logger = getLogger("subagents");
 
 /** 进程级 channel 握手的 globalThis key（Symbol.for 跨模块共享）。
  *
- *  **协议契约**：字面量 `"@zhushanwen/pi-subagents.channelHandshake"` 必须与
+ *  **协议契约**：字面量 `"@zhushanwen/subagent-core.channelHandshake"` 必须与
  *  ask-user 扩展的 `ask-user/src/channel-registry-register.ts` 完全一致——
  *  两边读写同一个 Symbol.for key 才能拿到同一握手对象。
  *

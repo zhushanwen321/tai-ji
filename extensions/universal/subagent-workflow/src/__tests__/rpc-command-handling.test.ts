@@ -42,13 +42,14 @@ import {
   parseWorkflowRpcCommand,
 } from "../interface/command-actions.ts";
 import { abortRun, resumeRun } from "@zhushanwen/subagent-core";
+import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 
 // ── 访问器槽注入 helpers ─────────────────────────────────────
 
 /** 重置进程级 SubagentService 单例槽（setSubagentService 不接受 null，测试清理用
  *  Symbol 直写；key 与生产 getServiceSlot 的 SERVICE_SLOT_KEY 一致）。 */
 function resetServiceSlot(): void {
-  const slot = Reflect.get(globalThis, Symbol.for("@zhushanwen/pi-subagents.service")) as
+  const slot = Reflect.get(globalThis, Symbol.for(GLOBAL_SLOT_KEYS.service)) as
     | { current: unknown }
     | undefined;
   if (slot) slot.current = null;

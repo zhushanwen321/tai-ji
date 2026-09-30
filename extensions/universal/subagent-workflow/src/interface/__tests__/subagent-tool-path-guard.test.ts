@@ -37,6 +37,7 @@ import { setSubagentService } from "@zhushanwen/subagent-core";
 
 import { registerSubagentTool } from "../../interface/subagent-tool.ts";
 import { mockExtensionApi } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/mock-extension-api.ts";
+import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 
 // ── 访问器槽注入 helpers ─────────────────────────────────────
 
@@ -48,7 +49,7 @@ const { mockServiceExecute } = vi.hoisted(() => ({
 /** 重置进程级 SubagentService 单例槽（setSubagentService 不接受 null，测试清理用
  *  Symbol 直写；key 与生产 getServiceSlot 的 SERVICE_SLOT_KEY 一致）。 */
 function resetServiceSlot(): void {
-  const slot = Reflect.get(globalThis, Symbol.for("@zhushanwen/pi-subagents.service")) as
+  const slot = Reflect.get(globalThis, Symbol.for(GLOBAL_SLOT_KEYS.service)) as
     | { current: unknown }
     | undefined;
   if (slot) slot.current = null;

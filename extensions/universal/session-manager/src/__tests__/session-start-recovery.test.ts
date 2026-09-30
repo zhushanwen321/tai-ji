@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import registerExtension from "../index.ts";
 
-const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger");
+const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/subagent-core.notifyLedger");
 
 interface WatchInvocation {
 	notifyId: string;

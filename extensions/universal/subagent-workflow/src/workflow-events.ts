@@ -149,7 +149,7 @@ function resolveCurrentPi(): ExtensionAPI {
   if (!pi) {
     throw new Error(
       "workflow deps current pi binding unset: setupWorkflowDomain has not run " +
-        "(slot @zhushanwen/pi-subagents.workflow-domain-state); re-run extension factory to re-register",
+        `(slot ${GLOBAL_SLOT_KEYS.workflowDomainState}); re-run extension factory to re-register`,
     );
   }
   return pi;

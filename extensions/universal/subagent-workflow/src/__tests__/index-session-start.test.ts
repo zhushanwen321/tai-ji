@@ -96,7 +96,7 @@ import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-
 /** 重置双 Service 单例槽（setter 不接受 null，测试清理用 Symbol 直写；
  *  key 与生产 getServiceSlot / getModelServiceSlot 的 Symbol.for 一致）。 */
 function resetLifecycleSlots(): void {
-  for (const key of ["@zhushanwen/pi-subagents.service", "@zhushanwen/pi-subagents.model-service"]) {
+  for (const key of ["@zhushanwen/subagent-core.service", "@zhushanwen/subagent-core.modelService"]) {
     const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
     if (slot) slot.current = null;
   }

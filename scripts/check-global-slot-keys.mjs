@@ -52,7 +52,9 @@ function collect(dir, out = []) {
     return out;
   }
   for (const name of entries) {
-    if (name === "node_modules" || name === "__tests__" || name === "dist") continue;
+    // __tests__ 不跳过：测试也声明/读取槽键，漏扫曾致改名后测试写旧键、生产读新键
+    //（2026-09-30 实证：12 例扩展测试假红）。
+    if (name === "node_modules" || name === "dist") continue;
     const full = join(dir, name);
     const st = statSync(full);
     if (st.isDirectory()) {

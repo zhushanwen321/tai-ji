@@ -71,7 +71,7 @@ import subagentsExtension from "../index.ts";
 process.setMaxListeners(50);
 
 function resetLifecycleSlots(): void {
-  for (const key of ["@zhushanwen/pi-subagents.service", "@zhushanwen/pi-subagents.model-service"]) {
+  for (const key of ["@zhushanwen/subagent-core.service", "@zhushanwen/subagent-core.modelService"]) {
     const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
     if (slot) slot.current = null;
   }

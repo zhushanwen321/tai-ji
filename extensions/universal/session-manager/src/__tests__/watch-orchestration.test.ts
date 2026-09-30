@@ -22,7 +22,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 
 import registerExtension from "../index.ts";
 
-const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger");
+const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/subagent-core.notifyLedger");
 
 interface EmittedEvent {
 	event: string;
