@@ -14,8 +14,8 @@
  * 第 6 个导出：recoverCrashedRuns(store, runs, reason, hooks?) —— 崩溃恢复装配
  * （loadAll → 中断收编 → evict），宿主专属事件经 hooks 外置。[D15] 后收编动作改经
  * terminal-actions.interruptRun 终局编排入口（落 run-interrupted 转移事件——[D2]
- * interrupted 暂停态，非终局），v1 兼容尾段（transition("done","failed") + store.save
- * 整文件覆盖写）随 [D1] store 单模式重写即刻删除。
+ * interrupted 暂停态，非终局），v1 兼容尾段（收编时对 v1 实体覆盖写终态快照 +
+ * store.save 整文件覆盖写）随 [D1] store 单模式重写即刻删除。
  *
  * 私有 makeHandlers(run, deps) → WorkerHandlers：
  * - onMessage → handleWorkerMessage(run, raw, deps, handlers)
