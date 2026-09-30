@@ -62,6 +62,7 @@ import { project } from "../persistence/execution-record.ts";
 // [P1b-1] settle 链收口单点（settleOneShotOutcome workflow origin 分支的终态收口
 // 迁入；execution/service → orchestration import 为既有先例方向——run-state-evidence）。
 import { settleWorkflowRecord } from "../../orchestration/terminal-actions.ts";
+import { EngineError } from "../engine/common/errors.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
@@ -268,27 +269,24 @@ export class RunOrchestration {
       : undefined;
 
     // ── 1.5 引擎路由（D2 单轨 + D3-② 路由单点：统一经 routeEngineForHost）──
-    // 唯一实现在 engine/routing.ts（pi 同步短路 + registry 注入 + 兜底回本地 pi 实例
-    // 收敛于此）；本调用点只装配三层输入与注入件。时机：路由（含 probe）在 record
-    // 创建前完成——兜底时 record 按 pi 语义创建 + engineFallback 留痕（D5 字节级守护
-    // 只约束「无 fallback 的纯缺省路径」）；守卫命中/strict 时在此 throw，不产生孤儿
-    // record。pi 请求路径同步短路（routed 非 Promise，零微任务——首个 await 前完成
+    // 唯一实现在 engine/routing.ts（pi 同步短路 + registry 注入收敛于此）；本调用点
+    // 只装配三层输入与注入件。时机：路由（含 probe）在 record 创建前完成——引擎未
+    // 注册 / probe 失败 / 全局配置读不出来都在此 throw，不产生孤儿 record，也不换
+    // 引擎执行。pi 请求路径同步短路（routed 非 Promise，零微任务——首个 await 前完成
     // 路由决策；执行经进程边界，「run 内首个 await 前已触达 executeAndAwait」的旧
     // 时序契约由引擎协议化设计 §3.5.3 作废放宽）。
     // [u-h2 D2-1] 路由先行于 pi 链 model 解析：agentConfig 是路由第二层输入（frontmatter
     // engine）已前置解析；pi 的 resolveModel 移到路由之后、按目标引擎分支执行——非 pi
     // 请求不被 pi registry 解析错误拦截（F2-A/B 时序根因），model 校验归目标引擎（D2-2）。
+    const modelService = this.deps.getModelService();
+    modelService.assertGlobalConfigReadable();
     const routingInput = {
       callEngine: opts.engine,
       agentEngine: agentConfig?.engine,
-      globalDefaultEngine: this.deps.getModelService().getGlobalConfig().defaultEngine,
+      globalDefaultEngine: modelService.getGlobalConfig().defaultEngine,
     };
     const routed = routeEngineForHost({
       routing: routingInput,
-      // 守卫 c 判据只看调用方显式指定的 model（resolved model 含 ctxModel 兼底，
-      // 恒非空会把一切兜底误判为 model 绑定命中）
-      taskModel: opts.model,
-      strict: this.deps.getModelService().getGlobalConfig().engineRouting?.strict === true,
       // [U2 pi-workflow-run-resource-model] probe 通道经窗口实例解析单点改道（不再
       // 直连 registry getEngine——惰性单例是薄壳跨窗口常驻的根源）。本入口（GUI 直派
       // 链）的窗口 = chat record 轮次，其窗口实例挂载归 U3 接线；窗口键 undefined =
@@ -569,10 +567,8 @@ export class RunOrchestration {
    * 结果提取（D5 字节级守护的执行侧落点；嵌套三元改早返回，判据与产物逐字节等价）：
    *   - pi 纯缺省/显式 pi：不盖 engine 键（pi record entry 序列化产物不得新增 engine
    *     键，undefined 经 JSON 省略）——与旧 pi 主路径 piOpts 剥离语义逐字节一致；
-   *   - pi 兜底：engine='pi' + engineFallback 留痕（engine = 实际执行引擎，from=请求
-   *     引擎留痕）；
-   *   - 非 pi：engine=route.engineId 显式留痕（+engineFallback 如有）+ model 覆写
-   *     （frontmatter 声明透传，u-h2 D2-1③）。
+   *   - 非 pi：engine=route.engineId 显式盖章 + model 覆写（frontmatter 声明透传，
+   *     u-h2 D2-1③）。路由不换引擎，故 route.engineId 恒等于三层指定的那个 id。
    */
   private stampEngineOnRecordOpts(
     opts: ExecuteOptions,
@@ -585,11 +581,7 @@ export class RunOrchestration {
         ...opts,
         ...(engineModel !== undefined ? { model: engineModel } : {}),
         engine: route.engineId,
-        ...(route.engineFallback !== undefined ? { engineFallback: route.engineFallback } : {}),
       };
-    }
-    if (route.engineFallback !== undefined) {
-      return { ...opts, engine: DEFAULT_ENGINE_ID, engineFallback: route.engineFallback };
     }
     return opts.engine === undefined ? opts : { ...opts, engine: undefined };
   }
@@ -633,7 +625,6 @@ export class RunOrchestration {
         ctxModel: identity.resolved.model,
         onEvent: journal.onEvent,
         ...(stream !== undefined ? { stream } : {}),
-        ...(record.engineFallback !== undefined ? { engineFallback: record.engineFallback } : {}),
         // [F6] 根 session id 注入（relay 归属键 SESSION_ID 权威源；null/空串不上 wire）
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }

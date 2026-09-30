@@ -924,7 +924,6 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     // [review round2] worktree 隔离标志：内存源有 handle 或跨重启重建带 hadWorktree 均为 true。
     worktree: r.worktreeHandle !== undefined || r.hadWorktree === true,
     engine: r.engine,
-    engineFallback: r.engineFallback,
     // U2：engineHandle 经 entry 持久化（register/archive 双写点均经本投影），无则 undefined 自然省略
     engineHandle: r.engineHandle,
     // [U5 修复 U2 披露的投影缺口] batchFinalized 随本投影持久化（register entry /

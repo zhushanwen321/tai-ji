@@ -86,7 +86,7 @@
 | 方法 | 调用时机 | 时序约束 | 超时分级 | 幂等 | 失败形态 |
 |---|---|---|---|---|---|
 | `initialize` | 引擎进程启动后、首个 run 前握手（`engine-client.ts:422-441`） | 必须是首个请求；应答仅诊断面——capabilities/models 与 manifest 不一致 → warn 留痕，不参与同步成员判据（`methods.ts:11-13`、:126） | 控制面：`HANDSHAKE_TIMEOUT_MS` = 10s（`engine-protocol.ts:60`） | 否（每连接一次） | 超时 → `engine_handshake_timeout` 引擎不可用；版本越界 → `engine_protocol_mismatch`；gate 位多声明 → `engine_capability_mismatch`（§3） |
-| `probe` | 宿主诊断（可用性/版本漂移检测、fallback 三检查输入） | 连接就绪后（`remote-engine.ts:184-190`） | 无宿主墙钟——引擎实现须快速返回；引擎内部子进程探测自设上限（先例 SDK `node-executor.ts:33` **PROBE_TIMEOUT_MS** = 5s） | 是（zcode `probeCache`，`force` 旁路，`zcode-engine.ts:213`） | `ProbeReport.ok=false` 时 `error{code,recovery}` 必填（`contract-types.ts:227-235`）；宿主归 `engine_probe_failed` |
+| `probe` | 宿主诊断（可用性/版本漂移检测输入） | 连接就绪后（`remote-engine.ts:184-190`） | 无宿主墙钟——引擎实现须快速返回；引擎内部子进程探测自设上限（先例 SDK `node-executor.ts:33` **PROBE_TIMEOUT_MS** = 5s） | 是（zcode `probeCache`，`force` 旁路，`zcode-engine.ts:213`） | `ProbeReport.ok=false` 时 `error{code,recovery}` 必填（`contract-types.ts:227-235`）；宿主归 `engine_probe_failed`（结构化失败，不换引擎） |
 | `run` | 任务派发（chat 域 `executeViaEngine` / workflow 域 SAR（SubprocessAgentRunner）.run） | 握手后；期间事件经 event 通知、句柄经 `host/handleReady` 回传；**应答到达即终态**（`methods.ts:153`） | **任务级无墙钟**（宿主不传 timeoutMs——`engine-client.ts:539`；超时治理 = 宿主显式 `timeoutMs` 走 cancel 链 + 引擎侧回收层 timer，§7） | 否（每 runId 一次） | 运行中失败不 reject——合成 error outcome + handle 正常返回（`remote-engine.ts:196-200`）；error 帧码按 §4 透传；进程崩 → `engine_crashed`（附 stderr 尾 400 字） |
 | `cancel` | 用户取消或宿主超时链触发，仅 run 在途时 | 应答仅受理确认；**终态本体由该 run 的 run 应答承载**（`methods.ts:164-170`） | 控制面：`CANCEL_SETTLE_GRACE_MS` = 3s（`engine-protocol.ts:63`；`engine-client.ts:602`）——超窗 core 走杀链 | 是（`ok:true` 恒定） | 引擎须 3s 内收敛终态；stop 生效 = 终态在窗内到达；超窗 = 共享进程收割、在途任务走崩溃路径（zcode 实装 §7 abort 链） |
 | `read` | SessionView 读取（降级链①级，§8） | handle 有效即可；`dataDir` 必填（存量定位依赖，`methods.ts:172-176`） | 任务级无墙钟（大会话慢读不设限，`remote-engine.ts:272-279`） | 是（纯读） | 引擎抛错 → 宿主降级链②③级承接（§8） |
@@ -126,7 +126,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | `engine_model_mismatch` | `dynamic:true` 运行期引擎拒绝 | run 失败 + record 标 failed |
 | `engine_handshake_timeout` | initialize 超时（10s） | 引擎不可用 |
 | `engine_crashed` | 进程意外退出 | 在途 run 失败（附 stderr 尾 400 字）；**崩溃重建上限 3 次、指数退避 1s/2s/4s**（`CRASH_REBUILD_MAX_ATTEMPTS`/`CRASH_REBUILD_BACKOFF_MS`，`engine-protocol.ts:65-76`），超限标记不可用至宿主重启 |
-| `engine_probe_failed` | probe 失败 | 既有 fallback 三检查不变 |
+| `engine_probe_failed` | probe 失败 | 结构化失败（逐项 check 摘要 + 恢复指引），**不自动切换引擎**；要换引擎只能由调用方显式传 `engine:'<id>'` |
 
 **conformance 锁定面**：协议一致性由 `packages/subagent-core/src/execution/engine/__tests__/conformance/engine-conformance.live.test.ts` 套件锁定（引擎 manifest、relay 常量镜像、run 帧映射）；SDK 侧封闭断言在 `subagent-engine-sdk/src/__tests__/protocol.test.ts`（方法集/通道集同源互证）与 `contract-closure.test.ts`（core↔SDK 双向可赋值）；两引擎各有 bin 级协议 e2e（如 `zcode-subagent-cli/src/__tests__/protocol-e2e.test.ts`：握手/反向请求/event seq 单调/终态/dispose 幂等 + 进程随 stdin 关闭退出，五断言）。chat 域独立协议面已退役：续聊轮 = 新 run + `RunParams.resume` 锚点（约束 C-proc-13；`engine-protocol.ts:14-17`）。
 
@@ -163,8 +163,8 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 **两层词表分工**：
 
-1. **宿主词表**（`packages/subagent-core/src/execution/engine/common/errors.ts:20-33`）：`ENGINE_ERROR_CODES` 封闭枚举 12 条——`engine_not_found` / `engine_probe_failed` / `engine_credential_missing` / `nested_spawn_rejected` / `schema_emulation_failed` / `engine_timeout` / `engine_capability_unsupported` / `engine_capability_mismatch` / `engine_session_not_resumable` / `model_not_available` / `prompt_too_large` / `engine_run_failed`。`DEFAULT_RECOVERY_HINTS` 为 `Record<EngineErrorCode, string>` 全集覆盖（:77-114）——**新增错误码漏写恢复模板在此处编译失败**（机器检查；恢复模板全文以 errors.ts 为准，本指南不复制）。
-2. **SDK 协议码**（`packages/subagent-engine-sdk/src/protocol/error-codes.ts:23-33`）：`ENGINE_PROTOCOL_ERROR_CODES` 9 条固定词表（全文见 `error-codes.ts:23-33`）+ 透传前缀判定（`ENGINE_ERROR_CODE_PREFIX = "engine_"`，:46-52）——非固定词表但带 `engine_` 前缀的引擎自报码由 core **原样透传，不解释文案**。透传面已登记码 `engine_method_unsupported`（宽容语义②：未知正向 method 的引擎应答码——**登记未实装**，刻意不进 9 条消费词表，见 error-codes.ts 头注与 §2.1 应答义务）。
+1. **宿主词表**（`packages/subagent-core/src/execution/engine/common/errors.ts:20-34`）：`ENGINE_ERROR_CODES` 封闭枚举 13 条——`engine_not_found` / `engine_probe_failed` / `engine_config_unreadable` / `engine_credential_missing` / `nested_spawn_rejected` / `schema_emulation_failed` / `engine_timeout` / `engine_capability_unsupported` / `engine_capability_mismatch` / `engine_session_not_resumable` / `model_not_available` / `prompt_too_large` / `engine_run_failed`。`DEFAULT_RECOVERY_HINTS` 为 `Record<EngineErrorCode, string>` 全集覆盖（:78-119）——**新增错误码漏写恢复模板在此处编译失败**（机器检查；恢复模板全文以 errors.ts 为准，本指南不复制）。`engine_config_unreadable` 是**宿主生成**码（非引擎 error 帧透传面）：全局 config.json 存在但读不出来（坏 JSON / 权限）时，派发前显式拒绝——缺省引擎是未知量，不按内置缺省 pi 执行（`model-config-service.ts` `assertGlobalConfigReadable`）。
+2. **SDK 协议码**（`packages/subagent-engine-sdk/src/protocol/error-codes.ts:33-43`）：`ENGINE_PROTOCOL_ERROR_CODES` 9 条固定词表（全文见 `error-codes.ts:33-43`）+ 透传前缀判定（`ENGINE_ERROR_CODE_PREFIX = "engine_"`，:56-62）——非固定词表但带 `engine_` 前缀的引擎自报码由 core **原样透传，不解释文案**。透传面已登记码 `engine_method_unsupported`（宽容语义②：未知正向 method 的引擎应答码——**登记未实装**，刻意不进 9 条消费词表，见 error-codes.ts 头注与 §2.1 应答义务）。
 
 **引擎新增错误码的登记义务**：引擎侧合成码不进 SDK 词表（透传面自管），但**必须登记进宿主 `ENGINE_ERROR_CODES` 枚举 + `DEFAULT_RECOVERY_HINTS`**——否则 GUI 无法按 code 分流、宿主词表出现未收录码。先例：zcode `schema_emulation_failed`（`zcode-engine.ts:893` 形态——SDK 词表无此码，宿主词表有）；待登记先例：`schema_gate_exhausted`（设计 4 拟新增，已裁决未实施；实施期定型项）。
 
@@ -183,12 +183,12 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | `RunContextParams`（:63-97） | `cwd?` | 可选 | worktree 隔离时 = worktree 路径；缺省引擎回退自身进程 cwd |
 | | `model?` | 可选 | 请求模型 ref（未传 = 引擎缺省模型） |
 | | `schemaEnv?` | 已退役（H1） | wire 不携带——env 由 pi 引擎从 wire `task.schema` 派生注入孙进程（`spawn-args.ts` `applySchemaEnvToChildEnv`），resolver 产出侧负断言锁防回流；schemaEnforcement 升级的**武装回执部分已实施**——见 §6 `armed` 事件与宿主等待窗 fail-fast |
-| | `ctxModel?` / `engineFallback?` / `streamMode?` | 可选 | ctx 模型 ref；fallback 留痕：宿主在 ctx 传入 `{from, reason}` 种子，引擎回填进 outcome.engineFallback；事件粒度请求（按 `capabilities.eventGranularity` 实际能力执行） |
+| | `ctxModel?` / `streamMode?` | 可选 | ctx 模型 ref；事件粒度请求（按 `capabilities.eventGranularity` 实际能力执行） |
 | | `sessionRootId?` | 可选 | **relay 身份键权威源**——引擎据此重写子进程 relay 归属 env（SESSION_ID/RECORD_ID），不靠 env 继承（[architecture.md](architecture.md) §3） |
 | | `sessionDir?` | 可选 | 权威 subagent session 目录（宿主以 `getSubagentSessionDir` 推导，引擎不自推导；缺省走引擎内 legacy fallback） |
 | | `extensionPaths?` | 可选 | 孙进程显式加载的扩展路径集——宿主经 HostServices 端口现取上 wire，pi 引擎逐项拼 `--extension` argv（随 `--no-extensions` 禁 settings 清单 discovery）；undefined/空 = 不拼任何 `--extension`；per-host 常量故落 ctx 而非 task |
 
-`AgentCallOpts` 引擎面子集 17 字段（1 必填 + 16 可选，`contract-types.ts:336-378`；core 全量 20 字段，其中 model/cwd 改挂 ctx 不双写，`engineFallback` 本就是 ctx 独有字段、从不在任务面，engine/timeoutMs/returnMeta 宿主自持不透传，字段裁决注 :323-331）：任务语义（`prompt` 必填、`schema?`、`thinkingLevel?`、`skill?`/`skillPath?`、`agent?`、`appendSystemPrompt?`、`description?`、`scene?`）、轮次预算（`maxTurns?`/`graceTurns?`/`idleTimeoutMs?`——显式 0/负 = 禁用 idle GC）、隔离与权限（`worktree?`/`fork?`/`forkSource?`/`denyTools?`/`permissionMode?`——denyTools/permissionMode 为 SDK 侧可选字段，宿主 AgentCallOpts 不携带、恒未传）。`forkSource`：无此概念的引擎按未知可选字段忽略、行为与不传一致——fork/fork-from 的同步拒发生在宿主能力门 `assertTaskShapeSupported`（steer/conversation 双 unsupported 时拒并附引导 message，`capability-gate.ts:85-94`），不到引擎侧。
+`AgentCallOpts` 引擎面子集 17 字段（1 必填 + 16 可选，`contract-types.ts:336-378`；core 全量 20 字段，其中 model/cwd 改挂 ctx 不双写，engine/timeoutMs/returnMeta 宿主自持不透传，字段裁决注 :323-331）：任务语义（`prompt` 必填、`schema?`、`thinkingLevel?`、`skill?`/`skillPath?`、`agent?`、`appendSystemPrompt?`、`description?`、`scene?`）、轮次预算（`maxTurns?`/`graceTurns?`/`idleTimeoutMs?`——显式 0/负 = 禁用 idle GC）、隔离与权限（`worktree?`/`fork?`/`forkSource?`/`denyTools?`/`permissionMode?`——denyTools/permissionMode 为 SDK 侧可选字段，宿主 AgentCallOpts 不携带、恒未传）。`forkSource`：无此概念的引擎按未知可选字段忽略、行为与不传一致——fork/fork-from 的同步拒发生在宿主能力门 `assertTaskShapeSupported`（steer/conversation 双 unsupported 时拒并附引导 message，`capability-gate.ts:85-94`），不到引擎侧。
 
 **resume 锚形态**：`ResumeAnchor = { sessionRef: Record<string,string>, journalPath? }`（`contract-types.ts:154-159`）；zcode 锚 = `sessionRef {sessionId, dbPath}`，pi 锚 = `{recordId?, sessionFile?}`（`EngineHandleData` 注释 :132）。引擎按锚分派 create/resume（`zcode-engine.ts:297-338` 形态）。锚只在协议层经 `run.params.resume` 携带，形状 = `{ recordId, resume?: ResumeAnchor }`（锚本体在 `params.resume.resume.sessionRef`；`RunContextParams` 无 resume 键）。zcode 判别函数（:1098-1110）读该键做形状收窄 + dbPath 白名单校验；其源码形参名叫 ctx 是引擎内部命名，勿与协议层 `RunContextParams` 混同。
 

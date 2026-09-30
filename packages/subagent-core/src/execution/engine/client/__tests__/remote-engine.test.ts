@@ -206,11 +206,10 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
 });
 
 describe("RemoteEngine run 帧映射", () => {
-  it("task 子集收窄（model/cwd/engineFallback 改挂 ctx）+ ctxModel 投影 provider/id", async () => {
+  it("task 子集收窄（model/cwd 改挂 ctx）+ ctxModel 投影 provider/id", async () => {
     const { engine, cleanup } = makeEngine();
     const { ctx, events } = makeCtx({
       ctxModel: { id: "glm-5.1", name: "GLM", provider: "zai", reasoning: true },
-      engineFallback: { from: "pi", reason: "probe-failed" },
     });
     const task = {
       prompt: "do things",
@@ -236,11 +235,12 @@ describe("RemoteEngine run 帧映射", () => {
       cwd: "/tmp/w2-cwd",
       model: "zai/glm-4.6",
       ctxModel: "zai/glm-5.1",
-      engineFallback: { from: "pi", reason: "probe-failed" },
     });
     // H1：schemaEnv wire 字段退役——schema 本体只经 task.schema 承载，ctx 不得重现该键
     expect(wire.task).not.toHaveProperty("schemaEnv");
     expect(wire.ctx).not.toHaveProperty("schemaEnv");
+    // 运行期引擎 fallback 已删：ctx 不得重现留痕字段（防字段名复活）
+    expect(wire.ctx).not.toHaveProperty("engineFallback");
     expect(wire.ctx).not.toHaveProperty("streamMode"); // 无 stream → 缺省（JSON 序列化丢 undefined 键）
     expect(result.outcome.content).toBe("fake-content-run-1");
     expect(result.handle.data.engineId).toBe("fake");

@@ -335,7 +335,6 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
           model: "prov/m1",
           ctxModel: "prov/ctx-model",
           streamMode: "stream",
-          engineFallback: { from: "pi", reason: "manifest" },
         },
       },
     });
@@ -368,7 +367,8 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     expect(captured?.ctx.taskId).toBe("run-1");
     expect(captured?.ctx.ctxModel).toEqual({ provider: "prov", id: "ctx-model" });
     expect(captured?.ctx).not.toHaveProperty("schemaEnv");
-    expect(captured?.ctx.engineFallback).toEqual({ from: "pi", reason: "manifest" });
+    // 运行期引擎 fallback 已删：ctx 不得重现留痕字段（防字段名复活）
+    expect(captured?.ctx).not.toHaveProperty("engineFallback");
     expect(captured?.ctx.stream).toBeDefined();
     expect(captured?.ctx.signal).toBeInstanceOf(AbortSignal);
 

@@ -138,17 +138,6 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * entry data.engineFallback → shared engineFallback（U1）。坏形状（非 plain object /
- * from/reason 非 string）不投影该字段——防御降级不抛，消费端按无 fallback 处理。
- */
-function projectEngineFallback(v: unknown): { from: string; reason: string } | undefined {
-  if (!isPlainRecord(v)) return undefined
-  const from = optString(v.from)
-  const reason = optString(v.reason)
-  return from !== undefined && reason !== undefined ? { from, reason } : undefined
-}
-
-/**
  * entry data.engineHandle → shared engineHandle（U1）。守卫已收敛到 core 单一实现
  * parseEngineHandle（dual-track-convergence D1 双守卫收敛：此前本文件的
  * projectEngineHandle 与 subagent-engine-history 的 extractRecordEngineHandle 两份
@@ -302,20 +291,18 @@ function deriveElapsedSeconds(startedAt: number | undefined, endedAt: number | u
 }
 
 /**
- * U1 engine 三字段条件投影：投影层只透传（engine 非空才投影），缺省=pi 由读侧
- * extractRecordEngine 映射（不在此填默认值）；engineFallback 坏形状字段级降级不抛
- * （undefined 不进字段）；engineHandle 守卫 = core parseEngineHandle 单一实现。
+ * U1 engine 字段条件投影：投影层只透传（engine 非空才投影），缺省=pi 由读侧
+ * extractRecordEngine 映射（不在此填默认值）；engineHandle 守卫 = core
+ * parseEngineHandle 单一实现。
  */
 function projectEngineSpreadFields(
   d: Record<string, unknown>,
-): Pick<SubagentRecord, 'engine' | 'engineFallback' | 'engineHandle'> {
+): Pick<SubagentRecord, 'engine' | 'engineHandle'> {
   const engineRaw = optString(d.engine)
   const engine = engineRaw !== undefined && engineRaw.length > 0 ? engineRaw : undefined
-  const engineFallback = projectEngineFallback(d.engineFallback)
   const engineHandle = parseEngineHandle(d.engineHandle)
   return {
     ...(engine !== undefined ? { engine } : {}),
-    ...(engineFallback !== undefined ? { engineFallback } : {}),
     ...(engineHandle !== undefined ? { engineHandle } : {}),
   }
 }

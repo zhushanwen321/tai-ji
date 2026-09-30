@@ -363,7 +363,7 @@ function profileFromLegacyFallback(
   const skillsFallback = parseCommaListFallback(extractYamlField(yamlBlock, "skills"));
   const thinkingLevelFallback = extractYamlField(yamlBlock, "thinkingLevel");
   const defaultBackgroundRaw = extractYamlField(yamlBlock, "defaultBackground");
-  const engineFallback = extractYamlField(yamlBlock, "engine");
+  const engineValue = extractYamlField(yamlBlock, "engine");
 
   return {
     name: nameFallback,
@@ -371,7 +371,7 @@ function profileFromLegacyFallback(
     body,
     ...(modelFallback !== undefined ? { model: modelFallback } : {}),
     ...nonEmptyArraySpread("tools", toolsFallback),
-    ...(engineFallback !== undefined ? { engine: engineFallback } : {}),
+    ...(engineValue !== undefined ? { engine: engineValue } : {}),
     ...(thinkingLevelFallback !== undefined ? { thinkingLevel: thinkingLevelFallback } : {}),
     ...(defaultBackgroundRaw === "true" ? { defaultBackground: true } : {}),
     ...(maxTurnsFallback !== undefined ? { maxTurns: maxTurnsFallback } : {}),

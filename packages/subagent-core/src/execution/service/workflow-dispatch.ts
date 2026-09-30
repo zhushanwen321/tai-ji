@@ -53,6 +53,7 @@ import {
 import { resumeAnchorOf } from "../assembly/conversation-continuation.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import { updateFromEvent } from "../persistence/execution-record.ts";
+import { EngineError } from "../engine/common/errors.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
@@ -347,14 +348,14 @@ export class WorkflowDispatch {
     agentConfig: AgentConfig | undefined,
     parentRunId: string,
   ): Promise<EngineRouteResult> {
+    const modelService = this.deps.getModelService();
+    modelService.assertGlobalConfigReadable();
     const routed = routeEngineForHost({
       routing: {
         callEngine: opts.engine,
         agentEngine: agentConfig?.engine,
-        globalDefaultEngine: this.deps.getModelService().getGlobalConfig().defaultEngine,
+        globalDefaultEngine: modelService.getGlobalConfig().defaultEngine,
       },
-      taskModel: opts.model,
-      strict: this.deps.getModelService().getGlobalConfig().engineRouting?.strict === true,
       probe: (engineId) => resolveWorkflowWindowEnginePort(parentRunId, engineId).probe(),
       // [U2 pi-workflow-run-resource-model] pi 同步短路位的 piEngine 注入同样携带
       // parentRunId 窗口键：pi 请求经 routeEngineForHost 短路返回本 port，是成员任务
@@ -415,16 +416,12 @@ export class WorkflowDispatch {
     return identity;
   }
 
-  /** [executeWorkflowAgent 阶段拆分] record 引擎留痕（对齐 executeViaEngine 盖章规则：
-   *  pi 纯缺省不盖键；pi 兜底盖 'pi'+from；非 pi 盖 engineId）。原位 mutate execOpts。 */
+  /** [executeWorkflowAgent 阶段拆分] record 引擎留痕（盖章规则：pi 纯缺省不盖键，
+   *  非 pi 盖 engineId）。原位 mutate execOpts。 */
   private stampWorkflowEngineTrace(route: EngineRouteResult, execOpts: ExecuteOptions): void {
-    const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
-    if (!isPiRoute) {
+    if (route.engineId !== DEFAULT_ENGINE_ID) {
       execOpts.engine = route.engineId;
-    } else if (route.engineFallback !== undefined) {
-      execOpts.engine = DEFAULT_ENGINE_ID;
     }
-    if (route.engineFallback !== undefined) execOpts.engineFallback = route.engineFallback;
   }
 
   /**
@@ -505,7 +502,6 @@ export class WorkflowDispatch {
         ctxModel: identity.resolved.model,
         onEvent: observedEvent,
         ...(effectiveStream !== undefined ? { stream: effectiveStream } : {}),
-        ...(record.engineFallback !== undefined ? { engineFallback: record.engineFallback } : {}),
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),

@@ -49,7 +49,6 @@ prompt 入口 schema = `SessionPrompt.PromptInput`（`packages/opencode/src/sess
 | streamMode | 无参数（SSE 恒流式，delta 粒度固定） | §3 | 引擎按能力执行，参数无意义 |
 | sessionRootId | 无对应（嵌套关系由 session.parentID 表达，fork 时建立） | `packages/core/src/session/sql.ts:31` | 丢弃 |
 | sessionDir | 无对应（数据目录由 serve 进程启动环境决定，无法 per-run 指定） | — | 不可达；数据目录隔离靠多 serve 实例 |
-| engineFallback | 无对应（单引擎无 fallback 概念） | — | 引擎不回填 |
 
 ### resume（RunResumeParams）
 

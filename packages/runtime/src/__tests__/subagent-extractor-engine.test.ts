@@ -4,8 +4,7 @@
  * 背景（v1 全量快照条目兼容层已随「项目未上线、无 v1 数据」删除）：scanSubagentEntries
  * 只认 v2 条目对——每个 id = 一条 registered（身份）+ 可选一条 settled（终局）。
  * engine / engineHandle 是终态条目的字段（v2 schema 见 core record-entry.ts），投影层
- * 逐字透传（不做形状/值守卫）；engineFallback 无 v2 载体（v1 专有字段），投影恒不产出。
- * 缺省=pi 由读侧 extractRecordEngine 映射，投影层不填默认值。
+ * 逐字透传（不做形状/值守卫）。缺省=pi 由读侧 extractRecordEngine 映射，投影层不填默认值。
  *
  * 锁定：
  * - 终态条目 engine/engineHandle 逐项投影（sessionRef 键不枚举整体透传）

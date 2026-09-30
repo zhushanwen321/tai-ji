@@ -390,7 +390,7 @@ export interface WorktreeHandle {
 
 /**
  * 一次引擎执行的终态（协议 run 终态应答的 outcome 载荷）。锚定 core
- * orchestration AgentResult 并追加引擎层字段（engineId / engineFallback / exitCode）。
+ * orchestration AgentResult 并追加引擎层字段（engineId / exitCode）。
  */
 export interface AgentOutcome {
   content: string;
@@ -408,10 +408,8 @@ export interface AgentOutcome {
   /** 仅诊断——目录可能已被 finalize 清理，不得作为 cwd 复用。 */
   worktreePath?: string;
   toolCalls?: ToolCallEntry[];
-  /** 实际执行引擎（fallback 后可能 ≠ 请求值）。 */
+  /** 实际执行引擎。 */
   engineId: string;
-  /** fallback 留痕（record 同步投影，GUI 警告条数据源）。 */
-  engineFallback?: { from: string; reason: string };
   /** null = 被信号杀死（杀链/abort 合成终态的判据）。 */
   exitCode?: number | null;
   /**
@@ -478,7 +476,7 @@ export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/re
  *   - 判据② task（隔离与权限随任务声明）：worktree / fork / forkSource /
  *     denyTools / permissionMode；
  *   - 判据② task（诊断元数据）：description；
- *   - 判据③ ctx（环境值，引擎自推导与宿主不恒等）：model / cwd / engineFallback
+ *   - 判据③ ctx（环境值，引擎自推导与宿主不恒等）：model / cwd
  *     （对照 core orchestration/models/types.ts AgentCallOpts，协议层单列）；
  *   - 判据① 宿主自持不上协议：engine（路由决策已完成，收到的引擎即选中值）、
  *     timeoutMs（宿主超时链 mergeTimeoutSignal → cancel 帧，非引擎参数）、

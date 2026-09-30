@@ -314,8 +314,6 @@ export default {
     subagentNoOutcome: '(no outcome recorded)',
     engineBadgeTitle: 'Engine: {engine}',
     subagentStopReason: 'Why the last round stopped (display only)',
-    engineFallbackBadge: 'Requested {from} → fell back to {to}',
-    engineFallbackHint: 'Engine {from} probe failed and fell back to {to}; fix {from} and start a new session to retry',
     backToWorkflow: 'Back to workflow',
     subagentLoadFailed: 'Load failed',
     subagentRetry: 'Retry',

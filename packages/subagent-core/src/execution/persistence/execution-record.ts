@@ -181,8 +181,6 @@ export function createRecord(
     idleTimeoutMs?: number;
     /** 实际执行引擎 id（P4 路由留痕，D9①）。缺省 = pi 投影（存量零迁移）。 */
     engine?: string;
-    /** 引擎 fallback 留痕（probe 失败路由回默认引擎）。GUI 警告条数据源。 */
-    engineFallback?: { from: string; reason: string };
     /** [A3/S3 修复] 来源身份冷复活透传——origin/parentRunId 与 engine 同属 identity
      *  域经 createRecord 重建：冷查链漏传会让 workflow 批成员复活后 origin=undefined，
      *  绕过 messageHandler 的 one-shot 批成员守卫。tool 来源两字段恒 undefined。 */
@@ -206,7 +204,6 @@ export function createRecord(
     depth: identity.depth ?? 0,
     idleTimeoutMs: identity.idleTimeoutMs,
     engine: identity.engine,
-    engineFallback: identity.engineFallback,
     // [A3/S3 修复] 冷复活透传——origin 属 identity 域（见 identity 签名注释）
     origin: identity.origin,
     parentRunId: identity.parentRunId,

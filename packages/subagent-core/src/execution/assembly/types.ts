@@ -340,11 +340,6 @@ export interface ExecuteOptions {
    * 缺省（历史调用方不设）= pi 投影。createRecordForMode 读入 record identity。
    */
   engine?: string;
-  /**
-   * 引擎 fallback 留痕（D9①：probe 失败路由回默认引擎时由路由层写入）。
-   * from = 请求引擎 id，reason 恒 'engine_probe_failed'（GUI 警告条数据源）。
-   */
-  engineFallback?: { from: string; reason: string };
   // 注：fork 深度不从外部传入（曾暴露 parentForkDepth，改用 ALS 后 execute 内部从调用链派生，
   // 公开字段成为死字段误导调用方，已移除）。深度限制检查见 session-runner.ts 内部 RunOptions.parentForkDepth
   // （与历史残留的 types.ts RunOptions 同名不同 interface——后者已删除）。
@@ -573,8 +568,6 @@ export interface SubagentRecord {
    * GUI 警告条/引擎标记的数据源之一。
    */
   engine?: string;
-  /** 引擎 fallback 留痕（D9①：probe 失败路由回默认引擎）。GUI 警告条数据源。 */
-  engineFallback?: { from: string; reason: string };
   /**
    * 引擎自描述定位符（U1：EngineHandleData 的持久化消费面子集，引擎无关——
    * sessionRef 整体透传不枚举内部键）。read 降级链①②级的数据源（runtime
@@ -611,8 +604,6 @@ export interface SubagentsGlobalConfig {
    * 缺省 'pi'（P4 路由层 DEFAULT_ENGINE_ID）。加载期只做类型校验，注册表校验归路由层。
    */
   defaultEngine?: string;
-  /** 引擎路由策略（D9①）：strict=true 时一切 probe 失败直接报错（不 fallback）。 */
-  engineRouting?: { strict: boolean };
 }
 
 // ============================================================

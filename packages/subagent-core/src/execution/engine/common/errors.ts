@@ -20,6 +20,7 @@
 export const ENGINE_ERROR_CODES = [
   "engine_not_found",
   "engine_probe_failed",
+  "engine_config_unreadable",
   "engine_credential_missing",
   "nested_spawn_rejected",
   "schema_emulation_failed",
@@ -81,6 +82,10 @@ export const DEFAULT_RECOVERY_HINTS: Record<EngineErrorCode, string> = {
   engine_probe_failed:
     "Confirm the engine version (e.g. `<engine> --version`), then re-run the engine probe. " +
     "For contract drift, see docs/research/agent-engine-*.md for the expected output format.",
+  engine_config_unreadable:
+    "The global config file (config.json) exists but cannot be read or parsed, so the configured default engine " +
+    "is unknown — the run is rejected instead of silently falling back to another engine. " +
+    "Fix the file (or delete it to use the built-in default) and retry.",
   engine_credential_missing:
     "Configure the engine credentials (see the engine credential section of docs/research/agent-engine-*.md), " +
     "then retry — the preparer cannot synthesize credentials it has no source for.",

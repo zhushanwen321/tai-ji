@@ -1023,7 +1023,7 @@ describe('scanSubagentEntries（entry 扫描器：v2 自描述优先 + legacy �
       settledEntry({ stopReason: 'completed', error: 'boom', engine: 'zcode', engineHandle }),
     ])
 
-    // toEqual 忽略显式 undefined 键；v1 专有字段（closedReason / engineFallback 等）
+    // toEqual 忽略显式 undefined 键；v1 专有字段（closedReason 等）
     // 在 v2 条目无载体——不在本断言内
     expect(records).toEqual([{
       subagentId: 'sa-1',

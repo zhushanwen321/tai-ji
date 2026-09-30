@@ -346,10 +346,9 @@ export class RecordAccess {
       // [modeless] chatMode 不落 record（「模式」不是 record 状态——万物可续，
       // conversation 派发参数已随波 5 删除）。idleTimeoutMs 对全 record 生效。
       idleTimeoutMs: opts.idleTimeoutMs,
-      // P4 引擎留痕（D9①）：opts.engine/engineFallback 由引擎适配层写入（PiEngine.run
+      // P4 引擎留痕（D9①）：opts.engine 由引擎适配层写入（PiEngine.run
       // 从 RunContext 回填；缺省 = pi 投影，存量调用方零感知）
       engine: opts.engine,
-      engineFallback: opts.engineFallback,
       // [collect 退役] collect 路由选项不在 record 落值（原 sync 成员由
       // executeViaEngine 派发时点登记进协调器，随批机制删除——collect 值从未入 record）。
       controller,

@@ -143,7 +143,7 @@ describe('v2 subagent-record 条目投影守卫（collectV2SubagentPair / projec
     expect(r.startedAt).toBe(1000)
   })
 
-  it('v1 专有字段无 v2 载体：closedReason/eventLog/displayItems/batchFinalized/worktree/round/patchFile/resumable/chatMode/engineFallback 键不出现', () => {
+  it('v1 专有字段无 v2 载体：closedReason/eventLog/displayItems/batchFinalized/worktree/round/patchFile/resumable/chatMode 键不出现', () => {
     const v1OnlyFields = {
       closedReason: 'gc',
       eventLog: [{ type: 'record-created' }],
@@ -154,7 +154,6 @@ describe('v2 subagent-record 条目投影守卫（collectV2SubagentPair / projec
       patchFile: '/tmp/x.patch',
       resumable: true,
       chatMode: 'chat',
-      engineFallback: { from: 'zcode', reason: 'engine_probe_failed' },
     }
     const records = scanSubagentEntries([
       registeredEntry(v1OnlyFields),

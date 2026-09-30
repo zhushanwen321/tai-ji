@@ -142,16 +142,15 @@ describe("readGlobalConfig 三态（设计 D5）", () => {
     expect(loggerMock.warn).not.toHaveBeenCalled();
   });
 
-  it("明确值：合法 JSON 透传 defaultEngine 与 engineRouting（sanitize 后）", () => {
+  it("明确值：合法 JSON 透传 defaultEngine（sanitize 后）", () => {
     writeConfig(
       tmpDir,
-      JSON.stringify({ version: 1, maxConcurrent: 8, defaultEngine: "zcode", engineRouting: { strict: true } }),
+      JSON.stringify({ version: 1, maxConcurrent: 8, defaultEngine: "zcode" }),
     );
     const result = readGlobalConfig(tmpDir);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.config.defaultEngine).toBe("zcode");
-    expect(result.config.engineRouting).toEqual({ strict: true });
     expect(result.config.maxConcurrent).toBe(8);
     expect(loggerMock.warn).not.toHaveBeenCalled();
   });

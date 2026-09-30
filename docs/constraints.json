@@ -1595,10 +1595,10 @@
   },
   {
    "id": "C-ext-16",
-   "summary": "chat 域缺省引擎路径字节级守护：pi 缺省路由下 record.engine 恒 undefined（entry 序列化不增键），显式 engine:'pi' 亦剥离；引擎归属缺省映射只发生在读侧/渲染侧（D5）；兜底路径（engineFallback）是唯一允许 entry 增 engine 系字段的 pi 形态",
+   "summary": "chat 域缺省引擎路径字节级守护：pi 缺省路由下 record.engine 恒 undefined（entry 序列化不增键），显式 engine:'pi' 亦剥离；引擎归属缺省映射只发生在读侧/渲染侧（D5）；引擎路由不换目标——三层任一指定即按该引擎执行，不可用即结构化失败，entry 不因路由回落增 engine 系字段",
    "scope": [
-    "extensions/universal/subagent-workflow/src/execution/subagent-service.ts",
-    "extensions/universal/subagent-workflow/src/execution/__tests__/chat-engine-routing.test.ts"
+    "packages/subagent-core/src/execution/service/run-orchestration.ts",
+    "packages/subagent-core/src/execution/__tests__/chat-engine-routing.test.ts"
    ],
    "authority": [
     "../packages/subagent-core/src/execution/engine/routing.ts"

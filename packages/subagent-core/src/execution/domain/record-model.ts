@@ -187,11 +187,6 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
    */
   readonly engine?: string;
   /**
-   * 引擎 fallback 留痕（D9①：probe 失败路由回默认引擎）。GUI 警告条数据源；
-   * 缺省 = 无 fallback。持久化经 subagent-record entry。
-   */
-  readonly engineFallback?: { from: string; reason: string };
-  /**
    * 引擎自描述定位符（U2：非 pi run resolve 后回填、终态迁移落 entry 前——run 前
    * 缺省不可用）。sessionRef 整体透传（失败终态 sessionId 缺失时仍回填已有部分，
    * 读侧①级降②级的防御形态）；journalPath 为 retarget 后实际落盘路径。pi 分支不

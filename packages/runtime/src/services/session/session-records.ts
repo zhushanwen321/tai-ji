@@ -1172,9 +1172,9 @@ function planDocListEquals(a: PlanDocMeta[] | undefined, b: PlanDocMeta[] | unde
  * [modeless 波4] chatMode 比对维度随字段消亡删除（旧 entry 残留键被投影层忽略，
  * 不再构成显示信号）。
  * [U5/D4] resumable 比对位随字段退役删除——轮终翻转由 status 位天然触发。
- * [engine 域浅比较] engineHandle/engineFallback 是嵌套对象，applyRecordEntries 每轮
+ * [engine 域浅比较] engineHandle 是嵌套对象，applyRecordEntries 每轮
  * 重新解析 entry 派生新对象引用——=== 引用比较对同值也判不等（每轮多发 publish），
- * 故走字段级浅比较（见下方两个 equals helper）。zcode 续聊每轮换新 sessionId
+ * 故走字段级浅比较（见下方 equals helper）。zcode 续聊每轮换新 sessionId
  * （sessionRef.sessionId 变化）是真值变化，字段级比较天然触发 publish。
  * [拆分依据] 24 字段单链 && 圈复杂度 24 超 metrics-gate 门禁（≤15），按 record
  * 语义域拆四组 helper（身份锚 / 执行配置 / 统计 / 状态展示，见下方四个 equals）。
@@ -1200,14 +1200,13 @@ function recordIdentityEquals(a: SubagentRecord, b: SubagentRecord): boolean {
 }
 
 /**
- * [执行配置组] 模型/思考等级标量 + engine 域三件套（engine id / fallback 留痕 /
- * handle 锚——后两者经既有浅比较 helper，见上方「engine 域浅比较」注释）。
+ * [执行配置组] 模型/思考等级标量 + engine 域两件套（engine id / handle 锚——后者
+ * 经既有浅比较 helper，见上方「engine 域浅比较」注释）。
  */
 function recordRunConfigEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.model === b.model
     && a.thinkingLevel === b.thinkingLevel
     && a.engine === b.engine
-    && engineFallbackEquals(a.engineFallback, b.engineFallback)
     && engineHandleEquals(a.engineHandle, b.engineHandle)
 }
 
@@ -1246,16 +1245,6 @@ function stringRecordEquals(a: Record<string, string>, b: Record<string, string>
   const aKeys = Object.keys(a)
   if (aKeys.length !== Object.keys(b).length) return false
   return aKeys.every((key) => a[key] === b[key])
-}
-
-/** [engine 域浅比较] engineFallback 字段级（from/reason 均标量）。 */
-function engineFallbackEquals(
-  a: SubagentRecord['engineFallback'],
-  b: SubagentRecord['engineFallback'],
-): boolean {
-  if (a === b) return true
-  if (a === undefined || b === undefined) return false
-  return a.from === b.from && a.reason === b.reason
 }
 
 /**

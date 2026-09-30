@@ -77,8 +77,6 @@ export interface RunContextParams {
   model?: string;
   /** 上下文模型 ref（与 run 模型分离的 ctx 模型）。 */
   ctxModel?: string;
-  /** fallback 留痕（引擎回填 outcome.engineFallback 的种子）。 */
-  engineFallback?: { from: string; reason: string };
   /** 事件粒度请求（引擎按 capabilities.eventGranularity 实际能力执行）。 */
   streamMode?: "stream" | "coarse";
   /**

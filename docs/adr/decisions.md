@@ -317,3 +317,10 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **条件性重审**：若「崩溃后零成本恢复」被判定为产品级要求（长任务、token 成本高的场景），唯一正确形态是写侧携带身份——调用在派发时记下它启动了哪个成员（`agent-started` 载荷补成员记录 id，或把成员登记提前到该事件写入之前），提交时带上本次调用的身份，使「哪次提交属于哪次调用」成为记录读取而非事后推断；届时应另立 ADR 与设计，不在读侧续补。
 
 **登记**：未新增约束族（本条为能力删除与语义收敛，事件词表与载荷形态不变）。如需机器防回退，建议同批登记一条检查「resume 恢复链不得读取子代理会话文件内容」的约束；按「新增约束先登记再写代码」，需配套 `scripts/` 检查脚本与 [docs/constraints.json](../constraints.json) 条目后一并提交。
+
+### ADR-0093 引擎路由不换目标：显式指定即严格 + 不可用显式失败（2026-09-30 用户裁决）
+**决策**：一次 subagent 派发选哪个引擎，只由三层路由决定——调用参数 `engine` > agent .md frontmatter `engine` > 全局 config.json `defaultEngine`，三层全缺落内置缺省 `pi`；三层任一指定了引擎，运行期就按该引擎执行，**不换目标**。不可用一律以结构化错误显式失败：id 未注册（含 `defaultEngine` 指向已卸载引擎）→ `engine_not_found`（列已发现引擎 + 配置路径 + 安装指引）；probe 失败 → `engine_probe_failed`（逐项 check 摘要 + 恢复指引）；全局 config.json 存在但读不出来（坏 JSON / 权限）→ 派发前拒 `engine_config_unreadable`（缺省引擎是未知量，不按内置缺省 pi 执行；文件不存在仍是合法缺省）。要换引擎只能由调用方显式改传 `engine:'<id>'`。`EngineRouteResult` 只承载实际执行的引擎 id 与生效层，不存在「换了目标」的第二种值；`engineFallback` 留痕字段与 `engineRouting.strict` 配置项不存在。
+
+**依据**：① 静默换引擎等于替调用方改写意图——沙箱类任务被静默卸除安全能力、显式 model 与引擎 provider 的绑定被打破；② 「显式指定」与「该引擎不可用」是两个独立事实，后者不改变前者——把不可用降级为「换个引擎跑」会让失败不可见，用户在非预期引擎上拿到结果；③ 引擎清单与 manifest 在派发前同步可得，不可用应前置暴露并给恢复指引，宽容回落面没有服务对象。
+
+**登记**：设计规格权威源 [subagent-engine-protocolization.md](../architecture/subagent-engine-protocolization.md) §3.8 D4；约束 C-ext-16 描述随本裁决更新（entry 不因路由回落增 engine 系字段）；未新增约束族。

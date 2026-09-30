@@ -44,7 +44,6 @@ CLI `-p` 降级路径：`kimi -p "<prompt>" --output-format stream-json`（apps/
 | ctx.streamMode | 恒 stream | events-map.ts:31-42 等 delta 映射 | 引擎恒流式；coarse 请求被忽略 |
 | ctx.sessionRootId | 无对应 | — | kimi 无 relay 归属概念；忽略 |
 | ctx.sessionDir | `KIMI_CODE_HOME`（引擎数据根粒度，非 per-session） | bootstrap.ts:162-165 | 映射到 spawn env，粒度粗于 taiji 语义 |
-| ctx.engineFallback | 无对应 | — | 引擎回填种子，宿主自持 |
 | resume.recordId | 无对应 | — | core 预建 record 关联键，适配层自持 |
 | resume.resume.sessionRef | `session/resume` / `session/load` params.sessionId | server.ts:305-314,289-303 | 见 §6 sessionRef 构成建议 |
 

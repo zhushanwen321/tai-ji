@@ -834,9 +834,6 @@ export class ZcodeEngine implements EnginePort {
       content: "",
       durationMs: Date.now() - startedAt,
       ...(typeof task.worktree === "object" && task.worktree !== null ? { worktreePath: task.worktree.path } : {}),
-      // D9① fallback 留痕：路由层经 RunContext 投影（zcode 无 record 通路，outcome 是
-      // 唯一留痕面；pi 引擎另有 record 投影）
-      ...(ctx.engineFallback !== undefined ? { engineFallback: ctx.engineFallback } : {}),
     };
     const emit = (event: AgentEvent): void => {
       ctx.onEvent?.(event);

@@ -132,17 +132,15 @@ function errnoCodeOf(err: unknown): string | undefined {
 
 /**
  * 已解析 JSON 的 sanitize（loadGlobalConfig 与 readGlobalConfig 共用，防两处漂移）。
- * P4 引擎路由（D9）：非法值静默回缺省（'pi' / false）——config.json 是用户手编
- * 文件，坏值不炸启动（与 maxConcurrent 同判）。
+ * 非法值静默回缺省——config.json 是用户手编文件，坏值不炸启动（与 maxConcurrent
+ * 同判）；但「文件读不出来」不是坏值，由三态读取区分并让路由链显式拒绝。
  */
 function sanitizeParsedConfig(parsed: Partial<SubagentsGlobalConfig>): SubagentsGlobalConfig {
   const defaultEngine = sanitizeDefaultEngine(parsed.defaultEngine);
-  const engineRouting = sanitizeEngineRouting(parsed.engineRouting);
   return {
     version: parsed.version ?? DEFAULT_CONFIG.version,
     maxConcurrent: sanitizeMaxConcurrent(parsed.maxConcurrent),
     ...(defaultEngine !== undefined ? { defaultEngine } : {}),
-    ...(engineRouting !== undefined ? { engineRouting } : {}),
   };
 }
 
@@ -160,11 +158,4 @@ function sanitizeMaxConcurrent(value: unknown): number {
  */
 function sanitizeDefaultEngine(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-/** engineRouting 校验：仅认 strict 布尔，其余键忽略（向前兼容追加）。 */
-function sanitizeEngineRouting(value: unknown): { strict: boolean } | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const strict = (value as Record<string, unknown>).strict;
-  return typeof strict === "boolean" ? { strict } : undefined;
 }

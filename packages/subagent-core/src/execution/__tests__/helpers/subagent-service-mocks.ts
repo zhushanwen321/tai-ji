@@ -68,9 +68,15 @@ export function fsSyncModule(
     writeFileSync: vi.fn(),
     readdirSync: vi.fn(() => []),
   });
+  // 真实 fs 全量展开 + 五个同步写/探测函数覆写：只提供这五个会让任何其它 fs 调用
+  // （如全局配置读取的 readFileSync）在 mock 下抛「No export is defined」，把
+  // 「mock 不完整」伪造成真实 IO 失败。
+  const realExports: Record<string, unknown> = { ...actual };
+  delete realExports["default"];
   return {
-    default: { ...actual, ...syncMocks() },
+    ...realExports,
     ...syncMocks(),
+    default: { ...actual, ...syncMocks() },
     promises: actual.promises,
   };
 }

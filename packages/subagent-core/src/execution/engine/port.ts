@@ -78,12 +78,6 @@ export interface RunContext {
    */
   stream?: AgentStreamSink;
   /**
-   * [P4 D9①] 引擎 fallback 留痕（probe 失败路由回默认引擎）。路由层（routing.ts）
-   * 产出，引擎投影到 outcome.engineFallback（zcode 等无 record 通路的引擎以此留痕；
-   * pi 引擎另经 ExecuteOptions 投影进 record）。
-   */
-  engineFallback?: { from: string; reason: string };
-  /**
    * [F6] 根 session id（SubagentService.sessionRootId 注入）——pi 引擎 relay 归属键
    * SESSION_ID 的权威来源（经 wire ctx.sessionRootId → server 还原 → SpawnRunParams
    * → buildChildEnv）。刻意走 per-run ctx 而非 EngineClient 的进程级 env：客户端按

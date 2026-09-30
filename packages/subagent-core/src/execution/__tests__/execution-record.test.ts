@@ -1146,11 +1146,11 @@ describe("tool_end running index [perf]", () => {
 });
 
 // ============================================================
-// P4 引擎留痕字段（engine / engineFallback，D9①）
+// P4 引擎留痕字段（engine，D9①）
 // ============================================================
 
 describe("createRecord 引擎留痕字段（P4）", () => {
-  it("identity 带 engine/engineFallback 时进 record，JSON 序列化保留（持久化语义）", () => {
+  it("identity 带 engine 时进 record，JSON 序列化保留（持久化语义）", () => {
     const record = createRecord("sa-engine-1", {
       agent: "reviewer",
       model: "p/m",
@@ -1159,16 +1159,13 @@ describe("createRecord 引擎留痕字段（P4）", () => {
       slug: "s",
       startedAt: 1,
       engine: "pi",
-      engineFallback: { from: "zcode", reason: "engine_probe_failed" },
     });
     expect(record.engine).toBe("pi");
-    expect(record.engineFallback).toEqual({ from: "zcode", reason: "engine_probe_failed" });
     const serialized = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
     expect(serialized["engine"]).toBe("pi");
-    expect(serialized["engineFallback"]).toEqual({ from: "zcode", reason: "engine_probe_failed" });
   });
 
-  it("不传时两字段缺省（存量 record 消费方零影响——序列化后无键产生）", () => {
+  it("不传时 engine 缺省（存量 record 消费方零影响——序列化后无键产生）", () => {
     const record = createRecord("sa-engine-2", {
       agent: "worker",
       model: "p/m",
@@ -1178,10 +1175,8 @@ describe("createRecord 引擎留痕字段（P4）", () => {
       startedAt: 1,
     });
     expect(record.engine).toBeUndefined();
-    expect(record.engineFallback).toBeUndefined();
     const serialized = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
     expect("engine" in serialized).toBe(false);
-    expect("engineFallback" in serialized).toBe(false);
   });
 
   it("SubagentRecord → v2 终态条目投影保留 engine（record-entry 持久化链）", () => {
@@ -1206,9 +1201,6 @@ describe("createRecord 引擎留痕字段（P4）", () => {
     };
     const entry = v2SettledEntry({ ...base, engine: "pi" });
     expect(entry.engine).toBe("pi");
-    // [v1 兼容层删除] engineFallback 在 v2 条目契约无载体（终态条目字段集不含它，
-    // manifest 投影 / record 事件帧同缺）——原「entry 透传 engineFallback」断言随
-    // v1 全量快照写点删除，不另造字段补位（留痕唯一承载 = 上行 record 内存投影）。
     // 存量 record（无字段）投影后同样缺省——消费方按 pi 投影，零迁移
     expect(v2SettledEntry(base).engine).toBeUndefined();
   });
@@ -1274,7 +1266,6 @@ describe("SubagentRecord ↔ subagent-record v2 终态条目往返（U1 engineHa
   it("record 无 engine/engineHandle → 条目 JSON 不含对应键（undefined 经 JSON.stringify 自然省略，存量零迁移）", () => {
     const serialized = JSON.parse(JSON.stringify(v2SettledEntry(base))) as Record<string, unknown>;
     expect("engine" in serialized).toBe(false);
-    // engineFallback 同无 v2 载体（恒非键——见上组用例注释），原断言随 v1 删除
     expect("engineHandle" in serialized).toBe(false);
   });
 });

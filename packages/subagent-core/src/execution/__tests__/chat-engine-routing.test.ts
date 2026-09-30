@@ -13,8 +13,8 @@
 //   4. 未注册 engine id → engine_not_found
 //   5. 引擎分支骨架（record 创建+盖章 / taskSpec 字段 / detached run / done+failed
 //      终态迁移 / abort signal 触达引擎 kill-chain）
-//   6. U2：probe 兜底两态（默认路由兜底回 pi / 显式 engine 守卫报错）+ JournalWriter
-//      接线（taskId=record.id + onPoolResolved retarget）+ engineHandle 完整回填
+//   6. probe 失败一律 engine_probe_failed（不换引擎）+ JournalWriter 接线
+//      （taskId=record.id + onPoolResolved retarget）+ engineHandle 完整回填
 //
 // mock 策略：只 mock node:child_process.spawn（pi 原路径的 FakeChild，见
 // execute-nesting.test.ts 同款范式）——非 pi 引擎分支用假 EnginePort（registerEngine
@@ -565,11 +565,11 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
 });
 
 // ============================================================
-// U2：probe/守卫兜底 + JournalWriter + engineHandle 回填
+// U2：probe 失败即报错 + JournalWriter + engineHandle 回填
 // 设计锚点：D4/D6、U2 行
 // ============================================================
 
-describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
+describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
   let agentDir: string;
 
   beforeEach(() => {
@@ -584,27 +584,7 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     vi.clearAllMocks();
   });
 
-  it("[兜底] 默认路由 zcode + probe 失败 → 回退 pi 协议 run + engineFallback 留痕", async () => {
-    writeGlobalConfig(agentDir, "zcode");
-    const { service, zcode, piEngine } = setup(agentDir);
-    zcode.probeFailed = true;
-
-    const handle = await service.execute(baseOpts(agentDir));
-    // 兜底 = 走 pi 协议 run 路径（engine.run 被调；[W3] pi 与 run 域同路）
-    await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
-    expect(mockSpawn).not.toHaveBeenCalled();
-
-    const rec = service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId);
-    expect(rec?.engine).toBe("pi");
-    expect(rec?.engineFallback).toEqual({ from: "zcode", reason: "engine_probe_failed" });
-    // [v1 兼容层删除] engineFallback 在现行持久面无载体：v2 条目（record-entry.ts）、
-    // manifest 投影（terminalManifestRecord / derivedManifestRecord /
-    // buildAdoptedManifestProjection）与 record 事件帧均不含该字段——留痕唯一承载 =
-    // 上行 record 内存投影（collectRecords）。原「entry JSON 含 engine_probe_failed」
-    // 断言随 v1 全量快照写点删除，不另造字段补位。
-  });
-
-  it("[守卫] 显式 engine='zcode' + probe 失败 → engine_probe_failed 报错不兜底", async () => {
+  it("[路由] 显式 engine='zcode' + probe 失败 → engine_probe_failed 报错，不换引擎", async () => {
     const { service, zcode } = setup(agentDir);
     zcode.probeFailed = true;
 
@@ -829,22 +809,20 @@ describe("chat 引擎分支 U2：probe 兜底 / journal / engineHandle", () => {
     }
   });
 
-  it("[D5 回归] pi 纯缺省路径 entry 不含 engine/engineFallback/engineHandle 键", async () => {
+  it("[D5 回归] pi 纯缺省路径 entry 不含 engine/engineHandle 键", async () => {
     const { service, piEngine, pi } = setup(agentDir);
     const handle = await service.execute(baseOpts(agentDir));
     await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
 
     const rec = service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId);
-    // [v1 兼容层删除] engine/engineHandle 的持久载体 = v2 终态条目（engineFallback 在
-    // 现行持久面无字段——此处保留缺位断言作「v2 投影不重新引入该键」的回归守卫）。
+    // [v1 兼容层删除] engine/engineHandle 的持久载体 = v2 终态条目——此处保留缺位断言
+    // 作「v2 投影不重新引入该键」的回归守卫。
     const entryJson = JSON.stringify(v2SettledEntry(rec!));
-    expect(entryJson).not.toContain("engineFallback");
     expect(entryJson).not.toContain("engineHandle");
     expect(entryJson).not.toMatch(/"engine"/);
     // pi.appendEntry 上的 record entry 同形态（register 写点）
     const entry = lastRecordEntry(pi);
     expect(entry?.engine).toBeUndefined();
-    expect(entry?.engineFallback).toBeUndefined();
     expect(entry?.engineHandle).toBeUndefined();
   });
 

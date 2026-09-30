@@ -191,11 +191,6 @@ export interface SubagentRecord {
    */
   engine?: string
   /**
-   * 引擎 fallback 留痕（D9①：probe 失败路由回默认引擎）。from = 请求引擎 id，
-   * reason 恒 'engine_probe_failed'。GUI 警告条数据源；缺省 = 无 fallback。
-   */
-  engineFallback?: { from: string; reason: string }
-  /**
    * 引擎自描述定位符（非 pi 引擎的历史详情读取键，读侧守卫语义见 runtime
    * subagent-engine-history 的 SubagentEngineHandle）。sessionRef 为引擎自定义键值
    * （zcode = { sessionId, dbPath }），整体透传不枚举内部键；journalPath 绝对路径
