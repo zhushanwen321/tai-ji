@@ -91,9 +91,11 @@ import { toErrorMessage } from "../../core/error-message.ts";
 import { getLogger } from "../../core/logger.ts";
 
 import { snapshot as toSnapshot } from "./execution-record.ts";
-import { recordEventsPath } from "./record-events.ts";
+import { RECORD_EVENTS_SUFFIX, recordEventsPath } from "./record-events.ts";
 // [UF-1] record 绑定 sidecar：宿主侧 id→file 映射（engine-CLI 化后子文件无 identity
 // entry 时代的身份载体）——scanFile 探测分支在 identity miss 时消费它重建 light record。
+// [身份换源第一步] 身份腿已先走事件流折叠（identityFromFold + 事件目录 id 反查），
+// 绑定只作兜底（存量/残事件文件形态），写点退场时本 import 随之消失。
 // [U7 / §3.2.7 统计口径] zcodeAnchorBasePath 供 zcode 锚的 binding/写权声明键派生
 // （U6-D2 交接：binding 键 = 锚基底 + 扩展名，pi 锚基底 = 子 session 文件路径）；
 // binding 读写函数的调用已随终态轴/投影轴外迁（readRecordBinding/writeRecordBinding/
@@ -138,6 +140,7 @@ import {
   derivedManifestRecord,
   detectIdentity,
   identityFromBinding,
+  identityFromFold,
   isFreshCache,
   manifestToSubagent,
   readSidecarPayloads,
@@ -176,6 +179,7 @@ import {
 } from "./record-store-rounds.ts";
 import type { RoundsCtx } from "./record-store-rounds.ts";
 import { reconstructFromFile } from "./session-reconstructor.ts";
+import type { IdentityHeaderRecon } from "./session-reconstructor.ts";
 import type { ClosedReason, StopReason, TranscriptRef } from "../domain/record-types.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { AgentEvent, RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
@@ -251,6 +255,21 @@ export class RecordStore {
   private readonly fileCache = new Map<string, FileCacheValue>();
   /** record id → sessionFile 索引（getFullRecord 按 id 定位文件）。随 fileCache 同步维护。 */
   private readonly idToFile = new Map<string, string>();
+  /**
+   * [身份换源第一步] 事件文件面「sessionFile → record id」反查索引（fold 身份腿的
+   * id 入口——折叠需要 record id，而子文件无 identity entry 时 id 不能从身份来）。
+   *
+   * 结构性入口 = 事件目录本身：文件名主名即 id，文件内 `record-bound` 帧携带
+   * sessionFile，两者对上即「这个子文件属于哪个 record」——不依赖 binding（绑定写点
+   * 退场后本索引是身份腿的唯一 id 入口）。装载 = readdir + 折叠缓存查询（每个 id
+   * 至多一次全量读，重复折叠零 IO——与 scanFile 的 stateMarkerFromFold 共用同一
+   * fold 缓存），按 recordsDir mtime 惰性重建（目录项增删才变 mtime；事件追加落在
+   * 文件内不触发重建，对应 mapping 由 record-bound 落账点增量维护）。
+   *
+   * null = 未装载；recordsDir 未接线（纯内存测试形态）时恒 null → 折叠腿空转，
+   * 调用方退 binding。
+   */
+  private fileToRecordId: { dirMtimeMs: number; byFile: Map<string, string> } | null = null;
   /** [perf] sessionsDir 最近一次全量扫描的 mtime（快路径判变，见 reconstructAll）。
    *  null = 未扫过 / 已 dispose。 */
   private dirStamp: { mtimeMs: number } | null = null;
@@ -472,6 +491,10 @@ export class RecordStore {
    */
   reportRecordTransition(record: ExecutionRecord): void {
     this.eventStreamFace?.syncBoundEvent(record);
+    // [身份换源第一步] record-bound 落账点增量维护反查索引：同进程追加落在既有事件
+    // 文件内（不改 recordsDir mtime），惰性重装载的 mtime 判据看不见这次变化——
+    // 「本进程刚绑定 secret 的 record」必须立刻可被折叠身份腿反查到。
+    this.noteFileToRecordId(record.id, record.sessionFile);
   }
 
   // ════════════════════════════════════════════════════════════
@@ -1354,8 +1377,10 @@ export class RecordStore {
     this.mainEntryStamp = null;
     this.mainEntryCache = [];
     // [W1 / D3] 事件 fold 缓存随 session 结束释放（revive 后按需重装载——磁盘事件
-    // 文件可能已被外部/清理通道改变）。
+    // 文件可能已被外部/清理通道改变）。[身份换源第一步] 反查索引同源释放（它由
+    // fold 派生——fold 缓存复位后旧索引可能指向已变的 bound 帧）。
     this.eventStreamFace?.resetFoldCache();
+    this.fileToRecordId = null;
   }
 
   /**
@@ -1502,9 +1527,11 @@ export class RecordStore {
   /**
    * 扫描单文件：stat 戳（jsonl + 终态 sidecar + record 绑定）校验，全同 →
    * 复用缓存（零文件读取，含负缓存直接返回 null）；否则重建 light。
-   * identity 定位两级：头部 64KB（首轮会话）→ 全文 fallback（续聊场景 identity
-   * append 在尾部）；两级都找不到 → [UF-1] record 绑定 sidecar 回退（宿主侧身份
-   * 载荷重建 light）→ 仍无 → 写负缓存（防每轮全文重读）。
+   * identity 定位三级：头部 64KB（首轮会话）→ 全文 fallback（续聊场景 identity
+   * append 在尾部）；两级都找不到 → [身份换源第一步] 事件流折叠（`foldOf(id)`，
+   * id 经事件目录反查——见 fileToRecordId 字段注释）→ [UF-1] 仍无则 record 绑定
+   * sidecar 兜底（宿主侧身份载荷；binding 写点退场后本腿消失）→ 三腿皆空 → 写负
+   * 缓存（防每轮全文重读）。
    * 返回 null：文件消失/读失败/无 identity 且无绑定 → 跳过。
    */
   private scanFile(file: string): FileCacheEntry | null {
@@ -1540,10 +1567,12 @@ export class RecordStore {
 
     const payloads = readSidecarPayloads(file, stamps);
     const header = detectIdentity(file, jsonl.size);
-    // [UF-1] 身份源两级：子文件 identity entry（历史权威，命中时绑定不参与）→
-    // record 绑定 sidecar（engine-CLI 化后子文件无身份 entry，宿主在 sessionFile
-    // 回填点落盘的 id→file 映射承担恢复能力）。两者皆缺 → 负缓存。
-    const base = header ?? identityFromBinding(payloads.binding, file);
+    // [身份换源第一步] 身份源三级：子文件 identity entry（历史权威，命中时其余不
+    // 参与）→ 事件流折叠（事件流是唯一事实源：id 经事件目录反查，身份域 +
+    // model/thinkingLevel/worktree 取 record-created 载荷）→ record 绑定 sidecar
+    // （engine-CLI 化后子文件无身份 entry 时代的宿主侧映射；绑定写点退场后本腿
+    // 随绑定一起消失）。三者皆缺 → 负缓存。
+    const base = header ?? this.identityFromFoldByFile(file) ?? identityFromBinding(payloads.binding, file);
     if (!base) {
       // 负缓存：确认无 identity。后续扫描 stat 命中直接跳过；戳变化（文件补写 /
       // 绑定后到落盘）自动重试。
@@ -1674,6 +1703,60 @@ export class RecordStore {
   /** 事件文件戳（缓存键第四维）——按 record id 取 `<recordsDir>/<id>.events`。 */
   private eventsStampOfId(id: string): Stamp | null {
     return this.manifestDir === undefined ? null : statStamp(recordEventsPath(this.manifestDir, id));
+  }
+
+  /**
+   * [身份换源第一步] 事件目录反查索引惰性装载（record-bound 帧的 sessionFile → id）。
+   *
+   * 重建时机 = 未装载 / recordsDir mtime 变化。事件追加落在既有文件内不改目录 mtime，
+   * 这一形态由落账点增量维护覆盖（reportRecordTransition → noteFileToRecordId），
+   * mtime 判据只兜「目录项增删 / 冷启动 / 跨进程写入」。
+   * best-effort：目录不可读 / 文件名非法（非 record id 形态）一律跳过该条，不得让
+   * 一个坏名把整轮扫描炸掉（与重建链其余容错同向）。
+   */
+  private ensureFileToRecordId(): void {
+    const dir = this.manifestDir;
+    if (dir === undefined || this.eventStreamFace === undefined) return; // 事件面未接线：折叠腿不可用
+    const dirMtimeMs = statStamp(dir)?.mtimeMs ?? null;
+    if (dirMtimeMs === null) return;
+    if (this.fileToRecordId !== null && this.fileToRecordId.dirMtimeMs === dirMtimeMs) return;
+    const byFile = new Map<string, string>();
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      return; // 目录不可读：保留上一次装载（或空），本轮折叠腿空转 → 退 binding
+    }
+    for (const name of names) {
+      if (!name.endsWith(RECORD_EVENTS_SUFFIX)) continue;
+      const id = name.slice(0, -RECORD_EVENTS_SUFFIX.length);
+      let sessionFile: string | undefined;
+      try {
+        sessionFile = this.eventStreamFace.foldOf(id).bound?.sessionFile;
+      } catch {
+        continue; // 非法文件名（recordEventsPath 的 id 白名单）/ 折叠内部异常：跳过该条
+      }
+      if (sessionFile !== undefined && sessionFile !== "") byFile.set(sessionFile, id);
+    }
+    this.fileToRecordId = { dirMtimeMs, byFile };
+  }
+
+  /** 事件面落账点增量维护（同进程 record-bound 追加不触发目录 mtime 变化，见字段注释）。 */
+  private noteFileToRecordId(id: string, sessionFile: string | undefined): void {
+    if (sessionFile === undefined || sessionFile === "" || this.fileToRecordId === null) return;
+    this.fileToRecordId.byFile.set(sessionFile, id);
+  }
+
+  /**
+   * [身份换源第一步] 折叠身份腿：事件目录反查 id → fold → light 身份基底。
+   * 无事件面 / 反查 miss（无 record-bound 帧）/ 无创建帧 → undefined（调用方退 binding）。
+   */
+  private identityFromFoldByFile(file: string): IdentityHeaderRecon | undefined {
+    if (this.eventStreamFace === undefined) return undefined;
+    this.ensureFileToRecordId();
+    const id = this.fileToRecordId?.byFile.get(file);
+    if (id === undefined) return undefined;
+    return identityFromFold(this.eventStreamFace.foldOf(id), file);
   }
 
   /** 缓存条目的事件文件戳：负条目无 id → null。 */

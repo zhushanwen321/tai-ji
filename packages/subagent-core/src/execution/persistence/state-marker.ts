@@ -34,10 +34,12 @@
 // 回填点写「record id → session 文件」映射（engine-CLI 化后子 session 文件无身份 entry，
 // 旧 PI_SUBAGENT_SELF_RECORD_ID 注入链消失，collectRecords/findLightById 失去 id→file
 // 工件——本 sidecar 是该映射的宿主侧落盘权威）。与收口 sidecar 的关系：
-//   - 读侧消费（record-store scanFile）：仅当子文件无 identity entry 时用绑定重建身份，
-//     status/stopReason 判定走 buildRecord 重建单规则（§3.2.4）——`.state`（收口）
-//     优先级天然高于绑定的在途形态，二者并存无冲突（收口后绑定保留：resurrect 回边
-//     删 .state 后绑定仍在，再崩溃仍可恢复）；
+//   - 读侧消费（record-store scanFile）：子文件无 identity entry 时**先问事件流折叠**
+//     （身份域 + model/thinkingLevel/worktree 取 record-created 载荷，id 经事件目录
+//     反查——「事件流是唯一事实源」），折叠腿无身份（无事件文件/无创建帧）才用本绑定
+//     重建；status/stopReason 判定走 buildRecord 重建单规则（§3.2.4）——收口收条源
+//     已换事件流折叠（stateMarkerFromFold），绑定不参与终态判定，二者并存无冲突
+//     （收口后绑定保留：resurrect 回边删终态收条后绑定仍在，再崩溃仍可恢复）；
 //   - GC：session-file-gc 的 sidecar 名单已含本扩展名（孤儿绑定随 TTL 清理；jsonl
 //     删除链同步同删——I-16 已销账，GC 领地批次落地）。
 

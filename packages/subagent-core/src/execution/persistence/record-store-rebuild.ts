@@ -6,8 +6,9 @@
 //   - entry 重建族（collectV2EntryPairs + v2PairToRecord ——登记 §3.3 后只剩当前版本
 //     通道：旧形态与未知版本结构性跳过，零幻影）；
 //   - 身份解析三级优先级（[W1 / U2b] resolveRecordIdentity：事件文件 fold >
-//     binding > manifest——纯函数参考实现 + 测试锚定面；现行生产路径 = v2 实体
-//     fold 通道 / v1 实体磁盘重建链，分流依据 W1 D4）；
+//     binding > manifest——纯函数参考实现 + 测试锚定面）+ 其 fold 腿的生产消费
+//     投影 identityFromFold（子文件无 identity entry 时的身份基底，id 入口见
+//     record-store.scanFile 的事件目录反查；binding 退场后本腿即唯一身份源）；
 //   - manifest 读投影（manifestToSubagent / mapManifestStatus）与写投影（terminal /
 //     batch / derived / legacyManifestStatusFields——session-reader 兼容契约的单点）；
 //   - 内存源投影 recordToSubagent、缓存戳类型与戳校验工具（Stamp / FileCacheEntry 族）。
@@ -141,7 +142,8 @@ export interface FileStamps {
 
 /** sidecar payload 读取结果（索引命中与探测重建两分支共享的读点）。 */
 export interface SidecarPayloads {
-  /** [UF-1] record 绑定载荷（identity miss 时的身份重建源）。 */
+  /** [UF-1] record 绑定载荷（identity miss 时的事件流折叠腿之后的身份兜底源 +
+   *  统计快照源——binding 写点退场后本字段随绑定一起消失）。 */
   binding: RecordBinding | undefined;
 }
 
@@ -452,6 +454,10 @@ export function stateMarkerFromFold(fold: RecordJournalFoldState | undefined): S
  * 绑定缺失/损坏返回 undefined（调用方落负缓存，不把损坏残留误判成身份）。
  * forkDepth/model_change/thinking_level_change 等头部途经信息绑定期不存在：
  * forkDepth 恒 undefined、model/thinkingLevel 取绑定快照值。
+ *
+ * [身份换源第一步] 本腿的角色已降级为「事件流折叠后的兜底」：生产扫描路径
+ * （record-store.scanFile）先问 {@link identityFromFold}，绑定只兜存量/残事件文件
+ * 形态；`.record-binding` 写点退场后本腿自然消失。
  */
 export function identityFromBinding(binding: RecordBinding | undefined, file: string): IdentityHeaderRecon | undefined {
   if (binding === undefined) return undefined;
@@ -495,18 +501,18 @@ export type RecordIdentitySource = "journal-fold" | "binding" | "manifest";
  * binding 兜底（旧数据兼容）> manifest；字段集 = D3 record-created 载荷同集）。
  *
  * 消费现状（如实登记）：本三级裁决是纯函数参考实现 + 测试锚定面
- * （record-store-rebuild-v-gate.test.ts），现行生产路径不经本函数——v2 实体走
- * fold 通道（record-store 收编/投影直接消费 fold.identity），v1 实体走磁盘重建链
- * （identity entry > binding > manifest 的内联组装），分流依据设计 D4（收编定界
- * 按注册条目形态分流）。三级源由调用方各自读好传入（本函数纯函数无 IO），高级源
- * 在场即整体胜出（冲突字段取高级源值——单写者下冲突仅见于数据损坏，不引入
- * 字段级合并的第二种语义）；高级源缺失/身份域损坏逐级降级；三源皆缺 →
- * undefined（调用方按无身份处理）。后续调身份优先级（如 W2 接线）时先立接线
- * 设计裁决，再让生产路径消费本单点。
+ * （record-store-rebuild-v-gate.test.ts）；生产磁盘扫描路径的身份腿改走 fold
+ * （{@link identityFromFold}——id 由 record-store.scanFile 的事件目录反查取得，
+ * 即「fold > binding」前两级已接线；manifest 级仍只在纯函数参考实现里）。
+ * v2 实体走 fold 通道（record-store 收编/投影直接消费 fold.identity）。三级源由
+ * 调用方各自读好传入（本函数纯函数无 IO），高级源在场即整体胜出（冲突字段取高级
+ * 源值——单写者下冲突仅见于数据损坏，不引入字段级合并的第二种语义）；高级源缺失/
+ * 身份域损坏逐级降级；三源皆缺 → undefined（调用方按无身份处理）。
  *
- * model/thinkingLevel/sessionFile 不在身份域（fold 的 record-created 不携带，
- * 绑定/引擎域属 bound 事件与 sidecar 面）——组装 IdentityHeaderRecon 基底由
- * 调用方补齐，本类型只承载三级裁决共有的身份字段。
+ * model/thinkingLevel/worktree 已随「事件流承载 binding 独有字段」进 fold 的
+ * record-created 载荷（见 {@link identityFromFold} 的补齐投影）；sessionFile 属
+ * 引擎绑定域（record-bound 帧 / 调用方传入的文件路径）。本类型只承载三级裁决
+ * 共有的身份字段。
  */
 export interface ResolvedRecordIdentity {
   id: string;
@@ -574,6 +580,48 @@ function identityFromFoldSource(fold: RecordJournalFoldState | undefined): Resol
   };
 }
 
+/**
+ * [身份换源第一步] fold 身份域 → light 身份基底（IdentityHeaderRecon 同形投影）。
+ *
+ * 子文件没有 identity entry 时，身份域改由事件流折叠取得（事件流是唯一事实源）：
+ * 与 {@link identityFromBinding} 同形，但字段源分工不同——身份域 + model/
+ * thinkingLevel/worktree 全部取 fold 的 record-created 载荷（绑定退场后这些字段的
+ * 读侧唯一来源；worktree 缺席 = 未启用，不再回落 false），sessionFile 取调用方传入
+ * 的子文件路径（引擎绑定域属 record-bound 帧，列表扫描的 base 必须携带本文件路径），
+ * forkDepth 头部途经信息事件载荷不承载恒 undefined。
+ *
+ * 形状守卫复用 identityFromFoldSource（三级优先级参考实现的 fold 腿单源，不复制
+ * 第二份判据）：身份域损坏 → undefined，调用方逐级降级（binding）。
+ */
+export function identityFromFold(
+  fold: RecordJournalFoldState | undefined,
+  file: string,
+): IdentityHeaderRecon | undefined {
+  const created = fold?.identity;
+  if (created === undefined) return undefined; // 残文件/全坏行形态（无身份可投影）
+  const resolved = identityFromFoldSource(fold);
+  if (resolved === undefined) return undefined; // 身份域损坏（守卫单源，降级下一级）
+  return {
+    id: resolved.id,
+    agent: resolved.agent,
+    mode: resolved.mode,
+    task: resolved.task,
+    slug: resolved.slug,
+    startedAt: resolved.startedAt,
+    rootSessionId: resolved.rootSessionId,
+    parentRecordId: resolved.parentRecordId,
+    depth: resolved.depth,
+    forkDepth: undefined,
+    ...(created.worktree !== undefined ? { worktree: created.worktree } : {}),
+    origin: resolved.origin,
+    parentRunId: resolved.parentRunId,
+    stepIndex: resolved.stepIndex,
+    model: modelOrUndefined(created.model),
+    thinkingLevel: created.thinkingLevel,
+    sessionFile: file,
+  };
+}
+
 /** binding 源投影：字段直传（readRecordBinding 读侧已字面量守卫归一，
  *  identityFromBinding 直传同款信任面）。 */
 function identityFromBindingSource(binding: RecordBinding | undefined): ResolvedRecordIdentity | undefined {
@@ -619,7 +667,9 @@ function identityFromManifestSource(m: ManifestRecord | undefined): ResolvedReco
 
 /**
  * 恢复路径身份解析（三级优先级参考实现，设计 D2：事件文件 fold > binding > manifest）。
- * 现状：仅测试锚定（生产路径分流见 {@link ResolvedRecordIdentity} 注释的如实登记）。
+ * 现状：纯函数参考实现 + 测试锚定面——生产磁盘扫描路径只接了前两级
+ * （{@link identityFromFold} > {@link identityFromBinding}，分流登记见
+ * {@link ResolvedRecordIdentity} 注释）。
  * 纯函数：三级源由调用方读好传入；高级源在场即整体胜出（冲突时高级源字段胜出），
  * 缺失/损坏逐级降级，三源皆缺 → undefined。
  */
