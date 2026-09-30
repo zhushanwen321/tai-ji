@@ -34,7 +34,7 @@ import {
 import { RUN_EVENT_JOURNAL_SUFFIX, type RunErrorCode, type RunOutcome } from "../../shared/run-vocabulary.ts";
 import { createRunEventJournal } from "./run-event-journal.ts";
 import type { WorkflowRunEvent } from "../../orchestration/run-events.ts";
-import { runSettledOutcomeToDoneReason } from "../../orchestration/terminal-actions.ts";
+import { runSettledOutcomeToDoneReason } from "../../shared/run-vocabulary.ts";
 
 const logger = getLogger("run-state-evidence");
 
