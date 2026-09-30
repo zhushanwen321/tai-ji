@@ -324,7 +324,9 @@ run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐�
 
 **终态目标**：只有索引存在，且三性质齐备；其余载体删除。
 
-**退场后残留的收尾项**（`state-marker.ts` 侧）：写函数族（`writeStateMarker` / `writeSettledState` / `writeFinalizedState` / `writeCancelledState`）与 `readStateMarker` / `statStateStamp` 已成死代码但仍在文件里；`markResurrected` 仍会删 `.state`/`.finalized`/`.cancelled` 残留（无害的旧文件清理，但它的「删失败即响亮抛错」语义已随载体退场而失去意义，其 6 个用例覆盖的正是该语义）。这两项要连同 12 个仍以这些函数造 fixture 的测试文件一起清，属于同一批。
+**退场后残留的收尾项**（`state-marker.ts` 侧）：写函数族（`writeStateMarker` / `writeSettledState` / `writeFinalizedState` / `writeCancelledState`）与 `readStateMarker` / `statStateStamp` 已成死代码但仍在文件里；`markResurrected` 仍会删 `.state`/`.finalized`/`.cancelled` 残留（无害的旧文件清理，但它的「删失败即响亮抛错」语义已随载体退场而失去意义，其 6 个用例覆盖的正是该语义）。
+
+清点（实测，按真实调用点，排除注释与未使用 import）：**共 12 处调用点 + 1 个模块测试文件**——`state-marker.test.ts` 46 处（模块自身用例，整段删除）、`record-store.test.ts` 4 处、`permanent-session-universal-resume.test.ts` 3 处、`record-binding.test.ts` 3 处、`get-record-for-action-restart.test.ts` 2 处；其余 8 个文件只是注释或未使用 import（已清）。迁移方式：加一个同步 helper 播种「created + settled」两帧事件（头行键 `record-events`），把 `writeFinalizedState(file[, reason])` 换成它；**注意 `stopReason` 取 StopReason 值域（`disconnected`/`completed` 等），`gc`/`user-close` 是 ClosedReason、不是合法停因**。`record-store.test.ts` 的 4 处里有两处所在用例用 `new RecordStore(tmpDir)`（无事件面）——这类用例要么补 recordsDir，要么按其「旧 sidecar 投影」性质删除。
 
 **读侧退场的隐藏前置**（`readStateMarker` / `FileStamps.state` 删除时踩到）：终态收条换源到折叠后，**没有事件面的 store 就无法表达终态**——`new RecordStore(sessionsDir)`（不传 recordsDir）这类构造在测试里很常见，它们的「终态 fixture」原来靠写 `.state` 造，收条退场后这些断言无处落地。因此读侧退场必须同批处理：要么让这些测试构造带 recordsDir 的 store 并用事件帧造终态，要么删掉其终态断言（其被测行为已随旧读链退场）。
 
