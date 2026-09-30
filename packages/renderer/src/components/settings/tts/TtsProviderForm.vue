@@ -192,6 +192,7 @@
       </template>
       <div class="flex flex-col gap-4 px-4 py-3">
         <div v-if="form.capabilities.supportsInstructions" class="flex flex-col gap-1.5">
+          <!-- 指令置灰只对 perModel 显式 null 条目生效；无条目（undefined）= 默认支持、无上限不置灰 -->
           <Label class="text-[11px] text-neutral-dim" :for="`tts-instructions-${providerId}`">{{ t('settings.tts.instructionsLabel') }}</Label>
           <Textarea
             :id="`tts-instructions-${providerId}`"

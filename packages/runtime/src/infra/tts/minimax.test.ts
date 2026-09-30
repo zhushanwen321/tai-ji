@@ -214,4 +214,13 @@ describe('能力表与表单投影（§7.3）', () => {
     expect(minimaxFormModel.voices).toHaveLength(8)
     expect(minimaxFormModel.voices[0]).toEqual({ id: 'male-qn-qingse', label: '青涩青年音色' })
   })
+
+  it('语言增强枚举：官方 language_boost 全集 41 项（auto + 40 语言，2026-10-01 官方文档抓取）', () => {
+    expect(minimaxFormModel.languages).toHaveLength(41)
+    expect(minimaxFormModel.languages[0]).toEqual({ id: 'auto', label: 'auto（全自动）' })
+    // 官方扩充的三语种在列（speech-01/02 系不支持，M0 的 2.6/2.8 系不受限）
+    expect(minimaxFormModel.languages.map((l) => l.id)).toEqual(
+      expect.arrayContaining(['Persian', 'Filipino', 'Tamil', 'Chinese,Yue']),
+    )
+  })
 })

@@ -33,6 +33,7 @@ import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useChat } from '@/composables/features/chat/useChat'
 import { useTtsPlayer } from '@/composables/features/chat/useTtsPlayer'
+import { useTtsSpeechEnabled } from '@/components/settings/tts/use-tts-enabled'
 import { useTurnExpansion } from '@/composables/panel/useTurnExpansion'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { useSideDrawer, type SideDrawerTab } from '@/composables/features/drawer/useSideDrawer'
@@ -72,6 +73,7 @@ export function useChatViewDeps(
   const sessionStore = useSessionStore()
   const { abortBash, editAndResend } = useChat()
   const tts = useTtsPlayer()
+  const { enabled: ttsSpeechEnabled } = useTtsSpeechEnabled()
   const turnExpansion = useTurnExpansion(sessionId)
   const { forkSession, handoff } = useSidebar()
   const drawer = useSideDrawer()
@@ -187,10 +189,16 @@ export function useChatViewDeps(
     /** 朗读（ai-voice-tts §5.1）：点击动作分流收敛在装配侧——idle = 朗读（清洗由
      *  useTtsPlayer 内部承担，文本源 = 消息正文 normalizeContent）；loading/playing =
      *  取消/停止（stop 与「点击停止」同源复用，§5.1 状态机非 idle 态点击语义）。
-     *  ui 包不 import renderer（反向依赖禁令），状态机数据面经 speakStateOf 投影。 */
+     *  ui 包不 import renderer（反向依赖禁令），状态机数据面经 speakStateOf 投影。
+     *  朗读总开关（§5.2 通用配置）只在 idle 分支拦截：关闭时 toast「语音服务未配置」
+     *  不发 RPC；非 idle 态点击 = 停止，不受开关约束（关掉开关也应能停掉在播的声音）。 */
     onSpeak: (sid: string, msg: Message): void => {
       if (!msg) return
       if (tts.speakStateOf(msg.id) === 'idle') {
+        if (!ttsSpeechEnabled.value) {
+          toastError(t('panel.message.speakNotConfigured'))
+          return
+        }
         tts.speak(sid, msg.id, normalizeContent(msg.content))
       } else {
         tts.stop()

@@ -183,12 +183,19 @@ export function emptyFormState(form: TtsFormModel): TtsProviderFormState {
   }
 }
 
-/** 选中模型的 per-model 能力（perModel 无条目 = 默认支持指令与音色标签，不置灰）。 */
+/**
+ * 选中模型的 per-model 能力。指令上限三态——「perModel 无条目」≠「条目显式 null」（设计 §7.3）：
+ * - number：perModel 条目登记的按模型上限（StepFun，maxlength 钳制）；
+ * - null：perModel 条目显式声明该模型不支持指令 → 指令位置灰；
+ * - undefined：perModel 无条目 = 该家指令不按模型分档（如 MiMo 自然语言无上限）→
+ *   默认支持、不置灰不设 maxlength（控件渲染与否由家级 supportsInstructions 决定）。
+ * 音色标签：无条目默认支持（不置灰），条目内 voiceLabelSupported=false 才置灰。
+ */
 export function perModelOf(
   form: TtsFormModel,
   modelId: string,
-): { instructionMaxChars: number | null; voiceLabelSupported: boolean } {
-  return form.capabilities.perModel[modelId] ?? { instructionMaxChars: null, voiceLabelSupported: true }
+): { instructionMaxChars: number | null | undefined; voiceLabelSupported: boolean } {
+  return form.capabilities.perModel[modelId] ?? { instructionMaxChars: undefined, voiceLabelSupported: true }
 }
 
 /**

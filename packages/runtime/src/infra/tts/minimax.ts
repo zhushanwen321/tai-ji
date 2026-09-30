@@ -72,8 +72,9 @@ export const minimaxCapabilities: TtsCapabilities = {
 
 /**
  * 音色：官方系统音色清单的核心中文（普通话）子集（2026-09-30 官方清单抓取——全集 229+
- * 条含多语言与 beta 变体，M0 下拉内置核心八音色；male-qn-qingse 实测 200）。其余音色
- * id 仍可经 tts.json 手配（voice 是自由字符串，由厂商校验）。
+ * 条含多语言与 beta 变体，M0 下拉内置核心八音色；male-qn-qingse 实测 200）。设置页表单
+ * 是唯一参数入口（D2——vendor 子树由表单生成，用户不接触 JSON），未内置音色在 M0
+ * 无配置入口；扩充即往本数组增项，由表单投影透传到下拉。
  */
 const VOICES: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'male-qn-qingse', label: '青涩青年音色' },
@@ -88,6 +89,56 @@ const VOICES: ReadonlyArray<{ id: string; label: string }> = [
 
 /** 情感枚举 ×9（§5.2；fluent/whisper 仅 2.6 系）。 */
 const EMOTIONS = ['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'calm', 'fluent', 'whisper'] as const
+
+/**
+ * 语言增强枚举：官方 language_boost 全集（2026-10-01 platform.minimax.cn 文档
+ * speech-t2a-http 抓取，与 platform.minimax.io 国际站逐项一致——40 语言 + auto；
+ * speech-01/02 系不支持其中 Persian/Filipino/Tamil，M0 模型全为 speech-2.6/2.8 系
+ * 不受限。设计 §7.3/§5.2 声明的「37 语言」为设计期官方快照，随官方扩充更新至此）。
+ */
+const LANGUAGES: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'auto', label: 'auto（全自动）' },
+  { id: 'Chinese', label: 'Chinese' },
+  { id: 'Chinese,Yue', label: 'Chinese,Yue（含粤语）' },
+  { id: 'English', label: 'English' },
+  { id: 'Arabic', label: 'Arabic' },
+  { id: 'Russian', label: 'Russian' },
+  { id: 'Spanish', label: 'Spanish' },
+  { id: 'French', label: 'French' },
+  { id: 'Portuguese', label: 'Portuguese' },
+  { id: 'German', label: 'German' },
+  { id: 'Turkish', label: 'Turkish' },
+  { id: 'Dutch', label: 'Dutch' },
+  { id: 'Ukrainian', label: 'Ukrainian' },
+  { id: 'Vietnamese', label: 'Vietnamese' },
+  { id: 'Indonesian', label: 'Indonesian' },
+  { id: 'Japanese', label: 'Japanese' },
+  { id: 'Italian', label: 'Italian' },
+  { id: 'Korean', label: 'Korean' },
+  { id: 'Thai', label: 'Thai' },
+  { id: 'Polish', label: 'Polish' },
+  { id: 'Romanian', label: 'Romanian' },
+  { id: 'Greek', label: 'Greek' },
+  { id: 'Czech', label: 'Czech' },
+  { id: 'Finnish', label: 'Finnish' },
+  { id: 'Hindi', label: 'Hindi' },
+  { id: 'Bulgarian', label: 'Bulgarian' },
+  { id: 'Danish', label: 'Danish' },
+  { id: 'Hebrew', label: 'Hebrew' },
+  { id: 'Malay', label: 'Malay' },
+  { id: 'Persian', label: 'Persian' },
+  { id: 'Slovak', label: 'Slovak' },
+  { id: 'Swedish', label: 'Swedish' },
+  { id: 'Croatian', label: 'Croatian' },
+  { id: 'Filipino', label: 'Filipino' },
+  { id: 'Hungarian', label: 'Hungarian' },
+  { id: 'Norwegian', label: 'Norwegian' },
+  { id: 'Slovenian', label: 'Slovenian' },
+  { id: 'Catalan', label: 'Catalan' },
+  { id: 'Nynorsk', label: 'Nynorsk' },
+  { id: 'Tamil', label: 'Tamil' },
+  { id: 'Afrikaans', label: 'Afrikaans' },
+]
 
 export const minimaxFormModel: TtsFormModel = {
   capabilities: minimaxCapabilities,
@@ -109,14 +160,7 @@ export const minimaxFormModel: TtsFormModel = {
     { id: '2', label: '双声道' },
   ],
   emotions: EMOTIONS.map((id) => ({ id, label: id })),
-  languages: [
-    { id: 'auto', label: 'auto（全自动）' },
-    { id: 'Chinese', label: 'Chinese' },
-    { id: 'Chinese,Yue', label: 'Chinese,Yue（含粤语）' },
-    { id: 'English', label: 'English' },
-    { id: 'Japanese', label: 'Japanese' },
-    { id: 'Korean', label: 'Korean' },
-  ],
+  languages: LANGUAGES,
   toggles: ['voice_setting.text_normalization', 'voice_setting.latex_read', 'aigc_watermark'],
   voiceModify: {
     tiers: [

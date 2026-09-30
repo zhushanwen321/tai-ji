@@ -151,7 +151,11 @@ describe('表单控件存在性（u1 mock 投影数据驱动，验收 2）', () 
     expect(voiceTag.attributes('disabled')).toBeDefined()
     expect(w.text()).toContain('当前模型不支持音色标签')
     // 指令（supportsInstructions=true）+ 词典 + 文本归一（toggles 成员）渲染
-    expect(sel(w, 'tts-instructions-input-stepfun').exists()).toBe(true)
+    const stepfunInstructions = sel(w, 'tts-instructions-input-stepfun')
+    expect(stepfunInstructions.exists()).toBe(true)
+    // perModel 显式条目：enabled 且 maxlength 按模型上限钳制（stepaudio-2.5-tts → 200）
+    expect(stepfunInstructions.attributes('disabled')).toBeUndefined()
+    expect(stepfunInstructions.attributes('maxlength')).toBe('200')
     expect(sel(w, 'tts-pronunciation-add-stepfun').exists()).toBe(true)
     expect(sel(w, 'tts-toggle-stepfun-text_normalization').exists()).toBe(true)
     // 枚举空数组 → 不渲染（emotions/channels/languages/效果器/水印/混合音色）
@@ -172,8 +176,12 @@ describe('表单控件存在性（u1 mock 投影数据驱动，验收 2）', () 
       expect(node.exists()).toBe(true)
       expect(node.attributes('disabled')).toBeDefined()
     }
-    // 指令渲染（supportsInstructions=true）；词典/情感/声道/语言增强/效果器不渲染
-    expect(sel(w, 'tts-instructions-input-mimo').exists()).toBe(true)
+    // 指令渲染（supportsInstructions=true）且可输入（perModel 无条目 = 默认支持无上限，不置灰）；
+    // 词典/情感/声道/语言增强/效果器不渲染
+    const mimoInstructions = sel(w, 'tts-instructions-input-mimo')
+    expect(mimoInstructions.exists()).toBe(true)
+    expect(mimoInstructions.attributes('disabled')).toBeUndefined()
+    expect(mimoInstructions.attributes('maxlength')).toBeUndefined()
     expect(sel(w, 'tts-pronunciation-add-mimo').exists()).toBe(false)
     expect(sel(w, 'tts-emotion-select-mimo').exists()).toBe(false)
     expect(sel(w, 'tts-channel-select-mimo').exists()).toBe(false)
@@ -185,6 +193,16 @@ describe('表单控件存在性（u1 mock 投影数据驱动，验收 2）', () 
     const w = await mountPage()
     expect(w.findAll('[data-testid^="tts-format-"]').length).toBe(0)
     expect(w.findAll('[data-testid^="tts-bitrate-"]').length).toBe(0)
+  })
+
+  it('perModel 显式 null 条目 → 指令控件置灰（与「无条目默认支持」两形态区分，设计 §7.3）', async () => {
+    const forms = formsFixture()
+    forms.mimo.capabilities.perModel['mimo-v2.5-tts'] = { instructionMaxChars: null, voiceLabelSupported: true }
+    ttsApiMock.getCapabilities.mockImplementation(() => Promise.resolve({ forms }))
+    const w = await mountPage()
+    await sel(w, 'tts-provider-card-mimo').trigger('click')
+    await flushPromises()
+    expect(sel(w, 'tts-instructions-input-mimo').attributes('disabled')).toBeDefined()
   })
 })
 
@@ -316,7 +334,9 @@ describe('通用开关与服务商卡片', () => {
     await sel(w, 'tts-provider-card-mimo').trigger('click')
     await flushPromises()
     expect(sel(w, 'tts-emotion-select-minimax').exists()).toBe(false)
-    expect(sel(w, 'tts-instructions-input-mimo').exists()).toBe(true)
+    const mimoInstructions = sel(w, 'tts-instructions-input-mimo')
+    expect(mimoInstructions.exists()).toBe(true)
+    expect(mimoInstructions.attributes('disabled')).toBeUndefined()
     // 切回 MiniMax：情感选择（未保存编辑态）保留（SelectValue 显示选中项 label）
     await sel(w, 'tts-provider-card-minimax').trigger('click')
     await flushPromises()

@@ -13,6 +13,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { Message } from '@taiji/shared'
 import { useChatStore } from '@/stores/chat'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
+import { useTtsSpeechEnabled } from '@/components/settings/tts/use-tts-enabled'
 
 // ── mock：sidebar.handoff（RPC spy）/ toast（错误 toast spy）/ useChat ──
 // （u5.2 生产切换 useChatViewDeps → useSidebar，mock 同步改指——原 legacy mock 已被架空）
@@ -132,6 +133,8 @@ describe('[RD-1#8] 文件白名单加载失败留痕（降级可见，非静默�
 
 // ── ai-voice-tts §5.1（u5 装配）：onSpeak 动作分流 + speakStateOf 直通 ──────────
 describe('onSpeak 朗读装配（ai-voice-tts §5.1）', () => {
+  const { setEnabled } = useTtsSpeechEnabled()
+
   /** assistant 消息 fixture（assistant content 为纯 string，ADR-0043） */
   function makeAssistant(id: string, content: string): Message {
     return { id, role: 'assistant', content, status: 'complete', timestamp: 0 }
@@ -168,6 +171,38 @@ describe('onSpeak 朗读装配（ai-voice-tts §5.1）', () => {
 
     expect(deps.speakStateOf!('a1')).toBe('loading')
     expect(ttsStateMock).toHaveBeenCalledWith('a1')
+    stop()
+  })
+
+  // ── 朗读总开关（ai-voice-tts §5.2 通用配置：关闭后朗读按钮报「语音服务未配置」）──
+  // use-tts-enabled 真模块不 mock（装配器与设置页消费同一模块级单例，测真实接线），
+  // 经唯一写点 setEnabled 驱动；用例末恢复默认开启，不留状态给后续用例。
+  it('总开关关闭：idle 态点击不发合成请求（speak 未被调 = 不发 RPC），toast「语音服务未配置」', () => {
+    setEnabled(false)
+    const { deps, stop } = setupDeps('s-tts-disabled')
+    const msg = makeAssistant('a3', '开关关闭时的正文')
+    ttsStateMock.mockReturnValue('idle')
+
+    deps.onSpeak!('s-tts-disabled', msg)
+
+    expect(ttsSpeakMock).not.toHaveBeenCalled()
+    expect(toastErrorMock).toHaveBeenCalledTimes(1)
+    expect(String(toastErrorMock.mock.calls[0][0])).toContain('语音服务未配置')
+    setEnabled(true)
+    stop()
+  })
+
+  it('关闭态下非 idle（playing）点朗读 = 停止，不受开关拦截（stop 照常被调）', () => {
+    setEnabled(false)
+    const { deps, stop } = setupDeps('s-tts-disabled-stop')
+    const msg = makeAssistant('a4', '关闭开关也应能停止在播内容')
+    ttsStateMock.mockReturnValue('playing')
+
+    deps.onSpeak!('s-tts-disabled-stop', msg)
+
+    expect(ttsStopMock).toHaveBeenCalledTimes(1)
+    expect(ttsSpeakMock).not.toHaveBeenCalled()
+    setEnabled(true)
     stop()
   })
 })

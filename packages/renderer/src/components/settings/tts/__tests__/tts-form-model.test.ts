@@ -21,6 +21,7 @@ import {
   buildConfig,
   emptyFormState,
   formStateFromConfig,
+  perModelOf,
   type TtsProviderFormState,
 } from '../tts-form-model'
 import type { TtsProviderId } from '@taiji/shared'
@@ -167,6 +168,21 @@ describe('控件存在性规则的提交面（置灰/不渲染字段不进 confi
     expect(vendor.language_boost).toBeUndefined()
     // 不混合第二音色 → 无 timbre_weights
     expect(vendor.timbre_weights).toBeUndefined()
+  })
+})
+
+describe('perModelOf 三态（「perModel 无条目」≠「条目显式 null=不支持」，设计 §7.3）', () => {
+  it('perModel 无条目 → 默认支持、无上限（instructionMaxChars undefined，MiMo 指令不置灰）', () => {
+    const r = perModelOf(formOf('mimo'), 'mimo-v2.5-tts')
+    expect(r.instructionMaxChars).toBeUndefined()
+    expect(r.voiceLabelSupported).toBe(true)
+  })
+
+  it('perModel 显式条目 → 原值消费（StepFun 2.5 系上限 200 / voiceLabel false）', () => {
+    expect(perModelOf(formOf('stepfun'), 'stepaudio-2.5-tts')).toEqual({
+      instructionMaxChars: 200,
+      voiceLabelSupported: false,
+    })
   })
 })
 
