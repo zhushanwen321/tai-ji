@@ -1624,7 +1624,7 @@
       "run": "node scripts/check-chat-ops-sync.mjs",
       "owner": "packages/renderer",
       "authority": "scripts/check-chat-ops-sync.mjs",
-      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（store.ts / taste-lint 规则文件 diff 时对账，看护对象是两清单载体文件而非本脚本）；本表 run = 改检查自身时的自含冒烟（42×42 零漂移恒绿形态）。无独立约束/ADR 登记，设计决策（独立脚本 vs lint 规则 import 类型的 D5-4 权衡）记录在脚本头注释块，故 authority 自指"
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = packages/core/src/domain/chat/store.ts + taste-lint/rules/no-chat-ops-in-components.mjs + 本脚本自身——对账结果只由这三文件决定；看护对象是两清单载体文件而非本脚本）；本表 run = 自含冒烟（42×42 零漂移恒绿形态，与 pre-commit 同一命令）。无独立约束/ADR 登记，设计决策（独立脚本 vs lint 规则 import 类型的 D5-4 权衡）记录在脚本头注释块，故 authority 自指"
     },
     {
       "id": "E2E-CENSUS-01",
@@ -1644,7 +1644,7 @@
       "run": "node scripts/check-session-scoped-state-census.mjs",
       "owner": "packages/renderer",
       "authority": "docs/adr/decisions.md#ADR-0049",
-      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（renderer/ui 生产代码 diff 时对账快照，看护对象是全仓调用点而非本脚本；退出码契约 0=合规 / 3=census 与快照不符 / 1=脚本自身异常）；本表 run = 改检查自身时的自含冒烟。同源约束 = docs/constraints.json C-state-01（enforcement 为 review 维度，本脚本是其入口静态锁机器载体）"
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发面 = 任意 .ts/.tsx/.vue staged + 本脚本自身——与检查脚本全仓扫描面同构的结构无关 glob，快照清单横跨 core/dom-core/renderer/ui，目录清单式触发面必有洞；看护对象是全仓调用点而非本脚本；退出码契约 0=合规 / 3=census 与快照不符 / 1=脚本自身异常）；本表 run = 自含冒烟（与 pre-commit 同一命令，全仓扫描 ~0.2s）。同源约束 = docs/constraints.json C-state-01（enforcement 为 review 维度，本脚本是其入口静态锁机器载体）"
     }
   ]
 }
