@@ -1336,9 +1336,78 @@
         "note": ":956-958 —— :956 const spaceIndex = text.indexOf(\" \")；:957 commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex)；:958 args = spaceIndex === -1 ? \"\" : text.slice(spaceIndex + 1)"
       }
     ],
-    "guard": {
+      "guard": {
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-64",
+    "claim": "pi 队列条目无身份、无条目级收回原语：待注入队列（_steeringMessages/_followUpMessages）只存纯文本串，全 dist 唯一的队列条目移除点 = message_start(user) 事件回流时按全文 indexOf 文本匹配出队（无 id 字段参与）；唯一批量收回原语 clearQueue() 是队列级全清（返回两队列拷贝并整体置空 + agent.clearAllQueues()），不存在按 id 撤单条的方法。承重（delivery-ownership-kernel 收回原语，原挂不入库设计文档 F8 节）：投递所有权内核的条目级收回只能建在「clear_queue 全收 → 按裸标记识别 → 自有条目重投 / 外来文本收养」的 runtime 对账器上（rpc-client.clearQueue 注释与 session-delivery-registry Reconciler 的机制依据）；pi 若引入条目级收回 API 或队列条目携带 id，对账器可换窄接口，本条漂移即复审信号",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_handleAgentEvent 的 message_start(user) 文本匹配出队块",
+        "note": ":360-382 —— :363 message_start && role==='user' 门控、:365 contentText 取全文、:368 this._steeringMessages.indexOf(messageText) → :370 splice、:375 this._followUpMessages.indexOf(messageText) → :377 splice；全文件队列数组 splice 恰此两处（0.84.4 实测计数 1+1），均文本匹配"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "clearQueue()（唯一批量收回原语，队列级）",
+        "note": ":1195-1203 —— :1196-1197 返回两队列拷贝、:1198-1199 整体置空、:1200 this.agent.clearAllQueues()、:1202 return { steering, followUp }；方法全文件唯一定义"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-65",
+    "claim": "pi RPC 面的投递原语族恒五条且全部队列级：prompt（streamingBehavior 直透 session.prompt）/ steer / follow_up / abort / clear_queue（→ session.clearQueue() 队列级全清）——命令面无任何条目级寻址或按 id 撤回形态。session-delivery-registry 对账器（Reconciler）的存在理由（原挂不入库设计文档 F9 节）：runtime 侧条目级收回/重投只能以「clear_queue 全收 + 标记识别 + 三分处置」在 pi 之上实现（pi 词汇封闭层 rpc-client.clearQueue 的协议面依据）；pi 若新增条目级收回命令，对账器三步机制可被窄接口替代，复审信号",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/modes/rpc/rpc-mode.js",
+        "symbol": "投递原语族 dispatch case ×5",
+        "note": ":298 case \"prompt\"（:303-305 streamingBehavior 直透 session.prompt）、:321 case \"steer\"、:325 case \"follow_up\"、:329 case \"abort\"、:333-335 case \"clear_queue\" → session.clearQueue()；各 case 0.84.4 实测计数恒 1，reclaim/remove 类 case 全文件 0 命中"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "clearQueue 队列级实现（PS-64 同锚）",
+        "note": ":1195-1203 队列级全清——pi 收回粒度上界即队列级，投递原语族无条目级寻址"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-66",
+    "claim": "非流式时 pi 忽略 streamingBehavior 参数：prompt() 对该参数的全部消费都在流式前提下调制——:843 extension input hook 按 this.isStreaming 三元传参（非流式传 undefined）、:860-872 isStreaming 块（:861 缺参 throw（PS-23 分支）/ :864 followUp 分流 / :868 steer 入队）；非流式路径（:874 起 flush pending → model 校验 → compaction 检查 → 起轮）零读取——非流式提交带 streamingBehavior 既不抛错也不产生队列副作用，参数静默失效。session-delivery-registry lane 判定的旁证承重（原挂不入库设计文档 F12 节）：direct lane（session 非流式）恒带 toStreamingBehavior(intent) 提交（pi 词汇封闭，无条件分支），行为正确性依赖「非流式忽略」；pi 若改为非流式也消费 streamingBehavior（如预排队），direct 投递会被错误排队",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "prompt(text, options) 的流式门控消费点与非流式路径",
+        "note": ":821 方法体；:843 emitInput(…, this.isStreaming ? options?.streamingBehavior : undefined)（非流式传 undefined）；:860 if (this.isStreaming)、:861-863 throw、:864-868 followUp/steer 分流——块后 :874-875 _flushPendingBashMessages/_flushPendingCustomMessages 起非流式路径，streamingBehavior 在窗口内最后出现于 :864（先于 :874）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "sendUserMessage(content, options) 透传（extension 通道同语义）",
+        "note": ":1161 方法体 → :1185 streamingBehavior: options?.deliverAs 直透 prompt——deliverAs 在非流式同样被忽略"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-reclaim-primitives.test.ts"
     },
     "verifiedWith": "0.84.4"
   }

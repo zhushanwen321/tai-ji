@@ -16,7 +16,7 @@
  * 4. **对账器 Reconciler**（D3）：五触发点（agent_settled / compaction_end / abort 完成 /
  *    pi restored / 30s watchdog）→ 条件「空闲 + pi 槽位非空」→ `clear_queue` 全收 → 三分处置
  *    （自有条目回队首重投 / 带标记无记录条目按 transcript 扫描重建 / 无标记外来文本收养）。
- *    pi 只有队列级原语（F9），条目级收回在本层以「全收 + 标记识别 + 其余重投」实现。
+ *    pi 只有队列级原语（PS-65），条目级收回在本层以「全收 + 标记识别 + 其余重投」实现。
  *
  * 单例约束（§3.4）：同 sessionId 必须复用同一 handle——多 handle 并发投递竞态无保护。
  * [HISTORICAL] sd-u6 完成回流曾复用本注册表；notify-once 废弃 CompletionBackflow 后回流腿
@@ -305,7 +305,7 @@ function laneOf(view: IManagedSessionView | undefined): DeliveryLane {
   return turn === 'generating' || turn === 'dispatching' ? 'steer' : 'direct'
 }
 
-/** intent → pi streamingBehavior（pi 词汇封闭在本层）：非流式时 pi 忽略该参数（F12 旁证）。 */
+/** intent → pi streamingBehavior（pi 词汇封闭在本层）：非流式时 pi 忽略该参数（PS-66 旁证）。 */
 function toStreamingBehavior(intent: DeliveryIntent): 'steer' | 'followUp' {
   return intent === 'interrupt-at-turn-boundary' ? 'steer' : 'followUp'
 }
@@ -411,7 +411,7 @@ export function createSessionDeliveryRegistry(
     return deps.getSession(sessionId)
   }
 
-  /** pi 队列级原语（F9；IPiEngine 端口未收编 —— 见交付说明 deviations，按结构化窄面 + guard 承接）。 */
+  /** pi 队列级原语（PS-65；IPiEngine 端口未收编 —— 见交付说明 deviations，按结构化窄面 + guard 承接）。 */
   function queuePrimitive(client: IPiEngine): { clearQueue(): Promise<{ steering: string[]; followUp: string[] }> } | null {
     const candidate = client as Partial<{ clearQueue(): Promise<{ steering: string[]; followUp: string[] }> }>
     return typeof candidate.clearQueue === 'function'
@@ -757,7 +757,7 @@ export function createSessionDeliveryRegistry(
       const client = await clientForAttachedTrigger(sessionId, rt, trigger)
       const primitive = client ? queuePrimitive(client) : null
       if (primitive) {
-        // 触发条件②：pi 槽位非空——槽位真值取 clear_queue 返回值（pi 权威、操作时刻；F9）
+        // 触发条件②：pi 槽位非空——槽位真值取 clear_queue 返回值（pi 权威、操作时刻；PS-65）
         const cleared = await primitive.clearQueue()
         const texts = [...cleared.steering, ...cleared.followUp]
         if (texts.length > 0) {

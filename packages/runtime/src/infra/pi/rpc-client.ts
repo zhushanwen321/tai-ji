@@ -57,12 +57,12 @@ export interface AvailableModelSnapshot {
 }
 
 /**
- * pi 队列级原语 clear_queue 的响应形状（F9 实装核对：pi 0.84.4 dist
+ * pi 队列级原语 clear_queue 的响应形状（PS-65 实装核对：pi 0.84.4 dist
  * `agent-session.js:1195-1203 clearQueue()` 返回 `{steering, followUp}` 两队列**全文数组**
  * ——`_steeringMessages` / `_followUpMessages` 的浅拷贝，元素是入队时的整段文本）。
  *
- * 这是「队列级」原语：pi 不提供条目级收回（F8 出队判定本身就是按文本 indexOf 匹配，无 id），
- * 故投递所有权内核的收回路径 = 全收 → 上层按裸标记识别目标条目 → 其余文本重投
+ * 这是「队列级」原语：pi 不提供条目级收回（出队判定本身就是按全文 indexOf 匹配，无 id，
+ * PS-64），故投递所有权内核的收回路径 = 全收 → 上层按裸标记识别目标条目 → 其余文本重投
  * （设计 delivery-ownership-kernel.md §3.1 场景 D / D3）。
  */
 export interface PiQueueSnapshot {
@@ -955,10 +955,10 @@ export class RpcClient implements IPiEngine {
   }
 
   /**
-   * 清空 pi 的两个内存待注入队列（steer / followUp）并取回全文（pi F9）。
+   * 清空 pi 的两个内存待注入队列（steer / followUp）并取回全文（PS-65）。
    *
-   * 投递所有权内核的收回原语：pi 只有队列级 clear_queue（无条目级收回——F8 出队判定按
-   * 文本 indexOf 匹配，无 id），上层（delivery registry 对账器）据此完成「全收 → 按裸标记
+   * 投递所有权内核的收回原语：pi 只有队列级 clear_queue（无条目级收回——出队判定按
+   * 全文 indexOf 匹配无 id，PS-64），上层（delivery registry 对账器）据此完成「全收 → 按裸标记
    * 识别 → 自有条目重投 / 外来文本收养」（§3.1 场景 D / D3）。
    *
    * 超时用 FAST_TIMEOUT_MS：纯内存操作 + 同步 emit（pi 实装 `clearQueue` 无 await），

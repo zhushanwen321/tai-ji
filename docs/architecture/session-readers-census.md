@@ -49,6 +49,9 @@ grep -rln 'FromSessionFile\|scanPiSessions\|scanExternalSessions\|getHistoryFrom
 grep -rln 'createReadStream' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 # P3 · plugin 族读者（经 runtime session-api readEntries 通道，不经 extensions/ 的 getEntries 锚——2026-09-25 A14 验收补锚）
 grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
+
+# R4 · runtime 侧 getEntries RPC 通道读者（2026-10-01 分支审查补锚：N13/N14 补登暴露的通道盲区——E1 只扫 extensions/、R1/R2/R3 只扫 runtime fs 通道，runtime 侧经 RpcClient.getEntries 读 session 的读者此前不可检索；命中面 session-api / session-records / history-rebuild-cache / trace-sync / revoke-orchestrator / session-delivery-registry 六文件均已登记）
+grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 ```
 
 闭合规则：任一锚点出现本清单未登记的新命中 → 按 C-proc-28 同 commit 归类登记后再合入。「接入单元」列 = message-revoke 流水线内承接裁剪/重建接线的单元（U6a-U6d）；「—」= 照实/非投影/豁免，无代码改动。
@@ -143,7 +146,7 @@ grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' 
 
 ## 6. 设计判定清单之外的新发现读者（已裁决）
 
-以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入面判定）：**N1-N12 全部维持照实 / 非投影归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13 为分支审查补登（2026-10-01，理由见行内）：其读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类。
+以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入面判定）：**N1-N12 全部维持照实 / 非投影归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13/N14 为分支审查补登（2026-10-01，理由见行内）：两者读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类；§2 已补 R4 检索锚（runtime 侧 client.getEntries 通道），该通道后续读者可被检索、不再漏网。
 
 | # | 读者 | 归类（已裁决） | 判定理由 |
 |---|------|----------|------|
@@ -160,6 +163,7 @@ grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' 
 | N11 | runtime `restore-seeding` + `session-file-streaming` | 非投影 | 逐行透传无投影可裁（文件维护管线，裁剪反而丢数据） |
 | N12 | runtime 导入族（import-source / external-scan） | 照实（非投影） | 外部目录，撤回机制不触及 |
 | N13 | runtime `revoke-orchestrator` `readTreeSnapshot`（get_entries 快照——③ 定位 / ⑤ 信令前校验共用一次拉取，⑥ 回退后校验复用同款读点；非投影构建） | 照实 | 树回退定位与活跃路径校验读者，非投影构建：校验对象是树回退定位所需的活跃路径状态（与 §4.1 U6a 重建链同语义域），但读 get_entries 全文件快照、不派生展示投影、不注入模型上下文——⑤ 幂等判定「目标不在活跃路径但全文件存在 → 已撤」正需全文件事实，按活跃路径裁剪反而使读者失效。归类照实（已发生文件事实），零追加单元；机制裁决见 ADR-0076（decisions.md:295「完成确认 = reply 后 get_entries 校验」） |
+| N14 | runtime `session-delivery-registry` `readTranscriptUserTexts`（getEntries 全文读，`resync/rebuild/在途宽限扫描` 三调用点共用读点——判 delivered / 判重；非投影构建） | 照实 | 投递对账读者，判据 = 「投递已发生」事实：user 文本集合按裸标记扫描，命中 transcript → 判 delivered 抑制重建/重投（被撤条目已进文件恒判 delivered，不重建重投、无复活破坏）；未命中才重投（必达优先于去重，读取失败保守判未送达）。读 getEntries 全文件 user 文本、不派生展示投影、不注入模型上下文。与 N13 同走 getEntries RPC 通道（E1/R1-R3 锚点族外，2026-10-01 分支审查补登，按 C-proc-28 登记义务归类；通道检索锚 = §2 R4） | — |
 
 ## 7. 已知边界登记
 
