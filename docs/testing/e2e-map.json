@@ -1638,6 +1638,31 @@
       "owner": "packages/subagent-core",
       "authority": "docs/todo/subagent-workflow-issues.md",
       "note": "D2 守卫（register §2.0 D2 / §2.4）：领域名清单动态读自 domain 两模块的导出，assembly 允许内部 import、禁止 export；双接线 = ci.yml invariants 步 + install-hooks.sh DOMAIN_TYPE_PATH_STAGED 段。"
+    },
+    {
+      "id": "E2E-PIPE-10",
+      "summary": "subagent-service 聚合边界检查：execution/service/ 六聚合与支撑文件之间的方向门——聚合间 import 未登记红 / 聚合↔支撑成环红 / 聚合→壳 import 红 / 支撑→壳台账外 import 红 / deps getter 穿透非 public 成员红（fixture 单测锁各态）",
+      "scope": [
+        "scripts/check-subagent-service-boundary.mjs",
+        "scripts/__tests__/check-subagent-service-boundary.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-subagent-service-boundary.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-subagent-service-boundary.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-subagent-service-boundary.mjs",
+      "owner": "packages/subagent-core",
+      "authority": "docs/architecture/subagent-service-decomposition.md",
+      "note": "H3/R5 防线（设计 §3.4 D4/G2，impl-plan §2 R5 行）：合法边以符号级台账登记在检查脚本内（ALLOWED_EDGES / SUPPORT_SHELL_EDGES），非聚合叶子 helper 走 SUPPORT_FILES 登记；pre-commit 按 execution/service/** 与脚本自身触发。纯文本级检查（无 AST 依赖），对存量结构零误报。"
     }
   ]
 }
