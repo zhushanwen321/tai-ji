@@ -24,6 +24,10 @@ export function createMockDeps(overrides: Partial<ChatViewDeps> = {}): ChatViewD
     isTakeover: () => false,
     // [D3] submitEdit 双发锁默认放行（不互斥）；互斥用例经 overrides 注入
     isPendingSend: () => false,
+    // ai-voice-tts §5.1：朗读按钮默认可渲染（idle 态）；「未 provide 不渲染」用例经
+    // overrides 显式传 undefined 注销
+    onSpeak: vi.fn(),
+    speakStateOf: () => 'idle',
     toggleExpand: vi.fn(),
     collapse: vi.fn(),
     setTakeover: vi.fn(),

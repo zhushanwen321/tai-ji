@@ -27,10 +27,12 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FileNode, Message, Segment } from '@taiji/shared'
+import { normalizeContent } from '@taiji/shared'
 import type { ChatViewDeps } from '@taiji/ui'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useChat } from '@/composables/features/chat/useChat'
+import { useTtsPlayer } from '@/composables/features/chat/useTtsPlayer'
 import { useTurnExpansion } from '@/composables/panel/useTurnExpansion'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { useSideDrawer, type SideDrawerTab } from '@/composables/features/drawer/useSideDrawer'
@@ -69,6 +71,7 @@ export function useChatViewDeps(
   const chat = useChatStore()
   const sessionStore = useSessionStore()
   const { abortBash, editAndResend } = useChat()
+  const tts = useTtsPlayer()
   const turnExpansion = useTurnExpansion(sessionId)
   const { forkSession, handoff } = useSidebar()
   const drawer = useSideDrawer()
@@ -181,6 +184,20 @@ export function useChatViewDeps(
       if (!msg) return
       triggerEnterHandoffMode(sid)
     },
+    /** 朗读（ai-voice-tts §5.1）：点击动作分流收敛在装配侧——idle = 朗读（清洗由
+     *  useTtsPlayer 内部承担，文本源 = 消息正文 normalizeContent）；loading/playing =
+     *  取消/停止（stop 与「点击停止」同源复用，§5.1 状态机非 idle 态点击语义）。
+     *  ui 包不 import renderer（反向依赖禁令），状态机数据面经 speakStateOf 投影。 */
+    onSpeak: (sid: string, msg: Message): void => {
+      if (!msg) return
+      if (tts.speakStateOf(msg.id) === 'idle') {
+        tts.speak(sid, msg.id, normalizeContent(msg.content))
+      } else {
+        tts.stop()
+      }
+    },
+    /** 朗读态查询：useTtsPlayer 全局单例（D11）按 messageId 投影，三态直通 */
+    speakStateOf: (messageId: string) => tts.speakStateOf(messageId),
     openDrawer: (tab, opts?): void => {
       drawer.open(tab as SideDrawerTab, opts)
     },

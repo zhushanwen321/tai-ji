@@ -23,6 +23,10 @@ export function createMockChatDeps(overrides: Partial<ChatViewDeps> = {}): ChatV
     isHandingOff: () => false,
     getChangeSetStatus: () => undefined,
     isExpanded: () => false,
+    // ai-voice-tts §5.1：朗读按钮默认可渲染（idle 态）；「未 provide 不渲染」用例经
+    // overrides 显式传 undefined 注销
+    onSpeak: vi.fn(),
+    speakStateOf: () => 'idle',
     toggleExpand: vi.fn(),
     collapse: vi.fn(),
     abortBash: vi.fn(),

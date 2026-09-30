@@ -63,6 +63,7 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useChat, ensureStreamSubscription } from '@/composables/features/chat/useChat'
+import { useTtsPlayer } from '@/composables/features/chat/useTtsPlayer'
 import { invalidateStatusCache } from '@/composables/features/chat/useSessionDerivations'
 import { browserDestroy as browserDestroyIpc } from '@/lib/ipc'
 import { useTerminalWriteQueueStore } from '@/stores/terminal-write-queue'
@@ -312,7 +313,14 @@ export function useSidebar() {
   // 原「回退后新 session 无流订阅」债务消除。
   const retryHistory = core.retryHistory
   const renameSession = core.renameSession
-  const deleteSession = core.deleteSession
+  // [ai-voice-tts D11] 播放中删除 session 的停播编排：消息与朗读按钮随会话消失后继续播
+  // 会失去可见停止入口——例外单例（useTtsPlayer 全局播放态）的 cleanup 走 deleteSession
+  // 统一编排惯例（ADR-0049 例外清单登记项），不另设自清理路径。stop 无参（全局单例语义），
+  // 与「点击停止」同源复用。
+  const deleteSession = async (id: string): Promise<void> => {
+    useTtsPlayer().stop()
+    await core.deleteSession(id)
+  }
   const deleteFolder = core.deleteFolder
   const loadSessions = core.loadSessions
 

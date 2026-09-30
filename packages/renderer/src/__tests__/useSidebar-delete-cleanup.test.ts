@@ -50,6 +50,13 @@ vi.mock('@/composables/features/chat/useChat', () => ({
   ensureStreamSubscription: vi.fn(),
 }))
 
+// ── mock useTtsPlayer：捕获 stop（ai-voice-tts D11 停播编排断言；deleteSession 统一
+//    编排调 stop，与「点击停止」同源复用）──
+const ttsStopMock = vi.hoisted(() => vi.fn())
+vi.mock('@/composables/features/chat/useTtsPlayer', () => ({
+  useTtsPlayer: () => ({ speak: vi.fn(), stop: ttsStopMock, speakStateOf: vi.fn(() => 'idle') }),
+}))
+
 // ── mock lib/ipc：捕获 browserDestroy（B4 接线断言）；其余导出透传真实模块 ──
 const browserDestroyMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 vi.mock('@/lib/ipc', async (importOriginal) => ({
@@ -238,6 +245,20 @@ describe('useSidebar deleteSession 跨 store 清理（W1 / S3）', () => {
     } finally {
       process.off('unhandledRejection', onUnhandled)
     }
+  })
+})
+
+describe('useSidebar deleteSession 停播编排（ai-voice-tts D11）', () => {
+  it('U-D11: deleteSession 统一编排调 useTtsPlayer.stop（播放中删会话失去可见停止入口的停播兜底）', async () => {
+    const scope = effectScope()
+    const sidebar = scope.run(() => useSidebar())!
+    seedSessions([{ cwd: '/proj', ids: ['s1', 's2'] }])
+
+    await sidebar.deleteSession('s1')
+
+    expect(ttsStopMock).toHaveBeenCalledTimes(1)
+
+    scope.stop()
   })
 })
 

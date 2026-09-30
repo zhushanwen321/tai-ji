@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { effectScope, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import type { Message } from '@taiji/shared'
 import { useChatStore } from '@/stores/chat'
 import { useChatViewDeps } from '@/composables/panel/useChatViewDeps'
 
@@ -30,6 +31,14 @@ vi.mock('@/composables/features/chat/useChat', () => ({
 const loadFileCandidatesMock = vi.hoisted(() => vi.fn(() => Promise.resolve([])))
 vi.mock('@/composables/features/search/useFileSearch', () => ({
   useFileSearch: () => ({ load: loadFileCandidatesMock }),
+}))
+
+// ── ai-voice-tts §5.1（u5 装配）：useTtsPlayer 三方法 spy，锁定 onSpeak 动作分流 ──
+const ttsSpeakMock = vi.hoisted(() => vi.fn())
+const ttsStopMock = vi.hoisted(() => vi.fn())
+const ttsStateMock = vi.hoisted(() => vi.fn(() => 'idle' as const))
+vi.mock('@/composables/features/chat/useTtsPlayer', () => ({
+  useTtsPlayer: () => ({ speak: ttsSpeakMock, stop: ttsStopMock, speakStateOf: ttsStateMock }),
 }))
 
 beforeEach(() => {
@@ -118,5 +127,47 @@ describe('[RD-1#8] 文件白名单加载失败留痕（降级可见，非静默�
     expect(warnSpy).not.toHaveBeenCalled()
     stop()
     warnSpy.mockRestore()
+  })
+})
+
+// ── ai-voice-tts §5.1（u5 装配）：onSpeak 动作分流 + speakStateOf 直通 ──────────
+describe('onSpeak 朗读装配（ai-voice-tts §5.1）', () => {
+  /** assistant 消息 fixture（assistant content 为纯 string，ADR-0043） */
+  function makeAssistant(id: string, content: string): Message {
+    return { id, role: 'assistant', content, status: 'complete', timestamp: 0 }
+  }
+
+  it('idle 态点击 → speak(sid, messageId, 消息正文)，清洗由 useTtsPlayer 内部承担', () => {
+    const { deps, stop } = setupDeps('s-tts')
+    const msg = makeAssistant('a1', '需要朗读的正文')
+    ttsStateMock.mockReturnValue('idle')
+
+    deps.onSpeak!('s-tts', msg)
+
+    expect(ttsSpeakMock).toHaveBeenCalledTimes(1)
+    expect(ttsSpeakMock).toHaveBeenCalledWith('s-tts', 'a1', '需要朗读的正文')
+    expect(ttsStopMock).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('loading/playing 态点击 = 取消/停止 → 调 useTtsPlayer.stop，不重入 speak', () => {
+    const { deps, stop } = setupDeps('s-tts-stop')
+    const msg = makeAssistant('a2', '正在朗读中')
+    ttsStateMock.mockReturnValue('playing')
+
+    deps.onSpeak!('s-tts-stop', msg)
+
+    expect(ttsStopMock).toHaveBeenCalledTimes(1)
+    expect(ttsSpeakMock).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('speakStateOf 查询直通 useTtsPlayer（按 messageId 投影三态）', () => {
+    const { deps, stop } = setupDeps('s-tts-state')
+    ttsStateMock.mockReturnValue('loading')
+
+    expect(deps.speakStateOf!('a1')).toBe('loading')
+    expect(ttsStateMock).toHaveBeenCalledWith('a1')
+    stop()
   })
 })

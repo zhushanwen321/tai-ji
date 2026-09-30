@@ -73,7 +73,7 @@ engine-protocol v1 的演进纪律从「头注承诺 + 人工记忆」落为成�
 ## 状态管理范式（renderer/core）
 
 ### ADR-0049 per-session Map 分区范式（最高频引用）
-任何持有 per-session 状态的 composable/组件必须用 `useSessionScopedState` 工厂（`packages/core/src/foundation/use-session-scoped-state.ts`，内部 Map<sessionId,T> 分区）；禁止实例级状态依赖组件树隔离、禁止 watch(sessionId) 手动清空。WS handler 必须用 `updateFor(capturedSid)` 显式分区（结构性消除切换竞态）；cleanup 统一挂 `useSidebar.deleteSession → triggerSessionCleanups` 销毁编排，纯加状态不接线清理的 PR 打回。例外清单显式登记（useSessionEvents 订阅编排层、全局 sid 协调器类模块级 Map、Pinia factory 体内 Map、useTerminal 混合形态、TurnRenderCache shallowRef 容器）。机器防线：taste-lint `no-instance-level-session-state`（error 级）。登记 C-state-01、C-state-08。
+任何持有 per-session 状态的 composable/组件必须用 `useSessionScopedState` 工厂（`packages/core/src/foundation/use-session-scoped-state.ts`，内部 Map<sessionId,T> 分区）；禁止实例级状态依赖组件树隔离、禁止 watch(sessionId) 手动清空。WS handler 必须用 `updateFor(capturedSid)` 显式分区（结构性消除切换竞态）；cleanup 统一挂 `useSidebar.deleteSession → triggerSessionCleanups` 销毁编排，纯加状态不接线清理的 PR 打回。例外清单显式登记（useSessionEvents 订阅编排层、全局 sid 协调器类模块级 Map、Pinia factory 体内 Map、useTerminal 混合形态、TurnRenderCache shallowRef 容器、useTtsPlayer 全局单例播放状态——同一时刻每窗口只有一条消息在朗读，状态窗口级唯一而非 per-session，cleanup 走 deleteSession 统一编排调 stop）。机器防线：taste-lint `no-instance-level-session-state`（error 级）。登记 C-state-01、C-state-08。
 
 ### ADR-0043 消息模型 Segment[]
 user message content 为 Segment 判别联合（text/skill/file/mention），badge 信息从 composer DOM（getSegmentsFromEl）结构化传递到渲染层；序列化/反序列化各只一处（segmentsToPrompt / parsePiUserContent）；归一化函数在 `packages/shared/src/segments.ts`。assistant/system 仍为纯 string。登记 C-state-02。
