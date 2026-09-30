@@ -49,7 +49,7 @@ import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "
 // 全部经 core barrel 消费（生产消费纪律：extensions 源码不深路径 import core）。
 import {
   AgentCall,
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
   STATE_DIR_NAME,
   Trace,
   WORKFLOW_RECORD_CUSTOM_TYPE,
@@ -582,7 +582,7 @@ export class JsonlRunStore implements RunStore {
 
   /** record 流路径 for a given runId（唯一持久件）。 */
   private recordPathFor(runId: string): string {
-    return path.join(this.stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+    return path.join(this.stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   }
 
   /**
@@ -693,7 +693,7 @@ export class JsonlRunStore implements RunStore {
     const runs: WorkflowRun[] = [];
     for (const [runId, reg] of registered) {
       const recordPath = reg.journalPath;
-      if (!recordPath.endsWith(RUN_EVENT_JOURNAL_SUFFIX)) {
+      if (!recordPath.endsWith(RUN_EVENTS_SUFFIX)) {
         // 旧形态锚点（旧 journal .events.jsonl）= 历史 run：不读旧两件套
         //（D1 历史数据处置——历史 run 从壳侧读取面消失，resume 一律拒绝）。
         logger.debug(

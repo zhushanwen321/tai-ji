@@ -40,7 +40,7 @@ import {
   IllegalTransitionError,
   INITIAL_RUN_LIFECYCLE_STATE,
   RUN_EVENT_TYPES,
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
   transition,
   type RunErrorCode,
   type RunEventJournal,
@@ -213,7 +213,7 @@ async function foldRunState(runId: string, journalDir?: string): Promise<RunLife
 export function runEventJournalPathOf(runId: string): string | undefined {
   const { dir } = resolveRunEventJournal();
   if (dir === "") return undefined;
-  return join(dir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  return join(dir, `${runId}${RUN_EVENTS_SUFFIX}`);
 }
 
 /**

@@ -10,7 +10,7 @@
 // 只能靠此兜底；workflow 域（taskId 占位无 record 生命周期锚）同样依赖它。
 //
 // [W1 D5] journal 事件文件族（record 事件文件 *.events + run journal
-// *.record.jsonl，RUN_EVENT_JOURNAL_SUFFIX 现行值）被显式忽略（isEventJournalName）
+// *.record.jsonl，RUN_EVENTS_SUFFIX 现行值）被显式忽略（isEventJournalName）
 // ——它们的清理归统一保留维护轮（fold 终态 + 保留窗口），本 GC 不得触碰（见
 // 函数注释）。
 
@@ -23,7 +23,7 @@ import { cleanupExpiredJournals } from "../engine/common/pool-manager.ts";
 // journal 事件文件后缀单源（run 域 = run-events；record 域 = record-events）——
 // 后缀字面量散布是静默漂移源（两常量的单源导出头注同款考量）。
 import { RECORD_EVENTS_SUFFIX } from "./record-events.ts";
-import { RUN_EVENT_JOURNAL_SUFFIX } from "../../shared/run-vocabulary.ts";
+import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
 
 /** 30 天 TTL（毫秒）。 */
 const TTL_DAYS = 30;
@@ -125,7 +125,7 @@ function cleanExpiredJsonl(full: string, now: number): void {
 
 /**
  * journal 事件文件名判定（W1 D3/D5 显式忽略规则）：record 事件文件（*.events，
- * records 目录内）与 run journal（*.record.jsonl——RUN_EVENT_JOURNAL_SUFFIX 现行值）
+ * records 目录内）与 run journal（*.record.jsonl——RUN_EVENTS_SUFFIX 现行值）
  * 不是 session 文件——清理归统一保留维护轮（fold 终态 + 保留窗口判据，
  * run-state-evidence.ts 单源），GC 不得触碰。
  *
@@ -137,7 +137,7 @@ function cleanExpiredJsonl(full: string, now: number): void {
  * 裁决点 7 无引用回收顺带删除覆盖（run-state-evidence.ts 对账清理段同源）。
  */
 function isEventJournalName(name: string): boolean {
-  return name.endsWith(RECORD_EVENTS_SUFFIX) || name.endsWith(RUN_EVENT_JOURNAL_SUFFIX);
+  return name.endsWith(RECORD_EVENTS_SUFFIX) || name.endsWith(RUN_EVENTS_SUFFIX);
 }
 
 /** 单条 dirent 分发。分支判断顺序与 fs 副作用时序保持与原实现一致：

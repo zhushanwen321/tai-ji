@@ -59,10 +59,10 @@ import {
 
 import { getLogger } from "../core/logger.ts";
 // [D1 Class A] run 域词汇下沉 shared；本文件 re-export 保持 orchestration 消费面与 barrel 不变
-import { ALL_RUN_OUTCOMES, RUN_EVENT_JOURNAL_SUFFIX, RUN_EVENT_TYPES } from "../shared/run-vocabulary.ts";
+import { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../shared/run-vocabulary.ts";
 import type { RunEventType } from "../shared/run-vocabulary.ts";
 import type { RunErrorCode, RunOutcome } from "../shared/run-vocabulary.ts";
-export { ALL_RUN_OUTCOMES, RUN_EVENT_JOURNAL_SUFFIX, RUN_EVENT_TYPES } from "../shared/run-vocabulary.ts";
+export { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../shared/run-vocabulary.ts";
 export type { RunErrorCode, RunEventType, RunOutcome } from "../shared/run-vocabulary.ts";
 import { MAX_ERROR_LOGS } from "./worker-message-pump-constants.ts";
 // [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-journal.ts（与 record 事件

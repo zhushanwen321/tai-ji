@@ -15,7 +15,7 @@ import * as path from "node:path";
 import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 
 import {
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
   WORKFLOW_RECORD_CUSTOM_TYPE,
   WORKFLOW_RECORD_ENTRY_VERSION,
   createRunEventJournal,
@@ -36,7 +36,7 @@ export function mkRecordEnv(label: string): RecordFixtureEnv {
   return {
     sessionDir,
     stateDir,
-    recordPath: (runId: string) => path.join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`),
+    recordPath: (runId: string) => path.join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`),
     cleanup: () => fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }),
   };
 }

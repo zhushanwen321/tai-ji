@@ -35,7 +35,7 @@ import {
   boundedPrettySerialize,
   getBoundNotifyLedger,
   isTerminalDoneReason,
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
   type RunOutcome,
 } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
@@ -60,10 +60,10 @@ const RECORD_FAIL_CONTENT_PREVIEW_LENGTH = 200;
 /**
  * [D7] 事件 journal 文件名（run store 旁，artifactsDir 内）：`<runId>.events.jsonl`
  * （runId 即 generateRunId 的 wf- 前缀产物，渲染名 = 设计 D5 的 wf-<id>.events.jsonl；
- * 后缀经 core barrel 单源 RUN_EVENT_JOURNAL_SUFFIX，core 命名变更时编译期同步）。
+ * 后缀经 core barrel 单源 RUN_EVENTS_SUFFIX，core 命名变更时编译期同步）。
  */
 function runEventsJournalPath(artifactsDir: string, runId: string): string {
-  return join(artifactsDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  return join(artifactsDir, `${runId}${RUN_EVENTS_SUFFIX}`);
 }
 
 /**

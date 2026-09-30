@@ -10,12 +10,12 @@
 //
 // 依赖方向说明：本模块对事件**载荷接口**（`WorkflowRunEvent` 一族）只做 `import type`
 // ——类型边在编译期擦除，值依赖环检查（C-data-26）不看它；词表值
-// （`RUN_EVENT_TYPES` / `RUN_EVENT_JOURNAL_SUFFIX`）已在 shared，不构成反向值边。
+// （`RUN_EVENT_TYPES` / `RUN_EVENTS_SUFFIX`）已在 shared，不构成反向值边。
 import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 import { JsonlEventJournal } from "../../shared/jsonl-event-journal.ts";
-import { ALL_RUN_OUTCOMES, RUN_EVENT_JOURNAL_SUFFIX, RUN_EVENT_TYPES } from "../../shared/run-vocabulary.ts";
+import { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../../shared/run-vocabulary.ts";
 import type { RunEventJournal, WorkflowRunEvent, WorkflowRunEventInput } from "../../orchestration/run-events.ts";
 
 const journalLogger = getLogger("run-event-journal");
@@ -26,7 +26,7 @@ const journalLogger = getLogger("run-event-journal");
  * runId 白名单：字母数字开头 + [A-Za-z0-9_-]，长度 ≤ 128。
  *
  * 为什么白名单而非黑名单：journal 文件名由 runId 直接拼出（join(dir,
- * `<runId><RUN_EVENT_JOURNAL_SUFFIX>`)），黑名单漏一个形态就是一次路径穿越；白名单只放行
+ * `<runId><RUN_EVENTS_SUFFIX>`)），黑名单漏一个形态就是一次路径穿越；白名单只放行
  * generateRunId 的产出字符集（wf-<ts>-<base36>），首字符约束同时排除 "."、
  * ".." 与隐藏文件形态，"/" "\" 根本不在字符集内。
  */
@@ -190,7 +190,7 @@ export function createRunEventJournal(dir: string): RunEventJournal {
   return new JsonlEventJournal<WorkflowRunEventInput, WorkflowRunEvent>(dir, {
     pathFor: (runId) => {
       assertValidRunId(runId);
-      return join(dir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+      return join(dir, `${runId}${RUN_EVENTS_SUFFIX}`);
     },
     parseLine: (value) => (isWorkflowRunEventLine(value) ? (value as WorkflowRunEvent) : undefined),
     withSeq: (event, seq) => ({ ...event, seq }) as WorkflowRunEvent,

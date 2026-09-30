@@ -31,7 +31,7 @@ import {
   foldRecordEvents,
   RECORD_EVENTS_SUFFIX,
 } from "./record-events.ts";
-import { RUN_EVENT_JOURNAL_SUFFIX, type RunErrorCode, type RunOutcome } from "../../shared/run-vocabulary.ts";
+import { RUN_EVENTS_SUFFIX, type RunErrorCode, type RunOutcome } from "../../shared/run-vocabulary.ts";
 import { createRunEventJournal } from "./run-event-journal.ts";
 import type { WorkflowRunEvent } from "../../orchestration/run-events.ts";
 import { runSettledOutcomeToDoneReason } from "../../shared/run-vocabulary.ts";
@@ -204,7 +204,7 @@ async function deleteRunFootprint(
   deps: PruneStateDeps,
 ): Promise<boolean> {
   const stateFull = join(stateDir, `${runId}.jsonl`);
-  const journalFull = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  const journalFull = join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   let prunedState = false;
   for (const full of [stateFull, journalFull]) {
     try {
@@ -274,7 +274,7 @@ async function pruneTerminalRunFootprint(
   // 不作候选是裁决点 7 引用保护的构成部分（唯一清理通道 = 对账清理），非实现疏漏；
   // 裁决性理由见 pruneTerminalRunFiles 注释 [D1 后射程] 段
   const stateNames = names.filter(
-    (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(RUN_EVENT_JOURNAL_SUFFIX),
+    (n) => n.startsWith("wf-") && n.endsWith(".jsonl") && !n.endsWith(RUN_EVENTS_SUFFIX),
   );
   result.scanned = stateNames.length;
 
@@ -587,7 +587,7 @@ function readManifestSettlement(
 }
 
 export function findRunSettlementEvidence(stateDir: string, runId: string): RunSettlementEvidence {
-  const journalPath = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  const journalPath = join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   const journal = scanJournalLastSettledFrame(journalPath);
   if (journal.kind === "ioError") {
     // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃挂账
@@ -744,7 +744,7 @@ function warnCorruptOrphanReapRegistry(
 /** 三件（record 流 + manifest + 旧双源）+ .resume.lock 的存在性探测（mtime 取最大——与门输入）。 */
 function runFootprintMaxMtime(stateDir: string, runId: string): { exists: boolean; maxMtime: number } {
   const candidates = [
-    `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`,
+    `${runId}${RUN_EVENTS_SUFFIX}`,
     `${runId}.json`,
     `${runId}.jsonl`, // 历史遗留旧 state 快照（[D1] 不读不写不主动删——无主回收顺带删）
     `${runId}.events.jsonl`, // 历史遗留旧 journal（同上）
@@ -768,7 +768,7 @@ function runFootprintMaxMtime(stateDir: string, runId: string): { exists: boolea
 /** 成对删 run 磁盘足迹（三件 + 残锁，存在才删——ENOENT 静默）。 */
 function deleteOrphanRunFootprint(stateDir: string, runId: string): number {
   const names = [
-    `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`,
+    `${runId}${RUN_EVENTS_SUFFIX}`,
     `${runId}.json`,
     `${runId}.jsonl`,
     `${runId}.events.jsonl`,
@@ -822,7 +822,7 @@ export interface OrphanRunReapResult { // oe-exempt:20260929:framework:workflow/
 function collectOrphanCandidateRunIds(names: readonly string[]): Set<string> {
   const runIds = new Set<string>();
   for (const name of names) {
-    for (const suffix of [RUN_EVENT_JOURNAL_SUFFIX, ".events.jsonl"]) {
+    for (const suffix of [RUN_EVENTS_SUFFIX, ".events.jsonl"]) {
       if (name.endsWith(suffix)) {
         runIds.add(name.slice(0, -suffix.length));
         break;

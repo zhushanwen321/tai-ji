@@ -132,7 +132,7 @@ export type RunErrorCode =
  * 不可行——与 D5 core↔shared 同款约束）本地持有旧值常量，其发现链重锚随宿主
  * 读侧适配批（D16 ③）同批落地。
  */
-export const RUN_EVENT_JOURNAL_SUFFIX = ".record.jsonl";
+export const RUN_EVENTS_SUFFIX = ".record.jsonl";
 /**
  * slug 最大长度（D6 合流迁入本文件，原权威定义在已删除的 execution/execute-options-mapper.ts）。
  * 历史值 20 偏紧——描述性 slug 如 "audit-structured-output"（23）/ "fix-subagent-wf-tools"（21）

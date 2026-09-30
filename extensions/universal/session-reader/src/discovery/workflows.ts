@@ -164,7 +164,7 @@ const WORKFLOW_RECORD_ENTRY_V2 = 2
 
 /**
  * run record 流文件名尾段（`<runId>.record.jsonl`）。写侧 subagent-core
- * RUN_EVENT_JOURNAL_SUFFIX 同值（[D1] record 单源后缀）——v2 注册条目的
+ * RUN_EVENTS_SUFFIX 同值（[D1] record 单源后缀）——v2 注册条目的
  * journalPath 锚点后缀判定用（新锚点直读 record 流；旧 `.events.jsonl` 锚点 =
  * 历史实体分流），本地持有 + 测试守卫漂移。
  */

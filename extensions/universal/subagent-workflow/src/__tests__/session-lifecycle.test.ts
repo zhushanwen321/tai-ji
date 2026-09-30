@@ -998,7 +998,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
     const { setRunEventJournalDirForTest } = await import(
       "@zhushanwen/subagent-core/orchestration/terminal-actions.ts"
     );
-    const { createRunEventJournal, RUN_EVENT_JOURNAL_SUFFIX, WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } =
+    const { createRunEventJournal, RUN_EVENTS_SUFFIX, WORKFLOW_RECORD_CUSTOM_TYPE, WORKFLOW_RECORD_ENTRY_VERSION } =
       await import("@zhushanwen/subagent-core");
     type CustomEntry = { type: string; customType?: string; data?: unknown; id: string; parentId: null; timestamp: string };
 
@@ -1006,7 +1006,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
     setRunEventJournalDirForTest(fixtureDir);
     try {
       const runId = "wf-kill9-1";
-      const journalPath = path.join(fixtureDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+      const journalPath = path.join(fixtureDir, `${runId}${RUN_EVENTS_SUFFIX}`);
       // 崩溃形态 journal：run-created + ask 帧，无 run-settled（进程被 kill-9 的磁盘形态）
       const journal = createRunEventJournal(fixtureDir);
       await journal.append(runId, { type: "run-created", runId, workflowName: "kill9", argsSummary: "{}", ts: Date.now() - 60_000 });

@@ -37,7 +37,7 @@ import { mapReasonToStatus } from "@zhushanwen/extension-protocol";
 import type { LogLevel } from "../../core/logger.ts";
 import { configureCore, resetCoreForTests, type HostServices } from "../../core/host-services.ts";
 import { findRunSettlementEvidence } from "../persistence/run-state-evidence.ts";
-import { RUN_EVENT_JOURNAL_SUFFIX, type RunErrorCode } from "../../shared/run-vocabulary.ts";
+import { RUN_EVENTS_SUFFIX, type RunErrorCode } from "../../shared/run-vocabulary.ts";
 import { createRunEventJournal } from "../../orchestration/run-events.ts";
 import { runReconcileSweep, type ReconcileSweepDeps } from "./reconcile-sweep.ts";
 import { settlementEvidenceToRunState } from "./sweep-binding.ts";
@@ -180,18 +180,18 @@ describe("[W2/V4 D6] sweep 判据源改接后的 v2 run 补注销（真实判定
     });
     // 形态 b：坏链——首帧损坏（截断行）+ 无 settled 帧（run-settled 对坏链是
     // 表外转移，与 adoptInterruptedRun skippedBrokenChain 同款保守纪律）。
-    // journal 文件名经 RUN_EVENT_JOURNAL_SUFFIX 单源拼出（后缀改名跟随单源，
+    // journal 文件名经 RUN_EVENTS_SUFFIX 单源拼出（后缀改名跟随单源，
     // 禁手写后缀字面量——曾因手写旧后缀在 [D1] 改名后判定核读空文件误入 missing）。
     writeRegisterEntry("wf-v4-broken");
     fs.mkdirSync(stateDirOf(), { recursive: true });
     fs.writeFileSync(
-      path.join(stateDirOf(), `wf-v4-broken${RUN_EVENT_JOURNAL_SUFFIX}`),
+      path.join(stateDirOf(), `wf-v4-broken${RUN_EVENTS_SUFFIX}`),
       `{"trunc\n${JSON.stringify({ type: "run-created", runId: "wf-v4-broken", workflowName: "review-fix-loop", argsSummary: "{}", ts: 1000 })}\n`,
       "utf8",
     );
     // 形态 c：journal 读错误（非 ENOENT）——journal 路径为目录，readFileSync 抛 EISDIR
     writeRegisterEntry("wf-v4-iofail");
-    fs.mkdirSync(path.join(stateDirOf(), `wf-v4-iofail${RUN_EVENT_JOURNAL_SUFFIX}`), { recursive: true });
+    fs.mkdirSync(path.join(stateDirOf(), `wf-v4-iofail${RUN_EVENTS_SUFFIX}`), { recursive: true });
 
     const { deps, unregisterAppends } = assembleSweep();
     const result = runReconcileSweep(deps);
@@ -367,9 +367,9 @@ describe("[U1 判定核抽取] findRunSettlementEvidence 直测（矩阵逐分�
       ts: 2000,
     });
     // 行序（写盘时序）：坏行（截断）→ created → settled → 尾空行 → …settled 无尾换行变体。
-    // 文件名经 RUN_EVENT_JOURNAL_SUFFIX 单源拼出（禁手写后缀字面量——改名漂移防线）。
+    // 文件名经 RUN_EVENTS_SUFFIX 单源拼出（禁手写后缀字面量——改名漂移防线）。
     fs.writeFileSync(
-      path.join(stateDirOf(), `wf-core-noisy${RUN_EVENT_JOURNAL_SUFFIX}`),
+      path.join(stateDirOf(), `wf-core-noisy${RUN_EVENTS_SUFFIX}`),
       `{"trunc\n${created}\n${settled}\n\n`,
       "utf8",
     );
@@ -380,7 +380,7 @@ describe("[U1 判定核抽取] findRunSettlementEvidence 直测（矩阵逐分�
 
     // settled 为文件末行且无换行（append 崩溃窗口形态）——尾向首行即命中
     fs.writeFileSync(
-      path.join(stateDirOf(), `wf-core-tailless${RUN_EVENT_JOURNAL_SUFFIX}`),
+      path.join(stateDirOf(), `wf-core-tailless${RUN_EVENTS_SUFFIX}`),
       `${created}\n${settled}`,
       "utf8",
     );
@@ -396,7 +396,7 @@ describe("[U1 判定核抽取] findRunSettlementEvidence 直测（矩阵逐分�
     // 坏链变体：首帧截断 + created 有效（run-settled 对坏链是表外转移）
     fs.mkdirSync(stateDirOf(), { recursive: true });
     fs.writeFileSync(
-      path.join(stateDirOf(), `wf-core-broken${RUN_EVENT_JOURNAL_SUFFIX}`),
+      path.join(stateDirOf(), `wf-core-broken${RUN_EVENTS_SUFFIX}`),
       `{"trunc\n${JSON.stringify({ type: "run-created", runId: "wf-core-broken", workflowName: "review-fix-loop", argsSummary: "{}", ts: 1000 })}\n`,
       "utf8",
     );
@@ -447,7 +447,7 @@ describe("[U1 判定核抽取] findRunSettlementEvidence 直测（矩阵逐分�
   });
 
   it("journal 非 ENOENT 读错（EISDIR）→ running + warn 留证（宁挂账不误注销）", () => {
-    fs.mkdirSync(path.join(stateDirOf(), `wf-core-iofail${RUN_EVENT_JOURNAL_SUFFIX}`), {
+    fs.mkdirSync(path.join(stateDirOf(), `wf-core-iofail${RUN_EVENTS_SUFFIX}`), {
       recursive: true,
     });
     expect(findRunSettlementEvidence(stateDirOf(), "wf-core-iofail")).toEqual({ kind: "running" });

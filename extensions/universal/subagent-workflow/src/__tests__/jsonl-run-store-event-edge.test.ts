@@ -27,7 +27,7 @@ import { Budget } from "@zhushanwen/subagent-core/orchestration/models/budget.ts
 import { Trace } from "@zhushanwen/subagent-core/orchestration/models/trace.ts";
 import type { RunSpec } from "@zhushanwen/subagent-core/orchestration/models/run-spec.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
-import { RUN_EVENT_JOURNAL_SUFFIX } from "@zhushanwen/subagent-core";
+import { RUN_EVENTS_SUFFIX } from "@zhushanwen/subagent-core";
 import { JsonlRunStore } from "../jsonl-run-store.ts";
 
 function makeSpec(): RunSpec {
@@ -56,7 +56,7 @@ function makeRun(runId: string): WorkflowRun {
 }
 
 function recordPath(runId: string): string {
-  return path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  return path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`);
 }
 
 /** 预置 record 流（core journal 单写者链的产物形态），返回写入时快照内容。 */

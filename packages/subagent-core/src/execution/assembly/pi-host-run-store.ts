@@ -19,7 +19,7 @@
 //（目录集运行时可变，对齐 sessionFace 晚绑定纪律）。
 //
 // 候选与判据同源（workflow-run-store-convergence U2 枚举改接）：候选 runId 集合
-// = state 目录下的 record 事件流文件族（<runId><RUN_EVENT_JOURNAL_SUFFIX>，
+// = state 目录下的 record 事件流文件族（<runId><RUN_EVENTS_SUFFIX>，
 // runId 从文件名提取）——**journal 在即候选在**，不依赖 state 快照文件存在性
 //（候选完备性正方向；反方向「快照在而 journal 不在」的残留 run 不再进枚举，
 // 该形态本就无从收编——判定核与收编入口都以 journal 为证据源，设计 §3.1
@@ -54,7 +54,7 @@ import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 import { findRunSettlementEvidence, STATE_DIR_NAME } from "../persistence/run-state-evidence.ts";
-import { RUN_EVENT_JOURNAL_SUFFIX } from "../../shared/run-vocabulary.ts";
+import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
 import { errorCodeOf } from "../../shared/fs-error.ts";
 
 const logger = getLogger("pi-host-run-store");
@@ -134,8 +134,8 @@ export function createPiHostRunEnumeration(
           );
         }
         for (const name of names) {
-          if (!name.endsWith(RUN_EVENT_JOURNAL_SUFFIX)) continue;
-          const runId = name.slice(0, -RUN_EVENT_JOURNAL_SUFFIX.length);
+          if (!name.endsWith(RUN_EVENTS_SUFFIX)) continue;
+          const runId = name.slice(0, -RUN_EVENTS_SUFFIX.length);
           // status 调共享判定核（与对账 sweep 判据同源；读失败按 running 的保守
           // 矩阵内聚在判定核内）：missing 仅竞态窗口可达（候选来自 journal 文件
           // 族），跳过不入结果。

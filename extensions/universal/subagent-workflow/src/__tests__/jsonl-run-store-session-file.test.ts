@@ -45,7 +45,7 @@ import { Trace } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import { runSummary } from "@zhushanwen/subagent-core";
 import {
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
   WORKFLOW_RECORD_CUSTOM_TYPE,
   WORKFLOW_RECORD_ENTRY_VERSION,
 } from "@zhushanwen/subagent-core";
@@ -54,7 +54,7 @@ import { mkCtx, mkPi } from "@zhushanwen/subagent-core/testing/orchestration/__t
 
 /** 向 stateDir 的 record 流追加一帧（raw JSONL——模拟 core 写者落账）。 */
 function appendRecordLine(tmpDir: string, runId: string, line: Record<string, unknown>): string {
-  const recordPath = path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  const recordPath = path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`);
   fs.mkdirSync(path.dirname(recordPath), { recursive: true });
   fs.appendFileSync(recordPath, `${JSON.stringify(line)}\n`, "utf8");
   return recordPath;
@@ -333,7 +333,7 @@ describe("W2[D1]: RunStore.stateFilePath 暴露 record 流路径", () => {
 
   it("stateFilePath(runId) 返回 <sessionDir>/workflow-state/<runId>.record.jsonl（[D1] 唯一持久件）", () => {
     const result = store.stateFilePath("run-foo");
-    expect(result).toBe(path.join(tmpDir, "workflow-state", `run-foo${RUN_EVENT_JOURNAL_SUFFIX}`));
+    expect(result).toBe(path.join(tmpDir, "workflow-state", `run-foo${RUN_EVENTS_SUFFIX}`));
     expect(result.endsWith(".record.jsonl")).toBe(true);
   });
 });
@@ -498,7 +498,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
   it("[中断收编] 注册条目指向缺失 record 流且无终态条目 → degraded running 重建交恢复链", async () => {
     const runId = "run-w1-missing";
     const entries: CustomEntry[] = [
-      v2RegisteredEntry(runId, path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`)),
+      v2RegisteredEntry(runId, path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`)),
     ];
     const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
     const loaded = await store.loadAll();
@@ -513,7 +513,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
   it("[存续分流] record 流缺失 + 终态条目在 → 跳过不重建（呈现面归条目读者，不伪造收编）", async () => {
     const runId = "run-w1-missing-settled";
     const entries: CustomEntry[] = [
-      v2RegisteredEntry(runId, path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`)),
+      v2RegisteredEntry(runId, path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`)),
       v2SettledEntry(runId),
     ];
     const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });

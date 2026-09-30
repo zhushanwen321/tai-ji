@@ -27,7 +27,7 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("@zhushanwen/subagent-core/core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { Budget, Trace, WorkflowRun } from "@zhushanwen/subagent-core";
-import { RUN_EVENT_JOURNAL_SUFFIX } from "@zhushanwen/subagent-core";
+import { RUN_EVENTS_SUFFIX } from "@zhushanwen/subagent-core";
 
 import { JsonlRunStore } from "../jsonl-run-store.ts";
 
@@ -60,7 +60,7 @@ function makeRun(runId: string): WorkflowRun {
 }
 
 function recordPath(runId: string): string {
-  return path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  return path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`);
 }
 
 function appendRecordLine(runId: string, event: Record<string, unknown>): void {
@@ -121,7 +121,7 @@ describe("壳 store 判终局唯一判法（[D1] record fold）", () => {
     await store.save(run); // 终局后再 save
 
     const stateDirFiles = fs.readdirSync(path.join(tmpDir, "workflow-state"));
-    expect(stateDirFiles).toEqual([`${run.runId}${RUN_EVENT_JOURNAL_SUFFIX}`]); // 无 <runId>.jsonl
+    expect(stateDirFiles).toEqual([`${run.runId}${RUN_EVENTS_SUFFIX}`]); // 无 <runId>.jsonl
     // stateFilePath 指向 record 流（唯一持久件指针）
     expect(store.stateFilePath(run.runId)).toBe(recordPath(run.runId));
     await store.dispose();

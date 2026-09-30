@@ -611,7 +611,7 @@ export { SNAPSHOT_VERSION } from "./orchestration/run-snapshot.ts";
 
 // [P3/D6] run 事件 journal 读面（宿主 store fold 投影的数据源——journal scan 的
 // 坏行容忍与日志语义单源；生产源码只从 barrel 消费 core 符号先例同上）。
-// [C3 常量上收] RUN_EVENT_JOURNAL_SUFFIX / ALL_RUN_OUTCOMES / RunOutcome /
+// [C3 常量上收] RUN_EVENTS_SUFFIX / ALL_RUN_OUTCOMES / RunOutcome /
 // doneReasonToRunOutcome：壳侧曾本地镜像 journal 后缀与 DoneReason→RunOutcome
 // 映射（无机器守卫、漂移即静默失配）——经 barrel 单源后壳改 import 消费；
 // 词表与映射的语义锚点注释见 run-events.ts 对应定义。
@@ -622,7 +622,7 @@ export {
   doneReasonToRunOutcome,
   foldRunEventCheckpoint,
   INITIAL_RUN_EVENT_FOLD,
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
   // [§3.2] record 流单行坏行判定原语（core 恢复读面与壳 strict 读面共用单源——规则
   // 在 core，错误文案由各调用方自持；此前两处各写一份判据，漂移即同一坏行一边拒绝
   // 一边放行）。
