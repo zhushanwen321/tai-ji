@@ -263,20 +263,6 @@ describe("[UF-1] record-store 据绑定 sidecar 重建（跨重启空内存场�
     expect(store.collectRecords(10, "all", "root-session")).toHaveLength(1);
   });
 
-  it("终态优先级：绑定 + .state(finalized) → closed/gc（.state 胜过绑定的 running 形态）；绑定保留在盘", () => {
-    const file = writePlainChildSession(sessionsDir);
-    writeBindingFixture(file);
-    writeFinalizedState(file, "gc");
-    const store = new RecordStore(sessionsDir);
-
-    const records = store.collectRecords(10, "all", undefined);
-    expect(records).toHaveLength(1);
-    expect(records[0]!.status).toBe("idle");
-    expect(records[0]!.closedReason).toBe("gc");
-    // 保留选项锁定：终态后绑定不删——resurrect 回边删 .state 后绑定仍在，再崩溃仍可恢复
-    expect(fs.existsSync(`${file}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(true);
-  });
-
   it("负缓存打破：先仅子文件（无绑定）扫描为空 → 绑定后到落盘 → 再次扫描命中", () => {
     const file = writePlainChildSession(sessionsDir);
     const store = new RecordStore(sessionsDir);

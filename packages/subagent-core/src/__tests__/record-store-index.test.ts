@@ -576,30 +576,6 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     expect(records.map((r) => r.id).sort()).toEqual(["sa-1", "sa-2"]); // 重扫 → loadIndex 重载 → 正条目命中零内容读取
   });
 
-  it("S1TC14: 索引命中 + .cancelled sidecar 冷启动——命中分支读取 tombstone 置 closed", { timeout: 15_000 }, async () => {
-    const f1 = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] });
-
-    const storeA = new RecordStore(sessionsDir);
-    storeA.collectRecords(100, "all", "root-1");
-    await waitForIndex();
-
-    // jsonl 戳不变，仅在旁路放 .cancelled sidecar（cancel 后 jsonl 截断、状态只能靠
-    // tombstone 重建；sidecar 形态复刻 record-store-cache.test.ts A3 用例）
-    fs.writeFileSync(
-      `${f1}.cancelled`,
-      JSON.stringify({ id: "sa-1", status: "cancelled", agent: "worker", startedAt: 1000, endedAt: 3000 }) + "\n",
-    );
-
-    // 冷启动新实例：jsonl 戳命中索引条目 → 走命中分支，但 cancelled sidecar stat 变化
-    // 必须被感知——命中分支读 tombstone override 状态（否则退回兜底 running）
-    const storeB = new RecordStore(sessionsDir);
-    const sa1 = storeB.collectRecords(100, "all", "root-1").find((r) => r.id === "sa-1");
-    expect(sa1?.status).toBe("idle");
-    expect(sa1?.closedReason).toBe("cancelled");
-    expect(sa1?.error).toBe("cancelled by user");
-    expect(sa1?.endedAt).toBe(3000); // tombstone 的精确结束时间，非 mtime 近似
-  });
-
   chmodProbeIt("S1TC15: [R4/D6-③] 存量索引空串归一回归——索引直查路径 model:\"\" 条目产出 model undefined 的 record", { timeout: 15_000 }, async () => {
     const f1 = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] });
 

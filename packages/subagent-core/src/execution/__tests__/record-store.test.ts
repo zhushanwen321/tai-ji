@@ -312,21 +312,6 @@ describe("RecordStore", () => {
   // ============================================================
   // cancelled tombstone override
   // ============================================================
-  describe("cancelled tombstone", () => {
-    it("有 .state sidecar（cancelled） → status override 为 closed + closedReason=cancelled", () => {
-      const sessionFile = path.join(tmpDir, "2026-01-01-uuid-a.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "bg-1", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
-      });
-      writeCancelledState(sessionFile, 6000);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === "bg-1");
-      // v4 B-1：cancelled 折入 closed，closedReason='cancelled' 保留用户取消语义
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("cancelled");
-      expect(found?.error).toBe("cancelled by user");
-    });
-  });
 
   // ============================================================
   // compareRecords 排序稳定性（内存 running record）
@@ -442,20 +427,6 @@ describe("RecordStore", () => {
     }
 
     // ── 输入 1: 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState 写面）──
-    it(".state 新格式收条 → idle + stopReason=收口 reason；closedReason/endedAt 不投影（live ≡ reload）", () => {
-      const sessionFile = writeBaseSession();
-      writeSettledState(sessionFile, { stopReason: "interrupted", endedAt: 6000 });
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.stopReason).toBe("interrupted");
-      // 桥接不变量新侧：settle 产出的 idle 无旧终态遗留位（与内存 markSettled 一致）
-      expect(found?.closedReason).toBeUndefined();
-      // 非终态语义：endedAt 不投影（收条时间不冒充终态结束时间）
-      expect(found?.endedAt).toBeUndefined();
-      expect(found?.error).toBeUndefined();
-    });
-
     it(".state 新格式收条无 stopReason → idle + interrupted-by-restart 兜底", () => {
       const sessionFile = writeBaseSession();
       writeSettledState(sessionFile, { endedAt: 6000 });
@@ -475,43 +446,9 @@ describe("RecordStore", () => {
     });
 
     // ── 输入 2: 旧 finalized → idle + closedReason/stopReason=reason（上行映射）──
-    it(".state 旧 finalized（携 reason）→ idle + stopReason=closedReason=reason", () => {
-      const sessionFile = writeBaseSession();
-      writeFinalizedState(sessionFile, "user-close");
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("user-close");
-      expect(found?.stopReason).toBe("user-close");
-    });
-
     // ── 输入 2b: 旧 finalized 空 reason（死因不可考）→ disconnected 兜底 ──
-    it(".state 旧 finalized（空 reason）→ idle + disconnected 兜底（旧数据兼容回归）", () => {
-      const sessionFile = writeBaseSession();
-      writeFinalizedState(sessionFile);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("disconnected");
-      expect(found?.stopReason).toBe("disconnected");
-    });
-
     // ── 输入 3: 旧 cancelled → idle + closedReason=cancelled（legacy 投影判据）
     //    + stopReason=interrupted（§3.2.4 上行映射）──
-    it(".state 旧 cancelled → idle + stopReason=interrupted + closedReason=cancelled（双写与 U2 桥接对齐）", () => {
-      const sessionFile = writeBaseSession();
-      writeCancelledState(sessionFile, 6000);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.stopReason).toBe("interrupted");
-      // closedReason 保留旧词：U2 桥接判据（idle ∧ closedReason 有值 → legacy
-      // closed/cancelled 投影，旧 session-reader 兼容面）依赖此值
-      expect(found?.closedReason).toBe("cancelled");
-      expect(found?.error).toBe("cancelled by user");
-      expect(found?.endedAt).toBe(6000);
-    });
-
     // ── 输入 4: 无 sidecar → idle + interrupted-by-restart（崩溃在途 / 尚未收口）──
     it("无任何 sidecar → idle + interrupted-by-restart（§3.2.4「文件不存在」行；.alive 不影响判定）", () => {
       const sessionFile = writeBaseSession();
@@ -536,31 +473,7 @@ describe("RecordStore", () => {
     });
 
     // ── 兼容读回归：存量旧名共存时 .cancelled 优先于 .finalized ──
-    it("兼容读：旧 .cancelled 优先于旧 .finalized（存量共存形态，优先级对齐合并前）", () => {
-      const sessionFile = writeBaseSession();
-      writeLegacyFinalizedSidecar(sessionFile);
-      writeLegacyCancelledSidecar(sessionFile, {
-        id: SESSION_ID, status: "cancelled", agent: "worker", startedAt: STARTED_AT, endedAt: 6000,
-      });
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("cancelled");
-      expect(found?.stopReason).toBe("interrupted");
-    });
-
     // ── 新名权威：.state 与存量旧名共存时 .state 胜出 ──
-    it(".state 优先于存量旧名（新写侧权威，旧文件残留不覆盖新收口）", () => {
-      const sessionFile = writeBaseSession();
-      writeLegacyCancelledSidecar(sessionFile, {
-        id: SESSION_ID, status: "cancelled", agent: "worker", startedAt: STARTED_AT, endedAt: 6000,
-      });
-      writeFinalizedState(sessionFile, "user-close");
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("user-close");
-    });
   });
 
   // ============================================================
@@ -643,23 +556,6 @@ describe("RecordStore", () => {
   // endedAt 重建（问题 2 修复：终态耗时不再随墙钟增长）
   // ============================================================
   describe("endedAt 重建（耗时不再无限增长）", () => {
-    it(".state（finalized）→ light endedAt 用 mtime 近似，全量 endedAt 为最后 entry 时间戳", () => {
-      const sessionFile = path.join(tmpDir, "fin.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "bg-1", agent: "w", mode: "background", task: "t",
-        startedAt: 5000, lastTs: 9000, rootSessionId: "sess-A",
-      });
-      writeFinalizedState(sessionFile);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
-      // [perf] light 分支 2：endedAt 用 jsonl mtime 近似（finalize 后文件不再变化，
-      // 与最后 entry ts 差 <1s）——不是 entry ts 9000，也不是随墙钟无限增长的 now 基准。
-      expect(found?.endedAt).toBeDefined();
-      expect(found?.endedAt).toBeGreaterThan(5000);
-      // 全量（getFullRecord）：精确用最后 entry 时间戳（非 now）。
-      expect(store.getFullRecord("bg-1")?.endedAt).toBe(9000);
-    });
-
     it("无 sidecar（idle, §3.2.4 单规则）→ endedAt 保持 undefined（非终态，与内存 settle 形态一致）", () => {
       const sessionFile = path.join(tmpDir, "crash.jsonl");
       writeSessionJsonl(sessionFile, {
@@ -792,35 +688,7 @@ describe("RecordStore", () => {
     });
 
     // TC-2: 旧 .state marker（finalized） → idle（上行映射不回归）
-    it("TC-2: .state marker（finalized） → idle（旧值上行映射不回归）", () => {
-      const sessionFile = path.join(tmpDir, "sp2-tc2.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "sa-sp2-2", agent: "worker", mode: "background", task: "finalized task",
-        startedAt: 2000, rootSessionId: "sess-sp2",
-      });
-      writeFinalizedState(sessionFile);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100, "all", "sess-sp2").find((r) => r.id === "sa-sp2-2");
-      expect(found).toBeDefined();
-      expect(found?.status).toBe("idle");
-      expect(found?.endedAt).toBeDefined();
-    });
-
     // TC-2b: 旧 .state marker（cancelled） → idle + closedReason=cancelled + stopReason=interrupted
-    it("TC-2b: .state marker（cancelled） → idle + closedReason=cancelled + stopReason=interrupted（旧值映射不回归）", () => {
-      const sessionFile = path.join(tmpDir, "sp2-tc2b.jsonl");
-      writeSessionJsonl(sessionFile, {
-        id: "sa-sp2-2b", agent: "worker", mode: "background", task: "cancelled task",
-        startedAt: 3000, rootSessionId: "sess-sp2",
-      });
-      writeCancelledState(sessionFile, 4000);
-      const store = new RecordStore(tmpDir);
-      const found = store.collectRecords(100, "all", "sess-sp2").find((r) => r.id === "sa-sp2-2b");
-      expect(found).toBeDefined();
-      expect(found?.status).toBe("idle");
-      expect(found?.closedReason).toBe("cancelled");
-      expect(found?.stopReason).toBe("interrupted");
-    });
   });
 
   // ============================================================

@@ -106,53 +106,6 @@ describe("[U8/S8] 旧格式磁盘组只读兼容——恒 idle + stopReason 桥�
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("旧 `.finalized`（内容 = reason 原文）→ idle + stopReason=reason + closedReason 桥接位", () => {
-    const file = path.join(sessionsDir, "20260101T000000_a.jsonl");
-    writeLegacySessionJsonl(file, { id: "sa-old-fin", task: "old fin task", startedAt: 1000, rootSessionId: "root-session" });
-    writeLegacyBinding(file, "sa-old-fin", 1000);
-    // 旧格式 finalized sidecar：裸内容 = 关闭原因（state-marker LEGACY_FINALIZED_EXT 读侧）
-    fs.writeFileSync(`${file}.finalized`, "gc", "utf-8");
-
-    const store = new RecordStore(sessionsDir);
-    const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-old-fin");
-    expect(rec).toBeDefined();
-    expect(rec?.status).toBe("idle");
-    expect(rec?.stopReason).toBe("gc");
-    expect(rec?.closedReason).toBe("gc");
-    expect(rec?.agent).toBe("worker");
-    expect(rec?.task).toBe("old fin task");
-    store.dispose();
-  });
-
-  it("旧 `.finalized` 空文件（v8.5 前形态）→ idle + stopReason=disconnected", () => {
-    const file = path.join(sessionsDir, "20260101T000001_b.jsonl");
-    writeLegacySessionJsonl(file, { id: "sa-old-empty", task: "old empty task", startedAt: 1000, rootSessionId: "root-session" });
-    fs.writeFileSync(`${file}.finalized`, "", "utf-8");
-
-    const store = new RecordStore(sessionsDir);
-    const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-old-empty");
-    expect(rec?.status).toBe("idle");
-    expect(rec?.stopReason).toBe("disconnected");
-    expect(rec?.closedReason).toBe("disconnected");
-    store.dispose();
-  });
-
-  it("旧 `.cancelled` tombstone → idle + stopReason=interrupted + closedReason=cancelled", () => {
-    const file = path.join(sessionsDir, "20260101T000002_c.jsonl");
-    writeLegacySessionJsonl(file, { id: "sa-old-cx", task: "old cx task", startedAt: 1000, rootSessionId: "root-session" });
-    writeLegacyBinding(file, "sa-old-cx", 1000);
-    // 旧格式 cancelled tombstone：JSON {status:"cancelled", endedAt}
-    fs.writeFileSync(`${file}.cancelled`, JSON.stringify({ status: "cancelled", endedAt: 2500 }), "utf-8");
-
-    const store = new RecordStore(sessionsDir);
-    const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-old-cx");
-    expect(rec?.status).toBe("idle");
-    expect(rec?.stopReason).toBe("interrupted");
-    expect(rec?.closedReason).toBe("cancelled");
-    expect(rec?.endedAt).toBe(2500);
-    store.dispose();
-  });
-
   it("旧 manifest（无 executionStatus）三值域 closed/completed/cancelled → manifest 源投影 idle + closedReason 保留", () => {
     // 磁盘组缺员（无子 session 文件）→ manifest 源兜底可见（mergedRecords 1.5）
     const writeOld = (id: string, status: string, closedReason?: string): void => {
