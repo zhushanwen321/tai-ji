@@ -1,4 +1,4 @@
-// src/interface/id-preview.ts
+// src/interface/format/id-preview.ts
 //
 // run/subagent 标识符的截断展示口径（单点常量）。
 //

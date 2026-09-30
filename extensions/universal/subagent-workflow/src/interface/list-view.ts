@@ -37,7 +37,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import type { SubagentRecord } from "@zhushanwen/subagent-core";
-import { type ThemeLike } from "./format.ts";
+import { type ThemeLike } from "./format/format.ts";
 import { SubagentsListComponent } from "./list-component.ts";
 import {
   type DetailKeyContext,

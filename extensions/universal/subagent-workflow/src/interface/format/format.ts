@@ -1,4 +1,4 @@
-// src/interface/format.ts
+// src/interface/format/format.ts
 //
 // 纯格式化函数.零 Pi 依赖、零 runtime 依赖,可单测.
 //

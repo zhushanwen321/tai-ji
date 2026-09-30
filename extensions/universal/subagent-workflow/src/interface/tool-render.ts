@@ -32,7 +32,7 @@ import {
   formatElapsedSeconds,
   statusGlyph,
   type ThemeLike,
-} from "./format.ts";
+} from "./format/format.ts";
 import { truncLine } from "./tui-kit.ts";
 
 // ============================================================

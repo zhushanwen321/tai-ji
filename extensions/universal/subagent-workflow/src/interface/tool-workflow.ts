@@ -50,7 +50,7 @@ import {
 } from "@zhushanwen/subagent-core";
 import { assertEntryTimeBudget, assertEntryTokenBudget, assertSlugWithinLimit } from "@zhushanwen/subagent-core";
 import { runSummary } from "@zhushanwen/subagent-core";
-import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
+import { ID_PREVIEW_LENGTH } from "./format/id-preview.ts";
 import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 import {
   acquireReentryGuard,
@@ -58,7 +58,7 @@ import {
   type ReentryGuardRef,
   releaseReentryGuard,
 } from "./reentry-guard.ts";
-import { formatRunStatusElapsed } from "./format.ts";
+import { formatRunStatusElapsed } from "./format/format.ts";
 import {
   assertNotAborted,
   buildRunSpecFromScript,

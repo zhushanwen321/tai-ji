@@ -27,7 +27,7 @@ import {
   spinnerGlyph,
   statusGlyph,
   type ThemeLike,
-} from "./format.ts";
+} from "./format/format.ts";
 import {
   b,
   dash,

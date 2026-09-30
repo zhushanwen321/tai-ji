@@ -1,4 +1,4 @@
-// src/interface/display-state.ts
+// src/interface/format/display-state.ts
 //
 // [§2.2 B 档 · run 域] 展示态单一中间表示——run 域所有展示映射的唯一输入。
 //

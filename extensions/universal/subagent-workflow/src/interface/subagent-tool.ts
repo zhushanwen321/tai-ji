@@ -27,7 +27,7 @@ import {
   messageHandler,
   startHandler,
 } from "@zhushanwen/subagent-core";
-import { extractAgentName } from "./format.ts";
+import { extractAgentName } from "./format/format.ts";
 import { toGuiCtx } from "./gui-mappers.ts";
 import { adapter } from "./subagent-actions.ts";
 import { SubagentParams } from "./subagent-tool-schema.ts";

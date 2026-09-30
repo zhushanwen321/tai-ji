@@ -25,7 +25,7 @@ import type {
   SubagentToolResult,
 } from "@zhushanwen/subagent-core";
 import { mapRunIcon, mapRunStatus } from "./gui-mappers.ts";
-import { ID_PREVIEW_LENGTH } from "./id-preview.ts";
+import { ID_PREVIEW_LENGTH } from "./format/id-preview.ts";
 import { withGuiAttach } from "./tool-shared.ts";
 
 // ============================================================

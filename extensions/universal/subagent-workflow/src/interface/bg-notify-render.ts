@@ -31,7 +31,7 @@ import {
   shortId,
   statusGlyph,
   type ThemeLike,
-} from "./format.ts";
+} from "./format/format.ts";
 import { padToVisible, truncLine } from "./tui-kit.ts";
 
 /** agent 名最大显示宽度。 */

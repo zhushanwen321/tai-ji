@@ -40,7 +40,7 @@ import {
   formatRunBadge,
   runDisplaySignaturePart,
   runDisplayStateOf,
-} from "../display-state.ts";
+} from "../format/display-state.ts";
 import {
   buildPhaseGroups,
   ELLIPSIS,
@@ -51,7 +51,7 @@ import {
   formatPhaseLine,
   statusDotStr,
   type ThemeLike,
-} from "../format.ts";
+} from "../format/format.ts";
 // [W2/V1 D1 分流表第 9 行] CLI 视图显示换源：投影二值 status（混合判源收拢在
 // displayStatusOf 单点——判源 = core runSummary 投影）。
 import { displayStatusOf } from "../tool-workflow.ts";

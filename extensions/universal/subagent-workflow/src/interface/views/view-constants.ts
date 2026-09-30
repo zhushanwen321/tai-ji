@@ -1,7 +1,7 @@
 // src/interface/views/view-constants.ts
 //
 // workflow 全屏视图族专属布局常量（WorkflowsView + detail-content 消费）。
-// 自 interface/format.ts 沉回 views/（post-convergence C4：format.ts 只保留
+// 自 interface/format/format.ts 沉回 views/（post-convergence C4：format.ts 只保留
 // 跨视图族共享的格式化函数，views 专属常量就近落位消费方目录）。
 // ELLIPSIS 留在 format.ts（formatActivityLine/formatPhaseLine 亦消费，非 views 专属）。
 

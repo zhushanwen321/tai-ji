@@ -26,7 +26,7 @@ import {
   statusDotStr,
   statusGlyph,
   type ThemeLike,
-} from "../interface/format.ts";
+} from "../interface/format/format.ts";
 import { padToVisible, segFillColored, truncLine, wrapText } from "../interface/tui-kit.ts";
 
 // ============================================================

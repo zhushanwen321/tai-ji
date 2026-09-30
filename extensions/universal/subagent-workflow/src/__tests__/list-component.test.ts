@@ -17,7 +17,7 @@
 
 import { afterEach,beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ThemeLike } from "../interface/format.ts";
+import type { ThemeLike } from "../interface/format/format.ts";
 import { SubagentsListComponent } from "../interface/list-component.ts";
 import { processKey } from "../interface/list-view.ts";
 import type { DetailKeyContext, KeyHandler, KeyResult, NotifyFn, TuiLike, ViewState } from "../interface/list-shared.ts";
