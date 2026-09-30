@@ -419,6 +419,7 @@ function onPresetSelect(payload: { presetId: string }): void {
       @close="flow.closeOverlay()"
       @success="onWorktreeCreated"
       @use-existing="onWorktreeActivated"
-    />\    </div><!-- /v-show 内容态（display:contents 包裹） -->
+    />
+    </div><!-- /v-show 内容态（display:contents 包裹） -->
   </div>
 </template>
