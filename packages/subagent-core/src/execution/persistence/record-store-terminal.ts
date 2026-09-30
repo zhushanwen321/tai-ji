@@ -857,6 +857,11 @@ export function buildCreatedEventPayload(
     depth: record.depth,
     mode: record.mode,
     startedAt: record.startedAt,
+    // 事件流自承载绑定侧的独有字段（.record-binding 退场的前置）：模型/档位/worktree
+    // 在创建期已知，写入本事件；缺省不落键（undefined = 未指定语义）。
+    ...(record.model !== undefined ? { model: record.model } : {}),
+    ...(record.thinkingLevel !== undefined ? { thinkingLevel: record.thinkingLevel } : {}),
+    ...(record.hadWorktree === true ? { worktree: true } : {}),
   };
 }
 

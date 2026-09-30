@@ -163,6 +163,18 @@ export interface RecordCreatedEvent extends RecordEventEnvelope { // oe-exempt:2
   depth: number;
   mode: ExecutionMode;
   startedAt: number;
+  /**
+   * 模型留痕（与 .record-binding 的 model 同源；undefined = 用户未指定模型，
+   * 引擎自身缺省解析）。写入点 = 记录创建，故与 created 事件同生。
+   */
+  model?: string;
+  /** 思考档位留痕（同上；undefined = 未指定）。 */
+  thinkingLevel?: string;
+  /**
+   * 创建时启用 worktree 隔离（与 .record-binding 的 worktree 同源；重建面
+   * hadWorktree 的恢复源）。undefined/false = 未启用。
+   */
+  worktree?: boolean;
 }
 
 /**

@@ -1706,3 +1706,63 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
     expect(captured).toHaveLength(2);
   });
 });
+
+// ============================================================
+// created 事件自承载绑定侧独有字段（.record-binding 退场的前置）
+// ============================================================
+
+describe("record-created 帧承载绑定侧独有字段（model / thinkingLevel / worktree）", () => {
+  let fieldRoot: string;
+  let fieldSessions: string;
+  let fieldRecords: string;
+
+  beforeEach(() => {
+    fieldRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-created-fields-"));
+    fieldSessions = path.join(fieldRoot, "sessions");
+    fieldRecords = path.join(fieldRoot, "records");
+    fs.mkdirSync(fieldSessions, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(fieldRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function makeStoreForFields(): RecordStore {
+    return new RecordStore(fieldSessions, undefined, v2CapturePi([]), fieldRecords);
+  }
+
+  it("指定模型/档位且启用 worktree → 三个字段进 created 帧", async () => {
+    const store = makeStoreForFields();
+    store.register(
+      v2MakeRecord({
+        id: "sa-v2-fields",
+        model: "prov/model-a",
+        thinkingLevel: "xhigh",
+        hadWorktree: true,
+      }),
+    );
+
+    const created = (await v2ScanEvents(fieldRecords, "sa-v2-fields")).find(
+      (e) => e.type === "record-created",
+    );
+    expect(created).toMatchObject({
+      type: "record-created",
+      model: "prov/model-a",
+      thinkingLevel: "xhigh",
+      worktree: true,
+    });
+  });
+
+  it("未指定模型/档位、未启用 worktree → 不落键（缺省语义，不写空值）", async () => {
+    const store = makeStoreForFields();
+    store.register(v2MakeRecord({ id: "sa-v2-fields-empty", model: undefined }));
+
+    const created = (await v2ScanEvents(fieldRecords, "sa-v2-fields-empty")).find(
+      (e) => e.type === "record-created",
+    ) as Record<string, unknown> | undefined;
+    expect(created).toBeDefined();
+    expect(created).not.toHaveProperty("model");
+    expect(created).not.toHaveProperty("thinkingLevel");
+    expect(created).not.toHaveProperty("worktree");
+  });
+});
