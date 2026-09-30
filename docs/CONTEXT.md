@@ -316,7 +316,7 @@ run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐�
 
 | 载体 | ① 可删 | ② 带水位 | ③ 无独有字段 | 现状 |
 |---|---|---|---|---|
-| `sessions-index.json` | 是 | 否（只有版本号） | 是 | 索引，缺水位 |
+| `sessions-index.json` | 是 | **是**（每条带该 jsonl 的 mtime+size，消费点 `record-store.ts` 逐条比对，不匹配即重探测） | 是 | **三性质齐备**——唯一的纯索引 |
 | manifest（`<sa-id>.json`） | 否 | 否 | 否（`stopReason` 现由它独家承载） | 跨包读取面（session-reader 只认它） |
 | `.state` 收条 | 否 | 否 | 是 | core 查询面的终态读源 |
 | `.record-binding` | 否 | 否 | 否（见 [身份绑定](#身份绑定record-binding与写权epoch)） | 唯一身份/统计载体 |
