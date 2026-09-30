@@ -49,6 +49,7 @@ import { ProjectMessageHandler } from './project-message-handler.js'
 import { WorktreeMessageHandler } from './worktree-message-handler.js'
 import { TerminalMessageHandler } from './terminal-message-handler.js'
 import { QuotaMessageHandler } from './quota-message-handler.js'
+import { TtsMessageHandler } from './tts-message-handler.js'
 import { UsageMessageHandler } from './usage-message-handler.js'
 import { PresetMessageHandler } from './preset-message-handler.js'
 import { SessionManagerHandler } from './session-manager-handler.js'
@@ -65,6 +66,7 @@ import type { ImportService } from '../services/session/import-service.js'
 import type { GenStatsService } from '../services/session/gen-stats-service.js'
 import type { ITerminalService } from '../services/ports/terminal-service.js'
 import type { QuotaService } from '../services/quota-service.js'
+import type { TtsService } from '../services/tts-service.js'
 import type { IProviderCredentialResolver } from '../services/ports/provider-credential-resolver.js'
 import type { IModelConnectionTester } from '../services/ports/model-connection-tester.js'
 import { UsageStatsService } from '../services/usage/usage-stats-service.js'
@@ -88,6 +90,8 @@ export interface RuntimeServerOptionalServices {
   worktree?: IWorktreeService
   terminal?: ITerminalService
   quota?: QuotaService
+  /** 语音合成朗读编排服务（ai-voice-tts 设计 §7.4）：tts.getConfig/configure/speak/getCapabilities 路由依赖。可选：未注入时该批 case 落 unknown_type。 */
+  tts?: TtsService
   handoff?: HandoffService
   preset?: PresetService
   auth?: IAuthService
@@ -168,6 +172,8 @@ export class RuntimeServer implements IMessageBroker {
   private worktreeMessageHandler?: WorktreeMessageHandler
   private terminalMessageHandler?: TerminalMessageHandler
   private quotaMessageHandler!: QuotaMessageHandler
+  /** tts 四 RPC handler（ai-voice-tts）：optional.tts 注入时装配（可选批次，btw 同款缺省语义）。 */
+  private ttsMessageHandler?: TtsMessageHandler
   private usageMessageHandler!: UsageMessageHandler
   private presetMessageHandler!: PresetMessageHandler
   private sessionManagerHandler!: SessionManagerHandler
@@ -389,7 +395,7 @@ export class RuntimeServer implements IMessageBroker {
    * usage / preset——按对应 service 是否注入条件装配，守卫条件与原实现一致。
    */
   private assembleOptionalHandlers(messaging: MessageHandlerContext, optional: RuntimeServerOptionalServices): void {
-    const { workspace, project, worktree, terminal, quota, preset, btw } = optional
+    const { workspace, project, worktree, terminal, quota, preset, btw, tts } = optional
     if (this.gitService) {
       this.gitMessageHandler = new GitMessageHandler({
         ...messaging,
@@ -447,6 +453,12 @@ export class RuntimeServer implements IMessageBroker {
         quotaService: quota,
         // quota.configure 成功后广播 provider 列表（renderer providers 快照即时刷新）
         broadcastProviderList: () => this.broker.broadcastProviderList(),
+      })
+    }
+    if (tts) {
+      this.ttsMessageHandler = new TtsMessageHandler({
+        ...messaging,
+        ttsService: tts,
       })
     }
     // UsageStatsService 构造参数有默认值 getSessionsDir()，无需外部注入
@@ -520,6 +532,7 @@ export class RuntimeServer implements IMessageBroker {
     const worktreeHandler = this.worktreeMessageHandler
     const terminalHandler = this.terminalMessageHandler
     const quotaHandler = this.quotaMessageHandler
+    const ttsHandler = this.ttsMessageHandler
     const usageHandler = this.usageMessageHandler
     const presetHandler = this.presetMessageHandler
     const btwHandler = this.btwMessageHandler
@@ -540,6 +553,7 @@ export class RuntimeServer implements IMessageBroker {
       ...(worktreeHandler ? worktreeHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => worktreeHandler.handleWorktreeMessage(msg, ws)] as const) : []),
       ...(terminalHandler ? terminalHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => terminalHandler.handleTerminalMessage(msg, ws)] as const) : []),
       ...(quotaHandler ? quotaHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => quotaHandler.handleQuotaMessage(msg, ws)] as const) : []),
+      ...(ttsHandler ? ttsHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => ttsHandler.handleTtsMessage(msg, ws)] as const) : []),
       ...usageHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => usageHandler.handleUsageMessage(msg, ws)] as const),
       ...(presetHandler ? presetHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => presetHandler.handlePresetMessage(msg, ws)] as const) : []),
       // btw 三帧（btw-question M2-b / D6）：create/list/remove → BtwMessageHandler。
