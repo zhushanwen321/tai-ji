@@ -25,7 +25,7 @@ import {
   trySettleLegacyClosed,
 } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { readRecordBinding, readStateMarker, writeRecordBinding } from "../persistence/state-marker.ts";
+import { readRecordBinding, writeRecordBinding } from "../persistence/state-marker.ts";
 import type { TranscriptRef } from "../domain/record-types.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 

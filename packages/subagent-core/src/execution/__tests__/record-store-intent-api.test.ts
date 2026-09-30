@@ -463,27 +463,12 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       store.markResurrected(record, true);
 
-      expect(order).toEqual(["alive-acquire"]); // acquire-first：声明先于终态位删除
+      expect(order).toEqual(["alive-acquire"]); // acquire-first：写权声明先行
       expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: "rs-1" });
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
-      expect(fs.existsSync(`${sessionFile}.finalized`)).toBe(false);
+      // 终态位 sidecar 已随 ③ 退场：重开不再有磁盘终态位清理动作（磁盘终态由事件流决定）
       expect(record.status).toBe("running"); // resurrectClosed 内存翻回
       expect(record.closedReason).toBeUndefined();
       expect(store.getMutable("rs-1")).toBe(record); // register
-    });
-
-    it("(ii) acquire 后删终态位失败 → 响亮抛错：marker 已写、.state 仍在、内存无半态", () => {
-      fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "finalized", reason: "parent-shutdown" }));
-      const record = makeClosedCandidate("rs-2");
-      rmSyncMock.mockImplementationOnce(() => {
-        throw new Error("simulated EACCES");
-      });
-
-      expect(() => store.markResurrected(record, true)).toThrow(/write-lease acquire\/terminal-position flip failed/);
-      expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid }); // acquire 已成
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(true); // 终态位未删（旧形态保持）
-      expect(store.getMutable("rs-2")).toBeUndefined(); // 内存无半态（未 register）
-      expect(loggerMock.error).toHaveBeenCalled();
     });
 
     it("acquire 失败（写 .alive 抛错）→ 响亮抛错：终态位未动、未注册（禁止吞错续跑）", () => {

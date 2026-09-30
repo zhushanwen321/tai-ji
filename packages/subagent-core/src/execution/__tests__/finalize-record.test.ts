@@ -29,20 +29,6 @@ vi.mock("../../core/logger.ts", () => ({
   getLogger: () => loggerMock,
 }));
 
-// [B1] state-marker 写面 mock（默认透传真实实现）：终态写失败（重试耗尽返回 false）
-// 用例经 vi.mocked(writeFinalizedState).mockReturnValueOnce(false) 注入——绕开真实
-// 重试 3 次 ×100ms 指数退避的墙钟等待。
-vi.mock("../persistence/state-marker.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../persistence/state-marker.ts")>();
-  return {
-    ...actual,
-    writeFinalizedState: vi.fn(actual.writeFinalizedState),
-    writeCancelledState: vi.fn(actual.writeCancelledState),
-  };
-});
-
-import { writeFinalizedState } from "../persistence/state-marker.ts";
-
 import { trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import { doFinalizeRecord, doFinalizeRoundToIdle } from "../persistence/finalize-record.ts";
 import { ManifestStore } from "../persistence/manifest-store.ts";

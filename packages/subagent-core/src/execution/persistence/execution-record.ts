@@ -807,6 +807,34 @@ export function completeLegacyClosed(
   record.error = result.error;
 }
 
+/**
+ * settleWorkflowRecord 的写入面注入（finalizeRecord 归 RecordLifecycle 显式接口，
+ * 经调用方闭包回指）。
+ */
+export interface WorkflowRecordSettleExec { // oe-exempt:20260929:framework:record settle exec contract per design D15
+  finalizeRecord: (result: AgentResult, closedReason: "gc" | "cancelled") => Promise<void>;
+}
+
+/**
+ * workflow origin 的 settle 收口单点：CAS 抢锁（trySettleLegacyClosed）→ 委托注入的
+ * finalizeRecord。CAS 拒绝（cancel/dispose 抢先 settle）静默跳过——既有语义逐字保持。
+ *
+ * [D1 拆边 Class C] 原定义在 `orchestration/terminal-actions.ts`，2026-09-30 下沉本模块：
+ * 函数体只读 record 两态状态位 + 委托注入面——不读 run 生命周期 / 转移表 / 通知面，
+ * 是记录级持久化原语（编排语义零耦合），故归 persistence，编排侧不再被 execution
+ * 反向 import。
+ */
+export async function settleWorkflowRecord(
+  record: ExecutionRecord,
+  result: AgentResult,
+  closedReason: "gc" | "cancelled",
+  exec: WorkflowRecordSettleExec,
+): Promise<void> {
+  if (trySettleLegacyClosed(record, closedReason)) {
+    await exec.finalizeRecord(result, closedReason);
+  }
+}
+
 // ============================================================
 // 终态 outcome（U3 C-outcome：单一权威派生）
 // ============================================================

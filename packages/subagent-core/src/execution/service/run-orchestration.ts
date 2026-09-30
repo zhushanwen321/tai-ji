@@ -58,10 +58,10 @@ import { MAX_TIMER_DELAY_MS } from "../../shared/timer-delay.ts";
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
-import { project } from "../persistence/execution-record.ts";
+import { project, settleWorkflowRecord } from "../persistence/execution-record.ts";
 // [P1b-1] settle 链收口单点（settleOneShotOutcome workflow origin 分支的终态收口
-// 迁入；execution/service → orchestration import 为既有先例方向——run-state-evidence）。
-import { settleWorkflowRecord } from "../../orchestration/terminal-actions.ts";
+// 迁入）。[D1 拆边 Class C] 该单点下沉持久化层（记录级原语：CAS + 委托
+// finalizeRecord，零编排语义），上方 import 已直连 persistence。
 import { EngineError } from "../engine/common/errors.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";

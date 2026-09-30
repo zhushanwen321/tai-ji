@@ -90,10 +90,6 @@ vi.mock("../persistence/alive-store.ts", async (importOriginal) => {
 });
 
 vi.mock("../persistence/state-marker.ts", () => ({
-  writeFinalizedState: vi.fn(),
-  writeCancelledState: vi.fn(),
-  readStateMarker: vi.fn(() => undefined),
-  statStateStamp: vi.fn(() => null),
   STATE_SIDECAR_EXT: ".state",
 }));
 

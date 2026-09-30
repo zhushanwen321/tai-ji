@@ -25,7 +25,7 @@ import { getLogger } from "../../core/logger.ts";
 import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 
 import { resurrectClosed } from "./execution-record.ts";
-import { updateRecordBinding, writeRecordBinding, readRecordBinding, zcodeAnchorBasePath, STATE_SIDECAR_EXT } from "./state-marker.ts";
+import { updateRecordBinding, writeRecordBinding, readRecordBinding, zcodeAnchorBasePath } from "./state-marker.ts";
 import type { RecordBinding } from "./state-marker.ts";
 import { MANIFEST_INDENT_SPACES } from "./manifest-store.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
@@ -218,14 +218,9 @@ export function markResurrectedImpl(record: ExecutionRecord, wasClosed: boolean,
   try {
     // acquire-first：先声明写权——失败即中止，终态位未删（D3c (i)/(ii) 形态锚）。
     ctx.acquireLease(leaseBase, { pid: process.pid, id, startedAt: Date.now() });
-    if (wasClosed && sessionFile !== undefined) {
-      fs.rmSync(`${sessionFile}${STATE_SIDECAR_EXT}`, { force: true });
-      // 旧名两名全量清理（与 writeStateMarker 写侧清理对称）：readStateMarker 在 .state
-      // 缺失时回退旧名——残留任一旧终态文件都会让重建读出 cancelled/finalized，破坏
-      // live ≡ reload。
-      fs.rmSync(`${sessionFile}.finalized`, { force: true });
-      fs.rmSync(`${sessionFile}.cancelled`, { force: true });
-    }
+    // 终态收条（`.state` 与旧名 sidecar）已退场（③）：磁盘终态由事件流折叠决定，
+    // 重开不再需要清理磁盘终态位——`wasClosed` 的翻回由 record-reopened 帧表达。
+    void wasClosed;
   } catch (err) {
     logger.error(
       `[subagents] markResurrected(${id}) failed to acquire/flip terminal position; ` +

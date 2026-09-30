@@ -45,13 +45,17 @@ import { assertModelInCatalog } from "../../shared/model-catalog.ts";
 // D1 拆边 Class C 消掉的那条 execution → orchestration 值边（terminal-actions 侧
 // 保留同名 re-export，其余消费点零改动）。
 import { scanRunEvents } from "../persistence/run-event-journal.ts";
-// [U4] 成员复用池（决策 4/9/10 的机制本体；orchestration → execution 零反向依赖，
-// 池的 journal 读写经 io 注入，无环）。
+// [U4] 成员复用池（决策 4/9/10 的机制本体）。[D1 拆边 Class C 第 4 步] 池本体自
+// orchestration 整体下沉 execution/service（依赖面核查 = 可下沉：值依赖只有
+// core/logger，类型依赖只有 run-events 的 WorkflowRunEvent；无编排状态机语义）——
+// 本 import 即 D1 拆边 Class C 消掉的第四条 execution → orchestration 值边；编排侧
+// 消费面经 orchestration/member-reuse-pool.ts 的同名 re-export 零改动。
+// 池的 record 读经 io 注入（读面单源），无环。
 import {
   lookupMemberRecordId,
   registerMemberRecord,
   type MemberReusePoolIo,
-} from "../../orchestration/member-reuse-pool.ts";
+} from "./member-reuse-pool.ts";
 // [U4] 续写轮 resume 锚点构造单点（chat Continuation 与 workflow 成员续写共用；
 // assembly 叶子方向，既有 import 先例）。
 import { resumeAnchorOf } from "../assembly/conversation-continuation.ts";

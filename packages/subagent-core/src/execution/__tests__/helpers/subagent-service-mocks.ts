@@ -98,10 +98,6 @@ export function aliveStoreModule(actual: typeof import("../../persistence/alive-
  *  对齐原 finalized-marker mock 的 no-finalized 语义）。 */
 export function stateMarkerModule() {
   return {
-    writeFinalizedState: vi.fn(),
-    writeCancelledState: vi.fn(),
-    readStateMarker: vi.fn(() => undefined),
-    statStateStamp: vi.fn(() => null),
     STATE_SIDECAR_EXT: ".state",
   };
 }

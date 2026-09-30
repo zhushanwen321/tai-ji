@@ -46,8 +46,9 @@ import { getLogger } from "../../core/logger.ts";
 
 import { bestEffort } from "../assembly/best-effort.ts";
 // [P1b-1] settle 链收口单点（finalizeFailed/finalizeAborted workflow origin 分支的
-// 终态收口迁入；execution/service → orchestration import 为既有先例方向）。
-import { settleWorkflowRecord } from "../../orchestration/terminal-actions.ts";
+// 终态收口迁入）。[D1 拆边 Class C] 该单点下沉持久化层（记录级原语：CAS + 委托
+// finalizeRecord，零编排语义）——消费点直连 persistence，不再反向 import 编排层。
+import { settleWorkflowRecord } from "../persistence/execution-record.ts";
 import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
 // [u7a 生产补挂] 批量 dispose 收敛点推最新在途计数（D5 出口——engine 域叶子模块，
 // 本模块不得被 inflight-snapshot 反向依赖，import 方向单向安全）。

@@ -30,7 +30,7 @@ import {
   STARTUP_SWEEP_GRACE_WINDOW_MS,
   startupSweep,
   type SweepLogChannel,
-} from "../assembly/startup-sweep.ts";
+} from "../../orchestration/startup-sweep.ts"; // [D1 拆边 Class C] 实现已上移 orchestration/
 
 /** mock 日志通道（按方法名断言级别落位——规格 6 签名的级别结构承载位）。 */
 function makeLog(): SweepLogChannel {
