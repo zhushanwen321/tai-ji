@@ -93,6 +93,39 @@ function mountModule(
   return { module, provider: providerRef, t }
 }
 
+// ── 高频基线装配（文件内单源）────────────────────────────────────────────────
+// 三类 fetcher 的「无覆写」provider 快照 + preset 组合是十余处用例的公共装配面（差异全在
+// 断言侧动作与期望值）；基线收敛在此，变体形态（enabled 翻转 / 已保存 workspace /
+// apiKeySet·credentialSource 覆写 / 未选类型等）仍直接走 mountModule 内联。
+
+/** 基线键 = fetcher 名（与 QUOTA_PRESETS 的 fetcher 对齐）。 */
+type BaselineKey = 'mimo' | 'kimi-coding' | 'opencode-go'
+
+const BASELINES: Record<BaselineKey, { preset: QuotaPreset | undefined; providerInit: ProviderInfo }> = {
+  // cookie 类基线：已保存 cookie、类型未变
+  mimo: {
+    preset: MIMO_PRESET,
+    providerInit: provider({ id: 'mimo-p', quota: { enabled: false, fetcher: 'mimo', cookieSet: true } }),
+  },
+  // api-key 类基线：source=provider（provider.apiKeySet 默认 true，凭据可用）
+  'kimi-coding': {
+    preset: KIMI_PRESET,
+    providerInit: provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
+  },
+  // cookie+workspace 类基线：已保存 cookie、workspace 未保存
+  'opencode-go': {
+    preset: OPENCODE_PRESET,
+    providerInit: provider({ id: 'oc-p', quota: { enabled: false, fetcher: 'opencode-go', cookieSet: true } }),
+  },
+}
+
+/** mount 基线并落定（原用例内联形态「mountModule(...) + await Promise.resolve()」的单源化）。 */
+async function mountBaseline(key: BaselineKey) {
+  const mounted = mountModule(BASELINES[key].providerInit, { preset: BASELINES[key].preset })
+  await Promise.resolve()
+  return mounted
+}
+
 /** 读取最近一次 configure 的 payload（逐键断言用；避免 toEqual 对 undefined 键的宽松处理掩盖 ''）。 */
 function lastConfigurePayload() {
   return vi.mocked(quotaApi.configure).mock.calls[0]?.[0]
@@ -146,11 +179,7 @@ describe('readiness 齐备性矩阵（D1 / D13）', () => {
   })
 
   it('cookie 类：已保存 cookie 且类型未变 → 齐备（密文取「草稿 ∨ 已保存」并集）', async () => {
-    const { module } = mountModule(
-      provider({ id: 'mimo-p', quota: { enabled: false, fetcher: 'mimo', cookieSet: true } }),
-      { preset: MIMO_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('mimo')
 
     expect(module.draft.value.cookie).toBe('')
     expect(module.view.value.readiness).toEqual({ ready: true, missing: [] })
@@ -291,11 +320,7 @@ describe('凭证归属 typeChanged（D5）', () => {
   })
 
   it('类型切换后旧 cookie 归属失效：不计入齐备', async () => {
-    const { module } = mountModule(
-      provider({ id: 'mimo-p', quota: { enabled: false, fetcher: 'mimo', cookieSet: true } }),
-      { preset: MIMO_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('mimo')
 
     expect(module.view.value.readiness).toEqual({ ready: true, missing: [] })
 
@@ -331,11 +356,7 @@ describe('凭证归属 typeChanged（D5）', () => {
 // ── ③ saveAndTest payload 构造（§7.2 细节 4） ───────────────────────────────
 describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
   it('cookie 类：草稿空 + 类型未变 → cookie 缺省；fetcher / credentialSource / enabled 恒传', async () => {
-    const { module } = mountModule(
-      provider({ id: 'mimo-p', quota: { enabled: false, fetcher: 'mimo', cookieSet: true } }),
-      { preset: MIMO_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('mimo')
 
     await module.saveAndTest()
 
@@ -352,11 +373,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
   })
 
   it('cookie 类：草稿非空 → 传 trim 后的草稿', async () => {
-    const { module } = mountModule(
-      provider({ id: 'mimo-p', quota: { enabled: false, fetcher: 'mimo', cookieSet: true } }),
-      { preset: MIMO_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('mimo')
 
     module.draft.value.cookie = '  session=abc  '
     await module.saveAndTest()
@@ -365,11 +382,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
   })
 
   it('类型变更 + cookie 草稿空 → 传空串清除（归属失效无条件清除）', async () => {
-    const { module } = mountModule(
-      provider({ id: 'mimo-p', quota: { enabled: false, fetcher: 'mimo', cookieSet: true } }),
-      { preset: MIMO_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('mimo')
 
     module.selectType('zhipu')
     await module.saveAndTest()
@@ -446,11 +459,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
   })
 
   it('workspace 必填：草稿非空 → 传归一化 URL（永不空串）', async () => {
-    const { module } = mountModule(
-      provider({ id: 'oc-p', quota: { enabled: false, fetcher: 'opencode-go', cookieSet: true } }),
-      { preset: OPENCODE_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('opencode-go')
 
     module.draft.value.workspace = 'wrk_newid77'
     await module.saveAndTest()
@@ -484,11 +493,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
   })
 
   it('非 requiresWorkspace 类型不传 workspace 键', async () => {
-    const { module } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('kimi-coding')
 
     await module.saveAndTest()
     expect(lastConfigurePayload()?.workspace).toBeUndefined()
@@ -512,11 +517,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
 
   it('落盘成功后触发一次查询（D2：保存并测试合一）', async () => {
     vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: mockRow, lastFetchAt: 2000 })
-    const { module } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('kimi-coding')
 
     await module.saveAndTest()
 
@@ -528,11 +529,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
 
   it('落盘失败 → 不触发查询，失败态走 i18n', async () => {
     vi.mocked(quotaApi.configure).mockResolvedValue({ ok: false, error: '' })
-    const { module } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('kimi-coding')
 
     await module.saveAndTest()
 
@@ -544,11 +541,8 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
     // 防的回归：payload 组装被移到 await 之后（§7.1 时序约定 1）。真实链路里 configure 成功后
     // runtime 广播 provider 列表 → watch(providerRef) → syncFromProvider 把草稿重置为磁盘态，
     // 此时再读草稿读到的是被重置后的值（用户选的类型丢失）。
-    const { module, provider: providerRef } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
+    // 此时再读草稿读到的是被重置后的值（用户选的类型丢失）。
+    const { module, provider: providerRef } = await mountBaseline('kimi-coding')
 
     // 草稿：用户把类型从磁盘值 kimi-coding 改成 zhipu
     module.selectType('zhipu')
@@ -570,11 +564,7 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
 // ── ④ setEnabled（D4） ──────────────────────────────────────────────────────
 describe('setEnabled 纯配置位（D4）', () => {
   it('只发 { providerId, enabled } 且零查询调用（草稿类型 / 来源不被偷偷落盘）', async () => {
-    const { module } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('kimi-coding')
 
     // 草稿里制造未提交的类型选择：开关不得把它带出去
     module.selectType('mimo')
@@ -606,11 +596,7 @@ describe('setEnabled 纯配置位（D4）', () => {
 
   it('transport 抛错 → 回滚开关并落 i18n 文案', async () => {
     vi.mocked(quotaApi.configure).mockRejectedValue(new Error('transport unavailable'))
-    const { module } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('kimi-coding')
 
     await module.setEnabled(true)
 
@@ -663,11 +649,7 @@ describe('去掩码（D7）', () => {
 // ── ⑥ 类型草稿写入（D5 细节 2） ─────────────────────────────────────────────
 describe('类型草稿写入（D5 细节 2）', () => {
   it('同值选中不重置凭证草稿、不发 RPC（reka Select 同值也 emit）', async () => {
-    const { module } = mountModule(
-      provider({ id: 'mimo-p', quota: { enabled: false, fetcher: 'mimo', cookieSet: true } }),
-      { preset: MIMO_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('mimo')
 
     module.draft.value.cookie = 'unsubmitted'
     module.selectType('mimo')
@@ -700,11 +682,7 @@ describe('类型草稿写入（D5 细节 2）', () => {
   })
 
   it('非字符串 payload 被守卫拦下（reka Select 宽联合类型；不许 String() 强转出 "undefined"）', async () => {
-    const { module } = mountModule(
-      provider({ id: 'mimo-p', quota: { enabled: false, fetcher: 'mimo', cookieSet: true } }),
-      { preset: MIMO_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('mimo')
 
     module.draft.value.cookie = 'unsubmitted'
     module.selectType(undefined)
@@ -766,11 +744,7 @@ describe('loadCached reason 透传', () => {
 describe('configureError i18n（D9）', () => {
   it('saveAndTest 返回 ok:false 且带 error → 优先透传 error（跳过 i18n 兜底）', async () => {
     vi.mocked(quotaApi.configure).mockResolvedValue({ ok: false, error: 'disk full' })
-    const { module } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('kimi-coding')
 
     await module.saveAndTest()
     expect(module.view.value.configureError).toBe('disk full')
@@ -778,22 +752,14 @@ describe('configureError i18n（D9）', () => {
 
   it('saveAndTest 非 Error 抛错 → 兜底走 quotaSaveAndTestFail', async () => {
     vi.mocked(quotaApi.configure).mockRejectedValue('boom')
-    const { module } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('kimi-coding')
 
     await module.saveAndTest()
     expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaSaveAndTestFail')
   })
 
   it('workspace 非法输入 → i18n 文案且不发 RPC', async () => {
-    const { module } = mountModule(
-      provider({ id: 'oc-p', quota: { enabled: false, fetcher: 'opencode-go', cookieSet: true } }),
-      { preset: OPENCODE_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('opencode-go')
 
     module.draft.value.workspace = 'https://evil.example.com/workspace/wrk_x/go'
     await module.saveAndTest()
@@ -804,11 +770,7 @@ describe('configureError i18n（D9）', () => {
 
   it('失败文案经注入 t 渲染（i18n 出口来自入参注入，与 provider-edit deps.t 同范式）', async () => {
     vi.mocked(quotaApi.configure).mockResolvedValue({ ok: false, error: '' })
-    const { module, t } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
+    const { module, t } = await mountBaseline('kimi-coding')
 
     await module.saveAndTest()
 
@@ -820,12 +782,8 @@ describe('configureError i18n（D9）', () => {
 // ── ⑨ 既有回归：reason 透传 / preset 派生 ───────────────────────────────────
 describe('既有回归（reason 透传 / preset 派生）', () => {
   it('saveAndTest 内查询失败 → failure 分档 + lastFetchAt = 最近成功时间', async () => {
+    const { module } = await mountBaseline('kimi-coding')
     vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: 5000, reason: 'network' })
-    const { module } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
 
     await module.saveAndTest()
 
@@ -835,12 +793,8 @@ describe('既有回归（reason 透传 / preset 派生）', () => {
   })
 
   it('查询抛错 → error 态 + failure generic + 错误消息透传', async () => {
+    const { module } = await mountBaseline('kimi-coding')
     vi.mocked(quotaApi.refreshQuota).mockRejectedValue(new Error('transport unavailable'))
-    const { module } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
 
     await module.saveAndTest()
 
@@ -849,11 +803,7 @@ describe('既有回归（reason 透传 / preset 派生）', () => {
   })
 
   it('凭证形态 / workspace 需求随草稿类型派生（view.credential.form / view.workspace.required）', async () => {
-    const { module } = mountModule(
-      provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-      { preset: KIMI_PRESET },
-    )
-    await Promise.resolve()
+    const { module } = await mountBaseline('kimi-coding')
 
     expect(module.view.value.type.selected).toBe('kimi-coding')
     expect(module.view.value.credential.form).toBe('apiKey')
@@ -877,11 +827,7 @@ describe('派生面收拢（C1：失败归一 / 警示分档 / 来源提示 / �
     ]
     for (const [reason, kind] of reasonKind) {
       vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: null, reason })
-      const { module } = mountModule(
-        provider({ id: 'kimi-p', quota: { enabled: false, fetcher: 'kimi-coding' } }),
-        { preset: KIMI_PRESET },
-      )
-      await Promise.resolve()
+      const { module } = await mountBaseline('kimi-coding')
       await module.saveAndTest()
       expect(module.test.value.failure?.kind, reason).toBe(kind)
     }

@@ -26,22 +26,20 @@ import { defineComponent, h, ref, type Ref } from 'vue'
 import type { BuiltinProviderTemplate, ProviderInfo } from '@taiji/shared'
 import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import {
+  authEventCbs,
+  type DeviceCodeEvent,
+  type AuthUrlEvent,
+  type AuthSuccessEvent,
+  type AuthErrorEvent,
+} from '../helpers/oauth-auth-events-mock'
 
 // auth.* 订阅回调捕获（onMounted 注册后由测试手动派发事件；实现须返回 disposer 供 onScopeDispose）。
-// vi.fn 显式参数类型 → mock.calls[0][0] 拿到类型化 handler，派发零断言收窄。
-interface DeviceCodeEvent { providerId: string; userCode: string; verificationUri: string; verificationUriComplete?: string; expiresIn?: number }
-interface AuthUrlEvent { providerId: string; url: string; callbackPort?: number }
-interface AuthSuccessEvent { providerId: string }
-interface AuthErrorEvent { providerId: string; message: string }
+// 类型化捕获 mock 与事件 payload 类型单源在 helpers/oauth-auth-events-mock.ts。
+// 本文件无 vi.mock（SettingsTransport seam 注入在 beforeEach），mock 集无需 vi.hoisted。
+const authCbs = authEventCbs()
 
-const authCbs = vi.hoisted(() => ({
-  onAuthDeviceCode: vi.fn<(h: (p: DeviceCodeEvent) => void) => () => void>(() => () => {}),
-  onAuthAuthUrl: vi.fn<(h: (p: AuthUrlEvent) => void) => () => void>(() => () => {}),
-  onAuthSuccess: vi.fn<(h: (p: AuthSuccessEvent) => void) => () => void>(() => () => {}),
-  onAuthError: vi.fn<(h: (p: AuthErrorEvent) => void) => () => void>(() => () => {}),
-}))
-
-const configMock = vi.hoisted(() => ({
+const configMock = {
   // OAuth flow 启动（login）：默认成功
   oauthLogin: vi.fn(async () => ({ started: true })),
   oauthCancel: vi.fn(async () => ({ cancelled: false })),
@@ -58,7 +56,7 @@ const configMock = vi.hoisted(() => ({
   onAuthAuthUrl: authCbs.onAuthAuthUrl,
   onAuthError: authCbs.onAuthError,
   onAuthSuccess: authCbs.onAuthSuccess,
-}))
+}
 
 // [C3] OAuth/config 调用经 SettingsTransport seam 桩注入（替换原 @/api 门面 mock）
 

@@ -27,6 +27,7 @@ import { defineComponent } from 'vue'
 import { createPinia, getActivePinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
 import type { PiLaunchPreset, ProviderInfo, SessionSummary } from '@taiji/shared'
+import { chatApiMethodsMock } from '../helpers/api-facade-mock'
 
 // ── core.createSessionFlow mock（submit 侧断言 create 入参 = resolve 终值）──
 vi.mock('@taiji/core', async (importActual) => {
@@ -80,12 +81,8 @@ vi.mock('@/api', async (importActual) => {
 
 // useChat 单一 mock：send/sendBash spy（A 的 submit 主链路终点）+ mount 期防御面（B）
 const chatApiMock = {
-  send: vi.fn(() => Promise.resolve()),
+  ...chatApiMethodsMock(),
   sendBash: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
   editAndResend: vi.fn(),
   hydrateHistory: vi.fn(),
   abortBash: vi.fn(() => Promise.resolve()),

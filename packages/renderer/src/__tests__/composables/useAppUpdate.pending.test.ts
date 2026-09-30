@@ -13,91 +13,46 @@
  *
  * 测试设计：直接调 controller.restorePendingUpdate（绕过 initAutoCheck 的 30s 定时器，避免
  * fake timer 与 async/await mock promise 的交互复杂度）。restorePendingUpdate 进控制器接口
- * 供测试直调，运行时由 initAutoCheck 内部触发。
+ * 供测试直调，运行时由 initAutoCheck 内部触发。恢复前置统一经 restorePendingRelease
+ * （mock getPendingUpdate → 订阅 → 执行 restore），断言留在用例。
  *
- * Mock 策略（控制器化，对齐 useAppUpdate.test.ts）：
- * - createAppUpdateController({ ipc }) 注入内存 adapter（helpers/update-ipc-mock.ts）。
- *   getPreloaded 默认 null → initAutoCheck 先 restorePreloadedUpdate 无果，再走
- *   restorePendingUpdate 路径
- * - vi.mock('@/composables/logic/markdown') 桩 renderMarkdown 避免 shiki WASM
- * - effectScope 包 controller.subscribeProgress（onScopeDispose 依赖活跃 scope）
- * - afterEach 兜底 stop 活跃 scope（定时器/visibility listener/订阅随 onScopeDispose 清理）
+ * Mock 策略：族级共享 harness（../helpers/app-update-mount.ts）——ipc 七键默认值 +
+ * markdown 桩 '<h2>新特性</h2>'（getPreloaded 默认 null → initAutoCheck 先
+ * restorePreloadedUpdate 无果，再走 restorePendingUpdate 路径）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useAppUpdate.pending.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { effectScope } from 'vue'
-import type { EffectScope } from 'vue'
+import { describe, it, expect, vi } from 'vitest'
 import type { LatestReleaseInfo } from '@taiji/shared'
-import { createMemoryAppUpdateIpc, type MemoryAppUpdateIpc } from '../helpers/update-ipc-mock'
+// app-update-markdown-stub 必须先于 app-update-mount import（后者加载 SUT 时 mock 工厂立即执行）
+import { markdownStubModule } from '../helpers/app-update-markdown-stub'
 import {
-  createAppUpdateController,
+  ipc,
+  controller,
+  makeUpdateRelease,
+  setupAppUpdate,
+  setupAppUpdateLifecycle,
   type AppUpdateControllerInternal,
-} from '@/composables/features/settings/useAppUpdate'
+} from '../helpers/app-update-mount'
 
-// markdown mock 留文件内：默认 html 属本文件行为面（非 IPC 桥）
-const hoistedRenderMarkdown = vi.hoisted(() => vi.fn<(md: string) => Promise<string>>())
-vi.mock('@/composables/logic/markdown', () => ({
-  renderMarkdown: hoistedRenderMarkdown,
-}))
+vi.mock('@/composables/logic/markdown', () => markdownStubModule())
 
-/** 构造测试用 LatestReleaseInfo */
-function makeRelease(version = '0.9.0'): LatestReleaseInfo {
-  return {
-    version,
-    tagName: `v${version}`,
-    releaseNotes: '## 新特性\n- 支持 foo',
-    publishedAt: '2026-07-01T00:00:00Z',
-    htmlUrl: 'https://github.com/example/repo/releases/v' + version,
-    assets: {},
-  }
-}
+setupAppUpdateLifecycle({ primeIpc: true, markdownHtml: '<h2>新特性</h2>' })
 
-/** 内存 ipc adapter + 绑定它的控制器（每 beforeEach 重建，用例间零残留） */
-let ipc: MemoryAppUpdateIpc
-let controller: AppUpdateControllerInternal
-/** 兜底清理：用例中断未 stop 时，afterEach 统一触发 onScopeDispose 清理 */
-let activeScope: EffectScope | null = null
-
-beforeEach(() => {
-  ipc = createMemoryAppUpdateIpc()
-  controller = createAppUpdateController({ ipc })
-  // initAutoCheck 恢复链的 checkLaunchResult 消费启动结果（consumed 一次性）；null = 无待通知结果
-  ipc.getLaunchResult.mockResolvedValue(null)
-  // initAutoCheck 读 autoUpdate 开关（默认 true，存量行为不变）
-  ipc.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
-  // 默认值：getPreloaded null 表示无预下载产物 → initAutoCheck 先 restorePreloadedUpdate
-  // 无果后再 restorePendingUpdate（pending 测试的核心路径）
-  ipc.getPreloaded.mockResolvedValue(null)
-  ipc.getPendingUpdate.mockResolvedValue(null)
-  ipc.updateDownload.mockResolvedValue({ downloaded: true })
-  ipc.updateInstall.mockResolvedValue({ triggerRestart: true })
-  hoistedRenderMarkdown.mockReset()
-  hoistedRenderMarkdown.mockResolvedValue('<h2>新特性</h2>')
-})
-
-afterEach(() => {
-  activeScope?.stop()
-  activeScope = null
-  vi.unstubAllGlobals()
-})
-
-/** 在 effectScope 内订阅控制器，返回 result + scope.stop 清理函数 */
-function setupUseAppUpdate(): { result: AppUpdateControllerInternal; stop: () => void } {
-  const scope = effectScope()
-  activeScope = scope
-  scope.run(() => {
-    controller.subscribeProgress()
-  })
-  return { result: controller, stop: () => scope.stop() }
+/** 恢复 pending 前置：mock getPendingUpdate 返回值 → 订阅 → 执行 restore（断言留在用例） */
+async function restorePendingRelease(release: LatestReleaseInfo | null): Promise<{
+  result: AppUpdateControllerInternal
+  stop: () => void
+}> {
+  ipc.getPendingUpdate.mockResolvedValue(release)
+  const handle = setupAppUpdate()
+  await controller.restorePendingUpdate()
+  return handle
 }
 
 describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
   it('PENDING-TC1：restorePendingUpdate 从 getPendingUpdate 恢复「可升级」提醒', async () => {
-    ipc.getPendingUpdate.mockResolvedValue(makeRelease('0.9.0'))
-    const { result, stop } = setupUseAppUpdate()
-
-    await controller.restorePendingUpdate()
+    const { result, stop } = await restorePendingRelease(makeUpdateRelease('0.9.0'))
 
     expect(result.state.state).toBe('available')
     expect(result.state.latestRelease?.version).toBe('0.9.0')
@@ -110,10 +65,7 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
   })
 
   it('PENDING-TC2：getPendingUpdate 返回 null → 不恢复提醒，state 保持 idle', async () => {
-    ipc.getPendingUpdate.mockResolvedValue(null)
-    const { result, stop } = setupUseAppUpdate()
-
-    await controller.restorePendingUpdate()
+    const { result, stop } = await restorePendingRelease(null)
 
     expect(result.state.state).toBe('idle')
     expect(result.state.latestRelease).toBeNull()
@@ -121,13 +73,10 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
   })
 
   it('PENDING-TC3：防覆盖守卫——pending 恢复后 checkForUpdate 失败不回退 idle', async () => {
-    // 1. 恢复 pending
-    ipc.getPendingUpdate.mockResolvedValue(makeRelease('0.9.0'))
-    const { result, stop } = setupUseAppUpdate()
-    await controller.restorePendingUpdate()
+    const { result, stop } = await restorePendingRelease(makeUpdateRelease('0.9.0'))
     expect(result.state.state).toBe('available')
 
-    // 2. 模拟 30s 后联网检测失败（网络断开）
+    // 模拟 30s 后联网检测失败（网络断开）
     ipc.checkForUpdate.mockRejectedValue(new Error('network error'))
     await result.checkForUpdate()
 
@@ -138,13 +87,10 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
   })
 
   it('PENDING-TC4：防覆盖守卫——pending 恢复后 checkForUpdate 返回 null 不回退 idle', async () => {
-    // 1. 恢复 pending
-    ipc.getPendingUpdate.mockResolvedValue(makeRelease('0.9.0'))
-    const { result, stop } = setupUseAppUpdate()
-    await controller.restorePendingUpdate()
+    const { result, stop } = await restorePendingRelease(makeUpdateRelease('0.9.0'))
     expect(result.state.state).toBe('available')
 
-    // 2. 模拟 30s 后联网检测无新版（null）
+    // 模拟 30s 后联网检测无新版（null）
     ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
     await result.checkForUpdate()
 
@@ -155,14 +101,12 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
   })
 
   it('PENDING-TC5：pending 恢复后 checkForUpdate 确认有新版 → 正常刷新 latestRelease', async () => {
-    // 1. 恢复的 pending 是 v0.9.0
-    ipc.getPendingUpdate.mockResolvedValue(makeRelease('0.9.0'))
-    const { result, stop } = setupUseAppUpdate()
-    await controller.restorePendingUpdate()
+    // 恢复的 pending 是 v0.9.0
+    const { result, stop } = await restorePendingRelease(makeUpdateRelease('0.9.0'))
     expect(result.state.latestRelease?.version).toBe('0.9.0')
 
-    // 2. 联网检测到更新的 v0.9.5
-    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.5'), rateLimited: false })
+    // 联网检测到更新的 v0.9.5
+    ipc.checkForUpdate.mockResolvedValue({ info: makeUpdateRelease('0.9.5'), rateLimited: false })
     await result.checkForUpdate()
 
     // 确认有新版 → 正常刷新（latestRelease 更新为 v0.9.5）
@@ -173,9 +117,7 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
 
   it('PENDING-TC6：无 pending 恢复时，checkForUpdate 失败正常回退 idle（守卫不影响正常流程）', async () => {
     // 无 pending → pendingRestored 保持 false
-    ipc.getPendingUpdate.mockResolvedValue(null)
-    const { result, stop } = setupUseAppUpdate()
-    await controller.restorePendingUpdate()
+    const { result, stop } = await restorePendingRelease(null)
     expect(result.state.state).toBe('idle')
 
     // 联网检测失败
@@ -191,7 +133,7 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     // 模拟 IPC 通道异常（如 preload 桥未就绪 / ipcRenderer.invoke reject）
     ipc.getPendingUpdate.mockRejectedValue(new Error('ipc fail'))
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const { result, stop } = setupUseAppUpdate()
+    const { result, stop } = setupAppUpdate()
 
     // restorePendingUpdate 是 best-effort：catch 后不 re-throw，state 不变
     await expect(controller.restorePendingUpdate()).resolves.toBeUndefined()
@@ -215,10 +157,10 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     // pending 恢复成功（立即触发，不等 30s）
-    ipc.getPendingUpdate.mockResolvedValue(makeRelease('0.9.0'))
+    ipc.getPendingUpdate.mockResolvedValue(makeUpdateRelease('0.9.0'))
     // 30s 后联网检测确认有更新版本
-    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.5'), rateLimited: false })
-    const { result, stop } = setupUseAppUpdate()
+    ipc.checkForUpdate.mockResolvedValue({ info: makeUpdateRelease('0.9.5'), rateLimited: false })
+    const { result, stop } = setupAppUpdate()
 
     // initAutoCheck 必须在活跃 effect scope 内调（onScopeDispose 注册 timer 清理）
     result.initAutoCheck()
@@ -260,8 +202,8 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     ipc.getPendingUpdate.mockResolvedValue(null)
-    ipc.checkForUpdate.mockResolvedValue({ info: makeRelease('0.9.0'), rateLimited: false })
-    const { result, stop } = setupUseAppUpdate()
+    ipc.checkForUpdate.mockResolvedValue({ info: makeUpdateRelease('0.9.0'), rateLimited: false })
+    const { result, stop } = setupAppUpdate()
 
     result.initAutoCheck()
     await vi.waitFor(() => {

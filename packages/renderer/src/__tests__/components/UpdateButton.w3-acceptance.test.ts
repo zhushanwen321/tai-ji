@@ -10,8 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { getCardUpdateHarness, makeCardRelease, resetCardUpdateHarness, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'
-import type { UpdateAppState } from '@/composables/features/settings/use-app-update-state'
+import { makeCardRelease, resetCardUpdateHarness, setCardUpdateState, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'
 
 // __APP_VERSION__ 是 vite define 注入的全局常量，vitest 下不存在，stub 之
 vi.stubGlobal('__APP_VERSION__', '0.9.7')
@@ -21,18 +20,12 @@ vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardMo
 
 import UpdateButton from '@/components/sidebar/UpdateButton.vue'
 
-function setTestState(partial: Partial<UpdateAppState>): void {
-  Object.assign(getCardUpdateHarness().controller.state, partial)
-}
-
-beforeEach(() => {
-  resetCardUpdateHarness()
-})
+beforeEach(resetCardUpdateHarness)
 
 describe('W3-A4-update-button-error-overlay-vitest', () => {
   it('W3-A4-update-button-error-overlay-vitest: error 浮层显示 message + suggestion 两段', async () => {
     vi.useFakeTimers()
-    setTestState({
+    setCardUpdateState({
       state: 'error',
       errorMessage: '无法连接代理 (EHOSTUNREACH)',
       errorSuggestion: 'macOS 未授予「本地网络」权限。恢复指引：系统设置 → 隐私与安全性 → 本地网络',
@@ -60,7 +53,7 @@ describe('W3-A4-update-button-error-overlay-vitest', () => {
 
   it('W3-A4-update-button-error-overlay-vitest: 无 suggestion 时只显示 message', async () => {
     vi.useFakeTimers()
-    setTestState({
+    setCardUpdateState({
       state: 'error',
       errorMessage: '网络连接失败',
       errorSuggestion: '',
@@ -86,7 +79,7 @@ describe('W3-A4-update-button-error-overlay-vitest', () => {
 describe('W3-A5-hover-version-vitest', () => {
   it('W3-A5-hover-version-vitest: hover 卡片标题显示版本号', async () => {
     vi.useFakeTimers()
-    setTestState({
+    setCardUpdateState({
       state: 'available',
       latestRelease: makeCardRelease('0.9.9'),
       releaseNotesHtml: '<p>Release notes</p>',

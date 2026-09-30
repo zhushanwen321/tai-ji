@@ -39,6 +39,7 @@ import { effectScope } from 'vue'
 import type { EffectScope } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Segment } from '@taiji/shared'
+import { apiProjectMock } from '../../helpers/api-facade-mock'
 import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import { triggerSessionCleanups } from '@/composables/useSessionScopedState'
 import { dispatchSession } from '@taiji/core/transport/api'
@@ -55,7 +56,7 @@ const apiMock = vi.hoisted(() => ({
   writeSegments: vi.fn(() => Promise.resolve()),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
   chat: {
     send: apiMock.send,
     steer: apiMock.steer,

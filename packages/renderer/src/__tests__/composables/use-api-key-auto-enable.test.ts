@@ -21,6 +21,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { ProviderInfo } from '@taiji/shared'
 import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { i18nKeyEchoModule, toastSpyMock, toastSpyModule } from '../helpers/i18n-toast-mock'
 
 const configMock = vi.hoisted(() => ({
   toggleProviderEnabled: vi.fn(async () => {}),
@@ -32,8 +33,6 @@ const settingsStoreStub = vi.hoisted(() => ({
   defaultModel: { value: '' },
 }))
 
-const toastMock = vi.hoisted(() => ({ info: vi.fn(), error: vi.fn() }))
-
 // [C3] toggleProviderEnabled 经 SettingsTransport seam 桩注入（替换原 @/api 门面 mock）
 
 vi.mock('@taiji/core', async (importOriginal) => ({
@@ -41,15 +40,9 @@ vi.mock('@taiji/core', async (importOriginal) => ({
   getSettingsStore: () => settingsStoreStub,
 }))
 
-vi.mock('@/i18n', () => ({
-  // t 返回 key；带 params 时拼接 name，让 toast 断言能验证插值确有传入
-  default: { global: { t: (key: string, params?: Record<string, unknown>) =>
-    params?.name ? `${key}:${String(params.name)}` : key } },
-}))
-
-vi.mock('@/composables/useToast', () => ({
-  useToast: () => toastMock,
-}))
+// t = key 回显 + name 拼接（toast 断言验证插值确有传入）；useToast → toastSpyMock 单例
+vi.mock('@/i18n', () => i18nKeyEchoModule())
+vi.mock('@/composables/useToast', () => toastSpyModule())
 
 import { useApiKeyAutoEnable } from '@/composables/features/settings/useApiKeyAutoEnable'
 
@@ -88,7 +81,7 @@ describe('afterApiKeySave 判定矩阵', () => {
     const api = mountApi()
     await api.afterApiKeySave('zai-coding-cn', false)
     expect(configMock.toggleProviderEnabled).not.toHaveBeenCalled()
-    expect(toastMock.info).not.toHaveBeenCalled()
+    expect(toastSpyMock.info).not.toHaveBeenCalled()
   })
 
   it('provider 不在列表（新建，broadcast 未回——runtime ensureProviderInWhitelist 已启用）→ 不启用', async () => {
@@ -109,7 +102,7 @@ describe('afterApiKeySave 判定矩阵', () => {
     await api.afterApiKeySave('zai-coding-cn', true)
     expect(settingsStoreStub.setProviderEnabled).toHaveBeenCalledWith('zai-coding-cn', true)
     expect(configMock.toggleProviderEnabled).toHaveBeenCalledWith('zai-coding-cn', true)
-    expect(toastMock.info).toHaveBeenCalledWith('settings.provider.autoEnabledToast:Z.AI Coding CN')
+    expect(toastSpyMock.info).toHaveBeenCalledWith('settings.provider.autoEnabledToast:Z.AI Coding CN')
   })
 
   it('自动启用失败 → 乐观更新回滚（旧值还原）+ setActionError + 不 toast', async () => {
@@ -120,7 +113,7 @@ describe('afterApiKeySave 判定矩阵', () => {
     expect(settingsStoreStub.setProviderEnabled).toHaveBeenNthCalledWith(1, 'zai-coding-cn', true)
     expect(settingsStoreStub.setProviderEnabled).toHaveBeenNthCalledWith(2, 'zai-coding-cn', false)
     expect(actionError).toBe('rpc down')
-    expect(toastMock.info).not.toHaveBeenCalled()
+    expect(toastSpyMock.info).not.toHaveBeenCalled()
   })
 })
 

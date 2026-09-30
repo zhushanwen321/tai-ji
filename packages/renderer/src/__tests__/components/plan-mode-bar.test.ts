@@ -22,9 +22,10 @@
  *   PanelContainer 无横幅/审批条挂载残留（findComponent 断言 PlanReviewBar 不在其树内）
  * - 挂载位：Panel 内 plan-mode-bar 行位于 .composer-band 之前（composer 正上方）
  *
- * mock 形态照抄 plan-review-bar.test.ts（command spread actual 保真实 events 通道 +
- * extension domain mock + 真实 InternalEventBus）；状态驱动用 store.applyFrame（真实 WS
- * 帧路径）。i18n 经 vitest-i18n-setup 全局 mock，t() 取 zh-CN 文案。
+ * mock 形态与挂载脚手架共享 helpers/plan-bar-mount（command spread actual 保真实
+ * events 通道 + 帧工厂 + 挂起请求注入 + mount 编排单源）+ extension domain mock +
+ * 真实 InternalEventBus）；状态驱动用 store.applyFrame（真实 WS 帧路径）。i18n 经
+ * vitest-i18n-setup 全局 mock，t() 取 zh-CN 文案。
  * 退出确认层经 reka Popover Portal 渲染在 document.body（UpdateButton.test.ts 同款断言
  * 形态）：mount attachTo document.body + 用例末尾统一 unmount（afterEach），禁 innerHTML 强删。
  *
@@ -36,13 +37,20 @@ import { computed, defineComponent, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
+import {
+  commandApiModule,
+  emitPlanReviewRequest as emitPlanReviewRequestOnBus,
+  flushAsync,
+  mountPlanBar,
+  planStateView as viewOf,
+} from '../helpers/plan-bar-mount'
 
 // ── mock ①：command（plan-store 首拉 RPC + 退出 session.abortPlan）——spread actual ──
+// （mock 体单源 helpers/plan-bar-mount commandApiModule）
 const commandMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api', async (importActual) => {
-  const actual = await importActual<typeof import('@taiji/core/transport/api')>()
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
-})
+vi.mock('@taiji/core/transport/api', async (importActual) =>
+  commandApiModule(await importActual<typeof import('@taiji/core/transport/api')>(), commandMock),
+)
 
 // ── mock ②：extension domain（useExtensionUI 的 WS/RPC 面，照 plan-review-bar.test.ts）──
 // getPendingRequests 快照引用外提：retainOnly 快照差集剔除以该快照为权威 pending 集，
@@ -99,55 +107,29 @@ import { isPlanReviewRequest, __resetExtensionBusSubscriptionForTesting } from '
 
 const SID = 'sess-mode-bar'
 
-function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
-  return {
-    isActive: true,
-    planFilePath: '/data/A/.tmp/plans/auth/plan.md',
-    requirement: '重构 auth 模块',
-    templateName: 'default',
-    ...overrides,
-  }
-}
-
-/** 挂起 planReview 审批请求（runtime event-adapter 广播形状，D5） */
-function emitPlanReviewRequest(requestId = 'pr-1'): void {
-  mockBus.emit({
-    kind: 'ui-request',
-    sessionId: SID,
-    request: {
-      requestId,
-      pluginId: '',
-      kind: 'select',
-      method: 'select',
-      title: '\x00TAIJI_PLAN_REVIEW:',
-      options: [JSON.stringify({ docs: [] })],
-      planReview: true,
-    },
-  } as never)
-}
-
 /** 挂载注册表：reka Popover Portal 内容挂在 document.body，用例末尾统一 unmount 清理
  *  （禁 document.body.innerHTML='' 强删——破坏 Vue 内部 vnode 引致 unmount 崩溃，UpdateButton 先例） */
 const mountedWrappers: VueWrapper[] = []
 
 async function mountBar(view: PlanStateView | null = viewOf()): Promise<VueWrapper> {
-  commandMock.mockResolvedValue({ sessionId: SID, planState: view })
-  const wrapper = mount(PlanModeBar, { props: { sessionId: SID }, attachTo: document.body })
-  mountedWrappers.push(wrapper)
-  await flushAsync()
-  return wrapper
+  return mountPlanBar(PlanModeBar, {
+    commandMock,
+    sid: SID,
+    view,
+    attachTo: document.body,
+    onMount: (w) => mountedWrappers.push(w),
+  })
+}
+
+/** 挂起 planReview 审批请求（发射体单源 helpers/plan-bar-mount；本文件绑定 mockBus+SID） */
+function emitPlanReviewRequest(requestId = 'pr-1'): void {
+  emitPlanReviewRequestOnBus(mockBus, SID, requestId)
 }
 
 /** 退出确认层（Popover Portal 在 document.body，wrapper.find 不可见）；null = 未打开 */
 function findExitConfirm(): DOMWrapper<Element> | null {
   const el = document.body.querySelector('[data-testid="plan-mode-bar-exit-confirm"]')
   return el ? new DOMWrapper(el) : null
-}
-
-async function flushAsync(): Promise<void> {
-  await nextTick()
-  await Promise.resolve()
-  await nextTick()
 }
 
 beforeEach(() => {

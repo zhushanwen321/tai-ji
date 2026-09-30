@@ -25,6 +25,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { defineComponent, h, ref, nextTick } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
+import { apiFacadeWithSessionDomain } from '../helpers/session-context-mock'
 import * as events from '@taiji/core/transport/api'
 import {
   triggerSessionCleanups,
@@ -41,14 +42,11 @@ import type {
 
 // ── mock 边界：getContext RPC mock 掉；门面 session 重指回 mock 的 domain ──
 // vitest 注入 VITE_MOCK=true 使 '@/api' 门面默认指向 mock 门面，须重指才能与断言共用
-// 同一 vi.fn（对齐 stores/workflow.test.ts 的「domain mock + 门面重指」双 mock 形态）。
+// 同一 vi.fn（「domain mock + 门面重指」双 mock 形态；重指工厂单源在
+// helpers/session-context-mock.ts，与 stores/workflow.test.ts 范式同源）。
 const getContextMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api/domains/session', () => ({ getContext: getContextMock }))
-vi.mock('@/api', async (importActual) => {
-  const actual = await importActual<typeof import('@/api')>()
-  const session = await import('@taiji/core/transport/api/domains/session')
-  return { ...actual, session }
-})
+vi.mock('@/api', () => apiFacadeWithSessionDomain())
 
 // ── 共享测试基建 ─────────────────────────────────────────────
 

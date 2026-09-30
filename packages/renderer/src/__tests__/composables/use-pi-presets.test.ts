@@ -18,35 +18,30 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import type { PiLaunchPreset } from '@taiji/shared'
+import { emptyProjectApi } from '../helpers/settings-modal-api-mock'
+import { wsStateModuleWithControlledRef } from '../helpers/ws-state-ref-mock'
 import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // mock preset 域（捕获 list/getDefault/setDefault/create/update/remove 调用 + 可控返回值）
-// [C3] 经 SettingsTransport seam 桩注入（seam 方法名 listPresets/getDefaultPreset/… 逐名映射）
-const presetApiMock = vi.hoisted(() => ({
-  list: vi.fn(),
-  getDefault: vi.fn(),
-  setDefault: vi.fn(),
-  create: vi.fn(),
-  update: vi.fn(),
-  remove: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  preset: presetApiMock,
-}))
+// [C3] 经 SettingsTransport seam 桩注入（seam 方法名 listPresets/getDefaultPreset/… 逐名映射）。
+// 键驱动构造（vi.hoisted 先于 import 执行，不能引用 helper 工厂——同 preset-page-mount.ts
+// 头注的实测约束；逐成员裸 vi.fn() 字面量形态与其他 preset 测试文件构成跨文件克隆）。
+const presetApiMock = vi.hoisted(() => {
+  const mocks: Record<string, ReturnType<typeof vi.fn>> = {}
+  for (const method of ['list', 'getDefault', 'setDefault', 'create', 'update', 'remove']) {
+    mocks[method] = vi.fn()
+  }
+  return mocks
+})
+vi.mock('@/api', () => ({ project: emptyProjectApi(), preset: presetApiMock }))
 
 // ── mock 边界：ws 连接态受控 ref（u5 加载点测试驱动；默认 disconnected，存量用例零影响）──
 // [C3] usePiPresets 的 getState 改经 @taiji/core 顶层 barrel（ws-client 实现经 barrel 允许面透出）——
-// mock 目标随之换 barrel（spread actual 保 getSettingsTransport 等真实单例；vi.mock 包子路径
-// 不拦截 barrel 内相对 re-export）。
+// mock 目标随之是 barrel（spread actual 保 getSettingsTransport 等真实单例；vi.mock 包子路径
+// 不拦截 barrel 内相对 re-export）。受控 ref 工厂单源在 helpers/ws-state-ref-mock.ts。
 const wsMock = vi.hoisted(() => ({ ref: null as null | { value: string } }))
-vi.mock('@taiji/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@taiji/core')>()
-  const { ref } = await import('vue')
-  const stateRef = ref<string>('disconnected')
-  wsMock.ref = stateRef
-  return { ...actual, getState: () => stateRef }
-})
+vi.mock('@taiji/core', () => wsStateModuleWithControlledRef('@taiji/core', wsMock))
 
 import { usePresetStore } from '@/stores/preset'
 import {

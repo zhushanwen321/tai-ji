@@ -26,6 +26,7 @@ import { effectScope } from 'vue'
 import type { EffectScope } from 'vue'
 import type { ServerMessage } from '@taiji/shared'
 import { dispatchSession } from '@taiji/core/transport/api'
+import { apiProjectMock } from '../../helpers/api-facade-mock'
 
 
 // vi.hoisted 保证 mock 工厂在模块加载前就绪；holder 捕获 streamSubscribe 注册的 handler
@@ -55,7 +56,7 @@ const toastSpy = vi.hoisted(() => ({
   warning: vi.fn(),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
   chat: {
     streamSubscribe: apiMock.streamSubscribe,
     send: apiMock.send,

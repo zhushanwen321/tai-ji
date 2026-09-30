@@ -42,6 +42,11 @@ export function getCardUpdateHarness(): CardUpdateHarness {
   return harness
 }
 
+/** 摆置测试态（驱动组件 v-if 分支；直改真实控制器的 state）。 */
+export function setCardUpdateState(partial: Partial<UpdateAppState>): void {
+  Object.assign(getCardUpdateHarness().controller.state, partial)
+}
+
 /** UpdateAppState 缺省态（全 6 字段，含 errorSuggestion） */
 const IDLE_STATE: UpdateAppState = {
   state: 'idle',

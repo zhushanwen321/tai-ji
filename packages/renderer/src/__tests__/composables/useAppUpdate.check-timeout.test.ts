@@ -12,85 +12,35 @@
  * - manual 挂死超时显形：state='error'（用户可见失败，不再无限等待）
  * - 迟到 resolve 丢弃：超时收口后原 promise 才 resolve，state 不被迟到结果改写
  *
- * Mock 策略（对齐 useAppUpdate.visibility.test.ts）：createAppUpdateController({ ipc })
- * 注入内存 adapter，挂死 = mockImplementation 返回永不 settle 的 Promise。
+ * Mock 策略：族级共享 harness（../helpers/app-update-mount.ts）——ipc 七键默认值 +
+ * fake timers/epoch 起点 + markdown 桩 '<h2>notes</h2>'；挂死 = makeCheckHang 返回
+ * 永不 settle 的 Promise。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useAppUpdate.check-timeout.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { effectScope } from 'vue'
-import type { EffectScope } from 'vue'
-import type { UpdateCheckResult } from '@taiji/shared'
-import { createMemoryAppUpdateIpc, type MemoryAppUpdateIpc } from '../helpers/update-ipc-mock'
+import { describe, it, expect, vi } from 'vitest'
+// app-update-markdown-stub 必须先于 app-update-mount import（后者加载 SUT 时 mock 工厂立即执行）
+import { markdownStubModule } from '../helpers/app-update-markdown-stub'
 import {
-  createAppUpdateController,
-  type AppUpdateControllerInternal,
-} from '@/composables/features/settings/useAppUpdate'
+  ipc,
+  makeCheckHang,
+  setupAppUpdateLifecycle,
+  startAutoCheckChain,
+} from '../helpers/app-update-mount'
 
-const hoistedRenderMarkdown = vi.hoisted(() => vi.fn<(md: string) => Promise<string>>())
-vi.mock('@/composables/logic/markdown', () => ({
-  renderMarkdown: hoistedRenderMarkdown,
-}))
+vi.mock('@/composables/logic/markdown', () => markdownStubModule())
 
-/** 内存 ipc adapter + 绑定它的控制器（每 beforeEach 重建，用例间零残留） */
-let ipc: MemoryAppUpdateIpc
-let controller: AppUpdateControllerInternal
-/** 兜底清理：用例中断未 stop 时，afterEach 统一触发 onScopeDispose 清理 */
-let activeScope: EffectScope | null = null
-
-/** 在 effectScope 内订阅控制器 + initAutoCheck（onScopeDispose 需活跃 scope） */
-function setupWithAutoCheck(): { result: AppUpdateControllerInternal; stop: () => void } {
-  const scope = effectScope()
-  activeScope = scope
-  scope.run(() => {
-    controller.subscribeProgress()
-    controller.initAutoCheck()
-  })
-  return { result: controller, stop: () => scope.stop() }
-}
-
-/** 让 ipc check 永不返回（模拟 invoke 挂死），并暴露手动 settle 通道 */
-function makeCheckHang(): (v: UpdateCheckResult) => void {
-  let settle!: (v: UpdateCheckResult) => void
-  ipc.checkForUpdate.mockImplementation(
-    () =>
-      new Promise<UpdateCheckResult>((res) => {
-        settle = res
-      }),
-  )
-  return (v: UpdateCheckResult) => settle(v)
-}
-
-beforeEach(() => {
-  ipc = createMemoryAppUpdateIpc()
-  controller = createAppUpdateController({ ipc })
-  vi.useFakeTimers()
-  vi.setSystemTime(1_700_000_000_000)
-  vi.stubGlobal('__APP_VERSION__', '0.0.0')
-  ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
-  ipc.updateDownload.mockResolvedValue({ downloaded: true })
-  ipc.updateInstall.mockResolvedValue({ triggerRestart: true })
-  ipc.getPreloaded.mockResolvedValue(null)
-  ipc.getPendingUpdate.mockResolvedValue(null)
-  ipc.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
-  hoistedRenderMarkdown.mockReset().mockResolvedValue('<h2>notes</h2>')
-})
-
-afterEach(() => {
-  // 先在 fake 时钟仍活跃时触发 onScopeDispose（clearTimeout 需配对 fake timer）
-  activeScope?.stop()
-  activeScope = null
-  vi.restoreAllMocks()
-  vi.unstubAllGlobals()
-  vi.useRealTimers()
+setupAppUpdateLifecycle({
+  fakeTimers: true,
+  primeIpc: true,
+  stubAppVersion: true,
+  markdownHtml: '<h2>notes</h2>',
 })
 
 describe('useAppUpdate ipc check 超时兜底', () => {
   it('auto 链挂死自愈：60s 超时静默回 idle，60min 周期照常排上（链不断）', async () => {
     makeCheckHang()
-    const { result, stop } = setupWithAutoCheck()
-    // initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
-    await vi.advanceTimersByTimeAsync(0)
+    const { result, stop } = await startAutoCheckChain()
 
     // 30s 首查发起，invoke 挂起中（state=checking）
     await vi.advanceTimersByTimeAsync(30_000)
@@ -109,9 +59,7 @@ describe('useAppUpdate ipc check 超时兜底', () => {
 
   it('manual 挂死超时显形：state="error"（用户可见失败，不再无限等待）', async () => {
     makeCheckHang()
-    const { result, stop } = setupWithAutoCheck()
-    // initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
-    await vi.advanceTimersByTimeAsync(0)
+    const { result, stop } = await startAutoCheckChain()
 
     // 用户点击「检查更新」（manual，force=true）→ invoke 挂起
     const pending = result.checkForUpdate(true, 'manual')
@@ -128,9 +76,7 @@ describe('useAppUpdate ipc check 超时兜底', () => {
 
   it('迟到 resolve 丢弃：超时收口后原 promise 才返回，state 不被迟到结果改写', async () => {
     const resolveLate = makeCheckHang()
-    const { result, stop } = setupWithAutoCheck()
-    // initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
-    await vi.advanceTimersByTimeAsync(0)
+    const { result, stop } = await startAutoCheckChain()
 
     // 30s 首查挂起 → 60s 超时 → auto 静默回 idle
     await vi.advanceTimersByTimeAsync(30_000)
