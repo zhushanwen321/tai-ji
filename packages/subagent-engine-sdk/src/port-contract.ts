@@ -100,6 +100,16 @@ export interface RunContext {
    * 恒无扩展 flag）。additive 可选：宿主缺省不传。
    */
   extensionPaths?: string[];
+  /**
+   * [D4 record 身份信封] 协议 `run.params.ctx.identity` 的进程内还原——引擎把它整封
+   * 写进任务子进程的身份 env（`SUBAGENT_IDENTITY_ENV` 的 slug / startedAt / mode）。
+   * additive 可选：宿主缺省不传时引擎不写这三个键，读者按回落语义工作。
+   */
+  identity?: {
+    slug?: string;
+    startedAt?: number;
+    mode?: string;
+  };
   onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef">) => void;
   /** 一次性子进程 pid 上报（host/childSpawned 载荷形态；ChildProcess 句柄不跨协议面）。 */
   onChildSpawned?: (child: { pid: number | undefined; killed: boolean }) => void;

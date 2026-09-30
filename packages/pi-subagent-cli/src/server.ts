@@ -260,6 +260,8 @@ export class EngineProtocolServer {
       // [D2 扩展加载显式化] 孙进程扩展路径集还原（undefined 不挂键 = 不拼
       // --extension，协议 additive 语义）
       ...(ctx.extensionPaths !== undefined ? { extensionPaths: ctx.extensionPaths } : {}),
+      // [D4] record 身份信封还原（引擎把它整封写进任务子进程身份 env；undefined 不挂键）
+      ...(ctx.identity !== undefined ? { identity: ctx.identity } : {}),
       ...(params.resume !== undefined ? { resume: params.resume } : {}),
       onHandleReady: (partial) => {
         void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef })

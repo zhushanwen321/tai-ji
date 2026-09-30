@@ -150,6 +150,15 @@ export interface SpawnRunParams {
    * 不存在。缺省 = 不拼 --extension。
    */
   extensionPaths?: string[];
+  /**
+   * [D4] record 身份信封（协议 ctx.identity 的还原）——整封写进子进程身份 env 的
+   * slug / startedAt / mode 三键；缺省不写，壳读者按回落语义工作。
+   */
+  identity?: {
+    slug?: string;
+    startedAt?: number;
+    mode?: string;
+  };
   /** resume 目标 session 文件（冷续写：--session 续写原文件）。 */
   resumeSessionFile?: string;
 }
@@ -191,6 +200,8 @@ export function applyIdentityEnvToChildEnv(
   childEnv: Record<string, string>,
   params: Pick<SpawnRunParams, "recordId" | "agentName" | "task" | "cwd" | "sessionRootId"> & {
     worktree?: boolean;
+    /** [D4] record 身份信封：在场时写 slug / startedAt / mode 三键（缺省不写）。 */
+    identity?: { slug?: string; startedAt?: number; mode?: string };
   },
   parentEnv: NodeJS.ProcessEnv,
 ): void {
@@ -212,7 +223,13 @@ export function applyIdentityEnvToChildEnv(
   }
   childEnv[key.agent] = params.agentName;
   childEnv[key.task] = params.task;
-  const mode = parentEnv[key.mode];
+  // [D4] record 身份信封优先（宿主派发的权威值）；缺席时按既有继承/缺省语义回落。
+  const identity = params.identity;
+  const slug = identity?.slug ?? parentEnv[key.slug];
+  if (slug !== undefined && slug !== "") childEnv[key.slug] = slug;
+  const startedAt = identity?.startedAt ?? Number(parentEnv[key.startedAt]);
+  if (Number.isFinite(startedAt) && startedAt > 0) childEnv[key.startedAt] = String(startedAt);
+  const mode = identity?.mode ?? parentEnv[key.mode];
   childEnv[key.mode] = mode !== undefined && mode !== "" ? mode : "background";
   const worktree = params.worktree === true || parentEnv[key.worktree] === "true";
   if (worktree) childEnv[key.worktree] = "true";

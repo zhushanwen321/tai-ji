@@ -68,6 +68,42 @@ describe("applyIdentityEnvToChildEnv（§2.7 身份 env 写回）", () => {
     expect(env[KEY.worktree]).toBe("true");
   });
 
+  it("[D4] record 身份信封在场：slug / startedAt / mode 三键由信封权威写入", () => {
+    const env: Record<string, string> = {};
+    applyIdentityEnvToChildEnv(
+      env,
+      { ...BASE_PARAMS, identity: { slug: "fix-bug-42", startedAt: 1_700_000_000_000, mode: "chat" } },
+      // 父 env 的旧值不得覆盖信封（宿主派发值是权威）
+      { [KEY.slug]: "stale-slug", [KEY.startedAt]: "1", [KEY.mode]: "background" },
+    );
+    expect(env[KEY.slug]).toBe("fix-bug-42");
+    expect(env[KEY.startedAt]).toBe("1700000000000");
+    expect(env[KEY.mode]).toBe("chat");
+  });
+
+  it("[D4] 信封部分在场：缺席键按既有继承/缺省语义回落（不写空串、不写 NaN）", () => {
+    const env: Record<string, string> = {};
+    applyIdentityEnvToChildEnv(
+      env,
+      { ...BASE_PARAMS, identity: { slug: "only-slug" } },
+      { [KEY.startedAt]: "1700000000000" },
+    );
+    expect(env[KEY.slug]).toBe("only-slug");
+    // startedAt 回落父 env；mode 无父值 → 缺省 background
+    expect(env[KEY.startedAt]).toBe("1700000000000");
+    expect(env[KEY.mode]).toBe("background");
+    // 信封与父 env 都没有 → 不写该键（读者按可选回落）
+    expect(env[KEY.slug]).toBe("only-slug");
+  });
+
+  it("[D4] 信封缺省：三键均不写（除非父 env 携带）——保持既有回落面", () => {
+    const env: Record<string, string> = {};
+    applyIdentityEnvToChildEnv(env, BASE_PARAMS, {});
+    expect(env[KEY.slug]).toBeUndefined();
+    expect(env[KEY.startedAt]).toBeUndefined();
+    expect(env[KEY.mode]).toBe("background");
+  });
+
   it("覆盖既有 env 值（deny 终态写回的语义：以本次 run 的事实为准）", () => {
     const env: Record<string, string> = { [KEY.selfRecordId]: "stale", [KEY.depth]: "9" };
     applyIdentityEnvToChildEnv(env, BASE_PARAMS, {});
