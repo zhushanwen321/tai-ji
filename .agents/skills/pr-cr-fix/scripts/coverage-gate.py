@@ -321,9 +321,48 @@ def incremental_pct(coverage: dict[str, dict[int, int]], pkg: str,
     return pct, covered, total, uncovered_files, no_lcov, file_details
 
 
+# argv 契约：--flag value 空格分隔取值。等号写法（--base=develop）与本脚本无关，
+# 按未识别参数 fail-fast——静默忽略会让「参数拼错/写错形式」伪装成正常门禁结果
+# （eg: --base=develop 回落默认 main，跑出来一切正常但基线是错的）。
+VALUE_FLAGS = ("--base", "--min-incremental", "--min-file-incremental",
+               "--file-gate-min-lines", "--packages", "--extra-packages")
+BOOL_FLAGS = ("--debug",)
+
+
+def parse_argv(args: list[str]) -> None:
+    """argv 预检：未识别参数 fail-fast、--flag 缺值友好报错（均 exit 2）。
+
+    主解析按 `args.index(flag) + 1` 精确取值，无法感知拼错 / 等号写法 / 缺值：
+    这些错误要么静默回落默认值，要么在 flag 位于末尾时抛裸 IndexError。本预检
+    只诊断不改写取值——成功路径的解析逻辑完全不变。
+    """
+    usage = ("用法：python3 coverage-gate.py [--base main] [--min-incremental 80] "
+             "[--min-file-incremental 60] [--file-gate-min-lines 8] "
+             "[--packages a,b] [--extra-packages a,b] [--debug]"
+             "（等号写法 --flag=value 不支持，请用空格分隔取值）")
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--"):
+            if arg in VALUE_FLAGS:
+                if i + 1 >= len(args) or args[i + 1].startswith("--"):
+                    print(f"ERROR: {arg} 缺少参数值。{usage}", file=sys.stderr)
+                    sys.exit(2)
+                i += 2
+                continue
+            if arg in BOOL_FLAGS:
+                i += 1
+                continue
+            print(f"ERROR: 未识别的参数 {arg}。已知参数：{', '.join(VALUE_FLAGS + BOOL_FLAGS)}。"
+                  f"{usage}", file=sys.stderr)
+            sys.exit(2)
+        i += 1
+
+
 def main() -> None:
     global DEBUG
     args = sys.argv[1:]
+    parse_argv(args)
     base = args[args.index("--base") + 1] if "--base" in args else "main"
     min_pct = float(args[args.index("--min-incremental") + 1]) if "--min-incremental" in args else MIN_INCREMENTAL_DEFAULT
     # S4 文件级增量门槛：包百分比会稀释单文件盲区（PR #20 组 A 的 A2 形态——
@@ -340,6 +379,7 @@ def main() -> None:
     DEBUG = "--debug" in args
 
     repo_root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    warn_if_head_equals_base(repo_root, base)
     pkgs, unmeasured = changed_packages(repo_root, base)
     if only:
         pkgs = {k: v for k, v in pkgs.items() if k in only}

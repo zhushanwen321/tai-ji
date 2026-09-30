@@ -16,7 +16,7 @@ base 不匹配时整体降级回 fallow 静态估算（行为同旧版）。运�
 metrics-gate 后跑（SKILL.md 阶段 1.5/1.6 执行序）。
 
 用法：python3 metrics-gate.py [--base main]
-退出码：0 = pass/warn（放行）；1 = fail（打回）；2 = 工具/运行错误（中止）
+退出码：0 = pass/warn（放行）；1 = fail（打回）；2 = 工具/运行错误（中止，含 argv 参数错误）
 产出：.review/metrics.json（阶段 2 review agent 的靶子清单来源）
 """
 
@@ -99,6 +99,10 @@ def locate_dead_code_item(kind: str, item: dict) -> dict:
 def load_thresholds(repo_root: Path) -> dict:
     config = repo_root / ".fallowrc.json"
     if not config.is_file():
+        # SKILL.md 称 .fallowrc.json 是阈值 SSOT：缺失必须出声（否则「用内置默认
+        # 阈值跑完门禁」看起来像按配置跑，实际口径可能不符 SSOT）
+        print(f"WARN: 仓库根 .fallowrc.json 缺失，用内置默认阈值 {DEFAULTS}——"
+              f"该文件是阈值 SSOT，缺失时请确认用默认阈值是有意为之", file=sys.stderr)
         return dict(DEFAULTS)
     try:
         health = json.loads(config.read_text()).get("health", {})
@@ -212,7 +216,42 @@ def judge(report: dict, thresholds: dict, real_cov: dict[str, dict] | None) -> d
     }
 
 
+# argv 契约：--flag value 空格分隔取值。等号写法（--base=develop）与本脚本无关，
+# 按未识别参数 fail-fast——静默忽略会让「参数拼错/写错形式」伪装成正常门禁结果
+# （eg: --base=develop 回落默认 main，跑出来一切正常但基线是错的）。
+VALUE_FLAGS = ("--base",)
+BOOL_FLAGS = ()
+
+
+def parse_argv(args: list[str]) -> None:
+    """argv 预检：未识别参数 fail-fast、--flag 缺值友好报错（均 exit 2）。
+
+    主解析按 `args.index(flag) + 1` 精确取值，无法感知拼错 / 等号写法 / 缺值：
+    这些错误要么静默回落默认值，要么在 flag 位于末尾时抛裸 IndexError。本预检
+    只诊断不改写取值——成功路径的解析逻辑完全不变。
+    """
+    usage = "用法：python3 metrics-gate.py [--base main]（等号写法 --flag=value 不支持，请用空格分隔取值）"
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--"):
+            if arg in VALUE_FLAGS:
+                if i + 1 >= len(args) or args[i + 1].startswith("--"):
+                    print(f"ERROR: {arg} 缺少参数值。{usage}", file=sys.stderr)
+                    sys.exit(2)
+                i += 2
+                continue
+            if arg in BOOL_FLAGS:
+                i += 1
+                continue
+            print(f"ERROR: 未识别的参数 {arg}。已知参数：{', '.join(VALUE_FLAGS + BOOL_FLAGS)}。"
+                  f"{usage}", file=sys.stderr)
+            sys.exit(2)
+        i += 1
+
+
 def main() -> None:
+    parse_argv(sys.argv[1:])
     base = "main"
     if "--base" in sys.argv:
         base = sys.argv[sys.argv.index("--base") + 1]

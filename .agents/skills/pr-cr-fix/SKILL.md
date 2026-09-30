@@ -79,12 +79,20 @@ gh pr create --repo zhushanwen321/tai-ji \
 
 ### 1.4 [OPTIONAL] skill YAML 规范校验
 
-本会话修改过实体 skill 文件（`<workspace 根>/.agents/skills/` 下任意文件——skill 已脱离 git 跟踪，PR diff 不再包含 skill 改动，改用会话内改动事实作为触发判据）时，PR 创建前运行本 skill 内置校验脚本：
+本会话修改过实体 skill 文件（`<workspace 根>/.agents/skills/` 下任意文件——skill 已脱离 git 跟踪，PR diff 不再包含 skill 改动，改用会话内改动事实作为触发判据）时，PR 创建前运行本 skill 内置校验脚本（依赖第三方 PyYAML，缺失时 `pip3 install pyyaml`）：
 
 ```bash
-# 校验 skill SKILL.md 的 frontmatter（name/description 必填，description 双引号包裹或块标量）
-python3 <workspace 根>/.agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py <skill-paths>
+# 校验 skill SKILL.md 的 frontmatter（name/description 必填且 name 必须与 skill 目录名
+# 完全一致；description 须为双引号字符串或块标量）。路径参数收 SKILL.md 文件路径或
+# glob 模式，不能传目录（传目录抛 IsADirectoryError；glob 无匹配时 exit 1，判读见下）
+python3 <workspace 根>/.agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py <SKILL.md 文件路径或 glob 模式>
+# 示例：一次校验本仓全部实体 skill
+python3 <workspace 根>/.agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py '<workspace 根>/.agents/skills/*/SKILL.md'
 ```
+
+- 强制检查项：frontmatter `name` 必填且与 skill 目录名完全一致——zcode skill 发现机制按目录名装载 skill，两者不一致时触发器与实际装载名脱节；`description` 必填非空且为双引号字符串或块标量（`>-` / `|`）——单引号是合法 YAML 但违反项目约定，计 error
+- `--fix` 自动修复 plain 与双引号转义两类问题（就地改写 SKILL.md，带写副作用，修后重跑校验确认）；单引号违规不自动修，须手工改为双引号或块标量
+- 退出码判读：exit 0 = 全部通过。exit 1 有两种成因共用同一退出码，按输出内容区分——输出含单独一行 `No files matched.` = glob 模式没匹配到任何 SKILL.md 文件（查路径与模式本身，与 skill 内容无关）；输出含 `ERROR:` 行 = 有文件挂了校验（逐条按错误内容修）
 
 ## 阶段 1.5：度量快照 + Gate-1.5（硬门禁）[MANDATORY]
 
@@ -130,16 +138,20 @@ python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base main
 
 ### 执行（主 agent 直接跑）
 
+**运行位置必须是 feature worktree 根目录**：repo 根按当前 cwd 解析，在 main worktree（HEAD=base）本脚本得到空 diff，会按「无带 src/ 改动的 vitest 包」打印 pass 并覆写 `.review/coverage.json` 为空报告（exit 0 静默假 pass）。脚本侧有守卫：HEAD 与 base 指向同一 commit 时打印 WARN 提示可能跑错 worktree。
+
 ```bash
 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main
 # diff 含 packages/shared/**/src/** 时传下游追加（见下方 shared 下游传播）：
 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main --extra-packages packages/runtime,packages/renderer
 ```
 
+- 参数按空格分隔取值（`--flag value`）；等号写法（`--base=develop`）与未识别参数会 fail-fast exit 2，`--flag` 缺值同样 exit 2 并给出用法
 - 自动检测 base...HEAD 改动过 `src/` 的 vitest 包（含 `extensions/shared/<lib>` 三层目录），逐包跑 `vitest run --coverage`（lcov），解析 lcov DA 行命中 × git diff 新增行号（精确路径匹配），算**可执行新增行覆盖率**
 - **判定**：任一被 gate 包增量 < 80%（默认）、**文件级增量门槛违规**（新增可执行行 ≥8 的单文件自身覆盖率 < 60%，防单文件盲区被包百分比稀释；可调 `--min-file-incremental` / `--file-gate-min-lines`）或测试失败 → `verdict=fail` exit 1；**登记式豁免**：文件头注释 `coverage-file-gate-exempt: <理由>`（组合根装配面/跨环境分支等单轨不可达形态）退出文件级门槛（包级仍卡），报告 file_gate.exempt 可见不静默；记账不闭合 / all-SKIP / git 瞬态异常 → exit 2（工具错误，修复后重跑）；产出 `.review/coverage.json`（packages 增量口径 + file_gate 违规/豁免清单 + files 全文件级真实覆盖率 + files_without_lcov 盲区清单）。SKIP 语义：按 package.json **声明**判定（非 node 解析），出现 SKIP 即配置漂移，按报告内指引补声明
 - **shared 下游传播**：包选择只收自身有 `src/` 改动的包，shared 改动不传播下游；diff 含 `packages/shared/**/src/**` 时传 `--extra-packages packages/runtime,packages/renderer`——实跑两包全量插桩测试，作为 shared 改动的下游兜底。**连带效应**：renderer vitest.config 内的全量 thresholds（CI 强制口径）随之生效，thresholds breach 视同测试失败走 FAIL 路径（与本次改动无关的全量退化同样拦截；该失败输出与 uncovered_files 增量口径不同源，排障注意区分）
-- `--packages <pkg>` 是交集过滤器（单包探针用，会以单包产物覆盖 coverage.json，探针后重跑全量恢复）；`--extra-packages` 是追加器，两者语义不同、可共存。**注意**：修复 worker 还在运行时本地读数会被污染——Gate-1.6 必须在干净工作区（全部改动已 commit）跑
+- `--packages <pkg[,pkg2...]>` 是交集过滤器（支持逗号分隔多包；单包/子集探针用，会以探针产物覆盖 coverage.json，探针后重跑全量恢复）；`--extra-packages <pkg[,pkg2...]>` 是追加器（同样支持逗号分隔多包），两者语义不同、可共存。**注意**：修复 worker 还在运行时本地读数会被污染——Gate-1.6 必须在干净工作区（全部改动已 commit）跑
+- 排障降载开关：时序类随机失败（单包复跑绿、gate 跑红）时用 `TAIJI_COVERAGE_GATE_SERIAL=1 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main` 串行复跑——该 env 使测试文件串行执行，只排除 CPU 并发对时序敏感用例的干扰，不改变断言与覆盖范围
 
 **Gate-1.6 判定**：fail → 派测试专项 subagent 补测试 → 重跑（上限 3 轮）。补测试优先级看 `.review/coverage.json` 的 uncovered_files 清单（按可执行新增行缺口排序）。
 
@@ -353,7 +365,7 @@ Pi Extension 接口契约 checklist（SDK 签名核对 / spec 偏差记录 / sch
 
 ### 3a — 终局三道 gate（主 agent 直接按序跑）
 
-阶段 2 修复会改代码，1.5/1.6 初跑读数已过期。**顺序固定 coverage → metrics → pre-merge**（coverage 的 files 节供 metrics 分流，见 1.6；pre-merge 注入值来自 coverage-gate 测试判定）：
+阶段 2 修复会改代码，1.5/1.6 初跑读数已过期。**顺序固定 coverage → metrics → pre-merge**（coverage 的 files 节供 metrics 分流，见 1.6；pre-merge 注入值来自 coverage-gate 测试判定）。**① 同样必须在 feature worktree 根目录运行**——repo 根按当前 cwd 解析，HEAD 与 base 同一 commit（main worktree）时空 diff 会被判 pass 并覆写 `.review/coverage.json`，跑错位置会让终值变成空报告假 pass（见 1.6 运行位置警示）：
 
 ```bash
 # ① coverage-gate：测试第 2 遍（插桩口径）+ 覆盖率终值；diff 含 shared src 时同样传 --extra-packages（见 1.6）
