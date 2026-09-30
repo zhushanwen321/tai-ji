@@ -338,3 +338,10 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：事件词表 `RUN_EVENT_TYPES` 由 9 增至 10（journal 事件；控制事件词表不变），`WorkflowRunEvent` 联合新增 `WorkerLogEvent`。无新约束族；机器检查面 = run-events 的词表/转移表穷尽测试（新增样本）+ 本条的诊断帧折叠与重建单测（core）+ 壳重建单测。
 
+### ADR-0095 run 侧 v1 读面整体删除（2026-09-30 用户裁决，承 ADR-0078 同款裁决的延伸）
+**决策**：workflow run 侧（workflow-record）的 v1 兼容读面整体删除——record 侧 v1 兼容层已按「项目未上线、无 v1 数据，不迁移不兼容」裁决先行删除（ADR-0078 v1 删除补记），run 侧残留读面按同款裁决收敛为 v2-only。删除面四项：① session-reader 发现链收敛单档（`discovery/workflows.ts`——删 workflow-record v1 全量快照档、workflow-state-link 旧指针档与 wf-state 快照解析族 `extractCallSessionFiles`，只认 v2 注册条目的 recordPath 锚点）；② runtime `workflow-extractor.ts` 删 v1 快照条目扫描与 legacy 双管线（workflow-state-link 指针 + state 文件投影），文件收缩为 session-file-extraction 共享骨架的消费壳，records 恒空——runtime workflow 列表唯一数据源 = events-projection 的 record 流 fold + v2 注册/终态条目；③ core `run-snapshot.ts`（`SNAPSHOT_VERSION` 快照行版本常量，写面死后仅存读面残件）整文件删除，barrel 导出移除；④ 跨包契约测试同批收敛（runtime 三文件删除/重写、session-reader 两文件收敛单档、core `SNAPSHOT_VERSION` 值锁定测试删除）。
+
+**旧格式语义**：历史格式条目（v1 全量快照 entry / workflow-state-link 指针 entry / wf-state 快照行）不识别、不拒读、不报错——静默从各读面消失（发现链不产 runId、列表不显示、resume 一律拒绝），是历史数据处置的预期行为（不迁移、不兼容、不主动清盘文件）。session-reader 的 `readRunSnapshot` 保留（tool-handler workflow 概览快照链仍有 import；发现链收敛 v2 后该链对 v2 档不可达，随该文件后续批次清理）。
+
+**登记**：壳 `jsonl-run-store.ts` 注释措辞同批终态化（v1 行静默消失 = 设计预期）；壳 `session-lifecycle.ts` 的 link 条目读面不在本批领地、另行批次收敛；无新约束族（数据处置口径承 ADR-0078 系）。
+

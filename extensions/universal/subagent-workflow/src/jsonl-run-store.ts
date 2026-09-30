@@ -124,8 +124,9 @@ function collectV2RecordEntry(entry: CustomEntry, entryIndex: number, sources: E
 }
 
 /** loadAll 的 entry 扫描：主 session entries → v2 注册定界 + 终态条目抑制（唯一发现
- *  通道）。历史形态 entry（v1 全量快照 / 旧 workflow-state-link 指针）静默忽略——
- *  历史数据仍在盘上，不再重建；未知 entry 的容忍面不受影响。 */
+ *  通道）。历史形态 entry（v1 全量快照 / 旧 workflow-state-link 指针）静默消失——
+ *  不识别、不拒读、不报错，是设计预期（[ADR-0095] 同 record 侧 v1 处置：项目未上线
+ *  无历史数据，不迁移不兼容）；未知 entry 的容忍面不受影响。 */
 function collectEntrySources(entries: SessionEntry[]): EntrySources {
   const sources: EntrySources = {
     registered: new Map<string, WorkflowRecordRegisteredEntryData>(),

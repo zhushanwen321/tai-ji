@@ -4,8 +4,8 @@
  * 验收对照（w18-acceptance 通过命令 3 / plan W18 验收标准 4）：
  * - 增量拉取：cursor 建立后失效 → client.getEntries(since=cursor)
  * - 游标失效全量自愈："Entry not found" → 丢 cursor → getEntries() 全量重建
- * - legacy 兜底：旧 session 无自描述 entry 重开列表仍显示（extractor 层单测覆盖
- *   scanSubagentEntries/scanWorkflowEntries 的 legacy 分支；本文件覆盖 RPC 编排链）
+ * - RPC 编排链：本文件覆盖 get_entries 拉取编排（extractor 的 workflow legacy 分支
+ *   已随 [ADR-0095] v1 读面删除；subagent 派生面见 subagent-extractor 层单测）
  *
  * mock 层级 = RPC（client.getEntries 可编程返回 entry 数组，entry 形态对齐 pi
  * appendCustomEntry 契约：{type:'custom', customType, data:{v:2, kind, ...}}——v2 条目对：

@@ -1570,66 +1570,6 @@ async function wfStateFile(
   return path
 }
 
-/** 向 main session 追加 workflow-state-link custom entry（resolveWorkflows 的输入）。 */
-async function wfLink(
-  dir: string,
-  slug: string,
-  id: string,
-  link: { runId: string; path: string },
-): Promise<void> {
-  const sessionPath = join(dir, 'sessions', slug, `${id}.jsonl`)
-  const line = JSON.stringify({
-    type: 'custom',
-    id: `wf-link-${link.runId}`,
-    parentId: id,
-    customType: 'workflow-state-link',
-    data: { runId: link.runId, path: link.path, updatedAt: '2026-08-12T00:00:00Z' },
-    timestamp: '2026-08-12T00:00:00Z',
-  })
-  await writeFile(sessionPath, line + '\n', { flag: 'a' })
-}
-
-/** 构造 NEW 格式 wf-state 快照 JSON 行（calls 含 sessionId/sessionFile，parseRunSnapshot 透传）。 */
-function wfSnapshotNew(
-  runId: string,
-  calls: Array<{ sessionId: string; sessionFile: string; description?: string }>,
-): string {
-  return JSON.stringify({
-    v: 'wf-run-v1',
-    runId,
-    spec: { scriptName: 'test-wf', name: 'Test' },
-    state: {
-      status: 'done',
-      reason: 'completed',
-      budget: {
-        usedTokens: 100,
-        usedCost: 0,
-        totalCallCount: calls.length,
-        maxTokens: 10000,
-      },
-      calls: calls.map((c, i) => ({
-        id: i,
-        opts: {
-          prompt: 'do work',
-          model: 'test-model',
-          description: c.description ?? `step-${i}`,
-        },
-        status: 'done',
-        attempts: 1,
-        result: {
-          content: 'ok',
-          durationMs: 100,
-          sessionId: c.sessionId,
-          sessionFile: c.sessionFile,
-        },
-        sessionId: c.sessionId,
-        sessionFile: c.sessionFile,
-      })),
-    },
-    meta: { startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:01:00Z' },
-  })
-}
-
 describe('doWorkflow（w6，fixture）', () => {
   let dir: string
 
@@ -1660,6 +1600,30 @@ describe('doWorkflow（w6，fixture）', () => {
       timestamp: '2026-09-28T00:00:00Z',
     })
     await writeFile(sessionPath, line + '\n', { flag: 'a' })
+  }
+
+  /** 构造 v2 record 流文件（run-created + agent-settled[+终局] 帧提 calls）并写注册条目——
+   *  [ADR-0095] v1 读面删除后的单档 fixture 形态（替代 wf-state 快照 + link 指针）。 */
+  async function wfV2Run(
+    dir: string,
+    slug: string,
+    id: string,
+    runId: string,
+    calls: Array<{ sessionId: string; sessionFile: string }>,
+    opts: { settled?: boolean } = {},
+  ): Promise<string> {
+    const lines = [
+      JSON.stringify({ type: 'run-created', seq: 1, ts: 1758000000000, runId, workflowName: 'test-wf', argsSummary: '{}' }),
+      ...calls.map((c, i) =>
+        JSON.stringify({ type: 'agent-settled', seq: 2 + i, ts: 1758000001000 + i, taskIndex: i, attempt: 1, outcome: 'done', durationMs: 100, result: { content: 'ok', sessionId: c.sessionId, sessionFile: c.sessionFile } }),
+      ),
+    ]
+    if (opts.settled) {
+      lines.push(JSON.stringify({ type: 'run-settled', seq: 2 + calls.length, ts: 1758000002000, outcome: 'done' }))
+    }
+    const recordPath = await wfStateFile(dir, slug, `${runId}.record.jsonl`, lines)
+    await wfV2Registered(dir, slug, id, runId, recordPath)
+    return recordPath
   }
 
   it('[D16③] v2 档 record 流概览：注册条目锚点直读流——steps 提 sessionFile、status 三态、不进 skippedRuns（活跃 run 红线）', async () => {
@@ -1726,12 +1690,9 @@ describe('doWorkflow（w6，fixture）', () => {
     const slug = '--wf-single--'
     await wfMainSession(dir, slug, WF_ROOT)
     const callSession = join(dir, 'sessions', slug, `${WF_CALL}.jsonl`)
-    const wfPath = await wfStateFile(dir, slug, 'wf-single.jsonl', [
-      wfSnapshotNew('wf-single-1', [
-        { sessionId: WF_CALL, sessionFile: callSession, description: 'probe-step' },
-      ]),
-    ])
-    await wfLink(dir, slug, WF_ROOT, { runId: 'wf-single-1', path: wfPath })
+    await wfV2Run(dir, slug, WF_ROOT, 'wf-single-1', [
+      { sessionId: WF_CALL, sessionFile: callSession },
+    ], { settled: true })
 
     const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
     const d = r.details as {
@@ -1762,14 +1723,8 @@ describe('doWorkflow（w6，fixture）', () => {
   it('TC-w6-multi-run：多 run 拼接，content 含两段 overview，runs.length===2', async () => {
     const slug = '--wf-multi--'
     await wfMainSession(dir, slug, WF_ROOT)
-    const wf1 = await wfStateFile(dir, slug, 'wf-1.jsonl', [
-      wfSnapshotNew('wf-multi-1', [{ sessionId: WF_CALL, sessionFile: '/abs/a.jsonl' }]),
-    ])
-    const wf2 = await wfStateFile(dir, slug, 'wf-2.jsonl', [
-      wfSnapshotNew('wf-multi-2', [{ sessionId: WF_CALL, sessionFile: '/abs/b.jsonl' }]),
-    ])
-    await wfLink(dir, slug, WF_ROOT, { runId: 'wf-multi-1', path: wf1 })
-    await wfLink(dir, slug, WF_ROOT, { runId: 'wf-multi-2', path: wf2 })
+    await wfV2Run(dir, slug, WF_ROOT, 'wf-multi-1', [{ sessionId: WF_CALL, sessionFile: '/abs/a.jsonl' }], { settled: true })
+    await wfV2Run(dir, slug, WF_ROOT, 'wf-multi-2', [{ sessionId: WF_CALL, sessionFile: '/abs/b.jsonl' }], { settled: true })
 
     const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
     const d = r.details as { runs: Array<{ runId: string }>; runIds: string[] }
@@ -1785,14 +1740,8 @@ describe('doWorkflow（w6，fixture）', () => {
   it('TC-w6-runid-filter：runId 过滤命中单 run', async () => {
     const slug = '--wf-filter--'
     await wfMainSession(dir, slug, WF_ROOT)
-    const wf1 = await wfStateFile(dir, slug, 'wf-1.jsonl', [
-      wfSnapshotNew('wf-filter-1', [{ sessionId: WF_CALL, sessionFile: '/abs/a.jsonl' }]),
-    ])
-    const wf2 = await wfStateFile(dir, slug, 'wf-2.jsonl', [
-      wfSnapshotNew('wf-filter-2', [{ sessionId: WF_CALL, sessionFile: '/abs/b.jsonl' }]),
-    ])
-    await wfLink(dir, slug, WF_ROOT, { runId: 'wf-filter-1', path: wf1 })
-    await wfLink(dir, slug, WF_ROOT, { runId: 'wf-filter-2', path: wf2 })
+    await wfV2Run(dir, slug, WF_ROOT, 'wf-filter-1', [{ sessionId: WF_CALL, sessionFile: '/abs/a.jsonl' }], { settled: true })
+    await wfV2Run(dir, slug, WF_ROOT, 'wf-filter-2', [{ sessionId: WF_CALL, sessionFile: '/abs/b.jsonl' }], { settled: true })
 
     const r = await handleSessionRead(
       { action: 'workflow', session: WF_ROOT, runId: 'wf-filter-1' },
@@ -1814,14 +1763,8 @@ describe('doWorkflow（w6，fixture）', () => {
   it('TC-w6-runid-not-found：runId 无匹配→ES-wf-runid-not-found（列候选+👉，不抛错）', async () => {
     const slug = '--wf-notfound--'
     await wfMainSession(dir, slug, WF_ROOT)
-    const wf1 = await wfStateFile(dir, slug, 'wf-1.jsonl', [
-      wfSnapshotNew('wf-nf-1', [{ sessionId: WF_CALL, sessionFile: '/abs/a.jsonl' }]),
-    ])
-    const wf2 = await wfStateFile(dir, slug, 'wf-2.jsonl', [
-      wfSnapshotNew('wf-nf-2', [{ sessionId: WF_CALL, sessionFile: '/abs/b.jsonl' }]),
-    ])
-    await wfLink(dir, slug, WF_ROOT, { runId: 'wf-nf-1', path: wf1 })
-    await wfLink(dir, slug, WF_ROOT, { runId: 'wf-nf-2', path: wf2 })
+    await wfV2Run(dir, slug, WF_ROOT, 'wf-nf-1', [{ sessionId: WF_CALL, sessionFile: '/abs/a.jsonl' }], { settled: true })
+    await wfV2Run(dir, slug, WF_ROOT, 'wf-nf-2', [{ sessionId: WF_CALL, sessionFile: '/abs/b.jsonl' }], { settled: true })
 
     const r = await handleSessionRead(
       { action: 'workflow', session: WF_ROOT, runId: 'wf-nonexist' },
@@ -1855,45 +1798,16 @@ describe('doWorkflow（w6，fixture）', () => {
     expect(text).toContain('family')
   })
 
-  it('TC-w6-snapshot-skip：run1 wf-state 不存在→跳过，run2 正常（ES-wf-snapshot-read-fail）', async () => {
-    const slug = '--wf-skip--'
-    await wfMainSession(dir, slug, WF_ROOT)
-    // run1 的 wf-state 文件不存在（link 指向不存在路径，模拟 GC）
-    const ghostPath = join(dir, 'sessions', slug, 'workflow-state', 'wf-ghost.jsonl')
-    const wf2 = await wfStateFile(dir, slug, 'wf-2.jsonl', [
-      wfSnapshotNew('wf-skip-2', [{ sessionId: WF_CALL, sessionFile: '/abs/b.jsonl' }]),
-    ])
-    await wfLink(dir, slug, WF_ROOT, { runId: 'wf-skip-1', path: ghostPath })
-    await wfLink(dir, slug, WF_ROOT, { runId: 'wf-skip-2', path: wf2 })
-
-    const r = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
-    const d = r.details as {
-      runs: Array<{ runId: string }>
-      runIds: string[]
-      skippedRuns?: Array<{ runId: string; stateFile: string; reason: string }>
-    }
-    expect(d.runs).toHaveLength(1)
-    expect(d.runs[0].runId).toBe('wf-skip-2')
-    expect(d.runIds).toEqual(['wf-skip-2'])
-    expect(d.skippedRuns).toBeDefined()
-    expect(d.skippedRuns).toHaveLength(1)
-    expect(d.skippedRuns![0].runId).toBe('wf-skip-1')
-    expect(d.skippedRuns![0].reason).toBe('snapshot-unreadable')
-    const text = r.content[0].text
-    expect(text).toContain('wf-skip-1')
-    expect(text).toContain('已跳过')
-    expect(text).toContain('run: wf-skip-2')
-  })
+  // [ADR-0095] TC-w6-snapshot-skip（快照不可读 → skippedRuns）随 v1 读面删除：
+  // 发现链收敛 v2 后 run 一律 record 流直读（读失败 → running 兜底不 skipped），
+  // skippedRuns 快照链对 v2 档不可达。
 
   it('TC-w6-call-jump：workflow 概览 call sessionId 可被 resolveSessionId 深读（outline 跳转，§7 场景 2）', async () => {
     const slug = '--wf-jump--'
     await wfMainSession(dir, slug, WF_ROOT)
     // 真实存在的 call session（main session 形态，findSessions 可匹配）
     const callPath = await wfMainSession(dir, slug, WF_CALL, { cwd: '/proj/call' })
-    const wfPath = await wfStateFile(dir, slug, 'wf-jump.jsonl', [
-      wfSnapshotNew('wf-jump-1', [{ sessionId: WF_CALL, sessionFile: callPath }]),
-    ])
-    await wfLink(dir, slug, WF_ROOT, { runId: 'wf-jump-1', path: wfPath })
+    await wfV2Run(dir, slug, WF_ROOT, 'wf-jump-1', [{ sessionId: WF_CALL, sessionFile: callPath }], { settled: true })
 
     // 第一次：workflow 概览，拿 call sessionId
     const rWf = await handleSessionRead({ action: 'workflow', session: WF_ROOT }, { agentDir: dir })
@@ -1925,21 +1839,21 @@ describe('doWorkflow（w6，fixture）', () => {
       JSON.stringify({ type: 'session', id: SUB_WF_ROOT, cwd: `/proj/${slug}` }) + '\n',
     )
     const callSession = join(dir, 'sessions', slug, `${WF_CALL}.jsonl`)
-    const wfPath = await wfStateFile(dir, slug, 'wf-sub.jsonl', [
-      wfSnapshotNew('wf-sub-1', [
-        { sessionId: WF_CALL, sessionFile: callSession, description: 'sub-step' },
-      ]),
+    // subagent session 的 v2 注册条目（[ADR-0095] v1 link 形态删除；record 流直读同源）
+    const recordPath = await wfStateFile(dir, slug, 'wf-sub-1.record.jsonl', [
+      JSON.stringify({ type: 'run-created', seq: 1, ts: 1758000000000, runId: 'wf-sub-1', workflowName: 'test-wf', argsSummary: '{}' }),
+      JSON.stringify({ type: 'agent-settled', seq: 2, ts: 1758000001000, taskIndex: 0, attempt: 1, outcome: 'done', durationMs: 100, result: { content: 'ok', sessionId: WF_CALL, sessionFile: callSession } }),
+      JSON.stringify({ type: 'run-settled', seq: 3, ts: 1758000002000, outcome: 'done' }),
     ])
-    // subagent session 的 workflow-state-link（wfLink helper 只写 sessions/，此处直接追加）
     await writeFile(
       subPath,
       JSON.stringify({
         type: 'custom',
-        id: 'wf-link-wf-sub-1',
+        id: 'wf-reg-wf-sub-1',
         parentId: SUB_WF_ROOT,
-        customType: 'workflow-state-link',
-        data: { runId: 'wf-sub-1', path: wfPath, updatedAt: '2026-08-12T00:00:00Z' },
-        timestamp: '2026-08-12T00:00:00Z',
+        customType: 'workflow-record',
+        data: { v: 2, kind: 'registered', runId: 'wf-sub-1', workflowName: 'test-wf', scriptName: 'test-wf', slug: 'wf-sub', startedAt: 1758000000000, recordPath },
+        timestamp: '2026-09-28T00:00:00Z',
       }) + '\n',
       { flag: 'a' },
     )

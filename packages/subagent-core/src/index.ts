@@ -594,8 +594,7 @@ export { startupSweep } from "./orchestration/startup-sweep.ts";
 // 契约单源（收敛前壳与 shared 各持一份字面量、v1 guard 壳/runtime 双实现）。
 // WORKFLOW_STATE_LINK_CUSTOM_TYPE：legacy workflow 指针条目（W17 前写侧停写，
 // 读侧兼容消费——runtime 两处 + 壳 session-lifecycle 引用集解析经 barrel 引用）。
-// classify 无 IO 无日志——日志策略（warn/warnOnce/静默）留消费方；snapshot 层
-// 解码仍在 run-snapshot.ts codec（entry 层 v 与 snapshot 层 v 两级独立版本）。
+// classify 无 IO 无日志——日志策略（warn/warnOnce/静默）留消费方。
 export {
   WORKFLOW_RECORD_CUSTOM_TYPE,
   WORKFLOW_STATE_LINK_CUSTOM_TYPE,
@@ -608,12 +607,6 @@ export {
   type WorkflowRecordRegisteredEntryData,
   type WorkflowRecordSettledEntryData,
 } from "./orchestration/workflow-record-entry.ts";
-
-// ── 快照格式版本（U8 / D4）────────────────────────────────────
-// workflow-state/<runId>.jsonl 快照行的格式版本常量单源（消费方 = runtime
-// workflow-extractor 版本守卫，经 barrel import 不落第二份字面量；additive
-// 字段策略与 bump 代价见 run-snapshot.ts 常量注释）。
-export { SNAPSHOT_VERSION } from "./orchestration/run-snapshot.ts";
 
 // [P3/D6] run 事件 journal 读面（宿主 store fold 投影的数据源——journal scan 的
 // 坏行容忍与日志语义单源；生产源码只从 barrel 消费 core 符号先例同上）。
