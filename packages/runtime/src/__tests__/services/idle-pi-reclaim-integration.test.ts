@@ -49,6 +49,7 @@ import { fileURLToPath } from 'node:url'
 import type { SessionSummary } from '@taiji/shared'
 import { FAUX_PI_READY, FAUX_PI_SKIP_REASON } from '../equivalence/pi-fixture.js'
 import { ProcessManager } from '../../infra/pi/process-manager.js'
+import type { RpcClient } from '../../infra/pi/rpc-client.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { PiSessionStore } from '../../infra/pi/session-store.js'
 import { EventAdapter } from '../../infra/pi/event-adapter.js'
@@ -74,6 +75,10 @@ const TEST_TIMEOUT_MS = 900_000
 const OCCUPANCY_IDLE_TIMEOUT_MS = 30_000
 /** occupancy 轮询间隔 */
 const POLL_INTERVAL_MS = 100
+/** faux 可用快照轮询总上限：正常一拍内完成（探针实测 <20ms），满载下 pi 后台可用性刷新可拖长，放宽不缩窄 */
+const FAUX_READY_TIMEOUT_MS = 60_000
+/** 单次 get_available_models 探针 RPC 超时（毫秒级只读 RPC，10s 对齐 L6 fast 档口径） */
+const FAUX_PROBE_RPC_TIMEOUT_MS = 10_000
 
 /** faux 演员（L2.5）：create 覆盖模型与 configStore 默认模型（pi-fixture FAUX_MODEL 同款） */
 const FAUX_MODEL_REF = 'faux/faux-1'
@@ -158,6 +163,38 @@ async function runTurn(client: IPiEngine, message: string, timeoutMs: number): P
   const ended = waitForAgentEnd(client, timeoutMs)
   await client.prompt(message)
   await ended
+}
+
+/**
+ * 等 pi 侧 faux provider 进入可用模型快照（get_available_models ⊇ faux/faux-1）再放行 prompt。
+ *
+ * 为什么需要：pi 的 registerProvider 只同步挂 provider，prompt 预检 hasConfiguredAuth 读的
+ * configuredProviders 快照字段要等后台 refresh({allowNetwork:false}) 的可用性刷新异步落地
+ * （pi 0.84.x dist/core/model-runtime.js：函数形 auth.apiKey 不命中 provisional 配置分支；
+ * RpcClient.start 只等固定 500ms 启动窗口，负载下 prompt 可先于刷新到达 → pi 报
+ * "No API key found for faux … docs/models.md"——满并行 gate 运行时偶发失败的同族竞态，
+ * 池隔离只消除满并行干扰、未消除本窗口）。探针消费的 getAvailableSnapshot 与 prompt 预检
+ * 读的是同一快照字段：就绪后放行 = 结构性不重赛，不靠墙钟碰运气。
+ */
+async function waitForFauxModelReady(client: RpcClient, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  let lastObservation = '(probe not run)'
+  while (Date.now() < deadline) {
+    try {
+      const res = await client.sendCommand('get_available_models', {}, FAUX_PROBE_RPC_TIMEOUT_MS)
+      const models = (res.data?.['models'] ?? []) as Array<{ provider?: string; id?: string }>
+      if (models.some((m) => m.provider === FAUX_PROVIDER && m.id === FAUX_MODEL_ID)) return
+      lastObservation = `available=[${models.map((m) => `${m.provider}/${m.id}`).join(', ') || '(none)'}]`
+    } catch (e) {
+      lastObservation = e instanceof Error ? e.message : String(e)
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+  }
+  throw new Error(
+    `faux provider 未在 ${timeoutMs}ms 内进入 pi 可用快照（${lastObservation}）——prompt 预检将报 No API key。`
+    + `恢复：确认 spawn --extension 注入 faux-llm-ext（getExtensionPaths fake）与 pi 版本未漂移`
+    + `（pi 0.84.x registerProvider/availability-refresh 语义）`,
+  )
 }
 
 /** 轮询等 occupancy 回 idle（turn 完成 → agent_settled → idle 转移，事件驱动挂点回写 session 记录） */
@@ -261,6 +298,9 @@ describe.skipIf(!FAUX_PI_READY)(
         expect(sid).toBeTruthy()
         const firstClient = pm.getClient(sid)
         expect(firstClient).toBeDefined()
+        // prompt 前等 faux 进入可用快照（registerProvider 同步挂载 ≠ configuredProviders 落地，
+        // 见 waitForFauxModelReady 注释；create 与 restore 两次 spawn 各等一次）
+        await waitForFauxModelReady(firstClient!, FAUX_READY_TIMEOUT_MS)
 
         // bus 订阅（renderer 全量订阅形态的等价物）：第一轮事件即从此订阅者经过
         const frames: BusFrame[] = []
@@ -368,6 +408,8 @@ describe.skipIf(!FAUX_PI_READY)(
         expect(restoredClient).not.toBe(firstClient)
         expect(restoredClient!.exited).toBe(false)
         expect(lifecycle!.has(sid)).toBe(true)
+        // 恢复进程是全新 spawn（faux provider 重新注册 + 后台可用性刷新），阶段 5 prompt 前同样等就绪
+        await waitForFauxModelReady(restoredClient!, FAUX_READY_TIMEOUT_MS)
 
         // ══ 阶段 4：P7 收益门（记录式断言）+ 历史完整 ══
         // 捕获窗口内日志，判定恢复后首次 getHistory 走的分支：

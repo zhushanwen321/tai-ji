@@ -366,6 +366,7 @@ const FORM_B_CONTEXT_RE = /(设计|权威|指南|手册|规范|文档|参见|详
 const COMMENT_DOC_REF_EXEMPT = new Map([
   // ['<文件相对路径>::<引用字面量>', '理由：为何保留对该已删除文档的历史性提及'],
   ['*::docs/rpc.md', 'pi 上游仓（badlogic/pi-mono）协议文档 docs/rpc.md 参照，非本仓文件（同 PATH_REF_EXEMPT 的 pi 上游先例）'],
+  ['*::docs/models.md', 'pi 上游包（@earendil-works/pi-coding-agent）auth-guidance 报错末行指向其安装目录 docs/models.md，测试注释引述报错原文用，非本仓文件（同 *::docs/rpc.md 先例）'],
   ['packages/renderer/src/__tests__/composables/markdown-filepath.test.ts::docs/My', 'markdown 链接解析测试叙述中的空格切断反例（docs/My Document.md），非仓库路径引用'],
   ['apps/electron/main/diagnostics/export-diagnostic-bundle.ts::summary.md', '运行时生成物文件名（诊断 zip 内置 summary.md，代码自身生成），非 docs 引用'],
   ['*::aggregated.md', 'zsw review-fix-loop 工作流脚本（.zcode/workflow-drafts，gitignored 产物目录）自述其产物文件名，非本仓 docs 引用'],
