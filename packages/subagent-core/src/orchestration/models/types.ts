@@ -46,14 +46,6 @@ export type DoneReason =
   | "budget_limited"
   | "time_limited";
 
-/** 合法的状态转换。空数组 = 无出边（done 终态）。 */
-export const VALID_RUN_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
-  running: ["done"] as const,
-  done: [] as const,
-};
-
-export const ALL_RUN_STATUSES: readonly RunStatus[] = ["running", "done"] as const;
-
 export const ALL_DONE_REASONS: readonly DoneReason[] = [
   "completed",
   "failed",
@@ -61,15 +53,6 @@ export const ALL_DONE_REASONS: readonly DoneReason[] = [
   "budget_limited",
   "time_limited",
 ] as const;
-
-/** done 为终态，无出边。 */
-export function isDone(status: RunStatus): boolean {
-  return status === "done";
-}
-
-export function canRunTransition(from: RunStatus, to: RunStatus): boolean {
-  return (VALID_RUN_TRANSITIONS[from] as readonly RunStatus[]).includes(to);
-}
 
 /**
  * DoneReason 的终止性判定（非正常完成）：通知/文案消费方区分「任务完成」与

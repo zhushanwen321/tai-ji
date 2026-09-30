@@ -358,7 +358,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     expect(WORKFLOW_RECORD_CUSTOM_TYPE).toBe("workflow-record");
   });
 
-  it("[停写锚定] save（running → done 全程）零 workflow-record entry、零 state 文件（[D1] 无物化面）", async () => {
+  it("[停写锚定] save 全程零 workflow-record entry、零 state 文件（[D1] 无物化面）", async () => {
     const entries: CustomEntry[] = [];
     const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
     const runId = "run-w17-shape";
@@ -368,8 +368,6 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
       { status: "running", budget: new Budget(), calls: new Map(), trace: new Trace(), errorLogs: [] },
       { startedAt: new Date().toISOString() },
     );
-    await store.save(run);
-    run.transition("done", "completed");
     await store.save(run);
 
     expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(0);

@@ -705,7 +705,7 @@ export interface RecoverCrashedRunsResult {
  *    残留 running run（进程被杀，worker 必死）逐个落 run-interrupted 转移事件
  *    （[D2] running → interrupted 暂停态——崩溃 ≠ 失败，可 resume）+ 中断条目
  *    补写 + 宿主事件（hooks）。**v1 兼容尾段已删除**（[D15] 豁免条款删除：原
- *    `run.transition("done","failed") → store.save(run)` 依赖的覆盖写语义在
+ *    「收编时对 v1 实体覆盖写终态快照」依赖的覆盖写语义在
  *    [D1] store 单模式重写后不存在——收编不再覆盖任何文件，只追加转移事件；
  *    启动收编触达 v1 形态实体由 loadAll 的只认 record 流构造性跳过——v1 历史
  *    run 不复活，其两件遗留文件按 [D1] 历史数据处置不读不写，跟随裁决点 7 清理

@@ -1,8 +1,8 @@
 /**
  * Workflow Extension — WorkflowRun
  *
- * 单次 workflow run 的聚合根。封装状态机 + runtime 生命周期 + 不变式守卫。
- * 架构核心——所有字段变更通过方法（transition/assignRuntime/releaseRuntime/
+ * 单次 workflow run 的聚合根。封装 runtime 生命周期 + 不变式守卫。
+ * 架构核心——runtime 字段变更通过方法（assignRuntime/releaseRuntime/
  * replaceRuntime），engine 模块不直接打洞（AC-3）。
  *
  * 层归属：Engine。依赖 RunRuntime（具体类，D-12 允许）+ RunSpec/RunExecutionSnapshot + 类型。
@@ -10,16 +10,15 @@
  * 关键不变式（必须全测）：
  * I1: state.status === "running" ⟺ runtime !== undefined
  * （原 I2「终局 ⟹ reason 非空」随 [D6(a) 第 1 步] 终局判定换源退役：终局判定不再
- * 读聚合状态字段，reason 完整性由 transition 的 done 入参校验与重建 fold 的构造
- * 唯一保证——详见 validateInvariants 注释。）
+ * 读聚合状态字段，reason 完整性由重建 fold 的构造唯一保证——详见 validateInvariants
+ * 注释。）
  *
- * 状态机（一次性生命周期，2 态）：
- * 构造（status="running"，I1 构造期跳过——runtime 由 assignRuntime 注入）
- * running ──transition("done", reason)──→ done (releaseRuntime + completedAt)
- * done ──(no out edges, zombie)
+ * 生命周期（[W2/V1 D1] 后）：run 构造即 running（一次性生命周期），终局判定与
+ * 落账唯一走六态机 dispatchRunTrigger 链（terminal-actions，终局记录注册表），
+ * 聚合不再持有终局转移方法。runtime 的绑定/替换/释放经本类三个方法。
  *
  * 「创建即 running」与 I1 的协调（F4）：构造瞬间 running 而 runtime 尚未注入，
- * I1 在构造期跳过；完整校验由 assignRuntime/transition/replaceRuntime 末尾的
+ * I1 在构造期跳过；完整校验由 assignRuntime/replaceRuntime 末尾的
  * validateInvariants 维持；构造到 assignRuntime 的 I1 窗口由调用方
  * （lifecycle.runWorkflow 在 assignRuntime 之后才 runs.set）保证对外不可见。
  *
@@ -31,8 +30,6 @@
 import { RunRuntime } from "./run-runtime.ts";
 import type { RunSpec } from "./run-spec.ts";
 import type { RunExecutionSnapshot } from "./run-state.ts";
-import type { DoneReason, RunStatus } from "./types.ts";
-import { canRunTransition } from "./types.ts";
 
 // ── WorkflowRunMeta ──────────────────────────────────────────
 
@@ -45,7 +42,11 @@ import { canRunTransition } from "./types.ts";
 export interface WorkflowRunMeta {
  /** ISO 时间戳，run 创建/启动时刻。 */
   startedAt: string;
- /** ISO 时间戳，transition("done") 时设置。 */
+  /**
+   * ISO 时间戳，终局时刻（legacy 兼容读：活体终局的权威时序 = 终局记录注册表的
+   * run-settled 帧时序（[W2/V1 D1] 后生产无写入方），本字段仅由旧持久化快照
+   * 重水合携带，作 runSummary 注册表 miss 时的回落读）。
+   */
   completedAt?: string;
  /**
   * ISO 时间戳，最近一次中断（run-interrupted 转移事件）时刻；run-resumed 复活
@@ -129,52 +130,6 @@ export class WorkflowRun {
     }
   }
 
-  // ── 状态机转换 ─────────────────────────────────────────────
-
-  /**
- * 状态机转换。合法转换：running→done。
- *
- * running 的进入不走 transition——构造即 running，replaceRuntime 保持 running。
- * 调用 transition("running") 抛错，防止绕过 runtime 注入直接改状态。
- *
- * 副作用：
- * - →done: releaseRuntime + 设 state.reason + meta.completedAt
- *
- * @param target 目标状态（不允许 "running"——runtime 注入只走 assignRuntime/replaceRuntime）
- * @param reason →done 时必填（终局 ⟹ reason 非空；原 I2 的写侧单点保证）
- * @throws 非法转换 / done 缺 reason / target==="running"
- */
-  transition(target: RunStatus, reason?: DoneReason): void {
-    // "running" 必须经 assignRuntime（需 runtime 参数，transition 无法提供）
-    if (target === "running") {
-      throw new Error(
-        `WorkflowRun.transition: cannot transition to "running" directly — use assignRuntime() (runId=${this.runId})`,
-      );
-    }
-
-    if (!canRunTransition(this.state.status, target)) {
-      throw new Error(
-        `WorkflowRun.transition: illegal transition ${this.state.status} → ${target} (runId=${this.runId})`,
-      );
-    }
-
-    // →done 需 reason（原 I2 的写侧单点保证）
-    if (target === "done" && reason === undefined) {
-      throw new Error(
-        `WorkflowRun.transition: transition to "done" requires a reason (runId=${this.runId})`,
-      );
-    }
-
-    // 副作用：先清理 runtime（releaseRuntime 守不变式 I1），再改 status
-    // （canRunTransition 已排除 target==="running"，此处 target 恒为 "done"）
-    this.releaseRuntime();
-    this.state.status = target;
-    this.state.reason = reason;
-    this.meta.completedAt = new Date().toISOString();
-
-    this.validateInvariants();
-  }
-
   // ── Runtime 生命周期 ───────────────────────────────────────
 
   /**
@@ -206,17 +161,18 @@ export class WorkflowRun {
   }
 
   /**
- * 解绑 runtime（done 时由 transition 调用，也可独立调用）。
- *
- * 前置：无（runtime===undefined 时 no-op，幂等）。
- * 副作用：调 runtime.release("terminal") 释放 worker/controller，置 runtime=undefined。
- */
+   * 解绑 runtime（终局 coda finalizeRun 显式调用，也可独立调用）。
+   *
+   * 前置：无（runtime===undefined 时 no-op，幂等）。
+   * 副作用：调 runtime.release("terminal") 释放 worker/controller，置 runtime=undefined。
+   */
   releaseRuntime(): void {
     if (this.runtime === undefined) return;
     this.runtime.release("terminal");
     this.runtime = undefined;
-    // 不改 status——调用方（transition）负责。独立调用时调用方需自行确保
-    // status 一致（如 worker-error-retry 用 replaceRuntime 而非 release+assign）。
+    // 不改 status——聚合 status 是过渡期兼容载体，终局判定经终局记录注册表
+    // （terminal-actions）；独立调用时调用方需自行确保 status 一致
+    // （如 worker-error-retry 用 replaceRuntime 而非 release+assign）。
   }
 
   /**

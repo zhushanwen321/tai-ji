@@ -186,10 +186,10 @@ describe("scheduleTimeBudget", () => {
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 
-  it("run 已 done 时 abortRun no-op（到期不重复 transition）", async () => {
+  it("run 已终局时 abortRun no-op（到期不重复终局化）", async () => {
     const { run } = makeRunningRealRun("wf-budget-2");
-    // 先把 run 转 done（手动）
-    run.transition("done", "completed");
+    // 先把 run 终局化（手工注入注册表条目——[W2/V1] 终局判定源 = 终局记录注册表）
+    noteRebuiltSettlement("wf-budget-2", { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
     deps.runs.set("wf-budget-2", run);
 
@@ -197,8 +197,8 @@ describe("scheduleTimeBudget", () => {
     await vi.advanceTimersByTimeAsync(500);
     await flushMicrotasks();
 
-    // 状态保持原 done/completed，未被 time_limited 覆盖
-    expect(run.state.reason).toBe("completed");
+    // 终局事实保持原 outcome=done（映射 reason completed），未被 time_limited 覆盖
+    expect(settledRecordOf("wf-budget-2")).toMatchObject({ outcome: "done" });
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
@@ -534,13 +534,15 @@ describe("abortRun", () => {
 
   it("done 状态 no-op（不重复 abort）", async () => {
     const { run } = makeRunningRealRun("wf-abort-2");
-    run.transition("done", "completed");
+    // [W2/V1] 终局判定源 = 终局记录注册表：注入终局事实（生产经 dispatch 链 note）
+    noteRebuiltSettlement("wf-abort-2", { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
     deps.runs.set("wf-abort-2", run);
 
     await abortRun("wf-abort-2", deps, "late abort");
 
-    expect(run.state.reason).toBe("completed"); // 未被覆盖
+    // 终局事实未被覆盖（outcome=done 映射 reason completed）
+    expect(settledRecordOf("wf-abort-2")).toMatchObject({ outcome: "done" });
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
@@ -619,10 +621,9 @@ describe("terminateRunningRuns", () => {
     const { run: doneRun } = makeRunningRealRun("wf-term-done");
     await seedRunCreated(running1);
     await seedRunCreated(running2);
-    doneRun.transition("done", "completed");
     // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：生产里 done run 的条目由活体
-    // dispatch 链 note（本 fixture 走死方法 transition 直改状态，故手工注入等价
-    // 事实）——否则该 run 会被判未终局并进入中断收编。
+    // dispatch 链 note，fixture 手工注入等价事实——否则该 run 会被判未终局并进入
+    // 中断收编。
     noteRebuiltSettlement("wf-term-done", { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
     deps.runs.set("wf-term-1", running1);
@@ -636,9 +637,9 @@ describe("terminateRunningRuns", () => {
     expect(isRunSettled(running2)).toBe(false);
     await expectInterruptedFrame("wf-term-1");
     await expectInterruptedFrame("wf-term-2");
-    // 已终局 run 不被重写（恢复写点聚合 done 保留）
-    expect(doneRun.state.status).toBe("done");
-    expect(doneRun.state.reason).toBe("completed");
+    // 已终局 run 不被重写（终局事实保持注册表条目原样：outcome=done 映射 reason completed）
+    expect(isRunSettled(doneRun)).toBe(true);
+    expect(settledRecordOf("wf-term-done")).toMatchObject({ outcome: "done" });
   });
 
   it("中断零终局副作用：不落 pending:unregister、不调 onRunDone（[D11] interruptRun 零终局 coda）", async () => {

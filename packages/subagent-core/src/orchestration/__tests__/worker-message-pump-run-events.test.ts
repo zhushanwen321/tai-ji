@@ -6,8 +6,8 @@
 // 1. finalizeRun = run-settled 事件终态单写点：completed/failed/aborted 三 doneReason
 //    路径的 journal 终局帧（aborted 经 cancel-requested 控制事件 → 输出执行侧合成
 //    run-settled(cancelled)——journal 词表恰无 cancel-requested 帧）。
-// 2. 终局后让位：并发终态化（抢先 transition）→ finalizeRun 让位返回 false，journal
-//    零追加（M12 语义 + 单写者纪律）。
+// 2. 终局后让位：终局触发命中表外转移（无 run-created 引导/已终局）→ finalizeRun
+//    让位返回 false，journal 零追加（M12 语义 + 单写者纪律）。
 // 3. dispatchAgentCall 的 ask 事件链：agent-started（派发时）+ agent-settled(completed，
 //    完成回调时)——taskIndex = callId 单源、attempt = call.attempts。
 // 4. journal 目录测试注入（setRunEventJournalDirForTest + mkdtemp 自建自删，测试红线：
@@ -196,9 +196,11 @@ describe("finalizeRun 落 run-settled（终态单写点）", () => {
     expect(events.at(-1)).toMatchObject({ type: "run-settled", outcome: "failed" });
   });
 
-  it("并发终态化让位（抢先 transition）→ 返回 false + journal 零追加（单写者纪律）", async () => {
+  it("终局触发命中表外转移（无 run-created 引导即终局化）→ 返回 false + journal 零追加（单写者纪律）", async () => {
     const run = makeRealRun("wf-ev-5");
-    run.transition("done", "aborted"); // 抢先方终态化
+    // 让位机制（[W2/V1] 六态机承接）：无 run-created 首帧 → fold 停在 created，
+    // created × run-settled 表外转移 fail-fast（IllegalTransitionError）——终局
+    // 单写者纪律的结构性承载，无需两态机先行直改。
     const deps = makeDeps();
 
     const ok = await finalizeRun(run, deps, "failed", { context: "test" });
@@ -250,8 +252,7 @@ describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
     const deps = makeDeps();
     deps.runner.run = vi.fn(async () => {
       // runner 执行窗内 run 被终态化（模拟 abort 竞态）
-      run.transition("done", "aborted");
-      // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：竞态终态化须同步注入终局事实
+      // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：竞态终态化注入终局事实
       // （生产 abortRun 经 dispatch 链 note）——stale 守卫据此拦截迟到 call 完成。
       noteRebuiltSettlement(run.runId, { outcome: "cancelled", settledAt: Date.now() });
       return { content: "late", durationMs: 1, toolCalls: [] } as AgentResult;

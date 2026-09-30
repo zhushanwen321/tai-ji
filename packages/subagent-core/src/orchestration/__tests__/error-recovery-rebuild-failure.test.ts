@@ -196,9 +196,8 @@ describe("[OR-2] rebuildRuntime 抛错回灌重试矩阵", () => {
     const deps = makeDeps({ startThrows: true });
 
     const p = handleWorkerError(run, new Error("worker boom"), deps, makeHandlers());
-    // 退避窗口内外部 abort（done,aborted）——[D6(a) 第 1 步] 终局判定源 = 终局记录
-    // 注册表：生产 abort 经 dispatch 链 note，本 fixture 直改状态故手工注入等价事实
-    run.transition("done", "aborted");
+    // 退避窗口内外部 abort（终局化）——[D6(a) 第 1 步] 终局判定源 = 终局记录
+    // 注册表：生产 abort 经 dispatch 链 note，本 fixture 注入等价事实
     noteRebuiltSettlement(run.runId, { outcome: "cancelled", settledAt: Date.now() });
     await advance(1000);
     await expect(p).resolves.toBeUndefined();
@@ -206,7 +205,7 @@ describe("[OR-2] rebuildRuntime 抛错回灌重试矩阵", () => {
     // scheduleRebuild 退避后重检 isTerminal → 跳过重建；isTerminal(run) 守卫跳过回灌
     expect(deps.workerHost.start).not.toHaveBeenCalled();
     expect(run.meta.workerErrorCount).toBe(1); // 仅崩溃那次，rebuild 失败未计数
-    expect(run.state.reason).toBe("aborted");
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "cancelled" });
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 });

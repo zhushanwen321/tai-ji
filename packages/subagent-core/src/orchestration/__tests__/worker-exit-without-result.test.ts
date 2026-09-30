@@ -32,7 +32,6 @@ import {
   dispatchRunCreated,
 } from "../terminal-actions.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
-import type { DoneReason, RunStatus } from "../models/types.ts";
 import type { WorkflowRun } from "../models/workflow-run.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 // [W2/V1] 六态机引导 + 终局断言换源（两态机字段停更——终局经注册表判定/派生）。
@@ -79,10 +78,6 @@ function makeRunningRun(opts: RunMockOpts = {}): WorkflowRun {
     runtime: {
       worker: { postMessage: vi.fn() },
       receivedTerminalMessage: opts.receivedTerminalMessage,
-    },
-    transition(this: WorkflowRun, target: RunStatus, reason?: DoneReason): void {
-      this.state.status = target;
-      if (target === "done") this.state.reason = reason;
     },
     replaceRuntime(this: WorkflowRun, rt: NonNullable<WorkflowRun["runtime"]>): void {
       this.runtime = rt;
@@ -179,15 +174,15 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
   it("已终态（done）的 run 不受影响", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
-    run.transition("done", "completed");
-    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：直改聚合状态的终态 fixture 须
-    // 同步注入终局事实（生产经 dispatch 链 note）——stale 守卫据此判「已终态」。
+    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：终局 fixture 注入注册表条目
+    // （生产经 dispatch 链 note）——stale 守卫据此判「已终态」。
     noteRebuiltSettlement(run.runId, { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
 
     await handleWorkerExit(run, 0, makeHandle(), deps, makeHandlers());
 
-    expect(run.state.reason).toBe("completed");
+    // 终局事实保持原 outcome=done（映射 reason completed），未被 exit 路径改写
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 

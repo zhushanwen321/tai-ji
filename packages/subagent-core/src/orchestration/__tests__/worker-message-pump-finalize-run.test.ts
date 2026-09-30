@@ -6,7 +6,7 @@
  * lifecycle 2 处）——本文件锁定：
  * 1. 四步恰好一次且有序（transition 先于 save 先于直落先于 onRunDone）
  * 2. notifyDone:false 真差异承载（finalizeRun 的 notifyDone 参数语义：false 时不调 onRunDone、直落 unregister 仍发）
- * 3. transition 让位（并发终态化）→ 后三步全不执行
+ * 3. 终局触发让位（六态机表外 fail-fast）→ 后三步全不执行
  * 4. save best-effort（SW-DATA-3）→ 直落/onRunDone 不被落盘失败短路
  * 5. [reload-closeout D4] 直落 entry 三字段（id/reason/status∈mapReasonToStatus
  *    值域，budget_limited→failed 用例锁死）+ emit 发射点已删（eventBus 零
@@ -246,20 +246,20 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     expect(deps.order).toEqual(["append:workflow-record", "save", "append:pending:unregister"]);
   });
 
-  it("transition 抛错（并发 abort 抢先终态化）→ 返回 false，后三步全不执行", async () => {
+  it("终局触发让位（六态机表外 fail-fast）→ 返回 false，后三步全不执行", async () => {
     const run = makeRealRun("wf-fin-3");
-    // 抢先终态化——此后 running→done 转移抛 illegal-transition
-    run.transition("done", "aborted");
+    // 无 run-created 引导即终局化：fold 停在 created，created × run-settled 表外
+    // 转移 fail-fast（IllegalTransitionError）——并发终局让位的结构性承载（[W2/V1]）。
     const deps = makeTracingDeps();
 
     const ok = await finalizeRun(run, deps, "failed", { context: "test" });
 
     expect(ok).toBe(false);
-    // 抢先方已兑现直落/onRunDone——本路径让位，不重复执行
+    // 让位路径不落账：注册表无条目、不 save、不直落、不通知
+    expect(settledRecordOf(run.runId)).toBeUndefined();
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(appendedUnregister(deps)).toBeUndefined();
     expect(deps.onRunDone).not.toHaveBeenCalled();
-    expect(run.state.reason).toBe("aborted");
   });
 
   it("save 抛错（ENOSPC）→ best-effort：直落 + onRunDone 照常（SW-DATA-3 统一）", async () => {
