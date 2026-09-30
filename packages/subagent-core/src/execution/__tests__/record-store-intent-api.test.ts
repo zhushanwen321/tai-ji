@@ -426,7 +426,6 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(store.markRoundIdle("chat-cas", { kind: "success", content: "r1" })).toBe(true);
       const roundAfterFirst = record.round;
-      const stateAfterFirst = fs.readFileSync(`${sessionFile}.state`, "utf-8");
       const idleEventsAfterFirst = countRoundIdleEvents();
       loggerMock.warn.mockClear();
 
@@ -437,8 +436,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(record.stopReason).toBe("completed"); // ⑩ 展示位不被覆写
       expect(record.lastError).toBeUndefined(); // ⑨ 失败原因不入内存
       expect(record.result).toBe("r1"); // ② 结果不被覆写
-      expect(fs.readFileSync(`${sessionFile}.state`, "utf-8")).toBe(stateAfterFirst); // ⑪ 收条不覆写
-      expect(countRoundIdleEvents()).toBe(idleEventsAfterFirst); // 事件流不追加
+      expect(countRoundIdleEvents()).toBe(idleEventsAfterFirst); // ⑪ 收条不覆写（收条即轮终帧）
       expect(loggerMock.warn).toHaveBeenCalledWith(
         "[subagents] markRoundIdle: CAS rejected (record not running)",
         expect.objectContaining({ detail: expect.objectContaining({ id: "chat-cas", status: "idle" }) }),

@@ -385,7 +385,6 @@ export class RecordStore {
     // 轮次轴通道绑定：records 共享引用；写函数调用时解引用（同上——懒访问形态）。
     this.roundsCtx = {
       records: this.records,
-      persistSettledState: (file, payload) => writeSettledState(file, payload),
       // [B2 / 簿记⑫] 轮终派生 manifest 投影——session-reader manifest 直读主路径的
       // 数据源（轮终留内存 idle 的 record 不经任何终态/回收写点）。D7 写面约束：
       // manifest 写函数调用字面只留本文件，轴文件经 ctx 注入（persistSettledState 先例）。

@@ -69,8 +69,18 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  const readStateJson = (): Record<string, unknown> =>
-    JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8")) as Record<string, unknown>;
+  /** 轮终收条改由事件流承载（③：`.state` 退场）：读最后一条 record-round-idle 帧。 */
+  const lastRoundIdle = (id: string): { stopReason?: string; ts?: number } | undefined => {
+    const file = path.join(manifestDir, `${id}.events`);
+    if (!fs.existsSync(file)) return undefined;
+    const idles = fs
+      .readFileSync(file, "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { type?: string; stopReason?: string; ts?: number })
+      .filter((e) => e.type === "record-round-idle");
+    return idles.at(-1);
+  };
 
   it("成功轮（pi 锚）：收条 reason=completed + binding 快照在场 + 内存翻 idle/stopReason + revive 水合不归零", () => {
     const record = makeRecord("bg-ok", { sessionFile });
@@ -90,10 +100,9 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(record.result).toBe("round output");
     // ⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081）——轮终不再写 idle 锚。
     // ⑪ `.state` 收条：轮收口 idle 形态（重建单规则一律 idle）。
-    const state = readStateJson();
-    expect(state["status"]).toBe("idle");
-    expect(state["reason"]).toBe("completed");
-    expect(typeof state["endedAt"]).toBe("number");
+    const idle = lastRoundIdle("bg-ok");
+    expect(idle?.stopReason).toBe("completed");
+    expect(typeof idle?.ts).toBe("number");
     // ⑪ binding 快照（U7 统计口径）：turns/totalTokens 在场。
     const binding = readRecordBinding(sessionFile);
     expect(binding?.turns).toBe(3);
@@ -146,10 +155,9 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(record.status).toBe("idle");
     expect(record.lastError).toBe("engine crashed");
     expect(record.result).toContain("engine crashed");
-    const state = readStateJson();
-    expect(state["status"]).toBe("idle");
-    expect(state["reason"]).toBe("failed");
-    expect(typeof state["endedAt"]).toBe("number");
+    const idle = lastRoundIdle("bg-fail");
+    expect(idle?.stopReason).toBe("failed");
+    expect(typeof idle?.ts).toBe("number");
     expect(readRecordBinding(sessionFile)?.turns).toBe(1);
     expect(readRecordBinding(sessionFile)?.totalTokens).toBe(300);
     // 帧面：record-round-idle 携带失败原因原文（W1 终态同步 F2-2——v1 rec.error
@@ -164,7 +172,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(failIdle?.error).toBe("engine crashed");
   });
 
-  it("跨轮轮终不击穿 A3 断言（endedAt 不写）+ `.state` 收条随最新轮覆写（每轮先过轮始门）", () => {
+  it("跨轮轮终不击穿 A3 断言（endedAt 不写）+ `.state` 轮终收条随最新轮覆写（每轮先过轮始门）", () => {
     const record = makeRecord("bg-multi", { sessionFile });
     store.register(record);
     expect(store.markRoundIdle("bg-multi", { kind: "success", content: "r1" })).toBe(true);
@@ -174,12 +182,12 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(() => store.markRoundIdle("bg-multi", { kind: "failed", reason: "r2 boom" })).not.toThrow();
     expect(record.round).toBe(2);
     expect(record.stopReason).toBe("failed");
-    expect(readStateJson()["reason"]).toBe("failed");
+    expect(lastRoundIdle("bg-multi")?.stopReason).toBe("failed");
     // 第三轮同款：轮始门 → 成功轮终；A3 断言（endedAt）始终不被击穿。
     expect(store.markRoundStarted("bg-multi")).toBe(true);
     expect(() => store.markRoundIdle("bg-multi", { kind: "success", content: "r3" })).not.toThrow();
     expect(record.round).toBe(3);
-    expect(readStateJson()["reason"]).toBe("completed");
+    expect(lastRoundIdle("bg-multi")?.stopReason).toBe("completed");
   });
 
   it("zcode 腿锚分派：快照写 transcriptRef 派生锚键、`.state` 不写、revive 水合不归零", () => {

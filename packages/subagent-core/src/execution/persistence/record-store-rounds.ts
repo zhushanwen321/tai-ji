@@ -65,8 +65,6 @@ const logger = getLogger("subagents");
 export interface RoundsCtx {
   /** 内存 record 表（RecordStore.records 的共享引用）。 */
   records: Map<string, ExecutionRecord>;
-  /** `.state` settle 收条写（writeSettledState 注入位）。 */
-  persistSettledState: (sessionFile: string, payload: { stopReason?: StopReason; endedAt?: number }) => boolean;
   /**
    * [B2 / 簿记⑫] 轮终派生 manifest 投影写（record-store.ts 构造点绑定
    * writeManifestPersisted(derivedManifestRecord(recordToSubagent(rec)))）——轮终留内存
@@ -250,7 +248,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   // 滞后由下次收口/接管补写）。
   const zcodeAnchor = rec.sessionFile === undefined ? zcodeRefOf(rec) : undefined;
   if (rec.sessionFile !== undefined) {
-    ctx.persistSettledState(rec.sessionFile, { stopReason, endedAt: Date.now() });
+    // `.state` 轮终收条已退场（③）：轮终停因由 record-round-idle 事件承载，读侧从折叠取。
     persistSettleSnapshot(rec.sessionFile, rec);
   } else if (zcodeAnchor !== undefined) {
     // zcode 腿（无 pi 文件锚是常态形态非异常，不 warn——对齐 markSettled）：

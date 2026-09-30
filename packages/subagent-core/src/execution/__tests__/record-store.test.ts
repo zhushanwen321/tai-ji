@@ -1538,8 +1538,8 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
       totalTokens: 4200,
     });
 
-    // .state 物化投影仍在（D2：写点时机不变）——idle 收条。
-    expect(readStateMarker(sessionFile)).toMatchObject({ status: "idle", reason: "completed" });
+    // 轮终收条 = record-round-idle 帧（③：`.state` 已退场，收条不再落 sidecar）。
+    expect(events[3]).toMatchObject({ type: "record-round-idle", stopReason: "completed" });
   });
 
   it("markSettled → record-settled 帧 + v2 终态条目；archive 真终局同款（endedAt 判定）", async () => {
