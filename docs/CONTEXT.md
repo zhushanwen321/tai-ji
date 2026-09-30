@@ -325,6 +325,8 @@ run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐�
 
 **索引承载终态收条的裁决**（换源时不可回避）：终态域（`stopReason` / `turns` / `totalTokens`）换源到折叠后，索引快路径**不能**去读每条记录的事件文件——那正好废掉索引存在的理由（冷启动零内容读取）。因此索引条目必须自己承载终态收条，且它的水位要覆盖**事件文件**的 stat（今天只盖 jsonl 的 mtime+size：轮终收条写在 jsonl 末次写入之后，只比 jsonl 会漏掉收条变化）。两条腿：① 索引条目加终态字段；② 水位扩到 `jsonl + <id>.events` 两个 stat。未做到之前，索引快路径的终态仍只能读 sidecar。
 
+第 ② 腿的改动面（动手前先看这里，别低估）：事件戳要进 `FileStamps`（今天只有 `jsonl` / `state` / `binding` 三个），而 `FileStamps` 是缓存新鲜度判定的中心——连带影响 `isFreshCache`、负缓存条目、`statStateStamp` 一族、以及索引投影 `projectIndexEntries` 的正/负两类条目。也就是说这不是「加一个字段」，而是给缓存键加一维。
+
 ### 身份绑定（`.record-binding`）与写权（`epoch`）
 
 `.record-binding` = 每子会话一个 sidecar（`<sessionFile>.record-binding`），记 record id ↔ 会话文件映射，以及事件流**暂不承载**的字段：`model` / `thinkingLevel` / `worktree` / `round` / `lastAbandonedRound` / `transcriptRef`。**它不是物化投影**——这些字段只在它里面。终态目标 = 字段补进事件载荷后删除该文件。
