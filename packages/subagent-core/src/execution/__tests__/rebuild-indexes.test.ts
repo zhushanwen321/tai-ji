@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRecord } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { ManifestStore } from "../persistence/manifest-store.ts";
-import { INDEX_FILENAME } from "../persistence/sessions-index.ts";
+import { INDEX_FILENAME, INDEX_VERSION } from "../persistence/sessions-index.ts";
 import { writeCancelledState, writeFinalizedState } from "../persistence/state-marker.ts";
 import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 
@@ -180,7 +180,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
       version: number;
       entries: Record<string, unknown>;
     };
-    expect(index.version).toBe(1);
+    expect(index.version).toBe(INDEX_VERSION);
     expect(Object.keys(index.entries)).toContain("20260912T000000_a.jsonl");
     expect(Object.keys(index.entries)).toContain("20260912T000001_b.jsonl");
 

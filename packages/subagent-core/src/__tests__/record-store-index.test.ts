@@ -130,7 +130,7 @@ describe("sessions-index 模块（S1TC10-12）", () => {
     expect(loadIndex(encDir).entries.size).toBe(0);
     expect(loadIndex(encDir).higherVersion).toBe(false);
 
-    fs.writeFileSync(indexPath, JSON.stringify({ version: 1, pid: 1, entries: [1, 2] })); // ③a 数组非 object
+    fs.writeFileSync(indexPath, JSON.stringify({ version: INDEX_VERSION, pid: 1, entries: [1, 2] })); // ③a 数组非 object
     expect(loadIndex(encDir).entries.size).toBe(0);
     expect(loadIndex(encDir).higherVersion).toBe(false);
 
@@ -165,7 +165,7 @@ describe("sessions-index 模块（S1TC10-12）", () => {
 
     // ③ 顶层 header 形态坏（entries 为数组）→ 空索引 + warn
     loggerMock.warn.mockClear();
-    fs.writeFileSync(indexPath, JSON.stringify({ version: 1, pid: 1, entries: [1, 2] }));
+    fs.writeFileSync(indexPath, JSON.stringify({ version: INDEX_VERSION, pid: 1, entries: [1, 2] }));
     expect(loadIndex(encDir).entries.size).toBe(0);
     expect(String(loggerMock.warn.mock.calls[0]?.[0])).toContain("invalid header fields");
 
@@ -192,7 +192,7 @@ describe("sessions-index 模块（S1TC10-12）", () => {
       noStamp: { ...good, mtimeMs: undefined, size: undefined }, // 缺戳字段（JSON 化后缺失）
       badNeg: { negative: true, mtimeMs: 1 }, // 负条目缺 size
     };
-    fs.writeFileSync(indexPath, JSON.stringify({ version: 1, pid: 1, entries: raw }));
+    fs.writeFileSync(indexPath, JSON.stringify({ version: INDEX_VERSION, pid: 1, entries: raw }));
 
     const loaded = loadIndex(encDir);
     expect(loaded.entries.size).toBe(1); // 单条目损坏不放大为整体失效

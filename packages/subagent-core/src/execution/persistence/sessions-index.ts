@@ -40,7 +40,7 @@ const logger = getLogger("subagents");
 export const INDEX_FILENAME = "sessions-index.json";
 
 /** 索引格式版本。schema 变更必须递增：低版本文件整体丢弃（空索引，下轮 dirty 重写自愈）；高版本整体忽略（higherVersion，不重写）。 */
-export const INDEX_VERSION = 1;
+export const INDEX_VERSION = 2;
 
 /** 两次成功落盘的最小墙钟间隔（节流：overlay 打开期间的高频扫描不放大磁盘写）。 */
 export const INDEX_WRITE_MIN_INTERVAL_MS = 60_000;
@@ -88,6 +88,17 @@ export interface SessionsIndexEntry {
   origin?: RecordOrigin;
   /** origin="workflow" 时所属 workflow run id（undefined = 缺失/tool 来源）。 */
   parentRunId?: string;
+  /**
+   * 事件文件（`<recordsDir>/<id>.events`）戳——缓存键第四维（v2 引入）。轮终收条写在
+   * jsonl 末次写入之后，只比 jsonl 会把过期终态判成新鲜。undefined = 无事件文件。
+   */
+  eventsMtimeMs?: number;
+  eventsSize?: number;
+  /**
+   * 终态收条（v2 引入）：索引自承终态域，快路径零内容读取即可回答「为什么停/何时停」，
+   * 不必再读 `.state` sidecar。缺席（无收条事件）= 在途中断语义。
+   */
+  receipt?: { stopReason: string; endedAt: number };
 }
 
 /**
@@ -102,7 +113,7 @@ export interface SessionsIndexNegativeEntry {
 
 /** 磁盘 JSON 顶层结构（key = jsonl basename 不含路径）。 */
 export interface SessionsIndexFile {
-  version: 1;
+  version: 2;
   pid: number;
   entries: Record<string, SessionsIndexEntry | SessionsIndexNegativeEntry>;
 }
@@ -172,6 +183,16 @@ function hasModelFields(v: Record<string, unknown>): boolean {
   );
 }
 
+/** 事件戳 + 终态收条字段组（v2；undefined 合法 = 无事件文件/无收条）。 */
+function hasReceiptFields(v: Record<string, unknown>): boolean {
+  if (v.eventsMtimeMs !== undefined && typeof v.eventsMtimeMs !== "number") return false;
+  if (v.eventsSize !== undefined && typeof v.eventsSize !== "number") return false;
+  if (v.receipt === undefined) return true;
+  if (typeof v.receipt !== "object" || v.receipt === null) return false;
+  const r = v.receipt as Record<string, unknown>;
+  return typeof r.stopReason === "string" && typeof r.endedAt === "number";
+}
+
 /** 正条目类型谓词：镜像 isIdentityData（session-reconstructor.ts:244-253）的字段检查 + 索引特有戳/形态字段。 */
 function isPositiveIndexEntry(raw: unknown): raw is SessionsIndexEntry {
   if (typeof raw !== "object" || raw === null) return false;
@@ -181,7 +202,8 @@ function isPositiveIndexEntry(raw: unknown): raw is SessionsIndexEntry {
     hasSessionDescFields(v) &&
     hasOptionalStringFields(v) &&
     hasOriginFields(v) &&
-    hasModelFields(v)
+    hasModelFields(v) &&
+    hasReceiptFields(v)
   );
 }
 

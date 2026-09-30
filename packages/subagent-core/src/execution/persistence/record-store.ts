@@ -142,12 +142,13 @@ import {
   manifestToSubagent,
   readSidecarPayloads,
   recordToSubagent,
+  sameNullableStamp,
   sameStamp,
   statStamp,
   terminalManifestRecord,
   v2PairToRecord,
 } from "./record-store-rebuild.ts";
-import type { FileCacheEntry, FileCacheValue, FileStamps, Stamp } from "./record-store-rebuild.ts";
+import type { FileCacheEntry, FileCacheValue, FileStamps, SidecarPayloads, Stamp } from "./record-store-rebuild.ts";
 // [H4 三轴拆分] 终态原语轴（record-store-terminal.ts）：markFinalized/markCancelled/
 // markSettled/markSettledOut 等终态/settle/收口动作原语实现 + binding settle 快照族——
 // 经 TerminalCtx 注入本类写面（七名写函数调用字面只留在本文件，D7 守卫零改动）。
@@ -1598,7 +1599,27 @@ export class RecordStore {
       this.fileCache.set(file, { negative: true, ...stamps });
       return null;
     }
-    const payloads = readSidecarPayloads(file, stamps);
+    // 事件戳校验（缓存键第四维）：索引里的事件文件戳与当前不符 → 该条目过期（终态
+    // 收条可能已变），落回探测重建；负条目无此维度。
+    const events = this.eventsStampOfId(hit.id);
+    const hitEvents: Stamp | null =
+      hit.eventsMtimeMs !== undefined && hit.eventsSize !== undefined
+        ? { mtimeMs: hit.eventsMtimeMs, size: hit.eventsSize }
+        : null;
+    if (!sameNullableStamp(hitEvents, events)) return undefined;
+    // 终态收条自索引读出（① 快路径换源：不再读 .state sidecar）；无收条条目
+    //（无收条事件 = 在途中断，或存量索引形态）落回 sidecar 读取。
+    const payloads: SidecarPayloads =
+      hit.receipt !== undefined
+        ? {
+            state: {
+              status: "idle",
+              reason: hit.receipt.stopReason,
+              endedAt: hit.receipt.endedAt,
+            },
+            binding: undefined,
+          }
+        : readSidecarPayloads(file, stamps);
     const entry = buildFileCacheEntry(
       {
         ...hit,
@@ -1616,7 +1637,7 @@ export class RecordStore {
       file,
       stamps,
       payloads,
-      this.eventsStampOfId(hit.id),
+      events,
     );
     this.fileCache.set(file, entry);
     this.idToFile.set(hit.id, file);
@@ -1698,6 +1719,22 @@ export class RecordStore {
           // binding 缺失面互补，索引命中路径不再静默抹掉 workflow 身份）。
           origin: cached.light.origin,
           parentRunId: cached.light.parentRunId,
+          // v2：事件文件戳（缓存键第四维）与终态收条（索引自承终态域——快路径零内容
+          // 读取即可回答「为什么停/何时停」，不必再读 .state sidecar）。
+          ...(cached.events !== null
+            ? { eventsMtimeMs: cached.events.mtimeMs, eventsSize: cached.events.size }
+            : {}),
+          ...(cached.stateMarker !== undefined &&
+          cached.stateMarker.status === "idle" &&
+          cached.stateMarker.reason !== undefined &&
+          cached.stateMarker.endedAt !== undefined
+            ? {
+                receipt: {
+                  stopReason: cached.stateMarker.reason,
+                  endedAt: cached.stateMarker.endedAt,
+                },
+              }
+            : {}),
         });
       }
     }
