@@ -46,54 +46,18 @@ import {
 } from '@taiji/ui/extension-host'
 import type { PluginInfo } from '@taiji/shared'
 
-// @/api 门面 mock（对齐 settings-modal-smoke.test.ts + ExtensionPage 依赖的 extension 域）
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  config: {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    // SettingsModal → ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
-    refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [] })),
-    setProvider: vi.fn(async () => ({})),
-    setSkillDirs: vi.fn(async () => undefined),
-    setAgentDirs: vi.fn(async () => undefined),
-    setExtensionDirs: vi.fn(async () => undefined),
-    discoverModels: vi.fn(async () => ({ success: true, models: [] })),
-    onProviders: vi.fn(() => () => {}),
-    onModels: vi.fn(() => () => {}),
-    onSkills: vi.fn(() => () => {}),
-    onAgents: vi.fn(() => () => {}),
-    onExtensions: vi.fn(() => () => {}),
-    onSkillDirs: vi.fn(() => () => {}),
-    onAgentDirs: vi.fn(() => () => {}),
-    onExtensionDirs: vi.fn(() => () => {}),
-    onDefaults: vi.fn(() => () => {}),
-    onDefaultsWithSource: vi.fn(() => () => {}),
-    onSystemPrompt: vi.fn(() => () => {}),
-    onTerminalConfig: vi.fn(() => () => {}),
-    detectSources: vi.fn(async () => []),
-    onAuthDeviceCode: vi.fn(() => () => {}),
-    onAuthAuthUrl: vi.fn(() => () => {}),
-    onAuthSuccess: vi.fn(() => () => {}),
-    onAuthError: vi.fn(() => () => {}),
-  },
-  model: { onModels: vi.fn(() => () => {}) },
-  extension: {
-    onExtensions: vi.fn(() => () => {}),
+// @/api 门面 mock（对齐 settings-modal-smoke.test.ts；成员面单源在 helpers/settings-modal-api-mock.ts，
+// 本文件追加 ExtensionPage/InstallFlow 依赖的 extension 域 install 流 mock）
+vi.mock('@/api', () =>
+  settingsModalApiModule({
     fetchRecommended: vi.fn(async () => []),
     install: vi.fn(async () => undefined),
     installDir: vi.fn(async () => ({ success: true, tempDir: '', candidates: [] })),
     installGitRepository: vi.fn(async () => ({ success: true, tempDir: '', candidates: [] })),
     finishInstall: vi.fn(async () => undefined),
     cancelInstall: vi.fn(async () => undefined),
-  },
-  settings: {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    onProviders: vi.fn(() => () => {}),
-    onExtensions: vi.fn(() => () => {}),
-    getAutoRenameEnabled: vi.fn(async () => ({ enabled: false })),
-    setAutoRenameEnabled: vi.fn(async () => ({ enabled: false })),
-  },
-}))
+  }),
+)
 
 // settings 域 seam mock（SystemPage/TerminalPage/LoadPaths chooseDirectory 依赖）
 vi.mock('@/api/domains/settings', () => ({
@@ -106,6 +70,9 @@ vi.mock('@/api/domains/settings', () => ({
   openUpdateManualDir: vi.fn(async () => ({ success: true })),
 }))
 
+// '@/api' mock 工厂 import 必须先于组件 import 求值：SettingsModal 模块图加载 '@/api' 时
+// vi.mock 工厂立即执行，晚于组件 import 的工厂绑定仍在 TDZ（vi.hoisted 同族坑）。
+import { settingsModalApiModule } from '@/__tests__/helpers/settings-modal-api-mock'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import PluginContributionsPage from '@/components/settings/extension/PluginContributionsPage.vue'
 import { toContributionInfos } from '@/composables/shell/useExtensionHostBridge'

@@ -10,27 +10,10 @@
  * 纯函数测试：无 Vue watch / 无时序伪造——每条裁决直接断言 decision 形状。
  */
 import { describe, it, expect } from 'vitest'
-import type { ProviderInfo, ProviderId } from '@taiji/shared'
 import { reconcileBroadcast, formPatchFromProvider } from '../provider-edit-reconcile'
 import type { FormSnapshot } from '../provider-edit-types'
-
-function makeProvider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {
-  return {
-    id: 'p1' as ProviderId,
-    name: 'P1',
-    api: 'anthropic-messages',
-    baseUrl: 'https://api.example.com',
-    apiKeySet: true,
-    status: 'connected',
-    headers: { 'X-Test': 'v1' },
-    authHeader: false,
-    models: [
-      { id: 'm1', name: 'M1', contextWindow: 200_000, enabled: true },
-    ],
-    enabled: true,
-    ...overrides,
-  }
-}
+// provider fixture 工厂迁 ./helpers/provider-edit-testbed（长版，与其他 provider-edit 系测试同源）
+import { makeProvider } from './helpers/provider-edit-testbed'
 
 /** 快照 fixture（authMethod 可指定——S8 例外判据读它） */
 function makeSnapshot(overrides: Partial<FormSnapshot> = {}): FormSnapshot {

@@ -49,8 +49,8 @@ describe('mock settings system 字段（自动重命名）：set 回显 + 写后
     expect(await settings.setAutoRenameEnabled(true)).toEqual({ enabled: true })
     expect(await settings.getAutoRenameEnabled()).toEqual({ enabled: true })
 
-    expect(await settings.setRenameMode('every-stop')).toEqual({ mode: 'every-stop' })
-    expect(await settings.getRenameMode()).toEqual({ mode: 'every-stop' })
+    expect(await settings.setRenameMode('first-stop')).toEqual({ mode: 'first-stop' })
+    expect(await settings.getRenameMode()).toEqual({ mode: 'first-stop' })
 
     expect(await settings.setRenameModel('claude-sonnet-4.5')).toEqual({ model: 'claude-sonnet-4.5' })
     expect(await settings.getRenameModel()).toEqual({ model: 'claude-sonnet-4.5' })

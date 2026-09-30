@@ -101,23 +101,25 @@ export type PresetDomain = typeof realPresetDomain
 export type BtwDomain = typeof realBtwDomain
 export type UsageDomain = typeof realUsageDomain
 
-/** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对） */
-type PlainTuple<T extends unknown[]> = { [K in keyof T]: T[K] }
+/** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对）。导出：被导出的 SameTuple / DomainParamsExact 引用 */
+export type PlainTuple<T extends unknown[]> = { [K in keyof T]: T[K] }
 /**
  * 元组类型全等（identity 比对而非可赋值性——可赋值性抓不到可选元素的增删）。
  * 判别臂用字符串字面量（非数值）：同为 identity 探针的两臂标记，避免 no-magic-numbers warning。
+ * 导出：被导出的 DomainParamsExact 引用（fallow private-type-leaks）。
  */
-type SameTuple<A extends unknown[], B extends unknown[]> =
+export type SameTuple<A extends unknown[], B extends unknown[]> =
   (<T>() => T extends PlainTuple<A> ? 'eq' : 'ne') extends (<T>() => T extends PlainTuple<B> ? 'eq' : 'ne') ? true : false
-/** 断言恒真（类型实参不满足 true 约束时在使用处报编译错） */
-type AssertExact<T extends true> = T
+/** 断言恒真（类型实参不满足 true 约束时在使用处报编译错；导出：被导出别名 *ParamsExact 引用） */
+export type AssertExact<T extends true> = T
 /**
  * 逐方法比较 mock 实现与 real 域的 Parameters 元组全等（identity）；任一方法少参/多参/错型，
  * 结果联合含 false。抓的正是「注解可赋值性放行」的漂移：mock 少声明一个可选参，TS 结构化
  * 比较视为合法（少参函数可赋给多参函数类型）。用法：AssertExact<DomainParamsExact<D, M>>——
  * 泛型定义内不能直接套 AssertExact（未解析泛型上约束不可证，会在定义处误报）。
+ * 导出：被导出别名 *ParamsExact 引用（fallow private-type-leaks）。
  */
-type DomainParamsExact<Real, Mock extends Real> = {
+export type DomainParamsExact<Real, Mock extends Real> = {
   [K in keyof Real]: Real[K] extends (...args: infer P) => unknown
     ? Mock[K] extends (...args: infer Q) => unknown
       ? SameTuple<P, Q>

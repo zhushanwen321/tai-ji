@@ -29,12 +29,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { computed, defineComponent, nextTick, reactive, ref } from 'vue'
+import { defineComponent, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { textToSegments } from '@taiji/shared'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import type { ViewCacheEntry, ViewHostSource } from '@taiji/ui/extension-host'
 import { ManualResizeObserverStub } from '../effects/_virtua-mock-helper'
+import { composerApiModule, composerChatModule, composerChildStubs, composerFlowModule, composerSessionStoreModule, makeComposerInputMock } from '../helpers/composer-mount'
 import {
   dispatchFitGeometry as stubFitGeometry,
   makeMountPointSource as makeHelperSource,
@@ -84,51 +84,19 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   }
 })
 
-// ── chat / flow / api / session store mock（composer-send-button-states 同范式）──
-const chatApiMock = vi.hoisted(() => ({
-  send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-  sendBash: vi.fn(() => Promise.resolve()),
-  abortBash: vi.fn(() => Promise.resolve()),
-}))
-vi.mock('@/composables/features/chat/useChat', () => ({ useChat: () => chatApiMock }))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({
-    submitFirstMessage: vi.fn(),
-    currentModel: { value: null },
-    setPendingModel: vi.fn(),
-    currentCwd: ref(null),
-  }),
-  resetNewTaskFlow: vi.fn(),
-}))
+// ── chat / flow / api / session store mock（公共骨架收敛 helpers/composer-mount.ts 单源，
+//    同 composer-file-injection 等四文件范式；api 的 chat 组是本文件增量）──
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: chatApiMock.send, steer: chatApiMock.steer, streamSubscribe: vi.fn(() => () => {}) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
+  ...composerApiModule(),
+  chat: { send: vi.fn(() => Promise.resolve()), steer: vi.fn(() => Promise.resolve()), streamSubscribe: vi.fn(() => () => {}) },
 }))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+vi.mock('@/stores/session', () => composerSessionStoreModule())
 
-// ── 子组件 stub（ComposerInput 保留 mock：testid 断言沿用既有范式）──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  emits: { input: (val: string) => { lastInputText.value = val; return true }, keydown: null, 'slash-trigger': null, 'file-trigger': null },
-  setup(_, { expose }) {
-    expose({ clear: vi.fn(), setText: vi.fn(), insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
+// ── 子组件 stub（ComposerInput mock 收敛 composer-mount 共用面工厂）──
+const { lastInputText, ComposerInputMock } = makeComposerInputMock()
+// GenStatsTriggers 专属空 stub（共享骨架未覆盖的本文件特例）
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 /** 聚合组件 stub（契约 testid = 组件级测试约定值；断言「哪个组件被挂载」） */
 const MetricsAggregateStub = defineComponent({
@@ -139,19 +107,15 @@ const ModelThinkingAggregateStub = defineComponent({
   name: 'ModelThinkingAggregate',
   template: '<div data-testid="composer-model-thinking-aggregate" />',
 })
+// AddMenuPopover 保持真实（序 0 的 `+` 是「不退化」断言对象，trigger 带 title）——
+// 从共享骨架剔除该键；其余兄弟子组件 stub 收敛 helpers/composer-mount.ts 单源
+const { AddMenuPopover: _addMenuPopoverReal, ...childStubs } = composerChildStubs
 const stubs = {
   ComposerInput: ComposerInputMock,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  // AddMenuPopover 保持真实：序 0 的 `+` 是「不退化」断言对象（trigger 带 title）
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
+  ...childStubs,
   GenStatsTriggers: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
   ComposerMetricsAggregate: MetricsAggregateStub,
   ModelThinkingAggregate: ModelThinkingAggregateStub,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
 }
 
 const SID = 's-density'

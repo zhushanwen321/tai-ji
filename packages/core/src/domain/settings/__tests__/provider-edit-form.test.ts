@@ -9,13 +9,19 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Ref } from 'vue'
-import { ref, effectScope, nextTick } from 'vue'
-import type { ProviderInfo, ProviderId, SetProviderData } from '@taiji/shared'
+import { ref, nextTick } from 'vue'
+import type { ProviderInfo, SetProviderData } from '@taiji/shared'
 import {
   provideSettingsTransport,
   type SettingsTransport,
 } from '../transport'
 import { makeFakeTransport } from './helpers/fake-transport'
+import {
+  makeProvider,
+  createTStub,
+  resetTStub,
+  createEffectScopeTracker,
+} from './helpers/provider-edit-testbed'
 import {
   createProviderEditForm,
   API_KEY_CLEAR_SENTINEL,
@@ -24,9 +30,10 @@ import {
 import { createProviderEditModels, type ProviderEditModelsModule } from '../provider-edit-models'
 
 /** i18n stub：返回 key 本身（校验调用参数而非翻译）。 */
-const tStub = vi.fn((key: string) => key)
+const tStub = createTStub()
 
 // fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法面全覆盖共享工厂）
+// provider fixture 工厂 / tStub / effectScope 生命周期迁 ./helpers/provider-edit-testbed
 
 /** 当前注入的 fake transport（模块级，供断言用）。 */
 let currentTransport: SettingsTransport
@@ -38,34 +45,15 @@ function getTransport(): SettingsTransport {
 beforeEach(() => {
   currentTransport = makeFakeTransport()
   provideSettingsTransport(currentTransport)
-  tStub.mockClear()
-  tStub.mockImplementation((key: string) => key)
+  resetTStub(tStub)
 })
 
-let scope: ReturnType<typeof effectScope> | null = null
+/** effectScope 生命周期（mountForm 挂载 / afterEach 回收）。 */
+const scopes = createEffectScopeTracker()
 
 afterEach(() => {
-  scope?.stop()
-  scope = null
+  scopes.stopScope()
 })
-
-function makeProvider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {
-  return {
-    id: 'p1' as ProviderId,
-    name: 'P1',
-    api: 'anthropic-messages',
-    baseUrl: 'https://api.example.com',
-    apiKeySet: true,
-    status: 'connected',
-    headers: { 'X-Test': 'v1' },
-    authHeader: false,
-    models: [
-      { id: 'm1', name: 'M1', contextWindow: 200_000, enabled: true },
-    ],
-    enabled: true,
-    ...overrides,
-  }
-}
 
 interface MountedForm {
   form: ProviderEditFormModule
@@ -82,9 +70,7 @@ interface MountedForm {
 function mountForm(provider: ProviderInfo | null = makeProvider(), options: { captureSnapshot?: boolean } = {}): MountedForm {
   const providerRef = ref<ProviderInfo | null>(provider)
   const providers = ref<ProviderInfo[]>([])
-  scope = effectScope()
-  // effectScope.run 类型签名 T | undefined——活动 scope 内同步返回值恒非空
-  return scope!.run(() => {
+  return scopes.runInScope(() => {
     const models = createProviderEditModels({ t: tStub })
     const form = createProviderEditForm({ providerRef, providers, models, t: tStub })
     form.applyProvider(providerRef.value)
@@ -93,7 +79,7 @@ function mountForm(provider: ProviderInfo | null = makeProvider(), options: { ca
     models.resetTransient()
     if (options.captureSnapshot !== false) form.captureSnapshot()
     return { form, models, providerRef, providers }
-  })!
+  })
 }
 
 /** save payload（setProvider 第 2 参） */

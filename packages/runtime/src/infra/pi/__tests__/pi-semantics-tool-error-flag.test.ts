@@ -19,6 +19,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { extractFunctionBody, stripToCode } from './helpers/pi-dist-fn-extract.js'
 import { locatePiDist } from './helpers/pi-semantics-probe.js'
 
 const AGENT_CORE_DIST = locatePiDist('pi-agent-core', 'agent.js')
@@ -27,71 +28,12 @@ const SKIP_REASON = AGENT_CORE_DIST
   : 'node_modules/@earendil-works/pi-agent-core/dist 不可达（cwd 上溯 6 级未命中）'
 if (!AGENT_CORE_DIST) console.warn(`[pi-semantics] skip：${SKIP_REASON}`)
 
-/** 去注释并剥离字符串字面量内容（占位为空串），后续花括号配对基于净化文本。 */
-function stripToCode(src: string): string {
-  const n = src.length
-  let out = ''
-  let i = 0
-  while (i < n) {
-    const c = src[i]
-    const d = i + 1 < n ? src[i + 1] : ''
-    if (c === '/' && d === '/') {
-      while (i < n && src[i] !== '\n') i++
-      continue
-    }
-    if (c === '/' && d === '*') {
-      i += 2
-      while (i < n && !(src[i] === '*' && i + 1 < n && src[i + 1] === '/')) i++
-      i += 2
-      continue
-    }
-    if (c === "'" || c === '"' || c === '`') {
-      i++
-      while (i < n) {
-        if (src[i] === '\\') {
-          i += 2
-          continue
-        }
-        i++
-        if (src[i - 1] === c) break
-      }
-      out += ' '
-      continue
-    }
-    out += c
-    i++
-  }
-  return out
-}
-
-/** 从 start（指向 '{'）做花括号配对，返回块文本与闭合后下标；字符串已剥离故无字面量干扰。 */
-function matchBrace(src: string, start: number): { text: string; end: number } | null {
-  let depth = 0
-  for (let i = start; i < src.length; i++) {
-    if (src[i] === '{') depth++
-    else if (src[i] === '}') {
-      depth--
-      if (depth === 0) return { text: src.slice(start, i + 1), end: i + 1 }
-    }
-  }
-  return null
-}
-
-/** 定位 executePreparedToolCall 函数体（净化文本上提取）。 */
-function extractExecuteFn(code: string): string | null {
-  const head = code.indexOf('async function executePreparedToolCall(')
-  if (head === -1) return null
-  const brace = code.indexOf('{', head)
-  if (brace === -1) return null
-  return matchBrace(code, brace)?.text ?? null
-}
-
 describe.skipIf(!AGENT_CORE_DIST)(
   `PS-56 探针：execute 返回值 isError 被丢弃、仅 throw 置 true（${SKIP_REASON ? `skip：${SKIP_REASON}` : ''}）`,
   () => {
     const agentLoopRaw = readFileSync(join(AGENT_CORE_DIST as string, 'agent-loop.js'), 'utf-8')
     const agentLoop = stripToCode(agentLoopRaw)
-    const execFn = extractExecuteFn(agentLoop)
+    const execFn = extractFunctionBody(agentLoop, 'async function executePreparedToolCall(')
 
     it('装置：executePreparedToolCall 函数体提取成功（0 = 形态漂移，禁静默放行）', () => {
       expect(

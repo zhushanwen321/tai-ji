@@ -12,8 +12,9 @@
  * 替换段未变更时不误拦 / 替换卡入口既有语义不回归。
  * 替换卡入口的等价既有用例在 `src/__tests__/settings/pi-presets-page.test.ts`（本次修复领地外，未改动）。
  *
- * mock 策略：`vi.mock('@/api')` 把 preset 门面替成可断言的 mock；`@taiji/ui/features/settings`
- * 用轻量 stub（GroupCard 需保留 #head/#actions 具名 slot，否则卡头 Switch 与标题不渲染）。
+ * mock 策略：mock 脚手架（presetMock 形状/默认 impl / @/api / @taiji/ui stub /
+ * transport 接线 / promptPreset fixture）收敛 @/__tests__/helpers/preset-page-mount
+ * 单源，与 settings 版同组件测试共享。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/settings/preset/__tests__/pi-presets-page.test.ts
  */
@@ -21,73 +22,41 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { PiLaunchPreset } from '@taiji/shared'
-import { provideSettingsTransport } from '@taiji/core'
-import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
+import {
+  presetApiModule,
+  presetUiModule,
+  primePresetDefaults,
+  promptPreset,
+  wirePresetTransport,
+  type PresetMock,
+} from '@/__tests__/helpers/preset-page-mount'
 
 /** mock preset API（update 是「是否落盘」的唯一可观测量）。 */
-const presetMock = vi.hoisted(() => ({
-  list: vi.fn(() => Promise.resolve([])),
-  getDefault: vi.fn(() => Promise.resolve('builtin:full')),
-  setDefault: vi.fn(() => Promise.resolve()),
-  create: vi.fn((p: PiLaunchPreset) => Promise.resolve(p)),
-  update: vi.fn((p: PiLaunchPreset) => Promise.resolve(p)),
-  remove: vi.fn(() => Promise.resolve()),
+const presetMock = vi.hoisted((): PresetMock => ({
+  list: vi.fn(),
+  getDefault: vi.fn(),
+  setDefault: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  remove: vi.fn(),
 }))
 
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  preset: presetMock,
-  default: { preset: presetMock },
-}))
-
-vi.mock('@taiji/ui/features/settings', () => ({
-  PresetModeSection: {
-    name: 'PresetModeSection',
-    props: ['preset', 'disabled'],
-    template: '<div data-testid="mode-section" />',
-  },
-  GroupCard: {
-    name: 'GroupCard',
-    template: '<div data-testid="group-card"><slot name="head" /><slot name="actions" /><slot /></div>',
-  },
-}))
+vi.mock('@/api', () => presetApiModule(presetMock))
+vi.mock('@taiji/ui/features/settings', () => presetUiModule())
 
 import PiPresetsPage from '@/components/settings/preset/PiPresetsPage.vue'
 import { usePresetStore } from '@/stores/preset'
 import { useToast } from '@/composables/useToast'
 
-/** 自定义预设 fixture：替换段 + 追加段均已落盘（两卡各 3 / 2 字符）。 */
-function promptPreset(): PiLaunchPreset {
-  return {
-    id: 'custom:prompt-preset',
-    name: 'Prompt Preset',
-    builtin: false,
-    order: 1,
-    toolMode: 'all',
-    extensionMode: 'all',
-    prompt: {
-      replace: { enabled: true, prompt: 'abc' },
-      append: { enabled: true, prompt: 'de' },
-    },
-  }
-}
-
 let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  presetMock.update.mockImplementation((p: PiLaunchPreset) => Promise.resolve(p))
+  primePresetDefaults(presetMock)
   const { toasts } = useToast()
   toasts.value = []
-  // [C3] preset 域调用经 SettingsTransport seam 桩注入（逐名映射）
-  provideSettingsTransport(makeSettingsTransportStub({
-    listPresets: presetMock.list,
-    getDefaultPreset: presetMock.getDefault,
-    setDefaultPreset: presetMock.setDefault,
-    createPreset: presetMock.create,
-    updatePreset: presetMock.update,
-    removePreset: presetMock.remove,
-  }))
+  // [C3] preset 域调用经 SettingsTransport seam 桩注入（接线收敛 helpers/preset-page-mount）
+  wirePresetTransport(presetMock)
 })
 
 afterEach(() => {

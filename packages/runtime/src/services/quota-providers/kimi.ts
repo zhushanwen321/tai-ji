@@ -16,7 +16,8 @@ const MS_PER_SEC = 1000
 /** wire 数值字段（limit/used/remaining）：实测以字符串数值下发（`"100"`），历史形态为 number。 */
 type KimiWireNumber = number | string
 
-interface KimiLimitDetail {
+/** 窗口用量字段形态（limits[].detail 与 usage 同构的数据位）：limit/used/remaining 可选 wire 数值、resetTime 可选 string。 */
+interface KimiUsageFields {
   limit?: KimiWireNumber
   used?: KimiWireNumber
   remaining?: KimiWireNumber
@@ -24,23 +25,16 @@ interface KimiLimitDetail {
 }
 
 interface KimiLimit {
-  detail?: KimiLimitDetail
-}
-
-interface KimiUsage {
-  limit?: KimiWireNumber
-  used?: KimiWireNumber
-  remaining?: KimiWireNumber
-  resetTime?: string
+  detail?: KimiUsageFields
 }
 
 interface KimiApiResponse {
   limits?: KimiLimit[]
-  usage?: KimiUsage
+  usage?: KimiUsageFields
 }
 
-/** limits[].detail 形态：limit/used/remaining 可选 wire 数值、resetTime 可选 string（5h 窗口字段）。 */
-function isKimiLimitDetail(v: unknown): boolean {
+/** 窗口用量字段 guard（limits[].detail 与 usage 共用，两处字段同构）。 */
+function isKimiUsageFields(v: unknown): boolean {
   if (!isRecord(v)) return false
   return (
     isOptionalNumericField(v.limit) &&
@@ -53,18 +47,7 @@ function isKimiLimitDetail(v: unknown): boolean {
 /** limits[] 条目形态：detail 缺失合法（该条目无 5h 窗口数据）。 */
 function isKimiLimitEntry(v: unknown): boolean {
   if (!isRecord(v)) return false
-  return v.detail === undefined || isKimiLimitDetail(v.detail)
-}
-
-/** usage 形态（week 窗口字段）。 */
-function isKimiUsage(v: unknown): boolean {
-  if (!isRecord(v)) return false
-  return (
-    isOptionalNumericField(v.limit) &&
-    isOptionalNumericField(v.used) &&
-    isOptionalNumericField(v.remaining) &&
-    isOptionalField(v.resetTime, 'string')
-  )
+  return v.detail === undefined || isKimiUsageFields(v.detail)
 }
 
 /**
@@ -84,7 +67,7 @@ function isKimiResponse(v: unknown): v is KimiApiResponse {
     if (!Array.isArray(o.limits)) return false
     if (!o.limits.every(isKimiLimitEntry)) return false
   }
-  if (o.usage !== undefined && !isKimiUsage(o.usage)) return false
+  if (o.usage !== undefined && !isKimiUsageFields(o.usage)) return false
   return true
 }
 

@@ -29,6 +29,7 @@ import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
 import { useToast } from '@/composables/useToast'
 import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from './helpers/settings-transport-stub'
+import { clickBody, setBodyInput, pointerBody } from './helpers/body-portal-harness'
 
 // @/api mock：ProviderPage onMounted 调 listBuiltinProviders（默认空数组，集成用例
 // mockResolvedValueOnce 覆盖为模板）；setProvider 桩供保存链路断言。
@@ -128,38 +129,6 @@ afterEach(() => {
   wrapper = null
   document.body.innerHTML = ''
 })
-
-/** body 内元素点击（portal 内容触发 Vue @click） */
-function clickBody(selector: string): void {
-  const el = document.body.querySelector<HTMLElement>(selector)
-  if (!el) throw new Error(`body 元素未找到: ${selector}`)
-  el.click()
-}
-
-/** body 内 input 赋值 + 派发 input 事件（v-model 更新） */
-function setBodyInput(selector: string, value: string): void {
-  const el = document.body.querySelector<HTMLInputElement>(selector)
-  if (!el) throw new Error(`body input 未找到: ${selector}`)
-  el.value = value
-  el.dispatchEvent(new Event('input', { bubbles: true }))
-}
-
-/**
- * reka Select 交互：打开/选中依赖 pointerdown/pointerup（click 不触发）。
- * happy-dom 缺 pointer capture API（SelectTrigger onPointerdown 直接调 target.hasPointerCapture），
- * 派发前 polyfill 到元素上。
- */
-function pointerBody(selector: string, type: 'pointerdown' | 'pointerup'): void {
-  const el = document.body.querySelector<HTMLElement>(selector)
-  if (!el) throw new Error(`body 元素未找到: ${selector}`)
-  const anyEl = el as HTMLElement & {
-    hasPointerCapture?: (id: number) => boolean
-    releasePointerCapture?: (id: number) => void
-  }
-  if (typeof anyEl.hasPointerCapture !== 'function') anyEl.hasPointerCapture = () => false
-  if (typeof anyEl.releasePointerCapture !== 'function') anyEl.releasePointerCapture = () => {}
-  el.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0 }))
-}
 
 // ── ProviderQuickSetup 组件级（默认凭据模式 / 自定义环境变量 / ambient / 恢复分支；渲染与 emit 权威断言在 @taiji/ui 包测试）──
 

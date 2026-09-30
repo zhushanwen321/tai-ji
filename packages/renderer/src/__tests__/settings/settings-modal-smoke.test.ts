@@ -31,46 +31,8 @@ import {
 } from '@taiji/ui/features/settings'
 
 // @/api 门面 mock：所有 config/extension/model/settings 域返回空/resolved，避免 WS 调用。
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  config: {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    // SettingsModal → ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
-    refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [] })),
-    setProvider: vi.fn(async () => ({})),
-    setSkillDirs: vi.fn(async () => undefined),
-    setAgentDirs: vi.fn(async () => undefined),
-    setExtensionDirs: vi.fn(async () => undefined),
-    discoverModels: vi.fn(async () => ({ success: true, models: [] })),
-    onProviders: vi.fn(() => () => {}),
-    onModels: vi.fn(() => () => {}),
-    onSkills: vi.fn(() => () => {}),
-    onAgents: vi.fn(() => () => {}),
-    onExtensions: vi.fn(() => () => {}),
-    onSkillDirs: vi.fn(() => () => {}),
-    onAgentDirs: vi.fn(() => () => {}),
-    onExtensionDirs: vi.fn(() => () => {}),
-    onDefaults: vi.fn(() => () => {}),
-    // P2：ProviderPage 默认 pill + 默认修复 toast（缺则 TypeError 崩 mount）
-    onDefaultsWithSource: vi.fn(() => () => {}),
-    onSystemPrompt: vi.fn(() => () => {}),
-    onTerminalConfig: vi.fn(() => () => {}),
-    detectSources: vi.fn(async () => []),
-    // wave-oauth：SettingsModal → ProviderPage → useProviderOAuth onMounted 订阅 4 个 auth.* 事件（缺则 TypeError 崩 mount）
-    onAuthDeviceCode: vi.fn(() => () => {}),
-    onAuthAuthUrl: vi.fn(() => () => {}),
-    onAuthSuccess: vi.fn(() => () => {}),
-    onAuthError: vi.fn(() => () => {}),
-  },
-  model: { onModels: vi.fn(() => () => {}) },
-  extension: { onExtensions: vi.fn(() => () => {}) },
-  settings: {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    onProviders: vi.fn(() => () => {}),
-    onExtensions: vi.fn(() => () => {}),
-    getAutoRenameEnabled: vi.fn(async () => ({ enabled: false })),
-    setAutoRenameEnabled: vi.fn(async () => ({ enabled: false })),
-  },
-}))
+// 成员面单源在 helpers/settings-modal-api-mock.ts（成员存在理由注释亦在该文件）。
+vi.mock('@/api', () => settingsModalApiModule())
 
 // lib/ipc mock：SystemPage/TerminalPage 读 systemSounds 等 ipc，避免 electronAPI 缺失报错。
 vi.mock('@/lib/ipc', () => ({
@@ -84,6 +46,9 @@ vi.mock('@/lib/ipc', () => ({
   chooseDirectory: vi.fn(async () => null),
 }))
 
+// '@/api' mock 工厂 import 必须先于组件 import 求值：SettingsModal 模块图加载 '@/api' 时
+// vi.mock 工厂立即执行，晚于组件 import 的工厂绑定仍在 TDZ（vi.hoisted 同族坑）。
+import { settingsModalApiModule } from '../helpers/settings-modal-api-mock'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import SettingsResourcePage from '@/components/settings/resource/SettingsResourcePage.vue'
 import { makeQuotaModuleStub } from '@taiji/core/testing'

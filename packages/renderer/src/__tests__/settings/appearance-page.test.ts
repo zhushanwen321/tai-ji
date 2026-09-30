@@ -17,68 +17,35 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/appearance-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import { useToast } from '@/composables/useToast'
-import { DEFAULT_SYSTEM, provideSettingsTransport } from '@taiji/core'
-import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import {
+  $,
+  defaultTerminalConfig as defaultConfig,
+  setupTerminalConfigHarness,
+  terminalConfigApiModule,
+  terminalConfigMock as configMock,
+  trackBodyMount,
+} from '../helpers/terminal-config-harness'
+import { DEFAULT_SYSTEM } from '@taiji/core'
 import type { TerminalConfig } from '@taiji/shared'
 
-function defaultConfig(): TerminalConfig {
-  return {
-    version: 1,
-    shell: '',
-    shellArgs: [],
-    fontSize: 14,
-    fontFamily: '',
-    scrollback: 1000,
-    cursorStyle: 'block',
-    bell: false,
-  }
-}
-
-const configMock = vi.hoisted(() => ({
-  getTerminalConfig: vi.fn(() => Promise.resolve({ config: defaultConfig(), corrupted: false })),
-  setTerminalConfig: vi.fn((cfg: TerminalConfig) => Promise.resolve({ config: cfg, corrupted: false })),
-}))
-
-// [C3] 终端配置读写经 SettingsTransport seam 桩注入（补充 @/api 遗留 mock，组件已不直连门面）
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  config: configMock,
-}))
+// [C3] 终端配置读写经 SettingsTransport seam 桩注入（补充 @/api 遗留 mock，组件已不直连门面）；
+// configMock 捕获单例 + project 桩单源在 helpers/terminal-config-harness.ts
+vi.mock('@/api', () => terminalConfigApiModule())
 
 import AppearancePage from '@/components/settings/appearance/AppearancePage.vue'
 
 let wrapper: ReturnType<typeof mount> | null = null
 
-function $(selector: string): DOMWrapper<Element> {
-  const node = document.body.querySelector(selector)
-  expect(node).toBeTruthy()
-  return new DOMWrapper(node!)
-}
-
-beforeEach(() => {
-  setActivePinia(createPinia())
-  const { toasts } = useToast()
-  toasts.value = []
-  configMock.getTerminalConfig.mockClear()
-  configMock.setTerminalConfig.mockClear()
-  provideSettingsTransport(makeSettingsTransportStub(configMock))
-})
-
-afterEach(() => {
-  wrapper?.unmount()
-  wrapper = null
-  document.body.innerHTML = ''
-})
+// beforeEach 重置（pinia/toast/mock 计数/transport 桩）+ afterEach 卸载清 body 单源在 harness
+setupTerminalConfigHarness()
 
 function mountPage(system = { ...DEFAULT_SYSTEM }) {
-  return mount(AppearancePage, {
+  return trackBodyMount(mount(AppearancePage, {
     props: { system },
     attachTo: document.body,
-  })
+  }))
 }
 
 describe('AppearancePage 渲染 gate', () => {

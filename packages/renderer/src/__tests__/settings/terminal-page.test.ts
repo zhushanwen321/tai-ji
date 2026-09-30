@@ -13,65 +13,31 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/terminal-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
+import { describe, it, expect, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import {
+  $,
+  defaultTerminalConfig as defaultConfig,
+  setupTerminalConfigHarness,
+  terminalConfigApiModule,
+  terminalConfigMock as configMock,
+  trackBodyMount,
+} from '../helpers/terminal-config-harness'
 import { useToast } from '@/composables/useToast'
-import { provideSettingsTransport } from '@taiji/core'
-import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import type { TerminalConfig } from '@taiji/shared'
 
-function defaultConfig(): TerminalConfig {
-  return {
-    version: 1,
-    shell: '',
-    shellArgs: [],
-    fontSize: 14,
-    fontFamily: '',
-    scrollback: 1000,
-    cursorStyle: 'block',
-    bell: false,
-  }
-}
-
-const configMock = vi.hoisted(() => ({
-  getTerminalConfig: vi.fn(() => Promise.resolve({ config: defaultConfig(), corrupted: false })),
-  setTerminalConfig: vi.fn((cfg: TerminalConfig) => Promise.resolve({ config: cfg, corrupted: false })),
-}))
-
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  config: configMock,
-}))
+// [C3] 终端配置读写经 SettingsTransport seam 桩注入（补充 @/api 遗留 mock，组件已不直连门面）；
+// configMock 捕获单例 + project 桩单源在 helpers/terminal-config-harness.ts
+vi.mock('@/api', () => terminalConfigApiModule())
 
 import TerminalPage from '@/components/settings/terminal/TerminalPage.vue'
 
-let wrapper: ReturnType<typeof mount> | null = null
-
-/** 在 teleport/attach 目标中查找元素并包装成 DOMWrapper */
-function $(selector: string): DOMWrapper<Element> {
-  const node = document.body.querySelector(selector)
-  expect(node).toBeTruthy()
-  return new DOMWrapper(node!)
-}
-
-beforeEach(() => {
-  setActivePinia(createPinia())
-  const { toasts } = useToast()
-  toasts.value = []
-  configMock.getTerminalConfig.mockClear()
-  configMock.setTerminalConfig.mockClear()
-  provideSettingsTransport(makeSettingsTransportStub(configMock))
-})
-
-afterEach(() => {
-  wrapper?.unmount()
-  wrapper = null
-  document.body.innerHTML = ''
-})
+// beforeEach 重置（pinia/toast/mock 计数/transport 桩）+ afterEach 卸载清 body 单源在 harness
+setupTerminalConfigHarness()
 
 describe('TerminalPage 渲染 gate', () => {
   it('首屏渲染：terminal-page testid + 各表单字段 testid 全部存在', async () => {
-    wrapper = mount(TerminalPage, { attachTo: document.body })
+    trackBodyMount(mount(TerminalPage, { attachTo: document.body }))
     await flushPromises()
 
     const requiredIds = [
@@ -91,7 +57,7 @@ describe('TerminalPage 渲染 gate', () => {
   })
 
   it('mount 后调 getTerminalConfig（mock 返回默认配置）', async () => {
-    wrapper = mount(TerminalPage, { attachTo: document.body })
+    trackBodyMount(mount(TerminalPage, { attachTo: document.body }))
     await flushPromises()
 
     expect(configMock.getTerminalConfig).toHaveBeenCalledTimes(1)
@@ -104,7 +70,7 @@ describe('TerminalPage 渲染 gate', () => {
 
 describe('TerminalPage 保存交互', () => {
   it('填表 + 点 save → setTerminalConfig 被调 + 正确 payload（含 shellArgs 逗号串 → string[]）', async () => {
-    wrapper = mount(TerminalPage, { attachTo: document.body })
+    trackBodyMount(mount(TerminalPage, { attachTo: document.body }))
     await flushPromises()
 
     // 修改 shell
@@ -138,7 +104,7 @@ describe('TerminalPage 保存交互', () => {
   it('setTerminalConfig 失败时显示 error toast', async () => {
     configMock.setTerminalConfig.mockRejectedValueOnce(new Error('保存失败'))
 
-    wrapper = mount(TerminalPage, { attachTo: document.body })
+    trackBodyMount(mount(TerminalPage, { attachTo: document.body }))
     await flushPromises()
 
     await $('[data-testid="terminal-save"]').trigger('click')
@@ -150,7 +116,7 @@ describe('TerminalPage 保存交互', () => {
   })
 
   it('shellArgs 空输入存为 []', async () => {
-    wrapper = mount(TerminalPage, { attachTo: document.body })
+    trackBodyMount(mount(TerminalPage, { attachTo: document.body }))
     await flushPromises()
 
     // shellArgs 留空（默认即为空串），点保存
@@ -167,7 +133,7 @@ describe('TerminalPage 保存交互', () => {
     configMock.setTerminalConfig.mockImplementationOnce(
       () => new Promise((r) => { resolveSave = r }),
     )
-    wrapper = mount(TerminalPage, { attachTo: document.body })
+    trackBodyMount(mount(TerminalPage, { attachTo: document.body }))
     await flushPromises()
 
     // 第一次点击 → 进入 saving（setTerminalConfig pending）
@@ -191,7 +157,7 @@ describe('TerminalPage corrupted 提示', () => {
       corrupted: true,
     })
 
-    wrapper = mount(TerminalPage, { attachTo: document.body })
+    trackBodyMount(mount(TerminalPage, { attachTo: document.body }))
     await flushPromises()
 
     const page = document.body.querySelector('[data-testid="terminal-page"]')

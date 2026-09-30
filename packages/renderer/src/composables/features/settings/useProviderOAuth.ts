@@ -32,19 +32,20 @@ import { getSettingsTransport, toErrorMessage } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 
 // OAuthDialog 的 .vue 导出类型在 plain tsc 下不可用（ui 包 shim 不导出命名类型），本地定义结构兼容
-interface ProviderOAuthDeviceInfo {
+// 三个类型导出：ProviderOAuthState 的公共契约成员（fallow private-type-leaks——消费方可命名）
+export interface ProviderOAuthDeviceInfo {
   userCode: string
   verificationUri: string
   verificationUriComplete?: string
   expiresIn?: number
 }
 
-interface ProviderOAuthAuthUrlInfo {
+export interface ProviderOAuthAuthUrlInfo {
   url: string
   callbackPort?: number
 }
 
-type ProviderOAuthStatus = 'idle' | 'pending' | 'success' | 'error'
+export type ProviderOAuthStatus = 'idle' | 'pending' | 'success' | 'error'
 
 /** OAuthDialog 四态状态机（device / authUrl 都落在 pending，携带各自 info） */
 export interface ProviderOAuthState {

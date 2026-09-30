@@ -9,7 +9,7 @@
  *  - 不触发 force 检查：切换只写偏好，checkForUpdate 不被调用（D3：生效以缓存 TTL 为界）
  *  - 失败回滚：setUpdateSettings reject → trigger 保持原选项 + toast error（不抛错）
  *
- * Mock 策略（同 settings/update-page.test.ts）：
+ * Mock 策略（同 update-page.test.ts，脚手架单源在 helpers/update-page-mount.ts）：
  *  - vi.mock('@/api/domains/settings') 捕获 getUpdateSettings/setUpdateSettings
  *  - vi.mock('@/composables/useToast') 隔离 toast
  *  - vi.mock('@/composables/features/settings/useAppUpdate')（UpdateCheckCard 唯一外部依赖，
@@ -19,9 +19,17 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/update-page-source.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { getCardUpdateHarness, resetCardUpdateHarness, settingsMock, toastMock, settingsApiModule, toastMockModule, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'
-import { mount, flushPromises } from '@vue/test-utils'
+import { describe, it, expect, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
+import {
+  getCardUpdateHarness,
+  settingsMock,
+  toastMock,
+  settingsApiModule,
+  toastMockModule,
+  useAppUpdateCardModule,
+} from '@/__tests__/helpers/update-card-mock'
+import { mountUpdatePage, setupUpdatePageLifecycle } from '@/__tests__/helpers/update-page-mount'
 
 // __APP_VERSION__ 在 vitest-i18n-setup.ts 全局 stub（'0.0.0-test'）
 
@@ -33,33 +41,12 @@ vi.mock('@/composables/useToast', () => toastMockModule())
 // UpdateCheckCard → useAppUpdate（真实 controller 面同 update-page）
 vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
 
-import UpdatePage from '@/components/settings/update/UpdatePage.vue'
-
-let wrapper: ReturnType<typeof mount> | null = null
-
-beforeEach(() => {
-  settingsMock.getProxyConfig.mockReset()
-  settingsMock.setProxyConfig.mockReset()
-  settingsMock.testProxy.mockReset()
-  settingsMock.getUpdateSettings.mockReset()
-  settingsMock.setUpdateSettings.mockReset()
-  toastMock.info.mockReset()
-  toastMock.error.mockReset()
-  settingsMock.getProxyConfig.mockResolvedValue({ mode: 'system', httpProxy: '', httpsProxy: '' })
-  settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: false })
-  settingsMock.setUpdateSettings.mockResolvedValue(undefined)
-  resetCardUpdateHarness()
-})
-
-afterEach(() => {
-  wrapper?.unmount()
-  wrapper = null
-  document.body.innerHTML = ''
-})
+// 脚手架（beforeEach 重置/默认值 + afterEach 卸载清 body）单源在 helpers/update-page-mount.ts
+setupUpdatePageLifecycle()
 
 /** 打开 select-update-source 的下拉（reka-ui：pointerdown 打开，SelectPortal teleport 到 body） */
-async function openSourceDropdown(): Promise<HTMLOptionElement[]> {
-  const trigger = wrapper!.find('[data-testid="select-update-source"]').element as HTMLElement
+async function openSourceDropdown(wrapper: ReturnType<typeof mountUpdatePage>): Promise<HTMLOptionElement[]> {
+  const trigger = wrapper.find('[data-testid="select-update-source"]').element as HTMLElement
   trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
   trigger.click()
   await flushPromises()
@@ -67,8 +54,8 @@ async function openSourceDropdown(): Promise<HTMLOptionElement[]> {
 }
 
 /** 在已打开的下拉中点选指定文案的 option */
-async function pickOption(label: string): Promise<void> {
-  const options = await openSourceDropdown()
+async function pickOption(label: string, wrapper: ReturnType<typeof mountUpdatePage>): Promise<void> {
+  const options = await openSourceDropdown(wrapper)
   const target = options.find((el) => (el.textContent ?? '').includes(label))
   expect(target, `option "${label}" should exist in dropdown`).toBeTruthy()
   target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
@@ -78,8 +65,7 @@ async function pickOption(label: string): Promise<void> {
 
 describe('UpdatePage 预下载开关与代理表单保存（setting-field 编排）', () => {
   it('预下载开关：点 switch → setUpdateSettings({ preDownload: true }) 立即持久化', async () => {
-    wrapper = mount(UpdatePage)
-    await flushPromises()
+    const wrapper = await mountUpdatePage()
     expect(settingsMock.getUpdateSettings).toHaveBeenCalled()
 
     const sw = wrapper.find('[data-testid="switch-pre-download"]')
@@ -92,8 +78,7 @@ describe('UpdatePage 预下载开关与代理表单保存（setting-field 编排
   })
 
   it('代理表单保存（system 模式直存）：点保存 → setProxyConfig 整体写回 + 成功 toast', async () => {
-    wrapper = mount(UpdatePage)
-    await flushPromises()
+    const wrapper = await mountUpdatePage()
 
     await wrapper.find('[data-testid="btn-save-proxy"]').trigger('click')
     await flushPromises()
@@ -110,8 +95,7 @@ describe('UpdatePage 预下载开关与代理表单保存（setting-field 编排
 
   it('代理保存失败：setProxyConfig reject → error toast 透传 RPC 错误文案（onError 路径）', async () => {
     settingsMock.setProxyConfig.mockRejectedValue(new Error('proxy down'))
-    wrapper = mount(UpdatePage)
-    await flushPromises()
+    const wrapper = await mountUpdatePage()
 
     await wrapper.find('[data-testid="btn-save-proxy"]').trigger('click')
     await flushPromises()
@@ -124,15 +108,13 @@ describe('UpdatePage 预下载开关与代理表单保存（setting-field 编排
 
 describe('UpdatePage 更新来源三选控件', () => {
   it('testid 存在：DOM 含 select-update-source trigger', async () => {
-    wrapper = mount(UpdatePage)
-    await flushPromises()
+    const wrapper = await mountUpdatePage()
     expect(wrapper.find('[data-testid="select-update-source"]').exists()).toBe(true)
   })
 
   it('三选项渲染：下拉 option 含「自动（推荐）」「GitHub」「GitCode」', async () => {
-    wrapper = mount(UpdatePage)
-    await flushPromises()
-    const options = await openSourceDropdown()
+    const wrapper = await mountUpdatePage()
+    const options = await openSourceDropdown(wrapper)
     const labels = options.map((el) => el.textContent ?? '')
     expect(labels).toContain('自动（推荐）')
     expect(labels).toContain('GitHub')
@@ -146,22 +128,19 @@ describe('UpdatePage 更新来源三选控件', () => {
       autoUpdate: false,
       updateSource: 'gitcode',
     })
-    wrapper = mount(UpdatePage)
-    await flushPromises()
+    const wrapper = await mountUpdatePage()
     expect(wrapper.find('[data-testid="select-update-source"]').text()).toContain('GitCode')
   })
 
   it('加载回填：updateSource 缺失（旧 settings 文件）→ 缺省显示「自动（推荐）」', async () => {
     settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: false })
-    wrapper = mount(UpdatePage)
-    await flushPromises()
+    const wrapper = await mountUpdatePage()
     expect(wrapper.find('[data-testid="select-update-source"]').text()).toContain('自动（推荐）')
   })
 
   it('切换持久化：点选 GitHub → setUpdateSettings({ updateSource: "github" }) + trigger 显示 GitHub', async () => {
-    wrapper = mount(UpdatePage)
-    await flushPromises()
-    await pickOption('GitHub')
+    const wrapper = await mountUpdatePage()
+    await pickOption('GitHub', wrapper)
     expect(settingsMock.setUpdateSettings).toHaveBeenCalledTimes(1)
     expect(settingsMock.setUpdateSettings).toHaveBeenCalledWith({ updateSource: 'github' })
     // 持久化成功后 trigger 显示更新
@@ -169,24 +148,21 @@ describe('UpdatePage 更新来源三选控件', () => {
   })
 
   it('切换持久化：点选 GitCode → setUpdateSettings({ updateSource: "gitcode" })', async () => {
-    wrapper = mount(UpdatePage)
-    await flushPromises()
-    await pickOption('GitCode')
+    const wrapper = await mountUpdatePage()
+    await pickOption('GitCode', wrapper)
     expect(settingsMock.setUpdateSettings).toHaveBeenCalledWith({ updateSource: 'gitcode' })
   })
 
   it('切换后不触发 force 检查：checkForUpdate 不被调用（D3：生效以缓存 TTL 为界）', async () => {
-    wrapper = mount(UpdatePage)
-    await flushPromises()
-    await pickOption('GitHub')
+    const wrapper = await mountUpdatePage()
+    await pickOption('GitHub', wrapper)
     expect(getCardUpdateHarness().ipc.checkForUpdate).not.toHaveBeenCalled()
   })
 
   it('持久化失败：trigger 保持原选项 + toast error（不抛错）', async () => {
     settingsMock.setUpdateSettings.mockRejectedValue(new Error('write failed'))
-    wrapper = mount(UpdatePage)
-    await flushPromises()
-    await pickOption('GitHub')
+    const wrapper = await mountUpdatePage()
+    await pickOption('GitHub', wrapper)
     // 失败回滚：trigger 仍显示初始选项「自动（推荐）」
     expect(wrapper.find('[data-testid="select-update-source"]').text()).toContain('自动（推荐）')
     expect(toastMock.error).toHaveBeenCalledTimes(1)

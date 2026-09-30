@@ -6,62 +6,48 @@
  * 各组行为矩阵在 provider-edit-{form,discover,models,reconcile}.test.ts（replace, don't layer：
  * 原 981 行逐成员浅层用例已按 module 归位，伪 watch 时序用例由 reconcile 纯核矩阵替代）。
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type { Ref } from 'vue'
-import { ref, effectScope, nextTick } from 'vue'
-import type { ProviderInfo, ProviderId } from '@taiji/shared'
+import { ref, nextTick } from 'vue'
+import type { ProviderInfo } from '@taiji/shared'
 import { providePlatform, __resetPlatformForTesting } from '../../../platform/port'
 import {
   provideSettingsTransport,
 } from '../transport'
 import { makeFakeTransport } from './helpers/fake-transport'
+import {
+  makeProvider,
+  createTStub,
+  resetTStub,
+  createEffectScopeTracker,
+} from './helpers/provider-edit-testbed'
 import { createSettingsStore, getSettingsStore, provideSettingsStore } from '../settings-store'
 import { useProviderEdit, type ProviderEditSession } from '../use-provider-edit'
 import { InMemoryStorage } from './helpers/in-memory-storage'
 
 /** i18n stub：返回 key 本身（校验调用参数而非翻译）。 */
-const tStub = vi.fn((key: string) => key)
+const tStub = createTStub()
 
 // fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法面全覆盖共享工厂）
+// provider fixture 工厂 / tStub / effectScope 生命周期迁 ./helpers/provider-edit-testbed
 
 beforeEach(() => {
   provideSettingsStore(createSettingsStore())
   __resetPlatformForTesting()
   providePlatform({ kind: 'mock', storage: new InMemoryStorage(), webSocket: { create: () => ({}) as never } })
   provideSettingsTransport(makeFakeTransport())
-  tStub.mockClear()
-  tStub.mockImplementation((key: string) => key)
+  resetTStub(tStub)
 })
 
-let scope: ReturnType<typeof effectScope> | null = null
+/** effectScope 生命周期（mount 挂载 / afterEach 回收）。 */
+const scopes = createEffectScopeTracker()
 
 afterEach(() => {
-  scope?.stop()
-  scope = null
+  scopes.stopScope()
 })
 
 function mount(providerRef: Ref<ProviderInfo | null>): ProviderEditSession {
-  scope = effectScope()
-  // effectScope.run 类型签名 T | undefined——活动 scope 内同步返回值恒非空
-  return scope!.run(() => useProviderEdit(providerRef, { t: tStub }))!
-}
-
-function makeProvider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {
-  return {
-    id: 'p1' as ProviderId,
-    name: 'P1',
-    api: 'anthropic-messages',
-    baseUrl: 'https://api.example.com',
-    apiKeySet: true,
-    status: 'connected',
-    headers: { 'X-Test': 'v1' },
-    authHeader: false,
-    models: [
-      { id: 'm1', name: 'M1', contextWindow: 200_000, enabled: true },
-    ],
-    enabled: true,
-    ...overrides,
-  }
+  return scopes.runInScope(() => useProviderEdit(providerRef, { t: tStub }))
 }
 
 describe('3 组子 interface 装配（form / discover / models）', () => {

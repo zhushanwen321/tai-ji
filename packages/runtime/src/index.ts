@@ -743,17 +743,17 @@ async function main(): Promise<void> {
   // settle 兑现腿（D4 锚）：injected 的 kind=claim 兑现并 respond（armed/lifetime 不动）。
   // 非 agent-managed session 无债权记录，短路文件 I/O；outcome = session_end 终态
   //（无 entry/null → completed，与原回流口径一致）。
-  subscribeAgentSettledIn(agentSettledListeners)((sid) => {
-    const summary = sessionService.getSummary(sid)
-    // managed 判定与 handler isOwnedBy 同源同判（SessionSummary 已投影 spawnSource/
-    // parentAgentSessionId）——session-internal 打标字段改名时此处随类型报错；原
-    // `view as {...}` 收窄读法在字段改名时静默全灭，已删。
+  // managed 判定与 handler isOwnedBy 同源同判（SessionSummary 已投影 spawnSource/
+  // parentAgentSessionId）——session-internal 打标字段改名时此处随类型报错；原
+  // `view as {...}` 收窄读法在字段改名时静默全灭，已删。
+  const extractSettleOutcome = (summary: ReturnType<typeof sessionService.getSummary>) => {
     const managed = summary?.spawnSource === 'agent' && summary?.parentAgentSessionId !== undefined
     const outcomePath = managed ? summary?.sessionFile : undefined
-    const outcome = outcomePath
-      ? sessionStore.extractSessionOutcome(outcomePath)
-      : null
-    const batch = claimLedger.settle(sid, outcome)
+    return outcomePath ? sessionStore.extractSessionOutcome(outcomePath) : null
+  }
+  subscribeAgentSettledIn(agentSettledListeners)((sid) => {
+    const summary = sessionService.getSummary(sid)
+    const batch = claimLedger.settle(sid, extractSettleOutcome(summary))
     if (batch.targets.length > 0) {
       deliverRespondTargets(claimLedger, batch.targets, respondWatch, {
         sessionFilePath: summary?.sessionFile ?? resolveSessionFile(sid),

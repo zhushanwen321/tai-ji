@@ -1,8 +1,10 @@
 /**
  * Composer 集成测试共享 mock 骨架（composer-file/session/slash-injection +
- * force-quit-draft-recovery-dom 四文件，范式同 sidebar-mount.ts / chat-stream-mount.ts）。
+ * force-quit-draft-recovery-dom 四文件，范式同 sidebar-mount.ts / chat-stream-mount.ts；
+ * session mock / 子组件 stub / ComposerInput 共用面另供 composer-bar-density-wiring 与
+ * composer-smoke 复用）。
  *
- * 收敛四文件逐字重复的 mock 段（质量审查 C-2 测试脚手架重复收敛批）：useChat /
+ * 收敛测试文件间逐字重复的 mock 段（质量审查 C-2 测试脚手架重复收敛批）：useChat /
  * useNewTaskFlow / @/api / stores/chat / stores/session 五个 mock 模块工厂 + Composer
  * 兄弟子组件空 stub 收敛到本 helper 单源；vi.mock 注册留在测试文件（mock 是文件作用域，
  * 工厂经顶层 import 转发本 helper 导出——同 sidebar-mount.ts 先例）。
@@ -15,8 +17,10 @@
  * 工厂与断言共享同一批 vi.fn）。
  *
  * 差异化部分（有意不收敛，各测试文件自留）：
- * - ComposerInput mock：各文件 expose 的 spy 面不同（insertFileChip / insertSessionChip /
- *   insertSlashChip+insertSkillChip / 完整 expose 面带 insertTextAtCursor）
+ * - ComposerInput mock：expose 的 spy 面不同者自留（insertFileChip / insertSessionChip /
+ *   insertSlashChip+insertSkillChip / 完整 expose 面带 insertTextAtCursor）；
+ *   density-wiring 与 smoke 的共用面（clear/setText/insertSlashChip/getSegments +
+ *   input 事件捕获）收敛为 makeComposerInputMock 工厂
  * - composer-session-injection：sessionStore 需可变 active（vi.hoisted sessionState），
  *   保留本地；本 helper 只提供静态 active: undefined 版
  * - composer-smoke：flow mock 是 hoisted 超集（断言引用字段），只在工厂内联真 ref
@@ -25,6 +29,7 @@
 import { ref } from 'vue'
 import { vi } from 'vitest'
 import { defineComponent } from 'vue'
+import { textToSegments } from '@taiji/shared'
 
 /** '@/composables/features/chat/useChat' mock 工厂（Composer 消费面 7 键全量）。 */
 export function composerChatModule() {
@@ -121,4 +126,23 @@ export const composerChildStubs = {
   ThinkingLevelPopover: SIMPLE,
   RetryIndicator: SIMPLE,
   QueueBubble: SIMPLE,
+}
+
+/**
+ * ComposerInput mock 工厂（density-wiring / smoke 共用 expose 面）：input 事件捕获进
+ * lastInputText 供 getSegments 读段；testid 锚点供冒烟断言。beforeEach 重置
+ * lastInputText.value = '' 即可复用于下一用例。
+ */
+export function makeComposerInputMock() {
+  const lastInputText = ref('')
+  const ComposerInputMock = defineComponent({
+    name: 'ComposerInput',
+    emits: { input: (val: string) => { lastInputText.value = val; return true }, keydown: null, 'slash-trigger': null, 'file-trigger': null },
+    setup(_, { expose }) {
+      expose({ clear: vi.fn(), setText: vi.fn(), insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
+      return {}
+    },
+    template: '<div data-testid="composer-input" />',
+  })
+  return { lastInputText, ComposerInputMock }
 }

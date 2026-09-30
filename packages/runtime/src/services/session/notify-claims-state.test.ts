@@ -5,39 +5,24 @@
  * 状态机边角（重复 arm、投递失败腿作用域、单 watch 槽覆盖、orphan 双触发器细节、
  * TTL 下界钳制与三类扫描、per-session 计数器、clearSession 边界、贯穿不变量）。
  *
- * 材料形态：零 I/O 纯状态机 + 注入手动时钟（`clock`）；vitest fake timers 保证工厂内
- * TTL 清扫 setInterval 不落真实事件循环（规则：timer 测试用 fake timers）。
+ * 材料形态：零 I/O 纯状态机 + 注入手动时钟（__tests__/helpers/notify-claims-harness.ts
+ * 的 setClock/advance）；vitest fake timers 保证工厂内 TTL 清扫 setInterval 不落真实
+ * 事件循环（规则：timer 测试用 fake timers）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  createClaimLedger,
-  type ClaimLedger,
-  type ClaimLedgerDeps,
-  type RespondTarget,
-} from './notify-claims.js'
+import type { ClaimLedger, RespondTarget } from './notify-claims.js'
+import { createLedgerHarness, P, S, TTL } from './__tests__/helpers/notify-claims-harness.js'
 
-const P = 'parent-1'
-const S = 'child-1'
-const TTL = 10 * 60_000
-
-let clock = 0
-let open: ClaimLedger[] = []
-
-function makeLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
-  const l = createClaimLedger({ now: () => clock, ...deps })
-  open.push(l)
-  return l
-}
+const h = createLedgerHarness()
+const { makeLedger } = h
 
 beforeEach(() => {
   vi.useFakeTimers()
-  clock = 0
-  open = []
+  h.reset()
 })
 
 afterEach(() => {
-  for (const l of open) l.dispose()
-  open = []
+  h.disposeAll()
   vi.useRealTimers()
 })
 
@@ -183,10 +168,10 @@ describe('ClaimLedger TTL 清扫', () => {
   it('TTL 下界 ≥10min 强制钳制（配置 1s 无效：5min 扫描零转移，10min 才转移）', () => {
     const l = makeLedger({ ttlMs: 1_000 })
     armClaim(l, 'sm-floor')
-    clock = 5 * 60_000
+    h.setClock(5 * 60_000)
     expect(l.sweep().orphaned).toHaveLength(0) // 未达钳制下界
     expect(l.getClaim(P, 'sm-floor')?.state).toBe('armed')
-    clock = TTL
+    h.setClock(TTL)
     expect(l.sweep().orphaned.map((v) => v.notifyId)).toEqual(['sm-floor'])
   })
 
@@ -204,7 +189,7 @@ describe('ClaimLedger TTL 清扫', () => {
     expect(l.markInjected(P, 'sm-c2')).toBe(true)
     expect(l.arm({ parentSid: P, notifyId: 'sm-c-lt', kind: 'lifetime', sessionId: S })).toEqual({ ok: true })
 
-    clock += TTL
+    h.advance(TTL)
     const s = l.sweep()
     expect(s.orphaned.map((v) => v.notifyId).sort()).toEqual(['sm-c1', 'sm-c2', 'sm-c3'])
     expect(s.respondOrphaned).toHaveLength(0) // 三条均无 watch → 仅状态转移
@@ -219,7 +204,7 @@ describe('ClaimLedger TTL 清扫', () => {
     armClaim(l, 'sm-sig')
     expect(l.markInjected(P, 'sm-sig')).toBe(true)
     l.openWatch(P, 'sm-sig', 'w-sig') // extension 在等
-    clock += TTL
+    h.advance(TTL)
     const s = l.sweep()
     expect(s.orphaned.map((v) => v.notifyId)).toEqual(['sm-sig'])
     expect(s.respondOrphaned).toHaveLength(1)
@@ -233,12 +218,12 @@ describe('ClaimLedger TTL 清扫', () => {
   it('类③ orphaned 达 TTL 回收删除（≥下界窗口保留供重启收口拿到精确应答）', () => {
     const l = makeLedger()
     armClaim(l, 'sm-gc')
-    clock = 60_000
+    h.setClock(60_000)
     l.orphanByParent(P) // orphanedAt = 60s
-    clock = 60_000 + TTL - 1
+    h.setClock(60_000 + TTL - 1)
     expect(l.sweep().purged).toBe(0) // 窗口内仍在册（收口腿拿得到 'orphaned'）
     expect(l.getClaim(P, 'sm-gc')?.state).toBe('orphaned')
-    clock += 1
+    h.advance(1)
     const s = l.sweep()
     expect(s.purged).toBe(1)
     expect(l.count()).toBe(0)
@@ -249,12 +234,12 @@ describe('ClaimLedger TTL 清扫', () => {
     const l = makeLedger({ ttlMs: TTL, sweepIntervalMs: 60_000 })
     armClaim(l, 'sm-timer')
     expect(l.markInjected(P, 'sm-timer')).toBe(true)
-    clock += TTL
+    h.advance(TTL)
     expect(l.getClaim(P, 'sm-timer')?.state).toBe('injected')
     vi.advanceTimersByTime(60_000) // 定时器到点 → 自动 sweep（时钟 = 注入 now）
     expect(l.getClaim(P, 'sm-timer')?.state).toBe('orphaned')
     l.dispose()
-    clock += TTL * 2
+    h.advance(TTL * 2)
     vi.advanceTimersByTime(120_000) // dispose 后不再自动清扫（无泄漏 timer 抛错）
     expect(l.getClaim(P, 'sm-timer')?.state).toBe('orphaned')
   })

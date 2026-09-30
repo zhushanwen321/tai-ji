@@ -18,7 +18,7 @@ import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
  * 插件 toolbar 挂载点名（= Composer 模板 `view-id` 字面量）。单份持有：任何需要引用该挂载点
  * 标识的代码 import 本常量，禁止再造字面量副本（拼写漂移会让插件 toolbar 静默消失且无编译期拦截）。
  */
-export const PLUGIN_TOOLBAR_VIEW_ID = 'composer.toolbar'
+const PLUGIN_TOOLBAR_VIEW_ID = 'composer.toolbar'
 
 /**
  * @param sessionId 焦点 session id（响应式取值，切换 session 即重判）

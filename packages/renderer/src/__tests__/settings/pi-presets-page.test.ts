@@ -13,7 +13,8 @@
  *    内置调度模式追加卡预置文案非空。
  *
  * mock 策略：
- *  - vi.mock('@/api') 把 preset 门面替成可断言的 mock。
+ *  - mock 脚手架（presetMock / @/api / @taiji/ui stub / transport 接线 / promptPreset
+ *    fixture）收敛 helpers/preset-page-mount 单源，与 components 版同组件测试共享。
  *  - PresetModeSection 子组件 stub（本测试聚焦 PiPresetsPage 主逻辑）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/pi-presets-page.test.ts
@@ -22,108 +23,65 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { PiLaunchPreset } from '@taiji/shared'
-import { provideSettingsTransport } from '@taiji/core'
-import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import { DEFAULT_PRESETS } from '@taiji/shared'
+import {
+  makePreset,
+  presetApiModule,
+  presetUiModule,
+  primePresetDefaults,
+  promptPreset,
+  wirePresetTransport,
+  type PresetMock,
+} from '../helpers/preset-page-mount'
 
-/** mock preset API */
-const presetMock = vi.hoisted(() => ({
-  list: vi.fn(() => Promise.resolve([])),
-  getDefault: vi.fn(() => Promise.resolve('builtin:full')),
-  setDefault: vi.fn(() => Promise.resolve()),
-  create: vi.fn((p: PiLaunchPreset) => Promise.resolve(p)),
-  update: vi.fn((p: PiLaunchPreset) => Promise.resolve(p)),
-  remove: vi.fn(() => Promise.resolve()),
+/** mock preset API（形状标注 + 默认 impl + 接线收敛 helpers/preset-page-mount 单源） */
+const presetMock = vi.hoisted((): PresetMock => ({
+  list: vi.fn(),
+  getDefault: vi.fn(),
+  setDefault: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  remove: vi.fn(),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  preset: presetMock,
-  default: { preset: presetMock },
-}))
-
-vi.mock('@taiji/ui/features/settings', () => ({
-  PresetModeSection: {
-    name: 'PresetModeSection',
-    props: ['preset', 'disabled'],
-    template: '<div data-testid="mode-section" />',
-  },
-  GroupCard: {
-    name: 'GroupCard',
-    // 真实 GroupCard 的 #head / #actions 具名 slot 也需渲染（提示词卡标题与 Switch 在其中），
-    // 否则测试看不到卡头与开关，与生产结构失真。
-    template: '<div data-testid="group-card"><slot name="head" /><slot name="actions" /><slot /></div>',
-  },
-}))
+vi.mock('@/api', () => presetApiModule(presetMock))
+vi.mock('@taiji/ui/features/settings', () => presetUiModule())
 
 import PiPresetsPage from '@/components/settings/preset/PiPresetsPage.vue'
 import { usePresetStore } from '@/stores/preset'
 import { useToast } from '@/composables/useToast'
 
-/** 内置预设 fixture */
+/** 预设 fixture（共有基础字段与 promptPreset 收敛 helpers/preset-page-mount 单源） */
 function builtinPreset(): PiLaunchPreset {
-  return {
+  return makePreset({
     id: 'builtin:full',
     name: 'Full Mode',
     description: 'All tools and extensions',
     builtin: true,
-    order: 0,
-    toolMode: 'all',
-    extensionMode: 'all',
-  }
+  })
 }
 
 /** 自定义预设 fixture */
 function customPreset(): PiLaunchPreset {
-  return {
+  return makePreset({
     id: 'custom:my-preset',
     name: 'My Preset',
     description: 'Custom preset',
-    builtin: false,
     order: 1,
     toolMode: 'allowlist',
     allowedTools: ['read', 'bash'],
-    extensionMode: 'all',
-  }
-}
-
-/** 带提示词两段（替换 3 字符 + 追加 2 字符）的自定义预设 fixture */
-function promptPreset(): PiLaunchPreset {
-  return {
-    id: 'custom:prompt-preset',
-    name: 'Prompt Preset',
-    description: 'Custom preset with prompt',
-    builtin: false,
-    order: 1,
-    toolMode: 'all',
-    extensionMode: 'all',
-    prompt: {
-      replace: { enabled: true, prompt: 'abc' },
-      append: { enabled: true, prompt: 'de' },
-    },
-  }
+  })
 }
 
 let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  presetMock.list.mockResolvedValue([])
-  presetMock.getDefault.mockResolvedValue('builtin:full')
-  presetMock.create.mockImplementation((p: PiLaunchPreset) => Promise.resolve(p))
-  presetMock.update.mockImplementation((p: PiLaunchPreset) => Promise.resolve(p))
-  presetMock.remove.mockResolvedValue(undefined)
-  presetMock.setDefault.mockResolvedValue(undefined)
+  primePresetDefaults(presetMock)
   const { toasts } = useToast()
   toasts.value = []
-  // [C3] preset 域调用经 SettingsTransport seam 桩注入（逐名映射）
-  provideSettingsTransport(makeSettingsTransportStub({
-    listPresets: presetMock.list,
-    getDefaultPreset: presetMock.getDefault,
-    setDefaultPreset: presetMock.setDefault,
-    createPreset: presetMock.create,
-    updatePreset: presetMock.update,
-    removePreset: presetMock.remove,
-  }))
+  // [C3] preset 域调用经 SettingsTransport seam 桩注入（接线收敛 helpers/preset-page-mount）
+  wirePresetTransport(presetMock)
 })
 
 afterEach(() => {

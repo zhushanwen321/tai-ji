@@ -190,7 +190,8 @@ export interface PerModelEntry {
  * 不导出（清理点 #11：投机导出，外部零消费方）——外部经 aggregate() 返回值推断类型，
  * 消费组件取色用 getProviderColor(data.providerColors, pid)。
  */
-interface AggregatedData {
+// aggregate() 的返回契约（导出：公共 API 的结果类型消费方可命名——fallow private-type-leaks）
+export interface AggregatedData {
   perDay: DayView[]
   perModel: Record<string, PerModelEntry>
   perProv: Record<string, AggMetrics>

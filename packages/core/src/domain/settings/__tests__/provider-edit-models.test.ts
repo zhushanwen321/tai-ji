@@ -7,8 +7,8 @@
  *
  * D9 档位断言用 pi 实装同源函数（唯一权威）——从根 node_modules 解析 pi-ai dist。
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { effectScope, nextTick } from 'vue'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { nextTick } from 'vue'
 import type { ProviderInfo, ProviderId } from '@taiji/shared'
 import {
   createProviderEditModels,
@@ -21,6 +21,8 @@ import {
 } from '../provider-edit-models'
 // D9 档位断言用 pi 实装同源函数（唯一权威）——从根 node_modules 解析 pi-ai 0.84.4 dist
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
+// tStub / effectScope 生命周期迁 ./helpers/provider-edit-testbed（本文件 fixture 是短版，保留本地实现）
+import { createTStub, resetTStub, createEffectScopeTracker } from './helpers/provider-edit-testbed'
 
 /**
  * 经 pi 同源 getSupportedThinkingLevels 算可用档位。
@@ -37,25 +39,22 @@ function supportedLevelsOf(
 }
 
 /** i18n stub：返回 key 本身（校验调用参数而非翻译）。 */
-const tStub = vi.fn((key: string) => key)
+const tStub = createTStub()
 
 beforeEach(() => {
-  tStub.mockClear()
-  tStub.mockImplementation((key: string) => key)
+  resetTStub(tStub)
 })
 
-let scope: ReturnType<typeof effectScope> | null = null
+/** effectScope 生命周期（mountModels 挂载 / afterEach 回收）。 */
+const scopes = createEffectScopeTracker()
 
 afterEach(() => {
-  scope?.stop()
-  scope = null
+  scopes.stopScope()
 })
 
 /** 挂 module（effectScope 包裹：thinking 联动 watch 随 scope 回收） */
 function mountModels(): ProviderEditModelsModule {
-  scope = effectScope()
-  // effectScope.run 类型签名 T | undefined——活动 scope 内同步返回值恒非空
-  return scope!.run(() => createProviderEditModels({ t: tStub }))!
+  return scopes.runInScope(() => createProviderEditModels({ t: tStub }))
 }
 
 function makeProvider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {

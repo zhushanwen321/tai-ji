@@ -48,7 +48,7 @@ describe('makeSettingsTransportStub', () => {
     expect(await stub.listProviders()).toEqual({ providers: [] })
     expect(await stub.listModels()).toEqual([])
     expect(await stub.refreshProviderCatalogs()).toEqual({ refreshed: [], failed: [], corrupt: [] })
-    expect(await stub.getCachedQuota()).toEqual({ data: null, lastFetchAt: null })
+    expect(await stub.getCachedQuota('p1')).toEqual({ data: null, lastFetchAt: null })
     expect(await stub.getSystemPrompt()).toEqual({
       config: { version: 1, replace: { enabled: false, prompt: '' }, append: { enabled: false, prompt: '' } },
       corrupted: false,
@@ -60,7 +60,7 @@ describe('makeSettingsTransportStub', () => {
       excludedModels: [],
     })
     // oauth 缺省不可达态（started:false 显式声明桩无真实登录通道）
-    expect(await stub.oauthLogin()).toEqual({ started: false, error: 'stub transport' })
+    expect(await stub.oauthLogin('p1')).toEqual({ started: false, error: 'stub transport' })
   })
 
   it('宽松回显：set* 实参原样回显（写后读语义的基础）', async () => {
@@ -68,7 +68,7 @@ describe('makeSettingsTransportStub', () => {
     expect(await stub.setScopedModels(['p/m1', 'p/m2'])).toEqual(['p/m1', 'p/m2'])
     expect(await stub.setWorktreeTimeout(120)).toEqual({ timeout: 120 })
     expect(await stub.setDefaultBaseBranch('develop')).toEqual({ baseBranch: 'develop' })
-    expect(await stub.setRenameMode('every-stop')).toEqual({ mode: 'every-stop' })
+    expect(await stub.setRenameMode('first-stop')).toEqual({ mode: 'first-stop' })
     const promptCfg = { version: 1, replace: { enabled: true, prompt: 'x' }, append: { enabled: false, prompt: '' } } as const
     expect(await stub.setSystemPrompt(promptCfg)).toEqual({ config: promptCfg, corrupted: false })
     // previewImportProviders 透传 source（导入预览链路的回显源）

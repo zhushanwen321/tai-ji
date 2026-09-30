@@ -17,11 +17,15 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/gen-stats-triggers.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import * as events from '@taiji/core/transport/api'
+import { flushPromises } from '@vue/test-utils'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { __clearInFlightGenStatsForTest } from '@/composables/features/model/useGenStats'
-import type { GenStatsCacheMiss, GenStatsFrame, ServerMessage } from '@taiji/shared'
+import {
+  genStatsFrame as genFrame,
+  mountGenStatsPanel,
+  pushSessionMsg,
+} from '../helpers/gen-stats-mount'
+import type { GenStatsCacheMiss } from '@taiji/shared'
 
 import GenStatsTriggers, {
   formatTtftDuration,
@@ -41,38 +45,13 @@ vi.mock('@taiji/core/transport/api', async (importActual) => {
   return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
 })
 
-/** HoverCard 家族 stub：内容常开渲染（观察者形态——浮层内容行可 DOM 断言） */
-const HOVER_STUBS = {
-  HoverCard: { name: 'HoverCard', template: '<div><slot /></div>' },
-  HoverCardTrigger: { name: 'HoverCardTrigger', template: '<div><slot /></div>' },
-  HoverCardContent: { name: 'HoverCardContent', template: '<div><slot /></div>' },
-}
-
 const SPEED_TITLE = 'TOKEN 速度' // zh-CN locale（vitest-i18n-setup 解析）
 const CACHE_TITLE = '缓存命中率'
 const TTFT_TITLE = '首字延迟 TTFT'
 
-/** 帧工厂（ttft 基线：current=820 →「820ms」，day=900 →「900ms」，d7=1100 →「1.1s」，d30=1300 →「1.3s」） */
-function genFrame(sessionId: string, overrides: Partial<GenStatsFrame> = {}): GenStatsFrame {
-  return {
-    sessionId,
-    speed: { current: 35, day: 28, d7: 22, d30: 19 },
-    cacheRatio: { current: 91, day: 87 },
-    ttft: { current: 820, day: 900, d7: 1100, d30: 1300 },
-    model: 'prov-a/m1',
-    ...overrides,
-  }
-}
-
-function pushSessionMsg(sid: string, msg: ServerMessage): void {
-  events.dispatchSession(sid, msg)
-}
-
+/** GenStats 面板 mount 编排（HoverCard stub 家族 + props）单源在 helpers/gen-stats-mount */
 function mountTriggers(stubHover = false) {
-  return mount(GenStatsTriggers, {
-    props: { sessionId: 's1', modelId: 'prov-a/m1' },
-    global: stubHover ? { stubs: HOVER_STUBS } : {},
-  })
+  return mountGenStatsPanel(GenStatsTriggers, stubHover)
 }
 
 beforeEach(() => {

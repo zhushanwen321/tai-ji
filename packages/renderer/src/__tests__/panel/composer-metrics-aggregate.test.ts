@@ -13,13 +13,16 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-metrics-aggregate.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import * as events from '@taiji/core/transport/api'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { __clearInFlightGenStatsForTest } from '@/composables/features/model/useGenStats'
 import { __clearInFlightContextFetchForTest } from '@/composables/features/model/useContextUsage'
-import type { GenStatsFrame, ServerMessage } from '@taiji/shared'
+import {
+  genStatsFrame as genFrame,
+  mountGenStatsPanel,
+  pushSessionMsg,
+} from '../helpers/gen-stats-mount'
 
 import ComposerMetricsAggregate from '@/components/panel/ComposerMetricsAggregate.vue'
 
@@ -37,35 +40,9 @@ vi.mock('@/api', async (importActual) => {
   return { ...actual, session }
 })
 
-/** HoverCard 家族 stub：内容常开渲染（观察者形态——聚合页内容可 DOM 断言） */
-const HOVER_STUBS = {
-  HoverCard: { name: 'HoverCard', template: '<div><slot /></div>' },
-  HoverCardTrigger: { name: 'HoverCardTrigger', template: '<div><slot /></div>' },
-  HoverCardContent: { name: 'HoverCardContent', template: '<div><slot /></div>' },
-}
-
-/** 帧工厂（ttft 基线与 gen-stats-triggers.test.ts 同源：current=820 →「820ms」；ttft 为
- *  GenStatsFrame 必填字段，缺省即类型漂移——typecheck:test 白名单收口后由编译期拦截） */
-function genFrame(sessionId: string, overrides: Partial<GenStatsFrame> = {}): GenStatsFrame {
-  return {
-    sessionId,
-    speed: { current: 35, day: 28, d7: 22, d30: 19 },
-    cacheRatio: { current: 91, day: 87 },
-    ttft: { current: 820, day: 900, d7: 1100, d30: 1300 },
-    model: 'prov-a/m1',
-    ...overrides,
-  }
-}
-
-function pushSessionMsg(sid: string, msg: ServerMessage): void {
-  events.dispatchSession(sid, msg)
-}
-
+/** GenStats 面板 mount 编排（HoverCard stub 家族 + props）单源在 helpers/gen-stats-mount */
 function mountAggregate(stubHover = false) {
-  return mount(ComposerMetricsAggregate, {
-    props: { sessionId: 's1', modelId: 'prov-a/m1' },
-    global: stubHover ? { stubs: HOVER_STUBS } : {},
-  })
+  return mountGenStatsPanel(ComposerMetricsAggregate, stubHover)
 }
 
 beforeEach(() => {

@@ -69,9 +69,8 @@ export const usage = isMock ? mockApi.usage : realUsage
 // search（⌘K 全局搜索）编排归 useSearchModalDeps（packages/renderer/src/composables/features/search/useSearchModalDeps.ts，D-026，#5）：
 // 该处判 VITE_MOCK 决定 mock 轨走 mockApi.search fixture / real 轨走真实 3 源聚合（命令/file/session domain）。
 // 本门面不再导出 search（renderer 版 useSearch.ts 已随域迁移删除，2026-09-11）。
+// ModelInfo re-export 已删（消费方全部 import @taiji/shared，fallow unused_types 零消费方）。
 
-// 类型 re-export（供组件 import 类型用）
-export type { ModelInfo } from '@taiji/core/transport/api/domains/model'
 // [W4] SystemSettings 类型已迁 @taiji/core；此处保留 re-export 路径兼容（消费方主要已改 import core）。
 export type { SystemSettings } from '@taiji/core'
 // D-028：SearchItem SSOT 归 lib/search-types，门面 re-export 改指领域层（非 mock）
