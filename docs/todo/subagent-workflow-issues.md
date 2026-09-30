@@ -80,13 +80,27 @@
 - 领域规则实例：`tool-workflow.ts:570-715` D14 resume args 一致性判定（含篡改检测与拒绝文案）完整实现在壳，readHistoricalArgs 自带 record 流 JSONL 解析与 core scanJournalFile 构成双实现——根因是 RunStore 端口只有 save（no-op）/loadAll/stateFilePath 三方法，没有「读 run-created 帧 args」的原语。
 - ADR 候选登记：「D14 args 判定刻意放在壳而非 core resumeRun」若无登记将反复被审查质疑；若非刻意即本条修复入口。
 
-### 2.6 进程级 globalThis Symbol 槽 17 键 3 前缀混用（原 G3）
+### 2.6 进程级 globalThis Symbol 槽键前缀混用（已修，2026-09-30）
 
-- subagent-core 与壳两包共 17 个唯一 `Symbol.for` 注册键，命名空间前缀 3 种并存（`@zhushanwen/pi-subagents.*` 6 / `@zhushanwen/subagent-core.*` 2 / `@zhushanwen/pi-subagent-workflow.*` 8）。
+- 原状：subagent-core 与壳两包共 **18** 个唯一 `Symbol.for` 注册键（登记原文写「17 键 3 前缀」自身加不起来，已核实更正），命名空间前缀 **4** 种并存且与实际归属不符——`@zhushanwen/pi-subagent-workflow.*` 8 个（全部住在 core 内）/ `@zhushanwen/pi-subagents.*` 6 / `@zhushanwen/subagent-core.*` 2 / `@zhushanwen/subagent-engine-sdk.*` 2。撞名无编译期报错，只会静默抢槽。
+- 已修：全部 18 键集中在两处声明文件——core `src/shared/global-slots.ts`（统一前缀 `@zhushanwen/subagent-core.`，含壳侧托管槽 dialogQueue / workflowDomainState，经 core barrel 导出；见 commit 65440e5b1）与 SDK `src/global-slots.ts`（SDK 自有 2 键保留 SDK 前缀，因 SDK 不得 import core）。
+- 防复发：`scripts/check-global-slot-keys.mjs`（字面量只允许出现在两处声明文件 + 前缀/唯一性校验）+ 约束 C-state-20 + pre-commit/CI 双接线 + fixture 单测 5 例。
+- 兼容性须知：改键不破坏跨进程语义（槽是运行时单例，重启即空），但 dev 热重载期间新旧代码各自成槽、需整进程重启收敛。
 
-### 2.7 靠 process.env 探针区分父/子进程角色（原 G4）
+### 2.7 靠 process.env 探针区分父/子进程角色（裁决 = 路 A 接通身份传递；落地契约已核实）
 
-- `session-lifecycle.ts:421-440`（appendSubagentIdentityEntry）以 `PI_SUBAGENT_SELF_RECORD_ID` 是否存在判主/子进程，并从 `PI_SUBAGENT_MODE` 等一组 env 读身份数据——角色判定隐式依赖 spawn 约定，无独立裁决入口。
+- 原状：`session-lifecycle.ts`（appendSubagentIdentityEntry）以 `PI_SUBAGENT_SELF_RECORD_ID` 是否存在判主/子进程，并从 `PI_SUBAGENT_MODE` 等一组 env 读身份数据；core 三个读者同源——`record-access.ts:146`（子进程跳过孤儿恢复）、`session-baselines.ts:216`（ROOT_CWD）、`:312/:328`（FORK_DEPTH / 执行嵌套基线）。
+- 2026-09-30 用户裁决：**路 A**（重新接通身份传递，不退役递归可见性）。
+- 已核实事实（决定落地方案）：
+  1. 这组 env 在生产**当前无写入方**（SDK `env.ts:75-82` 自记「两键已无写入方」并把判据改到 `TAIJI_AGENT_SUBAGENT=1`；ext-guards `isSubagentProcess()` 已改用新标记）→ core 三个读者在现行引擎链上恒判「我是主进程」。
+  2. **不能用 SDK 的 `identityEnv`（`env.ts:82`，engine-host spawn 通道）单独解决**：引擎宿主是长驻进程（每窗口一个），而身份是 **per-run** 的（子进程自己的 recordId / depth 每 run 不同）——在宿主 spawn 时钉值只能得到进程级粗粒度值，SELF_RECORD_ID 这类必须每 run 传递。该通道保留但**不足以**承载本项（其文档里的「待另行裁决」即指此事）。
+  3. `ENGINE_ENV_DENY_LIST` 不含 `PI_SUBAGENT_*`，但**含** TAIJI_SUBAGENT_RELAY_* 两键；引擎侧对 deny 键的既有处置 = `spawn-runner.ts:186-191` **post-deny 显式写回**（relay SESSION_ID/RECORD_ID 先例，注释记有「经 extras 注入会被剥掉致退出码 13」的历史事故）——身份键若走 extras 同理会/可能被剥，应照该先例在 deny 终态之后写回。
+- 落地方案（四步，落地时逐条核对）：
+  1. **SDK 协议**：`packages/subagent-engine-sdk/src/protocol/methods.ts` 的 `RunContextParams`（:72）加 additive 可选 `identity?: { selfRecordId, rootSessionId, depth?, forkDepth?, rootCwd?, agent?, task?, slug?, mode?, startedAt?, parentRecordId?, worktree? }`；同批更新 C-proc-23 词表锁/契约闭合测试与 `docs/extensions/subagents/engine-development-guide.md`（其「更新触发」明列 RunContext 变更须同 commit）。
+  2. **core 组装**：`execution/engine/client/remote-engine.ts:600-615` 的 ctx 组装处（现有 additive 字段先例 `ctx.sessionRootId` / `task.cwd`）从 run/record 取身份写 `identity`；嵌套深度取 SDK `ExecutionNestingState`（`nesting-guard.ts`）。
+  3. **pi 引擎注入**：`pi-subagent-cli/src/server.ts` 的 `buildRunContext`（:285-340）→ `SpawnRunParams` 增 identity → `spawn-runner.ts:172-192` 的 `buildChildEnv` 在 `buildOutboundChildEnv` **之后**按 identity 写回 `PI_SUBAGENT_SELF_RECORD_ID` / `ROOT_SESSION_ID` / `DEPTH` / `FORK_DEPTH` / `ROOT_CWD` / `MODE` / `AGENT` / `TASK` / `SLUG` / `STARTED_AT` / `PARENT_RECORD_ID` / `WORKTREE`（key 常量单源放 core `execution/service/service-constants.ts` 或 SDK）。
+  4. **验收**：真机嵌套派发（父→子→孙）后核对 `/subagents` 树与子会话文件出现 `subagent-identity` 条目（session-reader 路径），并补「写入方 ↔ 读者同源」测试（engine 侧 env 断言 + core 读者单测）。
+- 替代路 B（正式退役递归可见性）已被用户否决，无需再论证。
 
 ### 2.8 决策记录两处并存（已修，防复发规则已立）
 
