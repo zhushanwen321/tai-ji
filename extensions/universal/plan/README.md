@@ -31,7 +31,7 @@
 
 - `register-doc`：登记一份产物文档（同 fileName 重登 = version+1 覆盖），供 GUI 产物 tab 展示与内容刷新。
 - `submit-review`：全部文档就绪后请求审阅。**必带非空 `selfReview`（自审硬门，无豁免，含修订后重挂）**：缺失/空 → 纠偏错误不挂审批；文档已变而 selfReview 与上次逐字节相同 → 防照抄袭拒收（必须对新版本重做自审）。docs 为空或计划态已退出时返回错误提示（E6 双守卫）。
-- `complete`：经审批闸口进入执行方式选择（approve 边 → dispatching；未经审批直调被拒并指回 submit-review）。有 plan-exec 技能时弹执行方式选择（GUI 宿主经统一表单协议单 choice 问题）：选项 = ≤2 个技能档（label `Execute via skill: <name>`）+ Execute 档（goal 跟踪已整合：可用时先建 goal 跟踪，再按复杂度派发 subagent 并行、小步/紧耦合本会话直执）+ 暂不执行（later 边：状态落「已批准」，可再调 `complete` 重新选择）。**无 plan-exec 技能（含检测失败降级）时不弹表单，直通 execute**（工具结果明示「无 plan-exec 技能，直接执行」）。无选择解散归口（via 判别 + epoch 世代判别）：外部解散（取消/超时/channel-error/non-json）→ review_aborted 边落「已批准」（批准事实保留，可再调 `complete`）；命令解散（`/plan abort` 等 reset 已介入）→ 归口 no-op 不覆写终态。headless 无 UI 默认 execute 不弹选择。
+- `complete`：经审批闸口进入执行方式选择（approve 边 → dispatching；未经审批直调被拒并指回 submit-review）。有 plan-exec 技能时弹执行方式选择（GUI 宿主经统一表单协议单 choice 问题）：选项 = ≤2 个技能档（label `Execute via skill: <name>`）+ Execute 档（goal 跟踪已整合：可用时先建 goal 跟踪，再按复杂度派发 subagent 并行、小步/紧耦合本会话直执）+ 暂不执行（later 边：状态落「已批准」，可再调 `complete` 重新选择）。**无 plan-exec 技能（含检测失败降级）时不弹表单，直通 execute**（工具结果明示「无 plan-exec 技能，直接执行」）。无选择解散归口（dissolvedBy 解散来源直传判别）：外部解散（取消/超时/channel-error/non-json）→ review_aborted 边落「已批准」（批准事实保留，可再调 `complete`）；命令解散（`/plan abort` 等 reset 已介入）→ 归口 no-op 不覆写终态。headless 无 UI 默认 execute 不弹选择。
 - `abort`：直接退出。complete/abort 退出后恢复工具集；状态落终态两值 `completed`（批准并派发执行）/ `exited`（主动退出）+ isActive=false，docs 保留（产物跨重开留存），selfReview/resumeHint/指纹快照随退出失效。
 
 ## 执行方式与 plan-exec skill
@@ -60,4 +60,4 @@
 
 ## 依赖
 
-依赖：`@zhushanwen/extension-protocol`（PLAN_REVIEW_MARKER + PlanReviewRequest/Response 契约 + plan 生命周期状态机与审阅值域契约（`src/extensions/plan/`：transition/derivePhase + 值域守卫/selfReview 截断）+ ui-form（`uiFormInteract` / `FormQuestion`，统一提问表单协议），dependencies）；peer 依赖：`@zhushanwen/pi-goal`（plan 完成后衔接 goal 驱动执行）。
+依赖：`@zhushanwen/extension-protocol`（PLAN_REVIEW_MARKER + PlanReviewRequest/Response 契约 + plan 生命周期状态机与审阅值域契约（`src/extensions/plan/`：transition/derivePhase + 值域守卫/selfReview 截断）+ ui-form（`uiFormInteract` / `FormQuestion`，统一提问表单协议），dependencies）；`@zhushanwen/pi-exec-skills`（plan-exec 技能发现/执行门禁单源，ADR-0074，dependencies）；peer 依赖：`@zhushanwen/pi-goal`（plan 完成后衔接 goal 驱动执行）。
