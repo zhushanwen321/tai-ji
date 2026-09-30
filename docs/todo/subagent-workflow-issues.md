@@ -165,13 +165,16 @@
 - 真正的间接层 = **worker 执行模型**（脚本 eval 进 Worker + postMessage 调用协议），同时是 resume 重放（脚本确定性重跑 + 已 settled 调用走 record 回放）、注入安全（`workerData.scriptPath` 定位 `_shared`，不回退当前目录）与脚本可探索/可测试性（`@pi-meta` 进可用 workflow 清单）三项能力的载体。
 - 2026-09-29 用户裁决：**不做一等原语重构**（拆掉会引入第二份「按下标短路」重放实现，收益仅少一层 postMessage 与一次 Worker 启动）；若未来出现性能或调试痛点再立项。
 
-### 2.11 两引擎 server.ts 平行双实现（第一批已落，主循环待续）
+### 2.11 两引擎 server.ts 平行双实现（第一、二批已落，主循环与 run 段待续）
 
 - 现状（2026-09-30）：两包各持同名 `EngineProtocolServer`（pi 463 行 / zcode 355 行），约六成逐字同文：`FrameWriter`、`REVERSE_TIMEOUT_DEFAULT_MS`、`ActiveRun`、`handleFrame`、`dispatch`（未知方法错误码）、`cancel`/`read`、`emitEvent`（seq 单调）、`reverseRequest(Internal)`（含写失败就地收尾）、`toProtocolError`（只差恢复文案）。引擎特有 = 引擎实例创建 / 查询面 / `run` 前门与 ctx 还原扩展 / 应答等待语义（pi 两阶段 ack + askUI 结果检查；zcode ack 即结算）。
-- **第一批已落（2026-09-30，commit c8e5e3f 一族）**：SDK 新增 `./server` 子入口（`src/server/index.ts`），先收敛声明与纯函数——`FrameWriter` / `REVERSE_TIMEOUT_DEFAULT_MS` / `ActiveRun` / `ReversePending` / `ProtocolErrorPayload` / `toProtocolError(err, recoveryText)`（复用 SDK 单源 `toErrorMessage`）；两引擎 server 改为消费该入口并删除本地副本，恢复指引文案仍由各引擎注入。打包面同批打通：`tsup` entry `server/index` + `package.json` 的 `exports` 与 `publishConfig.exports` 双写 `./server`；`engine-development-guide.md` 的「SDK 消费入口两入口」改为三入口。
+- **第一批已落（2026-09-30，commit 0042b3dae）**：SDK 新增 `./server` 子入口（`src/server/index.ts`），先收敛声明与纯函数——`FrameWriter` / `REVERSE_TIMEOUT_DEFAULT_MS` / `ActiveRun` / `ReversePending` / `ProtocolErrorPayload` / `toProtocolError(err, recoveryText)`（复用 SDK 单源 `toErrorMessage`）；两引擎 server 改为消费该入口并删除本地副本，恢复指引文案仍由各引擎注入。打包面同批打通：`tsup` entry `server/index` + `package.json` 的 `exports` 与 `publishConfig.exports` 双写 `./server`；`engine-development-guide.md` 的「SDK 消费入口两入口」改为三入口。
 - **为什么先做声明层**：§2.11 的真正风险在打包与导出面（CJS/ESM 双形态、`exports` 与 `publishConfig` 双写、tsup 具名 entry），先打通它并保持两套 `server.test.ts` 全绿（pi 26 文件 318 例 / zcode 24 文件 287 例），后续迁主循环时不必再同时面对打包风险。
+- **第二批已落（2026-09-30，commit 见本次提交）**：帧循环收敛。SDK `src/server/index.ts` 新增 `classifyInboundFrame`（判序 = 协议纪律：反向应答 > 引擎侧反向请求拒绝 > 正向请求 > 静默忽略）、`handleInboundFrame(frame, ctx)`（应答管线：反向应答落地 / 反向请求坏帧应答 / 正向分发与错误帧回转）、`reverseRequestRejection`（逐字坏帧载荷）、`unknownMethodError`（两引擎逐字一致的未知方法错误）、`FrameLoopContext`（注入面：`write` / `settleReverse` / `dispatch` / `toError`）。两引擎 `handleFrame` 体缩成一行委托、`dispatch` 的未知方法错误改调共享函数、构造期建一次 ctx（不在每帧重建）；引擎特有部分原样留在引擎——两阶段 ack 语义在各自的 `settleReverse`、9 方法表本体在各自表里。
+  - **共享层顺带补一处健壮性缺口**：原实现依赖「`dispatch` 必是 async」才不会被同步抛错打断帧循环；共享层改为同步抛错也归错误帧（两引擎行为不变，共享层不再依赖调用方实现形态）。
+  - 等价性证据：两套 `server.test.ts` **逐例未改**（pi 318 例 / zcode 287 例全绿）；新增 SDK 侧分支单测 `src/__tests__/frame-loop.test.ts` 11 例（分类逐分支 + 管线副作用 + 逐字坏帧载荷 + 同步/异步错误回转 + 忽略分支零副作用）；SDK 套件 169 例绿。
 - 后续批次（未做）：
-  1. `handleFrame`（帧分类 + 坏帧应答）与 `dispatch`（未知方法错误码）迁入 SDK，按「纯函数返回动作」形态（`dispatch` 回调注入）。
+  1. `initialize`（版本协商 + models 投影）迁入。
   2. `initialize`（版本协商 + models 投影）与反向请求客户端（`reverseRequest(Internal)` + clock + 60s 超时 + 写失败就地收尾）迁入，`settleReverse` 的两阶段 ack 语义用钩子开关保留（**不得统一**——统一会让 pi 的 askUser 长等待被判超时；需专门用例）。
   3. `run` 段（差异最大）最后迁；`buildRunContext` 的引擎特有字段走 `buildRunContextExtras` 钩子。
   4. 全过程保持各包导出类名与构造签名不变（两套 `server.test.ts` 即等价性回归网）；骨架不得依赖引擎包内符号、不得有模块级可变状态（CJS 无 splitting 会跨 entry 内联复制）。

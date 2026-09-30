@@ -24,8 +24,6 @@ import {
   ENGINE_PROTOCOL_VERSION,
   EngineSdkError,
   getLogger,
-  isResponseFrame,
-  isReverseRequestFrame,
   type AgentCallOpts,
   type AgentEvent,
   type EngineHandleData,
@@ -44,6 +42,9 @@ import { createDefaultZcodeEngine } from "./registration.ts";
 import { parseCtxModel, type EnginePort, type EngineStream, type EngineCtxModel, type RunContext } from "./port-types.ts";
 import { toErrorMessage } from "./error-message.ts";
 import {
+  handleInboundFrame,
+  unknownMethodError,
+  type FrameLoopContext,
   REVERSE_TIMEOUT_DEFAULT_MS,
   toProtocolError as toProtocolErrorShared,
   type ActiveRun,
@@ -79,6 +80,7 @@ export class EngineProtocolServer {
   private readonly engine: EnginePort;
   private readonly reverseClock: ReverseRequestClock | undefined;
   private readonly reverseTimeoutMs: number;
+  private readonly frameLoop: FrameLoopContext;
   private readonly activeRuns = new Map<string, ActiveRun>();
   private readonly reversePending = new Map<string, ReversePending>();
   private revSeq = 0;
@@ -89,53 +91,23 @@ export class EngineProtocolServer {
     this.engine = opts.engine ?? createDefaultZcodeEngine();
     this.reverseClock = opts.reverseClock;
     this.reverseTimeoutMs = opts.reverseTimeoutMs ?? REVERSE_TIMEOUT_DEFAULT_MS;
+    this.frameLoop = {
+      write: this.write,
+      settleReverse: (id, frame) => this.settleReverse(id, frame),
+      dispatch: (id, method, params) => this.dispatch(id, method, params),
+      toError: (err) => toProtocolError(err),
+    };
   }
 
   /** 入站帧消费（请求帧 + 反向请求应答帧；main.ts 的行解析器拆行后喂入）。 */
   handleFrame(frame: unknown): void {
-    if (isResponseFrame(frame)) {
-      this.settleReverse(frame.id, frame);
-      return;
-    }
-    if (isReverseRequestFrame(frame)) {
-      // 引擎侧不接收反向请求（本进程是引擎，不发 host/* 给对面以外的角色）——协议
-      // 面唯一合法入站 = ①请求 + 反向应答；坏帧 warn 不断流（对端 EngineClient 同款纪律）。
-      this.write({
-        id: 0,
-        error: {
-          code: "engine_protocol_bad_frame",
-          message: `unexpected reverse request frame from host: ${String(frame.method)}`,
-          recovery: "The engine protocol v1 only carries host/* requests engine→host.",
-        },
-      });
-      return;
-    }
-    if (
-      typeof frame === "object" && frame !== null && "id" in frame && "method" in frame &&
-      typeof (frame as { method: unknown }).method === "string"
-    ) {
-      const { id, method, params } = frame as { id: unknown; method: string; params?: unknown };
-      if (typeof id === "number") {
-        void this.dispatch(id, method, params).then(
-          (result) => this.write({ id, result }),
-          (err) => this.write({ id, error: toProtocolError(err) }),
-        );
-        return;
-      }
-    }
-    // 无法归类的帧：静默忽略（stdout 是独占协议通道，不回显坏帧防对端解析器混乱）。
+    handleInboundFrame(frame, this.frameLoop);
   }
 
   /** 9 正向方法分发（表驱动：method → 处理器；未知方法 → engine_protocol_unknown_method）。 */
   private async dispatch(id: number, method: string, params: unknown): Promise<unknown> {
     const handler = this.methodHandlers[method];
-    if (handler === undefined) {
-      throw new EngineSdkError(
-        "engine_protocol_unknown_method",
-        `unknown protocol method: ${method} (request id ${id})`,
-        "The engine speaks protocol v1; check the installed engine package version vs the host.",
-      );
-    }
+    if (handler === undefined) throw unknownMethodError(id, method);
     return handler(params);
   }
 
