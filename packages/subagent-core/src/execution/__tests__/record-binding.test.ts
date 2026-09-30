@@ -284,6 +284,47 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     expect(store.findLightById("sa-bind-1")).toBeUndefined();
   });
+
+  it("[②B] 负缓存事件侧信号：bound 帧追加进既有事件文件且无 binding 写 → 下次扫描必须可见", () => {
+    // 时序（生产形态：spawn 未回填 → 首扫负缓存 → 回填落账）：负缓存条目没有 id、
+    // 不能按 `<id>.events` 取戳，jsonl/binding 戳全不变——若无事件侧反查，回填后的
+    // record 在磁盘扫描层永久不可见（列表面有内存源遮蔽，archive 除名后即暴露）。
+    const file = writePlainChildSession(sessionsDir);
+    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    // ① register（无 sessionFile——spawn 未回填）：事件文件只有 created 帧。
+    const rec = createRecord("sa-bind-1", {
+      agent: "general-purpose",
+      model: undefined,
+      mode: "background",
+      task: "binding task",
+      slug: "bind-test",
+      startedAt: STARTED_AT,
+      rootSessionId: "root-session",
+    });
+    store.register(rec);
+    // 首扫：内存源可见（running），但文件层身份反查 miss → 负缓存条目成形。
+    const firstScan = store.collectRecords(10, "all", undefined);
+    expect(firstScan).toHaveLength(1);
+    expect(firstScan[0]!.sessionFile).toBeUndefined();
+
+    // ② 回填：sessionFile 确定 + reportRecordTransition → record-bound 帧追加进既有
+    //    事件文件（syncBoundEvent 只追加事件，不写 binding；同进程 noteFileToRecordId
+    //    增量维护反查索引）。
+    rec.sessionFile = file;
+    store.reportRecordTransition(rec);
+
+    // ③ 信号只能来自事件侧：`<file>.record-binding` 不存在（证明 binding 戳不可能
+    //    是打破负缓存的信号源）。
+    expect(fs.existsSync(`${file}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(false);
+
+    // ④ 除名内存源（archive 对 running record = 纯内存除名，零写面），让末次扫描
+    //    只走磁盘层：反查命中 → 打破负缓存 → 正常探测重建 → 可见。
+    store.archive(rec);
+    const records = store.collectRecords(10, "all", undefined);
+    expect(records).toHaveLength(1);
+    expect(records[0]!.id).toBe("sa-bind-1");
+    expect(records[0]!.sessionFile).toBe(file);
+  });
 });
 
 // ============================================================

@@ -1447,11 +1447,23 @@ export class RecordStore {
     }
     if (this.dirStamp !== null && this.dirStamp.mtimeMs === dirMtimeMs) {
       const out: SubagentRecord[] = [];
-      for (const entry of this.fileCache.values()) {
-        if (entry.negative) continue;
+      let negativeBroken = false;
+      for (const [file, entry] of this.fileCache) {
+        if (entry.negative) {
+          // [②B 负缓存事件侧信号] bound 帧追加进既有事件文件不改 sessionsDir mtime
+          // （事件文件在 recordsDir）——快路径跳过负条目前必须做同一反查：命中 =
+          // 负条目过期，落全量扫描重建；miss = 维持快路径零读取语义。跨进程残余
+          // 形态由生产绑定路径覆盖（spawn 回填站点必写 binding，binding 戳变化先
+          // 一步改 jsonl 侧戳、快路径条件本就不成立）。
+          if (this.identityFromFoldByFile(file) !== undefined) {
+            negativeBroken = true;
+            break;
+          }
+          continue;
+        }
         out.push(entry.light);
       }
-      return this.filterByRoot(out, rootSessionFilter);
+      if (!negativeBroken) return this.filterByRoot(out, rootSessionFilter);
     }
 
     const files = this.readSessionsDirFiles();
@@ -1545,8 +1557,19 @@ export class RecordStore {
 
     const cached = this.fileCache.get(file);
     if (cached !== undefined && isFreshCache(cached, stamps, this.eventsStampOf(cached))) {
-      if (cached.negative) return null; // 负缓存命中：确认无 identity，零读取跳过
-      return cached;
+      if (cached.negative) {
+        // [②B 负缓存事件侧信号] bound 帧可能已追加进既有事件文件（syncBoundEvent 只
+        // 追加事件、不写 .record-binding，jsonl 戳也不变——负缓存的三维比对看不到它，
+        // 按戳判新鲜会永久不可见）。返回 null 前先经事件目录反查：命中（bound 帧已在
+        // ——同进程经 noteFileToRecordId 增量维护，跨进程新事件文件经 dir mtime 重装
+        // 载）即打破负缓存，穿透到下方正常探测。跨进程「追加进既有事件文件且无
+        // binding 写」的残余形态由生产绑定路径覆盖：spawn 回填站点
+        // （run-orchestration.writeBindingForRecord）必写 binding，binding 戳变化
+        // 先一步打破负缓存——本反查只兜「binding 写缺席」的窗口。
+        if (this.identityFromFoldByFile(file) === undefined) return null;
+      } else {
+        return cached;
+      }
     }
 
     // [perf L-1] 磁盘索引查询（首扫惰性装载，miss/空索引时 get 恒 undefined = 无索引）。
@@ -1613,8 +1636,15 @@ export class RecordStore {
       return undefined;
     }
     if (hit.negative === true) {
-      this.fileCache.set(file, { negative: true, ...stamps });
-      return null;
+      // [②B 负缓存事件侧信号] 同 scanFile 内存负缓存分支：bound 帧追加进既有事件文件
+      // （无 binding 写、jsonl 戳不变）时，反查命中即负条目过期——返回 undefined 落回
+      // 探测重建；反查 miss 才落负缓存（零探测跳过）。跨进程残余形态由生产绑定路径
+      // 覆盖（spawn 回填站点必写 binding，binding 戳变化打破负缓存）。
+      if (this.identityFromFoldByFile(file) === undefined) {
+        this.fileCache.set(file, { negative: true, ...stamps });
+        return null;
+      }
+      return undefined;
     }
     // 事件戳校验（缓存键第四维）：索引里的事件文件戳与当前不符 → 该条目过期（终态
     // 收条可能已变），落回探测重建；负条目无此维度。
