@@ -43,7 +43,7 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 
 function makeSpec(name = "test-wf"): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: {},
     scriptName: name,
     scriptPath: "/fake/test.js",

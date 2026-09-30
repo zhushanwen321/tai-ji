@@ -620,6 +620,23 @@ describe("resumeRun — 资格校验（错了明说）", () => {
     await expectRejection(resumeRun("wf-live", deps), "not 'interrupted'");
   });
 
+  // [撞名缺陷 / 第 4 道检查扩展到派发期] run-created 里的脚本文本不可编译时，
+  // resume 必须在段 4/5/6 的任何写动作之前干净拒绝（否则 Worker 启动后必然异步语法错）。
+  it("派发前语法闸：脚本文本不可编译 → 干净拒绝（worker 未启动、无 run-resumed 写入）", async () => {
+    await seedInterruptedRecord("wf-bad-script", {
+      scriptSource: "const args = { a: 1 };\nasync function execute() {}",
+    });
+    const { deps, runs, workerStarts } = makeDeps();
+
+    await expectRejection(resumeRun("wf-bad-script", deps), "cannot compile");
+
+    // 干净拒绝：无 worker、无活体注册、record 流保持 interrupted（run-resumed 未落）
+    expect(workerStarts).toHaveLength(0);
+    expect(runs.size).toBe(0);
+    const events = await scanEvents("wf-bad-script");
+    expect(events.filter((e) => e.type === "run-resumed")).toHaveLength(0);
+  });
+
   // D13 嵌套词法拒绝已随嵌套 workflow() 功能移除而删除（检测对象不存在，场景 20 退役）
 });
 

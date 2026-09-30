@@ -76,7 +76,7 @@ function makeRunningRun(opts: {
     },
     spec: {
       scriptName: "test-wf",
-      scriptSource: "execute() {}",
+      scriptSource: "async function execute() {}",
       args: {},
       budgetTimeMs: opts.budgetTimeMs,
     },

@@ -73,7 +73,7 @@ function makeRunningRun(opts: RunMockOpts = {}): WorkflowRun {
     },
     spec: {
       scriptName: "test-wf",
-      scriptSource: "execute() {}",
+      scriptSource: "async function execute() {}",
       args: {},
     },
     runtime: {

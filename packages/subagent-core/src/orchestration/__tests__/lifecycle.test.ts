@@ -27,6 +27,7 @@ import {
   terminateRunningRuns,
 } from "../lifecycle.ts";
 import { ArgsValidationError } from "../args-validator.ts";
+import { WorkflowScriptSyntaxError } from "../script-syntax.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { getLogger } from "../../core/logger.ts";
 import { AgentCall } from "../models/agent-call.ts";
@@ -62,7 +63,7 @@ function makeSpec(opts: {
   args?: Record<string, unknown>;
 } = {}): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: opts.args ?? {},
     parameters: opts.parameters,
     scriptName: "test-wf",
@@ -280,6 +281,21 @@ describe("runWorkflow", () => {
     await expect(runWorkflow(makeSpec(), deps)).rejects.toThrow("worker boot failed");
 
     // 无孤儿：启动失败时 run 未注册进 deps.runs（runs.set 在 start 之后）
+    expect(deps.runs.size).toBe(0);
+    expect(deps.store.save).not.toHaveBeenCalled();
+    expect(deps.eventBus.emit).not.toHaveBeenCalled();
+  });
+
+  // [撞名缺陷 / 第 4 道检查扩展到派发期] 手工脚本顶层重声明宿主预声明名时，
+  // 必须在 worker 启动前拒绝（真机形态 = Worker 异步语法错 → 被重试矩阵吃满三次）。
+  it("脚本顶层重声明宿主名 → runWorkflow 在 worker 启动前拒绝（零副作用）", async () => {
+    const deps = makeDeps();
+    const spec = { ...makeSpec(), scriptSource: "const args = { a: 1 };\nasync function execute() {}" };
+
+    await expect(runWorkflow(spec, deps)).rejects.toThrow(WorkflowScriptSyntaxError);
+
+    // 与参数校验同 chokepoint：worker 未启动、run 未注册、store/eventBus 零调用
+    expect(deps.workerHost.start).not.toHaveBeenCalled();
     expect(deps.runs.size).toBe(0);
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(deps.eventBus.emit).not.toHaveBeenCalled();
@@ -757,7 +773,7 @@ function makeEvictableRun(
   return WorkflowRun.reconstruct(
     runId,
     {
-      scriptSource: "execute() {}",
+      scriptSource: "async function execute() {}",
       args: {},
       scriptName: "test",
       scriptPath: "/fake/test.js",

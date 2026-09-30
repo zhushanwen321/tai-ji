@@ -47,6 +47,7 @@ import {
   type RunEventLineIssue,
   type WorkflowRunEvent,
 } from "./run-events.ts";
+import { checkWorkflowScriptSyntax, WORKER_IIFE_HOST_DECLARED_NAMES } from "./script-syntax.ts";
 import { AgentCall } from "./models/agent-call.ts";
 import { Budget } from "./models/budget.ts";
 import type { AgentCallOpts, AgentResult, ExecutionTraceNode } from "./models/types.ts";
@@ -661,6 +662,24 @@ async function resumeRunLocked(
 ): Promise<string> {
   // ── 2. 资格校验 ──
   const { events, created, activeElapsedMs, budgetTimeMs } = assertResumeEligibility(runId, recordPath, options);
+
+  // ── 2b. 派发前语法闸（第 4 道检查的 resume 侧）──
+  // run-created 里的 scriptSource 是权威脚本文本；不可编译（顶层重声明宿主预声明名）
+  // 时 Worker 启动后必然异步语法错 → 被重试矩阵吃满 MAX_WORKER_RETRIES 次才失败。
+  // 此处先于段 4/5/6 的一切写动作拒绝（干净拒绝：run-resumed 未落、v2 条目未补、
+  // run 仍 interrupted）。record 的脚本文本不可改 → 该 run 无法 resume，恢复动作 =
+  // 修脚本后重派新 run（文案已含指引）。空脚本文本跳过（旧格式 record 无全文）。
+  const scriptSyntaxError = created.scriptSource !== undefined && created.scriptSource.trim() !== ""
+    ? checkWorkflowScriptSyntax(created.scriptSource)
+    : undefined;
+  if (scriptSyntaxError !== undefined) {
+    throw new ResumeRejectionError(
+      `Resume rejected: run ${runId} carries a workflow script that cannot compile (${scriptSyntaxError}). ` +
+        `Recovery: the script source is stored in the run record and cannot be edited — fix the script ` +
+        `(a script-level declaration must not reuse a name the worker pre-declares: ` +
+        `${WORKER_IIFE_HOST_DECLARED_NAMES.join(", ")}) and start a new run.`,
+    );
+  }
 
   // ── 3. D8 三档判定（重派集判档；档 1 补收候选）──
   const tierPlan = planResumeTiers(events, options?.readMemberSession ?? defaultSessionReader);

@@ -37,7 +37,7 @@ import { WorkflowRun } from "../../orchestration/models/workflow-run.ts";
 
 function makeSpec(): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: {},
     scriptName: "test-wf",
     scriptPath: "/fake/test.js",

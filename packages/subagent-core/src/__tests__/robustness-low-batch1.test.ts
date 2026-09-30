@@ -57,7 +57,7 @@ function makeRunningRun(): WorkflowRun & { resetRunning(): void } {
     },
     spec: {
       scriptName: "test-wf",
-      scriptSource: "execute() {}",
+      scriptSource: "async function execute() {}",
       args: {},
     },
     runtime: {

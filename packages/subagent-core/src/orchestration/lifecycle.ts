@@ -41,6 +41,8 @@ import { getLogger } from "../core/logger.ts";
 
 import { assertSafeTimerDelay } from "../shared/timer-delay.ts";
 import { validateRunArgs } from "./args-validator.ts";
+// [第 4 道检查扩展] 派发前语法闸原语（与生成期同源；见 assertWorkflowScriptSyntax 头注）。
+import { assertWorkflowScriptSyntax } from "./script-syntax.ts";
 // [D11] 引擎窗口实例 dispose（中断分叉的执行资源释放；execution/engine 叶子
 // 方向——terminal-actions 同款 import 先例，orchestration → execution/service
 // 才成环）。
@@ -390,6 +392,15 @@ export async function runWorkflow(
   // zero side effects。coerceTypes 原地规范化 spec.args——worker 启动与崩溃重建
   // 共用同一对象（run.spec === spec），恢复路径参数一致。
   validateRunArgs(spec);
+
+  // [D-撞名 / 第 4 道检查扩展到派发期] 语法闸：手工编写或从别处拷进工作流目录的脚本
+  // 不过生成期校验（generateWorkflowScript 只服务 AI 生成路径）。脚本顶层重声明宿主
+  // 预声明名（args / $ARGS / agent / …）时，Worker 以**异步**语法错暴露 → 被 worker
+  // 错误矩阵当成崩溃重试 MAX_WORKER_RETRIES 次才失败，且丢分类与行号。此处与
+  // validateRunArgs 同 chokepoint（worker 启动前、失败零副作用），抛
+  // WorkflowScriptSyntaxError（生成期同款诊断 + 恢复指引）。空脚本源跳过（旧格式
+  // record 无文本可查，见 assertWorkflowScriptSyntax 头注）。
+  assertWorkflowScriptSyntax(spec.scriptName, spec.scriptSource);
 
   const runId = generateRunId();
   injectRunId(spec, runId);

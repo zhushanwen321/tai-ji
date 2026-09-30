@@ -12,7 +12,7 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 
 function makeSpec(scriptName: string, slug?: string): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: {},
     scriptName,
     ...(slug !== undefined ? { slug } : {}),

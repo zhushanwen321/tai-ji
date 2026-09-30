@@ -161,7 +161,7 @@ process.setMaxListeners(50);
  *  防线外兜底——防真实 service-bootstrap 经其他导入面写槽后跨用例泄漏，与
  *  index-session-start 先例同款）。 */
 function resetLifecycleSlots(): void {
-  for (const key of ["@zhushanwen/pi-subagents.service", "@zhushanwen/pi-subagents.model-service"]) {
+  for (const key of ["@zhushanwen/subagent-core.service", "@zhushanwen/subagent-core.modelService"]) {
     const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
     if (slot) slot.current = null;
   }
@@ -220,7 +220,7 @@ function createFakeCtx(
 function makeRun(runId: string, status: "running" | "done"): WorkflowRunType {
   return WorkflowRun.reconstruct(
     runId,
-    { scriptSource: "execute() {}", args: {}, scriptName: "test", scriptPath: "/fake/test.js" },
+    { scriptSource: "async function execute() {}", args: {}, scriptName: "test", scriptPath: "/fake/test.js" },
     {
       status,
       reason: status === "done" ? "completed" : undefined,
