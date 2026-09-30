@@ -6,7 +6,7 @@
  *   'max' 必须通过校验并透传到 spawn 参数（A-03：曾缺 max 被 silent drop，
  *   composer 最高档实际永不生效）。
  * - 全集任一值经 create → pm.createSession options.thinkingLevel 原样透传。
- * - 非法值 warn 后丢弃（不透传 thinkingLevel 字段）。
+ * - 词表外值原样透传（本层不持词表；合法性权威 = pi）。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-lifecycle-thinking.test.ts
  */
@@ -119,15 +119,12 @@ describe('thinking 值域校验（W2 A-03：max 全通）', () => {
     rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  it('非法值 warn 后丢弃（spawn 参数无 thinkingLevel 字段）', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('词表外值原样透传（本层不持词表：合法性权威 = pi，显式档位不被静默抹掉）', async () => {
     const { lifecycle, createSession } = makeEnv()
     const cwd = mkdtempSync(join(tmpdir(), 'w2-think-bogus-'))
     await lifecycle.create(cwd, 't', { thinkingOverride: 'ultra' })
     const options = createSession.mock.calls[0][2] as { thinkingLevel?: string }
-    expect(options.thinkingLevel).toBeUndefined()
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('ultra'))
-    warnSpy.mockRestore()
+    expect(options.thinkingLevel).toBe('ultra')
     rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 

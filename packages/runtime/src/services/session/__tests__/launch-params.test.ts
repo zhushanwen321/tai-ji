@@ -307,20 +307,18 @@ describe('buildPresetClientOptions', () => {
     expect(result.thinkingLevel).toBe('high')
   })
 
-  it('S-RT-5：非法 thinking 值（override 或 preset 侧）warn 后忽略', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      const result = buildPresetClientOptions(
-        undefined,
-        undefined,
-        'ultra-max' as never,
-      )
-      expect(result.thinkingLevel).toBeUndefined()
-      expect(result).toEqual({})
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid thinking level'))
-    } finally {
-      warn.mockRestore()
-    }
+  it('词表外 thinking 值原样透传（本层不持词表：合法性权威 = pi，不静默抹掉显式档位）', () => {
+    const result = buildPresetClientOptions(
+      undefined,
+      undefined,
+      'ultra-max' as never,
+    )
+    expect(result.thinkingLevel).toBe('ultra-max')
+  })
+
+  it('空串 thinking 值 → 不落字段（未指定语义）', () => {
+    const result = buildPresetClientOptions(undefined, undefined, '' as never)
+    expect(result.thinkingLevel).toBeUndefined()
   })
 
   it('noTools 真值映射为 true（flag 布尔语义）', () => {

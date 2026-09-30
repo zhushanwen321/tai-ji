@@ -8,7 +8,7 @@
  * 跨服务 facade 契约。本文件是 pi 引擎 / 进程池接口的唯一权威定义点。
  */
 
-import type { ThinkingLevel, ProviderId } from '@taiji/shared'
+import type { ProviderId } from '@taiji/shared'
 
 /**
  * pi 任意 JSON 响应的逃生类型。
@@ -120,7 +120,8 @@ export interface PiSessionOptions {
   /** 禁用 context files，透传到 RpcClientOptions.noContextFiles → --no-context-files。 */
   noContextFiles?: boolean
   /** 覆盖思考级别，透传到 RpcClientOptions.thinkingLevel → --thinking。 */
-  thinkingLevel?: ThinkingLevel
+  /** 档位字符串透传（非空即发；合法性权威 = pi）。 */
+  thinkingLevel?: string
 }
 
 /**

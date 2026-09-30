@@ -12,26 +12,11 @@
 import { existsSync } from 'node:fs'
 import { isAbsolute, resolve, sep } from 'node:path'
 import { expandHome } from '../../utils/path-utils.js'
-import type { ThinkingLevel } from '@taiji/shared'
-import { BUILTIN_PRESET_IDS, PI_THINKING_LEVELS, PRESET_FALLBACK_ENV_KEYS } from '@taiji/shared'
+import { BUILTIN_PRESET_IDS, PRESET_FALLBACK_ENV_KEYS } from '@taiji/shared'
 import type { IExtensionService, IConfigService } from '../../interfaces.js'
 import type { IConfigStore } from '../ports/config.js'
 import type { PresetService, PresetResolution } from '../preset-service.js'
 import { BUILTIN_EXTENSIONS_MISSING, toErrorMessage } from '../../utils/errors.js'
-
-/**
- * thinkingLevel 合法值集合（S-RT-5；W2 值域 SSOT 派生，A-03 修复）。
- *
- * 值 = shared PI_THINKING_LEVELS（pi 0.84.1 全集 7 值，锚点见 pi-preset.ts），
- * 不再手写数组——手写值域曾缺 'max' 导致 composer 最高档被静默丢弃。
- * 用 readonly 数组做运行时校验：buildPresetClientOptions 透传 thinkingOverride 到
- * pi 前先校验，非法值 warn 后忽略（不传给 pi，避免 pi 报错或行为异常）。
- *
- * 「shared 常量 ↔ pi-protocol PiThinkingLevel」的编译期双向防漂移锁随 S6 迁至
- * pi-protocol.ts 的 ThinkingLevelDriftGuard（比对双方的概念自然家；本文件不再
- * import Pi 侧类型——check_pi_type_leak 边界规则）。
- */
-const VALID_THINKING_LEVELS: readonly ThinkingLevel[] = PI_THINKING_LEVELS
 
 /**
  * 收集有效的 skill 路径（pi-provider-store + 存在性过滤）。
@@ -228,7 +213,8 @@ export interface PresetClientOptions {
   noSkills?: boolean
   noContextFiles?: boolean
   model?: string
-  thinkingLevel?: ThinkingLevel
+  /** 档位字符串（非空即透传；合法性权威 = pi，本层不持词表）。 */
+  thinkingLevel?: string
 }
 
 /**
@@ -251,20 +237,13 @@ export interface PresetClientOptions {
  * S-RT-5：thinkingOverride 校验合法值，非法值 warn 后忽略（不透传给 pi）。
  */
 /**
- * S-RT-5：thinkingLevel 校验合法值。Landing 传入与 preset 字段都可能是非法值
- *（如前端未约束 / preset JSON 手改），透传给 pi 会触发 pi 报错或静默忽略，统一在此拦截。
- * 非法值 warn 后忽略（返回 undefined，不透传给 pi）。
+ * thinkingLevel：非空字符串原样透传（档位合法性权威 = pi）。
+ *
+ * 本层不自持档位词表，也不把不认识的档位静默丢弃——显式设了档位却被悄悄抹掉，
+ * 用户以为改了实际没改（历史形态：warn 后返回 undefined）。非法档位由 pi 显式报错。
  */
-function resolveEffectiveThinking(rawThinking: string | undefined): ThinkingLevel | undefined {
-  // widening cast（与 shared isPiLaunchPreset 的 TOOL_MODES 同款惯例）：includes 收窄参数类型，
-  // 此处本意就是对任意 string 做白名单判定。
-  if (rawThinking !== undefined && (VALID_THINKING_LEVELS as readonly string[]).includes(rawThinking)) {
-    return rawThinking as ThinkingLevel
-  }
-  if (rawThinking !== undefined) {
-    console.warn(`[lifecycle] invalid thinking level: ${rawThinking}, ignored`)
-  }
-  return undefined
+function resolveEffectiveThinking(rawThinking: string | undefined): string | undefined {
+  return rawThinking !== undefined && rawThinking.length > 0 ? rawThinking : undefined
 }
 
 export function buildPresetClientOptions(
