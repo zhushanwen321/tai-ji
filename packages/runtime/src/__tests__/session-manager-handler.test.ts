@@ -12,7 +12,7 @@
  *
  * 运行：pnpm --filter @taiji/runtime exec vitest run session-manager-handler
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { SessionManagerHandler } from '../transport/session-manager-handler.js'
@@ -155,9 +155,7 @@ describe('SessionManagerHandler', () => {
 
       // 3. respond 携 sessionId/status/modelId + notify-once D6 两字段（无 prompt → willNotify:false；lifetimeNotifyId 恒在）
       expect(opts.sendExtensionUiResponse).toHaveBeenCalledWith('sid-parent', 'req-1', expect.any(String), 'select')
-      const createRespond = JSON.parse(
-        (opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2] as string,
-      )
+      const createRespond = respondAt(opts)
       expect(createRespond).toEqual({
         sessionId: 'new-session',
         status: 'created',
@@ -231,7 +229,7 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 's1', prompt: 'hello' })
 
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+      const response = respondAt(opts)
       expect(response.error).toBe('target session unreachable')
       expect(response.hint).toBe('target session unreachable; retry send_to_session after checking get_session_status')
     })
@@ -257,7 +255,7 @@ describe('SessionManagerHandler', () => {
 
         await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 'user-s1', prompt: 'inject' })
 
-        const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+        const response = respondAt(opts)
         expect(response.error).toBe(FOREIGN_ERROR)
         expect(delivery.getOrCreateDelivery).not.toHaveBeenCalled()
       })
@@ -273,7 +271,7 @@ describe('SessionManagerHandler', () => {
 
         await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 'other-child', prompt: 'inject' })
 
-        const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+        const response = respondAt(opts)
         expect(response.error).toBe(FOREIGN_ERROR)
         expect(delivery.getOrCreateDelivery).not.toHaveBeenCalled()
       })
@@ -291,7 +289,7 @@ describe('SessionManagerHandler', () => {
 
         await handler.handle('req-1', 'sid-parent', 'history', { sessionId: 'other-child' })
 
-        const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+        const response = respondAt(opts)
         expect(response.error).toBe(FOREIGN_ERROR)
         expect(getHistory).not.toHaveBeenCalled()
       })
@@ -305,7 +303,7 @@ describe('SessionManagerHandler', () => {
 
         await handler.handle('req-1', 'sid-parent', 'status', { sessionId: 'user-s1' })
 
-        const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+        const response = respondAt(opts)
         expect(response.status).toBe('not_found')
         expect(response.error).toBeUndefined()
       })
@@ -323,7 +321,7 @@ describe('SessionManagerHandler', () => {
 
         await handler.handle('req-1', 'sid-parent', 'abort', { sessionId: 'other-child' })
 
-        const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+        const response = respondAt(opts)
         expect(response.error).toBe(FOREIGN_ERROR)
         expect(abort).not.toHaveBeenCalled()
       })
@@ -402,7 +400,7 @@ describe('SessionManagerHandler', () => {
       await handler.handle('req-1', 'sid-parent', 'history', { sessionId: 's1', tailTurns: 1 })
 
       // 应该只保留最后一个 user turn 及之后的消息
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+      const response = respondAt(opts)
       expect(response.messages).toEqual([
         { role: 'user', content: 'msg2' },
         { role: 'assistant', content: 'reply2' },
@@ -426,7 +424,7 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'history', { sessionId: 's1', tailTurns: 5 })
 
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+      const response = respondAt(opts)
       expect(response.messages).toEqual(messages)
       expect(response.truncated).toBe(false)
     })
@@ -437,7 +435,7 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'send', { sessionId: 's1', prompt: 42 })
 
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+      const response = respondAt(opts)
       expect(response.error).toMatch(/invalid params/)
       expect(opts.delivery.getOrCreateDelivery).not.toHaveBeenCalled()
     })
@@ -494,10 +492,11 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'list', { spawnSource: 'agent' })
 
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
-      expect(response.sessions).toHaveLength(2)
-      expect(response.sessions[0].id).toBe('s2')
-      expect(response.sessions[1].id).toBe('s3')
+      const response = respondAt(opts)
+      const respondSessions = response.sessions as Array<{ id: string }>
+      expect(respondSessions).toHaveLength(2)
+      expect(respondSessions[0].id).toBe('s2')
+      expect(respondSessions[1].id).toBe('s3')
     })
 
     it('list → 缺省注入路由上下文：只返回本父的 agent 子 session（params 不得放宽）', async () => {
@@ -516,9 +515,10 @@ describe('SessionManagerHandler', () => {
       // 空 params（extension 端 list_my_sessions 实际发送的形状）
       await handler.handle('req-1', 'sid-parent', 'list', {})
 
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
-      expect(response.sessions).toHaveLength(1)
-      expect(response.sessions[0].id).toBe('s2')
+      const response = respondAt(opts)
+      const respondSessions = response.sessions as Array<{ id: string }>
+      expect(respondSessions).toHaveLength(1)
+      expect(respondSessions[0].id).toBe('s2')
     })
 
     it('list → params 显式指定其他 parentAgentSessionId 不生效（防跨父枚举）', async () => {
@@ -535,9 +535,10 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'list', { parentAgentSessionId: 'parent-b' })
 
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
-      expect(response.sessions).toHaveLength(1)
-      expect(response.sessions[0].id).toBe('s1')
+      const response = respondAt(opts)
+      const respondSessions = response.sessions as Array<{ id: string }>
+      expect(respondSessions).toHaveLength(1)
+      expect(respondSessions[0].id).toBe('s1')
     })
 
     it('abort → {success}', async () => {
@@ -591,7 +592,7 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'create', { cwd: '/test' })
 
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+      const response = respondAt(opts)
       expect(response.error).toBe('create failed')
       expect(response.sessionId).toBeUndefined()
       expect(response.hint).toBeUndefined()
@@ -659,7 +660,7 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'status', { sessionId: 's1' })
 
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+      const response = respondAt(opts)
       expect(response.modelId).toBe('anthropic/claude-3')
     })
 
@@ -674,7 +675,7 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'status', { sessionId: 's1' })
 
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+      const response = respondAt(opts)
       expect(response.modelId).toBeUndefined()
     })
   })
@@ -806,7 +807,7 @@ describe('SessionManagerHandler', () => {
       ).resolves.toBeUndefined()
 
       expect(createOptionsOf(opts.sessionService).projectId).toBeUndefined()
-      const response = JSON.parse((opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>).mock.calls[0][2])
+      const response = respondAt(opts)
       expect(response).toEqual({
         sessionId: 'child-3',
         status: 'created',
