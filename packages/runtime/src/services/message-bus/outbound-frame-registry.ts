@@ -84,6 +84,12 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 // - session.exited（session-service.ts:311 / dispatcher:488）：reason 含 stderr 尾部——pi
 //   崩溃堆栈可 MB 级但 32MB 级极罕见，且 pi-crash log 已全量落盘（D6）；若真超限走 miss
 //   整条丢弃 + error 日志（可观测），不登记。
+// - session.delivery（transport/session-delivery-topic.ts:181 publish；TOPIC_TABLE state 类
+//   last-value 快照，投递所有权内核 D5 新增帧）：队列状态帧，payload.entries 单条 preview
+//   按 DELIVERY_PREVIEW_MAX_CHARS（@taiji/shared = 80 字符，session-delivery-topic.ts:80）
+//   截断、delivered 侧仅投影最近 DEFAULT_DELIVERED_WINDOW（session-delivery = 50 条，
+//   delivery.ts 投影规则）——载荷双重有界，不登记；未来投影放大（preview 放宽 / 窗口取消）
+//   必须登记 LARGE_FIELD_REGISTRY。
 // - session.occupancy / session.state_changed / context.update / session.commands /
 //   session.subagents / session.workflowUpdate / session.stats_update / session.skillNotice /
 //   session.planState（session-records.ts:545，PlanStateView = requirement 文本 + 产物文档/
