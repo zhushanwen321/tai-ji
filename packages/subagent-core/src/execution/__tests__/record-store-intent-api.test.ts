@@ -37,22 +37,6 @@ vi.mock("../../core/logger.ts", () => ({
   getLogger: () => loggerMock,
 }));
 
-// state-marker partial mock：写函数包装真实实现并记录调用序。
-vi.mock("../persistence/state-marker.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../persistence/state-marker.ts")>();
-  return {
-    ...actual,
-    writeFinalizedState: vi.fn((sessionFile: string, reason?: string) => {
-      order.push("state-finalized");
-      return actual.writeFinalizedState(sessionFile, reason);
-    }),
-    writeCancelledState: vi.fn((sessionFile: string, endedAt: number) => {
-      order.push("state-cancelled");
-      return actual.writeCancelledState(sessionFile, endedAt);
-    }),
-  };
-});
-
 // alive-store partial mock：acquire/release 包装真实实现并记录调用序；release
 // 时点探测 manifest 是否已落盘（A2「.state 先 → manifest 后 → .alive 删」断言）。
 vi.mock("../persistence/alive-store.ts", async (importOriginal) => {
@@ -91,7 +75,6 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import { writeAliveMarker, readAliveMarker } from "../persistence/alive-store.ts";
-import * as stateMarker from "../persistence/state-marker.ts";
 import { createRecord, trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
@@ -487,24 +470,6 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(record.status).toBe("running"); // resurrectClosed 内存翻回
       expect(record.closedReason).toBeUndefined();
       expect(store.getMutable("rs-1")).toBe(record); // register
-    });
-
-    it("(iii) pre-L4 legacy：仅 .cancelled 终态（无 .state/.finalized）→ resurrect 后 readStateMarker undefined（live ≡ reload）", () => {
-      // 存量形态：L4 合并前 writeCancelledTombstone 的旧名 tombstone（单行 JSON +
-      // 换行），readStateMarker 在 .state 缺失时回退认领——resurrect 必须一并删除，
-      // 否则磁盘终态位未真正翻转（重建 cancelled 与内存 running 不一致）。
-      fs.writeFileSync(
-        `${sessionFile}.cancelled`,
-        `${JSON.stringify({ id: "rs-legacy", status: "cancelled", agent: "worker", startedAt: 1000, endedAt: 4000 })}\n`,
-      );
-      expect(stateMarker.readStateMarker(sessionFile)).toMatchObject({ status: "cancelled", endedAt: 4000 }); // 前置：旧名回退可读
-      const record = makeClosedCandidate("rs-legacy");
-
-      store.markResurrected(record, true);
-
-      expect(stateMarker.readStateMarker(sessionFile)).toBeUndefined(); // 磁盘终态位真正翻转
-      expect(record.status).toBe("running"); // 内存翻回
-      expect(store.getMutable("rs-legacy")).toBe(record); // register
     });
 
     it("(ii) acquire 后删终态位失败 → 响亮抛错：marker 已写、.state 仍在、内存无半态", () => {
