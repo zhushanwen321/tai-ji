@@ -85,6 +85,8 @@ export default {
   },
   // [E/F12] discoverability notice: message was delivered to the new task after switching away mid-create
   backgroundDelivered: 'Message sent to the new task',
+  // [E] visible feedback when abandon-cleanup removal fails (C-proc-21): the leftover session stays in the sidebar, tell the user to delete it manually
+  abandonCleanupFailed: 'Cancel cleanup failed: the new task was not deleted, remove it manually in the sidebar',
   presetSelect: {
     title: 'Launch mode',
     setAsDefault: 'Set as default',

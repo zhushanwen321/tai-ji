@@ -85,6 +85,8 @@ export default {
   },
   // [E/F12] 创建中切走后消息后台投递进新 session 的可发现性通知
   backgroundDelivered: '消息已发送到新任务',
+  // [E] 取消收尾删除失败的可见反馈（C-proc-21）：残留 session 会留在侧栏，须告知用户手动删除
+  abandonCleanupFailed: '取消清理失败：新任务未能删除，可在侧栏手动删除',
   presetSelect: {
     title: '选择启动模式',
     setAsDefault: '设为默认',

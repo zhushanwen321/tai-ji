@@ -21,10 +21,10 @@
  * 键化不在预造范围，YAGNI：多实例拓扑出现再说）。
  *
  * 生命周期（登记表 #46）：写 = sendLandingFirstMessage 失败 catch（幂等双写）+
- * flow 后台分支投递失败保稿（返回 'background' 前）；清 = 每次提交尝试开始时 send.ts
- * take 丢弃（时点必须在 submit 之前——flow 保稿发生在提交调用期间，收到结果后清会抹掉
- * 保稿；见 send.ts sendLandingFirstMessage）；取 = composer-shell onMounted take。
- * 成功（handed-over / background）/ abandoned 路径槽恒空 = 幽灵草稿不复活。
+ * flow 投递失败保稿（handover / 后台分支，返回结果前 stashAttemptDraft 写入）；清 = 每次
+ * 提交尝试开始时 send.ts take 丢弃（时点必须在 submit 之前——flow 保稿发生在提交调用期间，
+ * 收到结果后清会抹掉保稿；见 send.ts sendLandingFirstMessage）；取 = composer-shell onMounted take。
+ * 投递成功（handed-over / background）/ abandoned 路径槽恒空 = 幽灵草稿不复活。
  */
 import type { Segment } from '@taiji/shared'
 

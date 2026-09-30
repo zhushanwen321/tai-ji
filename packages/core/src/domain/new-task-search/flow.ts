@@ -47,30 +47,34 @@ import { supportedLevelsOf } from './supported-levels'
 // core 域 KV 单例直接 import（设计 D1，同 launch-config.ts 自身 import 先例）
 import { lookup as lookupLastUsedModel } from '../composer/last-used-model'
 import { lookup as lookupRememberedLevel } from '../composer/model-thinking-memory'
-// [A 消费侧] 后台投递失败保稿：orphan 草稿槽单源（与 send.ts catch 共用同一槽）
+// [A 消费侧] 投递失败保稿（handover / 后台两分支）：orphan 草稿槽单源（与 send.ts catch 共用同一槽）
 import { stashOrphanedDraft } from '@taiji/core/domain/composer'
 import { getSettingsStore } from '../settings'
-import type {
-  NewTaskFlowDeps,
-  SessionRemovePort,
-} from './ports'
+import type { NewTaskFlowDeps } from './ports'
 
 /**
- * [E] 取消收尾：删除本次提交已建的 session（best-effort——失败仅 console.warn 不阻断，
- * 残留幽灵 session 可由用户侧栏手动删）。端口未接线同样 warn 放行，不影响取消主语义。
- * 模块级（不依赖编排器实例内部状态）：入参 = ports.session.remove 接线面 + 目标 sid。
+ * [E] 取消收尾：删除本次提交已建的 session（best-effort——失败不阻断取消主语义，
+ * 残留幽灵 session 可由用户侧栏手动删）。失败反馈双通道（C-proc-21 用户可见辅助能力
+ * 失败须可见反馈）：console.warn 留痕供排障 + warning toast 告知用户残留与手动删除动作
+ * （删除不掉的 session 会留在侧栏，静默 = 用户可见异常无解释）。端口未接线按 ports.ts
+ * 契约（可选端口）只 warn 放行，不影响取消主语义。
+ * 模块级（不依赖编排器实例内部状态）：入参 = 清理相关端口集 + 目标 sid。
  */
-async function removeSessionBestEffort(port: SessionRemovePort | undefined, sid: string): Promise<void> {
-  if (!port) {
+async function removeSessionBestEffort(
+  cleanupPorts: Pick<NewTaskFlowDeps['ports'], 'session' | 'toast' | 't'>,
+  sid: string,
+): Promise<void> {
+  const { session, toast, t } = cleanupPorts
+  if (!session) {
     console.warn(`[new-task] abandon cleanup: session.remove 端口未接线，session ${sid} 保留`)
     return
   }
   try {
-    await port.remove(sid)
+    await session.remove(sid)
   } catch (e) {
-    // best-effort 降级策略：取消收尾的删除失败不阻断主语义（不投递 + 草稿归还已定），
-    // 残留幽灵 session 可由用户侧栏手动删——仅 console.warn 留痕供排障
+    // best-effort 降级策略：取消收尾的删除失败不阻断主语义（不投递 + 草稿归还已定）
     console.warn(`[new-task] abandon cleanup: remove session ${sid} failed`, e)
+    toast.warning(t('newTask.abandonCleanupFailed'))
   }
 }
 
@@ -167,8 +171,9 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
 
   /**
    * [B renderer 半] clientUuid 黏滞槽：同一用户意图（segments 序列化全等）的重试复用同一
-   * uuid（runtime 按 uuid 幂等——防 65s 超时后重试重复建 session）。成功（handed-over/
-   * background）或 abandoned 清槽；失败（throw 未放弃）保留供重试复用。
+   * uuid（runtime 按 uuid 幂等——防 65s 超时后重试重复建 session）。投递落定（delivered）
+   * 或 abandoned 清槽；投递失败（deliver 返 false）与 create 失败（throw 未放弃）保留
+   * 供重试复用——失败场景的同段重发正是要由 runtime 幂等返回已建 session。
    */
   let lastAttempt: { hash: string; uuid: string } | null = null
 
@@ -184,6 +189,23 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     const uuid = crypto.randomUUID()
     lastAttempt = { hash, uuid }
     return uuid
+  }
+
+  /**
+   * 投递失败保稿（A 消费侧）+ 黏滞 hash 口径对齐（B）。
+   *
+   * 保稿存**迁移后**段：migrateImageSegments 是 move 语义（tmpdir 文件已移进
+   * attachments/<sessionId>/），存原始段会还原出失效路径。但黏滞 hash 原记迁移**前**段
+   * （takeClientUuidFor 在 create 前取指纹），迁移会改写 image 段 path → 含图重发的
+   * JSON 指纹结构性不匹配 → 换新 uuid → api.create 重复建 session、已建 session 空壳残留。
+   * 故保稿时把槽 hash 同步对齐为保稿段指纹（槽 hash ≡ 保稿段口径，由构造成立）：
+   * 重发取回的是保稿段，takeClientUuidFor 必命中同一 uuid，由 runtime 幂等返回已建 session。
+   * create 失败（throw 未放弃）不经此处——槽 hash 仍是迁移前段指纹，与 send.ts catch
+   * 归还的原始段同口径（65s 超时重试场景幂等成立）。
+   */
+  function stashAttemptDraft(finalSegments: Segment[]): void {
+    stashOrphanedDraft(finalSegments)
+    if (lastAttempt) lastAttempt.hash = hashSegments(finalSegments)
   }
 
   // 受控写入口 controller（父编排器独占）：setter 不再模块级 export，杜绝子模块 /
@@ -425,12 +447,15 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * W2 内部吞错只 toast），与 flow 状态机无关，flow 终态不应依赖它——send 链路未来任何
    * 演化（恢复 throw、新增前置抛错点）都不再影响 flow 终态（时序正确性 + 防御加固，
    * 原设计 §3.3 D3，文档已删除、git 可追溯）。
+   *
+   * 返回 deliver 的投递结果（true=已投递 / false=未进入任何可自动投递通道）交调用方
+   * 收尾（失败保稿 / 成功清黏滞槽），不改变上述终态语义。
    */
   async function handoverAndSend(
     newSid: string,
     finalSegments: Segment[],
     bashCommand?: { command: string; excludeFromContext: boolean },
-  ): Promise<void> {
+  ): Promise<boolean> {
     ports.navigation.setActiveSession(newSid)
     ports.navigation.loadPanel(ports.navigation.activePanelId(), newSid)
     ports.navigation.pushChat(newSid)
@@ -441,7 +466,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     // per-session sid：显式传 newSid，不依赖全局 activeId（双 panel 隔离）
     // tmpdir 迁移已在上方分支完成（create 分支=createSessionFlow.migratedSegments，
     // retry 分支=migrateRetryImages），finalSegments 即迁移后的段。bashCommand 无图片段，无副作用。
-    await deliver(newSid, finalSegments, bashCommand)
+    return deliver(newSid, finalSegments, bashCommand)
   }
 
   /**
@@ -450,8 +475,10 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * handoverAndSend 与「post-create 状态复核」的后台投递分支共用，避免双实现参数漂移。
    *
    * [A 消费侧] 返回 boolean：false = 未进入任何可自动投递通道（send/sendBash 契约同构）。
-   * 后台投递分支据此保稿；handover 分支的成功/失败属 session 错误通道（W2 吞错 toast），
-   * 视图已交接、草稿归不回 landing，返回值不消费（D3 交接原子化）。
+   * 两个消费分支（handover / 后台投递）同款据此保稿（stashAttemptDraft）：草稿归不回原
+   * Composer（Landing 已随交接/切走卸载）时 orphan 槽即兜底载体（下次 landing 挂载取回），
+   * 返回值两分支都消费——handover 分支原「视图已交接、返回值不消费」的理由不成立
+   * （不保稿 = 首发真失败时用户内容彻底丢失）。
    */
   async function deliver(
     sid: string,
@@ -493,6 +520,9 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
     if (createInFlight.value) return 'abandoned' // 飞行中重复提交静默丢弃（未投递，草稿归还）
     submitAbandoned.value = false
     controller.setCreateInFlight(true)
+    // 本次提交创建/绑定的 session id（catch abandoned 收尾删除的目标）：后台分支会先清绑定，
+    // catch 内不能从 currentSession 回读，故在此显式留痕
+    let sid: string | null = null
     try {
       let finalSegments = segments
       // 未选目录直接发送（用默认 cwd 兜底 create），或重试场景已绑定
@@ -512,12 +542,12 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
       // 转换抛错 ③外层 catch 误报「任务创建失败」（实际已创建成功）。语义 = 后台完成投递：
       // 消息照发进新建 session（不丢用户输入），但不碰视图、不碰状态机、不报错（设计 D1）；
       // 并清 create 期绑定，防止后续 landing 提交误走 retry 分支把新消息发进旧 session（D6）。
-      const sid = currentSession.value?.id
+      sid = currentSession.value?.id ?? null
       // [E] abandoned 检查优先于 state 检查（拍板）：用户主动取消 → 不投递、删已建 session
       // （防幽灵任务烧 token）、清绑定，静默返回（无误报——「创建失败」对主动取消是误导）。
       // 未投递早退统一报 'abandoned'（草稿归还语义——调用方 restore，不丢用户输入）
       if (submitAbandoned.value) {
-        if (sid) await removeSessionBestEffort(ports.session, sid)
+        if (sid) await removeSessionBestEffort(ports, sid)
         controller.bindCurrentSession(null)
         lastAttempt = null // abandoned 清槽（B 黏滞规则）
         return 'abandoned'
@@ -531,23 +561,33 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
         // [A 消费侧] 后台投递失败（false = 未进入任何可自动投递通道）→ 草稿保底暂存
         // （orphan 槽，下次 landing 挂载取回）；仍报 'background'（用户已切走，flow 职责终结）
         if (!delivered) {
-          stashOrphanedDraft(finalSegments)
+          stashAttemptDraft(finalSegments)
         } else {
           // [F12 可发现性] 后台投递成功才 info toast——失败时消息并未去到新 session，
           // 「已发送」是误导（失败侧由 chat 错误通道 toast + 上方保稿兜底）
           ports.toast.info(ports.t('newTask.backgroundDelivered'))
+          lastAttempt = null // 投递落定才清槽（B 黏滞规则——!delivered 保留黏滞槽供同段重发复用）
         }
-        lastAttempt = null // 成功清槽（B 黏滞规则——投递已落定，重试属新意图）
         return 'background'
       }
       // 载入 panel + 设 activeId（预建或刚建统一处理）
-      await handoverAndSend(sid, finalSegments, bashCommand)
-      lastAttempt = null // 成功清槽（B 黏滞规则）
+      const delivered = await handoverAndSend(sid, finalSegments, bashCommand)
+      if (!delivered) {
+        // [A 消费侧] 交接后投递失败同款保稿：视图已交接，草稿归不回原 Composer（Landing 已
+        // 卸载），orphan 槽即兜底载体——不保稿 = 首发真失败时用户内容彻底丢失
+        stashAttemptDraft(finalSegments)
+      } else {
+        lastAttempt = null // 投递落定才清槽（B 黏滞规则）
+      }
       return 'handed-over'
     } catch (e) {
       // [E] 已放弃时的失败静默化：用户主动取消，「创建失败」是误导性误报 → 'abandoned'
       //（草稿由调用方归还）。未放弃的失败照常上抛（外层 catch 报错 toast + 保稿）。
       if (submitAbandoned.value) {
+        // 与 try 内前置 abandoned 分支同款收尾：删本次提交已建 session（handover 中抛错
+        // 时 session 已建，不删 = 侧栏残留「已取消」的多余 session）+ 清绑定
+        if (sid) await removeSessionBestEffort(ports, sid)
+        controller.bindCurrentSession(null)
         lastAttempt = null // abandoned 清槽（B 黏滞规则）
         return 'abandoned'
       }
