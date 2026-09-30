@@ -4,7 +4,8 @@
   自上而下：通用配置（启用总开关）→ 服务商卡片单选（三家独立记忆）→ 选中服务商全量
   配置（TtsProviderForm，表单投影 TtsFormModel 驱动）→ 操作行（保存 / 保存并测试 /
   额度说明）。数据源：打开时并行拉 tts.getConfig + tts.getCapabilities（§7.5）；capabilities
-  拉取失败表单区禁用 + 重试入口（不渲染半态枚举），已保存配置值展示不受影响。
+  首载失败时表单区整体不渲染（投影枚举缺失无从渲染半态）+ 重试入口；已成功加载过投影
+  后的重试失败保留禁用表单（已保存配置的 Key 状态点经 getConfig 始终可见）。
   「保存并测试」合成固定样句走 useTtsPlayer 的 settings-tts-test 通道（全局互斥，§7.5 要点 4）。
 -->
 <template>

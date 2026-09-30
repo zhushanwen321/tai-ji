@@ -3,9 +3,9 @@
  * TTS mock 演示数据（VITE_MOCK 测试基建）——三家最小可用 TtsFormModel 样例 + 默认配置骨架。
  *
  * mock 本职 = 模拟 runtime（内嵌假数据不违反「数据走 runtime 链路」纪律，设计 §7.5）：
- * 形状逐字段照 shared tts-types（协议 tts.getCapabilities reply 载荷），枚举值取设计
- * 前提 10 的实测清单子集（「最小可用」= 能驱动表单控件存在性三分支渲染：枚举渲染 / null
- * 置灰 / 空数组不渲染，非厂商全集）。真实能力表与表单投影数据本体在 runtime driver（u2）。
+ * 形状逐字段照 shared tts-types（协议 tts.getCapabilities reply 载荷），枚举值与 runtime 真投影同构（真值子集，
+ * D5 终态同步 F1-10 对齐——mock 轨保存的枚举值在真机投影中必须存在）。「最小可用」= 能驱动
+ * 表单控件存在性三分支渲染：枚举渲染 / null 置灰 / 空数组不渲染，非厂商全集。真实能力表与表单投影数据本体在 runtime driver（u2）。
  */
 import type { SanitizedTtsConfig, TtsFormModel, TtsProviderId } from '@taiji/shared'
 
@@ -16,7 +16,7 @@ const stepfunForm: TtsFormModel = {
     authHeader: 'bearer',
     maxInputChars: 1000,
     speedRange: [0.5, 2],
-    pcmSampleRates: [16000, 24000, 32000, 44100, 48000],
+    pcmSampleRates: [8000, 16000, 22050, 24000, 48000],
     supportsInstructions: true,
     perModel: { 'stepaudio-2.5-tts': { instructionMaxChars: 200, voiceLabelSupported: false } },
   },
@@ -44,7 +44,7 @@ const minimaxForm: TtsFormModel = {
     authHeader: 'bearer',
     maxInputChars: 3000,
     speedRange: [0.5, 2],
-    pcmSampleRates: [16000, 24000, 32000],
+    pcmSampleRates: [8000, 16000, 22050, 24000, 32000, 44100],
     supportsInstructions: false,
     perModel: {},
   },
@@ -57,8 +57,8 @@ const minimaxForm: TtsFormModel = {
     { id: 'speech-2.8-hd', label: 'Speech 2.8 HD' },
   ],
   voices: [{ id: 'male-qn-qingse', label: '青涩青年音色' }],
-  volumeRange: { min: 1, max: 10, step: 1 },
-  pitchRange: { min: -12, max: 12, step: 1 },
+  volumeRange: { min: 0.5, max: 10, step: 0.5 },
+  pitchRange: { min: -12, max: 12, step: 2 },
   channels: [{ id: '1', label: '单声道' }, { id: '2', label: '双声道' }],
   emotions: [
     { id: 'happy', label: '开心' },
@@ -67,17 +67,17 @@ const minimaxForm: TtsFormModel = {
     { id: 'fearful', label: '恐惧' },
     { id: 'disgusted', label: '厌恶' },
     { id: 'surprised', label: '惊讶' },
-    { id: 'cold', label: '冷漠' },
-    { id: 'neutral', label: '中性' },
     { id: 'calm', label: '平静' },
+    { id: 'fluent', label: '流畅' },
+    { id: 'whisper', label: '耳语' },
   ],
-  languages: [{ id: 'auto', label: '自动' }, { id: 'zh', label: '中文' }, { id: 'en', label: 'English' }],
+  languages: [{ id: 'auto', label: 'auto（全自动）' }, { id: 'Chinese', label: 'Chinese' }, { id: 'English', label: 'English' }],
   toggles: ['text_normalization', 'latex_read', 'aigc_watermark'],
   voiceModify: {
-    tiers: [{ id: 'bright', label: '明亮度' }],
-    effects: [{ id: 'telephone', label: '电话' }],
+    tiers: [{ id: 'pitch', label: '明亮度' }],
+    effects: [{ id: 'lofi_telephone', label: '电话失真' }],
   },
-  maxTimbreVoices: 4,
+  maxTimbreVoices: 2,
   hasPronunciationDict: true,
 }
 
@@ -142,7 +142,7 @@ export function mockDefaultTtsConfig(): SanitizedTtsConfig {
         providerKeyAvailable: false,
       },
       mimo: {
-        config: { baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1', model: 'mimo-v2.5-tts', voice: 'mimo_default', vendor: {} },
+        config: { baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-tts', voice: 'mimo_default', vendor: {} },
         hasApiKey: false,
         providerKeyAvailable: false,
       },

@@ -109,7 +109,7 @@ describe('vendor 子树形状（厂商 API 原名原路径，设计 §7.2）', (
       { voice_id: state.voice, weight: 70 },
       { voice_id: state.secondVoice, weight: 30 },
     ])
-    expect(vendor.voice_modify).toMatchObject({ bright: 25, sound_effects: 'telephone' })
+    expect(vendor.voice_modify).toMatchObject({ pitch: 25, sound_effects: 'lofi_telephone' })
   })
 
   it('StepFun：顶层原名字段 + 词典 pronunciation_map[].tone', () => {

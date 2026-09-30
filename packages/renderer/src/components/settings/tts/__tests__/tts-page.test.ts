@@ -131,7 +131,7 @@ describe('表单控件存在性（u1 mock 投影数据驱动，验收 2）', () 
     // 声道枚举（channels 单/双）渲染
     expect(sel(w, 'tts-channel-select-minimax').exists()).toBe(true)
     // 长尾：效果器档位 + 效果 + 词典行编辑器 + AIGC 水印开关（toggles 清单成员）
-    expect(sel(w, 'tts-vm-minimax-bright').exists()).toBe(true)
+    expect(sel(w, 'tts-vm-minimax-pitch').exists()).toBe(true)
     expect(sel(w, 'tts-vm-effect-minimax').exists()).toBe(true)
     expect(sel(w, 'tts-pronunciation-add-minimax').exists()).toBe(true)
     expect(sel(w, 'tts-toggle-minimax-aigc_watermark').exists()).toBe(true)
