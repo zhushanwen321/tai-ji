@@ -38,15 +38,15 @@ import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
 import {
-  commandApiModule,
   emitPlanReviewRequest as emitPlanReviewRequestOnBus,
   flushAsync,
   mountPlanBar,
   planStateView as viewOf,
 } from '../helpers/plan-bar-mount'
+import { commandApiModule } from '../helpers/transport-command-mock'
 
 // ── mock ①：command（plan-store 首拉 RPC + 退出 session.abortPlan）——spread actual ──
-// （mock 体单源 helpers/plan-bar-mount commandApiModule）
+// （mock 体单源 helpers/transport-command-mock commandApiModule）
 const commandMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api', async (importActual) =>
   commandApiModule(await importActual<typeof import('@taiji/core/transport/api')>(), commandMock),

@@ -16,13 +16,29 @@
  *
  * vitest 按测试文件隔离模块图：commandMock 在每个测试文件内是独立实例。
  */
-import { vi } from 'vitest'
+import { vi, type Mock } from 'vitest'
 
 /** transport command RPC 单例（每测试文件独立；beforeEach mockReset 后按用例编排返回值） */
 export const commandMock = vi.fn()
 
-/** '@taiji/core/transport/api' mock 工厂（spread actual 只换 command 与超时常量） */
+/**
+ * '@taiji/core/transport/api' 的 spread-actual mock 体（原语形态）：只换 command 门面与
+ * RPC_BACKSTOP_TIMEOUT_MS，events/pending 等其余面保持真实（测试侧 dispatchSession /
+ * bus 订阅与实现侧经同一真实 events 模块实例，帧链路不断）。
+ * 返回类型不标注为模块类型——RPC_BACKSTOP 会被覆写成 30_000，与真实声明的字面量类型冲突。
+ *
+ * 自 plan-bar-mount.ts 下沉至此（plan 族与 gen-stats 族共用的 command mock 唯一实装）；
+ * plan-bar-mount 的消费方改从本文件 import。
+ */
+export function commandApiModule(
+  actual: typeof import('@taiji/core/transport/api'),
+  commandMock: Mock,
+) {
+  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
+}
+
+/** '@taiji/core/transport/api' mock 工厂（本文件 commandMock 单例 + commandApiModule 原语） */
 export async function transportApiCommandModule() {
   const actual = await vi.importActual<typeof import('@taiji/core/transport/api')>('@taiji/core/transport/api')
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
+  return commandApiModule(actual, commandMock)
 }

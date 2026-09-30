@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises } from '@vue/test-utils'
 import type { PiLaunchPreset } from '@taiji/shared'
-import { emptyProjectApi } from '../helpers/settings-modal-api-mock'
+import { apiProjectMock } from '../helpers/api-facade-mock'
 import { wsStateModuleWithControlledRef } from '../helpers/ws-state-ref-mock'
 import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
@@ -34,7 +34,7 @@ const presetApiMock = vi.hoisted(() => {
   }
   return mocks
 })
-vi.mock('@/api', () => ({ project: emptyProjectApi(), preset: presetApiMock }))
+vi.mock('@/api', () => ({ project: apiProjectMock(), preset: presetApiMock }))
 
 // ── mock 边界：ws 连接态受控 ref（u5 加载点测试驱动；默认 disconnected，存量用例零影响）──
 // [C3] usePiPresets 的 getState 改经 @taiji/core 顶层 barrel（ws-client 实现经 barrel 允许面透出）——

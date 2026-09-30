@@ -12,7 +12,9 @@
  * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/MessageStream.render-error.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
+// 壳依赖 mock 三连（useChatViewDeps/useChat/useSidebar）经 message-stream-shell-mount 导入即
+// 注册——置于 MessageStream.vue import 之前，注册早于其导入链加载
+import '@/__tests__/helpers/message-stream-shell-mount'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { computed, defineComponent, h, reactive } from 'vue'
@@ -69,19 +71,6 @@ vi.mock('virtua/vue', async () => {
     }),
   }
 })
-
-vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    editAndResend: vi.fn(),
-    loadMoreHistory: vi.fn(),
-    hasMoreHistory: () => false,
-  }),
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn() }),
-}))
 
 // happy-dom 不提供真实 ResizeObserver 布局测量
 class NoopResizeObserver {

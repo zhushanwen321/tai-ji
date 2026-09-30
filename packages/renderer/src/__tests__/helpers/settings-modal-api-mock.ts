@@ -11,19 +11,13 @@
  * 扩展页测试经 extensionOverrides 追加 install 流 mock。
  *
  * 公共段另以独立导出供轻量门面 mock（composables 单测只挂 project + 单差异域）复用：
- * emptyProjectApi（project 域底盘）与 subscriptionStubs（on* 订阅族）。
+ * subscriptionStubs（on* 订阅族）；project 域底盘单源在 api-facade-mock.ts 的 apiProjectMock
+ * （原 emptyProjectApi 逐字副本已并入，消费方改从该文件 import）。
  *
  * vitest 按测试文件隔离模块图：每个测试文件经 vi.mock 工厂各自取一份新实例。
  */
 import { vi } from 'vitest'
-
-/** project 域最小 mock（空项目清单 + 空 activeProjectId；'@/api' 门面 mock 的公共底盘）。 */
-export function emptyProjectApi() {
-  return {
-    load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }),
-    save: vi.fn().mockResolvedValue(undefined),
-  }
-}
+import { apiProjectMock } from './api-facade-mock'
 
 /** on* 订阅成员族 stub（键列表 → { onX: vi.fn(() => () => {}) }：注册即返回 disposer 的
  *  no-op 订阅；'@/api' config 域订阅段在多文件门面 mock 间重复，收敛为键参数化单源）。 */
@@ -35,7 +29,7 @@ export function subscriptionStubs(keys: readonly string[]) {
  *  extensionOverrides 追加，基本面 onExtensions 恒在）。 */
 export function settingsModalApiModule(extensionOverrides: Record<string, unknown> = {}) {
   return {
-    project: emptyProjectApi(),
+    project: apiProjectMock(),
     config: {
       listProviders: vi.fn(async () => ({ providers: [] })),
       // SettingsModal → ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）

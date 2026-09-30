@@ -19,7 +19,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { defineComponent, h, ref, nextTick } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { wsClientStateModule } from '../helpers/ws-client-state-mock'
+import { wsStateModuleWithControlledRef } from '../helpers/ws-state-ref-mock'
 import * as events from '@taiji/core/transport/api'
 import {
   triggerSessionCleanups,
@@ -39,7 +39,9 @@ vi.mock('@taiji/core/transport/api/domains/background-task', () => ({ list: list
 
 // ── mock 边界：ws 连接态受控 ref（重连恢复腿驱动；默认 connected，既有用例零影响）──
 const wsMock = vi.hoisted(() => ({ ref: null as null | { value: string } }))
-vi.mock('@taiji/core/transport/ws-client', () => wsClientStateModule(wsMock, 'connected'))
+vi.mock('@taiji/core/transport/ws-client', () =>
+  wsStateModuleWithControlledRef('@taiji/core/transport/ws-client', wsMock, 'connected'),
+)
 
 // ── 共享测试基建 ─────────────────────────────────────────────
 

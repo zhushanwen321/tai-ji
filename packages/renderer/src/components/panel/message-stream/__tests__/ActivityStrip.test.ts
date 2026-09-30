@@ -29,7 +29,10 @@
  * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/ActivityStrip.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
+// MessageStream 壳依赖 mock（useChatViewDeps/useChat/useSidebar）由 message-stream-shell-mount
+// 导入即注册；置于组件 import 之前，注册早于 MessageStream 导入链加载
+import '@/__tests__/helpers/message-stream-shell-mount'
+import { apiProjectMock } from '@/__tests__/helpers/api-facade-mock'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -55,23 +58,14 @@ const queueMock = vi.hoisted(() => ({
   peek: vi.fn(() => [] as QueuedMessage[]),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({
+  project: apiProjectMock(),
   chat: { send: apiMock.send, steer: apiMock.steer, streamSubscribe: apiMock.streamSubscribe },
   session: {},
 }))
 vi.mock('@/composables/panel/useCompactQueue', () => ({
   useCompactQueue: () => ({ peek: queueMock.peek }),
 }))
-// MessageStream 挂载的重依赖 composable（对齐 MessageStream.wire.test.ts 的隔离策略）
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({ editAndResend: vi.fn(), loadMoreHistory: vi.fn(), hasMoreHistory: () => false }),
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn(), selectSession: vi.fn() }),
-}))
-vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
-
 import ActivityStrip from '../ActivityStrip.vue'
 import MessageStream from '../../MessageStream.vue'
 import { useChatStore } from '@/stores/chat'

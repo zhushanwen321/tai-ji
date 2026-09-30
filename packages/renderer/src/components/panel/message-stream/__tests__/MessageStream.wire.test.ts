@@ -10,13 +10,17 @@
  * - TC-w4-3b/4/6：useMessageStreamRail composable 单元测试（验事件路由 handler → useTurnExpansion，
  *   rail 下标→MessageTurn.index 映射）
  * - TC-w4-9：mount MessageStream.vue 首屏冒烟（验 MessageStream 模板真的引用 TurnRail + emit 接线）。
- *   真实 mount：仅 mock useChat/useSidebar（store 副作用隔离），用 chat store setMessages 注入
+ *   真实 mount：壳 mock 经 message-stream-shell-mount 导入注册（useChat/useSidebar，store
+ *   副作用隔离），用 chat store setMessages 注入
  *   消息让 renderItems/railTurns 非空，TurnRail v-if turns.length>0 命中渲染。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/message-stream/__tests__/MessageStream.wire.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
+// [w6] 壳 mock 三连（useChatViewDeps/useChat/useSidebar）由 message-stream-shell-mount 导入即
+// 注册；useChat mock 含 loadMoreHistory/hasMoreHistory（useLoadMoreHistory 挂载即读）；
+// 置于组件 import 之前，注册早于 MessageStream.vue 导入链加载
+import '@/__tests__/helpers/message-stream-shell-mount'
 import { mount } from '@vue/test-utils'
 // [w6 chat-ui-and-shell T7] ui 包组件：Turn/TurnRail 迁 ui；Turn 展开态经 deps inject（真实 useTurnExpansion 在 renderer 壳 useChatViewDeps）
 import { computed, nextTick, ref, shallowRef, defineComponent, h, reactive } from 'vue'
@@ -31,24 +35,6 @@ import { useTurnExpansionStore } from '@/stores/turn-expansion'
 import { useChatStore } from '@/stores/chat'
 import type { MessageTurn, RenderItem } from '@/composables/logic/messageTurns'
 import type { Message, ThinkingBlock, ToolCall } from '@taiji/shared'
-
-// mock 重依赖 composable（只测组件接线，不测 store 副作用）。
-// useChat mock 需含 loadMoreHistory/hasMoreHistory：useLoadMoreHistory 经 useChat 读这俩，
-// MessageStream 挂载时 useLoadMoreHistory 会立即调 hasMoreHistory（computed）。
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    editAndResend: vi.fn(),
-    loadMoreHistory: vi.fn(),
-    hasMoreHistory: () => false,
-  }),
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn() }),
-}))
-
-// [w6] MessageStream 壳装配 useChatViewDeps（TC-w4-9/9b mount 真组件）→ mock 装配器，壳内 ui 组件经 deps inject 消费
-vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
 
 /** 构造 toolCall（status 可指定，默认 completed） */
 function makeToolCall(id: string, status: ToolCall['status'] = 'completed'): ToolCall {

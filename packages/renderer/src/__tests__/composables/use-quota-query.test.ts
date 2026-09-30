@@ -17,7 +17,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
 import type { NormalizedQuotaRow } from '@taiji/shared'
-import { emptyProjectApi, subscriptionStubs } from '../helpers/settings-modal-api-mock'
+import { apiProjectMock } from '../helpers/api-facade-mock'
+import { subscriptionStubs } from '../helpers/settings-modal-api-mock'
 
 vi.mock('@taiji/core/transport/api/domains/quota', () => ({
   getCached: vi.fn(),
@@ -35,7 +36,7 @@ const terminalConfigReply = () => ({
 // config 域 on* 订阅族复用 settings-modal-api-mock 的公共段；terminal config / settings
 // system 两差异面保持本文件内联。
 vi.mock('@/api', () => ({
-  project: emptyProjectApi(),
+  project: apiProjectMock(),
   config: {
     ...subscriptionStubs([
       'onProviders', 'onSkills', 'onAgents', 'onSkillDirs', 'onAgentDirs',

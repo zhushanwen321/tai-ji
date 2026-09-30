@@ -29,12 +29,12 @@ import { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
 import { LEGACY_AWAITING_PLAN_STATE_VIEW } from '@taiji/shared/__tests__/fixtures/plan-state-entries'
 import {
-  commandApiModule,
   emitPlanReviewRequest as emitPlanReviewRequestOnBus,
   flushAsync,
   mountPlanBar,
   planStateView as viewOf,
 } from '../helpers/plan-bar-mount'
+import { commandApiModule } from '../helpers/transport-command-mock'
 
 // ── mock ⓪：drawer domain（§3.5 草稿回看 openDrawerTab）——spread actual：import 链
 // （useExtensionUI → chat store → agentcall-lru-linkage）还消费 bindViewedVidPanels 等导出 ──
@@ -52,7 +52,7 @@ vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
 })
 
 // ── mock ①：command（plan-store 首拉 RPC）——spread actual 保真实 events 通道 ──
-// （mock 体单源 helpers/plan-bar-mount commandApiModule）
+// （mock 体单源 helpers/transport-command-mock commandApiModule）
 const commandMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api', async (importActual) =>
   commandApiModule(await importActual<typeof import('@taiji/core/transport/api')>(), commandMock),

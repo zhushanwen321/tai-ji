@@ -20,19 +20,6 @@ import type { Mock } from 'vitest'
 import type { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
 
-/**
- * '@taiji/core/transport/api' 的 spread-actual mock 体：只换 command 门面与
- * RPC_BACKSTOP_TIMEOUT_MS，events/pending 等其余面保持真实（测试侧 dispatchSession /
- * bus 订阅与实现侧经同一真实 events 模块实例，帧链路不断）。
- * 返回类型不标注为模块类型——RPC_BACKSTOP 会被覆写成 30_000，与真实声明的字面量类型冲突。
- */
-export function commandApiModule(
-  actual: typeof import('@taiji/core/transport/api'),
-  commandMock: Mock,
-) {
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
-}
-
 /** plan 帧工厂：激活态四必填字段为基线，用例按需覆写（D4：新字段 optional） */
 export function planStateView(overrides: Partial<PlanStateView> = {}): PlanStateView {
   return {

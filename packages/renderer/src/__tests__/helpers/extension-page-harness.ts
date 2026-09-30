@@ -5,8 +5,8 @@
  * helper 导出）。
  *
  * 收敛内容：extension 门面捕获单例（11 个可断言 mock，toggle reply 携带权威扩展快照
- * 类型）+ '@/api' mock 工厂（project 域底盘复用 settings-modal-api-mock 的
- * emptyProjectApi）+ SettingsTransport seam 桩逐名映射（[C3]）+ beforeEach 生命周期。
+ * 类型）+ '@/api' mock 工厂（project 域底盘复用 api-facade-mock 的
+ * apiProjectMock 单源）+ SettingsTransport seam 桩逐名映射（[C3]）+ beforeEach 生命周期。
  *
  * 时序约束：vi.mock('@/api', () => extensionApiModule()) 的工厂在 '@/api' 首次被
  * import 时才执行，此时本 helper 模块已初始化——测试文件须把本 helper 的 import 放在
@@ -20,7 +20,7 @@ import type { ExtensionItem } from '@taiji/core'
 import { provideSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
 import { makeSettingsTransportStub } from './settings-transport-stub'
-import { emptyProjectApi } from './settings-modal-api-mock'
+import { apiProjectMock } from './api-facade-mock'
 
 /** extension 门面捕获单例形状（toggle reply 类型 = transport 契约的权威快照） */
 export interface ExtensionApiMock { // oe-exempt:20260930:test:测试 mock 的字段契约形状，捕获单例的类型标注唯一消费方是本文件工厂
@@ -57,7 +57,7 @@ export const extensionApiMock: ExtensionApiMock = {
  *  project 底盘（挂载期加载）+ config.detectSources 惰性桩 */
 export function extensionApiModule() {
   return {
-    project: emptyProjectApi(),
+    project: apiProjectMock(),
     extension: extensionApiMock,
     default: { extension: extensionApiMock },
     config: { detectSources: async () => [] },
