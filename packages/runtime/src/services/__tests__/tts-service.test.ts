@@ -10,6 +10,8 @@
  * 6. 八步编排 happy path：mock driver 两段拼接，WAV 头采样率/声道取第一段回报值
  * 7. configure 校验（speed 域内/词典格式/不落半改）+ Key 联动（from-provider 带入/unsupported 指引/MiMo baseUrl 预填）
  * 8. handler 协议往返：payload/reply 键名与 §7.1 表逐字段一致 + invalid_payload 入口防御
+ * 9. speak 请求端点跟随配置 baseUrl（真 driver + fetch 桩）：非默认 baseUrl 打到该地址 /
+ *    缺 baseUrl 回退表单投影出厂默认 / 出厂默认回归锁定
  *
  * 失败注入手段：FS 上限经构造参数注入小值（默认取 shared SSOT）；封顶删除通道经
  * cacheRemove / remove 注入 stub——不 vi.mock node:fs（fs-guard 全局 mock 会被文件级
@@ -41,6 +43,7 @@ import {
   wrapWavHeader,
 } from '../tts-audio.js'
 import { TtsMessageHandler, type TtsHandlerContext } from '../../transport/tts-message-handler.js'
+import { createTtsDriver, getTtsFormModels } from '../../infra/tts/index.js'
 import type { ClientMessage } from '@taiji/shared'
 import type { WebSocket as WsType } from 'ws'
 
@@ -144,7 +147,14 @@ function makeServiceDeps(): ServiceDeps {
 function makeService(deps: ServiceDeps): TtsService {
   return new TtsService({
     dataDir: dir,
-    drivers: { stepfun: deps.stepfun.driver, minimax: deps.minimax.driver, mimo: deps.mimo.driver },
+    // driver 现建工厂：按 id 返回对应 mock driver（合成调用经 calls 观测）；表单投影取自
+    // 同一 mock driver（capabilities 同源，与生产接线 getTtsFormModels + createTtsDriver 同构）
+    createDriver: (id) => deps[id].driver,
+    formModels: {
+      stepfun: deps.stepfun.driver.formModel,
+      minimax: deps.minimax.driver.formModel,
+      mimo: deps.mimo.driver.formModel,
+    },
     credentialResolver: deps.resolver,
   })
 }
@@ -242,7 +252,12 @@ describe('缓存双条件 FIFO 封顶（§7.4 步骤 7）', () => {
     const deps = makeServiceDeps()
     return new TtsService({
       dataDir: dir,
-      drivers: { stepfun: deps.stepfun.driver, minimax: deps.minimax.driver, mimo: deps.mimo.driver },
+      createDriver: (id) => deps[id].driver,
+      formModels: {
+        stepfun: deps.stepfun.driver.formModel,
+        minimax: deps.minimax.driver.formModel,
+        mimo: deps.mimo.driver.formModel,
+      },
       credentialResolver: deps.resolver,
       cacheMaxFiles: overrides.maxFiles ?? TTS_CACHE_MAX_FILES,
       cacheMaxBytes: overrides.maxBytes ?? TTS_CACHE_MAX_BYTES,
@@ -733,5 +748,73 @@ describe('TtsMessageHandler 协议往返（payload/reply 键名与 §7.1 表一�
     const msg = { type: 'tts.speak', id: 'r8', payload: { text: '文本' } } as ClientMessage
     await expect(handler.handleTtsMessage(msg, ws)).rejects.toMatchObject({ code: 'tts_not_configured' })
     expect(reply).not.toHaveBeenCalled()
+  })
+})
+
+// ── 9. speak 请求端点跟随配置 baseUrl（构造期固化缝隙修复）────────────────
+
+describe('speak 请求端点跟随配置 baseUrl（真 driver + fetch 桩）', () => {
+  const PCM = Buffer.from([1, 2, 3, 4])
+
+  /** fetch 桩：返回最小 2xx 音频响应（stepfun 2xx = 裸 PCM 二进制）；不触真实网络。 */
+  function stubFetch(): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn(async (..._args: unknown[]) => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => PCM.buffer.slice(PCM.byteOffset, PCM.byteOffset + PCM.byteLength),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  /** 生产同构接线：真 driver 工厂 + 真三家表单投影（infra/tts 唯一装配出口）。 */
+  function makeRealDriverService(): TtsService {
+    return new TtsService({
+      dataDir: dir,
+      createDriver: createTtsDriver,
+      formModels: getTtsFormModels(),
+      credentialResolver: makeResolver(),
+    })
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('tts.json 配非默认 baseUrl：厂商请求打到该地址（fetch 层断言 URL 前缀与端点）', async () => {
+    const altBase = 'https://token-plan-cn.xiaomimimo.com/v1'
+    const fetchMock = stubFetch()
+    writeTtsJson({ stepfun: baseStepfunConfig({ baseUrl: altBase }) })
+    writeSecret('stepfun')
+    await makeRealDriverService().speak('文本')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const url = String(fetchMock.mock.calls[0]?.[0])
+    expect(url.startsWith(altBase)).toBe(true)
+    expect(url).toBe(`${altBase}/audio/speech`)
+  })
+
+  it('tts.json 缺 baseUrl 字段：回退表单投影出厂默认（与 skeleton 行为一致）', async () => {
+    const fetchMock = stubFetch()
+    writeFileSync(
+      join(dir, 'tts.json'),
+      JSON.stringify({ activeProvider: 'stepfun', providers: { stepfun: { model: 'm1', voice: 'v1', vendor: {} } } }),
+    )
+    writeSecret('stepfun')
+    await makeRealDriverService().speak('文本')
+    const defaultUrl =
+      getTtsFormModels().stepfun.baseUrlOptions.find((option) => option.isDefault)?.url ?? ''
+    const url = String(fetchMock.mock.calls[0]?.[0])
+    expect(url).toBe(`${defaultUrl}/audio/speech`)
+  })
+
+  it('配置为出厂默认 baseUrl：端点与默认行为一致（回归锁定）', async () => {
+    const defaultUrl =
+      getTtsFormModels().stepfun.baseUrlOptions.find((option) => option.isDefault)?.url ?? ''
+    const fetchMock = stubFetch()
+    writeTtsJson({ stepfun: baseStepfunConfig({ baseUrl: defaultUrl }) })
+    writeSecret('stepfun')
+    await makeRealDriverService().speak('文本')
+    const url = String(fetchMock.mock.calls[0]?.[0])
+    expect(url).toBe(`${defaultUrl}/audio/speech`)
   })
 })

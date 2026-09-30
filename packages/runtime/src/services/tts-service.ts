@@ -8,11 +8,13 @@
  * - getConfig：脱敏投影（hasApiKey + providerKeyAvailable 两布尔，永不回 Key 本体）
  * - configure：runtime 复核（写路整条拒绝 invalid_payload，不落半改状态）→ 原子写 tts.json
  *   → secret 写删（quota 范式：persist 成功后才动 secrets）→ Key 联动（D4）
- * - getCapabilities：三家表单投影（数据权威在 driver，本层零厂商枚举）
+ * - getCapabilities：三家表单投影（数据权威在 infra/tts 表单投影，本层零厂商枚举）
  *
  * 分层纪律：本层只消费 TtsDriver port 与 IProviderCredentialResolver port；厂商协议知识
  * （字段换家/钳制丢弃/错误翻译）全部在 driver（infra/tts/，u2），统一层零厂商判断——
  * 唯二例外是 D4 显式裁决的两张常量映射表（TTS provider id → 模型 provider id，见下方常量）。
+ * driver 实例按 (providerId, config.baseUrl) 在合成前现建（端点跟随 tts.json 配置），
+ * 与 baseUrl 无关的知识（skeleton/校验/getCapabilities）走表单投影，不构造 driver。
  *
  * 外部 HTTP 只准出现在 infra/tts/（仓库硬约束）；本文件 fs 写入点全部有归属（设计 §7.4
  * 写入点清单）：tts.json（唯一写入者 = configure，原子写）、secrets/tts-<id>-apikey.txt、
@@ -128,13 +130,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** 单家驱动缺省配置骨架（D3 零厂商判断：默认值全部从该家表单投影推导，无硬编码枚举）。 */
-function skeletonConfigOf(driver: TtsDriver): TtsConfig {
-  const defaultBaseUrl = driver.formModel.baseUrlOptions.find((option) => option.isDefault)
+/** 单家驱动缺省配置骨架（D3 零厂商判断：默认值全部从该家表单投影推导，无硬编码枚举）。
+ *  数据源是表单投影而非 driver 实例——骨架与 baseUrl 无关，先于 driver 现建发生。 */
+function skeletonConfigOf(formModel: TtsFormModel): TtsConfig {
+  const defaultBaseUrl = formModel.baseUrlOptions.find((option) => option.isDefault)
   return {
     baseUrl: defaultBaseUrl?.url ?? '',
-    model: driver.formModel.models[0]?.id ?? '',
-    voice: driver.formModel.voices[0]?.id ?? '',
+    model: formModel.models[0]?.id ?? '',
+    voice: formModel.voices[0]?.id ?? '',
     vendor: {},
   }
 }
@@ -157,8 +160,17 @@ function mergeStoredConfig(skeleton: TtsConfig, stored: unknown): TtsConfig {
 export interface TtsServiceOptions {
   /** 数据目录（默认 getDataDir()；测试注入 mkdtemp 目录）。 */
   dataDir?: string
-  /** 三家 driver（infra/tts 产出，组合根构造注入；本层只消费 port）。 */
-  drivers: Record<TtsProviderId, TtsDriver>
+  /**
+   * driver 工厂（infra/tts createTtsDriver 直传）：speak 合成前按 tts.json 现读 baseUrl
+   * 现建 driver，请求端点跟随用户配置（构造期固化出厂默认会使非默认集群配置失效）。
+   */
+  createDriver: (id: TtsProviderId, baseUrl: string) => TtsDriver
+  /**
+   * 三家表单投影（infra/tts getTtsFormModels 产出）：skeleton 默认值 / configure 校验 /
+   * getCapabilities 投影的数据源。capabilities 内嵌于投影且与 driver 实例同源常量，
+   * 这些知识均与 baseUrl 无关，故与 driver 实例解耦（不为此构造 driver）。
+   */
+  formModels: Record<TtsProviderId, TtsFormModel>
   /** Provider 凭据解析唯一通道（u7 扩展后的 port：resolveProviderCredential + resolveProviderBaseUrl）。 */
   credentialResolver: IProviderCredentialResolver
   /** 缓存封顶文件数上限（默认 shared TTS_CACHE_MAX_FILES；测试注入小值）。 */
@@ -174,8 +186,8 @@ export interface TtsServiceOptions {
 
 export class TtsService {
   private readonly dataDir: string
-  private readonly drivers: Record<TtsProviderId, TtsDriver>
-  private readonly driverList: readonly TtsDriver[]
+  private readonly createDriver: (id: TtsProviderId, baseUrl: string) => TtsDriver
+  private readonly formModels: Record<TtsProviderId, TtsFormModel>
   private readonly credentialResolver: IProviderCredentialResolver
   private readonly cacheMaxFiles: number
   private readonly cacheMaxBytes: number
@@ -185,8 +197,8 @@ export class TtsService {
 
   constructor(options: TtsServiceOptions) {
     this.dataDir = options.dataDir ?? getDataDir()
-    this.drivers = options.drivers
-    this.driverList = Object.values(options.drivers)
+    this.createDriver = options.createDriver
+    this.formModels = options.formModels
     this.credentialResolver = options.credentialResolver
     this.cacheMaxFiles = options.cacheMaxFiles ?? TTS_CACHE_MAX_FILES
     this.cacheMaxBytes = options.cacheMaxBytes ?? TTS_CACHE_MAX_BYTES
@@ -207,12 +219,12 @@ export class TtsService {
       if (parseFailed) logger.warn('[tts] tts.json parse failed, treating as not configured')
       throw new TtsServiceError('tts_not_configured', 'TTS is not configured')
     }
-    const driver = this.drivers[providerId]
+    const formModel = this.formModels[providerId]
     const storedEntry = store.providers[providerId]
-    if (!driver || !storedEntry) {
+    if (!formModel || !storedEntry) {
       throw new TtsServiceError('tts_not_configured', `TTS provider not configured: ${providerId}`)
     }
-    const config = mergeStoredConfig(skeletonConfigOf(driver), storedEntry)
+    const config = mergeStoredConfig(skeletonConfigOf(formModel), storedEntry)
     const apiKey = this.readSecretFile(providerId)
     if (!apiKey) {
       throw new TtsServiceError('tts_not_configured', `API key missing for TTS provider: ${providerId}`)
@@ -238,8 +250,11 @@ export class TtsService {
       return { filePath }
     }
 
-    // ④ 分句（句边界优先，每段 ≤ capabilities.maxInputChars）
-    const chunks = splitIntoChunks(cleaned, driver.capabilities.maxInputChars)
+    // ④ 分句（句边界优先，每段 ≤ capabilities.maxInputChars）+ 合成前现建 driver：
+    // 端点取 config.baseUrl（speak 时跟随 tts.json 配置，§7.4 步骤 1）；缓存命中不触厂商
+    // 请求故不建。capabilities 内嵌于表单投影（三家同源常量，与 driver 实例无差）。
+    const driver = this.createDriver(providerId, config.baseUrl)
+    const chunks = splitIntoChunks(cleaned, formModel.capabilities.maxInputChars)
 
     // ⑤ 逐段顺序调 driver.synthesizeChunk（顺序而非并行：厂商限流未知，M0 保守）
     const parts: Awaited<ReturnType<TtsDriver['synthesizeChunk']>>[] = []
@@ -331,10 +346,9 @@ export class TtsService {
       logger.warn('[tts] tts.json parse failed, returning skeleton config')
     }
     const providers = {} as Record<TtsProviderId, SanitizedTtsProviderState>
-    for (const driver of this.driverList) {
-      const id = driver.id
+    for (const id of TTS_PROVIDER_IDS) {
       providers[id] = {
-        config: mergeStoredConfig(skeletonConfigOf(driver), store.providers[id]),
+        config: mergeStoredConfig(skeletonConfigOf(this.formModels[id]), store.providers[id]),
         hasApiKey: this.readSecretFile(id) !== undefined,
         providerKeyAvailable: await this.computeProviderKeyAvailable(id),
       }
@@ -361,10 +375,10 @@ export class TtsService {
     return false
   }
 
-  /** tts.getCapabilities：三家表单投影（数据权威在 driver，本层纯转发）。 */
+  /** tts.getCapabilities：三家表单投影（数据权威在 infra/tts 表单投影，本层纯转发）。 */
   getCapabilities(): Record<TtsProviderId, TtsFormModel> {
     const forms = {} as Record<TtsProviderId, TtsFormModel>
-    for (const driver of this.driverList) forms[driver.id] = driver.formModel
+    for (const id of TTS_PROVIDER_IDS) forms[id] = this.formModels[id]
     return forms
   }
 
@@ -380,12 +394,12 @@ export class TtsService {
     if (!isTtsProviderId(providerId)) {
       throw new TtsServiceError('invalid_payload', `unknown TTS provider id: ${String(providerId)}`)
     }
-    const driver = this.drivers[providerId]
+    const formModel = this.formModels[providerId]
     if (!isPlainObject(config)) {
       throw new TtsServiceError('invalid_payload', 'config must be an object')
     }
     // ── 第一段：全部校验与计算（零物理副作用）──
-    const validated = this.validateTtsConfig(driver, config)
+    const validated = this.validateTtsConfig(formModel, config)
     // Key 联动（D4）：from-provider 预解析（读明文只在本调用内，解析失败整条拒绝、不写 secrets）
     const resolvedKeys = new Map<TtsProviderId, string | null>()
     if (apiKeys) {
@@ -399,7 +413,7 @@ export class TtsService {
           resolvedKeys.set(keyProviderId, resolved.key)
           // baseUrl 联动仅 MiMo 家（D4）：该家 baseUrl 为空或仍为出厂默认值时，
           // 经 resolveProviderBaseUrl 两级数据源读 provider 实际生效值写入
-          if (keyProviderId === 'mimo') this.applyMimoBaseUrlLinkage(validated, driver)
+          if (keyProviderId === 'mimo') this.applyMimoBaseUrlLinkage(validated, formModel)
         } else {
           resolvedKeys.set(keyProviderId, input === '' ? null : input)
         }
@@ -436,7 +450,7 @@ export class TtsService {
   }
 
   /** runtime 复核（设计 §7.4）：必填形状、speed 域内、发音词典条目格式（wire 数据未经信任，运行时判型）。 */
-  private validateTtsConfig(driver: TtsDriver, config: TtsConfig): TtsConfig {
+  private validateTtsConfig(formModel: TtsFormModel, config: TtsConfig): TtsConfig {
     const invalid = (message: string): TtsServiceError => new TtsServiceError('invalid_payload', message)
     if (typeof config.baseUrl !== 'string' || config.baseUrl.trim() === '') throw invalid('config.baseUrl required')
     if (typeof config.model !== 'string' || config.model.trim() === '') throw invalid('config.model required')
@@ -446,7 +460,7 @@ export class TtsService {
       if (typeof config.speed !== 'number' || !Number.isFinite(config.speed)) {
         throw invalid('config.speed must be a finite number')
       }
-      const range = driver.capabilities.speedRange
+      const range = formModel.capabilities.speedRange
       if (!range) throw invalid('speed is not supported by this provider')
       if (config.speed < range[0] || config.speed > range[1]) {
         throw invalid(`config.speed out of range [${range[0]}, ${range[1]}]`)
@@ -522,8 +536,8 @@ export class TtsService {
    * 两级数据源（models.json 网关值 → 内置 catalog 兜底）读 provider 实际生效值写入；
    * 两级皆无值（undefined）→ 只带 Key、baseUrl 留当前值不写。手动改过的值任何家不覆盖。
    */
-  private applyMimoBaseUrlLinkage(config: TtsConfig, driver: TtsDriver): void {
-    const isDefaultUrl = driver.formModel.baseUrlOptions.find((option) => option.isDefault)?.url
+  private applyMimoBaseUrlLinkage(config: TtsConfig, formModel: TtsFormModel): void {
+    const isDefaultUrl = formModel.baseUrlOptions.find((option) => option.isDefault)?.url
     const untouched = config.baseUrl === '' || (isDefaultUrl !== undefined && config.baseUrl === isDefaultUrl)
     if (!untouched) return
     for (const modelProviderId of TTS_PROVIDER_TO_MODEL_PROVIDER_IDS.mimo) {
