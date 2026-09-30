@@ -207,7 +207,7 @@ export interface SubagentRecord {
  * 派生」），closedReason 字段同时保留作诊断位）。
  *
  * 派生规则与 extension 侧两处实现同构（三处一致，改任一处须同步其余两处）：
- * - TUI 渲染：extensions/universal/subagent-workflow/src/interface/bg-notify-render.ts
+ * - TUI 渲染：extensions/universal/subagent-workflow/src/interface/gui/bg-notify-render.ts
  *   renderRecordLines 的 verb 派发（cancelled / gc+error → failed / finished）
  * - LLM 通知文案：extensions/universal/subagent-workflow/src/execution/notifier.ts
  *   buildLlmContent 的 closed 分支（cancelled / gc+error → failed / completed）

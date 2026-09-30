@@ -94,6 +94,8 @@ workflow run 与 subagent record 的运行态持久化介质收敛（承接 ADR-
 
 **第六读者失效登记**：`scripts/zcode-session-db-cleanup.mjs`（zcode 引擎存量宿主行清理工具）自持 customType 白名单解析带 `data.v !== 1` 版本门——v1 条目停写后对全部新记录恒跳过、白名单恒空 → 清理面恒空，属**功能性保守降级**（漏清不误删：新记录本来就不落宿主库，白名单空集 = 零删除，语义安全）；该脚本为一次性清理工具，不随 W4 sunset 强制退役，重跑时对存量 v1 数据仍有效。
 
+**修订注记（2026-09-30）**：事件文件头行已定 `{"type":"record-events"}` 并落盘（`RECORD_EVENTS_HEADER_TYPE`，`record-events.ts`——本文 `record-journal` 头行表述以本注记为准）；`engineHandle.journalPath` → `engineHandle.eventsPath` 改名进行中，由后续批次处理。
+
 ### ADR-0080 run/record 状态机收敛：五态机唯一权威 + outcome 四值 + record 意图原语即状态机（2026-09-27 设计裁决）
 workflow run 与 subagent record 的状态词表与状态机形态收敛（承接 ADR-0074 显式状态机与 ADR-0078 介质归位；权威源 `.tmp/tech-design/w2-state-machine-convergence.md`——设计文档不入 git，实施记录 git 可追溯）。七件套：
 
