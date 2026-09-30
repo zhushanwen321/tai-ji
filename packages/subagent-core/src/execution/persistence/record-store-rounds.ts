@@ -284,6 +284,8 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
     totalTokens: rec.totalTokens,
     resultSummary: summarizeResultForJournal(nextResult),
     error: outcome.kind === "failed" ? outcome.reason : undefined,
+    // 事件流自承载绑定侧独有字段（.record-binding 退场的前置）：轮被弃置的标记。
+    ...(rec.lastAbandonedRound !== undefined ? { lastAbandonedRound: rec.lastAbandonedRound } : {}),
   });
   // ⑫ [B2] 轮终派生 manifest 投影（session-reader manifest 直读主路径的数据源）：
   // 轮终 record 留内存 idle（U4 翻边），不经任何终态/回收写点——缺本写则 records/

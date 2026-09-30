@@ -42,6 +42,7 @@ import type {
   RecordOrigin,
   StopReason,
 } from "../assembly/types.ts";
+import type { AbandonedRoundMark, TranscriptRef } from "../domain/record-types.ts";
 
 const journalLogger = getLogger("record-event-journal");
 
@@ -219,6 +220,11 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt
   type: "record-round-idle";
   /** 轮终停因（StopReason 值域——「为什么停」的轮粒度权威词）。 */
   stopReason: StopReason;
+  /**
+   * 轮被弃置的标记（与 .record-binding 的 lastAbandonedRound 同源；undefined = 无此
+   * 记录，null = 显式清空）。轮终是它的天然写点。
+   */
+  lastAbandonedRound?: AbandonedRoundMark | null;
   /** 轮终时点的累计轮数快照（统计终值以 record-settled 为准，本值是过程快照）。 */
   turns: number;
   /** 轮终时点的累计 token 快照（同上）。 */
@@ -274,6 +280,11 @@ export interface RecordReopenedEvent extends RecordEventEnvelope { // oe-exempt:
   epoch: Epoch;
   /** 归零后的轮计数（恒 0——字段显式承载 D3「round 归零」载荷）。 */
   round: number;
+  /**
+   * 谱系引用（与 .record-binding 的 transcriptRef 同源——markReopened 是它的写点；
+   * undefined = 未落）。
+   */
+  transcriptRef?: TranscriptRef;
 }
 
 /** record 事件判别联合（D3 词表全集，恰好 6 个；判别键 = type）。 */

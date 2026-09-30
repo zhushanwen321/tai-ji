@@ -416,6 +416,8 @@ export function markReopenedImpl(record: ExecutionRecord, transcriptRef: Transcr
     ts: Date.now(),
     epoch: record.epoch ?? 0,
     round: 0,
+    // 事件流自承载绑定侧独有字段（.record-binding 退场的前置）：谱系引用。
+    ...(record.transcriptRef !== undefined ? { transcriptRef: record.transcriptRef } : {}),
   });
   ctx.reportRecordTransition(record);
   ctx.notifyChange();
