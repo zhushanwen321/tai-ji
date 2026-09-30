@@ -102,24 +102,32 @@ async function settle(w: VueWrapper): Promise<void> {
 }
 
 /**
- * 轮询等待 Host 投影 unread 到达期望值（仅用于「增长到达」类断言）：
- * 消息数 0→1 增长到 badge 投影更新依赖 Vue watcher 回调的异步调度，
- * 固定 settle 后立即断言对调度器微时序有隐性依赖——CI 并行负载下偶发
- * 不达（CI 偶发 run 36585066332），改带超时轮询去依赖。超时后先输出
- * 失败现场快照，再以 expect 收尾（保持 vitest 断言失败形态）。
- * 预算 8000ms：全量套件 16 worker 抢占下单用例调度延迟可达 2s+（本地实测），
- * 2s 预算会被纯负载压过线；轮询只在到达后提前返回，上限加大不影响绿路耗时。
+ * 轮询等待 Host 投影到达期望值（仅用于「到达」类断言）：投影更新依赖 Vue watcher
+ * 回调的异步调度，固定 settle 后立即断言对调度器微时序有隐性依赖——CI 并行负载下
+ * 偶发不达（CI 偶发 run 36585066332），改带超时轮询去依赖。超时后先输出失败现场
+ * 快照，再以 expect 收尾（保持 vitest 断言失败形态）。预算 8000ms：全量套件
+ * 16 worker 抢占下单用例调度延迟可达 2s+（本地实测），2s 预算会被纯负载压过线；
+ * 轮询只在到达后提前返回，上限加大不影响绿路耗时。
  */
-async function waitForUnread(w: VueWrapper, expected: string, timeoutMs = 8000): Promise<void> {
+async function waitForProjection(
+  w: VueWrapper,
+  testid: 'unread' | 'threads',
+  expected: string,
+  timeoutMs = 8000,
+): Promise<void> {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     await flushPromises()
     await nextTick()
-    if (text(w, 'unread') === expected) return
+    if (text(w, testid) === expected) return
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
   await logBtwFlakyDiagnosis(w)
-  expect(text(w, 'unread')).toBe(expected)
+  expect(text(w, testid)).toBe(expected)
+}
+
+async function waitForUnread(w: VueWrapper, expected: string, timeoutMs = 8000): Promise<void> {
+  return waitForProjection(w, 'unread', expected, timeoutMs)
 }
 
 /**
@@ -315,6 +323,14 @@ describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费面�
     const w = mountHost(SID_A)
     await settle(w)
     const chat = useChatStore()
+
+    // [CI 慢机竞态关窗 2026-09-30] per-线未读 watch 创建于初始 btw.list resolve 之后
+    // （产品语义：初始快照内的消息不算新未读，watch 基线 = 创建时的分区长度）。CI 并行
+    // 负载下 settle 的微任务冲刷可能早于 mock resolve，setMessages 落在 watch 创建前会被
+    // 基线吞掉——unread 恒 0 且无重算路径（CI 两次连红取证：分区 btw:t2=1 而 host
+    // unread=0，8s 轮询不自愈）。等 threads 投影到位（与 watch 创建同拍，先写投影后建
+    // watch）再制造增长，构造性保证观察面在册。
+    await waitForProjection(w, 'threads', '2')
 
     chat.setMessages('btw:t2', [msg('b1')])
     await settle(w)
