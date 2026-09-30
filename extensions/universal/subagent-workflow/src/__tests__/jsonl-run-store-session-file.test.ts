@@ -277,7 +277,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     const runId2 = "run-rt-resumed";
     const recordPath2 = appendRecordLine(tmpDir, runId2, { type: "run-created", seq: 1, ts: 1000, runId: runId2, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')" });
     appendRecordLine(tmpDir, runId2, { type: "run-interrupted", seq: 2, ts: 1100, errorCode: "crashed", reason: "Process killed" });
-    appendRecordLine(tmpDir, runId2, { type: "run-resumed", seq: 3, ts: 1200, reason: "resume dispatch plan: 1 restart(tier-3)", host: "h" });
+    appendRecordLine(tmpDir, runId2, { type: "run-resumed", seq: 3, ts: 1200, reason: "resume plan: replay=1 redispatch=1", host: "h" });
     const store2 = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx([v2RegisteredEntry(runId2, recordPath2)]) });
     const restored2 = await store2.loadAll();
     expect(restored2[0]!.meta.interruptedAt).toBeUndefined();

@@ -58,7 +58,7 @@ switch (MODE) {
     // 消费同一转移帧，两链状态语义一致）。
     const withResumed = [
       ...content.split("\n").filter((l) => l.trim()),
-      JSON.stringify({ type: "run-resumed", ts: 1_759_000_001_000, reason: "resume dispatch plan: 1 restart(tier-3)" }),
+      JSON.stringify({ type: "run-resumed", ts: 1_759_000_001_000, reason: "resume plan: replay=1 redispatch=1" }),
     ].join("\n");
     const overview = parseRunRecordStream(withResumed, RUN_ID, RECORD_PATH);
     expectCond(overview.status === "running", `resumed stream returns to running in session_read overview, got ${overview.status}`);

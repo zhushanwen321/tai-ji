@@ -1,22 +1,16 @@
 // src/orchestration/__tests__/resume-tier-budget.test.ts
 //
-// [U2] D8 三档恢复（档位判据纯逻辑 + 档 1 补收落帧）与 D10 时间预算活跃段算式
-// （纯函数 + pump 账本消费）测试。
+// [U2] D10 时间预算活跃段算式（纯函数 + pump 账本消费）测试 +
+// [ADR-0092]「恢复不补收未提交结果」的回归锁（原 D8 三档判据已随该条删除）。
 //
-// D8 档位真实性（场景 22 真机冒烟）归 u4a；本文件锁编排侧判据与补收行为。
+// 文件名保留历史名（原为「tier 判据 + 预算」双主题）；档位真实性冒烟归场景 22。
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  classifyResumeTier,
-  classifyResumeTierFromContent,
-  computeActiveElapsedMs,
-  extractAssistantTextContent,
-  resumeRun,
-} from "../resume-run.ts";
+import { computeActiveElapsedMs, resumeRun } from "../resume-run.ts";
 import {
   forgetRunResumedBudget,
   noteRunResumedBudget,
@@ -48,111 +42,7 @@ function sessionHeaderLine(): string {
   return JSON.stringify({ type: "session", id: "e0", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/tmp" });
 }
 
-// ── D8 档位判据（纯逻辑）────────────────────────────────────
-
-describe("D8 档位判据 — classifyResumeTierFromContent", () => {
-  it("末轮 assistant 完整（string content）→ 档 1 collect，提取正文", () => {
-    const content = [sessionHeaderLine(), messageLine("user", "do it", 1), messageLine("assistant", "final answer", 2)].join("\n");
-    expect(classifyResumeTierFromContent(content)).toEqual({
-      tier: "collect",
-      collectedContent: "final answer",
-    });
-  });
-
-  it("末轮 assistant 完整（blocks content）→ 档 1 collect：text 块拼接，thinking 排除", () => {
-    const blocks = [
-      { type: "thinking", thinking: "internal reasoning" },
-      { type: "text", text: "part-a" },
-      { type: "text", text: "part-b" },
-    ];
-    const content = [sessionHeaderLine(), messageLine("user", "q", 1), messageLine("assistant", blocks, 2)].join("\n");
-    expect(classifyResumeTierFromContent(content)).toEqual({
-      tier: "collect",
-      collectedContent: "part-apart-b",
-    });
-  });
-
-  it("末尾悬空 user prompt（请求未完成）→ 档 2 continue", () => {
-    const content = [sessionHeaderLine(), messageLine("user", "pending prompt", 1)].join("\n");
-    expect(classifyResumeTierFromContent(content)).toEqual({ tier: "continue" });
-  });
-
-  it("末尾半截行（写入中断）→ 档 2 continue", () => {
-    const content = [sessionHeaderLine(), messageLine("user", "q", 1), '{"type":"message","id":"e2","parentId":"e1","mess'].join("\n");
-    expect(classifyResumeTierFromContent(content)).toEqual({ tier: "continue" });
-  });
-
-  it("末轮 assistant 纯工具调用（无 text 块）→ 档 2 continue（工具循环中崩溃）", () => {
-    const toolOnly = [{ type: "toolCall", id: "tc1", name: "bash", arguments: "{}" }];
-    const content = [sessionHeaderLine(), messageLine("user", "q", 1), messageLine("assistant", toolOnly, 2)].join("\n");
-    expect(classifyResumeTierFromContent(content)).toEqual({ tier: "continue" });
-  });
-
-  it("末尾 toolResult（工具结果后引擎死亡）→ 档 2 continue", () => {
-    const content = [
-      sessionHeaderLine(),
-      messageLine("user", "q", 1),
-      messageLine("assistant", [{ type: "toolCall", id: "tc1", name: "bash", arguments: "{}" }], 2),
-      messageLine("toolResult", "tool output", 3),
-    ].join("\n");
-    expect(classifyResumeTierFromContent(content)).toEqual({ tier: "continue" });
-  });
-
-  it("尾部 custom 元数据行跳过（subagent-identity 等 parentId=null 非对话流）→ 判定取其前 message", () => {
-    const content = [
-      sessionHeaderLine(),
-      messageLine("user", "q", 1),
-      messageLine("assistant", "done text", 2),
-      JSON.stringify({ type: "custom", id: "c1", parentId: null, customType: "subagent-identity", data: {} }),
-    ].join("\n");
-    expect(classifyResumeTierFromContent(content)).toEqual({
-      tier: "collect",
-      collectedContent: "done text",
-    });
-  });
-
-  it("仅 header（会话在但从未有回复）→ 档 2 continue", () => {
-    expect(classifyResumeTierFromContent(sessionHeaderLine())).toEqual({ tier: "continue" });
-  });
-});
-
-describe("D8 档位判据 — classifyResumeTier（IO 包装）", () => {
-  it("sessionFile 缺省（agent 从未有落定调用）→ 档 3 restart", () => {
-    expect(classifyResumeTier(undefined)).toEqual({ tier: "restart" });
-  });
-
-  it("读取失败（文件不存在/清理）→ 档 3 restart", () => {
-    expect(
-      classifyResumeTier("/gone/session.jsonl", () => {
-        throw new Error("ENOENT");
-      }),
-    ).toEqual({ tier: "restart" });
-  });
-});
-
-describe("D8 提取边界 — extractAssistantTextContent（检查点 8）", () => {
-  it("string 直取；空串 → undefined", () => {
-    expect(extractAssistantTextContent("hello")).toBe("hello");
-    expect(extractAssistantTextContent("")).toBeUndefined();
-  });
-
-  it("blocks：text 块拼接；thinking/toolCall 排除；空 → undefined", () => {
-    expect(
-      extractAssistantTextContent([
-        { type: "thinking", thinking: "x" },
-        { type: "text", text: "a" },
-        { type: "toolCall", name: "bash" },
-        { type: "text", text: "b" },
-      ]),
-    ).toBe("ab");
-    expect(extractAssistantTextContent([{ type: "thinking", thinking: "only" }])).toBeUndefined();
-    expect(extractAssistantTextContent(42)).toBeUndefined();
-  });
-});
-
-// ── D8 档 1 补收落帧（编排接线）──────────────────────────────
-
-describe("D8 档 1 补收 — resumeRun 集成", () => {
+describe("[ADR-0092] 恢复不补收未提交结果 — resumeRun 集成", () => {
   let journalDir: string;
 
   beforeEach(() => {
@@ -165,8 +55,8 @@ describe("D8 档 1 补收 — resumeRun 集成", () => {
     fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  /** in-flight call 的 agent 有既有 settled 帧（sessionFile 可知）→ 可判档。 */
-  async function seedWithSessionFile(runId: string): Promise<void> {
+  /** 同名 agent 第一轮已落定（携带会话文件路径）、第二轮在途即崩溃。 */
+  async function seedSecondRoundInFlight(runId: string, sessionFile: string): Promise<void> {
     const journal = createRunEventJournal(journalDir);
     await journal.append(runId, {
       type: "run-created",
@@ -189,10 +79,9 @@ describe("D8 档 1 补收 — resumeRun 集成", () => {
       attempt: 1,
       outcome: "done",
       durationMs: 1_000,
-      result: { content: "round-1", sessionFile: "/fake/sessions/member-a.jsonl" },
+      result: { content: "round-1", sessionFile },
       ts: T0 + 2_000,
     });
-    // 同名 agent 第二轮在途（崩溃形态）
     await journal.append(runId, {
       type: "agent-started",
       taskIndex: 1,
@@ -224,48 +113,42 @@ describe("D8 档 1 补收 — resumeRun 集成", () => {
     return { deps, runs };
   }
 
-  it("档 1：补收帧落 record（agent-settled 含提取正文 + sessionFile）+ 回放集含补收 call", async () => {
-    await seedWithSessionFile("wf-collect");
-    const { deps, runs } = makeDeps();
-    const memberSession = [
-      sessionHeaderLine(),
-      messageLine("user", "round 2 prompt", 1),
-      messageLine("assistant", "recovered round-2 answer", 2),
-    ].join("\n");
+  it("会话文件里有完整正文也不补收：只落 run-resumed，调用留重派集", async () => {
+    const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "resume-member-"));
+    try {
+      // 旧实装会读这份文件、按「末轮 assistant 有正文」判档 1 并合成补收帧；
+      // [ADR-0092] 后恢复链不再读取它，结果只来自已提交。
+      const sessionFile = path.join(sessionDir, "member-a.jsonl");
+      fs.writeFileSync(
+        sessionFile,
+        `${sessionHeaderLine()}\n${messageLine("user", "round 2 prompt", 1)}\n${messageLine("assistant", "recovered round-2 answer", 2)}\n`,
+        "utf8",
+      );
+      await seedSecondRoundInFlight("wf-nocollect", sessionFile);
+      const { deps, runs } = makeDeps();
 
-    await resumeRun("wf-collect", deps, {
-      now: () => T0 + 100_000,
-      readMemberSession: () => memberSession,
-    });
+      await resumeRun("wf-nocollect", deps, { now: () => T0 + 100_000 });
 
-    // record：run-resumed 后落补收帧（事实入流，D1）
-    const events = await createRunEventJournal(journalDir).scan("wf-collect");
-    const types = events.map((e) => e.type);
-    expect(types.slice(-2)).toEqual(["run-resumed", "agent-settled"]);
-    const collected = events.at(-1) as { taskIndex: number; outcome: string; result: { content: string; sessionFile?: string } };
-    expect(collected.taskIndex).toBe(1);
-    expect(collected.outcome).toBe("done");
-    expect(collected.result.content).toBe("recovered round-2 answer");
-    expect(collected.result.sessionFile).toBe("/fake/sessions/member-a.jsonl");
-    // 聚合：补收 call 进回放集（worker 重放到断点时零 token 回话）
-    const run = runs.get("wf-collect")!;
-    expect(run.state.calls.get(1)?.status).toBe("done");
-    expect(run.state.calls.get(1)?.result?.content).toBe("recovered round-2 answer");
+      const events = await createRunEventJournal(journalDir).scan("wf-nocollect");
+      expect(events.map((e) => e.type).slice(-1)).toEqual(["run-resumed"]);
+      expect(events.filter((e) => e.type === "agent-settled")).toHaveLength(1); // 仅崩溃前那一条
+      expect(String((events.at(-1) as { reason?: string }).reason ?? "")).toBe("resume plan: replay=1 redispatch=1");
+      // 未完成调用不建条目（留重派集：worker 重放到断点后重新派发）
+      expect(runs.get("wf-nocollect")!.state.calls.has(1)).toBe(false);
+    } finally {
+      fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
   });
 
-  it("档 2：末尾悬空 prompt → 不补收（in-flight 留重派，续写经成员复用通道）", async () => {
-    await seedWithSessionFile("wf-continue");
+  it("会话文件不存在同样不影响：恢复链不再读取它", async () => {
+    await seedSecondRoundInFlight("wf-missing-file", path.join(os.tmpdir(), "does-not-exist-member.jsonl"));
     const { deps, runs } = makeDeps();
-    const memberSession = [sessionHeaderLine(), messageLine("user", "round 2 prompt", 1)].join("\n");
 
-    await resumeRun("wf-continue", deps, {
-      now: () => T0 + 100_000,
-      readMemberSession: () => memberSession,
-    });
+    await resumeRun("wf-missing-file", deps, { now: () => T0 + 100_000 });
 
-    const events = await createRunEventJournal(journalDir).scan("wf-continue");
-    expect(events.filter((e) => e.type === "agent-settled")).toHaveLength(1); // 仅崩溃前的 round-1
-    expect(runs.get("wf-continue")!.state.calls.has(1)).toBe(false);
+    const events = await createRunEventJournal(journalDir).scan("wf-missing-file");
+    expect(events.filter((e) => e.type === "agent-settled")).toHaveLength(1);
+    expect(runs.get("wf-missing-file")!.state.calls.has(1)).toBe(false);
   });
 });
 

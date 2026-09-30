@@ -12,10 +12,11 @@
 //   1. D7 跨进程文件锁（proper-lockfile 直用，<workflow-state>/<runId>.resume.lock）
 //   2. 资格校验：record 严格读取 → fold lifecycle === interrupted → D13 嵌套拒绝
 //      → D12 完整性校验 → D10 预算预检
-//   3. D8 三档判定：重派集逐 call 按子代理会话文件落盘状态判档（档 1 补收候选）
+//   3. 恢复计划计数（回放集条数 / 重派集条数——随 run-resumed 帧的 reason 留痕）
 //   4. v2 注册条目补写（裁决点 7：先于复活事件，失败干净拒绝）
 //   5. run-resumed 转移事件落 record（interrupted → running；复活非终局动作，
-//      不经 [D15] 终局编排入口）+ 档 1 补收帧落 record（事实入流，D1）
+//      不经 [D15] 终局编排入口。不合成任何结果——[ADR-0092] 只复用已提交结果，
+//      未完成调用由段 6 的确定性重放走到断点后重新派发）
 //   6. 重建聚合 + D10/D11 标记 + worker 接管（脚本确定性重放，回放集命中
 //      cached replay）+ pending 信号
 //
@@ -24,8 +25,9 @@
 // （独立模块：消费方含 pump 的回放比对与 terminal-actions 的 agent-started 入参
 // 落账，两侧间已有 pump → terminal-actions 依赖边，工具留在任一侧都会成环）。
 //
-// 层归属：Engine。IO 面：record 流严格读取 + 会话文件尾部扫描（fs 直读——与
-// run-events.ts journal 实装同款「Engine 模块唯一 IO 边」形态）+ proper-lockfile。
+// 层归属：Engine。IO 面：record 流严格读取（fs 直读——与 run-events.ts journal
+// 实装同款「Engine 模块唯一 IO 边」形态）+ proper-lockfile。本模块不读取子代理
+// 会话文件（[ADR-0092]：恢复只复用已提交结果，不解析对话日志）。
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -166,164 +168,40 @@ function describeRunEventLineIssue(issue: RunEventLineIssue): string {
 }
 
 // ══════════════════════════════════════════════════════════════
-// §2 D8 三档恢复（档位判据 + 档 1 结果补收）
+// §2 恢复计划计数（[ADR-0092]：只复用已提交结果，未完成调用一律重派）
 // ══════════════════════════════════════════════════════════════
 
-/** D8 恢复档位：collect = 档 1 补收（零 token）/ continue = 档 2 同会话续写 / restart = 档 3 整跑。 */
-export type ResumeTier = "collect" | "continue" | "restart";
-
-/**
- * pi 会话文件尾部形态的 D8 档位判定结果。
- * - collect：末轮 assistant 回复完整落盘（仅结果未回传）——携带提取的补收文本；
- * - continue / restart：无补收（重派，档 2 经成员复用续写通道承接、档 3 新建）。
- */
-export interface ResumeTierDecision { // oe-exempt:20260929:framework:tier-decision domain contract per design U2, type-first single-impl
-  tier: ResumeTier;
-  /** tier === "collect" 时的末轮 assistant 正文（text 块拼接）。 */
-  collectedContent?: string;
+/** 恢复计划：回放集（有已提交结果）与重派集（未完成调用）的条数。 */
+interface ResumePlan { // oe-exempt:20260930:framework:resume plan reporting shape
+  replay: number;
+  redispatch: number;
 }
 
 /**
- * 档 1 提取边界（pi 0.84.4 实装锚点 pi-ai dist/types.d.ts:304-309，登记
- * PS-53）：assistant message.content 恒为 blocks 数组（TextContent |
- * ThinkingContent | ToolCall——text 块携带文本）；string 形态属 UserMessage
- * （content: string | (TextContent | ImageContent)[]），此处 string 分支为
- * 防御宽面（正常 assistant 流不命中）。
- * 提取口径 = type==='text' 块的 text 拼接（'' join）——与 session-reader
- * result-action「取 subagent 最终正文」同款口径（跨包无依赖边，口径一致性由
- * 两侧测试锁定）。thinking / toolCall / tool_result 块排除（推理噪音与工具协议
- * 帧不是正文）。无可提取文本 = undefined（调用方按档 2 处置）。
- */
-export function extractAssistantTextContent(content: unknown): string | undefined {
-  if (typeof content === "string") return content.length > 0 ? content : undefined;
-  if (!Array.isArray(content)) return undefined;
-  let text = "";
-  for (const block of content) {
-    const b = block !== null && typeof block === "object" ? (block as { type?: unknown; text?: unknown }) : undefined;
-    if (b?.type === "text" && typeof b.text === "string") text += b.text;
-  }
-  return text.length > 0 ? text : undefined;
-}
-
-/**
- * 会话文件读取注入面（D8 判定的 IO 边）：默认实装 readFileSync；测试注入替换
- * 内容（档位判定的纯逻辑测试无需真实文件）。
- */
-export type MemberSessionReader = (sessionFile: string) => string;
-
-const defaultSessionReader: MemberSessionReader = (p) => readFileSync(p, "utf8");
-
-/**
- * D8 档位判定（纯逻辑）：给定子代理会话文件内容，按「崩溃瞬间落盘状态」降档。
+ * 恢复计划计数：record 事件流 → 回放集条数（有 agent-settled 的 taskIndex）与
+ * 重派集条数（有 agent-started 无 agent-settled 的 taskIndex）。
  *
- * 判据链（设计 §3.1 恢复三档图）：
- * - 尾部（跳过末尾非 message 元数据行）最后一条 message 是完整 assistant 且带
- *   可提取正文 → collect（档 1：回复完整落盘仅结果未回传，补收零 token）；
- * - 其余（末尾悬空 user prompt / toolResult / 半截行 / 纯工具调用 assistant /
- *   无 message）→ continue（档 2：请求未完成，同会话续写——pi 实装语义（待验证
- *   检查点 1 已核实，0.84.4 agent-session.js:892：prompt 路径新增 user 消息、
- *   不调 agent.continue()）= 悬空 prompt 原样留在上下文 + 新增续跑指令（两个
- *   连续 user 轮），不重发原文；上下文已在（cacheRead 低价），与设计档 2
- *   「只重花最后一次生成」效益吻合）。
+ * [ADR-0092] 恢复只复用已提交结果：未完成调用不合成任何结果、不读取子代理会话
+ * 文件，一律由段 6 的确定性重放走到断点后重新派发（有成员绑定则续写同一成员会话、
+ * 无则新建）。本计数只服务 run-resumed 帧的 reason 与 debug 日志（排障可见性），
+ * 不参与派发决策——续写 / 重开的判定归既有成员复用通道。
  */
-export function classifyResumeTierFromContent(content: string): ResumeTierDecision {
-  const lines = content.split("\n");
-  // 从尾向前找最后一条 message 行（跳过空行与 custom 元数据尾行——pi 会话尾部
-  // 的 subagent-identity 等 custom 条目 parentId=null 非对话流节点，对齐
-  // session-reader buildTreeView 的 leafId 判定形态）
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]!;
-    if (line.trim().length === 0) continue;
-    const parsed = tryParseJson(line);
-    // 尾部半截行（活跃写入中断）：请求未完成 → 档 2
-    if (parsed === undefined) return { tier: "continue" };
-    if (typeof parsed !== "object" || parsed === null) continue;
-    const rec = parsed as { type?: unknown; message?: { role?: unknown; content?: unknown } };
-    if (rec.type !== "message" || typeof rec.message !== "object" || rec.message === null) {
-      continue; // 元数据行（session/custom/compaction/label）继续向前找
-    }
-    if (rec.message.role === "assistant") {
-      const text = extractAssistantTextContent(rec.message.content);
-      // 纯工具调用轮（无 text 块）= 引擎在工具循环中崩溃，回复未完成 → 档 2
-      return text !== undefined ? { tier: "collect", collectedContent: text } : { tier: "continue" };
-    }
-    // user（悬空 prompt）/ toolResult（工具结果后引擎死亡）→ 档 2
-    return { tier: "continue" };
-  }
-  // 无任何 message（仅 header）：会话在但从未有回复 → 档 2（续写从既有上下文起步）
-  return { tier: "continue" };
-}
-
-/** D8 档位判定（IO 包装）：读会话文件 → 纯逻辑判定；文件不存在/不可读 → 档 3。 */
-export function classifyResumeTier(
-  sessionFile: string | undefined,
-  readSession: MemberSessionReader = defaultSessionReader,
-): ResumeTierDecision {
-  if (sessionFile === undefined || sessionFile === "") return { tier: "restart" };
-  try {
-    return classifyResumeTierFromContent(readSession(sessionFile));
-  } catch {
-    return { tier: "restart" };
-  }
-}
-
-/** D8 判定的 per-call 结果（重派集成员逐个判档）。 */
-interface TierPlanEntry { // oe-exempt:20260929:framework:tier plan entry domain contract per design U2
-  taskIndex: number;
-  agentName: string;
-  /** 该 call 最后 agent-started 帧的 attempt（补收帧载荷）。 */
-  lastAttempt: number;
-  /** 子代理会话文件（同名 agent 最近 settled 帧的 result.sessionFile；无则档 3）。 */
-  sessionFile: string | undefined;
-  decision: ResumeTierDecision;
-}
-
-/**
- * 重派集 D8 判档：record 事件流 → 每个「有 started 无 settled」的 call 判档。
- *
- * 会话文件供源 = 同名 agentName 最近 agent-settled 帧的 result.sessionFile
- * （[D6] 绑定语义：同名 agent() 绑定同一子代理身份续写同一会话文件；路径随
- * result 全文落 record，无需跨层查 ExecutionRecord）。该 agent 从未有落定调用
- * （首次派发即崩）→ undefined（档 3 判据）。
- */
-function planResumeTiers(
-  events: readonly WorkflowRunEvent[],
-  readSession: MemberSessionReader,
-): TierPlanEntry[] {
-  const nameByTask = new Map<number, string>();
-  const lastAttemptByTask = new Map<number, number>();
-  const settledTasks = new Set<number>();
+function countResumePlan(events: readonly WorkflowRunEvent[]): ResumePlan {
+  const started = new Set<number>();
+  const settled = new Set<number>();
   for (const event of events) {
-    if (event.type === "agent-started") {
-      nameByTask.set(event.taskIndex, event.agentName);
-      lastAttemptByTask.set(event.taskIndex, event.attempt);
-    } else if (event.type === "agent-settled") {
-      settledTasks.add(event.taskIndex);
-    }
+    if (event.type === "agent-started") started.add(event.taskIndex);
+    else if (event.type === "agent-settled") settled.add(event.taskIndex);
   }
-  // 同名 agent 最近 settled 帧的 sessionFile（倒序扫描，首个命中即最近）
-  const lastSessionByAgent = new Map<string, string>();
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event?.type !== "agent-settled") continue;
-    const name = nameByTask.get(event.taskIndex);
-    if (name !== undefined && !lastSessionByAgent.has(name) && event.result?.sessionFile !== undefined) {
-      lastSessionByAgent.set(name, event.result.sessionFile);
-    }
-  }
-  const plan: TierPlanEntry[] = [];
-  for (const [taskIndex, agentName] of nameByTask) {
-    if (settledTasks.has(taskIndex)) continue; // 回放集，不判档
-    const sessionFile = lastSessionByAgent.get(agentName);
-    plan.push({
-      taskIndex,
-      agentName,
-      lastAttempt: lastAttemptByTask.get(taskIndex) ?? 1,
-      sessionFile,
-      decision: classifyResumeTier(sessionFile, readSession),
-    });
-  }
-  return plan;
+  let redispatch = 0;
+  for (const taskIndex of started) if (!settled.has(taskIndex)) redispatch += 1;
+  return { replay: settled.size, redispatch };
+}
+
+/** 恢复计划摘要（run-resumed 帧 reason 载荷 + debug 日志）。 */
+function summarizeResumePlan(plan: ResumePlan): string | undefined {
+  if (plan.replay === 0 && plan.redispatch === 0) return undefined;
+  return `resume plan: replay=${plan.replay} redispatch=${plan.redispatch}`;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -409,8 +287,6 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
   budgetTimeMs?: number;
   /** 时钟注入（epoch ms）；缺省 Date.now()——run-resumed 帧 ts 与预算算式的确定性测试通道。 */
   now?: () => number;
-  /** D8 会话文件读取注入（缺省 readFileSync）。 */
-  readMemberSession?: MemberSessionReader;
   /** 宿主标识（run-resumed 帧 host 载荷——跨进程锁裁决的胜出方语境）。 */
   host?: string;
 }
@@ -565,46 +441,10 @@ function assertResumeEligibility(
   return { events, created, activeElapsedMs, budgetTimeMs };
 }
 
-/**
- * [resumeRunLocked 拆分] 档 1 补收帧（段 5 尾，running × agent-settled 合法自环
- * ——补收事实入流，D1；幂等性：「run-resumed 落盘后、补收帧落盘前」崩溃 → 下次
- * resume 重判档 1 重新补收，会话文件仍在即幂等；时间窗内 record 无 settled 帧
- * 该 call 归重派集，无错档）。返回补收条数。
- */
-async function dispatchTierCollectFrames(
-  runId: string,
-  tierPlan: readonly TierPlanEntry[],
-  dispatchSource: { runId: string; journalDir?: string },
-  now: () => number,
-): Promise<number> {
-  let collectCount = 0;
-  for (const entry of tierPlan) {
-    if (entry.decision.tier !== "collect" || entry.decision.collectedContent === undefined) continue;
-    await dispatchRunTrigger(dispatchSource, {
-      type: "agent-settled",
-      taskIndex: entry.taskIndex,
-      attempt: entry.lastAttempt,
-      outcome: "done",
-      durationMs: 0,
-      result: {
-        content: entry.decision.collectedContent,
-        durationMs: 0,
-        ...(entry.sessionFile !== undefined ? { sessionFile: entry.sessionFile } : {}),
-      },
-      ts: now(),
-    });
-    collectCount += 1;
-    logger.warn(
-      `[workflow] resume tier-1 collect: call #${entry.taskIndex} ("${entry.agentName}") result ` +
-        `recovered from member session file without token spend (runId=${runId})`,
-    );
-  }
-  return collectCount;
-}
 
 /**
  * [resumeRunLocked 拆分] 段 6：重建聚合 + D10 预算标记 + worker 接管 + pending 信号。
- * 补收帧落盘后重读全量流重建（帧的 seq 由 journal.append 分配——重读拿权威序）。
+ * 按 record 流全量重读重建（事件 seq 由 journal.append 分配——重读拿权威序）。
  */
 function adoptResumedRun(
   runId: string,
@@ -616,8 +456,7 @@ function adoptResumedRun(
     activeElapsedMs: number;
     budgetTimeMs: number | undefined;
     resumedAt: number;
-    collectCount: number;
-    tierSummary: string | undefined;
+    plan: ResumePlan;
   },
   now: () => number,
 ): void {
@@ -654,10 +493,9 @@ function adoptResumedRun(
     deps.eventBus?.emit("pending:register", { id: runId, type: "workflow", name: run.spec.slug || run.spec.scriptName || runId });
     deps.log?.("debug", "workflow:resume-run", "run resumed", {
       runId,
-      replayCalls: summary.events.filter((e) => e.type === "agent-settled").length + summary.collectCount,
-      collectedCalls: summary.collectCount,
+      replayCalls: summary.plan.replay,
+      redispatchedCalls: summary.plan.redispatch,
       rescheduledBudgetMs: remainingBudgetMs,
-      tierSummary: summary.tierSummary,
     });
   } catch (err) {
     logger.error(
@@ -696,20 +534,20 @@ async function resumeRunLocked(
     );
   }
 
-  // ── 3. D8 三档判定（重派集判档；档 1 补收候选）──
-  const tierPlan = planResumeTiers(events, options?.readMemberSession ?? defaultSessionReader);
-  const tierSummary = summarizeTiers(tierPlan);
+  // ── 3. 恢复计划计数（[ADR-0092]：已提交结果回放 / 未完成调用重派）──
+  const plan = countResumePlan(events);
+  const planSummary = summarizeResumePlan(plan);
 
   // ── 4. v2 注册条目补写（裁决点 7：锁段内、先于复活事件，失败干净拒绝）──
   appendResumeRegisteredEntry(runId, deps, created, recordPath);
 
-  // ── 5. run-resumed 落 record（interrupted → running）+ 档 1 补收帧 ──
+  // ── 5. run-resumed 落 record（interrupted → running；不合成任何结果）──
   const dispatchSource = { runId, ...(options?.journalDir !== undefined ? { journalDir: options.journalDir } : {}) };
   const resumedAt = now();
   try {
     await dispatchRunTrigger(dispatchSource, {
       type: "run-resumed",
-      ...(tierSummary !== undefined ? { reason: tierSummary } : {}),
+      ...(planSummary !== undefined ? { reason: planSummary } : {}),
       ...(options?.host !== undefined ? { host: options.host } : {}),
       // 本次复活实际生效的预算随帧落盘（跨崩溃存续的数据面）：仅 > 0 落字段——
       // 未设/0/负值不落（与 run-created 同款条件式），读取面按「最近一条
@@ -726,7 +564,6 @@ async function resumeRunLocked(
         "before retrying the resume.",
     );
   }
-  const collectCount = await dispatchTierCollectFrames(runId, tierPlan, dispatchSource, now);
 
   // ── 6. 重建聚合 + D10 预算标记 + worker 接管 + pending 信号 ──
   // 补偿围栏：段 4/5 的失败都是干净拒绝（run-resumed 未落、状态无损），但本段在
@@ -739,7 +576,7 @@ async function resumeRunLocked(
   // 原异常照常上抛（调用方报错给用户）。
   try {
     adoptResumedRun(runId, deps, created, recordPath, {
-      events, activeElapsedMs, budgetTimeMs, resumedAt, collectCount, tierSummary,
+      events, activeElapsedMs, budgetTimeMs, resumedAt, plan,
     }, now);
   } catch (err) {
     // 回滚清账（D10）：noteRunResumedBudget 在段 6 首行写入（workerHost.start 之前）
@@ -800,21 +637,14 @@ function appendResumeRegisteredEntry(
   }
 }
 
-/** D8 判档摘要（run-resumed 帧 reason 载荷 + 日志）：按档位聚合计数。 */
-function summarizeTiers(plan: readonly TierPlanEntry[]): string | undefined {
-  if (plan.length === 0) return undefined;
-  const counts = new Map<ResumeTier, number>();
-  for (const e of plan) counts.set(e.decision.tier, (counts.get(e.decision.tier) ?? 0) + 1);
-  const label: Record<ResumeTier, string> = { collect: "collect(tier-1)", continue: "continue(tier-2)", restart: "restart(tier-3)" };
-  return `resume dispatch plan: ${[...counts].map(([t, n]) => `${n} ${label[t]}`).join(", ")}`;
-}
 
 /**
  * record 事件流 → 复活聚合重建（对齐壳侧 foldRecordStreamToRun 的 fold 语义，
  * core 侧独立实装——该函数未导出且属壳 Infra 层；两侧行为等价由 resume 测试
  * 与壳 record-mode 测试共同锁定）。
  *
- * 回放集 = 有 agent-settled 帧的 taskIndex（含档 1 补收帧）——done + result 全文；
+ * 回放集 = 有 agent-settled 帧的 taskIndex——done + result 全文（[ADR-0092]：结果只来自已提交，
+ * 恢复链不合成补收帧）；
  * 重派集（有 started 无 settled）不建条目：worker 重跑脚本到断点处重新发
  * agent-call(callId=N) → dispatchAgentCall miss → 真实派发（D8 档 2/3 经成员
  * 复用通道续写/新建）。budget 按恢复语义最小形态（record 流不承载预算）；args
