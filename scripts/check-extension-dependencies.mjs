@@ -15,7 +15,7 @@
  *    @taiji/*）时必须可解析（条目、extensions/shared/ 下包、或 packages/ 下包），
  *    防悬空引用；反向——包 package.json dependencies/peerDependencies 声明的
  *    @zhushanwen/* / @taiji/* 包必须登记进该条目 dependsOn，防漏登记
- *    （ADR-0074/C-ext-24 依赖登记方向机器防线）
+ *    （ADR-0074/C-ext-30 依赖登记方向机器防线）
  * 4. 分组：包必须在 taiji/（taiji 集成）或 universal/（独立通用）分组下；
  *    package.json 的 taiji.role 必须与所在分组一致；role=taiji 的包必须在
  *    mandatory-extensions.json（taiji 集成包随应用打包，见 docs/extensions/extension-conventions.md）
@@ -116,7 +116,7 @@ for (const entry of entries) {
 
 // ── 3b. 反向：package.json 声明的内部依赖必须登记进 dependsOn ──────
 // 正向（检查项 3）只防「登记了不存在的包」，防不了「真实依赖不登记」——依赖
-// 漏登记会让 ADR-0074/C-ext-24 的「依赖登记方向」只剩 review 兜底（extensions
+// 漏登记会让 ADR-0074/C-ext-30 的「依赖登记方向」只剩 review 兜底（extensions
 // 未经登记即可消费共享包/他包，绕过登记审计面）。反向闭环 = dependencies/
 // peerDependencies 声明的 @zhushanwen/* / @taiji/* 包必须出现在该条目
 // dependsOn，漏登记即红（type 不限：package/optional/runtime 均为合法登记形态）。
