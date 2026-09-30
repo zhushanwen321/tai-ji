@@ -4,6 +4,9 @@
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType, ServerMessage, PlanStateView, SessionSummary, SessionRevokeMessageReply } from '@taiji/shared'
+// hook 否决类分类码值常量（词表 SSOT = shared MessageBlockedCode）：message.send /
+// message.bash / delivery.submit 三落码点统一引用，不手抄字面量。
+import { MESSAGE_BLOCKED_CODE } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 import type { ISessionService } from '../interfaces.js'
 import type { HandoffService } from '../services/handoff-service.js'
@@ -953,7 +956,7 @@ export class SessionMessageHandler {
       return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'rejected' })
     }
     if (result.blocked) {
-      return this.ctx.sendError(ws, 'message_blocked', 'Message blocked by plugin hook', msg.id, { sessionId })
+      return this.ctx.sendError(ws, MESSAGE_BLOCKED_CODE, 'Message blocked by plugin hook', msg.id, { sessionId })
     }
     return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'sent' })
   }
@@ -981,7 +984,7 @@ export class SessionMessageHandler {
       return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'rejected' })
     }
     if (result.blocked) {
-      return this.ctx.sendError(ws, 'message_blocked', 'Bash execution failed', msg.id, { sessionId })
+      return this.ctx.sendError(ws, MESSAGE_BLOCKED_CODE, 'Bash execution failed', msg.id, { sessionId })
     }
     return this.ctx.reply(ws, msg.id, 'message.status', { sessionId, status: 'sent' })
   }
@@ -1027,7 +1030,7 @@ export class SessionMessageHandler {
     if (outcome.blocked) {
       // hook 否决：dispatcher 已广播 message.error（错误气泡），此处走 error envelope（带
       // msg.id）让 renderer 回滚乐观气泡——与 message.send blocked 先例同构，不得 reply success。
-      return this.ctx.sendError(ws, 'message_blocked', 'Message blocked by plugin hook', msg.id, { sessionId })
+      return this.ctx.sendError(ws, MESSAGE_BLOCKED_CODE, 'Message blocked by plugin hook', msg.id, { sessionId })
     }
     const result = outcome.receipt
     if (!result) {

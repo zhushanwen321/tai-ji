@@ -13,6 +13,8 @@ export type {
   // session.compact 失败分类码（msg-pipeline-debloat D4-2）：runtime handler 落码 +
   // core useChat toast 抑制判别跨包共用
   CompactErrorCode,
+  // hook 否决类分类码（message.send / message.bash / delivery.submit blocked）：同上跨包共用
+  MessageBlockedCode,
   TerminalConfig, TerminalErrorCode, TerminalUnknownErrorCode, TerminalEnvelopeCode,
   SkillCacheScope, SkillCacheInvalidatedPayload,
   SessionTraceHeaderPayload, SessionTraceMalformedLine, SessionTraceSessionEndPayload,
@@ -38,6 +40,9 @@ export type {
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
 export { TAIJI_NAV_COMMAND } from './protocol'
+// hook 否决类分类码值常量（msg-pipeline-debloat D4-2 同族）：runtime 落码点 +
+// core useChat 判别点统一引用，跨包禁止手抄字面量。
+export { MESSAGE_BLOCKED_CODE } from './protocol'
 // 消息撤回（U5，设计 D7）：撤回草稿还原纯函数族（剥标记 / 整批两层切条）——
 // core useChat reply 消费侧跨包取用，同 allowlist 纪律。
 export { stripDeliveryMarkers, restoreRevokedDraft } from './revoke-restore'

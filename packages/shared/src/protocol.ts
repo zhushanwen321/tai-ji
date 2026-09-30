@@ -948,6 +948,24 @@ export type WorktreeEnvelopeCode = WorktreeErrorCode | WorktreeUnknownErrorCode
  */
 export type CompactErrorCode = 'compact_busy' | 'compact_failed'
 
+/**
+ * hook 否决类 RPC 失败的分类码（msg-pipeline-debloat D4-2，runtime ↔ renderer 契约 SSOT）。
+ *
+ * 产生点：session-message-handler 的 message.send / message.bash / delivery.submit 三
+ * handler 对 BeforeSend hook 否决（blocked 失败）统一落的 error envelope code——否决时
+ * dispatcher 已广播 message.error 错误气泡（用户可见呈现已编排）。
+ *
+ * 消费点：core useChat 的 send / sendBash / delivery toast 抑制判别——envelope 携带本码 =
+ * 抑制全局错误 toast（与 CompactErrorCode 同判别框架；未登记/未知 code 保守回退为 toast
+ * 兜底，错误可见性优先）。
+ *
+ * 值常量 MESSAGE_BLOCKED_CODE 供 runtime 落码点与 core 判别点统一引用，
+ * 禁止跨包手抄字面量（手抄码名漂移时 tsc 不拦，静默退化为保守 toast 路径）。
+ */
+export type MessageBlockedCode = 'message_blocked'
+/** MessageBlockedCode 的值形态（runtime 落码点 / core 判别点统一引用） */
+export const MESSAGE_BLOCKED_CODE: MessageBlockedCode = 'message_blocked'
+
 export type ServerMessageType =
   | 'session.created' | 'session.deleted' | 'session.deletedByCwd' | 'config.sessions' | 'session.history' | 'session.switched'
   | 'session.compacting' | 'session.compacted' | 'session.renamed' | 'session.forkNotice' | 'session.skillNotice' | 'session.handoffStarted' | 'session.handoffComplete' | 'session.handoffAborted' | 'session.setProject'

@@ -18,8 +18,8 @@
  *
  * abort：调 api.chat.abort（方法存在，中断流转 DEFERRED G-025）。
  */
-import type { Segment, ServerMessage, CompactErrorCode } from '@taiji/shared'
-import { segmentsToPrompt, restoreRevokedDraft, markerLiteral } from '@taiji/shared'
+import type { Segment, ServerMessage, CompactErrorCode, MessageBlockedCode } from '@taiji/shared'
+import { segmentsToPrompt, restoreRevokedDraft, markerLiteral, MESSAGE_BLOCKED_CODE } from '@taiji/shared'
 import {
   subscribeSession,
   clearSubscription,
@@ -101,7 +101,8 @@ const streamSubscriptions = new Map<string, () => void>()
  * RPC 失败的 toast 抑制判别（msg-pipeline-debloat D4-2）：按 error envelope 分类码路由，
  * 不依赖事件到达顺序推断。
  *
- * envelope 携带 runtime 分类码（CompactErrorCode / 'message_blocked'）= 错误的
+ * envelope 携带 runtime 分类码（CompactErrorCode / MessageBlockedCode，词表 SSOT 在
+ * shared protocol.ts）= 错误的
  * 用户可见呈现已由 runtime 侧编排——compact_busy → 对话流 system 提示（dispatcher
  * stream_warn）；compact_failed → interpreter 对话流（compaction 级失败）或 session
  * 状态面（ensureActive 失败）；message_blocked → 错误气泡（dispatcher 广播——BeforeSend
@@ -124,8 +125,10 @@ function isTransportLevelFailure(e: unknown, classifiedCodes: readonly string[])
 const COMPACT_CLASSIFIED_CODES: readonly CompactErrorCode[] = ['compact_busy', 'compact_failed']
 
 /** hook 否决类 RPC 的已分类码（message.send / message.bash / delivery.submit 三 handler
- * 对 blocked 失败落的同一码，dispatcher 已广播 message.error 错误气泡）。 */
-const BLOCKED_CLASSIFIED_CODE = 'message_blocked'
+ * 对 blocked 失败落的同一码，dispatcher 已广播 message.error 错误气泡）。值经 shared
+ * 词表单点引用（MESSAGE_BLOCKED_CODE，与 CompactErrorCode 同 SSOT）——本文件不再
+ * 手抄字面量，码名漂移在编译期即失配。 */
+const BLOCKED_CLASSIFIED_CODE: MessageBlockedCode = MESSAGE_BLOCKED_CODE
 
 /**
  * [session-occupancy-send-closure D2 → 投递所有权内核 u3b 退役] per-session 未决直发记录
@@ -971,7 +974,7 @@ export function createUseChat(deps: UseChatDeps) {
    * 留痕输入未恢复（restoreInput 待壳层注入）。早退无。
    *
    * toast 抑制判别（msg-pipeline-debloat D4-2）：error envelope 携带分类码
-   * 'message_blocked'（runtime bash handler 对 blocked 失败落的码，错误气泡已广播）=
+   * MessageBlockedCode（runtime bash handler 对 blocked 失败落的码，错误气泡已广播）=
    * 终态呈现已编排，抑制 toast；transport 级（backstop 超时 / 断连 / 溢出驱逐）保守
    * toast 兜底。
    *
