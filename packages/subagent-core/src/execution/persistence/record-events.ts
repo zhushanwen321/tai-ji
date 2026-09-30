@@ -212,6 +212,10 @@ export interface RecordRoundStartedEvent extends RecordEventEnvelope { // oe-exe
  */
 export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-round-idle";
+  /** 轮终时点的累计轮数（[② 读侧换源] ——轮计数进轮终收条帧：revive 水合的折叠源，
+   *  原 `.record-binding` round 快照的承载接替；首轮轮终（无 round-started 帧）也在此
+   *  落盘轮计数）。 */
+  round: number;
   /** 轮终停因（StopReason 值域——「为什么停」的轮粒度权威词）。 */
   stopReason: StopReason;
   /**
@@ -404,7 +408,8 @@ export function applyRecordEvent(
         lastEvent: event,
       };
     case "record-round-idle":
-      return { ...state, roundIdle: event, lastSeq: event.seq, lastEvent: event };
+      // 轮终 = 轮计数推进（帧载荷自带累计轮数——[② 读侧换源] revive 水合的折叠源）。
+      return { ...state, roundIdle: event, round: event.round, lastSeq: event.seq, lastEvent: event };
     case "record-settled":
       return { ...state, settled: event, lastSeq: event.seq, lastEvent: event };
     case "record-reopened":

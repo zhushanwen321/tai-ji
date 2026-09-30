@@ -279,6 +279,9 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   ctx.appendJournalEvent(rec, {
     type: "record-round-idle",
     ts: Date.now(),
+    // 轮终时点的累计轮数（[② 读侧换源] ——revive 水合 round 的折叠源，原 binding
+    // round 快照的承载接替；③ increment 已在上方法簿记③完成）。
+    round: rec.round ?? 0,
     stopReason,
     turns: rec.turnCount,
     totalTokens: rec.totalTokens,

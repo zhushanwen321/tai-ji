@@ -46,8 +46,14 @@ import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-e
 import { SUBAGENT_RECORD_CUSTOM_TYPE, SUBAGENT_RECORD_ENTRY_VERSION } from "../persistence/record-entry.ts";
 import type { StatusFilter } from "../persistence/record-store.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { seedTerminalRecord } from "./helpers/seed-terminal-record.ts";
-import { manifestToSubagent, stateMarkerFromFold, v2PairToRecord } from "../persistence/record-store-rebuild.ts";
+import { seedTerminalRecord, seedTerminalRecordForSessionFile } from "./helpers/seed-terminal-record.ts";
+import {
+  baselineStatisticsFromFold,
+  manifestToSubagent,
+  receiptStatisticsFromFold,
+  stateMarkerFromFold,
+  v2PairToRecord,
+} from "../persistence/record-store-rebuild.ts";
 import type { V2EntryPair } from "../persistence/record-store-rebuild.ts";
 import { foldRecordEvents } from "../persistence/record-events.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
@@ -536,9 +542,11 @@ describe("RecordStore", () => {
 
   // ============================================================
   // endedAt 重建（问题 2 修复：终态耗时不再随墙钟增长）
+  // [② 读侧换源] 统计域源 = 折叠收条（record-settled / 轮终收条帧）：
+  //   idle 收条形态 → 正向断言（值来自折叠）；在途/中断无收条形态 → 保持 undefined。
   // ============================================================
   describe("endedAt 重建（耗时不再无限增长）", () => {
-    it("无 sidecar（idle, §3.2.4 单规则）→ endedAt 保持 undefined（非终态，与内存 settle 形态一致）", () => {
+    it("无收条事件（在途中断）→ endedAt 保持 undefined（非终态，与内存 settle 形态一致）", () => {
       const sessionFile = path.join(tmpDir, "crash.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "bg-1", agent: "w", mode: "background", task: "t",
@@ -562,6 +570,79 @@ describe("RecordStore", () => {
       const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
       expect(found?.status).toBe("idle");
       expect(found?.endedAt).toBeUndefined();
+    });
+
+    it("[② 读侧换源] record-settled 收条在场 → endedAt/turns/totalTokens 正向取折叠终值", () => {
+      const sessionFile = path.join(tmpDir, "settled.jsonl");
+      const recordsDir = path.join(tmpDir, "records");
+      writeSessionJsonl(sessionFile, {
+        id: "bg-1", agent: "w", mode: "background", task: "t",
+        startedAt: 5000, lastTs: 9000, rootSessionId: "sess-A",
+      });
+      seedTerminalRecordForSessionFile(sessionFile, recordsDir, {
+        stopReason: "completed",
+        endedAt: 9000,
+        turns: 4,
+        totalTokens: 60725,
+      });
+      const store = new RecordStore(tmpDir, undefined, undefined, recordsDir);
+      const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
+      expect(found?.status).toBe("idle");
+      expect(found?.stopReason).toBe("completed");
+      expect(found?.endedAt).toBe(9000);
+      expect(found?.turns).toBe(4);
+      expect(found?.totalTokens).toBe(60725);
+    });
+
+    it("[② 读侧换源] 轮终收条是最后一条事件 → endedAt 取 round-idle ts（轮终留存形态）", () => {
+      const sessionFile = path.join(tmpDir, "round-idle.jsonl");
+      const recordsDir = path.join(tmpDir, "records");
+      writeSessionJsonl(sessionFile, {
+        id: "bg-1", agent: "w", mode: "background", task: "t",
+        startedAt: 5000, lastTs: 9000, rootSessionId: "sess-A",
+      });
+      seedTerminalRecordForSessionFile(sessionFile, recordsDir, {
+        stopReason: "completed",
+        idleRound: { round: 2, ts: 8800, turns: 2, totalTokens: 300 },
+      });
+      const store = new RecordStore(tmpDir, undefined, undefined, recordsDir);
+      const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
+      expect(found?.status).toBe("idle");
+      expect(found?.endedAt).toBe(8800);
+      expect(found?.turns).toBe(2);
+      expect(found?.totalTokens).toBe(300);
+      expect(found?.round).toBe(2);
+    });
+
+    it("[② 读侧换源] 轮终收条之后又轮开始（在途续轮）→ 统计不投影（0/undefined，round 取当前轮）", () => {
+      const sessionFile = path.join(tmpDir, "round-idle-then-start.jsonl");
+      writeSessionJsonl(sessionFile, {
+        id: "bg-1", agent: "w", mode: "background", task: "t",
+        startedAt: 5000, lastTs: 9000, rootSessionId: "sess-A",
+      });
+      // 手写帧序：created → round-started(1) → round-idle → round-started(2)——在途续轮。
+      const id = "bg-1";
+      const frames = [
+        JSON.stringify({ type: "record-created", seq: 1, ts: 5000, id, agent: "w", task: "t", slug: "s", origin: "tool", rootSessionId: "sess-A", depth: 0, mode: "background", startedAt: 5000 }),
+        JSON.stringify({ type: "record-round-started", seq: 2, ts: 5100, round: 1, epoch: 0 }),
+        JSON.stringify({ type: "record-round-idle", seq: 3, ts: 5200, round: 1, stopReason: "completed", turns: 7, totalTokens: 999 }),
+        JSON.stringify({ type: "record-round-started", seq: 4, ts: 5300, round: 2, epoch: 0 }),
+      ];
+      fs.mkdirSync(path.join(tmpDir, "records"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "records", `${id}.events`),
+        `${JSON.stringify({ type: "record-events", id })}\n${frames.join("\n")}\n`,
+        "utf-8",
+      );
+      const store = new RecordStore(tmpDir, undefined, undefined, path.join(tmpDir, "records"));
+      const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
+      expect(found?.status).toBe("idle"); // 重建单规则兜底（无收条 → interrupted-by-restart 展示）
+      expect(found?.stopReason).toBe("interrupted-by-restart");
+      // 上一轮的统计不投影（lastEvent 守卫）；round 取当前轮（round-started 携带）。
+      expect(found?.endedAt).toBeUndefined();
+      expect(found?.turns).toBe(0);
+      expect(found?.totalTokens).toBe(0);
+      expect(found?.round).toBe(2);
     });
   });
 
@@ -1628,6 +1709,7 @@ describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
     type: "record-round-idle" as const,
     seq: 2,
     ts: 2000,
+    round: 1,
     stopReason: "completed" as const,
     turns: 1,
     totalTokens: 10,
@@ -1671,5 +1753,101 @@ describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
   it("无收条事件 / 无折叠 → undefined（在途中断，与 sidecar 缺席同语义）", () => {
     expect(stateMarkerFromFold(undefined)).toBeUndefined();
     expect(stateMarkerFromFold(foldRecordEvents([]))).toBeUndefined();
+  });
+});
+
+describe("[② 读侧换源] receiptStatisticsFromFold / baselineStatisticsFromFold（统计域投影）", () => {
+  const created = {
+    type: "record-created" as const,
+    seq: 1,
+    ts: 1000,
+    id: "sa-stats",
+    agent: "w",
+    task: "t",
+    slug: "s",
+    origin: "tool" as const,
+    rootSessionId: "root",
+    depth: 0,
+    mode: "background" as const,
+    startedAt: 1000,
+  };
+  const roundIdle = {
+    type: "record-round-idle" as const,
+    seq: 2,
+    ts: 2000,
+    round: 1,
+    stopReason: "completed" as const,
+    turns: 3,
+    totalTokens: 450,
+  };
+  const settled = {
+    type: "record-settled" as const,
+    seq: 3,
+    ts: 3000,
+    stopReason: "completed" as const,
+    endedAt: 3000,
+    turns: 5,
+    totalTokens: 900,
+  };
+
+  it("收条形（receiptStatistics）：settled 在场 → 终值 turns/tokens + endedAt=settled.endedAt", () => {
+    const stats = receiptStatisticsFromFold(foldRecordEvents([created, roundIdle, settled]));
+    // round 取 round-idle 帧自带的累计轮数（[② 读侧换源] 轮终收条承载轮计数）。
+    expect(stats).toEqual({ round: 1, turns: 5, totalTokens: 900, endedAt: 3000 });
+  });
+
+  it("收条形：仅轮终收条且是最后一条事件 → 轮终快照（endedAt 取 round-idle ts）", () => {
+    const stats = receiptStatisticsFromFold(foldRecordEvents([created, roundIdle]));
+    expect(stats).toEqual({ round: 1, turns: 3, totalTokens: 450, endedAt: 2000 });
+  });
+
+  it("收条形：轮终收条之后又有轮开始（在途续轮）→ 统计不投影、round 仍携带", () => {
+    const stats = receiptStatisticsFromFold(
+      foldRecordEvents([created, roundIdle, { type: "record-round-started", seq: 3, ts: 3000, round: 2, epoch: 0 }]),
+    );
+    expect(stats).toEqual({ round: 2, turns: undefined, totalTokens: undefined, endedAt: undefined });
+  });
+
+  it("收条形：无收条 / 无折叠 → 全 undefined（在途中断不误投影）", () => {
+    expect(receiptStatisticsFromFold(undefined)).toEqual({
+      round: undefined,
+      turns: undefined,
+      totalTokens: undefined,
+      endedAt: undefined,
+    });
+    expect(receiptStatisticsFromFold(foldRecordEvents([created]))).toEqual({
+      round: undefined,
+      turns: undefined,
+      totalTokens: undefined,
+      endedAt: undefined,
+    });
+  });
+
+  it("基线形（baselineStatistics）：无 last-event 守卫——轮中崩溃取最近轮终快照（revive 水合语义）", () => {
+    // round-idle 之后又 round-started（轮中崩溃形态）：基线仍取上一条 round-idle。
+    const inFlightCrash = foldRecordEvents([
+      created,
+      roundIdle,
+      { type: "record-round-started", seq: 3, ts: 3000, round: 2, epoch: 0 },
+    ]);
+    expect(baselineStatisticsFromFold(inFlightCrash)).toEqual({
+      round: 2,
+      turns: 3,
+      totalTokens: 450,
+      endedAt: 2000,
+    });
+    // settled 在场取终值。
+    expect(baselineStatisticsFromFold(foldRecordEvents([created, settled]))).toEqual({
+      round: undefined,
+      turns: 5,
+      totalTokens: 900,
+      endedAt: 3000,
+    });
+    expect(baselineStatisticsFromFold(undefined)).toEqual({
+      round: undefined,
+      turns: undefined,
+      totalTokens: undefined,
+      endedAt: undefined,
+    });
   });
 });

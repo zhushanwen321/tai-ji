@@ -92,14 +92,10 @@ import { getLogger } from "../../core/logger.ts";
 
 import { snapshot as toSnapshot } from "./execution-record.ts";
 import { RECORD_EVENTS_SUFFIX, recordEventsPath } from "./record-events.ts";
-// [UF-1] record 绑定 sidecar：宿主侧 id→file 映射（engine-CLI 化后子文件无 identity
-// entry 时代的身份载体）——scanFile 探测分支在 identity miss 时消费它重建 light record。
-// [身份换源第一步] 身份腿已先走事件流折叠（identityFromFold + 事件目录 id 反查），
-// 绑定只作兜底（存量/残事件文件形态），写点退场时本 import 随之消失。
 // [U7 / §3.2.7 统计口径] zcodeAnchorBasePath 供 zcode 锚的 binding/写权声明键派生
 // （U6-D2 交接：binding 键 = 锚基底 + 扩展名，pi 锚基底 = 子 session 文件路径）；
-// binding 读写函数的调用已随终态轴/投影轴外迁（readRecordBinding/writeRecordBinding/
-// updateRecordBinding 仅经轴文件 import——读函数与 binding 写不在 D7 七名拦截面）。
+// [身份换源第二步] scanFile 的身份/统计读侧已全部换源事件流折叠——本文件对
+// .record-binding 只剩戳职责（写面覆盖写变 mtime，击穿缓存），读函数零调用。
 import type { StateMarker } from "./state-marker.ts";
 import { RECORD_BINDING_SIDECAR_EXT } from "./state-marker.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
@@ -139,11 +135,10 @@ import {
   compareRecords,
   derivedManifestRecord,
   detectIdentity,
-  identityFromBinding,
   identityFromFold,
   isFreshCache,
   manifestToSubagent,
-  readSidecarPayloads,
+  receiptStatisticsFromFold,
   recordToSubagent,
   sameNullableStamp,
   sameStamp,
@@ -152,7 +147,7 @@ import {
   terminalManifestRecord,
   v2PairToRecord,
 } from "./record-store-rebuild.ts";
-import type { FileCacheEntry, FileCacheValue, FileStamps, SidecarPayloads, Stamp } from "./record-store-rebuild.ts";
+import type { FileCacheEntry, FileCacheValue, FileStamps, Stamp } from "./record-store-rebuild.ts";
 // [H4 三轴拆分] 终态原语轴（record-store-terminal.ts）：markFinalized/markCancelled/
 // markSettled/markSettledOut 等终态/settle/收口动作原语实现 + binding settle 快照族——
 // 经 TerminalCtx 注入本类写面（七名写函数调用字面只留在本文件，D7 守卫零改动）。
@@ -390,6 +385,9 @@ export class RecordStore {
       appendJournalEvent: (r, input) => {
         this.eventStreamFace?.appendJournal(r.id, input);
       },
+      // [② 读侧换源] fold 访问注入位（markResurrected 的 revive 基线水合读事件面
+      // 折叠——调用时解引用，事件面未接线（纯内存形态）返回 undefined = 水合 no-op）。
+      foldOf: (id) => this.eventStreamFace?.foldOf(id),
       notifyChange: () => this.notifyChange(),
     };
     // 轮次轴通道绑定：records 共享引用；写函数调用时解引用（同上——懒访问形态）。
@@ -1525,14 +1523,14 @@ export class RecordStore {
   }
 
   /**
-   * 扫描单文件：stat 戳（jsonl + 终态 sidecar + record 绑定）校验，全同 →
+   * 扫描单文件：stat 戳（jsonl + record 绑定写面戳）校验，全同 →
    * 复用缓存（零文件读取，含负缓存直接返回 null）；否则重建 light。
-   * identity 定位三级：头部 64KB（首轮会话）→ 全文 fallback（续聊场景 identity
-   * append 在尾部）；两级都找不到 → [身份换源第一步] 事件流折叠（`foldOf(id)`，
-   * id 经事件目录反查——见 fileToRecordId 字段注释）→ [UF-1] 仍无则 record 绑定
-   * sidecar 兜底（宿主侧身份载荷；binding 写点退场后本腿消失）→ 三腿皆空 → 写负
-   * 缓存（防每轮全文重读）。
-   * 返回 null：文件消失/读失败/无 identity 且无绑定 → 跳过。
+   * identity 定位两级：头部 64KB（首轮会话）→ 全文 fallback（续聊场景 identity
+   * append 在尾部）；两级都找不到 → [身份换源] 事件流折叠（`foldOf(id)`，
+   * id 经事件目录反查——见 fileToRecordId 字段注释）→ 两级皆空 → 写负缓存
+   * （防每轮全文重读）。[身份换源第二步] 旧 binding 兜底腿已退场（事件流是唯一
+   * 身份权威，无存量数据不留兼容读）。
+   * 返回 null：文件消失/读失败/无 identity → 跳过。
    */
   private scanFile(file: string): FileCacheEntry | null {
     const jsonl = statStamp(file);
@@ -1555,47 +1553,46 @@ export class RecordStore {
     // 条目戳匹配 jsonl 当前 stat → 零内容读取构造缓存条目。undefined = 未命中
     // （落到下方探测），null = 负条目命中（零探测跳过）。
     // [UF-1] 绑定 sidecar 存在的文件跳过索引投影：SessionsIndexEntry 不含
-    // round（身份域子集），索引命中会把绑定承载的轮次域抹成 undefined。
+    // round（身份域子集），索引命中会把绑定承载的轮次域抹成 undefined。本 guard
+    // 随绑定写点退场自然消失（写点仍在——run 应答回填 / settle 快照），读侧不消费
+    // 载荷、只剩戳职责。
     if (stamps.binding === null) {
       const fromIndex = this.buildEntryFromIndex(file, stamps);
       if (fromIndex !== undefined) return fromIndex;
     }
 
-    // [perf L-1] 索引 miss/戳不匹配落到原三级探测：本轮探测结果必须进索引（含负探测）。
+    // [perf L-1] 索引 miss/戳不匹配落到原两级探测：本轮探测结果必须进索引（含负探测）。
     // 覆盖两种形态：首扫（映像已装载但 miss/不匹配）与后续轮次（映像已释放，凡进重建分支必是戳变化）。
     this.indexDirty = true;
 
-    const payloads = readSidecarPayloads(file, stamps);
     const header = detectIdentity(file, jsonl.size);
-    // [身份换源第一步] 身份源三级：子文件 identity entry（历史权威，命中时其余不
-    // 参与）→ 事件流折叠（事件流是唯一事实源：id 经事件目录反查，身份域 +
-    // model/thinkingLevel/worktree 取 record-created 载荷）→ record 绑定 sidecar
-    // （engine-CLI 化后子文件无身份 entry 时代的宿主侧映射；绑定写点退场后本腿
-    // 随绑定一起消失）。三者皆缺 → 负缓存。
-    const base = header ?? this.identityFromFoldByFile(file) ?? identityFromBinding(payloads.binding, file);
+    // [身份换源] 身份源两级：子文件 identity entry（历史权威，命中时其余不参与）
+    // → 事件流折叠（事件流是唯一事实源：id 经事件目录反查，身份域 + model/
+    // thinkingLevel/worktree 取 record-created 载荷）。两级皆缺 → 负缓存。
+    const base = header ?? this.identityFromFoldByFile(file);
     if (!base) {
       // 负缓存：确认无 identity。后续扫描 stat 命中直接跳过；戳变化（文件补写 /
       // 绑定后到落盘）自动重试。
       this.fileCache.set(file, { negative: true, ...stamps });
       return null;
     }
-    // 终态收条 = 折叠结果（事件流是唯一事实源；`.state` sidecar 已退场）。
-    const state = stateMarkerFromFold(this.eventStreamFace?.foldOf(base.id));
-    const entry = buildFileCacheEntry(base, file, stamps, payloads, state, this.eventsStampOfId(base.id));
-    // [U7 / §3.2.7 统计口径单基准] binding 补投影扩展到 identity 基底（原仅 binding
-    // 基底）：binding 快照是 settle 写点的统计权威（.state 收条不冗余承载 round/
-    // usage，§3.2.4），light 重建一律从 binding 恢复 turns/tokens/round/endedAt 终值
-    // ——「冷复活前后计数一致」的读侧半边（写侧 = markSettled 快照 + markResurrected
-    // 水合）。快照可滞后于在飞轮（settle 后 jsonl 续写），此时 record 在内存由
-    // mergedRecords 内存源覆盖（内存增量覆盖磁盘终值），详情走 getFullRecord 从
-    // jsonl 全量重放——三面优先级衔接无跳变。
-    if (payloads.binding !== undefined) {
-      const b = payloads.binding;
-      if (b.round !== undefined) entry.light.round = b.round;
-      if (b.totalTokens !== undefined) entry.light.totalTokens = b.totalTokens;
-      if (b.turns !== undefined) entry.light.turns = b.turns;
-      if (b.endedAt !== undefined) entry.light.endedAt = b.endedAt;
-    }
+    // 终态收条与统计域 = 折叠结果（事件流是唯一事实源；`.state` / binding 读侧
+    // 均已退场）。fold 取一次，收条（stopReason/endedAt）与统计（round/turns/
+    // totalTokens/endedAt）共用同一折叠态。
+    const fold = this.eventStreamFace?.foldOf(base.id);
+    const state = stateMarkerFromFold(fold);
+    const entry = buildFileCacheEntry(base, file, stamps, state, this.eventsStampOfId(base.id));
+    // [U7 / §3.2.7 统计口径单基准] 统计域换源折叠（原 binding 快照补投影的接替）：
+    // light 重建从收条事件恢复 round/turns/tokens/endedAt 终值——「冷复活前后计数
+    // 一致」的读侧半边（写侧 = settle/轮终事件 + markResurrected 水合）。快照可滞后
+    // 于在飞轮（settle 后 jsonl 续写），此时 record 在内存由 mergedRecords 内存源
+    // 覆盖（内存增量覆盖磁盘终值），详情走 getFullRecord 从 jsonl 全量重放——三面
+    // 优先级衔接无跳变。
+    const stats = receiptStatisticsFromFold(fold);
+    if (stats.round !== undefined) entry.light.round = stats.round;
+    if (stats.totalTokens !== undefined) entry.light.totalTokens = stats.totalTokens;
+    if (stats.turns !== undefined) entry.light.turns = stats.turns;
+    if (stats.endedAt !== undefined) entry.light.endedAt = stats.endedAt;
     this.fileCache.set(file, entry);
     this.idToFile.set(base.id, file);
     return entry;
@@ -1603,11 +1600,10 @@ export class RecordStore {
 
   /**
    * [perf L-1] 磁盘索引查询（首扫惰性装载，miss/空索引时 get 恒 undefined = 无索引）。
-   * 条目戳匹配 jsonl 当前 stat → 零内容读取构造缓存条目。sidecar payload（终态 marker）
-   * 是活态数据，沿用探测分支的每轮重读语义；终态 reason 静态数据仅在 sidecar 存在
-   * 时读一次（文件小，成本可忽略）。
+   * 条目戳匹配 jsonl 当前 stat → 零内容读取构造缓存条目。终态收条是活态数据的快照
+   * （stopReason/endedAt/turns/totalTokens 随事件戳第四维校验——戳不匹配即过期重探）。
    *
-   * 返回 undefined = 索引未命中/戳不匹配（调用方落到原三级探测）；null = 负条目命中
+   * 返回 undefined = 索引未命中/戳不匹配（调用方落到探测分支）；null = 负条目命中
    * （「确认无 identity」跨实例持久，零探测跳过，与内存负缓存同款形态）。
    */
   private buildEntryFromIndex(file: string, stamps: FileStamps): FileCacheEntry | null | undefined {
@@ -1628,9 +1624,9 @@ export class RecordStore {
         ? { mtimeMs: hit.eventsMtimeMs, size: hit.eventsSize }
         : null;
     if (!sameNullableStamp(hitEvents, events)) return undefined;
-    // 终态收条自索引读出（① 快路径换源：不再读 .state sidecar）；无收条条目
-    //（无收条事件 = 在途中断，或存量索引形态）落回 sidecar 读取。
-    const payloads: SidecarPayloads = { binding: undefined };
+    // 终态收条自索引读出（快路径换源：不再读 `.state` sidecar，也不读 binding）；
+    // 统计域同源（v3：turns/totalTokens 随收条入索引——快路径零内容读取即可回答
+    // 「为什么停/何时停/停时多少量」）。无收条条目（无收条事件 = 在途中断）不投影。
     const state: StateMarker | undefined =
       hit.receipt !== undefined
         ? { status: "idle", reason: hit.receipt.stopReason, endedAt: hit.receipt.endedAt }
@@ -1651,10 +1647,18 @@ export class RecordStore {
       },
       file,
       stamps,
-      payloads,
       state,
       events,
     );
+    // 统计域补投影（与探测分支 receiptStatisticsFromFold 同形）：收条在场的条目
+    // turns/totalTokens 取索引自承值；round 索引不承载（既有缺口——round 只在
+    // round-started/reopened 帧与 binding，索引命中路径 round 缺席，下轮戳变化
+    // 重探补齐），登记于此。
+    if (hit.receipt !== undefined) {
+      if (hit.totalTokens !== undefined) entry.light.totalTokens = hit.totalTokens;
+      if (hit.turns !== undefined) entry.light.turns = hit.turns;
+      if (hit.receipt.endedAt !== undefined) entry.light.endedAt = hit.receipt.endedAt;
+    }
     this.fileCache.set(file, entry);
     this.idToFile.set(hit.id, file);
     return entry;
@@ -1790,10 +1794,13 @@ export class RecordStore {
           origin: cached.light.origin,
           parentRunId: cached.light.parentRunId,
           // v2：事件文件戳（缓存键第四维）与终态收条（索引自承终态域——快路径零内容
-          // 读取即可回答「为什么停/何时停」，不必再读 .state sidecar）。
+          // 读取即可回答「为什么停/何时停」）。
           ...(cached.events !== null
             ? { eventsMtimeMs: cached.events.mtimeMs, eventsSize: cached.events.size }
             : {}),
+          // v3：收条统计域随收条入索引（turns/totalTokens——[② 读侧换源] 后 light
+          // 统计来自折叠收条，索引自承后快路径不必读事件文件）。round 不入索引
+          //（既有缺口，见 buildEntryFromIndex 消费侧登记）。
           ...(cached.stateMarker !== undefined &&
           cached.stateMarker.status === "idle" &&
           cached.stateMarker.reason !== undefined &&
@@ -1803,6 +1810,8 @@ export class RecordStore {
                   stopReason: cached.stateMarker.reason,
                   endedAt: cached.stateMarker.endedAt,
                 },
+                turns: cached.light.turns,
+                totalTokens: cached.light.totalTokens,
               }
             : {}),
         });

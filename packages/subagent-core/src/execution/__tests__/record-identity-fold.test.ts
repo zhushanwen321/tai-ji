@@ -1,12 +1,13 @@
 // src/execution/__tests__/record-identity-fold.test.ts
 //
-// [身份换源第一步] 子文件无 identity entry 时，身份域从事件流折叠取得
-// （record-store.scanFile：identity entry → **事件流折叠** → .record-binding 兜底）。
+// [身份换源] 子文件无 identity entry 时，身份域从事件流折叠取得
+// （record-store.scanFile：identity entry → **事件流折叠**；[身份换源第二步] 后
+// binding 兜底腿已退场，折叠是 identity entry 之外的唯一身份源，统计域同源）。
 //
-// 背景（event-sourcing 收敛）：`.state` 收条退场后，`.record-binding` 是最后一个
-// 「身份域的旁路载体」。事件流已承载它的全部独有字段（身份域 + model/thinkingLevel/
-// worktree 在 record-created；sessionFile/engine/engineHandle 在 record-bound），
-// 因此读侧要先问折叠，绑定只兜存量/残事件文件形态。
+// 背景（event-sourcing 收敛）：`.state` 收条与 `.record-binding` 读侧均已退场，
+// 事件流是身份域与统计域的唯一事实源（身份域 + model/thinkingLevel/worktree 在
+// record-created；sessionFile/engine/engineHandle 在 record-bound；收条与统计在
+// record-settled / record-round-idle）。
 //
 // 本套件锁定的关键难点 = **折叠的 id 入口**：折叠要 record id，而子文件没有 identity
 // entry 时 id 无从由身份来。结构性入口 = 事件目录本身（文件名主名即 id，文件内
@@ -147,7 +148,7 @@ async function seedSettledFrame(recordsDir: string): Promise<void> {
   });
 }
 
-describe("[身份换源第一步] 无 identity entry 子文件的身份域 = 事件流折叠", () => {
+describe("[身份换源] 无 identity entry 子文件的身份域 = 事件流折叠", () => {
   let agentDir: string;
   let sessionsDir: string;
   let recordsDir: string;
@@ -198,10 +199,11 @@ describe("[身份换源第一步] 无 identity entry 子文件的身份域 = 事
     // 终态收条（折叠的 record-settled 帧，非 .state sidecar）
     expect(rec.status).toBe("idle");
     expect(rec.stopReason).toBe("completed");
-    // 统计域仍走 binding 快照投影（scanFile 的 binding round/turns/tokens/endedAt 补投影，
-    // 本步只换身份域）——无 binding 时 light 的 endedAt 缺省 undefined，步 2 退场绑定
-    // 时这条统计腿要一并换源（折叠 record-settled.endedAt）。
-    expect(rec.endedAt).toBeUndefined();
+    // [② 读侧换源] 统计域已换源折叠收条：endedAt/turns/totalTokens 取 settled 帧
+    //（原 binding 快照投影随读侧换源退场——登记项的落地翻转）。
+    expect(rec.endedAt).toBe(STARTED_AT + 2000);
+    expect(rec.turns).toBe(1);
+    expect(rec.totalTokens).toBe(30);
   });
 
   it("对照组：无事件文件也无绑定 → 不重建（证明重建确由折叠腿承载，不是别的兜底）", () => {
@@ -219,7 +221,7 @@ describe("[身份换源第一步] 无 identity entry 子文件的身份域 = 事
     expect(store.collectRecords(10, "all", undefined, true)).toEqual([]);
   });
 
-  it("fold 身份腿不认损坏载荷：record-created 身份域类型漂移 → 不重建（零幻影，与 identityFromBinding 同向）", async () => {
+  it("fold 身份腿不认损坏载荷：record-created 身份域类型漂移 → 不重建（零幻影——损坏残留不误判成身份）", async () => {
     const file = writeIdentityLessChildSession(sessionsDir);
     seedCorruptCreatedFrame(recordsDir, file);
 

@@ -19,15 +19,12 @@
 // 刻意避开七名：persistFinalized / acquireLease / releaseLease）。
 // 依赖方向单向：terminal → rebuild（投影），rebuild/rounds 不回 import 本文件。
 
-import * as fs from "node:fs";
-
 import { getLogger } from "../../core/logger.ts";
 import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 
 import { resurrectClosed } from "./execution-record.ts";
 import { updateRecordBinding, writeRecordBinding, readRecordBinding, zcodeAnchorBasePath } from "./state-marker.ts";
 import type { RecordBinding } from "./state-marker.ts";
-import { MANIFEST_INDENT_SPACES } from "./manifest-store.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 import { derivedManifestRecord, hydrateReviveBaseline, recordToSubagent, zcodeRefOf } from "./record-store-rebuild.ts";
 import { findForeignLiveInstance } from "./alive-store.ts";
@@ -74,6 +71,12 @@ export interface TerminalCtx {
   settleViaJournal: (record: ExecutionRecord, endedAt: number) => void;
   /** [W1 / D3] record 事件追加注入位（markReopened 的 record-reopened 帧）。 */
   appendJournalEvent: (record: ExecutionRecord, input: RecordJournalEventInput) => void;
+  /**
+   * [② 读侧换源] fold 访问注入位（markResurrected 的 revive 基线水合消费——
+   * record-store 构造点绑定 `this.eventStreamFace?.foldOf`；事件面未接线返回
+   * undefined = 水合 no-op，与纯内存测试形态对齐）。
+   */
+  foldOf: (id: string) => RecordJournalFoldState | undefined;
   notifyChange: () => void;
 }
 
@@ -124,8 +127,9 @@ function legacyTerminalWrite(
  * @returns true = 持久化面完成；false = `.state` 未落（record 不应被视作已终态化）。
  * @deprecated U5 退役（归 markSettled / markSettledOut / 编排性关闭新编排承接）。
  */
-export function markFinalizedImpl(record: ExecutionRecord, closedReason: ClosedReason | undefined, ctx: TerminalCtx): boolean {
-  const reason = closedReason ?? record.closedReason ?? "gc";
+export function markFinalizedImpl(record: ExecutionRecord, _closedReason: ClosedReason | undefined, ctx: TerminalCtx): boolean {
+  // closedReason 已随 `.state` 收条退场无处落盘（legacyTerminalWrite 不消费）——参数
+  // 保留（调用方签名兼容），U5 退役时随本原语一并删除。
   return legacyTerminalWrite(record, "markFinalized", ctx);
 }
 
@@ -175,7 +179,8 @@ export function markCancelledImpl(record: ExecutionRecord, ctx: TerminalCtx): bo
  * [U7 / §3.2.7] revive 统计基线水合先于 acquire/register：冷复活链的 createRecord
  * 产物 turnCount/totalTokens/round/epoch 全部归零，不水合则 register/reportRecordTransition
  * 的 entry 投影以归零值 last-writer-wins 覆盖磁盘原值（GUI 快修批次⑤根因）——
- * binding 快照（settle 权威终值）恢复基线，新轮增量在其上累加（跨轮连续）。
+ * 事件流折叠（settle/轮终收条帧，[② 读侧换源] 后的权威终值）恢复基线，新轮增量
+ * 在其上累加（跨轮连续）。
  *
  * @param record 调用方重建的可变 record（createRecord 产物）
  * @param wasClosed 磁盘候选是否为 closed 形态（cold-lookup 的 found.status 判定）
@@ -212,9 +217,10 @@ export function markResurrectedImpl(record: ExecutionRecord, wasClosed: boolean,
       );
     }
   }
-  // [U7] 统计基线水合（纯读盘 + 内存赋值，失败无副作用——binding 缺失/损坏时
-  // 静默保持归零基线，与 binding best-effort 记账语义对齐）。
-  hydrateReviveBaseline(record, zcodeAnchor);
+  // [U7 / §3.2.7] 统计基线水合（纯读 + 内存赋值，无副作用——折叠缺失/无收条时
+  // 静默保持归零基线）：[② 读侧换源] 读源 = 事件流折叠（ctx.foldOf），原 binding
+  // 快照读侧已退场（事件流是唯一事实源）。
+  hydrateReviveBaseline(record, ctx.foldOf(record.id));
   try {
     // acquire-first：先声明写权——失败即中止，终态位未删（D3c (i)/(ii) 形态锚）。
     ctx.acquireLease(leaseBase, { pid: process.pid, id, startedAt: Date.now() });

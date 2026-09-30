@@ -23,7 +23,6 @@ import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 import { completeLegacyClosed } from "./execution-record.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
-import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import type { RecordStore } from "./record-store.ts";
 import { readIdentityHeader, readIdentityTail } from "./session-reconstructor.ts";
 import type { ClosedReason } from "../domain/record-types.ts";

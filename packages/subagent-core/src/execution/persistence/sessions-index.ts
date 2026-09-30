@@ -40,7 +40,7 @@ const logger = getLogger("subagents");
 export const INDEX_FILENAME = "sessions-index.json";
 
 /** 索引格式版本。schema 变更必须递增：低版本文件整体丢弃（空索引，下轮 dirty 重写自愈）；高版本整体忽略（higherVersion，不重写）。 */
-export const INDEX_VERSION = 2;
+export const INDEX_VERSION = 3;
 
 /** 两次成功落盘的最小墙钟间隔（节流：overlay 打开期间的高频扫描不放大磁盘写）。 */
 export const INDEX_WRITE_MIN_INTERVAL_MS = 60_000;
@@ -99,6 +99,15 @@ export interface SessionsIndexEntry {
    * 不必再读 `.state` sidecar。缺席（无收条事件）= 在途中断语义。
    */
   receipt?: { stopReason: string; endedAt: number };
+  /**
+   * 收条统计域（v3 引入）：[② 读侧换源] 后 light 的 turns/totalTokens 来自折叠收条
+   * （record-settled / record-round-idle 帧）——索引自承后快路径零内容读取即可回答
+   * 「停时多少量」，不必读事件文件。与 receipt 同生同灭（有收条才有统计）；缺席 =
+   * 无收条（在途中断）或 v2 存量索引（消费侧 undefined 容忍，下轮戳变化重探补齐）。
+   * round 不入索引（既有缺口，见 record-store.buildEntryFromIndex 消费侧登记）。
+   */
+  turns?: number;
+  totalTokens?: number;
 }
 
 /**
@@ -113,7 +122,7 @@ export interface SessionsIndexNegativeEntry {
 
 /** 磁盘 JSON 顶层结构（key = jsonl basename 不含路径）。 */
 export interface SessionsIndexFile {
-  version: 2;
+  version: 3;
   pid: number;
   entries: Record<string, SessionsIndexEntry | SessionsIndexNegativeEntry>;
 }
@@ -183,14 +192,22 @@ function hasModelFields(v: Record<string, unknown>): boolean {
   );
 }
 
-/** 事件戳 + 终态收条字段组（v2；undefined 合法 = 无事件文件/无收条）。 */
+/** 事件戳 + 终态收条 + 收条统计域字段组（v2/v3；undefined 合法 = 无事件文件/无收条/存量 v2 索引）。 */
 function hasReceiptFields(v: Record<string, unknown>): boolean {
   if (v.eventsMtimeMs !== undefined && typeof v.eventsMtimeMs !== "number") return false;
   if (v.eventsSize !== undefined && typeof v.eventsSize !== "number") return false;
-  if (v.receipt === undefined) return true;
+  if (v.receipt === undefined) {
+    // v3 收条统计域与 receipt 同生同灭：receipt 缺席时统计字段也必须缺席
+    //（有值 = 形态损坏，丢弃条目走重探自愈）。
+    return v.turns === undefined && v.totalTokens === undefined;
+  }
   if (typeof v.receipt !== "object" || v.receipt === null) return false;
   const r = v.receipt as Record<string, unknown>;
-  return typeof r.stopReason === "string" && typeof r.endedAt === "number";
+  if (typeof r.stopReason !== "string" || typeof r.endedAt !== "number") return false;
+  return (
+    (v.turns === undefined || typeof v.turns === "number") &&
+    (v.totalTokens === undefined || typeof v.totalTokens === "number")
+  );
 }
 
 /** 正条目类型谓词：镜像 isIdentityData（session-reconstructor.ts:244-253）的字段检查 + 索引特有戳/形态字段。 */

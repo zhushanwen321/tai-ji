@@ -1,21 +1,21 @@
 // src/execution/__tests__/permanent-session-stats-baseline.test.ts
 //
-// [U7 / 永久会话模型 §3.2.7] 统计口径单基准验收：binding 快照为基准 + 内存增量
-// 覆盖 + revive/重启恢复（设计 subagent-permanent-session-model.md §3.2.7 统计行
-// 与 round 基线行；impl-plan §2 U7 行验收条款「revive 前轮统计保留 + 跨重启 binding
-// 恢复」）。
+// [U7 / 永久会话模型 §3.2.7] 统计口径单基准验收：事件流折叠为基准（[② 读侧换源]，
+// 原 binding 快照读侧已退场）+ 内存增量覆盖 + revive/重启恢复（设计
+// subagent-permanent-session-model.md §3.2.7 统计行与 round 基线行；impl-plan §2 U7
+// 行验收条款「revive 前轮统计保留 + 跨重启恢复」）。
 //
 // 四组验收面：
-//   ① revive 前轮统计保留：fake binding 落盘 → 新 store 实例 light 重建水合
+//   ① revive 前轮统计保留：事件流收条播种 → 新 store 实例 light 重建水合
 //      （turns/tokens/round）→ markResurrected 基线水合 → 新轮增量在基线上累加
 //      （跨轮连续；设计原文的 roundBaseTurnIndex 字段已随 H1 U6 / D7 ③ 退役，
-//      等价实现 = binding.turns 水合 record.turnCount——轮 N 的 turn 基点 = binding
-//      记录的累计值，不每轮从零）；
-//   ② 跨重启 binding 恢复 + 内存增量衔接无跳变：内存终值 == settle 快照 ==
-//      新 store 重建值；
+//      等价实现 = 折叠收条 turns 水合 record.turnCount——轮 N 的 turn 基点 = 事件
+//      流承载的累计值，不每轮从零）；
+//   ② 跨重启恢复 + 内存增量衔接无跳变：内存终值 == settle 收条事件 == 新 store
+//      重建值（settle 写点的 binding 快照仍在——写面不变，读侧已换源折叠）；
 //   ③ zcode 锚 settle 快照收编（U6-D2 交接）+ 重启锚恢复（B-restart store 面）：
 //      锚键 binding 落盘 → entry 源可见 + 锚派生 → markResurrected zcode 分派
-//      （acquire 键 + foreign 探针 + 水合）→ markReopened/markSettledOut 锚分派；
+//      （acquire 键 + foreign 探针 + 折叠水合）→ markReopened/markSettledOut 锚分派；
 //   ④ 归零覆盖回归（GUI 快修批次⑤根因）：冷复活后 register 的 entry 投影携带
 //      水合值，不再以归零 entry last-writer-wins 覆盖磁盘原值。
 //
@@ -30,7 +30,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { transcriptAnchorOf } from "../assembly/cold-lookup.ts";
 import { createRecord, updateFromEvent } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { readRecordBinding, zcodeAnchorBasePath, writeRecordBinding } from "../persistence/state-marker.ts";
+import { readRecordBinding, zcodeAnchorBasePath } from "../persistence/state-marker.ts";
+import { seedTerminalRecord } from "./helpers/seed-terminal-record.ts";
 import type { TranscriptRef } from "../domain/record-types.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { SubagentRecord } from "../assembly/types.ts";
@@ -123,30 +124,20 @@ function zcodeRecord(id: string, dbPath: string, sessionId: string, over: Partia
   return Object.assign(rec, over) as ExecutionRecord;
 }
 
-// ── ① revive 前轮统计保留（pi binding 基线水合 + 跨轮连续）──────────────────
+// ── ① revive 前轮统计保留（事件流折叠基准 + 跨轮连续）──────────────────
 
-describe("U7① revive 前轮统计保留（binding 基准）", () => {
-  it("fake binding 落盘 → 新 store 实例 light 重建水合 turns/tokens/round（identity 基底同样投影）", () => {
+describe("U7① revive 前轮统计保留（事件流折叠基准）", () => {
+  it("事件流轮终收条播种 → 新 store 实例 light 重建水合 turns/tokens/round/endedAt（identity 基底同样投影）", () => {
     const child = path.join(sessionsDir, "child.jsonl");
     writeIdentityChild(child, "bg-1");
-    // settle 快照（宿主 A 收口产物）。
-    writeRecordBinding(child, {
-      v: 1,
-      recordId: "bg-1",
-      depth: 0,
-      agent: "general-purpose",
-      task: "do things",
-      slug: "do-things",
-      mode: "background",
+    // 宿主 A 的轮终收条（事件流播种：created → round-started(3) → round-idle 快照）。
+    seedTerminalRecord(manifestDir, {
+      id: "bg-1",
       startedAt: 1,
-      model: "test/model",
-      worktree: false,
+      stopReason: "completed",
       rootSessionId: "root-1",
-      totalTokens: 4200,
-      turns: 7,
-      round: 3,
+      idleRound: { round: 3, ts: 999, turns: 7, totalTokens: 4200 },
       epoch: 1,
-      endedAt: 999,
     });
 
     // 重启：新 store 实例（fileCache 空、内存空）——buildRecord light 水合。
@@ -160,26 +151,25 @@ describe("U7① revive 前轮统计保留（binding 基准）", () => {
     expect(found?.status).toBe("idle"); // 重建单规则（§3.2.4）不受统计投影影响
   });
 
-  it("markResurrected 水合基线 → 新轮增量在基线上累加（round N 的 turn 基点 = binding 累计值）", () => {
+  it("markResurrected 水合基线 → 新轮增量在基线上累加（round N 的 turn 基点 = 事件流累计值）", () => {
     const child = path.join(sessionsDir, "child.jsonl");
     writeIdentityChild(child, "bg-1");
-    writeRecordBinding(child, {
-      v: 1,
-      recordId: "bg-1",
-      depth: 0,
-      agent: "general-purpose",
-      task: "do things",
-      slug: "do-things",
-      mode: "background",
+    // 事件流播种：created → bound(epoch 1) → round-started(3) → round-idle
+    //（轮统计快照 + 放弃轮标记——收编与 revive 水合的折叠源）。
+    seedTerminalRecord(manifestDir, {
+      id: "bg-1",
       startedAt: 1,
-      model: "test/model",
-      worktree: false,
+      stopReason: "completed",
       rootSessionId: "root-1",
-      totalTokens: 4200,
-      turns: 7,
-      round: 3,
+      boundSessionFile: child,
+      idleRound: {
+        round: 3,
+        ts: 900,
+        turns: 7,
+        totalTokens: 4200,
+        lastAbandonedRound: { epoch: 1, round: 2 },
+      },
       epoch: 1,
-      lastAbandonedRound: { epoch: 1, round: 2 },
     });
 
     const store2 = newStore();
@@ -189,7 +179,7 @@ describe("U7① revive 前轮统计保留（binding 基准）", () => {
     rec.round = 3;
     store2.markResurrected(rec, true);
 
-    // [U7] 统计基线水合：turns/tokens/round/epoch/放弃轮标记从 binding 恢复，
+    // [U7] 统计基线水合：turns/tokens/round/epoch/放弃轮标记从折叠恢复，
     // 不随 createRecord 归零。
     expect(rec.turnCount).toBe(7);
     expect(rec.totalTokens).toBe(4200);
@@ -209,7 +199,7 @@ describe("U7① revive 前轮统计保留（binding 基准）", () => {
     expect(rec.totalTokens).toBe(4230);
   });
 
-  it("无 binding（存量子文件零迁移）→ light 统计保持缺省 0（不误投影）", () => {
+  it("无事件流（无收条事件）→ light 统计保持缺省 0（不误投影）", () => {
     const child = path.join(sessionsDir, "child.jsonl");
     writeIdentityChild(child, "bg-2");
     const store = newStore();
@@ -221,10 +211,10 @@ describe("U7① revive 前轮统计保留（binding 基准）", () => {
   });
 });
 
-// ── ② 跨重启 binding 恢复 + 内存增量衔接无跳变 ────────────────────────────────
+// ── ② 跨重启恢复 + 内存增量衔接无跳变 ────────────────────────────────
 
-describe("U7② 跨重启 binding 恢复（内存终值 == settle 快照 == 重建值）", () => {
-  it("内存增量累加 → settle 落快照 → 新 store 重建值逐字段一致（衔接无跳变）", () => {
+describe("U7② 跨重启恢复（内存终值 == settle 收条事件 == 重建值）", () => {
+  it("内存增量累加 → settle 落收条 → 新 store 重建值逐字段一致（衔接无跳变）", () => {
     const child = path.join(sessionsDir, "child.jsonl");
     writeIdentityChild(child, "bg-1");
 
@@ -239,19 +229,21 @@ describe("U7② 跨重启 binding 恢复（内存终值 == settle 快照 == 重�
     });
     updateFromEvent(rec, { type: "turn_end" });
     rec.round = 1;
+    // 轮始落账（round-started 帧携带 round=1——[② 读侧换源] 后重建 round 的折叠源）。
+    storeA.markRoundStarted("bg-1");
     expect(storeA.markSettled(rec, "gc")).toBe(true);
     const memTurns = rec.turnCount;
     const memTokens = rec.totalTokens;
     expect(memTurns).toBe(2);
     expect(memTokens).toBe(300);
 
-    // settle 快照（binding）== 内存终值。
+    // settle 快照（binding 写面——写侧不变）== 内存终值。
     const binding = readRecordBinding(child);
     expect(binding?.turns).toBe(memTurns);
     expect(binding?.totalTokens).toBe(memTokens);
     expect(binding?.round).toBe(1);
 
-    // 重启：新 store 重建值 == 内存终值（active 以内存为准，idle/重启后以 binding
+    // 重启：新 store 重建值 == 内存终值（active 以内存为准，idle/重启后以折叠收条
     // 为准，两者衔接无跳变）。
     const storeB = newStore();
     const found = storeB.collectRecords(10, "all").find((r) => r.id === "bg-1");
@@ -438,26 +430,27 @@ describe("U7③ zcode 锚 settle 快照与重启恢复", () => {
 // ── ④ 归零覆盖回归（GUI 快修批次⑤根因）──────────────────────────────────────
 
 describe("U7④ 归零覆盖回归：冷复活 entry 投影不再以归零值覆盖磁盘原值", () => {
-  it("settle 落 binding → 冷复活 markResurrected → register 的 entry 投影携带水合值", () => {
+  it("settle 落收条 → 冷复活 markResurrected → register 的 entry 投影携带水合值", () => {
     const child = path.join(sessionsDir, "child.jsonl");
     writeIdentityChild(child, "bg-1");
-    // 宿主 A settle：binding 终值 turns=5 / tokens=1500 / round=2。
-    writeRecordBinding(child, {
-      v: 1,
-      recordId: "bg-1",
-      depth: 0,
-      agent: "general-purpose",
-      task: "do things",
-      slug: "do-things",
-      mode: "background",
-      startedAt: 1,
-      model: "test/model",
-      worktree: false,
-      rootSessionId: "root-1",
-      totalTokens: 1500,
-      turns: 5,
-      round: 2,
-    });
+
+    // 宿主 A：turns=5 / tokens=1500 / round=2 的完整生命周期（事件流 + binding
+    // 写面快照双双落盘）。
+    const storeA = newStore();
+    const recA = piRecord("bg-1", child);
+    recA.round = 2;
+    storeA.register(recA);
+    storeA.markRoundStarted("bg-1");
+    for (let i = 0; i < 5; i += 1) {
+      updateFromEvent(recA, { type: "turn_end" });
+      updateFromEvent(recA, {
+        type: "message_end",
+        usage: { input: 100, output: 200, cacheRead: 0, cacheWrite: 0 },
+      });
+    }
+    expect(storeA.markSettled(recA, "gc")).toBe(true);
+    expect(recA.turnCount).toBe(5);
+    expect(recA.totalTokens).toBe(1500);
 
     // 重启：新 store + pi mock 收集 subagent-record entry（register 内置上报）。
     const entries: Array<Record<string, unknown>> = [];
@@ -471,23 +464,20 @@ describe("U7④ 归零覆盖回归：冷复活 entry 投影不再以归零值覆
     const rec = piRecord("bg-1", child);
     storeB.markResurrected(rec, true);
 
-    // 回归断言（[W1/D2 停写写点] 改写面）：register 内置上报的 turns 投影停写——
-    // v2 注册条目只承载身份域（kind=registered，turns/totalTokens/round 零携带），
-    // 「entry last-writer-wins 覆盖磁盘原值」的原始威胁面（GUI 快修批次⑤）随之消灭。
-    expect(entries.length).toBeGreaterThan(0);
-    const last = entries[entries.length - 1]!;
-    expect(last.kind).toBe("registered");
-    const persisted = JSON.parse(JSON.stringify(last)) as Record<string, unknown>;
-    expect(Object.keys(persisted)).not.toContain("turns");
-    expect(Object.keys(persisted)).not.toContain("totalTokens");
+    // 回归断言（[W1/D2 停写写点] + 事件面幂等）：冷复活对已注册 record（事件文件
+    // 已有 created 帧）零 entry 写——「归零 entry last-writer-wins 覆盖磁盘原值」的
+    // 威胁面结构性消失（原 GUI 快修批次⑤；register 的 registered 条目只在事件首写
+    // 时落，见 RecordJournalWriteFace.syncCreation 幂等判定）。
+    expect(entries).toHaveLength(0);
 
-    // 水合保真的新承载面：内存 record 基线 = binding 水合值（后续轮终 round-idle
-    // 事件/条目据此携带正确统计——覆盖原断言的回归意图）。
+    // 水合保真的新承载面：内存 record 基线 = 事件流折叠水合值（[② 读侧换源]——
+    // settle 收条事件承载统计，后续轮终 round-idle 事件/条目据此携带正确统计——
+    // 覆盖原断言的回归意图）。
     expect(rec.turnCount).toBe(5);
     expect(rec.totalTokens).toBe(1500);
     expect(rec.round).toBe(2);
 
-    // 磁盘 binding 原值未被覆盖（merge 读侧不变）。
+    // 磁盘 binding 写面原值未被覆盖（merge 读侧不变——写面快照仍在，读侧已换源）。
     expect(readRecordBinding(child)?.turns).toBe(5);
   });
 });

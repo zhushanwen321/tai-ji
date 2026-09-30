@@ -5,10 +5,9 @@
 //     + stopReason 单源）与 light/full 两分支装配（buildFileCacheEntry）；
 //   - entry 重建族（collectV2EntryPairs + v2PairToRecord ——登记 §3.3 后只剩当前版本
 //     通道：旧形态与未知版本结构性跳过，零幻影）；
-//   - 身份解析三级优先级（[W1 / U2b] resolveRecordIdentity：事件文件 fold >
-//     binding > manifest——纯函数参考实现 + 测试锚定面）+ 其 fold 腿的生产消费
-//     投影 identityFromFold（子文件无 identity entry 时的身份基底，id 入口见
-//     record-store.scanFile 的事件目录反查；binding 退场后本腿即唯一身份源）；
+//   - 身份投影 identityFromFold（子文件无 identity entry 时的身份基底，id 入口见
+//     record-store.scanFile 的事件目录反查——事件流是唯一身份权威，binding 兜底腿
+//     已随读侧换源退场，无存量数据不留兼容读）；
 //   - manifest 读投影（manifestToSubagent / mapManifestStatus）与写投影（terminal /
 //     batch / derived / legacyManifestStatusFields——session-reader 兼容契约的单点）；
 //   - 内存源投影 recordToSubagent、缓存戳类型与戳校验工具（Stamp / FileCacheEntry 族）。
@@ -26,8 +25,7 @@ import * as fs from "node:fs";
 import { getLogger } from "../../core/logger.ts";
 
 import { getCurrentActivity, getDisplayItems, getEventLog, isLegacyClosedSettled, markReconstructedStatus } from "./execution-record.ts";
-import type { RecordBinding, StateMarker } from "./state-marker.ts";
-import { readRecordBinding, zcodeAnchorBasePath } from "./state-marker.ts";
+import type { StateMarker } from "./state-marker.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE, classifySubagentRecordEntryData } from "./record-entry.ts";
 import type {
   SubagentRecordRegisteredEntryData,
@@ -133,18 +131,13 @@ export interface NegativeFileEntry {
 /** fileCache 值类型：正常条目或负缓存条目。 */
 export type FileCacheValue = FileCacheEntry | NegativeFileEntry;
 
-/** scanFile 单文件本轮 stat 戳集合（jsonl + 终态 sidecar（含旧名合并戳）+ record 绑定；
- *  [U4a / D3b (a)] alive 戳退役——light 态不依赖 .alive，省去每文件一次 statSync）。 */
+/** scanFile 单文件本轮 stat 戳集合（jsonl + record 绑定写面戳；[U4a / D3b (a)] alive
+ *  戳退役——light 态不依赖 .alive，省去每文件一次 statSync）。binding 戳在统计/身份
+ *  读侧换源事件流后只剩缓存键职责（绑定写点仍在——写点退场是后续批次），写面每次
+ *  覆盖写都会变 mtime，仍能正确击穿缓存。 */
 export interface FileStamps {
   jsonl: Stamp;
   binding: Stamp | null;
-}
-
-/** sidecar payload 读取结果（索引命中与探测重建两分支共享的读点）。 */
-export interface SidecarPayloads {
-  /** [UF-1] record 绑定载荷（identity miss 时的事件流折叠腿之后的身份兜底源 +
-   *  统计快照源——binding 写点退场后本字段随绑定一起消失）。 */
-  binding: RecordBinding | undefined;
 }
 
 // ============================================================
@@ -409,17 +402,6 @@ export function detectIdentity(file: string, size: number): IdentityHeaderRecon 
 }
 
 /**
- * sidecar payload 读取（读顺序：终态 marker → record 绑定）。
- * 两者都是活态数据，调用方沿用每轮重读语义；终态 marker 静态数据仅在戳非空时读
- * （文件小，成本可忽略）。
- */
-export function readSidecarPayloads(file: string, stamps: FileStamps): SidecarPayloads {
-  return {
-    binding: stamps.binding !== null ? readRecordBinding(file) : undefined,
-  };
-}
-
-/**
  * 折叠状态 → 终态收条（`.state` sidecar 退场的桥，① 读侧换源的落点）。
  *
  * 语义与 `readStateMarker` 读出的新格式同形（status=idle + reason + endedAt）：
@@ -519,75 +501,26 @@ export function baselineStatisticsFromFold(fold: RecordJournalFoldState | undefi
 }
 
 // ============================================================
-// 身份基底 → light/full 缓存条目 → 重建单规则
+// [W1 / U2b] 身份投影（fold 腿——唯一身份权威）
 // ============================================================
+//
+// [身份换源第二步] 旧「三级优先级（fold > binding > manifest）参考实现」随 binding
+// 兜底腿一并退场：事件流已是身份权威，项目未上线无存量数据、不留兼容读——生产扫描
+// 路径的身份基底 = identity entry → {@link identityFromFold}（record-store.scanFile），
+// binding 读侧零生产读路径（state-marker.ts 只剩读写原语与写面 merge）。
 
-/**
- * [UF-1] record 绑定载荷 → light 身份基底（IdentityHeaderRecon 同形投影）。
- * 绑定缺失/损坏返回 undefined（调用方落负缓存，不把损坏残留误判成身份）。
- * forkDepth/model_change/thinking_level_change 等头部途经信息绑定期不存在：
- * forkDepth 恒 undefined、model/thinkingLevel 取绑定快照值。
- *
- * [身份换源第一步] 本腿的角色已降级为「事件流折叠后的兜底」：生产扫描路径
- * （record-store.scanFile）先问 {@link identityFromFold}，绑定只兜存量/残事件文件
- * 形态；`.record-binding` 写点退场后本腿自然消失。
- */
-export function identityFromBinding(binding: RecordBinding | undefined, file: string): IdentityHeaderRecon | undefined {
-  if (binding === undefined) return undefined;
-  return {
-    id: binding.recordId,
-    agent: binding.agent,
-    mode: binding.mode,
-    task: binding.task,
-    slug: binding.slug,
-    startedAt: binding.startedAt,
-    rootSessionId: binding.rootSessionId,
-    parentRecordId: binding.parentRecordId,
-    depth: binding.depth,
-    forkDepth: undefined,
-    // [modeless 波1] chatMode 读侧丢弃（旧 binding 残留键自然忽略）。
-    worktree: binding.worktree,
-    // [H2 S3] 来源域透传：漏本两行则引擎子文件身份面（binding sidecar）重建丢
-    // origin，归档/重启后 workflow record 逃过 D1 投影过滤（Gate B S3 FAIL 根因）。
-    // binding 读侧（readRecordBinding）已字面量守卫归一，此处直传。
-    // [W0 / D1] stepIndex 同族直传：identity entry 缺失时（非 pi 引擎 / extension
-    // 重启）binding 是身份源——漏投影则重启后 record 无 stepIndex（run 视图关联键
-    // 静默缺失，无编译红无测试红的降级，同族先例 H2 S3）。
-    origin: binding.origin,
-    parentRunId: binding.parentRunId,
-    stepIndex: binding.stepIndex,
-    model: binding.model,
-    thinkingLevel: binding.thinkingLevel,
-    sessionFile: file,
-  };
+/** unknown → string | undefined（JSON 值安全读取；entryStr 同形，身份解析节局部）。 */
+function optStr(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
 }
 
-// ============================================================
-// [W1 / U2b] 身份解析三级优先级（事件文件 fold > binding > manifest）
-// ============================================================
+/** unknown → number | undefined（JSON 值安全读取；entryNum 同形）。 */
+function optNum(v: unknown): number | undefined {
+  return typeof v === "number" ? v : undefined;
+}
 
-/** 身份解析命中源（优先级可观察面——排障对账与测试锚定）。 */
-export type RecordIdentitySource = "journal-fold" | "binding" | "manifest";
-
-/**
- * 恢复路径解析出的 record 身份域（设计 D2 binding 行裁决：事件文件 fold >
- * binding 兜底（旧数据兼容）> manifest；字段集 = D3 record-created 载荷同集）。
- *
- * 消费现状（如实登记）：本三级裁决是纯函数参考实现 + 测试锚定面
- * （record-store-rebuild-v-gate.test.ts）；生产磁盘扫描路径的身份腿改走 fold
- * （{@link identityFromFold}——id 由 record-store.scanFile 的事件目录反查取得，
- * 即「fold > binding」前两级已接线；manifest 级仍只在纯函数参考实现里）。
- * v2 实体走 fold 通道（record-store 收编/投影直接消费 fold.identity）。三级源由
- * 调用方各自读好传入（本函数纯函数无 IO），高级源在场即整体胜出（冲突字段取高级
- * 源值——单写者下冲突仅见于数据损坏，不引入字段级合并的第二种语义）；高级源缺失/
- * 身份域损坏逐级降级；三源皆缺 → undefined（调用方按无身份处理）。
- *
- * model/thinkingLevel/worktree 已随「事件流承载 binding 独有字段」进 fold 的
- * record-created 载荷（见 {@link identityFromFold} 的补齐投影）；sessionFile 属
- * 引擎绑定域（record-bound 帧 / 调用方传入的文件路径）。本类型只承载三级裁决
- * 共有的身份字段。
- */
-export interface ResolvedRecordIdentity {
+/** fold 身份域守卫投影（record-created 必需标量校验 + optional 域安全读取归一）。 */
+interface FoldIdentityFields {
   id: string;
   agent: string;
   task: string;
@@ -600,25 +533,9 @@ export interface ResolvedRecordIdentity {
   origin: RecordOrigin | undefined;
   parentRunId: string | undefined;
   stepIndex: number | undefined;
-  /** 命中源（三级优先级判定的结果面）。 */
-  source: RecordIdentitySource;
 }
 
-/** journal 行级解析只校验事件信封（type/seq/ts），身份域载荷解码归本消费方——
- *  必需标量形状不满足视为 fold 身份不可用，降级下一级（与 identityFromBinding
- *  「损坏残留不误判成身份」同向）。 */
-
-/** unknown → string | undefined（JSON 值安全读取；entryStr 同形，身份解析节局部）。 */
-function optStr(v: unknown): string | undefined {
-  return typeof v === "string" ? v : undefined;
-}
-
-/** unknown → number | undefined（JSON 值安全读取；entryNum 同形）。 */
-function optNum(v: unknown): number | undefined {
-  return typeof v === "number" ? v : undefined;
-}
-
-function identityFromFoldSource(fold: RecordJournalFoldState | undefined): ResolvedRecordIdentity | undefined {
+function identityFromFoldSource(fold: RecordJournalFoldState | undefined): FoldIdentityFields | undefined {
   const identity = fold?.identity;
   if (identity === undefined) return undefined; // 残文件/全坏行形态（record-events 注释）
   if (
@@ -630,7 +547,7 @@ function identityFromFoldSource(fold: RecordJournalFoldState | undefined): Resol
     typeof identity.depth !== "number" ||
     identity.mode !== "background"
   ) {
-    logger.debug("[subagents] identity resolve: corrupt record-created identity, falling back", {
+    logger.debug("[subagents] identity resolve: corrupt record-created identity, treating as absent", {
       id: identity.id,
     });
     return undefined;
@@ -642,29 +559,27 @@ function identityFromFoldSource(fold: RecordJournalFoldState | undefined): Resol
     slug: identity.slug,
     mode: identity.mode,
     startedAt: identity.startedAt,
-    // optional 身份域经安全读取（entryStr/entryNum 同款——JSON 值不裸收）
+    // optional 身份域经安全读取（JSON 值不裸收）
     rootSessionId: optStr(identity.rootSessionId),
     parentRecordId: optStr(identity.parentRecordId),
     depth: identity.depth,
     origin: identity.origin === "workflow" || identity.origin === "tool" ? identity.origin : undefined,
     parentRunId: optStr(identity.parentRunId),
     stepIndex: optNum(identity.stepIndex),
-    source: "journal-fold",
   };
 }
 
 /**
- * [身份换源第一步] fold 身份域 → light 身份基底（IdentityHeaderRecon 同形投影）。
+ * [身份换源] fold 身份域 → light 身份基底（IdentityHeaderRecon 同形投影）。
  *
  * 子文件没有 identity entry 时，身份域改由事件流折叠取得（事件流是唯一事实源）：
- * 与 {@link identityFromBinding} 同形，但字段源分工不同——身份域 + model/
- * thinkingLevel/worktree 全部取 fold 的 record-created 载荷（绑定退场后这些字段的
- * 读侧唯一来源；worktree 缺席 = 未启用，不再回落 false），sessionFile 取调用方传入
- * 的子文件路径（引擎绑定域属 record-bound 帧，列表扫描的 base 必须携带本文件路径），
- * forkDepth 头部途经信息事件载荷不承载恒 undefined。
+ * 身份域 + model/thinkingLevel/worktree 全部取 fold 的 record-created 载荷（这些
+ * 字段读侧的唯一来源；worktree 缺席 = 未启用，不回落 false），sessionFile 取调用方
+ * 传入的子文件路径（引擎绑定域属 record-bound 帧，列表扫描的 base 必须携带本文件
+ * 路径），forkDepth 头部途经信息事件载荷不承载恒 undefined。
  *
- * 形状守卫复用 identityFromFoldSource（三级优先级参考实现的 fold 腿单源，不复制
- * 第二份判据）：身份域损坏 → undefined，调用方逐级降级（binding）。
+ * 形状守卫复用 identityFromFoldSource（单源，不复制第二份判据）：身份域损坏 →
+ * undefined，调用方按无身份处理（落负缓存）。
  */
 export function identityFromFold(
   fold: RecordJournalFoldState | undefined,
@@ -695,71 +610,17 @@ export function identityFromFold(
   };
 }
 
-/** binding 源投影：字段直传（readRecordBinding 读侧已字面量守卫归一，
- *  identityFromBinding 直传同款信任面）。 */
-function identityFromBindingSource(binding: RecordBinding | undefined): ResolvedRecordIdentity | undefined {
-  if (binding === undefined) return undefined;
-  return {
-    id: binding.recordId,
-    agent: binding.agent,
-    task: binding.task,
-    slug: binding.slug,
-    mode: binding.mode,
-    startedAt: binding.startedAt,
-    rootSessionId: binding.rootSessionId,
-    parentRecordId: binding.parentRecordId,
-    depth: binding.depth,
-    origin: binding.origin,
-    parentRunId: binding.parentRunId,
-    stepIndex: binding.stepIndex,
-    source: "binding",
-  };
-}
+// ============================================================
+// 身份基底 → light/full 缓存条目 → 重建单规则
+// ============================================================
 
-/** manifest 源投影（兜底层）：投影语义对齐 manifestToSubagent——task/slug 缺失
- *  兜底空串、mode 恒 background、depth 恒 0、rootSessionId 空串归 undefined、
- *  parentRecordId 不采信（manifestToSubagent 同款）、无来源域字段。 */
-function identityFromManifestSource(m: ManifestRecord | undefined): ResolvedRecordIdentity | undefined {
-  if (m === undefined) return undefined;
-  return {
-    id: m.id,
-    agent: m.agentName,
-    task: m.task ?? "",
-    slug: m.slug ?? "",
-    mode: "background",
-    startedAt: m.createdAt,
-    rootSessionId: m.rootSessionId || undefined,
-    parentRecordId: undefined,
-    depth: 0,
-    origin: undefined,
-    parentRunId: undefined,
-    stepIndex: undefined,
-    source: "manifest",
-  };
-}
-
-/**
- * 恢复路径身份解析（三级优先级参考实现，设计 D2：事件文件 fold > binding > manifest）。
- * 现状：纯函数参考实现 + 测试锚定面——生产磁盘扫描路径只接了前两级
- * （{@link identityFromFold} > {@link identityFromBinding}，分流登记见
- * {@link ResolvedRecordIdentity} 注释）。
- * 纯函数：三级源由调用方读好传入；高级源在场即整体胜出（冲突时高级源字段胜出），
- * 缺失/损坏逐级降级，三源皆缺 → undefined。
- */
-export function resolveRecordIdentity(
-  fold: RecordJournalFoldState | undefined,
-  binding: RecordBinding | undefined,
-  manifest: ManifestRecord | undefined,
-): ResolvedRecordIdentity | undefined {
-  return identityFromFoldSource(fold) ?? identityFromBindingSource(binding) ?? identityFromManifestSource(manifest);
-}
-
-/** identity 基底 + sidecar 状态矩阵 → 缓存条目（索引命中与探测重建两分支的公共装配点）。 */
+/** identity 基底 + 收条矩阵 → 缓存条目（索引命中与探测重建两分支的公共装配点）。
+ *  统计域（round/turns/totalTokens/endedAt）不入本装配点——两分支各自的统计源不同
+ *  （探测 = fold 统计投影，索引 = 索引自承收条），调用方装配后自行补投影到 light。 */
 export function buildFileCacheEntry(
   base: IdentityHeaderRecon,
   file: string,
   stamps: FileStamps,
-  payloads: SidecarPayloads,
   state: StateMarker | undefined,
   events: Stamp | null,
 ): FileCacheEntry {
@@ -1089,31 +950,31 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
 }
 
 // ============================================================
-// revive 统计基线水合（读侧半边——binding 快照 → 内存 record 基线）
+// revive 统计基线水合（读侧半边——事件流折叠 → 内存 record 基线）
 // ============================================================
 
 /**
- * [U7 / §3.2.7] revive 统计基线水合：binding 快照（settle 写点权威终值）→ 内存
- * record 基线。max 合并防御调用方传入已带统计的形态（水合只增不减——防归零
- * 覆盖的语义本体）；lastAbandonedRound / transcriptRef 仅缺省回填（非空不覆盖，
- * 调用方冷查水合值优先）。
+ * [U7 / §3.2.7] revive 统计基线水合：事件流折叠（唯一事实源，[② 读侧换源] 后取代
+ * binding 快照读侧）→ 内存 record 基线。max 合并防御调用方传入已带统计的形态
+ * （水合只增不减——防归零覆盖的语义本体）；epoch 同款 max（跨重启单调防撞）；
+ * lastAbandonedRound / transcriptRef 仅缺省回填（非空不覆盖，调用方冷查水合值优先）。
+ *
+ * fold 来源 = TerminalCtx.foldOf 注入位（调用时读事件面——事件面未接线的纯内存
+ * 形态返回 undefined，本函数整体 no-op）。
  */
-export function hydrateReviveBaseline(record: ExecutionRecord, zcodeAnchor: ZcodeTranscriptRef | undefined): void {
-  const binding =
-    record.sessionFile !== undefined
-      ? readRecordBinding(record.sessionFile)
-      : zcodeAnchor !== undefined
-        ? readRecordBinding(zcodeAnchorBasePath(zcodeAnchor))
-        : undefined;
-  if (binding === undefined) return;
-  if (binding.turns !== undefined) record.turnCount = Math.max(record.turnCount, binding.turns);
-  if (binding.totalTokens !== undefined) record.totalTokens = Math.max(record.totalTokens, binding.totalTokens);
-  if (binding.round !== undefined) record.round = Math.max(record.round ?? 0, binding.round);
-  if (binding.epoch !== undefined) record.epoch = Math.max(record.epoch ?? 0, binding.epoch);
-  if (record.lastAbandonedRound == null && binding.lastAbandonedRound != null) {
-    record.lastAbandonedRound = binding.lastAbandonedRound;
+export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordJournalFoldState | undefined): void {
+  if (fold === undefined) return;
+  const stats = baselineStatisticsFromFold(fold);
+  if (stats.turns !== undefined) record.turnCount = Math.max(record.turnCount, stats.turns);
+  if (stats.totalTokens !== undefined) record.totalTokens = Math.max(record.totalTokens, stats.totalTokens);
+  if (stats.round !== undefined) record.round = Math.max(record.round ?? 0, stats.round);
+  if (fold.epoch !== undefined) record.epoch = Math.max(record.epoch ?? 0, fold.epoch);
+  const abandoned = fold.roundIdle?.lastAbandonedRound;
+  if (record.lastAbandonedRound == null && abandoned != null) {
+    record.lastAbandonedRound = abandoned;
   }
-  if (record.transcriptRef === undefined && binding.transcriptRef !== undefined) {
-    record.transcriptRef = binding.transcriptRef;
+  const reopenedRef = fold.reopened?.transcriptRef;
+  if (record.transcriptRef === undefined && reopenedRef !== undefined) {
+    record.transcriptRef = reopenedRef;
   }
 }

@@ -226,7 +226,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
         epoch: 0,
       },
       { type: "record-round-started", seq: 3, ts: 1780000002000, round: 1, epoch: 0 },
-      { type: "record-round-idle", seq: 4, ts: 1780000050000, stopReason: "completed", turns: 1, totalTokens: 1000 },
+      { type: "record-round-idle", seq: 4, ts: 1780000050000, round: 1, stopReason: "completed", turns: 1, totalTokens: 1000 },
       { ...settledInput(), seq: 5 },
       { type: "record-reopened", seq: 6, ts: 1780000200000, epoch: 1, round: 0 },
       { type: "record-round-started", seq: 7, ts: 1780000201000, round: 1, epoch: 1 },
@@ -303,7 +303,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
 
   it("空序列 / 残文件（无 created 帧）宽容：identity 缺席不炸", () => {
     expect(foldRecordEvents([])).toEqual(INITIAL_RECORD_EVENT_FOLD_STATE);
-    const orphan = foldRecordEvents([{ type: "record-round-idle", seq: 1, ts: 1, stopReason: "completed", turns: 1, totalTokens: 1 }]);
+    const orphan = foldRecordEvents([{ type: "record-round-idle", seq: 1, ts: 1, round: 1, stopReason: "completed", turns: 1, totalTokens: 1 }]);
     expect(orphan.identity).toBeUndefined();
     expect(orphan.roundIdle?.turns).toBe(1);
   });
