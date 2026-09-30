@@ -17,13 +17,13 @@
 | ext-guards | `src/index.ts` | 新增 `guardStaleCtx` / `STALE_CTX_MARKER` | —（守卫本体） |
 | smart-context | `src/tool.ts` | `compact_context` 的 `onComplete`/`onError` 两处（E1 实锤崩溃点，tool.ts 原 :183/:187） | isCtxStale 注入 + onStale=debugLog |
 | smart-context | `src/index.ts` | `agent_settled` 阈值提醒、`model_select` 跨界通知、`model_select` downshift 三处 `pi.sendUserMessage`（原 :127/:144/:157） | isCtxStale（模块级代数计数器，同 scheduler G1 范式）+ onStale=debugLog |
-| plan | `src/compact.ts` | `handlePlanComplete` compact 隔离流的 `onComplete`/`onError` 两处（原 :218-229） | 文案兜底分诊（无代际，判定见 §4）+ onStale=logger.warn |
+| plan | `src/execution-notice.ts`（原 compact.ts） | 已退役：原接入点 src/compact.ts :218-229 两处回调已随 D-B1-6 形态砍除（文件改名 execution-notice.ts，回调通道不存在，无接入面；全包 `guardStaleCtx` 零调用） | — |
 | scheduler | `src/runtime.ts` | `startScheduler` 的 tick 回调整体迁移到 `guardStaleCtx`（三件套语义等价，对照见 §5） | isCtxStale + onStale=retireStaleTimer |
 | structured-output | `src/loop-gate.ts` | terminal teardown 的 `ctx.abort()`/`ctx.shutdown()` | onStale=stderr 直出（该包日志惯例） |
 | subagent-workflow | `src/interface/helpers.ts` | `notifyDone` 的 `pi.sendMessage`（workflow-result 完成通知，原 :150；经 onRunDone 异步触发，审计 §7 blockers#1 收口） | label 分诊 + onStale=logger.warn（extension-logger `subagents` 通道） |
 | subagent-workflow | `src/session-lifecycle.ts` | ledgerHost `sendDelivery` 的 `pi.sendMessage`（同链路家族同判） | 同上 |
 
-配套依赖声明（workspace:\*）：smart-context / plan / scheduler / structured-output 的 package.json 各加 `@zhushanwen/pi-ext-guards`。
+配套依赖声明（workspace:\*）：smart-context / plan / scheduler / structured-output 的 package.json 各加 `@zhushanwen/pi-ext-guards`——其中 plan 的 `guardStaleCtx` 接入已无调用（D-B1-6 退役），依赖保留（`toErrorMessage` 仍用于 state.ts / execution-notice.ts 的错误文案）。
 
 ## 3. 全仓普查清单（grep 模式 × 逐包判定）
 
@@ -32,7 +32,7 @@
 | 包 | 命中点 | 判定 | 理由 |
 |---|---|---|---|
 | **smart-context** | tool.ts compact 两回调（E1 实锤）；index.ts 三处事件回调内 `pi.sendUserMessage` | **接入** | E1 实锤崩溃点（9/3 pi-crash log 堆栈 `assertActive → sendUserMessage`）；三处事件回调为 D1「所有 fire-and-forget 异步回调接入」判定对象（价值见 §1 崩溃面分层） |
-| **plan** | compact.ts :218-229 两处；compact.ts :258-263 case "direct"/default（`pi.sendUserMessage` + `tryGoalInit`）；command.ts :67/:164（/plan command handler 内） | **接入**（compact 两处）；**排除**（case "direct"、command 两处） | compact 回调与 E1 同构（无人接的 Promise 链）；case "direct" 在 plan 工具 execute 的同步链（`handlePlanComplete` 尾部 switch，经 tool.ts executeComplete 在用户批准 plan 的当次工具调用内执行），执行时 session 活跃，无跨 session 存活窗口；command handler 是用户主动触发的同步上下文，同理由 |
+| **plan** | 原接入点 compact.ts :218-229 两处回调（已随 D-B1-6 形态砍除——文件改名 execution-notice.ts，回调通道不存在，无接入面，全包 `guardStaleCtx` 零调用）；现存 execution-notice.ts 完成投递（`pi.sendMessage`，经 tool.ts :1235 `handlePlanComplete` 同步调用）；command.ts /plan command handler | **退役**（原 compact 两处接入）；**排除**（完成投递、command handler） | 原接入与 E1 同构（无人接的 Promise 链），形态已删；现存投递在 plan 工具 execute 的同步链（用户批准 plan 的当次工具调用内执行），执行时 session 活跃，无跨 session 存活窗口；command handler 是用户主动触发的同步上下文，同理由 |
 | **scheduler** | runtime.ts tick（setInterval 回调内 `onAfterTick → ctx.ui` / dispatch → `pi.sendMessage`） | **迁移**（共享守卫替换原地实现） | 既有已验证范式（G1+F2+retireStaleTimer），迁移语义等价对照见 §5 |
 | **structured-output** | loop-gate.ts terminal 的 `ctx.abort()`/`ctx.shutdown()`（无防御）；workflow-hook.ts :249 `pi.sendUserMessage`（try/catch 有痕降级）；loop-gate forceExit setTimeout（只 `process.stderr.write` + `process.exit`） | **接入**（loop-gate terminal）；**排除**（workflow-hook、forceExit timer） | abort/shutdown 在 assertActive 面且无任何 try/catch（async handler 内 throw = 无人接 rejection）；workflow-hook 的 turn_end 已有 try/catch + writeSteerFailedLog（无崩溃面；守卫「非 stale 上抛」语义在此处会把有痕降级恶化为崩溃，不接入是行为保持）；forceExit timer 不触碰 pi/ctx |
 | **pending-notifications** | events.on 回调内 `pi.appendEntry`（经 safeAppendEntry） | **排除** | 包内 `safeAppendEntry` 已 try/catch 静默兜底（注释明言 stale 场景）；events.on 订阅经 pi tracked subscription 在 session 替换时自动退订（W4 注释实锚 loader.js:338-341）——双防线已覆盖，无无人接抛错路径 |
@@ -57,7 +57,7 @@
 | **smart-context**：compact `onError` | 压缩失败的告警消息不投递——用户不知道该轮压缩失败了 | 上下文未变化（压缩失败无副作用），只是没有失败提示 | 稍后重试 `/compact`；反复失败查 smart-context 配置 | 同上：`compact failure notice delivery skipped (stale ctx)` |
 | **smart-context**：agent_settled 阈值提醒 | 一次性越档提醒不投递——fired 标记已置位（旧代闭包内），该提醒本次不重发 | 少收一条「上下文将满」提醒；下轮 settled 若仍在同一 session 会重新评估（标记随 session 重建） | 用户可主动 `/compact`；切回该 session 后提醒机制随新代重建正常工作 | 同上：`threshold reminder delivery skipped (stale ctx)` |
 | **smart-context**：model_select 两处通知 | 模型可用性变化/downshift 提醒不投递（用户切了 session，通知对旧 session 无意义） | 无实际影响（通知对象是已离开的 session 上下文） | 无需恢复 | 同上：`switch/downshift notice delivery skipped (stale ctx)` |
-| **plan**：compact 隔离 `onComplete`/`onError` | 「Plan approved，开始执行」的执行指令消息不投递 + goalInit 不触发——**plan 文件本身已落盘** | 用户批准 plan 后未见执行启动（压缩隔离流被 session 替换打断） | **用户可手动 Read plan 文件执行**（plan 文件路径在批准交互中有留痕）；或重新走 /plan | `~/.pi/agent/logs/`：`plan execution notice delivery skipped (stale ctx)`（logger.warn） |
+| **plan**：compact 隔离 `onComplete`/`onError`（已退役） | 场景已随 D-B1-6 形态砍除（回调通道不存在，无守卫接入）；现 complete 投递在 plan 工具 execute 的同步链内执行，session 活跃，无 stale 窗口 | — | — | — |
 | **scheduler**：tick stale 自停（retireStaleTimer） | 泄漏 timer 自停退场，旧代 runtime 不再调度——任务持久化（append-only op）不受影响，新一代 runtime 的 session_start 已接管调度 | 无感知（调度由新代接管；旧代自停正是防「任务双投递」） | 无需恢复 | `tick stopped: stale extension ctx (session replaced); timer self-retired`（warn，行为同迁移前） |
 | **structured-output**：terminal teardown | 跳过优雅 abort/shutdown——该 workflow 子进程的存在意义已随 session 替换消失，15s 硬退兜底（armForceExitTeardown）保持武装完成自清理 | 无感知（子进程延迟 ≤15s 自退） | 无需恢复 | stderr（runtime 的 pi tee 可见）：`terminal teardown skipped (stale ctx, session replaced)` |
 | **subagent-workflow**：notifyDone 完成通知 | workflow 完成通知（workflow-result 消息 + `__gui__` 渲染数据）不投递——**run 本体已终态落盘**（jsonl-run-store 持久化 + session 历史的 workflow 工具调用 entry 不受影响） | workflow 结束时无完成通知消息；用户可从 session 历史 / 工具结果看到 workflow 结果（status/trace 持久化面） | 重新打开该 session 查看 workflow 工具调用记录；或重跑 workflow | `~/.pi/agent/logs/`（`subagents` 通道）：`workflow completion notice delivery skipped (stale ctx)`（含 runId） |
