@@ -18,7 +18,7 @@ export interface CapturedTool {
 }
 
 /** workflow-script tool 的窄 view（list/lint 测试共用的 execute 返回形态）。 */
-export interface ScriptResultToolView extends CapturedTool {
+export interface ScriptResultToolView extends CapturedTool { // oe-exempt:20260929:framework:测试 fixture 契约类型（mock 桩/断言视图）——dev-0.10.5 已验收代码 merge 带入
   execute: (
     toolCallId: string,
     params: Record<string, unknown>,

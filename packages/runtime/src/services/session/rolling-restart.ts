@@ -118,7 +118,7 @@ export const SHUTDOWN_STEP_SEQUENCE = [
   'flush-stores',
   'dispose-skill-registry',
   'dispose-git-head-watcher',
-  'dispose-completion-backflow',
+  'dispose-claim-ledger',
   'deinit-relay-server',
   'server-stop',
   'engine-pool-dispose',

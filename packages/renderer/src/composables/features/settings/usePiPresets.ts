@@ -19,60 +19,74 @@
  *   成功即置位、重连不重复；加载失败不置位 → 下一次 connected 自动补拉（E7 ③ 恢复通道）。
  *
  * 依赖方向：
- * - 读 @/api（preset 域 RPC：list / getDefault / setDefault）。
- * - 读 @taiji/core/transport/ws-client（连接态；与 useBackgroundTasks 同源依赖）。
+ * - 读 SettingsTransport seam（[C3] preset 域 RPC：listPresets / getDefaultPreset / setDefaultPreset /
+ *   createPreset / updatePreset / removePreset——settings 域禁直连 @/api 门面）。
+ * - 读 @taiji/core 顶层 barrel 的 getState（连接态；ws-client 实现经 barrel 允许面透出，
+ *   不深 import transport 域；与 useBackgroundTasks 同源依赖）。
  * - 写 preset store（presets / defaultPresetId）。
  */
 import { effectScope, watch } from 'vue'
 import type { EffectScope } from 'vue'
-import { getState } from '@taiji/core/transport/ws-client'
-import { preset as presetApi } from '@/api'
+import { getState, getSettingsTransport } from '@taiji/core'
+import { runOptimisticUpdate } from '@taiji/core/foundation/optimistic-update'
 import { usePresetStore } from '@/stores/preset'
 import type { PiLaunchPreset } from '@taiji/shared'
 
-// ── 首次 connected 自动拉取单例（u5 · 设计 §6.5 P0-12 / §7.5 E7）─────────────
-/** 单例安装标志（幂等：HMR / 多次调用只挂一个 watcher）。 */
-let presetAutoLoadInstalled = false
-/** 已成功加载标志（置位后重连不重复拉；加载失败不置位 → 下一次 connected 补拉）。 */
-let presetLoadedOnce = false
-/** detached effect scope 持有单例 watch（不随调用方组件卸载停止）。 */
-let presetAutoLoadScope: EffectScope | null = null
+// ── 首次 connected 自动拉取容器（u5 · 设计 §6.5 P0-12 / §7.5 E7）─────────────
+/**
+ * 创建 preset「首次 connected 必拉一次」自动加载容器：安装标志 / 已成功加载标志 /
+ * detached effect scope 收进闭包。生产走模块级单例 defaultPresetAutoLoad
+ * （installPresetAutoLoad 委托）；测试新建实例即隔离（无 reset 后门）。
+ */
+export function createPresetAutoLoad() {
+  /** 安装标志（幂等：多次调用只挂一个 watcher）。 */
+  let installed = false
+  /** 已成功加载标志（置位后重连不重复拉；加载失败不置位 → 下一次 connected 补拉）。 */
+  let loadedOnce = false
+  /** detached effect scope 持有 watch（不随调用方组件卸载停止）。 */
+  let scope: EffectScope | null = null
+
+  /**
+   * 安装 preset「首次 connected 必拉一次」watch（幂等）。
+   *
+   * 行为：
+   * - immediate：若安装时已 connected（AppShell 仅在 connected 后渲染 → 稳态路径）立即拉一次；
+   * - 边沿：之后每次进入 connected 仅在尚未成功加载时拉（重连不重复）；
+   * - 失败补拉：任一 RPC rejected → store.loadError 非空 → 不置位 → 下一次 connected 重试。
+   * 实现细节：watch 放在 detached effectScope 内（app 生命周期单例，不随组件卸载停止）。
+   */
+  function install(): void {
+    if (installed) return
+    installed = true
+    scope = effectScope(true)
+    scope.run(() => {
+      const { loadPresets } = usePiPresets()
+      watch(
+        getState(),
+        (s) => {
+          if (s !== 'connected' || loadedOnce) return
+          void loadPresets().then(() => {
+            // 加载失败（loadError 非空）保持未置位，等下一次 connected 补拉（E7 ③ 恢复通道）
+            if (usePresetStore().loadError === null) loadedOnce = true
+          })
+        },
+        { immediate: true },
+      )
+    })
+  }
+
+  return { install }
+}
+
+const defaultPresetAutoLoad = createPresetAutoLoad()
 
 /**
  * 安装 preset「首次 connected 必拉一次」单例（幂等）。
  *
- * 何时调用：会话面板常驻挂载点（MessageStream setup）。安装后：
- * - immediate：若安装时已 connected（AppShell 仅在 connected 后渲染 → 稳态路径）立即拉一次；
- * - 边沿：之后每次进入 connected 仅在尚未成功加载时拉（重连不重复）；
- * - 失败补拉：任一 RPC rejected → store.loadError 非空 → 不置位 → 下一次 connected 重试。
- * 实现细节：watch 放在 detached effectScope 内（app 生命周期单例，不随组件卸载停止）。
+ * 何时调用：会话面板常驻挂载点（MessageStream setup）。
  */
 export function installPresetAutoLoad(): void {
-  if (presetAutoLoadInstalled) return
-  presetAutoLoadInstalled = true
-  presetAutoLoadScope = effectScope(true)
-  presetAutoLoadScope.run(() => {
-    const { loadPresets } = usePiPresets()
-    watch(
-      getState(),
-      (s) => {
-        if (s !== 'connected' || presetLoadedOnce) return
-        void loadPresets().then(() => {
-          // 加载失败（loadError 非空）保持未置位，等下一次 connected 补拉（E7 ③ 恢复通道）
-          if (usePresetStore().loadError === null) presetLoadedOnce = true
-        })
-      },
-      { immediate: true },
-    )
-  })
-}
-
-/** 测试专用：停止单例 watch 并复位标志（生产不调用）。 */
-export function __resetPresetAutoLoadForTest(): void {
-  presetAutoLoadScope?.stop()
-  presetAutoLoadScope = null
-  presetAutoLoadInstalled = false
-  presetLoadedOnce = false
+  defaultPresetAutoLoad.install()
 }
 
 /**
@@ -101,8 +115,8 @@ export function usePiPresets() {
    */
   async function loadPresets(): Promise<void> {
     const results = await Promise.allSettled([
-      presetApi.list(),
-      presetApi.getDefault(),
+      getSettingsTransport().listPresets(),
+      getSettingsTransport().getDefaultPreset(),
     ])
     // 任一 rejected → 记首个错误；全部 fulfilled → 清错误态
     const firstReject = results.find(
@@ -127,9 +141,8 @@ export function usePiPresets() {
   /**
    * 设置全局默认预设。
    *
-   * 乐观更新 + 失败回滚（RD-4#2，与 create/update/remove 同构）：
-   * 备份旧 defaultPresetId → 立即写 store（UI 即时响应）→ await RPC 持久化；
-   * RPC 失败回滚 store 后向上 throw（调用方 catch 后 toast——PiPresetsPage.onSetDefault 已有）。
+   * 乐观更新协议（RD-4#2，与 create/update/remove 同构）：快照旧 defaultPresetId → 乐观写
+   * → await RPC；失败回滚后 rethrow（调用方 catch 后 toast——PiPresetsPage.onSetDefault 已有）。
    *
    * 成功后 loadPresets() 强拉权威值：preset 域无广播（installPresetAutoLoad 仅首次 connected
    * 拉一次），乐观镜像与后端的背离不会自行消除——强拉是唯一的对齐通道。loadPresets 内部
@@ -137,73 +150,76 @@ export function usePiPresets() {
    */
   async function setDefault(presetId: string): Promise<void> {
     const previous = store.defaultPresetId
-    store.setDefaultPresetId(presetId)
-    try {
-      await presetApi.setDefault(presetId)
-    } catch (e) {
-      store.setDefaultPresetId(previous)
-      throw e
-    }
+    await runOptimisticUpdate({
+      apply: () => {
+        store.setDefaultPresetId(presetId)
+      },
+      rollback: () => {
+        store.setDefaultPresetId(previous)
+      },
+      commit: () => getSettingsTransport().setDefaultPreset(presetId),
+    })
     await loadPresets()
   }
 
   /**
    * 创建自定义预设。
    *
-   * 乐观更新：立即 upsert 到 store（UI 即时显示），随后发 RPC 持久化。
-   * RPC 成功后用 reply 回写 store（W-RN-3：runtime 可能补全 order/id 等字段，本地
-   * optimistic 镜像与持久态对齐，避免 order 错乱）。
-   * RPC 失败时回滚（removePreset），调用方 catch 后 toast。
+   * 乐观更新协议：立即 upsert 到 store（UI 即时显示）→ RPC 持久化；成功后用 reply 回写 store
+   * （W-RN-3：runtime 可能补全 order/id 等字段，本地 optimistic 镜像与持久态对齐）。
+   * 失败回滚 = 逆操作 removePreset（快照还原不适用——插入前不存在），回滚后 rethrow。
    */
   async function create(preset: PiLaunchPreset): Promise<PiLaunchPreset> {
-    store.upsertPreset(preset)
-    try {
-      const saved = await presetApi.create(preset)
-      // 用 RPC reply 回写（runtime 可能补全 order/id 等字段）
-      store.upsertPreset(saved)
-      return saved
-    } catch (e) {
-      store.removePreset(preset.id)
-      throw e
-    }
+    const saved = await runOptimisticUpdate({
+      apply: () => {
+        store.upsertPreset(preset)
+      },
+      rollback: () => {
+        store.removePreset(preset.id)
+      },
+      commit: () => getSettingsTransport().createPreset(preset),
+    })
+    // 用 RPC reply 回写（runtime 可能补全 order/id 等字段）
+    store.upsertPreset(saved)
+    return saved
   }
 
   /**
    * 更新预设（含内置预设的可编辑字段）。
    *
-   * 乐观更新：立即 upsert 到 store，随后发 RPC 持久化。
-   * RPC 成功后用 reply 回写 store（W-RN-3：runtime 对内置预设有 PresetGuard 规范化，
-   * reply 是权威态，覆盖本地乐观镜像）。
-   * RPC 失败时全量刷新回滚（内置预设保护等复杂场景，loadPresets 更可靠）。
+   * 乐观更新协议：立即 upsert → RPC 持久化；成功后用 reply 回写（runtime 对内置预设有
+   * PresetGuard 规范化，reply 是权威态）。失败回滚 = 异步全量刷新（内置预设保护等复杂场景，
+   * loadPresets 更可靠），完成后 rethrow。
    */
   async function update(preset: PiLaunchPreset): Promise<PiLaunchPreset> {
-    store.upsertPreset(preset)
-    try {
-      const saved = await presetApi.update(preset)
-      // 用 RPC reply 回写（runtime 规范化后的权威态）
-      store.upsertPreset(saved)
-      return saved
-    } catch (e) {
-      await loadPresets()
-      throw e
-    }
+    const saved = await runOptimisticUpdate({
+      apply: () => {
+        store.upsertPreset(preset)
+      },
+      rollback: () => loadPresets(),
+      commit: () => getSettingsTransport().updatePreset(preset),
+    })
+    // 用 RPC reply 回写（runtime 规范化后的权威态）
+    store.upsertPreset(saved)
+    return saved
   }
 
   /**
    * 删除自定义预设（内置不可删）。
    *
-   * 乐观更新：备份 → 立即 removePreset，随后发 RPC 持久化。
-   * RPC 失败时回滚（upsertPreset 备份），调用方 catch 后 toast。
+   * 乐观更新协议：快照 backup → 乐观 removePreset → RPC；失败回滚（upsertPreset 备份）后 rethrow。
    */
   async function remove(presetId: string): Promise<void> {
     const backup = store.presets.find((p) => p.id === presetId)
-    store.removePreset(presetId)
-    try {
-      await presetApi.remove(presetId)
-    } catch (e) {
-      if (backup) store.upsertPreset(backup)
-      throw e
-    }
+    await runOptimisticUpdate({
+      apply: () => {
+        store.removePreset(presetId)
+      },
+      rollback: () => {
+        if (backup) store.upsertPreset(backup)
+      },
+      commit: () => getSettingsTransport().removePreset(presetId),
+    })
   }
 
   return {

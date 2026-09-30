@@ -10,14 +10,18 @@
  * - ⑥成功清零：任一次恢复成功（notifyRestored）后熔断计数归零，未来崩溃获得全新额度；
  * - ⑦shutdown 取消语义：cancelAll 清全部 pending timer（timer unref 断言）；
  * - ⑧session 删除取消：cancel 清该 session 的 pending timer；
- * - ⑨restored/restoreFailed 消息形态（sessionId 必带，仓规规则 7）。
+ * - ⑨restored/restoreFailed 消息形态（sessionId 必带，仓规规则 7）；
+ * - ⑩respawn 终态命运信号源（notify-once D5）：emitRespawnFate 全部 7 处点位逐分支断言
+ *   fate 值（schedule 正常→retry-pending / isActive·isRestoring·复活→recovered /
+ *   熔断两态→terminal / 成功→recovered / cancel 不产生命运事件）——组合根 index.ts
+ *   据该信号裁决死亡发声/静默，信号错值 = 死亡通知漏发/误发且完全静默。
  *
  * 挂点/forceQuit 反向/join 等组装级行为在 session-service-respawn.test.ts（真实构造器
  * 接线 + dispatcher 链路）。本文件零 IO、零真实 pi、零真实数据目录。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { RespawnOrchestrator, RESPAWN_DELAY_MS, RESPAWN_MAX_CONSECUTIVE_FAILURES } from '../src/services/session/pi-respawn.js'
-import type { RespawnDeps } from '../src/services/session/pi-respawn.js'
+import { RespawnOrchestrator, RESPAWN_DELAY_MS, RESPAWN_MAX_CONSECUTIVE_FAILURES, onRespawnFate } from '../src/services/session/pi-respawn.js'
+import type { RespawnDeps, RespawnFate, RespawnFateEvent } from '../src/services/session/pi-respawn.js'
 import type { ServerMessage } from '@taiji/shared'
 
 function createDeps(overrides: Partial<RespawnDeps> = {}): RespawnDeps & {
@@ -38,12 +42,23 @@ function createDeps(overrides: Partial<RespawnDeps> = {}): RespawnDeps & {
 }
 
 describe('RespawnOrchestrator（crash-resilience D7）', () => {
+  // ⑩respawn 终态命运收集（notify-once D5 信号源断言面）：onRespawnFate 是模块级订阅
+  //（组合根单消费方），beforeEach 挂 afterEach 退订——订阅残留会跨用例串扰。
+  let fates: RespawnFateEvent[] = []
+  let unsubFate: (() => void) | undefined
   beforeEach(() => {
     vi.useFakeTimers()
+    fates = []
+    unsubFate = onRespawnFate((e) => { fates.push(e) })
   })
   afterEach(() => {
+    unsubFate?.()
+    unsubFate = undefined
     vi.useRealTimers()
   })
+  /** 该 session 的 fate 事件序列（按序，含重复） */
+  const fatesOf = (sessionId: string): RespawnFate[] =>
+    fates.filter((e) => e.sessionId === sessionId).map((e) => e.fate)
 
   it('①非主动退出：schedule 后 5s 触发一次 restore（且只一次），成功推 session.restored', async () => {
     const deps = createDeps()
@@ -67,6 +82,8 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     // 只触发一次：后续时间推进不再 restore
     await vi.runAllTimersAsync()
     expect(deps.restore).toHaveBeenCalledTimes(1)
+    // ⑩信号源：schedule 正常路径 → retry-pending（respawn 链接管，静默）；自动恢复成功 → recovered
+    expect(fatesOf('s1')).toEqual(['retry-pending', 'recovered'])
   })
 
   it('④a schedule 时 in-flight 恢复在跑 → 跳过自动恢复（不挂 timer 不 restore）', async () => {
@@ -85,6 +102,8 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     // 只有一次 restore（用户的惰性恢复），自动恢复让位
     expect(deps.restore).toHaveBeenCalledTimes(1)
     expect(deps.publish).not.toHaveBeenCalled()
+    // ⑩信号源：schedule 的 isRestoring 分支 → recovered（惰性恢复在跑 = session 将复活）
+    expect(fatesOf('s1')).toEqual(['recovered'])
   })
 
   it('④b timer 触发时已 active / in-flight（5s 窗口内用户先恢复）→ 跳过（不双跑）', async () => {
@@ -96,6 +115,8 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     await vi.runAllTimersAsync()
     expect(deps.restore).not.toHaveBeenCalled()
     expect(deps.publish).not.toHaveBeenCalled()
+    // ⑩信号源：schedule 正常挂 retry-pending，timer 触发时已复活 → recovered（丢弃退出现场 stash）
+    expect(fatesOf('s1')).toEqual(['retry-pending', 'recovered'])
 
     // in-flight 变体：触发瞬间恢复仍在跑 → 跳过且不计失败（join 语义下用户恢复负责终态）
     const deps2 = createDeps()
@@ -110,6 +131,8 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     expect(deps2.restore).toHaveBeenCalledTimes(1)
     await vi.runAllTimersAsync()
     expect(deps2.restore).toHaveBeenCalledTimes(1)
+    // ⑩信号源（deps2 变体）：schedule 的 isRestoring 分支 → recovered
+    expect(fatesOf('s2')).toEqual(['recovered'])
   })
 
   it('③join（ensureRestored）：并发调用等待同一 in-flight Promise，restore 内核只跑一次', async () => {
@@ -173,6 +196,8 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     const [, msg] = deps.publish.mock.calls[0] as [string, ServerMessage]
     expect(msg.type).toBe('session.restored')
     expect(msg.payload).toMatchObject({ sessionId: 's1' })
+    // ⑩信号源：join 场景下命运信号不重复——retry-pending → recovered 各恰一次
+    expect(fatesOf('s1')).toEqual(['retry-pending', 'recovered'])
   })
 
   it('⑤熔断：连续失败 2 次后停止自动重试（第 1 次失败续排，第 2 次失败不再续排）', async () => {
@@ -197,6 +222,9 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     expect(deps.restore).toHaveBeenCalledTimes(2)
     // session 保持 dead：无 restored 推送
     expect(deps.publish.mock.calls.some(([, m]) => (m as ServerMessage).type === 'session.restored')).toBe(false)
+    // ⑩信号源：重试耗尽熔断 → terminal（按不可恢复 crash 发声，携退出现场 stash）；
+    // 熔断已触发的后续死亡再 schedule → terminal（前次熔断时已销账则发声空转）
+    expect(fatesOf('s1')).toEqual(['retry-pending', 'terminal', 'terminal'])
   })
 
   it('⑤willRetry=true 中间失败帧：第 1 次失败推 willRetry=true', async () => {
@@ -213,6 +241,8 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     const [, secondMsg] = deps.publish.mock.calls[1] as [string, ServerMessage]
     expect(secondMsg.type).toBe('session.restored')
     expect(orchestrator.isTripped('s1')).toBe(false)
+    // ⑩信号源：中间失败不产生 fate 事件（willRetry=true 仍由 respawn 链接管），成功 → recovered
+    expect(fatesOf('s1')).toEqual(['retry-pending', 'recovered'])
   })
 
   it('⑥成功清零：手动恢复成功（notifyRestored）后熔断解除，未来崩溃获得全新自动恢复额度', async () => {
@@ -231,6 +261,8 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     await vi.runAllTimersAsync()
     expect(deps.restore).toHaveBeenCalledTimes(3)
     expect(deps.publish).toHaveBeenLastCalledWith('s1', expect.objectContaining({ type: 'session.restored' }))
+    // ⑩信号源：熔断 → terminal 发声；notifyRestored 清零后命运信号回到正常轨道（retry-pending → recovered）
+    expect(fatesOf('s1')).toEqual(['retry-pending', 'terminal', 'retry-pending', 'recovered'])
   })
 
   it('⑦shutdown 取消：cancelAll 清全部 pending timer（不触发 restore）', async () => {
@@ -245,6 +277,11 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     await vi.runAllTimersAsync()
     expect(deps.restore).not.toHaveBeenCalled()
     expect(deps.publish).not.toHaveBeenCalled()
+    // ⑩信号源：cancel 取消 ≠ 终态命运——不发声不复活（claim 悬挂交 TTL 清扫，D7②取消语义）
+    expect(fates).toEqual([
+      { sessionId: 's1', fate: 'retry-pending' },
+      { sessionId: 's2', fate: 'retry-pending' },
+    ])
   })
 
   // unref 断言需真实 Node Timeout 原型（fake timers 的句柄不是 Timeout 实例），本用例独立用真实 timer。
@@ -277,6 +314,10 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     await vi.runAllTimersAsync()
     expect(deps.restore).toHaveBeenCalledTimes(1)
     expect(deps.restore).toHaveBeenCalledWith('s2')
+    // ⑩信号源：cancel('s1') 不产生命运事件（被删 session 的悬挂 claim 交 TTL 清扫）——
+    // s1 只留 schedule 时的 retry-pending；s2 正常走完 respawn 链收口 recovered
+    expect(fatesOf('s1')).toEqual(['retry-pending'])
+    expect(fatesOf('s2')).toEqual(['retry-pending', 'recovered'])
   })
 
   it('schedule 对活跃 session no-op（防御：exit 链正常已清 processes）', async () => {
@@ -286,6 +327,8 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     orchestrator.schedule('s1')
     await vi.runAllTimersAsync()
     expect(deps.restore).not.toHaveBeenCalled()
+    // ⑩信号源：isActive 防御分支 → recovered（非死亡终态，丢弃退出现场 stash）
+    expect(fatesOf('s1')).toEqual(['recovered'])
   })
 
   it('同一 session 重复 schedule（防御）：不产生双 timer，只触发一次 restore', async () => {
@@ -296,5 +339,7 @@ describe('RespawnOrchestrator（crash-resilience D7）', () => {
     expect(orchestrator.pendingSessionIds()).toEqual(['s1'])
     await vi.runAllTimersAsync()
     expect(deps.restore).toHaveBeenCalledTimes(1)
+    // ⑩信号源：重复 schedule 每次都发 retry-pending（重排即 respawn 链接管），成功后收口 recovered
+    expect(fatesOf('s1')).toEqual(['retry-pending', 'retry-pending', 'recovered'])
   })
 })

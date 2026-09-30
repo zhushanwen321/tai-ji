@@ -7,17 +7,15 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsTransport, provideSettingsStore, createSettingsStore } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 import { SCOPED_MODEL_RENDERER_TOKEN } from './impl-token'
 
 const configMock = vi.hoisted(() => ({
   setScopedModels: vi.fn(async () => [] as string[]),
 }))
 
-vi.mock('@/api', () => ({
-  config: configMock,
-  default: { config: configMock },
-}))
+// [C3] setScopedModels 经 SettingsTransport seam 桩注入（替换原 @/api 门面 mock）
 
 import { useScopedModels } from '../useScopedModels'
 
@@ -43,8 +41,9 @@ const MOCK_PROVIDERS = [
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   configMock.setScopedModels.mockReset()
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
 })
 
 describe('useScopedModels', () => {

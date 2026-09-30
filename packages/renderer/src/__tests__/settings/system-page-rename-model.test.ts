@@ -15,71 +15,30 @@
  *  - 联动：auto-rename 开 → trigger 可用；关 → trigger disabled。
  *
  * mock 策略：mock 工厂 / fixtures / mount 编排经 __tests__/helpers/system-page-mount
- *  共享（与 system-page-smart-context.test.ts 的公共样板提取，mountSystemPage /
- *  mountSystemSection 两级入口）；vi.mock 注册留在本文件（hoisting 约束），用例断言与
- *  特定覆写保留在各自 describe。
- *  settings store 用 @taiji/core 的 getSettingsStore() 单例（模块级 store，
- *  providers/models 是 ref，测试直接写 .value 注入 fixture），
- *  beforeEach 经 __resetSettingsStoreForTesting 重置避免跨用例残留。
+ *  共享；vi.mock 注册 + 超时放宽 + 生命周期骨架经 __tests__/helpers/system-page-test-setup
+ *  一站式 setup（import 即注册 + setupSystemPageTest 工厂，两个 SystemPage 集成测试文件单源）；
+ *  用例断言与特定覆写保留在各自 describe。
+ *  settings store 经 provideSettingsStore(createSettingsStore()) 每用例注入全新实例
+ *  （providers/models 是 ref，测试直接写 .value 注入 fixture，无跨用例残留）。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/system-page-rename-model.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import { __resetSettingsStoreForTesting } from '@taiji/core'
+import { describe, it, expect } from 'vitest'
 import {
-  settingsApiMocks,
-  settingsApiModule,
-  toastModule,
-  commandStoreModule,
-  ipcModule,
-  resetSettingsApiMocks,
-  mountSystemPage,
-  mountSystemSection,
+  flushPromises,
   seedStore,
-} from '../helpers/system-page-mount'
+  setupSystemPageTest,
+} from '../helpers/system-page-test-setup'
 
-vi.mock('@taiji/core/transport/api/domains/settings', () => settingsApiModule())
-vi.mock('@/composables/useToast', () => toastModule())
-vi.mock('@/composables/features/command/useCommandStore', () => commandStoreModule())
-vi.mock('@/lib/ipc', () => ipcModule())
-
-// SystemPage 集成 mount 本身重（单跑首例 ~1.1s）；全量并发 CPU 争抢下默认 5s 超时偶发击穿
-//（Gate A R4②）。mount 慢是集成测试固有成本而非挂起，放宽本文件超时作资源竞争容差。
-vi.setConfig({ testTimeout: 20_000 })
-
-// 工厂引用 helper 单例（mock 模块与断言共享同一 mock fn 实例）
-const settingsMock = settingsApiMocks
-
-let wrapper: Awaited<ReturnType<typeof mountSystemPage>> | null = null
-
-/** mount SystemPage（集成入口）并完成异步加载。 */
-async function mountPage(): Promise<void> {
-  wrapper = await mountSystemPage()
-}
-
-/** 直挂 SystemAutoRenameSection（交互断言用例；依赖面裁剪依据见文件头 mount 分级说明）。 */
-async function mountSection(): Promise<void> {
-  wrapper = await mountSystemSection(() => import('@/components/settings/system/SystemAutoRenameSection.vue'))
-}
-
-beforeEach(() => {
-  setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
-  resetSettingsApiMocks(settingsMock)
-})
-
-afterEach(() => {
-  wrapper?.unmount()
-  wrapper = null
-  document.body.innerHTML = ''
-})
+// 工厂引用 helper 单例（seam 桩与断言共享同一 mock fn 实例）
+const { settingsMock, mountPage, mountSection, pageWrapper } = setupSystemPageTest(
+  () => import('@/components/settings/system/SystemAutoRenameSection.vue'),
+)
 
 describe('SystemPage 重命名模型 Select', () => {
   it('mount 后 DOM 含 rename-model Select trigger', async () => {
     await mountPage()
-    const trigger = wrapper!.find('[data-testid="setting-rename-model"]')
+    const trigger = pageWrapper()!.find('[data-testid="setting-rename-model"]')
     expect(trigger.exists()).toBe(true)
   })
 
@@ -87,7 +46,7 @@ describe('SystemPage 重命名模型 Select', () => {
     settingsMock.getRenameModel.mockResolvedValue({ model: 'p1/m1' })
     seedStore()
     await mountSection()
-    const trigger = wrapper!.find('[data-testid="setting-rename-model"]')
+    const trigger = pageWrapper()!.find('[data-testid="setting-rename-model"]')
     expect(trigger.text()).toContain('Model One')
   })
 
@@ -95,7 +54,7 @@ describe('SystemPage 重命名模型 Select', () => {
     settingsMock.getRenameModel.mockResolvedValue({ model: 'gone/model-x' })
     seedStore()
     await mountSection()
-    const trigger = wrapper!.find('[data-testid="setting-rename-model"]')
+    const trigger = pageWrapper()!.find('[data-testid="setting-rename-model"]')
     expect(trigger.text()).toContain('gone/model-x')
     expect(trigger.text()).toContain('（不可用）')
   })
@@ -104,22 +63,22 @@ describe('SystemPage 重命名模型 Select', () => {
     settingsMock.getRenameModel.mockResolvedValue({ model: '' })
     seedStore()
     await mountSection()
-    const trigger = wrapper!.find('[data-testid="setting-rename-model"]')
+    const trigger = pageWrapper()!.find('[data-testid="setting-rename-model"]')
     expect(trigger.text()).toContain('跟随会话模型')
   })
 
   it('auto-rename 关闭时 trigger disabled，开启时可用', async () => {
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: false })
     await mountSection()
-    const trigger = wrapper!.find('[data-testid="setting-rename-model"]')
+    const trigger = pageWrapper()!.find('[data-testid="setting-rename-model"]')
     expect(trigger.attributes('disabled')).toBeDefined()
 
     // 二段挂载前先卸载首段（直挂不 attachTo，残留实例的 watcher 不跨段存活）
-    wrapper!.unmount()
+    pageWrapper()!.unmount()
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: true })
     seedStore()
     await mountSection()
-    const enabledTrigger = wrapper!.find('[data-testid="setting-rename-model"]')
+    const enabledTrigger = pageWrapper()!.find('[data-testid="setting-rename-model"]')
     expect(enabledTrigger.attributes('disabled')).toBeUndefined()
   })
 
@@ -130,7 +89,7 @@ describe('SystemPage 重命名模型 Select', () => {
     // reka-ui SelectContent 仅在 open 时挂载（SelectPortal teleport 到 body）。
     // SelectTrigger 在 pointerdown 时打开，happy-dom 下需显式 dispatch
     // （同 provider-edit-modal.test.ts 的交互模式）。
-    const trigger = wrapper!.find('[data-testid="setting-rename-model"]').element as HTMLElement
+    const trigger = pageWrapper()!.find('[data-testid="setting-rename-model"]').element as HTMLElement
     trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
     trigger.click()
     await flushPromises()

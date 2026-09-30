@@ -50,9 +50,8 @@ import { isCatalogProvider } from '../provider-catalog.js'
 // （applyProviderEntry / applyOrphanWithTemplate）都在 upsert 前接载体，防线落在写入点。
 import { applyProviderWritePolicy, type ProviderWriteKind } from '../provider-config-helper.js'
 import type { CredentialWriter } from '../auth/auth-storage.js'
-import { matchQuotaPreset } from '@taiji/shared'
 import type { QuotaPreset } from '@taiji/shared'
-import type { TaijiProviderStore } from '../provider-extras-store.js'
+import { autoEnableQuotaDisplay, matchAutoEnablePreset, type QuotaExtrasWriter } from '../quota-auto-enable.js'
 
 /**
  * catalog provider 导入在 credentialWriter 未注入时的降级 reason（设计 D1④）。
@@ -67,58 +66,9 @@ const CATALOG_CREDENTIAL_WRITER_UNAVAILABLE =
  * coding-plan 额度显示自动开启的 extras 写入通道（可选注入，对齐 credentialWriter 先例）。
  * 生产由 ConfigService.applyImportProviders 传入 providerExtrasStore（providers.json 唯一
  * 读写者）；未注入（部分测试场景）时跳过写入，不影响导入主语义。
+ * 判定 + 落盘实现 = services/quota-auto-enable.ts（与 setProvider 新增路径共用，QuotaExtrasWriter
+ * 类型同源）。
  */
-type QuotaExtrasWriter = Pick<TaijiProviderStore, 'modify'>
-
-/**
- * 判定「导入即默认同意」是否适用（coding-plan 额度显示自动开启）：返回应落盘的 preset，
- * 不适用返回 undefined。四个条件缺一不可：
- * - credentialType === 'plaintext'：env/command 落盘的是占位串（$VAR / !command，由 pi
- *   运行时解析），quota 凭证链读原始串不解占位——自动开启只会得到查询失败；明文 key 即刻可用
- * - matchQuotaPreset 命中：用导入的完整数据（baseUrl/name）匹配，与脱敏 preview 无关。
- *   name 取 provider.name ?? _sourceName，与 listProviders custom 侧的 name 派生一致
- * - preset.auth 含 'api-key'：凭证复用 provider 自己的 key（credentialSource 缺省推导
- *   'provider' → auth.json → models.json，正是导入落盘位置）。cookie 类（mimo / opencode-go）
- *   不适用——导入不提取 cookie，自动开启只会得到 no-credential 失败态
- * - 非 requiresWorkspace：资源维度 fetcher（opencode-go）还需 workspace 配置才算齐备
- */
-function matchAutoEnablePreset(
-  provider: { baseUrl?: string; name?: string },
-  credentialType: ParsedProvider['_credentialType'],
-): QuotaPreset | undefined {
-  if (credentialType !== 'plaintext') return undefined
-  const preset = matchQuotaPreset(provider)
-  if (!preset) return undefined
-  if (!preset.auth.includes('api-key')) return undefined
-  if (preset.requiresWorkspace) return undefined
-  return preset
-}
-
-/**
- * extras 落盘 quota（merge 语义：保留 authMethod/modelStates 与既有 quota 字段，只写
- * enabled + fetcher）。fetcher 显式落盘的必要性：catalog provider（如 zai-coding-cn /
- * kimi-coding 孤儿凭据场景）无 models.json 条目，fetch 侧 getFetcherForProvider 的
- * baseUrl/name 自动匹配读不到定义——与手动配置路径一致（useQuotaConfigure 保存时也显式
- * 传 fetcher）。credentialSource 刻意不写：缺省推导 'provider'（复用导入落盘的 provider
- * key），不制造 secrets 中间态。
- *
- * 返回写入是否成功：成功才在结果条目置 quotaAutoEnabled（前端 toast 依据），失败只 warn
- * （best-effort：导入主语义已成功，额度显示可在设置里手动配置）。
- */
-async function autoEnableQuotaDisplay(store: QuotaExtrasWriter, providerId: string, fetcherId: string): Promise<boolean> {
-  try {
-    await store.modify(providerId, current => ({
-      ...current,
-      quota: { ...current?.quota, enabled: true, fetcher: fetcherId },
-    }))
-    return true
-  } catch (err) {
-    // best-effort 降级（非 silent-catch）：导入主语义（provider 定义+凭据+白名单）已成功，
-    // 额度显示缺失属可恢复态（设置里手动配置即可）；在此中断/回滚反而让导入结果与磁盘态背离。
-    console.warn(`[provider-importer] auto-enable quota display failed for ${providerId}:`, err)
-    return false
-  }
-}
 
 /**
  * previewImport 的成功返回（importId 供 Step2 applyImport 用 + 脱敏 preview 供前端渲染）。

@@ -1598,8 +1598,9 @@ ${STAGED_DELETED}"
         echo -e "${GREEN}[OK] 无 thinking 档位词表文件变更，跳过档位词表比对检查${NC}"
     fi
 
-    # G3：registry vs pi-ai 差分探针（触发文件：档位链路四文件任一 staged，basename 匹配）
-    if echo "$STAGED_FILES" | grep -qE "(^|/)(thinking-levels\.ts|use-provider-edit\.ts|builtin-providers\.json|model-capability\.ts)$"; then
+    # G3：registry vs pi-ai 差分探针（触发文件：档位链路四文件任一 staged，basename 匹配。
+    # [C4] use-provider-edit 拆分后思考预设/反推归位 provider-edit-models.ts，触发面同步跟随）
+    if echo "$STAGED_FILES" | grep -qE "(^|/)(thinking-levels\.ts|provider-edit-models\.ts|builtin-providers\.json|model-capability\.ts)$"; then
         echo -e "${BLUE}[INFO] 档位链路文件有变更，运行 G3 差分探针...${NC}"
         if ! node scripts/diff-probe-thinking.mjs; then
             echo -e "${RED}[ERROR] G3 差分探针失败：registry 计算路径与 pi-ai 同源函数不一致${NC}"

@@ -67,6 +67,7 @@
     "@zhushanwen/session-delivery": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-notify-ledger-host": "workspace:*",
     "@zhushanwen/subagent-core": "workspace:*",
     "@zhushanwen/pi-subagent-cli": "workspace:*",
     "@zhushanwen/zcode-subagent-cli": "workspace:*"

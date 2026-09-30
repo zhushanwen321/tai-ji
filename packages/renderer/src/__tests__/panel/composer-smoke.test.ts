@@ -20,7 +20,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, effectScope, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { textToSegments } from '@taiji/shared'
+import { composerApiModuleWithChat, composerChatSpyModule, makeComposerInputMock } from '../helpers/composer-mount'
+import { toastSpyModule } from '../helpers/i18n-toast-mock'
 import { useCompactQueue } from '@/composables/panel/useCompactQueue'
 import Panel from '@/components/panel/Panel.vue'
 
@@ -101,55 +102,17 @@ vi.mock('@/composables/useExtensionUI', () => ({
 }))
 
 // ── useChat / useToast / @/api / stores mock（Composer 的 chat RPC + 队列 flush）──
-const chatApiMock = vi.hoisted(() => ({
-  send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-  sendBash: vi.fn(() => Promise.resolve()),
-  abortBash: vi.fn(() => Promise.resolve()),
-}))
-const toastMock = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), warning: vi.fn() }))
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => chatApiMock,
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/useToast', () => ({
-  useToast: () => toastMock,
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: chatApiMock.send, steer: chatApiMock.steer },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn() },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
-}))
+// 不走 composer-shell-mount：flow 的 hoisted 超集与 session 的 revive 变体须由本文件
+// 注册生效（壳注册后到会覆盖文件内变体）；useChat/toast/api 三枚直挂单例工厂
+vi.mock('@/composables/features/chat/useChat', () => composerChatSpyModule())
+vi.mock('@/composables/useToast', () => toastSpyModule())
+vi.mock('@/api', () => composerApiModuleWithChat())
 vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn(), revive: vi.fn() }),
 }))
 
-// ── ComposerInput mock（data-testid 供冒烟断言；emit keydown 驱动 onSend 范式与集成测试一致）──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    expose({ clear: vi.fn(), setText: vi.fn(), insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
+// ── ComposerInput mock（共用面收敛 helpers/composer-mount；data-testid 供冒烟断言）──
+const { lastInputText, ComposerInputMock } = makeComposerInputMock()
 
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 const stubs = {

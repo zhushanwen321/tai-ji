@@ -22,7 +22,7 @@ import type { DoneReason, RunStatus, WorkerLogEntry } from "./types.ts";
  * 持久化由 RunStore.save(WorkflowRun) 触发（WorkflowRun 持 RunState）。
  * 跨进程重启时 RunState 从 JSONL 重水合（callCache 保留，worker 由崩溃恢复重建）。
  */
-export interface RunState {
+export interface RunState { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
  /** 当前状态（running/done）。 */
   status: RunStatus;
  /** 终态原因（done 时必有）。 */

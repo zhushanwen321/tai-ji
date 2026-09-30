@@ -27,7 +27,7 @@ import { BACKGROUND_BASH_CUSTOM_TYPE } from "./notify.ts";
 export const RECONCILED_MARKER_CUSTOM_TYPE = "background-bash:reconciled";
 
 /** 补投标记 entry 的 data 落盘形态（设计决策 1：{taskId, reconciledAt}）。 */
-export interface ReconciledMarkerData {
+export interface ReconciledMarkerData { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
 	taskId: string;
 	/** 补投发起时刻（epoch 毫秒；观测字段，判据不消费）。 */
 	reconciledAt: number;

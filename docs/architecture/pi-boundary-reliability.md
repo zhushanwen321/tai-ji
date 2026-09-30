@@ -62,7 +62,7 @@
 **三层根因叠加**（全部实读核实）：
 
 1. **pi 两级门控**（判据 1 的被推断对象）：`pi-ai/dist/models.js:548` `if (!model.reasoning) return ["off"]`——reasoning 是能力总开关，thinkingLevelMap 只是开关打开后的档位映射；第一关不过任何档位钳回 off。
-2. **写入时语义缺失**（判据 3）：GUI addModel 表单无 reasoning 输入项（`packages/ui/.../ModelListSection.vue` 全文无；`use-provider-edit.ts:546-561` addModel 只构造 id/name/contextWindow/input/thinkingLevelMap 五字段）→ 手动添加的模型落盘后 reasoning 永远 undefined → pi 判 off。**同一个 undefined，pi 解释为「关」，前端 `resolveAvailableLevels` 解释为「支持全档」**（`thinking-levels.ts:66-84` docstring 明写「undefined 视为 true」）——两侧对字段缺失的语义解释恰好相反。
+2. **写入时语义缺失**（判据 3）：GUI addModel 表单无 reasoning 输入项（`packages/ui/.../ModelListSection.vue` 全文无；`provider-edit-models.ts` addModel 只构造 id/name/contextWindow/input/thinkingLevelMap 五字段）→ 手动添加的模型落盘后 reasoning 永远 undefined → pi 判 off。**同一个 undefined，pi 解释为「关」，前端 `resolveAvailableLevels` 解释为「支持全档」**（`thinking-levels.ts:66-84` docstring 明写「undefined 视为 true」）——两侧对字段缺失的语义解释恰好相反。
 3. **无受理确认 + 漂移兜底造成体感**（判据 2+4）：runtime 侧其实已经做对了——`session-service.ts:624-645` set 后 get_state 读出 clamp 后的生效值并经 `session.thinkingLevelSet` 回传（`settings-message-handler.ts:397-404` 注释明写「reply 生效值而非请求值」）；但 `protocol.ts:1681` 把该 reply 类型映射为 `void`，`useModel.ts:68` 拿到 `Promise<void>` 后只能乐观写请求值。30s 周期兜底重新拉取（`replicated-states.config.ts:57-59`）把真值 off 拉回——于是用户看到「过一会自己变关」。**思考从第一次请求起就真是关的**，回执链路只差 renderer 最后一跳。
 
 **事故 B 物理数据流（三进程 Journey，★=失真点）**：
@@ -202,9 +202,9 @@ models-store 远端目录刷新引入大小写孪生条目
 
 **D4：addModel reasoning 显式化（选定）**
 
-- **采用**：① ModelListSection.vue 表单加 reasoning 开关，默认按思考策略自动推导（选非 all-levels 策略 → 自动置 true，用户可显式关）；② use-provider-edit.ts addModel 构造字段加 reasoning（显式 boolean，不再允许 undefined 出厂）；③ save/写盘白名单已支持 reasoning（`provider-config-helper.ts:584-589` `!== undefined` 判定），无需改 runtime 写侧；④ 存量数据不修（用户手工补 models.json 的临时方案已由排查给出），但 D2 注册表上线后，reasoning 缺失模型的档位 UI 会正确显示「仅关」，误导面被构造性消除。
+- **采用**：① ModelListSection.vue 表单加 reasoning 开关，默认按思考策略自动推导（选非 all-levels 策略 → 自动置 true，用户可显式关）；② provider-edit-models.ts addModel 构造字段加 reasoning（显式 boolean，不再允许 undefined 出厂）；③ save/写盘白名单已支持 reasoning（`provider-config-helper.ts:584-589` `!== undefined` 判定），无需改 runtime 写侧；④ 存量数据不修（用户手工补 models.json 的临时方案已由排查给出），但 D2 注册表上线后，reasoning 缺失模型的档位 UI 会正确显示「仅关」，误导面被构造性消除。
 - **不采用**：表单不加字段、只在文档里提醒用户手工补——把系统缺陷转嫁给用户纪律，判据 3 原样保留；❌ 强制扫存量 models.json 自动补写——静默改用户配置，违反零宽容同族原则。
-- **证据**：✅ addModel 五字段（use-provider-edit.ts:546-561）、表单无 reasoning（ModelListSection.vue 全文件）、写盘白名单已含 reasoning（provider-config-helper.ts:584-589，「GUI 再保存会抹掉手工字段」的担忧不成立——白名单回传，不抹）。
+- **证据**：✅ addModel 五字段（provider-edit-models.ts addModel）、表单无 reasoning（ModelListSection.vue 全文件）、写盘白名单已含 reasoning（provider-config-helper.ts:584-589，「GUI 再保存会抹掉手工字段」的担忧不成立——白名单回传，不抹）。
 - **效果**：新添加模型不再携带「无主的隐式语义」出厂；与 D2 合起来，判据 3 在模型能力域补全。
 
 **D5：确认式送达通用化——at-most-once 内存通道禁止用于结果语义（选定）**
@@ -231,7 +231,7 @@ models-store 远端目录刷新引入大小写孪生条目
 |---|---|---|---|---|
 | G1 | `check-pi-semantics.mjs`（D6 检查层） | machine | pre-commit 总开关（install-hooks.sh heredoc，i18n 段后插入，**不设独立 SKIP_\*** 遵循 R1 后惯例）+ CI `invariants` job 等价一步 | 新增 scripts/ 脚本 + docs/pi-semantics.json；constraints.json 登记 C-proc-08 |
 | G2 | pi 语义探针测试族 `pi-semantics-*.test.ts` | machine | `packages/runtime` vitest 主池（不进 REAL_PI_TESTS）；CI `test-runtime` 自动覆盖（凭证无关） | 仿 pi-paths-config-dir-contract.test.ts；初始覆盖附录 A 全部 probe 条目 |
-| G3 | `diff-probe-thinking.mjs` 接线 | machine | pre-commit：staged 含 `thinking-levels.ts` / `use-provider-edit.ts` / `builtin-providers.json` / `model-capability.ts` 时触发；CI invariants 同步 | U6 删除 resolveAvailableLevels 后，探针比对对象改为「registry 计算路径 vs pi-ai 同源函数」（防 registry 自身漂移），脚本改目标不退役 |
+| G3 | `diff-probe-thinking.mjs` 接线 | machine | pre-commit：staged 含 `thinking-levels.ts` / `provider-edit-models.ts` / `builtin-providers.json` / `model-capability.ts` 时触发；CI invariants 同步 | U6 删除 resolveAvailableLevels 后，探针比对对象改为「registry 计算路径 vs pi-ai 同源函数」（防 registry 自身漂移），脚本改目标不退役 |
 | G4 | subagent-workflow 通道禁则 | machine | pre-commit（staged 为 `extensions/universal/subagent-workflow/**` 时）：禁 `deliverAs:\s*["'](steer\|nextTurn)["']` 出现在 courier 模块白名单（U2 落地后 = `execution/notify/notify-ledger.ts` 单文件）之外；禁 `"--model"` 字面量出现在 `shared/model-ref.ts` / `session-runner.ts` 白名单之外；测试文件中的模拟串按白名单注释豁免（实施细节） | 实现为新的 `.githooks/check_subagent_channels.py`（exit 0/2 范式）；切片 1 U1/U2 合入后启用，避免过渡期红；**扫描面对 scheduler 的口径（2026-09-15 声明，随 D5 改判）**：脚本扫描面 = `extensions/universal/subagent-workflow/src/` 唯一，scheduler 目录不在扫描面、无 g4-allow 义务——原「账本化迁移单元合入时同步扩面到 scheduler」随该迁移待办逐条处理完毕而取消（scheduler 已改判提醒语义，见 D5 改判段），仅当 scheduler 未来承载结果语义通知时重新评估扩面 |
 | G5 | real-pi 对账用例 `thinking-level-effective-e2e.test.ts` | machine | REAL_PI_TESTS 池（须登记进 `packages/runtime/vitest.config.ts:22-34`，检查测试强制）；开发机跑（凭证门控 REAL_PI_READY） | 真实 pi：reasoning:false 模型 set high → 断言回执=get_state=off；正常模型 → 回执=请求值。这是「config ≡ pi effective」的端到端保险丝 |
 | G6 | 改状态 RPC reply=void 拦截 | review | constraints.json 登记 C-pi-13，dimensions: business-logic（review-business-logic agent 消费）；protocol.ts 改状态区段加注释指约束 | 机器化（静态判定「改状态」语义）不可靠，诚实停在 review 级 |
@@ -319,7 +319,7 @@ packages/runtime/package.json / tsup.config.ts           [U5 依赖与 noExterna
 packages/shared/src/**/protocol.ts                       [U6 ReplyPayloadMap]
 packages/core/src/domain/composer/thinking-levels.ts     [U6 删 resolveAvailableLevels + undefined 语义；其余导出保留]
 packages/core/src/domain/composer/model-thinking.ts      [U6 切 supportedLevels]
-packages/core/src/domain/settings/use-provider-edit.ts   [U6 addModel reasoning]
+packages/core/src/domain/settings/provider-edit-models.ts   [U6 addModel reasoning]
 packages/ui/src/features/settings/common/ModelListSection.vue   [U6 表单开关]
 packages/renderer/src/composables/features/model/useModel.ts    [U6 弃乐观写]
 packages/renderer/src/components/panel/ThinkingLevelPopover.vue [U6 接线]

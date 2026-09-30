@@ -34,12 +34,17 @@ import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, ref, h, nextTick } from 'vue'
 import type { Message, MessageTurn, SessionSummary, SessionGroup } from '@taiji/shared'
 import { textToSegments } from '@taiji/shared'
+import { composerChatApiSpy } from '../helpers/composer-mount'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（被测组件链）求值
+import { apiProjectMock } from '../helpers/api-facade-mock'
 
 // ── mock 最底层 api domain（层 1 只 mock RPC 返回，不 mock 编排）──
 // 真实 useForkActions / useSidebar 内部 import { chat as chatApi, session as sessionApi } from '@/api'，
 // 此 mock 让 fork/send/abort 调用可被 spy 断言，组件间交互保持真实。
 // vi.hoisted：mock factory 被 vitest hoist 到文件顶部，引用的 mock 对象也必须 hoisted。
-const { sessionApiMock, chatApiMock, useChatAbortMock } = vi.hoisted(() => ({
+// chat 域 spy 断言锚用 helpers/composer-mount.ts 的 composerChatApiSpy 单例（resolve 基线
+// 同构；工厂惰性执行期才解引用，非 hoisted 安全）。
+const { sessionApiMock, useChatAbortMock } = vi.hoisted(() => ({
   sessionApiMock: {
     fork: vi.fn(),
     remove: vi.fn().mockResolvedValue(undefined),
@@ -48,19 +53,12 @@ const { sessionApiMock, chatApiMock, useChatAbortMock } = vi.hoisted(() => ({
     getContext: vi.fn().mockResolvedValue({}),
     setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })),
   },
-  chatApiMock: {
-    send: vi.fn(() => Promise.resolve()),
-    steer: vi.fn(() => Promise.resolve()),
-    followUp: vi.fn(() => Promise.resolve()),
-    abort: vi.fn(() => Promise.resolve()),
-    compact: vi.fn(() => Promise.resolve()),
-  },
   // 软停止上层联动断言锚点（useSidebarSessionActions.onAbortSession → useChat().abort）
   useChatAbortMock: vi.fn(() => Promise.resolve()),
 }))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
   session: sessionApiMock,
-  chat: chatApiMock,
+  chat: composerChatApiSpy,
   model: { switchModel: vi.fn() },
   composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
 }))
@@ -308,8 +306,8 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
     expect(sessionApiMock.fork).toHaveBeenCalledTimes(1)
     expect(sessionApiMock.fork.mock.calls[0][0]).toBe('s-src')
     // chat.send 被调，第 1 参 = 新 session id（'s-forked'，非主线 's-src'）
-    expect(chatApiMock.send).toHaveBeenCalledTimes(1)
-    expect(chatApiMock.send.mock.calls[0][0]).toBe('s-forked')
+    expect(composerChatApiSpy.send).toHaveBeenCalledTimes(1)
+    expect(composerChatApiSpy.send.mock.calls[0][0]).toBe('s-forked')
     // forkMode 自动复位 false（发送后退出 fork 模式）
     expect(vm.forkMode.value).toBe(false)
     // 用户可见：composer-box 已退出 fork-mode class

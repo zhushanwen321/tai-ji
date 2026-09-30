@@ -14,16 +14,16 @@
  */
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import type { ProviderInfo } from '@taiji/shared'
-import type { useProviderEdit, TestConnectionResult } from '@taiji/core/domain/settings'
+import type { ProviderEditSession, TestConnectionResult } from '@taiji/core/domain/settings'
 
 /** i18n 翻译函数（vue-i18n global.t 消费侧的最小结构类型） */
 type Translate = (key: string, named?: Record<string, unknown>) => string
 
 /**
- * useProviderEdit 的返回值（本模块从它读取 form / test 状态 / 模型数）。
- * 取 ReturnType 而非结构切片：`testResults` 的元素类型必须与子组件声明同源，重复声明会漂移。
+ * Provider 编辑会话（[C4] 三组子 interface）。本模块按组消费：form.draft（写 baseUrl）/
+ * discover（test 状态转 props）/ models（模型数）——不逐名解构扁平返回面。
  */
-type ProviderEditState = ReturnType<typeof useProviderEdit>
+type ProviderEditState = ProviderEditSession
 
 /** 非空字段值 → 出现次数（展示用分布：协议分布 / 端点分布） */
 function countNonEmpty(values: Array<string | undefined>): Map<string, number> {
@@ -77,7 +77,7 @@ export interface CatalogDisplayState {
 
 /**
  * @param provider 当前编辑的 provider（prop ref）
- * @param edit useProviderEdit 的返回值（本模块读取 form 写 baseUrl，读取 test 状态转 props）
+ * @param edit Provider 编辑会话（本模块读取 form.draft 写 baseUrl，读取 discover 状态转 props）
  * @param t i18n 翻译函数
  * @param isCatalog 是否 catalog 体系（custom 不走派生展示）
  */
@@ -87,7 +87,7 @@ export function useCatalogDisplay(
   t: Translate,
   isCatalog: ComputedRef<boolean>,
 ): CatalogDisplayState {
-  const { form } = edit
+  const form = edit.form.draft
   const apiCounts = computed(() => countNonEmpty((provider.value?.models ?? []).map(m => m.api)))
   const baseUrlCounts = computed(() => countNonEmpty((provider.value?.models ?? []).map(m => m.baseUrl)))
 
@@ -162,13 +162,13 @@ export function useCatalogDisplay(
    * 组件侧 v-bind 直传，避免逐个解构 4 个新 props 撑破行数上限。
    */
   const testDiscoverProps = computed<ProviderTestDiscoverBindings>(() => ({
-    testing: edit.testing.value,
-    discovering: edit.discovering.value,
-    testResult: edit.testResult.value,
-    testResults: edit.testResults.value,
-    testError: edit.testError.value,
-    discoverResult: edit.discoverResult.value,
-    modelCount: edit.localModels.value.length,
+    testing: edit.discover.testing.value,
+    discovering: edit.discover.discovering.value,
+    testResult: edit.discover.testResult.value,
+    testResults: edit.discover.testResults.value,
+    testError: edit.discover.testError.value,
+    discoverResult: edit.discover.discoverResult.value,
+    modelCount: edit.models.localModels.value.length,
     providerKind: isCatalog.value ? 'catalog' : 'custom',
     providerBaseUrl: effectiveBaseUrl.value,
   }))

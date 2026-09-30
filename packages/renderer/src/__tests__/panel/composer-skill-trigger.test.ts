@@ -22,43 +22,29 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { nextTick, defineComponent, ref } from 'vue'
+import { nextTick, defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import * as events from '@taiji/core/transport/api'
 import type { ServerMessage } from '@taiji/shared'
 import type { SkillInfo } from '@taiji/shared'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { composerApiModule, composerChatModule, composerFlowModule } from '../helpers/composer-mount'
 
-// ── Composer 路径 mock —— vi.mock factory 必须早于 import ──
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    send: vi.fn(),
-    steer: vi.fn(),
-    followUp: vi.fn(),
-    abort: vi.fn(),
-    compact: vi.fn(),
-    editAndResend: vi.fn(),
-    hydrateHistory: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, currentCwd: ref(null), setPendingModel: vi.fn() }),
-  resetNewTaskFlow: vi.fn(),
-}))
+// ── Composer 路径 mock —— vi.mock factory 必须早于 import；骨架单源 helpers/composer-mount.ts ──
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 // P7 用：getProjectSkills 可控 mock（vi.hoisted 提升供断言/改返回值）
 const getProjectSkillsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })), getCommands: vi.fn().mockResolvedValue({ sessionId: '', commands: [] }) },
-  composer: {
-    getMentionCandidates: vi.fn().mockResolvedValue([]),
-    getFileCandidates: vi.fn().mockResolvedValue([]),
-  },
-  config: {
-    getGlobalSkills: vi.fn().mockResolvedValue([]),
-    getProjectSkills: getProjectSkillsMock,
-    onSkillCacheInvalidated: () => () => {},
-  },
-}))
+vi.mock('@/api', () => {
+  // session 域追加 getCommands（CommandPopover 候选真源）、config 域换可控 getProjectSkills（P7 断言面）
+  const api = composerApiModule()
+  return {
+    ...api,
+    session: { ...api.session, getCommands: vi.fn().mockResolvedValue({ sessionId: '', commands: [] }) },
+    config: { ...api.config, getProjectSkills: getProjectSkillsMock },
+  }
+})
 
 import CommandPopover from '@/components/panel/CommandPopover.vue'
 import Composer from '@/components/panel/Composer.vue'
@@ -67,6 +53,8 @@ import { useSessionStore } from '@/stores/session'
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // [C3] 打 seam：P7 断言 getProjectSkills 拉取参数（getProjectSkillsMock 可控）
+  provideSettingsTransport(makeSettingsTransportStub({ getProjectSkills: getProjectSkillsMock }))
 })
 
 // ─────────────────────── W 组：Composer wiring（真实 ComposerInput + stub CommandPopover） ───────────────────────

@@ -217,6 +217,17 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     replyKey: 'config.smartContextExcludedModels',
     effectiveFields: ['models'],
   },
+  {
+    // provider CRUD 的 set 通道：set 原值落盘 + reply 回显 providerId + broadcastProviderList
+    // 全量广播（provider-message-handler handleSetProvider）。quotaAutoEnabled（optional，仅新建
+    // 分支携带）供 renderer toast（provider-edit-form save 消费 → ProviderPage
+    // notifyQuotaAutoEnabled），非回显字段不登记；不做乐观写回退（权威覆盖由广播承担）。
+    type: 'config.setProvider',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.providerUpdated',
+    effectiveFields: ['providerId'],
+  },
   // ── 分支二：ack 豁免清单（reply 无回显字段，豁免理由逐条登记）──
   {
     type: 'preset.setDefault',
@@ -261,12 +272,6 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     rationale: 'renderer 是语言权威（乐观写 i18n 即生效），无读回 RPC；成功只回 config.uiLocaleSet 空 ack，reply 生效值无消费方',
   },
   {
-    type: 'config.setProvider',
-    branch: 'verbatim',
-    contract: 'ack-exempt',
-    rationale: 'wire reply 实际携带 config.providerUpdated { providerId } + broadcastProviderList 全量广播（provider-message-handler）；类型层登记 void，权威覆盖由广播通道承担',
-  },
-  {
     type: 'config.deleteProvider',
     branch: 'verbatim',
     contract: 'ack-exempt',
@@ -288,7 +293,7 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     type: 'config.setToolPermissions',
     branch: 'verbatim',
     contract: 'ack-exempt',
-    rationale: 'wire reply config.providerUpdated { saved }（tool-permissions-message-handler）+ 广播；类型层登记 void，无生效值字段可回显',
+    rationale: 'wire reply config.toolPermissionsSaved { saved }（tool-permissions-message-handler，app 级配置与 provider 无关）；类型层登记 void，无生效值字段可回显',
   },
   {
     type: 'config.setDefaultModel',
@@ -624,11 +629,14 @@ describe('MUTATION_RPC_REGISTRY 清单守卫（ADR-0065 / C-pi-14，D8 机器强
     const smartContextEnabledEcho: HasRequiredField<ServerMessageMap['config.smartContextEnabled'], 'enabled'> = true
     const terminalConfigEcho: HasRequiredField<ServerMessageMap['config.terminalConfig'], 'config'> = true
     const scopedModelsEffective: HasRequiredField<ReplyPayloadMap['config.setScopedModels'], 'scopedModels'> = true
+    // setProvider echo-value：providerId 必需回显（quotaAutoEnabled optional 供 toast，不入契约）
+    const providerUpdatedEcho: HasRequiredField<ServerMessageMap['config.providerUpdated'], 'providerId'> = true
 
     const assertions = [
       modelSwitchProvider, modelSwitchModelId, thinkingLevel,
       presetCreateEcho, presetUpdateEcho, engineIdEcho,
       smartContextEnabledEcho, terminalConfigEcho, scopedModelsEffective,
+      providerUpdatedEcho,
     ]
     expect(assertions, '类型断言清单意外为空——本用例失效，请检查').not.toHaveLength(0)
     expect(assertions.every(Boolean)).toBe(true)

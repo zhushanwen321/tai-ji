@@ -1,5 +1,3 @@
-// @vitest-environment node
-
 /**
  * useAppUpdate · 手动通道衔接测试（update-network-resilience renderer 侧 D2/D9）。
  *
@@ -10,24 +8,20 @@
  *  - D2 交错缓解：performInstall 返回实装 version ≠ latestRelease.version →
  *    版本显示对齐（其他字段保留）；version 相同/缺失 → 不动 latestRelease
  *
- * Mock 策略（同 useAppUpdate.w3-acceptance.test.ts 结构）：
- *  - vi.mock('@/api/domains/settings') 桩 update 方法，onUpdateError 捕获 cb 供手动触发
+ * Mock 策略：族级共享 harness（../helpers/app-update-mount.ts）注入内存 adapter 与
+ * markdown 桩 '<p>test</p>'；onUpdateError 捕获 cb 供 ipc.fireError 手动触发。
  *  - vi.mock('@/i18n') t 返回 key（追加文案断言 key 本身即可，文案正确性由
  *    update-manual-channel.test.ts 的真实 zh-CN 文案断言守卫）
- *  - effectScope 包 useAppUpdate（onScopeDispose 依赖活跃 scope）
+ *  - 用例体统一经 inUpdateScope 包 effectScope（onScopeDispose 依赖活跃 scope）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useAppUpdate.manual-channel.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { effectScope } from 'vue'
-import type { LatestReleaseInfo } from '@taiji/shared'
-import { updateIpcBridge, updateIpcModule } from '../helpers/update-ipc-mock'
-
-// IPC 桥 mock 底座收敛在 helpers/update-ipc-mock.ts（r2-01：原 vi.hoisted 块外移为
-// helper 模块单例，vi.mock 工厂经顶层 import 转发注册）。原文件除 updateInstall/
-// onUpdateError 外的键为内联 no-op 实现——本文件不触达这些路径（不调 initAutoCheck/
-// checkForUpdate/performDownload），统一为桥的裸 vi.fn 行为等价。
-vi.mock('@/api/domains/settings', () => updateIpcModule(updateIpcBridge))
+import type { LatestReleaseInfo, UpdateInstallResult } from '@taiji/shared'
+// app-update-markdown-stub 必须先于 app-update-mount import（后者加载 SUT 时 mock 工厂立即执行）
+import { markdownStubModule } from '../helpers/app-update-markdown-stub'
+import { ipc, controller, setupAppUpdateLifecycle, type AppUpdateControllerInternal } from '../helpers/app-update-mount'
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({
@@ -38,9 +32,7 @@ vi.mock('@/composables/useToast', () => ({
   }),
 }))
 
-vi.mock('@/composables/logic/markdown', () => ({
-  renderMarkdown: vi.fn(() => Promise.resolve('<p>test</p>')),
-}))
+vi.mock('@/composables/logic/markdown', () => markdownStubModule())
 
 // mock t 返回 key：追加段断言 key 本身（真实文案断言在 update-manual-channel.test.ts）
 vi.mock('@/i18n', () => ({
@@ -48,7 +40,20 @@ vi.mock('@/i18n', () => ({
   default: { global: { t: (key: string) => key } },
 }))
 
-/** 构造带完整字段的 release（断言「其他字段保留」用） */
+setupAppUpdateLifecycle({ markdownHtml: '<p>test</p>' })
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
+/** 在独立 effectScope 内执行用例体（subscribeProgress/onScopeDispose 需活跃 scope），完跑统一 stop */
+async function inUpdateScope(body: (controller: AppUpdateControllerInternal) => Promise<void>): Promise<void> {
+  const scope = effectScope()
+  await scope.run(() => body(controller))
+  scope.stop()
+}
+
+/** 构造带完整字段的 release（断言「其他字段保留」用；notes/url 与族级 fixture 不同，留本文件） */
 function makeRelease(version: string): LatestReleaseInfo {
   return {
     version,
@@ -60,11 +65,31 @@ function makeRelease(version: string): LatestReleaseInfo {
   }
 }
 
-beforeEach(async () => {
-  vi.clearAllMocks()
-  const { _resetForTest } = await import('@/composables/features/settings/useAppUpdate')
-  _resetForTest()
-})
+/** D2 公共断言：latestRelease 显示 version、htmlUrl 指向 urlVersion（对齐后其他字段保留的读回核对） */
+function expectReleaseShown(state: AppUpdateControllerInternal['state'], version: string, urlVersion: string): void {
+  expect(state.latestRelease?.version).toBe(version)
+  expect(state.latestRelease?.htmlUrl).toContain(`v${urlVersion}`)
+}
+
+/**
+ * D2 公共执行体：mock updateInstall 返回 installResult → 认领 0.9.11 → 执行安装 →
+ * 断言终态 restarting 与版本显示（url 指向认领版：对齐只覆 version/url，其余字段不动）；
+ * then 在 scope 内追加断言（交错场景「其他字段保留」的读回核对）。
+ */
+async function installClaimedRelease(
+  installResult: UpdateInstallResult,
+  shownVersion: string,
+  then?: (state: AppUpdateControllerInternal['state']) => void,
+): Promise<void> {
+  ipc.updateInstall.mockResolvedValue(installResult)
+  await inUpdateScope(async ({ state, performInstall }) => {
+    state.latestRelease = makeRelease('0.9.11')
+    await performInstall()
+    expect(state.state).toBe('restarting')
+    expectReleaseShown(state, shownVersion, '0.9.11')
+    then?.(state)
+  })
+}
 
 describe('D9 suggestion 追加手动下载指引', () => {
   it.each([
@@ -75,11 +100,10 @@ describe('D9 suggestion 追加手动下载指引', () => {
   ])(
     '%s → errorSuggestion 末尾追加手动下载指引',
     async (code) => {
-      const scope = effectScope()
-      await scope.run(async () => {
-        const { useAppUpdate } = await import('@/composables/features/settings/useAppUpdate')
-        const { state } = useAppUpdate()
-        updateIpcBridge.fireError({
+      await inUpdateScope(async (c) => {
+        c.subscribeProgress()
+        const { state } = c
+        ipc.fireError({
           stage: 'downloading',
           message: '下载失败',
           errorCode: code,
@@ -88,27 +112,23 @@ describe('D9 suggestion 追加手动下载指引', () => {
         expect(state.state).toBe('error')
         expect(state.errorSuggestion).toBe('基础恢复指引\nsidebar.update.manualDownloadHint')
       })
-      scope.stop()
     },
   )
 
   it('网络类错误无 suggestion → errorSuggestion 仅含手动下载指引（无前导换行）', async () => {
-    const scope = effectScope()
-    await scope.run(async () => {
-      const { useAppUpdate } = await import('@/composables/features/settings/useAppUpdate')
-      const { state } = useAppUpdate()
-      updateIpcBridge.fireError({ stage: 'downloading', message: '下载失败', errorCode: 'UPDATE_NETWORK_TIMEOUT' })
+    await inUpdateScope(async (c) => {
+      c.subscribeProgress()
+      const { state } = c
+      ipc.fireError({ stage: 'downloading', message: '下载失败', errorCode: 'UPDATE_NETWORK_TIMEOUT' })
       expect(state.errorSuggestion).toBe('sidebar.update.manualDownloadHint')
     })
-    scope.stop()
   })
 
   it('非网络类错误码（UPDATE_INTEGRITY_FAILED）→ 不追加', async () => {
-    const scope = effectScope()
-    await scope.run(async () => {
-      const { useAppUpdate } = await import('@/composables/features/settings/useAppUpdate')
-      const { state } = useAppUpdate()
-      updateIpcBridge.fireError({
+    await inUpdateScope(async (c) => {
+      c.subscribeProgress()
+      const { state } = c
+      ipc.fireError({
         stage: 'downloading',
         message: '校验失败',
         errorCode: 'UPDATE_INTEGRITY_FAILED',
@@ -116,67 +136,38 @@ describe('D9 suggestion 追加手动下载指引', () => {
       })
       expect(state.errorSuggestion).toBe('重新下载更新')
     })
-    scope.stop()
   })
 
   it('无 errorCode → 不追加', async () => {
-    const scope = effectScope()
-    await scope.run(async () => {
-      const { useAppUpdate } = await import('@/composables/features/settings/useAppUpdate')
-      const { state } = useAppUpdate()
-      updateIpcBridge.fireError({ stage: 'downloading', message: '未知错误', suggestion: '基础指引' })
+    await inUpdateScope(async (c) => {
+      c.subscribeProgress()
+      const { state } = c
+      ipc.fireError({ stage: 'downloading', message: '未知错误', suggestion: '基础指引' })
       expect(state.errorSuggestion).toBe('基础指引')
     })
-    scope.stop()
   })
 })
 
 describe('D2 performInstall 实装版本对齐', () => {
   it('install 返回 version ≠ latestRelease.version → 版本显示对齐且其他字段保留', async () => {
-    updateIpcBridge.updateInstall.mockResolvedValue({ triggerRestart: true, version: '0.9.12' })
-    const scope = effectScope()
-    await scope.run(async () => {
-      const { useAppUpdate } = await import('@/composables/features/settings/useAppUpdate')
-      const { state, performInstall } = useAppUpdate()
-      state.latestRelease = makeRelease('0.9.11')
-      await performInstall()
-      // 实装 0.9.12 覆写显示（认领 0.9.11 → 后台预下载 0.9.12 交错场景）
-      expect(state.state).toBe('restarting')
-      expect(state.latestRelease?.version).toBe('0.9.12')
-      // 其他字段保留（旧 release 的 notes/url，app 即将重启，生命周期以秒计）
-      expect(state.latestRelease?.htmlUrl).toContain('v0.9.11')
+    // 实装 0.9.12 覆写显示（认领 0.9.11 → 后台预下载 0.9.12 交错场景）；
+    // 其他字段保留（旧 release 的 notes，app 即将重启，生命周期以秒计）
+    await installClaimedRelease({ triggerRestart: true, version: '0.9.12' }, '0.9.12', (state) => {
       expect(state.latestRelease?.releaseNotes).toBe('notes for 0.9.11')
     })
-    scope.stop()
   })
 
   it('install 返回 version 与显示一致 → 不触发对齐（版本保持不变）', async () => {
-    updateIpcBridge.updateInstall.mockResolvedValue({ triggerRestart: true, version: '0.9.11' })
-    const scope = effectScope()
-    await scope.run(async () => {
-      const { useAppUpdate } = await import('@/composables/features/settings/useAppUpdate')
-      const { state, performInstall } = useAppUpdate()
+    ipc.updateInstall.mockResolvedValue({ triggerRestart: true, version: '0.9.11' })
+    await inUpdateScope(async ({ state, performInstall }) => {
       state.latestRelease = makeRelease('0.9.11')
       await performInstall()
       // reactive 读回是 proxy，引用断言不可用；版本未变即证明对齐分支未执行
-      expect(state.latestRelease?.version).toBe('0.9.11')
-      expect(state.latestRelease?.htmlUrl).toContain('v0.9.11')
+      expectReleaseShown(state, '0.9.11', '0.9.11')
     })
-    scope.stop()
   })
 
   it('install 返回无 version（读取失败容错）→ latestRelease 不动', async () => {
-    updateIpcBridge.updateInstall.mockResolvedValue({ triggerRestart: true })
-    const scope = effectScope()
-    await scope.run(async () => {
-      const { useAppUpdate } = await import('@/composables/features/settings/useAppUpdate')
-      const { state, performInstall } = useAppUpdate()
-      state.latestRelease = makeRelease('0.9.11')
-      await performInstall()
-      expect(state.state).toBe('restarting')
-      expect(state.latestRelease?.version).toBe('0.9.11')
-      expect(state.latestRelease?.htmlUrl).toContain('v0.9.11')
-    })
-    scope.stop()
+    await installClaimedRelease({ triggerRestart: true }, '0.9.11')
   })
 })

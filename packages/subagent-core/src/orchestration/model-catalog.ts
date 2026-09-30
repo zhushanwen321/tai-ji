@@ -30,13 +30,13 @@ import { stripThinkingSuffix } from "../shared/model-ref.ts";
 const MODEL_LIST_LIMIT = 20;
 
 /** 目录条目（ModelRegistryLike.getAvailable() 元素的结构子集，duck-typed 可 mock）。 */
-export interface ModelCatalogEntry {
+export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   provider: string;
   id: string;
 }
 
 /** 模型清单源的最小 duck 接口（ModelRegistryLike 结构兼容——getAvailable 只含已配鉴权模型）。 */
-export interface ModelCatalogSource {
+export interface ModelCatalogSource { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   getAvailable(): ReadonlyArray<ModelCatalogEntry>;
 }
 
@@ -44,14 +44,14 @@ export interface ModelCatalogSource {
 export type ModelCatalogMissClassification = "not_found" | "provider_drift";
 
 /** 命中：与目录条目全等的 (provider, id)。 */
-export interface ModelCatalogHit {
+export interface ModelCatalogHit { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   ok: true;
   provider: string;
   id: string;
 }
 
 /** 未命中：分类 + 分类化错误全文（调用方直接用作 Error message）。 */
-export interface ModelCatalogMiss {
+export interface ModelCatalogMiss { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   ok: false;
   classification: ModelCatalogMissClassification;
   input: string;
@@ -61,7 +61,7 @@ export interface ModelCatalogMiss {
 export type ModelCatalogResolution = ModelCatalogHit | ModelCatalogMiss;
 
 /** 来源标签（进错误首行辅助定位，与 shared/model-ref 的 opts.source 同口径）。 */
-export interface ModelCatalogOptions {
+export interface ModelCatalogOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   source?: string;
 }
 

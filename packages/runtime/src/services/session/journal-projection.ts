@@ -132,7 +132,7 @@ export function parseWorkflowRunEventFileLine(line: string): WorkflowRunEvent | 
 // 形态），不再重复形状校验。
 
 /** v2 条目族扫描结果（entry 源的 v2 半边）。 */
-export interface V2EntryScan {
+export interface V2EntryScan { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   subagentRegistered: Map<string, SubagentRecordRegisteredEntryData>
   subagentSettled: Map<string, SubagentRecordSettledEntryData>
   workflowRegistered: Map<string, WorkflowRecordRegisteredEntryData>
@@ -522,7 +522,7 @@ export function projectV2Workflow(
 }
 
 /** 投影双源持有态（entry 源两代 + journal 源两域）。 */
-export interface JournalProjectionSources {
+export interface JournalProjectionSources { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** v1 全量快照实体（兼容层冻结数据——journal 不参与合并）。 */
   v1Subagents: Map<string, SubagentRecord>
   v1Workflows: Map<string, WorkflowRunRecord>
@@ -646,7 +646,7 @@ function runIdOfFilename(filename: string): string {
     : filename
 }
 
-export interface SessionJournalProjectionOptions {
+export interface SessionJournalProjectionOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 本会话 id（record 域 rootSessionId 过滤的归属键）。 */
   sessionId: string
   /** record 事件文件目录（`<agentDir>/subagents/<enc(cwd)>/records`）；undefined = 无 journal 源（entry-only 降级形态）。 */

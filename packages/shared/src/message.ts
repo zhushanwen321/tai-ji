@@ -25,12 +25,19 @@ export type SteerFollowUpMode = 'steer' | 'follow-up'
  *   喂 entry 与重开 replay 同一个 reducer 覆写点，2026-08-19 custom 双管线收敛；实时侧
  *   registry customStart 只构造 entry，不再独立覆写）
  * - runtime mapSessionEntries / entry-tree-builder：对称覆写 display:false（历史链路，方案 Z）
+ *
+ * `managed-session-notify`：managed session 完成/死亡通知（notify-once D9）——
+ * session-manager extension 经 B-ledger 送达的 custom message，与 extension 端
+ * MANAGED_SESSION_NOTIFY_CUSTOM_TYPE、core extractNotifyRecords 分支三处同值。
  */
 // 显式 Set<string>：保持既有类型面（成员常量是 as const 字面量类型，缺省推断会
 // 收窄成联合字面量 Set，令消费方 .has(entry.customType: string) 编译期红）
+// 'managed-session-notify' 暂未入 extension-protocol 词表（常量在 session-manager
+// 扩展内部），单源化跟进项
 export const COMPLETE_NOTIFY_CUSTOM_TYPES: Set<string> = new Set([
   SUBAGENT_BG_NOTIFY_CUSTOM_TYPE,
   WORKFLOW_RESULT_CUSTOM_TYPE,
+  'managed-session-notify',
 ])
 
 // subagent-directive customType SSOT：经 extension-protocol 单源 re-export（生产侧

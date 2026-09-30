@@ -160,6 +160,41 @@ describe("runReconcileSweep 差集补发", () => {
     expect(appended).toHaveLength(0);
   });
 
+  it("[notify-once D7③] type=session → 显式 skip：不入 workflow run-state 判据、不补注销（防误销活跃 claim）", () => {
+    // notifyId 对 FileRunStore 必 missing——若落入 workflow 判据，「查不到即补注销」
+    // 会把活跃债权 claim 销掉（G2 查询面破坏）。本用例三重钉住：skip 桶 / 判据零调用 /
+    // 零写入。
+    writeSessionFile([reg("sm-123e4567-e89b-12d3-a456-426614174000", "session")]);
+    const workflowLookup = vi.fn(() => "missing" as SupervisedRecordState);
+    const recordLookup = vi.fn(() => "missing" as SupervisedRecordState);
+    const { deps, appended } = makeDeps({});
+    const result = runReconcileSweep({
+      ...deps,
+      lookupRecordState: recordLookup,
+      lookupWorkflowRunState: workflowLookup,
+    });
+    expect(result.skippedSession).toEqual(["sm-123e4567-e89b-12d3-a456-426614174000"]);
+    expect(result.reconciled).toEqual([]);
+    expect(result.skippedNonSubagent).toEqual([]);
+    expect(workflowLookup).not.toHaveBeenCalled();
+    expect(recordLookup).not.toHaveBeenCalled();
+    expect(appended).toHaveLength(0);
+  });
+
+  it("[notify-once D7③] session skip 与其余类型共存互不干扰（subagent 照常收口）", () => {
+    writeSessionFile([
+      reg("sm-123e4567-e89b-12d3-a456-426614174001", "session"),
+      reg("bg-1", "subagent"),
+    ]);
+    const { deps, appended } = makeDeps({
+      states: new Map([["bg-1", { terminal: true, closedReason: "cancelled" } as SupervisedRecordState]]),
+    });
+    const result = runReconcileSweep(deps);
+    expect(result.skippedSession).toEqual(["sm-123e4567-e89b-12d3-a456-426614174001"]);
+    expect(result.reconciled).toEqual(["bg-1"]);
+    expect(appended).toHaveLength(1);
+  });
+
   it("[F2] deps 未注入 workflow 判据 → workflow/未知类型保守跳过（判据缺席 ≠ 可注销）", () => {
     writeSessionFile([reg("wf-1", "workflow"), reg("bad-1", "mystery")]);
     const { deps, appended } = makeDeps({ injectWorkflowLookup: false });

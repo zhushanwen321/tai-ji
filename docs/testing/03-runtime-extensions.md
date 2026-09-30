@@ -482,5 +482,6 @@ bash scripts/validate-runtime-bundle.sh    # 作为第 7 步自动运行（pre-c
 | switch-pre-download | 预下载开关 | packages/renderer/src/components/settings/update/UpdatePage.vue |
 | input-http-proxy / input-https-proxy | 代理输入（手动模式） | packages/renderer/src/components/settings/update/UpdatePage.vue |
 | btn-test-proxy / test-proxy-result / btn-save-proxy | 代理测试与保存操作栏 | packages/renderer/src/components/settings/update/UpdatePage.vue |
+| update-page-load-error / update-page-load-retry | 读配置失败常驻提示 + 重试（RD-4#8，失败期间可落盘控件禁用） | packages/renderer/src/components/settings/update/UpdatePage.vue |
 
 > 内嵌的 UpdateCheckCard.vue（settings-update-check 等 13 个 testid）不在本表范围，登记属其他任务。

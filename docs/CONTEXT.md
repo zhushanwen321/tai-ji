@@ -41,6 +41,22 @@ Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同
 ### 调度模式（Session Dispatch Mode）
 内置模式 `builtin:session-dispatch`（显示序第 4）：主 agent 只做拆解与派发、执行由独立会话完成。工具面 = `allowlist`（`read/grep/find/ls` + 六个 session 管理工具 + `ask_user/todo`），扩展面 = `denylist` 屏蔽 `@zhushanwen/pi-subagent-workflow`（派发不经 subagent，直接开会话），提示词面 = 预置可编辑 `append` 纪律文案。子会话经 `create_managed_session` 创建，**服务端继承父会话 projectId**（不新增工具参数），在侧栏命名 project 视图与父会话同屏。
 
+### 通知债权（claim / lifetime / notifyId）
+
+managed session 完成通知的判据模型（[ADR-0087](adr/decisions.md)）：一笔债权 = 主 session 一次「等待子会话结果」的请求，携带唯一 `notifyId`（幂等键，`sm-` 前缀形态）；请求被消费的轮次结束时销账并经 B-ledger 通知一次，无债权的完成一律静默。两种记录：**claim**（随单笔请求生灭——create+prompt / send 成功产生，settle 兑现 / exit·deleted 终结 / 主 abort 抹除）与 **lifetime**（随 session 生灭——create 时 runtime 自动 arm，非 respawn 链终局死亡时发声，携带 runtime 生成的 `lifetimeNotifyId`，与 claim 键独立杜绝撞幂等键）。claim 状态机 = `armed → injected → fulfilled → 删除`，吸收/终态 `orphaned` / `aborted`；唯一键 `(parentSessionId, notifyId)`，重复 arm 拒绝。**不变量**：债权只在 session-manager 通道产生与消灭，UI 续聊/插话、scheduler、孙会话回流一律不触碰（「插话仍通知」「只通知第一次」均由不变量推导，无需特判 flag）。
+
+**代码映射**: `packages/runtime/src/services/session/notify-claims.ts`（ClaimLedger 纯状态机）。
+
+### watch 桥
+
+session-manager extension 与 taiji runtime 之间的长挂应答事件通道（[ADR-0087](adr/decisions.md)）：extension 以 `{action:'watch', params:{notifyId}}` **单键寻址** fire-and-forget 挂起 select（不传 timeout，前提 = marker select 长挂语义探针实测），runtime 按（调用方 parentSid, notifyId）反查 claim 后 deferred respond——查无 fail-closed 立即 'cancelled'、已兑现 catch-up 快照、未兑现挂等、已终结回终结 reason；每 claim 单 watch 槽新覆盖旧（被覆盖的旧 watch 悬置为已知无害）。respond payload 回带 `sessionId` + `deathSeq`/`settleSeq`/`fulfills N`/`exitCode`/`stderrTail`/`sessionFilePath`，extension 据此 unregister + `notifyLedger.record`（两例外：cancelled·orphaned 静默、死亡新闻槽 (sessionId, deathSeq) 去重）。它把「生命周期观测者在 runtime、注册者在父 pi 进程内」的跨进程缝桥起来，是 managed session 并入 pending-notifications 注册面与 notify-ledger 送达面的唯一事件通路。与 [Marker RPC](#marker-rpcselectmarker-通道原语2026-09-14) 的区别 = 挂起等待状态迁移，而非即问即答。
+
+### pending type 'session'
+
+`pending_notifications` 查询面的注册类型之一：managed session 债权在挂期间以三键 `{id: notifyId, type: 'session', name}` 注册（P4 既有 emit 契约零改动；lifetime 同类——每子会话 1 条 register，随终局死亡 unregister，写入面每 session 共 2 行 entry）。词表真身 = `extensions/universal/pending-notifications/src/state.ts`（`PendingType` 扩值 + `normalizePendingType` 放行，否则写侧归一成 'workflow' 展示错标）；`reconcile-sweep` 按 raw type 分流时对 `session` 跳过（不入 workflow run-state 判据，防误销活跃 claim）；注销 reason 经 `mapReasonToStatus` 族映射（stopped→aborted、exited/deleted/orphaned→cancelled），**不扩共享词表**——精确状态由通知正文与 `get_session_status` 承载。消费方 `countActiveFromEntries()` 不传 type 过滤，managed session 计入活跃集 = 有意为之（goal continuation 守卫在子会话未收口时不误判「已干完」）。
+
+**代码映射**: `extensions/universal/pending-notifications/src/state.ts`（词表）；`packages/extension-protocol/src/pending-entries.ts`（族映射）；`packages/subagent-core/src/execution/round-supervisor/reconcile-sweep.ts`（skip 分支）。
+
 ### Session 切入链
 用户在侧栏点选一个 session 后，前端按固定顺序执行的 12 步动作序列：`cancelActiveFlow → switchSession RPC → setActiveId → clearUnread → ensureStreamSubscription → touchRecency → syncSessionToPanel → navigation.push → hydrate/reconcile → preloadFileTree → touchRecency(panel 绑定 session) → evictLru`。
 
@@ -284,6 +300,17 @@ pi 引擎的可用模型集合及其能力（思考档位等）。能力判定�
 
 ---
 
+## Settings 域
+
+### 乐观更新协议
+「乐观写本地 → await 持久化 → 失败回滚后 rethrow」的唯一实现（`packages/core/src/foundation/optimistic-update.ts`，提供 `runOptimisticUpdate`/`optimisticUpdate`/`refCell` 三形态）；错误映射到既有错误面（toast / actionError / saveError 标志）由调用方或字段 module 承接。RPC 设置项字段编排（`setting-field` module）与 settings 域全部乐观写现场均收编于此协议。**Avoid**：手写 prev/rollback 快照样板、组件内 try/catch 回滚、置标志式失败语义。
+
+### 动作错误来源标签（ActionErrorSource）
+provider-edit 域动作错误的归属判定机制：每条动作错误带 source 标签（save/headers/discover/models），清除与归属按 source 判定。**Avoid**：比对错误展示文案判定归属（i18n 运行时值不稳定，locale 切换后失效——曾致旧错误滞留的真 bug）。
+
+### 组级 load 归并（loadError）
+字段组（`setting-field` 的 `SettingFieldGroup`）任一字段 loader 失败即整组置 loadError：控件禁用 + 常驻提示 + 重试，加载失败时默认值明确标注为默认而非已存值（RD-4#8 契约），全部 loader 成功后复位。**Avoid**：逐字段独立 try/catch 后按默认值静默渲染、console.warn 冒充已存值。
+
 ## v3 UI 结构术语（2026-06 重构）
 
 > 以下术语由 v3-demo 设计稿确立。原规范源 `docs/page-design/archive/v3/architecture-and-terminology.html` 已随 v3 视觉稿于 2026-08-02 被 v6 取代删除（归档说明见 `docs/architecture/v3-specs/README.md`，其指认本章节为术语/拓扑定义载体）；当前视觉 SSOT = `docs/DESIGN.md`。
@@ -353,6 +380,6 @@ composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/
 > **命中率归因降噪（2026-09-19）**：缓存命中率 `current` 是「本会话最近一次 LLM 请求」的单样本口径，任何一次 total miss 都会显示 0%。已知成因的 0%（会话首请求 `cold-start` / 空闲超 5min provider TTL `idle-expiry` / compaction 后前缀重建 `context-rewrite`）改为渲染成因文案（`cacheRatio.currentMiss`，中性色 + 浮层说明行），未知成因的 0%（如服务端淘汰）**保留原值三档色**——降噪只覆盖预期内 miss，不吞真信号；provider 从未上报 cache 字段时命中率为「无数据」（null，显示「—」）而非 0%。
 
 ### 任务托盘（Widget Tray）
-composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 四件（后台命令 / 子代理 / 工作流 / **子会话**，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情，子会话行点开即跳该会话），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。窄窗口下底盘密度状态机可将整托盘聚合为「层叠图标 + 运行数」单入口（层叠图标 = 聚合入口，省略号 = 溢出菜单入口，两者不共用）。设计文档已删除（git 可追溯）。
+composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 四件（后台命令 / 子代理 / 工作流 / **子会话**，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情，子会话行点开即跳该会话），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。底栏密度状态机实测放不下时（fit L1）整托盘 + 插件 toolbar 聚合为**单图标**聚合按钮（角标 = 运行数数字）单入口，点击弹出全部图标列表；托盘全无条目且插件零贡献时不渲染（无死入口）。设计文档已删除（git 可追溯）。
 
 > **术语演进（2026-09 核对）**：原「WidgetArea」（对话流内的单行 pill 状态带，`@taiji/ui` 组件）已退役——widget 消费端收敛为上述托盘（2026-09-16，设计 D11：对话流回归纯内容，入口唯一化）。子会话第 4 件为模式体系设计 D7 新增（u7 已落地，面板 `TraySessionPanel.vue` 为扁平列表而非分桶槽）。

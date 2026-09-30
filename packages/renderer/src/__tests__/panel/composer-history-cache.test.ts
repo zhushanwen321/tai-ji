@@ -18,6 +18,7 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-history-cache.test.ts
  */
 import { describe, it, expect, vi } from 'vitest'
+import { composerApiModule } from '../helpers/composer-mount'
 import type { Message } from '@taiji/shared'
 import { deriveHistoryFromChatStore } from '@/composables/panel/composer-shell'
 import type { useChatStore } from '@/stores/chat'
@@ -36,12 +37,10 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn() }),
   resetNewTaskFlow: vi.fn(),
 }))
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn() },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-}))
+// '@/api' mock 工厂单源在 helpers/composer-mount.ts（config 组为无害超集，本文件只触达
+// composer-shell 纯派生函数）；helper import 排在 composer-shell import 前，避免 mock 工厂
+// 执行期 helper 绑定仍处 TDZ
+vi.mock('@/api', () => composerApiModule())
 vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ forkSessionAsk: vi.fn(), forkSession: vi.fn() }),
 }))

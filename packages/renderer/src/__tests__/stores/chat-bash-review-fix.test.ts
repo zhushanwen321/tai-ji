@@ -16,6 +16,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useChat 链）求值
+import { apiProjectMock } from '../helpers/api-facade-mock'
 
 // ── api mock（B2 用：abortBash reject 触发 catch）──
 const apiMock = vi.hoisted(() => ({
@@ -23,7 +25,7 @@ const apiMock = vi.hoisted(() => ({
   abortBash: vi.fn(() => Promise.resolve()),
   streamSubscribe: vi.fn((_sid: string, _handler: (msg: ServerMessage) => void) => () => {}),
 }))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
   chat: {
     bash: apiMock.bash,
     abortBash: apiMock.abortBash,

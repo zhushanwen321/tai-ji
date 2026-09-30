@@ -58,8 +58,9 @@ export default {
     sendBusy: 'Session is busy, please wait before sending',
     sendEmptyHint: 'Type something before sending',
     sendHint: 'Type and send',
-    steerHint: 'Add to current task with ⏎ · Queue for next turn with Alt+⏎…',
-    inputHint: 'Describe what you want AI to do, or # file, / command…',
+    steerHint: 'Add to current task with ⏎ · Queue for next turn with Alt+⏎ · Shift+⏎ newline…',
+    inputHint: 'Describe what you want AI to do… (/ command · $ file · # session · {\'@\'} subagent · ! bash · Shift+⏎ newline · ↑/↓ history · Shift+Tab thinking · Ctrl+P/Ctrl+Shift+P model)',
+    deferHint: 'Session busy — ⏎ will queue and send when free…',
     addContent: 'Add content (attachment / command)',
     attach: 'Attachment',
     image: 'Image',
@@ -208,6 +209,8 @@ export default {
     unavailableTitle: 'Git unavailable, repository status cannot be read',
   },
   context: {
+    // Metrics aggregate entry (W3a single-icon button; hover opens the capacity/speed/cache aggregate page) title
+    metricsAggregateTitle: 'Metrics',
     capacity: 'Context capacity',
     used: 'Used',
     total: 'Total',
@@ -398,6 +401,8 @@ export default {
     searchPlaceholder: 'Search models…',
     noMatch: 'No matching models',
     placeholder: '\u2026',
+    // Model + thinking aggregate entry (W3a single-icon button; click opens model list + thinking levels) title
+    modelThinkingAggregateTitle: 'Model · Thinking',
   },
   thinkingLevel: {
     title: 'Thinking level',

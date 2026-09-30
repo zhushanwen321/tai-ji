@@ -163,7 +163,7 @@ import {
   fmtISO,
   fmtMMDD,
   fmtPct,
-} from './aggregate'
+} from '@taiji/core'
 
 const { t } = useI18n()
 

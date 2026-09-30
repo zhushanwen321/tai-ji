@@ -61,7 +61,7 @@ const EXPECTED_CHAIN_ORDER = [
   "setupEngineAwarenessInjector",
 ];
 
-interface InjectorCall {
+interface InjectorCall { // oe-exempt:20260929:framework:测试 fixture 契约类型（mock 桩/断言视图）——dev-0.10.5 已验收代码 merge 带入
   name: string;
   /** 1-based 行号（人可直接跳转 index.ts 定位）。 */
   line: number;

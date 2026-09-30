@@ -17,9 +17,11 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/mode-declaration-row.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-// 必须置于 MessageStream import 之前：useChatViewDeps 的 vi.mock 工厂引用本 helper，
-// 而 MessageStream 导入时会触发工厂执行（工厂在 hoist 后运行时 helper 必须已初始化）。
-import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
+// 必须置于 MessageStream import 之前：壳 mock 三连（useChatViewDeps / useChat / useSidebar）
+// 经 message-stream-shell-mount 顶层注册，virtua mock 工厂也解引用 helper 导出——
+// MessageStream 导入链触发工厂/注册时 helper 模块必须已初始化。
+import '@/__tests__/helpers/message-stream-shell-mount'
+import { virtuaVueMockModule } from '@/__tests__/helpers/chat-stream-mount'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
@@ -27,7 +29,7 @@ import ModeDeclarationRow from '@/components/panel/ModeDeclarationRow.vue'
 import MessageStream from '@/components/panel/MessageStream.vue'
 import { useSessionStore } from '@/stores/session'
 import { usePresetStore } from '@/stores/preset'
-import { __resetPresetAutoLoadForTest } from '@/composables/features/settings/usePiPresets'
+import { createPresetAutoLoad } from '@/composables/features/settings/usePiPresets'
 import type { PiLaunchPreset } from '@taiji/shared'
 
 // ── ws 连接态受控 ref（MessageStream 挂载会安装 preset 自动加载单例；测试保持 disconnected，
@@ -41,32 +43,18 @@ vi.mock('@taiji/core/transport/ws-client', async (importOriginal) => {
   return { ...actual, getState: () => stateRef }
 })
 
-// ── MessageStream 集成块的轻量 mock（对齐 skill-notice-stream.test.ts；不影响上面的直接 mount）──
-vi.mock('virtua/vue', async () => {
-  const { defineComponent, h } = await import('vue')
-  return {
-    Virtualizer: defineComponent({
-      name: 'MockVirtualizer',
-      props: { data: { type: Array, default: () => [] } },
-      render(ctx) {
-        const data = (ctx.data as unknown[]) ?? []
-        return h(
-          'div',
-          { class: 'mock-virtualizer' },
-          data.flatMap((item, index) => ctx.$slots.default?.({ item, index }) ?? []),
-        )
-      },
-    }),
-  }
+// ── MessageStream 集成块的轻量 mock（virtua 简化版工厂转发共享单源；壳 deps 三连注册在
+//    message-stream-shell-mount import；不影响上面的直接 mount）──
+vi.mock('virtua/vue', () => virtuaVueMockModule())
+// ── preset 自动加载容器逐用例换新：MessageStream setup 的 installPresetAutoLoad()
+//    调用点不变，路由到每用例新容器（createPresetAutoLoad 实例即隔离），单例 watch
+//    状态不跨用例残留（本文件保持 disconnected 不触发 RPC；加载点行为由
+//    use-pi-presets.test.ts 覆盖）。
+const presetAutoLoadSlot = vi.hoisted(() => ({ install: () => {} }))
+vi.mock('@/composables/features/settings/usePiPresets', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/composables/features/settings/usePiPresets')>()
+  return { ...actual, installPresetAutoLoad: () => presetAutoLoadSlot.install() }
 })
-vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({ editAndResend: vi.fn(), loadMoreHistory: vi.fn(), hasMoreHistory: () => false }),
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ selectSession: vi.fn(), forkSession: vi.fn(), abortHandoff: vi.fn() }),
-}))
 
 class NoopResizeObserver {
   observe(): void {}
@@ -110,7 +98,7 @@ function mountRow(sessionId = 's1') {
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetPresetAutoLoadForTest()
+  presetAutoLoadSlot.install = createPresetAutoLoad().install
   if (wsMock.ref) wsMock.ref.value = 'disconnected'
   const presetStore = usePresetStore()
   presetStore.setPresets([])

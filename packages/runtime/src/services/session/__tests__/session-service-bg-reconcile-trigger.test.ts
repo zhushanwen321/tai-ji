@@ -32,7 +32,7 @@ import type { WorkspaceService } from '../../workspace/workspace-service.js'
 const SID_A = 'sess-a'
 const SID_B = 'sess-b'
 
-interface ClientStubs {
+interface ClientStubs { // oe-exempt:20260929:framework:测试 fixture 契约类型（mock 桩/断言视图）——dev-0.10.5 已验收代码 merge 带入
   client: IPiEngine
   prompt: ReturnType<typeof vi.fn>
   getCommands: ReturnType<typeof vi.fn>

@@ -21,6 +21,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
 import type { SessionSummary, SessionGroup } from '@taiji/shared'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的 import（useNewTaskFlow 链）求值
+import { apiProjectMock, apiWorkspaceDomainsMock } from '../helpers/api-facade-mock'
 
 const apiMock = vi.hoisted(() => ({
   create: vi.fn(
@@ -46,23 +48,22 @@ const apiMock = vi.hoisted(() => ({
   chatAbortBash: vi.fn((): Promise<void> => Promise.resolve()),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
   session: { create: apiMock.create, remove: apiMock.remove, subscribe: vi.fn().mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 0 }), unsubscribe: vi.fn().mockResolvedValue(undefined), migrateImage: vi.fn().mockResolvedValue(undefined), writeSegments: vi.fn().mockResolvedValue(undefined) },
   // submitFirstMessage → useFileTree.loadTree 调 fileApi.tree/gitApi.status（Promise.allSettled）；
   // 给空返回避免 unhandled rejection
   file: { tree: vi.fn().mockResolvedValue([]), expand: vi.fn().mockResolvedValue([]) },
   git: { status: vi.fn().mockResolvedValue({ isRepo: false }) },
   chat: { send: apiMock.chatSend, streamSubscribe: apiMock.streamSubscribe, bash: apiMock.chatBash, abortBash: apiMock.chatAbortBash },
-  workspace: { detect: vi.fn().mockResolvedValue({ mode: 'not-repo', isBareMode: false, wsRoot: '', repoRoot: '' }) },
-  worktree: { list: vi.fn().mockResolvedValue([]) },
+  ...apiWorkspaceDomainsMock(),
 }))
 
 // W3: mock workspaceStore 让 submitFirstMessage 能取到 defaultCwd
 const workspaceStoreMock = vi.hoisted(() => ({
+  record: vi.fn(),
+  load: vi.fn(),
   records: [] as Array<{ cwd: string; lastUsedAt: number; label: string }>,
   defaultCwd: undefined as string | undefined,
-  load: vi.fn(),
-  record: vi.fn(),
 }))
 
 // INV-7: mock useToast 捕获 toastError 调用（cwd fallback 通知）

@@ -6,46 +6,27 @@
  *  - 升级交互：点击升级按钮 → extension.upgrade 被调。
  *
  * mock 策略：
- *  - vi.mock('@/api') 把 extension 门面替成可断言的 mock（fetchRecommended 空数组避免 onMounted 拉取报错；
+ *  - extension 门面捕获单例 + '@/api' mock 工厂 + seam 桩接线单源在
+ *    helpers/extension-page-harness（fetchRecommended 空数组避免 onMounted 拉取报错；
  *    upgrade/setAutoUpgrade 捕获断言）。
  *  - ConfirmDialog 走 reka-ui Dialog，teleport 到 body；ExtensionPage 默认 open=false 不会渲染内容，
  *    故无需 stub。Switch/Checkbox/Label 等 ui 原语直接渲染。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/extension-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
 import type { ExtensionItem } from '@taiji/core'
+import { getSettingsStore, provideSettingsStore, createSettingsStore, provideSettingsTransport } from '@taiji/core'
 import {
-  getSettingsStore,
-  provideSettingsTransport,
-  __resetSettingsStoreForTesting,
-  __resetSettingsTransportForTesting,
-  type SettingsTransport,
-} from '@taiji/core'
+  extensionApiMock,
+  extensionApiModule,
+  setupExtensionPageTest,
+  teardownExtensionPage,
+} from '../helpers/extension-page-harness'
 import type { SkillDirConfig } from '@taiji/shared'
 
-/** mock 捕获 extension.upgrade / setAutoUpgrade 调用。vi.hoisted 保证在 vi.mock 工厂执行前就绪。 */
-const extensionMock = vi.hoisted(() => ({
-  upgrade: vi.fn(() => Promise.resolve()),
-  setAutoUpgrade: vi.fn(() => Promise.resolve()),
-  fetchRecommended: vi.fn(() => Promise.resolve([])),
-  onExtensions: vi.fn(() => () => {}),
-  toggle: vi.fn(() => Promise.resolve()),
-  install: vi.fn(() => Promise.resolve()),
-  installDir: vi.fn(() => Promise.resolve()),
-  installGitRepository: vi.fn(() => Promise.resolve()),
-  cancelInstall: vi.fn(() => Promise.resolve()),
-  finishInstall: vi.fn(() => Promise.resolve()),
-  uninstall: vi.fn(() => Promise.resolve()),
-}))
-
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  extension: extensionMock,
-  default: { extension: extensionMock },
-  config: { detectSources: async () => [] },
-}))
+vi.mock('@/api', () => extensionApiModule())
 
 // RD-4#11：ExtensionPage onMounted 读 getDataDir——mock 该域以便注入「读取失败」路径
 const settingsDomainMock = vi.hoisted(() => ({
@@ -90,20 +71,27 @@ function builtinExt(): ExtensionItem {
 
 let wrapper: ReturnType<typeof mount> | null = null
 
-beforeEach(() => {
-  setActivePinia(createPinia())
-  extensionMock.upgrade.mockClear()
-  extensionMock.setAutoUpgrade.mockClear()
-  // 清空全局 toasts（useToast 是模块级单例，跨用例共享）
-  const { toasts } = useToast()
-  toasts.value = []
-})
+// beforeEach 重置（pinia / mock 计数 / toast / transport 桩）单源在 helpers/extension-page-harness
+setupExtensionPageTest()
 
 afterEach(() => {
-  wrapper?.unmount()
+  teardownExtensionPage(wrapper)
   wrapper = null
-  document.body.innerHTML = ''
 })
+
+/** MF-1-3 / ExtensionDetail 乐观更新用例共用装配：store 预置 userExt，页面 props 与
+ *  store.extensions 同引用（生产链路 props 即 store 镜像），挂 body 供开关 DOM 断言 */
+async function mountWithPresetStore(): Promise<ReturnType<typeof getSettingsStore>> {
+  provideSettingsStore(createSettingsStore())
+  const store = getSettingsStore()
+  store.extensions.value = [userExt()]
+  wrapper = mount(ExtensionPage, {
+    props: { extensions: store.extensions.value },
+    attachTo: document.body,
+  })
+  await flushPromises()
+  return store
+}
 
 describe('ExtensionPage 首屏冒烟', () => {
   it('user-installed 项渲染升级按钮，built-in 项不渲染', async () => {
@@ -140,8 +128,186 @@ describe('ExtensionPage 升级交互', () => {
     expect(upgradeBtn.exists()).toBe(true)
     await upgradeBtn.trigger('click')
     await flushPromises()
-    expect(extensionMock.upgrade).toHaveBeenCalledTimes(1)
-    expect(extensionMock.upgrade).toHaveBeenCalledWith('my-tools')
+    expect(extensionApiMock.upgrade).toHaveBeenCalledTimes(1)
+    expect(extensionApiMock.upgrade).toHaveBeenCalledWith('my-tools')
+  })
+})
+
+// ── MF-1-3 · 启用开关乐观更新协议（runOptimisticUpdate 归一）──────────────────
+//
+// 行为不变量（组件手写 try/catch 回滚迁入协议后必须逐点保持）：
+//  B1 乐观翻转：点开关 → store 对应项 enabled 立即翻转（不等 RPC），开关乐观滑动；
+//  B2 失败回滚：RPC reject → 回滚到旧值 + 开关回弹 + error ref 就近显示 e.message；
+//  B3 权威覆盖：RPC resolve → store.extensions 被 reply.extensions 权威快照整体覆盖
+//     （toggle reply 命中 pending 被 routeInbound 吞掉、不走 onExtensions 广播）。
+// 走 seam stub（makeSettingsTransportStub + extensionApiMock.toggle）断言，与生产装配同构。
+describe('ExtensionActions 启用开关乐观更新协议（MF-1-3）', () => {
+  it('点开关 → store enabled 立即翻转 + 开关乐观滑动（不等 RPC，B1）', async () => {
+    const store = await mountWithPresetStore()
+    // commit 挂起不 resolve：断言乐观翻转发生在 await 之前
+    let resolveToggle!: (reply: { extensions: ExtensionItem[] }) => void
+    extensionApiMock.toggle.mockImplementationOnce(
+      () => new Promise<{ extensions: ExtensionItem[] }>((res) => { resolveToggle = res }),
+    )
+    const sw = wrapper!.find('button[aria-label="禁用扩展"]')
+    expect(sw.exists()).toBe(true)
+    expect(sw.attributes('data-state')).toBe('checked')
+
+    await sw.trigger('click')
+    // RPC 尚未返回：store 已翻转（乐观写先于 commit），开关已滑动
+    // （aria-label 随 enabled 翻转为「启用扩展」——UI 已响应乐观写）
+    expect(store.extensions.value[0]!.enabled).toBe(false)
+    expect(wrapper!.find('button[aria-label="启用扩展"]').attributes('data-state')).toBe('unchecked')
+
+    resolveToggle({ extensions: [{ ...userExt(), enabled: false }] })
+    await flushPromises()
+    expect(extensionApiMock.toggle).toHaveBeenCalledWith('my-tools', false)
+  })
+
+  it('toggle reject → 回滚到旧值 + 开关回弹 + error ref 显示 e.message（B2）', async () => {
+    const store = await mountWithPresetStore()
+    extensionApiMock.toggle.mockRejectedValueOnce(new Error('toggle down'))
+
+    await wrapper!.find('button[aria-label="禁用扩展"]').trigger('click')
+    await flushPromises()
+
+    // 回滚到旧值 + 开关回弹（现有 catch 行为逐字保持）
+    expect(store.extensions.value[0]!.enabled).toBe(true)
+    expect(wrapper!.find('button[aria-label="禁用扩展"]').attributes('data-state')).toBe('checked')
+    // error ref 就近显示 e.message（非静默吞）
+    expect(wrapper!.text()).toContain('toggle down')
+  })
+
+  it('toggle resolve → store.extensions 被 reply.extensions 权威快照整体覆盖（B3）', async () => {
+    const store = await mountWithPresetStore()
+    const authoritative: ExtensionItem[] = [{ ...userExt(), enabled: false, version: '2.0.0' }]
+    extensionApiMock.toggle.mockResolvedValueOnce({ extensions: authoritative })
+
+    await wrapper!.find('button[aria-label="禁用扩展"]').trigger('click')
+    await flushPromises()
+
+    // reply.extensions 整体覆盖 store（读侧经 reactive 代理，断言内容整体替换而非引用同一）
+    expect(store.extensions.value).toStrictEqual(authoritative)
+    expect(store.extensions.value[0]!.version).toBe('2.0.0')
+  })
+})
+
+// ── 自动升级开关乐观更新（ExtensionDetail · runOptimisticUpdate 协议）──────────────
+//
+// 行为不变量（手写 try/catch 迁入协议后的同一编排面）：
+//  A1 apply 乐观写：点开关 → store 对应项 autoUpgrade 立即翻转（setExtensionAutoUpgrade 返回旧值）
+//  A2 commit 持久化：transport.setExtensionAutoUpgrade(name, enabled) 被调
+//  A3 失败回滚 + 就近显错：commit reject → store 回滚旧值 + error ref 显示 e.message
+describe('ExtensionDetail 自动升级开关（乐观更新协议）', () => {
+  it('点开关 → store autoUpgrade 立即翻转 + transport.setExtensionAutoUpgrade 持久化', async () => {
+    const store = await mountWithPresetStore()
+    const sw = wrapper!.find('button[aria-label="自动升级"]')
+    expect(sw.exists()).toBe(true)
+    expect(sw.attributes('data-state')).toBe('unchecked')
+
+    await sw.trigger('click')
+    await flushPromises()
+
+    // apply 乐观写（store 先翻转）+ commit 持久化
+    expect(store.extensions.value[0]!.autoUpgrade).toBe(true)
+    expect(extensionApiMock.setAutoUpgrade).toHaveBeenCalledTimes(1)
+    expect(extensionApiMock.setAutoUpgrade).toHaveBeenCalledWith('my-tools', true)
+  })
+
+  it('commit reject → 回滚旧值 + error 就近显示 e.message', async () => {
+    const store = await mountWithPresetStore()
+    extensionApiMock.setAutoUpgrade.mockRejectedValueOnce(new Error('persist down'))
+
+    await wrapper!.find('button[aria-label="自动升级"]').trigger('click')
+    await flushPromises()
+
+    // rollback：store 回滚旧值，error ref 就近显示（非静默吞）
+    expect(store.extensions.value[0]!.autoUpgrade).toBe(false)
+    expect(wrapper!.text()).toContain('persist down')
+  })
+})
+
+// ── 安装流四路径（ExtensionInstallFlow · transport seam 调用面）──────────────────
+/** 切到安装流的 Git URL tab（git 发现两用例共用交互序列） */
+async function selectGitTab(): Promise<void> {
+  const gitTab = wrapper!.findAll('button').find((b) => b.text() === 'Git URL')
+  expect(gitTab).toBeTruthy()
+  await gitTab!.trigger('click')
+}
+
+/** 在安装输入框填入路径并点「发现」（Git URL / Local Dir 两条发现路径共用交互序列） */
+async function fillInstallInputAndDiscover(path: string): Promise<void> {
+  await wrapper!.find('[data-testid="install-input"]').setValue(path)
+  const discoverBtn = wrapper!.findAll('button').find((b) => b.text() === '发现')
+  expect(discoverBtn).toBeTruthy()
+  await discoverBtn!.trigger('click')
+  await flushPromises()
+}
+
+describe('ExtensionInstallFlow 安装流（transport seam）', () => {
+  /** 发现一个候选（git tab → installGitRepository → 候选区展开），返回 tempDir */
+  async function discoverCandidateViaGit(tempDir: string): Promise<void> {
+    extensionApiMock.installGitRepository.mockResolvedValueOnce({ tempDir, candidates: [userExt()] })
+    await selectGitTab()
+    await fillInstallInputAndDiscover('https://example.com/u/ext')
+    expect(wrapper!.find('[data-testid="install-candidates"]').exists()).toBe(true)
+  }
+
+  it('推荐扩展一键安装 → installExtension 自动补 npm: 前缀', async () => {
+    extensionApiMock.fetchRecommended.mockResolvedValueOnce([
+      { name: 'rec-ext', description: 'recommended ext' },
+    ] as never)
+    wrapper = mount(ExtensionPage, { props: { extensions: [] } })
+    await flushPromises()
+
+    // 推荐区 section（v-if recommended.length）按行内包名定位；行内「安装」按钮点击 → npm: 前缀安装
+    const recSection = wrapper.findAll('section').find((s) => s.text().includes('rec-ext'))
+    expect(recSection).toBeTruthy()
+    const installBtn = recSection.findAll('button').find((b) => b.text() === '安装')
+    expect(installBtn).toBeTruthy()
+    await installBtn!.trigger('click')
+    await flushPromises()
+
+    expect(extensionApiMock.install).toHaveBeenCalledWith('npm:rec-ext')
+  })
+
+  it('git tab：输入 URL 点发现 → installExtensionGitRepository 被调', async () => {
+    wrapper = mount(ExtensionPage, { props: { extensions: [] } })
+    await flushPromises()
+    extensionApiMock.installGitRepository.mockResolvedValueOnce({ tempDir: '/tmp/git', candidates: [] })
+
+    await selectGitTab()
+    await fillInstallInputAndDiscover('https://example.com/u/ext')
+
+    expect(extensionApiMock.installGitRepository).toHaveBeenCalledWith('https://example.com/u/ext')
+  })
+
+  it('候选确认安装：勾选候选点「安装选中」→ finishInstall(tempDir, names)', async () => {
+    wrapper = mount(ExtensionPage, { props: { extensions: [] } })
+    await flushPromises()
+    await discoverCandidateViaGit('/tmp/cand')
+
+    await wrapper.find('[data-testid="install-candidates"] button[role="checkbox"]').trigger('click')
+    const confirmBtn = wrapper.findAll('button').find((b) => b.text() === '安装选中')
+    expect(confirmBtn).toBeTruthy()
+    await confirmBtn!.trigger('click')
+    await flushPromises()
+
+    expect(extensionApiMock.finishInstall).toHaveBeenCalledWith('/tmp/cand', ['my-tools'])
+  })
+
+  it('放弃安装：点「取消」→ cancelInstall(tempDir)（候选区收起）', async () => {
+    wrapper = mount(ExtensionPage, { props: { extensions: [] } })
+    await flushPromises()
+    await discoverCandidateViaGit('/tmp/cancel')
+
+    const cancelBtn = wrapper.findAll('button').find((b) => b.text() === '取消')
+    expect(cancelBtn).toBeTruthy()
+    await cancelBtn!.trigger('click')
+    await flushPromises()
+
+    expect(extensionApiMock.cancelInstall).toHaveBeenCalledWith('/tmp/cancel')
+    expect(wrapper.find('[data-testid="install-candidates"]').exists()).toBe(false)
   })
 })
 
@@ -162,7 +328,7 @@ describe('ExtensionPage 升级交互', () => {
 describe('ExtensionPage 候选项点击不双触发（W2 D3）', () => {
   it('模拟浏览器 label 转发 + 文字区 click → checkbox 只翻转一次（选中态正确）', async () => {
     // mock installDir 返回 1 个候选，使组件进入候选选择阶段
-    extensionMock.installDir.mockResolvedValueOnce({
+    extensionApiMock.installDir.mockResolvedValueOnce({
       tempDir: '/tmp/cand',
       candidates: [{
         name: 'cand-ext',
@@ -186,11 +352,7 @@ describe('ExtensionPage 候选项点击不双触发（W2 D3）', () => {
     expect(dirTab).toBeTruthy()
     await dirTab!.trigger('click')
     // 用 testid 精确定位安装输入框（顶部 LoadPaths 也有 input，避免误中）
-    await wrapper.find('[data-testid="install-input"]').setValue('/some/dir')
-    const discoverBtn = wrapper.findAll('button').find((b) => b.text() === '发现')
-    expect(discoverBtn).toBeTruthy()
-    await discoverBtn!.trigger('click')
-    await flushPromises()
+    await fillInstallInputAndDiscover('/some/dir')
 
     expect(wrapper.text()).toContain('发现 1 个候选')
 
@@ -245,7 +407,7 @@ describe('ExtensionPage 操作成功 toast 反馈（W4 D11）', () => {
     expect(installBtn).toBeTruthy()
     await installBtn!.trigger('click')
     await flushPromises()
-    expect(extensionMock.install).toHaveBeenCalledWith('npm:foo-pkg')
+    expect(extensionApiMock.install).toHaveBeenCalledWith('npm:foo-pkg')
     expect(toasts.value.some((t) => t.message === '扩展已安装' && t.type === 'info')).toBe(true)
   })
 
@@ -267,7 +429,7 @@ describe('ExtensionPage 操作成功 toast 反馈（W4 D11）', () => {
     expect(confirm).toBeTruthy()
     confirm!.click()
     await flushPromises()
-    expect(extensionMock.uninstall).toHaveBeenCalledWith('my-tools')
+    expect(extensionApiMock.uninstall).toHaveBeenCalledWith('my-tools')
     expect(toasts.value.some((t) => t.message === '扩展已卸载' && t.type === 'info')).toBe(true)
   })
 
@@ -278,7 +440,7 @@ describe('ExtensionPage 操作成功 toast 反馈（W4 D11）', () => {
     const upgradeBtn = wrapper.find('button[title="升级"]')
     await upgradeBtn.trigger('click')
     await flushPromises()
-    expect(extensionMock.upgrade).toHaveBeenCalledWith('my-tools')
+    expect(extensionApiMock.upgrade).toHaveBeenCalledWith('my-tools')
     expect(toasts.value.some((t) => t.message === '扩展已升级' && t.type === 'info')).toBe(true)
   })
 })
@@ -295,7 +457,7 @@ describe('ExtensionPage 加载路径保存失败回弹（RD-4#1）', () => {
     return {
       listProviders: async () => ({ providers: [] }),
       listModels: async () => [],
-      setProvider: async () => undefined,
+      setProvider: async () => ({}),
       setScopedModels: async () => [],
       discoverModels: async () => ({ success: true, models: [] }),
       setSkillDirs: async () => undefined,
@@ -316,8 +478,7 @@ describe('ExtensionPage 加载路径保存失败回弹（RD-4#1）', () => {
   }
 
   it('勾选目录保存失败 → toast + 常驻红字 + 勾选态回弹至最近落盘值', async () => {
-    __resetSettingsStoreForTesting()
-    __resetSettingsTransportForTesting()
+    provideSettingsStore(createSettingsStore())
     const persisted: SkillDirConfig[] = [{ path: '/persisted/exts', enabled: false, scope: 'global' }]
     getSettingsStore().extensionDirs.value = persisted
     provideSettingsTransport(stubTransportWithFailingSetExtensionDirs())

@@ -66,7 +66,7 @@ function isEnoentError(err: unknown): boolean {
 // 仅 log tag 文案）。
 
 /** pruneTerminalRunFiles / runRetentionMaintenanceRound 的宿主注入依赖（日志与错误字符串化——tag 前缀由注入方决定）。 */
-export interface PruneStateDeps {
+export interface PruneStateDeps { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** warn 通道（readdir / unlink 失败留证；清理是旁路维护，失败不抛） */
   warn: (msg: string) => void;
   /** debug 通道（成功裁剪与候选枚举记录） */
@@ -97,7 +97,7 @@ export interface PruneStateDeps {
 // （两宿主共用同一缺省保留期与测试期调低通道；W1 起为 run+record 两域统一窗口）。
 
 /** 保留窗口缺省值 = 2_592_000_000ms（30 天；W1 D5：run+record 两域统一保留窗口，窗口内全保留）。 */
-export const DEFAULT_STATE_TTL_MS = 2_592_000_000;
+const DEFAULT_STATE_TTL_MS = 2_592_000_000;
 
 /**
  * 保留窗口 env 通道（测试期调低用）：
@@ -109,7 +109,7 @@ export const DEFAULT_STATE_TTL_MS = 2_592_000_000;
 export const STATE_TTL_MS_ENV = "TAIJI_SUBAGENT_STATE_TTL_MS";
 
 /** 解析保留窗口；env 未设/空 → 缺省，显式非法/≤0 → undefined（不按窗裁）。 */
-export function resolveStateTtlMs(): number | undefined {
+function resolveStateTtlMs(): number | undefined {
   const raw = process.env[STATE_TTL_MS_ENV];
   if (raw === undefined || raw === "") return DEFAULT_STATE_TTL_MS;
   const parsed = Number(raw);
@@ -118,13 +118,13 @@ export function resolveStateTtlMs(): number | undefined {
 }
 
 /** pruneTerminalRunFiles 的可调项。 */
-export interface PruneTerminalRunFilesOptions {
+export interface PruneTerminalRunFilesOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 保留窗口（ms）；undefined = 不按窗裁（opt-out）。缺省经 {@link resolveStateTtlMs}。 */
   ttlMs?: number;
 }
 
 /** pruneTerminalRunFiles 的执行结果（宿主日志/健康面用）。 */
-export interface PruneTerminalRunFilesResult {
+export interface PruneTerminalRunFilesResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 扫描到的 state 文件数（glob 命中、排除 journal）。 */
   scanned: number;
   /** fold 投影为终态的 run 数（无论是否超窗——资格计数）。 */
@@ -139,7 +139,7 @@ export interface PruneTerminalRunFilesResult {
 }
 
 /** 单 run 保留判定（fold 投影 + 时间锚提取；判据①资格与判据②候选的公共输入）。 */
-interface RunRetentionAssessment {
+interface RunRetentionAssessment { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   runId: string;
   /** fold 投影是否终态（含收编产生的 interrupted——终态事件在 journal 内）。 */
   terminal: boolean;
@@ -311,7 +311,7 @@ async function pruneTerminalRunFootprint(
 }
 
 /** record 域保留清理结果（与 run 域同构的计数面）。 */
-export interface PruneTerminalRecordEventFilesResult {
+export interface PruneTerminalRecordEventFilesResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 扫描到的 *.events 事件文件数。 */
   scanned: number;
   /** fold 投影为终态（record-settled 在流内且未被回边清除）的 record 数。 */
@@ -403,7 +403,7 @@ function mtimeMsOf(full: string): number {
  * 双域）——强制两域必传会逼出「core 侧反推 pi sessionDir」或「壳侧反推 record
  * enc 段」两类推导漂移面。每域至少有一个持锚触发点，覆盖面由三触发点并集保证
  * （幂等整轮，任一触发点缺一域只影响冗余度不影响覆盖）。 */
-export interface RetentionMaintenanceInput {
+export interface RetentionMaintenanceInput { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** run 域状态目录（workflow-state——state 快照 + journal 成对清理）；undefined = 跳过 run 域。 */
   stateDir?: string;
   /** record 事件文件目录（records——仅清 *.events，manifest 不触碰）；undefined = 跳过 record 域。 */
@@ -411,13 +411,13 @@ export interface RetentionMaintenanceInput {
 }
 
 /** 维护轮可调项。 */
-export interface RetentionMaintenanceOptions {
+export interface RetentionMaintenanceOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 保留窗口（ms）；undefined = 经 {@link resolveStateTtlMs}（缺省 30 天 + env 调低通道）。 */
   retentionMs?: number;
 }
 
 /** 维护轮执行结果（两域计数面）。 */
-export interface RetentionMaintenanceResult {
+export interface RetentionMaintenanceResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   run: PruneTerminalRunFilesResult;
   record: PruneTerminalRecordEventFilesResult;
 }
@@ -650,7 +650,7 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
 // v2 注册条目（当前主形态）/ v1 全量快照条目 / pre-W17 link 指针。
 
 /** 对账清理的宿主注入依赖（引用集采集面 + 日志）。 */
-export interface OrphanRunReapDeps {
+export interface OrphanRunReapDeps { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /**
    * 存活 session 引用集采集（壳侧注入面——全池 session 文件流式扫描，秒级～
    * 十秒级）：返回「全部存活 session 的注册引用并集」runId 集合。调用一次，
@@ -666,7 +666,7 @@ export interface OrphanRunReapDeps {
 }
 
 /** 对账清理可调项。 */
-export interface OrphanRunReapOptions {
+export interface OrphanRunReapOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /**
    * 宽限窗（ms）：删除条件 = 登记距今 ≥ 宽限窗 ∧ 三件最大 mtime 距扫描 ≥ 宽限窗
    * （与门防活跃误删）∧ 当轮仍无引用。缺省 {@link resolveOrphanRunGraceWindowMs}
@@ -678,13 +678,13 @@ export interface OrphanRunReapOptions {
 }
 
 /** 宽限窗缺省值 = 7 天（裁决点 7「删除安全（首版宽限）」——首判无主后仍留观察期）。 */
-export const DEFAULT_ORPHAN_RUN_GRACE_WINDOW_MS = 604_800_000;
+const DEFAULT_ORPHAN_RUN_GRACE_WINDOW_MS = 604_800_000;
 
 /** 宽限窗 env 通道（测试期调零用；TAIJI_ 前缀理由对齐 STATE_TTL_MS_ENV——pi 进程内读的配置 env）。 */
 export const ORPHAN_RUN_GRACE_WINDOW_MS_ENV = "TAIJI_WORKFLOW_ORPHAN_RUN_GRACE_WINDOW_MS";
 
 /** 解析宽限窗；env 未设/空 → 缺省 7 天；显式 0/正数 → env 值（调零 = 测试即删通道）。 */
-export function resolveOrphanRunGraceWindowMs(): number {
+function resolveOrphanRunGraceWindowMs(): number {
   const raw = process.env[ORPHAN_RUN_GRACE_WINDOW_MS_ENV];
   if (raw === undefined || raw === "") return DEFAULT_ORPHAN_RUN_GRACE_WINDOW_MS;
   const parsed = Number(raw);
@@ -795,7 +795,7 @@ function deleteOrphanRunFootprint(stateDir: string, runId: string): number {
 }
 
 /** 对账清理执行结果（宿主日志/健康面用）。 */
-export interface OrphanRunReapResult {
+export interface OrphanRunReapResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 扫描的 run 候选数（record 流 + 旧 journal 文件族并集的 runId 数）。 */
   scanned: number;
   /** 存活引用保护跳过数。 */

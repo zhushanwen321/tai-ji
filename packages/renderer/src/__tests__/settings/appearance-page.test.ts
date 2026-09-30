@@ -5,6 +5,8 @@
  *  - 首屏渲染：h1 =「外观」、分区字号卡文案命中 locale（无 raw key 泄漏）、
  *    三个区域 Select trigger + 终端字号 input testid 存在。
  *  - 太极主题按钮：点击 → emit update {theme, themePreset}（持久化路径，与 store 落库闭环）。
+ *  - Select 载荷守卫：外观模式/全局字号/分区字号三 Select 经 reka 真实交互点选 →
+ *    update emit 走 onXxxSelect 运行时守卫收窄（不写死模板 as 断言的回归面）。
  *  - 终端字号：mount 拉取 getTerminalConfig；改值 + blur → setTerminalConfig 整体写回
  *    （保留 shell 等其他字段）+ clamp 边界（30 → 24）。
  *
@@ -15,65 +17,36 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/appearance-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import { useToast } from '@/composables/useToast'
+import {
+  $,
+  defaultTerminalConfig as defaultConfig,
+  setupTerminalConfigHarness,
+  terminalConfigApiModule,
+  terminalConfigMock as configMock,
+  trackBodyMount,
+} from '../helpers/terminal-config-harness'
+import { pickRekaOption } from '../helpers/reka-select-harness'
 import { DEFAULT_SYSTEM } from '@taiji/core'
 import type { TerminalConfig } from '@taiji/shared'
 
-function defaultConfig(): TerminalConfig {
-  return {
-    version: 1,
-    shell: '',
-    shellArgs: [],
-    fontSize: 14,
-    fontFamily: '',
-    scrollback: 1000,
-    cursorStyle: 'block',
-    bell: false,
-  }
-}
-
-const configMock = vi.hoisted(() => ({
-  getTerminalConfig: vi.fn(() => Promise.resolve({ config: defaultConfig(), corrupted: false })),
-  setTerminalConfig: vi.fn((cfg: TerminalConfig) => Promise.resolve({ config: cfg, corrupted: false })),
-}))
-
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  config: configMock,
-}))
+// [C3] 终端配置读写经 SettingsTransport seam 桩注入（补充 @/api 遗留 mock，组件已不直连门面）；
+// configMock 捕获单例 + project 桩单源在 helpers/terminal-config-harness.ts
+vi.mock('@/api', () => terminalConfigApiModule())
 
 import AppearancePage from '@/components/settings/appearance/AppearancePage.vue'
 
 let wrapper: ReturnType<typeof mount> | null = null
 
-function $(selector: string): DOMWrapper<Element> {
-  const node = document.body.querySelector(selector)
-  expect(node).toBeTruthy()
-  return new DOMWrapper(node!)
-}
-
-beforeEach(() => {
-  setActivePinia(createPinia())
-  const { toasts } = useToast()
-  toasts.value = []
-  configMock.getTerminalConfig.mockClear()
-  configMock.setTerminalConfig.mockClear()
-})
-
-afterEach(() => {
-  wrapper?.unmount()
-  wrapper = null
-  document.body.innerHTML = ''
-})
+// beforeEach 重置（pinia/toast/mock 计数/transport 桩）+ afterEach 卸载清 body 单源在 harness
+setupTerminalConfigHarness()
 
 function mountPage(system = { ...DEFAULT_SYSTEM }) {
-  return mount(AppearancePage, {
+  return trackBodyMount(mount(AppearancePage, {
     props: { system },
     attachTo: document.body,
-  })
+  }))
 }
 
 describe('AppearancePage 渲染 gate', () => {
@@ -101,6 +74,46 @@ describe('AppearancePage 渲染 gate', () => {
     await flushPromises()
     expect(document.body.innerHTML).toContain('--accent')
     expect(document.body.innerHTML).toContain('--bg')
+  })
+})
+
+describe('AppearancePage Select 载荷守卫（reka Select 交互 → update emit）', () => {
+  // reka Select 真实交互（pointerdown 开下拉 + option 点选）单源在 helpers/reka-select-harness
+  // （原 pickOption/openDropdown 与 update-page-source.test.ts 逐字重复，收敛为 pickRekaOption）
+
+  /** 按显示文案定位 SelectTrigger（theme/fontSize 的 trigger 无 testid，以 SelectValue 文案锚定） */
+  function findTriggerByText(text: string): HTMLElement {
+    const btn = wrapper!.findAll('button').find((b) => b.text() === text)
+    expect(btn, `trigger showing "${text}" should exist`).toBeTruthy()
+    return btn!.element as HTMLElement
+  }
+
+  function lastUpdate(): Record<string, unknown> {
+    const emitted = (wrapper as any).emitted('update')
+    expect(emitted).toBeTruthy()
+    return emitted.at(-1)[0]
+  }
+
+  it('外观模式 Select：点「浅色」→ emit update {theme:"light"}（isThemeMode 守卫收窄后放行）', async () => {
+    wrapper = mountPage() // DEFAULT_SYSTEM theme=dark → trigger 显示「深色」
+    await flushPromises()
+    await pickRekaOption(findTriggerByText('深色'), '浅色')
+    expect(lastUpdate()).toEqual({ theme: 'light' })
+  })
+
+  it('全局字号 Select：点「大」→ emit update {fontSize:"large"}', async () => {
+    wrapper = mountPage() // fontSize=medium → trigger 显示「中」
+    await flushPromises()
+    await pickRekaOption(findTriggerByText('中'), '大')
+    expect(lastUpdate()).toEqual({ fontSize: 'large' })
+  })
+
+  it('分区字号 Select（sidebar）：点「特大」→ emit update {fontScales 含 sidebar:"xlarge"}（浅合并回传完整对象）', async () => {
+    wrapper = mountPage()
+    await flushPromises()
+    const trigger = wrapper!.find('[data-testid="appearance-fs-sidebar-trigger"]').element
+    await pickRekaOption(trigger, '特大')
+    expect(lastUpdate().fontScales).toEqual({ ...DEFAULT_SYSTEM.fontScales, sidebar: 'xlarge' })
   })
 })
 

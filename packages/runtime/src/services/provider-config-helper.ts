@@ -10,6 +10,8 @@
 import builtinData from '../generated/builtin-providers.json'
 import { type ProviderInfo, type BuiltinProviderTemplate, type ProviderId } from '@taiji/shared'
 import { isCatalogProvider, deriveEnabled, getMergedCatalogModels } from './provider-catalog.js'
+// coding-plan 额度显示自动开启（新增即默认同意）：判定 + 落盘与导入路径（provider-importer）共用
+import { autoEnableQuotaDisplayOnCreate, isPlaintextCredential, resolveCreateMatchIdentity } from './quota-auto-enable.js'
 // U6①：模型项 id 谓词（写侧与启动清洗侧共享单点，分层说明见该模块 JSDoc）
 import { normalizeModelIdOrReject } from './provider-model-item.js'
 export { normalizeModelIdOrReject }
@@ -1228,13 +1230,38 @@ function clearGatewayMarker(
 }
 
 /**
+ * 新建 provider 分支（拆分自 setProvider）：边界1 白名单守卫 + coding-plan 额度显示
+ * 自动开启（新增即默认同意，§2.2.1）——写入在返回前完成（toast 只报真实写入）。
+ * 边界1（wave3 TC5 / C2）不受 skipUpsert 影响：catalog 定义在 pi 内置 catalog，无
+ * models.json 条目时 provider 依然存在可用（内置定义 + auth.json 凭据），`<id>/*`
+ * 不是死引用；且守卫幂等（pattern 已存在 no-op），首次配置凭据的 catalog 用户不能因
+ * 「不物化条目」而漏启用。条件/守卫见 quota-auto-enable.ts。
+ */
+async function provisionNewProvider(
+  configStore: IConfigStore,
+  extrasStore: ProviderExtrasAccessors | undefined,
+  credentialWriter: CredentialWriter | undefined,
+  providerId: string,
+  data: SetProviderInput,
+  merged: Record<string, unknown>,
+): Promise<boolean> {
+  configStore.ensureProviderInWhitelist(providerId)
+  return autoEnableQuotaDisplayOnCreate(
+    extrasStore,
+    providerId,
+    resolveCreateMatchIdentity(isCatalogProvider(providerId) ? builtinProvidersById.get(providerId) : undefined, data, merged),
+    isPlaintextCredential(data.apiKey) && (!isCatalogProvider(providerId) || credentialWriter !== undefined),
+  )
+}
+
+/**
  * 新建 / 更新 provider（wave3 边界1 白名单守卫 + I9 auth.json 清理 + catalog 分体系）。
  * 纯函数：configStore / authStorage / extrasStore / credentialWriter 经参数注入
  * （原 ConfigService.setProvider 逐字搬迁）。
  *
  * A1-5 写侧切换：authMethod 写 config/providers.json（extrasStore），不再寄生 models.json；
  * quota 分支已删除（历史死分支，无前端调用方——防复活，quota 配置唯一写路径是
- * QuotaService.configure → providers.json）。
+ * QuotaService.configure → providers.json）。**例外**：新建分支额度显示自动开启经 extrasStore 写 quota（quota-auto-enable.ts）。
  * A1-4 收口：catalog apiKey 写入经 credentialWriter（AuthService.saveCredential），
  * 不再直接持有 authStorage.set。
  */
@@ -1245,7 +1272,7 @@ export async function setProvider(
   credentialWriter: CredentialWriter | undefined,
   providerId: string,
   data: SetProviderInput,
-): Promise<{ newDefault?: { provider: ProviderId; modelId: string } }> {
+): Promise<{ newDefault?: { provider: ProviderId; modelId: string }; quotaAutoEnabled?: boolean }> {
   // wave3：existingConfig===undefined 判定「新建 provider」（边界1 白名单守卫用）
   const existingConfig = configStore.getProviderConfig(providerId)
   const existing = existingConfig ?? {}
@@ -1326,20 +1353,17 @@ export async function setProvider(
   if (!shouldSkipUpsert(skipUpsert, existingConfig)) {
     result = configStore.upsertProvider(providerId, merged)
   }
-  // 边界1（wave3 TC5 / C2）：新建 provider 时若 enabledModels 非空，加 <id>/* 白名单守卫——
-  // 否则在白名单语义下新 provider 默认不启用（与 importer applyImport 的 upsertProvider 后
-  // 守卫对称，共用水台函数 ensureProviderInWhitelist）。**不受 skipUpsert 影响**：catalog
-  // 定义在 pi 内置 catalog，无 models.json 条目时 provider 依然存在可用（内置定义 + auth.json
-  // 凭据），`<id>/*` 不是死引用；且守卫幂等（pattern 已存在 no-op），首次配置凭据的 catalog
-  // 用户不能因「不物化条目」而漏启用。
+  // 边界1（wave3 TC5 / C2）+ coding-plan 额度显示自动开启：拆分至 provisionNewProvider
+  //（守卫与自动开启的语义/时序契约见其注释——await 在返回前完成，toast 只报真实写入）。
+  let quotaAutoEnabled = false
   if (existingConfig === undefined) {
-    configStore.ensureProviderInWhitelist(providerId)
+    quotaAutoEnabled = await provisionNewProvider(configStore, extrasStore, credentialWriter, providerId, data, merged)
   }
   // 清除网关 = 写序契约第二步：先落 models.json 键删除（已由载体删除）、后清 extras 标记
   // （见 clearGatewayMarker，本调用点在 upsert 之后）。
   const gatewayClearFlush = clearGatewayMarker(extrasStore, providerId, gatewayToClear)
   if (gatewayClearFlush) await gatewayClearFlush
-  return result
+  return { ...result, quotaAutoEnabled: quotaAutoEnabled || undefined }
 }
 
 /**

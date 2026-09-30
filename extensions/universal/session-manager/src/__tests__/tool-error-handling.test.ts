@@ -1,81 +1,75 @@
-// tool-error-handling.test.ts — U5-A4: null/undefined returns → cancelled result; exceptions → caught error result
+// tool-error-handling.test.ts — U5-A4: null/undefined returns → cancelled throw; exceptions → propagate;
+// {error} respond → throw（W4 throw 范式：pi agent-loop 仅在 execute throw 时置 isError:true——
+// pi-agent-core dist/agent-loop.js:453-483 executePreparedToolCall 正常 return 硬编码 isError:false；
+// 语义登记 PS-56）
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import registerExtension from "../index.ts";
-
-function createHarness(selectImpl: (...args: unknown[]) => Promise<unknown>) {
-	const registered: Array<{ name: string; execute: Function }> = [];
-	const selectMock = vi.fn(selectImpl);
-	const pi = {
-		registerTool: (tool: { name: string; execute: Function }) => registered.push(tool),
-		on: vi.fn(),
-		getAllTools: vi.fn(() => []),
-		setActiveTools: vi.fn(),
-	};
-	const ctx = {
-		mode: "rpc" as const,
-		hasUI: true,
-		ui: { select: selectMock },
-	};
-	registerExtension(pi as never);
-	return { registered, selectMock, ctx };
-}
+import { createToolHarness, expectToolRejects, runToolForText } from "./helpers/extension-harness.ts";
 
 describe("U5-A4 tool-error-handling", () => {
-	it("select returning undefined (user cancel/timeout) → cancelled result, no throw", async () => {
-		const { registered, ctx } = createHarness(vi.fn().mockResolvedValue(undefined));
-		const tool = registered.find((t) => t.name === "create_managed_session")!;
-		const result = await tool.execute("call-1", { cwd: "/tmp" }, undefined, undefined, ctx);
-		expect(result.content).toHaveLength(1);
-		expect(result.content[0].text).toContain("cancelled");
+	beforeEach(() => {
+		vi.clearAllMocks();
 	});
 
-	it("select returning null → cancelled result, no throw", async () => {
-		const { registered, ctx } = createHarness(vi.fn().mockResolvedValue(null));
-		const tool = registered.find((t) => t.name === "send_to_session")!;
-		const result = await tool.execute("call-1", { sessionId: "s1", prompt: "hi" }, undefined, undefined, ctx);
-		expect(result.content).toHaveLength(1);
-		expect(result.content[0].text).toContain("cancelled");
-	});
-
-	it("select throwing exception → caught, returns error result, no throw", async () => {
-		const { registered, ctx } = createHarness(vi.fn().mockRejectedValue(new Error("channel closed")));
-		const tool = registered.find((t) => t.name === "get_session_status")!;
-		const result = await tool.execute("call-1", { sessionId: "s1" }, undefined, undefined, ctx);
-		expect(result.content).toHaveLength(1);
-		expect(result.content[0].text).toContain("cancelled");
-	});
-
-	it("select throwing non-Error → caught, returns error result, no throw", async () => {
-		const { registered, ctx } = createHarness(vi.fn().mockRejectedValue("string error"));
-		const tool = registered.find((t) => t.name === "abort_session")!;
-		const result = await tool.execute("call-1", { sessionId: "s1" }, undefined, undefined, ctx);
-		expect(result.content).toHaveLength(1);
-		expect(result.content[0].text).toContain("cancelled");
-	});
-
-	it("runtime respond 携带 {error} JSON → isError: true（禁止错误成功模式）", async () => {
-		const { registered, ctx } = createHarness(
-			vi.fn().mockResolvedValue(JSON.stringify({ error: "session unreachable", hint: "check get_session_status" })),
+	it("select returning undefined (user cancel/timeout) → cancelled throw（W4 范式：错误路径 throw）", async () => {
+		await expectToolRejects(
+			createToolHarness(vi.fn().mockResolvedValue(undefined)),
+			"create_managed_session",
+			{ cwd: "/tmp" },
+			/cancelled/,
 		);
-		const tool = registered.find((t) => t.name === "send_to_session")!;
-		const result = await tool.execute("call-1", { sessionId: "s1", prompt: "hi" }, undefined, undefined, ctx);
-		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain("session unreachable");
-		expect(result.content[0].text).toContain("hint");
 	});
 
-	it("runtime respond 正常 JSON → 无 isError", async () => {
-		const { registered, ctx } = createHarness(
-			vi.fn().mockResolvedValue(JSON.stringify({ queued: true })),
+	it("select returning null → cancelled throw", async () => {
+		await expectToolRejects(
+			createToolHarness(vi.fn().mockResolvedValue(null)),
+			"send_to_session",
+			{ sessionId: "s1", prompt: "hi" },
+			/cancelled/,
 		);
-		const tool = registered.find((t) => t.name === "send_to_session")!;
-		const result = await tool.execute("call-1", { sessionId: "s1", prompt: "hi" }, undefined, undefined, ctx);
-		expect(result.isError).toBeUndefined();
 	});
 
-	it("all 6 tools handle null gracefully", async () => {
-		const { registered, ctx } = createHarness(vi.fn().mockResolvedValue(null));
+	it("select throwing exception → cancelled throw（select 通道异常同折叠）", async () => {
+		await expectToolRejects(
+			createToolHarness(vi.fn().mockRejectedValue(new Error("channel closed"))),
+			"get_session_status",
+			{ sessionId: "s1" },
+			/cancelled/,
+		);
+	});
+
+	it("select throwing non-Error → cancelled throw", async () => {
+		await expectToolRejects(
+			createToolHarness(vi.fn().mockRejectedValue("string error")),
+			"abort_session",
+			{ sessionId: "s1" },
+			/cancelled/,
+		);
+	});
+
+	it("runtime respond 携带 {error} JSON → throw（禁止错误成功模式；pi 置 isError:true）", async () => {
+		await expectToolRejects(
+			createToolHarness(
+				vi.fn().mockResolvedValue(JSON.stringify({ error: "session unreachable", hint: "check get_session_status" })),
+			),
+			"send_to_session",
+			{ sessionId: "s1", prompt: "hi" },
+			/session unreachable[\s\S]*hint/,
+		);
+	});
+
+	it("runtime respond 正常 JSON → 成功返回（不含 isError 字段）", async () => {
+		const result = await runToolForText(
+			createToolHarness(vi.fn().mockResolvedValue(JSON.stringify({ queued: true }))),
+			"send_to_session",
+			{ sessionId: "s1", prompt: "hi" },
+		);
+		expect(Object.hasOwn(result, "isError")).toBe(false);
+		expect(JSON.parse(result.content[0].text)).toEqual({ queued: true });
+	});
+
+	it("all 6 tools handle null gracefully（cancelled throw）", async () => {
+		const { registered, ctx } = createToolHarness(vi.fn().mockResolvedValue(null));
 		for (const tool of registered) {
 			const params = tool.name === "create_managed_session"
 				? { cwd: "/tmp" }
@@ -86,9 +80,9 @@ describe("U5-A4 tool-error-handling", () => {
 						: tool.name === "list_my_sessions"
 							? {}
 							: { sessionId: "s1" };
-			const result = await tool.execute("call-1", params, undefined, undefined, ctx);
-			expect(result.content).toHaveLength(1);
-			expect(result.content[0].text).toContain("cancelled");
+			await expect(tool.execute("call-1", params, undefined, undefined, ctx)).rejects.toThrow(
+				/cancelled/,
+			);
 		}
 	});
 });

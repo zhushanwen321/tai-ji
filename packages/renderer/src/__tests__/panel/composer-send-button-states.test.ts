@@ -25,76 +25,23 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
+import { defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { textToSegments } from '@taiji/shared'
+// helper import 必须先于组件链（vi.mock 只 hoist 注册不重排 import，工厂执行期 helper
+// 绑定须已初始化）；composer-shell-mount import 即注册壳 mock（useChat/flow/session 三枚单源）
+import '../helpers/composer-shell-mount'
+import { composerApiModuleWithChat, composerChatApiSpy, composerChildStubs, makeComposerInputMock } from '../helpers/composer-mount'
 
-// ── mock useChat（spy 化 send/steer/abort）──
-const chatApiMock = vi.hoisted(() => ({
-  send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-  sendBash: vi.fn(() => Promise.resolve()),
-  abortBash: vi.fn(() => Promise.resolve()),
-}))
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => chatApiMock,
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn(), currentCwd: ref(null) }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: chatApiMock.send, steer: chatApiMock.steer, streamSubscribe: vi.fn(() => () => {}) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+// ── api mock：chat 组 = composerChatApiSpy 单例转发 + streamSubscribe（chatStore 装配面消费，
+//    与 useChat mock 同一批 vi.fn——断言面不分裂）──
+vi.mock('@/api', () => composerApiModuleWithChat())
 
-// ── ComposerInput mock：emit input 设 draft ──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    const clear = vi.fn()
-    const setText = vi.fn()
-    expose({ clear, setText, insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
-    return { clear, setText }
-  },
-  template: '<div data-testid="composer-input" />',
-})
+// ── ComposerInput mock：emit input 设 draft（共用面工厂单源 helpers/composer-mount）──
+const { lastInputText, ComposerInputMock } = makeComposerInputMock()
 
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
-const otherStubs = {
-  ComposerInput: ComposerInputMock,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
-}
+const otherStubs = { ComposerInput: ComposerInputMock, ...composerChildStubs }
 
 import Composer from '@/components/panel/Composer.vue'
 import ActivityStrip from '@/components/panel/message-stream/ActivityStrip.vue'
@@ -227,7 +174,7 @@ describe('queue 态角标 / title / aria 语义', () => {
     const btn = wrapper.find('.stop-btn')
     expect(btn.attributes('title')).toBe('停止')
     await btn.trigger('click')
-    expect(chatApiMock.abort).toHaveBeenCalled()
+    expect(composerChatApiSpy.abort).toHaveBeenCalled()
   })
 
   it('settling+compacting queue 态：title 同 queue 语义（角标随分档出现）', () => {

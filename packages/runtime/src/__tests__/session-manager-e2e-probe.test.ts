@@ -241,8 +241,9 @@ describe('U4-E2 manage e2e probe', () => {
     {
       action: 'send',
       params: { sessionId: 's1', prompt: 'hello' },
-      // sd-u5：send 走 delivery.sendChecked——idle 直投受理即回，busy 入队也回 queued
-      expected: { queued: true },
+      // sd-u5：send 走 delivery.sendChecked——idle 直投受理即回，busy 入队也回 queued；
+      // notify-once：probe 未带 notifyId → willNotify:false
+      expected: { queued: true, willNotify: false },
     },
     {
       action: 'history',
@@ -258,7 +259,7 @@ describe('U4-E2 manage e2e probe', () => {
     {
       action: 'status',
       params: { sessionId: 's1' },
-      expected: { status: 'active', modelId: 'openai/gpt-4' },
+      expected: { status: 'active', modelId: 'openai/gpt-4', undeliveredResults: 0 },
     },
     {
       action: 'list',
@@ -274,6 +275,7 @@ describe('U4-E2 manage e2e probe', () => {
             parentAgentSessionId: 'sid-parent',
           },
         ],
+        undeliveredResults: 0,
       },
     },
     {

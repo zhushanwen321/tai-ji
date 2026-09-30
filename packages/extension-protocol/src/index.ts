@@ -140,6 +140,7 @@ export type {
   SessionManagerStatusParams,
   SessionManagerListParams,
   SessionManagerAbortParams,
+  SessionManagerWatchParams,
   SessionManagerCreateResult,
   SessionManagerSendResult,
   SessionManagerHistoryResult,
@@ -148,6 +149,8 @@ export type {
   SessionManagerSessionSummary,
   SessionManagerAbortResult,
   SessionManagerErrorResult,
+  SessionManagerWatchReason,
+  SessionManagerWatchRespondPayload,
 } from './extensions/session-manager/types'
 export {
   isSessionManagerCreateParams,
@@ -156,6 +159,9 @@ export {
   isSessionManagerStatusParams,
   isSessionManagerListParams,
   isSessionManagerAbortParams,
+  isSessionManagerNotifyId,
+  isSessionManagerWatchParams,
+  isSessionManagerWatchRespondPayload,
 } from './extensions/session-manager/types'
 export { SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS } from './extensions/session-manager/marker'
 

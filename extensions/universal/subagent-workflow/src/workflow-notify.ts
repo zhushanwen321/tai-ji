@@ -103,7 +103,7 @@ export const MAX_NOTIFIED_RUN_IDS = 1000;
  * 模块私有（原 export 已删）：无跨文件消费者，测试经 notifyDone 公共入口
  * 观察并内联类型。
  */
-interface WorkflowNotifyDetails {
+interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   runId: string;
   name: string;
   status: string;

@@ -15,19 +15,26 @@
  * - §3.5：0 评论时「提交评论修订」禁用 + tooltip；评论计数可点 → openDrawerTab('plan') +
  *   plan-store 回看请求递增
  *
- * mock 形态照抄 useExtensionUI.test.ts（真实 InternalEventBus）+ plan-store.test.ts
- * （spread actual 保真实 events 通道只换 command）；i18n 经 vitest-i18n-setup 全局 mock。
+ * mock 形态照抄 useExtensionUI.test.ts（真实 InternalEventBus）；command 门面 spread
+ * actual 与挂载脚手架共享 helpers/plan-bar-mount 单源；i18n 经 vitest-i18n-setup 全局 mock。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/plan-review-bar.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
-import { computed, nextTick } from 'vue'
+import type { VueWrapper } from '@vue/test-utils'
+import { computed } from 'vue'
 import { effectScope } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
 import { LEGACY_AWAITING_PLAN_STATE_VIEW } from '@taiji/shared/__tests__/fixtures/plan-state-entries'
+import {
+  emitPlanReviewRequest as emitPlanReviewRequestOnBus,
+  flushAsync,
+  mountPlanBar,
+  planStateView as viewOf,
+} from '../helpers/plan-bar-mount'
+import { commandApiModule } from '../helpers/transport-command-mock'
 
 // ── mock ⓪：drawer domain（§3.5 草稿回看 openDrawerTab）——spread actual：import 链
 // （useExtensionUI → chat store → agentcall-lru-linkage）还消费 bindViewedVidPanels 等导出 ──
@@ -45,11 +52,11 @@ vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
 })
 
 // ── mock ①：command（plan-store 首拉 RPC）——spread actual 保真实 events 通道 ──
+// （mock 体单源 helpers/transport-command-mock commandApiModule）
 const commandMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api', async (importActual) => {
-  const actual = await importActual<typeof import('@taiji/core/transport/api')>()
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
-})
+vi.mock('@taiji/core/transport/api', async (importActual) =>
+  commandApiModule(await importActual<typeof import('@taiji/core/transport/api')>(), commandMock),
+)
 
 // ── mock ②：extension domain（useExtensionUI 的 WS/RPC 面，照 useExtensionUI.test.ts）──
 const uiTimeoutHandlers = new Map<string, Array<(requestId: string) => void>>()
@@ -91,44 +98,13 @@ import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/exten
 
 const SID = 'sess-bar'
 
-function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
-  return {
-    isActive: true,
-    planFilePath: '/data/A/.tmp/plans/auth/plan.md',
-    requirement: '重构 auth 模块',
-    templateName: 'default',
-    ...overrides,
-  }
-}
-
-/** 挂起 planReview 审批请求（runtime event-adapter 广播形状，D5） */
-function emitPlanReviewRequest(requestId = 'pr-1'): void {
-  mockBus.emit({
-    kind: 'ui-request',
-    sessionId: SID,
-    request: {
-      requestId,
-      pluginId: '',
-      kind: 'select',
-      method: 'select',
-      title: '\x00TAIJI_PLAN_REVIEW:',
-      options: [JSON.stringify({ docs: [] })],
-      planReview: true,
-    },
-  } as never)
-}
-
 async function mountBar(view: PlanStateView | null = viewOf()): Promise<VueWrapper> {
-  commandMock.mockResolvedValue({ sessionId: SID, planState: view })
-  const wrapper = mount(PlanReviewBar, { props: { sessionId: SID } })
-  await flushAsync()
-  return wrapper
+  return mountPlanBar(PlanReviewBar, { commandMock, sid: SID, view })
 }
 
-async function flushAsync(): Promise<void> {
-  await nextTick()
-  await Promise.resolve()
-  await nextTick()
+/** 挂起 planReview 审批请求（runtime 广播形状，D5）：发射体单源 helpers/plan-bar-mount，本文件绑定 mockBus+SID */
+function emitPlanReviewRequest(requestId = 'pr-1'): void {
+  emitPlanReviewRequestOnBus(mockBus, SID, requestId)
 }
 
 beforeEach(() => {

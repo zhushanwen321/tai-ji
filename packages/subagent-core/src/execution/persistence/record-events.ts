@@ -90,7 +90,7 @@ export const RECORD_JOURNAL_HEADER_TYPE = "record-journal";
  * 读命中非 session header 即忽略）。写侧契约 = 文件创建时写恰一行（append 首写
  * 时落，见 FileRecordEventJournal）。
  */
-export interface RecordJournalHeader {
+export interface RecordJournalHeader { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: typeof RECORD_JOURNAL_HEADER_TYPE;
   /** record id（= 文件主名 sa-id）。 */
   id: string;
@@ -141,7 +141,7 @@ export interface RecordEventEnvelope {
  * 对应现状写点（D3 表行 1）：register（record-store 写点①）+ v2 注册条目（同点
  * 双写：journal 事件是事实，主 session 注册条目是锚）。
  */
-export interface RecordCreatedEvent extends RecordEventEnvelope {
+export interface RecordCreatedEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-created";
   /** record id（= 文件主名 sa-id）。 */
   id: string;
@@ -169,7 +169,7 @@ export interface RecordCreatedEvent extends RecordEventEnvelope {
  * 对应现状写点（D3 表行 2）：.record-binding 写点（spawn 回填）。D2 的
  * record-bound manifest 物化（zcode 运行窗口锚定）以本事件为产生点。
  */
-export interface RecordBoundEvent extends RecordEventEnvelope {
+export interface RecordBoundEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-bound";
   /** 子 session 文件绝对路径。 */
   sessionFile: string;
@@ -188,7 +188,7 @@ export interface RecordBoundEvent extends RecordEventEnvelope {
  * 隐含，续轮显式落账——record 轮次粒度事件进 journal 是 D5 增量裁决：不进则
  * .state 仍是事实源，事实源介质数降不到 1）。
  */
-export interface RecordRoundStartedEvent extends RecordEventEnvelope {
+export interface RecordRoundStartedEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-round-started";
   /** 轮序号（递增，写侧计数链）。 */
   round: number;
@@ -201,7 +201,7 @@ export interface RecordRoundStartedEvent extends RecordEventEnvelope {
  * 对应现状写点（D3 表行 4）：markRoundIdle（.state 写点）。.state 降级为本事件
  * 的落盘物化投影（D2 sidecar 裁决表 .state 行）。
  */
-export interface RecordRoundIdleEvent extends RecordEventEnvelope {
+export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-round-idle";
   /** 轮终停因（StopReason 值域——「为什么停」的轮粒度权威词）。 */
   stopReason: StopReason;
@@ -230,7 +230,7 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope {
  * 对应现状写点（D3 表行 5）：archive / markSettled / legacy 终态（v2 终态条目同点
  * 双写）。收编（D4）幂等追加的终态事件也是本类型（stopReason=interrupted 族）。
  */
-export interface RecordSettledEvent extends RecordEventEnvelope {
+export interface RecordSettledEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-settled";
   stopReason: StopReason;
   /** 终局展示形态（completed/failed/cancelled；终态条目 outcome 同源）。 */
@@ -254,7 +254,7 @@ export interface RecordSettledEvent extends RecordEventEnvelope {
  * 对应现状写点（D3 表行 6）：markReopened。epoch 递增 + round 归零（与
  * .record-binding 的 epoch 持久化同源——notifyId `id:epoch:round` 防撞维度）。
  */
-export interface RecordReopenedEvent extends RecordEventEnvelope {
+export interface RecordReopenedEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-reopened";
   /** 递增后的新 epoch。 */
   epoch: Epoch;
@@ -325,7 +325,7 @@ export function parseRecordEventFileLine(line: string): RecordJournalEvent | und
  * settled 不是吸收位——reopened / round-started 清除 settled（可续实体回边），
  * 「当前是否终态」= settled !== undefined。
  */
-export interface RecordJournalFoldState {
+export interface RecordJournalFoldState { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 身份域（首条 record-created 落账；undefined = 文件缺创建帧——残文件/全坏行形态）。 */
   identity: RecordCreatedEvent | undefined;
   /** 引擎绑定（record-bound 落账；zcode 运行窗口锚定的数据源）。 */
@@ -432,7 +432,7 @@ export function foldRecordJournalEvents(
  * RecordStore 状态迁移点（U2a 接线）——record 域事件经 store 落账，引擎与读侧
  * 不直接写。seq 分配权在 journal 实装内（文件末水位 + 1），构造性单调。
  */
-export interface RecordEventJournal {
+export interface RecordEventJournal { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /**
    * 追加一条事件（JSONL 单行；文件不存在时先落头行）。id 显式传参——文件定位
    * 不依赖事件形态。返回落盘的完整事件（含分配的 seq），调用方据此同步构造

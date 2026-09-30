@@ -15,7 +15,11 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/subagent-tab.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
+// 必须置于 SubagentTab import 之前：壳 mock 三连（useChatViewDeps / useChat / useSidebar）
+// 经 message-stream-shell-mount 顶层注册，virtua mock 工厂也解引用 helper 导出——
+// SubagentTab → MessageStream 导入链触发注册/工厂时 helper 模块必须已初始化。
+import '@/__tests__/helpers/message-stream-shell-mount'
+import { virtuaVueMockModule } from '@/__tests__/helpers/chat-stream-mount'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h, ref } from 'vue'
@@ -29,52 +33,9 @@ import SubagentTab from '@/components/panel/SubagentTab.vue'
 import type { Message, SubagentRecord, WorkflowAgentCall } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
 
-vi.mock('virtua/vue', async () => {
-  const { vi: vitest } = await import('vitest')
-  return {
-    Virtualizer: defineComponent({
-      name: 'MockVirtualizer',
-      props: {
-        data: { type: Array, default: () => [] },
-      },
-      setup() {
-        return {
-          scrollSize: 600,
-          scrollOffset: 0,
-          viewportSize: 400,
-          cache: {},
-          scrollToIndex: vitest.fn(),
-          getItemOffset: vitest.fn(() => 0),
-          getItemSize: vitest.fn(() => 200),
-          findItemIndex: vitest.fn(() => 0),
-          scrollTo: vitest.fn(),
-          scrollBy: vitest.fn(),
-        }
-      },
-      render(ctx) {
-        return h(
-          'div',
-          { class: 'mock-virtualizer' },
-          (ctx.data as unknown[]).map((item, index) => ctx.$slots.default?.({ item, index }) ?? []),
-        )
-      },
-    }),
-  }
-})
-
-// 壳 deps mock（对齐 MessageStream-subagent-force-working.test.ts：聚焦数据链不需真 deps）
-vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    editAndResend: vi.fn(),
-    loadMoreHistory: vi.fn(),
-    hasMoreHistory: () => false,
-  }),
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn() }),
-}))
+// virtua mock（helpers/chat-stream-mount.ts 简化版工厂转发：Virtualizer stub 全量渲染
+// scoped slot，setup 暴露 VirtualizerHandle 兼容字段——论证见该 helper 文件头）
+vi.mock('virtua/vue', () => virtuaVueMockModule())
 
 // sessionApi mock：fetchAndInject 内部调 getSubagentHistory（快照腿）
 vi.mock('@taiji/core/transport/api/domains/session', () => ({

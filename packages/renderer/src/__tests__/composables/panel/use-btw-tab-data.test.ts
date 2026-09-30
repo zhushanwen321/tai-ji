@@ -101,6 +101,56 @@ async function settle(w: VueWrapper): Promise<void> {
   await nextTick()
 }
 
+/**
+ * 轮询等待 Host 投影到达期望值（仅用于「到达」类断言）：投影更新依赖 Vue watcher
+ * 回调的异步调度，固定 settle 后立即断言对调度器微时序有隐性依赖——CI 并行负载下
+ * 偶发不达（CI 偶发 run 36585066332），改带超时轮询去依赖。超时后先输出失败现场
+ * 快照，再以 expect 收尾（保持 vitest 断言失败形态）。预算 8000ms：全量套件
+ * 16 worker 抢占下单用例调度延迟可达 2s+（本地实测），2s 预算会被纯负载压过线；
+ * 轮询只在到达后提前返回，上限加大不影响绿路耗时。
+ */
+async function waitForProjection(
+  w: VueWrapper,
+  testid: 'unread' | 'threads',
+  expected: string,
+  timeoutMs = 8000,
+): Promise<void> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    await flushPromises()
+    await nextTick()
+    if (text(w, testid) === expected) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  await logBtwFlakyDiagnosis(w)
+  expect(text(w, testid)).toBe(expected)
+}
+
+async function waitForUnread(w: VueWrapper, expected: string, timeoutMs = 8000): Promise<void> {
+  return waitForProjection(w, 'unread', expected, timeoutMs)
+}
+
+/**
+ * 失败现场取证（waitForUnread 超时路径）：Host 投影三项 + 线分区消息条数 +
+ * btw.list 最近一次 mock 返回值——下次 CI 复现时据此区分「watcher 未计数」
+ * vs「分区无数据」vs「投影未更新」。
+ */
+async function logBtwFlakyDiagnosis(w: VueWrapper): Promise<void> {
+  const chat = useChatStore()
+  console.log('[btw-flaky-diagnosis] host projection:', {
+    threads: text(w, 'threads'),
+    unread: text(w, 'unread'),
+    pending: text(w, 'pending'),
+  })
+  console.log('[btw-flaky-diagnosis] chat partition counts:', {
+    'btw:t2': chat.getMessages('btw:t2').length,
+    'btw:t1': chat.getMessages('btw:t1').length,
+  })
+  const lastResult = btwMock.list.mock.results.at(-1)
+  const lastReturned = lastResult?.type === 'return' ? await Promise.resolve(lastResult.value) : undefined
+  console.log('[btw-flaky-diagnosis] btw.list last mock result:', lastReturned ?? '(no result)')
+}
+
 function msg(id: string): Message {
   return { id, role: 'assistant', content: 'x', status: 'complete', timestamp: 0 }
 }
@@ -274,9 +324,17 @@ describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费面�
     await settle(w)
     const chat = useChatStore()
 
+    // [CI 慢机竞态关窗 2026-09-30] per-线未读 watch 创建于初始 btw.list resolve 之后
+    // （产品语义：初始快照内的消息不算新未读，watch 基线 = 创建时的分区长度）。CI 并行
+    // 负载下 settle 的微任务冲刷可能早于 mock resolve，setMessages 落在 watch 创建前会被
+    // 基线吞掉——unread 恒 0 且无重算路径（CI 两次连红取证：分区 btw:t2=1 而 host
+    // unread=0，8s 轮询不自愈）。等 threads 投影到位（与 watch 创建同拍，先写投影后建
+    // watch）再制造增长，构造性保证观察面在册。
+    await waitForProjection(w, 'threads', '2')
+
     chat.setMessages('btw:t2', [msg('b1')])
     await settle(w)
-    expect(text(w, 'unread')).toBe('1')
+    await waitForUnread(w, '1')
 
     // 关线后重拉（抽屉活动触发面）：权威列表只剩 t1
     btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }])

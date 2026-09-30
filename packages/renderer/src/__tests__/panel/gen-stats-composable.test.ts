@@ -14,6 +14,7 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/gen-stats-composable.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { commandMock, transportApiCommandModule } from '../helpers/transport-command-mock'
 import { defineComponent, h, ref, nextTick } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import * as events from '@taiji/core/transport/api'
@@ -29,30 +30,19 @@ import {
   type UseGenStatsReturn,
 } from '@/composables/features/model/useGenStats'
 import type { GenStatsFrame } from '@taiji/shared'
+import { genStatsFrame } from '../helpers/gen-stats-mount'
 
 // ── mock 边界：getGenStats RPC mock 掉（u3 未接线，恢复腿用受控 deferred 驱动）──
-// mock 目标 = 实现 import 的权威路径（u5 re-anchor 删除 @/api/request bridge 后）；
-// spread actual 只换 command/超时常量：useSessionEvents 经主模块 events.on 订阅，须保留
-// 真实 events 通道（测试侧 dispatchSession 与实现侧订阅经同一真实 events 模块实例，注册表
-// 共享），否则帧链路断
-const commandMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api', async (importActual) => {
-  const actual = await importActual<typeof import('@taiji/core/transport/api')>()
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
-})
+// spread-actual mock 体单源在 helpers/transport-command-mock.ts（events 真实通道保留，
+// RPC_BACKSTOP_TIMEOUT_MS 透传 30_000；commandMock 为该 helper 导出的文件内单例，
+// beforeEach 编排受控 deferred）。
+vi.mock('@taiji/core/transport/api', () => transportApiCommandModule())
 
 // ── 共享测试基建 ─────────────────────────────────────────────
 
-/** 帧工厂：合法全量帧为基线（含 ttft，composer-genstats-ttft U4），用例按需覆写 */
+/** 帧工厂：共享基线（helpers/gen-stats-mount）+ model 覆写 'm1'（本文件 model 匹配用例口径） */
 function genFrame(sessionId: string, overrides: Partial<GenStatsFrame> = {}): GenStatsFrame {
-  return {
-    sessionId,
-    speed: { current: 35, day: 28, d7: 22, d30: 19 },
-    cacheRatio: { current: 91, day: 87 },
-    ttft: { current: 820, day: 900, d7: 1100, d30: 1300 },
-    model: 'm1',
-    ...overrides,
-  }
+  return genStatsFrame(sessionId, { model: 'm1', ...overrides })
 }
 
 /** 真实 events.dispatchSession 通道派发 session.stats_update 帧 */

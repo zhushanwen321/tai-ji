@@ -68,12 +68,14 @@
     :aria-label="t('panel.tray.trayLabel')"
     class="flex min-w-0 shrink-0 items-center gap-0.5"
   >
-    <!-- 序 4 聚合单入口（D6 密度档 `aggregated`）：整个托盘收为「层叠图标 + 运行数」一个按钮，
-         点击开面板（TrayPanelSurface）内分段展示全部类别（TrayAggregatePanel）；
-         `hasTrayItems === false`（三态之「全无」）整块不渲染——聚合态同样不留死入口。
-         图标语义硬约束：聚合入口 = 层叠图标（此处），溢出入口 = 省略号（Composer 底栏），两者不共用。 -->
+    <!-- 序 4 聚合单入口（D6 密度档 `aggregated`）：整个托盘收为「单图标 + 运行数数字角标」一个按钮，
+         点击开面板（TrayPanelSurface）内分段展示全部类别（TrayAggregatePanel）+ 插件 toolbar 贡献段；
+         可见条件 = aggregated 且（托盘有条目 或 插件 toolbar 有贡献）——两者皆无整块不渲染，
+         聚合态同样不留死入口。
+         图标语义硬约束：聚合入口 = **单一图标**（layers，W3a 禁多 icon 重叠；运行数以数字角标
+         承载），溢出入口 = 省略号（Composer 底栏，[`»` 菜单已删 HISTORICAL]），两者不共用。 -->
     <Popover
-      v-if="aggregated && hasTrayItems"
+      v-if="showAggregate"
       :open="activeKey === AGGREGATE_PANEL_KEY"
       @update:open="(open: boolean) => onPanelOpenChange(AGGREGATE_PANEL_KEY, open)"
     >
@@ -83,8 +85,8 @@
           variant="ghost"
           data-testid="tray-aggregate-button"
           :data-running="aggregateRunningCount"
-          :title="aggregateTitle"
-          :aria-label="aggregateTitle"
+          :title="t('panel.tray.aggregate.allTools')"
+          :aria-label="t('panel.tray.aggregate.allTools')"
           :aria-expanded="activeKey === AGGREGATE_PANEL_KEY ? 'true' : 'false'"
           :aria-pressed="isPinnedOf(AGGREGATE_PANEL_KEY) ? 'true' : 'false'"
           :class="trayItemButtonClass(isPinnedOf(AGGREGATE_PANEL_KEY) || activeKey === AGGREGATE_PANEL_KEY)"
@@ -92,21 +94,12 @@
           @pointerleave="onHoverEnd"
           @click="onTogglePin(AGGREGATE_PANEL_KEY)"
         >
-          <!-- 层叠图标（各类别 icon 重叠排布；仅 widget 无 built-in 时给通用网格图标兜底） -->
-          <span class="flex shrink-0 items-center -space-x-1" aria-hidden="true">
-            <span
-              v-for="item in builtinItems"
-              :key="item.kind"
-              class="grid size-4 place-items-center rounded-full bg-bg-input ring-1 ring-border"
-            >
-              <component
-                :is="item.icon"
-                class="size-2.5"
-                :class="item.running > 0 ? 'text-accent' : 'text-neutral-dim'"
-              />
-            </span>
-            <LayoutGrid v-if="builtinItems.length === 0" class="size-4 text-neutral-dim" />
-          </span>
+          <!-- 单一图标（聚合语义 = layers 层叠面；有进行中时 accent 提亮，无则中性） -->
+          <Layers
+            class="size-4 shrink-0"
+            :class="aggregateRunningCount > 0 ? 'text-accent' : 'text-neutral-dim'"
+            aria-hidden="true"
+          />
           <!-- 运行数（归零不虚亮：running === 0 时呼吸点与计数都不出，与三态同款） -->
           <span
             v-if="aggregateRunningCount > 0"
@@ -135,6 +128,17 @@
           :widgets="widgetItems"
           :pinned="isPinnedOf(AGGREGATE_PANEL_KEY)"
         />
+        <!--
+          插件 toolbar 贡献段（W3a：`»` 溢出入口删除后，聚合页承接插件 toolbar）：
+          有贡献才渲染发丝分隔 + ViewHost（零贡献不留死分隔）；分隔与 ViewHost 收在 shrink-0
+          容器里钉在面板底部，聚合段保持 flex-1 内部滚动。
+        -->
+        <template v-if="hasPluginToolbar">
+          <span class="h-px w-full shrink-0 bg-border-strong" aria-hidden="true" />
+          <div class="shrink-0">
+            <ViewHost view-id="composer.toolbar" :session-id="sessionId" empty="hidden" />
+          </div>
+        </template>
       </TrayPanelSurface>
     </Popover>
 
@@ -252,8 +256,9 @@
 import { computed, inject, onBeforeUnmount, provide, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bot, LayoutGrid, SquareTerminal, Waypoints, Workflow } from '@lucide/vue'
-import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
+import { Bot, Layers, SquareTerminal, Waypoints, Workflow } from '@lucide/vue'
+import { VIEW_HOST_SOURCE_KEY, ViewHost } from '@taiji/ui/extension-host'
+import { usePluginToolbarContribution } from '@/components/panel/tray/use-plugin-toolbar'
 import type { ViewCacheEntry } from '@taiji/ui/extension-host'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
@@ -275,7 +280,7 @@ const props = withDefaults(
     sessionId: string
     /**
      * 密度档驱动的托盘形态（u6b / D6 序 4）：true = 收为单个聚合入口
-     * （层叠图标 + 运行数 → 面板内分段展示全部类别）；false = 既有逐件按钮行。
+     * （单图标 layers + 运行数数字角标 → 面板内分段展示全部类别 + 插件 toolbar 贡献段）；false = 既有逐件按钮行。
      */
     aggregated?: boolean
   }>(),
@@ -394,6 +399,10 @@ const hasTrayItems = computed(() => builtinItems.value.length > 0 || widgetItems
 
 watch(hasTrayItems, (value) => emit('update:hasItems', value), { immediate: true })
 
+/** 插件 toolbar 贡献面 + 聚合入口可见条件（W3a：托盘有条目 或 插件有贡献，两者皆无不留死入口；贡献判定实现见 use-plugin-toolbar） */
+const hasPluginToolbar = usePluginToolbarContribution(() => props.sessionId)
+const showAggregate = computed(() => props.aggregated && (hasTrayItems.value || hasPluginToolbar.value))
+
 /** 聚合入口运行数（built-in 进行中 + widget 推送中；归零不虚亮由按钮 v-if 统一判定） */
 const aggregateRunningCount = computed(
   () =>
@@ -401,15 +410,10 @@ const aggregateRunningCount = computed(
     widgetItems.value.filter((item) => item.entry.meta?.status === 'running').length,
 )
 
-/** 聚合入口 title / aria-label（带运行数：聚合态下这是唯一可扫读的数字） */
-const aggregateTitle = computed(() =>
-  t('panel.tray.aggregate.title', { running: aggregateRunningCount.value }),
-)
-
 /** 当前渲染出按钮的面板键集合（activeKey 有效性判据：键不在集合内 = 条目已消失，状态随之作废） */
 const renderedPanelKeys = computed<TrayPanelKey[]>(() => {
-  // 聚合态下只有聚合面板键存在（条目集 = 「有任一条目」）；非聚合态逐件键（同既有语义）
-  if (props.aggregated) return hasTrayItems.value ? [AGGREGATE_PANEL_KEY] : []
+  // 聚合态下只有聚合面板键存在（条目集 = 「托盘有条目 或 插件有贡献」）；非聚合态逐件键（同既有语义）
+  if (props.aggregated) return showAggregate.value ? [AGGREGATE_PANEL_KEY] : []
   return [
     ...builtinItems.value.map((item) => builtinKey(item.kind)),
     ...widgetItems.value.map((item) => widgetKey(item.viewId)),

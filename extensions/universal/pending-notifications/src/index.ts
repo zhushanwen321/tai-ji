@@ -225,7 +225,7 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		name: "pending_notifications",
 		label: "Pending Notifications",
 		description:
-			"查询当前活跃的异步操作（workflow/subagent/bash 后台任务）。action=count 返回数量；action=list 返回列表。状态由 EventBus + session entries 维护，无需手动注册。",
+			"查询当前活跃的异步操作（workflow/subagent/bash 后台任务与 session（managed session 债权））。action=count 返回数量；action=list 返回列表。状态由 EventBus + session entries 维护，无需手动注册。",
 		parameters: PendingNotificationsParams,
 		execute: async (_toolCallId: string, params: { action: "count" | "list" }, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<{ content: { type: "text"; text: string }[]; details: PendingToolDetails }> => {
 			// entries 现算（单一权威源）：与 goal/subagent-workflow 同一原语。跨 session

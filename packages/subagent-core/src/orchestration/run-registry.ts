@@ -63,7 +63,7 @@ export type RunRegistryPhase =
   | "interrupted";
 
 /** run 注册表投影（单一推导点，无独立状态存储）。 */
-export interface RunRegistryProjection {
+export interface RunRegistryProjection { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   runId: string;
   /** D5 两维状态（fold 终帧；missing 时 = INITIAL_RUN_STATE）。 */
   state: RunState;
@@ -79,7 +79,7 @@ export interface RunRegistryProjection {
 }
 
 /** 投影的活体判定输入（host-died 判据的互补面——活体集命中即未死）。 */
-export interface RunProjectionOptions {
+export interface RunProjectionOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /**
    * 本进程活体持有的 runId 集合（runs Map 的 key 视图）。缺省 = 空集（跨进程
    * 查询形态：record fold 停在非 terminal 一律判 interrupted）。
@@ -188,7 +188,7 @@ export async function projectRunRegistryState(
 //    随重启追加增长。
 
 /** adoptInterruptedRun 的可调项。 */
-export interface AdoptInterruptedRunOptions {
+export interface AdoptInterruptedRunOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 时钟注入（epoch ms）；缺省 Date.now()——转移 ts 与宽限窗判定的确定性测试通道。 */
   now?: number;
   /** 中断来源标记（RunErrorCode 中断族：crashed / terminated / startup-sweep）。 */

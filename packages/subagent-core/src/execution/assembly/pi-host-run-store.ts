@@ -82,7 +82,7 @@ const LEGACY_JOURNAL_SUFFIX = ".events.jsonl";
  * 不经两态机快照）——快照写面不再是枚举读侧的职责（判据读者已随 D6 改接换源；
  * 候选来源已随 U2 改接换 journal 文件族）。
  */
-export interface WorkflowRunEnumerationStore {
+export interface WorkflowRunEnumerationStore { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   loadAll(): Promise<Array<{ runId: string; stateDir: string; status: string }>>;
 }
 

@@ -38,6 +38,8 @@ import type {
   LlmRetryConfig,
   ScannedSkillInfo,
   ScannedAgentInfo,
+  RenameMode,
+  UsageStatsResult,
   UiLocale,
 } from '@taiji/shared'
 import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS } from '@taiji/shared'
@@ -66,9 +68,10 @@ import * as wsClient from '../ws-client'
 // ② AssertExact<DomainParamsExact<...>> —— 可赋值性抓不到「少可选参」（少参函数可赋给多参函数类型），
 //    须逐方法比较 Parameters 元组全等（identity）。断言别名 export：未导出的 unused 类型
 //    别名会被 lint no-unused-vars 拦截（tsc 侧本包未开 noUnusedLocals，不设防）。
-// 已锚定：session/chat/config/model/plugin/composer/workspace/quota/project/preset/btw（11 域）。
-// 未锚定（mock 保真度登记见 docs/TEST-STRATEGY.md §5）：settings（7 成员子集转发器，
-// real 是 40+ 方法全域）/ extension（onExtensions 宽类型为登记过的有意偏差，W08 收口）/
+// 已锚定：session/chat/config/model/plugin/composer/workspace/quota/project/preset/btw/usage（12 域）。
+// 未锚定（mock 保真度登记见 docs/TEST-STRATEGY.md §5）：settings（[C3] 字段读写已补齐为
+// 内存态 fixture 全域，但 onExtensions 转发沿用 extension 的宽类型偏差——锚定受其阻塞，
+// W08 收口时一并锚定）/ extension（onExtensions 宽类型为登记过的有意偏差，W08 收口）/
 // search（real 侧无单源 domain，编排归 useSearchModalDeps）/ git、file（独立 mock 文件，
 // 待后续同法锚定）。
 import type * as realSessionDomain from '../api/domains/session'
@@ -82,6 +85,7 @@ import type * as realQuotaDomain from '../api/domains/quota'
 import type * as realProjectDomain from '../api/domains/project'
 import type * as realPresetDomain from '../api/domains/preset'
 import type * as realBtwDomain from '../api/domains/btw'
+import type * as realUsageDomain from '../api/domains/usage'
 
 /** real 域形状单点（mock 锚定源；散函数模块的 namespace 类型即域接口） */
 export type SessionDomain = typeof realSessionDomain
@@ -95,24 +99,27 @@ export type QuotaDomain = typeof realQuotaDomain
 export type ProjectDomain = typeof realProjectDomain
 export type PresetDomain = typeof realPresetDomain
 export type BtwDomain = typeof realBtwDomain
+export type UsageDomain = typeof realUsageDomain
 
-/** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对） */
-type PlainTuple<T extends unknown[]> = { [K in keyof T]: T[K] }
+/** 去 tuple 标签（Parameters 产 labeled tuple；参数名是修饰不是类型身份，归一后再比对）。导出：被导出的 SameTuple / DomainParamsExact 引用 */
+export type PlainTuple<T extends unknown[]> = { [K in keyof T]: T[K] }
 /**
  * 元组类型全等（identity 比对而非可赋值性——可赋值性抓不到可选元素的增删）。
  * 判别臂用字符串字面量（非数值）：同为 identity 探针的两臂标记，避免 no-magic-numbers warning。
+ * 导出：被导出的 DomainParamsExact 引用（fallow private-type-leaks）。
  */
-type SameTuple<A extends unknown[], B extends unknown[]> =
+export type SameTuple<A extends unknown[], B extends unknown[]> =
   (<T>() => T extends PlainTuple<A> ? 'eq' : 'ne') extends (<T>() => T extends PlainTuple<B> ? 'eq' : 'ne') ? true : false
-/** 断言恒真（类型实参不满足 true 约束时在使用处报编译错） */
-type AssertExact<T extends true> = T
+/** 断言恒真（类型实参不满足 true 约束时在使用处报编译错；导出：被导出别名 *ParamsExact 引用） */
+export type AssertExact<T extends true> = T
 /**
  * 逐方法比较 mock 实现与 real 域的 Parameters 元组全等（identity）；任一方法少参/多参/错型，
  * 结果联合含 false。抓的正是「注解可赋值性放行」的漂移：mock 少声明一个可选参，TS 结构化
  * 比较视为合法（少参函数可赋给多参函数类型）。用法：AssertExact<DomainParamsExact<D, M>>——
  * 泛型定义内不能直接套 AssertExact（未解析泛型上约束不可证，会在定义处误报）。
+ * 导出：被导出别名 *ParamsExact 引用（fallow private-type-leaks）。
  */
-type DomainParamsExact<Real, Mock extends Real> = {
+export type DomainParamsExact<Real, Mock extends Real> = {
   [K in keyof Real]: Real[K] extends (...args: infer P) => unknown
     ? Mock[K] extends (...args: infer Q) => unknown
       ? SameTuple<P, Q>
@@ -1174,6 +1181,8 @@ const configImpl = {
       }
     }
     broadcastProviders()
+    // 对齐 real reply 形状（config.providerUpdated 载荷消费型）：mock 不模拟额度自动开启
+    return {}
   },
   async deleteProvider(providerId: ProviderId) {
     await sleep(TIMING.ack)
@@ -1600,6 +1609,24 @@ export const search = {
 /* ── Settings mock（对齐新契约：转发 config/extension 订阅 + 复用 real 的 localStorage 偏好）── */
 /* 必须在 config/extension 块之后（转发引用它们） */
 
+// [C3] system 设置项字段内存态（worktree / 自动重命名 / 智能上下文）：mock 无持久化，
+// get 返回当前内存值、set 写内存后回显生效值；real 侧这些字段同样无独立广播通道。
+const MOCK_WORKTREE_TIMEOUT_SECONDS = 60
+const mockWorktreePrefs = {
+  rootDir: '',
+  setupScript: '',
+  bareSetupScript: '',
+  timeout: MOCK_WORKTREE_TIMEOUT_SECONDS,
+  baseBranch: '',
+}
+const mockAutoRenamePrefs = { enabled: false, mode: 'first-stop' as RenameMode, model: '' }
+const mockSmartContextPrefs = {
+  enabled: false,
+  compactModel: '',
+  reminderThresholds: [] as number[],
+  excludedModels: [] as string[],
+}
+
 export const settings = {
   // 订阅（转发到 mock sub）
   onProviders: config.onProviders,
@@ -1611,6 +1638,92 @@ export const settings = {
   listProviders: config.listProviders,
   // 动作
   setProvider: config.setProvider,
+
+  // ── [C3] system 设置项字段（worktree）：内存态 fixture（不持久化）──
+  async getWorktreeRootDir(): Promise<ServerMessageMap['config.worktreeRootDir']> {
+    return { dir: mockWorktreePrefs.rootDir }
+  },
+  async setWorktreeRootDir(dir: string): Promise<ServerMessageMap['config.worktreeRootDir']> {
+    mockWorktreePrefs.rootDir = dir
+    return { dir }
+  },
+  async getSetupScript(): Promise<ServerMessageMap['config.setupScript']> {
+    return { script: mockWorktreePrefs.setupScript }
+  },
+  async setSetupScript(script: string): Promise<ServerMessageMap['config.setupScript']> {
+    mockWorktreePrefs.setupScript = script
+    return { script }
+  },
+  async getBareSetupScript(): Promise<ServerMessageMap['config.bareSetupScript']> {
+    return { script: mockWorktreePrefs.bareSetupScript }
+  },
+  async setBareSetupScript(script: string): Promise<ServerMessageMap['config.bareSetupScript']> {
+    mockWorktreePrefs.bareSetupScript = script
+    return { script }
+  },
+  async getWorktreeTimeout(): Promise<ServerMessageMap['config.worktreeTimeout']> {
+    return { timeout: mockWorktreePrefs.timeout }
+  },
+  async setWorktreeTimeout(timeout: number): Promise<ServerMessageMap['config.worktreeTimeout']> {
+    mockWorktreePrefs.timeout = timeout
+    return { timeout }
+  },
+  async getDefaultBaseBranch(): Promise<ServerMessageMap['config.defaultBaseBranch']> {
+    return { baseBranch: mockWorktreePrefs.baseBranch }
+  },
+  async setDefaultBaseBranch(baseBranch: string): Promise<ServerMessageMap['config.defaultBaseBranch']> {
+    mockWorktreePrefs.baseBranch = baseBranch
+    return { baseBranch }
+  },
+
+  // ── [C3] system 设置项字段（自动重命名）：内存态 fixture ──
+  async getAutoRenameEnabled(): Promise<ServerMessageMap['config.autoRenameEnabled']> {
+    return { enabled: mockAutoRenamePrefs.enabled }
+  },
+  async setAutoRenameEnabled(enabled: boolean): Promise<ServerMessageMap['config.autoRenameEnabled']> {
+    mockAutoRenamePrefs.enabled = enabled
+    return { enabled }
+  },
+  async getRenameMode(): Promise<ServerMessageMap['config.renameMode']> {
+    return { mode: mockAutoRenamePrefs.mode }
+  },
+  async setRenameMode(mode: RenameMode): Promise<ServerMessageMap['config.renameMode']> {
+    mockAutoRenamePrefs.mode = mode
+    return { mode }
+  },
+  async getRenameModel(): Promise<ServerMessageMap['config.renameModel']> {
+    return { model: mockAutoRenamePrefs.model }
+  },
+  async setRenameModel(model: string): Promise<ServerMessageMap['config.renameModel']> {
+    mockAutoRenamePrefs.model = model
+    return { model }
+  },
+
+  // ── [C3] system 设置项字段（智能上下文）：内存态 fixture ──
+  async getSmartContextConfig(): Promise<ServerMessageMap['config.smartContextConfig']> {
+    return {
+      enabled: mockSmartContextPrefs.enabled,
+      compactModel: mockSmartContextPrefs.compactModel,
+      reminderThresholds: [...mockSmartContextPrefs.reminderThresholds],
+      excludedModels: [...mockSmartContextPrefs.excludedModels],
+    }
+  },
+  async setSmartContextEnabled(enabled: boolean): Promise<ServerMessageMap['config.smartContextEnabled']> {
+    mockSmartContextPrefs.enabled = enabled
+    return { enabled }
+  },
+  async setSmartContextCompactModel(model: string): Promise<ServerMessageMap['config.smartContextCompactModel']> {
+    mockSmartContextPrefs.compactModel = model
+    return { model }
+  },
+  async setSmartContextThresholds(thresholds: number[]): Promise<ServerMessageMap['config.smartContextThresholds']> {
+    mockSmartContextPrefs.reminderThresholds = [...thresholds]
+    return { thresholds: [...thresholds] }
+  },
+  async setSmartContextExcludedModels(models: string[]): Promise<ServerMessageMap['config.smartContextExcludedModels']> {
+    mockSmartContextPrefs.excludedModels = [...models]
+    return { models: [...models] }
+  },
 }
 
 // Mock workspace domain（W3：最近工作区记录，mock 返回 3 条 records 供 E2E 验证）
@@ -1655,6 +1768,43 @@ const quotaImpl = {
 // [G4] 参数全等断言：mock quota 任一方法少参/多参/错型在此行编译失败
 export type QuotaDomainParamsExact = AssertExact<DomainParamsExact<QuotaDomain, typeof quotaImpl>>
 export const quota: QuotaDomain = quotaImpl
+
+/* ── Usage mock（[C3] usage.getStats seam 收编配套：settings 页用量统计全 seam 可用）── */
+// mock 无 session JSONL 扫描，返回小型 fixture（2 条日级用量行）让 UsagePage 演示链路完整；
+// real 轨扫真实会话聚合。
+const MOCK_USAGE_INPUT_TOKENS = 12_000
+const MOCK_USAGE_OUTPUT_TOKENS = 3_400
+const MOCK_USAGE_CACHE_READ_TOKENS = 8_000
+const MOCK_USAGE_CACHE_WRITE_TOKENS = 500
+const MOCK_USAGE_COST_USD = 0.42
+const MOCK_USAGE_MESSAGES = 26
+const MOCK_USAGE_SESSION_COUNT = 2
+const usageImpl = {
+  async getUsageStats(): Promise<UsageStatsResult> {
+    await sleep(TIMING.ack)
+    const metrics = {
+      input: MOCK_USAGE_INPUT_TOKENS,
+      output: MOCK_USAGE_OUTPUT_TOKENS,
+      cacheRead: MOCK_USAGE_CACHE_READ_TOKENS,
+      cacheWrite: MOCK_USAGE_CACHE_WRITE_TOKENS,
+      costUSD: MOCK_USAGE_COST_USD,
+      messages: MOCK_USAGE_MESSAGES,
+    }
+    return {
+      rows: [
+        { ...metrics, date: '2026-09-24', provider: 'anthropic', model: 'claude-sonnet-4.5', project: 'mock-project' },
+        { ...metrics, date: '2026-09-23', provider: 'compaction', model: 'compaction', project: 'mock-project' },
+      ],
+      scannedAt: Date.now(),
+      sessionCount: MOCK_USAGE_SESSION_COUNT,
+      skippedLines: 0,
+    }
+  },
+}
+
+// [G4] 参数全等断言：mock usage 任一方法少参/多参/错型在此行编译失败
+export type UsageDomainParamsExact = AssertExact<DomainParamsExact<UsageDomain, typeof usageImpl>>
+export const usage: UsageDomain = usageImpl
 
 const workspaceImpl = {
   async listRecent(): Promise<import('@taiji/shared').RecentWorkspaceRecord[]> {

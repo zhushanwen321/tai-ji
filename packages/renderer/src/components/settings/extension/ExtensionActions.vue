@@ -64,9 +64,10 @@ import { Trash2, Loader2, AlertCircle, ArrowUpCircle } from '@lucide/vue'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { extension as extensionApi } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import type { ExtensionItem } from '@taiji/core'
 import { getSettingsStore } from '@taiji/core'
+import { useOptimisticExtensionFlagToggle } from './extension-flag-toggle'
 import { useToast } from '@/composables/useToast'
 
 defineProps<{ ext: ExtensionItem }>()
@@ -75,16 +76,15 @@ const settingsStore = getSettingsStore()
 const { info: toastInfo } = useToast()
 const { t } = useI18n()
 
-/** 启用开关切换中（防双击：API 期间 disable Switch） */
-const toggling = ref<Set<string>>(new Set())
+// 启用开关的乐观切换（toggling 防双击 / error 就近错误面；编排与 ExtensionDetail 的
+// autoUpgrade 开关共用 extension-flag-toggle）
+const { toggling, error, toggleFlag } = useOptimisticExtensionFlagToggle()
 /** 升级中（按扩展名 key） */
 const upgrading = ref<Set<string>>(new Set())
 /** 卸载中 */
 const uninstalling = ref(false)
 /** 卸载确认目标（非空即打开弹窗） */
 const confirmTarget = ref('')
-/** 操作失败信息（就近显示在操作按钮下方） */
-const error = ref('')
 
 /** 卸载弹窗开关：派生自 confirmTarget（有目标即开），关闭时清空目标 */
 const uninstallDialogOpen = computed({
@@ -94,32 +94,16 @@ const uninstallDialogOpen = computed({
   },
 })
 
-/** 启用开关 → 乐观更新 store（开关即时滑动）+ extension.toggle 持久化。
- * 乐观：先改 store，UI 立即反应；失败回滚 store + 报错。
- * 广播回来时权威值覆盖 store（幂等：若值一致无副作用）。 */
+/** 启用开关 → 乐观更新 store（开关即时滑动）+ extension.toggle 持久化。 */
 async function onToggle(ext: ExtensionItem, enabled: boolean) {
-  if (toggling.value.has(ext.name)) return
-  error.value = ''
-  // 防双击
-  const next = new Set(toggling.value)
-  next.add(ext.name)
-  toggling.value = next
-  // 乐观：立即改 store
-  const old = settingsStore.setExtensionEnabled(ext.name, enabled)
-  try {
-    const reply = await extensionApi.toggle(ext.name, enabled)
+  await toggleFlag(ext.name, enabled, {
+    setFlag: (v) => settingsStore.setExtensionEnabled(ext.name, v),
+    persist: () => getSettingsTransport().toggleExtension(ext.name, enabled),
     // RPC reply 命中 pending 被 routeInbound 吞掉、不触发 onExtensions 全局订阅，
     // 故手动用 reply 的权威扫描结果刷新列表（替代不可靠的广播）。乐观值与权威值一致时幂等。
-    settingsStore.extensions.value = reply.extensions
-  } catch (e) {
-    // 回滚
-    settingsStore.setExtensionEnabled(ext.name, old)
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    const after = new Set(toggling.value)
-    after.delete(ext.name)
-    toggling.value = after
-  }
+    onSuccess: (reply) => { settingsStore.extensions.value = reply.extensions },
+    formatError: (e) => (e instanceof Error ? e.message : String(e)),
+  })
 }
 
 /** 卸载确认 → extension.uninstall（runtime 推 config.extensions 刷新列表） */
@@ -129,7 +113,7 @@ async function onConfirmUninstall() {
   uninstalling.value = true
   const name = confirmTarget.value
   try {
-    await extensionApi.uninstall(name)
+    await getSettingsTransport().uninstallExtension(name)
     confirmTarget.value = ''
     toastInfo(t('settings.extension.uninstalledToast'))
   } catch (e) {
@@ -148,7 +132,7 @@ async function onUpgrade(name: string) {
   next.add(name)
   upgrading.value = next
   try {
-    await extensionApi.upgrade(name)
+    await getSettingsTransport().upgradeExtension(name)
     toastInfo(t('settings.extension.upgradedToast'))
   } catch (e) {
     error.value = e instanceof Error

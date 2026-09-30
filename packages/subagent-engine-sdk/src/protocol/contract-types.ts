@@ -444,7 +444,7 @@ export interface AgentOutcome {
  * 协议面 = initialize 应答 models? 与 listModels 应答 models 的元素型；
  * manifest 解析与生成（gen:model-catalog）归 W4/W5 实装。
  */
-export interface ModelCatalogEntry {
+export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   id: string;
   aliases?: string[];
   canonicalRef?: string;

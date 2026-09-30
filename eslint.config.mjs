@@ -407,21 +407,11 @@ export default [
       'max-lines': 'off',
     },
   },
-  // [HISTORICAL] useProviderEdit 是 Provider 编辑弹窗的唯一 composable 工厂（同 chat.ts 性质），
-  // 承载 form/localModels/headerRows 状态 + test/discover/save 编排 + 模型/headers CRUD +
-  // compat 编辑器展开态 + isDirty 快照 + 过期刷新 watch。职责内聚但函数体超 300 行。
-  // 与 chat.ts setup 同理：唯一聚合中心，max-lines-per-function 规则不适用，override 避免误报。
-  // [HISTORICAL] arch-fix-v2 归位：useProviderEdit 迁至 packages/core/src/domain/settings/（M1a 新包），
-  // files 模式补新路径（旧 renderer 路径文件已删，仅保留作迁移记录）。
-  {
-    files: [
-      'packages/renderer/src/composables/features/useProviderEdit.ts',
-      'packages/core/src/domain/settings/use-provider-edit.ts',
-    ],
-    rules: {
-      'max-lines-per-function': 'off',
-    },
-  },
+  // [HISTORICAL] useProviderEdit 曾是 Provider 编辑的唯一 composable 工厂（779 行 / 31 成员），
+  // max-lines-per-function 豁免登记于此。[C4] 按裂缝拆为 provider-edit-{form,discover,models}
+  // 三 module + reconcile 纯核后，各文件函数体均在常规上限内，本豁免随之失效删除
+  //（旧 renderer 路径 packages/renderer/src/composables/features/useProviderEdit.ts 早已删除）。
+  //
   // [HISTORICAL] createChatStore 是 core 域 chat store 的唯一 setup 函数（自 renderer stores/chat.ts 迁入，
   // P3 chat 域绞杀 w4）。与 renderer chat.ts 同性质——唯一聚合中心，setup 天然是单一大函数，
   // max-lines-per-function 规则不适用（项目已裁定该场景为误报，对齐 renderer chat.ts 同款 override）。
@@ -811,12 +801,15 @@ export default [
   // provider-config-helper：provider 配置读改/清洗/凭据应用聚合中心。
   // 写侧防线载体（applyProviderWritePolicy）驻本文件，且后续单元（M2b 的 listProviders 迁移、M4 的 resolveCatalogDisplayFields 改造）
   // 仍会继续追加，故上限抬到 900（先例：download-asset.ts 抬到 1000）。
+  // [gate-suite 2026-09] setProvider 复杂度拆分（新建分支抽 provisionNewProvider，
+  // cyclomatic 16→11）净增 10 有效行（901→910），按 pi-provider-store「微超即提额，
+  // 保留软上限告警」先例抬到 920。
   // 沿用既有「sanitize* 校验组拆分是长期方向，短期 override 与 chat.ts 等聚合中心同模式」表述——
   // 长期仍应拆分（防线载体可拆独立模块）。
   {
     files: ['packages/runtime/src/services/provider-config-helper.ts'],
     rules: {
-      'max-lines': ['warn', { max: 900, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 920, skipBlankLines: true, skipComments: true }],
     },
   },
   // runtime 组合根 main()：装配顺序带文档化时序耦合（函数内注释逐段说明构造先后

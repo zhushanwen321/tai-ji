@@ -21,7 +21,10 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
-import { guardStaleCtx, oncePerProcess, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { oncePerProcess, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+// notify ledger host 装配工厂（五端口接线 + 送达 stale 防御的共享单点实现，
+// 与 session-manager notify-ledger.ts 同一装配机制收敛于此）
+import { createPiNotifyLedgerHost } from "@zhushanwen/pi-notify-ledger-host";
 // [W2/V4 D6] 恢复链注销直落消费的 protocol SSOT（customType + status 映射单点——
 // 与 finalizeRun 直落 / reconcile-sweep 补注销同一函数，零新增定义点）。
 import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
@@ -519,46 +522,15 @@ function appendSubagentIdentityEntry(pi: ExtensionAPI): void {
  * 返回 undefined。
  */
 export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext): NotifyLedgerHost | undefined {
-  const ledgerHost: NotifyLedgerHost = {
-    appendLedgerEntry: (customType, data) => {
-      pi.appendEntry(customType, data);
-    },
-    readSessionEntries: () => ctx.sessionManager.getEntries(),
-    isIdle: () => ctx.isIdle(),
-    onAgentSettled: (handler) => {
-      pi.on("agent_settled", handler);
-    },
-    sendDelivery: (message) => {
-      // D5 单通道：唯一发送形态 = sendCustomMessage({triggerTurn:true})，
-      // courier 已在发送前二次复查 isIdle，多通道投递选项已删（D5）。
-      // stale ctx 防御（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：
-      // sendDelivery 经 settled 边沿 / 看门狗 / 恢复重放异步触发——session 替换窗口
-      // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection（E1 同机制）。
-      // stale 静默降级（本条通知不投递，attemptDeliver 按已受理标 sentAt——session
-      // 替换后通知对旧 session 已无意义，与守卫前「留 pending 反复撞 stale 直到账本
-      // 重绑」终局一致），非 stale 错误原样上抛（attemptDeliver 既有 catch 走
-      // settleRejected 留账重试语义不变）。
-      guardStaleCtx(() => pi.sendMessage(message, { triggerTurn: true }), {
-        label: "subagent-workflow:sendDelivery",
-        onStale: (error) =>
-          logger.warn("notify delivery skipped (stale ctx)", {
-            error: toErrorMessage(error),
-          }),
-      });
-    },
-    // abandon 对会话补显形（T4③ 放弃终态）：不唤醒的 display 消息（无 triggerTurn），
-    // 让主 agent/用户在会话里看到「通知已放弃」线索。
-    // 与 sendDelivery（triggerTurn 唤醒）分工，通道不复用。
-    sendDisplayMessage: (message) => {
-      guardStaleCtx(() => pi.sendMessage(message), {
-        label: "subagent-workflow:sendDisplayMessage",
-        onStale: (error) =>
-          logger.warn("notify abandon display skipped (stale ctx)", {
-            error: toErrorMessage(error),
-          }),
-      });
-    },
-  };
+  // host 五端口接线 + 送达 stale 防御（D5 单通道 {triggerTurn:true} / stale 静默降级 /
+  // abandon 补显形 T4③）收敛在 @zhushanwen/pi-notify-ledger-host 工厂，权威注释随迁
+  // 工厂内；component/logger 参数保持本包 label 前缀与 warn 通道归因不变，
+  // sendDisplayMessage = 生产 bind 恒实现（NotifyLedgerHost 可选端口的本侧既有语义）。
+  const ledgerHost = createPiNotifyLedgerHost(pi, ctx, {
+    component: "subagent-workflow",
+    logger,
+    sendDisplayMessage: true,
+  });
   // bind 与 recover 拆独立 try（失败归因不同）：
   // - bind 失败：槽上无 ledger，消费方（getBoundNotifyLedger）退回内核直发路径；
   // - recover 失败：bind 已成功、槽上 ledger 仍在，消费方照常走账本路径（重启重放

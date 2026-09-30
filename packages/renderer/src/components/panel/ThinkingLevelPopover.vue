@@ -9,15 +9,13 @@
       <Button
         variant="ghost"
         class="h-7 gap-1 rounded-sm px-2 text-[11px] text-neutral-dim transition-colors hover:text-neutral-mid"
-        :class="props.iconOnly && 'px-1.5'"
-        :title="iconOnlyTitle"
+        :title="t('panel.thinkingLevel.title')"
       >
         <!-- U4：切换中（停止态切档要先 ensureActive 拉活）→ 转圈 + 禁止重复开合/点选 -->
         <LoaderCircle v-if="switching" class="size-3 shrink-0 animate-spin" />
         <Brain v-else class="size-3 shrink-0" />
-        <span v-if="!props.iconOnly">{{ currentLabel }}</span>
+        <span>{{ currentLabel }}</span>
         <ChevronDown
-          v-if="!props.iconOnly"
           class="ml-px size-[9px] transition-transform duration-[var(--duration)] ease-[var(--ease)]"
           :class="open && 'rotate-180'"
         />
@@ -60,15 +58,14 @@ import { Check, ChevronDown, LoaderCircle, Brain } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
-  THINKING_LEVELS,
-  normalizeSupportedLevels,
-  highestAvailableLevel,
+  currentThinkingLevelKey,
+  availableThinkingLevelOptions,
   resolveThinkingValue,
-  resolveThinkingKey,
   getDisplayLabel,
   type ThinkingLevelOption,
   type ThinkingLevel,
 } from './thinking-levels'
+import { useSwitchingGatedPopoverOpen } from './popover-open-gate'
 
 const emit = defineEmits<{
   /** 选中档位后，发给 runtime 的实际 level（经 thinkingLevelMap value 映射） */
@@ -95,51 +92,35 @@ const props = withDefaults(
      * 读条件由调用方判 sessionId 等值后传入（本组件不感知 session）。
      */
     switching?: boolean
-    /**
-     * 纯图标态（u6b fit L2 图标化）：只留 Brain 图标，档位名进 title（点击仍出档位 popover，
-     * 交互路径不丢）。
-     */
-    iconOnly?: boolean
+    // [HISTORICAL] `iconOnly` prop 已删（W3b）：图标态由 ModelThinkingAggregate（单图标聚合页）
+    // 承担，本组件触发器恒为「Brain + 档位名 + chevron」文本形态
  }>(),
   {
     level: undefined,
     levelMap: undefined,
     supportedLevels: undefined,
     switching: false,
-    iconOnly: false,
   },
 )
 
 const { t } = useI18n()
-const open = ref(false)
-// U4：切换中禁止开合（内联处理，避免侵入通用 popover 原语）
-const canOpen = computed({
-  get: () => open.value,
-  set: (v: boolean) => { open.value = props.switching ? false : v },
-})
+// U4：切换中禁止开合（门禁在 useSwitchingGatedPopoverOpen，与 ModelSelectPopover 共用）
+const { open, canOpen } = useSwitchingGatedPopoverOpen(() => props.switching)
 // prop level 是 runtime 返回的 value，反查 map 得到 UI 档位 key
 const level = ref<ThinkingLevel>(
-  props.level
-    ? resolveThinkingKey(props.level, props.levelMap, highestAvailableLevel(props.supportedLevels))
-    : 'max',
+  currentThinkingLevelKey(props.level, props.levelMap, props.supportedLevels),
 )
 watch(() => props.level, (v) => {
-  if (v) level.value = resolveThinkingKey(v, props.levelMap, highestAvailableLevel(props.supportedLevels))
+  if (v) level.value = currentThinkingLevelKey(v, props.levelMap, props.supportedLevels)
 })
 
 /** 当前模型的可用档位选项（只渲染可用的，不灰显不可用档位；可用集来自 supportedLevels 下发） */
-const availableOptions = computed<ThinkingLevelOption[]>(() => {
-  const available = new Set(normalizeSupportedLevels(props.supportedLevels))
-  return THINKING_LEVELS.filter((opt) => available.has(opt.level))
-})
+const availableOptions = computed<ThinkingLevelOption[]>(() =>
+  availableThinkingLevelOptions(props.supportedLevels),
+)
 
 const currentLabel = computed(
   () => props.level ? getDisplayLabel(level.value, props.levelMap, t) : t('panel.thinkingLevel.placeholder'),
-)
-
-/** 图标态 title：标题 + 当前档位（文本被图标取代，档位信息不能丢） */
-const iconOnlyTitle = computed(() =>
-  props.iconOnly ? `${t('panel.thinkingLevel.title')} · ${currentLabel.value}` : t('panel.thinkingLevel.title'),
 )
 
 function onSelect(opt: ThinkingLevelOption): void {

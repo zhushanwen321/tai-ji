@@ -15,6 +15,8 @@
  * 模块级状态重置：TC1-TC4 用 vi.resetModules() + 动态 import 重新加载 composable 模块，
  * 保证每个 it 拿到全新的 globalLoaded/globalInvalidateSubscribed/projectInvalidateSubscribed。
  * 现有 W4 用例（TC0 组）保持静态 import，不受模块级状态影响（其断言不依赖订阅守卫）。
+ * [C3] resetModules 同时重置 @taiji/core 的 transport 模块级单例——动态 import 组的 seam
+ * 注入经 provideSeam（同实例动态 import 后 provide）。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/composables/use-project-skills.test.ts
  */
@@ -22,17 +24,22 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { SkillInfo } from '@taiji/shared'
+import {
+  provideSettingsTransport,
+} from '@taiji/core'
+import { makeSettingsTransportStub, type SettingsTransportStubOverrides } from '../helpers/settings-transport-stub'
 
 // mock getProjectSkills RPC（W4：替代 scanSessionSkills）
-// onSkillCacheInvalidated 顶层 stub（Wave3 模块级订阅调用；W4 用例不验证订阅，stub 为空实现）。
+// onSkillCacheInvalidated stub（Wave3 失效信号订阅调用；W4 用例不验证订阅，stub 为空实现）。
 const getProjectSkillsMock = vi.hoisted(() => vi.fn())
 const onSkillCacheInvalidatedMock = vi.hoisted(() => vi.fn().mockReturnValue(() => {}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  config: {
-    getProjectSkills: getProjectSkillsMock,
-    onSkillCacheInvalidated: onSkillCacheInvalidatedMock,
-  },
-}))
+// [C3] 读 RPC 与失效信号订阅经 SettingsTransport seam 桩注入（替换原 @/api 门面 mock）
+
+/** resetModules 后 @taiji/core 是新模块实例（transport 单例重置）——从同实例 provide。 */
+async function provideSeam(overrides: SettingsTransportStubOverrides): Promise<void> {
+  const { provideSettingsTransport: provide } = await import('@taiji/core')
+  provide(makeSettingsTransportStub(overrides))
+}
 
 import { useProjectSkills } from '@/composables/features/settings/useProjectSkills'
 
@@ -46,6 +53,10 @@ const SKILLS_B: SkillInfo[] = [
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  provideSettingsTransport(makeSettingsTransportStub({
+    getProjectSkills: getProjectSkillsMock,
+    onSkillCacheInvalidated: onSkillCacheInvalidatedMock,
+  }))
 })
 
 describe('useProjectSkills (W4)', () => {
@@ -170,7 +181,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
    * 用途：
    * - 用 vi.fn 断言注册次数（守卫验证）
    * - emit(scope) 直接调对应 handler（绕开 events，隔离 project/global handler 各测各的）
-   * 关键：模块加载时顶层 project 订阅先注册（calls[0] scope=project），
+   * 关键：首次 useProjectSkills 实例化时 project 订阅先注册（calls[0] scope=project），
    * useGlobalSkills() 内 global 订阅后注册（calls[1] scope=global）。两者各自带 scope 守卫。
    */
   function makeInvalidateMock() {
@@ -197,7 +208,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
   it('TC1: useGlobalSkills RPC 失败不置 globalLoaded（修复永久失败 bug，可重试）', async () => {
     const getGlobalSkills = vi.fn().mockRejectedValue(new Error('network'))
     const inv = makeInvalidateMock()
-    vi.doMock('@/api', () => ({ config: { getGlobalSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated } }))
+    await provideSeam({ getGlobalSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated })
 
     const { useGlobalSkills } = await import('@/composables/features/settings/useProjectSkills')
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -220,7 +231,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
   it('TC2: useGlobalSkills 订阅 global scope 失效信号触发 force 重拉', async () => {
     const getGlobalSkills = vi.fn().mockResolvedValue(SKILL_1)
     const inv = makeInvalidateMock()
-    vi.doMock('@/api', () => ({ config: { getGlobalSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated } }))
+    await provideSeam({ getGlobalSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated })
 
     const { useGlobalSkills } = await import('@/composables/features/settings/useProjectSkills')
     const { globalSkills } = useGlobalSkills()
@@ -243,7 +254,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
   it('TC2-B1: Composer 重挂后失效信号仍刷新活跃实例（globalSkills 模块级共享 ref）', async () => {
     const getGlobalSkills = vi.fn().mockResolvedValue(SKILL_1)
     const inv = makeInvalidateMock()
-    vi.doMock('@/api', () => ({ config: { getGlobalSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated } }))
+    await provideSeam({ getGlobalSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated })
 
     const { useGlobalSkills } = await import('@/composables/features/settings/useProjectSkills')
     // 第一次挂载（模拟首个 Composer 实例）
@@ -268,7 +279,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
   it('TC3: useProjectSkills 订阅 project scope 失效信号清缓存重拉（版本号机制）', async () => {
     const getProjectSkills = vi.fn().mockResolvedValue(SKILL_A)
     const inv = makeInvalidateMock()
-    vi.doMock('@/api', () => ({ config: { getProjectSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated } }))
+    await provideSeam({ getProjectSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated })
 
     const { useProjectSkills } = await import('@/composables/features/settings/useProjectSkills')
     const cwd = ref<string | null>('/proj1')
@@ -288,14 +299,14 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
   it('TC4: 多实例 useProjectSkills 共享一份模块级订阅', async () => {
     const getProjectSkills = vi.fn().mockResolvedValue(SKILL_A)
     const inv = makeInvalidateMock()
-    vi.doMock('@/api', () => ({ config: { getProjectSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated } }))
+    await provideSeam({ getProjectSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated })
 
     const { useProjectSkills } = await import('@/composables/features/settings/useProjectSkills')
     // 两次实例化（模拟多个 Composer 实例）
     useProjectSkills(ref('/a'))
     useProjectSkills(ref('/b'))
 
-    // 关键断言：project 模块级订阅只挂一次（projectInvalidateSubscribed 守卫，模块加载时挂载）。
+    // 关键断言：project 模块级订阅只挂一次（projectInvalidateSubscribed 守卫，[C3] 首次实例化时挂载）。
     // 注意：onSkillCacheInvalidated 总调用次数 = 1（仅 project 顶层订阅）；useGlobalSkills 未调用，无 global 订阅。
     expect(inv.onSkillCacheInvalidated).toHaveBeenCalledTimes(1)
 

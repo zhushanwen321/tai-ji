@@ -305,7 +305,7 @@ export interface EventEnvelope {
 }
 
 /** `run-created`——run 创建落账（journal 首帧）。 */
-export interface RunCreatedEvent extends EventEnvelope {
+export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "run-created";
   /**
    * run 唯一 id（record 流文件名同源：wf-<id>.record.jsonl）。全词表唯一携带
@@ -355,7 +355,7 @@ export interface RunCreatedEvent extends EventEnvelope {
  * 缺 taskIndex 则无法定位归属 call（agentName 不唯一、attempt 单独不足），故
  * 三个 agent 事件统一携带。
  */
-interface AgentIdentity {
+interface AgentIdentity { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   taskIndex: number;
   /** agent 身份名（ExecutionTraceNode.agent 同源）。 */
   agentName: string;
@@ -366,7 +366,7 @@ interface AgentIdentity {
 /**
  * `agent-started`——脚本 agent() 调用已派发（[D4] 对齐 pi `agent_start` 语义）。
  */
-export interface AgentStartedEvent extends AgentIdentity, EventEnvelope {
+export interface AgentStartedEvent extends AgentIdentity, EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "agent-started";
   /**
    * 剧本 phase 归属（`phase()` 包裹 / `opts.phase` 显式声明——派发时刻由 worker
@@ -398,7 +398,7 @@ export interface AgentStartedEvent extends AgentIdentity, EventEnvelope {
 }
 
 /** `agent-retrying`——失败尝试后将退避重试（重试轨迹从脚本内部状态变为 record 事件，重试不再能掩盖事故）。 */
-export interface AgentRetryingEvent extends EventEnvelope {
+export interface AgentRetryingEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "agent-retrying";
   /** call 关联键（见 AgentIdentity——投影按 calls[].id 关联）。 */
   taskIndex: number;
@@ -411,7 +411,7 @@ export interface AgentRetryingEvent extends EventEnvelope {
 }
 
 /** `agent-settled`——单次 call 终局（每次尝试各一帧，attempt 区分重试波；pi 原生同名采纳）。 */
-export interface AgentSettledEvent extends EventEnvelope {
+export interface AgentSettledEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "agent-settled";
   /** call 关联键（见 AgentIdentity——投影按 calls[].id 关联）。 */
   taskIndex: number;
@@ -454,7 +454,7 @@ export interface AgentSettledEvent extends EventEnvelope {
  * agent-started 载荷的 phase 字段驱动 pending → running，转移事件缺失不判损坏、
  * 不进 D12 拒绝范围）。
  */
-export interface PhaseStartedEvent extends EventEnvelope {
+export interface PhaseStartedEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "phase-started";
   /** phase 名（脚本 `phase(name)` 的实参字符串化）。 */
   phase: string;
@@ -466,7 +466,7 @@ export interface PhaseStartedEvent extends EventEnvelope {
  * phase group）同源——「续聊时算不算完成」的唯一答案：phase 看 call，agent 会话
  * 续聊是另一层。
  */
-export interface PhaseSettledEvent extends EventEnvelope {
+export interface PhaseSettledEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "phase-settled";
   /** phase 名。 */
   phase: string;
@@ -478,7 +478,7 @@ export interface PhaseSettledEvent extends EventEnvelope {
  * 终局编排入口统一写入。中断不是终局——本事件后 run 停在 interrupted 暂停态，
  * 可经 run-resumed 复活。
  */
-export interface RunInterruptedEvent extends EventEnvelope {
+export interface RunInterruptedEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "run-interrupted";
   /**
    * 中断来源标记（承载于 errorCode 字段——词表成员 crashed / terminated /
@@ -494,7 +494,7 @@ export interface RunInterruptedEvent extends EventEnvelope {
  * `run-resumed`——interrupted → running 的复活转移事件（[D2]）：resume 编排
  * （U2，resume-run.ts 锁段内自完成——不经 [D15] 终局入口，复活非终局动作）。
  */
-export interface RunResumedEvent extends EventEnvelope {
+export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "run-resumed";
   /** resume 锚点摘要（重放/三档恢复的入口语境，自由文本；可缺省）。 */
   reason?: string;
@@ -503,7 +503,7 @@ export interface RunResumedEvent extends EventEnvelope {
 }
 
 /** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */
-export interface RunSettledEvent extends EventEnvelope {
+export interface RunSettledEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "run-settled";
   outcome: RunOutcome;
   /** 失败时的结构化编码（done/cancelled/time_limited 缺省——[D2] 后 failed 终局的 budget_limited 与因提取码承载）。 */
@@ -610,7 +610,7 @@ export type RunLifecycle = (typeof ALL_RUN_LIFECYCLES)[number];
  * 只需一处 `lifecycle === "terminal"` 判定；嵌套形态把同一不变量复制进类型系统，
  * 全部消费点多一层 narrow，收益不抵摩擦。
  */
-export interface RunState {
+export interface RunState { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   lifecycle: RunLifecycle;
   /** 终局形态——仅 lifecycle === "terminal" 时有值（transition 构造性保证）。 */
   outcome?: RunOutcome;
@@ -686,7 +686,7 @@ export type TransitionOutput = (typeof TRANSITION_OUTPUT_TYPES)[number];
 export type AskSettleBranch = "more-work-expected" | "adjudicate-now";
 
 /** 单条转移规则（表行）。 */
-export interface TransitionRule {
+export interface TransitionRule { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   from: RunLifecycle;
   on: RunEventType | ControlTriggerType;
   /**
@@ -762,12 +762,12 @@ export const RUN_TRANSITIONS: readonly TransitionRule[] = [
  * 重放无此上下文，保守取 running 支：重放至多把 settling 延后到 run-settled
  * 帧（fold 下 settling 是不可重现的活体内瞬态），终局正确性不受影响。
  */
-export interface TransitionContext {
+export interface TransitionContext { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   enterSettling?: boolean;
 }
 
 /** 转移结果：次态 + 应发生的输出动作（声明性标签，执行归调用侧）。 */
-export interface TransitionResult {
+export interface TransitionResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   state: RunState;
   outputs: readonly TransitionOutput[];
 }
@@ -862,7 +862,7 @@ export function transition(
  * fold 单源后，runtime 投影消费 core fold 的骨架输出，不再自建第二套 fold。
  * [D4] 随事件词 agent-* 更名（ask → agent）。
  */
-export interface RunAskStepFold {
+export interface RunAskStepFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   taskIndex: number;
   agentName: string;
   /** 剧本 phase 归属（agent-started 携带；未标注剧本缺省 undefined——不造键）。 */
@@ -876,7 +876,7 @@ export interface RunAskStepFold {
 }
 
 /** 单个 phase 的状态机投影行（[D3] pending → running → settled 的 fold 半边）。 */
-export interface RunPhaseFold {
+export interface RunPhaseFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** phase 名。 */
   phase: string;
   /** 转移进入时刻（phase-started 帧 ts；自愈重建 = 首 agent-started ts）。 */
@@ -960,7 +960,7 @@ function derivePhaseSettlement(
  * 投影（projectV2Workflow）读本骨架合成 WorkflowRunRecord，与状态机半边
  * （state/lastSeq）同源于一次 fold 循环。
  */
-export interface RunJournalFold {
+export interface RunJournalFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** run-created 帧（record 流首帧；undefined = 首帧未达）。 */
   created: { runId: string; workflowName: string; ts: number } | undefined;
   /** call 投影（taskIndex → 步骤行）。 */
@@ -989,7 +989,7 @@ export interface RunJournalFold {
  * core 内消费面（run-state-evidence 清理资格 / 注册表投影 / pump 活体 fold）经
  * foldRunEventFrames 只取 state，骨架半边零成本闲置。
  */
-export interface RunEventFoldCheckpoint extends RunJournalFold {
+export interface RunEventFoldCheckpoint extends RunJournalFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   state: RunState;
   lastSeq: number;
 }

@@ -15,76 +15,27 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
+import { defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { textToSegments } from '@taiji/shared'
 import type { ProviderInfo } from '@taiji/shared'
 import { getSettingsStore } from '@taiji/core'
+import '../helpers/composer-shell-mount'
+import { composerApiModule, composerChildStubs, makeKeyboardComposerInputMock } from '../helpers/composer-mount'
 
-// ── mock useChat / useNewTaskFlow / api（fork-mode 范式） ──
-const chatApiMock = {
-  send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-}
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => chatApiMock,
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn() }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn() },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-}))
+// ── 壳 mock（useChat / useNewTaskFlow / stores/session）：import composer-shell-mount 即
+//    注册；本文件无 useChat spy 断言，'@/api' 注册留文件内 ──
+vi.mock('@/api', () => composerApiModule())
 vi.mock('@/composables/features/settings/useProjectSkills', () => ({
   useProjectSkills: () => ({ projectSkills: [] }),
   useGlobalSkills: () => ({ globalSkills: [] }),
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
 }))
 vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ forkSessionAsk: vi.fn(), forkSession: vi.fn() }),
 }))
 
-// ── ComposerInput mock（fork-mode 范式：defineExpose 最小集）──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  props: {
-    placeholder: { type: String, default: '' },
-    disabled: { type: Boolean, default: false },
-  },
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    expose({
-      clear: vi.fn(),
-      setText: vi.fn(),
-      insertSlashChip: vi.fn(),
-      getSegments: () => textToSegments(lastInputText.value),
-      getText: () => lastInputText.value,
-      moveCaretVertical: () => 'edge',
-    })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
+// ── ComposerInput mock：键盘交互变体（placeholder props + 全 expose 面含
+//    getText/moveCaretVertical；单源 helpers/composer-mount.ts）──
+const { lastInputText, ComposerInputMock } = makeKeyboardComposerInputMock()
 
 // ── ThinkingLevelPopover 透传探针：把 supportedLevels/level 派生落到 DOM 属性 ──
 const ThinkingLevelProbe = defineComponent({
@@ -98,17 +49,11 @@ const ThinkingLevelProbe = defineComponent({
     '<div data-testid="tlp-probe" :data-supported="supportedLevels === undefined ? \'undef\' : supportedLevels.join(\',\')" :data-level="level" />',
 })
 
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
+// ThinkingLevelPopover 用透传探针顶替默认空 stub（探针在后覆盖 spread 默认值）
 const otherStubs = {
+  ...composerChildStubs,
   ComposerInput: ComposerInputMock,
   ThinkingLevelPopover: ThinkingLevelProbe,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
 }
 
 import Composer from '@/components/panel/Composer.vue'

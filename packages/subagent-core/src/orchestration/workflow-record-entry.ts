@@ -65,7 +65,7 @@ export type WorkflowRecordEntryKind = (typeof WORKFLOW_RECORD_ENTRY_KINDS)[numbe
  * run 创建时写一条：身份 + journal 锚点。journalPath 是 session-reader workflow
  * 发现链的主源数据基础（v2 注册条目是 run 步骤级详情读面的唯一发现锚点）。
  */
-export interface WorkflowRecordRegisteredEntryData {
+export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
   kind: "registered";
   runId: string;
@@ -94,7 +94,7 @@ export interface WorkflowRecordRegisteredEntryData {
  * 现状收编补写 settled 条目的行为随 D2 终止）：终局 + 摘要。字段与
  * run-settled record 帧同源（条目是 record 的投影锚，不是第二事实源）。
  */
-export interface WorkflowRecordSettledEntryData {
+export interface WorkflowRecordSettledEntryData { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
   kind: "settled";
   runId: string;

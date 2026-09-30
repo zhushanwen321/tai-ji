@@ -9,7 +9,9 @@
  *
  * mock 策略：
  *  - vue-i18n 全局 mock（vitest-i18n-setup.ts，t() 从 zh-CN 取值）
- *  - USE_QUOTA_CONFIGURE_KEY provide 真实 useQuotaConfigure（'@taiji/core/transport/api/domains/quota' mock）
+ *  - provideSettingsTransport 注入 spy transport（save 路径断言）
+ *  - QUOTA_CONFIGURE_FACTORY_KEY provide 真实 useQuotaConfigure（'@taiji/core/transport/api/domains/quota' mock）
+ *  - Dialog（形态切换确认）teleport 到 body：attachTo + document.body 查询（对齐 provider-builtin-ui 模式）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -19,20 +21,26 @@ import {
   providePlatform,
   provideSettingsTransport,
   __resetPlatformForTesting,
-  __resetSettingsStoreForTesting,
-  __resetSettingsTransportForTesting,
   type SettingsTransport,
+  type Translate,
+  type QuotaConfigureFactoryInputs,
+  provideSettingsStore,
+  createSettingsStore,
 } from '@taiji/core'
 import {
   ProviderEditBody,
   SETTINGS_TOAST_KEY,
-  USE_QUOTA_CONFIGURE_KEY,
+  QUOTA_CONFIGURE_FACTORY_KEY,
 } from '@taiji/ui/features/settings'
-import { useQuotaConfigure } from '@/composables/features/model/useQuotaConfigure'
+import { useQuotaConfigure } from '@/composables/features/settings/useQuotaConfigure'
 import { useToast } from '@/composables/useToast'
+import i18n from '@/i18n'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { inMemoryStorage } from '../helpers/platform-storage-stub'
 
-// useQuotaConfigure 直连 quota domain（原实现如此，非绕门面场景），mock 其 RPC 面
+// [C3] useQuotaConfigure 经 SettingsTransport seam 消费 quota RPC——本域模块 mock 作为 seam 桩
+// 函数源（getCachedQuota / configureQuota / refreshQuota 逐名映射，见 makeTransport）。
 vi.mock('@taiji/core/transport/api/domains/quota', () => ({
   getCached: vi.fn(async () => ({ data: null, lastFetchAt: null })),
   fetchQuota: vi.fn(async () => ({ data: null, lastFetchAt: null })),
@@ -70,50 +78,42 @@ const ZHIPU_READY_P: ProviderInfo = {
   quota: { fetcher: 'zhipu', enabled: true },
 }
 
+/** api-key 类但 provider 侧无凭据：matchQuotaPreset 命中 zhipu → 凭证警示区可见（§7.4 两套文案） */
+const ZHIPU_NO_KEY_P: ProviderInfo = {
+  id: 'zhipu-nokey',
+  name: 'Zhipu GLM',
+  api: 'openai-completions',
+  apiKeySet: false,
+  authMethod: 'api_key',
+  status: 'connected',
+  kind: 'catalog',
+  baseUrl: 'https://open.bigmodel.cn/api',
+  models: [{ id: 'glm-4', name: 'GLM-4.6', source: 'builtin' }],
+  quota: { fetcher: 'zhipu', enabled: true },
+}
+
 // ── transport stub（save 路径 spy）──
 
 const setProviderSpy = vi.fn(async () => undefined)
 
+/** [C3] 共享 seam 桩工厂（全方法面中性默认）+ 本文件 spy/映射（保存 spy + quota RPC）。 */
 function makeTransport(): SettingsTransport {
-  const noop = (): void => {}
-  return {
-    listProviders: vi.fn(async () => ({ providers: [] })),
-    listModels: vi.fn(async () => []),
+  return makeSettingsTransportStub({
     setProvider: setProviderSpy,
-    discoverModels: vi.fn(async () => ({ success: true, models: [] })),
-    setSkillDirs: vi.fn(async () => undefined),
-    setAgentDirs: vi.fn(async () => undefined),
-    setExtensionDirs: vi.fn(async () => undefined),
-    onProviders: () => noop,
-    onModels: () => noop,
-    onSkills: () => noop,
-    onAgents: () => noop,
-    onExtensions: () => noop,
-    onSkillDirs: () => noop,
-    onAgentDirs: () => noop,
-    onExtensionDirs: () => noop,
-    onDefaults: () => noop,
-    onSystemPrompt: () => noop,
-    onTerminalConfig: () => noop,
-  }
+    getCachedQuota: quotaApi.getCached,
+    refreshQuota: quotaApi.refreshQuota,
+    configureQuota: quotaApi.configure,
+  })
 }
 
-function inMemoryStorage() {
-  const map = new Map<string, string>()
-  return {
-    get: async (k: string) => map.get(k) ?? null,
-    set: async (k: string, v: string) => { map.set(k, v) },
-    remove: async (k: string) => { map.delete(k) },
-  }
-}
+// in-memory KVStorage 桩单源在 helpers/platform-storage-stub（providePlatform storage 形状）
 
 let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetPlatformForTesting()
-  __resetSettingsStoreForTesting()
-  __resetSettingsTransportForTesting()
+  provideSettingsStore(createSettingsStore())
   providePlatform({
     kind: 'mock',
     storage: inMemoryStorage(),
@@ -141,7 +141,9 @@ function mountBody(provider: ProviderInfo, props: Record<string, unknown> = {}):
     global: {
       provide: {
         [SETTINGS_TOAST_KEY]: useToast(),
-        [USE_QUOTA_CONFIGURE_KEY]: useQuotaConfigure,
+        // 壳层同款包装：业务输入归 ProviderEditBody 物化点，t 由包装函数注入
+        [QUOTA_CONFIGURE_FACTORY_KEY]: (inputs: QuotaConfigureFactoryInputs) =>
+          useQuotaConfigure({ ...inputs, t: i18n.global.t as Translate }),
       },
     },
   })
@@ -258,5 +260,29 @@ describe('契约 v2 接线：readiness / setEnabled / saveAndTest（真实 compo
     const payload = configureSpy.mock.calls[0]![0] as Record<string, unknown>
     expect(payload.credentialSource).toBe('exclusive')
     expect(payload.apiKey).toBe('sk-exclusive-draft')
+  })
+
+  it('§7.4 跨区块时序：provider 表单填 API Key（未保存）→ 警示从「还没有」切「已填写，保存后即可查询」', async () => {
+    wrapper = mountBody(ZHIPU_NO_KEY_P)
+    await flushPromises()
+
+    // 首屏：来源=provider 且 provider 侧无凭据 → 「还没有可用的 API Key」警示 + 按钮置灰
+    const warn = () => wrapper!.find('[data-testid="quota-provider-credential-warning"]')
+    expect(warn().exists()).toBe(true)
+    expect(warn().text()).toContain('还没有可用的 API Key')
+    expect(saveDisabled()).toBe(true)
+
+    // 表单里填 Key（尚未保存 provider）→ carry-in 槽位（providerApiKeyDraft）驱动文案切换：
+    // 用户可见差异 =「按钮灰但屏幕上明明填了 Key」的矛盾消除（指引先保存 provider）
+    await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('sk-draft-key')
+    await flushPromises()
+    expect(warn().text()).toContain('已填写 API Key，保存 provider 配置后即可查询')
+    expect(warn().text()).not.toContain('还没有可用的 API Key')
+    expect(saveDisabled()).toBe(true) // runtime 仍读不到（provider 未保存），齐备性不变
+
+    // 草稿清空（删除已输入内容）→ 文案退回「还没有」
+    await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('')
+    await flushPromises()
+    expect(warn().text()).toContain('还没有可用的 API Key')
   })
 })

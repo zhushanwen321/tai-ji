@@ -176,7 +176,7 @@ export function makeDeps(runner: AgentRunner): LauncherDeps {
  * 字段与原 runAndWait 返回的 WorkflowRunResult 测试消费子集同构——reason/error/
  * scriptResult/runId，既有断言零改动）。
  */
-export interface WorkflowRunOutcome {
+export interface WorkflowRunOutcome { // oe-exempt:20260929:framework:测试 fixture 契约类型（mock 桩/断言视图）——dev-0.10.5 已验收代码 merge 带入
   /** 终态原因（completed/failed/…，经 runSummary 投影——活体终局源 = 终局记录注册表）。 */
   reason: string;
   /** 失败/中止原因（state.error）。 */

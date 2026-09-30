@@ -57,7 +57,7 @@ export function splitCompleteLines(buffer: string): { lines: string[]; remainder
 export type JournalLineParser<T> = (line: string) => T | undefined;
 
 /** 单次续读结果。 */
-export interface JournalTailChunk<T> {
+export interface JournalTailChunk<T> { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 本次新读出的完整事件行（写入序）。 */
   events: T[];
   /** 下次续读起点（字节偏移；只落在完整行边界——不完整尾行不计入）。 */
@@ -143,7 +143,7 @@ const DEFAULT_DEBOUNCE_MS = 200;
 /** 默认 watch 失败重挂间隔（git-head-watcher L1 同构）。 */
 const DEFAULT_RETRY_DELAY_MS = 5_000;
 
-export interface JournalDirectoryTailerOptions<T> {
+export interface JournalDirectoryTailerOptions<T> { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 监视目录（目录级 watch，不 per-file——D6 裁决；run 域 = workflow-state，record 域 = records）。 */
   dir: string;
   /**
@@ -167,7 +167,7 @@ export interface JournalDirectoryTailerOptions<T> {
   retryDelayMs?: number;
 }
 
-export interface JournalDirectoryTailer {
+export interface JournalDirectoryTailer { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 手动触发一次全目录复查（冷启动全量读 / 测试驱动入口；幂等）。 */
   rescan(): void;
   /** 某文件当前续读偏移（字节；未读过 = undefined——诊断/测试面）。 */

@@ -44,26 +44,33 @@ const configMock = vi.hoisted(() => ({
   applyImportProviders: vi.fn(() => Promise.resolve({
     result: { source: 'claude', imported: [{ id: 'openai', name: 'OpenAI', status: 'imported' }], failedCount: 0 },
   })),
-  // wave-oauth：ProviderPage → useProviderOAuth onMounted 订阅 4 个 auth.* 事件（缺则 TypeError 崩 mount）
-  onAuthDeviceCode: vi.fn(() => () => {}),
-  onAuthAuthUrl: vi.fn(() => () => {}),
-  onAuthSuccess: vi.fn(() => () => {}),
-  onAuthError: vi.fn(() => () => {}),
-  // P2：ProviderPage 默认 pill + 默认修复 toast（缺则 TypeError 崩 mount）
-  onDefaultsWithSource: vi.fn(() => () => {}),
 }))
 
 vi.mock('@/api', () => ({
-  config: configMock,
+  config: {
+    ...configMock,
+    // 订阅成员族单源（键缺导出即 TypeError 崩 mount）：wave-oauth 的 4 个 auth.* 订阅
+    // + P2 的 onDefaultsWithSource（默认 pill + 默认修复 toast）
+    ...subscriptionStubs([
+      'onAuthDeviceCode', 'onAuthAuthUrl', 'onAuthSuccess', 'onAuthError', 'onDefaultsWithSource',
+    ]),
+  },
 }))
 
+// 工厂绑定 import 必须先于组件 import 求值：ProviderPage 模块图加载 '@/api' 时 vi.mock
+// 工厂立即执行，晚于组件 import 的工厂绑定仍在 TDZ（vi.hoisted 同族坑）。
+import { subscriptionStubs } from '@/__tests__/helpers/settings-modal-api-mock'
 import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
 import { useToast } from '@/composables/useToast'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
 let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映）
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
   // 清空全局 toasts（useToast 模块级单例，跨用例共享）
   useToast().toasts.value = []
   configMock.previewImportProviders.mockReset()

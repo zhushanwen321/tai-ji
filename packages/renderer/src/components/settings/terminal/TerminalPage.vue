@@ -1,7 +1,7 @@
 <!--
   Settings · Terminal 菜单页（Phase 6）。
   单卡片表单：shell / shellArgs / fontSize / fontFamily / scrollback / cursorStyle / bell。
-  数据层：config.getTerminalConfig / setTerminalConfig（整体保存为显式按钮触发，不自动保存，
+  数据层：SettingsTransport seam 的 getTerminalConfig / setTerminalConfig（整体保存为显式按钮触发，不自动保存，
   失败走 toast error，成功走 toast info）。
   shellArgs 以逗号分隔输入，存储为 string[]。
 -->
@@ -147,7 +147,7 @@
             data-testid="terminal-save"
             size="dense"
             :disabled="saving"
-            @click="save"
+            @click="saveConfig.run()"
           >
             {{ t('settings.terminal.save') }}
           </Button>
@@ -167,12 +167,13 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GroupCard } from '@taiji/ui/features/settings'
-import { config } from '@/api'
+import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
+import { createExplicitSave } from '@/composables/features/settings/setting-field'
 import type { TerminalConfig } from '@taiji/shared'
 
 const { t } = useI18n()
-const { info, error } = useToast()
+const { error } = useToast()
 
 /** 当前加载的配置（getTerminalConfig 返回）。corrupted=true 表示磁盘损坏已回退默认。 */
 const corrupted = ref(false)
@@ -186,9 +187,13 @@ const scrollback = ref(1000)
 const cursorStyle = ref<TerminalConfig['cursorStyle']>('block')
 const bell = ref(false)
 
-/** 保存 in-flight 标志（RD-4#7）：整体保存为显式按钮触发，65s 窗口内防重复点击
- *  （并发覆盖同一 config + 双 toast）。 */
-const saving = ref(false)
+// 保存动作（setting-field module · createExplicitSave）：整体保存为显式按钮触发，唯一 saving
+// 窗口（RD-4#7，65s 窗口内防重复点击并发覆盖 + 双 toast）。失败 toast = e.message 原文 error。
+const saveConfig = createExplicitSave({
+  run: () => getSettingsTransport().setTerminalConfig(buildConfig()).then(() => undefined),
+  savedToastKey: 'settings.terminal.savedToast',
+})
+const saving = saveConfig.saving
 
 /** 从本地编辑态组装 TerminalConfig。shellArgs 由逗号分隔串转为 string[]。 */
 function buildConfig(): TerminalConfig {
@@ -210,7 +215,7 @@ function buildConfig(): TerminalConfig {
 /** 加载终端配置到本地编辑态。shellArgs 由 string[] 转为逗号分隔串便于编辑。 */
 async function loadConfig(): Promise<void> {
   try {
-    const res = await config.getTerminalConfig()
+    const res = await getSettingsTransport().getTerminalConfig()
     corrupted.value = res.corrupted
     shell.value = res.config.shell
     shellArgsInput.value = res.config.shellArgs.join(',')
@@ -221,20 +226,6 @@ async function loadConfig(): Promise<void> {
     bell.value = res.config.bell
   } catch (e) {
     error(e instanceof Error ? e.message : String(e))
-  }
-}
-
-/** 整体保存终端配置。 */
-async function save(): Promise<void> {
-  if (saving.value) return
-  saving.value = true
-  try {
-    await config.setTerminalConfig(buildConfig())
-    info(t('settings.terminal.savedToast'))
-  } catch (e) {
-    error(e instanceof Error ? e.message : String(e))
-  } finally {
-    saving.value = false
   }
 }
 

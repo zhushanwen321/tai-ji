@@ -1157,5 +1157,91 @@
       "note": "消费方：packages/subagent-core/src/orchestration/resume-run.ts extractAssistantTextContent JSDoc（带锚点行号）。漂移形态 = pi 改 content 块词表（新增块类型/更名 text 块）时提取口径漏收新正文形态——档 1 判档退化为档 2 重派（多花一次生成，功能不阻断）。pi 升级重验：比对 types.d.ts 三 Message 接口的 content 联合类型是否仍为上述形态"
     },
     "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-57",
+    "claim": "pi RPC 模式 stdout JSONL 消息按写入顺序到达（FIFO）：全部协议消息（response / 事件 / extension_ui_request）汇经 rpc-mode 的 output 单点 writeRawStdout(serializeJsonLine(obj))，事件流经 session.subscribe 回调逐条 output；writeRawStdout 以 promise tail 链串行化（rawStdoutWriteTail = rawStdoutWriteTail.then(() => writeRawStdoutChunk(text))），底层 write 的异步回调与背压重试（ENOBUFS/EAGAIN/EWOULDBLOCK → 10ms 延迟重试）都在 tail 链上排队——写序 = 调用序，不并行不乱序。承重（ADR-0087 通知兑现链）：delivery 内核 onSettled 受理回执（port.send 同栈同步触发）先于其后的 agent_settled 事件被 runtime 处理——armed→injected 锚定与 settled 兑现的先后关系以 stdout FIFO 为前提。pi 升级时重验：output 是否仍单点汇入 writeRawStdout、tail 链是否仍串行化（改并行/分通道输出即失锚）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/modes/rpc/rpc-mode.js",
+        "symbol": "output 单点 / session.subscribe 事件转发",
+        "note": ":28-30 output = (obj) => writeRawStdout(serializeJsonLine(obj))（全部协议消息唯一出口）；:265-267 session.subscribe((event) => output(toJsonEvent(event)))（agent 事件含 agent_settled 经同一单点）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/output-guard.js",
+        "symbol": "writeRawStdout tail 链",
+        "note": ":67-75（:71 rawStdoutWriteTail = rawStdoutWriteTail.then(() => writeRawStdoutChunk(text)) 串行化）；:10-37 writeRawStdoutChunk 背压重试（ENOBUFS/EAGAIN/EWOULDBLOCK → 10ms 重试，重试在 tail 链回调内不改写序）"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-stdout-fifo.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-58",
+    "claim": "steer 投递在 pi busy 窗口不拒绝、随 run 循环级联排空：prompt() 在 isStreaming 且 streamingBehavior='steer' 时走 _queueSteer 原样 agent.steer 入 steeringQueue（不 throw——第二拒绝分支仅覆盖未传 streamingBehavior，见 PS-23）；runAgentLoop 在 run 起始、preparation（compaction 等长操作）后补查、每轮结束后三处 poll config.getSteeringMessages（= steeringQueue.drain()，drain 点计数见 PS-05），drain 到的 pending 消息在下一轮 assistant 响应前注入当前 run（emit message_start/message_end + push currentContext.messages/newMessages）。承重（ADR-0087 兑现锚）：delivery 内核 steer 投递命中 busy 窗口时消息不悬空——只要 pi run 尚存续必被当前 run 消费并产出轮次，agent_settled 仍会到达，injected→settled 兑现链不因入队延迟断裂；反面（run 收尾后入队的 steer 无 drain 点、at-most-once）由 PS-05 登记、session-delivery 账本通道规避，两登记互补。pi 升级时重验：poll 点数量（减少 = busy 窗口 steer 悬挂风险上升）与注入块形态",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "prompt(text, options) 的 isStreaming steer 分支 / _queueSteer",
+        "note": ":860-872 —— :861-863 无 streamingBehavior 才 throw（PS-23 分支），:864-866 followUp 分流，:868 await this._queueSteer(…)（steer 入队不拒绝）；:1046-1058 _queueSteer 体（:1053 this.agent.steer({role:'user',…}) 原样入队）"
+      },
+      {
+        "pkg": "pi-agent-core",
+        "distPath": "dist/agent-loop.js",
+        "symbol": "runAgentLoop steering poll ×3 + 注入块",
+        "note": ":82-83 run 起始 poll / :103-108 preparation 后补 poll（仅当先 poll 为空）/ :158 每轮尾再 poll；:112-119 注入块 emit message_start/message_end + currentContext.messages.push(message) + newMessages.push（drain 消息进入当前 run 处理）"
+      },
+      {
+        "pkg": "pi-agent-core",
+        "distPath": "dist/agent.js",
+        "symbol": "getSteeringMessages = steeringQueue.drain()",
+        "note": ":316-321（PS-26 同锚）——poll 到 drain 的通路无变换"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-steer-drain-cascade.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-59",
+    "claim": "RPC select 请求无 timeout 时永不超时（长挂语义）：createDialogPromise 仅在 opts?.timeout 真值时设 setTimeout，timeout 缺省 promise 恒 pending 直到 extension_ui_response 到达（pendingExtensionRequests.get(response.id) → delete → resolve）或 abort signal；select 定义 timeout: opts?.timeout 直传无默认值。与 PS-45 互补（PS-45 登记应答路径只 resolve 不回灌，本条登记请求路径超时语义）。承重（ADR-0087 watch 桥）：extension 以 {action:'watch'} 长挂 select 不传 timeout fire-and-forget，runtime 晚 respond（settle/death/abort/TTL 腿）依赖 promise 不被 pi 侧超时打断；pi 若引入默认超时，晚达 respond 将落在已 resolve 的缺省值上、通知静默丢失。pi 升级时重验：createDialogPromise 超时分支条件性与 select 直传形态",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/modes/rpc/rpc-mode.js",
+        "symbol": "createDialogPromise 超时门 / select 定义 / 应答 resolve 路径",
+        "note": ":47-78（:64 if (opts?.timeout) 才 setTimeout，缺省恒不设）；:84 select: timeout: opts?.timeout 直传；:615-626 extension_ui_response 分派（:620 get(response.id) → :622 delete → :623 pending.resolve(response)）"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-select-long-pending.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-56",
+    "claim": "pi agent-loop 对工具 execute 返回值的错误标记约定：正常路径 return { result, isError: false }（isError 硬编码 false——execute 返回值携带的 isError 字段被丢弃，不参与判定），仅 execute throw 时 catch 分支置 isError:true 并以 createErrorToolResult(error.message) 作为 result。承重（W4 throw 范式）：pi extension 的工具错误路径必须 throw 才能对 agent 呈现 isError:true——session-manager 6 工具（callSessionManager 失败四态 cancelled/timeout/channel-error/non-json + channel {error} respond）、ask-user/scheduler/session-reader 同款；若扩展改在返回值上携带 isError 字段，agent-loop 丢弃之，错误退化为「错误标成功」（agent 无法区分成败以决定重试/放弃，违反 extension-conventions「禁止错误成功模式」）。pi 升级时重验：executePreparedToolCall 正常 return 是否仍硬编码 isError:false、catch 是否仍置 true 并经 createErrorToolResult 包装",
+    "piAnchor": [
+      {
+        "pkg": "pi-agent-core",
+        "distPath": "dist/agent-loop.js",
+        "symbol": "executePreparedToolCall 正常 return / catch 分支",
+        "note": ":452-483 函数体——:468 正常 return { result, isError: false }（硬编码 false，execute 返回值携带的 isError 字段被丢弃）；:470-476 catch 分支 :474 result = createErrorToolResult(error.message)、:475 isError: true"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-tool-error-flag.test.ts"
+    },
+    "verifiedWith": "0.84.4"
   }
 ]
