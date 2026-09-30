@@ -1,4 +1,4 @@
-// src/interface/list-view.ts
+// src/interface/tui/list-view.ts
 //
 // /subagents list 全屏带框左右分屏 overlay。
 //   左列：record 列表（状态图标 + agent + mode + 绝对时长）
@@ -37,7 +37,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import type { SubagentRecord } from "@zhushanwen/subagent-core";
-import { type ThemeLike } from "./format/format.ts";
+import { type ThemeLike } from "../format/format.ts";
 import { SubagentsListComponent } from "./list-component.ts";
 import {
   type DetailKeyContext,

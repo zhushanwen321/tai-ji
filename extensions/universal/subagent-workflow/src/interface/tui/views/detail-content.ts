@@ -26,7 +26,7 @@ import {
   formatTraceEventLine,
   statusDotStr,
   type ThemeLike,
-} from "../format/format.ts";
+} from "../../format/format.ts";
 import { PAGE_SCROLL_DEFAULT } from "../tui-kit.ts";
 import {
   BOX_BORDER_CHARS,

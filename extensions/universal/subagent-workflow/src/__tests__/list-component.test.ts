@@ -18,9 +18,9 @@
 import { afterEach,beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ThemeLike } from "../interface/format/format.ts";
-import { SubagentsListComponent } from "../interface/list-component.ts";
-import { processKey } from "../interface/list-view.ts";
-import type { DetailKeyContext, KeyHandler, KeyResult, NotifyFn, TuiLike, ViewState } from "../interface/list-shared.ts";
+import { SubagentsListComponent } from "../interface/tui/list-component.ts";
+import { processKey } from "../interface/tui/list-view.ts";
+import type { DetailKeyContext, KeyHandler, KeyResult, NotifyFn, TuiLike, ViewState } from "../interface/tui/list-shared.ts";
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import type { SubagentRecord } from "@zhushanwen/subagent-core";
 

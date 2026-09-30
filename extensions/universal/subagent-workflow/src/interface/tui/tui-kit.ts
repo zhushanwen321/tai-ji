@@ -1,4 +1,4 @@
-// src/interface/tui-kit.ts
+// src/interface/tui/tui-kit.ts
 //
 // TUI 终端零件 kit（post-convergence C4）：全屏视图族的共享零件单点——
 // 终端探测常量 / termRows() / 边框着色家族（b/dash/dashes/titleBorder/plainBorder/walled，

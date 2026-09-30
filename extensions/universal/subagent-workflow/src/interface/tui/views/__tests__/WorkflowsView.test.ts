@@ -23,7 +23,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import type { LiveProgressView } from "../detail-content.ts";
 import { buildDetailContent } from "../detail-content.ts";
-import type { ThemeLike } from "../../format/format.ts";
+import type { ThemeLike } from "../../../format/format.ts";
 import { collectNodeLiveProgress, computeRenderSignature } from "../WorkflowsView.ts";
 import type { AgentEventLogEntry } from "@zhushanwen/subagent-core";
 import type { ExecutionTraceNode, WorkerLogEntry } from "@zhushanwen/subagent-core";

@@ -7,7 +7,7 @@
 //   禁用 `│` 做 stats 分隔、`├─`/`└─` 做 eventLog 前缀.
 //
 // 截断/填充/换行（truncLine / padToVisible / segFillColored / wrapText）单定义
-// ./tui-kit.ts（零依赖叶），消费方直接从 tui-kit import。
+// ../tui/tui-kit.ts（零依赖叶），消费方直接从 tui-kit import。
 
 import os from "node:os";
 
@@ -414,15 +414,15 @@ export function formatDisplayItem(item: DisplayItem, theme: ThemeLike): string {
 // 自 views/format.ts 并入（D7-① 双轨合并）：workflow 视图特有的 badge/phase/
 // trace 行格式化在此作差异段保留。并入时收敛的同构构件——ThemeLike、
 // formatElapsedSeconds（本文件版含小时分支，>1h 显示 "1h15m" 而非 "75m30s"）、
-// segFillColored、padToVisible（后者已随 C4 迁 ./tui-kit.ts，消费方直接 import）。
+// segFillColored、padToVisible（后者已随 C4 迁 ../tui/tui-kit.ts，消费方直接 import）。
 // ============================================================
 
 // ── Workflow view 布局常量 ────────────────────────────────────
 
 // views 专属布局常量（SIDEBAR_WIDTH / PROMPT_FOLD_LINES / OUTPUT_TRUNCATE_BYTES /
 // BOX_BORDER_CHARS / BUDGET_TOKENS_DIVISOR / MAX_TOOL_CALLS_DISPLAY）已沉回
-// ./views/view-constants.ts（就近消费方，post-convergence C4）；
-// 终端兜底零件（终端行数兜底、翻页兜底步长）单定义在 ./tui-kit.ts。
+// ../tui/views/view-constants.ts（就近消费方，post-convergence C4）；
+// 终端兜底零件（终端行数兜底、翻页兜底步长）单定义在 ../tui/tui-kit.ts。
 // ELLIPSIS 留此：formatActivityLine / formatPhaseLine（本文件）亦消费，非 views 专属。
 export const ELLIPSIS = "\u2026"; // U+2026
 

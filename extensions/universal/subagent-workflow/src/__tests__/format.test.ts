@@ -27,7 +27,7 @@ import {
   statusGlyph,
   type ThemeLike,
 } from "../interface/format/format.ts";
-import { padToVisible, segFillColored, truncLine, wrapText } from "../interface/tui-kit.ts";
+import { padToVisible, segFillColored, truncLine, wrapText } from "../interface/tui/tui-kit.ts";
 
 // ============================================================
 // formatTokens

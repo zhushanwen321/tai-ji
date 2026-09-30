@@ -33,7 +33,7 @@ import {
   statusGlyph,
   type ThemeLike,
 } from "./format/format.ts";
-import { truncLine } from "./tui-kit.ts";
+import { truncLine } from "./tui/tui-kit.ts";
 
 // ============================================================
 // 常量

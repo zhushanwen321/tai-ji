@@ -1,4 +1,4 @@
-// src/interface/list-shared.ts
+// src/interface/tui/list-shared.ts
 //
 // list-view 与 list-component 共享的类型/常量/纯函数，避免两者循环依赖。
 // 原循环：list-view import 组件类 SubagentsListComponent；组件 import key 处理 + 状态类型。

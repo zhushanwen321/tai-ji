@@ -32,7 +32,7 @@ import {
   statusGlyph,
   type ThemeLike,
 } from "./format/format.ts";
-import { padToVisible, truncLine } from "./tui-kit.ts";
+import { padToVisible, truncLine } from "./tui/tui-kit.ts";
 
 /** agent 名最大显示宽度。 */
 const AGENT_MAX_WIDTH = 40;

@@ -1,4 +1,4 @@
-// src/interface/views/view-constants.ts
+// src/interface/tui/views/view-constants.ts
 //
 // workflow 全屏视图族专属布局常量（WorkflowsView + detail-content 消费）。
 // 自 interface/format/format.ts 沉回 views/（post-convergence C4：format.ts 只保留
