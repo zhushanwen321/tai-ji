@@ -7,24 +7,30 @@ import { describe, expect, it } from "vitest";
 import {
   foldRunEventCheckpoint,
   INITIAL_RUN_EVENT_FOLD,
+  type AgentEventLogEntry,
+  type DisplayItem,
   type ExecutionTraceNode,
   type RunEventFoldCheckpoint,
   type WorkflowRunEvent,
 } from "@zhushanwen/subagent-core";
 import {
   buildPhaseGroups,
+  formatDisplayItem,
   formatElapsed,
   formatElapsedSeconds,
+  formatEventLine,
   formatPhaseLine,
   formatRunStatusElapsed,
   formatStatusBadge,
   formatTokens,
   formatToolCall,
+  formatTraceEventLine,
   sanitizeLabel,
   shortId,
   spinnerGlyph,
   statusDotStr,
   statusGlyph,
+  firstLineSanitized,
   type ThemeLike,
 } from "../interface/format/format.ts";
 import { padToVisible, segFillColored, truncLine, wrapText } from "../interface/tui/tui-kit.ts";
@@ -774,5 +780,80 @@ describe("run 域展示映射（§2.2 回归）", () => {
     expect(statusDotStr("time_limited", markingTheme)).toContain("error(");
     expect(statusDotStr("interrupted", markingTheme)).toContain("muted(");
     expect(statusDotStr("completed", markingTheme)).toContain("success(");
+  });
+});
+
+// ============================================================
+// formatEventLine / formatTraceEventLine / formatDisplayItem /
+// formatStatusBadge(default) / firstLineSanitized — 分支直测补面
+// （消费方渲染路径经 list-component / detail-content / bg-notify 测试覆盖，
+//   此处钉住导出纯函数自身的词表分支，与渲染测试互补）
+// ============================================================
+describe("formatEventLine 词表分支", () => {
+  const entry = (over: Partial<AgentEventLogEntry>): AgentEventLogEntry =>
+    ({ type: "tool_start", label: "read", ts: 0, ...over }) as AgentEventLogEntry;
+
+  it("tool_end：done → ✓ success / failed → ✗ error", () => {
+    expect(formatEventLine(entry({ type: "tool_end", status: "done" }), markingTheme))
+      .toBe("tool: read success(✓)");
+    expect(formatEventLine(entry({ type: "tool_end", status: "failed" }), markingTheme))
+      .toBe("tool: read error(✗)");
+  });
+
+  it("turn_end：空摘要/turn 占位 → dim ── turn ──；有摘要 → toolOutput 摘要", () => {
+    expect(formatEventLine(entry({ type: "turn_end", label: "turn" }), markingTheme))
+      .toBe("dim(── turn ──)");
+    expect(formatEventLine(entry({ type: "turn_end", label: "调查完成，待复核" }), markingTheme))
+      .toBe("toolOutput(调查完成，待复核)");
+  });
+
+  it("error → label + ✗；未知类型 → 裸 label（default 分支）", () => {
+    expect(formatEventLine(entry({ type: "error" }), markingTheme)).toBe("tool: read error(✗)");
+    expect(formatEventLine(entry({ type: "mystery" as never }), markingTheme)).toBe("read");
+  });
+});
+
+describe("formatTraceEventLine 词表分支（detail live Activity 行）", () => {
+  const entry = (over: Partial<AgentEventLogEntry>): AgentEventLogEntry =>
+    ({ type: "tool_start", label: "write", ts: 0, ...over }) as AgentEventLogEntry;
+
+  it("tool_start → →；tool_end done/failed → ✓/✗（error 档）；turn_end → dim ∘；error → ✗；未知 → 裸 label", () => {
+    expect(formatTraceEventLine(entry({ type: "tool_start" }), markingTheme)).toBe("→ write");
+    expect(formatTraceEventLine(entry({ type: "tool_end", status: "done" }), markingTheme)).toBe("✓ write");
+    expect(formatTraceEventLine(entry({ type: "tool_end", status: "failed" }), markingTheme)).toBe("error(✗ write)");
+    expect(formatTraceEventLine(entry({ type: "turn_end", label: "t1" }), markingTheme)).toBe("dim(∘ t1)");
+    expect(formatTraceEventLine(entry({ type: "error" }), markingTheme)).toBe("error(✗ write)");
+    expect(formatTraceEventLine(entry({ type: "mystery" as never }), markingTheme)).toBe("write");
+  });
+});
+
+describe("formatDisplayItem 分支", () => {
+  it("text 项 → toolOutput 正文（缺省空串）", () => {
+    expect(formatDisplayItem({ type: "text", text: "hello" }, markingTheme)).toBe("toolOutput(hello)");
+    expect(formatDisplayItem({ type: "text" }, markingTheme)).toBe("toolOutput()");
+  });
+
+  it("tool 项：name/args 缺省兜底 + done/failed 尾标 + 进行中无尾标", () => {
+    expect(formatDisplayItem({ type: "tool" }, markingTheme)).toContain("unknown");
+    expect(formatDisplayItem({ type: "tool", name: "bash", args: { command: "ls" }, status: "done" }, markingTheme))
+      .toContain("success(✓)");
+    expect(formatDisplayItem({ type: "tool", name: "bash", args: { command: "ls" }, status: "failed" }, markingTheme))
+      .toContain("error(✗)");
+    expect(formatDisplayItem({ type: "tool", name: "bash", args: { command: "ls" } }, markingTheme))
+      .not.toContain("✓");
+  });
+});
+
+describe("formatStatusBadge 兜底分支", () => {
+  it("词表外状态（pending）→ muted 裸字（与 muted 档 default 一致）", () => {
+    expect(formatStatusBadge("pending", markingTheme)).toBe("muted(pending)");
+  });
+});
+
+describe("firstLineSanitized", () => {
+  it("取首个非空行并压平残余换行/Tab（sanitizeLabel 口径）", () => {
+    expect(firstLineSanitized("\n\n  second line\nthird\tline")).toBe("second line");
+    expect(firstLineSanitized(undefined)).toBe("");
+    expect(firstLineSanitized("a\tb")).toBe("a  b");
   });
 });
