@@ -330,7 +330,7 @@ export {
 export {
   createRecordEventJournal,
   foldRecordJournalEvents,
-  INITIAL_RECORD_JOURNAL_FOLD_STATE,
+  INITIAL_RECORD_EVENT_FOLD_STATE,
   parseRecordEventFileLine,
   recordEventsPath,
   RECORD_EVENTS_SUFFIX,
@@ -340,7 +340,7 @@ export {
   type RecordJournalEventInput,
   type RecordJournalFoldState,
   type RecordSettledEvent,
-  applyRecordJournalEvent,
+  applyRecordEvent,
 } from "./execution/persistence/record-events.ts";
 export {
   createJournalDirectoryTailer,

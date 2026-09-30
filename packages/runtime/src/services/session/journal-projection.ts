@@ -41,7 +41,7 @@ import {
   classifyWorkflowRecordEntryData,
   createJournalDirectoryTailer,
   foldRecordJournalEvents,
-  INITIAL_RECORD_JOURNAL_FOLD_STATE,
+  INITIAL_RECORD_EVENT_FOLD_STATE,
   parseRecordEventFileLine,
   RECORD_EVENTS_SUFFIX,
   type JournalDirectoryTailer,
@@ -748,7 +748,7 @@ export class SessionJournalProjection {
   private applyRecordEvents(filename: string, events: readonly RecordJournalEvent[]): void {
     if (this.disposed || events.length === 0) return
     const id = recordIdOfFilename(filename)
-    const current = this.sources.recordFolds.get(id) ?? INITIAL_RECORD_JOURNAL_FOLD_STATE
+    const current = this.sources.recordFolds.get(id) ?? INITIAL_RECORD_EVENT_FOLD_STATE
     this.sources.recordFolds.set(id, foldRecordJournalEvents([...events], current))
     this.recompute()
     this.fireChange()

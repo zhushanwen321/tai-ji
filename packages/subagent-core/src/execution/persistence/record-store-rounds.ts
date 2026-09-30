@@ -30,8 +30,8 @@ import * as fs from "node:fs";
 
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
 import {
-  INITIAL_RECORD_JOURNAL_FOLD_STATE,
-  applyRecordJournalEvent,
+  INITIAL_RECORD_EVENT_FOLD_STATE,
+  applyRecordEvent,
   createRecordEventJournal,
   foldRecordJournalEvents,
   parseRecordEventFileLine,
@@ -379,8 +379,8 @@ export class RecordJournalWriteFace {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
         faceLogger.warn("[subagents] record event journal read failed (treated as empty)", { detail: { id, error: err instanceof Error ? err.message : String(err) } });
       }
-      this.foldCache.set(id, INITIAL_RECORD_JOURNAL_FOLD_STATE);
-      return INITIAL_RECORD_JOURNAL_FOLD_STATE;
+      this.foldCache.set(id, INITIAL_RECORD_EVENT_FOLD_STATE);
+      return INITIAL_RECORD_EVENT_FOLD_STATE;
     }
     const events: RecordJournalEvent[] = [];
     for (const line of content.split("\n")) {
@@ -463,7 +463,7 @@ export class RecordJournalWriteFace {
   private journalAppend(id: string, input: RecordJournalEventInput): Promise<void> {
     const cur = this.foldOf(id);
     const predicted = { ...input, seq: cur.lastSeq + 1 } as RecordJournalEvent;
-    this.foldCache.set(id, applyRecordJournalEvent(cur, predicted));
+    this.foldCache.set(id, applyRecordEvent(cur, predicted));
     return this.journal
       .append(id, input)
       .then((full) => {
@@ -473,7 +473,7 @@ export class RecordJournalWriteFace {
           this.foldCache.delete(id); // 断层：外部写入——作废缓存，下次如实重装载
           return;
         }
-        this.foldCache.set(id, applyRecordJournalEvent(now, full)); // 恰落后一格：按落盘真值补齐
+        this.foldCache.set(id, applyRecordEvent(now, full)); // 恰落后一格：按落盘真值补齐
       })
       .catch((err: unknown) => {
         this.foldCache.delete(id);

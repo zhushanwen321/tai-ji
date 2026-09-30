@@ -17,7 +17,7 @@
 //    即忽略，零成本）；
 // 4. journal 读写原语（createRecordEventJournal：append 单调分配 seq + scan 坏行
 //    宽容跳过）；
-// 5. fold 纯函数族（applyRecordJournalEvent 单步 + foldRecordJournalEvents 全量/
+// 5. fold 纯函数族（applyRecordEvent 单步 + foldRecordJournalEvents 全量/
 //    增量共用——增量 = 以既有 state 为 initial 重入，seq 单调守卫保证幂等）。
 //
 // 落点裁决（D3）：`<recordsDir>/<sa-id>.events`（与 manifest 同目录同主名，寻址 =
@@ -370,7 +370,7 @@ export interface RecordJournalFoldState { // oe-exempt:20260929:framework:workfl
 }
 
 /** fold 初始态（全量 fold 起点；增量 fold 以既有 state 传入）。 */
-export const INITIAL_RECORD_JOURNAL_FOLD_STATE: RecordJournalFoldState = {
+export const INITIAL_RECORD_EVENT_FOLD_STATE: RecordJournalFoldState = {
   identity: undefined,
   bound: undefined,
   round: undefined,
@@ -387,7 +387,7 @@ export const INITIAL_RECORD_JOURNAL_FOLD_STATE: RecordJournalFoldState = {
  * seq 守卫不在此层——apply 假定调用方已去重（foldRecordJournalEvents 统一把关；
  * U1/U3 直接复用 fold 入口而非手写 apply 循环，守卫单点）。
  */
-export function applyRecordJournalEvent(
+export function applyRecordEvent(
   state: RecordJournalFoldState,
   event: RecordJournalEvent,
 ): RecordJournalFoldState {
@@ -434,7 +434,7 @@ export function applyRecordJournalEvent(
  */
 export function foldRecordJournalEvents(
   events: readonly RecordJournalEvent[],
-  initial: RecordJournalFoldState = INITIAL_RECORD_JOURNAL_FOLD_STATE,
+  initial: RecordJournalFoldState = INITIAL_RECORD_EVENT_FOLD_STATE,
   onSkipped?: (event: RecordJournalEvent, why: "seq-regression") => void,
 ): RecordJournalFoldState {
   let state = initial;
@@ -443,7 +443,7 @@ export function foldRecordJournalEvents(
       onSkipped?.(event, "seq-regression");
       continue;
     }
-    state = applyRecordJournalEvent(state, event);
+    state = applyRecordEvent(state, event);
   }
   return state;
 }

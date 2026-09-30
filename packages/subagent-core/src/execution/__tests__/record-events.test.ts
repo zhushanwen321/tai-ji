@@ -26,10 +26,10 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  applyRecordJournalEvent,
+  applyRecordEvent,
   createRecordEventJournal,
   foldRecordJournalEvents,
-  INITIAL_RECORD_JOURNAL_FOLD_STATE,
+  INITIAL_RECORD_EVENT_FOLD_STATE,
   isRecordJournalHeader,
   parseRecordEventFileLine,
   parseRecordEventLine,
@@ -271,7 +271,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
     const skipped: Array<{ seq: number; why: string }> = [];
     const state = foldRecordJournalEvents(
       [...events, ...events],
-      INITIAL_RECORD_JOURNAL_FOLD_STATE,
+      INITIAL_RECORD_EVENT_FOLD_STATE,
       (event, why) => skipped.push({ seq: event.seq, why }),
     );
     // 重放段全部被 seq 守卫拦下，状态与单遍 fold 等价
@@ -293,16 +293,16 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
     expect(state.bound).toBeUndefined(); // 被跳过的回退行未应用
   });
 
-  it("applyRecordJournalEvent 单步纯函数：不可变更新（原 state 不被 mutate）", () => {
-    const base = INITIAL_RECORD_JOURNAL_FOLD_STATE;
-    const after = applyRecordJournalEvent(base, { ...createdInput(), seq: 1 });
+  it("applyRecordEvent 单步纯函数：不可变更新（原 state 不被 mutate）", () => {
+    const base = INITIAL_RECORD_EVENT_FOLD_STATE;
+    const after = applyRecordEvent(base, { ...createdInput(), seq: 1 });
     expect(after.identity?.id).toBe("sa-test-1");
     expect(base.identity).toBeUndefined();
     expect(base.lastSeq).toBe(0);
   });
 
   it("空序列 / 残文件（无 created 帧）宽容：identity 缺席不炸", () => {
-    expect(foldRecordJournalEvents([])).toEqual(INITIAL_RECORD_JOURNAL_FOLD_STATE);
+    expect(foldRecordJournalEvents([])).toEqual(INITIAL_RECORD_EVENT_FOLD_STATE);
     const orphan = foldRecordJournalEvents([{ type: "record-round-idle", seq: 1, ts: 1, stopReason: "completed", turns: 1, totalTokens: 1 }]);
     expect(orphan.identity).toBeUndefined();
     expect(orphan.roundIdle?.turns).toBe(1);
