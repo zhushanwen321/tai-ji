@@ -104,7 +104,8 @@ const streamSubscriptions = new Map<string, () => void>()
  * envelope 携带 runtime 分类码（CompactErrorCode / 'message_blocked'）= 错误的
  * 用户可见呈现已由 runtime 侧编排——compact_busy → 对话流 system 提示（dispatcher
  * stream_warn）；compact_failed → interpreter 对话流（compaction 级失败）或 session
- * 状态面（ensureActive 失败）；message_blocked → 错误气泡（bash handler 广播）。
+ * 状态面（ensureActive 失败）；message_blocked → 错误气泡（dispatcher 广播——BeforeSend
+ * hook 否决，message.send / message.bash / delivery.submit 三 handler 统一落此码）。
  * 此时再弹全局错误 toast 属双提示，抑制。
  *
  * 其余形态保守回退为 toast 兜底（错误可见性优先，AGENTS.md 规则 3）：
@@ -122,8 +123,9 @@ function isTransportLevelFailure(e: unknown, classifiedCodes: readonly string[])
 /** compact RPC 的已分类码集合（词表 SSOT = shared CompactErrorCode）。 */
 const COMPACT_CLASSIFIED_CODES: readonly CompactErrorCode[] = ['compact_busy', 'compact_failed']
 
-/** bash RPC 的已分类码（runtime message.bash handler 对 blocked 失败落的码，错误气泡已广播）。 */
-const BASH_CLASSIFIED_CODE = 'message_blocked'
+/** hook 否决类 RPC 的已分类码（message.send / message.bash / delivery.submit 三 handler
+ * 对 blocked 失败落的同一码，dispatcher 已广播 message.error 错误气泡）。 */
+const BLOCKED_CLASSIFIED_CODE = 'message_blocked'
 
 /**
  * [session-occupancy-send-closure D2 → 投递所有权内核 u3b 退役] per-session 未决直发记录
@@ -771,7 +773,8 @@ export function createUseChat(deps: UseChatDeps) {
    *
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事
    * 发生（空输入/空白 prompt 早退——无投递动作、无丢失面，调用方无需恢复）；false =
-   * RPC 失败（内部已 toast 消化且乐观副作用已回滚）——调用方（dispatch send）据
+   * RPC 失败（内部已消化——transport 级 toast、hook 否决级经 runtime 错误气泡抑制
+   * toast；乐观副作用已回滚）——调用方（dispatch send）据
    * `=== false`（严格比较——false = RPC 失败需恢复草稿）restoreSegments
    * 恢复草稿。不 throw（W2「内部消化」契约不变）。
    *
@@ -807,12 +810,20 @@ export function createUseChat(deps: UseChatDeps) {
 
     // [u3b/D1] 统一 submit：乐观气泡 + delivery.submit（失败 toast 不 throw——错误已消化，
     // 消费侧 Composer.onSend 的 catch 不再触发；throw 只会变 unhandled rejection）。
+    // toast 抑制判别（msg-pipeline-debloat D4-2，对齐 sendBash/compact 既有接法）：
+    // message_blocked（BeforeSend hook 否决）= runtime dispatcher 已广播 message.error
+    // 错误气泡（乐观回滚已由 submitNewMessage catch 完成）——再弹 toast 属同一失败
+    // 双提示，抑制；transport 级（断连/超时/未知码）保守 toast 兜底。
     try {
       await submitNewMessage(sid, segments, promptText)
       return true
     } catch (e) {
-      const msg = toErrorMessage(e)
-      deps.toast.error(deps.t('composable.sendFailed', { msg }))
+      if (isTransportLevelFailure(e, [BLOCKED_CLASSIFIED_CODE])) {
+        const msg = toErrorMessage(e)
+        deps.toast.error(deps.t('composable.sendFailed', { msg }))
+        return false
+      }
+      console.warn(`[useChat] send RPC failed (classified envelope, toast suppressed, sid=${sid})`, e)
       return false
     }
   }
@@ -889,8 +900,9 @@ export function createUseChat(deps: UseChatDeps) {
    * 非执行中按普通发送处理（避免 Alt+⏎ 死键）。
    *
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事
-   * 发生（空输入/空白 prompt 早退无丢失面）；false = RPC 失败（内部已 toast + 回滚乐观
-   * 副作用，不 throw）——调用方（composer submit.onFollowUp）据 `=== false`
+   * 发生（空输入/空白 prompt 早退无丢失面）；false = RPC 失败（内部已消化 + 回滚乐观
+   * 副作用，不 throw——transport 级 toast、hook 否决级经 runtime 错误气泡抑制 toast）
+   * ——调用方（composer submit.onFollowUp）据 `=== false`
    * restoreSegments 恢复草稿，否则 clearInput 已清空的输入静默丢失。
    *
    * 显式接收 sessionId：与 send 同理，per-panel 隔离。
@@ -910,8 +922,14 @@ export function createUseChat(deps: UseChatDeps) {
       await submitNewMessage(sid, segments, promptText)
       return true
     } catch (e) {
-      const msg = toErrorMessage(e)
-      deps.toast.error(deps.t('composable.nextTurnSendFailed', { msg }))
+      // toast 抑制判别同 send（D4-2）：message_blocked = runtime 已广播错误气泡，
+      // 抑制 toast；transport 级保守 toast 兜底。
+      if (isTransportLevelFailure(e, [BLOCKED_CLASSIFIED_CODE])) {
+        const msg = toErrorMessage(e)
+        deps.toast.error(deps.t('composable.nextTurnSendFailed', { msg }))
+        return false
+      }
+      console.warn(`[useChat] followUp RPC failed (classified envelope, toast suppressed, sid=${sid})`, e)
       return false
     }
   }
@@ -966,7 +984,7 @@ export function createUseChat(deps: UseChatDeps) {
       await deps.chatApi.bash(sid, command, excludeFromContext)
       return true
     } catch (e) {
-      if (isTransportLevelFailure(e, [BASH_CLASSIFIED_CODE])) {
+      if (isTransportLevelFailure(e, [BLOCKED_CLASSIFIED_CODE])) {
         const msg = toErrorMessage(e)
         deps.toast.error(deps.t('composable.bashFailed', { msg }))
         return false
@@ -1050,7 +1068,8 @@ export function createUseChat(deps: UseChatDeps) {
    * 委托 submitSegments：与 send 同通路（segmentsToPrompt + delivery.submit），image 段
    * 经 segmentsToText 产出裸路径进 prompt 文本（不丢）。
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事发生（空白 prompt/
-   * active session 早退无丢失面）；false = RPC 失败（内部已 toast）。
+   * active session 早退无丢失面）；false = RPC 失败（内部已消化——transport 级 toast、
+   * hook 否决级经 runtime 错误气泡抑制 toast）。
    *
    * 显式接收 sessionId：编辑可发生在非 active 的 standby panel，不能依赖全局 activeId。
    *
@@ -1068,10 +1087,16 @@ export function createUseChat(deps: UseChatDeps) {
       await submitNewMessage(sessionId, segments, promptText)
       return true
     } catch (e) {
-      // [W2] 错误处理策略与 send/followUp/abort 对齐：toast + 不 throw。
-      // 消费侧 Turn.vue submitEdit 无 try/catch，不 throw 避免其产生 unhandled rejection（错误已通过 toast 消化）。
-      const msg = toErrorMessage(e)
-      deps.toast.error(deps.t('composable.sendFailed', { msg }))
+      // [W2] 错误处理策略与 send/followUp/abort 对齐：不 throw（消费侧 Turn.vue submitEdit
+      // 无 try/catch，throw 只会变 unhandled rejection）。错误呈现同 send 的分类码路由
+      // （D4-2）：message_blocked（hook 否决）= runtime 已广播错误气泡，抑制 toast；
+      // transport 级保守 toast 兜底。
+      if (isTransportLevelFailure(e, [BLOCKED_CLASSIFIED_CODE])) {
+        const msg = toErrorMessage(e)
+        deps.toast.error(deps.t('composable.sendFailed', { msg }))
+        return false
+      }
+      console.warn(`[useChat] editAndResend RPC failed (classified envelope, toast suppressed, sid=${sessionId})`, e)
       return false
     }
   }

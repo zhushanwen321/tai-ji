@@ -829,6 +829,66 @@ describe('sendBash toast 抑制（D4-2 分类码：message_blocked→抑制 / �
   })
 })
 
+// ── send 族 toast 抑制（msg-pipeline-debloat D4-2 分类码：message_blocked→抑制 / 无码→兜底）──
+//
+// 判别式：error envelope 携带 runtime 分类码 'message_blocked'（BeforeSend hook 否决——
+// runtime dispatcher 已广播 message.error 错误气泡，delivery.submit handler 同码回 error
+// envelope 让 renderer 回滚乐观气泡）→ 抑制 toast，错误气泡是权威呈现面；transport 级
+//（断连 / 超时，无码或机械码）→ 保守 toast 兜底（错误可见性优先）。
+// send / followUp / editAndResend 三通路同一接法（对齐 sendBash/compact 先例）。
+describe('send 族 toast 抑制（D4-2 分类码：message_blocked→抑制 / 无码→兜底）', () => {
+  it('send：hook 否决（message_blocked）→ 抑制 sendFailed toast，乐观副作用照常回滚', async () => {
+    const f = makeFixture()
+    f.chatApi.submitDelivery.mockRejectedValueOnce(
+      Object.assign(new Error('Message blocked by plugin hook'), { code: 'message_blocked' }),
+    )
+    await expect(f.useChat.send('sb1', textToSegments('hi'))).resolves.toBe(false)
+    expect(f.toast.error).not.toHaveBeenCalled()
+    // 乐观回滚不受 toast 抑制影响（气泡移除 + inflight 不悬空）
+    expect(f.chatStore.getMessages('sb1')).toHaveLength(0)
+    expect(f.chatStore.getInflight('sb1')).toBe(0)
+    f.dispose()
+  })
+
+  it('followUp：hook 否决（message_blocked）→ 抑制 nextTurnSendFailed toast', async () => {
+    const f = makeFixture()
+    await f.useChat.send('sb2', textToSegments('hi'))
+    f.emit('sb2', msg('sb2', 'message.message_start', { messageId: 'a1' }))
+    f.chatApi.submitDelivery.mockRejectedValueOnce(
+      Object.assign(new Error('Message blocked by plugin hook'), { code: 'message_blocked' }),
+    )
+    await expect(f.useChat.followUp('sb2', textToSegments('补充'))).resolves.toBe(false)
+    expect(f.toast.error).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('editAndResend：hook 否决（message_blocked）→ 抑制 sendFailed toast', async () => {
+    const f = makeFixture()
+    await f.useChat.send('sb3', textToSegments('old'))
+    const userMsgId = f.chatStore.getMessages('sb3').find((m) => m.role === 'user')!.id
+    f.emit('sb3', msg('sb3', 'message.message_start', { messageId: 'a1' }))
+    f.emit('sb3', msg('sb3', 'message.complete', { stopReason: 'end_turn' }))
+    f.chatApi.submitDelivery.mockRejectedValueOnce(
+      Object.assign(new Error('Message blocked by plugin hook'), { code: 'message_blocked' }),
+    )
+    await expect(f.useChat.editAndResend('sb3', userMsgId, textToSegments('edited'))).resolves.toBe(false)
+    expect(f.toast.error).not.toHaveBeenCalled()
+    f.dispose()
+  })
+
+  it('editAndResend：transport 级失败（无码断连形态）→ 保守 toast 兜底（契约边界）', async () => {
+    const f = makeFixture()
+    await f.useChat.send('sb4', textToSegments('old'))
+    const userMsgId = f.chatStore.getMessages('sb4').find((m) => m.role === 'user')!.id
+    f.emit('sb4', msg('sb4', 'message.message_start', { messageId: 'a1' }))
+    f.emit('sb4', msg('sb4', 'message.complete', { stopReason: 'end_turn' }))
+    f.chatApi.submitDelivery.mockRejectedValueOnce(new Error('transport unavailable (ws not open)'))
+    await expect(f.useChat.editAndResend('sb4', userMsgId, textToSegments('edited'))).resolves.toBe(false)
+    expect(f.toast.error).toHaveBeenCalledTimes(1)
+    f.dispose()
+  })
+})
+
 describe('恢复窗口过渡态的 message_start 收口 gate（crash-resilience T4 回流修复）', () => {
   // 缺陷背景（Gate B A7 真机）：恢复窗口（respawnPending）内用户发消息 → runtime 惰性恢复
   // join 先于 D7 自动恢复 timer 完成 → timer fire「already active/restoring — skip」→
