@@ -1,0 +1,37 @@
+{
+  "name": "@zhushanwen/pi-notify-ledger-host",
+  "version": "0.1.0",
+  "description": "Shared pi-extension adapter factory for the @zhushanwen/subagent-core notify ledger host port — binds pi appendEntry / sessionManager.getEntries / isIdle / agent_settled / sendMessage into a NotifyLedgerHost with stale-ctx guarded delivery (shared library, not a Pi extension).",
+  "type": "module",
+  "main": "src/index.ts",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "notify",
+    "ledger",
+    "host",
+    "shared"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@zhushanwen/pi-ext-guards": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@zhushanwen/subagent-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@zhushanwen/subagent-core": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  }
+}

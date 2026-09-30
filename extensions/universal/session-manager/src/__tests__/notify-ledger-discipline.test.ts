@@ -15,6 +15,9 @@
 //   槽空降级（ensure 未跑/失败时 record → warn + false，用例登记）。
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+// logger mock helper 必须先于任何会加载 pi-extension-logger 的 import
+//（subagent-core barrel / ../notify-ledger.ts），见 logger-mock.ts 文件头
+import { createLoggerModuleMock, getLoggerMock } from "./helpers/logger-mock.ts";
 import {
 	bindNotifyLedgerHost,
 	getBoundNotifyLedger,
@@ -22,14 +25,9 @@ import {
 } from "@zhushanwen/subagent-core";
 import { STALE_CTX_MARKER } from "@zhushanwen/pi-ext-guards";
 
-const loggerMock = vi.hoisted(() => ({
-	error: vi.fn(),
-	warn: vi.fn(),
-	debug: vi.fn(),
-}));
-vi.mock("@zhushanwen/pi-extension-logger", () => ({
-	getLogger: () => loggerMock,
-}));
+vi.mock("@zhushanwen/pi-extension-logger", () => createLoggerModuleMock());
+
+const loggerMock = getLoggerMock();
 
 import {
 	ensureLedgerBound,

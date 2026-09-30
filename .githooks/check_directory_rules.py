@@ -119,8 +119,8 @@ def check_root_temp_artifacts(staged_files):
                 found.add(filepath)
                 break
     if found:
-        sample = ", ".join(sorted(found)[:5])
-        suffix = f" 等 {len(found)} 个" if len(found) > 5 else ""
+        sample = ", ".join(sorted(found))
+        suffix = f"（共 {len(found)} 个）" if len(found) > 1 else ""
         errors.append(
             f"根目录禁止 cw v1 工作流临时产物: {sample}{suffix}\n"
             f"  wave-*/.cw-*/plan.*/clarify.json 等应归档到 .taiji-harness/，不应散落项目根"
@@ -141,8 +141,8 @@ def check_backup_suffixes(staged_files):
                 found.append(filepath)
                 break
     if found:
-        sample = ", ".join(found[:5])
-        suffix = f" 等 {len(found)} 个" if len(found) > 5 else ""
+        sample = ", ".join(found)
+        suffix = f"（共 {len(found)} 个）" if len(found) > 1 else ""
         errors.append(
             f"禁止备份/临时后缀文件: {sample}{suffix}\n"
             f"  *.bak/*.tmp/*.swp/*.orig/*~ 是临时产物，不应进版本管理"
@@ -164,8 +164,8 @@ def check_ascii_paths(staged_files):
         except UnicodeEncodeError:
             found.append(filepath)
     if found:
-        sample = ", ".join(found[:5])
-        suffix = f" 等 {len(found)} 个" if len(found) > 5 else ""
+        sample = ", ".join(found)
+        suffix = f"（共 {len(found)} 个）" if len(found) > 1 else ""
         errors.append(
             f"禁止非 ASCII 路径: {sample}{suffix}\n"
             f"  目录/文件名必须全 ASCII（中文目录名跨平台/CI 易出问题）"
@@ -194,8 +194,8 @@ def check_pi_whitelist(staged_files):
         if subdir not in PI_ALLOWED_SUBDIRS:
             found.append(filepath)
     if found:
-        sample = ", ".join(sorted(found)[:5])
-        suffix = f" 等 {len(found)} 个" if len(found) > 5 else ""
+        sample = ", ".join(sorted(found))
+        suffix = f"（共 {len(found)} 个）" if len(found) > 1 else ""
         errors.append(
             f".pi/ 目录只允许 workflows/ 进 git: {sample}{suffix}\n"
             f"  .pi/sessions/ .pi/infinite-context/ 等是运行时数据，不应提交。"
@@ -231,15 +231,15 @@ def check_extensions_md_whitelist(staged_files):
                 pkg_violations.append(filepath)
         # extensions/<pkg>/<subdir>/... → 子目录 md（docs/ 等），不检查
     if root_violations:
-        sample = ", ".join(sorted(root_violations)[:5])
-        suffix = f" 等 {len(root_violations)} 个" if len(root_violations) > 5 else ""
+        sample = ", ".join(sorted(root_violations))
+        suffix = f"（共 {len(root_violations)} 个）" if len(root_violations) > 1 else ""
         errors.append(
             f"extensions/ 根目录禁止 md 文件: {sample}{suffix}\n"
             f"  临时文件/杂散文档应放 docs/ 子目录或删除（.tmp-* 类研究文档不应散落包根）"
         )
     if pkg_violations:
-        sample = ", ".join(sorted(pkg_violations)[:5])
-        suffix = f" 等 {len(pkg_violations)} 个" if len(pkg_violations) > 5 else ""
+        sample = ", ".join(sorted(pkg_violations))
+        suffix = f"（共 {len(pkg_violations)} 个）" if len(pkg_violations) > 1 else ""
         errors.append(
             f"extensions/<pkg>/ 根目录 md 白名单违规: {sample}{suffix}\n"
             f"  只允许 {sorted(EXTENSIONS_PKG_ALLOWED_MD)}；其他 md 应放 extensions/<pkg>/docs/ 或项目 docs/"

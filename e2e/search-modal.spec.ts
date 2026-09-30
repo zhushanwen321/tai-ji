@@ -56,6 +56,46 @@ async function openSearch(page: import('@playwright/test').Page): Promise<void> 
   await expect(page.getByTestId('search-input')).toBeVisible({ timeout: 5_000 })
 }
 
+/**
+ * slash 注入旅程公共骨架（SM-E2E-7/8/9 同构，差异全部参数化）：
+ * 等前置 composer 可见 → 唤起搜索 → 输入命令词 → 命令分组渲染并含该词 →
+ * 等选中项收敛到该词 → Enter confirm → 浮层关闭（confirm ok:true 才关，AC-6.7）→
+ * composer 出现该命令的 slash-chip。返回 chip locator 供用例补充分支断言（如图标透传）。
+ *
+ * - composerTimeout：前置 composer-box 可见的等待预算。panel 态（激活 session 后）5s；
+ *   landing 态（SM-E2E-9）首窗装载更慢用 10s。
+ * - settleScopeTestId：等「选中项收敛」时 [aria-selected] 的宿主容器 testid——
+ *   'search-modal-root'（全浮层唯一选中项，SM-E2E-7 口径）或 'search-section-命令'
+ *   （限定命令分组内，SM-E2E-8/9 口径）。
+ *
+ * 「等选中项收敛」是不可省略的竞态守卫：逐字输入的防抖窗口内，前缀/子串中间查询
+ * （'c'/'r' 等子串命中概览 sub 'Mission Control'，概览 app 命令排名靠前 + 默认选中
+ * 首项）可能让 section 已含目标词但选中项仍落在概览/应用命令上，此时 Enter 会确认
+ * 概览（goOverview 跳概览页，chip 不注入，2026-09-18 CI 实发）或应用命令（如
+ * toggle-sidebar：收侧栏 + ok:true 关弹层、不开 drawer、recents 无记录，2026-09-24
+ * 批内实发）。断言的是 Enter 真正消费的信号（选中项文本），而非仅 section 含目标词。
+ */
+async function confirmSlashCommand(
+  page: import('@playwright/test').Page,
+  command: string,
+  opts: { composerTimeout: number; settleScopeTestId: string },
+): Promise<import('@playwright/test').Locator> {
+  await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: opts.composerTimeout })
+  await openSearch(page)
+  await page.getByTestId('search-input').pressSequentially(command)
+  await expect(page.getByTestId('search-section-命令')).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByTestId('search-section-命令')).toContainText(command)
+  await expect(page.getByTestId(opts.settleScopeTestId).locator('[aria-selected="true"]'))
+    .toContainText(command, { timeout: 5_000 })
+  // Enter confirm 当前选中项（命令应排前）
+  await page.getByTestId('search-input').press('Enter')
+  await expect(page.getByTestId('search-modal-root')).not.toBeVisible({ timeout: 5_000 })
+  const chip = page.getByTestId('composer-box').locator('.slash-chip')
+  await expect(chip).toBeVisible({ timeout: 3_000 })
+  await expect(chip.locator('.chip-label')).toContainText(command)
+  return chip
+}
+
 test.describe('搜索浮层 E2E', () => {
   test('harness smoke：Electron app 加载首窗口', async ({ page }) => {
     await expect(page).toHaveTitle(/太极|TaiJi/)
@@ -147,89 +187,33 @@ test.describe('搜索浮层 E2E', () => {
   })
 
   test('SM-E2E-7（slash 命令注入活跃 composer）：搜 commit → confirm → composer 含 commit chip @p0-smoke', async ({ page }) => {
-    // 前置：激活 session（panel composer 可见）
+    // 前置：激活 session（panel composer 出现）；选中项收敛口径 = 全浮层（modal root）
     await activateSession(page)
-    await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 5_000 })
-
-    // 唤起搜索
-    await openSearch(page)
-    // 输入 commit（mock SEARCH_MOCK.command 含 'commit'，commandKind:'slash'，对齐 pi 格式无 / 前缀）
-    await page.getByTestId('search-input').pressSequentially('commit')
-    // 等命令分组出现 + 含 commit 项
-    await expect(page.getByTestId('search-section-命令')).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByTestId('search-section-命令')).toContainText('commit')
-    // Enter 消费的是**当前选中项**：逐字输入期间防抖窗口内的前缀结果可能仍在前（'c'/'o'/'co'
-    // 子串命中概览 sub 'Mission Control'，概览 app 命令排名在 commit 前 + 默认选中首项），
-    // 此时 Enter 会确认概览 → goOverview 跳概览页（2026-09-18 CI 实发；同一竞态族也命中
-    // SM-E2E-8/9 的中间态，见各用例内注释）。等选中项收敛为 commit 再按 Enter——断言的是
-    // Enter 真正消费的信号。
-    await expect(page.getByTestId('search-modal-root').locator('[aria-selected="true"]'))
-      .toContainText('commit', { timeout: 5_000 })
-
-    // Enter confirm 第一项（commit 应排前）
-    await page.getByTestId('search-input').press('Enter')
-    // 搜索浮层关闭（confirm ok:true）
-    await expect(page.getByTestId('search-modal-root')).not.toBeVisible({ timeout: 5_000 })
-
-    // composer 输入区含 commit chip（slash-chip 内 chip-label 文本）
-    const composer = page.getByTestId('composer-box')
-    await expect(composer.locator('.slash-chip')).toBeVisible({ timeout: 3_000 })
-    await expect(composer.locator('.slash-chip .chip-label')).toContainText('commit')
+    await confirmSlashCommand(page, 'commit', {
+      composerTimeout: 5_000,
+      settleScopeTestId: 'search-modal-root',
+    })
   })
 
   test('SM-E2E-8（slash chip 图标）：搜 review → composer 出现 review chip 含星标 svg 图标', async ({ page }) => {
+    // 输入 review（mock 含 'review'，icon:star，commandKind:'slash'）；选中项收敛口径 = 命令分组内
     await activateSession(page)
-    await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 5_000 })
-
-    await openSearch(page)
-    // 输入 review（mock 含 'review'，icon:star，commandKind:'slash'）
-    await page.getByTestId('search-input').pressSequentially('review')
-    await expect(page.getByTestId('search-section-命令')).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByTestId('search-section-命令')).toContainText('review')
-    // Enter 消费的是**当前选中项**：逐字输入期间防抖窗口内的中间查询 'r' 结果可能仍在渲染
-    //（'r' 子串命中概览 sub 'Mission Control'，概览 app 命令排名在 review 前 + 默认选中
-    // 首项），此时 section 已含 review 文本（'r' 同样命中 review）但选中项落在概览上，
-    // Enter 会确认概览 → goOverview 跳概览页 → chip 不注入（与 SM-E2E-7 同一竞态类，同款
-    // settle 等待；同族 2026-09-24 再次实发）。等命令分组内选中项收敛为 review 再按 Enter。
-    await expect(page.getByTestId('search-section-命令').locator('[aria-selected="true"]'))
-      .toContainText('review', { timeout: 5_000 })
-
-    await page.getByTestId('search-input').press('Enter')
-    await expect(page.getByTestId('search-modal-root')).not.toBeVisible({ timeout: 5_000 })
-
-    // composer 含 review chip + chip 内含 svg 图标（star icon 渲染为 svg 元素）
-    const composer = page.getByTestId('composer-box')
-    const chip = composer.locator('.slash-chip')
-    await expect(chip).toBeVisible({ timeout: 3_000 })
-    await expect(chip.locator('.chip-label')).toContainText('review')
+    const chip = await confirmSlashCommand(page, 'review', {
+      composerTimeout: 5_000,
+      settleScopeTestId: 'search-section-命令',
+    })
     // chip-icon 内含 svg（star 图标渲染为 svg 元素）
     await expect(chip.locator('.chip-icon svg')).toBeVisible()
   })
 
   test('SM-E2E-9（landing 态 slash 注入）：未激活 session → 搜 slash 命令 → landing composer 注入 chip', async ({ page }) => {
     // 前置：landing 态（默认启动未激活 session，landing composer 可见）
-    // landing composer 也有 composer-box testid（Composer.vue 同组件，variant=landing）
-    await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 10_000 })
-
-    await openSearch(page)
-    // 输入 commit 搜 slash 命令
-    await page.getByTestId('search-input').pressSequentially('commit')
-    await expect(page.getByTestId('search-section-命令')).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByTestId('search-section-命令')).toContainText('commit')
-    // 同 SM-E2E-7/8：中间查询 'c'/'o'/'co' 子串命中概览 sub 'Mission Control'，section 已含
-    // commit 文本但选中项中间态可能落在概览上，Enter 会消费概览而非 commit → chip 不注入
-    //（同族 2026-09-24 再次实发：Enter 消费 toggle-sidebar → 收侧栏且不开 drawer）。
-    // 等命令分组内选中项收敛为 commit 再按 Enter。
-    await expect(page.getByTestId('search-section-命令').locator('[aria-selected="true"]'))
-      .toContainText('commit', { timeout: 5_000 })
-
-    await page.getByTestId('search-input').press('Enter')
-    await expect(page.getByTestId('search-modal-root')).not.toBeVisible({ timeout: 5_000 })
-
-    // landing composer（role=textbox）出现 commit chip
-    const composer = page.getByTestId('composer-box')
-    await expect(composer.locator('.slash-chip')).toBeVisible({ timeout: 3_000 })
-    await expect(composer.locator('.slash-chip .chip-label')).toContainText('commit')
+    // landing composer 也有 composer-box testid（Composer.vue 同组件，variant=landing）；
+    // 首窗装载较慢，composer 等待预算放大到 10s；选中项收敛口径 = 命令分组内
+    await confirmSlashCommand(page, 'commit', {
+      composerTimeout: 10_000,
+      settleScopeTestId: 'search-section-命令',
+    })
   })
 
   test('SM-E2E-10（回归：应用命令 confirm 不注入 chip）：搜新建 → confirm → composer 不出现 chip', async ({ page }) => {

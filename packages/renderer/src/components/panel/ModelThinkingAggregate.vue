@@ -83,11 +83,9 @@ import type { ProviderId } from '@taiji/shared'
 import ModelPickerPanel from './ModelPickerPanel.vue'
 import { bareModelId, useModelPickerData } from './model-picker-data'
 import {
-  THINKING_LEVELS,
-  normalizeSupportedLevels,
-  highestAvailableLevel,
+  currentThinkingLevelKey,
+  availableThinkingLevelOptions,
   resolveThinkingValue,
-  resolveThinkingKey,
   getDisplayLabel,
   type ThinkingLevelOption,
   type ThinkingLevel,
@@ -170,9 +168,7 @@ function onPickModel(modelId: string): void {
 
 /** 当前档位的 UI key（高亮与 hover 去重的基准；与 ThinkingLevelPopover 同款反查与缺省语义） */
 const currentLevelKey = computed<ThinkingLevel>(() =>
-  props.level
-    ? resolveThinkingKey(props.level, props.levelMap, highestAvailableLevel(props.supportedLevels))
-    : 'max',
+  currentThinkingLevelKey(props.level, props.levelMap, props.supportedLevels),
 )
 
 // pending 档位回流确认（基准值在上方定义，watch 置此避免 TDZ）
@@ -181,10 +177,9 @@ watch(currentLevelKey, (v) => {
 })
 
 /** 可用档位选项（只渲染可用的，不灰显不可用档位；可用集来自 supportedLevels 下发） */
-const availableOptions = computed<ThinkingLevelOption[]>(() => {
-  const available = new Set(normalizeSupportedLevels(props.supportedLevels))
-  return THINKING_LEVELS.filter((opt) => available.has(opt.level))
-})
+const availableOptions = computed<ThinkingLevelOption[]>(() =>
+  availableThinkingLevelOptions(props.supportedLevels),
+)
 
 /** emit 的值 = map 映射后的实际 value（如 max 档发 xhigh），非 UI 档位名 */
 function emitLevel(opt: ThinkingLevelOption): void {

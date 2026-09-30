@@ -5,56 +5,47 @@
 //
 // watch select 全部走 deferred：开表时挂起，用例按调用序精确控制应答时机与内容
 // （覆盖「晚 respond」「W1 悬置 W2 应答」等时序形态）。
+// pi/ctx 装配、respondWatch、flushMicrotasks 走共享 harness（helpers/extension-harness.ts）；
+// select 的 action 分发（actionResults / deferred watch）为本文件域行为，留在本地。
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { SESSION_MANAGER_MARKER } from "@zhushanwen/extension-protocol";
+// logger mock helper 必须先于 extension-harness（其 import 链触发被 mock 模块加载）
+import { createLoggerModuleMock, getLoggerMock } from "./helpers/logger-mock.ts";
+import {
+	flushMicrotasks,
+	makeRespondWatch,
+	mountExtension,
+	runToolCall,
+	runToolForText,
+	type ExtensionHarness,
+	type WatchInvocation,
+} from "./helpers/extension-harness.ts";
 
-// logger 打桩（同 tool-non-json-response 先例）：drift 留痕断言只认 warn 通道
-const loggerMock = vi.hoisted(() => ({
-	error: vi.fn(),
-	warn: vi.fn(),
-	debug: vi.fn(),
-}));
-vi.mock("@zhushanwen/pi-extension-logger", () => ({
-	getLogger: () => loggerMock,
-	setPiHandle: vi.fn(),
-}));
+vi.mock("@zhushanwen/pi-extension-logger", () => createLoggerModuleMock());
 
-import registerExtension from "../index.ts";
+const loggerMock = getLoggerMock();
 
 const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger");
 
-interface EmittedEvent {
-	event: string;
-	data: Record<string, unknown>;
-}
-
-interface WatchInvocation {
-	notifyId: string;
+/** watch 开表调用（deferred）——opts 为开表时传入的 select 第三参原样值 */
+interface DeferredWatch extends WatchInvocation {
 	opts: { timeout?: number } | undefined;
-	resolve: (value: unknown) => void;
 }
 
-interface Harness {
-	registered: Array<{ name: string; execute: (...args: unknown[]) => Promise<unknown> }>;
-	emitted: EmittedEvent[];
-	handlers: Record<string, (event: unknown, ctx: unknown) => unknown>;
-	selectMock: ReturnType<typeof vi.fn>;
-	ctx: Record<string, unknown>;
+interface Harness extends ExtensionHarness {
+	selectMock: Mock;
 	entries: unknown[];
 	/** 非 watch action 的回包（JSON 字符串），用例在跑工具前置位 */
 	actionResults: Record<string, () => string>;
 	/** 按开表顺序排列的 watch 调用（deferred 应答入口） */
-	watches: WatchInvocation[];
+	watches: DeferredWatch[];
 	/** 按调用序 resolve 第 n 次 watch（value = select 回包原样值） */
 	respondWatch(index: number, value: unknown): void;
 }
 
 function createHarness(entries: unknown[] = []): Harness {
-	const registered: Harness["registered"] = [];
-	const emitted: EmittedEvent[] = [];
-	const handlers: Harness["handlers"] = {};
-	const watches: WatchInvocation[] = [];
+	const watches: DeferredWatch[] = [];
 	const actionResults: Record<string, () => string> = {};
 	const selectMock = vi.fn((marker: unknown, args: unknown[], opts?: unknown) => {
 		expect(marker).toBe(SESSION_MANAGER_MARKER);
@@ -74,57 +65,14 @@ function createHarness(entries: unknown[] = []): Harness {
 		const produce = actionResults[payload.action];
 		return Promise.resolve(produce ? produce() : '{"ok":true}');
 	});
-	const pi = {
-		registerTool: (tool: { name: string; execute: (...a: unknown[]) => Promise<unknown> }) =>
-			registered.push(tool),
-		on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
-			handlers[event] = handler;
-		},
-		events: {
-			emit: (event: string, data: Record<string, unknown>) => {
-				emitted.push({ event, data });
-			},
-		},
-		getAllTools: vi.fn(() => []),
-		setActiveTools: vi.fn(),
-	};
-	const ctx = {
-		mode: "rpc" as const,
-		hasUI: true,
-		ui: { select: selectMock },
-		sessionManager: { getEntries: () => entries, getSessionId: () => "parent-1" },
-	};
-	registerExtension(pi as never);
 	return {
-		registered,
-		emitted,
-		handlers,
+		...mountExtension(selectMock, entries),
 		selectMock,
-		ctx,
 		entries,
 		actionResults,
 		watches,
-		respondWatch: (index, value) => {
-			const inv = watches[index];
-			if (!inv) throw new Error(`no watch invocation at index ${index}`);
-			inv.resolve(value);
-		},
+		respondWatch: makeRespondWatch(watches),
 	};
-}
-
-function tool(h: Harness, name: string) {
-	const t = h.registered.find((x) => x.name === name);
-	if (!t) throw new Error(`tool not registered: ${name}`);
-	return t;
-}
-
-async function runTool(h: Harness, name: string, params: Record<string, unknown>) {
-	return tool(h, name).execute("call-1", params, undefined, undefined, h.ctx);
-}
-
-/** 纯微任务排干（不推进假时钟——攒批窗计时不受污染） */
-async function flushMicrotasks(): Promise<void> {
-	for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
 function emittedIds(h: Harness, event: string): string[] {
@@ -154,6 +102,22 @@ function recordSpy(): ReturnType<typeof vi.fn> {
 	return spy;
 }
 
+/** 「兼容与防御」组共用前置：植入 record spy → arm 单笔 send → 应答首个 watch →
+ * 排干微任务 → 推进 50ms 攒批窗（三用例的时序骨架逐字同款） */
+async function armSendAndRespondWatch(
+	respondValue: unknown,
+): Promise<{ record: ReturnType<typeof vi.fn>; h: Harness }> {
+	const record = recordSpy();
+	const h = createHarness();
+	h.actionResults.send = () => SEND_OK;
+	await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "x" });
+	await flushMicrotasks();
+	h.respondWatch(0, respondValue);
+	await flushMicrotasks();
+	await vi.advanceTimersByTimeAsync(50);
+	return { record, h };
+}
+
 beforeEach(() => {
 	vi.useFakeTimers();
 	loggerMock.warn.mockClear();
@@ -170,7 +134,7 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 	it("send willNotify:true → register 三键 {id=notifyId, type:'session', name} + 开表（watch 不传 timeout）", async () => {
 		const h = createHarness();
 		h.actionResults.send = () => SEND_OK;
-		await runTool(h, "send_to_session", { sessionId: "child-1", prompt: "go" });
+		await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "go" });
 		await flushMicrotasks();
 
 		// 请求面：send params 携带 sm- 形态 notifyId
@@ -196,10 +160,10 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 	it("工具结果原样透传：send result 含 willNotify 字段（LLM 契约面显式化）", async () => {
 		const h = createHarness();
 		h.actionResults.send = () => SEND_OK;
-		const result = (await runTool(h, "send_to_session", {
+		const result = await runToolForText(h, "send_to_session", {
 			sessionId: "child-1",
 			prompt: "go",
-		})) as { content: Array<{ text: string }> };
+		});
 		expect(Object.hasOwn(result, "isError")).toBe(false);
 		expect(JSON.parse(result.content[0].text)).toEqual({ queued: true, willNotify: true });
 	});
@@ -215,7 +179,7 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 				lifetimeNotifyId: lifetime,
 			});
 		h.actionResults.send = () => SEND_OK;
-		await runTool(h, "create_managed_session", {
+		await runToolCall(h, "create_managed_session", {
 			cwd: "/w",
 			label: "auth-refactor",
 			prompt: "do it",
@@ -230,7 +194,7 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		expect(h.watches.map((w) => w.notifyId)).toEqual([regs[0].id, lifetime]);
 
 		// label 缓存回填：随后 send 的 register name = 工具入参 label（D9 正常路径）
-		await runTool(h, "send_to_session", { sessionId: "child-9", prompt: "again" });
+		await runToolCall(h, "send_to_session", { sessionId: "child-9", prompt: "again" });
 		await flushMicrotasks();
 		const afterSend = registersOf(h);
 		expect(afterSend).toHaveLength(3);
@@ -248,7 +212,7 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 				willNotify: false,
 				lifetimeNotifyId: lifetime,
 			});
-		await runTool(h, "create_managed_session", { cwd: "/w", label: "L" });
+		await runToolCall(h, "create_managed_session", { cwd: "/w", label: "L" });
 		await flushMicrotasks();
 
 		const createPayload = JSON.parse(h.selectMock.mock.calls[0][1][0]) as {
@@ -267,7 +231,7 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 	it("willNotify:false 的 send（runtime 未 arm）→ 零 register 零开表", async () => {
 		const h = createHarness();
 		h.actionResults.send = () => SEND_NO_NOTIFY;
-		await runTool(h, "send_to_session", { sessionId: "child-1", prompt: "x" });
+		await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "x" });
 		await flushMicrotasks();
 		expect(registersOf(h)).toHaveLength(0);
 		expect(h.watches).toHaveLength(0);
@@ -278,8 +242,8 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		h.actionResults.list = () =>
 			JSON.stringify({ sessions: [{ id: "c1", label: "restored-label" }], undeliveredResults: 0 });
 		h.actionResults.send = () => SEND_OK;
-		await runTool(h, "list_my_sessions", {});
-		await runTool(h, "send_to_session", { sessionId: "c1", prompt: "x" });
+		await runToolCall(h, "list_my_sessions", {});
+		await runToolCall(h, "send_to_session", { sessionId: "c1", prompt: "x" });
 		await flushMicrotasks();
 		const regs = registersOf(h);
 		expect(regs).toHaveLength(1);
@@ -292,8 +256,8 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 	async function armTwoSends(h: Harness): Promise<{ id1: string; id2: string }> {
 		h.actionResults.send = () => SEND_OK;
-		await runTool(h, "send_to_session", { sessionId: "child-1", prompt: "a" });
-		await runTool(h, "send_to_session", { sessionId: "child-1", prompt: "b" });
+		await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "a" });
+		await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "b" });
 		await flushMicrotasks();
 		const ids = emittedIds(h, "pending:register");
 		expect(ids).toHaveLength(2);
@@ -389,8 +353,8 @@ describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 		const record = recordSpy();
 		const h = createHarness();
 		h.actionResults.send = () => SEND_OK;
-		await runTool(h, "send_to_session", { sessionId: "child-a", prompt: "x" });
-		await runTool(h, "send_to_session", { sessionId: "child-b", prompt: "y" });
+		await runToolCall(h, "send_to_session", { sessionId: "child-a", prompt: "x" });
+		await runToolCall(h, "send_to_session", { sessionId: "child-b", prompt: "y" });
 		await flushMicrotasks();
 		expect(h.watches).toHaveLength(2);
 		h.respondWatch(
@@ -446,8 +410,8 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 
 		async function armTwo() {
 			h.actionResults.send = () => SEND_OK;
-			await runTool(h, "send_to_session", { sessionId: "child-1", prompt: "a" });
-			await runTool(h, "send_to_session", { sessionId: "child-1", prompt: "b" });
+			await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "a" });
+			await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "b" });
 			await flushMicrotasks();
 			return { id1: emittedIds(h, "pending:register")[0], id2: emittedIds(h, "pending:register")[1] };
 		}
@@ -464,7 +428,7 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 				willNotify: true,
 				lifetimeNotifyId: lifetime,
 			});
-		await runTool(h, "create_managed_session", { cwd: "/w", label: "doomed", prompt: "go" });
+		await runToolCall(h, "create_managed_session", { cwd: "/w", label: "doomed", prompt: "go" });
 		await flushMicrotasks();
 		const claimId = emittedIds(h, "pending:register").find((id) => id !== lifetime);
 		expect(claimId).toBeDefined();
@@ -500,7 +464,7 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 
 		// 新死亡（新 deathSeq，respawn 后再死）→ 新闻自然发声；未携 sessionFilePath → 整行省略
 		h.actionResults.send = () => SEND_OK;
-		await runTool(h, "send_to_session", { sessionId: "child-d", prompt: "x" });
+		await runToolCall(h, "send_to_session", { sessionId: "child-d", prompt: "x" });
 		await flushMicrotasks();
 		expect(h.watches).toHaveLength(3);
 		h.respondWatch(
@@ -561,14 +525,7 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 
 describe("兼容与防御", () => {
 	it("旧 runtime 象限：respond 'null' → 折叠 cancelled 静默 unregister，零 record", async () => {
-		const record = recordSpy();
-		const h = createHarness();
-		h.actionResults.send = () => SEND_OK;
-		await runTool(h, "send_to_session", { sessionId: "child-1", prompt: "x" });
-		await flushMicrotasks();
-		h.respondWatch(0, "null");
-		await flushMicrotasks();
-		await vi.advanceTimersByTimeAsync(50);
+		const { record, h } = await armSendAndRespondWatch("null");
 		expect(record).not.toHaveBeenCalled();
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(1);
 		// D6 显式静默豁免：null 不是漂移信号，零 warn 留痕
@@ -576,14 +533,7 @@ describe("兼容与防御", () => {
 	});
 
 	it("畸形/词表外 payload → 折叠 cancelled 收口（不落 default 误标、不产通知）+ 漂移 warn 留痕", async () => {
-		const record = recordSpy();
-		const h = createHarness();
-		h.actionResults.send = () => SEND_OK;
-		await runTool(h, "send_to_session", { sessionId: "child-1", prompt: "x" });
-		await flushMicrotasks();
-		h.respondWatch(0, JSON.stringify({ reason: "some-future-reason" }));
-		await flushMicrotasks();
-		await vi.advanceTimersByTimeAsync(50);
+		const { record, h } = await armSendAndRespondWatch(JSON.stringify({ reason: "some-future-reason" }));
 		expect(record).not.toHaveBeenCalled();
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(1);
 		// 协议漂移信号必须留痕：warn 带 notifyId + 漂移形态摘要（词表外 reason 原词）
@@ -597,14 +547,7 @@ describe("兼容与防御", () => {
 	});
 
 	it("select 侧 cancelled（应答未达，resolve undefined）→ 不动 pending（残留交下次 session_start 收口腿）", async () => {
-		const record = recordSpy();
-		const h = createHarness();
-		h.actionResults.send = () => SEND_OK;
-		await runTool(h, "send_to_session", { sessionId: "child-1", prompt: "x" });
-		await flushMicrotasks();
-		h.respondWatch(0, undefined);
-		await flushMicrotasks();
-		await vi.advanceTimersByTimeAsync(50);
+		const { record, h } = await armSendAndRespondWatch(undefined);
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(0);
 		expect(record).not.toHaveBeenCalled();
 	});

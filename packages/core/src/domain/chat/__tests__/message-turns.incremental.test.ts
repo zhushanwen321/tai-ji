@@ -77,6 +77,23 @@ function turnOf(item: RenderItem) {
   return item.turn
 }
 
+/** R2 组共用场景骨架：一问一答 turn → 隐藏完成通知边界（数量/形态由调用方给）→ 续跑 assistant */
+function qaThenNotify(notices: Message[]): Message[] {
+  return [
+    makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
+    makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
+    ...notices,
+    makeMsg({ id: 'a2', role: 'assistant', content: '续跑结果' }),
+  ]
+}
+
+/** R2 断言简写：第 2 个渲染项为 bg-notify 触发的 trigger turn，assistants 恰为给定 id 序列 */
+function expectBgNotifyTriggerTurn(items: RenderItem[], assistantIds: string[]): void {
+  const t2 = turnOf(items[1])
+  expect(t2.trigger).toBe('bg-notify')
+  expect(t2.assistants.map((m) => m.id)).toEqual(assistantIds)
+}
+
 /** 混合 fixture：turn / systemNotice / bashExecution 全 kind 覆盖。
  *  bash 置于 c1（可见 system 边界）之后 → 无当前 turn → 退化独立 static 项（规则 4 兜底）；
  *  若置于 turn 内则按规则 v2 inline 归 turn（notices），不再产出独立 bashExecution 项。 */
@@ -475,29 +492,17 @@ describe('groupRenderInput 分组规则 v2 —— R2 隐藏完成通知 = turn �
   })
 
   it('R2 常量源：workflow-result / managed-session-notify 同属 COMPLETE_NOTIFY_CUSTOM_TYPES（shared SSOT，无第二份判定）', () => {
-    const items = toRenderItems([
-      makeMsg({ id: 'u1', role: 'user', content: 'q' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'r' }),
+    const items = toRenderItems(qaThenNotify([
       notifyMsg('n1', 'workflow-result'),
       notifyMsg('n2', 'managed-session-notify'),
-      makeMsg({ id: 'a2', role: 'assistant', content: '续跑' }),
-    ])
-    expect(turnOf(items[1]).trigger).toBe('bg-notify')
-    expect(turnOf(items[1]).assistants.map((m) => m.id)).toEqual(['a2'])
+    ]))
+    expectBgNotifyTriggerTurn(items, ['a2'])
   })
 
   it('R2 空 turn 折叠：连续边界折叠为一个 trigger turn（后续 assistant 归入该组）', () => {
-    const items = toRenderItems([
-      makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
-      notifyMsg('n1'),
-      notifyMsg('n2'),
-      notifyMsg('n3'),
-      makeMsg({ id: 'a2', role: 'assistant', content: '续跑结果' }),
-    ])
+    const items = toRenderItems(qaThenNotify([notifyMsg('n1'), notifyMsg('n2'), notifyMsg('n3')]))
     expect(items.map((i) => i.kind)).toEqual(['turn', 'turn']) // 三个边界折叠为一
-    expect(turnOf(items[1]).trigger).toBe('bg-notify')
-    expect(turnOf(items[1]).assistants.map((m) => m.id)).toEqual(['a2'])
+    expectBgNotifyTriggerTurn(items, ['a2'])
   })
 
   it('R2 空 turn 折叠：边界后紧跟 user 不产出空 trigger turn', () => {

@@ -89,6 +89,19 @@ function savePayload(index = 0): SetProviderData {
   return spy.mock.calls[index]![1] as SetProviderData
 }
 
+/**
+ * headers 重复 key 场景装配（headers 错误三用例共用 given 步）：置入两行同 key X-A +
+ * 同步进 draft，断言 duplicateHeaderKey 已置入（装配自带验证，防 given 静默失效）。
+ */
+function givenDuplicateHeaderRows(form: ProviderEditFormModule): void {
+  form.headerRows.value = [
+    { key: 'X-A', value: '1' },
+    { key: 'X-A', value: '2' },
+  ]
+  form.syncHeadersFromRows()
+  expect(form.actionError.value).toBe('composable.duplicateHeaderKey')
+}
+
 describe('isDirty 快照矩阵（D13）', () => {
   it('快照未捕获 → false（未初始化不误报 dirty）', () => {
     // 跳过 captureSnapshot 的裸装配形态（snapshot = null）——用户改了字段也不判 dirty
@@ -331,12 +344,7 @@ describe('headers 行编辑 CRUD（W3 D7）', () => {
 
   it('重复 key → actionError duplicateHeaderKey（修复后清错误）', () => {
     const { form } = mountForm(null)
-    form.headerRows.value = [
-      { key: 'X-A', value: '1' },
-      { key: 'X-A', value: '2' },
-    ]
-    form.syncHeadersFromRows()
-    expect(form.actionError.value).toBe('composable.duplicateHeaderKey')
+    givenDuplicateHeaderRows(form)
     // 去重后错误清除（非永久挂起）
     form.removeHeader(1)
     expect(form.actionError.value).toBe('')
@@ -350,24 +358,14 @@ describe('headers 行编辑 CRUD（W3 D7）', () => {
     form.syncHeadersFromRows()
     expect(form.actionError.value).toBe('save failed')
     // headers 来源错误置入 → 重复 key 消除后仅该错误被清除
-    form.headerRows.value = [
-      { key: 'X-A', value: '1' },
-      { key: 'X-A', value: '2' },
-    ]
-    form.syncHeadersFromRows()
-    expect(form.actionError.value).toBe('composable.duplicateHeaderKey')
+    givenDuplicateHeaderRows(form)
     form.removeHeader(1)
     expect(form.actionError.value).toBe('')
   })
 
   it('locale 切换后 headers 错误仍能被清除（归属按 source 标签，不比对展示文案，MF-1-7）', () => {
     const { form } = mountForm(null)
-    form.headerRows.value = [
-      { key: 'X-A', value: '1' },
-      { key: 'X-A', value: '2' },
-    ]
-    form.syncHeadersFromRows()
-    expect(form.actionError.value).toBe('composable.duplicateHeaderKey')
+    givenDuplicateHeaderRows(form)
     // locale 切换：同 key 的文案运行时值变化（stub 由「返回 key」切到「加 en: 前缀」）
     tStub.mockImplementation((key: string) => `en:${key}`)
     // 用户修正重复 key → syncHeadersFromRows（经 removeHeader 触发，与真实 UI 路径一致）

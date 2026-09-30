@@ -3,23 +3,21 @@
 // 类型过滤（workflow 与已注销条目不触碰）/ 覆盖序（W1 悬置被 W2 覆盖后该 entry 恰一次
 // unregister、后续 entry 不受阻塞——每 entry 独立 handler 禁串行 await）/
 // 收口腿 label 降级源 = register 三键 name。
+// pi/ctx 装配、respondWatch、flushMicrotasks 走共享 harness（helpers/extension-harness.ts）；
+// watch-only select（非 watch action 即抛）为本文件域行为，留在本地。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import registerExtension from "../index.ts";
+import {
+	flushMicrotasks,
+	makeRespondWatch,
+	mountExtension,
+	type ExtensionHarness,
+	type WatchInvocation,
+} from "./helpers/extension-harness.ts";
 
 const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger");
 
-interface WatchInvocation {
-	notifyId: string;
-	resolve: (value: unknown) => void;
-}
-
-interface Harness {
-	registered: Array<{ name: string; execute: (...args: unknown[]) => Promise<unknown> }>;
-	emitted: Array<{ event: string; data: Record<string, unknown> }>;
-	handlers: Record<string, (event: unknown, ctx: unknown) => unknown>;
-	ctx: Record<string, unknown>;
+interface Harness extends ExtensionHarness {
 	watches: WatchInvocation[];
 	respondWatch(index: number, value: unknown): void;
 }
@@ -42,9 +40,6 @@ function staleEntries(): unknown[] {
 }
 
 function createHarness(entries: unknown[]): Harness {
-	const registered: Harness["registered"] = [];
-	const emitted: Harness["emitted"] = [];
-	const handlers: Harness["handlers"] = {};
 	const watches: WatchInvocation[] = [];
 	const selectMock = vi.fn((_marker: unknown, args: unknown[], _opts?: unknown) => {
 		const payload = JSON.parse((args as string[])[0]) as {
@@ -56,49 +51,30 @@ function createHarness(entries: unknown[]): Harness {
 			watches.push({ notifyId: String(payload.params.notifyId), resolve });
 		});
 	});
-	const pi = {
-		registerTool: (tool: { name: string; execute: (...a: unknown[]) => Promise<unknown> }) =>
-			registered.push(tool),
-		on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
-			handlers[event] = handler;
-		},
-		events: {
-			emit: (event: string, data: Record<string, unknown>) => {
-				emitted.push({ event, data });
-			},
-		},
-		getAllTools: vi.fn(() => []),
-		setActiveTools: vi.fn(),
-	};
-	const ctx = {
-		mode: "rpc" as const,
-		hasUI: true,
-		ui: { select: selectMock },
-		sessionManager: { getEntries: () => entries, getSessionId: () => "parent-1" },
-	};
-	registerExtension(pi as never);
 	return {
-		registered,
-		emitted,
-		handlers,
-		ctx,
+		...mountExtension(selectMock, entries),
 		watches,
-		respondWatch: (index, value) => {
-			const inv = watches[index];
-			if (!inv) throw new Error(`no watch invocation at index ${index}`);
-			inv.resolve(value);
-		},
+		respondWatch: makeRespondWatch(watches),
 	};
-}
-
-async function flushMicrotasks(): Promise<void> {
-	for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
 function unregistersOf(h: Harness): Array<[string, unknown]> {
 	return h.emitted
 		.filter((e) => e.event === "pending:unregister")
 		.map((e) => [String(e.data.id), e.data.reason]);
+}
+
+/** 单条 session register 的收口腿驱动（fail-closed / label 降级两用例共用前置）：
+ * 开表（session_start）→ 排干微任务 → 应答首个 watch → 再排干 */
+async function startSingleEntrySession(respondValue: unknown): Promise<Harness> {
+	const h = createHarness([
+		{ customType: "pending:register", data: { id: E1, type: "session", name: "Alpha", registeredAt: 1, sessionId: "parent-1" } },
+	]);
+	h.handlers.session_start({ type: "session_start" }, h.ctx);
+	await flushMicrotasks();
+	h.respondWatch(0, respondValue);
+	await flushMicrotasks();
+	return h;
 }
 
 beforeEach(() => {
@@ -150,13 +126,7 @@ describe("session_start 重启收口腿（D7③）", () => {
 	});
 
 	it("runtime 已重启查无 claim → fail-closed 'cancelled' 腿：静默注销（活跃集回归基线）", async () => {
-		const h = createHarness([
-			{ customType: "pending:register", data: { id: E1, type: "session", name: "Alpha", registeredAt: 1, sessionId: "parent-1" } },
-		]);
-		h.handlers.session_start({ type: "session_start" }, h.ctx);
-		await flushMicrotasks();
-		h.respondWatch(0, JSON.stringify({ reason: "cancelled" }));
-		await flushMicrotasks();
+		const h = await startSingleEntrySession(JSON.stringify({ reason: "cancelled" }));
 		expect(unregistersOf(h)).toEqual([[E1, "cancelled"]]);
 	});
 
@@ -165,13 +135,9 @@ describe("session_start 重启收口腿（D7③）", () => {
 			current: { record: vi.fn(() => true), compactionCheck: () => 0 },
 		});
 		const record = Reflect.get(globalThis, LEDGER_SLOT_KEY).current.record;
-		const h = createHarness([
-			{ customType: "pending:register", data: { id: E1, type: "session", name: "Alpha", registeredAt: 1, sessionId: "parent-1" } },
-		]);
-		h.handlers.session_start({ type: "session_start" }, h.ctx);
-		await flushMicrotasks();
-		h.respondWatch(0, JSON.stringify({ reason: "completed", sessionId: "child-x", settleSeq: 1, fulfillsN: 1 }));
-		await flushMicrotasks();
+		const h = await startSingleEntrySession(
+			JSON.stringify({ reason: "completed", sessionId: "child-x", settleSeq: 1, fulfillsN: 1 }),
+		);
 		await vi.advanceTimersByTimeAsync(50);
 		expect(record).toHaveBeenCalledTimes(1);
 		expect(String(record.mock.calls[0][1])).toContain('Managed session "Alpha" (child-x)');

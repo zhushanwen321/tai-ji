@@ -131,13 +131,9 @@ def main() -> int:
         missing_in_en = sorted(zh_keys - en_keys)
         extra_in_en = sorted(en_keys - zh_keys)
         if missing_in_en:
-            preview = missing_in_en[:5]
-            suffix = '...' if len(missing_in_en) > 5 else ''
-            errors.append(f'{name} — en-US 缺失 {len(missing_in_en)} key: {preview}{suffix}')
+            errors.append(f'{name} — en-US 缺失 {len(missing_in_en)} key: {missing_in_en}')
         if extra_in_en:
-            preview = extra_in_en[:5]
-            suffix = '...' if len(extra_in_en) > 5 else ''
-            errors.append(f'{name} — en-US 多余 {len(extra_in_en)} key: {preview}{suffix}')
+            errors.append(f'{name} — en-US 多余 {len(extra_in_en)} key: {extra_in_en}')
 
     if not errors:
         print(f'{GREEN}[OK] i18n locale 双侧 key 对齐（{len(common)} 个子模块，zh-CN === en-US）{NC}')

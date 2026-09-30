@@ -25,6 +25,52 @@ export type SettingsTransportStubOverrides = {
   [K in keyof SettingsTransport]?: (...args: Parameters<SettingsTransport[K]>) => unknown
 }
 
+/** 订阅方法统一桩形（模块内共用）：一键产出「调用返回 no-op 取消函数」的独立 vi.fn
+ *  （每键一实例，mock 调用记录按键隔离，断言互不串扰）。 */
+function makeUnsubscribeStub() {
+  return vi.fn((): () => void => () => {})
+}
+
+/** SettingsTransport 的订阅方法面（键集漂移由下方 Pick 标注报错——改名/删键即编译红）。 */
+export type SettingsSubscriptionStubs = Pick<
+  SettingsTransport,
+  | 'onProviders' | 'onModels' | 'onSkills' | 'onAgents' | 'onExtensions'
+  | 'onSkillDirs' | 'onAgentDirs' | 'onExtensionDirs' | 'onDefaults' | 'onDefaultsWithSource'
+  | 'onSkillCacheInvalidated' | 'onSystemPrompt' | 'onTerminalConfig' | 'onRetryConfig'
+  | 'onAuthDeviceCode' | 'onAuthAuthUrl' | 'onAuthSuccess' | 'onAuthError'
+>
+
+/**
+ * 订阅段全量桩（单源导出）：SettingsTransport 订阅方法面一键取齐，每次调用产出全新
+ * vi.fn 实例（无跨用例状态残留）。
+ *
+ * renderer/ui 侧 mock 需要同形状订阅段时 spread 本函数返回值
+ * （`...makeSettingsSubscriptionStubs()`），不再逐键复刻 `vi.fn(() => () => {})`
+ * 字面量——该字面量与外部 mock 的逐字重复正是克隆组来源。
+ */
+export function makeSettingsSubscriptionStubs(): SettingsSubscriptionStubs {
+  return {
+    onProviders: makeUnsubscribeStub(),
+    onModels: makeUnsubscribeStub(),
+    onSkills: makeUnsubscribeStub(),
+    onAgents: makeUnsubscribeStub(),
+    onExtensions: makeUnsubscribeStub(),
+    onSkillDirs: makeUnsubscribeStub(),
+    onAgentDirs: makeUnsubscribeStub(),
+    onExtensionDirs: makeUnsubscribeStub(),
+    onDefaults: makeUnsubscribeStub(),
+    onDefaultsWithSource: makeUnsubscribeStub(),
+    onSkillCacheInvalidated: makeUnsubscribeStub(),
+    onSystemPrompt: makeUnsubscribeStub(),
+    onTerminalConfig: makeUnsubscribeStub(),
+    onRetryConfig: makeUnsubscribeStub(),
+    onAuthDeviceCode: makeUnsubscribeStub(),
+    onAuthAuthUrl: makeUnsubscribeStub(),
+    onAuthSuccess: makeUnsubscribeStub(),
+    onAuthError: makeUnsubscribeStub(),
+  }
+}
+
 /** 构造全量 SettingsTransport 桩（逐方法中性默认 + 按需覆盖）。 */
 export function makeSettingsTransportStub(overrides: SettingsTransportStubOverrides = {}): SettingsTransport {
   const transport: SettingsTransport = {
@@ -129,25 +175,9 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     upgradeExtension: vi.fn(async () => {}),
     setExtensionAutoUpgrade: vi.fn(async () => {}),
 
-    // ── 订阅（返回 no-op 取消函数）──
-    onProviders: vi.fn(() => () => {}),
-    onModels: vi.fn(() => () => {}),
-    onSkills: vi.fn(() => () => {}),
-    onAgents: vi.fn(() => () => {}),
-    onExtensions: vi.fn(() => () => {}),
-    onSkillDirs: vi.fn(() => () => {}),
-    onAgentDirs: vi.fn(() => () => {}),
-    onExtensionDirs: vi.fn(() => () => {}),
-    onDefaults: vi.fn(() => () => {}),
-    onDefaultsWithSource: vi.fn(() => () => {}),
-    onSkillCacheInvalidated: vi.fn(() => () => {}),
-    onSystemPrompt: vi.fn(() => () => {}),
-    onTerminalConfig: vi.fn(() => () => {}),
-    onRetryConfig: vi.fn(() => () => {}),
-    onAuthDeviceCode: vi.fn(() => () => {}),
-    onAuthAuthUrl: vi.fn(() => () => {}),
-    onAuthSuccess: vi.fn(() => () => {}),
-    onAuthError: vi.fn(() => () => {}),
+    // ── 订阅（返回 no-op 取消函数）—— 订阅段单源 = makeSettingsSubscriptionStubs
+    //    （键集漂移由其 Pick 标注 + 下方 SettingsTransport 标注双重报错）──
+    ...makeSettingsSubscriptionStubs(),
   }
   return { ...transport, ...overrides } as SettingsTransport
 }

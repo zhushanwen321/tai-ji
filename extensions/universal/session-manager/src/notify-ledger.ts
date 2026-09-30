@@ -29,13 +29,10 @@
 //（STANDARDS §11.1 通知类接入点降级，非静默吞）。
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-	bindNotifyLedgerHost,
-	getBoundNotifyLedger,
-	type NotifyLedgerHost,
-} from "@zhushanwen/subagent-core";
+import { bindNotifyLedgerHost, getBoundNotifyLedger } from "@zhushanwen/subagent-core";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
-import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { createPiNotifyLedgerHost } from "@zhushanwen/pi-notify-ledger-host";
+import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 import {
 	MANAGED_SESSION_NOTIFY_CUSTOM_TYPE,
@@ -46,39 +43,24 @@ const logger = getLogger("session-manager");
 
 /**
  * 装配纪律 ①②（session_start 调用）：无条件 bind + recover 成对。
- * host 形态与 subagent-workflow bindLedgerHostAndRecover 同构（同一槽的两处装配方，
- * host 接口一致才能互换消费）；装配失败不阻断 session_start（record 侧走槽空降级）。
+ * host 五端口的 pi 接线（appendEntry / getEntries / isIdle / agent_settled /
+ * sendMessage + 送达 stale 防御）收敛在共享工厂 @zhushanwen/pi-notify-ledger-host
+ * ——与 subagent-workflow 同一工厂（同一槽的两处装配方，host 接口一致才能互换
+ * 消费），本包以 component/logger/warn 前缀参数化（label = session-manager:*、
+ * stale warn 文案带 "[session-manager] " 前缀，归因不串包）。
+ * 装配失败不阻断 session_start（record 侧走槽空降级）。
  */
 export function ensureLedgerBound(pi: ExtensionAPI, ctx: ExtensionContext): void {
 	try {
-		const host: NotifyLedgerHost = {
-			appendLedgerEntry: (customType, data) => {
-				pi.appendEntry(customType, data);
-			},
-			readSessionEntries: () => ctx.sessionManager.getEntries(),
-			isIdle: () => ctx.isIdle(),
-			onAgentSettled: (handler) => {
-				pi.on("agent_settled", handler);
-			},
-			sendDelivery: (message) => {
-				// 单通道送达（D5）：courier 已在发送前二次复查 isIdle。
-				// stale ctx 防御（对齐 subagent-workflow sendDelivery 同款）：delivery 经
-				// settled 边沿 / 恢复重放异步触发，可能落在 ctx 失效窗口——stale 静默降级
-				// （本条不投递，attemptDeliver 按已受理标 sentAt）+ warn 归因；非 stale
-				// 异常原样上抛，由 ledger attemptDeliver 既有 catch 走 settleRejected
-				// 留账重试语义。
-				guardStaleCtx(() => pi.sendMessage(message, { triggerTurn: true }), {
-					label: "session-manager:sendDelivery",
-					onStale: (error) =>
-						logger.warn("[session-manager] notify delivery skipped (stale ctx)", {
-							error: toErrorMessage(error),
-						}),
-				});
-			},
-		};
 		// ①② bind + recover 成对（G3 重启重放 = recoverFromSession 既有语义；
 		// 双 bind 收敛 = subagent-core dispose 旧实例语义，见文件头 ③）
-		bindNotifyLedgerHost(host).recoverFromSession();
+		bindNotifyLedgerHost(
+			createPiNotifyLedgerHost(pi, ctx, {
+				component: "session-manager",
+				logger,
+				staleWarnPrefix: "[session-manager] ",
+			}),
+		).recoverFromSession();
 	} catch (err) {
 		logger.warn("[session-manager] notify ledger bind failed (record degrades until next session_start)", {
 			error: toErrorMessage(err),

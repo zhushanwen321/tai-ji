@@ -58,15 +58,14 @@ import { Check, ChevronDown, LoaderCircle, Brain } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
-  THINKING_LEVELS,
-  normalizeSupportedLevels,
-  highestAvailableLevel,
+  currentThinkingLevelKey,
+  availableThinkingLevelOptions,
   resolveThinkingValue,
-  resolveThinkingKey,
   getDisplayLabel,
   type ThinkingLevelOption,
   type ThinkingLevel,
 } from './thinking-levels'
+import { useSwitchingGatedPopoverOpen } from './popover-open-gate'
 
 const emit = defineEmits<{
   /** 选中档位后，发给 runtime 的实际 level（经 thinkingLevelMap value 映射） */
@@ -105,27 +104,20 @@ const props = withDefaults(
 )
 
 const { t } = useI18n()
-const open = ref(false)
-// U4：切换中禁止开合（内联处理，避免侵入通用 popover 原语）
-const canOpen = computed({
-  get: () => open.value,
-  set: (v: boolean) => { open.value = props.switching ? false : v },
-})
+// U4：切换中禁止开合（门禁在 useSwitchingGatedPopoverOpen，与 ModelSelectPopover 共用）
+const { open, canOpen } = useSwitchingGatedPopoverOpen(() => props.switching)
 // prop level 是 runtime 返回的 value，反查 map 得到 UI 档位 key
 const level = ref<ThinkingLevel>(
-  props.level
-    ? resolveThinkingKey(props.level, props.levelMap, highestAvailableLevel(props.supportedLevels))
-    : 'max',
+  currentThinkingLevelKey(props.level, props.levelMap, props.supportedLevels),
 )
 watch(() => props.level, (v) => {
-  if (v) level.value = resolveThinkingKey(v, props.levelMap, highestAvailableLevel(props.supportedLevels))
+  if (v) level.value = currentThinkingLevelKey(v, props.levelMap, props.supportedLevels)
 })
 
 /** 当前模型的可用档位选项（只渲染可用的，不灰显不可用档位；可用集来自 supportedLevels 下发） */
-const availableOptions = computed<ThinkingLevelOption[]>(() => {
-  const available = new Set(normalizeSupportedLevels(props.supportedLevels))
-  return THINKING_LEVELS.filter((opt) => available.has(opt.level))
-})
+const availableOptions = computed<ThinkingLevelOption[]>(() =>
+  availableThinkingLevelOptions(props.supportedLevels),
+)
 
 const currentLabel = computed(
   () => props.level ? getDisplayLabel(level.value, props.levelMap, t) : t('panel.thinkingLevel.placeholder'),

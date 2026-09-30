@@ -39,13 +39,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { LoaderCircle } from '@lucide/vue'
 import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/popover'
 import type { ProviderId } from '@taiji/shared'
 import { getSettingsStore } from '@taiji/core'
 import ModelPickerPanel from './ModelPickerPanel.vue'
+import { useSwitchingGatedPopoverOpen } from './popover-open-gate'
 import { bareModelId, resolveProviderIdFromGroups, useModelPickerData } from './model-picker-data'
 
 const emit = defineEmits<{
@@ -72,12 +73,8 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 const settingsStore = getSettingsStore()
-const open = ref(false)
-// U4：切换中禁止开合（内联处理，避免侵入 ui 包 PopoverTriggerButton 的 props 面）
-const canOpen = computed({
-  get: () => open.value,
-  set: (v: boolean) => { open.value = props.switching ? false : v },
-})
+// U4：切换中禁止开合（门禁在 useSwitchingGatedPopoverOpen，与 ThinkingLevelPopover 共用）
+const { open, canOpen } = useSwitchingGatedPopoverOpen(() => props.switching)
 
 // 数据面（分组 / enabled 过滤 / pickerGroups / 反查）在 model-picker-data——
 // 顶层绑定名保持 groups（既有测试经 vm.groups 断言分组形状，语义不漂移）

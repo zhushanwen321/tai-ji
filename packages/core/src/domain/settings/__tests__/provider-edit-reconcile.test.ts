@@ -10,8 +10,9 @@
  * 纯函数测试：无 Vue watch / 无时序伪造——每条裁决直接断言 decision 形状。
  */
 import { describe, it, expect } from 'vitest'
-import { reconcileBroadcast, formPatchFromProvider } from '../provider-edit-reconcile'
+import { reconcileBroadcast, formPatchFromProvider, type BroadcastReconcileDecision } from '../provider-edit-reconcile'
 import type { FormSnapshot } from '../provider-edit-types'
+import type { ProviderInfo } from '@taiji/shared'
 // provider fixture 工厂迁 ./helpers/provider-edit-testbed（长版，与其他 provider-edit 系测试同源）
 import { makeProvider } from './helpers/provider-edit-testbed'
 
@@ -28,6 +29,16 @@ function makeSnapshot(overrides: Partial<FormSnapshot> = {}): FormSnapshot {
     authMethod: undefined,
     ...overrides,
   }
+}
+
+/**
+ * 分支① repaint 裁决获取（models 两用例共用）：非 dirty + 已初始化快照基线，
+ * 非 repaint 即抛错（原用例内守卫同语义，类型收窄使 .models 直接可达）。
+ */
+function repaintDecision(fresh: ProviderInfo): Extract<BroadcastReconcileDecision, { action: 'repaint' }> {
+  const d = reconcileBroadcast(fresh, { authMethod: undefined }, false, makeSnapshot())
+  if (d.action !== 'repaint') throw new Error('unexpected decision')
+  return d
 }
 
 describe('分支①：非 dirty → 整体重拍（repaint）', () => {
@@ -66,28 +77,24 @@ describe('分支①：非 dirty → 整体重拍（repaint）', () => {
   })
 
   it('repaint 的 models = toEditableModels：catalog 过滤 builtin 条目（B-2），override/旧数据保留', () => {
-    const fresh = makeProvider({
+    const d = repaintDecision(makeProvider({
       kind: 'catalog',
       models: [
         { id: 'b1', name: 'B1', source: 'builtin' },
         { id: 'o1', name: 'O1', source: 'override' },
         { id: 'legacy', name: 'Legacy' },
       ],
-    })
-    const d = reconcileBroadcast(fresh, { authMethod: undefined }, false, makeSnapshot())
-    if (d.action !== 'repaint') throw new Error('unexpected decision')
+    }))
     expect(d.models.map((m) => m.id)).toEqual(['o1', 'legacy'])
   })
 
   it('repaint 的 models：custom（kind 缺失同）全量保留不过滤', () => {
-    const fresh = makeProvider({
+    const d = repaintDecision(makeProvider({
       models: [
         { id: 'm1', name: 'M1' },
         { id: 'm2', name: 'M2', source: 'builtin' },
       ],
-    })
-    const d = reconcileBroadcast(fresh, { authMethod: undefined }, false, makeSnapshot())
-    if (d.action !== 'repaint') throw new Error('unexpected decision')
+    }))
     expect(d.models.map((m) => m.id)).toEqual(['m1', 'm2'])
     // B-4b 透传位随 spread 进编辑副本（load 侧接线）
     expect(d.models[0]).toEqual({ id: 'm1', name: 'M1' })

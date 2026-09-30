@@ -154,6 +154,31 @@ export function highestAvailableLevel(supportedLevels?: string[] | null): Thinki
 }
 
 /**
+ * 当前档位的 UI key：runtime 返回的 value 反查（ThinkingLevelPopover / ModelThinkingAggregate
+ * 的高亮基准同语义）。value 缺失（runtime 未回传）时回退 'max'。
+ */
+export function currentThinkingLevelKey(
+  value: string | undefined,
+  map?: Record<string, string | null>,
+  supportedLevels?: string[] | null,
+): ThinkingLevel {
+  return value ? resolveThinkingKey(value, map, highestAvailableLevel(supportedLevels)) : 'max'
+}
+
+/**
+ * 档位可用集对应的选项列表（THINKING_LEVELS 只保留可用档，保持全序）。
+ *
+ * 可用档位列表渲染的唯一来源（ThinkingLevelPopover / ModelThinkingAggregate 的
+ * availableOptions）：只渲染可用的，不灰显不可用档位；可用集来自 supportedLevels 下发。
+ */
+export function availableThinkingLevelOptions(
+  supportedLevels?: string[] | null,
+): ThinkingLevelOption[] {
+  const available = new Set(normalizeSupportedLevels(supportedLevels))
+  return THINKING_LEVELS.filter((opt) => available.has(opt.level))
+}
+
+/**
  * 判断两个模型的档位可用集（supportedLevels）是否属同一思考体系。
  *
  * 用于模型切换时判定思考等级是否可直接映射：同体系直接映射当前档位，

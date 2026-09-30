@@ -16,34 +16,24 @@ import type { Translate } from './provider-edit-types'
 
 // ── 类型 ──
 
+/** ProviderInfo.models 元素（LocalModel 的单源基底——shared 读侧模型条目形状）。 */
+export type ProviderModelEntry = ProviderInfo['models'][number]
+
 /** 本地编辑态模型（ProviderInfo.models 的可编辑副本）。
- *  含 api/baseUrl/enabled 透传位（与 ProviderInfo.models 元素同构，W4）+
- *  B-4b 透传位（reasoning/maxTokens/cost/headers，对齐 SetProviderData.models 元素）：
+ *  形状经 extends 从 shared 单源派生：api/baseUrl/enabled 透传位（与 ProviderInfo.models
+ *  元素同构，W4）+ B-4b 透传位（reasoning/maxTokens/cost/headers/compat）全部由基底声明，
+ *  不再逐字段复刻（与 runtime SetProviderInput.models 的同形内联声明是跨包克隆组来源）。
  *  编辑保存时这些字段必须回传，否则 model 级配置会在 setProvider 合并时被丢弃
  *  （运行时靠 base spread 保数据不丢，但显式回传才让「编辑→保存」链路真实生效）。 */
-export interface LocalModel {
-  id: string
-  name?: string
-  api?: string
-  baseUrl?: string
-  reasoning?: boolean
-  /** model 级 max output tokens（B-4b 透传位）。 */
-  maxTokens?: number
-  contextWindow?: number
-  input?: Array<'text' | 'image'>
-  thinkingLevelMap?: Record<string, string | null>
+export interface LocalModel extends ProviderModelEntry {
   /**
    * model 级计费（B-4b 透传位，含可选 tiers 分档定价）。tiers 是运行时透传：
-   * ProviderInfo.models[].cost 类型未声明 tiers，但 spread 链（load → LocalModel → save）
-   * 保留其运行时值，编辑器不构造 cost 时既有 tiers 不丢。
+   * 基底（ProviderInfo.models[].cost）未声明 tiers，但 spread 链（load → LocalModel → save）
+   * 保留其运行时值，编辑器不构造 cost 时既有 tiers 不丢——此处补声明使透传位类型可达。
    */
-  cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: Array<{ inputTokensAbove: number; input: number; output: number; cacheRead: number; cacheWrite: number }> }
-  /** model 级自定义请求头（B-4b 透传位；当前无行编辑 UI，纯 load→save 保字段）。 */
-  headers?: Record<string, string>
-  /** model 级 compat 覆盖（OpenAI/Anthropic 兼容性配置，透传到 runtime setProvider）。 */
-  compat?: Record<string, unknown>
-  /** model 级启停透传（省略时 runtime 默认 true） */
-  enabled?: boolean
+  cost?: NonNullable<ProviderModelEntry['cost']> & {
+    tiers?: Array<{ inputTokensAbove: number; input: number; output: number; cacheRead: number; cacheWrite: number }>
+  }
   /**
    * 条目来源（B-2 聚合层标注透传）：catalog provider 的编辑列表只含非 builtin 条目
    * （见 toEditableModels），save 回传 override 条目、builtin 不回传（runtime 合并语义
