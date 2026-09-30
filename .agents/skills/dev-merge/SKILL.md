@@ -41,9 +41,9 @@ description: >-
 
 | 级别 | 判据（任一命中） | 动作 |
 |------|----------------|------|
-| **打回**（不进第 2 步合并） | quality-gates FAIL 经 3 轮修复子循环仍红；branch-review 终态 needs-human / stuck / max-rounds / review-failure / fix-failure（CR 门 fail-fast 语义，见 1.7）；must-fix 未全修；传播守卫硬检查红灯 | 停在合并之外，按各步失败输出的恢复指引处置后重跑对应步 |
+| **打回**（不进第 2 步合并） | quality-gates FAIL 经 3 轮修复子循环仍红；branch-review 终态 needs-human / stuck / max-rounds / review-failure / fix-failure（CR 门 fail-fast 语义，见 1.7）；must-fix 未全修；传播检查红灯 | 停在合并之外，按各步失败输出的恢复指引处置后重跑对应步 |
 | **随分支带走** | branch-review minor（suggestion）残余；metrics/coverage 的 warn 档机器报告 | 不阻塞合并，登记进 commit message 或 TODO，终局 PR 期复核 |
-| **呈报后继续** | 传播守卫软提示（兄弟线线粒度呈报 + 文件交集）；gates / changeset-check / cross-branch-overlap 脚本缺失的存在性守卫披露；changeset WARN（自动分类处置，理由列明） | 呈报或披露后继续流程，不静默跳过 |
+| **呈报后继续** | 传播检查软提示（兄弟线线粒度呈报 + 文件交集）；gates / changeset-check / cross-branch-overlap 脚本缺失的存在性检查披露；changeset WARN（自动分类处置，理由列明） | 呈报或披露后继续流程，不静默跳过 |
 
 ### 第 1.6 步：质量门与 changeset 前置（gates，恒跑）
 
@@ -60,9 +60,9 @@ node scripts/changeset-check.mjs                  # changeset 完整性：diff �
 - **changeset WARN**：主 agent 按 Gate-1a.5 同款分类逻辑处置（不弹窗问用户）——实质改动（包有对外语义变化）→ 起草 `.changeset/*.md` 且理由列明；非发布改动（纯注释/文档/无对外语义变化的内部整理）→ 跳过起草并列明理由。skip/pass → 无动作，汇报记一句。
 - **base 口径**：`--side dev-merge` = 分支增量（`git merge-base github/main HEAD`，脚本自解析），与第 1.7 步审查对象同口径；禁止传 `--base main`（那是 pr-cr-fix 侧的累积口径，两侧差异有意）。
 
-**存在性守卫（zcode/pi 两侧通用）**：跑前 `test -f scripts/quality-gates.mjs` 检查脚本存在——脚本随 git 分支传播，skill 实体经 symlink 即时生效，feature 分支未含新脚本 commit 时必然缺失（介质错速）。缺失 → 显式输出「quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露」，继续第 1.7 步；不崩溃、不静默。changeset-check.mjs 缺失同款处置。恢复通道：源 worktree `git merge dev-0.10.5`（或发布后 merge main）主动吸收后重跑。
+**存在性检查（zcode/pi 两侧通用）**：跑前 `test -f scripts/quality-gates.mjs` 检查脚本存在——脚本随 git 分支传播，skill 实体经 symlink 即时生效，feature 分支未含新脚本 commit 时必然缺失（介质错速）。缺失 → 显式输出「quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露」，继续第 1.7 步；不崩溃、不静默。changeset-check.mjs 缺失同款处置。恢复通道：源 worktree `git merge dev-0.10.5`（或发布后 merge main）主动吸收后重跑。
 
-**宿主分工**：zcode 宿主 = 发起项目 workflow（CreateWorkflow path 指向 `.agents/workflows/dev-merge-gates.dwf.ts`），一次承载本步 + 第 1.7 步（gates + branch-review 两步前置，存在性守卫内建，失败以 failed 终态返回）；pi 宿主无对应 workflow（dev-merge 使用频率低，不维护双宿主镜像），主 agent 按本步与第 1.7 步手工编排——gates 走上述 node 脚本 + changeset WARN 起草指令，branch-review 走 review-fix-loop。
+**宿主分工**：zcode 宿主 = 发起项目 workflow（CreateWorkflow path 指向 `.agents/workflows/dev-merge-gates.dwf.ts`），一次承载本步 + 第 1.7 步（gates + branch-review 两步前置，存在性检查内建，失败以 failed 终态返回）；pi 宿主无对应 workflow（dev-merge 使用频率低，不维护双宿主镜像），主 agent 按本步与第 1.7 步手工编排——gates 走上述 node 脚本 + changeset WARN 起草指令，branch-review 走 review-fix-loop。
 
 ### 第 1.7 步：合入点横切审查（3+3 维，触及源码即跑）
 
@@ -77,27 +77,27 @@ feature 分支的 diff 完整、上下文集中，是横切维度审查的天然
 3. 触发式追加 3 维：diff 触及打包/构建配置（tsup/electron-builder/CI）→ 加 `electron-build`；触及包结构/发布线（package.json / pnpm-workspace.yaml / .changeset/ 下任何变更）→ 加 `monorepo-impact`；触及 `extensions/**/src/**` → 加 `extension-api`（tool/command schema、SDK 契约、spec 偏差登记与 data-governance 同属 dev-flow 审不到的横切关注点，且是本仓高频改动范围；SDK 签名核对要对照 node_modules dist、成本中等，故不恒派只触发）；pr-cr-fix 侧回退集对 `extensions/**`（不限 src）宽派是终局兜底定位的保守取向，本侧收窄到 src 是合入点定位的有意差异、非谓词漂移。`electron-build` 本步只挂构建/发布配置面是有意收窄：runtime/electron **源码**改动的 CJS 兼容（`import.meta.url`）与 bundle 完整性由 pre-commit 的 `validate-runtime-bundle.sh` 机器门在每次 commit（含本步之后的 merge commit）拦截，LLM 维度不重审机器门已覆盖项；pr-cr-fix 回退集对 `packages/runtime/**` 宽派是终局兜底定位的保守取向（宁可多派不漏派），与本步收窄是两层定位差异、非谓词漂移
 4. 终态处置：must-fix 全修后才进第 2 步合并；minor 残余随分支带走（commit message 或 TODO 登记），不阻塞
 
-**CR 门 fail-fast 语义（2026-09-25 裁决）**：第 1.7 步 review-fix-loop 全链强结构化返回——reviewer/fixer/aggregator 任一结构化返回失败即立即终止整个 workflow（review-failure / fix-failure / aggregator-failure 终态 + 恢复指引），无降级完成形态。CR 门读到非 clean/converged 终态 = 环境或模型问题未修，按失败处置（不进合并），恢复动作见 run 返回值 message。
+**CR 门 fail-fast 语义（2026-09-25 裁决；2026-09-30 补实装对齐）**：第 1.7 步全链强结构化返回——reviewer/fixer/aggregator 校验失败由同一 agent 回注失败原因重试一次（该类失败最常见形态是报告已写好、JSON 尾部字段错），仍败即终止整个 workflow（review-failure / fix-failure / aggregator-failure 终态 + 恢复指引），无降级完成形态（禁止从报告文本解析降级）。CR 门读到非 clean/converged 终态 = 环境或模型问题未修，按失败处置（不进合并），恢复动作见 run 返回值 message。
 
 成本随 diff 规模浮动：小分支（≤5 非测试源文件）预计 10-20 分钟，大分支 30-50 分钟审查 + 15-30 分钟修复（diff 为单分支增量，远小于终局全量）。
 
-### 第 1.8 步：传播守卫前置（目标线 ⊇ main + 兄弟线未传播呈报）
+### 第 1.8 步：传播检查前置（目标线 ⊇ main + 兄弟线未传播呈报）
 
-进入合并（第 2 步）前对**目标集成线**跑传播守卫（纪律与约束 SSOT：ADR-0076 / C-proc-30）。硬检查语义 = **目标线 ⊇ main**（合并产物的落点线不得落后 main），**不以源 feature 线为检查对象**——源线落后而目标线不落后时合并产物仍 ⊇ main，拦截即过度；源线开发基线新旧是 ADR-0076 纪律①的治理面，不是本守卫语义。
+进入合并（第 2 步）前对**目标集成线**跑传播检查（纪律与约束 SSOT：ADR-0076 / C-proc-30）。硬检查语义 = **目标线 ⊇ main**（合并产物的落点线不得落后 main），**不以源 feature 线为检查对象**——源线落后而目标线不落后时合并产物仍 ⊇ main，拦截即过度；源线开发基线新旧是 ADR-0076 纪律①的治理面，不是本检查语义。
 
 ```bash
 # 目标集成 worktree 已存在（常态）——命令自包含 cd：
 cd <workspace>/<dev-branch> && node scripts/check-line-propagation.mjs --target HEAD
 # 目标 worktree 不存在但分支已存在（.bare 共享 refs 可见）——在源 worktree 内以分支名变量跑：
 node scripts/check-line-propagation.mjs --target <dev-branch>
-# 分支也不存在：跳过守卫，在合并汇报记一句理由（第 2 步将基于 main 新建该分支，构造性 ⊇ main）
+# 分支也不存在：跳过检查，在合并汇报记一句理由（第 2 步将基于 main 新建该分支，构造性 ⊇ main）
 ```
 
 - `--target` **禁止写死为 `main` 等分支名字面量**（任何 worktree 跑都恒绿，接线即空转）；worktree 内一律 `--target HEAD`。
-- **硬检查红灯 = block**：按守卫恢复指引在目标线 worktree 内 `git merge main` 后重跑；确有正当理由才可 `--allow-diverged` 一次性越过（打印警示、软提示照常执行），越过决定须呈报用户。
-- **仅分支存在形态红灯的处置**：目标 worktree 不存在时上述恢复指引不可直接执行——block 挡的是第 2 步合并，不挡恢复前置。先经 `worktree-manipulate` 创建目标 worktree（检出既有分支，等价于第 2 步的自动创建）→ 在其中 `git merge main` → 重跑守卫消除红灯后再进第 2 步。
+- **硬检查红灯 = block**：按第 1.8 步恢复指引在目标线 worktree 内 `git merge main` 后重跑；确有正当理由才可 `--allow-diverged` 一次性越过（打印警示、软提示照常执行），越过决定须呈报用户。
+- **仅分支存在形态红灯的处置**：目标 worktree 不存在时上述恢复指引不可直接执行——block 挡的是第 2 步合并，不挡恢复前置。先经 `worktree-manipulate` 创建目标 worktree（检出既有分支，等价于第 2 步的自动创建）→ 在其中 `git merge main` → 重跑检查消除红灯后再进第 2 步。
 - **软提示头条摘要呈报用户后才进第 2 步**（流程一等步骤，不是可选日志）：每条兄弟线的 commit 总量 + 最老停留天数；裁决粒度 = **线粒度**（对每条兄弟线回答「吸收 / 暂缓」），不逐条裁决。兄弟线长周期 WIP 每次全量呈报数十条属无状态恒常呈报的稳态，不是异常。
-- **兄弟线修改文件交集呈报**：软提示摘要附带交集列——`node scripts/cross-branch-overlap.mjs`（目标 worktree 存在 → cd 目标 worktree 直跑，默认 `--branch HEAD`；目标仅分支存在 → 源 worktree 内 `--branch <dev-branch>`），输出当前线 diff 与各未合并兄弟线 diff 的修改文件交集（确定性计算、恒不阻塞、空交集也是有效结论）。脚本缺失按存在性守卫同款跳过并披露；exit 2 工具错误披露后不阻塞。交集只给线粒度裁决提供重叠证据，不改变「吸收 / 暂缓」的裁决粒度。
+- **兄弟线修改文件交集呈报**：软提示摘要附带交集列——`node scripts/cross-branch-overlap.mjs`（目标 worktree 存在 → cd 目标 worktree 直跑，默认 `--branch HEAD`；目标仅分支存在 → 源 worktree 内 `--branch <dev-branch>`），输出当前线 diff 与各未合并兄弟线 diff 的修改文件交集（确定性计算、恒不阻塞、空交集也是有效结论）。脚本缺失按存在性检查同款跳过并披露；exit 2 工具错误披露后不阻塞。交集只给线粒度裁决提供重叠证据，不改变「吸收 / 暂缓」的裁决粒度。
 
 ### 第 2 步：合并
 
