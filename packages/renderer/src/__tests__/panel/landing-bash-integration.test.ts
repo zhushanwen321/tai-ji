@@ -31,22 +31,15 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/landing-bash-integration.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+// 必须置于 Composer import 之前：@/api 的 vi.mock 工厂执行期解引用 helper 导出，
+// Composer 导入链触发工厂时 helper 模块必须已初始化（同 mode-declaration-row 先例）。
+import { composerApiModule, composerSessionStoreModule, makeComposerChatApiMock } from '@/__tests__/helpers/composer-mount'
 import { mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
-// ── mock useChat（spy 化 send / sendBash，landing 首发不应触发它们）──
-const chatApiMock = {
-  send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-  sendBash: vi.fn(() => Promise.resolve()),
-  abortBash: vi.fn(() => Promise.resolve()),
-}
+// ── mock useChat（spy 化 send / sendBash，landing 首发不应触发它们；字面量换共享 helper 工厂）──
+const chatApiMock = makeComposerChatApiMock()
 vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => chatApiMock,
 }))
@@ -62,15 +55,8 @@ vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: () => flowMock,
   resetNewTaskFlow: vi.fn(),
 }))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn() },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+vi.mock('@/api', () => composerApiModule())
+vi.mock('@/stores/session', () => composerSessionStoreModule())
 
 // ── ComposerInput mock：render testid + emit input 设 draft + emit keydown Enter 触发 onSend ──
 // lastInputText 跟踪最近一次 input 文本，getSegments 还原 text 段（Composer landing 分支取 segments）

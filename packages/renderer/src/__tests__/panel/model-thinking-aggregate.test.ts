@@ -67,6 +67,20 @@ async function click(el: Element): Promise<void> {
   await flushPromises()
 }
 
+/** portal 内直查弹层行并断言在场（teleport 到 body，wrapper.find 够不到；hover/click 用例公共开场） */
+function pickerRow(testid: string): Element {
+  const row = document.body.querySelector(`[data-testid="${testid}"]`)
+  expect(row).not.toBeNull()
+  return row!
+}
+
+/** 断言事件已 emit 且取回首条 payload（emitted[0][0]；已发 N 条的追加断言由调用方自写） */
+function firstEmit(w: VueWrapper, event: string): unknown {
+  const emitted = w.emitted(event)
+  expect(emitted).toBeTruthy()
+  return emitted![0][0]
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   provideSettingsStore(createSettingsStore())
@@ -104,13 +118,10 @@ describe('hover 切换（D2：hover 即切，不关弹层；同值不 emit）', 
     const w = mountAggregate()
     await openAggregate(w)
 
-    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')
-    expect(gptRow).not.toBeNull()
-    await hover(gptRow!)
+    const gptRow = pickerRow('model-picker-item-gpt-4')
+    await hover(gptRow)
 
-    const emitted = w.emitted('selectModel')
-    expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toEqual({ modelId: 'gpt-4', provider: 'openai' })
+    expect(firstEmit(w, 'selectModel')).toEqual({ modelId: 'gpt-4', provider: 'openai' })
     // hover 切换不关弹层（用户还要继续瞄别的行）
     expect(pickerPanel()).not.toBeNull()
   })
@@ -131,13 +142,9 @@ describe('hover 切换（D2：hover 即切，不关弹层；同值不 emit）', 
     const w = mountAggregate()
     await openAggregate(w)
 
-    const maxRow = document.body.querySelector('[data-testid="thinking-level-row-max"]')
-    expect(maxRow).not.toBeNull()
-    await hover(maxRow!)
+    await hover(pickerRow('thinking-level-row-max'))
 
-    const emitted = w.emitted('selectThinking')
-    expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toBe('xhigh')
+    expect(firstEmit(w, 'selectThinking')).toBe('xhigh')
     expect(pickerPanel()).not.toBeNull()
   })
 
@@ -156,16 +163,13 @@ describe('hover 切换（D2：hover 即切，不关弹层；同值不 emit）', 
     const w = mountAggregate()
     await openAggregate(w)
 
-    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')
-    expect(gptRow).not.toBeNull()
     // hover 已 emit 启动切换（pending = gpt-4），随后指针落定同目标的 click 不得再发第二条 RPC
-    await hover(gptRow!)
-    await click(gptRow!)
+    const gptRow = pickerRow('model-picker-item-gpt-4')
+    await hover(gptRow)
+    await click(gptRow)
 
-    const emitted = w.emitted('selectModel')
-    expect(emitted).toBeTruthy()
-    expect(emitted).toHaveLength(1)
-    expect(emitted![0][0]).toEqual({ modelId: 'gpt-4', provider: 'openai' })
+    expect(w.emitted('selectModel')).toHaveLength(1)
+    expect(firstEmit(w, 'selectModel')).toEqual({ modelId: 'gpt-4', provider: 'openai' })
   })
 
   it('switching=true（U4 单飞锁）→ hover/click 均不 emit，click 仅关弹层', async () => {
@@ -244,13 +248,9 @@ describe('click 选中（关弹层）', () => {
     const w = mountAggregate()
     await openAggregate(w)
 
-    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')
-    expect(gptRow).not.toBeNull()
-    await click(gptRow!)
+    await click(pickerRow('model-picker-item-gpt-4'))
 
-    const emitted = w.emitted('selectModel')
-    expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toEqual({ modelId: 'gpt-4', provider: 'openai' })
+    expect(firstEmit(w, 'selectModel')).toEqual({ modelId: 'gpt-4', provider: 'openai' })
     expect(pickerPanel()).toBeNull()
   })
 
@@ -258,13 +258,9 @@ describe('click 选中（关弹层）', () => {
     const w = mountAggregate()
     await openAggregate(w)
 
-    const maxRow = document.body.querySelector('[data-testid="thinking-level-row-max"]')
-    expect(maxRow).not.toBeNull()
-    await click(maxRow!)
+    await click(pickerRow('thinking-level-row-max'))
 
-    const emitted = w.emitted('selectThinking')
-    expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toBe('xhigh')
+    expect(firstEmit(w, 'selectThinking')).toBe('xhigh')
     expect(pickerPanel()).toBeNull()
   })
 })

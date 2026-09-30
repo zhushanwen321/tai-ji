@@ -18,7 +18,9 @@
  * 运行：cd packages/renderer && pnpm vitest run src/__tests__/panel/skill-notice-stream.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
+// 必须置于 MessageStream import 之前：壳 deps 三连（useChatViewDeps / useChat / useSidebar）
+// 经 message-stream-shell-mount 顶层注册，MessageStream 导入链触发注册时 helper 必须已初始化。
+import '@/__tests__/helpers/message-stream-shell-mount'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
@@ -68,19 +70,7 @@ vi.mock('virtua/vue', async () => {
   }
 })
 
-// 壳 deps mock（同 MessageStream-kind.test.ts：装配 useChatViewDeps，本测聚焦 notice 呈现）
-vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    editAndResend: vi.fn(),
-    loadMoreHistory: vi.fn(),
-    hasMoreHistory: () => false,
-  }),
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn() }),
-}))
+// 壳 deps mock 经 message-stream-shell-mount import 顶层注册（本测聚焦 notice 呈现）
 
 class NoopResizeObserver {
   observe(): void {}

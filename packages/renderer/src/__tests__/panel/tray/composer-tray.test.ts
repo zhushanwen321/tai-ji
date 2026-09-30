@@ -298,6 +298,16 @@ async function advance(ms: number): Promise<void> {
   await nextTick()
 }
 
+/**
+ * 聚合面板用例公共开场：aggregated 形态挂载 + 真实点击聚合入口 + 面板键断言
+ * （原三用例逐字重复的「开聚合面板」段单源；面板段内容差异留在各用例）。
+ */
+async function openAggregatedPanel(): Promise<void> {
+  mountTray(makeWidgetSource(SID), SID, true)
+  await realClick(row().find('[data-testid="tray-aggregate-button"]'))
+  expect(panelKeys()).toEqual(['aggregate'])
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   Object.assign(trayState, createTrayState())
@@ -940,11 +950,8 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
     trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
-    mountTray(makeWidgetSource(SID), SID, true)
+    await openAggregatedPanel()
 
-    await realClick(row().find('[data-testid="tray-aggregate-button"]'))
-
-    expect(panelKeys()).toEqual(['aggregate'])
     expect(panelContentNodes('tray-aggregate-panel')).toHaveLength(1)
     // 段 = 有记录的类别（bash + workflow），全无记录的类别不出段
     expect(panelContentNodes('tray-aggregate-section-bash')).toHaveLength(1)
@@ -996,10 +1003,8 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
 
   it('aggregated + 插件零贡献 → 面板无发丝分隔、无 toolbar ViewHost（不留死分隔）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource(SID), SID, true)
+    await openAggregatedPanel()
 
-    await realClick(row().find('[data-testid="tray-aggregate-button"]'))
-    expect(panelKeys()).toEqual(['aggregate'])
     const panel = panelNodes()[0]
     expect(panel?.querySelector('[data-testid="view-host"]')).toBeNull()
     expect(panel?.querySelector('span.h-px.bg-border-strong')).toBeNull()
@@ -1089,10 +1094,8 @@ describe('ComposerTray 第 4 件「子会话」（u7）', () => {
   it('聚合入口共存（序 4）：聚合面板含 session 段，且段内复用 TraySessionPanel', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'active' })]
-    mountTray(makeWidgetSource(SID), SID, true)
+    await openAggregatedPanel()
 
-    await realClick(row().find('[data-testid="tray-aggregate-button"]'))
-    expect(panelKeys()).toEqual(['aggregate'])
     expect(panelContentNodes('tray-aggregate-section-session')).toHaveLength(1)
     expect(panelContentNodes('tray-session-panel')).toHaveLength(1)
     // bash 段仍走 TrayNativePanel（分流未改变）
