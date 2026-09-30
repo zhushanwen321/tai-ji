@@ -378,6 +378,10 @@ describe("createEventDirectoryTailer（周期复查 / offset 续读状态）", (
       parseLine: parseRecordEventFileLine,
       onEvents: (_filename, events) => seen.push(events.length),
       debounceMs: 20,
+      // fs.watch 静默丢事件有平台前科（本模块头注），重负载下 2s 预算内 watch 腿不可依赖
+      // ——注入短周期复查，让断言注释所称「双保险」的另一条腿在预算内实际参战；
+      // 正常路径 watch 仍是首要送达腿（毫秒级），周期复查只在丢事件/饥饿时接管
+      recheckIntervalMs: 200,
     });
     try {
       tailer.rescan(); // 冷启动消费首事件
