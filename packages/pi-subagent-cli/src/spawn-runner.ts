@@ -49,7 +49,6 @@ import { getPiInvocation } from "./pi-invocation.ts";
 import { collectOutcome, type CollectedOutcome } from "./output-collector.ts";
 import { toErrorMessage } from "./error-message.ts";
 import {
-  asThinkingLevel,
   buildEnvBlock,
   buildSpawnArgs,
   parseSpawnModelRef,
@@ -548,7 +547,12 @@ export async function runSpawnOnce(
     // 2. spawn 参数 + invocation
     const args = buildSpawnArgs({
       modelRef,
-      thinkingLevel: asThinkingLevel(params.thinkingLevel),
+      // 档位原样透传（合法性权威 = 宿主入口层与 pi）——非法值由 pi 显式报错，
+      // 本层不再做白名单收窄（收窄会把非法值静默换成 undefined = 「显式指定」变「没指定」）。
+      thinkingLevel:
+        typeof params.thinkingLevel === "string" && params.thinkingLevel.length > 0
+          ? params.thinkingLevel
+          : undefined,
       agentTools: params.agentTools,
       appendSystemPromptPath: tempFile?.filePath,
       sessionDir: params.sessionDir,

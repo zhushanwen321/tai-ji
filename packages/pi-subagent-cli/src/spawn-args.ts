@@ -4,7 +4,7 @@
 // buildSpawnArgs / applySchemaEnvToChildEnv / buildEnvBlock 提取——行为逐字等价，
 // 类型面改包内形态）。
 //
-// [U1 归并] buildSpawnArgs / parseSpawnModelRef / ThinkingLevel / asThinkingLevel
+// [U1 归并] buildSpawnArgs / parseSpawnModelRef
 // 的实现本体已上移 @zhushanwen/pi-rpc spawn-args 模块（主/从两侧模板单源，设计
 // subagent-permanent-session-model §3.3.2）——本文件按「先并存后切换」完成切换：
 // re-export 保持既有导入面（index.ts / spawn-runner / __tests__ 零改动），包内
@@ -18,11 +18,9 @@ import { buildOutboundChildEnv, getLogger } from "@zhushanwen/subagent-engine-sd
 
 import {
   appendExtensionArgs,
-  asThinkingLevel,
   buildPiSubagentSpawnArgs,
   parseSpawnModelRef,
   type SpawnModelRef,
-  type ThinkingLevel,
 } from "@zhushanwen/pi-rpc";
 
 import { SCHEMA_ENV_MAX_BYTES, SCHEMA_ENV_VAR } from "./constants.ts";
@@ -33,8 +31,8 @@ const logger = getLogger("session-runner");
 
 // ── pi-rpc spawn-args 模块 re-export（导入面兼容） ──
 
-export { asThinkingLevel, parseSpawnModelRef };
-export type { SpawnModelRef, ThinkingLevel };
+export { parseSpawnModelRef };
+export type { SpawnModelRef };
 
 /**
  * 组装 pi CLI 参数（不含 task 本身——task 由 spawn 后 sendPromptCommand 写 stdin）。
@@ -46,7 +44,7 @@ export type { SpawnModelRef, ThinkingLevel };
 export function buildSpawnArgs(
   params: {
     modelRef: SpawnModelRef;
-    thinkingLevel: ThinkingLevel | undefined;
+    thinkingLevel: string | undefined;
     agentTools: string[] | undefined;
     appendSystemPromptPath: string | undefined;
     sessionDir: string;

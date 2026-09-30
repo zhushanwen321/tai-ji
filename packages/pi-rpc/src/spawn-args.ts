@@ -20,7 +20,6 @@
 //     （--model provider/id:level）
 //   - extensions/skills 注入：两模板共用 appendSkillArgs / appendExtensionArgs 原语
 
-import type { ThinkingLevel } from './types.ts'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 共享分段原语
@@ -110,7 +109,7 @@ export interface PiMainAgentSpawnOptions {
   /** 禁用 context files（AGENTS.md 自动发现，--no-context-files）。 */
   noContextFiles?: boolean
   /** 覆盖思考级别（--thinking <level>；注意：非 --thinking-level，附录 A.4）。 */
-  thinkingLevel?: ThinkingLevel | string
+  thinkingLevel?: string
 }
 
 /**
@@ -197,7 +196,7 @@ export function parseSpawnModelRef(ref: string | undefined): SpawnModelRef | und
 /** subagent spawn 形状（pi-subagent-cli spawn-args.ts buildSpawnArgs 入参逐字等价）。 */
 export interface PiSubagentSpawnParams {
   modelRef: SpawnModelRef
-  thinkingLevel: ThinkingLevel | undefined
+  thinkingLevel: string | undefined
   agentTools: string[] | undefined
   appendSystemPromptPath: string | undefined
   sessionDir: string
