@@ -1625,11 +1625,13 @@ function metricsFixContext(metPassed) {
   if (metPassed) return "metrics-gate 本道已通过（无失败明细，本轮失败在另一道 gate）。";
   const m = readJsonFile(".review/metrics.json");
   const fails = (m && m.fail) || [];
-  if (fails.length === 0) return "metrics.json 不可读或无 fail 明细：以失败输出定位。";
+  const warns = (m && m.warn) || [];
+  if (fails.length === 0 && warns.length === 0) return "metrics.json 不可读或无明细：以失败输出定位。";
   return [
-    "metrics.json fail 明细（.review/metrics.json，前 10 条）：",
-    ...fails.slice(0, 10).map((f) => "- [" + f.type + "] " + (f.path || (f.files || []).join(",")) + " " + (f.name || "") + " — " + (f.reason || "")),
-    "要求：按明细修复（降复杂度/解除循环依赖/清理 unresolved import）；不放松 .fallowrc.json 阈值。",
+    "metrics.json 明细（.review/metrics.json，全量无截断——逐条修复全部条目）：",
+    ...fails.map((f) => "- FAIL [" + f.type + "] " + (f.path || (f.files || []).join(",")) + " " + (f.name || "") + " — " + (f.reason || "")),
+    ...warns.map((f) => "- WARN [" + f.type + "] " + (f.path || (f.files || []).join(",")) + " " + (f.name || "") + " — " + (f.reason || "")),
+    "要求：按明细修复（降复杂度/解除循环依赖/清理 unresolved import/重复块提取共享 helper）；不放松 .fallowrc.json 阈值。",
   ].join("\n");
 }
 

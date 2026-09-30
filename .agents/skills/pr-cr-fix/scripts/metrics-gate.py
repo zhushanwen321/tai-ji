@@ -47,7 +47,8 @@ WARN_DEAD_CODE_KINDS = [
     "boundary_violations",
 ]
 
-TARGET_TOP_N = 20
+# 2026-09-30 裁决：修复型门禁禁止 top-N 截断——清单必须全量报告，否则总工作量不可见、
+# 完成判定不可能、修复退化为清一组浮一组的循环。下方 warn/fail/targets/stdout 全部全量。
 
 # 文件级真实覆盖率 ≥ 此值时，complexity warn 条目视为「复杂但有充分测试证据」→ 移入
 # covered 列表（出 warn 保留展示）。文件级是函数级的有损近似（函数体行区间需 AST 才
@@ -184,7 +185,7 @@ def judge(report: dict, thresholds: dict, real_cov: dict[str, dict] | None) -> d
                                        or item.get("package_name") or item.get("type_name") or kind})
 
     dup_groups = [g for g in report.get("duplication", {}).get("clone_groups", []) if g.get("introduced")]
-    for g in sorted(dup_groups, key=lambda g: -(g.get("line_count") or 0))[:5]:
+    for g in sorted(dup_groups, key=lambda g: -(g.get("line_count") or 0)):
         # fallow clone_groups instance 的字段是 file/start_line（无 path/line 键），
         # 取错键会全量得 None（R3 monorepo-impact S-2 的 5 条 path=null 根因）
         files = [i.get("file") for i in g.get("instances", []) if isinstance(i, dict)]
@@ -199,7 +200,7 @@ def judge(report: dict, thresholds: dict, real_cov: dict[str, dict] | None) -> d
         "fail": fail,
         "warn": warn,
         "covered": covered,
-        "targets": {"high_crap": targets[:TARGET_TOP_N]},
+        "targets": {"high_crap": targets},
         "stats": {
             "fail": len(fail),
             "warn": len(warn),
@@ -235,9 +236,12 @@ def main() -> None:
     print(f"Gate-1.5 verdict={result['verdict']}  fail={s['fail']} warn={s['warn']} "
           f"covered={s['covered_by_real_coverage']}({s['coverage_basis']}) "
           f"dup_groups={s['duplication_introduced_groups']}  (base={base}, thresholds={s['thresholds']})")
-    for item in result["fail"][:10]:
+    for item in result["fail"]:
         loc = item.get("path") or ",".join(item.get("files", []))
-        print(f"  FAIL [{item['type']}] {loc}:{item.get('line', '')} {item.get('name', '')} — {item['reason']}")
+        print(f"  FAIL [{item['type']}] {loc}:{item.get('line', '')} {item.get('name', '')} — {item.get('reason')}")
+    for item in result["warn"]:
+        loc = item.get("path") or ",".join(item.get("files", []))
+        print(f"  WARN [{item['type']}] {loc}:{item.get('line', '')} — {item.get('reason')}")
     print(f"报告: {out_dir / 'metrics.json'}")
     sys.exit(1 if result["verdict"] == "fail" else 0)
 
