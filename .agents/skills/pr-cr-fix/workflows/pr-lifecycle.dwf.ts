@@ -2,8 +2,8 @@
 description: pr-cr-fix 的 zcode 原生版 PR 全生命周期单 workflow（9 step）：发起前检查 → 静态门禁
   （typecheck+lint，含条件 skill-yaml 校验）→ PR 标题/描述起草 + changeset 复核（缺失时按
   Gate-1a.5 原逻辑补起草兜底）→ 开 PR → 约束加载 → 覆盖率+度量聚合门禁（含 PR 规模披露）→
-  条件评审修复循环（cr-fix 代码审查维度默认不派——重语义审查已由 dev-merge 分层承接；显式
-  reviewers 参数是唯一开启方式，流程不读分支名做决策；循环本体 = 内联 review-fix-loop：并行
+  条件评审修复循环（cr-fix 代码审查维度默认不派；显式 reviewers 参数是唯一开启方式，
+  流程不读分支名做决策；循环本体 = 内联 review-fix-loop：并行
   review → 聚合 → 分组修复 → 对账重审）→ code-simplify → 终局三道门禁 → 停在 awaiting-push 等
   push 授权。与 pi 版（workspace 根 .agents/workflows/pr-lifecycle.js，pi workflow 工具按脚本
   绝对路径发起）为仅有的两个全链实现，语义完全一致。
@@ -34,13 +34,12 @@ args:
 // pr-lifecycle — zcode 原生动态工作流版（PR 全生命周期单脚本）
 // 语义同源：zsw 版 pr-lifecycle.js/lib.cjs（已退役，git 可追溯）的 step 注册表
 // + 全局 saved workflow review-fix-loop.dwf.ts 的循环本体（cr-fix step 内联）。
-// 两版本收敛裁决（2026-09-24）：完整 PR 生命周期只留 zcode 原生版（本文件）与
+// 完整 PR 生命周期有两个实现：zcode 原生版（本文件）与
 // pi 版（workspace 根 .agents/workflows/pr-lifecycle.js，pi workflow 工具按脚本绝对
 // 路径发起，见 SKILL.md 路径 1）。两版 cr-fix 内联循环 + zcode saved 版循环 = 三镜像同语义。
 //
-// 9 step 执行序（2026-09-26 审查体系重排 + 同日二次修正：审查分层——重语义审查前移
-// dev-merge；cr-fix 代码审查维度默认不派且流程不读分支名做决策，显式 reviewers 参数
-// 是唯一开启方式；skill-yaml 校验并入 static-gate；pr-meta 退化为 changeset 复核 +
+// 9 step 执行序（cr-fix 代码审查维度默认不派，显式 reviewers 参数是唯一开启方式，
+// 流程不读分支名做决策；skill-yaml 校验含在 static-gate 内；pr-meta = changeset 复核 +
 // 缺失兜底起草）：
 //   preflight → static-gate(含条件 skill-yaml 校验) →
 //   pr-meta(changeset 复核+缺失兜底) → pr-submit → constraints → gate-suite(含
@@ -286,12 +285,14 @@ async function gateFixLoop<R>(
       );
     }
     if (round === MAX_GATE_ROUNDS) break;
-    const fixer = agent(
+    // 链式调用（非 const 初始化器形态）：编译器静态分析只对链式 agent() 提取模板名做
+    // GUI 显示，const 赋值形态会把显示名顶成变量名；此处每轮新建单次 ask，无引用复用，
+    // 链式语义等价
+    const ctxTxt = extraFixContext ? `\n\n${await extraFixContext()}` : "";
+    await agent(
       `gate-fix-${stepId}-r${round}`,
       "你是 gate 修复工程师：只修失败输出直接相关的问题，修完自行 commit（显式路径），禁止 git add -A / git add .。",
-    );
-    const ctxTxt = extraFixContext ? `\n\n${await extraFixContext()}` : "";
-    await fixer.ask(
+    ).ask(
       [
         `workflow step "${stepId}" 第 ${round} 轮验证失败（gate：${gateName}），输出摘要（末 60 行）：`,
         tailLines(`${last.stderr}\n${last.stdout}`, 60),
@@ -765,7 +766,11 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
     }
 
     phase("聚合去重与修复分组");
-    const aggAgent = agent(
+    // 分步赋值（非 const 初始化器形态）：编译器静态分析只对非「变量声明初始化器」的
+    // agent() 提取模板名做 GUI 显示；此 actor 在下方重试循环内续聊（同一引用多次
+    // ask），不能链式化
+    let aggAgent: Agent;
+    aggAgent = agent(
       `aggregator-a${attempt}-r${round}`,
       "你是评审聚合裁决员：跨维度合并去重、证据裁决从严（无实证不进修复队列）、跨轮身份判定准确、修复分组遵循组内相关/组间独立；只读报告与代码，不改代码。",
     );
@@ -1497,11 +1502,11 @@ await step("gate-suite", async () => {
       return;
     }
     if (round === GATE_SUITE_ROUNDS) break;
-    const repairer = agent(
+    // 链式调用：同 gate-fix（每轮新建单次 ask，无引用复用）
+    await agent(
       `suite-fix-r${round}`,
       "你是 gate 修复工程师：拿聚合失败清单一次修复（覆盖率缺口与结构度量常同文件同源），只修清单直接相关的问题，修完自行 commit（显式路径），禁止 git add -A / git add .。",
-    );
-    await repairer.ask(
+    ).ask(
       [
         `gate-suite 第 ${round} 轮验证失败（增量覆盖率 + 结构度量两道 gate，输出摘要末 60 行）：`,
         tailLines(`${cov.stderr}\n${cov.stdout}${met ? `\n${met.stderr}\n${met.stdout}` : ""}`, 60),
@@ -1526,9 +1531,8 @@ await step("gate-suite", async () => {
 });
 
 phase("条件评审修复循环");
-// step 7：cr-fix（内联 review-fix-loop；代码审查维度默认不派——重语义审查分层归 dev-merge，
-// 本流程的 LLM 层 = simplify + pr-meta 等流程环节；显式 reviewers 参数是唯一开启方式，
-// 对所有分支一律如此，流程不读分支名做决策；环境类失败自动重试 1 次）
+// step 7：cr-fix（内联 review-fix-loop；代码审查维度默认不派，显式 reviewers 参数
+// 是唯一开启方式，与分支名无关；环境类失败自动重试 1 次）
 await step("cr-fix", async () => {
   const relReviewers = (await files.glob(".agents/skills/dev-merge/agents/review-*.md")).sort();
   let picked: string[];
@@ -1544,7 +1548,7 @@ await step("cr-fix", async () => {
     log(`[cr-fix] ${reviewModeNote}`);
   } else {
     // 默认不派代码审查维度（与分支名无关）——机器兜底由 gate-suite / final-gates 承担
-    reviewModeNote = "cr-fix 代码审查默认不派（重语义审查已由 dev-merge 分层承接；如需带审查请显式传 reviewers）";
+    reviewModeNote = "cr-fix 代码审查默认不派；需要审查时显式传 reviewers 参数";
     skippedSteps.push({ step: "cr-fix", reason: `${reviewModeNote}；机器兜底由 gate-suite / final-gates 承担` });
     log(`[cr-fix] ${reviewModeNote}`);
     return;

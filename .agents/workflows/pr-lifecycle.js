@@ -14,9 +14,8 @@
 //   PR 规模披露) → cr-fix(条件：默认不派代码审查维度/显式 reviewers 才派) → simplify(条件) → final-gates
 //
 // cr-fix 维度集判定（与 SKILL.md「审查维度集」节同规则）：
-//   代码审查维度默认不派——重语义审查（业务逻辑/架构/数据治理）分层归 dev-merge 承接；
-//   显式 reviewers 参数（白名单裁剪）是唯一开启方式，对所有分支一律如此。
-//   本流程不读分支名做任何决策（2026-09-26 用户裁决）；分支名仅作披露展示。
+//   代码审查维度默认不派；显式 reviewers 参数（白名单裁剪）是唯一开启方式，
+//   对所有分支一律如此。本流程不读分支名做任何决策；分支名仅作披露展示。
 //
 // 平台差异（宿主 API 形态，语义等价）：
 // - zcode CreateWorkflow path 调用 → pi workflow 工具 action=run + name=<本脚本绝对路径>
@@ -1700,8 +1699,8 @@ await step("gate-suite", async () => {
 });
 
 phase("条件评审修复循环");
-// step 7：cr-fix（内联 review-fix-loop；代码审查维度默认不派——重语义审查分层归
-// dev-merge，显式 reviewers 参数是唯一开启方式，与分支名无关；环境类失败自动重试 1 次）
+// step 7：cr-fix（内联 review-fix-loop；代码审查维度默认不派，显式 reviewers 参数
+// 是唯一开启方式，与分支名无关；环境类失败自动重试 1 次）
 await step("cr-fix", async () => {
   const agentsDir = ".agents/skills/dev-merge/agents";
   const relReviewers = !fileExists(agentsDir)
@@ -1720,7 +1719,7 @@ await step("cr-fix", async () => {
     log("[cr-fix] " + reviewModeNote);
   } else {
     // 默认不派代码审查维度（与分支名无关）——机器兜底由 gate-suite / final-gates 承担
-    reviewModeNote = "cr-fix 代码审查默认不派（重语义审查已由 dev-merge 分层承接；如需带审查请显式传 reviewers）";
+    reviewModeNote = "cr-fix 代码审查默认不派；需要审查时显式传 reviewers 参数";
     skippedStepsList.push({ step: "cr-fix", reason: reviewModeNote + "；机器兜底由 gate-suite / final-gates 承担" });
     log("[cr-fix] " + reviewModeNote);
     return;
