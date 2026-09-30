@@ -172,6 +172,12 @@ grep -rnE "run\.state\.status|this\.state\.status|state\.status\s*=" --include=*
 - **换什么**：把 R6 / R7 里 `state.status === "done"` 这一支的判据来源，从聚合字段改为**重建时的 fold 结果**——重建点（W3/W4/W5）本来就持有「有无 run-settled 帧」这一事实（`jsonl-run-store.ts:236 lastRunSettledEvent`、`resume-run.ts:750 rebuildRunFromRecord` 的 fold），该事实应随重建产物直接带到消费面，而不是绕道聚合字段再读回来。
 - **判据**：`grep -rnE 'state\.status === "done"' packages/subagent-core/src packages/runtime/src extensions/universal/subagent-workflow/src | grep -v __tests__` 命中数 = 0；且重水合 done run 的**三处行为**单测全绿（展示投影 = done / `isRunSettled` = true / `evictDoneRunsBeyondCap` 可淘汰）。
 - **风险**：`evictDoneRunsBeyondCap` 是 done run 内存有界性的唯一来源（`lifecycle.ts:88-93` 注释明载「内存上限 = K × 聚合大小」）。换源漏改这一处 = 内存无界，且症状滞后（长时间跑才显形），必须有三处行为断言兜底。
+- **落地状态（2026-09-30，已落）**：commit `927822df6`（`refactor(subagent-core): source run finality from the rebuild fold instead of the aggregate status`）。
+  - 做法：core 新增 `noteRebuiltSettlement` / `settlementRecordOfRunSettledFrame`（终局记录注册表的第二记源，与活体 dispatch 链同记录形状）；`isRunSettled` / `runSummary` 的终局判定只读该注册表；壳 `rebuildRunsFromRecordStreams` 在 fold 出 run-settled 帧时注入该事实（W1–W5 写点未动）。`WorkflowRun` 的 I2（终局 ⟹ reason）随本步退役——判据要求 `state.status === "done"` 字面量归零，而 I2 是唯一剩下的另一处读点；reason 完整性由 `transition` 的 done 入参校验与重建 fold（恒携带 `runSettledOutcomeToDoneReason`）保证，即原第 3 步的 R2 提前到本步。
+  - 判据实测：`grep -rnE 'state\.status === "done"' packages/subagent-core/src packages/runtime/src extensions/universal/subagent-workflow/src | grep -v __tests__` → 命中 **0**。
+  - 三处行为断言（新增用例 = 扩展侧 `jsonl-run-store-loadall.test.ts` 的「[D6(a) 第 1 步] 重水合 run 的终局判定源 = 重建 fold 结果」节，用 `loadAll` 真实重建 run）：① `runSummary` 投影 `done`（重启后不回退 running）；② `isRunSettled` = true（同节对照：无 run-settled 帧的重水合 run = false）；③ `evictDoneRunsBeyondCap(runs, 0)` 淘汰该 done run（白名单命中，内存有界性）。
+  - 夹具面：换源让「聚合 done 而注册表无条目」这一形态不再可达，core 与扩展侧直写 `state.status` 的终态夹具同步改为注入注册表条目（含 `interface/` 下 3 个既有展示/签名测试文件，仅改测试夹具，未动被测生产代码）。
+  - 验证：两侧 `npx tsc --noEmit` 0 错误；core 3594 passed / 扩展 934 passed（扩展仅剩既有 `transparent-resume.test.ts` 的 `writeFinalizedState` 失败，与本次无关）；`node scripts/check-subagent-core-value-cycles.mjs` / `node scripts/check-doc-symbol-drift.mjs` 均 OK。
 
 #### 第 2 步：清死方法与零消费表
 
