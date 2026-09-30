@@ -5,7 +5,7 @@
 // 错误规格表回归门：
 //   - -32603 "Model config is missing" → engine_credential_missing（共享宿主 HOME——
 //     凭据在 ZCode 桌面端管理），不换路径（第二任务仍走 app-server，create 帧计数增长）；
-//   - -32004 / -32010 → engine_run_failed 按任务失败上报（非漂移类，无 fallback 标注）。
+//   - -32004 / -32010 → engine_run_failed 按任务失败上报（非漂移类，不换通道保底）。
 // 全部跑 __fixtures__/fake-appserver.mjs 子进程（scenario 注入），绝不 spawn 真 zcode.cjs。
 
 import * as fs from "node:fs";
@@ -152,7 +152,7 @@ describe("错误分类（错误规格表）", () => {
     });
     const r1 = await engine.run(makeTask({ cwd: workspace }), makeCtx());
     expect(r1.outcome.error).toContain("engine_credential_missing");
-    expect(r1.outcome.engineFallback).toBeUndefined();
+    expect("engineFallback" in r1.outcome).toBe(false);
     const createsBefore = recvFrames(stateFile, "session/create").length;
     const r2 = await engine.run(makeTask({ cwd: workspace }), makeCtx());
     expect(r2.outcome.error).toContain("engine_credential_missing");
@@ -166,7 +166,7 @@ describe("错误分类（错误规格表）", () => {
     const r1 = await engine.run(makeTask({ cwd: workspace }), makeCtx());
     expect(r1.outcome.error).toContain("engine_run_failed");
     expect(r1.outcome.error).toContain("-32004");
-    expect(r1.outcome.engineFallback).toBeUndefined();
+    expect("engineFallback" in r1.outcome).toBe(false);
   }, 20_000);
 
   it("-32010（send busy）→ 任务失败上报，不降级", async () => {
@@ -176,6 +176,6 @@ describe("错误分类（错误规格表）", () => {
     const r1 = await engine.run(makeTask({ cwd: workspace }), makeCtx());
     expect(r1.outcome.error).toContain("engine_run_failed");
     expect(r1.outcome.error).toContain("-32010");
-    expect(r1.outcome.engineFallback).toBeUndefined();
+    expect("engineFallback" in r1.outcome).toBe(false);
   }, 20_000);
 });

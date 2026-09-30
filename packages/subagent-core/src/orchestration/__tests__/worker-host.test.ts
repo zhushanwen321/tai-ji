@@ -34,7 +34,7 @@ function fakeWorkerInstance() {
 
 function makeSpec(overrides: Partial<RunSpec> = {}): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: { autoCommit: true },
     scriptName: "test-wf",
     scriptPath: "/fake/test.js",

@@ -1,40 +1,78 @@
 /**
- * subagent-extractor 畸形输入守卫定向测试（CRAP 靶子：projectSelfDescribedSubagentRecord /
- * parseLegacyToolCallBlock / projectSubagentStartArgs / projectLegacyToolResultData /
- * buildLegacySubagentRecord）。
+ * subagent-extractor 畸形输入 / 投影守卫定向测试（CRAP 靶子：collectV2SubagentPair /
+ * projectV2SubagentRecord / parseLegacyToolCallBlock / projectSubagentStartArgs /
+ * projectLegacyToolResultData / buildLegacySubagentRecord）。
  *
- * 已有 subagent-extractor.test.ts 覆盖正常路径（快照投影 / bg-notify 终态 / sessionFile
- * 回退扫描）；本文件专测 PR #185 type-safety review 加的 shape 守卫族——输入源是
- * LLM 生成的 toolCall arguments / toolResult 文本 JSON.parse 产物 / extension 写入的
- * entry data（全部不可信），畸形值不得以谎报类型直达 SubagentRecord（下游 readFileSync
- * 对非 string sessionFile 会 throw）。每条守卫用例在「裸断言透传」的未修复形态下会红。
+ * [登记 §3.3] v1 全量快照投影（projectSelfDescribedSubagentRecord）与 v1 entry 扫描已随
+ * 兼容层整体删除（项目未上线、无 v1 数据）——自描述投影用例改用现行 v2「注册 + 终态」
+ * 条目对播种，断言收敛到幸存投影面：身份域透传（origin 字面量守卫 / parentRunId /
+ * stepIndex）、缺省可选字段 → undefined / null（不发明默认值）、elapsedSeconds 派生、
+ * engine/engineHandle 透传、同 id 后到覆盖。
+ *
+ * 已有 subagent-extractor.test.ts 覆盖正常路径（条目对投影 / bg-notify 终态 /
+ * sessionFile 回退扫描）；本文件专测形状守卫族——输入源是 LLM 生成的 toolCall
+ * arguments / toolResult 文本 JSON.parse 产物 / extension 写入的 entry data（全部
+ * 不可信），畸形值不得以谎报类型直达 SubagentRecord（下游 readFileSync 对非 string
+ * sessionFile 会 throw）。
  *
  * 运行：cd packages/runtime && npx vitest run test/subagent-extractor-guards.test.ts
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { scanSubagentEntries } from '../src/services/session/subagent-extractor.js'
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
 import type { SubagentRecord } from '@taiji/shared'
 
-/** 自描述 subagent-record entry 构造（type:'custom' 是 pi JSONL 持久化层形态）。 */
-function recordEntry(data: Record<string, unknown>): Record<string, unknown> {
-  return { type: 'custom', customType: SUBAGENT_RECORD_CUSTOM_TYPE, data }
+/** v2 注册条目 entry 构造（type:'custom' 是 pi JSONL 持久化层形态；身份域基线）。 */
+function registeredEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    type: 'custom',
+    customType: SUBAGENT_RECORD_CUSTOM_TYPE,
+    id: 'e-registered',
+    parentId: null,
+    timestamp: '2026-09-26T00:00:00Z',
+    data: {
+      v: 2,
+      kind: 'registered',
+      id: 'sub-1',
+      agent: 'worker',
+      task: 'do',
+      slug: 'w1',
+      origin: 'tool',
+      rootSessionId: 's1',
+      depth: 0,
+      startedAt: 1000,
+      ...overrides,
+    },
+  }
 }
 
-/** 完整合法自描述 data（守卫用例的基线，畸形字段逐个覆写）。 */
-function validRecordData(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+/** v2 终态条目 entry 构造（终局域基线，畸形字段逐个覆写）。 */
+function settledEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    v: 1,
-    id: 'sub-1',
-    status: 'running',
-    sessionFile: '/pi/sub-1.jsonl',
-    agent: 'worker',
-    slug: 'w1',
-    task: 'do',
-    startedAt: 1000,
-    endedAt: 61000,
-    ...overrides,
+    type: 'custom',
+    customType: SUBAGENT_RECORD_CUSTOM_TYPE,
+    id: 'e-settled',
+    parentId: null,
+    timestamp: '2026-09-26T00:00:01Z',
+    data: {
+      v: 2,
+      kind: 'settled',
+      id: 'sub-1',
+      status: 'idle',
+      stopReason: 'completed',
+      endedAt: 61000,
+      turns: 3,
+      totalTokens: 100,
+      model: 'p/m',
+      thinkingLevel: 'low',
+      ...overrides,
+    },
   }
+}
+
+/** v1 专有字段在 v2 投影上无载体：键不出现（不是「键在场值为 undefined」）。 */
+function expectAbsentKey(record: SubagentRecord, key: string): void {
+  expect(Object.prototype.hasOwnProperty.call(record, key)).toBe(false)
 }
 
 /** [legacy] assistant toolCall block 构造。 */
@@ -64,76 +102,143 @@ function pair(toolResultText: string, block: Record<string, unknown> = startBloc
   ]
 }
 
-describe('自描述 subagent-record 投影守卫（projectSelfDescribedSubagentRecord）', () => {
-  it('必填 id 非字符串 → 坏 entry 跳过，同批其余合法 entry 照常产出', () => {
+describe('v2 subagent-record 条目投影守卫（collectV2SubagentPair / projectV2SubagentRecord）', () => {
+  it('注册条目 id 非字符串 → 该条目跳过，同批其余合法注册条目照常产出（在飞态）', () => {
     const records = scanSubagentEntries([
-      recordEntry(validRecordData({ id: 123 })), // id 畸形：number
-      recordEntry(validRecordData({ id: 'sub-ok' })),
+      registeredEntry({ id: 123 }), // id 畸形：number
+      registeredEntry({ id: 'sub-ok' }),
     ])
     expect(records.map((r) => r.subagentId)).toEqual(['sub-ok'])
+    // 无终态条目 → 两态判据落 running
+    expect(records[0].status).toBe('running')
   })
 
-  it('必填 status 非字符串 → 坏 entry 跳过（全部无效时落 legacy 兜底 → 空数组）', () => {
-    expect(scanSubagentEntries([
-      recordEntry(validRecordData({ status: null })),
-      recordEntry(validRecordData({ status: 3 })),
-    ])).toEqual([])
+  it('缺注册条目的终态条目不成实体（身份无所出）→ 无自描述命中（同批无 legacy 配对时空数组）', () => {
+    expect(scanSubagentEntries([settledEntry({ id: 'sub-orphan' })])).toEqual([])
   })
 
-  it('可选字段类型畸形 → 逐字段缺省（undefined），不用谎报类型值填充', () => {
-    const records = scanSubagentEntries([
-      recordEntry(validRecordData({
-        startedAt: 'not-a-number',
-        endedAt: [],
-        turns: '3',
-        totalTokens: '100',
-        model: 42,
-        error: { code: 1 },
-      })),
-    ])
+  it('缺省可选字段 → undefined / null（不发明默认值），身份字段恒取注册条目原值', () => {
+    const records = scanSubagentEntries([registeredEntry({ origin: 'bogus' })]) // 无终态条目
     const r = records[0]
-    expect(r.startedAt).toBeUndefined()
-    expect(r.endedAt).toBeUndefined()
+    expect(r.status).toBe('running')
+    expect(r.sessionFile).toBeNull() // 无终态条目 → null（不猜路径）
+    expect(r.stopReason).toBeUndefined()
     expect(r.turns).toBeUndefined()
     expect(r.totalTokens).toBeUndefined()
     expect(r.model).toBeUndefined()
+    expect(r.thinkingLevel).toBeUndefined()
+    expect(r.endedAt).toBeUndefined()
+    expect(r.elapsedSeconds).toBeUndefined()
     expect(r.error).toBeUndefined()
-    // 非守卫字段缺省链不变（agent 兜底 general-purpose、slug/task 兜底空串）
+    expect(r.result).toBeUndefined()
+    expect(r.parentRunId).toBeUndefined()
+    expect(r.stepIndex).toBeUndefined()
+    // origin 字面量守卫：非法值 → undefined（= tool 语义，不发明出处）
+    expect(r.origin).toBeUndefined()
+    // v1 投影的 agent/slug/task 兜底（general-purpose / 空串）已随兼容层删除：
+    // v2 身份域原样透传注册条目值
     expect(r.agent).toBe('worker')
     expect(r.slug).toBe('w1')
+    expect(r.task).toBe('do')
+    expect(r.startedAt).toBe(1000)
   })
 
-  it('elapsedSeconds 派生：endedAt ≥ startedAt 按差值取整秒；endedAt < startedAt 不派生（负时长是脏数据）', () => {
-    const ok = scanSubagentEntries([recordEntry(validRecordData({ startedAt: 1000, endedAt: 61000 }))])
+  it('v1 专有字段无 v2 载体：closedReason/eventLog/displayItems/batchFinalized/worktree/round/patchFile/resumable/chatMode 键不出现', () => {
+    const v1OnlyFields = {
+      closedReason: 'gc',
+      eventLog: [{ type: 'record-created' }],
+      displayItems: ['x'],
+      batchFinalized: true,
+      worktree: true,
+      round: 2,
+      patchFile: '/tmp/x.patch',
+      resumable: true,
+      chatMode: 'chat',
+    }
+    const records = scanSubagentEntries([
+      registeredEntry(v1OnlyFields),
+      settledEntry(v1OnlyFields),
+    ])
+    expect(records).toHaveLength(1)
+    for (const key of Object.keys(v1OnlyFields)) expectAbsentKey(records[0], key)
+    // 终态条目在场 → idle；stopReason 原样下行（不派生展示值）
+    expect(records[0].status).toBe('idle')
+    expect(records[0].stopReason).toBe('completed')
+  })
+
+  it('elapsedSeconds 派生：endedAt ≥ startedAt 按差值取整秒；负时长/缺任一端不派生', () => {
+    const ok = scanSubagentEntries([
+      registeredEntry({ startedAt: 1000 }),
+      settledEntry({ endedAt: 61000 }),
+    ])
     expect(ok[0].elapsedSeconds).toBe(60) // 60000ms → 60s
 
-    const dirty = scanSubagentEntries([recordEntry(validRecordData({ startedAt: 61000, endedAt: 1000 }))])
+    // 负时长是脏数据 → 不派生
+    const dirty = scanSubagentEntries([
+      registeredEntry({ startedAt: 61000 }),
+      settledEntry({ endedAt: 1000 }),
+    ])
     expect(dirty[0].elapsedSeconds).toBeUndefined()
-  })
 
-  it('closedReason 仅 closed 终态投影（running/done 带 closedReason 的脏组合被丢弃）', () => {
-    const running = scanSubagentEntries([recordEntry(validRecordData({ status: 'running', closedReason: 'gc' }))])
-    expect(running[0].closedReason).toBeUndefined()
-    const closed = scanSubagentEntries([recordEntry(validRecordData({ status: 'closed', closedReason: 'gc' }))])
-    expect(closed[0].closedReason).toBe('gc')
+    // 无终态条目（无 endedAt）→ 不派生
+    const running = scanSubagentEntries([registeredEntry({ startedAt: 1000 })])
+    expect(running[0].elapsedSeconds).toBeUndefined()
   })
 
   // R3-1（H2 阶段 3 一致性审查修复）：origin 透传断言——此前投影白名单漏 origin，
   // renderer 过滤面（badge 计数 / hasRunning / 列表桶）origin 恒 undefined，workflow
   // record 运行期虚亮。守卫语义对齐 core readEntryOriginFields：仅认 'tool'|'workflow'
-  // 字面量，非法值/缺省 → undefined（= tool 语义，存量 entry 零迁移）。
-  it('origin 字面量透传：workflow/tool 透传，非法值与缺省 → undefined（renderer 过滤面数据源契约）', () => {
+  // 字面量，非法值/缺省 → undefined（= tool 语义，存量 record 零迁移）。
+  it('身份域透传：origin 字面量守卫 + parentRunId/stepIndex 透传（renderer 过滤面 / run 视图数据源契约）', () => {
     const projected = scanSubagentEntries([
-      recordEntry(validRecordData({ id: 'sub-wf', origin: 'workflow' })),
-      recordEntry(validRecordData({ id: 'sub-tool', origin: 'tool' })),
-      recordEntry(validRecordData({ id: 'sub-bogus', origin: 'bogus' })), // 非法字面量
-      recordEntry(validRecordData({ id: 'sub-legacy' })), // 缺省（v1 前存量 entry）
+      registeredEntry({ id: 'sub-wf', origin: 'workflow', parentRunId: 'run-1', stepIndex: 2 }),
+      registeredEntry({ id: 'sub-tool', origin: 'tool' }),
+      registeredEntry({ id: 'sub-bogus', origin: 'bogus' }), // 非法字面量
+      registeredEntry({ id: 'sub-absent', origin: undefined }), // 缺省（契约外存量）
     ])
     const byId = (id: string): SubagentRecord | undefined => projected.find((r) => r.subagentId === id)
     expect(byId('sub-wf')?.origin).toBe('workflow')
+    expect(byId('sub-wf')?.parentRunId).toBe('run-1')
+    expect(byId('sub-wf')?.stepIndex).toBe(2)
     expect(byId('sub-tool')?.origin).toBe('tool')
+    expect(byId('sub-tool')?.parentRunId).toBeUndefined()
+    expect(byId('sub-tool')?.stepIndex).toBeUndefined()
     expect(byId('sub-bogus')?.origin).toBeUndefined()
-    expect(byId('sub-legacy')?.origin).toBeUndefined()
+    expect(byId('sub-absent')?.origin).toBeUndefined()
+  })
+
+  it('engine/engineHandle 透传：终态条目携带则原样投影，缺省则键不出现（不填默认值）', () => {
+    const engineHandle = {
+      sessionRef: { sessionId: 'z-1', dbPath: '/db/z.sqlite' },
+      eventsPath: '/journal/z.jsonl',
+      poolKey: 'shared',
+    }
+    const withEngine = scanSubagentEntries([
+      registeredEntry(),
+      settledEntry({ engine: 'zcode', engineHandle }),
+    ])
+    expect(withEngine[0].engine).toBe('zcode')
+    expect(withEngine[0].engineHandle).toEqual(engineHandle)
+
+    const withoutEngine = scanSubagentEntries([registeredEntry(), settledEntry()])
+    expectAbsentKey(withoutEngine[0], 'engine')
+    expectAbsentKey(withoutEngine[0], 'engineHandle')
+  })
+
+  it('版本/形态不认识的 entry 跳过并 warn 留证（v1 已删形态 → future-v；v2 无 kind → unknown-kind）', () => {
+    const warn = vi.spyOn(console, 'warn').mockReturnValue(undefined)
+    try {
+      const records = scanSubagentEntries([
+        { type: 'custom', customType: SUBAGENT_RECORD_CUSTOM_TYPE, data: { v: 1, id: 'sub-old', status: 'running' } },
+        { type: 'custom', customType: SUBAGENT_RECORD_CUSTOM_TYPE, data: { v: 2, id: 'sub-no-kind' } },
+      ])
+      expect(records).toEqual([])
+      expect(warn).toHaveBeenCalledTimes(2)
+      expect(String(warn.mock.calls[0][0])).toContain('future-v')
+      expect(String(warn.mock.calls[1][0])).toContain('unknown-kind')
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 

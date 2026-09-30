@@ -29,42 +29,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { parseResourceMetaDetailed } from "../shared/meta-parser.ts";
+import { checkWorkflowScriptSyntax, WORKER_IIFE_HOST_DECLARED_NAMES } from "./script-syntax.ts";
 import { DEFAULT_WORKFLOW_TMP_DIR } from "./workflow-files.ts";
 
-/**
- * Worker 执行时在用户脚本作用域（async IIFE 顶层）预先声明的名字全集——
- * 镜像 worker-script-builder.ts 的宿主段（`(async () => {` 起至「User workflow
- * script」注释行止的全部声明）。语法闸（checkSyntax）以假声明拼接复现真实包裹
- * 作用域：脚本顶层重声明任一名字 = 真机 SyntaxError，必须在生成期拦下（曾因
- * 闸只包脚本文本、未拼宿主段，产物 `const args` 撞宿主别名仅在真机崩、生成期
- * 零信号）。
- *
- * 同步义务：worker-script-builder.ts 宿主段增删名字时本清单必须同改；守卫 =
- * __tests__/script-generate.test.ts 的宿主声明对账用例（从 builder 源文本提取
- * 声明名与本清单互查）。
- */
-export const WORKER_IIFE_HOST_DECLARED_NAMES = [
-  "parentPort",
-  "workerData",
-  "_callIdCounter",
-  "_agentCallCount",
-  "_pendingCalls",
-  "_callCache",
-  "_currentPhase",
-  "$ARGS",
-  "args",
-  "$WORKSPACE",
-  "_budgetData",
-  "$BUDGET",
-  "$MODEL",
-  "$THINKING_LEVEL",
-  "WorkflowAbortedError",
-  "phase",
-  "log",
-  "agent",
-  "parallel",
-  "pipeline",
-] as const;
+// 宿主预声明名字清单与语法闸本体已抽至 ./script-syntax.ts（第二消费方 = 派发期
+// 闸 lifecycle.runWorkflow / resume-run 出现后，工具留在本文件会形成创作管线与
+// 运行管线的反向 import）。此处 re-export 维持既有 import 路径（测试与下游消费方
+// 不变），清单同步义务与语义见该模块头注。
+export { WORKER_IIFE_HOST_DECLARED_NAMES } from "./script-syntax.ts";
 
 /** generate 目录注入参数：tmp 落盘目录宿主注入（缺省 DEFAULT_WORKFLOW_TMP_DIR）。 */
 export interface GenerateWorkflowScriptOptions {
@@ -119,20 +91,6 @@ function checkAgentUsage(stripped: string): string | undefined {
   return undefined;
 }
 
-/** 闸 4：语法检查（async IIFE + 宿主预声明假拼接——与 worker 真实包裹作用域一致，
- *  脚本顶层重声明宿主名（args/$ARGS/agent/…）在此红，而非真机 SyntaxError）。 */
-function checkSyntax(script: string): string | undefined {
-  const cjsScript = script.replace(/\bexport\s+const\s+meta\b/, "const meta");
-  const hostDecls = WORKER_IIFE_HOST_DECLARED_NAMES.map((n) => `const ${n} = null;`).join("\n");
-  try {
-    new Function(`(async () => {\n${hostDecls}\n${cjsScript} })();`);
-    return undefined;
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return `Syntax error in script: ${msg}`;
-  }
-}
-
 /** 闸 4b：round-trip——@pi-meta 存在时 parseResourceMetaDetailed 校验 YAML（报行列）。 */
 function checkMetaRoundTrip(script: string, hasPiMeta: boolean): string | undefined {
   if (!hasPiMeta) return undefined;
@@ -174,7 +132,7 @@ export function generateWorkflowScript(
   if (agentError) return { ok: false, error: agentError };
 
   // 4. Syntax check (wrap in async IIFE like runtime)
-  const syntaxError = checkSyntax(script);
+  const syntaxError = checkWorkflowScriptSyntax(script);
   if (syntaxError) return { ok: false, error: syntaxError };
 
   // 4b. Round-trip: validate /* @pi-meta */ YAML before writing (v5 §4.7 / ERR4 — report linePos, don't write bad files)

@@ -26,7 +26,8 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { findRunSettlementEvidence } from "../persistence/run-state-evidence.ts";
-import { createRunEventJournal, RUN_EVENT_JOURNAL_SUFFIX } from "../../orchestration/run-events.ts";
+import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
+import { createRunEventJournal } from "../../orchestration/run-events.ts";
 import {
   setRunEventJournalDirForTest,
 } from "../../orchestration/terminal-actions.ts";
@@ -127,8 +128,8 @@ describe("findRunSettlementEvidence(stateDir) × 真实 JsonlRunStore 布局（�
       expect(findRunSettlementEvidence(stateDir, "wf-done")).toEqual({ kind: "terminal", reason: "completed" });
       expect(findRunSettlementEvidence(stateDir, "wf-never")).toEqual({ kind: "missing" });
       // journal 落盘路径形状与 pi 壳 JsonlRunStore 同构：<sessionDir>/workflow-state/<runId>.record.jsonl
-      //（后缀经 RUN_EVENT_JOURNAL_SUFFIX 单源，防再改名漂移）。
-      expect(fs.existsSync(path.join(stateDir, `wf-live${RUN_EVENT_JOURNAL_SUFFIX}`))).toBe(true);
+      //（后缀经 RUN_EVENTS_SUFFIX 单源，防再改名漂移）。
+      expect(fs.existsSync(path.join(stateDir, `wf-live${RUN_EVENTS_SUFFIX}`))).toBe(true);
     } finally {
       setRunEventJournalDirForTest(undefined);
     }

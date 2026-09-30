@@ -34,53 +34,110 @@ import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
 /** get_entries RPC 返回形态（pi GetEntriesResponse：{entries, leafId}）。 */
 type GetEntriesResult = { data?: { entries?: unknown[]; leafId?: string | null } }
 
-/** 自描述 subagent-record entry（W16 v1 完整快照）。 */
-function subagentRecordEntry(id: string, status: string, entryId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+/**
+ * v2 subagent-record 条目族的终局域键词表（[登记 §3.3] v1 全量快照兼容层已删，现行契约 =
+ * 「注册 + 终态两条小条目」）——extra 里落终态条目的键，其余身份域键落注册条目。
+ */
+const SUBAGENT_SETTLED_KEYS: readonly string[] = [
+  'stopReason', 'outcome', 'error', 'endedAt', 'turns', 'totalTokens',
+  'model', 'thinkingLevel', 'engine', 'engineHandle', 'sessionFile', 'result',
+]
+
+/** custom entry 包裹（entryId/parentId/timestamp 对齐 pi appendCustomEntry 契约）。 */
+function recordEntry(customType: string, entryId: string, data: Record<string, unknown>): Record<string, unknown> {
   return {
     type: 'custom',
-    customType: 'subagent-record',
+    customType,
     id: entryId,
     parentId: null,
     timestamp: '2026-08-19T00:00:00Z',
-    data: {
-      v: 1,
-      id,
-      agent: 'worker',
-      task: 'Do work',
-      slug: 'work',
-      status,
-      startedAt: 1000,
-      ...extra,
-    },
+    data,
   }
 }
 
-/** 自描述 workflow-record entry（W17 v1：{v:1, snapshot, updatedAt}）。 */
-function workflowRecordEntry(
+/**
+ * v2 subagent-record 条目族（W1 [D1]：「注册 + 终态两条小条目」）。
+ *
+ * 注册条目恒在场（身份域：id/agent/task/slug/家族链/起点；rootSessionId 默认 's1' 供投影
+ * 的会话归属过滤）；status 非 running 再补终态条目（终局域：停因/统计/引擎锚/结果全文）。
+ * extra 按键域路由：终局域键 → settled，其余 → registered（生产写侧 toRegisteredEntryData /
+ * toSettledEntryData 同形态）。返回整族由调用处 spread 进 entries 数组。
+ */
+function subagentRecordEntries(id: string, status: string, entryId: string, extra: Record<string, unknown> = {}): Array<Record<string, unknown>> {
+  const registeredExtra: Record<string, unknown> = {}
+  const settledExtra: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(extra)) {
+    if (SUBAGENT_SETTLED_KEYS.includes(key)) settledExtra[key] = value
+    else registeredExtra[key] = value
+  }
+  const family = [recordEntry('subagent-record', entryId, {
+    v: 2,
+    kind: 'registered',
+    id,
+    agent: 'worker',
+    task: 'Do work',
+    slug: 'work',
+    origin: 'tool',
+    rootSessionId: 's1',
+    depth: 0,
+    startedAt: 1000,
+    ...registeredExtra,
+  })]
+  if (status !== 'running') {
+    family.push(recordEntry('subagent-record', `${entryId}-settled`, {
+      v: 2,
+      kind: 'settled',
+      id,
+      status: 'idle',
+      stopReason: 'completed',
+      endedAt: 2000,
+      turns: 1,
+      totalTokens: 10,
+      model: 'default',
+      thinkingLevel: 'off',
+      ...settledExtra,
+    }))
+  }
+  return family
+}
+
+/**
+ * v2 workflow-record 条目族（W1 [D1] 同构：注册 + 终态两条小条目）。
+ *
+ * 注册条目恒在场（身份域：runId/workflowName/scriptName/slug/startedAt/recordPath）；
+ * status 非 running 再补终态条目（终局域：done/interrupted + reason + 统计摘要）。
+ * v2 条目面不携 trace——agentCalls 由 run journal fold 供源（本文件 entry-only 装置无
+ * run journal 目录，fold 恒缺席 → agentCalls 恒空）。
+ */
+function workflowRecordEntries(
   runId: string,
   status: 'running' | 'done',
   entryId: string,
   reason?: string,
-  trace: Array<Record<string, unknown>> = [],
-): Record<string, unknown> {
-  return {
-    type: 'custom',
-    customType: 'workflow-record',
-    id: entryId,
-    parentId: null,
-    timestamp: '2026-08-19T00:00:00Z',
-    data: {
-      v: 1,
-      updatedAt: '2026-08-19T00:00:01Z',
-      snapshot: {
-        v: 'wf-run-v2',
-        runId,
-        spec: { scriptName: 'test-flow' },
-        state: { status, reason, budget: { usedTokens: 1, usedCost: 0 }, calls: [], trace },
-        meta: { startedAt: '2026-08-19T00:00:00Z' },
-      },
-    },
+): Array<Record<string, unknown>> {
+  const family = [recordEntry('workflow-record', entryId, {
+    v: 2,
+    kind: 'registered',
+    runId,
+    workflowName: 'test-flow',
+    scriptName: 'test-flow',
+    slug: 'test-flow',
+    startedAt: 1000,
+    recordPath: `/tmp/workflow-state/${runId}.record.jsonl`,
+  })]
+  if (status !== 'running') {
+    family.push(recordEntry('workflow-record', `${entryId}-settled`, {
+      v: 2,
+      kind: 'settled',
+      runId,
+      status: 'done',
+      ...(reason !== undefined ? { reason } : {}),
+      settledAt: 2000,
+      callCount: 0,
+      usedTokens: 1,
+    }))
   }
+  return family
 }
 
 /** plan-state entry fixture（data 平铺四必填 + 三 optional）。 */
@@ -176,8 +233,8 @@ describe('送达水位发布门', () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     await seedRound(records, fire, client, [
-      subagentRecordEntry('sa-1', 'running', 'e1'),
-      workflowRecordEntry('run-1', 'running', 'e2'),
+      ...subagentRecordEntries('sa-1', 'running', 'e1'),
+      ...workflowRecordEntries('run-1', 'running', 'e2'),
       planStateEntry(fullPlanData('awaiting'), 'e3'),
     ], 'e3')
 
@@ -193,7 +250,7 @@ describe('送达水位发布门', () => {
   it('稳态零帧：快照==水位 → 重复对账（agent_settled 腿 + 定时腿）零帧', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     expect(publish).toHaveBeenCalledTimes(1)
 
     // 空增量：派生不变、水位已推进 → agent_settled 腿零帧
@@ -211,27 +268,27 @@ describe('送达水位发布门', () => {
   it('同值增量（新 entryId 同内容）不发布（水位 diff 恒空）', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     expect(publish).toHaveBeenCalledTimes(1)
 
-    client.getEntries.mockResolvedValue({ data: { entries: [subagentRecordEntry('sa-1', 'running', 'e9')], leafId: 'e9' } })
+    client.getEntries.mockResolvedValue({ data: { entries: [...subagentRecordEntries('sa-1', 'running', 'e9')], leafId: 'e9' } })
     records.invalidateRecordEntries('s1', 'subagent-record')
     await flushDebounce()
     expect(publish).toHaveBeenCalledTimes(1)
   })
 
-  it('workflowUpdate 按差异 run 构造：多 run 仅差异 run 出信号；步骤数变化也出信号', async () => {
+  it('workflowUpdate 按差异 run 构造：多 run 仅差异 run 出信号', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     await seedRound(records, fire, client, [
-      workflowRecordEntry('run-1', 'running', 'e1'),
-      workflowRecordEntry('run-2', 'running', 'e2'),
+      ...workflowRecordEntries('run-1', 'running', 'e1'),
+      ...workflowRecordEntries('run-2', 'running', 'e2'),
     ], 'e2')
     expect(framesOf(publish, 'session.workflowUpdate')).toHaveLength(2) // 两个新 run 各一条
 
     // delta：仅 run-2 翻终态 → 只出 run-2 的信号（run-1 无差异不出）
     client.getEntries.mockResolvedValue({
-      data: { entries: [workflowRecordEntry('run-2', 'done', 'e3', 'completed')], leafId: 'e3' },
+      data: { entries: [...workflowRecordEntries('run-2', 'done', 'e3', 'completed')], leafId: 'e3' },
     })
     records.invalidateRecordEntries('s1', 'subagent-record')
     await flushDebounce()
@@ -239,29 +296,23 @@ describe('送达水位发布门', () => {
     expect(signals).toHaveLength(3)
     expect(signals[2]).toEqual({ runId: 'run-2', status: 'done', reason: 'completed' })
 
-    // running 中仅步骤数变化（trace +1）也出信号（GUI 步骤实时可见维度保留）
-    client.getEntries.mockResolvedValue({
-      data: { entries: [workflowRecordEntry('run-1', 'running', 'e4', undefined, [
-        { stepIndex: 1, agent: 'reviewer', task: 't', model: 'default', status: 'running', phase: 'R1', startedAt: '2026-08-19T00:00:02Z' },
-      ])], leafId: 'e4' },
-    })
-    records.invalidateRecordEntries('s1', 'subagent-record')
-    await flushDebounce()
-    const after = framesOf(publish, 'session.workflowUpdate').map(([, m]) => (m as { payload: { update: { runId: string } } }).payload.update)
-    expect(after).toHaveLength(4)
-    expect(after[3]!.runId).toBe('run-1')
+    // [登记 §3.3 迁移] 原「running 中仅步骤数变化（trace +1）也出信号」断言删除：v2 条目面
+    // 不携 trace，agentCalls 由 run journal fold 供源——本文件 entry-only 装置（sessionStore
+    // 恒空 → 无 run journal 目录）fold 缺席，agentCalls 恒空，步骤数/步骤状态维度无 entry 侧
+    // 可达形态。该维度由 session-records.test.ts「投影驱动信号」用例（world 装置 + run journal
+    // 追加 record 终态 → stepStatuses 翻转）覆盖。
   })
 
   it('fullRebuild 内容不变零帧（cursor 自愈全量重拉旧形态发冗余帧——A5 已知差异锁定）', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     expect(publish).toHaveBeenCalledTimes(1)
 
     // 游标失效自愈：丢 cursor → 全量重建，全集内容不变 → 水位存续 diff 空 → 零新帧
     client.getEntries.mockImplementation(async (since?: string) => {
       if (since !== undefined) throw new Error('Entry not found: e1')
-      return { data: { entries: [subagentRecordEntry('sa-1', 'running', 'e1')], leafId: 'e1' } } as GetEntriesResult
+      return { data: { entries: [...subagentRecordEntries('sa-1', 'running', 'e1')], leafId: 'e1' } } as GetEntriesResult
     })
     records.invalidateRecordEntries('s1', 'subagent-record')
     await flushDebounce()
@@ -280,7 +331,7 @@ describe('A3 守卫/发布门跳自愈（注入单测）', () => {
     let alive = false // 瞬态 false：session 未销毁（如 bus 重建窗口），守卫拦发布
     const { records, publish, client } = makeRecords({ hasSession: vi.fn(() => alive) })
     const fire = registerSession(records)
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     // merge 已完成（cache 有 record）但 publish 未发生 → 水位滞留
     expect(publish).not.toHaveBeenCalled()
 
@@ -307,7 +358,7 @@ describe('A3 守卫/发布门跳自愈（注入单测）', () => {
     let bus: IMessageBus | null = null
     const { records, publish, client } = makeRecords({ getMessageBus: () => bus })
     const fire = registerSession(records)
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     expect(publish).not.toHaveBeenCalled() // getMessageBus() 短路：无帧、水位未推进
 
     bus = { publish } as unknown as IMessageBus
@@ -323,7 +374,7 @@ describe('A3 守卫/发布门跳自愈（注入单测）', () => {
     // 行为锁定：publish 完成即推进（回放覆盖该形态，水位结构性不触发补发）
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     expect(publish).toHaveBeenCalledTimes(1)
 
     client.getEntries.mockResolvedValue({ data: { entries: [], leafId: 'e1' } })
@@ -360,7 +411,7 @@ describe('agent_settled 腿（reconcileRecordEntries）', () => {
   it('与在途防抖拉取经 inflight 合并（对账撞在途不重复 RPC）', async () => {
     const { records, client } = makeRecords()
     const fire = registerSession(records)
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
 
     let release!: (v: GetEntriesResult) => void
     client.getEntries.mockImplementation(async () => new Promise<GetEntriesResult>((resolve) => { release = resolve }))
@@ -383,7 +434,7 @@ describe('定时腿（15s 服务级单例 timer）', () => {
   it('内容落缓存后 timer 自启：advance 15s → 域内 session 增量对账', async () => {
     const { records, client } = makeRecords()
     const fire = registerSession(records)
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
 
     client.getEntries.mockClear()
     client.getEntries.mockResolvedValue({ data: { entries: [], leafId: 'e1' } })
@@ -395,14 +446,14 @@ describe('定时腿（15s 服务级单例 timer）', () => {
     const { records, client } = makeRecords()
     const fire = registerSession(records)
     // leafId 缺省 → 拉取成功但 cursor 保持 null（域内 + cursor 空的可达形态）
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], undefined as unknown as string)
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], undefined as unknown as string)
 
     client.getEntries.mockClear()
     await advanceReconcileInterval(3)
     expect(client.getEntries).not.toHaveBeenCalled() // 定时腿跳过
 
     // agent_settled 腿不受门③限制（正常全量路径）
-    client.getEntries.mockResolvedValue({ data: { entries: [subagentRecordEntry('sa-1', 'running', 'e1')], leafId: 'e1' } })
+    client.getEntries.mockResolvedValue({ data: { entries: [...subagentRecordEntries('sa-1', 'running', 'e1')], leafId: 'e1' } })
     records.reconcileRecordEntries('s1')
     await Promise.resolve()
     await Promise.resolve()
@@ -412,7 +463,7 @@ describe('定时腿（15s 服务级单例 timer）', () => {
   it('onSessionDisposed 扫描域清零 → timer 停（advance 45s 零拉取）', async () => {
     const { records, client } = makeRecords()
     const fire = registerSession(records)
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
 
     client.getEntries.mockClear()
     records.onSessionDisposed('s1')
@@ -436,7 +487,7 @@ describe('定时腿（15s 服务级单例 timer）', () => {
     const fire = registerSession(records)
     for (const sid of ['s1', 's2']) {
       clients.get(sid)!.getEntries.mockResolvedValue({
-        data: { entries: [subagentRecordEntry(`sa-${sid}`, 'running', `e-${sid}`)], leafId: `e-${sid}` },
+        data: { entries: [...subagentRecordEntries(`sa-${sid}`, 'running', `e-${sid}`, { rootSessionId: sid })], leafId: `e-${sid}` },
       })
       fire(sid)
       records.invalidateRecordEntries(sid, 'subagent-record')
@@ -460,12 +511,12 @@ describe('重注册空水位', () => {
   it('销毁后重注册：新缓存空水位 → 首拉 diff 全量非空 → 全量首发布', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     expect(framesOf(publish, 'session.subagents')).toHaveLength(1)
 
     // 销毁（水位随 cache 同批清理）→ 重注册 → 首失效全量重拉（cursor=null）
     records.onSessionDisposed('s1')
-    await seedRound(records, fire, client, [subagentRecordEntry('sa-1', 'running', 'e1')], 'e1')
+    await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     const subFrames = framesOf(publish, 'session.subagents')
     expect(subFrames).toHaveLength(2) // 空水位 vs 快照 diff 全量非空 → 重新发布
     expect(client.getEntries).toHaveBeenCalledWith() // 全量路径
@@ -484,16 +535,16 @@ describe('A5 反向：无 reload 演进序列', () => {
 
     // 轮 1：subagent + workflow 起跑
     await seedRound(records, fire, client, [
-      subagentRecordEntry('sa-1', 'running', 'e1'),
-      workflowRecordEntry('run-1', 'running', 'e2'),
+      ...subagentRecordEntries('sa-1', 'running', 'e1'),
+      ...workflowRecordEntries('run-1', 'running', 'e2'),
     ], 'e2')
     expect(publish).toHaveBeenCalledTimes(2) // subagents 全量帧 + workflow 新 run 信号
 
     // 轮 2（增量）：subagent 轮终（result 写入）+ run 终态 + plan 进入
     client.getEntries.mockResolvedValue({
       data: { entries: [
-        subagentRecordEntry('sa-1', 'idle', 'e3', { result: 'round output' }),
-        workflowRecordEntry('run-1', 'done', 'e4', 'completed'),
+        ...subagentRecordEntries('sa-1', 'idle', 'e3', { result: 'round output' }),
+        ...workflowRecordEntries('run-1', 'done', 'e4', 'completed'),
         planStateEntry(fullPlanData('awaiting'), 'e5'),
       ], leafId: 'e5' },
     })
@@ -504,8 +555,8 @@ describe('A5 反向：无 reload 演进序列', () => {
     // 轮 3（增量）：同值重复 entry（新 entryId 同内容）→ 零帧（帧序列为改动前子集：无内容变化必无帧）
     client.getEntries.mockResolvedValue({
       data: { entries: [
-        subagentRecordEntry('sa-1', 'idle', 'e6', { result: 'round output' }),
-        workflowRecordEntry('run-1', 'done', 'e7', 'completed'),
+        ...subagentRecordEntries('sa-1', 'idle', 'e6', { result: 'round output' }),
+        ...workflowRecordEntries('run-1', 'done', 'e7', 'completed'),
         planStateEntry(fullPlanData('awaiting'), 'e8'),
       ], leafId: 'e8' },
     })
@@ -536,8 +587,8 @@ describe('profiling 门①：单轮对账耗时（real timers）', () => {
 
   it('稳态单轮对账 ≤100ms/session/轮（faux 规模：50 subagent×2KB + 20 workflow + plan 全量比对）', async () => {
     const bigTask = 'x'.repeat(2048)
-    const subEntries = Array.from({ length: 50 }, (_, i) => subagentRecordEntry(`sa-${i}`, 'idle', `e-sub-${i}`, { task: bigTask, result: bigTask }))
-    const wfEntries = Array.from({ length: 20 }, (_, i) => workflowRecordEntry(`run-${i}`, 'done', `e-wf-${i}`, 'completed'))
+    const subEntries = Array.from({ length: 50 }, (_, i) => subagentRecordEntries(`sa-${i}`, 'idle', `e-sub-${i}`, { task: bigTask, result: bigTask })).flat()
+    const wfEntries = Array.from({ length: 20 }, (_, i) => workflowRecordEntries(`run-${i}`, 'done', `e-wf-${i}`, 'completed')).flat()
     const entries = [...subEntries, ...wfEntries, planStateEntry(fullPlanData('awaiting'), 'e-plan')]
 
     const { records, publish, client } = makeRecords()

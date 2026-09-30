@@ -28,7 +28,7 @@ import type { UiRequest, UiRequestHandler } from "../ui/dialog-queue.ts";
 import { SubagentService } from "../subagent-service.ts";
 // [H3/R6] 单例访问器外移支撑文件 service/service-bootstrap.ts（壳不再导出）。
 import { getSubagentService, setSubagentService } from "../service/service-bootstrap.ts";
-import type { ExecutionRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 // ── 工具:建临时 agentDir + 真实 ModelConfigService ──
@@ -93,8 +93,8 @@ describe("SubagentService", () => {
       // session 替换（newSession/fork）后 pi 旧 handle 全方法抛 stale 错（runner.invalidate
       // → assertActive），单例 Service 的 _pi 残留指向旧 session——替换窗口内迟到的
       // 异步收尾（轮终 markRoundIdle 簿记⑧ pending 注销 / 迟到 register 的 appendEntry）
-      // 触达它即抛未捕获异常崩 runtime。根治 = dispose 尾部 clearSessionHandles 回收
-      // _pi/_streamSink/_isIdleFn + store pi，消费点经 `pi?.` 短路为 no-op。
+      // 触达它即抛未捕获异常崩 runtime。根治 = dispose 尾部 invalidatePiBinding 作废
+      // 绑定（_piUsable 翻假 + store pi 置 null），消费点经 `pi?.` 短路为 no-op。
       const STALE_MSG = "This extension ctx is stale after session replacement or reload.";
       const stalePi = makePi();
       stalePi.appendEntry.mockImplementation(() => {
@@ -657,3 +657,57 @@ describe("SubagentService", () => {
 //   - sync signal abort → cancelled
 //   - schema enforcement steer（漏调 structured-output）
 // 同时覆盖 session-runner.run() —— event-bridge 合并进 run() 后的事件处理回归。
+
+// ============================================================
+// [§1.4 (a)] pi 绑定作废（invalidatePiBinding）：壳转发面 + dispose 收尾作废
+// ============================================================
+
+describe("[§1.4 (a)] pi 绑定作废（dispose 收尾 + 显式作废转发）", () => {
+  let agentDir: string;
+  let modelService: ModelConfigService;
+
+  beforeEach(() => {
+    agentDir = makeTmpAgentDir();
+    modelService = makeModelService(agentDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  /** baselines 私有字段读面（深绑测试先例：Reflect.get(service, "字段")）。 */
+  function baselinesOf(service: SubagentService): { pi: unknown; piGeneration: number } {
+    return Reflect.get(service, "baselines") as { pi: unknown; piGeneration: number };
+  }
+
+  it("initSession 注入后 invalidatePiBinding 作废 → 读面 null；再 initSession 新代际恢复", () => {
+    const service = new SubagentService({ cwd: agentDir, modelService });
+    const pi1 = makePi();
+    service.initSession({ pi: pi1, sessionId: "s1" });
+    expect(baselinesOf(service).pi).toBe(pi1);
+    expect(baselinesOf(service).piGeneration).toBe(1);
+
+    service.invalidatePiBinding("session replacement (reload)");
+    expect(baselinesOf(service).pi).toBeNull(); // 旧句柄消费降级 null
+    expect(baselinesOf(service).piGeneration).toBe(1); // 作废不递增代际
+
+    const pi2 = makePi();
+    service.initSession({ pi: pi2, sessionId: "s2" });
+    expect(baselinesOf(service).pi).toBe(pi2);
+    expect(baselinesOf(service).piGeneration).toBe(2);
+  });
+
+  it("dispose 收尾显式作废：dispose 后读面 null（关停投递链之后的最后一步）", () => {
+    const service = new SubagentService({ cwd: agentDir, modelService });
+    const pi = makePi();
+    service.initSession({ pi, sessionId: "s-dispose" });
+    expect(baselinesOf(service).pi).toBe(pi);
+
+    service.dispose();
+
+    expect(baselinesOf(service).pi).toBeNull();
+    // dispose 幂等：重复 dispose 不再触发作废副作用（_disposed 早退）。
+    expect(() => service.dispose()).not.toThrow();
+    expect(baselinesOf(service).pi).toBeNull();
+  });
+});

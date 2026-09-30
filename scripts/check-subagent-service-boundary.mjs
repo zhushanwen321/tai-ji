@@ -67,9 +67,15 @@ const ALLOWED_EDGES = new Map([
   ["chat-rounds.ts|ResolvedIdentity", "record-access.ts"],
 ]);
 
-/** [H3/R6] SERVICE_DIR 下的支撑文件（非聚合）：类型声明 / 常量叶子 / 装配工厂的
- *  宿主。与聚合适用不同方向规则（检查 5）；聚合间台账门不覆盖支撑文件。 */
-const SUPPORT_FILES = new Set(["service-bootstrap.ts", "service-constants.ts"]);
+/** [H3/R6] SERVICE_DIR 下的支撑文件（非聚合）：类型声明 / 常量叶子 / 叶子 helper
+ *  （零聚合状态：模块级内存表 + 纯函数 + io 注入面，无 deps、不 import 兄弟）/
+ *  装配工厂的宿主。与聚合适用不同方向规则（检查 5）；聚合间台账门不覆盖支撑文件。
+ *  [D1 拆边 Class C 第 4 步补登 2026-09-30] member-reuse-pool.ts 自
+ *  orchestration/member-reuse-pool.ts 整体下沉至此——它是聚合外的叶子 helper
+ *  （只依赖 core/logger 与 run-events 类型，零兄弟 import、零壳 import、零 deps），
+ *  按支撑文件登记而非塞进聚合台账（后者会把「聚合协作须走壳 deps 注入」的判据
+ *  误用到叶子消费面上）。 */
+const SUPPORT_FILES = new Set(["service-bootstrap.ts", "service-constants.ts", "member-reuse-pool.ts"]);
 
 /** 支撑文件→壳的合法值边台账（符号级）：唯一登记 = service-bootstrap 的
  *  createSubagentService 构造依赖（设计 v4 明文「bootstrap 必须 new SubagentService」；

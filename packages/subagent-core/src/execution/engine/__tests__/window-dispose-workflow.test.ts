@@ -105,7 +105,6 @@ function makeRealRun(runId: string): WorkflowRun {
       scriptPath: "/tmp/test-wf.js",
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),
@@ -272,13 +271,11 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
     // 同一解析来源——probe 通过后的取用（directRoute）拿同一窗口实例
     const routed = await routeEngineForHost({
       routing: { callEngine: "fake-perwin" },
-      strict: false,
       probe: (engineId) => resolveWorkflowWindowEnginePort(runId, engineId).probe(),
       getEngineFn: (engineId) => resolveWorkflowWindowEnginePort(runId, engineId),
       piEngine: new FakeWindowEnginePort("pi"),
       hasEngineFn: () => true,
       listEnginesFn: () => ["fake-perwin"],
-      listAvailableEnginesFn: () => ["fake-perwin"],
     });
     expect((routed as EngineRouteResult).engineId).toBe("fake-perwin");
     expect((routed as EngineRouteResult).engine).toBe(port);
@@ -304,7 +301,6 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
 
     const routed = routeEngineForHost({
       routing: {}, // 缺省 = pi 请求 → 同步短路位
-      strict: false,
       probe: (engineId) => resolveWorkflowWindowEnginePort(runId, engineId).probe(),
       piEngine: resolveWorkflowWindowEnginePort(runId, "pi"),
     });

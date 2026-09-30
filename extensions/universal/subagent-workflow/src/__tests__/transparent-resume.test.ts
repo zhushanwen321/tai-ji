@@ -13,13 +13,22 @@
 //   - resurrectClosed 单元语义 → core permanent-session-state-machine.test.ts 已覆盖，删；
 //   - sidecar 合法 reason 读回矩阵 → core cold-lookup.test.ts（.state/.finalized 载体）
 //     已覆盖，删；
+//   - cancel tombstone 优先级（.cancelled 存在恒 cancelled）→ 收条 sidecar 读侧随 ③
+//     全族退场，该行为随机制消亡；cancel 现行载体 = record-settled 帧，其折叠读回
+//     投影由 core record-store.test.ts（seedTerminalRecord 收条读回矩阵）覆盖，删；
 //   - 壳独有断言保留：happy path 帧面（readdir 文件集恒一 + 帧序）、轮次收口 round
-//     基数、[U4] close 幂等、sidecar 空/损坏兜底 disconnected、tombstone 优先级、
-//     not found 文案含 id 回显、fork-from 贯通（task.forkSource 透传）、默认接管框架
-//     双正则；空 .finalized 与 fork cancelled 放行两对同契约条各留断言更全的一份。
+//     基数、[U4] close 幂等、sidecar 残留惰性、not found 文案含 id 回显、fork-from
+//     贯通（task.forkSource 透传）、默认接管框架双正则；fork cancelled 放行保留
+//     真链路断言更全的一份。
+//
+// [③ 收条 sidecar 退场] 磁盘前置形态改经 record 事件流表达（与 core 同款 helper）：
+// 终态收条 = `<recordsDir>/<id>.events` 的 record-settled 帧
+//（seedTerminalRecordForSessionFile 播种）；事件流缺席/无终态帧 = 在途中断形态
+//（重建兜底 idle + interrupted-by-restart，万物可续候选）。收条 sidecar 文件
+//（.state/.finalized/.cancelled）读侧已退场——残留文件对判定零影响（惰性）。
 //
 // mock 手法（[W3 改写]）：registerFakePiEngine 协议替身 + logger；record-store /
-// state-marker / alive-store 走真实实现（fixture 用临时目录写真实 .jsonl + sidecar）。
+// 事件 journal / alive-store 走真实实现（fixture 用临时目录写真实 .jsonl + 事件文件）。
 // 执行链观测点 = fake.runs 捕获（协议 engine.run 的 task/ctx——resume 锚点在
 // ctx.resume.resume，[H1 U6] 键切换后唯一会话形态键）。
 //
@@ -38,8 +47,8 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("@zhushanwen/subagent-core/core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { registerFakePiEngine, type FakePiEnginePort } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/fake-engine-port.ts";
+import { seedTerminalRecordForSessionFile } from "@zhushanwen/subagent-core/testing/execution/__tests__/helpers/seed-terminal-record.ts";
 import { clearEngines } from "@zhushanwen/subagent-core/execution/engine/registry.ts";
-import { writeFinalizedState } from "@zhushanwen/subagent-core/execution/persistence/state-marker.ts";
 import { getSubagentSessionDir, getSubagentRecordsDir } from "@zhushanwen/subagent-core/execution/assembly/path-encoding.ts";
 import { SubagentService } from "@zhushanwen/subagent-core";
 import { ModelConfigService } from "@zhushanwen/subagent-core";
@@ -123,7 +132,8 @@ function writeSessionJsonl(
   return file;
 }
 
-/** 存量旧名 .cancelled sidecar fixture（L4 后生产只写 .state，此处覆盖兼容读路径）。 */
+/** 存量 .cancelled sidecar 残留 fixture。收条 sidecar 读侧已退场（③）：本文件在场
+ *  不参与任何判定（惰性残留），仅用于验证带此残留的 record 照常被识别与放行。 */
 function writeTombstone(sessionFile: string, id: string): void {
   fs.writeFileSync(
     `${sessionFile}.cancelled`,
@@ -186,13 +196,14 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
   });
 
   // ============================================================
-  // happy path 帧面：closed(disconnected) → 同 id 重生续写原文件
+  // happy path 帧面：在途中断遗留 → 同 id 重生续写原文件
   // ============================================================
 
   describe("happy path 帧面", () => {
-    it("closed(disconnected) 记录 message → 内部状态翻 running + resume 触达 + 原 sessionFile 作为续写目标", async () => {
+    it("遗留中断记录（事件流无收条帧）message → 内部状态翻 running + resume 触达 + 原 sessionFile 作为续写目标", async () => {
+      // 事件流缺席 = 在途中断形态（重建兜底 idle + interrupted-by-restart）——
+      // 万物可续候选，message 同 id 透明重生、续写原文件。
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-happy", rootSessionId: "root-session-cur" });
-      writeFinalizedState(file, "disconnected");
       expect(service.queries.findRecord("sa-d-happy")).toBeUndefined(); // 前置：内存无
 
       const result = await messageHandler(service, { subagentId: "sa-d-happy", text: "continue the work" });
@@ -221,7 +232,8 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
       expect(fake.runs[0].ctx.ctxModel).toMatchObject({ provider: "p", id: "m-1" });
 
       // subagent-record v2 注册条目落盘（[W1 / D1] 停写 v1 快照后 entry 面 = 注册/
-      // 终态两条小条目；「状态翻 running」的事实落账 = record-round-started 帧）。
+      // 终态两条小条目；「状态翻 running」的事实落账 = record-round-started 帧；
+      // 事件流缺席的遗留记录重生时补账 created 帧 + 注册条目）。
       const entries = pi.appendEntry.mock.calls.filter((c) => c[0] === "subagent-record");
       expect(entries.length).toBeGreaterThan(0);
       const lastEntry = entries[entries.length - 1][1] as { v?: number; kind?: string; id?: string };
@@ -230,7 +242,7 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
       expect(frames).toContain("record-created");
       expect(frames).toContain("record-round-started:0");
 
-      // 重生后的死因语义位已清（不再是 closed 态残留）
+      // 重生后的死因语义位已清（无 closed 态残留）
       expect(snap?.closedReason).toBeUndefined();
       expect(snap?.endedAt).toBeUndefined();
     });
@@ -241,7 +253,6 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
       // [W1 / D1·D3] v1 快照 entry 停写后 round 快照位消亡：轮次推进的事实源 = 事件
       // 文件（record-round-started → record-round-idle 帧序）+ 记录态收口翻边（idle）。
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-notify", rootSessionId: "root-session-cur" });
-      writeFinalizedState(file, "disconnected");
 
       await messageHandler(service, { subagentId: "sa-d-notify", text: "go" });
       // 收链：本轮 detached 协议 run 在用例内 settle（防跨用例竞态）
@@ -255,8 +266,10 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
         // ——第二轮 dedup key 的 round 基数（=1）由该记录态派生。
         const frames = readRecordEventFrames(agentDir, "sa-d-notify");
         expect(frames).toContain("record-round-started:0");
-        expect(frames).toContain("record-round-idle");
-        expect(frames.indexOf("record-round-idle")).toBeGreaterThan(frames.indexOf("record-round-started:0"));
+        // 轮终收条帧自带累计轮数（[② 读侧换源] round 进帧）：轮终帧 = record-round-idle:1
+        // ——第二轮 dedup key 的 round 基数（=1）直接在帧载荷可见。
+        expect(frames).toContain("record-round-idle:1");
+        expect(frames.indexOf("record-round-idle:1")).toBeGreaterThan(frames.indexOf("record-round-started:0"));
         // 收口翻边：轮终后记录态 idle（第二轮起 key 正常递增的记录态前提）
         expect(service.queries.findRecord("sa-d-notify")?.status).toBe("idle");
         return all;
@@ -268,43 +281,27 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
   });
 
   // ============================================================
-  // finalized sidecar 磁盘读回（旧格式兼容 / 损坏兜底 / tombstone 优先级）
+  // 终态 sidecar 残留惰性（③ 退场后读侧不消费任何收条 sidecar 文件）
   // ============================================================
 
-  describe("finalized sidecar 磁盘读回", () => {
-    it("向后兼容：旧格式空内容 sidecar → disconnected（不再误导为 gc），message 不崩且透明重生", async () => {
+  describe("终态 sidecar 残留惰性", () => {
+    it("旧名空 .finalized 与损坏 .state 残留在场 → 读侧无视（不产出误导死因），记录仍可发现且 message 透明重生", async () => {
+      // 两类残留形态并存：旧格式空文件（旧版本写入）+ 现名垃圾内容（外部损坏/手写）。
+      // 读侧已整体退场（不读内容、不进缓存戳）：记录按 jsonl identity 正常重建，
+      // 死因展示走事件流（缺席 = interrupted-by-restart），不再产出 disconnected/gc。
       const file = writeSessionJsonl(sessionsDir, { id: "sa-a2-legacy", rootSessionId: "root-session-cur" });
-      // 存量旧格式 fixture（L4 后生产只写 .state，旧名靠 fs 直写仿真）
       fs.writeFileSync(`${file}.finalized`, "", "utf-8");
+      fs.writeFileSync(`${file}.state`, "some random junk", "utf-8");
 
-      // A 档兼容读：磁盘层 closedReason=disconnected
       const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-legacy");
       expect(rec?.status).toBe("idle");
-      expect(rec?.closedReason).toBe("disconnected");
+      expect(rec?.closedReason).toBeUndefined();
 
-      // D 档：disconnected ∈ 可重连集 → message 透明重生，续写原文件
+      // message 透明重生不受残留影响，续写原文件
       const res = await messageHandler(service, { subagentId: "sa-a2-legacy", text: "hi" });
       expect(res.response.delivered).toBe(true);
       await vi.waitFor(() => expect(fake.runs.length).toBe(1));
       expect(fake.runs[0].ctx.resume?.resume?.sessionRef["sessionFile"]).toBe(file);
-    });
-
-    it("sidecar 内容非法（外部损坏/手写垃圾）→ 兜底 disconnected", () => {
-      const file = writeSessionJsonl(sessionsDir, { id: "sa-a2-junk", rootSessionId: "root-session-cur" });
-      // .state 非 JSON（损坏形态）→ 读侧存在性宽语义 → 无 reason → disconnected
-      fs.writeFileSync(`${file}.state`, "some random junk", "utf-8");
-
-      const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-junk");
-      expect(rec?.closedReason).toBe("disconnected");
-    });
-
-    it("cancel 路径的 tombstone 优先级不变：.cancelled 存在时恒 cancelled", () => {
-      const file = writeSessionJsonl(sessionsDir, { id: "sa-a2-tomb", rootSessionId: "root-session-cur" });
-      writeTombstone(file, "sa-a2-tomb");
-
-      const rec = service.queries.collectRecords(50, "all").find((r) => r.id === "sa-a2-tomb");
-      expect(rec?.status).toBe("idle");
-      expect(rec?.closedReason).toBe("cancelled");
     });
   });
 
@@ -315,7 +312,10 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
   describe("fork-from 贯通", () => {
     it("正常接续：done 记录 → 新 id + prompt 注入引导语（含源文件指引面）", async () => {
       const sourceFile = writeSessionJsonl(sessionsDir, { id: "sa-src", rootSessionId: "old-root" });
-      writeFinalizedState(sourceFile, "gc");
+      // done 形态播种（现行载体）：事件流 record-settled 帧（stopReason=completed）
+      seedTerminalRecordForSessionFile(sourceFile, getSubagentRecordsDir(agentDir, agentDir), {
+        stopReason: "completed",
+      });
 
       const result = await forkFromHandler(service, {
         sourceSubagentId: "sa-src",
@@ -342,7 +342,10 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
 
     it("无 prompt → 注入默认接管框架（reconstruct state 引导语）", async () => {
       const sourceFile = writeSessionJsonl(sessionsDir, { id: "sa-src2", rootSessionId: "old-root" });
-      writeFinalizedState(sourceFile, "gc");
+      // done 形态播种（载体同上）
+      seedTerminalRecordForSessionFile(sourceFile, getSubagentRecordsDir(agentDir, agentDir), {
+        stopReason: "completed",
+      });
 
       await forkFromHandler(service, { sourceSubagentId: "sa-src2" });
 
@@ -355,7 +358,7 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
 
     // fork cancelled 放行壳内留一（同契约另一份在 core subagent-actions-core 守卫 4
     // 删除条参数化覆盖；此处保留真链路断言更全的一份）。
-    it("[U4 守卫 4 删除] cancelled 源 → 放行分叉（主动告别不再是 fork 例外）", async () => {
+    it("[U4 守卫 4 删除] cancelled 残留源 → 放行分叉（主动告别不再是 fork 例外）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-canxx", rootSessionId: "old-root" });
       writeTombstone(file, "sa-canxx");
 
@@ -371,9 +374,8 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
   // ============================================================
 
   describe("回归边界", () => {
-    it("[U4] close action 对旧终态遗留 record → 放行（idle 全候选：对已收口 record 操作 = 幂等收口/归档）", async () => {
+    it("[U4] close action 对遗留中断 record → 放行（idle 全候选：对已收口 record 操作 = 幂等收口/归档）", async () => {
       const file = writeSessionJsonl(sessionsDir, { id: "sa-d-closestrict", rootSessionId: "root-session-cur" });
-      writeFinalizedState(file, "disconnected");
 
       // [U4 万物可续] getRecordForAction 冷查不再按 allowReconnect 把门——close 的
       // 归属校验放行（冷查重建注册），closeSubagent 幂等收口。不触发续聊执行链。

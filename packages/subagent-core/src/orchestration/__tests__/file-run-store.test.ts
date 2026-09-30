@@ -30,7 +30,7 @@ import {
   PruneStateDeps,
   pruneTerminalRunFiles,
 } from "../../execution/persistence/run-state-evidence.ts";
-import { RUN_EVENT_JOURNAL_SUFFIX } from "../run-events.ts";
+import { RUN_EVENTS_SUFFIX } from "../run-events.ts";
 
 let dataRoot: string;
 
@@ -65,7 +65,7 @@ function runSettledFrame(ts: number, outcome: "done" | "failed" | "cancelled"): 
 /** 直接写 run journal（<runId>.events.jsonl，每帧一行 JSONL）。 */
 function writeRunJournal(stateDir: string, runId: string, frames: readonly unknown[]): string {
   mkdirSync(stateDir, { recursive: true });
-  const full = join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  const full = join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   writeFileSync(full, frames.map((f) => JSON.stringify(f)).join("\n") + "\n", "utf8");
   return full;
 }

@@ -22,7 +22,7 @@ import { isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import {
 	clearConfigCache,
 	getConfigPath as getLlmConfigPath,
-	isThinkingLevel,
+	normalizeThinkingLevel,
 	loadConfig,
 	saveConfig as saveLlmConfig,
 } from "@zhushanwen/pi-llm-shared";
@@ -59,10 +59,8 @@ function normalizeClassifierConfig(raw: unknown): ClassifierConfig {
 	if (record.model !== undefined && !(typeof record.model === "string" && record.model.length > 0)) {
 		logger.warn("Ignoring invalid classifier.model (expected string 'auto' or 'provider/model-id'), using default auto");
 	}
-	// thinkingLevel 校验：合法值为 'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max'
-	const thinkingLevel = isThinkingLevel(record.thinkingLevel)
-		? record.thinkingLevel
-		: DEFAULT_CLASSIFIER_CONFIG.thinkingLevel;
+	// thinkingLevel：非空字符串即采信（合法档位由写入侧 UI 与 pi 判定；本层不再自持词表）
+	const thinkingLevel = normalizeThinkingLevel(record.thinkingLevel) ?? DEFAULT_CLASSIFIER_CONFIG.thinkingLevel;
 	return {
 		enabled: record.enabled !== false,
 		model: typeof record.model === "string" && record.model.length > 0 ? record.model : DEFAULT_CLASSIFIER_CONFIG.model,

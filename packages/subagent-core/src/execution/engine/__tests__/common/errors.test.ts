@@ -1,6 +1,6 @@
 // errors.test.ts —— 引擎层错误 SSOT 的结构锁定。
 //
-// 三视角：①构建者——12 条 code 与设计错误规格全表一致（[W3] 协议化增
+// 三视角：①构建者——13 条 code 与设计错误规格全表一致（[W3] 协议化增
 // engine_capability_mismatch——manifest 多声明的 run 期握手阻断面，与 SDK 协议错误码
 // 词表同源）；②使用者——错误消息 code 前缀格式可被字符串匹配分流；③观察者——每条
 // 错误必有非空恢复指引（可操作）。
@@ -19,10 +19,11 @@ import {
 } from "../../common/errors.ts";
 
 describe("ENGINE_ERROR_CODES（§3.3.3 全表）", () => {
-  it("12 条错误码与设计文档错误规格表逐条一致（[W3] 协议化增 engine_capability_mismatch）", () => {
+  it("13 条错误码与设计文档错误规格表逐条一致", () => {
     expect([...ENGINE_ERROR_CODES]).toEqual([
       "engine_not_found",
       "engine_probe_failed",
+      "engine_config_unreadable",
       "engine_credential_missing",
       "nested_spawn_rejected",
       "schema_emulation_failed",

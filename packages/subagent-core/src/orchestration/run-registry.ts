@@ -29,17 +29,20 @@
 import { getLogger } from "../core/logger.ts";
 import { readRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
 import {
-  INITIAL_RUN_STATE,
+  INITIAL_RUN_LIFECYCLE_STATE,
   foldRunEventFrames,
   type RunErrorCode,
   type RunEventJournal,
-  type RunState,
+  type RunLifecycleState,
   type WorkflowRunEvent,
 } from "./run-events.ts";
-// [D15] 中断编排入口（run-interrupted 转移事件 + 中断条目补写的统一写点）与
+// [D15] 中断编排入口（run-interrupted 转移事件 + 中断条目补写的统一写点）、
+// foldRunEventsToLifecycleState（[D6(b)] 进程内 fold 检查点缓存的唯一读口——
+// 收编链的 fold 与 dispatch 链共享同一份全量重放结果，不再独立重折）与
 // scanRunEvents（record 读通道——journal 单写者域，证据面一致；ADR-0081 起
 // journal 目录支持 per-call 参数注入，缺省仍模块锚）。
 import {
+  foldRunEventsToLifecycleState,
   interruptRun,
   runEventJournalDirOf,
   scanRunEvents,
@@ -65,8 +68,8 @@ export type RunRegistryPhase =
 /** run 注册表投影（单一推导点，无独立状态存储）。 */
 export interface RunRegistryProjection { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   runId: string;
-  /** D5 两维状态（fold 终帧；missing 时 = INITIAL_RUN_STATE）。 */
-  state: RunState;
+  /** D5 两维状态（fold 终帧；missing 时 = INITIAL_RUN_LIFECYCLE_STATE）。 */
+  state: RunLifecycleState;
   /** 投影判读（见 {@link RunRegistryPhase}）。 */
   phase: RunRegistryPhase;
   /** 事件流最后活动时刻（record 末帧 ts；空事件流 = undefined）。 */
@@ -90,10 +93,13 @@ export interface RunProjectionOptions { // oe-exempt:20260929:framework:workflow
 /**
  * record 流 fold：scan 产物逐事件 transition（不传 ctx——run-events.ts fold 契约）。
  *
- * 循环体单源 run-events.ts 的 foldRunEventFrames（与 terminal-actions.foldRunState
- * 共享同一坏帧失效模式：保守停在最近一致态）；本侧只持注册表域的 warn 文案与 logger。
+ * 循环体单源 run-events.ts 的 foldRunEventFrames（与 terminal-actions 的 fold
+ * 读口共享同一坏帧失效模式：保守停在最近一致态）；本侧只持注册表域的 warn 文案
+ * 与 logger。消费面 = projectRunRegistryEvents（纯投影函数，任意 journal 源的
+ * 查询/对账形态，不经进程内缓存）；收编链（adoptInterruptedRun）的 fold 不走
+ * 本函数——经 terminal-actions 共享读口（[D6(b)] 检查点缓存）。
  */
-function foldEvents(events: readonly WorkflowRunEvent[], runId: string): RunState {
+function foldEvents(events: readonly WorkflowRunEvent[], runId: string): RunLifecycleState {
   return foldRunEventFrames(events, (err, lastType) => {
     logger.warn(
       `run registry fold stopped at a broken frame (runId=${runId}, lastType=${lastType}): ${
@@ -127,7 +133,7 @@ export function projectRunRegistryEvents(
   if (events.length === 0) {
     return {
       runId,
-      state: INITIAL_RUN_STATE,
+      state: INITIAL_RUN_LIFECYCLE_STATE,
       phase: active ? "active" : "missing",
       ...(lastEventAt !== undefined ? { lastEventAt } : {}),
     };
@@ -304,7 +310,10 @@ export async function adoptInterruptedRun(
   const events = await scanRunEvents(runId, journalDir);
   if (events.length === 0) return "skippedMissing";
   if (opts?.activeRunIds?.has(runId)) return "skippedActive";
-  const state = foldEvents(events, runId);
+  // [D6(b) 唯一读口] fold 经 terminal-actions 共享读口（进程内检查点缓存）：
+  // 收编链的全量重放结果进缓存，紧随的 interruptRun dispatch 链命中缓存直接
+  // transition——同一次收编内同 runId 不再重折第二遍。
+  const state = foldRunEventsToLifecycleState(runId, events);
   const precheck = await precheckAdoption(runId, events, state, opts, journalDir, now);
   if (precheck.skipped !== null) return precheck.skipped;
   // 幂等追加中断转移事件（[D15] 入口；workflowName 取 run-created 帧——中断条目

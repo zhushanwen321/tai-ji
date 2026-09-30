@@ -2,16 +2,17 @@
 //
 // 时序收尾逻辑（从 subagent-service.ts 提取，降低主文件行数 < 1000 上限）。
 //
-// [U2a / §3.1 意图 API 迁移] 终态持久化四件套（.state 写 + entry/archive + manifest +
-// .alive 删）归口 store.markFinalized / markCancelled——本文件降级为**副作用编排层**
+// [U2a / §3.1 意图 API 迁移] 终态持久化原语（entry/archive + manifest + .alive 删）
+// 归口 store.markFinalized / markCancelled——本文件降级为**副作用编排层**
 // （collectPatch / completeLegacyClosed / worktree cleanup / pending 注销① / onFinalized 钩子，
 // §3.1 副作用归属边界）。文件布局知识（写哪个文件、什么顺序）不再散落此处：D8 v7 写序
-//（.state writeSync 先 → manifest writeSync 后 → .alive 删）由 store 内部单点保证。
+//（binding 快照 → archive/manifest → .alive 删；磁盘收条由 record-settled 帧承载）由
+// store 内部单点保证。
 //
 // [Critical #1 / PR #85 精神保持] manifest 写失败响亮上报不阻断（logger.error +
-// subagent:manifest-write-failed entry，§3.4 manifest 面）与终态原语返回 false 均不
-// 得跳过 worktree cleanup——磁盘满/权限错时 worktree 泄漏比索引缺失严重；终态写失
-// 败时 record 留 running 形态（磁盘无终态位），下次 boot 孤儿恢复终态化承接（§3.4）。
+// subagent:manifest-write-failed entry，§3.4 manifest 面）不得跳过 worktree
+// cleanup——磁盘满/权限错时 worktree 泄漏比索引缺失严重；收编/孤儿恢复终态化承接
+// 磁盘终态判定（§3.4）。
 //
 // B9 兜底：completeLegacyClosed/终态原语抛错→后续 cleanup 仍执行。
 
@@ -20,14 +21,15 @@ import * as path from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
 
-import { bestEffort } from "../assembly/best-effort.ts";
+import { bestEffort, bestEffortPiCall } from "../assembly/best-effort.ts";
 import { completeLegacyClosed } from "./execution-record.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
-import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import type { RecordStore } from "./record-store.ts";
 import { readIdentityHeader, readIdentityTail } from "./session-reconstructor.ts";
-import type { AgentResult, ClosedReason, ExecutionRecord } from "../assembly/types.ts";
+import type { ClosedReason } from "../domain/record-types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
+import { collectWorktreePatch } from "../worktree/worktree-patch-collection.ts";
 
 const logger = getLogger("subagents");
 
@@ -59,7 +61,7 @@ export interface FinalizeDeps {
    *
    * record.sessionFile 缺失（RC-1 握手失败 + LC-4 反查也未命中的残余形态）时用于磁盘
    * 反查：按 identity（record.id）扫目录找真实 session 文件，作为终态原语
-   * （store.markFinalized/markCancelled 的 .state/manifest/.alive 面）的锚点依据——
+   * （store.markFinalized/markCancelled 的 binding 快照/manifest/.alive 面）的锚点依据——
    * 消除「sessionFile 缺失 → 终态原因丢失 + alive marker 残留」。undefined = 调用方
    * 无法提供（反查跳过，行为退回修复前）。
    */
@@ -100,7 +102,7 @@ function findSessionFileByRecordIdentity(
 /**
  * [T1/PS-9] Step 序言：sessionFile 缺失时按 record 身份在 sessionDir 反查回填。
  *
- * 放在一切步骤前，让终态原语（archive 投影 / .state / manifest / .alive release）
+ * 放在一切步骤前，让终态原语（archive 投影 / binding 快照 / manifest / .alive release）
  * 统一受益。RC-1（握手失败）+ LC-4（收尾反查未命中）的残余形态下，磁盘上 session
  * 文件仍可能真实存在（identity 携带 record.id）——反查命中则终态原语有了锚点，
  * 终态原因不再丢失、alive marker 不再残留；未命中则保持旧行为（best-effort 跳过）。
@@ -120,21 +122,16 @@ function resolveMissingSessionFile(deps: FinalizeDeps, record: ExecutionRecord):
  * Step 0: collectPatch（best-effort，仅 worktree 绑定时执行）。
  * [MF#3] patchFile 写到 worktree 之外（sessionsDir/<branch>.patch），避免被 cleanup 删除；
  * 路径回填 record.patchFile，供调用方（tool result / /subagents list）应用。
+ * 正文与归档路径（record-lifecycle.archiveWorktreeResources）共用单源原语
+ * collectWorktreePatch（登记 §3.1.6）；本壳只补 deps 取值形态与标签。
  */
 async function collectPatchIfWorktree(deps: FinalizeDeps, record: ExecutionRecord): Promise<void> {
-  if (!record.worktreeHandle) return;
-  try {
-    const sessionsDir = getSubagentSessionDir(
-      deps.modelService.getAgentDir(),
-      record.worktreeHandle.mainCwd,
-    );
-    fs.mkdirSync(sessionsDir, { recursive: true });
-    const patchFile = path.join(sessionsDir, `${record.worktreeHandle.branch}.patch`);
-    const patch = await deps.worktreeManager.collectPatch(record.worktreeHandle, patchFile);
-    if (patch.written) record.patchFile = patchFile;
-  } catch (pe: unknown) {
-    bestEffort(pe, "collectPatch (finalizeRecord Step0)");
-  }
+  await collectWorktreePatch({
+    record,
+    getWorktreeManager: () => deps.worktreeManager,
+    getAgentDir: () => deps.modelService.getAgentDir(),
+    label: "collectPatch (finalizeRecord Step0)",
+  });
 }
 
 /**
@@ -154,13 +151,13 @@ async function cleanupWorktreeIfBound(deps: FinalizeDeps, record: ExecutionRecor
  * 时序收尾（D-017，[U2a] 终态持久化面归口 store 意图原语后的编排形态）。
  *
  * 步骤：序言 sessionFile 反查 → Step 0 collectPatch → Step 1 completeLegacyClosed →
- * Step 2 终态原语（store.markFinalized / markCancelled：.state writeSync + entry/
+ * Step 2 终态原语（store.markFinalized / markCancelled：binding 快照 + entry/
  * archive + manifest + .alive 删，D8 v7 写序）→ Step 3b worktree cleanup →
  * pending 注销① → onFinalized 钩子。
  *
- * [Critical #1] 终态原语失败（返回 false = .state 重试耗尽；或意外抛错）不得跳过
- * worktree cleanup——写失败时 record 留 running（磁盘无终态位），副作用清理照常
- * （幂等）；§3.4 响亮 entry 上报由本编排层接线（store 层已 logger.error）。
+ * [Critical #1] 终态原语意外抛错不得跳过 worktree cleanup——副作用清理照常
+ * （幂等）；磁盘终态由事件流折叠判定，§3.4 响亮 entry 上报由本编排层接线
+ * （store 层已 logger.error）。
  */
 export async function doFinalizeRecord(
   deps: FinalizeDeps,
@@ -182,11 +179,11 @@ export async function doFinalizeRecord(
     bestEffort(err, "completeLegacyClosed (finalizeRecord B9)", "error");
   }
 
-  // ── Step 2: 终态持久化四件套归口（B1 迁移点）──
-  // cancelled 走 markCancelled（.state 载荷 status:"cancelled" + 精确 endedAt），其余
-  // markFinalized。两原语内部写序 = .state writeSync 先 → binding/archive/manifest →
-  // .alive 删（release 出口①，D8 v7）。生产路径恒 manifestDir 接线（subagent-service
-  // 构造点）；缺省异步分支仅纯内存测试形态。
+  // ── Step 2: 终态持久化原语归口（B1 迁移点）──
+  // cancelled 走 markCancelled，其余 markFinalized。两原语内部写序 = binding 快照 →
+  // archive/manifest → .alive 删（release 出口①，D8 v7；磁盘收条由 record-settled
+  // 帧承载）。生产路径恒 manifestDir 接线（subagent-service 构造点）；缺省异步分支
+  // 仅纯内存测试形态。
   let persisted = false;
   try {
     persisted =
@@ -197,18 +194,22 @@ export async function doFinalizeRecord(
     bestEffort(err, "store terminal primitive (finalizeRecord B9)", "error");
   }
   if (!persisted) {
-    // [§3.4 / U1 偏差 6 接线] 终态写失败（重试耗尽）响亮 entry 上报——GUI 通知面腿；
-    // 日志 error 级腿已由 state-marker 内部完成。record 留 running 形态（磁盘无终态
-    // 位、未 archive），下次 boot 孤儿恢复终态化承接。
+    // [§3.4 / U1 偏差 6 接线] 终态原语意外抛错（B9 吞错路径）响亮 entry 上报——GUI
+    // 通知面腿；日志 error 级腿已由 store 层完成。record 留 running 形态（未
+    // archive），下次 boot 孤儿恢复终态化承接。
     const reasonDesc = closedReason ?? record.closedReason ?? "gc";
     logger.error(
-      `[subagent] terminal state write failed after retries (record=${record.id}, reason=${reasonDesc}); ` +
+      `[subagent] terminal state primitive failed unexpectedly (record=${record.id}, reason=${reasonDesc}); ` +
         `record stays running on disk — boot orphan recovery will finalize it`,
     );
-    deps.pi?.appendEntry?.("subagent:state-write-failed", {
-      id: record.id,
-      status,
-      closedReason: reasonDesc,
+    // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（PS-30，登记 §1.4）——终态写
+    // 已失败的响亮上报本身不得成为新的崩溃源。
+    bestEffortPiCall(deps.pi, `state-write-failed entry (${record.id})`, (active) => {
+      active.appendEntry?.("subagent:state-write-failed", {
+        id: record.id,
+        status,
+        closedReason: reasonDesc,
+      });
     });
   }
 
@@ -219,8 +220,8 @@ export async function doFinalizeRecord(
   // [W4 发射点枚举归属①] 注销合法发射点枚举（设计 D2）第 ① 处：subagent record
   // 终态化（finalizeRecord 路径）。其余合法发射点：② = store
   // .markRoundIdle 簿记⑧（U5 收口后编排层无直发；setPendingUnregister →
-  // emitPendingUnregister 唯一发射）；③ workflow run 终态迁移
-  //（transition("done") 路径）；
+  // emitPendingUnregister 唯一发射）；③ workflow run 终局落账（dispatch 链
+  // terminal，[D6(a)] 终局判定走终局记录注册表）；
   // ⑤ 注册对账 sweep 补发（registry-reconcile/reconcile-sweep.ts）。进程退出本身
   // 永远不是注销理由（subagent-service disposeAllRecords 的 emit 属①——其同批
   // completeLegacyClosed+archive 终态化）。

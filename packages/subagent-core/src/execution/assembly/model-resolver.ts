@@ -15,7 +15,11 @@ import {
   THINKING_ORDER,
   assertCanonicalModelRef,
   modelRefFromVerified,
+  parseModelSelector,
 } from "../../shared/model-ref";
+import { getLogger } from "../../core/logger.ts";
+
+const logger = getLogger("model-resolver");
 
 export { THINKING_ORDER };
 export type { ThinkingLevel } from "../../shared/model-ref";
@@ -102,8 +106,8 @@ export interface ResolvedModel {
 //   ║  （maxThinkingForModel，含 "max" 时用 max）——不落回 pi 默认      ║
 //   ║  medium，subagent 任务需要最大推理深度。                          ║
 //   ║                                                                ║
-//   ║  显式指定但 lookup/auth 失败 → 抛错（不静默降级到主 agent，     ║
-//   ║  因为用户明确要求了某个 model，降级会造成「以为用了 X 实际用 Y」║
+//   ║  显式指定（model 或 thinkingLevel）但不可用 → 抛错（不静默降级到主 agent ║
+//   ║  或最高档——用户明确要求了某个目标，降级会造成「以为用了 X 实际用 Y」）  ║
 //   ╚════════════════════════════════════════════════════════════════╝
  *
  * @param agentConfig     agent .md 解析结果（查 model override + thinkingLevel）
@@ -111,6 +115,20 @@ export interface ResolvedModel {
  * @param paramOverride   调用方显式 override（最高优先级）
  * @param ctxModel        主 agent 当前模型（兜底，直接透传）
  */
+/** 取第一个已定义的值（档位优先级展开用；undefined 视为「未指定」）。 */
+function firstDefined<T>(...values: readonly (T | undefined)[]): T | undefined {
+  for (const value of values) {
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+/** frontmatter 模型串的内联档位后缀（resolveModel 拆出；agentConfig.model 缺席 =
+ * undefined——无内联可解析）。 */
+function inlineThinkingOfAgentConfig(agentConfig: AgentConfig | undefined): string | undefined {
+  return agentConfig?.model !== undefined ? parseModelSelector(agentConfig.model).thinkingLevel : undefined;
+}
+
 export function resolveModel(
   agentConfig: AgentConfig | undefined,
   modelRegistry: ModelRegistryLike,
@@ -119,20 +137,33 @@ export function resolveModel(
 ): ResolvedModel {
   // 1. paramOverride（最高优先级）。显式指定但 lookup/auth 失败 → 直接抛错，
   // 不降级到下层（避免「以为用了 X 实际用 Y」的静默错误）。
+  // 档位候选按优先级：调用参数自带字段 > 模型串内联后缀 > frontmatter 字段 >
+  // frontmatter 模型串后缀——越靠近「这一次调用」越权威；同层内字段比内联后缀权威。
   if (paramOverride?.model) {
     return lookupAndResolve(
       paramOverride.model,
-      paramOverride.thinkingLevel ?? agentConfig?.thinkingLevel,
+      firstDefined(
+        paramOverride.thinkingLevel,
+        parseModelSelector(paramOverride.model).thinkingLevel,
+        agentConfig?.thinkingLevel,
+        inlineThinkingOfAgentConfig(agentConfig),
+      ),
       modelRegistry,
       "paramOverride",
     );
   }
 
   // 2. agentConfig.model（agent 作者指定）。同样显式 → 失败即抛错。
+  // thinkingLevel 仍按同一优先级取值（paramOverride.thinkingLevel 最高）——调用方显式
+  // 指定档位不因「model 来自 agentConfig」被丢弃（与 1/3 级同序，避免显式目标静默失效）。
   if (agentConfig?.model) {
     return lookupAndResolve(
       agentConfig.model,
-      agentConfig.thinkingLevel,
+      firstDefined(
+        paramOverride?.thinkingLevel,
+        agentConfig.thinkingLevel,
+        parseModelSelector(agentConfig.model).thinkingLevel,
+      ),
       modelRegistry,
       "agentConfig",
     );
@@ -145,8 +176,11 @@ export function resolveModel(
     modelRefFromVerified(ctxModel, modelRegistry);
     return {
       model: ctxModel,
-      thinkingLevel: paramOverride?.thinkingLevel ?? agentConfig?.thinkingLevel
-        ?? maxThinkingForModel(ctxModel),
+      thinkingLevel: firstDefined(
+        paramOverride?.thinkingLevel,
+        agentConfig?.thinkingLevel,
+        inlineThinkingOfAgentConfig(agentConfig),
+      ) ?? maxThinkingForModel(ctxModel),
     };
   }
 
@@ -161,14 +195,19 @@ export function resolveModel(
 }
 
 /**
- * lookup + auth 校验 + thinkingLevel clamp。显式指定但失败 → 抛错（不降级）。
+ * lookup + auth 校验 + thinkingLevel 裁决。显式指定但不可用 → 抛错（不降级）。
  *
  * [U1 D1] 模型串裁决经 assertCanonicalModelRef 单一入口（strip 后缀 → provider 精确 →
  * 全等匹配 → 孪生守卫；未命中同步抛错并附问句式纠错候选）。放行即与 registry 条目全等。
  *
- * 错误信息区分两种失败（避免误导排查方向）：
+ * 错误信息区分三类失败（避免误导排查方向）：
  *   - model 非全等（不存在/大小写不符/孪生歧义）→ assertCanonicalModelRef 的问句式报错
  *   - model 全等命中但 auth 未配置 → 提示在 models.json 配置鉴权
+ *   - thinkingLevel 显式指定但该模型不可用 → 列出该模型可用档位 + 换档/换模型指引
+ *
+ * 档位来源二态：调用方独立字段（paramOverride/agentConfig.thinkingLevel）与模型串内联
+ * 后缀（`provider/id:level`）——两者都在调用点展开成同一个「显式请求」，缺省推导只在
+ * 两者全缺席时发生（串里的档位不再被丢弃）。
  */
 function lookupAndResolve(
   modelStr: string,
@@ -194,8 +233,9 @@ function lookupAndResolve(
   }
   return {
     model,
-    // 无显式请求时兜底「模型最高可用档」（不落 pi 默认 medium）。
-    thinkingLevel: resolveThinkingLevel(model, requestedThinking ?? maxThinkingForModel(model)),
+    // 显式请求（paramOverride / agentConfig.thinkingLevel）经裁决：不可用即抛错；
+    // 未请求 → 缺省最高可用档（不落 pi 默认 medium）。
+    thinkingLevel: resolveThinkingLevel(model, requestedThinking),
   };
 }
 
@@ -217,18 +257,40 @@ function maxThinkingForModel(
 }
 
 /**
- * 从 model.thinkingLevelMap 提取可用级别，clamp 到最高可用。
- * model.reasoning === false → undefined（不支持 thinking）
+ * thinkingLevel 裁决（显式请求 / 缺省推导两态分治）：
+ *
+ *   - requestedExplicit 有值（调用方 paramOverride 或 agent .md frontmatter 显式指定）
+ *     → 模型可用档位不含该值即抛错：显式指定了目标就不允许静默换档（否则调用方以为
+ *     跑了 X 档、实际跑 Y 档）；模型无 thinkingLevelMap（档位信息缺席、无法判定）时
+ *     按 reasoning 透传，可用性由引擎/pi 侧校验；
+ *   - requestedExplicit 缺省 → 收敛到模型最高可用档（见 maxThinkingForModel），
+ *     并留 debug 痕迹（缺省推导结果可追溯，不静默）。
+ *
+ *   model.reasoning === false → undefined（不支持 thinking）。
  */
 function resolveThinkingLevel(
-  model: { reasoning: boolean; thinkingLevelMap?: Record<string, unknown> },
-  requested?: string,
+  model: { id?: string; reasoning: boolean; thinkingLevelMap?: Record<string, unknown> },
+  requestedExplicit: string | undefined,
 ): string | undefined {
   const levels = availableThinkingLevels(model);
-  if (levels.length === 0) return model.reasoning ? requested : undefined;
-  if (requested && levels.includes(requested)) return requested;
-  // requested 不可用 → 降级到最高可用
-  return levels[levels.length - 1];
+  if (requestedExplicit === undefined) {
+    const derived = maxThinkingForModel(model);
+    logger.debug(
+      `[model-resolver] no explicit thinkingLevel for model '${model.id ?? "(unknown)"}' — ` +
+        `derived highest available level '${derived ?? "(none)"}'`,
+    );
+    return derived;
+  }
+  // 无档位信息（无 thinkingLevelMap）：无法判定可用性，按 reasoning 透传。
+  if (levels.length === 0) return model.reasoning ? requestedExplicit : undefined;
+  if (levels.includes(requestedExplicit)) return requestedExplicit;
+  throw new Error(
+    `thinkingLevel "${requestedExplicit}" is not available for model ` +
+      `"${model.id ?? "(unknown)"}". Available levels for this model: ${levels.join(", ")}. ` +
+      `Recovery: request one of the available levels, or switch to a model whose ` +
+      `thinkingLevelMap includes "${requestedExplicit}" — the host never silently ` +
+      `substitutes a different level for an explicitly requested one.`,
+  );
 }
 
 /**

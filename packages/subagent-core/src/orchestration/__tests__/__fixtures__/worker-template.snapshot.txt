@@ -104,16 +104,24 @@ function _safePost(msg, context) {
         // 需要检查错误时请用 returnMeta:true（resolve 值含 error 字段）。
         // parsedOutput: validated data object from structured-output execute().
         // Fallback to content (raw text) when no schema was requested or on error.
+        // [ADR-0092] 带 schema 却既无 parsedOutput 也无显式 error = 结果出口断裂：
+        // 对象形态是 schema 调用唯一合法结果，无文本回落选项——拒绝静默回落，
+        // resolve 错误说明（非 returnMeta 单值，对齐 B-5 超时错误形态；returnMeta
+        // 走 error 字段），脚本容错循环（parse 失败 → skip）自然接管。与缓存重放
+        // 出口（_callCache 命中分支）同一判定，两处必须同批修改。
         // W2 改动 9(b)：returnMeta===true 时 resolve {value,sessionFile,worktreePath,error,usage,durationMs,sessionId}
         // （对称缓存重放 9c）；否则单值。usage/durationMs/sessionId 为 rfl 仪表透传（tier-1 §7.1，
         // AgentResult 已含、此处原样转发，缺省 undefined 兼容旧主线程）。
-        const _value = msg.result.parsedOutput ?? msg.result.content;
+        const _schemaGap = pending.hasSchema && msg.result.parsedOutput === undefined && msg.result.error === undefined;
+        const _value = _schemaGap
+          ? "[agent] schema call produced neither a parsed object nor an explicit error; text fallback is rejected (schema results must be object-shaped, ADR-0092). Recovery: rerun this agent call."
+          : (msg.result.parsedOutput ?? msg.result.content);
         if (pending.returnMeta) {
           pending.resolve({
             value: _value,
             sessionFile: msg.result.sessionFile,
             worktreePath: msg.result.worktreePath,
-            error: msg.result.error,
+            error: _schemaGap ? _value : msg.result.error,
             usage: msg.result.usage,
             durationMs: msg.result.durationMs,
             sessionId: msg.result.sessionId,
@@ -220,13 +228,17 @@ function _safePost(msg, context) {
       // 见 agent-result 消息处理的注释：拒绝传播失败到 agent 外部。
       // W2 改动 9(c)：returnMeta 分支（对称 handler 9b），opts 仍在闭包作用域。
       if (!cached) return undefined;
-      const _cachedValue = cached.parsedOutput ?? cached.content;
+      // [ADR-0092] schema 出口契约，与 agent-result 活体处理同判（见该处注释，两处同批修改）。
+      const _schemaGap = opts.schema !== undefined && cached.parsedOutput === undefined && cached.error === undefined;
+      const _cachedValue = _schemaGap
+        ? "[agent] schema call produced neither a parsed object nor an explicit error; text fallback is rejected (schema results must be object-shaped, ADR-0092). Recovery: rerun this agent call."
+        : (cached.parsedOutput ?? cached.content);
       if (opts.returnMeta === true) {
         return {
           value: _cachedValue,
           sessionFile: cached.sessionFile,
           worktreePath: cached.worktreePath,
-          error: cached.error,
+          error: _schemaGap ? _cachedValue : cached.error,
           usage: cached.usage,
           durationMs: cached.durationMs,
           sessionId: cached.sessionId,
@@ -242,7 +254,9 @@ function _safePost(msg, context) {
       return Promise.reject(new Error("postMessage failed for agent-call (callId=" + callId + "): see workerLogs"));
     }
     return new Promise((resolve, reject) => {
-      const _pending = { resolve: resolve, reject: reject, returnMeta: opts.returnMeta === true, timer: undefined };
+      // hasSchema：agent-result 处理段（worker 顶层，opts 不在作用域）做 schema 出口
+      // 契约判定（ADR-0092）用——调用点闭包里的 opts.schema 不可达，随 pending 存取。
+      const _pending = { resolve: resolve, reject: reject, returnMeta: opts.returnMeta === true, hasSchema: opts.schema !== undefined, timer: undefined };
       // [OR-3] per-call timeoutMs：消息层自己的超时——主线程对 agent-call 永不回话
       //（畸形消息丢弃 / postMessage 双重失败 / runner 不 settle）时 pending 不再永挂
       //（旧实现零超时 → agent() 永挂 → worker 不退出 → run 永久 running）。

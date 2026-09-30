@@ -32,7 +32,8 @@ import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
 import type { ModelInfo } from "../assembly/model-resolver.ts";
-import type { SubagentStream } from "../assembly/stream-sink.ts";
+import type { ExecutionMode } from "../domain/record-types.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { AgentEvent } from "../assembly/types.ts";
 import type {
   AgentOutcome,
@@ -76,13 +77,7 @@ export interface RunContext {
    * agentEvent 出口注释）。pi 回填期承载 AgentRunner port 的 stream 透传（行为零变化），
    * 语义上是宿主设施而非引擎专有——未来引擎的 text_delta 同样可走此通道。
    */
-  stream?: SubagentStream;
-  /**
-   * [P4 D9①] 引擎 fallback 留痕（probe 失败路由回默认引擎）。路由层（routing.ts）
-   * 产出，引擎投影到 outcome.engineFallback（zcode 等无 record 通路的引擎以此留痕；
-   * pi 引擎另经 ExecuteOptions 投影进 record）。
-   */
-  engineFallback?: { from: string; reason: string };
+  stream?: AgentStreamSink;
   /**
    * [F6] 根 session id（SubagentService.sessionRootId 注入）——pi 引擎 relay 归属键
    * SESSION_ID 的权威来源（经 wire ctx.sessionRootId → server 还原 → SpawnRunParams
@@ -102,6 +97,15 @@ export interface RunContext {
    * 仅旧宿主/独立运行引擎形态可达。
    */
   sessionDir?: string;
+  /**
+   * [D4 record 身份信封] 协议 `run.params.ctx.identity` 的宿主侧值（唯一构造点 =
+   * `identityEnvelopeOf`）——引擎据此写任务子进程身份 env 的 slug / startedAt / mode。
+   */
+  identity?: {
+    slug?: string;
+    startedAt?: number;
+    mode?: string;
+  };
   /**
    * [R4 §3.4 不变量 3] 运行中句柄回填通道：引擎在「session/create 应答到达后」
    * 立即回调（早于 run resolve——stream 引擎的 run 生命周期远长于会话建立）。
@@ -204,8 +208,20 @@ export interface EnginePort {
    *
    * 未实现：model 透传，引擎自身 prepare 期校验兜底（现状语义）；pi 不实现（pi 链走
    * 既有三层解析 + assertCanonicalModelRef 裁决，搬迁是大重构，设计 D2-2 被否②）。
+   *
+   * [⑦ 模型引用三元组化 · 字符串边界裁决] 本成员的 modelRef 参数**刻意保持字符串**，
+   * 是 ModelRef 结构体传导链上保留的两类边界入口之一：
+   *   ① 输入域是**未裁决词形**（用户原始串：alias 短名 / 缺省 provider 形态 / 待剥的
+   *      `:thinking` 后缀）——解析成 {provider, id} 会伪造 provider 空串的三元组、
+   *      丢掉 alias 裁决语义；裁决正是本成员的职责，产物侧才结构体化（裁决产物经
+   *      model-validation.ts validateModelForEngine 收敛为 SplitModelRef 三元组，
+   *      core 内部不再以裸串穿层）。
+   *   ② 跨包镜像面：SDK `@zhushanwen/subagent-engine-sdk` port-contract 的 EnginePort
+   *      同签名镜像 + 协议 validateModel 帧（{modelRef?: string}）同形，签名变更会
+   *      波及引擎包实现（清单外）。
+   * 输入词形统一用 EngineModelSelectorInput 别名表达（契约派生，禁裸 string 重写）。
    */
-  validateModel?(modelRef: string | undefined): { canonicalRef: string };
+  validateModel?(modelRef: EngineModelSelectorInput): { canonicalRef: string };
 
   /**
    * [R1 D6] 可选停机面：释放引擎持有的常驻资源（如 app-server 常驻进程 / 长连接）。
@@ -217,4 +233,33 @@ export interface EnginePort {
    * Promise 前完成；grace→SIGKILL 升级序列属异步面（promise 段）。
    */
   dispose?(): Promise<void>;
+}
+
+/**
+ * [⑦ 模型引用三元组化] 跨引擎边界的模型**词形**（未裁决用户串）：EnginePort.validateModel
+ * 的输入域。本别名是该域的唯一权威定义——内部新代码禁再手写裸 `string | undefined`
+ * 表达同一域（穿层是否越界由类型名可检索：结构体传导见 model-validation.ts
+ * validateModelForEngine；跨包镜像面见 EnginePort.validateModel 注释的边界裁决）。
+ */
+export type EngineModelSelectorInput = string | undefined;
+
+/**
+ * [D4] record → 身份信封（宿主侧**唯一构造点**）：引擎把它整封写进任务子进程的
+ * 身份 env（SDK `SUBAGENT_IDENTITY_ENV` 的 slug / startedAt / mode）。
+ *
+ * 三处 run 组装点（workflow 派发 / 会话轮 / chat 轮）共用本函数——身份字段的取值
+ * 口径只有一处，避免「某条派发链漏填某个键 → 该链的子代理身份条目缺字段」。
+ * `slug` 空串不上 wire（record 允许空 slug）；`startedAt` / `mode` 是 record 不变式
+ * 字段，恒有值。
+ */
+export function identityEnvelopeOf(record: {
+  slug: string;
+  startedAt: number;
+  mode: ExecutionMode;
+}): RunContext["identity"] {
+  return {
+    ...(record.slug !== "" ? { slug: record.slug } : {}),
+    startedAt: record.startedAt,
+    mode: record.mode,
+  };
 }

@@ -32,11 +32,10 @@ import {
   dispatchRunCreated,
 } from "../terminal-actions.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
-import type { DoneReason, RunStatus } from "../models/types.ts";
 import type { WorkflowRun } from "../models/workflow-run.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 // [W2/V1] 六态机引导 + 终局断言换源（两态机字段停更——终局经注册表判定/派生）。
-import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
+import { isRunSettled, noteRebuiltSettlement, settledRecordOf } from "../terminal-actions.ts";
 
 /** [F1] 归因文案——与 worker-message-pump.ts 常量一致（不直接 import 常量以锚定对外文案）。 */
 const EXITED_WITHOUT_RESULT_MSG =
@@ -60,7 +59,6 @@ function makeRunningRun(opts: RunMockOpts = {}): WorkflowRun {
   return {
     runId: `wf-test-${++runSeq}`,
     state: {
-      status: "running",
       budget: { usedTokens: 0, usedCost: 0, isExceeded: () => false },
       errorLogs: [],
       calls: new Map(),
@@ -73,16 +71,12 @@ function makeRunningRun(opts: RunMockOpts = {}): WorkflowRun {
     },
     spec: {
       scriptName: "test-wf",
-      scriptSource: "execute() {}",
+      scriptSource: "async function execute() {}",
       args: {},
     },
     runtime: {
       worker: { postMessage: vi.fn() },
       receivedTerminalMessage: opts.receivedTerminalMessage,
-    },
-    transition(this: WorkflowRun, target: RunStatus, reason?: DoneReason): void {
-      this.state.status = target;
-      if (target === "done") this.state.reason = reason;
     },
     replaceRuntime(this: WorkflowRun, rt: NonNullable<WorkflowRun["runtime"]>): void {
       this.runtime = rt;
@@ -158,7 +152,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
 
     await handleWorkerExit(run, 0, makeHandle(), deps, makeHandlers());
 
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(deps.eventBus.emit).not.toHaveBeenCalled();
     expect(deps.appendEntry).not.toHaveBeenCalled();
@@ -172,19 +166,22 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
 
     await handleWorkerExit(run, 0, makeHandle(false), deps, makeHandlers());
 
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
   it("已终态（done）的 run 不受影响", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
-    run.transition("done", "completed");
+    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：终局 fixture 注入注册表条目
+    // （生产经 dispatch 链 note）——stale 守卫据此判「已终态」。
+    noteRebuiltSettlement(run.runId, { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
 
     await handleWorkerExit(run, 0, makeHandle(), deps, makeHandlers());
 
-    expect(run.state.reason).toBe("completed");
+    // 终局事实保持原 outcome=done（映射 reason completed），未被 exit 路径改写
+    expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
@@ -202,7 +199,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
       await pending;
 
       // 未超限 → rebuild（workerHost.start 重建），run 保持 running、不判 failed
-      expect(run.state.status).toBe("running");
+      expect(isRunSettled(run)).toBe(false);
       expect(run.meta.workerErrorCount).toBe(1);
       expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
       expect(deps.onRunDone).not.toHaveBeenCalled();
@@ -237,7 +234,7 @@ describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
       // 双事件只处理一次：计数 +1（非 +2）、单次 rebuild、run 保持 running
       expect(run.meta.workerErrorCount).toBe(1);
       expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-      expect(run.state.status).toBe("running");
+      expect(isRunSettled(run)).toBe(false);
       expect(deps.onRunDone).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();

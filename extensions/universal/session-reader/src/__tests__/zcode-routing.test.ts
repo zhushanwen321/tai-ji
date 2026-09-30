@@ -201,7 +201,10 @@ function recordLine(entryId: string, saId: string, sessionRef: Record<string, st
     customType: 'subagent-record',
     id: entryId,
     parentId: null,
-    data: { v: 1, id: saId, engine: 'zcode', engineHandle: { sessionRef, poolKey: 'shared' } },
+    data: {
+      v: 2, kind: 'settled', id: saId, status: 'idle', stopReason: 'completed', endedAt: BASE_MS + 1,
+      turns: 1, totalTokens: 10, engine: 'zcode', engineHandle: { sessionRef, poolKey: 'shared' },
+    },
   })
 }
 
@@ -217,21 +220,15 @@ function piRecordLine(entryId: string, saId: string): string {
     id: entryId,
     parentId: null,
     data: {
-      v: 1,
+      // 登记 §3.3：条目面 = v2 族——pi 形态 = 注册条（身份）+ 终态条（engineHandle 半键）。
+      v: 2,
+      kind: 'settled',
       id: saId,
-      agent: 'pi-agent',
-      task: 'pi task',
-      slug: 'pi-sub',
-      status: 'running',
-      mode: 'subagent',
-      startedAt: BASE_MS,
-      rootSessionId: ROOT_SESSION,
-      parentRecordId: null,
-      depth: 0,
-      turns: 0,
-      totalTokens: 0,
-      eventLog: [],
-      displayItems: [],
+      status: 'idle',
+      stopReason: 'completed',
+      endedAt: BASE_MS + 1,
+      turns: 1,
+      totalTokens: 10,
       engineHandle: { sessionRef: { sessionId: SESS_A }, poolKey: 'shared' },
     },
   })

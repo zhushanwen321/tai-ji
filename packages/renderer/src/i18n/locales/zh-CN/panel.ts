@@ -309,8 +309,6 @@ export default {
     subagentNoOutcome: '（无结果记录）',
     engineBadgeTitle: '执行引擎：{engine}',
     subagentStopReason: '上一轮为什么停（停因词，仅展示）',
-    engineFallbackBadge: '请求 {from} → 已回退 {to}',
-    engineFallbackHint: '引擎 {from} 探针失败，已自动回退 {to}；修复 {from} 后新建会话即可恢复',
     backToWorkflow: '返回工作流',
     subagentLoadFailed: '加载失败',
     subagentRetry: '重试',

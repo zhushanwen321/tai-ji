@@ -10,8 +10,8 @@
 // - running 残留 → run-interrupted 转移事件落 record（[D2] interrupted 暂停态，
 //   非 done,failed——崩溃 ≠ 失败，可 resume）+ in-flight call 内存观测面收口 +
 //   runs Map 注册
-// - 内存观测面不变量：收编后 run.state.status 仍 running（活体写点停更语义——
-//   终局判据归 record fold；「进程内持有重水合 running 聚合」与新语义一致）
+// - 内存观测面不变量：收编后 run 仍非终局（isRunSettled=false——中断非终局，
+//   终局判据归终局记录注册表；「进程内持有未终局聚合」与新语义一致）
 // - hooks 每 running run 恰好一次、参数 {id, reason:"interrupted"}；无 hooks 不炸
 // - onRunRecovered 同步 throw 被围栏捕获（warn 留痕），不中断其余 run 恢复
 // - evict 步：超 MAX_RETAINED_DONE_RUNS 的 done run 被淘汰（最旧优先）
@@ -29,6 +29,8 @@ import {
   recoverCrashedRuns,
 } from "../lifecycle.ts";
 import {
+  isRunSettled,
+  noteRebuiltSettlement,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
@@ -43,7 +45,7 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 
 function makeSpec(name = "test-wf"): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: {},
     scriptName: name,
     scriptPath: "/fake/test.js",
@@ -65,8 +67,8 @@ function makeRun(
   } = {},
 ): WorkflowRun {
   const status = opts.status ?? "running";
+  // [D6(a)] 聚合快照不持生命周期轴——status 选择器仅决定 reason 与注册表条目。
   const state = {
-    status,
     ...(status === "done"
       ? { reason: opts.reason ?? "completed" }
       : {}),
@@ -80,7 +82,18 @@ function makeRun(
     startedAt: "2026-08-30T00:00:00.000Z",
     ...(opts.completedAt !== undefined ? { completedAt: opts.completedAt } : {}),
   };
-  return WorkflowRun.reconstruct(runId, makeSpec(opts.scriptName), state, meta);
+  const run = WorkflowRun.reconstruct(runId, makeSpec(opts.scriptName), state, meta);
+  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重水合
+  // done run」时必须携带注册表条目（生产 = 壳重建点 noteRebuiltSettlement 注入
+  // run-settled 帧事实）；settledAt 缺省取快照 completedAt（重水合 run 的条目 =
+  // 帧时序），否则 0（最旧——仅用于防御排序，非本文件断言面）。
+  if (status === "done") {
+    noteRebuiltSettlement(runId, {
+      outcome: "done",
+      settledAt: opts.completedAt !== undefined ? Date.parse(opts.completedAt) : 0,
+    });
+  }
+  return run;
 }
 
 /** mock RunStore：loadAll 返回预置 runs，save 可观察。 */
@@ -154,9 +167,9 @@ describe("recoverCrashedRuns — 三步序列（loadAll→中断收编→evict�
       // 内存观测面：state.error 记录 reason、status 维持 running（活体写点停更——
       // 终局判据归 record fold，重水合聚合保持「未终局」观感）
       expect(running.state.error).toBe("Process killed (kill-9 or crash recovery)");
-      expect(running.state.status).toBe("running");
+      expect(isRunSettled(running)).toBe(false);
       // done run 原样（不进收编判定）
-      expect(done.state.status).toBe("done");
+      expect(isRunSettled(done)).toBe(true);
       expect(done.state.reason).toBe("completed");
       // [D15] v1 尾段删除：收编零 store.save（无覆盖写）
       expect(saves).toHaveLength(0);

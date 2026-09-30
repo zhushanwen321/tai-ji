@@ -4,7 +4,7 @@ import { redactArgv } from './argv-redact.js'
 import { recordSpawnMarkers } from './spawn-markers.js'
 import { getDefaultModel } from './pi-provider-store.js'
 import { RpcTimeoutError } from '../../utils/errors.js'
-import type { ThinkingLevel, ProviderId } from '@taiji/shared'
+import type { ProviderId } from '@taiji/shared'
 import { BASH_RPC_TIMEOUT_MS, COMPACT_RPC_TIMEOUT_MS } from '@taiji/shared'
 // B3 出站契约唯一构建器（U3 收口点；实现本体在 @taiji/shared，此处走 runtime 门面）
 import { buildOutboundChildEnv } from '../spawn-env.js'
@@ -114,7 +114,14 @@ export interface RpcClientOptions {
   /** 禁用 context files（AGENTS.md 自动发现），映射 pi `--no-context-files`。 */
   noContextFiles?: boolean
   /** 覆盖思考级别，映射 pi `--thinking <level>`（注意：非 --thinking-level，附录 A.4）。 */
-  thinkingLevel?: ThinkingLevel
+  /**
+   * 档位字符串透传（非空即发）；合法性由上游入口层校验（runtime launch-params
+   * resolveEffectiveThinking，词表 = shared PI_THINKING_LEVELS），本层不重复校验。
+   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi（0.84.4）对非法 --thinking 仅 push
+   * warning diagnostic 并丢弃档位、进程照常以缺省档启动（pi-coding-agent
+   * dist/cli/args.js:112-121；仅 type==="error" 才 exit：dist/main.js:476-478）。
+   */
+  thinkingLevel?: string
 }
 
 // 超时分级常量（L6）与迟到响应 TTL / 早期帧缓冲上限已上移 @zhushanwen/pi-rpc

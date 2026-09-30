@@ -42,7 +42,7 @@ type EngineAwareRecord = SubagentRecord & { engine?: string; engineHandle?: unkn
 
 interface EngineHandleShape {
   sessionRef: Record<string, string>
-  journalPath?: string
+  eventsPath?: string
   poolKey: string
 }
 
@@ -180,7 +180,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
     setRuntimeDiscoveryOptionsForTests({ nodeModuleRoots: [], env: {} })
     const isolatedDb = join(dataDir, 'engines', 'zcode', 'session-db', 'db.sqlite')
     await createPoolDb(SESSION_ID, isolatedDb)
-    const journalPath = writeJournal([
+    const eventsPath = writeJournal([
       journalLine(0, { type: 'text_delta', delta: 'partial ' }),
       journalLine(1, { type: 'text_delta', delta: 'answer' }),
       journalLine(2, { type: 'turn_end' }),
@@ -188,7 +188,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
     const messages = await readEngineSubagentHistory(
       zcodeRecord({
         sessionRef: { dbPath: isolatedDb, sessionId: SESSION_ID },
-        journalPath,
+        eventsPath,
         poolKey: POOL_KEY,
       }),
       dataDir,
@@ -238,7 +238,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
   })
 
   it('tier2: falls back to journal replay when db is missing', async () => {
-    const journalPath = writeJournal([
+    const eventsPath = writeJournal([
       journalLine(0, { type: 'text_delta', delta: 'partial ' }),
       journalLine(1, { type: 'text_delta', delta: 'answer' }),
       journalLine(2, { type: 'tool_start', toolName: 'Read', args: { path: 'a.ts' } }),
@@ -248,7 +248,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
     ])
 
     const messages = await readEngineSubagentHistory(
-      zcodeRecord({ sessionRef: { dbPath: DB_RELATIVE, sessionId: SESSION_ID }, journalPath, poolKey: POOL_KEY }),
+      zcodeRecord({ sessionRef: { dbPath: DB_RELATIVE, sessionId: SESSION_ID }, eventsPath, poolKey: POOL_KEY }),
       dataDir,
     )
 
@@ -297,10 +297,10 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
     // 清掉跨用例残留实例。注意调用顺序：reset 会连带把 discoveryOverrides 置
     // undefined（恢复缺省发现），隔离必须后设，顺序颠倒则隔离失效（基线红修复期实测）。
     // 根因形态：引擎侧 journal 重放（zcode-subagent-cli journal-io）无 engines-root
-    // 前缀白名单——①级协议 read 把不可信 journalPath 透传引擎进程直读，越界文件被
+    // 前缀白名单——①级协议 read 把不可信 eventsPath 透传引擎进程直读，越界文件被
     // 读出（断言收到 'STOLEN CONTENT'），用例随宿主 env 非确定性翻红；隔离后本用例
     // 确定性验证本文件头部覆盖点 3：宿主侧②级白名单（core session-view-service
-    // readJournalTier 的 isStrictlyUnder(resolveEnginesRoot(dataDir), journalPath)）
+    // readJournalTier 的 isStrictlyUnder(resolveEnginesRoot(dataDir), eventsPath)）
     // 拒绝越界路径且不读文件、降③级。引擎侧缺口是独立产品问题，登记在 u9 验收
     // 报告 blockers（领地 = zcode-subagent-cli，超出本单元）。
     // 清扫先行（reset 会把 discoveryOverrides 一并置 undefined——隔离必须后设，顺序不可倒）
@@ -312,7 +312,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
 
     try {
       const messages = await readEngineSubagentHistory(
-        zcodeRecord({ sessionRef: { dbPath: DB_RELATIVE, sessionId: SESSION_ID }, journalPath: outsideJournal, poolKey: POOL_KEY }),
+        zcodeRecord({ sessionRef: { dbPath: DB_RELATIVE, sessionId: SESSION_ID }, eventsPath: outsideJournal, poolKey: POOL_KEY }),
         dataDir,
       )
       expect(messages[1]?.content).toBe('LGTM outcome text')
@@ -375,7 +375,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
 
     // fixture 约束（设计 D6）：result 与 error 必须双缺——:450 三选一
     // (result ?? error ?? 占位)，带任一则断言走不到占位分支、守护空转。
-    // 无 journalPath → ①空降②、②不可达 → ③级占位投影。
+    // 无 eventsPath → ①空降②、②不可达 → ③级占位投影。
     const base = zcodeRecord({ sessionRef: { dbPath: DB_RELATIVE, sessionId: SESSION_ID }, poolKey: POOL_KEY })
     const record: EngineAwareRecord = { ...base, result: undefined, error: undefined }
 

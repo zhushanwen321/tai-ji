@@ -7,11 +7,12 @@ import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 import { writeAtomicFile, writeAtomicFileSync } from "../../shared/atomic-write.ts";
 import { isMissingFsError } from "./fs-error.ts";
-import type { ClosedReason, ExecutionStatus } from "../assembly/types.ts";
+import { recordEventsPath } from "./record-events.ts";
+import type { ClosedReason, ExecutionStatus } from "../domain/record-types.ts";
 // 类型面依赖（D5 终局投影词表单源）——纯 type import，无运行时循环
 //（run-events 只依赖 core/logger 与 orchestration/models，不回指 execution 层）。
-import type { RunErrorCode, RunOutcome } from "../../orchestration/run-events.ts";
-import { ALL_RUN_OUTCOMES } from "../../orchestration/run-events.ts";
+import { RunErrorCode, RunOutcome } from "../../shared/run-vocabulary.ts";
+import { ALL_RUN_OUTCOMES } from "../../shared/run-vocabulary.ts";
 
 const logger = getLogger("subagents");
 
@@ -35,7 +36,7 @@ export interface ManifestRecord {
    * 与上方旧 status 三态投影**永久双写**——无版本磁盘 schema 不做破坏性变更；
    * session-reader（独立 npm 包独立进程）直读旧 status 做 identity 富字段投影
    * 与孤儿判定，删字段 = 外部消费方富字段降级。旧 status 只降权威地位不删字段。
-   * 宿主内消费方不读本字段（终态判定走 `.state` 权威，D1）；本字段是词汇收口
+   * 宿主内消费方不读本字段（终态判定走事件流折叠权威，D1）；本字段是词汇收口
    * （全景① ExecutionStatus+ClosedReason）在 manifest 写面的过渡锚。
    */
   executionStatus?: ExecutionStatus;
@@ -48,17 +49,17 @@ export interface ManifestRecord {
   engine?: string;
   /**
    * [U8 / B-restart] 引擎自描述定位符（与 SubagentRecord.engineHandle 同形）：
-   * sessionRef 整体透传不枚举内部键（zcode = { sessionId, dbPath }）、journalPath
+   * sessionRef 整体透传不枚举内部键（zcode = { sessionId, dbPath }）、eventsPath
    * 绝对路径、poolKey 隔离池定位。zcode record 重启续聊的锚恢复数据源之一
    * （entry engineHandle.sessionRef 为主，本字段为 manifest 孤儿兜底）。
    */
-  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+  engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
   /**
    * [M2 Gate B] closed 终态的 L2 关闭原因（status="closed" 时有意义）。旧 manifest 无
    * 此字段（undefined = 死因不可考，读侧守卫归一 undefined）。缺失时 manifest 源重建
    * 的快照丢 closedReason，endedMessageGuard 把 user-close/cancelled 误分流进
    * 「reconnectable/fork-from」分支——本字段是 manifest 源快照三分流的唯一依据
-   * （磁盘 sidecar 源由 .state reason 承载，不经本字段）。
+   * （磁盘重建源的 closedReason 由折叠与 v2 条目承载，不经本字段）。
    */
   closedReason?: ClosedReason;
   /**
@@ -78,18 +79,34 @@ export interface ManifestRecord {
   slug?: string;
   model?: string;
   /**
-   * [P1b-2 / D5 终局投影] run 终局形态（completed/failed/cancelled）。record 域的
-   * 投影能力面：record 终态写入链（markFinalized 族）接线归后继批次（Q2/P3 领地），
-   * 本批只交付字段与读侧兼容。undefined = 未投影/旧 manifest（isValidManifest 不查
-   * 可选字段，读侧守卫归一，不炸）。
+   * [④ 纯索引水位] 派生自的事件文件（`<id>.events`）stat 戳——manifest 三性质的
+   * 「带水位」维度：读时对不上即投影过期（写点与事件追加之间崩溃的半更新窗），
+   * 回落事件流重建（core 读侧 mergeManifestRecords 校验；跨包 session-reader 的
+   * 水位校验随 manifest 整体退场批次处理，登记剩余）。缺省 = 无水位（存量 manifest
+   * / 纯内存测试形态），读侧按现状接受（宽容存量，行为零变化）。
    */
-  outcome?: RunOutcome;
-  /** [P1b-2 / D5 终局投影] 失败终局的结构化编码（见 outcome 注释的接线归属）。 */
-  errorCode?: RunErrorCode;
+  eventsStamp?: { mtimeMs: number; size: number };
 }
 
-/** JSON.stringify 缩进空格数（no-magic-numbers 合规）。 */
-const MANIFEST_INDENT_SPACES = 2;
+/** manifest JSON.stringify 缩进空格数（no-magic-numbers 合规）。
+ *  **唯一权威源**：manifest 字节形态由本模块定义，全部生产侧（本文件、
+ *  record-store-terminal.ts 的 binding 快照族、record-store.ts 的同步物化点）
+ *  经 import 消费——读写两侧格式互认靠单一定义，不靠两处巧合同值。 */
+export const MANIFEST_INDENT_SPACES = 2;
+
+/**
+ * [④ 纯索引水位] manifest 写点统一嵌事件文件水位（`<id>.events` 的 stat 戳）。
+ *
+ * manifest 三性质收口的「带水位」维度的写入半边：全部 record 侧 manifest 写点
+ * （writeManifestPersisted / materializeBoundRecordManifest / rebuildManifestIfMissing）
+ * 落盘前经本函数嵌入当前事件文件戳——写序保证（各原语先追加事件后写 manifest）
+ * 使水位在写点处构造性新鲜；读侧（mergeManifestRecords）对不上即跳过该条回落
+ * 重建。事件文件不在场（纯内存/未落账）→ 原样返回（无水位 = 存量宽容形态）。
+ */
+export function withEventsWatermark(manifestDir: string, manifest: ManifestRecord): ManifestRecord {
+  const stamp = statStamp(recordEventsPath(manifestDir, manifest.id));
+  return stamp === null ? manifest : { ...manifest, eventsStamp: stamp };
+}
 
 /** [perf] 缓存校验戳（与 record-store.ts Stamp 同构；manifest 是小文件，mtime+size 足够）。 */
 interface Stamp {
@@ -155,9 +172,8 @@ export class ManifestStore {
    * 不阻塞 event loop）。
    *
    * 失败时原语尽力清理残留 tmp（debug 记录，不掩盖原错误）并原样上抛——
-   * 调用方（RecordStore 写面：writeManifestPersisted 缺省异步分支 / 批写 barrier /
-   * rebuildIndexes 重建降级（debug 留痕）/ rematerializeManifest（warn 语义））
-   * 决定降级策略——各面降级策略分化见各调用点。
+   * 调用方（RecordStore 写面：writeManifestPersisted 缺省异步分支 / rebuildIndexes
+   * 重建降级（debug 留痕））决定降级策略——各面降级策略分化见各调用点。
    */
   async writeManifest(record: ManifestRecord): Promise<void> {
     const filePath = path.join(this.dir, `${record.id}.json`);
@@ -170,6 +186,9 @@ export class ManifestStore {
   /**
    * 按 id 读 manifest。文件不存在/JSON 损坏/schema 不合法均返回 null。
    * 调用方需处理 null。
+   *
+   * 可诊断性分档：ENOENT = 合法缺省（静默）；JSON 损坏 = warn（路径 + 原因，投影
+   * 等待重建）；非 ENOENT 读错误 = error 留证。
    */
   async readManifest(id: string): Promise<ManifestRecord | null> {
     const filePath = path.join(this.dir, `${id}.json`);
@@ -188,8 +207,13 @@ export class ManifestStore {
     try {
       const parsed: unknown = JSON.parse(content);
       return isValidManifest(parsed) ? parsed : null;
-    } catch {
-      // JSON 损坏（SyntaxError）降级为 null
+    } catch (err) {
+      // JSON 损坏（SyntaxError）：该投影按「不存在」消费（下个物化点重建），但损坏
+      // 必须留 warn（含路径与原因）——静默返回 null 与「本来就没有 manifest」不可区分。
+      logger.warn(
+        `[subagents] readManifest: corrupted JSON, treated as absent (projection awaits rebuild): ${filePath}`,
+        { detail: err instanceof Error ? err.message : String(err) },
+      );
       return null;
     }
   }
@@ -256,10 +280,11 @@ export class ManifestStore {
    * recoverTmpFiles → sweepTmpFiles，名实对齐「静默删除」）。
    *
    * 旧语义（ADR-035 三分支：manifest 已存在删 tmp / tmp 合法且 manifest 缺失
-   * promote / tmp 非法删）已随缓存降级退役——manifest 现为可丢可重建缓存
-   * （权威 = `.state`，重建 = RecordStore.rebuildIndexes，D5），promote 半写 tmp
-   * 只会把陈旧快照复活成「看似权威」的索引，语义失效；统一**静默删除**全部
-   * tmp（含 0 字节/半写形态——D8 停机窗残留由本清扫顺带清理）。
+   * promote / tmp 非法删）已随缓存降级退役——manifest 现为可丢可重建的带水位
+   * 纯索引（权威 = record 事件流折叠，重建 = RecordStore.rebuildIndexes，
+   * [④ 裁决 A]），promote 半写 tmp 只会把陈旧快照复活成「看似权威」的索引，
+   * 语义失效；统一**静默删除**全部 tmp（含 0 字节/半写形态——D8 停机窗残留由
+   * 本清扫顺带清理）。
    *
    * [T5④ / PS-13] per-file 容错保留：单个 tmp 删除失败（ENOENT——并发回收/外部
    * 清理抢先、EACCES 等）只 warn + 跳过该文件，不再中断整轮。promote 退役后
@@ -344,7 +369,9 @@ export function materializeBoundRecordManifest(
     return false;
   }
   try {
-    writeAtomicFileSync(path.join(dir, `${manifest.id}.json`), JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES));
+    // [④ 纯索引水位] bound 物化与事件追加的写序（先 append 后物化）保证水位新鲜。
+    const stamped = withEventsWatermark(dir, manifest);
+    writeAtomicFileSync(path.join(dir, `${manifest.id}.json`), JSON.stringify(stamped, null, MANIFEST_INDENT_SPACES));
     return true;
   } catch (err) {
     logger.warn(
@@ -448,6 +475,9 @@ export async function writeRunTerminalManifest(
  * outcome 字段的存量形态）一律返回 null（未终局语义，消费方按「无投影」处理，
  * 不炸）；errorCode / stderrTeePath 非法值由 isRunTerminalManifest 整体拒绝
  * （同 null 降级）；两字段缺省（旧 manifest）= undefined 合法通过（读侧兼容）。
+ *
+ * 可诊断性分档：ENOENT（未终局/已清理）静默；JSON 损坏 warn（路径 + 原因）；
+ * 非 ENOENT 读错误 warn。
  */
 export async function readRunTerminalManifest(
   dir: string,
@@ -471,8 +501,14 @@ export async function readRunTerminalManifest(
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
-  } catch {
-    return null; // 损坏 JSON——按「无投影」降级。
+  } catch (err) {
+    // JSON 损坏：按「无投影」降级（未终局语义），warn 留证（路径 + 原因）——
+    // 损坏与「未终局」在返回值上不可区分，只有日志能分辨。
+    logger.warn(
+      `[subagents] readRunTerminalManifest: corrupted JSON, treated as absent (projection awaits rebuild): ${filePath}`,
+      { detail: err instanceof Error ? err.message : String(err) },
+    );
+    return null;
   }
   return isRunTerminalManifest(parsed) ? parsed : null;
 }

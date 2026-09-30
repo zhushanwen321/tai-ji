@@ -72,13 +72,13 @@ vi.mock("../jsonl-run-store.ts", () => ({
     flushPendingSaves = vi.fn(async () => {});
   },
 }));
-vi.mock("../interface/subagent-tool.ts", () => ({ registerSubagentTool: vi.fn() }));
-vi.mock("../interface/subagents.ts", () => ({ registerSubagentsCommand: vi.fn() }));
-vi.mock("../interface/bg-notify-render.ts", () => ({ renderBgNotifyMessage: vi.fn() }));
-vi.mock("../interface/tool-workflow.ts", () => ({ registerWorkflowTool: vi.fn() }));
-vi.mock("../interface/tool-subagents.ts", () => ({ registerSubagentsTool: vi.fn() }));
-vi.mock("../interface/tool-workflow-script.ts", () => ({ registerWorkflowScriptTool: vi.fn() }));
-vi.mock("../interface/commands.ts", () => ({ registerWorkflowsCommand: vi.fn() }));
+vi.mock("../interface/tool/subagent-tool.ts", () => ({ registerSubagentTool: vi.fn() }));
+vi.mock("../interface/command/subagents.ts", () => ({ registerSubagentsCommand: vi.fn() }));
+vi.mock("../interface/gui/bg-notify-render.ts", () => ({ renderBgNotifyMessage: vi.fn() }));
+vi.mock("../interface/tool/tool-workflow.ts", () => ({ registerWorkflowTool: vi.fn() }));
+vi.mock("../interface/tool/tool-subagents.ts", () => ({ registerSubagentsTool: vi.fn() }));
+vi.mock("../interface/tool/tool-workflow-script.ts", () => ({ registerWorkflowScriptTool: vi.fn() }));
+vi.mock("../interface/command/commands.ts", () => ({ registerWorkflowsCommand: vi.fn() }));
 
 import { setupSessionLifecycle } from "../session-lifecycle.ts";
 
@@ -205,7 +205,7 @@ describe("场景 19：对账清理存量形态与接管保护", () => {
     const refA = seedSessionEntry("proj", "sess-a", {
       type: "custom",
       customType: "workflow-record",
-      data: { v: 2, kind: "registered", runId: "wf-s19-takeover", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, journalPath: path.join(stateDir, "wf-s19-takeover.record.jsonl") },
+      data: { v: 2, kind: "registered", runId: "wf-s19-takeover", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, recordPath: path.join(stateDir, "wf-s19-takeover.record.jsonl") },
     });
 
     // 删 A（session 文件删除）
@@ -216,7 +216,7 @@ describe("场景 19：对账清理存量形态与接管保护", () => {
     seedSessionEntry("proj", "sess-b", {
       type: "custom",
       customType: "workflow-record",
-      data: { v: 2, kind: "registered", runId: "wf-s19-takeover", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, journalPath: path.join(stateDir, "wf-s19-takeover.record.jsonl") },
+      data: { v: 2, kind: "registered", runId: "wf-s19-takeover", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, recordPath: path.join(stateDir, "wf-s19-takeover.record.jsonl") },
     });
 
     await runMaintenanceRound("sess-b-round");
@@ -257,7 +257,7 @@ describe("场景 19：对账清理存量形态与接管保护", () => {
       seedSessionEntry("proj", "sess-io", {
         type: "custom",
         customType: "workflow-record",
-        data: { v: 2, kind: "registered", runId: "wf-s19-io", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, journalPath: path.join(stateDir, "wf-s19-io.record.jsonl") },
+        data: { v: 2, kind: "registered", runId: "wf-s19-io", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, recordPath: path.join(stateDir, "wf-s19-io.record.jsonl") },
       });
       fs.chmodSync(sessionsRoot, 0o000);
 

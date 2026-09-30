@@ -5,7 +5,7 @@
 // - 表驱动全 reason 分支（wrong-type / missing-v / future-v / no-snapshot /
 //   unknown-kind——每分支至少一行真实输入）；
 // - ok 分支：v1 snapshot 引用透传（不复制不校验）与 truthy-即放行语义；
-// - v2 分支：registered/settled 载荷透传（含 journalPath 锚点字段）；
+// - v2 分支：registered/settled 载荷透传（含 recordPath 锚点字段）；
 // - 词表零差集守卫：期望 reason 词表与判别联合双向穷尽（类型级赋值锚 +
 //   运行时表覆盖核对——任一侧加成员即红）；
 // - 常量钉住：customType / entry schema 版本（W1 起 = 2）的字面量值锁（壳测试
@@ -89,7 +89,7 @@ describe("classifyWorkflowRecordEntryData ok 分支（v1 兼容读面）", () =>
 });
 
 describe("classifyWorkflowRecordEntryData v2 分支（W1 注册/终态两条小条目）", () => {
-  it("v2 registered → reason 'v2'，载荷透传 + journalPath 锚点字段在位", () => {
+  it("v2 registered → reason 'v2'，载荷透传 + recordPath 锚点字段在位", () => {
     const entry = {
       v: 2,
       kind: "registered",
@@ -98,13 +98,13 @@ describe("classifyWorkflowRecordEntryData v2 分支（W1 注册/终态两条小�
       scriptName: "review-fix-loop",
       slug: "pr-123",
       startedAt: 1780000000000,
-      journalPath: "/tmp/workflow-state/wf-1.events.jsonl",
+      recordPath: "/tmp/workflow-state/wf-1.events.jsonl",
     };
     const result = classifyWorkflowRecordEntryData(entry);
     expect(result).toEqual({ ok: false, reason: "v2", entry });
     if (!result.ok && result.reason === "v2" && result.entry.kind === "registered") {
       // TS 窄化面：判别联合经 kind 收窄（消费方解码路径的形态锚）
-      expect(result.entry.journalPath).toBe("/tmp/workflow-state/wf-1.events.jsonl");
+      expect(result.entry.recordPath).toBe("/tmp/workflow-state/wf-1.events.jsonl");
     }
   });
 

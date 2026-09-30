@@ -67,7 +67,7 @@ export interface RunEndState {
 }
 
 /** session 身份回填状态机（三路写同源；get_state 监听表随行持有）。 */
-export interface SessionIdentityTracker {
+export interface SessionIdentityTracker { // oe-exempt:20260930:framework:CLI 泵与 spawn 编排之间的接缝契约（唯一实装 createSessionIdentityTracker；非投机抽象，后续新增引擎会带来第二实装）
   readonly sessionId: string | undefined;
   readonly sessionFile: string | undefined;
   /** header 行：id + session 文件路径全量落位（handleReady 双字段条件展开）。 */

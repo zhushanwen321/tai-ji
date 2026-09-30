@@ -604,3 +604,68 @@ describe("buildWorkerScript runtime — string 分支 maxTurns ?? 语义保真�
   });
 });
 
+
+describe("buildWorkerScript runtime — schema 出口契约（ADR-0092 保留项）", () => {
+  // [ADR-0092] 带 schema 却既无 parsedOutput 也无显式 error = 结果出口断裂：
+  // 对象形态是 schema 调用唯一合法结果，无文本回落选项——出口不得静默把正文
+  // 文本当结果（脚本无感知）。违规出口 resolve 错误说明（returnMeta 走 error 字段）。
+
+  it("带 schema + 无 parsedOutput + 无 error → resolve 错误说明（不静默回落正文文本）", async () => {
+    const script = `
+      const v = await agent({ prompt: "p", schema: { type: "object" } });
+      return { got: v };
+    `;
+    const res = await runWorker(script, { agentResultObjects: [{ content: "plain prose" }] });
+    expect(res.workerError).toBeUndefined();
+    expect(res.returnValue).toEqual({
+      got: expect.stringMatching(/neither a parsed object nor an explicit error/),
+    });
+  });
+
+  it("带 schema + returnMeta → error 字段带说明、value 同串（脚本可判错）", async () => {
+    const script = `
+      const r = await agent({ prompt: "p", schema: { type: "object" }, returnMeta: true });
+      return r;
+    `;
+    const res = await runWorker(script, { agentResultObjects: [{ content: "plain prose" }] });
+    expect(res.workerError).toBeUndefined();
+    const ret = res.returnValue as { error?: string; value?: string };
+    expect(ret.error).toMatch(/ADR-0092/);
+    expect(ret.value).toMatch(/neither a parsed object nor an explicit error/);
+  });
+
+  it("无 schema + 无 parsedOutput → content 回落不变（容错策略不受影响）", async () => {
+    const script = `
+      const v = await agent({ prompt: "p" });
+      return { got: v };
+    `;
+    const res = await runWorker(script, { agentResultObjects: [{ content: "plain prose" }] });
+    expect(res.returnValue).toEqual({ got: "plain prose" });
+  });
+
+  it("带 schema + 显式 error → content 回落不变（失败 resolve 容错形态保留）", async () => {
+    const script = `
+      const v = await agent({ prompt: "p", schema: { type: "object" } });
+      return { got: v };
+    `;
+    const res = await runWorker(script, {
+      agentResultObjects: [{ content: "fallback text", error: "boom" }],
+    });
+    expect(res.returnValue).toEqual({ got: "fallback text" });
+  });
+
+  it("缓存命中路径同判：带 schema + 无 parsedOutput 无 error 的缓存结果 → 错误说明", async () => {
+    const script = `
+      const v = await agent({ prompt: "p", schema: { type: "object" } });
+      return { got: v };
+    `;
+    // callCache 预填 = 重放命中（callId 0）；缓存条目无 parsedOutput 无 error。
+    const res = await runWorker(script, {
+      callCache: new Map([[0, { content: "cached prose" }]]),
+    });
+    expect(res.workerError).toBeUndefined();
+    expect(res.returnValue).toEqual({
+      got: expect.stringMatching(/neither a parsed object nor an explicit error/),
+    });
+  });
+});

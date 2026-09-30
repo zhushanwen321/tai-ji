@@ -75,7 +75,7 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", async (importOri
 const { mockRegisterWorkflowsCommand } = vi.hoisted(() => ({
   mockRegisterWorkflowsCommand: vi.fn(),
 }));
-vi.mock("../interface/commands.ts", () => ({
+vi.mock("../interface/command/commands.ts", () => ({
   registerWorkflowsCommand: mockRegisterWorkflowsCommand,
 }));
 
@@ -89,14 +89,14 @@ import { NOTIFY_ACK_CUSTOM_TYPE, NOTIFY_CUSTOM_TYPE, NOTIFY_LEDGER_CUSTOM_TYPE, 
 import { setupSessionLifecycle } from "../session-lifecycle.ts";
 import subagentsExtension from "../index.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
-import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
+import { GLOBAL_SLOT_KEYS, setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /** 重置双 Service 单例槽（setter 不接受 null，测试清理用 Symbol 直写；
  *  key 与生产 getServiceSlot / getModelServiceSlot 的 Symbol.for 一致）。 */
 function resetLifecycleSlots(): void {
-  for (const key of ["@zhushanwen/pi-subagents.service", "@zhushanwen/pi-subagents.model-service"]) {
+  for (const key of [GLOBAL_SLOT_KEYS.service, GLOBAL_SLOT_KEYS.modelService]) {
     const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
     if (slot) slot.current = null;
   }
@@ -303,14 +303,12 @@ describe("session_shutdown: store.dispose 接线（W2TC16）", () => {
     // 预热：session_start 建立一个 sessionState 条目（含 mock store 实例）。
     // loadAll 注入 running run 使其进入 sessionState.runs——duck-typed 对象 +
     // no-op transition：session_start 的 kill-9 恢复会把 running run 转 done,failed
-    // （真实 WorkflowRun.reconstruct 无法保持 running），no-op transition 吞掉该转换
-    // 让 run 以 running 进入 sessionState.runs。运行时形状由消费路径保证：handler
-    // 只读 state.status（string）与 transition（可调用），duck typing 满足。
+    // 残留 running 形态经恢复链走中断收编（isRunSettled=false 判活——聚合快照
+    // 不持生命周期轴，duck typing 满足消费路径）。
     mockStoreDispose.mockClear();
     const runningRun = {
       runId: "wf-w2tc16-1",
-      state: { status: "running", error: undefined as string | undefined },
-      transition: vi.fn(),
+      state: { error: undefined as string | undefined },
     } as unknown as WorkflowRun;
     const { shutdownHandler } = await mountWithLoadAll(async () => [runningRun]);
 

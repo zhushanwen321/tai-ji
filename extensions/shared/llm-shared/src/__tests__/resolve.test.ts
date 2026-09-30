@@ -2,7 +2,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
-import { isThinkingLevel, normalizeModelSelector, parseModelRef, resolveModel } from "../resolve.ts";
+import { normalizeModelSelector, normalizeThinkingLevel, parseModelRef, resolveModel } from "../resolve.ts";
 
 /** 构造最小 Model（cast 绕过必填字段，单测只关心 provider/id）。 */
 function makeModel(provider: string, id: string): Model<Api> {
@@ -63,35 +63,22 @@ describe("resolveModel（仅 ref 精确指定）", () => {
 	});
 });
 
-describe("isThinkingLevel（V2 七值钉值，与 pi-ai ModelThinkingLevel 联合一致）", () => {
-	it.each(["off", "minimal", "low", "medium", "high", "xhigh", "max"])(
-		"合法值 %j → true",
-		(level) => {
-			expect(isThinkingLevel(level)).toBe(true);
-		},
-	);
+describe("normalizeThinkingLevel（配置值归一：不自持词表）", () => {
+	it("非空字符串原样返回（含词表外值——合法性归写入侧 UI 与 pi）", () => {
+		for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]) {
+			expect(normalizeThinkingLevel(level)).toBe(level);
+		}
+	});
 
 	it.each([
-		["未知档位 ultra", "ultra"],
 		["空串", ""],
-		["大小写不符 OFF", "OFF"],
 		["undefined", undefined],
 		["null", null],
 		["数字", 1],
 		["对象", {}],
-		["数组（元素为合法值也不接受）", ["high"]],
-	])("非法值 %s → false", (_label, raw) => {
-		expect(isThinkingLevel(raw)).toBe(false);
-	});
-
-	it("类型收窄：合法值通过谓词后可赋给 ModelThinkingLevel", () => {
-		const raw: unknown = "xhigh";
-		if (isThinkingLevel(raw)) {
-			const narrowed: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" = raw;
-			expect(narrowed).toBe("xhigh");
-		} else {
-			throw new Error("xhigh 应通过谓词");
-		}
+		["数组", ["high"]],
+	])("%s → undefined（调用方落自己的缺省）", (_label, raw) => {
+		expect(normalizeThinkingLevel(raw)).toBeUndefined();
 	});
 });
 

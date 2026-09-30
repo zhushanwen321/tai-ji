@@ -16,7 +16,7 @@ import {
 import {
   terminateRunningRuns,
 } from "../lifecycle.ts";
-import { setRunEventJournalDirForTest } from "../terminal-actions.ts";
+import { isRunSettled, setRunEventJournalDirForTest } from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { resolveAgentOpts } from "../agent-opts-resolver.ts";
 import { AgentCall } from "../models/agent-call.ts";
@@ -45,7 +45,6 @@ function makeRunningRun(
       ...(opts.budgetTimeMs !== undefined ? { budgetTimeMs: opts.budgetTimeMs } : {}),
     },
     {
-      status: "running",
       budget: new Budget(opts.budgetTimeMs !== undefined ? { maxTimeMs: opts.budgetTimeMs } : {}),
       calls: new Map(),
       trace: new Trace(),
@@ -327,7 +326,7 @@ describe("D11 terminate 统一中断 — 全部 running run 被动失联转 inte
     await expect(
       resumeRun(runId, deps, { now: () => 1_770_000_100_000 }),
     ).resolves.toBe(runId);
-    expect(runs.get(runId)!.state.status).toBe("running");
+    expect(isRunSettled(runs.get(runId)!)).toBe(false);
   });
 
   it("正常 run：terminate 同样转 interrupted 暂停态（D11 统一，2026-09-29 用户裁决——打断不记失败）", async () => {
@@ -358,6 +357,54 @@ describe("D11 terminate 统一中断 — 全部 running run 被动失联转 inte
     await expect(
       resumeRun(runId, deps, { now: () => 1_770_000_100_000 }),
     ).resolves.toBe(runId);
-    expect(runs.get(runId)!.state.status).toBe("running");
+    expect(isRunSettled(runs.get(runId)!)).toBe(false);
+  });
+});
+
+// ── 已 done 调用 + 本次 schema 形状非法：回放历史结果，不误报漂移 ──────────────
+
+describe("schema 形状非法时的 replay 处置", () => {
+  let journalDir: string;
+
+  beforeEach(() => {
+    journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "resume-replay-schema-"));
+    setRunEventJournalDirForTest(journalDir);
+  });
+
+  afterEach(() => {
+    setRunEventJournalDirForTest(undefined);
+    fs.rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  it("本次 schema 是字符串（调用方写法错误）→ 回放照走历史结果，不判漂移、不 que 成 failed 终局", async () => {
+    const runId = "wf-replay-bad-schema";
+    await createRunEventJournal(journalDir).append(runId, {
+      type: "run-created",
+      runId,
+      workflowName: "w",
+      argsSummary: "{}",
+      scriptSource: "async function execute() {}",
+      ts: 1_770_000_000_000,
+    });
+    const { run, postMessage } = makeRunningRun(runId);
+    // 历史调用带合法对象 schema；本次脚本把 schema 字符串化——形状非法，但不是「漂移」
+    run.state.calls.set(0, makeSettledCall(0, { prompt: "same prompt", schema: { type: "object" } }, { content: "cached result" }));
+    const { deps } = makeDeps();
+
+    await handleWorkerMessage(
+      run,
+      { type: "agent-call", callId: 0, opts: { prompt: "same prompt", schema: '{"type":"object"}' } },
+      deps,
+      { onMessage: vi.fn(async () => {}), onError: vi.fn(async () => {}), onExit: vi.fn(async () => {}) },
+    );
+    await flushMicrotasks();
+
+    // 已 done 的调用照常回放历史结果
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agent-result", callId: 0, cached: true }),
+    );
+    // 且不得被误判成输入漂移（那条路径会落 run-settled failed 终局）
+    const events = await createRunEventJournal(journalDir).scan(runId);
+    expect(events.find((e) => e.type === "run-settled")).toBeUndefined();
   });
 });

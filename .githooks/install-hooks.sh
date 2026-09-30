@@ -1581,9 +1581,11 @@ ${STAGED_DELETED}"
     # 复用上方 pi-sync 段拼好的 PI_SYNC_TRIGGER_FILES（staged ACMR + deleted D——副本文件
     # 被删除也必须触发，脚本对文件缺失自带 fail 分支）。与 pi-sync 触发面有意部分重叠
     # （lockfile 同为触发文件）但职责不同：pi-sync 守构建派生锚点且 S6 只比 KnownApi，
-    # 本检查守 extensions/pi-rpc/subagent-core 档位词表副本，互不覆盖。不设独立 SKIP_* 开关（R1 后惯例，
+    # 本检查守两个比对面：subagent-core 的 THINKING_ORDER（宿主侧校验词表）与 shared 的
+    # PI_THINKING_LEVELS（前端派生源，core/renderer 从它派生）。llm-shared / pi-rpc 的副本已删除，
+    # 触发面随之摘除。不设独立 SKIP_* 开关（R1 后惯例，
     # 总开关 SKIP_ALL_CHECKS 兜底）。
-    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^extensions/shared/llm-shared/src/resolve\.ts$|^packages/pi-rpc/src/types\.ts$|^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$|^packages/subagent-core/src/shared/model-ref\.ts$"; then
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$|^packages/subagent-core/src/shared/model-ref\.ts$|^packages/shared/src/pi-preset\.ts$"; then
         echo -e "${BLUE}[INFO] thinking 档位词表文件有变更，运行档位词表比对检查...${NC}"
         if [ ! -f "scripts/check-thinking-levels.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-thinking-levels.mjs（D5 机器检查交付物缺失）${NC}"
@@ -1663,6 +1665,70 @@ if echo "$SUBAGENT_CORE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/ch
         exit 1
     fi
     echo -e "${GREEN}[OK] subagent-core 依赖闭包检查通过${NC}"
+fi
+
+# ============================================================================
+# subagent-core 包内值依赖环检查（C-data-26，§2.3 配套）
+#   packages/subagent-core/** 或检查脚本自身变更时触发：
+#   scripts/check-subagent-core-value-cycles.mjs —— 值 import 图不得成环（类型擦除边
+#   豁免，仅提示）。与 H3 聚合边界检查互补：后者只看六聚合子图，本检查覆盖整包。
+# ============================================================================
+
+SUBAGENT_CORE_CYCLE_STAGED=$(git diff --cached --name-only -- packages/subagent-core/ scripts/check-subagent-core-value-cycles.mjs)
+if echo "$SUBAGENT_CORE_CYCLE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/check-subagent-core-value-cycles\.mjs$"; then
+    print_section "[subagent-core 包内值依赖环检查]"
+    if [ ! -f "scripts/check-subagent-core-value-cycles.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-26 守卫缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-subagent-core-value-cycles.mjs; then
+        echo -e "${RED}[ERROR] subagent-core 包内检出值依赖环（C-data-26）——按上方 SCC 成员与内部边处理（端口反转/装配注入/共享词汇下沉契约层）${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] subagent-core 包内值依赖环检查通过${NC}"
+fi
+
+# ============================================================================
+# 进程级全局槽键归属检查（C-state-20，§2.6 配套）
+#   subagent 体系三包或检查脚本自身变更时触发：scripts/check-global-slot-keys.mjs
+#   —— Symbol.for 字面量只允许出现在两处声明文件，前缀/唯一性同时校验。
+# ============================================================================
+
+# ============================================================================
+# 领域类型路径单源检查（D2 配套，register §2.0/§2.4）
+#   subagent-core 源码或检查脚本自身变更时触发：scripts/check-domain-type-path.mjs
+#   —— execution/domain/ 是领域类型唯一权威路径；assembly 禁 re-export、消费面禁绕道。
+# ============================================================================
+
+DOMAIN_TYPE_PATH_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src scripts/check-domain-type-path.mjs)
+if echo "$DOMAIN_TYPE_PATH_STAGED" | grep -qE "^packages/subagent-core/src/|^scripts/check-domain-type-path\.mjs$"; then
+    print_section "[领域类型路径单源检查]"
+    if [ ! -f "scripts/check-domain-type-path.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-domain-type-path.mjs（D2 守卫缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-domain-type-path.mjs; then
+        echo -e "${RED}[ERROR] 领域类型路径出现双源（D2）——领域名只在 execution/domain/ 声明，assembly 不得 re-export，消费面不得绕道${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 领域类型路径单源检查通过${NC}"
+fi
+
+GLOBAL_SLOT_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src packages/subagent-engine-sdk/src extensions/universal/subagent-workflow/src scripts/check-global-slot-keys.mjs)
+if echo "$GLOBAL_SLOT_STAGED" | grep -qE "^packages/subagent-(core|engine-sdk)/src/|^extensions/universal/subagent-workflow/src/|^scripts/check-global-slot-keys\.mjs$"; then
+    print_section "[进程级全局槽键归属检查]"
+    if [ ! -f "scripts/check-global-slot-keys.mjs" ]; then
+        echo -e "${RED}[ERROR] 找不到 scripts/check-global-slot-keys.mjs（C-state-20 守卫缺失）${NC}"
+        exit 1
+    fi
+    if ! node scripts/check-global-slot-keys.mjs; then
+        echo -e "${RED}[ERROR] 进程级全局槽键归属检查未通过（C-state-20）——字面量集中到两处声明文件，其余写 Symbol.for(<常量>)${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK] 进程级全局槽键归属检查通过${NC}"
 fi
 
 # ============================================================================

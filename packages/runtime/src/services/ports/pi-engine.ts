@@ -8,7 +8,7 @@
  * 跨服务 facade 契约。本文件是 pi 引擎 / 进程池接口的唯一权威定义点。
  */
 
-import type { ThinkingLevel, ProviderId } from '@taiji/shared'
+import type { ProviderId } from '@taiji/shared'
 
 /**
  * pi 任意 JSON 响应的逃生类型。
@@ -120,7 +120,14 @@ export interface PiSessionOptions {
   /** 禁用 context files，透传到 RpcClientOptions.noContextFiles → --no-context-files。 */
   noContextFiles?: boolean
   /** 覆盖思考级别，透传到 RpcClientOptions.thinkingLevel → --thinking。 */
-  thinkingLevel?: ThinkingLevel
+  /**
+   * 档位字符串透传（非空即发）；合法性由上游入口层校验（launch-params
+   * resolveEffectiveThinking，词表 = shared PI_THINKING_LEVELS），本层不重复校验。
+   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi（0.84.4）对非法 --thinking 仅 push
+   * warning diagnostic 并丢弃档位、进程照常以缺省档启动（pi-coding-agent
+   * dist/cli/args.js:112-121；仅 type==="error" 才 exit：dist/main.js:476-478）。
+   */
+  thinkingLevel?: string
 }
 
 /**

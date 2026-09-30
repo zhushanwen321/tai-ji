@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "@zhushanwen/pi-ext-guards";
@@ -268,6 +269,12 @@ export async function callRenameLLM(
 		logger.warn("model not available, skipping");
 		return null;
 	}
+	const reasoningLevel = getSupportedThinkingLevels(model).find((l) => l === config.thinkingLevel);
+	if (config.thinkingLevel !== undefined && reasoningLevel === undefined) {
+		logger.warn(
+			`configured thinkingLevel "${config.thinkingLevel}" is not supported by ${model.provider}/${model.id}; calling without a thinking level`,
+		);
+	}
 
 	const userPrompt =
 		options?.promptText ??
@@ -307,8 +314,10 @@ export async function callRenameLLM(
 		maxTokens: 2048,
 		// 固定 30s 超时（网络抖动归一为 ok:false 走静默跳过，不悬挂 fire-and-forget promise）
 		timeoutMs: RENAME_TIMEOUT_MS,
-		// thinkingLevel 直接透传（含 "off"）；llm-shared 内部会把 "off" 映射为不传 reasoning（provider 默认）
-		reasoning: config.thinkingLevel,
+		// 档位按「该模型自己的 supportedLevels」判定（pi-ai 数据驱动，本层不自持词表）：
+		// 配置写了该模型不支持的档位 → 留痕并按「不传档位」处理（不静默换成别的档）。
+		// llm-shared 内部会把 "off" 映射为不传 reasoning（provider 默认）。
+		reasoning: reasoningLevel,
 		// 保留随 session abort 取消调用的语义（旧版 llm.ts 同样透传 ctx.signal）
 		signal: ctx.signal,
 		sessionId,

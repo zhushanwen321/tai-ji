@@ -8,7 +8,7 @@
  *   publish diff；[reload-closeout D2] 发布门基线从 merge 变化信号换成已发布快照水位，
  *   守卫/发布门处丢帧 = 水位滞留 → agent_settled / 15s 定时两腿对账补发，稳态零帧）；
  * - 磁盘读侧/动作/引擎配置：getSubagents/getWorkflows（[W1 / D6] 读请求只读 journal
- *   投影——entry 游标 + journal tail 双源单点合并，见 journal-projection.ts；v1 巨文件
+ *   投影——entry 游标 + journal tail 双源单点合并，见 events-projection.ts；v1 巨文件
  *   会话 oversize 分流走旧格式惰性兼容读路径）、getPlanState（冷启动磁盘扫描不变）、
  *   getSubagentHistory/getAgentCall*（record.sessionFile 直读）、
  *   workflowAction/subagentAction（经扩展 slash command 的生命周期/定向消息操作）、
@@ -53,7 +53,7 @@ import {
 } from './subagent-engine-history.js'
 import { extractWorkflowsFromSessionFile } from './workflow-extractor.js'
 import { scanRecordFamilyEntriesFromSessionFile } from './session-file-extraction.js'
-import { SessionJournalProjection } from './journal-projection.js'
+import { SessionEventProjection } from './events-projection.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { logger } from '../../infra/logger.js'
 import { discoverAndRegisterEngines } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
@@ -123,7 +123,7 @@ export interface RecordEntriesCache {
    * [W1 / D6] journal 投影（读请求唯一数据源）：entry 游标 + journal tail 双源
    * 单点合并。惰性创建（首个失效拉取 / 读 RPC / 对账触达时）；销毁随 cache。
    */
-  projection: SessionJournalProjection | null
+  projection: SessionEventProjection | null
   /**
    * [pull-push W0] 首拉未决标志：收到过 record 失效信号但尚未成功完成一轮拉取。
    * 置位 = invalidateRecordEntries 通过 customType 门；清除 = refreshRecordEntries 成功
@@ -448,13 +448,13 @@ export class SessionRecords {
    * 会话 meta 不可得（pi 延迟写入 / 测试窄 mock）→ 无 tailer 的 entry-only
    * 降级投影。
    */
-  private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionJournalProjection {
+  private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionEventProjection {
     if (cache.projection !== null) return cache.projection
     const meta = this.deps.sessionStore
       .scanSessions({ force: true })
       .find((s) => s.id === sessionId)
     const cwd = meta?.cwd
-    const projection = new SessionJournalProjection({
+    const projection = new SessionEventProjection({
       sessionId,
       recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
       runJournalDir: meta !== undefined ? join(dirname(meta.filePath), 'workflow-state') : undefined,
@@ -490,7 +490,7 @@ export class SessionRecords {
   }
 
   /** 派生缓存 ← 投影合并快照（cache.subagents/workflows 的数据写路径唯一 = 投影重算）。 */
-  private syncCacheFromProjection(cache: RecordEntriesCache, projection: SessionJournalProjection): void {
+  private syncCacheFromProjection(cache: RecordEntriesCache, projection: SessionEventProjection): void {
     cache.subagents = new Map(projection.subagents)
     cache.workflows = new Map(projection.workflows)
   }
@@ -1257,9 +1257,9 @@ function planDocListEquals(a: PlanDocMeta[] | undefined, b: PlanDocMeta[] | unde
  * [modeless 波4] chatMode 比对维度随字段消亡删除（旧 entry 残留键被投影层忽略，
  * 不再构成显示信号）。
  * [U5/D4] resumable 比对位随字段退役删除——轮终翻转由 status 位天然触发。
- * [engine 域浅比较] engineHandle/engineFallback 是嵌套对象，applyRecordEntries 每轮
+ * [engine 域浅比较] engineHandle 是嵌套对象，applyRecordEntries 每轮
  * 重新解析 entry 派生新对象引用——=== 引用比较对同值也判不等（每轮多发 publish），
- * 故走字段级浅比较（见下方两个 equals helper）。zcode 续聊每轮换新 sessionId
+ * 故走字段级浅比较（见下方 equals helper）。zcode 续聊每轮换新 sessionId
  * （sessionRef.sessionId 变化）是真值变化，字段级比较天然触发 publish。
  * [拆分依据] 24 字段单链 && 圈复杂度 24 超 metrics-gate 门禁（≤15），按 record
  * 语义域拆四组 helper（身份锚 / 执行配置 / 统计 / 状态展示，见下方四个 equals）。
@@ -1285,14 +1285,13 @@ function recordIdentityEquals(a: SubagentRecord, b: SubagentRecord): boolean {
 }
 
 /**
- * [执行配置组] 模型/思考等级标量 + engine 域三件套（engine id / fallback 留痕 /
- * handle 锚——后两者经既有浅比较 helper，见上方「engine 域浅比较」注释）。
+ * [执行配置组] 模型/思考等级标量 + engine 域两件套（engine id / handle 锚——后者
+ * 经既有浅比较 helper，见上方「engine 域浅比较」注释）。
  */
 function recordRunConfigEquals(a: SubagentRecord, b: SubagentRecord): boolean {
   return a.model === b.model
     && a.thinkingLevel === b.thinkingLevel
     && a.engine === b.engine
-    && engineFallbackEquals(a.engineFallback, b.engineFallback)
     && engineHandleEquals(a.engineHandle, b.engineHandle)
 }
 
@@ -1333,18 +1332,8 @@ function stringRecordEquals(a: Record<string, string>, b: Record<string, string>
   return aKeys.every((key) => a[key] === b[key])
 }
 
-/** [engine 域浅比较] engineFallback 字段级（from/reason 均标量）。 */
-function engineFallbackEquals(
-  a: SubagentRecord['engineFallback'],
-  b: SubagentRecord['engineFallback'],
-): boolean {
-  if (a === b) return true
-  if (a === undefined || b === undefined) return false
-  return a.from === b.from && a.reason === b.reason
-}
-
 /**
- * [engine 域浅比较] engineHandle 字段级：sessionRef 键值逐一比对 + journalPath /
+ * [engine 域浅比较] engineHandle 字段级：sessionRef 键值逐一比对 + eventsPath /
  * poolKey 标量比对（zcode 锚 = sessionRef.{sessionId,dbPath}，sessionId 换新即真变化）。
  */
 function engineHandleEquals(
@@ -1354,7 +1343,7 @@ function engineHandleEquals(
   if (a === b) return true
   if (a === undefined || b === undefined) return false
   return stringRecordEquals(a.sessionRef, b.sessionRef)
-    && a.journalPath === b.journalPath
+    && a.eventsPath === b.eventsPath
     && a.poolKey === b.poolKey
 }
 

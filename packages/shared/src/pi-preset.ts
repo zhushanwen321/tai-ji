@@ -25,14 +25,29 @@ export type ToolMode = 'all' | 'allowlist' | 'denylist' | 'none'
 export type ExtensionMode = 'all' | 'allowlist' | 'denylist' | 'none'
 
 /**
- * pi thinking 值域全集 SSOT（W2 值域对齐，pi-assumption-remediation A-03）。
+ * pi thinking 值域全集 SSOT —— **前端侧唯一档位词表来源（集合 + 顺序）**。
  *
- * 锚点：pi 0.84.1 实装版 `node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js:6`
- * `VALID_THINKING_LEVELS = ["off","minimal","low","medium","high","xhigh","max"]`；
- * runtime 协议镜像 = `packages/runtime/src/infra/pi/pi-protocol.ts` 的 `PiThinkingLevel`。
- * shared 不能反向 import runtime（依赖方向），双向一致性由 session-lifecycle.ts
- * 的编译期类型断言锁定（该文件同时 import 两边）。
- * 维护注：升级 pi 时 diff 上面锚点行，同步本数组（漏同步会在编译期报错，不会静默）。
+ * 锚点（pi 0.84.4 实装版，两处同集同序，均为 7 值含 xhigh/max）：
+ * - `node_modules/@earendil-works/pi-ai/dist/types.d.ts:24-25`
+ *   `ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max"`，
+ *   `ModelThinkingLevel = "off" | ThinkingLevel`；
+ * - `node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js:6`
+ *   `VALID_THINKING_LEVELS = ["off","minimal","low","medium","high","xhigh","max"]`。
+ *
+ * 前端消费面（都从这里派生，前端侧不再有第二份集合/顺序）：
+ * - @taiji/core `domain/composer/thinking-levels`（THINKING_LEVELS / 全序 / isThinkingLevel）；
+ * - @taiji/core `transport/mock/composer-data`（mock fixture）。
+ * 「某模型支持哪些档」不在这份词表里——那是 runtime 下发的 supportedLevels 数据驱动。
+ *
+ * 宿主侧另有一份**校验用**词表（packages/subagent-core `src/shared/model-ref.ts` 的
+ * THINKING_ORDER，分层约束禁跨包 import，故与本文件共存）：它由
+ * `scripts/check-thinking-levels.mjs` 在提交期与 pi-ai 实装的 ModelThinkingLevel 对账。
+ * 本文件（前端派生源）↔ runtime 协议镜像 PiThinkingLevel 的双向一致由
+ * `packages/runtime/src/infra/pi/pi-protocol.ts` 的 ThinkingLevelDriftGuard 编译期断言锁定
+ * （shared 不能反向 import runtime）。
+ *
+ * 维护注：升级 pi 时 diff 上面两处锚点，同步本数组（漏同步会在编译期断言/packages/shared
+ * 值域钉值单测/守卫脚本上分别报错，不会静默）。
  */
 export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 

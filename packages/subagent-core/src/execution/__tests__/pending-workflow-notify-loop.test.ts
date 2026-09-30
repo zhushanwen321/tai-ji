@@ -37,7 +37,7 @@ import { WorkflowRun } from "../../orchestration/models/workflow-run.ts";
 
 function makeSpec(): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: {},
     scriptName: "test-wf",
     scriptPath: "/fake/test.js",
@@ -70,7 +70,6 @@ function makeRealRun(runId: string): WorkflowRun {
       scriptPath: "/tmp/test-wf.js",
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),

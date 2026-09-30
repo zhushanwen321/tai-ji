@@ -19,28 +19,19 @@ import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 // 守卫 5 的「锚不可解析 → 引导 reopen」分流消费。
 import { isAnchorResolvable } from "./cold-lookup.ts";
 import { computeElapsedSeconds, projectOutcome } from "../persistence/execution-record.ts";
-import { SLUG_MAX_LENGTH } from "../../orchestration/models/types.ts";
+import { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 import type { ModelInfo } from "./model-resolver.ts";
 import type { SubagentService } from "../subagent-service.ts";
 import { displayAgentName } from "../../shared/agent-ref.ts";
-import type {
-  BgResponse,
-  CancelResponse,
-  CloseResponse,
-  ExecutionRecord,
-  ExecutionStatus,
-  ExternalState,
-  ForkFromResponse,
-  ListResponse,
-  MessageResponse,
-  SubagentListItem,
-  SubagentRecord,
-} from "./types.ts";
-import { ResurrectDeniedError } from "./types.ts";
+import type { ExecutionStatus, ExternalState } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { BgResponse, CancelResponse, CloseResponse, ForkFromResponse, ListResponse, MessageResponse, SubagentListItem, SubagentRecord } from "./types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 // [modeless 波1] message 资格 gate 的错误构造（文案/错误码/恢复指引单一权威，与
-// Continuation revive 翻边格写点②共用）+ 默认引擎 id（engine 留痕缺省判据）。
+// Continuation revive 翻边格写点②共用）+ 引擎路由裁决单点（engine 留痕缺省 = pi；
+// 带原生引擎锚却无 engine 字段 = 身份域损坏，显式抛错）。
 import { engineConversationMessageUnsupportedError } from "../engine/common/capability-gate.ts";
-import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
+import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 
 // ============================================================
 // 常量
@@ -549,9 +540,11 @@ export async function messageHandler(
   // record 直接续聊（无 one-shot → chatMode 升级概念，Mutable<> 置位 hack 消亡）。
   // 引擎能力轴的 message 资格检查保留（与 record 无关：pi native / zcode cold 均
   // 可续；unsupported 引擎硬拒 + fork/重派指引——与 Continuation revive 翻边格
-  // 写点②分工协同，改动这两处必须协同）。
+  // 写点②分工协同，改动这两处必须协同）。拒绝文案的引擎 id 经路由裁决单点解析：
+  // engine 缺省 = pi；带原生引擎锚却无 engine 字段（身份域损坏）→ 显式抛
+  // RecordEngineIdentityError，不按 pi 生成误导性拒绝文案。
   if (!service.engineSupportsConversation(record)) {
-    throw engineConversationMessageUnsupportedError(record.engine ?? DEFAULT_ENGINE_ID);
+    throw engineConversationMessageUnsupportedError(resolveEngineRouteId(record, record.id));
   }
 
   // 统一投递：Continuation 编排（§3.4——两态分流 / D2 打断语义）。

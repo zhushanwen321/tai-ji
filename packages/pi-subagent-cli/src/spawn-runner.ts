@@ -33,6 +33,7 @@ import {
   buildOutboundChildEnv,
   createReplayRecord,
   getLogger,
+  SUBAGENT_IDENTITY_ENV,
   resolveEngineDataDir,
   spawnEngineChild,
   type AgentEvent,
@@ -48,7 +49,6 @@ import { getPiInvocation } from "./pi-invocation.ts";
 import { collectOutcome, type CollectedOutcome } from "./output-collector.ts";
 import { toErrorMessage } from "./error-message.ts";
 import {
-  asThinkingLevel,
   buildEnvBlock,
   buildSpawnArgs,
   parseSpawnModelRef,
@@ -150,6 +150,15 @@ export interface SpawnRunParams {
    * 不存在。缺省 = 不拼 --extension。
    */
   extensionPaths?: string[];
+  /**
+   * [D4] record 身份信封（协议 ctx.identity 的还原）——整封写进子进程身份 env 的
+   * slug / startedAt / mode 三键；缺省不写，壳读者按回落语义工作。
+   */
+  identity?: {
+    slug?: string;
+    startedAt?: number;
+    mode?: string;
+  };
   /** resume 目标 session 文件（冷续写：--session 续写原文件）。 */
   resumeSessionFile?: string;
 }
@@ -164,6 +173,90 @@ export interface SpawnRunResult extends Omit<CollectedOutcome, "sessionId"> {
    * 装配源，经 pi-engine toOutcome 透传上协议）。
    */
   stderrTeePath?: string;
+}
+
+/**
+ * [§2.7 身份 env 接通] 把本次 run 的子代理身份写入子进程 env（**必须在
+ * `buildOutboundChildEnv` 的 deny 剥除之后调用**——当前 deny 名单不含 PI_SUBAGENT_*，
+ * 但按 relay 归属键先例统一在终态写回，防将来 deny 扩展时这些键被静默剥掉）。
+ *
+ * 值的来源分层（引擎只写它确实知道的；其余不写，读者各自回落）：
+ *   - selfRecordId / agent / task：本次 run 参数（recordId / agentName / task 文本）；
+ *   - rootSessionId：run 参数优先，回落引擎自身 env（嵌套链贯穿）；
+ *   - rootCwd：引擎自身 env（真 ROOT 的 cwd，worktree 场景下≠子进程 cwd）优先，
+ *     回落本次 spawn cwd；
+ *   - depth：引擎自身 env 的层数 + 1（子进程 = 父进程 + 1）；
+ *   - forkDepth：引擎自身 env 原值（root 侧一次设定，链上不变）；
+ *   - parentRecordId：引擎自身 env 的 selfRecordId（嵌套时引擎自己也是某个 run 的
+ *     子进程，那正是本次子进程的父 record id）；
+ *   - mode：继承引擎自身 env（嵌套场景），缺席缺省 "background"（子代理 record 的
+ *     常规形态；壳读者对非法值同款兜底）；
+ *   - worktree：引擎自身 env 或本次 run 声明任一为真即写 "true"。
+ *   - slug / startedAt：引擎无从得知（record 级字段，协议未携带）→ 不写；壳读者
+ *     分别按「可选」与「Date.now()」回落。补齐它们需要把 record 身份挂上协议（登记见
+ *     docs/todo/subagent-workflow-issues.md §2.7 遗留）。
+ */
+/** 链路定位键写入（applyIdentityEnvToChildEnv 拆出）：root 链 / 深度 / 父 record。
+ * 值源分层见主函数注释——run 参数优先、引擎自身 env 回落（嵌套链贯穿）。 */
+function applyLinkageIdentityKeys(
+  childEnv: Record<string, string>,
+  params: Pick<SpawnRunParams, "recordId" | "cwd" | "sessionRootId">,
+  parentEnv: NodeJS.ProcessEnv,
+): void {
+  const key = SUBAGENT_IDENTITY_ENV;
+  childEnv[key.selfRecordId] = params.recordId;
+  const rootSessionId = params.sessionRootId ?? parentEnv[key.rootSessionId];
+  if (rootSessionId !== undefined && rootSessionId !== "") {
+    childEnv[key.rootSessionId] = rootSessionId;
+  }
+  const rootCwd = parentEnv[key.rootCwd];
+  childEnv[key.rootCwd] = rootCwd !== undefined && rootCwd !== "" ? rootCwd : params.cwd;
+  const parentDepth = Number(parentEnv[key.depth]);
+  childEnv[key.depth] = String((Number.isFinite(parentDepth) ? parentDepth : 0) + 1);
+  const forkDepth = Number(parentEnv[key.forkDepth]);
+  if (Number.isFinite(forkDepth) && forkDepth > 0) childEnv[key.forkDepth] = String(forkDepth);
+  const parentRecordId = parentEnv[key.selfRecordId];
+  if (parentRecordId !== undefined && parentRecordId !== "") {
+    childEnv[key.parentRecordId] = parentRecordId;
+  }
+}
+
+/** 身份内容键写入（applyIdentityEnvToChildEnv 拆出）：agent/task 直写 + [D4]
+ * 身份信封三键（slug/startedAt/mode）——信封优先（宿主派发权威值），缺席按既有
+ * 继承/缺省语义回落。 */
+function applyContentIdentityKeys(
+  childEnv: Record<string, string>,
+  params: Pick<SpawnRunParams, "agentName" | "task"> & {
+    identity?: { slug?: string; startedAt?: number; mode?: string };
+  },
+  parentEnv: NodeJS.ProcessEnv,
+): void {
+  const key = SUBAGENT_IDENTITY_ENV;
+  childEnv[key.agent] = params.agentName;
+  childEnv[key.task] = params.task;
+  // [D4] record 身份信封优先（宿主派发的权威值）；缺席时按既有继承/缺省语义回落。
+  const identity = params.identity;
+  const slug = identity?.slug ?? parentEnv[key.slug];
+  if (slug !== undefined && slug !== "") childEnv[key.slug] = slug;
+  const startedAt = identity?.startedAt ?? Number(parentEnv[key.startedAt]);
+  if (Number.isFinite(startedAt) && startedAt > 0) childEnv[key.startedAt] = String(startedAt);
+  const mode = identity?.mode ?? parentEnv[key.mode];
+  childEnv[key.mode] = mode !== undefined && mode !== "" ? mode : "background";
+}
+
+export function applyIdentityEnvToChildEnv(
+  childEnv: Record<string, string>,
+  params: Pick<SpawnRunParams, "recordId" | "agentName" | "task" | "cwd" | "sessionRootId"> & {
+    worktree?: boolean;
+    /** [D4] record 身份信封：在场时写 slug / startedAt / mode 三键（缺省不写）。 */
+    identity?: { slug?: string; startedAt?: number; mode?: string };
+  },
+  parentEnv: NodeJS.ProcessEnv,
+): void {
+  applyLinkageIdentityKeys(childEnv, params, parentEnv);
+  applyContentIdentityKeys(childEnv, params, parentEnv);
+  const worktree = params.worktree === true || parentEnv[SUBAGENT_IDENTITY_ENV.worktree] === "true";
+  if (worktree) childEnv[SUBAGENT_IDENTITY_ENV.worktree] = "true";
 }
 
 /** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + relay 归属键重写）。 */
@@ -189,6 +282,8 @@ function buildChildEnv(params: SpawnRunParams): Record<string, string> {
     if (rootId !== undefined && rootId !== "") childEnv[RELAY_ENV_SESSION_ID] = rootId;
     childEnv[RELAY_ENV_RECORD_ID] = params.recordId;
   }
+  // [§2.7] 身份 env 写回（deny 终态之后——见函数头分层说明）
+  applyIdentityEnvToChildEnv(childEnv, params, process.env);
   return childEnv;
 }
 
@@ -493,7 +588,21 @@ export async function runSpawnOnce(
     // 2. spawn 参数 + invocation
     const args = buildSpawnArgs({
       modelRef,
-      thinkingLevel: asThinkingLevel(params.thinkingLevel),
+      // 档位原样透传（合法性权威 = 宿主入口层与 pi）——非法值由 pi 显式报错，
+      // 本层不再做白名单收窄（收窄会把非法值静默换成 undefined = 「显式指定」变「没指定」）。
+      // [pi 锚点] 档位以 --model "provider/id:level" 后缀传递（pi-rpc
+      // buildPiSubagentSpawnArgs :222-227），pi CLI 链恒严格解析：dist/core/
+      // model-resolver.js resolveCliModel 两处 parseModelPattern 传
+      // allowInvalidThinkingLevelFallback:false（:383/:419），非法后缀在严格模式按
+      // 模型 id 一部分处理返回 model:undefined（:185-190；缺省 ?? true 放宽仅 scope
+      // 模式走）→ resolveCliModel 收敛为 error "Model ... not found" → dist/main.js
+      // 打印 Error 后 process.exit(1)（:719-729）→ spawn run 失败可见。实装 0.84.4；
+      // 语义登记 PS-62。pi 升级重验：:383/:419 是否仍传 false——若 CLI 链改用缺省
+      // 放宽，非法档位将静默剥后缀降级为「没指定」（docs/pi-semantics.json PS-62）。
+      thinkingLevel:
+        typeof params.thinkingLevel === "string" && params.thinkingLevel.length > 0
+          ? params.thinkingLevel
+          : undefined,
       agentTools: params.agentTools,
       appendSystemPromptPath: tempFile?.filePath,
       sessionDir: params.sessionDir,

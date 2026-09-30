@@ -568,12 +568,12 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
 //     server.test cancel 用例覆盖；
 //   - 收割链（agent_settled resolve + 杀链）由 run-spawn-once.integration 覆盖。
 describe("PiEngine.read / dispose", () => {
-  it("journalPath 在 → ②级 journal 重放（source journal）；不在 → ③级 outcome-only", async () => {
+  it("eventsPath 在 → ②级 journal 重放（source journal）；不在 → ③级 outcome-only", async () => {
     const dir = fs.mkdtempSync(join(tmpdir(), "pi-cli-test-engine-read-"));
     try {
-      const journalPath = join(dir, "journal.jsonl");
+      const eventsPath = join(dir, "journal.jsonl");
       fs.writeFileSync(
-        journalPath,
+        eventsPath,
         [
           JSON.stringify({ type: "text_delta", delta: "replayed" }),
           JSON.stringify({ type: "turn_end" }),
@@ -585,7 +585,7 @@ describe("PiEngine.read / dispose", () => {
           v: 1,
           engineId: PI_ENGINE_ID,
           sessionRef: { recordId: "rec-r1", sessionId: "sess-r1", sessionFile: "/tmp/sess-r1.jsonl" },
-            journalPath,
+            eventsPath,
           adapterVersion: PI_ADAPTER_VERSION,
         },
       });

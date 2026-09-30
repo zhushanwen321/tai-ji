@@ -2,26 +2,25 @@
  * workflow 步骤视图合并投影测试（W0 / 设计 workflow-step-visibility-data-source
  * D2 R1-R3 / D4 / D5）。
  *
- * 五类覆盖（验收对齐设计 §4 与 U2 单测清单）：
+ * 覆盖（验收对齐设计 §4 与 U2 单测清单；entry 契约 = v2 registered/settled 两条小条目
+ * ——v2 条目不承载 trace/agentCalls，其供源在 run journal fold，故 entry 载 trace 的
+ * 冷热 fixture 对拍随 v1 快照兼容层删除，对应项改由 journal 投影面承载）：
  * 1. 合并矩阵全形态：trace 独有 / record 独有 / 双有 / 一键多 record 收敛（双 running
  *    tiebreak + 僵尸 running × 新 attempt 终态，设计检查点③）/ 无 stepIndex 守卫 /
- *    旧 session 回落 trace-only；
+ *    跨 run 桶隔离 / 幂等；
  * 2. R1 两态→四态映射矩阵 13 值域逐行（StopReason 全枚举，含中断族三值与兜底行）；
- * 3. V3 fixture 重放：冷热同代码——同一 fixture 全量重放 ≡ 分波增量合并；
- * 4. 水位终态计数变化触发信号 + V10 信号量上界（4-agent run 信号条数 ≤ 迁移波次数）；
+ * 3. subagent-record v2 条目 → SubagentRecord 身份域投影（parentRunId/stepIndex/origin）；
+ * 4. 水位信号：steps / 步骤状态序列变化触发信号、同值重放去重 + V10 信号量上界
+ *    （4-agent run 信号条数 ≤ 迁移波次数）；
  * 5. V9 重试三段序列（设计 §4.1 V9）：同一 (parentRunId, stepIndex) 键下 attempt1
  *    failed → attempt2 running（计时换新）→ completed；全失败取最后 attempt 错误；
- *    终态计数随序列翻转（0→1→0→1）各触发一条水位信号。
+ *    步骤状态随序列翻转（running→failed→running→done）各触发一条水位信号。
  *
  * 测试框架：vitest。运行：cd packages/runtime && npx vitest run src/services/session/__tests__/workflow-step-merge.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 
 import { scanSubagentEntries } from '../subagent-extractor.js'
-import { scanWorkflowEntries, scanWorkflowEntriesWithSteps, extractWorkflowsFromSessionFile } from '../workflow-extractor.js'
 import {
   mergeWorkflowStepRecords,
   mapStepStatusFromRecord,
@@ -69,56 +68,137 @@ function traceCall(id: number, overrides: Partial<WorkflowAgentCall> = {}): Work
   }
 }
 
-/** 自描述 subagent-record entry（data 字段对齐 extension 写点 W16 v1）。 */
-function subagentRecordEntry(overrides: Record<string, unknown> & { id: string }): Record<string, unknown> {
-  return {
-    type: 'custom',
-    customType: 'subagent-record',
-    id: `entry-${overrides.id}`,
-    parentId: null,
-    timestamp: '2026-09-25T00:00:00Z',
-    data: {
-      v: 1,
-      agent: 'reviewer',
-      task: 'do review',
-      slug: 'rev',
-      status: 'running',
-      ...overrides,
-    },
-  }
-}
-
-/** 自描述 workflow-record entry（data = {v:1, snapshot, updatedAt}）。 */
-function workflowRecordEntry(
-  overrides: {
-    runId?: string
-    trace?: Array<Record<string, unknown>>
-    status?: 'running' | 'done'
-  } = {},
-): Record<string, unknown> {
-  return {
-    type: 'custom',
-    customType: 'workflow-record',
-    id: `entry-wf-${overrides.runId ?? 'run-1'}`,
-    parentId: null,
-    timestamp: '2026-09-25T00:00:00Z',
-    data: {
-      v: 1,
-      updatedAt: '2026-09-25T00:00:01Z',
-      snapshot: {
-        v: 'wf-run-v2',
-        runId: overrides.runId ?? 'run-1',
-        spec: { scriptName: 'test-flow' },
-        state: {
-          status: overrides.status ?? 'running',
-          budget: { usedTokens: 1, usedCost: 0 },
-          calls: [],
-          trace: overrides.trace ?? [],
-        },
-        meta: { startedAt: '2026-09-25T00:00:00Z' },
+/**
+ * 自描述 subagent-record v2 entry 族（registered 恒有 + settled 仅终态形态，即
+ * status !== 'running' 时合成）——data schema 见 core record-entry.ts。
+ *
+ * 返回 ARRAY（append-only 两条小条目形态），call site 用 spread 展开：
+ * `[...subagentRecordEntry({ ... })]`。
+ *
+ * 身份字段缺省值：agent/slug/task 造数据；rootSessionId 缺省 's1' = SessionRecords
+ * harness 的会话 id（journal 投影按 rootSessionId === sessionId 过滤注册条目）；
+ * origin 缺省 'tool'；depth 0；startedAt 缺省 0。overrides 里未识别的键（parentRunId/
+ * stepIndex/origin/rootSessionId/agent/slug/task/parentRecordId/depth/startedAt）进
+ * 注册条目；终态键（stopReason/outcome/error/endedAt/turns/totalTokens/model/
+ * thinkingLevel/sessionFile/result）只进 settled 条目。
+ */
+function subagentRecordEntry(
+  overrides: Record<string, unknown> & { id: string },
+): Array<Record<string, unknown>> {
+  const {
+    status = 'running',
+    stopReason,
+    outcome,
+    error,
+    endedAt,
+    turns,
+    totalTokens,
+    model,
+    thinkingLevel,
+    sessionFile,
+    result,
+    startedAt = 0,
+    ...identity
+  } = overrides
+  const entries: Array<Record<string, unknown>> = [
+    {
+      type: 'custom',
+      customType: 'subagent-record',
+      id: `entry-${overrides.id}-registered`,
+      parentId: null,
+      timestamp: '2026-09-25T00:00:00Z',
+      data: {
+        v: 2,
+        kind: 'registered',
+        agent: 'reviewer',
+        task: 'do review',
+        slug: 'rev',
+        origin: 'tool',
+        rootSessionId: 's1',
+        depth: 0,
+        ...identity,
+        startedAt,
       },
     },
+  ]
+  if (status !== 'running') {
+    entries.push({
+      type: 'custom',
+      customType: 'subagent-record',
+      id: `entry-${overrides.id}-settled`,
+      parentId: null,
+      timestamp: '2026-09-25T00:00:01Z',
+      data: {
+        v: 2,
+        kind: 'settled',
+        id: overrides.id,
+        status: 'idle',
+        stopReason,
+        ...(outcome !== undefined ? { outcome } : {}),
+        ...(error !== undefined ? { error } : {}),
+        endedAt,
+        turns,
+        totalTokens,
+        model,
+        thinkingLevel,
+        ...(sessionFile !== undefined ? { sessionFile } : {}),
+        ...(result !== undefined ? { result } : {}),
+      },
+    })
   }
+  return entries
+}
+
+/**
+ * 自描述 workflow-record v2 entry 族（registered 恒有 + settled 仅 status === 'done'）。
+ * v2 条目不承载 trace/agentCalls（供源 = run journal fold），故 overrides 只有身份
+ * （runId）与收敛形态（status）。返回 ARRAY，call site 用 spread 展开：
+ * `[...workflowRecordEntry({ ... })]`。
+ */
+function workflowRecordEntry(
+  overrides: { runId?: string; status?: 'running' | 'done' } = {},
+): Array<Record<string, unknown>> {
+  const runId = overrides.runId ?? 'run-1'
+  const entries: Array<Record<string, unknown>> = [
+    {
+      type: 'custom',
+      customType: 'workflow-record',
+      id: `entry-wf-${runId}-registered`,
+      parentId: null,
+      timestamp: '2026-09-25T00:00:00Z',
+      data: {
+        v: 2,
+        kind: 'registered',
+        runId,
+        workflowName: 'test-flow',
+        scriptName: 'test-flow',
+        slug: 'test-flow',
+        startedAt: Date.parse('2026-09-25T00:00:00Z'),
+        recordPath: `workflow-state/${runId}.record.jsonl`,
+      },
+    },
+  ]
+  if (overrides.status === 'done') {
+    entries.push({
+      type: 'custom',
+      customType: 'workflow-record',
+      id: `entry-wf-${runId}-settled`,
+      parentId: null,
+      timestamp: '2026-09-25T00:00:02Z',
+      data: {
+        v: 2,
+        kind: 'settled',
+        runId,
+        status: 'done',
+        reason: 'completed',
+        outcome: 'done',
+        settledAt: Date.parse('2026-09-25T00:00:02Z'),
+        callCount: 0,
+        usedTokens: 1,
+      },
+    })
+  }
+  return entries
 }
 
 // ── 1. 合并矩阵全形态 ─────────────────────────────────────────────────────
@@ -248,22 +328,6 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
     expect(merged.agentCalls).toHaveLength(0)
   })
 
-  it('旧 session 回落 trace-only：无 stepIndex 的 record 全员不参与，视图 ≡ 纯 trace 扫描（V5）', () => {
-    const trace = [
-      { stepIndex: 0, agent: 'dev', status: 'done', phase: 'D1' },
-      { stepIndex: 1, agent: 'rev', status: 'done', phase: 'R1' },
-    ]
-    const entries = [
-      workflowRecordEntry({ runId: 'run-legacy', trace, status: 'done' }),
-      subagentRecordEntry({ id: 'sa-legacy-1', origin: 'workflow', status: 'idle', stopReason: 'completed' }),
-    ]
-    const merged = scanWorkflowEntriesWithSteps(entries)
-    const traceOnly = scanWorkflowEntries(entries)
-    expect(merged).toEqual(traceOnly)
-    expect(merged[0]!.agentCalls.map((c) => c.id)).toEqual([0, 1])
-    expect(merged[0]!.status).toBe('done')
-  })
-
   it('跨 run 不串场：parentRunId 桶隔离，run-2 的候选不进 run-1', () => {
     const run1 = wf([traceCall(0)], 'run-1')
     const run2 = wf([], 'run-2')
@@ -340,123 +404,12 @@ describe('R1 两态→四态映射矩阵（D2 R1，StopReason 13 值域逐行）
   })
 })
 
-// ── 3. V3 fixture 重放：冷热同代码（D5）───────────────────────────────────
-
-describe('V3 fixture 重放：冷热同代码（全量重放 ≡ 分波增量合并）', () => {
-  /**
-   * 4-agent run 完整 entry 序列（真实时序形态）：
-   * 波1 run 创建（trace 空，① 首写 steps=0）
-   * 波2 4 条 record spawn（② 迁移即写；① 60s 节流吞 dispatch save——trace 仍空）
-   * 波3 agent-1 完成（② 先落；① 同边沿 flush trace 4 节点）
-   * 波4 其余 3 agent 完成（② 逐条；① 终态快照）
-   */
-  function buildWaves(): unknown[][] {
-    const wave1 = [workflowRecordEntry({ runId: 'run-v3', trace: [] })]
-    const wave2 = [1, 2, 3, 4].map((n) =>
-      subagentRecordEntry({
-        id: `sa-v3-${n}`,
-        origin: 'workflow',
-        parentRunId: 'run-v3',
-        stepIndex: n - 1,
-        status: 'running',
-        startedAt: 1000 + n,
-      }),
-    )
-    const wave3 = [
-      subagentRecordEntry({
-        id: 'sa-v3-1', origin: 'workflow', parentRunId: 'run-v3', stepIndex: 0,
-        status: 'idle', stopReason: 'completed', startedAt: 1001, endedAt: 61001,
-        elapsedSeconds: 60, turns: 8, totalTokens: 12300,
-      }),
-      workflowRecordEntry({
-        runId: 'run-v3',
-        trace: [1, 2, 3, 4].map((n) => ({
-          stepIndex: n - 1,
-          agent: 'reviewer',
-          phase: 'Review',
-          status: n === 1 ? 'completed' : 'running',
-          startedAt: new Date(1000 + n).toISOString(),
-        })),
-      }),
-    ]
-    const wave4 = [
-      [2, 3, 4].map((n) =>
-        subagentRecordEntry({
-          id: `sa-v3-${n}`, origin: 'workflow', parentRunId: 'run-v3', stepIndex: n - 1,
-          status: 'idle', stopReason: n === 3 ? 'failed' : 'completed', startedAt: 1000 + n,
-          endedAt: 62000 + n, elapsedSeconds: 61, turns: 7, totalTokens: 9000,
-          ...(n === 3 ? { error: 'engine crashed' } : {}),
-        }),
-      ),
-      workflowRecordEntry({
-        runId: 'run-v3',
-        status: 'done',
-        trace: [1, 2, 3, 4].map((n) => ({
-          stepIndex: n - 1,
-          agent: 'reviewer',
-          phase: 'Review',
-          status: n === 3 ? 'failed' : 'completed',
-        })),
-      }),
-    ].flat()
-    return [wave1, wave2, wave3, wave4]
-  }
-
-  it('同一 fixture：一次全量重放 ≡ 四波增量（缓存 merge + 重合并），最终 agentCalls 逐字段相等', () => {
-    const waves = buildWaves()
-    const allEntries = waves.flat()
-
-    // 冷：全量一次（extractWorkflowsFromSessionFile 同款组合扫描）
-    const cold = scanWorkflowEntriesWithSteps(allEntries)
-
-    // 热：分波增量（W1 换源后实时路径 = journal-projection.recompute 内跑
-    // mergeWorkflowStepRecords——本对拍直测该纯函数，缓存重建语义等价）
-    const wfCache = new Map<string, WorkflowRunRecord>()
-    const subCache = new Map<string, SubagentRecord>()
-    for (const wave of waves) {
-      for (const r of scanSubagentEntries(wave)) subCache.set(r.subagentId, r)
-      for (const r of scanWorkflowEntries(wave)) wfCache.set(r.runId, r)
-      for (const r of mergeWorkflowStepRecords(Array.from(wfCache.values()), Array.from(subCache.values()))) {
-        wfCache.set(r.runId, r)
-      }
-    }
-    const hot = Array.from(wfCache.values())
-
-    expect(hot).toEqual(cold)
-    // 终态语义抽查（非只比形状）：4 行、1 failed（error 透传）、3 completed、sessionId = record id
-    expect(cold[0]!.agentCalls).toHaveLength(4)
-    expect(cold[0]!.agentCalls.map((c) => c.status)).toEqual(['done', 'done', 'failed', 'done'])
-    expect(cold[0]!.agentCalls[2]!.error).toBe('engine crashed')
-    expect(cold[0]!.agentCalls[0]!.sessionId).toBe('sa-v3-1')
-    expect(cold[0]!.agentCalls.every((c) => c.phase === 'Review')) // trace 归组后 phase 不丢
-  })
-
-  it('D5 禁双读盘：冷路径磁盘提取单次 readFileSync + 两遍内存扫描（组合 scan 内无文件读取）', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'workflow-step-merge-test-'))
-    const filePath = join(dir, 'session.jsonl')
-    writeFileSync(filePath, buildWaves().flat().map((e) => JSON.stringify(e)).join('\n'))
-    try {
-      const fs = await import('node:fs')
-      const readSpy = vi.spyOn(fs, 'readFileSync')
-      const { records, oversize } = extractWorkflowsFromSessionFile(filePath)
-      expect(oversize).toBe(false)
-      expect(records).toHaveLength(1)
-      // 单次读盘：一次 statSync 预检 + 一次 readFileSync；合并扫描全部在内存 entries 上
-      expect(readSpy).toHaveBeenCalledTimes(1)
-      expect(records[0]!.agentCalls).toHaveLength(4)
-      readSpy.mockRestore()
-    } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
-    }
-  })
-})
-
-// ── 4. 提取器投影透出（P2：entry data 已有，投影透出）─────────────────────
+// ── 3. 提取器投影透出（P2：v2 条目 data 已有，投影透出）───────────────────
 
 describe('subagent-extractor 投影透出 workflow 身份域', () => {
-  it('subagent-record entry 的 parentRunId / stepIndex 投影进 SubagentRecord', () => {
+  it('subagent-record v2 注册条目的 parentRunId / stepIndex / origin 投影进 SubagentRecord', () => {
     const entries = [
-      subagentRecordEntry({
+      ...subagentRecordEntry({
         id: 'sa-wf-1', origin: 'workflow', parentRunId: 'run-x', stepIndex: 2,
         status: 'running', startedAt: 1000,
       }),
@@ -468,14 +421,14 @@ describe('subagent-extractor 投影透出 workflow 身份域', () => {
     expect(records[0]!.origin).toBe('workflow')
   })
 
-  it('旧 entry（无字段）投影归一 undefined（零迁移读侧容忍）', () => {
-    const records = scanSubagentEntries([subagentRecordEntry({ id: 'sa-old', status: 'idle', stopReason: 'completed' })])
+  it('无 workflow 身份域字段（tool 来源）投影归一 undefined（零迁移读侧容忍）', () => {
+    const records = scanSubagentEntries([...subagentRecordEntry({ id: 'sa-old', status: 'idle', stopReason: 'completed' })])
     expect(records[0]!.parentRunId).toBeUndefined()
     expect(records[0]!.stepIndex).toBeUndefined()
   })
 })
 
-// ── 5. 水位终态计数 + V10 信号量上界（D4，SessionRecords 直测）──────────────
+// ── 5. 水位信号（steps / 步骤状态序列）+ V10 信号量上界（D4，SessionRecords 直测）──
 
 /** SessionRecords 直测装置（形态对齐 session-records.test.ts 的 makeRecords——deps mock 断言同款）。 */
 async function makeSessionRecordsHarness() {
@@ -504,71 +457,50 @@ async function makeSessionRecordsHarness() {
   }
 }
 
-describe('水位终态计数维度（D4）与 V10 信号量上界', () => {
+describe('水位信号（steps / 步骤状态序列）与 V10 信号量上界', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
-  it('record-only 成行使 steps 变化触发信号；转态使终态计数变化触发信号（steps 不变）', async () => {
+  it('record-only 成行使 steps 变化触发信号；转态使步骤状态序列变化触发信号（steps 不变）', async () => {
     const h = await makeSessionRecordsHarness()
     h.fire('s1')
-    // 波1：run 创建（trace 空，steps=0）→ 1 条信号（新 run）
-    await h.invalidate('s1', [workflowRecordEntry({ runId: 'run-d4' })], 'e1')
+    // 波1：run 创建（v2 注册条目，无步骤行 steps=0）→ 1 条信号（新 run）
+    await h.invalidate('s1', [...workflowRecordEntry({ runId: 'run-d4' })], 'e1')
     expect(h.workflowUpdates()).toHaveLength(1)
 
     // 波2：1 条 record spawn（record-only 成行，steps 0→1）→ 信号
     await h.invalidate('s1', [
-      subagentRecordEntry({ id: 'sa-d4-1', origin: 'workflow', parentRunId: 'run-d4', stepIndex: 0, status: 'running', startedAt: 1000 }),
+      ...subagentRecordEntry({ id: 'sa-d4-1', origin: 'workflow', parentRunId: 'run-d4', stepIndex: 0, status: 'running', startedAt: 1000 }),
     ], 'e2')
     expect(h.workflowUpdates()).toHaveLength(2)
 
-    // 波3：同一 record 转态 running → idle+completed（steps 不变 1，settledSteps 0→1）→ 信号
-    //（D4 核心断言：仅比 steps 会静默吞掉转态信号——现状缺陷根因形态）
+    // 波3：同一 record 转态 running → idle+completed（steps 不变 1，步骤状态序列
+    // running→done）→ 信号（[W1/D6] 核心断言：仅比 steps 会静默吞掉转态信号——现状缺陷根因形态）
     await h.invalidate('s1', [
-      subagentRecordEntry({ id: 'sa-d4-1', origin: 'workflow', parentRunId: 'run-d4', stepIndex: 0, status: 'idle', stopReason: 'completed', startedAt: 1000, endedAt: 2000 }),
+      ...subagentRecordEntry({ id: 'sa-d4-1', origin: 'workflow', parentRunId: 'run-d4', stepIndex: 0, status: 'idle', stopReason: 'completed', startedAt: 1000, endedAt: 2000 }),
     ], 'e3')
     expect(h.workflowUpdates()).toHaveLength(3)
 
     // 波4：同值重放（无任何维度变化）→ 无新信号（水位去重）
     await h.invalidate('s1', [
-      subagentRecordEntry({ id: 'sa-d4-1', origin: 'workflow', parentRunId: 'run-d4', stepIndex: 0, status: 'idle', stopReason: 'completed', startedAt: 1000, endedAt: 2000 }),
+      ...subagentRecordEntry({ id: 'sa-d4-1', origin: 'workflow', parentRunId: 'run-d4', stepIndex: 0, status: 'idle', stopReason: 'completed', startedAt: 1000, endedAt: 2000 }),
     ], 'e4')
     expect(h.workflowUpdates()).toHaveLength(3)
-  })
-
-  it('结构补全（① trace 落盘、record-only 行归位）不发信号——steps 与终态计数均不变（已知取舍 2）', async () => {
-    const h = await makeSessionRecordsHarness()
-    h.fire('s1')
-    await h.invalidate('s1', [workflowRecordEntry({ runId: 'run-s2' })], 'e1')
-    await h.invalidate('s1', [
-      subagentRecordEntry({ id: 'sa-s2-0', origin: 'workflow', parentRunId: 'run-s2', stepIndex: 0, status: 'idle', stopReason: 'completed', startedAt: 1000, endedAt: 2000 }),
-    ], 'e2')
-    const before = h.workflowUpdates().length
-    expect(before).toBe(2)
-
-    // ① 边沿 flush：trace 节点落盘（completed，与 record 状态一致）——record-only 行归位
-    // trace 位，phase 补全但行数与终态计数不变 → 无信号（分组 header 搭下一次终态信号）
-    await h.invalidate('s1', [
-      workflowRecordEntry({
-        runId: 'run-s2',
-        trace: [{ stepIndex: 0, agent: 'reviewer', phase: 'Review', status: 'done' }],
-      }),
-    ], 'e3')
-    expect(h.workflowUpdates()).toHaveLength(before)
   })
 
   it('V10 信号量上界：4-agent run 全迁移序列的 workflowUpdate 信号条数 ≤ 迁移波次数（无风暴退化）', async () => {
     const h = await makeSessionRecordsHarness()
     h.fire('s1')
     const waves: unknown[][] = [
-      [workflowRecordEntry({ runId: 'run-v10' })],
+      [...workflowRecordEntry({ runId: 'run-v10' })],
       ...[1, 2, 3, 4].map((n) => [
-        subagentRecordEntry({
+        ...subagentRecordEntry({
           id: `sa-v10-${n}`, origin: 'workflow', parentRunId: 'run-v10', stepIndex: n - 1,
           status: 'running', startedAt: 1000 + n,
         }),
       ]),
       ...[1, 2, 3, 4].map((n) => [
-        subagentRecordEntry({
+        ...subagentRecordEntry({
           id: `sa-v10-${n}`, origin: 'workflow', parentRunId: 'run-v10', stepIndex: n - 1,
           status: 'idle', stopReason: 'completed', startedAt: 1000 + n, endedAt: 61000 + n,
         }),
@@ -660,39 +592,39 @@ describe('V9 重试三段序列', () => {
     expect(row.completedAt).toBe(new Date(6500).toISOString())
   })
 
-  it('水位信号：三段序列翻转终态计数（failed +1 / 重试回 running -1 / completed +1）各恰好一条信号，重放去重', async () => {
+  it('水位信号：三段序列翻转步骤状态（running→failed→running→done）各恰好一条信号，重放去重', async () => {
     const h = await makeSessionRecordsHarness()
     h.fire('s1')
 
-    // 波0 run 创建（trace 空，steps=0）
-    await h.invalidate('s1', [workflowRecordEntry({ runId: 'run-v9' })], 'e0')
+    // 波0 run 创建（v2 注册条目，无步骤行 steps=0）
+    await h.invalidate('s1', [...workflowRecordEntry({ runId: 'run-v9' })], 'e0')
     expect(h.workflowUpdates()).toHaveLength(1)
 
-    // 波1 attempt1 派发（record-only 成行，steps 0→1，settledSteps=0）
+    // 波1 attempt1 派发（record-only 成行，steps 0→1，步骤状态 running）
     await h.invalidate('s1', [
-      subagentRecordEntry({ id: 'sa-v9-att1', origin: 'workflow', parentRunId: 'run-v9', stepIndex: 0, status: 'running', startedAt: 1000 }),
+      ...subagentRecordEntry({ id: 'sa-v9-att1', origin: 'workflow', parentRunId: 'run-v9', stepIndex: 0, status: 'running', startedAt: 1000 }),
     ], 'e1')
     expect(h.workflowUpdates()).toHaveLength(2)
 
-    // 段① attempt1 结算 failed（steps 不变，settledSteps 0→1）——退避窗口内 GUI 收到
-    // 转态信号才能看到 failed（D4：仅比 steps 会静默吞掉这次转态）
+    // 段① attempt1 结算 failed（steps 不变，步骤状态 running→failed）——退避窗口内 GUI 收到
+    // 转态信号才能看到 failed（仅比 steps 会静默吞掉这次转态）
     await h.invalidate('s1', [
-      subagentRecordEntry({
+      ...subagentRecordEntry({
         id: 'sa-v9-att1', origin: 'workflow', parentRunId: 'run-v9', stepIndex: 0,
         status: 'idle', stopReason: 'failed', error: 'attempt-1 crash', startedAt: 1000, endedAt: 2000,
       }),
     ], 'e2')
     expect(h.workflowUpdates()).toHaveLength(3)
 
-    // 段② attempt2 派发 running（同键第二 record，steps 不变，settledSteps 1→0）
+    // 段② attempt2 派发 running（同键第二 record，steps 不变，步骤状态 failed→running）
     await h.invalidate('s1', [
-      subagentRecordEntry({ id: 'sa-v9-att2', origin: 'workflow', parentRunId: 'run-v9', stepIndex: 0, status: 'running', startedAt: 3000 }),
+      ...subagentRecordEntry({ id: 'sa-v9-att2', origin: 'workflow', parentRunId: 'run-v9', stepIndex: 0, status: 'running', startedAt: 3000 }),
     ], 'e3')
     expect(h.workflowUpdates()).toHaveLength(4)
 
-    // 段③ attempt2 结算 completed（settledSteps 0→1）
+    // 段③ attempt2 结算 completed（步骤状态 running→done）
     await h.invalidate('s1', [
-      subagentRecordEntry({
+      ...subagentRecordEntry({
         id: 'sa-v9-att2', origin: 'workflow', parentRunId: 'run-v9', stepIndex: 0,
         status: 'idle', stopReason: 'completed', startedAt: 3000, endedAt: 8000,
       }),
@@ -701,7 +633,7 @@ describe('V9 重试三段序列', () => {
 
     // 同值重放（水位无变化）→ 无新信号（去重）
     await h.invalidate('s1', [
-      subagentRecordEntry({
+      ...subagentRecordEntry({
         id: 'sa-v9-att2', origin: 'workflow', parentRunId: 'run-v9', stepIndex: 0,
         status: 'idle', stopReason: 'completed', startedAt: 3000, endedAt: 8000,
       }),

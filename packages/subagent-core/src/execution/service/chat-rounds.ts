@@ -58,6 +58,7 @@ import { zcodeAnchorBasePath } from "../persistence/state-marker.ts";
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
+import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, EngineRunResult } from "../engine/port.ts";
 // [U3 pi-workflow-run-resource-model] 轮窗口实例解析单点 + 收尾释放原语（U2 在
 // routing.ts「窗口实例状态」段建立，chat 轮窗口与 workflow run 窗口共用）。
@@ -66,6 +67,8 @@ import {
   resolveWorkflowWindowEnginePort,
 } from "../engine/routing.ts";
 import { splitEngineModelRef } from "../engine/model-validation.ts";
+// 引擎路由裁决单点（engine 缺省 = pi / 带原生引擎锚却无 engine 字段 = 身份域损坏抛错）。
+import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 import { DEFAULT_ENGINE_ID, getEngine } from "../engine/registry.ts";
 import type { AgentOutcome } from "../engine/types.ts";
 import { hasLiveProcessHandle } from "../lifecycle/lifecycle-predicates.ts";
@@ -75,18 +78,17 @@ import type { RecordStore } from "../persistence/record-store.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态，边界守卫台账登记边）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
+import { createBackgroundStream, type StreamSink } from "../assembly/stream-sink.ts";
 import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
-import type {
-  AgentEvent,
-  AgentResult,
-  ExecuteOptions,
-  ExecutionRecord,
-} from "../assembly/types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import type { AgentEvent, ExecuteOptions } from "../assembly/types.ts";
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 // [R6/D-R4-4] 值语义纯量消费常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
+// [§1.4 (b)] pi 条目通道 best-effort 执行（stale pi 抛错留痕不冒泡）。
+import { bestEffortPiCall } from "../assembly/best-effort.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 
 /**
  * [H1 U2 / 红线②] stale-child 兜底的退出等待窗（ms）：镜像在途子进程活项时，协议
@@ -96,6 +98,15 @@ import { PRIORITY_BACKGROUND } from "./service-constants.ts";
  * 引擎存活期状态错配频次 × 窗内未退出概率，罕见）。
  * [D-R4-1 兑现] 随唯一消费主体（killStaleChildBeforeDispatch）自 run-orchestration 迁入。 */
 const STALE_CHILD_EXIT_WAIT_MS = 300;
+
+/**
+ * [§1.4 (a)] 轮终收尾「句柄就绪」等待的上界（ms）：pi 会话替换（reload / new / fork /
+ * switch）作废旧句柄后，下一次 initSession 注入新代际的窗口量级 = extension 模块图
+ * 重求值 + session_start 装配链（实测亚秒~秒级）。等到 = 轮终 pi 条目写落进新权威
+ * session（正常路径完成写）；超时 = 降级跳过（磁盘 journal/manifest 面不受影响）+
+ * warn 留痕含恢复指引。控制面单请求粒度，禁止放大为任务级墙钟预算。
+ */
+const ROUND_FINAL_PI_READY_WAIT_MS = 2_000;
 
 /** 有界 delay（stale-child 退出窗消费；fire-and-forget 场景不引入 timer 依赖）。
  *  [D-R4-1 兑现] 随唯一消费主体（killStaleChildBeforeDispatch）自 run-orchestration 迁入。 */
@@ -148,6 +159,10 @@ export interface ChatRoundsDeps {
   readonly getStreamSink: () => StreamSink | null;
   /** UI observability（stream 通道形态判据 getMode）。 */
   readonly getUiObservability: () => UiRequestObservability;
+  /** [§1.4 (a)] 轮终收尾的「句柄就绪」有界等待（本体 SessionBaselines.waitForUsablePi）：
+   *  pi 绑定被会话替换作废时，短暂等待下一次 initSession 注入新代际；超时返回 null
+   *  （调用方降级跳过 pi 写，磁盘面不受影响）。 */
+  readonly waitForPiReady: (timeoutMs: number, context: string) => Promise<PiLike | null>;
   /** [R3 RecordLifecycle 显式接口] 轮次 run 失败的收尾（kickOffChatRound catch 面）。 */
   readonly finalizeFailed: (record: ExecutionRecord, err: unknown) => Promise<AgentResult>;
   /** [R3 RecordLifecycle 显式接口] one-shot 轮排队中被 abort 的收尾（[U5] cancel 语义
@@ -390,7 +405,7 @@ export class ChatRounds {
     opts: ExecuteOptions,
     identity: ResolvedIdentity,
     signal: AbortSignal | undefined,
-    stream: SubagentStream | undefined,
+    stream: AgentStreamSink | undefined,
     engine: EnginePort,
     resume: ResumeAnchor | undefined,
   ): Promise<EngineRunResult> {
@@ -454,6 +469,8 @@ export class ChatRounds {
       this.deps.taskSpecWithModel(opts, record.model),
       {
         taskId: record.id,
+        // [D4] record 身份信封（引擎写进任务子进程身份 env；构造单点 = identityEnvelopeOf）
+        identity: identityEnvelopeOf(record),
         signal,
         ...(stream !== undefined ? { stream } : {}),
         ctxModel: identity.resolved.model,
@@ -539,8 +556,13 @@ export class ChatRounds {
    *     只剩 workflow 域 runAndFinalize），窗口收尾归 U2 的 finalizeRun 接线管辖。
    * 故 chat 域轮 idle 释放接线点 = finalizeRoundToIdle（①）。
    */
-  private resolveRoundEnginePort(record: Pick<ExecutionRecord, "engine" | "id">): EnginePort {
-    const engineId = record.engine ?? DEFAULT_ENGINE_ID;
+  private resolveRoundEnginePort(
+    record: Pick<ExecutionRecord, "engine" | "engineHandle" | "id">,
+  ): EnginePort {
+    // 引擎路由裁决单点（resolveEngineRouteId）：engine 缺省 → pi；带原生引擎锚却无
+    // engine 字段（身份域损坏）→ 显式抛 RecordEngineIdentityError，禁止静默把原生引擎
+    // record 投给 pi 引擎进程。
+    const engineId = resolveEngineRouteId(record, record.id);
     if (engineId === DEFAULT_ENGINE_ID) return resolveHostPiEnginePort(undefined, record.id);
     return resolveWorkflowWindowEnginePort(record.id, engineId);
   }
@@ -611,10 +633,13 @@ export class ChatRounds {
         this.deps.getWorktreeManager().reconstruct(this.deps.getCwd(), rec.id, rec.patchFile),
       // [U5 / §3.2.5 形态②] apply 冲突用户可见提示（entry 落主 session，含 patch
       // 备份路径——prompt 前缀通道由 Continuation worktreeNotice 承担，双通道互补）。
+      // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（PS-30，登记 §1.4）。
       notifyWorktreeConflict: (recordId, patchFile) => {
-        this.deps.getPi()?.appendEntry?.("subagent:worktree-rebuild-conflict", {
-          id: recordId,
-          patchFile,
+        bestEffortPiCall(this.deps.getPi(), `worktree-rebuild-conflict entry (${recordId})`, (active) => {
+          active.appendEntry?.("subagent:worktree-rebuild-conflict", {
+            id: recordId,
+            patchFile,
+          });
         });
       },
     });
@@ -681,15 +706,29 @@ export class ChatRounds {
 
   /**
    * [modeless 波1] message 资格的引擎能力轴检查（原 SP-5 升级 gate 的 canUpgradeTo
-   * Conversation 记录级门删除后保留的引擎轴）：record 所属引擎（engine 留痕 ??
-   * 默认引擎）capabilities.conversation 非 'unsupported' 才放行（pi native /
-   * zcode cold 均可续）。与 record 无关——万物可续后不存在「一次性 record 不可续」
-   * 的记录级形态。引擎未注册 = 无法验证续聊能力，fail-closed 拒绝。消费双写点：
-   * ①messageHandler 入口（subagent-actions-core）②Continuation revive 翻边格。
+   * Conversation 记录级门删除后保留的引擎轴）：record 所属引擎经引擎路由裁决单点
+   * resolveEngineRouteId 解析（engine 留痕 ?? 默认引擎；带原生引擎锚却无 engine
+   * 字段 = 身份域损坏，显式抛错不回落 pi）——该引擎 capabilities().conversation 非
+   * 'unsupported' 才放行（pi native / zcode cold 均可续）。与 record 无关——万物可续
+   * 后不存在「一次性 record 不可续」的记录级形态。引擎未注册 = 无法验证续聊能力，
+   * fail-closed 拒绝。消费双写点：①messageHandler 入口（subagent-actions-core）
+   * ②Continuation revive 翻边格。
+   *
+   * 入参型面 = Pick<engine> + 可选 engineHandle/id：壳侧与 Continuation 的声明面只
+   * 保证 engine 字段，运行期传入的是完整 record；锚判据与错误定位需读 engineHandle/id
+   * （领地外签名不因此改动）。
+   *
+   * @throws RecordEngineIdentityError record 带原生引擎锚却无 engine 字段（身份域损坏）
    */
-  engineSupportsConversation(record: Pick<ExecutionRecord, "engine">): boolean {
+  engineSupportsConversation(
+    record: Pick<ExecutionRecord, "engine"> & {
+      engineHandle?: ExecutionRecord["engineHandle"];
+      id?: string;
+    },
+  ): boolean {
+    const engineId = resolveEngineRouteId(record, record.id);
     try {
-      const engine = getEngine(record.engine ?? DEFAULT_ENGINE_ID);
+      const engine = getEngine(engineId);
       return engine.capabilities().conversation !== "unsupported";
     } catch {
       return false;
@@ -730,6 +769,15 @@ export class ChatRounds {
     record: ExecutionRecord,
     outcome: RoundSettlementOutcome,
   ): Promise<void> {
+    // [§1.4 (a)] 轮终收尾的「句柄就绪」有界等待：pi 会话替换窗（reload/替换作废旧句柄、
+    // 新 initSession 未到）内，短暂等待新代际注入再执行簿记——等到 = 轮终 pi 条目写
+    // 落进 reload 后的新权威 session（正常路径完成写）；超时 = 降级 null（下方
+    // FinalizeDeps.pi 走可选链跳过 pi 写，磁盘 journal/manifest 面不受影响）。
+    // 从未注入过 pi 的宿主形态（headless / 纯内存测试）恒立即返回，零等待。
+    await this.deps.waitForPiReady(
+      ROUND_FINAL_PI_READY_WAIT_MS,
+      `round final to idle (record=${record.id}, outcome=${outcome.kind})`,
+    );
     await doFinalizeRoundToIdle(
       {
         worktreeManager: this.deps.getWorktreeManager(),

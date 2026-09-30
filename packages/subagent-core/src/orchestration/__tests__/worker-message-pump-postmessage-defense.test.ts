@@ -74,7 +74,7 @@ function makeAlwaysFailingPostMessage(): ReturnType<typeof vi.fn> {
   });
 }
 
-/** 构造 status="running" 的 mock WorkflowRun，postMessage 由调用方注入。 */
+/** 构造活体（未终局）mock WorkflowRun，postMessage 由调用方注入。 */
 function makeRunningRun(postMessage: ReturnType<typeof vi.fn>): WorkflowRun {
   return {
     state: { status: "running" },
@@ -126,8 +126,7 @@ describe("W2a: postBudgetUpdate 防御 DataCloneError", () => {
       const postMessage = makeAlwaysFailingPostMessage();
       const run = {
         state: {
-          status: "running",
-          budget: { usedTokens: 42, usedCost: 0.5 },
+            budget: { usedTokens: 42, usedCost: 0.5 },
         },
         runtime: { worker: { postMessage } },
       } as unknown as WorkflowRun;
@@ -145,8 +144,7 @@ describe("W2a: postBudgetUpdate 防御 DataCloneError", () => {
       const postMessage = makeAlwaysFailingPostMessage();
       const run = {
         state: {
-          status: "running",
-          budget: { usedTokens: 42, usedCost: 0.5 },
+            budget: { usedTokens: 42, usedCost: 0.5 },
         },
         runtime: { worker: { postMessage } },
       } as unknown as WorkflowRun;
@@ -166,7 +164,6 @@ describe("W2a: postBudgetUpdate 防御 DataCloneError", () => {
     const postMessage = vi.fn();
     const run = {
       state: {
-        status: "running",
         budget: { usedTokens: 42, usedCost: 0.5 },
       },
       runtime: { worker: { postMessage } },
@@ -204,7 +201,6 @@ function makeRunningRunWithCachedDone(
   calls.set(callId, { status: "done", result });
   return {
     state: {
-      status: "running",
       calls,
       trace: { append: vi.fn(), update: vi.fn() },
       budget: { isExceeded: vi.fn(() => false) },

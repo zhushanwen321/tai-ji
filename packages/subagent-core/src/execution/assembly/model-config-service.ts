@@ -6,9 +6,10 @@
 // 上游：SubagentService.execute 内部调 resolveModel。
 // session_start 时经 initModel 注入 modelRegistry。
 
+import { EngineError } from "../engine/common/errors.ts";
 import { AgentRegistry } from "./agent-registry.ts";
 import {
-  loadGlobalConfig,
+  DEFAULT_CONFIG,
   readGlobalConfig,
   type GlobalConfigReadResult,
 } from "./config.ts";
@@ -20,6 +21,7 @@ import {
   resolveModel,
 } from "./model-resolver.ts";
 import type { SubagentsGlobalConfig } from "./types.ts";
+import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 // ============================================================
 // 类型
@@ -68,6 +70,9 @@ export interface ModelServiceSessionInit {
  */
 export class ModelConfigService {
   private globalConfig: SubagentsGlobalConfig;
+  /** 最近一次全局配置三态读取结果（构造与 reload 均记录）——路由链据此区分
+   *  「明确缺省」与「读失败」（读失败不得静默按缺省引擎派发）。 */
+  private lastGlobalConfigRead: GlobalConfigReadResult;
   private readonly agentRegistry: AgentRegistry;
   private readonly agentRegistryDir: string;
   private modelRegistry: ModelRegistryLike | null = null;
@@ -77,7 +82,12 @@ export class ModelConfigService {
 
   constructor(init: ModelConfigServiceInit) {
     this.agentRegistryDir = init.agentDir;
-    this.globalConfig = loadGlobalConfig(init.agentDir);
+    // 构造即用三态读取：读失败要留痕（旧 loadGlobalConfig 把「坏 JSON」与「文件不存在」
+    // 同判缺省且无日志），状态供路由链在派发前显式拒绝。
+    this.lastGlobalConfigRead = readGlobalConfig(init.agentDir);
+    // failed 态不携带 config（读失败无值可采信）→ 落内置缺省；断言方法会拦下派发。
+    this.globalConfig =
+      this.lastGlobalConfigRead.status === "failed" ? { ...DEFAULT_CONFIG } : this.lastGlobalConfigRead.config;
     this.agentRegistry = new AgentRegistry();
   }
 
@@ -113,10 +123,39 @@ export class ModelConfigService {
    * 读取之间的分叉窗口（两次读值不一致时检测走 unchanged，状态段/路由永停旧值）。
    */
   applyGlobalConfig(read: GlobalConfigReadResult): GlobalConfigReadResult {
+    this.lastGlobalConfigRead = read;
     if (read.status !== "failed") {
       this.globalConfig = read.config;
     }
     return read;
+  }
+
+  /**
+   * 最近一次全局配置读取状态（ok / absent / failed）。
+   *
+   * 消费方（引擎路由链）：`failed` = 配置文件存在但读不出来，此时「缺省引擎」是未知量，
+   * 必须显式拒绝派发而不是按内置缺省 pi 执行——否则用户配置的引擎会被一次坏 JSON
+   * 静默替换。`absent`（文件不存在）是合法缺省，按内置缺省执行。
+   */
+  getGlobalConfigReadStatus(): GlobalConfigReadResult["status"] {
+    return this.lastGlobalConfigRead.status;
+  }
+
+  /**
+   * 派发前断言全局配置可读（引擎路由链的 chokepoint，先于 record 创建与 worker 启动）。
+   *
+   * 读失败（配置文件存在但读不出来）时「缺省引擎」是未知量——按内置缺省 pi 继续执行
+   * 等于用一次坏 JSON 静默替换用户配置的引擎。此处显式拒绝：结构化错误 + 恢复指引。
+   * `absent`（配置不存在）是合法缺省，不拦。
+   */
+  assertGlobalConfigReadable(): void {
+    if (this.lastGlobalConfigRead.status !== "failed") return;
+    throw new EngineError(
+      "engine_config_unreadable",
+      `global config (config.json) exists but cannot be read or parsed, so the default engine is unknown` +
+        (this.lastGlobalConfigRead.reason !== undefined ? `: ${this.lastGlobalConfigRead.reason}` : ""),
+      "Fix or remove the global config file, then retry — the run is rejected instead of silently running on the built-in default engine.",
+    );
   }
 
   /**
@@ -224,7 +263,7 @@ export class ModelConfigService {
 
 // 用 globalThis[Symbol.for] 持有进程单例，避免 jiti 因路径字符串不同加载多份模块
 // 导致单例分裂（详见 docs/STANDARDS.md §7.5）。
-const MODEL_SERVICE_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.model-service");
+const MODEL_SERVICE_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.modelService);
 
 type ModelServiceSlot = { current: ModelConfigService | null };
 

@@ -24,8 +24,9 @@ import { getLogger } from "../../core/logger.ts";
 import type { ModelCatalogEntry } from "@zhushanwen/subagent-engine-sdk";
 
 import type { EngineCapabilities } from "./types.ts";
-import type { EnginePort } from "./port.ts";
+import type { EngineModelSelectorInput, EnginePort } from "./port.ts";
 import type { EngineProcessModel } from "./window-instances.ts";
+import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 // core log facade（execution 层统一 "subagents" component，模块顶层缓存惯例）。
 const logger = getLogger("subagents");
@@ -163,7 +164,7 @@ export class EngineNotFoundError extends Error {
  * readOnlyEngineProxy）。readOnlyProxies 是代理的实现缓存（代理无进程无连接，纯
  * manifest 快照读——缓存的是快照读取面，不是活实例；descriptor 覆盖重注册时清掉）。
  */
-const ENGINE_REGISTRY_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagent-workflow.engineRegistry");
+const ENGINE_REGISTRY_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.engineRegistry);
 
 /** 注册表槽位形状（同文件唯一写入点，运行时保证）。 */
 interface EngineRegistrySlot {
@@ -258,7 +259,7 @@ function readOnlyEngineProxy(id: string, descriptor: CliEngineDescriptor): Engin
       ? { listModels: () => engine.listModels!() }
       : {}),
     ...(engine.validateModel !== undefined
-      ? { validateModel: (modelRef: string | undefined) => engine.validateModel!(modelRef) }
+      ? { validateModel: (modelRef: EngineModelSelectorInput) => engine.validateModel!(modelRef) }
       : {}),
     dispose: () => refuse("dispose"),
   };
@@ -378,9 +379,7 @@ function isStableEquivalentDescriptor(
  * 首个窗口创建时把「dispose 全部活窗口实例」经本槽登记，registry 覆盖重注册时
  * 触发。globalThis[Symbol.for] 槽位纪律（registry 同款）。
  */
-const ACTIVE_WINDOW_DISPOSER_SLOT_KEY = Symbol.for(
-  "@zhushanwen/pi-subagent-workflow.activeWindowEngineDisposer",
-);
+const ACTIVE_WINDOW_DISPOSER_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.activeWindowEngineDisposer);
 
 /** 窗口状态段接线口：登记「dispose 全部活窗口引擎实例」的执行体（重复登记覆盖）。 */
 export function setActiveWindowEngineDisposer(

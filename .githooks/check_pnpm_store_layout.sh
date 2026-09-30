@@ -36,7 +36,15 @@ PNPM_MAJOR="$(pnpm --version 2>/dev/null | cut -d. -f1)"
 if [ -n "$STORE_DIR_CONFIG" ] && [ "$STORE_DIR_CONFIG" != "undefined" ] && [ -n "$PNPM_MAJOR" ]; then
     EXPECTED="${STORE_DIR_CONFIG%/}/v${PNPM_MAJOR}"
 else
-    EXPECTED="$(cd "$PROJECT_ROOT" && pnpm store path 2>/dev/null)" || exit 0
+    STORE_PATH="$(cd "$PROJECT_ROOT" && pnpm store path 2>/dev/null)" || exit 0
+    # [HISTORICAL 2026-10-01] pnpm 10.27 的 `pnpm store path` 尾段会报与自身 install 不一致的
+    # 布局版本（同机并存全局 pnpm 11 时实测报 /v11，install 恒写 /v10），EXPECTED 与 install
+    # 同源解析 = 尾段取 pnpm 主版本号（与上方 config 分支同式）；仅当 store path 输出以
+    # /v<数字> 结尾时改写尾段，其余形态原样采用（自定义无版本段 store 路径不受影响）。
+    EXPECTED="$STORE_PATH"
+    if [ -n "$PNPM_MAJOR" ] && [[ "$STORE_PATH" =~ /v[0-9]+$ ]]; then
+        EXPECTED="${STORE_PATH%/*}/v${PNPM_MAJOR}"
+    fi
 fi
 RECORDED="$(grep -m1 '^storeDir:' "$MODULES_YAML" | sed 's/^storeDir:[[:space:]]*//')"
 

@@ -15,7 +15,7 @@
       ]
     },
     {
-      "file": "extensions/universal/subagent-workflow/src/interface/subagent-actions.ts",
+      "file": "extensions/universal/subagent-workflow/src/interface/gui/subagent-actions.ts",
       "exports": [
         "*"
       ]

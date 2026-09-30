@@ -21,6 +21,7 @@
 //     → runtime 侧 process-manager.ts spawn env 补注入 TAIJI_AGENT_DATA_DIR 修复。
 
 import { getLogger } from "./logger.ts";
+import { ENGINE_SDK_SLOT_KEYS } from "./global-slots.ts";
 
 const logger = getLogger("subagents");
 
@@ -29,7 +30,7 @@ export const TAIJI_DATA_DIR_ENV = "TAIJI_AGENT_DATA_DIR";
 
 // warn-once 配置态：globalThis[Symbol.for] slot（core host-services 同款范式）——
 // CJS 多 entry 内联副本下模块级 `let` 会分裂成多份（每份各 warn 一次），slot 跨副本一致。
-const WARNED_SLOT_KEY = Symbol.for("@zhushanwen/subagent-engine-sdk.data-dir-warned");
+const WARNED_SLOT_KEY = Symbol.for(ENGINE_SDK_SLOT_KEYS.dataDirWarned);
 
 function getWarnedSlot(): { current: boolean } {
   let slot = Reflect.get(globalThis, WARNED_SLOT_KEY) as { current: boolean } | undefined;

@@ -75,13 +75,13 @@ vi.mock("../jsonl-run-store.ts", () => ({
     flushPendingSaves = vi.fn(async () => {});
   },
 }));
-vi.mock("../interface/subagent-tool.ts", () => ({ registerSubagentTool: vi.fn() }));
-vi.mock("../interface/subagents.ts", () => ({ registerSubagentsCommand: vi.fn() }));
-vi.mock("../interface/bg-notify-render.ts", () => ({ renderBgNotifyMessage: vi.fn() }));
-vi.mock("../interface/tool-workflow.ts", () => ({ registerWorkflowTool: vi.fn() }));
-vi.mock("../interface/tool-subagents.ts", () => ({ registerSubagentsTool: vi.fn() }));
-vi.mock("../interface/tool-workflow-script.ts", () => ({ registerWorkflowScriptTool: vi.fn() }));
-vi.mock("../interface/commands.ts", () => ({ registerWorkflowsCommand: vi.fn() }));
+vi.mock("../interface/tool/subagent-tool.ts", () => ({ registerSubagentTool: vi.fn() }));
+vi.mock("../interface/command/subagents.ts", () => ({ registerSubagentsCommand: vi.fn() }));
+vi.mock("../interface/gui/bg-notify-render.ts", () => ({ renderBgNotifyMessage: vi.fn() }));
+vi.mock("../interface/tool/tool-workflow.ts", () => ({ registerWorkflowTool: vi.fn() }));
+vi.mock("../interface/tool/tool-subagents.ts", () => ({ registerSubagentsTool: vi.fn() }));
+vi.mock("../interface/tool/tool-workflow-script.ts", () => ({ registerWorkflowScriptTool: vi.fn() }));
+vi.mock("../interface/command/commands.ts", () => ({ registerWorkflowsCommand: vi.fn() }));
 
 import { setupSessionLifecycle } from "../session-lifecycle.ts";
 
@@ -133,7 +133,7 @@ function seedSessionWithV2Reference(slug: string, sessionId: string, runId: stri
       JSON.stringify({
         type: "custom",
         customType: "workflow-record",
-        data: { v: 2, kind: "registered", runId, workflowName: "reap-flow", scriptName: "reap-flow", slug: "reap-flow", startedAt: 1_000, journalPath: path.join(stateDir, `${runId}.record.jsonl`) },
+        data: { v: 2, kind: "registered", runId, workflowName: "reap-flow", scriptName: "reap-flow", slug: "reap-flow", startedAt: 1_000, recordPath: path.join(stateDir, `${runId}.record.jsonl`) },
       }),
     ].join("\n") + "\n",
     "utf8",

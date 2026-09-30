@@ -83,14 +83,20 @@ workflow run 与 subagent record 的运行态持久化介质收敛（承接 ADR-
 
 **写面宿主扩充（2026-09-29，resume 修订 D15/D16 落地连带）**：workflow-record 条目写点宿主在原三写点（worker-message-pump.ts / lifecycle.ts / 壳 jsonl-run-store.ts）基础上新增 terminal-actions.ts（D15 终局编排单一入口的注册/终态条目写点）与 resume-run.ts（D16 resume 链注册条目写点）——条目构造仍全走 buildWorkflowRecord*EntryData 意图原语与 appendEntry 通路，写面唯一入口语义不变（宿主清单扩充非写点扩散）；`check-record-write-surface.mjs` R3 白名单同步为五写点宿主。
 
-**v1 兼容层失效版本清单（W4 legacy sunset 统一清理的登记载体，两层失效次序：事件兼容读层 ≥ 词表映射层——后者是 W2 产物）**：
-- core `record-store-rebuild.ts` v1 快照解析路径（行为门跳过 v2 后的 v1 残余消费方）；
-- runtime 两 extractor（`workflow-extractor.ts` / `subagent-extractor.ts`）的 v1 分支 + `session-file-extraction.ts` 全文读路径（32MB 预检仅存于此）；
-- core `record-store.ts` `reportSubagentRecord` 的 v1 快照纠偏写点（孤儿纠偏兼容层唯一活写点，写面检查 R4 白名单登记）；
-- session-reader discovery/workflows 的 v1 快照层与旧 workflow-state-link 指针 fallback（三档发现链的下两档）；
+**v1 兼容层已整体删除（2026-09-30 裁决：项目未上线、无 v1 数据，不迁移不兼容；登记 §3.3）**：原「W4 legacy sunset 失效版本清单」的 subagent-record 侧写读面全部落地删除——
+- core `record-entry.ts`：v1 快照接口 `SubagentRecordEntryData` 与写点 `toSubagentRecordEntry` 删除，`classifySubagentRecordEntryData` 收为 v2-only（`ok:true` = 当前版本条目；v1 形态归 `future-v`）；
+- core `record-store-rebuild.ts`：v1 收集/重建路径删除，改为 `collectV2EntryPairs` / `v2PairToRecord`（v2 注册 + 终态条目对；身份域损坏拒绝重建）；
+- core `record-store.ts`：`reportSubagentRecord`（v1 快照纠偏写点）删除；孤儿恢复改由 v2 形态承担——事件文件在者归 `adoptV2Orphans`，entry-only 形态（注册条目在、无事件文件、无子文件）归 `recoverEntryOnlyOrphans` 补写 v2 终态条目（stopReason=interrupted-by-restart）；
+- runtime `journal-projection.ts`：`v1Subagents`/`v1Workflows` 源与「v1 冻结定界优先」仲裁删除（该仲裁是「投影遮蔽事件流」的方向性缺陷本体）；
+- runtime `subagent-extractor.ts`：v1 快照分支删除，改按 v2 条目对重建；
+- 遗留未删（非 subagent-record v1 快照面）：`workflow-extractor.ts` 的 workflow 旧形态分支与 `session-file-extraction.ts` 全文读路径（32MB 预检——冷启动旧 session 兜底）；session-reader discovery/workflows 的旧 workflow-state-link 指针 fallback（三档发现链的下两档）；
 - state-marker 旧值（finalized/cancelled）上行映射等伴随面（`Atomics.wait` 同步睡重试已随 W1 D6 全量退役，无 W4 残余——state-marker.test.ts 断言锁定）。
 
 **第六读者失效登记**：`scripts/zcode-session-db-cleanup.mjs`（zcode 引擎存量宿主行清理工具）自持 customType 白名单解析带 `data.v !== 1` 版本门——v1 条目停写后对全部新记录恒跳过、白名单恒空 → 清理面恒空，属**功能性保守降级**（漏清不误删：新记录本来就不落宿主库，白名单空集 = 零删除，语义安全）；该脚本为一次性清理工具，不随 W4 sunset 强制退役，重跑时对存量 v1 数据仍有效。
+
+**修订注记（2026-09-30）**：事件文件头行已定 `{"type":"record-events"}` 并落盘（`RECORD_EVENTS_HEADER_TYPE`，`record-events.ts`——本文 `record-journal` 头行表述以本注记为准）；落盘键与符号旧词清理已落：`engineHandle.journalPath` → `engineHandle.eventsPath`（SDK wire 契约 + core record/manifest/entry 形状 + 读写两侧 + 扫描守卫同批）、workflow-record 注册条目锚点键 `journalPath` → `recordPath`（无 v1 数据，不留兼容读）、遗留符号清单改名完成（`JsonlEventJournal`→`JsonlEventStream`、`RecordJournalWriteFace`→`RecordEventsWriteFace`、`RecordJournalFoldState`→`RecordEventFoldState`、`journal-tail.ts`→`event-tail.ts`、`SessionJournalProjection`→`SessionEventProjection`、`journal-wiring.ts`→`event-journal-wiring.ts`）——本文 `journalPath` 锚点等旧词表述以本注记为准。
+
+**读侧换源与 manifest 裁决（2026-09-30，②④ 批次落地）**：record 读侧身份/统计/revive 基线全部换源事件流折叠（`identityFromFold` / `receiptStatisticsFromFold` / `baselineStatisticsFromFold`——TerminalCtx 增 `foldOf` 注入位；binding 读函数零生产读路径，`.record-binding` 只剩写面与戳职责，写点退场 = 后续批次）；record 侧 manifest 裁决为**方案 A：收敛为带水位纯索引**（`eventsStamp` 水位统一收口 `withEventsWatermark`，markSettled 改先事件后投影写序；读侧不匹配即跳过回落重建）——方案 B（删除 manifest、session-reader 换源 fold）被否：session-reader 侧改动面 6 文件超阈值、其生产依赖面刻意不引 subagent-core（折叠无法复用又不许复制）、孤儿可见窗口语义等价拿不准；跨包读取面是 manifest 整体退场的挂起点。索引条目 v3 自承收条统计域（turns/totalTokens）；负缓存三消费点（reconstructAll 快路径 / scanFile / buildEntryFromIndex）增事件侧反查击穿（bound 帧追加不写 binding 也可见）。
 
 ### ADR-0080 run/record 状态机收敛：五态机唯一权威 + outcome 四值 + record 意图原语即状态机（2026-09-27 设计裁决）
 workflow run 与 subagent record 的状态词表与状态机形态收敛（承接 ADR-0074 显式状态机与 ADR-0078 介质归位；权威源 `.tmp/tech-design/w2-state-machine-convergence.md`——设计文档不入 git，实施记录 git 可追溯）。七件套：
@@ -128,6 +134,8 @@ workflow run 与 subagent record 的状态词表与状态机形态收敛（承�
 - **D16 宿主读侧锚链**：runtime RUN_EVENT_TYPE_PROBE 词表镜像（9 键）+ projectV2Workflow 三态投影；shared 三态 + WORKFLOW_RUN_OUTCOME_ALL + 文案表（成功/失败/已取消/已超时）；renderer tray-tone interrupted 专属中性暗 + WorkflowTab call 级词表 done 贯穿；session-reader 发现链重锚（journalPath 锚点语义 = record 流路径——v2 档直读流提 calls[].sessionFile，不引 subagent-core 生产依赖【两案裁决：案 A（废除「不引 core」边界）不采用，sessionFile 从 agent-settled.result 承载】）。
 - **裁决点 7 对账清理**：reapOrphanRuns（run-state-evidence 维护轮族扩展）——引用集三代解析（v2 注册/v1 快照/link 指针，壳侧 session-lifecycle 注入采集）+ 宽限窗登记（7 天 env 可调，锚 = 首判无主时刻非 mtime，与门防活跃误删）+ 三件删除（record 流 + manifest 派生缓存 + 历史遗留旧双源顺带删 + .resume.lock 残锁）。采集成本首轮实测（2026-09-29，等量级 fixture 400 session 文件 / 61.4MB，同款同步扫描形态）：单轮 37-40ms，远低于秒级预期上限；重审触发线 = 单轮 >5s 或文件数 >5000。壳侧采集器读错分通道（sessions 根 ENOENT = 空态，EACCES/EIO 真故障上抛 → core 采集失败整轮跳过的宁保留防御经生产路径可达）。
 - 实施期裁决：ExecutionOutcome（execution/subagent-record 域）从 `Exclude<RunOutcome,"interrupted">` 改独立实体字面量 completed/failed/cancelled——设计未裁决该域（Out of scope 射程外），保留其写入值不变；D10/D11 状态载体落进程内注册表（worker-message-pump 的 resumedBudgetLedger「累计活跃段已耗 + 本段复活时刻」与 lifecycle 的 resumedOriginRunIds 来源标记——设计原文的 run meta 字段面不在 U2 领地；record 流是权威源，再次 resume 按 run-resumed/run-interrupted 事件重算覆盖，注册表生命周期与消费方 [本进程 runs Map] 一致、evictDoneRunsBeyondCap 连带回收）；replay 输入漂移（回放入参哈希不匹配）= failed 终局 + 含恢复指引的诊断文案（D2 四态无 running→interrupted 人工回退转移——run-interrupted 写入方仅崩溃收编与 terminate 被动）；D12 宽松面：agent-settled 无对应 agent-started 帧的残形态按 fold 自愈占位行处理（warn 留痕不拒绝——对齐 run-events fold 兜底语义），严格拒绝面限坏行/seq 断档/settled 缺 result 三项。
+
+- **resume 恢复语义修订（2026-09-30 用户裁决）**：原三档中的档 1（从子代理会话文件复用「已跑完但未提交」的结果）整体删除——恢复只保留「已有 agent-settled 则回放、没有则重跑（能定位同一成员会话则续写，否则重开）」，随删的派生机制见 [ADR-0092](#adr-0092-resume-只复用已提交结果删除从子代理会话日志复用结果的通道2026-09-30-用户裁决)。本条 D1–D16 其余内容不变。
 
 ### ADR-0087 session-manager 通知债权模型与 watch 桥（2026-09-24 设计裁决）
 
@@ -284,6 +292,15 @@ pi 的 `ExtensionAPI.getCommands()` 返回 resource loader 的启动加载集（
 
 ### ADR-0075 拉为主推补充：数据同步第一原则与域同步协议收口（2026-09-26 架构裁决）
 **拉是真理通道，推是性能提示**——任何数据查询必须返回当前真值（缓存优先、磁盘兜底）；推送允许丢失，丢失后的收敛由协议层统一提供（订阅快照回放 / 重连重放 / 事件边沿拉三路），**功能域代码禁止出现推送补偿逻辑**（域层新增 reconcile/冷拉/兜底定时器 = constraints 红灯，豁免须登记理由）。背景：plan 审计与项目级推拉诊断实证「推不可靠（R11）+ 拉被做贵（getPlanState 全量解析 + 目录扫描 35ms 地板价）」逼出逐域补偿（renderer 三件套手写 8 处、守卫 6 种变体、重连重拉 6-8 处）的恶性循环——可靠性必须由通道保证，不得用消费侧补丁偿付。协议收口：功能域经 `DomainSyncDescriptor` 声明式接入（key + source 参数 + read），数据源（bus-state / rpc / file-derived / memory-registry）是参数，上层不感知底层方案；拉的可靠性与性能是基建义务（缓存优先 + 负缓存 + cursor 增量管线泛化 + 逆序分块冷读 + 结构化可观测），不属于任何功能域。数据分型五类（内存注册表无缓存 / 磁盘推导走增量管线 / 外部配置 mtime 缓存 / 外部服务 TTL / 本地 UI 态不入协议）。已否方案：推送必达化（分布式消息税，重复乱序仍未消）；维持逐域修（恶性循环加码）。保留不推翻：ADR-0049 分区范式、message-bus 三分类（stream/transient 流类不在协议范围）、chat 域帧流形态（天然豁免）。设计 SSOT `.tmp/tech-design/pull-push-architecture.md`（过程产物，分波 W0 根修可观测 → W1 性能四刀 → W2 协议收口 → W3 样板迁移与补偿退役 → W4 散件收编，每波独立可回退）；constraints 守卫随 W2 登记。**事件数据直通（D8，ReplicatedState 不变量修订）**：pi `entry_appended` 事件携带完整 entry 直通派生缓存——「事件只做失效」修订为「事件携带数据、多通路共用同一派生/合并函数、拉取是校验与冷启动腿」：handleEntryAppended 透传 entry；事件直通 / getEntries 拉取 / 冷启动全量三条路径喂**同一个**单 entry 增量合并函数（等价性：append-only + 事件序=文件序下，「新 entry 经 parsePlanStateEntry 非空即胜出」≡「逆序取末条」）；拉取降级（冷启动/Entry-not-found 自愈/低频校验），300ms 防抖退役于常态路径；等价性照搬 chat 域模式（applyEntry reducer 双通路 + apply-entry-equivalence 测试守卫，规则 9）——三族各建等价性测试。已否：保持「事件只做失效」（丢了再拉的 RPC 往返+防抖延迟是常态税，新鲜度押在拉取必然成功上）；各域自写事件处理逻辑（两条写路径两套逻辑 = live ≡ reload 破裂标准形态）。前置探针：pi 事件 emit 序 = 文件追加序（反证则 D8 整体退回）。
+### ADR-0091 subagent 资源引用 = 绝对路径 + 两段式暴露（承接包内 ADR-0001/0002/0003，2026-09-29 收敛）
+
+subagent 体系的资源面决策三条现状（原记于包内 `extensions/universal/subagent-workflow/docs/adr/`，该目录已按「包内不自建 ADR 目录」规则退役，内容折入本条）：
+
+- **引用形态 = 绝对路径**：`agentRef` / `workflowRef` 统一为绝对路径引用（原 ADR-0002），发现与解析不依赖 cwd；后续实现质量补强（发现对齐 pi skill 的 session 级节奏、M2 改 `appendSystemPrompt` 内容语义并删除 agent/schema 临时文件、`AgentCallOpts` 字段统一、砍 info action、review-fix-loop 启动期 stat fail-fast）见原 ADR-0003 各条，均已落地。
+- **暴露机制 = 两段式**（原 ADR-0001）：workflow 侧「结构化参数 + 固定编排」按第一性原理推导（结构化参数是暴露问题的单一根因），subagent 侧参考竞品优化；四家（含 pi-subagent）趋同于两段式而非三段式。
+- **决策记录归属**：包内不再自建 ADR / 长期设计文档源（规则见 [extension-conventions.md](../extensions/extension-conventions.md)「决策记录与设计文档归属」）；体系级决策进本文件，包内实现细节进 `docs/architecture/` 或源码注释。
+
+现行载体：[docs/extensions/subagents/architecture.md](../extensions/subagents/architecture.md)（包拓扑 / 协议面 / 机制落点导航）+ `packages/subagent-core/src/shared/resource-discovery.ts`（7 源同名 last-writer-wins，SSOT）。
 
 ## 已否谱系（决策已过时/被推翻，一行注记防重新发现旧坑）
 
@@ -303,3 +320,38 @@ pi 的 `ExtensionAPI.getCommands()` 返回 resource loader 的启动加载集（
 
 ### ADR-0077 workflow 步骤视图数据源 = runtime 合并投影（2026-09-25 设计裁决）
 WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（60s 节流持久化通道）」改为 runtime 合并投影：① workflow-record 供编排结构（trace 骨架：stepIndex/phase/agent）× ② subagent-record 供运行状态（迁移即写无节流），关联键 = (parentRunId, stepIndex)，在 runtime 派生缓存层合并（`packages/runtime/src/services/session/workflow-step-merge.ts`，冷热路径共用同一纯函数、单次解析两遍内存扫描）——步骤实时性不再寄生持久化通道（9.5-12.2 分钟盲区根因消除，真机实测 64-324ms 出现）。关键裁决：两态→四态映射矩阵 13 值域全覆盖——**gc 按写侧 D7 例外族语义分叉**（workflow origin 成功/失败 settle 均写 gc、由 error 区分：空→completed、非空→failed，同 `deriveOutcome` truthy 判定同构），中断族三值→failed+原文，cancelled→failed+文案，不产出第五态；一键多 record 收敛 = running 优先 + startedAt tiebreak（重试链退避窗口显示 failed 是真实状态）；无 stepIndex 的 record 不成行（旧 session 回落 trace-only）；水位维度增终态计数（settledSteps）驱动 workflowUpdate；renderer 拉取收敛（per-session in-flight 合并 + 可再武装 dirty 补充拉取，`stores/workflow.ts`）为**过渡层**——根治形态 = workflowUpdate 直接携带合并投影全量帧（独立优化紧随立项，落地后过渡层整体退役）。run 级徽标权威仍归 ①（接受「步骤全终态而 run 仍 running」≤60s 窗口，不新增第三状态词表）。schema additive 纪律：SubagentRecordEntryData / ExecutionRecord / SubagentRecord / RecordBinding 四型增可选 `stepIndex`（零迁移：旧 entry 读取归一 undefined + 序列化字节层负向单测锚定；constraints 机器检查评估结论 = 不登记，单测锚定足够）。设计文档 `.tmp/tech-design/workflow-step-visibility-data-source.md`（过程产物）；实施 = W0 四单元 + 验收缺陷修复（25410fac4 / c3cb48854 / 8e4afe05f / cb254b427 / ce0ab4e5d）。
+
+### ADR-0092 resume 只复用已提交结果，删除从子代理会话日志复用结果的通道（2026-09-30 用户裁决）
+**决策**：崩溃恢复只保留两种形态——① 该调用已有已提交结果（record 流里那条 `agent-settled`）→ 原样回放、零成本；② 没有 → 重跑（能定位到同一成员会话则续写，定位不到则重开）。删除「从子代理会话文件里把已跑完但结果未提交的结果捞回来复用」这条通道（原三档设计的档 1 补收）：`packages/subagent-core/src/orchestration/resume-run.ts` 的 `classifyResumeTierFromContent`（抽取末尾正文）、`dispatchTierCollectFrames`（合成补收用的 `agent-settled` 事件）、`planResumeTiers` 里按子代理名字取会话文件的部分，以及由它派生的时间下界、跨库身份查询、按契约判档、契约未知分支、原因枚举一并作废；`run-resumed` 的档位词由 `collect(tier-1)/continue(tier-2)/restart(tier-3)` 收敛为 `continue(tier-2)/restart(tier-3)`，档位判据换为「能否定位到该调用所属的成员会话」——定位口径沿用既有成员复用通道（`agent-started` 载荷的 `memberRecordId` + member-reuse-pool 查询），该通道自身的定位精度不在本条射程内。本条只约束**结果的来源**：交给脚本的结果必须来自已提交的调用结果；它不禁止任何功能读取子代理会话文件（读本身无害，被禁止的是把会话文件的内容当作某次调用的权威结果）。
+
+**依据**：① 不变式判据——交给脚本的结果必须来自一次已提交的调用结果；满足它时，结果形态、归属、轮次、并发、数据格式漂移全部无需判断（这些难点只在「复用一份未提交的东西」时才出现）。② 读侧方案无法自洽：2026-09-30 两轮业务用例走查（核心组 + 边界组，独立 subagent）共查出 9 条缺口，形态是「每补一处就冒出新的前置」——按名字取会话文件 → 归属不可证（可能把别的调用甚至上一轮的对象交给脚本）→ 补「文件内自证」→ 自证不足需时间下界 → 时间下界之外仍需调用身份 → 身份查询又依赖源码注释自陈「重启后可能回落 undefined」的字段；首次派发即中断的场景则结构性取不到文件（现有测试必须预置一条同名已落定记录才能构造档 1 / 档 2）。③ 需求证据为零：本机可得的全部 run 记录 7 份 / 23 次调用中，未完成调用 0 个、`run-resumed` 0 次（有 1 次 run-interrupted，当时其调用已全部落定）。样本小（7 份，且记录会被清理）不构成「不会发生」的证明，但足以说明该能力目前由设计推演驱动而非需求驱动。④ 减法优先：删除后恢复链的判据只剩「有没有已提交结果」与「成员会话能不能定位」两条，不再解析对话日志。
+
+**修订关系**：[ADR-0082](#adr-0082-workflow-run-record-单源收敛生命周期与词表重构2026-09-28-设计裁决workflow-run-resume-revision) 的 D1–D16 其余内容不变，被修订的是 resume 对「未提交结果」的处置。不采用的读侧方案与其两轮走查证据留档在不入库的过程产物 `.tmp/tech-design/resume-tier1-structured-result.md`（git 不可追溯），故本条为决策的权威登记处。
+
+**条件性重审**：若「崩溃后零成本恢复」被判定为产品级要求（长任务、token 成本高的场景），唯一正确形态是写侧携带身份——调用在派发时记下它启动了哪个成员（`agent-started` 载荷补成员记录 id，或把成员登记提前到该事件写入之前），提交时带上本次调用的身份，使「哪次提交属于哪次调用」成为记录读取而非事后推断；届时应另立 ADR 与设计，不在读侧续补。
+
+**登记**：未新增约束族，也未新增机器检查（本条为能力删除与语义收敛，事件词表与载荷形态不变；「结果只能来自已提交结果」由恢复链的实现形态承载——判据只剩「有没有 `agent-settled`」，没有第二条取结果的通路可走）。带 schema 的调用「必须给对象、否则报错」的义务**不在本层**：它已由引擎契约承载（pi 引擎 `collectOutcome` 在 `schemaExpected` 且无有效对象时强制失败并填 error；emulated 引擎失败走 `schema_emulation_failed`；义务登记见 [engine-development-guide.md](../extensions/subagents/engine-development-guide.md) §「schema 分流义务」），宿主侧不再加一层——引擎违契约应在引擎面暴露，宿主补丁会把边界故障掩盖成正常回落。
+
+### ADR-0093 引擎路由不换目标：显式指定即严格 + 不可用显式失败（2026-09-30 用户裁决）
+**决策**：一次 subagent 派发选哪个引擎，只由三层路由决定——调用参数 `engine` > agent .md frontmatter `engine` > 全局 config.json `defaultEngine`，三层全缺落内置缺省 `pi`；三层任一指定了引擎，运行期就按该引擎执行，**不换目标**。不可用一律以结构化错误显式失败：id 未注册（含 `defaultEngine` 指向已卸载引擎）→ `engine_not_found`（列已发现引擎 + 配置路径 + 安装指引）；probe 失败 → `engine_probe_failed`（逐项 check 摘要 + 恢复指引）；全局 config.json 存在但读不出来（坏 JSON / 权限）→ 派发前拒 `engine_config_unreadable`（缺省引擎是未知量，不按内置缺省 pi 执行；文件不存在仍是合法缺省）。要换引擎只能由调用方显式改传 `engine:'<id>'`。`EngineRouteResult` 只承载实际执行的引擎 id 与生效层，不存在「换了目标」的第二种值；`engineFallback` 留痕字段与 `engineRouting.strict` 配置项不存在。
+
+**依据**：① 静默换引擎等于替调用方改写意图——沙箱类任务被静默卸除安全能力、显式 model 与引擎 provider 的绑定被打破；② 「显式指定」与「该引擎不可用」是两个独立事实，后者不改变前者——把不可用降级为「换个引擎跑」会让失败不可见，用户在非预期引擎上拿到结果；③ 引擎清单与 manifest 在派发前同步可得，不可用应前置暴露并给恢复指引，宽容回落面没有服务对象。
+
+**登记**：设计规格权威源 [subagent-engine-protocolization.md](../architecture/subagent-engine-protocolization.md) §3.8 D4；约束 C-ext-16 描述随本裁决更新（entry 不因路由回落增 engine 系字段）；未新增约束族。
+
+### ADR-0094 worker 诊断日志入 record 流：errorLogs 重启后可重建（2026-09-30 用户裁决）
+**决策**：run 事件词表新增 `worker-log` 帧（载荷 `entry: {level, message}`）。worker 的 `console.*` 捕获与主线程 log 消息在追加 `run.state.errorLogs` 的同时**落账**，落账唯一写点 = `orchestration/terminal-actions.ts` 的 `appendRunDiagnosticEvent`（journal append 的单写者纪律不变：pump 经它写，不自己 append）。重建面 = `orchestration/run-events.ts` 的 `errorLogsFromEvents(events)`（按事件序追加 + `slice(-MAX_ERROR_LOGS)` 尾部裁剪，与活体写入同语义），壳 `jsonl-run-store.ts` 的三个重建点由「`errorLogs: []`」改用该函数。落账为 **best-effort**：写失败只 warn 留痕，不影响 run 生命周期（活体 errorLogs 已在内存，重建面少几条不改变终局语义）。
+
+`worker-log` **不进生命周期状态机**：`foldRunEventCheckpoint` 显式跳过该事件（并推进 seq 水位），故不占 `RUN_TRANSITIONS` 表行。
+
+**依据**：① 诊断日志的价值集中在「run 崩了/失败了之后」——重启即空等于在最需要现场时没有现场（此前 errorLogs 无任何持久面）。② 刻意不进状态机：诊断面与状态面正交，若让它走 `transition`，run 终局后迟到的诊断日志会撞上「terminal 是吸收态、任何事件 fail-fast」而把 fold 判成坏帧，进而丢掉后续判读；不占表行也避免把诊断事件写进转移表这份状态机权威。③ 单写者纪律保持：落账仍在 terminal-actions 内，pump 只经函数调用触达。④ 体量可控：`MAX_ERROR_LOGS` = 500 条上限，实测 run journal 每 run 2-20 条量级，诊断帧随 run 生命周期同清理（统一保留维护轮）。
+
+**登记**：事件词表 `RUN_EVENT_TYPES` 由 9 增至 10（journal 事件；控制事件词表不变），`WorkflowRunEvent` 联合新增 `WorkerLogEvent`。无新约束族；机器检查面 = run-events 的词表/转移表穷尽测试（新增样本）+ 本条的诊断帧折叠与重建单测（core）+ 壳重建单测。
+
+### ADR-0095 run 侧 v1 读面整体删除（2026-09-30 用户裁决，承 ADR-0078 同款裁决的延伸）
+**决策**：workflow run 侧（workflow-record）的 v1 兼容读面整体删除——record 侧 v1 兼容层已按「项目未上线、无 v1 数据，不迁移不兼容」裁决先行删除（ADR-0078 v1 删除补记），run 侧残留读面按同款裁决收敛为 v2-only。删除面四项：① session-reader 发现链收敛单档（`discovery/workflows.ts`——删 workflow-record v1 全量快照档、workflow-state-link 旧指针档与 wf-state 快照解析族 `extractCallSessionFiles`，只认 v2 注册条目的 recordPath 锚点）；② runtime `workflow-extractor.ts` 删 v1 快照条目扫描与 legacy 双管线（workflow-state-link 指针 + state 文件投影），文件收缩为 session-file-extraction 共享骨架的消费壳，records 恒空——runtime workflow 列表唯一数据源 = events-projection 的 record 流 fold + v2 注册/终态条目；③ core `run-snapshot.ts`（`SNAPSHOT_VERSION` 快照行版本常量，写面死后仅存读面残件）整文件删除，barrel 导出移除；④ 跨包契约测试同批收敛（runtime 三文件删除/重写、session-reader 两文件收敛单档、core `SNAPSHOT_VERSION` 值锁定测试删除）。
+
+**旧格式语义**：历史格式条目（v1 全量快照 entry / workflow-state-link 指针 entry / wf-state 快照行）不识别、不拒读、不报错——静默从各读面消失（发现链不产 runId、列表不显示、resume 一律拒绝），是历史数据处置的预期行为（不迁移、不兼容、不主动清盘文件）。session-reader 的 `readRunSnapshot` 保留（tool-handler workflow 概览快照链仍有 import；发现链收敛 v2 后该链对 v2 档不可达，随该文件后续批次清理）。
+
+**登记**：壳 `jsonl-run-store.ts` 注释措辞同批终态化（v1 行静默消失 = 设计预期）；壳 `session-lifecycle.ts` 的 link 条目读面不在本批领地、另行批次收敛；无新约束族（数据处置口径承 ADR-0078 系）。
+

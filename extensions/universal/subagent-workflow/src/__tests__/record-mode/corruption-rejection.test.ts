@@ -28,6 +28,7 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("@zhushanwen/subagent-core/core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
+import { isRunSettled } from "@zhushanwen/subagent-core";
 import { JsonlRunStore } from "../../jsonl-run-store.ts";
 import {
   appendEvents,
@@ -121,7 +122,7 @@ describe("场景 18：record 损坏拒绝（[D1] 坏行停摆——解析失败�
     const loaded = await store.loadAll();
     expect(loaded).toHaveLength(1);
     expect(loaded[0]!.runId).toBe(RUN_ID);
-    expect(loaded[0]!.state.status).toBe("running");
+    expect(isRunSettled(loaded[0]!)).toBe(false);
   });
 
   it("损坏隔离面：settlement 查询（通知链）保守 miss + warn，不抛（恢复面的拒绝语义只在 loadAll）", async () => {

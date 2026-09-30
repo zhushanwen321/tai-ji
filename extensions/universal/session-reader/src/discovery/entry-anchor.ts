@@ -46,12 +46,12 @@ const SUBAGENT_RECORD_ENTRY_V2 = 2
  * 从单条 entry 提取 zcode 锚。形状校验窄而严，任一不满足 = 该条不算命中（返回
  * undefined，调用方继续扫——缺键条目不遮蔽更早的完整条目）：
  * - `type === 'custom'` ∧ `customType === 'subagent-record'`
- * - 版本/判别键二选一（schema 版本守卫，不认识的版本跳过而非猜测——写侧
- *   record-entry.ts classifySubagentRecordEntryData 同口径）：
- *   - v1：`data.v === 1`（全量快照形态，兼容读面）；
- *   - v2：`data.v === 2` ∧ `data.kind === 'settled'`（W1 注册/终态两条小条目——
- *     **锚只取自终态条**：registered 条目不携带 engineHandle，且设计 D1 裁决
- *     「sessionRef 双键取自终态条」；kind 非法 = unknown-kind 跳过）；
+ * - 版本/判别键（schema 版本守卫，不认识的版本跳过而非猜测——写侧
+ *   record-entry.ts classifySubagentRecordEntryData v2-only 同口径）：
+ *   `data.v === 2` ∧ `data.kind === 'settled'`（W1 注册/终态两条小条目——
+ *   **锚只取自终态条**：registered 条目不携带 engineHandle，且设计 D1 裁决
+ *   「sessionRef 双键取自终态条」；kind 非法 = unknown-kind 跳过。v1 全量快照形态
+ *   已随兼容层删除，不再命中，2026-09-30 登记 §3.3）；
  * - `data.id === saId`（record id 即 sa-id，record-access.ts `sa-${uuid}`）
  * - `engineHandle.sessionRef.sessionId` / `.dbPath` 均为非空 string（F8 双键齐判据的
  *   锚字段部分；pi record 的 sessionRef 无 dbPath → 天然不命中，无需 engine 判别）
@@ -66,14 +66,11 @@ function zcodeAnchorOfEntry(entry: Entry, saId: string): ZcodeAnchor | undefined
   return extractZcodeSessionRefAnchor(d.engineHandle)
 }
 
-/** [zcodeAnchorOfEntry 拆分] 条目形态判别：v1 全量快照 或 v2 终态条（registered
- * 条目不携带 engineHandle，且设计 D1 裁决「sessionRef 双键取自终态条」；kind
- * 非法 = unknown-kind 跳过）。 */
+/** [zcodeAnchorOfEntry 拆分] 条目形态判别：当前版本终态条（registered 条目不携带
+ *  engineHandle，且设计 D1 裁决「sessionRef 双键取自终态条」；kind 非法 = 跳过。
+ *  v1 全量快照形态已随兼容层删除，不再命中）。 */
 function isAnchorEligibleRecordEntryVersion(d: Record<string, unknown>): boolean {
-  if (d.v === SUBAGENT_RECORD_ENTRY_V2) {
-    return d.kind === 'settled'
-  }
-  return d.v === 1
+  return d.v === SUBAGENT_RECORD_ENTRY_V2 && d.kind === 'settled'
 }
 
 /** [zcodeAnchorOfEntry 拆分] engineHandle.sessionRef 双键提取（sessionId/dbPath

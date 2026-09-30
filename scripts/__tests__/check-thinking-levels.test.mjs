@@ -6,7 +6,8 @@
  * 不依赖/不修改真实仓库词表文件。CLI 集成用例把守卫脚本复制到 tmp mirror 运行：
  * - 权威源（pi-ai dist/types.d.ts）经 node_modules symlink 指向真实实装包——import.meta.resolve
  *   默认 realpath 解析，脚本向上爬包根的逻辑与真实仓库运行完全同构；
- * - 三个词表副本是测试生成的 fixture（成员集从真实权威源动态提取，pi 升级不破测试）：
+ * - 两个比对面词表（宿主侧 subagent-core THINKING_ORDER + 前端派生源 shared
+ *   PI_THINKING_LEVELS）是测试生成的 fixture（成员集从真实权威源动态提取，pi 升级不破测试）：
  *   绿 = fixture 与权威源一致；红 = 篡改 fixture 成员（多出/缺失）跑出 exit 1——
  *   「篡改即红、还原即绿」在同一 tmpdir 内构成差分，证明守卫非恒绿（不触碰真实源文件，
  *   无需还原动作）。
@@ -76,13 +77,13 @@ describe('extractModelThinkingLevel（联合提取 + 别名递归展开）', () 
   })
 })
 
-describe('extractConstListMembers（三真实副本形态一条正则覆盖）', () => {
-  it('llm-shared 形态：类型标注 + new Set 多行', () => {
+describe('extractConstListMembers（真实词表形态 + 历史副本形态一条正则覆盖）', () => {
+  it('历史 llm-shared 副本形态：类型标注 + new Set 多行（提取器对 Set 形态仍兼容）', () => {
     const src = 'const THINKING_LEVELS: ReadonlySet<string> = new Set([\n\t"off",\n\t"max",\n]);'
     expect(extractConstListMembers(src, 'THINKING_LEVELS').values).toEqual(['off', 'max'])
   })
 
-  it('pi-rpc 形态：类型标注 + 数组单行单引号', () => {
+  it('历史 pi-rpc 副本形态：类型标注 + 数组单行单引号（提取器对带标注数组仍兼容）', () => {
     const src = "const THINKING_LEVELS: readonly string[] = ['off', 'max']"
     expect(extractConstListMembers(src, 'THINKING_LEVELS').values).toEqual(['off', 'max'])
   })
@@ -90,6 +91,11 @@ describe('extractConstListMembers（三真实副本形态一条正则覆盖）',
   it('subagent-core 形态：无类型标注 + as const（D6 适配：标注可选）', () => {
     const src = 'export const THINKING_ORDER = ["off", "minimal", "max"] as const;'
     expect(extractConstListMembers(src, 'THINKING_ORDER').values).toEqual(['off', 'minimal', 'max'])
+  })
+
+  it('shared 形态：PI_THINKING_LEVELS 无类型标注 + as const（T4 比对面实装形态）', () => {
+    const src = "export const PI_THINKING_LEVELS = ['off', 'minimal', 'max'] as const"
+    expect(extractConstListMembers(src, 'PI_THINKING_LEVELS').values).toEqual(['off', 'minimal', 'max'])
   })
 
   it('常量缺失/改名 → error', () => {
@@ -120,19 +126,17 @@ describe('resolvePiAiRoot（触发路径解析：入口爬包根 + name 校验�
 
 // ── CLI 集成（tmp mirror：守卫脚本 + fixture 副本 + 真实 pi-ai symlink）────────
 
-/** 三个词表副本 fixture 的真实文件形态（成员集动态取自权威源，pi 升级不破）。 */
-const llmSharedResolveSrc = (members) =>
-  `export const THINKING_LEVELS: ReadonlySet<string> = new Set([\n${members.map((m) => `\t"${m}",`).join('\n')}\n]);\n`
-const piRpcTypesSrc = (members) =>
-  `export const THINKING_LEVELS: readonly string[] = [${members.map((m) => `'${m}'`).join(', ')}]\n`
+/** 两个比对面词表 fixture 的真实文件形态（成员集动态取自权威源，pi 升级不破）。 */
 const subagentCoreModelRefSrc = (members) =>
   `export const THINKING_ORDER = [${members.map((m) => `"${m}"`).join(', ')}] as const;\n`
+const sharedPiPresetSrc = (members) =>
+  `export const PI_THINKING_LEVELS = [${members.map((m) => `'${m}'`).join(', ')}] as const\n`
 
 /**
- * tmp mirror 工厂：目录布局对齐守卫的 ROOT 相对路径（extensions/shared/llm-shared/src、
- * packages/pi-rpc/src、packages/subagent-core/src/shared），node_modules/@earendil-works/pi-ai
+ * tmp mirror 工厂：目录布局对齐守卫的 ROOT 相对路径（packages/subagent-core/src/shared、
+ * packages/shared/src），node_modules/@earendil-works/pi-ai
  * symlink 到真实实装包根（import.meta.resolve realpath 后向上爬包根与真实运行同构）。
- * overrides 可按副本覆盖成员集（漂移注入点），missing 指定不落盘的副本路径。
+ * overrides 可按比对面覆盖成员集（漂移注入点），missing 指定不落盘的比对面路径。
  *
  * 守卫脚本本体复制进 `<mirror>/scripts/`，run() 跑的是该副本：守卫 ROOT 由
  * `import.meta.url` 推导，副本位置使 ROOT 落在 mirror 内——篡改 fixture 才真正改到守卫读
@@ -144,7 +148,7 @@ const subagentCoreModelRefSrc = (members) =>
  * 会让守卫的 isMain 判定（`import.meta.url === pathToFileURL(resolve(process.argv[1]))`）为
  * false，脚本被 import 而不执行 main（又变恒 exit 0）。realpath 后两条路径同源。
  */
-function makeMirror({ llmShared, piRpc, thinkingOrder, missing = [] } = {}) {
+function makeMirror({ thinkingOrder, piPresetLevels, missing = [] } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'thinking-levels-fx-')))
   const writeAt = (rel, content) => {
     const abs = join(root, rel)
@@ -152,9 +156,8 @@ function makeMirror({ llmShared, piRpc, thinkingOrder, missing = [] } = {}) {
     writeFileSync(abs, content)
   }
   const files = {
-    'extensions/shared/llm-shared/src/resolve.ts': llmSharedResolveSrc(llmShared ?? REAL_MEMBERS),
-    'packages/pi-rpc/src/types.ts': piRpcTypesSrc(piRpc ?? REAL_MEMBERS),
     'packages/subagent-core/src/shared/model-ref.ts': subagentCoreModelRefSrc(thinkingOrder ?? REAL_MEMBERS),
+    'packages/shared/src/pi-preset.ts': sharedPiPresetSrc(piPresetLevels ?? REAL_MEMBERS),
   }
   for (const [rel, content] of Object.entries(files)) {
     if (missing.includes(rel)) continue
@@ -171,30 +174,16 @@ function makeMirror({ llmShared, piRpc, thinkingOrder, missing = [] } = {}) {
 }
 
 describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
-  it('词表一致 → exit 0，三副本逐一报一致', () => {
+  it('词表一致 → exit 0，两个比对面逐一报一致', () => {
     const fx = makeMirror()
     try {
       const r = fx.run()
       expect(r.status).toBe(0)
       expect(r.stdout).toContain('✓ thinking-levels 守卫通过')
-      for (const label of ['T1 llm-shared THINKING_LEVELS', 'T2 pi-rpc THINKING_LEVELS', 'T3 subagent-core THINKING_ORDER']) {
+      for (const label of ['T3 subagent-core THINKING_ORDER', 'T4 shared PI_THINKING_LEVELS']) {
         expect(r.stdout).toContain(`${label} 与 pi-ai`)
         expect(r.stdout).toContain(`一致（${REAL_MEMBERS.length} 值）`)
       }
-    } finally {
-      fx.cleanup()
-    }
-  })
-
-  it('漂移红（T1 副本多出档位）→ exit 1 + 漂移明细 + 恢复动作（差分证明守卫非恒绿）', () => {
-    const fx = makeMirror({ llmShared: [...REAL_MEMBERS, 'bogus-tier'] })
-    try {
-      const r = fx.run()
-      expect(r.status).toBe(1)
-      expect(r.stderr).toContain('T1 llm-shared THINKING_LEVELS')
-      expect(r.stderr).toContain('副本多出: bogus-tier')
-      expect(r.stderr).toContain('恢复动作')
-      expect(r.stderr).toContain('thinking-levels 守卫未通过')
     } finally {
       fx.cleanup()
     }
@@ -213,12 +202,26 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
     }
   })
 
-  it('副本文件缺失 → exit 1，报缺失路径与迁移同步指引（提取失败一律 fail）', () => {
-    const fx = makeMirror({ missing: ['extensions/shared/llm-shared/src/resolve.ts'] })
+  it('漂移红（T4 shared PI_THINKING_LEVELS 多出档位）→ exit 1，报漂移明细与恢复动作（差分证明 shared 面非恒绿）', () => {
+    const fx = makeMirror({ piPresetLevels: [...REAL_MEMBERS, 'bogus-tier'] })
     try {
       const r = fx.run()
       expect(r.status).toBe(1)
-      expect(r.stderr).toContain('T1 llm-shared resolve.ts 缺失')
+      expect(r.stderr).toContain('T4 shared PI_THINKING_LEVELS')
+      expect(r.stderr).toContain('副本多出: bogus-tier')
+      expect(r.stderr).toContain('恢复动作')
+      expect(r.stderr).toContain('thinking-levels 守卫未通过')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('比对面文件缺失 → exit 1，报缺失路径与迁移同步指引（提取失败一律 fail）', () => {
+    const fx = makeMirror({ missing: ['packages/shared/src/pi-preset.ts'] })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain('T4 shared pi-preset.ts 缺失')
     } finally {
       fx.cleanup()
     }

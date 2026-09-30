@@ -9,10 +9,8 @@
 export type {
   PiMessage,
   PiEventListener,
-  ThinkingLevel,
   StreamingBehavior,
 } from './types.ts'
-export { asThinkingLevel } from './types.ts'
 
 export {
   appendSkillArgs,

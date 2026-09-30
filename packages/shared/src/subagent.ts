@@ -191,17 +191,12 @@ export interface SubagentRecord {
    */
   engine?: string
   /**
-   * 引擎 fallback 留痕（D9①：probe 失败路由回默认引擎）。from = 请求引擎 id，
-   * reason 恒 'engine_probe_failed'。GUI 警告条数据源；缺省 = 无 fallback。
-   */
-  engineFallback?: { from: string; reason: string }
-  /**
    * 引擎自描述定位符（非 pi 引擎的历史详情读取键，读侧守卫语义见 runtime
    * subagent-engine-history 的 SubagentEngineHandle）。sessionRef 为引擎自定义键值
-   * （zcode = { sessionId, dbPath }），整体透传不枚举内部键；journalPath 绝对路径
+   * （zcode = { sessionId, dbPath }），整体透传不枚举内部键；eventsPath 绝对路径
    * （读前校验前缀白名单）；poolKey 隔离池定位。缺省 = pi（走 JSONL 直读链）。
    */
-  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string }
+  engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string }
 }
 
 /**
@@ -212,7 +207,7 @@ export interface SubagentRecord {
  * 派生」），closedReason 字段同时保留作诊断位）。
  *
  * 派生规则与 extension 侧两处实现同构（三处一致，改任一处须同步其余两处）：
- * - TUI 渲染：extensions/universal/subagent-workflow/src/interface/bg-notify-render.ts
+ * - TUI 渲染：extensions/universal/subagent-workflow/src/interface/gui/bg-notify-render.ts
  *   renderRecordLines 的 verb 派发（cancelled / gc+error → failed / finished）
  * - LLM 通知文案：extensions/universal/subagent-workflow/src/execution/notifier.ts
  *   buildLlmContent 的 closed 分支（cancelled / gc+error → failed / completed）
@@ -321,7 +316,7 @@ export interface SubagentRecordSettledEntry {
   model?: string
   thinkingLevel?: string
   engine?: string
-  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string }
+  engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string }
   sessionFile?: string
   /** 终局结果全文（一次性写——事件文件只存摘要锚，本条目是全文唯一落点）。 */
   result?: string

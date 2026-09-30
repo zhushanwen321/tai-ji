@@ -17,6 +17,7 @@
  *   - fail-closed：timeout / 抛错 / 解析失败 / 无可用模型 → 一律 ask
  */
 
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import type { CallLLMOptions, CallLLMResult } from "@zhushanwen/pi-llm-shared";
@@ -133,15 +134,25 @@ function buildCallOptions(
 	config: ClassifierConfig,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
+	onLog?: (msg: string) => void,
 ): CallLLMOptions {
+	// 档位按「该模型自己的 supportedLevels」判定（pi-ai 数据驱动，本层不自持词表）；
+	// 不支持则按「不传档位」处理，不静默换成别的档（clamp），并 warn 留痕
+	// （changeset pi-permission-thinking-level-datadriven 的承诺，与 rename-session 同族对齐）。
+	// llm-shared 会把 "off" 映射为不传。
+	const reasoning = getSupportedThinkingLevels(model).find((l) => l === config.thinkingLevel);
+	if (config.thinkingLevel !== undefined && config.thinkingLevel !== "" && reasoning === undefined) {
+		onLog?.(
+			`[pi-permission] classifier: configured thinkingLevel "${config.thinkingLevel}" is not supported by ${model.provider}/${model.id}; calling without a thinking level`,
+		);
+	}
 	return {
 		model,
 		systemPrompt: CLASSIFIER_SYSTEM_PROMPT,
 		messages: buildMessages(ctx),
 		...(timeoutMs !== undefined ? { timeoutMs } : {}),
 		...(signal !== undefined ? { signal } : {}),
-		// thinkingLevel 直接透传（含 "off"）；llm-shared 内部会把 "off" 映射为不传 reasoning（provider 默认）
-		reasoning: config.thinkingLevel,
+		reasoning,
 	};
 }
 
@@ -223,7 +234,7 @@ export function createClassifier(deps: ClassifierDeps): {
 
 		// 2. 构造 CallLLMOptions
 		const timeoutMs = config.timeout > 0 ? config.timeout * MILLIS_PER_SECOND : undefined;
-		const callPromise = callLLM(buildCallOptions(model, ctx, config, timeoutMs, signal));
+		const callPromise = callLLM(buildCallOptions(model, ctx, config, timeoutMs, signal, onLog));
 
 		// 3. 等待 callLLM + 外层超时/中止兜底（provider 不支持 timeoutMs/signal 时防永挂）
 		let settled: SettledRace;

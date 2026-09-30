@@ -27,6 +27,7 @@ import {
   terminateRunningRuns,
 } from "../lifecycle.ts";
 import { ArgsValidationError } from "../args-validator.ts";
+import { WorkflowScriptSyntaxError } from "../script-syntax.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { getLogger } from "../../core/logger.ts";
 import { AgentCall } from "../models/agent-call.ts";
@@ -42,6 +43,7 @@ import {
   dispatchRunCreated,
   dispatchRunTrigger,
   isRunSettled,
+  noteRebuiltSettlement,
   settledRecordOf,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
@@ -62,7 +64,7 @@ function makeSpec(opts: {
   args?: Record<string, unknown>;
 } = {}): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: opts.args ?? {},
     parameters: opts.parameters,
     scriptName: "test-wf",
@@ -98,7 +100,6 @@ function makeRunningRealRun(
     runId,
     spec,
     {
-      status: "running",
       budget: new Budget({ maxTokens: 1000 }),
       calls: new Map(),
       trace: new Trace(),
@@ -184,10 +185,10 @@ describe("scheduleTimeBudget", () => {
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 
-  it("run 已 done 时 abortRun no-op（到期不重复 transition）", async () => {
+  it("run 已终局时 abortRun no-op（到期不重复终局化）", async () => {
     const { run } = makeRunningRealRun("wf-budget-2");
-    // 先把 run 转 done（手动）
-    run.transition("done", "completed");
+    // 先把 run 终局化（手工注入注册表条目——[W2/V1] 终局判定源 = 终局记录注册表）
+    noteRebuiltSettlement("wf-budget-2", { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
     deps.runs.set("wf-budget-2", run);
 
@@ -195,8 +196,8 @@ describe("scheduleTimeBudget", () => {
     await vi.advanceTimersByTimeAsync(500);
     await flushMicrotasks();
 
-    // 状态保持原 done/completed，未被 time_limited 覆盖
-    expect(run.state.reason).toBe("completed");
+    // 终局事实保持原 outcome=done（映射 reason completed），未被 time_limited 覆盖
+    expect(settledRecordOf("wf-budget-2")).toMatchObject({ outcome: "done" });
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
@@ -232,8 +233,8 @@ describe("runWorkflow", () => {
     // run 注册到 deps.runs
     expect(deps.runs.has(runId)).toBe(true);
     const run = deps.runs.get(runId)!;
-    // status 为 running（assignRuntime 已绑定 runtime）
-    expect(run.state.status).toBe("running");
+    // 活体 run（未终局）且 runtime 已绑定
+    expect(isRunSettled(run)).toBe(false);
     expect(run.runtime).toBeDefined();
     // workerHost.start 被调
     expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
@@ -247,7 +248,7 @@ describe("runWorkflow", () => {
     });
   });
 
-  it("创建即 running：构造即 running，runs.set 在 assignRuntime 后（I1 窗口对外不可见）", async () => {
+  it("创建即活体：runs.set 在 assignRuntime 后（绑定窗口对外不可见）", async () => {
     const deps = makeDeps();
     // worker.start 被调时探测 runs 注册状态——证明 runs.set 在 assignRuntime 之后
     let runsSizeAtWorkerStart = -1;
@@ -258,17 +259,16 @@ describe("runWorkflow", () => {
 
     const runId = await runWorkflow(makeSpec(), deps);
 
-    // worker.start 执行时 run 尚未注册（I1 跳过窗口不外泄）
+    // worker.start 执行时 run 尚未注册（绑定窗口不外泄）
     expect(runsSizeAtWorkerStart).toBe(0);
-    // 完成后已注册，且构造即 running + runtime 已注入（I1 成立）
+    // 完成后已注册，runtime 已注入
     expect(deps.runs.has(runId)).toBe(true);
     const run = deps.runs.get(runId)!;
-    expect(run.state.status).toBe("running");
     expect(run.runtime).toBeDefined();
-    // save 落盘的是恢复 I1 后的聚合（status running + runtime 已绑定）
+    // save 落盘的是 runtime 已绑定的聚合
     const savedRun = deps.store.save.mock.calls[0]![0] as WorkflowRun;
     expect(savedRun).toBe(run);
-    expect(savedRun.state.status).toBe("running");
+    expect(savedRun.runtime).toBeDefined();
   });
 
   it("worker.start 抛错 → runWorkflow 拒绝且 runs 无孤儿注册", async () => {
@@ -280,6 +280,21 @@ describe("runWorkflow", () => {
     await expect(runWorkflow(makeSpec(), deps)).rejects.toThrow("worker boot failed");
 
     // 无孤儿：启动失败时 run 未注册进 deps.runs（runs.set 在 start 之后）
+    expect(deps.runs.size).toBe(0);
+    expect(deps.store.save).not.toHaveBeenCalled();
+    expect(deps.eventBus.emit).not.toHaveBeenCalled();
+  });
+
+  // [撞名缺陷 / 第 4 道检查扩展到派发期] 手工脚本顶层重声明宿主预声明名时，
+  // 必须在 worker 启动前拒绝（真机形态 = Worker 异步语法错 → 被重试矩阵吃满三次）。
+  it("脚本顶层重声明宿主名 → runWorkflow 在 worker 启动前拒绝（零副作用）", async () => {
+    const deps = makeDeps();
+    const spec = { ...makeSpec(), scriptSource: "const args = { a: 1 };\nasync function execute() {}" };
+
+    await expect(runWorkflow(spec, deps)).rejects.toThrow(WorkflowScriptSyntaxError);
+
+    // 与参数校验同 chokepoint：worker 未启动、run 未注册、store/eventBus 零调用
+    expect(deps.workerHost.start).not.toHaveBeenCalled();
     expect(deps.runs.size).toBe(0);
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(deps.eventBus.emit).not.toHaveBeenCalled();
@@ -330,7 +345,7 @@ describe("runWorkflow", () => {
       // [D2] dispatched 并入 running——run-created 首帧后 fold 即 running
       expect(projection.state.lifecycle).toBe("running");
       // [W1 / D1] v2 注册条目（两写点之一）：journal 首帧落账成功后经
-      // appendEntry 写主 session——journalPath 锚点指向真实 journal 文件
+      // appendEntry 写主 session——recordPath 锚点指向真实 journal 文件
       const registered = deps.appendEntry.mock.calls.find((c) => c[0] === "workflow-record");
       expect(registered).toBeDefined();
       expect(registered![1]).toMatchObject({
@@ -341,9 +356,9 @@ describe("runWorkflow", () => {
         scriptName: "test-wf",
         slug: "test-wf",
       });
-      const regData = registered![1] as { journalPath: string; startedAt: number };
-      expect(regData.journalPath).toBe(path.join(journalDir, `${runId}.record.jsonl`));
-      expect(fs.existsSync(regData.journalPath)).toBe(true);
+      const regData = registered![1] as { recordPath: string; startedAt: number };
+      expect(regData.recordPath).toBe(path.join(journalDir, `${runId}.record.jsonl`));
+      expect(fs.existsSync(regData.recordPath)).toBe(true);
       expect(typeof regData.startedAt).toBe("number");
     } finally {
       setRunEventJournalDirForTest(undefined);
@@ -448,10 +463,10 @@ describe("runWorkflow", () => {
 
     expect(run.runtime?.timeBudgetTimer).toBeUndefined();
 
-    // 无预算 → 不存在到期 abort：推进 10min 后 run 仍 running
+    // 无预算 → 不存在到期 abort：推进 10min 后 run 仍未终局
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
     await flushMicrotasks();
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
   });
 
   it("signal 已 abort → fail fast（抛错，不创建 run）", async () => {
@@ -501,7 +516,7 @@ describe("abortRun", () => {
 
     await abortRun("wf-abort-1", deps, "user cancelled");
 
-    // [W2/V1] 终局断言换源（两态机字段停更——state.status 恒 running）
+    // [W2/V1] 终局断言换源（终局经注册表判定——[D6(a)] 聚合不持状态字段）
     expect(isRunSettled(run)).toBe(true);
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "cancelled" });
     expect(run.state.error).toBe("user cancelled");
@@ -517,13 +532,15 @@ describe("abortRun", () => {
 
   it("done 状态 no-op（不重复 abort）", async () => {
     const { run } = makeRunningRealRun("wf-abort-2");
-    run.transition("done", "completed");
+    // [W2/V1] 终局判定源 = 终局记录注册表：注入终局事实（生产经 dispatch 链 note）
+    noteRebuiltSettlement("wf-abort-2", { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
     deps.runs.set("wf-abort-2", run);
 
     await abortRun("wf-abort-2", deps, "late abort");
 
-    expect(run.state.reason).toBe("completed"); // 未被覆盖
+    // 终局事实未被覆盖（outcome=done 映射 reason completed）
+    expect(settledRecordOf("wf-abort-2")).toMatchObject({ outcome: "done" });
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
@@ -602,7 +619,10 @@ describe("terminateRunningRuns", () => {
     const { run: doneRun } = makeRunningRealRun("wf-term-done");
     await seedRunCreated(running1);
     await seedRunCreated(running2);
-    doneRun.transition("done", "completed");
+    // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：生产里 done run 的条目由活体
+    // dispatch 链 note，fixture 手工注入等价事实——否则该 run 会被判未终局并进入
+    // 中断收编。
+    noteRebuiltSettlement("wf-term-done", { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
     deps.runs.set("wf-term-1", running1);
     deps.runs.set("wf-term-2", running2);
@@ -615,9 +635,9 @@ describe("terminateRunningRuns", () => {
     expect(isRunSettled(running2)).toBe(false);
     await expectInterruptedFrame("wf-term-1");
     await expectInterruptedFrame("wf-term-2");
-    // 已终局 run 不被重写（恢复写点聚合 done 保留）
-    expect(doneRun.state.status).toBe("done");
-    expect(doneRun.state.reason).toBe("completed");
+    // 已终局 run 不被重写（终局事实保持注册表条目原样：outcome=done 映射 reason completed）
+    expect(isRunSettled(doneRun)).toBe(true);
+    expect(settledRecordOf("wf-term-done")).toMatchObject({ outcome: "done" });
   });
 
   it("中断零终局副作用：不落 pending:unregister、不调 onRunDone（[D11] interruptRun 零终局 coda）", async () => {
@@ -742,29 +762,34 @@ describe("terminateRunningRuns", () => {
 // ── evictDoneRunsBeyondCap ────────────────────────────────────
 
 /**
- * 构造可重水合的 WorkflowRun 快照（对齐 crash-recovery.test.ts makeRun 模式——
- * WorkflowRun.reconstruct 与构造同语义：I1 构造期跳过，running 快照合法）。
+ * 构造可重水合的 WorkflowRun 快照（对齐 crash-recovery.test.ts makeRun 模式）。
+ *
+ * [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态必须同时注入注册表条目
+ * （生产 = 壳重建点 noteRebuiltSettlement 把 run-settled 帧事实带进消费面）；
+ * settledAt 缺省取快照 completedAt（重水合 run 的条目 = run-settled 帧时序）。
  *
  * @param runId run 标识
  * @param opts.completedAt 完成时刻 ISO 串（缺省=缺失场景，模拟旧格式/异常快照）
- * @param opts.status 状态（默认 done；running 用于白名单验证）
+ * @param opts.status fixture 建模选择器（默认 done；running 用于白名单验证——
+ *   仅决定是否注入注册表条目，聚合快照不持生命周期轴）
+ * @param opts.settledAt 注册表排序键覆盖（缺省 = completedAt；用于锁定「排序键 =
+ *   注册表 settledAt，meta.completedAt 不参与」的换源语义）
  */
 function makeEvictableRun(
   runId: string,
-  opts: { completedAt?: string; status?: "running" | "done" } = {},
+  opts: { completedAt?: string; status?: "running" | "done"; settledAt?: number } = {},
 ): WorkflowRun {
   const status = opts.status ?? "done";
-  return WorkflowRun.reconstruct(
+  const run = WorkflowRun.reconstruct(
     runId,
     {
-      scriptSource: "execute() {}",
+      scriptSource: "async function execute() {}",
       args: {},
       scriptName: "test",
       scriptPath: "/fake/test.js",
     },
     {
-      status,
-      reason: status === "done" ? "completed" : undefined,
+      ...(status === "done" ? { reason: "completed" as const } : {}),
       budget: new Budget({ maxTokens: 1000 }),
       calls: new Map(),
       trace: new Trace(),
@@ -775,6 +800,14 @@ function makeEvictableRun(
       ...(opts.completedAt !== undefined ? { completedAt: opts.completedAt } : {}),
     },
   );
+  if (status === "done") {
+    noteRebuiltSettlement(runId, {
+      outcome: "done",
+      settledAt:
+        opts.settledAt ?? (opts.completedAt !== undefined ? Date.parse(opts.completedAt) : 0),
+    });
+  }
+  return run;
 }
 
 /** ISO 基准时刻（过去时刻），isoAt(n) = 基准 + n 分钟。 */
@@ -858,18 +891,19 @@ describe("evictDoneRunsBeyondCap（done run 内存淘汰，K=MAX_RETAINED_DONE_R
     }
   });
 
-  it("W3TC4: completedAt 缺失 fallback 视为最旧（排序键空串字典序最小）", () => {
+  it("W3TC4: 排序键 = 注册表 settledAt（meta.completedAt 不参与排序）", () => {
     const runs = new Map<string, WorkflowRun>();
-    // 插入序 [runC, runA, runB]——缺失者 runA 居中，防「碰巧首元素」假通过
-    runs.set("wf-runC", makeEvictableRun("wf-runC", { completedAt: isoAt(2) }));
-    runs.set("wf-runA", makeEvictableRun("wf-runA"));
-    runs.set("wf-runB", makeEvictableRun("wf-runB", { completedAt: isoAt(1) }));
+    // [D6(a) 第 1 步] 排序键换源锁定：三个 run 的 meta.completedAt 序与注册表
+    // settledAt 序刻意相反——淘汰集合必须跟随 settledAt（run-settled 帧时序），
+    // 若实现回落到 meta.completedAt，删的将是 runC 而非 runA。
+    runs.set("wf-runA", makeEvictableRun("wf-runA", { completedAt: isoAt(2), settledAt: Date.parse(isoAt(0)) }));
+    runs.set("wf-runB", makeEvictableRun("wf-runB", { completedAt: isoAt(1), settledAt: Date.parse(isoAt(1)) }));
+    runs.set("wf-runC", makeEvictableRun("wf-runC", { completedAt: isoAt(0), settledAt: Date.parse(isoAt(2)) }));
 
     const evicted = evictDoneRunsBeyondCap(runs, 2);
 
-    // runA 缺失 completedAt = 空串排序键 → 字典序最小=最旧 → 先被淘汰
     expect(evicted).toBe(1);
-    expect(runs.has("wf-runA")).toBe(false);
+    expect(runs.has("wf-runA")).toBe(false); // settledAt 最旧（尽管 completedAt 最新）
     expect(runs.has("wf-runB")).toBe(true);
     expect(runs.has("wf-runC")).toBe(true);
   });

@@ -261,12 +261,26 @@ describe('extractSubagentsFromSessionFile', () => {
 
   it('[G3] READ_PRECHECK 预检：>32MB 降级返回空列表 + oversize 标记（不读全文）', () => {
     const sessionFile = join(tempDir, 'oversize-session.jsonl')
-    // 首行是合法自描述 subagent-record（守卫失效被误读时会产出 1 条记录——若本用例
-    // 断言翻红即说明预检未挡住读路径）；其余为 >32MB 单行填充（JSON.parse 失败行，仅撑体积）
+    // 首行是合法 v2 注册条目（预检失效被误读时会产出 1 条记录——若本用例断言翻红即
+    // 说明预检未挡住读路径）；其余为 >32MB 单行填充（JSON.parse 失败行，仅撑体积）
     const recordLine = JSON.stringify({
       type: 'custom',
       customType: SUBAGENT_RECORD_CUSTOM_TYPE,
-      data: { v: 1, id: 'sub-oversize-guard', status: 'running', agent: 'worker', task: 'huge' },
+      id: 'e-oversize',
+      parentId: null,
+      timestamp: '2026-09-26T00:00:00Z',
+      data: {
+        v: 2,
+        kind: 'registered',
+        id: 'sub-oversize-guard',
+        agent: 'worker',
+        task: 'huge',
+        slug: 'huge',
+        origin: 'tool',
+        rootSessionId: 's1',
+        depth: 0,
+        startedAt: 1000,
+      },
     })
     // 阈值 + 1B 超限（READ_PRECHECK_MAX_BYTES = 32MB，shared SSOT——导入引用而非写死，
     // 阈值调整时本用例跟随）
@@ -286,8 +300,21 @@ describe('extractSubagentsFromSessionFile', () => {
       {
         type: 'custom',
         customType: SUBAGENT_RECORD_CUSTOM_TYPE,
-        data: { v: 1, id: 'sub-normal', status: 'running', agent: 'worker', task: 't' },
+        id: 'e-normal',
+        parentId: null,
         timestamp: '2026-07-11T06:00:00Z',
+        data: {
+          v: 2,
+          kind: 'registered',
+          id: 'sub-normal',
+          agent: 'worker',
+          task: 't',
+          slug: 't',
+          origin: 'tool',
+          rootSessionId: 's1',
+          depth: 0,
+          startedAt: 1000,
+        },
       },
     ]
     writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n'))
@@ -936,47 +963,68 @@ describe('extractSubagentsFromSessionFile — background sessionFile 回退查�
 })
 
 
-// ── W18：scanSubagentEntries（entry 扫描器：自描述优先 + legacy 兜底）─────────────
-describe('scanSubagentEntries（W18 entry 扫描器）', () => {
-  /** 构造自描述 subagent-record entry（W16 v1 完整快照形态，对齐 extension record-entry.ts schema） */
-  function subagentRecordEntry(data: Record<string, unknown>): Record<string, unknown> {
+// ── scanSubagentEntries（entry 扫描器：v2 自描述优先 + legacy 兜底）─────────────
+describe('scanSubagentEntries（entry 扫描器：v2 自描述优先 + legacy 兜底）', () => {
+  /** v2 注册条目 entry（身份域定身份；data 覆写供透传用例） */
+  function registeredEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       type: 'custom',
-      customType: 'subagent-record',
+      customType: SUBAGENT_RECORD_CUSTOM_TYPE,
       id: 'e-1',
       parentId: null,
       timestamp: '2026-08-19T00:00:00Z',
       data: {
-        v: 1,
+        v: 2,
+        kind: 'registered',
+        id: 'sa-1',
         agent: 'worker',
         task: 'Do work',
         slug: 'work',
-        status: 'running',
+        origin: 'tool',
+        rootSessionId: 's1',
+        depth: 0,
         startedAt: 1000,
-        ...data,
+        ...overrides,
       },
     }
   }
 
-  it('自描述命中：v1 entry → SubagentRecord 投影（id/status/时间戳/closedReason 终态投影）', () => {
-    const records = scanSubagentEntries([
-      { type: 'session', id: 's', cwd: '/proj', timestamp: '2026-08-19T00:00:00Z' },
-      subagentRecordEntry({
+  /** v2 终态条目 entry（终局域；终态条目在场即 idle，条目 status 值不参与判据） */
+  function settledEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      type: 'custom',
+      customType: SUBAGENT_RECORD_CUSTOM_TYPE,
+      id: 'e-2',
+      parentId: null,
+      timestamp: '2026-08-19T00:00:01Z',
+      data: {
+        v: 2,
+        kind: 'settled',
         id: 'sa-1',
-        status: 'closed',
-        closedReason: 'gc',
+        status: 'idle',
+        stopReason: 'interrupted',
         endedAt: 61000,
+        turns: 9,
         totalTokens: 1234,
         model: 'p/m',
+        thinkingLevel: 'low',
         sessionFile: '/data/sa-1.jsonl',
-        error: 'boom',
-        // R3-1：origin 进全量快照断言——投影白名单漏字段时本用例 toEqual 红
-        origin: 'workflow',
-      }),
+        result: 'full result text',
+        ...overrides,
+      },
+    }
+  }
+
+  it('自描述命中：v2 条目对 → SubagentRecord 全字段投影（身份 / 终局 / 统计 / 引擎锚）', () => {
+    const engineHandle = { sessionRef: { sessionId: 'z-1', dbPath: '/db/z.sqlite' }, poolKey: 'shared' }
+    const records = scanSubagentEntries([
+      { type: 'session', id: 's', cwd: '/proj', timestamp: '2026-08-19T00:00:00Z' },
+      registeredEntry({ origin: 'workflow', parentRunId: 'run-1', stepIndex: 2 }),
+      settledEntry({ stopReason: 'completed', error: 'boom', engine: 'zcode', engineHandle }),
     ])
 
-    // [U6/D5] closed 归一：status=idle + closedReason 保留 + deriveClosedDisplay(gc+error)
-    // 派生 stopReason='failed'（toEqual 忽略显式 undefined 键——result 等缺省面不变）
+    // toEqual 忽略显式 undefined 键；v1 专有字段（closedReason 等）
+    // 在 v2 条目无载体——不在本断言内
     expect(records).toEqual([{
       subagentId: 'sa-1',
       sessionFile: '/data/sa-1.jsonl',
@@ -984,79 +1032,79 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
       slug: 'work',
       task: 'Do work',
       status: 'idle',
-      stopReason: 'failed',
-      closedReason: 'gc',
-      turns: undefined,
+      stopReason: 'completed',
+      turns: 9,
       totalTokens: 1234,
       model: 'p/m',
-      thinkingLevel: undefined,
+      thinkingLevel: 'low',
       startedAt: 1000,
       endedAt: 61000,
-      // elapsedSeconds 派生：entry 无 duration，从 startedAt/endedAt 差值（60s）
+      // elapsedSeconds 派生：条目无 duration 字段，从 startedAt/endedAt 差值（60s）
       elapsedSeconds: 60,
       error: 'boom',
+      result: 'full result text',
       origin: 'workflow',
+      parentRunId: 'run-1',
+      stepIndex: 2,
+      engine: 'zcode',
+      engineHandle,
     }])
   })
 
-  it('同 id 后到覆盖（状态迁移 append 序列：running → closed 取最后快照）+ running 无 closedReason', () => {
+  it('同 id 后到覆盖：同族条目各取最后一条（注册定身份 / 终态定终局），仅有注册条目 → running', () => {
     const records = scanSubagentEntries([
-      subagentRecordEntry({ id: 'sa-1', status: 'running' }),
-      subagentRecordEntry({ id: 'sa-1', status: 'closed', closedReason: 'user-close', endedAt: 2000 }),
+      registeredEntry({ agent: 'w1' }),
+      registeredEntry({ agent: 'w2' }),
+      settledEntry({ stopReason: 'interrupted' }),
+      settledEntry({ stopReason: 'completed' }),
+      registeredEntry({ id: 'sa-running', agent: 'w3' }),
     ])
 
-    expect(records).toHaveLength(1)
-    // [U6/D5] closed 归一 idle + closedReason 保留（user-close 无 error → 派生 completed）
-    expect(records[0]!.status).toBe('idle')
-    expect(records[0]!.closedReason).toBe('user-close')
-    expect(records[0]!.stopReason).toBe('completed')
+    expect(records).toHaveLength(2)
+    const settled = records.find((r) => r.subagentId === 'sa-1')
+    expect(settled?.agent).toBe('w2') // 后到的注册条目定身份
+    expect(settled?.stopReason).toBe('completed') // 后到的终态条目定终局
+    expect(settled?.status).toBe('idle')
+
+    const running = records.find((r) => r.subagentId === 'sa-running')
+    expect(running?.status).toBe('running')
+    expect(running?.stopReason).toBeUndefined()
+    expect(running?.endedAt).toBeUndefined()
+    expect(running?.sessionFile).toBeNull()
   })
 
-  it('U8 两态投影：idle entry 直投 idle + stopReason 下行（展示维度）', () => {
-    const records = scanSubagentEntries([
-      subagentRecordEntry({
-        id: 'sa-idle',
-        status: 'idle',
-        stopReason: 'interrupted',
-        endedAt: 5000,
-      }),
+  it('两态投影：终态条目在场 → idle + stopReason 原样下行；无终态条目 → running 且终局字段全空', () => {
+    const idle = scanSubagentEntries([
+      registeredEntry({ id: 'sa-idle' }),
+      settledEntry({ id: 'sa-idle', stopReason: 'interrupted-by-restart' }),
     ])
+    expect(idle[0]!.status).toBe('idle')
+    expect(idle[0]!.stopReason).toBe('interrupted-by-restart')
 
-    expect(records).toHaveLength(1)
-    expect(records[0]!.status).toBe('idle')
-    expect(records[0]!.stopReason).toBe('interrupted')
-    // 旧会话数据（无新字段）下行不漂移：closed 归一由 closedReason 派生 stopReason
-    const legacy = scanSubagentEntries([
-      subagentRecordEntry({ id: 'sa-old', status: 'closed', closedReason: 'gc' }),
-    ])
-    // [U6/D5] closed 归一 idle + closedReason 保留（gc 无 error → deriveClosedDisplay
-    // done → 派生 stopReason:'completed' + one-shot 形态位合成）
-    expect(legacy[0]!.status).toBe('idle')
-    expect(legacy[0]!.stopReason).toBe('completed')
-    expect(legacy[0]!.closedReason).toBe('gc')
+    const running = scanSubagentEntries([registeredEntry({ id: 'sa-running' })])
+    expect(running[0]!.status).toBe('running')
+    expect(running[0]!.stopReason).toBeUndefined()
+    expect(running[0]!.error).toBeUndefined()
+    expect(running[0]!.result).toBeUndefined()
   })
 
-  it('U8 守卫：轮终 stopReason（failed/completed）有值即投影；closedReason 仍 closed-only', () => {
-    // W4 新态真实形态（[U5/D4] adoptEngineDeath：running + stopReason=failed + result=∅）
-    const failed = scanSubagentEntries([
-      subagentRecordEntry({ id: 'sa-rf', status: 'running', stopReason: 'failed', result: 'round did not complete: boom' }),
+  it('stopReason 来源单一（仅终态条目）：注册条目上的 stopReason 不读；终态值 string 宽透传不派生/不收窄', () => {
+    // W4 死亡纳管态（running + stopReason）在 v2 无载体：running 判据 = 无终态条目，
+    // 故「running + stopReason」脏组合读侧构造性不可达
+    const running = scanSubagentEntries([registeredEntry({ id: 'sa-rf', stopReason: 'failed' })])
+    expect(running[0]!.status).toBe('running')
+    expect(running[0]!.stopReason).toBeUndefined()
+
+    // 词表外/新增展示值 string 宽透传（shared 契约不因收窄丢字段）
+    const settled = scanSubagentEntries([
+      registeredEntry({ id: 'sa-s' }),
+      settledEntry({ id: 'sa-s', stopReason: 'some-future-reason' }),
     ])
-    expect(failed[0]!.status).toBe('running')
-    expect(failed[0]!.stopReason).toBe('failed')
-    // 成功轮同理（completed 下行）
-    const completed = scanSubagentEntries([
-      subagentRecordEntry({ id: 'sa-rc', status: 'idle', stopReason: 'completed', result: '产出' }),
-    ])
-    expect(completed[0]!.stopReason).toBe('completed')
-    // 不对称守卫另一半保留：running + closedReason 仍不投影（closed-only，防脏组合）
-    const dirty = scanSubagentEntries([
-      subagentRecordEntry({ id: 'sa-dirty', status: 'running', closedReason: 'gc', stopReason: 'interrupted' }),
-    ])
-    expect(dirty[0]!.status).toBe('running')
-    expect(dirty[0]!.closedReason).toBeUndefined()
+    expect(settled[0]!.status).toBe('idle')
+    expect(settled[0]!.stopReason).toBe('some-future-reason')
   })
 
-  it('版本守卫：v≠1 的自描述 entry 跳过（全部无效 → 落 legacy 兜底）', () => {
+  it('不认识的版本/形态 entry 跳过（v1 已删快照 → future-v；v2 无 kind → unknown-kind）→ 全部无效落 legacy 兜底', () => {
     const legacyEntries = [
       {
         type: 'message', id: 'm-0', timestamp: '2026-07-11T06:38:28Z',
@@ -1073,15 +1121,24 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
         },
       },
     ]
-    const records = scanSubagentEntries([
-      subagentRecordEntry({ id: 'sa-new', v: 2, status: 'running' }),
-      ...legacyEntries,
-    ])
+    // warn 留证（版本漂移可观测）——静音输出，形状断言归 guards 文件
+    const warn = vi.spyOn(console, 'warn').mockReturnValue(undefined)
+    try {
+      const records = scanSubagentEntries([
+        // v1 全量快照形态（已删）：按版本判别跳过而非猜测
+        { type: 'custom', customType: SUBAGENT_RECORD_CUSTOM_TYPE, data: { v: 1, id: 'sa-v1', status: 'running' } },
+        // 当前版本但 kind 不在词表（半写/形态损坏）
+        { type: 'custom', customType: SUBAGENT_RECORD_CUSTOM_TYPE, data: { v: 2, id: 'sa-no-kind' } },
+        ...legacyEntries,
+      ])
 
-    // v2 entry 全部无效 → 自描述无命中 → legacy 兜底产出（数据滞后但可用）
-    expect(records).toHaveLength(1)
-    expect(records[0]!.subagentId).toBe('bg-legacy-1')
-    expect(records[0]!.status).toBe('running')
+      // 自描述无命中 → legacy 兜底产出（数据滞后但可用）
+      expect(records).toHaveLength(1)
+      expect(records[0]!.subagentId).toBe('bg-legacy-1')
+      expect(records[0]!.status).toBe('running')
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('无自描述 entry 的旧 session → legacy 解析（toolCall/toolResult 配对路径，D4 降级表现）', () => {
@@ -1107,9 +1164,17 @@ describe('scanSubagentEntries（W18 entry 扫描器）', () => {
     expect(records[0]!.agent).toBe('worker')
   })
 
-  it('混合时自描述优先（同批 legacy entry 存在但有自描述命中即不走 legacy）', () => {
+  it('混合时自描述优先（同批 legacy 配对存在但有 v2 自描述命中即不走 legacy）', () => {
     const records = scanSubagentEntries([
-      subagentRecordEntry({ id: 'sa-self', status: 'running' }),
+      registeredEntry({ id: 'sa-self' }),
+      // 完整 legacy 配对（toolCall + toolResult）——若走 legacy 兜底会产出 bg-legacy-3
+      {
+        type: 'message', id: 'm-0', timestamp: '2026-07-11T06:38:29Z',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'call-1', name: 'subagent', arguments: { action: 'start', startParam: { agent: 'worker', slug: 's', task: 't' } } }],
+        },
+      },
       {
         type: 'message', id: 'm-1', timestamp: '2026-07-11T06:38:30Z',
         message: {

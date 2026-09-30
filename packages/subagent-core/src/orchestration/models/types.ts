@@ -5,8 +5,9 @@
  * 可独立编译测试（D-12 三层架构，AC-1）。
  *
  * 核心内容：
- * - 状态机：RunStatus = "running" | "done"（2 态，一次性生命周期，FR-3）
- * + DoneReason（completed/failed/aborted/budget_limited/time_limited）
+ * - DoneReason（completed/failed/aborted/budget_limited/time_limited）
+ *   （run 生命周期两态机词表已随 [D6(a)] 退役——生命周期判定唯一走
+ *   六态机 dispatchRunTrigger 链与终局记录注册表，聚合不持状态机词表）
  * - AgentCallOpts / AgentResult（单次 agent 调用的输入/输出，宿主面 SSOT 留守本地）
  * + AgentUsage / ToolCallEntry / AgentFailureKind（自 SDK re-export，S4 簇 3 收编）
  * - ExecutionTraceNode / TracePatch / ToolCallEntry / WorkerLogEntry（trace 数据）
@@ -18,36 +19,31 @@ import type {
   AgentFailureKind,
   AgentOutcomeUsage as AgentUsage,
   ToolCallEntry,
+  // [§2.3 环解开] WorktreeHandle 的权威定义在 SDK（assembly/types.ts 只是 re-export）；
+  // 此前本文件经 assembly/types.ts 转手取它，构成 orchestration/models ↔
+  // execution/assembly 的文件级类型环。直接从 SDK 取，环自解。
+  WorktreeHandle,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import type { WorktreeHandle } from "../../execution/assembly/types.ts";
+// [D1 Class A] 词汇下沉 shared（execution 侧直接 import，不再反向依赖本层）
+export { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 
-// ── 状态机 ────────────────────────────────────────────────────
+// ── 终局原因 ─────────────────────────────────────────────────
 
 /**
- * 状态机：2 态（D-12 / FR-3，一次性生命周期——run 不可挂起）。
+ * 终态原因。done 时必有（WorkflowRun 不变式）。
  *
- * running → done
- *
- * `done` 是唯一终态，具体原因由 DoneReason 区分。
+ * [D6(a)] 原 run 两态机词表（running | done + 转移表）已整体退役：
+ * run 生命周期判定唯一走六态机 dispatchRunTrigger 链（terminal-actions）与
+ * 进程内终局记录注册表（isRunSettled / settledRecordOf），聚合快照不再携带
+ * 状态机词表。
  */
-export type RunStatus = "running" | "done";
-
-/** 终态原因。done 时必有（WorkflowRun 不变式）。 */
 export type DoneReason =
   | "completed"
   | "failed"
   | "aborted"
   | "budget_limited"
   | "time_limited";
-
-/** 合法的状态转换。空数组 = 无出边（done 终态）。 */
-export const VALID_RUN_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
-  running: ["done"] as const,
-  done: [] as const,
-};
-
-export const ALL_RUN_STATUSES: readonly RunStatus[] = ["running", "done"] as const;
 
 export const ALL_DONE_REASONS: readonly DoneReason[] = [
   "completed",
@@ -56,15 +52,6 @@ export const ALL_DONE_REASONS: readonly DoneReason[] = [
   "budget_limited",
   "time_limited",
 ] as const;
-
-/** done 为终态，无出边。 */
-export function isDone(status: RunStatus): boolean {
-  return status === "done";
-}
-
-export function canRunTransition(from: RunStatus, to: RunStatus): boolean {
-  return (VALID_RUN_TRANSITIONS[from] as readonly RunStatus[]).includes(to);
-}
 
 /**
  * DoneReason 的终止性判定（非正常完成）：通知/文案消费方区分「任务完成」与
@@ -88,15 +75,7 @@ export function isTerminalDoneReason(reason: DoneReason): boolean {
 
 // ── Agent 调用 ────────────────────────────────────────────────
 
-/**
- * slug 最大长度（D6 合流迁入本文件，原权威定义在已删除的 execution/execute-options-mapper.ts）。
- * 历史值 20 偏紧——描述性 slug 如 "audit-structured-output"（23）/ "fix-subagent-wf-tools"（21）
- * 会撞上限，放宽到 35 兼顾「短到能塞进 TUI 标题行」与「容纳合理描述性 kebab-case 名」。
- * 放本文件的原因：约束对象是 AgentCallOpts.description（slug 的源字段，见下方 slug 派生说明），
- * 与字段同文件；subagent-actions-core（slug 校验）、subagent-service（record slug 截断）
- * 与壳侧 tool schema maxLength 共享引用。
- */
-export const SLUG_MAX_LENGTH = 35;
+
 
 /**
  * 单次 agent 调用的任务声明（D6 任务形状合流后的单一形状）。

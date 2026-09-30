@@ -15,7 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PiLike } from "../notify/notify-host.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 import { runPendingReconcileSweepForService, type ReconcileSweepBinding } from "./sweep-binding.ts";
 
 // ============================================================

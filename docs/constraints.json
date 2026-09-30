@@ -3271,6 +3271,47 @@
           "agent": "review-arch-boundary"
         }
       ]
+    },
+    {
+      "id": "C-state-20",
+      "summary": "进程级全局槽键（Symbol.for + globalThis 单例）单一归属：subagent 体系三包（packages/subagent-core / packages/subagent-engine-sdk / extensions/universal/subagent-workflow）内 `Symbol.for(\"<字面量>\")` 只允许出现在两处声明文件——core `src/shared/global-slots.ts`（前缀 @zhushanwen/subagent-core.<槽名>，含壳侧托管槽）与 SDK `src/global-slots.ts`（前缀 @zhushanwen/subagent-engine-sdk.<槽名>，SDK 不得 import core 故保留自有前缀）；其余源码必须写 Symbol.for(<常量>)。键串跨两文件唯一。判据 scripts/check-global-slot-keys.mjs（含注释行豁免与 fixture 单测）。改键不破坏跨进程语义（槽为运行时单例，重启即重建），但 dev 热重载期间新旧代码各自成槽，需整进程重启收敛。",
+      "scope": [
+        "packages/subagent-core/src/**",
+        "packages/subagent-engine-sdk/src/**",
+        "extensions/universal/subagent-workflow/src/**"
+      ],
+      "authority": [
+        "../scripts/check-global-slot-keys.mjs",
+        "../packages/subagent-core/src/shared/global-slots.ts"
+      ],
+      "dimensions": [
+        "state-isolation"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check-global-slot-keys.mjs"
+        }
+      ]
+    },
+    {
+      "id": "C-data-26",
+      "summary": "subagent-core 包内依赖图禁止值依赖环：静态 import/export-from、动态 import()、require() 构成的值边不得成环（含自环）；`import type` / 全 `type` 修饰具名导入 / `export type from` 属编译期擦除边，不参与判定（仅打印提示）。判据机器化于 scripts/check-subagent-core-value-cycles.mjs——execution（记录/执行域）与 orchestration（编排域）互指会在此红；修复方向 = 具体值依赖经端口反转 + 装配期注入，或把跨域共享词汇下沉契约层（§2.3 仲裁见 docs/todo/subagent-workflow-issues.md）。",
+      "scope": [
+        "packages/subagent-core/src/**"
+      ],
+      "authority": [
+        "../scripts/check-subagent-core-value-cycles.mjs"
+      ],
+      "dimensions": [
+        "arch-boundary"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check-subagent-core-value-cycles.mjs"
+        }
+      ]
     }
   ]
 }

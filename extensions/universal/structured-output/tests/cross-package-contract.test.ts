@@ -92,7 +92,7 @@ describe("cross-package contract: schema env（structured-output ↔ pi-subagent
 // ── ② SW tool schema 常量校验（真实 typebox 构造 + 编译，mock 失真对照基准）────────────
 
 /** SW 侧 schema 叶子候选路径（相对本文件）。SW 侧调整叶子布局时在此追加候选。 */
-const SW_TOOL_SCHEMA_CANDIDATES = ["../../subagent-workflow/src/interface/subagent-tool-schema.ts"];
+const SW_TOOL_SCHEMA_CANDIDATES = ["../../subagent-workflow/src/interface/tool/subagent-tool-schema.ts"];
 
 /**
  * 动态 import SW schema 叶子，拿真实 typebox 构造的 SubagentParams。

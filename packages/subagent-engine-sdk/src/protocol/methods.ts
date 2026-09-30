@@ -77,8 +77,6 @@ export interface RunContextParams {
   model?: string;
   /** 上下文模型 ref（与 run 模型分离的 ctx 模型）。 */
   ctxModel?: string;
-  /** fallback 留痕（引擎回填 outcome.engineFallback 的种子）。 */
-  engineFallback?: { from: string; reason: string };
   /** 事件粒度请求（引擎按 capabilities.eventGranularity 实际能力执行）。 */
   streamMode?: "stream" | "coarse";
   /**
@@ -103,6 +101,27 @@ export interface RunContextParams {
    * 旧引擎忽略未知字段，undefined 不上 wire。
    */
   extensionPaths?: string[];
+  /**
+   * [D4 record 身份信封] 本次 run 的 **record 级身份**（引擎把它整封写进任务子进程的
+   * 身份 env；见 SDK `identity-env.ts` 的 `SUBAGENT_IDENTITY_ENV`）。
+   *
+   * 为什么是信封而不是三个平铺键：`slug` 与 task 侧 `description` 是同一语义的两种写法，
+   * 平铺进 ctx 会撞 wire 层绝对条款「同一语义不得 task/ctx 双写」（`wire-field-locks.test.ts`
+   * 的 `keyof AgentCallOpts & keyof RunContextParams = never`）；信封把「record 身份」立成
+   * 一个独立概念（与「怎么执行这次调用」的 task 面正交），也给后续身份字段一个归处。
+   *
+   * 字段语义（缺省即不写该键，读者按各自回落语义工作）：
+   *   - `slug`：record 短标签（宿主侧由 record 的 description 派生的展示标签）；
+   *   - `startedAt`：record 起始时刻（epoch ms；宿主派发时刻即权威值，引擎不得改写）；
+   *   - `mode`：执行形态（`background` / `chat`，record 级事实）。
+   *
+   * additive 可选：旧引擎忽略未知字段，undefined 不上 wire。
+   */
+  identity?: {
+    slug?: string;
+    startedAt?: number;
+    mode?: string;
+  };
 }
 
 // ============================================================
@@ -187,7 +206,7 @@ export interface CancelResult {
 export interface ReadParams {
   handle: EngineHandleData;
   /** 数据根（core 每次 read 都发送——remote-engine 构造注入的数据目录）。两引擎
-   *  server 现行均不消费该字段：定位走 handle.data（journalPath 等）或引擎自身
+   *  server 现行均不消费该字段：定位走 handle.data（recordPath 等）或引擎自身
    *  数据目录。保留为协议帧字段（历史：存量池时代引擎自算池/journal 相对 dbPath
    *  的定位需要它）。 */
   dataDir: string;

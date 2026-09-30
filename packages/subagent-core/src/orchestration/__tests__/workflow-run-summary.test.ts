@@ -5,6 +5,8 @@
 import { describe, expect, it } from "vitest";
 
 import { runSummary } from "../workflow-run-summary.ts";
+import { doneReasonToRunOutcome } from "../run-events.ts";
+import { noteRebuiltSettlement } from "../terminal-actions.ts";
 import { Budget } from "../models/budget.ts";
 import type { RunSpec } from "../models/run-spec.ts";
 import { Trace } from "../models/trace.ts";
@@ -12,7 +14,7 @@ import { WorkflowRun } from "../models/workflow-run.ts";
 
 function makeSpec(scriptName: string, slug?: string): RunSpec {
   return {
-    scriptSource: "execute() {}",
+    scriptSource: "async function execute() {}",
     args: {},
     scriptName,
     ...(slug !== undefined ? { slug } : {}),
@@ -23,6 +25,7 @@ function makeSpec(scriptName: string, slug?: string): RunSpec {
 function makeRun(
   runId: string,
   opts: {
+    /** fixture 建模选择器：done = 重水合终局 run（同步注入注册表条目 + reason）。 */
     status?: "running" | "done";
     scriptName?: string;
     slug?: string;
@@ -34,11 +37,10 @@ function makeRun(
   } = {},
 ): WorkflowRun {
   const status = opts.status ?? "running";
-  return WorkflowRun.reconstruct(
+  const run = WorkflowRun.reconstruct(
     runId,
     makeSpec(opts.scriptName ?? "deploy-site", opts.slug),
     {
-      status,
       ...(status === "done" ? { reason: opts.reason ?? "completed" } : {}),
       budget: new Budget({ maxTokens: 1000 }),
       calls: new Map(),
@@ -52,6 +54,16 @@ function makeRun(
       ...(opts.interruptedAt !== undefined ? { interruptedAt: opts.interruptedAt } : {}),
     },
   );
+  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重水合
+  // done run」时必须携带注册表条目（生产 = 壳重建点 noteRebuiltSettlement 注入），
+  // settledAt = 快照 completedAt（重水合 run 的条目 = run-settled 帧时序）。
+  if (status === "done") {
+    noteRebuiltSettlement(runId, {
+      outcome: doneReasonToRunOutcome(opts.reason ?? "completed"),
+      settledAt: opts.completedAt !== undefined ? Date.parse(opts.completedAt) : 0,
+    });
+  }
+  return run;
 }
 
 describe("runSummary — 字段投影（字段以 core WorkflowRun 为准）", () => {
@@ -91,7 +103,7 @@ describe("runSummary — 字段投影（字段以 core WorkflowRun 为准）", (
     });
   });
 
-  it("interrupted run（meta.interruptedAt 置位）：status 投影 'interrupted'——聚合 status 保持两态，中断态经 meta 在投影面表达", () => {
+  it("interrupted run（meta.interruptedAt 置位）：status 投影 'interrupted'——中断态经 meta 在投影面表达", () => {
     // [U10 回归] 重水合中断 run（loadAll fold / 收编链写 meta.interruptedAt）在
     // CLI/TUI 展示投影三态：不再显示僵尸「运行中」（与 shared WorkflowRunStatus
     // 三态、场景 25 中断显示语义同词）。resume 资格判据在 core fold lifecycle，

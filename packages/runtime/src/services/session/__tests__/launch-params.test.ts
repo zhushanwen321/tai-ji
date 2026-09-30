@@ -307,17 +307,33 @@ describe('buildPresetClientOptions', () => {
     expect(result.thinkingLevel).toBe('high')
   })
 
-  it('S-RT-5：非法 thinking 值（override 或 preset 侧）warn 后忽略', () => {
+  it('S-RT-5：非法 thinking 值（override 或 preset 侧）warn 后忽略（不透传，pi 对非法档位不报错只 warning）', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      const result = buildPresetClientOptions(
-        undefined,
-        undefined,
-        'ultra-max' as never,
-      )
-      expect(result.thinkingLevel).toBeUndefined()
-      expect(result).toEqual({})
+      // override 侧非法值
+      const fromOverride = buildPresetClientOptions(undefined, undefined, 'ultra-max' as never)
+      expect(fromOverride.thinkingLevel).toBeUndefined()
+      expect(fromOverride).toEqual({})
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid thinking level'))
+      // preset 侧非法值（Landing 未传 override 时 preset 字段直达本函数）
+      warn.mockClear()
+      const fromPreset = buildPresetClientOptions(
+        { toolArgs: {}, flags: {}, thinkingLevel: 'ultra-max' } as unknown as PresetResolution,
+        undefined,
+        undefined,
+      )
+      expect(fromPreset.thinkingLevel).toBeUndefined()
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid thinking level'))
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('空串 thinking 值 → 不落字段（不在词表，同走非法值路径）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const result = buildPresetClientOptions(undefined, undefined, '' as never)
+      expect(result.thinkingLevel).toBeUndefined()
     } finally {
       warn.mockRestore()
     }

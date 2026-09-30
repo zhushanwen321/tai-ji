@@ -13,6 +13,8 @@
 //   - D-R3-2：ENV_SELF_RECORD_ID 原声明在 session-baselines.ts，record-access.ts
 //     的单向 import 登记为 R5 守卫台账合法边①，本单元归位后该边删除。
 
+import { SUBAGENT_IDENTITY_ENV } from "@zhushanwen/subagent-engine-sdk";
+
 /** background 优先级（保留 priority 排序机制，单一值）。 */
 export const PRIORITY_BACKGROUND = 1000;
 
@@ -24,4 +26,5 @@ export const SECONDS_PER_MINUTE = 60;
  *  initSession / recoverOrphansIfRootProcess 读取）。env 族机制全貌与兄弟常量
  *  （ENV_ROOT_SESSION_ID / ENV_DEPTH / ENV_ROOT_CWD，消费主体在聚合内）见
  *  session-baselines.ts。 */
-export const ENV_SELF_RECORD_ID = "PI_SUBAGENT_SELF_RECORD_ID";
+/** [§2.7] 键名单源 = SDK `identity-env.ts`（引擎写入方与 core 读者共用同一常量表）。 */
+export const ENV_SELF_RECORD_ID = SUBAGENT_IDENTITY_ENV.selfRecordId;

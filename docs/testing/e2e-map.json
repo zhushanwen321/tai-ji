@@ -623,7 +623,7 @@
       "assets": [
         {
           "kind": "harness",
-          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/tool-subagents.ts"
         },
         {
           "kind": "script",
@@ -645,13 +645,13 @@
       "id": "E2E-BATCH-02",
       "summary": "S2 三审真实负载：真实 LLM 三路并行审查收齐（人工验收形态，R3 归档）",
       "scope": [
-        "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+        "extensions/universal/subagent-workflow/src/interface/tool/tool-subagents.ts"
       ],
       "layer": "L3",
       "assets": [
         {
           "kind": "harness",
-          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/tool-subagents.ts"
         }
       ],
       "trigger": "on-pi-bump",
@@ -704,7 +704,7 @@
       "assets": [
         {
           "kind": "harness",
-          "ref": "extensions/universal/subagent-workflow/src/interface/tool-subagents.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/tool-subagents.ts"
         },
         {
           "kind": "script",
@@ -758,7 +758,7 @@
         "packages/subagent-core/src/execution/registry-reconcile/**",
         "packages/subagent-core/src/execution/__tests__/subagent-actions-core.test.ts",
         "packages/subagent-core/src/orchestration/__tests__/lifecycle-recover-crashed.test.ts",
-        "packages/subagent-core/src/execution/__tests__/journal-tail.test.ts",
+        "packages/subagent-core/src/execution/__tests__/event-tail.test.ts",
         "extensions/universal/structured-output/tests/**"
       ],
       "layer": "L1",
@@ -770,16 +770,16 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "cd packages/subagent-core && npx vitest run src/execution/__tests__/subagent-actions-core.test.ts src/orchestration/__tests__/lifecycle-recover-crashed.test.ts src/execution/__tests__/journal-tail.test.ts && cd ../../extensions/universal/structured-output && npx vitest run tests/loop-gate.test.ts",
+      "run": "cd packages/subagent-core && npx vitest run src/execution/__tests__/subagent-actions-core.test.ts src/orchestration/__tests__/lifecycle-recover-crashed.test.ts src/execution/__tests__/event-tail.test.ts && cd ../../extensions/universal/structured-output && npx vitest run tests/loop-gate.test.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "pi-workflow-run-resource-model §4.1 V10 登记行（2026-09-27 U6）：三类拒绝 = message 对 workflow 成员续聊拒绝（workflow-origin 域边界，subagent-actions-core 拒绝文案）、冷复活绕过检查、agents 数量错配 fail-fast（设计 G7「内部复用通道与外部 message 通道分离」）；回归测试 = 断点恢复（lifecycle-recover-crashed）+ journal 核对（journal-tail）+ structured-output 门禁（loop-gate，行为零变化正交红线）。全部零 token mock 轨；真机形态未单列（域边界拒绝行为有既有测试锚，设计核实状态 ✅）。"
+      "note": "pi-workflow-run-resource-model §4.1 V10 登记行（2026-09-27 U6）：三类拒绝 = message 对 workflow 成员续聊拒绝（workflow-origin 域边界，subagent-actions-core 拒绝文案）、冷复活绕过检查、agents 数量错配 fail-fast（设计 G7「内部复用通道与外部 message 通道分离」）；回归测试 = 断点恢复（lifecycle-recover-crashed）+ journal 核对（event-tail）+ structured-output 门禁（loop-gate，行为零变化正交红线）。全部零 token mock 轨；真机形态未单列（域边界拒绝行为有既有测试锚，设计核实状态 ✅）。"
     },
     {
       "id": "E2E-BATCH-05",
       "summary": "S5 collect 退役回归：存量调用无批副作用（pi 静默放行）+ 存量 batchFinalized entry 旧 session 可读",
       "scope": [
-        "extensions/universal/subagent-workflow/src/interface/subagent-tool-schema.ts",
+        "extensions/universal/subagent-workflow/src/interface/tool/subagent-tool-schema.ts",
         "packages/subagent-core/src/execution/persistence/**",
         "extensions/universal/session-reader/src/**"
       ],
@@ -787,7 +787,7 @@
       "assets": [
         {
           "kind": "harness",
-          "ref": "extensions/universal/subagent-workflow/src/interface/subagent-tool-schema.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/subagent-tool-schema.ts"
         },
         {
           "kind": "harness",
@@ -983,7 +983,7 @@
     },
     {
       "id": "E2E-RECORD-01",
-      "summary": "run/record 写面唯一入口 grep 检查（ADR-0078 口径 R1-R7：写函数直调 / 两族 entry 写面白名单 / v1 快照投影构造器与载荷形态拒绝 / 死字节拒绝 / .events 直写拒绝）",
+      "summary": "run/record 写面唯一入口 grep 检查（ADR-0078 口径 R1-R7：写函数直调 / 两族 entry 写面白名单 / v1 快照投影构造器回潮拒绝（白名单已清空）与载荷形态拒绝 / 死字节拒绝 / .events 直写拒绝）",
       "scope": [
         "scripts/check-record-write-surface.mjs",
         "scripts/__tests__/check-record-write-surface.test.mjs"
@@ -1004,7 +1004,7 @@
       "run": "node scripts/check-record-write-surface.mjs",
       "owner": "packages/subagent-core",
       "authority": "docs/adr/decisions.md",
-      "note": "R1 态（CI invariants 固定环节 + pre-commit 按路径触发双接线——SSOT = ci.yml invariants 步与 install-hooks.sh RECORD_WRITE_SURFACE 段，触发面 packages/subagent-core/src、extensions/**/src、脚本自身；单测 scripts/__tests__/check-record-write-surface.test.mjs 同在 CI vitest 轨）。设计基线 = ADR-0078（W1 介质归位：journal 唯一事实源 + 注册/终态两条 v2 条目 + 物化投影；写面检查断言随写点收敛更新为 R1-R7——新写点白名单 = 事件文件双写者（record-events/run-events）+ 三 run 条目宿主（pump/lifecycle/壳 jsonl-run-store）+ store 家族（record-store/rounds face），拒绝对象 = v1 快照投影构造器与载荷形态、eventLog/displayItems 死字节、.events 白名单外直写）；历史基线 = subagent-record-persistence-consolidation §3.3 D7（写面 9 处收敛 RecordStore 唯一写入口）。grep 门是文本级兜底，模块边界一级拦截 = eslint no-restricted-imports（eslint.config.mjs subagent-core 块）——本表登记脚本资产的 coverage 与最小触发面，路径级触发面由 pre-commit/CI 承担"
+      "note": "R1 态（CI invariants 固定环节 + pre-commit 按路径触发双接线——SSOT = ci.yml invariants 步与 install-hooks.sh RECORD_WRITE_SURFACE 段，触发面 packages/subagent-core/src、extensions/**/src、脚本自身；单测 scripts/__tests__/check-record-write-surface.test.mjs 同在 CI vitest 轨）。设计基线 = ADR-0078（W1 介质归位：journal 唯一事实源 + 注册/终态两条 v2 条目 + 物化投影；写面检查断言随写点收敛更新为 R1-R7——新写点白名单 = 事件文件双写者（record-events/run-events）+ 三 run 条目宿主（pump/lifecycle/壳 jsonl-run-store）+ store 家族（record-store/rounds face），拒绝对象 = v1 快照投影构造器（回潮）与载荷形态、eventLog/displayItems 死字节、.events 白名单外直写）；历史基线 = subagent-record-persistence-consolidation §3.3 D7（写面 9 处收敛 RecordStore 唯一写入口）。grep 门是文本级兜底，模块边界一级拦截 = eslint no-restricted-imports（eslint.config.mjs subagent-core 块）——本表登记脚本资产的 coverage 与最小触发面，路径级触发面由 pre-commit/CI 承担"
     },
     {
       "id": "E2E-THIRDHOST-01",
@@ -1207,7 +1207,7 @@
         "packages/subagent-core/src/execution/engine/**",
         "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
         "packages/pi-subagent-cli/src/**",
-        "packages/subagent-core/src/orchestration/member-reuse-pool.ts"
+        "packages/subagent-core/src/execution/service/member-reuse-pool.ts"
       ],
       "layer": "L3",
       "assets": [
@@ -1302,7 +1302,7 @@
     },
     {
       "id": "E2E-RESUME-01",
-      "summary": "workflow run 断点续跑确定性场景族（scenario-01…25 无门段：主链回放 / 拒绝族 / 三档恢复 / 预算 / 重建保真 / D14 args 校验）+ record-mode 夹具族 + 壳层与 core 侧 resume 单测（进程内真 resumeRun + faux runner，零 token；含内置模板 scriptPath 守卫探针族 review-fix-loop-scriptpath-failfast——空串形态 = 旧 record 流 resume）",
+      "summary": "workflow run 断点续跑确定性场景族（scenario-01…25 无门段：主链回放 / 拒绝族 / 恢复重派（[ADR-0092] 只复用已提交结果）/ 预算 / 重建保真 / D14 args 校验）+ record-mode 夹具族 + 壳层与 core 侧 resume 单测（进程内真 resumeRun + faux runner，零 token；含内置模板 scriptPath 守卫探针族 review-fix-loop-scriptpath-failfast——空串形态 = 旧 record 流 resume）",
       "scope": [
         "extensions/universal/subagent-workflow/src/**",
         "packages/subagent-core/src/orchestration/**",
@@ -1436,11 +1436,11 @@
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/interface/__tests__/tool-workflow-resume.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/tool/__tests__/tool-workflow-resume.test.ts"
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/interface/__tests__/commands-resume.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/command/__tests__/commands-resume.test.ts"
         },
         {
           "kind": "spec",
@@ -1461,10 +1461,10 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "cd extensions/universal/subagent-workflow && npx vitest run src/__tests__/scenario- src/__tests__/record-mode/ src/interface/__tests__/tool-workflow-resume.test.ts src/interface/__tests__/commands-resume.test.ts && cd ../../../packages/subagent-core && npx vitest run src/orchestration/__tests__/resume-orchestration.test.ts src/orchestration/__tests__/resume-replay-validation.test.ts src/orchestration/__tests__/resume-tier-budget.test.ts src/orchestration/__tests__/review-fix-loop-scriptpath-failfast.test.ts",
+      "run": "cd extensions/universal/subagent-workflow && npx vitest run src/__tests__/scenario- src/__tests__/record-mode/ src/interface/__tests__/tool-workflow-resume.test.ts src/interface/command/__tests__/commands-resume.test.ts && cd ../../../packages/subagent-core && npx vitest run src/orchestration/__tests__/resume-orchestration.test.ts src/orchestration/__tests__/resume-replay-validation.test.ts src/orchestration/__tests__/resume-tier-budget.test.ts src/orchestration/__tests__/review-fix-loop-scriptpath-failfast.test.ts",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态（来源设计 workflow-run-resume-revision §4 e2e 影响面「场景 1-25 新族」行——设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-MODELREF-01 同款先例；登记零实现依赖复审 F3 的校验由 u4b 完成收尾）。触发面 = resume/record 链路（壳 interface/jsonl-run-store + core orchestration/resume-run/run-events）改动时按改动范围跑。分层形态：进程内真 resumeRun + 真 WorkerHost + 真 record IO，LLM 层 = faux runner（AgentRunner 协议替身，派发捕获 + 行为队列），崩溃前置态经生产 journal 写入器 seed——写侧载荷完整：dispatchRunCreated 写 scriptSource 全文、dispatchAgentSettled 写 result 全文（全文写入随 terminal-actions 闭环，真跑 runWorkflow 产生的流与夹具构造的流同构可换，夹具构造形态是可控性选择——scenario-kit.ts 头注现行措辞）。场景 24（D14 args 不一致拒绝）驱动壳层入口 actionResume（D14 校验唯一所在层），其余场景直驱 core resumeScenarioRun。scenario-22/25 各含环境门段（节点级默认 skip），门段触发面拆分至 E2E-RESUME-02/03（同 asset 重复引用，E2E-EQUIV-01/02 拆分先例）；record-mode 两 spec（损坏拒绝/重建保真）与夹具四件（helpers/scenario-kit/driver-resume/driver-session-reader）随族登记——driver-* 为 tsx 子进程 driver（D16 ③ 跨包断言载体）。core 三件 = resumeRun 编排原语 / replay 校验增强 / 三档判定与预算算式；interface 两件 = workflow tool resume action（D14 单元层）+ /workflows 命令 resume verb 契约"
+      "note": "R2 态（来源设计 workflow-run-resume-revision §4 e2e 影响面「场景 1-25 新族」行——设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-MODELREF-01 同款先例；登记零实现依赖复审 F3 的校验由 u4b 完成收尾）。触发面 = resume/record 链路（壳 interface/jsonl-run-store + core orchestration/resume-run/run-events）改动时按改动范围跑。分层形态：进程内真 resumeRun + 真 WorkerHost + 真 record IO，LLM 层 = faux runner（AgentRunner 协议替身，派发捕获 + 行为队列），崩溃前置态经生产 journal 写入器 seed——写侧载荷完整：dispatchRunCreated 写 scriptSource 全文、dispatchAgentSettled 写 result 全文（全文写入随 terminal-actions 闭环，真跑 runWorkflow 产生的流与夹具构造的流同构可换，夹具构造形态是可控性选择——scenario-kit.ts 头注现行措辞）。场景 24（D14 args 不一致拒绝）驱动壳层入口 actionResume（D14 校验唯一所在层），其余场景直驱 core resumeScenarioRun。scenario-22/25 各含环境门段（节点级默认 skip），门段触发面拆分至 E2E-RESUME-02/03（同 asset 重复引用，E2E-EQUIV-01/02 拆分先例）；record-mode 两 spec（损坏拒绝/重建保真）与夹具四件（helpers/scenario-kit/driver-resume/driver-session-reader）随族登记——driver-* 为 tsx 子进程 driver（D16 ③ 跨包断言载体）。core 三件 = resumeRun 编排原语 / replay 校验增强 / 恢复计划计数与预算算式。[ADR-0092] 修订：resume 只复用已提交结果（档 1 补收通道删除，恢复链不读取子代理会话文件），原 E2E-RESUME-02（真实会话文件档位门段）随之退役——scenario-22 现锁「已提交调用零 token 回放 + 未完成调用真实重派 + 不合成补收帧」；interface 两件 = workflow tool resume action（D14 单元层）+ /workflows 命令 resume verb 契约"
     },
     {
       "id": "E2E-RESUME-02",
@@ -1493,7 +1493,7 @@
       "scope": [
         "extensions/universal/subagent-workflow/src/__tests__/scenario-25-host-projection.test.ts",
         "packages/shared/src/workflow.ts",
-        "packages/runtime/src/services/session/journal-projection.ts",
+        "packages/runtime/src/services/session/events-projection.ts",
         "packages/renderer/src/components/panel/tray/tray-tone.ts"
       ],
       "layer": "L2",
@@ -1508,7 +1508,7 @@
       "run": "前置：TAIJI_DEV_BACKGROUND=1 pnpm dev（AGENTS.md 前端调试规约）+ node apps/electron/scripts/dev-instance.mjs --print 取本实例 CDP 端口，剧本在窗口内构造 interrupted run。执行：cd extensions/universal/subagent-workflow && TAIJI_E2E_HOST_PROJECTION_CDP=<cdp-port> npx vitest run src/__tests__/scenario-25-host-projection.test.ts（env 缺省时门段 skip 不 fail）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "E2E-RESUME-01 同资产（scenario-25）的门段触发面拆分。设计 §4 场景 25 行：真机 dev app 环境断 GUI workflow 列表；断言面 = 列表文案字面量「已中断（可续跑）」（非「运行中」）+ resume 后恢复 running 投影——色调已由 state-tone-lock L1 锁死，托盘桶归类（interrupted 计 ended 桶）不进真机断言（D2 宿主投影④登记不覆盖理由）。scope = 文案标签单源链（shared WORKFLOW_RUN_OUTCOME_LABELS → journal-projection 投影 → tray-tone 消费）+ spec 自身。数据面断言（中断形态条目契约 / 概览链三态 / session-reader 家族链）归 E2E-RESUME-01 常规跑，无门"
+      "note": "E2E-RESUME-01 同资产（scenario-25）的门段触发面拆分。设计 §4 场景 25 行：真机 dev app 环境断 GUI workflow 列表；断言面 = 列表文案字面量「已中断（可续跑）」（非「运行中」）+ resume 后恢复 running 投影——色调已由 state-tone-lock L1 锁死，托盘桶归类（interrupted 计 ended 桶）不进真机断言（D2 宿主投影④登记不覆盖理由）。scope = 文案标签单源链（shared WORKFLOW_RUN_OUTCOME_LABELS → events-projection 投影 → tray-tone 消费）+ spec 自身。数据面断言（中断形态条目契约 / 概览链三态 / session-reader 家族链）归 E2E-RESUME-01 常规跑，无门"
     },
     {
       "id": "E2E-SESSMGR-01",
@@ -1560,7 +1560,131 @@
       "run": "bash scripts/cw/session-manager-full-e2e.sh",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#2-测试分层",
-      "note": "真 LLM 轨：开发阶段按改动范围空载串行执行，无 CI/门禁触发面（同 EQUIV-01 note 对 equivalence real-pi 分池的裁决口径——本条只登记剧本文件的 coverage，剧本驱动的 test.ts 资产面归 E2E-EQUIV-01）。剧本自含 180s watchdog + trap 孤儿 pi 清理（session-dir 带 u9-smoke 标记）"    },
+      "note": "真 LLM 轨：开发阶段按改动范围空载串行执行，无 CI/门禁触发面（同 EQUIV-01 note 对 equivalence real-pi 分池的裁决口径——本条只登记剧本文件的 coverage，剧本驱动的 test.ts 资产面归 E2E-EQUIV-01）。剧本自含 180s watchdog + trap 孤儿 pi 清理（session-dir 带 u9-smoke 标记）"
+    },
+    {
+      "id": "E2E-PIPE-06",
+      "summary": "subagent-core 包内值依赖环守卫：静态 import/export-from、动态 import()、require() 构成的值边不得成环（Tarjan SCC；`import type` 等编译期擦除边豁免并打印提示）——fixture 单测锁值环必红 / 类型环放行 / 混合说明符按值边 / 动态 import / 干净图五态",
+      "scope": [
+        "scripts/check-subagent-core-value-cycles.mjs",
+        "scripts/__tests__/check-subagent-core-value-cycles.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-subagent-core-value-cycles.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-subagent-core-value-cycles.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-subagent-core-value-cycles.mjs",
+      "owner": "packages/subagent-core",
+      "authority": "docs/constraints.json",
+      "note": "C-data-26 守卫（register §2.3 配套）。双接线 = ci.yml invariants 步 + install-hooks.sh SUBAGENT_CORE_CYCLE_STAGED 段；触发面 packages/subagent-core/src/** 与脚本自身。判据先只查值边（历史类型环不红），类型环仅提示；`--root` 供 fixture 单测注入临时目录。"
+    },
+    {
+      "id": "E2E-PIPE-07",
+      "summary": "进程级全局槽键归属守卫：subagent 体系三包内 Symbol.for 字面量只允许出现在 core/SDK 两处声明文件，前缀（subagent-core. / subagent-engine-sdk.）与跨文件唯一性同时校验——fixture 单测锁合规绿 / 散落字面量红 / 前缀越界红 / 声明文件缺失红 / 注释豁免五态",
+      "scope": [
+        "scripts/check-global-slot-keys.mjs",
+        "scripts/__tests__/check-global-slot-keys.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-global-slot-keys.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-global-slot-keys.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-global-slot-keys.mjs",
+      "owner": "packages/subagent-core",
+      "authority": "docs/constraints.json",
+      "note": "C-state-20 守卫（register §2.6 配套）。双接线 = ci.yml invariants 步 + install-hooks.sh GLOBAL_SLOT_STAGED 段；扫描面限定 subagent 体系三包；注释行豁免（声明文件头部用字面量举例说明机制）。"
+    },
+    {
+      "id": "E2E-PIPE-08",
+      "summary": "thinking 档位词表比对守卫：pi-ai ModelThinkingLevel ↔ 两份职责不同的词表（宿主侧校验用 subagent-core shared/model-ref THINKING_ORDER + 前端派生源 shared pi-preset PI_THINKING_LEVELS）单向比对——pi-rpc 与 llm-shared 的副本已删除；两比对面比对语义均为成员集合一致性（不判序）",
+      "scope": [
+        "scripts/check-thinking-levels.mjs",
+        "scripts/__tests__/check-thinking-levels.test.mjs",
+        "packages/subagent-core/src/shared/model-ref.ts",
+        "packages/shared/src/pi-preset.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-thinking-levels.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-thinking-levels.mjs",
+      "owner": "packages/subagent-core",
+      "authority": "docs/CONTEXT.md",
+      "note": "词表归属 = 入口层（字符串进来的那一层）；pre-commit 按路径触发，--self-test 覆盖提取函数。守卫单测（tmp mirror × spawnSync）与守卫脚本同面登记：两比对面各有一例漂移红 + 文件缺失红，shared 面纳入后由该单测证明非恒绿。"
+    },
+    {
+      "id": "E2E-PIPE-09",
+      "summary": "领域类型路径单源守卫：execution/domain/ 是 record 域类型与词汇唯一权威路径——assembly 复活 re-export 红 / 消费者绕道 assembly 取领域名红 / 干净树绿 / 走 domain 路径绿（fixture 四态单测）",
+      "scope": [
+        "scripts/check-domain-type-path.mjs",
+        "scripts/__tests__/check-domain-type-path.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-domain-type-path.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-domain-type-path.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-domain-type-path.mjs",
+      "owner": "packages/subagent-core",
+      "authority": "docs/todo/subagent-workflow-issues.md",
+      "note": "D2 守卫（register §2.0 D2 / §2.4）：领域名清单动态读自 domain 两模块的导出，assembly 允许内部 import、禁止 export；双接线 = ci.yml invariants 步 + install-hooks.sh DOMAIN_TYPE_PATH_STAGED 段。"
+    },
+    {
+      "id": "E2E-PIPE-10",
+      "summary": "subagent-service 聚合边界检查：execution/service/ 六聚合与支撑文件之间的方向门——聚合间 import 未登记红 / 聚合↔支撑成环红 / 聚合→壳 import 红 / 支撑→壳台账外 import 红 / deps getter 穿透非 public 成员红（fixture 单测锁各态）",
+      "scope": [
+        "scripts/check-subagent-service-boundary.mjs",
+        "scripts/__tests__/check-subagent-service-boundary.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-subagent-service-boundary.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-subagent-service-boundary.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-subagent-service-boundary.mjs",
+      "owner": "packages/subagent-core",
+      "authority": "docs/architecture/subagent-service-decomposition.md",
+      "note": "H3/R5 防线（设计 §3.4 D4/G2，impl-plan §2 R5 行）：合法边以符号级台账登记在检查脚本内（ALLOWED_EDGES / SUPPORT_SHELL_EDGES），非聚合叶子 helper 走 SUPPORT_FILES 登记；pre-commit 按 execution/service/** 与脚本自身触发。纯文本级检查（无 AST 依赖），对存量结构零误报。"
+    },
     {
       "id": "E2E-PLANMODE-01",
       "summary": "plan 模式验收资产族（U0 预建，R2 按改动面）：mock pi 脚本族 / S5 fixture 技能模板 / CDP 等待断言脚本三自测入口零 token 确定性回归（真机场景 S1-S16 执行归阶段 5 验收窗口，PR/merge/CI 门禁不跑）",

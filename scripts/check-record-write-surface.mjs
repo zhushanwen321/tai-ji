@@ -26,7 +26,7 @@
 //      appendSettledEntry 等以 Entry 结尾的写通道名）与 customType 引用
 //      （SUBAGENT_RECORD_CUSTOM_TYPE 常量或 "subagent-record" 字面量）在调用窗口
 //      内同现，只许 store 家族（record-store.ts 本体 + record-store-rounds.ts 的
-//      RecordJournalWriteFace 容器——W1 v2 两条款写面宿主）与常量定义面
+//      RecordEventsWriteFace 容器——W1 v2 两条款写面宿主）与常量定义面
 //      （record-entry.ts）。appendEntry 是 pi 全局通路，全域禁不可行，按
 //      customType 限定到「写」形态（读面失效回调/类型声明不拦）。
 //   R3 workflow-record entry 写面白名单（W1 新增；D15/D7 裁决点 7 扩）：append 条目
@@ -35,11 +35,11 @@
 //      jsonl-run-store.ts（loadAll 终态条目幂等补写）、terminal-actions.ts（D15
 //      终局编排单一入口的注册/终态条目写点）、resume-run.ts（D7/裁决点 7 resume 链
 //      注册条目写点）。其余文件（含 extension 域）一律违规。
-//   R4 v1 快照投影构造器白名单（W1 新增，subagent-record 族）：toSubagentRecordEntry
-//      调用只许 record-entry.ts（定义）与 record-store.ts（v1 实体孤儿纠偏兼容层
-//      reportSubagentRecord——ADR-0078 失效清单登记面，W4 sunset 统一退役）。
-//      其余文件引用即违规：v1 全量快照（含 eventLog/displayItems 死字节）写点
-//      已停写，新写点一律走 v2 条目构造器。
+//   R4 v1 快照投影构造器拒绝（W1 新增，subagent-record 族；登记 §3.3 后全域拒绝）：
+//      v1 全量快照写点与其兼容层（toSubagentRecordEntry / reportSubagentRecord）
+//      已随「项目未上线、无 v1 数据」整体删除——白名单清空，任何位置再出现
+//      toSubagentRecordEntry 调用即回潮（含定义文件本身）：新写点一律走 v2 条目
+//      构造器（toRegisteredEntryData / toSettledEntryData）。
 //   R5 workflow-record v1 快照载荷形态拒绝（W1 新增，全域无豁免）：workflow-record
 //      写点窗口内出现 v1 快照形态标记（`v: 1` 载荷字面量 / toWorkflowRecordEntryData
 //      构造器 / snapshot 直传）即违规——含 R3 白名单宿主自身（四宿主的写点必须
@@ -54,12 +54,12 @@
 //      R2-R6 同构，覆盖 prettier 拆行形态）。
 //
 // 白名单逐域（D7 ③ + ADR-0078 写面清单）：
-//   - store 家族：record-store.ts（R1+R2+R4 豁免，唯一写入口本体）+
-//     record-store-rounds.ts（R2 豁免——RecordJournalWriteFace 容器，v2 两条款
+//   - store 家族：record-store.ts（R1+R2 豁免，唯一写入口本体）+
+//     record-store-rounds.ts（R2 豁免——RecordEventsWriteFace 容器，v2 两条款
 //     写面 + 事件追加注入位的共享写面基础设施）
 //   - 写面载体定义文件：state-marker.ts / alive-store.ts / sessions-index.ts /
 //     manifest-store.ts（R1 定义行豁免：函数/类方法定义处，非调用方）
-//   - 常量定义：record-entry.ts（R2/R4 豁免）、workflow-record-entry.ts（R3 天然
+//   - 常量定义：record-entry.ts（R2 豁免）、workflow-record-entry.ts（R3 天然
 //     不命中——定义行无 append 调用）
 //   - run 族四写点宿主：lifecycle.ts / 壳 jsonl-run-store.ts /
 //     terminal-actions.ts（D15）/ resume-run.ts（D7/裁决点 7）
@@ -85,8 +85,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** R1 七名模式：真实导出名（D7 v2，含 .alive 写/删两名——轮 5 补；含 U2 轮收口写面）。 */
-export const WRITE_FN_RE = /\b(writeFinalizedState|writeCancelledState|writeSettledState|writeManifest|saveIndex|writeAliveMarker|removeAliveMarker)\s*\(/;
+/** R1 八名模式：真实导出名（D7 v2，含 .alive 写/删两名——轮 5 补；含 U2 轮收口写面；
+ *  manifest-store 的 bound 物化写面 materializeBoundRecordManifest——2026-09-29 补，
+ *  此前它不在名单内，record-store-rounds.ts 直接 import 调用可整条绕过本检查）。 */
+export const WRITE_FN_RE = /\b(writeFinalizedState|writeCancelledState|writeSettledState|writeManifest|materializeBoundRecordManifest|saveIndex|writeAliveMarker|removeAliveMarker)\s*\(/;
 
 /** R2 subagent-record custom entry 写形态（单行双序，字面量形态——窗口判定的
  *  快路径导出，行为回归锚定见 scripts/__tests__/check-record-write-surface.test.mjs）。
@@ -144,16 +146,13 @@ function callWindow(lines, i) {
 /** store 本体（R1+R2+R4 豁免）——唯一写入口本体，含全部合法调用与注释提及。 */
 const STORE_FILE = "packages/subagent-core/src/execution/persistence/record-store.ts";
 
-/** store 家族补充：RecordJournalWriteFace 容器（R2 豁免——v2 两条款写面宿主，
+/** store 家族补充：RecordEventsWriteFace 容器（R2 豁免——v2 两条款写面宿主，
  *  W1 写面接线层，见 record-store-rounds.ts 头注释）。 */
 const JOURNAL_FACE_FILE = "packages/subagent-core/src/execution/persistence/record-store-rounds.ts";
 
-/** R4 白名单：v1 快照投影构造器定义 + v1 兼容层纠偏写点（reportSubagentRecord，
- *  ADR-0078 失效清单登记面）。 */
-const V1_PROJECTOR_ALLOWED_FILES = new Set([
-  "packages/subagent-core/src/execution/persistence/record-entry.ts",
-  STORE_FILE,
-]);
+/** R4 白名单：登记 §3.3 后清空——v1 全量快照的构造器定义与兼容层纠偏写点已整体删除
+ *  （无 v1 数据、不迁移不兼容）；本规则转为回潮拦截：任何位置再出现该构造器调用即红。 */
+const V1_PROJECTOR_ALLOWED_FILES = new Set([]);
 
 /** 写面载体定义文件（R1 白名单：定义处非调用方）。 */
 const WRITER_DEFINITION_FILES = new Set([
@@ -176,10 +175,12 @@ const WF_ENTRY_HOST_FILES = new Set([
   "packages/subagent-core/src/orchestration/resume-run.ts",
 ]);
 
-/** R7 白名单：事件文件双写者（record 事件文件 + run journal 的唯一追加入口）。 */
+/** R7 白名单：事件文件追加入口（record 事件文件 + run journal 的唯一写面，经
+ *  shared/jsonl-event-stream.ts 基座落地——§3.1.3 后 append/scan 单源，两域只提供策略）。 */
 const EVENTS_WRITER_FILES = new Set([
   "packages/subagent-core/src/execution/persistence/record-events.ts",
   "packages/subagent-core/src/orchestration/run-events.ts",
+  "packages/subagent-core/src/shared/jsonl-event-stream.ts",
 ]);
 
 /** extension 自有域白名单（R1+R2；相对仓根路径）。当前零命中，新增须注明依据。 */
@@ -294,9 +295,9 @@ function scanWriteLineRules(rel, i, line, lines, flags, violations) {
     if (EVENTS_PATH_LITERAL_RE.test(callWindow(lines, i))) {
       violations.push(
         `${rel}:${i + 1} [R7] 事件文件直写（appendFile×\`.events\`）出现在唯一写者外——` +
-          `run journal 与 record 事件文件的追加原语分别在 run-events.ts / record-events.ts` +
-          `（seq 分配权与头行契约单点）。Recovery: 改经两模块的 journal 追加入口` +
-          `（createRunEventJournal / createRecordEventJournal，ADR-0078）。`,
+          `追加原语单源在 shared/jsonl-event-stream.ts（seq 分配权与头行契约单点），` +
+          `两域策略分别在 run-events.ts / record-events.ts（createRunEventJournal / ` +
+          `createRecordEventJournal，ADR-0078）。Recovery: 改经两个创建入口。`,
       );
       return;
     }
@@ -304,11 +305,10 @@ function scanWriteLineRules(rel, i, line, lines, flags, violations) {
   // R4：v1 快照投影构造器调用（白名单外违规——W1 停写面，兼容层除外）。
   if (V1_SNAPSHOT_PROJECTOR_RE.test(line) && !V1_PROJECTOR_ALLOWED_FILES.has(rel)) {
     violations.push(
-      `${rel}:${i + 1} [R4] v1 全量快照投影构造器 toSubagentRecordEntry 出现在登记面外——` +
-        `v1 快照 entry 已停写（ADR-0078），白名单仅 record-entry.ts（定义）与` +
-        `record-store.ts（v1 实体孤儿纠偏兼容层，W4 sunset 退役）。` +
-        `Recovery: 新写点改走 v2 条目构造器（toRegisteredEntryData / toSettledEntryData /` +
-        `buildAdoptedSettledEntry）；读侧兼容投影经 record-entry.ts 单源扩展。`,
+      `${rel}:${i + 1} [R4] v1 全量快照投影构造器 toSubagentRecordEntry 回潮——` +
+        `v1 快照写点与其兼容层已整体删除（登记 §3.3：项目未上线、无 v1 数据），` +
+        `白名单已清空。Recovery: 新写点走 v2 条目构造器（toRegisteredEntryData /` +
+        `toSettledEntryData / buildAdoptedSettledEntry）。`,
     );
     return;
   }
@@ -336,7 +336,7 @@ function scanWindowRules(rel, i, window, flags, violations) {
     violations.push(
       `${rel}:${i + 1} [R2] customType "subagent-record" 的 entry 直写出现在 store 家族外——` +
         `record 主记录 entry 的写面归 RecordStore（register/archive/收编内置）与` +
-        `RecordJournalWriteFace 容器（v2 两条款写面）。Recovery: 改调 store 公开原语或` +
+        `RecordEventsWriteFace 容器（v2 两条款写面）。Recovery: 改调 store 公开原语或` +
         `reportSubagentRecord（appendEntry 是 pi 全局通路，record 域 customType 限定唯一，D7 ②）。`,
     );
   }
@@ -385,7 +385,7 @@ function main() {
   }
   console.log(
     `[record-write-surface] OK：${files.length} 个源文件（packages/*/src + extensions/**/src，tests 豁免）` +
-      ` 写面守卫零命中（R1 七名函数 + R2 subagent-record + R3 workflow-record 白名单 +` +
+      ` 写面守卫零命中（R1 八名函数 + R2 subagent-record + R3 workflow-record 白名单 +` +
       ` R4 v1 投影器 + R5 v1 快照载荷 + R6 死字节 + R7 .events 直写，ADR-0078）`,
   );
   return 0;

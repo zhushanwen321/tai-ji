@@ -3,11 +3,11 @@
 // [H4 三轴拆分 / 重建与投影轴] RecordStore 的无状态重建与投影纯函数族：
 //   - buildRecord 重建单规则（§3.2.4：identity 基底 + `.state` sidecar 矩阵 → 一律 idle
 //     + stopReason 单源）与 light/full 两分支装配（buildFileCacheEntry）；
-//   - entry 重建族（rebuildEntryRecord + readEntry* 域投影 + collectLastRecordEntries
-//     ——含 [W1 / U2b] v1 快照通道版本门：v2 条目与未知版本结构性跳过，零幻影）；
-//   - 身份解析三级优先级（[W1 / U2b] resolveRecordIdentity：事件文件 fold >
-//     binding > manifest——纯函数参考实现 + 测试锚定面；现行生产路径 = v2 实体
-//     fold 通道 / v1 实体磁盘重建链，分流依据 W1 D4）；
+//   - entry 重建族（collectV2EntryPairs + v2PairToRecord ——登记 §3.3 后只剩当前版本
+//     通道：旧形态与未知版本结构性跳过，零幻影）；
+//   - 身份投影 identityFromFold（子文件无 identity entry 时的身份基底，id 入口见
+//     record-store.scanFile 的事件目录反查——事件流是唯一身份权威，binding 兜底腿
+//     已随读侧换源退场，无存量数据不留兼容读）；
 //   - manifest 读投影（manifestToSubagent / mapManifestStatus）与写投影（terminal /
 //     batch / derived / legacyManifestStatusFields——session-reader 兼容契约的单点）；
 //   - 内存源投影 recordToSubagent、缓存戳类型与戳校验工具（Stamp / FileCacheEntry 族）。
@@ -25,11 +25,13 @@ import * as fs from "node:fs";
 import { getLogger } from "../../core/logger.ts";
 
 import { getCurrentActivity, getDisplayItems, getEventLog, isLegacyClosedSettled, markReconstructedStatus } from "./execution-record.ts";
-import { readStateMarker } from "./state-marker.ts";
-import type { RecordBinding, StateMarker } from "./state-marker.ts";
-import { readRecordBinding, zcodeAnchorBasePath } from "./state-marker.ts";
+import type { StateMarker } from "./state-marker.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE, classifySubagentRecordEntryData } from "./record-entry.ts";
-import type { RecordJournalFoldState } from "./record-events.ts";
+import type {
+  SubagentRecordRegisteredEntryData,
+  SubagentRecordSettledEntryData,
+} from "./record-entry.ts";
+import type { RecordBoundEvent, RecordEventFoldState } from "./record-events.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 // [U7 / §3.2.6 引擎中立锚] transcriptAnchorOf（cold-lookup 导出接口）：record →
 // transcript 锚的派生单点（显式 transcriptRef 优先 / zcode engineHandle.sessionRef
@@ -45,16 +47,11 @@ import {
   readIdentityTail,
   IDENTITY_HEAD_BYTES,
 } from "./session-reconstructor.ts";
-import type {
-  ClosedReason,
-  ExecutionMode,
-  ExecutionRecord,
-  ExecutionStatus,
-  RecordOrigin,
-  SubagentRecord,
-  ZcodeTranscriptRef,
-} from "../assembly/types.ts";
-import { CLOSED_REASONS as CLOSED_REASON_LIST, isZcodeTranscriptRef, isValidStopReason } from "../assembly/types.ts";
+import type { ClosedReason, ExecutionMode, ExecutionStatus, RecordOrigin, ZcodeTranscriptRef } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
+import { CLOSED_REASONS as CLOSED_REASON_LIST } from "../domain/record-types.ts";
+import { isZcodeTranscriptRef, isValidStopReason } from "../domain/record-model.ts";
 
 const logger = getLogger("subagents");
 
@@ -109,9 +106,14 @@ export interface FileCacheEntry {
   light: SubagentRecord;
   full: SubagentRecord | undefined;
   jsonl: Stamp;
-  state: Stamp | null;
   /** [UF-1] record 绑定 sidecar 戳（null = 无绑定文件）。 */
   binding: Stamp | null;
+  /**
+   * 事件文件（`<recordsDir>/<id>.events`）戳（null = 无事件文件/无 id）。
+   * 缓存键的第四维：轮终收条写在 jsonl 末次写入**之后**，只比 jsonl 会漏掉收条变化
+   * ——索引/缓存命中会端出过期的终态。
+   */
+  events: Stamp | null;
   /** 最近一次重建时读到的终态 sidecar 内容（校验命中路径复用，不重读文件）。 */
   stateMarker: StateMarker | undefined;
 }
@@ -121,7 +123,6 @@ export interface FileCacheEntry {
 export interface NegativeFileEntry {
   negative: true;
   jsonl: Stamp;
-  state: Stamp | null;
   /** [UF-1] 绑定戳纳入负缓存：绑定文件后到（run 应答回填点落盘）改变戳，
    *  打破负缓存触发重探测——「先扫描后绑定落盘」时序的恢复能力锚点。 */
   binding: Stamp | null;
@@ -130,19 +131,13 @@ export interface NegativeFileEntry {
 /** fileCache 值类型：正常条目或负缓存条目。 */
 export type FileCacheValue = FileCacheEntry | NegativeFileEntry;
 
-/** scanFile 单文件本轮 stat 戳集合（jsonl + 终态 sidecar（含旧名合并戳）+ record 绑定；
- *  [U4a / D3b (a)] alive 戳退役——light 态不依赖 .alive，省去每文件一次 statSync）。 */
+/** scanFile 单文件本轮 stat 戳集合（jsonl + record 绑定写面戳；[U4a / D3b (a)] alive
+ *  戳退役——light 态不依赖 .alive，省去每文件一次 statSync）。binding 戳在统计/身份
+ *  读侧换源事件流后只剩缓存键职责（绑定写点仍在——写点退场是后续批次），写面每次
+ *  覆盖写都会变 mtime，仍能正确击穿缓存。 */
 export interface FileStamps {
   jsonl: Stamp;
-  state: Stamp | null;
   binding: Stamp | null;
-}
-
-/** sidecar payload 读取结果（索引命中与探测重建两分支共享的读点）。 */
-export interface SidecarPayloads {
-  state: StateMarker | undefined;
-  /** [UF-1] record 绑定载荷（identity miss 时的身份重建源）。 */
-  binding: RecordBinding | undefined;
 }
 
 // ============================================================
@@ -216,35 +211,19 @@ function asSubagentRecordEntry(o: unknown): { id: string; data: Record<string, u
 }
 
 /**
- * [W1 / U2b] v1 快照通道的版本门（设计 D1「旧读者版本门补齐清单」的 A-17 缺口，
- * 判定单源 = classifySubagentRecordEntryData）。
+ * [登记 §3.3] 主 session 全文 → 每 id 的 v2 条目对（registered / settled，后写覆盖）。
  *
- * 跳过（结构性不可见——零幻影，D8 中间态「不崩溃不产幻影」的读侧半边）：
- *   - v2 条目（registered/settled）：v2 实体的状态权威在事件文件 fold（record-
- *     events.ts），v1 快照通道消费它会产半构造投影（registered 重建出 running 假态、
- *     settled 丢失 eventLog/displayItems 详情域）；
- *   - future-v（v > 2）/ unknown-kind（v2 但 kind 越词表）：不认识的版本跳过而非
- *     猜测（record-entry v1 契约同款纪律）。
- *
- * 保留照 v1 读：missing-v。真实写点 W16 起恒写 v（toSubagentRecordEntry），磁盘
- * 合法数据不存在无 v 形态——missing-v 宽容面只覆盖测试 fixture 的简化形态与
- * 极端损坏残留（后者的幻影风险由 rebuildEntryRecord 的字段守卫承接）。
- *
- * 消费点两层（单谓词单源）：collectLastRecordEntries（行为门——v2 行像不存在，
- * 「每 id 末条 v1」语义保持）与 rebuildEntryRecord（契约门——导出函数对非 v1
- * 输入返回 null，与「损坏 entry 返回 null」同款契约）。
+ * v 门内联（classifySubagentRecordEntryData 单源）：非当前版本 / 未知 kind 的行跳过
+ * 而非猜测——v1 全量快照形态已随兼容层删除，旧形态不进任何解析路径（零幻影）。
+ * 快过滤与 collectV2EntryState 同款（customType 子串）。
  */
-function isV1SnapshotEntry(data: Record<string, unknown>): boolean {
-  const verdict = classifySubagentRecordEntryData(data);
-  return verdict.ok || verdict.reason === "missing-v";
+export interface V2EntryPair {
+  registered?: SubagentRecordRegisteredEntryData;
+  settled?: SubagentRecordSettledEntryData;
 }
 
-/** recoverEntryOnlyOrphans 用的 entry 扫描：主 session 全文 → 每 id 末条 record data。
- *  [W1 / U2b] 版本门内联：v2/未知版本行跳过（isV1SnapshotEntry），v1 兼容路径
- *  （纯 v1 会话与 v1+v2 混排行）输出与无门时逐字节一致——D7「旧会话行为完全
- *  不变」的读侧证明义务。 */
-export function collectLastRecordEntries(content: string): Map<string, Record<string, unknown>> {
-  const lastById = new Map<string, Record<string, unknown>>();
+export function collectV2EntryPairs(content: string): Map<string, V2EntryPair> {
+  const byId = new Map<string, V2EntryPair>();
   for (const line of content.split("\n")) {
     if (!line.includes(SUBAGENT_RECORD_CUSTOM_TYPE)) continue; // 快过滤：绝大多数行不是本类型
     let entry: { id: string; data: Record<string, unknown> } | null = null;
@@ -252,110 +231,120 @@ export function collectLastRecordEntries(content: string): Map<string, Record<st
       entry = asSubagentRecordEntry(JSON.parse(line));
     } catch (err) {
       // 截断/异构行跳过（主文件末行可能正被写入）——行级 best-effort，debug 留痕
-      logger.debug("[subagents] entry-only orphan scan: skip unparsable line", {
+      logger.debug("[subagents] v2 entry scan: skip unparsable line", {
         reason: err instanceof Error ? err.message : String(err),
       });
     }
     if (entry === null) continue;
-    if (!isV1SnapshotEntry(entry.data)) {
-      // v 门跳过是设计内合法形态（非坏行）：v2 实体归新读者（事件文件 fold 通道，
-      // U3），此处 debug 留痕供「record 为什么不见了」类排障对账。
-      logger.debug("[subagents] entry-only orphan scan: skip non-v1 subagent-record entry", {
+    const verdict = classifySubagentRecordEntryData(entry.data);
+    if (!verdict.ok) {
+      logger.debug("[subagents] v2 entry scan: skip non-current subagent-record entry", {
         id: entry.id,
+        reason: verdict.reason,
       });
       continue;
     }
-    lastById.set(entry.id, entry.data);
+    const pair = byId.get(entry.id) ?? {};
+    if (verdict.entry.kind === "registered") pair.registered = verdict.entry;
+    else pair.settled = verdict.entry;
+    byId.set(entry.id, pair);
   }
-  return lastById;
-}
-
-/** entry data 字段的安全 string 读取（非 string → undefined）。 */
-function entryStr(d: Record<string, unknown>, k: string): string | undefined {
-  return typeof d[k] === "string" ? (d[k] as string) : undefined;
-}
-
-/** entry data 字段的安全 number 读取（非 number → undefined）。 */
-function entryNum(d: Record<string, unknown>, k: string): number | undefined {
-  return typeof d[k] === "number" ? (d[k] as number) : undefined;
+  return byId;
 }
 
 /**
- * 来源域投影（H2 W1，设计 subagent-workflow-record-unification §3.3 D1）：origin 经
- * 字面量守卫（非法值/缺省 → undefined = "tool" 语义，存量 entry 零迁移）；parentRunId
- * 经安全 string 读取。缺省语义对齐 ExecutionRecord.origin 注释——消费面按
- * `=== "workflow"` 负向判定，缺省（undefined）恒视为手动 tool 派发。
- * [W0 / D1] stepIndex 经安全 number 读取（同族身份域；存量 entry 缺键 → undefined，
- * 读侧不参与 run 视图关联——「无 stepIndex 的 record 不成行」守卫的上游归一）。
+ * 引擎域回落（v2PairToRecord 拆出）：settled 条目字段优先，缺终态条目时回落
+ * journal bound 事件（条目契约不承载 engine/engineHandle/sessionFile——引擎定位
+ * 的权威源在运行态 journal）。sessionFile 的 bound 回落拒绝空串（bound 事件
+ * sessionFile 必填但写侧可能落 ""，与 modelOrUndefined 同款归一纪律）。
  */
-function readEntryOriginFields(
-  d: Record<string, unknown>,
-): Pick<SubagentRecord, "origin" | "parentRunId" | "stepIndex"> {
+function v2EngineDomain(
+  settled: SubagentRecordSettledEntryData | undefined,
+  bound: RecordBoundEvent | undefined,
+): Pick<SubagentRecord, "engine" | "engineHandle" | "sessionFile"> {
+  const engine = settled?.engine ?? bound?.engine;
+  const engineHandle = settled?.engineHandle ?? bound?.engineHandle;
+  const sessionFile = settled?.sessionFile
+    ?? (bound !== undefined && bound.sessionFile !== "" ? bound.sessionFile : undefined);
   return {
-    origin: d.origin === "workflow" || d.origin === "tool" ? d.origin : undefined,
-    parentRunId: entryStr(d, "parentRunId"),
-    stepIndex: entryNum(d, "stepIndex"),
+    sessionFile,
+    ...(engine !== undefined ? { engine } : {}),
+    ...(engineHandle !== undefined ? { engineHandle } : {}),
   };
 }
 
 /**
- * 终态域投影（U2 两态迁移映射）。已收口 entry 的两种形态：
- *   ① 存量旧写侧：status:"closed" + closedReason → 迁移映射 idle + stopReason
- *     （StopReason ⊇ ClosedReason，§3.2.2 展示迁移）；
- *   ② 新写侧投影（recordToSubagent/markSettled 后 U2 起产 status:"idle"）：直投，
- *     stopReason 优先取 entry 的 stopReason 字段（新写侧 additive），缺失回落
- *     closedReason 迁移映射。
- * 其余含缺省 → "running"。closedReason 经枚举守卫保留为读侧兼容位（closed-only，
- * 防 running + closedReason 脏组合）；stopReason 经 isValidStopReason 守卫后有值即
- * 透传——running entry 的合法停因（存量桥接形态轮终 entry 携带 completed/failed；
- * [two-state-convergence U4] 翻边后新轮终 entry 落 idle + stopReason，running+停因
- * 组合不再新产）不再恒丢，与 runtime extractor 侧 value-present 判据对齐（A-lite
- * 阶段 3 裁决），仅 settled entry 缺 stopReason 时回落 closedReason 迁移映射。
+ * 终端统计域（v2PairToRecord 拆出）：settled 条目的终局统计与结果字段。缺省纪律：
+ * 无终态条目（running 态）turns/totalTokens 归 0，endedAt/result/error 缺席为
+ * undefined，model 经空串归一（见 modelOrUndefined 注释）。
  */
-function readEntryTerminalFields(
-  d: Record<string, unknown>,
-): Pick<SubagentRecord, "status" | "closedReason" | "stopReason"> {
-  const closedReason = entryStr(d, "closedReason");
-  const validClosed = isValidClosedReason(closedReason) ? closedReason : undefined;
-  const stopReasonRaw = entryStr(d, "stopReason");
-  const validStop = isValidStopReason(stopReasonRaw) ? stopReasonRaw : undefined;
-  const settledEntry = d.status === "closed" || d.status === "idle";
+function v2SettledOutcome(
+  settled: SubagentRecordSettledEntryData | undefined,
+): Pick<SubagentRecord, "endedAt" | "turns" | "totalTokens" | "model" | "thinkingLevel" | "result" | "error"> {
   return {
-    status: settledEntry ? "idle" : "running",
-    closedReason: settledEntry ? validClosed : undefined,
-    stopReason: validStop ?? (settledEntry ? validClosed : undefined),
+    endedAt: settled?.endedAt,
+    turns: settled?.turns ?? 0,
+    totalTokens: settled?.totalTokens ?? 0,
+    model: modelOrUndefined(settled?.model),
+    thinkingLevel: settled?.thinkingLevel,
+    result: settled?.result,
+    error: settled?.error,
   };
 }
 
-/** 批收集域投影：仅显式字面量收敛，缺省 undefined（JSON 序列化自然缺省）。
- *  [U5/D4] resumable 投影已随字段退役删除。[modeless 波3] collectMode 读侧丢弃
- * （旧 entry 残留键自然忽略——collect = 派发时路由选项，成员身份 = 协调器登记态）。
- *  E1 排除判据随其退役消亡，batchFinalized 保留为批域审计/孤儿 merge 透传面。 */
-function readEntryBatchFields(
-  d: Record<string, unknown>,
-): Pick<SubagentRecord, "batchFinalized"> {
+/**
+ * [登记 §3.3] v2 条目对 → SubagentRecord（entry 面重建）。
+ *
+ * 身份域取注册条目（缺注册条目的终态行不成实体——身份无所出，返回 null）；终局域取
+ * 终态条目；运行态记录（无终态条目）的引擎域回落 journal 的 bound 事件（条目契约
+ * 不承载 engine/sessionFile，回落组装见 v2EngineDomain）。
+ *
+ * 缺省纪律：v2 条目契约不承载的字段（patchFile / worktree / round / closedReason /
+ * batchFinalized / 详情域）一律缺席——与 runtime 投影 projectV2Subagent 同口径，
+ * 这些字段的权威源在 manifest 与子 session 文件。
+ */
+export function v2PairToRecord(
+  id: string,
+  pair: V2EntryPair,
+  bound?: RecordBoundEvent,
+): SubagentRecord | null {
+  const registered = pair.registered;
+  if (registered === undefined) return null;
+  // 损坏身份域（agent / task / startedAt 缺失或类型漂移）→ 拒绝重建（零幻影）：
+  // 分类只认 v/kind（形态合法 ≠ 载荷可用），字段级守卫与旧 v1 重建路径同款——
+  // 消费方（scanLastRecordEntries / 纠偏判定）据此跳过并 warn 留痕。
+  if (
+    typeof registered.agent !== "string" ||
+    typeof registered.task !== "string" ||
+    typeof registered.startedAt !== "number"
+  ) {
+    return null;
+  }
+  const settled = pair.settled;
   return {
-    batchFinalized: d.batchFinalized === true ? true : undefined,
+    id,
+    agent: registered.agent,
+    task: registered.task,
+    slug: registered.slug,
+    status: settled !== undefined ? "idle" : "running",
+    ...(settled?.stopReason !== undefined ? { stopReason: settled.stopReason } : {}),
+    ...(settled?.outcome !== undefined ? { outcome: settled.outcome } : {}),
+    mode: "background",
+    startedAt: registered.startedAt,
+    rootSessionId: registered.rootSessionId,
+    parentRecordId: registered.parentRecordId,
+    depth: registered.depth,
+    origin: registered.origin,
+    parentRunId: registered.parentRunId,
+    stepIndex: registered.stepIndex,
+    ...v2SettledOutcome(settled),
+    eventLog: [],
+    displayItems: [],
+    ...v2EngineDomain(settled, bound),
   };
 }
 
-/** engine 域投影：engineFallback/engineHandle 经运行时 guard（未知 JSON 不裸收）。 */
-function readEntryEngineFields(
-  d: Record<string, unknown>,
-): Pick<SubagentRecord, "engine" | "engineFallback" | "engineHandle"> {
-  return {
-    engine: entryStr(d, "engine"),
-    engineFallback: isEngineFallbackShape(d.engineFallback) ? d.engineFallback : undefined,
-    engineHandle: isEngineHandleShape(d.engineHandle) ? d.engineHandle : undefined,
-  };
-}
 
-/** engineFallback entry 值的运行时 guard（未知 JSON 不裸收）。 */
-function isEngineFallbackShape(v: unknown): v is { from: string; reason: string } {
-  if (typeof v !== "object" || v === null) return false;
-  const r = v as Record<string, unknown>;
-  return typeof r.from === "string" && typeof r.reason === "string";
-}
 
 /**
  * [U7 / §3.2.6] record 的 zcode 锚（cold-lookup transcriptAnchorOf 派生单点的 zcode
@@ -369,10 +358,10 @@ export function zcodeRefOf(record: ExecutionRecord): ZcodeTranscriptRef | undefi
 
 /** engineHandle entry 值的运行时 guard（未知 JSON 不裸收；形状与 runtime 读侧
  *  subagent-engine-history 的 extractRecordEngineHandle 守卫语义对齐：poolKey
- *  必有非空 string + sessionRef 值全 string 才收，journalPath 可选 string）。 */
+ *  必有非空 string + sessionRef 值全 string 才收，eventsPath 可选 string）。 */
 export function isEngineHandleShape(
   v: unknown,
-): v is { sessionRef: Record<string, string>; journalPath?: string; poolKey: string } {
+): v is { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string } {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   const h = v as Record<string, unknown>;
   if (typeof h.poolKey !== "string" || h.poolKey.length === 0) return false;
@@ -382,78 +371,10 @@ export function isEngineHandleShape(
   for (const value of Object.values(h.sessionRef as Record<string, unknown>)) {
     if (typeof value !== "string") return false;
   }
-  if (h.journalPath !== undefined && typeof h.journalPath !== "string") return false;
+  if (h.eventsPath !== undefined && typeof h.eventsPath !== "string") return false;
   return true;
 }
 
-/** entry data 即 SubagentRecord v1 快照——带运行时 guard 重建（taste/no-unsafe-cast）。
- *  损坏 entry（agent/task/startedAt 任一缺失）返回 null，由调用方跳过。
- *  [W1 / U2b] 版本门（isV1SnapshotEntry 同谓词）：v2/未知版本 data 返回 null——
- *  导出函数不消费非 v1 形态，防直接调用方（绕过 collectLastRecordEntries）产
- *  半构造投影；v2 实体重建归事件文件 fold 通道（record-events.ts，U3 消费）。
- *  [U5 E1] 投影白名单扩展（设计 §3.1.3「标记读取通路」）：batchFinalized
- * （[modeless 波3] collectMode 读侧丢弃随字段消亡删除）+ 终态五字段 status/endedAt/closedReason/result/error——原实现硬编码
- *  status:"running" 且不投影终态，E1 重建成员恒被视为 running，「全员终态→补发」
- *  判定永假、补发内容缺失，整条补发路径成死代码。status 守卫只认 "closed" 字面量
- *  （其余含缺省 → "running"，旧调用方 recoverEntryOnlyOrphans 行为不变——其候选
- *  守卫已滤非 running 末条）；closedReason 经 isValidClosedReason 枚举守卫。
- *  [v2 D3] 再补 sessionFile 投影（resumable 投影已随 [U5/D4] 字段退役删除；
- *  [collect 退役] 原桥接期豁免判据 isCollectPending 的 status 子句已随批机制删除）：
- *  sessionFile 原硬编码
- *  undefined，导致
- *  E1 落标路径重建快照丢失反查索引锚（断链 1 前置依赖）。recoverEntryOnlyOrphans
- *  的候选判定（isEntryOrphanCandidate）只认 status==="running"，该字段不参与
- *  判定（P-rebuild 探针守卫面）。
- *  [E1 恢复批语义修复] 再补 patchFile 投影：entry data 携带该字段
- *  （toSubagentRecordEntry 落盘含 patchFile）但原投影丢弃 → E1 补发记录丢失
- *  worktree patch 的 git-apply 回收指针（正常 flush 路径经 toNotifyRecord 特意
- *  携带，notify-host.ts patchFile 透传）。undefined 经 JSON.stringify 自然缺省，
- *  无 patchFile 的存量 entry 序列化字节不变（落标出口经 toSubagentRecordEntry
- *  按名重投影，重建对象字段顺序不影响序列化字节形态）。
- *  字段顺序 = 对象字面量原序（终态/批收集/engine 域以 spread 在原位置展开），
- *  entry 序列化字节形态不变。 */
-export function rebuildEntryRecord(id: string, d: Record<string, unknown>): SubagentRecord | null {
-  if (!isV1SnapshotEntry(d)) return null; // v 门：v2/未知版本不经 v1 快照重建（零幻影）
-  const agent = entryStr(d, "agent");
-  const task = entryStr(d, "task");
-  const startedAt = entryNum(d, "startedAt");
-  if (agent === undefined || task === undefined || startedAt === undefined) return null; // 损坏 entry：跳过
-  return {
-    id,
-    agent,
-    task,
-    slug: entryStr(d, "slug") ?? "",
-    ...readEntryTerminalFields(d),
-    // [u-arch] intent 载荷停读（概念已删除）：旧 entry 残留 intent 键在此被忽略
-    //（与 chatMode 字段消亡同款先例——该标记不再驱动任何行为，旧 record 重启后
-    // 按 idle 重建 = 两态「已结束」侧，语义无损）。
-    mode: "background",
-    startedAt,
-    rootSessionId: entryStr(d, "rootSessionId"),
-    parentRecordId: entryStr(d, "parentRecordId"),
-    depth: entryNum(d, "depth") ?? 0,
-    // [H2 W1] 来源域透传（origin/parentRunId）：漏本行则主 session entry 重建路径
-    // 丢 origin，重启后 workflow record 逃过投影过滤（D1 ①-④ 全失效）。
-    ...readEntryOriginFields(d),
-    endedAt: entryNum(d, "endedAt"),
-    turns: entryNum(d, "turns") ?? 0,
-    totalTokens: entryNum(d, "totalTokens") ?? 0,
-    // [R4/D6-③] 空串归一缺席（存量 entry 的 "" 兜底产物不再复活）。
-    model: modelOrUndefined(entryStr(d, "model")),
-    thinkingLevel: entryStr(d, "thinkingLevel"),
-    eventLog: [],
-    displayItems: [],
-    result: entryStr(d, "result"),
-    error: entryStr(d, "error"),
-    sessionFile: entryStr(d, "sessionFile"),
-    patchFile: entryStr(d, "patchFile"),
-    // [modeless 波1] chatMode 读侧丢弃（旧 entry 残留键自然忽略——万物可续语义
-    // 与 legacy 缺省归 chat 天然一致）。
-    round: entryNum(d, "round"),
-    ...readEntryEngineFields(d),
-    ...readEntryBatchFields(d),
-  };
-}
 
 // ============================================================
 // 戳工具与 sidecar 读取
@@ -473,11 +394,11 @@ export function sameStamp(a: Stamp, b: Stamp): boolean {
   return a.mtimeMs === b.mtimeMs && a.size === b.size;
 }
 
-/** ClosedReason 合法值集合（sidecar 内容校验用：外部损坏/手写垃圾内容 → disconnected）。
+/** ClosedReason 合法值集合（binding 快照 closedReason 校验用：外部损坏/手写垃圾内容 → 视为缺失）。
  * SSOT = types.ts CLOSED_REASONS 可写终态原因清单，此处仅建 Set 索引（避免第二份字面量清单漂移）。 */
 const CLOSED_REASONS: ReadonlySet<string> = new Set(CLOSED_REASON_LIST);
 
-/** sidecar 内容是否为合法的 ClosedReason 字面量（disconnected 只作兜底产出，不接受写入）。 */
+/** 值是否为合法的 ClosedReason 字面量（disconnected 只作历史数据读面兜底，不接受写入）。 */
 export function isValidClosedReason(value: string | undefined): value is ClosedReason {
   return value !== undefined && CLOSED_REASONS.has(value);
 }
@@ -488,12 +409,12 @@ export function sameNullableStamp(a: Stamp | null, b: Stamp | null): boolean {
 }
 
 /** 缓存条目与本轮 stat 戳全同（jsonl + 终态 sidecar + record 绑定，null 语义对齐）→ 零读取复用。 */
-export function isFreshCache(cached: FileCacheValue, stamps: FileStamps): boolean {
-  return (
-    sameStamp(cached.jsonl, stamps.jsonl) &&
-    sameNullableStamp(cached.state, stamps.state) &&
-    sameNullableStamp(cached.binding, stamps.binding)
-  );
+export function isFreshCache(cached: FileCacheValue, stamps: FileStamps, events: Stamp | null): boolean {
+  if (!sameStamp(cached.jsonl, stamps.jsonl) || !sameNullableStamp(cached.binding, stamps.binding)) {
+    return false;
+  }
+  // 负缓存无 id → 无事件文件可对账（只比 jsonl）。
+  return cached.negative === true ? true : sameNullableStamp(cached.events, events);
 }
 
 /**
@@ -509,83 +430,125 @@ export function detectIdentity(file: string, size: number): IdentityHeaderRecon 
 }
 
 /**
- * sidecar payload 读取（读顺序：终态 marker → record 绑定）。
- * 两者都是活态数据，调用方沿用每轮重读语义；终态 marker 静态数据仅在戳非空时读
- * （文件小，成本可忽略）。
+ * 折叠状态 → 终态收条（`.state` sidecar 退场的桥，① 读侧换源的落点）。
+ *
+ * 语义与 `readStateMarker` 读出的新格式同形（status=idle + reason + endedAt）：
+ *   - `record-settled` 在场 → 终局收条（endedAt 用事件自带时间）；
+ *   - 否则 `record-round-idle` **且它是最后一条事件** → 轮终收条（endedAt 用该事件
+ *     时间；记录停在轮终未终局）；
+ *   - 其余 → undefined（无收条 = 在途中断，与 sidecar 缺席同语义）。
+ *
+ * 「轮终收条须是最后一条事件」不是细节而是必需：续轮记录（round-idle 之后又
+ * round-started）若仍按上一条 round-idle 投影，会把上一轮的停因当成当前停因写进
+ * 运行中的记录——与 journal 投影侧「轮始清残留死因」同一条语义（`lastEvent` 判定）。
+ *
+ * 纯函数：不做旧格式上行映射（那是 sidecar 存量兼容面，随 sidecar 一起退场）。
  */
-export function readSidecarPayloads(file: string, stamps: FileStamps): SidecarPayloads {
+export function stateMarkerFromFold(fold: RecordEventFoldState | undefined): StateMarker | undefined {
+  if (fold === undefined) return undefined;
+  if (fold.settled !== undefined) {
+    return { status: "idle", reason: fold.settled.stopReason, endedAt: fold.settled.endedAt };
+  }
+  if (fold.roundIdle !== undefined && fold.lastEvent === fold.roundIdle) {
+    return { status: "idle", reason: fold.roundIdle.stopReason, endedAt: fold.roundIdle.ts };
+  }
+  return undefined;
+}
+
+// ============================================================
+// [② 读侧换源] fold 统计域投影（binding 统计快照的读侧接替面）
+// ============================================================
+
+/** fold 统计域投影（undefined = 该维无事件可投影，调用方保持缺省）。 */
+export type FoldStatistics = {
+  /** 当前轮计数（round-started / reopened 携带）。 */
+  round: number | undefined;
+  /** 轮统计快照（settled 终值或轮终过程快照）。 */
+  turns: number | undefined;
+  totalTokens: number | undefined;
+  /** 收条时间（settled.endedAt / 轮终收条 ts）。 */
+  endedAt: number | undefined;
+};
+
+const EMPTY_FOLD_STATISTICS: FoldStatistics = {
+  round: undefined,
+  turns: undefined,
+  totalTokens: undefined,
+  endedAt: undefined,
+};
+
+const emptyStatsWithRound = (round: number | undefined): FoldStatistics =>
+  round === undefined ? { ...EMPTY_FOLD_STATISTICS } : { ...EMPTY_FOLD_STATISTICS, round };
+
+/**
+ * [② 读侧换源] 收条形统计（light 重建投影用）：`record-settled` 在场取终值
+ * （turns/totalTokens/endedAt 均为终局定稿）；未终局且轮终收条是**最后一条事件**
+ * 时取轮终快照（endedAt 用该事件 ts）；其余（在途 / 轮中续跑）不投影。
+ *
+ * 「轮终收条须是最后一条事件」与 {@link stateMarkerFromFold} 同一条 lastEvent
+ * 语义：续轮记录若按上一条 round-idle 投影，会把上一轮的统计当成当前态写进
+ * 运行中的记录。
+ */
+export function receiptStatisticsFromFold(fold: RecordEventFoldState | undefined): FoldStatistics {
+  if (fold === undefined) return EMPTY_FOLD_STATISTICS;
+  const settled = fold.settled;
+  const idleReceipt =
+    settled !== undefined
+      ? settled
+      : fold.roundIdle !== undefined && fold.lastEvent === fold.roundIdle
+        ? fold.roundIdle
+        : undefined;
+  if (idleReceipt === undefined) {
+    return emptyStatsWithRound(fold.round);
+  }
   return {
-    state: stamps.state !== null ? readStateMarker(file) : undefined,
-    binding: stamps.binding !== null ? readRecordBinding(file) : undefined,
+    round: fold.round,
+    turns: idleReceipt.turns,
+    totalTokens: idleReceipt.totalTokens,
+    endedAt: settled !== undefined ? settled.endedAt : idleReceipt.ts,
+  };
+}
+
+/**
+ * [② 读侧换源] 基线形统计（revive 水合用）：settled ?? 最近轮终快照——**无**
+ * last-event 守卫。对齐 binding settle 快照的原语义（settle 写点落终值，轮中崩溃
+ * 时上一轮快照仍是有效基线）：max 合并语义下取最近快照比取空更接近真值。
+ */
+export function baselineStatisticsFromFold(fold: RecordEventFoldState | undefined): FoldStatistics {
+  if (fold === undefined) return { ...EMPTY_FOLD_STATISTICS };
+  const snapshot = fold.settled ?? fold.roundIdle;
+  if (snapshot === undefined) {
+    return emptyStatsWithRound(fold.round);
+  }
+  return {
+    round: fold.round,
+    turns: snapshot.turns,
+    totalTokens: snapshot.totalTokens,
+    endedAt: fold.settled !== undefined ? fold.settled.endedAt : snapshot.ts,
   };
 }
 
 // ============================================================
-// 身份基底 → light/full 缓存条目 → 重建单规则
+// [W1 / U2b] 身份投影（fold 腿——唯一身份权威）
 // ============================================================
+//
+// [身份换源第二步] 旧「三级优先级（fold > binding > manifest）参考实现」随 binding
+// 兜底腿一并退场：事件流已是身份权威，项目未上线无存量数据、不留兼容读——生产扫描
+// 路径的身份基底 = identity entry → {@link identityFromFold}（record-store.scanFile），
+// binding 读侧零生产读路径（state-marker.ts 只剩读写原语与写面 merge）。
 
-/**
- * [UF-1] record 绑定载荷 → light 身份基底（IdentityHeaderRecon 同形投影）。
- * 绑定缺失/损坏返回 undefined（调用方落负缓存，不把损坏残留误判成身份）。
- * forkDepth/model_change/thinking_level_change 等头部途经信息绑定期不存在：
- * forkDepth 恒 undefined、model/thinkingLevel 取绑定快照值。
- */
-export function identityFromBinding(binding: RecordBinding | undefined, file: string): IdentityHeaderRecon | undefined {
-  if (binding === undefined) return undefined;
-  return {
-    id: binding.recordId,
-    agent: binding.agent,
-    mode: binding.mode,
-    task: binding.task,
-    slug: binding.slug,
-    startedAt: binding.startedAt,
-    rootSessionId: binding.rootSessionId,
-    parentRecordId: binding.parentRecordId,
-    depth: binding.depth,
-    forkDepth: undefined,
-    // [modeless 波1] chatMode 读侧丢弃（旧 binding 残留键自然忽略）。
-    worktree: binding.worktree,
-    // [H2 S3] 来源域透传：漏本两行则引擎子文件身份面（binding sidecar）重建丢
-    // origin，归档/重启后 workflow record 逃过 D1 投影过滤（Gate B S3 FAIL 根因）。
-    // binding 读侧（readRecordBinding）已字面量守卫归一，此处直传。
-    // [W0 / D1] stepIndex 同族直传：identity entry 缺失时（非 pi 引擎 / extension
-    // 重启）binding 是身份源——漏投影则重启后 record 无 stepIndex（run 视图关联键
-    // 静默缺失，无编译红无测试红的降级，同族先例 H2 S3）。
-    origin: binding.origin,
-    parentRunId: binding.parentRunId,
-    stepIndex: binding.stepIndex,
-    model: binding.model,
-    thinkingLevel: binding.thinkingLevel,
-    sessionFile: file,
-  };
+/** unknown → string | undefined（JSON 值安全读取；entryStr 同形，身份解析节局部）。 */
+function optStr(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
 }
 
-// ============================================================
-// [W1 / U2b] 身份解析三级优先级（事件文件 fold > binding > manifest）
-// ============================================================
+/** unknown → number | undefined（JSON 值安全读取；entryNum 同形）。 */
+function optNum(v: unknown): number | undefined {
+  return typeof v === "number" ? v : undefined;
+}
 
-/** 身份解析命中源（优先级可观察面——排障对账与测试锚定）。 */
-export type RecordIdentitySource = "journal-fold" | "binding" | "manifest";
-
-/**
- * 恢复路径解析出的 record 身份域（设计 D2 binding 行裁决：事件文件 fold >
- * binding 兜底（旧数据兼容）> manifest；字段集 = D3 record-created 载荷同集）。
- *
- * 消费现状（如实登记）：本三级裁决是纯函数参考实现 + 测试锚定面
- * （record-store-rebuild-v-gate.test.ts），现行生产路径不经本函数——v2 实体走
- * fold 通道（record-store 收编/投影直接消费 fold.identity），v1 实体走磁盘重建链
- * （identity entry > binding > manifest 的内联组装），分流依据设计 D4（收编定界
- * 按注册条目形态分流）。三级源由调用方各自读好传入（本函数纯函数无 IO），高级源
- * 在场即整体胜出（冲突字段取高级源值——单写者下冲突仅见于数据损坏，不引入
- * 字段级合并的第二种语义）；高级源缺失/身份域损坏逐级降级；三源皆缺 →
- * undefined（调用方按无身份处理）。后续调身份优先级（如 W2 接线）时先立接线
- * 设计裁决，再让生产路径消费本单点。
- *
- * model/thinkingLevel/sessionFile 不在身份域（fold 的 record-created 不携带，
- * 绑定/引擎域属 bound 事件与 sidecar 面）——组装 IdentityHeaderRecon 基底由
- * 调用方补齐，本类型只承载三级裁决共有的身份字段。
- */
-export interface ResolvedRecordIdentity {
+/** fold 身份域守卫投影（record-created 必需标量校验 + optional 域安全读取归一）。 */
+interface FoldIdentityFields {
   id: string;
   agent: string;
   task: string;
@@ -598,25 +561,9 @@ export interface ResolvedRecordIdentity {
   origin: RecordOrigin | undefined;
   parentRunId: string | undefined;
   stepIndex: number | undefined;
-  /** 命中源（三级优先级判定的结果面）。 */
-  source: RecordIdentitySource;
 }
 
-/** journal 行级解析只校验事件信封（type/seq/ts），身份域载荷解码归本消费方——
- *  必需标量形状不满足视为 fold 身份不可用，降级下一级（与 identityFromBinding
- *  「损坏残留不误判成身份」同向）。 */
-
-/** unknown → string | undefined（JSON 值安全读取；entryStr 同形，身份解析节局部）。 */
-function optStr(v: unknown): string | undefined {
-  return typeof v === "string" ? v : undefined;
-}
-
-/** unknown → number | undefined（JSON 值安全读取；entryNum 同形）。 */
-function optNum(v: unknown): number | undefined {
-  return typeof v === "number" ? v : undefined;
-}
-
-function identityFromFoldSource(fold: RecordJournalFoldState | undefined): ResolvedRecordIdentity | undefined {
+function identityFromFoldSource(fold: RecordEventFoldState | undefined): FoldIdentityFields | undefined {
   const identity = fold?.identity;
   if (identity === undefined) return undefined; // 残文件/全坏行形态（record-events 注释）
   if (
@@ -628,7 +575,7 @@ function identityFromFoldSource(fold: RecordJournalFoldState | undefined): Resol
     typeof identity.depth !== "number" ||
     identity.mode !== "background"
   ) {
-    logger.debug("[subagents] identity resolve: corrupt record-created identity, falling back", {
+    logger.debug("[subagents] identity resolve: corrupt record-created identity, treating as absent", {
       id: identity.id,
     });
     return undefined;
@@ -640,91 +587,81 @@ function identityFromFoldSource(fold: RecordJournalFoldState | undefined): Resol
     slug: identity.slug,
     mode: identity.mode,
     startedAt: identity.startedAt,
-    // optional 身份域经安全读取（entryStr/entryNum 同款——JSON 值不裸收）
+    // optional 身份域经安全读取（JSON 值不裸收）
     rootSessionId: optStr(identity.rootSessionId),
     parentRecordId: optStr(identity.parentRecordId),
     depth: identity.depth,
     origin: identity.origin === "workflow" || identity.origin === "tool" ? identity.origin : undefined,
     parentRunId: optStr(identity.parentRunId),
     stepIndex: optNum(identity.stepIndex),
-    source: "journal-fold",
-  };
-}
-
-/** binding 源投影：字段直传（readRecordBinding 读侧已字面量守卫归一，
- *  identityFromBinding 直传同款信任面）。 */
-function identityFromBindingSource(binding: RecordBinding | undefined): ResolvedRecordIdentity | undefined {
-  if (binding === undefined) return undefined;
-  return {
-    id: binding.recordId,
-    agent: binding.agent,
-    task: binding.task,
-    slug: binding.slug,
-    mode: binding.mode,
-    startedAt: binding.startedAt,
-    rootSessionId: binding.rootSessionId,
-    parentRecordId: binding.parentRecordId,
-    depth: binding.depth,
-    origin: binding.origin,
-    parentRunId: binding.parentRunId,
-    stepIndex: binding.stepIndex,
-    source: "binding",
-  };
-}
-
-/** manifest 源投影（兜底层）：投影语义对齐 manifestToSubagent——task/slug 缺失
- *  兜底空串、mode 恒 background、depth 恒 0、rootSessionId 空串归 undefined、
- *  parentRecordId 不采信（manifestToSubagent 同款）、无来源域字段。 */
-function identityFromManifestSource(m: ManifestRecord | undefined): ResolvedRecordIdentity | undefined {
-  if (m === undefined) return undefined;
-  return {
-    id: m.id,
-    agent: m.agentName,
-    task: m.task ?? "",
-    slug: m.slug ?? "",
-    mode: "background",
-    startedAt: m.createdAt,
-    rootSessionId: m.rootSessionId || undefined,
-    parentRecordId: undefined,
-    depth: 0,
-    origin: undefined,
-    parentRunId: undefined,
-    stepIndex: undefined,
-    source: "manifest",
   };
 }
 
 /**
- * 恢复路径身份解析（三级优先级参考实现，设计 D2：事件文件 fold > binding > manifest）。
- * 现状：仅测试锚定（生产路径分流见 {@link ResolvedRecordIdentity} 注释的如实登记）。
- * 纯函数：三级源由调用方读好传入；高级源在场即整体胜出（冲突时高级源字段胜出），
- * 缺失/损坏逐级降级，三源皆缺 → undefined。
+ * [身份换源] fold 身份域 → light 身份基底（IdentityHeaderRecon 同形投影）。
+ *
+ * 子文件没有 identity entry 时，身份域改由事件流折叠取得（事件流是唯一事实源）：
+ * 身份域 + model/thinkingLevel/worktree 全部取 fold 的 record-created 载荷（这些
+ * 字段读侧的唯一来源；worktree 缺席 = 未启用，不回落 false），sessionFile 取调用方
+ * 传入的子文件路径（引擎绑定域属 record-bound 帧，列表扫描的 base 必须携带本文件
+ * 路径），forkDepth 头部途经信息事件载荷不承载恒 undefined。
+ *
+ * 形状守卫复用 identityFromFoldSource（单源，不复制第二份判据）：身份域损坏 →
+ * undefined，调用方按无身份处理（落负缓存）。
  */
-export function resolveRecordIdentity(
-  fold: RecordJournalFoldState | undefined,
-  binding: RecordBinding | undefined,
-  manifest: ManifestRecord | undefined,
-): ResolvedRecordIdentity | undefined {
-  return identityFromFoldSource(fold) ?? identityFromBindingSource(binding) ?? identityFromManifestSource(manifest);
+export function identityFromFold(
+  fold: RecordEventFoldState | undefined,
+  file: string,
+): IdentityHeaderRecon | undefined {
+  const created = fold?.identity;
+  if (created === undefined) return undefined; // 残文件/全坏行形态（无身份可投影）
+  const resolved = identityFromFoldSource(fold);
+  if (resolved === undefined) return undefined; // 身份域损坏（守卫单源，降级下一级）
+  return {
+    id: resolved.id,
+    agent: resolved.agent,
+    mode: resolved.mode,
+    task: resolved.task,
+    slug: resolved.slug,
+    startedAt: resolved.startedAt,
+    rootSessionId: resolved.rootSessionId,
+    parentRecordId: resolved.parentRecordId,
+    depth: resolved.depth,
+    forkDepth: undefined,
+    ...(created.worktree !== undefined ? { worktree: created.worktree } : {}),
+    origin: resolved.origin,
+    parentRunId: resolved.parentRunId,
+    stepIndex: resolved.stepIndex,
+    model: modelOrUndefined(created.model),
+    thinkingLevel: created.thinkingLevel,
+    sessionFile: file,
+  };
 }
 
-/** identity 基底 + sidecar 状态矩阵 → 缓存条目（索引命中与探测重建两分支的公共装配点）。 */
+// ============================================================
+// 身份基底 → light/full 缓存条目 → 重建单规则
+// ============================================================
+
+/** identity 基底 + 收条矩阵 → 缓存条目（索引命中与探测重建两分支的公共装配点）。
+ *  统计域（round/turns/totalTokens/endedAt）不入本装配点——两分支各自的统计源不同
+ *  （探测 = fold 统计投影，索引 = 索引自承收条），调用方装配后自行补投影到 light。 */
 export function buildFileCacheEntry(
   base: IdentityHeaderRecon,
   file: string,
   stamps: FileStamps,
-  payloads: SidecarPayloads,
+  state: StateMarker | undefined,
+  events: Stamp | null,
 ): FileCacheEntry {
   return {
     light: buildRecord(base, {
-      state: payloads.state,
+      state,
       jsonlMtimeMs: stamps.jsonl.mtimeMs,
     }),
     full: undefined,
     jsonl: stamps.jsonl,
-    state: stamps.state,
     binding: stamps.binding,
-    stateMarker: payloads.state,
+    events,
+    stateMarker: state,
   };
 }
 
@@ -800,42 +737,21 @@ export function buildRecord(
     };
   }
 
-  // ── [U3 / §3.2.4] 重建单规则：重建一律得 idle，stopReason 取自 `.state`
-  //（无则 interrupted-by-restart）。崩溃恢复不再区分「终态不可逆 / 纳管可保留 /
-  //  直断 gc」——不存在不可逆终态；崩溃后 running 只在轮次在飞时有意义，必然空闲。
+  // ── [U3 / §3.2.4] 重建单规则：重建一律得 idle，stopReason 取自事件流收条
+  //（fold 折出的终局/轮终帧；无收条则 interrupted-by-restart）。崩溃恢复不再区分
+  //「终态不可逆 / 纳管可保留 / 直断 gc」——不存在不可逆终态；崩溃后 running 只在
+  // 轮次在飞时有意义，必然空闲。
   markReconstructedStatus(rec, "idle");
-  if (m.state !== undefined && m.state.status === "idle") {
-    // 新格式收条（markSettled 写面）：stopReason = 收口 reason（值域 StopReason；
-    // 非法/缺失 → interrupted-by-restart——「死因不可考 = 被打断」同族兜底）。
-    // closedReason 不写（桥接不变量新侧：settle 产出的 idle 无旧终态遗留位，
-    // live ≡ reload 与内存 markSettled 形态构造性一致）；endedAt 不投影（内存
-    // settle 非终态不写 endedAt——收条时间留给 binding 快照面，U7 统计口径消费）。
+  if (m.state !== undefined) {
+    // 收条（markSettled 写面经 stateMarkerFromFold 折出，恒 status=idle）：stopReason =
+    // 收口 reason（值域 StopReason；非法/缺失 → interrupted-by-restart——「死因不可考
+    // = 被打断」同族兜底）。closedReason 不写（settle 产出的 idle 无旧终态遗留位，
+    // live ≡ reload 与内存 markSettled 形态构造性一致）；endedAt 不投影（内存 settle
+    // 非终态不写 endedAt——收条时间留给 binding 快照面，U7 统计口径消费）。
+    // 旧 sidecar 收条的上行映射（cancelled/finalized → interrupted/disconnected）已随
+    // `.state` 读侧退场删除：m.state 唯一来源 = stateMarkerFromFold，不产旧格式 status。
     const reason = m.state.reason?.trim();
     rec.stopReason = isValidStopReason(reason) ? reason : "interrupted-by-restart";
-  } else if (m.state !== undefined && m.state.status === "cancelled") {
-    // 旧值上行映射（§3.2.4：cancelled → interrupted）：closedReason 保留
-    // "cancelled"（U2 桥接判据 idle ∧ closedReason 有值 → legacy closed/cancelled
-    // 投影，旧 session-reader 兼容面）；stopReason 切新词表。
-    rec.closedReason = "cancelled";
-    rec.stopReason = "interrupted";
-    rec.error = "cancelled by user";
-    // endedAt 用 sidecar 携带的精确值（原 tombstone.endedAt）；缺失（旧写侧恒携带，
-    // 兼容手写残留）回落全量末 entry ts / light mtime。
-    rec.endedAt = m.state.endedAt ?? m.fullEndedAt ?? m.jsonlMtimeMs;
-  } else if (m.state !== undefined) {
-    // 旧值上行映射（finalized → idle + stopReason=reason）：closedReason 优先用
-    // sidecar 内容携带的真实原因（[v8.5 A2] doFinalizeRecord Step3 写入）。空内容
-    // （旧格式空文件 / 未携 reason 的外部写入）→ disconnected 兜底：死因不可考，
-    // 但「正常结束过」信号仍在；非枚举值（外部损坏/手写垃圾内容）同 treated as
-    // unknown → disconnected。**旧版读新值的回滚降级链**（§3.2.4 双向兼容②）：
-    // 未知 status 在 readNewStateMarker 落 {status:"finalized"} 无 reason → 本分支
-    // disconnected ∈ 旧版可重连集，回滚方向良性。
-    const reason = m.state.reason?.trim();
-    rec.closedReason = isValidClosedReason(reason) ? (reason as ClosedReason) : "disconnected";
-    rec.stopReason = rec.closedReason;
-    // 全量路径用最后 entry ts（精确）；light 路径用 jsonl mtime 近似（finalize 后
-    // 文件不再变化，误差 <1s），避免重建后耗时随墙钟无限增长。
-    rec.endedAt = m.fullEndedAt ?? m.jsonlMtimeMs;
   } else {
     // 无 sidecar：在途中断（崩溃）或尚未收口（§3.2.4「文件不存在」行）——
     // interrupted-by-restart 展示值（G2：为什么停；U6 起参与 isOccupied 判定）。
@@ -993,8 +909,9 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     agent: r.agent,
     status: r.status,
     closedReason: r.closedReason,
-    // [U2 additive] 展示维度随投影持久化（register/archive/reportRecordTransition
-    // 全部写点均经本投影 → toSubagentRecordEntry）；undefined 自然缺省，旧 entry 零迁移。
+    // [U2 additive] 展示维度随本投影进读面与 bound/settle manifest 物化；持久化面
+    // 已换源 = v2 条目构造器直取字段 + 事件流 fold 重建（v1 全量快照 entry 已停写，
+    // 不再经本投影）；undefined 自然缺省，旧 entry 零迁移。
     stopReason: r.stopReason,
     mode: r.mode,
     slug: r.slug,
@@ -1022,16 +939,16 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     // [review round2] worktree 隔离标志：内存源有 handle 或跨重启重建带 hadWorktree 均为 true。
     worktree: r.worktreeHandle !== undefined || r.hadWorktree === true,
     engine: r.engine,
-    engineFallback: r.engineFallback,
     // U2：engineHandle 经 entry 持久化（register/archive 双写点均经本投影），无则 undefined 自然省略
     engineHandle: r.engineHandle,
     // [U5 修复 U2 披露的投影缺口] batchFinalized 随本投影持久化（register entry /
     // archive entry 双写点均经本投影）。[modeless 波3] collectMode 投影随字段消亡删除。
     // undefined 经 JSON.stringify 自然缺省，旧 entry 零迁移。
     batchFinalized: r.batchFinalized,
-    // [H2 W1] 来源身份两字段随本投影持久化（register/archive/reportRecordTransition
-    // 全部写点均经本投影 → toSubagentRecordEntry）。漏投影则 entry 无 origin，重启后
-    // 重建链拿不到来源、D1 投影过滤全失效（同型先例：H1 U5 缺字段事故）。
+    // [H2 W1] 来源身份两字段的持久化通路 = v2 注册条目（toRegisteredEntryData 直取）
+    // + binding 身份域单源（identityBindingPayload）+ 事件流 fold 重建；漏载荷则
+    // entry 无 origin，重启后重建链拿不到来源、D1 投影过滤全失效（同型先例：H1 U5
+    // 缺字段事故）。
     // [W0 / D1] stepIndex 同族随投影持久化——漏投影则 entry 恒无 stepIndex（run 视图
     // 关联键静默缺失）。undefined 经 JSON.stringify 自然缺省，存量 record 序列化字节
     // 不变（零迁移）。
@@ -1041,49 +958,32 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
   };
 }
 
-/** [v2 D3] 孤儿覆写 merge 字段集：末条 entry 的批域标记 + 轮终正文/模型，仅补 rec 侧
- *  undefined/空值（model 空值形态含 "" 与 undefined——旧数据空串经归一后与缺席同域），
- *  不覆盖已有值。merge 后写 entry 经 reportSubagentRecord →
- *  toSubagentRecordEntry 序列化，undefined 字段自然缺省（不引入显式 null）。
- *  [R4/D6-③] merge 产物经 modelOrUndefined 归一：两侧均空（含旧数据 ""）→ undefined
- *  （缺席），不再以 `?? ""` 收尾产空串。 */
-export function mergeOrphanLastEntry(rec: SubagentRecord, last: SubagentRecord): SubagentRecord {
-  const pickStr = (cur: string | undefined, src: string | undefined): string | undefined =>
-    cur !== undefined && cur !== "" ? cur : src;
-  return {
-    ...rec,
-    batchFinalized: rec.batchFinalized ?? last.batchFinalized,
-    result: pickStr(rec.result, last.result),
-    model: modelOrUndefined(pickStr(rec.model, last.model)),
-  };
-}
-
 // ============================================================
-// revive 统计基线水合（读侧半边——binding 快照 → 内存 record 基线）
+// revive 统计基线水合（读侧半边——事件流折叠 → 内存 record 基线）
 // ============================================================
 
 /**
- * [U7 / §3.2.7] revive 统计基线水合：binding 快照（settle 写点权威终值）→ 内存
- * record 基线。max 合并防御调用方传入已带统计的形态（水合只增不减——防归零
- * 覆盖的语义本体）；lastAbandonedRound / transcriptRef 仅缺省回填（非空不覆盖，
- * 调用方冷查水合值优先）。
+ * [U7 / §3.2.7] revive 统计基线水合：事件流折叠（唯一事实源，[② 读侧换源] 后取代
+ * binding 快照读侧）→ 内存 record 基线。max 合并防御调用方传入已带统计的形态
+ * （水合只增不减——防归零覆盖的语义本体）；epoch 同款 max（跨重启单调防撞）；
+ * lastAbandonedRound / transcriptRef 仅缺省回填（非空不覆盖，调用方冷查水合值优先）。
+ *
+ * fold 来源 = TerminalCtx.foldOf 注入位（调用时读事件面——事件面未接线的纯内存
+ * 形态返回 undefined，本函数整体 no-op）。
  */
-export function hydrateReviveBaseline(record: ExecutionRecord, zcodeAnchor: ZcodeTranscriptRef | undefined): void {
-  const binding =
-    record.sessionFile !== undefined
-      ? readRecordBinding(record.sessionFile)
-      : zcodeAnchor !== undefined
-        ? readRecordBinding(zcodeAnchorBasePath(zcodeAnchor))
-        : undefined;
-  if (binding === undefined) return;
-  if (binding.turns !== undefined) record.turnCount = Math.max(record.turnCount, binding.turns);
-  if (binding.totalTokens !== undefined) record.totalTokens = Math.max(record.totalTokens, binding.totalTokens);
-  if (binding.round !== undefined) record.round = Math.max(record.round ?? 0, binding.round);
-  if (binding.epoch !== undefined) record.epoch = Math.max(record.epoch ?? 0, binding.epoch);
-  if (record.lastAbandonedRound == null && binding.lastAbandonedRound != null) {
-    record.lastAbandonedRound = binding.lastAbandonedRound;
+export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEventFoldState | undefined): void {
+  if (fold === undefined) return;
+  const stats = baselineStatisticsFromFold(fold);
+  if (stats.turns !== undefined) record.turnCount = Math.max(record.turnCount, stats.turns);
+  if (stats.totalTokens !== undefined) record.totalTokens = Math.max(record.totalTokens, stats.totalTokens);
+  if (stats.round !== undefined) record.round = Math.max(record.round ?? 0, stats.round);
+  if (fold.epoch !== undefined) record.epoch = Math.max(record.epoch ?? 0, fold.epoch);
+  const abandoned = fold.roundIdle?.lastAbandonedRound;
+  if (record.lastAbandonedRound == null && abandoned != null) {
+    record.lastAbandonedRound = abandoned;
   }
-  if (record.transcriptRef === undefined && binding.transcriptRef !== undefined) {
-    record.transcriptRef = binding.transcriptRef;
+  const reopenedRef = fold.reopened?.transcriptRef;
+  if (record.transcriptRef === undefined && reopenedRef !== undefined) {
+    record.transcriptRef = reopenedRef;
   }
 }

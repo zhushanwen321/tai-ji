@@ -16,7 +16,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createRunEventJournal } from "@zhushanwen/subagent-core";
+import { createRunEventJournal, isRunSettled } from "@zhushanwen/subagent-core";
 import { JsonlRunStore } from "../../jsonl-run-store.ts";
 import {
   appendEvents,
@@ -106,7 +106,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
     expect(run!.spec.scriptSource).toBe(SCRIPT_SOURCE);
     expect(run!.spec.scriptPath).toBe(SCRIPT_PATH);
     expect(run!.spec.scriptName).toBe("fidelity-script");
-    expect(run!.state.status).toBe("running"); // 无 run-settled 帧 = 交恢复链收编
+    expect(isRunSettled(run!)).toBe(false); // 无 run-settled 帧 = 交恢复链收编
 
     // call 级：已完成调用全文保真（resume 缓存回放的数据面）
     const call0 = run!.state.calls.get(0)!;
@@ -142,7 +142,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
     const [run] = await store.loadAll();
 
     // [D2] 中断非终局：重建产物维持 running（终局判据归 fold；无 done/reason 收敛）
-    expect(run!.state.status).toBe("running");
+    expect(isRunSettled(run!)).toBe(false);
     expect(run!.state.reason).toBeUndefined();
     // 中断标记投影（U10）：流含 run-interrupted、无 run-settled → meta.interruptedAt
     // 置位（= 帧 ts ISO）——runSummary/displayStatusOf 投影 'interrupted'，CLI/TUI
@@ -168,7 +168,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
     const entries = [registeredEntry(RUN_ID, env.recordPath(RUN_ID))];
     const store = new JsonlRunStore({ sessionDir: env.sessionDir, ctx: mkCtxWith(entries) as never });
     const [run] = await store.loadAll();
-    expect(run!.state.status).toBe("done");
+    expect(isRunSettled(run!)).toBe(true);
     expect(run!.state.reason).toBe("completed");
     expect(run!.meta.startedAt).toBe(new Date(T0).toISOString());
     expect(run!.meta.completedAt).toBe(new Date(T0 + 2000).toISOString());

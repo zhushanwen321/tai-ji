@@ -52,6 +52,16 @@
 
 目标：用户 `pi install <extension>` 后直接可用，无需额外下载或配置外部资源。
 
+## 决策记录与设计文档归属 [MANDATORY]
+
+扩展包内**不做**决策记录或长期设计文档的第二份源头：
+
+- 体系级决策（跨包生效、影响进程拓扑或协议语义）→ 项目级 [docs/adr/decisions.md](../adr/decisions.md)，编号沿用该文件规则。
+- 包内实现细节的设计 → [docs/architecture/](../architecture/)（现行文档族）或包内 README/源码注释。
+- 包内 `docs/adr/`、包内 `docs/design/` 一类的历史档案族不再新建、不再回填；已失效的按根 AGENTS.md 的「历史档案不回填不新建」纪律删除（git 可追溯）。
+
+依据：2026-09-29 §2.8 裁决（包内 3 个 ADR + 13 个设计文档与项目级 SSOT 并存，决策与设计位置无单一规则）；本规则即该条的防复发约束。
+
 ## Session 隔离（进程内层面）
 
 - 状态必须存储在 `session_start` 重建的闭包变量或 `ctx.sessionManager` entries 中

@@ -13,7 +13,8 @@ import {
   assertCanonicalModelRef,
   assertThinkingLevel,
   modelRefFromVerified,
-  stripThinkingSuffix,
+  parseModelSelector,
+  isModelRef,
   THINKING_ORDER,
 } from "../model-ref.ts";
 
@@ -269,18 +270,70 @@ describe("modelRefFromVerified — ctxModel inheritance path (D2)", () => {
 });
 
 // ============================================================
-// stripThinkingSuffix / assertThinkingLevel
+// parseModelSelector / assertThinkingLevel
 // ============================================================
 
-describe("stripThinkingSuffix", () => {
-  it("剥白名单后缀", () => {
-    expect(stripThinkingSuffix("p/m:high")).toBe("p/m");
-    expect(stripThinkingSuffix("p/m:off")).toBe("p/m");
-    expect(stripThinkingSuffix("p/m")).toBe("p/m");
+describe("parseModelSelector（语法单点，档位随串返回）", () => {
+  it("白名单后缀：剥出 ref 并带出档位", () => {
+    expect(parseModelSelector("p/m:high")).toEqual({
+      input: "p/m:high",
+      ref: "p/m",
+      provider: "p",
+      id: "m",
+      thinkingLevel: "high",
+    });
+    expect(parseModelSelector("p/m:off").thinkingLevel).toBe("off");
+    expect(parseModelSelector("p/m:max").thinkingLevel).toBe("max");
   });
 
-  it("非白名单冒号后缀不剥", () => {
-    expect(stripThinkingSuffix("p/m:foo")).toBe("p/m:foo");
+  it("无后缀：档位缺省，provider/id 照切", () => {
+    expect(parseModelSelector("p/m")).toEqual({
+      input: "p/m",
+      ref: "p/m",
+      provider: "p",
+      id: "m",
+    });
+  });
+
+  it("非白名单冒号不剥（仍属 id 的一部分）", () => {
+    expect(parseModelSelector("p/m:foo")).toEqual({
+      input: "p/m:foo",
+      ref: "p/m:foo",
+      provider: "p",
+      id: "m:foo",
+    });
+  });
+
+  it("id 自身含 /：按第一个 / 切分", () => {
+    expect(parseModelSelector("a/b/c")).toMatchObject({ provider: "a", id: "b/c" });
+    expect(parseModelSelector("a/b/c:high")).toMatchObject({
+      provider: "a",
+      id: "b/c",
+      thinkingLevel: "high",
+    });
+  });
+
+  it("缺 / 或空段：provider/id 至少一侧为空串（交由裁决按未命中处理）", () => {
+    expect(parseModelSelector("foo")).toMatchObject({ provider: "", id: "" });
+    expect(parseModelSelector("/m")).toMatchObject({ provider: "", id: "" });
+    // "p/" 切成 {provider:"p", id:""}——放行判据要求两侧都非空，故仍按未命中处理
+    expect(parseModelSelector("p/")).toMatchObject({ provider: "p", id: "" });
+  });
+});
+
+describe("isModelRef（provider/id 形态判据）", () => {
+  it("两侧都非空即成立（含 id 带 / 与带档位后缀）", () => {
+    expect(isModelRef("p/m")).toBe(true);
+    expect(isModelRef("a/b/c")).toBe(true);
+    expect(isModelRef("p/m:high")).toBe(true);
+    expect(isModelRef("p/m:foo")).toBe(true);
+  });
+
+  it("缺 / 或任一侧为空即不成立", () => {
+    expect(isModelRef("m")).toBe(false);
+    expect(isModelRef("/m")).toBe(false);
+    expect(isModelRef("p/")).toBe(false);
+    expect(isModelRef("")).toBe(false);
   });
 });
 

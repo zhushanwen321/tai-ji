@@ -376,6 +376,32 @@ describe('ReplicatedState', () => {
       await vi.advanceTimersByTimeAsync(120_000)
       expect(fetch).toHaveBeenCalledTimes(1)
     })
+
+    it('dispose 后在途 fetch 的迟到失败：静默丢弃（无失败 warn、不排退避定时器）', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const { rs, fetch } = createState({ diagnosticLabel: 'usage(sx)' })
+        let rejectFetch!: (e: unknown) => void
+        fetch.mockImplementationOnce(
+          () =>
+            new Promise<SessionState>((_, reject) => {
+              rejectFetch = reject
+            }),
+        )
+
+        rs.refetch() // fetch 在途（挂起未决，dispose 无法取消）
+        rs.dispose()
+        expect(vi.getTimerCount()).toBe(0)
+
+        rejectFetch(new Error('late rpc down')) // dispose 之后在途 promise 才失败
+        await vi.advanceTimersByTimeAsync(60_000)
+
+        expect(warn).not.toHaveBeenCalled() // 迟到失败不落 warn（防 vitest worker 关闭窗口竞争）
+        expect(vi.getTimerCount()).toBe(0) // 也不排退避重试定时器
+      } finally {
+        warn.mockRestore()
+      }
+    })
   })
 
   describe('在途失效不丢（epoch 守卫）', () => {

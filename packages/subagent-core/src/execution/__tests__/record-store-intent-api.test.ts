@@ -37,22 +37,6 @@ vi.mock("../../core/logger.ts", () => ({
   getLogger: () => loggerMock,
 }));
 
-// state-marker partial mock：写函数包装真实实现并记录调用序。
-vi.mock("../persistence/state-marker.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../persistence/state-marker.ts")>();
-  return {
-    ...actual,
-    writeFinalizedState: vi.fn((sessionFile: string, reason?: string) => {
-      order.push("state-finalized");
-      return actual.writeFinalizedState(sessionFile, reason);
-    }),
-    writeCancelledState: vi.fn((sessionFile: string, endedAt: number) => {
-      order.push("state-cancelled");
-      return actual.writeCancelledState(sessionFile, endedAt);
-    }),
-  };
-});
-
 // alive-store partial mock：acquire/release 包装真实实现并记录调用序；release
 // 时点探测 manifest 是否已落盘（A2「.state 先 → manifest 后 → .alive 删」断言）。
 vi.mock("../persistence/alive-store.ts", async (importOriginal) => {
@@ -91,10 +75,10 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import { writeAliveMarker, readAliveMarker } from "../persistence/alive-store.ts";
-import * as stateMarker from "../persistence/state-marker.ts";
-import { createRecord, trySettleLegacyClosed } from "../persistence/execution-record.ts";
+import { createRecord, resurrectClosed, trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 
 /** 构造 ExecutionRecord（running 基线，over 覆盖）。 */
 function makeRecord(id: string, over: Partial<ExecutionRecord> = {}): ExecutionRecord {
@@ -142,6 +126,22 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   /** Pi appendEntry mock（显式签名：可作 RecordStorePi 直传 + 断言面可用）。 */
   let appendEntryMock: ReturnType<typeof vi.fn<(customType: string, data: unknown) => void>>;
   let store: RecordStore;
+
+  /** 终态收条读取（③：`.state` 退场，收条 = 事件流最后一条 record-settled 帧）。 */
+  function lastSettledEvent(
+    recordsDir: string,
+    id: string,
+  ): { stopReason?: string; endedAt?: number } | undefined {
+    const file = path.join(recordsDir, `${id}.events`);
+    if (!fs.existsSync(file)) return undefined;
+    return fs
+      .readFileSync(file, "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { type?: string; stopReason?: string; endedAt?: number })
+      .filter((e) => e.type === "record-settled")
+      .at(-1);
+  }
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-store-intent-api-"));
@@ -225,15 +225,13 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(store.markFinalized(record, "user-close")).toBe(true);
 
-      // 写序：.state → .alive release（顺序数组中两者先后可证）。
-      expect(order).toEqual(["alive-acquire", "state-finalized", "alive-release"]);
+      // 写序：写权声明 → 终态落账（事件/entry/manifest）→ .alive release
+      //（③ 后 `.state` 不再是写序中的一环）。
+      expect(order).toEqual(["alive-acquire", "alive-release"]);
       // release 时点 manifest 已落盘（.state 先 → manifest 后 → .alive 删）。
       expect(probe.manifestExistedAtRelease).toBe(true);
-      // 写后即刻可见（同步写，无 fire-and-forget）。
-      expect(JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8"))).toEqual({
-        status: "finalized",
-        reason: "user-close",
-      });
+      // 写后即刻可见（同步写，无 fire-and-forget）：终态收条 = record-settled 帧。
+      expect(lastSettledEvent(manifestDir, "bg-1")?.stopReason).toBe("user-close");
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
       // manifest 投影（同步落盘）。
       expect(readManifestJson("bg-1")).toMatchObject({
@@ -251,29 +249,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       );
     });
 
-    it(".state 写失败（重试耗尽）→ 返回 false、零持久化副作用、record 留 running 形态", () => {
-      const record = makeRecord("bg-2");
-      record.sessionFile = sessionFile;
-      store.acquireWriteLease(sessionFile, "bg-2");
-      store.register(record);
-      trySettleLegacyClosed(record, "user-close");
-      appendEntryMock.mockClear();
-
-      vi.mocked(stateMarker.writeFinalizedState).mockReturnValueOnce(false);
-
-      expect(store.markFinalized(record, "user-close")).toBe(false);
-      // 零持久化副作用：不出册（内存仍在）、无 manifest、写权声明未 release、无终态 entry。
-      expect(store.getMutable("bg-2")).toBeDefined();
-      expect(fs.existsSync(manifestPathOf("bg-2"))).toBe(false);
-      expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
-      // `.state` 写尝试确实发生（mockReturnValueOnce 短路包装层，顺序 token 不入 order，
-      // 以调用事实为准）；且其后无任何后续写动作（alive-release 未入 order）。
-      expect(stateMarker.writeFinalizedState).toHaveBeenCalledWith(sessionFile, "user-close");
-      expect(order).toEqual(["alive-acquire"]);
-      expect(appendEntryMock).not.toHaveBeenCalled();
-    });
-
-    it("sessionFile 缺失 → .state 面跳过（warn 留痕），manifest/entry 照常", () => {
+    it("sessionFile 缺失 → binding 快照面跳过（warn 留痕），manifest/entry 照常", () => {
       const record = makeRecord("bg-3");
       store.register(record);
       trySettleLegacyClosed(record, "gc");
@@ -297,28 +273,13 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(store.markCancelled(record)).toBe(true);
 
-      expect(order).toEqual(["alive-acquire", "state-cancelled", "alive-release"]);
+      expect(order).toEqual(["alive-acquire", "alive-release"]);
       expect(probe.manifestExistedAtRelease).toBe(true);
-      expect(JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8"))).toEqual({
-        status: "cancelled",
-        endedAt: 7777,
-      });
+      expect(typeof lastSettledEvent(manifestDir, "bg-c1")?.endedAt).toBe("number");
       expect(readManifestJson("bg-c1")).toMatchObject({ id: "bg-c1", status: "closed", closedReason: "cancelled" });
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
     });
 
-    it(".state 写失败 → 返回 false、tombstone 未落、record 不出册", () => {
-      const record = makeRecord("bg-c2");
-      record.sessionFile = sessionFile;
-      store.register(record);
-      trySettleLegacyClosed(record, "cancelled");
-
-      vi.mocked(stateMarker.writeCancelledState).mockReturnValueOnce(false);
-
-      expect(store.markCancelled(record)).toBe(false);
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
-      expect(store.getMutable("bg-c2")).toBeDefined();
-    });
   });
 
   // [collect 退役] 原 markBatchFinalized barrier 用例（manifest 屏障写序 + 落标
@@ -358,6 +319,83 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
     it("id 不在内存 → false 无副作用", () => {
       expect(store.markRoundStarted("nope")).toBe(false);
+    });
+
+    // ── [轮次轴 CAS] 终态冻结门（与 markRoundIdle A3 断言同族；判定依据见
+    //    markRoundStartedImpl 方法头）────────────────────────────────
+
+    it("[轮次轴 CAS] 终态簿记已冻结（endedAt 已设）→ fail-fast 抛错，零副作用", () => {
+      // 形态来源：真终态族写点（markFinalized / markCancelled / completeLegacyClosed）
+      // 之后误派轮始 = 复活终态（调用方 bug）。markRoundIdle 刻意不写 endedAt
+      //（轮终留内存 idle 可续聊），本门只拦真终态复活。
+      const record = makeRecord("chat-rs-frozen", { status: "idle", endedAt: 123, result: "final output" });
+      store.register(record);
+      const eventsPath = path.join(manifestDir, "chat-rs-frozen.events");
+      const countEventLines = (): number =>
+        fs.existsSync(eventsPath)
+          ? fs.readFileSync(eventsPath, "utf-8").split("\n").filter((l) => l.trim().length > 0).length
+          : 0;
+      const linesBefore = countEventLines();
+
+      expect(() => store.markRoundStarted("chat-rs-frozen")).toThrow(
+        /terminal bookkeeping already frozen/,
+      );
+      // 零副作用：内存态不动（status/result 保持终态冻结值）、事件文件不追加
+      //（fail-fast 先于一切簿记——轮始帧不落账）。
+      expect(record.status).toBe("idle");
+      expect(record.result).toBe("final output");
+      expect(countEventLines()).toBe(linesBefore);
+    });
+
+    it("[轮次轴 CAS] 终态 record 经 resurrectClosed 解冻后轮始放行（revive 链不误伤）", () => {
+      // 合法解冻序列全部在轮始前清 endedAt：markResurrected → resurrectClosed
+      //（idle→running 翻边并清终态位）/ reviveOrThrow（tryEnterRunning 后手动清）
+      //——「先轮始后解冻」的序列不存在，本门不拦 revive 链。
+      const record = makeRecord("chat-rs-revived", { status: "idle", endedAt: 123 });
+      store.register(record);
+
+      expect(() => store.markRoundStarted("chat-rs-revived")).toThrow(
+        /terminal bookkeeping already frozen/,
+      );
+      expect(resurrectClosed(record)).toBe(true); // 解冻：idle→running + 清 endedAt
+      expect(store.markRoundStarted("chat-rs-revived")).toBe(true);
+      expect(record.status).toBe("running");
+    });
+
+    it("idle 续轮放行：轮终（idle）后轮始 → 翻 running + result/stopReason 清点 + 落帧", () => {
+      // 形态来源：轮终后直接续轮（markReopened 保持 idle 的 reopen 后轮始同形态）。
+      const record = makeRecord("chat-rs-idle", { round: 0 });
+      record.result = "round 1 output";
+      record.stopReason = "completed";
+      store.register(record);
+      expect(store.markRoundIdle("chat-rs-idle", { kind: "success", content: "round 1 output" })).toBe(true);
+      expect(record.status).toBe("idle");
+
+      expect(store.markRoundStarted("chat-rs-idle")).toBe(true);
+      expect(record.status).toBe("running"); // idle→running 翻边（续轮在飞）
+      expect(record.result).toBeUndefined(); // 上轮结果随轮始清点（isStreaming 公式）
+      expect(record.stopReason).toBeUndefined();
+      expect(lastJournalEvent(manifestDir, "chat-rs-idle")).toMatchObject({
+        type: "record-round-started",
+        round: 1,
+      });
+    });
+
+    it("running 连续轮始放行（onAbandoned→drain 合法路径语义锚）——无 running 在途门的判定依据", () => {
+      // 形态来源：acquire 被打断（无 run 产生、不终态化）→ drain 重派 = running 中
+      // 第二次轮始，是合法生产路径。与假想「双轮始竞态」的内存形态完全同形
+      //（running + stopReason/result/endedAt 全 undefined），首轮出生 / 续轮翻边 /
+      // revive 清位三种合法前提也同形——原语层无法构造「只拒双轮始」的 running 门，
+      // 双轮始的生产防护在 Continuation 编排层（activeRunId 单飞窗 + 终态门）。
+      // 本用例锚定原语层不拒绝的现状语义（详见 markRoundStartedImpl 方法头）。
+      const record = makeRecord("chat-rs-again");
+      store.register(record);
+      expect(store.markRoundStarted("chat-rs-again")).toBe(true);
+      loggerMock.warn.mockClear();
+
+      expect(store.markRoundStarted("chat-rs-again")).toBe(true); // 连续轮始不拒绝
+      expect(record.status).toBe("running");
+      expect(loggerMock.warn).not.toHaveBeenCalled(); // 无 CAS 拒绝留痕
     });
   });
 
@@ -408,6 +446,38 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(() => store.markRoundIdle("chat-4", { kind: "success", content: "x" })).toThrow(
         /terminal bookkeeping already frozen/,
+      );
+    });
+
+    it("[§4 在途门 CAS] 已轮终（idle）的 record 再次轮终 → warn 留痕 + false，零副作用", () => {
+      // 形态来源：cancel 的 markSettledOut 有意不写 endedAt（endedAt 门拦不住），
+      // 或迟到应答越过上层 status 门——原语级兜底即本用例。
+      const record = makeRecord("chat-cas", { round: 0 });
+      record.sessionFile = sessionFile;
+      store.register(record);
+      const eventsPath = path.join(manifestDir, "chat-cas.events");
+      const countRoundIdleEvents = (): number =>
+        fs
+          .readFileSync(eventsPath, "utf-8")
+          .split("\n")
+          .filter((line) => line.includes('"type":"record-round-idle"')).length;
+
+      expect(store.markRoundIdle("chat-cas", { kind: "success", content: "r1" })).toBe(true);
+      const roundAfterFirst = record.round;
+      const idleEventsAfterFirst = countRoundIdleEvents();
+      loggerMock.warn.mockClear();
+
+      // 第二次轮终（未过轮始门）：拒绝且零副作用。
+      expect(store.markRoundIdle("chat-cas", { kind: "failed", reason: "late settle" })).toBe(false);
+
+      expect(record.round).toBe(roundAfterFirst); // ③ 轮次不二次递增
+      expect(record.stopReason).toBe("completed"); // ⑩ 展示位不被覆写
+      expect(record.lastError).toBeUndefined(); // ⑨ 失败原因不入内存
+      expect(record.result).toBe("r1"); // ② 结果不被覆写
+      expect(countRoundIdleEvents()).toBe(idleEventsAfterFirst); // ⑪ 收条不覆写（收条即轮终帧）
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        "[subagents] markRoundIdle: CAS rejected (record not running)",
+        expect.objectContaining({ detail: expect.objectContaining({ id: "chat-cas", status: "idle" }) }),
       );
     });
 
@@ -470,45 +540,12 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       store.markResurrected(record, true);
 
-      expect(order).toEqual(["alive-acquire"]); // acquire-first：声明先于终态位删除
+      expect(order).toEqual(["alive-acquire"]); // acquire-first：写权声明先行
       expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: "rs-1" });
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
-      expect(fs.existsSync(`${sessionFile}.finalized`)).toBe(false);
+      // 终态位 sidecar 已随 ③ 退场：重开不再有磁盘终态位清理动作（磁盘终态由事件流决定）
       expect(record.status).toBe("running"); // resurrectClosed 内存翻回
       expect(record.closedReason).toBeUndefined();
       expect(store.getMutable("rs-1")).toBe(record); // register
-    });
-
-    it("(iii) pre-L4 legacy：仅 .cancelled 终态（无 .state/.finalized）→ resurrect 后 readStateMarker undefined（live ≡ reload）", () => {
-      // 存量形态：L4 合并前 writeCancelledTombstone 的旧名 tombstone（单行 JSON +
-      // 换行），readStateMarker 在 .state 缺失时回退认领——resurrect 必须一并删除，
-      // 否则磁盘终态位未真正翻转（重建 cancelled 与内存 running 不一致）。
-      fs.writeFileSync(
-        `${sessionFile}.cancelled`,
-        `${JSON.stringify({ id: "rs-legacy", status: "cancelled", agent: "worker", startedAt: 1000, endedAt: 4000 })}\n`,
-      );
-      expect(stateMarker.readStateMarker(sessionFile)).toMatchObject({ status: "cancelled", endedAt: 4000 }); // 前置：旧名回退可读
-      const record = makeClosedCandidate("rs-legacy");
-
-      store.markResurrected(record, true);
-
-      expect(stateMarker.readStateMarker(sessionFile)).toBeUndefined(); // 磁盘终态位真正翻转
-      expect(record.status).toBe("running"); // 内存翻回
-      expect(store.getMutable("rs-legacy")).toBe(record); // register
-    });
-
-    it("(ii) acquire 后删终态位失败 → 响亮抛错：marker 已写、.state 仍在、内存无半态", () => {
-      fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "finalized", reason: "parent-shutdown" }));
-      const record = makeClosedCandidate("rs-2");
-      rmSyncMock.mockImplementationOnce(() => {
-        throw new Error("simulated EACCES");
-      });
-
-      expect(() => store.markResurrected(record, true)).toThrow(/write-lease acquire\/terminal-position flip failed/);
-      expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid }); // acquire 已成
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(true); // 终态位未删（旧形态保持）
-      expect(store.getMutable("rs-2")).toBeUndefined(); // 内存无半态（未 register）
-      expect(loggerMock.error).toHaveBeenCalled();
     });
 
     it("acquire 失败（写 .alive 抛错）→ 响亮抛错：终态位未动、未注册（禁止吞错续跑）", () => {

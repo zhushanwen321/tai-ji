@@ -31,34 +31,43 @@ import { getLogger } from "../../core/logger.ts";
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../orchestration/models/types.ts";
-import { SLUG_MAX_LENGTH } from "../../orchestration/models/types.ts";
+import { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 // [D8 派发期对称校验] pi 引擎模型目录分类裁决（创建期同源消费 model-catalog；
 // orchestration → shared 叶子方向，无环）。
-import { assertModelInCatalog } from "../../orchestration/model-catalog.ts";
+import { assertModelInCatalog } from "../../shared/model-catalog.ts";
 // [D3 协议版 P6] armed 回执落账投递（runId 键入口；observedEvent 消费点）。value
 // import 方向 execution/service → orchestration/pump：pump 的传递闭包（persistence/
 // assembly/orchestration 内部）不 import execution/service，无循环。
-// [U4 → D15/D6] scanRunEvents 迁 terminal-actions（投递域单写者链），供成员复用
-// 绑定的 record 读注入面（MemberReusePoolIo 生产装配）。
-import { scanRunEvents } from "../../orchestration/terminal-actions.ts";
-// [U4] 成员复用池（决策 4/9/10 的机制本体；orchestration → execution 零反向依赖，
-// 池的 journal 读写经 io 注入，无环）。
+// [U4 → D15/D6 → D1 Class C 第 3 步] scanRunEvents 直连持久化层（journal 目录解析
+// 集群随「目录解析是持久化策略」一并迁 execution/persistence/run-event-journal.ts），
+// 供成员复用绑定的 record 读注入面（MemberReusePoolIo 生产装配）——读面仍单源，
+// 写面单写者纪律（唯一写者 = orchestration/terminal-actions）不变。本 import 即
+// D1 拆边 Class C 消掉的那条 execution → orchestration 值边（terminal-actions 侧
+// 曾保留同名 re-export 过渡，收尾已删并改直连持久化层）。
+import { scanRunEvents } from "../persistence/run-event-journal.ts";
+// [U4] 成员复用池（决策 4/9/10 的机制本体）。[D1 拆边 Class C 第 4 步] 池本体自
+// orchestration 整体下沉 execution/service（依赖面核查 = 可下沉：值依赖只有
+// core/logger，类型依赖只有 run-events 的 WorkflowRunEvent；无编排状态机语义）——
+// 本 import 即 D1 拆边 Class C 消掉的第四条 execution → orchestration 值边；编排侧
+// 消费面直连本模块（过渡期同名 re-export façade 收尾已删）。
+// 池的 record 读经 io 注入（读面单源），无环。
 import {
   lookupMemberRecordId,
   registerMemberRecord,
   type MemberReusePoolIo,
-} from "../../orchestration/member-reuse-pool.ts";
+} from "./member-reuse-pool.ts";
 // [U4] 续写轮 resume 锚点构造单点（chat Continuation 与 workflow 成员续写共用；
 // assembly 叶子方向，既有 import 先例）。
 import { resumeAnchorOf } from "../assembly/conversation-continuation.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import { updateFromEvent } from "../persistence/execution-record.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
-import { wireEventJournal } from "../engine/common/journal-wiring.ts";
+import { wireEventJournal } from "../engine/common/event-journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 // [H2 W2 迁移步⑥] mergeRunSignals 提公共 helper（原 SAR 模块内直调）——workflow
 // 派发的 timeout+外部 signal 两源合流。
 import { mergeRunSignals, type MergedRunSignalHandle } from "../engine/common/run-signals.ts";
+import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
 import {
@@ -73,21 +82,18 @@ import type { NotifyHost } from "../notify/notify-host.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
+import { createBackgroundStream, type StreamSink } from "../assembly/stream-sink.ts";
 // 嵌套深度护栏单点（与 run-orchestration 同源；聚合间零互调不受影响——共同 import
 // 叶子 helper 文件是既有形态，G2 禁的是两聚合互相 import）。
 import { assertNestingDepthWithinLimit } from "../assembly/session-context-resolver.ts";
 import type { UiRequestObservability } from "../ui/ui-request-observability.ts";
-import {
-  DEFAULT_AGENT_NAME,
-  type AgentEvent,
-  type AgentResult,
-  type ExecuteOptions,
-  type ExecutionMode,
-  type ExecutionRecord,
-} from "../assembly/types.ts";
+import { DEFAULT_AGENT_NAME } from "../domain/record-model.ts";
+import type { ExecutionMode } from "../domain/record-types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import { type AgentEvent, type ExecuteOptions } from "../assembly/types.ts";
 // [R6/D-R4-4] 跨两聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 
 const logger = getLogger("subagents");
 
@@ -178,7 +184,7 @@ export interface WorkflowDispatchDeps {
   readonly releaseRoundResources: (
     record: ExecutionRecord,
     holdSlot: boolean,
-    stream: SubagentStream | undefined,
+    stream: AgentStreamSink | undefined,
   ) => void;
   /**
    * [U4 pi-workflow-run-resource-model 决策 7/10] 成员 revive 通道（命中路径的
@@ -198,10 +204,10 @@ export class WorkflowDispatch {
   private readonly deps: WorkflowDispatchDeps;
 
   /**
-   * [U4 → D6] 成员复用绑定的 record 读注入面（本聚合单点装配；scan 经
-   * terminal-actions 的 scanRunEvents 同源防线，不自建 journal 实例）。append
-   * 通道随 [D6] 绑定消解删除——绑定随 agent-started 帧落账（pump dispatchAgentCall
-   * 链），登记收尾只改内存（member-reuse-pool.registerMemberRecord）。
+   * [U4 → D6 → D1 Class C] 成员复用绑定的 record 读注入面（本聚合单点装配；scan 经
+   * persistence/run-event-journal 的 scanRunEvents 同源解析，不自建 journal 实例）。
+   * append 通道随 [D6] 绑定消解删除——绑定随 agent-started 帧落账（pump
+   * dispatchAgentCall 链），登记收尾只改内存（member-reuse-pool.registerMemberRecord）。
    */
   private readonly memberReusePoolIo: MemberReusePoolIo = {
     scanEvents: (runId) => scanRunEvents(runId),
@@ -242,7 +248,7 @@ export class WorkflowDispatch {
     parentRunId: string,
     signal?: AbortSignal,
     onEvent?: (event: AgentEvent) => void,
-    stream?: SubagentStream,
+    stream?: AgentStreamSink,
     stepIndex?: number,
   ): Promise<WorkflowAgentResult> {
     this.deps.assertReady();
@@ -346,14 +352,14 @@ export class WorkflowDispatch {
     agentConfig: AgentConfig | undefined,
     parentRunId: string,
   ): Promise<EngineRouteResult> {
+    const modelService = this.deps.getModelService();
+    modelService.assertGlobalConfigReadable();
     const routed = routeEngineForHost({
       routing: {
         callEngine: opts.engine,
         agentEngine: agentConfig?.engine,
-        globalDefaultEngine: this.deps.getModelService().getGlobalConfig().defaultEngine,
+        globalDefaultEngine: modelService.getGlobalConfig().defaultEngine,
       },
-      taskModel: opts.model,
-      strict: this.deps.getModelService().getGlobalConfig().engineRouting?.strict === true,
       probe: (engineId) => resolveWorkflowWindowEnginePort(parentRunId, engineId).probe(),
       // [U2 pi-workflow-run-resource-model] pi 同步短路位的 piEngine 注入同样携带
       // parentRunId 窗口键：pi 请求经 routeEngineForHost 短路返回本 port，是成员任务
@@ -414,16 +420,12 @@ export class WorkflowDispatch {
     return identity;
   }
 
-  /** [executeWorkflowAgent 阶段拆分] record 引擎留痕（对齐 executeViaEngine 盖章规则：
-   *  pi 纯缺省不盖键；pi 兜底盖 'pi'+from；非 pi 盖 engineId）。原位 mutate execOpts。 */
+  /** [executeWorkflowAgent 阶段拆分] record 引擎留痕（盖章规则：pi 纯缺省不盖键，
+   *  非 pi 盖 engineId）。原位 mutate execOpts。 */
   private stampWorkflowEngineTrace(route: EngineRouteResult, execOpts: ExecuteOptions): void {
-    const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
-    if (!isPiRoute) {
+    if (route.engineId !== DEFAULT_ENGINE_ID) {
       execOpts.engine = route.engineId;
-    } else if (route.engineFallback !== undefined) {
-      execOpts.engine = DEFAULT_ENGINE_ID;
     }
-    if (route.engineFallback !== undefined) execOpts.engineFallback = route.engineFallback;
   }
 
   /**
@@ -446,7 +448,7 @@ export class WorkflowDispatch {
     engine: EnginePort,
     signal: AbortSignal | undefined,
     onEvent?: (event: AgentEvent) => void,
-    stream?: SubagentStream,
+    stream?: AgentStreamSink,
     /**
      * [U4 pi-workflow-run-resource-model] 会话形态 resume 键（RunContext.resume 契约
      * 位——recordId 关联键 + 续聊锚点）。现状路径（首次派发）不传，wire 上不出现该键
@@ -500,11 +502,12 @@ export class WorkflowDispatch {
 
       const runCtx: RunContext = {
         taskId: record.id,
+        // [D4] record 身份信封（引擎写进任务子进程身份 env；构造单点 = identityEnvelopeOf）
+        identity: identityEnvelopeOf(record),
         signal: runSignal.signal,
         ctxModel: identity.resolved.model,
         onEvent: observedEvent,
         ...(effectiveStream !== undefined ? { stream: effectiveStream } : {}),
-        ...(record.engineFallback !== undefined ? { engineFallback: record.engineFallback } : {}),
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),
@@ -526,7 +529,7 @@ export class WorkflowDispatch {
         // 持久化形状保留字段（record-store 读侧守卫要求非空）；恒 'shared'——
         // [池抽象降级 2026-09-13] 协议面 poolKey 已删，无引擎侧实际值。
         poolKey: SHARED_POOL_KEY,
-        journalPath: journal.path,
+        eventsPath: journal.path,
       };
       const result = this.deps.outcomeToAgentResult(record, outcome);
       // D7 收口（origin 分支在 settleOneShotOutcome 函数顶部；aborted 判外部 signal

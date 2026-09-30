@@ -12,8 +12,8 @@
 //   - sessionFile/round 从磁盘重建结果回填（round 无磁盘持久化 → undefined）
 //
 // fixture 构造参照 record-store.test.ts 的 writeSessionJsonl（真实 .jsonl 文件，
-// identity custom entry + assistant message；无 .alive sidecar → record-store
-// sidecar 矩阵分支 4 → status="running" 跨重启可续聊态）。
+// identity custom entry + assistant message；无终态收条帧 → 重建兜底 idle +
+// interrupted-by-restart，冷查接管后翻 running 跨重启可续聊态）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -29,13 +29,13 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 // [W3 改写 → H1 U6] deliverChatMessage 走协议 seam（registerFakePiEngine 替身）——
 // 每轮 = 新 run + resume 锚点，续聊守卫链归 Continuation（dispatchRoundGuarded）。
 
-import { writeFinalizedState } from "../persistence/state-marker.ts";
-import { ResurrectDeniedError } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
 import { makePi } from "./helpers/pi-mock.ts";
+import { seedTerminalRecordForSessionFile } from "./helpers/seed-terminal-record.ts";
 import { clearEngines } from "../engine/registry.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
 
@@ -50,7 +50,7 @@ const IDENTITY_ENV_KEYS = [
 ] as const;
 
 /** 写一个最小合法 session.jsonl（session header + identity entry + 1 条 assistant message）。
- *  不写任何 sidecar（.alive/.cancelled/.finalized）→ sidecar 矩阵分支 4 → running。 */
+ *  不写任何终态收条（.alive / 事件流 record-settled 帧）→ 重建兜底 idle，冷查接管翻 running。 */
 function writeSessionJsonl(
   sessionsDir: string,
   identity: {
@@ -122,6 +122,7 @@ interface ServiceInternals {
 describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", () => {
   let agentDir: string;
   let sessionsDir: string;
+  let recordsDir: string;
   let service: SubagentService;
   let store: RecordStore;
 
@@ -129,6 +130,7 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "restart-recon-"));
     sessionsDir = getSubagentSessionDir(agentDir, agentDir);
+    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
 
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
@@ -193,9 +195,10 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     expect(() => service.chatActions.getRecordForAction("sa-grand")).toThrow(/direct parent/);
   });
 
-  it("[U4 万物可续] .state sidecar（旧终态遗留位）→ 冷查重建放行（idle 全候选，closedReason 只是展示位）", () => {
+  it("[U4 万物可续] 事件流终态收条（record-settled 帧）→ 冷查重建放行（idle 全候选，停因只是展示位）", () => {
     const file = writeSessionJsonl(sessionsDir, { id: "sa-fin", rootSessionId: "root-session" });
-    writeFinalizedState(file); // sidecar 矩阵分支 2 → 重建 idle + closedReason 遗留位
+    // 终态收条已换源到事件流（`.state` sidecar 退场）；结算形态 = 冷查重建的 idle 候选。
+    seedTerminalRecordForSessionFile(file, recordsDir, { stopReason: "disconnected" });
 
     const record = service.chatActions.getRecordForAction("sa-fin");
     expect(record.status).toBe("running"); // 接管翻边
@@ -216,7 +219,7 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
       origin: "workflow",
       parentRunId: "wf-test-run",
     });
-    writeFinalizedState(file, "gc"); // GC 收口终态 → 重建 idle + closedReason 遗留位
+    seedTerminalRecordForSessionFile(file, recordsDir, { stopReason: "gc" }); // GC 收口终态 → 重建 idle（可续候选）
 
     // 前置：内存确无（归档形态）；且未跑过任何 collectRecords（索引未热——与 a3rv
     // 剧本一致，list 预热会走 findLightById 直查，掩盖不了本缺陷的兜底全扫口径）

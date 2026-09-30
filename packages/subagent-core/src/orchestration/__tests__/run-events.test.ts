@@ -29,7 +29,7 @@ import {
   CONTROL_TRIGGER_TYPES,
   doneReasonToRunOutcome,
   foldRunEventCheckpoint,
-  INITIAL_RUN_STATE,
+  INITIAL_RUN_LIFECYCLE_STATE,
   RUN_EVENT_TYPES,
   RUN_TRANSITIONS,
   TRANSITION_OUTPUT_TYPES,
@@ -43,7 +43,7 @@ import {
   type RunEventType,
   type RunLifecycle,
   type RunOutcome,
-  type RunState,
+  type RunLifecycleState,
   type TransitionTrigger,
   type WorkflowRunEvent,
 } from "../run-events.ts";
@@ -155,6 +155,14 @@ const runSettledFailed: WorkflowRunEvent = {
   artifactsDir: "/record-fixture/wf-1758-a1",
 };
 
+/** [ADR-0094] 诊断帧样本（不进状态机；重建面 errorLogsFromEvents 消费）。 */
+const workerLogSample: WorkflowRunEvent = {
+  type: "worker-log",
+  seq: 12,
+  ts: TS + 250_000,
+  entry: { level: "error", message: "worker blew up" },
+};
+
 const runSettledCompleted: WorkflowRunEvent = {
   type: "run-settled",
   seq: 11,
@@ -215,6 +223,8 @@ function labelOf(event: WorkflowRunEvent): string {
       return `run-resumed:${event.host ?? "none"}`;
     case "run-settled":
       return `run-settled:${event.outcome}:${event.errorCode ?? "none"}`;
+    case "worker-log":
+      return `worker-log:${event.entry.level}:${event.entry.message}`;
   }
   const _exhaustive: never = event;
   return _exhaustive;
@@ -223,7 +233,7 @@ function labelOf(event: WorkflowRunEvent): string {
 // ── 词表 ─────────────────────────────────────────────────────
 
 describe("事件词表（D5 → [D4] 对齐 pi）", () => {
-  it("RUN_EVENT_TYPES 恰好 9 个成员（[D4] agent-* 对齐 + phase-*/run-interrupted/run-resumed 新增；armed 随 [D5] 删、member-pool 随 [D6] 绑定消解删；无 world-run 族——脚本 API 面无子进程调用通道）", () => {
+  it("RUN_EVENT_TYPES 恰好 10 个成员（[D4] agent-* 对齐 + phase-*/run-interrupted/run-resumed 新增；armed 随 [D5] 删、member-pool 随 [D6] 绑定消解删；无 world-run 族——脚本 API 面无子进程调用通道；worker-log 随 [ADR-0094] 诊断日志持久化新增，**不进状态机**故不占转移表行）", () => {
     expect(RUN_EVENT_TYPES).toEqual([
       "run-created",
       "phase-started",
@@ -234,6 +244,7 @@ describe("事件词表（D5 → [D4] 对齐 pi）", () => {
       "run-interrupted",
       "run-resumed",
       "run-settled",
+      "worker-log",
     ]);
   });
 
@@ -306,6 +317,7 @@ describe("判别联合 exhaustive（无 default 吞噬）", () => {
       runResumed,
       runSettledFailed,
       runSettledCompleted,
+      workerLogSample,
     ];
     expect(new Set(samples.map((e) => e.type))).toEqual(new Set(RUN_EVENT_TYPES));
   });
@@ -503,16 +515,17 @@ const triggerSamples: Record<RunEventType | ControlTriggerType, TransitionTrigge
   "run-interrupted": runInterrupted,
   "run-resumed": runResumed,
   "run-settled": runSettledFailed,
+  "worker-log": { type: "worker-log", entry: { level: "error", message: "boom" }, ts: 1_700_000_000_000 },
   "cancel-requested": { type: "cancel-requested", reason: "user abort" },
 };
 
 /** 构造某 lifecycle 的状态样本（terminal 带 outcome——真实终态形态）。 */
-function stateOf(lifecycle: RunLifecycle): RunState {
+function stateOf(lifecycle: RunLifecycle): RunLifecycleState {
   return lifecycle === "terminal" ? { lifecycle, outcome: "done" } : { lifecycle };
 }
 
 /** 表外转移断言：抛 IllegalTransitionError，且错误信息含当前态与事件名。 */
-function expectIllegalTransition(state: RunState, trigger: TransitionTrigger): void {
+function expectIllegalTransition(state: RunLifecycleState, trigger: TransitionTrigger): void {
   let caught: unknown;
   try {
     transition(state, trigger);
@@ -555,8 +568,8 @@ describe("状态词表（D5-1 → [D2] 四态 + interrupted 暂停态）", () =>
     ]);
   });
 
-  it("INITIAL_RUN_STATE = created 且无 outcome", () => {
-    expect(INITIAL_RUN_STATE).toEqual({ lifecycle: "created" });
+  it("INITIAL_RUN_LIFECYCLE_STATE = created 且无 outcome", () => {
+    expect(INITIAL_RUN_LIFECYCLE_STATE).toEqual({ lifecycle: "created" });
   });
 
   it("[D2] lifecycle 词表类型锁：RunLifecycle 恰为四态 + interrupted（暂停态回归的类型锚——增删任一成员本 Equal 断言编译红）", () => {
@@ -619,12 +632,12 @@ describe("转移表完整性", () => {
     }
   });
 
-  it("表规模快照：15 行 / 14 个合法 (lifecycle × 事件) 组合 / 36 个表外组合（5 × 10 = 50 全积）——[D2] dispatched 并入 running、armed 三行随 [D5] 删、member-pool 三行随 [D6] 删、新增 run-interrupted 两行 + run-resumed 一行 + phase 三行", () => {
+  it("表规模快照：15 行 / 14 个合法 (lifecycle × 事件) 组合 / 41 个表外组合（5 × 11 = 55 全积）——[D2] dispatched 并入 running、armed 三行随 [D5] 删、member-pool 三行随 [D6] 删、新增 run-interrupted 两行 + run-resumed 一行 + phase 三行；[ADR-0094] worker-log 是诊断帧、不进状态机故无表行（表外组合 +5 = 每个 lifecycle 一个）", () => {
     expect(RUN_TRANSITIONS).toHaveLength(15);
     const legalKeys = new Set(RUN_TRANSITIONS.map((r) => `${r.from}|${r.on}`));
     expect(legalKeys.size).toBe(14);
-    expect(ALL_RUN_LIFECYCLES.length * ALL_TRIGGER_TYPES.length).toBe(50);
-    expect(50 - legalKeys.size).toBe(36);
+    expect(ALL_RUN_LIFECYCLES.length * ALL_TRIGGER_TYPES.length).toBe(55);
+    expect(55 - legalKeys.size).toBe(41);
   });
 
   it("[D2] interrupted 唯一出边 = run-resumed（暂停态无特例转移行、无 guard——终局/取消在 interrupted 态表外 fail-fast，非「终局了却没死透」）", () => {
@@ -705,7 +718,7 @@ describe("终局与输出动作语义", () => {
   });
 
   it("run-settled 的 outcome 透传到终态（done / failed / cancelled / time_limited——[D2] 四值全贯通）", () => {
-    const settling: RunState = { lifecycle: "settling" };
+    const settling: RunLifecycleState = { lifecycle: "settling" };
     expect(transition(settling, runSettledCompleted).state).toEqual({
       lifecycle: "terminal",
       outcome: "done",
@@ -775,7 +788,7 @@ describe("终局与输出动作语义", () => {
       phaseSettled,
       runSettledCompleted,
     ];
-    let state = INITIAL_RUN_STATE;
+    let state = INITIAL_RUN_LIFECYCLE_STATE;
     for (const trigger of chain) {
       state = transition(state, trigger).state;
     }
@@ -785,7 +798,7 @@ describe("终局与输出动作语义", () => {
   it("cancel 路径 fold：record 里的合成 run-settled(cancelled) 把 running 直接收敛到 terminal", () => {
     // 控制事件不进 record——fold 只见 run-created / agent-started / run-settled
     const chain: TransitionTrigger[] = [runCreated, agentStarted, runSettledCancelled];
-    let state = INITIAL_RUN_STATE;
+    let state = INITIAL_RUN_LIFECYCLE_STATE;
     for (const trigger of chain) {
       state = transition(state, trigger).state;
     }
@@ -800,7 +813,7 @@ describe("终局与输出动作语义", () => {
       runResumed,
       runSettledCompleted,
     ];
-    let state = INITIAL_RUN_STATE;
+    let state = INITIAL_RUN_LIFECYCLE_STATE;
     for (const trigger of chain) {
       state = transition(state, trigger).state;
     }
@@ -821,7 +834,7 @@ describe("transition 纯函数边界", () => {
       throw new Error("transition 不得取随机数");
     };
     try {
-      transition(INITIAL_RUN_STATE, runCreated);
+      transition(INITIAL_RUN_LIFECYCLE_STATE, runCreated);
       transition({ lifecycle: "running" }, agentSettledFailed, { enterSettling: true });
       transition({ lifecycle: "running" }, triggerSamples["cancel-requested"]);
       // fail-fast 路径同样不碰时钟

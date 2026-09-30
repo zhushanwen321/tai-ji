@@ -15,7 +15,7 @@ import * as path from "node:path";
 import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 
 import {
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
   WORKFLOW_RECORD_CUSTOM_TYPE,
   WORKFLOW_RECORD_ENTRY_VERSION,
   createRunEventJournal,
@@ -36,7 +36,7 @@ export function mkRecordEnv(label: string): RecordFixtureEnv {
   return {
     sessionDir,
     stateDir,
-    recordPath: (runId: string) => path.join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`),
+    recordPath: (runId: string) => path.join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`),
     cleanup: () => fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }),
   };
 }
@@ -58,8 +58,8 @@ export function writeRawLines(env: RecordFixtureEnv, runId: string, lines: strin
   fs.writeFileSync(env.recordPath(runId), lines.join("\n") + "\n", "utf8");
 }
 
-/** v2 注册条目夹具（journalPath 锚点 = record 流路径——新形态实体）。 */
-export function registeredEntry(runId: string, journalPath: string): CustomEntry {
+/** v2 注册条目夹具（recordPath 锚点 = record 流路径——新形态实体）。 */
+export function registeredEntry(runId: string, recordPath: string): CustomEntry {
   return {
     type: "custom",
     customType: WORKFLOW_RECORD_CUSTOM_TYPE,
@@ -71,7 +71,7 @@ export function registeredEntry(runId: string, journalPath: string): CustomEntry
       scriptName: "fidelity-script",
       slug: "fidelity-script",
       startedAt: Date.now(),
-      journalPath,
+      recordPath,
     },
     id: `reg-${runId}`,
     parentId: null,

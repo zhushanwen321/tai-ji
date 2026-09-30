@@ -15,7 +15,7 @@
 //   不写、**不主动删**——维护轮对窗外终态旧双源足迹的成对裁剪是既有清理通道的
 //   自然结果（D1 历史数据处置③：非新增删除动作，跟随裁决点 7 消亡）；
 // - record 流（`.record.jsonl` 新后缀）被 prune 候选枚举结构性排除（filter 用
-//   RUN_EVENT_JOURNAL_SUFFIX 单源）——唯一事实源不被旧快照面裁剪逻辑误删。
+//   RUN_EVENTS_SUFFIX 单源）——唯一事实源不被旧快照面裁剪逻辑误删。
 //
 // mtime/时钟确定性：事件帧 ts 相对 Date.now 构造（天数偏移注入），不依赖写入时序。
 
@@ -37,7 +37,7 @@ import * as path from "node:path";
 
 import {
   Budget,
-  RUN_EVENT_JOURNAL_SUFFIX,
+  RUN_EVENTS_SUFFIX,
   Trace,
   WorkflowRun,
   runRetentionMaintenanceRound,
@@ -63,7 +63,6 @@ function makeRunningRun(runId: string): WorkflowRun {
   const trace = new Trace();
   trace.append({ stepIndex: 0, agent: "worker", task: "do thing", model: "default", status: "pending" });
   return WorkflowRun.reconstruct(runId, makeSpec(), {
-    status: "running",
     budget: new Budget(),
     calls: new Map(),
     trace,
@@ -85,7 +84,7 @@ function legacyJournalFile(stateDir: string, runId: string): string {
 }
 
 function recordFile(stateDir: string, runId: string): string {
-  return path.join(stateDir, `${runId}${RUN_EVENT_JOURNAL_SUFFIX}`);
+  return path.join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
 }
 
 function manifestFile(stateDir: string, runId: string): string {
@@ -187,7 +186,7 @@ describe("维护轮入口（core 单源）对 run 域目录的行为——sessio
   it("旧双源窗外终态不获裁剪资格（journal 判据换源后 scan 只认 record 后缀）；record 流不被候选枚举捕获、不误删", async () => {
     process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
     // 旧格式窗外终态：prune 资格 = journal run-settled 帧 fold（D5 判据①）——
-    // journal scan 经 RUN_EVENT_JOURNAL_SUFFIX 单源只认 record 后缀后，旧 journal
+    // journal scan 经 RUN_EVENTS_SUFFIX 单源只认 record 后缀后，旧 journal
     // 不进判定路径（空流 = 非终态 = 不获资格）——旧两件套「不读不写不主动删」
     //（D1 历史数据处置）在保留通道的自然成立形态，留置原地。
     seedLegacyTerminalRun(stateDir, runIdAt(0), 40, 35);

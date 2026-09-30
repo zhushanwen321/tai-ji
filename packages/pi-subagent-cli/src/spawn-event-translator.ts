@@ -25,7 +25,7 @@ const TOOL_ACTIVITY_MIN_INTERVAL_MS = 1_000;
  * [U-A6] 工具执行期活性信号载体（`tool_execution_update` → onEvent 通道，不产数据）。
  *
  * 第一类 `activity` 变体已落地（F2 清账）：协议闭合联合的专用纯活性信号——双侧
- * reducer no-op、core journal-wiring 豁免 append（不进持久/重放面），语义见 SDK
+ * reducer no-op、core event-journal-wiring 豁免 append（不进持久/重放面），语义见 SDK
  * contract-types AgentEvent 注释。历史借用形态（usage/error 双缺省的零写入
  * message_end）见 git 历史。
  */

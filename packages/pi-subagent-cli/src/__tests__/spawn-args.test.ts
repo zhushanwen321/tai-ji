@@ -10,7 +10,7 @@ import { buildEnvBlock, buildSpawnArgs } from "../spawn-args.ts";
 
 describe("buildSpawnArgs", () => {
   // [U1 D2] modelRef 为必填（spawn 前置守卫：未经裁决的裸字符串类型层面不可达）。
-  // 类型直接锚定 buildSpawnArgs 入参（thinkingLevel 是 ThinkingLevel 枚举，非裸 string）
+  // 类型直接锚定 buildSpawnArgs 入参（thinkingLevel 在协议层是宿主校验后的 string 透传）
   const baseParams: Parameters<typeof buildSpawnArgs>[0] = {
     modelRef: { provider: "openai", id: "gpt-4o" },
     thinkingLevel: undefined,

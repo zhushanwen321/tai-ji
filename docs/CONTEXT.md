@@ -135,7 +135,7 @@ subagent 跨 run 续聊时定位既有会话的凭据（引擎中立形态 `Resu
 
 ### Execution Record
 
-subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0078](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 快照条目走惰性兼容读）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外投影两态（`active` / `idle`，ended 随终态概念删除），轮终收尾写 `<session>.state` sidecar 与 manifest（均为物化投影）。
+subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0078](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 全量快照兼容层已整体删除，2026-09-30）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外投影两态（`active` / `idle`，ended 随终态概念删除），轮终收条由 `record-settled` / `record-round-idle` 事件帧承载（事件流是唯一事实源），manifest 为物化投影。
 
 ### ToolCall
 
@@ -300,18 +300,94 @@ workflow run 的唯一持久化：`<sessionDir>/workflow-state/<runId>.record.js
 run 与 record 两域状态词表的单源口径，消费方按维取值、禁止跨维混用：
 
 - **run 域两维正交**：lifecycle 维 = `RunLifecycle` 四态 + `interrupted` 暂停态（`created/running/settling/terminal` + `interrupted`——dispatched 已并入 running（两态行为相同且零消费方，[ADR-0082] D2）；`packages/subagent-core/src/orchestration/run-events.ts` 的 `RUN_TRANSITIONS` 转移表唯一裁决，表外转移 fail-fast）；outcome 维 = `RunOutcome` 四值（`done/failed/cancelled/time_limited`，`ALL_RUN_OUTCOMES` 单源），outcome 仅 terminal 出现。`interrupted` 不是终局——是「执行中断、无活体」的 lifecycle 暂停态（running/settling → interrupted：崩溃收编 / terminate 被动失联（resume 来源 run，[ADR-0082] D11）；interrupted → running：resume），自动终局化写入方已随 abandon 移除消失（[ADR-0082] D9），中断来源细分由 `run-interrupted` 帧 errorCode 承载（`crashed` / `terminated` / `startup-sweep`；历史成员 `interrupted_abandoned` / `idle-evicted` 保留只读解析）；`cancelled` 保留「用户主动取消」语义，显示面「已取消」（主动）与「已中断」（被动）禁混用。旧 `RunStatus` 两态机（running|done + `state.status`/`state.reason` 快照字段）降级 v1 兼容层（W4 sunset），禁止作活体终局判据或载荷源。
-- **record 域三维正交**：lifecycle 维 = `ExecutionStatus`（running|idle）× 停因维 = `StopReason`（上一轮收条语义，`.state` sidecar，仅展示排障）× 结果维 = outcome 四值（轮终参数 `ExecutionOutcome` 为独立实体字面量 `completed/failed/cancelled`——原 `Exclude<RunOutcome,"interrupted">` 派生别名随 interrupted 移出 RunOutcome 取消，[ADR-0082] 实施期裁决：execution/subagent-record 域写入值不变）。record 域不建显式转移表：意图原语族即状态机（C-data-20 唯一写入口 + `tryEnterRunning` CAS 表外拒绝）。
+- **record 域三维正交**：lifecycle 维 = `ExecutionStatus`（running|idle）× 停因维 = `StopReason`（上一轮收条语义，由 `record-settled` / `record-round-idle` 事件帧承载，仅展示排障）× 结果维 = outcome 四值（轮终参数 `ExecutionOutcome` 为独立实体字面量 `completed/failed/cancelled`——原 `Exclude<RunOutcome,"interrupted">` 派生别名随 interrupted 移出 RunOutcome 取消，[ADR-0082] 实施期裁决：execution/subagent-record 域写入值不变）。record 域不建显式转移表：意图原语族即状态机（C-data-20 唯一写入口 + `tryEnterRunning` CAS 表外拒绝）。
 - **投影相 ≠ 状态**：注册表投影 = record fold 四相（missing/active/terminal/interrupted，`run-registry.ts` 的 `RunRegistryPhase`）——interrupted 相是投影判读（`run-interrupted` 转移帧已写入 record，或事件流停止且活体未命中的 host-died 判读），对应 lifecycle 暂停态而非终局（[ADR-0082] 后投影相与 lifecycle 同构，interrupted 相可流转回 active）。manifest 的投影持久化格式（record 终局事件的派生缓存，单一生产者）不计入消费方状态词表口径。
 
 ### 介质归位（run/record 运行态持久化，W1）
-run 与 record 的运行态数据持久化形态（[ADR-0078](adr/decisions.md) / [ADR-0082](adr/decisions.md) D1）：**事件流是唯一事实源**——run 侧 = record 事件流（`<runId>.record.jsonl`，[ADR-0082] D1 由 journal 更名并升格：全文入事件、state 快照删除），record 侧 = 事件文件 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀，既有 .jsonl 扫描器结构性忽略；首行 `{"type":"record-journal"}` 头行自描述）。子术语：
+run 与 record 的运行态数据持久化形态（[ADR-0078](adr/decisions.md) / [ADR-0082](adr/decisions.md) D1）：**事件流是唯一事实源**——run 侧 = record 事件流（`<runId>.record.jsonl`，[ADR-0082] D1 由 journal 更名并升格：全文入事件、state 快照删除），record 侧 = 事件文件 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀，既有 .jsonl 扫描器结构性忽略；首行 `{"type":"record-events"}` 头行自描述）。子术语：
 
-- **注册条目 / 终态条目**：主 session JSONL 里每实体只写的两条小 entry（v:2，kind 判别 registered/settled，customType 不变）——注册条记身份与锚点（诞生时写；workflow-record 族携带 journalPath 锚点），终态条记终局与摘要（结束时写，含 result 全文与 engineHandle 双键）。旧读者按版本门跳过 v2。
-- **物化投影**：每次都能从事件流重新算出来的状态写成的落盘文件——record 侧 manifest 与 run 侧 manifest（后者 [ADR-0082] D1 起降格为 record 终局事件的派生缓存；run 侧 state 快照文件已删）——删了可重建；不是事实源。`.alive` 是操作租约，同样不计事实源。
-- **journal tail**：从上次读到的位置（offset）继续读新增事件行的增量读取方式（`packages/subagent-core/src/execution/persistence/journal-tail.ts`，run 与 record 两域共用）——runtime 内存投影的增量喂入源之一（另一源 = pi entry 游标）。
-- **收编**：把「有注册记录、无终态记录」的实体判定为中断并补齐记录的动作（本域领域词）——run 侧 = 落 `run-interrupted` 转移帧转 interrupted 暂停态（[ADR-0082] D15：壳侧 recoverCrashedRuns 与 runtime startupSweep 两链经终局编排单一入口），record 侧 = 幂等追加终态事件；事件流重放后幂等追加。
-- **惰性兼容读**：旧格式数据（v1 全量快照 entry）不做一次性迁移，读到的当下按旧格式解析（带失效版本，W4 legacy sunset 统一清理）。run 侧旧格式两件套（`.events.jsonl` journal + `<runId>.jsonl` 快照）无兼容读——不读、不写、不主动删（[ADR-0082] D1 历史数据处置，随裁决点 7 清理自然消亡）。
-- **保留窗口**：事件流的显式保留期限（默认 30 天）——窗口内全保留，窗口外的终态实体由统一保留维护轮清理（fold 终态资格判据；cap=50 已废除）。
+- **注册条目 / 终态条目**：主 session JSONL 里每实体只写的两条小 entry（v:2，kind 判别 registered/settled，customType 不变）——注册条记身份与锚点（诞生时写；workflow-record 族携带 recordPath 锚点），终态条记终局与摘要（结束时写，含 result 全文与 engineHandle 双键）。旧读者按版本门跳过 v2。
+- **落盘键的旧词裁决（已完成）**：事件流升格前的旧词（journal）在代码符号与落盘键里的残留已全部改成现行词，不做迁移、不留兼容读——项目未上线，不存在需要兼容的 v1 数据。三处落盘键现状：事件文件头行 = `{"type":"record-events"}`（`RECORD_EVENTS_HEADER_TYPE`，`record-events.ts`）；engineHandle 落盘键 = `engineHandle.eventsPath`（引擎侧事件文件路径——SDK `EngineHandleData`/`ResumeAnchor` wire 契约、core record/manifest/entry 形状、读写两侧与扫描守卫同批改名）；workflow-record 注册条目锚点键 = `recordPath`（record 流路径，D16③ 后锚点语义 = `<runId>.record.jsonl`）。
+- **物化投影 / 索引**：折叠结果的落盘副本（record 侧 manifest、run 侧 manifest、`.record-binding`、`sessions-index.json`）。三条硬性质（可删 / 带水位 / 无独有字段）与逐项现状见 [物化投影与索引](#物化投影与索引)。`.alive` 是操作租约，不计事实源。
+- **事件流增量读**：从上次读到的位置（offset）继续读新增事件行的增量读取方式（`packages/subagent-core/src/execution/persistence/event-tail.ts`，run 与 record 两域共用）——runtime 内存投影的增量喂入源之一（另一源 = pi entry 游标）。
+- **收编**：把「有注册记录、无终态记录」的实体判定为中断并补齐记录的动作（本域领域词）——run 侧 = 落 `run-interrupted` 转移帧转 interrupted 暂停态（[ADR-0082] D15：壳侧 recoverCrashedRuns 与 runtime startupSweep 两链经终局编排单一入口），record 侧 = 幂等追加终态事件；事件流重放后幂等追加。`recoverCrashedRuns`（崩溃孤儿收编链）与 `rebuildRunFromRecord`（resume 正常路径的聚合重建面——fold 判 resume 资格、重建供 worker 接管的完整聚合）均经调用链甄别为现役机制非补偿残留，保留。
+- **惰性兼容读（run 侧存量）**：run 侧旧格式两件套（`.events.jsonl` + `<runId>.jsonl` 快照）无兼容读——不读、不写、不主动删（[ADR-0082] D1 历史数据处置，随裁决点 7 清理自然消亡）；subagent-record 的 v1 全量快照兼容层已整体删除（无 v1 数据）。
+- **保留窗口**：事件流的显式保留期限（默认 30 天）——窗口内全保留，窗口外的终态实体由统一保留维护轮清理（折叠终态资格判据；cap=50 已废除）。
+
+### 事件流（唯一事实源）
+
+run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐行一个事件，行带单调 `seq`。
+
+- record 侧 = `<recordsDir>/<sa-id>.events`（首行 `{"type":"record-events"}` 自描述；六类事件 `record-created` / `bound` / `round-started` / `round-idle` / `settled` / `reopened`）；
+- run 侧 = `<sessionDir>/workflow-state/<runId>.record.jsonl`（九类事件，见 [Run record 事件流](#run-record-事件流workflow-域)）；
+- **单一写者**：状态变化只能追加事件，其它模块禁止直写盘上投影（写面检查 `scripts/check-record-write-surface.mjs`）；
+- **崩溃安全**：只追加、不原地改，尾部损坏按 [事件流损坏形态](#事件流损坏形态半写--坏行--截断)处理，不需要跨文件事务。
+
+**遗留符号改名（已完成）**：原待改名清单 `JsonlEventJournal` / `RecordJournalWriteFace` / `RecordJournalFoldState` / `journal-tail.ts` / `SessionJournalProjection` 已全部改成现行词——`JsonlEventStream`（`shared/jsonl-event-stream.ts`）/ `RecordEventsWriteFace` / `RecordEventFoldState` / `event-tail.ts` / `SessionEventProjection`（runtime `events-projection.ts`）；`journal-wiring.ts` 同批改名 `event-journal-wiring.ts`。journal 词的保留边界（现行词，不改）：引擎域自己的 journal 概念（`engine/common/event-journal.ts` 的 `JournalWriter`、zcode 引擎 `journal-io.ts`、磁盘文件名 `journal-<taskId>.jsonl`）与 run 域 journal 概念（`run-event-journal.ts` 等）。残余旧词的后续改名候选登记在 `docs/todo/journal-oldword-rename-candidates.md`。
+
+### 折叠（fold）
+
+按 `seq` 顺序重放事件流、得到实体当前状态的动作。它是「事件流 → 状态」的唯一推导方式，也是判读权威——注册表投影、终局诊断引用、resume 资格、保留窗口资格都由折叠结果裁决。
+
+**唯一实现原则**：折叠与状态词表只有一份实现，runtime 内存投影、core 查询面、扩展与 session-reader 一律复用它，禁止各自再写一份「从事件算状态」的代码。
+
+### 物化投影与索引
+
+物化投影 = 把折叠结果写到盘上、免去每次重算的文件。判断它是**索引（缓存）**还是**第二份事实源**，用三条硬性质：
+
+1. **可删**：整目录删掉后行为不变，只有性能下降；
+2. **带水位**：自带「派生自事件流的哪个 seq / 内容摘要」，读时对不上就回落事件流重建；
+3. **无独有字段**：它有的字段，事件流必须有。
+
+| 载体 | ① 可删 | ② 带水位 | ③ 无独有字段 | 现状 |
+|---|---|---|---|---|
+| `sessions-index.json` | 是 | **是**（每条带该 jsonl 的 mtime+size，消费点 `record-store.ts` 逐条比对，不匹配即重探测） | 是 | **三性质齐备**——唯一的纯索引 |
+| manifest（`<sa-id>.json`） | 是（惰性通道 + boot 轮双重建） | **是**（`eventsStamp` = 派生自 `<id>.events` 的 mtime+size，写点先事件后投影构造性新鲜；读侧不匹配即跳过回落重建） | 是（`stopReason` / `turns` / `totalTokens` 已随读侧换源由 `record-settled` / `record-round-idle` 帧承载） | **三性质齐备的物化投影**；跨包读取面（session-reader 只认它）是整体退场的挂起点 |
+| ~~`.state` 收条~~ | — | — | — | **已删除**：收条由 `record-settled` / `record-round-idle` 帧承载（写侧、读侧、戳与常量全部退场；快路径走索引收条，重建路径走折叠） |
+| `.record-binding` | 写点退场后可达 | 戳（写面覆盖写变 mtime，缓存键职责） | 是（身份域 + 统计域已全部入事件载荷） | **读侧已全部换源事件流折叠**（身份 = `identityFromFold`、统计 = `receiptStatisticsFromFold`、revive 基线 = `baselineStatisticsFromFold`）——binding 只剩写面（spawn 回填 / settle 快照 / reopen merge）与负缓存击穿戳；写点退场 = 后续批次 |
+
+**终态目标**：只有索引存在，且三性质齐备；其余载体删除。
+
+**`.state` 退场已完成**（记录于此以免后人重复排查）：写函数族 / 读函数 / `statStateStamp` / 三个后缀常量与 `SidecarStat` 已从 `state-marker.ts` 删除；`markResurrected` 不再清理旧终态文件（磁盘终态由事件流决定，重开由 `record-reopened` 帧表达）；12 处测试 fixture 迁到事件帧播种（helper `execution/__tests__/helpers/seed-terminal-record.ts`），纯旧兼容用例随其被测对象一并删除。
+
+**索引承载终态收条的裁决**（换源时不可回避）：终态域（`stopReason` / `turns` / `totalTokens`）换源到折叠后，索引快路径**不能**去读每条记录的事件文件——那正好废掉索引存在的理由（冷启动零内容读取）。因此索引条目必须自己承载终态收条，且它的水位要覆盖**事件文件**的 stat（今天只盖 jsonl 的 mtime+size：轮终收条写在 jsonl 末次写入之后，只比 jsonl 会漏掉收条变化）。两条腿：① 索引条目加终态字段；② 水位扩到 `jsonl + <id>.events` 两个 stat。**两腿均已落地**：索引条目自承收条（`receipt` = stopReason + endedAt；v3 起再加 `turns` / `totalTokens`——统计域随读侧换源由折叠承载，索引自承后快路径零内容读取即可回答「为什么停/何时停/停时多少量」），`INDEX_VERSION` 升到 3；round 不入索引（既有缺口，消费侧登记，下轮戳变化重探补齐）。
+
+第 ② 腿的改动面（动手前先看这里，别低估）：事件戳属于缓存键，而缓存新鲜度判定是中心面——连带影响 `isFreshCache`、负缓存条目、以及索引投影 `projectIndexEntries` 的正/负两类条目。**已完成**：`FileStamps` 去掉 state 维（现为 `jsonl` + `binding`），事件戳落在 `FileCacheEntry.events` 并由 `isFreshCache` 作为第四维比对；索引条目承载事件戳（`eventsMtimeMs` / `eventsSize`）与终态收条（`receipt`），`INDEX_VERSION` 升到 2。
+
+### 身份绑定（`.record-binding`）与写权（`epoch`）
+
+`.record-binding` = 每子会话一个 sidecar（`<sessionFile>.record-binding`），记 record id ↔ 会话文件映射。**读侧已全部换源事件流折叠**（[② 读侧换源]：身份 = `identityFromFold`、统计 = `receiptStatisticsFromFold`、revive 基线 = `baselineStatisticsFromFold`，`.record-binding` 读函数零生产读路径）——binding 只剩写面（spawn 回填 / settle 快照 / reopen merge-or-create，best-effort）与缓存键戳职责（写面覆盖写变 mtime，负缓存击穿）。写点退场 = 后续批次，退场后该文件删除。
+
+`epoch` = 写权世代计数，随写权取得递增，用于判定过期写者（`acquireWriteLease` 一族）。
+
+### 记录谱系字段（origin / rootSessionId / parentRecordId / depth）
+
+判读 record 归属与嵌套深度的四件套：`rootSessionId` = 根会话（跨 tree 归属判据）、`parentRecordId` = 直接父 record、`depth` = 嵌套层数（`MAX_FORK_DEPTH` 上限判据）、`origin` = 诞生来源（工具调用 / workflow 成员 / resume 等）。查询面按 `rootSessionId` 过滤，禁止跨 tree 混读。
+
+### 轮次（round）与轮次事件
+
+record 的执行单位：一次「派发 → 回收」= 一轮。`round-started` 记轮起、`round-idle` 记轮终（带 `stopReason` / `endedAt`）、`bound` 记引擎会话锚在轮内回填。轮次是终局进度与统计（`turns` / `totalTokens`）的聚合单位。
+
+### 事件流损坏形态（半写 / 坏行 / 截断）
+
+- **半写**：进程在写入途中被杀，末尾留下不完整 JSON 行；
+- **坏行**：行能解析成 JSON 但不满足事件形状（缺 `seq` / 未知 type）；
+- **截断**：读到的文件短于上次记录的 offset（外部清理或轮转）。
+
+处置纪律：尾部半写与截断行可丢弃（保留已确认前缀）；坏行跳过并计数/告警。**禁止把跳过做成无声**——静默跳过会把数据损坏伪装成「什么都没发生过」。
+
+### 三级降级读取链（引擎历史）
+
+非 pi 引擎的 record 详情读取顺序：① 引擎原生读取（zcode 隔离会话库 / 协议 `read`）→ ② 宿主事件文件重放 → ③ outcome-only（record 字段投影摘要）。逐级降级并留痕；pi record 不走该链（走会话文件直读）。**身份已知才允许降级**——「有会话锚却没有 engine」是数据损坏，必须显式失败，不能按 pi 链读。
+
+### 模型引用与三元组（`{provider, id, thinkingLevel}`）
+
+模型引用在人类输入与磁盘格式里是字符串 `provider/id[:thinkingLevel]`（后缀 = 该模型的思考档位，spawn 时拼成 `--model provider/id:level` 交给 pi）。内部表示目标是**三元组** `{provider, id, thinkingLevel?}`：
+
+- 字符串只在**入口**解析一次——工具参数 / agent `.md` frontmatter / 配置 / GUI 选择器 / runtime IPC / 扩展 `ctx` / CLI 参数；
+- core、runtime、SDK、引擎协议、renderer 之间只传结构体；
+- 解析单点 = `parseModelSelector`（无损，连档位一起返回）；禁止各处再按 `/` 或 `:` 自行切分；
+- thinking 档位词表现存三份副本，收敛为单一事实源后删比对脚本。
 
 ### 武装回执（armed，workflow 域）
 schema 强制链的引擎确认信号：native 引擎在启动期武装断言通过 + 孙进程 spawn 成功后上报一次 `armed` 事件（载荷 = env 变量名 + 必备扩展包名）。宿主是独立信号源（监控不与施控同源），等待窗内未收到即 fail-fast。仅 native 引擎、仅 schema 任务；emulated 引擎恒不上报。契约义务见 [engine-development-guide](extensions/subagents/engine-development-guide.md) §6。

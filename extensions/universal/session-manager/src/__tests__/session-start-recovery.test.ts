@@ -15,7 +15,7 @@ import {
 	type WatchInvocation,
 } from "./helpers/extension-harness.ts";
 
-const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger");
+const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/subagent-core.notifyLedger");
 
 interface Harness extends ExtensionHarness {
 	watches: WatchInvocation[];

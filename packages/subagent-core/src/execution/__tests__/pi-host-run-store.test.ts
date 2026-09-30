@@ -22,11 +22,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogLevel } from "../../core/logger.ts";
 import { configureCore, resetCoreForTests, type HostServices } from "../../core/host-services.ts";
 
-import {
-  createRunEventJournal,
-  RUN_EVENT_JOURNAL_SUFFIX,
-  type WorkflowRunEventInput,
-} from "../../orchestration/run-events.ts";
+import { RUN_EVENTS_SUFFIX } from "../../shared/run-vocabulary.ts";
+import { createRunEventJournal, type WorkflowRunEventInput } from "../../orchestration/run-events.ts";
 import { adoptInterruptedRun } from "../../orchestration/run-registry.ts";
 import {
   setRunEventJournalDirForTest,
@@ -190,7 +187,7 @@ describe("createPiHostRunEnumeration status 映射（判定核三态）", () => 
     const wsB = join(agentRoot, "sessions", "--other-slug--", "workflow-state");
     mkdirSync(wsB, { recursive: true });
     await seedRunningJournal(wsB, "wf-keep");
-    const target = join(wsA, `wf-race${RUN_EVENT_JOURNAL_SUFFIX}`);
+    const target = join(wsA, `wf-race${RUN_EVENTS_SUFFIX}`);
     // 竞态窗口模拟：候选目录 readdir 返回之后、判定核读文件之前 journal 被删
     //（枚举路径 missing 的唯一可达形态——被测模块头注）。按 path 分流拦截
     // wsA 的候选列举，其余 readdir 调用透传真实现。

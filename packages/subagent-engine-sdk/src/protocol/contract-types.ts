@@ -139,7 +139,7 @@ export interface Turn {
  * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/assembly/types.ts 注释）。
  *
  * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
- * （core journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
+ * （core event-journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
  * 无进展守护刷新判活（长工具执行期）。节流属生产者实现细节，不进协议承诺。
  *
  * armed = [D3 协议版 P6] schema 强制武装确认回执：引擎在启动期武装断言通过 +
@@ -235,7 +235,7 @@ export interface EngineHandleData {
    * [池抽象降级 2026-09-13] 原 poolKey 字段已删除——两引擎 poolKey 恒 'shared'
    * （SDK SHARED_POOL_KEY），journal 固定落 engines/<engineId>/shared/，字段零信息量。
    */
-  journalPath?: string;
+  eventsPath?: string;
   /** probe 实测版本（漂移排查锚点）。 */
   engineVersion?: string;
   /** 适配器版本（golden 样本对齐排查）。 */
@@ -254,7 +254,7 @@ export interface ResumeAnchor {
   /** 引擎定位键（pi = { recordId?, sessionFile? }；zcode = { sessionId, dbPath }）。 */
   sessionRef: Record<string, string>;
   /** journal 绝对路径（read 降级链第②级数据源；无 journal 缺省）。 */
-  journalPath?: string;
+  eventsPath?: string;
 }
 
 /** Turn → ReplayedTurn：剥离内部态（closed 恒 true——重放物无进行时语义）。 */
@@ -390,7 +390,7 @@ export interface WorktreeHandle {
 
 /**
  * 一次引擎执行的终态（协议 run 终态应答的 outcome 载荷）。锚定 core
- * orchestration AgentResult 并追加引擎层字段（engineId / engineFallback / exitCode）。
+ * orchestration AgentResult 并追加引擎层字段（engineId / exitCode）。
  */
 export interface AgentOutcome {
   content: string;
@@ -408,10 +408,8 @@ export interface AgentOutcome {
   /** 仅诊断——目录可能已被 finalize 清理，不得作为 cwd 复用。 */
   worktreePath?: string;
   toolCalls?: ToolCallEntry[];
-  /** 实际执行引擎（fallback 后可能 ≠ 请求值）。 */
+  /** 实际执行引擎。 */
   engineId: string;
-  /** fallback 留痕（record 同步投影，GUI 警告条数据源）。 */
-  engineFallback?: { from: string; reason: string };
   /** null = 被信号杀死（杀链/abort 合成终态的判据）。 */
   exitCode?: number | null;
   /**
@@ -478,7 +476,7 @@ export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/re
  *   - 判据② task（隔离与权限随任务声明）：worktree / fork / forkSource /
  *     denyTools / permissionMode；
  *   - 判据② task（诊断元数据）：description；
- *   - 判据③ ctx（环境值，引擎自推导与宿主不恒等）：model / cwd / engineFallback
+ *   - 判据③ ctx（环境值，引擎自推导与宿主不恒等）：model / cwd
  *     （对照 core orchestration/models/types.ts AgentCallOpts，协议层单列）；
  *   - 判据① 宿主自持不上协议：engine（路由决策已完成，收到的引擎即选中值）、
  *     timeoutMs（宿主超时链 mergeTimeoutSignal → cancel 帧，非引擎参数）、

@@ -58,28 +58,33 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 }));
 
 // 组合根薄接线（⑥）专用：registerWorkflowsCommand 打桩捕获第三参 lazyDeps。
-vi.mock("../interface/commands.ts", () => ({
+vi.mock("../interface/command/commands.ts", () => ({
   registerWorkflowsCommand: mockRegisterWorkflowsCommand,
 }));
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { MAX_RETAINED_DONE_RUNS } from "@zhushanwen/subagent-core";
+import { MAX_RETAINED_DONE_RUNS, noteRebuiltSettlement } from "@zhushanwen/subagent-core";
 import type { LauncherDeps, WorkflowRun } from "@zhushanwen/subagent-core";
 import { setSubagentService } from "@zhushanwen/subagent-core";
 import type { InFlightReporter } from "../host/inflight-reporter.ts";
 import type { WorkflowDomainHandle } from "../workflow-events.ts";
 import { runSettledEffects, type RunSettledEffectsEnv } from "../workflow-events.ts";
+import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 
 // 槽 key（Symbol.for 同 key 即同一 symbol——与被测实现登记的 key 一致）
-const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.workflow-domain-state");
-const DIALOG_QUEUE_KEY = Symbol.for("@zhushanwen/pi-subagents.dialogQueue");
-const SERVICE_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.service");
+// [§2.6] 槽键单源：与生产侧同取 core 的槽键常量，改键不再需要手工同步测试
+const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.workflowDomainState);
+const DIALOG_QUEUE_KEY = Symbol.for(GLOBAL_SLOT_KEYS.dialogQueue);
+const SERVICE_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.service);
 // notify ledger 槽（notify-ledger.ts NOTIFY_LEDGER_SLOT_KEY）：清空保证降级直发路径
-const NOTIFY_LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/pi-subagents.notifyLedger");
+const NOTIFY_LEDGER_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.notifyLedger);
 
 // ── fake 组件（合并去重：makePi/makeCtx/makeReporter/resetSlots/mount 各一处定义） ──
 
 const serviceDisposeSpy = vi.fn();
+// [§1.4 (a)] reload 分支的句柄作废调用 spy（fake service 必须携带该成员
+// ——生产 handler 直调 `service?.invalidatePiBinding(...)`，缺成员即 TypeError）。
+const serviceInvalidatePiBindingSpy = vi.fn();
 const storeDisposeSpy = vi.fn(async () => {});
 const queueRejectAllSpy = vi.fn();
 const reporterAttachSpy = vi.fn();
@@ -114,15 +119,25 @@ type FakeRunShape = {
 
 /** 统一 WorkflowRun 构造：notifyDone 读 trace/spec/scriptResult/calls，evict 读
  *  status/completedAt（meta.completedAt 缺省 = evict 排序不感知），preserved 统计读
- *  runId + state.calls。 */
+ *  runId + state.calls。
+ *  [D6(a) 第 1 步] evict 白名单源 = core 终局记录注册表：done 形态 fixture 必须
+ *  注入注册表条目（生产 = 活体 dispatch 链 note / 重建点 noteRebuiltSettlement），
+ *  排序键 settledAt 取 completedAt（= 帧时序）——本文件的 env.settledRecordOf 是
+ *  注入 stub，通知步语义不受影响。 */
 function makeRun(shape: FakeRunShape): WorkflowRun {
   const calls = new Map<number, unknown>();
   for (let i = 1; i <= (shape.callCount ?? 0); i += 1) calls.set(i, {});
+  const status = shape.status ?? "running";
+  if (status === "done") {
+    noteRebuiltSettlement(shape.runId, {
+      outcome: "done",
+      settledAt: shape.completedAt !== undefined ? Date.parse(shape.completedAt) : 0,
+    });
+  }
   return {
     runId: shape.runId,
     spec: {},
     state: {
-      status: shape.status ?? "running",
       reason: shape.reason,
       scriptResult: shape.scriptResult,
       calls,
@@ -254,6 +269,7 @@ function injectFakeService(): void {
     recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
     getStreamSink: () => null,
     dispose: serviceDisposeSpy,
+    invalidatePiBinding: serviceInvalidatePiBindingSpy,
   } as never);
 }
 
@@ -431,6 +447,36 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
       "[workflow-events] session_shutdown reason=reload preserved={runs:0, records:0, stores:0}",
     );
     expect(reporterDetachSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // [§1.4 (a)] reload 分支显式作废句柄：只作废 core 读面的句柄可用性判定（PS-30 窗口
+  // 消除），不动在途 run 纳管（上两例的「不 dispose / 条目保留」即纳管面证据）。
+  it("[§1.4 (a)] reload：core service 的 invalidatePiBinding 被调（reason 含 reload），dispose 不被调", async () => {
+    const { handlers, ctx } = await mountWithSession("sess-reload-invalidate");
+    await handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "reload" }, ctx);
+    expect(serviceInvalidatePiBindingSpy).toHaveBeenCalledTimes(1);
+    expect(String(serviceInvalidatePiBindingSpy.mock.calls[0]?.[0])).toContain("reload");
+    expect(serviceDisposeSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ── ② D1：session_tree（同进程分支导航，非会话替换）不作废句柄 ─────────────────
+//
+// [PS-61] pi 的 session_tree 发射 = 同进程分支导航（原地换叶子后 emit）：不 teardown、
+// 不失效 runner——pi 绑定保持有效，handler 不作废句柄。作废即断裂：唯一重臂点
+// initSession 只由 session_start 触发，tree 导航不触发 session_start，本 session 余生
+// record/notify 的 pi 写入将静默 no-op。一次性生命周期（在途 run terminate）独立成立。
+
+describe("[§1.4 (a)] session_tree：分支导航不作废句柄（tree 导航非会话替换形态）", () => {
+  it("session_tree：invalidatePiBinding 不被调 + 在途 run 照常 terminate", async () => {
+    const run = makeRun({ runId: "run-sess-tree", callCount: 1 });
+    const { handle, handlers, ctx } = await mountWithSession("sess-tree", { runs: [run] });
+    expect(handle.state.sessionState.size).toBe(1);
+
+    await handlers.get("session_tree")!({ type: "session_tree" }, ctx);
+
+    expect(serviceInvalidatePiBindingSpy).not.toHaveBeenCalled();
+    expect(mockTerminateRunningRuns).toHaveBeenCalledTimes(1);
   });
 });
 

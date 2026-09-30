@@ -4,12 +4,15 @@
 //   - M1：disposeAllRecords（parent-shutdown 等）终态化补写 records/<id>.json——曾整体
 //     缺席 → 重启后 list 不可见 + message「not found or not owned」（展示层∪动作链双失）。
 //     含 sessionFile 锚点提升（engineHandle.sessionRef.sessionFile → record.sessionFile）。
-//   - M1 自愈段：SIGKILL 打进 shutdown 窗口吞掉 fire-and-forget manifest 写时，
-//     initSession 的可重连 entry（closed + closedReason ∈ RECONNECTABLE_FINAL_REASONS）
-//     重物化 manifest。
+//   - M1 自愈段：停机竞态吞掉 manifest 写时，initSession 从主 session 的 v2 注册/终态
+//     条目对 + record 事件 journal（仅 record-created 帧的不对称窗口）收编重物化 manifest
+//     （adoptV2Orphans → adoptInterruptedRecord）。[v1 兼容层删除] 旧「可重连 entry =
+//     closed + closedReason 属可重连终态集」读形态已无载体（v2 条目不承载
+//     closedReason）——原 rematerializeReconnectableEntryManifests 出口随之失去可达输入。
 //   - [D8 v7] writeSync 接线后 fire-and-forget 停机窗构造性消灭（头两段描述为
 //     历史形态）；自愈段保留为防御纵深。
-//   - M1 负向：user-close/cancelled/gc 末条 entry 不被孤儿恢复/重物化（主动终态语义不放大）。
+//   - M1 负向：user-close/cancelled/gc 末条 entry（v2 终态条目的非 interrupted 停因）
+//     不被孤儿恢复/重物化（主动终态语义不放大）。
 //   - M2：manifest 源快照 closedReason 投影 → endedMessageGuard 三分流正确
 //     （user-close/cancelled → 主动关闭专属文案；parent-shutdown → reconnectable 文案）。
 //     曾因 manifest 不携带 closedReason，user-close 误入「closedReason: unknown +
@@ -32,14 +35,16 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
-import { toSubagentRecordEntry, SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from "../persistence/record-entry.ts";
+import { createRecordEventJournal } from "../persistence/record-events.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { endedMessageGuard } from "../assembly/subagent-actions-core.ts";
-import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
-import { isReconnectableFinalReason } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 import { makePi } from "./helpers/pi-mock.ts";
+import { v2Entries } from "./helpers/v2-record-entry.ts";
 
 function makeTmpAgentDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dispose-manifest-"));
@@ -73,15 +78,29 @@ function makeServiceOn(agentDir: string, init?: { mainSessionFile?: string }): S
   return service;
 }
 
-/** 构造一条 closed 终态的 subagent-record entry 行（archive 写点的离线形态）。 */
-function closedEntryLine(rec: Partial<SubagentRecord> & { id: string; closedReason: NonNullable<SubagentRecord["closedReason"]> }): string {
+/** 构造一条 closed 终态的 subagent-record entry 族（archive 写点的离线形态）。
+ *
+ * [v1 兼容层删除] v1 全量快照写点（toSubagentRecordEntry）已删：现行主 session 条目
+ * 契约 = 注册 + 终态两条小条目（每族两行 JSON——v2Entries 与生产写点同序）。v2 终态
+ * 条目不承载 closedReason 兼容位——该「为什么停」语义的值域完整并入 StopReason，
+ * 故缺省取 stopReason = closedReason（旧读形态的迁移值），由 v2PairToRecord 投影回
+ * stopReason；settle 形态（编排性关闭）显式传 stopReason。
+ */
+function closedEntryLines(rec: {
+  id: string;
+  /** v1 终态兼容位（v2 条目无此载体）：仅作 stopReason 缺省——旧读形态的迁移值。 */
+  closedReason?: SubagentRecord["closedReason"];
+  /** v2 终态条目的停因（settle 形态的权威位）；缺省回落 closedReason。 */
+  stopReason?: SubagentRecord["stopReason"];
+  sessionFile?: string;
+}): string {
   const full: SubagentRecord = {
     id: rec.id,
-    agent: rec.agent ?? "general-purpose",
-    task: rec.task ?? "gate b task",
-    slug: rec.slug ?? "gate-b",
+    agent: "general-purpose",
+    task: "gate b task",
+    slug: "gate-b",
     status: "idle",
-    closedReason: rec.closedReason,
+    stopReason: rec.stopReason ?? rec.closedReason,
     mode: "background",
     startedAt: 1000,
     rootSessionId: "root-session",
@@ -97,7 +116,49 @@ function closedEntryLine(rec: Partial<SubagentRecord> & { id: string; closedReas
     error: "closed due to parent-shutdown",
     sessionFile: rec.sessionFile,
   };
-  return JSON.stringify({ type: "custom", customType: SUBAGENT_RECORD_CUSTOM_TYPE, data: toSubagentRecordEntry(full) });
+  return v2Entries(full)
+    .map((data) => JSON.stringify({ type: "custom", customType: SUBAGENT_RECORD_CUSTOM_TYPE, data }))
+    .join("\n");
+}
+
+/** 播种 record 事件 journal 的 record-created 帧（真实写原语——收编路径 fold 的身份源）。
+ *
+ * [v1 兼容层删除] v2 自愈链的 manifest 物化出口 = adoptV2Orphans → adoptInterruptedRecord
+ *（「注册条目在 ∧ journal 无终局帧」的不对称窗口补写 manifest），fold 身份帧是硬前提
+ *（缺帧判 skippedNoIdentity）。v1 时代该场景由全量快照 entry 直读承接；v2 事件文件是
+ * 事实源，离线播种须与 entry 族同批造出。
+ */
+/**
+ * dispose 后的收条读取——收条由事件流承载（③：`.state` 退场）：读最后一条
+ * record-settled 帧，投影成与旧 sidecar 同形的 {status, reason, endedAt}。
+ */
+function readDisposedState(
+  agentDir: string,
+  id: string,
+): { status: string; reason?: string; endedAt?: number } {
+  const file = path.join(getSubagentRecordsDir(agentDir, agentDir), `${id}.events`);
+  const lines = fs.readFileSync(file, "utf-8").trim().split("\n");
+  const settled = lines
+    .map((l) => JSON.parse(l) as { type?: string; stopReason?: string; endedAt?: number })
+    .filter((e) => e.type === "record-settled")
+    .at(-1);
+  return { status: "idle", reason: settled?.stopReason, endedAt: settled?.endedAt };
+}
+
+async function seedCreatedJournalFrame(recordsDir: string, id: string): Promise<void> {
+  await createRecordEventJournal(recordsDir).append(id, {
+    type: "record-created",
+    ts: 1000,
+    id,
+    agent: "general-purpose",
+    task: "gate b task",
+    slug: "gate-b",
+    origin: "tool",
+    rootSessionId: "root-session",
+    depth: 0,
+    mode: "background",
+    startedAt: 1000,
+  });
 }
 
 function manifestPath(agentDir: string, id: string): string {
@@ -185,10 +246,9 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
 
     // record 本体提升（archive entry 投影随之携带）
     expect(record.sessionFile).toBe(promoted);
-    // [U5] .state 新格式收条（markSettled）：{status:"idle", stopReason, endedAt}——
-    // parent-shutdown → interrupted-by-restart（§3.2.2 host shutdown 行）；不再是
-    // 旧 {status:"finalized", reason} 死亡证明。
-    const marker = JSON.parse(fs.readFileSync(`${promoted}.state`, "utf-8")) as Record<string, unknown>;
+    // [U5] 终态收条（③ 后由事件流承载）：parent-shutdown → interrupted-by-restart
+    //（§3.2.2 host shutdown 行）；不再是旧 {status:"finalized", reason} 死亡证明。
+    const marker = readDisposedState(agentDir, "sa-promote");
     expect(marker.status).toBe("idle");
     expect(marker.reason).toBe("interrupted-by-restart");
     expect(typeof marker.endedAt).toBe("number");
@@ -227,15 +287,21 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     expect(err.message).toContain("fork-from");
   });
 
-  it("M1 自愈: manifest 被 SIGKILL 竞态吞掉时，boot 从可重连 entry 重物化反查索引", async () => {
-    // 离线形态：archive entry 已随 pi flush 落盘，但 dispose 的 manifest 写未及落盘
-    //（无 records/<id>.json、无子文件、无绑定 sidecar——重物化的唯一恢复源是 entry）。
+  it("M1 自愈: manifest 被停机竞态吞掉时，boot 从 entry 族 + journal 收编重物化反查索引", async () => {
+    // 离线形态：v2 终态条目（interrupted 族 = 编排性关闭的 settle 停因）已随 pi flush
+    // 落盘、事件文件仅 record-created 帧（「条目面先行写、journal 终局帧缺失」的不对称
+    // 窗口），manifest 写未及落盘（无 records/<id>.json、无子文件、无绑定 sidecar）。
+    // [v1 兼容层删除] v1 全量快照的 closedReason 兼容位已无载体——自愈出口从
+    // rematerializeReconnectableEntryManifests（closedReason gate，现无可达输入）转为
+    // v2 收编链 adoptV2Orphans → adoptInterruptedRecord（终局帧/条目/manifest 一次补齐）。
+    const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
     const mainSessionFile = path.join(agentDir, "main-session.jsonl");
     fs.writeFileSync(
       mainSessionFile,
-      `${closedEntryLine({ id: "sa-remat", closedReason: "parent-shutdown" })}\n`,
+      `${closedEntryLines({ id: "sa-remat", stopReason: "interrupted-by-restart" })}\n`,
       "utf-8",
     );
+    await seedCreatedJournalFrame(recordsDir, "sa-remat");
     expect(fs.existsSync(manifestPath(agentDir, "sa-remat"))).toBe(false);
 
     const restarted = makeServiceOn(agentDir, { mainSessionFile });
@@ -243,21 +309,25 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
 
     await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-remat"))).toBe(true));
     const manifest = JSON.parse(fs.readFileSync(manifestPath(agentDir, "sa-remat"), "utf-8")) as Record<string, unknown>;
-    expect(manifest.status).toBe("closed");
-    expect(manifest.closedReason).toBe("parent-shutdown");
+    // 收编 manifest 投影 = legacy running + executionStatus idle + 收编停因
+    //（v2 条目契约不承载 closedReason——旧终态兼容位随 v1 全量快照删除）
+    expect(manifest.status).toBe("running");
+    expect(manifest.executionStatus).toBe("idle");
+    expect(manifest.stopReason).toBe("interrupted-by-restart");
+    expect(manifest.closedReason).toBeUndefined();
     expect(manifest.rootSessionId).toBe("root-session");
     // 动作链同步恢复：message 分流可查（不再 not found）
     const snap = restarted.queries.lookupRecordAnyState("sa-remat");
     expect(snap?.status).toBe("idle");
-    expect(snap?.closedReason).toBe("parent-shutdown");
+    expect(snap?.closedReason).toBeUndefined();
   });
 
   it("M1 负向: user-close/cancelled/gc 末条 entry 不被重物化、不被孤儿恢复改写", async () => {
     const mainSessionFile = path.join(agentDir, "main-session.jsonl");
     const lines = [
-      closedEntryLine({ id: "sa-uc", closedReason: "user-close" }),
-      closedEntryLine({ id: "sa-cc", closedReason: "cancelled" }),
-      closedEntryLine({ id: "sa-gc", closedReason: "gc" }),
+      closedEntryLines({ id: "sa-uc", closedReason: "user-close" }),
+      closedEntryLines({ id: "sa-cc", closedReason: "cancelled" }),
+      closedEntryLines({ id: "sa-gc", closedReason: "gc" }),
     ];
     fs.writeFileSync(mainSessionFile, `${lines.join("\n")}\n`, "utf-8");
 
@@ -283,7 +353,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     const mainSessionFile = path.join(agentDir, "main-session.jsonl");
     fs.writeFileSync(
       mainSessionFile,
-      `${closedEntryLine({ id: "sa-uc2", closedReason: "user-close" })}\n`,
+      `${closedEntryLines({ id: "sa-uc2", closedReason: "user-close" })}\n`,
       "utf-8",
     );
     const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
@@ -385,16 +455,11 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       return { record, sessionFile };
     }
 
-    /** dispose 后的 .state 磁盘产物读取（新格式收条）。 */
-    function readDisposedState(sessionFile: string): { status: string; reason?: string; endedAt?: number } {
-      return JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8")) as { status: string; reason?: string; endedAt?: number };
-    }
-
     it("行 1 [chat × parent-shutdown]：.state 收条 status=idle + stopReason=interrupted-by-restart + .alive release", () => {
       const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-chat-shutdown" });
       expect(service.disposeAllRecords("parent-shutdown")).toBe(1);
 
-      const marker = readDisposedState(sessionFile);
+      const marker = readDisposedState(agentDir, record.id);
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-restart");
       expect(typeof marker.endedAt).toBe("number");
@@ -409,7 +474,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-chat-fork" });
       service.disposeAllRecords("parent-fork");
 
-      const marker = readDisposedState(sessionFile);
+      const marker = readDisposedState(agentDir, record.id);
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-parent");
       expect(record.status).toBe("idle");
@@ -418,10 +483,10 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     });
 
     it("行 3 [one-shot × parent-shutdown]：stopReason=interrupted-by-restart，重启冷查分流不依赖可重连集", () => {
-      const { sessionFile } = registerActiveRecord({ id: "sa-d8-oneshot-shutdown" });
+      registerActiveRecord({ id: "sa-d8-oneshot-shutdown" });
       service.disposeAllRecords("parent-shutdown");
 
-      const marker = readDisposedState(sessionFile);
+      const marker = readDisposedState(agentDir, "sa-d8-oneshot-shutdown");
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-restart");
       // [U5] 重建单规则：一律 idle（U3）——stopReason 只是展示位，复活资格 = 物理三件套
@@ -431,7 +496,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-oneshot-new" });
       service.disposeAllRecords("parent-new");
 
-      const marker = readDisposedState(sessionFile);
+      const marker = readDisposedState(agentDir, record.id);
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-parent");
       expect(record.status).toBe("idle");
@@ -452,7 +517,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       expect(record.status).toBe("idle");
       expect(record.closedReason).toBeUndefined();
       expect(record.stopReason).toBe("interrupted-by-restart");
-      const marker = readDisposedState(sessionFile);
+      const marker = readDisposedState(agentDir, record.id);
       expect(marker.reason).toBe("interrupted-by-restart");
 
       // boot 重认领意愿消亡：[U5/D4 MF-1] 磁盘重建单规则恒 idle + 孤儿恢复恒 idle

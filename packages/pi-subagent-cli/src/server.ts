@@ -27,14 +27,26 @@
 // 登记进 ReverseRequestClock（armEngineSelfDestruct 的辅助判据面）。
 
 import {
-  ENGINE_PROTOCOL_VERSION,
+  assembleFullTask,
+  handleInboundFrame,
+  initializeEngine,
+  notInitializedError,
+  sendReverseRequest,
+  unknownMethodError,
+  writeRunEvent,
+  type FrameLoopContext,
+  REVERSE_TIMEOUT_DEFAULT_MS,
+  toProtocolError as toProtocolErrorShared,
+  type ActiveRun,
+  type FrameWriter,
+  type ProtocolErrorPayload,
+  type ReversePending,
+} from "@zhushanwen/subagent-engine-sdk/server";
+import {
   EngineSdkError,
   assertChatConversationSupported,
   getLogger,
-  isResponseFrame,
-  isReverseRequestFrame,
   isUiResponse,
-  type AgentCallOpts,
   type AgentEvent,
   type EngineHandleData,
   type InitializeParams,
@@ -57,9 +69,6 @@ import { toErrorMessage } from "./error-message.ts";
 
 const logger = getLogger("pi-engine-cli");
 
-/** 出站帧写入面（main.ts 注入 process.stdout；测试注入内存缓冲）。 */
-export type FrameWriter = (frame: unknown) => void;
-
 /** 入站帧来源（readline 已拆行的请求帧 + 反向请求应答帧混流）。 */
 export interface EngineProtocolServerOptions {
   /** stdout 写入面（每帧一行 JSON）。 */
@@ -80,22 +89,8 @@ export interface EngineProtocolServerOptions {
   piAgentDir?: string;
 }
 
-interface ReversePending {
-  resolve: (result: unknown) => void;
-  reject: (err: Error) => void;
-  timer: NodeJS.Timeout;
-  /** 反向通道名（settle 时按通道守卫应答形态；S7 askUser 应答面守卫用）。 */
-  method: string;
-}
-
-/** 反向请求应答等待缺省上限（ms）——数据面分类 core 侧 10s，两阶段等待放宽一档兜底。 */
-const REVERSE_TIMEOUT_DEFAULT_MS = 60_000;
-
-/** 单个 run 的在途登记（cancel 帧路由 + 事件 seq 计数）。 */
-interface ActiveRun {
-  controller: AbortController;
-  seq: number;
-}
+// [§2.11] ReversePending / REVERSE_TIMEOUT_DEFAULT_MS / ActiveRun / FrameWriter 共用
+// SDK `./server` 子入口的声明单源（pi 侧 method 字段为扩展位，SDK 类型已含）。
 
 /** 构造缺省 pi 引擎（main.ts 的 server 构造缺省值；测试注入 fake）。 */
 export function createDefaultPiEngine(): PiEngine {
@@ -113,6 +108,7 @@ export class EngineProtocolServer {
   private readonly reverseTimeoutMs: number;
   /** 引擎查询面数据目录（listModels/validateModel 应答源；见 opts.piAgentDir）。 */
   private readonly queryAgentDir: string;
+  private readonly frameLoop: FrameLoopContext;
   private readonly activeRuns = new Map<string, ActiveRun>();
   private readonly reversePending = new Map<string, ReversePending>();
   /** 9 正向方法 → EnginePort 装配表（构造期冻结；表驱动分发）。 */
@@ -127,40 +123,17 @@ export class EngineProtocolServer {
     this.reverseTimeoutMs = opts.reverseTimeoutMs ?? REVERSE_TIMEOUT_DEFAULT_MS;
     this.queryAgentDir = opts.piAgentDir ?? resolvePiAgentDir();
     this.dispatchTable = this.buildDispatchTable();
+    this.frameLoop = {
+      write: this.write,
+      settleReverse: (id, frame) => this.settleReverse(id, frame),
+      dispatch: (id, method, params) => this.dispatch(id, method, params),
+      toError: (err) => toProtocolError(err),
+    };
   }
 
   /** 入站帧消费（请求帧 + 反向请求应答帧；main.ts 的行解析器拆行后喂入）。 */
   handleFrame(frame: unknown): void {
-    if (isResponseFrame(frame)) {
-      this.settleReverse(frame.id, frame);
-      return;
-    }
-    if (isReverseRequestFrame(frame)) {
-      // 引擎侧不接收反向请求（本进程是引擎）——坏帧 warn 不断流。
-      this.write({
-        id: 0,
-        error: {
-          code: "engine_protocol_bad_frame",
-          message: `unexpected reverse request frame from host: ${String(frame.method)}`,
-          recovery: "The engine protocol v1 only carries host/* requests engine→host.",
-        },
-      });
-      return;
-    }
-    if (
-      typeof frame === "object" && frame !== null && "id" in frame && "method" in frame &&
-      typeof (frame as { method: unknown }).method === "string"
-    ) {
-      const { id, method, params } = frame as { id: unknown; method: string; params?: unknown };
-      if (typeof id === "number") {
-        void this.dispatch(id, method, params).then(
-          (result) => this.write({ id, result }),
-          (err) => this.write({ id, error: toProtocolError(err) }),
-        );
-        return;
-      }
-    }
-    // 无法归类的帧：静默忽略（stdout 是独占协议通道，不回显坏帧防对端解析器混乱）。
+    handleInboundFrame(frame, this.frameLoop);
   }
 
   /** 9 正向方法 → EnginePort 装配表（协议载荷 cast 收敛在各方法适配行）。 */
@@ -187,48 +160,27 @@ export class EngineProtocolServer {
   /** 9 正向方法分发（表驱动；未知方法 → engine_protocol_unknown_method）。 */
   private async dispatch(id: number, method: string, params: unknown): Promise<unknown> {
     const handler = this.dispatchTable[method];
-    if (handler === undefined) {
-      throw new EngineSdkError(
-        "engine_protocol_unknown_method",
-        `unknown protocol method: ${method} (request id ${id})`,
-        "The engine speaks protocol v1; check the installed engine package version vs the host.",
-      );
-    }
+    if (handler === undefined) throw unknownMethodError(id, method);
     return handler(params);
   }
 
   // ── initialize：版本协商（越界 → engine_protocol_mismatch）+ 能力应答 ──
 
   private initialize(params: InitializeParams): InitializeResult {
-    if (params?.protocolVersion !== ENGINE_PROTOCOL_VERSION) {
-      throw new EngineSdkError(
-        "engine_protocol_mismatch",
-        `host protocol version ${String(params?.protocolVersion)} is not compatible with engine protocol v${ENGINE_PROTOCOL_VERSION}`,
-        `Upgrade the engine package or the host so both speak protocol v${ENGINE_PROTOCOL_VERSION}.`,
-      );
-    }
-    this.initialized = true;
-    const models = listPiModels(this.queryAgentDir);
-    return {
-      protocolVersion: ENGINE_PROTOCOL_VERSION,
+    const result = initializeEngine(params, {
       engineId: this.engine.id,
-      engineVersion: PI_ADAPTER_VERSION,
       adapterVersion: PI_ADAPTER_VERSION,
       capabilities: this.engine.capabilities(),
-      ...(models !== null ? { models: models.map((m) => ({ id: m.id })) } : {}),
-    };
+      listModels: () => listPiModels(this.queryAgentDir),
+    });
+    this.initialized = true;
+    return result;
   }
 
   // ── run：协议载荷 → 本地 AgentCallOpts/RunContext；事件 → 通知/host 通道 ──
 
   private async run(params: RunParams): Promise<{ handle: EngineHandleData; outcome: unknown }> {
-    if (!this.initialized) {
-      throw new EngineSdkError(
-        "engine_protocol_not_initialized",
-        "run before initialize is a protocol violation",
-        "The host must complete the initialize handshake before dispatching runs.",
-      );
-    }
+    if (!this.initialized) throw notInitializedError();
     if (params.resume !== undefined) this.assertResumeRunFrame(params.resume);
     const { runId, task, ctx } = params;
     const controller = new AbortController();
@@ -247,11 +199,7 @@ export class EngineProtocolServer {
 
     // task 子集 + ctx 还原 = 本地全量 AgentCallOpts（RemoteEngine.toSdkTaskSubset 镜像）。
     // cwd 有值才还原（wire additive 语义）——worktree 隔离路径的子进程 spawn cwd 载体。
-    const fullTask: AgentCallOpts = {
-      ...task,
-      ...(ctx.model !== undefined ? { model: ctx.model } : {}),
-      ...(ctx.cwd !== undefined ? { cwd: ctx.cwd } : {}),
-    };
+    const fullTask = assembleFullTask(task, ctx);
 
     try {
       const r = await this.engine.run(
@@ -304,7 +252,6 @@ export class EngineProtocolServer {
       onEvent: (event: AgentEvent) => this.emitEvent(runId, event),
       ...(ctxModel !== undefined ? { ctxModel } : {}),
       ...(stream !== undefined ? { stream } : {}),
-      ...(ctx.engineFallback !== undefined ? { engineFallback: ctx.engineFallback } : {}),
       // [F6] 根 session id 还原（relay 归属键 SESSION_ID 权威源；undefined 不挂键）
       ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
       // [Option C 协议化] 权威 subagent session 目录还原（宿主 getSubagentSessionDir
@@ -313,6 +260,8 @@ export class EngineProtocolServer {
       // [D2 扩展加载显式化] 孙进程扩展路径集还原（undefined 不挂键 = 不拼
       // --extension，协议 additive 语义）
       ...(ctx.extensionPaths !== undefined ? { extensionPaths: ctx.extensionPaths } : {}),
+      // [D4] record 身份信封还原（引擎把它整封写进任务子进程身份 env；undefined 不挂键）
+      ...(ctx.identity !== undefined ? { identity: ctx.identity } : {}),
       ...(params.resume !== undefined ? { resume: params.resume } : {}),
       onHandleReady: (partial) => {
         void this.reverseRequestInternal("host/handleReady", { runId, sessionRef: partial.sessionRef })
@@ -358,9 +307,7 @@ export class EngineProtocolServer {
   // ── 出站：事件通知 + 反向请求客户端 ──
 
   private emitEvent(runId: string, event: AgentEvent): void {
-    const active = this.activeRuns.get(runId);
-    const seq = active !== undefined ? ++active.seq : 0;
-    this.write({ method: "event", params: { runId, seq, event } });
+    writeRunEvent(this.write, this.activeRuns, runId, event);
   }
 
   /**
@@ -383,28 +330,18 @@ export class EngineProtocolServer {
   }
 
   private reverseRequestInternal(method: string, params: unknown): Promise<unknown> {
-    const id = `rev-${++this.revSeq}`;
-    return new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.reversePending.delete(id);
-        this.reverseClock?.settled(id);
-        reject(new Error(`reverse request ${method} (${id}) timed out after ${this.reverseTimeoutMs}ms`));
-      }, this.reverseTimeoutMs);
-      if (typeof timer.unref === "function") timer.unref();
-      this.reversePending.set(id, { resolve, reject, timer, method });
-      this.reverseClock?.started(id);
-      try {
-        this.write({ id, method, params });
-      } catch (err) {
-        // write 同步抛错（stdout 关闭等）：就地收口——清 pending + timer 后转
-        // reject，不让异常同步逃出 Promise executor（逃出 = pending 条目与 timer
-        // 残留，且 reject 无人消费时仍是 unhandled rejection 面）。
-        this.reversePending.delete(id);
-        clearTimeout(timer);
-        this.reverseClock?.settled(id);
-        reject(new Error(`reverse request ${method} (${id}) could not be written: ${toErrorMessage(err)}`));
-      }
-    });
+    return sendReverseRequest(
+      {
+        write: this.write,
+        pending: this.reversePending,
+        timeoutMs: this.reverseTimeoutMs,
+        ...(this.reverseClock !== undefined ? { clock: this.reverseClock } : {}),
+        nextId: () => `rev-${++this.revSeq}`,
+        pendingExtras: (method) => ({ method }),
+      },
+      method,
+      params,
+    );
   }
 
   /** 反向请求应答落位。
@@ -453,11 +390,10 @@ export class EngineProtocolServer {
 }
 
 /** unknown → 协议错误帧载荷（可操作恢复指引，规则 16）。 */
-function toProtocolError(err: unknown): { code: string; message: string; recovery: string } {
-  if (err instanceof EngineSdkError) return err.toStructured();
-  return {
-    code: "engine_run_failed",
-    message: toErrorMessage(err),
-    recovery: "Check the engine process logs (host/log stream + stderr) and rerun; if persistent, reinstall or upgrade the engine package.",
-  };
+const RUN_FAILURE_RECOVERY =
+  "Check the engine process logs (host/log stream + stderr) and rerun; if persistent, reinstall or upgrade the engine package.";
+
+/** [§2.11] 错误帧构造共用 SDK 纯函数；本引擎只提供自己的恢复指引文案。 */
+function toProtocolError(err: unknown): ProtocolErrorPayload {
+  return toProtocolErrorShared(err, RUN_FAILURE_RECOVERY);
 }

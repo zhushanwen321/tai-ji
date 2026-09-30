@@ -26,8 +26,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ListHandlerResult, StartHandlerResult, SubagentService } from "@zhushanwen/subagent-core";
 import { startHandler } from "@zhushanwen/subagent-core";
-import { adapter } from "../interface/subagent-actions.ts";
-import { SubagentParams } from "../interface/subagent-tool-schema.ts";
+import { adapter } from "../interface/gui/subagent-actions.ts";
+import { SubagentParams } from "../interface/tool/subagent-tool-schema.ts";
 import { BG_MESSAGE } from "@zhushanwen/subagent-core/execution/assembly/subagent-actions-core.ts";
 import type { ExecutionHandle, SubagentToolDetails } from "@zhushanwen/subagent-core/execution/assembly/types.ts";
 
@@ -36,7 +36,7 @@ import type { ExecutionHandle, SubagentToolDetails } from "@zhushanwen/subagent-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const SUBAGENT_TOOL_SRC = readFileSync(
-	join(__dirname, "../interface/subagent-tool.ts"),
+	join(__dirname, "../interface/tool/subagent-tool.ts"),
 	"utf-8",
 );
 

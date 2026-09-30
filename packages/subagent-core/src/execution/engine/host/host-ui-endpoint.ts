@@ -18,10 +18,9 @@
 // 加载分裂（registry.ts 同款惯例）。
 
 import type { UiRequestHandler } from "@zhushanwen/subagent-engine-sdk";
+import { GLOBAL_SLOT_KEYS } from "../../../shared/global-slots.ts";
 
-const ENDPOINT_SLOT_KEY = Symbol.for(
-  "@zhushanwen/pi-subagent-workflow.hostUiRequestEndpoint",
-);
+const ENDPOINT_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.hostUiRequestEndpoint);
 
 function endpointSlot(): { handler: UiRequestHandler | undefined } {
   let slot = Reflect.get(globalThis, ENDPOINT_SLOT_KEY) as

@@ -376,29 +376,6 @@
     "verifiedWith": "0.84.4"
   },
   {
-    "id": "PS-24",
-    "claim": "/skill:name 的展开格式 = `<skill name=\"<skillName>\" location=\"<SKILL.md abs path>\">\\nReferences are relative to <skillDir>.\\n\\n<body>\\n</skill>`（body = stripFrontmatter 剥 frontmatter 后 trim；args 有则 block + \"\\n\\n\" + args；name 缺 frontmatter 时回退父目录名）；且 get_commands 的 skill 项 name 恒带 `skill:` 前缀（`skill:${skill.name}`），sourceInfo.path 为 resolve 后绝对路径（baseDir 不可依赖：extension 覆盖链可改写、兜底形态缺字段，References 行以 dirname(path) 为准）——runtime 注入器（skill-injector）对同输入的展开输出与 pi 落盘文本逐字 golden diff 由 PS-24 探针检查（composer-multi-skill-injection D5 / 场景 8；编号自 PS-22 改——与 session-occupancy-send-closure 的 PS-22 撞号）",
-    "piAnchor": [
-      {
-        "pkg": "pi-coding-agent",
-        "distPath": "dist/core/agent-session.js",
-        "symbol": "_expandSkillCommand / getCommands（skill 项）",
-        "note": ":983-1007 展开模板 :997（stripFrontmatter :995 trim）；:1996 name: `skill:${skill.name}`（前缀实锤；:1998 为 source: \"skill\"）；name 回退父目录名 core/skills.js:244-245，sourceInfo 见 skills.js:90-110 createSkillSourceInfo（path 可依赖；baseDir 不可依赖——resource-loader.js:514-518 extension 覆盖链可改写、:612 兜底形态无该字段，References 行以 dirname(path) 为准）"
-      },
-      {
-        "pkg": "pi-coding-agent",
-        "distPath": "dist/modes/rpc/jsonl.js",
-        "symbol": "serializeJsonLine / attachJsonlLineReader",
-        "note": "帧协议 LF-only（:5-17 注释明示 readline 按 Unicode 分隔符拆帧的坑）——runtime rpc-client 的 LF-only 读取器是它的对端（D10），同一探针文件族检查"
-      }
-    ],
-    "guard": {
-      "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts"
-    },
-    "verifiedWith": "0.84.4"
-  },
-  {
     "id": "PS-21",
     "claim": "注册工具的 parameters schema 是 pi 注入给模型的权威展示面：agent-session 把注册工具装入 agent.state.tools，agent-core 每轮流式调用经 createContextSnapshot 把 state.tools 带入请求上下文，pi-ai provider 层 convertTools 对每个工具取 tool.parameters 原样映射进 provider 请求体（anthropic input_schema / openai function.parameters）——API tools 段即模型可见的 schema 全文，ASP/任务文本不放 schema 重复不影响模型拿到结构",
     "piAnchor": [
@@ -464,6 +441,29 @@
     "guard": {
       "type": "probe",
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-prompt-rejection.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-24",
+    "claim": "/skill:name 的展开格式 = `<skill name=\"<skillName>\" location=\"<SKILL.md abs path>\">\\nReferences are relative to <skillDir>.\\n\\n<body>\\n</skill>`（body = stripFrontmatter 剥 frontmatter 后 trim；args 有则 block + \"\\n\\n\" + args；name 缺 frontmatter 时回退父目录名）；且 get_commands 的 skill 项 name 恒带 `skill:` 前缀（`skill:${skill.name}`），sourceInfo.path 为 resolve 后绝对路径（baseDir 不可依赖：extension 覆盖链可改写、兜底形态缺字段，References 行以 dirname(path) 为准）——runtime 注入器（skill-injector）对同输入的展开输出与 pi 落盘文本逐字 golden diff 由 PS-24 探针检查（composer-multi-skill-injection D5 / 场景 8；编号自 PS-22 改——与 session-occupancy-send-closure 的 PS-22 撞号）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_expandSkillCommand / getCommands（skill 项）",
+        "note": ":983-1007 展开模板 :997（stripFrontmatter :995 trim）；:1996 name: `skill:${skill.name}`（前缀实锤；:1998 为 source: \"skill\"）；name 回退父目录名 core/skills.js:244-245，sourceInfo 见 skills.js:90-110 createSkillSourceInfo（path 可依赖；baseDir 不可依赖——resource-loader.js:514-518 extension 覆盖链可改写、:612 兜底形态无该字段，References 行以 dirname(path) 为准）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/modes/rpc/jsonl.js",
+        "symbol": "serializeJsonLine / attachJsonlLineReader",
+        "note": "帧协议 LF-only（:5-17 注释明示 readline 按 Unicode 分隔符拆帧的坑）——runtime rpc-client 的 LF-only 读取器是它的对端（D10），同一探针文件族检查"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-skill-expansion-golden.test.ts"
     },
     "verifiedWith": "0.84.4"
   },
@@ -602,29 +602,6 @@
     "verifiedWith": "0.84.4"
   },
   {
-    "id": "PS-30",
-    "claim": "extension stale ctx 错误文案契约：session 替换（newSession/fork/switchSession/reload）后 runner.invalidate() 把默认 message（含 'stale after session replacement'）写入 staleMessage，此后 pi API（loader.js 的 sendMessage/sendUserMessage/appendEntry 等）与 ctx 全部方法（runner.js createContext 的 compact/abort/shutdown/getContextUsage/isIdle 等）经 assertActive() 同步 throw new Error(this.staleMessage)——跨 session 存活的异步回调触碰捕获 pi/ctx 即同步抛错，无人接即 pi 进程崩溃（E1）。该文案是 ext-guards guardStaleCtx 的兜底分诊词（代际检测为主判，文案覆盖 reload 产生全新模块环境后旧闭包代数冻结的盲区）；文案变更时检查退化为全部上抛（回到现状崩溃链路，不更危险），门禁报红提示同步 STALE_CTX_MARKER",
-    "piAnchor": [
-      {
-        "pkg": "pi-coding-agent",
-        "distPath": "dist/core/extensions/runner.js",
-        "symbol": "invalidate / assertActive / createContext",
-        "note": "invalidate :396 默认 message 含 'stale after session replacement'（staleMessage 唯一写入点）；assertActive :402-406 throw new Error(this.staleMessage)；createContext :503 起 ctx 方法（compact/abort/shutdown/getContextUsage 等）逐个 this.assertActive() 前置；agent-session.js:595 session 替换时调用 invalidate"
-      },
-      {
-        "pkg": "pi-coding-agent",
-        "distPath": "dist/core/extensions/loader.js",
-        "symbol": "pi API 绑定段（bindCore 消费侧）",
-        "note": ":291-321 起——sendMessage/sendUserMessage/appendEntry/setSessionName 等每个方法 assertActive() 前置后转发共享 runtime（E1 崩溃堆栈帧 assertActive → sendUserMessage 的实装位置）"
-      }
-    ],
-    "guard": {
-      "type": "probe",
-      "test": "extensions/shared/ext-guards/src/__tests__/pi-semantics-stale-ctx-wording.test.ts"
-    },
-    "verifiedWith": "0.84.4"
-  },
-  {
     "id": "PS-29",
     "claim": "appendCustomEntry 落盘形态含 customType/data/timestamp：ExtensionAPI 的 core 绑定 appendEntry(customType, data) 直接委托 sessionManager.appendCustomEntry（同参数序、零中间变换），后者 entry 字面量固定 {type:\"custom\", customType, data, id, parentId, timestamp}——data 原样引用入参（无克隆/无字段白名单），经 _appendEntry 落盘并 emit entry_appended。rename-session 计量登记（usage-page-fixes §3.3 ③④）依赖该形态（U5 已本地 CLI 实测 P-appendEntry ✅：落盘行恰为该六字段，见实施计划状态表 U5 证据）；pi 升级若改字段名/裁剪 data/timestamp 改形，scanner ④ 分类静默失效（rename 账整桶消失，不报错），由本探针拦截",
     "piAnchor": [
@@ -648,19 +625,25 @@
     "verifiedWith": "0.84.4"
   },
   {
-    "id": "PS-36",
-    "claim": "ENV_SESSION_DIR 变量名 = PI_CODING_AGENT_SESSION_DIR：实装为模板拼接 \"${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR\"，默认发行形态 APP_NAME=\"pi\" 展开即得该名（piConfig.name 品牌化定制时变量名随 APP_NAME 漂移）——session-reader 的 [env] 根信号与 taiji 注入面（U4 退路）依赖此精确变量名",
+    "id": "PS-30",
+    "claim": "extension stale ctx 错误文案契约：session 替换（newSession/fork/switchSession/reload）后 runner.invalidate() 把默认 message（含 'stale after session replacement'）写入 staleMessage，此后 pi API（loader.js 的 sendMessage/sendUserMessage/appendEntry 等）与 ctx 全部方法（runner.js createContext 的 compact/abort/shutdown/getContextUsage/isIdle 等）经 assertActive() 同步 throw new Error(this.staleMessage)——跨 session 存活的异步回调触碰捕获 pi/ctx 即同步抛错，无人接即 pi 进程崩溃（E1）。该文案是 ext-guards guardStaleCtx 的兜底分诊词（代际检测为主判，文案覆盖 reload 产生全新模块环境后旧闭包代数冻结的盲区）；文案变更时检查退化为全部上抛（回到现状崩溃链路，不更危险），门禁报红提示同步 STALE_CTX_MARKER",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
-        "distPath": "dist/config.js",
-        "symbol": "ENV_SESSION_DIR 导出常量",
-        "note": ":406 export const ENV_SESSION_DIR = \"${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR\"；APP_NAME :400（piConfigName || \"pi\"，上溯 :398 pkg.piConfig?.name）"
+        "distPath": "dist/core/extensions/runner.js",
+        "symbol": "invalidate / assertActive / createContext",
+        "note": "invalidate :396 默认 message 含 'stale after session replacement'（staleMessage 唯一写入点）；assertActive :402-406 throw new Error(this.staleMessage)；createContext :503 起 ctx 方法（compact/abort/shutdown/getContextUsage 等）逐个 this.assertActive() 前置；agent-session.js:595 session 替换时调用 invalidate"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/extensions/loader.js",
+        "symbol": "pi API 绑定段（bindCore 消费侧）",
+        "note": ":291-321 起——sendMessage/sendUserMessage/appendEntry/setSessionName 等每个方法 assertActive() 前置后转发共享 runtime（E1 崩溃堆栈帧 assertActive → sendUserMessage 的实装位置）"
       }
     ],
     "guard": {
-      "type": "observe",
-      "note": "消费方：session-reader [env] 根信号读该变量定位托管 session 根（方案 B 先行路径不注入，U4 仅退路；纯 pi 用户手工设置同变量生效）。pi 升级时重验：dist/config.js 的 ENV_SESSION_DIR 模板与 APP_NAME 默认值是否漂移"
+      "type": "probe",
+      "test": "extensions/shared/ext-guards/src/__tests__/pi-semantics-stale-ctx-wording.test.ts"
     },
     "verifiedWith": "0.84.4"
   },
@@ -770,6 +753,23 @@
     "guard": {
       "type": "observe",
       "note": "消费方：方案 B（taiji 数据布局与 pi 同构）成立前提之一——托管数据目录内 settings.json 的 sessionDir 恒空，pi 才走默认派生（PS-34）；该字段被清除时方走默认派生（无写入方应设置它）。pi 升级时重验：getSessionDir 是否仍直读 settings.sessionDir 且无副作用、是否新增 sessionDir 写入路径"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-36",
+    "claim": "ENV_SESSION_DIR 变量名 = PI_CODING_AGENT_SESSION_DIR：实装为模板拼接 \"${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR\"，默认发行形态 APP_NAME=\"pi\" 展开即得该名（piConfig.name 品牌化定制时变量名随 APP_NAME 漂移）——session-reader 的 [env] 根信号与 taiji 注入面（U4 退路）依赖此精确变量名",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/config.js",
+        "symbol": "ENV_SESSION_DIR 导出常量",
+        "note": ":406 export const ENV_SESSION_DIR = \"${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR\"；APP_NAME :400（piConfigName || \"pi\"，上溯 :398 pkg.piConfig?.name）"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：session-reader [env] 根信号读该变量定位托管 session 根（方案 B 先行路径不注入，U4 仅退路；纯 pi 用户手工设置同变量生效）。pi 升级时重验：dist/config.js 的 ENV_SESSION_DIR 模板与 APP_NAME 默认值是否漂移"
     },
     "verifiedWith": "0.84.4"
   },
@@ -1159,6 +1159,23 @@
     "verifiedWith": "0.84.4"
   },
   {
+    "id": "PS-56",
+    "claim": "pi agent-loop 对工具 execute 返回值的错误标记约定：正常路径 return { result, isError: false }（isError 硬编码 false——execute 返回值携带的 isError 字段被丢弃，不参与判定），仅 execute throw 时 catch 分支置 isError:true 并以 createErrorToolResult(error.message) 作为 result。承重（W4 throw 范式）：pi extension 的工具错误路径必须 throw 才能对 agent 呈现 isError:true——session-manager 6 工具（callSessionManager 失败四态 cancelled/timeout/channel-error/non-json + channel {error} respond）、ask-user/scheduler/session-reader 同款；若扩展改在返回值上携带 isError 字段，agent-loop 丢弃之，错误退化为「错误标成功」（agent 无法区分成败以决定重试/放弃，违反 extension-conventions「禁止错误成功模式」）。pi 升级时重验：executePreparedToolCall 正常 return 是否仍硬编码 isError:false、catch 是否仍置 true 并经 createErrorToolResult 包装",
+    "piAnchor": [
+      {
+        "pkg": "pi-agent-core",
+        "distPath": "dist/agent-loop.js",
+        "symbol": "executePreparedToolCall 正常 return / catch 分支",
+        "note": ":452-483 函数体——:468 正常 return { result, isError: false }（硬编码 false，execute 返回值携带的 isError 字段被丢弃）；:470-476 catch 分支 :474 result = createErrorToolResult(error.message)、:475 isError: true"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-tool-error-flag.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
     "id": "PS-57",
     "claim": "pi RPC 模式 stdout JSONL 消息按写入顺序到达（FIFO）：全部协议消息（response / 事件 / extension_ui_request）汇经 rpc-mode 的 output 单点 writeRawStdout(serializeJsonLine(obj))，事件流经 session.subscribe 回调逐条 output；writeRawStdout 以 promise tail 链串行化（rawStdoutWriteTail = rawStdoutWriteTail.then(() => writeRawStdoutChunk(text))），底层 write 的异步回调与背压重试（ENOBUFS/EAGAIN/EWOULDBLOCK → 10ms 延迟重试）都在 tail 链上排队——写序 = 调用序，不并行不乱序。承重（ADR-0087 通知兑现链）：delivery 内核 onSettled 受理回执（port.send 同栈同步触发）先于其后的 agent_settled 事件被 runtime 处理——armed→injected 锚定与 settled 兑现的先后关系以 stdout FIFO 为前提。pi 升级时重验：output 是否仍单点汇入 writeRawStdout、tail 链是否仍串行化（改并行/分通道输出即失锚）",
     "piAnchor": [
@@ -1228,23 +1245,6 @@
     "verifiedWith": "0.84.4"
   },
   {
-    "id": "PS-56",
-    "claim": "pi agent-loop 对工具 execute 返回值的错误标记约定：正常路径 return { result, isError: false }（isError 硬编码 false——execute 返回值携带的 isError 字段被丢弃，不参与判定），仅 execute throw 时 catch 分支置 isError:true 并以 createErrorToolResult(error.message) 作为 result。承重（W4 throw 范式）：pi extension 的工具错误路径必须 throw 才能对 agent 呈现 isError:true——session-manager 6 工具（callSessionManager 失败四态 cancelled/timeout/channel-error/non-json + channel {error} respond）、ask-user/scheduler/session-reader 同款；若扩展改在返回值上携带 isError 字段，agent-loop 丢弃之，错误退化为「错误标成功」（agent 无法区分成败以决定重试/放弃，违反 extension-conventions「禁止错误成功模式」）。pi 升级时重验：executePreparedToolCall 正常 return 是否仍硬编码 isError:false、catch 是否仍置 true 并经 createErrorToolResult 包装",
-    "piAnchor": [
-      {
-        "pkg": "pi-agent-core",
-        "distPath": "dist/agent-loop.js",
-        "symbol": "executePreparedToolCall 正常 return / catch 分支",
-        "note": ":452-483 函数体——:468 正常 return { result, isError: false }（硬编码 false，execute 返回值携带的 isError 字段被丢弃）；:470-476 catch 分支 :474 result = createErrorToolResult(error.message)、:475 isError: true"
-      }
-    ],
-    "guard": {
-      "type": "probe",
-      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-tool-error-flag.test.ts"
-    },
-    "verifiedWith": "0.84.4"
-  },
-  {
     "id": "PS-60",
     "claim": "exec-skills 共享包消费的技能加载语义：① 四根组装序 = addAutoDiscoveredResources 内 .pi/skills → 祖先链 .agents/skills（近→远，git root 级含）→ <agentDir>/skills → ~/.agents/skills；untrusted 跳过前两族；settings skills 数组 '+/-/!' 三级优先级（'-' 强排 > '+' 强含 > '!' 排除）按根挂载过滤；同名先到先得（realPath 去重）。② 单根枚举公开导出 loadSkillsFromDir——name 派生（frontmatter name 优先）与 description 必填门 / ignore / 递归遍历横切规则随实装；坏 YAML skill 不进加载集（loader 侧拒收）。③ CONFIG_DIR_NAME = \".pi\"（node 实测）；parseFrontmatter 返回 frontmatter 供 plan-exec marker 二次读取（严格 === true，字符串 \"true\" 不误判）",
     "piAnchor": [
@@ -1276,6 +1276,52 @@
     "guard": {
       "type": "probe",
       "test": "extensions/shared/exec-skills/src/__tests__/exec-skills.test.ts"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-61",
+    "claim": "session_tree 是同进程分支导航，非会话替换形态：navigateTree 换叶子（this.agent.state.messages = sessionContext.messages 原地替换）后 emit session_tree，不 teardown、不失效 runner（runner.invalidate() 调用点全集 = dispose 内 :595 与 reload 内 :2214，两处均不在 tree 路径上），也不触发 session_start / session_shutdown；session_tree 全 dist 唯一发射点 = navigateTree（agent-session.js:2612），与 switchSession 无调用关系。互补登记替换形态触发词表：真正的会话替换全部形态都发 session_shutdown——new/fork/resume 经 teardownCurrent(reason) emit 后 dispose（agent-session-runtime.js:102-113），quit 经 dispose 直发，reload 在 oldRunner 上显式 emit（agent-session.js:2213）后 invalidate（:2214）；switchSession 亦为真替换形态：emitBeforeSwitch(\"resume\") 后 await teardownCurrent(\"resume\")（emit session_shutdown(reason:\"resume\") 后 dispose）→ createRuntime + session_start(reason:\"resume\")（agent-session-runtime.js:128-148），借 reason=\"resume\"（SessionShutdownReason 枚举 = quit|reload|new|resume|fork，无 switchSession 专用成员），入口经 commandContextActions 注入暴露（dist/modes/print-mode.js / dist/modes/interactive/interactive-mode.js / dist/modes/rpc/rpc-mode.js）；agent-session.js:595 的 ctx.switchSession() 字面量是 stale 文案对替换形态的并列列举（newSession/fork/switchSession/reload），非 tree 路径。承重：subagent-workflow 的 pi 绑定作废只允许挂在真替换形态上（reload 分支 invalidatePiBinding / 其余——含 switchSession——经 session_shutdown 非 reload 分支 dispose 收尾）——禁止挂 session_tree（作废后唯一重臂点 initSession 只由 session_start 触发，tree 导航不触发 session_start，作废即本 session 余生 record/notify 的 pi 写入静默 no-op）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "navigateTree 换叶子 + emit session_tree / invalidate 调用点全集",
+        "note": ":2608-2609 this.agent.state.messages = sessionContext.messages 原地换叶子 → :2610-2617 emit {type:\"session_tree\", newLeafId, oldLeafId, ...}（全 dist 唯一发射点，navigateTree 内）；:2213 reload 显式 emit session_shutdown(reason:\"reload\") 后 :2214 oldRunner.invalidate()；:595 dispose 内 _extensionRunner.invalidate(stale 文案将 ctx.switchSession() 与 newSession/fork/reload 并列为替换触发——switchSession 确属替换形态，见 agent-session-runtime 锚，与 tree 导航无关)"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session-runtime.js",
+        "symbol": "teardownCurrent / dispose 的 session_shutdown 发射与替换链",
+        "note": ":102-113 teardownCurrent(reason) emit session_shutdown 后 dispose；调用点 :136（switchSession 内）/:278（importFromJsonl 内）reason:\"resume\"、:160（newSession 内）reason:\"new\"、:206/:224/:241（fork 内）reason:\"fork\"；:290-293 dispose 直发 reason:\"quit\"；switchSession 本体 :128-148 = emitBeforeSwitch(\"resume\") → teardownCurrent(\"resume\") → createRuntime + session_start(reason:\"resume\")，commandContextActions 注入 dist/modes/print-mode.js:71-72、dist/modes/interactive/interactive-mode.js:1500（经 handleResumeSession :4490/:4507 直调）、dist/modes/rpc/rpc-mode.js:249-250（另有 :477 直调）；SessionShutdownReason 枚举 quit|reload|new|resume|fork 见 dist/core/extensions/types.d.ts:480"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：extensions/universal/subagent-workflow/src/workflow-events.ts session_tree handler 注释（不作废依据）与 session_shutdown reload 分支（真替换形态作废机制）；行为证据 = workflow-events.test.ts session_tree 用例（invalidatePiBinding 不被调 + 在途 run 照常 terminate）。pi 升级时重验：session_tree 发射点是否仍唯一（navigateTree）且未引入 teardown/invalidate；SessionShutdownReason 是否新增成员；switchSession 是否仍走 teardownCurrent(\"resume\") + session_start(reason:\"resume\")（改道即替换触发词表与 workflow-events 注释需重审）；tree 导航是否改为触发 session_start——任一变化即 subagent-workflow 的绑定生命周期判定需重审"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-62",
+    "claim": "CLI --model 模式串的档位后缀（'id:level'）严格解析：非法后缀 = 解析失败报错。parseModelPattern 对无法识别的 :level 后缀按 allowInvalidThinkingLevelFallback 分叉——缺省（?? true，仅 scope/模糊匹配模式走）剥后缀按前缀递归匹配并 warn；严格模式（false）把非法后缀按模型 id 一部分处理，返回 model:undefined → resolveCliModel 各 fallback 全部落空，收敛为 error 'Model ... not found' → main.js 打印 Error 后 process.exit(1)（子进程退出码 1）。pi-subagent-cli spawn 链 thinkingLevel 原样透传进 --model 后缀（无白名单收窄）正依赖此语义：非法档位显式失败（spawn run 失败可见）而非静默降级为「没指定」。pi 升级时重验：:185 缺省值是否仍 ?? true、:383/:419 严格调用点是否仍传 false——若 CLI 链改用缺省放宽，非法档位将从显式失败静默变为剥后缀降级",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/model-resolver.js",
+        "symbol": "parseModelPattern 非法后缀分叉 / resolveCliModel 严格模式调用点",
+        "note": ":184-190 非法后缀分叉——:185 allowFallback = options?.allowInvalidThinkingLevelFallback ?? true（缺省放宽），:186-189 严格模式 return { model: undefined, thinkingLevel: undefined, warning: undefined }，:191 起 scope 模式按前缀递归 + warn；:383 与 :419 resolveCliModel 两处 parseModelPattern 传 allowInvalidThinkingLevelFallback:false（CLI --model 链恒严格）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/main.js",
+        "symbol": "resolved.error → reportDiagnostics → process.exit(1)",
+        "note": ":364 resolved.error 进 diagnostics → :719 hasRuntimeErrors → :722-729 reportDiagnostics 打印 Error 后 process.exit(1)——spawn 子进程退出码 1，taiji 引擎 run 以 child error 失败可见"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方 = pi-subagent-cli spawn 链：packages/pi-subagent-cli/src/spawn-runner.ts runSpawnOnce 档位透传注释（[pi 锚点] 块）+ packages/pi-rpc/src/spawn-args.ts buildPiSubagentSpawnArgs（:222-227 --model 后缀改写）。pi 升级时人工重验 model-resolver.js :185 缺省值与 :383/:419 严格实参；无独立单测探针——非法后缀的承重行为是真实 CLI 子进程报错退出（e2e 面），单测层直调 resolveCliModel 需 stub modelRuntime，收益低"
     },
     "verifiedWith": "0.84.4"
   }

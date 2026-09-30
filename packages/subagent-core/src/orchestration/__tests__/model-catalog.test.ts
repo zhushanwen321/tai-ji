@@ -11,16 +11,16 @@ import { describe, expect, it } from "vitest";
 import {
   assertModelInCatalog,
   resolveModelInCatalog,
-  type ModelCatalogEntry,
+  type PiRegistryModelEntry,
   type ModelCatalogSource,
-} from "../model-catalog.ts";
+} from "../../shared/model-catalog.ts";
 import { assertCanonicalModelRef } from "../../shared/model-ref.ts";
 
-function makeSource(entries: ReadonlyArray<ModelCatalogEntry>): ModelCatalogSource {
+function makeSource(entries: ReadonlyArray<PiRegistryModelEntry>): ModelCatalogSource {
   return { getAvailable: () => entries };
 }
 
-const CATALOG: ReadonlyArray<ModelCatalogEntry> = [
+const CATALOG: ReadonlyArray<PiRegistryModelEntry> = [
   { provider: "prov1", id: "good-a" },
   { provider: "prov1", id: "good-b" },
   { provider: "prov2", id: "solo" },
@@ -85,7 +85,7 @@ describe("resolveModelInCatalog 未命中分类", () => {
   });
 
   it("可用清单超上限截断（20 + 余量行）", () => {
-    const many: ModelCatalogEntry[] = Array.from({ length: 25 }, (_, i) => ({
+    const many: PiRegistryModelEntry[] = Array.from({ length: 25 }, (_, i) => ({
       provider: "p",
       id: `m${i}`,
     }));

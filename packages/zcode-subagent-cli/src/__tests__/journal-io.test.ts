@@ -8,7 +8,7 @@
 //      空白行，逐项跳过不中断后续行；
 //   ③ ②级不可达语义：缺文件 / 空文件 / 零有效事件 → 空事件序列（replayJournal）
 //      或 undefined（replayJournalToSessionView，调用方落③级降级）；
-//   ④ replayJournalToSessionView：journalPath 缺省 → undefined；有事件 → SDK
+//   ④ replayJournalToSessionView：eventsPath 缺省 → undefined；有事件 → SDK
 //      eventsToSessionView 投影（source: "journal" + sessionRef.sessionId 提取）。
 //
 // 纪律：临时文件 mkdtemp 自建自删，零真实数据目录触碰。
@@ -32,7 +32,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
-function journalPath(name: string): string {
+function eventsPath(name: string): string {
   return join(dir, name);
 }
 
@@ -41,7 +41,7 @@ function line(seq: number, event: unknown): string {
   return JSON.stringify({ v: 1, ts: 1_700_000_000_000 + seq, taskId: "task-journal-test", engineId: "zcode", seq, event });
 }
 
-/** handle.data.journalPath 指向给定文件的最小 handle。 */
+/** handle.data.eventsPath 指向给定文件的最小 handle。 */
 function handleWithJournal(path: string | undefined): { data: EngineHandleData } {
   return {
     data: {
@@ -49,14 +49,14 @@ function handleWithJournal(path: string | undefined): { data: EngineHandleData }
       engineId: "zcode",
       sessionRef: { sessionId: "sess-journal-test" },
       adapterVersion: "1.0.0",
-      ...(path !== undefined ? { journalPath: path } : {}),
+      ...(path !== undefined ? { eventsPath: path } : {}),
     },
   };
 }
 
 describe("replayJournal：合法行序列", () => {
   it("seq 乱序写入 → 事件按 seq 升序返回（往返一致）", () => {
-    const p = journalPath("journal.jsonl");
+    const p = eventsPath("journal.jsonl");
     const ev0 = { type: "text_delta", delta: "第一" };
     const ev1 = { type: "text_delta", delta: "第二" };
     const ev2 = { type: "turn_end" };
@@ -65,22 +65,22 @@ describe("replayJournal：合法行序列", () => {
   });
 
   it("空行与首尾空白行容忍（split+trim 语义）", () => {
-    const p = journalPath("journal-blank.jsonl");
+    const p = eventsPath("journal-blank.jsonl");
     const ev = { type: "turn_end" };
     writeFileSync(p, `\n${line(0, ev)}\n\n   \n`, "utf8");
     expect(replayJournal(p)).toEqual([ev]);
   });
 
   it("缺文件 → []（②级不可达，不抛）", () => {
-    expect(replayJournal(journalPath("no-such-file.jsonl"))).toEqual([]);
+    expect(replayJournal(eventsPath("no-such-file.jsonl"))).toEqual([]);
   });
 
   it("空文件 / 纯坏行 → []（零有效事件）", () => {
-    const empty = journalPath("journal-empty.jsonl");
+    const empty = eventsPath("journal-empty.jsonl");
     writeFileSync(empty, "", "utf8");
     expect(replayJournal(empty)).toEqual([]);
 
-    const allBad = journalPath("journal-all-bad.jsonl");
+    const allBad = eventsPath("journal-all-bad.jsonl");
     writeFileSync(allBad, "not-json\n{\"v\":2}\n", "utf8");
     expect(replayJournal(allBad)).toEqual([]);
   });
@@ -88,7 +88,7 @@ describe("replayJournal：合法行序列", () => {
 
 describe("replayJournal：parseLine 形状 guard 逐分支（坏行跳过不中断）", () => {
   it("坏 JSON / 缺 v / v≠1 / ts 非 number / seq 非 number / event 非 object / event 缺 type 逐项跳过", () => {
-    const p = journalPath("journal-guards.jsonl");
+    const p = eventsPath("journal-guards.jsonl");
     const good1 = { type: "text_delta", delta: "ok-1" };
     const good2 = { type: "turn_end" };
     const badLines: Array<[string, string]> = [
@@ -113,20 +113,20 @@ describe("replayJournal：parseLine 形状 guard 逐分支（坏行跳过不中�
 });
 
 describe("replayJournalToSessionView：②级编排与③级降级语义", () => {
-  it("journalPath 缺省 → undefined（调用方落③级）", () => {
+  it("eventsPath 缺省 → undefined（调用方落③级）", () => {
     expect(replayJournalToSessionView(handleWithJournal(undefined), "zcode")).toBeUndefined();
   });
 
-  it("journalPath 指向缺文件 → undefined；零有效事件 → undefined（均落③级）", () => {
-    expect(replayJournalToSessionView(handleWithJournal(journalPath("missing.jsonl")), "zcode")).toBeUndefined();
+  it("eventsPath 指向缺文件 → undefined；零有效事件 → undefined（均落③级）", () => {
+    expect(replayJournalToSessionView(handleWithJournal(eventsPath("missing.jsonl")), "zcode")).toBeUndefined();
 
-    const empty = journalPath("journal-empty-2.jsonl");
+    const empty = eventsPath("journal-empty-2.jsonl");
     writeFileSync(empty, "not-json\n", "utf8");
     expect(replayJournalToSessionView(handleWithJournal(empty), "zcode")).toBeUndefined();
   });
 
   it("有事件 → SDK reducer 投影 SessionView（source journal + sessionId 提取 + turn 内容）", () => {
-    const p = journalPath("journal-view.jsonl");
+    const p = eventsPath("journal-view.jsonl");
     // 故意乱序写入，验证 seq 排序后 reducer 投影正确
     writeFileSync(p, [line(1, { type: "turn_end" }), line(0, { type: "text_delta", delta: "Hello" })].join("\n") + "\n", "utf8");
     const view = replayJournalToSessionView(handleWithJournal(p), "zcode");

@@ -101,13 +101,13 @@ describe('getSubagentEngineConfig', () => {
 describe('setSubagentDefaultEngine', () => {
   it('合法引擎：读改写 config.json（保留其他字段）+ 原子写', async () => {
     writeJson('engines.json', { v: 1, engines: ['pi', 'zcode'], updatedAt: 1 })
-    writeJson('config.json', { version: 1, maxConcurrent: 3, engineRouting: { strict: true } })
+    writeJson('config.json', { version: 1, maxConcurrent: 3, futureKey: { keep: true } })
     const svc = makeRecords()
     await svc.setSubagentDefaultEngine('zcode')
     const conf = readConfigJson()
     expect(conf['defaultEngine']).toBe('zcode')
     expect(conf['maxConcurrent']).toBe(3)
-    expect(conf['engineRouting']).toEqual({ strict: true })
+    expect(conf['futureKey']).toEqual({ keep: true }) // 未知键原样保留（向前兼容）
     // 读回视图一致
     expect(await svc.getSubagentEngineConfig()).toEqual({ engines: ['pi', 'zcode'], defaultEngine: 'zcode' })
   })
@@ -130,7 +130,7 @@ describe('setSubagentDefaultEngine', () => {
     // review round1 MUST_FIX：config.json 是多写方共享文件（runtime RMW / agent bash /
     // 用户手编），RMW 必须持 withFileLockSync（lockfile = <config.json>.lock）。
     writeJson('engines.json', { v: 1, engines: ['pi', 'zcode'], updatedAt: 1 })
-    writeJson('config.json', { version: 1, maxConcurrent: 5, engineRouting: { strict: true } })
+    writeJson('config.json', { version: 1, maxConcurrent: 5, futureKey: { keep: true } })
     const p = configPath()
     // 他方（遵守锁协议的另一写方）持同一把锁
     const release = lockfile.lockSync(p, { realpath: false })
@@ -141,11 +141,11 @@ describe('setSubagentDefaultEngine', () => {
     expect(confDuring['defaultEngine']).toBeUndefined()
     expect(confDuring['maxConcurrent']).toBe(5)
     release()
-    // 锁释放后重试成功：defaultEngine 写入，engineRouting / maxConcurrent 不被 RMW 覆盖回滚
+    // 锁释放后重试成功：defaultEngine 写入，未知键 / maxConcurrent 不被 RMW 覆盖回滚
     await makeRecords().setSubagentDefaultEngine('zcode')
     const confAfter = JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>
     expect(confAfter['defaultEngine']).toBe('zcode')
     expect(confAfter['maxConcurrent']).toBe(5)
-    expect(confAfter['engineRouting']).toEqual({ strict: true })
+    expect(confAfter['futureKey']).toEqual({ keep: true })
   })
 })

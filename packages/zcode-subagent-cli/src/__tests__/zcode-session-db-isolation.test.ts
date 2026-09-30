@@ -123,7 +123,7 @@ describe("API 链集合成员判定（EnginePort.read，D2 第二站点）", () 
     expect(view.source).toBe("native");
   });
 
-  it("dbPath = 集合外绝对路径 → 拒绝①级（reader 零触达），journalPath 缺失落 outcome-only（防任意文件读）", async () => {
+  it("dbPath = 集合外绝对路径 → 拒绝①级（reader 零触达），eventsPath 缺失落 outcome-only（防任意文件读）", async () => {
     const view = await engine.read(makeHandle({ sessionId: "sess-1", dbPath: "/tmp/attacker-chosen/db.sqlite" }));
     expect(mockedRead).not.toHaveBeenCalled();
     expect(view.source).toBe("outcome-only");

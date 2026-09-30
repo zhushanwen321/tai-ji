@@ -1,6 +1,6 @@
 ---
 name: subagent-ext-config
-description: "使用或排查 @zhushanwen/pi-subagent-workflow 的引擎路由与同步收集配置时加载。说明 config.json 三环境路径与动态推导方法、字段表（defaultEngine / engineRouting.strict / maxConcurrent / collectSync 三键）、三层路由优先级、生效时机（新 session 生效）、probe 缓存语义、collectSync 预算（perItemChars/totalChars）热读时机、验证步骤与常见错误。触发词：subagent 引擎配置、切换 subagent 引擎、defaultEngine、zcode 派发、subagent 配置在哪、engineFallback、engine_not_found、collectSync、sync collect、collect 配置、subagent-ext-config。"
+description: "使用或排查 @zhushanwen/pi-subagent-workflow 的引擎路由与同步收集配置时加载。说明 config.json 三环境路径与动态推导方法、字段表（defaultEngine / maxConcurrent / collectSync 三键）、三层路由优先级、生效时机（新 session 生效）、probe 缓存语义、collectSync 预算（perItemChars/totalChars）热读时机、验证步骤与常见错误。触发词：subagent 引擎配置、切换 subagent 引擎、defaultEngine、zcode 派发、subagent 配置在哪、engine_not_found、engine_probe_failed、engine_config_unreadable、collectSync、sync collect、collect 配置、subagent-ext-config。"
 ---
 
 # subagent-workflow 引擎路由配置指南
@@ -21,14 +21,13 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 
 **动态推导（推荐）**：agentDir 由 pi 核心 `getAgentDir()` 决定（读 `PI_CODING_AGENT_DIR`，默认 `~/.pi/agent`）；taiji 通过 `TAIJI_AGENT_DATA_DIR` 隔离数据目录。排查时先查这两个 env 变量组合出实际路径（`<agentDir>/subagents/config.json`），不要假设单一环境——写错环境的配置文件改了也不生效。
 
-文件不存在 / JSON 解析失败 / 字段缺失时全部回默认配置，不报错。旧版 `categories` / `fallback` / `yoloByDefault` 等字段读取时忽略（模型解析已退化为「主 agent model 优先」）。
+文件不存在（ENOENT，合法缺省）/ 字段缺失 → 回默认配置；**文件存在但读不出来（坏 JSON / 权限）** → 派发前显式拒绝 `engine_config_unreadable`（缺省引擎是未知量，不按内置缺省 pi 执行），修复或删除该文件后重试。旧版 `categories` / `fallback` / `yoloByDefault` 等字段读取时忽略（模型解析已退化为「主 agent model 优先」）。
 
 ## 字段表（sanitize 语义）
 
 | 字段 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `defaultEngine` | string | 缺省由路由层落 `'pi'` | 全局默认引擎。合法值 `'pi'` / `'zcode'`。坏值（非字符串/空串）**静默忽略**回缺省 pi，不报错——排查「改了 defaultEngine 却还在用 pi」时先检查 JSON 值合法性 |
-| `engineRouting.strict` | boolean | `false` | `true` = 一切 probe 失败直接报错、不做兜底回退。仅认 strict 布尔键，其余键忽略 |
+| `defaultEngine` | string | 缺省由路由层落 `'pi'` | 全局默认引擎。合法值 `'pi'` / `'zcode'`。坏值（非字符串/空串）**静默忽略**回缺省 pi，不报错——排查「改了 defaultEngine 却还在用 pi」时先检查 JSON 值合法性。指向未安装引擎时不回落：派发期报 `engine_not_found` |
 | `maxConcurrent` | number | `6` | subagent 并发池大小。正整数，非正整数/非整数回默认 |
 
 示例（最小可用）：
@@ -37,14 +36,13 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 {
   "version": 1,
   "defaultEngine": "zcode",
-  "engineRouting": { "strict": false },
   "maxConcurrent": 6
 }
 ```
 
 ## collectSync 节（同步收集）
 
-`collectSync` 控制 subagent 同步收集（`collect:"sync"` 批通知）的默认模式与结果预算。整节缺失 = 不落键，消费方兜底默认（与 defaultEngine/engineRouting 同风格）；逐字段 sanitize——坏字段回该字段默认、好字段透传（部分覆盖合法）；非对象值（字符串/null 等）整节回默认。坏值不炸启动（与 maxConcurrent 同判）。
+`collectSync` 控制 subagent 同步收集（`collect:"sync"` 批通知）的默认模式与结果预算。整节缺失 = 不落键，消费方兜底默认（与 defaultEngine 同风格）；逐字段 sanitize——坏字段回该字段默认、好字段透传（部分覆盖合法）；非对象值（字符串/null 等）整节回默认。坏值不炸启动（与 maxConcurrent 同判）。
 
 | 字段 | 类型 | 默认 | 说明 |
 |------|------|------|------|
@@ -72,13 +70,12 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 | 2 | agent `.md` frontmatter 的 `engine` 字段 |
 | 3 | config.json 的 `defaultEngine` |
 
-显式指定（层级 1/2）属「守卫命中」——probe 失败**不兜底**、直接报 `engine_probe_failed`；仅全局默认任务才走 fallback 兜底回 pi。
+三层（调用参数 / agent frontmatter / 全局缺省）任一指定了引擎，运行期就按该引擎执行——**不可用即结构化失败，不换目标**：probe 失败一律报 `engine_probe_failed`（含逐项 check 摘要与恢复指引），id 未注册报 `engine_not_found`；要换引擎只能由调用方显式改传 `engine` 参数。三层全缺时落内置缺省 `pi`（免探）。
 
 ## 生效时机与 probe 缓存
 
 - **配置读取**：pi 子进程启动 + 每次 `session_start` 各读一次，session 内不重读。改配置 → 新建 session 生效。
-- **probe 缓存**：引擎探针（zcode CLI 存在性/版本检查）成功或失败均缓存直返，**进程存活期内不重探**。
-- **engineFallback 留痕条件**：兜底回 pi（record 带 `engineFallback` 标记）只在探针**未缓存**时触发。同一 session 内先 probe 成功后 CLI 损坏，不会再触发兜底。要复现/验证 fallback 场景，必须新建 session 重置缓存。
+- **probe 缓存**：引擎探针（zcode CLI 存在性/版本检查）成功或失败均缓存直返，**进程存活期内不重探**——CLI 刚装好 / 刚损坏都要新建 session 重置缓存才会重新探测。
 
 ## 验证步骤
 
@@ -93,8 +90,9 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 
 | 症状 | 原因与处置 |
 |------|------|
-| `engine_not_found` | engine id 未注册。检查拼写，合法值仅 `pi` / `zcode` |
+| `engine_not_found` | engine id 未注册（含 `defaultEngine` 指向已卸载引擎）。检查拼写，合法值仅 `pi` / `zcode`；不回落其它引擎 |
+| `engine_probe_failed` | 引擎探针失败（CLI 缺失/版本不符）。引擎路由不换目标——修好引擎后重试，或由调用方显式改传 `engine` 参数 |
+| `engine_config_unreadable` | 全局 config.json 存在但读不出来（坏 JSON / 权限）——修复或删除该文件后重试（不按内置缺省 pi 执行） |
 | zcode 任务传 `conversation` / `fork` / `worktree` 被预检拒绝 | 这些是 pi 专属能力，zcode 不支持。改用 `engine: pi` 或不传该参数重试（预检在 record 创建前同步拒绝，可立即换引擎） |
 | 改了 `defaultEngine` 没生效 | 两种可能：① 当前 session 不重读配置——新建 session；② 值非法被静默忽略回 pi——核对 JSON 值 |
-| 期望 fallback 回 pi 却报错 | 显式指定引擎（工具参数/frontmatter）属守卫命中，probe 失败不兜底直接报错；只有走 `defaultEngine` 的任务才兜底 |
 | probe 结果与 CLI 实际状态不符 | 探针进程存活期内缓存——CLI 刚装好/刚损坏，需新建 session 重置缓存 |

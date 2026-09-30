@@ -2,14 +2,14 @@
  * Composer 工具区浮层 + progress-zone 的纯内存 fixture。
  *
  * 对应设计稿：
- * - draft-composer-states.html §2a–§2f（上下文容量 / 模型分组 / 思考 6 级 /
+ * - draft-composer-states.html §2a–§2f（上下文容量 / 模型分组 / 思考档位 /
  *   @ 引用 / # 文件 / / 命令 / 已附上下文条目）
  * - draft-companion-zones.html §1（progress-zone idle / running / done 三态）
  *
  * 纯数据：不依赖 vue/runtime，无副作用。全部 named export，无 default export。
  * token 数用原始数值（如 69000），不用字符串。
  */
-import type { ModelInfo, ProviderId } from '@taiji/shared'
+import { PI_THINKING_LEVELS, type ModelInfo, type ProviderId, type ThinkingLevel } from '@taiji/shared'
 
 // ── 1. 模型列表（provider 分组，平铺单层） ──────────────────────────────
 export interface MockModel {
@@ -51,8 +51,8 @@ export const MOCK_MODELS: MockModel[] = [
   { id: 'gemini-2.5-pro', name: 'gemini-2.5-pro', provider: 'Google', providerId: 'google', providerColor: '#4285f4' },
 ]
 
-// ── 2. 思考等级 6 级 ───────────────────────────────────────────────────
-export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+// ── 2. 思考等级（集合与顺序 = shared PI_THINKING_LEVELS 全集） ──────────
+export type { ThinkingLevel }
 
 export interface MockThinkingLevel {
   level: ThinkingLevel
@@ -61,14 +61,23 @@ export interface MockThinkingLevel {
   available: boolean
 }
 
-export const MOCK_THINKING_LEVELS: MockThinkingLevel[] = [
-  { level: 'off', label: '关', en: 'off', available: true },
-  { level: 'low', label: '低', en: 'low', available: true },
-  { level: 'medium', label: '中', en: 'medium', available: true },
-  { level: 'high', label: '高', en: 'high', available: true },
-  { level: 'xhigh', label: '极高', en: 'xhigh', available: true },
-  { level: 'max', label: '最高', en: 'max', available: true },
-]
+/** 档位展示文案（mock fixture 的展示数据；档位集合本身不在这里手写） */
+const MOCK_THINKING_LABELS: Record<ThinkingLevel, string> = {
+  off: '关',
+  minimal: '极简',
+  low: '低',
+  medium: '中',
+  high: '高',
+  xhigh: '极高',
+  max: '最高',
+}
+
+export const MOCK_THINKING_LEVELS: MockThinkingLevel[] = PI_THINKING_LEVELS.map((level) => ({
+  level,
+  label: MOCK_THINKING_LABELS[level],
+  en: level,
+  available: true,
+}))
 
 // ── 3. 上下文容量统计（§2a） ────────────────────────────────────────────
 export interface MockContextStats {

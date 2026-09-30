@@ -89,7 +89,7 @@ pi 子进程事件 → infra/pi/event-adapter(翻译) → ServerMessage(WS)
 
 **跨 store 编排在 composable 层（实例）**：⌘K 全局搜索（`useSearch`）聚合 4 源——命令内存（core `command-registry`/`command-store`）+ 文件 WS（core `file-search` 缓存，未命中调 composer domain WS + 超时 race）+ session domain（WS）+ recents（localStorage）。实现位于 core `packages/core/src/domain/new-task-search/`（`search.ts`/`search-jump.ts`/`recents.ts`），2026-09-11 由 renderer 迁入。编排归 composable 非 domain（domain 严格只调 transport+pending，编排跨 store 违反铁律），见 [ADR-0028](adr/decisions.md)。
 
-**workflow/subagent 运行态数据流（介质归位 [ADR-0078](adr/decisions.md)，record 单源 [ADR-0082](adr/decisions.md) D1）**：run 与 record 的运行态唯一事实写 = 事件流追加（run `<runId>.record.jsonl`——D1 由 `.events.jsonl` 更名、run 侧 state 快照已删，旧两件套不读不写；record `<sa-id>.events`）；主 session JSONL 每实体只写注册 + 终态两条 v2 小条目；manifest 是事件流 fold 的物化投影（可删可重建）。runtime 读请求只读内存投影——投影由「pi entry 游标 + journal tail」双增量源喂入（`packages/runtime/src/services/session/journal-projection.ts`，同实体冲突 journal 胜出），旧格式会话走 v1 惰性兼容读。崩溃恢复统一「journal 重放 + 收编」（run 侧有注册无终局 → 幂等落 run-interrupted 转暂停态；record 侧有注册无终态 → 补追加终态事件）。
+**workflow/subagent 运行态数据流（介质归位 [ADR-0078](adr/decisions.md)，record 单源 [ADR-0082](adr/decisions.md) D1）**：run 与 record 的运行态唯一事实写 = 事件流追加（run `<runId>.record.jsonl`——D1 由 `.events.jsonl` 更名、run 侧 state 快照已删，旧两件套不读不写；record `<sa-id>.events`）；主 session JSONL 每实体只写注册 + 终态两条 v2 小条目；manifest 是事件流 fold 的物化投影（可删可重建）。runtime 读请求只读内存投影——投影由「pi entry 游标 + journal tail」双增量源喂入（`packages/runtime/src/services/session/events-projection.ts`，同实体冲突 journal 胜出），旧格式会话走 v1 惰性兼容读。崩溃恢复统一「journal 重放 + 收编」（run 侧有注册无终局 → 幂等落 run-interrupted 转暂停态；record 侧有注册无终态 → 补追加终态事件）。
 
 ## 关键状态机
 
