@@ -9,9 +9,9 @@
 // ExecutionMode / RecordOrigin）、身份与谱系值对象（Epoch / AbandonedRoundMark /
 // TranscriptRef 族 / AliveMarker）及其配套的判定常量与 `ResurrectDeniedError`。
 //
-// 过渡形态：`execution/assembly/types.ts` 仍**re-export** 本文件的全部导出，故消费面
-// （~100 处 import，含 barrel）零改动；后续批次把 record 聚合（ExecutionRecord）与
-// 只读视图（SubagentRecord）等逐族迁出后，再收掉 re-export。
+// 现状：`execution/assembly/types.ts` 不再 re-export 本文件——领域词汇的权威路径 =
+// execution/domain/，消费面 import 直达本文件；record 聚合（ExecutionRecord）在同
+// 目录 record-model.ts。
 //
 // 依赖方向：本文件零内部依赖（只用 TS 内置与 SDK 类型），不得 import assembly 或
 // orchestration——这是「领域层在下」的构造性保证。

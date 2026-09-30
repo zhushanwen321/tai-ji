@@ -909,8 +909,9 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     agent: r.agent,
     status: r.status,
     closedReason: r.closedReason,
-    // [U2 additive] 展示维度随投影持久化（register/archive/reportRecordTransition
-    // 全部写点均经本投影 → toSubagentRecordEntry）；undefined 自然缺省，旧 entry 零迁移。
+    // [U2 additive] 展示维度随本投影进读面与 bound/settle manifest 物化；持久化面
+    // 已换源 = v2 条目构造器直取字段 + 事件流 fold 重建（v1 全量快照 entry 已停写，
+    // 不再经本投影）；undefined 自然缺省，旧 entry 零迁移。
     stopReason: r.stopReason,
     mode: r.mode,
     slug: r.slug,
@@ -944,9 +945,10 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     // archive entry 双写点均经本投影）。[modeless 波3] collectMode 投影随字段消亡删除。
     // undefined 经 JSON.stringify 自然缺省，旧 entry 零迁移。
     batchFinalized: r.batchFinalized,
-    // [H2 W1] 来源身份两字段随本投影持久化（register/archive/reportRecordTransition
-    // 全部写点均经本投影 → toSubagentRecordEntry）。漏投影则 entry 无 origin，重启后
-    // 重建链拿不到来源、D1 投影过滤全失效（同型先例：H1 U5 缺字段事故）。
+    // [H2 W1] 来源身份两字段的持久化通路 = v2 注册条目（toRegisteredEntryData 直取）
+    // + binding 身份域单源（identityBindingPayload）+ 事件流 fold 重建；漏载荷则
+    // entry 无 origin，重启后重建链拿不到来源、D1 投影过滤全失效（同型先例：H1 U5
+    // 缺字段事故）。
     // [W0 / D1] stepIndex 同族随投影持久化——漏投影则 entry 恒无 stepIndex（run 视图
     // 关联键静默缺失）。undefined 经 JSON.stringify 自然缺省，存量 record 序列化字节
     // 不变（零迁移）。
