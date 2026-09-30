@@ -72,7 +72,7 @@ import {
   type WorkflowRunEvent,
 } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
-import { rebuildBudget, runAccountingFromEvents } from "@zhushanwen/subagent-core";
+import { errorLogsFromEvents, rebuildBudget, runAccountingFromEvents } from "@zhushanwen/subagent-core";
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── [W1 / D1] v2 条目读面（注册定界 + 终态条目抑制）────────────────
@@ -472,8 +472,10 @@ function foldRecordStreamToRun(
   const spec = rebuildRunSpecFromEntries(created, reg, resolveSpecBudgetMs(created, events));
   // [§2.1b] 会计重建：v2 终态条目带活体口径 usedTokens/callCount → 真值优先；条目缺席
   // 回落 agent-settled.result.usage 的同一加权口径（下界近似，含 usedCost）。
-  // errorLogs 无持久面 → 空数组（明确接受的已知形态，见 core run-accounting.ts 头注）。
   const budget = rebuildBudget(settled, events);
+  // [§2.1 errorLogs 持久化 / ADR-0093] 诊断日志重建：worker-log 帧 → errorLogs（与活体
+  // 写入同语义：按序 + 尾部上限裁剪）。此前无持久面、重启即空。
+  const errorLogs = errorLogsFromEvents(events);
 
   const drafts = collectRunCallDrafts(events);
 
@@ -496,7 +498,7 @@ function foldRecordStreamToRun(
         budget,
         calls,
         trace,
-        errorLogs: [],
+        errorLogs,
       },
       {
         startedAt: startedAtIso,
@@ -518,7 +520,7 @@ function foldRecordStreamToRun(
       budget,
       calls,
       trace,
-      errorLogs: [],
+      errorLogs,
       // 成功终局无 error；失败终局带帧 reason 文本（不落 generic 恢复文案）
       ...(reason !== "completed" && settledEvent.reason !== undefined ? { error: settledEvent.reason } : {}),
     },

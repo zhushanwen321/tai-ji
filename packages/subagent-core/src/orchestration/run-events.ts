@@ -58,10 +58,11 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import { getLogger } from "../core/logger.ts";
+import { MAX_ERROR_LOGS } from "./worker-message-pump-constants.ts";
 // [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-journal.ts（与 record 事件
 // journal 共用同一实现体，差异经策略注入——本文件只提供 run 域策略）。
 import { JsonlEventJournal } from "../shared/jsonl-event-journal.ts";
-import type { AgentFailureKind, AgentResult, DoneReason } from "./models/types.ts";
+import type { AgentFailureKind, AgentResult, DoneReason, WorkerLogEntry } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 
 // ── 终态双维度（D5-1 → [D2] 四态重构）────────────────────────
@@ -279,6 +280,7 @@ export const RUN_EVENT_TYPES = [
   "run-interrupted",
   "run-resumed",
   "run-settled",
+  "worker-log",
 ] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
@@ -526,6 +528,20 @@ export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:f
 }
 
 /** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */
+/**
+ * worker 诊断日志帧（[§2.1 errorLogs 持久化] ADR-0093）。
+ *
+ * **不参与生命周期状态机**：诊断面与状态面正交——fold 显式跳过本类事件（见
+ * foldRunEventCheckpoint），故不占 RUN_TRANSITIONS 表行，也不受终态吸收约束（run
+ * 终局后迟到的诊断日志不会把 fold 判成坏帧）。唯一消费面 = `errorLogsFromEvents`
+ * 重建（与活体写入同语义：按序追加 + 尾部上限裁剪）。
+ */
+export interface WorkerLogEvent extends EventEnvelope { // oe-exempt:20260930:framework:workflow/record 协议契约类型——诊断事件帧（单实现常态，与既有 run 事件族同款豁免）
+  type: "worker-log";
+  /** 诊断条目（level + message，与活体 errorLogs 条目同形）。 */
+  entry: WorkerLogEntry;
+}
+
 export interface RunSettledEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "run-settled";
   outcome: RunOutcome;
@@ -547,7 +563,8 @@ export type WorkflowRunEvent =
   | PhaseSettledEvent
   | RunInterruptedEvent
   | RunResumedEvent
-  | RunSettledEvent;
+  | RunSettledEvent
+  | WorkerLogEvent;
 
 /**
  * 写侧入参形态：事件去掉 seq（seq 由 journal 单写者分配——单调性的构造性保证，
@@ -1237,6 +1254,13 @@ export function foldRunEventCheckpoint(
     if (typeof seq === "number" && seq <= checkpoint.lastSeq) {
       continue;
     }
+    // 诊断事件（worker-log）不进状态机：诊断面与状态面正交，且终态是吸收态——若让
+    // 它走 transition，run 终局后迟到的诊断日志会把 fold 判成坏帧。水位仍推进，避免
+    // tail 消费方每轮重读同一批诊断行。
+    if (event.type === "worker-log") {
+      checkpoint = { ...checkpoint, lastSeq: typeof seq === "number" ? seq : checkpoint.lastSeq };
+      continue;
+    }
     try {
       const { state } = transition(checkpoint.state, event);
       const { asks, phases } = applyAskFoldEvent(checkpoint.asks, checkpoint.phases, event);
@@ -1285,6 +1309,21 @@ export function foldRunEventFrames(
   onBrokenFrame: (err: unknown, lastType: string) => void,
 ): RunLifecycleState {
   return foldRunEventCheckpoint(events, onBrokenFrame).state;
+}
+
+/**
+ * worker-log 帧 → errorLogs 重建（[§2.1 errorLogs 持久化] ADR-0093）。
+ *
+ * 语义与活体写入单点同构（worker-message-pump 的 appendErrorLogs）：按事件序追加 +
+ * 尾部上限裁剪（`MAX_ERROR_LOGS`）。重启后折叠 record 流即可恢复诊断日志——此前
+ * errorLogs 无任何持久面，重启即空。
+ */
+export function errorLogsFromEvents(events: readonly WorkflowRunEvent[]): WorkerLogEntry[] {
+  const logs: WorkerLogEntry[] = [];
+  for (const event of events) {
+    if (event.type === "worker-log") logs.push(event.entry);
+  }
+  return logs.length > MAX_ERROR_LOGS ? logs.slice(-MAX_ERROR_LOGS) : logs;
 }
 
 // ── journal 实装（createRunEventJournal——本模块唯一 IO 边）────

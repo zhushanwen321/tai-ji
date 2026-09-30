@@ -155,6 +155,14 @@ const runSettledFailed: WorkflowRunEvent = {
   artifactsDir: "/record-fixture/wf-1758-a1",
 };
 
+/** [ADR-0094] 诊断帧样本（不进状态机；重建面 errorLogsFromEvents 消费）。 */
+const workerLogSample: WorkflowRunEvent = {
+  type: "worker-log",
+  seq: 12,
+  ts: TS + 250_000,
+  entry: { level: "error", message: "worker blew up" },
+};
+
 const runSettledCompleted: WorkflowRunEvent = {
   type: "run-settled",
   seq: 11,
@@ -215,6 +223,8 @@ function labelOf(event: WorkflowRunEvent): string {
       return `run-resumed:${event.host ?? "none"}`;
     case "run-settled":
       return `run-settled:${event.outcome}:${event.errorCode ?? "none"}`;
+    case "worker-log":
+      return `worker-log:${event.entry.level}:${event.entry.message}`;
   }
   const _exhaustive: never = event;
   return _exhaustive;
@@ -223,7 +233,7 @@ function labelOf(event: WorkflowRunEvent): string {
 // ── 词表 ─────────────────────────────────────────────────────
 
 describe("事件词表（D5 → [D4] 对齐 pi）", () => {
-  it("RUN_EVENT_TYPES 恰好 9 个成员（[D4] agent-* 对齐 + phase-*/run-interrupted/run-resumed 新增；armed 随 [D5] 删、member-pool 随 [D6] 绑定消解删；无 world-run 族——脚本 API 面无子进程调用通道）", () => {
+  it("RUN_EVENT_TYPES 恰好 10 个成员（[D4] agent-* 对齐 + phase-*/run-interrupted/run-resumed 新增；armed 随 [D5] 删、member-pool 随 [D6] 绑定消解删；无 world-run 族——脚本 API 面无子进程调用通道；worker-log 随 [ADR-0094] 诊断日志持久化新增，**不进状态机**故不占转移表行）", () => {
     expect(RUN_EVENT_TYPES).toEqual([
       "run-created",
       "phase-started",
@@ -234,6 +244,7 @@ describe("事件词表（D5 → [D4] 对齐 pi）", () => {
       "run-interrupted",
       "run-resumed",
       "run-settled",
+      "worker-log",
     ]);
   });
 
@@ -306,6 +317,7 @@ describe("判别联合 exhaustive（无 default 吞噬）", () => {
       runResumed,
       runSettledFailed,
       runSettledCompleted,
+      workerLogSample,
     ];
     expect(new Set(samples.map((e) => e.type))).toEqual(new Set(RUN_EVENT_TYPES));
   });
@@ -503,6 +515,7 @@ const triggerSamples: Record<RunEventType | ControlTriggerType, TransitionTrigge
   "run-interrupted": runInterrupted,
   "run-resumed": runResumed,
   "run-settled": runSettledFailed,
+  "worker-log": { type: "worker-log", entry: { level: "error", message: "boom" }, ts: 1_700_000_000_000 },
   "cancel-requested": { type: "cancel-requested", reason: "user abort" },
 };
 
@@ -619,12 +632,12 @@ describe("转移表完整性", () => {
     }
   });
 
-  it("表规模快照：15 行 / 14 个合法 (lifecycle × 事件) 组合 / 36 个表外组合（5 × 10 = 50 全积）——[D2] dispatched 并入 running、armed 三行随 [D5] 删、member-pool 三行随 [D6] 删、新增 run-interrupted 两行 + run-resumed 一行 + phase 三行", () => {
+  it("表规模快照：15 行 / 14 个合法 (lifecycle × 事件) 组合 / 41 个表外组合（5 × 11 = 55 全积）——[D2] dispatched 并入 running、armed 三行随 [D5] 删、member-pool 三行随 [D6] 删、新增 run-interrupted 两行 + run-resumed 一行 + phase 三行；[ADR-0094] worker-log 是诊断帧、不进状态机故无表行（表外组合 +5 = 每个 lifecycle 一个）", () => {
     expect(RUN_TRANSITIONS).toHaveLength(15);
     const legalKeys = new Set(RUN_TRANSITIONS.map((r) => `${r.from}|${r.on}`));
     expect(legalKeys.size).toBe(14);
-    expect(ALL_RUN_LIFECYCLES.length * ALL_TRIGGER_TYPES.length).toBe(50);
-    expect(50 - legalKeys.size).toBe(36);
+    expect(ALL_RUN_LIFECYCLES.length * ALL_TRIGGER_TYPES.length).toBe(55);
+    expect(55 - legalKeys.size).toBe(41);
   });
 
   it("[D2] interrupted 唯一出边 = run-resumed（暂停态无特例转移行、无 guard——终局/取消在 interrupted 态表外 fail-fast，非「终局了却没死透」）", () => {

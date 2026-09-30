@@ -70,6 +70,7 @@ import type {
   AgentResult,
   DoneReason,
   RunStatus,
+  WorkerLogEntry,
 } from "./models/types.ts";
 
 const logger = getLogger("subagents");
@@ -217,6 +218,37 @@ export function runEventJournalPathOf(runId: string): string | undefined {
  * `journalDir` = per-call 目录（决策 2 收编链注入，缺省模块锚）；测试防线
  * （NoopJournal 形态 dir=""）返回 undefined——零写域不做真目录读）。
  */
+/**
+ * 诊断事件落账（[§2.1 errorLogs 持久化] ADR-0093）：worker 诊断日志进 record 流的唯一写点。
+ *
+ * 为什么放本模块：journal append 的单写者纪律规定「唯一合法调用方 = terminal-actions」
+ * （见 run-events.ts 的 RunEventJournal 注释）——pump 经本函数落账而不是自己 append，
+ * 纪律的物理边界不被撑破。
+ *
+ * 语义：**best-effort**——诊断面不得影响 run 生命周期，落账失败只 warn 留痕（活体
+ * errorLogs 已在内存里，重启重建面少这几条不改变终局语义）。append 实装内同步完成
+ * （appendFileSync），seq 由 journal 分配。
+ *
+ * 目录：缺省模块锚（pi 壳内 pump 与 terminal-actions 同进程，推导一致）；runtime
+ * 收编链有显式目录时经 `journalDir` 传入。
+ */
+export function appendRunDiagnosticEvent(runId: string, entry: WorkerLogEntry, journalDir?: string): void {
+  try {
+    const { journal } = resolveRunEventJournal(journalDir);
+    journal.append(runId, { type: "worker-log", entry, ts: Date.now() }).catch((err: unknown) => {
+      runEventLogger.warn("[subagents] worker-log 诊断事件落账失败（run 生命周期不受影响）", {
+        runId,
+        detail: toErrorMessage(err),
+      });
+    });
+  } catch (err) {
+    runEventLogger.warn("[subagents] worker-log 诊断事件落账失败（run 生命周期不受影响）", {
+      runId,
+      detail: toErrorMessage(err),
+    });
+  }
+}
+
 export function runEventJournalDirOf(journalDir?: string): string | undefined {
   const { dir } = resolveRunEventJournal(journalDir);
   return dir === "" ? undefined : dir;

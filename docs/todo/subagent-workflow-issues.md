@@ -85,6 +85,12 @@
   - 测试：core 新增 `orchestration/__tests__/run-accounting.test.ts`（6 例：加权口径 /
     缺 usage 帧 / 非 settled 帧不计 / 条目真值优先 / maxTimeMs 条件式）；core 237 文件
     与扩展 76 文件全绿。
+- **errorLogs 持久化已落（2026-09-30，ADR-0094）**：run 事件词表新增诊断帧 `worker-log`（载荷 `entry: {level,message}`）——worker 的 `console.*` 捕获与主线程 log 消息在追加 `run.state.errorLogs` 的同时落账（活体写入与落账共用单点 `appendErrorLogs`；落账唯一写点 = terminal-actions 的 `appendRunDiagnosticEvent`，journal 单写者纪律不变），重建面 = `errorLogsFromEvents(events)`（按序 + `slice(-MAX_ERROR_LOGS)`，与活体同语义），壳 `jsonl-run-store.ts` 三个重建点由 `errorLogs: []` 改用该函数。
+  - **诊断帧不进生命周期状态机**（刻意）：`foldRunEventCheckpoint` 显式跳过并推进 seq 水位——诊断面与状态面正交，且 terminal 是吸收态，若走 `transition`，run 终局后迟到的诊断日志会把 fold 判成坏帧；故不占 `RUN_TRANSITIONS` 表行（词表 9 → 10，表外组合 36 → 41）。
+  - 落账 best-effort：写失败只 warn 留痕，不影响 run 生命周期（活体 errorLogs 已在内存）。
+  - 测试：core 新增两文件 11 例（诊断帧折叠跳过三形态 + 水位推进 + 重建面顺序/上限/空流；写入侧三例含 workerLogs 回带顺序与「非诊断消息不落帧」），壳新增 2 例（loadAll 重建带 errorLogs / 旧流无诊断帧仍空数组不拒绝）；core 238 文件 3638 例、扩展 77 文件 939 例全绿。
+- 剩余（非阻塞）：`run-accounting.ts` 头注里「errorLogs 无持久面」的旧表述已同批更新；本条不再有未做项。
+
 ### 2.2 run 生命周期状态判定散布（9 处以上）+ 展示层映射未归并（2026-09-30 核实修正）
 
 - 状态表达位置（登记原列 7 处，实测 9 处以上）：`WorkflowRun.state.status` 两态（聚合根，v1 兼容层）、`WorkflowRunMeta.interruptedAt` 标记、record 事件流 fold 五态（唯一权威）、DoneReason 五因、RunOutcome 四值、shared `WorkflowRunStatus` 第三份字面量副本，外加登记未列的 `shared/workflow.ts` 的 `WorkflowDoneReason` 与 `WorkflowRunOutcome` / `WORKFLOW_RUN_OUTCOME_ALL`、runtime `workflow-extractor.ts:69/:72` 的两份副本、`assembly/types.ts:58` 的 `ExecutionStatus`。映射有单点（doneReasonToRunOutcome）但单点两侧仍是两套词表。**值级一致性断言只有 outcome 轴有**（`packages/runtime/test/workflow-outcome-vocab-parity.test.ts`），status 轴没有。

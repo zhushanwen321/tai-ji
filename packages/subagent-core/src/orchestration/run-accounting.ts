@@ -19,7 +19,8 @@
 // 与 v2 终态条目的关系：条目带活体口径的 `usedTokens`/`callCount`（写点取
 // `state.budget.usedTokens`），**有真值时优先用条目**，本函数只作条目缺席时的兜底。
 //
-// errorLogs 无任何持久面（worker 的 `console.*` 捕获不进 record）；重建面保持空数组，
+// errorLogs 已由 worker-log 诊断帧持久化（[ADR-0093]）——重建走 run-events 的
+// errorLogsFromEvents，本模块只管会计口径；
 // 这是明确接受的已知形态，不是遗漏。
 import { Budget } from "./models/budget.ts";
 import type { WorkflowRunEvent } from "./run-events.ts";

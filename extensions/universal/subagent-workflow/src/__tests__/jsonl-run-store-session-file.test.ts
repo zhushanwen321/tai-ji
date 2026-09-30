@@ -150,6 +150,37 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     expect(restored[0]!.spec.budgetTimeMs).toBe(600_000);
   });
 
+  it("[§2.1 / ADR-0094] loadAll round-trip: worker-log 诊断帧 → run.state.errorLogs 重建（此前重启即空）", async () => {
+    const runId = "run-rt-error-logs";
+    const recordPath = appendRecordLine(tmpDir, runId, {
+      type: "run-created", seq: 1, ts: 1000, runId, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')",
+    });
+    appendRecordLine(tmpDir, runId, { type: "worker-log", seq: 2, ts: 1500, entry: { level: "warn", message: "w1" } });
+    appendRecordLine(tmpDir, runId, { type: "worker-log", seq: 3, ts: 1600, entry: { level: "error", message: "e1" } });
+    appendRecordLine(tmpDir, runId, { type: "run-settled", seq: 4, ts: 2000, outcome: "done", artifactsDir: tmpDir });
+
+    const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const restored = await store.loadAll();
+    expect(restored[0]!.state.errorLogs).toEqual([
+      { level: "warn", message: "w1" },
+      { level: "error", message: "e1" },
+    ]);
+  });
+
+  it("[§2.1 / ADR-0094] 无诊断帧的旧 journal → errorLogs 空数组（不因新帧类型而拒绝旧流）", async () => {
+    const runId = "run-rt-error-logs-legacy";
+    const recordPath = appendRecordLine(tmpDir, runId, {
+      type: "run-created", seq: 1, ts: 1000, runId, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')",
+    });
+    appendRecordLine(tmpDir, runId, { type: "run-settled", seq: 2, ts: 2000, outcome: "done", artifactsDir: tmpDir });
+
+    const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
+    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const restored = await store.loadAll();
+    expect(restored[0]!.state.errorLogs).toEqual([]);
+  });
+
   it("loadAll round-trip: 旧格式帧（无 budgetTimeMs）/ 0 值 → spec 无预算（不限时，与 core 侧等价）", async () => {
     const legacyId = "run-rt-budget-legacy";
     const legacyPath = appendRecordLine(tmpDir, legacyId, { type: "run-created", seq: 1, ts: 1000, runId: legacyId, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')" });

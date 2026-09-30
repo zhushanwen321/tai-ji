@@ -324,3 +324,13 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：① 静默换引擎等于替调用方改写意图——沙箱类任务被静默卸除安全能力、显式 model 与引擎 provider 的绑定被打破；② 「显式指定」与「该引擎不可用」是两个独立事实，后者不改变前者——把不可用降级为「换个引擎跑」会让失败不可见，用户在非预期引擎上拿到结果；③ 引擎清单与 manifest 在派发前同步可得，不可用应前置暴露并给恢复指引，宽容回落面没有服务对象。
 
 **登记**：设计规格权威源 [subagent-engine-protocolization.md](../architecture/subagent-engine-protocolization.md) §3.8 D4；约束 C-ext-16 描述随本裁决更新（entry 不因路由回落增 engine 系字段）；未新增约束族。
+
+### ADR-0094 worker 诊断日志入 record 流：errorLogs 重启后可重建（2026-09-30 用户裁决）
+**决策**：run 事件词表新增 `worker-log` 帧（载荷 `entry: {level, message}`）。worker 的 `console.*` 捕获与主线程 log 消息在追加 `run.state.errorLogs` 的同时**落账**，落账唯一写点 = `orchestration/terminal-actions.ts` 的 `appendRunDiagnosticEvent`（journal append 的单写者纪律不变：pump 经它写，不自己 append）。重建面 = `orchestration/run-events.ts` 的 `errorLogsFromEvents(events)`（按事件序追加 + `slice(-MAX_ERROR_LOGS)` 尾部裁剪，与活体写入同语义），壳 `jsonl-run-store.ts` 的三个重建点由「`errorLogs: []`」改用该函数。落账为 **best-effort**：写失败只 warn 留痕，不影响 run 生命周期（活体 errorLogs 已在内存，重建面少几条不改变终局语义）。
+
+`worker-log` **不进生命周期状态机**：`foldRunEventCheckpoint` 显式跳过该事件（并推进 seq 水位），故不占 `RUN_TRANSITIONS` 表行。
+
+**依据**：① 诊断日志的价值集中在「run 崩了/失败了之后」——重启即空等于在最需要现场时没有现场（此前 errorLogs 无任何持久面）。② 刻意不进状态机：诊断面与状态面正交，若让它走 `transition`，run 终局后迟到的诊断日志会撞上「terminal 是吸收态、任何事件 fail-fast」而把 fold 判成坏帧，进而丢掉后续判读；不占表行也避免把诊断事件写进转移表这份状态机权威。③ 单写者纪律保持：落账仍在 terminal-actions 内，pump 只经函数调用触达。④ 体量可控：`MAX_ERROR_LOGS` = 500 条上限，实测 run journal 每 run 2-20 条量级，诊断帧随 run 生命周期同清理（统一保留维护轮）。
+
+**登记**：事件词表 `RUN_EVENT_TYPES` 由 9 增至 10（journal 事件；控制事件词表不变），`WorkflowRunEvent` 联合新增 `WorkerLogEvent`。无新约束族；机器检查面 = run-events 的词表/转移表穷尽测试（新增样本）+ 本条的诊断帧折叠与重建单测（core）+ 壳重建单测。
+
