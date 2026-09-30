@@ -12,8 +12,12 @@
 // `.githooks/check-engine-sdk-boundary.mjs` / `scripts/check-engine-package-boundary.mjs`）；
 // SDK 是两个引擎唯一的共同依赖。
 import { toErrorMessage } from "../error-message.ts";
+import { ENGINE_PROTOCOL_VERSION } from "../protocol/engine-protocol.ts";
+import type { AgentEvent } from "../protocol/contract-types.ts";
 import { EngineSdkError } from "../protocol/error-codes.ts";
 import { isResponseFrame, isReverseRequestFrame } from "../protocol/frames.ts";
+import type { InitializeParams, InitializeResult } from "../protocol/methods.ts";
+import type { ReverseRequestClock } from "../spawn.ts";
 
 /** 出站帧写入面（各引擎 main.ts 注入 process.stdout；测试注入内存缓冲）。 */
 export type FrameWriter = (frame: unknown) => void;
@@ -159,4 +163,107 @@ export function handleInboundFrame(frame: unknown, ctx: FrameLoopContext): Inbou
     case "ignore":
       return action;
   }
+}
+
+// ── [§2.11 第三批] 反向请求客户端 / 运行事件通知 / 初始化握手（两引擎逐字同文部分） ──
+//
+// 留在各引擎的部分：应答侧 `settleReverse`（pi 的两阶段 ack + askUI 应答面检查 vs zcode
+// ack 即结算，**语义不同不得合并**）、9 方法表本体、`run` 前门。这里只抽发送侧与握手。
+
+/**
+ * 反向请求发送（引擎 → 宿主请求的发出与等待登记）。
+ *
+ * 语义（两条都是踩过坑的）：
+ *   - 计时兜底在**发出侧**武装——应答侧不重复武装，两阶段 ack 只延长等待而不重置计时。
+ *   - `write` 同步抛错（stdout 关闭等）就地收尾：清 pending + 停 timer + 记 clock 后转
+ *     reject；不让异常同步逃出 Promise executor（逃出 = pending 条目与 timer 残留，
+ *     且 reject 无人消费时仍是 unhandled rejection 面）。
+ */
+export interface ReverseRequestSendContext { // oe-exempt:20260930:framework:SDK 协议面契约类型——两引擎反向请求发送侧共用注入面（引擎包不得依赖 core，契约落 SDK）
+  write: FrameWriter;
+  pending: Map<string, ReversePending>;
+  timeoutMs: number;
+  clock?: ReverseRequestClock;
+  /** 请求 id 分配（各引擎可带自己的前缀与计数器）。 */
+  nextId(): string;
+  /** 实现特有的 pending 附加字段（pi 记 `method` 供应答面检查用；zcode 不记）。 */
+  pendingExtras?(method: string): Partial<ReversePending>;
+}
+
+export function sendReverseRequest(
+  ctx: ReverseRequestSendContext,
+  method: string,
+  params: unknown,
+): Promise<unknown> {
+  const id = ctx.nextId();
+  return new Promise<unknown>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ctx.pending.delete(id);
+      ctx.clock?.settled(id);
+      reject(new Error(`reverse request ${method} (${id}) timed out after ${ctx.timeoutMs}ms`));
+    }, ctx.timeoutMs);
+    if (typeof timer.unref === "function") timer.unref();
+    ctx.pending.set(id, { resolve, reject, timer, ...(ctx.pendingExtras?.(method) ?? {}) });
+    ctx.clock?.started(id);
+    try {
+      ctx.write({ id, method, params });
+    } catch (err) {
+      ctx.pending.delete(id);
+      clearTimeout(timer);
+      ctx.clock?.settled(id);
+      reject(new Error(`reverse request ${method} (${id}) could not be written: ${toErrorMessage(err)}`));
+    }
+  });
+}
+
+/** 运行事件通知帧（`seq` 单调：无在途登记时取 0，仅作占位而非序号源）。 */
+export function writeRunEvent(
+  write: FrameWriter,
+  activeRuns: Map<string, ActiveRun>,
+  runId: string,
+  event: AgentEvent,
+): void {
+  const active = activeRuns.get(runId);
+  const seq = active !== undefined ? ++active.seq : 0;
+  write({ method: "event", params: { runId, seq, event } });
+}
+
+/** 初始化握手所需的最小上下文（版本协商共用；引擎实例面与适配器版本由引擎注入）。 */
+export interface InitializeHandshakeContext { // oe-exempt:20260930:framework:SDK 协议面契约类型——两引擎初始化握手共用注入面（引擎包不得依赖 core，契约落 SDK）
+  /** 引擎实例 id（`EnginePort.id`）。 */
+  engineId: string;
+  /** 引擎包自己的适配器版本常量（各包独立版本号）。 */
+  adapterVersion: string;
+  /** 能力位（`EnginePort.capabilities()` 的返回值）。 */
+  capabilities: InitializeResult["capabilities"];
+  /** 可用模型列表；`null` = 本引擎不提供（应答里不带 models 字段）。 */
+  listModels(): Array<{ id: string }> | null;
+}
+
+/**
+ * 初始化握手：协议版本协商（越界 → `engine_protocol_mismatch`）+ 能力与模型应答。
+ *
+ * 版本比对用严格相等：v1 系列内仍以 `ENGINE_PROTOCOL_VERSION` 为准（宿主与引擎同批发布），
+ * 放宽比对会让「装了旧引擎」静默通过，后续方法缺失才炸在更远处。
+ */
+export function initializeEngine(
+  params: InitializeParams,
+  ctx: InitializeHandshakeContext,
+): InitializeResult {
+  if (params?.protocolVersion !== ENGINE_PROTOCOL_VERSION) {
+    throw new EngineSdkError(
+      "engine_protocol_mismatch",
+      `host protocol version ${String(params?.protocolVersion)} is not compatible with engine protocol v${ENGINE_PROTOCOL_VERSION}`,
+      `Upgrade the engine package or the host so both speak protocol v${ENGINE_PROTOCOL_VERSION}.`,
+    );
+  }
+  const models = ctx.listModels();
+  return {
+    protocolVersion: ENGINE_PROTOCOL_VERSION,
+    engineId: ctx.engineId,
+    engineVersion: ctx.adapterVersion,
+    adapterVersion: ctx.adapterVersion,
+    capabilities: ctx.capabilities,
+    ...(models !== null ? { models: models.map((m) => ({ id: m.id })) } : {}),
+  };
 }

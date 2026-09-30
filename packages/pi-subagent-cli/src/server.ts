@@ -28,7 +28,10 @@
 
 import {
   handleInboundFrame,
+  initializeEngine,
+  sendReverseRequest,
   unknownMethodError,
+  writeRunEvent,
   type FrameLoopContext,
   REVERSE_TIMEOUT_DEFAULT_MS,
   toProtocolError as toProtocolErrorShared,
@@ -38,7 +41,6 @@ import {
   type ReversePending,
 } from "@zhushanwen/subagent-engine-sdk/server";
 import {
-  ENGINE_PROTOCOL_VERSION,
   EngineSdkError,
   assertChatConversationSupported,
   getLogger,
@@ -164,23 +166,14 @@ export class EngineProtocolServer {
   // ── initialize：版本协商（越界 → engine_protocol_mismatch）+ 能力应答 ──
 
   private initialize(params: InitializeParams): InitializeResult {
-    if (params?.protocolVersion !== ENGINE_PROTOCOL_VERSION) {
-      throw new EngineSdkError(
-        "engine_protocol_mismatch",
-        `host protocol version ${String(params?.protocolVersion)} is not compatible with engine protocol v${ENGINE_PROTOCOL_VERSION}`,
-        `Upgrade the engine package or the host so both speak protocol v${ENGINE_PROTOCOL_VERSION}.`,
-      );
-    }
-    this.initialized = true;
-    const models = listPiModels(this.queryAgentDir);
-    return {
-      protocolVersion: ENGINE_PROTOCOL_VERSION,
+    const result = initializeEngine(params, {
       engineId: this.engine.id,
-      engineVersion: PI_ADAPTER_VERSION,
       adapterVersion: PI_ADAPTER_VERSION,
       capabilities: this.engine.capabilities(),
-      ...(models !== null ? { models: models.map((m) => ({ id: m.id })) } : {}),
-    };
+      listModels: () => listPiModels(this.queryAgentDir),
+    });
+    this.initialized = true;
+    return result;
   }
 
   // ── run：协议载荷 → 本地 AgentCallOpts/RunContext；事件 → 通知/host 通道 ──
@@ -321,9 +314,7 @@ export class EngineProtocolServer {
   // ── 出站：事件通知 + 反向请求客户端 ──
 
   private emitEvent(runId: string, event: AgentEvent): void {
-    const active = this.activeRuns.get(runId);
-    const seq = active !== undefined ? ++active.seq : 0;
-    this.write({ method: "event", params: { runId, seq, event } });
+    writeRunEvent(this.write, this.activeRuns, runId, event);
   }
 
   /**
@@ -346,28 +337,18 @@ export class EngineProtocolServer {
   }
 
   private reverseRequestInternal(method: string, params: unknown): Promise<unknown> {
-    const id = `rev-${++this.revSeq}`;
-    return new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.reversePending.delete(id);
-        this.reverseClock?.settled(id);
-        reject(new Error(`reverse request ${method} (${id}) timed out after ${this.reverseTimeoutMs}ms`));
-      }, this.reverseTimeoutMs);
-      if (typeof timer.unref === "function") timer.unref();
-      this.reversePending.set(id, { resolve, reject, timer, method });
-      this.reverseClock?.started(id);
-      try {
-        this.write({ id, method, params });
-      } catch (err) {
-        // write 同步抛错（stdout 关闭等）：就地收口——清 pending + timer 后转
-        // reject，不让异常同步逃出 Promise executor（逃出 = pending 条目与 timer
-        // 残留，且 reject 无人消费时仍是 unhandled rejection 面）。
-        this.reversePending.delete(id);
-        clearTimeout(timer);
-        this.reverseClock?.settled(id);
-        reject(new Error(`reverse request ${method} (${id}) could not be written: ${toErrorMessage(err)}`));
-      }
-    });
+    return sendReverseRequest(
+      {
+        write: this.write,
+        pending: this.reversePending,
+        timeoutMs: this.reverseTimeoutMs,
+        ...(this.reverseClock !== undefined ? { clock: this.reverseClock } : {}),
+        nextId: () => `rev-${++this.revSeq}`,
+        pendingExtras: (method) => ({ method }),
+      },
+      method,
+      params,
+    );
   }
 
   /** 反向请求应答落位。
