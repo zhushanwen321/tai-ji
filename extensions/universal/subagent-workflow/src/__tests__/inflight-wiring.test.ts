@@ -63,7 +63,7 @@ import {
   SUBAGENT_INFLIGHT_MARKER,
   isSubagentInFlightReport,
 } from "@zhushanwen/extension-protocol";
-import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
+import { GLOBAL_SLOT_KEYS, setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
 // 通知账本重置导出（beforeEach 显式清空；session_start 装配链按 ctx entries 重水合）
 import { _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
 import subagentsExtension from "../index.ts";
@@ -71,7 +71,7 @@ import subagentsExtension from "../index.ts";
 process.setMaxListeners(50);
 
 function resetLifecycleSlots(): void {
-  for (const key of ["@zhushanwen/subagent-core.service", "@zhushanwen/subagent-core.modelService"]) {
+  for (const key of [GLOBAL_SLOT_KEYS.service, GLOBAL_SLOT_KEYS.modelService]) {
     const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
     if (slot) slot.current = null;
   }

@@ -89,14 +89,14 @@ import { NOTIFY_ACK_CUSTOM_TYPE, NOTIFY_CUSTOM_TYPE, NOTIFY_LEDGER_CUSTOM_TYPE, 
 import { setupSessionLifecycle } from "../session-lifecycle.ts";
 import subagentsExtension from "../index.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
-import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
+import { GLOBAL_SLOT_KEYS, setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /** 重置双 Service 单例槽（setter 不接受 null，测试清理用 Symbol 直写；
  *  key 与生产 getServiceSlot / getModelServiceSlot 的 Symbol.for 一致）。 */
 function resetLifecycleSlots(): void {
-  for (const key of ["@zhushanwen/subagent-core.service", "@zhushanwen/subagent-core.modelService"]) {
+  for (const key of [GLOBAL_SLOT_KEYS.service, GLOBAL_SLOT_KEYS.modelService]) {
     const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
     if (slot) slot.current = null;
   }

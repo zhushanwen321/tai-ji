@@ -144,6 +144,7 @@ import { registerSubagentTool } from "../interface/tool/subagent-tool.ts";
 // 组 1「new 分支」/ 组 3 观察面：单例访问器 + 双 Service 假类（mock 实例，与被测
 // 装配消费同一模块图——模块图单实例后静态引用即被测引用）。
 import {
+  GLOBAL_SLOT_KEYS,
   ModelConfigService,
   setModelConfigService,
   setSubagentService,
@@ -161,7 +162,7 @@ process.setMaxListeners(50);
  *  防线外兜底——防真实 service-bootstrap 经其他导入面写槽后跨用例泄漏，与
  *  index-session-start 先例同款）。 */
 function resetLifecycleSlots(): void {
-  for (const key of ["@zhushanwen/subagent-core.service", "@zhushanwen/subagent-core.modelService"]) {
+  for (const key of [GLOBAL_SLOT_KEYS.service, GLOBAL_SLOT_KEYS.modelService]) {
     const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
     if (slot) slot.current = null;
   }

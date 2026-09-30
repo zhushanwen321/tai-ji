@@ -98,7 +98,7 @@ function makeRun(
 function resetSlots(): void {
   Reflect.deleteProperty(globalThis, WORKFLOW_DOMAIN_SLOT_KEY);
   Reflect.deleteProperty(globalThis, DIALOG_QUEUE_KEY);
-  for (const key of ["@zhushanwen/subagent-core.service", "@zhushanwen/subagent-core.modelService"]) {
+  for (const key of [GLOBAL_SLOT_KEYS.service, GLOBAL_SLOT_KEYS.modelService]) {
     const slot = Reflect.get(globalThis, Symbol.for(key)) as { current: unknown } | undefined;
     if (slot) slot.current = null;
   }
