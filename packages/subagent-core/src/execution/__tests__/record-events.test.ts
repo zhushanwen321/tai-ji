@@ -36,7 +36,7 @@ import {
   RECORD_EVENT_TYPES,
   recordEventsPath,
   RECORD_EVENTS_SUFFIX,
-  RECORD_JOURNAL_HEADER_TYPE,
+  RECORD_EVENTS_HEADER_TYPE,
   toRecordJournalHeader,
   type RecordCreatedEvent,
   type RecordJournalEvent,
@@ -108,19 +108,19 @@ describe("词表钉住（D3 映射表逐项对应——恰好 6 类）", () => {
   });
 
   it("头行 type 与事件词表命名空间不相交（头行不是事件——fold 不会误吞）", () => {
-    expect(RECORD_EVENT_TYPES).not.toContain(RECORD_JOURNAL_HEADER_TYPE);
+    expect(RECORD_EVENT_TYPES).not.toContain(RECORD_EVENTS_HEADER_TYPE);
   });
 });
 
 describe("首行头行形态（写侧契约：文件创建时恰一行）", () => {
-  it("头行序列化形态 = {\"type\":\"record-journal\",\"id\":...}", () => {
-    expect(JSON.stringify(toRecordJournalHeader("sa-1"))).toBe('{"type":"record-journal","id":"sa-1"}');
+  it("头行序列化形态 = {\"type\":\"record-events\",\"id\":...}", () => {
+    expect(JSON.stringify(toRecordJournalHeader("sa-1"))).toBe('{"type":"record-events","id":"sa-1"}');
   });
 
   it("isRecordJournalHeader 判定（id 非空字符串）", () => {
-    expect(isRecordJournalHeader({ type: "record-journal", id: "sa-1" })).toBe(true);
-    expect(isRecordJournalHeader({ type: "record-journal" })).toBe(false);
-    expect(isRecordJournalHeader({ type: "record-journal", id: "" })).toBe(false);
+    expect(isRecordJournalHeader({ type: "record-events", id: "sa-1" })).toBe(true);
+    expect(isRecordJournalHeader({ type: "record-events" })).toBe(false);
+    expect(isRecordJournalHeader({ type: "record-events", id: "" })).toBe(false);
     expect(isRecordJournalHeader({ type: "record-created", id: "sa-1" })).toBe(false);
     expect(isRecordJournalHeader(null)).toBe(false);
   });
@@ -202,7 +202,7 @@ describe("行解析（parseRecordEventLine / parseRecordEventFileLine）", () =>
 
   it("文件行解析：空行与头行静默跳过（undefined 且非坏 JSON 形态）", () => {
     expect(parseRecordEventFileLine("")).toBeUndefined();
-    expect(parseRecordEventFileLine('{"type":"record-journal","id":"sa-1"}')).toBeUndefined();
+    expect(parseRecordEventFileLine('{"type":"record-events","id":"sa-1"}')).toBeUndefined();
     expect(parseRecordEventFileLine('{"type":"record-created","seq":1,"ts":1}')).toMatchObject({
       type: "record-created",
       seq: 1,

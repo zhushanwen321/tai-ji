@@ -58,7 +58,7 @@ function scanRecordEventsFor(agentDir: string, id: string): Array<Record<string,
       .split("\n")
       .filter((l) => l.trim().length > 0)
       .map((l) => JSON.parse(l) as Record<string, unknown>)
-      .filter((e) => e.type !== "record-journal");
+      .filter((e) => e.type !== "record-events");
   } catch {
     return [];
   }

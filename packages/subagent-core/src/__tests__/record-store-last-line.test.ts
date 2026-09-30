@@ -82,7 +82,7 @@ describe("孤儿恢复与子文件末行内容解耦（超长末行 / 截断行�
     fs.writeFileSync(
       path.join(rootDir, "records", `${id}.events`),
       [
-        JSON.stringify({ type: "record-journal", id }),
+        JSON.stringify({ type: "record-events", id }),
         JSON.stringify({
           type: "record-created", seq: 1, ts: 1000, id, agent: "worker", task: "t", slug: "s",
           origin: "tool", rootSessionId: "session-main", depth: 0, mode: "background", startedAt: 1000,
@@ -168,7 +168,7 @@ describe("孤儿恢复与子文件末行内容解耦（超长末行 / 截断行�
     fs.writeFileSync(
       path.join(rootDir, "records", "orphan-empty.events"),
       [
-        JSON.stringify({ type: "record-journal", id: "orphan-empty" }),
+        JSON.stringify({ type: "record-events", id: "orphan-empty" }),
         JSON.stringify({
           type: "record-created", seq: 1, ts: 1000, id: "orphan-empty", agent: "worker", task: "t",
           slug: "s", origin: "tool", rootSessionId: "session-main", depth: 0, mode: "background", startedAt: 1000,

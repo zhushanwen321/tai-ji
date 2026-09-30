@@ -83,7 +83,7 @@ function assertValidRecordId(id: string): void {
 // ── 首行头行形态（D3「无后缀的代价补偿」）─────────────────────
 
 /** 头行 type 判别值（与事件词表的 type 命名空间不相交——头行不是事件）。 */
-export const RECORD_JOURNAL_HEADER_TYPE = "record-journal";
+export const RECORD_EVENTS_HEADER_TYPE = "record-events";
 
 /**
  * 事件文件首行头行：`{"type":"record-journal","id":"..."}`。
@@ -94,21 +94,21 @@ export const RECORD_JOURNAL_HEADER_TYPE = "record-journal";
  * 时落，见 FileRecordEventJournal）。
  */
 export interface RecordJournalHeader { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
-  type: typeof RECORD_JOURNAL_HEADER_TYPE;
+  type: typeof RECORD_EVENTS_HEADER_TYPE;
   /** record id（= 文件主名 sa-id）。 */
   id: string;
 }
 
 /** 头行序列化形态（append 首写时落盘的 JSON 单行）。 */
 export function toRecordJournalHeader(id: string): RecordJournalHeader {
-  return { type: RECORD_JOURNAL_HEADER_TYPE, id };
+  return { type: RECORD_EVENTS_HEADER_TYPE, id };
 }
 
 /** 值级头行判定（JSON.parse 产物 → 头行形状校验；fold/scan 命中即跳过）。 */
 export function isRecordJournalHeader(value: unknown): value is RecordJournalHeader {
   if (typeof value !== "object" || value === null) return false;
   const rec = value as { type?: unknown; id?: unknown };
-  return rec.type === RECORD_JOURNAL_HEADER_TYPE && typeof rec.id === "string" && rec.id.length > 0;
+  return rec.type === RECORD_EVENTS_HEADER_TYPE && typeof rec.id === "string" && rec.id.length > 0;
 }
 
 // ── 事件词表（D3 映射表，恰好 6 类）────────────────────────────

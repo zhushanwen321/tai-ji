@@ -878,7 +878,7 @@ describe("RecordStore", () => {
       };
       fs.writeFileSync(
         recordEventsPath(recordsDir, id),
-        `${JSON.stringify({ type: "record-journal", id })}\n${JSON.stringify(created)}\n`,
+        `${JSON.stringify({ type: "record-events", id })}\n${JSON.stringify(created)}\n`,
         "utf-8",
       );
     }
@@ -1452,7 +1452,7 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
     const firstLine = fs
       .readFileSync(recordEventsPath(recordsDir, "sa-v2-reg"), "utf8")
       .split("\n")[0]!;
-    expect(JSON.parse(firstLine)).toEqual({ type: "record-journal", id: "sa-v2-reg" });
+    expect(JSON.parse(firstLine)).toEqual({ type: "record-events", id: "sa-v2-reg" });
   });
 
   it("register 幂等：revive / 重启后重注册不重复落 created 帧与注册条目", async () => {
@@ -1673,7 +1673,7 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
     store.markSettled(rec, "interrupted-by-parent");
 
     const events = v2ReadEventLines(recordsDir, "sa-v2-seq").filter(
-      (e) => (e.type as string) !== "record-journal",
+      (e) => (e.type as string) !== "record-events",
     );
     // 事件行（排除头行后 6 条）seq = 1..6 严格递增。
     expect(events.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6]);
