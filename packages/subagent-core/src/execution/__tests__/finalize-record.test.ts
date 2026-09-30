@@ -48,7 +48,8 @@ import { doFinalizeRecord, doFinalizeRoundToIdle } from "../persistence/finalize
 import { ManifestStore } from "../persistence/manifest-store.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
-import type { AgentResult, ExecutionRecord, WorktreeHandle } from "../assembly/types.ts";
+import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import type { WorktreeHandle } from "../assembly/types.ts";
 
 function makeMinimalRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   return {
@@ -86,6 +87,22 @@ function makeMinimalResult(): AgentResult {
     sessionId: "sess-1",
     toolCalls: [],
   };
+}
+
+/** 终态收条读取（③：`.state` 退场，收条 = 事件流最后一条 record-settled 帧）。 */
+function lastSettledEvent(
+  recordsDir: string,
+  id: string,
+): { stopReason?: string; endedAt?: number } | undefined {
+  const file = path.join(recordsDir, `${id}.events`);
+  if (!fs.existsSync(file)) return undefined;
+  return fs
+    .readFileSync(file, "utf-8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l) as { type?: string; stopReason?: string; endedAt?: number })
+    .filter((e) => e.type === "record-settled")
+    .at(-1);
 }
 
 describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
@@ -162,7 +179,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
     }
   });
 
-  it("manifest write 抛错时 cleanup-first 顺序仍执行（终态原语内 .state 先于 manifest）", async () => {
+  it("manifest write 抛错时 cleanup-first 顺序仍执行（终态原语内终态落盘先于 manifest）", async () => {
     // record 带 sessionFile 让终态原语走真实 .state/.alive 路径；
     // 不设 worktreeHandle → Step 0 (collectPatch) 和 worktree cleanup 都跳过。
     // [U2a] manifest 写失败经 store 内部 fire-and-forget catch（record-store
@@ -183,10 +200,12 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
 
     // mock writeManifest 抛错（模拟 disk full）。在 mock 内捕获「writeManifest 被调用时
     // finalized marker 是否已存在」——这是终态原语内部写序的关键断言：D8 v7 要求
-    // `.state` writeSync 先、manifest 后（若有人反转写序，本标志会是 false）。
+    // manifest 先、写权释放后（若有人反转写序，本标志会是 false）。终态权威在本
+    // 用例里是事件流，但本用例刻意不接 manifestDir（事件面无接线）——故写序锚点取
+    // 「写权仍持有」这一可观测事实（release 之前 manifest 必须已落盘）。
     const finalizedBeforeManifestWrite = { value: false };
     vi.spyOn(manifestStore, "writeManifest").mockImplementation(async () => {
-      finalizedBeforeManifestWrite.value = fs.existsSync(`${sessionFile}.state`);
+      finalizedBeforeManifestWrite.value = fs.existsSync(`${sessionFile}.alive`);
       throw new Error("disk full");
     });
     loggerMock.error.mockClear();
@@ -198,8 +217,8 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
       doFinalizeRecord(deps, record, makeMinimalResult(), "closed"),
     ).resolves.toBeUndefined();
 
-    // ── 核心 claim 2：终态权威 .state 真实写入 ──
-    expect(fs.existsSync(`${sessionFile}.state`)).toBe(true);
+    // ── 核心 claim 2：写权在 manifest 写失败后仍被释放（收口不因写失败卡住）──
+    expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
 
     // ── 核心 claim 3：.alive 被移除（release 出口①——预写的 .alive 不再存在）──
     expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
@@ -224,9 +243,9 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
     // ── 核心 claim 7：manifest 实际未写入（writeManifest 抛错被吞咽）──
     expect(await manifestStore.readManifest("rec-cleanup-first")).toBeNull();
 
-    // ── 核心 claim 8：[D8 v7] 终态原语内部写序 —— .state 先于 manifest ──
-    // 若有人把 manifest 写前移到 .state 之前，mock 捕获时刻 .state 尚未写入，
-    // 本标志会是 false（D8 写序不变量：终态权威优先落）。
+    // ── 核心 claim 8：[D8 v7] 写序 —— manifest 先于写权释放 ──
+    // 若有人把 release 前移到 manifest 之前，mock 捕获时刻 .alive 已不在，
+    // 本标志会是 false。
     expect(finalizedBeforeManifestWrite.value).toBe(true);
 
     // 清理 mock 调用记录防污染
@@ -234,56 +253,12 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
     loggerMock.error.mockClear();
   });
 
-  it("[B1/§3.4] markFinalized 返回 false（.state 重试耗尽）→ 响亮 entry 上报 + 零持久化副作用 + cleanup 编排不跳过", async () => {
-    // 终态写失败（磁盘满/权限）语义：record 留 running（磁盘无终态位、不 archive、
-    // 不删 .alive），GUI 通知面腿 = subagent:state-write-failed entry（日志 error 腿
-    // 由 state-marker/store 层完成，此处断言编排层接线）；worktree cleanup 等
-    // 副作用继续（幂等，不可被写失败跳过——否则 worktree 泄漏）。
-    vi.mocked(writeFinalizedState).mockReturnValueOnce(false);
-    const sessionFile = path.join(tmpDir, "session-fail.jsonl");
-    fs.writeFileSync(sessionFile, "{}\n", "utf-8");
-    fs.writeFileSync(
-      `${sessionFile}.alive`,
-      `${JSON.stringify({ pid: process.pid, id: "rec-write-fail", startedAt: 1000 })}\n`,
-      "utf-8",
-    );
-    const record = makeMinimalRecord({ id: "rec-write-fail", sessionFile });
-    const deps = makeDeps();
-    const cleanup = vi.fn().mockResolvedValue(undefined);
-    (deps as { worktreeManager: unknown }).worktreeManager = { cleanup };
-    // 「record 留 running」口径（U1 偏差 5）= 磁盘面（无 .state）+ 不 archive：
-    // record 未 register 进内存（doFinalizeRecord 不 register），未 archive 以 spy 钉。
-    const archiveSpy = vi.spyOn(deps.store as RecordStore, "archive");
-
-    await expect(
-      doFinalizeRecord(deps, record, makeMinimalResult(), "closed", "gc"),
-    ).resolves.toBeUndefined();
-
-    // 响亮 entry 上报（§3.4 GUI 通知面——U1 偏差 6 的接线点）
-    expect(deps.pi!.appendEntry).toHaveBeenCalledWith(
-      "subagent:state-write-failed",
-      expect.objectContaining({ id: "rec-write-fail", status: "closed", closedReason: "gc" }),
-    );
-    expect(loggerMock.error).toHaveBeenCalledWith(
-      expect.stringContaining("terminal state write failed"),
-    );
-    // 零持久化副作用（D8 失败语义）：无 .state / 无 manifest / .alive 未删 / 未 archive
-    expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
-    expect(await manifestStore.readManifest("rec-write-fail")).toBeNull();
-    expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
-    expect(archiveSpy).not.toHaveBeenCalled();
-    // 副作用编排继续：worktree cleanup / emitUnregister 不被写失败跳过
-    expect(cleanup).toHaveBeenCalledTimes(0); // 本用例 record 无 worktreeHandle
-    expect(deps.emitUnregister).toHaveBeenCalledWith("rec-write-fail", "closed");
-    loggerMock.error.mockClear();
-  });
-
-  // ── [T1/PS-9] sessionFile 缺失 → sessionDir 反查后 marker/alive 清理仍落地 ──
+  // ── [T1/PS-9] sessionFile 缺失 → sessionDir 反查后终态收条/alive 清理仍落地 ──
   //
-  // PS-9：finalize 的 tombstone/finalized sidecar 与 removeAliveMarker 全部 gated on
-  // record.sessionFile——RC-1（握手失败）+ LC-4（收尾反查未命中）的残余形态下，
-  // 「sessionFile 缺失 → 终态原因丢失 + alive marker 残留」。修复：sessionFile 缺失时
-  // 用 deps.sessionDir 按 identity（record.id）反查真实 session 文件作依据。
+  // PS-9：finalize 的终态收条与 removeAliveMarker 全部 gated on record.sessionFile——
+  // RC-1（握手失败）+ LC-4（收尾反查未命中）的残余形态下，「sessionFile 缺失 → 终态
+  // 原因丢失 + alive marker 残留」。修复：sessionFile 缺失时用 deps.sessionDir 按
+  // identity（record.id）反查真实 session 文件作依据。
   // 真实 fs + tmp 目录（与文件既有策略一致）：session JSONL 写入 identity custom entry
   //（子进程 session_start hook 的写入形态），readIdentityHeader/readIdentityTail 真实解析。
   describe("[T1/PS-9] sessionFile 缺失 sessionDir 反查", () => {
@@ -309,7 +284,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
       return sessionFile;
     }
 
-    it("sessionFile 缺失 + 反查命中 → .state 落盘 + .alive 清理 + record/manifest 回填", async () => {
+  it("sessionFile 缺失 + 反查命中 → 终态收条落账 + .alive 清理 + record/manifest 回填", async () => {
       const sessionFile = writeSessionFileWithIdentity("20260901T12000000_ps9.jsonl", "rec-ps9");
       // 预写 .alive 残留（模拟 running 期崩溃恢复窗口的 marker）
       fs.writeFileSync(
@@ -324,11 +299,8 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
 
       // 反查回填 record.sessionFile
       expect(record.sessionFile).toBe(sessionFile);
-      // 终态原因持久化不再丢失（closedReason gc 写入 .state 的 reason 字段）
-      expect(JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8"))).toEqual({
-        status: "finalized",
-        reason: "gc",
-      });
+      // 终态原因持久化不再丢失（closedReason 写入 record-settled 帧的 stopReason）
+      expect(lastSettledEvent(tmpDir, "rec-ps9")?.stopReason).toBe("gc");
       // alive marker 不再残留
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
       // manifest 拿到真实 sessionFile（诊断/重建源不再失真）
@@ -344,12 +316,9 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
       await doFinalizeRecord(deps, record, makeMinimalResult(), "closed", "cancelled");
 
       expect(record.sessionFile).toBe(sessionFile);
-      const marker = JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8")) as {
-        status: string;
-        endedAt: number;
-      };
-      expect(marker.status).toBe("cancelled");
-      expect(typeof marker.endedAt).toBe("number");
+      const settled = lastSettledEvent(tmpDir, "rec-ps9c");
+      expect(settled).toBeDefined();
+      expect(typeof settled?.endedAt).toBe("number");
     });
 
     it("反查未命中（目录无 identity 匹配文件）→ 不抛、sessionFile 保持缺失、无 marker（行为退回修复前）", async () => {
@@ -376,8 +345,8 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
   //   cancelled → .state {status:"cancelled", endedAt}（重建还原 cancelled 语义 + 精确结束时间）
   //   其余 reason → .state {status:"finalized", reason}（真实 reason 进 sidecar，重建还原 closedReason）
   // 单文件单 status 字段 → 互斥构造性成立；兼容期旧名（.finalized/.cancelled）不再被写。
-  describe("writeTerminalState 判别 wiring（closedReason → .state status）", () => {
-    it("closedReason=cancelled → .state 携带 status/endedAt 且不写旧名 sidecar", async () => {
+  describe("终态收条判别 wiring（closedReason → record-settled 载荷）", () => {
+    it("closedReason=cancelled → 终态收条携带 endedAt 且不写旧名 sidecar", async () => {
       const sessionFile = path.join(tmpDir, "session.jsonl");
       const record = makeMinimalRecord({
         id: "rec-wire-cancelled",
@@ -388,38 +357,30 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
 
       await doFinalizeRecord(makeDeps(), record, makeMinimalResult(), "closed", "cancelled");
 
-      // .state 写出且内容为终态 marker（字段逐项断言，不用 objectContaining 放宽——
-      // 重建链路靠这些字段还原）
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(true);
-      const marker = JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8")) as {
-        status: string;
-        endedAt: number;
-      };
-      expect(marker.status).toBe("cancelled");
+      // record-settled 帧落账且内容为终态收条（字段逐项断言，不用 objectContaining
+      // 放宽——重建链路靠这些字段还原）
+      const marker = lastSettledEvent(tmpDir, "rec-wire-cancelled");
+      expect(marker).toBeDefined();
       // endedAt 来自 completeLegacyClosed 冻结后的 record.endedAt（Step 1 先于 Step 3a，
-      // record 预设的 endedAt 会被冻结值覆盖）——sidecar 携带真实收尾时间戳
-      expect(marker.endedAt).toBe(record.endedAt);
-      expect(typeof marker.endedAt).toBe("number");
+      // record 预设的 endedAt 会被冻结值覆盖）——事件携带真实收尾时间戳
+      expect(marker?.endedAt).toBe(record.endedAt);
+      expect(typeof marker?.endedAt).toBe("number");
       // 兼容期旧名不再被写（写侧单点收敛）
       expect(fs.existsSync(`${sessionFile}.finalized`)).toBe(false);
       expect(fs.existsSync(`${sessionFile}.cancelled`)).toBe(false);
     });
 
     it.each(["user-close", "gc"] as const)(
-      "closedReason=%s → .state 内容携带真实 reason 且不写旧名 sidecar",
+      "closedReason=%s → 终态收条携带真实 reason 且不写旧名 sidecar",
       async (reason) => {
         const sessionFile = path.join(tmpDir, "session.jsonl");
         const record = makeMinimalRecord({ id: `rec-wire-${reason}`, sessionFile });
 
         await doFinalizeRecord(makeDeps(), record, makeMinimalResult(), "closed", reason);
 
-        // .state 写出且 reason = 真实关因（磁盘重建用它还原 closedReason，
+        // 终态收条落账且 reason = 真实关因（磁盘重建用它还原 closedReason，
         // 不再一律硬编码 gc）
-        expect(fs.existsSync(`${sessionFile}.state`)).toBe(true);
-        expect(JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8"))).toEqual({
-          status: "finalized",
-          reason,
-        });
+        expect(lastSettledEvent(tmpDir, `rec-wire-${reason}`)?.stopReason).toBe(reason);
         // 兼容期旧名不再被写
         expect(fs.existsSync(`${sessionFile}.cancelled`)).toBe(false);
         expect(fs.existsSync(`${sessionFile}.finalized`)).toBe(false);
@@ -515,8 +476,8 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
         doFinalizeRecord(deps, record, makeMinimalResult(), "closed", "gc"),
       ).resolves.toBeUndefined();
 
-      // Step 0 失败不影响后续步骤：finalized sidecar 与 manifest 照常落地
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(true);
+      // Step 0 失败不影响后续步骤：终态收条（record-settled 帧）与 manifest 照常落地
+      expect(lastSettledEvent(tmpDir, "rec-patch-err")).toBeDefined();
       const manifest = await manifestStore.readManifest("rec-patch-err");
       expect(manifest?.status).toBe("closed");
       expect(deps.worktreeManager.cleanup).toHaveBeenCalledTimes(1);

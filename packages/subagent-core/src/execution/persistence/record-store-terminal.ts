@@ -38,8 +38,11 @@ import type {
   SubagentRecordRegisteredEntryData,
   SubagentRecordSettledEntryData,
 } from "./record-entry.ts";
-import { ResurrectDeniedError, isPiTranscriptRef } from "../assembly/types.ts";
-import type { ClosedReason, ExecutionRecord, StopReason, SubagentRecord, TranscriptRef } from "../assembly/types.ts";
+import { ResurrectDeniedError } from "../domain/record-types.ts";
+import { isPiTranscriptRef } from "../domain/record-model.ts";
+import type { ClosedReason, StopReason, TranscriptRef } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
 
@@ -49,12 +52,8 @@ const logger = getLogger("subagents");
  * check-record-write-surface 扫描而不命中（写面唯一入口语义仍收口在 store 家族）。
  */
 export interface TerminalCtx {
-  /** `.state` finalized 收条写（writeFinalizedState 注入位）。 */
-  persistFinalized: (sessionFile: string, reason?: string) => boolean;
   /** `.state` cancelled 收条写（writeCancelledState 注入位）。 */
-  persistCancelled: (sessionFile: string, endedAt: number) => boolean;
   /** `.state` settle 收条写（writeSettledState 注入位）。 */
-  persistSettledState: (sessionFile: string, payload: { stopReason?: StopReason; endedAt?: number }) => boolean;
   /** `.alive` 写权声明（writeAliveMarker 注入位）。 */
   acquireLease: (sessionFile: string, marker: { pid: number; id: string; startedAt: number }) => void;
   /** `.alive` 写权释放（removeAliveMarker 注入位）。 */
@@ -90,12 +89,10 @@ export interface TerminalCtx {
  */
 function legacyTerminalWrite(
   record: ExecutionRecord,
-  persist: (sessionFile: string) => boolean,
   label: string,
   ctx: TerminalCtx,
 ): boolean {
   if (record.sessionFile !== undefined) {
-    if (!persist(record.sessionFile)) return false;
     // 终态 usage 快照随 binding 落盘（维持 doFinalizeRecord Step3a 现状——light
     // 列表面的唯一低成本 usage 源）。binding 内部 best-effort（缺失不造残缺身份）。
     updateRecordBinding(record.sessionFile, {
@@ -104,7 +101,7 @@ function legacyTerminalWrite(
       endedAt: record.endedAt,
     });
   } else {
-    logger.warn(`[subagents] ${label}: no sessionFile anchor, .state face skipped`, {
+    logger.warn(`[subagents] ${label}: no sessionFile anchor, binding snapshot skipped`, {
       detail: { id: record.id },
     });
   }
@@ -129,7 +126,7 @@ function legacyTerminalWrite(
  */
 export function markFinalizedImpl(record: ExecutionRecord, closedReason: ClosedReason | undefined, ctx: TerminalCtx): boolean {
   const reason = closedReason ?? record.closedReason ?? "gc";
-  return legacyTerminalWrite(record, (sessionFile) => ctx.persistFinalized(sessionFile, reason), "markFinalized", ctx);
+  return legacyTerminalWrite(record, "markFinalized", ctx);
 }
 
 /**
@@ -145,7 +142,6 @@ export function markFinalizedImpl(record: ExecutionRecord, closedReason: ClosedR
 export function markCancelledImpl(record: ExecutionRecord, ctx: TerminalCtx): boolean {
   return legacyTerminalWrite(
     record,
-    (sessionFile) => ctx.persistCancelled(sessionFile, record.endedAt ?? Date.now()),
     "markCancelled",
     ctx,
   );
@@ -320,9 +316,8 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
   //   - 双锚皆缺（spawn 窗口期 / 从未开跑）：warn 留痕（现行）。
   const zcodeAnchor = record.sessionFile === undefined ? zcodeRefOf(record) : undefined;
   if (record.sessionFile !== undefined) {
-    // ① `.state` 收条（失败 warn 留痕不抛——轮收口非终态，内存态已收口，磁盘面
-    // 滞后由下次收口/接管补写；错误已在 state-marker 层 error 级响亮暴露）。
-    ctx.persistSettledState(record.sessionFile, { stopReason, endedAt: settledAt });
+    // ① `.state` 收条已退场（③）：终态停因/时间由 record-settled 帧承载，读侧取折叠
+    // 或索引收条。此处直接落 binding 快照。
     // ② binding 快照。[U5 / §3.2.7] epoch 与放弃轮标记同批落盘（cancel/编排性
     // 关闭的中断轮 settle 是标记的置位点——gate ②判据跨重启有效是硬要求，丢标记
     // = 中断轮迟到回注防双发失效）。[U7] 写点统一为 merge-or-create：binding

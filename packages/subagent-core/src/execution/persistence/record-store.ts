@@ -91,7 +91,7 @@ import { toErrorMessage } from "../../core/error-message.ts";
 import { getLogger } from "../../core/logger.ts";
 
 import { snapshot as toSnapshot } from "./execution-record.ts";
-import { statStateStamp, writeFinalizedState, writeCancelledState, writeSettledState } from "./state-marker.ts";
+import { statStateStamp } from "./state-marker.ts";
 import { recordEventsPath } from "./record-events.ts";
 // [UF-1] record 绑定 sidecar：宿主侧 id→file 映射（engine-CLI 化后子文件无 identity
 // entry 时代的身份载体）——scanFile 探测分支在 identity miss 时消费它重建 light record。
@@ -176,15 +176,9 @@ import {
 } from "./record-store-rounds.ts";
 import type { RoundsCtx } from "./record-store-rounds.ts";
 import { reconstructFromFile } from "./session-reconstructor.ts";
-import type {
-  AgentEvent,
-  ClosedReason,
-  ExecutionRecord,
-  RecordSnapshot,
-  StopReason,
-  SubagentRecord,
-  TranscriptRef,
-} from "../assembly/types.ts";
+import type { ClosedReason, StopReason, TranscriptRef } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { AgentEvent, RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
 // [U4a / D3b (a″)] findForeignLiveInstance：孤儿恢复的活实例跳过判据——现查探针
 // 替代重建时 externalInstance 缓存（pid 单判据 + self-pid 排除，比缓存更新鲜）。
 import { writeAliveMarker, removeAliveMarker, findForeignLiveInstance } from "./alive-store.ts";
@@ -363,9 +357,6 @@ export class RecordStore {
     // 顶层解引用而报 mock 缺 key）；容器方法经 this 闭包（pi 通道在调用时点取值，
     // setPi 后生效）。
     this.terminalCtx = {
-      persistFinalized: (file, reason) => writeFinalizedState(file, reason),
-      persistCancelled: (file, endedAt) => writeCancelledState(file, endedAt),
-      persistSettledState: (file, payload) => writeSettledState(file, payload),
       acquireLease: (file, marker) => writeAliveMarker(file, marker),
       releaseLease: (file) => removeAliveMarker(file),
       manifestDir,

@@ -94,7 +94,8 @@ import { writeAliveMarker, readAliveMarker } from "../persistence/alive-store.ts
 import * as stateMarker from "../persistence/state-marker.ts";
 import { createRecord, trySettleLegacyClosed } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 
 /** 构造 ExecutionRecord（running 基线，over 覆盖）。 */
 function makeRecord(id: string, over: Partial<ExecutionRecord> = {}): ExecutionRecord {
@@ -142,6 +143,22 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   /** Pi appendEntry mock（显式签名：可作 RecordStorePi 直传 + 断言面可用）。 */
   let appendEntryMock: ReturnType<typeof vi.fn<(customType: string, data: unknown) => void>>;
   let store: RecordStore;
+
+  /** 终态收条读取（③：`.state` 退场，收条 = 事件流最后一条 record-settled 帧）。 */
+  function lastSettledEvent(
+    recordsDir: string,
+    id: string,
+  ): { stopReason?: string; endedAt?: number } | undefined {
+    const file = path.join(recordsDir, `${id}.events`);
+    if (!fs.existsSync(file)) return undefined;
+    return fs
+      .readFileSync(file, "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { type?: string; stopReason?: string; endedAt?: number })
+      .filter((e) => e.type === "record-settled")
+      .at(-1);
+  }
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-store-intent-api-"));
@@ -225,15 +242,13 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(store.markFinalized(record, "user-close")).toBe(true);
 
-      // 写序：.state → .alive release（顺序数组中两者先后可证）。
-      expect(order).toEqual(["alive-acquire", "state-finalized", "alive-release"]);
+      // 写序：写权声明 → 终态落账（事件/entry/manifest）→ .alive release
+      //（③ 后 `.state` 不再是写序中的一环）。
+      expect(order).toEqual(["alive-acquire", "alive-release"]);
       // release 时点 manifest 已落盘（.state 先 → manifest 后 → .alive 删）。
       expect(probe.manifestExistedAtRelease).toBe(true);
-      // 写后即刻可见（同步写，无 fire-and-forget）。
-      expect(JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8"))).toEqual({
-        status: "finalized",
-        reason: "user-close",
-      });
+      // 写后即刻可见（同步写，无 fire-and-forget）：终态收条 = record-settled 帧。
+      expect(lastSettledEvent(manifestDir, "bg-1")?.stopReason).toBe("user-close");
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
       // manifest 投影（同步落盘）。
       expect(readManifestJson("bg-1")).toMatchObject({
@@ -251,29 +266,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       );
     });
 
-    it(".state 写失败（重试耗尽）→ 返回 false、零持久化副作用、record 留 running 形态", () => {
-      const record = makeRecord("bg-2");
-      record.sessionFile = sessionFile;
-      store.acquireWriteLease(sessionFile, "bg-2");
-      store.register(record);
-      trySettleLegacyClosed(record, "user-close");
-      appendEntryMock.mockClear();
-
-      vi.mocked(stateMarker.writeFinalizedState).mockReturnValueOnce(false);
-
-      expect(store.markFinalized(record, "user-close")).toBe(false);
-      // 零持久化副作用：不出册（内存仍在）、无 manifest、写权声明未 release、无终态 entry。
-      expect(store.getMutable("bg-2")).toBeDefined();
-      expect(fs.existsSync(manifestPathOf("bg-2"))).toBe(false);
-      expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
-      // `.state` 写尝试确实发生（mockReturnValueOnce 短路包装层，顺序 token 不入 order，
-      // 以调用事实为准）；且其后无任何后续写动作（alive-release 未入 order）。
-      expect(stateMarker.writeFinalizedState).toHaveBeenCalledWith(sessionFile, "user-close");
-      expect(order).toEqual(["alive-acquire"]);
-      expect(appendEntryMock).not.toHaveBeenCalled();
-    });
-
-    it("sessionFile 缺失 → .state 面跳过（warn 留痕），manifest/entry 照常", () => {
+    it("sessionFile 缺失 → binding 快照面跳过（warn 留痕），manifest/entry 照常", () => {
       const record = makeRecord("bg-3");
       store.register(record);
       trySettleLegacyClosed(record, "gc");
@@ -297,28 +290,13 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(store.markCancelled(record)).toBe(true);
 
-      expect(order).toEqual(["alive-acquire", "state-cancelled", "alive-release"]);
+      expect(order).toEqual(["alive-acquire", "alive-release"]);
       expect(probe.manifestExistedAtRelease).toBe(true);
-      expect(JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8"))).toEqual({
-        status: "cancelled",
-        endedAt: 7777,
-      });
+      expect(typeof lastSettledEvent(manifestDir, "bg-c1")?.endedAt).toBe("number");
       expect(readManifestJson("bg-c1")).toMatchObject({ id: "bg-c1", status: "closed", closedReason: "cancelled" });
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
     });
 
-    it(".state 写失败 → 返回 false、tombstone 未落、record 不出册", () => {
-      const record = makeRecord("bg-c2");
-      record.sessionFile = sessionFile;
-      store.register(record);
-      trySettleLegacyClosed(record, "cancelled");
-
-      vi.mocked(stateMarker.writeCancelledState).mockReturnValueOnce(false);
-
-      expect(store.markCancelled(record)).toBe(false);
-      expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
-      expect(store.getMutable("bg-c2")).toBeDefined();
-    });
   });
 
   // [collect 退役] 原 markBatchFinalized barrier 用例（manifest 屏障写序 + 落标

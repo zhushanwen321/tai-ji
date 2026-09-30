@@ -26,7 +26,8 @@ import {
 } from "../persistence/execution-record.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { readRecordBinding, readStateMarker, writeRecordBinding } from "../persistence/state-marker.ts";
-import type { ExecutionRecord, TranscriptRef } from "../assembly/types.ts";
+import type { TranscriptRef } from "../domain/record-types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
 
 // ── fixture ──────────────────────────────────────────────────────────────────
 
@@ -180,19 +181,21 @@ describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
     expect(store.getMutable("bg-1")).toBe(rec); // 留内存（随时可续聊）
   });
 
-  it(".state 面：新格式收条 {status:\"idle\", reason, endedAt} 落盘", () => {
+  it("终态收条面：record-settled 帧承载 {stopReason, endedAt}（③：`.state` 收条退场）", () => {
     const store = newStore();
     const rec = runningRecord();
     store.register(rec);
     store.markSettled(rec, "interrupted");
-    // 直接读 sidecar 原文断言写面内容（经 readStateMarker 会落「旧版读新值」存在性
-    // 降级分支——U2/U3 窗口期设计行为，读侧兼容归 U3，不在本写面测试断言范围）。
-    const raw = JSON.parse(
-      fs.readFileSync(`${rec.sessionFile}.state`, "utf-8"),
-    ) as Record<string, unknown>;
-    expect(raw.status).toBe("idle");
-    expect(raw.reason).toBe("interrupted");
-    expect(typeof raw.endedAt).toBe("number");
+    // 终态收条的事实源 = 事件流：读最后一条 record-settled 帧原文。
+    const settled = fs
+      .readFileSync(path.join(manifestDir, `${rec.id}.events`), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { type?: string; stopReason?: string; endedAt?: number })
+      .filter((e) => e.type === "record-settled")
+      .at(-1);
+    expect(settled?.stopReason).toBe("interrupted");
+    expect(typeof settled?.endedAt).toBe("number");
   });
 
   it("binding 面：usage 快照（totalTokens/turns/round/endedAt）merge 进存量 binding", () => {

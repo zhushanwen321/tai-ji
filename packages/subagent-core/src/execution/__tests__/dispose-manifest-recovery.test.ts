@@ -128,6 +128,23 @@ function closedEntryLines(rec: {
  *（缺帧判 skippedNoIdentity）。v1 时代该场景由全量快照 entry 直读承接；v2 事件文件是
  * 事实源，离线播种须与 entry 族同批造出。
  */
+/**
+ * dispose 后的收条读取——收条由事件流承载（③：`.state` 退场）：读最后一条
+ * record-settled 帧，投影成与旧 sidecar 同形的 {status, reason, endedAt}。
+ */
+function readDisposedState(
+  agentDir: string,
+  id: string,
+): { status: string; reason?: string; endedAt?: number } {
+  const file = path.join(getSubagentRecordsDir(agentDir, agentDir), `${id}.events`);
+  const lines = fs.readFileSync(file, "utf-8").trim().split("\n");
+  const settled = lines
+    .map((l) => JSON.parse(l) as { type?: string; stopReason?: string; endedAt?: number })
+    .filter((e) => e.type === "record-settled")
+    .at(-1);
+  return { status: "idle", reason: settled?.stopReason, endedAt: settled?.endedAt };
+}
+
 async function seedCreatedJournalFrame(recordsDir: string, id: string): Promise<void> {
   await createRecordEventJournal(recordsDir).append(id, {
     type: "record-created",
@@ -229,10 +246,9 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
 
     // record 本体提升（archive entry 投影随之携带）
     expect(record.sessionFile).toBe(promoted);
-    // [U5] .state 新格式收条（markSettled）：{status:"idle", stopReason, endedAt}——
-    // parent-shutdown → interrupted-by-restart（§3.2.2 host shutdown 行）；不再是
-    // 旧 {status:"finalized", reason} 死亡证明。
-    const marker = JSON.parse(fs.readFileSync(`${promoted}.state`, "utf-8")) as Record<string, unknown>;
+    // [U5] 终态收条（③ 后由事件流承载）：parent-shutdown → interrupted-by-restart
+    //（§3.2.2 host shutdown 行）；不再是旧 {status:"finalized", reason} 死亡证明。
+    const marker = readDisposedState(agentDir, "sa-promote");
     expect(marker.status).toBe("idle");
     expect(marker.reason).toBe("interrupted-by-restart");
     expect(typeof marker.endedAt).toBe("number");
@@ -439,25 +455,11 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       return { record, sessionFile };
     }
 
-    /**
-     * dispose 后的收条读取——收条改由事件流承载（③：`.state` 退场）：读最后一条
-     * record-settled 帧，投影成与旧 sidecar 同形的 {status, reason, endedAt}。
-     */
-    function readDisposedState(id: string): { status: string; reason?: string; endedAt?: number } {
-      const file = path.join(getSubagentRecordsDir(agentDir, agentDir), `${id}.events`);
-      const lines = fs.readFileSync(file, "utf-8").trim().split("\n");
-      const settled = lines
-        .map((l) => JSON.parse(l) as { type?: string; stopReason?: string; endedAt?: number })
-        .filter((e) => e.type === "record-settled")
-        .at(-1);
-      return { status: "idle", reason: settled?.stopReason, endedAt: settled?.endedAt };
-    }
-
     it("行 1 [chat × parent-shutdown]：.state 收条 status=idle + stopReason=interrupted-by-restart + .alive release", () => {
       const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-chat-shutdown" });
       expect(service.disposeAllRecords("parent-shutdown")).toBe(1);
 
-      const marker = readDisposedState(record.id);
+      const marker = readDisposedState(agentDir, record.id);
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-restart");
       expect(typeof marker.endedAt).toBe("number");
@@ -472,7 +474,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-chat-fork" });
       service.disposeAllRecords("parent-fork");
 
-      const marker = readDisposedState(record.id);
+      const marker = readDisposedState(agentDir, record.id);
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-parent");
       expect(record.status).toBe("idle");
@@ -484,7 +486,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       registerActiveRecord({ id: "sa-d8-oneshot-shutdown" });
       service.disposeAllRecords("parent-shutdown");
 
-      const marker = readDisposedState("sa-d8-oneshot-shutdown");
+      const marker = readDisposedState(agentDir, "sa-d8-oneshot-shutdown");
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-restart");
       // [U5] 重建单规则：一律 idle（U3）——stopReason 只是展示位，复活资格 = 物理三件套
@@ -494,7 +496,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-oneshot-new" });
       service.disposeAllRecords("parent-new");
 
-      const marker = readDisposedState(record.id);
+      const marker = readDisposedState(agentDir, record.id);
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-parent");
       expect(record.status).toBe("idle");
@@ -515,7 +517,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       expect(record.status).toBe("idle");
       expect(record.closedReason).toBeUndefined();
       expect(record.stopReason).toBe("interrupted-by-restart");
-      const marker = readDisposedState(record.id);
+      const marker = readDisposedState(agentDir, record.id);
       expect(marker.reason).toBe("interrupted-by-restart");
 
       // boot 重认领意愿消亡：[U5/D4 MF-1] 磁盘重建单规则恒 idle + 孤儿恢复恒 idle
