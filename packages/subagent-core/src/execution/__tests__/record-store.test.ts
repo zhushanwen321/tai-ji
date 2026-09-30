@@ -1809,6 +1809,14 @@ describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
     });
   });
 
+  it("轮终收条之后又有轮开始 → undefined（续轮记录不继承上一轮停因）", () => {
+    const fold = foldRecordJournalEvents([
+      idleEvent,
+      { type: "record-round-started", seq: 3, ts: 3000, round: 2, epoch: 0 },
+    ]);
+    expect(stateMarkerFromFold(fold)).toBeUndefined();
+  });
+
   it("无收条事件 / 无折叠 → undefined（在途中断，与 sidecar 缺席同语义）", () => {
     expect(stateMarkerFromFold(undefined)).toBeUndefined();
     expect(stateMarkerFromFold(foldRecordJournalEvents([]))).toBeUndefined();

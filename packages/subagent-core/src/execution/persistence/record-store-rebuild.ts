@@ -427,8 +427,13 @@ export function readSidecarPayloads(file: string, stamps: FileStamps): SidecarPa
  *
  * 语义与 `readStateMarker` 读出的新格式同形（status=idle + reason + endedAt）：
  *   - `record-settled` 在场 → 终局收条（endedAt 用事件自带时间）；
- *   - 否则 `record-round-idle` 在场 → 轮终收条（endedAt 用该事件时间；记录仍在世）；
- *   - 都没有 → undefined（无收条 = 在途中断，与 sidecar 缺席同语义）。
+ *   - 否则 `record-round-idle` **且它是最后一条事件** → 轮终收条（endedAt 用该事件
+ *     时间；记录停在轮终未终局）；
+ *   - 其余 → undefined（无收条 = 在途中断，与 sidecar 缺席同语义）。
+ *
+ * 「轮终收条须是最后一条事件」不是细节而是必需：续轮记录（round-idle 之后又
+ * round-started）若仍按上一条 round-idle 投影，会把上一轮的停因当成当前停因写进
+ * 运行中的记录——与 journal 投影侧「轮始清残留死因」同一条语义（`lastEvent` 判定）。
  *
  * 纯函数：不做旧格式上行映射（那是 sidecar 存量兼容面，随 sidecar 一起退场）。
  */
@@ -437,7 +442,7 @@ export function stateMarkerFromFold(fold: RecordJournalFoldState | undefined): S
   if (fold.settled !== undefined) {
     return { status: "idle", reason: fold.settled.stopReason, endedAt: fold.settled.endedAt };
   }
-  if (fold.roundIdle !== undefined) {
+  if (fold.roundIdle !== undefined && fold.lastEvent === fold.roundIdle) {
     return { status: "idle", reason: fold.roundIdle.stopReason, endedAt: fold.roundIdle.ts };
   }
   return undefined;
