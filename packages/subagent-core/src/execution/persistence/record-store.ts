@@ -144,6 +144,7 @@ import {
   recordToSubagent,
   sameNullableStamp,
   sameStamp,
+  stateMarkerFromFold,
   statStamp,
   terminalManifestRecord,
   v2PairToRecord,
@@ -1548,18 +1549,21 @@ export class RecordStore {
     // 覆盖两种形态：首扫（映像已装载但 miss/不匹配）与后续轮次（映像已释放，凡进重建分支必是戳变化）。
     this.indexDirty = true;
 
-    const payloads = readSidecarPayloads(file, stamps);
+    const sidecars = readSidecarPayloads(file, stamps);
     const header = detectIdentity(file, jsonl.size);
     // [UF-1] 身份源两级：子文件 identity entry（历史权威，命中时绑定不参与）→
     // record 绑定 sidecar（engine-CLI 化后子文件无身份 entry，宿主在 sessionFile
     // 回填点落盘的 id→file 映射承担恢复能力）。两者皆缺 → 负缓存。
-    const base = header ?? identityFromBinding(payloads.binding, file);
+    const base = header ?? identityFromBinding(sidecars.binding, file);
     if (!base) {
       // 负缓存：确认无 identity。后续扫描 stat 命中直接跳过；戳变化（文件补写 /
       // 绑定后到落盘）自动重试。
       this.fileCache.set(file, { negative: true, ...stamps });
       return null;
     }
+    // 终态收条：折叠（事件流 = 事实源）优先，sidecar 退为存量兜底（无事件文件的记录）。
+    const fold = this.eventStreamFace?.foldOf(base.id);
+    const payloads = { ...sidecars, state: stateMarkerFromFold(fold) ?? sidecars.state };
     const entry = buildFileCacheEntry(base, file, stamps, payloads, this.eventsStampOfId(base.id));
     // [U7 / §3.2.7 统计口径单基准] binding 补投影扩展到 identity 基底（原仅 binding
     // 基底）：binding 快照是 settle 写点的统计权威（.state 收条不冗余承载 round/
