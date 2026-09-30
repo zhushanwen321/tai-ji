@@ -57,7 +57,7 @@ describe("场景 25 无门段：中断 run 宿主投影数据面", () => {
       await runSessionReaderProbe("overview-interrupted", env.recordPath(RUN_ID), RUN_ID);
       // 复活流（run-resumed 落流、无终局帧）：run-resumed 是 interrupted → running
       // 的转移证据，session_read 概览链消费该帧回 running——与 runtime
-      // journal-projection（foldRunEventCheckpoint 同款转移帧消费）状态语义一致。
+      // events-projection（foldRunEventCheckpoint 同款转移帧消费）状态语义一致。
       await runSessionReaderProbe("overview-resumed", env.recordPath(RUN_ID), RUN_ID);
     } finally {
       env.cleanup();

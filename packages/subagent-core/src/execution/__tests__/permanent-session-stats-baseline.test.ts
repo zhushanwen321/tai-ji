@@ -467,7 +467,7 @@ describe("U7④ 归零覆盖回归：冷复活 entry 投影不再以归零值覆
     // 回归断言（[W1/D2 停写写点] + 事件面幂等）：冷复活对已注册 record（事件文件
     // 已有 created 帧）零 entry 写——「归零 entry last-writer-wins 覆盖磁盘原值」的
     // 威胁面结构性消失（原 GUI 快修批次⑤；register 的 registered 条目只在事件首写
-    // 时落，见 RecordJournalWriteFace.syncCreation 幂等判定）。
+    // 时落，见 RecordEventsWriteFace.syncCreation 幂等判定）。
     expect(entries).toHaveLength(0);
 
     // 水合保真的新承载面：内存 record 基线 = 事件流折叠水合值（[② 读侧换源]——

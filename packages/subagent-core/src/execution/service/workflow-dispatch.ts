@@ -62,7 +62,7 @@ import { resumeAnchorOf } from "../assembly/conversation-continuation.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import { updateFromEvent } from "../persistence/execution-record.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
-import { wireEventJournal } from "../engine/common/journal-wiring.ts";
+import { wireEventJournal } from "../engine/common/event-journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 // [H2 W2 迁移步⑥] mergeRunSignals 提公共 helper（原 SAR 模块内直调）——workflow
 // 派发的 timeout+外部 signal 两源合流。

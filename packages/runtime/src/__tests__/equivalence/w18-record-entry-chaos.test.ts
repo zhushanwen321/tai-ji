@@ -21,7 +21,7 @@
  * [v1 全量快照兼容层删除后] 等价性对照保留：本 fixture 的 session meta 缺席
  * （scanSessions → []）⇒ recordsDir 不可得 ⇒ entry-only 降级投影，journal 源缺席；
  * 故此处对照 = 「主信号在位」与「主信号丢失」两条 entry 通路收敛到同一权威快照
- * （journal 胜出仲裁的对照面在 journal-projection 单测覆盖）。
+ * （journal 胜出仲裁的对照面在 events-projection 单测覆盖）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ServerMessage } from '@taiji/shared'

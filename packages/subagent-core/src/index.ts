@@ -316,7 +316,7 @@ export {
   type RecordEventJournal,
   type RecordJournalEvent,
   type RecordJournalEventInput,
-  type RecordJournalFoldState,
+  type RecordEventFoldState,
   type RecordSettledEvent,
   applyRecordEvent,
 } from "./execution/persistence/record-events.ts";
@@ -325,10 +325,10 @@ export {
   readEventTail,
   splitCompleteLines,
   type EventDirectoryTailer,
-  type JournalDirectoryTailerOptions,
-  type JournalLineParser,
-  type JournalTailChunk,
-} from "./execution/persistence/journal-tail.ts";
+  type EventDirectoryTailerOptions,
+  type EventLineParser,
+  type EventTailChunk,
+} from "./execution/persistence/event-tail.ts";
 
 // agent-registry 执行消费面：loadByPath 直接加载（@experimental U10 / D6）+
 // parseAgentProfile 宽容解析（无 frontmatter 不拒、name 缺省 stem、返回 body 与

@@ -67,7 +67,7 @@ export interface EngineStream {
  * 本值（pi / zcode 均无池化实现——pi = PI_CODING_AGENT_DIR 全局一份，zcode = 共享
  * 宿主 HOME）。[池抽象降级 2026-09-13] poolKey 协议面（RunContext/run.params.ctx/
  * host/poolResolved 通道/EngineHandleData）已整体退役，本常量不再跨进程透传，仅
- * 三类消费：① journal 落盘路径构造（core journal-wiring）；② 存量 record 兼容
+ * 三类消费：① journal 落盘路径构造（core event-journal-wiring）；② 存量 record 兼容
  * （zcode read 旧相对 dbPath 的锚定分支 + 持久化 engineHandle.poolKey 字段——
  * record-store 读侧守卫要求非空，值恒本常量）；③ 引擎数据目录布局 SSOT paths.ts
  * 的签名参数。**值逐字不变**（存量 journal 落盘路径与记录含该值分段，改名不改值）。

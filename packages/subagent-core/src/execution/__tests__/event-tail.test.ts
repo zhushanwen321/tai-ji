@@ -1,4 +1,4 @@
-// src/execution/__tests__/journal-tail.test.ts
+// src/execution/__tests__/event-tail.test.ts
 //
 // [W1 / D6] journal tail 读取原语测试：完整行边界（纯函数）/ offset 续读 /
 // 部分行 / 坏行宽容 / 截断重读 / 周期复查（fake timers）。
@@ -25,13 +25,13 @@ import {
   createEventDirectoryTailer,
   readEventTail,
   splitCompleteLines,
-  type JournalTailChunk,
-} from "../persistence/journal-tail.ts";
+  type EventTailChunk,
+} from "../persistence/event-tail.ts";
 
 let workDir: string;
 
 beforeEach(() => {
-  workDir = fs.mkdtempSync(path.join(os.tmpdir(), "journal-tail-unit-"));
+  workDir = fs.mkdtempSync(path.join(os.tmpdir(), "event-tail-unit-"));
 });
 
 afterEach(() => {
@@ -95,7 +95,7 @@ describe("readEventTail（offset 续读原语）", () => {
     const chunk = readEventTail(filePath, 0, parseRecordEventFileLine);
     expect(chunk.events).toHaveLength(1);
     expect(chunk.events[0]?.type).toBe("record-created");
-    expect(chunk.skippedLines).toBe(1); // 头行 = 解析器拒绝的合法行（计数语义见 JournalTailChunk 注释）
+    expect(chunk.skippedLines).toBe(1); // 头行 = 解析器拒绝的合法行（计数语义见 EventTailChunk 注释）
     expect(chunk.nextOffset).toBe(fs.statSync(filePath).size);
     expect(chunk.truncated).toBe(false);
   });
@@ -148,7 +148,7 @@ describe("readEventTail（offset 续读原语）", () => {
 
   it("ENOENT → 空结果 + 偏移归零（文件未创建/已清理的缺省语义）", () => {
     const chunk = readEventTail(path.join(workDir, "absent.jsonl"), 100, rawLineParser);
-    expect(chunk).toEqual({ events: [], nextOffset: 0, skippedLines: 0, truncated: false } satisfies JournalTailChunk<string>);
+    expect(chunk).toEqual({ events: [], nextOffset: 0, skippedLines: 0, truncated: false } satisfies EventTailChunk<string>);
   });
 
   it("size === offset → 零成本快路径（无新内容偏移不动）", () => {

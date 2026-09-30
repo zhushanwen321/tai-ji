@@ -54,7 +54,7 @@ switch (MODE) {
   case "overview-resumed": {
     // 复活流的概览状态：run-resumed 是 interrupted → running 的转移证据（[D2]
     // lifecycle fold 投影），概览链消费该帧清中断标记 → 复活 run 在 session_read
-    // 概览回 running（与 runtime journal-projection 的 foldRunEventCheckpoint
+    // 概览回 running（与 runtime events-projection 的 foldRunEventCheckpoint
     // 消费同一转移帧，两链状态语义一致）。
     const withResumed = [
       ...content.split("\n").filter((l) => l.trim()),

@@ -3,7 +3,7 @@
 // read 的 ②级降级：宿主 event journal 文件重放（W7，impl-plan §2.7「session-
 // reconstructor 保持 core，pi 包经协议 read 拿会话视图」的引擎侧承接）。
 //
-// journal 文件由宿主侧 EngineClient 的事件 journal 写入（core journal-wiring：
+// journal 文件由宿主侧 EngineClient 的事件 journal 写入（core event-journal-wiring：
 // handle.data.eventsPath 回填是运行期落盘路径权威）。本模块读该 JSONL 文件、
 // 逐行解析 AgentEvent、经 SDK journal-replay 纯投影还原 SessionView。文件缺失 /
 // 不可解析 / 无事件 → undefined（调用方落 ③级 outcome-only）。
@@ -68,7 +68,7 @@ export function replayJournalToSessionView(handle: EngineHandle, engineId: strin
 /**
  * AgentEvent 运行时 guard（type 字段白名单收窄）。
  *
- * activity 刻意不在白名单：纯活性信号不进任何持久/重放面（core journal-wiring 豁免
+ * activity 刻意不在白名单：纯活性信号不进任何持久/重放面（core event-journal-wiring 豁免
  * append，正常 journal 不含 activity 行）——即使旧宿主落盘的 journal 混入借用期
  * message_end 形态外的 activity 行，被过滤 = no-op 安全（reducer 对其本就 no-op）。
  */

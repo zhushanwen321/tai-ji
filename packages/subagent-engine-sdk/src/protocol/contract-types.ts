@@ -139,7 +139,7 @@ export interface Turn {
  * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/assembly/types.ts 注释）。
  *
  * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
- * （core journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
+ * （core event-journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
  * 无进展守护刷新判活（长工具执行期）。节流属生产者实现细节，不进协议承诺。
  *
  * armed = [D3 协议版 P6] schema 强制武装确认回执：引擎在启动期武装断言通过 +

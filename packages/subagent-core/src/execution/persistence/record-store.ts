@@ -116,7 +116,7 @@ import type { V2EntryState } from "./record-store-terminal.ts";
 // [W1 / U2a] record 事件文件写面接线层（fold 缓存 + 写点幂等判定 + 物化编排）——
 // 轮次簿记轴承载（事件落账调用面主体 = RoundsCtx/TerminalCtx 注入位）。RecordStore
 // 是 record 域事件的唯一合法写者（单写者纪律，face 是容器的单点封装）。
-import { RecordJournalWriteFace } from "./record-store-rounds.ts";
+import { RecordEventsWriteFace } from "./record-store-rounds.ts";
 // [W1 / U7·D5] 统一保留维护轮入口（record 域触发点）：同域 run-state-evidence
 // 直取（barrel 面只约束壳生产消费）。
 import { runRetentionMaintenanceRound } from "./run-state-evidence.ts";
@@ -311,7 +311,7 @@ export class RecordStore {
    * pi appendEntry 通道工作（register/archive 的 face 缺省分支）。fold 缓存与写点
    * 幂等判定封装在 face 内部，容器只做薄转发。
    */
-  private readonly eventStreamFace: RecordJournalWriteFace | undefined;
+  private readonly eventStreamFace: RecordEventsWriteFace | undefined;
 
   /**
    * [§3.1 markRoundIdle 簿记⑧] pending-notifications 轮终注销（发射点②）的注入面。
@@ -357,7 +357,7 @@ export class RecordStore {
     // 面空转，条目面独立工作（register/archive 的 face 缺省分支）。
     this.eventStreamFace =
       manifestDir !== undefined
-        ? new RecordJournalWriteFace(manifestDir, (customType, data) => {
+        ? new RecordEventsWriteFace(manifestDir, (customType, data) => {
           this.pi?.appendEntry?.(customType, data);
         }, (rec) => {
           // [D2 决策 9] bound 物化写面（锚定就绪守卫与写失败降级在被调函数内）——

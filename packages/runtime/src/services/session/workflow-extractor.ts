@@ -14,7 +14,7 @@
  * 2. **legacy 解析（降级兜底）**：无自描述 entry 命中（W17 改造前创建的旧 session）时走
  *    workflow-state-link 指针 entry + state 文件读取。降级表现 = 数据滞后但可用（登记表
  *    #9 标注）。state 文件在 W17 后降级为纯性能缓存（读序 entry > state 文件 > 空）。
- *    新 run（W1+ v2 条目）不经本扫描器——runtime 列表主数据源 = journal-projection 的
+ *    新 run（W1+ v2 条目）不经本扫描器——runtime 列表主数据源 = events-projection 的
  *    record 流 fold + v2 注册/终态条目（v2 条目在本扫描器按版本门静默跳过）。
  *
  * agent call 对话流：trace[].sessionId 是 pi session ID（uuidv7），
@@ -202,7 +202,7 @@ export function scanWorkflowEntries(entries: unknown[]): WorkflowRunRecord[] {
  * 结构（trace 骨架），② 供运行时状态（迁移即写、无节流）。
  *
  * 仅冷启动全量路径使用（extractWorkflowsFromSessionFile 的 scan 注入）；实时增量
- * 路径不经本函数（W1 换源后实时路径 = journal-projection.recompute 单点合并——
+ * 路径不经本函数（W1 换源后实时路径 = events-projection.recompute 单点合并——
  * mergeJournalProjection 内跑 workflow-step-merge 的 mergeWorkflowStepRecords 纯函数，
  * D5 冷热同代码；session-records 缓存是投影合并快照的镜像）。
  */

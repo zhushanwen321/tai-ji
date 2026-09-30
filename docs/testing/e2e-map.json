@@ -758,7 +758,7 @@
         "packages/subagent-core/src/execution/registry-reconcile/**",
         "packages/subagent-core/src/execution/__tests__/subagent-actions-core.test.ts",
         "packages/subagent-core/src/orchestration/__tests__/lifecycle-recover-crashed.test.ts",
-        "packages/subagent-core/src/execution/__tests__/journal-tail.test.ts",
+        "packages/subagent-core/src/execution/__tests__/event-tail.test.ts",
         "extensions/universal/structured-output/tests/**"
       ],
       "layer": "L1",
@@ -770,10 +770,10 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "cd packages/subagent-core && npx vitest run src/execution/__tests__/subagent-actions-core.test.ts src/orchestration/__tests__/lifecycle-recover-crashed.test.ts src/execution/__tests__/journal-tail.test.ts && cd ../../extensions/universal/structured-output && npx vitest run tests/loop-gate.test.ts",
+      "run": "cd packages/subagent-core && npx vitest run src/execution/__tests__/subagent-actions-core.test.ts src/orchestration/__tests__/lifecycle-recover-crashed.test.ts src/execution/__tests__/event-tail.test.ts && cd ../../extensions/universal/structured-output && npx vitest run tests/loop-gate.test.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "pi-workflow-run-resource-model §4.1 V10 登记行（2026-09-27 U6）：三类拒绝 = message 对 workflow 成员续聊拒绝（workflow-origin 域边界，subagent-actions-core 拒绝文案）、冷复活绕过检查、agents 数量错配 fail-fast（设计 G7「内部复用通道与外部 message 通道分离」）；回归测试 = 断点恢复（lifecycle-recover-crashed）+ journal 核对（journal-tail）+ structured-output 门禁（loop-gate，行为零变化正交红线）。全部零 token mock 轨；真机形态未单列（域边界拒绝行为有既有测试锚，设计核实状态 ✅）。"
+      "note": "pi-workflow-run-resource-model §4.1 V10 登记行（2026-09-27 U6）：三类拒绝 = message 对 workflow 成员续聊拒绝（workflow-origin 域边界，subagent-actions-core 拒绝文案）、冷复活绕过检查、agents 数量错配 fail-fast（设计 G7「内部复用通道与外部 message 通道分离」）；回归测试 = 断点恢复（lifecycle-recover-crashed）+ journal 核对（event-tail）+ structured-output 门禁（loop-gate，行为零变化正交红线）。全部零 token mock 轨；真机形态未单列（域边界拒绝行为有既有测试锚，设计核实状态 ✅）。"
     },
     {
       "id": "E2E-BATCH-05",
@@ -1472,7 +1472,7 @@
       "scope": [
         "extensions/universal/subagent-workflow/src/__tests__/scenario-25-host-projection.test.ts",
         "packages/shared/src/workflow.ts",
-        "packages/runtime/src/services/session/journal-projection.ts",
+        "packages/runtime/src/services/session/events-projection.ts",
         "packages/renderer/src/components/panel/tray/tray-tone.ts"
       ],
       "layer": "L2",
@@ -1487,7 +1487,7 @@
       "run": "前置：TAIJI_DEV_BACKGROUND=1 pnpm dev（AGENTS.md 前端调试规约）+ node apps/electron/scripts/dev-instance.mjs --print 取本实例 CDP 端口，剧本在窗口内构造 interrupted run。执行：cd extensions/universal/subagent-workflow && TAIJI_E2E_HOST_PROJECTION_CDP=<cdp-port> npx vitest run src/__tests__/scenario-25-host-projection.test.ts（env 缺省时门段 skip 不 fail）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "E2E-RESUME-01 同资产（scenario-25）的门段触发面拆分。设计 §4 场景 25 行：真机 dev app 环境断 GUI workflow 列表；断言面 = 列表文案字面量「已中断（可续跑）」（非「运行中」）+ resume 后恢复 running 投影——色调已由 state-tone-lock L1 锁死，托盘桶归类（interrupted 计 ended 桶）不进真机断言（D2 宿主投影④登记不覆盖理由）。scope = 文案标签单源链（shared WORKFLOW_RUN_OUTCOME_LABELS → journal-projection 投影 → tray-tone 消费）+ spec 自身。数据面断言（中断形态条目契约 / 概览链三态 / session-reader 家族链）归 E2E-RESUME-01 常规跑，无门"
+      "note": "E2E-RESUME-01 同资产（scenario-25）的门段触发面拆分。设计 §4 场景 25 行：真机 dev app 环境断 GUI workflow 列表；断言面 = 列表文案字面量「已中断（可续跑）」（非「运行中」）+ resume 后恢复 running 投影——色调已由 state-tone-lock L1 锁死，托盘桶归类（interrupted 计 ended 桶）不进真机断言（D2 宿主投影④登记不覆盖理由）。scope = 文案标签单源链（shared WORKFLOW_RUN_OUTCOME_LABELS → events-projection 投影 → tray-tone 消费）+ spec 自身。数据面断言（中断形态条目契约 / 概览链三态 / session-reader 家族链）归 E2E-RESUME-01 常规跑，无门"
     },
     {
       "id": "E2E-SESSMGR-01",

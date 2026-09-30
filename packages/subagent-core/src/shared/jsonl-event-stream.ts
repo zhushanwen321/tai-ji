@@ -1,4 +1,4 @@
-// src/shared/jsonl-event-journal.ts
+// src/shared/jsonl-event-stream.ts
 //
 // [§3.1.3 双份基座收敛] 泛型 JSONL 事件 journal 基座——append（seq 单调分配）/ scan
 // （宽容解析 + 坏行计数）的唯一实现。
@@ -20,7 +20,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 
 /** 泛型 journal 的域策略（各域唯一实装点提供）。 */
-export interface JsonlEventJournalStrategy<TInput, TEvent extends { seq?: number }> { // oe-exempt:20260930:framework:shared 泛型基座的策略注入契约——record / run 两域各提供一份策略对象（两个真实变体），基座只此一个泛型实现属参数化 seam 常态，非单实现投机抽象
+export interface JsonlEventStreamStrategy<TInput, TEvent extends { seq?: number }> { // oe-exempt:20260930:framework:shared 泛型基座的策略注入契约——record / run 两域各提供一份策略对象（两个真实变体），基座只此一个泛型实现属参数化 seam 常态，非单实现投机抽象
   /** id → 文件绝对路径（须一并做该域的 id 白名单校验，非法即抛）。 */
   pathFor(id: string): string;
   /** 首行头行载荷（文件不存在时先落一行）；无头行契约的域返回 undefined。 */
@@ -56,14 +56,14 @@ function isNodeErrorCode(error: unknown, code: string): boolean {
  * scan 契约：文件不存在 = 空 journal（ENOENT 静默）；坏行跳过并计数（warn 留证）——
  * 失效模式是保守可诊断，不炸整个投影。
  */
-export class JsonlEventJournal<TInput extends object, TEvent extends { seq?: number }> {
+export class JsonlEventStream<TInput extends object, TEvent extends { seq?: number }> {
   private dirEnsured = false;
   /** id → 已知末 seq（append 分配基数）。 */
   private readonly lastSeqById = new Map<string, number>();
 
   constructor(
     private readonly dir: string,
-    private readonly strategy: JsonlEventJournalStrategy<TInput, TEvent>,
+    private readonly strategy: JsonlEventStreamStrategy<TInput, TEvent>,
   ) {}
 
   async append(id: string, event: TInput): Promise<TEvent> {

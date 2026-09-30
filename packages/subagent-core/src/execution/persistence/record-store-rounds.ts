@@ -41,7 +41,7 @@ import type {
   RecordEventJournal,
   RecordJournalEvent,
   RecordJournalEventInput,
-  RecordJournalFoldState,
+  RecordEventFoldState,
 } from "./record-events.ts";
 import {
   buildBoundEventPayload,
@@ -329,7 +329,7 @@ export function adoptEngineDeathImpl(id: string, opts: { error: string }, ctx: R
 
 
 // ============================================================
-// [W1 / U2a] RecordJournalWriteFace——record 事件文件写面接线层
+// [W1 / U2a] RecordEventsWriteFace——record 事件文件写面接线层
 // ============================================================
 //
 // 为什么在本文件：事件落账的调用面主体 = RoundsCtx/TerminalCtx 注入位（轮次粒度
@@ -349,11 +349,11 @@ export function adoptEngineDeathImpl(id: string, opts: { error: string }, ctx: R
 
 const faceLogger = getLogger("subagents");
 
-export class RecordJournalWriteFace {
+export class RecordEventsWriteFace {
   private readonly journal: RecordEventJournal;
   /** id → fold 当前态（写点幂等判定与 append 增量推进的单点状态；dispose/revive
    *  由容器调 resetFoldCache 重置——事件文件可能已被外部/清理通道改变）。 */
-  private readonly foldCache = new Map<string, RecordJournalFoldState>();
+  private readonly foldCache = new Map<string, RecordEventFoldState>();
 
   constructor(
     /** recordsDir（与 manifest 同目录——D3 落点，事件文件 = `<dir>/<sa-id>.events`）。 */
@@ -372,7 +372,7 @@ export class RecordJournalWriteFace {
   // ── fold 读面 ─────────────────────────────────────────────
 
   /** 同步 fold（缓存 miss → 文件全量装载；文件缺 ENOENT = 空 journal 态）。 */
-  foldOf(id: string): RecordJournalFoldState {
+  foldOf(id: string): RecordEventFoldState {
     const hit = this.foldCache.get(id);
     if (hit !== undefined) return hit;
     let content: string;

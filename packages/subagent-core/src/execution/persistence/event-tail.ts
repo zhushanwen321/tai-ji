@@ -1,4 +1,4 @@
-// src/execution/persistence/journal-tail.ts
+// src/execution/persistence/event-tail.ts
 //
 // W1 [D6]：journal tail 读取原语（域无关层，run / record 两域共用）。
 //
@@ -54,10 +54,10 @@ export function splitCompleteLines(buffer: string): { lines: string[]; remainder
 // ── offset 续读（无状态单文件原语）────────────────────────────
 
 /** 域注入的行解析器：合法事件返回 T；空行/头行/坏行返回 undefined（跳过 + 计数）。 */
-export type JournalLineParser<T> = (line: string) => T | undefined;
+export type EventLineParser<T> = (line: string) => T | undefined;
 
 /** 单次续读结果。 */
-export interface JournalTailChunk<T> { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+export interface EventTailChunk<T> { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 本次新读出的完整事件行（写入序）。 */
   events: T[];
   /** 下次续读起点（字节偏移；只落在完整行边界——不完整尾行不计入）。 */
@@ -84,8 +84,8 @@ export interface JournalTailChunk<T> { // oe-exempt:20260929:framework:workflow/
 export function readEventTail<T>(
   filePath: string,
   offset: number,
-  parseLine: JournalLineParser<T>,
-): JournalTailChunk<T> {
+  parseLine: EventLineParser<T>,
+): EventTailChunk<T> {
   let size: number;
   try {
     size = statSync(filePath).size;
@@ -143,7 +143,7 @@ const DEFAULT_DEBOUNCE_MS = 200;
 /** 默认 watch 失败重挂间隔（git-head-watcher L1 同构）。 */
 const DEFAULT_RETRY_DELAY_MS = 5_000;
 
-export interface JournalDirectoryTailerOptions<T> { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+export interface EventDirectoryTailerOptions<T> { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 监视目录（目录级 watch，不 per-file——D6 裁决；run 域 = workflow-state，record 域 = records）。 */
   dir: string;
   /**
@@ -152,7 +152,7 @@ export interface JournalDirectoryTailerOptions<T> { // oe-exempt:20260929:framew
    */
   filter: (filename: string) => boolean;
   /** 域注入的行解析器（record 域 = parseRecordEventFileLine）。 */
-  parseLine: JournalLineParser<T>;
+  parseLine: EventLineParser<T>;
   /** 续读产出的事件（按文件回调；events 恒非空数组才回调）。 */
   onEvents: (filename: string, events: T[]) => void;
   /** 跳过行出声（宽容跳过 + 计日志——调用方注入日志策略）。 */
@@ -176,7 +176,7 @@ export interface EventDirectoryTailer { // oe-exempt:20260929:framework:workflow
   dispose(): void;
 }
 
-class DirectoryJournalTailer<T> implements EventDirectoryTailer {
+class DirectoryEventTailer<T> implements EventDirectoryTailer {
   /** filename → 字节偏移（只落在完整行边界）。 */
   private readonly offsets = new Map<string, number>();
   private watcher: FSWatcher | undefined;
@@ -186,7 +186,7 @@ class DirectoryJournalTailer<T> implements EventDirectoryTailer {
   private retryTimer: NodeJS.Timeout | null = null;
   private readonly recheckTimer: NodeJS.Timeout;
 
-  constructor(private readonly opts: JournalDirectoryTailerOptions<T>) {
+  constructor(private readonly opts: EventDirectoryTailerOptions<T>) {
     this.mountWatch();
     const timer = setInterval(() => {
       // 周期复查：无条件运行（不依赖 watch 存活）——静默丢事件兜底 + 死 watcher
@@ -308,7 +308,7 @@ class DirectoryJournalTailer<T> implements EventDirectoryTailer {
  * 全量读是同一文件同一解析器，只差起点偏移（直播/冷启动同构，D6 语义）。
  */
 export function createEventDirectoryTailer<T>(
-  options: JournalDirectoryTailerOptions<T>,
+  options: EventDirectoryTailerOptions<T>,
 ): EventDirectoryTailer {
-  return new DirectoryJournalTailer<T>(options);
+  return new DirectoryEventTailer<T>(options);
 }

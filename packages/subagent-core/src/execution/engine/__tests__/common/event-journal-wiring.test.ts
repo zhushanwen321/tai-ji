@@ -1,4 +1,4 @@
-// journal-wiring.test.ts —— [D3-③ journal 接线合一] host helper 单测（两域共用的
+// event-journal-wiring.test.ts —— [D3-③ journal 接线合一] host helper 单测（两域共用的
 // 唯一实现：writer 创建 + journaling onEvent + handle 回填 + close）。
 // 设计权威源：docs/design/dual-track（已删 git 可追溯）§3.3 D3-③ + 双轨清单 #6。
 //
@@ -14,7 +14,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { wireEventJournal } from "../../common/journal-wiring.ts";
+import { wireEventJournal } from "../../common/event-journal-wiring.ts";
 import { resolveJournalPath } from "../../paths.ts";
 import type { AgentEvent } from "../../types.ts";
 import type { EngineHandle } from "../../types.ts";
@@ -23,7 +23,7 @@ let dataRoot: string;
 const PREV_DATA_DIR = process.env["TAIJI_AGENT_DATA_DIR"];
 
 beforeEach(() => {
-  dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "journal-wiring-"));
+  dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "event-journal-wiring-"));
   process.env["TAIJI_AGENT_DATA_DIR"] = dataRoot;
 });
 

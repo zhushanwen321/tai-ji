@@ -31,7 +31,7 @@ import type {
   SubagentRecordRegisteredEntryData,
   SubagentRecordSettledEntryData,
 } from "./record-entry.ts";
-import type { RecordBoundEvent, RecordJournalFoldState } from "./record-events.ts";
+import type { RecordBoundEvent, RecordEventFoldState } from "./record-events.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 // [U7 / §3.2.6 引擎中立锚] transcriptAnchorOf（cold-lookup 导出接口）：record →
 // transcript 锚的派生单点（显式 transcriptRef 优先 / zcode engineHandle.sessionRef
@@ -416,7 +416,7 @@ export function detectIdentity(file: string, size: number): IdentityHeaderRecon 
  *
  * 纯函数：不做旧格式上行映射（那是 sidecar 存量兼容面，随 sidecar 一起退场）。
  */
-export function stateMarkerFromFold(fold: RecordJournalFoldState | undefined): StateMarker | undefined {
+export function stateMarkerFromFold(fold: RecordEventFoldState | undefined): StateMarker | undefined {
   if (fold === undefined) return undefined;
   if (fold.settled !== undefined) {
     return { status: "idle", reason: fold.settled.stopReason, endedAt: fold.settled.endedAt };
@@ -461,7 +461,7 @@ const emptyStatsWithRound = (round: number | undefined): FoldStatistics =>
  * 语义：续轮记录若按上一条 round-idle 投影，会把上一轮的统计当成当前态写进
  * 运行中的记录。
  */
-export function receiptStatisticsFromFold(fold: RecordJournalFoldState | undefined): FoldStatistics {
+export function receiptStatisticsFromFold(fold: RecordEventFoldState | undefined): FoldStatistics {
   if (fold === undefined) return EMPTY_FOLD_STATISTICS;
   const settled = fold.settled;
   const idleReceipt =
@@ -486,7 +486,7 @@ export function receiptStatisticsFromFold(fold: RecordJournalFoldState | undefin
  * last-event 守卫。对齐 binding settle 快照的原语义（settle 写点落终值，轮中崩溃
  * 时上一轮快照仍是有效基线）：max 合并语义下取最近快照比取空更接近真值。
  */
-export function baselineStatisticsFromFold(fold: RecordJournalFoldState | undefined): FoldStatistics {
+export function baselineStatisticsFromFold(fold: RecordEventFoldState | undefined): FoldStatistics {
   if (fold === undefined) return { ...EMPTY_FOLD_STATISTICS };
   const snapshot = fold.settled ?? fold.roundIdle;
   if (snapshot === undefined) {
@@ -535,7 +535,7 @@ interface FoldIdentityFields {
   stepIndex: number | undefined;
 }
 
-function identityFromFoldSource(fold: RecordJournalFoldState | undefined): FoldIdentityFields | undefined {
+function identityFromFoldSource(fold: RecordEventFoldState | undefined): FoldIdentityFields | undefined {
   const identity = fold?.identity;
   if (identity === undefined) return undefined; // 残文件/全坏行形态（record-events 注释）
   if (
@@ -582,7 +582,7 @@ function identityFromFoldSource(fold: RecordJournalFoldState | undefined): FoldI
  * undefined，调用方按无身份处理（落负缓存）。
  */
 export function identityFromFold(
-  fold: RecordJournalFoldState | undefined,
+  fold: RecordEventFoldState | undefined,
   file: string,
 ): IdentityHeaderRecon | undefined {
   const created = fold?.identity;
@@ -962,7 +962,7 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
  * fold 来源 = TerminalCtx.foldOf 注入位（调用时读事件面——事件面未接线的纯内存
  * 形态返回 undefined，本函数整体 no-op）。
  */
-export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordJournalFoldState | undefined): void {
+export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEventFoldState | undefined): void {
   if (fold === undefined) return;
   const stats = baselineStatisticsFromFold(fold);
   if (stats.turns !== undefined) record.turnCount = Math.max(record.turnCount, stats.turns);

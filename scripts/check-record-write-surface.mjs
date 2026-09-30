@@ -26,7 +26,7 @@
 //      appendSettledEntry 等以 Entry 结尾的写通道名）与 customType 引用
 //      （SUBAGENT_RECORD_CUSTOM_TYPE 常量或 "subagent-record" 字面量）在调用窗口
 //      内同现，只许 store 家族（record-store.ts 本体 + record-store-rounds.ts 的
-//      RecordJournalWriteFace 容器——W1 v2 两条款写面宿主）与常量定义面
+//      RecordEventsWriteFace 容器——W1 v2 两条款写面宿主）与常量定义面
 //      （record-entry.ts）。appendEntry 是 pi 全局通路，全域禁不可行，按
 //      customType 限定到「写」形态（读面失效回调/类型声明不拦）。
 //   R3 workflow-record entry 写面白名单（W1 新增；D15/D7 裁决点 7 扩）：append 条目
@@ -55,7 +55,7 @@
 //
 // 白名单逐域（D7 ③ + ADR-0078 写面清单）：
 //   - store 家族：record-store.ts（R1+R2 豁免，唯一写入口本体）+
-//     record-store-rounds.ts（R2 豁免——RecordJournalWriteFace 容器，v2 两条款
+//     record-store-rounds.ts（R2 豁免——RecordEventsWriteFace 容器，v2 两条款
 //     写面 + 事件追加注入位的共享写面基础设施）
 //   - 写面载体定义文件：state-marker.ts / alive-store.ts / sessions-index.ts /
 //     manifest-store.ts（R1 定义行豁免：函数/类方法定义处，非调用方）
@@ -146,7 +146,7 @@ function callWindow(lines, i) {
 /** store 本体（R1+R2+R4 豁免）——唯一写入口本体，含全部合法调用与注释提及。 */
 const STORE_FILE = "packages/subagent-core/src/execution/persistence/record-store.ts";
 
-/** store 家族补充：RecordJournalWriteFace 容器（R2 豁免——v2 两条款写面宿主，
+/** store 家族补充：RecordEventsWriteFace 容器（R2 豁免——v2 两条款写面宿主，
  *  W1 写面接线层，见 record-store-rounds.ts 头注释）。 */
 const JOURNAL_FACE_FILE = "packages/subagent-core/src/execution/persistence/record-store-rounds.ts";
 
@@ -176,11 +176,11 @@ const WF_ENTRY_HOST_FILES = new Set([
 ]);
 
 /** R7 白名单：事件文件追加入口（record 事件文件 + run journal 的唯一写面，经
- *  shared/jsonl-event-journal.ts 基座落地——§3.1.3 后 append/scan 单源，两域只提供策略）。 */
+ *  shared/jsonl-event-stream.ts 基座落地——§3.1.3 后 append/scan 单源，两域只提供策略）。 */
 const EVENTS_WRITER_FILES = new Set([
   "packages/subagent-core/src/execution/persistence/record-events.ts",
   "packages/subagent-core/src/orchestration/run-events.ts",
-  "packages/subagent-core/src/shared/jsonl-event-journal.ts",
+  "packages/subagent-core/src/shared/jsonl-event-stream.ts",
 ]);
 
 /** extension 自有域白名单（R1+R2；相对仓根路径）。当前零命中，新增须注明依据。 */
@@ -295,7 +295,7 @@ function scanWriteLineRules(rel, i, line, lines, flags, violations) {
     if (EVENTS_PATH_LITERAL_RE.test(callWindow(lines, i))) {
       violations.push(
         `${rel}:${i + 1} [R7] 事件文件直写（appendFile×\`.events\`）出现在唯一写者外——` +
-          `追加原语单源在 shared/jsonl-event-journal.ts（seq 分配权与头行契约单点），` +
+          `追加原语单源在 shared/jsonl-event-stream.ts（seq 分配权与头行契约单点），` +
           `两域策略分别在 run-events.ts / record-events.ts（createRunEventJournal / ` +
           `createRecordEventJournal，ADR-0078）。Recovery: 改经两个创建入口。`,
       );
@@ -336,7 +336,7 @@ function scanWindowRules(rel, i, window, flags, violations) {
     violations.push(
       `${rel}:${i + 1} [R2] customType "subagent-record" 的 entry 直写出现在 store 家族外——` +
         `record 主记录 entry 的写面归 RecordStore（register/archive/收编内置）与` +
-        `RecordJournalWriteFace 容器（v2 两条款写面）。Recovery: 改调 store 公开原语或` +
+        `RecordEventsWriteFace 容器（v2 两条款写面）。Recovery: 改调 store 公开原语或` +
         `reportSubagentRecord（appendEntry 是 pi 全局通路，record 域 customType 限定唯一，D7 ②）。`,
     );
   }

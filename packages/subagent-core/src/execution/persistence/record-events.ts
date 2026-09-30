@@ -26,15 +26,15 @@
 // 结构性忽略该文件族（「被忽略或被误读」两类风险一次排空）。清理归统一保留
 // 通道（D5），session-file-gc 对 *.events 显式忽略（U5）。
 //
-// tail 增量读取（offset 续读 / 完整行边界 / 坏行宽容）不在本模块——journal-tail.ts
+// tail 增量读取（offset 续读 / 完整行边界 / 坏行宽容）不在本模块——event-tail.ts
 // 是域无关的 tail 原语层，本模块只提供 parseRecordEventFileLine 行解析器注入。
 
 import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
-// [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-journal.ts（与 run journal
+// [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-stream.ts（与 run journal
 // 共用同一实现体，差异经策略注入——本文件只提供 record 域策略）。
-import { JsonlEventJournal } from "../../shared/jsonl-event-journal.ts";
+import { JsonlEventStream } from "../../shared/jsonl-event-stream.ts";
 import type { Epoch, ExecutionMode, ExecutionOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
 import type { AbandonedRoundMark, TranscriptRef } from "../domain/record-types.ts";
 
@@ -322,7 +322,7 @@ export function parseRecordEventLine(value: unknown): RecordJournalEvent | null 
 }
 
 /**
- * 文件行解析器（journal-tail / scan 共用）：空行静默跳过、头行静默跳过（合法
+ * 文件行解析器（event-tail / scan 共用）：空行静默跳过、头行静默跳过（合法
  * 存在，非坏行——计数语义见 readEventTail 的 skippedLines 注释）、坏行（JSON
  * 解析失败 / 词表外 / 信封坏值）返回 undefined 交调用方计数。
  */
@@ -348,7 +348,7 @@ export function parseRecordEventFileLine(line: string): RecordJournalEvent | und
  * settled 不是吸收位——reopened / round-started 清除 settled（可续实体回边），
  * 「当前是否终态」= settled !== undefined。
  */
-export interface RecordJournalFoldState { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+export interface RecordEventFoldState { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 身份域（首条 record-created 落账；undefined = 文件缺创建帧——残文件/全坏行形态）。 */
   identity: RecordCreatedEvent | undefined;
   /** 引擎绑定（record-bound 落账；zcode 运行窗口锚定的数据源）。 */
@@ -370,7 +370,7 @@ export interface RecordJournalFoldState { // oe-exempt:20260929:framework:workfl
 }
 
 /** fold 初始态（全量 fold 起点；增量 fold 以既有 state 传入）。 */
-export const INITIAL_RECORD_EVENT_FOLD_STATE: RecordJournalFoldState = {
+export const INITIAL_RECORD_EVENT_FOLD_STATE: RecordEventFoldState = {
   identity: undefined,
   bound: undefined,
   round: undefined,
@@ -389,9 +389,9 @@ export const INITIAL_RECORD_EVENT_FOLD_STATE: RecordJournalFoldState = {
  * U1/U3 直接复用 fold 入口而非手写 apply 循环，守卫单点）。
  */
 export function applyRecordEvent(
-  state: RecordJournalFoldState,
+  state: RecordEventFoldState,
   event: RecordJournalEvent,
-): RecordJournalFoldState {
+): RecordEventFoldState {
   switch (event.type) {
     case "record-created":
       return { ...state, identity: event, lastSeq: event.seq, lastEvent: event };
@@ -437,9 +437,9 @@ export function applyRecordEvent(
  */
 export function foldRecordEvents(
   events: readonly RecordJournalEvent[],
-  initial: RecordJournalFoldState = INITIAL_RECORD_EVENT_FOLD_STATE,
+  initial: RecordEventFoldState = INITIAL_RECORD_EVENT_FOLD_STATE,
   onSkipped?: (event: RecordJournalEvent, why: "seq-regression") => void,
-): RecordJournalFoldState {
+): RecordEventFoldState {
   let state = initial;
   for (const event of events) {
     if (event.seq <= state.lastSeq) {
@@ -477,14 +477,14 @@ export interface RecordEventJournal { // oe-exempt:20260929:framework:workflow/r
 /**
  * 创建文件形态的 record 事件 journal（唯一创建入口）。
  *
- * 实装体 = shared 泛型基座（JsonlEventJournal，与 run journal 单源）；本函数只提供
+ * 实装体 = shared 泛型基座（JsonlEventStream，与 run journal 单源）；本函数只提供
  * record 域策略：路径（含 id 白名单校验）、首行头行、行校验器（seq 必填）、warn 标签。
  *
  * @param recordsDir manifest 同款目录（getSubagentRecordsDir 产物；测试传
  *        mkdtemp 临时目录）。
  */
 export function createRecordEventJournal(recordsDir: string): RecordEventJournal {
-  return new JsonlEventJournal<RecordJournalEventInput, RecordJournalEvent>(recordsDir, {
+  return new JsonlEventStream<RecordJournalEventInput, RecordJournalEvent>(recordsDir, {
     pathFor: (id) => recordEventsPath(recordsDir, id),
     headerFor: (id) => toRecordJournalHeader(id),
     isHeader: isRecordJournalHeader,

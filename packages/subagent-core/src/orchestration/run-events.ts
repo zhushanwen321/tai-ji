@@ -65,9 +65,9 @@ import type { RunErrorCode, RunOutcome } from "../shared/run-vocabulary.ts";
 export { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../shared/run-vocabulary.ts";
 export type { RunErrorCode, RunEventType, RunOutcome } from "../shared/run-vocabulary.ts";
 import { MAX_ERROR_LOGS } from "./worker-message-pump-constants.ts";
-// [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-journal.ts（与 record 事件
+// [§3.1.3 基座单源] append/scan 实现在 shared/jsonl-event-stream.ts（与 record 事件
 // journal 共用同一实现体，差异经策略注入——本文件只提供 run 域策略）。
-import { JsonlEventJournal } from "../shared/jsonl-event-journal.ts";
+import { JsonlEventStream } from "../shared/jsonl-event-stream.ts";
 import type { AgentFailureKind, AgentResult, DoneReason, WorkerLogEntry } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 
@@ -200,7 +200,7 @@ function extractFailedRunErrorCode(run: WorkflowRun): RunErrorCode {
  * seq（1 起严格递增，同一 journal 文件内全序；W1 [D1] 起）：同一事件的唯一行
  * 身份——W2 通知去重键（终态事件身份）的载体 + tail 截断重建后全量重读的 fold
  * 去重依据（seq ≤ 已见水位的行按重放跳过，见 foldRunEventFrames）。与 record 侧
- * RecordEventEnvelope（u0）同构——两域 tail 原语（journal-tail.ts）的去重语义
+ * RecordEventEnvelope（u0）同构——两域 tail 原语（event-tail.ts）的去重语义
  * 对称落位。
  *
  * ts：D5 载荷表未列，但快照投影（calls[].startedAt / lastProgressAt 派生）与
@@ -807,7 +807,7 @@ export function transition(
 /**
  * 单个 agent call（步骤）的 fold 投影行：骨架行 + 终局。
  *
- * [W2 D7] 自 runtime journal-projection.ts 上收（原 RunAskStepFold）——run 域
+ * [W2 D7] 自 runtime events-projection.ts 上收（原 RunAskStepFold）——run 域
  * fold 单源后，runtime 投影消费 core fold 的骨架输出，不再自建第二套 fold。
  * [D4] 随事件词 agent-* 更名（ask → agent）。
  */
@@ -905,7 +905,7 @@ function derivePhaseSettlement(
  * 单个 run record 流的投影骨架（fold 产物的投影半边：run 首帧 + call 步骤行 +
  * phase 状态机 + 中断/复活 + run 终局）。
  *
- * [W2 D7] 自 runtime journal-projection.ts 上收（原 RunJournalFold）：runtime
+ * [W2 D7] 自 runtime events-projection.ts 上收（原 RunJournalFold）：runtime
  * 投影（projectV2Workflow）读本骨架合成 WorkflowRunRecord，与状态机半边
  * （state/lastSeq）同源于一次 fold 循环。
  */
@@ -933,7 +933,7 @@ export interface RunJournalFold { // oe-exempt:20260929:framework:workflow/recor
  * 格式行（无 seq，W1 前）不推进水位（见 foldRunEventFrames 注释）。
  *
  * 骨架半边的消费方 = runtime journal 投影（[W2 D7] fold 单源：runtime 的
- * SessionJournalProjection 以本 checkpoint 为 per-run tailer 状态，投影读
+ * SessionEventProjection 以本 checkpoint 为 per-run tailer 状态，投影读
  * created/asks/phases/runSettled 合成 WorkflowRunRecord——「只要终帧状态」的
  * core 内消费面（run-state-evidence 清理资格 / 注册表投影 / pump 活体 fold）经
  * foldRunEventFrames 只取 state，骨架半边零成本闲置。

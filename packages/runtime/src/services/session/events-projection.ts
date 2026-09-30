@@ -7,7 +7,7 @@
  *   scanRecordFamilyEntriesFromSessionFile 流式扫描喂入（同一入口）；
  * - journal 源：record 事件文件（`<recordsDir>/<sa-id>.events`）与 run journal
  *   （`<sessionDir>/workflow-state/<runId>.record.jsonl`，后缀常量
- *   RUN_EVENTS_SUFFIX 单源）——经 u0 journal-tail
+ *   RUN_EVENTS_SUFFIX 单源）——经 u0 event-tail
  *   目录 tailer（watch + offset 续读 + 周期复查）增量 fold。run 域 fold 自
  *   [W2 D7] 起单源 core run-events foldRunEventCheckpoint（状态机检查点 + 投影
  *   骨架 created/asks/runSettled 一体产出），runtime 不再自建 fold。
@@ -47,7 +47,7 @@ import {
   type EventDirectoryTailer,
   type RecordCreatedEvent,
   type RecordJournalEvent,
-  type RecordJournalFoldState,
+  type RecordEventFoldState,
   type RunAskStepFold,
   type RunEventFoldCheckpoint,
   type SubagentRecordRegisteredEntryData,
@@ -80,7 +80,7 @@ const _assertRunEventTypeWordlist: Exclude<
 > extends never ? true : never = true
 
 /**
- * run journal 文件行解析器（journal-tail parseLine 注入面，run 域）。
+ * run journal 文件行解析器（event-tail parseLine 注入面，run 域）。
  *
  * 守卫对齐 core run-events isWorkflowRunEventLine 的最宽共同判定面：JSON 对象 +
  * type 落词表 + ts 有限数值 + seq（携带时）正安全整数 + outcome（agent-settled /
@@ -234,7 +234,7 @@ function deriveElapsedSeconds(
  * fold 在场（含事件文件）时由 fold 定态；窗外无 fold 时终态条目兜底。
  */
 function resolveSubagentStatus(
-  fold: RecordJournalFoldState | undefined,
+  fold: RecordEventFoldState | undefined,
   settledEntry: SubagentRecordSettledEntryData | undefined,
 ): SubagentRecord['status'] {
   if (fold === undefined) {
@@ -257,9 +257,9 @@ function resolveSubagentStatus(
  * F2-1：第二轮 running + 「completed」矛盾组合即旧值透传所致）。
  */
 function resolveSubagentStopReason(
-  fold: RecordJournalFoldState | undefined,
-  settled: RecordJournalFoldState['settled'],
-  roundIdle: RecordJournalFoldState['roundIdle'],
+  fold: RecordEventFoldState | undefined,
+  settled: RecordEventFoldState['settled'],
+  roundIdle: RecordEventFoldState['roundIdle'],
   settledEntry: SubagentRecordSettledEntryData | undefined,
 ): string | undefined {
   if (fold === undefined) return settledEntry?.stopReason
@@ -277,9 +277,9 @@ function resolveSubagentStopReason(
  * 清残留死因）→ 条目面兜底（fold 缺席 = journal 未接线的旧实体）。
  */
 function resolveSubagentError(
-  fold: RecordJournalFoldState | undefined,
-  settled: RecordJournalFoldState['settled'],
-  roundIdle: RecordJournalFoldState['roundIdle'],
+  fold: RecordEventFoldState | undefined,
+  settled: RecordEventFoldState['settled'],
+  roundIdle: RecordEventFoldState['roundIdle'],
   settledEntry: SubagentRecordSettledEntryData | undefined,
 ): string | undefined {
   if (fold === undefined) return settledEntry?.error
@@ -295,8 +295,8 @@ function resolveSubagentError(
  * 否则终局面优先（v2 终态条目全文是 D1 唯一全文落点，摘要锚兜底）。
  */
 function resolveSubagentResult(
-  settled: RecordJournalFoldState['settled'],
-  roundIdle: RecordJournalFoldState['roundIdle'],
+  settled: RecordEventFoldState['settled'],
+  roundIdle: RecordEventFoldState['roundIdle'],
   settledEntry: SubagentRecordSettledEntryData | undefined,
 ): string | undefined {
   if (roundIdle !== undefined && (settled === undefined || roundIdle.seq > settled.seq)) {
@@ -310,8 +310,8 @@ function resolveSubagentResult(
  * 条目面兜底（journal 缺席 = journal 未接线的旧实体）。
  */
 function resolveSubagentStats(
-  settled: RecordJournalFoldState['settled'],
-  roundIdle: RecordJournalFoldState['roundIdle'],
+  settled: RecordEventFoldState['settled'],
+  roundIdle: RecordEventFoldState['roundIdle'],
   settledEntry: SubagentRecordSettledEntryData | undefined,
 ): { turns: number | undefined; totalTokens: number | undefined } {
   return {
@@ -328,7 +328,7 @@ function resolveSubagentStats(
  * 类型按原组装表达式自然推导（union），不在此窄化。
  */
 function resolveSubagentBinding(
-  bound: RecordJournalFoldState['bound'],
+  bound: RecordEventFoldState['bound'],
   settledEntry: SubagentRecordSettledEntryData | undefined,
 ) {
   return {
@@ -352,7 +352,7 @@ function resolveSubagentBinding(
 export function projectV2Subagent(
   registered: SubagentRecordRegisteredEntryData | undefined,
   settledEntry: SubagentRecordSettledEntryData | undefined,
-  fold: RecordJournalFoldState | undefined,
+  fold: RecordEventFoldState | undefined,
 ): SubagentRecord | null {
   const identity: RecordCreatedEvent | SubagentRecordRegisteredEntryData | undefined =
     fold?.identity ?? registered
@@ -527,7 +527,7 @@ export interface JournalProjectionSources { // oe-exempt:20260929:framework:work
   v2WorkflowRegistered: Map<string, WorkflowRecordRegisteredEntryData>
   v2WorkflowSettled: Map<string, WorkflowRecordSettledEntryData>
   /** record 事件文件 fold（sa-id → 当前态）。 */
-  recordFolds: Map<string, RecordJournalFoldState>
+  recordFolds: Map<string, RecordEventFoldState>
   /** run journal fold（runId → core fold 检查点：状态半边 + 投影骨架半边，[W2 D7] 单源）。 */
   runFolds: Map<string, RunEventFoldCheckpoint>
 }
@@ -630,7 +630,7 @@ function runIdOfFilename(filename: string): string {
     : filename
 }
 
-export interface SessionJournalProjectionOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+export interface SessionEventProjectionOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 本会话 id（record 域 rootSessionId 过滤的归属键）。 */
   sessionId: string
   /** record 事件文件目录（`<agentDir>/subagents/<enc(cwd)>/records`）；undefined = 无 journal 源（entry-only 降级形态）。 */
@@ -652,7 +652,7 @@ export interface SessionJournalProjectionOptions { // oe-exempt:20260929:framewo
  * journal 源目录缺席（会话 meta 不可得，如 pi 延迟写入窗口）→ 无 tailer 的
  * entry-only 降级投影，行为退化为 entry 通道单源。
  */
-export class SessionJournalProjection {
+export class SessionEventProjection {
   readonly sources: JournalProjectionSources = initialJournalProjectionSources()
   /** 合并快照（每次重算整体替换；读请求唯一数据源）。 */
   subagents: Map<string, SubagentRecord> = new Map()
@@ -666,7 +666,7 @@ export class SessionJournalProjection {
   /** entry 批应用期间的回调抑制（发布归调用方统一执行）。 */
   private applyingEntryBatch = false
 
-  constructor(opts: SessionJournalProjectionOptions) {
+  constructor(opts: SessionEventProjectionOptions) {
     this.sessionId = opts.sessionId
     this.onProjectionChange = opts.onProjectionChange
     // undefined 直传 = tailer 缺省值（30s，周期复查兜底上界）
@@ -678,7 +678,7 @@ export class SessionJournalProjection {
         parseLine: parseRecordEventFileLine,
         onEvents: (filename, events) => this.applyRecordEvents(filename, events),
         onSkippedLines: (filename, count) =>
-          console.warn(`[journal-projection] record events skipped ${count} bad lines: ${filename}`),
+          console.warn(`[events-projection] record events skipped ${count} bad lines: ${filename}`),
         onReset: (filename) => {
           this.sources.recordFolds.delete(recordIdOfFilename(filename))
         },
@@ -692,7 +692,7 @@ export class SessionJournalProjection {
         parseLine: parseWorkflowRunEventFileLine,
         onEvents: (filename, events) => this.applyRunEvents(filename, events),
         onSkippedLines: (filename, count) =>
-          console.warn(`[journal-projection] run journal skipped ${count} bad lines: ${filename}`),
+          console.warn(`[events-projection] run journal skipped ${count} bad lines: ${filename}`),
         onReset: (filename) => {
           this.sources.runFolds.delete(runIdOfFilename(filename))
         },
@@ -765,7 +765,7 @@ export class SessionJournalProjection {
       runId,
       foldRunEventCheckpoint(events, (err, lastType) => {
         console.warn(
-          `[journal-projection] run journal fold stopped at a broken frame (file=${filename}, ` +
+          `[events-projection] run journal fold stopped at a broken frame (file=${filename}, ` +
             `lastType=${lastType}): ${err instanceof Error ? err.message : String(err)}`,
         )
       }, current),

@@ -22,7 +22,7 @@
 import { join } from "node:path";
 
 import { getLogger } from "../../core/logger.ts";
-import { JsonlEventJournal } from "../../shared/jsonl-event-journal.ts";
+import { JsonlEventStream } from "../../shared/jsonl-event-stream.ts";
 import { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../../shared/run-vocabulary.ts";
 import type { RunEventJournal, WorkflowRunEvent, WorkflowRunEventInput } from "../../orchestration/run-events.ts";
 // 【D1 拆边 Class C 第 3 步】默认 journal 目录的模块锚推导（原 terminal-actions 依赖，
@@ -193,7 +193,7 @@ export function parseLegacyArgsSummary(argsSummary: string | undefined): LegacyA
 /**
  * 创建文件形态的 run 事件 journal（唯一创建入口）。
  *
- * 实装体 = shared 泛型基座（JsonlEventJournal，与 record 事件 journal 单源）；本函数
+ * 实装体 = shared 泛型基座（JsonlEventStream，与 record 事件 journal 单源）；本函数
  * 只提供 run 域策略：路径（runId 白名单校验 + `.record.jsonl` 后缀）、行校验器
  *（存量无 seq 行容忍）、warn 标签。无首行头行契约（run 侧文件自带后缀，无需自描述行）。
  *
@@ -201,7 +201,7 @@ export function parseLegacyArgsSummary(argsSummary: string | undefined): LegacyA
  *        workflow-state 目录，测试传 mkdtemp 临时目录）。
  */
 export function createRunEventJournal(dir: string): RunEventJournal {
-  return new JsonlEventJournal<WorkflowRunEventInput, WorkflowRunEvent>(dir, {
+  return new JsonlEventStream<WorkflowRunEventInput, WorkflowRunEvent>(dir, {
     pathFor: (runId) => {
       assertValidRunId(runId);
       return join(dir, `${runId}${RUN_EVENTS_SUFFIX}`);

@@ -8,7 +8,7 @@
  *   publish diff；[reload-closeout D2] 发布门基线从 merge 变化信号换成已发布快照水位，
  *   守卫/发布门处丢帧 = 水位滞留 → agent_settled / 15s 定时两腿对账补发，稳态零帧）；
  * - 磁盘读侧/动作/引擎配置：getSubagents/getWorkflows（[W1 / D6] 读请求只读 journal
- *   投影——entry 游标 + journal tail 双源单点合并，见 journal-projection.ts；v1 巨文件
+ *   投影——entry 游标 + journal tail 双源单点合并，见 events-projection.ts；v1 巨文件
  *   会话 oversize 分流走旧格式惰性兼容读路径）、getPlanState（冷启动磁盘扫描不变）、
  *   getSubagentHistory/getAgentCall*（record.sessionFile 直读）、
  *   workflowAction/subagentAction（经扩展 slash command 的生命周期/定向消息操作）、
@@ -50,7 +50,7 @@ import {
 } from './subagent-engine-history.js'
 import { extractWorkflowsFromSessionFile } from './workflow-extractor.js'
 import { scanRecordFamilyEntriesFromSessionFile } from './session-file-extraction.js'
-import { SessionJournalProjection } from './journal-projection.js'
+import { SessionEventProjection } from './events-projection.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { discoverAndRegisterEngines } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
 import { isStrictlyUnder } from '../../utils/path-utils.js'
@@ -119,7 +119,7 @@ export interface RecordEntriesCache {
    * [W1 / D6] journal 投影（读请求唯一数据源）：entry 游标 + journal tail 双源
    * 单点合并。惰性创建（首个失效拉取 / 读 RPC / 对账触达时）；销毁随 cache。
    */
-  projection: SessionJournalProjection | null
+  projection: SessionEventProjection | null
 }
 
 /**
@@ -415,13 +415,13 @@ export class SessionRecords {
    * 会话 meta 不可得（pi 延迟写入 / 测试窄 mock）→ 无 tailer 的 entry-only
    * 降级投影。
    */
-  private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionJournalProjection {
+  private ensureProjection(sessionId: string, cache: RecordEntriesCache): SessionEventProjection {
     if (cache.projection !== null) return cache.projection
     const meta = this.deps.sessionStore
       .scanSessions({ force: true })
       .find((s) => s.id === sessionId)
     const cwd = meta?.cwd
-    const projection = new SessionJournalProjection({
+    const projection = new SessionEventProjection({
       sessionId,
       recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
       runJournalDir: meta !== undefined ? join(dirname(meta.filePath), 'workflow-state') : undefined,
@@ -457,7 +457,7 @@ export class SessionRecords {
   }
 
   /** 派生缓存 ← 投影合并快照（cache.subagents/workflows 的数据写路径唯一 = 投影重算）。 */
-  private syncCacheFromProjection(cache: RecordEntriesCache, projection: SessionJournalProjection): void {
+  private syncCacheFromProjection(cache: RecordEntriesCache, projection: SessionEventProjection): void {
     cache.subagents = new Map(projection.subagents)
     cache.workflows = new Map(projection.workflows)
   }

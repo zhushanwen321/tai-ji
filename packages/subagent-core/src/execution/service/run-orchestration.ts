@@ -63,7 +63,7 @@ import { project, settleWorkflowRecord } from "../persistence/execution-record.t
 // 迁入）。[D1 拆边 Class C] 该单点下沉持久化层（记录级原语：CAS + 委托
 // finalizeRecord，零编排语义），上方 import 已直连 persistence。
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
-import { wireEventJournal } from "../engine/common/journal-wiring.ts";
+import { wireEventJournal } from "../engine/common/event-journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
 import { identityEnvelopeOf } from "../engine/port.ts";

@@ -190,7 +190,7 @@ export function scanSubagentEntries(entries: unknown[]): SubagentRecord[] {
  * 收集自描述 subagent-record entry（登记 §3.3 后 = v2 注册/终态条目对）。
  *
  * data schema = core record-entry.ts 的 v2 条目契约（registered / settled）——与
- * journal-projection 的 scanV2RecordEntries 消费同一 classify 单源；runtime 只取
+ * events-projection 的 scanV2RecordEntries 消费同一 classify 单源；runtime 只取
  * shared SubagentRecord 投影需要的字段（eventLog/displayItems 等扩展内部字段不进
  * runtime 契约）。
  *
@@ -218,7 +218,7 @@ interface V2SubagentPair {
 /**
  * 单条 entry → v2 条目对（type/customType/data/版本逐层守卫，坏 entry 静默丢弃）。
  * 版本不认识（missing-v / future-v / unknown-kind）或旧形态 warn 留证——与
- * journal-projection 的 scanV2RecordEntries 同一 classify 判定。
+ * events-projection 的 scanV2RecordEntries 同一 classify 判定。
  */
 function collectV2SubagentPair(entry: unknown, pairs: Map<string, V2SubagentPair>): void {
   if (typeof entry !== 'object' || entry === null) return

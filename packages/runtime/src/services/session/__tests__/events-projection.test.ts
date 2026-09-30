@@ -7,7 +7,7 @@
  * record 事件文件/run journal 形态对齐 u0 契约（record-events.ts 六类词表 +
  * 首行头行 / run-events.ts 七类词表）。测试框架：vitest + fake timers（tailer
  * 周期复查注入短值驱动确定性增量）。
- * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/journal-projection.test.ts
+ * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/events-projection.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -21,8 +21,8 @@ import {
   projectV2Subagent,
   projectV2Workflow,
   scanV2RecordEntries,
-  SessionJournalProjection,
-} from '../journal-projection.js'
+  SessionEventProjection,
+} from '../events-projection.js'
 import { scanRecordFamilyEntriesFromSessionFile } from '../session-file-extraction.js'
 import {
   foldRunEventCheckpoint,
@@ -985,7 +985,7 @@ describe('scanRecordFamilyEntriesFromSessionFile（冷启动流式 entry 源）'
 
 // ── 有状态投影（tailer 接线集成）─────────────────────────────
 
-describe('SessionJournalProjection（冷启动 + 增量 + dispose）', () => {
+describe('SessionEventProjection（冷启动 + 增量 + dispose）', () => {
   let dir: string
   let recordsDir: string
   let runDir: string
@@ -1011,7 +1011,7 @@ describe('SessionJournalProjection（冷启动 + 增量 + dispose）', () => {
         JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
       ].join('\n') + '\n',
     )
-    const projection = new SessionJournalProjection({
+    const projection = new SessionEventProjection({
       sessionId: 's1',
       recordsDir,
       runJournalDir: runDir,
@@ -1037,7 +1037,7 @@ describe('SessionJournalProjection（冷启动 + 增量 + dispose）', () => {
         JSON.stringify({ type: 'agent-started', taskIndex: 0, agentName: 'w1', attempt: 1, ts: 1100 }),
       ].join('\n') + '\n',
     )
-    const projection = new SessionJournalProjection({
+    const projection = new SessionEventProjection({
       sessionId: 's1',
       recordsDir,
       runJournalDir: runDir,
@@ -1070,7 +1070,7 @@ describe('SessionJournalProjection（冷启动 + 增量 + dispose）', () => {
   it('增量：周期复查拾取追加事件 → fold 推进 → onChange 驱动（投影变更即信号源）', async () => {
     writeFileSync(join(recordsDir, 'sa-1.events'), recordJournalLines('sa-1', [createdEvent('sa-1')]).join('\n') + '\n')
     const onChange = vi.fn()
-    const projection = new SessionJournalProjection({
+    const projection = new SessionEventProjection({
       sessionId: 's1',
       recordsDir,
       runJournalDir: runDir,
@@ -1099,7 +1099,7 @@ describe('SessionJournalProjection（冷启动 + 增量 + dispose）', () => {
       join(recordsDir, 'sa-1.events'),
       [...recordJournalLines('sa-1', [createdEvent('sa-1')]), '{broken-line', ''].join('\n') + '\n',
     )
-    const projection = new SessionJournalProjection({
+    const projection = new SessionEventProjection({
       sessionId: 's1',
       recordsDir,
       runJournalDir: runDir,
@@ -1122,7 +1122,7 @@ describe('SessionJournalProjection（冷启动 + 增量 + dispose）', () => {
 
   it('dispose 后停增量（周期复查不复活投影）', async () => {
     writeFileSync(join(recordsDir, 'sa-1.events'), recordJournalLines('sa-1', [createdEvent('sa-1')]).join('\n') + '\n')
-    const projection = new SessionJournalProjection({
+    const projection = new SessionEventProjection({
       sessionId: 's1',
       recordsDir,
       runJournalDir: runDir,

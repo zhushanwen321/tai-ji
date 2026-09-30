@@ -67,7 +67,7 @@ const DOC_MODULE_MAP = {
   //
   // 引擎开发指南（docs/extensions/subagents/engine-development-guide.md）：登记蓝本 =
   // 该指南 §12 映射表——SDK 全 src（protocol 契约 + spawn/env/node-executor）、core 引擎
-  // 子域（errors/engine-manifest/capability-gate/journal-wiring/session-view）+ path-encoding
+  // 子域（errors/engine-manifest/capability-gate/event-journal-wiring/session-view）+ path-encoding
   // （getSubagentSessionDir）、两引擎包（zcode constants/engine/session-channel/reader/parser、
   // pi constants/spawn-args）、shared constants（ENV_WHITELIST_PREFIXES）。非导出的模块内
   // const（PROBE_TIMEOUT_MS/DISPOSE_GRACE_MS/CAPABILITY_ENUMS/ENGINE_ICON_REGISTRY 等）不进

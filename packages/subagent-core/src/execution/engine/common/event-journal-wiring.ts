@@ -1,4 +1,4 @@
-// src/execution/engine/common/journal-wiring.ts
+// src/execution/engine/common/event-journal-wiring.ts
 //
 // [D3-③ journal 接线合一] host 侧 event journal 接线的共享 helper（唯一实现，调用
 // 点全部在 workflow 域编排层两处：workflow-dispatch.ts 与 run-orchestration.ts 的

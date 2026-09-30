@@ -28,7 +28,7 @@ import type { RecordBinding } from "./state-marker.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 import { derivedManifestRecord, hydrateReviveBaseline, recordToSubagent, zcodeRefOf } from "./record-store-rebuild.ts";
 import { findForeignLiveInstance } from "./alive-store.ts";
-import type { RecordJournalEventInput, RecordJournalFoldState } from "./record-events.ts";
+import type { RecordJournalEventInput, RecordEventFoldState } from "./record-events.ts";
 // [W1 / U2a] v2 条目契约与 v2 定界判定（u0 契约层消费）。
 import { SUBAGENT_RECORD_CUSTOM_TYPE, SUBAGENT_RECORD_ENTRY_VERSION, classifySubagentRecordEntryData } from "./record-entry.ts";
 import type {
@@ -76,7 +76,7 @@ export interface TerminalCtx {
    * record-store 构造点绑定 `this.eventStreamFace?.foldOf`；事件面未接线返回
    * undefined = 水合 no-op，与纯内存测试形态对齐）。
    */
-  foldOf: (id: string) => RecordJournalFoldState | undefined;
+  foldOf: (id: string) => RecordEventFoldState | undefined;
   notifyChange: () => void;
 }
 
@@ -741,7 +741,7 @@ export function isNonInterruptedSettledEvidence(st: V2EntryState | undefined): b
 
 /** 收编产物的 v2 终态条目（fold + 收编停因组装——model/thinkingLevel 收编形态 undefined 诚实缺省：journal 无此数据源）。 */
 export function buildAdoptedSettledEntry(
-  fold: RecordJournalFoldState,
+  fold: RecordEventFoldState,
   id: string,
   stopReason: StopReason,
   now: number,
@@ -790,7 +790,7 @@ export function buildEntryOnlyOrphanSettledEntry(
 
 /** 收编产物的 record-settled 帧（统计终值取 fold 轮终快照、缺帧诚实 0——判定半边在容器）。 */
 export function buildAdoptedSettledEvent(
-  fold: RecordJournalFoldState,
+  fold: RecordEventFoldState,
   id: string,
   stopReason: StopReason,
   now: number,
@@ -807,7 +807,7 @@ export function buildAdoptedSettledEvent(
 
 /** 收编产物的 manifest 投影（derivedManifestRecord 同族形态——身份域取 created 帧、引擎域取 bound 帧、终局域取收编停因）。 */
 export function buildAdoptedManifestProjection(
-  fold: RecordJournalFoldState,
+  fold: RecordEventFoldState,
   id: string,
   stopReason: StopReason,
   now: number,
