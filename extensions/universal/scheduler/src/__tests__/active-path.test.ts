@@ -79,7 +79,9 @@ function makeCtx(initialEntries: BranchEntry[], initialLeafId: string | null) {
   }
 }
 
-/** 捕获 pi.on 注册的 handler + 副作用记录面（sendMessage / appendEntry vi.fn） */
+/** 捕获 pi.on 注册的 handler + 副作用记录面（sendMessage / appendEntry vi.fn）。
+ * on 字段仅满足 ExtensionAPI 结构完整性：session_tree 注册面已迁至 factory 顶层
+ * （index.ts），backend 构造不再调 pi.on（注册面契约见 session-tree-registration.test.ts）。 */
 function makePi() {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const sendMessage = vi.fn(async () => {})
@@ -183,14 +185,14 @@ describe('PiSchedulerBackend.loadTasks 活跃路径裁剪（U6c）', () => {
 // ── session_tree handler 重折叠 + 到点不触发（U6c / A14）──
 
 describe('session_tree 重折叠（U6c）', () => {
-  it('撤回后 session_tree → runtime 任务集重折叠（被撤任务移除）；handler 本身零 dispatch 零 append', async () => {
+  it('撤回后 session_tree → runtime 任务集重折叠（被撤任务移除）；handler 本身零 dispatch 零 append', () => {
     // 撤回前：线性文件（leaf=尾=e2），t1/t2 均在
     const preRevoke = [
       taskOpEntry('e1', null, upsertOp('t1')),
       taskOpEntry('e2', 'e1', upsertOp('t2')),
     ]
     const { ctx, setTree } = makeCtx(preRevoke, null)
-    const { pi, handlers, sendMessage, appendEntry } = makePi()
+    const { pi, sendMessage, appendEntry } = makePi()
 
     const backend = new PiSchedulerBackend(ctx, pi)
     const runtime = new SchedulerRuntime(backend)
@@ -198,12 +200,10 @@ describe('session_tree 重折叠（U6c）', () => {
     expect(runtime.getTask('t1')).toBeDefined()
     expect(runtime.getTask('t2')).toBeDefined()
 
-    // 构造注册断言：backend 构造时注册 session_tree（pi.on 捕获）
-    expect(handlers.has('session_tree')).toBe(true)
-
     // 撤回：树回退（label 锚落尾 + leafId 指向它）→ session_tree 事件 → 重折叠
+    // （生产注册面在 factory 顶层 index.ts，此处直接驱动委托体）
     setTree([...preRevoke, labelEntry('L', 'e1')], 'L')
-    await handlers.get('session_tree')!({ type: 'session_tree' })
+    backend.refoldSessionTree()
 
     expect(runtime.getTask('t1')).toBeDefined()
     expect(runtime.getTask('t2')).toBeUndefined()
@@ -224,7 +224,7 @@ describe('session_tree 重折叠（U6c）', () => {
         taskOpEntry('e2', 'e1', upsertOp('t2', { nextRunAt: dueAt })),
       ]
       const { ctx, setTree } = makeCtx(preRevoke, null)
-      const { pi, handlers, sendMessage } = makePi()
+      const { pi, sendMessage } = makePi()
 
       const backend = new PiSchedulerBackend(ctx, pi)
       const runtime = new SchedulerRuntime(backend)
@@ -232,7 +232,7 @@ describe('session_tree 重折叠（U6c）', () => {
 
       // 撤回回退到 e1（t2 所在子树被移出活跃路径）
       setTree([...preRevoke, labelEntry('L', 'e1')], 'L')
-      await handlers.get('session_tree')!({ type: 'session_tree' })
+      backend.refoldSessionTree()
       expect(runtime.getTask('t2')).toBeUndefined()
 
       // tick 常驻循环不动启停逻辑：重折叠后照常消费新任务集

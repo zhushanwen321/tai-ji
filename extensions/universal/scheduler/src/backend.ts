@@ -72,10 +72,11 @@ export interface SchedulerBackend {
    */
   getEntries(): SchedulerEntryLike[]
   /**
-   * U6c：session_tree（树回退）重折叠订阅。生产实现（PiSchedulerBackend）注册
-   * pi.on('session_tree')，事件到达时按活跃路径重折叠任务集并回调 listener——
-   * 落点是 SchedulerRuntime 的内存任务 Map（runtime 构造时订阅，backend 不能反向
-   * 持有 runtime）。测试替身可不实现（构造侧 ?. 订阅为 no-op，既有单测路径不变）。
+   * U6c：session_tree（树回退）重折叠订阅。生产注册面在 extension factory 顶层
+   * （index.ts：pi.on('session_tree') 每代恰一，事件经 activeBackend 委托
+   * PiSchedulerBackend.refoldSessionTree），事件到达时按活跃路径重折叠任务集并回调
+   * listener——落点是 SchedulerRuntime 的内存任务 Map（runtime 构造时订阅，backend
+   * 不能反向持有 runtime）。测试替身可不实现（构造侧 ?. 订阅为 no-op，既有单测路径不变）。
    */
   onSessionTree?(listener: (tasks: ScheduledTask[]) => void): void
 }
@@ -94,6 +95,7 @@ export interface SchedulerBackendCtx {
      * （ReadonlySessionManager Pick 清单含 getLeafId）；最小 duck-typed ctx（单测）
      * 缺失时按文件尾回退——session_start 时点与 pi 树重放规则（叶子 = 文件最后
      * 一条 entry）等价，session_tree 时点由生产 ctx 携带精确锚。
+     * （pi 树重放规则实锚登记 pi-semantics PS-60：dist/core/session-manager.js:673 _buildIndex）
      */
     getLeafId?(): string | null
   }
@@ -133,14 +135,7 @@ export class PiSchedulerBackend implements SchedulerBackend {
   private pi: Pick<
     ExtensionAPI,
     'sendMessage' | 'appendEntry' | 'registerProvider' | 'unregisterProvider'
-  > & {
-    /**
-     * U6c session_tree 订阅面：可选——测试最小 pi / 新宿主缺省时跳过注册（其余能力
-     * 不变，fail-safe 方向 = 少做事）。生产装配点（index.ts session_start）传完整
-     * ExtensionAPI，恒携带。
-     */
-    on?: ExtensionAPI['on']
-  }
+  >
   private sessionTreeListener: ((tasks: ScheduledTask[]) => void) | null = null
 
   constructor(
@@ -148,26 +143,26 @@ export class PiSchedulerBackend implements SchedulerBackend {
     pi: Pick<
       ExtensionAPI,
       'sendMessage' | 'appendEntry' | 'registerProvider' | 'unregisterProvider'
-    > & { on?: ExtensionAPI['on'] },
+    >,
   ) {
     this.ctx = ctx
     this.pi = pi
-    // U6c：session_tree（树回退——撤回 __taiji_nav__ → navigateTree / 用户树跳转）
-    // → 重折叠。为什么注册在 backend 而非装配点 index.ts：backend 持有 pi 引用且与
-    // ctx 同生命周期（每 session_start 一代）；pi 对 extension 的 API 对象每代新建
-    // （pi loader.js initializeExtension 每次 factory 运行建全新 handlers Map，0.84.4
-    // 实装核对），不会跨代累积 handler。
-    // 纯重建体：只按活跃路径重折叠任务集（loadTasks）并回调 runtime 换 Map——不做
-    // 任何 sendMessage / appendEntry / tickTimer 启停（tick 常驻循环照常消费新任务集，
-    // 被撤子树任务不在集内即到点不触发，A14）。
-    pi.on?.('session_tree', () => {
-      this.sessionTreeListener?.(this.loadTasks())
-    })
   }
 
   /** U6c：SchedulerRuntime 构造时订阅重折叠回调（见 SchedulerBackend.onSessionTree）。 */
   onSessionTree(listener: (tasks: ScheduledTask[]) => void): void {
     this.sessionTreeListener = listener
+  }
+
+  /**
+   * U6c：session_tree（树回退）事件委托体，由 extension factory 顶层注册的 handler
+   * 经 activeBackend 调用（index.ts；不在本类构造函数注册，注册面理由见该处注释）。
+   * 纯重建体：只按活跃路径重折叠任务集（loadTasks）并回调 runtime 换 Map——不做
+   * 任何 sendMessage / appendEntry / tickTimer 启停（tick 常驻循环照常消费新任务集，
+   * 被撤子树任务不在集内即到点不触发，A14）。
+   */
+  refoldSessionTree(): void {
+    this.sessionTreeListener?.(this.loadTasks())
   }
 
   /**
