@@ -26,7 +26,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { ServerMessage, SkillInfo } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
 import { getSettingsStore, provideSettingsTransport, provideSettingsStore, createSettingsStore } from '@taiji/core'
-import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { makeSkillsReloadTransportStub } from '../helpers/settings-transport-stub'
 import { __resetCommandStoreForTesting } from '@/composables/features/command/useCommandStore'
 import CommandPopover from '@/components/panel/CommandPopover.vue'
 
@@ -555,14 +555,9 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
     // lazy import：避免顶层 import 触发 useProjectSkills 模块加载（其顶层订阅依赖 mock 已挂载，OK）。
     const { useGlobalSkills } = await import('@/composables/features/settings/useProjectSkills')
     // [C3] 打 seam：getGlobalSkills 可控 mock + onSkillCacheInvalidated 桥真实 events
-    //（广播端到端触达 useGlobalSkills 订阅——同本文件 '@/api' mock 工厂的语义）。
-    provideSettingsTransport(makeSettingsTransportStub({
-      getGlobalSkills: getGlobalSkillsMock,
-      onSkillCacheInvalidated: (handler: (p: { scope: 'global' | 'project'; cwd?: string }) => void) =>
-        events.onGlobalType('config.skillCacheInvalidated', (msg) => {
-          handler(msg.payload as { scope: 'global' | 'project'; cwd?: string })
-        }),
-    }))
+    //（单源 = helpers/settings-transport-stub 的 makeSkillsReloadTransportStub，语义同
+    // 本文件 '@/api' mock 工厂——广播端到端触达 useGlobalSkills 订阅）。
+    provideSettingsTransport(await makeSkillsReloadTransportStub(getGlobalSkillsMock))
 
     const SKILL_1: SkillInfo[] = [
       { id: 'sk-1', name: 'skill1', description: 'one', enabled: true, source: 'agents', effective: true },

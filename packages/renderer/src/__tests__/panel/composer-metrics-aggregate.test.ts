@@ -15,6 +15,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { commandMock, transportApiCommandModule } from '../helpers/transport-command-mock'
+import { apiFacadeWithSessionDomain } from '../helpers/session-context-mock'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { __clearInFlightGenStatsForTest } from '@/composables/features/model/useGenStats'
 import { __clearInFlightContextFetchForTest } from '@/composables/features/model/useContextUsage'
@@ -26,19 +28,13 @@ import {
 
 import ComposerMetricsAggregate from '@/components/panel/ComposerMetricsAggregate.vue'
 
-// ── mock：getGenStats（command 门面）与 getContext（session domain 门面）均为受控 pending ──
-const commandMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api', async (importActual) => {
-  const actual = await importActual<typeof import('@taiji/core/transport/api')>()
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
-})
+// ── mock：getGenStats（command 门面）与 getContext（session domain 门面）均为受控 pending。
+// spread-actual 工厂单源：helpers/transport-command-mock.ts（events 真实通道保留）+
+// helpers/session-context-mock.ts（'@/api' 门面 session 域重指回被 mock 的 domain 模块）──
+vi.mock('@taiji/core/transport/api', () => transportApiCommandModule())
 const getContextMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api/domains/session', () => ({ getContext: getContextMock }))
-vi.mock('@/api', async (importActual) => {
-  const actual = await importActual<typeof import('@/api')>()
-  const session = await import('@taiji/core/transport/api/domains/session')
-  return { ...actual, session }
-})
+vi.mock('@/api', () => apiFacadeWithSessionDomain())
 
 /** GenStats 面板 mount 编排（HoverCard stub 家族 + props）单源在 helpers/gen-stats-mount */
 function mountAggregate(stubHover = false) {

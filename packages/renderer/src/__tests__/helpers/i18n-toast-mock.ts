@@ -1,5 +1,6 @@
 /**
- * 设置域 composable 单测共享的 i18n key 回显 + toast spy mock（use-api-key-auto-enable /
+ * 设置域 composable 单测与 composer 集成测试（compact-queue / dispatch-route 的
+ * queue 拒绝 toast）共享的 i18n key 回显 + toast spy mock（use-api-key-auto-enable /
  * useQuotaAutoEnableNotice 等 '@/i18n' + '@/composables/useToast' 前置段单源）。
  *
  * t 返回 key 本身；带 name 参数时拼接（`key:name`）——toast 断言据此验证插值确有传入
@@ -11,8 +12,10 @@
  */
 import { vi } from 'vitest'
 
-/** toast spy 集（info/error 两面，beforeEach vi.clearAllMocks 常规清理）。 */
-export const toastSpyMock = { info: vi.fn(), error: vi.fn() }
+/** toast spy 集（info/error/warning 三面，beforeEach vi.clearAllMocks 常规清理；
+ *  warning 键供 compact-queue / dispatch-route 的 queue 拒绝 toast 断言，对其余
+ *  消费文件为无害多余键）。 */
+export const toastSpyMock = { info: vi.fn(), error: vi.fn(), warning: vi.fn() }
 
 /** '@/i18n' mock 工厂（t = key 回显 + name 拼接，见文件头注释）。 */
 export function i18nKeyEchoModule() {

@@ -13,103 +13,42 @@
  * ComposerInput mock（defineExpose + emit keydown/input）。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
-import { textToSegments } from '@taiji/shared'
+import '../helpers/composer-shell-mount'
+import {
+  composerApiModule,
+  composerChatApiSpy,
+  composerChildStubs,
+  makeKeyboardComposerInputMock,
+  mountComposerWithStubs,
+  resetComposerMountState,
+} from '../helpers/composer-mount'
 import { useChatStore } from '@/stores/chat'
 
-// ── mock useChat（send 等 spy）──
-const chatApiMock = {
-  send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-}
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => chatApiMock,
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn() }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-}))
+// ── 壳 mock（useChat spy 转发 / useNewTaskFlow / stores/session）：import
+//    composer-shell-mount 即注册；send/steer/followUp 断言用 composerChatApiSpy ──
 // main 合并引入 useProjectSkills/useGlobalSkills（landing skill），与 fork 测试无关，stub 掉
 vi.mock('@/composables/features/settings/useProjectSkills', () => ({
   useProjectSkills: () => ({ projectSkills: [] }),
   useGlobalSkills: () => ({ globalSkills: [] }),
 }))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+vi.mock('@/api', () => composerApiModule())
 // ── mock useSidebar：forkSessionAsk（W2 新增，当前不存在）──
 const forkSessionAskMock = vi.fn(() => Promise.resolve())
 vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ forkSessionAsk: forkSessionAskMock, forkSession: vi.fn() }),
 }))
 
-// ── ComposerInput mock：defineExpose + emit（同 composer-three-states 范式）──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  props: {
-    placeholder: { type: String, default: '' },
-    disabled: { type: Boolean, default: false },
-  },
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    expose({
-      clear: vi.fn(),
-      setText: vi.fn(),
-      insertSlashChip: vi.fn(),
-      getSegments: () => textToSegments(lastInputText.value),
-      getText: () => lastInputText.value,
-      moveCaretVertical: () => 'edge',
-    })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
+// ── ComposerInput mock：键盘交互变体（placeholder/disabled props 供 U12 透传断言 +
+//    全 expose 面含 getText/moveCaretVertical；单源 helpers/composer-mount.ts）──
+const { lastInputText, ComposerInputMock } = makeKeyboardComposerInputMock()
 
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
-const otherStubs = {
-  ComposerInput: ComposerInputMock,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
-}
+const otherStubs = { ComposerInput: ComposerInputMock, ...composerChildStubs }
 
 import Composer from '@/components/panel/Composer.vue'
 
-beforeEach(() => {
-  setActivePinia(createPinia())
-  vi.clearAllMocks()
-  lastInputText.value = ''
-})
+beforeEach(() => resetComposerMountState(lastInputText))
 
-function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'landing' }) {
-  return mount(Composer, { props, global: { stubs: otherStubs } })
-}
+const mountComposer = mountComposerWithStubs(Composer, otherStubs)
 
 /** 构造 ⌘/Ctrl + key 的 KeyboardEvent（fork 用 ⌘G 触发；Esc 用 Escape） */
 function keyEvent(key: string, opts: { meta?: boolean; ctrl?: boolean; shift?: boolean } = {}): KeyboardEvent {
@@ -178,7 +117,7 @@ describe('U13：forkMode 下发送 → 调 forkSessionAsk + forkMode 自动复�
 
     // forkSessionAsk 被调（而非 send）
     expect(forkSessionAskMock).toHaveBeenCalled()
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.send).not.toHaveBeenCalled()
     // forkMode ref 复位 false
     expect(vm.forkMode?.value).toBe(false)
   })
@@ -251,8 +190,8 @@ describe('U15：streaming 中 fork 模式：Enter 提交 fork 而非 steer，发
     expect(forkSessionAskMock).toHaveBeenCalledWith(
       's1', 'm1', 'fork 那条回复去问', expect.anything(),
     )
-    expect(chatApiMock.steer).not.toHaveBeenCalled()
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.steer).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.send).not.toHaveBeenCalled()
   })
 
   it('streaming + fork 模式 → 发送位显示 fork 发送按钮，stop 按钮被替换', async () => {
@@ -295,7 +234,7 @@ describe('U15：streaming 中 fork 模式：Enter 提交 fork 而非 steer，发
     await wrapper.vm.$nextTick()
 
     expect(forkSessionAskMock).toHaveBeenCalled()
-    expect(chatApiMock.followUp).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.followUp).not.toHaveBeenCalled()
   })
 })
 

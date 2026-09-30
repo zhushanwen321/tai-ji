@@ -51,7 +51,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { ServerMessage, SkillInfo } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
 import { provideSettingsTransport } from '@taiji/core'
-import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { makeSkillsReloadTransportStub, skillCacheInvalidatedBridge } from '../helpers/settings-transport-stub'
+import { composerApiModule, composerChatApiSpy } from '../helpers/composer-mount'
 
 // ── getGlobalSkills 可控 mock（hoisted：vi.mock 工厂早于 import 求值）──
 // TC5-Composer 中途改返回值模拟 runtime 重扫 globalCache 后缓存更新。
@@ -59,36 +60,19 @@ const getGlobalSkillsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]))
 
 // ── onSkillCacheInvalidated 接真实 events.onGlobalType：让 dispatchGlobal 广播能端到端触达
 // useGlobalSkills 的订阅回调（loadGlobal(true) force 重拉）。这是「真实订阅链路」验证的关键。
+// api 骨架单源 helpers/composer-mount.ts；config 域换受控 getGlobalSkills + events 桥。
 vi.mock('@/api', async () => {
   const realEvents = await import('@taiji/core/transport/api')
+  const api = composerApiModule()
   return {
-    model: { switchModel: vi.fn() },
-    session: { setThinkingLevel: vi.fn() },
-    composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-    config: {
-      getGlobalSkills: getGlobalSkillsMock,
-      getProjectSkills: vi.fn().mockResolvedValue([]),
-      onSkillCacheInvalidated: (handler: (p: { scope: 'global' | 'project'; cwd?: string }) => void) =>
-        realEvents.onGlobalType('config.skillCacheInvalidated', (msg) => {
-          handler(msg.payload as { scope: 'global' | 'project'; cwd?: string })
-        }),
-    },
+    ...api,
+    config: { ...api.config, getGlobalSkills: getGlobalSkillsMock, onSkillCacheInvalidated: skillCacheInvalidatedBridge(realEvents) },
   }
 })
 
-// ── mock useChat（spy 化，landing 首发不应触发 send）──
-const chatApiMock = {
-  send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-}
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => chatApiMock,
-}))
+// ── mock useChat（spy 化，landing 首发不应触发 send；composerChatApiSpy 单例转发，
+//    断言直接引用同一批 vi.fn）──
+vi.mock('@/composables/features/chat/useChat', () => ({ useChat: () => composerChatApiSpy }))
 
 // ── mock useNewTaskFlow：currentCwd=null（真 ref）使 useProjectSkills 早退不 RPC，聚焦 global 链路 ──
 vi.mock('@/composables/features/new-task/useNewTaskFlow', async () => {
@@ -146,20 +130,14 @@ const otherStubs = {
 
 import Composer from '@/components/panel/Composer.vue'
 
-beforeEach(() => {
+beforeEach(async () => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   // 默认空数组；TC5-Composer 用例内覆盖为具体 skill 列表
   getGlobalSkillsMock.mockResolvedValue([])
   // [C3] 打 seam：getGlobalSkills 可控 mock + onSkillCacheInvalidated 桥真实 events
-  //（同本文件 '@/api' mock 工厂语义——广播端到端触达 useGlobalSkills 订阅）
-  provideSettingsTransport(makeSettingsTransportStub({
-    getGlobalSkills: getGlobalSkillsMock,
-    onSkillCacheInvalidated: (handler: (p: { scope: 'global' | 'project'; cwd?: string }) => void) =>
-      events.onGlobalType('config.skillCacheInvalidated', (msg) => {
-        handler(msg.payload as { scope: 'global' | 'project'; cwd?: string })
-      }),
-  }))
+  //（桥实现单源 helpers/settings-transport-stub.ts——广播端到端触达 useGlobalSkills 订阅）
+  provideSettingsTransport(await makeSkillsReloadTransportStub(getGlobalSkillsMock))
   // 清 body（reka-ui Popover portal 到 body，跨用例残留会污染断言）
   document.body.innerHTML = ''
 })
@@ -254,7 +232,7 @@ describe('Composer.vue landing 态 skill reload 集成（PR#123 reviewer-D WARNI
     })
 
     // 反向断言：landing 首发未被触发（仅验证 skill 刷新，不应误发消息）
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.send).not.toHaveBeenCalled()
   })
 
   // ── WARNING-3：首屏冒烟 gate（AGENTS.md 行 415-423 MANDATORY 模板）──

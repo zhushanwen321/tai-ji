@@ -18,7 +18,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { effectScope } from 'vue'
-import type { LatestReleaseInfo } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateInstallResult } from '@taiji/shared'
 // app-update-markdown-stub 必须先于 app-update-mount import（后者加载 SUT 时 mock 工厂立即执行）
 import { markdownStubModule } from '../helpers/app-update-markdown-stub'
 import { ipc, controller, setupAppUpdateLifecycle, type AppUpdateControllerInternal } from '../helpers/app-update-mount'
@@ -69,6 +69,26 @@ function makeRelease(version: string): LatestReleaseInfo {
 function expectReleaseShown(state: AppUpdateControllerInternal['state'], version: string, urlVersion: string): void {
   expect(state.latestRelease?.version).toBe(version)
   expect(state.latestRelease?.htmlUrl).toContain(`v${urlVersion}`)
+}
+
+/**
+ * D2 公共执行体：mock updateInstall 返回 installResult → 认领 0.9.11 → 执行安装 →
+ * 断言终态 restarting 与版本显示（url 指向认领版：对齐只覆 version/url，其余字段不动）；
+ * then 在 scope 内追加断言（交错场景「其他字段保留」的读回核对）。
+ */
+async function installClaimedRelease(
+  installResult: UpdateInstallResult,
+  shownVersion: string,
+  then?: (state: AppUpdateControllerInternal['state']) => void,
+): Promise<void> {
+  ipc.updateInstall.mockResolvedValue(installResult)
+  await inUpdateScope(async ({ state, performInstall }) => {
+    state.latestRelease = makeRelease('0.9.11')
+    await performInstall()
+    expect(state.state).toBe('restarting')
+    expectReleaseShown(state, shownVersion, '0.9.11')
+    then?.(state)
+  })
 }
 
 describe('D9 suggestion 追加手动下载指引', () => {
@@ -130,14 +150,9 @@ describe('D9 suggestion 追加手动下载指引', () => {
 
 describe('D2 performInstall 实装版本对齐', () => {
   it('install 返回 version ≠ latestRelease.version → 版本显示对齐且其他字段保留', async () => {
-    ipc.updateInstall.mockResolvedValue({ triggerRestart: true, version: '0.9.12' })
-    await inUpdateScope(async ({ state, performInstall }) => {
-      state.latestRelease = makeRelease('0.9.11')
-      await performInstall()
-      // 实装 0.9.12 覆写显示（认领 0.9.11 → 后台预下载 0.9.12 交错场景）
-      expect(state.state).toBe('restarting')
-      expectReleaseShown(state, '0.9.12', '0.9.11')
-      // 其他字段保留（旧 release 的 notes，app 即将重启，生命周期以秒计）
+    // 实装 0.9.12 覆写显示（认领 0.9.11 → 后台预下载 0.9.12 交错场景）；
+    // 其他字段保留（旧 release 的 notes，app 即将重启，生命周期以秒计）
+    await installClaimedRelease({ triggerRestart: true, version: '0.9.12' }, '0.9.12', (state) => {
       expect(state.latestRelease?.releaseNotes).toBe('notes for 0.9.11')
     })
   })
@@ -153,12 +168,6 @@ describe('D2 performInstall 实装版本对齐', () => {
   })
 
   it('install 返回无 version（读取失败容错）→ latestRelease 不动', async () => {
-    ipc.updateInstall.mockResolvedValue({ triggerRestart: true })
-    await inUpdateScope(async ({ state, performInstall }) => {
-      state.latestRelease = makeRelease('0.9.11')
-      await performInstall()
-      expect(state.state).toBe('restarting')
-      expectReleaseShown(state, '0.9.11', '0.9.11')
-    })
+    await installClaimedRelease({ triggerRestart: true }, '0.9.11')
   })
 })
