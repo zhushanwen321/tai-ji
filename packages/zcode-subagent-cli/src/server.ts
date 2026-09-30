@@ -23,7 +23,6 @@
 import {
   EngineSdkError,
   getLogger,
-  type AgentCallOpts,
   type AgentEvent,
   type EngineHandleData,
   type InitializeParams,
@@ -41,8 +40,10 @@ import { createDefaultZcodeEngine } from "./registration.ts";
 import { parseCtxModel, type EnginePort, type EngineStream, type EngineCtxModel, type RunContext } from "./port-types.ts";
 import { toErrorMessage } from "./error-message.ts";
 import {
+  assembleFullTask,
   handleInboundFrame,
   initializeEngine,
+  notInitializedError,
   sendReverseRequest,
   unknownMethodError,
   writeRunEvent,
@@ -148,13 +149,7 @@ export class EngineProtocolServer {
   // ── run：协议载荷 → 本地 AgentCallOpts/RunContext；事件 → 通知/host 通道 ──
 
   private async run(params: RunParams): Promise<{ handle: EngineHandleData; outcome: unknown }> {
-    if (!this.initialized) {
-      throw new EngineSdkError(
-        "engine_protocol_not_initialized",
-        "run before initialize is a protocol violation",
-        "The host must complete the initialize handshake before dispatching runs.",
-      );
-    }
+    if (!this.initialized) throw notInitializedError();
     const { runId, task, ctx } = params;
     const controller = new AbortController();
     const active: ActiveRun = { controller, seq: 0 };
@@ -162,11 +157,7 @@ export class EngineProtocolServer {
 
     // task 子集 + ctx 还原 = 本地全量 AgentCallOpts（RemoteEngine.toSdkTaskSubset 镜像）。
     // cwd 有值才还原（wire additive 语义）——session/create workspacePath 的任务级载体。
-    const fullTask: AgentCallOpts = {
-      ...task,
-      ...(ctx.model !== undefined ? { model: ctx.model } : {}),
-      ...(ctx.cwd !== undefined ? { cwd: ctx.cwd } : {}),
-    };
+    const fullTask = assembleFullTask(task, ctx);
     const ctxModel: EngineCtxModel | undefined = parseCtxModel(ctx.ctxModel);
     const stream: EngineStream | undefined = ctx.streamMode === "stream"
       ? {

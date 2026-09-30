@@ -13,10 +13,10 @@
 // SDK 是两个引擎唯一的共同依赖。
 import { toErrorMessage } from "../error-message.ts";
 import { ENGINE_PROTOCOL_VERSION } from "../protocol/engine-protocol.ts";
-import type { AgentEvent } from "../protocol/contract-types.ts";
+import type { AgentCallOpts, AgentEvent } from "../protocol/contract-types.ts";
 import { EngineSdkError } from "../protocol/error-codes.ts";
 import { isResponseFrame, isReverseRequestFrame } from "../protocol/frames.ts";
-import type { InitializeParams, InitializeResult } from "../protocol/methods.ts";
+import type { InitializeParams, InitializeResult, RunContextParams } from "../protocol/methods.ts";
 import type { ReverseRequestClock } from "../spawn.ts";
 
 /** 出站帧写入面（各引擎 main.ts 注入 process.stdout；测试注入内存缓冲）。 */
@@ -265,5 +265,39 @@ export function initializeEngine(
     adapterVersion: ctx.adapterVersion,
     capabilities: ctx.capabilities,
     ...(models !== null ? { models: models.map((m) => ({ id: m.id })) } : {}),
+  };
+}
+
+// ── [§2.11 第四批] run 前门的纯逻辑部分（其余差异经核实为引擎固有，不抽） ────────
+//
+// `run` 方法两侧的**顺序骨架**（未初始化拒绝 → 建 controller → 登记在途 → 组 fullTask
+// → engine.run → 拆 handle → finally 注销）看着同形，但中段被引擎固有逻辑切开：pi 有
+// resume 帧断言 + `bindAskUser` 绑定/解绑 + 自己的 ctx 组装，zcode 的 ctx 是**内联**构造
+// （无 `buildRunContext` 方法，含 ctxModel 解析 / stream / onHandleReady 三个反向通道）。
+// 把这些差异用 5 个钩子包成一个 `dispatchRun` 会得到一个全是 unknown 接缝的配置对象，
+// 净收益为负——故 run 段**只抽两处纯逻辑**，其余按引擎差异保留（结论登记见
+// docs/todo/subagent-workflow-issues.md §2.11）。
+
+/** run 前门未初始化拒绝（两引擎逐字一致的协议错误）。 */
+export function notInitializedError(): EngineSdkError {
+  return new EngineSdkError(
+    "engine_protocol_not_initialized",
+    "run before initialize is a protocol violation",
+    "The host must complete the initialize handshake before dispatching runs.",
+  );
+}
+
+/**
+ * 协议 `task` 子集 + `ctx` 还原 = 本地全量 `AgentCallOpts`（与宿主侧
+ * `RemoteEngine.toSdkTaskSubset` 镜像）。
+ *
+ * 还原纪律：`model` / `cwd` **有值才写**（wire additive 语义）——写 `undefined` 会覆盖
+ * 引擎侧缺省值，worktree 隔离与模型选择都会静默走错。
+ */
+export function assembleFullTask(task: AgentCallOpts, ctx: RunContextParams): AgentCallOpts {
+  return {
+    ...task,
+    ...(ctx.model !== undefined ? { model: ctx.model } : {}),
+    ...(ctx.cwd !== undefined ? { cwd: ctx.cwd } : {}),
   };
 }

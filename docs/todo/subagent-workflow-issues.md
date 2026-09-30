@@ -165,7 +165,7 @@
 - 真正的间接层 = **worker 执行模型**（脚本 eval 进 Worker + postMessage 调用协议），同时是 resume 重放（脚本确定性重跑 + 已 settled 调用走 record 回放）、注入安全（`workerData.scriptPath` 定位 `_shared`，不回退当前目录）与脚本可探索/可测试性（`@pi-meta` 进可用 workflow 清单）三项能力的载体。
 - 2026-09-29 用户裁决：**不做一等原语重构**（拆掉会引入第二份「按下标短路」重放实现，收益仅少一层 postMessage 与一次 Worker 启动）；若未来出现性能或调试痛点再立项。
 
-### 2.11 两引擎 server.ts 平行双实现（第一至三批已落，run 段与应答侧差异待续）
+### 2.11 两引擎 server.ts 平行双实现（已收：四批落地 + run 骨架不抽的否定结论）
 
 - 现状（2026-09-30）：两包各持同名 `EngineProtocolServer`（pi 463 行 / zcode 355 行），约六成逐字同文：`FrameWriter`、`REVERSE_TIMEOUT_DEFAULT_MS`、`ActiveRun`、`handleFrame`、`dispatch`（未知方法错误码）、`cancel`/`read`、`emitEvent`（seq 单调）、`reverseRequest(Internal)`（含写失败就地收尾）、`toProtocolError`（只差恢复文案）。引擎特有 = 引擎实例创建 / 查询面 / `run` 前门与 ctx 还原扩展 / 应答等待语义（pi 两阶段 ack + askUI 结果检查；zcode ack 即结算）。
 - **第一批已落（2026-09-30，commit 0042b3dae）**：SDK 新增 `./server` 子入口（`src/server/index.ts`），先收敛声明与纯函数——`FrameWriter` / `REVERSE_TIMEOUT_DEFAULT_MS` / `ActiveRun` / `ReversePending` / `ProtocolErrorPayload` / `toProtocolError(err, recoveryText)`（复用 SDK 单源 `toErrorMessage`）；两引擎 server 改为消费该入口并删除本地副本，恢复指引文案仍由各引擎注入。打包面同批打通：`tsup` entry `server/index` + `package.json` 的 `exports` 与 `publishConfig.exports` 双写 `./server`；`engine-development-guide.md` 的「SDK 消费入口两入口」改为三入口。
@@ -176,12 +176,12 @@
 - **第三批已落（2026-09-30，commit 见本次提交）**：反向请求**发送侧** + 运行事件通知 + 初始化握手收敛。SDK `src/server/index.ts` 新增 `sendReverseRequest`（id 分配经 `nextId` 钩子 / 发出侧武装计时兜底 / `write` 同步抛错就地收尾——清 pending + 停 timer + 记 clock 后转 reject，不让异常逃出 executor / `pendingExtras` 供应答侧守卫取用）、`writeRunEvent`（`seq` 单调通知帧；无在途登记取 0）、`initializeEngine`（协议版本严格相等协商 + 能力与模型应答；`listModels` 钩子返回 `null` 即应答不带 `models` 字段）。两引擎对应方法改为一行委托：`emitEvent` / `reverseRequestInternal` / `initialize`。
   - **应答侧 `settleReverse` 明确不抽**：pi 38 行（两阶段 ack + `host/askUser` 应答面 `isUiResponse` 守卫）vs zcode 10 行（ack 即结算），语义不同，合并会让 pi 的长等待被判超时——这条差异是本批唯一刻意保留的平行实现，已在两文件注释中互相指认。
   - 等价性证据：两套 `server.test.ts` 逐例未改（pi 318 / zcode 287 全绿）；新增 `src/__tests__/server-reverse-handshake.test.ts` 11 例（超时与写失败两条清理路径 + pending 附加字段 + seq 单调 + 握手三形态，含 `models` 缺席形态）；SDK 套件 180 例绿。
-- 后续批次（未做）：
-  1. `run` 段（差异最大，同文度约 0.49）——`buildRunContext` 的引擎特有字段走 `buildRunContextExtras` 钩子；`cancel` / `read` / `reverseRequest` / `warnReverseFailure` 是逐字一致的一行委托，是否抽入按「抽了是否更好读」单独判断（当前判断：收益低，暂留）。
-  2. `initialize`（版本协商 + models 投影）与反向请求客户端（`reverseRequest(Internal)` + clock + 60s 超时 + 写失败就地收尾）迁入，`settleReverse` 的两阶段 ack 语义用钩子开关保留（**不得统一**——统一会让 pi 的 askUser 长等待被判超时；需专门用例）。
-  3. `run` 段（差异最大）最后迁；`buildRunContext` 的引擎特有字段走 `buildRunContextExtras` 钩子。
-  4. 全过程保持各包导出类名与构造签名不变（两套 `server.test.ts` 即等价性回归网）；骨架不得依赖引擎包内符号、不得有模块级可变状态（CJS 无 splitting 会跨 entry 内联复制）。
-
+- **第四批已落 + run 段结论（2026-09-30，commit 见本次提交）**：`run` 段只抽**两处纯逻辑**——`notInitializedError`（未初始化拒绝的协议错误三件套）与 `assembleFullTask`（协议 task 子集 + ctx 还原，还原纪律 = `model`/`cwd` **有值才写**，写 `undefined` 会覆盖引擎缺省值）。两引擎对应位置改为一行调用。
+  - **否定结论（已核实，防将来重复提议整段抽）**：`run` 的**顺序骨架**（未初始化拒绝 → 建 controller → 登记在途 → 组 fullTask → `engine.run` → 拆 handle → finally 注销）看着同形，但中段被引擎固有逻辑切开——pi 有 `resume` 帧断言（`assertResumeRunFrame`）+ `bindAskUser` 绑定/解绑 + 自己的 `buildRunContext`（含 4 条反向通道），zcode 的 ctx 是**内联**构造（**没有** `buildRunContext` 方法，含 ctxModel 解析 / stream / onHandleReady）。要包成 `dispatchRun` 需要 5 个钩子、接缝全是 unknown，净收益为负。故 run 段到此为止，**不再排后续批次**。
+  - 同批判定：`cancel` / `read` / `reverseRequest` / `warnReverseFailure` 是逐字一致的一行委托，抽入只增间接层（收益 < 阅读成本）——**不抽**。
+  - 等价性证据：两套 `server.test.ts` 逐例未改（pi 318 / zcode 287 全绿）；新增 `src/__tests__/server-run-front.test.ts` 4 例（错误三件套 + 「有值才写」三形态）；SDK 套件 184 例绿。
+- §2.11 收敛账（终态）：`EngineProtocolServer` 两侧共 4 处共享面（`./server` 子入口的声明与纯函数 / 入站帧循环 / 反向请求发送侧与握手与事件通知 / run 前门纯逻辑），**唯一刻意保留的平行实现 = 应答侧 `settleReverse`**（pi 两阶段 ack + askUI 应答面检查 vs zcode ack 即结算，语义不同）。
+- 后续批次（未做）：无（本条已收）。
 ## 3. 双实现与词表镜像（一致性收敛，每处需「单源放哪 + 真差异判别」小设计）
 
 ### 3.1 同策略双实现（修一处漏一处即漂移）
