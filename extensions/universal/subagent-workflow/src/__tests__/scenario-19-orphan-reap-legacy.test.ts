@@ -73,12 +73,12 @@ vi.mock("../jsonl-run-store.ts", () => ({
   },
 }));
 vi.mock("../interface/subagent-tool.ts", () => ({ registerSubagentTool: vi.fn() }));
-vi.mock("../interface/subagents.ts", () => ({ registerSubagentsCommand: vi.fn() }));
+vi.mock("../interface/command/subagents.ts", () => ({ registerSubagentsCommand: vi.fn() }));
 vi.mock("../interface/gui/bg-notify-render.ts", () => ({ renderBgNotifyMessage: vi.fn() }));
 vi.mock("../interface/tool-workflow.ts", () => ({ registerWorkflowTool: vi.fn() }));
 vi.mock("../interface/tool-subagents.ts", () => ({ registerSubagentsTool: vi.fn() }));
 vi.mock("../interface/tool-workflow-script.ts", () => ({ registerWorkflowScriptTool: vi.fn() }));
-vi.mock("../interface/commands.ts", () => ({ registerWorkflowsCommand: vi.fn() }));
+vi.mock("../interface/command/commands.ts", () => ({ registerWorkflowsCommand: vi.fn() }));
 
 import { setupSessionLifecycle } from "../session-lifecycle.ts";
 

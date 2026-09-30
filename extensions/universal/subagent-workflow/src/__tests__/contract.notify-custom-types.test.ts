@@ -32,7 +32,7 @@ const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const PRODUCER_FILES = {
   workflowNotify: path.join(SRC_ROOT, "workflow-notify.ts"),
   index: path.join(SRC_ROOT, "index.ts"),
-  subagents: path.join(SRC_ROOT, "interface/subagents.ts"),
+  subagents: path.join(SRC_ROOT, "interface/command/subagents.ts"),
 } as const;
 
 function readSource(file: string): string {
@@ -64,7 +64,7 @@ describe("notify customType 词表：生产写点单源形态（防裸字面量�
     );
   });
 
-  it("壳 interface/subagents.ts 不本地定义 SUBAGENT_DIRECTIVE_CUSTOM_TYPE（经 import 单源消费）", () => {
+  it("壳 interface/command/subagents.ts 不本地定义 SUBAGENT_DIRECTIVE_CUSTOM_TYPE（经 import 单源消费）", () => {
     expect(readSource(PRODUCER_FILES.subagents)).not.toMatch(
       /const\s+SUBAGENT_DIRECTIVE_CUSTOM_TYPE\s*=/,
     );

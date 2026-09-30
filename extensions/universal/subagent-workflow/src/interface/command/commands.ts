@@ -27,11 +27,11 @@ import type { LauncherDeps } from "@zhushanwen/subagent-core";
 import { abortRun, getSubagentService, resumeRun } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import { parseWorkflowRpcCommand, type WorkflowRpcAction } from "./command-actions.ts";
-import { createWorkflowsView, type ViewActions } from "./tui/views/WorkflowsView.ts";
+import { createWorkflowsView, type ViewActions } from "../tui/views/WorkflowsView.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
-import { LIST_LIMIT } from "./tui/list-shared.ts";
-import { ID_PREVIEW_LENGTH } from "./format/id-preview.ts";
-import { displayStatusOf } from "./tool-workflow.ts";
+import { LIST_LIMIT } from "../tui/list-shared.ts";
+import { ID_PREVIEW_LENGTH } from "../format/id-preview.ts";
+import { displayStatusOf } from "../tool-workflow.ts";
 
 /** status 显示顺序：running 优先（活跃态在前），interrupted 次之（[D2] 暂停态
  *  ——无活体但可续跑，排活体后、终局前），再 startedAt 倒序。

@@ -48,10 +48,10 @@ import { setupModelListInjector } from "./injectors/model-list-injector.ts";
 import { setupSubagentListInjector } from "./injectors/subagent-list-injector.ts";
 import { setupWorkflowListInjector } from "./injectors/workflow-list-injector.ts";
 import { renderBgNotifyMessage } from "./interface/gui/bg-notify-render.ts";
-import { registerWorkflowsCommand } from "./interface/commands.ts";
+import { registerWorkflowsCommand } from "./interface/command/commands.ts";
 import { registerSubagentTool } from "./interface/subagent-tool.ts";
 // ═══ interface/ 层（tools/commands/tui 合并） ═══
-import { registerSubagentsCommand } from "./interface/subagents.ts";
+import { registerSubagentsCommand } from "./interface/command/subagents.ts";
 import { registerSubagentsTool } from "./interface/tool-subagents.ts";
 import { registerWorkflowTool } from "./interface/tool-workflow.ts";
 import { registerWorkflowScriptTool } from "./interface/tool-workflow-script.ts";

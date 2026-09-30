@@ -44,12 +44,12 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 // 被 mock 的模块——vi.mock 路径与被测源文件解析到同一物理模块，确保 vitest 拦截同一模块实例。
 // 使用 import 副作用顺序：vi.mock 在文件顶部提升，此处 import 拿到的是 mock 版本。
 import { setSubagentService } from "@zhushanwen/subagent-core";
-import { registerWorkflowsCommand } from "../interface/commands.ts";
-import { registerSubagentsCommand } from "../interface/subagents.ts";
+import { registerWorkflowsCommand } from "../interface/command/commands.ts";
+import { registerSubagentsCommand } from "../interface/command/subagents.ts";
 import {
   parseSubagentRpcCommand,
   parseWorkflowRpcCommand,
-} from "../interface/command-actions.ts";
+} from "../interface/command/command-actions.ts";
 import { abortRun, resumeRun } from "@zhushanwen/subagent-core";
 import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 

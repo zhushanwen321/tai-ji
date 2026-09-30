@@ -75,7 +75,7 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", async (importOri
 const { mockRegisterWorkflowsCommand } = vi.hoisted(() => ({
   mockRegisterWorkflowsCommand: vi.fn(),
 }));
-vi.mock("../interface/commands.ts", () => ({
+vi.mock("../interface/command/commands.ts", () => ({
   registerWorkflowsCommand: mockRegisterWorkflowsCommand,
 }));
 

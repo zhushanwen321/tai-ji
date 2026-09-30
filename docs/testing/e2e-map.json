@@ -1440,7 +1440,7 @@
         },
         {
           "kind": "spec",
-          "ref": "extensions/universal/subagent-workflow/src/interface/__tests__/commands-resume.test.ts"
+          "ref": "extensions/universal/subagent-workflow/src/interface/command/__tests__/commands-resume.test.ts"
         },
         {
           "kind": "spec",
@@ -1461,7 +1461,7 @@
       ],
       "trigger": "on-diff",
       "serial": false,
-      "run": "cd extensions/universal/subagent-workflow && npx vitest run src/__tests__/scenario- src/__tests__/record-mode/ src/interface/__tests__/tool-workflow-resume.test.ts src/interface/__tests__/commands-resume.test.ts && cd ../../../packages/subagent-core && npx vitest run src/orchestration/__tests__/resume-orchestration.test.ts src/orchestration/__tests__/resume-replay-validation.test.ts src/orchestration/__tests__/resume-tier-budget.test.ts src/orchestration/__tests__/review-fix-loop-scriptpath-failfast.test.ts",
+      "run": "cd extensions/universal/subagent-workflow && npx vitest run src/__tests__/scenario- src/__tests__/record-mode/ src/interface/__tests__/tool-workflow-resume.test.ts src/interface/command/__tests__/commands-resume.test.ts && cd ../../../packages/subagent-core && npx vitest run src/orchestration/__tests__/resume-orchestration.test.ts src/orchestration/__tests__/resume-replay-validation.test.ts src/orchestration/__tests__/resume-tier-budget.test.ts src/orchestration/__tests__/review-fix-loop-scriptpath-failfast.test.ts",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态（来源设计 workflow-run-resume-revision §4 e2e 影响面「场景 1-25 新族」行——设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-MODELREF-01 同款先例；登记零实现依赖复审 F3 的校验由 u4b 完成收尾）。触发面 = resume/record 链路（壳 interface/jsonl-run-store + core orchestration/resume-run/run-events）改动时按改动范围跑。分层形态：进程内真 resumeRun + 真 WorkerHost + 真 record IO，LLM 层 = faux runner（AgentRunner 协议替身，派发捕获 + 行为队列），崩溃前置态经生产 journal 写入器 seed——写侧载荷完整：dispatchRunCreated 写 scriptSource 全文、dispatchAgentSettled 写 result 全文（全文写入随 terminal-actions 闭环，真跑 runWorkflow 产生的流与夹具构造的流同构可换，夹具构造形态是可控性选择——scenario-kit.ts 头注现行措辞）。场景 24（D14 args 不一致拒绝）驱动壳层入口 actionResume（D14 校验唯一所在层），其余场景直驱 core resumeScenarioRun。scenario-22/25 各含环境门段（节点级默认 skip），门段触发面拆分至 E2E-RESUME-02/03（同 asset 重复引用，E2E-EQUIV-01/02 拆分先例）；record-mode 两 spec（损坏拒绝/重建保真）与夹具四件（helpers/scenario-kit/driver-resume/driver-session-reader）随族登记——driver-* 为 tsx 子进程 driver（D16 ③ 跨包断言载体）。core 三件 = resumeRun 编排原语 / replay 校验增强 / 恢复计划计数与预算算式。[ADR-0092] 修订：resume 只复用已提交结果（档 1 补收通道删除，恢复链不读取子代理会话文件），原 E2E-RESUME-02（真实会话文件档位门段）随之退役——scenario-22 现锁「已提交调用零 token 回放 + 未完成调用真实重派 + 不合成补收帧」；interface 两件 = workflow tool resume action（D14 单元层）+ /workflows 命令 resume verb 契约"

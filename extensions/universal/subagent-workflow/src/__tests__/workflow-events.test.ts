@@ -58,7 +58,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 }));
 
 // 组合根薄接线（⑥）专用：registerWorkflowsCommand 打桩捕获第三参 lazyDeps。
-vi.mock("../interface/commands.ts", () => ({
+vi.mock("../interface/command/commands.ts", () => ({
   registerWorkflowsCommand: mockRegisterWorkflowsCommand,
 }));
 

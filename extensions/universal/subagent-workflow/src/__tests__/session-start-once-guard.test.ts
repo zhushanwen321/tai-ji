@@ -172,7 +172,7 @@ vi.mock("../jsonl-run-store.ts", () => ({
 vi.mock("../interface/subagent-tool.ts", () => ({
   registerSubagentTool: vi.fn(),
 }));
-vi.mock("../interface/subagents.ts", () => ({
+vi.mock("../interface/command/subagents.ts", () => ({
   registerSubagentsCommand: vi.fn(),
 }));
 vi.mock("../interface/gui/bg-notify-render.ts", () => ({
@@ -184,7 +184,7 @@ vi.mock("../interface/tool-workflow.ts", () => ({
 vi.mock("../interface/tool-workflow-script.ts", () => ({
   registerWorkflowScriptTool: vi.fn(),
 }));
-vi.mock("../interface/commands.ts", () => ({
+vi.mock("../interface/command/commands.ts", () => ({
   registerWorkflowsCommand: vi.fn(),
 }));
 

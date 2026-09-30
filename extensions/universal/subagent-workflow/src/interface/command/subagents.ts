@@ -1,4 +1,4 @@
-// src/interface/subagents.ts
+// src/interface/command/subagents.ts
 //
 // /subagents 命令。薄壳——打开 list overlay（等同原 /subagents list [<id>]）。
 // 同名 tool（批量派发入口，模型调用面）见 interface/tool-subagents.ts——两者无共享状态、无调用关系。
@@ -17,8 +17,8 @@ import { messageHandler, startHandler } from "@zhushanwen/subagent-core";
 import { SUBAGENT_DIRECTIVE_CUSTOM_TYPE } from "@zhushanwen/extension-protocol";
 import { parseSubagentRpcCommand } from "./command-actions.ts";
 import type { SubagentRpcAction } from "./command-actions.ts";
-import { LIST_LIMIT } from "./tui/list-shared.ts";
-import { createSubagentsView } from "./tui/list-view.ts";
+import { LIST_LIMIT } from "../tui/list-shared.ts";
+import { createSubagentsView } from "../tui/list-view.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // subagent-directive customType 经 extension-protocol 单源（与 shared/runtime 消费侧
