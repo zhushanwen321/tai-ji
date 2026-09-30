@@ -59,6 +59,24 @@
 
 ## 2. 结构性 / 架构问题（需排期，多数走 tech-design 立项）
 
+### 2.0 终态演进方向与阶段计划（2026-09-30 用户裁决：全部按长期合理架构 / 终态演进）
+
+**本节是 §2 的执行纲领**——七条方向的裁决结果与阶段划分在此一次写死，各条不再单独留待决项。
+
+| # | 议题 | 终态方向（已裁决） | 阶段 |
+|---|---|---|---|
+| D1 | §2.3 双向依赖终态形态 | **整体拆边**：终局编排（terminal-actions 一族）归 orchestration；execution 只暴露端口（persistence / engine / ui / worktree），反向边收窄为「execution → orchestration 端口接口」 | ① 盘清 20 条 execution→orchestration 导入面并分类（端口可承接 / 需搬迁 / 可消除）；② 逐类收窄，每类一个 commit；③ 终局编排搬迁 |
+| D2 | §2.4 re-export 过渡 | **收掉**：`execution/domain/` 成为领域类型的唯一权威路径，`assembly/types.ts` 不再 re-export | ① 全仓 import 改路径（~89 文件）；② 删 re-export 块；③ 加机器检查防回退（domain 类型不得再从 assembly 导出） |
+| D3 | §2.5 `interface/` 职责归位 | **排期拆开**：按 command / format / gui / tool / tui 五类归位（独立设计，不并入 §2 其它项） | ① 先出「文件 → 类别」映射与目标目录结构设计；② 分五批搬迁，每批保持行为等价 |
+| D4 | §2.7 身份三字段上协议 | **补齐**：`slug` / `startedAt` / 精确 `mode` 挂 `RunContextParams`（additive），引擎写入子 env，壳读者由回落改直读；同批更新 C-proc-23 词表锁 | ① SDK 协议加字段；② 引擎写回；③ 壳直读 + 回落分支退役；④ 词表锁与文档同批 |
+| D5 | §2.7 真机嵌套验收 | **跑**：父→子→孙真实派发，核对 `/subagents` 树、`subagent-identity` 条目与 core 三读者 | ① 确认本机可用模型与 CLI 形态；② 空载串行跑；③ 结果登记（含失败形态） |
+| D6 | §2.2 状态机词汇演进 | (a) **v1 兼容层排期退役**（`WorkflowRun.state.status` 两态 + `RunStatus`，先立退役顺序与判据）；(b) **内活性状态收敛到唯一读口**（fold checkpoint 进程内缓存，需先证明失效面可控）；(c) **core 保留领域词表**（协议侧线格式与领域词表分离，边界映射） | (a) 出退役顺序设计 → 执行；(b) 出缓存失效面分析 → 执行；(c) 已定（边界映射保持现状） |
+| D7 | 并发 worktree 协作 | **拆到不同 worktree**（消除互卷与等绿灯窗口的时间损失） | ① 由用户/另一会话在新 worktree 起工作线（本会话 workspace 不可自迁移）；② 本会话在新 worktree 未就绪前，按路径提交 + 冲突面最小的项优先 |
+
+**执行顺序（按「冲突面最小 × 终态收益」排）**：D4 → D6(c 已定) → D2 → D1 → D3 → D6(a)(b) → D5（D5 需模型额度窗口；D7 依赖会话级迁移）。
+
+**报告纪律（本轮起）**：中途不再就任何议题提问；只在收尾汇总一轮（报结果 + 真正的新发现），决策项一次列全、不逐条抛。
+
 ### 2.1 双 `RunState` 同名异义（已改名，2026-09-30）
 
 - `orchestration/models/run-state.ts:25`（status / reason / budget / calls / trace / errorLogs / error / scriptResult 执行快照形态，WorkflowRun 聚合持有）vs `orchestration/run-events.ts:613`（lifecycle 五态 + outcome 状态机两维形态，转移表与 fold 消费）。同包同词两义。头部注释「两半各对一半」（2026-09-30 核实）：`RunStore.save 触发持久化` 已失效（壳侧 save 是显式 no-op），`重启时从 JSONL 重新加载` 仍真但**残缺**——loadAll 重建时 `budget` 与 `errorLogs` 不恢复（重启后令牌 / 费用统计归零、诊断日志清空）；「callCache 保留」是错误归因（那是 worker 侧脚本的重放缓存，与重建无因果）。另：「旧形态是 v1 兼容层」只对状态轴成立，budget / calls / trace / errorLogs / scriptResult 是 TUI 的唯一活体数据面，整体当兼容层退役会拆掉 WorkflowsView 的数据源。修法：先做纯改名（如 `RunExecutionSnapshot` / `RunLifecycleState`）+ 注释回写；补齐 budget / errorLogs 重建属行为变更，需先裁决「重启后统计归零是否预期」。

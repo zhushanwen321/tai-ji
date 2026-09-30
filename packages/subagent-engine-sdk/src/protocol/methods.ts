@@ -101,6 +101,27 @@ export interface RunContextParams {
    * 旧引擎忽略未知字段，undefined 不上 wire。
    */
   extensionPaths?: string[];
+  /**
+   * [D4 record 身份信封] 本次 run 的 **record 级身份**（引擎把它整封写进任务子进程的
+   * 身份 env；见 SDK `identity-env.ts` 的 `SUBAGENT_IDENTITY_ENV`）。
+   *
+   * 为什么是信封而不是三个平铺键：`slug` 与 task 侧 `description` 是同一语义的两种写法，
+   * 平铺进 ctx 会撞 wire 层绝对条款「同一语义不得 task/ctx 双写」（`wire-field-locks.test.ts`
+   * 的 `keyof AgentCallOpts & keyof RunContextParams = never`）；信封把「record 身份」立成
+   * 一个独立概念（与「怎么执行这次调用」的 task 面正交），也给后续身份字段一个归处。
+   *
+   * 字段语义（缺省即不写该键，读者按各自回落语义工作）：
+   *   - `slug`：record 短标签（宿主侧由 record 的 description 派生的展示标签）；
+   *   - `startedAt`：record 起始时刻（epoch ms；宿主派发时刻即权威值，引擎不得改写）；
+   *   - `mode`：执行形态（`background` / `chat`，record 级事实）。
+   *
+   * additive 可选：旧引擎忽略未知字段，undefined 不上 wire。
+   */
+  identity?: {
+    slug?: string;
+    startedAt?: number;
+    mode?: string;
+  };
 }
 
 // ============================================================
