@@ -27,6 +27,14 @@
 // 登记进 ReverseRequestClock（armEngineSelfDestruct 的辅助判据面）。
 
 import {
+  REVERSE_TIMEOUT_DEFAULT_MS,
+  toProtocolError as toProtocolErrorShared,
+  type ActiveRun,
+  type FrameWriter,
+  type ProtocolErrorPayload,
+  type ReversePending,
+} from "@zhushanwen/subagent-engine-sdk/server";
+import {
   ENGINE_PROTOCOL_VERSION,
   EngineSdkError,
   assertChatConversationSupported,
@@ -57,9 +65,6 @@ import { toErrorMessage } from "./error-message.ts";
 
 const logger = getLogger("pi-engine-cli");
 
-/** 出站帧写入面（main.ts 注入 process.stdout；测试注入内存缓冲）。 */
-export type FrameWriter = (frame: unknown) => void;
-
 /** 入站帧来源（readline 已拆行的请求帧 + 反向请求应答帧混流）。 */
 export interface EngineProtocolServerOptions {
   /** stdout 写入面（每帧一行 JSON）。 */
@@ -80,22 +85,8 @@ export interface EngineProtocolServerOptions {
   piAgentDir?: string;
 }
 
-interface ReversePending {
-  resolve: (result: unknown) => void;
-  reject: (err: Error) => void;
-  timer: NodeJS.Timeout;
-  /** 反向通道名（settle 时按通道守卫应答形态；S7 askUser 应答面守卫用）。 */
-  method: string;
-}
-
-/** 反向请求应答等待缺省上限（ms）——数据面分类 core 侧 10s，两阶段等待放宽一档兜底。 */
-const REVERSE_TIMEOUT_DEFAULT_MS = 60_000;
-
-/** 单个 run 的在途登记（cancel 帧路由 + 事件 seq 计数）。 */
-interface ActiveRun {
-  controller: AbortController;
-  seq: number;
-}
+// [§2.11] ReversePending / REVERSE_TIMEOUT_DEFAULT_MS / ActiveRun / FrameWriter 共用
+// SDK `./server` 子入口的声明单源（pi 侧 method 字段为扩展位，SDK 类型已含）。
 
 /** 构造缺省 pi 引擎（main.ts 的 server 构造缺省值；测试注入 fake）。 */
 export function createDefaultPiEngine(): PiEngine {
@@ -453,11 +444,10 @@ export class EngineProtocolServer {
 }
 
 /** unknown → 协议错误帧载荷（可操作恢复指引，规则 16）。 */
-function toProtocolError(err: unknown): { code: string; message: string; recovery: string } {
-  if (err instanceof EngineSdkError) return err.toStructured();
-  return {
-    code: "engine_run_failed",
-    message: toErrorMessage(err),
-    recovery: "Check the engine process logs (host/log stream + stderr) and rerun; if persistent, reinstall or upgrade the engine package.",
-  };
+const RUN_FAILURE_RECOVERY =
+  "Check the engine process logs (host/log stream + stderr) and rerun; if persistent, reinstall or upgrade the engine package.";
+
+/** [§2.11] 错误帧构造共用 SDK 纯函数；本引擎只提供自己的恢复指引文案。 */
+function toProtocolError(err: unknown): ProtocolErrorPayload {
+  return toProtocolErrorShared(err, RUN_FAILURE_RECOVERY);
 }

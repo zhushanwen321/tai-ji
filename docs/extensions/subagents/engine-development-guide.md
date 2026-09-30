@@ -53,7 +53,7 @@
 | `processModel` | 可选 | 进程形态声明（`EngineProcessModel`，SDK `contract-types.ts`），值域 `per-window` / `shared-service`：缺省（未声明）= `per-window`；非法值 warn 回落 `per-window`，包仍可用（解析权威 = `engine-manifest.ts` `parseProcessModel`，产物挂 `DiscoveredEngine.processModel`）。字段语义见下方「进程形态声明」段 |
 | `displayName` / `description` | 可选 | 形态校验，坏值忽略 + warn（`engine-inspect-package.ts:146-161`） |
 
-包级义务：`package.json` `version` 盖章进 descriptor（registry 稳定标识比较字段——包升级触发 dispose 换新实例，:254-256）。检查产物三态：ok（装载）/ skip（必需字段缺失，warn 跳过）/ unusable（protocol 不兼容、bin 不可执行，标记不可用）（:31-34）。依赖红线：引擎包只依赖 SDK（`@zhushanwen/subagent-engine-sdk`），不依赖 core（[architecture.md](architecture.md) §2.3）；SDK 消费入口仅限其 exports 两入口——`.`（契约根）与 `./protocol`（协议面），深路径 import 不在支持面。包命名与 `taiji.role` 分组约束见 [extension-conventions.md](../extension-conventions.md)。
+包级义务：`package.json` `version` 盖章进 descriptor（registry 稳定标识比较字段——包升级触发 dispose 换新实例，:254-256）。检查产物三态：ok（装载）/ skip（必需字段缺失，warn 跳过）/ unusable（protocol 不兼容、bin 不可执行，标记不可用）（:31-34）。依赖红线：引擎包只依赖 SDK（`@zhushanwen/subagent-engine-sdk`），不依赖 core（[architecture.md](architecture.md) §2.3）；SDK 消费入口仅限其 exports 三入口——`.`（契约根）、`./protocol`（协议面）与 `./server`（[§2.11] 引擎协议服务器共享零件：帧写入面类型 / 反向等待与在途登记类型 / 超时常量 / 错误帧构造纯函数），深路径 import 不在支持面。包命名与 `taiji.role` 分组约束见 [extension-conventions.md](../extension-conventions.md)。
 
 **进程形态声明（`processModel`）**：该字段服务宿主的实例管理——`per-window` = 薄壳进程随派发窗口（workflow run / chat record 轮次）创建、窗口内复用、窗口收尾释放；`shared-service` = 进程级懒加载单例，随宿主存活、跨一切窗口共享（现役声明：pi = `per-window`，zcode = `shared-service`——其薄壳所辖 app-server 是重服务单例）。缺省 `per-window`：轻壳是引擎适配包的常态，重服务是显式特例——第三方轻壳引擎零声明即获正确行为。该字段**不是任务能力**：能力位（§3）服务 run 前资格判定，进程形态服务实例归属（挂窗口作用域还是挂 registry 单例），混放会让能力协商面（握手应答对照、gate 位）误消费，故独立声明、刻意不进 `capabilities` 11 位。
 
@@ -323,7 +323,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 ## 13. 新引擎接入 checklist
 
 1. 读 [architecture.md](architecture.md) §1-§3（拓扑 + 协议面）。
-2. 按 §1 准入形态建包：manifest 必填三字段 + capabilities 必需（缺键即保守值降级）+ `processModel`（缺省 `per-window`；重服务单例引擎显式声明 `shared-service`）、依赖红线（只依赖 SDK，消费入口仅 `.` 与 `./protocol`）；落点按 §1 发现根选择——入仓引擎放 `packages/`（staging 按 manifest 动态发现、`extraResources` 目录映射，均不写死清单，打包布局改动时同批核对两文件）；GUI icon 经 **ENGINE_ICON_REGISTRY** 单点登记（新引擎加一行，未登记 id 防御回中性圆点，C-ext-18）。
+2. 按 §1 准入形态建包：manifest 必填三字段 + capabilities 必需（缺键即保守值降级）+ `processModel`（缺省 `per-window`；重服务单例引擎显式声明 `shared-service`）、依赖红线（只依赖 SDK，消费入口仅 `.` / `./protocol` / `./server`）；落点按 §1 发现根选择——入仓引擎放 `packages/`（staging 按 manifest 动态发现、`extraResources` 目录映射，均不写死清单，打包布局改动时同批核对两文件）；GUI icon 经 **ENGINE_ICON_REGISTRY** 单点登记（新引擎加一行，未登记 id 防御回中性圆点，C-ext-18）。
 3. 按 §2 实现 9 方法 + 6 反向通道（控制面超时上限记牢；run 无墙钟；conformance 过 + bin 级协议 e2e 五断言）；**未知正向 method 必回 error 帧 `engine_method_unsupported`**（§2.1 应答义务）——该码引擎侧实装与对应 conformance 用例随各引擎适配层立项同批带上。
 4. 按 §3 声明 capabilities（引擎类 + package.json 两镜像同批；头注同批写依据）。
 5. 按 §4 登记错误码（引擎合成码进宿主枚举 + 恢复模板，漏登记编译失败）。

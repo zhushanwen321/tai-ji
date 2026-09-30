@@ -43,11 +43,16 @@ import { ZCODE_ADAPTER_VERSION } from "./constants.ts";
 import { createDefaultZcodeEngine } from "./registration.ts";
 import { parseCtxModel, type EnginePort, type EngineStream, type EngineCtxModel, type RunContext } from "./port-types.ts";
 import { toErrorMessage } from "./error-message.ts";
+import {
+  REVERSE_TIMEOUT_DEFAULT_MS,
+  toProtocolError as toProtocolErrorShared,
+  type ActiveRun,
+  type FrameWriter,
+  type ProtocolErrorPayload,
+  type ReversePending,
+} from "@zhushanwen/subagent-engine-sdk/server";
 
 const logger = getLogger("subagents");
-
-/** 出站帧写入面（main.ts 注入 process.stdout；测试注入内存缓冲）。 */
-export type FrameWriter = (frame: unknown) => void;
 
 /** 入站帧来源（ readline 已拆行的请求帧 + 反向请求应答帧混流）。 */
 export interface EngineProtocolServerOptions {
@@ -61,20 +66,8 @@ export interface EngineProtocolServerOptions {
   reverseTimeoutMs?: number;
 }
 
-interface ReversePending {
-  resolve: (result: unknown) => void;
-  reject: (err: Error) => void;
-  timer: NodeJS.Timeout;
-}
-
-/** 反向请求应答等待缺省上限（ms）——数据面分类 core 侧 10s，两阶段等待放宽一档兜底。 */
-const REVERSE_TIMEOUT_DEFAULT_MS = 60_000;
-
-/** 单个 run 的在途登记（cancel 帧路由 + 事件 seq 计数）。 */
-interface ActiveRun {
-  controller: AbortController;
-  seq: number;
-}
+// [§2.11] ReversePending / REVERSE_TIMEOUT_DEFAULT_MS / ActiveRun / FrameWriter 共用
+// SDK `./server` 子入口的声明单源。
 
 /**
  * 引擎协议服务器。生命周期 = 进程生命周期（单引擎实例，无重建面——崩溃重建归
@@ -345,11 +338,10 @@ function probeParamsOf(params: unknown): { force?: boolean } | undefined {
 }
 
 /** unknown → 协议错误帧载荷（可操作恢复指引，规则 16）。 */
-function toProtocolError(err: unknown): { code: string; message: string; recovery: string } {
-  if (err instanceof EngineSdkError) return err.toStructured();
-  return {
-    code: "engine_run_failed",
-    message: toErrorMessage(err),
-    recovery: "Check the engine process logs (engineDataDir/logs/) and rerun; if persistent, reinstall or upgrade the engine package.",
-  };
+const RUN_FAILURE_RECOVERY =
+  "Check the engine process logs (engineDataDir/logs/) and rerun; if persistent, reinstall or upgrade the engine package.";
+
+/** [§2.11] 错误帧构造共用 SDK 纯函数；本引擎只提供自己的恢复指引文案。 */
+function toProtocolError(err: unknown): ProtocolErrorPayload {
+  return toProtocolErrorShared(err, RUN_FAILURE_RECOVERY);
 }
