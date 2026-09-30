@@ -96,6 +96,8 @@ workflow run 与 subagent record 的运行态持久化介质收敛（承接 ADR-
 
 **修订注记（2026-09-30）**：事件文件头行已定 `{"type":"record-events"}` 并落盘（`RECORD_EVENTS_HEADER_TYPE`，`record-events.ts`——本文 `record-journal` 头行表述以本注记为准）；`engineHandle.journalPath` → `engineHandle.eventsPath` 改名进行中，由后续批次处理。
 
+**读侧换源与 manifest 裁决（2026-09-30，②④ 批次落地）**：record 读侧身份/统计/revive 基线全部换源事件流折叠（`identityFromFold` / `receiptStatisticsFromFold` / `baselineStatisticsFromFold`——TerminalCtx 增 `foldOf` 注入位；binding 读函数零生产读路径，`.record-binding` 只剩写面与戳职责，写点退场 = 后续批次）；record 侧 manifest 裁决为**方案 A：收敛为带水位纯索引**（`eventsStamp` 水位统一收口 `withEventsWatermark`，markSettled 改先事件后投影写序；读侧不匹配即跳过回落重建）——方案 B（删除 manifest、session-reader 换源 fold）被否：session-reader 侧改动面 6 文件超阈值、其生产依赖面刻意不引 subagent-core（折叠无法复用又不许复制）、孤儿可见窗口语义等价拿不准；跨包读取面是 manifest 整体退场的挂起点。索引条目 v3 自承收条统计域（turns/totalTokens）；负缓存三消费点（reconstructAll 快路径 / scanFile / buildEntryFromIndex）增事件侧反查击穿（bound 帧追加不写 binding 也可见）。
+
 ### ADR-0080 run/record 状态机收敛：五态机唯一权威 + outcome 四值 + record 意图原语即状态机（2026-09-27 设计裁决）
 workflow run 与 subagent record 的状态词表与状态机形态收敛（承接 ADR-0074 显式状态机与 ADR-0078 介质归位；权威源 `.tmp/tech-design/w2-state-machine-convergence.md`——设计文档不入 git，实施记录 git 可追溯）。七件套：
 

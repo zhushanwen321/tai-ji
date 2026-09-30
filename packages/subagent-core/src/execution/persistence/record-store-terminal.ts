@@ -336,12 +336,14 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
       detail: { id: record.id },
     });
   }
-  // ③ manifest 投影（D8 写序 manifest 后；派生投影——非终态如实 legacy running）。
-  commitDerivedTransition(record, ctx);
-  // ④ [W1 / D3 表行 5] record-settled 帧 + v2 终态条目（markSettled 是终局写点
+  // ③ [W1 / D3 表行 5] record-settled 帧 + v2 终态条目（markSettled 是终局写点
   // 之一——D3 映射表「archive / markSettled / legacy 终态」；幂等守卫在被调侧）。
   // endedAt 取收口时点（settle 非终态不写 record.endedAt——事件帧的终局时间戳）。
+  // **先事件后投影**（[④ 纯索引水位] 写序约束）：manifest 物化嵌 `<id>.events`
+  // 水位，事件追加必须在物化之前，水位在写点才构造性新鲜。
   ctx.settleViaJournal(record, settledAt);
+  // ④ manifest 投影（派生投影——非终态如实 legacy running）。
+  commitDerivedTransition(record, ctx);
   return true;
 }
 

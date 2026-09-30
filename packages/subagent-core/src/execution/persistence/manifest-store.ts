@@ -7,6 +7,7 @@ import { getLogger } from "../../core/logger.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
 import { writeAtomicFile, writeAtomicFileSync } from "../../shared/atomic-write.ts";
 import { isMissingFsError } from "./fs-error.ts";
+import { recordEventsPath } from "./record-events.ts";
 import type { ClosedReason, ExecutionStatus } from "../domain/record-types.ts";
 // 类型面依赖（D5 终局投影词表单源）——纯 type import，无运行时循环
 //（run-events 只依赖 core/logger 与 orchestration/models，不回指 execution 层）。
@@ -77,6 +78,14 @@ export interface ManifestRecord {
   task?: string;
   slug?: string;
   model?: string;
+  /**
+   * [④ 纯索引水位] 派生自的事件文件（`<id>.events`）stat 戳——manifest 三性质的
+   * 「带水位」维度：读时对不上即投影过期（写点与事件追加之间崩溃的半更新窗），
+   * 回落事件流重建（core 读侧 mergeManifestRecords 校验；跨包 session-reader 的
+   * 水位校验随 manifest 整体退场批次处理，登记剩余）。缺省 = 无水位（存量 manifest
+   * / 纯内存测试形态），读侧按现状接受（宽容存量，行为零变化）。
+   */
+  eventsStamp?: { mtimeMs: number; size: number };
 }
 
 /** manifest JSON.stringify 缩进空格数（no-magic-numbers 合规）。
@@ -84,6 +93,20 @@ export interface ManifestRecord {
  *  record-store-terminal.ts 的 binding 快照族、record-store.ts 的同步物化点）
  *  经 import 消费——读写两侧格式互认靠单一定义，不靠两处巧合同值。 */
 export const MANIFEST_INDENT_SPACES = 2;
+
+/**
+ * [④ 纯索引水位] manifest 写点统一嵌事件文件水位（`<id>.events` 的 stat 戳）。
+ *
+ * manifest 三性质收口的「带水位」维度的写入半边：全部 record 侧 manifest 写点
+ * （writeManifestPersisted / materializeBoundRecordManifest / rebuildManifestIfMissing）
+ * 落盘前经本函数嵌入当前事件文件戳——写序保证（各原语先追加事件后写 manifest）
+ * 使水位在写点处构造性新鲜；读侧（mergeManifestRecords）对不上即跳过该条回落
+ * 重建。事件文件不在场（纯内存/未落账）→ 原样返回（无水位 = 存量宽容形态）。
+ */
+export function withEventsWatermark(manifestDir: string, manifest: ManifestRecord): ManifestRecord {
+  const stamp = statStamp(recordEventsPath(manifestDir, manifest.id));
+  return stamp === null ? manifest : { ...manifest, eventsStamp: stamp };
+}
 
 /** [perf] 缓存校验戳（与 record-store.ts Stamp 同构；manifest 是小文件，mtime+size 足够）。 */
 interface Stamp {
@@ -149,9 +172,8 @@ export class ManifestStore {
    * 不阻塞 event loop）。
    *
    * 失败时原语尽力清理残留 tmp（debug 记录，不掩盖原错误）并原样上抛——
-   * 调用方（RecordStore 写面：writeManifestPersisted 缺省异步分支 / 批写 barrier /
-   * rebuildIndexes 重建降级（debug 留痕）/ rematerializeManifest（warn 语义））
-   * 决定降级策略——各面降级策略分化见各调用点。
+   * 调用方（RecordStore 写面：writeManifestPersisted 缺省异步分支 / rebuildIndexes
+   * 重建降级（debug 留痕））决定降级策略——各面降级策略分化见各调用点。
    */
   async writeManifest(record: ManifestRecord): Promise<void> {
     const filePath = path.join(this.dir, `${record.id}.json`);
@@ -346,7 +368,9 @@ export function materializeBoundRecordManifest(
     return false;
   }
   try {
-    writeAtomicFileSync(path.join(dir, `${manifest.id}.json`), JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES));
+    // [④ 纯索引水位] bound 物化与事件追加的写序（先 append 后物化）保证水位新鲜。
+    const stamped = withEventsWatermark(dir, manifest);
+    writeAtomicFileSync(path.join(dir, `${manifest.id}.json`), JSON.stringify(stamped, null, MANIFEST_INDENT_SPACES));
     return true;
   } catch (err) {
     logger.warn(

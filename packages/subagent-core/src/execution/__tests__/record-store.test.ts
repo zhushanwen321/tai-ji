@@ -1851,3 +1851,101 @@ describe("[② 读侧换源] receiptStatisticsFromFold / baselineStatisticsFromF
     });
   });
 });
+
+// ============================================================
+// [④ 纯索引水位] manifest 水位（写侧嵌入 + 读侧校验）
+// ============================================================
+
+describe("[④ 纯索引水位] manifest 水位（写侧嵌入 + 读侧校验）", () => {
+  let wmDir: string;
+  let wmSessions: string;
+  let wmRecords: string;
+
+  beforeEach(() => {
+    wmDir = fs.mkdtempSync(path.join(os.tmpdir(), "sa-manifest-watermark-"));
+    wmSessions = path.join(wmDir, "sessions");
+    wmRecords = path.join(wmDir, "records");
+    fs.mkdirSync(wmSessions, { recursive: true });
+    fs.mkdirSync(wmRecords, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(wmDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  const manifestPath = (id: string): string => path.join(wmRecords, `${id}.json`);
+
+  /** 生产形态 store（manifestStore + manifestDir 双接线——水位校验的前提）。 */
+  function newWmStore(): RecordStore {
+    return new RecordStore(wmSessions, new ManifestStore(wmRecords), undefined, wmRecords);
+  }
+
+  /** 播种 settled record（created + settled 帧，无子 session 文件——manifest 源独占可见）。 */
+  function seedSettledRecord(id: string): void {
+    seedTerminalRecord(wmRecords, {
+      id,
+      startedAt: 1000,
+      stopReason: "completed",
+      turns: 2,
+      totalTokens: 120,
+    });
+  }
+
+  it("markSettled 物化嵌 <id>.events 水位（写点构造性新鲜——先事件后投影写序）", () => {
+    const store = newWmStore();
+    const rec = makeRecord({ id: "sa-wm" });
+    store.register(rec);
+    expect(store.markSettled(rec, "gc")).toBe(true);
+
+    const manifest = JSON.parse(fs.readFileSync(manifestPath("sa-wm"), "utf-8")) as {
+      eventsStamp?: { mtimeMs: number; size: number };
+    };
+    expect(manifest.eventsStamp).toBeDefined();
+    // 水位 = settled 帧落盘后的事件文件 stat（先事件后投影 → 构造性新鲜）。
+    const events = fs.statSync(path.join(wmRecords, "sa-wm.events"));
+    expect(manifest.eventsStamp?.size).toBe(events.size);
+    expect(manifest.eventsStamp?.mtimeMs).toBe(events.mtimeMs);
+    store.dispose();
+  });
+
+  it("水位不符（半更新窗）→ manifest 源跳过（陈旧快照不投影）；无水位存量 → 照常投影", () => {
+    seedSettledRecord("sa-wm-fresh");
+    seedSettledRecord("sa-wm-stale");
+    seedSettledRecord("sa-wm-legacy");
+
+    // fresh：手写带正确水位的 manifest → 投影。
+    const events = fs.statSync(path.join(wmRecords, "sa-wm-fresh.events"));
+    fs.writeFileSync(
+      manifestPath("sa-wm-fresh"),
+      JSON.stringify({
+        id: "sa-wm-fresh", rootSessionId: "sess-current", agentName: "worker",
+        status: "running", createdAt: 1000,
+        eventsStamp: { mtimeMs: events.mtimeMs, size: events.size },
+      }),
+      "utf-8",
+    );
+    // stale：手写错水位（半更新窗形态）→ 跳过。
+    fs.writeFileSync(
+      manifestPath("sa-wm-stale"),
+      JSON.stringify({
+        id: "sa-wm-stale", rootSessionId: "sess-current", agentName: "worker",
+        status: "running", createdAt: 1000,
+        eventsStamp: { mtimeMs: 1, size: 1 },
+      }),
+      "utf-8",
+    );
+    // legacy：无水位（存量形态）→ 照常投影（宽容存量，行为零变化）。
+    fs.writeFileSync(
+      manifestPath("sa-wm-legacy"),
+      JSON.stringify({
+        id: "sa-wm-legacy", rootSessionId: "sess-current", agentName: "worker",
+        status: "running", createdAt: 1000,
+      }),
+      "utf-8",
+    );
+
+    const store = newWmStore();
+    const ids = store.collectRecords(10, "all").map((r) => r.id).sort();
+    expect(ids).toEqual(["sa-wm-fresh", "sa-wm-legacy"]);
+  });
+});

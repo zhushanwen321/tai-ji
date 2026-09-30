@@ -318,23 +318,21 @@ run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐�
 | 载体 | ① 可删 | ② 带水位 | ③ 无独有字段 | 现状 |
 |---|---|---|---|---|
 | `sessions-index.json` | 是 | **是**（每条带该 jsonl 的 mtime+size，消费点 `record-store.ts` 逐条比对，不匹配即重探测） | 是 | **三性质齐备**——唯一的纯索引 |
-| manifest（`<sa-id>.json`） | 否 | 否 | 否（`stopReason` 现由它独家承载） | 跨包读取面（session-reader 只认它） |
+| manifest（`<sa-id>.json`） | 是（惰性通道 + boot 轮双重建） | **是**（`eventsStamp` = 派生自 `<id>.events` 的 mtime+size，写点先事件后投影构造性新鲜；读侧不匹配即跳过回落重建） | 是（`stopReason` / `turns` / `totalTokens` 已随读侧换源由 `record-settled` / `record-round-idle` 帧承载） | **三性质齐备的物化投影**；跨包读取面（session-reader 只认它）是整体退场的挂起点 |
 | ~~`.state` 收条~~ | — | — | — | **已删除**：收条由 `record-settled` / `record-round-idle` 帧承载（写侧、读侧、戳与常量全部退场；快路径走索引收条，重建路径走折叠） |
-| `.record-binding` | 否 | 否 | 否（见 [身份绑定](#身份绑定record-binding与写权epoch)） | 统计快照读侧的现行源；身份读侧已换源事件流折叠（binding 为兜底），统计换源进行中 |
+| `.record-binding` | 写点退场后可达 | 戳（写面覆盖写变 mtime，缓存键职责） | 是（身份域 + 统计域已全部入事件载荷） | **读侧已全部换源事件流折叠**（身份 = `identityFromFold`、统计 = `receiptStatisticsFromFold`、revive 基线 = `baselineStatisticsFromFold`）——binding 只剩写面（spawn 回填 / settle 快照 / reopen merge）与负缓存击穿戳；写点退场 = 后续批次 |
 
 **终态目标**：只有索引存在，且三性质齐备；其余载体删除。
 
 **`.state` 退场已完成**（记录于此以免后人重复排查）：写函数族 / 读函数 / `statStateStamp` / 三个后缀常量与 `SidecarStat` 已从 `state-marker.ts` 删除；`markResurrected` 不再清理旧终态文件（磁盘终态由事件流决定，重开由 `record-reopened` 帧表达）；12 处测试 fixture 迁到事件帧播种（helper `execution/__tests__/helpers/seed-terminal-record.ts`），纯旧兼容用例随其被测对象一并删除。
 
-**索引承载终态收条的裁决**（换源时不可回避）：终态域（`stopReason` / `turns` / `totalTokens`）换源到折叠后，索引快路径**不能**去读每条记录的事件文件——那正好废掉索引存在的理由（冷启动零内容读取）。因此索引条目必须自己承载终态收条，且它的水位要覆盖**事件文件**的 stat（今天只盖 jsonl 的 mtime+size：轮终收条写在 jsonl 末次写入之后，只比 jsonl 会漏掉收条变化）。两条腿：① 索引条目加终态字段；② 水位扩到 `jsonl + <id>.events` 两个 stat。未做到之前，索引快路径的终态仍只能读 sidecar。
+**索引承载终态收条的裁决**（换源时不可回避）：终态域（`stopReason` / `turns` / `totalTokens`）换源到折叠后，索引快路径**不能**去读每条记录的事件文件——那正好废掉索引存在的理由（冷启动零内容读取）。因此索引条目必须自己承载终态收条，且它的水位要覆盖**事件文件**的 stat（今天只盖 jsonl 的 mtime+size：轮终收条写在 jsonl 末次写入之后，只比 jsonl 会漏掉收条变化）。两条腿：① 索引条目加终态字段；② 水位扩到 `jsonl + <id>.events` 两个 stat。**两腿均已落地**：索引条目自承收条（`receipt` = stopReason + endedAt；v3 起再加 `turns` / `totalTokens`——统计域随读侧换源由折叠承载，索引自承后快路径零内容读取即可回答「为什么停/何时停/停时多少量」），`INDEX_VERSION` 升到 3；round 不入索引（既有缺口，消费侧登记，下轮戳变化重探补齐）。
 
 第 ② 腿的改动面（动手前先看这里，别低估）：事件戳属于缓存键，而缓存新鲜度判定是中心面——连带影响 `isFreshCache`、负缓存条目、以及索引投影 `projectIndexEntries` 的正/负两类条目。**已完成**：`FileStamps` 去掉 state 维（现为 `jsonl` + `binding`），事件戳落在 `FileCacheEntry.events` 并由 `isFreshCache` 作为第四维比对；索引条目承载事件戳（`eventsMtimeMs` / `eventsSize`）与终态收条（`receipt`），`INDEX_VERSION` 升到 2。
 
 ### 身份绑定（`.record-binding`）与写权（`epoch`）
 
-`.record-binding` = 每子会话一个 sidecar（`<sessionFile>.record-binding`），记 record id ↔ 会话文件映射。**它不是物化投影**——读侧仍依赖它（统计快照读侧的现行源，「可删 / 带水位」两性质不满足）。终态目标 = 统计快照换源事件流后删除该文件。
-
-**读侧现状**：事件载荷已承载身份域与统计域——`model` / `thinkingLevel` / `worktree` 在 `record-created`，`lastAbandonedRound` 在 `record-round-idle`，`transcriptRef` / `epoch` / `round` 在 `record-reopened` / `record-round-started` / `record-bound`，统计快照在 `record-round-idle`（过程值）与 `record-settled`（终值 `turns` / `totalTokens` / `endedAt`）。身份读侧已换源：磁盘扫描身份腿三级优先 = identity entry → 事件流折叠（`identityFromFold`）→ binding 兜底。统计快照读侧仍在 binding（settle 写点的统计权威），换源进行中，完成后删除该文件。
+`.record-binding` = 每子会话一个 sidecar（`<sessionFile>.record-binding`），记 record id ↔ 会话文件映射。**读侧已全部换源事件流折叠**（[② 读侧换源]：身份 = `identityFromFold`、统计 = `receiptStatisticsFromFold`、revive 基线 = `baselineStatisticsFromFold`，`.record-binding` 读函数零生产读路径）——binding 只剩写面（spawn 回填 / settle 快照 / reopen merge-or-create，best-effort）与缓存键戳职责（写面覆盖写变 mtime，负缓存击穿）。写点退场 = 后续批次，退场后该文件删除。
 
 `epoch` = 写权世代计数，随写权取得递增，用于判定过期写者（`acquireWriteLease` 一族）。
 

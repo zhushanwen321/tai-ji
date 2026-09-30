@@ -120,7 +120,7 @@ import { RecordJournalWriteFace } from "./record-store-rounds.ts";
 // [W1 / U7·D5] 统一保留维护轮入口（record 域触发点）：同域 run-state-evidence
 // 直取（barrel 面只约束壳生产消费）。
 import { runRetentionMaintenanceRound } from "./run-state-evidence.ts";
-import { MANIFEST_INDENT_SPACES, materializeBoundRecordManifest } from "./manifest-store.ts";
+import { MANIFEST_INDENT_SPACES, materializeBoundRecordManifest, withEventsWatermark } from "./manifest-store.ts";
 import type { ManifestRecord, ManifestStore } from "./manifest-store.ts";
 import { INDEX_WRITE_MIN_INTERVAL_MS, loadIndex, saveIndex } from "./sessions-index.ts";
 import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "./sessions-index.ts";
@@ -770,9 +770,11 @@ export class RecordStore {
   private writeManifestPersisted(id: string, manifest: ManifestRecord): void {
     if (this.manifestDir !== undefined) {
       try {
+        // [④ 纯索引水位] 各原语写序（先追加事件后写 manifest）保证水位构造性新鲜。
+        const stamped = withEventsWatermark(this.manifestDir, manifest);
         writeAtomicFileSync(
           path.join(this.manifestDir, `${id}.json`),
-          JSON.stringify(manifest, null, MANIFEST_INDENT_SPACES),
+          JSON.stringify(stamped, null, MANIFEST_INDENT_SPACES),
         );
       } catch (err) {
         RecordStore.reportManifestWriteFailure(id, err, this.pi);
@@ -868,7 +870,11 @@ export class RecordStore {
       const manifestPath = path.join(this.manifestDir, `${rec.id}.json`);
       try {
         if (fs.existsSync(manifestPath)) return false;
-        writeAtomicFileSync(manifestPath, JSON.stringify(derivedManifestRecord(rec), null, MANIFEST_INDENT_SPACES));
+        // [④ 纯索引水位] 重建补写同样嵌水位（写点统一收口 withEventsWatermark）。
+        writeAtomicFileSync(
+          manifestPath,
+          JSON.stringify(withEventsWatermark(this.manifestDir, derivedManifestRecord(rec)), null, MANIFEST_INDENT_SPACES),
+        );
         return true;
       } catch (err) {
         logger.debug("[subagents] rebuildIndexes: manifest rebuild skipped (write failed)", {
@@ -1068,6 +1074,19 @@ export class RecordStore {
       for (const manifest of this.readManifestsSync()) {
         if (byId.has(manifest.id)) continue; // 已被磁盘/内存源覆盖
         if (rootSessionFilter !== undefined && manifest.rootSessionId !== rootSessionFilter) continue;
+        // [④ 纯索引水位] 水位校验：eventsStamp 与当前事件文件戳不符 = 投影过期
+        // （写点与事件追加之间崩溃的半更新窗）→ 跳过该条（磁盘/内存源在则已被覆盖，
+        // 不在则如实缺席——陈旧快照不得顶替事实源）。无水位（存量 manifest / 纯内存
+        // 形态）或本 store 无 manifestDir（manifestStore 降级形态，无事件路径可 stat）
+        // → 无法证伪，按现状接受——宽容存量，行为零变化。
+        if (manifest.eventsStamp !== undefined && this.manifestDir !== undefined) {
+          const events = this.eventsStampOfId(manifest.id);
+          const fresh =
+            events !== null &&
+            events.mtimeMs === manifest.eventsStamp.mtimeMs &&
+            events.size === manifest.eventsStamp.size;
+          if (!fresh) continue;
+        }
         const rec = manifestToSubagent(manifest);
         if (!rec) {
           // manifest status 越界=数据损坏（含历史 "error"、意外 crashed 值）：跳过而非降级 failed，
@@ -1157,8 +1176,7 @@ export class RecordStore {
    * 缺省 interrupted-by-restart；统计终值取 fold 的轮终快照，缺帧诚实 0）→ 幂等补写
    * v2 终态条目（engine/engineHandle/sessionFile 取 fold 的 bound 帧——「journal
    * 整文件损坏但终态条目完好」的反向组合，条目缺则补）→ 物化 manifest（投影：
-   * session-reader 与查询面的重启可见性恢复通道——验收⑤的 v2 新路径，
-   * record-access.ts 的 rematerialize 桥接是 v1 兼容专属零改动）。
+   * session-reader 与查询面的重启可见性恢复通道——验收⑤的 v2 新路径）。
    */
   adoptInterruptedRecord(
     id: string,
