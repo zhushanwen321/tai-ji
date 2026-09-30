@@ -283,11 +283,80 @@ run 与 record 两域状态词表的单源口径，消费方按维取值、禁�
 run 与 record 的运行态数据持久化形态（[ADR-0078](adr/decisions.md) / [ADR-0082](adr/decisions.md) D1）：**事件流是唯一事实源**——run 侧 = record 事件流（`<runId>.record.jsonl`，[ADR-0082] D1 由 journal 更名并升格：全文入事件、state 快照删除），record 侧 = 事件文件 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀，既有 .jsonl 扫描器结构性忽略；首行 `{"type":"record-journal"}` 头行自描述）。子术语：
 
 - **注册条目 / 终态条目**：主 session JSONL 里每实体只写的两条小 entry（v:2，kind 判别 registered/settled，customType 不变）——注册条记身份与锚点（诞生时写；workflow-record 族携带 journalPath 锚点），终态条记终局与摘要（结束时写，含 result 全文与 engineHandle 双键）。旧读者按版本门跳过 v2。
-- **物化投影**：每次都能从事件流重新算出来的状态写成的落盘文件——record 侧 manifest 与 run 侧 manifest（后者 [ADR-0082] D1 起降格为 record 终局事件的派生缓存；run 侧 state 快照文件已删）——删了可重建；不是事实源。`.alive` 是操作租约，同样不计事实源。
-- **journal tail**：从上次读到的位置（offset）继续读新增事件行的增量读取方式（`packages/subagent-core/src/execution/persistence/journal-tail.ts`，run 与 record 两域共用）——runtime 内存投影的增量喂入源之一（另一源 = pi entry 游标）。
+- **物化投影 / 索引**：折叠结果的落盘副本（record 侧 manifest、run 侧 manifest、`.state` 收条、`.record-binding`、`sessions-index.json`）。三条硬性质（可删 / 带水位 / 无独有字段）与逐项现状见 [物化投影与索引](#物化投影与索引)。`.alive` 是操作租约，不计事实源。
+- **事件流增量读**：从上次读到的位置（offset）继续读新增事件行的增量读取方式（`packages/subagent-core/src/execution/persistence/journal-tail.ts`，run 与 record 两域共用）——runtime 内存投影的增量喂入源之一（另一源 = pi entry 游标）。
 - **收编**：把「有注册记录、无终态记录」的实体判定为中断并补齐记录的动作（本域领域词）——run 侧 = 落 `run-interrupted` 转移帧转 interrupted 暂停态（[ADR-0082] D15：壳侧 recoverCrashedRuns 与 runtime startupSweep 两链经终局编排单一入口），record 侧 = 幂等追加终态事件；事件流重放后幂等追加。
-- **惰性兼容读（run 侧存量）**：run 侧旧格式两件套（`.events.jsonl` journal + `<runId>.jsonl` 快照）无兼容读——不读、不写、不主动删（[ADR-0082] D1 历史数据处置）。subagent-record 的 v1 全量快照兼容层已整体删除（2026-09-30，无 v1 数据）。run 侧旧格式两件套（`.events.jsonl` journal + `<runId>.jsonl` 快照）无兼容读——不读、不写、不主动删（[ADR-0082] D1 历史数据处置，随裁决点 7 清理自然消亡）。
-- **保留窗口**：事件流的显式保留期限（默认 30 天）——窗口内全保留，窗口外的终态实体由统一保留维护轮清理（fold 终态资格判据；cap=50 已废除）。
+- **惰性兼容读（run 侧存量）**：run 侧旧格式两件套（`.events.jsonl` + `<runId>.jsonl` 快照）无兼容读——不读、不写、不主动删（[ADR-0082] D1 历史数据处置，随裁决点 7 清理自然消亡）；subagent-record 的 v1 全量快照兼容层已整体删除（无 v1 数据）。
+- **保留窗口**：事件流的显式保留期限（默认 30 天）——窗口内全保留，窗口外的终态实体由统一保留维护轮清理（折叠终态资格判据；cap=50 已废除）。
+
+### 事件流（唯一事实源）
+
+run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐行一个事件，行带单调 `seq`。
+
+- record 侧 = `<recordsDir>/<sa-id>.events`（首行 `{"type":"record-journal"}` 自描述；六类事件 `record-created` / `bound` / `round-started` / `round-idle` / `settled` / `reopened`）；
+- run 侧 = `<sessionDir>/workflow-state/<runId>.record.jsonl`（九类事件，见 [Run record 事件流](#run-record-事件流workflow-域)）；
+- **单一写者**：状态变化只能追加事件，其它模块禁止直写盘上投影（写面检查 `scripts/check-record-write-surface.mjs`）；
+- **崩溃安全**：只追加、不原地改，尾部损坏按 [事件流损坏形态](#事件流损坏形态半写--坏行--截断)处理，不需要跨文件事务。
+
+**遗留符号（待改名；属持久化键者需版本裁决）**：`JsonlEventJournal` / `RecordJournalWriteFace` / `RecordJournalFoldState` / `journal-tail.ts` / `SessionJournalProjection`；注册条目载荷键 `journalPath` 是持久化键，改名要单独裁决。
+
+### 折叠（fold）
+
+按 `seq` 顺序重放事件流、得到实体当前状态的动作。它是「事件流 → 状态」的唯一推导方式，也是判读权威——注册表投影、终局诊断引用、resume 资格、保留窗口资格都由折叠结果裁决。
+
+**唯一实现原则**：折叠与状态词表只有一份实现，runtime 内存投影、core 查询面、扩展与 session-reader 一律复用它，禁止各自再写一份「从事件算状态」的代码。
+
+### 物化投影与索引
+
+物化投影 = 把折叠结果写到盘上、免去每次重算的文件。判断它是**索引（缓存）**还是**第二份事实源**，用三条硬性质：
+
+1. **可删**：整目录删掉后行为不变，只有性能下降；
+2. **带水位**：自带「派生自事件流的哪个 seq / 内容摘要」，读时对不上就回落事件流重建；
+3. **无独有字段**：它有的字段，事件流必须有。
+
+| 载体 | ① 可删 | ② 带水位 | ③ 无独有字段 | 现状 |
+|---|---|---|---|---|
+| `sessions-index.json` | 是 | 否（只有版本号） | 是 | 索引，缺水位 |
+| manifest（`<sa-id>.json`） | 否 | 否 | 否（`stopReason` 现由它独家承载） | 跨包读取面（session-reader 只认它） |
+| `.state` 收条 | 否 | 否 | 是 | core 查询面的终态读源 |
+| `.record-binding` | 否 | 否 | 否（见 [身份绑定](#身份绑定record-binding与写权epoch)） | 唯一身份/统计载体 |
+
+**终态目标**：只有索引存在，且三性质齐备；其余载体删除。
+
+### 身份绑定（`.record-binding`）与写权（`epoch`）
+
+`.record-binding` = 每子会话一个 sidecar（`<sessionFile>.record-binding`），记 record id ↔ 会话文件映射，以及事件流**暂不承载**的字段：`model` / `thinkingLevel` / `worktree` / `round` / `lastAbandonedRound` / `transcriptRef`。**它不是物化投影**——这些字段只在它里面。终态目标 = 字段补进事件载荷后删除该文件。
+
+`epoch` = 写权世代计数，随写权取得递增，用于判定过期写者（`acquireWriteLease` 一族）。
+
+### 记录谱系字段（origin / rootSessionId / parentRecordId / depth）
+
+判读 record 归属与嵌套深度的四件套：`rootSessionId` = 根会话（跨 tree 归属判据）、`parentRecordId` = 直接父 record、`depth` = 嵌套层数（`MAX_FORK_DEPTH` 上限判据）、`origin` = 诞生来源（工具调用 / workflow 成员 / resume 等）。查询面按 `rootSessionId` 过滤，禁止跨 tree 混读。
+
+### 轮次（round）与轮次事件
+
+record 的执行单位：一次「派发 → 回收」= 一轮。`round-started` 记轮起、`round-idle` 记轮终（带 `stopReason` / `endedAt`）、`bound` 记引擎会话锚在轮内回填。轮次是终局进度与统计（`turns` / `totalTokens`）的聚合单位。
+
+### 事件流损坏形态（半写 / 坏行 / 截断）
+
+- **半写**：进程在写入途中被杀，末尾留下不完整 JSON 行；
+- **坏行**：行能解析成 JSON 但不满足事件形状（缺 `seq` / 未知 type）；
+- **截断**：读到的文件短于上次记录的 offset（外部清理或轮转）。
+
+处置纪律：尾部半写与截断行可丢弃（保留已确认前缀）；坏行跳过并计数/告警。**禁止把跳过做成无声**——静默跳过会把数据损坏伪装成「什么都没发生过」。
+
+### 三级降级读取链（引擎历史）
+
+非 pi 引擎的 record 详情读取顺序：① 引擎原生读取（zcode 隔离会话库 / 协议 `read`）→ ② 宿主事件文件重放 → ③ outcome-only（record 字段投影摘要）。逐级降级并留痕；pi record 不走该链（走会话文件直读）。**身份已知才允许降级**——「有会话锚却没有 engine」是数据损坏，必须显式失败，不能按 pi 链读。
+
+### 模型引用与三元组（`{provider, id, thinkingLevel}`）
+
+模型引用在人类输入与磁盘格式里是字符串 `provider/id[:thinkingLevel]`（后缀 = 该模型的思考档位，spawn 时拼成 `--model provider/id:level` 交给 pi）。内部表示目标是**三元组** `{provider, id, thinkingLevel?}`：
+
+- 字符串只在**入口**解析一次——工具参数 / agent `.md` frontmatter / 配置 / GUI 选择器 / runtime IPC / 扩展 `ctx` / CLI 参数；
+- core、runtime、SDK、引擎协议、renderer 之间只传结构体；
+- 解析单点 = `parseModelSelector`（无损，连档位一起返回）；禁止各处再按 `/` 或 `:` 自行切分；
+- thinking 档位词表现存三份副本，收敛为单一事实源后删比对脚本。
 
 ### 武装回执（armed，workflow 域）
 schema 强制链的引擎确认信号：native 引擎在启动期武装断言通过 + 孙进程 spawn 成功后上报一次 `armed` 事件（载荷 = env 变量名 + 必备扩展包名）。宿主是独立信号源（监控不与施控同源），等待窗内未收到即 fail-fast。仅 native 引擎、仅 schema 任务；emulated 引擎恒不上报。契约义务见 [engine-development-guide](extensions/subagents/engine-development-guide.md) §6。
