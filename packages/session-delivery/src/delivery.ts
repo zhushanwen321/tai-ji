@@ -22,6 +22,9 @@
  *   cancel(id) 终结为 cancelled + tombstone。收回失败不再调 → 条目留守原态
  *   （§3.4「目标条目留守原态」）；若文本实际进了 transcript，confirmDelivered
  *   对已标记条目事实优先转 delivered（delivered 事实 > cancel 意图）。
+ * - [扩展③] confirmAccepted 受理登记（分段 port 实现用，dmg-r1-4）：申报批内条目
+ *   已由底层通道受理——queued → in-flight + 出批 + checked waiter 受理口径 resolve。
+ *   合批分段中途失败时已登记段留守 in-flight（等回执/对账），仅未受理段走失败面。
  *
  * onSettled 记账口径（D9⑤ 升级）：
  * - 'delivered' = 送达口径：仅 confirmDelivered 驱动回调（受理只转 in-flight，
@@ -146,11 +149,19 @@ export interface DeliveryHandleV2 extends DeliveryHandle {
    */
   onChange(cb: () => void): () => void
   /**
-   * 送达回执驱动转 delivered（D9③）。接受 in-flight（正规路径）与 queued
+   * 送达回执驱动转 delivered（D9③）。接受 in-flight（正规送达路径）与 queued
    * （扩展①：rebuild 直确认 / 出站中回执先到）。幂等：未知/已终态 no-op。
    * @returns 是否发生了状态转移（诊断/测试用）。
    */
   confirmDelivered(id: string): boolean
+  /**
+   * 受理登记（[扩展③]，dmg-r1-4）：分段 port 实现申报「本条目已由底层通道受理」。
+   * 只接受当前出站批内的 queued 条目（受理事实锚定于在途投递）；生效即 queued →
+   * in-flight 转移 + 出批 + checked waiter 按受理口径 resolve（D9⑤）。幂等：非批内/
+   * 已转移/未知 id 返回 false。合批分段中途失败时已登记段留守 in-flight（等回执/对账），
+   * 仅未受理段走失败面——已进底层通道的文本不再误报「投递失败」。
+   */
+  confirmAccepted(id: string): boolean
   /**
    * 回收重置 queued 至队首（保持 ids 相对序，D3 own 处置/failed 重试）。
    * 只接受 in-flight/failed；queued 幂等跳过（已在队列）；cancelled/delivered
@@ -469,6 +480,11 @@ export function createDelivery(
 
   /** 终态落定：出活跃集 + 写 tombstone（D5②）。调用方负责 onSettled/通知语义。 */
   function finalizeEntry(e: KernelEntry, state: Extract<DeliveryEntryState, 'delivered' | 'cancelled'>): void {
+    // 终态同步摘出出站批次（dmg-r1-1）：错误重试窗口内批次经 attemptSend 原样重发，
+    // 批内残留已终态条目会把已撤销/已送达文本随重试再次发出。原地 splice 保持
+    // inFlight 在途 promise 闭包对批数组的引用一致（filter 重赋值会让旧引用复活成员）。
+    const batchIdx = inflightBatch.indexOf(e)
+    if (batchIdx !== -1) inflightBatch.splice(batchIdx, 1)
     const idx = active.indexOf(e)
     if (idx !== -1) active.splice(idx, 1)
     activeIndex.delete(e.id)
@@ -583,6 +599,20 @@ export function createDelivery(
 
   // ─── attemptSend：对出站批次执行 port.send ────────────────
   function attemptSend(): void {
+    // 在册守卫重过滤（dmg-r1-1 兜底防线）：finalizeEntry 已同步摘出终态条目，此处
+    // 对迟到路径（旧批次引用等）统一按在册过滤——已撤销条目不随重试重发；批次清空
+    // 则按空收口（复位在途与重试计数，不投任何文本）。此时不存在未 settle 的旧
+    // port.send promise（进入本函数的前提是上一 promise 已 settle 或首投），复位
+    // inFlight 后 pump 启动新投递无防重竞态。
+    if (inflightBatch.some((e) => !inRegistry(e))) {
+      inflightBatch = inflightBatch.filter((e) => inRegistry(e))
+    }
+    if (inflightBatch.length === 0) {
+      inFlight = false
+      sendAttempts = 0
+      pump()
+      return
+    }
     const batch = inflightBatch
     const composed = buildBatchPayload(batch.map((e) => e.msg))
     const intent: DeliveryIntent = composed.intent ?? cfg.intent
@@ -985,6 +1015,23 @@ export function createDelivery(
     return true
   }
 
+  function confirmAccepted(id: string): boolean {
+    if (disposed) return false
+    const e = activeIndex.get(id)
+    if (!e || e.state !== 'queued') return false
+    // 只接受当前出站批成员：受理事实锚定于在途投递——gate 等待中的 queued 条目
+    // 未触达底层通道，登记即虚报受理（条目会以 in-flight 挂起且无回执可等）
+    if (!inflightBatch.includes(e)) return false
+    inflightBatch.splice(inflightBatch.indexOf(e), 1)
+    e.state = 'in-flight'
+    e.updatedAt = now()
+    // 受理口径 settle（D9⑤）：checked waiter 收到受理确认即 resolve（受理 ≠ 送达，
+    // 后续送达仍由 confirmDelivered 驱动 onSettled）
+    settleChecked([e], undefined, checkedPending)
+    notifyChange()
+    return true
+  }
+
   function requeue(ids: readonly string[]): number {
     if (disposed) {
       warn('requeue ignored: delivery handle disposed')
@@ -999,8 +1046,11 @@ export function createDelivery(
       const e = activeIndex.get(id)
       if (!e) continue
       // 只接受 in-flight（对账回收，D3 own）/ failed（用户重试/resync 重报）；
-      // queued 幂等跳过（已在队列）；delivered/cancelled 拒绝（终态防复活）
+      // queued 幂等跳过（已在队列）；delivered/cancelled 拒绝（终态防复活）；
+      // 撤销待收回（cancelRequested，dmg-r1-2）拒绝重排——重排会清撤销标记把用户
+      // 已撤销的消息送回投递队列；少排的条目留守原态，调用方经返回数感知
       if (e.state !== 'in-flight' && e.state !== 'failed') continue
+      if (e.cancelRequested) continue
       found.push(e)
     }
     if (found.length === 0) return 0
@@ -1012,7 +1062,6 @@ export function createDelivery(
       e.sendAttempts = 0
       e.updatedAt = now()
       e.settledAt = undefined
-      e.cancelRequested = false // 重投即重新起跑，撤销标记不跨回收轮（cancel 需重新发起）
     }
     active.unshift(...found)
     notifyChange()
@@ -1112,5 +1161,5 @@ export function createDelivery(
     dedupSet?.clear()
   }
 
-  return { send, sendChecked, flush, depth, entriesFull, projection, onChange, confirmDelivered, requeue, cancel, drain, dispose }
+  return { send, sendChecked, flush, depth, entriesFull, projection, onChange, confirmDelivered, confirmAccepted, requeue, cancel, drain, dispose }
 }

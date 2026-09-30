@@ -140,6 +140,29 @@ describe('u1-api requeue', () => {
 
     handle.dispose()
   })
+
+  it('撤销待收回条目拒绝重排：返回数不含它，留守原态且撤销标记不清（dmg-r1-2）', () => {
+    let idle = true
+    const port = makeMockPort({ isIdle: () => idle })
+    const handle = createDelivery(port)
+
+    handle.send(textMsg('A'), { id: 'u-a' }) // idle 立即投 → 受理 in-flight
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
+    expect(handle.cancel('u-a').kind).toBe('reclaim-requested') // 标记待收回
+
+    // 对账器回收重排：待收回条目被拒（重排会清撤销标记复活消息）
+    idle = false
+    expect(handle.requeue(['u-a'])).toBe(0)
+    expect(handle.entriesFull().active).toMatchObject([{ id: 'u-a', state: 'in-flight' }])
+
+    // 意图留守下撤销仍可兑现：收回确认（再次 cancel）终态
+    idle = true
+    expect(handle.cancel('u-a').kind).toBe('cancelled')
+    expect(handle.entriesFull().active).toHaveLength(0)
+    expect(handle.entriesFull().tombstones).toMatchObject([{ id: 'u-a', state: 'cancelled' }])
+
+    handle.dispose()
+  })
 })
 
 describe('u1-api cancel', () => {
@@ -224,6 +247,135 @@ describe('u1-api cancel', () => {
     resolvers[1]!() // u-2 受理
     await vi.advanceTimersByTimeAsync(0)
     expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
+
+    handle.dispose()
+  })
+
+  it('出站批次错误重试窗口内 cancel：backoff 到期重试不重发已取消条目（dmg-r1-1）', () => {
+    // busy park 两条合批出站 → port.send 首投失败进 backoff 重试窗口 → 窗口内撤 u-1
+    // → 重试到期只重发 u-2（修复前：inflightBatch 残留 u-1，composed 原样重发已撤销文本）
+    let calls = 0
+    let idle = false
+    let settledCb: (() => void) | undefined
+    const port = makeMockPort({
+      isIdle: () => idle,
+      send: () => {
+        calls++
+        if (calls === 1) throw new Error('transient send failure')
+        return undefined
+      },
+      subscribeSettled: (cb) => {
+        settledCb = cb
+        return () => {
+          settledCb = undefined
+        }
+      },
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const handle = createDelivery(port, { backoff: { ms: 100, max: 50 } })
+
+    handle.send(textMsg('m1'), { id: 'u-1' }) // busy 留队
+    handle.send(textMsg('m2'), { id: 'u-2' })
+    idle = true
+    settledCb!() // settled 边沿 flush → 合批 [u-1, u-2] 出站 → 首投失败
+    expect(port.sendCalls).toHaveLength(1)
+    expect(port.sendCalls[0]!.msg.payload.content).toBe('m1\n\n---\n\nm2')
+
+    // 重试窗口内撤销 u-1（queued 分支本地终结 + 出批）
+    expect(handle.cancel('u-1').kind).toBe('cancelled')
+    vi.advanceTimersByTime(100) // backoff 到期 → 重试
+    expect(port.sendCalls).toHaveLength(2)
+    expect(port.sendCalls[1]!.msg.payload.content).toBe('m2') // 已撤销条目不随重试重发
+    expect(handle.entriesFull().active.map((e) => e.id)).toEqual(['u-2'])
+    expect(handle.entriesFull().tombstones).toMatchObject([{ id: 'u-1', state: 'cancelled' }])
+
+    warnSpy.mockRestore()
+    handle.dispose()
+  })
+
+  it('出站批次重试窗口内 cancel 唯一条目：backoff 到期按空收口（不重发不挂死）', () => {
+    let calls = 0
+    let idle = false
+    let settledCb: (() => void) | undefined
+    const port = makeMockPort({
+      isIdle: () => idle,
+      send: () => {
+        calls++
+        if (calls === 1) throw new Error('transient send failure')
+        return undefined
+      },
+      subscribeSettled: (cb) => {
+        settledCb = cb
+        return () => {
+          settledCb = undefined
+        }
+      },
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const handle = createDelivery(port, { backoff: { ms: 100, max: 50 } })
+
+    handle.send(textMsg('m1'), { id: 'u-1' }) // busy 留队
+    idle = true
+    settledCb!() // 单条批出站 → 首投失败进重试窗口
+    expect(port.sendCalls).toHaveLength(1)
+
+    expect(handle.cancel('u-1').kind).toBe('cancelled')
+    vi.advanceTimersByTime(100) // 重试到期：批已空 → 按空收口
+    expect(port.sendCalls).toHaveLength(1) // 无第二次 send
+    expect(handle.entriesFull().active).toHaveLength(0)
+
+    // 收口后队列不挂死：新消息正常出站
+    handle.send(textMsg('m2'), { id: 'u-2' })
+    expect(port.sendCalls).toHaveLength(2)
+    expect(port.sendCalls[1]!.msg.payload.content).toBe('m2')
+
+    warnSpy.mockRestore()
+    handle.dispose()
+  })
+})
+
+describe('u1-api confirmAccepted（分段受理登记，dmg-r1-4）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('批内 queued 条目受理登记：转 in-flight + 出批 + checked waiter 受理口径 resolve', async () => {
+    let sendResolve: (() => void) | undefined
+    const port = makeMockPort({
+      send: () => new Promise<void>((resolve) => { sendResolve = resolve }),
+    })
+    const handle = createDelivery(port)
+
+    const promise = handle.sendChecked(textMsg('m1'), { id: 'u-1' })
+    expect(handle.entriesFull().active[0]!.state).toBe('queued')
+    expect(handle.confirmAccepted('u-1')).toBe(true)
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
+    await expect(promise).resolves.toBeUndefined() // 受理口径 settle（D9⑤）
+
+    // 迟到的批次受理回执：已登记条目不二次转移、不炸
+    sendResolve!()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(handle.entriesFull().active[0]!.state).toBe('in-flight')
+
+    // 送达回执照常驱动 delivered（受理 ≠ 送达，两阶段第二阶段不变）
+    expect(handle.confirmDelivered('u-1')).toBe(true)
+    expect(handle.entriesFull().tombstones).toMatchObject([{ id: 'u-1', state: 'delivered' }])
+
+    handle.dispose()
+  })
+
+  it('非出站批成员（gate 等待中）与未知 id 登记拒绝：不转移不 settle', () => {
+    // busy gate 拦下的 queued 条目未触达底层通道，登记即虚报受理（拒）
+    const port = makeMockPort({ isIdle: () => false })
+    const handle = createDelivery(port)
+
+    handle.send(textMsg('m1'), { id: 'u-1' }) // busy：留队等 gate，不在出站批内
+    expect(handle.confirmAccepted('u-1')).toBe(false)
+    expect(handle.confirmAccepted('u-unknown')).toBe(false)
+    expect(handle.entriesFull().active[0]!.state).toBe('queued')
 
     handle.dispose()
   })

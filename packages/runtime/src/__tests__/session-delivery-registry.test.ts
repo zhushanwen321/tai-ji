@@ -823,3 +823,159 @@ describe('S1 死锁复现（D1 申报制）：无标记合批受理即落地 + g
     expect(h.promptCalls[1]![0]).toContain('后续 queued 消息')
   })
 })
+
+// ── 缺陷修复回归③（dmg-r1-2）：in-flight 撤销二段式归宿单一化 ────────────────
+// 缺陷：第二次 cancel 经内核 cancelRequested 短路终态透传为「撤销成功」（无 clear_queue
+// 收回、无 transcript 校验，pi 槽位文本随后被消费即假撤销成功）；sweep/requeue 清撤销
+// 标记把待收回条目重投复活。修复 = registry 持 per-session pendingRevoke 意图集：再入
+// cancel 重复完整「收回 + 校验」流程；sweep/rebuild/disposeCleared 查集不重投，文本确认
+// 离场（收回/蒸发）即兑现终态。
+
+describe('in-flight 撤销二段式归宿（dmg-r1-2）：意图集持有至兑现', () => {
+  const SUBMIT_AND_ACCEPT = async (h: ReturnType<typeof makeHarness>, id: string, content: string) => {
+    h.registry.submit('s1', { content, clientUuid: id })
+    await h.flush()
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'in-flight' })
+    return h.promptCalls[0]![0] as string
+  }
+
+  it('收回失败后的再次 cancel 不短路撤销成功：重复完整收回流程，条目留守', async () => {
+    const h = makeHarness()
+    const id = 'u-d2000001-0000-4000-8000-000000000001'
+    await SUBMIT_AND_ACCEPT(h, id, '撤不掉的')
+
+    // 第一次 cancel：clear_queue 失败 → 意图留守（pendingRevoke），条目留守原态
+    h.client.clearQueue.mockRejectedValueOnce(new Error('pi stuck'))
+    const first = await h.registry.cancel('s1', id)
+    expect(first.cancelled).toBe(false)
+    expect(first.reason).toContain('收回失败')
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'in-flight' })
+
+    // 第二次 cancel：不透传内核短路终态（修复前：cancelled=true 谎报撤销成功）——
+    // 重复完整流程，clear_queue 仍失败 → 仍不谎报
+    h.client.clearQueue.mockRejectedValueOnce(new Error('pi stuck'))
+    const second = await h.registry.cancel('s1', id)
+    expect(second.cancelled).toBe(false)
+    expect(second.reason).toContain('收回失败')
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'in-flight' })
+    expect(h.promptCalls).toHaveLength(1) // 全程无重投
+  })
+
+  it('待收回条目不随对账 sweep 重投：文本确认离场（蒸发）→ 撤销意图兑现终态', async () => {
+    const h = makeHarness()
+    const id = 'u-d2000002-0000-4000-8000-000000000002'
+    await SUBMIT_AND_ACCEPT(h, id, '蒸发兑现')
+
+    h.client.clearQueue.mockRejectedValueOnce(new Error('pi stuck'))
+    const first = await h.registry.cancel('s1', id)
+    expect(first.cancelled).toBe(false)
+
+    // 30s watchdog 对账：clear_queue 空（槽位无滞留）+ transcript 无迹 = 文本已不在
+    // 任何投递通道 → 撤销意图兑现 cancelled（修复前：sweep 重投复活消息）
+    h.setCleared({ steering: [], followUp: [] })
+    await vi.advanceTimersByTimeAsync(30_000)
+    await h.flush()
+    expect(h.promptCalls).toHaveLength(1) // 未重投
+    expect(h.registry.entries('s1')?.active).toHaveLength(0)
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'cancelled' }])
+  })
+
+  it('待收回条目随收回兑现：第二次 cancel 收回目标文本 → 撤销成功回草稿', async () => {
+    const h = makeHarness()
+    const id = 'u-d2000003-0000-4000-8000-000000000003'
+    const sentText = await SUBMIT_AND_ACCEPT(h, id, '收回兑现')
+
+    h.client.clearQueue.mockRejectedValueOnce(new Error('pi stuck'))
+    expect((await h.registry.cancel('s1', id)).cancelled).toBe(false)
+
+    // pi 恢复：第二次 cancel 的 clear_queue 收回目标文本 → 完整流程兑现撤销
+    h.setCleared({ steering: [sentText], followUp: [] })
+    const second = await h.registry.cancel('s1', id)
+    expect(second.cancelled).toBe(true)
+    expect(second.content).toContain('收回兑现')
+    expect(h.registry.entries('s1')?.active).toHaveLength(0)
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'cancelled' }])
+  })
+
+  it('文本实际进 transcript：delivered 事实优先于撤销意图，意图集随终态清除', async () => {
+    const h = makeHarness()
+    const id = 'u-d2000004-0000-4000-8000-000000000004'
+    const sentText = await SUBMIT_AND_ACCEPT(h, id, '实际已送达')
+
+    h.client.clearQueue.mockRejectedValueOnce(new Error('pi stuck'))
+    expect((await h.registry.cancel('s1', id)).cancelled).toBe(false)
+
+    // pi 消费文本进 transcript（message_end 送达回执）→ delivered 事实 > cancel 意图
+    h.userMessageEnd(sentText)
+    await h.flush()
+
+    const again = await h.registry.cancel('s1', id)
+    expect(again.cancelled).toBe(false)
+    expect(again.reason).toBe('already delivered')
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'delivered' }])
+    // 意图集已清：后续对账 sweep 无待收回残留（条目已终态不进 aged 扫描）
+    h.setCleared({ steering: [], followUp: [] })
+    await vi.advanceTimersByTimeAsync(30_000)
+    await h.flush()
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'delivered' }])
+  })
+})
+
+// ── 缺陷修复回归④（dmg-r1-4）：合批分段中途失败只对未受理段走失败面 ───────────
+// 缺陷：批 [A,B] 中 A 段已受理进 pi 后 B 段失败 → port.send 整体 reject → 内核对 A、B
+// 全部 reject + removeActive + 广播「消息投递失败」——A 实际已进 transcript，重开 session
+// 后与失败提示矛盾（信号失真）。修复 = 逐段受理登记（confirmAccepted）：已受理段转
+// in-flight 出批留守（等回执/对账），仅未受理段走失败面。
+
+describe('合批分段中途失败（dmg-r1-4）：已受理段留守，失败面只落未受理段', () => {
+  it('三段批 [A 挂起受理 | B 成功 | C 失败]：A、B in-flight 留守，C 入口即拦 + 单条失败广播', async () => {
+    const h = makeHarness()
+    // prompt 序列：首次挂起（拉住 A 段在途，让 B、C 挂账成同批）、二次成功（B）、三次失败（C）
+    let resolveFirstPrompt: (() => void) | undefined
+    h.client.prompt.mockImplementation(async (text: string) => {
+      h.promptCalls.push([text, undefined, undefined])
+      if (h.promptCalls.length === 1) {
+        await new Promise<void>((resolve) => { resolveFirstPrompt = resolve })
+        return {}
+      }
+      if (h.promptCalls.length === 2) return {}
+      throw new Error('boom segment C')
+    })
+
+    const idA = 'u-d4000001-0000-4000-8000-000000000001'
+    const idB = 'u-d4000002-0000-4000-8000-000000000002'
+    const idC = 'u-d4000003-0000-4000-8000-000000000003'
+    h.registry.submit('s1', { content: '段A', clientUuid: idA }) // 批[A] 在途（prompt 挂起）
+    h.registry.submit('s1', { content: '段B', clientUuid: idB }) // checked 挂账
+    h.registry.submit('s1', { content: '段C', clientUuid: idC }) // checked 挂账
+    await h.flush()
+    expect(h.promptCalls).toHaveLength(1)
+
+    // A 段受理成功 → confirmAccepted 出批留守 → pump 把挂账的 B、C 锁成同批
+    resolveFirstPrompt!()
+    await h.flush()
+    expect(h.promptCalls).toHaveLength(3) // B 成功 + C 失败
+    await h.flush()
+
+    // 失败面只落 C：单条广播（修复前：A 的 waiter 同被 reject → 2 条误报）
+    const errors = h.published.filter((m) => m.type === 'message.error')
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({
+      type: 'message.error',
+      payload: { message: expect.stringContaining('boom segment C') },
+    })
+    // 已受理段 A、B 留守 in-flight（等回执/对账）；未受理段 C 入口即拦移除（无 tombstone）
+    const full = h.registry.entries('s1')!
+    expect(full.active.map((e) => [e.id, e.state])).toEqual([
+      [idA, 'in-flight'],
+      [idB, 'in-flight'],
+    ])
+    expect(full.tombstones.some((t) => t.id === idC)).toBe(false)
+
+    // 留守段回执照常闭环：B 送达 delivered（受理 ≠ 送达，第二阶段不受失败影响）
+    const textB = h.promptCalls.find((c) => (c[0] as string).includes('段B'))![0] as string
+    h.userMessageEnd(textB)
+    await h.flush()
+    expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id: idB, state: 'delivered' }])
+  })
+})
