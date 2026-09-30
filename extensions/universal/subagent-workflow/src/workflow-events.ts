@@ -483,13 +483,15 @@ export function setupWorkflowDomain(
     const sessionId = ctx.sessionManager.getSessionId();
     lsRef.lastSessionId = sessionId;
 
-    // [§1.4 (a) switchSession 替换窗作废] switchSession 是 pi 会话替换的四个触发形态之一
-    //（§1.4 机制登记），且不触发 session_shutdown（SessionShutdownReason 枚举无该成员）
-    //——旧 runner 失效后 core 读面的旧句柄同样进入「已失效、新 initSession 未到」窗口。
-    //与 reload 分支同机制：只作废句柄可用性判定（在途 run 的 terminate 由本 handler
-    //下方原逻辑承接，互不影响）。方法本身不抛。
-    getSubagentService()?.invalidatePiBinding("session replacement (switchSession / session_tree)");
-
+    // [PS-61] tree 导航 = 同进程分支导航，非会话替换：pi 原地换叶子
+    //（agent.state.messages = sessionContext.messages）后 emit，不 teardown、不失效
+    // runner——pi 绑定保持有效，此处不作废（与下方 reload 分支的前提不同：真正的
+    // 会话替换形态 quit/new/resume/fork 都发 session_shutdown，reload 另有本文件
+    // :544 显式作废）。禁止在此 invalidatePiBinding：作废后唯一重臂点 initSession
+    // 只由 session_start 触发，tree 导航不触发 session_start，本 session 余生
+    // record/notify 的 pi 写入将静默 no-op。
+    // [HISTORICAL] 曾按「switchSession 是会话替换形态之一」的假前提在此作废绑定，
+    // 撤销依据与触发词表登记见 docs/pi-semantics.json PS-61。
     const state = sessionState.get(sessionId);
     if (state) {
       // 一次性生命周期（D-2）：running run 转 done,failed 落盘（helper 内部自过滤

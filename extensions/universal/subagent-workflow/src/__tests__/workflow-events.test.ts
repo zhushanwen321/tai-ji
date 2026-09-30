@@ -82,7 +82,7 @@ const NOTIFY_LEDGER_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.notifyLedger);
 // ── fake 组件（合并去重：makePi/makeCtx/makeReporter/resetSlots/mount 各一处定义） ──
 
 const serviceDisposeSpy = vi.fn();
-// [§1.4 (a)] reload / session_tree 分支的句柄作废调用 spy（fake service 必须携带该成员
+// [§1.4 (a)] reload 分支的句柄作废调用 spy（fake service 必须携带该成员
 // ——生产 handler 直调 `service?.invalidatePiBinding(...)`，缺成员即 TypeError）。
 const serviceInvalidatePiBindingSpy = vi.fn();
 const storeDisposeSpy = vi.fn(async () => {});
@@ -460,18 +460,22 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
   });
 });
 
-// ── ② D1：session_tree（switchSession 替换窗）句柄作废 ─────────────────────────
+// ── ② D1：session_tree（同进程分支导航，非会话替换）不作废句柄 ─────────────────
+//
+// [PS-61] pi 的 session_tree 发射 = 同进程分支导航（原地换叶子后 emit）：不 teardown、
+// 不失效 runner——pi 绑定保持有效，handler 不作废句柄。作废即断裂：唯一重臂点
+// initSession 只由 session_start 触发，tree 导航不触发 session_start，本 session 余生
+// record/notify 的 pi 写入将静默 no-op。一次性生命周期（在途 run terminate）独立成立。
 
-describe("[§1.4 (a)] session_tree：switchSession 替换窗同样作废句柄（不触发 session_shutdown 的替换形态）", () => {
-  it("session_tree：invalidatePiBinding 被调 + 在途 run 照常 terminate", async () => {
+describe("[§1.4 (a)] session_tree：分支导航不作废句柄（tree 导航非会话替换形态）", () => {
+  it("session_tree：invalidatePiBinding 不被调 + 在途 run 照常 terminate", async () => {
     const run = makeRun({ runId: "run-sess-tree", callCount: 1 });
     const { handle, handlers, ctx } = await mountWithSession("sess-tree", { runs: [run] });
     expect(handle.state.sessionState.size).toBe(1);
 
     await handlers.get("session_tree")!({ type: "session_tree" }, ctx);
 
-    expect(serviceInvalidatePiBindingSpy).toHaveBeenCalledTimes(1);
-    expect(String(serviceInvalidatePiBindingSpy.mock.calls[0]?.[0])).toContain("switchSession");
+    expect(serviceInvalidatePiBindingSpy).not.toHaveBeenCalled();
     expect(mockTerminateRunningRuns).toHaveBeenCalledTimes(1);
   });
 });
