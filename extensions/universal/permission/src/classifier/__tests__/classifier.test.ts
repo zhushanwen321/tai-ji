@@ -282,4 +282,27 @@ describe("CT5: callLLM opts 构造（model/messages/timeoutMs/signal）", () => 
 		const opts = getLastOpts();
 		expect(opts?.signal).toBe(ac.signal);
 	});
+
+	it("配置 thinkingLevel 不被模型支持 → warn 留痕 + reasoning 不传（不静默降级）", async () => {
+		// FIXED_MODEL_OBJ reasoning:false → supportedLevels = ["off"]，配置 "high" 判定落空；
+		// changeset pi-permission-thinking-level-datadriven 承诺 warn 留痕（同族 rename-session 对齐）
+		const onLog = vi.fn();
+		const { spy, getLastOpts } = capturingCallLLM(okResult('{"outcome":"allow","risk_level":"low","reasoning":"x","confidence":0.9}'));
+		const classifier = createClassifier(makeDeps({ callLLM: spy, onLog }));
+		const r = await classifier.classifyRisk(CTX, { ...CONFIG, thinkingLevel: "high" });
+		expect(r.outcome).toBe("allow");
+		expect(onLog).toHaveBeenCalledWith(
+			expect.stringContaining('configured thinkingLevel "high" is not supported by test-co/test-model; calling without a thinking level'),
+		);
+		expect(getLastOpts()?.reasoning).toBeUndefined();
+	});
+
+	it("配置 thinkingLevel 被模型支持 → 命中透传，无 warn", async () => {
+		const onLog = vi.fn();
+		const { spy, getLastOpts } = capturingCallLLM(okResult('{"outcome":"allow","risk_level":"low","reasoning":"x","confidence":0.9}'));
+		const classifier = createClassifier(makeDeps({ callLLM: spy, onLog }));
+		await classifier.classifyRisk(CTX, { ...CONFIG, thinkingLevel: "off" });
+		expect(onLog).not.toHaveBeenCalledWith(expect.stringContaining("not supported"));
+		expect(getLastOpts()?.reasoning).toBe("off");
+	});
 });
