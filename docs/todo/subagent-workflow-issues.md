@@ -45,10 +45,11 @@
 - 为什么 (b) 单独做属掩盖：注销被吞后 pending 差集残留（要靠下一轮对账补），而同一窗口的条目写点仍会抛；且静默降级的影响面尚无登记。
 - 证据与取证：原证据目录 `.tmp/dev-flow/b1b2-verify/` 已不在盘上；复核建议先在 `<dataDir>/logs/` 找 `pi-crash-*.log` 核对崩溃栈是否含上述文案，并与同一 `pi-<date>-<sid>.jsonl` 的 shutdown / start 时间戳对齐。
 
-### 1.5 resume 档 1 补收丢失结构化调用的对象形态（用户已裁决应修）
+### 1.5 resume 档 1 补收丢失结构化调用的对象形态（2026-09-30 用户裁决：删除该通道，见 [ADR-0092](../adr/decisions.md)）
 
 - 现状（已核实）：活体链的 schema 调用把校验后对象 `AgentResult.parsedOutput` 写进 agent-settled 事件，但 resume 档 1（结果补收）构造的事件只带 `extractAssistantTextContent` 提取的正文文本（resume-run.ts:531-543，全文件无 parsedOutput）；worker 侧回放恒 `parsedOutput ?? content` 优先（worker-script-builder.ts:183 与缓存路径 :303）→ schema 调用经档 1 补收后脚本拿到 JSON 文本串，且脚本无感知（returnMeta.error 仍为 undefined）。测试覆盖应精确表述为「**对象形态无覆盖**」：档 1 集成用例存在（resume-tier-budget.test.ts:227-252），只断言 content 与 sessionFile。
-- 裁决语义（2026-09-29 用户定案）：schema 调用的结果必须是对象形态，**没有文本回落选项**；拿不到对象形态就不该判档 1。
+- 裁决语义（2026-09-29 用户定案，**已被 2026-09-30 裁决取代**）：schema 调用的结果必须是对象形态，**没有文本回落选项**；拿不到对象形态就不该判档 1。
+- **2026-09-30 用户裁决（现行，权威登记 = ADR-0092）**：不修补收，**删除「从子代理会话文件复用未提交结果」这条通道**。恢复只保留两种形态——① 该调用已有已提交结果（record 流里那条 `agent-settled`）→ 原样回放、零成本；② 没有 → 重跑（能定位到同一成员会话则续写，定位不到则重开）。删除面 = `classifyResumeTierFromContent` / `dispatchTierCollectFrames` / `planResumeTiers` 里按名字取会话文件的部分，以及由此派生的时间下界、跨库身份查询、按契约判档、契约未知分支、原因枚举；`run-resumed` 档位词收敛为 `continue(tier-2)/restart(tier-3)`，判据换为「能否定位到该调用所属的成员会话」。保留项 = 结果出口按契约判断一处（带 schema 却既无对象也无显式错误时不得静默回落文本，可单独实施）。裁决依据（走查 9 条缺口证明读侧方案无法自洽 + 需求证据为零：本机 7 份 run 记录 / 23 次调用中未完成调用 0 个、`run-resumed` 0 次）见 ADR-0092。
 - 附带隐患（**推断成立**：判据形态支持，无 fixture 直证）：档 1 判据 classifyResumeTierFromContent（resume-run.ts:219-245）只看「最后一条 assistant 回复有正文文本块」，不校验结构化输出是否成功配对——崩溃发生在「校验失败轮已落盘、steer 重试未完成」窗口时，未验收文本会被当成结果回放。修复必须一并封住。
 - 证据来源（本次核实）：record 流拿不到工具级验收痕迹——mapToolCalls（agent-result-mapper.ts:78-83）只留 `{name, input}`，丢掉 isError 与 details；且被判档的 call 定义上就没有 agent-settled 事件。成员会话文件里有：工具调用是 assistant 消息 content 内的 `{type:"toolCall", id, name, arguments}` 块，工具结果是独立 `role:"toolResult"` 条目并带 `toolName` / `toolCallId`（实测 515/515 配对），权威类型还带 details 与 isError。限制：`packages/session-core` 的 Entry 不保留未知字段 → 方向 A 需直读原始 JSONL 或扩展 session-core。
 - 实现要点（方向 A）：该 call 是否结构化调用由 agent-started 事件的 `opts.schema` 判定；是则在补收前从成员会话文件提取最后一个非错误的 `structured-output` 工具调用参数作为对象，补收事件带 parsedOutput；拿不到可信对象就不判档 1，改判档 2 续写重花。补两类测试（对象形态补收 / 未验收不补收）。第二道闸（方向 B，非根因、须与 A 同批）：worker 侧在 schema 调用命中无 parsedOutput 的缓存结果时不回落文本，改为报错或降档。
