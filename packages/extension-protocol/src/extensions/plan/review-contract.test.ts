@@ -3,8 +3,9 @@
  *
  * 覆盖义务（U1 验收③ + 契约测试边界要求）：
  * - dismiss 样本必测（D3 主干——漏守即 F1 循环复活）。
- * - error envelope 三态判别（ok / unknown-decision / malformed）——降级双分源语义相反：
- *   未知 decision → 版本不匹配指引（不引导重挂）；malformed → 垃圾数据（E5，提示重挂）。
+ * - error envelope 三态判别（ok / unknown-decision / malformed）——降级双分源可判别
+ *   分离：未知 decision → 版本错配信号（出口与 malformed 同款引导重挂）；malformed →
+ *   垃圾数据（E5，提示重挂）。
  * - boundary 帧：空载荷 / 非法形态 / 超限（selfReview 4KB 写侧单点截断，码点界安全）/
  *   未知 decision 值域降级——不只测 happy-path。
  */
@@ -54,11 +55,11 @@ describe('dismiss 样本（D3 主干，必测）', () => {
 })
 
 describe('error envelope 三态判别（降级双分源，D3①）', () => {
-  it('未知 decision 值域降级：code=unknown-decision 且保留原值（版本不匹配指引，不引导重挂）', () => {
+  it('未知 decision 值域降级：code=unknown-decision 且保留原值（版本错配信号，与 malformed 可判别分离）', () => {
     for (const decision of ['shelve', 'DISMISS', 'hold', 'reject']) {
       const envelope = parsePlanReviewResponse({ decision })
       expect(envelope).toEqual({ ok: false, code: 'unknown-decision', decision })
-      // 与 malformed 可判别分离——两类降级文案语义相反
+      // 与 malformed 可判别分离（消费面出口同款引导重挂，见 review-contract.ts 文件头）
       expect(envelope.ok === false && envelope.code).toBe('unknown-decision')
     }
   })

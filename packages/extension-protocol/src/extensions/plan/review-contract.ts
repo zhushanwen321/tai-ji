@@ -6,10 +6,13 @@
  * 垃圾 → bad-response 引导重挂」再入循环（F1 复活路径）。canonical 守卫与判别联合同住
  * 契约包，消费面（extensions/universal/plan tool.ts）接线见同目录 consumers.md。
  *
- * 降级双分源（D3①）——parse 失败必须区分两类，文案语义相反：
- * - `unknown-decision`（对象合法但 decision 不在值域）：宿主/扩展版本不匹配类指引，
- *   **不再引导重挂**（防再入循环，兼覆盖 R2 反方向错配——新 renderer × 旧扩展）。
- * - `malformed`（非对象 / 缺 decision / 形状不合法）：垃圾数据（E5 判据），报错提示重挂。
+ * 降级双分源（D3①）——parse 失败必须区分两类（envelope 判别保留），消费面出口同款：
+ * - `unknown-decision`（对象合法但 decision 不在值域）：版本错配信号（R2），消费方
+ *   额外 logger.warn 留痕；出口与文案与 malformed 同款——bad-response 报错提示重挂。
+ *   裁决与重审触发（候选替代 = 恢复独立 version-mismatch 不重挂出口）登记于消费方
+ *   extensions/universal/plan/src/tool.ts「条目 7 降级」注释段。
+ * - `malformed`（非对象 / 缺 decision / 形状不合法）：垃圾数据（E5 判据），bad-response
+ *   报错提示重挂。
  *
  * selfReview 有界字段（D9③ / R3）：有界性由**写侧单点截断**保证（截断点 = 扩展 payload
  * 构造处），4KB 上限与 UTF-8 字节界安全截断的唯一权威在本模块；透传层（runtime）不截、
@@ -90,7 +93,8 @@ export function isPlanReviewRequest(value: unknown): value is PlanReviewRequest 
  * respond 回传解析结果（error envelope 单源）：
  * - ok：归一化后的合法 `PlanReviewResponse`（多余键已剥——approve/dismiss 不携带评论是
  *   结构保证，不信任宿主回传的附加形态）。
- * - `unknown-decision`：decision 是 string 但不在值域 → 版本不匹配类指引（不引导重挂）。
+ * - `unknown-decision`：decision 是 string 但不在值域 → 版本错配信号（消费方额外
+ *   logger.warn 留痕；出口与 malformed 同款 bad-response 引导重挂，见文件头「降级双分源」）。
  * - `malformed`：空载荷 / 非对象 / 形状不合法 → E5 判据，报错提示重挂。
  */
 export type PlanReviewResponseEnvelope =
@@ -112,7 +116,7 @@ function normalizeComments(value: unknown): PlanReviewResponse | null {
 
 /**
  * respond 回传解析（值域守卫的判别版）：dismiss 样本必通（D3 主干），未知 decision 值域
- * 落降级枚举而非垃圾（两者文案语义相反，见文件头「降级双分源」）。
+ * 落降级枚举而非垃圾（两类降级可判别分离；消费面出口同款引导重挂，见文件头「降级双分源」）。
  */
 export function parsePlanReviewResponse(value: unknown): PlanReviewResponseEnvelope {
   if (typeof value !== 'object' || value === null) return { ok: false, code: 'malformed' }
@@ -129,7 +133,8 @@ export function parsePlanReviewResponse(value: unknown): PlanReviewResponseEnvel
       return response === null ? { ok: false, code: 'malformed' } : { ok: true, response }
     }
     default:
-      // 已知形状、未知值域 = 版本错配信号（R2），不是垃圾——降级文案不引导重挂
+      // 已知形状、未知值域 = 版本错配信号（R2），不是垃圾——与 malformed 同款
+      // bad-response 出口引导重挂（消费方对本类额外 logger.warn 留痕，裁决见文件头）
       return { ok: false, code: 'unknown-decision', decision }
   }
 }

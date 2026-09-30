@@ -247,8 +247,8 @@ export interface PlanReviewComment {
  * revise → 评论清单以显式 deliverAs:'steer' 注入 + 转移 reviewing→revising；
  * dismiss（D3 搁置）→ 转移 reviewing→planning 落盘，tool result 告知 agent「用户搁置了
  * 本次审阅：plan 模式保持、文档与进度不变；简短告知用户已搁置并询问下一步，不要实施改动」。
- * 未知 decision 值域的降级指引 = 「宿主/扩展版本不匹配」类文案（**不再引导重挂**，防
- * 再入循环，D3①）——判别与降级枚举见 src/extensions/plan/review-contract.ts。
+ * 未知 decision 值域降级 = 版本错配信号：与 malformed 同款 bad-response 出口引导重挂，
+ * 消费方额外 logger.warn 留痕（D3①）——判别与降级枚举见 src/extensions/plan/review-contract.ts。
  */
 export type PlanReviewResponse =
   | { decision: 'approve' }
