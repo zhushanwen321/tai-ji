@@ -153,7 +153,7 @@
 
 - 状态：**已修**（2026-09-30）：包内 3 个 ADR 与 12 个历史设计文档已删除（仍有效的决策折入 `docs/adr/decisions.md` ADR-0091，git 可追溯；清单：resource-exposure / agentref-path / discovery-session-level、v2/v3/v4 与 workflow-one-shot 族、idle 侦查、dsh 对比、agent-ref-v3）。
 - 防复发：`docs/extensions/extension-conventions.md` 新增「决策记录与设计文档归属 [MANDATORY]」——扩展包内不得自建 ADR / 长期设计文档源。
-- 遗留一项：`docs/design/recursive-subagent-visibility.md` 是 §2.7 的现行依据（live 代码注释引用），随 §2.7 改写为 `docs/architecture/` 下的现行形态文档后删除包内副本。
+- **遗留项已清（2026-09-30）**：包内最后一份设计文档 `docs/design/recursive-subagent-visibility.md` 已按现行形态改写为 [docs/architecture/subagent-identity-and-recursive-visibility.md](../../architecture/subagent-identity-and-recursive-visibility.md)（键表 / 传递链路 / 读者与失效后果 / 语义决策 / 已知边界 / 代码落点，键值语义单源指向 SDK `identity-env.ts`），包内副本删除、`docs/design/` 目录消失；回指同批更新——导航页（机制表 + 主题文档表）、core `session-baselines.ts` 两处注释。包内现存文档只剩 `docs/subagent-development.md`（开发指南，不属被禁的 ADR / 设计档案族）。
 
 ### 2.9 测试深路径 import（已裁决关闭，勿重复怀疑）
 

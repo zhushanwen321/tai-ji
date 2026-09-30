@@ -180,7 +180,7 @@ export class SessionBaselines {
    *  子进程 = env PI_SUBAGENT_ROOT_SESSION_ID 贯穿的真 ROOT（initSession 读取）。
    *  与 sessionId 正交：sessionId 是本进程 pi session（事件路由等），sessionRootId 是所属根
    *  （collectRecords filter 用，与 createRecordForMode 的 rootSessionId 盖章同源——子进程
-   *  因此看到整棵 ROOT 树）。设计见 recursive-subagent-visibility.md 决策 3。 */
+   *  因此看到整棵 ROOT 树）。现行机制见 docs/architecture/subagent-identity-and-recursive-visibility.md（决策 3：rootSessionId 取环境优先）。 */
   private _sessionRootId: string | null = null;
 
   /**
@@ -281,7 +281,7 @@ export class SessionBaselines {
       this.dialogQueue = init.dialogQueue;
     }
     this.initForkDepthBaseline();
-    // [递归可见性] 跨进程身份贯穿（设计 recursive-subagent-visibility.md）。
+    // [递归可见性] 跨进程身份贯穿（现行机制 docs/architecture/subagent-identity-and-recursive-visibility.md）。
     // 父进程 spawn 时注入 env 描述「子进程自己的身份」（rootSessionId / selfRecordId /
     // depth / rootCwd），语义与基线建立见 initExecContextBaseline。根进程无 env →
     // sessionRootId = init.sessionId（自己是 root），execCtxAls 不 enterWith（顶层）。
