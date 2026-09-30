@@ -116,6 +116,12 @@ export interface FileCacheEntry {
   state: Stamp | null;
   /** [UF-1] record 绑定 sidecar 戳（null = 无绑定文件）。 */
   binding: Stamp | null;
+  /**
+   * 事件文件（`<recordsDir>/<id>.events`）戳（null = 无事件文件/无 id）。
+   * 缓存键的第四维：轮终收条写在 jsonl 末次写入**之后**，只比 jsonl 会漏掉收条变化
+   * ——索引/缓存命中会端出过期的终态。
+   */
+  events: Stamp | null;
   /** 最近一次重建时读到的终态 sidecar 内容（校验命中路径复用，不重读文件）。 */
   stateMarker: StateMarker | undefined;
 }
@@ -390,12 +396,16 @@ export function sameNullableStamp(a: Stamp | null, b: Stamp | null): boolean {
 }
 
 /** 缓存条目与本轮 stat 戳全同（jsonl + 终态 sidecar + record 绑定，null 语义对齐）→ 零读取复用。 */
-export function isFreshCache(cached: FileCacheValue, stamps: FileStamps): boolean {
-  return (
-    sameStamp(cached.jsonl, stamps.jsonl) &&
-    sameNullableStamp(cached.state, stamps.state) &&
-    sameNullableStamp(cached.binding, stamps.binding)
-  );
+export function isFreshCache(cached: FileCacheValue, stamps: FileStamps, events: Stamp | null): boolean {
+  if (
+    !sameStamp(cached.jsonl, stamps.jsonl) ||
+    !sameNullableStamp(cached.state, stamps.state) ||
+    !sameNullableStamp(cached.binding, stamps.binding)
+  ) {
+    return false;
+  }
+  // 负缓存无 id → 无事件文件可对账（只比 jsonl）。
+  return cached.negative === true ? true : sameNullableStamp(cached.events, events);
 }
 
 /**
@@ -642,6 +652,7 @@ export function buildFileCacheEntry(
   file: string,
   stamps: FileStamps,
   payloads: SidecarPayloads,
+  events: Stamp | null,
 ): FileCacheEntry {
   return {
     light: buildRecord(base, {
@@ -652,6 +663,7 @@ export function buildFileCacheEntry(
     jsonl: stamps.jsonl,
     state: stamps.state,
     binding: stamps.binding,
+    events,
     stateMarker: payloads.state,
   };
 }

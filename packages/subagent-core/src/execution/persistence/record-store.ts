@@ -92,6 +92,7 @@ import { getLogger } from "../../core/logger.ts";
 
 import { snapshot as toSnapshot } from "./execution-record.ts";
 import { statStateStamp, writeFinalizedState, writeCancelledState, writeSettledState } from "./state-marker.ts";
+import { recordEventsPath } from "./record-events.ts";
 // [UF-1] record 绑定 sidecar：宿主侧 id→file 映射（engine-CLI 化后子文件无 identity
 // entry 时代的身份载体）——scanFile 探测分支在 identity miss 时消费它重建 light record。
 // [U7 / §3.2.7 统计口径] zcodeAnchorBasePath 供 zcode 锚的 binding/写权声明键派生
@@ -1527,7 +1528,7 @@ export class RecordStore {
     };
 
     const cached = this.fileCache.get(file);
-    if (cached !== undefined && isFreshCache(cached, stamps)) {
+    if (cached !== undefined && isFreshCache(cached, stamps, this.eventsStampOf(cached))) {
       if (cached.negative) return null; // 负缓存命中：确认无 identity，零读取跳过
       return cached;
     }
@@ -1558,7 +1559,7 @@ export class RecordStore {
       this.fileCache.set(file, { negative: true, ...stamps });
       return null;
     }
-    const entry = buildFileCacheEntry(base, file, stamps, payloads);
+    const entry = buildFileCacheEntry(base, file, stamps, payloads, this.eventsStampOfId(base.id));
     // [U7 / §3.2.7 统计口径单基准] binding 补投影扩展到 identity 基底（原仅 binding
     // 基底）：binding 快照是 settle 写点的统计权威（.state 收条不冗余承载 round/
     // usage，§3.2.4），light 重建一律从 binding 恢复 turns/tokens/round/endedAt 终值
@@ -1615,6 +1616,7 @@ export class RecordStore {
       file,
       stamps,
       payloads,
+      this.eventsStampOfId(hit.id),
     );
     this.fileCache.set(file, entry);
     this.idToFile.set(hit.id, file);
@@ -1661,6 +1663,16 @@ export class RecordStore {
    * reconstructAll 修剪掉消失文件（修剪时置 indexDirty），下次过窗写时快照清除
    * 磁盘上的陈旧条目。
    */
+  /** 事件文件戳（缓存键第四维）——按 record id 取 `<recordsDir>/<id>.events`。 */
+  private eventsStampOfId(id: string): Stamp | null {
+    return this.manifestDir === undefined ? null : statStamp(recordEventsPath(this.manifestDir, id));
+  }
+
+  /** 缓存条目的事件文件戳：负条目无 id → null。 */
+  private eventsStampOf(cached: FileCacheValue): Stamp | null {
+    return cached.negative === true ? null : this.eventsStampOfId(cached.light.id);
+  }
+
   private projectIndexEntries(): Map<string, SessionsIndexEntry | SessionsIndexNegativeEntry> {
     const entries = new Map<string, SessionsIndexEntry | SessionsIndexNegativeEntry>();
     for (const [file, cached] of this.fileCache) {
