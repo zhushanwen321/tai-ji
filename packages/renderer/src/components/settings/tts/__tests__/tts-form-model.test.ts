@@ -97,7 +97,9 @@ describe('vendor 子树形状（厂商 API 原名原路径，设计 §7.2）', (
 
     expect(vendor).toMatchObject({
       voice_setting: { vol: 2, pitch: -4, emotion: 'happy', text_normalization: true, latex_read: true },
-      audio_setting: { channel: '2' },
+      // channel 数值语义：Select 档位 id 恒 string，写 vendor 必须 Number 化
+      //（D3 验收实测：字符串直传被 MiniMax 2013 invalid params 拒）
+      audio_setting: { channel: 2 },
       language_boost: 'auto',
       aigc_watermark: true,
       pronunciation_dict: { tone: ['处理/(chu3)(li3)'] },

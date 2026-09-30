@@ -288,7 +288,9 @@ function buildMinimaxVendor(form: TtsFormModel, state: TtsProviderFormState): Re
     setPath(vendor, ['voice_setting', 'emotion'], state.emotion)
   }
   if (form.channels.length > 0 && state.channel !== null) {
-    setPath(vendor, ['audio_setting', 'channel'], state.channel)
+    // 声道是数值语义（MiniMax audio_setting.channel int64）——Select 档位 id 恒 string，
+    // 写 vendor 必须 Number 化（D3 验收实测：字符串直传被厂商 2013 invalid params 拒）。
+    setPath(vendor, ['audio_setting', 'channel'], Number(state.channel))
   }
   if (form.languages.length > 0 && state.languageBoost) {
     vendor.language_boost = state.languageBoost
@@ -407,7 +409,10 @@ function parseMinimaxVendor(form: TtsFormModel, vendor: Record<string, unknown>,
   const emotion = getPath(vendor, ['voice_setting', 'emotion'])
   if (form.emotions.length > 0 && typeof emotion === 'string') state.emotion = emotion
   const channel = getPath(vendor, ['audio_setting', 'channel'])
-  if (form.channels.length > 0 && typeof channel === 'string') state.channel = channel
+  // 读路兼容两形态：数值（本表单写路规范形态）与历史落盘的字符串档位 id
+  if (form.channels.length > 0 && (typeof channel === 'number' || typeof channel === 'string')) {
+    state.channel = String(channel)
+  }
   const boost = vendor.language_boost
   if (form.languages.length > 0 && typeof boost === 'string') state.languageBoost = boost
   for (const id of form.toggles) {
