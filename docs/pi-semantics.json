@@ -1243,5 +1243,51 @@
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-tool-error-flag.test.ts"
     },
     "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-60",
+    "claim": "CLI --model 模式串的档位后缀（'id:level'）严格解析：非法后缀 = 解析失败报错。parseModelPattern 对无法识别的 :level 后缀按 allowInvalidThinkingLevelFallback 分叉——缺省（?? true，仅 scope/模糊匹配模式走）剥后缀按前缀递归匹配并 warn；严格模式（false）把非法后缀按模型 id 一部分处理，返回 model:undefined → resolveCliModel 各 fallback 全部落空，收敛为 error 'Model ... not found' → main.js 打印 Error 后 process.exit(1)（子进程退出码 1）。pi-subagent-cli spawn 链 thinkingLevel 原样透传进 --model 后缀（无白名单收窄）正依赖此语义：非法档位显式失败（spawn run 失败可见）而非静默降级为「没指定」。pi 升级时重验：:185 缺省值是否仍 ?? true、:383/:419 严格调用点是否仍传 false——若 CLI 链改用缺省放宽，非法档位将从显式失败静默变为剥后缀降级",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/model-resolver.js",
+        "symbol": "parseModelPattern 非法后缀分叉 / resolveCliModel 严格模式调用点",
+        "note": ":184-190 非法后缀分叉——:185 allowFallback = options?.allowInvalidThinkingLevelFallback ?? true（缺省放宽），:186-189 严格模式 return { model: undefined, thinkingLevel: undefined, warning: undefined }，:191 起 scope 模式按前缀递归 + warn；:383 与 :419 resolveCliModel 两处 parseModelPattern 传 allowInvalidThinkingLevelFallback:false（CLI --model 链恒严格）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/main.js",
+        "symbol": "resolved.error → reportDiagnostics → process.exit(1)",
+        "note": ":364 resolved.error 进 diagnostics → :719 hasRuntimeErrors → :722-729 reportDiagnostics 打印 Error 后 process.exit(1)——spawn 子进程退出码 1，taiji 引擎 run 以 child error 失败可见"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方 = pi-subagent-cli spawn 链：packages/pi-subagent-cli/src/spawn-runner.ts runSpawnOnce 档位透传注释（[pi 锚点] 块）+ packages/pi-rpc/src/spawn-args.ts buildPiSubagentSpawnArgs（:222-227 --model 后缀改写）。pi 升级时人工重验 model-resolver.js :185 缺省值与 :383/:419 严格实参；无独立单测探针——非法后缀的承重行为是真实 CLI 子进程报错退出（e2e 面），单测层直调 resolveCliModel 需 stub modelRuntime，收益低"
+    },
+    "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-61",
+    "claim": "session_tree 是同进程分支导航，非会话替换形态：navigateTree 换叶子（this.agent.state.messages = sessionContext.messages 原地替换）后 emit session_tree，不 teardown、不失效 runner（runner.invalidate() 调用点全集 = dispose 内 :595 与 reload 内 :2214，两处均不在 tree 路径上），也不触发 session_start / session_shutdown。互补登记替换形态触发词表：真正的会话替换全部形态都发 session_shutdown——new/fork/resume 经 teardownCurrent(reason) emit 后 dispose（agent-session-runtime.js:102-113），quit 经 dispose 直发，reload 在 oldRunner 上显式 emit（agent-session.js:2213）后 invalidate（:2214）；SessionShutdownReason 枚举 = quit|reload|new|resume|fork，无 switchSession 专用成员——ctx.switchSession() 只出现在 stale 文案里，其内部路径即分支导航域（session_tree），不属替换形态。承重：subagent-workflow 的 pi 绑定作废只允许挂在真替换形态上（reload 分支 invalidatePiBinding / 其余经 dispose 收尾）——禁止挂 session_tree（作废后唯一重臂点 initSession 只由 session_start 触发，tree 导航不触发 session_start，作废即本 session 余生 record/notify 的 pi 写入静默 no-op）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "navigateTree 换叶子 + emit session_tree / invalidate 调用点全集",
+        "note": ":2606-2607 this.agent.state.messages = sessionContext.messages 原地换叶子 → :2608-2616 emit {type:\"session_tree\", newLeafId, oldLeafId, ...}；:2214 oldRunner.invalidate()（reload 内）；:595 dispose 内 _extensionRunner.invalidate(stale 文案提及 ctx.switchSession()——易误读为替换形态，实为分支导航 API)"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session-runtime.js",
+        "symbol": "teardownCurrent / dispose 的 session_shutdown 发射与替换链",
+        "note": ":102-113 teardownCurrent(reason) emit session_shutdown 后 dispose；调用点 :136/:278 reason:\"resume\"、:160 reason:\"new\"、:206/:224/:241 reason:\"fork\"；:290-293 dispose 直发 reason:\"quit\"；SessionShutdownReason 枚举 quit|reload|new|resume|fork 见 dist/core/extensions/types.d.ts:480"
+      }
+    ],
+    "guard": {
+      "type": "observe",
+      "note": "消费方：extensions/universal/subagent-workflow/src/workflow-events.ts session_tree handler 注释（不作废依据）与 session_shutdown reload 分支（真替换形态作废机制）；行为证据 = workflow-events.test.ts session_tree 用例（invalidatePiBinding 不被调 + 在途 run 照常 terminate）。pi 升级时重验：session_tree emit 路径是否引入 teardown/invalidate；SessionShutdownReason 是否新增成员；tree 导航是否改为触发 session_start——任一变化即 subagent-workflow 的绑定生命周期判定需重审"
+    },
+    "verifiedWith": "0.84.4"
   }
 ]
