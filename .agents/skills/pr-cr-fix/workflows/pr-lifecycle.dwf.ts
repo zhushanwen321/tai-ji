@@ -281,7 +281,7 @@ async function gateFixLoop<R>(
     if (last.exitCode === 0) return onPass(last);
     if (last.exitCode === 2) {
       throw new Error(
-        `gate ${gateName} exit 2（工具错误，不自动重试）：\n${tailLines(`${last.stderr}\n${last.stdout}`, 15)}\n按脚本输出指引处理（多为配置漂移/记账不闭合，需人看）`,
+        `gate ${gateName} exit 2（工具错误，不自动重试）：\n${tailLines(`${last.stderr}\n${last.stdout}`, 15)}\n按脚本输出指引处理（多为配置漂移/记账未完成，需人看）`,
       );
     }
     if (round === MAX_GATE_ROUNDS) break;
@@ -337,7 +337,7 @@ interface ReviewerVerdict {
   mustFix: number;
   /** minor 数 */
   suggestion: number;
-  /** R1 恒空数组；R2+ 对上一轮台账逐条申报 */
+  /** R1 恒空数组；R2+ 对上一轮问题清单逐条申报 */
   reconciliation: ReconEntry[];
 }
 
@@ -435,7 +435,7 @@ function dimensionName(mdPath: string): string {
 }
 
 /** 修复分组确定性校验（不信任 LLM 分组自觉）：无效组过滤 + 覆盖性兜底 + 相交组传递
- *  闭包合并 + 组 files 以台账为准 + 重编 G1..Gn。 */
+ *  闭包合并 + 组 files 以问题清单为准 + 重编 G1..Gn。 */
 function reconcileGroups(raw: FixGroup[] | undefined, active: { id: string; files: string[] }[]): FixGroup[] {
   if (active.length === 0) return [];
   const activeIds = new Set(active.map((i) => i.id));
@@ -569,7 +569,7 @@ function countDiffPackages(files: string[]): number {
   return pkgs.size;
 }
 
-// ── 跨轮身份对齐（L1 精确 id 带标题守卫 + L2 标题归一唯一命中；与 saved 版同源） ──
+// ── 跨轮身份对齐（L1 精确 id 带标题检查 + L2 标题归一唯一命中；与 saved 版同源） ──
 const TITLE_MATCH_MIN = 5;
 const titleUnits = (t: string): number => {
   let n = 0;
@@ -578,12 +578,12 @@ const titleUnits = (t: string): number => {
 };
 const normalizeTitle = (t: string): string => String(t ?? "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
 /** issue ID 归一化（对齐 pi 版 normIssueId）：小写 + 剥尾部 "(...)" 尾注——LLM 产出的
- *  ID 漂移形态（"mf-1"/"MF-1"/"MF-1 (fixed)"）经此归一后与台账键匹配，防 ES3 严格
+ *  ID 漂移形态（"mf-1"/"MF-1"/"MF-1 (fixed)"）经此归一后与清单键匹配，防 ES3 严格
  *  比较把漂移 ID 误判 must-fix 漏修（pi 版注释明言该形态曾真实发生）。空串返回 ""。 */
 const normIssueId = (s: unknown): string =>
   String(s ?? "").toLowerCase().replace(/\s*\([^)]*\)\s*$/, "").trim();
 
-/** 台账查找（精确优先，归一化兜底）——ES3 与 fix 后台账更新的共用键空间。 */
+/** 问题清单查找（精确优先，归一化兜底）——ES3 与 fix 后问题清单更新的共用键空间。 */
 const findIssue = (issues: IssueRecord[], rawId: unknown): IssueRecord | undefined => {
   const raw = typeof rawId === "string" ? rawId : "";
   return issues.find((i) => i.id === raw) ?? issues.find((i) => normIssueId(i.id) === normIssueId(raw));
@@ -635,7 +635,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
     const dispatchAll = forceRedispatch;
     if (dispatchAll) {
       forceRedispatch = false;
-      log(`第 ${round} 轮：追账轮——上轮全员 clean 但台账有残留，重派全部维度对账`);
+      log(`第 ${round} 轮：追账轮——上轮全员 clean 但清单有残留，重派全部维度对账`);
     }
     const running =
       round > 1 && !dispatchAll
@@ -644,7 +644,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
     if (running.length === 0) {
       const residue = issues.filter((i) => i.status === "open" || i.status === "regressed");
       if (residue.length > 0) {
-        log(`全部维度 clean 但台账残留 ${residue.length} 条（${residue.map((i) => i.id).join(", ")}）——重派全部维度追账`);
+        log(`全部维度 clean 但清单残留 ${residue.length} 条（${residue.map((i) => i.id).join(", ")}）——重派全部维度追账`);
         forceRedispatch = true;
         continue;
       }
@@ -675,7 +675,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       round > 1
         ? [
             "",
-            "上一轮活跃问题台账（逐条对账，reconciliation 每条必填）：",
+            "上一轮活跃问题清单（逐条对账，reconciliation 每条必填）：",
             wrapUntrusted(JSON.stringify(
               activeBefore.map((i) => ({ id: i.id, title: i.title, severity: i.severity, guidance: i.guidance, evidence: i.evidence })),
             )),
@@ -742,7 +742,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         dimension: ordered[i]?.name ?? `dim-${i}`,
         // LLM 畸形防御（P1-3）：reconciliation 缺失 / 条目缺字段不裸崩——裸 TypeError
         // 会绕过环境类自动重试链且无恢复指引。归一为受控形态：status 严格比较（=== "fixed"
-        // 等）把畸形值自然当「未修复」，下一轮台账对账重报，不会假清账。
+        // 等）把畸形值自然当「未修复」，下一轮问题清单对账重报，不会误判为已解决。
         reconciliation: Array.isArray(v.reconciliation)
           ? v.reconciliation
               .filter((r): r is ReconEntry => r !== null && typeof r === "object")
@@ -771,11 +771,11 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       }
       const residue = issues.filter((i) => i.status === "open" || i.status === "regressed");
       if (residue.length > 0) {
-        log(`全员 clean 但台账残留 ${residue.length} 条（${residue.map((i) => i.id).join(", ")}）——下轮强制重派追账`);
+        log(`全员 clean 但清单残留 ${residue.length} 条（${residue.map((i) => i.id).join(", ")}）——下轮强制重派追账`);
         forceRedispatch = true;
         continue;
       }
-      return finish(round === 1 ? "clean" : "converged", round, `第 ${round} 轮全部维度 clean${round > 1 ? "（修复已确认收敛，台账已清）" : ""}`);
+      return finish(round === 1 ? "clean" : "converged", round, `第 ${round} 轮全部维度 clean${round > 1 ? "（修复已确认收敛，清单已清）" : ""}`);
     }
 
     phase("聚合去重与修复分组");
@@ -793,13 +793,13 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       `输入：本轮全部评审报告在 ${rDir}/ 目录下（review-<dimension>.md，共 ${ordered.length} 份：${ordered.map((d) => `review-${d.name}.md`).join("、")}）。逐份 Read——各维度的审查结果与修复指南（guidance）全部在文档里。`,
       `各维度计数（校验用）：${JSON.stringify(verdicts.map((v) => ({ dimension: v.dimension, mustFix: v.mustFix, suggestion: v.suggestion })))}`,
       round > 1 && activeBefore.length > 0
-        ? `上轮活跃台账（延续条目必须复用其 id）：${JSON.stringify(activeBefore.map((i) => ({ id: i.id, title: i.title, severity: i.severity })))}`
+        ? `上轮活跃问题清单（延续条目必须复用其 id）：${JSON.stringify(activeBefore.map((i) => ({ id: i.id, title: i.title, severity: i.severity })))}`
         : "",
       "",
       "任务：",
       "1. 跨维度合并同根因问题（保留最强证据与完整文件清单；guidance 合并为最具体的一句表述——合并后的修复指南会随 per-fixer 文档直达修复者）。",
       '2. 逐条证据裁决：有真实代码证据 → adjudication="evidence"；reviewer 未给实证 → "unverified"；臆测/纯风格指控 → "downgraded" + note。unverified/downgraded 同样写进聚合报告供人复核，但只有 evidence 条目会进修复队列。',
-      round > 1 ? `3. 延续条目复用台账 id；新条目分配 id，格式 MF-${round}-<序号>（如 MF-${round}-1）。` : "3. 全部为新问题，分配 id 格式 MF-1-<序号>（MF-1-1、MF-1-2…）。",
+      round > 1 ? `3. 延续条目复用问题清单 id；新条目分配 id，格式 MF-${round}-<序号>（如 MF-${round}-1）。` : "3. 全部为新问题，分配 id 格式 MF-1-<序号>（MF-1-1、MF-1-2…）。",
       "4. 修复分组：把 evidence 条目按相关性和独立性分组——同文件/同模块/同根因的问题归同组（一个 agent 修一组）；不同组的文件集必须不相交（组间可并行修复、互不冲突）。单条问题独立成组即可；问题间无关联时不要强行合并。",
       "",
       `产出——聚合总报告 ${rDir}/aggregated.md：## Summary（一句话）+ "- Must-fix: N" + "- Suggestions: N" + 问题表（ID|严重度|文件|证据|修复方向；新问题 ID 列写 pending）+ 修复分组表（组ID|问题ID|涉及文件|分组依据）+ 裁决说明（unverified/downgraded 及原因）。`,
@@ -840,7 +840,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       .map((i) => {
         let prev = i.id ? issues.find((p) => p.id === i.id) : undefined;
         if (prev && i.title && prev.title && !titlesCompatible(prev.title, i.title)) {
-          log(`身份对齐 L1 守卫：${i.id} 命中台账 ${prev.id} 但标题不兼容（${prev.title} ≁ ${i.title}），放弃编号沿用转 L2`);
+          log(`身份对齐 L1 检查：${i.id} 命中问题清单 ${prev.id} 但标题不兼容（${prev.title} ≁ ${i.title}），放弃编号沿用转 L2`);
           prev = undefined;
         }
         if (!prev && i.title && titleUnits(i.title) >= TITLE_MATCH_MIN) {
@@ -849,7 +849,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
             const hits = issues.filter((p) => p.status !== "deferred" && normalizeTitle(p.title) === key);
             if (hits.length === 1) {
               prev = hits[0]!;
-              log(`身份对齐 L2：${i.id ?? "(无 id)"} 按标题唯一命中沿用台账条目 ${prev.id}`);
+              log(`身份对齐 L2：${i.id ?? "(无 id)"} 按标题唯一命中沿用问题清单条目 ${prev.id}`);
             } else if (hits.length > 1) {
               log(`身份对齐 L2：${i.id ?? "(无 id)"} 标题命中 ${hits.length} 条（非唯一），按新条目处理`);
             }
@@ -870,10 +870,10 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
           // deferred 不经聚合重报复活——唯一复活入口 = reviewer 对注入清单申报 escalate。
           return prev;
         }
-        // id 复用守卫：L1 标题不兼容被拒（或 id 未命中台账但与台账现有 id 撞车）时，
+        // id 复用检查：L1 标题不兼容被拒（或 id 未命中问题清单但与问题清单现有 id 撞车）时，
         // 复用该 id 会让新建 open 条目借保留块 dedup 把旧条目（deferred/disputed/fixed）
-        // 挤出台账——deferred 由此绕过「唯一复活入口 = escalate」。冲突/空串时强制新 id
-        //（空串 id 不是合法台账键——pi 版 schema 已加 minLength，此处兜底同语义）
+        // 挤出问题清单——deferred 由此绕过「唯一复活入口 = escalate」。冲突/空串时强制新 id
+        //（空串 id 不是合法清单键——pi 版 schema 已加 minLength，此处兜底同语义）
         const idOk = i.id && !issues.some((p) => p.id === i.id);
         seq += 1;
         return {
@@ -902,7 +902,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         if (fixedClaim) {
           old.status = "fixed";
         } else {
-          log(`WARN: 台账条目 ${old.id} 本轮聚合漏报——保留（防静默丢失）`);
+          log(`WARN: 问题清单条目 ${old.id} 本轮聚合漏报——保留（防静默丢失）`);
           nextIssues.push(old);
         }
       }
@@ -910,7 +910,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
 
     // deferred/disputed 条目跨轮保留：deferred 是有意退出修复队列的条目（escalate 复活
     // 通道的对象面），disputed 是待人工裁决的申述——两者都不要求聚合覆盖（不走「漏报
-    // WARN」语义），直接并入台账：deferred 等 reviewer 对注入清单申报 escalate（唯一
+    // WARN」语义），直接并入问题清单：deferred 等 reviewer 对注入清单申报 escalate（唯一
     // 复活入口，聚合重报不复活，L1/L2 合并点已禁），disputed 等 finish() 收集升
     // needs-human（多轮申述不因下轮聚合漏报蒸发，也不回修复队列——active 过滤自然排除）。
     // 聚合已并入同 id 条目时跳过（L1/L2 合并点会把重报条目按原状态返回 nextIssues，防双份）。
@@ -922,11 +922,11 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
 
     for (const v of verdicts) {
       for (const r of v.reconciliation ?? []) {
-        // 归一化匹配 + 台账内守卫：reconciliation 只对注入台账（activeBefore = 上轮
-        // open/regressed）生效——fixed/regressed/not-fixed 命中台账外条目（幻觉 prevId、
+        // 归一化匹配 + 清单内检查：reconciliation 只对注入清单（activeBefore = 上轮
+        // open/regressed）生效——fixed/regressed/not-fixed 命中问题清单外条目（幻觉 prevId、
         // 保留块并入的 deferred/disputed、已 fixed 条目）不套用：防申述/延迟条目被对账
         // 翻转（disputed 被 fixed 掉 = needs-human 收集丢失）、防同轮 L1 重报 +1 与对账
-        // 申报 +1 双计 fixAttempts。escalate 豁免：其对象 deferred 本就不在注入台账。
+        // 申报 +1 双计 fixAttempts。escalate 豁免：其对象 deferred 本就不在注入清单。
         const it = findIssue(nextIssues, r.prevId);
         if (!it) continue;
         const inLedger = findIssue(activeBefore, r.prevId) !== undefined;
@@ -936,7 +936,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         } else if (r.status === "regressed" && inLedger) {
           // fixAttempts 语义 = 修复失败次数（对齐 pi 版 applyFixAttemptedOutcome）：只在
           // regressed（修了又坏）时 +1；not-fixed（一直没修好）只计 consecutiveUnfixed 走 stuck。
-          // 台账外 regressed 申报按函数头注释三向守卫忽略——否则 deferred/disputed 被翻出
+          // 问题清单外 regressed 申报按函数头注释三向检查忽略——否则 deferred/disputed 被翻出
           // needs-human 收集、绕过 escalate 唯一复活入口、双计 fixAttempts 误触 needs-redesign。
           it.status = "regressed";
           it.fixAttempts += 1;
@@ -1043,7 +1043,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
                 `第一步：Read 你的修复任务文档 ${docPath}（workspace 相对路径）——组内问题清单、证据与修复指南（guidance）全部在其中，按它逐条修复。聚合总报告可作补充上下文：${agg.reportFile}`,
                 "",
                 "要求：",
-                "1. 台账条目经聚合方独立核实，预设为真。核实后确信某条是误报 → 放 disputed 申诉（evidence 必须含 file:line 反证 + 指明聚合方核实遗漏了什么；空洞申诉是 ES3 违规），不盲改；给不出反证就修复。disputed 不终止流程，由人类在 run 结束后裁决。",
+                "1. 问题清单条目经聚合方独立核实，预设为真。核实后确信某条是误报 → 放 disputed 申诉（evidence 必须含 file:line 反证 + 指明聚合方核实遗漏了什么；空洞申诉是 ES3 违规），不盲改；给不出反证就修复。disputed 不终止流程，由人类在 run 结束后裁决。",
                 "2. 修复全部等级（critical/major/minor）：小步修改，改完跑与改动直接相关的验证（对应包 typecheck 或相关测试）。",
                 "3. 每条修复给 selfCheck：一条 grep 命令 + 预期结果，证明修复完整、无残留引用。",
                 "4. 只有 minor 级可 deferred（reason 必须具体：涉及文件/机制/代价）；critical/major 禁止延迟。",
@@ -1068,8 +1068,8 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       commitMessage: "",
     };
 
-    // ES3 硬校验：disputed 格式合法性（命中活跃台账 + 反证非空洞）；deferred 只允许
-    // minor（severity 以台账为准）；must-fix 漏修不静默。违规 → fix-failure 诚实终止。
+    // ES3 硬校验：disputed 格式合法性（命中活跃问题清单 + 反证非空洞）；deferred 只允许
+    // minor（severity 以问题清单为准）；must-fix 漏修不静默。违规 → fix-failure 诚实终止。
     // ID 匹配走 findIssue（归一化兜底，防 LLM ID 漂移误判漏修）；字符串字段先 typeof
     // 防御（畸形值走违规分支诚实终止，不裸 TypeError 绕过重试链）。
     {
@@ -1077,13 +1077,13 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       for (const d of merged.deferred) {
         const it = findIssue(issues, d.issueId);
         const sev = it ? it.severity : "minor";
-        if (sev !== "minor") es3.push(`deferred 含非 minor 条目（${d.issueId}，台账 severity=${sev}）`);
+        if (sev !== "minor") es3.push(`deferred 含非 minor 条目（${d.issueId}，清单 severity=${sev}）`);
       }
       const disputedNorms = new Set<string>();
       for (const d of merged.disputed) {
         const it = findIssue(issues, d.issueId);
         if (!it || (it.status !== "open" && it.status !== "regressed")) {
-          es3.push(`disputed 申述未命中活跃台账条目（${d.issueId}）`);
+          es3.push(`disputed 申述未命中活跃问题清单条目（${d.issueId}）`);
           continue;
         }
         const ev = typeof d.evidence === "string" ? d.evidence.trim() : "";
@@ -1217,7 +1217,7 @@ const baseHash = baseLockRes.stdout.trim();
 // step 1：preflight（仓库根 / 工作区残留披露 / base..HEAD 非空 / gh 认证 / fallow 可用）
 await step("preflight", async () => {
   const failures: string[] = [];
-  // 仓库根守卫（对齐 zsw 版 Gate B S1）：workspace 非仓库根时后续全部相对路径脚本
+  // 仓库根检查（对齐 zsw 版 Gate B S1）：workspace 非仓库根时后续全部相对路径脚本
   // ENOENT，且 git 命令向上找 .git 会审错仓库——以门禁脚本存在性为根判据提前拦截
   if (!(await existsViaNode("scripts/pr-pre-merge.sh"))) {
     failures.push("当前 workspace 不是本仓库根（scripts/pr-pre-merge.sh 不存在）；CreateWorkflow 须在仓库根（git rev-parse --show-toplevel）发起");
@@ -1522,7 +1522,7 @@ await step("gate-suite", async () => {
     const met = cov.exitCode === 2 ? null : await world.run("python3", [".agents/skills/pr-cr-fix/scripts/metrics-gate.py", "--base", base], { timeoutMs: 1_800_000 });
     if (cov.exitCode === 2 || met?.exitCode === 2) {
       throw new Error(
-        `gate-suite exit 2（工具错误，不自动重试）：\n${tailLines(`${cov.stderr}\n${cov.stdout}${met ? `\n${met.stderr}\n${met.stdout}` : ""}`, 15)}\n按脚本输出指引处理（多为配置漂移/记账不闭合，需人看）`,
+        `gate-suite exit 2（工具错误，不自动重试）：\n${tailLines(`${cov.stderr}\n${cov.stdout}${met ? `\n${met.stderr}\n${met.stdout}` : ""}`, 15)}\n按脚本输出指引处理（多为配置漂移/记账未完成，需人看）`,
       );
     }
     if (cov.exitCode === 0 && met !== null && met.exitCode === 0) {
@@ -1662,12 +1662,12 @@ await step("simplify", async () => {
       apply
         ? [
             "【覆盖声明——本 task 的最高裁决条款】",
-            "本 run 以 simplifyMode=apply 发起，code-simplify skill 的「先报告、用户确认后改」确认断点在本上下文视为已获用户授权，授权范围仅 A 档（行为不变）高置信项；B 档（行为敏感）与低置信项只产报告不落地。",
+            "本 run 以 simplifyMode=apply 发起，code-simplify skill 的「先报告、用户确认后改」人工确认环节在本上下文视为已获用户授权，授权范围仅 A 档（行为不变）高置信项；B 档（行为敏感）与低置信项只产报告不落地。",
             "",
           ]
         : [
             "【模式声明】",
-            "本 run 以 simplifyMode=report 发起，code-simplify 的确认断点完整保留：只产报告，不改任何代码、不 commit。下方契约中「覆盖声明」与本模式冲突，以本声明为准。",
+            "本 run 以 simplifyMode=report 发起，code-simplify 的人工确认环节完整保留：只产报告，不改任何代码、不 commit。下方契约中「覆盖声明」与本模式冲突，以本声明为准。",
             "",
           ],
       "【固化契约（simplify-apply.md 原文全文——铁律 / 范围收敛 / A-B 档 / 报告格式 / 审查信号锚点均在此）】",
