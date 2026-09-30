@@ -23,7 +23,7 @@ Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同
 **「任务」是「会话」的产品化措辞，1:1 同义。** 对用户暴露的概念叫"任务"（更贴近工作意图），系统/代码层统一叫"session"。不存在"一个任务跨多 session"的聚合实体。
 
 ### isActive（执行态 SSOT）
-用户视角的「session 在忙」信号。定义：`isGenerating ∨ pendingSend`。UI 层（圆点/状态点/Composer/Panel 守卫）统一消费此信号，不直接用 isGenerating。isCompacting 是独立互斥态（compact 期间不可 steer/abort），不并入 isActive，但 deriveStatus 第 4 参数 isCompacting=true 时也返回 running（视觉态属 running）。实现：`packages/core/src/domain/chat/derive-status.ts`。
+用户视角的「session 在忙」信号。定义：`isGenerating ∨ pendingSend`。UI 层（圆点/状态点/Composer/Panel 检查）统一消费此信号，不直接用 isGenerating。isCompacting 是独立互斥态（compact 期间不可 steer/abort），不并入 isActive，但 deriveStatus 第 4 参数 isCompacting=true 时也返回 running（视觉态属 running）。实现：`packages/core/src/domain/chat/derive-status.ts`。
 
 ### 新建任务（New Task Flow）
 用户从「无活跃会话」进入「准备开聊」的业务动作。终点是 session 发出第一条消息。用户流程 5 步：落地空态 → 选目录 popover → 选分支 popover → 系统原生目录选择器 → 创建分支 modal；对应状态机 8 态（`idle/landing/dir-popover/branch-popover/dir-dialog/branch-modal/completed/cancelled`，`useNewTaskFlow.ts`）。**directory / branch** 是 session 的元信息，非任务本体，显示为 composer 顶部 chip，可随时改。
@@ -92,7 +92,7 @@ Agent Runtime（一个 Node.js 进程）
 | MessageConverter (`infra/pi/message-converter.ts`) | pi 历史格式 → 前端 Message[] | 纯函数 |
 | MessageBroker (`transport/message-broker.ts`) | 统一 WS 广播 | `IMessageBroker` |
 
-**依赖方向**: Transport → Service → ports → infra。Service 经 `services/ports/` 定义的 port 接口消费 pi 能力（`IPiEngine` / `IProcessManager` 由 `infra/pi/rpc-client.ts` + `process-manager.ts` 实现，D24 收口），不直接碰 pi 协议；Transport 不包含业务逻辑。
+**依赖方向**: Transport → Service → ports → infra。Service 经 `services/ports/` 定义的 port 接口消费 pi 能力（`IPiEngine` / `IProcessManager` 由 `infra/pi/rpc-client.ts` + `process-manager.ts` 实现，收敛于 D24），不直接碰 pi 协议；Transport 不包含业务逻辑。
 
 ### 语义吸收层（pi-boundary-reliability，2026-08-28）
 
@@ -106,7 +106,7 @@ taiji subagent 体系的子任务执行单元：由引擎进程派生子进程�
 
 ### Fan-out / 批量派发
 
-2+ 独立任务并行、结果收齐一起处理的批量编排形态。唯一入口是 `subagents` 批量 tool：一次调用传 `tasks` 数组（每个元素 = 一条自包含任务 prompt），handler 转译 `runWorkflow("fan-out")` 走 workflow 单管道——`parallel()` allSettled 并行派 N 个一次性成员（one-shot，不可 message/续聊，恢复 = 重派），任一成员失败降 `partial` 不炸 run；run 收口后主 agent 收到一条聚合结果通知（结构化 results：task / taskIndex / status / summary / fullReportPath）。机制落点：[subagents/architecture.md §4 批量编排行](../extensions/subagents/architecture.md)。
+2+ 独立任务并行、结果收齐一起处理的批量编排形态。唯一入口是 `subagents` 批量 tool：一次调用传 `tasks` 数组（每个元素 = 一条自包含任务 prompt），handler 转译 `runWorkflow("fan-out")` 走 workflow 单管道——`parallel()` allSettled 并行派 N 个一次性成员（one-shot，不可 message/续聊，恢复 = 重派），任一成员失败降 `partial` 不炸 run；run 收尾后主 agent 收到一条聚合结果通知（结构化 results：task / taskIndex / status / summary / fullReportPath）。机制落点：[subagents/architecture.md §4 批量编排行](../extensions/subagents/architecture.md)。
 
 **collect 退役迁移说明（2026-09-16 落地）**：
 1. 旧调用形态（`subagent start` 显式带 `collect` 字段）不会被 pi 拒绝——typebox 参数校验无 `additionalProperties`，未知字段静默放行且不剥离；字段退役后行为等价原 `collect:"async"` 缺省路径（立即逐条通知），无迁移动作、无功能损失。
@@ -119,7 +119,7 @@ subagent 跨 run 续聊时定位既有会话的凭据（引擎中立形态 `Resu
 
 ### Execution Record
 
-subagent 运行状态的单一真源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：内存 record 与磁盘 `session.jsonl` 重建两条通路共用同一 reducer；对外状态两态（`active` / `idle`，ended 随终态概念删除），收口经 `<session>.state` sidecar 标记。
+subagent 运行状态的单一真源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：内存 record 与磁盘 `session.jsonl` 重建两条通路共用同一 reducer；对外状态两态（`active` / `idle`，ended 随终态概念删除），终态标记经 `<session>.state` sidecar 标记。
 
 ### ToolCall
 
@@ -165,11 +165,11 @@ extension 与 taiji runtime 之间的请求-回包通道原语（`packages/exten
 
 ### 统一表单协议（ui-form，2026-09-19）
 
-ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问题即数据（类型化问题集），GUI 链路一个入口一个渲染器——多问 = 多 tab，单问 = 单视图（planReview 审批条与 permission 等 band 流程对话框不属提问表单，不在收口范围）。协议 SSOT = `packages/extension-protocol/src/extensions/ui-form/`：
+ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问题即数据（类型化问题集），GUI 链路一个入口一个渲染器——多问 = 多 tab，单问 = 单视图（planReview 审批条与 permission 等 band 流程对话框不属提问表单，不在统一范围）。协议 SSOT = `packages/extension-protocol/src/extensions/ui-form/`：
 
 - **问题集 `FormQuestion` 判别联合**：`choice`（选项题：`options`（label 即选中值，无独立 value 字段）/ `multi` 多选 / `allowOther`，默认 true）/ `text`（纯自由文本）/ `schedule`（时间输入整表单，`initial` 预填 `ScheduleDraft`）。answers key = `header ?? question`。
 - **回传 `FormAnswers = Record<string, string>`**：choice 单选 = label、多选 = `JSON.stringify(labels[])`、Other 文本独立键 `${key}__other`、text 键位 `${key}__other`（与纯 Other 形态同键位）、schedule value = `JSON.stringify(ScheduleFormResult)`。choice/text 部分与 `AskUserAnswers` 逐字兼容——`getAskUserAnswer` / `getAskUserOther` 解码零改动。
-- **wire 通道**：extension 侧统一入口 `uiFormInteract(ctx, form, opts?)`（传输核复用 [Marker RPC](#marker-rpcselectmarker-通道原语2026-09-14) 的 `callMarkerRpc`）以 `UI_FORM_MARKER = '\x00TAIJI_UI_FORM'` 为 select title、`options[0]` 携 `{ formQuestions, allowCancel }` JSON；runtime event-adapter 按 marker 翻译为 `extension.ui_request` 帧（`form: true` + `formQuestions`，逐项 `isFormQuestion` 守卫过滤，全不合法降级普通 select 落 band）；renderer `FormOverlay`（`packages/renderer/src/components/extension/form/`）Panel 内联覆盖 composer 渲染，按问题 type 分派渲染器（ChoiceQuestion / TextQuestion / ScheduleForm）。回包四态判别（`cancelled` / `timeout` / `channel-error` / `non-json`），channel-error 含 **echo 检测**——收包等于发送 payload 时报「宿主过旧需升级」（旧 taiji × 新扩展组合的确定性识别）。
+- **wire 通道**：extension 侧统一入口 `uiFormInteract(ctx, form, opts?)`（传输核复用 [Marker RPC](#marker-rpcselectmarker-通道原语2026-09-14) 的 `callMarkerRpc`）以 `UI_FORM_MARKER = '\x00TAIJI_UI_FORM'` 为 select title、`options[0]` 携 `{ formQuestions, allowCancel }` JSON；runtime event-adapter 按 marker 翻译为 `extension.ui_request` 帧（`form: true` + `formQuestions`，逐项 `isFormQuestion` 检查过滤，全不合法降级普通 select 落 band）；renderer `FormOverlay`（`packages/renderer/src/components/extension/form/`）Panel 内联覆盖 composer 渲染，按问题 type 分派渲染器（ChoiceQuestion / TextQuestion / ScheduleForm）。回包四态判别（`cancelled` / `timeout` / `channel-error` / `non-json`），channel-error 含 **echo 检测**——收包等于发送 payload 时报「宿主过旧需升级」（旧 taiji × 新扩展组合的确定性识别）。
 - **TUI 契约**：`uiFormInteract` 在 TUI 误调抛错——formQuestions 在 TUI 无呈现语义，各 extension 自行渲染（ask-user AskUserComponent / scheduler ScheduleCreateComponent / plan 原生 select），属有意取舍。
 - **turn 预期声明 `expectTurn`**（2026-09-22，ADR-0073）：opts 可选布尔，扩展作者声明「表单提交后是否有 turn 跟随」——缺省 true（桥接 message_start 照旧，存量全兼容）；显式 `false`（command handler 内 select 的源，如 scheduler /schedule）经 event-adapter 条件落键（仅显式 false 落帧）→ respond 严格双条件 `result≠null && expectTurn===false` 即时清 pendingSend（真机 91ms/48ms 两轮实测），不再命中 30s 兜底。
 - **版本偏斜窗口**：旧 ask-user 帧（`askUser` + `askUserQuestions`）/ 旧 scheduler 帧（`scheduleCreate` + `scheduleDraft`）由 runtime event-adapter 的 ASK_USER / SCHEDULE_CREATE marker 分支直接归一为 `form: true` 统一表单帧（askUser 源含 type 推断映射，renderer 只消费 view-ready 帧）。退役窗口终局（新 marker 版三包 npm 发布 + 一个大版本后独立 PR）：event-adapter 的 ASK_USER / SCHEDULE_CREATE legacy 分支、两旧 marker 常量、payload 旧字段（shared/core wire 类型同批）、ask-user channel 旧名注册（`ask_user`）一并清理。
@@ -178,7 +178,7 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 
 ### Schedule Create（schedule 创建表单 / 触发反转，2026-09-20）
 
-调度任务的创建入口两路：**人侧 `/schedule` 命令打开创建表单**（无参 = 空草稿、带参 `<schedule> <prompt>` = 预填；命令 handler 异步打开、立即返回，填表时长不受 prompt RPC 60s 窗口约束），**模型侧 `schedule` tool 直建**（不再弹确认表单；参数不完整时要求模型先经 ask-user / 对话澄清）。交互入口收口[统一表单协议](#统一表单协议ui-form2026-09-19)：extension 侧 `uiFormInteract` 携 `ScheduleQuestion` 单问整表单（预填草稿经 `initial` 直传），GUI 由 FormOverlay 的 ScheduleForm 渲染器呈现，回包 `FormAnswers` envelope 解出 `ScheduleFormResult` 经 `isScheduleFormResult` 判别（判别职责在 scheduler 包内）；TUI 走 `ctx.ui.custom` 挂 `ScheduleCreateComponent`；`json` / `print` 模式无交互通道，带参直建、无参/失败一律 `throw`（stderr 是唯一可见通道）。scheduler-create 模块为共享资产层：草稿 `ScheduleDraft`（表单预填值，含 `models` 列表注入）与回传 `ScheduleFormResult`（`action: 'create'`；取消不走此形状——select resolve undefined）契约类型 + `isScheduleDraft` / `isScheduleFormResult` 形状守卫 + 时间折叠单点 `dateToOnceCron` / `onceCronToDate`（一次性时刻 ↔ 一次性 cron（5 段 `分 时 日 月 *`）互转，GUI/TUI 共用禁止双实现）。
+调度任务的创建入口两路：**人侧 `/schedule` 命令打开创建表单**（无参 = 空草稿、带参 `<schedule> <prompt>` = 预填；命令 handler 异步打开、立即返回，填表时长不受 prompt RPC 60s 窗口约束），**模型侧 `schedule` tool 直建**（不再弹确认表单；参数不完整时要求模型先经 ask-user / 对话澄清）。交互入口统一[统一表单协议](#统一表单协议ui-form2026-09-19)：extension 侧 `uiFormInteract` 携 `ScheduleQuestion` 单问整表单（预填草稿经 `initial` 直传），GUI 由 FormOverlay 的 ScheduleForm 渲染器呈现，回包 `FormAnswers` envelope 解出 `ScheduleFormResult` 经 `isScheduleFormResult` 判别（判别职责在 scheduler 包内）；TUI 走 `ctx.ui.custom` 挂 `ScheduleCreateComponent`；`json` / `print` 模式无交互通道，带参直建、无参/失败一律 `throw`（stderr 是唯一可见通道）。scheduler-create 模块为共享资产层：草稿 `ScheduleDraft`（表单预填值，含 `models` 列表注入）与回传 `ScheduleFormResult`（`action: 'create'`；取消不走此形状——select resolve undefined）契约类型 + `isScheduleDraft` / `isScheduleFormResult` 形状检查 + 时间折叠单点 `dateToOnceCron` / `onceCronToDate`（一次性时刻 ↔ 一次性 cron（5 段 `分 时 日 月 *`）互转，GUI/TUI 共用禁止双实现）。
 
 ### 计划模式（Plan Mode）
 
@@ -188,7 +188,7 @@ pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--ski
 
 ### plan-state entry
 
-计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 五个 optional 字段 `templateProvidedPath`（`--template` 直传标记：直传进入时为展开后模板绝对路径，select-template 防御判据；模板流程缺失）/ `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `reviewState`（`awaiting` 审阅挂起 | `revising` 修订中 | 无值 进行中）/ `lastSubmitReviewDocsFingerprint`（submit-review 重提交指纹快照）/ `reviewStateSource`（D4 兼容态成因：`resubmit` 会话重启待重提交 | 无值 正常，仅描述当前降级等待，submit-review 重挂起时清空；runtime 白名单透传 + 发布水位比较字段）。旧 entry（无新字段）逐字段降级读。runtime 投影链按同字面量派生扫描，前端消费与冷启动首拉共用同一份派生代码。
+计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 五个 optional 字段 `templateProvidedPath`（`--template` 直传标记：直传进入时为展开后模板绝对路径，select-template 防御判据；模板流程缺失）/ `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `reviewState`（`awaiting` 审阅挂起 | `revising` 修订中 | 无值 进行中）/ `lastSubmitReviewDocsFingerprint`（submit-review 重提交指纹快照）/ `reviewStateSource`（D4 兼容态成因：`resubmit` 会话重启待重提交 | 无值 正常，仅描述当前降级等待，submit-review 重挂起时清空；runtime 白名单透传 + 发布水位比较字段）。旧 entry（无新字段）逐字段降级读。runtime 投影链按同字面量派生扫描，前端消费与冷启动首次拉取共用同一份派生代码。
 
 **代码映射**: `extensions/universal/plan/src/state.ts`（schema + 重建/落盘唯一入口）；`packages/extension-protocol/src/core/types.ts` 的 `PlanDocMeta`（产物元数据契约）。
 
@@ -200,7 +200,7 @@ plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `UI_FO
 
 ### record 投影链
 
-会话持久派生态到前端 stateSnapshot 的统一通道（subagent/workflow 现役，plan-state 为第三员——plan-mode-redesign 方案 A）。链路：custom entry append → event-adapter `handleEntryAppended` 白名单 → interpreter record 联合类型 + 失效透传 → `SessionRecords.invalidateRecordEntries` 派生扫描（冷启动读盘与 live 更新共用同一份派生代码，live ≡ reload 构造性成立）→ publish 走 diff 基线 → message-bus `TOPIC_TABLE` / `STATE_TYPE_KEY_MAP` 分发 → 前端 store 订阅 + 切换/冷启动 RPC 首拉。三道运行时 customType 门 + 冷启动首拉全部要过，缺一则静默失效（三道门均为字符串判定，编译器不保护——加员时逐点核对）。
+会话持久派生态到前端 stateSnapshot 的统一通道（subagent/workflow 现役，plan-state 为第三员——plan-mode-redesign 方案 A）。链路：custom entry append → event-adapter `handleEntryAppended` 白名单 → interpreter record 联合类型 + 失效透传 → `SessionRecords.invalidateRecordEntries` 派生扫描（冷启动读盘与 live 更新共用同一份派生代码，live ≡ reload 构造性成立）→ publish 走 diff 基线 → message-bus `TOPIC_TABLE` / `STATE_TYPE_KEY_MAP` 分发 → 前端 store 订阅 + 切换/冷启动 RPC 首次拉取。三道运行时 customType 门 + 冷启动首次拉取全部要过，缺一则静默失效（三道门均为字符串判定，编译器不保护——加员时逐点核对）。
 
 **代码映射**: `packages/runtime/src/infra/pi/event-adapter.ts` / `packages/runtime/src/services/session/session-records.ts` / `packages/runtime/src/services/message-bus/message-bus.ts`。
 
