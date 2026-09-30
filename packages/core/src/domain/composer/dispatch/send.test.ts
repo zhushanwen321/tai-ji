@@ -21,7 +21,7 @@ import { useComposerSend, type ComposerSendDeps } from './send'
 import type { BashCommandExtract } from '../types'
 import type { StagingAction } from '../types'
 import type { Segment } from '@taiji/shared'
-import { takeOrphanedDraft, __resetOrphanedDraftForTesting } from '../orphan-draft'
+import { stashOrphanedDraft, takeOrphanedDraft, __resetOrphanedDraftForTesting } from '../orphan-draft'
 
 interface DepsControl {
   canSend: boolean
@@ -458,5 +458,51 @@ describe('useComposerSend.onSend', () => {
     expect(spies.toastError).not.toHaveBeenCalled()
     // 可发现性 info toast（F12）走 flow 后台分支的 ToastPort.info 通道——
     // 「info toast 出现」断言见 flow.test TC-6f（同一 background 分支语义面）
+  })
+
+  it('⑭b [幽灵草稿修复] 首发失败（stash）→ 重发成功（handed-over）→ 槽清空，下次 landing 不复活', async () => {
+    // 回归场景：失败 → catch stash S1 + 草稿回输入框 → 重发成功（视图交接、输入已清）→
+    // 槽内 S1 若残留，下次进 landing 被 take 复活 = 幽灵草稿 → 再点发送产生重复任务。
+    __resetOrphanedDraftForTesting()
+    const { deps, spies } = setup({ variant: 'landing' })
+    spies.submitFirstMessage.mockRejectedValueOnce(new Error('landing fail'))
+    await useComposerSend(deps).onSend()
+    // 前置自证：失败路径确实写入了槽（⑫c 同款断言，防测试空转）
+    expect(takeOrphanedDraft()).toEqual(SEGMENTS)
+    // 重发成功（同一草稿）：成功路径不得在槽内留下旧副本
+    spies.submitFirstMessage.mockResolvedValueOnce('handed-over')
+    await useComposerSend(deps).onSend()
+    expect(spies.submitFirstMessage).toHaveBeenCalledTimes(2)
+    expect(takeOrphanedDraft()).toBeNull()
+  })
+
+  it('⑭c [幽灵草稿修复] 首发失败（stash）→ 重发返回 abandoned（草稿归还输入框）→ 槽清空', async () => {
+    // abandoned 路径草稿经 restoreSegments 归还调用方，槽内旧副本同样不得存活
+    //（否则归还进输入框的草稿之外，下次 landing 再复活一份旧副本）。
+    __resetOrphanedDraftForTesting()
+    const { deps, spies } = setup({ variant: 'landing' })
+    spies.submitFirstMessage.mockRejectedValueOnce(new Error('landing fail'))
+    await useComposerSend(deps).onSend()
+    expect(takeOrphanedDraft()).toEqual(SEGMENTS)
+    spies.submitFirstMessage.mockResolvedValueOnce('abandoned')
+    await useComposerSend(deps).onSend()
+    expect(spies.restoreSegments).toHaveBeenCalledWith(SEGMENTS)
+    expect(takeOrphanedDraft()).toBeNull()
+  })
+
+  it('⑭d [幽灵草稿修复] 清槽在 submit 之前——flow 侧 background 投递失败的保稿 stash 不被抹掉', async () => {
+    // flow 后台分支在返回 "background" **之前**对投递失败 stashOrphanedDraft 保稿（A 消费侧
+    // 契约，草稿已 clearInput、landing 已卸载，槽是唯一副本）——清槽若放在收到结果之后，
+    // 该次保稿会被连带清掉 = 草稿永久丢失。本用例锁死清槽时点在 submit 调用之前。
+    __resetOrphanedDraftForTesting()
+    const { deps, spies } = setup({ variant: 'landing' })
+    spies.submitFirstMessage.mockImplementationOnce(async () => {
+      // 模拟 flow.ts 后台分支投递失败路径：返回 background 前保稿入槽
+      stashOrphanedDraft(SEGMENTS)
+      return 'background'
+    })
+    await useComposerSend(deps).onSend()
+    expect(spies.submitFirstMessage).toHaveBeenCalledTimes(1)
+    expect(takeOrphanedDraft()).toEqual(SEGMENTS)
   })
 })

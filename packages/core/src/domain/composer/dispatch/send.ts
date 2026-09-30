@@ -32,7 +32,7 @@ import type { Segment } from '@taiji/shared'
 import type { BashCommandExtract, StagingAction } from '../types'
 import { segmentsToPrompt } from '@taiji/shared'
 import { toErrorMessage } from '../../../utils/error-message'
-import { stashOrphanedDraft } from '../orphan-draft'
+import { stashOrphanedDraft, takeOrphanedDraft } from '../orphan-draft'
 import { nextTick } from 'vue'
 
 /**
@@ -192,6 +192,14 @@ async function sendLandingFirstMessage(deps: ComposerSendDeps, segments: Segment
   deps.clearInput()
   deps.isSending.value = true
   try {
+    // [幽灵草稿修复] 本次尝试开始即清槽（take 丢弃返回值）：槽内只允许存在「本尝试失败后
+    // 写入」的保稿。上一尝试失败 stash 的残留若不清，重发成功后草稿已被消费（视图交接 /
+    // 后台投递 / abandoned 归还），槽内旧副本会在下次 landing 挂载时被 take 复活成幽灵草稿
+    // → 再点发送产生重复任务。清槽时点必须在 submit 之前而非收到结果之后：background 投递
+    // 失败时 flow 侧会在返回 'background' **之前**重新 stashOrphanedDraft 保稿（flow 后台
+    // 分支），收到结果后再清会抹掉该次保稿（草稿既已 clearInput、landing 又已卸载 = 永久
+    // 丢失）；本尝试自身的失败 stash（下方 catch）与 flow 保稿均发生在本次清槽之后，不受影响。
+    takeOrphanedDraft()
     // B6：preset 透传走 flow.pendingPreset，不在此读 store 第二真源
     const bashCommand = bashExtract.type === 'command' ? bashExtract : undefined
     const result = await deps.flow.submitFirstMessage(segments, deps.localThinkingLevel.value, bashCommand)

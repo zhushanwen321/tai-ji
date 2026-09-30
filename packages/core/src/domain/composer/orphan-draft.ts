@@ -19,9 +19,17 @@
  * （composer-shell onMounted，仅 landing 消费），单写单读才保证「一次性取回」幂等。
  * 若未来出现多 landing 挂载点，本槽会变成跨实例草稿串扰源——必须先重新设计（多实例
  * 键化不在预造范围，YAGNI：多实例拓扑出现再说）。
+ *
+ * 生命周期（登记表 #46）：写 = sendLandingFirstMessage 失败 catch（幂等双写）+
+ * flow 后台分支投递失败保稿（返回 'background' 前）；清 = 每次提交尝试开始时 send.ts
+ * take 丢弃（时点必须在 submit 之前——flow 保稿发生在提交调用期间，收到结果后清会抹掉
+ * 保稿；见 send.ts sendLandingFirstMessage）；取 = composer-shell onMounted take。
+ * 成功（handed-over / background）/ abandoned 路径槽恒空 = 幽灵草稿不复活。
  */
 import type { Segment } from '@taiji/shared'
 
+// @data-owner #46 —— landing 首发失败孤立草稿暂存槽本体（模块级 plain-let 单例，R3 检测
+// 形态之外的已登记盲区形态，登记与生命周期说明见主表 #46）
 let orphanedDraft: Segment[] | null = null
 
 /**
