@@ -166,7 +166,7 @@ export class JournalWriter {
   }
 
   /**
-   * 当前落盘路径（handle.journalPath 回填数据源）。
+   * 当前落盘路径（handle.eventsPath 回填数据源）。
    * [池抽象降级 2026-09-13] 原 retarget（onPoolResolved 重定向路径）已删除——
    * 路径构造即终值（两引擎 poolKey 恒 'shared'）。
    */

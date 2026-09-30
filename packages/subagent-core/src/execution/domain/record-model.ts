@@ -174,10 +174,10 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   /**
    * 引擎自描述定位符（U2：非 pi run resolve 后回填、终态迁移落 entry 前——run 前
    * 缺省不可用）。sessionRef 整体透传（失败终态 sessionId 缺失时仍回填已有部分，
-   * 读侧①级降②级的防御形态）；journalPath 为 retarget 后实际落盘路径。pi 分支不
+   * 读侧①级降②级的防御形态）；eventsPath 为 retarget 后实际落盘路径。pi 分支不
    * 回填（sessionFile 即定位符）。持久化经 subagent-record entry。
    */
-  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+  engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
   // [modeless 波3·已删除字段] collectMode 随「collect = 派发时路由选项」语义消亡：
   // sync 批成员身份 = collectCoordinator 登记态（executeViaEngine 派发时点注册），
   // 非 record 身份；旧 entry 残留键读侧自然忽略，零迁移。

@@ -4,7 +4,7 @@
 // reconstructor 保持 core，pi 包经协议 read 拿会话视图」的引擎侧承接）。
 //
 // journal 文件由宿主侧 EngineClient 的事件 journal 写入（core journal-wiring：
-// handle.data.journalPath 回填是运行期落盘路径权威）。本模块读该 JSONL 文件、
+// handle.data.eventsPath 回填是运行期落盘路径权威）。本模块读该 JSONL 文件、
 // 逐行解析 AgentEvent、经 SDK journal-replay 纯投影还原 SessionView。文件缺失 /
 // 不可解析 / 无事件 → undefined（调用方落 ③级 outcome-only）。
 //
@@ -30,16 +30,16 @@ import {
 import type { EngineHandle } from "./port-types.ts";
 
 /**
- * 从 handle 自描述的 journalPath 重放会话视图。
+ * 从 handle 自描述的 eventsPath 重放会话视图。
  *
- * @returns undefined = journalPath 缺失 / 文件不存在 / 无有效事件（降级链落 ③级）
+ * @returns undefined = eventsPath 缺失 / 文件不存在 / 无有效事件（降级链落 ③级）
  */
 export function replayJournalToSessionView(handle: EngineHandle, engineId: string): SessionView | undefined {
-  const journalPath = handle.data.journalPath;
-  if (journalPath === undefined || journalPath === "") return undefined;
+  const eventsPath = handle.data.eventsPath;
+  if (eventsPath === undefined || eventsPath === "") return undefined;
   let raw: string;
   try {
-    raw = readFileSync(journalPath, "utf8");
+    raw = readFileSync(eventsPath, "utf8");
   } catch {
     return undefined;
   }

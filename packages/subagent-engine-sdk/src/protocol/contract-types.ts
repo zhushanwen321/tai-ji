@@ -235,7 +235,7 @@ export interface EngineHandleData {
    * [池抽象降级 2026-09-13] 原 poolKey 字段已删除——两引擎 poolKey 恒 'shared'
    * （SDK SHARED_POOL_KEY），journal 固定落 engines/<engineId>/shared/，字段零信息量。
    */
-  journalPath?: string;
+  eventsPath?: string;
   /** probe 实测版本（漂移排查锚点）。 */
   engineVersion?: string;
   /** 适配器版本（golden 样本对齐排查）。 */
@@ -254,7 +254,7 @@ export interface ResumeAnchor {
   /** 引擎定位键（pi = { recordId?, sessionFile? }；zcode = { sessionId, dbPath }）。 */
   sessionRef: Record<string, string>;
   /** journal 绝对路径（read 降级链第②级数据源；无 journal 缺省）。 */
-  journalPath?: string;
+  eventsPath?: string;
 }
 
 /** Turn → ReplayedTurn：剥离内部态（closed 恒 true——重放物无进行时语义）。 */

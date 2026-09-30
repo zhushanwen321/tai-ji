@@ -874,7 +874,7 @@ export function buildCreatedEventPayload(
  * 的 transition 再落 bound 帧会重复表达同一迁移。
  */
 export function isBoundSignatureUnchanged(
-  bound: { sessionFile: string; engine: string; engineHandle: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string } } | undefined,
+  bound: { sessionFile: string; engine: string; engineHandle: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string } } | undefined,
   sessionFile: string | undefined,
   engine: string | undefined,
   engineHandle: ExecutionRecord["engineHandle"],

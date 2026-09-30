@@ -84,9 +84,9 @@ describe("wireEventJournal（D3-③ host helper 唯一实现）", () => {
     wiring.onEvent({ type: "turn_end" });
     const handle = makeHandle();
     wiring.backfillHandle(handle);
-    expect(handle.data.journalPath).toBe(resolveJournalPath(dataRoot, "zcode", "shared", "sa-4"));
+    expect(handle.data.eventsPath).toBe(resolveJournalPath(dataRoot, "zcode", "shared", "sa-4"));
     await wiring.close();
-    expect(fs.existsSync(handle.data.journalPath!)).toBe(true);
+    expect(fs.existsSync(handle.data.eventsPath!)).toBe(true);
   });
 
   it("close 幂等（重复调用不抛）；无事件任务不产生空 journal 文件", async () => {

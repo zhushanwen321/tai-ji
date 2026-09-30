@@ -968,7 +968,7 @@ export class ZcodeEngine implements EnginePort {
    * D6 read 三级降级：①sqlite 原生读取 → ②宿主 event journal 重放（对齐点①接线：
    * replayJournalToSessionView 复用 live reducer，重放等价性见 §3.3.6）→ ③outcome-only。
    * sessionId 缺失（解析失败的 run 无法定位 session）跳过①级；②级依赖
-   * handle.journalPath（宿主 run 后回填）。dbPath：新 handle 恒为隔离库绝对路径
+   * handle.eventsPath（宿主 run 后回填）。dbPath：新 handle 恒为隔离库绝对路径
    * （zcodeSessionDbPath(engineDataDir)，tier1 白名单集合见方法体——宿主路径仅
    * 「共享 HOME 时代」存量兼容）；旧 records（池时代）的相对路径仍按池目录锚定
    * 解析（read 兼容旧数据，池目录不存在时自然落②级 journal 降级）。[池抽象降级
@@ -1028,7 +1028,7 @@ export class ZcodeEngine implements EnginePort {
         }
       }
     }
-    // ②级：journal 重放（journalPath 缺省 / 文件不存在 / 无事件 → undefined 落③级）
+    // ②级：journal 重放（eventsPath 缺省 / 文件不存在 / 无事件 → undefined 落③级）
     const journaled = replayJournalToSessionView(handle, ZCODE_ENGINE_ID);
     if (journaled !== undefined) return journaled;
     return { engineId: ZCODE_ENGINE_ID, turns: [], source: "outcome-only" };

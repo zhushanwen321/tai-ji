@@ -450,7 +450,7 @@ export async function runWorkflow(
     await createdDispatch;
     // [W1 / D1] v2 注册条目（journal 首帧落账成功后写——锚点语义：条目指向的
     // journal 此刻已在盘，无悬挂锚）。appendWorkflowRecordRegisteredEntry 内含
-    // best-effort 围栏与 journalPath 可寻址守卫（vitest 防线跳过）。
+    // best-effort 围栏与 recordPath 可寻址守卫（vitest 防线跳过）。
     appendWorkflowRecordRegisteredEntry(run, deps);
   } catch (err) {
     const msg = toErrorMessage(err);

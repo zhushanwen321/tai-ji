@@ -529,7 +529,7 @@ export class WorkflowDispatch {
         // 持久化形状保留字段（record-store 读侧守卫要求非空）；恒 'shared'——
         // [池抽象降级 2026-09-13] 协议面 poolKey 已删，无引擎侧实际值。
         poolKey: SHARED_POOL_KEY,
-        journalPath: journal.path,
+        eventsPath: journal.path,
       };
       const result = this.deps.outcomeToAgentResult(record, outcome);
       // D7 收口（origin 分支在 settleOneShotOutcome 函数顶部；aborted 判外部 signal

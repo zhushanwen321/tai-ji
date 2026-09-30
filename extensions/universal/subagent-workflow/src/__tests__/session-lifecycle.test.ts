@@ -1011,7 +1011,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
     setRunEventJournalDirForTest(fixtureDir);
     try {
       const runId = "wf-kill9-1";
-      const journalPath = path.join(fixtureDir, `${runId}${RUN_EVENTS_SUFFIX}`);
+      const recordPath = path.join(fixtureDir, `${runId}${RUN_EVENTS_SUFFIX}`);
       // 崩溃形态 journal：run-created + ask 帧，无 run-settled（进程被 kill-9 的磁盘形态）
       const journal = createRunEventJournal(fixtureDir);
       await journal.append(runId, { type: "run-created", runId, workflowName: "kill9", argsSummary: "{}", ts: Date.now() - 60_000 });
@@ -1030,7 +1030,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
             scriptName: "kill9",
             slug: "kill9",
             startedAt: Date.now() - 60_000,
-            journalPath,
+            recordPath,
           },
           id: "seed-reg",
           parentId: null,
@@ -1082,7 +1082,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
       expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();
 
       // ① record 尾部有收编 run-interrupted（[D2] 中断转移帧；errorCode=crashed）
-      const lines = fs.readFileSync(journalPath, "utf8").split("\n").filter((l) => l.trim());
+      const lines = fs.readFileSync(recordPath, "utf8").split("\n").filter((l) => l.trim());
       const lastFrame = JSON.parse(lines[lines.length - 1]!) as { type: string; errorCode?: string };
       expect(lastFrame.type).toBe("run-interrupted");
       expect(lastFrame.errorCode).toBe("crashed");
@@ -1100,7 +1100,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
       appended.length = 0;
       await setupSessionLifecycle(pi, ctx, mkDeps());
       const interruptedFrames = fs
-        .readFileSync(journalPath, "utf8")
+        .readFileSync(recordPath, "utf8")
         .split("\n")
         .filter((l) => l.trim() && (JSON.parse(l) as { type: string }).type === "run-interrupted");
       expect(interruptedFrames).toHaveLength(1);

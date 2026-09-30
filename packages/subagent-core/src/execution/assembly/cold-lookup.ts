@@ -71,7 +71,7 @@ export interface AnchorProbeShape {
   sessionFile?: string;
   transcriptRef?: TranscriptRef;
   engine?: string;
-  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+  engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
 }
 
 /**

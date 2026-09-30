@@ -1248,7 +1248,7 @@ function stringRecordEquals(a: Record<string, string>, b: Record<string, string>
 }
 
 /**
- * [engine 域浅比较] engineHandle 字段级：sessionRef 键值逐一比对 + journalPath /
+ * [engine 域浅比较] engineHandle 字段级：sessionRef 键值逐一比对 + eventsPath /
  * poolKey 标量比对（zcode 锚 = sessionRef.{sessionId,dbPath}，sessionId 换新即真变化）。
  */
 function engineHandleEquals(
@@ -1258,7 +1258,7 @@ function engineHandleEquals(
   if (a === b) return true
   if (a === undefined || b === undefined) return false
   return stringRecordEquals(a.sessionRef, b.sessionRef)
-    && a.journalPath === b.journalPath
+    && a.eventsPath === b.eventsPath
     && a.poolKey === b.poolKey
 }
 

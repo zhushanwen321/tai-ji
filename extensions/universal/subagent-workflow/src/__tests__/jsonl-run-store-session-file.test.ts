@@ -61,7 +61,7 @@ function appendRecordLine(tmpDir: string, runId: string, line: Record<string, un
 }
 
 /** [D1] 手工 v2 注册条目夹具（字段集 = core lifecycle 写点同构）。 */
-function v2RegisteredEntry(runId: string, journalPath: string): CustomEntry {
+function v2RegisteredEntry(runId: string, recordPath: string): CustomEntry {
   return {
     type: "custom",
     customType: WORKFLOW_RECORD_CUSTOM_TYPE,
@@ -73,7 +73,7 @@ function v2RegisteredEntry(runId: string, journalPath: string): CustomEntry {
       scriptName: "test-script",
       slug: "test-script",
       startedAt: Date.now(),
-      journalPath,
+      recordPath,
     },
     id: `seed-v2-reg-${runId}`,
     parentId: null,

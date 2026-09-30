@@ -205,7 +205,7 @@ describe("场景 19：对账清理存量形态与接管保护", () => {
     const refA = seedSessionEntry("proj", "sess-a", {
       type: "custom",
       customType: "workflow-record",
-      data: { v: 2, kind: "registered", runId: "wf-s19-takeover", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, journalPath: path.join(stateDir, "wf-s19-takeover.record.jsonl") },
+      data: { v: 2, kind: "registered", runId: "wf-s19-takeover", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, recordPath: path.join(stateDir, "wf-s19-takeover.record.jsonl") },
     });
 
     // 删 A（session 文件删除）
@@ -216,7 +216,7 @@ describe("场景 19：对账清理存量形态与接管保护", () => {
     seedSessionEntry("proj", "sess-b", {
       type: "custom",
       customType: "workflow-record",
-      data: { v: 2, kind: "registered", runId: "wf-s19-takeover", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, journalPath: path.join(stateDir, "wf-s19-takeover.record.jsonl") },
+      data: { v: 2, kind: "registered", runId: "wf-s19-takeover", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, recordPath: path.join(stateDir, "wf-s19-takeover.record.jsonl") },
     });
 
     await runMaintenanceRound("sess-b-round");
@@ -257,7 +257,7 @@ describe("场景 19：对账清理存量形态与接管保护", () => {
       seedSessionEntry("proj", "sess-io", {
         type: "custom",
         customType: "workflow-record",
-        data: { v: 2, kind: "registered", runId: "wf-s19-io", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, journalPath: path.join(stateDir, "wf-s19-io.record.jsonl") },
+        data: { v: 2, kind: "registered", runId: "wf-s19-io", workflowName: "legacy-flow", scriptName: "legacy-flow", startedAt: 1_000, recordPath: path.join(stateDir, "wf-s19-io.record.jsonl") },
       });
       fs.chmodSync(sessionsRoot, 0o000);
 

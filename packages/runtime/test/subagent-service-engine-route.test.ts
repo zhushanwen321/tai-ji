@@ -163,9 +163,9 @@ describe('SessionService.getSubagentHistory engine routing (P5)', () => {
   it('routes zcode record to journal tier when journal exists inside engines root', async () => {
     const poolDir = join(tempDir, 'engines', 'zcode', 'reviewer')
     mkdirSync(poolDir, { recursive: true })
-    const journalPath = join(poolDir, 'journal-bg-route-1.jsonl')
+    const eventsPath = join(poolDir, 'journal-bg-route-1.jsonl')
     writeFileSync(
-      journalPath,
+      eventsPath,
       [
         JSON.stringify({ v: 1, ts: 1, taskId: 'bg-route-1', engineId: 'zcode', seq: 0, event: { type: 'text_delta', delta: 'journal answer' } }),
         JSON.stringify({ v: 1, ts: 2, taskId: 'bg-route-1', engineId: 'zcode', seq: 1, event: { type: 'turn_end' } }),
@@ -176,7 +176,7 @@ describe('SessionService.getSubagentHistory engine routing (P5)', () => {
       join(tempDir, 'main.jsonl'),
       `${subagentRegisteredEntry()}\n${subagentSettledEntry({
         engine: 'zcode',
-        engineHandle: { poolKey: 'reviewer', sessionRef: { dbPath: '.zcode/cli/db/db.sqlite', sessionId: 's1' }, journalPath },
+        engineHandle: { poolKey: 'reviewer', sessionRef: { dbPath: '.zcode/cli/db/db.sqlite', sessionId: 's1' }, eventsPath },
       })}\n`,
       { flag: 'a' },
     )

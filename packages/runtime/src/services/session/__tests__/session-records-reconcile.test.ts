@@ -104,7 +104,7 @@ function subagentRecordEntries(id: string, status: string, entryId: string, extr
 /**
  * v2 workflow-record 条目族（W1 [D1] 同构：注册 + 终态两条小条目）。
  *
- * 注册条目恒在场（身份域：runId/workflowName/scriptName/slug/startedAt/journalPath）；
+ * 注册条目恒在场（身份域：runId/workflowName/scriptName/slug/startedAt/recordPath）；
  * status 非 running 再补终态条目（终局域：done/interrupted + reason + 统计摘要）。
  * v2 条目面不携 trace——agentCalls 由 run journal fold 供源（本文件 entry-only 装置无
  * run journal 目录，fold 恒缺席 → agentCalls 恒空）。
@@ -123,7 +123,7 @@ function workflowRecordEntries(
     scriptName: 'test-flow',
     slug: 'test-flow',
     startedAt: 1000,
-    journalPath: `/tmp/workflow-state/${runId}.record.jsonl`,
+    recordPath: `/tmp/workflow-state/${runId}.record.jsonl`,
   })]
   if (status !== 'running') {
     family.push(recordEntry('workflow-record', `${entryId}-settled`, {

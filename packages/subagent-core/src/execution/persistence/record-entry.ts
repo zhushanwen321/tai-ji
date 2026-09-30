@@ -42,7 +42,7 @@ export type SubagentRecordEntryKind = (typeof SUBAGENT_RECORD_ENTRY_KINDS)[numbe
  * 诞生时写一条：身份 + 家族链锚点。字段集对照三个消费面枚举核对（session-reader
  * 锚链 / runtime 投影构造集 / SubagentTab 展示集）——身份域一次定清。事件文件
  * 寻址不经本条目（D3：注册条目 id 直接定址 `<recordsDir>/<sa-id>.events`，无需
- * journalPath 锚点字段）。
+ * eventsPath 锚点字段）。
  */
 export interface SubagentRecordRegisteredEntryData {
   v: typeof SUBAGENT_RECORD_ENTRY_VERSION;
@@ -93,7 +93,7 @@ export interface SubagentRecordSettledEntryData {
    * 引擎自描述定位符（session-reader 末条锚定依赖——sessionRef 双键取自本条，
    * 不升级则 zcode 锚链兜底对新记录失效，D1 版本门补齐清单同款义务）。
    */
-  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+  engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
   sessionFile?: string;
   /** 终局结果全文（一次性写——事件文件只存摘要锚，本条目是全文唯一落点）。 */
   result?: string;

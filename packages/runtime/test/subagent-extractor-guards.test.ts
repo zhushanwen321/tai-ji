@@ -210,7 +210,7 @@ describe('v2 subagent-record 条目投影守卫（collectV2SubagentPair / projec
   it('engine/engineHandle 透传：终态条目携带则原样投影，缺省则键不出现（不填默认值）', () => {
     const engineHandle = {
       sessionRef: { sessionId: 'z-1', dbPath: '/db/z.sqlite' },
-      journalPath: '/journal/z.jsonl',
+      eventsPath: '/journal/z.jsonl',
       poolKey: 'shared',
     }
     const withEngine = scanSubagentEntries([

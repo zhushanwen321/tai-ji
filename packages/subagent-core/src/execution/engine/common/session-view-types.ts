@@ -17,13 +17,13 @@
 
 /**
  * record 携带的引擎 handle 消费面（EngineHandleData 的结构子集，双端契约不变）：
- * journalPath 绝对路径；sessionRef 内 dbPath 相对池目录 / 绝对路径均可。
+ * eventsPath 绝对路径；sessionRef 内 dbPath 相对池目录 / 绝对路径均可。
  */
 export interface EngineHandleView {
   /** 引擎自定义定位符（zcode = { sessionId, dbPath }）。 */
   sessionRef: Record<string, string>;
   /** journal 绝对路径（②级数据源；读前校验 engines 根前缀白名单）。 */
-  journalPath?: string;
+  eventsPath?: string;
   /** 隔离池定位（路径布局 SSOT：resolvePoolDir 消费）。 */
   poolKey: string;
 }
@@ -104,7 +104,7 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
  * record，读侧按缺 handle 降级 outcome-only，两侧行为面等价落点都是降级）：
  * - poolKey 缺失 / 非 string / 空串 → undefined（定位符不完整，读侧降③级）
  * - sessionRef 非 plain object 或含非 string 值 → undefined（整体拒绝）
- * - journalPath 可选 string（空串视为缺省）
+ * - eventsPath 可选 string（空串视为缺省）
  */
 export function parseEngineHandle(raw: unknown): EngineHandleView | undefined {
   if (!isPlainRecord(raw)) return undefined;
@@ -115,11 +115,11 @@ export function parseEngineHandle(raw: unknown): EngineHandleView | undefined {
     if (typeof value !== "string") return undefined;
     sessionRef[key] = value;
   }
-  const journalPath =
-    typeof raw.journalPath === "string" && raw.journalPath.length > 0 ? raw.journalPath : undefined;
+  const eventsPath =
+    typeof raw.eventsPath === "string" && raw.eventsPath.length > 0 ? raw.eventsPath : undefined;
   return {
     sessionRef,
-    ...(journalPath !== undefined ? { journalPath } : {}),
+    ...(eventsPath !== undefined ? { eventsPath } : {}),
     poolKey: raw.poolKey,
   };
 }

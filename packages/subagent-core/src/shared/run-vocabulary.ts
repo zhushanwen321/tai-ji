@@ -122,7 +122,7 @@ export type RunErrorCode =
  * 全部读取路径只认本后缀（旧两件不读、不写、不主动删，历史 run 从壳侧读取面
  * 消失即 D1 历史数据处置的预期行为）。
  *
- * 单源导出（barrel 上收）：core 内部全部落/扫点（本文件 journalPath、
+ * 单源导出（barrel 上收）：core 内部全部落/扫点（本文件 recordPath、
  * run-state-evidence / run-registry 的成对裁剪与扫描）+ 壳侧镜像消费点
  * （终局通知的 eventsJournalPath、record store 的流路径构造）统一 import 本
  * 常量——后缀字面量散布多处时任何一侧单独改动都是静默漂移（watcher 失配 /

@@ -133,7 +133,7 @@ function seedSessionWithV2Reference(slug: string, sessionId: string, runId: stri
       JSON.stringify({
         type: "custom",
         customType: "workflow-record",
-        data: { v: 2, kind: "registered", runId, workflowName: "reap-flow", scriptName: "reap-flow", slug: "reap-flow", startedAt: 1_000, journalPath: path.join(stateDir, `${runId}.record.jsonl`) },
+        data: { v: 2, kind: "registered", runId, workflowName: "reap-flow", scriptName: "reap-flow", slug: "reap-flow", startedAt: 1_000, recordPath: path.join(stateDir, `${runId}.record.jsonl`) },
       }),
     ].join("\n") + "\n",
     "utf8",

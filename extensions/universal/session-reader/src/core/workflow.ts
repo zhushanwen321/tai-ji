@@ -3,7 +3,7 @@
 // ============================================================
 //
 // 本文件消费 discovery/workflows.ts 的 readRunSnapshot（v1/旧指针档——返 unknown
-// 原始快照对象，NEW/OLD 双格式分支）与 record 流文本（[D16③] v2 档——journalPath
+// 原始快照对象，NEW/OLD 双格式分支）与 record 流文本（[D16③] v2 档——recordPath
 // 锚点语义重定义为 record 流路径后的新数据源），把 unknown/事件流行类型化为
 // WorkflowOverview，再渲染为人类可读文本。零 IO：parseRunSnapshot /
 // parseRunRecordStream / renderWorkflowOverview 喂 mock 即可单测（w5

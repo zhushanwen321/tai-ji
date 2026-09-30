@@ -84,7 +84,7 @@ function subagentSettledEntry(id: string, entryId: string, extra: Record<string,
   }
 }
 
-/** v2 workflow-record 注册条目（run 身份 + journalPath 锚点——journalPath 是投影收编键）。 */
+/** v2 workflow-record 注册条目（run 身份 + recordPath 锚点——recordPath 是投影收编键）。 */
 function workflowRegisteredEntry(runId: string, entryId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     type: 'custom',
@@ -100,7 +100,7 @@ function workflowRegisteredEntry(runId: string, entryId: string, extra: Record<s
       scriptName: 'test-flow',
       slug: 'test-flow',
       startedAt: 1000,
-      journalPath: `/tmp/workflow-state/${runId}.record.jsonl`,
+      recordPath: `/tmp/workflow-state/${runId}.record.jsonl`,
       ...extra,
     },
   }

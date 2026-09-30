@@ -19,7 +19,7 @@
  *   的改名波及大于语义收益），语义已收敛为 record store 单模式。
  * - **旧格式两件套（旧 journal `.events.jsonl` + state 快照 `<runId>.jsonl`）不读、
  *   不写、不主动删**（用户裁决 2026-09-28：不做存量迁移）：全部读取路径只认
- *   record 后缀；注册条目的 journalPath 锚点后缀天然区分新旧实体——旧后缀锚点
+ *   record 后缀；注册条目的 recordPath 锚点后缀天然区分新旧实体——旧后缀锚点
  *   = 历史 run，跳过不重建（从壳侧读取面消失即 D1 历史数据处置的预期行为）。
  * - **loadAll = record 流折叠重建**：v2 注册条目定界（本会话有哪些实体）→
  *   record 流全量读 → fold 重建（终局 ⟸ run-settled 帧）；「有注册、无终局帧」
@@ -83,7 +83,7 @@ import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext
 
 /** loadAll 的 entry 扫描产物。 */
 interface EntrySources {
-  /** v2 注册条目（runId → 注册载荷；record 重建的定界源 + journalPath 锚点）。 */
+  /** v2 注册条目（runId → 注册载荷；record 重建的定界源 + recordPath 锚点）。 */
   registered: Map<string, WorkflowRecordRegisteredEntryData>;
   /**
    * 已有 v2 终态条目的 run（runId → 终态载荷，后写覆盖 = last-wins）。唯一用途 =
@@ -104,9 +104,9 @@ function collectV2RecordEntry(entry: CustomEntry, entryIndex: number, sources: E
   if (classification.ok || classification.reason !== "v2") return;
   const v2 = classification.entry;
   if (v2.kind === "registered") {
-    if (typeof v2.runId !== "string" || v2.runId === "" || typeof v2.journalPath !== "string") {
+    if (typeof v2.runId !== "string" || v2.runId === "" || typeof v2.recordPath !== "string") {
       logger.warn(
-        `[subagent-workflow] workflow-record v2 registered entry #${entryIndex} malformed (runId/journalPath missing), skipped`,
+        `[subagent-workflow] workflow-record v2 registered entry #${entryIndex} malformed (runId/recordPath missing), skipped`,
       );
       return;
     }
@@ -645,7 +645,7 @@ export class JsonlRunStore implements RunStore {
    * 保持 running 交恢复链收编）；已终局且终态条目缺失 → 幂等补写（条目投影锚
    * 的收编半边；经 rebind 后的 appendEntry 面，stale guard 内置）。
    *
-   * **历史实体分流（D1 历史数据处置）**：注册条目 journalPath 锚点后缀非
+   * **历史实体分流（D1 历史数据处置）**：注册条目 recordPath 锚点后缀非
    * record 后缀 = 旧形态实体（旧 journal 锚点）→ 跳过不重建（历史 run 从壳侧
    * 读取面消失 = 预期行为，不读旧两件套）。
    *
@@ -694,7 +694,7 @@ export class JsonlRunStore implements RunStore {
   ): WorkflowRun[] {
     const runs: WorkflowRun[] = [];
     for (const [runId, reg] of registered) {
-      const recordPath = reg.journalPath;
+      const recordPath = reg.recordPath;
       if (!recordPath.endsWith(RUN_EVENTS_SUFFIX)) {
         // 旧形态锚点（旧 journal .events.jsonl）= 历史 run：不读旧两件套
         //（D1 历史数据处置——历史 run 从壳侧读取面消失，resume 一律拒绝）。

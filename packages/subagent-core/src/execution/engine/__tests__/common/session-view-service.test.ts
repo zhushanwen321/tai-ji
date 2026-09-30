@@ -43,7 +43,7 @@ afterEach(() => {
   resetNativeSessionReaders();
 });
 
-/** 最小 record 快照（默认 zcode + 池内相对 dbPath + 可选 journalPath）。 */
+/** 最小 record 快照（默认 zcode + 池内相对 dbPath + 可选 eventsPath）。 */
 function makeRecord(overrides: Partial<SubagentRecordSnapshot> = {}): SubagentRecordSnapshot {
   return {
     subagentId: "sub-1",
@@ -72,17 +72,17 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // ============================================================
 
 describe("parseEngineHandle（唯一 guard）", () => {
-  it("合法形状：sessionRef 透传 + journalPath 可选", () => {
+  it("合法形状：sessionRef 透传 + eventsPath 可选", () => {
     expect(
       parseEngineHandle({
         sessionRef: { sessionId: "s", dbPath: "db.sqlite" },
         poolKey: "shared",
-        journalPath: "/tmp/j.jsonl",
+        eventsPath: "/tmp/j.jsonl",
       }),
     ).toEqual({
       sessionRef: { sessionId: "s", dbPath: "db.sqlite" },
       poolKey: "shared",
-      journalPath: "/tmp/j.jsonl",
+      eventsPath: "/tmp/j.jsonl",
     });
     expect(
       parseEngineHandle({ sessionRef: { sessionId: "s" }, poolKey: "shared" }),
@@ -104,9 +104,9 @@ describe("parseEngineHandle（唯一 guard）", () => {
     ).toBeUndefined();
   });
 
-  it("journalPath 空串视为缺省", () => {
+  it("eventsPath 空串视为缺省", () => {
     expect(
-      parseEngineHandle({ sessionRef: {}, poolKey: "shared", journalPath: "" }),
+      parseEngineHandle({ sessionRef: {}, poolKey: "shared", eventsPath: "" }),
     ).toEqual({ sessionRef: {}, poolKey: "shared" });
   });
 });
@@ -238,8 +238,8 @@ describe("降级链编排", () => {
     // 删除，sqlite 侧行为由 zcode 包 e2e 接替；NativeSessionReader 契约 = 不抛，
     // 失败以 undefined 表达）。
     registerNativeSessionReader("zcode", async () => undefined);
-    const journalPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
-    await writeJournal(journalPath, [
+    const eventsPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
+    await writeJournal(eventsPath, [
       { type: "text_delta", delta: "part one. " },
       { type: "text_delta", delta: "part two." },
       { type: "message_end", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 } },
@@ -249,7 +249,7 @@ describe("降级链编排", () => {
       engineHandle: {
         sessionRef: { sessionId: "sess-1", dbPath: ".zcode/cli/db/db.sqlite" },
         poolKey: "shared",
-        journalPath,
+        eventsPath,
       },
     });
     const messages = await readSubagentHistoryMessages(record, dataDir);
@@ -263,8 +263,8 @@ describe("降级链编排", () => {
     });
   });
 
-  it("②级也不可达（无 journalPath）→ ③级 outcome-only，永不返回空数组", async () => {
-    // ①级无注册 reader（W11 后注册表初始为空）→ 直落②级；handle 无 journalPath → ③级
+  it("②级也不可达（无 eventsPath）→ ③级 outcome-only，永不返回空数组", async () => {
+    // ①级无注册 reader（W11 后注册表初始为空）→ 直落②级；handle 无 eventsPath → ③级
     const messages = await readSubagentHistoryMessages(
       makeRecord({ result: "final answer", endedAt: 2_000 }),
       dataDir,
@@ -308,8 +308,8 @@ describe("降级链编排", () => {
   // ============================================================
 
   it("①级 defined 空 turns（{turns:[], source:'native'}）→ 降②级，journal 内容命中（不返回 [task] 空壳）", async () => {
-    const journalPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
-    await writeJournal(journalPath, [
+    const eventsPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
+    await writeJournal(eventsPath, [
       { type: "text_delta", delta: "journal answer" },
       { type: "turn_end" },
     ]);
@@ -323,7 +323,7 @@ describe("降级链编排", () => {
       engineHandle: {
         sessionRef: { sessionId: "sess-1", dbPath: ".zcode/cli/db/db.sqlite" },
         poolKey: "shared",
-        journalPath,
+        eventsPath,
       },
     });
     const messages = await readSubagentHistoryMessages(record, dataDir);
@@ -332,7 +332,7 @@ describe("降级链编排", () => {
     expect(messages[1]).toMatchObject({ role: "assistant", content: "journal answer" });
   });
 
-  it("①级非空数组但全空 turn（截断/被杀残留形态）→ 同样降级：无 journalPath 落③级 outcome-only", async () => {
+  it("①级非空数组但全空 turn（截断/被杀残留形态）→ 同样降级：无 eventsPath 落③级 outcome-only", async () => {
     registerNativeSessionReader("zcode", async () => ({
       engineId: "zcode",
       sessionId: "sess-1",
@@ -365,7 +365,7 @@ describe("降级链编排", () => {
     expect(messages[2]).toMatchObject({ role: "assistant", content: "real answer" });
   });
 
-  it("①空（defined 空 turns）②亦不可达（无 journalPath）→ 落③级 outcome-only 占位", async () => {
+  it("①空（defined 空 turns）②亦不可达（无 eventsPath）→ 落③级 outcome-only 占位", async () => {
     registerNativeSessionReader("zcode", async () => ({
       engineId: "zcode",
       sessionId: "sess-1",
@@ -434,14 +434,14 @@ describe("②级重放投影 parity（基准 = 收敛前 runtime 手写链）", 
     events: AgentEvent[],
     recordOverrides: Partial<SubagentRecordSnapshot> = {},
   ): Promise<Awaited<ReturnType<typeof readSubagentHistoryMessages>>> {
-    const journalPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
-    await writeJournal(journalPath, events);
+    const eventsPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
+    await writeJournal(eventsPath, events);
     const record = makeRecord({
       ...recordOverrides,
       engineHandle: {
         sessionRef: { sessionId: "sess-1", dbPath: ".zcode/cli/db/db.sqlite" },
         poolKey: "shared",
-        journalPath,
+        eventsPath,
       },
     });
     return readSubagentHistoryMessages(record, dataDir);
@@ -553,7 +553,7 @@ describe("②级重放投影 parity（基准 = 收敛前 runtime 手写链）", 
     });
   });
 
-  it("journal 白名单：journalPath 越界（engines 根外）→ 拒绝并降③级", async () => {
+  it("journal 白名单：eventsPath 越界（engines 根外）→ 拒绝并降③级", async () => {
     const outsidePath = join(tmpdir(), "outside-journal-sub-1.jsonl");
     await writeJournal(outsidePath, [{ type: "text_delta", delta: "should not appear" }]);
     const record = makeRecord({
@@ -561,7 +561,7 @@ describe("②级重放投影 parity（基准 = 收敛前 runtime 手写链）", 
       engineHandle: {
         sessionRef: { sessionId: "sess-1", dbPath: ".zcode/cli/db/db.sqlite" },
         poolKey: "shared",
-        journalPath: outsidePath,
+        eventsPath: outsidePath,
       },
     });
     const messages = await readSubagentHistoryMessages(record, dataDir);
@@ -569,14 +569,14 @@ describe("②级重放投影 parity（基准 = 收敛前 runtime 手写链）", 
   });
 
   it("空 journal（无事件）→ ③级", async () => {
-    const journalPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
-    await writeJournal(journalPath, []);
+    const eventsPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
+    await writeJournal(eventsPath, []);
     const record = makeRecord({
       result: "r",
       engineHandle: {
         sessionRef: { sessionId: "sess-1", dbPath: ".zcode/cli/db/db.sqlite" },
         poolKey: "shared",
-        journalPath,
+        eventsPath,
       },
     });
     const messages = await readSubagentHistoryMessages(record, dataDir);
@@ -590,8 +590,8 @@ describe("②级重放投影 parity（基准 = 收敛前 runtime 手写链）", 
 
 describe("message_end 携带 error 的记账语义（现役 zcode 不产出，回归校验）", () => {
   it("有内容 + message_end(error) 且无 turn_end 清除 → 末条 assistant 记账 status=error", async () => {
-    const journalPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
-    await writeJournal(journalPath, [
+    const eventsPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
+    await writeJournal(eventsPath, [
       { type: "text_delta", delta: "partial work" },
       { type: "message_end", error: "provider error" },
     ]);
@@ -599,7 +599,7 @@ describe("message_end 携带 error 的记账语义（现役 zcode 不产出，�
       engineHandle: {
         sessionRef: { sessionId: "sess-1", dbPath: ".zcode/cli/db/db.sqlite" },
         poolKey: "shared",
-        journalPath,
+        eventsPath,
       },
     });
     const messages = await readSubagentHistoryMessages(record, dataDir);
@@ -612,13 +612,13 @@ describe("message_end 携带 error 的记账语义（现役 zcode 不产出，�
   });
 
   it("无内容 + message_end(error) → 物化单条（记账文本可见，不降③级）", async () => {
-    const journalPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
-    await writeJournal(journalPath, [{ type: "message_end", error: "provider error" }]);
+    const eventsPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
+    await writeJournal(eventsPath, [{ type: "message_end", error: "provider error" }]);
     const record = makeRecord({
       engineHandle: {
         sessionRef: { sessionId: "sess-1", dbPath: ".zcode/cli/db/db.sqlite" },
         poolKey: "shared",
-        journalPath,
+        eventsPath,
       },
     });
     const messages = await readSubagentHistoryMessages(record, dataDir);
@@ -631,8 +631,8 @@ describe("message_end 携带 error 的记账语义（现役 zcode 不产出，�
   });
 
   it("turn_end 在 message_end(error) 之后 → 瞬态清除（重放不残留记账）", async () => {
-    const journalPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
-    await writeJournal(journalPath, [
+    const eventsPath = join(dataDir, "engines", "zcode", "shared", "journal-sub-1.jsonl");
+    await writeJournal(eventsPath, [
       { type: "text_delta", delta: "recovered" },
       { type: "message_end", error: "transient" },
       { type: "turn_end" },
@@ -643,7 +643,7 @@ describe("message_end 携带 error 的记账语义（现役 zcode 不产出，�
       engineHandle: {
         sessionRef: { sessionId: "sess-1", dbPath: ".zcode/cli/db/db.sqlite" },
         poolKey: "shared",
-        journalPath,
+        eventsPath,
       },
     });
     const messages = await readSubagentHistoryMessages(record, dataDir);

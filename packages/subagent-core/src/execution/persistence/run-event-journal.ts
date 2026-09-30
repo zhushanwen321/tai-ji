@@ -310,7 +310,7 @@ export function resolveRunEventJournal(journalDir?: string): { dir: string; jour
  * run record 事件流文件绝对路径（record/manifest 同一解析源：生产推导
  * resolvePiWorkflowStateDir，测试经 setRunEventJournalDirForTest 注入）。
  *
- * [W1 / D1] v2 注册条目的 journalPath 锚点字段经本函数寻址（lifecycle.runWorkflow
+ * [W1 / D1] v2 注册条目的 recordPath 锚点字段经本函数寻址（lifecycle.runWorkflow
  * 写注册条目时消费）——锚点与 record 实写面同源，防条目指向漂移。vitest 无注入
  * 防线（dir=""）下返回 undefined = 锚点不可寻址，调用方据此跳过条目写（禁触真实
  * 数据目录红线，与 no-op journal 同一防线语义）。

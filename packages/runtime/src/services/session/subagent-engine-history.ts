@@ -192,7 +192,7 @@ function ensureProtocolEntry(engineId: string): RuntimeEngineEntry | undefined {
 // poolKey 是持久化 record 形状（EngineHandleView）的成员，不再上 wire。
 function protocolReadTier(engineId: string): (handle: {
   sessionRef: Record<string, string>
-  journalPath?: string
+  eventsPath?: string
   poolKey: string
 }, dataDir: string) => Promise<SessionView | undefined> {
   return async (handle) => {
@@ -210,7 +210,7 @@ function protocolReadTier(engineId: string): (handle: {
           v: 1,
           engineId,
           sessionRef: handle.sessionRef,
-          ...(handle.journalPath !== undefined ? { journalPath: handle.journalPath } : {}),
+          ...(handle.eventsPath !== undefined ? { eventsPath: handle.eventsPath } : {}),
           adapterVersion: 'runtime-protocol-read',
         },
       })

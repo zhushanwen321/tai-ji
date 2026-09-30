@@ -174,7 +174,7 @@ function workflowRecordEntry(
         scriptName: 'test-flow',
         slug: 'test-flow',
         startedAt: Date.parse('2026-09-25T00:00:00Z'),
-        journalPath: `workflow-state/${runId}.record.jsonl`,
+        recordPath: `workflow-state/${runId}.record.jsonl`,
       },
     },
   ]

@@ -41,15 +41,15 @@ export interface JournalWiring {
   onEvent: (event: AgentEvent) => void;
   /**
    * 终态落盘路径（writer 是路径权威）。read 第②级的自描述定位符数据源：
-   * record.engineHandle.journalPath（chat 域）与 handle.data.journalPath
+   * record.engineHandle.eventsPath（chat 域）与 handle.data.eventsPath
    * （workflow 域 backfillHandle）都取本值。
    */
   readonly path: string;
   /** run 终态收口（flush + fsync；幂等，不抛——见文件头）。 */
   close(): Promise<void>;
   /**
-   * handle 回填：EngineHandleData.journalPath = writer 终态路径（read ②级经
-   * handle.journalPath 自描述定位——运行期落盘路径权威在 writer）。
+   * handle 回填：EngineHandleData.eventsPath = writer 终态路径（read ②级经
+   * handle.eventsPath 自描述定位——运行期落盘路径权威在 writer）。
    */
   backfillHandle(handle: EngineHandle): void;
 }
@@ -82,7 +82,7 @@ export function wireEventJournal(opts: JournalWiringOptions): JournalWiring {
     },
     close: () => journal.close(),
     backfillHandle: (handle) => {
-      handle.data.journalPath = journal.path;
+      handle.data.eventsPath = journal.path;
     },
   };
 }

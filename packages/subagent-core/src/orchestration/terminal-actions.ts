@@ -1167,7 +1167,7 @@ const SCRIPT_RESULT_SUMMARY_MAX_CHARS = 200;
 
 /**
  * v2 注册条目构造（纯函数）。slug 缺省回落 scriptName（u0 契约注释的字面语义）；
- * startedAt/journalPath 由调用方传入（诞生点时钟 + runEventJournalPathOf 锚点）。
+ * startedAt/recordPath 由调用方传入（诞生点时钟 + runEventJournalPathOf 锚点）。
  * （构造器本体自 worker-message-pump 迁入——条目写点收敛 [D15] 入口文件。）
  */
 export function buildWorkflowRecordRegisteredEntryData(params: {
@@ -1175,7 +1175,7 @@ export function buildWorkflowRecordRegisteredEntryData(params: {
   scriptName: string;
   slug?: string;
   startedAt: number;
-  journalPath: string;
+  recordPath: string;
 }): WorkflowRecordRegisteredEntryData {
   return {
     v: WORKFLOW_RECORD_ENTRY_VERSION,
@@ -1185,7 +1185,7 @@ export function buildWorkflowRecordRegisteredEntryData(params: {
     scriptName: params.scriptName,
     slug: params.slug ?? params.scriptName,
     startedAt: params.startedAt,
-    journalPath: params.journalPath,
+    recordPath: params.recordPath,
   };
 }
 
@@ -1263,13 +1263,13 @@ function summarizeScriptResult(scriptResult: unknown): string | undefined {
 }
 
 /**
- * v2 注册条目写点（lifecycle.runWorkflow 调用；journalPath 锚点不可寻址时跳过）。
+ * v2 注册条目写点（lifecycle.runWorkflow 调用；recordPath 锚点不可寻址时跳过）。
  * best-effort 围栏：appendEntry 失败留痕不阻断 run 启动主链（条目是投影锚，
  * record 事实已在——与 SW-DATA-3 同族的「落盘面尽力」语义）。
  */
 export function appendWorkflowRecordRegisteredEntry(run: WorkflowRun, deps: LifecycleDeps): void {
-  const journalPath = runEventJournalPathOf(run.runId);
-  if (journalPath === undefined) {
+  const recordPath = runEventJournalPathOf(run.runId);
+  if (recordPath === undefined) {
     runEventLogger.warn(
       "workflow-record registered entry skipped: journal path not addressable " +
         "(vitest env without setRunEventJournalDirForTest — entry anchor would dangle)",
@@ -1282,7 +1282,7 @@ export function appendWorkflowRecordRegisteredEntry(run: WorkflowRun, deps: Life
     scriptName: run.spec.scriptName,
     ...(run.spec.slug !== undefined ? { slug: run.spec.slug } : {}),
     startedAt: Number.isFinite(startedAtMs) ? startedAtMs : Date.now(),
-    journalPath,
+    recordPath,
   });
   try {
     deps.appendEntry?.(WORKFLOW_RECORD_CUSTOM_TYPE, entry);

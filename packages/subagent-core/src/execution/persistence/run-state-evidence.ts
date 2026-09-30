@@ -530,10 +530,10 @@ type JournalScan =
 
 /** [findRunSettlementEvidence 拆分] journal 尾扫：自尾向头找最近一条 run-settled 帧
  * （坏行继续向前——append-only 下帧行独立有效；尾部空行静默跳过）。 */
-function scanJournalLastSettledFrame(journalPath: string): JournalScan {
+function scanJournalLastSettledFrame(recordPath: string): JournalScan {
   let settled: Extract<WorkflowRunEvent, { type: "run-settled" }> | undefined;
   try {
-    const content = readFileSync(journalPath, "utf8");
+    const content = readFileSync(recordPath, "utf8");
     const lines = content.split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i]!.trim();
@@ -587,13 +587,13 @@ function readManifestSettlement(
 }
 
 export function findRunSettlementEvidence(stateDir: string, runId: string): RunSettlementEvidence {
-  const journalPath = join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
-  const journal = scanJournalLastSettledFrame(journalPath);
+  const recordPath = join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
+  const journal = scanJournalLastSettledFrame(recordPath);
   if (journal.kind === "ioError") {
     // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃挂账
     //（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
     logger.warn(
-      `[run-state-evidence] findRunSettlementEvidence journal read failed, treating as running (stay registered): ${journalPath}`,
+      `[run-state-evidence] findRunSettlementEvidence journal read failed, treating as running (stay registered): ${recordPath}`,
     );
     return { kind: "running" };
   }

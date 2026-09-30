@@ -596,7 +596,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     expect(service.queries.collectRecords(10, "all")).toHaveLength(0);
   });
 
-  it("[journal→modeless] chat 域 zcode 轮不接 event journal（原生会话库即数据源）+ engineHandle 经 onHandleReady 回填（无 journalPath）", async () => {
+  it("[journal→modeless] chat 域 zcode 轮不接 event journal（原生会话库即数据源）+ engineHandle 经 onHandleReady 回填（无 eventsPath）", async () => {
     process.env.TAIJI_AGENT_DATA_DIR = agentDir;
     const { service, zcode, pi } = setup(agentDir);
     // [hygiene] dbPath 必须绝对（tmp 域内）：binding sidecar 落 zcodeAnchorBasePath
@@ -629,13 +629,13 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
 
     // [modeless 波1] chat 域不接 journal（pi 子 session / zcode 会话库即原生数据源；
     // journal 接线仅 workflow 域 SAR）——无 journal 文件落盘。
-    const journalPath = resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId);
-    expect(fs.existsSync(journalPath)).toBe(false);
+    const eventsPath = resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId);
+    expect(fs.existsSync(eventsPath)).toBe(false);
 
     // [W1/D2 停写写点→事件面] engineHandle 过程投影改走事件文件：成功轮 modeless
     // 收口 = markRoundIdle（round-idle 帧 stopReason: completed，不终态化无 settled
     // 条目）；引擎锚经 record-bound 帧承载（运行中另经 bound manifest 物化可见），
-    // 均无 journalPath 键。
+    // 均无 eventsPath 键。
     const events = scanRecordEventsFor(agentDir, handle.subagentId);
     expect(events.filter((e) => e.type === "record-round-idle").at(-1)).toMatchObject({
       stopReason: "completed",
@@ -713,7 +713,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       });
     });
     const running = service["collectRecords"](10, "running").find((r) => r.id === handle.subagentId);
-    // [modeless 波1] chat 域不接 journal——engineHandle 无 journalPath 键
+    // [modeless 波1] chat 域不接 journal——engineHandle 无 eventsPath 键
     expect(running?.engineHandle).toEqual({
       sessionRef: { dbPath: ".zcode/cli/db/db.sqlite", sessionId: "sess-live-1" },
       poolKey: "shared",

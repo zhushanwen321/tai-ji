@@ -127,7 +127,7 @@ export function parseWorkflowRunEventFileLine(line: string): WorkflowRunEvent | 
 // ── v2 条目载荷守卫（classify 只判 v/kind，字段形状归本层）─────
 //
 // kind 判别联合的成员访问已由 classify 的 entry 载荷窄化承载；此处仅补 classify
-// 不校验的最小运行时键守卫（id/runId/journalPath 的 typeof 检查——防御截断半写
+// 不校验的最小运行时键守卫（id/runId/recordPath 的 typeof 检查——防御截断半写
 // 形态），不再重复形状校验。
 
 /** v2 条目族扫描结果（entry 源的 v2 半边）。 */
@@ -150,7 +150,7 @@ function scanSubagentV2Entry(data: unknown, result: V2EntryScan): void {
   }
 }
 
-/** [scanV2RecordEntries 拆分] workflow 域 v2 条目收编（runId/journalPath 键守卫归本层）。 */
+/** [scanV2RecordEntries 拆分] workflow 域 v2 条目收编（runId/recordPath 键守卫归本层）。 */
 function scanWorkflowV2Entry(data: unknown, result: V2EntryScan): void {
   const classification = classifyWorkflowRecordEntryData(data)
   if (classification.ok || classification.reason !== 'v2') return
@@ -158,7 +158,7 @@ function scanWorkflowV2Entry(data: unknown, result: V2EntryScan): void {
   if (
     v2.kind === 'registered' &&
     typeof v2.runId === 'string' &&
-    typeof v2.journalPath === 'string'
+    typeof v2.recordPath === 'string'
   ) {
     result.workflowRegistered.set(v2.runId, v2)
   } else if (v2.kind === 'settled' && typeof v2.runId === 'string') {
@@ -451,7 +451,7 @@ function projectAskStepToAgentCall(ask: RunAskStepFold): WorkflowAgentCall {
 
 /**
  * [projectV2Workflow 拆分] 身份半边归并：runId/scriptName/slug/startedAt 的
- * 注册条目 → fold 骨架兜底链（stateFilePath = 注册条目 journalPath 承载，v2 无
+ * 注册条目 → fold 骨架兜底链（stateFilePath = 注册条目 recordPath 承载，v2 无
  * state 文件锚；v1 快照路径恒 '' 由 workflow-extractor 对空串隐藏）。
  */
 function resolveWorkflowIdentity(
@@ -464,7 +464,7 @@ function resolveWorkflowIdentity(
     scriptName: registered?.scriptName ?? fold?.created?.workflowName ?? '(unknown)',
     slug: registered?.slug,
     startedAt: toIso(registered?.startedAt ?? fold?.created?.ts ?? 0),
-    stateFilePath: registered?.journalPath ?? '',
+    stateFilePath: registered?.recordPath ?? '',
   }
 }
 

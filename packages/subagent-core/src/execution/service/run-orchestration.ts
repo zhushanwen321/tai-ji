@@ -628,7 +628,7 @@ export class RunOrchestration {
       record.engineHandle = {
         sessionRef: handle.data.sessionRef,
         poolKey: SHARED_POOL_KEY,
-        journalPath: journal.path,
+        eventsPath: journal.path,
       };
       await journal.close();
       result = this.outcomeToAgentResult(record, outcome);

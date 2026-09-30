@@ -206,7 +206,7 @@ export interface CancelResult {
 export interface ReadParams {
   handle: EngineHandleData;
   /** 数据根（core 每次 read 都发送——remote-engine 构造注入的数据目录）。两引擎
-   *  server 现行均不消费该字段：定位走 handle.data（journalPath 等）或引擎自身
+   *  server 现行均不消费该字段：定位走 handle.data（recordPath 等）或引擎自身
    *  数据目录。保留为协议帧字段（历史：存量池时代引擎自算池/journal 相对 dbPath
    *  的定位需要它）。 */
   dataDir: string;

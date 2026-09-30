@@ -86,9 +86,9 @@ describe("场景 25 无门段：中断 run 宿主投影数据面", () => {
         v: 2,
         kind: "registered",
         runId: RUN_ID,
-        journalPath: env.recordPath(RUN_ID),
+        recordPath: env.recordPath(RUN_ID),
       });
-      expect((entry.data as { journalPath: string }).journalPath.endsWith(".record.jsonl")).toBe(true);
+      expect((entry.data as { recordPath: string }).recordPath.endsWith(".record.jsonl")).toBe(true);
     } finally {
       env.cleanup();
     }

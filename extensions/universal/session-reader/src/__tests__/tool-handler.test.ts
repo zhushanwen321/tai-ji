@@ -1640,9 +1640,9 @@ describe('doWorkflow（w6，fixture）', () => {
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  // ---- [D16③] v2 record 流档概览（journalPath 锚点 = record 流路径）----
+  // ---- [D16③] v2 record 流档概览（recordPath 锚点 = record 流路径）----
 
-  /** 向 main session 追加 workflow-record v2 注册条目行（journalPath 锚点指向 record 流）。 */
+  /** 向 main session 追加 workflow-record v2 注册条目行（recordPath 锚点指向 record 流）。 */
   async function wfV2Registered(
     dir: string,
     slug: string,
@@ -1656,7 +1656,7 @@ describe('doWorkflow（w6，fixture）', () => {
       id: `wf-reg-${runId}`,
       parentId: id,
       customType: 'workflow-record',
-      data: { v: 2, kind: 'registered', runId, workflowName: 'rec-flow', scriptName: 'rec-flow', slug: 'rec-flow', startedAt: 1758000000000, journalPath: recordPath },
+      data: { v: 2, kind: 'registered', runId, workflowName: 'rec-flow', scriptName: 'rec-flow', slug: 'rec-flow', startedAt: 1758000000000, recordPath: recordPath },
       timestamp: '2026-09-28T00:00:00Z',
     })
     await writeFile(sessionPath, line + '\n', { flag: 'a' })

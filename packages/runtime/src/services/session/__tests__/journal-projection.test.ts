@@ -155,7 +155,7 @@ function workflowRegisteredEntry(runId: string, over: Record<string, unknown> = 
       scriptName: 'test-flow',
       slug: 'tf',
       startedAt: 1000,
-      journalPath: '/tmp/wf-state/wf-1.events.jsonl',
+      recordPath: '/tmp/wf-state/wf-1.events.jsonl',
       ...over,
     },
   }
@@ -330,7 +330,7 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
       scriptName: 'test-flow',
       slug: 'tf',
       startedAt: 1000,
-      journalPath: '/tmp/ws/wf-idle.events.jsonl',
+      recordPath: '/tmp/ws/wf-idle.events.jsonl',
     }
     const record = projectV2Workflow(registered, undefined, evicted)!
     expect(record.status).toBe('done')
@@ -480,10 +480,11 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
-      round: 1,
+     round: 1,
       epoch: 0,
       roundIdle: {
         type: 'record-round-idle' as const,
+        round: 1,
         seq: 3,
         ts: 2500,
         stopReason: 'completed' as const,
@@ -495,6 +496,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
       lastSeq: 3,
       lastEvent: {
         type: 'record-round-idle' as const,
+        round: 1,
         seq: 3,
         ts: 2500,
         stopReason: 'completed' as const,
@@ -512,6 +514,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
   it('续跑第二轮：round-started 在 round-idle 后 → running（roundIdle 在场不作 idle 判据）', () => {
     const roundIdle = {
       type: 'record-round-idle' as const,
+      round: 2,
       seq: 3,
       ts: 2500,
       stopReason: 'completed' as const,
@@ -521,7 +524,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
-      round: 2,
+     round: 2,
       epoch: 0,
       roundIdle,
       settled: undefined,
@@ -542,10 +545,11 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
-      round: 1,
+     round: 1,
       epoch: 1,
       roundIdle: {
         type: 'record-round-idle' as const,
+        round: 1,
         seq: 3,
         ts: 2500,
         stopReason: 'completed' as const,
@@ -566,10 +570,11 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
-      round: 0,
+     round: 0,
       epoch: 1,
       roundIdle: {
         type: 'record-round-idle' as const,
+        round: 1,
         seq: 3,
         ts: 2500,
         stopReason: 'completed' as const,
@@ -594,6 +599,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
   it('轮终摘要透传：round-idle.resultSummary 在场（无终态条目）→ result 取轮终摘要', () => {
     const roundIdle = {
       type: 'record-round-idle' as const,
+      round: 1,
       seq: 3,
       ts: 2500,
       stopReason: 'completed' as const,
@@ -604,7 +610,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
-      round: 1,
+     round: 1,
       epoch: 0,
       roundIdle,
       settled: undefined,
@@ -619,6 +625,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
   it('reopened 续跑后的新轮终摘要胜过旧终局条目全文（fresh round-idle 胜出）', () => {
     const roundIdle = {
       type: 'record-round-idle' as const,
+      round: 2,
       seq: 6,
       ts: 6000,
       stopReason: 'completed' as const,
@@ -629,7 +636,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
-      round: 2,
+     round: 2,
       epoch: 1,
       roundIdle,
       settled: undefined, // reopened / round-started 已清除 settled
@@ -645,10 +652,11 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
-      round: 1,
+     round: 1,
       epoch: 0,
       roundIdle: {
         type: 'record-round-idle' as const,
+        round: 1,
         seq: 2,
         ts: 2500,
         stopReason: 'completed' as const,
@@ -674,6 +682,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
   it('轮终失败：round-idle.error 在场（无终局）→ error 取失败原因原文', () => {
     const roundIdle = {
       type: 'record-round-idle' as const,
+      round: 1,
       seq: 4,
       ts: 3000,
       stopReason: 'failed' as const,
@@ -685,7 +694,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
-      round: 1,
+     round: 1,
       epoch: 0,
       roundIdle,
       settled: undefined,
@@ -699,6 +708,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
   it('第二轮在飞：round-started 在 round-idle 后 → 上轮失败原文不透传（轮始清点语义）', () => {
     const roundIdle = {
       type: 'record-round-idle' as const,
+      round: 2,
       seq: 4,
       ts: 3000,
       stopReason: 'failed' as const,
@@ -709,7 +719,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
-      round: 2,
+     round: 2,
       epoch: 0,
       roundIdle,
       settled: undefined,
@@ -723,6 +733,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
   it('终局优先：settled 在场 → error 取终局原文（晚于轮终收条时不受 roundIdle 影响）', () => {
     const roundIdle = {
       type: 'record-round-idle' as const,
+      round: 1,
       seq: 2,
       ts: 2500,
       stopReason: 'failed' as const,
@@ -733,7 +744,7 @@ describe('projectV2Subagent（journal 胜出 / 窗外兜底）', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
-      round: 1,
+     round: 1,
       epoch: 0,
       roundIdle,
       settled: settledRecordEvent({ seq: 3, resultSummary: 'settled summary', error: 'settled failure' }),
@@ -759,7 +770,7 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
       scriptName: 'test-flow',
       slug: 'tf',
       startedAt: 1000,
-      journalPath: '/tmp/ws/wf-1.events.jsonl',
+      recordPath: '/tmp/ws/wf-1.events.jsonl',
     }
     const settledEntry = {
       v: 2 as const,
@@ -814,7 +825,7 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
       scriptName: 'test-flow',
       slug: 'tf',
       startedAt: 1000,
-      journalPath: '/tmp/ws/wf-phase.events.jsonl',
+      recordPath: '/tmp/ws/wf-phase.events.jsonl',
     }
     const record = projectV2Workflow(registered, undefined, fold)!
     // renderer hasExplicitPhases（phase !== undefined）的供源：带 phase 步骤进分组，旧行保持平铺
@@ -831,7 +842,7 @@ describe('projectV2Workflow（run 域定界 + journal 骨架）', () => {
       scriptName: 'test-flow',
       slug: 'tf',
       startedAt: 1000,
-      journalPath: '/tmp/ws/wf-intr.record.jsonl',
+      recordPath: '/tmp/ws/wf-intr.record.jsonl',
     }
     const interruptedEntry = {
       v: 2 as const,
@@ -904,7 +915,7 @@ describe('mergeJournalProjection（单点合并）', () => {
     const sources = initialJournalProjectionSources()
     const registered = {
       v: 2 as const, kind: 'registered' as const, runId: 'wf-1', workflowName: 'f',
-      scriptName: 'f', slug: 'f', startedAt: 1000, journalPath: '/tmp/j',
+      scriptName: 'f', slug: 'f', startedAt: 1000, recordPath: '/tmp/j',
     }
     sources.v2WorkflowRegistered.set('wf-1', registered)
     sources.runFolds.set(

@@ -1243,7 +1243,7 @@ describe("SubagentRecord ↔ subagent-record v2 终态条目往返（U1 engineHa
     eventLog: [],
     displayItems: [],
   };
-  const handle = { sessionRef: { sessionId: "s-1", dbPath: "pool/zcode.db" }, journalPath: "/abs/journal.jsonl", poolKey: "p1" };
+  const handle = { sessionRef: { sessionId: "s-1", dbPath: "pool/zcode.db" }, eventsPath: "/abs/journal.jsonl", poolKey: "p1" };
 
   it("record 含 engine/engineHandle → 终态条目 JSON → 解析回 deep equal（sessionRef 键不枚举整体透传）", () => {
     const entry = v2SettledEntry({ ...base, engine: "zcode", engineHandle: handle });

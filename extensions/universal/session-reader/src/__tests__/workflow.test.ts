@@ -377,7 +377,7 @@ describe('readRunSnapshot', () => {
 })
 
 // ============================================================
-// resolveWorkflows 三档发现链（W1 D10 断链修复：v2 journalPath 主源 / v1 快照层 /
+// resolveWorkflows 三档发现链（W1 D10 断链修复：v2 recordPath 主源 / v1 快照层 /
 // 旧指针 fallback——W17 前 / W17~W1 / W1+ 三类 run 全部有发现通道）
 // ============================================================
 
@@ -438,8 +438,8 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
     return p
   }
 
-  /** workflow-record v2 注册条目行（journalPath 锚点）。 */
-  function v2RegisteredLine(runId: string, journalPath: string): string {
+  /** workflow-record v2 注册条目行（recordPath 锚点）。 */
+  function v2RegisteredLine(runId: string, recordPath: string): string {
     return JSON.stringify({
       type: 'custom',
       customType: 'workflow-record',
@@ -453,7 +453,7 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
         scriptName: 'probe-flow',
         slug: 'probe',
         startedAt: 1,
-        journalPath,
+        recordPath,
       },
     })
   }
@@ -469,7 +469,7 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
     })
   }
 
-  /** workflow-record v2 终态条目行（不携带 journalPath——非发现链数据源）。 */
+  /** workflow-record v2 终态条目行（不携带 recordPath——非发现链数据源）。 */
   function v2SettledLine(runId: string): string {
     return JSON.stringify({
       type: 'custom',
@@ -504,7 +504,7 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
   const CALL_A = '/abs/subagents/--proj--/sessions/call-a.jsonl'
   const CALL_B = '/abs/subagents/--proj--/sessions/call-b.jsonl'
 
-  it('v2 journalPath 主源（[D16③] 重锚）：注册条目 → record 流直读提 calls，stateFile = 流路径', async () => {
+  it('v2 recordPath 主源（[D16③] 重锚）：注册条目 → record 流直读提 calls，stateFile = 流路径', async () => {
     dir = await mkdtemp(join(tmpdir(), 'wf-v2-tier-'))
     // record 流内容：run-created + agent-started + agent-settled（result 携带 sessionFile）
     const recordPath = await writeRecordStream('wf-v2-1', [
@@ -518,7 +518,7 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
 
     expect(workflows).toHaveLength(1)
     expect(workflows[0].runId).toBe('wf-v2-1')
-    // stateFile = record 流路径（journalPath 锚点语义重定义——[D16③]）
+    // stateFile = record 流路径（recordPath 锚点语义重定义——[D16③]）
     expect(workflows[0].stateFile).toBe(recordPath)
     expect(workflows[0].calls).toHaveLength(1)
     expect(workflows[0].calls[0].fileName).toBe(CALL_A)
@@ -611,7 +611,7 @@ describe('resolveWorkflows 三档发现链（W1 D10）', () => {
     expect(workflows[2].calls[0].fileName).toBe(CALL_A)
   })
 
-  it('v2 终态条目（settled，无 journalPath）不参与发现链——不产 runId 幻影', async () => {
+  it('v2 终态条目（settled，无 recordPath）不参与发现链——不产 runId 幻影', async () => {
     dir = await mkdtemp(join(tmpdir(), 'wf-settled-'))
     const { sessionIdToPath } = await writeMain([v2SettledLine('wf-settled-1')])
 

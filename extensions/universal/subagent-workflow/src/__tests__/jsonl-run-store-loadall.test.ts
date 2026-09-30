@@ -67,7 +67,7 @@ function legacyLinkEntry(runId: string, statePath: string): CustomEntry {
 }
 
 /** v2 注册条目夹具（字段集 = core lifecycle 写点同构）。 */
-function v2RegisteredEntry(runId: string, journalPath: string): CustomEntry {
+function v2RegisteredEntry(runId: string, recordPath: string): CustomEntry {
   return {
     type: "custom",
     customType: WORKFLOW_RECORD_CUSTOM_TYPE,
@@ -79,7 +79,7 @@ function v2RegisteredEntry(runId: string, journalPath: string): CustomEntry {
       scriptName: "test-script",
       slug: "test-script",
       startedAt: Date.now(),
-      journalPath,
+      recordPath,
     },
     id: `seed-v2-reg-${runId}`,
     parentId: null,
@@ -98,7 +98,7 @@ function settledLine(): string {
   });
 }
 
-function journalPathOf(tmpDir: string, runId: string): string {
+function recordPathOf(tmpDir: string, runId: string): string {
   return path.join(tmpDir, "workflow-state", `${runId}.record.jsonl`);
 }
 
@@ -140,9 +140,9 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
 
   it("混合批：v2 注册条目照常 journal 重建，历史形态 entry 同批不干扰", async () => {
     // v2 实体：注册条目 + journal 终局帧 → journal 权威重建
-    const journalPath = journalPathOf(tmpDir, "run-v2-current");
-    fs.mkdirSync(path.dirname(journalPath), { recursive: true });
-    fs.writeFileSync(journalPath, `${settledLine()}\n`, "utf8");
+    const recordPath = recordPathOf(tmpDir, "run-v2-current");
+    fs.mkdirSync(path.dirname(recordPath), { recursive: true });
+    fs.writeFileSync(recordPath, `${settledLine()}\n`, "utf8");
 
     // 历史形态同批在盘：v1 快照 entry + link 指针（指向 state 文件）
     const legacyStatePath = path.join(tmpDir, "workflow-state", "run-old.jsonl");
@@ -152,7 +152,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
       "utf8",
     );
     const entries: CustomEntry[] = [
-      v2RegisteredEntry("run-v2-current", journalPath),
+      v2RegisteredEntry("run-v2-current", recordPath),
       legacyV1RecordEntryRaw("run-old", { v: "wf-run-v2", runId: "run-old", state: { status: "running" }, meta: {} }),
       legacyLinkEntry("run-old", legacyStatePath),
     ];
@@ -172,10 +172,10 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
     // call 的 agent-settled 帧由 dispatchAgentSettledFailed 落账。写面补齐 result
     // 后，重启 loadAll 的严格读原语（settled 帧缺 result = RecordStreamCorruptionError
     // → storeHealthy=false 停初始化）不再把该流判损坏。
-    const journalPath = journalPathOf(tmpDir, "run-pre-dispatch-fail");
-    fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+    const recordPath = recordPathOf(tmpDir, "run-pre-dispatch-fail");
+    fs.mkdirSync(path.dirname(recordPath), { recursive: true });
     fs.writeFileSync(
-      journalPath,
+      recordPath,
       [
         JSON.stringify({
           type: "run-created",
@@ -217,7 +217,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
       "utf8",
     );
 
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx([v2RegisteredEntry("run-pre-dispatch-fail", journalPath)]) });
+    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx([v2RegisteredEntry("run-pre-dispatch-fail", recordPath)]) });
     const loaded = await store.loadAll();
 
     expect(loaded.map((r) => r.runId)).toEqual(["run-pre-dispatch-fail"]);
@@ -255,12 +255,12 @@ describe("[D6(a) 第 1 步] 重水合 run 的终局判定源 = 重建 fold 结�
 
   /** 写 record 流 + v2 注册条目 → loadAll 重建该 run。 */
   async function rebuild(runId: string, lines: string[]): Promise<WorkflowRun> {
-    const journalPath = journalPathOf(tmpDir, runId);
-    fs.mkdirSync(path.dirname(journalPath), { recursive: true });
-    fs.writeFileSync(journalPath, `${lines.join("\n")}\n`, "utf8");
+    const recordPath = recordPathOf(tmpDir, runId);
+    fs.mkdirSync(path.dirname(recordPath), { recursive: true });
+    fs.writeFileSync(recordPath, `${lines.join("\n")}\n`, "utf8");
     const store = new JsonlRunStore({
       sessionDir: tmpDir,
-      ctx: mkCtx([v2RegisteredEntry(runId, journalPath)]),
+      ctx: mkCtx([v2RegisteredEntry(runId, recordPath)]),
     });
     const loaded = await store.loadAll();
     expect(loaded.map((r) => r.runId)).toEqual([runId]);

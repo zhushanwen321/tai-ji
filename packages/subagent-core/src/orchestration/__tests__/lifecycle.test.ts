@@ -345,7 +345,7 @@ describe("runWorkflow", () => {
       // [D2] dispatched 并入 running——run-created 首帧后 fold 即 running
       expect(projection.state.lifecycle).toBe("running");
       // [W1 / D1] v2 注册条目（两写点之一）：journal 首帧落账成功后经
-      // appendEntry 写主 session——journalPath 锚点指向真实 journal 文件
+      // appendEntry 写主 session——recordPath 锚点指向真实 journal 文件
       const registered = deps.appendEntry.mock.calls.find((c) => c[0] === "workflow-record");
       expect(registered).toBeDefined();
       expect(registered![1]).toMatchObject({
@@ -356,9 +356,9 @@ describe("runWorkflow", () => {
         scriptName: "test-wf",
         slug: "test-wf",
       });
-      const regData = registered![1] as { journalPath: string; startedAt: number };
-      expect(regData.journalPath).toBe(path.join(journalDir, `${runId}.record.jsonl`));
-      expect(fs.existsSync(regData.journalPath)).toBe(true);
+      const regData = registered![1] as { recordPath: string; startedAt: number };
+      expect(regData.recordPath).toBe(path.join(journalDir, `${runId}.record.jsonl`));
+      expect(fs.existsSync(regData.recordPath)).toBe(true);
       expect(typeof regData.startedAt).toBe("number");
     } finally {
       setRunEventJournalDirForTest(undefined);

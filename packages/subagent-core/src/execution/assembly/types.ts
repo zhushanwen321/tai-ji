@@ -528,7 +528,7 @@ export interface SubagentRecord {
    * sessionRef 整体透传不枚举内部键）。read 降级链①②级的数据源（runtime
    * subagent-engine-history）；缺省 = pi（走 JSONL 直读链）。
    */
-  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+  engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
   // [modeless 波3·已删除字段] collectMode 快照投影随字段消亡删除（读侧丢弃，
   // 存量 entry 残留键零迁移）。
   /**

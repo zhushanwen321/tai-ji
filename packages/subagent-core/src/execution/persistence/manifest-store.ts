@@ -49,11 +49,11 @@ export interface ManifestRecord {
   engine?: string;
   /**
    * [U8 / B-restart] 引擎自描述定位符（与 SubagentRecord.engineHandle 同形）：
-   * sessionRef 整体透传不枚举内部键（zcode = { sessionId, dbPath }）、journalPath
+   * sessionRef 整体透传不枚举内部键（zcode = { sessionId, dbPath }）、eventsPath
    * 绝对路径、poolKey 隔离池定位。zcode record 重启续聊的锚恢复数据源之一
    * （entry engineHandle.sessionRef 为主，本字段为 manifest 孤儿兜底）。
    */
-  engineHandle?: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+  engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
   /**
    * [M2 Gate B] closed 终态的 L2 关闭原因（status="closed" 时有意义）。旧 manifest 无
    * 此字段（undefined = 死因不可考，读侧守卫归一 undefined）。缺失时 manifest 源重建

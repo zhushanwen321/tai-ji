@@ -144,7 +144,7 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
  * guard 各自演进，收敛取本侧的严格语义——sessionRef 含非 string 值整体拒绝）：
  * - poolKey 缺失/非 string/空串 → 整个字段不投影（定位符不完整，读侧降级 outcome-only）
  * - sessionRef 非 plain object 或含非 string 值 → 整个字段不投影；键不枚举整体透传
- * - journalPath optString（可选）
+ * - eventsPath optString（可选）
  */
 
 /** JSONL 中的 message entry 结构（简化） */

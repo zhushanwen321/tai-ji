@@ -612,7 +612,7 @@ async function resumeRunLocked(
  * 锁段内、先于 run-resumed 落 record——失败干净拒绝（run-resumed 未落，run 保持
  * interrupted 无损）。幂等性：同 session 重复 resume 会重复追加条目——多一条引用
  * 无害（引用集判「任一存活 session 引用即保留」，重复条目不改变归属判定）。
- * journalPath 锚点 = recordPath 同源（防 journalDir 显式注入形态下锚点漂移到模块锚）。
+ * recordPath 锚点 = recordPath 同源（防 journalDir 显式注入形态下锚点漂移到模块锚）。
  */
 function appendResumeRegisteredEntry(
   runId: string,
@@ -624,7 +624,7 @@ function appendResumeRegisteredEntry(
     runId,
     scriptName: created.workflowName,
     startedAt: created.ts,
-    journalPath: recordPath,
+    recordPath: recordPath,
   });
   try {
     deps.appendEntry?.(WORKFLOW_RECORD_CUSTOM_TYPE, entry);

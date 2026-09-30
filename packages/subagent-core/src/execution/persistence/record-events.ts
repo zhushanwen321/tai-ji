@@ -185,7 +185,7 @@ export interface RecordBoundEvent extends RecordEventEnvelope { // oe-exempt:202
   /** 实际执行引擎 id（缺省语义 = pi 由写侧归一后落账）。 */
   engine: string;
   /** 引擎自描述定位符（与 manifest / entry 的 engineHandle 同形——sessionRef 整体透传）。 */
-  engineHandle: { sessionRef: Record<string, string>; journalPath?: string; poolKey: string };
+  engineHandle: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
   /** 绑定生效的 epoch（与 .record-binding 的 epoch 同源）。 */
   epoch: Epoch;
 }

@@ -142,7 +142,7 @@ function subagentRecordEntry(
 /**
  * 自描述 workflow-record entry 族（W1 v2：注册条目恒有 + 非 running 时终态条目）。
  *
- * 第 5 参 = 注册条目的 journalPath 锚点（v2 run 步骤级详情读面发现锚；旧 v1 快照的
+ * 第 5 参 = 注册条目的 recordPath 锚点（v2 run 步骤级详情读面发现锚；旧 v1 快照的
  * trace 参数随运行态移出条目删除——agentCalls 现由 run journal fold 供骨架，需要
  * 步骤断言的用例自建 `workflow-state/<runId>.record.jsonl`）。
  */
@@ -151,7 +151,7 @@ function workflowRecordEntry(
   status: 'running' | 'done' | 'interrupted',
   entryId: string,
   reason?: string,
-  journalPath = '',
+  recordPath = '',
 ): Array<Record<string, unknown>> {
   const registered: Record<string, unknown> = {
     type: 'custom',
@@ -167,7 +167,7 @@ function workflowRecordEntry(
       scriptName: 'test-flow',
       slug: 'tf',
       startedAt: 1000,
-      journalPath,
+      recordPath,
     },
   }
   if (status === 'running') return [registered]
@@ -406,7 +406,7 @@ describe('refreshRecordEntries：拉取与发布', () => {
           engine: 'zcode',
           engineHandle: {
             sessionRef: { sessionId: 'z-1', dbPath: '/engines/zcode/session-db/db.sqlite' },
-            journalPath: '/engines/zcode/shared/journal.jsonl',
+            eventsPath: '/engines/zcode/shared/journal.jsonl',
             poolKey: 'shared',
           },
         })],
@@ -425,7 +425,7 @@ describe('refreshRecordEntries：拉取与发布', () => {
         entries: [...subagentRecordEntry('sa-1', 'done', 'e9', {
           engine: 'zcode',
           engineHandle: {
-            journalPath: '/engines/zcode/shared/journal.jsonl',
+            eventsPath: '/engines/zcode/shared/journal.jsonl',
             sessionRef: { dbPath: '/engines/zcode/session-db/db.sqlite', sessionId: 'z-1' },
             poolKey: 'shared',
           },
@@ -1227,13 +1227,13 @@ function subagentSettledV2(id: string): Record<string, unknown> {
 }
 
 /** v2 workflow-record 注册条目 entry。 */
-function workflowRegisteredV2(runId: string, journalPath: string): Record<string, unknown> {
+function workflowRegisteredV2(runId: string, recordPath: string): Record<string, unknown> {
   return {
     type: 'custom', customType: 'workflow-record', id: 'e-w1', parentId: null,
     timestamp: '2026-09-26T00:00:00Z',
     data: {
       v: 2, kind: 'registered', runId, workflowName: 'test-flow', scriptName: 'test-flow',
-      slug: 'tf', startedAt: 1000, journalPath,
+      slug: 'tf', startedAt: 1000, recordPath,
     },
   }
 }

@@ -330,10 +330,10 @@ export function zcodeRefOf(record: ExecutionRecord): ZcodeTranscriptRef | undefi
 
 /** engineHandle entry 值的运行时 guard（未知 JSON 不裸收；形状与 runtime 读侧
  *  subagent-engine-history 的 extractRecordEngineHandle 守卫语义对齐：poolKey
- *  必有非空 string + sessionRef 值全 string 才收，journalPath 可选 string）。 */
+ *  必有非空 string + sessionRef 值全 string 才收，eventsPath 可选 string）。 */
 export function isEngineHandleShape(
   v: unknown,
-): v is { sessionRef: Record<string, string>; journalPath?: string; poolKey: string } {
+): v is { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string } {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   const h = v as Record<string, unknown>;
   if (typeof h.poolKey !== "string" || h.poolKey.length === 0) return false;
@@ -343,7 +343,7 @@ export function isEngineHandleShape(
   for (const value of Object.values(h.sessionRef as Record<string, unknown>)) {
     if (typeof value !== "string") return false;
   }
-  if (h.journalPath !== undefined && typeof h.journalPath !== "string") return false;
+  if (h.eventsPath !== undefined && typeof h.eventsPath !== "string") return false;
   return true;
 }
 

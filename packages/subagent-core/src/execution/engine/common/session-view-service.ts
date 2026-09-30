@@ -228,29 +228,29 @@ export function resetNativeSessionReaders(): void {
 // ============================================================
 
 /**
- * ②级：journalPath 白名单 + 重放。返回 undefined = 本级不可达 / 重放无内容（降③级）。
+ * ②级：eventsPath 白名单 + 重放。返回 undefined = 本级不可达 / 重放无内容（降③级）。
  */
 function readJournalTier(
   record: SubagentRecordSnapshot,
   handle: EngineHandleView,
   dataDir: string,
 ): HistoryMessage[] | undefined {
-  const journalPath = handle.journalPath;
-  if (journalPath === undefined) {
-    logger.debug("[session-view-service] tier2 skipped: no journalPath in handle");
+  const eventsPath = handle.eventsPath;
+  if (eventsPath === undefined) {
+    logger.debug("[session-view-service] tier2 skipped: no eventsPath in handle");
     return undefined;
   }
-  if (!isStrictlyUnder(resolveEnginesRoot(dataDir), journalPath)) {
+  if (!isStrictlyUnder(resolveEnginesRoot(dataDir), eventsPath)) {
     logger.warn(
-      `[session-view-service] journalPath escapes engines root, reject tier2: ${journalPath}`,
+      `[session-view-service] eventsPath escapes engines root, reject tier2: ${eventsPath}`,
     );
     return undefined;
   }
-  const messages = replayEventsToHistory(replayJournal(journalPath), record);
+  const messages = replayEventsToHistory(replayJournal(eventsPath), record);
   if (messages === undefined) {
     logger.debug(
       `[session-view-service] tier2 journal replay produced no content, degrade to outcome-only ` +
-        `(path=${journalPath})`,
+        `(path=${eventsPath})`,
     );
   }
   return messages;

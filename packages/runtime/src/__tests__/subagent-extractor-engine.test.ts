@@ -8,7 +8,7 @@
  *
  * 锁定：
  * - 终态条目 engine/engineHandle 逐项投影（sessionRef 键不枚举整体透传）
- * - engineHandle 无 journalPath → 该键缺席（可选字段）
+ * - engineHandle 无 eventsPath → 该键缺席（可选字段）
  * - 仅注册条目（未终态）→ engine/engineHandle 均 undefined，status=running
  * - 投影产物喂读侧 extractRecordEngine：缺省/空串 → 'pi'，非空透传（读写两侧对齐）
  *
@@ -74,7 +74,7 @@ describe('scanSubagentEntries · engine/engineHandle 投影（v2：终态条目�
         engine: 'zcode',
         engineHandle: {
           sessionRef: { sessionId: 's-1', dbPath: 'pool/zcode.db' },
-          journalPath: '/abs/engines/zcode/p1/journal.jsonl',
+          eventsPath: '/abs/engines/zcode/p1/journal.jsonl',
           poolKey: 'p1',
         },
       }),
@@ -83,12 +83,12 @@ describe('scanSubagentEntries · engine/engineHandle 投影（v2：终态条目�
     expect(records[0].engine).toBe('zcode')
     expect(records[0].engineHandle).toEqual({
       sessionRef: { sessionId: 's-1', dbPath: 'pool/zcode.db' },
-      journalPath: '/abs/engines/zcode/p1/journal.jsonl',
+      eventsPath: '/abs/engines/zcode/p1/journal.jsonl',
       poolKey: 'p1',
     })
   })
 
-  it('终态条目 engineHandle 无 journalPath → 投影省略该键（可选字段）', () => {
+  it('终态条目 engineHandle 无 eventsPath → 投影省略该键（可选字段）', () => {
     const records = scanSubagentEntries([
       registeredEntry('sa-2'),
       settledEntry('sa-2', {
@@ -97,7 +97,7 @@ describe('scanSubagentEntries · engine/engineHandle 投影（v2：终态条目�
       }),
     ])
     expect(records[0].engineHandle).toEqual({ sessionRef: { sessionId: 's-2' }, poolKey: 'p2' })
-    expect(records[0].engineHandle?.journalPath).toBeUndefined()
+    expect(records[0].engineHandle?.eventsPath).toBeUndefined()
   })
 
   it('仅注册条目（未终态）→ engine/engineHandle 均 undefined（绑定只随终态条目落盘）', () => {
