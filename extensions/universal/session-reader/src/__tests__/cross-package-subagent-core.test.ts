@@ -136,7 +136,9 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  /** 真实 RecordStore（写文件 pi：种子经真实 toSubagentRecordEntry 序列化落主文件）。 */
+  /** 真实 RecordStore（写文件 pi：种子经真实 register 通路 + v2 条目构造器
+   *  （toRegisteredEntryData，[v1 兼容层删除] v1 快照写点 toSubagentRecordEntry 已删）
+   *  落主文件）。 */
   function makeSeedStore(): RecordStore {
     return new RecordStore(
       getSubagentSessionDir(agentDir, agentDir),
