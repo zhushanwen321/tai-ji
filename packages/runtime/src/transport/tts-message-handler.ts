@@ -30,7 +30,7 @@ export interface TtsHandlerContext extends MessageHandlerContext {
 export class TtsMessageHandler {
   constructor(private ctx: TtsHandlerContext) {}
 
-  /** D1: 本 handler 认领的 ClientMessageType 清单。 */
+  /** 本 handler 认领的 ClientMessageType 清单（handles 展开进路由表）。 */
   readonly handles: ClientMessageType[] = [
     'tts.getConfig',
     'tts.configure',

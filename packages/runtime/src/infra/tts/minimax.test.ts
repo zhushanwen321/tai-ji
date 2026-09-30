@@ -210,6 +210,13 @@ describe('能力表与表单投影（§7.3）', () => {
     expect(minimaxFormModel.baseUrlOptions.map((o) => o.url)).toContain('https://api.minimaxi.com/v1')
   })
 
+  it('投影 id 形态：toggles 与 voiceModify tiers 均为 vendor 子键名裸键（D5 F1-8/F1-11 回归——renderer 按裸键查落盘路径/直写子树，路径前缀形态静默丢值或双前缀错位）', () => {
+    expect(minimaxFormModel.toggles).toEqual(['text_normalization', 'latex_read', 'aigc_watermark'])
+    expect(minimaxFormModel.voiceModify?.tiers.map((t) => t.id)).toEqual(['pitch', 'intensity', 'timbre'])
+    expect(minimaxFormModel.voiceModify?.effects.map((e) => e.id)).toEqual(['spacious_echo', 'auditorium_echo', 'lofi_telephone', 'robotic'])
+    expect(minimaxFormModel.maxTimbreVoices).toBe(2) // M0 表单开放值（非厂商上限 4）
+  })
+
   it('音色枚举：官方核心中文八音色，实测音色 male-qn-qingse 首位', () => {
     expect(minimaxFormModel.voices).toHaveLength(8)
     expect(minimaxFormModel.voices[0]).toEqual({ id: 'male-qn-qingse', label: '青涩青年音色' })

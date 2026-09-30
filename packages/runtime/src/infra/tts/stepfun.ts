@@ -53,6 +53,9 @@ export const stepfunCapabilities: TtsCapabilities = {
   speedRange: [0.5, 2],
   pcmSampleRates: SAMPLE_RATES,
   supportsInstructions: true,
+  // voiceLabelSupported 全 false 口径：stepaudio-2.5/3 系官方声明不支持 voice_label（设计 §5.2
+  // 实测注记「2.5/3 系报错」）；step-tts-2 / step-tts-mini 未实测，按保守缺省 false（支持位放开
+  // 前须实测 voice_label 不报错，消费端按该位置灰）。
   perModel: {
     'stepaudio-2.5-tts': { instructionMaxChars: 200, voiceLabelSupported: false },
     'stepaudio-3-tts': { instructionMaxChars: 500, voiceLabelSupported: false },
@@ -124,7 +127,9 @@ export const stepfunFormModel: TtsFormModel = {
   channels: [],
   emotions: [],
   languages: [],
-  toggles: [],
+  // text_normalization(standard/enhanced) M0 表单化（设计 §5.2 参数全集 + §4.2 增量裁决④；
+  // renderer 两档开关已就绪，空清单曾使真机控件不渲染——D5 F1-1/F1-13 修复）
+  toggles: ['text_normalization'],
   voiceModify: null,
   maxTimbreVoices: 0,
   hasPronunciationDict: true,

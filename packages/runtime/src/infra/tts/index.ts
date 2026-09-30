@@ -14,7 +14,6 @@ import { createMimoDriver, mimoFormModel } from './mimo.js'
 export { stepfunCapabilities, stepfunFormModel, buildStepfunRequestBody, createStepfunDriver } from './stepfun.js'
 export { minimaxCapabilities, minimaxFormModel, buildMinimaxRequestBody, decodeMinimaxResponse, createMinimaxDriver } from './minimax.js'
 export { mimoCapabilities, mimoFormModel, buildMimoRequestBody, decodeMimoResponse, MIMO_PCM_SAMPLE_RATE, createMimoDriver } from './mimo.js'
-export { wrapPcmAsWav, WAV_HEADER_BYTES } from './wav.js'
 export {
   mergeRequestBody,
   sanitizePassthrough,
