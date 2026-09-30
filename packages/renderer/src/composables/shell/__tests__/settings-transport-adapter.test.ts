@@ -32,6 +32,7 @@ import type {
   SystemPromptConfig,
   TerminalConfig,
 } from '@taiji/shared'
+import { apiConfigDomainMock } from '@/__tests__/helpers/api-facade-mock'
 
 /** 与被测 mock 域 fixture 的对照锚（composer-data MOCK_MODELS 首条） */
 const MOCK_ANCHOR_MODEL_ID = 'claude-sonnet-4.5'
@@ -361,7 +362,10 @@ describe('settings-transport-adapter · discoverModels 模式感知 guard（S-13
     const discoverModels = vi.fn()
     vi.resetModules()
     vi.doMock('@/api', () => ({
+      // config 域基座（on* 订阅族 + terminal 读写）单源在 helpers/api-facade-mock；
+      // discover 场景消费的请求方法保持本文件内联（discoverModels 为断言捕获 spy）
       config: {
+        ...apiConfigDomainMock(),
         listProviders: vi.fn(),
         setProvider: vi.fn(),
         setScopedModels: vi.fn(),
@@ -369,15 +373,6 @@ describe('settings-transport-adapter · discoverModels 模式感知 guard（S-13
         setSkillDirs: vi.fn(),
         setAgentDirs: vi.fn(),
         setExtensionDirs: vi.fn(),
-        onProviders: vi.fn(() => () => {}),
-        onSkills: vi.fn(() => () => {}),
-        onAgents: vi.fn(() => () => {}),
-        onSkillDirs: vi.fn(() => () => {}),
-        onAgentDirs: vi.fn(() => () => {}),
-        onExtensionDirs: vi.fn(() => () => {}),
-        onDefaults: vi.fn(() => () => {}),
-        onSystemPrompt: vi.fn(() => () => {}),
-        onTerminalConfig: vi.fn(() => () => {}),
       },
       model: { listModels: vi.fn(), onModels: vi.fn(() => () => {}) },
       extension: { onExtensions: vi.fn(() => () => {}) },

@@ -142,15 +142,21 @@ export function emitChatStreamMessage(msg: ServerMessage): void {
   chatStreamApiSpy.holder.current?.(msg)
 }
 
+/** on* 订阅成员族 stub（键列表 → { onX: vi.fn(() => () => {}) }：注册即返回 disposer 的
+ *  no-op 订阅）；'@/api' 各域订阅段的键参数化单源，apiConfigDomainMock 基座亦由它生成。 */
+export function subscriptionStubs(keys: readonly string[]) {
+  return Object.fromEntries(keys.map((k) => [k, vi.fn(() => () => {})]))
+}
+
 /**
  * config 域 mock 基线（on* 订阅家族全部返回退订函数 + terminal 配置读写 resolve 基线）：
  * mount 链组件 setup 期批量挂订阅，缺键即崩；消费形态同 apiProjectMock。
  *
- * on* 家族用键名表循环生成（每键独立 vi.fn 实例 + 调用返回退订函数，与逐键字面量
- * 语义等价）：config on* 段在其他测试文件仍有逐键字面量副本（归各自任务迁移），
- * 本 helper 保持循环形态避免与未迁移副本构成逐字克隆组。
+ * on* 家族经 subscriptionStubs 键参数化生成（每键独立 vi.fn 实例）：基座 9 键覆盖
+ * SettingsModal / 面板类 mount 链的公共订阅面，域特有订阅键（onModels / onExtensions /
+ * onAuth* 等）经 extraSubscriptionKeys 追加，不重复登记进基座键表。
  */
-export function apiConfigDomainMock() {
+export function apiConfigDomainMock(extraSubscriptionKeys: readonly string[] = []) {
   const onKeys = [
     'onProviders',
     'onSkills',
@@ -161,9 +167,10 @@ export function apiConfigDomainMock() {
     'onDefaults',
     'onSystemPrompt',
     'onTerminalConfig',
-  ] as const
+    ...extraSubscriptionKeys,
+  ]
   return {
-    ...Object.fromEntries(onKeys.map((key) => [key, vi.fn(() => () => {})])),
+    ...subscriptionStubs(onKeys),
     getTerminalConfig: vi.fn(async () => ({ config: { version: 1, shell: '', shellArgs: [], fontSize: 14, fontFamily: '', scrollback: 1000, cursorStyle: 'block' as const, bell: false }, corrupted: false })),
     setTerminalConfig: vi.fn(async () => ({ config: { version: 1, shell: '', shellArgs: [], fontSize: 14, fontFamily: '', scrollback: 1000, cursorStyle: 'block' as const, bell: false }, corrupted: false })),
   }

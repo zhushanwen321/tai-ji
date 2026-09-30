@@ -20,6 +20,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { Component } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { provideSettingsTransport } from '@taiji/core'
+import { apiProjectMock } from './api-facade-mock'
 import { makeSettingsTransportStub } from './settings-transport-stub'
 import { authEventCbs } from './oauth-auth-events-mock'
 
@@ -58,10 +59,10 @@ const systemPromptSettingsMock = {
   updateSystem: vi.fn(() => Promise.resolve()),
 }
 
-/** '@/api' mock 工厂：config / settings 域转发捕获单例 + project 底盘（挂载期加载） */
+/** '@/api' mock 工厂：config / settings 域转发捕获单例 + project 底盘（单源 apiProjectMock，挂载期加载） */
 export function systemPromptApiModule() {
   return {
-    project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+    project: apiProjectMock(),
     config: systemPromptConfigMock,
     settings: systemPromptSettingsMock,
   }

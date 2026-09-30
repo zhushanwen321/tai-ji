@@ -4,11 +4,14 @@
  * 对齐同包 chat 功能 `__tests__/helpers.ts` 惯例：跨测试文件复用的测试脚手架
  * 收拢一处，供本目录测试文件 import（ui 包不依赖 renderer，跨包同名桩属包边界真差异）。
  */
+import type { KVStorage } from '@taiji/core'
 import { expect } from 'vitest'
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 
-/** 内存 storage 桩（providePlatform.storage 用；与 renderer 端 platform-storage-stub 同形态） */
-export function inMemoryStorage() {
+/** 内存 storage 桩（providePlatform.storage 用；与 renderer 端 platform-storage-stub 为
+ *  跨包包边界两副本（ui 不得依赖 renderer 测试基建），契约层经 KVStorage 类型锚定单源
+ *  ——类型漂移由两包 typecheck 拦截） */
+export function inMemoryStorage(): KVStorage {
   const map = new Map<string, string>()
   return {
     get: async (k: string) => map.get(k) ?? null,
