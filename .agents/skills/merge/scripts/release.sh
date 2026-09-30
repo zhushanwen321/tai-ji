@@ -5,6 +5,8 @@
 #   1. 从 conventional commits 自动生成 release notes 草稿（双语三节结构，对齐 docs/release-notes.md；
 #      条目为 commit 原文直出，须按该规范人工定稿）
 #   2. 创建或更新 GitHub Release（优先更新 CI 创建的 Draft Release）
+#   3. 仅在创建 / Draft 态重写 notes：release 已发布（非 draft）且现有 notes 已含
+#      <!-- LANG: 语言标记（已定稿双语）时不覆盖重写，改用手动 gh release edit
 #
 # 前置：阶段 4 已完成（version bump + tag push + CI 构建产物）
 # 用法: bash .agents/skills/merge/scripts/release.sh [tag] [--notes <file>]
@@ -189,6 +191,14 @@ fi
 
 # 5b. 创建或更新 Release
 # 优先等 CI 创建 Draft Release（含构建产物），fallback 手动创建
+# notes 覆盖保护判定：release 已发布（非 draft）且现有 notes 已含 <!-- LANG: 语言标记
+# （视为已定稿双语 notes）→ 不覆盖，避免阶段 5 重跑/重复执行时把定稿内容冲掉
+notes_finalized() {
+    local body="$1" is_draft="$2"
+    [[ "$is_draft" != "true" ]] || return 1
+    printf '%s' "$body" | grep -q '<!-- LANG:'
+}
+
 EXISTING_RELEASE=$(gh release view "$TAG" --repo "$GH_REPO" --json isDraft,id,body,assets --jq '.' 2>/dev/null || echo "")
 
 if [[ -n "$EXISTING_RELEASE" ]]; then
@@ -201,12 +211,17 @@ if [[ -n "$EXISTING_RELEASE" ]]; then
     echo "  发现已有 Release（assets=$ASSET_COUNT, draft=${IS_DRAFT}）"
 
     EXISTING_BODY=$(echo "$EXISTING_RELEASE" | jq -r '.body // ""' 2>/dev/null || echo "")
-    if [[ -z "$EXISTING_BODY" ]] || [[ ${#EXISTING_BODY} -lt 20 ]]; then
-        echo "  Release notes 为空，回填中..."
+    if notes_finalized "$EXISTING_BODY" "$IS_DRAFT"; then
+        echo "  ⏭️  Release 已发布且 notes 已定稿（含 <!-- LANG: 标记），跳过覆盖"
+        echo "  如需修改: gh release edit $TAG --repo $GH_REPO --notes-file <双语文件>"
     else
-        echo "  更新已有 Release notes"
+        if [[ -z "$EXISTING_BODY" ]] || [[ ${#EXISTING_BODY} -lt 20 ]]; then
+            echo "  Release notes 为空，回填中..."
+        else
+            echo "  更新已有 Release notes"
+        fi
+        gh release edit "$TAG" --repo "$GH_REPO" --notes-file "$FINAL_NOTES_FILE" 2>&1 || true
     fi
-    gh release edit "$TAG" --repo "$GH_REPO" --notes-file "$FINAL_NOTES_FILE" 2>&1 || true
 
     # 如果是 Draft，发布它
     if [[ "$IS_DRAFT" == "true" ]]; then
@@ -235,9 +250,15 @@ else
     # 再次检查（等待循环中可能已创建）
     EXISTING_RELEASE=$(gh release view "$TAG" --repo "$GH_REPO" --json isDraft,id,body,assets --jq '.' 2>/dev/null || echo "")
     if [[ -n "$EXISTING_RELEASE" ]]; then
-        echo "  Release 已存在，更新 notes"
-        gh release edit "$TAG" --repo "$GH_REPO" --notes-file "$FINAL_NOTES_FILE" 2>&1 || true
         IS_DRAFT=$(echo "$EXISTING_RELEASE" | jq -r '.isDraft // false' 2>/dev/null) || IS_DRAFT="false"
+        EXISTING_BODY=$(echo "$EXISTING_RELEASE" | jq -r '.body // ""' 2>/dev/null || echo "")
+        if notes_finalized "$EXISTING_BODY" "$IS_DRAFT"; then
+            echo "  ⏭️  Release 已发布且 notes 已定稿（含 <!-- LANG: 标记），跳过覆盖"
+            echo "  如需修改: gh release edit $TAG --repo $GH_REPO --notes-file <双语文件>"
+        else
+            echo "  Release 已存在，更新 notes"
+            gh release edit "$TAG" --repo "$GH_REPO" --notes-file "$FINAL_NOTES_FILE" 2>&1 || true
+        fi
         if [[ "$IS_DRAFT" == "true" ]]; then
             echo "  发布 Draft Release..."
             gh release edit "$TAG" --repo "$GH_REPO" --draft=false 2>&1 || true

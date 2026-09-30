@@ -4,8 +4,9 @@
 # 在 feature worktree 中运行。自动检测项目结构，执行完整验证。
 # 任何一项失败都会以非零退出码退出，并输出明确错误信息。
 #
-# 用法: cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pre-merge-check.sh [worktree-dir]
-#   worktree-dir: 可选，默认当前目录
+# 用法: cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pre-merge-check.sh [worktree-path]
+#   worktree-path: 可选，可被 cd 解析的 worktree 路径（相对或绝对），默认当前目录；
+#                  SKILL.md 调用模板传 $WS_ROOT/<worktree-dir>
 #
 # AI 行为约束：
 #   - 此脚本的每一项检查都不可跳过

@@ -69,7 +69,7 @@ remove_worktree() {
     # 该闸门是拿掉 git 内建检查的交换条件）。与 dev-merge skill 同结构（ca6091f7e）。
     echo "删除 worktree '$dir_name'（rm -rf + prune）..."
     if ! rm -rf "$worktree_path"; then
-        echo "Error: 目录删除失败：$worktree_path（rm stderr 见上）。git 登记与分支均未动。"
+        echo "Error: 目录删除失败：${worktree_path}（rm stderr 见上）。git 登记与分支均未动。"
         echo "       排查根因（文件锁 / 权限 / 外部挂载）后重跑本脚本，或执行单命令："
         echo "       rm -rf '$worktree_path' && git -C '$workspace_root/.bare' worktree prune"
         return 1

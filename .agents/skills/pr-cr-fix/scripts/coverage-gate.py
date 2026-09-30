@@ -50,7 +50,7 @@ node 解析，原因见上 [HISTORICAL] #3）。未声明的包记 SKIP 并给�
       承接下游兜底，见 pr-cr-fix 精简设计 D12）。追加包无新增行时走 total=0 → 100% 记
       OK 的现有路径；路径无效或缺 vitest.config.ts 记 FAIL 条目，不静默跳过。
 退出码：0 = pass；1 = fail（增量不足或测试失败）；2 = 工具错误（git 异常 / 记账不闭合 /
-      all-SKIP 配置错误）
+      all-SKIP 配置错误 / argv 参数错误）
 产出：.review/coverage.json（packages 增量口径 + files 全文件级真实覆盖率，
       后者供 metrics-gate.py 替换 fallow 静态估算消费）
 """
@@ -121,6 +121,26 @@ def git_diff_names(repo_root: Path, base: str) -> list[str]:
     print(f"ERROR: git diff 连续 3 次空输出而 {base}..HEAD 有 commit——git 异常，中止。"
           f"恢复：确认无并发 git 进程后重跑本脚本", file=sys.stderr)
     sys.exit(2)
+
+
+def warn_if_head_equals_base(repo_root: Path, base: str) -> None:
+    """HEAD 与 base 指向同一 commit 时打印 WARN（只警告，不改变判定与退出码）。
+
+    repo 根按当前 cwd 解析（git rev-parse --show-toplevel）；在 main worktree
+    （HEAD=base）里跑时 git diff 恒空，脚本会按「无带 src/ 改动的 vitest 包」
+    判 pass 并覆写 .review/coverage.json 为空报告——静默假 pass 与该脚本防假
+    pass 的设计意图相悖。此处比较 rev-parse 出的 SHA（不同 ref 名指向同一
+    commit 时同样命中）；base ref 解析失败时不 warn（后续 git diff 会以
+    exit 2 正常报错），不改任何正常路径行为。
+    """
+    head = sh(["git", "rev-parse", "HEAD"], repo_root)
+    tip = sh(["git", "rev-parse", base], repo_root)
+    head_sha = head.stdout.strip()
+    if head.returncode == 0 and tip.returncode == 0 and head_sha and head_sha == tip.stdout.strip():
+        print(f"WARN: HEAD 与 base={base} 指向同一 commit，git diff 恒为空。若当前目录是 "
+              f"main worktree（或任何 HEAD=={base} 的 worktree）属跑错位置：空 diff 会被判 "
+              f"pass 并覆写 .review/coverage.json；请到 feature worktree 根目录重跑本脚本。"
+              f"确属有意在 {base} 上自检时忽略本警告", file=sys.stderr)
 
 
 def pkg_dir_of(repo_root: Path, repo_file: str) -> str | None:

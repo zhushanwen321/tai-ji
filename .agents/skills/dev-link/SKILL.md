@@ -28,6 +28,8 @@ bash .agents/skills/dev-link/pi-link.sh subagent-workflow      # symlink 本地 
 bash .agents/skills/dev-link/pi-unlink.sh subagent-workflow    # rm symlink + pi install 重装 npm 版（需联网）
 ```
 
+**成功判据**：必须在目标 worktree 根目录运行（`extensions/` 映射由 git root 解析，cwd 在外层目录时全部包都查不到）；以 `link-list.sh` 输出中对应 symlink 存在为生效确认，而非以脚本结尾的 banner 为准。
+
 **机制**：symlink 本地源码 → `~/.pi/agent/extensions/pi-<short>`（globalExtDir，loader 第 2 步扫描，pi-statusline 同模式）。同时 `pi uninstall` 清 npm 版（settings 条目 + node_modules 包），避免 globalExtDir symlink 与 npm 包两源并存。**另把 extension 的 `skills/*/` 每个 skill symlink 到 `~/.pi/agent/skills/`**（绕过 pi globalExtDir 不读 `pi.skills` 的限制，让 skill 进 available_skills）。unlink 时 `pi install` 重装 npm 版 + 删 skill symlinks（从 npm registry 下载，需联网）。
 
 **生效**：新建 pi session（当前 session 已加载旧版，不重扫）。**注意 pi list 不显示** globalExtDir symlink——pi list 只列 `packages` 配置的，不列自动发现源，但 loader 会加载（正常现象）。
@@ -36,7 +38,8 @@ bash .agents/skills/dev-link/pi-unlink.sh subagent-workflow    # rm symlink + pi
 
 ```bash
 bash .agents/skills/dev-link/link-local.sh cw-tool             # 加到 TAIJI_EXTENSION_PATHS
-bash .agents/skills/dev-link/link-npm.sh cw-tool               # 移除
+bash .agents/skills/dev-link/link-npm.sh cw-tool               # 移除指定包
+bash .agents/skills/dev-link/link-npm.sh --all                 # 全量清理：清空整个 .env.dev-extensions
 # 启动带 link 的 dev：
 set -a && source .env.dev-extensions && set +a && pnpm dev
 ```
@@ -59,7 +62,7 @@ bash .agents/skills/dev-link/link-list.sh
 
 智能检测（动态推导路径，不写死项目路径）：
 - **pi 模式**（`PI_EXT_DIR/pi-*` symlink）：显示所有 link + target，标注归属 `[当前worktree]` / `[其他worktree: name]` / `[外部]`；悬空 symlink（worktree 删了未清）标 `✗悬空`
-- **taiji 模式**（`.env.dev-extensions`）：从当前 git root 动态查找，检测路径存在性 + worktree 归属
+- **taiji 模式**（`.env.dev-extensions`）：从当前 git root 动态查找，检测路径存在性 + 是否当前 worktree
 - **PI_CODING_AGENT_DIR 不一致警告**：link 位置与运行时 agentDir 不一致时提示（pi 可能不加载）
 - 路径 source `dev-link-lib.sh` 复用 `PI_EXT_DIR`，与 link 建立位置一致
 
@@ -96,7 +99,7 @@ extensions/<short>/package.json
 |------|------|
 | pi 模式 link 后 pi 仍用旧版 | 当前 session 已加载旧版，**需新 session**；或没 remove npm（两源冲突，pi resolver 不知选谁）|
 | taiji 模式 link 后 taiji 看不到 extension | 没 `source .env.dev-extensions`；或没新建 session |
-| pi 启动报 ENOENT extension path | worktree 删了但 link 未清理 → 对应模式 unlink |
+| pi 启动报 ENOENT extension path | worktree 删了但 link 未清理 → 对应模式 unlink；事后清理仅移除失效的 extension symlink，skill symlink 残留与 npm 版重装需在仍有该包源码的 worktree 里再跑一次 |
 | link → unlink 往返后 extension 消失 | 现版用 `pi install`/`pi uninstall`（替代旧 backup 机制），unlink 重装 npm 版（需联网，失败检查网络） |
 | **link 了但不生效（最常见）** | **模式选错**：想测当前 pi 却用 taiji 模式（`TAIJI_EXTENSION_PATHS` 当前 pi 不读）；想测 taiji 却用 pi 模式。按"何时用哪个"选 |
 | source 报 command not found | 路径含空格未加引号；或 `.env.dev-extensions` 格式错 |

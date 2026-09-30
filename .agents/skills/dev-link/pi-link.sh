@@ -14,6 +14,9 @@
 #
 # 用法: ./pi-link.sh <package> [package2 ...]
 #   <package> = 短名 (subagent-workflow) / pi-前缀 / @zhushanwen/pi-全名
+#
+# 退出码：全部包 link 成功 = 0；有包尝试但无一成功 = 1（cwd 不在目标 worktree 内时
+# extensions/ 映射查不到，每个包都失败，此前仍会打印成功 banner，属假成功）。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,7 +26,11 @@ source "$SCRIPT_DIR/dev-link-lib.sh"
 [ $# -lt 1 ] && { echo "用法: $0 <package> [package2 ...]"; exit 1; }
 mkdir -p "$PI_EXT_DIR"
 
+ok=0
+attempted=0
+
 for input in "$@"; do
+	attempted=$((attempted + 1))
 	short=$(dl_resolve_short_name "$input")
 
 	# 查映射（源码目录 + npm 包名 + 是否真 extension，均来自 package.json）
@@ -40,6 +47,7 @@ for input in "$@"; do
 	link_name="$PI_EXT_DIR/pi-$short"
 	if ln -sfn "$DL_SRC_DIR" "$link_name" 2>/dev/null; then
 		green "✓ symlink: ${short} → ${link_name}"
+		ok=$((ok + 1))
 	else
 		red "✗ symlink 失败: ${link_name}"
 		continue
@@ -58,8 +66,14 @@ for input in "$@"; do
 	fi
 done
 
+if [ "$attempted" -gt 0 ] && [ "$ok" -eq 0 ]; then
+	echo ""
+	red "✗ pi 模式 link 失败：${attempted} 个包均未成功（检查是否在目标 worktree 根目录运行：extensions/ 映射由 git root 解析）"
+	exit 1
+fi
+
 echo ""
 green "✓ pi 模式 link 完成"
 echo "  生效：新建 pi session（当前 session 已加载旧版）"
 echo "  注：pi list 只列 packages，不显示 globalExtDir symlink——loader 仍会加载（pi-statusline 同模式）"
-echo "  恢复：./pi-unlink.sh $*（rm symlink + pi install 重装，需联网）"
+echo "  恢复：$SCRIPT_DIR/pi-unlink.sh $*（rm symlink + pi install 重装，需联网）"

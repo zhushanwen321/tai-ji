@@ -168,7 +168,7 @@ for _gb in $GH_BRANCHES; do
         fi
     else
         _ahead=$(git -C .bare rev-list --count "github/$MAIN_BRANCH..$_gb" 2>/dev/null || echo '?')
-        echo "  ⚠ 未合并远端分支需人工裁决: $_branch_name（领先 $MAIN_BRANCH ${_ahead} commit）"
+        echo "  ⚠ 未合并远端分支需人工裁决: ${_branch_name}（领先 $MAIN_BRANCH ${_ahead} commit）"
         HYGIENE_KEPT=$((HYGIENE_KEPT + 1))
     fi
 done

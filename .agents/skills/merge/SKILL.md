@@ -19,7 +19,7 @@ description: >-
 
 ## 前置条件
 
-- **`WS_ROOT` 变量约定**：`WS_ROOT` = workspace root（bare repo 模式，含 `.bare/`，所有 worktree 均为其直接子目录）。**动态推导，不写死路径**：`WS_ROOT="$(git worktree list | head -1 | awk '{print $1}' | xargs dirname)"`（worktree list 首行是 main worktree，其父目录即 workspace root；在任意 worktree 内执行均可）。`.agents` 实体在 **`$WS_ROOT` 本身**（workspace 根单一实体，各 worktree 经 symlink 共享，ADR-0074）——skill 脚本一律经 `bash "$WS_ROOT/.agents/skills/merge/scripts/<脚本>"` 绝对路径调用（实体恒存在），禁止写死某个 worktree 内的 `.agents` 路径
+- **`WS_ROOT` 变量约定**：`WS_ROOT` = workspace root（bare repo 模式，含 `.bare/`，所有 worktree 均为其直接子目录）。**动态推导，不写死路径**：`WS_ROOT="$(git worktree list | head -1 | awk '{print $1}' | xargs dirname)"`（worktree list 首行是 workspace root 下的 `.bare` 裸仓库条目，取 dirname 即 workspace root；在任意 worktree 内执行均可）。`.agents` 实体在 **`$WS_ROOT` 本身**（workspace 根单一实体，各 worktree 经 symlink 共享，ADR-0074）——skill 脚本一律经 `bash "$WS_ROOT/.agents/skills/merge/scripts/<脚本>"` 绝对路径调用（实体恒存在），禁止写死某个 worktree 内的 `.agents` 路径
 - feature 分支有已创建的 PR
 - GitHub CLI 已认证
 
@@ -114,16 +114,16 @@ git push github HEAD --force-with-lease
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pre-merge-check.sh "$WS_ROOT/<worktree-dir>"
 ```
 
-阶段 1 调用项目内 pre-merge-check.sh（依赖安装、类型检查、lint、测试、构建，以及第 5 步 Git 状态检查——有未提交变更或未推送 commits 会 FAIL 阻塞合并）。脚本自包含在项目 skill 目录内，不依赖全局脚本。
+阶段 1 调用项目内 pre-merge-check.sh（依赖安装、类型检查、lint、测试、构建，以及第 5 步 Git 状态检查——有未提交变更或未推送 commits 会 FAIL 阻塞合并）。脚本自包含在项目 skill 目录内，不依赖全局脚本；`set -e` 运行，任一检查失败即以非零退出码中断，失败项上下文（命令输出尾部 / 失败文件清单）随错误打印，须按输出定位修复后重跑同一命令。
 
 **测试步骤 = unit 轨**（`TAIJI_SKIP_REAL_PI=1 pnpm test`，与 CI runtime job 同口径）。**merge 门禁不跑 e2e**——e2e / 真实进程 / 真实 LLM 用例只在开发阶段按改动范围跑（清单由 tech-design 的 e2e 影响面评估 + dev-flow 验收计划表圈定），执行准则 SSOT = AGENTS.md「测试」节。GitHub CI 同样从不跑 e2e（`TAIJI_SKIP_REAL_PI=1` + 无凭证注入 + 无 darwin pi binary）。
 
 **[HISTORICAL] real-pi 失败归因纪律（2026-09-15 事故，禁止盲目重试）**：事故前 premerge 曾全量并发扫并跑了真实 LLM 等价性用例，`send-queue-e2e` 120s 事件超时——根因是跨包并发饱和 CPU 使真实轮次延迟越过预算，不是代码缺陷（junit 的 seen types 显示 LLM 在推进）。处置是结构性的：门禁只跑单测、e2e 移出 merge/PR；若开发期按改动范围跑 e2e 失败，先读 `packages/runtime/test-results/vitest-junit.xml` 的 failure 详情（seen types 区分「LLM 在推进但慢」与「真死锁」），禁止不经归因就直接重试，禁止放宽断言或膨胀预算换绿灯。
 
-ℹ️ **pnpm workspace 单步安装**：项目使用 pnpm workspace（`packages/* + apps/*`），`pnpm install` 一次装完所有依赖，无需手动 cd 子目录。如果 pre-merge-check.sh 未自动处理依赖安装，需手动执行：
+ℹ️ **pnpm workspace 单步安装**：项目使用 pnpm workspace（`packages/* + apps/*`），`pnpm install` 一次装完所有依赖，无需手动 cd 子目录。与脚本内自动安装同口径：根目录执行 `pnpm install --frozen-lockfile`（脚本只在 `node_modules` 或 `node_modules/.pnpm` 缺失时才自动装）。如果 pre-merge-check.sh 未自动处理依赖安装，需手动执行：
 
 ```bash
-ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install
+pnpm install --frozen-lockfile
 ```
 
 ### 阶段 1.5: Dev-Link 清理
@@ -134,7 +134,7 @@ ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/prune-dev-link.sh "$WS_ROOT/<worktree-dir>"
 ```
 
-`<worktree-dir>` 是阶段 0 传给 init.sh 的 feature worktree 目录名。脚本自己向上查找 `.bare` 定位 workspace root，无需手动算路径。
+`<worktree-dir>` 是阶段 0 传给 init.sh 的 feature worktree 目录名。**`$WS_ROOT/` 前缀必须带上**——脚本要求实参是已存在的目录路径（`[ ! -d "$1" ]` 检查，传裸目录名且 cwd 不在 workspace root 时 exit 2），命令模板里的 `"$WS_ROOT/<worktree-dir>"` 就是完整路径。脚本自己向上查找 `.bare` 定位 workspace root，无需手动算路径。
 
 **为什么要清理**：dev-link 让 pi 通过 `TAIJI_EXTENSION_PATHS` 加载本地源码 extension。标准用法下 link 指向当前 worktree 自己的 `extensions/`，删 worktree 时该 worktree 内的 `.env.dev-extensions` 随之删除——不会残留。但存在**跨 worktree 残留**场景（用户在 main worktree 里 link 指向 feature worktree 测改动、手动编辑/复制 `.env.dev-extensions` 跨 worktree）：这些残留 link 在 feature worktree 删除后指向不存在的路径，下次 `pnpm dev` 时 pi 加载报 ENOENT。本阶段在删 worktree 前兜底清理所有这类残留。
 
@@ -143,7 +143,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/prune-dev-link.sh "$WS_ROO
 ### 阶段 2: PR CI + 合并
 
 ```bash
-cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pr-merge.sh <branch-name> <pr-number>
+cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pr-merge.sh <pr-number>
 ```
 
 检查 PR CI 状态并通过 PR 合并（`gh pr merge --merge --delete-branch`，使用 merge commit 绝不 squash）。
@@ -162,6 +162,8 @@ bash .agents/skills/merge/scripts/wait-for-ci.sh "$MAIN_SHA"
 ```
 
 等待 main 分支 CI 通过。wait-for-ci.sh 在项目 skill 目录内（CI 轮询），需传入 commit SHA。
+
+> ⏱ **超时语义**：默认 600s 超时（15s 一轮轮询），超时时 exit 2 并提示仍有几个 workflow 在运行——此时询问用户处理，或用 `--timeout 1200` 拉长重跑：`bash .agents/skills/merge/scripts/wait-for-ci.sh "$MAIN_SHA" --timeout 1200`。
 
 > ⚠️ **边界**：commit 在约 30s 内无任何 workflow run 时，wait-for-ci.sh 视为「无 CI」直接放行（exit 0）——merge commit 因 ci.yml 路径过滤可能未触发任何 run。此时 exit 0 ≠「CI 通过」，须先用 `gh run list --commit "$MAIN_SHA" --repo zhushanwen321/tai-ji` 人工确认是否存在 run；确认无 run 属预期（如纯 docs 改动）才可继续，不得把该放行误判为「CI 通过」。
 
@@ -397,6 +399,8 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/release.sh
 
 从 conventional commits 自动生成 Release Notes 草稿（双语三节结构：feat → 新增功能、perf → 功能优化、fix → 修复缺陷、breaking → 重大变更；条目为 commit 原文，须按全局规范 `~/.agents/guide/release-notes.md` 定稿）并创建/更新 GitHub Release。也可指定 tag 和 notes 文件：`cd $WS_ROOT/main && bash .agents/skills/merge/scripts/release.sh v0.6.5 --notes ./my-notes.md`。
 
+> **notes 写入语义**：release.sh 仅在创建 / Draft 态重写 notes；release 已发布（非 draft）且现有 notes 已含 `<!-- LANG:` 语言标记（视为已定稿）时不会被覆盖重写——已定稿 release 需改动手动执行 `gh release edit <tag> --notes-file <双语文件>`。
+
 > ⚠️ **release.sh 自动 notes 在 merge 末尾常不准**：脚本用 `git describe HEAD^` 找上一个 tag，但 merge 流程末尾 HEAD 已远超当前 tag（经过 bump + skill 更新 + 4N bump 等 commits），`git describe HEAD^` 会返回**当前 tag**，导致 range = `<当前tag>..HEAD` 几乎为空、自动 notes 退化。实际执行中建议跳过自动生成，直接按全局规范（`~/.agents/guide/release-notes.md`）手写双语 notes 后用 `gh release edit <tag> --notes-file <双语文件>` 覆盖（见下方 [MANDATORY] 要求）。
 
 **[MANDATORY] 撰写 Release Notes 前必须先读两级规范**
@@ -529,7 +533,7 @@ curl -sL -o /dev/null -w '%{http_code}\n' -r 0-1048575 --max-time 60 \
 
 如果执行后 bash 工具报 ENOENT / cwd 不存在——这是删除 worktree **已成功**的最强确认（当前 shell 的 cwd 落在被删目录内），不是错误。详见底部 [HISTORICAL] 阶段 7 后 bash 工具失效处理。
 
-调用本 skill 的 remove-worktree.sh 清理 feature worktree 和本地分支（命令全文见下方「自动化执行」代码块，本阶段只此一个命令版本，避免出现不一致的两个副本）。`--force` 跳过已合并检查并强制删除（含未提交/未跟踪内容，删除前会列出将销毁的清单）——分支已删除（远程 delete-branch）时本地 `git branch --merged` 检查会误判，故恒用 `--force`。`--skip-sync` 因为 pr-merge.sh 已 sync 过 main。
+调用本 skill 的 remove-worktree.sh 清理 feature worktree 和本地分支（命令全文见下方「自动化执行」代码块，本阶段只此一个命令版本，避免出现不一致的两个副本）。`--force` 跳过已合并检查并强制删除（含未提交/未跟踪内容，删除前会列出将销毁的清单）——分支已删除（远程 delete-branch）时本地 `git branch --merged` 检查会误判，故恒用 `--force`。**同步其他 worktree 的默认行为**：不带 `--skip-sync` 时，脚本会对 workspace 内其他非 main worktree 逐个执行 `git merge --no-ff github/main`；发生冲突时不自动 abort，冲突态保留在该 worktree 待人工处理（脚本结束报告列出冲突 worktree 与处理命令）。`--skip-sync` 跳过整个同步段——阶段 7 恒带该参数，因为 pr-merge.sh 已 sync 过 main，且发布收尾阶段不应顺带改动其他 worktree 的工作区。
 
 脚本内含**远端分支卫生段**（在删除 worktree 目录前执行）：对 `refs/remotes/github/*` 做确定性清扫——排除 `main`、现行 dev 集成线（版本号最大的 dev-* 分支，动态识别）、`dependabot/**`（活 PR）后，已合并进 main 的远端分支自动删除（纯祖先判定，main 已含全部工作，删除零损失）；未合并的报告分支名与领先 commit 数，留人工裁决。单条删除失败记 warning 不阻断主流程。判定基于段内自 fetch 的新鲜视图（`--force` 路径同样覆盖）。
 
@@ -613,7 +617,7 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/remove-worktree.sh <branch
 - 执行完 `remove-worktree.sh` 后**立即输出合并总结收尾**，不再调用任何 bash 工具做"再次确认"或执行其他任务
 - 如果 bash 失效已发生，**不要再尝试调用 bash**——这只会循环报错
 - 此时不需要（也不可能）做 git status / ls / pwd 等确认；删除本身的成功（无论脚本 exit 0 还是 bash 后续失效）已经说明清理完成
-- 例外：如果脚本 **exit 非 0 且 bash 仍正常返回**（没出现工具层报废错误），说明删除没走完，按失败点分两类——**rm -rf 失败**：登记与分支均未动，目录可能残缺，排查文件锁/权限/挂载后重跑脚本，或执行脚本打印的单命令；**prune 失败**：目录已删、仅登记残留，`git worktree prune` 幂等补跑即可。两类都不得当成"删除已完成"
+- 例外：如果脚本 **exit 非 0 且 bash 仍正常返回**（没出现工具层报废错误），说明删除没走完，按失败点分两类——**rm -rf 失败**：登记与分支均未动，目录可能残缺，排查文件锁/权限/挂载后重跑脚本，或执行脚本打印的单命令；**prune 失败**：目录已删、仅登记残留，且 prune 在删本地分支之前执行——分支仍残留，重跑脚本无效（worktree 目录已删除，脚本会提前 exit 1），须手工按序补跑 `git -C "$WS_ROOT/.bare" worktree prune` 清登记 + `git -C "$WS_ROOT/.bare" branch -D <branch-name>` 删本地分支。两类都不得当成"删除已完成"
 - **[HISTORICAL] 半删态识别（旧版脚本或手工操作产生；现行脚本结构上不再产生）**：worktree 目录还在，但目录内一切 git 命令报 `fatal: not a git repository`，且 `.bare/worktrees/<name>/` 登记已消失——这正是 `git worktree remove` 内部「先删登记、后删目录」在目录删除失败时留下的形态（2026-09-10 v0.9.16 发布实测 `Directory not empty`）。恢复：从**兄弟 worktree**（不是待删除的目录本身）执行单命令 `git -C <main-wt> merge-base --is-ancestor <feat-branch> <main> && rm -rf <feat 目录> && git -C <main-wt> worktree prune && git -C <main-wt> branch -D <feat-branch>`（is-ancestor 在链首，未合入即中止不删任何东西；rm -rf 在链尾，失败即停、剩余状态仍可诊断）。该命令删除会话 cwd 所在目录 → 必须作为最后一条 bash 命令，之后只用 read/write 类工具收尾
 
 **反模式**：删除后为"确认"再跑 `git worktree list` / `ls <worktree-dir>` → bash ENOENT → 误判为"删除失败"或"流程出错"→ 尝试 `cd $WS_ROOT` 重试 → 可能进一步混乱。

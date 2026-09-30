@@ -7,7 +7,7 @@
 #   3. sync 本地 main（fetch + reset --hard github/main）
 #
 # 前置：阶段 0（init.sh）已执行，PR 处于 OPEN 状态
-# 用法: bash .agents/skills/merge/scripts/pr-merge.sh <branch-name> <pr-number>
+# 用法: bash .agents/skills/merge/scripts/pr-merge.sh <pr-number>
 # 退出码：0 = 成功，1 = 失败
 
 set -euo pipefail
@@ -18,8 +18,7 @@ YELLOW='\033[1;33m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-BRANCH_NAME="${1:?Usage: pr-merge.sh <branch-name> <pr-number>}"
-PR_NUMBER="${2:?Usage: pr-merge.sh <branch-name> <pr-number>}"
+PR_NUMBER="${1:?Usage: pr-merge.sh <pr-number>}"
 
 GH_REPO="zhushanwen321/tai-ji"
 GH_REMOTE="github"
@@ -35,7 +34,7 @@ echo "  状态: $PR_STATE"
 if [[ "$PR_STATE" == "MERGED" ]]; then
     echo -e "  ${GREEN}⏭️  PR 已合并，跳过${NC}"
 elif [[ "$PR_STATE" != "OPEN" ]]; then
-    echo -e "${RED}Error: PR 状态为 $PR_STATE，无法处理（需 OPEN 或 MERGED）${NC}"
+    echo -e "${RED}Error: PR 状态为 ${PR_STATE}，无法处理（需 OPEN 或 MERGED）${NC}"
     exit 1
 else
     # 等待 PR CI
@@ -142,7 +141,7 @@ git -C "$MAIN_WT" reset --hard "$GH_REMOTE/main" 2>&1 | tail -1
 # 校验当前分支确实是 main（checkout 失败时 reset 仍会移动错误分支指针）
 CURRENT_BRANCH=$(git -C "$MAIN_WT" branch --show-current)
 if [[ "$CURRENT_BRANCH" != "main" ]]; then
-    echo -e "${RED}Error: main worktree 当前分支为 $CURRENT_BRANCH（非 main）${NC}"
+    echo -e "${RED}Error: main worktree 当前分支为 ${CURRENT_BRANCH}（非 main）${NC}"
     echo "  reset 无法切换分支，手动执行: git -C $MAIN_WT checkout main"
     exit 1
 fi

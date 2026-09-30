@@ -55,6 +55,7 @@ fi
 
 command -v gh >/dev/null 2>&1 || { echo "Error: gh CLI 未安装"; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "Error: gh CLI 未登录"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "Error: jq 未安装（解析 CI 结果必需）"; exit 1; }
 
 echo -e "${BOLD}等待 CI 完成...${NC}"
 _ci_log "等待 CI: commit=$REF, workflow=${WORKFLOW:-all}, timeout=${TIMEOUT}s"
@@ -209,7 +210,7 @@ if [[ -n "$VERIFY_RELEASE_TAG" ]]; then
     if [[ "$RELEASE_TAG" != "$VERIFY_RELEASE_TAG" ]]; then
         echo -e "  ${RED}❌ Release tag 不匹配: 期望 $VERIFY_RELEASE_TAG, 实际 $RELEASE_TAG${NC}"
         _ci_log "Release 验证失败: tag mismatch ($RELEASE_TAG != $VERIFY_RELEASE_TAG)"
-        echo "  根因：CI 的 src-electron/package.json 版本号与根 package.json 不一致"
+        echo "  根因：CI 的 apps/electron/package.json 版本号与根 package.json 不一致"
         echo "  修复：同步版本号后重新触发 CI"
         exit 1
     fi
