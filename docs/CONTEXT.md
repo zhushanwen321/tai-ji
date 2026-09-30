@@ -327,3 +327,12 @@ composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/
 composer 工具条左簇的常驻观察入口（`packages/renderer/src/components/panel/tray/`，`ComposerTray.vue`）：条目 = built-in 四件（后台命令 / 子代理 / 工作流 / **子会话**，固定序）+ 协议 widget 区（extension 经 `setWidget` 推送的 todo/goal 等「给 agent 看的工作记忆」，icon/badge/状态色由 `WidgetMeta` 驱动）。hover icon 弹出该条目的分桶面板（计数与行集同源，可就地 kill/cancel/abort、点行开 drawer 详情，子会话行点开即跳该会话），点击 icon 可 pin。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻；全无记录 → 不渲染（归零不虚噪）。窄窗口下底盘密度状态机可将整托盘聚合为「层叠图标 + 运行数」单入口（层叠图标 = 聚合入口，省略号 = 溢出菜单入口，两者不共用）。设计文档已删除（git 可追溯）。
 
 > **术语演进（2026-09 核对）**：原「WidgetArea」（对话流内的单行 pill 状态带，`@taiji/ui` 组件）已退役——widget 消费端收敛为上述托盘（2026-09-16，设计 D11：对话流回归纯内容，入口唯一化）。子会话第 4 件为模式体系设计 D7 新增（u7 已落地，面板 `TraySessionPanel.vue` 为扁平列表而非分桶槽）。
+
+### 语音朗读（TTS）
+taiji 的 assistant 回复朗读能力（ai-voice-tts 设计，P2 辅助功能）。链路：朗读按钮（TurnSummary `speak-btn`，三态 idle/loading/playing + 生成中置灰）→ `useTtsPlayer` 全局单例（ADR-0049 例外清单，窗口级唯一播放任务态）→ core 域 `tts.speak` → runtime `TtsService` 八步编排（现读配置 → 清洗复核 → 缓存键 → 分句 → 逐段合成 → WAV 封装 → 原子写 + FIFO 封顶 → reply `filePath`）→ local-file 音频播放。三家 provider：MiniMax `t2a_v2` / StepFun `audio/speech` / MiMo 借壳 `chat/completions`，配置入口 = 设置页「语音」菜单（表单投影驱动，用户不接触 JSON）。
+
+### 语音朗读总开关
+设置页「启用语音朗读」开关（`use-tts-enabled.ts`，localStorage key `taiji.tts.enabled`，data-source-registry #45）：只拦 idle 新朗读（关闭时点朗读 → 「语音服务未配置」toast 不发 RPC）；非 idle 停止与设置页「保存并测试」不受拦。默认开启（键缺失/读失败同默认开）。
+
+### settings-tts-test（伪 id）
+设置页「保存并测试」的播放通道：走与朗读按钮完全相同的 `useTtsPlayer.speak`，但用固定伪 messageId（`SETTINGS_TTS_TEST_MESSAGE_ID`）驱动，与对话朗读天然双向互斥（同一全局单例任务态）。
