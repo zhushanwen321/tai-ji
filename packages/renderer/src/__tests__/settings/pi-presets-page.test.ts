@@ -13,43 +13,23 @@
  *    内置调度模式追加卡预置文案非空。
  *
  * mock 策略：
- *  - mock 脚手架（presetMock / @/api / @taiji/ui stub / transport 接线 / promptPreset
- *    fixture）收敛 helpers/preset-page-mount 单源，与 components 版同组件测试共享。
+ *  - mock 脚手架（presetMock 单例 / '@/api' 与 @taiji/ui mock 注册 / transport 接线 /
+ *    promptPreset fixture）收敛 helpers/preset-page-mount + helpers/preset-page-mock
+ *    单源（后者 import 即注册，settings 与 components 两套同组件测试共享），与
+ *    components 版同组件测试共享。
  *  - PresetModeSection 子组件 stub（本测试聚焦 PiPresetsPage 主逻辑）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/pi-presets-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
 import type { PiLaunchPreset } from '@taiji/shared'
 import { DEFAULT_PRESETS } from '@taiji/shared'
-import {
-  makePreset,
-  presetApiModule,
-  presetUiModule,
-  primePresetDefaults,
-  promptPreset,
-  wirePresetTransport,
-  type PresetMock,
-} from '../helpers/preset-page-mount'
-
-/** mock preset API（形状标注 + 默认 impl + 接线收敛 helpers/preset-page-mount 单源） */
-const presetMock = vi.hoisted((): PresetMock => ({
-  list: vi.fn(),
-  getDefault: vi.fn(),
-  setDefault: vi.fn(),
-  create: vi.fn(),
-  update: vi.fn(),
-  remove: vi.fn(),
-}))
-
-vi.mock('@/api', () => presetApiModule(presetMock))
-vi.mock('@taiji/ui/features/settings', () => presetUiModule())
+import { makePreset, promptPreset } from '../helpers/preset-page-mount'
+import { presetMock, setupPresetPageTest, teardownPresetPage } from '../helpers/preset-page-mock'
 
 import PiPresetsPage from '@/components/settings/preset/PiPresetsPage.vue'
 import { usePresetStore } from '@/stores/preset'
-import { useToast } from '@/composables/useToast'
 
 /** 预设 fixture（共有基础字段与 promptPreset 收敛 helpers/preset-page-mount 单源） */
 function builtinPreset(): PiLaunchPreset {
@@ -75,19 +55,13 @@ function customPreset(): PiLaunchPreset {
 
 let wrapper: ReturnType<typeof mount> | null = null
 
-beforeEach(() => {
-  setActivePinia(createPinia())
-  primePresetDefaults(presetMock)
-  const { toasts } = useToast()
-  toasts.value = []
-  // [C3] preset 域调用经 SettingsTransport seam 桩注入（接线收敛 helpers/preset-page-mount）
-  wirePresetTransport(presetMock)
-})
+// beforeEach 重置（pinia / mock 默认 impl / toast / transport 桩）+ mock 注册单源在
+// helpers/preset-page-mock（import 即注册）
+setupPresetPageTest()
 
 afterEach(() => {
-  wrapper?.unmount()
+  teardownPresetPage(wrapper)
   wrapper = null
-  document.body.innerHTML = ''
 })
 
 describe('PiPresetsPage 首屏冒烟', () => {

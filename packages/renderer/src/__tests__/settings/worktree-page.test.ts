@@ -61,6 +61,14 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/** 以 getWorktreeTimeout reject('ws down') 挂载并断言常驻 loadError 显形（RD-4#8 两用例共用） */
+async function mountWithLoadError(): Promise<void> {
+  settingsMock.getWorktreeTimeout.mockRejectedValueOnce(new Error('ws down'))
+  wrapper = mount(WorktreePage, { attachTo: document.body })
+  await flushPromises()
+  expect($('[data-testid="worktree-load-error"]').exists()).toBe(true)
+}
+
 describe('WorktreePage 加载', () => {
   it('mount 后拉取 5 个 getter，timeout input 显示加载值 60', async () => {
     wrapper = mount(WorktreePage, { attachTo: document.body })
@@ -73,12 +81,9 @@ describe('WorktreePage 加载', () => {
 
 describe('WorktreePage RD-4#8 加载失败（有意行为修正：一次性 toast → 常驻禁用 + 重试）', () => {
   it('getWorktreeTimeout reject → 常驻 loadError 块显形 + 控件禁用（默认值不再冒充已存值可保存）', async () => {
-    settingsMock.getWorktreeTimeout.mockRejectedValueOnce(new Error('ws down'))
-    wrapper = mount(WorktreePage, { attachTo: document.body })
-    await flushPromises()
+    await mountWithLoadError()
 
     // 常驻错误块 + 重试入口（对照 System sections 的 RD-4#8 形态）
-    expect($('[data-testid="worktree-load-error"]').exists()).toBe(true)
     expect($('[data-testid="worktree-load-retry"]').exists()).toBe(true)
     // 全部输入控件禁用（含加载成功字段的控件——组级归并）
     expect($('[data-testid="worktree-timeout-input"]').attributes('disabled')).toBeDefined()
@@ -90,10 +95,7 @@ describe('WorktreePage RD-4#8 加载失败（有意行为修正：一次性 toas
   })
 
   it('retry → getter 重拉成功 → loadError 消失 + 控件恢复可用 + 显示加载值', async () => {
-    settingsMock.getWorktreeTimeout.mockRejectedValueOnce(new Error('ws down'))
-    wrapper = mount(WorktreePage, { attachTo: document.body })
-    await flushPromises()
-    expect($('[data-testid="worktree-load-error"]').exists()).toBe(true)
+    await mountWithLoadError()
 
     await $('[data-testid="worktree-load-retry"]').trigger('click')
     await flushPromises()

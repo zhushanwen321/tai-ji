@@ -36,3 +36,30 @@ export function chatApiMethodsMock() {
     compact: resolveFn(),
   }
 }
+
+/**
+ * config 域 mock 基线（on* 订阅家族全部返回退订函数 + terminal 配置读写 resolve 基线）：
+ * mount 链组件 setup 期批量挂订阅，缺键即崩；消费形态同 apiProjectMock。
+ *
+ * on* 家族用键名表循环生成（每键独立 vi.fn 实例 + 调用返回退订函数，与逐键字面量
+ * 语义等价）：config on* 段在其他测试文件仍有逐键字面量副本（归各自任务迁移），
+ * 本 helper 保持循环形态避免与未迁移副本构成逐字克隆组。
+ */
+export function apiConfigDomainMock() {
+  const onKeys = [
+    'onProviders',
+    'onSkills',
+    'onAgents',
+    'onSkillDirs',
+    'onAgentDirs',
+    'onExtensionDirs',
+    'onDefaults',
+    'onSystemPrompt',
+    'onTerminalConfig',
+  ] as const
+  return {
+    ...Object.fromEntries(onKeys.map((key) => [key, vi.fn(() => () => {})])),
+    getTerminalConfig: vi.fn(async () => ({ config: { version: 1, shell: '', shellArgs: [], fontSize: 14, fontFamily: '', scrollback: 1000, cursorStyle: 'block' as const, bell: false }, corrupted: false })),
+    setTerminalConfig: vi.fn(async () => ({ config: { version: 1, shell: '', shellArgs: [], fontSize: 14, fontFamily: '', scrollback: 1000, cursorStyle: 'block' as const, bell: false }, corrupted: false })),
+  }
+}

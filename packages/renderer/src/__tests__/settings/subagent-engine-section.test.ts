@@ -43,6 +43,15 @@ function mountSection() {
   })
 }
 
+/** 挂载前注入一次引擎读取失败，断言 loadError 已显形（两个重试用例的共同前奏）。 */
+async function mountWithLoadFailure(): Promise<ReturnType<typeof mountSection>> {
+  sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down'))
+  const wrapper = mountSection()
+  await flushPromises()
+  expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(true)
+  return wrapper
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   // 清空全局 toasts（useToast 模块级单例，跨用例共享）
@@ -139,10 +148,7 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
   })
 
   it('RD-4#8：重试成功后清除 loadError + 控件恢复可用', async () => {
-    sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down'))
-    const wrapper = mountSection()
-    await flushPromises()
-    expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(true)
+    const wrapper = await mountWithLoadFailure()
 
     // 重试：mock 改成功
     sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({ engines: ['pi', 'zcode'], defaultEngine: 'zcode' })
@@ -156,10 +162,7 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
   })
 
   it('RD-4#8：重试仍失败 → loadError 保持 + 控件保持禁用（占位值不冒充已存值）', async () => {
-    sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down'))
-    const wrapper = mountSection()
-    await flushPromises()
-    expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(true)
+    const wrapper = await mountWithLoadFailure()
 
     // 重试：mock 依旧失败
     sessionApiMock.getSubagentEngineConfig.mockRejectedValueOnce(new Error('ws down again'))

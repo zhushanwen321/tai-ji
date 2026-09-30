@@ -22,6 +22,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { NormalizedQuotaRow, ProviderId, ProviderInfo } from '@taiji/shared'
+import { apiConfigDomainMock } from '../helpers/api-facade-mock'
 
 // ── mock ──
 
@@ -30,19 +31,8 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   // mock 为永不 resolve 的 pending（本文件只测 quota 区与帧直驱显示，恢复腿行为在
   // use-context-usage.test.ts / context-usage-journeys.test.ts 覆盖）
   session: { getContext: vi.fn(() => new Promise(() => {})) },
-  config: {
-    onProviders: vi.fn(() => () => {}),
-    onSkills: vi.fn(() => () => {}),
-    onAgents: vi.fn(() => () => {}),
-    onSkillDirs: vi.fn(() => () => {}),
-    onAgentDirs: vi.fn(() => () => {}),
-    onExtensionDirs: vi.fn(() => () => {}),
-    onDefaults: vi.fn(() => () => {}),
-    onSystemPrompt: vi.fn(() => () => {}),
-    onTerminalConfig: vi.fn(() => () => {}),
-    getTerminalConfig: vi.fn(async () => ({ config: { version: 1, shell: '', shellArgs: [], fontSize: 14, fontFamily: '', scrollback: 1000, cursorStyle: 'block' as const, bell: false }, corrupted: false })),
-    setTerminalConfig: vi.fn(async () => ({ config: { version: 1, shell: '', shellArgs: [], fontSize: 14, fontFamily: '', scrollback: 1000, cursorStyle: 'block' as const, bell: false }, corrupted: false })),
-  },
+  // config 域基座单源在 helpers/api-facade-mock.ts（on* 订阅家族 + terminal 读写基线）
+  config: apiConfigDomainMock(),
   model: { onModels: vi.fn(() => () => {}) },
   extension: { onExtensions: vi.fn(() => () => {}) },
   settings: {
@@ -356,6 +346,26 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       )
     }
 
+    /**
+     * 刷新三分支用例公共骨架：打开 popover → 点「刷新」→ flush → 读回 store entry。
+     * afterOpen 在点击前回调（插入点击前的 DOM 前置锚断言）；entry 的 toBeDefined
+     * 断言在此单源执行。返回 wrapper 供用例收尾 unmount 与后续 DOM 断言。
+     */
+    async function refreshAndReadEntry(afterOpen?: () => void): Promise<{
+      wrapper: ReturnType<typeof mount>
+      entry: NonNullable<ReturnType<ReturnType<typeof useQuotaStore>['getEntry']>>
+    }> {
+      const wrapper = await openPopover()
+      afterOpen?.()
+      const refreshBtn = findBodyButton('刷新')
+      expect(refreshBtn).toBeTruthy()
+      refreshBtn!.click()
+      await flushPromises()
+      const entry = useQuotaStore().getEntry('zhipu')
+      expect(entry).toBeDefined()
+      return { wrapper, entry: entry! }
+    }
+
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     })
@@ -371,18 +381,11 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       quotaStore.setCache('zhipu', mockQuotaRow, 500)
       vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: null, lastFetchAt: 500, reason: 'unauthorized' })
 
-      const wrapper = await openPopover()
-
-      const refreshBtn = findBodyButton('刷新')
-      expect(refreshBtn).toBeTruthy()
-      refreshBtn!.click()
-      await flushPromises()
+      const { wrapper, entry } = await refreshAndReadEntry()
 
       // 失败态（R2-S）：保留旧 data 不覆写为 null，error 写 reason 文案
-      const entry = quotaStore.getEntry('zhipu')
-      expect(entry).toBeDefined()
-      expect(entry!.data).toEqual(mockQuotaRow)
-      expect(entry!.error).toBe('panel.context.quotaFailUnauthorized')
+      expect(entry.data).toEqual(mockQuotaRow)
+      expect(entry.error).toBe('panel.context.quotaFailUnauthorized')
       wrapper.unmount()
     })
 
@@ -398,22 +401,15 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       }
       vi.mocked(quotaApi.refreshQuota).mockResolvedValue({ data: freshRow, lastFetchAt: 2000 })
 
-      const wrapper = await openPopover()
-
-      // 点击前失败态可见（用户可见 DOM 前置锚）
-      expect(document.body.textContent).toContain('查询失败：panel.context.quotaFailNetwork')
-
-      const refreshBtn = findBodyButton('刷新')
-      expect(refreshBtn).toBeTruthy()
-      refreshBtn!.click()
-      await flushPromises()
+      const { wrapper, entry } = await refreshAndReadEntry(() => {
+        // 点击前失败态可见（用户可见 DOM 前置锚）
+        expect(document.body.textContent).toContain('查询失败：panel.context.quotaFailNetwork')
+      })
 
       // 成功分支：新 data + lastFetchAt 写入，error 清空
-      const entry = quotaStore.getEntry('zhipu')
-      expect(entry).toBeDefined()
-      expect(entry!.data).toEqual(freshRow)
-      expect(entry!.lastFetchAt).toBe(2000)
-      expect(entry!.error).toBeNull()
+      expect(entry.data).toEqual(freshRow)
+      expect(entry.lastFetchAt).toBe(2000)
+      expect(entry.error).toBeNull()
       // 用户可见 DOM：失败提示随 error 清空退出
       expect(document.body.textContent).not.toContain('查询失败：panel.context.quotaFailNetwork')
       wrapper.unmount()
@@ -425,18 +421,11 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       quotaStore.setCache('zhipu', mockQuotaRow, 500)
       vi.mocked(quotaApi.refreshQuota).mockRejectedValue(new Error('boom'))
 
-      const wrapper = await openPopover()
-
-      const refreshBtn = findBodyButton('刷新')
-      expect(refreshBtn).toBeTruthy()
-      refreshBtn!.click()
-      await flushPromises()
+      const { wrapper, entry } = await refreshAndReadEntry()
 
       // 异常分支：旧 data 保留，error 写异常消息
-      const entry = quotaStore.getEntry('zhipu')
-      expect(entry).toBeDefined()
-      expect(entry!.data).toEqual(mockQuotaRow)
-      expect(entry!.error).toBe('boom')
+      expect(entry.data).toEqual(mockQuotaRow)
+      expect(entry.error).toBe('boom')
       // 用户可见 DOM：失败提示带异常消息
       expect(document.body.textContent).toContain('查询失败：boom')
       // refreshing 复位：按钮文案回到「刷新」且不再禁用（可再次点击）

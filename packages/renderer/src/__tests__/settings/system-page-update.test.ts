@@ -41,6 +41,12 @@ function setTestState(partial: Partial<UpdateAppState>): void {
   Object.assign(getCardUpdateHarness().controller.state, partial)
 }
 
+/** 断言 force 检查恰好执行一次（TC2/TC7 共用断言对） */
+function expectForceCheckCalledOnce(): void {
+  expect(getCardUpdateHarness().ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+  expect(getCardUpdateHarness().ipc.checkForUpdate).toHaveBeenCalledWith({ force: true })
+}
+
 let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
@@ -69,8 +75,7 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     wrapper = mount(UpdateCheckCard)
     await flushPromises()
     await wrapper.find('[data-testid="settings-update-check"]').trigger('click')
-    expect(getCardUpdateHarness().ipc.checkForUpdate).toHaveBeenCalledTimes(1)
-    expect(getCardUpdateHarness().ipc.checkForUpdate).toHaveBeenCalledWith({ force: true })
+    expectForceCheckCalledOnce()
   })
 
   it('TC3：checking 态按钮 loading + disabled', async () => {
@@ -148,8 +153,7 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     expect(retryBtn.exists()).toBe(true)
     expect(retryBtn.text()).toContain('重试')
     await retryBtn.trigger('click')
-    expect(getCardUpdateHarness().ipc.checkForUpdate).toHaveBeenCalledTimes(1)
-    expect(getCardUpdateHarness().ipc.checkForUpdate).toHaveBeenCalledWith({ force: true })
+    expectForceCheckCalledOnce()
   })
 
   it('TC8：unsupported 态显示前往下载按钮，click 调 openFallbackUrl', async () => {

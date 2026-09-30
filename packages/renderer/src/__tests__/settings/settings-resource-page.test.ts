@@ -46,6 +46,18 @@ function mountPage(kind: 'skill' | 'agent') {
   })
 }
 
+/** 挂载指定 kind 的页面并点「刷新」按钮（两用例共同编排；scan 断言留在各用例）。 */
+async function mountAndClickRefresh(kind: 'skill' | 'agent') {
+  const w = mountPage(kind)
+  wrapper = w
+  await flushPromises()
+
+  const refreshBtn = w.findAll('button').find((b) => b.text() === '刷新')
+  expect(refreshBtn).toBeTruthy()
+  await refreshBtn!.trigger('click')
+  await flushPromises()
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   scanMock.scanSkills.mockClear()
@@ -61,13 +73,7 @@ afterEach(() => {
 
 describe('SettingsResourcePage 刷新扫描（transport seam）', () => {
   it('skill 页点「刷新」→ scanSkills 只传 enabled 目录路径', async () => {
-    wrapper = mountPage('skill')
-    await flushPromises()
-
-    const refreshBtn = wrapper.findAll('button').find((b) => b.text() === '刷新')
-    expect(refreshBtn).toBeTruthy()
-    await refreshBtn!.trigger('click')
-    await flushPromises()
+    await mountAndClickRefresh('skill')
 
     expect(scanMock.scanSkills).toHaveBeenCalledTimes(1)
     expect(scanMock.scanSkills).toHaveBeenCalledWith(['/enabled/first', '/enabled/third'])
@@ -75,13 +81,7 @@ describe('SettingsResourcePage 刷新扫描（transport seam）', () => {
   })
 
   it('agent 页点「刷新」→ scanAgents 被调（kind 驱动 API 差异内聚）', async () => {
-    wrapper = mountPage('agent')
-    await flushPromises()
-
-    const refreshBtn = wrapper.findAll('button').find((b) => b.text() === '刷新')
-    expect(refreshBtn).toBeTruthy()
-    await refreshBtn!.trigger('click')
-    await flushPromises()
+    await mountAndClickRefresh('agent')
 
     expect(scanMock.scanAgents).toHaveBeenCalledTimes(1)
     expect(scanMock.scanAgents).toHaveBeenCalledWith(['/enabled/first', '/enabled/third'])

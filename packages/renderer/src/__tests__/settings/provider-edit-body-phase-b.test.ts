@@ -37,6 +37,7 @@ import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { inMemoryStorage } from '../helpers/platform-storage-stub'
 
 // [C3] useQuotaConfigure 经 SettingsTransport seam 消费 quota RPC——本域模块 mock 作为 seam 桩
 // 函数源（getCachedQuota / configureQuota / refreshQuota 逐名映射，见 makeTransport）。
@@ -105,14 +106,7 @@ function makeTransport(): SettingsTransport {
   })
 }
 
-function inMemoryStorage() {
-  const map = new Map<string, string>()
-  return {
-    get: async (k: string) => map.get(k) ?? null,
-    set: async (k: string, v: string) => { map.set(k, v) },
-    remove: async (k: string) => { map.delete(k) },
-  }
-}
+// in-memory KVStorage 桩单源在 helpers/platform-storage-stub（providePlatform storage 形状）
 
 let wrapper: ReturnType<typeof mount> | null = null
 

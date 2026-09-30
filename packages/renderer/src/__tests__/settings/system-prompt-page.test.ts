@@ -9,61 +9,32 @@
  *  - 放弃/恢复默认：dirty 才可用，discard 还原已保存快照、reset 清空关开关。
  *  - corrupted：getSystemPrompt 返回 corrupted=true → 页内出现损坏提示。
  *
- * mock 策略：
- *  - SettingsTransport seam 桩提供 getSystemPrompt / setSystemPrompt（[C3] 测试打 seam），
- *    以及 SettingsModal/store 需要的 config.listProviders / setSkillDirs / setAgentDirs。
+ * mock 策略（捕获单例 + 脚手架单源在 helpers/system-prompt-page-harness.ts，与
+ * default-prompt-reference.test.ts 共用）：
+ *  - vi.mock('@/api') 工厂转发 harness 的 systemPromptApiModule（config/settings 捕获单例 +
+ *    project 桩）；SettingsTransport seam 桩提供 getSystemPrompt / setSystemPrompt（[C3] 测试
+ *    打 seam），以及 SettingsModal/store 需要的 config.listProviders / setSkillDirs / setAgentDirs。
  *  - vi.mock('@/i18n') 仅 stub setLocale，保留 t 行为（菜单 key 未翻译时回退 key）。
  *  - Dialog / DialogContent 走 reka-ui teleport 到 body，查询走 document.body。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/system-prompt-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
+import { describe, it, expect, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
+import {
+  $,
+  hasTestId,
+  openSettingsModalPage,
+  setupSystemPromptPageHarness,
+  systemPromptApiModule,
+  systemPromptConfigMock as configMock,
+  systemPromptDefaultConfig as defaultConfig,
+  type SystemPromptConfig,
+} from '../helpers/system-prompt-page-harness'
+import { expectCorruptedHint, expectErrorToastSaved } from '../helpers/settings-page-asserts'
 import { useToast } from '@/composables/useToast'
-import { provideSettingsTransport } from '@taiji/core'
-import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
-interface SystemPromptConfig {
-  version: number
-  replace: { enabled: boolean; prompt: string }
-  append: { enabled: boolean; prompt: string }
-}
-
-function defaultConfig(): SystemPromptConfig {
-  return {
-    version: 1,
-    replace: { enabled: false, prompt: '' },
-    append: { enabled: false, prompt: '' },
-  }
-}
-
-const configMock = vi.hoisted(() => ({
-  getSystemPrompt: vi.fn(() => Promise.resolve({ config: defaultConfig(), corrupted: false })),
-  setSystemPrompt: vi.fn((cfg: SystemPromptConfig) => Promise.resolve({ config: cfg, corrupted: false })),
-  listProviders: vi.fn(() => Promise.resolve({ providers: [] })),
-  // SettingsModal → ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
-  refreshProviderCatalogs: vi.fn(() => Promise.resolve({ refreshed: [], failed: [] })),
-  setSkillDirs: vi.fn(() => Promise.resolve()),
-  setAgentDirs: vi.fn(() => Promise.resolve()),
-  // wave-oauth：SettingsModal → ProviderPage → useProviderOAuth onMounted 订阅 4 个 auth.* 事件（缺则 TypeError 崩 mount）
-  onAuthDeviceCode: vi.fn(() => () => {}),
-  onAuthAuthUrl: vi.fn(() => () => {}),
-  onAuthSuccess: vi.fn(() => () => {}),
-  onAuthError: vi.fn(() => () => {}),
-  // P2：ProviderPage 默认 pill + 默认修复 toast（缺则 TypeError 崩 mount）
-  onDefaultsWithSource: vi.fn(() => () => {}),
-}))
-
-const settingsMock = vi.hoisted(() => ({
-  getSystem: vi.fn(() => Promise.resolve({ locale: 'zh-CN', theme: 'dark', themePreset: 'cold-blue' })),
-  updateSystem: vi.fn(() => Promise.resolve()),
-}))
-
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  config: configMock,
-  settings: settingsMock,
-}))
+vi.mock('@/api', () => systemPromptApiModule())
 
 vi.mock('@/i18n', async (importOriginal) => ({
   ...((await importOriginal()) as object),
@@ -72,53 +43,32 @@ vi.mock('@/i18n', async (importOriginal) => ({
 
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 
-let wrapper: ReturnType<typeof mount> | null = null
+// 脚手架（beforeEach 重置/transport 桩 + afterEach 卸载清 body）单源在 helpers/system-prompt-page-harness.ts
+setupSystemPromptPageHarness()
 
-/** 在 teleport 目标 document.body 中查找元素并包装成 DOMWrapper */
-function $(selector: string): DOMWrapper<Element> {
-  const node = document.body.querySelector(selector)
-  expect(node).toBeTruthy()
-  return new DOMWrapper(node!)
-}
-
-/** 检查 document.body 中是否存在指定 data-testid 的元素 */
-function hasTestId(id: string): boolean {
-  return document.body.querySelector(`[data-testid="${id}"]`) !== null
-}
-
-beforeEach(() => {
-  setActivePinia(createPinia())
-  const { toasts } = useToast()
-  toasts.value = []
-  configMock.getSystemPrompt.mockClear()
-  configMock.setSystemPrompt.mockClear()
-  configMock.listProviders.mockClear()
-  provideSettingsTransport(makeSettingsTransportStub(configMock))
-})
-
-afterEach(() => {
-  wrapper?.unmount()
-  wrapper = null
-  document.body.innerHTML = ''
-})
-
-/**
- * 打开 SettingsModal 并切换到「系统提示词」菜单。
- * 用 nav 按钮顺序定位（systemPrompt 是第 5 个菜单项，index 4），不依赖 textContent。
- */
+/** 打开 SettingsModal 并切换到「系统提示词」菜单（挂载/切换编排单源在 helpers/system-prompt-page-harness.ts） */
 async function openSystemPromptPage(): Promise<void> {
-  wrapper = mount(SettingsModal, {
-    props: { open: true },
-    attachTo: document.body,
-  })
-  await flushPromises()
+  await openSettingsModalPage(SettingsModal, 'system-prompt')
+}
 
-  // 用 data-testid 定位（menus 已标注 settings-nav-${id}），不依赖 nav button 索引——
-  // 索引定位会因 nav 内新增非菜单按钮（如顶部退出按钮）而整体偏移，脆弱。
-  const systemPromptBtn = document.body.querySelector('[data-testid="settings-nav-system-prompt"]')
-  expect(systemPromptBtn).toBeTruthy()
-  systemPromptBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+/** 点保存 → flush → 断言 setSystemPrompt 恰好一次，返回首调 payload（替换/追加卡共用） */
+async function saveAndGetPayload(selector: string): Promise<SystemPromptConfig> {
+  await $(selector).trigger('click')
   await flushPromises()
+  expect(configMock.setSystemPrompt).toHaveBeenCalledTimes(1)
+  return configMock.setSystemPrompt.mock.calls[0]![0] as SystemPromptConfig
+}
+
+/** 预置「已保存替换提示词」的已存态 stub（放弃/恢复默认两用例的公共基线） */
+function stubSavedReplacePrompt(): void {
+  configMock.getSystemPrompt.mockResolvedValueOnce({
+    config: {
+      version: 1,
+      replace: { enabled: true, prompt: '已保存的提示词' },
+      append: { enabled: false, prompt: '' },
+    },
+    corrupted: false,
+  })
 }
 
 describe('SystemPromptPage 渲染 gate', () => {
@@ -169,11 +119,7 @@ describe('SystemPromptPage 保存交互', () => {
     // 在替换 textarea 输入文本
     await $('[data-testid="system-prompt-replace-input"]').setValue('自定义系统提示词')
     // 点击保存
-    await $('[data-testid="system-prompt-replace-save"]').trigger('click')
-    await flushPromises()
-
-    expect(configMock.setSystemPrompt).toHaveBeenCalledTimes(1)
-    const payload = configMock.setSystemPrompt.mock.calls[0]![0] as SystemPromptConfig
+    const payload = await saveAndGetPayload('[data-testid="system-prompt-replace-save"]')
     expect(payload.replace.enabled).toBe(true)
     expect(payload.replace.prompt).toBe('自定义系统提示词')
 
@@ -200,11 +146,7 @@ describe('SystemPromptPage 保存交互', () => {
     // 开启追加开关 + 输入追加文本 + 点追加卡保存按钮（与替换卡共用同一 createExplicitSave 动作）
     await $('[data-testid="system-prompt-append-switch"]').trigger('click')
     await $('[data-testid="system-prompt-append-input"]').setValue('追加段落内容')
-    await $('[data-testid="system-prompt-append-save"]').trigger('click')
-    await flushPromises()
-
-    expect(configMock.setSystemPrompt).toHaveBeenCalledTimes(1)
-    const payload = configMock.setSystemPrompt.mock.calls[0]![0] as SystemPromptConfig
+    const payload = await saveAndGetPayload('[data-testid="system-prompt-append-save"]')
     expect(payload.append.enabled).toBe(true)
     expect(payload.append.prompt).toBe('追加段落内容')
 
@@ -223,12 +165,8 @@ describe('SystemPromptPage 保存交互', () => {
 
     await $('[data-testid="system-prompt-replace-switch"]').trigger('click')
     await $('[data-testid="system-prompt-replace-input"]').setValue('任意文本')
-    await $('[data-testid="system-prompt-replace-save"]').trigger('click')
-    await flushPromises()
-
-    expect(configMock.setSystemPrompt).toHaveBeenCalledTimes(1)
-    const { toasts } = useToast()
-    expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('保存失败'))).toBe(true)
+    await saveAndGetPayload('[data-testid="system-prompt-replace-save"]')
+    expectErrorToastSaved('保存失败')
   })
 
   it('RD-4#7：保存 in-flight 期间保存按钮禁用（saving 守卫，防 65s 窗口重复点击并发覆盖）', async () => {
@@ -242,9 +180,7 @@ describe('SystemPromptPage 保存交互', () => {
 
     await $('[data-testid="system-prompt-replace-switch"]').trigger('click')
     await $('[data-testid="system-prompt-replace-input"]').setValue('自定义提示词')
-    await $('[data-testid="system-prompt-replace-save"]').trigger('click')
-    await flushPromises()
-    expect(configMock.setSystemPrompt).toHaveBeenCalledTimes(1)
+    await saveAndGetPayload('[data-testid="system-prompt-replace-save"]')
     // in-flight：保存按钮禁用（!replaceDirty || saving）
     expect(($('[data-testid="system-prompt-replace-save"]').element as HTMLButtonElement).disabled).toBe(true)
 
@@ -254,14 +190,7 @@ describe('SystemPromptPage 保存交互', () => {
   })
 
   it('修改后点「放弃」还原已保存快照，编辑态回退且保存按钮禁用', async () => {
-    configMock.getSystemPrompt.mockResolvedValueOnce({
-      config: {
-        version: 1,
-        replace: { enabled: true, prompt: '已保存的提示词' },
-        append: { enabled: false, prompt: '' },
-      },
-      corrupted: false,
-    })
+    stubSavedReplacePrompt()
 
     await openSystemPromptPage()
 
@@ -281,14 +210,7 @@ describe('SystemPromptPage 保存交互', () => {
   })
 
   it('替换卡「恢复默认」清空文本并关开关（编辑态，需保存生效）', async () => {
-    configMock.getSystemPrompt.mockResolvedValueOnce({
-      config: {
-        version: 1,
-        replace: { enabled: true, prompt: '已保存的提示词' },
-        append: { enabled: false, prompt: '' },
-      },
-      corrupted: false,
-    })
+    stubSavedReplacePrompt()
 
     await openSystemPromptPage()
 
@@ -313,9 +235,6 @@ describe('SystemPromptPage corrupted 提示', () => {
 
     await openSystemPromptPage()
 
-    const page = document.body.querySelector('[data-testid="system-prompt-page"]')
-    expect(page).toBeTruthy()
-    const text = page!.textContent ?? ''
-    expect(text.includes('已损坏') || text.includes('回退默认') || text.includes('损坏')).toBe(true)
+    expectCorruptedHint('system-prompt-page')
   })
 })

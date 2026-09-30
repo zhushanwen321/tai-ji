@@ -7,37 +7,23 @@
  *  - user：全部操作可见（禁/卸/升级/autoUpgrade）
  *
  * mock 策略：
- *  - vi.mock('@/api') 把 extension 门面替成可断言的 mock（fetchRecommended 空数组避免 onMounted 拉取报错）。
+ *  - extension 门面捕获单例 + '@/api' mock 工厂 + seam 桩接线单源在
+ *    helpers/extension-page-harness（fetchRecommended 空数组避免 onMounted 拉取报错）。
  *  - i18n 由 vitest-i18n-setup.ts 全局 mock（从 zh-CN locale 取值），故 mandatoryBadge 渲染为「内置」。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/extension-page-mandatory.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
 import type { ExtensionItem } from '@taiji/core'
-import { provideSettingsTransport } from '@taiji/core'
-import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import {
+  extensionApiMock,
+  extensionApiModule,
+  setupExtensionPageTest,
+  teardownExtensionPage,
+} from '../helpers/extension-page-harness'
 
-const extensionMock = vi.hoisted(() => ({
-  fetchRecommended: vi.fn(() => Promise.resolve([])),
-  onExtensions: vi.fn(() => () => {}),
-  toggle: vi.fn(() => Promise.resolve()),
-  install: vi.fn(() => Promise.resolve()),
-  installDir: vi.fn(() => Promise.resolve()),
-  installGitRepository: vi.fn(() => Promise.resolve()),
-  cancelInstall: vi.fn(() => Promise.resolve()),
-  finishInstall: vi.fn(() => Promise.resolve()),
-  uninstall: vi.fn(() => Promise.resolve()),
-  upgrade: vi.fn(() => Promise.resolve()),
-  setAutoUpgrade: vi.fn(() => Promise.resolve()),
-}))
-
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  extension: extensionMock,
-  default: { extension: extensionMock },
-  config: { detectSources: async () => [] },
-}))
+vi.mock('@/api', () => extensionApiModule())
 
 import ExtensionPage from '@/components/settings/extension/ExtensionPage.vue'
 import { useToast } from '@/composables/useToast'
@@ -95,32 +81,12 @@ function userExt(): ExtensionItem {
 
 let wrapper: ReturnType<typeof mount> | null = null
 
-beforeEach(() => {
-  setActivePinia(createPinia())
-  vi.clearAllMocks()
-  // 清空全局 toasts（useToast 是模块级单例，跨用例共享）
-  const { toasts } = useToast()
-  toasts.value = []
-  // [C3] extension 域调用经 SettingsTransport seam 桩注入（旧名→seam 域前缀名逐名映射）
-  provideSettingsTransport(makeSettingsTransportStub({
-    fetchRecommendedExtensions: extensionMock.fetchRecommended,
-    toggleExtension: extensionMock.toggle,
-    installExtension: extensionMock.install,
-    installExtensionDir: extensionMock.installDir,
-    installExtensionGitRepository: extensionMock.installGitRepository,
-    finishExtensionInstall: extensionMock.finishInstall,
-    cancelExtensionInstall: extensionMock.cancelInstall,
-    uninstallExtension: extensionMock.uninstall,
-    upgradeExtension: extensionMock.upgrade,
-    setExtensionAutoUpgrade: extensionMock.setAutoUpgrade,
-    onExtensions: extensionMock.onExtensions,
-  }))
-})
+// beforeEach 重置（pinia / mock 计数 / toast / transport 桩）单源在 helpers/extension-page-harness
+setupExtensionPageTest()
 
 afterEach(() => {
-  wrapper?.unmount()
+  teardownExtensionPage(wrapper)
   wrapper = null
-  document.body.innerHTML = ''
 })
 
 /**
@@ -133,6 +99,15 @@ function findExtRow(root: ReturnType<typeof mount>, name: string) {
   return rows.find((r) => r.text().includes(name))
 }
 
+/** builtin 行共同断言：卸载/升级按钮隐藏 + autoUpgrade 文案不出现（开关行整体被 v-if 隐藏） */
+function expectBuiltinRowHidesActions(row: NonNullable<ReturnType<typeof findExtRow>>): void {
+  // 卸载/升级按钮隐藏（builtin 不可卸，由 runtime 自动升级）
+  expect(row.findAll('button[title="卸载"]')).toHaveLength(0)
+  expect(row.findAll('button[title="升级"]')).toHaveLength(0)
+  // autoUpgrade 文案不应出现（开关行整体被 v-if 隐藏）
+  expect(row.text()).not.toContain('自动升级')
+}
+
 describe('ExtensionPage 三层权限矩阵 UI', () => {
   it('infrastructure builtin 显示「内置」badge + 隐藏启用开关 + 隐藏卸载/升级/autoUpgrade', async () => {
     wrapper = mount(ExtensionPage, { props: { extensions: [infraBuiltinExt()] } })
@@ -143,11 +118,7 @@ describe('ExtensionPage 三层权限矩阵 UI', () => {
     expect(row!.text()).toContain('内置')
     // 启用开关隐藏（infrastructure 不可禁）
     expect(row!.findAll('button[role="switch"]')).toHaveLength(0)
-    // 卸载/升级按钮隐藏
-    expect(row!.findAll('button[title="卸载"]')).toHaveLength(0)
-    expect(row!.findAll('button[title="升级"]')).toHaveLength(0)
-    // autoUpgrade 文案不应出现（开关行整体被 v-if 隐藏）
-    expect(row!.text()).not.toContain('自动升级')
+    expectBuiltinRowHidesActions(row!)
   })
 
   it('feature builtin 显示「内置」badge + 显示启用开关（可禁）+ 隐藏卸载/升级/autoUpgrade', async () => {
@@ -159,11 +130,7 @@ describe('ExtensionPage 三层权限矩阵 UI', () => {
     expect(row!.text()).toContain('内置')
     // 启用开关可见（feature builtin 可禁，翻转原 mandatory 行为）
     expect(row!.findAll('button[role="switch"]')).toHaveLength(1)
-    // 卸载/升级按钮隐藏（builtin 不可卸，由 runtime 自动升级）
-    expect(row!.findAll('button[title="卸载"]')).toHaveLength(0)
-    expect(row!.findAll('button[title="升级"]')).toHaveLength(0)
-    // autoUpgrade 文案不应出现（开关行整体被 v-if 隐藏）
-    expect(row!.text()).not.toContain('自动升级')
+    expectBuiltinRowHidesActions(row!)
   })
 
   it('user 扩展全部操作可见（禁/卸/升级/autoUpgrade）+ 无「内置」badge', async () => {
@@ -195,7 +162,7 @@ describe('ExtensionPage 三层权限矩阵 UI', () => {
     // fetchRecommended 默认 resolve([]) → recommended.length === 0 → section 不渲染
     wrapper = mount(ExtensionPage, { props: { extensions: [] } })
     await flushPromises()
-    expect(extensionMock.fetchRecommended).toHaveBeenCalled()
+    expect(extensionApiMock.fetchRecommended).toHaveBeenCalled()
     // 推荐区标题「推荐扩展」不应出现在 DOM
     expect(wrapper!.text()).not.toContain('推荐扩展')
   })

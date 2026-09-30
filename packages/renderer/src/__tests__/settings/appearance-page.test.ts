@@ -27,6 +27,7 @@ import {
   terminalConfigMock as configMock,
   trackBodyMount,
 } from '../helpers/terminal-config-harness'
+import { pickRekaOption } from '../helpers/reka-select-harness'
 import { DEFAULT_SYSTEM } from '@taiji/core'
 import type { TerminalConfig } from '@taiji/shared'
 
@@ -77,23 +78,8 @@ describe('AppearancePage 渲染 gate', () => {
 })
 
 describe('AppearancePage Select 载荷守卫（reka Select 交互 → update emit）', () => {
-  /** 打开指定 trigger 的下拉（reka Select：pointerdown 打开，SelectPortal teleport 到 body） */
-  async function openDropdown(trigger: Element): Promise<HTMLElement[]> {
-    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-    ;(trigger as HTMLElement).click()
-    await flushPromises()
-    return Array.from(document.body.querySelectorAll('[role="option"]')) as HTMLElement[]
-  }
-
-  /** 在已打开下拉中点选指定文案 option（同 update-page-source.test.ts 交互模式） */
-  async function pickOption(trigger: Element, label: string): Promise<void> {
-    const options = await openDropdown(trigger)
-    const target = options.find((el) => (el.textContent ?? '').includes(label))
-    expect(target, `option "${label}" should exist in dropdown`).toBeTruthy()
-    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-    target!.click()
-    await flushPromises()
-  }
+  // reka Select 真实交互（pointerdown 开下拉 + option 点选）单源在 helpers/reka-select-harness
+  // （原 pickOption/openDropdown 与 update-page-source.test.ts 逐字重复，收敛为 pickRekaOption）
 
   /** 按显示文案定位 SelectTrigger（theme/fontSize 的 trigger 无 testid，以 SelectValue 文案锚定） */
   function findTriggerByText(text: string): HTMLElement {
@@ -111,14 +97,14 @@ describe('AppearancePage Select 载荷守卫（reka Select 交互 → update emi
   it('外观模式 Select：点「浅色」→ emit update {theme:"light"}（isThemeMode 守卫收窄后放行）', async () => {
     wrapper = mountPage() // DEFAULT_SYSTEM theme=dark → trigger 显示「深色」
     await flushPromises()
-    await pickOption(findTriggerByText('深色'), '浅色')
+    await pickRekaOption(findTriggerByText('深色'), '浅色')
     expect(lastUpdate()).toEqual({ theme: 'light' })
   })
 
   it('全局字号 Select：点「大」→ emit update {fontSize:"large"}', async () => {
     wrapper = mountPage() // fontSize=medium → trigger 显示「中」
     await flushPromises()
-    await pickOption(findTriggerByText('中'), '大')
+    await pickRekaOption(findTriggerByText('中'), '大')
     expect(lastUpdate()).toEqual({ fontSize: 'large' })
   })
 
@@ -126,7 +112,7 @@ describe('AppearancePage Select 载荷守卫（reka Select 交互 → update emi
     wrapper = mountPage()
     await flushPromises()
     const trigger = wrapper!.find('[data-testid="appearance-fs-sidebar-trigger"]').element
-    await pickOption(trigger, '特大')
+    await pickRekaOption(trigger, '特大')
     expect(lastUpdate().fontScales).toEqual({ ...DEFAULT_SYSTEM.fontScales, sidebar: 'xlarge' })
   })
 })

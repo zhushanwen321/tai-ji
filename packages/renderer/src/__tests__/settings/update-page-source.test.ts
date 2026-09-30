@@ -9,58 +9,38 @@
  *  - 不触发 force 检查：切换只写偏好，checkForUpdate 不被调用（D3：生效以缓存 TTL 为界）
  *  - 失败回滚：setUpdateSettings reject → trigger 保持原选项 + toast error（不抛错）
  *
- * Mock 策略（同 update-page.test.ts，脚手架单源在 helpers/update-page-mount.ts）：
- *  - vi.mock('@/api/domains/settings') 捕获 getUpdateSettings/setUpdateSettings
- *  - vi.mock('@/composables/useToast') 隔离 toast
- *  - vi.mock('@/composables/features/settings/useAppUpdate')（UpdateCheckCard 唯一外部依赖，
- *    工厂注入真实控制器 createAppUpdateController + 内存 ipc——原内联动作 vi.fn 已收敛）
+ * Mock 策略（同 update-page.test.ts，单源）：
+ *  - 三条 vi.mock 注册收进 helpers/update-page-mocks.ts（import 即注册，副作用模块）；
+ *    脚手架（beforeEach 重置/默认值 + afterEach 卸载）单源在 helpers/update-page-mount.ts
  *  - Select 交互经 reka-ui 真实组件：pointerdown 打开下拉（SelectPortal teleport 到 body），
- *    在 document.body 找 [role="option"] 点选（同 settings/system-page-rename-model.test.ts）
+ *    在 document.body 找 [role="option"] 点选（交互序列单源在 helpers/reka-select-harness.ts）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/update-page-source.test.ts
  */
-import { describe, it, expect, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
+import { describe, it, expect } from 'vitest'
+import { flushPromises, type VueWrapper } from '@vue/test-utils'
+import '@/__tests__/helpers/update-page-mocks'
 import {
   getCardUpdateHarness,
   settingsMock,
   toastMock,
-  settingsApiModule,
-  toastMockModule,
-  useAppUpdateCardModule,
 } from '@/__tests__/helpers/update-card-mock'
 import { mountUpdatePage, setupUpdatePageLifecycle } from '@/__tests__/helpers/update-page-mount'
+import { openRekaDropdown, pickRekaOption } from '@/__tests__/helpers/reka-select-harness'
 
 // __APP_VERSION__ 在 vitest-i18n-setup.ts 全局 stub（'0.0.0-test'）
-
-// mock 捕获层单例在 helpers/update-card-mock.ts（原 vi.hoisted 块收敛）
-vi.mock('@/api/domains/settings', () => settingsApiModule())
-
-vi.mock('@/composables/useToast', () => toastMockModule())
-
-// UpdateCheckCard → useAppUpdate（真实 controller 面同 update-page）
-vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
 
 // 脚手架（beforeEach 重置/默认值 + afterEach 卸载清 body）单源在 helpers/update-page-mount.ts
 setupUpdatePageLifecycle()
 
-/** 打开 select-update-source 的下拉（reka-ui：pointerdown 打开，SelectPortal teleport 到 body） */
-async function openSourceDropdown(wrapper: ReturnType<typeof mountUpdatePage>): Promise<HTMLOptionElement[]> {
-  const trigger = wrapper.find('[data-testid="select-update-source"]').element as HTMLElement
-  trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-  trigger.click()
-  await flushPromises()
-  return Array.from(document.body.querySelectorAll('[role="option"]')) as HTMLOptionElement[]
+/** 打开 select-update-source 的下拉，返回全部 option（reka 交互序列单源在 helpers/reka-select-harness.ts） */
+async function openSourceDropdown(wrapper: VueWrapper): Promise<HTMLElement[]> {
+  return openRekaDropdown(wrapper.find('[data-testid="select-update-source"]').element)
 }
 
-/** 在已打开的下拉中点选指定文案的 option */
-async function pickOption(label: string, wrapper: ReturnType<typeof mountUpdatePage>): Promise<void> {
-  const options = await openSourceDropdown(wrapper)
-  const target = options.find((el) => (el.textContent ?? '').includes(label))
-  expect(target, `option "${label}" should exist in dropdown`).toBeTruthy()
-  target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-  target!.click()
-  await flushPromises()
+/** 在 select-update-source 的下拉中点选指定文案的 option（reka 交互序列同上单源） */
+async function pickOption(label: string, wrapper: VueWrapper): Promise<void> {
+  await pickRekaOption(wrapper.find('[data-testid="select-update-source"]').element, label)
 }
 
 describe('UpdatePage 预下载开关与代理表单保存（setting-field 编排）', () => {

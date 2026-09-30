@@ -150,6 +150,28 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/** 挂载 SystemAutoRenameSection 并展开指定 Select 下拉，返回 option 元素清单
+ *  （reka-ui SelectContent 仅 open 时挂载，teleport 到 body；happy-dom 需显式 dispatch）。 */
+async function mountAndOpenOptions(testid: string): Promise<HTMLElement[]> {
+  const w = mount(SystemAutoRenameSection)
+  wrapper = w
+  await flushPromises()
+  const trigger = w.find(`[data-testid="${testid}"]`).element as HTMLElement
+  trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+  trigger.click()
+  await flushPromises()
+  return Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'))
+}
+
+/** 在已展开的下拉选项中点选 label 匹配项（断言存在 → pointerup+click 选中 → flush）。 */
+async function pickOption(options: HTMLElement[], label: string): Promise<void> {
+  const target = options.find((el) => (el.textContent ?? '').includes(label))
+  expect(target).toBeTruthy()
+  target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+  target!.click()
+  await flushPromises()
+}
+
 describe('SystemAutoRenameSection 会话自动重命名开关', () => {
   it('mount 后 DOM 含 auto-rename Switch', async () => {
     wrapper = mount(SystemAutoRenameSection)
@@ -210,26 +232,13 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
   })
 
   it('下拉含三模式选项；点选 agent 自主命名 → setRenameMode 收到 "agent-tool"', async () => {
-    wrapper = mount(SystemAutoRenameSection)
-    await flushPromises()
-
-    // reka-ui SelectContent 仅 open 时挂载（teleport 到 body），happy-dom 需显式 dispatch
-    const trigger = wrapper.find('[data-testid="setting-rename-mode"]').element as HTMLElement
-    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-    trigger.click()
-    await flushPromises()
-
-    const options = document.body.querySelectorAll('[role="option"]')
-    const labels = Array.from(options).map((el) => el.textContent ?? '')
+    const options = await mountAndOpenOptions('setting-rename-mode')
+    const labels = options.map((el) => el.textContent ?? '')
     expect(labels).toContain('首次请求时')
     expect(labels).toContain('首轮回复完成')
     expect(labels).toContain('agent 自主命名')
 
-    const target = Array.from(options).find((el) => (el.textContent ?? '').includes('agent 自主命名'))
-    expect(target).toBeTruthy()
-    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-    target!.click()
-    await flushPromises()
+    await pickOption(options, 'agent 自主命名')
     expect(settingsMock.setRenameMode).toHaveBeenCalledWith('agent-tool')
     // 开关开（默认 true）→ 原「已生效」文案（toast 分流的正向对照）
     expect(toastMock.info).toHaveBeenCalledWith(expect.stringContaining('已生效'))
@@ -240,23 +249,11 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
     // UI 必须显示 reply 生效值（首轮回复完成），而非乐观更新的请求值（防本地与实际漂移）
     settingsMock.getRenameMode.mockResolvedValue({ mode: 'first-prompt' })
     settingsMock.setRenameMode.mockResolvedValue({ mode: 'first-stop' })
-    wrapper = mount(SystemAutoRenameSection)
-    await flushPromises()
-
-    const trigger = wrapper.find('[data-testid="setting-rename-mode"]').element as HTMLElement
-    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-    trigger.click()
-    await flushPromises()
-
-    const options = document.body.querySelectorAll('[role="option"]')
-    const target = Array.from(options).find((el) => (el.textContent ?? '').includes('agent 自主命名'))
-    expect(target).toBeTruthy()
-    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-    target!.click()
-    await flushPromises()
+    const options = await mountAndOpenOptions('setting-rename-mode')
+    await pickOption(options, 'agent 自主命名')
 
     expect(settingsMock.setRenameMode).toHaveBeenCalledWith('agent-tool')
-    const triggerAfter = wrapper.find('[data-testid="setting-rename-mode"]')
+    const triggerAfter = wrapper!.find('[data-testid="setting-rename-mode"]')
     expect(triggerAfter.text()).toContain('首轮回复完成')
     expect(triggerAfter.text()).not.toContain('agent 自主命名')
     expect(triggerAfter.text()).not.toContain('首次请求时')
@@ -279,23 +276,11 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
         ],
       },
     ]
-    wrapper = mount(SystemAutoRenameSection)
-    await flushPromises()
-
-    const trigger = wrapper.find('[data-testid="setting-rename-model"]').element as HTMLElement
-    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-    trigger.click()
-    await flushPromises()
-
-    const options = document.body.querySelectorAll('[role="option"]')
-    const target = Array.from(options).find((el) => (el.textContent ?? '').includes('prov/req-model'))
-    expect(target).toBeTruthy()
-    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-    target!.click()
-    await flushPromises()
+    const options = await mountAndOpenOptions('setting-rename-model')
+    await pickOption(options, 'prov/req-model')
 
     expect(settingsMock.setRenameModel).toHaveBeenCalledWith('prov/req-model')
-    const triggerAfter = wrapper.find('[data-testid="setting-rename-model"]')
+    const triggerAfter = wrapper!.find('[data-testid="setting-rename-model"]')
     expect(triggerAfter.text()).toContain('prov/eff-model')
     expect(triggerAfter.text()).not.toContain('prov/req-model')
     expect(triggerAfter.text()).not.toContain('prov/init-model')
@@ -312,20 +297,8 @@ describe('SystemAutoRenameSection 会话自动重命名开关', () => {
 
   it('开关关 + 切自动模式 → 成功 toast 提示需开启开关（不承诺已生效）', async () => {
     settingsMock.getAutoRenameEnabled.mockResolvedValue({ enabled: false })
-    wrapper = mount(SystemAutoRenameSection)
-    await flushPromises()
-
-    const trigger = wrapper.find('[data-testid="setting-rename-mode"]').element as HTMLElement
-    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-    trigger.click()
-    await flushPromises()
-
-    const options = document.body.querySelectorAll('[role="option"]')
-    const target = Array.from(options).find((el) => (el.textContent ?? '').includes('首次请求时'))
-    expect(target).toBeTruthy()
-    target!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-    target!.click()
-    await flushPromises()
+    const options = await mountAndOpenOptions('setting-rename-mode')
+    await pickOption(options, '首次请求时')
 
     expect(settingsMock.setRenameMode).toHaveBeenCalledWith('first-prompt')
     // 自动路径被 enabled flag 拦截——toast 不承诺「已生效」，指向恢复动作

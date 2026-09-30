@@ -7,84 +7,29 @@
  *  - 参考区含说明文案（动态段不受影响）
  *  - DEFAULT_PI_SYSTEM_PROMPT 常量导出且非空
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import { provideSettingsTransport } from '@taiji/core'
-import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { describe, it, expect, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
+import {
+  $,
+  hasTestId,
+  openSettingsModalPage,
+  setupSystemPromptPageHarness,
+  systemPromptApiModule,
+  systemPromptI18nModule,
+} from '../helpers/system-prompt-page-harness'
 
-interface SystemPromptConfig {
-  version: number
-  replace: { enabled: boolean; prompt: string }
-  append: { enabled: boolean; prompt: string }
-}
-
-function defaultConfig(): SystemPromptConfig {
-  return { version: 1, replace: { enabled: false, prompt: '' }, append: { enabled: false, prompt: '' } }
-}
-
-const configMock = vi.hoisted(() => ({
-  getSystemPrompt: vi.fn(() => Promise.resolve({ config: defaultConfig(), corrupted: false })),
-  setSystemPrompt: vi.fn((cfg: SystemPromptConfig) => Promise.resolve({ config: cfg, corrupted: false })),
-  getSystemPromptSnapshot: vi.fn(() => Promise.resolve({ exists: false })),
-  listProviders: vi.fn(() => Promise.resolve({ providers: [] })),
-  // SettingsModal → ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
-  refreshProviderCatalogs: vi.fn(() => Promise.resolve({ refreshed: [], failed: [] })),
-  setSkillDirs: vi.fn(() => Promise.resolve()),
-  setAgentDirs: vi.fn(() => Promise.resolve()),
-  // wave-oauth：SettingsModal → ProviderPage → useProviderOAuth onMounted 订阅 4 个 auth.* 事件（缺则 TypeError 崩 mount）
-  onAuthDeviceCode: vi.fn(() => () => {}),
-  onAuthAuthUrl: vi.fn(() => () => {}),
-  onAuthSuccess: vi.fn(() => () => {}),
-  onAuthError: vi.fn(() => () => {}),
-  // P2：ProviderPage 默认 pill + 默认修复 toast（缺则 TypeError 崩 mount）
-  onDefaultsWithSource: vi.fn(() => () => {}),
-}))
-
-const settingsMock = vi.hoisted(() => ({
-  getSystem: vi.fn(() => Promise.resolve({ locale: 'zh-CN', theme: 'dark', themePreset: 'cold-blue' })),
-  updateSystem: vi.fn(() => Promise.resolve()),
-}))
-
-vi.mock('@/api', () => ({ config: configMock, settings: settingsMock }))
-vi.mock('@/i18n', async (importOriginal) => ({ ...((await importOriginal()) as object), setLocale: vi.fn() }))
+vi.mock('@/api', () => systemPromptApiModule())
+vi.mock('@/i18n', (importOriginal) => systemPromptI18nModule(importOriginal))
 
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import { DEFAULT_PI_SYSTEM_PROMPT, DEFAULT_PI_SYSTEM_PROMPT_VERSION } from '@taiji/shared'
 
-let wrapper: ReturnType<typeof mount> | null = null
-
-function $(selector: string): DOMWrapper<Element> {
-  const node = document.body.querySelector(selector)
-  expect(node).toBeTruthy()
-  return new DOMWrapper(node!)
-}
-
-function hasTestId(id: string): boolean {
-  return document.body.querySelector(`[data-testid="${id}"]`) !== null
-}
-
-beforeEach(() => {
-  setActivePinia(createPinia())
-  configMock.getSystemPrompt.mockClear()
-  provideSettingsTransport(makeSettingsTransportStub(configMock))
-})
-
-afterEach(() => {
-  wrapper?.unmount()
-  wrapper = null
-  document.body.innerHTML = ''
-})
+// beforeEach 重置（pinia / toast / 捕获单例计数 / transport 桩）+ afterEach 卸载清 body +
+// SettingsModal 挂载切菜单单源在 helpers/system-prompt-page-harness
+setupSystemPromptPageHarness()
 
 async function openSystemPromptPage(): Promise<void> {
-  wrapper = mount(SettingsModal, { props: { open: true }, attachTo: document.body })
-  await flushPromises()
-  // 用 data-testid 定位（menus 已标注 settings-nav-${id}），不依赖 nav button 索引——
-  // 索引定位会因 nav 内新增非菜单按钮（如顶部退出按钮）而整体偏移，脆弱。
-  const btn = document.body.querySelector('[data-testid="settings-nav-system-prompt"]')
-  expect(btn).toBeTruthy()
-  btn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-  await flushPromises()
+  await openSettingsModalPage(SettingsModal, 'system-prompt')
 }
 
 describe('DEFAULT_PI_SYSTEM_PROMPT 常量', () => {

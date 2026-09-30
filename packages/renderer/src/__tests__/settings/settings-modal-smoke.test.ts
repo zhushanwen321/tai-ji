@@ -21,7 +21,6 @@ import {
   providePlatform,
   provideSettingsTransport,
   __resetPlatformForTesting,
-  type SettingsTransport,
   provideSettingsStore,
   createSettingsStore,
 } from '@taiji/core'
@@ -49,27 +48,29 @@ vi.mock('@/lib/ipc', () => ({
 // '@/api' mock 工厂 import 必须先于组件 import 求值：SettingsModal 模块图加载 '@/api' 时
 // vi.mock 工厂立即执行，晚于组件 import 的工厂绑定仍在 TDZ（vi.hoisted 同族坑）。
 import { settingsModalApiModule } from '../helpers/settings-modal-api-mock'
+import { inMemoryStorage } from '../helpers/platform-storage-stub'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import SettingsResourcePage from '@/components/settings/resource/SettingsResourcePage.vue'
 import { makeQuotaModuleStub } from '@taiji/core/testing'
 import type { SkillDirConfig } from '@taiji/shared'
 import { useToast } from '@/composables/useToast'
 import { getSettingsStore } from '@taiji/core'
-import { makeSettingsTransportStub, type SettingsTransportStubOverrides } from '../helpers/settings-transport-stub'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
-/** 构造 SettingsTransport stub（[C3] 共享工厂：全 seam 方法面中性默认，可按用例覆写成员）。 */
-function stubTransport(overrides: SettingsTransportStubOverrides = {}): SettingsTransport {
-  return makeSettingsTransportStub(overrides)
-}
-
-/** 提供最小 in-memory KVStorage（满足 PlatformPort.storage 形状）。 */
-function inMemoryStorage() {
-  const map = new Map<string, string>()
-  return {
-    get: async (k: string) => map.get(k) ?? null,
-    set: async (k: string, v: string) => { map.set(k, v) },
-    remove: async (k: string) => { map.delete(k) },
-  }
+/** 挂载 open=true 的 SettingsModal（spy toast provide：toast 三面用 spy，不桥接 useToast；
+ *  quota 工厂键保留 InjectionKey 类型，契约门由 makeQuotaModuleStub 的 QuotaConfigureModule
+ *  返回标注承担，契约漏成员即编译错）。 */
+function mountOpenModalWithSpyToasts(): ReturnType<typeof mount> {
+  return mount(SettingsModal, {
+    props: { open: true },
+    attachTo: document.body,
+    global: {
+      provide: {
+        [SETTINGS_TOAST_KEY as symbol]: { error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+        [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
+      },
+    },
+  })
 }
 
 beforeEach(() => {
@@ -88,20 +89,9 @@ describe('SettingsModal 首屏冒烟（AC12 渲染 gate）', () => {
       storage: inMemoryStorage(),
       webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
     })
-    provideSettingsTransport(stubTransport())
+    provideSettingsTransport(makeSettingsTransportStub())
 
-    mount(SettingsModal, {
-      props: { open: true },
-      attachTo: document.body,
-      global: {
-        provide: {
-          [SETTINGS_TOAST_KEY as symbol]: { error: vi.fn(), info: vi.fn(), warning: vi.fn() },
-          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
-          // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
-          [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
-        },
-      },
-    })
+    mountOpenModalWithSpyToasts()
     await flushPromises()
 
     // ① Dialog 标题渲染（settings.title → 中文「设置」）
@@ -123,22 +113,11 @@ describe('SettingsModal 懒加载挂载即 open 的 open 语义（W31 review maj
     })
     // refreshProviders → getSettingsTransport().listProviders()（模块级单例）→ spy 在此
     const listProvidersSpy = vi.fn(async () => ({ providers: [] }))
-    provideSettingsTransport({ ...stubTransport(), listProviders: listProvidersSpy })
+    provideSettingsTransport({ ...makeSettingsTransportStub(), listProviders: listProvidersSpy })
 
     // 模拟 AppShell 懒加载场景：settingsOpen=true 与组件挂载同帧，props.open 初始即 true。
     // 修复前 watch 无 immediate，无变化沿 → 回调不执行 → refreshProviders/焦点初始化全部跳过。
-    mount(SettingsModal, {
-      props: { open: true },
-      attachTo: document.body,
-      global: {
-        provide: {
-          [SETTINGS_TOAST_KEY as symbol]: { error: vi.fn(), info: vi.fn(), warning: vi.fn() },
-          // 不再 `as symbol` 强转：保留 InjectionKey 类型；契约门由 makeQuotaModuleStub 的
-          // QuotaConfigureModule 返回标注承担（契约漏成员即编译错）。
-          [QUOTA_CONFIGURE_FACTORY_KEY]: () => makeQuotaModuleStub(),
-        },
-      },
-    })
+    mountOpenModalWithSpyToasts()
     await flushPromises()
 
     // ① open 语义：providers 快照刷新被触发（settings-lifecycle「打开 modal 时刷新」契约）
@@ -157,7 +136,7 @@ describe('SettingsModal onUpdateSkillDirs 错误反馈（W2 D10，原 settings-m
       storage: inMemoryStorage(),
       webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
     })
-    provideSettingsTransport(stubTransport({ setSkillDirs: () => Promise.reject(new Error('network down')) }))
+    provideSettingsTransport(makeSettingsTransportStub({ setSkillDirs: () => Promise.reject(new Error('network down')) }))
 
     // toast 断言走真实 useToast 单例（SETTINGS_TOAST_KEY 桥接到 useToast）
     const { toasts } = useToast()
@@ -207,7 +186,7 @@ describe('SettingsModal 路径保存失败回弹（RD-4#1：失败强制回弹 U
       storage: inMemoryStorage(),
       webSocket: { create: () => ({ readyState: 0, send: () => {}, close: () => {}, onopen: null, onclose: null, onmessage: null, onerror: null }) },
     })
-    provideSettingsTransport(stubTransport({ setSkillDirs: () => Promise.reject(new Error('disk full')) }))
+    provideSettingsTransport(makeSettingsTransportStub({ setSkillDirs: () => Promise.reject(new Error('disk full')) }))
     return mount(SettingsModal, {
       props: { open: true },
       attachTo: document.body,

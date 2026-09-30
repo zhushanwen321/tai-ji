@@ -108,6 +108,48 @@ async function dispatchGeometry(avail: number, left: number, right: number): Pro
   )
 }
 
+/** 右簇需求宽按 fitLevel 查表的两套构造（收敛回路用例：放得下级别宽递减） */
+const DEMAND_L2: Record<number, number> = { 0: 520, 1: 460, 2: 300, 3: 200 }
+const DEMAND_REWIDEN: Record<number, number> = { 0: 700, 1: 500, 2: 400, 3: 300 }
+
+/**
+ * 手动打桩底栏几何并派发一次 RO（收敛/保护用例的 spy + defineProperty + dispatch
+ * 逐行重复段单源）：右簇需求宽传数字（固定值）或函数（每轮 fit 重算后按当前 fitLevel
+ * 取值——各级需求宽不同的收敛回路用例）；左簇固定 leftWidth（缺省 20）；bar 可用宽 =
+ * avail（clientWidth 与 contentRect 同值，NaN/非正即脏可用宽用例）。每个用例只作初次
+ * 打桩调用（重复派发改走 redispatchBarWidth，避免二次 spyOn 歧义）。
+ */
+async function dispatchStubbedGeometry(
+  rightWidth: number | (() => number),
+  avail: number,
+  leftWidth = 20,
+): Promise<void> {
+  const rightEl = hostEl('[data-testid="host-right"]')
+  if (typeof rightWidth === 'number') {
+    vi.spyOn(rightEl, 'getBoundingClientRect').mockReturnValue({ width: rightWidth } as DOMRect)
+  } else {
+    vi.spyOn(rightEl, 'getBoundingClientRect').mockImplementation(
+      () => ({ width: rightWidth() }) as DOMRect,
+    )
+  }
+  const leftEl = hostEl('[data-testid="host-left"]')
+  vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: leftWidth } as DOMRect)
+  const bar = hostEl('[data-testid="host-bar"]')
+  Object.defineProperty(bar, 'clientWidth', { value: avail, configurable: true })
+  const observer = ManualResizeObserverStub.created()[0]
+  observer.dispatch([{ target: bar, contentRect: { width: avail } as DOMRectReadOnly }])
+  await flushFitPasses()
+}
+
+/** 已打桩后只改 bar 可用宽并派发一次 RO（窗口放宽 / 脏值恢复共用段；几何打桩保持原状） */
+async function redispatchBarWidth(avail: number): Promise<void> {
+  const bar = hostEl('[data-testid="host-bar"]')
+  Object.defineProperty(bar, 'clientWidth', { value: avail, configurable: true })
+  const observer = ManualResizeObserverStub.created()[0]
+  observer.dispatch([{ target: bar, contentRect: { width: avail } as DOMRectReadOnly }])
+  await flushFitPasses()
+}
+
 /** 派发一条缺 contentRect 的脏 entry（polyfill/异常宿主形态）——回调不读 entry，不应崩 */
 async function dispatchBareEntry(): Promise<void> {
   const observer = ManualResizeObserverStub.created()[0]
@@ -184,18 +226,7 @@ describe('useComposerBarDensity：测量收敛回路（三步聚合 + 锚点保�
 
   it('放不下 → 逐级升到放得下（两级即够则停在 L2：左簇+指标聚合、模型仍完整形态）', async () => {
     const host = mountHost(makeSource())
-    const rightEl = hostEl('[data-testid="host-right"]')
-    const widthByFit: Record<number, number> = { 0: 520, 1: 460, 2: 300, 3: 200 }
-    vi.spyOn(rightEl, 'getBoundingClientRect').mockImplementation(
-      () => ({ width: widthByFit[host.getDensity().fitLevel] }) as DOMRect,
-    )
-    const leftEl = hostEl('[data-testid="host-left"]')
-    vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: 20 } as DOMRect)
-    const bar = hostEl('[data-testid="host-bar"]')
-    Object.defineProperty(bar, 'clientWidth', { value: 400, configurable: true })
-    const observer = ManualResizeObserverStub.created()[0]
-    observer.dispatch([{ target: bar, contentRect: { width: 400 } as DOMRectReadOnly }])
-    await flushFitPasses()
+    await dispatchStubbedGeometry(() => DEMAND_L2[host.getDensity().fitLevel], 400)
 
     expect(host.getDensity().fitLevel).toBe(2)
     expect(host.getDensity().slots.leftCluster).toBe('aggregated')
@@ -206,16 +237,8 @@ describe('useComposerBarDensity：测量收敛回路（三步聚合 + 锚点保�
 
   it('一直放不下 → 顶格 L3 后进入锚点保护：中部让位，`+`/发送/模型入口恒在', async () => {
     const host = mountHost(makeSource())
-    const rightEl = hostEl('[data-testid="host-right"]')
     // 所有级别都放不下（5000px 需求）
-    vi.spyOn(rightEl, 'getBoundingClientRect').mockReturnValue({ width: 5000 } as DOMRect)
-    const leftEl = hostEl('[data-testid="host-left"]')
-    vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: 20 } as DOMRect)
-    const bar = hostEl('[data-testid="host-bar"]')
-    Object.defineProperty(bar, 'clientWidth', { value: 200, configurable: true })
-    const observer = ManualResizeObserverStub.created()[0]
-    observer.dispatch([{ target: bar, contentRect: { width: 200 } as DOMRectReadOnly }])
-    await flushFitPasses()
+    await dispatchStubbedGeometry(5000, 200)
 
     expect(host.getDensity().fitLevel).toBe(3)
     expect(host.getDensity().anchorProtected).toBe(true)
@@ -239,26 +262,13 @@ describe('useComposerBarDensity：测量收敛回路（三步聚合 + 锚点保�
 
   it('窗口变宽 → 解除保护并逐级降回（一次放宽可连续降多级，直到某级溢出重新定级）', async () => {
     const host = mountHost(makeSource())
-    const rightEl = hostEl('[data-testid="host-right"]')
-    const widthByFit: Record<number, number> = { 0: 700, 1: 500, 2: 400, 3: 300 }
-    vi.spyOn(rightEl, 'getBoundingClientRect').mockImplementation(
-      () => ({ width: widthByFit[host.getDensity().fitLevel] }) as DOMRect,
-    )
-    const leftEl = hostEl('[data-testid="host-left"]')
-    vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: 20 } as DOMRect)
-    const bar = hostEl('[data-testid="host-bar"]')
 
     // 阶段 A：200px 宽 → 升到顶并进保护
-    Object.defineProperty(bar, 'clientWidth', { value: 200, configurable: true })
-    const observer = ManualResizeObserverStub.created()[0]
-    observer.dispatch([{ target: bar, contentRect: { width: 200 } as DOMRectReadOnly }])
-    await flushFitPasses()
+    await dispatchStubbedGeometry(() => DEMAND_REWIDEN[host.getDensity().fitLevel], 200)
     expect(host.getDensity().anchorProtected).toBe(true)
 
     // 阶段 B：放宽到 800px（720 需求可放下）→ 解保护 + 连续降级直到 L0
-    Object.defineProperty(bar, 'clientWidth', { value: 800, configurable: true })
-    observer.dispatch([{ target: bar, contentRect: { width: 800 } as DOMRectReadOnly }])
-    await flushFitPasses()
+    await redispatchBarWidth(800)
     expect(host.getDensity().anchorProtected).toBe(false)
     expect(host.getDensity().fitLevel).toBe(0)
     expect(host.getDensity().slots.leftCluster).toBe('expanded')
@@ -266,41 +276,22 @@ describe('useComposerBarDensity：测量收敛回路（三步聚合 + 锚点保�
 
   it('同宽度 regime 内反复派发不抖（迟滞：降级只认窗口变宽）', async () => {
     const host = mountHost(makeSource())
-    const rightEl = hostEl('[data-testid="host-right"]')
-    const widthByFit: Record<number, number> = { 0: 520, 1: 460, 2: 300, 3: 200 }
-    vi.spyOn(rightEl, 'getBoundingClientRect').mockImplementation(
-      () => ({ width: widthByFit[host.getDensity().fitLevel] }) as DOMRect,
-    )
-    const leftEl = hostEl('[data-testid="host-left"]')
-    vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: 20 } as DOMRect)
-    const bar = hostEl('[data-testid="host-bar"]')
-    Object.defineProperty(bar, 'clientWidth', { value: 400, configurable: true })
-    const observer = ManualResizeObserverStub.created()[0]
-    observer.dispatch([{ target: bar, contentRect: { width: 400 } as DOMRectReadOnly }])
-    await flushFitPasses()
+    await dispatchStubbedGeometry(() => DEMAND_L2[host.getDensity().fitLevel], 400)
     const settled = host.getDensity().fitLevel
     expect(settled).toBe(2)
     for (let i = 0; i < 5; i += 1) {
-      await dispatchGeometry(400, 20, widthByFit[settled])
+      await dispatchGeometry(400, 20, DEMAND_L2[settled])
     }
     expect(host.getDensity().fitLevel).toBe(settled)
   })
 
   it('内容变矮（同窗口宽）不触发降级——无窗口变宽依据时不动作（防自污染抖动回归）', async () => {
     const host = mountHost(makeSource())
-    const rightEl = hostEl('[data-testid="host-right"]')
     // 先在 400px 下溢出 → L1 定级（settled=400）
-    vi.spyOn(rightEl, 'getBoundingClientRect').mockReturnValue({ width: 460 } as DOMRect)
-    const leftEl = hostEl('[data-testid="host-left"]')
-    vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: 20 } as DOMRect)
-    const bar = hostEl('[data-testid="host-bar"]')
-    Object.defineProperty(bar, 'clientWidth', { value: 400, configurable: true })
-    const observer = ManualResizeObserverStub.created()[0]
-    observer.dispatch([{ target: bar, contentRect: { width: 400 } as DOMRectReadOnly }])
-    await flushFitPasses()
+    await dispatchStubbedGeometry(460, 400)
     expect(host.getDensity().fitLevel).toBeGreaterThanOrEqual(1)
     // 外部内容变矮（L0 现在也放得下）→ 停在当前级（保守但稳定；窗口变宽时自会逐级还原）
-    vi.spyOn(rightEl, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
+    vi.spyOn(hostEl('[data-testid="host-right"]'), 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
     await dispatchGeometry(400, 20, 300)
     expect(host.getDensity().fitLevel).toBeGreaterThanOrEqual(1)
   })
@@ -364,23 +355,13 @@ describe('useComposerBarDensity：脏输入与生命周期', () => {
 
   it('可用宽脏值（clientWidth NaN/非正）→ 落最保守（顶格 + 锚点保护），恢复后可回', async () => {
     const host = mountHost(makeSource())
-    const rightEl = hostEl('[data-testid="host-right"]')
-    vi.spyOn(rightEl, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
-    const leftEl = hostEl('[data-testid="host-left"]')
-    vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: 20 } as DOMRect)
-    const bar = hostEl('[data-testid="host-bar"]')
+    await dispatchStubbedGeometry(300, Number.NaN)
 
-    Object.defineProperty(bar, 'clientWidth', { value: Number.NaN, configurable: true })
-    const observer = ManualResizeObserverStub.created()[0]
-    observer.dispatch([{ target: bar, contentRect: { width: Number.NaN } as DOMRectReadOnly }])
-    await flushFitPasses()
     expect(host.getDensity().fitLevel).toBe(3)
     expect(host.getDensity().anchorProtected).toBe(true)
 
     // 恢复正常可用宽（窗口变宽依据成立）→ 回到全展开
-    Object.defineProperty(bar, 'clientWidth', { value: 800, configurable: true })
-    observer.dispatch([{ target: bar, contentRect: { width: 800 } as DOMRectReadOnly }])
-    await flushFitPasses()
+    await redispatchBarWidth(800)
     expect(host.getDensity().fitLevel).toBe(0)
     expect(host.getDensity().anchorProtected).toBe(false)
   })
