@@ -13,7 +13,7 @@
  * + use-app-update-notes（渲染 releaseNotes）+ use-app-update-ipc。被 useAppUpdate.ts /
  * use-app-update-autocheck 消费。
  */
-import type { LatestReleaseInfo, UpdateState } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateCheckResult, UpdateState } from '@taiji/shared'
 import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
 import type { AppUpdateIpc } from './use-app-update-ipc'
@@ -25,7 +25,7 @@ import { createNotesAxis } from './use-app-update-notes'
 const t = i18n.global.t
 
 /**
- * 检查触发源（RD-4#5）：区分用户主动点击（manual）与后台自动检查（auto）。
+ * 检测触发源（RD-4#5）：区分用户主动点击（manual）与后台自动检查（auto）。
  * manual = 设置页「检查更新」按钮 + error 态「重试」按钮；auto = 启动 30s 首查 / 60min 周期 /
  * visibility 补查 / STALE 自动重查。仅 manual 失败置 error 态显形，auto 失败保持静默。
  *
@@ -33,6 +33,38 @@ const t = i18n.global.t
  * 使用——不能拿 force 当 manual 判据（审查 E 订正）。故显式加 source 参数。
  */
 export type CheckSource = 'manual' | 'auto'
+
+/**
+ * ipc check 超时兜底（毫秒）。Electron invoke 无内置超时——main 侧网络路径虽已配 10s 级
+ * 超时，但一旦 invoke 因任意形态永不返回，checkForUpdate 挂起会连锁杀死两条通路：
+ * 自动调度链（runAutoCheck 在 await 之后才排下一周期，见 use-app-update-autocheck）与
+ * state（固化 checking，canCheck 守卫此后跳过一切自动检查）。此处保证 checkForUpdate
+ * 恒在 60s 内落定（超时按失败收口），单次挂死不再永久失效。60s 覆盖 main 侧最坏
+ * 路径（探测 3s + 双源×双通道 fetch 10s + manifest 10s）且不误伤慢检查。
+ */
+const IPC_CHECK_TIMEOUT_MS = 60_000
+
+/**
+ * 给 ipc check promise 加墙钟超时：超时 reject（由 checkForUpdate 的 catch 按
+ * source 收口），保证 checkForUpdate 恒在有限时间内落定。原 promise 迟到的
+ * resolve/reject 无人消费、自然丢弃——迟到结果视为不可信，等下一次检查取新值。
+ * timer 随 settle 清理防泄漏。
+ */
+function withIpcTimeout(p: Promise<UpdateCheckResult>, ms: number): Promise<UpdateCheckResult> {
+  return new Promise<UpdateCheckResult>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`update:check timed out after ${ms}ms`)), ms)
+    p.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(timer)
+        reject(e)
+      },
+    )
+  })
+}
 
 /** 检测轴依赖：所属 state 容器 + ipc 缝 */
 export interface CheckAxisDeps {
@@ -174,7 +206,10 @@ export function createCheckAxis(deps: CheckAxisDeps): CheckAxis {
     const myToken = ++renderToken
     const prevState = beginCheckTransition()
     try {
-      const { info, rateLimited } = await ipc.checkForUpdate({ force })
+      const { info, rateLimited } = await withIpcTimeout(
+        ipc.checkForUpdate({ force }),
+        IPC_CHECK_TIMEOUT_MS,
+      )
       // 防陈旧：若期间又发了新 checkForUpdate，丢弃本次结果
       if (myToken !== renderToken) return
       if (rateLimited) {

@@ -1,11 +1,12 @@
 /**
- * useAppUpdate 可见性守卫单测（perf W05 Q1-6）。
+ * useAppUpdate 可见性守卫单测（perf W05 Q1-6 + 补查时间阈值化）。
  *
  * 覆盖（fake timers + document.hidden mock）：
  * - hidden 期间周期定时器照常触发，但不联网检测（checkForUpdate 零调用，连 hidden 多周期均不发）
- * - 恢复可见（visibilitychange → visible）：跳过被立即补查（force=false 走缓存），不等下一个 60min
+ * - 恢复可见（visibilitychange → visible）：距上次联网检查 ≥30min 时立即补查
+ *   （force=false 走缓存），不等下一个 60min 周期
  * - 补查后周期检测继续（runAutoCheck 重排下一次定时器）
- * - 状态守卫优先于 visibility 补查：升级流程态（downloaded）hidden 期间跳过不标记，恢复可见不补查
+ * - 状态守卫优先于 visibility 补查：升级流程态（downloaded）恢复可见不补查
  * - onScopeDispose：scope 卸载后 visibilitychange 不再触发检测
  * - 补查 await 窗口 dispose：runAutoCheck await 恢复后不排新周期 timer（W05 review）
  *
@@ -62,8 +63,8 @@ beforeEach(() => {
   ipc = createMemoryAppUpdateIpc()
   controller = createAppUpdateController({ ipc })
   vi.useFakeTimers()
-  // fake 时钟起点设为真实 epoch 量级：lastVisibilityCheckAt 初值 0 时，
-  // 起点 0 会让「首查后 30s 的补查」被 10min 节流窗口误挡（真实时钟不会）
+  // fake 时钟起点设为真实 epoch 量级：lastNetworkCheckAt 初值 0 时，
+  // 起点 0 会让「首查前的恢复可见补查」被时间比较误判（真实时钟不会）
   vi.setSystemTime(1_700_000_000_000)
   vi.stubGlobal('__APP_VERSION__', '0.0.0')
   setHidden(false)
@@ -110,12 +111,12 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     // initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
     await vi.advanceTimersByTimeAsync(0)
 
-    await vi.advanceTimersByTimeAsync(30_000) // hidden 跳过，标记 skippedWhileHidden
+    await vi.advanceTimersByTimeAsync(30_000) // hidden 跳过（未联网，lastNetworkCheckAt 保持 0）
     expect(ipc.checkForUpdate).not.toHaveBeenCalled()
 
     setHidden(false)
     fireVisibilityChange()
-    // 补查同步发起，立即断言可见
+    // 补查同步发起，立即断言可见（距上次联网 = ∞ ≥ 30min 阈值）
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
     expect(ipc.checkForUpdate).toHaveBeenLastCalledWith({ force: false })
     stop()
@@ -138,40 +139,62 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     stop()
   })
 
-  it('补查节流（RM2.4）：10min 窗口内第二次补查被跳过（console 提示 + 不再联网）', async () => {
+  it('补查阈值：距上次联网检查 30min 内的恢复可见不补查（不重复联网）', async () => {
     setHidden(true)
     const { stop } = setupWithAutoCheck()
     // initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
     await vi.advanceTimersByTimeAsync(0)
 
-    // hidden 30s 首查跳过（skipped 置位）→ 恢复可见补查#1（lastVisibilityCheckAt = t+30s）
+    // hidden 30s 首查跳过 → 恢复可见补查#1（lastNetworkCheckAt = t+30s）
     await vi.advanceTimersByTimeAsync(30_000)
     setHidden(false)
     fireVisibilityChange()
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
 
     // 多消费者再次 initAutoCheck（幂等重排）：清补查#1 的 60min 周期 timer，重排 30s 首查
-    // （skipped 复位为 false，恢复链/订阅幂等）
     activeScope!.run(() => controller.initAutoCheck())
     setHidden(true)
-    await vi.advanceTimersByTimeAsync(30_000) // t+60s：hidden 触发 → skipped 再次置位
+    await vi.advanceTimersByTimeAsync(30_000) // t+60s：hidden 触发 → 仍未联网
     setHidden(false)
-    fireVisibilityChange() // 距补查#1 仅 30s < 10min 窗口 → 节流 return，不联网
+    fireVisibilityChange() // 距补查#1 仅 30s < 30min 阈值 → 不补查，不联网
 
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
     stop()
   })
 
-  it('恢复可见无跳过记录时不补查（正常周期内的 visibilitychange 是 no-op）', async () => {
+  it('距上次联网 ≥30min 的恢复可见补查：提前于 60min 周期拉起检查（时间阈值自愈通路）', async () => {
     const { stop } = setupWithAutoCheck()
     // initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
     await vi.advanceTimersByTimeAsync(0)
 
-    // 可见期间正常 30s 首次检测（无跳过记录）
+    // 可见期间正常 30s 首查联网（lastNetworkCheckAt = t+30s）
     await vi.advanceTimersByTimeAsync(30_000)
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
 
-    // 失焦又恢复（hidden 期间无周期触发 → 无跳过记录）
+    // 推进 31min：距上次联网已超 30min 阈值，但 60min 周期 timer 还未到（剩 ~29min）
+    await vi.advanceTimersByTimeAsync(31 * 60 * 1000)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1) // 周期未到，无新联网
+
+    // 失焦又恢复 → 距上次联网 31min ≥ 30min → 补查（不等 60min 周期）
+    setHidden(true)
+    fireVisibilityChange()
+    setHidden(false)
+    fireVisibilityChange()
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(2)
+    expect(ipc.checkForUpdate).toHaveBeenLastCalledWith({ force: false })
+    stop()
+  })
+
+  it('距上次联网 <30min 的恢复可见不补查（正常周期内的 visibilitychange 是 no-op）', async () => {
+    const { stop } = setupWithAutoCheck()
+    // initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
+    await vi.advanceTimersByTimeAsync(0)
+
+    // 可见期间正常 30s 首次检测（lastNetworkCheckAt = t+30s）
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+
+    // 失焦又恢复（距上次联网仅数秒 < 30min 阈值）
     setHidden(true)
     fireVisibilityChange()
     setHidden(false)
@@ -180,10 +203,10 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     stop()
   })
 
-  it('状态守卫优先：downloaded 态 hidden 期间跳过不标记，恢复可见不补查', async () => {
+  it('状态守卫优先：downloaded 态恢复可见不补查（升级流程不被打断）', async () => {
     setHidden(true)
     const { result, stop } = setupWithAutoCheck()
-    // 置为升级流程态：canCheck=false，visibility 守卫不应置补查标记
+    // 置为升级流程态：canAutoCheck=false，visibility 补查不发起
     result.state.state = 'downloaded'
 
     await vi.advanceTimersByTimeAsync(30_000)
@@ -223,7 +246,7 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     const { stop } = setupWithAutoCheck()
     // initAutoCheck 的定时器排在 settings promise 之后，先 flush 微任务
     await vi.advanceTimersByTimeAsync(0)
-    await vi.advanceTimersByTimeAsync(30_000) // hidden 跳过，标记 skippedWhileHidden
+    await vi.advanceTimersByTimeAsync(30_000) // hidden 跳过（未联网，lastNetworkCheckAt 保持 0）
     expect(ipc.checkForUpdate).not.toHaveBeenCalled()
 
     setHidden(false)
