@@ -422,7 +422,9 @@ function collectRecentTurnEntriesFromTail(
  * entries → Message[]（共享 mapper + port 翻译 + entry 专属回填，全量读与①②档窗口共用单点）。
  *
  * [message-revoke U6a] 活跃路径裁剪接入：leafId 取窗口/文件**最后一条** entry 的 id——
- * pi 树重放规则（重启后叶子 = 文件最后一条 entry）保证文件尾即活跃叶子；撤回后 label
+ * pi 树重放规则（重启后叶子 = 文件最后一条 entry；PS-60 实锚 dist/core/session-manager.js:673
+ * `_buildIndex` 文件序循环置 leafId=entry.id、:616 `_setSessionFile` 加载路径）保证文件尾即
+ * 活跃叶子；撤回后 label
  * entry 落文件尾，被撤子树条目按文件序先于 label，经 computeActivePathEntries 沿 parentId
  * 回溯滤除（离线尾读 / oversize 窗口 / 全量文件读 / 游标窗口四条腿共用本单点，被撤分支
  * 在文件源腿同样不渲染）。已知边界（设计 D3 允许的降级面）：turn 计数与字节预算在

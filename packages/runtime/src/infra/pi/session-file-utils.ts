@@ -585,8 +585,9 @@ function findLastEntryField<R>(
  *    id 无 parentId）；不剥则 header + 真 根 entry 会被 computeActivePathEntries 的单根
  *    守卫判成多根病态树而降级不裁剪（被撤分支照常命中）。
  * 2. 取（剥 header 后）**最后一条** entry 的 id 作 leafId——pi 树重放规则（重启后叶子 =
- *    文件最后一条 entry）保证文件尾即活跃叶子；撤回后 label 锚落文件尾，被撤子树条目按
- *    文件序先于 label，经 parentId 回溯滤除。
+ *    文件最后一条 entry；PS-60 实锚 dist/core/session-manager.js:673 `_buildIndex`
+ *    文件序循环置 leafId=entry.id、:616 `_setSessionFile` 加载路径）保证文件尾即活跃
+ *    叶子；撤回后 label 锚落文件尾，被撤子树条目按文件序先于 label，经 parentId 回溯滤除。
  *
  * 降级契约（两守卫，G2 宁多显不少显——树不可靠时物理序兜底 = 现行为，降级即 warn 留痕，
  * 措辞对齐 computeActivePathEntries 的降级口径）：

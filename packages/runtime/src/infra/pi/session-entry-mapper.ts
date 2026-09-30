@@ -115,7 +115,9 @@ export function applyEntryEndTimes(messages: Message[], entries: PiSessionEntry[
  *
  * 语义：pi session 文件是 append-only 树（每个 entry 带 parentId，根为 null；pi 全部
  * append* 统一 `parentId = this.leafId` 追加）；模型/对话流视角的「活跃上下文」= 从叶子
- * 沿 parentId 回溯到根的链（pi 树重放规则：重启后叶子 = 文件最后一条 entry）。撤回
+ * 沿 parentId 回溯到根的链（pi 树重放规则：重启后叶子 = 文件最后一条 entry——PS-60
+ * 实锚 dist/core/session-manager.js:673 `_buildIndex` 文件序循环置 leafId=entry.id、
+ * :616 `_setSessionFile` 加载路径）。撤回
  * （navigateTree 回退）后被撤子树仍在文件里（审计保留）但不在活跃路径上——本函数把
  * entries 投影为活跃路径子集，供历史重建链喂入既有映射（被撤分支不渲染，G2 二分的
  * 「未来状态随树」腿）。

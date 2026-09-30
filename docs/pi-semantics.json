@@ -1243,5 +1243,34 @@
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-tool-error-flag.test.ts"
     },
     "verifiedWith": "0.84.4"
+  },
+  {
+    "id": "PS-60",
+    "claim": "pi session 树重放规则：SessionManager 加载路径（_setSessionFile → loadEntriesFromFile → _buildIndex）重建内存 leafId = 文件序最后一条非 header entry 的 id（_buildIndex 循环内逐条赋 this.leafId = entry.id，type==='session' header 被跳过）——重启/空闲回收后活跃叶子 = 文件尾，活跃上下文路径由 buildSessionPath 从该叶子沿 parentId 回溯到根构成。配套不变量：①运行时追加恒落文件尾且推进 leafId（_appendEntry 置 leafId=entry.id，全部 append* 的 parentId=旧 leafId）；②navigateTree 树内回退 = branch() 仅移内存指针不重写文件（被撤子树保留在文件里），随后 appendLabelChange 以 parentId=回退后 leaf 追加 LabelEntry 到文件尾——故撤回（summarize:false + label:'taiji:revoked'）后文件尾 = 新路径上的 label entry，重启重放所得叶子的 parentId 链不含被撤子树（回退不复活）；③label entry 不投影为 LLM 消息（sessionEntryToContextMessages 对 type==='label' 落入末尾 return []）。承重（ADR-0076 撤回持久化安全 + message-revoke U6a/U6d 文件腿裁剪 leaf=文件尾取数）：taiji 文件源活跃路径裁剪（trimFileEntriesToActivePath / computeActivePathEntries 取文件尾 entry id 回溯）与 pi 重放语义同构全靠本条；pi 若改为按持久化 leaf 指针/其他准则重放，文件尾≠叶子，撤回复活或裁剪错叶。pi 升级时重验：_buildIndex 的文件序赋值循环与 header 跳过、_setSessionFile 加载路径调 _buildIndex、navigateTree 的 branch+appendLabelChange 两步形态",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/session-manager.js",
+        "symbol": "_buildIndex / _setSessionFile（加载路径）",
+        "note": ":673-695 _buildIndex——:678-680 文件序 for 循环跳过 type==='session' header，:682 this.leafId = entry.id（循环终值 = 最后一条非 header entry）；加载路径 :616 _setSessionFile → :619 fileEntries = preloadedFileEntries ?? loadEntriesFromFile(sessionFile) → :638 this._buildIndex()"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/session-manager.js",
+        "symbol": "buildSessionPath / _appendEntry / appendLabelChange / branch",
+        "note": ":124-144 buildSessionPath 从叶子沿 parentId 回溯（:133 leaf 缺失兜底 = entries 末条）；:756-762 _appendEntry :759 this.leafId = entry.id（追加即推进叶子 = 文件尾）；:917-929 appendLabelChange :925 parentId: this.leafId（LabelEntry 落文件尾，父 = 当前叶子）；:1035-1041 branch :1040 this.leafId = branchFromId（仅移指针，不重写文件——被撤子树保留）"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "navigateTree(targetId, options) 的 branch + appendLabelChange 两步",
+        "note": ":2464 方法体——:2581 非 user 目标 newLeafId = targetId；:2597/:2601 无摘要时 resetLeaf()/branch(newLeafId)；:2605 label && !summaryText → appendLabelChange(targetId, label)（revoke 形态 summarize:false 恒走此腿，label entry 落文件尾）"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-session-replay.test.ts"
+    },
+    "verifiedWith": "0.84.4"
   }
 ]

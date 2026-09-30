@@ -190,7 +190,9 @@ function parsePlanDocMeta(v: unknown): PlanDocMeta | null {
  * 从主 session JSONL 文件提取 plan 状态视图（冷启动 / getPlanState RPC 路径，D1⑥ 冷腿）。
  *
  * 读取文件 → parseJsonl → [message-revoke U6d] trimFileEntriesToActivePath（剥 header +
- * 文件尾 leaf 回溯——pi 树重放规则保证文件尾即活跃叶子，撤回后 label 锚落文件尾，被撤
+ * 文件尾 leaf 回溯——pi 树重放规则保证文件尾即活跃叶子（PS-60 实锚 dist/core/
+ * session-manager.js:673 `_buildIndex` 文件序循环置 leafId=entry.id、:616
+ * `_setSessionFile` 加载路径），撤回后 label 锚落文件尾，被撤
  * 子树的 plan-state entry 经 parentId 回溯滤除）→ scanPlanStateEntries（与实时增量拉取
  * 同一份派生代码；live ≡ reload 由「派生代码唯一 + 裁剪单点」构造性保持）。
  *

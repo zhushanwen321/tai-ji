@@ -48,7 +48,10 @@ export default function (pi: ExtensionAPI): void {
   // args 取（pi 切首个空格后的原样余串，单空格形态下精确等于 entryId）。
   // 双下划线前缀 = 内部命令（前端 internal-command-filter 过滤 `/__` 前缀不显示）。
   // summarize:false = 不触发 tree summary；label:'taiji:revoked' = pi 追加 LabelEntry
-  // 落盘（树重放规则 leaf=文件尾，重启/空闲回收后回退不复活）。
+  // 落盘（树重放规则 leaf=文件尾，重启/空闲回收后回退不复活——pi-semantics PS-60 实锚：
+  // dist/core/session-manager.js:673 _buildIndex 文件序循环置 leafId=entry.id、:616
+  // _setSessionFile 加载路径重放；navigateTree 回退 = branch() 移指针 + appendLabelChange
+  // 落锚文件尾两步，dist/core/agent-session.js:2464）。
   // 写法契约（D1 硬要求）：handler 必须把 navigateTree 的 promise 纳入自身返回链——
   // pi `await command.handler(...)` 接住返回值是「revokeMessage reply 前树变更+落盘
   // 完成」的保证链。取 D1 许可形态「显式 await」而非「直接 return」：SDK 0.84.4
