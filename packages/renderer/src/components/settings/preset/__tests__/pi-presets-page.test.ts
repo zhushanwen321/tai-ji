@@ -12,77 +12,30 @@
  * 替换段未变更时不误拦 / 替换卡入口既有语义不回归。
  * 替换卡入口的等价既有用例在 `src/__tests__/settings/pi-presets-page.test.ts`（本次修复领地外，未改动）。
  *
- * mock 策略：`vi.mock('@/api')` 把 preset 门面替成可断言的 mock；`@taiji/ui/features/settings`
- * 用轻量 stub（GroupCard 需保留 #head/#actions 具名 slot，否则卡头 Switch 与标题不渲染）。
+ * mock 策略：mock 脚手架收敛单源——presetMock 单例 / '@/api' 与 @taiji/ui mock 注册 /
+ * beforeEach 接线在 @/__tests__/helpers/preset-page-mock（import 即注册，settings 版同
+ * 组件测试共享）；工厂 / 默认 impl / promptPreset fixture 在 @/__tests__/helpers/preset-page-mount。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/settings/preset/__tests__/pi-presets-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
 import type { PiLaunchPreset } from '@taiji/shared'
-
-/** mock preset API（update 是「是否落盘」的唯一可观测量）。 */
-const presetMock = vi.hoisted(() => ({
-  list: vi.fn(() => Promise.resolve([])),
-  getDefault: vi.fn(() => Promise.resolve('builtin:full')),
-  setDefault: vi.fn(() => Promise.resolve()),
-  create: vi.fn((p: PiLaunchPreset) => Promise.resolve(p)),
-  update: vi.fn((p: PiLaunchPreset) => Promise.resolve(p)),
-  remove: vi.fn(() => Promise.resolve()),
-}))
-
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  preset: presetMock,
-  default: { preset: presetMock },
-}))
-
-vi.mock('@taiji/ui/features/settings', () => ({
-  PresetModeSection: {
-    name: 'PresetModeSection',
-    props: ['preset', 'disabled'],
-    template: '<div data-testid="mode-section" />',
-  },
-  GroupCard: {
-    name: 'GroupCard',
-    template: '<div data-testid="group-card"><slot name="head" /><slot name="actions" /><slot /></div>',
-  },
-}))
+import { promptPreset } from '@/__tests__/helpers/preset-page-mount'
+import { presetMock, setupPresetPageTest, teardownPresetPage } from '@/__tests__/helpers/preset-page-mock'
 
 import PiPresetsPage from '@/components/settings/preset/PiPresetsPage.vue'
 import { usePresetStore } from '@/stores/preset'
-import { useToast } from '@/composables/useToast'
-
-/** 自定义预设 fixture：替换段 + 追加段均已落盘（两卡各 3 / 2 字符）。 */
-function promptPreset(): PiLaunchPreset {
-  return {
-    id: 'custom:prompt-preset',
-    name: 'Prompt Preset',
-    builtin: false,
-    order: 1,
-    toolMode: 'all',
-    extensionMode: 'all',
-    prompt: {
-      replace: { enabled: true, prompt: 'abc' },
-      append: { enabled: true, prompt: 'de' },
-    },
-  }
-}
 
 let wrapper: ReturnType<typeof mount> | null = null
 
-beforeEach(() => {
-  setActivePinia(createPinia())
-  presetMock.update.mockImplementation((p: PiLaunchPreset) => Promise.resolve(p))
-  const { toasts } = useToast()
-  toasts.value = []
-})
+// mock 注册 + beforeEach 重置（pinia / 默认 impl / toast / transport 桩）单源在
+// helpers/preset-page-mock，顶层调用一次
+setupPresetPageTest()
 
 afterEach(() => {
-  wrapper?.unmount()
+  teardownPresetPage(wrapper)
   wrapper = null
-  document.body.innerHTML = ''
 })
 
 /** 挂载页面并让「替换段 + 追加段」都进入 dirty 态（追加卡保存按钮因此解禁）。 */

@@ -88,7 +88,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(record.round).toBe(1);
     expect(record.endedAt).toBeUndefined();
     expect(record.result).toBe("round output");
-    expect(record.idleSince).toBeTypeOf("number");
+    // ⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081）——轮终不再写 idle 锚。
     // ⑪ `.state` 收条：轮收口 idle 形态（重建单规则一律 idle）。
     const state = readStateJson();
     expect(state["status"]).toBe("idle");
@@ -114,6 +114,26 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(revived.round).toBe(1);
   });
 
+  it("[W1 / D3 表行 4] 轮终帧携带 result 摘要锚（record-settled 同款截断——承接 v1 轮终 result 显示信号）", () => {
+    const record = makeRecord("bg-round-result", { sessionFile });
+    store.register(record);
+
+    const longResult = "x".repeat(260);
+    expect(store.markRoundIdle("bg-round-result", { kind: "success", content: longResult })).toBe(true);
+
+    // record-round-idle 帧的 resultSummary = 截断摘要（200 字 + 省略号，全文不进事件行）
+    const lines = fs
+      .readFileSync(path.join(manifestDir, "bg-round-result.events"), "utf-8")
+      .trim()
+      .split("\n");
+    const idle = lines
+      .map((l) => JSON.parse(l) as { type?: string; resultSummary?: string; error?: string })
+      .find((e) => e.type === "record-round-idle");
+    expect(idle?.resultSummary).toBe(`${"x".repeat(200)}…`);
+    // 成功轮失败原因原文缺席（W1 终态同步 F2-2——error 仅失败轮承载）
+    expect(idle?.error).toBeUndefined();
+  });
+
   it("失败轮（pi 锚）：收条 reason=failed + lastError + 内存 stopReason=failed + binding 快照在场", () => {
     const record = makeRecord("bg-fail", { sessionFile });
     record.turnCount = 1;
@@ -132,6 +152,16 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(typeof state["endedAt"]).toBe("number");
     expect(readRecordBinding(sessionFile)?.turns).toBe(1);
     expect(readRecordBinding(sessionFile)?.totalTokens).toBe(300);
+    // 帧面：record-round-idle 携带失败原因原文（W1 终态同步 F2-2——v1 rec.error
+    // 显示信号的 journal 承接，投影 error 供源）
+    const failLines = fs
+      .readFileSync(path.join(manifestDir, "bg-fail.events"), "utf-8")
+      .trim()
+      .split("\n");
+    const failIdle = failLines
+      .map((l) => JSON.parse(l) as { type?: string; error?: string })
+      .find((e) => e.type === "record-round-idle");
+    expect(failIdle?.error).toBe("engine crashed");
   });
 
   it("跨轮轮终不击穿 A3 断言（endedAt 不写）+ `.state` 收条随最新轮覆写", () => {

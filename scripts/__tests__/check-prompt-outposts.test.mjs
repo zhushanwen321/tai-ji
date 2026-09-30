@@ -55,7 +55,7 @@ describe('check_prompt_outposts.py 判定行为', () => {
     ])
     writeSrc('services/session/session-service.ts', [
       'async function reload(client) {',
-      "  await client.prompt('/__taiji_reload__', undefined, undefined, { maintenance: true })",
+      'await client.prompt(BG_RECONCILE_COMMAND, undefined, undefined, { maintenance: true })',
       '}',
     ])
     const r = runGuard()

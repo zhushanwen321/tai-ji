@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * parseDiff unified diff 解析纯函数单测。
  *

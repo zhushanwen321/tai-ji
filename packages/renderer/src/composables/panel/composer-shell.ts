@@ -19,8 +19,8 @@
  *   见 composables/panel/useQueueRows.ts）；本文件的残留职责仅剩「撤销/回收文本回输入区」。
  *
  * 视觉派生（D1「视觉派生留壳」）：useComposerBoxClass + useComposerModeVisual 的逻辑并入本文件
- * （boxClass 三级链：staging > bash > 流式 steer 呼吸 > 聚焦 ring；placeholder 三级链：
- * staging > bash > steerHint/inputHint），删除原 2 文件（无独立复用点，仅 Composer.vue 消费）。
+ * （boxClass 三级链：staging > bash > 流式 steer 呼吸 > 聚焦 ring；placeholder 四级链：
+ * staging > bash > steerHint > deferHint > inputHint），删除原 2 文件（无独立复用点，仅 Composer.vue 消费）。
  */
 import { computed, reactive, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -382,7 +382,7 @@ export function useComposerShell(params: ComposerShellParams) {
    * 仅约束普通 send；staging 发送不受本守卫拦（fork-ask 对源只读，streaming 中合法）。 */
   const canSend = computed(() => hasInput.value && !isSending.value)
   /** 可提交：staging 活跃时只看本地双发锁（isSending）——streaming 中 fork 提交合法，
-   *  handoff 的 streaming 拦截在入口（enterHandoffMode）+ 兑底（handleHandoffSend）。
+   *  handoff 的 streaming 拦截在入口（enterHandoffMode）+ 兜底（handleHandoffSend）。
    *  非 staging 态维持 canSend（hasInput ∧ ¬isSending）。 */
   const canSubmit = computed(() => {
     const active = staging.activeStaging.value
@@ -407,7 +407,6 @@ export function useComposerShell(params: ComposerShellParams) {
             : ''),
     isSending.value && 'opacity-[0.55]',
   ])
-  /** placeholder 三级链：staging > bash > 流式 steerHint / 普通 inputHint */
   const placeholder = computed(
     () =>
       stagingPlaceholder.value

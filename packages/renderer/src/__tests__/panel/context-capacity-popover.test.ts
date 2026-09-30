@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { apiFacadeWithSessionDomain } from '../helpers/session-context-mock'
 import * as events from '@taiji/core/transport/api'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { __clearInFlightContextFetchForTest } from '@/composables/features/model/useContextUsage'
@@ -22,14 +23,11 @@ import type { ServerMessage } from '@taiji/shared'
 
 import ContextCapacityPopover from '@/components/panel/ContextCapacityPopover.vue'
 
-// ── mock 边界：getContext mock 为受控 pending（挂载触发的恢复腿不落地）；门面重指 ──
+// ── mock 边界：getContext mock 为受控 pending（挂载触发的恢复腿不落地）；'@/api' 门面
+//    session 域重指单源 helpers/session-context-mock（domain mock 一行内联 + 工厂转发）──
 const getContextMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api/domains/session', () => ({ getContext: getContextMock }))
-vi.mock('@/api', async (importActual) => {
-  const actual = await importActual<typeof import('@/api')>()
-  const session = await import('@taiji/core/transport/api/domains/session')
-  return { ...actual, session }
-})
+vi.mock('@/api', () => apiFacadeWithSessionDomain())
 
 beforeEach(() => {
   setActivePinia(createPinia())

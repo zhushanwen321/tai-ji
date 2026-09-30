@@ -151,7 +151,7 @@ def main() -> int:
     print(f"  cd packages/renderer && pnpm add <缺失的包>")
     print(f"  （shadcn-vue add 生成的组件常漏 class-variance-authority / reka-ui 等）")
     print()
-    print(f"\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m")
+    print(f"\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m")
     return 2
 
 

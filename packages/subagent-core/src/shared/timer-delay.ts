@@ -6,8 +6,7 @@
  * 3ms 触发）——语义完全反转：调用方想表达的「近乎不限时」变成立即触发。对 watchdog
  * / 预算计时器而言即「刚启动就误杀」。
  *
- * 本包三个 timer 挂载/解析入口（budgetTimeMs → lifecycle.scheduleTimeBudget、
- * TAIJI_SUBAGENT_SPAWN_WATCHDOG_MS → session-runner.resolveSpawnWatchdogMs、
+ * 本包 timer 挂载/解析入口（budgetTimeMs → lifecycle.scheduleTimeBudget、
  * idleTimeoutMs → lifecycle-manager.armIdleTimer）统一在值流入 setTimeout 前调
  * assertSafeTimerDelay fail-fast——不静默 clamp（clamp 把配置错误变成静默语义漂移，
  * 比崩溃更难排查；用户应显式决定 clamp 到多少）。

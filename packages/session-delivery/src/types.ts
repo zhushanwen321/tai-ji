@@ -46,6 +46,20 @@ export type DeliveryPayload = TextPayload | CustomPayload
 
 // ─── 消息 envelope ──────────────────────────────────────────
 
+/**
+ * envelope additive meta（notify-once 设计 D2：notifyId 穿 envelope）。
+ *
+ * 内核对 meta 零读取零加工——只随消息对象本身流转；per-message 终态回调（onSettled，
+ * 见下方契约）收到的是**该条原始消息**，meta 因此原样到达回调（合批亦然：回调逐条
+ * 收各自原始消息，非 composed 合批消息）。消费方（runtime 债权桥接）在 delivered 回调
+ * 读 `msg.meta.notifyId` 完成 armed→injected 受理回执锚定。
+ */
+export interface DeliveryMeta {
+  /** 通知债权幂等键（notify-once）：delivered 回执据此锚定受理事实。 */
+  notifyId?: string
+  [key: string]: unknown
+}
+
 /** 投递消息 envelope。 */
 export interface DeliveryMessage {
   payload: DeliveryPayload
@@ -53,6 +67,10 @@ export interface DeliveryMessage {
   intent?: DeliveryIntent
   /** 去重 key（开 dedupe 时必填）。 */
   dedupeKey?: string
+  /** 持久性预留（一期仅 'in-memory'）。 */
+  durability?: 'in-memory'
+  /** additive meta：不参与内核策略，per-message 原样透传 onSettled（见 DeliveryMeta）。 */
+  meta?: DeliveryMeta
 }
 
 // ─── 端口（注入运行时能力） ──────────────────────────────────
@@ -112,7 +130,8 @@ export interface DeliveryConfig {
   dedupe?: { maxKeys: number }
   /**
    * 投递终态信号（D4）。per-message 契约（ext-simplify-08 D1/B1）：批次内每条消息
-   * 各获一次终态回调，msg 为该条原始消息（非合批 composed 消息）；单消息批次行为
+   * 各获一次终态回调，msg 为该条原始消息（非合批 composed 消息）——additive meta
+   * （notifyId 等）随原消息一并到达回调；单消息批次行为
    * 不变。回调循环边界：回调内 dispose() 后本批剩余条目不再回调（与 dispose「丢弃
    * 队列不触发 onSettled」契约一致）；回调内再 send() 的新消息走标准 flush 管线
    * （空闲时可能在回调栈内立即投递）、不参与本批回调循环（契约完备性登记：当前

@@ -241,6 +241,21 @@ interface Setup {
 
 let autoId = 0
 
+/**
+ * per-session replicated-state 实例组的 teardown 登记表。
+ *
+ * 播种 refetch 失败（mock 缺 wire 字段）的实例以真时钟 1s/5s 退避重试；用例结束无人
+ * dispose 时定时器穿越文件生命周期，全包跑撞上 vitest worker teardown →
+ * EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was pending（exit=1）。
+ * 每个创建点（createSetup / 局部 new SessionService）经 trackScalarStates 登记，
+ * afterEach 统一 dispose 四实例停止全部定时器。
+ */
+const liveScalarStateOwners: Array<{ service: SessionService; sids: () => Iterable<string> }> = []
+
+function trackScalarStates(service: SessionService, sids: () => Iterable<string>): void {
+  liveScalarStateOwners.push({ service, sids })
+}
+
 function createSetup(): Setup {
   const clientMap = new Map<string, MockClient>()
   let exitCb: ((sessionId: string, code: number | null, stderr: string) => void) | null = null
@@ -362,6 +377,8 @@ function createSetup(): Setup {
     await service.create(opts.cwd ?? tmpdir(), opts.label ?? 'seed', { hidden: opts.hidden })
     return { id: piSid, client }
   }
+
+  trackScalarStates(service, () => clientMap.keys())
 
   const setup: Setup = {
     service, pm, broker, messageBus, extensionService, clientMap, gitInfoReader,
@@ -522,6 +539,20 @@ function createServiceWithSpyAdapters(
 // useRealTimers 幂等，真 timers 下 no-op——不影响 2062 行自管 fake timers 的既有用例）
 afterEach(() => {
   vi.useRealTimers()
+  // 停掉全部登记实例组的退避/防抖/周期定时器（见 liveScalarStateOwners JSDoc——
+  // 泄漏定时器在文件 teardown 后 fire 会撞 vitest worker 关闭，报 unhandled rejection）
+  for (const { service, sids } of liveScalarStateOwners) {
+    for (const sid of sids()) {
+      const states = service.getScalarReplicatedStates(sid)
+      if (states) {
+        states.thinkingLevel.dispose()
+        states.modelId.dispose()
+        states.usage.dispose()
+        states.commands.dispose()
+      }
+    }
+  }
+  liveScalarStateOwners.length = 0
 })
 
 // [u2] 用例间清理投递内核：释放 30s watchdog（持有期轮询已事件化，无轮询 timer）
@@ -920,6 +951,9 @@ describe('SessionService · lifecycle', () => {
           // 用可观测的 adapter 工厂捕获 detach（同 Facade 组 onSessionExited detach 先例）
           const localService = createServiceWithSpyAdapters(localSetup, attachSpy, detachSpy)
           stubNextCreatedClient(localSetup, makeMockClient(), { persistent: true })
+          // 防泄漏登记（notify-once review must-fix）：localService 的 replicated-state
+          // 实例定时器需 afterEach 统一 dispose，否则撞 vitest worker teardown
+          trackScalarStates(localService, () => ['persist-detach'])
 
           await localService.restoreSession('persist-detach')
           expect(detachSpy).not.toHaveBeenCalled()
@@ -1779,6 +1813,9 @@ describe('SessionService · onSessionExit callback', () => {
     const localSetup = createSetup()
     // 替换 adapterFactory：直接 new 一个带 spy 的 service
     const localService = createServiceWithSpyAdapters(localSetup, attachSpy, detachSpy)
+    // 防泄漏登记（notify-once review must-fix）：localService 的 replicated-state
+    // 实例定时器需 afterEach 统一 dispose，否则撞 vitest worker teardown
+    trackScalarStates(localService, () => localSetup.clientMap.keys())
     const piSid = 'pi-detach-1'
     const client = makeMockClient({
       // W2 收口后 create 用 client.getState()，返回归一后的 state 对象

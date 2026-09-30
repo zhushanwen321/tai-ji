@@ -24,9 +24,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, nextTick } from 'vue'
+import { defineComponent, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { DIAGNOSTIC_EXPORT_PRIVACY_NOTICE } from '@taiji/shared'
+// useToast 断言经 toastSpyMock 单例取；Panel 挂载壳 mock 三连（useSidebar/useToast/
+// useExtensionUI）由 panel-mount-mocks 导入即注册——置于 Panel import 之前，注册早于
+// 其导入链加载（useToast 工厂绑定 TDZ 坑，见 helpers/i18n-toast-mock.ts）
+import { toastSpyMock } from '@/__tests__/helpers/i18n-toast-mock'
+import { MessageStreamStub } from '@/__tests__/helpers/panel-mount-mocks'
 import Panel from '../Panel.vue'
 
 // ── mock 面 ────────────────────────────────────────────────────────
@@ -63,35 +68,6 @@ vi.mock('@/stores/session', () => ({ useSessionStore: () => sessionMock }))
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
   useNewTaskFlow: () => ({ state: { value: 'idle' }, isActive: { value: false } }),
 }))
-
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({
-    restoreSession: vi.fn(async () => {}),
-    retryHistory: vi.fn(async () => {}),
-    deleteSession: vi.fn(async () => {}),
-  }),
-}))
-
-const toastMock = vi.hoisted(() => ({ info: vi.fn(), error: vi.fn(), warning: vi.fn() }))
-vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ info: toastMock.info, error: toastMock.error, warning: toastMock.warning }),
-}))
-
-vi.mock('@/composables/useExtensionUI', () => ({
-  useExtensionUI: () => ({
-    currentFormRequest: { value: undefined as unknown },
-    respond: vi.fn(),
-    cancel: vi.fn(),
-  }),
-  formFilter: () => true,
-  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
-  planReviewFilter: () => true,
-}))
-
-const MessageStreamStub = defineComponent({
-  name: 'MessageStream',
-  render: () => h('div', { 'data-testid': 'message-stream-stub' }),
-})
 
 /** ConfirmDialog stub：open 受控 + description/confirm 同构渲染（teleport 免处理） */
 const ConfirmDialogStub = defineComponent({
@@ -149,7 +125,7 @@ describe('Panel 死态块诊断导出入口（D6 / u3b 断言 ⑤）', () => {
     await dialog.find('[data-testid="dialog-confirm"]').trigger('click')
     await nextTick()
     expect(exportBundleMock).toHaveBeenCalledTimes(1)
-    expect(toastMock.info.mock.calls[0]?.[0] as string).toContain('/tmp/taiji-diag-dead.zip')
+    expect(toastSpyMock.info.mock.calls[0]?.[0] as string).toContain('/tmp/taiji-diag-dead.zip')
     wrapper.unmount()
   })
 

@@ -106,7 +106,11 @@ export class ProviderMessageHandler {
   private async handleSetProvider(ws: WsType, msg: Extract<ClientMessage, { type: 'config.setProvider' }>): Promise<boolean> {
     const { providerId, ...data } = msg.payload
     const setResult = await this.ctx.configService.setProvider(providerId, data as Parameters<IConfigService['setProvider']>[1])
-    this.ctx.reply(ws, msg.id, 'config.providerUpdated', { providerId })
+    // quotaAutoEnabled（新增即默认同意写成功）随 reply 回传——前端 toast 依据，不实报告禁止
+    this.ctx.reply(ws, msg.id, 'config.providerUpdated', {
+      providerId,
+      ...(setResult.quotaAutoEnabled ? { quotaAutoEnabled: true } : {}),
+    })
     this.ctx.broadcastProviderList()
     reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-updated', setResult.newDefault)
     return true

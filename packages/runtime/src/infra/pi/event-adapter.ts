@@ -1554,7 +1554,7 @@ const NULL_EVENTS = new Set([
  * pi 无「每次 append 都广播」的 entry 事件（entry_appended 全仓唯一 emit 点在 extension
  * appendEntry 回调，agent-session.ts:2517），message / compaction / bash 的 append 均无
  * entry 级事件。改用三类现存事件作触发信号：message_end（每条消息 append 后）、
- * agent_settled（稳态兑底）、entry_appended（extension appendEntry）。payload 不需要——
+ * agent_settled（稳态兜底）、entry_appended（extension appendEntry）。payload 不需要——
  * interpreter 据此调 onTraceSync（get_entries(since) 追赶式拉取，pi 侧才是权威）。
  *
  * 这三类事件同时是 main 侧 W21（实时 feed）/ W1（bash flush）/ W18（派生缓存失效）的

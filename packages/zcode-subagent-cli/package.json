@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/zcode-subagent-cli",
-  "version": "0.4.1",
+  "version": "0.4.3",
   "description": "zcode subagent engine as an independent CLI package (W5 of subagent-engine-protocolization): speaks engine-protocol v1 over NDJSON stdio, depends only on @zhushanwen/subagent-engine-sdk (never subagent-core)",
   "type": "module",
   "license": "MIT",
@@ -25,6 +25,7 @@
   "taiji": {
     "subagentEngine": {
       "id": "zcode",
+      "processModel": "shared-service",
       "bin": "zcode-subagent-cli",
       "protocol": 1,
       "envPrefixes": [

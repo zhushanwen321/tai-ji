@@ -12,9 +12,8 @@
  *   R6 dimensions 非数组；constraints 空数组
  *   R7 validateHookExists：§ 内联段特例 / 真实 hook / 不存在
  *
- * 本测试只读仓库既有文件（docs/ARCHITECTURE.md、scripts/validate-constraints.mjs、
- * .agents/skills/pr-cr-fix/agents/review-test-coverage.md），零写操作，不触碰
- * 真实数据目录。
+ * 本测试只读仓库既有文件（docs/ARCHITECTURE.md、scripts/validate-constraints.mjs），
+ * fixture 全部自造数据、零写操作，不触碰真实数据目录。
  */
 import { describe, it, expect } from 'vitest'
 
@@ -41,7 +40,7 @@ describe('R1 合法条目 → 零错误', () => {
     expect(validate({ constraints: [validConstraint()] })).toEqual([])
   })
   it('dimensions 合法数组不报错；scope global 放行', () => {
-    const c = validConstraint({ scope: ['global'], dimensions: ['review:review-test-coverage'] })
+    const c = validConstraint({ scope: ['global'], dimensions: ['review:business-logic'] })
     expect(validate({ constraints: [c] })).toEqual([])
   })
 })
@@ -144,7 +143,7 @@ describe('R6 表级校验', () => {
     expect(validate({})).toContainEqual('constraints 为空数组')
   })
   it('dimensions 非数组报一条', () => {
-    const errors = validate({ constraints: [validConstraint({ dimensions: 'review:review-test-coverage' })] })
+    const errors = validate({ constraints: [validConstraint({ dimensions: 'review:business-logic' })] })
     expect(errors).toContainEqual('C-proc-99: dimensions 须为数组')
   })
 })

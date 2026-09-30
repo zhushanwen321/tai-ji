@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useExtensionUI planReview 分流单测 —— plan 模式重设计 u1-banner（设计 D5 marker select 通道）。
  *

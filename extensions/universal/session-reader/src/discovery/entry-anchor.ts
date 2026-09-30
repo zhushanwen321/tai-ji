@@ -36,10 +36,22 @@ export interface ZcodeAnchor {
 const SUBAGENT_RECORD_CUSTOM_TYPE = 'subagent-record'
 
 /**
+ * v2 条目 data 的认识版本词表（W1 起 = 2）。与写侧 subagent-core
+ * SUBAGENT_RECORD_ENTRY_VERSION 同值、同「本地持有 + 测试守卫漂移」模式——写侧
+ * 再升 v3 时本守卫先红，提醒评估新版本的锚读取面。
+ */
+const SUBAGENT_RECORD_ENTRY_V2 = 2
+
+/**
  * 从单条 entry 提取 zcode 锚。形状校验窄而严，任一不满足 = 该条不算命中（返回
  * undefined，调用方继续扫——缺键条目不遮蔽更早的完整条目）：
  * - `type === 'custom'` ∧ `customType === 'subagent-record'`
- * - `data.v === 1`（schema 版本守卫，不认识的版本跳过而非猜测——写侧 record-entry.ts v 注释同口径）
+ * - 版本/判别键二选一（schema 版本守卫，不认识的版本跳过而非猜测——写侧
+ *   record-entry.ts classifySubagentRecordEntryData 同口径）：
+ *   - v1：`data.v === 1`（全量快照形态，兼容读面）；
+ *   - v2：`data.v === 2` ∧ `data.kind === 'settled'`（W1 注册/终态两条小条目——
+ *     **锚只取自终态条**：registered 条目不携带 engineHandle，且设计 D1 裁决
+ *     「sessionRef 双键取自终态条」；kind 非法 = unknown-kind 跳过）；
  * - `data.id === saId`（record id 即 sa-id，record-access.ts `sa-${uuid}`）
  * - `engineHandle.sessionRef.sessionId` / `.dbPath` 均为非空 string（F8 双键齐判据的
  *   锚字段部分；pi record 的 sessionRef 无 dbPath → 天然不命中，无需 engine 判别）
@@ -49,10 +61,26 @@ function zcodeAnchorOfEntry(entry: Entry, saId: string): ZcodeAnchor | undefined
   const data: unknown = entry.data
   if (typeof data !== 'object' || data === null) return undefined
   const d = data as Record<string, unknown>
-  if (d.v !== 1 || d.id !== saId) return undefined
-  const handle: unknown = d.engineHandle
-  if (typeof handle !== 'object' || handle === null) return undefined
-  const ref: unknown = (handle as Record<string, unknown>).sessionRef
+  if (d.id !== saId) return undefined
+  if (!isAnchorEligibleRecordEntryVersion(d)) return undefined
+  return extractZcodeSessionRefAnchor(d.engineHandle)
+}
+
+/** [zcodeAnchorOfEntry 拆分] 条目形态判别：v1 全量快照 或 v2 终态条（registered
+ * 条目不携带 engineHandle，且设计 D1 裁决「sessionRef 双键取自终态条」；kind
+ * 非法 = unknown-kind 跳过）。 */
+function isAnchorEligibleRecordEntryVersion(d: Record<string, unknown>): boolean {
+  if (d.v === SUBAGENT_RECORD_ENTRY_V2) {
+    return d.kind === 'settled'
+  }
+  return d.v === 1
+}
+
+/** [zcodeAnchorOfEntry 拆分] engineHandle.sessionRef 双键提取（sessionId/dbPath
+ * 均非空 string 才命中；pi record 的 sessionRef 无 dbPath → 天然不命中）。 */
+function extractZcodeSessionRefAnchor(engineHandle: unknown): ZcodeAnchor | undefined {
+  if (typeof engineHandle !== 'object' || engineHandle === null) return undefined
+  const ref: unknown = (engineHandle as Record<string, unknown>).sessionRef
   if (typeof ref !== 'object' || ref === null) return undefined
   const r = ref as Record<string, unknown>
   const { sessionId, dbPath } = r
@@ -68,6 +96,9 @@ function zcodeAnchorOfEntry(entry: Entry, saId: string): ZcodeAnchor | undefined
  * 「主 session 全文 → 每 id 末条 record data」，record-store-rebuild.ts:212-227）：
  * 同一 sa-id 每次状态迁移写一条全量快照 entry 且 sessionRef 每轮覆写（F16），故
  * 同文件内后条覆盖前条 = 文件顺序末条。**禁止另创取首条/合并语义**（附录 B-6）。
+ * W1 v2 双形态下末条锚定语义不变：registered 条目不命中（无 engineHandle），
+ * 「末条」= 最后一条可命中的 v1 快照条或 v2 终态条（v2 settled 条目也随 reopen
+ * 多轮各写一条，后写覆盖前写，与 v1 覆写同构）。
  *
  * 多候选文件：按候选列表顺序逐文件扫，文件内有命中锚（含末条裁决后）即止——
  * 候选顺序 = 调用方声明的优先级（liveSessionDir 优先），不跨文件合并。

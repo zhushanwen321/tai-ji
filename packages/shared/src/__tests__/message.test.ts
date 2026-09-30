@@ -13,12 +13,21 @@
 import { describe, it, expect } from 'vitest'
 import {
   MSG_ID_TAG_RE,
+  COMPLETE_NOTIFY_CUSTOM_TYPES,
   PI_RESPAWN_NOTICE_CUSTOM_TYPE,
   SUBAGENT_DIRECTIVE_CUSTOM_TYPE,
   decodeNewlineEscapes,
   parseRespawnNoticeVariant,
   parseSubagentDirective,
 } from '../message'
+
+describe('COMPLETE_NOTIFY_CUSTOM_TYPES SSOT', () => {
+  it('三成员精确锁定（notify-once D9 渲染接入点①：managed-session-notify 追加——少员 = 通知被 Turn 渲染层静默吞掉，多员 = 误藏正常消息）', () => {
+    expect(COMPLETE_NOTIFY_CUSTOM_TYPES).toEqual(
+      new Set(['subagent-bg-notify', 'workflow-result', 'managed-session-notify']),
+    )
+  })
+})
 
 describe('SUBAGENT_DIRECTIVE_CUSTOM_TYPE SSOT', () => {
   it('常量值锁定为 subagent-directive（与 extension 端写入字符串一致，防改名漂移）', () => {

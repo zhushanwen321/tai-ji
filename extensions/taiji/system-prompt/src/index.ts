@@ -11,7 +11,7 @@
  *  3. When `append.enabled === true` and `append.prompt` is non-blank,
  *     appends the user's text to the event's systemPrompt.
  *  4. Reads the global instructions file `~/.agents/AGENTS.md` (candidates
- *     AGENTS.md / AGENTS.MD / CLAUDE.md / CLAUDE.MD) every turn and appends it
+ *     AGENTS.md / AGENTS.MD, exact case match) every turn and appends it
  *     under a labeled header. Modeled on pi's native `loadContextFileFromDir`
  *     but deliberately narrower: pi 0.84.4 also probes `AGENTS.override.md`
  *     and applies its candidate list to project dirs, whereas this list only
@@ -66,12 +66,12 @@ function cachedReadFileSync(filePath: string): string | null {
 
 /**
  * Global instruction candidates. Modeled on pi's native loadContextFileFromDir
- * but deliberately not a strict mirror: pi 0.84.4 probes
- * ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"]
- * against project dirs, while these candidates apply only to the global agents
- * directory and intentionally exclude AGENTS.override.md.
+ * but deliberately not a strict mirror: pi 0.84.4 probes its own candidate
+ * list (including AGENTS.override.md) against project dirs, while these
+ * candidates apply only to the global agents directory, intentionally exclude
+ * AGENTS.override.md, and recognize only AGENTS.md case variants.
  */
-const GLOBAL_AGENTS_CANDIDATES = ['AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD']
+const GLOBAL_AGENTS_CANDIDATES = ['AGENTS.md', 'AGENTS.MD']
 
 /**
  * taiji capability 固定注入段（设计 D6）：告知 AI 本渲染器的能力面，让新会话无需
@@ -173,29 +173,25 @@ function readGlobalAgentsFile(): { path: string; content: string } | null {
 /**
  * Read & parse the config file. Missing / malformed / partial → all-default.
  * Returns the effective config object; never throws.
+ *
+ * Only parses the sections this extension consumes (append / capability).
+ * The config file's `version` / `replace` fields belong to the runtime-side
+ * `--system-prompt` consumer (ADR-0044) and are intentionally not parsed here.
  */
 function readConfig(dataDir: string): {
-  version: number
-  replace: { enabled: boolean; prompt: string }
   append: { enabled: boolean; prompt: string }
   capability: { enabled: boolean }
 } {
   const parsed = readJsonIfValid(path.join(dataDir, CONFIG_FILE))
   if (!parsed) {
     return {
-      version: 1,
-      replace: { enabled: false, prompt: '' },
       append: { enabled: false, prompt: '' },
       // capability 默认值与解析语义同向：缺 config → 开（见 readCapabilityEnabled）
       capability: { enabled: true },
     }
   }
   // Merge defensively — every field has its own default.
-  // replace 字段仅防御性解析保持 config 结构完整，不参与本 hook 逻辑——
-  // replace 走 --system-prompt CLI（ADR-0044），hook 只处理 append。
   return {
-    version: typeof parsed.version === 'number' ? parsed.version : 1,
-    replace: readSection(parsed.replace),
     append: readSection(parsed.append),
     capability: { enabled: readCapabilityEnabled(parsed.capability) },
   }
@@ -229,7 +225,7 @@ function isJsonObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object'
 }
 
-/** Defensive field parsing for a `replace`/`append` config section. */
+/** Defensive field parsing for the `append` config section. */
 function readSection(raw: unknown): { enabled: boolean; prompt: string } {
   const section = isJsonObject(raw) ? raw : {}
   return {
@@ -239,8 +235,8 @@ function readSection(raw: unknown): { enabled: boolean; prompt: string } {
 }
 
 /**
- * pi 是否以 --no-context-files / -nc 启动。用户显式退出 AGENTS.md / CLAUDE.md
- * 发现时，全局文件不得从这条通路溜回来。pi CLI 把 -nc 视为 --no-context-files
+ * pi 是否以 --no-context-files / -nc 启动。用户显式退出 AGENTS.md
+ * 自动发现时，全局文件不得从这条通路溜回来。pi CLI 把 -nc 视为 --no-context-files
  * 的等价短形式（cli/args.ts），两种形式都必须命中守卫——与镜像侧
  * （argv-mirror.ts 同样解析两种形式）保持一致。
  */

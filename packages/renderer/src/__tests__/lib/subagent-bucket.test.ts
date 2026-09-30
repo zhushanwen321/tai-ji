@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * renderer lib/subagent-bucket.test.ts —— 判据 SSOT 模块单测
  * （[modeless 波4] chatMode 比对维度随字段消亡删除，done 展示判据 idle+result 化）。

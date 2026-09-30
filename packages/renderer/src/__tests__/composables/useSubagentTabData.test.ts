@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useSubagentTabData 单测（drawer-blank-fix u2-seed，T2 判定矩阵——设计 §10 v4）。
  *

@@ -2,8 +2,9 @@
 //
 // Pi ctx.ui method 的交互模型分类。
 //
-// 固化 Pi rpc-mode.ts（--mode rpc 子进程的 ctx.ui 实现）中 10 个会发
-// extension_ui_request 的 method 的交互模型分类，供 session-runner 决定：
+// 固化 Pi rpc-mode.ts（--mode rpc 子进程的 ctx.ui 实现）中 9 个会发
+// extension_ui_request 的 method 的交互模型分类（4 dialog + 5 fire-and-forget，
+// 与 ui-request-handler-factory.ts 转发表一一对应），供消费方决定：
 //   - 是否透传到主进程 handler（dialog 类才透传，fire-and-forget 不透传）
 //   - 是否进 L2 全局串行队列（dialog 类才排队，争输入焦点）
 //

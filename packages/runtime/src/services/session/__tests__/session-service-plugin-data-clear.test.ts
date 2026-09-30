@@ -208,7 +208,6 @@ function createRestoreLifecycle(service: SessionService, sid: string, bodyFile: 
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
   const removeEntryOnService = vi.spyOn(service, 'removeSessionEntry')
   const lifecycle = new SessionLifecycle(

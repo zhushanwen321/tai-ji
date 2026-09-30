@@ -94,7 +94,7 @@ describe('D3: props.level 为空时触发器显示占位文案', () => {
 })
 
 // ══ U9: pi 新语义（U6 改锚：可用集读 supportedLevels 下发）——mimo 场景档位渲染 ══
-// xiaomi-token-plan-cn/mimo-v2.5-pro 的 supportedLevels = pi 同源计算默认五档。
+// xiaomi-token-plan-cn/mimo-v2.6-flash 的 supportedLevels = pi 同源计算默认五档。
 describe('U9: mimo 场景（supportedLevels 未下发）→ 渲染默认五档含 minimal，无 xhigh/max', () => {
   it('DOM 含 5 个档位项：off/minimal/low/medium/high，不含 xhigh/max', async () => {
     const wrapper = mount(ThinkingLevelPopover, {

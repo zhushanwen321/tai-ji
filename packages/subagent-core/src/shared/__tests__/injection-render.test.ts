@@ -11,6 +11,8 @@
 // - 分段条目预算（红线 7）：码点序 + 截尾 + 兜底指引行、预算边界（恰好 15/10
 //   不截）、先排后截（乱序输入）、models 段无预算完整渲染；
 // - guide 宿主注入（渲染源码无内嵌平台文案）；
+// - 空态显式（D4-2）：formatEmptyResourceList 形态/转义/去重/空 roots +
+//   既有三 format 空列表返空串判据契约不变；
 // - summarizeDescription / sortByCodepoint / barrel 逐名探针。
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -20,6 +22,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	formatAgentList,
+	formatEmptyResourceList,
 	formatModelList,
 	formatWorkflowList,
 	sortByCodepoint,
@@ -47,7 +50,7 @@ const MODEL_GUIDE = "MODEL-GUIDE";
 const agentOpts: ListFormatOptions = { guide: AGENT_GUIDE };
 const workflowOpts: ListFormatOptions = { guide: WORKFLOW_GUIDE };
 
-/** pi 现调用形态的 agent 数据（discoverAllAgents 输出投影：已按 name 码点序） */
+/** pi 现调用形态的 agent 数据（agent 清单注入投影：已按 name 码点序） */
 const piShapedAgents: AgentEntry[] = [
 	{
 		name: "coder",
@@ -180,23 +183,16 @@ describe("byte-exact parity with pi-sw current formatters", () => {
 // ============================================================
 
 describe("ModelEntry union guards (red-line 5)", () => {
-	it("input undefined 不抛且 caps 无 vision（reasoning 对象形态按 truthy → caps 含 reasoning）", () => {
+	it("input undefined 不抛且 caps 无 vision（reasoning true → caps 含 reasoning）", () => {
 		const entry: ModelEntry = {
 			id: "glm",
 			name: "GLM",
-			reasoning: { variants: ["high", "medium"], defaultVariant: "high" },
-			// input 缺席——zsw 投影形态；pi 版此处抛 TypeError
+			reasoning: true,
+			// input 缺席；pi 版此处抛 TypeError
 		};
 		const out = formatModelList([entry], { guide: MODEL_GUIDE });
 		expect(out).toContain("<caps>reasoning</caps>");
 		expect(out).not.toContain("vision");
-	});
-
-	it("reasoning 空对象形态（无 variants）仍按 truthy 处理 → caps 含 reasoning", () => {
-		const entry: ModelEntry = { id: "glm", name: "GLM", reasoning: {} };
-		expect(formatModelList([entry], { guide: MODEL_GUIDE })).toContain(
-			"<caps>reasoning</caps>",
-		);
 	});
 
 	it("input 空数组：无 vision；reasoning false：无 reasoning → 无 caps 段", () => {
@@ -224,13 +220,6 @@ describe("ModelEntry union guards (red-line 5)", () => {
 		expect(formatModelList([entry], { guide: MODEL_GUIDE })).toContain(
 			"<contextWindow>0</contextWindow>",
 		);
-	});
-
-	it("label 进类型并集但渲染面不消费（输出无 label 内容）", () => {
-		const entry: ModelEntry = { id: "glm", name: "GLM", label: "secret-label" };
-		const out = formatModelList([entry], { guide: MODEL_GUIDE });
-		expect(out).not.toContain("secret-label");
-		expect(out).not.toContain("label");
 	});
 });
 
@@ -377,6 +366,117 @@ describe("per-section entry budget (red-line 7)", () => {
 });
 
 // ============================================================
+// 空态显式（D4-2 空注入显式化）：零条目时空发现态渲染
+// ============================================================
+
+describe("empty-state explicit rendering (D4-2)", () => {
+	it("workflows 零条目：渲染 (none discovered; roots: ...) 且外层仍是 <available_workflows> 标签形态（逐字节）", () => {
+		const out = formatEmptyResourceList("workflows", [
+			"/home/u/.pi/agent/workflows",
+			"/ws/.pi/workflows",
+		]);
+		expect(out).toBe(
+			"\n\n<available_workflows>\n" +
+				"  (none discovered; roots: /home/u/.pi/agent/workflows, /ws/.pi/workflows)\n" +
+				"</available_workflows>",
+		);
+	});
+
+	it("agents kind：标签映射为 <available_subagents>（两段共用空态形态）", () => {
+		const out = formatEmptyResourceList("agents", ["/ws/.agents/agents"]);
+		expect(out).toContain("<available_subagents>");
+		expect(out).toContain("</available_subagents>");
+		expect(out).toContain("(none discovered; roots: /ws/.agents/agents)");
+	});
+
+	it("roots 每项 escapeXml（路径含 XML 特殊字符不破坏注入段）", () => {
+		const out = formatEmptyResourceList("workflows", ["/a&b<c>/w"]);
+		expect(out).toContain("roots: /a&amp;b&lt;c&gt;/w");
+	});
+
+	it("重复 roots 保序去重（同 turn 重建字节稳定，KV-cache 契约）", () => {
+		const out = formatEmptyResourceList("workflows", ["/r1", "/r2", "/r1"]);
+		expect(out).toContain("roots: /r1, /r2)");
+		expect(out.match(/\/r1/g)).toHaveLength(1);
+	});
+
+	it("空 roots 返回空串（无清单可渲染时不注入，防空括号垃圾）", () => {
+		expect(formatEmptyResourceList("workflows", [])).toBe("");
+		expect(formatEmptyResourceList("agents", [])).toBe("");
+	});
+
+	it("既有三 format 空列表仍返回空串（空态接管在工厂层，判据契约不变）", () => {
+		expect(formatAgentList([], agentOpts)).toBe("");
+		expect(formatWorkflowList([], workflowOpts)).toBe("");
+		expect(formatModelList([], { guide: MODEL_GUIDE })).toBe("");
+	});
+});
+
+// ============================================================
+// invalid 具名上报（D4-3 / P5）：损坏 workflow 不静默跳过
+// ============================================================
+
+describe("invalid named reporting (D4-3/P5)", () => {
+	const invalids = [
+		{ path: "/ws/.pi/workflows/broken.js", reason: "no valid resource metadata" },
+	];
+
+	it("非空条目 + invalids：条目行后、闭合标签前渲染 invalid 元素（逐字节）", () => {
+		const out = formatWorkflowList(
+			[{ name: "chain", description: "三步链", path: "/abs/chain.js" }],
+			{ guide: WORKFLOW_GUIDE, invalids },
+		);
+		expect(out).toBe(
+			"\n\n<available_workflows>\n" +
+				`${WORKFLOW_GUIDE}\n` +
+				"  <workflow><name>chain</name><description>三步链</description><location>/abs/chain.js</location></workflow>\n" +
+				"  <invalid><path>/ws/.pi/workflows/broken.js</path><reason>no valid resource metadata</reason></invalid>\n" +
+				"</available_workflows>",
+		);
+	});
+
+	it("invalid path/reason 逐字段 escapeXml（错误消息含特殊字符不破坏注入段）", () => {
+		const out = formatWorkflowList(
+			[{ name: "chain", description: "d", path: "/abs/chain.js" }],
+			{
+				guide: WORKFLOW_GUIDE,
+				invalids: [{ path: "/a&b<c>.js", reason: 'EACCES: "permission" & denied' }],
+			},
+		);
+		expect(out).toContain(
+			"<invalid><path>/a&amp;b&lt;c&gt;.js</path><reason>EACCES: &quot;permission&quot; &amp; denied</reason></invalid>",
+		);
+	});
+
+	it("不传 invalids / 空数组：输出与既有形态逐字节一致（CA2 锚定面零影响）", () => {
+		const entries = [{ name: "chain", description: "d", path: "/abs/chain.js" }];
+		const baseline = formatWorkflowList(entries, workflowOpts);
+		expect(formatWorkflowList(entries, { guide: WORKFLOW_GUIDE })).toBe(baseline);
+		expect(formatWorkflowList(entries, { guide: WORKFLOW_GUIDE, invalids: [] })).toBe(baseline);
+	});
+
+	it("空列表 + invalids 非空仍返回空串（invalid 随空态段渲染的分流契约）", () => {
+		expect(formatWorkflowList([], { guide: WORKFLOW_GUIDE, invalids })).toBe("");
+	});
+
+	it("formatEmptyResourceList invalids：空态行后追加具名上报行（逐字节）", () => {
+		const out = formatEmptyResourceList("workflows", ["/ws/.pi/workflows"], invalids);
+		expect(out).toBe(
+			"\n\n<available_workflows>\n" +
+				"  (none discovered; roots: /ws/.pi/workflows)\n" +
+				"  <invalid><path>/ws/.pi/workflows/broken.js</path><reason>no valid resource metadata</reason></invalid>\n" +
+				"</available_workflows>",
+		);
+	});
+
+	it("formatEmptyResourceList 无 invalids 缺省参数：输出与既有形态逐字节一致", () => {
+		expect(formatEmptyResourceList("workflows", ["/r"])).toBe(
+			formatEmptyResourceList("workflows", ["/r"], []),
+		);
+	});
+});
+
+// ============================================================
 // 码点序契约（禁 localeCompare——跨环境字节一致）
 // ============================================================
 
@@ -488,6 +588,7 @@ describe("barrel exports probe", () => {
 	it("值导出逐名可达（typeof function）", () => {
 		const valueExports = [
 			"formatAgentList",
+			"formatEmptyResourceList",
 			"formatWorkflowList",
 			"formatModelList",
 			"sortByCodepoint",

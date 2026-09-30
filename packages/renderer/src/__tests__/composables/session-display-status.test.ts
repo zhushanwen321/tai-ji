@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * 进程级 SessionStatus → 展示态映射 + 「运行已完成」判据单测（U-B：子会话徽标口径改未完成数）。
  *

@@ -30,13 +30,10 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
+import { commandMock, transportApiCommandModule } from '@/__tests__/helpers/transport-command-mock'
 
 // ── mock 边界：command 换 mock（spread actual 保留 events 真实通道——usePlanState 订阅用）──
-const commandMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api', async (importActual) => {
-  const actual = await importActual<typeof import('@taiji/core/transport/api')>()
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
-})
+vi.mock('@taiji/core/transport/api', () => transportApiCommandModule())
 
 // file.read mock（照 command-doc-panel.test.ts：捕获调用参数，返回预设 content）
 const readMock = vi.hoisted(() => vi.fn())

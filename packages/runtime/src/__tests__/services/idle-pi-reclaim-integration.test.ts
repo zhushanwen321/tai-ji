@@ -58,6 +58,7 @@ import type { PiTranslatedEvent, ScannedSession } from '../../services/session/t
 import { SessionHistoryReader } from '../../services/session/history-rebuild-cache.js'
 import { MessageBus } from '../../services/message-bus/message-bus.js'
 import type { BusClient } from '../../services/message-bus/types.js'
+import type { ProviderId } from '@taiji/shared'
 import { EventInterpreter } from '../../services/session/event-interpreter.js'
 import { ReclaimSeat, startIdlePiReaper, type IdlePiReaperHandle } from '../../services/session/idle-pi-reaper.js'
 import type { IPiEngine } from '../../services/ports/pi-engine.js'
@@ -74,6 +75,8 @@ const TEST_TIMEOUT_MS = 900_000
 const OCCUPANCY_IDLE_TIMEOUT_MS = 30_000
 /** occupancy 轮询间隔 */
 const POLL_INTERVAL_MS = 100
+/** restore 后 faux 模型就位确认的轮询上限（被等的异步刷新链正常亚秒级，留慢机余量） */
+const MODEL_READY_TIMEOUT_MS = 5_000
 
 /** faux 演员（L2.5）：create 覆盖模型与 configStore 默认模型（pi-fixture FAUX_MODEL 同款） */
 const FAUX_MODEL_REF = 'faux/faux-1'
@@ -176,6 +179,46 @@ function maxSeq(frames: BusFrame[]): number {
   return frames.reduce((max, f) => (typeof f.seq === 'number' && f.seq > max ? f.seq : max), 0)
 }
 
+/** get_state 的 model 字段是否已就位为 faux 演员（运行时收窄后比对 provider/id） */
+function fauxModelActive(state: Record<string, unknown> | undefined): boolean {
+  const model = state?.model
+  if (typeof model !== 'object' || model === null) return false
+  const m = model as Record<string, unknown>
+  return m.provider === FAUX_PROVIDER && m.id === FAUX_MODEL_ID
+}
+
+/**
+ * restore 后、第二 turn 前：轮询确认 pi 当前模型已恢复为 faux；未就位则 setModel 补救。
+ *
+ * 为什么需要：faux 经 pi.registerProvider 的 native 形态注册，pi 进程内「provider 已配置
+ * 鉴权」的集合（configuredProviders）由注册尾部一轮**不等待**的异步刷新落地（pi
+ * model-runtime.js registerNativeProvider → void refresh()）；restore spawn 不带
+ * --model（inheritSessionModel 被测语义），若 switch_session 内的模型恢复判定
+ * hasConfiguredAuth('faux') 赶在刷新落地前执行，模型静默回落 fallback 且**不自愈**
+ * （判定只在 switch_session 重建时做一次），第二 turn 的前置鉴权检查即报
+ * "No API key found for the selected model."（CI run 36586910056 慢机偶发）。
+ * setModel 补救同受该窗口影响（pi 侧 set_model 从可用模型快照找模型，快照被同一
+ * 集合过滤，未落地时报 Model not found）——确认与补救都重试到超时。
+ */
+async function ensureFauxModelReady(client: IPiEngine, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (fauxModelActive(await client.getState())) return
+    try {
+      // 品牌类型边界提升（provider.ts design D5：字面量拆分的编译期已知串，同 pi-provider-store 惯例）
+      await client.setModel(FAUX_PROVIDER! as ProviderId, FAUX_MODEL_ID!)
+    } catch {
+      // 可用模型快照尚未含 faux（鉴权集合未落地）——下一轮重试
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+  }
+  const finalState = await client.getState()
+  expect(
+    fauxModelActive(finalState),
+    `faux model not ready within ${timeoutMs}ms after restore (last model: ${JSON.stringify(finalState?.model)})`,
+  ).toBe(true)
+}
+
 describe.skipIf(!FAUX_PI_READY)(
   `idle pi reclamation 端到端（faux 真进程${FAUX_PI_SKIP_REASON ? `｜skip：${FAUX_PI_SKIP_REASON}` : ''}）`,
   () => {
@@ -240,7 +283,6 @@ describe.skipIf(!FAUX_PI_READY)(
         },
         getMessageBus: () => bus,
         broadcastGlobal: () => {},
-        notifyMessageComplete: () => {},
       }
       const pm = new ProcessManager(tmpdir())
       lifecycle = new SessionLifecycle(
@@ -302,7 +344,6 @@ describe.skipIf(!FAUX_PI_READY)(
           seat,
           listRelayChildrenByMainSession: () => [],
           reapBackgroundTasks: async () => {},
-          clearPendingReload: () => {},
         }
         const broadcastSpy = vi.fn()
         reaper = startIdlePiReaper({
@@ -400,6 +441,10 @@ describe.skipIf(!FAUX_PI_READY)(
         // P1 历史无损（不管 P7 走哪条分支，恢复后的历史都必须与回收前基线等价）
         expect(postRestore.messages.length).toBe(baseline.messages.length)
         expect(JSON.stringify(postRestore.messages)).toContain('reclaim-seed-alpha')
+
+        // 模型就位确认 + 条件补救（机制见 ensureFauxModelReady 注释；正常路径第一拍即
+        // 确认——「模型由 session 文件恢复」的语义仍被完整验证，setModel 只兜慢机窗口）
+        await ensureFauxModelReady(restoredClient!, MODEL_READY_TIMEOUT_MS)
 
         // ══ 阶段 5：新回复流式到达（P3）══
         const framesBeforeSecondTurn = frames.length

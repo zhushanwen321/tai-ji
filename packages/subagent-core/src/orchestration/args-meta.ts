@@ -100,9 +100,8 @@ export function argKeysFromMeta(
 }
 
 /**
- * 平铺检测内部谓词（接收已构建键集）——normalizeArgsByMeta 复用以避免二次构建
- * 键集触发重复 warn；公开入口 findFlattenedArgKeys(params, meta) 按设计签名接收
- * meta 并内联构建。两路径谓词逐字同源，行为必然一致。
+ * 平铺检测内部谓词（接收已构建键集）。公开入口 findFlattenedArgKeys(params, meta)
+ * 按设计签名接收 meta 并内联构建键集后交本谓词判定。
  */
 function filterFlattenedKeys(p: Record<string, unknown>, keys: ArgKeySet): string[] {
   const args = typeof p.args === "object" && p.args !== null ? p.args : undefined;
@@ -132,67 +131,4 @@ export function findFlattenedArgKeys(
   if (typeof params !== "object" || params === null) return [];
   const keys = argKeysFromMeta(meta, options);
   return filterFlattenedKeys(params as Record<string, unknown>, keys);
-}
-
-/** 组装层警告（结构化承载，宿主决定展示/日志/fatal 升级）。 */
-export type ArgMetaWarning =
-  | {
-      /** 无参数契约（meta 未声明或解析为空）——平铺检测跳过，args 不校验（m6 M-2 显式信号）。 */
-      code: "no_parameter_contract";
-      message: string;
-    }
-  | {
-      /** args 子字段被平铺到顶层——修正动作留宿主（pi 现行为是带 Correct 正例 throw）。 */
-      code: "flattened_args";
-      message: string;
-      keys: readonly string[];
-    };
-
-/** normalizeArgsByMeta 产物。 */
-export interface NormalizedArgs {
-  /**
-   * 归一后的 args：params.args ?? {}（params 非对象时为 {}）。args 字段为非对象
-   * 标量时原样透传——类型校验责任在 args-validator（schema chokepoint），本函数
-   * 不发明约束（与 m3 exec-review M2 裁决一致）。
-   */
-  readonly args: unknown;
-  readonly warnings: readonly ArgMetaWarning[];
-}
-
-/**
- * 组装函数：按 meta 归一 params 为 { args, warnings }（pi actionRun 参数处理段的
- * 纯函数化——argKeysFromMeta + 空契约信号 + 平铺检测 + args 归一四步单点收口）。
- *
- * 警告语义与 pi 现行为对位：
- * - no_parameter_contract ↔ pi logger.warn「未声明参数契约——平铺检测跳过」（M-2）
- * - flattened_args ↔ pi throw「Detected ... they belong inside 'args'」（Correct
- *   正例含宿主 tool 键 action/name——平台事实留宿主拼接，core 文案保持中立）
- */
-export function normalizeArgsByMeta(
-  params: unknown,
-  meta: Record<string, unknown> | undefined | null,
-  options?: ArgMetaOptions,
-): NormalizedArgs {
-  const keys = argKeysFromMeta(meta, options);
-  const warnings: ArgMetaWarning[] = [];
-  if (keys.exact.size === 0 && keys.patterns.length === 0) {
-    // m6 exec-review M1：无参数契约（未声明/解析空）→ 显式警告——静默退化变显式
-    warnings.push({
-      code: "no_parameter_contract",
-      message: "未声明参数契约（或解析为空）——平铺检测跳过，args 不校验",
-    });
-  }
-  if (typeof params === "object" && params !== null) {
-    const p = params as Record<string, unknown>;
-    const flattened = filterFlattenedKeys(p, keys);
-    if (flattened.length > 0) {
-      warnings.push({
-        code: "flattened_args",
-        keys: flattened,
-        message: `Detected ${flattened.join(", ")} at top level — they belong inside 'args'.`,
-      });
-    }
-    return { args: p.args ?? {}, warnings };
-  }
-  return { args: {}, warnings };
 }

@@ -471,7 +471,7 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
       'flush-stores',
       'dispose-skill-registry',
       'dispose-git-head-watcher',
-      'dispose-completion-backflow',
+      'dispose-claim-ledger',
       'deinit-relay-server',
       'server-stop',
       'engine-pool-dispose',

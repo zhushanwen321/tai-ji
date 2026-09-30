@@ -148,7 +148,7 @@
 <script setup lang="ts">
 /**
  * System · LLM 调用重试 Section（llm-retry-settings u3）。
- * 数据层：config.getRetryConfig / setRetryConfig（RPC，整体保存为显式按钮触发）。
+ * 数据层：SettingsTransport seam 的 getRetryConfig / setRetryConfig（RPC，整体保存为显式按钮触发）。
  * 校验域：直接消费 shared LLM_RETRY_DOMAIN / validateLlmRetryConfig（禁另写一套域）。
  * 存量超域/坏值（D7/D8）：加载值超出合法域或类型不可用时，对应行显示行内标注。
  */
@@ -165,8 +165,9 @@ import {
 } from '@/components/ui/collapsible'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
-import { getRetryConfig, setRetryConfig, onRetryConfig } from '@taiji/core/transport/api/domains/config'
+import { getSettingsTransport } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
+import { createExplicitSave } from '@/composables/features/settings/setting-field'
 import {
   LLM_RETRY_DOMAIN,
   validateLlmRetryConfig,
@@ -174,8 +175,11 @@ import {
   type LlmRetryProviderConfig,
 } from '@taiji/shared'
 
+// [C3] settings 域 transport 只经 SettingsTransport seam（禁直连门面 / 禁深 import transport 域）
+const transport = getSettingsTransport()
+
 const { t } = useI18n()
-const { info: toastInfo, error: toastError } = useToast()
+const { error: toastError } = useToast()
 
 const MS_PER_SEC = 1000
 const SEC_PER_MIN = 60
@@ -202,7 +206,6 @@ const providerTimeoutSecInput = ref('')
 const providerMaxDelaySecInput = ref('')
 
 const configured = ref(false)
-const saving = ref(false)
 /** 保存失败时标红的字段名集合（validateLlmRetryConfig error 信封字段名）。 */
 const invalidFields = reactive(new Set<string>())
 /** 加载期存量超域/坏值的行内标注（D7/D8），字段名 → 提示文本。 */
@@ -213,7 +216,7 @@ const warnings = reactive<Record<string, string>>({})
 let unsubscribeRetryConfig: (() => void) | null = null
 
 onMounted(async () => {
-  unsubscribeRetryConfig = onRetryConfig((payload) => {
+  unsubscribeRetryConfig = transport.onRetryConfig((payload) => {
     if (!payload.configured) return
     configured.value = true
     // 其他窗口保存的合法值到达后，本窗口过期的校验红框不应残留
@@ -221,7 +224,7 @@ onMounted(async () => {
     applyLoaded(payload.config)
   })
   try {
-    const res = await getRetryConfig()
+    const res = await transport.getRetryConfig()
     configured.value = res.configured
     applyLoaded(res.config)
   } catch (e) {
@@ -391,6 +394,18 @@ function buildConfig(): LlmRetryConfig | null {
   }
 }
 
+// 保存尾段（setting-field module）：saving 防重入 + setRetryConfig + toast（成败文案本域固定）；
+// 域校验（buildConfig / validateLlmRetryConfig）留在组件，不搬
+const saveAction = createExplicitSave<LlmRetryConfig>({
+  run: (config) => transport.setRetryConfig(config).then(() => undefined),
+  savedToastKey: 'settings.system.llmRetrySavedToast',
+  onError: (e) => {
+    console.warn('[SystemLlmRetrySection] failed to save retry config:', e)
+    return t('settings.system.llmRetrySaveFailed')
+  },
+})
+const saving = saveAction.saving
+
 /** 保存：先前端同规则校验（shared validateLlmRetryConfig），失败 toast + 标红不发 RPC。 */
 async function onSave(): Promise<void> {
   if (saving.value) return
@@ -411,15 +426,6 @@ async function onSave(): Promise<void> {
     toastError(res.error)
     return
   }
-  saving.value = true
-  try {
-    await setRetryConfig(config)
-    toastInfo(t('settings.system.llmRetrySavedToast'))
-  } catch (e) {
-    console.warn('[SystemLlmRetrySection] failed to save retry config:', e)
-    toastError(t('settings.system.llmRetrySaveFailed'))
-  } finally {
-    saving.value = false
-  }
+  await saveAction.run(config)
 }
 </script>

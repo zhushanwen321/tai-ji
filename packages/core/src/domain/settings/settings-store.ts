@@ -30,6 +30,7 @@ import type {
 import { getPlatform } from '../../platform/port'
 import { updateSystem } from './system-storage'
 import { getSettingsTransport } from './transport'
+import { optimisticUpdate, refCell } from '../../foundation/optimistic-update'
 import { DEFAULT_SYSTEM, type SystemSettings, type ExtensionItem } from './types'
 
 /** createSettingsStore() 返回的 store 实例形状（消费方类型标注用）。 */
@@ -88,21 +89,12 @@ export function createSettingsStore() {
    * 原 renderer 实现中「同步 DOM + i18n」部分（applySystemToDom）下沉 ui 包/壳（TC2），
    * core 侧无 DOM 副作用。
    *
-   * 乐观更新 + 失败回滚（D9 修复语义保留）：
-   *   原实现先乐观改 system.value，再 await updateSystem，失败时 system.value 已是新值不回滚
-   *   → store 说新主题 DOM 是旧主题，状态脱节。现顺序：存快照 → 改 state → await 持久化
-   *   → 失败 catch 还原 state → throw（让调用方 toast 反馈）。
+   * 乐观更新 + 失败回滚（D9 修复语义保留，编排收进乐观更新协议）：
+   *   存快照 → 改 state → await 持久化 → 失败还原 state → rethrow（调用方 toast 反馈）。
    */
   async function setSystem(patch: Partial<SystemSettings>): Promise<void> {
-    const snapshot = { ...system.value }
-    system.value = { ...system.value, ...patch }
-    try {
-      await updateSystem(getPlatform().storage, patch)
-    } catch (e) {
-      // 持久化失败：回滚 state，保持 state/storage 一致
-      system.value = snapshot
-      throw e
-    }
+    const next = { ...system.value, ...patch }
+    await optimisticUpdate(refCell(system), next, () => updateSystem(getPlatform().storage, patch))
   }
 
   /**
@@ -135,7 +127,10 @@ export function createSettingsStore() {
   // ── 乐观更新（toggle 级，区别于 setSkillDirs 的「靠广播推回」）──
   // Switch 受控于 store state，点 toggle 到 UI 动效需经历一次 WS 往返（几十~数百 ms），
   // 纯广播模式期间开关卡在原位 → 用户以为没反应。这些 action 立即改本地 state，
-  // 组件「先调 action 再调 API、失败回滚」，广播回来时权威值自然覆盖（幂等调和）。
+  // 广播回来时权威值自然覆盖（幂等调和）。
+  // 这些 toggle action 是乐观更新协议（foundation/optimistic-update）的 apply/rollback
+  // 原语（返回旧值供回滚）：编排一律走 runOptimisticUpdate（apply 捕获旧值 / rollback 写回 /
+  // commit 走 transport），禁止组件内手写 try/catch 回滚。
 
   /**
    * 乐观切换 provider enabled。
@@ -229,20 +224,26 @@ export function createSettingsStore() {
   }
 }
 
-// ── 模块级惰性单例（域内消费方共用；壳/测试可 createSettingsStore() 新建独立实例）──
+// ── 注入 + 模块级惰性单例（域内消费方共用；壳/测试可 createSettingsStore() 新建独立实例）──
 
+let injectedStore: SettingsStoreInstance | null = null
 let storeSingleton: SettingsStoreInstance | null = null
 
 /**
- * 获取 settings store 模块级单例（首次调用惰性创建）。
+ * 注入 store 实例（对称 provideSettingsTransport）：测试装配入口——beforeEach
+ * provideSettingsStore(createSettingsStore()) 即拿到全新 store，取代旧 reset 后门。
+ * 生产不调用（bootstrapSettingsCore 不 provide，走下方惰性单例，行为不变）。
+ */
+export function provideSettingsStore(store: SettingsStoreInstance): void {
+  injectedStore = store
+}
+
+/**
+ * 获取 settings store：有注入值返回注入值（测试装配），否则惰性单例（首次调用惰性创建）。
  * settings-lifecycle / use-provider-edit 等域内模块共用同一实例。
  */
 export function getSettingsStore(): SettingsStoreInstance {
+  if (injectedStore) return injectedStore
   if (!storeSingleton) storeSingleton = createSettingsStore()
   return storeSingleton
-}
-
-/** 仅测试用：清空单例缓存（跨用例隔离，避免 state 泄漏）。 */
-export function __resetSettingsStoreForTesting(): void {
-  storeSingleton = null
 }

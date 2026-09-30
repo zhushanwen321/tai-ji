@@ -212,9 +212,12 @@ function makeWorkflow(overrides: Partial<WorkflowRunRecord> & { runId: string })
     slug: 'rel',
     status: 'running',
     startedAt: new Date(T(60_000)).toISOString(),
+    // id/status 对齐 WorkflowAgentCall 契约（id = trace.stepIndex 数字；status 词表
+    // pending|running|done|failed——record 域 'completed' 由 mapStepStatusFromRecord
+    // 映射为 'done'，词表显式转换禁止直拷）
     agentCalls: [
-      { id: 'c1', agent: 'a', status: 'completed', phase: 'p1' },
-      { id: 'c2', agent: 'b', status: 'running', phase: 'p1' },
+      { id: 0, agent: 'a', status: 'done', phase: 'p1' },
+      { id: 1, agent: 'b', status: 'running', phase: 'p1' },
     ],
     stateFilePath: '/data/wf.jsonl',
     ...overrides,
@@ -383,6 +386,56 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     // running 行有 spinner，done 行无（状态点替代）
     expect(rows[0].find('[data-testid="tray-workflow-spinner"]').exists()).toBe(true)
     expect(rows[1].find('[data-testid="tray-workflow-spinner"]').exists()).toBe(false)
+  })
+})
+
+describe('TrayNativePanel [W0/V8] 合并投影消费锚定（盲区窗口 N/M 进度显式预期变化）', () => {
+  it('盲区窗口 record-only agentCalls → N/M 进度 0/N + 0% 进度条（旧形态 0/0 → 0/N）', async () => {
+    // D2-R3 record-only 成行契约形状：id/agent/slug/status/startedAt/sessionId、phase undefined。
+    // 显式预期变化（设计 V8）：盲区窗口托盘进度从 0/0（agentCalls 空）变为 0/N（record-only
+    // 行已可见），百分比同口径从 0%（0/0 兜底）变为 0%（0 终态 / N 总数）
+    trayState.workflowRunning = [
+      makeWorkflow({
+        runId: 'wf-blind',
+        agentCalls: [
+          { id: 0, agent: 'reviewer-1', status: 'running', sessionId: 'acs-r1' },
+          { id: 1, agent: 'reviewer-2', status: 'running', sessionId: 'acs-r2' },
+          { id: 2, agent: 'reviewer-3', status: 'running', sessionId: 'acs-r3' },
+          { id: 3, agent: 'reviewer-4', status: 'running', sessionId: 'acs-r4' },
+        ],
+      }),
+    ]
+    wrapper = mountPanel('workflow')
+    await flushPromises()
+
+    const row = wrapper.find('[data-testid="tray-workflow-row"]')
+    expect(row.exists()).toBe(true)
+    // N/M 计数：done=0 / total=4（合并投影使盲区窗口立即有值）
+    expect(row.text()).toContain(msg(zhTray.tray.agentsLabel, { done: 0, total: 4 }))
+    // 百分比：进度条宽度 0%（无终态步骤）
+    const bar = row.find('[style*="width"]')
+    expect(bar.exists()).toBe(true)
+    expect(bar.attributes('style')).toContain('width: 0%')
+  })
+
+  it('转态后 N/M 随终态计数推进：1 终态 / 4 总数 → 25% 进度条', async () => {
+    trayState.workflowRunning = [
+      makeWorkflow({
+        runId: 'wf-partial',
+        agentCalls: [
+          { id: 0, agent: 'reviewer-1', status: 'done', sessionId: 'acs-r1' },
+          { id: 1, agent: 'reviewer-2', status: 'running', sessionId: 'acs-r2' },
+          { id: 2, agent: 'reviewer-3', status: 'running', sessionId: 'acs-r3' },
+          { id: 3, agent: 'reviewer-4', status: 'running', sessionId: 'acs-r4' },
+        ],
+      }),
+    ]
+    wrapper = mountPanel('workflow')
+    await flushPromises()
+
+    const row = wrapper.find('[data-testid="tray-workflow-row"]')
+    expect(row.text()).toContain(msg(zhTray.tray.agentsLabel, { done: 1, total: 4 }))
+    expect(row.find('[style*="width"]').attributes('style')).toContain('width: 25%')
   })
 })
 
@@ -774,7 +827,10 @@ describe('TrayNativePanel 数据面单例（U1：开合不重发首拉 RPC）', 
     const loadSubSpy = vi.spyOn(subagentStore, 'loadSubagents').mockResolvedValue(undefined)
     const loadWfSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
     subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sub-1', status: 'running' })])
-    workflowStore.applyRecords(SID, [makeWorkflow({ runId: 'wf-1', status: 'running' })])
+    // workflow 种数据：applyRecords 已私有化，直写分区 ref
+    workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, [
+      makeWorkflow({ runId: 'wf-1', status: 'running' }),
+    ])
 
     wrapper = mount(ShellHarness, { props: { sessionId: SID, open: false } })
     await flushPromises()
@@ -878,7 +934,7 @@ describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('subagent / workflow 面板即使有 running 行也零 interval（elapsedLabel 仅 bash 分支消费）', async () => {
+  it('subagent / workflow 面板有 running 行零 interval（行耗时走数据字段，无 now 消费者）', async () => {
     trayState.subagentRunning = [makeSubagent({ subagentId: 'sub-1', status: 'running' })]
     wrapper = mountPanel('subagent')
     await flushPromises()
@@ -886,6 +942,7 @@ describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash
     expect(vi.getTimerCount()).toBe(0)
     wrapper.unmount()
 
+    // workflow 行耗时（workflowElapsed）直读 Date.now 不依赖 tick → 恒零 interval
     trayState.workflowRunning = [makeWorkflow({ runId: 'wf-1', status: 'running' })]
     wrapper = mountPanel('workflow')
     await flushPromises()

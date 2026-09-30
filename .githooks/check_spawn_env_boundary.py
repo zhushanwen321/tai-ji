@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-runtime 子进程 env 出站契约静态守卫（约束 C-proc-09）
+runtime 子进程 env 出站契约静态检查（约束 C-proc-09）
 
 扫描 packages/runtime/src 与 apps/electron/main 的 *.ts 中所有 child-process 进程创建
 调用点（spawn / execFile / execFileSync / fork / pty.spawn / new Worker /
@@ -27,7 +27,7 @@ utilityProcess.fork），要求每个调用点的实参区窗口内出现出站�
    构建器而整文件搭便车放行（审计 RT-8#9）；逐调用点判定消除该盲区。
    已知局限：相邻两调用点距离落在窗口内时，前一调用点的构建器调用可能让后一未武装
    调用点搭 12 行内的短程便车——窗口取值以覆盖全部真实武装形态的最小值为准，
-   这是文本级守卫接受的残余风险（豁免指纹与逐条人工复核兜底）；
+   这是文本级检查接受的残余风险（豁免指纹与逐条人工复核兜底）；
 2. 调用点检测的激活条件不变：仅在文件确实 import 了对应符号时才激活对应模式
    （node:child_process 的 spawn/execFile/execFileSync/fork、node-pty 命名空间的
    .spawn()、node:worker_threads 的 new Worker()、electron 的 utilityProcess.fork），
@@ -41,7 +41,7 @@ utilityProcess.fork），要求每个调用点的实参区窗口内出现出站�
    命中则放行并计入豁免统计。用行内容子串而非行号做指纹，代码平移不会让豁免
    静默漂移到新位置；豁免失效时宁可重新报警人工复核，不允许静默放行。
    豁免两类：无 env 出站面（只读探测 / kill / Worker 同进程线程），与间接组装
-   （env 经本文件包装函数 / 跨包注入 / SDK 类型契约收口，豁免理由须指向组装点）。
+   （env 经本文件包装函数 / 跨包注入 / SDK 类型契约封住，豁免理由须指向组装点）。
 
 退出码：0=通过；2=存在违规；1=脚本自身异常。
 豁免/范围调整须同步 docs/architecture/env-propagation-boundary.md §3.6 R5 并过评审。
@@ -62,15 +62,15 @@ SCAN_ROOTS = [
     # [历史注记] W12 主时点扩展（impl-plan §2.12 / §7.1 拖尾清单第 4 项）仅加入 SDK 与
     # 两个引擎 CLI 包——出生即经 SDK 原语（buildEngineChildEnv / spawnEngineChild），
     # 无存量违规面；包未创建时 iter_ts_files 对缺目录 root 打 [WARN] 后 continue
-    # （容错行为，勿改）。packages/subagent-core/src 条目已由 W11 收口批
+    # （容错行为，勿改）。packages/subagent-core/src 条目已由 W11 收尾批
     # （W12 拖尾子项④执行）加入——终态口径见下条注释。
     "packages/subagent-engine-sdk/src",
     "packages/zcode-subagent-cli",
     "packages/pi-subagent-cli",
-    # [W11 收口 / W12 拖尾子项④，终态口径] engines/ 内建目录已删、壳侧裸 spawn 已消
+    # [W11 收尾 / W12 拖尾子项④，终态口径] engines/ 内建目录已删、壳侧裸 spawn 已消
     # （唯一 spawn 面 = EngineClient（buildEngineChildEnv）/ worktree git
     # （buildOutboundChildEnv）/ relay-env 探针（豁免通道兜底））——core/src 已入扫描；
-    # 收口判据 = 「迁移期临时豁免清零」（engines/zcode 相关临时条目随目录删除消失），
+    # 收尾判据 = 「迁移期临时豁免清零」（engines/zcode 相关临时条目随目录删除消失），
     # 现存 6 条 core 侧永久类豁免（pid-file/reaper/pi-engine/session-runner×2/worker-host
     # 的只读探测/kill/Worker 场景，EXEMPT_CALLSITES 逐条附理由，语义合理非泄漏面）；
     # 豁免申请仍走既有 EXEMPT_CALLSITES 通道。
@@ -88,7 +88,7 @@ CONTRACT_BUILDER_SYMBOLS = (
     "buildOutboundChildEnv",
     "composeChildEnvBase",
     # W12：SDK 引擎 env 三层契约构建器（与 shared 版构建器并列的可接受符号——
-    # F9：SDK 消费面不可依赖 shared，自持同语义构建器）
+    # F9：SDK 消费方不可依赖 shared，自持同语义构建器）
     "buildEngineChildEnv",
 )
 CONTRACT_BUILDER_USAGE_RE = re.compile(
@@ -177,10 +177,10 @@ EXEMPT_CALLSITES = [
     (
         "engine-sdk/src/spawn.ts",
         "spawn(opts.command",
-        "SDK 引擎任务子进程唯一 spawn 原语 spawnEngineChild：env 形态由类型契约收口"
+        "SDK 引擎任务子进程唯一 spawn 原语 spawnEngineChild：env 形态由类型契约封住"
         "（SpawnEngineChildOptions.env: EngineChildEnv = ReturnType<typeof "
         "buildEngineChildEnv>，非构建器输出无法通过编译），原语自身不经手 env 组装"
-        "——类型契约形态豁免（RT-8#9 守卫逐调用点化登记 2026-09-20）",
+        "——类型契约形态豁免（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
     (
         "node-executor.ts",
@@ -253,7 +253,7 @@ EXEMPT_CALLSITES = [
         "插件宿主 fork 的 env 由本文件导出的 buildPluginHostChildEnv(process.env) 组装"
         "（buildOutboundChildEnv pass-all 拷贝 + deny 兜底 + ELECTRON_RUN_AS_NODE 注入，"
         "唯一组装点、导出供单测直验），fork 前按需附加 sandbox 目录键——间接组装形态，"
-        "非裸继承（RT-8#9 守卫逐调用点化登记 2026-09-20）",
+        "非裸继承（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
     (
         "services/plugin-service/plugin-host.ts",
@@ -268,15 +268,15 @@ EXEMPT_CALLSITES = [
         "relay 子进程 spawn 的 env 内联经本文件导出包装 buildChildEnv(frame) 组装"
         "（内部即 buildOutboundChildEnv：帧 env 全量拷贝基座 + relay 五键剥离 + deny"
         "兜底，B8 出站接线，导出供单测直验）——间接组装形态，非裸继承"
-        "（RT-8#9 守卫逐调用点化登记 2026-09-20）",
+        "（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
     (
         "infra/pi/rpc-client.ts",
         "spawn(piCmd, args",
         "pi 长驻进程 spawn 的 env 在 start() 内经 buildPiOutboundEnv 组装"
-        "（@zhushanwen/pi-rpc env 模块单源，B3 出站契约收口），底层白名单构建器以"
+        "（@zhushanwen/pi-rpc env 模块单源，B3 出站契约封住），底层白名单构建器以"
         "buildChildEnv: buildOutboundChildEnv 参数注入——间接组装形态，非裸继承"
-        "（RT-8#9 守卫逐调用点化登记 2026-09-20）",
+        "（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
     (
         "services/terminal/terminal-service.ts",
@@ -284,9 +284,9 @@ EXEMPT_CALLSITES = [
         "用户终端 PTY spawn 的 env 内联经本文件 buildEnv() 组装（buildOutboundChildEnv "
         "pass-all 全量拷贝 + TERM fallback + ELECTRON 三键显式删除，B7 出站接线，"
         "D5 决策：终端身份跟随用户最小剥离）——间接组装形态，非裸继承"
-        "（RT-8#9 守卫逐调用点化登记 2026-09-20）",
+        "（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
-    # --- packages/subagent-core/src（W11 收口批加入 SCAN_ROOTS；以下均为永久类，
+    # --- packages/subagent-core/src（W11 收尾批加入 SCAN_ROOTS；以下均为永久类，
     # 非迁移期临时豁免——迁移期临时条目已随 engines/zcode 删除清零） ---
     (
         "engine/client/pid-file.ts",
@@ -306,7 +306,7 @@ EXEMPT_CALLSITES = [
         'spawn("taskkill"',
         "Windows 进程树终止 kill 处置（崩溃/超时收割补杀），stdio ignore、无数据回流"
         "通路，无 env 出站面（与 engine/client/reaper.ts taskkill 先例同构）"
-        "（RT-8#9 守卫逐调用点化登记 2026-09-20）",
+        "（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
     (
         "engine/engines/pi/pi-engine.ts",
@@ -590,6 +590,6 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except Exception as exc:  # noqa: BLE001 守卫自身崩溃不能静默放行
-        print(f"[ERROR] 守卫脚本异常: {exc}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 检查自身崩溃不能静默放行
+        print(f"[ERROR] 检查脚本异常: {exc}", file=sys.stderr)
         sys.exit(1)

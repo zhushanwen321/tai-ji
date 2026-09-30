@@ -482,7 +482,7 @@ export class MessageDispatcher {
     const client = this.pm.getClient(sessionId)
     if (!client) {
       // 不在活跃进程表（已退出 / 未 spawn）：无可杀对象。菜单入口对 dead/idle
-      // 历史 session 隐藏，此分支是「菜单渲染后 session 恰好退出」的竞态兑底。
+      // 历史 session 隐藏，此分支是「菜单渲染后 session 恰好退出」的竞态兜底。
       // [U3 修复] 早退也须置 userStopped 标记：用户点「强制退出」的意图与进程死活无关
       // （与 K1 同源）——无 client 时 pi 可能已自行 spawn 恢复链（restore replay turn），
       // 缺标记会让后续 restore 的收敛环不设防，被杀的旧执行复活。

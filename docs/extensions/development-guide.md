@@ -644,7 +644,7 @@ pi.registerCommand({
 
 | 提问形态 | 通道 | API | 收尾语义 |
 |---------|------|-----|---------|
-| 简单单选 / 确认类，一步收口，提交后无 turn 跟随 | plain dialog（taiji 内底部浮带） | 裸 `ctx.ui.select(title, labels)`（确认/输入用同族 `ctx.ui.confirm` / `ctx.ui.input`） | 应答终局即时收尾——提交/取消后宿主 busy 态立即恢复；pi select API 无元数据位，不可声明 turn 预期 |
+| 简单单选 / 确认类，一步收尾，提交后无 turn 跟随 | plain dialog（taiji 内底部浮带） | 裸 `ctx.ui.select(title, labels)`（确认/输入用同族 `ctx.ui.confirm` / `ctx.ui.input`） | 应答终局即时收尾——提交/取消后宿主 busy 态立即恢复；pi select API 无元数据位，不可声明 turn 预期 |
 | 多问一次提交 / 级联表单 / 需显式声明「提交后是否有 turn 跟随」 | form（taiji 内 FormOverlay） | `uiFormInteract`（`@zhushanwen/extension-protocol`） | `expectTurn` 三态声明：命令 handler 内提交后无 turn 传 `expectTurn: false`（应答即收尾）；缺省 `true` = 提交后桥接 message_start |
 
 **[指南]** 提交后要 `pi.sendMessage` 驱动模型开 turn 的提问，必须走 `uiFormInteract`（`expectTurn` 保持缺省或显式 `true`）——plain dialog 通路提交即收尾，提交后开 turn 会在 turn 到来前产生状态空窗（插话可能打断）。通道可用性：`uiFormInteract` 仅 taiji 宿主（RPC 模式）有效，TUI 形态需扩展自有组件渲染（scheduler / plan 先例）；裸 `ctx.ui.select` 是 pi 原生 API，无 taiji 宿主时同样可用。
@@ -964,7 +964,7 @@ Pi 的 extension loader 使用 [jiti](https://github.com/unjs/jiti) 加载 TypeS
 
 **红线速查**（详释见 logging-conventions「关键约束」）：
 
-1. **禁止一切裸 `console.*`**（`log` / `info` / `warn` / `error`），无论是否本次引入，必须正面修复，统一接 `@zhushanwen/pi-extension-logger`
+1. **禁止一切裸 `console.*`**（`log` / `info` / `warn` / `error`），无论是否本次引入，必须当场直接修复，统一接 `@zhushanwen/pi-extension-logger`
 2. **日志按受众选唯一通道**：AI 实时感知 = tool result / `return { block: true, reason }`；事后排查 = `logger.warn`/`error` → `pi.appendEntry`；开发者调试 = `logger.debug` 文件日志（`TAIJI_AGENT_DEBUG=1` 全量 / `TAIJI_AGENT_EXT_LOG=1` INFO 级）；用户操作反馈 = `ctx.ui.notify`
 3. **禁止新增 per-extension 的 `PI_*_DEBUG` / `<EXT>_DEBUG` 变量**——开关统一走上一条的两个变量
 4. **不可恢复错误用 `throw`**——由 Pi 框架的 `ExtensionRunner.onError()` 捕获并渲染到 TUI，不用 console 输出
@@ -1109,7 +1109,7 @@ pi agent 自行决策重试/换路径；插件侧无感知、不被卸载。
 **命令执行超时（命令定义级 `timeoutMs` 声明）**：用户点击 UI（状态栏按钮/命令面板）触发的
 插件命令，执行超时取值链与工具 `registerTool` 完全同款（上表适用；校验同在注册入口，
 非 number 抛 `INVALID_TIMEOUT_MS`），缺省默认 30min，`<=0` / `Infinity` 显式 opt-out。
-命令并发执行有 busy 守卫：同一命令 handler 未返回前重复触发会被拒绝，提示含已等待时长
+命令并发执行有 busy 检查：同一命令 handler 未返回前重复触发会被拒绝，提示含已等待时长
 （命令进度反馈/可取消能力为后续演进项）。到期行为与工具一致（诚实 `isError`，含调整指引
 `pass timeoutMs in the command definition`），保留 `code: -32000`。
 
@@ -1474,7 +1474,7 @@ ctx.ui.setWidget("my-widget-key", undefined);
 
 当 widget 内容是从外部流（如 subagent 的 streaming）转发来的，注入逻辑必须区分主进程是 TUI 还是 GUI（taiji）。TUI 主进程没有 GUI sidecar，raw streaming text 灌到 widget 会成噪音。
 
-**正确做法**：`ctx.mode === "rpc"` 守卫。**不要**用 `ctx.hasUI`（TUI 和 RPC 都 true）。
+**正确做法**：`ctx.mode === "rpc"` 检查。**不要**用 `ctx.hasUI`（TUI 和 RPC 都 true）。
 
 ```typescript
 // session_start 内

@@ -18,8 +18,8 @@
  * 无该 provider（新建，broadcast 未回——runtime ensure 已启用）；已启用（幂等）。
  */
 import { ref } from 'vue'
-import { config } from '@/api'
-import { getSettingsStore } from '@taiji/core'
+import { getSettingsTransport, getSettingsStore } from '@taiji/core'
+import { runOptimisticUpdate } from '@taiji/core/foundation/optimistic-update'
 import { useToast } from '@/composables/useToast'
 import i18n from '@/i18n'
 import type { ProviderInfo } from '@taiji/shared'
@@ -44,19 +44,27 @@ export function useApiKeyAutoEnable(opts: {
     const next = new Set(toggling.value)
     next.add(p.id)
     toggling.value = next
-    const old = settingsStore.setProviderEnabled(p.id, enabled)
     try {
-      // wave4：走 toggleProviderEnabled（写 enabledModels 白名单）。旧 setProvider({enabled})
-      // 在 wave3 停用 provider 级 enabled 写入后无效。newDefault 经 onDefaults 订阅推回。
-      await config.toggleProviderEnabled(p.id, enabled)
+      // 乐观更新协议（回滚语义唯一 = 失败回滚 + rethrow）：apply 顺带捕获旧值供回滚。
+      // 失败在本调用方映射到既有错误面（actionError + 返回值 false），用户可见行为不变。
+      let old = false
+      await runOptimisticUpdate({
+        apply: () => {
+          old = settingsStore.setProviderEnabled(p.id, enabled)
+        },
+        rollback: () => {
+          settingsStore.setProviderEnabled(p.id, old)
+        },
+        // wave4：走 toggleProviderEnabled（写 enabledModels 白名单）。旧 setProvider({enabled})
+        // 在 wave3 停用 provider 级 enabled 写入后无效。newDefault 经 onDefaults 订阅推回。
+        commit: () => getSettingsTransport().toggleProviderEnabled(p.id, enabled),
+      })
       if (!enabled && settingsStore.defaultModel.value.startsWith(`${p.id}/`)) {
         settingsStore.defaultModel.value = ''
       }
       return true
     } catch (e) {
-      settingsStore.setProviderEnabled(p.id, old)
-      const msg = e instanceof Error ? e.message : String(e)
-      opts.setActionError(msg)
+      opts.setActionError(e instanceof Error ? e.message : String(e))
       return false
     } finally {
       const after = new Set(toggling.value)

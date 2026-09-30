@@ -90,7 +90,7 @@ function createBareArrowNav(
 /**
  * ⏎ 落地分派（已 preventDefault）：staging（fork/handoff）优先于发送路由——模式 chip
  * 在时 Enter/Alt+Enter 均提交 staging，不注入当前对话（streaming 中 fork-ask 合法——对源
- * session 只读；handoff 的 streaming 拦截在 enterHandoffMode 入口 + handleHandoffSend 兑底，
+ * session 只读；handoff 的 streaming 拦截在 enterHandoffMode 入口 + handleHandoffSend 兜底，
  * 此处无需区分）。Alt+⏎ 按 D6 路由行分流：steer 行（turn 活跃）保留 followUp 下一轮语义
  * （现状 isActive→onFollowUp 等价）；queued/direct 行经分发器（[u5b] 原 isCompacting→onSend
  * 特判由 queued 路由自然覆盖）。裸 ⏎ 统一 onSend（steer 路由并入当前回合 / queued 排队 /

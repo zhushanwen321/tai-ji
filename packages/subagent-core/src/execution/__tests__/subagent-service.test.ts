@@ -299,7 +299,7 @@ describe("SubagentService", () => {
 
       // sync record 的 controller 是 undefined，running 状态下 dispose 不应抛
       // （abortRunningControllers 检查 r.controller 才 abort，sync 跳过）
-      // [C1] sync 子进程的 kill 由 killAllSpawnedChildren 兜底（spawnedChildren Set 注册），
+      // [C1] sync 子进程的 kill 由 markAllSpawnedChildrenDead 兜底（spawnedChildren Set 注册），
       //      集成验证见 run-spawn-integration.test.ts 的 C1 用例（mock spawn + spy kill）。
       const syncRecord = registerRunningSync(service, "sync-1");
       expect(syncRecord.controller).toBeUndefined();
@@ -405,7 +405,7 @@ describe("SubagentService", () => {
   // （见文件头——execute 集成测试在 execute-nesting.test.ts / run-spawn-integration.test.ts）：
   //   - finalizeRecord status="closed"（background 正常完成 → unregister(closed)）
   //   - finalizeRecord status="cancelled" 经 runAndFinalize 路径（cancel 抢先 CAS 时
-  //     runAndFinalize 侧 tryTransition 失败跳过 finalizeRecord，由 cancelBackground 侧 emit——
+  //     runAndFinalize 侧 trySettleLegacyClosed 失败跳过 finalizeRecord，由 cancelBackground 侧 emit——
   //     本块 cancel 用例覆盖的即此后端 emit）
   //   - background detached 正常完成回注（finalizeRecord → emitPendingUnregister(done, {result,error,patchFile})）
   // register emit 的 payload（type:"subagent"、name）由本块 worktree-fail 路径附带覆盖。

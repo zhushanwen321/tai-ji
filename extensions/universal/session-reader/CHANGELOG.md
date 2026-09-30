@@ -1,5 +1,17 @@
 # @zhushanwen/pi-session-reader
 
+## 0.8.1
+
+### Patch Changes
+
+- 8aa4b40e8: chore: refresh dependency range (triggered by @zhushanwen/zcode-session-source@0.2.1 → @zhushanwen/zcode-session-source@0.2.2)
+
+## 0.8.0
+
+### Minor Changes
+
+- 50f31a73c: Teach session_read to discover and overview workflow runs recorded in the new v2 record-stream format: workflow refs now resolve through a three-tier entry chain (v2 workflow-record journal anchor > v1 snapshot > legacy workflow-state-link pointer), `.record.jsonl` streams are parsed directly into run overviews with three-state status (running | interrupted | done), and zcode session anchors additionally accept v2 settled subagent-record entries while keeping v1 snapshot reads compatible.
+
 ## 0.7.0
 
 ### Minor Changes

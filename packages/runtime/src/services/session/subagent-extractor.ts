@@ -9,7 +9,7 @@
  * 数据来源优先级：
  * 1. **自描述 `subagent-record` entry（W16 v1，权威）**：pi-subagent-workflow 在 record 状态
  *    迁移点（register/archive/reportRecordTransition）经 pi.appendEntry 落完整快照（customType
- *    常量 = shared SUBAGENT_RECORD_CUSTOM_TYPE）。读取方无需逆向解析 toolCall/toolResult。
+ *    常量 = @zhushanwen/subagent-core 的 SUBAGENT_RECORD_CUSTOM_TYPE，经 barrel 消费）。读取方无需逆向解析 toolCall/toolResult。
  * 2. **legacy 解析（降级兜底）**：无自描述 entry 命中（W16 改造前创建的旧 session）时走
  *    旧双管线的磁盘解析逻辑——从 toolCall/toolResult/bg-notify 配对重建。降级表现 = 旧
  *    session 数据滞后但可用（登记表 #8 标注）。
@@ -38,8 +38,15 @@
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { getSubagentSessionDir } from '../../infra/pi/pi-paths.js'
-import { parseBgNotifyDetails, SUBAGENT_RECORD_CUSTOM_TYPE } from '@taiji/shared'
-import { parseEngineHandle } from '@zhushanwen/subagent-core'
+import { parseBgNotifyDetails } from '@taiji/shared'
+// notify 通道 customType 词表单源（extension-protocol，与壳写点同源）
+import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
+// subagent-record 词表已收 core 单源（runtime 投影经 core barrel 消费；shared 副本仅剩 renderer 消费）
+import {
+  classifySubagentRecordEntryData,
+  parseEngineHandle,
+  SUBAGENT_RECORD_CUSTOM_TYPE,
+} from '@zhushanwen/subagent-core'
 import { extractRecordsFromSessionFile, type SessionFileExtraction } from './session-file-extraction.js'
 import { normalizeSubagentStatus } from './subagent-status.js'
 import { isEnoent } from '../../utils/errors.js'
@@ -218,18 +225,22 @@ function parseSelfDescribedSubagentRecord(entry: unknown): SubagentRecord | null
   if (typeof entry !== 'object' || entry === null) return null
   const e = entry as JsonlCustomEntry
   if (e.type !== 'custom' || e.customType !== SUBAGENT_RECORD_CUSTOM_TYPE) return null
-  const data = e.data
-  if (typeof data !== 'object' || data === null) return null
-  const d = data as Record<string, unknown>
-  if (d.v !== 1) {
-    console.warn(
-      `[subagent-extractor] subagent-record entry schema version '${String(d.v)}' unsupported (expected 1) — ` +
-        `extension/runtime version skew, skip this entry. Fix: align schema with ` +
-        `extensions/universal/subagent-workflow/src/execution/record-entry.ts (W16 v1).`,
-    )
-    return null
+  // v 判别单源 core classifySubagentRecordEntryData（journal-projection 的
+  // scanV2RecordEntries 同源消费）：v1 快照进本层投影；v2（含 unknown-kind 形态损坏）
+  // 静默跳过——v2 消费面是 scanV2RecordEntries；missing-v / future-v（≥3）warn 留证。
+  // 本扫描器是 v1 快照兼容层（D7 惰性兼容读）。
+  const classification = classifySubagentRecordEntryData(e.data)
+  if (classification.ok) {
+    return projectSelfDescribedSubagentRecord(classification.data as Record<string, unknown>)
   }
-  return projectSelfDescribedSubagentRecord(d)
+  if (classification.reason === 'missing-v' || classification.reason === 'future-v') {
+    console.warn(
+      `[subagent-extractor] subagent-record entry schema version '${String((e.data as { v?: unknown }).v)}' unsupported (expected 1) — ` +
+        `extension/runtime version skew, skip this entry. Fix: align schema with ` +
+        `packages/subagent-core/src/execution/persistence/record-entry.ts (W1 v2 current).`,
+    )
+  }
+  return null
 }
 
 /**
@@ -315,6 +326,11 @@ function projectSelfDescribedSubagentRecord(d: Record<string, unknown>): Subagen
     // tool 语义）。此前投影白名单漏此字段 → renderer 过滤面 origin 恒 undefined，
     // workflow record 运行期虚亮 badge / 绑架 hasRunning / 混入 GUI 列表。
     origin: projectOrigin(d.origin),
+    // [W0 / D1] workflow 身份域透传（entry data 可选字段，与 origin 同族）：合并投影
+    // （workflow-step-merge）按 (parentRunId, stepIndex) 圈定 run 视图候选集。undefined
+    // = 存量 entry / tool 来源（读侧守卫：无 stepIndex 不成行，旧 session 回落 trace-only）。
+    parentRunId: optString(d.parentRunId),
+    stepIndex: optNumber(d.stepIndex),
     ...projectEngineSpreadFields(d),
   }
 }
@@ -375,7 +391,7 @@ function extractSubagentsFromEntriesLegacy(entries: unknown[]): SubagentRecord[]
     // 处理 custom_message entry：找 subagent-bg-notify
     // 用 parseBgNotifyDetails 统一解析 single + batch 两种形态（pi notifier 滑动窗口 60s 合并），
     // 避免 batch 形态 {batch:true, items:[...]} 时 details.id 为 undefined 整批被丢弃。
-    if (e.type === 'custom_message' && e.customType === 'subagent-bg-notify') {
+    if (e.type === 'custom_message' && e.customType === SUBAGENT_BG_NOTIFY_CUSTOM_TYPE) {
       collectLegacyBgNotifies(e.details, bgNotifies)
     }
   }
@@ -710,7 +726,11 @@ function listSubagentJsonlFiles(mainCwd: string): { dir: string; files: string[]
 
   let files: string[]
   try {
-    files = readdirSync(dir).filter((f) => f.endsWith('.jsonl') && !f.endsWith('.finalized'))
+    // [W1 / D3] 后缀白名单结构性忽略 *.events 文件族（record 事件文件无 .jsonl 后缀
+    // ——与 records 目录同 cwd 树相邻，防御性按后缀排除：误读会拿事件行当 session 行）
+    files = readdirSync(dir).filter(
+      (f) => f.endsWith('.jsonl') && !f.endsWith('.finalized') && !f.endsWith('.events'),
+    )
   } catch (e) {
     if (!isEnoent(e)) {
       warnOnce(

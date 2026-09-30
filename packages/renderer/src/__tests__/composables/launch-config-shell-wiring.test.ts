@@ -27,6 +27,7 @@ import { defineComponent } from 'vue'
 import { createPinia, getActivePinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
 import type { PiLaunchPreset, ProviderInfo, SessionSummary } from '@taiji/shared'
+import { chatApiMethodsMock } from '../helpers/api-facade-mock'
 
 // ── core.createSessionFlow mock（submit 侧断言 create 入参 = resolve 终值）──
 vi.mock('@taiji/core', async (importActual) => {
@@ -80,12 +81,8 @@ vi.mock('@/api', async (importActual) => {
 
 // useChat 单一 mock：send/sendBash spy（A 的 submit 主链路终点）+ mount 期防御面（B）
 const chatApiMock = {
-  send: vi.fn(() => Promise.resolve()),
+  ...chatApiMethodsMock(),
   sendBash: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
   editAndResend: vi.fn(),
   hydrateHistory: vi.fn(),
   abortBash: vi.fn(() => Promise.resolve()),
@@ -108,7 +105,12 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
 
 import { useNewTaskFlow, resetNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import { supportedLevelsOf } from '@/composables/features/new-task/supported-levels'
-import { createSessionFlow, getSettingsStore } from '@taiji/core'
+import {
+  createSessionFlow,
+  getSettingsStore,
+  provideSettingsTransport,
+} from '@taiji/core'
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 import {
   __resetLastUsedModelForTesting,
   recordLastUsedModel,
@@ -117,6 +119,16 @@ import {
 } from '@taiji/core/domain/composer'
 import { usePresetStore } from '@/stores/preset'
 import Composer from '@/components/panel/Composer.vue'
+
+// [C3] preset 域调用经 SettingsTransport seam 桩注入（usePiPresets.loadPresets 的数据源探针；
+// 替换原 '@/api' 门面 preset mock 的消费面）。
+beforeEach(() => {
+  provideSettingsTransport(makeSettingsTransportStub({
+    listPresets: presetApiMock.list,
+    getDefaultPreset: presetApiMock.getDefault,
+    setDefaultPreset: presetApiMock.setDefault,
+  }))
+})
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
   return { id: 'ns', label: 'L', cwd: '/x', status: 'idle', lastActiveAt: 1, modelId: '', ...over }

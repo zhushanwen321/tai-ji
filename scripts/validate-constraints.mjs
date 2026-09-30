@@ -13,7 +13,7 @@
  *   - scope 非空：["global"] 或路径 glob（<prefix>/** 或精确路径）
  *   - authority 非空且文件存在（剥离 #锚点后按相对 docs/ 解析，../ 前缀相对仓库根）
  *   - enforcement：machine 项 hook 须存在于 .githooks/ / scripts/ / 仓库根（含 "§" 的内联段特例跳过）；
- *     review 项 agent 须存在于 .agents/skills/pr-cr-fix/agents/<agent>.md
+ *     review 项 agent 须存在于 .agents/skills/dev-merge/agents/<agent>.md
  *
  * 退出码：0 成功 / 2 校验失败（含 JSON 解析失败）
  *
@@ -81,7 +81,7 @@ export function validateEnforcementItem(e, at, errors) {
     else if (!validateHookExists(e.hook)) errors.push(`${at}: hook 不存在于 .githooks/ / scripts/ / 根: ${e.hook}`);
   } else if (e.type === "review") {
     if (!e.agent) errors.push(`${at}: review enforcement 缺 agent`);
-    else if (!existsSync(join(REPO_ROOT, ".agents/skills/pr-cr-fix/agents", `${e.agent}.md`)))
+    else if (!existsSync(join(REPO_ROOT, ".agents/skills/dev-merge/agents", `${e.agent}.md`)))
       errors.push(`${at}: review agent 不存在: ${e.agent}`);
   } else if (e.type !== "none") {
     errors.push(`${at}: enforcement.type 非法: ${e.type}`);

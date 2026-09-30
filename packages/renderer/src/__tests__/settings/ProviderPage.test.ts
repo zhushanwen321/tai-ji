@@ -16,13 +16,18 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { BuiltinProviderTemplate, ProviderInfo } from '@taiji/shared'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsTransport, provideSettingsStore, createSettingsStore } from '@taiji/core'
+// '@/api' mock 工厂解引用的 helper import 必须先于触发工厂执行的组件 import 求值
+// （vi.hoisted 同族 TDZ 坑，settings-modal-smoke.test.ts 先例）。
+import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { apiProjectMock } from '../helpers/api-facade-mock'
+import { authEventCbs } from '../helpers/oauth-auth-events-mock'
 
 const configMock = vi.hoisted(() => ({
   onProviders: vi.fn(() => () => {}),
   // 门面签名 { providers, scopedModels }（settings-lifecycle 解构消费）；裸数组解构得 undefined
   listProviders: vi.fn(async () => ({ providers: [], scopedModels: undefined })),
-  setProvider: vi.fn(async () => {}),
+  setProvider: vi.fn(async () => ({})),
   deleteProvider: vi.fn(async () => {}),
   // wave4 C1/IF3：toggle 持久化走 toggleProviderEnabled（写 enabledModels 白名单），删除按 kind 走 removeProviderByKind
   toggleProviderEnabled: vi.fn(async () => {}),
@@ -38,18 +43,20 @@ const configMock = vi.hoisted(() => ({
   oauthLogin: vi.fn(async () => ({ started: false, error: 'mock' })),
   oauthCancel: vi.fn(async () => ({ cancelled: false })),
   hasOAuth: vi.fn(async () => false),
-  onAuthDeviceCode: vi.fn(() => () => {}),
-  onAuthAuthUrl: vi.fn(() => () => {}),
-  onAuthSuccess: vi.fn(() => () => {}),
-  onAuthError: vi.fn(() => () => {}),
   listBuiltinProviders: vi.fn(async () => []),
   // ProviderPage onMounted 按需刷新远程模型目录（缺则 unhandled rejection）
   refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [] })),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  config: configMock,
-  default: { config: configMock },
+// wave-oauth：useProviderOAuth onMounted 订阅 4 个 auth.* 事件（缺则 TypeError 崩 mount）。
+// vi.hoisted 工厂不能引用 import 绑定（TDZ），auth 订阅捕获集单源在 helper——顶层装配
+// 后并入门面 config 域（同 use-provider-oauth.test.ts 先例）。
+const authCbs = authEventCbs()
+const configWithAuth = { ...configMock, ...authCbs }
+
+vi.mock('@/api', () => ({ project: apiProjectMock(),
+  config: configWithAuth,
+  default: { config: configWithAuth },
 }))
 
 import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
@@ -86,12 +93,14 @@ const PROVIDERS: ProviderInfo[] = [
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   configMock.setProvider.mockClear()
   configMock.deleteProvider.mockClear()
   configMock.toggleProviderEnabled.mockClear()
   configMock.removeProviderByKind.mockClear()
   configMock.setDefaultModel.mockClear()
+  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映；含 auth 订阅捕获集）
+  provideSettingsTransport(makeSettingsTransportStub(configWithAuth))
 })
 
 afterEach(() => {
@@ -107,6 +116,8 @@ describe('ProviderPage 首屏冒烟', () => {
     const addBtn = wrapper.findAll('button').find((b) => b.text().includes('添加供应商'))
     expect(addBtn).toBeTruthy()
     expect(wrapper.text()).toContain('还没有供应商')
+    // 并列的「从其他 Agent 导入」入口仍在
+    expect(wrapper.find('[data-testid="import-providers-menu"]').exists()).toBe(true)
   })
 })
 

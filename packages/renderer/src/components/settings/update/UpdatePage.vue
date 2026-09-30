@@ -2,9 +2,28 @@
   Settings · 更新设置页。
   自动更新开关 + 更新来源三选（自动/GitHub/GitCode）+ 当前版本 + 检查更新状态机
   + 预下载开关 + 代理模式选择 + 手动模式下 HTTP/HTTPS 代理输入 + 测试代理连接。
+  更新设置三字段（autoUpdate/preDownload/updateSource）走 setting-field module 编排；
+  代理表单为显式保存形态（createExplicitSave）；onTestProxy 为查询型动作留组件。
 -->
 <template>
   <div class="flex max-w-[860px] flex-col gap-3">
+    <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；可落盘控件禁用直到重拉成功 -->
+    <div
+      v-if="loadError"
+      data-testid="update-page-load-error"
+      class="flex items-center gap-2 px-1 text-[11px] text-warn"
+    >
+      <AlertTriangle class="size-3.5 shrink-0" />
+      <span>{{ t('settings.update.loadErrorHint') }}</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        class="h-5 px-1.5 text-[11px] text-accent"
+        data-testid="update-page-load-retry"
+        @click="loadConfig"
+      >{{ t('settings.update.loadErrorRetry') }}</Button>
+    </div>
+
     <!-- 卡 1：自动更新（v6 demo 回填：开关 + 当前版本 + 检查更新状态机） -->
     <div class="rounded-md border border-border bg-bg">
       <div class="px-4 pb-3 pt-3">
@@ -18,7 +37,7 @@
           <Switch
             data-testid="switch-auto-update"
             :model-value="autoUpdate"
-            :disabled="autoUpdateSaving"
+            :disabled="autoUpdateBusy || loadError"
             @update:model-value="onToggleAutoUpdate"
           />
         </div>
@@ -27,7 +46,7 @@
           <Label class="text-[12px] text-fg">{{ t('settings.update.updateSourceLabel') }}</Label>
           <Select
             :model-value="updateSource"
-            :disabled="updateSourceSaving"
+            :disabled="updateSourceBusy || loadError"
             @update:model-value="(v) => onSourceChange(String(v))"
           >
             <SelectTrigger
@@ -68,7 +87,7 @@
           <Switch
             data-testid="switch-pre-download"
             :model-value="preDownload"
-            :disabled="preDownloadSaving"
+            :disabled="preDownloadBusy || loadError"
             @update:model-value="onTogglePreDownload"
           />
         </div>
@@ -173,14 +192,14 @@
         <!-- 保存按钮 -->
         <Button
           size="sm"
-          :disabled="saving"
+          :disabled="saveProxySaving || loadError"
           class="gap-1.5 text-[12px]"
           data-testid="btn-save-proxy"
           @click="onSave"
         >
-          <Save v-if="!saving" class="size-3.5" />
+          <Save v-if="!saveProxySaving" class="size-3.5" />
           <Loader2 v-else class="size-3.5 animate-spin" />
-          <span>{{ saving ? t('settings.update.saving') : t('settings.update.save') }}</span>
+          <span>{{ saveProxySaving ? t('settings.update.saving') : t('settings.update.save') }}</span>
         </Button>
       </div>
     </div>
@@ -190,7 +209,7 @@
 <script setup lang="ts">
 import { onMounted, ref, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Zap, Save, Loader2 } from '@lucide/vue'
+import { Zap, Save, Loader2, AlertTriangle } from '@lucide/vue'
 import type { IProxyConfig, UpdateSourcePref } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -198,15 +217,16 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { getProxyConfig, setProxyConfig, testProxy, getUpdateSettings, setUpdateSettings } from '@/api/domains/settings'
+import { createExplicitSave, createSettingFieldGroup } from '@/composables/features/settings/setting-field'
 import { useToast } from '@/composables/useToast'
 import UpdateCheckCard from '../UpdateCheckCard.vue'
 
 const { t } = useI18n()
-const { info: toastInfo, error: toastError } = useToast()
+const { error: toastError } = useToast()
 
 // ── State ──
 
-/** 本地代理配置（双向绑定，保存时写入 main 进程） */
+/** 本地代理配置（表单草稿双向绑定；显式保存形态，保存动作见 createExplicitSave） */
 const localConfig = reactive<IProxyConfig>({
   mode: 'system',
   httpProxy: '',
@@ -215,117 +235,101 @@ const localConfig = reactive<IProxyConfig>({
 
 /** 测试中 */
 const testing = ref(false)
-/** 保存中 */
-const saving = ref(false)
 /** 测试结果（null=未测试） */
 type TestResult = { status: 'success' } | { status: 'failed'; message?: string; suggestion?: string } | { status: 'skipped'; message?: string }
 const testResult = ref<TestResult | null>(null)
 
-/** 预下载开关（从 main 进程加载，切换时立即持久化） */
-const preDownload = ref(false)
-/** 预下载开关持久化中（切换时短暂 disable 控件） */
-const preDownloadSaving = ref(false)
+// ── 更新设置三字段（autoUpdate/preDownload/updateSource）走 setting-field module：
+//    load 失败归并 loadError（RD-4#8 默认值不冒充已存值）+ 乐观写/失败回滚/toast 编排 ──
 
-/** 自动更新开关（启动时自动检查更新，从 main 进程加载，切换时立即持久化） */
-const autoUpdate = ref(false)
-/** 自动更新开关持久化中（切换时短暂 disable 控件） */
-const autoUpdateSaving = ref(false)
+/** 更新设置字段组成功/失败 toast key（proxy 表单的 settings.update.saved 语义专属，不混用） */
+const UPDATE_SAVED_TOAST_KEY = 'settings.update.updateSettingsSaved'
+const UPDATE_SAVE_FAILED_TOAST_KEY = 'settings.update.updateSettingsSaveFailed'
+
+const group = createSettingFieldGroup()
+const loadError = group.loadError
+
+const autoUpdateField = group.field<boolean>(false, {
+  save: (next) => setUpdateSettings({ autoUpdate: next }),
+  savedToastKey: UPDATE_SAVED_TOAST_KEY,
+  saveFailedToastKey: UPDATE_SAVE_FAILED_TOAST_KEY,
+})
+const autoUpdate = autoUpdateField.value
+const autoUpdateBusy = autoUpdateField.busy
+
+const preDownloadField = group.field<boolean>(false, {
+  save: (next) => setUpdateSettings({ preDownload: next }),
+  savedToastKey: UPDATE_SAVED_TOAST_KEY,
+  saveFailedToastKey: UPDATE_SAVE_FAILED_TOAST_KEY,
+})
+const preDownload = preDownloadField.value
+const preDownloadBusy = preDownloadField.busy
 
 /** 更新来源偏好枚举（与 SelectItem value 一一对应）。 */
 const UPDATE_SOURCE_PREFS = ['auto', 'github', 'gitcode'] as const
-
-/** 更新来源偏好（选择即优先级非独占：任一源失败仍自动降级另一源；切换即持久化） */
-const updateSource = ref<UpdateSourcePref>('auto')
-/** 更新来源持久化中（切换时短暂 disable 控件） */
-const updateSourceSaving = ref(false)
 
 /** 运行时守卫：把 Select 的字符串 value 收敛为 UpdateSourcePref 字面量联合（无需 as 断言）。 */
 function isUpdateSourcePref(value: string): value is UpdateSourcePref {
   return (UPDATE_SOURCE_PREFS as readonly string[]).includes(value)
 }
 
+/** 更新来源偏好（选择即优先级非独占：任一源失败仍自动降级另一源；切换即持久化） */
+const updateSourceField = group.field<UpdateSourcePref>('auto', {
+  save: (next) => setUpdateSettings({ updateSource: next }),
+  savedToastKey: UPDATE_SAVED_TOAST_KEY,
+  saveFailedToastKey: UPDATE_SAVE_FAILED_TOAST_KEY,
+})
+const updateSource = updateSourceField.value
+const updateSourceBusy = updateSourceField.busy
+
+// 共享 loader：一次 getUpdateSettings 回填三字段 + proxy 配置独立 loader（loadAll 并行，任一失败归并 loadError）
+group.registerLoader(async () => {
+  const settings = await getUpdateSettings()
+  preDownloadField.reset(settings.preDownload)
+  // 旧 settings 文件无 autoUpdate/updateSource 字段 → 缺省回退（D3 向后兼容）
+  autoUpdateField.reset(settings.autoUpdate ?? false)
+  updateSourceField.reset(settings.updateSource ?? 'auto')
+})
+group.registerLoader(async () => {
+  const config = await getProxyConfig()
+  localConfig.mode = config.mode
+  localConfig.httpProxy = config.httpProxy ?? ''
+  localConfig.httpsProxy = config.httpsProxy ?? ''
+})
+
 /** 当前应用版本（vite define 注入，全局声明见 env.d.ts） */
 const appVersion = __APP_VERSION__
 
 // ── Lifecycle ──
 
-/** 加载当前配置 */
-async function loadConfig() {
-  // 代理配置与预下载设置并行加载（独立数据源）
-  const results = await Promise.allSettled([
-    getProxyConfig(),
-    getUpdateSettings(),
-  ])
-  // 代理配置
-  if (results[0].status === 'fulfilled') {
-    const config = results[0].value
-    localConfig.mode = config.mode
-    localConfig.httpProxy = config.httpProxy ?? ''
-    localConfig.httpsProxy = config.httpsProxy ?? ''
-  } else {
-    // best-effort：加载失败时使用默认配置（system mode），不影响页面渲染
-    console.error('[UpdatePage] load proxy config failed:', results[0].reason)
-  }
-  // 预下载设置
-  if (results[1].status === 'fulfilled') {
-    preDownload.value = results[1].value.preDownload
-    autoUpdate.value = results[1].value.autoUpdate ?? false
-    // 旧 settings 文件无 updateSource 字段 → 缺省回退 auto（D3 向后兼容）
-    updateSource.value = results[1].value.updateSource ?? 'auto'
-  } else {
-    console.error('[UpdatePage] load update settings failed:', results[1].reason)
-  }
+/** 加载/重试：全部 loader 并行执行，任一失败归并置 loadError（控件禁用直到重拉成功）。 */
+async function loadConfig(): Promise<void> {
+  await group.loadAll()
 }
 
-onMounted(loadConfig)
+onMounted(() => {
+  void loadConfig()
+})
 
-/** 切换自动更新开关（立即持久化到 main 进程） */
-async function onToggleAutoUpdate(value: boolean | string): Promise<void> {
-  const enabled = value === true
-  autoUpdateSaving.value = true
-  try {
-    await setUpdateSettings({ autoUpdate: enabled })
-    autoUpdate.value = enabled
-  } catch (err) {
-    // 持久化失败：恢复控件到原值，toast 提示
-    toastError(err instanceof Error ? err.message : String(err))
-  } finally {
-    autoUpdateSaving.value = false
-  }
+/** 切换自动更新开关（立即持久化；编排全在 setting-field module）。 */
+function onToggleAutoUpdate(value: boolean | string): void {
+  void autoUpdateField.persist(value === true)
 }
 
-/** 切换预下载开关（立即持久化到 main 进程） */
-async function onTogglePreDownload(value: boolean | string): Promise<void> {
-  const enabled = value === true
-  preDownloadSaving.value = true
-  try {
-    await setUpdateSettings({ preDownload: enabled })
-    preDownload.value = enabled
-  } catch (err) {
-    // 持久化失败：恢复控件到原值，toast 提示
-    toastError(err instanceof Error ? err.message : String(err))
-  } finally {
-    preDownloadSaving.value = false
-  }
+/** 切换预下载开关（立即持久化；编排全在 setting-field module）。 */
+function onTogglePreDownload(value: boolean | string): void {
+  void preDownloadField.persist(value === true)
 }
 
 /**
- * 切换更新来源（立即持久化到 main 进程）。
+ * 切换更新来源（立即持久化）。
  * 仅写偏好，不触发 force 检查——偏好实际生效以检查缓存 TTL 为界
  * （update-multi-source D3：手动「检查更新」才是 force 语义）。
  */
-async function onSourceChange(value: string): Promise<void> {
+function onSourceChange(value: string): void {
+  // 守卫落 persist 前：清单外值禁止进入乐观写/落盘路径
   if (!isUpdateSourcePref(value)) return
-  updateSourceSaving.value = true
-  try {
-    await setUpdateSettings({ updateSource: value })
-    updateSource.value = value
-  } catch (err) {
-    // 持久化失败：恢复控件到原值，toast 提示
-    toastError(err instanceof Error ? err.message : String(err))
-  } finally {
-    updateSourceSaving.value = false
-  }
+  void updateSourceField.persist(value)
 }
 
 // ── Actions ──
@@ -356,7 +360,7 @@ function onModeChange(value: string) {
   testResult.value = null
 }
 
-/** 测试代理 */
+/** 测试代理（查询型动作，不落盘，留在组件） */
 async function onTestProxy() {
   // disabled 模式不发起测试：代理未启用，测试无意义，直接给出提示而非误导性的成功
   if (localConfig.mode === 'disabled') {
@@ -387,9 +391,23 @@ async function onTestProxy() {
   }
 }
 
-/** 保存配置 */
-async function onSave() {
-  // 基本前端校验
+// 显式保存动作（setting-field module · createExplicitSave）：saving 防重入 + 成功/失败 toast；
+// 组装收进动作本体，域校验留调用方（onSave）
+const saveProxy = createExplicitSave({
+  run: async () => {
+    await setProxyConfig({
+      mode: localConfig.mode,
+      httpProxy: localConfig.httpProxy || undefined,
+      httpsProxy: localConfig.httpsProxy || undefined,
+    })
+  },
+  savedToastKey: 'settings.update.saved',
+  onError: (e) => t('settings.update.saveFailed', { msg: e instanceof Error ? e.message : String(e) }),
+})
+const saveProxySaving = saveProxy.saving
+
+/** 保存配置：manual 非空 + URL 校验留调用方（校验拒绝不进入保存动作、无成功 toast）。 */
+function onSave() {
   if (localConfig.mode === 'manual') {
     if (!localConfig.httpProxy) {
       toastError(t('settings.update.httpProxyRequired'))
@@ -404,21 +422,6 @@ async function onSave() {
       return
     }
   }
-
-  saving.value = true
-
-  try {
-    const config: IProxyConfig = {
-      mode: localConfig.mode,
-      httpProxy: localConfig.httpProxy || undefined,
-      httpsProxy: localConfig.httpsProxy || undefined,
-    }
-    await setProxyConfig(config)
-    toastInfo(t('settings.update.saved'))
-  } catch (err) {
-    toastError(t('settings.update.saveFailed', { msg: err instanceof Error ? err.message : String(err) }))
-  } finally {
-    saving.value = false
-  }
+  void saveProxy.run()
 }
 </script>

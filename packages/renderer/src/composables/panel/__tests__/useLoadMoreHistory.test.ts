@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useLoadMoreHistory —— [scroll-top-auto-load] 触顶自动续载的判定与防重入。
  *

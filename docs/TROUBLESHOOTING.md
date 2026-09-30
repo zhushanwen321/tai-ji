@@ -152,7 +152,7 @@ printenv | grep TAIJI_AGENT_PACKAGED   # 有输出 = 泄漏确认（出站契约
 env -u TAIJI_AGENT_PACKAGED bash scripts/validate-runtime-bundle.sh   # 旁证：剥除后应恢复正常
 ```
 
-若仍命中，说明该调用点未经出站契约构建器，带报错文件行号去 `.githooks/check_spawn_env_boundary.py` 豁免名单核对。治理：约束 C-proc-09（子进程 env 出站契约，`buildOutboundChildEnv` deny 剥除）+ pre-commit 守卫 `.githooks/check_spawn_env_boundary.py`，详见 [architecture/env-propagation-boundary.md](architecture/env-propagation-boundary.md)。
+若仍命中，说明该调用点未经出站契约构建器，带报错文件行号去 `.githooks/check_spawn_env_boundary.py` 豁免名单核对。治理：约束 C-proc-09（子进程 env 出站契约，`buildOutboundChildEnv` deny 剥除）+ pre-commit 检查 `.githooks/check_spawn_env_boundary.py`，详见 [architecture/env-propagation-boundary.md](architecture/env-propagation-boundary.md)。
 
 ### 10. 升级中断手动恢复（升级脚本 staging 状态机残余窗口）
 
@@ -200,14 +200,14 @@ grep -E "\[sessionfile\]|agent_end get_state backfill|workflow no-progress watch
 
 H1 后续聊要点：每轮续聊 = 独立 run（`RunParams.resume` 续写原 session 文件），无长驻 chat 进程形态；跨重启续聊数据源 = `<sessionFile>.record-binding` 绑定 sidecar——「subagent not found or not owned」按序查 record 存在性 → sidecar 文件 → `cold-lookup.ts` 恢复。「失败后无通知」或「失败即 closed」属异常，查 Continuation onRunSettled 失败分支。workflow origin record 排查须带 `includeFinished:true` + `includeWorkflow:true` 成对；成败判读看 outcome 不看 closedReason（见观察项 #14）。
 
-### 13. record 直写守卫拦截（eslint no-restricted-imports / check-record-write-surface）
+### 13. record 直写检查拦截（eslint no-restricted-imports / check-record-write-surface）
 
-> 权威 SSOT：[architecture/subagent-record-persistence-consolidation.md](architecture/subagent-record-persistence-consolidation.md)（§3.3 守卫分级 / §3.1 意图级 API 表）；约束登记 C-data-20。
+> 权威 SSOT：[architecture/subagent-record-persistence-consolidation.md](architecture/subagent-record-persistence-consolidation.md)（§3.3 检查分级 / §3.1 意图级 API 表）；约束登记 C-data-20。
 
-record 持久化写面（`.state` / `.alive` / manifest / sessions-index / `subagent-record` entry）的唯一写入口 = `RecordStore` 意图原语（`packages/subagent-core/src/execution/persistence/record-store.ts`）。两级守卫：eslint `no-restricted-imports`（store 外禁 import 终态/.alive/sessions-index 写函数，模块边界一级拦截）+ pre-commit `scripts/check-record-write-surface.mjs`（类方法 / 字面量直写形态 grep 门兜底）。
+record 持久化写面（`.state` / `.alive` / manifest / sessions-index / `subagent-record` entry）的唯一写入口 = `RecordStore` 意图原语（`packages/subagent-core/src/execution/persistence/record-store.ts`）。两级检查：eslint `no-restricted-imports`（store 外禁 import 终态/.alive/sessions-index 写函数，模块边界一级拦截）+ pre-commit `scripts/check-record-write-surface.mjs`（类方法 / 字面量直写形态 grep 门兜底）。
 
 - 处置：改调 RecordStore 意图原语（`markFinalized` / `markCancelled` / `acquireWriteLease` / `markIdleArchived` / `rematerializeManifest` / `markBatchFinalized` / `reportRecordTransition`）；读函数不受限。复跑：`node scripts/check-record-write-surface.mjs`（应输出 store 外零命中）。
-- 误拦判定：新写面确属 store 外自有域时，在守卫脚本 `EXTENSION_DOMAIN_ALLOWLIST` 登记文件并注明设计依据（登记处即台账），禁止行内豁免绕过。
+- 误拦判定：新写面确属 store 外自有域时，在检查脚本 `EXTENSION_DOMAIN_ALLOWLIST` 登记文件并注明设计依据（登记处即登记），禁止行内豁免绕过。
 
 ### 14. catalog provider 自定义网关失效 / 端点与官网不符（启动清洗剥除手编网关，2026-09-10 D2 已接受代价）
 
@@ -215,7 +215,7 @@ record 持久化写面（`.state` / `.alive` / manifest / sessions-index / `suba
 grep "stripped unmarked provider-level keys" ~/.taiji/logs/runtime-*.log   # dev 用 ~/.taiji-dev
 ```
 
-命中即启动清洗剥除了未显式标记的手编 catalog 网关（判定锚 = providers.json extras 的 `gatewayBaseUrl` 标记，无标记即剥）。恢复：Settings → Providers 展开该 provider，在「端点（自定义网关）」重设网关 URL 并保存一次（标记落盘后不再被剥）。判定锚权威 = `packages/core/src/domain/settings/use-provider-edit.ts` 防线注释（原设计文档 catalog-provider-field-authority.md 已删除，git 可追溯）。
+命中即启动清洗剥除了未显式标记的手编 catalog 网关（判定锚 = providers.json extras 的 `gatewayBaseUrl` 标记，无标记即剥）。恢复：Settings → Providers 展开该 provider，在「端点（自定义网关）」重设网关 URL 并保存一次（标记落盘后不再被剥）。判定锚权威 = `packages/core/src/domain/settings/provider-edit-form.ts` 防线注释（原设计文档 catalog-provider-field-authority.md 已删除，git 可追溯）。
 
 ### 15. Coding Plan 额度查询失败 / 数据疑似过期（2026-09-10 配置交互重构）
 
@@ -227,7 +227,7 @@ grep "stripped unmarked provider-level keys" ~/.taiji/logs/runtime-*.log   # dev
 
 **现象**：找 dev 实例的 session / 日志时落点不对；或 dev 首启没配模型，新建会话直接报 `No model configured. Please configure a provider and model in Settings before starting a session.`。
 
-**现状**：dev 数据目录 = 装配器派生的 `~/.taiji-dev/instances/<worktree>/`——`main.ts` dev 分支受控采信树内实例目录（外部 `TAIJI_AGENT_DATA_DIR` 仅当 `path.resolve` 后位于 `~/.taiji-dev` 树内才采信，其余一律钉死回 `~/.taiji-dev`，防宿主 env 泄漏语义保留；`TAIJI_E2E=1` 受控装配豁免）。解析纯函数 = `apps/electron/main/utils/dev-data-dir.ts`（行为矩阵 = `main/test/dev-data-dir.test.ts`）。早期 dev 数据可能仍留在 `~/.taiji-dev/` 根——实例目录找不到旧 session 时去根目录核对。
+**现状**：dev 数据目录 = 装配器派生的 `~/.taiji-dev/instances/<worktree>/`——`main.ts` dev 分支受控采信树内实例目录（外部 `TAIJI_AGENT_DATA_DIR` 仅当 `path.resolve` 后位于 `~/.taiji-dev` 树内才采信，其余一律固定回 `~/.taiji-dev`，防宿主 env 泄漏语义保留；`TAIJI_E2E=1` 受控装配豁免）。解析纯函数 = `apps/electron/main/utils/dev-data-dir.ts`（行为矩阵 = `main/test/dev-data-dir.test.ts`）。早期 dev 数据可能仍留在 `~/.taiji-dev/` 根——实例目录找不到旧 session 时去根目录核对。
 
 **排障动作**：
 
@@ -238,7 +238,7 @@ ls -la ~/.taiji-dev/instances/<worktree>/logs/             # runtime-*.log / pi-
 
 首启缺配置（provider / secrets / 默认模型）时装配器自动从只读模板 `~/.taiji-dev.template/` 按 `TEMPLATE_TOP_FILES` / `TEMPLATE_TOP_DIRS` 白名单复制进实例目录（白名单定义见 `apps/electron/scripts/dev-instance-lib.mjs`，`node apps/electron/scripts/dev-instance.mjs init-template --seed-from <源>` 生成模板；模板只读，勿直改）。
 
-**实验隔离正式通道（2026-09-19）**：需要独立数据目录（基线采集 / mock 实例 / 多实验并行 / 多 worktree 隔离）时，用装配器显式参数 `node apps/electron/scripts/dev-instance.mjs --data-dir ~/.taiji-dev/<suffix>`——值域限 `~/.taiji-dev/` 树内（fs-guard 白名单与路径守卫按该前缀放行），装配器注入 `TAIJI_DEV_ASSEMBLED=1` 供 main.ts dev 分支采信（显式标记 + 值域白名单双约束，裸 env 泄漏仍不采信，2026-09-08 防线语义不变）。此通道取代已废弃的「临时改 main.ts dataDir + 用完 revert」实验做法。
+**实验隔离正式通道（2026-09-19）**：需要独立数据目录（基线采集 / mock 实例 / 多实验并行 / 多 worktree 隔离）时，用装配器显式参数 `node apps/electron/scripts/dev-instance.mjs --data-dir ~/.taiji-dev/<suffix>`——值域限 `~/.taiji-dev/` 树内（fs-guard 白名单与路径检查按该前缀放行），装配器注入 `TAIJI_DEV_ASSEMBLED=1` 供 main.ts dev 分支采信（显式标记 + 值域白名单双约束，裸 env 泄漏仍不采信，2026-09-08 防线语义不变）。此通道取代已废弃的「临时改 main.ts dataDir + 用完 revert」实验做法。
 
 ### 17. 子包目录 `pnpm exec vitest` 全仓扫跑 + 测试红线「测试禁止触碰真实数据目录」
 
@@ -257,7 +257,7 @@ vitest run --root <子包目录>                                 # 或从仓库�
 
 ### 18. 宿主 shell 注入 `TAIJI_AGENT_DATA_DIR=~/.taiji` 时的测试行为（自动脱钩，2026-09-17）
 
-**现象（旧行为）**：Electron / dev 宿主 shell 的 env 天然带 `TAIJI_AGENT_DATA_DIR=~/.taiji`（app 自身的数据目录）。在该 shell 里跑 `pnpm test`，或在该 shell 里 `git commit`（pre-commit 钩子内的守卫单测同为 vitest），会被 global-setup 以「指向真实用户数据目录」为由拒跑，必须 `env -u TAIJI_AGENT_DATA_DIR` 才能继续——人人需感知的环境摩擦。
+**现象（旧行为）**：Electron / dev 宿主 shell 的 env 天然带 `TAIJI_AGENT_DATA_DIR=~/.taiji`（app 自身的数据目录）。在该 shell 里跑 `pnpm test`，或在该 shell 里 `git commit`（pre-commit 钩子内的检查单测同为 vitest），会被 global-setup 以「指向真实用户数据目录」为由拒跑，必须 `env -u TAIJI_AGENT_DATA_DIR` 才能继续——人人需感知的环境摩擦。
 
 **现状（自动脱钩 + 单行通告）**：`test-guard/global-setup.ts` 检测到注入值指向**真实数据目录**或**非白名单目录**时，不再 `exit 1`，而是删除该 env 并落 tmp 重定向（判定条件与 `isInjectedEnvAllowed` 白名单共用，单一实现）：
 
@@ -284,39 +284,39 @@ VITE_E2E=true pnpm run build:e2e
 VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 ```
 
-判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。该形态错误已由 launch 前守卫拦截：`e2e/fixtures/launch-app-real.ts` 的 pre-flight `assertRealRendererBundle`（判据 = mock fixture 标记串命中 assets/*.js，real 构建经死分支摇除零命中）校验产物形态，mock 产物在场即 fail-fast 并给出上面的重建命令。
+判别信号：runtime 日志（`<dataDir>/logs/runtime-*.log`）只有 spec 自身的 WS 连接、无 renderer 连接；renderer console 出现 `[ws] connecting to mock://localhost`。该形态错误已由 launch 前检查拦截：`e2e/fixtures/launch-app-real.ts` 的 pre-flight `assertRealRendererBundle`（判据 = mock fixture 标记串命中 assets/*.js，real 构建经死分支摇除零命中）校验产物形态，mock 产物在场即 fail-fast 并给出上面的重建命令。
 
 ### 20. 表单/命令提交后状态条假忙约 30s / 非断连期 `[chat] finalizeSession reason=timeout` warn
 
 **现象**：命令路径弹窗（如 `/permission rule`、`/permission model`）**提交**后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（attach 调试可见，含 sid——timeout 分支已无 dev 门，生产 attach 同样可见；生产落 `renderer-console-<date>.log`（`<dataDir>/logs/`），无需 attach）。
 
-**判定**：该形态的常态命中面已全部清零——scheduler 表单走 `expectTurn: false` 声明即时收尾（ADR-0073），plain dialog 提交面已由通路级即时收尾解决（`sendPiResponse` 应答终局无条件清 pendingSend，生产者穷尽论证与落地 commit 见 ADR-0072 收口条目）。**任何提交源命中 30s timeout 均属真异常形态**（pi 僵死 / 协议漂移 / 极端延迟 / 新扩展源未按通道选型实现——选型指引见 development-guide §5.1）。
+**判定**：该形态的常态命中面已全部清零——scheduler 表单走 `expectTurn: false` 声明即时收尾（ADR-0073），plain dialog 提交面已由通路级即时收尾解决（`sendPiResponse` 应答终局无条件清 pendingSend，生产者穷尽论证与落地 commit 见 ADR-0072 收敛条目）。**任何提交源命中 30s timeout 均属真异常形态**（pi 僵死 / 协议漂移 / 极端延迟 / 新扩展源未按通道选型实现——选型指引见 development-guide §5.1）。
 
 **排障**：确认提交源类型——plain dialog 命令（band 弹窗）或已声明 `expectTurn: false` 的表单提交后仍命中 30s = turn 信号链断裂（先取 `renderer-console-<date>.log` 确认 warn 落盘形态（含 sid），再按 pi tee 日志 + ping 信号归因）；ask-user/plan 表单提交出现该 warn 说明 turn 未续接（真异常，同上归因）；新 form 扩展源提交命中 = 未声明 `expectTurn: false`（缺省 true 走桥接，发现即补声明）；新命令扩展源需要「提交后开 turn」的应改用 `uiFormInteract` 并声明 expectTurn（裸 select 通路按无 turn 收尾，恒清不桥接）。
 
-### 21. bun 腿测试假绿：`bunx vitest` 不带 `--bun` 静默跑系统 node（2026-09-21）
+### 21. bun 路径测试假绿：`bunx vitest` 不带 `--bun` 静默跑系统 node（2026-09-21）
 
-**症状**：手工跑 zcode-session-source 的 bun:sqlite 腿测试（`bunx vitest run`）全绿，但 bun 驱动语义分支（`get()` 未命中返 null、`close()` 不 checkpoint 等）实际没被测到——整趟跑的是系统 node 的 node:sqlite。
+**症状**：手工跑 zcode-session-source 的 bun:sqlite 路径测试（`bunx vitest run`）全绿，但 bun 驱动语义分支（`get()` 未命中返 null、`close()` 不 checkpoint 等）实际没被测到——整趟跑的是系统 node 的 node:sqlite。
 
 **根因**：vitest 可执行文件的 shebang 是 node，`bunx` 默认按 shebang 用 node 启动它——进程内 `typeof Bun === 'undefined'`，D3 双驱动探测走 node 分支。`bunx` ≠ bun 运行时，必须显式 `--bun` 才把 vitest 本体跑在 bun 下。
 
-**正确做法**：真 bun 腿 = 包目录内 `bunx --bun --no-install vitest run`。该命令已固化在守卫 `scripts/check-bun-driver.mjs`（bun 那一跑由它承担，node 趟由常规 vitest 覆盖；手工验证时可加 `typeof Bun` 探针确认运行时形态）。
+**正确做法**：真 bun 路径 = 包目录内 `bunx --bun --no-install vitest run`。该命令已固化在检查 `scripts/check-bun-driver.mjs`（bun 那一跑由它承担，node 趟由常规 vitest 覆盖；手工验证时可加 `typeof Bun` 探针确认运行时形态）。
 
 ### 22. 测试防线被绕过：非 vitest-config 入口执行测试会写真实数据目录（2026-09-22 事故）
 
-**症状**：`~/.taiji/` 下出现测试命名的目录/文件（如 `attachments/att-store-*`——`attachment-store.test.ts` 的用例 sessionId 命名），而测试红线的双层防线（globalSetup 钉死 `TAIJI_AGENT_DATA_DIR` + fs-guard 白名单拦截）本应阻止一切真实目录写入。
+**症状**：`~/.taiji/` 下出现测试命名的目录/文件（如 `attachments/att-store-*`——`attachment-store.test.ts` 的用例 sessionId 命名），而测试红线的双层防线（globalSetup 固定 `TAIJI_AGENT_DATA_DIR` + fs-guard 白名单拦截）本应阻止一切真实目录写入。
 
-**根因**：防线挂在 vitest config（`taijiTestConfig` 工厂）上，**只对经 config 启动的 vitest 进程生效**。绕过形态：`bun test`（Bun 测试运行器自动把 `import from 'vitest'` 映射到 `bun:test`，完全不读 vitest.config）、或任何不经项目 config 的执行方式——此时无 env 钉死（dataDir 解析回真实 `~/.taiji`）、无 fs-guard（拦截不发生）。标准入口已复现验证有效：包目录 `pnpm vitest run` 写入被正确钉到 tmp。
+**根因**：防线挂在 vitest config（`taijiTestConfig` 工厂）上，**只对经 config 启动的 vitest 进程生效**。绕过形态：`bun test`（Bun 测试运行器自动把 `import from 'vitest'` 映射到 `bun:test`，完全不读 vitest.config）、或任何不经项目 config 的执行方式——此时无 env 固定（dataDir 解析回真实 `~/.taiji`）、无 fs-guard（拦截不发生）。标准入口已复现验证有效：包目录 `pnpm vitest run` 写入被正确钉到 tmp。
 
 **恢复**：① 按测试命名模式识别垃圾条目（`att-store-*` 等用例 sessionId 命名、tmp 下 `logger-test-*`/`zcode-engine-*` 等本仓 fixture 前缀），核对条目内无用户数据后删除；② 会话数据核查：`agent/sessions/` 在事故时段的修改检查（本次事故会话区零触碰）。tmp 大量残留会让依赖 readdir 的用例超时（实测 21 万条目时 `countSnapshotDirs` 单次 >3.6s）。
 
-**防范**：跑测试只用标准入口——包目录 `pnpm vitest run`、仓库根 vitest（根级兜底 config 同挂防线）、bun 腿只走 `bunx --bun vitest`（守卫同口径）；禁止 `bun test` 执行本项目测试文件。
+**防范**：跑测试只用标准入口——包目录 `pnpm vitest run`、仓库根 vitest（根级兜底 config 同挂防线）、bun 路径只走 `bunx --bun vitest`（检查同口径）；禁止 `bun test` 执行本项目测试文件。
 
 ### 23. runtime 启动即拒绝："fatal: data directory already served by a live runtime instance"
 
 **现象**：runtime 进程启动秒退（exit 1），日志含上述 fatal 与 `live at: 127.0.0.1:<port> (source: ...)` 定位行。
 
-**判定**：同数据目录已有活 runtime 实例（单实例守卫，约束 C-proc-25）。守卫读 `<dataDir>/runtime-instance.json`（runtime 自登记）与 `<dataDir>/runtime.port`（supervisor 通道）候选端口做 TCP 探活，任一可达即拒绝；端口不可达但 instance.json 登记 pid 存活（启动窗口内的预登记实例，probe 通过即登记、早于 listen）同样拒绝——双 runtime 共享数据目录会导致第二实例 reattach 抢管他人 session、退出时 destroyAll + relay kill-on-disconnect 屠杀全部主 pi 与 subagent，拒绝是正确防御。
+**判定**：同数据目录已有活 runtime 实例（单实例检查，约束 C-proc-25）。检查读 `<dataDir>/runtime-instance.json`（runtime 自登记）与 `<dataDir>/runtime.port`（supervisor 通道）候选端口做 TCP 探活，任一可达即拒绝；端口不可达但 instance.json 登记 pid 存活（启动窗口内的预登记实例，probe 通过即登记、早于 listen）同样拒绝——双 runtime 共享数据目录会导致第二实例 reattach 抢管他人 session、退出时 destroyAll + relay kill-on-disconnect 屠杀全部主 pi 与 subagent，拒绝是正确防御。
 
 **排障**：定位行带 `reachable: true`（端口可达）时按 `lsof -i :<port>` 确认持有者——app 正常重启的竞态窗口等旧实例退出后重试即自愈；定位行带 `reachable: false`（pid 存活但未 listen）时先等并发的另一实例完成启动再重试，`ps -p <pid>` 确认其身份；要并行跑第二实例（dev / e2e / 验收脚本）必须给独立 `TAIJI_AGENT_DATA_DIR`（mkdtemp 或 `~/.taiji-dev/instances/<worktree>`），禁止继承 prod 数据目录 env 起 runtime；仅当持有 pid / 端口确认是无关进程（pid 复用占位）时可删 `runtime-instance.json` 后重试。app 正常链路（Electron supervisor）stop 时等旧 runtime 完全退出才 spawn 新实例，不应触发本报错——频繁出现说明有绕过 supervisor 的独立 runtime 在同目录运行。
 
@@ -330,11 +330,33 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **排障**：组件经 `defineExpose` 暴露真实元素 getter（先例 `ComposerInput.getInputElement()`），消费方读 expose 元素、缺失即 fail-closed，禁回退 `$el`（ADR-0073 [HISTORICAL]，事故 = W1 F-1 直发门 dev 全变体静默失效）。
 
+### 25. 导入的 zcode 会话 usage 缺失两级症状：stats WARN（已知降级）与续聊即死（毒消息，2026-09-21 事故，已根治）
+
+- **症状 A（轻）**：runtime 日志反复 `replicated-state usage snapshot fetch failed (attempt=N/4): Cannot read properties of undefined (reading 'input')` WARN——token 用量统计（辅助功能）降级，续聊正常。
+- **症状 B（重）**：续聊发出后 25ms 内 turn 即死，pi tee 日志 `turn_end` 带 `stopReason:"error"` + `errorMessage:"Cannot read properties of undefined (reading 'totalTokens')"`，且与症状 A 并存。
+- **根因**：产物中存在「assistant 消息、stopReason 为终态（stop/toolUse/length）、无 usage 键」的 entry。pi 0.84.4 读面对此无检查（pi-semantics PS-41：`agent-session.js:2678` stats 读 `.input`、`:2721` turn 前上下文扫描读 `.totalTokens` 仅跳过 aborted/error）。pi 原生写侧连错误轮都写全零 usage，原生会话不触发；只有导入产物能违反该隐式不变量。
+- **成因与根治**：旧版 zcode 导入转换器把「取消轮」（zcode `data.error.turnResult=cancelled`、无 step-finish part）映射成 `stopReason:'stop'` 且不写 usage——设计期「message 级 stopReason 零消费」断言只查了 taiji 渲染链、漏了 pi 读面。已根治（converter `unsealedStopReason`：cancelled→aborted / error 家族→error；`zeroUsage` 不变量门：assistant 恒带 usage 对象，缺失零值兜底——全零是 pi「无测量数据」的合法编码）。
+- **修复配方（存量毒产物，手术式）**：备份 jsonl → 定位毒 entry（assistant + 终态 stopReason + 无 usage）→ 补 `stopReason:'aborted'`（zcode 源有取消证据时）与全零 usage 对象 → 验证：`parseSessionEntries` + PS-41 双谓词零违例 → 重启应用或切走再切回该会话（运行中 pi 进程持旧内存态，改文件不生效于已加载会话）。
+- **排查特征**：「续聊即死 + reading 'totalTokens' + stats WARN」三者并存 = 症状 B；仅 stats WARN（续聊正常）= 症状 A（毒 entry 的 stopReason 恰为 aborted/error 时 2721 跳过、仅 2678 崩）。两者同根（usage 缺键），根治后新导入产物均不再出现；存量产物按修复配方手术。
+
+### 26. workflow run 状态异常排查：run 事件 journal 取证（2026-09-21 run 显式状态机落地）
+
+- **取证源**：workflow run 生命周期由显式状态机裁决（`subagent-core/src/orchestration/run-events.ts`，`RUN_TRANSITIONS` 转移表 + `transition` 纯函数，表外转移 fail-fast）；record 流 journal 是 run 态权威投影源——`<agentDir>/workflow-state/<runId>.record.jsonl`（[D1] record 单源，后缀经 core `RUN_EVENT_JOURNAL_SUFFIX`；workspace 有活跃 session 时为 `<agentDir>/sessions/<slug>/workflow-state/`，推导 = `resolvePiWorkflowStateDir`），JSONL 逐行（`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`；`agent-started` 载荷携带 `phase?` = 剧本 phase 归属，抽屉分组视图供源；成员词表权威源 = `subagent-core/src/orchestration/run-events.ts` 的 `RUN_EVENT_TYPES`）。旧格式 `.events.jsonl` 两件套不读不写（历史 run 不进 GUI 列表、resume 拒绝，随孤儿对账清理自然消亡）——不是取证源。
+- **判定姿势**：run 卡死/终态异常先读 journal 事件序列对照合法转移表——① 缺 `run-settled` 事件 = run 未终局（查 pump 日志）；② schema 任务武装回执异常：journal 里没有也不该有 `armed` 事件（占位事件已随 D5 删除——回执经运行时事件路由喂入宿主等待门，不落 journal）；现行断言点 = run 终态 failed 且 error 文案含 `[schema-arming]`（宿主 armed 回执等待窗窗满合成失败 outcome，fail-fast 先行——查引擎侧武装断言与 `@zhushanwen/pi-structured-output` 扩展装载；native 引擎 + schema 任务才有武装面，emulated 引擎 / 无 schema 任务豁免不适用本条）；③ debug 日志 `run event dispatch yielded (runId=...)` = 表外转移让位，常见根因是派发链 runId 键错、事件落进占位键（旁证：binding sidecar `.record-binding` 的 `parentRunId` 为 `sar-unattached` 占位而非真实 runId = 未走 workflowAgentDispatch 通道）。
+- **注册表投影**：run 列表态 = journal fold（四相 missing/active/terminal/interrupted），不看文件 mtime；journal 缺失即 missing 相，手工挪动/删除 journal 文件直接改变投影结果。
+
+### 27. 项目 skill 实体（.agents）排障：symlink 形态判定 / 实体还原 / 检出旧 ref 脱钩（2026-09-25 ADR-0086）
+
+- **现状**：`.agents` 实体唯一一份在 workspace 根（`<workspace>/.agents/`），各 worktree 经 symlink 共享，git 不跟踪（`git status` 干净是常态）。backup = `refs/skills-snapshot`（pre-commit 尾部段自动维护；远端同名 ref = 跨机器权威备份点）。
+- **判定姿势**：`ls -la .agents` 应显示 `-> ../.agents`；`git ls-files .agents | wc -l` 应为 0。commit 被第 0 段拦下时按错误信息分派：symlink 悬空 = 实体丢失（走还原）；symlink 指错目标 = 重建（`rm .agents && ln -sfn ../.agents .agents`）；`.agents` 是真实目录 = 该分支检出的是迁移前内容（先落迁移 commit 再删目录重建；bisect/detached 态直接 `rm -rf .agents && ln -sfn ../.agents .agents` 后 continue——禁 merge，会污染 bisect 序列）。
+- **实体还原**（实体误删 / `.bare` 损坏）：`git archive refs/skills-snapshot | tar -x -C <workspace 根>`；本地 ref 不可用先 `git fetch github refs/skills-snapshot:refs/skills-snapshot`（本 workspace remote 名 = `github`；fresh clone 默认 `origin`——`refs/remotes/origin/*` 是 remote 改名前的 stale 残留，`rev-parse origin/main` 仍解析出陈旧值属半工作陷阱，勿作为依据）。还原后 `diff -r` 核对。
+- **快照链排障**：`git rev-parse refs/skills-snapshot` 不存在 = 任一 worktree 手动跑 `bash .githooks/snapshot-skills.sh`；hook 输出 `[WARN] skills 快照失败` = 非阻断（下次 commit 自动重试，多为离线 push 超时）；跨机器重建前 `git ls-remote github refs/skills-snapshot` 核对新鲜度。
+
 ## 环境变量速查
 
 | 变量 | 用途 | 生产默认值 | 开发默认值 |
 |------|------|-----------|------------|
-| `TAIJI_AGENT_DATA_DIR` | 数据目录 | `~/.taiji` | `~/.taiji-dev/instances/<worktree>`（装配器注入、树内受控采信；树外值钉死 `~/.taiji-dev`） |
+| `TAIJI_AGENT_DATA_DIR` | 数据目录 | `~/.taiji` | `~/.taiji-dev/instances/<worktree>`（装配器注入、树内受控采信；树外值固定 `~/.taiji-dev`） |
 | `TAIJI_AGENT_PORT_OFFSET` | 端口偏移 | `0` | `100` |
 | `TAIJI_AGENT_PACKAGED` | 打包标记 | `1` | 未设置 |
 | `ELECTRON_RUN_AS_NODE` | Node 模式 | `1`（runtime 子进程） | 未设置 |
@@ -378,7 +400,7 @@ bare repo + worktree 结构下，`.bare/hooks/pre-commit` 是全部 worktree 共
 
 ### 周期轮询/兜底定时器的合法性判定（2026-08-28）
 
-新增任何周期定时器（setInterval / 递归 setTimeout 循环 / 轮询兜底）前，必须按下表归类并回答该类的问题；处置台账与外部对照证据见 [architecture/pi-boundary-reliability.md 附录 C](architecture/pi-boundary-reliability.md#附录-c轮询定时器处置全清单2026-08-28d9-执行台账)。**判定原则：变化时对方会主动 push 的信息，禁止用周期 pull 兜底**——兜底轮询会掩盖主链路 bug（事故 B 的 30s 轮询就让「回执丢失」隐性存在了很久）。
+新增任何周期定时器（setInterval / 递归 setTimeout 循环 / 轮询兜底）前，必须按下表归类并回答该类的问题；处置登记与外部对照证据见 [architecture/pi-boundary-reliability.md 附录 C](architecture/pi-boundary-reliability.md#附录-c轮询定时器处置全清单2026-08-28d9-执行登记)。**判定原则：变化时对方会主动 push 的信息，禁止用周期 pull 兜底**——兜底轮询会掩盖主链路 bug（事故 B 的 30s 轮询就让「回执丢失」隐性存在了很久）。
 
 | 类 | 判据 | 规则 | 实例 |
 |---|---|---|---|
@@ -459,7 +481,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 
 - **pi 锚点**：`dist/core/agent-session.js:325-336`——`_emitAgentSettled` 首行复位 `_isAgentRunActive = false` 再发 agent_settled 事件
 - **机制**：settled 边沿驱动的通知通道不会撞上残留 busy 态——notify-ledger 的 settled 边沿 courier 依赖此序；若 pi 未来调换次序，courier 投递时序需重验
-- **处置建议**：探针守卫（pi-semantics-agent-session.test.ts）；消费 settled 边沿的新代码可假定回调内 idle，但 pi 升级时此条目自动进重验清单（verifiedWith 门禁）
+- **处置建议**：探针检查（pi-semantics-agent-session.test.ts）；消费 settled 边沿的新代码可假定回调内 idle，但 pi 升级时此条目自动进重验清单（verifiedWith 门禁）
 
 ### 11. plain appendEntry（type=custom）不进 LLM 上下文（PS-09）
 
@@ -471,7 +493,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 
 > 2026-09 H1 后 chat 域整族退役（续聊轮 = 新 run + resume 锚点，见 §12 头注），原锚点与 `engine_round_aborted`/`engine_round_crashed` 错误码在现树 grep 恒零命中是预期。
 
-- **机制**：pi rpc-mode 对 SIGTERM 的 trap 是优雅收口后自行 `process.exit(143)`（`dist/modes/rpc/rpc-mode.js` trap 段）——子进程以主动 exit 结束，OS 层无信号终止事件，宿主只能拿到 (143, null)。该语义仍适用 run 链任务子进程（观察对象 `packages/pi-subagent-cli/src/spawn-runner.ts`）
+- **机制**：pi rpc-mode 对 SIGTERM 的 trap 是优雅收尾后自行 `process.exit(143)`（`dist/modes/rpc/rpc-mode.js` trap 段）——子进程以主动 exit 结束，OS 层无信号终止事件，宿主只能拿到 (143, null)。该语义仍适用 run 链任务子进程（观察对象 `packages/pi-subagent-cli/src/spawn-runner.ts`）
 - **处置**：无需修复；判读时注意「引擎进程被信号杀死」（呈 `signal SIGTERM`）与「pi 收到 SIGTERM 自行退出」（呈 exit 143）的形态差异，比对事故取证时不要误判
 
 ### 13. 自装引擎包（TAIJI_AGENT_ENGINE_ROOTS / config.json engines）的发现优先级，与自装旧版包 chat 报 engine_capability_unsupported（协议 v1.x）
@@ -481,32 +503,23 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 
 ### 14. closedReason:"gc" 是统一终态占位，不是故障（2026-08-27 事故 A）
 
-- **机制**：pi 的 session close 事件把 done/failed/crashed 等全部终态统一坍缩为 `closed + closedReason:"gc"`——"gc" 是「非用户主动关闭」的占位终态，不代表垃圾回收、不代表异常
-- **处置建议**：看到它先别当故障查——**看 outcome 字段**（completed / failed / cancelled 一等字段）判成败，禁止对 closedReason 做 switch 推导（历史上下游三处同构各自重新推导成败，是「写入时坍缩」问题类的温床）；若消费方还在读 closedReason 判成败，改为消费 outcome。（暂无 PS 互链：机器登记层未收录该语义锚点，补登记留待后续）
+- **机制**：pi 的 session close 事件把 done/failed/crashed 等全部终态统一改写为 `closed + closedReason:"gc"`——"gc" 是「非用户主动关闭」的占位终态，不代表垃圾回收、不代表异常
+- **处置建议**：看到它先别当故障查——**看 outcome 字段**（completed / failed / cancelled 一等字段）判成败，禁止对 closedReason 做 switch 推导（历史上下游三处同构各自重新推导成败，是「写入时合并终态、丢失区分度」问题类的温床）；若消费方还在读 closedReason 判成败，改为消费 outcome。（暂无 PS 互链：机器登记层未收录该语义锚点，补登记留待后续）
 
 ### 15. dev 实例数据目录共享污染（R-13，已修复：受控采信）
 
 - **症状（修复前）**：多 worktree 各自 `pnpm dev` 时，实例数据目录未按 C-dev-01 预期落在 `~/.taiji-dev/instances/<worktree>/`，而是共用同一目录（sandbox 探针插件/权限/会话互相可见，单实例锁互踢）。
-- **现状**：`main.ts` dev 块经 `utils/dev-data-dir.ts` 的 `resolveDevDataDir` 受控采信——装配器注入的 `instances/<worktree>` 实例目录生效（多 worktree 并行 dev 自动隔离），树外值（泄漏形态 `~/.taiji` 等）仍钉死回 `~/.taiji-dev`。
+- **现状**：`main.ts` dev 块经 `utils/dev-data-dir.ts` 的 `resolveDevDataDir` 受控采信——装配器注入的 `instances/<worktree>` 实例目录生效（多 worktree 并行 dev 自动隔离），树外值（泄漏形态 `~/.taiji` 等）仍固定回 `~/.taiji-dev`。
 - **处置建议**：排查多实例互相污染类问题先核对实际数据目录（日志首行/`getDataDir()` 输出），不要按文档预期推定；需要干净环境时使用 `--fresh`。
 
 ### 16. e2e real 轨执行环境三坑（2026-09-19 session 导入验收实测）
 
 - **坑① 沙箱杀子进程**：沙箱化终端（如 AI agent 的 sandbox bash）里跑 `npx playwright test <real 轨 spec>`，e2e 派生的 runtime/pi 子进程会被持续 SIGKILL（supervisor 日志呈 `exitCode 137` 循环重启、runtime 死前零错误输出、无 jetsam 系统记录）——症状是 WS reply 超时/「连接中…」卡死，极具迷惑性。**处置**：real 轨一律非沙箱执行；取证先看 `<dataDir>/logs/main-*.log` 的 supervisor restart decision 与 `log show` 查 jetsam（有 = 系统内存压力，无 = 沙箱/外部 kill）。
 - **坑② bundle 陈旧分裂**：`build:e2e` 链 = main + preload + vite 三产物，**不含 build:runtime**——runtime 源码改动后直接跑 real 轨会用旧 runtime bundle，行为与源码对不上且无告警。**处置**：改过 runtime 后重跑 real 轨前先 `VITE_E2E=true pnpm run build:e2e`（会重建 runtime），或核对 `apps/electron/dist*/runtime` 产物 mtime 晚于源码最后改动。
-- **坑③ mock/real 构建产物互斥覆盖**：mock 轨（`VITE_MOCK=true`）与 real 轨（`VITE_E2E=true` 不传 VITE_MOCK）写同一 renderer 产物目录，后构建者覆盖前者——mock 轨 spec 在 real bundle 下会以「UI 停空态/元素找不到」失败，real 轨 spec 在 mock bundle 下被 `assertRealRendererBundle` 守卫拦截（报 mock fixture 标记）。**处置**：切换轨之前按轨重建 bundle；mock 轨的 13 个失败里若混着 real spec 的 8-38ms 秒败，属预期拦截非回归。
+- **坑③ mock/real 构建产物互斥覆盖**：mock 轨（`VITE_MOCK=true`）与 real 轨（`VITE_E2E=true` 不传 VITE_MOCK）写同一 renderer 产物目录，后构建者覆盖前者——mock 轨 spec 在 real bundle 下会以「UI 停空态/元素找不到」失败，real 轨 spec 在 mock bundle 下被 `assertRealRendererBundle` 检查拦截（报 mock fixture 标记）。**处置**：切换轨之前按轨重建 bundle；mock 轨的 13 个失败里若混着 real spec 的 8-38ms 秒败，属预期拦截非回归。
 
 ### 17. pi openai-completions 适配层对「缺 usage 的错误响应」崩坏（2026-09-19 导入验收发现，上游健壮性问题，既有未修）
 
 - **症状**：续聊大上下文会话（实测 230K tokens）时 assistant 恒定 `stopReason=error`：`undefined is not an object (evaluating 'usage.totalTokens')`，秒级失败（上游 100ms 即拒）。
 - **机制**：provider 上游渠道对超窗口请求返回**不含 usage 字段**的错误响应，pi openai-completions 适配层解析时未对 usage 缺失做防御。凭据/通路无问题（同 provider 小上下文请求成功）。
 - **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
-
-### 20. 导入的 zcode 会话 usage 缺失两级症状：stats WARN（已知降级）与续聊即死（毒消息，2026-09-21 事故，已根治）
-
-- **症状 A（轻）**：runtime 日志反复 `replicated-state usage snapshot fetch failed (attempt=N/4): Cannot read properties of undefined (reading 'input')` WARN——token 用量统计（辅助功能）降级，续聊正常。
-- **症状 B（重）**：续聊发出后 25ms 内 turn 即死，pi tee 日志 `turn_end` 带 `stopReason:"error"` + `errorMessage:"Cannot read properties of undefined (reading 'totalTokens')"`，且与症状 A 并存。
-- **根因**：产物中存在「assistant 消息、stopReason 为终态（stop/toolUse/length）、无 usage 键」的 entry。pi 0.84.4 读面对此无守卫（pi-semantics PS-41：`agent-session.js:2678` stats 读 `.input`、`:2721` turn 前上下文扫描读 `.totalTokens` 仅跳过 aborted/error）。pi 原生写侧连错误轮都写全零 usage，原生会话不触发；只有导入产物能违反该隐式不变量。
-- **成因与根治**：旧版 zcode 导入转换器把「取消轮」（zcode `data.error.turnResult=cancelled`、无 step-finish part）映射成 `stopReason:'stop'` 且不写 usage——设计期「message 级 stopReason 零消费」断言只查了 taiji 渲染链、漏了 pi 读面。已根治（converter `unsealedStopReason`：cancelled→aborted / error 家族→error；`zeroUsage` 不变量门：assistant 恒带 usage 对象，缺失零值兜底——全零是 pi「无测量数据」的合法编码）。
-- **修复配方（存量毒产物，手术式）**：备份 jsonl → 定位毒 entry（assistant + 终态 stopReason + 无 usage）→ 补 `stopReason:'aborted'`（zcode 源有取消证据时）与全零 usage 对象 → 验证：`parseSessionEntries` + PS-41 双谓词零违例 → 重启应用或切走再切回该会话（运行中 pi 进程持旧内存态，改文件不生效于已加载会话）。
-- **排查特征**：「续聊即死 + reading 'totalTokens' + stats WARN」三者并存 = 症状 B；仅 stats WARN（续聊正常）= 症状 A（毒 entry 的 stopReason 恰为 aborted/error 时 2721 跳过、仅 2678 崩）。两者同根（usage 缺键），根治后新导入产物均不再出现；存量产物按修复配方手术。

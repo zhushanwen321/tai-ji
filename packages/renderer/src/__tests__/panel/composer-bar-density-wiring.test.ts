@@ -1,50 +1,67 @@
 /**
- * Composer 底栏密度接线测试（u6b / 设计 `mode-system-composer-density` D6 + §7.4「底栏」行）。
+ * Composer 底栏密度接线测试（D6 修订「三步聚合」版）。
  *
  * 覆盖（三视角，用户可见 DOM 断言优先）：
- * - 使用者（黑盒）：① 窄档下托盘聚合成单入口（层叠图标 + 运行数）；② `»` 溢出菜单仅在确有被收起项
- *   （插件 toolbar 有贡献）时渲染；③ 序 0 发送位在窄档仍渲染（不退化，右锚不漂移）；托盘全无条目时
- *   窄档也不出聚合入口（不留死入口）。
- * - 观察者（形态）：底栏 `flex-nowrap`（永不换行）+ 三簇结构；形态以状态机输出为准（data-tier /
- *   data-slot-* 逐元素形态），档位切换时形态整组跟随。
- * - **fit 轴**（方案 A）：实测「放不下」→ `data-fit` 逐级收紧（L2 即停 / 顶格 L3 容量+指标进 `»` /
- *   变宽放松 / 同宽不抖）；V2 合流态无实心底、分组由发丝分隔表达。
- * - 构建者（白盒）：ResizeObserver 实测驱动档位（模拟容器宽度 400/560/700 → narrow/compact/expanded），
- *   阈值判据本体在 composer-density.test.ts（100% 覆盖），此处只证「实测 → 状态机 → DOM」链路导通。
+ * - 使用者（黑盒）：① 实测溢出逐级触发 左簇聚合 → 指标聚合 → 模型+思考聚合（累计）；
+ *   ② 锚点保护：顶格仍溢出 → 中部让位，`+` 与发送按钮恒在且为首末按钮（零裁剪）；
+ *   ③ 不留死入口：托盘全无 + 插件零贡献 → 无聚合入口；`»` Ellipsis 菜单在任何状态都不出现（退役回归）。
+ * - 观察者（形态）：底栏 `flex-nowrap`（永不换行）+ 三簇结构；`data-fit` / `data-slot-*` /
+ *   `data-anchor-protected` 以状态机输出为准；**bar 内永不出现 88/56px 截断 class**（模型名零截断，
+ *   S4 构造性回归防线）。
+ * - 构建者（白盒）：ResizeObserver 实测驱动 fit 收敛（逐级收紧到放得下 / 顶格保护 / 变宽放松回
+ *   / 同宽不抖 / 卸载断开）；状态机判据本体在 composer-density.test.ts（穷举），此处只证
+ *   「实测 → 状态机 → DOM」链路导通。
  *
  * 策略：
  * - `useTrayCounts` 替身（托盘三态计数注入）——真 ComposerTray 渲染，聚合入口是真实组件；
  * - `VIEW_HOST_SOURCE_KEY` provide（插件 toolbar 贡献面：有 entry → 贡献数 1）；`getViewIds` 返回空
  *   （该 mock 只服务挂载点查询，不冒充 widget 区条目）；
- * - `ManualResizeObserverStub`（`../effects/_virtua-mock-helper` 定稿件）确定性派发实测宽；
+ * - `ManualResizeObserverStub`（`../effects/_virtua-mock-helper` 定稿件）确定性派发；
  * - 真 pinia + 真 chat store（与 composer-send-button-states 同范式），mock useChat / useNewTaskFlow /
- *   api / session store；ComposerInput 与重子组件 stub。
+ *   api / session store；ComposerInput 与重子组件 stub（聚合组件 stub 带契约 testid——
+ *   断言「哪个组件被挂载」，组件内部行为归各自组件测试）。
+ *
+ * [HISTORICAL] 旧版用例断言的 data-tier 三档（640/520 阈值）、data-slot-capacity/model merged、
+ * `composer-overflow-menu` / `composer-capacity-merged` / `composer-model-merged` testid、
+ * 合流发丝分隔（separatorsInBar）已随三步聚合击败的旧语义删除。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-bar-density-wiring.test.ts
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { computed, defineComponent, nextTick, reactive, ref } from 'vue'
+import { defineComponent, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { textToSegments } from '@taiji/shared'
 import { VIEW_HOST_SOURCE_KEY } from '@taiji/ui/extension-host'
 import type { ViewCacheEntry, ViewHostSource } from '@taiji/ui/extension-host'
 import { ManualResizeObserverStub } from '../effects/_virtua-mock-helper'
+import { composerApiModule, composerChatModule, composerChildStubs, composerFlowModule, composerSessionStoreModule, makeComposerInputMock } from '../helpers/composer-mount'
+import {
+  dispatchFitGeometry as stubFitGeometry,
+  makeMountPointSource as makeHelperSource,
+  toolbarEntry,
+} from './_density-geometry-helper'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import Composer from '@/components/panel/Composer.vue'
 
 // ── 托盘三态替身：计数可注入（数组型行集对本文件无消费方，恒空）──
-const trayFixture = vi.hoisted(() => ({ bashRunning: 2, subagentRunning: 1 }))
+// state = mock 工厂挂载的 reactive 计数（挂载前 null）：mount 前定值与 mount 后中途变更
+// （归零→恢复 emitter 存活链用例）都经 setTrayCounts 写同一 proxy，驱动 counts 重算。
+const trayFixture = vi.hoisted(() => ({
+  state: null as { bashRunning: number; subagentRunning: number } | null,
+}))
 
 vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/panel/tray/useTrayCounts')>()
+  const { computed, reactive } = await import('vue')
+  const state = reactive({ bashRunning: 2, subagentRunning: 1 })
+  trayFixture.state = state
   const emptyList = (): ReturnType<typeof computed<never[]>> => computed(() => [])
   return {
     ...actual,
     useTrayCounts: (): UseTrayCountsReturn => ({
       counts: computed(() => ({
-        bash: { running: trayFixture.bashRunning, ended: 0, total: trayFixture.bashRunning },
-        subagent: { running: trayFixture.subagentRunning, ended: 0, total: trayFixture.subagentRunning },
+        bash: { running: state.bashRunning, ended: 0, total: state.bashRunning },
+        subagent: { running: state.subagentRunning, ended: 0, total: state.subagentRunning },
         workflow: { running: 0, ended: 0, total: 0 },
         // u7 第 4 件：本文件不验 session 件（无子会话 → 该件不渲染），恒 0
         session: { running: 0, ended: 0, total: 0 },
@@ -67,85 +84,63 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   }
 })
 
-// ── chat / flow / api / session store mock（composer-send-button-states 同范式）──
-const chatApiMock = vi.hoisted(() => ({
-  send: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-  sendBash: vi.fn(() => Promise.resolve()),
-  abortBash: vi.fn(() => Promise.resolve()),
-}))
-vi.mock('@/composables/features/chat/useChat', () => ({ useChat: () => chatApiMock }))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({
-    submitFirstMessage: vi.fn(),
-    currentModel: { value: null },
-    setPendingModel: vi.fn(),
-    currentCwd: ref(null),
-  }),
-  resetNewTaskFlow: vi.fn(),
-}))
+// ── chat / flow / api / session store mock（公共骨架收敛 helpers/composer-mount.ts 单源，
+//    同 composer-file-injection 等四文件范式；api 的 chat 组是本文件增量）──
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: chatApiMock.send, streamSubscribe: vi.fn(() => () => {}) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
+  ...composerApiModule(),
+  chat: { send: vi.fn(() => Promise.resolve()), steer: vi.fn(() => Promise.resolve()), streamSubscribe: vi.fn(() => () => {}) },
 }))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+vi.mock('@/stores/session', () => composerSessionStoreModule())
 
-// ── 子组件 stub（ComposerInput 保留 mock：testid 断言沿用既有范式）──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  emits: { input: (val: string) => { lastInputText.value = val; return true }, keydown: null, 'slash-trigger': null, 'file-trigger': null },
-  setup(_, { expose }) {
-    expose({ clear: vi.fn(), setText: vi.fn(), insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
+// ── 子组件 stub（ComposerInput mock 收敛 composer-mount 共用面工厂）──
+const { lastInputText, ComposerInputMock } = makeComposerInputMock()
+// GenStatsTriggers 专属空 stub（共享骨架未覆盖的本文件特例）
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
+/** 聚合组件 stub（契约 testid = 组件级测试约定值；断言「哪个组件被挂载」） */
+const MetricsAggregateStub = defineComponent({
+  name: 'ComposerMetricsAggregate',
+  template: '<div data-testid="composer-metrics-aggregate" />',
+})
+const ModelThinkingAggregateStub = defineComponent({
+  name: 'ModelThinkingAggregate',
+  template: '<div data-testid="composer-model-thinking-aggregate" />',
+})
+// AddMenuPopover 保持真实（序 0 的 `+` 是「不退化」断言对象，trigger 带 title）——
+// 从共享骨架剔除该键；其余兄弟子组件 stub 收敛 helpers/composer-mount.ts 单源
+const { AddMenuPopover: _addMenuPopoverReal, ...childStubs } = composerChildStubs
 const stubs = {
   ComposerInput: ComposerInputMock,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  // AddMenuPopover 保持真实：序 0 的 `+` 是「不退化」断言对象（trigger 带 title）
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
+  ...childStubs,
   GenStatsTriggers: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
+  ComposerMetricsAggregate: MetricsAggregateStub,
+  ModelThinkingAggregate: ModelThinkingAggregateStub,
 }
 
 const SID = 's-density'
 
+/** S4 两用例共用的全档宽度矩阵（截断 class 扫描 + `»` 退役检查；末行全档放不下驱动顶格） */
+const WIDTH_MATRIX: Array<[number, Record<string, number>]> = [
+  [800, { 0: 300, 1: 200, 2: 150, 3: 120 }],
+  [400, { 0: 500, 1: 300, 2: 180, 3: 100 }],
+  [300, { 0: 500, 1: 500, 2: 500, 3: 500 }],
+]
+
 /**
- * 挂载点数据源替身：**只服务 `getView(sid, 'composer.toolbar')`**（插件 toolbar 贡献面），
- * `getViewIds` 恒空——不冒充 widget 区条目（否则挂载点 view 会被托盘 widget 区当成条目）。
+ * 挂载（空挂载点源）+ 派发一次 fit 几何（左簇宽全文件恒 80）——级数/锚点/fit 回路
+ * 用例的共用入口（S4 矩阵用例与插件贡献用例挂载形态不同，不走此口）。
  */
-function makeMountPointSource(partition: Map<string, ViewCacheEntry>): ViewHostSource {
-  return {
-    getView: (sid, viewId) => (sid === SID ? partition.get(viewId) : undefined),
-    getViewIds: () => [],
-  }
+async function mountAndFit(avail: number, widths: Record<string, number>): Promise<void> {
+  mountComposer(makeMountPointSource(reactive(new Map())))
+  await dispatchFitGeometry(avail, 80, widths)
 }
 
-/** 一个非空 guiTree 的挂载点条目（贡献数 > 0） */
-function toolbarEntry(): ViewCacheEntry {
-  return {
-    viewId: 'composer.toolbar',
-    pluginId: 'ext-x',
-    guiTree: [{ type: 'ansi-text', props: { lines: ['toolbar'] } }],
-    updatedAt: 1_760_000_000_000,
-  }
+/**
+ * 挂载点数据源替身（几何 helper 单份替身的本文件绑 SID 形态）。
+ */
+function makeMountPointSource(partition: Map<string, ViewCacheEntry>): ViewHostSource {
+  return makeHelperSource(SID, partition)
 }
 
 let wrapper: VueWrapper | null = null
@@ -169,28 +164,19 @@ function bar(): VueWrapper {
   return node
 }
 
-/** 派发一次 ResizeObserver 实测宽（contentRect 只填本接线消费的 width 字段）+ 等重渲染 */
-async function dispatchWidth(width: number): Promise<void> {
+/** 派发一次 ResizeObserver 回调（触发测量 pass）+ 等重渲染 */
+async function dispatchTick(): Promise<void> {
   const observer = ManualResizeObserverStub.created()[0]
   if (!observer) throw new Error('ResizeObserver 未创建：密度接线未挂载')
-  observer.dispatch([{ contentRect: { width } as DOMRectReadOnly }])
+  observer.dispatch([{ contentRect: { width: 0 } as DOMRectReadOnly }])
   await nextTick()
 }
 
-/** 等 fit 收敛回路跑完（rAF 链；happy-dom 有 rAF） */
-async function flushFitPasses(): Promise<void> {
-  for (let i = 0; i < 12; i += 1) {
-    await new Promise<void>((resolve) => {
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
-      else setTimeout(resolve, 0)
-    })
-  }
-  await nextTick()
-}
+/** 等 fit 收敛回路跑完（helper 单份；本文件调用点见 dispatchFitGeometry） */
 
 /**
- * 打桩底栏几何并派发 RO：可用宽 + 左右两簇占宽（fit 回路据二者之和判「放不放得下」）。
- * 右簇占宽按当前 `data-fit` 分级回落——模拟「形态收紧 → 需求宽下降」的真实收敛过程。
+ * 打桩底栏几何并派发 RO：真差异（从 Composer wrapper 查三簇节点）留本文件，
+ * 打桩 + 派发 + rAF 排空同构本体在 `_density-geometry-helper` 单份。
  */
 async function dispatchFitGeometry(
   avail: number,
@@ -201,29 +187,31 @@ async function dispatchFitGeometry(
   const leftEl = barEl.querySelector<HTMLElement>('[data-composer-cluster="left"]')
   const rightEl = barEl.querySelector<HTMLElement>('[data-composer-cluster="right"]')
   if (!leftEl || !rightEl) throw new Error('底栏两簇节点缺失：模板与 fit 回路不同步？')
-  Object.defineProperty(barEl, 'clientWidth', { value: avail, configurable: true })
-  vi.spyOn(leftEl, 'getBoundingClientRect').mockReturnValue({ width: left } as DOMRect)
-  vi.spyOn(rightEl, 'getBoundingClientRect').mockImplementation(
-    () => ({ width: widthByFit[barEl.getAttribute('data-fit') ?? '0'] }) as DOMRect,
-  )
-  const observer = ManualResizeObserverStub.created()[0]
-  observer.dispatch([{ target: barEl, contentRect: { width: avail } as DOMRectReadOnly }])
-  await flushFitPasses()
+  await stubFitGeometry({ bar: barEl, left: leftEl, right: rightEl }, avail, left, widthByFit)
 }
 
-/** 合流 chip 内的发丝分隔节点（V2：1px 竖线表达分组，替代原实心底） */
-function separatorsInBar(): number {
-  return bar()
-    .findAll('span[aria-hidden="true"]')
-    .filter((node) => node.classes().includes('w-px') && node.classes().includes('bg-border-strong')).length
+/** 底栏首/末按钮（序 0 锚点断言用） */
+function firstButtonTitle(): string | undefined {
+  return bar().findAll('button')[0]?.attributes('title')
+}
+function lastButtonTitle(): string | undefined {
+  const buttons = bar().findAll('button')
+  return buttons[buttons.length - 1]?.attributes('title')
+}
+
+/** 写托盘计数（响应式 state：mount 前定值与 mount 后中途变更同口） */
+function setTrayCounts(bashRunning: number, subagentRunning: number): void {
+  const state = trayFixture.state
+  if (!state) throw new Error('tray fixture state 未初始化：useTrayCounts mock 工厂未执行')
+  state.bashRunning = bashRunning
+  state.subagentRunning = subagentRunning
 }
 
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   lastInputText.value = ''
-  trayFixture.bashRunning = 2
-  trayFixture.subagentRunning = 1
+  setTrayCounts(2, 1)
   ManualResizeObserverStub.install()
 })
 
@@ -233,221 +221,169 @@ afterEach(() => {
   wrapper = null
 })
 
-describe('底栏三簇与永不换行（D6）', () => {
-  it('底栏 flex-nowrap：宽度不足只退化形态，不换行', () => {
+describe('底栏三簇与永不换行（D6 硬约束）', () => {
+  it('底栏 flex-nowrap：宽度不足只退化形态，不换行', async () => {
     mountComposer(makeMountPointSource(reactive(new Map())))
+    await dispatchTick()
     expect(bar().classes()).toContain('flex-nowrap')
     expect(bar().classes()).not.toContain('flex-wrap')
+    // 双轴旧语义构造性不存在
+    expect(bar().attributes('data-tier')).toBeUndefined()
   })
 })
 
-describe('① 窄档托盘聚合单入口（层叠图标 + 运行数）', () => {
-  it('窄档：托盘收为单入口，层叠图标 + 运行数 = 进行中合计；宽档：回到逐件按钮', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
-    // 宽档：逐件按钮在，聚合入口不在
-    await dispatchWidth(700)
-    expect(bar().attributes('data-tier')).toBe('expanded')
-    expect(bar().attributes('data-slot-tray')).toBe('expanded')
-    expect(bar().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(2)
+describe('三步聚合：实测溢出 → 状态机 → DOM（累计，左簇 → 指标 → 模型）', () => {
+  it('放得下 → fit 0 全展开：托盘逐件按钮在、无任何聚合入口', async () => {
+    await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    expect(bar().attributes('data-fit')).toBe('0')
+    expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
+    expect(bar().attributes('data-slot-metrics')).toBe('expanded')
+    expect(bar().attributes('data-slot-model-thinking')).toBe('expanded')
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
+    expect(bar().findAll('[data-testid="tray-builtin-button"]').length).toBeGreaterThanOrEqual(2)
+    expect(bar().find('[data-testid="composer-metrics-aggregate"]').exists()).toBe(false)
+    expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(false)
+  })
 
-    // 窄档：单入口（层叠图标 = built-in 类别 icon 若干）+ 运行数 2 + 1 = 3
-    await dispatchWidth(400)
-    expect(bar().attributes('data-slot-tray')).toBe('aggregated')
+  it('L1 收缩停级 → 左簇聚合（托盘单入口 + 运行数），指标/模型仍展开', async () => {
+    // L0 需求 80+500=580 > 400；L1 需求 80+300=380 ≤ 400 → 停在 L1
+    await mountAndFit(400, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('1')
+    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
     const aggregate = bar().find('[data-testid="tray-aggregate-button"]')
     expect(aggregate.exists()).toBe(true)
     expect(aggregate.find('[data-testid="tray-aggregate-count"]').text()).toBe('3')
-    expect(aggregate.find('[data-testid="tray-aggregate-pulse"]').exists()).toBe(true)
-    expect(aggregate.findAll('svg').length).toBeGreaterThanOrEqual(2)
     expect(bar().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(0)
+    // 序 2/3 未触发
+    expect(bar().attributes('data-slot-metrics')).toBe('expanded')
+    expect(bar().attributes('data-slot-model-thinking')).toBe('expanded')
   })
 
-  it('托盘全无条目（三态之「全无」）→ 窄档也不渲染聚合入口（状态机 slot = absent，无死入口）', async () => {
-    trayFixture.bashRunning = 0
-    trayFixture.subagentRunning = 0
-    mountComposer(makeMountPointSource(reactive(new Map())))
-    await dispatchWidth(400)
+  it('L2 → 指标聚合（单图标聚合组件挂载），模型仍完整形态', async () => {
+    // L0 580 > 300；L1 380 > 300；L2 260 ≤ 300 → 停在 L2
+    await mountAndFit(300, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('2')
+    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    expect(bar().attributes('data-slot-metrics')).toBe('aggregated')
+    expect(bar().find('[data-testid="composer-metrics-aggregate"]').exists()).toBe(true)
+    expect(bar().attributes('data-slot-model-thinking')).toBe('expanded')
+    expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(false)
+  })
 
-    expect(bar().attributes('data-tier')).toBe('narrow')
-    expect(bar().attributes('data-slot-tray')).toBe('absent')
-    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
+  it('L3 顶格 → 模型+思考聚合（三步全生效）', async () => {
+    // 所有级别都放不下 → 顶格 L3（且 demand 仍 > avail → 进锚点保护，见下个 describe）
+    await mountAndFit(300, { 0: 500, 1: 400, 2: 350, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('3')
+    expect(bar().attributes('data-slot-model-thinking')).toBe('aggregated')
+    expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(true)
   })
 })
 
-describe('② `»` 溢出菜单仅在确有被收起项时渲染（序 3）', () => {
-  it('插件 toolbar 有贡献 + 窄档 → toolbar 收起、`»` 菜单出现；宽档 → toolbar 内联、无 `»`', async () => {
-    const partition = reactive(new Map<string, ViewCacheEntry>([['composer.toolbar', toolbarEntry()]]))
-    mountComposer(makeMountPointSource(partition))
-
-    await dispatchWidth(700)
-    expect(bar().attributes('data-slot-plugin-toolbar')).toBe('expanded')
-    expect(bar().find('[data-testid="composer-overflow-menu"]').exists()).toBe(false)
-
-    await dispatchWidth(560)
-    expect(bar().attributes('data-tier')).toBe('compact')
-    expect(bar().attributes('data-slot-plugin-toolbar')).toBe('collapsed-to-menu')
-    expect(bar().find('[data-testid="composer-overflow-menu"]').exists()).toBe(true)
+describe('锚点保护：顶格仍放不下 → 中部让位，锚点零裁剪（S1）', () => {
+  it('持续溢出 → data-anchor-protected，左簇/指标让位，模型聚合按钮与 `+`/发送恒在', async () => {
+    await mountAndFit(300, { 0: 500, 1: 500, 2: 500, 3: 500 })
+    expect(bar().attributes('data-fit')).toBe('3')
+    expect(bar().attributes('data-anchor-protected')).toBe('true')
+    // 中部让位：左簇与指标不渲染（无死入口）
+    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
+    expect(bar().attributes('data-slot-metrics')).toBe('absent')
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
+    expect(bar().find('[data-testid="composer-metrics-aggregate"]').exists()).toBe(false)
+    // 模型入口 + 序 0 锚点恒在
+    expect(bar().attributes('data-slot-model-thinking')).toBe('aggregated')
+    expect(firstButtonTitle()).toBe('添加内容（附件 / 命令）')
+    expect(lastButtonTitle()).toContain('发送')
   })
 
-  it('插件零贡献（默认安装）→ 任何档位都无 `»`（也不产生死入口）', async () => {
+  it('窗口放宽 → 解除保护并逐级降回全展开', async () => {
+    await mountAndFit(300, { 0: 500, 1: 400, 2: 350, 3: 320 })
+    expect(bar().attributes('data-anchor-protected')).toBe('true')
+    // 放宽到 600（L0 需求 380 ≤ 600）→ 解保护 + 连续降级到 0
+    await dispatchFitGeometry(600, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    expect(bar().attributes('data-anchor-protected')).toBeUndefined()
+    expect(bar().attributes('data-fit')).toBe('0')
+    expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
+    expect(bar().attributes('data-slot-metrics')).toBe('expanded')
+  })
+})
+
+describe('S4 模型名零截断 + `»` 退役（构造性回归防线）', () => {
+  it('任意宽度矩阵下 bar 内永不出现 88/56px 截断 class（模型名非聚合态恒完整）', async () => {
     mountComposer(makeMountPointSource(reactive(new Map())))
-    for (const width of [400, 560, 700]) {
-      await dispatchWidth(width)
-      expect(bar().find('[data-testid="composer-overflow-menu"]').exists()).toBe(false)
-      expect(bar().attributes('data-slot-plugin-toolbar')).toBe('absent')
+    for (const [avail, widths] of WIDTH_MATRIX) {
+      await dispatchFitGeometry(avail, 80, widths)
+      const html = bar().html()
+      expect(html).not.toContain('max-w-[88px]')
+      expect(html).not.toContain('max-w-[56px]')
     }
   })
-})
 
-describe('③ 序 0 不退化：窄档下发送位（+ 添加内容）仍在', () => {
-  it('400px 窄档：发送位与 `+` 都渲染，右簇形态为合流/合体（序 1/2）', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
-    await dispatchWidth(400)
-
-    expect(bar().attributes('data-tier')).toBe('narrow')
-    // 发送位（序 0）：四态之一必在（此处全 idle → send），title 含「发送」
-    const sendButton = bar().findAll('button').find((n) => n.attributes('title')?.includes('发送'))
-    expect(sendButton).toBeDefined()
-    // `+` 添加内容（序 0）：真实 AddMenuPopover 触发器仍在底栏左簇
-    const addButton = bar().findAll('button').find((n) => n.attributes('title') === '添加内容（附件 / 命令）')
-    expect(addButton).toBeDefined()
-    // 序 0 的 `+` 在左簇首位、发送位在右簇末位（三簇结构下两端锚定）
-    const buttons = bar().findAll('button')
-    expect(buttons[0]?.attributes('title')).toBe('添加内容（附件 / 命令）')
-    expect(buttons[buttons.length - 1]?.attributes('title')).toContain('发送')
-    // 序 1/2 合流形态生效（信息不丢，只是合成单 chip 容器）
-    expect(bar().attributes('data-slot-capacity')).toBe('merged')
-    expect(bar().attributes('data-slot-model')).toBe('merged')
-    expect(bar().find('[data-testid="composer-capacity-merged"]').exists()).toBe(true)
-    expect(bar().find('[data-testid="composer-model-merged"]').exists()).toBe(true)
+  it('任何状态（含插件有贡献 + 强制溢出）都不出现 `»` Ellipsis 溢出菜单（退役）', async () => {
+    const partition = reactive(new Map<string, ViewCacheEntry>([['composer.toolbar', toolbarEntry()]]))
+    mountComposer(makeMountPointSource(partition))
+    for (const [avail, widths] of WIDTH_MATRIX) {
+      await dispatchFitGeometry(avail, 80, widths)
+      expect(bar().find('[data-testid="composer-overflow-menu"]').exists()).toBe(false)
+      expect(bar().find('[data-testid="composer-overflow-capacity-metrics"]').exists()).toBe(false)
+    }
+    // 插件有贡献 + 展开态：左簇仍是散图标路径（挂载点内联），无 `»`
+    await dispatchFitGeometry(800, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
   })
 })
 
-describe('④ ResizeObserver 实测驱动档位与形态（模拟容器宽度变化）', () => {
-  it('400 → 560 → 700：narrow → compact → expanded，逐元素形态整组跟随状态机', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
+describe('不留死入口（能力标志 → 左簇形态）', () => {
+  it('托盘全无条目 + 插件零贡献 → leftCluster absent，任何状态无聚合入口', async () => {
+    setTrayCounts(0, 0)
+    await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
+    // `+` 仍在（序 0 与托盘无关）
+    expect(firstButtonTitle()).toBe('添加内容（附件 / 命令）')
+  })
 
-    await dispatchWidth(400)
-    expect(bar().attributes('data-tier')).toBe('narrow')
-    expect(bar().attributes('data-slot-capacity')).toBe('merged')
-    expect(bar().attributes('data-slot-model')).toBe('merged')
-    expect(bar().attributes('data-slot-tray')).toBe('aggregated')
+  it('非保护态托盘恒挂载：条目归零→恢复，聚合按钮经 absent 再回来（emitter 存活链）', async () => {
+    // L1 聚合态起步：聚合入口在场
+    await mountAndFit(400, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
 
-    await dispatchWidth(560)
-    expect(bar().attributes('data-tier')).toBe('compact')
-    expect(bar().attributes('data-slot-capacity')).toBe('merged')
-    expect(bar().attributes('data-slot-model')).toBe('merged')
-    // 序 4 只在 narrow 生效（累计退化：compact 不含序 4）
-    expect(bar().attributes('data-slot-tray')).toBe('expanded')
+    // 条目归零 → has-items false 上抛（托盘外壳未被卸载，emitter 存活）→ leftCluster absent
+    setTrayCounts(0, 0)
+    await nextTick()
+    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
 
-    await dispatchWidth(700)
-    expect(bar().attributes('data-tier')).toBe('expanded')
-    expect(bar().attributes('data-slot-capacity')).toBe('expanded')
-    expect(bar().attributes('data-slot-model')).toBe('expanded')
-    expect(bar().attributes('data-slot-tray')).toBe('expanded')
-    expect(bar().find('[data-testid="composer-capacity-merged"]').exists()).toBe(false)
-    expect(bar().find('[data-testid="composer-model-merged"]').exists()).toBe(false)
-  })
-
-  it('阈值边界按状态机常量归高档（640 → expanded，520 → compact）', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
-
-    await dispatchWidth(640)
-    expect(bar().attributes('data-tier')).toBe('expanded')
-    await dispatchWidth(639)
-    expect(bar().attributes('data-tier')).toBe('compact')
-    await dispatchWidth(520)
-    expect(bar().attributes('data-tier')).toBe('compact')
-    await dispatchWidth(519)
-    expect(bar().attributes('data-tier')).toBe('narrow')
-  })
-
-  it('卸载后 observer 断开（不再消费派发）', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
-    await dispatchWidth(400)
-    const observer = ManualResizeObserverStub.created()[0]
-    wrapper?.unmount()
-    wrapper = null
-    // disconnect 后 dispatch 不再触达组件（无异常即为断开；此处断言 DOM 已随卸载消失）
-    observer?.dispatch([{ contentRect: { width: 700 } as DOMRectReadOnly }])
+    // 条目恢复 → 同一 emitter 仍上抛 → 聚合按钮重新渲染（形态恢复，无需重挂）
+    setTrayCounts(2, 1)
     await nextTick()
-    expect(document.querySelector('[data-testid="composer-bar"]')).toBeNull()
+    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
   })
 })
 
-describe('⑤ fit 轴：实测放不下时逐级收紧右簇内容（方案 A 内容自适应）', () => {
-  it('V2 合流态视觉：无实心底，分组由发丝分隔表达（两个合流组各一条）', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
-    await dispatchWidth(400)
-    // 序 1 / 序 2 两组合流 → 各组内 1px 竖线分隔（替代原 bg-surface-2 实心 chip）
-    expect(separatorsInBar()).toBe(2)
-    const capacityChip = bar().find('[data-testid="composer-capacity-merged"]')
-    expect(capacityChip.classes()).not.toContain('bg-surface-2')
-  })
-
-  it('放得下 → 不施加 fit 退化（data-fit = 0，容量+指标留在底栏）', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
-    await dispatchWidth(560)
-    await dispatchFitGeometry(500, 80, 380)
+describe('fit 收敛回路（宽度矩阵驱动）', () => {
+  it('放得下 → 不施加 fit 退化（data-fit = 0）', async () => {
+    await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
     expect(bar().attributes('data-fit')).toBe('0')
-    expect(bar().find('[data-testid="composer-capacity-merged"]').exists()).toBe(true)
-  })
-
-  it('放不下 → 收紧到刚好放得下的那一级即停（不到顶）', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
-    await dispatchWidth(400)
-    // L0 需求 580 > 300；L1 380 > 300；L2 260 ≤ 300 → 停在 L2（右簇图标化）
-    await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
-    expect(bar().attributes('data-fit')).toBe('2')
-    // L2 未到 L3：容量+指标仍在底栏（只是图标化），`»` 里不出现收纳区
-    expect(bar().find('[data-testid="composer-capacity-merged"]').exists()).toBe(true)
-    expect(bar().find('[data-testid="composer-overflow-capacity-metrics"]').exists()).toBe(false)
-  })
-
-  it('一直放不下 → 顶格 L3：容量+指标退出底栏、进 `»` 菜单（模型/档位仍在）', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
-    await dispatchWidth(400)
-    // 右簇恒 500：任何一级都放不下 → 顶格 L3
-    await dispatchFitGeometry(300, 80, { 0: 500, 1: 500, 2: 500, 3: 500 })
-    expect(bar().attributes('data-fit')).toBe('3')
-    // 底栏：容量+指标组消失（腾出宽度）
-    expect(bar().find('[data-testid="composer-capacity-merged"]').exists()).toBe(false)
-    // `»` 菜单：即使插件零贡献，也因 fit L3 的收纳项而出现
-    const menu = bar().find('[data-testid="composer-overflow-menu"]')
-    expect(menu.exists()).toBe(true)
-    // 打开菜单：容量+指标整组收纳在内（详情浮层路径不变）
-    await menu.find('button').trigger('click')
-    expect(document.querySelector('[data-testid="composer-overflow-capacity-metrics"]')).not.toBeNull()
-    // 序 0 与序 2 仍在底栏（切模型任何宽度可达）
-    const addButton = bar().findAll('button').find((n) => n.attributes('title') === '添加内容（附件 / 命令）')
-    expect(addButton).toBeDefined()
-    const sendButton = bar().findAll('button').find((n) => n.attributes('title')?.includes('发送'))
-    expect(sendButton).toBeDefined()
-  })
-
-  it('变宽 → 逐级放松回 full（迟滞：只在更宽裕时降级，不来回抖）', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
-    await dispatchWidth(400)
-    await dispatchFitGeometry(300, 80, { 0: 500, 1: 500, 2: 500, 3: 500 })
-    expect(bar().attributes('data-fit')).toBe('3')
-    // 容器大幅变宽 + 内容变窄 → 一路放松到 L0（600 仍属 compact：合流组回到底栏）
-    await dispatchFitGeometry(600, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
-    expect(bar().attributes('data-fit')).toBe('0')
-    expect(bar().attributes('data-tier')).toBe('compact')
-    expect(bar().find('[data-testid="composer-capacity-merged"]').exists()).toBe(true)
-    // 收纳项消失 → 插件零贡献时 `»` 菜单一并消失（不留死入口）
-    expect(bar().find('[data-testid="composer-overflow-menu"]').exists()).toBe(false)
   })
 
   it('同宽度下反复派发不抖（级数稳定）', async () => {
-    mountComposer(makeMountPointSource(reactive(new Map())))
-    await dispatchWidth(400)
-    await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    await mountAndFit(300, { 0: 500, 1: 300, 2: 180, 3: 100 })
     expect(bar().attributes('data-fit')).toBe('2')
     for (let i = 0; i < 4; i += 1) {
       await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
     }
     expect(bar().attributes('data-fit')).toBe('2')
+  })
+
+  it('卸载后 observer 断开（不再消费派发）', async () => {
+    await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    const observer = ManualResizeObserverStub.created()[0]
+    wrapper?.unmount()
+    wrapper = null
+    observer?.dispatch([{ contentRect: { width: 700 } as DOMRectReadOnly }])
+    await nextTick()
+    expect(document.querySelector('[data-testid="composer-bar"]')).toBeNull()
   })
 })

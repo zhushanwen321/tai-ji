@@ -13,63 +13,48 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/terminal-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mount, flushPromises, DOMWrapper } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
+import { describe, it, expect, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import {
+  $,
+  defaultTerminalConfig as defaultConfig,
+  setupTerminalConfigHarness,
+  terminalConfigApiModule,
+  terminalConfigMock as configMock,
+  trackBodyMount,
+} from '../helpers/terminal-config-harness'
 import { useToast } from '@/composables/useToast'
+import { expectCorruptedHint, expectErrorToastSaved } from '../helpers/settings-page-asserts'
 import type { TerminalConfig } from '@taiji/shared'
 
-function defaultConfig(): TerminalConfig {
-  return {
-    version: 1,
-    shell: '',
-    shellArgs: [],
-    fontSize: 14,
-    fontFamily: '',
-    scrollback: 1000,
-    cursorStyle: 'block',
-    bell: false,
-  }
-}
-
-const configMock = vi.hoisted(() => ({
-  getTerminalConfig: vi.fn(() => Promise.resolve({ config: defaultConfig(), corrupted: false })),
-  setTerminalConfig: vi.fn((cfg: TerminalConfig) => Promise.resolve({ config: cfg, corrupted: false })),
-}))
-
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  config: configMock,
-}))
+// [C3] 终端配置读写经 SettingsTransport seam 桩注入（补充 @/api 遗留 mock，组件已不直连门面）；
+// configMock 捕获单例 + project 桩单源在 helpers/terminal-config-harness.ts
+vi.mock('@/api', () => terminalConfigApiModule())
 
 import TerminalPage from '@/components/settings/terminal/TerminalPage.vue'
 
-let wrapper: ReturnType<typeof mount> | null = null
+// beforeEach 重置（pinia/toast/mock 计数/transport 桩）+ afterEach 卸载清 body 单源在 harness
+setupTerminalConfigHarness()
 
-/** 在 teleport/attach 目标中查找元素并包装成 DOMWrapper */
-function $(selector: string): DOMWrapper<Element> {
-  const node = document.body.querySelector(selector)
-  expect(node).toBeTruthy()
-  return new DOMWrapper(node!)
+// ── 用例骨架 helper（保存用例重复段单源；断言随骨架保留，用例只留差异覆写与专属断言）──
+
+/** mount TerminalPage（登记 body 挂载槽）+ flush 异步加载 */
+async function mountPage(): Promise<void> {
+  trackBodyMount(mount(TerminalPage, { attachTo: document.body }))
+  await flushPromises()
 }
 
-beforeEach(() => {
-  setActivePinia(createPinia())
-  const { toasts } = useToast()
-  toasts.value = []
-  configMock.getTerminalConfig.mockClear()
-  configMock.setTerminalConfig.mockClear()
-})
-
-afterEach(() => {
-  wrapper?.unmount()
-  wrapper = null
-  document.body.innerHTML = ''
-})
+/** 点保存 → flush → 断言 setTerminalConfig 恰好一次，返回首调 payload */
+async function saveAndGetPayload(): Promise<TerminalConfig> {
+  await $('[data-testid="terminal-save"]').trigger('click')
+  await flushPromises()
+  expect(configMock.setTerminalConfig).toHaveBeenCalledTimes(1)
+  return configMock.setTerminalConfig.mock.calls[0]![0] as TerminalConfig
+}
 
 describe('TerminalPage 渲染 gate', () => {
   it('首屏渲染：terminal-page testid + 各表单字段 testid 全部存在', async () => {
-    wrapper = mount(TerminalPage, { attachTo: document.body })
-    await flushPromises()
+    await mountPage()
 
     const requiredIds = [
       'terminal-page',
@@ -88,8 +73,7 @@ describe('TerminalPage 渲染 gate', () => {
   })
 
   it('mount 后调 getTerminalConfig（mock 返回默认配置）', async () => {
-    wrapper = mount(TerminalPage, { attachTo: document.body })
-    await flushPromises()
+    await mountPage()
 
     expect(configMock.getTerminalConfig).toHaveBeenCalledTimes(1)
     // 默认配置应填充到表单（fontSize=14, scrollback=1000）
@@ -101,8 +85,7 @@ describe('TerminalPage 渲染 gate', () => {
 
 describe('TerminalPage 保存交互', () => {
   it('填表 + 点 save → setTerminalConfig 被调 + 正确 payload（含 shellArgs 逗号串 → string[]）', async () => {
-    wrapper = mount(TerminalPage, { attachTo: document.body })
-    await flushPromises()
+    await mountPage()
 
     // 修改 shell
     await $('[data-testid="terminal-shell-input"]').setValue('/bin/zsh')
@@ -115,11 +98,7 @@ describe('TerminalPage 保存交互', () => {
     // 修改 scrollback
     await $('[data-testid="terminal-scrollback-input"]').setValue('5000')
     // 点保存
-    await $('[data-testid="terminal-save"]').trigger('click')
-    await flushPromises()
-
-    expect(configMock.setTerminalConfig).toHaveBeenCalledTimes(1)
-    const payload = configMock.setTerminalConfig.mock.calls[0]![0] as TerminalConfig
+    const payload = await saveAndGetPayload()
     expect(payload.shell).toBe('/bin/zsh')
     expect(payload.shellArgs).toEqual(['-l', '-i'])
     expect(payload.fontFamily).toBe('Menlo, monospace')
@@ -135,27 +114,17 @@ describe('TerminalPage 保存交互', () => {
   it('setTerminalConfig 失败时显示 error toast', async () => {
     configMock.setTerminalConfig.mockRejectedValueOnce(new Error('保存失败'))
 
-    wrapper = mount(TerminalPage, { attachTo: document.body })
-    await flushPromises()
+    await mountPage()
 
-    await $('[data-testid="terminal-save"]').trigger('click')
-    await flushPromises()
-
-    expect(configMock.setTerminalConfig).toHaveBeenCalledTimes(1)
-    const { toasts } = useToast()
-    expect(toasts.value.some((t) => t.type === 'error' && t.message.includes('保存失败'))).toBe(true)
+    await saveAndGetPayload()
+    expectErrorToastSaved('保存失败')
   })
 
   it('shellArgs 空输入存为 []', async () => {
-    wrapper = mount(TerminalPage, { attachTo: document.body })
-    await flushPromises()
+    await mountPage()
 
     // shellArgs 留空（默认即为空串），点保存
-    await $('[data-testid="terminal-save"]').trigger('click')
-    await flushPromises()
-
-    expect(configMock.setTerminalConfig).toHaveBeenCalledTimes(1)
-    const payload = configMock.setTerminalConfig.mock.calls[0]![0] as TerminalConfig
+    const payload = await saveAndGetPayload()
     expect(payload.shellArgs).toEqual([])
   })
 
@@ -164,13 +133,10 @@ describe('TerminalPage 保存交互', () => {
     configMock.setTerminalConfig.mockImplementationOnce(
       () => new Promise((r) => { resolveSave = r }),
     )
-    wrapper = mount(TerminalPage, { attachTo: document.body })
-    await flushPromises()
+    await mountPage()
 
     // 第一次点击 → 进入 saving（setTerminalConfig pending）
-    await $('[data-testid="terminal-save"]').trigger('click')
-    await flushPromises()
-    expect(configMock.setTerminalConfig).toHaveBeenCalledTimes(1)
+    await saveAndGetPayload()
     // in-flight：保存按钮禁用
     expect(($('[data-testid="terminal-save"]').element as HTMLButtonElement).disabled).toBe(true)
 
@@ -188,12 +154,8 @@ describe('TerminalPage corrupted 提示', () => {
       corrupted: true,
     })
 
-    wrapper = mount(TerminalPage, { attachTo: document.body })
-    await flushPromises()
+    await mountPage()
 
-    const page = document.body.querySelector('[data-testid="terminal-page"]')
-    expect(page).toBeTruthy()
-    const text = page!.textContent ?? ''
-    expect(text.includes('已损坏') || text.includes('回退默认') || text.includes('损坏')).toBe(true)
+    expectCorruptedHint('terminal-page')
   })
 })

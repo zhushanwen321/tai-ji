@@ -66,12 +66,12 @@ def check_file(path: str) -> list[str]:
 def main() -> int:
     args = sys.argv[1:]
     # 初始提交（unborn HEAD）无基线可比：git diff --cached 会把全仓当新增行，
-    # 「存量不拦、新代码拦」的增量前提不成立，显式跳过；后续增量提交恢复全量守卫。
+    # 「存量不拦、新代码拦」的增量前提不成立，显式跳过；后续增量提交恢复全量检查。
     head_exists = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", "HEAD"], capture_output=True
     ).returncode == 0
     if not head_exists:
-        print("[check_staged_forbidden_lines] 初始提交（无 HEAD 基线）：行级增量守卫不适用，跳过")
+        print("[check_staged_forbidden_lines] 初始提交（无 HEAD 基线）：行级增量检查不适用，跳过")
         return 0
     files = args if args else subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],

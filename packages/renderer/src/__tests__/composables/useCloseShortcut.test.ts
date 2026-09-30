@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useCloseShortcut 单测（Cmd/Ctrl+W 优先关 drawer）。
  *

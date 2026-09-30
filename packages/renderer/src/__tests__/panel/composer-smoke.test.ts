@@ -131,25 +131,8 @@ vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn(), revive: vi.fn() }),
 }))
 
-// ── ComposerInput mock（data-testid 供冒烟断言；emit keydown 驱动 onSend 范式与集成测试一致）──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    expose({ clear: vi.fn(), setText: vi.fn(), insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
+// ── ComposerInput mock（共用面收敛 helpers/composer-mount；data-testid 供冒烟断言）──
+const { lastInputText, ComposerInputMock } = makeComposerInputMock()
 
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 const stubs = {

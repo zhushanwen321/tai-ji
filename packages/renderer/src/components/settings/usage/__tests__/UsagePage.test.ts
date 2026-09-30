@@ -16,22 +16,20 @@
  * mock 策略（对齐 PluginContributionsPage.test.ts 装配方式）：
  *   - vue-i18n 由 vitest.config.ts setupFiles（vitest-i18n-setup.ts）全局 mock，
  *     t() 从 zh-CN locale 取值，无需在测试里 app.use(i18n)
- *   - vi.mock('@taiji/core/transport/api/domains/usage') 替掉 WS RPC 门面（onMounted 即拉数据）
+ *   - SettingsTransport seam 桩（[C3] 测试打 seam）替掉 WS RPC 门面（onMounted 即拉数据），
+ *     getUsageStats 捕获单例 + beforeEach 接线收敛 helpers/usage-page-mock 单源
  *   - 仅 stub UsageDailyChart（内部用 ResizeObserver，happy-dom 无实现）；其余子组件
  *     （UsageLedger/UsageDetailTable 等）真实渲染，保证 testid 断言来自真实聚合管线
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { UsageRow, UsageStatsResult } from '@taiji/shared'
-
-vi.mock('@taiji/core/transport/api/domains/usage', () => ({
-  getUsageStats: vi.fn(),
-}))
+import { mockedGetUsageStats, setupUsagePageTest } from '@/__tests__/helpers/usage-page-mock'
 
 import UsagePage from '@/components/settings/usage/UsagePage.vue'
-import { getUsageStats } from '@taiji/core/transport/api/domains/usage'
 
-const mockedGetUsageStats = vi.mocked(getUsageStats)
+// [C3] getUsageStats seam 桩 beforeEach 接线单源在 helpers/usage-page-mock
+setupUsagePageTest()
 
 /** 构造 n 天前的本地日期串（YYYY-MM-DD）。页面默认 range=30 按当天滚动构造窗口，写死日期会在 30 天后滑出窗口静默变红——测试日期一律相对当天。 */
 function daysAgo(n: number): string {

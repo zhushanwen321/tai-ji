@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * usePermissionRequest.test.ts —— permissionRequest 闭环单测（MF-9 补测）。
  *

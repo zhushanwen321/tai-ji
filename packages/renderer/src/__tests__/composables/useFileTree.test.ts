@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useFileTree composable 单测（#3，T2.3/T2.4/T2.5 + loadTree 编排）。
  *

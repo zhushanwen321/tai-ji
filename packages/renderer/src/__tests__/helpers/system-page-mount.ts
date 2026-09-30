@@ -2,9 +2,9 @@
  * SystemPage 集成测试共享 helper（system-page-rename-model / system-page-smart-context）。
  *
  * 提取两测试文件重复的构造样板：
- *  - settings API mock 集（auto-rename 6 + smart-context 5 函数）与 '@taiji/core/transport/api/domains/settings'
- *    mock 模块工厂（含 getSystem/updateSystem 空实现——stores/settings → '@/api' → mock/index
- *    转发引用 real 域导出，工厂缺导出会在模块加载时抛 "No export defined"）。
+ *  - settings API mock 集（auto-rename 6 + smart-context 5 函数）与 SettingsTransport seam 注入
+ *    （[C3] 测试打 seam：provideSettingsApiMocks 把 mock 集作为 seam 桩覆盖注入，不再 mock
+ *    core transport 域模块）。
  *  - useToast / useCommandStore / lib/ipc 三组模块 mock 工厂。
  *  - settings store fixture（providers/models 注入）+ SystemPage mount 编排。
  *
@@ -12,10 +12,15 @@
  * helper 导出）；断言与用例特定 mock 覆写（mockResolvedValue）留在原测试文件。
  */
 import { mount, flushPromises } from '@vue/test-utils'
-import { ref } from 'vue'
+import { ref, type Component } from 'vue'
 import { vi } from 'vitest'
 import type { ProviderInfo, ModelInfo } from '@taiji/shared'
-import { getSettingsStore, type SystemSettings } from '@taiji/core'
+import {
+  getSettingsStore,
+  provideSettingsTransport,
+  type SystemSettings,
+} from '@taiji/core'
+import { makeSettingsTransportStub } from './settings-transport-stub'
 
 /** settings API mock 集（两测试共用形态；默认值经 resetSettingsApiMocks 统一注入）。 */
 export function createSettingsApiMocks() {
@@ -40,14 +45,12 @@ export type SettingsApiMocks = ReturnType<typeof createSettingsApiMocks>
 /** settings API mock 单例——mock 模块工厂与测试断言共享同一批 vi.fn 实例。 */
 export const settingsApiMocks = createSettingsApiMocks()
 
-/** '@taiji/core/transport/api/domains/settings' 的 mock 模块工厂（引用 settingsApiMocks 单例）。 */
-export function settingsApiModule() {
-  return {
-    ...settingsApiMocks,
-    // 本测试不消费 getSystem/updateSystem，给空实现避免 mock/index 转发抛错
-    getSystem: vi.fn(() => Promise.resolve({})),
-    updateSystem: vi.fn(() => Promise.resolve()),
-  }
+/**
+ * [C3] 把 settings API mock 集注入 SettingsTransport seam（测试打 seam，替换原
+ * '@taiji/core/transport/api/domains/settings' 模块 mock）；未覆盖方法用桩中性默认值。
+ */
+export function provideSettingsApiMocks(): void {
+  provideSettingsTransport(makeSettingsTransportStub({ ...settingsApiMocks }))
 }
 
 /** '@/composables/useToast' 的 mock 模块工厂（隔离 toast 全局副作用）。 */
@@ -138,6 +141,18 @@ export async function mountSystemPage(): Promise<ReturnType<typeof mount>> {
     props: { system: systemFixture() },
     attachTo: document.body,
   })
+  await flushPromises()
+  return wrapper
+}
+
+/** 直挂单个 system Section（交互断言用例）：SystemPage 全页集成树 = 6 Section +
+ *  UpdateCheckCard 等全量编译，交互断言只关单 Section 时是纯浪费。Section 依赖面 =
+ *  settings API mock + useToast mock + useAuthedModelGroups（真实实现，数据经 seedStore
+ *  注入）；props 契约与全页 mount 一致（system fixture；Section 变更经各自 API 持久化，
+ *  不经 update 事件）。Section 组件同样动态 import（理由同 mountSystemPage）。 */
+export async function mountSystemSection(load: () => Promise<{ default: Component }>): Promise<ReturnType<typeof mount>> {
+  const { default: Section } = await load()
+  const wrapper = mount(Section, { props: { system: systemFixture() } })
   await flushPromises()
   return wrapper
 }

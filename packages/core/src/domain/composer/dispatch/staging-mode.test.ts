@@ -427,8 +427,8 @@ describe('handoff 形配置：enter（guard + 互斥）', () => {
   })
 })
 
-describe('handoff 形配置：handleSend（兑底守卫 + reply 归一化）', () => {
-  it('beforeSend 兑底命中：返回 true 已消费，不清草稿不退模式不打 handoff', async () => {
+describe('handoff 形配置：handleSend（兜底守卫 + reply 归一化）', () => {
+  it('beforeSend 兜底命中：返回 true 已消费，不清草稿不退模式不打 handoff', async () => {
     const { deps, instance, handoff, isSessionActive } = setupHandoff()
     instance.enter({ srcSessionId: 'src-1' })
     // 进入后才变 streaming（竞态窗口）
@@ -554,7 +554,7 @@ describe('全链序列等价（enter → watch → esc / send）', () => {
     const { deps, instance, signal, isSessionActive } = setupHandoff('s1')
     deps.inputRef.value = { focus: () => {} }
 
-    // streaming 拦截 → 正常 signal 进入 → send 兑底拦截 → 再 send 成功
+    // streaming 拦截 → 正常 signal 进入 → send 兜底拦截 → 再 send 成功
     isSessionActive.mockReturnValue(true)
     signal.value = { srcSessionId: 's1' }
     await nextTick()
@@ -577,7 +577,7 @@ describe('全链序列等价（enter → watch → esc / send）', () => {
       'toast:panel.composer.handoffBusy', // enterGuard 拦截
       'exitForkMode', // 正常 enter：互斥
       'enterStagingMode',
-      'toast:panel.composer.handoffBusy', // beforeSend 兑底拦截（不清草稿不退模式）
+      'toast:panel.composer.handoffBusy', // beforeSend 兜底拦截（不清草稿不退模式）
       'clearInput', // send 成功
       'setSending:true',
       'getStagingConfig',

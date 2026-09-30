@@ -43,6 +43,7 @@ const DESIGN_EVENT_LINE = [
   'reattach-skipped',
   'checkpoint-corrupt',
   'reaped',
+  'reap-failed',
   'inbound-frame-dropped',
   'frame-truncated',
   'registry-miss',

@@ -9,61 +9,73 @@
  *  - 失败恢复：setUpdateSettings reject → Switch 保持原值 + toast error（不抛错）
  *  - 预下载开关回填（原有行为不回归）：getUpdateSettings.preDownload → switch-pre-download 状态
  *
- * Mock 策略：
- *  - vi.mock('@/api/domains/settings') 捕获 getProxyConfig/getUpdateSettings/setUpdateSettings 等
- *  - vi.mock('@/composables/useToast') 隔离 toast（失败用例断言 error 被调）
- *  - vi.mock('@/composables/features/settings/useAppUpdate')（UpdateCheckCard 唯一外部依赖，
- *    同 system-page-update.test.ts 的 mock 结构）
+ * Mock 策略（与 update-page-source.test.ts 单源）：
+ *  - 三条 vi.mock 注册（'@/api/domains/settings' / '@/composables/useToast' /
+ *    '@/composables/features/settings/useAppUpdate'——UpdateCheckCard 唯一外部依赖，工厂注入
+ *    真实控制器 createAppUpdateController + 内存 ipc）收进 helpers/update-page-mocks.ts
+ *    （import 即注册，副作用模块）
+ *  - mock 捕获层单例在 helpers/update-card-mock.ts；beforeEach 重置/默认值 + mount 编排 +
+ *    afterEach 卸载在 helpers/update-page-mount.ts
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/update-page.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { cardTestState, checkForUpdateMock, performDownloadMock, performInstallMock, openFallbackUrlMock, settingsMock, toastMock, useAppUpdateCardModule, settingsApiModule, toastMockModule } from '@/__tests__/helpers/update-card-mock'
-import { mount, flushPromises } from '@vue/test-utils'
+import { describe, it, expect } from 'vitest'
+import { flushPromises, type DOMWrapper } from '@vue/test-utils'
+import '@/__tests__/helpers/update-page-mocks'
+import { settingsMock, toastMock } from '@/__tests__/helpers/update-card-mock'
+import { mountUpdatePage, setupUpdatePageLifecycle } from '@/__tests__/helpers/update-page-mount'
 
 // __APP_VERSION__ 在 vitest-i18n-setup.ts 全局 stub（'0.0.0-test'）
 
-// mock 捕获层单例 + useAppUpdate 脚手架在 helpers/update-card-mock.ts（原 vi.hoisted 块收敛）
-vi.mock('@/api/domains/settings', () => settingsApiModule())
+// 脚手架（beforeEach 重置/默认值 + afterEach 卸载清 body）单源在 helpers/update-page-mount.ts
+setupUpdatePageLifecycle()
 
-vi.mock('@/composables/useToast', () => toastMockModule())
+// ── 用例骨架 helper（文件内重复段单源；断言随骨架保留，用例只留差异覆写与专属断言）──
 
-vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
+type PageWrapper = Awaited<ReturnType<typeof mountUpdatePage>>
 
-import UpdatePage from '@/components/settings/update/UpdatePage.vue'
+/** 以 autoUpdate=true 挂载并断言开关初始为开（回填/开→关切换用例的公共基线） */
+async function mountWithAutoUpdateOn(): Promise<PageWrapper> {
+  settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
+  const wrapper = await mountUpdatePage()
+  expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('data-state')).toBe('checked')
+  return wrapper
+}
 
-let wrapper: ReturnType<typeof mount> | null = null
+/** 挂载 + 断言开关初始为关 + 点击切换 + flush（persist 结果断言用例的公共前缀） */
+async function mountAndToggleFromOff(): Promise<PageWrapper> {
+  const wrapper = await mountUpdatePage()
+  const sw = wrapper.find('[data-testid="switch-auto-update"]')
+  expect(sw.attributes('data-state')).toBe('unchecked')
+  await sw.trigger('click')
+  await flushPromises()
+  return wrapper
+}
 
-beforeEach(() => {
-  settingsMock.getProxyConfig.mockReset()
-  settingsMock.setProxyConfig.mockReset()
-  settingsMock.testProxy.mockReset()
-  settingsMock.getUpdateSettings.mockReset()
-  settingsMock.setUpdateSettings.mockReset()
-  toastMock.info.mockReset()
-  toastMock.error.mockReset()
-  // 默认解析值：与组件默认 ref 一致
-  settingsMock.getProxyConfig.mockResolvedValue({ mode: 'system', httpProxy: '', httpsProxy: '' })
-  settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: false })
-  settingsMock.setUpdateSettings.mockResolvedValue(undefined)
-  Object.assign(cardTestState, {
-    state: 'idle',
-    latestRelease: null,
-    errorMessage: '',
-    percent: 0,
-    releaseNotesHtml: '',
-  })
-})
+/** 以 getUpdateSettings reject('ipc down') 挂载并断言常驻 loadError 显形（load 失败契约用例共用） */
+async function mountWithUpdateLoadError(): Promise<PageWrapper> {
+  settingsMock.getUpdateSettings.mockRejectedValue(new Error('ipc down'))
+  const wrapper = await mountUpdatePage()
+  expect(wrapper.find('[data-testid="update-page-load-error"]').exists()).toBe(true)
+  return wrapper
+}
 
-afterEach(() => {
-  wrapper?.unmount()
-  wrapper = null
-})
+/** 挂载 → 点「测试代理」→ flush → 返回结果块（testProxy 结果渲染用例共用；按钮与结果块存在
+ *  断言随骨架保留） */
+async function mountAndTestProxy(): Promise<DOMWrapper<Element>> {
+  const wrapper = await mountUpdatePage()
+  const testButton = wrapper.find('[data-testid="btn-test-proxy"]')
+  expect(testButton.exists()).toBe(true)
+  await testButton.trigger('click')
+  await flushPromises()
+  const result = wrapper.find('[data-testid="test-proxy-result"]')
+  expect(result.exists()).toBe(true)
+  return result
+}
 
 describe('UpdatePage 自动更新卡', () => {
   it('首屏渲染：DOM 含自动更新开关 + 当前版本 pill + 检查更新按钮', async () => {
-    wrapper = mount(UpdatePage)
-    await flushPromises()
+    const wrapper = await mountUpdatePage()
     // 自动更新开关存在
     const sw = wrapper.find('[data-testid="switch-auto-update"]')
     expect(sw.exists()).toBe(true)
@@ -77,29 +89,19 @@ describe('UpdatePage 自动更新卡', () => {
   })
 
   it('加载回填：getUpdateSettings.autoUpdate true → 开关为开', async () => {
-    settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
-    wrapper = mount(UpdatePage)
-    await flushPromises()
-    const sw = wrapper.find('[data-testid="switch-auto-update"]')
-    expect(sw.attributes('data-state')).toBe('checked')
+    await mountWithAutoUpdateOn()
   })
 
   it('加载回填：getUpdateSettings.autoUpdate false → 开关为关', async () => {
     settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: false })
-    wrapper = mount(UpdatePage)
-    await flushPromises()
+    const wrapper = await mountUpdatePage()
     const sw = wrapper.find('[data-testid="switch-auto-update"]')
     expect(sw.attributes('data-state')).toBe('unchecked')
   })
 
   it('切换开关：click 调 setUpdateSettings({ autoUpdate: true }) 并更新开关状态', async () => {
-    wrapper = mount(UpdatePage)
-    await flushPromises()
-    const sw = wrapper.find('[data-testid="switch-auto-update"]')
-    expect(sw.attributes('data-state')).toBe('unchecked')
     // reka-ui Switch 通过 click 切换并 emit update:model-value
-    await sw.trigger('click')
-    await flushPromises()
+    const wrapper = await mountAndToggleFromOff()
     expect(settingsMock.setUpdateSettings).toHaveBeenCalledTimes(1)
     expect(settingsMock.setUpdateSettings).toHaveBeenCalledWith({ autoUpdate: true })
     // 持久化成功后开关状态更新
@@ -107,12 +109,8 @@ describe('UpdatePage 自动更新卡', () => {
   })
 
   it('切换开关：开 → 关 调 setUpdateSettings({ autoUpdate: false })', async () => {
-    settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
-    wrapper = mount(UpdatePage)
-    await flushPromises()
-    const sw = wrapper.find('[data-testid="switch-auto-update"]')
-    expect(sw.attributes('data-state')).toBe('checked')
-    await sw.trigger('click')
+    const wrapper = await mountWithAutoUpdateOn()
+    await wrapper.find('[data-testid="switch-auto-update"]').trigger('click')
     await flushPromises()
     expect(settingsMock.setUpdateSettings).toHaveBeenCalledWith({ autoUpdate: false })
     expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('data-state')).toBe('unchecked')
@@ -120,25 +118,83 @@ describe('UpdatePage 自动更新卡', () => {
 
   it('持久化失败：开关保持原值 + toast error（不抛错）', async () => {
     settingsMock.setUpdateSettings.mockRejectedValue(new Error('write failed'))
-    wrapper = mount(UpdatePage)
-    await flushPromises()
-    const sw = wrapper.find('[data-testid="switch-auto-update"]')
-    expect(sw.attributes('data-state')).toBe('unchecked')
     // 切换触发持久化 → 失败 → 控件保持 unchecked
-    await sw.trigger('click')
-    await flushPromises()
+    const wrapper = await mountAndToggleFromOff()
     expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('data-state')).toBe('unchecked')
     expect(toastMock.error).toHaveBeenCalledTimes(1)
-    expect(toastMock.error).toHaveBeenCalledWith('write failed')
+    // module 统一失败反馈：saveFailed toast 透传 IPC 错误文案（{reason} 插值）
+    expect(toastMock.error).toHaveBeenCalledWith('保存失败：write failed')
+    // 失败回滚路径无成功反馈（saved toast 仅在写成功出现）
+    expect(toastMock.info).not.toHaveBeenCalled()
   })
 
   it('预下载开关回填不回归：preDownload true → switch-pre-download 为开', async () => {
     settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: true, autoUpdate: false })
-    wrapper = mount(UpdatePage)
-    await flushPromises()
+    const wrapper = await mountUpdatePage()
     const sw = wrapper.find('[data-testid="switch-pre-download"]')
     expect(sw.exists()).toBe(true)
     expect(sw.attributes('data-state')).toBe('checked')
+  })
+
+  it('切换成功反馈：写成功后出现 saved toast（setting-field module 统一形态）', async () => {
+    const wrapper = await mountUpdatePage()
+    await wrapper.find('[data-testid="switch-auto-update"]').trigger('click')
+    await flushPromises()
+    expect(settingsMock.setUpdateSettings).toHaveBeenCalledTimes(1)
+    expect(toastMock.info).toHaveBeenCalledWith('更新设置已保存')
+  })
+})
+
+// ── load 失败契约（RD-4#8，样板 = subagent-engine-section.test.ts）：失败默认值不冒充已存值 ──
+describe('UpdatePage load 失败契约（RD-4#8）', () => {
+  it('getUpdateSettings reject → loadError 常驻提示 + 可落盘控件禁用 + 默认值不发写请求', async () => {
+    const wrapper = await mountWithUpdateLoadError()
+    // 常驻提示 + 重试入口
+    expect(wrapper.text()).toContain('读取失败，显示的是默认值')
+    expect(wrapper.find('[data-testid="update-page-load-retry"]').exists()).toBe(true)
+    // 可落盘控件禁用（Switch disabled attribute + Select disabled prop + 保存按钮）
+    expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="switch-pre-download"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.findComponent({ name: 'Select' }).props('disabled')).toBe(true)
+    expect(wrapper.find('[data-testid="btn-save-proxy"]').attributes('disabled')).toBeDefined()
+    // 禁用态下 click 不发写请求（默认值明确不可操作）
+    await wrapper.find('[data-testid="switch-auto-update"]').trigger('click')
+    await flushPromises()
+    expect(settingsMock.setUpdateSettings).not.toHaveBeenCalled()
+  })
+
+  it('getProxyConfig reject → 同样归并置 loadError（组级 loadAll 任一失败即置位）', async () => {
+    settingsMock.getProxyConfig.mockRejectedValue(new Error('proxy read failed'))
+    const wrapper = await mountUpdatePage()
+    expect(wrapper.find('[data-testid="update-page-load-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="btn-save-proxy"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('RD-4#8：重试成功 → loadError 清除 + 控件恢复 + 权威值回填', async () => {
+    const wrapper = await mountWithUpdateLoadError()
+
+    // 重试：mock 改成功，权威值 autoUpdate=true
+    settingsMock.getUpdateSettings.mockResolvedValue({ preDownload: false, autoUpdate: true })
+    await wrapper.find('[data-testid="update-page-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="update-page-load-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="btn-save-proxy"]').attributes('disabled')).toBeUndefined()
+    // 权威值回填：开关从占位 false 前进到已存 true
+    expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('data-state')).toBe('checked')
+  })
+
+  it('RD-4#8：重试仍失败 → loadError 保持 + 控件保持禁用', async () => {
+    const wrapper = await mountWithUpdateLoadError()
+
+    settingsMock.getUpdateSettings.mockRejectedValue(new Error('ipc down again'))
+    await wrapper.find('[data-testid="update-page-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="update-page-load-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="switch-auto-update"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="btn-save-proxy"]').attributes('disabled')).toBeDefined()
   })
 })
 
@@ -152,16 +208,7 @@ describe('testProxy 测试代理结果渲染（W3-A6）', () => {
       suggestion: 'macOS 未授予「本地网络」权限。恢复指引：系统设置 → 隐私与安全性 → 本地网络',
     })
 
-    const wrapper = mount(UpdatePage)
-    await flushPromises()
-
-    const testButton = wrapper.find('[data-testid="btn-test-proxy"]')
-    expect(testButton.exists()).toBe(true)
-    await testButton.trigger('click')
-    await flushPromises()
-
-    const result = wrapper.find('[data-testid="test-proxy-result"]')
-    expect(result.exists()).toBe(true)
+    const result = await mountAndTestProxy()
 
     const text = result.text()
     // 第一行：错误摘要
@@ -173,15 +220,8 @@ describe('testProxy 测试代理结果渲染（W3-A6）', () => {
   it('测试成功时只显示成功消息（不显示 suggestion）', async () => {
     settingsMock.testProxy.mockResolvedValue({ success: true })
 
-    const wrapper = mount(UpdatePage)
-    await flushPromises()
+    const result = await mountAndTestProxy()
 
-    const testButton = wrapper.find('[data-testid="btn-test-proxy"]')
-    await testButton.trigger('click')
-    await flushPromises()
-
-    const result = wrapper.find('[data-testid="test-proxy-result"]')
-    expect(result.exists()).toBe(true)
     expect(result.text()).toContain('代理连接成功')
     expect(result.text()).not.toContain('macOS')
   })
@@ -192,15 +232,8 @@ describe('testProxy 测试代理结果渲染（W3-A6）', () => {
       message: 'fetch failed',
     })
 
-    const wrapper = mount(UpdatePage)
-    await flushPromises()
+    const result = await mountAndTestProxy()
 
-    const testButton = wrapper.find('[data-testid="btn-test-proxy"]')
-    await testButton.trigger('click')
-    await flushPromises()
-
-    const result = wrapper.find('[data-testid="test-proxy-result"]')
-    expect(result.exists()).toBe(true)
     expect(result.text()).toContain('代理连接失败: fetch failed')
   })
 })

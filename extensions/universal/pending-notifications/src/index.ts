@@ -29,7 +29,7 @@
  * - subagent-core worker-message-pump.ts finalizeRun（reload-closeout D4：workflow
  *   run 终态注销直落，emit 发射点已删——reload 转换窗/factory 顺序窗内 emit 丢失
  *   即注销 entry 永缺位）；
- * - subagent-core round-supervisor/reconcile-sweep.ts（对账 sweep 补注销，对账走
+ * - subagent-core registry-reconcile/reconcile-sweep.ts（对账 sweep 补注销，对账走
  *   appendEntry 权威路径，不经 emit）；
  * - base-tool-enhance pending-reconcile.ts（session_start 对账，同款）。
  *
@@ -225,7 +225,7 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		name: "pending_notifications",
 		label: "Pending Notifications",
 		description:
-			"查询当前活跃的异步操作（workflow/subagent/bash 后台任务）。action=count 返回数量；action=list 返回列表。状态由 EventBus + session entries 维护，无需手动注册。",
+			"查询当前活跃的异步操作（workflow/subagent/bash 后台任务与 session（managed session 债权））。action=count 返回数量；action=list 返回列表。状态由 EventBus + session entries 维护，无需手动注册。",
 		parameters: PendingNotificationsParams,
 		execute: async (_toolCallId: string, params: { action: "count" | "list" }, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<{ content: { type: "text"; text: string }[]; details: PendingToolDetails }> => {
 			// entries 现算（单一权威源）：与 goal/subagent-workflow 同一原语。跨 session

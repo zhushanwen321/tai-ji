@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useTraceJump 溯源跳转编排单测（design §3.1 样例 5，trace-jump）。
  *

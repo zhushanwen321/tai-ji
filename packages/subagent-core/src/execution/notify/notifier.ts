@@ -121,12 +121,12 @@ export interface BgNotifyRecord {
    * toNotifyRecord 守卫放行后经此联合穷尽。
    */
   status: "running" | "closed";
-  /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。内部诊断 + outcome 兑底派生输入。 */
+  /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。内部诊断 + outcome 兜底派生输入。 */
   closedReason?: ClosedReason;
   /**
    * 终态三态对外语义（U3 C-outcome）。notify() 投影边界物化：closed 入参缺省时按
-   * deriveOutcome(closedReason, error) 兑底填充（所有可达流程下与 completeRecord
-   * 冻结的 record.outcome 等价——toNotifyRecord 构造点在 completeRecord 之后；该
+   * deriveOutcome(closedReason, error) 兜底填充（所有可达流程下与 completeLegacyClosed
+   * 冻结的 record.outcome 等价——toNotifyRecord 构造点在 completeLegacyClosed 之后；该
    * 构造点属 U3 领地外，不透传本字段）。buildLlmContent 与 bg-notify-render 只读本字段。
    */
   outcome?: ExecutionOutcome;
@@ -152,14 +152,15 @@ export interface BgNotifyRecord {
    *  record 都要能被 message/fork 定位。缺失时 buildLlmContent 省略整行。 */
   sessionFile?: string;
   /** [U2] 通知身份键（投影边界物化 = dedupe key：`id` / `id:round`；[U5 / §3.2.3]
-   *  epoch>0 时扩为 `id:epoch:round`——reopen 后 round 归零不与历史轮撞键，epoch=0
-   *  恒旧格式，磁盘账本零迁移）。账本条目 / 回执匹配 / 幂等去重共用——details 携带
-   *  （不进文案，G4 字节锁定不受影响），重复注入条目凭此可识别为同一条（G2
-   *  at-least-once 幂等键）。 */
+   *  epoch>0 时扩为 `id:epoch:round` / `id:epoch`（无轮形态——reopen 后第二次
+   *  close 不与首轮 close 撞键，epoch=0 恒旧格式，磁盘账本零迁移）。账本条目 /
+   *  回执匹配 / 幂等去重共用——details 携带（不进文案，G4 字节锁定不受影响），
+   *  重复注入条目凭此可识别为同一条（G2 at-least-once 幂等键）。 */
   notifyId?: string;
   /**
    * [U5 / §3.2.3] 通知所属世代（reopen 防撞维度）：notifyId 构造消费——epoch>0 的
-   *  轮次通知 key 带 epoch 段。缺省（undefined）= epoch 0 旧格式。
+   *  key 带 epoch 段（轮次通知 `id:epoch:round`、无轮通知 `id:epoch`）。缺省
+   *  （undefined）= epoch 0 旧格式。
    */
   epoch?: number;
   /**
@@ -201,6 +202,21 @@ export interface NotifierHost {
 }
 
 /**
+ * 失败通知的恢复指引尾段（[T2-③/LC-1] 可达性语义——失败原因 + 恢复指引必须可达宿主）。
+ * 定义于本模块（notify 域）：conversation-continuation（轮失败 error 构造）与本模块的
+ * failed 通知文案共同消费——单一权威禁散改。
+ * [勿重做警示] 失败通知与恢复轮完成通知之间存在时序窗：主 agent 若在窗口内改判
+ * 「亲自接管」并同时重发 message，会产生并行恢复轮 + 重复劳动（2026-09-24 事故 S1
+ * 实测形态）——接管前必须先 list 确认无在跑恢复轮。
+ */
+export const FAILURE_RECOVERY_TAIL =
+  "Recovery: re-send your message (action:'message') to continue — the conversation " +
+  "context is preserved (session file intact), or use action:'close' to discard it. " +
+  "If you decide to take over the work yourself instead, first run action:'list' to check " +
+  "whether a resumed round is already running for this subagent — do not redo work that a " +
+  "recovery round may have already started or finished.";
+
+/**
  * 将 BgNotifyRecord 格式化为 LLM 可读的 notification content。
  *
  * 模块内唯一消费方是下方 createNotifier 的 notify()（预格式化后传 delivery.send，
@@ -218,7 +234,7 @@ function buildLlmContent(record: BgNotifyRecord): string {
     : "";
   switch (record.status) {
     case "closed": {
-      // U3 C-outcome：终态文案只读 outcome（notify() 投影边界已物化；?? 兑底为防御
+      // U3 C-outcome：终态文案只读 outcome（notify() 投影边界已物化；?? 兜底为防御
       // 完整性——单一权威函数，非同构重写）。判定先于 patchFile——失败轮也会写
       // patchFile（doFinalizeRecord Step 0 对 worktreeHandle 无条件 collectPatch），
       // failed 分支不展示 patch 提示，否则 worktree 失败并存时 LLM 被告知 completed
@@ -228,7 +244,9 @@ function buildLlmContent(record: BgNotifyRecord): string {
         return `Subagent "${agent}" (${id}) cancelled.`;
       }
       if (outcome === "failed") {
-        return `Subagent "${agent}" (${id}) failed: ${record.error}`;
+        // [LC-1 补口] failed 通知带上恢复指引尾段（此前仅轮失败 error 携带，通知侧
+        // 丢失——主 agent 收到裸 error 无恢复路径，误判「任务全损」改判亲自重做）
+        return `Subagent "${agent}" (${id}) failed: ${record.error}\n\n${FAILURE_RECOVERY_TAIL}${transcriptPointer}`;
       }
       // 成功完成或通用结束：展示结果。
       // [C-2] close 收口提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
@@ -386,12 +404,18 @@ export function createNotifier(host: NotifierHost): BgNotifier {
   };
   let handle: DeliveryHandle = createHandle();
 
+  /** ledger 未 bind 降级留痕的 per-notifier 一次性去重（对齐 directFallbackWarned
+   *  同款策略）：降级是装配级状态而非逐条通知事件，首条 warn 即可定位漏装配；每条
+   *  notify 刷一次会在多通知场景刷屏。revive 不复位（per-notifier 一次），新 session
+   *  新 notifier 再 warn 可接受。 */
+  let ledgerFallbackWarned = false;
+
   /** 四步投递链收尾共用段（S2，code-simplify）：ledger 在 → ①写账（拒绝 = false，
    *  幂等去重：同 notifyId 已在账/已销账）→ ②attemptDeliver（settled 边沿 + isIdle
    *  二次复查，③④销账/重放在 ledger 内）；ledger 缺（旧装配 / 部分测试，含 jiti
-   *  单例分裂的失效形态）→ 内核路径降级 + 降级留痕 warn（C-ext-06 配套，不改变向
-   *  后兼容行为）。notify 为 fire-and-forget，返回值忽略。闭包读 let handle：
-   *  revive 重建后自然指向新 handle。 */
+   *  单例分裂的失效形态）→ 内核路径降级 + 降级留痕 warn（C-ext-06 配套，per-notifier
+   *  一次，不改变向后兼容行为）。notify 为 fire-and-forget，返回值忽略。闭包读
+   *  let handle：revive 重建后自然指向新 handle。 */
   function deliverViaLedgerOrKernel(notifyId: string, content: string, details: object): boolean {
     const ledger = getBoundNotifyLedger();
     if (ledger) {
@@ -399,9 +423,12 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       ledger.attemptDeliver();
       return true;
     }
-    notifyLogger.warn("notify ledger not bound, falling back to delivery kernel path (at-most-once)", {
-      notifyId,
-    });
+    if (!ledgerFallbackWarned) {
+      ledgerFallbackWarned = true;
+      notifyLogger.warn("notify ledger not bound, falling back to delivery kernel path (at-most-once)", {
+        notifyId,
+      });
+    }
     // D1 申报制：通知出站文本不附裸标记（无回执锚点），申报 'acceptance' = 受理即落地
     // （缺省 'marker' 会让条目永挂 in-flight，死锁形态复发——新增无标记提交点须同样申报）
     handle.send(
@@ -425,21 +452,23 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       if (disposed) return;
 
       // U3 C-outcome：投影边界物化 outcome——closed payload 缺省时按单一权威
-      // deriveOutcome 兑底填充，content 与 details（GUI pane 消费）均携带一等 outcome；
-      // 所有可达流程下与 record.outcome 等价（toNotifyRecord 在 completeRecord 之后
+      // deriveOutcome 兜底填充，content 与 details（GUI pane 消费）均携带一等 outcome；
+      // 所有可达流程下与 record.outcome 等价（toNotifyRecord 在 completeLegacyClosed 之后
       // 构造）。running（轮次通知）语义上无 outcome，不物化。消源自 record 的浅拷贝
       // ——不改写入方对象（BgNotifyRecord 由调用方持有）。notifyId 同批物化（U2：
       // dedupe key 与账本身份键同源，details 携带供回执匹配）。
       // notifyId 构造：dedupKey 显式覆盖优先（drain 丢弃通知等派生通知的独立去重
-      // 身份），缺省 = `id:round` / `id` 旧格式；[U5 / §3.2.3] epoch>0 扩为
-      // `id:epoch:round`（reopen 后 round 归零不与历史轮撞键，同 key 撞车吞通知是
-      // 本代码库已修复过的事故类——epoch 是同族防御的构造性根治）。
+      // 身份），缺省 = `id:round` / `id` 旧格式；[U5 / §3.2.3] epoch>0 时两种形态都
+      // 带 epoch 段——轮次通知 `id:epoch:round`（reopen 后 round 归零不与历史轮撞
+      // 键）、无轮通知 `id:epoch`（notifyClosed 显式清 round，reopen 后第二次 close
+      // 的终态提示若沿用裸 id 会与首轮 close 撞键，被 ledger 按「同 notifyId 已
+      // ack」永久拒绝——同 key 撞车吞通知是本代码库已修复过的事故类，epoch 是同族
+      // 防御的构造性根治）。epoch=0 恒旧格式，磁盘账本零迁移。
+      const withEpoch = record.epoch !== undefined && record.epoch > 0;
       const roundKey =
         record.round != null
-          ? (record.epoch !== undefined && record.epoch > 0
-            ? `${record.id}:${record.epoch}:${record.round}`
-            : `${record.id}:${record.round}`)
-          : record.id;
+          ? (withEpoch ? `${record.id}:${record.epoch}:${record.round}` : `${record.id}:${record.round}`)
+          : (withEpoch ? `${record.id}:${record.epoch}` : record.id);
       const notifyId = record.dedupKey ?? roundKey;
       const payload: BgNotifyRecord =
         record.status === "closed"
@@ -459,7 +488,7 @@ export function createNotifier(host: NotifierHost): BgNotifier {
 
     flushPendingNotifications(): void {
       // ledger 路径：立即投递尝试（isIdle 复查，busy 则挂 pending 等边沿——账已落盘，
-      // 重启恢复兑底）；内核路径：flush。
+      // 重启恢复兜底）；内核路径：flush。
       const ledger = getBoundNotifyLedger();
       if (ledger) {
         ledger.attemptDeliver();

@@ -28,7 +28,7 @@
         {
           "package": "@zhushanwen/pi-pending-notifications",
           "type": "package",
-          "reason": "代码层静态 import countActiveFromEntries（src/host/pi-host.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖。另有 pending 状态投影运行时协作：pending:register/unregister 事件的 emit 端在 subagent-core（notify-host.ts / orchestration/lifecycle.ts / worker-message-pump.ts / round-supervisor/reconcile-sweep.ts 崩溃恢复 sweep 补注销）与 base-tool-enhance（bash 投影），subagent-workflow 自身仅在崩溃恢复时 emit pending:unregister（src/session-lifecycle.ts recoverCrashedRuns 回调）；pending-notifications 消费该事件落盘 session entries（活跃 pending 的唯一状态源）。后台任务完成通知不经该事件——由 subagent-workflow 自有通道承担（notifier.ts 设 display+triggerTurn，bg-notify-render 渲染完成块并唤醒父 agent）"
+          "reason": "代码层静态 import countActiveFromEntries（src/host/pi-host.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖。另有 pending 状态投影运行时协作：pending:register/unregister 事件的 emit 端在 subagent-core（notify-host.ts / orchestration/lifecycle.ts / worker-message-pump.ts / registry-reconcile/reconcile-sweep.ts 崩溃恢复 sweep 补注销）与 base-tool-enhance（bash 投影），subagent-workflow 自身仅在崩溃恢复时 emit pending:unregister（src/session-lifecycle.ts recoverCrashedRuns 回调）；pending-notifications 消费该事件落盘 session entries（活跃 pending 的唯一状态源）。后台任务完成通知不经该事件——由 subagent-workflow 自有通道承担（notifier.ts 设 display+triggerTurn，bg-notify-render 渲染完成块并唤醒父 agent）"
         },
         {
           "package": "@zhushanwen/session-delivery",
@@ -325,6 +325,16 @@
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
           "reason": "代码层静态 import getLogger/setPiHandle（src/index.ts top-level import），select 通道 catch 留痕 + appendEntry 日志通道），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/subagent-core",
+          "type": "package",
+          "reason": "代码层静态 import bindNotifyLedgerHost/getBoundNotifyLedger/type NotifyLedgerHost（src/notify-ledger.ts top-level import，notify-once B-ledger 装配纪律①②⑤：session_start 查槽→无则 bind+recoverFromSession 成对、消费点动态查槽、session_compact compactionCheck 接线），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/notify-ledger.ts top-level import，ledgerHost sendDelivery 的 stale ctx 防御，stale-ctx-audit 登记接入点），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

@@ -6,7 +6,7 @@
 // - 协议版本（FAKE_PROTOCOL_VERSION，缺省 1）：版本协商越界测试用；
 // - run 动作脚本（FAKE_RUN_ACTIONS，JSON 数组）：emit / streamDelta / poolResolved /
 //   handleReady / childSpawned / childStateChanged / askUser / log / delay / spawnGrandchild /
-//   exit —— 逐动作播放，播完回 run 终态应答；
+//   rawStdout / exit —— 逐动作播放，播完回 run 终态应答；
 // - cancel：受理应答；FAKE_CANCEL_SETTLE=1 时同步收敛 run 终态（测收敛路径），
 //   缺省继续挂（测 3s 收敛窗口超时杀链）；
 // - spawnGrandchild：spawn 同组长眠子进程（不 detached → 与引擎同组，供组杀断言），
@@ -58,6 +58,13 @@ function runOutcomeAborted() {
   };
 }
 
+// "@runId" 记号：recordId 取当前 run 的 requestId（D9-2 半径断言的 per-run 归账锚）；
+// 其余值原样透传（各动作缺省值由调用点传入，存量用例不变）。
+function recordIdFor(action, requestId, fallback) {
+  if (action.recordId === "@runId") return requestId;
+  return action.recordId ?? fallback;
+}
+
 async function playRunActions(requestId) {
   for (const action of RUN_ACTIONS) {
     if (activeRun === null) return; // run 已被 cancel 收敛
@@ -79,12 +86,12 @@ async function playRunActions(requestId) {
         });
         break;
       case "childSpawned":
-        reverseRequest(`rev-child-${requestId}`, "host/childSpawned", { pid: action.pid, recordId: action.recordId ?? "rec-1" });
+        reverseRequest(`rev-child-${requestId}`, "host/childSpawned", { pid: action.pid, recordId: recordIdFor(action, requestId) });
         break;
       case "childStateChanged":
         reverseRequest(`rev-childst-${requestId}`, "host/childStateChanged", {
           pid: action.pid,
-          recordId: action.recordId ?? "rec-1",
+          recordId: recordIdFor(action, requestId),
           state: action.state ?? "exited",
           killed: action.killed ?? false,
           ...(action.exitCode !== undefined ? { exitCode: action.exitCode } : {}),
@@ -116,17 +123,34 @@ async function playRunActions(requestId) {
       }
       case "spawnGrandchild": {
         // 同组后代（不 detached）：进程组收割断言对象。node 长眠进程。
+        // recordId 支持 "@runId" 记号 = 当前 run 的 requestId（D9-2 run 拓扑半径
+        // 断言：同引擎两 run 各自的孙进程按 runId 归账，杀半径只及目标 run）。
         const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
           detached: false,
           stdio: "ignore",
         });
         grandchild.unref();
-        reverseRequest(`rev-grand-${requestId}`, "host/childSpawned", { pid: grandchild.pid, recordId: action.recordId ?? "rec-grand" });
+        reverseRequest(`rev-grand-${requestId}`, "host/childSpawned", { pid: grandchild.pid, recordId: recordIdFor(action, requestId, "rec-grand") });
         break;
       }
       case "delay":
         await new Promise((resolve) => setTimeout(resolve, action.ms ?? 10));
         break;
+      case "rawStdout": {
+        // 裸 stdout 写（非 NDJSON）：bytes 字节垃圾分片写（可选 terminateNewline 补
+        // 一个换行冲刷残片）——EngineClient stdoutBuffer 半行上限（MAX_LINE_BYTES）
+        // 测试数据源。分片写模拟管道真实送达形态（残片经多次 data 事件累积）。
+        const bytes = action.bytes ?? 0;
+        const chunkSize = 64 * 1024;
+        let written = 0;
+        while (written < bytes) {
+          const n = Math.min(chunkSize, bytes - written);
+          process.stdout.write("x".repeat(n));
+          written += n;
+        }
+        if (action.terminateNewline) process.stdout.write("\n");
+        break;
+      }
       case "exit":
         process.stderr.write(action.stderr ?? "fake engine mid-run crash\n");
         process.exit(action.code ?? 137);
@@ -179,7 +203,7 @@ const ANSWERED_CAPABILITIES = CAPS_OVERRIDE
 
 const MODELS = [
   { id: "glm-4.6", aliases: ["glm"], canonicalRef: "zai/glm-4.6" },
-  { id: "mimo-v2.5-pro", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.5-pro" },
+  { id: "mimo-v2.6-flash", canonicalRef: "xiaomi-token-plan-cn/mimo-v2.6-flash" },
 ];
 
 if (MODE === "crash") {

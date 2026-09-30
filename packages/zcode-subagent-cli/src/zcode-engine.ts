@@ -5,9 +5,8 @@
 // 连接）/ D3（abort 链）/ D4（会话自包含）/ D5（capabilities）/ D6（停机面）。
 //
 // 2026-09 breaking 重构（用户拍板，理由与代价见设计文档修订节）：
-//   - **删除 CLI spawn 降级链**（原 TAIJI_ZCODE_MODE=spawn 定向 / probe 冒烟门控 /
-//     protocol-drift 首败降级）：zcode 无公开契约，协议漂移不再降级保底，直接报
-//     可操作错误（提示核对版本 / 重启 / 改用 engine: pi）。
+//   - **删除 CLI spawn 降级链**（probe 冒烟门控 / protocol-drift 首败降级）：zcode 无公开
+//     契约，协议漂移不再降级保底，直接报可操作错误（提示核对版本 / 重启 / 改用 engine: pi）。
 //   - **删除 HOME 池化，共享宿主 HOME**：spawn env 不覆写 HOME，app-server 共享
 //     宿主 ~/.zcode/（凭据经 appserver-launcher fs 拦截注入——cli config 读取重定向
 //     为「真实文件 + v2 provider」合并，同 id 时 v2 优先，机制与漂移面见该文件头注；
@@ -98,6 +97,8 @@ import {
 import {
   defaultV2ConfigPath,
   listZcodeModels,
+  locateZcodeBuiltinCatalog,
+  resolveZcodeMinimalReasoningLevel,
   resolveZcodeModelRef,
   splitZcodeModelRef,
   type ZcodeSourcePaths,
@@ -463,8 +464,13 @@ export class ZcodeEngine implements EnginePort {
   ): Promise<AttemptResult> {
     const rt = this.ensureAppServerRuntime();
     // [R4/G3] modelRef 缺席 → create 帧不携带 model 键（zcode 自身缺省解析）；
-    // 显式 → 拆分为 per-session {providerId, modelId}。
-    const createParams = buildAppServerCreateParams(task, modelRef, cwd);
+    // 显式 → 拆分为 per-session {providerId, modelId}（+ 最小 reasoning 档，目录
+    // 值域解析——per-modelRef 记忆化，目录在进程生命周期内视为静态）。
+    const reasoningLevel =
+      modelRef !== undefined && modelRef !== ""
+        ? this.minimalReasoningFor(modelRef)
+        : undefined;
+    const createParams = buildAppServerCreateParams(task, modelRef, cwd, reasoningLevel);
 
     let currentSessionId: string | undefined;
     let signalSessionCreated: (() => void) | undefined;
@@ -518,37 +524,62 @@ export class ZcodeEngine implements EnginePort {
       if (ctx.signal?.aborted === true) return abortedAppServerAttempt(ctx);
       return parsedAppServerAttempt(task, r);
     } catch (err) {
-      if (ctx.signal?.aborted === true) return abortedAppServerAttempt(ctx);
-      // [P0-1 U2] 超时入口（D3 v1.1）：turn 已被 channel 判死 reject——升级判据不能
-      // 再挂在 turn 落定上（race 恒真，killChain 结构性不可达的 v1 击穿点），改以
-      // stop 应答三态裁决。await 链终局（非 fire-and-forget）：outcome 止损文案与
-      // 重试时序（D6，u-z4）都依赖链终局信号——止损完成前不合成终态。
-      if (err instanceof TurnTimeoutError) {
-        const stopPath = await this.appServerAbortChain(
-          rt,
-          turn,
-          () => currentSessionId,
-          sessionCreated,
-          { escalateOn: "stop-outcome" },
-        );
-        // [P0-1 U4] timeout 类（idle/ceiling 都算）是 D6 明文的可重试形态——结构化
-        // 标记（TurnTimeoutError 类型化判据，不经字符串匹配，D4 同精神）
-        return timeoutAppServerAttempt(err, currentSessionId, stopPath, { retried: opts.retried });
-      }
-      // [P0-1 U4] 连接崩溃收割形态（failAllTurns 的错误，D6 第二可重试形态）判据：
-      // 非 RPC error（服务端无明确应答——有应答即精确错误归类，非瞬时崩溃面）且
-      // conn 不存活。时序可靠性：catch 时刻紧随 onClose 收割，连接重建仅由
-      // conn.request 惰性触发——本链路中 runTurn finally 的 closeSession 对死连接
-      // 短路（channel 侧 !alive 守卫）、stop 只属 abort/超时入口（前者已被
-      // signal.aborted 短路、后者走上一分支）——此刻无 request 可重建，判据可靠。
-      if (!isAppServerRpcError(err) && !rt.conn.alive) {
-        return failedAppServerAttempt(err, currentSessionId, { retried: opts.retried, transient: "conn-closed" });
-      }
-      return failedAppServerAttempt(err, currentSessionId, { retried: opts.retried });
+      return await this.classifyAppServerTurnFailure(err, ctx, {
+        rt,
+        turn,
+        currentSessionId: () => currentSessionId,
+        sessionCreated,
+        retried: opts.retried,
+      });
     } finally {
       if (currentSessionId !== undefined) rt.activeSessions.delete(currentSessionId);
       if (ctx.signal !== undefined) ctx.signal.removeEventListener("abort", onAbort);
     }
+  }
+
+  /**
+   * [attemptAppServerTurn 拆分] 失败分流（catch 半边）：
+   * - signal 已 aborted → 中止终态收口；
+   * - [P0-1 U2] 超时入口（D3 v1.1）：turn 已被 channel 判死 reject——升级判据不能
+   *   再挂在 turn 落定上（race 恒真，killChain 结构性不可达的 v1 击穿点），改以
+   *   stop 应答三态裁决。await 链终局（非 fire-and-forget）：outcome 止损文案与
+   *   重试时序（D6，u-z4）都依赖链终局信号——止损完成前不合成终态。timeout 类
+   *   （idle/ceiling 都算）是 D6 明文的可重试形态——结构化标记
+   *   （TurnTimeoutError 类型化判据，不经字符串匹配，D4 同精神）；
+   * - [P0-1 U4] 连接崩溃收割形态（failAllTurns 的错误，D6 第二可重试形态）判据：
+   *   非 RPC error（服务端无明确应答——有应答即精确错误归类，非瞬时崩溃面）且
+   *   conn 不存活。时序可靠性：catch 时刻紧随 onClose 收割，连接重建仅由
+   *   conn.request 惰性触发——本链路中 runTurn finally 的 closeSession 对死连接
+   *   短路（channel 侧 !alive 守卫）、stop 只属 abort/超时入口（前者已被
+   *   signal.aborted 短路、后者走上一分支）——此刻无 request 可重建，判据可靠；
+   * - 其余 → 精确错误终态。
+   */
+  private async classifyAppServerTurnFailure(
+    err: unknown,
+    ctx: RunContext,
+    args: {
+      rt: AppServerRuntime;
+      turn: Promise<unknown>;
+      currentSessionId: () => string | undefined;
+      sessionCreated: Promise<void>;
+      retried: boolean | undefined;
+    },
+  ): Promise<AttemptResult> {
+    if (ctx.signal?.aborted === true) return abortedAppServerAttempt(ctx);
+    if (err instanceof TurnTimeoutError) {
+      const stopPath = await this.appServerAbortChain(
+        args.rt,
+        args.turn as never,
+        args.currentSessionId,
+        args.sessionCreated,
+        { escalateOn: "stop-outcome" },
+      );
+      return timeoutAppServerAttempt(err, args.currentSessionId(), stopPath, { retried: args.retried });
+    }
+    if (!isAppServerRpcError(err) && !args.rt.conn.alive) {
+      return failedAppServerAttempt(err, args.currentSessionId(), { retried: args.retried, transient: "conn-closed" });
+    }
+    return failedAppServerAttempt(err, args.currentSessionId(), { retried: args.retried });
   }
 
   /**
@@ -900,9 +931,22 @@ export class ZcodeEngine implements EnginePort {
     for (const ev of synthesizeCoarseEvents(payload.response, payload.usage)) emit(ev);
   }
 
-  /** [U7] 模型可发现性：v2 桌面登录态聚合（带凭据 provider × models），失败安全返回清单本身可能为空。 */
+  /** [U7] 模型可发现性：provider_config 个人 provider 聚合（注册表实况对齐源），失败安全返回清单本身可能为空。 */
   listModels(): Array<{ id: string; name?: string }> {
     return listZcodeModels(this.deps.sources);
+  }
+
+  /** 显式模型的最小 reasoning 档（目录 modelRules 值域；per-modelRef 记忆化——
+   *  目录文件在引擎进程生命周期内视为静态，重复 run 不重读）。 */
+  private readonly reasoningMemo = new Map<string, string | undefined>();
+
+  private minimalReasoningFor(modelRef: string): string | undefined {
+    const memoKey = `${locateZcodeBuiltinCatalog(this.deps.sources) ?? "none"}|${modelRef}`;
+    const hit = this.reasoningMemo.get(memoKey);
+    if (hit !== undefined || this.reasoningMemo.has(memoKey)) return hit;
+    const level = resolveZcodeMinimalReasoningLevel(modelRef, this.deps.sources);
+    this.reasoningMemo.set(memoKey, level);
+    return level;
   }
 
   /**
@@ -913,11 +957,11 @@ export class ZcodeEngine implements EnginePort {
    *
    * [R4/D6-②] 缺席语义：本实现是进程内形态 + 协议诊断面（宿主 cli 形态消费的是
    * RemoteEngine 的 manifest 本地判定，不经本方法——SDK protocol methods.ts 明示
-   * validateModel 为诊断面）。缺席 modelRef 时返回 ZCODE_FALLBACK_DEFAULT_MODEL
-   * canonical 全名作为「引擎缺省模型」的呈现值（诊断面只读不 create，不参与
-   * create 缺席不携带的 G3 行为链）。帧应答形态维持 {canonicalRef: string}（SDK
-   * port-contract 契约必填——「帧字段缺席」的 optional 对齐需放宽 SDK 契约与
-   * server handler 签名，非本包单方面可完成）。
+   * validateModel 为诊断面）。缺席 modelRef 时返回空串 canonical（= create 帧省略
+   * model 键、CLI 自身缺省解析——2026-09-29 account 体系迁移后 plan 家族兜底 id
+   * 已不可用；record 留痕侧按 R4/D6-② 空串归一为「用户未指定」条件留空）。帧应答
+   * 形态维持 {canonicalRef: string}（SDK port-contract 契约必填——「帧字段缺席」
+   * 的 optional 对齐需放宽 SDK 契约与 server handler 签名，非本包单方面可完成）。
    */
   validateModel(modelRef: string | undefined): { canonicalRef: string } {
     return { canonicalRef: resolveZcodeModelRef(modelRef, this.deps.sources) };
@@ -1403,17 +1447,29 @@ function appendSchemaRetryDirective(basePrompt: string, validationError: string)
 /** create 参数组装（A.2 ① strict 键集：空白 thoughtLevel / 空 deny 清单不设键）。
  *  [R4/G3] modelRef 条件携带：显式（trim 非空，上游已裁决 canonical）拆分为
  *  per-session model；缺席不设键——zcode 走自身缺省解析（用户 defaultModelSelection
- *  优先），与 strict 键集纪律一致（缺席语义用「键不存在」表达，禁空串哨兵）。 */
+ *  优先），与 strict 键集纪律一致（缺席语义用「键不存在」表达，禁空串哨兵）。
+ *  [2026-09-29 account 迁移同步] 显式模型附 model.options.reasoningLevel（目录
+ *  modelRules 值域的最小档）：注册表模型普遍要求该选项（缺席 create 即拒收
+ *  「Reasoning level is required」），缺省解析路径 CLI 自动补、显式路径须调用方供数。 */
 function buildAppServerCreateParams(
   task: AgentCallOpts,
   modelRef: string | undefined,
   cwd: string,
+  reasoningLevel?: string,
 ): SessionCreateParams {
   const denyTools = (task.denyTools ?? []).filter((t) => typeof t === "string" && t.trim() !== "");
   // thinkingLevel → thoughtLevel（A.2 ① 键集内）：空白串归一为不设键——strict 对象下
   // 空值键位无语义且防 -32602 变形拒收（与 denyTools 空清单不设键同款纪律）
   const thoughtLevel = task.thinkingLevel?.trim();
-  const model = modelRef !== undefined && modelRef !== "" ? splitZcodeModelRef(modelRef) : undefined;
+  const model =
+    modelRef !== undefined && modelRef !== ""
+      ? {
+        ...splitZcodeModelRef(modelRef),
+        ...(reasoningLevel !== undefined && reasoningLevel !== ""
+          ? { options: { reasoningLevel } }
+          : {}),
+      }
+      : undefined;
   return {
     workspacePath: cwd,
     mode: "yolo",

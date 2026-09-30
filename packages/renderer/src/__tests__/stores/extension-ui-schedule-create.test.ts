@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * extension-ui store getter form 键判定单测（ui-presentation-protocol u4；原名
  * schedule-create 扩义面职责随 D5 收敛改写）。

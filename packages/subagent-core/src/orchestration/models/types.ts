@@ -39,9 +39,7 @@ export type DoneReason =
   | "failed"
   | "aborted"
   | "budget_limited"
-  | "time_limited"
-  // m3：runAndWait 合成返回值专用——参数校验失败（run 从未创建，不进入 run.state.reason）
-  | "invalid_args";
+  | "time_limited";
 
 /** 合法的状态转换。空数组 = 无出边（done 终态）。 */
 export const VALID_RUN_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
@@ -55,7 +53,6 @@ export const ALL_DONE_REASONS: readonly DoneReason[] = [
   "completed",
   "failed",
   "aborted",
-  "invalid_args",
   "budget_limited",
   "time_limited",
 ] as const;
@@ -67,6 +64,26 @@ export function isDone(status: RunStatus): boolean {
 
 export function canRunTransition(from: RunStatus, to: RunStatus): boolean {
   return (VALID_RUN_TRANSITIONS[from] as readonly RunStatus[]).includes(to);
+}
+
+/**
+ * DoneReason 的终止性判定（非正常完成）：通知/文案消费方区分「任务完成」与
+ * 「run 因异常收口」（budget/time 耗尽或 abort 不是任务完成，模型可能把 done
+ * 当成功汇报——防偷懒收尾指令只对终止性 reason 追加）。
+ *
+ * 穷举 switch 无 default：DoneReason 新增成员时 tsc 强制在此显式归类，
+ * 消费方（壳 workflow-notify）不再持有本地词表镜像。
+ */
+export function isTerminalDoneReason(reason: DoneReason): boolean {
+  switch (reason) {
+    case "completed":
+      return false;
+    case "failed":
+    case "aborted":
+    case "budget_limited":
+    case "time_limited":
+      return true;
+  }
 }
 
 // ── Agent 调用 ────────────────────────────────────────────────
@@ -91,7 +108,7 @@ export const SLUG_MAX_LENGTH = 35;
  *
  * 终态命名按变化轴裁定为 AgentCallOpts，理由：
  *   - 字段演进的首要驱动轴是「调用方要表达的任务语义」（agent() API 是唯一生产写入方，
- *     合流字段中 prompt/description/skill/skillPath/schemaEnv/thinkingLevel 等多数派
+ *     合流字段中 prompt/description/skill/skillPath/thinkingLevel 等多数派
  *     已是调用方命名）；
  *   - 原 AgentTaskSpec 的中立重命名层（task/slug/effort/persona）与调用方命名是
  *     形式同构、语义同构的假差异（prompt≡task、slug=description 截断、effort≡thinkingLevel、
@@ -100,7 +117,7 @@ export const SLUG_MAX_LENGTH = 35;
  *     opts 均以 prompt 字段落盘，改名会破坏旧快照重水合。
  *
  * 引擎中立字段的并入方式（可选字段，原 AgentTaskSpec 独有字段去向）：
- *   - graceTurns / idleTimeoutMs / denyTools / permissionMode：可选并入；
+ *   - graceTurns / idleTimeoutMs：可选并入；
  *   - persona.agentRef：裁撤（无生产写入方、无消费者——pi 走 agent 字段解析身份）；
  *   - requires：裁撤（P4 形状预留、无生产写入方；且并入需 import EngineCapabilities
  *     形成 orchestration↔engine 类型环）。将来能力依赖声明下钻时在本形状上加回。
@@ -141,9 +158,7 @@ export interface AgentCallOpts {
  /**
   * Turn 上限（turn limiter 用）。
   *
-  * [预算语义对齐] 未传或 <=0 = 不限 turn；此时也不按 turns 估算 spawn watchdog——
-  * 仅当 env TAIJI_SUBAGENT_SPAWN_WATCHDOG_MS 设置时才按绝对时限挂 watchdog（见
-  * session-runner.resolveSpawnWatchdogMs）。pi 边界直出为 ExecuteOptions.maxTurns
+  * [预算语义对齐] 未传或 <=0 = 不限 turn。pi 边界直出为 ExecuteOptions.maxTurns
   * → runSpawn（D6 合流后无中间映射层）。
   */
   maxTurns?: number;
@@ -180,14 +195,7 @@ export interface AgentCallOpts {
   */
   appendSystemPrompt?: string[];
  /**
-  * Schema JSON for PI_WORKFLOW_SCHEMA env var.
-  * Set by agent-opts-resolver when opts.schema is present (值 = stringifySchemaCached
-  * compact，与 schema 派生等值); passed as env var to activate the structured-output
-  * tool + hook. pi 边界直出时 schema 派生优先、本字段兜底（解耦形态通道，生产不可达）。
-  */
-  schemaEnv?: string;
- /**
- * Per-call 工作目录（ADR-029 决策 1）。传给 child_process.spawn 的 cwd option。
+  * Per-call 工作目录（ADR-029 决策 1）。传给 child_process.spawn 的 cwd option。
  *
  * 用于 worktree 隔离：传入 worktree 绝对路径，spawn 的 pi 子进程绑定到该目录，
  * 其内部的 createAgentSession/ResourceLoader/bash 工具都在该目录运行。
@@ -226,16 +234,6 @@ export interface AgentCallOpts {
   * idle GC。chat 域经 host-task-spec 填充。
   */
  idleTimeoutMs?: number;
- /**
-  * 工具 denylist（原 AgentTaskSpec.denyTools 并入，中立新增面）：各引擎做语法映射
-  * （zcode buildZcodeArgv 消费；pi 链路暂无对应面）。无 workflow 写入方，预留形状。
-  */
-  denyTools?: string[];
- /**
-  * 中立权限模式（原 AgentTaskSpec.permissionMode 并入，预留形状）：映射按各引擎
-  * capabilities.permissionMode。无生产写入方/消费者。
-  */
-  permissionMode?: string;
 }
 
 // [S4 簇 3 收编] 以下三个契约类型本地定义已删除，自 @zhushanwen/subagent-engine-sdk
@@ -296,6 +294,13 @@ export interface AgentResult {
   durationMs?: number;
  /** True when the pi process exited with code 0. */
   error?: string;
+ /**
+ * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。
+ * 产出侧 = 引擎终态应答 AgentOutcome.stderrTeePath（SDK contract-types，上报判据
+ * 见彼处注释），经 workflow-dispatch outcomeToWorkflowResult 透传到本形态；消费侧
+ * worker-message-pump dispatchAgentSettled 读本字段填 agent-settled 事件载荷。
+ */
+  stderrTeePath?: string;
  /**
  * Pi session ID for the subagent process (uuidv7).
  * Present when pi emits a session header (default in --mode json).

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * partitioned-session-records 单测 —— createEmptyResultStrikeGuard strike 机制全行为直测。
  *

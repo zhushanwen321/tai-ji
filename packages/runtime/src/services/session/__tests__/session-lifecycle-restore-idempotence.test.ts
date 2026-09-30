@@ -101,7 +101,6 @@ function makeRestoreEnv() {
     adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }) as unknown as IEventAdapter,
     getMessageBus: () => null,
     broadcastGlobal: () => {},
-    notifyMessageComplete: () => {},
   }
   const lifecycle = new SessionLifecycle(
     svc,

@@ -52,7 +52,7 @@ allowlist（ALLOWLIST）：
 检出边界（诚实声明）：
   - 目标路径经形参间接且整个文件无代码语境 sessions 痕迹的写点不命中（跨文件数据流
     静态不可判定）——session-fork.ts:175 createForkedSessionFile 即此形态（调用点传
-    getSessionsDir()，fork 文件内唯一 sessions token 在 JSDoc 注释）。该形态的守卫 =
+    getSessionsDir()，fork 文件内唯一 sessions token 在 JSDoc 注释）。该形态的检查 =
     登记表「创建型唯一写入口」声明（§4 ⑥）+ S1 语义层。
   - fd 型续写（writeSync(fd, …)）与流实例的 .write(chunk) 方法调用不在写调用清单——
     其源头 openSync('a') / createWriteStream(path) 已被拦截（同根拦截口径；openSync 形态
@@ -139,7 +139,7 @@ TMP_MIGRATE_SUFFIX_RE = re.compile(r"['\"]\.tmp-migrate-")
 # ---------------------------------------------------------------------------
 # 条件 B②：非 sessions 目标的可见推导锚点（spec 指定「脚本内维护枚举清单」）
 #   tmpdir() + taiji 自有目录/文件推导函数。getPiRoot/getPiAgentDir 亦纳入——经它们构造
-#   sessions 路径会在语句上留下痕迹 token，由「语句含 sessions 痕迹则不豁免」守卫兜住。
+#   sessions 路径会在语句上留下痕迹 token，由「语句含 sessions 痕迹则不豁免」检查兜住。
 # ---------------------------------------------------------------------------
 NON_SESSIONS_DERIVATIONS_RE = re.compile(
     r"\b(?:"
@@ -420,7 +420,7 @@ def main() -> int:
 
     if has_error:
         print()
-        print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m")
+        print("\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m")
         return 2
 
     if not has_error:

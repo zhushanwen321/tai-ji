@@ -14,7 +14,7 @@
 - S（情境）：taiji 通过 pi binary spawn 子进程承载会话，20 个 `@zhushanwen/pi-*` extension 经 pi 的 jiti loader 加载；extension 与 runtime 两侧各自封装 proper-lockfile 做跨进程文件锁。
 - C（冲突）：2026-09-01 实证：冷启动后首次点击 session，pi 进程必崩（exit 1），用户看到「切换会话失败」；重试成功。根因是 jiti 2.7.0 对嵌套 CJS 依赖 exports 的 Proxy 值缓存违反 ES invariant——同模块图内第二次 proper-lockfile 异步锁必抛 TypeError 且进程级崩溃；触发面是 base-tool-enhance 的 reaper 在 pi factory 二次调用（extension 按 cwd 缓存命中时重复调用、handler 累积注册）下于同一 session_start 事件双跑。
 - Q（问题）：如何让这类「extension 运行环境 × 基础设施依赖」的组合缺陷不再发生，而不是只修这一次的症状？
-- A（答案）：三批次——①锁原语自实现统一（天然免疫 jiti，替代「继续用 proper-lockfile + 绕过」）；②reaper 收殓下沉 runtime（触发面从结构上消失，职责归位）；③pi 环境守卫骨架 + 观测补齐（防线显式化，下次可观测）。
+- A（答案）：三批次——①锁原语自实现统一（天然免疫 jiti，替代「继续用 proper-lockfile + 绕过」）；②reaper 收殓下沉 runtime（触发面从结构上消失，职责归位）；③pi 环境检查骨架 + 观测补齐（防线显式化，下次可观测）。
 
 **系统认知**（受众：会用 taiji 但不了解 extension 体系的开发者）：
 
@@ -27,7 +27,7 @@
 
 - G1（用户可见故障归零）：冷启动后首次点击任意 session，100% 成功进入会话，不再出现「切换会话失败：pi process exited with code 1」。
 - G2（职责正确）：孤儿后台任务的收殓由 pi 生命周期的所有者（runtime）执行，extension 不再做全局扫描/全局锁；有孤儿时收殓仍然发生（功能不回归）。
-- G3（防线显式）：pi 的 factory 二调坑有统一守卫；受影响的 session_start handler 全部接入，双跑不再可能。
+- G3（防线显式）：pi 的 factory 二调坑有统一检查；受影响的 session_start handler 全部接入，双跑不再可能。
 - G4（可观测）：pi 进程异常退出时，完整 stderr 与 extension 日志默认落盘可查——本次排障依赖的 20 轮受控实验，下次应是一轮 grep。
 
 **In scope**：上述四目标的代码与测试改动；锁协议兼容性（与 pi 内嵌版互斥）；过渡期新旧 extension 共存。**Out of scope**：不改 pi 源码/不提 PR（项目铁律）；不修 jiti（上游）；不处理 subagent relay 链路的锁（未受影响，见 §3.3 D1 备注）；不重做 extension-logger 的日志库选型。
@@ -114,32 +114,32 @@ A 的关键约束（不是自由设计）：
 - **路径规范化统一 `realpath: false`**：与 pi auth-storage 及 extension 包现状一致；runtime async 锁现状是默认 realpath:true（历史偏差），切换属纠正——行为变化仅影响 symlink 目标路径的锁路径解析，锁目标路径（auth.json 在 `getPiAgentDir()`、settings/ext-config 在 `getDataDir()` 派生目录）均动态推导、无 symlink 场景，影响面声明为零；symlink 目标不在锁契约内。探针基线锁定 proper-lockfile 4.1.2（与 pi 依赖一致，pi package.json 核实）。
 - **锁原语源文件零依赖**：`lock-core.ts` 不 import extension-logger（其依赖链携带 pi SDK peerDep，会经 runtime re-export 穿越 pi 边界）；诊断日志改为可选注入（`opts.log?: (msg) => void`，extension 入口注入 logger，runtime 不注入）。
 - **包导出双子入口**：`@zhushanwen/pi-file-lock`（extension 用，现 API 含 logger 依赖）与 `@zhushanwen/pi-file-lock/core`（零依赖锁原语，runtime 用，package.json `exports` 声明子路径）。
-被否 B 的教训回放：若用它，§2.1 链路中 probe 缓存问题消失，但 P1 双轨仍在，下一个 jiti×第三方组合缺陷仍要 13 轮实验定位。
+不采用 B 的教训回放：若用它，§2.1 链路中 probe 缓存问题消失，但 P1 双轨仍在，下一个 jiti×第三方组合缺陷仍要 13 轮实验定位。
 
 **D2 收殓下沉 runtime（双触发面）**
 
 | 方案 | 长期架构合理性 | 短期成本 | 风险 |
 |---|---|---|---|
 | A（推荐）双触发面：① 生命周期收殓挂 runtime `onSessionDestroyed` 汇聚点（汇聚点本体 session-service.ts removeSessionEntry，覆盖主动删/进程退出/forceQuit/restore 清场，见 §5 U2-2 DE2 澄清），fire-and-forget 不阻塞销毁收敛链；② 启动期全量兜底扫描挂 startup-background-init 后台序列（与 reapOrphanPiProcesses 同序列，**硬序在其完成后执行**，时序论证见 §2.3）——旧 reaper 全局扫描的三类兜底对象（跨运行遗留孤儿、启动期被收殓 pi 的 detached 任务、从未激活即删的 session）由此等价承接。extension 删 session_start reaper（reconcile 对账保留，见 D3） | 收殓发生在「该 session 的 pi 确认死亡」的精确时点；跨运行遗留有启动期等价兜底；extension 不再做运行期全局扫描/全局锁；registry 契约入 `@zhushanwen/extension-protocol`（跨层契约 SSOT 有 session-manager 先例） | 中（~180 行：判定逻辑移植自 reaper.ts 三分支 + 契约定义 + 双挂点接线） | 扫描成本（启动期一次 readdir + 逐 registry 读取，毫秒级×session 数，fire-and-forget）；新旧共存见 §3.3 过渡窗口 |
-| B extension 侧保留 reaper 仅加幂等守卫 | 职责仍错层，全局锁/全局扫描仍在；触发面靠 D1 兜底而非消失 | 低 | 治标 |
+| B extension 侧保留 reaper 仅加幂等检查 | 职责仍错层，全局锁/全局扫描仍在；触发面靠 D1 兜底而非消失 | 低 | 治标 |
 | B' 仅生命周期收殓、无启动期兜底（Round 0 原案） | 跨运行遗留孤儿永久无人收殓——G2「有孤儿时收殓仍然发生」因果链断裂（旧 reaper 立项场景「SIGKILL 后 detached 任务被 init 收养」静默丢失） | 低 | 功能回归 |
 | C 收殓挂 Electron main | pi 生命周期所有者是 runtime，跨层绕路 | 高 | 引入新链路故障面 |
 
-**D3 幂等守卫与影响面**
+**D3 幂等检查与影响面**
 
 | 方案 | 长期架构合理性 | 短期成本 | 风险 |
 |---|---|---|---|
-| A（推荐）批次 1 先内联止血（flag 仅包 reapOrphanedTasks，见下），批次 3 新建 `@zhushanwen/pi-ext-guards`（`oncePerProcess(key, fn)` 高阶函数 ~15 行）替换内联，并按判定准则排查其余 10 个 session_start extension 接入 | pi 环境坑（factory 二调/未来 jiti 类）的防线集中一处；业务 extension 假设标准语义 | 低 | 新包粒度——缓解：包只做「pi 运行环境守卫」一个职责，命名即边界 |
+| A（推荐）批次 1 先内联止血（flag 仅包 reapOrphanedTasks，见下），批次 3 新建 `@zhushanwen/pi-ext-guards`（`oncePerProcess(key, fn)` 高阶函数 ~15 行）替换内联，并按判定准则排查其余 10 个 session_start extension 接入 | pi 环境坑（factory 二调/未来 jiti 类）的防线集中一处；业务 extension 假设标准语义 | 低 | 新包粒度——缓解：包只做「pi 运行环境检查」一个职责，命名即边界 |
 | B 全量直接建包接入，不做批次 1 内联 | 同 A 终态 | 高（止血被拉长） | 崩溃多暴露一个发版周期 |
 | C 各 extension 各自内联不建包 | 防线分散，准则漂移 | 低 | 下一个 extension 作者无从知晓 |
 
-**守卫粒度（Round 1 修正）**：flag/oncePerProcess 只包**跨 session 副作用的操作**（reapOrphanedTasks——进程级全局维护，正确频率就是每进程至多一次）。**reconcilePendingEntries 是 session 级操作**（读当前 session 的 pi entries + 当前 session 的 registry，appendEntry 幂等），按判定准则属豁免类，**保持每 session_start 执行、不挂 flag**——桌面端每次激活是 startup+resume 双 session_start，若整体挂进程级 flag，startup 消费 flag 后目标 session 的对账将永远被跳过（M3 对账在主链路被禁用）。reconcile 全同步、不持锁、无 jiti 风险面。需要「每 session 一次」语义的 handler 属另一设计，本设计不提供（避免 clever 机制，出现真实需求再设计）。
+**检查粒度（Round 1 修正）**：flag/oncePerProcess 只包**跨 session 副作用的操作**（reapOrphanedTasks——进程级全局维护，正确频率就是每进程至多一次）。**reconcilePendingEntries 是 session 级操作**（读当前 session 的 pi entries + 当前 session 的 registry，appendEntry 幂等），按判定准则属豁免类，**保持每 session_start 执行、不挂 flag**——桌面端每次激活是 startup+resume 双 session_start，若整体挂进程级 flag，startup 消费 flag 后目标 session 的对账将永远被跳过（M3 对账在主链路被禁用）。reconcile 全同步、不持锁、无 jiti 风险面。需要「每 session 一次」语义的 handler 属另一设计，本设计不提供（避免 clever 机制，出现真实需求再设计）。
 
 判定准则（批次 3 排查用）：handler 体内存在**任一**跨 session 副作用即必须接入——写非本 session 的文件、注册定时器/watcher、扫描目录、进程操作；纯内存初始化（如 permission 的 footer renderer 注册，registry.register 同 id 覆盖）天然幂等可豁免，豁免结论须在排查清单中逐条留痕。
 
 **D4 可观测性**
 
-| 项 | 推荐 | 被否 |
+| 项 | 推荐 | 不采用 |
 |---|---|---|
 | extension 日志落盘 | **taiji 托管环境默认落盘**：新环境变量 `TAIJI_AGENT_EXT_LOG=1` 由 runtime spawn pi 时注入（buildOutboundChildEnv extras），extension-logger 见此变量即落盘 INFO 级（DEBUG 全量仍由 TAIJI_AGENT_DEBUG 控制）+ 7 天清理。量级：INFO 级事件（session_start/命令/错误）每 session 数十条 × ~200B ≈ 单位数 KB/session。**universal 包独立 pi 用户默认行为不变**（未注入变量 = no-op，零磁盘/行为影响） | 维持 debug-only（P4 黑洞教训）；无条件默认落盘（改变 universal 包独立用户开箱行为，19 extension × appendFileSync 叠加不可控） |
 | pi 崩溃 stderr | rpc-client exit handler：异常退出（code≠0 且非主动 kill）时将累计 stderr 全量写 `<logsDir>/pi-crash-<date>-<sid>.log`（logger.ts 新增 helper，复用 pi-*.jsonl 命名惯例）；正常退出不写 | 维持尾部 N 行 ring buffer（本次崩溃现场只剩 2 行，TypeError 之上的输出全部丢失） |
@@ -147,9 +147,9 @@ A 的关键约束（不是自由设计）：
 ### 3.3 关键决策与权衡（探针标注）
 
 - **D1-A 自实现协议正确性**：mkdir 是 POSIX 原子操作 ✅已测（本次调查第 13 轮通读 proper-lockfile acquireLock 全流程并复刻实验验证）；stale 夺取竞态窗口（两个进程同时判死同时夺取）与 proper-lockfile 现状等同，不引入新风险 ✅已测（协议逐行比对）。**实施期门**：S3 互斥探针不过则 D1 不算完成。
-- **D2-A 挂点选择**：onSessionDestroyed 是既有「单一清理入口」（D6a 设计），且经代码核实覆盖比三路径更多——forceQuit 经 message-dispatcher 手动编排显式调 removeSessionEntry（kill 路径的 exit 事件被双层守卫拦截不走 onSessionExit）✅已测。不挂 pm.onSessionExit 的原因：后者只覆盖进程退出，主动 delete/forceQuit 同样遗留孤儿任务。执行形态：**fire-and-forget**（void + catch warn；实现为入口 async + setImmediate 延后一拍执行同步核心——removeSessionEntry 是同步销毁收敛链，spawnSync `ps`（单条 5s 超时）与同步锁 busy-wait 不占当拍，构造性不阻塞），收殓不得阻塞销毁收敛链（旧设计 fire-and-forget 的理由同样适用）。
+- **D2-A 挂点选择**：onSessionDestroyed 是既有「单一清理入口」（D6a 设计），且经代码核实覆盖比三路径更多——forceQuit 经 message-dispatcher 手动编排显式调 removeSessionEntry（kill 路径的 exit 事件被双层检查拦截不走 onSessionExit）✅已测。不挂 pm.onSessionExit 的原因：后者只覆盖进程退出，主动 delete/forceQuit 同样遗留孤儿任务。执行形态：**fire-and-forget**（void + catch warn；实现为入口 async + setImmediate 延后一拍执行同步核心——removeSessionEntry 是同步销毁收敛链，spawnSync `ps`（单条 5s 超时）与同步锁 busy-wait 不占当拍，构造性不阻塞），收殓不得阻塞销毁收敛链（旧设计 fire-and-forget 的理由同样适用）。
 - **D2 registry 契约归属**：放 `@zhushanwen/extension-protocol` 而非新包——runtime 已依赖该包（tsup noExternal 已收录）✅已测，extension 侧 base-tool-enhance 增加对其的依赖（dev workspace + 发布 dependencies，形态同 session-manager 对接先例）。
-- **D3 守卫语义**：`oncePerProcess` 按进程去重（模块级 Map），只用于跨 session 副作用操作（见 D3 粒度段）；需要「每 session 一次」的 handler 属另一语义，本设计不提供（避免 clever 机制，出现真实需求再设计）。
+- **D3 检查语义**：`oncePerProcess` 按进程去重（模块级 Map），只用于跨 session 副作用操作（见 D3 粒度段）；需要「每 session 一次」的 handler 属另一语义，本设计不提供（避免 clever 机制，出现真实需求再设计）。
 - **D1 备注（排除项）**：subagent relay 链路（zsw）不经 jiti 加载且无 proper-lockfile async 锁使用，不在受影响面；本次调查已 grep 全量 extensions 确认 async 锁调用仅 reaper 一处 ✅已测。
 - **D2 过渡窗口（Round 1 重写，Round 2 限定范围）**：用户机器上 **npm 全局层**旧装残留**不会进入 pi 加载**——taiji spawn pi 用 `--no-extensions` 抑制全局发现（rpc-client.ts）+ extension 全部显式 `--extension` 注入（builtin staged / 项目级路径；数量以 mandatory-extensions.json SSOT 为准——写作时 19、当前 17，S1 脚本按 staged 实际枚举不硬编码），12:22 真实 spawn 命令核实无 npm 全局安装层路径 ✅已测。因此不存在「新旧同图双跑」；旧 reaper 的崩溃机制（其代码自带）也无加载机会。**残余通道如实声明**：`--approve` 会信任项目级 `.pi/extensions`——若用户手动在项目层放置同名 base-tool-enhance 旧拷贝仍可进入加载（已知暴露面，pi 侧 TODO 承认），概率极低但非零；S5 含此检查项。（`--no-extensions` 抑制全局发现的佐证在 rpc-client.ts——一致性审查后行号随波次插行漂移，改文件级引用。）**残留处置**：随升级 release note 给卸载指引（`pi uninstall npm:@zhushanwen/pi-base-tool-enhance`，参照 unified-hooks 废弃先例——pi 0.84.4 实装无 `extension uninstall` 子命令，一致性审查 DE1 核实修正），防旧包与新包在**裸 pi 使用场景**（用户脱离 taiji 独立装过）双重注册 bash 拦截。
 - **锁残留清理**：D2 落地后 `reaper.lock` 不再产生；启动期兜底扫描顺带 rmdir stale 残留目录，不单独做迁移脚本。
@@ -164,12 +164,12 @@ A 的关键约束（不是自由设计）：
 | S2（G1） | 真实用户路径 | dev app（pnpm dev）冷启动，首点 cwd=Stock 的 session（12:22 原始场景） | 直接进入会话，无 toast；runtime 日志无 auto-restore failed |
 | S3（G1/P1） | 锁互操作兼容 | 探针脚本：runtime 侧（Node，新自实现锁）与 pi 内嵌 proper-lockfile 并发对同一测试文件各循环 100 次 lock→write→unlock | 双方全部成功获取（等待互斥），最终文件内容无交错损坏；ELOCKED 等待期间无数据竞争 |
 | S4a（G2） | 生命周期收殓不回归 | dev app 中让 session 跑一个 background bash 任务（sleep 300）→ forceQuit 该 pi → 观察 runtime | 孤儿 bash 进程被 kill（ps 核实）；registry 该条目转 orphaned 终态；runtime 日志有收殓记录；销毁收敛链未被阻塞（session 列表即时更新） |
-| S4b（G2） | 跨运行遗留兜底（B-only 构造） | 让 session 跑 background bash 任务（sleep 300）后，**直接 `kill -9 <pi pid>`（不经 forceQuit，绕开 A 腿）并立即 SIGKILL 整个 app**（SIGKILL 下 A 腿无执行机会）→ 重启 dev app，等待启动后台序列（含孤儿 pi 收殓 + B 扫描硬序）完成。**硬序验证变体（确定性孤儿化）**：新 session 跑后台任务后 `SIGSTOP <pi pid>` 再 SIGKILL app——SIGTERM 无法投递给 stopped 进程，2s 宽限后必走 SIGKILL（绕开 pi 优雅退出 → D12 exit-guard 收殓 → 无孤儿产生的两条分支） | B 日志在场（启动期扫描收殓记录）；孤儿任务进程被 kill、registry 转终态；**硬序变体**：重启后 detached 任务确定性地由 B 收殓（orphaned 终态由 B 写、B 日志在场）——该变体是 §2.3 硬序约束的唯一真验证场景，不得以「任务已死」替代（可能是 D12 收的） |
+| S4b（G2） | 跨运行遗留兜底（B-only 构造） | 让 session 跑 background bash 任务（sleep 300）后，**直接 `kill -9 <pi pid>`（不经 forceQuit，绕开 A 路径）并立即 SIGKILL 整个 app**（SIGKILL 下 A 路径无执行机会）→ 重启 dev app，等待启动后台序列（含孤儿 pi 收殓 + B 扫描硬序）完成。**硬序验证变体（确定性孤儿化）**：新 session 跑后台任务后 `SIGSTOP <pi pid>` 再 SIGKILL app——SIGTERM 无法投递给 stopped 进程，2s 宽限后必走 SIGKILL（绕开 pi 优雅退出 → D12 exit-guard 收殓 → 无孤儿产生的两条分支） | B 日志在场（启动期扫描收殓记录）；孤儿任务进程被 kill、registry 转终态；**硬序变体**：重启后 detached 任务确定性地由 B 收殓（orphaned 终态由 B 写、B 日志在场）——该变体是 §2.3 硬序约束的唯一真验证场景，不得以「任务已死」替代（可能是 D12 收的） |
 | S5（G1） | 旧 npm 残留不混入 | 升级后的 builtin 环境（机器保留 npm 旧装残留）启动 dev app，检查 runtime 日志的 pi spawn 命令与 extension-resolver resolved 列表 | 加载列表全部来自 builtin staged/项目级路径，无 npm 全局安装层路径；项目层 `.pi/extensions` 无同名 base-tool-enhance 旧拷贝混入；release note 文档含旧包卸载指引 |
 | S6（G3） | factory 二调下维护链单跑 | 目标 session **预埋一条僵尸 pending:register**（registry 存一条 running 终态可判条目 + pi entries 含对应未抵消 register；**id 必须带 `bt-` 前缀**——`collectUnsettledTaskIds` 只认 `BTE_TASK_ID_PREFIX`，非 bt- 前缀会被差集忽略致预埋失效）。用本次调查的探针方法（观测 factory 调用与 handler 派发；实施形态 = bte dispatch 日志 + S1 复现脚本，见 §5 U3-2 实施修正旁注）跑 switch；观测通道 = `TAIJI_AGENT_DEBUG=1` 的 extension 日志（U1-4 在 runSessionStartMaintenance 入口加无条件 debug 日志） | factory 调用 ×2、resume 的 handler 派发 ×2（探针可测）；**效果导向断言**：僵尸的 `pending:unregister` entry 恰好追加一次、无重复条目；维护链入口日志按 handler 派发次数出现、reap 类跨 session 操作只在首个派发执行（批 1）/不再执行（批 2 后） |
 | S7（G4） | 崩溃可观测 | 人为制造 pi 崩溃（注入一个必抛异常的临时 extension）→ 查数据目录 | `<logsDir>/pi-crash-*.log` 含完整 stderr；taiji 托管 pi 进程的 extension 日志文件存在且含该 extension 的 INFO 输出；未注入 TAIJI_AGENT_EXT_LOG 的裸 pi 环境 extension 日志保持 no-op |
 
-批次对应：批次 1 验收 = S1/S2/S3（+S6 的内联版）；批次 2 = S4a/S4b/S5；批次 3 = S6（守卫包版 + 逐 extension 探针验证点，实施形态见 §5 U3-2 实施修正旁注）/S7。每批独立可验收、可发版。
+批次对应：批次 1 验收 = S1/S2/S3（+S6 的内联版）；批次 2 = S4a/S4b/S5；批次 3 = S6（检查包版 + 逐 extension 探针验证点，实施形态见 §5 U3-2 实施修正旁注）/S7。每批独立可验收、可发版。
 
 ## 5. 下一层拆分
 
@@ -191,12 +191,12 @@ A 的关键约束（不是自由设计）：
 | U2-3 extension 侧移除 | base-tool-enhance 删 reapOrphanedTasks 及其调用；**reconcilePendingEntries 保留每 session_start 执行**（session 级豁免类，见 D3）；删 reaper.ts；依赖改引 extension-protocol 类型 | `extensions/universal/base-tool-enhance/src/index.ts`、删 `reaper.ts`、package.json 增 `@zhushanwen/extension-protocol` 依赖 | 触发面消失（P2）；S4a/S4b/S6 |
 | U2-4 文档同步 | base-tool-enhance 设计文档 §3.5 收殓章节标注下沉（历史沿革 + 新链路指引）；release note 段落：npm 旧装残留卸载指引（参照 unified-hooks 先例） | `docs/design/base-tool-enhance.md`（已随 2026-09 docs 清理删除，git 可追溯）、发布说明草稿 | 文档符号漂移守护（C-proc-10）；S5 |
 
-### 批次 3：pi 环境守卫 + 观测补齐
+### 批次 3：pi 环境检查 + 观测补齐
 
 | 单元 | 内容 | 文件 | justification / 验收挂钩 |
 |---|---|---|---|
-| U3-1 守卫包 | `@zhushanwen/pi-ext-guards`：`oncePerProcess(key, fn)`（结果缓存形态：同 key 重放首次结果/Promise 实例、fn 抛错不吞不释放 key）；~~U1-4 内联 flag 替换为守卫调用~~（实施修正：该 flag 随 U2-3 reaper 删除一并消失，bte 无跨 session 操作不接守卫；守卫包实际消费者 = u-audit-fix 判定的 permission / subagent-workflow） | `extensions/shared/ext-guards/`（新包）、base-tool-enhance index.ts（实施后无需改动） | 防线集中（P3）；S6 |
-| U3-2 影响面排查 | 按 §3.2-D3 准则排查其余 **10 个** session_start extension（ask-user / system-prompt-trace / pending-notifications / cache-probe / permission / goal / plan / subagent-workflow / smart-context / todo），非幂等者接入守卫，豁免者清单留痕；**每个「必须接入」项给一个探针验证点**（S6 探针 extension 通用化：记录 handler 派发与目标操作执行次数）（实施修正：以 docs/design/pi-session-start-handler-idempotency-audit.md §2.5 的效果导向证据链替代——单测入口计数 + bte dispatch 日志 ×N + S1 复现脚本，通用化探针 extension 未建） | 10 个 extension 源文件 + 排查清单文档（附 PR） | P3 系统性收口；S6 逐项 |
+| U3-1 检查包 | `@zhushanwen/pi-ext-guards`：`oncePerProcess(key, fn)`（结果缓存形态：同 key 重放首次结果/Promise 实例、fn 抛错不吞不释放 key）；~~U1-4 内联 flag 替换为检查调用~~（实施修正：该 flag 随 U2-3 reaper 删除一并消失，bte 无跨 session 操作不接检查；检查包实际消费者 = u-audit-fix 判定的 permission / subagent-workflow） | `extensions/shared/ext-guards/`（新包）、base-tool-enhance index.ts（实施后无需改动） | 防线集中（P3）；S6 |
+| U3-2 影响面排查 | 按 §3.2-D3 准则排查其余 **10 个** session_start extension（ask-user / system-prompt-trace / pending-notifications / cache-probe / permission / goal / plan / subagent-workflow / smart-context / todo），非幂等者接入检查，豁免者清单留痕；**每个「必须接入」项给一个探针验证点**（S6 探针 extension 通用化：记录 handler 派发与目标操作执行次数）（实施修正：以 docs/design/pi-session-start-handler-idempotency-audit.md §2.5 的效果导向证据链替代——单测入口计数 + bte dispatch 日志 ×N + S1 复现脚本，通用化探针 extension 未建） | 10 个 extension 源文件 + 排查清单文档（附 PR） | P3 系统性收尾；S6 逐项 |
 | U3-3 extension 日志 taiji 托管默认落盘 | extension-logger 支持 `TAIJI_AGENT_EXT_LOG=1`（INFO 落盘 + 7 天清理；未注入保持 no-op）；runtime spawn env 注入（buildOutboundChildEnv extras，env-propagation-boundary 出站契约） | `extensions/shared/extension-logger/src/index.ts`、`packages/runtime/src/infra/pi/rpc-client.ts`（env extras） | P4；S7（含裸 pi 环境 no-op 验证） |
 | U3-4 pi 崩溃 stderr 落盘 | rpc-client 异常退出分支（code≠0 且非主动 kill）全量写 `pi-crash-<date>-<sid>.log`（logger.ts helper） | `packages/runtime/src/infra/pi/rpc-client.ts`、`infra/logger.ts` | P4；S7 |
 

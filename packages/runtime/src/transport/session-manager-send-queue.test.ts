@@ -19,6 +19,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { SessionManagerHandler } from './session-manager-handler.js'
 import { createSessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
+import { createClaimLedger } from '../services/session/notify-claims.js'
+import type { ClaimLedger } from '../services/session/notify-claims.js'
 import { applySessionOccupancyTransition } from '../services/session/event-interpreter.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 import type { ISessionService } from '../interfaces.js'
@@ -44,6 +46,8 @@ function makeHarness(overrides: {
   createResult?: Partial<SessionSummary>
   ensureActiveError?: Error
   recordWorkspaceError?: Error
+  /** false = 不接受理回执（P9 否定面：armed 悬挂交 TTL）；缺省 true（组合根同款接线） */
+  wireReceipt?: boolean
 } = {}) {
   const calls: CallLog = []
   const client = {
@@ -62,6 +66,8 @@ function makeHarness(overrides: {
     ...overrides.view,
   }
   const settledCbs: Array<(sid: string) => void> = []
+  const claims: ClaimLedger = createClaimLedger()
+  spawnedLedgers.push(claims)
   const registry = createSessionDeliveryRegistry({
     getSession: (sid) => (sid === view.id ? (view as unknown as IManagedSessionView) : undefined),
     ensureActive: async (sid: string) => {
@@ -78,6 +84,19 @@ function makeHarness(overrides: {
       if (overrides.recordWorkspaceError) throw overrides.recordWorkspaceError
     },
     getMessageBus: () => null,
+    // notify-once D2 受理回执（组合根 index.ts 同款接线形态——P9 事件序的集成层）：
+    // delivered → markInjected（injected 锚先于其后的 settled 帧）/ rejected → disarm。
+    ...(overrides.wireReceipt === false
+      ? {}
+      : {
+          onSettledMessage: (_sid: string, msg: { meta?: { notifyId?: unknown; parentSid?: unknown } }, outcome: 'delivered' | 'rejected') => {
+            const notifyId = typeof msg.meta?.notifyId === 'string' ? msg.meta.notifyId : undefined
+            const parentSid = typeof msg.meta?.parentSid === 'string' ? msg.meta.parentSid : undefined
+            if (notifyId === undefined || parentSid === undefined) return
+            if (outcome === 'delivered') claims.markInjected(parentSid, notifyId)
+            else claims.disarmDeliveryFailed(parentSid, notifyId)
+          },
+        }),
   })
   const sendExtensionUiResponse = vi.fn()
   const sessionService = {
@@ -108,12 +127,13 @@ function makeHarness(overrides: {
     delivery: registry,
     sendExtensionUiResponse,
     broadcastSessionList: vi.fn(),
+    claims,
   })
   /** 触发 agent_settled 边沿（模拟组合根多播分发到本 session） */
   const emitSettled = (sid = view.id): void => {
     for (const cb of settledCbs) cb(sid)
   }
-  return { handler, registry, client, view, sendExtensionUiResponse, sessionService, calls, emitSettled }
+  return { handler, registry, client, view, sendExtensionUiResponse, sessionService, calls, emitSettled, claims }
 }
 
 /** 解析 handler 回写 pi 的 respond JSON（唯一一条） */
@@ -137,8 +157,13 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // ClaimLedger 内部清扫定时器收口（每 harness 一个实例，登记制统一 dispose）
+  while (spawnedLedgers.length > 0) spawnedLedgers.pop()!.dispose()
   vi.useRealTimers()
 })
+
+/** harness 声明前登记点（makeHarness 内部 push） */
+const spawnedLedgers: ClaimLedger[] = []
 
 // ─── A1: busy 排队路径 ────────────────────────────────────────────────────
 
@@ -149,7 +174,7 @@ describe('A1-busy-queue-vitest: handleSend busy 时入队而非拒绝', () => {
     await h.handler.handle('req-1', 'parent-1', 'send', { sessionId: 's1', prompt: 'hello' })
 
     const respond = readRespond(h)
-    expect(respond).toEqual({ queued: true })
+    expect(respond).toEqual({ queued: true, willNotify: false }) // notify-once：未带 notifyId 不 arm
     // 不再出现旧拒绝形状
     expect(respond.blocked).toBeUndefined()
     expect(respond.rejected).toBeUndefined()
@@ -358,5 +383,58 @@ describe('A6-plugin-paths-vitest: plugin-service 两路径仍走 dispatcher 不�
     expect(src).toContain('deps.sessionService.sendMessage(sessionId, content, undefined, undefined, requireCommand)')
     expect(src).not.toContain('getOrCreateDelivery')
     expect(src).not.toContain('sendChecked')
+  })
+})
+
+// ─── P9 事件序（设计前提 P9，handler 集成层钉住）────────────────────────────
+// P9 = pi stdout 单流 FIFO：prompt 受理回执帧先写于其后 agent_settled 帧——injected 锚
+//（onSettled delivered → markInjected）先于兑现判定的安全性就在这里钉住。
+describe('P9-accept-receipt-vitest: 受理回执（onSettled delivered → markInjected）先于 settled 帧', () => {
+  const NID = 'sm-12345678-1234-4234-8234-123456789012'
+  const NID2 = 'sm-12345678-1234-4234-8234-123456789013'
+
+  it('send 受理即回执：sendChecked resolve 时 claim 已 injected → 其后首个 settle 即兑现', async () => {
+    const h = makeHarness()
+    await h.handler.handle('req-1', 'parent-1', 'send', {
+      sessionId: 's1',
+      prompt: 'run tests',
+      notifyId: NID,
+    })
+    // 内核 onSendOk 同栈顺序（settleChecked → onSettled delivered → markInjected）：
+    // await 返回时回执已落——比 pi stdout 上任何后续 settled 帧的处理更早（FIFO 帧序）
+    expect(h.claims.getClaim('parent-1', NID)?.state).toBe('injected')
+
+    // 模拟组合根 settle 兑现腿（首个 settled 帧到达）→ 即刻兑现，无 armed 悬挂缺口
+    const batch = h.claims.settle('s1', 'done')
+    expect(batch.settleSeq).toBe(1)
+    expect(batch.fulfilled).toHaveLength(1)
+    expect(batch.fulfilled[0].notifyId).toBe(NID)
+  })
+
+  it('否定面：回执缺位（registry 未接 onSettledMessage）→ settle 不兑现（armed 悬挂，交 TTL 清扫）', async () => {
+    const h = makeHarness({ wireReceipt: false })
+    await h.handler.handle('req-1', 'parent-1', 'send', {
+      sessionId: 's1',
+      prompt: 'run tests',
+      notifyId: NID,
+    })
+    expect(h.claims.getClaim('parent-1', NID)?.state).toBe('armed')
+    const batch = h.claims.settle('s1', 'done')
+    expect(batch.fulfilled).toHaveLength(0)
+    expect(batch.settleSeq).toBe(0) // 空批不占号
+    expect(h.claims.getClaim('parent-1', NID)?.state).toBe('armed')
+  })
+
+  it('回执 per-message 不串键：单例 handle 上两条带各自 notifyId 的投递各自锚定', async () => {
+    const h = makeHarness()
+    h.claims.arm({ parentSid: 'parent-1', notifyId: NID, kind: 'claim', sessionId: 's1' })
+    h.claims.arm({ parentSid: 'parent-1', notifyId: NID2, kind: 'claim', sessionId: 's1' })
+    const handle = h.registry.getOrCreateDelivery('s1')
+    expect(handle).toBe(h.registry.getOrCreateDelivery('s1')) // 单例约束（原 U6_SINGLETON 语义）
+    await handle.sendChecked({ payload: { kind: 'text', content: 'a' }, meta: { notifyId: NID, parentSid: 'parent-1' } })
+    await handle.sendChecked({ payload: { kind: 'text', content: 'b' }, meta: { notifyId: NID2, parentSid: 'parent-1' } })
+    expect(h.claims.getClaim('parent-1', NID)?.state).toBe('injected')
+    expect(h.claims.getClaim('parent-1', NID2)?.state).toBe('injected')
+    expect(h.client.prompt).toHaveBeenCalledTimes(2)
   })
 })

@@ -190,6 +190,21 @@ describe("manifest schema 字段级解析", () => {
     });
   });
 
+  it("processModel 透传：声明值入条目产物；缺省/非法值归一 per-window（U0 §3.3 决策 3）", () => {
+    makeEnginePkg(tmpRoot, "pm-shared", { processModel: "shared-service", capabilities: FULL_CAPABILITIES });
+    makeEnginePkg(tmpRoot, "pm-window", { processModel: "per-window", capabilities: FULL_CAPABILITIES });
+    makeEnginePkg(tmpRoot, "pm-default", { capabilities: FULL_CAPABILITIES });
+    makeEnginePkg(tmpRoot, "pm-invalid", { processModel: "per_window", capabilities: FULL_CAPABILITIES });
+    const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
+    expect(result.discovered).toHaveLength(4);
+    const byId = new Map(result.discovered.map((d) => [d.id, d.processModel]));
+    expect(byId.get("pm-shared")).toBe("shared-service");
+    expect(byId.get("pm-window")).toBe("per-window");
+    expect(byId.get("pm-default")).toBe("per-window");
+    expect(byId.get("pm-invalid")).toBe("per-window");
+    expect(collectedLogs.some((l) => l.level === "warn" && l.message.includes("processModel"))).toBe(true);
+  });
+
   it("bin 解析：manifest bin = package.json bin map 的 key → 入口绝对路径", () => {
     makeEnginePkg(tmpRoot, "binmap", { capabilities: FULL_CAPABILITIES });
     const result = scanEngines(scanOpts({ roots: [tmpRoot] }));

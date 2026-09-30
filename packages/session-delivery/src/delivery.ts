@@ -26,7 +26,9 @@
  * onSettled 记账口径（D9⑤ 升级）：
  * - 'delivered' = 送达口径：仅 confirmDelivered 驱动回调（受理只转 in-flight，
  *   不回调——受理 ≠ 送达的机制化落地）；per-message 契约（ext-simplify-08）在
- *   confirmDelivered 路径同样成立。
+ *   confirmDelivered 路径同样成立——对每条消息各回调一次，msg 为该条原始消息
+ *   （非 composed 合批消息），additive meta（notifyId 等）随原消息引用原样
+ *   透传到回调，内核不读不改。
  * - 'rejected' = 重试耗尽通知（v1 时点不变，判定源 = sendAttempts > max，仅通知）。
  * - 显式例外：sendChecked 的同步 settle 维持受理口径不变——promise 在 port.send
  *   受理成功时点 resolve（session_manager send 的 {queued:true} 契约锚，D9⑤ 锁定），

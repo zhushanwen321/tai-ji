@@ -48,6 +48,7 @@ export type CrashJournalEventName =
   | 'reattach-skipped'
   | 'checkpoint-corrupt'
   | 'reaped'
+  | 'reap-failed'
   | 'inbound-frame-dropped'
   | 'frame-truncated'
   | 'frame-unserializable'
@@ -164,9 +165,9 @@ export interface CrashJournalEvent {
 
   // ── 扩展字段登记面（开放语义：新增须在此登记，见接口头注）─────────────
 
-  /** [reaped] 被收殓的孤儿 pi 进程 pid（reap-orphan-pi.ts 杀链命中行）。 */
+  /** [reaped/reap-failed] 被收殓（成功/失败）的孤儿 pi 进程 pid（reap-orphan-pi.ts 杀链命中行）。 */
   pid?: number | null
-  /** [reaped] 收殓时刻的 ppid（恒 1 = reparent 证据，归因复核判据；reap-orphan-pi.ts）。 */
+  /** [reaped/reap-failed] 收殓时刻的 ppid（恒 1 = reparent 证据，归因复核判据；reap-orphan-pi.ts）。 */
   ppid?: number | null
   /** [reclaimed] 回收判定时的空闲时长 now - lastActivityAt（idle-pi-reaper.ts 摘除步）。 */
   idleMs?: number | null
@@ -235,6 +236,7 @@ export const CRASH_JOURNAL_EVENTS = [
   'reattach-skipped',
   'checkpoint-corrupt',
   'reaped',
+  'reap-failed',
   'inbound-frame-dropped',
   'frame-truncated',
   'frame-unserializable',

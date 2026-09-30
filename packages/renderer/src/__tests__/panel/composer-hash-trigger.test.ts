@@ -22,26 +22,15 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { nextTick, defineComponent, ref } from 'vue'
+import { nextTick, defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Mock } from 'vitest'
+import { composerChatModule, composerFlowModule, composerApiModule } from '../helpers/composer-mount'
 
 // ── Composer 路径 mock —— vi.mock factory 必须早于 import ──
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    send: vi.fn(),
-    steer: vi.fn(),
-    followUp: vi.fn(),
-    abort: vi.fn(),
-    compact: vi.fn(),
-    editAndResend: vi.fn(),
-    hydrateHistory: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn(), currentCwd: ref(null) }),
-  resetNewTaskFlow: vi.fn(),
-}))
+// useChat / useNewTaskFlow / api 骨架单源 helpers/composer-mount.ts（本文件无 spy 断言）
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 
 // session 域 mock：getCommands（slash 打开主动拉断言）/ getSubagents（subagent 候选 load）
 const getCommandsMock = vi.hoisted(() => vi.fn())
@@ -51,23 +40,12 @@ const mockLoad = vi.hoisted(() => vi.fn())
 vi.mock('@/composables/features/search/useFileSearch', () => ({
   useFileSearch: () => ({ load: (...args: unknown[]) => mockLoad(...args) }),
 }))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: {
-    setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })),
-    getCommands: getCommandsMock,
-    getSubagents: getSubagentsMock,
-  },
-  composer: {
-    getMentionCandidates: vi.fn().mockResolvedValue([]),
-    getFileCandidates: vi.fn().mockResolvedValue([]),
-  },
-  config: {
-    getGlobalSkills: vi.fn().mockResolvedValue([]),
-    getProjectSkills: vi.fn().mockResolvedValue([]),
-    onSkillCacheInvalidated: () => () => {},
-  },
-}))
+vi.mock('@/api', () => {
+  // api 骨架单源 helpers/composer-mount.ts；session 域追加本文件受控 mock
+  //（getCommands：slash 打开主动拉断言；getSubagents：subagent 候选 load）
+  const api = composerApiModule()
+  return { ...api, session: { ...api.session, getCommands: getCommandsMock, getSubagents: getSubagentsMock } }
+})
 
 import { ComposerInput, ComposerInputDepsKey } from '@taiji/ui/features/composer'
 import CommandPopover from '@/components/panel/CommandPopover.vue'

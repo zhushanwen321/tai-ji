@@ -17,11 +17,16 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/gen-stats-triggers.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import * as events from '@taiji/core/transport/api'
+import { flushPromises } from '@vue/test-utils'
+import { commandMock, transportApiCommandModule } from '../helpers/transport-command-mock'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { __clearInFlightGenStatsForTest } from '@/composables/features/model/useGenStats'
-import type { GenStatsCacheMiss, GenStatsFrame, ServerMessage } from '@taiji/shared'
+import {
+  genStatsFrame as genFrame,
+  mountGenStatsPanel,
+  pushSessionMsg,
+} from '../helpers/gen-stats-mount'
+import type { GenStatsCacheMiss } from '@taiji/shared'
 
 import GenStatsTriggers, {
   formatTtftDuration,
@@ -31,48 +36,37 @@ import GenStatsTriggers, {
 } from '@/components/panel/GenStatsTriggers.vue'
 
 // ── mock 边界：getGenStats RPC mock 为受控 pending（恢复腿不落地）──
-// mock 目标 = 实现 import 的权威路径（u5 re-anchor 删除 @/api/request bridge 后，
-// mock 指旧路径 = 拦截失效，恢复腿会真实打 transport）；spread actual 只换 command/
-// 超时常量：useSessionEvents 经主模块 events.on 订阅，须保留真实 events 通道（测试侧
-// dispatchSession 与实现侧订阅经同一真实 events 模块实例，注册表共享），否则帧链路断
-const commandMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api', async (importActual) => {
-  const actual = await importActual<typeof import('@taiji/core/transport/api')>()
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
-})
-
-/** HoverCard 家族 stub：内容常开渲染（观察者形态——浮层内容行可 DOM 断言） */
-const HOVER_STUBS = {
-  HoverCard: { name: 'HoverCard', template: '<div><slot /></div>' },
-  HoverCardTrigger: { name: 'HoverCardTrigger', template: '<div><slot /></div>' },
-  HoverCardContent: { name: 'HoverCardContent', template: '<div><slot /></div>' },
-}
+// spread-actual mock 体单源在 helpers/transport-command-mock.ts（events 真实通道保留，
+// RPC_BACKSTOP_TIMEOUT_MS 透传 30_000；commandMock 为该 helper 导出的文件内单例）。
+vi.mock('@taiji/core/transport/api', () => transportApiCommandModule())
 
 const SPEED_TITLE = 'TOKEN 速度' // zh-CN locale（vitest-i18n-setup 解析）
 const CACHE_TITLE = '缓存命中率'
 const TTFT_TITLE = '首字延迟 TTFT'
 
-/** 帧工厂（ttft 基线：current=820 →「820ms」，day=900 →「900ms」，d7=1100 →「1.1s」，d30=1300 →「1.3s」） */
-function genFrame(sessionId: string, overrides: Partial<GenStatsFrame> = {}): GenStatsFrame {
-  return {
-    sessionId,
-    speed: { current: 35, day: 28, d7: 22, d30: 19 },
-    cacheRatio: { current: 91, day: 87 },
-    ttft: { current: 820, day: 900, d7: 1100, d30: 1300 },
-    model: 'prov-a/m1',
-    ...overrides,
-  }
-}
-
-function pushSessionMsg(sid: string, msg: ServerMessage): void {
-  events.dispatchSession(sid, msg)
-}
-
+/** GenStats 面板 mount 编排（HoverCard stub 家族 + props）单源在 helpers/gen-stats-mount */
 function mountTriggers(stubHover = false) {
-  return mount(GenStatsTriggers, {
-    props: { sessionId: 's1', modelId: 'prov-a/m1' },
-    global: stubHover ? { stubs: HOVER_STUBS } : {},
+  return mountGenStatsPanel(GenStatsTriggers, stubHover)
+}
+
+/**
+ * 归因态（cacheMiss）帧驱动公共段：mount（HoverCard 常开）+ flush + 推归因帧 + flush。
+ * 供归因降噪用例（说明行/浮层断言）单源驱动，返回 wrapper 供 DOM 断言。
+ */
+async function mountAndPushCacheMiss(
+  ratio: { current: number; day: number },
+  currentMiss: GenStatsCacheMiss,
+) {
+  const wrapper = mountTriggers(true)
+  await flushPromises()
+
+  pushSessionMsg('s1', {
+    type: 'session.stats_update',
+    payload: genFrame('s1', { cacheRatio: { ...ratio, currentMiss } }),
   })
+  await flushPromises()
+
+  return wrapper
 }
 
 beforeEach(() => {
@@ -207,16 +201,7 @@ describe('双触发器渲染（黑盒 DOM）', () => {
 
   // ── [RD-2#6/#7] 假测量值治理 + 未知 reason 协议漂移兜底 ──
   it('[RD-2#6] idle-expiry 无 idleMs → 说明行显「空闲时长未知」，不产「已空闲 1m」假测量值；触发器 label 仍为「空闲过期」', async () => {
-    const wrapper = mountTriggers(true)
-    await flushPromises()
-
-    pushSessionMsg('s1', {
-      type: 'session.stats_update',
-      payload: genFrame('s1', {
-        cacheRatio: { current: 0, day: 90, currentMiss: { reason: 'idle-expiry' } },
-      }),
-    })
-    await flushPromises()
+    const wrapper = await mountAndPushCacheMiss({ current: 0, day: 90 }, { reason: 'idle-expiry' })
 
     // idleMs 缺失：时长未知分支文案，不以 ?? 0 伪装成「空闲 1m」（D4：null=无数据/0=真值）
     const note = wrapper.find('[data-testid="genstats-cache-miss-note"]')
@@ -474,6 +459,21 @@ describe('浮层内容（观察者形态）', () => {
     expect(wrapper.find('[data-testid="genstats-cache-miss-note"]').text()).toContain('空闲')
     // 归因态无 0% 数值可画 → bar 整体隐藏（空轨道会被读成另一种 0）
     expect(wrapper.find('[data-testid="genstats-cache-bar"]').exists()).toBe(false)
+  })
+
+  // ── formatIdle ≥1h 分支（MF-1-4 边界锚）：整点「3h」/ 非整点「3h50m」──
+  it.each([
+    { idleMs: 13_800_000, duration: '3h50m' },
+    { idleMs: 10_800_000, duration: '3h' },
+  ])('归因态浮层：idleMs=$idleMs（≥1h）→ 说明行含「$duration」（小时档格式化）', async ({ idleMs, duration }) => {
+    const wrapper = await mountAndPushCacheMiss(
+      { current: 0, day: 96 },
+      { reason: 'idle-expiry', idleMs },
+    )
+
+    const note = wrapper.find('[data-testid="genstats-cache-miss-note"]')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain(`距上次请求已空闲 ${duration}`)
   })
 
   it('context-rewrite 归因浮层：压缩重建说明行', async () => {

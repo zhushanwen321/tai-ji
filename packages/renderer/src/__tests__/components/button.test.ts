@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * buttonVariants base class 回归守卫（Plan 02 — Button 按下物理反馈）。
  *

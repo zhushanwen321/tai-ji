@@ -6,7 +6,7 @@
  * 缩进语义（AC-4「逐字保留」不变式）。IF6（_KNOWN_FIELDS 提升至生成源
  * module scope）落地时基线已按设计在同一 commit 内更新为最终形态。
  *
- * 样例脚本覆盖 $ARGS / schema / parallel / pipeline / workflow / phase / log 特性。
+ * 样例脚本覆盖 $ARGS / schema / parallel / pipeline / phase / log 特性。
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -26,7 +26,6 @@ const sampleScript = [
   '  agent({ task: "lint", agent: "./linter.md", skill: "lint-skill" }),',
   "]);",
   "await pipeline([(x) => x, (x) => x]);",
-  'await workflow("deploy", { env: "prod" });',
   'log("done " + name + " " + $WORKSPACE + " " + $BUDGET.remaining());',
   "module.exports = { execute: async (ctx) => ctx.agent(\"finalize\") };",
 ].join("\n");
@@ -119,7 +118,7 @@ describe("buildWorkerScript — _KNOWN_FIELDS module scope 提升（IF6）", () 
   });
 
   // [F-2 maxTurns:0 吞没修复] 旧字符串分支 `&& maxTurns) || undefined` 把显式 0
-  // 抹成 undefined → runSpawn 落 env 兑底（SPAWN_WATCHDOG env 设置时误挂 watchdog），
+  // 抹成 undefined → runSpawn 落 env 兜底（SPAWN_WATCHDOG env 设置时误挂 watchdog），
   // 与对象分支保真语义分裂。锁定生成源为 ?? 形态（0/null/undefined 区分处理）。
   it("string 分支 maxTurns 用 ?? 语义（显式 0 不抹成 undefined，F-2）", () => {
     const out = buildWorkerScript("// noop");

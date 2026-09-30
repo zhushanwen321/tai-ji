@@ -3,11 +3,12 @@
 // `subagent` LLM 工具。薄壳——参数解析 + 调 runtime.execute。
 // 不创建 state、不节流 onUpdate、不持久化（全部在 runtime 层统一）。
 //
-// 设计说明：renderCall/renderResult/execute 三个回调均抽成模块级 const +
-// 顶层 type alias。原因：stub 的 registerTool(tool: unknown) 参数是 unknown，
-// 在其对象字面量内直接标注从 pi-coding-agent 导入的泛型（AgentToolResult<X>、
-// Theme、ExtensionContext）会触发 TS2307 误报（probe5d/5f 验证）。
-// 抽到顶层后参数类型由 alias 提供，绕过该 quirk。
+// 设计说明：execute / renderCall 两个回调抽成模块级 const + 顶层 type alias。
+// 原因：stub 的 registerTool(tool: unknown) 参数是 unknown，在其对象字面量内直接
+// 标注从 pi-coding-agent 导入的泛型（AgentToolResult<X>、Theme、ExtensionContext）
+// 会触发 TS2307 误报（probe5d/5f 验证）。抽到顶层后参数类型由 alias 提供，绕过
+// 该 quirk。renderResult 直接引用 tool-render.ts 导出的 renderSubagentResult
+// 函数值——值引用不涉及类型标注，不受该 quirk 影响。
 
 import { isAbsolute } from "node:path";
 
@@ -18,9 +19,17 @@ import type { Static } from "typebox";
 
 import { getSubagentService } from "@zhushanwen/subagent-core";
 import type { SubagentToolResult } from "@zhushanwen/subagent-core";
+import {
+  cancelHandler,
+  closeHandler,
+  forkFromHandler,
+  listHandler,
+  messageHandler,
+  startHandler,
+} from "@zhushanwen/subagent-core";
 import { extractAgentName } from "./format.ts";
 import { toGuiCtx } from "./gui-mappers.ts";
-import { adapter, cancelHandler, closeHandler, forkFromHandler, listHandler, messageHandler, startHandler } from "./subagent-actions.ts";
+import { adapter } from "./subagent-actions.ts";
 import { SubagentParams } from "./subagent-tool-schema.ts";
 import { type RenderContext,renderSubagentCall, renderSubagentResult } from "./tool-render.ts";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
@@ -47,13 +56,6 @@ type SubagentExecuteCb = (
 ) => Promise<AgentToolResult<SubagentToolResult>>;
 
 type SubagentRenderCallCb = (args: unknown, theme: Theme, ctx: RenderContext) => Component;
-
-type SubagentRenderResultCb = (
-  result: AgentToolResult<SubagentToolResult>,
-  options: { expanded: boolean; isPartial: boolean },
-  theme: Theme,
-  ctx: RenderContext,
-) => Component;
 
 // ============================================================
 // renderCall 预解析 helper
@@ -221,7 +223,7 @@ Do NOT recurse when: the work is linear/flat; the child needs your context; or y
     executionMode: "sequential",
     parameters: SubagentParams,
     renderCall: subagentRenderCall,
-    renderResult: subagentRenderResult,
+    renderResult: renderSubagentResult,
     execute: executeSubagent,
   });
 }
@@ -260,9 +262,6 @@ const subagentRenderCall: SubagentRenderCallCb = (args, theme, ctx) => {
   return renderSubagentCall(args, theme, ctx, resolved);
 };
 
-const subagentRenderResult: SubagentRenderResultCb = (result, options, theme, ctx) =>
-  renderSubagentResult(result, options, theme, ctx);
-
 /**
  * execute 实现（action 路由 + adapter）。
  *
@@ -295,7 +294,16 @@ const executeSubagent: SubagentExecuteCb = async (
   // background 模式：execute 立即返回，detached 运行不向 tool 层回流 onUpdate
   //（完成由 notify 驱动新 turn）。onUpdate 参数保留以兼容 SDK 回调签名，但不消费。
   const service = getSubagentService();
-  if (!service) throw new Error("subagents runtime not initialized");
+  if (!service) {
+    // [C2] 错误带恢复动作（对齐 workflow-events getWorkflowDeps 的 store unavailable
+    // 闭环风格）：service 缺席的 root cause 是 session_start 装配链失败（围栏 catch
+    // 只留 extension 日志），此处指引 reload + 查日志，接通「现象 → 根因」链路。
+    throw new Error(
+      "subagents runtime not initialized (session_start assembly failed). " +
+        "Recovery: reload this session or restart pi to re-run initialization, " +
+        "and check the subagents extension logs (session_start failure) for the root cause.",
+    );
+  }
 
   // typebox v1 的 StringEnum 在 Static 投影下退化为 string，此处类型守卫收窄回
   // 字面量联合，恢复 switch 的 exhaustiveness 约束（default 分支 = never）。

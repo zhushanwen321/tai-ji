@@ -56,7 +56,8 @@ let sandboxDir = "";
 
 beforeEach(() => {
   sandboxDir = mkdtempSync(join(tmpdir(), "rfl-scriptpath-failfast-"));
-  for (const stem of SCRIPT_STEMS) {
+  // 副本覆盖六件：SCRIPT_STEMS 五件 + fan-out（空串形态用例补齐的第六件）
+  for (const stem of [...SCRIPT_STEMS, "fan-out"]) {
     copyFileSync(join(WORKFLOWS_DIR, stem + ".js"), join(sandboxDir, stem + ".cjs"));
   }
   // _shared 布局对齐真实 workflows/（四编排脚本经 SCRIPT_DIR + "/_shared" 定位）
@@ -153,6 +154,31 @@ describe("内置 workflow 脚本 scriptPath 锚定 fail-fast（u0-failfast）", 
     expect(stderr).toContain("core_module_load_failed");
     expect(stderr).not.toContain(PLANTED_MARKER);
   });
+
+  // 空串形态 = resume 从旧 record 流（scriptPath 载荷落地前）重建的 spec——与缺席
+  // 同拦（D5 收紧），文案区分两种形态：空串指明「旧 run 重跑」而非「注入义务」。
+  // fan-out 不在 SCRIPT_STEMS（原覆盖五件），此处单独枚举补齐六件。
+  it.each([...SCRIPT_STEMS, "fan-out"].map((stem) => [stem] as const))(
+    "%s：scriptPath 为空串（旧 record 流形态）→ 非零退出 + 空串专属恢复指引，cwd 植入依赖不被加载",
+    async (stem) => {
+      const minArgs: Record<string, string> = {
+        ...MIN_VALID_ARGS,
+        "fan-out": '{ tasks: ["probe"] }',
+      };
+      plantHostileUtils(sandboxDir);
+      const stderr = await runNodeExpectFailure(
+        ["-e", probeCode(stem, '{ scriptPath: "" }', minArgs[stem])],
+        sandboxDir,
+      );
+
+      expect(stderr).toContain("core_module_load_failed");
+      // 空串形态专属恢复指引：旧 run 重跑（中英文文案均含 resume 字样）
+      expect(stderr).toContain("resume");
+      // 文案区分的证据：不再指向注入义务（WorkerHost 是缺席形态的指引）
+      expect(stderr).not.toContain("WorkerHost");
+      expect(stderr).not.toContain(PLANTED_MARKER);
+    },
+  );
 
   it("正向探针（review-fix-loop）：scriptPath 注入后 utils 锚定加载成功（白名单校验执行 = VALID_ARG_KEYS 已解构）", async () => {
     const workerDataJson = "{ scriptPath: " + JSON.stringify(join(sandboxDir, "review-fix-loop.cjs")) + " }";

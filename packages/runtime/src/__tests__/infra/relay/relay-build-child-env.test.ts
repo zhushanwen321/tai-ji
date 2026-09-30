@@ -4,7 +4,7 @@
  * 覆盖验收断言点：
  * - 五键剥离范式保留（RELAY_ENV_* 经 extras undefined=删除语义迁入构建器）；
  * - 叠加 deny 两键剔除（D4：「叠加 deny 过滤后不多不少」）；
- * - 帧 env 全量拷贝拓扑不变（pass-all：schemaEnv/worktree 标志类非白名单键必须原样保留）；
+ * - 帧 env 全量拷贝拓扑不变（pass-all：PI_WORKFLOW_SCHEMA 类非白名单 extras 键必须原样保留）；
  * - 不 mutate 帧 env 输入（R1）。
  *
  * 直接导入纯函数验（handleConnection 全链路已有 relay-registry.test.ts 真 socket 覆盖）。

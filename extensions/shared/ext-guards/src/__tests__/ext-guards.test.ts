@@ -1,11 +1,12 @@
 // src/__tests__/ext-guards.test.ts
 //
-// oncePerProcess 单测——验收条款逐条对应（u-guards-pkg ①）：
+// oncePerProcess 单测——验收条款逐条对应（u-guards-pkg ①；失败语义按加固审查裁决
+// 修订为「失败不缓存、下次调用可重试」）：
 //   a. key 隔离去重：不同 key 互不影响，各自首次调用执行
 //   b. 同 key 双调 fn 仅执行一次
-//   c. fn 抛错不释放 key：同 key 再调不再执行（每进程至多一次的字面语义）
+//   c. fn 抛错不吞不包装，且不缓存——同 key 再调重新执行（可重试）
 //   d. 结果缓存形态：值原样重放（严格同一引用）、Promise 实例重放
-//      （含 rejected Promise 缓存——不因 rejection 释放 key）
+//   e. rejected Promise：落定后释放 key，下次调用重新执行
 //
 // 模块级 Map 是被测状态：测试间共享，每个用例用全文件唯一的 key 隔离。
 
@@ -37,21 +38,68 @@ describe("oncePerProcess", () => {
 		expect(fnB).toHaveBeenCalledTimes(1);
 	});
 
-	it("fn 同步抛错：错误原样上抛（不吞不包装），key 不释放——同 key 再调不再执行且重抛同一错误", () => {
+	it("fn 同步抛错：错误原样上抛（不吞不包装），不写缓存——同 key 再调重新执行（可重试）", () => {
 		const boom = new Error("reap failed");
-		const failing = vi.fn(() => {
+		let attempts = 0;
+		const fn = vi.fn(() => {
+			attempts += 1;
+			if (attempts === 1) throw boom;
+			return "recovered";
+		});
+
+		expect(() => oncePerProcess("dedupe:throws-retry", fn)).toThrow(boom);
+		expect(fn).toHaveBeenCalledTimes(1);
+
+		// 失败不缓存：下次同 key 调用重新执行 fn，成功结果照常缓存
+		expect(oncePerProcess("dedupe:throws-retry", fn)).toBe("recovered");
+		expect(fn).toHaveBeenCalledTimes(2);
+		// 成功后去重恢复：不再执行
+		expect(oncePerProcess("dedupe:throws-retry", fn)).toBe("recovered");
+		expect(fn).toHaveBeenCalledTimes(2);
+	});
+
+	it("async fn 抛错：rejected Promise 落定后释放 key——下次调用重新执行（可重试）", async () => {
+		const boom = new Error("async reap failed");
+		let attempts = 0;
+		const fn = vi.fn(async () => {
+			attempts += 1;
+			if (attempts === 1) throw boom;
+			return "recovered";
+		});
+
+		const first = oncePerProcess("dedupe:async-rejected-retry", fn);
+		// 先 attach 断言再消费，避免 unhandledRejection
+		await expect(first).rejects.toThrow(boom);
+		expect(fn).toHaveBeenCalledTimes(1);
+
+		// rejection 已落定、key 已释放：下次调用重新执行 fn
+		const second = oncePerProcess("dedupe:async-rejected-retry", fn);
+		expect(second).not.toBe(first);
+		await expect(second).resolves.toBe("recovered");
+		expect(fn).toHaveBeenCalledTimes(2);
+	});
+
+	it("async fn：rejection 落定前的同 key 双调仍重放同一实例（落定后释放）", async () => {
+		const boom = new Error("async reap failed");
+		const fn = vi.fn(async () => {
 			throw boom;
 		});
 
-		expect(() => oncePerProcess("dedupe:throws", failing)).toThrow(boom);
+		const first = oncePerProcess("dedupe:async-inflight", fn);
+		// 落定前第二次调用：同一 Promise 实例（在飞去重不双跑）
+		const second = oncePerProcess("dedupe:async-inflight", fn);
+		expect(second).toBe(first);
+		// 先 attach 断言再消费，避免 unhandledRejection
+		const firstRejection = expect(first).rejects.toThrow(boom);
+		await firstRejection;
+		await Promise.resolve(); // 让释放 handler 的微任务走完
+		expect(fn).toHaveBeenCalledTimes(1);
 
-		// 再调换一个「本会成功」的 fn：若 key 被释放，它会执行并返回——这是本条
-		// 的核心断言（失败不重置，双跑窗口不重新打开）
-		const shouldNeverRun = vi.fn(() => "second attempt");
-		expect(() => oncePerProcess("dedupe:throws", shouldNeverRun)).toThrow(boom);
-
-		expect(failing).toHaveBeenCalledTimes(1);
-		expect(shouldNeverRun).not.toHaveBeenCalled();
+		// 落定后第三次调用：key 已释放，fn 重新执行
+		const third = oncePerProcess("dedupe:async-inflight", fn);
+		expect(third).not.toBe(first);
+		await expect(third).rejects.toThrow(boom);
+		expect(fn).toHaveBeenCalledTimes(2);
 	});
 
 	it("结果缓存形态：对象返回值严格同一引用（重放非重新求值）", () => {
@@ -78,20 +126,14 @@ describe("oncePerProcess", () => {
 		expect(fn).toHaveBeenCalledTimes(1);
 	});
 
-	it("async fn 抛错：rejected Promise 被缓存——同 key 再调重放同一实例、fn 不再执行", async () => {
-		const boom = new Error("async reap failed");
-		const fn = vi.fn(async () => {
-			throw boom;
-		});
+	it("fn 返回 undefined：值仍被缓存（不因 undefined 误判未执行）", () => {
+		const fn = vi.fn(() => undefined);
 
-		const first = oncePerProcess("dedupe:async-rejected", fn);
-		// 先 attach 断言再消费，避免 unhandledRejection
-		const firstRejection = expect(first).rejects.toThrow(boom);
-		const second = oncePerProcess("dedupe:async-rejected", fn);
+		const first = oncePerProcess("dedupe:undefined-value", fn);
+		const second = oncePerProcess("dedupe:undefined-value", fn);
 
-		expect(second).toBe(first);
-		await firstRejection;
-		await expect(second).rejects.toThrow(boom);
+		expect(first).toBeUndefined();
+		expect(second).toBeUndefined();
 		expect(fn).toHaveBeenCalledTimes(1);
 	});
 });

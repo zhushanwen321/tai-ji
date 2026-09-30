@@ -61,13 +61,13 @@ const os = require('node:os');
 const CLI_PATH = process.env.ZCODE_ENG_CLI_PATH;
 const V2_PATH = process.env.ZCODE_ENG_V2_CONFIG || path.join(os.homedir(), '.zcode', 'v2', 'config.json');
 const CONFIG_PATH = path.join(os.homedir(), '.zcode', 'cli', 'config.json');
-// 与 constants.ts ZCODE_FALLBACK_DEFAULT_MODEL 双源（内嵌字符串无法 import）——改那边须同步此处
-const FALLBACK_MODEL_MAIN = 'builtin:bigmodel-coding-plan/GLM-5.3';
 
 // 合并形态：真实 cli config 原样（model/plugins/mcp/subagents 等 worker 继承面不变）
 // + v2 的 provider 字典注入，同 id 时 v2 条目整条优先——GUI 直传 modelConfig 时
 // v2 即权威源（进程外等价复刻）；cli config 不在 GUI 管理面、可能残留历史验证
 // 配置（2026-08-25 事故：残留旧 key 压过新凭据致 turn 0 401），故不取 real 优先。
+// model.main 缺失时只从 v2 透传（v2 也没有则不伪造——CLI 缺省解析自会落到注册表
+// 可用模型；plan 家族 id 已不可用，不再兜底伪造）。
 // 返回 null = 无可注入凭据（v2 无 provider 条目）——不 patch，让原生报错透出。
 // 读源经 readOrig 间接取：patch 前首调 = fs.readFileSync 本体；patch 后 = 原函数
 // （防 patch 后的递归自调用）。
@@ -95,9 +95,9 @@ function injectedConfigText() {
   if (Object.keys(injectable).length === 0) return null;
   const merged = { ...real };
   merged.provider = { ...(real.provider && typeof real.provider === 'object' ? real.provider : {}), ...injectable };
-  if (!merged.model || typeof merged.model !== 'object' || !merged.model.main) {
-    const main = (v2.model && v2.model.main) || FALLBACK_MODEL_MAIN;
-    merged.model = { ...(merged.model || {}), main };
+  if ((!merged.model || typeof merged.model !== 'object' || !merged.model.main)
+      && v2.model && typeof v2.model === 'object' && v2.model.main) {
+    merged.model = { ...(merged.model || {}), main: v2.model.main };
   }
   return JSON.stringify(merged);
 }
@@ -195,6 +195,23 @@ if (!process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE) {
     }
   } catch { /* provider 目录缺失/不可读 → 不设键 */ }
   if (located) process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = located;
+  // endpoint origin 对齐（2026-09-29 迁移同步）：CLI 按 ZCODE_BASE_URL 派生 active
+  // 目录路径（sha256(origin) 前缀）；GUI 安装的目录在 refresh 控制文件的 endpointKey
+  // 下（如 https://zcode.z.ai），与 CLI 缺省 origin（bigmodel.cn）不同——不注入则
+  // active 路径算到不存在的目录，触发无谓的联网重装尝试。从已定位目录的邻位控制
+  // 文件读出 origin 注入（无硬编码）；显式 env 优先，不覆盖。
+  if (located && !process.env.ZCODE_BASE_URL && !process.env.ZCODE_ENDPOINT_ORIGIN) {
+    try {
+      const ctlPath = path.join(path.dirname(located), 'zcode-builtin-refresh.json');
+      const ctlText = fs.__origReadFileSync
+        ? fs.__origReadFileSync.call(fs, ctlPath, 'utf8')
+        : fs.readFileSync(ctlPath, 'utf8');
+      const ctl = JSON.parse(ctlText);
+      if (ctl && typeof ctl.endpointKey === 'string' && ctl.endpointKey.indexOf('http') === 0) {
+        process.env.ZCODE_BASE_URL = ctl.endpointKey;
+      }
+    } catch { /* 控制文件缺失/损坏 → 不注入（CLI 用缺省 origin 派生） */ }
+  }
 }
 
 // 上游 provider bootstrap 以 argv[1] 为入口锚，从该路径邻近定位 CLI 内建

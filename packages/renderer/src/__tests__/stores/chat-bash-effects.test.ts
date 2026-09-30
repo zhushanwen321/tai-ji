@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * w1 timer-decouple 回归测试（bash-align-pi-tui-w4::w1-timer-decouple；
  * W1 fix-chat-flow-order entry 化后种子方式更新）。

@@ -57,7 +57,7 @@ export interface SessionSummary {
   sessionFile?: string
   /**
    * 归属 project id（D14 语义修正，2026-08-04）：session 创建时归属当前 activeProject，
-   * 与 cwd 无关（project 可跨目录）。无值 = 未归类，展示层归入默认项目（proj-default 兑底）。
+   * 与 cwd 无关（project 可跨目录）。无值 = 未归类，展示层归入默认项目（proj-default 兜底）。
    * 持久化在独立 sidecar `<sessionFile>.project.json`（与 preset sidecar 同模式），
    * runtime 扫描时读取填充。fork 继承父归属。
    */

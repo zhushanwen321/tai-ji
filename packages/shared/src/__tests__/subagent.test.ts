@@ -2,7 +2,10 @@
 //   - SUBAGENT_STATUS_ALL 全集 = 两态（B3 编译锁的运行时镜像——编译锁拦「联合扩值
 //     漏改元组」，本测试拦「元组值域与联合语义漂移」的回归方向）；
 //   - deriveClosedDisplay 既有三分色不回归（U6 起消费方迁至 runtime 归一层，作为
-//     closed → stopReason 派生映射的推导器）。
+//     closed → stopReason 派生映射的推导器）；
+//   - [W1 / D1] subagent-record v2 条目契约镜像（注册/终态两条小条目）：shared 侧
+//     形状断言 + JSON round-trip——core 侧权威定义（record-entry.ts）与 shared 镜像
+//     的同构漂移由本测试 + core record-entry-collect.test.ts 双侧互证把守。
 
 import { describe, expect, it } from 'vitest'
 
@@ -35,3 +38,4 @@ describe('deriveClosedDisplay（legacy 终态三分色，扩值不回归）', ()
     expect(deriveClosedDisplay({})).toBe('done')
   })
 })
+

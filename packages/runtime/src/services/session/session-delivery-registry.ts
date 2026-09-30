@@ -19,8 +19,9 @@
  *    pi 只有队列级原语（F9），条目级收回在本层以「全收 + 标记识别 + 其余重投」实现。
  *
  * 单例约束（§3.4）：同 sessionId 必须复用同一 handle——多 handle 并发投递竞态无保护。
- * sd-u6（完成回流）复用本注册表；session_manager send / completion-backflow / landing 首发
- * 三个既有调用方经注册表 handle（或 sendDirect）零改动承接。
+ * [HISTORICAL] sd-u6 完成回流曾复用本注册表；notify-once 废弃 CompletionBackflow 后回流腿
+ * 消失，禁止自行 createDelivery 的单例约束仍由现行消费方（session_manager send 排队 /
+ * create 直投 / landing 首发）共守。
  *
  * 装配纪律（MF-1-7 收编后终态）：本注册表由组合根（index.ts）创建后经
  * SessionService.setDeliveryRegistry 后置注入消费方（MessageDispatcher / RevokeOrchestrator）
@@ -62,6 +63,8 @@ export interface SessionDeliveryDeps {
   recordWorkspace(cwd: string): void
   /** MessageBus 当前值（skillNotice 广播 + 投递失败 message.error 用） */
   getMessageBus(): IMessageBus | null
+  /** notify-once D2 受理回执（per-message、meta 原样透传）；缺席（未注入）= 字段缺省，内核行为零变化 */
+  onSettledMessage?: (sessionId: string, msg: DeliveryMessage, outcome: 'delivered' | 'rejected') => void
 }
 
 /** 提交入参（delivery.submit / message.send 适配器共用） */
@@ -624,7 +627,8 @@ export function createSessionDeliveryRegistry(
   /**
    * 单条出站交接（port.send 的逐条实现 + sendDirect 共用）：
    * 抑制/撤销守卫 → 持有等待 → 显式投递放行 → ensureActive → skill 注入 → prompt（busy 类
-   * 拒绝按 D6 处置）→ skillNotice → 三副作用置位。置位晚于 prompt 受理（成功才显示 working）。
+   * 拒绝按 D6 处置）→ skillNotice → 记账置位。occupancy 置位先于 prompt（RT-4#10，RPC 往返
+   * 窗不呈 idle）；lastActiveAt/workspace 记账晚于 prompt 受理（成功才显示 working）。
    * entryId = 本段对应的内核条目 id（splitComposed 按 marker 定位直传；agent 通路无标记段
    * undefined）——撤销/抑制判定的唯一锚是条目身份，同文本多条互不误伤（V 裁决 R2-A2）。
    */
@@ -1087,8 +1091,11 @@ export function createSessionDeliveryRegistry(
     const handle = createDelivery(buildPort(sessionId, state, handleRef), {
       // 默认意图：turn 边界抢占（D3）；pi 词汇映射在 toStreamingBehavior
       intent: 'interrupt-at-turn-boundary',
-      // D9⑤ 记账口径：'delivered' 由确认路径驱动；'rejected' 为重试耗尽通知（仅记账）
+      // D9⑤ 记账口径：'delivered' 由确认路径驱动；'rejected' 为重试耗尽通知（仅记账）。
+      // notify-once D2 桥接（P9 帧序：内核同栈触发，先于 settled 帧）：meta 原样透传给
+      // 债权侧（ClaimLedger），缺席（未注入）零行为变化。
       onSettled: (msg, outcome) => {
+        deps.onSettledMessage?.(sessionId, msg, outcome)
         if (outcome === 'rejected') {
           warn(
             'kernel onSettled(rejected), sid=',

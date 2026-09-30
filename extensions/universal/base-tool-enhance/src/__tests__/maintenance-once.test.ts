@@ -47,6 +47,9 @@ import type { ExtensionAPI, SessionStartEvent } from "@earendil-works/pi-coding-
 function createMockPi() {
 	return {
 		registerTool: vi.fn(),
+		// __taiji_bg_reconcile__ 第二触发面（runtime 切回补投）注册桩——本文件只验证
+		// session_start 入口，命令注册面断言在 index.test.ts
+		registerCommand: vi.fn(),
 		on: vi.fn(),
 		appendEntry: vi.fn(),
 		events: { emit: vi.fn(), on: vi.fn() },
@@ -57,7 +60,8 @@ function createMockPi() {
 function getSessionStartHandler(pi: ReturnType<typeof createMockPi>) {
 	const handler = pi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
 	expect(handler).toBeTypeOf("function");
-	return handler as (event: SessionStartEvent, ctx: unknown) => void;
+	// handler 返回 promise（补投 await sendMessage 使维护链 async 化，bg-task-notify-durability）
+	return handler as (event: SessionStartEvent, ctx: unknown) => Promise<void>;
 }
 
 function makeEvent(reason: SessionStartEvent["reason"]): SessionStartEvent {
@@ -109,9 +113,9 @@ describe("session_start maintenance chain after reap sink (u-bte-remove)", () =>
 
 		// 多派发覆盖真实形态：startup + resume 双发（桌面端每次激活）+ new；
 		// factory 二调 handler 累积时同一事件被多组 handler 各跑一次，同理多次执行
-		handler(makeEvent("startup"), ctx);
-		handler(makeEvent("resume"), ctx);
-		handler(makeEvent("new"), ctx);
+		await handler(makeEvent("startup"), ctx);
+		await handler(makeEvent("resume"), ctx);
+		await handler(makeEvent("new"), ctx);
 
 		expect(reconcileMock).toHaveBeenCalledTimes(3);
 		expect(reconcileMock).toHaveBeenNthCalledWith(1, expect.anything(), dataDirRef.dir, "sid-once", []);
@@ -127,8 +131,8 @@ describe("session_start maintenance chain after reap sink (u-bte-remove)", () =>
 		const handler = getSessionStartHandler(pi);
 		const ctx = makeCtx();
 
-		handler(makeEvent("startup"), ctx);
-		handler(makeEvent("resume"), ctx);
+		await handler(makeEvent("startup"), ctx);
+		await handler(makeEvent("resume"), ctx);
 
 		// 每次派发恰好一条入口日志（无条件 = 不以任何条件短路），reason 取自事件；
 		// reapSkipped 字段已随 reap 下沉移除（u-bte-remove 变更登记，S6「批 2 后
@@ -142,20 +146,41 @@ describe("session_start maintenance chain after reap sink (u-bte-remove)", () =>
 		});
 	});
 
-	it("keeps reconcile failures non-fatal: warn logged, dispatch chain not throwing", async () => {
+	it("keeps reconcile failures non-fatal: handler promise resolves, warn logged", async () => {
+		// async 化后的非致命语义（bg-task-notify-durability U3 防假绿改写）：维护链已
+		// async——同步 not.toThrow() 断言恒真，改为显式断言「handler 的 promise resolve
+		//（错误在链内被 async 捕获，不向上传播成 unhandled rejection）+ warn 日志确实
+		// 记录」。两个断言缺一即红：吞掉后不打日志 = 观测丢失；打日志但 reject = fire
+		// 调用点 unhandled rejection。
+		reconcileMock.mockImplementation(() => Promise.reject(new Error("reconcile boom")));
+		const mod = await loadExtension();
+		const pi = createMockPi();
+		mod.default(pi as unknown as ExtensionAPI);
+		const handler = getSessionStartHandler(pi);
+
+		// 对账 reject 被维护链 async 捕获记 warn（僵尸停留差集，下一 session_start 幂等重查）
+		await expect(handler(makeEvent("resume"), makeCtx())).resolves.toBeUndefined();
+		expect(loggerMock.warn).toHaveBeenCalledWith(
+			"session_start pending reconcile failed; zombies retried next session start",
+			expect.objectContaining({ detail: expect.objectContaining({ err: "reconcile boom" }) }),
+		);
+	});
+
+	it("async chain surfaces synchronous setup errors through the same warn path", async () => {
+		// 同步 throw（非 promise reject）走同一 catch：覆盖 getSessionId 抛错等装配期异常，
+		// 锁定「try 块包住整个 await 链」不因 async 化出现裸同步段
 		reconcileMock.mockImplementation(() => {
-			throw new Error("reconcile boom");
+			throw new Error("sync boom");
 		});
 		const mod = await loadExtension();
 		const pi = createMockPi();
 		mod.default(pi as unknown as ExtensionAPI);
 		const handler = getSessionStartHandler(pi);
 
-		// 对账抛错被维护链吞掉记 warn（僵尸停留差集，下一 session_start 幂等重查）
-		expect(() => handler(makeEvent("resume"), makeCtx())).not.toThrow();
+		await expect(handler(makeEvent("resume"), makeCtx())).resolves.toBeUndefined();
 		expect(loggerMock.warn).toHaveBeenCalledWith(
 			"session_start pending reconcile failed; zombies retried next session start",
-			expect.objectContaining({ detail: expect.objectContaining({ err: "reconcile boom" }) }),
+			expect.objectContaining({ detail: expect.objectContaining({ err: "sync boom" }) }),
 		);
 	});
 });

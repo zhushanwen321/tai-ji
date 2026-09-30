@@ -1,7 +1,7 @@
 <!-- 决策记录（原实施型设计文档已压缩，全文见 git 历史：`git log --diff-filter=M -- docs/extensions/tool-schema-openai-compat.md`） -->
 # Pi Extension Tool Schema OpenAI 兼容性（决策记录）
 
-> **状态**：已实施完毕（2026-08）。规范本体 = [extension-conventions.md](./extension-conventions.md)「Tool 设计」节 [MANDATORY]；机器守卫 = `.githooks/check_tool_schema.py`（pre-commit 拦截顶层非 Object schema）。本文只保留决策结论与取舍理由。
+> **状态**：已实施完毕（2026-08）。规范本体 = [extension-conventions.md](./extension-conventions.md)「Tool 设计」节 [MANDATORY]；机器检查 = `.githooks/check_tool_schema.py`（pre-commit 拦截顶层非 Object schema）。本文只保留决策结论与取舍理由。
 
 ## 结论
 
@@ -26,11 +26,11 @@
 
 ## 落地状态
 
-- conventions 规范文案与守卫脚本已上线（对照本文历史附录 A 逐字 apply）
+- conventions 规范文案与检查脚本已上线（对照本文历史附录 A 逐字 apply）
 - goal / todo schema 已扁平化，todo 的 `as TodoActionParams` unsafe-cast 已消除（`Static` 派生类型天然替代）
 - 无回滚需求：schema 形态变化不影响已持久化 session 数据；发版后观察运行时漏传必填的报错率即可（过高则补强 description 文案，不改 schema 形态）
 
 ## 遗留
 
-- **严格网关端到端实测**未在文档销账（字段级嵌套 anyOf 的安全性当时靠 scheduler 间接证据推断）。若某网关连字段级嵌套 anyOf 也拒，plan B：action 字段改 `Type.Enum` / `StringEnum`（序列化为 `enum` 而非 `anyOf`）。
+- **严格网关端到端实测**未在文档逐条处理完毕（字段级嵌套 anyOf 的安全性当时靠 scheduler 间接证据推断）。若某网关连字段级嵌套 anyOf 也拒，plan B：action 字段改 `Type.Enum` / `StringEnum`（序列化为 `enum` 而非 `anyOf`）。
 - **pi 上游 suggestion**（并行动作，不阻塞）：建议 pi-mono 提供 `registerMultiActionTool` 一等公民——extension 写 discriminated union，pi 负责合规转换。

@@ -7,7 +7,8 @@
  *
  * 壳路径（mount PanelContainer，test-strategy 集成章节要求）：
  * - PanelContainer 渲染跨端共享容器 DrawerPanel（@taiji/ui/features/drawer，W3），
- *   断言 drawer-tab-* 五 tab 按钮 + drawer-panel + drawer-content DOM 存在（AC9/AC12 壳层载体）
+ *   断言 drawer-panel + drawer-content DOM 存在（AC9/AC12 壳层载体）；drawer-tab-* 全量
+ *   tab 按钮断言收拢在「注册表契约」用例（SideDrawerTab 10 成员，其余用例只断言被测 tab）
  * - drawerOpen=true：DrawerPanel 在 drawer-area wrapper 内挂载（feat-chat-flow-width 手写
  *   flex 布局，替换 reka-ui Splitter：无 drawer main 占 75%、有 drawer 双侧 width 动画、
  *   handle 拖动/键盘调整 + localStorage 持久化，见下方「动态宽度」describe）
@@ -20,14 +21,20 @@
  *
  * 控制态经 core drawer 域直连（PanelContainer 自持 bindDrawerSessionId，不消费 useSideDrawer
  * 兼容层——C1）：测试同样直连 core（bindDrawerSessionId + openDrawerTab + _resetDrawerForTest）。
- * 桌面独占面板（GitPanel/CommandDocPanel/DetailPane/BrowserPane/TerminalView）
- * stub 为占位 div（避免真实组件依赖，对齐旧测试 stub 策略）。
+ * 静态依赖隔离：重面板（GitPanel/CommandDocPanel/BackgroundTaskDetailPanel/PlanDocsPanel/
+ * BtwPanel）与壳层组件（Panel/PanelHeader/ToastContainer/TraceInspector/SubagentTab/
+ * WorkflowTab/StatusBar）vi.mock 占位组件（import 期替换——global.stubs 只在渲染期替换，
+ * import 期仍加载原模块触发 PanelContainer 整棵依赖图 transform，四个 PanelContainer 测试
+ * 文件的用例时间合计被该 transform 主导；壳层组件零 DOM 断言，占位只保挂载点）。懒加载
+ * DetailPane/TerminalView（PanelContainer 动态 import，不在静态图内）保留渲染期 stub。
+ * DrawerPanel（@taiji/ui/features/drawer）真实渲染：drawer-panel/tab/空态断言与
+ * header-extra slot 承接都在它身上。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/panel-container-drawer-mode.test.ts
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { mount, enableAutoUnmount } from '@vue/test-utils'
-import { defineComponent, ref, computed, nextTick, reactive } from 'vue'
+import { defineComponent, ref, computed, nextTick, reactive, type Component } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import {
@@ -37,6 +44,10 @@ import {
   getDrawerControlState,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
+// drawer-tab 注册表契约：全量 tab 清单收拢在 helpers/drawer-tabs.ts（SideDrawerTab 运行时
+// 投影，satisfies Record 双向防漂移），本文件的「注册表契约」用例是唯一全量断言处。其余
+// 用例只断言被测 tab 自身按钮，不再各留子集循环。
+import { ALL_DRAWER_TABS } from '../helpers/drawer-tabs'
 
 // ── mock 壳层依赖（PanelContainer setup 阶段执行，避免真实 WS/session 副作用）──
 vi.mock('@/composables/features/file-tree/useGitStatus', () => ({
@@ -45,6 +56,55 @@ vi.mock('@/composables/features/file-tree/useGitStatus', () => ({
 }))
 vi.mock('@/composables/features/chat/useSessionDerivations', () => ({
   useSessionDerivations: () => ({ derivedStatus: () => ({ value: 'done' }) }),
+}))
+
+// ── 静态重面板 vi.mock（import 期替换：vitest 不再加载原模块，砍掉 PanelContainer 整图
+// transform；占位组件与原 global.stubs 等价——同名 testid，接线断言面不变）。工厂零外部
+// 引用（普通 options 对象组件），规避 vi.mock hoisting 对顶层绑定的限制。──
+vi.mock('@/components/panel/GitPanel.vue', () => ({
+  default: { name: 'GitPanel', template: '<div data-testid="git-panel" />' },
+}))
+vi.mock('@/components/panel/CommandDocPanel.vue', () => ({
+  default: { name: 'CommandDocPanel', template: '<div data-testid="doc-panel" />' },
+}))
+vi.mock('@/components/extension/BackgroundTaskDetailPanel.vue', () => ({
+  default: { name: 'BackgroundTaskDetailPanel', template: '<div data-testid="bash-task-detail-panel" />' },
+}))
+vi.mock('@/components/panel/plan/PlanDocsPanel.vue', () => ({
+  default: { name: 'PlanDocsPanel', template: '<div data-testid="plan-docs-panel" />' },
+}))
+vi.mock('@/components/panel/BtwPanel.vue', () => ({
+  default: { name: 'BtwPanel', template: '<div data-testid="btw-panel" />' },
+}))
+
+// ── 壳层组件 vi.mock（import 期替换，同上砍整图 transform；七个组件在本文件零 DOM 断言，
+// 占位空壳保挂载点即可。Panel 例外：保 testid="panel" + data-panel-id，壳行为用例断言主
+// panel 挂载数量。StatusBar 来自 @taiji/ui/extension-host，mock 路径须与 PanelContainer 的
+// import 说明符一致。DrawerPanel 不 mock——真实渲染承接全部 drawer 断言与 header-extra slot）──
+vi.mock('@/components/panel/Panel.vue', () => ({
+  default: {
+    name: 'Panel',
+    props: { panelId: String, sessionId: { type: String, default: null } },
+    template: '<div data-testid="panel" :data-panel-id="panelId" />',
+  },
+}))
+vi.mock('@/components/panel/PanelHeader.vue', () => ({
+  default: { name: 'PanelHeader', template: '<div />' },
+}))
+vi.mock('@/components/ui/ToastContainer.vue', () => ({
+  default: { name: 'ToastContainer', template: '<div />' },
+}))
+vi.mock('@/components/panel/trace/TraceInspector.vue', () => ({
+  default: { name: 'TraceInspector', template: '<div />' },
+}))
+vi.mock('@/components/panel/SubagentTab.vue', () => ({
+  default: { name: 'SubagentTab', template: '<div />' },
+}))
+vi.mock('@/components/panel/WorkflowTab.vue', () => ({
+  default: { name: 'WorkflowTab', template: '<div />' },
+}))
+vi.mock('@taiji/ui/extension-host', () => ({
+  StatusBar: { name: 'StatusBar', template: '<div />' },
 }))
 
 // ── mock chatStore：unread badge（AC-13）可控消息数 ──
@@ -74,39 +134,23 @@ vi.mock('@/stores/chat', () => ({
 // 注册 reader：工厂首次执行（PanelContainer 动态 import）时 read() 已能转发到响应式 Map
 chatMock.registerReader((sid) => reactiveMessages.get(sid) ?? [])
 
-// ── 桌面独占面板 stub（DrawerPanel 默认 slot 注入的内容；真实组件依赖重，stub 为占位）──
+// ── 渲染期 stub（vi.mock 未覆盖的组件）：懒加载 DetailPane/TerminalView（PanelContainer
+// 动态 import 的 v-else-if 互斥分支，不在静态依赖图内，渲染期 stub 即可）──
 const DesktopStub = (name: string, testid: string) =>
   defineComponent({
     name,
     template: `<div data-testid="${testid}" />`,
   })
 
-// Panel stub：占位，避免 Panel 内部的 chat/session 依赖
-const PanelStub = defineComponent({
-  name: 'Panel',
-  props: { panelId: String, sessionId: { type: String, default: null } },
-  template: '<div data-testid="panel" :data-panel-id="panelId" />',
-})
-
-async function mountContainer() {
+async function mountContainer(stubOverrides: Record<string, Component> = {}) {
   // 动态 import 让 vi.mock 先生效
   const PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
   return mount(PanelContainer, {
     global: {
       stubs: {
-        Panel: PanelStub,
-        GitPanel: DesktopStub('GitPanel', 'git-panel'),
-        CommandDocPanel: DesktopStub('CommandDocPanel', 'doc-panel'),
         DetailPane: DesktopStub('DetailPane', 'detail-panel'),
         TerminalView: DesktopStub('TerminalView', 'terminal-panel'),
-        // bashTask tab 内容面板（background-task-sidebar-view D5③）同样 stub（接线断言面）
-        BackgroundTaskDetailPanel: DesktopStub('BackgroundTaskDetailPanel', 'bash-task-detail-panel'),
-        // plan tab 内容面板（plan 模式重设计 u1-docs-panel）：PlanDocsPanel 起真面板内含
-        // RPC/订阅副作用，接线断言面 stub 同其余桌面面板
-        PlanDocsPanel: DesktopStub('PlanDocsPanel', 'plan-docs-panel'),
-        // btw tab 内容面板（btw-question D7 M3-a）：真面板内含 btw.list/create 门面副作用，
-        // 接线断言面 stub 同其余桌面面板
-        BtwPanel: DesktopStub('BtwPanel', 'btw-panel'),
+        ...stubOverrides,
       },
     },
   })
@@ -127,8 +171,23 @@ beforeEach(() => {
 // activePinia，导致下个用例 usePanelStore() 解析到旧 pinia、读到旧 sid、drawer 打不开。
 enableAutoUnmount(afterEach)
 
+describe('drawer-tab 注册表契约（SideDrawerTab 全量收敛点）', () => {
+  it('drawer 打开态渲染生产注册表全部一级 tab 按钮（全量清单唯一断言处）', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 's-tab-registry')
+    openDrawerTab('git')
+
+    const wrapper = await mountContainer()
+    await nextTick()
+
+    for (const key of ALL_DRAWER_TABS) {
+      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists(), `drawer-tab-${key} 应存在`).toBe(true)
+    }
+  }, 60_000)
+})
+
 describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）', () => {
-  it('drawerOpen=true：DOM 含 drawer-panel + drawer-tab-* 五 tab + drawer-content（W4 换新入口）', async () => {
+  it('drawerOpen=true：DOM 含 drawer-panel + drawer-content（W4 换新入口；tab 全量归注册表契约用例）', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 'sess-smoke')
     openDrawerTab('git') // 打开 drawer（git tab）
@@ -138,10 +197,6 @@ describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）
 
     // DrawerPanel 渲染（@taiji/ui/features/drawer）
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
-    // 五基础 tab 按钮（AC9/AC12：drawer-tab-* DOM 断言）
-    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail']) {
-      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
-    }
     expect(wrapper.find('[data-testid="drawer-content"]').exists()).toBe(true)
     // git tab 内容面板经 slot 注入（C2 v-if chain）
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
@@ -156,6 +211,42 @@ describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）
 
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="panel"]')).toHaveLength(1)
+  }, 60_000)
+})
+
+// 首屏冒烟（TC1）：DrawerPanel 探针 stub 仅本用例覆盖——断言壳派发的 sessionId 落进
+// DrawerPanel props 面；其余用例走真实 DrawerPanel（drawer-panel/tab DOM 断言面）。
+const DrawerPanelProbe = defineComponent({
+  name: 'DrawerPanel',
+  props: {
+    isOpen: Boolean,
+    activeTab: String,
+    docked: Boolean,
+    sessionId: { type: String, default: null },
+  },
+  template:
+    '<div data-testid="drawer-panel" :data-is-open="isOpen" :data-active-tab="activeTab" :data-session-id="sessionId" />',
+})
+
+describe('PanelContainer 首屏冒烟（TC1）', () => {
+  it('drawerOpen=true：resize handle（separator）+ main/drawer 双区域挂载 + DrawerPanel 收到壳派发的 sessionId', async () => {
+    // 先 loadSession 让 panel store 有 focusedSessionId，再 open（分区键为 null 时 open 写入
+    // 的 isOpen 落不到 mount 后 active panel 对应的分区）
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 'sess-tc1')
+    openDrawerTab('git') // 打开 drawer（git tab）
+
+    const wrapper = await mountContainer({ DrawerPanel: DrawerPanelProbe })
+
+    // resize handle 存在（drawer 打开时可拖动调宽，role=separator 键盘可达）
+    const handle = wrapper.find('[data-testid="drawer-resize-handle"]')
+    expect(handle.exists()).toBe(true)
+    expect(handle.attributes('role')).toBe('separator')
+    // main-area + drawer-area 双区域挂载（手写 flex，宽度拆分）
+    expect(wrapper.find('[data-testid="main-area"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="drawer-area"]').exists()).toBe(true)
+    // DrawerPanel 探针收到壳派发的 sessionId（分区键跟随 panel）
+    expect(wrapper.find('[data-testid="drawer-panel"]').attributes('data-session-id')).toBe('sess-tc1')
   }, 60_000)
 })
 
@@ -239,12 +330,8 @@ describe('PanelContainer plan tab 接线（u1-drawer-tab + u1-docs-panel）', ()
     expect(wrapper.find('[data-testid="plan-docs-panel"]').exists()).toBe(true)
     // 无条件注入语义：面板存在时空态 fallback 不渲染（与 bashTask「未选中不注入」相反）
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
-    // plan tab 按钮随 SideDrawerTab 第 9 员常驻（DrawerPanel TabMeta）
+    // plan tab 按钮随 SideDrawerTab 第 9 员常驻（DrawerPanel TabMeta；全量清单归注册表契约用例）
     expect(wrapper.find('[data-testid="drawer-tab-plan"]').exists()).toBe(true)
-    // 既有 8 tab 无回归
-    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask']) {
-      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
-    }
   }, 60_000)
 
   it('切走 tab（git）→ plan 面板卸载（v-if 按 tab 激活切换）', async () => {
@@ -487,7 +574,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
 // btw tab 接线（btw-question D7，M3-a）：v-if chain 加分支 + 面板常驻注入（与 plan 同款
 // ——tab 激活即渲染，面板自渲染线列表空态，不经 DrawerPanel 空态 fallback）
 describe('PanelContainer btw tab 接线（btw-question D7 M3-a）', () => {
-  it('btw tab 激活 → 注入 BtwPanel（常驻容器）；btw tab 按钮常驻（第 10 员）；既有 9 tab 无回归', async () => {
+  it('btw tab 激活 → 注入 BtwPanel（常驻容器）；btw tab 按钮常驻（第 10 员）', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-btw-wire')
     openDrawerTab('btw')
@@ -499,12 +586,8 @@ describe('PanelContainer btw tab 接线（btw-question D7 M3-a）', () => {
     expect(wrapper.find('[data-testid="btw-panel"]').exists()).toBe(true)
     // 常驻注入语义：面板存在时空态 fallback 不渲染（与 plan 同款）
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
-    // btw tab 按钮随 SideDrawerTab 第 10 员常驻（DrawerPanel TabMeta）
+    // btw tab 按钮随 SideDrawerTab 第 10 员常驻（DrawerPanel TabMeta；全量清单归注册表契约用例）
     expect(wrapper.find('[data-testid="drawer-tab-btw"]').exists()).toBe(true)
-    // 既有 9 tab 无回归
-    for (const key of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan']) {
-      expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)
-    }
   }, 60_000)
 
   it('切走 tab（git）→ btw 面板卸载（v-if chain 互斥）', async () => {

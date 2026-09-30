@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useTurnExpansion 单测——w1 wave IF1 契约验证（w4 store 重构后底层为 turn-expansion store）。
  *

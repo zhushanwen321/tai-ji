@@ -22,12 +22,13 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/MessageStream-kind.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { chatViewDepsModule } from '@/__tests__/helpers/chat-stream-mount'
+import '@/__tests__/helpers/message-stream-shell-mount'
+import { messageStreamStubs, resetMessageStreamEnv, makeStreamMessageFactory } from '@/__tests__/helpers/chat-stream-mount'
 import { mount } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
 import MessageStream from '@/components/panel/MessageStream.vue'
 import { turnStableId } from '@taiji/core/domain/chat'
+import type { ComponentOptions } from 'vue'
 import type { Message } from '@taiji/shared'
 
 // ── virtua mock：Virtualizer → 全量渲染 scoped slot 的 stub ──────────────────────────
@@ -117,73 +118,51 @@ vi.mock('virtua/vue', async () => {
   }
 })
 
-// 壳 deps mock（MessageStream 装配 useChatViewDeps，测试聚焦 kind 分发不需真 deps）
-vi.mock('@/composables/panel/useChatViewDeps', () => chatViewDepsModule())
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    editAndResend: vi.fn(),
-    loadMoreHistory: vi.fn(),
-    hasMoreHistory: () => false,
-  }),
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSession: vi.fn(), abortHandoff: vi.fn() }),
-}))
+// 壳 deps mock 经 message-stream-shell-mount 顶层注册（MessageStream 装配 useChatViewDeps，
+// 测试聚焦 kind 分发不需真 deps）
 
-// happy-dom 不提供真实 ResizeObserver 布局测量
-class NoopResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
+// [U0 事件链打通] Turn 从无事件 stub 升级为可 emit `edit-state-change` 的 stub（设计
+// §5 U0：改 stub 或 unstub 二选一，取改 stub——真实 Turn.vue 依赖 Block/MarkdownRenderer
+// 等重组件树，happy-dom 下 mount 成本与脆弱面都大，而本测关心的链路只有：
+// canEdit prop（MessageStream 侧「最后 user turn 才可编辑」的真实判定结果）→ 编辑动作
+// → emit → MessageStream.onEditStateChange。stub 只替换 Turn/UserBubble 的内部 UI，
+// handler/钉扎派生/keepMounted 绑定全是真实生产代码路径。
+// [U3 stub 与真实 UserBubble 事件行为同构]（设计 §3.3 D2/D3）：
+// - 置位负载 {editing:true, turnKey}，turnKey 用与生产同一身份函数 turnStableId（首条消息
+//   id，与 renderKey 的 `t-` 空间一致）——生产 pinnedIndexes 按 `t-${turnKey}` 反查；
+// - 卸载清理：编辑态中卸载（session 切换 / 数据换血）时 emit {editing:false, turnKey}（D3
+//   「谁置位谁清理」）。C2（U2）已证 happy-dom 下 unmounted 内 emit 父监听器可达。
+// 编辑态 DOM 表现（turn-edit-box）模拟 UserBubble 气泡变输入框，供用例确认置位生效。
+const turnStub: ComponentOptions = {
+  name: 'Turn',
+  props: {
+    turn: { type: Object, required: true },
+    canEdit: { type: Boolean, default: false },
+  },
+  emits: ['edit-state-change'],
+  data() {
+    return { editing: false }
+  },
+  methods: {
+    startEdit(): void {
+      this.editing = true
+      this.$emit('edit-state-change', { editing: true, turnKey: turnStableId(this.turn) })
+    },
+  },
+  unmounted() {
+    if (this.editing) {
+      this.$emit('edit-state-change', { editing: false, turnKey: turnStableId(this.turn) })
+    }
+  },
+  template: `
+    <div :data-testid="'turn-stub-' + turn.index" :data-editing="String(editing)">
+      <textarea v-if="editing" data-testid="turn-edit-box" />
+      <button v-if="canEdit && !editing" data-testid="turn-edit-btn" @click="startEdit">edit</button>
+    </div>`,
 }
 
 /** 目标组件 stub：带 testid，断言「kind → 组件」选中关系（选中哪个就渲染哪个 testid）。 */
-const globalStubs = {
-  // [U0 事件链打通] Turn 从无事件 stub 升级为可 emit `edit-state-change` 的 stub（设计
-  // §5 U0：改 stub 或 unstub 二选一，取改 stub——真实 Turn.vue 依赖 Block/MarkdownRenderer
-  // 等重组件树，happy-dom 下 mount 成本与脆弱面都大，而本测关心的链路只有：
-  // canEdit prop（MessageStream 侧「最后 user turn 才可编辑」的真实判定结果）→ 编辑动作
-  // → emit → MessageStream.onEditStateChange。stub 只替换 Turn/UserBubble 的内部 UI，
-  // handler/钉扎派生/keepMounted 绑定全是真实生产代码路径。
-  // [U3 stub 与真实 UserBubble 事件行为同构]（设计 §3.3 D2/D3）：
-  // - 置位负载 {editing:true, turnKey}，turnKey 用与生产同一身份函数 turnStableId（首条消息
-  //   id，与 renderKey 的 `t-` 空间一致）——生产 pinnedIndexes 按 `t-${turnKey}` 反查；
-  // - 卸载清理：编辑态中卸载（session 切换 / 数据换血）时 emit {editing:false, turnKey}（D3
-  //   「谁置位谁清理」）。C2（U2）已证 happy-dom 下 unmounted 内 emit 父监听器可达。
-  // 编辑态 DOM 表现（turn-edit-box）模拟 UserBubble 气泡变输入框，供用例确认置位生效。
-  Turn: {
-    name: 'Turn',
-    props: {
-      turn: { type: Object, required: true },
-      canEdit: { type: Boolean, default: false },
-    },
-    emits: ['edit-state-change'],
-    data() {
-      return { editing: false }
-    },
-    methods: {
-      startEdit(): void {
-        this.editing = true
-        this.$emit('edit-state-change', { editing: true, turnKey: turnStableId(this.turn) })
-      },
-    },
-    unmounted() {
-      if (this.editing) {
-        this.$emit('edit-state-change', { editing: false, turnKey: turnStableId(this.turn) })
-      }
-    },
-    template: `
-      <div :data-testid="'turn-stub-' + turn.index" :data-editing="String(editing)">
-        <textarea v-if="editing" data-testid="turn-edit-box" />
-        <button v-if="canEdit && !editing" data-testid="turn-edit-btn" @click="startEdit">edit</button>
-      </div>`,
-  },
-  SystemNotice: { name: 'SystemNotice', template: '<div data-testid="system-notice-stub" />' },
-  BashOutputBlock: { name: 'BashOutputBlock', template: '<div data-testid="bash-output-stub" />' },
-  ForkNotice: { name: 'ForkNotice', template: '<div />' },
-  Button: { name: 'Button', template: '<button><slot /></button>' },
-}
+const globalStubs = messageStreamStubs(turnStub, { stubTestids: true })
 
 function mountStream(sessionId: string, onError?: (err: unknown) => void) {
   return mount(MessageStream, {
@@ -198,16 +177,8 @@ function mountStream(sessionId: string, onError?: (err: unknown) => void) {
   })
 }
 
-function makeMsg(over: Partial<Message>): Message {
-  return {
-    id: 'm1',
-    role: 'system',
-    content: '',
-    status: 'complete',
-    timestamp: Date.now(),
-    ...over,
-  } as Message
-}
+/** 消息工厂：role 缺省 system（本文件聚焦 system 类消息族：notice/bash/bgNotify） */
+const makeMsg = makeStreamMessageFactory('system')
 
 function bashMsg(id: string): Message {
   return makeMsg({
@@ -226,9 +197,7 @@ function bashMsg(id: string): Message {
 
 describe('MessageStream kind 查表分发（M1）', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
-    vi.stubGlobal('ResizeObserver', NoopResizeObserver)
-    HTMLElement.prototype.scrollTo = vi.fn()
+    resetMessageStreamEnv()
     slotKeyCollector.keys.length = 0
     keepMountedCollector.entries.length = 0
   })
@@ -392,9 +361,7 @@ describe('MessageStream kind 查表分发（M1）', () => {
  */
 describe('P5 探针门：keepMounted 越界渲染崩溃复现（U0 红 → U3 绿）', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
-    vi.stubGlobal('ResizeObserver', NoopResizeObserver)
-    HTMLElement.prototype.scrollTo = vi.fn()
+    resetMessageStreamEnv()
     slotKeyCollector.keys.length = 0
     keepMountedCollector.entries.length = 0
   })
@@ -481,9 +448,7 @@ describe('P5 探针门：keepMounted 越界渲染崩溃复现（U0 红 → U3 �
  */
 describe('A2 白盒：编辑中数组重排 → keepMounted 跟随编辑回合身份（U3）', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
-    vi.stubGlobal('ResizeObserver', NoopResizeObserver)
-    HTMLElement.prototype.scrollTo = vi.fn()
+    resetMessageStreamEnv()
     slotKeyCollector.keys.length = 0
     keepMountedCollector.entries.length = 0
   })

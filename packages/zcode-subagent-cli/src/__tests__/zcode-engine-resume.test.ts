@@ -25,6 +25,7 @@ const engines: ZcodeEngine[] = [];
 let tmpRoot: string;
 let dataDir: string;
 let v2Path: string;
+let personalPath: string;
 let seq = 0;
 
 function writeJson(p: string, v: unknown): void {
@@ -36,9 +37,21 @@ beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "zcode-eng-resume-"));
   dataDir = path.join(tmpRoot, "data");
   v2Path = path.join(tmpRoot, "v2.json");
+  personalPath = path.join(tmpRoot, "personal.json");
   writeJson(v2Path, {
     provider: { [PROVIDER]: { options: { apiKey: "k", baseURL: "https://t.example" }, models: { m1: {} } } },
   });
+  writeJson(personalPath, {
+    config: {
+      providerOrder: [PROVIDER],
+      providerConfigRules: {
+        providerRules: [
+          { providerId: PROVIDER, providerName: "t", config: { access: { type: "api-key", apiKey: "k" }, personalModelIds: ["m1"] } },
+        ],
+      },
+    },
+  });
+
 });
 
 afterEach(async () => {
@@ -104,7 +117,7 @@ function makeEngine(overrides: ResumeScenarioOverrides = {}): { engine: ZcodeEng
   const deps: ZcodeEngineDeps = {
     engineDataDir: () => dataDir,
     cliPath: FAKE_CLI,
-    sources: { v2ConfigPath: v2Path },
+    sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath, builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") },
     processEnv: {
       PATH: process.env.PATH ?? "",
       HOME: "/fake-host-home",

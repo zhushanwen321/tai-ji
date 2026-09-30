@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useInboundFrameGuard 单测（crash-forensics-and-watchdog §3.3 D8 / §4 A6 renderer 半边）。
  *

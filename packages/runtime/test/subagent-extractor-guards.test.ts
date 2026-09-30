@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { scanSubagentEntries } from '../src/services/session/subagent-extractor.js'
-import { SUBAGENT_RECORD_CUSTOM_TYPE } from '@taiji/shared'
+import { SUBAGENT_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
 import type { SubagentRecord } from '@taiji/shared'
 
 /** 自描述 subagent-record entry 构造（type:'custom' 是 pi JSONL 持久化层形态）。 */

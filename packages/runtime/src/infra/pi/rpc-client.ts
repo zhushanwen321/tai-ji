@@ -127,7 +127,7 @@ export interface RpcClientOptions {
   noTools?: boolean
   /** 禁用所有 skill，映射 pi `--no-skills`。调用方同时需清空 skillPaths。 */
   noSkills?: boolean
-  /** 禁用 context files（AGENTS.md/CLAUDE.md 自动发现），映射 pi `--no-context-files`。 */
+  /** 禁用 context files（AGENTS.md 自动发现），映射 pi `--no-context-files`。 */
   noContextFiles?: boolean
   /** 覆盖思考级别，映射 pi `--thinking <level>`（注意：非 --thinking-level，附录 A.4）。 */
   thinkingLevel?: ThinkingLevel
@@ -343,7 +343,7 @@ export class RpcClient implements IPiEngine {
 
     // Bun 编译的 bundled pi 用 process.execPath 定位资源（package.json、themes 等），
     // 不依赖 process.cwd() 查找 package.json。因此 spawn cwd 可以安全地设为用户项目目录。
-    // 这样 pi 的初始 session、system prompt、CLAUDE.md 查找、bash 工具都基于正确的 cwd。
+    // 这样 pi 的初始 session、system prompt、AGENTS.md 查找、bash 工具都基于正确的 cwd。
     // Re-verified 2026-08-20 (W6 A-11 探针) on upstream 0.84.1，双形态均不依赖 cwd：
     // - bun binary（打包产物 apps/electron/resources/pi/pi-darwin-arm64）：getPackageDir() =
     //   dirname(process.execPath)（pi 0.84.1 dist config.js isBunBinary 分支）；cwd=/tmp spawn
@@ -372,6 +372,18 @@ export class RpcClient implements IPiEngine {
     // logger 未初始化时（如单元测试）返回 no-op 写入器，无副作用。
     if (this.options.sessionId) {
       this.piSessionLog = createPiSessionLog(this.options.sessionId)
+      // respawn 边界行：同 session 的 pi 进程可能多次 spawn（runtime 重启后 restore /
+      // 崩溃重拉），tee 是 append 模式，无边界行时无法从文件内区分代际——排障时
+      // 「崩溃前最后输出」与「重启后首输出」会混读（2026-09-24 事故取证的实测痛点）。
+      // 下划线前缀 type 与 pi 自身事件命名空间区分，消费方按未知类型忽略。
+      this.piSessionLog.write(
+        JSON.stringify({
+          type: '_spawn_boundary',
+          ts: new Date().toISOString(),
+          runtimePid: process.pid,
+          sessionId: this.options.sessionId,
+        }) + '\n',
+      )
     }
 
     const proc = this.proc
@@ -573,12 +585,12 @@ export class RpcClient implements IPiEngine {
     // 入站 touch（idle-pi-reclamation D1）：任何 stdout 帧（response / 事件 / 迟到丢弃帧）
     // 都证明 pi 在产出，进程非空闲。放在分派前——分支结构变化不影响 touch 语义。
     // 唯一例外（D1 双腿闭合）：解析为「maintenance pending 的 response」的帧不 touch。
-    // promptReload（{ maintenance: true }）的出站腿已在 sendCommand 排除，但其 response
-    // 回程经本入口无条件 touch 会把空闲时钟重置回去——回程回声与出站请求同频（skill
-    // 变更风暴下与 promptReload 一一配对到达），只排除出站腿时回收饿死原样保留，
-    // 故双腿同豁免。事件帧 / 非 maintenance response 的 touch 语义零变化。
+    // 维护通道（{ maintenance: true }）的出站腿已在 sendCommand 排除，但其 response
+    // 回程经本入口无条件 touch 会把空闲时钟重置回去——回程回声与出站请求同频到达，
+    // 只排除出站腿时回收饿死原样保留，故双腿同豁免。事件帧 / 非 maintenance response
+    // 的 touch 语义零变化。
     // 边角（可接受）：迟到 maintenance response——pending 已被超时清理（60s）后到达，
-    // id 命不中 pending → 照旧 touch。超时 60s 后才回的 reload 极罕见，且该边角方向 =
+    // id 命不中 pending → 照旧 touch。超时 60s 后才回的维护响应极罕见，且该边角方向 =
     // 多豁免不误杀（多 touch 一次只推迟回收，不会误杀活跃进程），与「宁漏不误杀」同向。
     const maintenanceResponse = this.pendingRegistry.isMaintenanceResponse(msg)
     if (!maintenanceResponse) {
@@ -711,9 +723,9 @@ export class RpcClient implements IPiEngine {
       this.lastCommandType = type
 
       // 出站 touch（idle-pi-reclamation D1）：sendCommand 是全部出站 RPC 的唯一咽喉。
-      // 唯一例外 = 维护通道（options.maintenance，如 promptReload 的 /__taiji_reload__——
-      // skill 目录变更会对全部活跃 session 触发，计入会让空闲时钟被周期性重置、回收
-      // 饿死且不体现为豁免命中）。touch 在状态检查后：进程已死时无空闲可言。
+      // 唯一例外 = 维护通道（options.maintenance——维护类内部命令不计用户/session 活跃，
+      // 计入会让空闲时钟被周期性重置、回收饿死且不体现为豁免命中）。
+      // touch 在状态检查后：进程已死时无空闲可言。
       if (!options?.maintenance) {
         this._lastActivityAt = Date.now()
       }
@@ -933,8 +945,8 @@ export class RpcClient implements IPiEngine {
     // 帧组装（pi-rpc commands）：images 是 shared 层图片附件形状（无 type 字段），
     // shared→pi ImageContent 的唯一组装点在公共包（pi 私有 type:'image' 不出本层）；
     // 空 images 归一化不传键（避免 pi 收到空数组），与改动前路径完全一致。
-    // options 透传（idle-pi-reclamation D1）：维护通道（promptReload 的 /__taiji_reload__）
-    // 经 prompt 的语义方法形态发起，maintenance 标记直达 sendCommand touch 排除。
+    // options 透传（idle-pi-reclamation D1）：维护通道经 prompt 的语义方法形态发起时，
+    // maintenance 标记直达 sendCommand touch 排除。
     return this.sendCommand('prompt', buildPromptParams({ message: content, images, streamingBehavior }), CMD_TIMEOUT_MS, options)
   }
 

@@ -12,7 +12,7 @@ commit 863f0704（Round 4 review 修复）将两份常量收敛到 shared SSOT �
 旧正则匹配 `const ENV_WHITELIST_PREFIXES = [` 失效（两文件改为 import），
 检查静默误报"未找到"。本版适配 SSOT 架构，改为验证定义点单一性。
 
-精神（CLAUDE.md #3）仍保留：主进程可扩展（safe-env.ts: [...SSOT, 'ELECTRON_']），
+精神仍保留：主进程可扩展（safe-env.ts: [...SSOT, 'ELECTRON_']），
 子进程用全集（rpc-client.ts: = SSOT）。SSOT 化让"两处不同步"物理不可能，
 剩余风险是 SSOT 退化（未来有人在 main/runtime 本地重新定义），本检查防此。
 
@@ -372,7 +372,7 @@ def main() -> int:
             print(e)
         print()
         print()
-        print('\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m')
+        print('\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m')
         return 2
 
     print(f'[OK] {CONST_NAME} SSOT 单一性检查通过（定义点：shared/src/constants.ts）')

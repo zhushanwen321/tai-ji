@@ -825,7 +825,7 @@ describe('event-adapter handleTurnEndPi 扩展字段提取（D1）', () => {
       role: 'assistant',
       content: [],
       usage: { input: 100, output: 200, totalTokens: 500, cacheRead: 300, cacheWrite: 50 },
-      model: 'mimo-v2.5-pro',
+      model: 'mimo-v2.6-flash',
       provider: 'xiaomi-token-plan-cn',
     }), 's1')
 
@@ -838,7 +838,7 @@ describe('event-adapter handleTurnEndPi 扩展字段提取（D1）', () => {
       cacheRead: 300,
       cacheWrite: 50,
       input: 100,
-      model: 'mimo-v2.5-pro',
+      model: 'mimo-v2.6-flash',
       provider: 'xiaomi-token-plan-cn',
     })
   })

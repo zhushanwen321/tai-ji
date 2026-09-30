@@ -59,7 +59,7 @@
 **pi-subagent 已符合两段式范式**（发现 + spawn 注入 + 统一校验），骨架健康。优化方向是**在范式内补齐发现层质量差距**：
 
 - **发现层增强**：借鉴 claude-code `<example>` + `<commentary>` 触发教学样本（context→user→assistant→commentary 四元组），把"何时该用/不该用"做成主 agent 可学习样本，提升路由准确率。pi-subagent 当前发现层是四家里最弱的（单行、无强制、路由信息最少）。
-- **放宽单行 description 限制**：当前 `parseAgentFrontmatter` 只支持单行 `key: value`（block scalar 不支持），反向激励 description 过简。
+- **放宽单行 description 限制**：frontmatter 解析只支持单行 `key: value`（block scalar 不支持），反向激励 description 过简。
 - **校验层顺手增强**：借鉴 codex `deny_unknown_fields`，未知参数报错防幻觉。校验层已与竞品持平，仅此小优化。
 
 **不加加载层（撤销本 ADR 初稿的设计）。** 根因：subagent 输入是**自由文本 task**，不是结构化参数——没有"参数 schema"需要查。主 agent 凭对任务的理解 + description 就能写 task。四家竞品 subagent 全无加载层且工作良好，验证了这一点。给 subagent 加加载层，是把 workflow 的解法错套到 subagent 上。

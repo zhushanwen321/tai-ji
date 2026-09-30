@@ -1,58 +1,55 @@
 /**
- * GUI 协议测试。
+ * GUI 协议测试（interface 渲染壳的映射 / ctx 分发 / 构造器三面）。
  *
- * 覆盖三层：
- *   1. gui-mappers —— mapRunStatus / mapRunIcon（状态字符串 → 协议三态 + 图标）
- *   2. protocol    —— isGuiCapable（mode 判定 GUI 渲染通道是否有效）
- *   3. 构造器      —— buildGuiComponent（subagent）/ buildWorkflowGui（workflow）
- *                    按 action 构造对应 GuiComponent，验证 type 字段 + 子组件结构。
+ * 覆盖：
+ *   1. gui-mappers —— mapRunStatus / mapRunIcon（状态字符串 → 协议三态 + 图标）与
+ *      toGuiCtx（ExtensionContext → GuiContext 最小子集）
+ *   2. adapter     —— ctx.mode 分发契约（rpc → __gui__ 附加，其余模式不附加）
+ *   3. 构造器      —— buildGuiComponent（subagent）/ buildScriptGui（script）按
+ *      action 构造对应 GuiComponent，验证 type 字段 + 子组件结构（workflow tool 走
+ *      isWorkflow 块分支不消费 `__gui__`，无构造器——D8）
  *
- * buildGuiComponent / buildWorkflowGui 的入参是纯数据类型（AdapterInput /
- * WorkflowToolDetails 联合），不需 mock 领域 service，直接构造对象字面量即可。
- * 状态/icon 映射的正确性已在 mapRunStatus/mapRunIcon 用例里独立覆盖，构造器用例
- * 只验证「正确组件 type + items 结构 + 映射联动」。
+ * isGuiCapable 属协议包符号，其模式判定矩阵由 packages/extension-protocol 的
+ * helpers.test.ts 锁定，不在此重复。
+ *
+ * 构造器入参是纯数据类型（AdapterInput / WorkflowScriptToolDetails 联合），不需
+ * mock 领域 service，直接构造对象字面量即可。状态/icon 映射的正确性已在
+ * mapRunStatus/mapRunIcon 用例里独立覆盖，构造器用例只验证「正确组件 type +
+ * items 结构 + 映射联动」。
  */
-import { isGuiCapable } from "@zhushanwen/extension-protocol";
-import { describe, expect,it } from "vitest";
+import type { GuiContext } from "@zhushanwen/extension-protocol";
+import { describe, expect, it } from "vitest";
 
-import { mapRunIcon,mapRunStatus, toGuiCtx } from "../interface/gui-mappers.ts";
-import { buildGuiComponent } from "../interface/subagent-actions.ts";
-import type { WorkflowToolDetails } from "../interface/tool-workflow.ts";
-import { buildWorkflowGui } from "../interface/tool-workflow.ts";
+import { mapRunIcon, mapRunStatus, toGuiCtx } from "../interface/gui-mappers.ts";
+import { adapter, buildGuiComponent } from "../interface/subagent-actions.ts";
+import type { AdapterInput } from "../interface/subagent-actions.ts";
+import { buildScriptGui } from "../interface/tool-workflow-script.ts";
+import type { WorkflowScriptToolDetails } from "../interface/tool-workflow-script.ts";
 
 // ============================================================
 // mapRunStatus —— 状态字符串 → list-tree 三态 status
 // ============================================================
 
 describe("mapRunStatus", () => {
-  it("running → running", () => {
-    expect(mapRunStatus("running")).toBe("running");
-  });
-
-  it("done / completed / success / pending → done", () => {
-    expect(mapRunStatus("done")).toBe("done");
-    expect(mapRunStatus("completed")).toBe("done");
-    expect(mapRunStatus("success")).toBe("done");
-    expect(mapRunStatus("pending")).toBe("done");
-  });
-
-  it("failed / aborted / cancelled / crashed / error → failed", () => {
-    expect(mapRunStatus("failed")).toBe("failed");
-    expect(mapRunStatus("aborted")).toBe("failed");
-    expect(mapRunStatus("cancelled")).toBe("failed");
-    expect(mapRunStatus("crashed")).toBe("failed");
-    expect(mapRunStatus("error")).toBe("failed");
-  });
-
-  it("budget / time_limited reason → failed", () => {
-    expect(mapRunStatus("budget_limited")).toBe("failed");
-    expect(mapRunStatus("time_limited")).toBe("failed");
-  });
-
-  it("组合状态 done (failed) → failed（reason 后缀优先于外层 done）", () => {
+  it.each([
+    ["running", "running"],
+    ["done", "done"],
+    ["completed", "done"],
+    ["success", "done"],
+    ["pending", "done"],
+    ["failed", "failed"],
+    ["aborted", "failed"],
+    ["cancelled", "failed"],
+    ["crashed", "failed"],
+    ["error", "failed"],
+    ["budget_limited", "failed"],
+    ["time_limited", "failed"],
     // mapRunStatus 用 includes 子串匹配，"done (failed)" 含 "failed" → failed。
-    // 这是 workflow status action 的典型输入（status + reason 拼接）。
-    expect(mapRunStatus("done (failed)")).toBe("failed");
+    // 这是 workflow status action 的典型输入（status + reason 拼接），
+    // reason 后缀优先于外层 done。
+    ["done (failed)", "failed"],
+  ])("%s → %s", (status, expected) => {
+    expect(mapRunStatus(status)).toBe(expected);
   });
 
   it("大小写不敏感", () => {
@@ -67,27 +64,20 @@ describe("mapRunStatus", () => {
 // ============================================================
 
 describe("mapRunIcon", () => {
-  it("running → circle（进行中）", () => {
-    expect(mapRunIcon("running")).toBe("circle");
-  });
-
-  it("done / completed / success → check", () => {
-    expect(mapRunIcon("done")).toBe("check");
-    expect(mapRunIcon("completed")).toBe("check");
-    expect(mapRunIcon("success")).toBe("check");
-  });
-
-  it("failed / aborted / cancelled / crashed / error → cross", () => {
-    expect(mapRunIcon("failed")).toBe("cross");
-    expect(mapRunIcon("aborted")).toBe("cross");
-    expect(mapRunIcon("cancelled")).toBe("cross");
-    expect(mapRunIcon("crashed")).toBe("cross");
-    expect(mapRunIcon("error")).toBe("cross");
-  });
-
-  it("budget / time_limited → cross", () => {
-    expect(mapRunIcon("budget_limited")).toBe("cross");
-    expect(mapRunIcon("time_limited")).toBe("cross");
+  it.each([
+    ["running", "circle"],
+    ["done", "check"],
+    ["completed", "check"],
+    ["success", "check"],
+    ["failed", "cross"],
+    ["aborted", "cross"],
+    ["cancelled", "cross"],
+    ["crashed", "cross"],
+    ["error", "cross"],
+    ["budget_limited", "cross"],
+    ["time_limited", "cross"],
+  ])("%s → %s", (status, expected) => {
+    expect(mapRunIcon(status)).toBe(expected);
   });
 
   it("未知状态 → done/check（default 兜底，S#15）", () => {
@@ -123,34 +113,6 @@ describe("toGuiCtx", () => {
   it("返回对象只有 mode/hasUI 两键（不泄漏 ui 引用）", () => {
     const result = toGuiCtx({ mode: "rpc", hasUI: true });
     expect(Object.keys(result!)).toEqual(["mode", "hasUI"]);
-  });
-});
-
-// ============================================================
-// isGuiCapable —— RPC 模式才支持 GUI 渲染通道
-// ============================================================
-
-describe("isGuiCapable (protocol)", () => {
-  it("rpc mode + hasUI → true（唯一支持 GUI 的组合）", () => {
-    expect(isGuiCapable({ mode: "rpc", hasUI: true })).toBe(true);
-  });
-
-  it("rpc mode + 无 UI → 仍 true（hasUI 不影响判定，仅看 mode）", () => {
-    // 实测协议实现：isGuiCapable 只检查 mode === "rpc"。
-    // hasUI 为 false 时 rpc 仍判定为 capable（runtime 可能走非 widget 渲染路径）。
-    expect(isGuiCapable({ mode: "rpc", hasUI: false })).toBe(true);
-  });
-
-  it("tui mode → false", () => {
-    expect(isGuiCapable({ mode: "tui", hasUI: true })).toBe(false);
-  });
-
-  it("print mode → false", () => {
-    expect(isGuiCapable({ mode: "print", hasUI: false })).toBe(false);
-  });
-
-  it("json mode → false", () => {
-    expect(isGuiCapable({ mode: "json", hasUI: false })).toBe(false);
   });
 });
 
@@ -357,122 +319,222 @@ describe("buildGuiComponent", () => {
       expect(props.items[0].severity).toBe("warn");
     });
   });
+
+  describe("action: fork-from", () => {
+    it("返回 stats-line：forked-from（继承源 session 路径）+ new subagent（severity ok）", () => {
+      const comp = buildGuiComponent(
+        {
+          action: "fork-from",
+          domain: {
+            kind: "fork-from",
+            subagentId: "sub-005",
+            sourceSessionFile: "/abs/sessions/source.jsonl",
+            response: { newSubagentId: "sub-005", sourceSessionFile: "/abs/sessions/source.jsonl" },
+          },
+        },
+        {
+          action: "fork-from",
+          subagentId: "sub-005",
+          sessionFile: null,
+          forkFromResponse: { newSubagentId: "sub-005", sourceSessionFile: "/abs/sessions/source.jsonl" },
+        },
+      );
+
+      expect(comp.type).toBe("stats-line");
+      const props = comp.props as { items: Array<{ label: string; value: string; severity?: string }> };
+      expect(props.items).toHaveLength(2);
+      // 源路径直出（input.domain.sourceSessionFile），供 GUI 侧定位继承源
+      expect(props.items[0].label).toBe("forked-from");
+      expect(props.items[0].value).toBe("/abs/sessions/source.jsonl");
+      expect(props.items[1].label).toBe("new subagent");
+      expect(props.items[1].value).toBe("sub-005");
+      expect(props.items[1].severity).toBe("ok");
+    });
+  });
 });
 
 // ============================================================
-// buildWorkflowGui —— workflow tool details 的 GUI 构造
+// adapter —— ctx.mode 分发契约（S6）
 // ============================================================
 //
-// WorkflowToolDetails 是 run/status/abort 联合。run→list-tree(1 item)，
-// status→list-tree(N items)，abort→stats-line。
+// sdk-contract.test.ts 只覆盖 ctx.model 透传；此处补 ctx.mode 的 __gui__ 附加分发：
+// adapter() 是纯函数，ctx.mode === "rpc" → details.__gui__ 被附加，
+// ctx.mode === "tui"/"json"/"print" → details.__gui__ 为 undefined。
 
-describe("buildWorkflowGui", () => {
-  describe("action: run", () => {
-    it("running → list-tree，单 item status=running icon=circle", () => {
-      const details: WorkflowToolDetails = {
-        action: "run",
-        runId: "abcdefgh1234",
-        status: "running",
-        name: "build",
-        slug: "ci",
-      };
-      const comp = buildWorkflowGui(details);
+function makeStartInput(): AdapterInput {
+  return {
+    action: "start",
+    domain: {
+      subagentId: "test-id",
+      sessionFile: "/test/session.jsonl",
+      slug: "test-slug",
+      response: { status: "started" },
+    },
+  } as unknown as AdapterInput;
+}
 
-      expect(comp.type).toBe("list-tree");
-      const props = comp.props as { items: Array<{ label: string; status: string; icon: string }> };
-      expect(props.items).toHaveLength(1);
-      expect(props.items[0].status).toBe("running");
-      expect(props.items[0].icon).toBe("circle");
-      // label = name + slug + runId 前 8 字符
-      expect(props.items[0].label).toBe("build ci abcdefgh");
-    });
-
-    it("not_found → stats-line danger（错误状态不渲染为成功）", () => {
-      const details: WorkflowToolDetails = {
-        action: "run",
-        runId: "",
-        status: "not_found",
-        name: "missing",
-      };
-      const comp = buildWorkflowGui(details);
-
-      // not_found 是脚本未找到的逻辑错误（isError:true），短路为 stats-line danger，
-      // 不走通用 mapper 的 done/check 成功映射（避免绿色对勾与错误文案矛盾）。
-      expect(comp.type).toBe("stats-line");
-      const props = comp.props as { items: Array<{ label: string; value: string; severity: string }> };
-      expect(props.items[0].label).toBe("run");
-      expect(props.items[0].value).toBe("not found");
-      expect(props.items[0].severity).toBe("danger");
-    });
-
-    it("无 slug 时 label 不含双空格（filter(Boolean).join 生效）", () => {
-      const details: WorkflowToolDetails = {
-        action: "run",
-        runId: "1234567890",
-        status: "running",
-        name: "deploy",
-      };
-      const comp = buildWorkflowGui(details);
-      const props = comp.props as { items: Array<{ label: string }> };
-      // slug 缺失 → filter(Boolean) 过滤掉空段 → "deploy 12345678"（单空格）
-      expect(props.items[0].label).toBe("deploy 12345678");
-    });
+describe("S6: ctx.mode dispatches __gui__ output correctly", () => {
+  it("ctx.mode=rpc → details.__gui__ is populated", () => {
+    const ctx = { mode: "rpc", hasUI: true } as GuiContext;
+    const result = adapter(makeStartInput(), ctx);
+    expect(result.details).toHaveProperty("__gui__");
+    expect(result.details.__gui__).toBeDefined();
   });
 
-  describe("action: status", () => {
-    it("多 runs → list-tree，每个 run 的 status+reason 拼接后映射", () => {
-      const details: WorkflowToolDetails = {
-        action: "status",
-        runs: [
-          { runId: "run11111", name: "build", slug: "b", status: "running" },
-          { runId: "run22222", name: "test", slug: "t", status: "done", reason: "completed" },
-          { runId: "run33333", name: "deploy", slug: "d", status: "done", reason: "failed" },
-        ],
-      };
-      const comp = buildWorkflowGui(details);
-
-      expect(comp.type).toBe("list-tree");
-      const props = comp.props as { items: Array<{ label: string; status: string; icon: string }> };
-      expect(props.items).toHaveLength(3);
-
-      // running
-      expect(props.items[0].status).toBe("running");
-      expect(props.items[0].icon).toBe("circle");
-
-      // done (completed) — reason 为 completed，statusStr = "done (completed)"
-      // 含 "done" → done；无 failed 子串 → check
-      expect(props.items[1].status).toBe("done");
-      expect(props.items[1].icon).toBe("check");
-
-      // done (failed) — statusStr = "done (failed)"，含 "failed" → failed/cross
-      expect(props.items[2].status).toBe("failed");
-      expect(props.items[2].icon).toBe("cross");
-    });
-
-    it("空 runs → list-tree with empty items", () => {
-      const details: WorkflowToolDetails = { action: "status", runs: [] };
-      const comp = buildWorkflowGui(details);
-
-      expect(comp.type).toBe("list-tree");
-      const props = comp.props as { items: unknown[] };
-      expect(props.items).toEqual([]);
-    });
+  it("ctx.mode=tui → details.__gui__ is undefined (TUI renders differently)", () => {
+    const ctx = { mode: "tui", hasUI: true } as GuiContext;
+    const result = adapter(makeStartInput(), ctx);
+    expect(result.details.__gui__).toBeUndefined();
   });
 
-  describe("abort → stats-line", () => {
-    it("abort → stats-line，label=abort value=runId 前 8 字符，severity=warn（破坏性终止非成功完成）", () => {
-      const details: WorkflowToolDetails = {
-        action: "abort",
-        runId: "abortId1234",
-        status: "aborted",
-        reason: "user",
-      };
-      const comp = buildWorkflowGui(details);
-      expect(comp.type).toBe("stats-line");
-      const props = comp.props as { items: Array<{ label: string; value: string; severity: string }> };
-      expect(props.items[0].label).toBe("abort");
-      expect(props.items[0].value).toBe("abortId1");
-      expect(props.items[0].severity).toBe("warn");
-    });
+  it("ctx.mode=json → details.__gui__ is undefined (headless)", () => {
+    const ctx = { mode: "json", hasUI: false } as GuiContext;
+    const result = adapter(makeStartInput(), ctx);
+    expect(result.details.__gui__).toBeUndefined();
+  });
+
+  it("ctx.mode=print → details.__gui__ is undefined (headless)", () => {
+    const ctx = { mode: "print", hasUI: false } as GuiContext;
+    const result = adapter(makeStartInput(), ctx);
+    expect(result.details.__gui__).toBeUndefined();
+  });
+
+  it("ctx=undefined → details.__gui__ is undefined (backward compat)", () => {
+    const result = adapter(makeStartInput(), undefined);
+    expect(result.details.__gui__).toBeUndefined();
+  });
+});
+
+// ============================================================
+// buildScriptGui —— workflow script tool details 的 GUI 构造
+// ============================================================
+//
+// 覆盖 5 个 action 分支（generate/lint/list/save/delete），验证各分支产出的
+// stats-line 结构：component.type、item.label/value/severity。
+
+describe("buildScriptGui — generate", () => {
+  it("产出 stats-line，severity ok，value 为脚本名", () => {
+    const details: WorkflowScriptToolDetails = {
+      action: "generate",
+      path: "/tmp/test.js",
+      name: "my-workflow",
+      status: "ready",
+    };
+    const gui = buildScriptGui(details);
+    expect(gui.type).toBe("stats-line");
+    const items = gui.props.items as Array<{ label: string; value: string; severity: string }>;
+    expect(items).toHaveLength(1);
+    expect(items[0].label).toBe("generated");
+    expect(items[0].value).toBe("my-workflow");
+    expect(items[0].severity).toBe("ok");
+  });
+});
+
+describe("buildScriptGui — lint", () => {
+  it("valid=true → value passed, severity ok", () => {
+    const details: WorkflowScriptToolDetails = {
+      action: "lint",
+      name: "clean-script",
+      valid: true,
+      findingCount: 0,
+    };
+    const gui = buildScriptGui(details);
+    expect(gui.type).toBe("stats-line");
+    const items = gui.props.items as Array<{ label: string; value: string; severity: string }>;
+    expect(items[0].label).toBe("lint");
+    expect(items[0].value).toBe("passed");
+    expect(items[0].severity).toBe("ok");
+  });
+
+  it("valid=false → value N findings, severity warn", () => {
+    const details: WorkflowScriptToolDetails = {
+      action: "lint",
+      name: "buggy-script",
+      valid: false,
+      findingCount: 3,
+    };
+    const gui = buildScriptGui(details);
+    const items = gui.props.items as Array<{ label: string; value: string; severity: string }>;
+    expect(items[0].value).toBe("3 findings");
+    expect(items[0].severity).toBe("warn");
+  });
+});
+
+describe("buildScriptGui — list", () => {
+  it("value 为脚本数量字符串，severity ok", () => {
+    const details: WorkflowScriptToolDetails = {
+      action: "list",
+      count: 5,
+    };
+    const gui = buildScriptGui(details);
+    expect(gui.type).toBe("stats-line");
+    const items = gui.props.items as Array<{ label: string; value: string; severity: string }>;
+    expect(items[0].label).toBe("scripts");
+    expect(items[0].value).toBe("5");
+    expect(items[0].severity).toBe("ok");
+  });
+
+  it("count=0 → value 0（空列表仍产出 stats-line）", () => {
+    const details: WorkflowScriptToolDetails = {
+      action: "list",
+      count: 0,
+    };
+    const gui = buildScriptGui(details);
+    const items = gui.props.items as Array<{ label: string; value: string; severity: string }>;
+    expect(items[0].value).toBe("0");
+  });
+});
+
+describe("buildScriptGui — save", () => {
+  it("ok=true → severity ok", () => {
+    const details: WorkflowScriptToolDetails = {
+      action: "save",
+      name: "promoted-script",
+      ok: true,
+    };
+    const gui = buildScriptGui(details);
+    expect(gui.type).toBe("stats-line");
+    const items = gui.props.items as Array<{ label: string; value: string; severity: string }>;
+    expect(items[0].label).toBe("save");
+    expect(items[0].value).toBe("promoted-script");
+    expect(items[0].severity).toBe("ok");
+  });
+
+  it("ok=false → severity warn", () => {
+    const details: WorkflowScriptToolDetails = {
+      action: "save",
+      name: "failed-save",
+      ok: false,
+    };
+    const gui = buildScriptGui(details);
+    const items = gui.props.items as Array<{ label: string; value: string; severity: string }>;
+    expect(items[0].severity).toBe("warn");
+  });
+});
+
+describe("buildScriptGui — delete", () => {
+  it("ok=true → severity ok", () => {
+    const details: WorkflowScriptToolDetails = {
+      action: "delete",
+      name: "removed-script",
+      ok: true,
+    };
+    const gui = buildScriptGui(details);
+    expect(gui.type).toBe("stats-line");
+    const items = gui.props.items as Array<{ label: string; value: string; severity: string }>;
+    expect(items[0].label).toBe("delete");
+    expect(items[0].value).toBe("removed-script");
+    expect(items[0].severity).toBe("ok");
+  });
+
+  it("ok=false → severity warn", () => {
+    const details: WorkflowScriptToolDetails = {
+      action: "delete",
+      name: "locked-script",
+      ok: false,
+    };
+    const gui = buildScriptGui(details);
+    const items = gui.props.items as Array<{ label: string; value: string; severity: string }>;
+    expect(items[0].severity).toBe("warn");
   });
 });

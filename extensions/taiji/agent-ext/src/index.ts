@@ -1,30 +1,25 @@
 /**
  * taiji extension for Pi — internal commands for the host.
  *
- * Registers `/__taiji_reload__` (host-triggered skill/extension reload),
- * `/__taiji_get_system_prompt__` (Trace view fetch-current button), and
- * `/__taiji_nav__` (session tree rewind for message revoke).
+ * Registers `/__taiji_get_system_prompt__` (Trace view fetch-current button)
+ * and `/__taiji_nav__` (session tree rewind for message revoke).
  *
  * [HISTORICAL] The session tree navigation command was removed 2026-08-31:
  * its bridge consumer on the runtime side had been deleted, leaving the
  * command with no reachable caller (ADR-0008). It returns as `__taiji_nav__`
  * under the message-revoke design (ADR-0076, decision D1) — the runtime
  * revoke orchestration is the new consumer.
+ * [HISTORICAL] `/__taiji_reload__` was removed (2026-09-25): the W5
+ * skill-change→pi-reload orchestration was retired — slash menu and composer
+ * injection resolve skills from the taiji SkillRegistry (D7 source switch),
+ * so a full pi reload (extension ctx invalidate + clearExtensionCache, which
+ * broke background-task completion notifications in the stale module world)
+ * bought nothing but stale-pi-side lists, accepted per ADR-0050 degradation.
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI): void {
-  // W5: builtin internal reload command. `/__taiji_reload__` 由 host 在 skill 文件变动时
-  // 经 client.prompt 发起（不经 LLM），handler 调 pi ctx.reload() 重扫 skill + 重建 runtime。
-  // 双下划线前缀 = 内部命令（前端 W4 internal-command-filter 过滤 `/__` 前缀不显示）。
-  pi.registerCommand('__taiji_reload__', {
-    description: 'Internal: reload skills/extensions/prompts (triggered by host on skill file change)',
-    handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      await ctx.reload();
-    },
-  });
-
   // [fetch-current-system-prompt] Trace 视图「现取当前值」通道（session-trace design §3.1
   // 失败路径 / D2）：pi RPC 无 get_system_prompt 命令、getSystemPrompt() 只在 extension
   // API，且现取不能依赖可禁的留痕包（system-prompt-trace 是 feature tier）——挂本

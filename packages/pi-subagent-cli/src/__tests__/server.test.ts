@@ -16,6 +16,10 @@
 //   ⑤ 反向请求客户端：rev-N 帧形状 / {ack:true} 两阶段第一段只 ack 不终结等待
 //      （R9-2，zcode 姊妹包无此语义）/ result+error 应答落位 / 超时兜底（fake timers）。
 
+import { randomUUID } from "node:crypto";
+import * as os from "node:os";
+import * as path from "node:path";
+
 import { describe, expect, it, vi, type Mock } from "vitest";
 
 import {
@@ -128,13 +132,17 @@ function makeEngine(overrides: Partial<FakeEngine> = {}): FakeEngine {
   return { ...base, ...overrides };
 }
 
-/** 组合一个 server（缺省 clock 记录面 + 内存 sink），返回全部观测点。 */
-function makeServer(engine = makeEngine(), reverseTimeoutMs?: number) {
+/** 组合一个 server（缺省 clock 记录面 + 内存 sink），返回全部观测点。
+ * piAgentDir 缺省注入一个不存在的 tmp 路径——查询面（listModels/validateModel，
+ * 路由 engine-query）读不到任何数据文件 → null/结构化错误，测试既不触碰真实
+ * 系统 pi 目录，也无需 fixture 文件（本文件保持零 fs 写删）。 */
+function makeServer(engine = makeEngine(), reverseTimeoutMs?: number, piAgentDir?: string) {
   const sink = makeSink();
   const clockCalls: Array<{ op: string; id: string }> = [];
   const server = new EngineProtocolServer({
     write: sink.write,
     engine,
+    piAgentDir: piAgentDir ?? path.join(os.tmpdir(), `pi-server-test-absent-${randomUUID()}`),
     reverseClock: {
       started: (id: string) => clockCalls.push({ op: "started", id }),
       acked: (id: string) => clockCalls.push({ op: "acked", id }),
@@ -218,7 +226,7 @@ describe("handleFrame 帧分类路由", () => {
 // ── 10 正向方法分发表 ──
 
 describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", () => {
-  it("initialize：版本协商 + 能力/模型目录应答（models 投影仅 id）", async () => {
+  it("initialize：版本协商 + 能力应答（查询面 agentDir 无数据 → 应答不含 models 键）", async () => {
     const engine = makeEngine();
     const { server, sink } = makeServer(engine);
     const resp = await request(server, sink, 1, "initialize", INIT_PARAMS);
@@ -229,15 +237,19 @@ describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", (
       engineVersion: PI_ADAPTER_VERSION,
       adapterVersion: PI_ADAPTER_VERSION,
       capabilities: CAPABILITIES,
-      models: [{ id: "prov/m1" }],
     });
   });
 
-  it("initialize：引擎无 listModels → 应答不含 models 键（null 与省略语义区分）", async () => {
-    const { server, sink } = makeServer(makeEngine({ listModels: undefined }));
+  it("initialize：models 应答源 = 引擎查询面（engine-query 读数据目录，不经 engine mock；models 投影仅 id）", async () => {
+    // engine.listModels mock 不再被分发位消费（pi-workflow-run-resource-model §3.3
+    // 决策 11：查询面路由 engine-query）——数据面断言归 engine-query.test.ts（fixture
+    // 注入形态），本用例锁定「mock 声明不泄漏进 initialize 应答」的改道路由事实。
+    const engine = makeEngine({ listModels: vi.fn((): Array<{ id: string; name?: string }> => [{ id: "mock-only/m", name: "Mock" }]) });
+    const { server, sink } = makeServer(engine);
     const resp = await request(server, sink, 1, "initialize", INIT_PARAMS);
     expect(resp.error).toBeUndefined();
     expect(Object.keys(resp.result as object)).not.toContain("models");
+    expect(vi.mocked(engine.listModels)).not.toHaveBeenCalled();
   });
 
   it("initialize 版本越界 → engine_protocol_mismatch（含双方版本与升级指引）", async () => {
@@ -272,27 +284,21 @@ describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", (
     expect(resp.error?.code).toBe("engine_protocol_not_initialized");
   });
 
-  it("listModels：引擎有枚举面 → {models}；未实现 → {models:null}", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
+  it("listModels：分发位路由 engine-query（agentDir 无数据 → {models:null}；数据面 fixture 断言归 engine-query.test.ts）", async () => {
+    const { server, sink } = makeServer();
     const r1 = await request(server, sink, 1, "listModels", {});
-    expect(r1.result).toEqual({ models: [{ id: "prov/m1", name: "M1" }] });
-
-    const second = makeServer(makeEngine({ listModels: undefined }));
-    const r2 = await request(second.server, second.sink, 1, "listModels", {});
-    expect(r2.result).toEqual({ models: null });
+    expect(r1.result).toEqual({ models: null });
   });
 
-  it("validateModel：透传 modelRef；引擎未实现 → engine_capability_unsupported", async () => {
-    const engine = makeEngine();
-    const { server, sink } = makeServer(engine);
+  it("validateModel：分发位路由 engine-query（无数据目录 + 无缺省声明 → engine_model_unknown 结构化错误）", async () => {
+    const { server, sink } = makeServer();
     const r1 = await request(server, sink, 1, "validateModel", { modelRef: "prov/m1" });
-    expect(r1.result).toEqual({ canonicalRef: "prov/m1" });
-    expect(vi.mocked(engine.validateModel!)).toHaveBeenLastCalledWith("prov/m1");
+    expect(r1.error?.code).toBe("engine_model_unknown");
+    expect(r1.error?.recovery).toContain("listModels");
 
-    const second = makeServer(makeEngine({ validateModel: undefined }));
-    const r2 = await request(second.server, second.sink, 1, "validateModel", {});
-    expect(r2.error?.code).toBe("engine_capability_unsupported");
+    const r2 = await request(server, sink, 2, "validateModel", {});
+    expect(r2.error?.code).toBe("engine_model_unknown");
+    expect(r2.error?.recovery).toContain("pi /model");
   });
 
   it("read：handle 以 {data} 包装传给引擎（协议面裸 handle）", async () => {
@@ -340,13 +346,13 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
       method: "run",
       params: {
         runId: "run-1",
-        task: { prompt: "做点什么", denyTools: ["bash"] },
+        // [D1] schema 本体经 wire task.schema 单字段承载（ctx 侧 env 字符串已退役）
+        task: { prompt: "做点什么", denyTools: ["bash"], schema: { type: "object" } },
         ctx: {
               cwd: "/w",
           model: "prov/m1",
           ctxModel: "prov/ctx-model",
           streamMode: "stream",
-          schemaEnv: "PI_WORKFLOW_SCHEMA=1",
           engineFallback: { from: "zcode", reason: "manifest" },
           sessionRootId: "root-sess-9",
           sessionDir: "/host/agent-dir/subagents/--Users-x-proj--/sessions",
@@ -370,11 +376,19 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     expect(p1).toMatchObject({ runId: "run-1", seq: 1, event: { type: "text_delta", delta: "你好" } });
     expect(p2).toMatchObject({ runId: "run-1", seq: 2, event: { type: "message_end" } });
 
-    // 本地全量 task 还原（ctx.model/cwd 合回；task 其余字段透传）+ RunContext 断言
-    expect(captured?.task).toEqual({ prompt: "做点什么", denyTools: ["bash"], model: "prov/m1", cwd: "/w" });
+    // 本地全量 task 还原（ctx.model/cwd 合回；task 其余字段透传——含 [D1] wire
+    // task.schema 本体直通）+ RunContext 断言
+    expect(captured?.task).toEqual({
+      prompt: "做点什么",
+      denyTools: ["bash"],
+      schema: { type: "object" },
+      model: "prov/m1",
+      cwd: "/w",
+    });
     expect(captured?.ctx.taskId).toBe("run-1");
     expect(captured?.ctx.ctxModel).toEqual({ provider: "prov", id: "ctx-model" });
-    expect(captured?.ctx.schemaEnv).toBe("PI_WORKFLOW_SCHEMA=1");
+    // [D1] 负向断言：ctx 侧传输态 env 字符串字段已退役（防字段名复活）
+    expect("schemaEnv" in (captured?.ctx ?? {})).toBe(false);
     expect(captured?.ctx.engineFallback).toEqual({ from: "zcode", reason: "manifest" });
     expect(captured?.ctx.sessionRootId).toBe("root-sess-9");
     // [Option C 协议化] ctx.sessionDir 还原透传（宿主权威值，引擎不自推导）

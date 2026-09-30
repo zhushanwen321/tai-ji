@@ -39,7 +39,7 @@
  *                                                  挡旧 sessions/日志/调度数据，非数据迁移）
  *   TAIJI_DEV_INSTANCE_NAME=foo pnpm dev             显式指定实例名（默认 = worktree 目录名）
  *
- * 模板预置默认模型 xiaomi-token-plan-cn/mimo-v2.5-pro（快速测试模型，本仓等价性测试
+ * 模板预置默认模型 xiaomi-token-plan-cn/mimo-v2.6-flash（快速测试模型，本仓等价性测试
  * pi-fixture.ts 同款）——每个实例副本天生默认用它，GUI 派发不再吃慢模型。
  */
 
@@ -65,7 +65,7 @@ const APP_ROOT = path.resolve(__dirname, '..') // apps/electron
 const REPO_ROOT = path.resolve(APP_ROOT, '..', '..')
 
 const DEFAULT_MODEL_PROVIDER = 'xiaomi-token-plan-cn'
-const DEFAULT_MODEL_ID = 'mimo-v2.5-pro'
+const DEFAULT_MODEL_ID = 'mimo-v2.6-flash'
 
 /** worktree 名：git toplevel 的 basename（bare repo + worktree 模式下即 worktree 目录名） */
 function resolveInstanceName(cliName) {

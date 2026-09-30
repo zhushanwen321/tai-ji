@@ -95,7 +95,7 @@ function projectSessionScalars(state: unknown): SessionScalarFields {
   const model = record.model
   if (typeof model === 'object' && model !== null) {
     const m = model as Record<string, unknown>
-    // pi Model.id 是裸 modelId（如 'mimo-v2.5-pro'，provider 在 Model.provider）；runtime
+    // pi Model.id 是裸 modelId（如 'mimo-v2.6-flash'，provider 在 Model.provider）；runtime
     // session.modelId 语义是 'provider/model' 组合（switchModel / toSummary 口径）——此处组合。
     if (typeof m.provider === 'string' && m.provider !== '' && typeof m.id === 'string' && m.id !== '') {
       fields.modelId = `${m.provider}/${m.id}`

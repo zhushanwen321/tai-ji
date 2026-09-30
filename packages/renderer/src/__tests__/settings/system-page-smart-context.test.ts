@@ -1,5 +1,10 @@
 /**
- * SystemPage · 智能上下文压缩 Section 测试（SystemSmartContextSection，经 SystemPage 入口 mount）。
+ * SystemPage · 智能上下文压缩 Section 测试（SystemSmartContextSection）。
+ *
+ * mount 分两级：首屏冒烟走 mountSystemPage 全页集成入口（容器编排回归锚 + 全页级联加载
+ * 的用户可见断言）；交互断言用例走 mountSystemSection 直挂单 Section——全页集成树
+ * （6 Section + UpdateCheckCard 等）的编译成本对单 Section 交互断言是纯浪费，且被测
+ * 断言对象（setting-smart-context-* 全族 testid）都落在 SystemSmartContextSection 内。
  *
  * 覆盖：
  *  - 首屏冒烟：DOM 含 switch / model Select / 3 档阈值 input / 排除容器（用户可见断言）。
@@ -11,95 +16,65 @@
  *  - 排除 tag：getSmartContextConfig 返回 excludedModels → tag 文本渲染；点 × → 列表移除项被传。
  *
  * mock 策略：mock 工厂 / fixtures / mount 编排经 __tests__/helpers/system-page-mount
- *  共享（与 system-page-rename-model.test.ts 的公共样板提取）；vi.mock 注册留在本文件
- *  （hoisting 约束），用例断言与特定覆写保留在各自 describe。
- *  settings store 用 @taiji/core 的 getSettingsStore() 单例，beforeEach 经
- *  __resetSettingsStoreForTesting 重置避免跨用例残留。
+ *  共享；vi.mock 注册 + 超时放宽 + 生命周期骨架经 __tests__/helpers/system-page-test-setup
+ *  一站式 setup（import 即注册 + setupSystemPageTest 工厂，两个 SystemPage 集成测试文件单源）；
+ *  用例断言与特定覆写保留在各自 describe。
+ *  settings store 经 provideSettingsStore(createSettingsStore()) 每用例注入全新实例，无跨用例残留。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/system-page-smart-context.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import { __resetSettingsStoreForTesting } from '@taiji/core'
+import { describe, it, expect, beforeEach } from 'vitest'
 import {
-  settingsApiMocks,
-  settingsApiModule,
-  toastModule,
-  commandStoreModule,
-  ipcModule,
-  resetSettingsApiMocks,
-  mountSystemPage,
+  flushPromises,
   seedStore,
   smartContextFixture,
-} from '../helpers/system-page-mount'
+  setupSystemPageTest,
+} from '../helpers/system-page-test-setup'
 
-vi.mock('@taiji/core/transport/api/domains/settings', () => settingsApiModule())
-vi.mock('@/composables/useToast', () => toastModule())
-vi.mock('@/composables/features/command/useCommandStore', () => commandStoreModule())
-vi.mock('@/lib/ipc', () => ipcModule())
-
-// SystemPage 集成 mount 重组件树，插桩/全量套件负载下超 5s 默认预算（空载单跑秒级过）
-// ——预算放宽对齐兄弟文件 system-page-rename-model.test.ts 的 20s 形态
-vi.setConfig({ testTimeout: 20_000 })
-
-// 工厂引用 helper 单例（mock 模块与断言共享同一 mock fn 实例）
-const settingsMock = settingsApiMocks
-
-let wrapper: Awaited<ReturnType<typeof mountSystemPage>> | null = null
-
-/** mount SystemPage（集成入口）并完成异步加载。 */
-async function mountPage(): Promise<void> {
-  wrapper = await mountSystemPage()
-}
+// 工厂引用 helper 单例（seam 桩与断言共享同一 mock fn 实例）
+const { settingsMock, mountPage, mountSection, pageWrapper } = setupSystemPageTest(
+  () => import('@/components/settings/system/SystemSmartContextSection.vue'),
+)
 
 beforeEach(() => {
-  setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
-  resetSettingsApiMocks(settingsMock)
   // 本文件默认值覆写：切 Switch 用例断言传参 false，响应也用 false 保持一致形态
+  //（setup 的 beforeEach 先注册先执行 reset + seam 注入，本覆写在其后生效）
   settingsMock.setSmartContextEnabled.mockResolvedValue({ enabled: false })
-})
-
-afterEach(() => {
-  wrapper?.unmount()
-  wrapper = null
-  document.body.innerHTML = ''
 })
 
 describe('SystemSmartContextSection 智能上下文压缩', () => {
   it('mount 后 DOM 含 switch / model Select / 3 档阈值 input / 排除容器', async () => {
     await mountPage()
-    expect(wrapper!.find('[data-testid="setting-smart-context-switch"]').exists()).toBe(true)
-    expect(wrapper!.find('[data-testid="setting-smart-context-model"]').exists()).toBe(true)
-    expect(wrapper!.find('[data-testid="setting-smart-context-threshold-1"]').exists()).toBe(true)
-    expect(wrapper!.find('[data-testid="setting-smart-context-threshold-2"]').exists()).toBe(true)
-    expect(wrapper!.find('[data-testid="setting-smart-context-threshold-3"]').exists()).toBe(true)
-    expect(wrapper!.find('[data-testid="setting-smart-context-excluded"]').exists()).toBe(true)
+    expect(pageWrapper()!.find('[data-testid="setting-smart-context-switch"]').exists()).toBe(true)
+    expect(pageWrapper()!.find('[data-testid="setting-smart-context-model"]').exists()).toBe(true)
+    expect(pageWrapper()!.find('[data-testid="setting-smart-context-threshold-1"]').exists()).toBe(true)
+    expect(pageWrapper()!.find('[data-testid="setting-smart-context-threshold-2"]').exists()).toBe(true)
+    expect(pageWrapper()!.find('[data-testid="setting-smart-context-threshold-3"]').exists()).toBe(true)
+    expect(pageWrapper()!.find('[data-testid="setting-smart-context-excluded"]').exists()).toBe(true)
   })
 
   it('初始值：Switch 开 + 阈值 input 显示 K 值（400/500/600）', async () => {
-    await mountPage()
-    const sw = wrapper!.find('[data-testid="setting-smart-context-switch"]')
+    await mountSection()
+    const sw = pageWrapper()!.find('[data-testid="setting-smart-context-switch"]')
     expect(sw.attributes('data-state')).toBe('checked')
-    const t1 = wrapper!.find('[data-testid="setting-smart-context-threshold-1"]').element as HTMLInputElement
-    const t3 = wrapper!.find('[data-testid="setting-smart-context-threshold-3"]').element as HTMLInputElement
+    const t1 = pageWrapper()!.find('[data-testid="setting-smart-context-threshold-1"]').element as HTMLInputElement
+    const t3 = pageWrapper()!.find('[data-testid="setting-smart-context-threshold-3"]').element as HTMLInputElement
     expect(t1.value).toBe('400')
     expect(t3.value).toBe('600')
   })
 
   it('enabled=false 时 Switch 为关且阈值 input disabled', async () => {
     settingsMock.getSmartContextConfig.mockResolvedValue({ ...smartContextFixture(), enabled: false })
-    await mountPage()
-    const sw = wrapper!.find('[data-testid="setting-smart-context-switch"]')
+    await mountSection()
+    const sw = pageWrapper()!.find('[data-testid="setting-smart-context-switch"]')
     expect(sw.attributes('data-state')).toBe('unchecked')
-    const t1 = wrapper!.find('[data-testid="setting-smart-context-threshold-1"]')
+    const t1 = pageWrapper()!.find('[data-testid="setting-smart-context-threshold-1"]')
     expect(t1.attributes('disabled')).toBeDefined()
   })
 
   it('切换 Switch 触发 setSmartContextEnabled(false)', async () => {
-    await mountPage()
-    const sw = wrapper!.find('[data-testid="setting-smart-context-switch"]')
+    await mountSection()
+    const sw = pageWrapper()!.find('[data-testid="setting-smart-context-switch"]')
     // reka-ui Switch 通过 click 切换并 emit update:model-value
     await sw.trigger('click')
     await flushPromises()
@@ -109,11 +84,11 @@ describe('SystemSmartContextSection 智能上下文压缩', () => {
 
   it('模型下拉：只列已配凭证 provider 的模型，首项跟随当前会话模型；点选后 setSmartContextCompactModel 收到 "p1/m1"', async () => {
     seedStore()
-    await mountPage()
+    await mountSection()
 
     // reka-ui SelectContent 仅在 open 时挂载（SelectPortal teleport 到 body）。
     // SelectTrigger 在 pointerdown 时打开，happy-dom 下需显式 dispatch。
-    const trigger = wrapper!.find('[data-testid="setting-smart-context-model"]').element as HTMLElement
+    const trigger = pageWrapper()!.find('[data-testid="setting-smart-context-model"]').element as HTMLElement
     trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
     trigger.click()
     await flushPromises()
@@ -135,8 +110,8 @@ describe('SystemSmartContextSection 智能上下文压缩', () => {
   })
 
   it('阈值输入保存换算：第 1 档改为 300(K) → setSmartContextThresholds 收到 300000 绝对数', async () => {
-    await mountPage()
-    const t1 = wrapper!.find('[data-testid="setting-smart-context-threshold-1"]')
+    await mountSection()
+    const t1 = pageWrapper()!.find('[data-testid="setting-smart-context-threshold-1"]')
     ;(t1.element as HTMLInputElement).value = '300'
     await t1.trigger('input')
     await t1.trigger('change')
@@ -149,9 +124,9 @@ describe('SystemSmartContextSection 智能上下文压缩', () => {
     settingsMock.getSmartContextConfig.mockResolvedValue(
       smartContextFixture(['p1/m1', 'p2/m2']),
     )
-    await mountPage()
+    await mountSection()
 
-    const excluded = wrapper!.find('[data-testid="setting-smart-context-excluded"]')
+    const excluded = pageWrapper()!.find('[data-testid="setting-smart-context-excluded"]')
     // tag 文本渲染（用户可见）
     expect(excluded.text()).toContain('p1/m1')
     expect(excluded.text()).toContain('p2/m2')
@@ -166,10 +141,10 @@ describe('SystemSmartContextSection 智能上下文压缩', () => {
 
   it('添加 Select 点选模型后 setSmartContextExcludedModels 收到追加列表', async () => {
     seedStore()
-    await mountPage()
+    await mountSection()
 
     // 打开「添加模型」Select（排除容器内的 SelectTrigger）
-    const addTrigger = wrapper!
+    const addTrigger = pageWrapper()!
       .find('[data-testid="setting-smart-context-excluded"]')
       .find('[role="combobox"]')
     expect(addTrigger.exists()).toBe(true)
@@ -194,27 +169,27 @@ describe('SystemSmartContextSection 智能上下文压缩', () => {
 
   it('RD-4#8：getSmartContextConfig 读取失败 → 常驻提示 + Switch 禁用（不把默认值当已存值）', async () => {
     settingsMock.getSmartContextConfig.mockRejectedValue(new Error('ws down'))
-    await mountPage()
+    await mountSection()
     // 顶部常驻提示 + 重试入口
-    expect(wrapper!.find('[data-testid="smart-context-load-error"]').exists()).toBe(true)
-    expect(wrapper!.text()).toContain('读取失败')
+    expect(pageWrapper()!.find('[data-testid="smart-context-load-error"]').exists()).toBe(true)
+    expect(pageWrapper()!.text()).toContain('读取失败')
     // Switch 禁用（loadError 时不可操作，禁止把默认「开」当已存值落盘）
-    const swEl = wrapper!.find('[data-testid="setting-smart-context-switch"]').element as HTMLButtonElement
+    const swEl = pageWrapper()!.find('[data-testid="setting-smart-context-switch"]').element as HTMLButtonElement
     expect(swEl.disabled).toBe(true)
   })
 
   it('RD-4#8：重试成功后清除提示 + Switch 恢复可用', async () => {
     settingsMock.getSmartContextConfig.mockRejectedValueOnce(new Error('ws down'))
-    await mountPage()
-    expect(wrapper!.find('[data-testid="smart-context-load-error"]').exists()).toBe(true)
+    await mountSection()
+    expect(pageWrapper()!.find('[data-testid="smart-context-load-error"]').exists()).toBe(true)
 
     // 重试：mock 改成功（resetSettingsApiMocks 的默认 resolved 值）
     settingsMock.getSmartContextConfig.mockResolvedValue(smartContextFixture())
-    await wrapper!.find('[data-testid="smart-context-load-retry"]').trigger('click')
+    await pageWrapper()!.find('[data-testid="smart-context-load-retry"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper!.find('[data-testid="smart-context-load-error"]').exists()).toBe(false)
-    const swEl = wrapper!.find('[data-testid="setting-smart-context-switch"]').element as HTMLButtonElement
+    expect(pageWrapper()!.find('[data-testid="smart-context-load-error"]').exists()).toBe(false)
+    const swEl = pageWrapper()!.find('[data-testid="setting-smart-context-switch"]').element as HTMLButtonElement
     expect(swEl.disabled).toBe(false)
   })
 })

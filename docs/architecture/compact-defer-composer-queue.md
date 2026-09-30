@@ -14,7 +14,7 @@
 
 ### 1.2 目标
 
-- defer 消息与 steer/followUp 统一收口到 composer 上方队列区：专属 Hourglass icon + 占用分档 chip（「压缩后」/「命令后」/「稍后发送」）区分三种排队语义，保留未提交条目的 × 撤销能力。
+- defer 消息与 steer/followUp 统一收敛到 composer 上方队列区：专属 Hourglass icon + 占用分档 chip（「压缩后」/「命令后」/「稍后发送」）区分三种排队语义，保留未提交条目的 × 撤销能力。
 - 「压缩中」指示落为横线分隔行（spinner + 主文案 +「待发 N」chip），并联动待发队列计数（未提交全量条数），闭环「消息没丢」的感知。〔2026-09-16 修订：原「升级为通栏活动带」被降级取代——瞬时状态回归 DESIGN.md §6.1 通知族二分的横线分隔行族（可交互性二分下压缩中提示属静态元信息），详见 §2.2〕
 
 ### 1.3 Out of scope 与已接受代价
@@ -34,7 +34,7 @@
 > **提交尝试瞬态声明**：`setEntryMode` 先于 RPC await（useCompactQueue.ts:365/:368）——提交尝试窗口内 defer 行即隐藏；busy/传输错误回滚 mode 后行弹回（ms 级自愈）。回滚是既有 flush 记账「留队静默自愈」的显示投影，非双显/丢失，回滚后 × 撤销能力恢复。与 pi 既有队列条目的交叉时序沿用既有消费顺序约定（QueueBubble 现注释 + G-023），非本设计 delta。
 
 - 反例重演（压缩中入队 2 条 D1/D2 → 压缩结束 flush）：D1 队首走 send → D1 defer 行隐藏、确认前无任何行（零行窗口，量级 = pi echo 延迟）；D2 走 steer → 队列区出现 D2 镜像 Zap 行、D2 defer 行隐藏 → **每条消息至多一行，无双行**。D1/D2 确认帧先后到达 → 镜像行消失/气泡入流、正常气泡逐一入流。VISIBLE_MAX 不再对同一消息计双份；defer chip 只出现在未提交行，「稍后发送」chip 与「已提交」tooltip 的矛盾不复存在。
-- 被否谱系：~~镜像行按 DEFER_FLUSH_MARKER 与本地队列求差集隐藏、defer 行承接已提交态~~ —— 击穿反例：文本匹配脆弱（同文本多条目），且已提交行保留仍占 VISIBLE_MAX 位；~~显式接受双显示~~ —— 击穿反例：直接违背 §1.2「消息没丢」目标（同列表相邻双行）。
+- 否决记录：~~镜像行按 DEFER_FLUSH_MARKER 与本地队列求差集隐藏、defer 行承接已提交态~~ —— 击穿反例：文本匹配脆弱（同文本多条目），且已提交行保留仍占 VISIBLE_MAX 位；~~显式接受双显示~~ —— 击穿反例：直接违背 §1.2「消息没丢」目标（同列表相邻双行）。
 - **行为变化显式声明（两条）**：① 已提交条目不再展示「禁用 × + tooltip 已提交，等待投递」（现 PendingBubble 形态）。该态下用户本就不可撤（pi 无 clear_queue），仅信息呈现位置让渡给镜像行（steer）/放弃展示（send）；撤销能力范围不变（仅未提交条目）。② 已提交 send 条目存在确认前不可见窗口（量级 = pi echo 延迟，秒级内；现状由 PendingBubble 已提交禁用态遮盖；压缩全期队列可见性不受影响）。判定可接受——不可撤操作无交互损失，且 echo 后气泡即入流。
 
 **QueueBubble 扩展**（维持「纯 props 展示 + emit」范式，M4 数据源唯一纪律）：
@@ -67,7 +67,7 @@
 - **结构（四行同构）**：`system-notice content-col flex min-w-0 items-center gap-2 py-1.5` + 两端渐隐横线 ×2（`h-px flex-1` + `bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]`）——`content-col` 保留（回到居中 720 内容列），`-mx-5` 通栏 / `accent-soft` 底 / `border-y` 全部摘除；`system-notice` 标记随形态回归横线分隔行族而恢复（零 CSS 语义标记，「形态归一」即理由——早期版本（v2 F5 摘除 / v3 死标记定性）的「摘除」判断以本版为准）。
 - **内容**：Loader2 `size-[13px] stroke-width 2.2 text-neutral-mid`（原通栏带形态的 `size-3.5 animate-spin text-accent` 随降级作废；图标色走中性，语义色落 meta——exit 0 绿 / 非 0 与超时 warn）+ 主文案（`--text-sm` `--neutral-fg` 550；manual →「压缩中」/ threshold·overflow →「正在自动压缩上下文」，key 不变）+ 「待发 N」chip（mono `--text-3xs` + `border-border-strong` 描边，`t('panel.message.compactingQueueChip', { count })`；原副文案长句 `compactingFlushHint` 与「·」分隔随之退役）。bash 行的 mono 命令文本沿用主文案同行展示。
 - **chip 数据源与口径（口径不随形态变化）**：`useCompactQueue().peek(sid)` 过滤 `mode === undefined` 后计数（App 级单例，ActivityStrip 内 computed）——**只计未提交条目**，与 2.1 归一规则同口径：flush 提交后未确认条目不计入（它们已投递，承接形态分通道见 §2.1：steer 镜像行 / send 无行）；「已提交未确认 + 再压缩」边缘下 chip 语义仍准确。`count === 0` 时 chip 不渲染（活动行仍在，压缩状态本身独立成立）。
-- **行高与守卫**：行高由 CSS 与文档流承担（`py-1.5` + 内容行），不设行高像素常量、不挂 dev 运行时断言——原两行高常量与 `useConstantHeightAssert` 绑定已随 D6 定位链删除退役（行高不再参与任何定位计算，防漂移守卫失去守护对象），行尺寸规范守卫归 e2e-visual 像素轨；`useConstantHeightAssert` 现存唯一消费 = load-more 预留高度断言（有真实布局消费）。
+- **高度常量同步**：`COMPACTING_NOTICE_HEIGHT` 50 → 32（py-1.5(6px×2) + 内容行 max(chip 20px, 主文案 text-sm×1.5≈19.5px)）；`EXECUTING_BASH_NOTICE_HEIGHT` 24 → 32（D3 增强规格三项 py-1→py-1.5 / text-xs→text-sm / icon 12→13px 同时改变行高，与 COMPACTING 同批重测）。两常量的强绑定 DOM 注释（逐 class 记录新结构）同批改写；数值为规格算式结果，**以 dev 断言实测校准为准**（`useConstantHeightAssert` 持续检查漂移，±1px 容差）。
 
 ### 2.3 i18n（zh/en 同步新增，禁硬编码）
 
@@ -108,6 +108,6 @@
 ## 变更历史
 
 - 2026-09-13 v1：初稿。方案来源 = 三 demo 用户裁决（方案 2），demo 文件 `.tmp/compact-queue-demos/`。
-- 2026-09-13 v2：三审 round 1 全修（2+4 must-fix、3+4 suggestion 全部处置）。F1 → §2.1 双数据源归一规则（defer 行仅渲染未提交条目，被否谱系 2 条）+ A8 场景 + 副文案 count 口径改未提交；F2 → 根门改写声明；F3/INFO → u1 测试领地更名 queue-bubble-s8.test.ts + 只读契约收窄；F4 → 清扫清单补全（源码 4 面 + docs 5 面）+ 新拆 u4 清扫单元；F5 → §2.2 摘除 content-col/system-notice + tailwind-preset 注释同步；S1 → 可见性口径变化声明 + 副文案全量补偿；S2 → 亮色主题四要素补齐；S3 → 覆盖面 re-home 声明；S4 → A9 split 场景；主审 P1-4 → demo-2 入库 `docs/page-design/compact-defer-queue-spec.html`；主审 S3 → QueueBubble 头注归 u1、useCompactQueue 头注归 u2；~~`submittedAwaitingDelivery`~~ 消费方消失，key 暂留（终态同步复核）。
-- 2026-09-13 v3：round 2 聚焦复审全修（主审 0MF/1S；影响审 2MF/2S）。MF-1 → 归一规则承接句按通道改写（steer=镜像行承接；send=无承接行、确认前不可见窗口显式声明——inflight 纯记账计数无视觉形态、flush-send 不做乐观 appendUser 源码证伪 v2 叙述）+ 反例重演/A2/A8 联动改写 + A8 补 D1 长任务可观测步骤 + 提交尝试瞬态声明（主审 S 吸收）；MF-2 → re-home 锚点修正（use-compact-queue.test.ts TC5/CD1 承接转态，use-chat-compacted-flush.test.ts 为 renderer 包 flush 触发面）；S-1 → u4 种子内联改写目标（composer-compact-queue.test.ts 3 处 :4/:5/:15）+ 03-chat-flow.md 标注 `pending-bubble-list` testid；S-2 → u4 计数修正 8 路径（+1 豁免不计入）；INFO → 「unde」残缺文本修正、system-notice 零 CSS 定性修正（摘除=死标记清理）+ v-for 按 row.kind 条件化实施注意、pi 既有队列交叉时序沿用既有约定加注。被否谱系新增：~~inflight 占位承接展示~~ —— 源码证伪（记账计数器无视觉形态）。
+- 2026-09-13 v2：三审 round 1 全修（2+4 must-fix、3+4 suggestion 全部处置）。F1 → §2.1 双数据源归一规则（defer 行仅渲染未提交条目，否决记录 2 条）+ A8 场景 + 副文案 count 口径改未提交；F2 → 根门改写声明；F3/INFO → u1 测试领地更名 queue-bubble-s8.test.ts + 只读契约收窄；F4 → 清扫清单补全（源码 4 面 + docs 5 面）+ 新拆 u4 清扫单元；F5 → §2.2 摘除 content-col/system-notice + tailwind-preset 注释同步；S1 → 可见性口径变化声明 + 副文案全量补偿；S2 → 亮色主题四要素补齐；S3 → 覆盖面 re-home 声明；S4 → A9 split 场景；主审 P1-4 → demo-2 入库 `docs/page-design/compact-defer-queue-spec.html`；主审 S3 → QueueBubble 头注归 u1、useCompactQueue 头注归 u2；~~`submittedAwaitingDelivery`~~ 消费方消失，key 暂留（终态同步复核）。
+- 2026-09-13 v3：round 2 聚焦复审全修（主审 0MF/1S；影响审 2MF/2S）。MF-1 → 归一规则承接句按通道改写（steer=镜像行承接；send=无承接行、确认前不可见窗口显式声明——inflight 纯记账计数无视觉形态、flush-send 不做乐观 appendUser 源码证伪 v2 叙述）+ 反例重演/A2/A8 联动改写 + A8 补 D1 长任务可观测步骤 + 提交尝试瞬态声明（主审 S 吸收）；MF-2 → re-home 锚点修正（use-compact-queue.test.ts TC5/CD1 承接转态，use-chat-compacted-flush.test.ts 为 renderer 包 flush 触发面）；S-1 → u4 种子内联改写目标（composer-compact-queue.test.ts 3 处 :4/:5/:15）+ 03-chat-flow.md 标注 `pending-bubble-list` testid；S-2 → u4 计数修正 8 路径（+1 豁免不计入）；INFO → 「unde」残缺文本修正、system-notice 零 CSS 定性修正（摘除=死标记清理）+ v-for 按 row.kind 条件化实施注意、pi 既有队列交叉时序沿用既有约定加注。否决记录新增：~~inflight 占位承接展示~~ —— 源码证伪（记账计数器无视觉形态）。
 - 2026-09-16 v4：压缩中形态降级同步（来源 = 系统通知渲染升级设计 D4 裁决：压缩中提示回归 DESIGN.md §6.1 通知族二分的「横线分隔行」族，同时 bash/thinking/settling 行同批升 D3 增强规格）。按全文检索 `compacting|活动带|副文案|compactingFlushHint` 命中面逐处同步——标题（L1）+ 头部视觉基线声明（死链修正为 `docs/assets/compact-defer-queue-spec.html`：队列区引用保留、活动带部分标注失效并改指 §6.1）+ §1.2 目标句 + §1.3 视觉面登记行（`--accent-soft` 退出，改记 `--info-soft` / `--border-strong`）+ §2.1 补偿口径（副文案长句 → chip，显眼度变化登记）+ §2.2 全节重写（通栏带 → 分隔行；`COMPACTING_NOTICE_HEIGHT` 50→32 与 `EXECUTING_BASH_NOTICE_HEIGHT` 24→32 同批）+ §2.3 i18n 表（`compactingFlushHint` → `compactingQueueChip`，旧键退役）+ §3 验收场景 A3/A4/A7/A9 + §4 u3 行（职责与领地更新，补 `tailwind-preset.ts` content-col 清单恢复 ActivityStrip）+ 本节。资产 `docs/assets/compact-defer-queue-spec.html` 加活动带形态失效标注（不删资产，队列区部分继续有效）。显式豁免不改：§1.1 现状问题 2（历史陈述）与 §2.1 deferChip 分档行（不受降级影响）。

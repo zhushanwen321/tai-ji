@@ -112,7 +112,7 @@ export interface PiLaunchPreset {
   // ── 其他配置 ──
   /** 禁用所有 skill（映射 --no-skills） */
   noSkills?: boolean
-  /** 禁用 context files（AGENTS.md/CLAUDE.md，映射 --no-context-files） */
+  /** 禁用 context files（AGENTS.md，映射 --no-context-files） */
   noContextFiles?: boolean
 }
 
@@ -334,14 +334,14 @@ prompt?: {
 
 取值集中在 `resolveEffectiveSystemPrompt` / `resolveAppendSystemPrompt`（`packages/runtime/src/services/session/launch-params.ts`），create / restoreSession / forkSession 三处 spawn 共用（避免一处改了另两处漏）。argv 拼装在 `packages/pi-rpc/src/spawn-args.ts`；内联值统一**前置一个 `\n`**（`toInlinePromptValue`）——pi 对两个 flag 的值先 `existsSync(值)`（基准 = 会话 cwd），命中即把该文件内容当提示词；含换行的值不可能命中真实路径，从而构造性区分「字面文本」与「文件路径」（否则用户文案恰为项目内文件名如 `AGENTS.md` 时会被静默替换成文件内容）。该前缀覆盖两条通道 × 两条来路（模式值 / 全局值），不会漏加。
 
-`append` 段的链序（如实声明）：pi 基础 → 模式追加段 → project context（cwd AGENTS.md/CLAUDE.md）→ skills → 扩展全局 AGENTS.md（`~/.agents`）→ 全局追加段；即模式追加段在两条全局段**之前**，直接冲突时全局占优（逃逸路径 = 把文案放进该模式的替换段，但会一并丢弃 pi 内置行为规范）。
+`append` 段的链序（如实声明）：pi 基础 → 模式追加段 → project context（cwd AGENTS.md）→ skills → 扩展全局 AGENTS.md（`~/.agents`）→ 全局追加段；即模式追加段在两条全局段**之前**，直接冲突时全局占优（逃逸路径 = 把文案放进该模式的替换段，但会一并丢弃 pi 内置行为规范）。
 
 | preset.noContextFiles | systemPrompt 来源 | pi args |
 |---|---|---|
 | `false` / 未设 | 模式 replace > 全局替换 > pi 默认 | `--system-prompt <value>`（有模式 append 时增 `--append-system-prompt <value>`） |
 | `true` | 同上 | 同上 + `--no-context-files` |
 
-`--no-context-files` 禁用 AGENTS.md / CLAUDE.md 自动发现（不影响显式 `--system-prompt`）。
+`--no-context-files` 禁用 AGENTS.md 自动发现（不影响显式 `--system-prompt`）。
 
 **argv 日志脱敏**：两条 prompt flag 的值都是用户可编辑的成段文本，spawn 回显（`rpc-client` 日志行）与孤儿回收的 crash journal `argvSummary()` 必须经共享脱敏纯函数只记 `--flag <N chars>`，不得落正文。**（已实施）** 落点 = `packages/runtime/src/infra/pi/argv-redact.ts`（数组形态 `redactArgv` + 行形态 `redactArgvLine`；只蔽值型 flag 的值、其余 token 原样保留、按索引遮蔽不做全局替换、换行归一 + 长度封顶），两处调用点均已接线。
 
@@ -382,7 +382,7 @@ Settings → 新增 Tab「Pi 参数」（或在「系统」Tab 下新增 Section
 │  │ 高级选项:                                             │ │
 │  │ ☐ 禁用所有扩展                                        │ │
 │  │ ☐ 禁用所有 Skill                                      │ │
-│  │ ☐ 禁用 Context Files（AGENTS.md/CLAUDE.md）          │ │
+│  │ ☐ 禁用 Context Files（AGENTS.md）                    │ │
 │  │                                                       │ │
 │  │ ⓘ 3 个内置扩展（系统提示词等）始终加载，不可禁用      │ │
 │  └───────────────────────────────────────────────────────┘ │
@@ -985,7 +985,7 @@ const extensionPaths = this.noExtensions
 | modelOverride | `--model <pattern>` | provider/modelId 形式 | args.ts:89-90, 239 |
 | thinkingLevel | `--thinking <level>` **（不是 --thinking-level）** | off, minimal, low, medium, high, xhigh | args.ts:130-139, 261, 57 |
 | noSkills | `--no-skills` / `-ns` | flag | args.ts:163-164, 265 |
-| noContextFiles | `--no-context-files` / `-nc` | flag（禁用 AGENTS.md/CLAUDE.md 发现） | args.ts:169-170, 270 |
+| noContextFiles | `--no-context-files` / `-nc` | flag（禁用 AGENTS.md 发现） | args.ts:169-170, 270 |
 | systemPrompt | `--system-prompt <text>` | text | args.ts:93-97, 241-242 |
 
 其他可选 flag：`--no-prompt-templates` / `-np`、`--no-themes`、`--provider`、`--api-key`、`--skill <path>`。

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useBrowserFocusSync 单测（Browser Drawer Wave 4）。
  *

@@ -519,7 +519,7 @@ describe('asStagingAction', () => {
   })
 })
 
-// ── streaming 守卫（isSessionActive：入口拦截 + 发送兑底）─────────────────
+// ── streaming 守卫（isSessionActive：入口拦截 + 发送兜底）─────────────────
 describe('streaming 守卫（isSessionActive）', () => {
   it('源 session streaming 中 enterHandoffMode 拦截：toast + 不进入模式', () => {
     const { deps, api } = setup()
@@ -554,7 +554,7 @@ describe('streaming 守卫（isSessionActive）', () => {
     expect(deps.toastError).not.toHaveBeenCalled()
   })
 
-  it('发送兑底：进入模式后 session 变 streaming → handleHandoffSend 拦截，不清草稿不退模式不打 handoff', async () => {
+  it('发送兜底：进入模式后 session 变 streaming → handleHandoffSend 拦截，不清草稿不退模式不打 handoff', async () => {
     const { deps, api } = setup()
     api.enterHandoffMode('src-1')
     // 进入后才变 streaming（竞态窗口）

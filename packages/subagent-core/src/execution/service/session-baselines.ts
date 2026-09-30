@@ -14,7 +14,7 @@
 // 2. 转发壳写法：壳保留同名私有 getter（字段面）与同名方法（方法面）单行转发；
 //    聚合公共面 = 壳转发面 + 测试改写后的聚合路径，两面同源零漂移。
 // 3. 跨聚合边收敛：他域直写本域字段的写点收敛为显式接口方法（本聚合：
-//    disposeSessionUi ← 壳 dispose 直写 uiRequestHandler/uiObservability，清单① C-3）；
+//    disposeSessionUi ← 壳 dispose 直写 uiRequestHandler，清单① C-3）；
 //    本域直写他域字段的写点收敛为 deps 显式回调（[modeless 波3] resetSettledRescan
 //    随 E1 退役删除——历史写点见 git）
 //    直写 settledRescanState，清单① C-2；R2 抽取后回调改指其聚合显式接口）。
@@ -67,9 +67,8 @@ export const ENV_ROOT_CWD = "PI_SUBAGENT_ROOT_CWD";
  * stub 始终返回 {cancelled:true}，不调 ctx.ui、不捕获任何 ctx，让 trailing ui_request
  * 干净降级为 cancelled（等价于子进程主动取消）。
  *
- * 不置 undefined —— 那会让 trailing ui_request 走 inproc UI 请求队列（已删） 的 handler-missing
- * 分支触发 notifyMissingHandlerGlobal warn，噪声性质从 threw-error 变 missing-handler，
- * 没真正解决。
+ * 不置 undefined——那会让 trailing ui_request 找不到 handler 接管，降级路径不明确；
+ * stub 化让行为固定为 cancelled。
  *
  * [R1] 自壳文件迁入（消费点 = disposeSessionUi + 壳 dispose 的应答端 stub 替换）。 */
 export const disposedUiRequestStub: UiRequestHandler = () => Promise.resolve({ cancelled: true });
@@ -118,9 +117,9 @@ export interface SubagentServiceSessionInit {
  * - 复活回调（reviveDisposed）：initSession 对壳旗标的写点显式化。
  *   [modeless 波3] 旧 resetSettledRescan 回调（#5 SyncCollect 的 settledRescanState
  *   复活重置，清单① C-2）随 E1 恢复面退役删除。
- * - 跨域编排回调（getStore/getNotifyHost/recoverOrphans/bootRoundSupervisor/
- *   runPendingReconcileSweep）：initSession 复活后的跨域编排时序（R3/R4 域）以回调
- *   注入，聚合→壳零 import（D4）；R3/R4 抽取后同点改指聚合显式接口。
+ * - 跨域编排回调（getStore/getNotifyHost/recoverOrphans/runPendingReconcileSweep）：
+ *   initSession 复活后的跨域编排时序（R3/R4 域）以回调注入，聚合→壳零 import（D4）；
+ *   R3/R4 抽取后同点改指聚合显式接口。
  */
 export interface SessionBaselinesDeps {
   /** [D4 late-bound getter] assertReady 断言状态快照源（pi 运行时注入 + 声明周期 disposed 旗标）。 */
@@ -133,9 +132,7 @@ export interface SessionBaselinesDeps {
   readonly getNotifyHost: () => { revive(): void };
   /** [跨域编排回调] 孤儿终态恢复（#3 RecordLifecycle 域方法；R3 改指聚合显式接口）。 */
   readonly recoverOrphans: () => void;
-  /** [跨域编排回调] 轮次监督器 boot 分区（#14 协作面；R4 改指聚合显式接口）。 */
-  readonly bootRoundSupervisor: () => void;
-  /** [跨域编排回调] 注册对账 sweep（#14 service-binding 模块函数 + #18 finalize 委托闭包，壳装配）。 */
+  /** [跨域编排回调] 注册对账 sweep（#14 registry-reconcile/sweep-binding 模块函数，壳装配）。 */
   readonly runPendingReconcileSweep: () => void;
 }
 
@@ -273,7 +270,6 @@ export class SessionBaselines {
     this._uiObservability.setMode(init.mode);
     if (init.uiRequestHandler !== undefined) {
       this.uiRequestHandler = init.uiRequestHandler ?? undefined;
-      this._uiObservability.resetMissingHandlerWarnings();
       // [W6 R3 MF-A] session 级覆盖同步进壳侧应答端登记（三态：null = 显式清空）。
       setHostUiRequestEndpoint(this.uiRequestHandler);
     }
@@ -300,12 +296,9 @@ export class SessionBaselines {
     // 孤儿终态恢复（放 initSession 末尾：setPi 已注入（appendEntry 可用）、
     // sessionRootId 已建立（过滤当前根的 record）；单扫描者判据见 recoverOrphansIfRootProcess）
     this.deps.recoverOrphans();
-    // [W4] boot 分区 + 注册对账 sweep（须在孤儿恢复之后——依赖关系见两方法注释：
-    // 孤儿恢复把「重启前在途」record 一律纠偏 idle 等 revive（[U5/D4 MF-1] 重认领
-    // 谓词已随死代码清理删除——磁盘重建单规则恒 idle，boot 候选门后恒空，W4 跨重启
-    // 归宿 = idle 等 revive 非重认领）；sweep 再对终态 record 补发注销落盘——表 3 行 2
-    // 「注销经对账 sweep 保证落盘」的编排点）。
-    this.deps.bootRoundSupervisor();
+    // 注册对账 sweep（须在孤儿恢复之后——孤儿恢复把「重启前在途」record 一律纠偏
+    // idle 等 revive（[U5/D4 MF-1]：磁盘重建单规则恒 idle）；sweep 再对终态 record
+    // 补发注销落盘——「注销经对账 sweep 保证落盘」的编排点）。
     this.deps.runPendingReconcileSweep();
   }
 
@@ -349,16 +342,15 @@ export class SessionBaselines {
     }
   }
 
-  /** [C-3 显式接口收敛] dispose 时的 UI 面 stub 化：uiRequestHandler 换 stub +
-   *  缺失告警去重重置。原壳 dispose 直写本聚合两个字段，R1 收敛为本显式方法
-   *  （壳 dispose 编排调用；壳侧应答端登记 setHostUiRequestEndpoint(stub) 仍留壳）。
+  /** [C-3 显式接口收敛] dispose 时的 UI 面 stub 化：uiRequestHandler 换 stub。
+   *  R1 收敛为本显式方法（壳 dispose 编排调用；壳侧应答端登记 setHostUiRequestEndpoint(stub)
+   *  仍留壳）。
    *
    *  stub 化时序契约（原壳 dispose 注释）：第一时间换 stub，防 trailing ui_request 调到
    *  stale handler 闭包（仍持有 disposed session 的 ctx）产生误导性 console.error；
    *  必须在 emit/abort 之前——这些步骤可能同步触发 trailing pump。 */
   disposeSessionUi(): void {
     this.uiRequestHandler = disposedUiRequestStub;
-    this._uiObservability.resetMissingHandlerWarnings();
   }
 
   /**

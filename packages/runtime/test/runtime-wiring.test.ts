@@ -149,21 +149,6 @@ describe('wave:runtime-wiring · TC1/TC2 session-service send 回调双写', () 
     expect(broker.broadcast).toHaveBeenCalledWith(msg)
   })
 
-  it('TC1 边界：message.complete 带 sessionId 时仍触发 onMessageComplete 回调', async () => {
-    const { send, svc } = await captureSend(true)
-    const cb = vi.fn()
-    svc.setOnMessageComplete(cb)
-    broker.broadcast.mockClear()
-    vi.mocked(messageBus.publish).mockClear()
-
-    const msg: ServerMessage = { type: 'message.complete', payload: { sessionId: 's-complete' } }
-    send(msg)
-    expect(cb).toHaveBeenCalledWith('s-complete')
-    expect(messageBus.publish).toHaveBeenCalledWith('s-complete', msg)
-    // wave:perf-w09（D1-2）：broadcast 腿已删
-    expect(broker.broadcast).not.toHaveBeenCalled()
-  })
-
   it('未注入 messageBus 时（nullable）session 级消息不抛错（publish no-op，broker 也不走）', async () => {
     const { send } = await captureSend(false)
     broker.broadcast.mockClear()

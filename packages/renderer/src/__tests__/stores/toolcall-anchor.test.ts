@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * ToolCall ID 锚定 + 流结束收口测试。
  *

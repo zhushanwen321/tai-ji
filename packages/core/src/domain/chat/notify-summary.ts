@@ -16,6 +16,8 @@ import {
   parseWorkflowResultNotify,
 } from '@taiji/shared'
 import type { BgNotifyRecord, Message } from '@taiji/shared'
+// notify 通道 customType 词表单源（extension-protocol，与壳写点同源）
+import { WORKFLOW_RESULT_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 
 /** bg-notify 单条记录的成败三态（D5 判据输出）：成功 / 失败 / 中性（取消、判据不可得）。 */
 export type NotifyOutcome = 'success' | 'failed' | 'neutral'
@@ -84,11 +86,34 @@ function judgeBgNotifyRecord(record: BgNotifyRecord): NotifyOutcome {
   }
 }
 
+/**
+ * managed-session-notify details 防御解析（notify-once D9 提取口径）：key = details.notifyId
+ * （批已在 extension 攒批窗重建身份，单条即一批，无 items 展开面）；outcome = reason/status
+ * 映射 completed→success / failed→failed / 其余（stopped/cancelled 等）→neutral。
+ * notifyId 缺失/空串、reason 与 status 双缺席 → null（消费侧降级 unparsed，不崩溃）。
+ */
+function parseManagedSessionNotify(details: unknown): { notifyId: string; outcome: NotifyOutcome } | null {
+  if (typeof details !== 'object' || details === null || Array.isArray(details)) return null
+  const d = details as Record<string, unknown>
+  const notifyId = d['notifyId']
+  if (typeof notifyId !== 'string' || notifyId === '') return null
+  const raw =
+    typeof d['reason'] === 'string'
+      ? d['reason']
+      : typeof d['status'] === 'string'
+        ? d['status']
+        : null
+  if (raw === null) return null
+  const outcome: NotifyOutcome = raw === 'completed' ? 'success' : raw === 'failed' ? 'failed' : 'neutral'
+  return { notifyId, outcome }
+}
+
 /** 隐藏通知消息 → record 列表（D5 record 口径）：subagent-bg-notify single→1 /
- *  batch→items.length；workflow-result→1（去重键 details.runId）。message 级 parse null
+ *  batch→items.length；workflow-result→1（去重键 details.runId）；managed-session-notify→1
+ *  （去重键 details.notifyId，D9）。message 级 parse null
  *  → 零 record + unparsed 1。 */
 function extractNotifyRecords(msg: Message): NotifyExtraction {
-  if (msg.customType === 'workflow-result') {
+  if (msg.customType === WORKFLOW_RESULT_CUSTOM_TYPE) {
     const notify = parseWorkflowResultNotify(msg.details)
     if (!notify) return { records: [], unparsed: 1 }
     return {
@@ -99,6 +124,14 @@ function extractNotifyRecords(msg: Message): NotifyExtraction {
           outcome: notify.outcome === 'completed' ? 'success' : notify.outcome,
         },
       ],
+      unparsed: 0,
+    }
+  }
+  if (msg.customType === 'managed-session-notify') {
+    const parsed = parseManagedSessionNotify(msg.details)
+    if (!parsed) return { records: [], unparsed: 1 }
+    return {
+      records: [{ key: parsed.notifyId, round: -1, outcome: parsed.outcome }],
       unparsed: 0,
     }
   }

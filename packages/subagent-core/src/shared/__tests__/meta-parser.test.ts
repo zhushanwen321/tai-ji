@@ -125,6 +125,19 @@ describe("parseResourceMeta (discovery, fail-safe null)", () => {
     expect(a.model).toBe("claude-3.5");
   });
 
+  it("agent frontmatter 单引号包裹的值可解析（YAML 引号形态）", () => {
+    const meta = parseResourceMeta("---\nname: 'reviewer'\ndescription: '代码审查'\n---", "agent");
+    expect(meta).not.toBeNull();
+    const a = meta as AgentMeta;
+    expect(a.kind).toBe("agent");
+    expect(a.name).toBe("reviewer");
+    expect(a.description).toBe("代码审查");
+  });
+
+  it("agent frontmatter 未闭合（无结束 ---）返 null", () => {
+    expect(parseResourceMeta("---\nname: worker\ndescription: x", "agent")).toBeNull();
+  });
+
   it("TC3: malformed YAML（缩进错）返 null，不抛 [P-yaml]", () => {
     expect(() => parseResourceMeta(MALFORMED_INDENT, "workflow")).not.toThrow();
     expect(parseResourceMeta(MALFORMED_INDENT, "workflow")).toBeNull();

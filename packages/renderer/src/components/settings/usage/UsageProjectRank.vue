@@ -52,8 +52,8 @@ import {
   fmtCompact,
   fmtUSD,
   fmtPct,
-} from './aggregate'
-import type { RankRow } from './aggregate'
+} from '@taiji/core'
+import type { RankRow } from '@taiji/core'
 
 const props = defineProps<{
   projects: RankRow[]

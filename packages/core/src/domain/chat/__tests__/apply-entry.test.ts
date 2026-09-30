@@ -775,9 +775,15 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
         type: 'custom_message', id: 'cmb-2', parentId: null, timestamp: ISO(1000),
         customType: 'subagent-bg-notify', content: 'done', display: true,
       },
+      {
+        type: 'custom_message', id: 'cmb-3', parentId: null, timestamp: ISO(1001),
+        customType: 'managed-session-notify', content: 'session completed', display: true,
+      },
     ])
     // pi 可能持久化 display:true，taiji 统一隐藏（mapSessionEntries 同 SSOT 规则）
     expect(state.messages[0].display).toBe(false)
+    expect(state.messages[1].customType).toBe('managed-session-notify')
+    expect(state.messages[1].display).toBe(false)
   })
 
   // ── 未建模 entry 类型（default no-op，规则 #9 不丢弃）──────────────

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useAuthedModelGroups 守卫测试（design scoped-model-extension-candidates T3）。
  *
@@ -8,7 +10,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsStore, createSettingsStore } from '@taiji/core'
 import { useAuthedModelGroups, staleModelRef } from '../useAuthedModelGroups'
 import type { ProviderInfo } from '@taiji/shared'
 
@@ -31,7 +33,7 @@ function mockProviders(extra: Partial<ProviderInfo> = {}): ProviderInfo[] {
       name: '小米',
       apiKeySet: true,
       status: 'ok',
-      models: [{ id: 'mimo-v2.5-pro', name: 'MiMo v2.5 Pro' }],
+      models: [{ id: 'mimo-v2.6-flash', name: 'MiMo v2.6 Flash' }],
       ...extra,
     },
   ] as ProviderInfo[]
@@ -39,7 +41,7 @@ function mockProviders(extra: Partial<ProviderInfo> = {}): ProviderInfo[] {
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
 })
 
 describe('useAuthedModelGroups', () => {
@@ -56,12 +58,12 @@ describe('useAuthedModelGroups', () => {
 
     // 候选 = providers 全量 3 模型，而非 models 的 1 模型
     expect(availableValues.value).toEqual(
-      new Set(['zai/glm-5.2', 'zai/glm-5.2-air', 'xiaomi/mimo-v2.5-pro']),
+      new Set(['zai/glm-5.2', 'zai/glm-5.2-air', 'xiaomi/mimo-v2.6-flash']),
     )
     expect(modelGroups.value.map((g) => g.providerId)).toEqual(['zai', 'xiaomi'])
     expect(modelGroups.value[1].models[0]).toEqual({
-      value: 'xiaomi/mimo-v2.5-pro',
-      label: 'MiMo v2.5 Pro',
+      value: 'xiaomi/mimo-v2.6-flash',
+      label: 'MiMo v2.6 Flash',
     })
   })
 
@@ -155,8 +157,8 @@ describe('useAuthedModelGroups', () => {
     store.scopedModels.value = ['zai/glm-5.2']
     const { availableValues } = useAuthedModelGroups()
 
-    // 旧实现：xiaomi/mimo-v2.5-pro 不在 scoped 过滤列表 → 误报「不可用」
-    expect(staleModelRef('xiaomi/mimo-v2.5-pro', availableValues.value)).toBeNull()
+    // 旧实现：xiaomi/mimo-v2.6-flash 不在 scoped 过滤列表 → 误报「不可用」
+    expect(staleModelRef('xiaomi/mimo-v2.6-flash', availableValues.value)).toBeNull()
     // 真实不可用（模型被删）仍报 stale
     expect(staleModelRef('zai/deleted', availableValues.value)).toBe('zai/deleted')
     // 空串（未设置语义）恒不 stale

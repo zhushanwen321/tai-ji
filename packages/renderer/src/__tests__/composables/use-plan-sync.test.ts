@@ -22,6 +22,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { defineComponent, h, ref, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount, type VueWrapper } from '@vue/test-utils'
+import { commandMock, transportApiCommandModule } from '../helpers/transport-command-mock'
 import * as events from '@taiji/core/transport/api'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 import {
@@ -32,11 +33,9 @@ import { usePlanState, type UsePlanStateReturn } from '@/composables/use-plan-sy
 import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
 
 // ── mock 边界：getPlanState RPC mock 掉（runtime 侧 u1-rpc 未接线，受控 deferred 驱动）──
-const commandMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api', async (importActual) => {
-  const actual = await importActual<typeof import('@taiji/core/transport/api')>()
-  return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
-})
+// spread-actual mock 体单源在 helpers/transport-command-mock.ts（events 真实通道保留，
+// RPC_BACKSTOP_TIMEOUT_MS 透传 30_000；commandMock 为该 helper 导出的文件内单例）
+vi.mock('@taiji/core/transport/api', () => transportApiCommandModule())
 
 // ── 共享测试基建 ─────────────────────────────────────────────
 

@@ -19,7 +19,8 @@ interface ZhipuLimit {
   type: string
   percentage?: number
   currentValue?: number
-  nextResetTime?: string
+  /** wire 形态（2026-09-24 实测）：number epoch-ms；历史/文档形态：epoch-ms 字符串或 "4h11m" 相对 label。 */
+  nextResetTime?: number | string
 }
 
 interface ZhipuApiData {
@@ -32,14 +33,16 @@ interface ZhipuApiResponse {
   data?: ZhipuApiData
 }
 
-/** limits[] 条目形态：type 必在且为 string（TOKENS_LIMIT 判定依据），数值/时间字段可选。 */
+/** limits[] 条目形态：type 必在且为 string（TOKENS_LIMIT 判定依据），数值/时间字段可选。
+ * nextResetTime 接受 number|string 双形态（实测 2026-09-24：真响应为 number epoch-ms，
+ * 按纯 string 收紧会拒真响应归 parse——额度查询恒「获取失败」）。 */
 function isZhipuLimitEntry(lim: unknown): boolean {
   if (!isRecord(lim)) return false
   if (typeof lim.type !== 'string') return false
   return (
     isOptionalField(lim.percentage, 'number') &&
     isOptionalField(lim.currentValue, 'number') &&
-    isOptionalField(lim.nextResetTime, 'string')
+    (lim.nextResetTime === undefined || typeof lim.nextResetTime === 'string' || typeof lim.nextResetTime === 'number')
   )
 }
 
@@ -77,9 +80,9 @@ function parseResetSec(label: string): number {
   return sec
 }
 
-/** 从 nextResetTime（epoch ms 字符串）计算剩余秒 */
-function resetSecFromEpoch(epochMsStr: string): number | null {
-  const epochMs = Number(epochMsStr)
+/** 从 nextResetTime（epoch ms，number 或字符串形态）计算剩余秒 */
+function resetSecFromEpoch(nextResetTime: number | string): number | null {
+  const epochMs = Number(nextResetTime)
   if (!epochMs || Number.isNaN(epochMs)) return null
   const remSec = Math.floor(epochMs / MS_PER_SEC) - Math.floor(Date.now() / MS_PER_SEC)
   return remSec > 0 ? remSec : null
@@ -99,7 +102,8 @@ function buildWin5h(data: ZhipuApiData): QuotaWindow {
       tokensPct = typeof lim.percentage === 'number' ? lim.percentage : undefined
       if (lim.nextResetTime) {
         resetSec = resetSecFromEpoch(lim.nextResetTime)
-        if (resetSec === null) resetSec = parseResetSec(lim.nextResetTime)
+        // 相对 label（"4h11m"）兜底——仅字符串形态可为 label（number 是 epoch-ms，上面已解析）
+        if (resetSec === null && typeof lim.nextResetTime === 'string') resetSec = parseResetSec(lim.nextResetTime)
       }
     }
   }

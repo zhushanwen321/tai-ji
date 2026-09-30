@@ -109,7 +109,7 @@ def main() -> int:
     print(f"  并在 zh-CN/en-US locale 文件同步新增对应 key。")
     print(f"  如属合理使用（mock fixtures / 数据值），加入 check_i18n_cjk.py 的 ALLOW_FILES。")
     print()
-    print(f"\033[0;31m[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。\033[0m")
+    print(f"\033[0;31m[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。\033[0m")
     return 2
 
 

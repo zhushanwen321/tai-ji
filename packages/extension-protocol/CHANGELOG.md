@@ -1,5 +1,23 @@
 # @zhushanwen/extension-protocol
 
+## 0.16.0
+
+### Minor Changes
+
+- 8aa4b40e8: Managed-session completion notifications now fire exactly once (notify-once claim ledger):
+
+  - `extension-protocol`: the session-manager channel gains a `watch` action (single-key `notifyId` addressing, fire-and-forget respond payload) and maps the four new watch reasons (stopped / exited / deleted / orphaned) onto existing pending statuses
+  - `session-delivery`: delivery messages accept an additive `meta` object (e.g. `notifyId`) that reaches per-message settled callbacks untouched, anchoring delivery receipts
+  - `subagent-core`: the registry reconcile sweep explicitly skips `type=session` notification claims, so active claims are never reaped by workflow run-state checks
+  - `pi-session-manager`: new watch-coordinator / notify-ledger / notify-content modules orchestrate watch requests with ledger discipline and session-start recovery; ships the `session-manager-ext-config` skill
+  - `pi-pending-notifications`: the pending vocabulary gains the `session` type for managed-session notification claims (unknown types still normalize to workflow)
+
+## 0.15.0
+
+### Minor Changes
+
+- 50f31a73c: Single-source the notify-channel custom_message customType vocabulary in the protocol package (new exports: WORKFLOW_RESULT_CUSTOM_TYPE, SUBAGENT_BG_NOTIFY_CUSTOM_TYPE, SUBAGENT_DIRECTIVE_CUSTOM_TYPE — values unchanged, byte-identical). Producers and consumers now import the same constants instead of mirrored string literals that had zero cross-side anchoring: the shell's completion-notify sender, messageRenderer registration, and directive-entry writer; subagent-core's NOTIFY_CUSTOM_TYPE (compat alias) and the abandoned-notification recovery-hint channel check; the shared COMPLETE_NOTIFY_CUSTOM_TYPES set is now assembled from the constants (with SUBAGENT_DIRECTIVE_CUSTOM_TYPE re-exported), and runtime's event-interpreter / subagent-extractor plus core's notify-summary compare against them. A conformance test in the shell locks the three values and forbids local re-definitions at the producer sites. Also folded into the shell: the fourth GUI attach point now goes through the shared withGuiAttach helper (returns a new object instead of in-place mutation, byte-equivalent payloads), and the in-flight reporter creation plus setInFlightListener wiring moved from the factory root into setupWorkflowDomain (index.ts passes no wiring; behavior unchanged).
+
 ## 0.14.0
 
 ### Minor Changes

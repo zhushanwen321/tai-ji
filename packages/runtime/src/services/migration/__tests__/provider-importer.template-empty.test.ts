@@ -4,28 +4,15 @@
  * 为什么独立文件：真实 builtin-providers.json 的 39 个模板全有 name/api/baseUrl，
  * 「全缺」分支在真实数据下不可达（防御分支，供模板数据退化为空壳时兜底）——需对
  * generated/builtin-providers.json 注入「只有 id 的模板」fixture 才能命中。注入是模块级
- * vi.mock，会覆盖同文件其他用例依赖的真实模板（sa3-i5 等），故独立成文件、mock 策略
- * 与 provider-importer.test.ts 逐字对齐（parseProviders / pi-provider-store / provider-catalog）。
+ * vi.mock，会覆盖同文件其他用例依赖的真实模板（sa3-i5 等），故独立成文件；三面默认 mock
+ * （parseProviders / pi-provider-store / provider-catalog）与 provider-importer.test.ts
+ * 共用 provider-importer-test-mocks.ts 注册模块。
  *
  * 运行命令：cd packages/runtime && npx vitest run src/services/migration/__tests__/provider-importer.template-empty.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-
-// ── vi.mock 必须在 import 之前（vitest hoist），与 provider-importer.test.ts 同策略 ──
-
-vi.mock('../provider-parser.js', () => ({
-  parseProviders: vi.fn(() => null),
-}))
-
-vi.mock('../../../infra/pi/pi-provider-store.js', () => ({
-  getProviderNames: vi.fn(() => []),
-  upsertProvider: vi.fn(() => ({})),
-  ensureProviderInWhitelist: vi.fn(),
-}))
-
-vi.mock('../../provider-catalog.js', () => ({
-  isCatalogProvider: vi.fn(() => false),
-}))
+// 共享 mock 注册必须先于被 mock 模块的 import（见 provider-importer-test-mocks.ts 时序约束）
+import './provider-importer-test-mocks.js'
 
 // 模板 fixture：只有 id（无 name/api/baseUrl/models）——applyProviderWritePolicy 八字段
 // 全缺 → skipUpsert →「不物化空壳也不谎报 imported」分支（provider-importer.ts nothing to import）

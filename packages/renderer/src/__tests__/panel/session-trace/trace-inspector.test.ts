@@ -6,7 +6,8 @@
  *   （优先于 activeTab 面板），详情按 kind 渲染（文本全文 / kv / 原始 JSON）
  * - 返回复原前 tab：「← 返回」清 selectedKey → inspector 卸载 → activeTab 内容复原
  * - 未开自动打开：drawer 关闭态点选 → openDrawerTab 自动打开（保持当前 tab）
- * - 单向 main→drawer + SideDrawerTab 体系不变（7 个一级 tab icon 仍在，无新 tab 位）
+ * - 单向 main→drawer + SideDrawerTab 体系不变（全量一级 tab 仍在，无新 tab 位；
+ *   清单与 drawer-mode 注册表契约同源：helpers/drawer-tabs.ts）
  *
  * 两层：组件级（mount TraceInspector 断言详情内容）+ 壳路径（mount PanelContainer，
  * stub 桌面面板，对齐 panel-container-drawer-mode.test.ts harness）。
@@ -28,6 +29,24 @@ vi.mock('@/composables/features/file-tree/useGitStatus', () => ({
 }))
 vi.mock('@/composables/features/chat/useSessionDerivations', () => ({
   useSessionDerivations: () => ({ derivedStatus: () => ({ value: 'done' }) }),
+}))
+
+// ── 静态重面板 vi.mock（import 期替换：global.stubs 只在渲染期替换，import 期仍加载原
+// 模块触发 PanelContainer 整图 transform；占位组件与原 stubs 等价——同名 testid）。两点
+// 边界：① TraceInspector 本体不 mock——组件级用例直接 mount 本体（L74 静态 import），
+// mock 会污染本体；② 懒加载 DetailPane/TerminalView（PanelContainer 动态 import，不在
+// 静态图内）保留渲染期 stub。──
+vi.mock('@/components/panel/GitPanel.vue', () => ({
+  default: { name: 'GitPanel', template: '<div data-testid="git-panel" />' },
+}))
+vi.mock('@/components/panel/CommandDocPanel.vue', () => ({
+  default: { name: 'CommandDocPanel', template: '<div data-testid="doc-panel" />' },
+}))
+vi.mock('@/components/panel/SubagentTab.vue', () => ({
+  default: { name: 'SubagentTab', template: '<div data-testid="subagent-panel" />' },
+}))
+vi.mock('@/components/panel/WorkflowTab.vue', () => ({
+  default: { name: 'WorkflowTab', template: '<div data-testid="workflow-panel" />' },
 }))
 
 // ── mock chatStore（unread badge 计数读 getMessages）──
@@ -81,6 +100,7 @@ import {
 } from '@/composables/features/trace/useSessionTrace'
 import { useToast } from '@/composables/useToast'
 import { clearToasts } from '../../helpers/toast-queue'
+import { ALL_DRAWER_TABS } from '../../helpers/drawer-tabs'
 
 const SID = 'sid-inspector-1'
 
@@ -143,12 +163,8 @@ async function mountContainer() {
     global: {
       stubs: {
         Panel: PanelStub,
-        GitPanel: DesktopStub('GitPanel', 'git-panel'),
-        CommandDocPanel: DesktopStub('CommandDocPanel', 'doc-panel'),
         DetailPane: DesktopStub('DetailPane', 'detail-panel'),
         TerminalView: DesktopStub('TerminalView', 'terminal-panel'),
-        SubagentTab: DesktopStub('SubagentTab', 'subagent-panel'),
-        WorkflowTab: DesktopStub('WorkflowTab', 'workflow-panel'),
       },
     },
   })
@@ -156,7 +172,9 @@ async function mountContainer() {
 
 async function readyPartition() {
   ensureTraceLoaded(SID)
-  await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'))
+  // mock 数据一个微任务即 ready，interval 缺省 50ms 白付一个轮询 tick——缩到 1ms 只改轮询
+  // 粒度，等待语义不变（下同：本文件三处 vi.waitFor 统一处理）
+  await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'), { interval: 1 })
 }
 
 beforeEach(() => {
@@ -225,8 +243,9 @@ describe('A44 drawer inspector 联动（选中切入临时页 / 返回复原 / �
     // inspector 优先于 activeTab 面板（默认 terminal tab 内容被临时页取代）
     expect(wrapper.find('[data-testid="terminal-panel"]').exists()).toBe(false)
 
-    // SideDrawerTab 体系不变：7 个一级 tab icon 仍在（inspector 不占 tab 位）
-    for (const tab of ['terminal', 'browser', 'git', 'doc', 'detail', 'subagent', 'workflow']) {
+    // SideDrawerTab 体系不变：全量一级 tab 按钮仍在（清单与 drawer-mode 注册表契约用例
+    // 同源——helpers/drawer-tabs.ts，生产注册表运行时投影；inspector 不占 tab 位）
+    for (const tab of ALL_DRAWER_TABS) {
       expect(wrapper.find(`[data-testid="drawer-tab-${tab}"]`).exists(), `drawer-tab-${tab} 应存在`).toBe(true)
     }
 
@@ -424,7 +443,7 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
       const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
       expect(errorToast).toBeDefined()
       expect(errorToast?.message).toContain('trace 加载超时')
-    })
+    }, { interval: 1 })
     view.unmount()
   })
 
@@ -436,7 +455,7 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
       const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
       expect(errorToast).toBeDefined()
       expect(errorToast?.message).toContain('未找到源 session')
-    })
+    }, { interval: 1 })
     view.unmount()
   })
 })

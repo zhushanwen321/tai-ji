@@ -29,7 +29,7 @@
 
 - **plan 扩展**（`extensions/universal/plan/`，universal 组 = 独立通用包）：提供 `plan` 工具，AI 在计划模式下起草 plan 文件后调 `action=complete` 结束计划期。complete 时弹出执行方式对话框（`resolveCompleteChoice` 三路分流：headless 默认 execute / taiji rpc 走统一表单协议 / 原生 plain select），选项由 `buildExecOptions` 构造（动态参数：检测到的 exec skills，root 序前 2 个）+ 固定 Execute / 暂不执行档——goal 跟踪整合在 Execute 档内（`tryGoalInit` 读 slot：可用即建跟踪，不可用降级直接执行，无独立 goal 档）。
 - **goal 扩展**（`extensions/universal/goal/`）：目标驱动执行——`/goal` 命令族 + `goal_control` 工具 + widget 投影 + token 预算。goal 创建有两条入口：用户命令（`/goal <objective>`）与编程式接口 `__goalInit`（service.ts `createGoal` 唯一创建入口，FR-3.1）。**goal 桥**指后者被 plan 消费的通道——这是两包唯一的跨包运行时接触面（类型经 `import type { GoalInitFn } from "@zhushanwen/pi-goal"` 擦除，运行时零依赖，compact.ts:6）。
-- **pi 扩展加载器**（实装 `dist/core/extensions/loader.js`）：对每个 `--extension` 路径走 `loadExtensionsInternal`（:499-509 循环）→ `initializeExtension`（:459-472）：先建全新登记表 `createExtension()`（:441-458），再建全新 API 对象 `createExtensionAPI(extension, runtime, cwd, eventBus)`（:209），然后 `factory(load.api)`。官方注释自述设计意图（:204-208）：*"Create the ExtensionAPI for an extension. Registration methods write to the extension object. Action methods delegate to the shared runtime."*——**pi 的共享面是 runtime 与 eventBus（循环外创建一次、逐个传入），API 对象本身从不共享**。
+- **pi 扩展加载器**（实装 `dist/core/extensions/loader.js`）：对每个 `--extension` 路径走 `loadExtensionsInternal`（:499-509 循环）→ `initializeExtension`（:459-472）：先建全新登记表 `createExtension()`（:441-458），再建全新 API 对象 `createExtensionAPI(extension, runtime, cwd, eventBus)`（:209），然后 `factory(load.api)`。官方注释自述设计意图（:204-208）：*"Create the ExtensionAPI for an extension. Registration methods write to the extension object. Action methods delegate to the shared runtime."*——**pi 的共享范围是 runtime 与 eventBus（循环外创建一次、逐个传入），API 对象本身从不共享**。
 
 桥的消费时序（设计 06 §6.2 D2 已定，本设计不动）：plan complete 选 Execute 档（goal 跟踪整合）→ compact 档在 `session_before_compact` 的 `onComplete` 回调内调 `tryGoalInit`（goal 状态 entry 须在压缩后世界里创建）→ 成功发 goal steer、失败按五值 reason 发降级 steer + warning notify。
 
@@ -113,7 +113,7 @@ plan 使用时（buildExecOptions / tryGoalInit）──读──▶ 同一 slot
 
 ## 3. 解决方案
 
-**本章结论**：通道迁移到 `globalThis[Symbol.for]` slot（方案 A，六个决策 D1-D6 支撑）——goal 直挂函数、plan 使用时以 typeof 守卫读取，D2 五值失败出口原样承接 slot 世界的全部异常形态，不为边缘场景新增机制。
+**本章结论**：通道迁移到 `globalThis[Symbol.for]` slot（方案 A，六个决策 D1-D6 支撑）——goal 直挂函数、plan 使用时以 typeof 检查读取，D2 五值失败出口原样承接 slot 世界的全部异常形态，不为边缘场景新增机制。
 
 ### 3.1 终态（使用者视角先行）
 
@@ -129,7 +129,7 @@ plan 使用时（buildExecOptions / tryGoalInit）──读──▶ 同一 slot
 | init-refused | 已有 active goal / ctx 缺失 | `/goal clear` 或沿用现有 goal |
 | internal-error | goalInit 抛出意外异常（**含 slot 残留 fn 调用失效，本设计归入**） | 降级 steer 已含分步执行指引，异常详情进 notify 与日志 |
 
-goal 档缺失从此只剩一种合法语义：用户未装 goal（slot 不存在/值非函数，goal-unavailable 降级）；独立安装形态下跨包版本漂移导致的签名错配不产生新失败类，按两种形态分别收敛（r2 主审 S1 断言校准）：**失败形态**落既有出口（旧 fn 返回 false → init-refused、抛错 → internal-error，恢复动作同为降级 steer + warning notify，与 goal-unavailable 的用户感知差仅一行文案）；**成功形态**（尾部加参、位重排等仍能跑完的错配——如位重排后 goal 侧创建路径只碰 pi 不碰调用方 ctx，可静默畸形成功不落任何出口）不在桥层兜底，由源头机制拦截：同仓 type SSOT 编译期拦截（改签名 plan `tsc --noEmit` 即红）+ npm semver major 发布约定（§3.3-D2 被否谱系第三层）。
+goal 档缺失从此只剩一种合法语义：用户未装 goal（slot 不存在/值非函数，goal-unavailable 降级）；独立安装形态下跨包版本漂移导致的签名错配不产生新失败类，按两种形态分别收敛（r2 主审 S1 断言校准）：**失败形态**落既有出口（旧 fn 返回 false → init-refused、抛错 → internal-error，恢复动作同为降级 steer + warning notify，与 goal-unavailable 的用户感知差仅一行文案）；**成功形态**（尾部加参、位重排等仍能跑完的错配——如位重排后 goal 侧创建路径只碰 pi 不碰调用方 ctx，可静默畸形成功不落任何出口）不在桥层兜底，由源头机制拦截：同仓 type SSOT 编译期拦截（改签名 plan `tsc --noEmit` 即红）+ npm semver major 发布约定（§3.3-D2 否决记录第三层）。
 
 ### 3.2 多方案对比
 
@@ -140,49 +140,49 @@ goal 档缺失从此只剩一种合法语义：用户未装 goal（slot 不存�
 | C. taiji runtime 侧接线 | 差：只救桌面形态，独立 pi 仍断；plan/goal 均为 universal 组（自足性是分组契约）；引入宿主特有通路 | 中：runtime 侧新增装配点 | 独立 pi 用户（G1）永远看不到 goal 档 | ❌ |
 | D. plan 运行时 import goal 包 | 差：静态 import 拿到的是另一份模块实例的导出，**拿不到 goal factory 闭包里的 `session`**（goalInit 依赖它，index.ts:38/:142）；optional peer 倒退为 required（06 刚做的 optional 化倒退）；跨扩展 import 触发 jiti 双路径加载分裂（C-ext-06 触发场景①，ask-user M4 劫持事故同类） | 低 | session 分裂 = goal 状态错乱，正确性风险 | ❌ |
 
-**推荐 A**。被否若用：B 则 §3.1 场景 A 无限期待验收、G4 兑现无期；C 则独立 pi 用户的对话框永远 4 选项——G1 不成立；D 则 goal/plan 任一单独装卸时 plan 加载失败（required 依赖），且 M4 类「双实例 session 劫持」事故形态回归。
+**推荐 A**。不采用若用：B 则 §3.1 场景 A 无限期待验收、G4 兑现无期；C 则独立 pi 用户的对话框永远 4 选项——G1 不成立；D 则 goal/plan 任一单独装卸时 plan 加载失败（required 依赖），且 M4 类「双实例 session 劫持」事故形态回归。
 
 ### 3.3 关键决策与权衡
 
 **D1：通道载体 = `globalThis[Symbol.for]` slot（选定）**
 
 - **采用**：见 §3.2 方案 A——goal 挂、plan 读，进程级共享，双形态同机制。
-- **被否**：B/C/D 三方案（§3.2 展开各自被击穿的理由）。
+- **不采用**：B/C/D 三方案（§3.2 展开各自被击穿的理由）。
 - **证据**：C-ext-06（constraints.json，权威 development-guide.md §7.5——只强制载体 `globalThis[Symbol.for(包名.角色)]`，不强制 version/形状）；仓内现役 `Symbol.for` slot 十余处（grep 实证：ask-user CHANNEL_HANDSHAKE_KEY / permission FOOTER_HANDSHAKE_KEY + REQUEST_RENDER_KEY / subagent-workflow DIALOG_QUEUE_KEY / subagent-core registry·dialog-queue·notify-ledger 等多处）——其中带 version 的仅 registry 模式家族两例（ask-user channelHandshake、permission footerHandshake，双向共享可变 slot + pending 时序队列），**单向/单例 slot 全部裸挂**。
 - **效果**：G1/G2 成立——这是仓内唯一同时在「独立 pi 双扩展」与「taiji 桌面（builtin goal + 用户安装 plan 混载）」两种形态下都成立的通道形态。
 
 **D2：slot 协议 = 裸函数直挂（选定）**
 
-- **采用**：`globalThis[Symbol.for("@zhushanwen/pi-goal.goalInit")]` 直挂 `GoalInitFn`（key 命名遵循 C-ext-06「包名.角色」全限定规范，development-guide.md:822）；plan 读取守卫回退与现状 `getGoalInit` 同构的 `typeof fn === "function"`（仅换读取源为 slot）。
-- **被否**：带 version 的握手对象 `{ version: 1, goalInit }` + version 校验——三重击穿：①其引用的 ask-user 先例前提不匹配：先例带 version 防的是「双向共享可变 slot（两侧都写）+ pending 时序队列 + 跨体系无类型共享」三条件下的形状错配写坏（M4 劫持事故形态），goal 桥是 goal 单写 / plan 只读 / D3 自证无时序窗口 / 同仓 type SSOT 存在，一条不占；②仓内形态学：单向与单例 slot 十余处全部裸挂，C-ext-06 权威原文只强制载体不强制 version；③裸函数的真实风险（签名错配）已有三层既有机制承接——同仓编译期 type SSOT（`import type { GoalInitFn }`，compact.ts:6，改签名 plan `tsc --noEmit` 即红）/ 五值出口运行时兜底（错配**失败形态**落 init-refused 或 internal-error；成功形态由前层拦，见 §3.1 尾段断言校准）/ npm semver major——version 是第四层重复表达，且其兑付依赖「签名变更时记得 bump」的人工纪律（r1 简洁审 F1）。
+- **采用**：`globalThis[Symbol.for("@zhushanwen/pi-goal.goalInit")]` 直挂 `GoalInitFn`（key 命名遵循 C-ext-06「包名.角色」全限定规范，development-guide.md:822）；plan 读取检查回退与现状 `getGoalInit` 同构的 `typeof fn === "function"`（仅换读取源为 slot）。
+- **不采用**：带 version 的握手对象 `{ version: 1, goalInit }` + version 校验——三重击穿：①其引用的 ask-user 先例前提不匹配：先例带 version 防的是「双向共享可变 slot（两侧都写）+ pending 时序队列 + 跨体系无类型共享」三条件下的形状错配写坏（M4 劫持事故形态），goal 桥是 goal 单写 / plan 只读 / D3 自证无时序窗口 / 同仓 type SSOT 存在，一条不占；②仓内形态学：单向与单例 slot 十余处全部裸挂，C-ext-06 权威原文只强制载体不强制 version；③裸函数的真实风险（签名错配）已有三层既有机制承接——同仓编译期 type SSOT（`import type { GoalInitFn }`，compact.ts:6，改签名 plan `tsc --noEmit` 即红）/ 五值出口运行时兜底（错配**失败形态**落 init-refused 或 internal-error；成功形态由前层拦，见 §3.1 尾段断言校准）/ npm semver major——version 是第四层重复表达，且其兑付依赖「签名变更时记得 bump」的人工纪律（r1 简洁审 F1）。
 - **证据**：channel-registry-register.ts:5-16/:41-42/:87-114（先例的三前提实读）；仓内裸挂清单（D1 证据）；GOAL_FAILURE_RECOVERY 恢复动作等价性（compact.ts:156-162——goal-unavailable 与 init-refused/internal-error 的用户动作差仅一行文案）。
-- **效果**：概念净减（省 version 常量、slot 形状 interface ×2 份、version-不兼容语义分支），两侧人工同步物从 2 个（key + version）减到 1 个（key 字符串）；goal-unavailable 回归单义「未装」；G3 不受损（「不误调」由 typeof 守卫保证，与 version 无关）。
+- **效果**：概念净减（省 version 常量、slot 形状 interface ×2 份、version-不兼容语义分支），两侧人工同步物从 2 个（key + version）减到 1 个（key 字符串）；goal-unavailable 回归单义「未装」；G3 不受损（「不误调」由 typeof 检查保证，与 version 无关）。
 
 **D3：探测时机 = 使用时读（不在加载时缓存）**
 
 - **采用**：plan 在 `buildExecOptions`（complete 对话框构造）与 `tryGoalInit`（实际调用）两个使用点现场读 slot，与现状 `detectGoalCapability` 使用时探测的时机保持一致。
-- **被否**：factory/加载时探测一次缓存 boolean——引入对 `--extension` 参数顺序的依赖（plan 先于 goal 加载时探测必 miss），且 goal 加载失败重载后缓存过期无失效机制。
+- **不采用**：factory/加载时探测一次缓存 boolean——引入对 `--extension` 参数顺序的依赖（plan 先于 goal 加载时探测必 miss），且 goal 加载失败重载后缓存过期无失效机制。
 - **证据**：pi loader 串行加载全部扩展后才进入会话生命周期（loadExtensionsInternal :506 循环 await）——complete 发生时 goal 的 factory 必已执行（若已加载），使用时读无时序窗口。
 - **效果**：桥可达性对扩展加载顺序免疫；无缓存失效面。
 
 **D4：挂载时机 = goal factory 内一次（与现状等价）**
 
 - **采用**：goal factory 挂载 `Reflect.set(globalThis, KEY, goalInitFn)`，fn 闭包捕获 factory 级 `session`——与现状 `api.__goalInit = fn` 同点同语义，仅换可见域。
-- **被否**：session_start 时挂载——`session` 本就是 factory 闭包级进程单例（index.ts:37-38，goal 的会话状态在 session 对象内部、session_start 时重建内容而非对象），换挂载点无语义收益反增延迟窗口。
+- **不采用**：session_start 时挂载——`session` 本就是 factory 闭包级进程单例（index.ts:37-38，goal 的会话状态在 session 对象内部、session_start 时重建内容而非对象），换挂载点无语义收益反增延迟窗口。
 - **效果**：goal 侧行为变更最小（挂载语句搬家，闭包结构不动）。
 
 **D5：slot 残留与失效的处理 = 不做清理协议，调用异常走既有出口**
 
 - **采用**：plan 对 slot 的异常形态全部折叠进 D2 既有出口——slot 不存在/值非函数 → `goal-unavailable`；fn 存在但调用抛错（goal 扩展加载失败后 api 失效、fn 内 `pi.sendMessage` throw 等）→ `internal-error`（tryGoalInit catch 出口，compact.ts:187-190 既有）。
-- **被否**：goal 侧在加载失败/session_shutdown 时清 slot——pi 扩展无卸载生命周期保证（session_shutdown 后进程通常即退出，清理无消费者）；双向清理协议是为 <0.1% 边缘形态引入的第二套状态，违反「能用一个自洽机制解决的不接受两个字段两套检查」（AGENTS.md 架构偏好）。
+- **不采用**：goal 侧在加载失败/session_shutdown 时清 slot——pi 扩展无卸载生命周期保证（session_shutdown 后进程通常即退出，清理无消费者）；双向清理协议是为 <0.1% 边缘形态引入的第二套状态，违反「能用一个自洽机制解决的不接受两个字段两套检查」（AGENTS.md 架构偏好）。
 - **证据**：`tryGoalInit` 的 catch 出口本就覆盖「goalInit 抛出意外异常」（06 设计 D2 明确 internal-error 含义）；`createExtensionAPI` 的 `assertActive` 在扩展失败后 throw（loader.js:214-218）——残留 fn 的调用会 throw 而非静默错行，正好落入 catch。
 - **效果**：五值出口对 slot 世界的全部异常形态闭环，无新增机制。
 - **已接受代价四要素**（slot 残留 fn 可被调用）：量级 = 仅「goal factory 已执行但扩展随后加载失败/失效」的窗口内可触发（正常装配不发生，量级 <0.1%）；恢复路径 = internal-error 出口（降级 steer 分步执行指引 + notify + 日志），进程退出 slot 随之消亡，无跨进程累积；重审条件 = 若日志中 internal-error 因 slot 残留高频出现（正常路径兜底被高频触发 = 正常路径 broken 的信号，AGENTS.md 规则 20），重开清理协议设计；显式判定 = 可接受（错误形态有出口、有指引、可观测，代价窗口极窄）。
 
 **D6：pi 官方机制与同型通道 = 观察项登记，非本设计依赖**
 
-- **采用**：两项登记。①pi 未来版本若提供官方跨扩展 API（升级 PR 必查项，受 C-proc-08 版本门禁流程覆盖），plan 侧读取可局部替换为官方通道——slot→官方的迁移是单点替换（一个函数体），不为此预留抽象层。②**同型通道死刑登记（r1 影响面审 S1，R2 修正加注对象）**：本设计的根因证据同样宣判 `pi.__workflowRun` 通道死刑——subagent-workflow 仍按同型模式挂载（`extensions/universal/subagent-workflow/src/index.ts:556` 实际挂载点，:6/:16/:80-84 为其类型与注释，挂 pi API 对象），运行时同样恒不可达；其消费方 coding-workflow 1.x 已退役、`runSingleAgent` 全仓零引用，故当前无用户可见影响——给真背书者 `docs/extensions/adr/pi-ext-020-coding-workflow-depends-on-workflow.md` 加注「通道恒不可达（pi 0.84.4 per-extension API 隔离，见 goal-bridge-cross-extension.md），禁止未来消费者按 Accepted 状态信任该模式；其『与 `pi.__goalInit` 同模式』表述随 goal 桥迁移 slot 而过时」，防重蹈（注意：历史 docs/adr 编号 0020 曾对应 core-user-flows 主题，为同名编号的不同 ADR，与本登记无关；旧 ADR 已于 2026-09-15 收口进 `docs/adr/decisions.md` 单份整合）。
-- **被否**：为「未来官方机制」预写适配器接口（BridgeProvider 抽象之类）——为想象未来预付复杂度（over-engineering 反模式）；本次顺手修复 `__workflowRun`——无消费方（零引用），修复无收益方，超出本设计 scope（若 subagent-workflow 后续立项消费，按本设计同款 slot 形态另做）。
+- **采用**：两项登记。①pi 未来版本若提供官方跨扩展 API（升级 PR 必查项，受 C-proc-08 版本门禁流程覆盖），plan 侧读取可局部替换为官方通道——slot→官方的迁移是单点替换（一个函数体），不为此预留抽象层。②**同型通道死刑登记（r1 影响面审 S1，R2 修正加注对象）**：本设计的根因证据同样宣判 `pi.__workflowRun` 通道死刑——subagent-workflow 仍按同型模式挂载（`extensions/universal/subagent-workflow/src/index.ts:556` 实际挂载点，:6/:16/:80-84 为其类型与注释，挂 pi API 对象），运行时同样恒不可达；其消费方 coding-workflow 1.x 已退役、`runSingleAgent` 全仓零引用，故当前无用户可见影响——给真背书者 `docs/extensions/adr/pi-ext-020-coding-workflow-depends-on-workflow.md` 加注「通道恒不可达（pi 0.84.4 per-extension API 隔离，见 goal-bridge-cross-extension.md），禁止未来消费者按 Accepted 状态信任该模式；其『与 `pi.__goalInit` 同模式』表述随 goal 桥迁移 slot 而过时」，防重蹈（注意：历史 docs/adr 编号 0020 曾对应 core-user-flows 主题，为同名编号的不同 ADR，与本登记无关；旧 ADR 已于 2026-09-15 收敛进 `docs/adr/decisions.md` 单份整合）。
+- **不采用**：为「未来官方机制」预写适配器接口（BridgeProvider 抽象之类）——为想象未来预付复杂度（over-engineering 反模式）；本次顺手修复 `__workflowRun`——无消费方（零引用），修复无收益方，超出本设计 scope（若 subagent-workflow 后续立项消费，按本设计同款 slot 形态另做）。
 - **证据**：0.84.4 types.d.ts 无跨扩展面（§2.3）；C-proc-08 门禁流程已含「升级必查」机制；workflowRun 引用面 grep 实证（subagent-workflow 自身 + pi-ext-020，无外部消费方）。
 - **效果**：方案 B 的长期价值以观察项形式保留不付当下成本；同型死通道显式登记，未来消费者不会再按文档信任恒不可达的模式。
 
@@ -208,7 +208,7 @@ Reflect.set(globalThis, GOAL_INIT_SLOT_KEY, goalInitFn);
 const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");
 function getGoalInit(): GoalInitFn | undefined {
   const fn = Reflect.get(globalThis, GOAL_INIT_SLOT_KEY);
-  return typeof fn === "function" ? (fn as GoalInitFn) : undefined;  // 守卫与现状同构，仅换读取源
+  return typeof fn === "function" ? (fn as GoalInitFn) : undefined;  // 检查与现状同构，仅换读取源
 }
 export function detectGoalCapability(): boolean { return getGoalInit() !== undefined; }
 function tryGoalInit(planFilePath: string, ctx: ExtensionContext): GoalBridgeOutcome { /* 同体，去 pi 参数 */ }
@@ -228,7 +228,7 @@ function tryGoalInit(planFilePath: string, ctx: ExtensionContext): GoalBridgeOut
 
 ### 4.2 验收场景
 
-环境基准：本地 pi CLI 实测（AGENTS.md MANDATORY：`pi --mode rpc -ne --session-dir <tmp> --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension <本地 plan> --extension <本地 goal>` + stdin JSONL，`-ne` 禁全局扩展防工具名冲突——probe-06 实测踩坑）；GUI 场景 `TAIJI_DEV_BACKGROUND=1 pnpm dev` + browser-automation 连 CDP。
+环境基准：本地 pi CLI 实测（AGENTS.md MANDATORY：`pi --mode rpc -ne --session-dir <tmp> --model <本机可用模型> --approve --extension <本地 plan> --extension <本地 goal>` + stdin JSONL，`-ne` 禁全局扩展防工具名冲突——probe-06 实测踩坑）；GUI 场景 `TAIJI_DEV_BACKGROUND=1 pnpm dev` + browser-automation 连 CDP。
 
 | 场景 | 回溯目标 | 真实流程 | 通过标准 |
 |------|---------|---------|---------|
@@ -237,7 +237,7 @@ function tryGoalInit(planFilePath: string, ctx: ExtensionContext): GoalBridgeOut
 | **V3 init-refused 真实触发** | G4 | 先 `/goal <objective>` 建 active goal → plan complete 选 goal 档 | 降级 steer 文案含 `init-refused` 与恢复指引（`/goal clear`）；warning notify 出现；既有 goal 不被破坏 |
 | **V4 taiji 桌面 GUI（混载形态）** | G2 | 前置：dev 环境为桌面装上 plan——dev-link **taiji 模式**（`bash .agents/skills/dev-link/link-local.sh plan` 写入 `.env.dev-extensions`，**dev 启动前需 `set -a && source .env.dev-extensions && set +a` 才注入**，r3 主审 S1；本地源码经 `TAIJI_EXTENSION_PATHS` 注入 dev runtime → pi 子进程，新建 session 生效；注意 pi 模式的扩展目录不在桌面六源默认扫描面，r2 主审 F1）；goal 侧 dev 形态走 resolver 源码分流（`extensions/` 源码目录，dev 不产 bundle，extension-resolver 源码分流逻辑——**实施期不可用「扩展安装通道」**：它只能装 npm 已发布旧版 plan，不含 slot 改造）；然后 dev 真机对话流内 AI 走 plan complete → select 对话框（GUI 通道） | goal 档出现；选中后 goal widget 出现且状态正确——混载形态（resolver 源码分流的 goal + dev-link 注入的 plan 同进程）下 slot 共享的验证（P-5 dev 门）；**packaged bundle 形态**（goal esbuild bundle + npm dist plan）的 slot 共享为推理登记（esbuild 无 VM 沙箱、Symbol.for 是 JS 引擎级注册表跨模块系统共享），发布后随下一版本 prerelease 冒烟补验 goal 档出现 |
 | **V5 npm 安装形态** | G1（独立安装） | `npm pack` 两包 → 干净目录独立 pi 安装两 tarball → 跑 V1 同款流程 | 与 V1 同标准（排除「本地源码 --extension 才可用」的形态偏差） |
-| **V6 回归三连 + 符号清扫** | G3（零回归） | `pnpm extensions:typecheck && extensions:lint && extensions:test`；plan+goal 既有用例全量；符号清扫（r1 影响面审 MF）：`grep -rn "__goalInit"` 限定 `extensions/{universal/{plan,goal}}/` 的 src + `__tests__` + `docs/{design,extensions}/` + `extension-dependencies.json` + `docs/adr/`——存活引用应全部属于：新通道表述、历史登记（ext-simplify-06 设计的变更历史/审查记录类条目、pi-ext-020 加注后的死通道登记）或明确标注保留的注释；豁免面（不要求清零）：CHANGELOG*、`.taiji-harness/`、`.tmp/`、staged 产物 | 全绿；豁免面外无「旧通道当现状」的存活表述——`check-doc-symbol-drift.mjs` 的候选集模式（蛇形大写 + get 前缀驼峰）对 `__goalInit` 不可见（r1 影响面审 MF 核实），机器守卫靠不住，本条 grep 是清扫的验收门 |
+| **V6 回归三连 + 符号清扫** | G3（零回归） | `pnpm extensions:typecheck && extensions:lint && extensions:test`；plan+goal 既有用例全量；符号清扫（r1 影响面审 MF）：`grep -rn "__goalInit"` 限定 `extensions/{universal/{plan,goal}}/` 的 src + `__tests__` + `docs/{design,extensions}/` + `extension-dependencies.json` + `docs/adr/`——存活引用应全部属于：新通道表述、历史登记（ext-simplify-06 设计的变更历史/审查记录类条目、pi-ext-020 加注后的死通道登记）或明确标注保留的注释；豁免范围（不要求清零）：CHANGELOG*、`.taiji-harness/`、`.tmp/`、staged 产物 | 全绿；豁免范围外无「旧通道当现状」的存活表述——`check-doc-symbol-drift.mjs` 的候选集模式（蛇形大写 + get 前缀驼峰）对 `__goalInit` 不可见（r1 影响面审 MF 核实），机器检查靠不住，本条 grep 是清扫的验收门 |
 
 **负面行为验收边界**：no-steps / plan-unreadable 出口已有 06 设计 §7 V2 构造法与单测覆盖，本设计不改变其逻辑（读取与提取代码零变更），不重复开真机场景；internal-error 出口以单测（mock slot 挂抛错 fn）覆盖，不为「goal 加载失败后残留 fn」单独构造真机场景（需人为制造扩展加载失败，成本大于收益——catch 出口逻辑既有且 06 已验）；「独立安装跨包版本漂移签名错配」不单开场景（构造需人为混装不配套版本，错配失败形态分落 init-refused（不经 catch）与 internal-error（经 catch）两既有出口、单测覆盖等价，成功形态由编译期/semver 源头机制管理而非桥层——见 §3.1 尾段断言校准）。
 
@@ -261,8 +261,8 @@ function tryGoalInit(planFilePath: string, ctx: ExtensionContext): GoalBridgeOut
 | 单元 | 内容 | justification | 验收 |
 |------|------|--------------|------|
 | u1 goal 侧 slot 挂载 | index.ts 内联改造：key 常量（紧邻 `GoalInitFn` 导出）+ factory 挂载语句换 `Reflect.set(globalThis, KEY, fn)` + docstring 消费示例更新（`pi.__goalInit` → slot 读取）+ goal 侧单测（slot 挂载后可读、teardown 清理） | 暴露方先行；纯增量不破坏现状（旧 `api.__goalInit` 挂载语句同批删除，无并存窗口） | goal 包单测绿 + typecheck |
-| u2 plan 侧探测改造 | `getGoalInit`/`detectGoalCapability`/`tryGoalInit` 去 pi 参数换 slot 读取（typeof 守卫同构）+ tool.ts 调用点 + compact.ts goal-unavailable 注释语义更新（「正常交互下不可达」反转为真实防御分支）+ 既有测试 mock 形态全部对齐 slot（本地 `Reflect.set` + teardown 清理，两侧同规） | 消费方单点改造；与 u1 同批合入（中间态桥仍断但无行为恶化，两侧无顺序依赖） | plan 包单测绿（含 slot mock 世界）+ 三连 |
-| u3 文档与符号清扫（r1 影响面审 MF 全清单） | 06 设计桥表述（`pi.__goalInit` 挂载/鸭子探测/getGoalInit 断言点共 5 处）与 03 设计（:18「跨扩展 API」/:226「签名不变」）回写为 slot 通道；goal 侧清扫：`src/service.ts:9/:124` 注释、`README.md:48`、`index.ts` docstring、`index.ts:119` 注释（coding-workflow 历史消费方表述）；仓根 `extension-dependencies.json:90` reason 字段（`__goalInit` → goal 桥 slot 表述）；`docs/extensions/adr/pi-ext-020-coding-workflow-depends-on-workflow.md` 加注（D6-②：`pi.__workflowRun` 通道恒不可达 + 其 Decision 节「与 `pi.__goalInit` 同模式」表述过时回写）；ext-simplify-index.md 登记；changeset（两包 patch）。**守卫盲区登记**：`check-doc-symbol-drift.mjs` 候选集（蛇形大写 + get 前缀驼峰）不覆盖 `__goalInit` 模式——本次清扫以 V6 的显式 grep 为验收门，不改守卫脚本（单一符号的一次性清扫，不值得扩守卫面；若未来再出现 `__xx` 型跨扩展符号批量迁移，再议守卫扩展） | C-proc-10 同批纪律：符号语义变更与文档同步；桥断裂登记债务本设计清账 | `node scripts/check-doc-symbol-drift.mjs` 过 + V6 grep 门 |
+| u2 plan 侧探测改造 | `getGoalInit`/`detectGoalCapability`/`tryGoalInit` 去 pi 参数换 slot 读取（typeof 检查同构）+ tool.ts 调用点 + compact.ts goal-unavailable 注释语义更新（「正常交互下不可达」反转为真实防御分支）+ 既有测试 mock 形态全部对齐 slot（本地 `Reflect.set` + teardown 清理，两侧同规） | 消费方单点改造；与 u1 同批合入（中间态桥仍断但无行为恶化，两侧无顺序依赖） | plan 包单测绿（含 slot mock 世界）+ 三连 |
+| u3 文档与符号清扫（r1 影响面审 MF 全清单） | 06 设计桥表述（`pi.__goalInit` 挂载/鸭子探测/getGoalInit 断言点共 5 处）与 03 设计（:18「跨扩展 API」/:226「签名不变」）回写为 slot 通道；goal 侧清扫：`src/service.ts:9/:124` 注释、`README.md:48`、`index.ts` docstring、`index.ts:119` 注释（coding-workflow 历史消费方表述）；仓根 `extension-dependencies.json:90` reason 字段（`__goalInit` → goal 桥 slot 表述）；`docs/extensions/adr/pi-ext-020-coding-workflow-depends-on-workflow.md` 加注（D6-②：`pi.__workflowRun` 通道恒不可达 + 其 Decision 节「与 `pi.__goalInit` 同模式」表述过时回写）；ext-simplify-index.md 登记；changeset（两包 patch）。**检查盲区登记**：`check-doc-symbol-drift.mjs` 候选集（蛇形大写 + get 前缀驼峰）不覆盖 `__goalInit` 模式——本次清扫以 V6 的显式 grep 为验收门，不改检查脚本（单一符号的一次性清扫，不值得扩检查面；若未来再出现 `__xx` 型跨扩展符号批量迁移，再议检查扩展） | C-proc-10 同批纪律：符号语义变更与文档同步；桥断裂登记债务本设计逐条关闭 | `node scripts/check-doc-symbol-drift.mjs` 过 + V6 grep 门 |
 | u4 真机验收 | §4.2 V1-V6 逐项（含 P-5/P-6 两个实施期门） | 行为修复必须真机闭环（本缺陷的直接教训就是 mock 验不出） | 全 pass + 证据留档 `.tmp/dev-flow/` |
 
 文件改动地图：`extensions/universal/goal/src/index.ts`（slot 挂载 + key 常量 + docstring/注释）、`extensions/universal/goal/src/service.ts`（:9/:124 注释）、`extensions/universal/goal/README.md`（:48）、`extensions/universal/goal/src/__tests__/`（slot 单测 + 既有桥用例 mock 形态）、`extensions/universal/plan/src/compact.ts`（getGoalInit/detectGoalCapability/tryGoalInit + key 常量本地声明 + 注释）、`extensions/universal/plan/src/tool.ts`（调用点签名）、`extensions/universal/plan/src/__tests__/`（mock 形态对齐）、`extension-dependencies.json`（:90 reason 字段）、`docs/design/ext-simplify-06-plan.md`、`docs/design/ext-simplify-03-goal.md`、`docs/design/ext-simplify-index.md`、`docs/extensions/adr/pi-ext-020-coding-workflow-depends-on-workflow.md`（workflowRun 死刑加注 + 同模式表述回写，D6-②）、changeset ×2。
@@ -274,9 +274,9 @@ function tryGoalInit(planFilePath: string, ctx: ExtensionContext): GoalBridgeOut
 ## 变更历史
 
 - v1（2026-09-14）：初稿。Step 0 根因三重实证（loader 源码 P-2 / 运行时重跑 P-1 / pi types 全量 P-3）；方案对比四候选（A slot / B 等上游 / C runtime 接线 / D 运行时 import），推荐 A——C-ext-06 惯例形态 + 仓内现役 slot 形态学使新颖度归零；D1-D6 决策落盘；验收 V1-V6 继承 handoff §6 并按双形态 + 负载顺序门补全。
-- v2.3（2026-09-14）：**R3 收尾**（三审均 0 must-fix，设计就绪；R3 轮 5 小项全修）。主审 S1：V4 前置补 `set -a && source .env.dev-extensions && set +a` 注入环节（link-local.sh 只写文件不加载，脚本自述用法核实）；主审 S2/影响面 SG2（同一处）：D2 被否③「错配调用落既有出口」补「失败形态」限定（v2.2 收敛四处漏掉的第五处）；主审 S3：§5 待验证检查点 P-5 旧标签改「dev 混载形态 + bundle 推理登记」对齐 §4.3；影响面 SG1：V6 门「历史登记」括号纳入 pi-ext-020 死通道登记；影响面 INFO：D6-② workflowRun 挂载行号精确到 index.ts:556 实际挂载点。
+- v2.3（2026-09-14）：**R3 收尾**（三审均 0 must-fix，设计就绪；R3 轮 5 小项全修）。主审 S1：V4 前置补 `set -a && source .env.dev-extensions && set +a` 注入环节（link-local.sh 只写文件不加载，脚本自述用法核实）；主审 S2/影响面 SG2（同一处）：D2 不采用③「错配调用落既有出口」补「失败形态」限定（v2.2 收敛四处漏掉的第五处）；主审 S3：§5 待验证检查点 P-5 旧标签改「dev 混载形态 + bundle 推理登记」对齐 §4.3；影响面 SG1：V6 门「历史登记」括号纳入 pi-ext-020 死通道登记；影响面 INFO：D6-② workflowRun 挂载行号精确到 index.ts:556 实际挂载点。
 - v2.2（2026-09-14）：**主审 R2 修复**（1 MF + 1 SG 全修）。①V4/P-5 验收前提链纠偏（主审 R2-F1）：dev 下 builtin goal 走 resolver 源码分流非 esbuild bundle（extension-resolver dev 分支核实）；「pi 模式扩展目录」不在桌面六源扫描面，V4 前置收敛为 dev-link **taiji 模式**（`link-local.sh plan` → `TAIJI_EXTENSION_PATHS` → 新建 session 生效）；「扩展安装通道」实施期不可用（只能装无 slot 改造的 npm 旧版）；P-5 验证点改 dev 实际形态，packaged bundle 形态降级为推理登记（esbuild 无 VM 沙箱 + Symbol.for 引擎级注册表 + bundle 内联 subagent-core↔ask-user 握手现役生产先例，bundle-external 边界核实 subagent-core 非 external 即被内联）+ 发布后 prerelease 冒烟补验。②错配断言收敛（主审 R2-S1）：「错配落 init-refused 或 internal-error」全称断言被证伪（尾部加参错配良性成功、位重排错配静默畸形成功不落出口、「同一 catch 链」结构描述错误）——§3.1 尾段/§3.2 A 行/场景 B 表/负面边界段四处统一收敛为「失败形态落既有出口（init-refused 不经 catch / internal-error 经 catch），成功形态由 type SSOT + semver major 源头拦，不在桥层兜底」。
-- v2.1（2026-09-14）：**R2 复审修复**（主审 0/0 进行中 · 影响面审 2 MF 全修 · 简洁审 PASS 0/0+1 INFO）。①加注对象纠错（影响面审 R2-MF1）：死刑加注从历史误标的 docs/adr 0020（core-user-flows，同名编号无关 ADR，全文零 workflowRun ✅核实）改到真背书者 `docs/extensions/adr/pi-ext-020-coding-workflow-depends-on-workflow.md`（Decision 节「与 `pi.__goalInit` 同模式」表述同步回写，D6-②/u3/文件地图/证据行四处联动）；②§3 章结论残留修正（影响面审 R2-MF2）：「挂带版本的握手对象」v1 表述漏改 → 「直挂函数 + typeof 守卫」；③V4/P-5「npm dist」措辞与 dev-link 前置对齐（简洁审 R2 INFO）：改「非 builtin 来源（dev-link 源码或安装通道产物）」，npm dist 纯净形态归 V5。
-- v2（2026-09-14）：**R1 三审修复**（主审 1MF+2SG / 影响面审 1MF+2SG / 简洁审 1MF+2SG，全修 + 3 INFO）。**方案性**：①D2 推翻——version 握手对象记入被否谱系（简洁审 F1：ask-user 先例三前提不匹配 + 仓内单向/单例 slot 十余处裸挂 + 三层既有机制承接签名错配 + v1 的 G3「版本协议不匹配」系发明 version 后的循环论证），slot 回归裸函数直挂，G3 改单义「未装」；联动删 bridge.ts（内联 index.ts，简洁审 F2）、删「goal 侧测试辅助导出」备选（F3）、V2 version:99 子场景、u1 version 用例、主审 S2（version 分支 debug 日志）随之消失。**事实纠错**：②桌面形态口径（主审 MF）：plan 不在 mandatory-extensions.json（18 项仅含 goal ✅核实），builtin 双包表述全部改为「goal builtin + plan 用户安装混载同进程」，V4 补安装前置（dev-link / 扩展安装通道），P-5 形态描述同步。**规格完整性**：③符号清扫清单补全（影响面审 MF）：service.ts/README/extension-dependencies.json:90/06 设计 5 处/ADR-020，V6 改显式 grep 门（含豁免面），登记 check-doc-symbol-drift 候选集对 `__goalInit` 不可见的守卫盲区；④D6 扩为双登记（影响面审 S1）：`pi.__workflowRun` 同型死通道给 ADR-020 加注；⑤teardown 清 slot 两侧通用（影响面审 S2）。**INFO**：goal 档排序第 2 非第 5（tool.ts EXEC_MODE_OPTIONS 核实）；「4 个现役 slot」改十余处；C-ext-06 表述从「进程级单例」精确为「进程级共享」。
+- v2.1（2026-09-14）：**R2 复审修复**（主审 0/0 进行中 · 影响面审 2 MF 全修 · 简洁审 PASS 0/0+1 INFO）。①加注对象纠错（影响面审 R2-MF1）：死刑加注从历史误标的 docs/adr 0020（core-user-flows，同名编号无关 ADR，全文零 workflowRun ✅核实）改到真背书者 `docs/extensions/adr/pi-ext-020-coding-workflow-depends-on-workflow.md`（Decision 节「与 `pi.__goalInit` 同模式」表述同步回写，D6-②/u3/文件地图/证据行四处联动）；②§3 章结论残留修正（影响面审 R2-MF2）：「挂带版本的握手对象」v1 表述漏改 → 「直挂函数 + typeof 检查」；③V4/P-5「npm dist」措辞与 dev-link 前置对齐（简洁审 R2 INFO）：改「非 builtin 来源（dev-link 源码或安装通道产物）」，npm dist 纯净形态归 V5。
+- v2（2026-09-14）：**R1 三审修复**（主审 1MF+2SG / 影响面审 1MF+2SG / 简洁审 1MF+2SG，全修 + 3 INFO）。**方案性**：①D2 推翻——version 握手对象记入否决记录（简洁审 F1：ask-user 先例三前提不匹配 + 仓内单向/单例 slot 十余处裸挂 + 三层既有机制承接签名错配 + v1 的 G3「版本协议不匹配」系发明 version 后的循环论证），slot 回归裸函数直挂，G3 改单义「未装」；联动删 bridge.ts（内联 index.ts，简洁审 F2）、删「goal 侧测试辅助导出」备选（F3）、V2 version:99 子场景、u1 version 用例、主审 S2（version 分支 debug 日志）随之消失。**事实纠错**：②桌面形态口径（主审 MF）：plan 不在 mandatory-extensions.json（18 项仅含 goal ✅核实），builtin 双包表述全部改为「goal builtin + plan 用户安装混载同进程」，V4 补安装前置（dev-link / 扩展安装通道），P-5 形态描述同步。**规格完整性**：③符号清扫清单补全（影响面审 MF）：service.ts/README/extension-dependencies.json:90/06 设计 5 处/ADR-020，V6 改显式 grep 门（含豁免范围），登记 check-doc-symbol-drift 候选集对 `__goalInit` 不可见的检查盲区；④D6 扩为双登记（影响面审 S1）：`pi.__workflowRun` 同型死通道给 ADR-020 加注；⑤teardown 清 slot 两侧通用（影响面审 S2）。**INFO**：goal 档排序第 2 非第 5（tool.ts EXEC_MODE_OPTIONS 核实）；「4 个现役 slot」改十余处；C-ext-06 表述从「进程级单例」精确为「进程级共享」。
 - v2.6（2026-09-14）：**实施完成（u1-u4）**——goal 侧 slot 挂载（index.ts 内联 + docstring + GOAL_INIT_SLOT_KEY 导出）；plan 侧 getGoalInit/detectGoalCapability/tryGoalInit 换 slot 读取去 pi 参数（tool.ts buildExecOptions/resolveCompleteChoice 签名跟随）；两侧测试 mock 形态对齐 slot + teardown（goal 405 / plan 82 用例全绿，三连过）；u3 符号清扫（extension-dependencies.json reason、06 设计 5 处 + 03 两处桥表述注记、goal service.ts/README/docstring、pi-ext-020 死刑加注）+ changeset（两包 patch）；u4 真机验收 V1/V2/V3/V5/V6 全 PASS（V4 GUI 留 dev 环境轮，登记 `.tmp/dev-flow/goal-bridge-slot.acceptance.md`）——V1 全链（5 选项 goal 档 + 压缩后 goal-state + steer 兑现）、V3 经 v3b 假 fn 可控构造触发 init-refused 三通道。
 - v2.5（2026-09-14）：**撤销搁置，恢复实施（用户澄清裁决）**——暂缓的仅 tdflow 重构（docs/design/tdflow-two-phase-workflow.md），plan 包在重构落地前维持现状，goal 桥修复（u1-u4）照做。v2.4 的搁置登记作废（其登记的 ext-simplify-index / AGENTS.md / tdflow §五「已执行」小节同步撤销修正）。

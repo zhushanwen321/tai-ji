@@ -10,9 +10,11 @@
  *   （退化序登记 = 序 0 不退化，不破坏既有布局）
  * - 构建者（白盒）：COMPOSER_BTW_BUTTON_DEGRADATION_ORDER 登记值 = 0
  *
- * mock 策略（TEST-STRATEGY §5）：vi.mock('@/api') 补 btw 域（本文件 badge 数据源）；
- * useTrayCounts 替身（全无条目 → 托盘不渲染，左簇按钮位次断言无干扰）；useChat /
- * useNewTaskFlow / stores/session 同 composer-bar-density-wiring 范式；真实 chat store
+ * mock 策略（TEST-STRATEGY §5）：vi.mock('@/api') 补 btw 域（本文件 badge 数据源，
+ * 经 composerApiModuleWithChatAndBtw 工厂——chat+getHistory+btw 增量组，btw spy 单例
+ * composerBtwApiSpy 供用例内 mockResolvedValue 驱动）；useChat / useNewTaskFlow /
+ * stores/session 壳 mock 经 composer-shell-mount 装配；useTrayCounts 替身（全无条目 →
+ * 托盘不渲染，左簇按钮位次断言无干扰）；真实 chat store
  * （badge 未读计数从 setMessages 真实分区增长）+ 真实 core drawer 域（入口点击 / 视口判定）。
  * i18n 由 vitest-i18n-setup 全局提供（t 取 zh-CN 真实文案，断言中文无需另行 mock）。
  *
@@ -23,8 +25,11 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { computed, defineComponent, nextTick, reactive, ref } from 'vue'
 import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { textToSegments } from '@taiji/shared'
 import type { Message } from '@taiji/shared'
+// helper import 先于 Composer：其链上 import '@/api' 即触发 api mock 工厂执行（sync
+// 工厂在 import 求值期解引用 helper 绑定），彼时须已初始化
+import '../helpers/composer-shell-mount'
+import { composerApiModuleWithChatAndBtw, composerBtwApiSpy, composerChildStubs, makeComposerInputMock } from '../helpers/composer-mount'
 import {
   bindDrawerSessionId,
   drawerControl,
@@ -70,82 +75,19 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   }
 })
 
-// ── chat / flow / api / session store mock（composer-bar-density-wiring 同范式 + btw 域）──
-const chatApiMock = vi.hoisted(() => ({
-  send: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-  sendBash: vi.fn(() => Promise.resolve()),
-  abortBash: vi.fn(() => Promise.resolve()),
-}))
-const btwMock = vi.hoisted(() => ({
-  list: vi.fn(),
-  create: vi.fn(),
-  remove: vi.fn(),
-}))
-vi.mock('@/composables/features/chat/useChat', () => ({ useChat: () => chatApiMock }))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({
-    submitFirstMessage: vi.fn(),
-    currentModel: { value: null },
-    // [U4r2] composer-shell 壳层读取 pendingPreset.value（landing 态 preset chip 数据源），
-    // 形态对齐 core flow.ts 的 ref<string | null>
-    pendingPreset: ref(null),
-    setPendingModel: vi.fn(),
-    startFlow: vi.fn(),
-    currentCwd: ref(null),
-  }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: {
-    send: chatApiMock.send,
-    streamSubscribe: vi.fn(() => () => {}),
-    // btw-replay（M2-c 接线，chatStore 装配）：drawer 选中线时的回放腿——空快照即可
-    // （本文件不验回放，只需不走失败告警路径）
-    getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
-  },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
-  btw: btwMock,
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+// ── api mock：chat 组（spy 转发 + getHistory 回放腿空快照）+ btw 域（badge 数据源）──
+vi.mock('@/api', () => composerApiModuleWithChatAndBtw())
 
 // ── 子组件 stub（AddMenuPopover 保持真实：`+` 首位是「既有布局不破坏」断言对象）──
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  emits: { input: null, keydown: null, 'slash-trigger': null, 'file-trigger': null },
-  setup(_, { expose }) {
-    expose({
-      clear: vi.fn(),
-      setText: vi.fn(),
-      insertSlashChip: vi.fn(),
-      getSegments: () => textToSegments(''),
-      getText: () => '',
-    })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
+const { ComposerInputMock } = makeComposerInputMock()
+// GenStatsTriggers 专属空 stub（composerChildStubs 未覆盖的本文件特例）
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
+// 从共享 stub 剔除 AddMenuPopover（保持真实），其余兄弟子组件转发 composerChildStubs
+const { AddMenuPopover: _addMenuPopoverReal, ...childStubs } = composerChildStubs
 const stubs = {
   ComposerInput: ComposerInputMock,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
+  ...childStubs,
   GenStatsTriggers: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
 }
 
 const SID = 's-btw-btn'
@@ -215,10 +157,18 @@ async function dispatchWidth(width: number): Promise<void> {
   await nextTick()
 }
 
+/** 单线 badge 用例共用起步：list=[t1] + 挂载 + settle，返回真 chatStore（setMessages 驱动） */
+async function mountSingleLineWithChat(): Promise<ReturnType<typeof useChatStore>> {
+  composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }])
+  mountComposer()
+  await settle()
+  return useChatStore()
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
-  btwMock.list.mockResolvedValue([])
+  composerBtwApiSpy.list.mockResolvedValue([])
   ManualResizeObserverStub.install()
   boundSid = ref(SID)
   bindDrawerSessionId(boundSid)
@@ -265,7 +215,7 @@ describe('入口渲染与 show-btw 实例开关（D7 ③入口）', () => {
 
 describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（§1.4 / D8 未读行）', () => {
   it('聚合 = 当前主会话名下线的 Σ：逐线累加、title 换计数文案、>9 封顶 9+', async () => {
-    btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
+    composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
     mountComposer()
     await settle()
     const chat = useChatStore()
@@ -295,10 +245,7 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
   })
 
   it('清除 = 线内容进视口；视口内新回复不计；关面板后再计', async () => {
-    btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }])
-    mountComposer()
-    await settle()
-    const chat = useChatStore()
+    const chat = await mountSingleLineWithChat()
 
     chat.setMessages('btw:t1', [msg('a1')])
     await settle()
@@ -324,7 +271,7 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
   })
 
   it('badge 归属各自主会话：切走不串台、切回恢复（D7③④，S10 单测面）', async () => {
-    btwMock.list.mockImplementation((sid: string) =>
+    composerBtwApiSpy.list.mockImplementation((sid: string) =>
       Promise.resolve(sid === SID ? [{ vid: 'btw:ta' }] : [{ vid: 'btw:tb' }]),
     )
     const w = mountComposer()
@@ -353,7 +300,7 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
 
 describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 裁决 U1 + D8 终态机）', () => {
   it('双零（unread=0 且 pending=0）：计数角标与待处理徽点都不渲染，title 保持入口语义', async () => {
-    btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }])
+    composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }])
     mountComposer()
     await settle()
 
@@ -364,7 +311,7 @@ describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 �
   })
 
   it('pending>0：待处理徽点渲染 + title 换待处理计数文案（Σ per-line 待处理线数）；清除后归零不显', async () => {
-    btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
+    composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
     mountComposer()
     await settle()
     expect(pendingDot().exists()).toBe(false)
@@ -389,7 +336,7 @@ describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 �
   })
 
   it('reclaimImminent 消费接线：拉取置位 → 徽点 + 计数 title 可见；state 帧广播翻转 false → 双双回落（用户可见 DOM）', async () => {
-    btwMock.list.mockResolvedValue([{ vid: 'btw:t1', reclaimImminent: true }])
+    composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1', reclaimImminent: true }])
     mountComposer()
     await settle()
 
@@ -409,10 +356,7 @@ describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 �
   })
 
   it('两态并列：unread 计数角标（右上）与待处理徽点（右下）同屏共存；title 待处理优先', async () => {
-    btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }])
-    mountComposer()
-    await settle()
-    const chat = useChatStore()
+    const chat = await mountSingleLineWithChat()
 
     // 先让消息增长落地（D8 回收提醒清除支 = 线内容增长即清；与置位同拍会被抢先清掉）
     chat.setMessages('btw:t1', [msg('a1')])
@@ -453,7 +397,27 @@ describe('点击入口与退化序登记（D7 + use-composer-bar-density 序 0�
       expect(buttons[0]?.attributes('title')).toBe('添加内容（附件 / 命令）')
       expect(buttons[buttons.length - 1]?.attributes('title')).toContain('发送')
     }
-    // 档位本身如实驱动（证明确实经过三档，而非恒 expanded）
-    expect(bar().attributes('data-tier')).toBe('narrow')
+    // 密度档位本身如实驱动（证明确实经过退化，而非恒 fit=0 展开）
+    // [HISTORICAL] 原断言 data-tier='narrow'（固定阈值 tier 轴：700/560/400 → expanded/mid/narrow）
+    // ——该轴已随三步聚合实测化退役；现行轴 = data-fit（0–3 实测 fit 级，判据 = 可用宽 vs 两簇
+    // 占宽）。jsdom 无真实几何（clientWidth/占宽恒 0 → 需求 0 → 恒 fit=0），故本探针须打桩几何
+    // （composer-bar-density-wiring 的 dispatchFitGeometry 同法）才走退化；data-fit 0→3 全档
+    // 由 wiring 测试的纯接线面承接，此处只证全量挂载下回路真实驱动。
+    const probeBar = bar().element as HTMLElement
+    const probeLeft = probeBar.querySelector<HTMLElement>('[data-composer-cluster="left"]')
+    const probeRight = probeBar.querySelector<HTMLElement>('[data-composer-cluster="right"]')
+    if (!probeLeft || !probeRight) throw new Error('底栏两簇节点缺失：模板与 fit 回路不同步？')
+    Object.defineProperty(probeBar, 'clientWidth', { value: 200, configurable: true })
+    vi.spyOn(probeLeft, 'getBoundingClientRect').mockReturnValue({ width: 150 } as DOMRect)
+    vi.spyOn(probeRight, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
+    ManualResizeObserverStub.created()[0].dispatch([
+      { target: probeBar, contentRect: { width: 200 } as DOMRectReadOnly },
+    ])
+    await new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
+      else setTimeout(resolve, 0)
+    })
+    await settle()
+    expect(Number(bar().attributes('data-fit'))).toBeGreaterThan(0)
   })
 })

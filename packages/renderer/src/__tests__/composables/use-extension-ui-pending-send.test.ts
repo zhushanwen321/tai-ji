@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useExtensionUI respond 分型锚点 + invalidated 清除单测（form-hang-fix D1 / 探针 P-fh5）。
  *

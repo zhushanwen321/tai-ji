@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useMessageEffects 测试（架构审计 §11.4）。
  *

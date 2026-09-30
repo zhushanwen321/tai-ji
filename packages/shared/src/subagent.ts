@@ -130,9 +130,11 @@ export interface SubagentRecord {
    * result 残留的 running 形态只存在于 U4 部署边界旧 entry（runtime 第五归一
    * `running && resumable===true → idle` 承接，two-state-convergence D5）。
    *
-   * 来源：自描述 subagent-record entry（W16 v1，reportRecordTransition 轮终迁移携带
-   * result 字段）；轮终迁移写点对空文本轮写占位（本轮正文 / 错误兜底文本 /
-   * "(no output this round)" / "(empty)"）。首轮未完成前恒 undefined。
+   * 来源（W1 后双形态终态）：v2 record-settled 终态条目一次性写全文（终局写点 =
+   * core settleViaJournal → toSettledEntryData，事件文件只存摘要锚、本字段是全文
+   * 唯一落点）；存量 v1 快照条目兼容读同名字段（W16 写点 reportRecordTransition
+   * 轮终迁移已停写，留 D7 兼容层）。轮终迁移写点对空文本轮写占位（本轮正文 /
+   * 错误兜底文本 / "(no output this round)" / "(empty)"）。首轮未完成前恒 undefined。
    */
   result?: string
   /**
@@ -169,6 +171,19 @@ export interface SubagentRecord {
    */
   origin?: 'tool' | 'workflow'
   /**
+   * [W0 / D1] origin='workflow' 时所属 workflow run id（subagent-record entry data
+   * 投影透传；与 origin/stepIndex 同族身份域）。runtime 合并投影按 (parentRunId,
+   * stepIndex) 关联 run 视图。additive：undefined（存量 record / tool 来源）零迁移。
+   */
+  parentRunId?: string
+  /**
+   * [W0 / D1] origin='workflow' 时在 run 内的步骤索引（单源 = pump dispatch 的
+   * callId/taskIndex，entry data 投影透传）。additive：undefined（存量 entry / tool
+   * 来源）= 不参与 run 视图合并（无 stepIndex 的 record 不成行——旧 session 回落
+   * trace-only 视图的守卫判据）。
+   */
+  stepIndex?: number
+  /**
    * 实际执行引擎 id（P4 路由留痕，设计 D9①/D3：engine 三字段贯通）。缺省 = pi，
    * 由读侧映射（runtime subagent-engine-history 的 extractRecordEngine：undefined/
    * 空串 → 'pi'，非空透传）——投影层只透传不填默认值，存量 record 零迁移。
@@ -191,8 +206,8 @@ export interface SubagentRecord {
 
 /**
  * closed 统一终态的展示语义（[U6/D5] 消费方迁移：renderer 侧侧栏任务卡片的 closed 三分行
- * 及其状态表已随该视图退役一并删除，本函数改由 runtime 归一层消费——legacy
- * closed 归一为 idle 时经本函数派生展示语义并映射为 stopReason 注入（cancelled→
+ * 及其状态表已随该视图退役一并删除，本函数改由 runtime 归一层消费——legacy closed 归一为
+ * idle 时经本函数派生展示语义并映射为 stopReason 注入（cancelled→
  * 'cancelled' / failed→'failed' / done→'completed'，「deriveClosedDisplay 改 stopReason
  * 派生」），closedReason 字段同时保留作诊断位）。
  *

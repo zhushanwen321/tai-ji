@@ -3,15 +3,21 @@
 // 测试方法（限制见文末 import 用例）：review-fix-loop.js 是 pi worker 模板脚本——
 // 顶层执行 + 顶层 return，不可作为 ES module import（vite/esbuild 直接 SyntaxError）。
 // 因此用 vm.Script 对源码文本做「函数段抽取求值」：从源文件按函数名定位 + brace
-// 配平截取 normUsage / warnTelemetryMissingOnce / buildCallRecord 三段，在注入
-// log/Buffer 的沙箱里求值后取回引用。抽取定位失败（函数改名/移动）会显式 throw，
-// 不会静默测到旧副本。
+// 配平截取 normUsage / warnTelemetryMissingOnce / buildCallRecord 三段（loadScriptFns
+// 集中求值），在注入 log/Buffer 的沙箱里求值后取回引用。抽取定位
+// 失败（函数改名/移动）会显式 throw，不会静默测到旧副本。
 //
 // 回归锚点（对照修复史，断言在旧实现上会红）：
 //   - W1：失败调用（returnMeta={value,error}）不得触发 telemetry-missing WARN
 //         （旧实现不排除 error 分支，agent 失败被误诊为引擎透传未上线并烧掉 once 名额）
 //   - A11：model 缺省回退 "(default)"（请求时参数语义）
 //   - A12：promptMode=null（aggregator/fixer）必须保持 null，不被 || 误转 "full"
+//
+// 注：弱格式通道相关测试（summarizeDegradedTrigger 直测 / F-1 前缀契约锁定 /
+// degraded 三落点锚点 / 兜底差集清单锚点）已随 fail-fast 改造整体退役——
+// 结构化返回失败即终判，脚本侧无 F-1 字面量、无降级可观测面；引擎侧
+// DETERMINISTIC_SCHEMA_FAILURE_PREFIX 常量仍被宿主 execute-agent-call 重试分诊
+// 消费（output-collector.test.ts 侧覆盖），与本脚本无契约关系。
 import { execFile } from "node:child_process";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -704,5 +710,44 @@ describe("review-fix-loop.js fixerDocPath + groupCalls（fixer 文件总线渲�
       expect(captured[0].reportPath).toBe("");
       expect(captured[0].caution).toEqual([]);
     });
+  });
+});
+
+// ── 结构化失败终判恢复指引（fail-fast：错误信息带恢复动作是要求，不是兜底）──
+// 源文本锚定防「终判文案被精简后丢恢复指引」——行为级断言（终判 message 内容）
+// 在 subagent-workflow e2e mock 轨（review-fix-loop-e2e.test.ts fail-fast describe），
+// 此处锁源级形态。弱格式通道相关锚点（summarizeDegradedTrigger 直测 / F-1 前缀
+// 契约锁定 / degraded 三落点 / 兜底差集清单）已随通道拆除整体退役。
+describe("review-fix-loop.js 结构化失败终判恢复指引锚点", () => {
+  it("恢复指引常量单一声明 + 语义覆盖结构化链路检查动作与重试闭环", () => {
+    expect(WORKFLOW_SOURCE).toContain("const REVIEWER_RECOVERY_HINT = ");
+    // 语义三要素：tools 白名单检查（受限 tools 过滤 schema 工具）/ 引擎 schema 支持 / 重跑闭环
+    expect(WORKFLOW_SOURCE).toContain("tools 白名单须放行 structured-output");
+    expect(WORKFLOW_SOURCE).toContain("schema 结构化返回");
+    expect(WORKFLOW_SOURCE).toContain("重跑 workflow");
+  });
+
+  it("两处 reviewer 终判分支（结构化 error catch / 结果无效落入处）都以常量拼接收尾——防一处直写字面量漂移", () => {
+    // 结构化 error 落入的终判（failFastAgent catch：failedLabel + e.message）
+    expect(WORKFLOW_SOURCE).toContain('String(e)) + REVIEWER_RECOVERY_HINT;');
+    // 结果无效落入的终判（审查 agent 结果无效，缺 must_fix）
+    expect(WORKFLOW_SOURCE).toContain('.slice(0, 400) + REVIEWER_RECOVERY_HINT;');
+    // 消费恰好两处（1 声明 + 2 消费 = 标识符共 3 次）——第三处内联即红
+    expect(WORKFLOW_SOURCE.match(/REVIEWER_RECOVERY_HINT/g)?.length).toBe(3);
+    expect(WORKFLOW_SOURCE.match(/\+ REVIEWER_RECOVERY_HINT;/g)?.length).toBe(2);
+  });
+
+  it("fail-fast 形态锚点：failFastAgent 包装存在、脚本无 F-1 字面量、无 degraded 可观测面", () => {
+    // failFastAgent 单一声明 + reviewer/fixer 两处消费（声明含 `(`，共 3 次）
+    expect(WORKFLOW_SOURCE).toContain("function failFastAgent(call, failedLabel)");
+    expect(WORKFLOW_SOURCE.match(/failFastAgent\(/g)?.length).toBe(3);
+    // F-1 引擎前缀字面量不再内联（引擎侧常量仍被宿主重试分诊消费，与本脚本无契约关系）
+    expect(WORKFLOW_SOURCE).not.toContain("Structured output failed deterministically");
+    // 弱格式降级可观测面零残留（degraded 三落点已整体拆除）
+    expect(WORKFLOW_SOURCE).not.toContain("degradedRounds");
+    expect(WORKFLOW_SOURCE).not.toContain("degradedRoundKeys");
+    expect(WORKFLOW_SOURCE).not.toContain("baselineDirtyPaths");
+    expect(WORKFLOW_SOURCE).not.toContain("recoverFromReportFile");
+    expect(WORKFLOW_SOURCE).not.toContain("parseAggregatedMd");
   });
 });

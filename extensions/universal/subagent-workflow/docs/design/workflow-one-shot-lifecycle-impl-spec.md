@@ -74,7 +74,7 @@
 | `WorkflowAction` :54-59 + `WORKFLOW_ACTIONS` :61-67 | 删 `"pause"` / `"resume"`（类型与数组同步） |
 | `runId` 参数描述 :83 | `"Workflow run ID (pause/resume/abort)"` → `"Workflow run ID (abort action)"` |
 | execute case :372-377 | 删 `case "pause"` / `case "resume"` 两分支（default never 穷尽检查自然适配三 action） |
-| `actionLifecycle` :556 起 | pause/resume 分支删除（保留 abort；若函数内 verb 分发依赖 WorkflowAction，随类型收窄同步） |
+| abort 处理函数 :556 起 | pause/resume 分支删除（保留 abort；若函数内 verb 分发依赖 WorkflowAction，随类型收窄同步） |
 | tool description + promptGuidelines :330-342 | ① `- pause/resume/abort: {"action":"pause","runId":"<id>"} (abort optional: ,"error":"<reason>"})` → `- abort: {"action":"abort","runId":"<id>"} (optional: {"error":"<reason>"})`；② 新增一次性语义句（F3 预防性指引）：`Runs are one-shot: there is no pause/resume — to stop a run early use abort; for a fresh result start a new run.` |
 
 **U1-5 `src/interface/commands.ts` + `src/interface/command-actions.ts`**
@@ -195,7 +195,7 @@ S1（快照 v2 断言除外）+ S2 + S4 + S7 + S8a（§3 手册）。S8a = `grep
 
 ### 2.3 U2 验收绑定
 
-S3（kill-9 + session 切换完整两路）+ S5 + S6 + S8b（`grep -rn '"paused"' src/` 零命中（历史注释/CHANGELOG 除外）**且 `grep -rn "pauseRun\|resumeRun" src/` 全域零命中**（U1 遗留的 6 处在 U2 一并清：trace.ts:156 / budget.ts:103 / run-runtime.ts:27 存量注释改写、gui.test.ts:429/:437 fixture 字符串改名、jsonl-run-store-session-file.test.ts:404 注释改写）+ 旧 v1 快照启动不崩不显示 + 新快照 v2 + 三命令全绿）。
+S3（kill-9 + session 切换完整两路）+ S6 + S8b（`grep -rn '"paused"' src/` 零命中（历史注释/CHANGELOG 除外）**且 `grep -rn "pauseRun\|resumeRun" src/` 全域零命中**（U1 遗留的 6 处在 U2 一并清：trace.ts:156 / budget.ts:103 / run-runtime.ts:27 存量注释改写、gui.test.ts:429/:437 fixture 字符串改名、jsonl-run-store-session-file.test.ts:404 注释改写）+ 旧 v1 快照启动不崩不显示 + 新快照 v2 + 三命令全绿）。
 
 ---
 
@@ -206,7 +206,7 @@ S3（kill-9 + session 切换完整两路）+ S5 + S6 + S8b（`grep -rn '"paused"
 ```bash
 SESSION_DIR=/tmp/wf-one-shot-$(date +%s)
 TAIJI_AGENT_DEBUG=1 pi --mode rpc --session-dir "$SESSION_DIR" \
-  --model xiaomi-token-plan-cn/mimo-v2.5-pro --approve --extension "$WF"
+  --model <本机可用模型> --approve --extension "$WF"
 # stdin 发 prompt JSONL 驱动主 agent 调 workflow 工具（pi rpc-mode 标准 prompt 命令；
 # 首次执行时把实际 prompt 报文记入验收报告）
 ```
@@ -241,21 +241,12 @@ const b = await agent({ prompt: "Reply with exactly: beta", schema: SCHEMA })
 return { a, b }
 ```
 
-**嵌套脚本**（S5 专用，`/tmp/nested-chain.js`；嵌套 name 走 `deps.registry.getPath(name)`——launcher.ts:328，与 actionRun 同一解析方法（registry-impl.ts:77），绝对路径口径已核实（R4）；worker 全局 `workflow(name, args)` 存在于 worker-script-builder.ts:354）：
-
-```js
-// /tmp/nested-chain.js
-const inner = await workflow("/abs/path/to/chain.js", { task: "分析当前目录结构" })
-return { inner }
-```
-
 | # | 场景 | 步骤（命令级） | 通过标准 |
 |---|---|---|---|
 | S1 | 正常完成回归（U1） | 发 prompt 令主 agent 调 `{"action":"run","name":"<WF>/workflows/chain.js","args":{"task":"分析当前目录结构"}}` → 等完成通知 | status done/completed；result 含三步产出；**U2 后追加**：`$SESSION_DIR/workflow-state/<runId>.jsonl` 首行含 `"version":"wf-run-v2"` |
 | S2 | 主动 abort（U1） | run `<WF>/workflows/review-fix-loop.js`（args targetType:"text" 长任务）→ 进行中发 `{"action":"abort","runId":"<id>"}` | done/aborted；`ps aux \| grep -i "pi\|worker"` 无残留 worker 与 pi 子进程；`{"action":"status"}` 列表显示 aborted |
 | S3 | 崩溃与切换作废（U2） | ① run review-fix-loop → 进行中 `kill -9` 主 pi 进程 → 同 SESSION_DIR 重启 pi；②a run review-fix-loop → **分支导航**（优先 TUI `/tree` 选择另一分支；RPC `navigateTree` 需先从 session 树获取目标 branchId，步骤繁复不推荐）→ 切回；②b run review-fix-loop → **切 session**（TUI `/new`，或 RPC `switch_session`）→ 切回 | ① 残留 run 显示 done/failed 且 state.error 含 "Process killed"；无 running 幽灵；②a 切回后 run 显示 failed、state.error 含 **"Session switched"**（session_tree 路径）；②b 同显 failed、state.error 含 **"Session shutdown"**（session_shutdown 路径——`/new` 与 `switch_session` 都走 before_switch + shutdown，不触发 session_tree）；resume 任何形态不可达 |
 | S4 | 已删能力指引（U1） | ① 工具调 `{"action":"pause","runId":"<id>"}`；② 命令 `/workflows pause <id>`（RPC 通道） | ① 结构化错误，文本匹配 `Validation failed for tool "workflow"`（enum 拒绝），无成功 payload；② 提示 `Workflow pause has been removed — runs are one-shot. To stop a run early: /workflows abort <runId>`；③ 命令补全列表无 pause/resume（注记：pi rpc-mode 无补全探测入口——rpc-mode 无 completion 命令，不可 E2E 探测，以源码 diff 为证：`getArgumentCompletions` 补全列表仅剩 `abort`，二段条件 `parts[0] === "abort"`——U1 verifier 注记 ③） |
-| S5 | 嵌套回归（U2） | run `/tmp/nested-chain.js` | 父子均 done/completed；子 run 的 token 消耗计入父（`{"action":"status"}` 父 run 预算字段含子消耗；对照单独跑 chain.js 的量级） |
 | S6 | 预算终态（U2） | `{"action":"run","name":"<WF>/workflows/chain.js","args":{...},"tokens":100}` | done/budget_limited；无 pause 分支残留行为 |
 | S7 | 崩溃自愈（U1） | ① `crashAt:"second"` run → 观察自愈完成；② `crashAt:"always"` run → 观察重试耗尽；③ `throwAt:"always"` run → script error 重试。token 对照前先 `touch /tmp/wf-marker`（`-newer` 基准） | ① `result = {a:{word:"alpha"}, b:{word:"beta"}}`——**b 重跑成功即 discard 生效**（若 discard 失效，b replay 假失败/abort 错误）；**a 不重复消耗 token**：`find ~/.pi/agent/subagents -name "*.jsonl" -newer /tmp/wf-marker` 中 PHASE_A 对应子进程 session 文件恰 1 份（重跑不新增）、PHASE_B 恰 2 份（崩溃前 + 重跑）；**rebuild 以行为证据判定**——rebuild 路径（handleWorkerExit/scheduleRebuild/rebuildRuntime）无 deps.log 调用，扩展日志查不到 rebuild 字样（U1 verifier 实测注记 ②）：`meta.workerErrorCount=1`（崩溃 1 次 + rebuild 1 次）+ 上述 session 文件计数 + 最终 scriptResult 正确；② 3 次重建后 done/failed（workerErrorCount 计数至 4 耗尽）；③ 同为重试后 failed（scriptErrorCount 分账，两条计数互不污染——快照 meta 计数可证：always 路 worker=4/script 未设，throwAt 路 script=4/worker 未设） |
 | S8 | 静态断言（U1=S8a / U2=S8b） | `grep -rn "pauseRun\|resumeRun" src/`；`grep -rn '"paused"' src/`；启动含旧 v1 快照的 session；`pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test` | S8a（U1 后）：pauseRun/resumeRun 零命中 + 三命令全绿（"paused" 死值仍在，允许）。S8b（U2 后）：`"paused"` 零命中（types/workflow-run/run-runtime/jsonl-run-store/gui-mappers/format/run-state/run-spec 及全部 src 注释；CHANGELOG 与本 docs/ 除外）+ 旧 v1 快照不崩不显示 + 新快照 v2 + 三命令全绿 |

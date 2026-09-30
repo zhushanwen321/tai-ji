@@ -11,7 +11,8 @@
  * - TC7 error      重试按钮（settings-update-retry），click → checkForUpdate(true)
  * - TC8 unsupported 前往下载按钮（settings-update-unsupported），click → openFallbackUrl
  *
- * Mock 策略：仅需 vi.mock('@/composables/features/settings/useAppUpdate')（UpdateCheckCard 唯一外部依赖）。
+ * Mock 策略：仅需 vi.mock('@/composables/features/settings/useAppUpdate')（UpdateCheckCard 唯一外部依赖），
+ * 工厂注入真实控制器（helpers/update-card-mock.ts：createAppUpdateController + 内存 ipc）。
  * 不需 SystemPage 的其他 mock（getAutoRenameEnabled/useToast/useCommandStore/listSystemSounds）——
  * UpdateCheckCard 是自包含组件，无 props、无 onMounted 副作用。
  *
@@ -24,40 +25,32 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/settings/system-page-update.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { cardTestState, checkForUpdateMock, performDownloadMock, performInstallMock, openFallbackUrlMock, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'
+import { getCardUpdateHarness, makeCardRelease, resetCardUpdateHarness, useAppUpdateCardModule } from '@/__tests__/helpers/update-card-mock'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import type { UpdateAppState } from '@/composables/features/settings/use-app-update-state'
 
 // __APP_VERSION__ 在 vitest-i18n-setup.ts 全局 stub
-
-/** 构造 mock release（available/downloaded 用例需 version 填充占位符） */
-function makeRelease(version: string): { version: string; htmlUrl: string; releaseNotes: string } {
-  return { version, htmlUrl: 'https://example.com/release', releaseNotes: '' }
-}
 
 vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
 
 import UpdateCheckCard from '@/components/settings/UpdateCheckCard.vue'
 
-/** 设置测试态（驱动组件 v-if/v-else-if 分支） */
-function setTestState(partial: Partial<typeof cardTestState>): void {
-  Object.assign(cardTestState, partial)
+/** 设置测试态（驱动组件 v-if/v-else-if 分支；直改真实控制器的 state） */
+function setTestState(partial: Partial<UpdateAppState>): void {
+  Object.assign(getCardUpdateHarness().controller.state, partial)
+}
+
+/** 断言 force 检查恰好执行一次（TC2/TC7 共用断言对） */
+function expectForceCheckCalledOnce(): void {
+  expect(getCardUpdateHarness().ipc.checkForUpdate).toHaveBeenCalledTimes(1)
+  expect(getCardUpdateHarness().ipc.checkForUpdate).toHaveBeenCalledWith({ force: true })
 }
 
 let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
-  checkForUpdateMock.mockReset()
-  performDownloadMock.mockReset()
-  performInstallMock.mockReset()
-  openFallbackUrlMock.mockReset()
-  Object.assign(cardTestState, {
-    state: 'idle',
-    latestRelease: null,
-    errorMessage: '',
-    percent: 0,
-    releaseNotesHtml: '',
-  })
+  resetCardUpdateHarness()
 })
 
 afterEach(() => {
@@ -77,13 +70,12 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     expect(checkBtn.text()).toContain('检查更新')
   })
 
-  it('TC2：点击检查按钮调 checkForUpdate(true, "manual")（RD-4#5 手动检查显形）', async () => {
+  it('TC2：点击检查按钮调 checkForUpdate(force=true)（RD-4#5 手动检查显形）', async () => {
     setTestState({ state: 'idle' })
     wrapper = mount(UpdateCheckCard)
     await flushPromises()
     await wrapper.find('[data-testid="settings-update-check"]').trigger('click')
-    expect(checkForUpdateMock).toHaveBeenCalledTimes(1)
-    expect(checkForUpdateMock).toHaveBeenCalledWith(true, 'manual')
+    expectForceCheckCalledOnce()
   })
 
   it('TC3：checking 态按钮 loading + disabled', async () => {
@@ -99,7 +91,7 @@ describe('UpdateCheckCard 版本检查卡片', () => {
   })
 
   it('TC4：available 显示新版本号 + 下载按钮，click 调 performDownload', async () => {
-    setTestState({ state: 'available', latestRelease: makeRelease('0.9.0') })
+    setTestState({ state: 'available', latestRelease: makeCardRelease('0.9.0') })
     wrapper = mount(UpdateCheckCard)
     await flushPromises()
     // 新版本号（i18n newVersionAvailable 含 {version}）
@@ -108,13 +100,14 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     const downloadBtn = wrapper.find('[data-testid="settings-update-download"]')
     expect(downloadBtn.exists()).toBe(true)
     expect(downloadBtn.text()).toContain('下载并安装')
-    // click → performDownload
+    // click → performDownload 执行到 ipc（动作断言走内存 adapter）
     await downloadBtn.trigger('click')
-    expect(performDownloadMock).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.updateDownload).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.updateDownload).toHaveBeenCalledWith('0.9.0')
   })
 
   it('TC5：downloaded 显示重启安装按钮，click 弹确认 Dialog', async () => {
-    setTestState({ state: 'downloaded', latestRelease: makeRelease('0.9.0') })
+    setTestState({ state: 'downloaded', latestRelease: makeCardRelease('0.9.0') })
     wrapper = mount(UpdateCheckCard)
     await flushPromises()
     const installBtn = wrapper.find('[data-testid="settings-update-install"]')
@@ -132,7 +125,7 @@ describe('UpdateCheckCard 版本检查卡片', () => {
   })
 
   it('TC6：确认 Dialog 点「立即重启安装」调 performInstall', async () => {
-    setTestState({ state: 'downloaded', latestRelease: makeRelease('0.9.0') })
+    setTestState({ state: 'downloaded', latestRelease: makeCardRelease('0.9.0') })
     wrapper = mount(UpdateCheckCard)
     await flushPromises()
     // 打开 Dialog
@@ -144,12 +137,12 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     expect(confirmBtn).not.toBeNull()
     confirmBtn!.click()
     await flushPromises()
-    expect(performInstallMock).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.updateInstall).toHaveBeenCalledTimes(1)
     wrapper.unmount()
     wrapper = null
   })
 
-  it('TC7：error 态显示重试按钮，click 调 checkForUpdate(true)', async () => {
+  it('TC7：error 态显示重试按钮，click 调 checkForUpdate(force=true)', async () => {
     setTestState({ state: 'error', errorMessage: '下载校验失败' })
     wrapper = mount(UpdateCheckCard)
     await flushPromises()
@@ -160,12 +153,13 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     expect(retryBtn.exists()).toBe(true)
     expect(retryBtn.text()).toContain('重试')
     await retryBtn.trigger('click')
-    expect(checkForUpdateMock).toHaveBeenCalledTimes(1)
-    expect(checkForUpdateMock).toHaveBeenCalledWith(true, 'manual')
+    expectForceCheckCalledOnce()
   })
 
   it('TC8：unsupported 态显示前往下载按钮，click 调 openFallbackUrl', async () => {
-    setTestState({ state: 'unsupported' })
+    // 摆 latestRelease：真实链 available → main 推送 unsupported 错误时 release 数据保留，
+    // controller.openFallbackUrl 前置 latestRelease 提供 htmlUrl（无 release 时短路不调 ipc）
+    setTestState({ state: 'unsupported', latestRelease: makeCardRelease('0.9.0') })
     wrapper = mount(UpdateCheckCard)
     await flushPromises()
     // 不支持文案
@@ -175,7 +169,8 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     expect(fallbackBtn.exists()).toBe(true)
     expect(fallbackBtn.text()).toContain('前往下载')
     await fallbackBtn.trigger('click')
-    expect(openFallbackUrlMock).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.openUpdateFallbackUrl).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.openUpdateFallbackUrl).toHaveBeenCalledWith('https://example.com/release')
   })
 
   // ── 附加：downloading / replacing / restarting 渲染断言（补全状态机覆盖） ──

@@ -36,7 +36,7 @@ import type {
   SessionView,
 } from "../protocol/contract-types.ts";
 import type { UiRequest, UiRequestHandler, UiResponse } from "../ui-types.ts";
-import type { RunParams } from "../protocol/methods.ts";
+import type { RunContextParams, RunParams } from "../protocol/methods.ts";
 
 // ── 1. 自恰样板（每个契约类型一行；SDK 类型 ↔ 自身恒可赋值）──
 type _SelfAgentEvent = AssertMutuallyAssignable<AgentEvent, AgentEvent>;
@@ -50,6 +50,48 @@ type _SelfUiResponse = AssertMutuallyAssignable<UiResponse, UiResponse>;
 type _SelfUiHandler = AssertMutuallyAssignable<UiRequestHandler, UiRequestHandler>;
 // AgentCallOpts 的引擎面子集 ↔ run.params.task（协议消费方向一致）
 type _SelfAgentCallOpts = AssertMutuallyAssignable<AgentCallOpts, RunParams["task"]>;
+
+// ── 3. 协议演进宪法机器锁（C3/C4/C2；权威源 docs/architecture/subagent-engine-protocolization.md
+//    §3.3「协议演进宪法」）。断言必须带 const 锚点消费——裸 type alias 结果为 never 时
+//    tsc 不报错，`const probe: _X = true` 形态让漂移在 typecheck 期即红。
+
+// C3 事件词表 SSOT 双向锁：union 任一侧漂移（词表删成员 / union 加成员）即 never → 红。
+type _AgentEventTypeNamesClosure = AssertMutuallyAssignable<
+  AgentEvent["type"],
+  AgentEventTypeName
+>;
+
+// C4 task/ctx 双写禁令锁：keyof 交集与 never 双向可赋值恒 true（禁令绝对条款：
+// 同一语义不得在 task 与 ctx 各挂一份，取值源必须唯一）。边界：禁令钉 wire 类型
+// （本断言两端 = contract-types.ts AgentCallOpts × methods.ts RunContextParams）；
+// port-contract.ts 的 RunContext 进程内合回形态是宿主侧独立契约，不在此列。
+// 机器锁覆盖同名交集；异名同义双写由判据 4 成文 + CR 人判兜底。
+type _NoTaskCtxDualWrite = AssertMutuallyAssignable<
+  keyof AgentCallOpts & keyof RunContextParams,
+  never
+>;
+
+// C2-① 存量能力位逐一必填的类型面：任一键被误标可选即 EngineCapabilities 不再
+// 可赋值给 Required 形态 → 红。运行时键集合投影见 REQUIRED_CAPABILITY_KEYS。
+type _CapabilityKeysAllRequired = AssertMutuallyAssignable<
+  EngineCapabilities,
+  Required<EngineCapabilities>
+>;
+
+// C2-① 存量 11 键名词表（逐一必填的运行时投影；新增轴走可选键，不进本词表）。
+const REQUIRED_CAPABILITY_KEYS = [
+  "schemaEnforcement",
+  "steer",
+  "conversation",
+  "personaInjection",
+  "eventGranularity",
+  "sandbox",
+  "sessionRead",
+  "resume",
+  "interrupt",
+  "permissionMode",
+  "maxTurns",
+] as const satisfies readonly (keyof EngineCapabilities)[];
 
 // ── 2. 方向性样板（演示 W2 core→SDK 断言形态；用结构等价镜像替代 core 类型）──
 // W2 落地时把下面的 Mirror* 换成 core 实型即可：
@@ -75,6 +117,16 @@ describe("类型闭包样板", () => {
     const same: _SelfAgentCallOpts = true;
     expect(same).toBe(true);
   });
+
+  it("C3 事件词表 ↔ AgentEvent union 双向锁为 true（词表删成员 / union 加成员均编译红）", () => {
+    const c3: _AgentEventTypeNamesClosure = true;
+    expect(c3).toBe(true);
+  });
+
+  it("C4 task/ctx 双写禁令锁为 true（keyof 交集 = never；任一侧加同名键编译红）", () => {
+    const c4: _NoTaskCtxDualWrite = true;
+    expect(c4).toBe(true);
+  });
 });
 
 // [U2 修正] 原标题自称「字段可选项漂移时在构造处爆红」——失准：必填→可选的漂移
@@ -98,7 +150,30 @@ describe("契约类型运行时形状冒烟（必填缺失/多余字段在构造
       permissionMode: "fixed",
       maxTurns: false,
     };
-    expect(Object.keys(caps)).toHaveLength(11);
+    expect([...Object.keys(caps)].sort()).toEqual([...REQUIRED_CAPABILITY_KEYS].sort());
+    const allRequired: _CapabilityKeysAllRequired = true;
+    expect(allRequired).toBe(true);
+  });
+
+  it("C2-② 可选新增轴缺省构造编译通过（新增轴一律可选键，缺省语义 = 该轴最弱档）", () => {
+    // 模拟新增第 12 能力位：可选键 + 双侧 reducer/解析器对缺省的 no-op 语义。
+    // 消费新轴的 core 代码必须处理缺省（不得 `!` 断言）——D11 C2 约定。
+    type CapsWithFutureAxis = EngineCapabilities & { futureAxis?: "native" | "off" };
+    const withoutFutureAxis: CapsWithFutureAxis = {
+      schemaEnforcement: "emulated",
+      steer: "unsupported",
+      conversation: "unsupported",
+      personaInjection: "prompt",
+      eventGranularity: "coarse",
+      sandbox: "emulated",
+      sessionRead: "full",
+      resume: "cold",
+      interrupt: "kill-only",
+      permissionMode: "fixed",
+      maxTurns: false,
+    };
+    const asBase: EngineCapabilities = withoutFutureAxis;
+    expect("futureAxis" in asBase).toBe(false);
   });
 
   it("EngineHandleData v 恒字面量 1（JSON v1 契约）", () => {
@@ -123,6 +198,7 @@ describe("契约类型运行时形状冒烟（必填缺失/多余字段在构造
       compaction: { type: "compaction" },
       activity: { type: "activity" },
       error: { type: "error", message: "boom" },
+      armed: { type: "armed", schemaEnvVar: "PI_WORKFLOW_SCHEMA", extensionPkg: "@zhushanwen/pi-structured-output" },
     };
     // 运行时同源确认：键集 = 词表全集（不手写事件集合），逐成员 type 即词表成员
     expect(Object.keys(events).sort()).toEqual([...AGENT_EVENT_TYPE_NAMES].sort());

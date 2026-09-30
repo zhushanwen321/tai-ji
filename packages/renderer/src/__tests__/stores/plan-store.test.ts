@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * plan store 单测 —— plan 模式重设计 u1-store 层 1（状态与操作）。
  *

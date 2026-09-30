@@ -7,7 +7,7 @@
  *   1. identity env→appendEntry 重建（类型 13 字段含 1 个 @deprecated，写入 12）
  *   2. notify ledger host 装配 + 重启恢复
  *   3. 双 Service 装配 + initSession（createOrReuseServices 封装，单例语义 D8）
- *   4. GC / manifest tmp 清扫（[U4c/D6] promote 退役）/ 索引重建（[U4c/G1] boot 全量腿）/ worktree 恢复
+ *   4. GC / manifest tmp 清扫（[U4c/D6] promote 退役）/ 索引重建（[U4c/G1] boot 全量腿）/ worktree 恢复 / 保留维护轮兜底（[W1/D5] session_start 触发）
  *   5. per-session run store + kill-9 恢复循环 + evictDoneRunsBeyondCap
  *   6. SAR + engine 基线（经 SessionLifecycleResult 返回，sessionState 写入留在组合根）
  *
@@ -21,7 +21,13 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
-import { guardStaleCtx, oncePerProcess, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+import { oncePerProcess, toErrorMessage } from "@zhushanwen/pi-ext-guards";
+// notify ledger host 装配工厂（五端口接线 + 送达 stale 防御的共享单点实现，
+// 与 session-manager notify-ledger.ts 同一装配机制收敛于此）
+import { createPiNotifyLedgerHost } from "@zhushanwen/pi-notify-ledger-host";
+// [W2/V4 D6] 恢复链注销直落消费的 protocol SSOT（customType + status 映射单点——
+// 与 finalizeRun 直落 / reconcile-sweep 补注销同一函数，零新增定义点）。
+import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 
 // ═══ core 宿主端口消费（随迁块的依赖；production 默认实现住本文件） ═══
 import { getOrCreateChannelRegistry } from "@zhushanwen/subagent-core";
@@ -37,6 +43,20 @@ import { bindNotifyLedgerHost, type NotifyLedgerHost } from "@zhushanwen/subagen
 import { IDENTITY_CUSTOM_TYPE, type SubagentIdentityData } from "@zhushanwen/subagent-core";
 import type { ExecutionMode } from "@zhushanwen/subagent-core";
 import { maybeCleanupExpiredSessionFiles } from "@zhushanwen/subagent-core";
+import { resolvePiSessionScopedDir } from "@zhushanwen/subagent-core";
+// [W1 / D5] session_start 兜底触发点的统一保留维护轮：入口 + record 域目录锚
+// （getSubagentRecordsDir 布局 + ENV_ROOT_CWD 贯穿 env 名单源）+ state 目录分量
+// 单源 STATE_DIR_NAME——全部经 barrel 消费（壳生产消费纪律）。
+import { reapOrphanRuns, runRetentionMaintenanceRound } from "@zhushanwen/subagent-core";
+import { getSubagentRecordsDir } from "@zhushanwen/subagent-core";
+import { ENV_ROOT_CWD } from "@zhushanwen/subagent-core";
+import { STATE_DIR_NAME } from "@zhushanwen/subagent-core";
+// workflow 族 customType 词表单源（workflow-record 现役 + workflow-state-link legacy
+// 指针）：引用集三代解析的判别字面量经 barrel 消费，勿手抄。
+import {
+  WORKFLOW_RECORD_CUSTOM_TYPE,
+  WORKFLOW_STATE_LINK_CUSTOM_TYPE,
+} from "@zhushanwen/subagent-core";
 import {
   getSubagentService,
   setSubagentService,
@@ -80,6 +100,13 @@ function getCachedMainSessionFile(): string | undefined {
  * 时（AGENTS.md 规则 6：首条 assistant 消息前可能不存在）返回 undefined，调用方
  * （fork 解析 / 孤儿恢复）对该场景本就无 entry 可读。
  *
+ * 布局对齐 pi 实装 getSessionsDir（config.js）：session 文件落
+ * `<agentDir>/sessions/<encoded-cwd>/` 子目录（session-manager.js——`--<cwd 编码>--`
+ * 目录内 `<ts>_<sessionId>.jsonl`；与 collectAliveWorkflowRunReferences 同一布局
+ * 锚点）。子目录枚举 + 文件名后缀段 `<ts>_<sessionId>.jsonl` 匹配，slug 目录名不
+ * 解析（pi 编码规则演进不影响按 id 命中）。任一层 readdir 失败（sessions 根不存在
+ * 等）返回 undefined，调用方回落 getSessionFile()。
+ *
  * [pi 锚点 ADR-0063 I4] getSessionFile attach 语义：返回 `this.sessionFile` 字段
  * （pi-mono coding-agent/src/core/session-manager.ts :1011-1013），该字段仅在
  * _setSessionFile（:884/:895-896，constructor 显式路径或 setSessionFile）与
@@ -87,23 +114,172 @@ function getCachedMainSessionFile(): string | undefined {
  * extension ctx 持有的 sessionManager 若尚未重绑到 root session，getSessionFile
  * 仍回旧值（与 E2E 实测一致）。clone v0.84.2 核对，实装 0.84.4。
  */
+/** sessions 根下的 encoded-cwd slug 子目录绝对路径列表（布局锚点 = `<agentDir>/sessions`
+ *  对齐 pi 实装 getSessionsDir，详注见 resolveMainSessionFileById 与
+ *  collectAliveWorkflowRunReferences）。readdir 失败原样上抛——错误分通道
+ *  （catch-all 回落 / ENOENT 空态分流）归各调用方。 */
+function listSessionSlugDirs(agentDir: string): string[] {
+  const sessionsRoot = path.join(agentDir, "sessions");
+  return fs
+    .readdirSync(sessionsRoot, { withFileTypes: true })
+    .filter((ent) => ent.isDirectory())
+    .map((ent) => path.join(sessionsRoot, ent.name));
+}
+
 function resolveMainSessionFileById(sessionId: string): string | undefined {
-  const sessionsDir = path.join(getAgentDir(), "..", "sessions");
+  let slugDirs: string[];
   try {
-    const match = fs.readdirSync(sessionsDir).find((f) => f.endsWith(`_${sessionId}.jsonl`));
-    return match === undefined ? undefined : path.join(sessionsDir, match);
+    slugDirs = listSessionSlugDirs(getAgentDir());
   } catch {
     return undefined;
   }
+  const suffix = `_${sessionId}.jsonl`;
+  for (const dir of slugDirs) {
+    try {
+      const match = fs.readdirSync(dir).find((f) => f.endsWith(suffix));
+      if (match !== undefined) return path.join(dir, match);
+    } catch {
+      continue; // 单子目录读失败继续其余（宁回落 getSessionFile，不中断装配）
+    }
+  }
+  return undefined;
 }
 
-/** workflow 域 per-session state 目录探测（随迁为 module 私有，唯一消费方是随迁块）。 */
+/**
+ * workflow 域 per-session state 目录探测（随迁为 module 私有，唯一消费方是随迁块）。
+ *
+ * [已知限制·登记] slug 锚 process.cwd()（进程 cwd）而非 session cwd：pi CLI 在
+ * 目录 B resume cwd 为 A 的 session 时，新 run 的 record 事件流落 B 的 slug
+ * 目录、旧 run 的在 A——GC/retention sweep（core 同源推导）读不到旧 run 的磁盘
+ * 足迹，兜底失效。主数据不受影响（权威 entry 在 session 文件里，跨 cwd 可重建）。
+ * 布局单源在 core resolvePiSessionScopedDir（workflow-state-root.ts）——修复改锚
+ * 只动 core 单点，本薄消费自动跟随。taiji 桌面场景（spawn cwd 恒等于 session
+ * cwd）不触发，仅裸 pi CLI 的跨目录 resume 触发，故登记不改。
+ */
 function resolveSessionDir(): string {
-  const defaultDir = getAgentDir();
-  const sessionSlug = `--${process.cwd().replace(/^\//, "").replace(/\//g, "-")}--`;
-  // F2：根改 getAgentDir() 派生（实例隔离）；保留 sessionScopedDir 存在则用之的探测语义
-  const sessionScopedDir = path.join(getAgentDir(), "sessions", sessionSlug);
-  return fs.existsSync(sessionScopedDir) ? sessionScopedDir : defaultDir;
+  // F2：agentDir 走 pi SDK 活源注入（实例隔离）；slug + 探测布局单源在 core。
+  return resolvePiSessionScopedDir({ agentDir: getAgentDir() });
+}
+
+// ── [裁决点 7] 存活 session 引用集采集（壳侧注入面，core 不 import pi SDK）──────
+//
+// 全池 session 文件流式扫描（sessions 根 + 全 slug 子目录的 *.jsonl），逐文件
+// 提 workflow run 的注册引用并集——三代形态都解析（v2 注册条目 / v1 全量快照
+// 条目 / pre-W17 link 指针）：
+// - v2：workflow-record custom entry，data.kind === "registered" → data.runId；
+// - v1：data.v === 1 且 data.snapshot.runId 为 string → snapshot.runId；
+// - link：workflow-state-link custom entry → data.runId。
+// 只认 v2 会把存量 run 首轮误判无主并不可逆删除（设计裁决点 7「引用集三代形态」）。
+//
+// 行预过滤（customType 子串）+ 逐行 JSON.parse 的宽容扫描：单文件解析失败跳过
+// （坏文件不阻断整轮——引用集缺侧 = 宁保留方向：少采集到的 run 引用会使其
+// 进观察期而非直接删除，宽限窗兜底）。成本量级 = 全池文件流式扫描，秒级～
+// 十秒级（设计「实现落点」登记的实测预期——每 session_start 一次，oncePerProcess
+// 守卫下进程内单跑）。
+
+/** Node fs 错误 code 判定（ENOENT = 路径不存在；core shared/fs-error 的 errorCodeOf
+ *  未进 barrel——本地等价 helper，判据与 pi-host-run-store 的读错分通道同款）。 */
+function isEnoent(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+/** workflow custom entry 的最小消费视图（宽容扫描用）：customType 保持 unknown
+ *  （值域分流在调用方），data 已过对象校验（字段级读取仍走 unknown 判型）。 */
+interface WorkflowCustomEntryView {
+  customType: unknown;
+  data: Record<string, unknown>;
+}
+
+/** [extractRunReferencesFromLine 守卫] 是否为 data 载荷成形的 workflow custom
+ *  entry（type=custom 且 data 为对象；customType 免判型——分流在调用方）。 */
+function isWorkflowCustomEntry(v: unknown): v is WorkflowCustomEntryView {
+  if (typeof v !== "object" || v === null) return false;
+  const rec = v as Record<string, unknown>;
+  return rec.type === "custom" && typeof rec.data === "object" && rec.data !== null;
+}
+
+function extractRunReferencesFromLine(line: string, out: Set<string>): void {
+  const trimmed = line.trim();
+  if (trimmed === "" || !trimmed.includes("workflow")) return; // 行级预过滤
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+  if (!isWorkflowCustomEntry(parsed)) return;
+  const d: Record<string, unknown> = parsed.data;
+  if (parsed.customType === WORKFLOW_RECORD_CUSTOM_TYPE) {
+    extractWorkflowRecordRunReference(d, out);
+  } else if (parsed.customType === WORKFLOW_STATE_LINK_CUSTOM_TYPE) {
+    if (typeof d.runId === "string" && d.runId !== "") out.add(d.runId);
+  }
+}
+
+/** [extractRunReferencesFromLine 拆分] workflow-record 条目两代引用提取
+ * （v2 registered 的 runId / v1 快照内 runId）。 */
+function extractWorkflowRecordRunReference(
+  d: Record<string, unknown>,
+  out: Set<string>,
+): void {
+  if (d.kind === "registered" && typeof d.runId === "string" && d.runId !== "") {
+    out.add(d.runId);
+  } else if (d.v === 1 && typeof d.snapshot === "object" && d.snapshot !== null) {
+    const snapRunId: unknown = (d.snapshot as Record<string, unknown>).runId;
+    if (typeof snapRunId === "string" && snapRunId !== "") out.add(snapRunId);
+  }
+}
+
+/**
+ * [裁决点 7] 采集全部存活 session 的 workflow run 引用并集（agentDir 活源）。
+ *
+ * sessions 布局对齐 pi 实装 getSessionsDir（config.js）：`<agentDir>/sessions`
+ * 下的 encoded-cwd 子目录（session-manager.js——`--<cwd 编码>--` 目录内
+ * `<ts>_<sessionId>.jsonl`）。指向错误层级会静默扫出空集，裁决点 7 的引用
+ * 保护整体落空（活跃 run 误判无主）——布局锚点以 pi dist 实装为准。
+ */
+async function collectAliveWorkflowRunReferences(
+  agentDir: string,
+): Promise<ReadonlySet<string>> {
+  const refs = new Set<string>();
+  let slugDirs: string[];
+  try {
+    slugDirs = listSessionSlugDirs(agentDir);
+  } catch (err) {
+    // 读错分通道（对齐 core pi-host-run-store 同款纪律）：ENOENT = 从未落盘的
+    // 正常空态，空集返回（core reapOrphanRuns 按「无引用」正常判定）；非 ENOENT
+    // （EACCES/EIO 等真 IO 故障）上抛——空集会把「引用状态不可知」折叠成「无任何
+    // 引用」的成功返回，core 的「采集失败 = 整轮跳过（宁保留）」防御（reapOrphan
+    // Runs 的 collectAliveRunReferences catch）在生产路径将不可达，持续 IO 权限
+    // 故障下被存活 session 引用的 run 会在宽限窗后被不可逆删除。
+    if (isEnoent(err)) return refs;
+    throw err;
+  }
+  const readOpts = { encoding: "utf8" as const };
+  for (const dir of slugDirs) {
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir);
+    } catch (err) {
+      // 同款分通道：ENOENT = 该 slug 目录被并发清走（会话删除竞态），跳过；真 IO
+      // 故障上抛整轮跳过（该目录下 session 的引用集缺席只延后删除——但「缺席的
+      // 原因不可知」时按失败处置，不冒充空集）。
+      if (!isEnoent(err)) throw err;
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+      try {
+        const content = fs.readFileSync(path.join(dir, file), readOpts);
+        for (const line of content.split("\n")) {
+          extractRunReferencesFromLine(line, refs);
+        }
+      } catch {
+        continue; // 单文件读失败跳过（宁保留——该文件的引用缺席只延后删除）
+      }
+    }
+  }
+  return refs;
 }
 
 // ── 进程级单例（dialog queue；原 index.ts module 级随域搬移） ────────────────────
@@ -190,7 +366,7 @@ export interface SessionLifecycleResult {
   store: JsonlRunStore;
   runs: Map<string, WorkflowRun>;
   sessionDir: string;
-  /** D-008 per-session SAR（需要 ctxModel + subagentService 委托目标） */
+  /** D-008 per-session SAR（subagentService 委托目标） */
   runner: SubprocessAgentRunner;
   /** session 上下文（notifyDone 需要 GuiContext） */
   ctx: ExtensionContext;
@@ -278,10 +454,6 @@ function createOrReuseServices(pi: ExtensionAPI, ctx: ExtensionContext): Service
     setSubagentService(service);
   }
 
-  // S-2: 启动 idle record GC 定时器（30 天 TTL，每小时检查一次）。
-  // 注册 setInterval 属进程级副作用——oncePerProcess 守卫防双跑（u-audit-fix）。
-  oncePerProcess("subagent-workflow:start-gc-timer", () => service.startGcTimer());
-
   return { service, modelService, reused };
 }
 
@@ -350,45 +522,38 @@ function appendSubagentIdentityEntry(pi: ExtensionAPI): void {
  * 返回 undefined。
  */
 export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext): NotifyLedgerHost | undefined {
+  // host 五端口接线 + 送达 stale 防御（D5 单通道 {triggerTurn:true} / stale 静默降级 /
+  // abandon 补显形 T4③）收敛在 @zhushanwen/pi-notify-ledger-host 工厂，权威注释随迁
+  // 工厂内；component/logger 参数保持本包 label 前缀与 warn 通道归因不变，
+  // sendDisplayMessage = 生产 bind 恒实现（NotifyLedgerHost 可选端口的本侧既有语义）。
+  const ledgerHost = createPiNotifyLedgerHost(pi, ctx, {
+    component: "subagent-workflow",
+    logger,
+    sendDisplayMessage: true,
+  });
+  // bind 与 recover 拆独立 try（失败归因不同）：
+  // - bind 失败：槽上无 ledger，消费方（getBoundNotifyLedger）退回内核直发路径；
+  // - recover 失败：bind 已成功、槽上 ledger 仍在，消费方照常走账本路径（重启重放
+  //   缺席，边沿/看门狗仍投新通知）——不得共用 "bind failed" 文案误报。
+  let ledger: ReturnType<typeof bindNotifyLedgerHost>;
   try {
-    const ledgerHost: NotifyLedgerHost = {
-      appendLedgerEntry: (customType, data) => {
-        pi.appendEntry(customType, data);
-      },
-      readSessionEntries: () => ctx.sessionManager.getEntries(),
-      isIdle: () => ctx.isIdle(),
-      onAgentSettled: (handler) => {
-        pi.on("agent_settled", handler);
-      },
-      sendDelivery: (message) => {
-        // D5 单通道：唯一发送形态 = sendCustomMessage({triggerTurn:true})，
-        // courier 已在发送前二次复查 isIdle，多通道投递选项已删（D5）。
-        // stale ctx 防御（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：
-        // sendDelivery 经 settled 边沿 / 看门狗 / 恢复重放异步触发——session 替换窗口
-        // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection（E1 同机制）。
-        // stale 静默降级（本条通知不投递，attemptDeliver 按已受理标 sentAt——session
-        // 替换后通知对旧 session 已无意义，与守卫前「留 pending 反复撞 stale 直到账本
-        // 重绑」终局一致），非 stale 错误原样上抛（attemptDeliver 既有 catch 走
-        // settleRejected 留账重试语义不变）。
-        guardStaleCtx(() => pi.sendMessage(message, { triggerTurn: true }), {
-          label: "subagent-workflow:sendDelivery",
-          onStale: (error) =>
-            logger.warn("notify delivery skipped (stale ctx)", {
-              error: toErrorMessage(error),
-            }),
-        });
-      },
-    };
-    // U4：重放观测已内聚到 ledger 分桶日志（recoveryReplays 桶经 extensionLogger
-    // 通道落盘），此处不再重复打日志。
-    bindNotifyLedgerHost(ledgerHost).recoverFromSession();
-    return ledgerHost;
+    ledger = bindNotifyLedgerHost(ledgerHost);
   } catch (err) {
     logger.warn("[subagents] notify ledger bind failed", {
       reason: toErrorMessage(err),
     });
     return undefined;
   }
+  try {
+    // U4：重放观测已内聚到 ledger 分桶日志（recoveryReplays 桶经 extensionLogger
+    // 通道落盘），此处不再重复打日志。
+    ledger.recoverFromSession();
+  } catch (err) {
+    logger.warn("[subagents] notify ledger recoverFromSession failed (ledger stays bound)", {
+      reason: toErrorMessage(err),
+    });
+  }
+  return ledgerHost;
 }
 
 /**
@@ -458,6 +623,85 @@ async function runProcessLevelMaintenance(
       reason: toErrorMessage(err),
     });
   }
+
+  // [W1 / D5] session_start 兜底触发：统一保留维护轮（冷启动即清——进程首启
+  // 无任何新写时的清理机会，覆盖「崩溃后重开的会话」历史遗留）。run 域目录锚
+  // = resolveSessionDir 同源（与 JsonlRunStore 落盘同布局）；record 域目录锚 =
+  // getSubagentRecordsDir(agentDir, rootCwd)，rootCwd 推导与 SubagentService 构造点
+  // （SessionBaselines）同式：env 贯穿 ?? ctx.cwd 兜底，env 名单源 ENV_ROOT_CWD——
+  // enc 段不漂移（sessions 与 records 两目录同源不变量）。进程级维护幂等，
+  // oncePerProcess 守卫防双跑；/resume /fork 同进程复用时跳过（record-only 会话
+  // 的持续累积由 record 首写触发点 RecordStore.register 覆盖）。
+  try {
+    await oncePerProcess("subagent-workflow:retention-maintenance-round", async () => {
+      const envRootCwd = process.env[ENV_ROOT_CWD];
+      const rootCwd = envRootCwd && envRootCwd !== "" ? envRootCwd : ctx.cwd;
+      await runRetentionMaintenanceRound(
+        {
+          stateDir: path.join(resolveSessionDir(), STATE_DIR_NAME),
+          recordsDir: getSubagentRecordsDir(agentDir, rootCwd),
+        },
+        {},
+        {
+          warn: (msg) => logger.warn(`[subagent-workflow] ${msg}`),
+          debug: (msg) => logger.debug(`[subagent-workflow] ${msg}`),
+          toMsg: (err: unknown) => toErrorMessage(err),
+        },
+      );
+      // [裁决点 7]（workflow-run-resume-revision）孤儿 run 对账清理：引用集采集 =
+      // 壳侧注入面（core 不 import pi SDK——全池 session 文件流式扫描，v2 注册
+      // 条目 ∪ v1 快照条目 ∪ pre-W17 link 指针三代解析的并集）。同维护轮触发点、
+      // 同 oncePerProcess 守卫（幂等整轮）；宽限窗缺省 7 天（env 可调）。
+      // 触发面 = 全部 state 目录（对齐 core pi-host-run-store 枚举口径：agentDir
+      // 根回退 + sessions/<slug>/workflow-state 全目录 + 本 session 锚定目录）——
+      // 「引用 session 全删的目录」的残留 run 对本 session 维护轮结构性可达，判定
+      // 与删除判据归 core reapOrphanRuns，本处只做目录枚举。引用集预采集一次复用
+      // 全部目录（同轮同快照，逐目录重复全池扫描无增益）；登记文件
+      // （orphan-run-reap.json）落各自 stateDir，多目录天然隔离。
+      const stateDirs = new Set<string>([
+        path.join(resolveSessionDir(), STATE_DIR_NAME),
+        path.join(agentDir, STATE_DIR_NAME),
+      ]);
+      try {
+        for (const ent of fs.readdirSync(path.join(agentDir, "sessions"), { withFileTypes: true })) {
+          if (ent.isDirectory()) {
+            stateDirs.add(path.join(agentDir, "sessions", ent.name, STATE_DIR_NAME));
+          }
+        }
+      } catch (err) {
+        // sessions 根不可枚举：ENOENT = 从未落盘（首次运行形态），仅保留上方两
+        // 目录锚；非 ENOENT（EACCES/EIO 等真 IO 故障）debug 留痕不放大——枚举
+        // 缺侧 = 少扫目录（宁保留方向，宽限窗兜底），对齐读错分通道纪律。
+        if (!isEnoent(err)) {
+          logger.debug(
+            `[subagent-workflow] sessions 根目录枚举失败，state 目录触发面缺侧：${toErrorMessage(err)}`,
+          );
+        }
+      }
+      // 引用集惰性单次采集（同轮同快照，逐目录重复全池扫描无增益）：promise 在
+      // core reapOrphanRuns 的 await 表达式内才创建——采集器上抛（真 IO 故障，
+      // 读错分通道）时拒绝被该 await 的 try/catch 即时接住，不产生提前创建导致的
+      // 未处理拒绝告警；登记文件（orphan-run-reap.json）落各自 stateDir，多目录天然隔离。
+      let aliveRefsPromise: Promise<ReadonlySet<string>> | undefined;
+      const collectAliveRefsOnce = (): Promise<ReadonlySet<string>> => {
+        aliveRefsPromise ??= collectAliveWorkflowRunReferences(agentDir);
+        return aliveRefsPromise;
+      };
+      const reapDeps = {
+        collectAliveRunReferences: collectAliveRefsOnce,
+        warn: (msg: string) => logger.warn(`[subagent-workflow] ${msg}`),
+        debug: (msg: string) => logger.debug(`[subagent-workflow] ${msg}`),
+        toMsg: (err: unknown) => toErrorMessage(err),
+      };
+      for (const dir of stateDirs) {
+        await reapOrphanRuns({ stateDir: dir }, reapDeps);
+      }
+    });
+  } catch (err) {
+    logger.warn("[subagents] retention maintenance round failed", {
+      reason: toErrorMessage(err),
+    });
+  }
 }
 
 /** createSessionRunState 返回值（随迁块 5 的装配产物）。 */
@@ -473,7 +717,8 @@ interface SessionRunState {
  *
  * MF-1: store 健康度跟踪。loadAll 失败 → storeHealthy=false，workflow 域启动时 fail-fast。
  * 崩溃恢复四步（loadAll → failed → save → evict）收口到 core recoverCrashedRuns（D8：
- * 宿主各写一遍正是 failure-mode-B）；pending:unregister 经 hooks 外置发射（位置在
+ * 宿主各写一遍正是 failure-mode-B）；pending:unregister 经 hooks 外置回调在本面
+ * appendEntry 直落（[W2/V4 D6] 与 reload-closeout D4 定案对齐——不经 emit；位置在
  * transition 后、save 前，对齐原内联实现）；save 走 store 冷路径（done 绕过去抖）——
  * 冷路径语义在 JsonlRunStore.save 内，不随循环归属转移。loadAll 失败的 fail-fast
  * （storeHealthy=false 停初始化）是宿主职责，core 原样上抛、这里 catch 兜住。
@@ -501,32 +746,55 @@ async function createSessionRunState(
   let storeHealthy = true;
   // [skill-reload D4] 恢复门控：session_start(reason==='reload') 全程不跑
   // recoverCrashedRuns（无论条目有无）。暗礁（设计 §2.4）：recoverCrashedRuns 判
-  // 「crashed」只看磁盘快照 status=running、内存活 run 不参与判定且会被重建对象
-  // 覆盖——契约前提是「拥有这些 run 的进程已死」，而 reload 恰恰证明进程没死，
-  // 跑恢复即误杀窗口内存活的 run。条目缺失场景同理门控：磁盘可能有本 session 的
-  // running entry（前一轮 adoption 未完成又 reload 的窗口），由下一次**非 reload**
-  // 的 session_start（真重启/切换）按既有 kill-9 语义收编。跳过 loadAll 时无从
-  // 证伪健康度：storeHealthy 保持 true（workflow 域可用，可派发新 run）。门控放
-  // 调用点先于条目判断（setupSessionLifecycle 分流处），不进 oncePerProcess 守卫
-  // 内——守卫 Map 是模块级状态 reload 后归零（D9 不提权），靠守卫判 reason 形同虚设。
+  // 「crashed」只看 record fold 出的 running 态（loadAll 产物；runs Map 内存活
+  // run 不参与判定）——loadAll 折叠重建出 running 态即经 interruptRun（终局编排
+  // 单一入口）收编，事件流不含进程存活信息、窗口内存活 run 的流同样是 running
+  // 形态——契约前提是「拥有这些 run 的进程已死」，而 reload 恰恰证明进程没死，
+  // 跑恢复即误杀窗口内存活的 run。条目缺失场景同理
+  // 门控：磁盘可能有本 session 的 running entry（前一轮 adoption 未完成又
+  // reload 的窗口），由下一次**非 reload** 的 session_start（真重启/切换）按既有
+  // kill-9 语义收编。跳过 loadAll 时无从证伪健康度：storeHealthy 保持 true
+  // （workflow 域可用，可派发新 run）。
   if (!opts.skipRecovery) {
     try {
-      // 崩溃恢复 loadAll 扫 cwd 共享 sessionDir（同 cwd 跨 session 共享）并把 running run
-      // 转 failed 落盘——写非本 session 的 run state 文件属跨 session 副作用，oncePerProcess
-      // 守卫防双跑（u-audit-fix）。第二派发重放首次 Promise：不再落盘、不再 emit。
-      await oncePerProcess(
-        "subagent-workflow:recover-crashed-runs",
-        () =>
-          recoverCrashedRuns(
-            store,
-            runs,
-            "Process killed (kill-9 or crash recovery)",
-            {
-              onRunRecovered: (payload) => {
-                pi.events.emit("pending:unregister", payload);
-              },
-            },
-          ),
+      // [B1 修复] 恢复不挂 oncePerProcess：loadAll 只认本 session 的 v2 注册
+      // 条目（record 流折叠重建，W17 定界的现行形态）、收编即向本 run 的 record
+      // 流追加 run-interrupted 转移事件（不覆盖任何文件，天然幂等）——恢复是
+      // session 级幂等操作，挂进程级守卫会让同进程的后续 session_start（如 /new
+      // 后 /resume 一个上次崩溃退出的 session）重放首次 Promise、跳过 loadAll，
+      // 该 session 的 running 残留既不收编也不进 run 列表。reload 的防误杀由上方
+      // opts.skipRecovery（分流处按 reason 判定）承担，无需进程级守卫。
+      const { loaded, recovered } = await recoverCrashedRuns(
+        store,
+        runs,
+        "Process killed (kill-9 or crash recovery)",
+        {
+          onRunRecovered: (payload) => {
+            // [W2/V4 D6] 注销直落权威面：appendEntry 直接落盘，不经 emit。
+            // [reload-closeout D4] 定案「emit 链在 reload 转换窗失效、appendEntry
+            // 是唯一可靠通道」在崩溃恢复链同样适用（session_start 装配窗可能仍在
+            // reload 转换内）；pending 域消费方全部从持久化 entries 现算，直落对其
+            // 即时生效。status 经 protocol mapReasonToStatus 单点（与 finalizeRun
+            // 直落 / reconcile-sweep 补注销同一函数）；抛错由 core 侧 hook 围栏
+            // warn 留痕后恢复循环继续，差集残留交 reconcile-sweep 下次收口。
+            pi.appendEntry(PENDING_UNREGISTER_ENTRY_TYPE, {
+              id: payload.id,
+              reason: payload.reason,
+              status: mapReasonToStatus(payload.reason),
+            });
+          },
+          // [W1 / D4] 收编终态条目补写（恢复链收编的条目半边）：core 在 journal
+          // run-settled 落账后回调本面，v2 终态条目经当前 pi appendEntry 落主
+          // session（注册 + 终态两条 v2 小条目的收编补齐；本 store loadAll 对
+          // 「journal 已终局而条目缺失」形态的幂等补写与此同构）。围栏在 core 消费
+          // 侧（同步抛错 warn 后恢复循环继续，lifecycle.ts hooks 契约）。
+          appendSettledEntry: (customType, data) => {
+            pi.appendEntry(customType, data);
+          },
+        },
+      );
+      logger.debug(
+        `[subagent-workflow] recoverCrashedRuns: loaded=${loaded} recovered=${recovered}`,
       );
     } catch (err) {
       // QMF-4 fix: store.loadAll 失败是关键路径错误，workflow 域将未初始化
@@ -544,7 +812,7 @@ async function createSessionRunState(
 /**
  * adoption 主体：接管既有条目（同引用原地改写）。成功返回原 SessionLifecycleResult
  * （sessionState.get(sid) 与 reload 前同一引用——探针红线，store/runs 不换实例）；
- * 失败（健康检查不过 / rebind / 快照重发抛错）走 {@link failAdoption} 后返回
+ * 失败（健康检查不过 / rebind 抛错）走 {@link failAdoption} 后返回
  * undefined（调用方落到全量装配）。
  */
 async function tryAdoptExistingSession(
@@ -561,22 +829,19 @@ async function tryAdoptExistingSession(
     return undefined;
   }
   try {
-    // D3 rebind：在飞去抖批与串行 flush 链持有 store（this），原地改写 .pi/.ctx
-    // 对后续 flush 天然可见；换入的 appendEntry 源带 stale guard（D5）。
+    // D3 rebind：store 实例跨 reload 存活（this 引用不变），原地改写 .pi/.ctx；
+    // 换入的 appendEntry 源带 stale guard（D5）。[D1] record 单源后 store 无投影
+    // 物化面（原 D4 快照重发随 state 快照删除而退役）——接管动作收敛为 rebind，
+    // 后续 v2 终态条目补写自动走新 pi。
     existing.store.rebind(pi, ctx);
-    // D4 快照重发：经 store 既有 per-runId 串行 flush 链重发当前快照权威 entry
-    //（设计红线：禁止绕链直接 pi.appendEntry——物理乱序会让 last-ways 读回
-    // running → 崩溃恢复误判）。任何 IO 失败上抛 → 失败处置。
-    await existing.store.resendSnapshots(existing.runs);
   } catch (err) {
     await failAdoption(pi, ctx, deps, existing, toErrorMessage(err));
     return undefined;
   }
   // 接管：同引用原地改写（ctx 换新——旧 ctx 已被 invalidate；lastEngine 按当前
-  // config 重置基线）+ runner 刷新 ctxModel。跳过 store/runner 重建（幂等 last-wins）。
+  // config 重置基线）。跳过 store/runner 重建（幂等 last-wins）。
   existing.ctx = ctx;
   existing.lastEngine = lastEngine;
-  existing.runner.updateCtxModel(ctx.model ?? undefined);
   logger.debug(
     `[subagent-workflow] adoption ok (sessionId=${existing.sessionId}, runs=${existing.runs.size})`,
   );
@@ -703,12 +968,10 @@ export async function setupSessionLifecycle(
     skipRecovery: isReload,
   });
 
-  // D-008: per-session SAR（需要 ctxModel 填底 + subagentService 委托目标）。
-  // old: const runner = new SubprocessAgentRunner()（module-level singleton，无 deps）
-  // new: per-session session_start 时创建，经 SessionLifecycleResult 传给组合根。
+  // D-008: per-session SAR（subagentService 委托目标）——per-session session_start
+  // 时创建，经 SessionLifecycleResult 传给组合根。
   const runner = new SubprocessAgentRunner({
     subagentService: service,
-    ctxModel: ctx.model ?? undefined,
   });
 
   return {

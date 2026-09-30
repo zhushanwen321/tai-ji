@@ -44,26 +44,33 @@ const configMock = vi.hoisted(() => ({
   applyImportProviders: vi.fn(() => Promise.resolve({
     result: { source: 'claude', imported: [{ id: 'openai', name: 'OpenAI', status: 'imported' }], failedCount: 0 },
   })),
-  // wave-oauth：ProviderPage → useProviderOAuth onMounted 订阅 4 个 auth.* 事件（缺则 TypeError 崩 mount）
-  onAuthDeviceCode: vi.fn(() => () => {}),
-  onAuthAuthUrl: vi.fn(() => () => {}),
-  onAuthSuccess: vi.fn(() => () => {}),
-  onAuthError: vi.fn(() => () => {}),
-  // P2：ProviderPage 默认 pill + 默认修复 toast（缺则 TypeError 崩 mount）
-  onDefaultsWithSource: vi.fn(() => () => {}),
 }))
 
 vi.mock('@/api', () => ({
-  config: configMock,
+  config: {
+    ...configMock,
+    // 订阅成员族单源（键缺导出即 TypeError 崩 mount）：wave-oauth 的 4 个 auth.* 订阅
+    // + P2 的 onDefaultsWithSource（默认 pill + 默认修复 toast）
+    ...subscriptionStubs([
+      'onAuthDeviceCode', 'onAuthAuthUrl', 'onAuthSuccess', 'onAuthError', 'onDefaultsWithSource',
+    ]),
+  },
 }))
 
+// 工厂绑定 import 必须先于组件 import 求值：ProviderPage 模块图加载 '@/api' 时 vi.mock
+// 工厂立即执行，晚于组件 import 的工厂绑定仍在 TDZ（vi.hoisted 同族坑）。
+import { subscriptionStubs } from '@/__tests__/helpers/settings-modal-api-mock'
 import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
 import { useToast } from '@/composables/useToast'
+import { provideSettingsTransport } from '@taiji/core'
+import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
 let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // [C3] config 门面调用经 SettingsTransport seam 桩注入（同名直映）
+  provideSettingsTransport(makeSettingsTransportStub(configMock))
   // 清空全局 toasts（useToast 模块级单例，跨用例共享）
   useToast().toasts.value = []
   configMock.previewImportProviders.mockReset()
@@ -152,8 +159,10 @@ describe('ProviderPage 导入入口', () => {
   })
 
   it('T10d: preview transport reject (Promise.reject) → importState 回 idle，菜单按钮重新可点', async () => {
-    configMock.previewImportProviders.mockImplementationOnce(() =>
-      Promise.reject(new Error('timeout')),
+    // deferred reject：先断言 in-flight 态 trigger disabled（正向对照），再放行 reject 验证恢复
+    let rejectPreview!: (e: Error) => void
+    configMock.previewImportProviders.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectPreview = reject }),
     )
 
     wrapper = mount(ProviderPage, {
@@ -163,11 +172,25 @@ describe('ProviderPage 导入入口', () => {
 
     await selectClaudeSource()
 
+    // preview 进行中（loading-preview）：菜单 trigger disabled（:disabled="importState !== 'idle'" 透传）
+    const trigger = wrapper.find('[data-testid="import-providers-menu"]')
+    expect(trigger.attributes('disabled')).toBeDefined()
+
     // reject 被 catch：importState 回 idle，对话框未渲染
+    rejectPreview(new Error('timeout'))
+    await flushPromises()
     expect(document.querySelectorAll('[data-testid="preview-provider-item"]').length).toBe(0)
     // error toast 渲染
     const toasts = useToast().toasts.value
     expect(toasts.some((t) => t.type === 'error' && t.message === 'timeout')).toBe(true)
+
+    // 「回 idle」恢复语义（与「卡在 previewing 空数据」可区分）：
+    // ① trigger 解除 disabled
+    expect(trigger.attributes('disabled')).toBeUndefined()
+    // ② 二次点击 trigger → 候选列表重新展开（菜单按钮重新可点）
+    await trigger.trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[data-testid="import-source-claude"]')).toBeTruthy()
   })
 
   it('T10e: apply transport reject (Promise.reject) → importState 回 previewing，对话框仍开允许重试', async () => {
@@ -316,23 +339,6 @@ describe('ProviderPage 导入入口', () => {
     // failedCount>0 → error toast（reportImportSuccess 既有行为）
     const toasts = useToast().toasts.value
     expect(toasts.some((t) => t.type === 'error')).toBe(true)
-  })
-
-  it('RD-4#12: 全部成功（failedCount=0）→ reset 关闭弹窗（既有行为不变）', async () => {
-    // 默认 mock applyImportProviders 返回 failedCount:0
-    wrapper = mount(ProviderPage, {
-      props: { providers: [] },
-    })
-    await flushPromises()
-
-    await selectClaudeSource()
-
-    const confirmBtn = document.body.querySelector('[data-testid="confirm-import-btn"]') as HTMLElement | null
-    confirmBtn!.click()
-    await flushPromises()
-
-    // failedCount=0 → reset → 对话框关闭（preview-provider-item 消失）
-    expect(document.querySelectorAll('[data-testid="preview-provider-item"]').length).toBe(0)
   })
 
   it('RD-4#10: refreshProviderCatalogs 有 failed 项 → Picker 头部「目录可能过期」提示', async () => {

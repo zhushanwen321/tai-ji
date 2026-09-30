@@ -236,7 +236,7 @@ import { ref, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Loader2, BarChart3 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { getUsageStats } from '@taiji/core/transport/api/domains/usage'
+import { getSettingsTransport } from '@taiji/core'
 import type { UsageStatsResult } from '@taiji/shared'
 
 import UsageLedger from './UsageLedger.vue'
@@ -258,7 +258,7 @@ import {
   aggregateProjects,
   aggregateCacheMix,
   aggregateDetailGroups,
-} from './aggregate'
+} from '@taiji/core'
 
 const { t } = useI18n()
 
@@ -290,7 +290,7 @@ async function fetchData(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    data.value = await getUsageStats()
+    data.value = await getSettingsTransport().getUsageStats()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {

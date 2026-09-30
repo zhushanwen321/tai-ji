@@ -15,91 +15,25 @@
  * - Alt+⏎：steer 路由行（turn 活跃）→ followUp；其余行 → send
  * - steer 路由行 + 空输入 → 不提交（分发器空输入守卫）
  *
+ * 装配（真 pinia + 真 chatStore + mount Composer）：mock useChat / api（chat 组）/
+ * useToast / ComposerInput + 壳 stub + 逐用例重置统一经 composer-queue-mount.ts 装配，
+ * 断言引用 composerChatApiSpy 单例。
+ *
  * occupancy 由 chat.setOccupancy 驱动（store 投影 = composer-shell sendRoute 的数据源）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-dispatch-route.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
+// harness 先于组件 import：'@/api' mock 工厂（composer-queue-mount 顶层注册）在其链上
+// 执行，helper 绑定彼时须已初始化
+import { composerChatApiSpy, setupComposerQueueHarness } from '../helpers/composer-queue-mount'
 import { useChatStore } from '@/stores/chat'
-import { composerChildStubs } from '../helpers/composer-mount'
 
-// ── mock useChat（spy 化 send / followUp / compact）+ useToast ──
-const chatApiMock = vi.hoisted(() => ({
-  send: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-  sendBash: vi.fn(() => Promise.resolve()),
-  abortBash: vi.fn(() => Promise.resolve()),
-}))
-const toastMock = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), warning: vi.fn() }))
-
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => chatApiMock,
-  resetChatModuleState: vi.fn(),
-}))
-vi.mock('@/composables/useToast', () => ({
-  useToast: () => toastMock,
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn(), currentCwd: ref(null) }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  chat: { send: chatApiMock.send, streamSubscribe: vi.fn(() => () => {}) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
-
-// ── ComposerInput mock：emit input 设 draft + emit keydown ──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    const clear = vi.fn()
-    const setText = vi.fn()
-    expose({ clear, setText, insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
-    return { clear, setText }
-  },
-  template: '<div data-testid="composer-input" />',
-})
-
-// 兄弟组件 stub 收敛到共享 helper（ComposerInput 本文件 spy 面自留，其余八项委托）
-const otherStubs = {
-  ComposerInput: ComposerInputMock,
-  ...composerChildStubs,
-}
+const { ComposerInputMock, otherStubs } = setupComposerQueueHarness()
 
 import Composer from '@/components/panel/Composer.vue'
-// resetChatModuleState 来自被 mock 的 useChat 模块（vi.fn，测试隔离占位）
-import { resetChatModuleState } from '@/composables/features/chat/useChat'
-
-beforeEach(() => {
-  setActivePinia(createPinia())
-  vi.clearAllMocks()
-  lastInputText.value = ''
-  resetChatModuleState()
-})
 
 function mountComposer(): ReturnType<typeof mount> {
   return mount(Composer, { props: { sessionId: 's1' }, global: { stubs: otherStubs } })
@@ -137,8 +71,8 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     await pressKey(wrapper, {})
 
     // [D1] 占用期照常提交（内核判 lane），renderer 不再本地转 steer
-    expect(chatApiMock.send).toHaveBeenCalledTimes(1)
-    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('补充：别忘了加测试'))
+    expect(composerChatApiSpy.send).toHaveBeenCalledTimes(1)
+    expect(composerChatApiSpy.send).toHaveBeenCalledWith('s1', textToSegments('补充：别忘了加测试'))
     // 输入已清空（提交语义完成）
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
   })
@@ -152,7 +86,7 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
 
     await pressKey(wrapper, {})
 
-    expect(chatApiMock.send).toHaveBeenCalledTimes(1)
+    expect(composerChatApiSpy.send).toHaveBeenCalledTimes(1)
   })
 
   it('行 4：settling ⏎ → 统一提交（不再本地 defer 入队，内核 queued 承接）', async () => {
@@ -163,7 +97,7 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
 
     await pressKey(wrapper, {})
 
-    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('settling 中发送'))
+    expect(composerChatApiSpy.send).toHaveBeenCalledWith('s1', textToSegments('settling 中发送'))
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
   })
 
@@ -175,7 +109,7 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
 
     await pressKey(wrapper, {})
 
-    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('bash 忙时发送'))
+    expect(composerChatApiSpy.send).toHaveBeenCalledWith('s1', textToSegments('bash 忙时发送'))
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
   })
 
@@ -187,9 +121,9 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
 
     await pressKey(wrapper, {})
 
-    expect(chatApiMock.send).toHaveBeenCalledTimes(1)
+    expect(composerChatApiSpy.send).toHaveBeenCalledTimes(1)
     // useChat mock 的 send 签名 = (sid, segments)（底层 RPC 的 clientUuid 透传在 core 编排内）
-    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('普通消息'))
+    expect(composerChatApiSpy.send).toHaveBeenCalledWith('s1', textToSegments('普通消息'))
   })
 
   it('Alt+⏎ steer 路由行（generating）→ followUp（下一轮语义保留，非 steer）', async () => {
@@ -201,8 +135,8 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
 
     await pressKey(wrapper, { altKey: true })
 
-    expect(chatApiMock.followUp).toHaveBeenCalledTimes(1)
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.followUp).toHaveBeenCalledTimes(1)
+    expect(composerChatApiSpy.send).not.toHaveBeenCalled()
   })
 
   it('Alt+⏎ non-steer 路由行（compacting）→ 统一提交（sendRoute 仅 UI 预测，非 followUp）', async () => {
@@ -213,8 +147,8 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
 
     await pressKey(wrapper, { altKey: true })
 
-    expect(chatApiMock.followUp).not.toHaveBeenCalled()
-    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('压缩后发'))
+    expect(composerChatApiSpy.followUp).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.send).toHaveBeenCalledWith('s1', textToSegments('压缩后发'))
   })
 
   it('steer 路由行 + 空输入 ⏎ → 不提交（分发器空输入守卫）', async () => {
@@ -223,6 +157,6 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     const wrapper = mountComposer()
     await pressKey(wrapper, {})
 
-    expect(chatApiMock.send).not.toHaveBeenCalled()
+    expect(composerChatApiSpy.send).not.toHaveBeenCalled()
   })
 })

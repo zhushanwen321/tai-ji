@@ -38,6 +38,7 @@ vi.mock("../persistence/sessions-index.ts", async (importOriginal) => {
 });
 
 import { createRecord } from "../persistence/execution-record.ts";
+import { recordToSubagent } from "../persistence/record-store-rebuild.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE, toSubagentRecordEntry } from "../persistence/record-entry.ts";
 import type { SubagentRecordEntryData } from "../persistence/record-entry.ts";
 import { RecordStore } from "../persistence/record-store.ts";
@@ -96,7 +97,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
     fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("entry 往返保真：origin=workflow + parentRunId 经真实落盘/重建后两字段不丢", () => {
+  it("[W1/D1·D7] v2 注册条目携带 origin/parentRunId；v1 快照通道对 v2 条目结构性跳过（往返双面）", () => {
     const store = new RecordStore(tmpDir);
     const captured: SubagentRecordEntryData[] = [];
     store.setPi(makeCapturePi(captured));
@@ -104,54 +105,78 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
     const rec = makeRecord({ id: "wf-step-1", origin: "workflow", parentRunId: "wf-run-1" });
     store.register(rec);
     expect(captured).toHaveLength(1);
-    expect(captured[0].origin).toBe("workflow");
-    expect(captured[0].parentRunId).toBe("wf-run-1");
+    expect(captured[0]).toMatchObject({
+      v: 2,
+      kind: "registered",
+      id: "wf-step-1",
+      origin: "workflow",
+      parentRunId: "wf-run-1",
+    });
 
-    // 真实重建路径：落盘产物 → 主 session JSONL → scanLastRecordEntries
+    // v1 快照通道（scanLastRecordEntries → collectLastRecordEntries v 门）对 v2 条目
+    // 结构性跳过——身份域的恢复通道已移交事件文件 fold（record-events.ts，U3 消费）；
+    // 此处断言跳过行为本身（零幻影：不产 id+status 幻影行）。
     const mainFile = path.join(rootDir, "main.jsonl");
     writeMainSessionFile(mainFile, captured);
     const rebuilt = store.scanLastRecordEntries(mainFile);
-    const hit = rebuilt.find((r) => r.id === "wf-step-1");
-    expect(hit).toBeDefined();
-    expect(hit?.origin).toBe("workflow");
-    expect(hit?.parentRunId).toBe("wf-run-1");
+    expect(rebuilt.find((r) => r.id === "wf-step-1")).toBeUndefined();
   });
 
-  it("缺省负向：存量 record（无 origin）落盘产物不含新键（零迁移），重建后 origin undefined（=tool 语义）", () => {
+  it("[W1/D1] 缺省归一：无 origin 的 record 落 v2 注册条目 origin=\"tool\"（必填域归一，parentRunId 缺省不含键）", () => {
     const store = new RecordStore(tmpDir);
     const captured: SubagentRecordEntryData[] = [];
     store.setPi(makeCapturePi(captured));
 
     store.register(makeRecord({ id: "legacy-1" }));
     expect(captured).toHaveLength(1);
-    // 零迁移：JSON 序列化产物不含 origin/parentRunId 键（undefined 自然缺省）。
-    // 必须断言序列化后形态——内存对象保留 undefined 键名（record-store.test.ts 同坑：
-    // 真实 JSONL 丢 undefined 值），键级/子串断言都会误判。
-    const persistedKeys = Object.keys(JSON.parse(JSON.stringify(captured[0])) as Record<string, unknown>);
-    expect(persistedKeys).not.toContain("origin");
-    expect(persistedKeys).not.toContain("parentRunId");
-
-    const mainFile = path.join(rootDir, "main.jsonl");
-    writeMainSessionFile(mainFile, captured);
-    const rebuilt = store.scanLastRecordEntries(mainFile);
-    const hit = rebuilt.find((r) => r.id === "legacy-1");
-    expect(hit).toBeDefined();
-    expect(hit?.origin).toBeUndefined();
-    expect(hit?.parentRunId).toBeUndefined();
+    // v2 契约 origin 必填：undefined 归一 "tool"（消费面负向判定零迁移）；可选域
+    // parentRunId 经序列化自然缺省（断言序列化后形态——内存对象保留 undefined 键名）。
+    const persisted = JSON.parse(JSON.stringify(captured[0])) as Record<string, unknown>;
+    expect(persisted.origin).toBe("tool");
+    expect(Object.keys(persisted)).not.toContain("parentRunId");
   });
 
-  it("重建投影不过滤（D1⑤）：workflow 来源 record 经重建通路全量返回", () => {
+  it("重建投影不过滤（D1⑤）：workflow 来源 record 经内存源投影全量返回（includeWorkflow 通道）", () => {
+    const store = new RecordStore(tmpDir);
+    store.register(makeRecord({ id: "wf-step-2", origin: "workflow", parentRunId: "wf-run-2" }));
+    // [W1/D7] v2 条目不经 v1 重建通道（上方负向断言）；重建投影不过滤的现役断言面
+    // = collectRecords 的 includeWorkflow 通道（内存源投影 recordToSubagent 直传）。
+    const all = store.collectRecords(50, "all", "sess-origin", true);
+    expect(all.map((r) => r.id)).toContain("wf-step-2");
+    expect(all.find((r) => r.id === "wf-step-2")?.origin).toBe("workflow");
+  });
+
+  it("[W0 / D1] stepIndex 往返保真：register 落盘 entry 含字段，真实重建路径读回不丢", () => {
     const store = new RecordStore(tmpDir);
     const captured: SubagentRecordEntryData[] = [];
     store.setPi(makeCapturePi(captured));
 
-    store.register(makeRecord({ id: "wf-step-2", origin: "workflow", parentRunId: "wf-run-2" }));
-    const mainFile = path.join(rootDir, "main.jsonl");
+    const rec = makeRecord({ id: "wf-step-idx", origin: "workflow", parentRunId: "wf-run-idx", stepIndex: 7 });
+    store.register(rec);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({
+      v: 2,
+      kind: "registered",
+      stepIndex: 7,
+      origin: "workflow",
+      parentRunId: "wf-run-idx",
+    });
+
+    // v1 快照通道对 v2 条目结构性跳过（往返的另一半断言与主往返用例同款）。
+    const mainFile = path.join(rootDir, "main-step-idx.jsonl");
     writeMainSessionFile(mainFile, captured);
-    // scanLastRecordEntries 是恢复链（recoverOrphanRecords）与查询共享的重建投影——
-    // 此处必须返回 workflow record 全量（过滤只在查询消费面，不在重建投影）。
-    const rebuilt = store.scanLastRecordEntries(mainFile);
-    expect(rebuilt.map((r) => r.id)).toContain("wf-step-2");
+    expect(store.scanLastRecordEntries(mainFile).find((r) => r.id === "wf-step-idx")).toBeUndefined();
+  });
+
+  it("[W0 / D1·W1 v2] stepIndex 缺省负向：无字段 record 落 v2 条目不含键（序列化自然缺省）", () => {
+    const store = new RecordStore(tmpDir);
+    const captured: SubagentRecordEntryData[] = [];
+    store.setPi(makeCapturePi(captured));
+
+    store.register(makeRecord({ id: "legacy-step", origin: "workflow", parentRunId: "wf-run-legacy" }));
+    expect(captured).toHaveLength(1);
+    const persistedKeys = Object.keys(JSON.parse(JSON.stringify(captured[0])) as Record<string, unknown>);
+    expect(persistedKeys).not.toContain("stepIndex");
   });
 });
 
@@ -254,14 +279,11 @@ describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可
     fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("recoverEntryOnlyOrphans：workflow origin 的 entry-only 孤儿照样纠偏（idle），纠偏 entry 保留 origin", () => {
-    const store = new RecordStore(tmpDir);
-    const captured: SubagentRecordEntryData[] = [];
-    store.setPi(makeCapturePi(captured));
-
-    // 末条 running + origin=workflow 的 entry 落主 session；无子文件锚（entry-only 孤儿）
+  it("recoverEntryOnlyOrphans：workflow origin 的 entry-only 孤儿照样纠偏（idle），纠偏 entry 保留 origin（v1 兼容层）", () => {
+    // [W1/D7] 收编定界分流：v1 快照实体保留 v1 纠偏路径（旧会话行为完全不变）——
+    // 种子直接落 v1 快照行（toSubagentRecordEntry——兼容读面的写入侧单源）。
     const orphan = makeRecord({ id: "wf-orphan", origin: "workflow", parentRunId: "run-G" });
-    store.register(orphan);
+    const captured: SubagentRecordEntryData[] = [toSubagentRecordEntry(recordToSubagent(orphan))];
     const mainFile = path.join(rootDir, "main.jsonl");
     writeMainSessionFile(mainFile, captured);
 

@@ -138,7 +138,10 @@ describe("M4: dispatchAgentCall validates IPC fields before dereferencing", () =
 
       expect(run.state.trace.toArray().length).toBe(0);
       expect(run.state.calls.size).toBe(0);
-      expect(postMessage).not.toHaveBeenCalled();
+      // 加固语义（oe-harden）：callId 合法的畸形载荷回发 error result 收敛 worker 侧
+      // pending（旧行为 = 仅日志不回发，worker 内该 callId 永久悬挂且无墙钟兜底）
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
     } finally {
       restore();
     }
@@ -160,7 +163,8 @@ describe("M4: dispatchAgentCall validates IPC fields before dereferencing", () =
 
       expect(run.state.trace.toArray().length).toBe(0);
       expect(run.state.calls.size).toBe(0);
-      expect(postMessage).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
     } finally {
       restore();
     }
@@ -182,7 +186,8 @@ describe("M4: dispatchAgentCall validates IPC fields before dereferencing", () =
 
       expect(run.state.trace.toArray().length).toBe(0);
       expect(run.state.calls.size).toBe(0);
-      expect(postMessage).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(postMessage.mock.calls[0])).toContain("malformed");
     } finally {
       restore();
     }
@@ -251,108 +256,5 @@ describe("M4: dispatchAgentCall validates IPC fields before dereferencing", () =
     } finally {
       loggerMock.error.mockClear();
     }
-  });
-});
-
-// ── M4: dispatchWorkflowCall 字段校验 ────────────────────────
-
-describe("M4: dispatchWorkflowCall validates IPC fields before dereferencing", () => {
-  it("callId 非数字 → 不抛、不 postMessage", async () => {
-    const restore = silenceConsoleError();
-    try {
-      const run = makeRunningRun("wf-m4-w-001");
-      const deps = { onWorkflowCall: vi.fn(async () => ({ content: "ok" })) } as unknown as LifecycleDeps;
-      const postMessage = run.runtime!.worker.postMessage as ReturnType<typeof vi.fn>;
-
-      await handleWorkerMessage(
-        run,
-        { type: "workflow-call", callId: "bad", name: "sub", args: {} },
-        deps,
-        makeHandlers(),
-      );
-
-      expect(deps.onWorkflowCall).not.toHaveBeenCalled();
-      expect(postMessage).not.toHaveBeenCalled();
-    } finally {
-      restore();
-    }
-  });
-
-  it("name 非字符串 → 不抛、不 postMessage", async () => {
-    const restore = silenceConsoleError();
-    try {
-      const run = makeRunningRun("wf-m4-w-002");
-      const deps = { onWorkflowCall: vi.fn(async () => ({ content: "ok" })) } as unknown as LifecycleDeps;
-      const postMessage = run.runtime!.worker.postMessage as ReturnType<typeof vi.fn>;
-
-      await handleWorkerMessage(
-        run,
-        { type: "workflow-call", callId: 1, name: 42, args: {} },
-        deps,
-        makeHandlers(),
-      );
-
-      expect(deps.onWorkflowCall).not.toHaveBeenCalled();
-      expect(postMessage).not.toHaveBeenCalled();
-    } finally {
-      restore();
-    }
-  });
-
-  it("args 为 null → 不抛、不 postMessage", async () => {
-    const restore = silenceConsoleError();
-    try {
-      const run = makeRunningRun("wf-m4-w-003");
-      const deps = { onWorkflowCall: vi.fn(async () => ({ content: "ok" })) } as unknown as LifecycleDeps;
-      const postMessage = run.runtime!.worker.postMessage as ReturnType<typeof vi.fn>;
-
-      await handleWorkerMessage(
-        run,
-        { type: "workflow-call", callId: 1, name: "sub", args: null },
-        deps,
-        makeHandlers(),
-      );
-
-      expect(deps.onWorkflowCall).not.toHaveBeenCalled();
-      expect(postMessage).not.toHaveBeenCalled();
-    } finally {
-      restore();
-    }
-  });
-
-  it("校验失败打印 malformed 日志", async () => {
-    loggerMock.error.mockClear();
-    try {
-      const run = makeRunningRun("wf-m4-w-004");
-      const deps = { onWorkflowCall: vi.fn(async () => ({ content: "ok" })) } as unknown as LifecycleDeps;
-
-      await handleWorkerMessage(
-        run,
-        { type: "workflow-call", callId: "bad", name: 42, args: {} },
-        deps,
-        makeHandlers(),
-      );
-
-      expect(loggerMock.error).toHaveBeenCalled();
-      const logged = String(loggerMock.error.mock.calls[0]![0]);
-      expect(logged).toContain("malformed workflow-call");
-    } finally {
-      loggerMock.error.mockClear();
-    }
-  });
-
-  it("正常消息 → 正常派发（onWorkflowCall 被调用）", async () => {
-    const run = makeRunningRun("wf-m4-w-005");
-    const onWorkflowCall = vi.fn(async () => ({ content: "ok" }));
-    const deps = { onWorkflowCall } as unknown as LifecycleDeps;
-
-    await handleWorkerMessage(
-      run,
-      { type: "workflow-call", callId: 1, name: "sub", args: { k: 1 } },
-      deps,
-      makeHandlers(),
-    );
-
-    expect(onWorkflowCall).toHaveBeenCalledWith("sub", { k: 1 }, run);
   });
 });

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useSessionRespawnRetry —— crash 恢复唯一人工通路的单测（crash-resilience D7）。
  *

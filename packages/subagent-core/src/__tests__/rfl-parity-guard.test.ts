@@ -8,7 +8,8 @@
 //   ④ pi 侧文件缺失 → exit 1（结构前提缺失不得静默通过）
 //   ⑤ zcode 缺失 → SKIP + exit 0；但**已累积的失败不得被 SKIP 吞掉**
 //      （fail-closed：无 zcode 的环境/CI 里仍需拦下 pi 侧退化）
-// 夹具直接从仓库内真实文件派生（读取后改写），因此断言的是「守卫能否抓住真实形态的漂移」，
+// 夹具不依赖本机真实用户目录：pi 侧从仓库内真实文件派生（拷贝后改写），zcode 侧由
+// 内联片段合成（调度算法 + 池常量的真实形态），因此断言的是「守卫能否抓住真实形态的漂移」，
 // 而不是「守卫能否处理人造玩具输入」。
 
 import { execFile } from "node:child_process";
@@ -29,7 +30,6 @@ const run = promisify(execFile);
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..");
 const GUARD = join(REPO_ROOT, "scripts", "check-rfl-parity.mjs");
 const PI_UTILS = join(REPO_ROOT, "packages", "subagent-core", "workflows", "review-fix-loop-utils.cjs");
-const ZCODE_DWF = join(process.env.HOME ?? "", ".zcode", "workflows", "review-fix-loop.dwf.ts");
 
 interface GuardResult {
   code: number;
@@ -201,28 +201,35 @@ describe("check-rfl-parity.mjs（双实现锁步守卫行为）", () => {
     const res = await runGuard({ PI_RFL: piCopy, ZCODE_RFL: join(dir, "absent-dwf.ts"), RFL_REQUIRE_ZCODE: "1" });
     expect(res.code).toBe(1);
   });
-
-  it("本机真实 zcode 副本（若存在）与 pi 一致：作为集成断言，防夹具与真实形态脱节", async () => {
-    const hasReal = (() => {
-      try {
-        readFileSync(ZCODE_DWF, "utf8");
-        return true;
-      } catch {
-        return false;
-      }
-    })();
-    if (!hasReal) return; // 无 zcode 安装：跳过（夹具路径已覆盖判定逻辑）
-    const res = await runGuard({ PI_RFL: piCopy, ZCODE_RFL: ZCODE_DWF, RFL_REQUIRE_ZCODE: "1" });
-    expect(res.code, "真实 zcode 副本与 pi 已漂移：\n" + res.stdout + res.stderr).toBe(0);
-  });
 });
 
 // ── A14 身份对齐（zcode 侧）：L1 标题守卫 + L2 归一算法与 pi 对齐 ──
-// 调度有 parity 守卫护住，身份对齐目前没有对等物；此组用「从 .dwf.ts 抽片段求值」的方式
-// 把它钉住：① 不剥标点（归一越激进误合并越高）；② 短标题不参与（TITLE_MATCH_MIN）；
+// 调度有 parity 守卫护住，身份对齐目前没有对等物；此组用内联算法快照驱动：
+// ① 不剥标点（归一越激进误合并越高）；② 短标题不参与（TITLE_MATCH_MIN）；
 // ③ 前缀互含在「两边都够长」时兼容——用于 L1 编号撞车守卫（防新问题排到旧号被静默销账）。
-// 真实 zcode 副本缺失时整组跳过（非 zcode 环境无第二实现可校准）。
+// 快照 = zcode workflow 侧身份对齐算法的实现副本（本测试不读本机真实用户目录）；
+// 快照与真实实现的锁步由 zcode 侧 review-fix-loop 的维护流程保证，不在单测职责内。
 describe("zcode 身份对齐算法（A14：标题归一 + 兼容判定）", () => {
+  // zcode workflow 侧身份对齐算法快照（与 review-fix-loop.dwf.ts 同名符号同实现）。
+  // String.raw 保证 /\s+/、/\u4e00-\u9fa5/ 等正则字面量原样进入夹具。
+  const A14_IDENTITY_SNAPSHOT = String.raw`
+const TITLE_MATCH_MIN = 5;
+const titleUnits = (t: string): number => {
+  let n = 0;
+  for (const ch of t) n += /[\u4e00-\u9fa5]/.test(ch) ? 2 : 1;
+  return n;
+};
+const normalizeTitle = (t: string): string => String(t ?? "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+const titlesCompatible = (a: string, b: string): boolean => {
+  const na = normalizeTitle(a);
+  const nb = normalizeTitle(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (titleUnits(na) < TITLE_MATCH_MIN || titleUnits(nb) < TITLE_MATCH_MIN) return false;
+  return na.startsWith(nb) || nb.startsWith(na);
+};
+`;
+
   interface IdentityApi {
     TITLE_MATCH_MIN: number;
     titleUnits: (t: string) => number;
@@ -230,35 +237,9 @@ describe("zcode 身份对齐算法（A14：标题归一 + 兼容判定）", () =
     titlesCompatible: (a: string, b: string) => boolean;
   }
 
-  async function loadIdentityApi(): Promise<IdentityApi | null> {
-    let src: string;
-    try {
-      src = readFileSync(ZCODE_DWF, "utf8");
-    } catch {
-      return null; // 无 zcode 安装：跳过
-    }
-    const start = src.indexOf("const TITLE_MATCH_MIN");
-    if (start < 0) throw new Error("A14 抽取失败：找不到 TITLE_MATCH_MIN 声明（函数改名/移动？）");
-    const fnMarker = "const titlesCompatible";
-    const fnStart = src.indexOf(fnMarker, start);
-    if (fnStart < 0) throw new Error("A14 抽取失败：找不到 titlesCompatible");
-    // 花括号配平截完整函数（含返回类型标注的形态由配平自行跳过多层）
-    const open = src.indexOf("{", src.indexOf(")", fnStart));
-    let depth = 0;
-    let close = -1;
-    for (let i = open; i < src.length; i++) {
-      if (src[i] === "{") depth++;
-      else if (src[i] === "}") {
-        depth--;
-        if (depth === 0) {
-          close = i;
-          break;
-        }
-      }
-    }
-    if (close < 0) throw new Error("A14 抽取失败：titlesCompatible 花括号不配平");
-    const block = src.slice(start, close + 1).replace("void isCjk;", "");
-    const js = stripTypeScriptTypesForTest(block)
+  /** 类型擦除后以 data URL 动态 import 快照片段，导出被测算法。 */
+  async function loadIdentityApi(): Promise<IdentityApi> {
+    const js = stripTypeScriptTypesForTest(A14_IDENTITY_SNAPSHOT)
       + "\nexport const api = { TITLE_MATCH_MIN, titleUnits, normalizeTitle, titlesCompatible };\n";
     const mod = await import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
     return mod.api as IdentityApi;
@@ -266,13 +247,11 @@ describe("zcode 身份对齐算法（A14：标题归一 + 兼容判定）", () =
 
   it("L2 归一只折叠空白与大小写，不剥标点（剥标点会把不同问题误合并）", async () => {
     const api = await loadIdentityApi();
-    if (!api) return;
     expect(api.normalizeTitle("Fix:  Coverage-Gate Fails!")).toBe("fix: coverage-gate fails!");
   });
 
   it("短标题不参与匹配（TITLE_MATCH_MIN=5，CJK 计 2 单位）", async () => {
     const api = await loadIdentityApi();
-    if (!api) return;
     expect(api.TITLE_MATCH_MIN).toBe(5);
     expect(api.titleUnits("评审循环")).toBe(8); // 4 CJK × 2
     expect(api.titlesCompatible("a b", "c d")).toBe(false);
@@ -280,7 +259,6 @@ describe("zcode 身份对齐算法（A14：标题归一 + 兼容判定）", () =
 
   it("L1 安全网：同前缀但确属不同问题时不得判为兼容（防新问题被当作旧条目的延续而静默销账）", async () => {
     const api = await loadIdentityApi();
-    if (!api) return;
     // 两边都够长、前缀相同但尾段不同——必须是 false（这是 A14 修的核心风险点）
     expect(api.titlesCompatible(
       "renderer scroll resets on session switch",
@@ -290,7 +268,6 @@ describe("zcode 身份对齐算法（A14：标题归一 + 兼容判定）", () =
 
   it("对照：完全相等（含大小写/空白差异）判兼容", async () => {
     const api = await loadIdentityApi();
-    if (!api) return;
     expect(api.titlesCompatible("Fix:  Coverage Gate Fails", "fix: coverage gate fails")).toBe(true);
   });
 });

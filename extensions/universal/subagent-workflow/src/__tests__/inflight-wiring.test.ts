@@ -11,8 +11,17 @@
 //
 // mock 面对齐 index-session-start.test.ts（jsonl-run-store + lifecycle.terminate）；
 // 其余走真实装配（service 单例槽注入 fake，与该文件同一模式）。
+//
+// 装载成本分层 [组 5a 瘦身 2026-09-27]：模块图静态加载一次，beforeEach 显式重置
+// oncePerProcess 守卫 Map + 通知账本 + Service 单例槽（与 resetModules 重建等价）；
+// subagentsExtension（index.ts 全图）不再每用例动态 import 重求值。reporter 重试
+// 用例被测对象是 createInFlightReporter 单模块（静态图内缓存命中）。重试语义用
+// fake timers 确定性驱动（重试 timer 走 setTimeout；select 为 stub 立即返回，无真实
+// 超时计时），消除对真实时序的依赖。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { _resetOncePerProcessForTest } from "@zhushanwen/pi-ext-guards";
 
 const { mockStoreLoadAll, mockStoreDispose } = vi.hoisted(() => ({
   mockStoreLoadAll: vi.fn(async () => []),
@@ -35,10 +44,9 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", async (importOri
   return { ...actual, terminateRunningRuns: mockTerminateRunningRuns };
 });
 
-// [modeless 波5 测试修复] logger mock：本文件 beforeEach resetModules 后，失败路径首次
-// logger.warn 触发 fresh logger 模块的同步初始化（~100ms 量级，实测 probe 阻塞事件循
-// 环），把真实定时器的 30ms 重试窗口挤爆——重试语义断言（maxAttempts 放弃/ack 清零）
-// 变成冷加载时序的赌局。本文件主题是 reporter 重试语义，非日志行为，隔离之。
+// [modeless 波5 测试修复] logger mock：失败路径首次 logger.warn 触发 fresh logger 模块
+// 的同步初始化（~100ms 量级，实测 probe 阻塞事件循环）。本文件主题是 reporter 重试
+// 语义，非日志行为，隔离之；重试窗口另由 fake timers 确定性驱动，双重消除时序敏感。
 const { inflightLoggerFns } = vi.hoisted(() => ({
   inflightLoggerFns: { debug: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
@@ -56,10 +64,11 @@ import {
   isSubagentInFlightReport,
 } from "@zhushanwen/extension-protocol";
 import { setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
+// 通知账本重置导出（beforeEach 显式清空；session_start 装配链按 ctx entries 重水合）
+import { _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
+import subagentsExtension from "../index.ts";
 
 process.setMaxListeners(50);
-
-let subagentsExtension: typeof import("../index.ts").default;
 
 function resetLifecycleSlots(): void {
   for (const key of ["@zhushanwen/pi-subagents.service", "@zhushanwen/pi-subagents.model-service"]) {
@@ -99,7 +108,6 @@ function injectFakeServices(): void {
   setSubagentService({
     initSession: vi.fn(),
     recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-    startGcTimer: vi.fn(),
     getStreamSink: () => null,
     dispose: vi.fn(),
   } as never);
@@ -109,38 +117,38 @@ function injectFakeServices(): void {
   } as never);
 }
 
-beforeEach(async () => {
-  vi.resetModules();
+beforeEach(() => {
   vi.clearAllMocks();
   mockStoreLoadAll.mockResolvedValue([]);
   resetLifecycleSlots();
+  _resetOncePerProcessForTest();
+  _resetNotifyLedgerForTest();
   injectFakeServices();
-  subagentsExtension = (await import("../index.ts")).default;
 });
 
 afterEach(() => {
   resetLifecycleSlots();
 });
 
-function mount(): { pi: ExtensionAPI; handlers: Map<string, (event: unknown, ctx: ExtensionContext) => unknown> } {
-  const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
-  const noop = (): void => undefined;
-  const pi = {
-    registerTool: vi.fn(),
-    registerCommand: vi.fn(),
-    registerMessageRenderer: vi.fn(),
-    on: (event: string, handler: (...args: unknown[]) => unknown) => {
-      handlers.set(event, handler as (event: unknown, ctx: ExtensionContext) => unknown);
-    },
-    appendEntry: noop,
-    events: { emit: vi.fn() },
-    sendMessage: noop,
-  } as unknown as ExtensionAPI;
-  subagentsExtension(pi);
-  return { pi, handlers };
-}
-
 describe("组合根接线：初始上报时点（u7a 验收）", () => {
+  function mount(): { pi: ExtensionAPI; handlers: Map<string, (event: unknown, ctx: ExtensionContext) => unknown> } {
+    const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
+    const noop = (): void => undefined;
+    const pi = {
+      registerTool: vi.fn(),
+      registerCommand: vi.fn(),
+      registerMessageRenderer: vi.fn(),
+      on: (event: string, handler: (...args: unknown[]) => unknown) => {
+        handlers.set(event, handler as (event: unknown, ctx: ExtensionContext) => unknown);
+      },
+      appendEntry: noop,
+      events: { emit: vi.fn() },
+      sendMessage: noop,
+    } as unknown as ExtensionAPI;
+    subagentsExtension(pi);
+    return { pi, handlers };
+  }
+
   it("session_start 即发初始上报，不等 setupSessionLifecycle await 链（fire-and-forget）", async () => {
     const { pi, handlers } = mount();
     const { ctx, selectCalls } = makeCtx();
@@ -195,6 +203,15 @@ describe("组合根接线：初始上报时点（u7a 验收）", () => {
 });
 
 describe("createInFlightReporter：有界重试（2026-09-13 oe-audit，原无限重试收敛）", () => {
+  // 重试 timer 走 setTimeout（retryDelayMs），select 为 stub 立即 resolve——fake timers
+  // 确定性驱动整条重试链，不依赖真实时序。
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   /** 最小 ctx：select 恒超时折叠（resolve undefined = 无 ack），模拟无拦截方通道。 */
   function neverAckCtx(selectCalls: unknown[][]): ExtensionContext {
     return {
@@ -220,12 +237,12 @@ describe("createInFlightReporter：有界重试（2026-09-13 oe-audit，原无�
     const ctx = neverAckCtx(selectCalls);
 
     reporter.attachSession(ctx);
-    await new Promise((r) => setTimeout(r, 30));
+    await vi.advanceTimersByTimeAsync(30);
     // 放弃后停止：初始 1 次 + 重试 2 次 = maxAttempts 次，之后静默
     expect(selectCalls).toHaveLength(3);
     const settled = selectCalls.length;
     reporter.onInFlightChanged();
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.advanceTimersByTimeAsync(20);
     expect(selectCalls).toHaveLength(settled); // 已放弃，迁移点不再触发推送
 
     // ack 恢复路径：换一个恒 ack 的 ctx（模拟 runtime 就绪后的新 session）
@@ -240,7 +257,7 @@ describe("createInFlightReporter：有界重试（2026-09-13 oe-audit，原无�
     } as unknown as ExtensionContext;
     reporter.detachSession();
     reporter.attachSession(ackCtx);
-    await new Promise((r) => setTimeout(r, 5));
+    await vi.advanceTimersByTimeAsync(5);
     expect(selectCalls).toHaveLength(settled + 1); // 新 epoch 首帧即 ack
   });
 
@@ -267,7 +284,7 @@ describe("createInFlightReporter：有界重试（2026-09-13 oe-audit，原无�
     } as unknown as ExtensionContext;
 
     reporter.attachSession(ctx);
-    await new Promise((r) => setTimeout(r, 30));
+    await vi.advanceTimersByTimeAsync(30);
     expect(selectCalls).toHaveLength(2); // 失败 1 次 → 重试 1 次 → ack 停
   });
 });

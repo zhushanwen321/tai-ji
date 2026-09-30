@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { SUBAGENT_RECORD_CUSTOM_TYPE } from '@zhushanwen/subagent-core'
+import { SUBAGENT_RECORD_CUSTOM_TYPE, SUBAGENT_RECORD_ENTRY_VERSION } from '@zhushanwen/subagent-core'
 
 import { findZcodeEntryAnchor, type ZcodeAnchor } from '../discovery/entry-anchor.js'
 
@@ -50,6 +50,68 @@ function messageLine(entryId: string, text: string): string {
     id: entryId,
     parentId: null,
     message: { role: 'user', content: text },
+  })
+}
+
+/**
+ * v2 终态条行（W1 D1：`{v:2, kind:"settled", id, engine?, engineHandle?, ...}`——
+ * 载荷形态对齐 subagent-core SubagentRecordSettledEntryData，锚取 engineHandle.sessionRef）。
+ */
+function v2SettledLine(
+  entryId: string,
+  saId: string,
+  opts: {
+    sessionRef?: Record<string, string>
+    engine?: string
+  } = {},
+): string {
+  const data: Record<string, unknown> = {
+    v: 2,
+    kind: 'settled',
+    id: saId,
+    status: 'idle',
+    stopReason: 'end_turn',
+    endedAt: 123,
+    turns: 1,
+    totalTokens: 10,
+    model: undefined,
+    thinkingLevel: undefined,
+  }
+  if (opts.engine !== undefined) data.engine = opts.engine
+  if (opts.sessionRef !== undefined) {
+    data.engineHandle = { sessionRef: opts.sessionRef, poolKey: 'shared' }
+  }
+  return JSON.stringify({
+    type: 'custom',
+    customType: 'subagent-record',
+    id: entryId,
+    parentId: null,
+    data,
+  })
+}
+
+/**
+ * v2 注册条行（`{v:2, kind:"registered", id, agent, task, ...}`——身份域字段，不携带
+ * engineHandle；设计 D1 裁决「sessionRef 双键取自终态条」，注册条目不是锚源）。
+ */
+function v2RegisteredLine(entryId: string, saId: string): string {
+  return JSON.stringify({
+    type: 'custom',
+    customType: 'subagent-record',
+    id: entryId,
+    parentId: null,
+    data: {
+      v: 2,
+      kind: 'registered',
+      id: saId,
+      agent: 'dev',
+      task: 't',
+      slug: 's',
+      origin: 'tool',
+      rootSessionId: 'root-1',
+      depth: 0,
+      startedAt: 1,
+    },
   })
 }
 
@@ -146,16 +208,94 @@ describe('形状校验窄而严：缺键条目不算命中，继续找更早条�
     expect(await findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
   })
 
-  it('data.v ≠ 1 的条目不算命中，更早 v=1 条目仍可命中', async () => {
+  it('data.v 为认识的 v1/v2 之外的版本（future-v，如 3）不算命中，更早 v=1 条目仍可命中', async () => {
     const file = writeMainSession('main.jsonl', [
       JSON.stringify({ type: 'session', id: 'main-1' }),
       recordLine('e1', 'sa-1', { sessionId: 'sess-A', dbPath: DB_PATH }),
-      recordLine('e2', 'sa-1', { sessionId: 'sess-V2', dbPath: DB_PATH }, 2),
+      recordLine('e2', 'sa-1', { sessionId: 'sess-V3', dbPath: DB_PATH }, 3),
     ])
 
     const anchor = await findZcodeEntryAnchor([file], 'sa-1')
     expect(anchor?.sessionId).toBe('sess-A')
-    expect(anchor?.sessionId).not.toBe('sess-V2')
+    expect(anchor?.sessionId).not.toBe('sess-V3')
+  })
+})
+
+// ============================================================
+// v2 终态条锚定（W1 D1 版本门补齐：sessionRef 双键取自终态条）
+// ============================================================
+
+describe('v2 终态条锚定：kind="settled" + engineHandle.sessionRef 双键', () => {
+  it('v2 终态条完整锚（sessionRef 双键齐）→ 命中', async () => {
+    const file = writeMainSession('main.jsonl', [
+      JSON.stringify({ type: 'session', id: 'main-1' }),
+      messageLine('m1', 'dispatch'),
+      v2SettledLine('e1', 'sa-1', {
+        engine: 'zcode',
+        sessionRef: { sessionId: 'sess-V2A', dbPath: DB_PATH },
+      }),
+    ])
+
+    const anchor = await findZcodeEntryAnchor([file], 'sa-1')
+    expect(anchor).toBeDefined()
+    expect(anchor?.sessionId).toBe('sess-V2A')
+    expect(anchor?.dbPath).toBe(DB_PATH)
+  })
+
+  it('v2 注册条（kind="registered"，不携带 engineHandle）→ 不命中（锚只取自终态条）', async () => {
+    const file = writeMainSession('main.jsonl', [
+      JSON.stringify({ type: 'session', id: 'main-1' }),
+      v2RegisteredLine('e-reg', 'sa-1'),
+    ])
+
+    expect(await findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
+  })
+
+  it('v1 快照条（早）+ v2 终态条（晚）→ 末条 v2 胜（末条锚定跨版本一致）', async () => {
+    const file = writeMainSession('main.jsonl', [
+      JSON.stringify({ type: 'session', id: 'main-1' }),
+      recordLine('e1', 'sa-1', { sessionId: 'sess-V1OLD', dbPath: DB_PATH }),
+      v2SettledLine('e2', 'sa-1', {
+        engine: 'zcode',
+        sessionRef: { sessionId: 'sess-V2NEW', dbPath: DB_PATH },
+      }),
+    ])
+
+    const anchor = await findZcodeEntryAnchor([file], 'sa-1')
+    expect(anchor?.sessionId).toBe('sess-V2NEW')
+    expect(anchor?.sessionId).not.toBe('sess-V1OLD')
+  })
+
+  it('v2 终态条锚残缺（缺 engineHandle）→ 不命中，更早 v1 完整条目仍可命中（缺键不遮蔽）', async () => {
+    const file = writeMainSession('main.jsonl', [
+      JSON.stringify({ type: 'session', id: 'main-1' }),
+      recordLine('e1', 'sa-1', { sessionId: 'sess-EARLY', dbPath: DB_PATH }),
+      v2SettledLine('e2', 'sa-1', { engine: 'zcode' }), // 无 sessionRef
+    ])
+
+    const anchor = await findZcodeEntryAnchor([file], 'sa-1')
+    expect(anchor?.sessionId).toBe('sess-EARLY')
+  })
+
+  it('v2 但 kind 不在词表（unknown-kind，非 registered/settled）→ 不命中', async () => {
+    const badKind = JSON.stringify({
+      type: 'custom',
+      customType: 'subagent-record',
+      id: 'e-bad',
+      parentId: null,
+      data: {
+        v: 2,
+        kind: 'migrated',
+        id: 'sa-1',
+        engineHandle: { sessionRef: { sessionId: 'sess-BAD', dbPath: DB_PATH }, poolKey: 'shared' },
+      },
+    })
+    const file = writeMainSession('main.jsonl', [
+      JSON.stringify({ type: 'session', id: 'main-1' }),
+      badKind,
+    ])
+
+    expect(await findZcodeEntryAnchor([file], 'sa-1')).toBeUndefined()
   })
 })
 
@@ -222,5 +362,9 @@ describe('协议字面量漂移守卫（跨包契约）', () => {
   it('entry-anchor 本地 customType 字面量 === subagent-core 写侧单源', () => {
     // 源码本地持有磁盘协议字符串（生产依赖面不引 subagent-core），此处锚定两侧同值
     expect(SUBAGENT_RECORD_CUSTOM_TYPE).toBe('subagent-record')
+  })
+
+  it('entry-anchor 本地 v2 认识版本 === subagent-core 写侧单源（写侧再升版本本守卫先红）', () => {
+    expect(SUBAGENT_RECORD_ENTRY_VERSION).toBe(2)
   })
 })

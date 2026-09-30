@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * panel.context 命名空间的 i18n key 存在性机器闸门（同款机制见 provider-edit-key-existence.test.ts）。
  *

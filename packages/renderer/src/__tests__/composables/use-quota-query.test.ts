@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useQuotaQuery composable 单测。
  *
@@ -15,6 +17,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
 import type { NormalizedQuotaRow } from '@taiji/shared'
+import { apiProjectMock } from '../helpers/api-facade-mock'
+import { subscriptionStubs } from '../helpers/settings-modal-api-mock'
 
 vi.mock('@taiji/core/transport/api/domains/quota', () => ({
   getCached: vi.fn(),
@@ -22,22 +26,27 @@ vi.mock('@taiji/core/transport/api/domains/quota', () => ({
   configure: vi.fn(),
 }))
 
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+// terminal config 回复（getTerminalConfig / setTerminalConfig 共用形状）
+const terminalConfigReply = () => ({
+  config: { version: 1, shell: '', shellArgs: [], fontSize: 14, fontFamily: '', scrollback: 1000, cursorStyle: 'block' as const, bell: false },
+  corrupted: false,
+})
+
+// '@/api' 门面 mock：导入静默底盘（真实门面拉起 WS 连接，node env 不可用）。project 域与
+// config 域 on* 订阅族复用 settings-modal-api-mock 的公共段；terminal config / settings
+// system 两差异面保持本文件内联。
+vi.mock('@/api', () => ({
+  project: apiProjectMock(),
   config: {
-    onProviders: vi.fn(() => () => {}),
-    onSkills: vi.fn(() => () => {}),
-    onAgents: vi.fn(() => () => {}),
-    onSkillDirs: vi.fn(() => () => {}),
-    onAgentDirs: vi.fn(() => () => {}),
-    onExtensionDirs: vi.fn(() => () => {}),
-    onDefaults: vi.fn(() => () => {}),
-    onSystemPrompt: vi.fn(() => () => {}),
-    onTerminalConfig: vi.fn(() => () => {}),
-    getTerminalConfig: vi.fn(async () => ({ config: { version: 1, shell: '', shellArgs: [], fontSize: 14, fontFamily: '', scrollback: 1000, cursorStyle: 'block' as const, bell: false }, corrupted: false })),
-    setTerminalConfig: vi.fn(async () => ({ config: { version: 1, shell: '', shellArgs: [], fontSize: 14, fontFamily: '', scrollback: 1000, cursorStyle: 'block' as const, bell: false }, corrupted: false })),
+    ...subscriptionStubs([
+      'onProviders', 'onSkills', 'onAgents', 'onSkillDirs', 'onAgentDirs',
+      'onExtensionDirs', 'onDefaults', 'onSystemPrompt', 'onTerminalConfig',
+    ]),
+    getTerminalConfig: vi.fn(async () => terminalConfigReply()),
+    setTerminalConfig: vi.fn(async () => terminalConfigReply()),
   },
-  model: { onModels: vi.fn(() => () => {}) },
-  extension: { onExtensions: vi.fn(() => () => {}) },
+  model: subscriptionStubs(['onModels']),
+  extension: subscriptionStubs(['onExtensions']),
   settings: {
     getSystem: vi.fn(async () => ({ locale: 'zh-CN', theme: 'dark', themePreset: 'cold-blue' })),
     updateSystem: vi.fn(async () => {}),

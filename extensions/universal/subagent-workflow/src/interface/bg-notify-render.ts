@@ -25,15 +25,14 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { displayAgentName } from "@zhushanwen/subagent-core";
 import { deriveOutcome } from "@zhushanwen/subagent-core";
 import { CLOSED_REASONS } from "@zhushanwen/subagent-core";
-import type { ClosedReason, ExecutionOutcome } from "@zhushanwen/subagent-core";
+import type { ClosedReason } from "@zhushanwen/subagent-core";
 import {
   firstLineSanitized,
-  padToVisible,
   shortId,
   statusGlyph,
   type ThemeLike,
-  truncLine,
 } from "./format.ts";
+import { padToVisible, truncLine } from "./tui-kit.ts";
 
 /** agent 名最大显示宽度。 */
 const AGENT_MAX_WIDTH = 40;
@@ -51,6 +50,16 @@ const BORDER_CHARS = 2;
 const MIN_BORDER_WIDTH = BORDER_CHARS + INNER_PAD_TOTAL + 1;
 
 /**
+ * record 域轮终 outcome 子集（[W2 D5] 单源 RunOutcome 收窄别名——interrupted 只由
+ * run 收编/回收路径写入，record 轮终构造性不可达）。本文件原经 core 的
+ * ExecutionOutcome 消费同值联合；[D2]（workflow-run-resume-revision）RunOutcome
+ * 词表重构后 Exclude 派生失效（interrupted 已移出），本域改独立实体字面量、与
+ * core execution/assembly/types.ts 的 ExecutionOutcome 三值同构（record 域终局
+ * 形态不含 run 级 time_limited）。
+ */
+type RecordOutcome = "completed" | "failed" | "cancelled";
+
+/**
  * background 完成通知的 record 形态（从 message.details 提取）。
  * notifier.ts 构造，本文件防御性解析。
  */
@@ -58,10 +67,10 @@ interface BgNotifyRecord {
   id: string;
   /** v4 B-1: closed（终态，含 cancelled）或 running（对话模式轮次完成，旧 idle）。 */
   status: "running" | "closed";
-  /** L2 关闭原因子枚举（内部诊断 + outcome 兑底派生输入；经 toClosedReason 防御性收窄）。 */
+  /** L2 关闭原因子枚举（内部诊断 + outcome 兜底派生输入；经 toClosedReason 防御性收窄）。 */
   closedReason?: ClosedReason;
-  /** 终态三态对外语义（U3 C-outcome）。缺失（升级前旧消息重放）时按 deriveOutcome 兑底。 */
-  outcome?: ExecutionOutcome;
+  /** 终态三态对外语义（U3 C-outcome）。缺失（升级前旧消息重放）时按 deriveOutcome 兜底。 */
+  outcome?: RecordOutcome;
   agent: string;
   model?: string;
   result?: string;
@@ -213,7 +222,7 @@ function renderRecordLines(record: BgNotifyRecord, t: ThemeLike): string[] {
     ? ` ${t.fg("dim", "·")} ${t.fg("accent", truncLine(record.model, MODEL_MAX_WIDTH))}`
     : "";
   // U3 C-outcome：verb 与正文分流只读 outcome——单一权威派生（升级前旧消息重放等
-  // details 缺 outcome 的存量形态经 deriveOutcome(closedReason, error) 兑底，非同构
+  // details 缺 outcome 的存量形态经 deriveOutcome(closedReason, error) 兜底，非同构
   // 重写）。判定先于 patchFile：failed 分支不展示 patch/result（失败轮也会写
   // patchFile，历史 bug 存档见 deriveOutcome 注释）。
   const outcome = record.outcome ?? deriveOutcome(record.closedReason, record.error);
@@ -257,14 +266,14 @@ function renderRecordLines(record: BgNotifyRecord, t: ThemeLike): string[] {
 
 /**
  * details.closedReason 防御性收窄：任意字符串 → ClosedReason | undefined。
- * 旧数据/外部构造的非法值按缺失处理，交由 deriveOutcome 兑底（消费方不崩溃）。
+ * 旧数据/外部构造的非法值按缺失处理，交由 deriveOutcome 兜底（消费方不崩溃）。
  */
 function toClosedReason(value: unknown): ClosedReason | undefined {
   return CLOSED_REASONS.find((reason) => reason === value);
 }
 
 /** details.outcome 防御性收窄：仅接受三态枚举值，其余按缺失处理。 */
-function toOutcome(value: unknown): ExecutionOutcome | undefined {
+function toOutcome(value: unknown): RecordOutcome | undefined {
   return value === "completed" || value === "failed" || value === "cancelled" ? value : undefined;
 }
 

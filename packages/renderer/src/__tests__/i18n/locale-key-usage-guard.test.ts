@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * 反向守卫：`panel.*` / `settings.providerEdit.*` / `composable.*` 的 locale 叶子 key 必须被源码消费。
  *

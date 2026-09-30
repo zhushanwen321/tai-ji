@@ -209,7 +209,6 @@ describe('SessionLifecycle — 写入时机 record', () => {
         adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }),
         getMessageBus: () => null,
         broadcastGlobal: () => {},
-        notifyMessageComplete: () => {},
       } as ConstructorParameters<typeof SessionLifecycle>[5],
     )
 
@@ -248,7 +247,6 @@ describe('SessionLifecycle — 写入时机 record', () => {
         adapterFactory: () => ({ attach: vi.fn(), detach: vi.fn() }),
         getMessageBus: () => null,
         broadcastGlobal: () => {},
-        notifyMessageComplete: () => {},
       } as ConstructorParameters<typeof SessionLifecycle>[5],
     )
 

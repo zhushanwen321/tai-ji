@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * useExtensionUI per-sessionId 队列隔离单测（slice `companion-band-mount` wave1 bus 版）。
  *

@@ -13,11 +13,15 @@ import { SESSION_MANAGER_ACTIONS } from './marker'
  * select 通道的 wire 形态正是 JSON 字符串，协议形状即 wire 契约）。
  */
 describe('A8-protocol-types-vitest: SendResult 排队语义的协议形状', () => {
-  it('成功形状：{queued: true} 是唯一合法的 SendResult', () => {
-    const result: SessionManagerSendResult = { queued: true }
-    expect(result).toEqual({ queued: true })
+  it('成功形状：{queued, willNotify} 是唯一合法的 SendResult', () => {
+    // willNotify（notify-once D6）注入后必红适配：optional-notifyId 的 arm 结果显式化，
+    // 缺省/畸形 notifyId → willNotify:false（零完成通知）而非字段缺席
+    const result: SessionManagerSendResult = { queued: true, willNotify: true }
+    expect(result).toEqual({ queued: true, willNotify: true })
     // wire 往返（handler respond 经 JSON.stringify 走 select 通道）
-    expect(JSON.parse(JSON.stringify(result))).toEqual({ queued: true })
+    expect(JSON.parse(JSON.stringify(result))).toEqual({ queued: true, willNotify: true })
+    const noNotify: SessionManagerSendResult = { queued: true, willNotify: false }
+    expect(noNotify).toEqual({ queued: true, willNotify: false })
   })
 
   it('旧形状 {blocked, rejected} 被类型系统拒绝', () => {
@@ -43,9 +47,21 @@ describe('A8-protocol-types-vitest: SendResult 排队语义的协议形状', () 
     expect(Object.keys(JSON.parse(JSON.stringify(errorResult))).sort()).toEqual(['error', 'hint'])
   })
 
-  it('send params 形状不变（sessionId + prompt），action 集合含 send', () => {
-    const params: SessionManagerSendParams = { sessionId: 's1', prompt: 'hello' }
-    expect(params).toEqual({ sessionId: 's1', prompt: 'hello' })
+  it('send params 形状：sessionId + prompt + optional notifyId，action 集合含 send', () => {
+    // notifyId 注入后必红适配（notify-once D6）：present 时须入 toEqual
+    const params: SessionManagerSendParams = {
+      sessionId: 's1',
+      prompt: 'hello',
+      notifyId: 'sm-123e4567-e89b-12d3-a456-426614174000',
+    }
+    expect(params).toEqual({
+      sessionId: 's1',
+      prompt: 'hello',
+      notifyId: 'sm-123e4567-e89b-12d3-a456-426614174000',
+    })
+    // optional：缺省形态照旧合法（兼容判据 = 字段有无，不破坏旧调用方）
+    const legacy: SessionManagerSendParams = { sessionId: 's1', prompt: 'hello' }
+    expect(legacy).toEqual({ sessionId: 's1', prompt: 'hello' })
     expect(SESSION_MANAGER_ACTIONS).toContain('send')
   })
 })

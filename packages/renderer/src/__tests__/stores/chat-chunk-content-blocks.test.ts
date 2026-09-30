@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * W1 数据层 —— 流式 chunk 填充 contentBlocks 测试。
  *

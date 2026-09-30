@@ -7,7 +7,7 @@
  *
  * 验证按 variant 分支：landing 态（variant='landing'）合并 globalSkills（全局）∪ projectSkills
  * （当前 cwd），skill name 归一化为 /skill:<name>；panel 态用 commandStore + compact，不并入
- * globalSkills。__ 前缀命令过滤（W5 /__taiji_reload__ 准备）。
+ * globalSkills。__ 前缀命令过滤（host 内部命令不显示）。
  *
  * 覆盖三视角：
  * - 构建者（白盒）：items 来源（commandStore vs globalSkills/projectSkills props）、归一化字段
@@ -25,7 +25,8 @@ import { defineComponent, h, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ServerMessage, SkillInfo } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsTransport, provideSettingsStore, createSettingsStore } from '@taiji/core'
+import { makeSkillsReloadTransportStub } from '../helpers/settings-transport-stub'
 import { __resetCommandStoreForTesting } from '@/composables/features/command/useCommandStore'
 import CommandPopover from '@/components/panel/CommandPopover.vue'
 
@@ -86,7 +87,7 @@ function bodyItemButtons(): HTMLElement[] {
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   // [w5] CommandPopover 改经壳单例（core 实例）：reset 防跨用例残留 commandsBySession/appCommands
   __resetCommandStoreForTesting()
 })
@@ -463,8 +464,8 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
     expect(btns).toHaveLength(7)
   })
 
-  // ── W4：__ 前缀命令过滤（W5 /__taiji_reload__ 准备）──
-  // skill name 以 __ 开头的命令不显示（内部触发命令，W5 reload-orchestrator 用）。
+  // ── W4：__ 前缀命令过滤（host 内部命令不显示）──
+  // skill name 以 __ 开头的命令不显示（内部触发命令）。
   it('L15 landing globalSkills 含 __ 前缀 skill → 不显示（W5 内部命令过滤）', async () => {
     const skillsWithInternal: SkillInfo[] = [
       { id: 'sk-normal', name: 'normal-skill', description: '正常', enabled: true, source: 'agents', effective: true },
@@ -553,6 +554,10 @@ describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () 
   it('TC5: 广播 global scope 失效信号 → landing slash 浮层 DOM 反映 globalSkills 刷新', async () => {
     // lazy import：避免顶层 import 触发 useProjectSkills 模块加载（其顶层订阅依赖 mock 已挂载，OK）。
     const { useGlobalSkills } = await import('@/composables/features/settings/useProjectSkills')
+    // [C3] 打 seam：getGlobalSkills 可控 mock + onSkillCacheInvalidated 桥真实 events
+    //（单源 = helpers/settings-transport-stub 的 makeSkillsReloadTransportStub，语义同
+    // 本文件 '@/api' mock 工厂——广播端到端触达 useGlobalSkills 订阅）。
+    provideSettingsTransport(await makeSkillsReloadTransportStub(getGlobalSkillsMock))
 
     const SKILL_1: SkillInfo[] = [
       { id: 'sk-1', name: 'skill1', description: 'one', enabled: true, source: 'agents', effective: true },
