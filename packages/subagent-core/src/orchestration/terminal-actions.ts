@@ -78,6 +78,7 @@ const runEventLogger = getLogger("run-event-dispatch");
 import {
   IN_FLIGHT_CALL_CANCELLED_MSG,
 } from "./worker-message-pump-constants.ts";
+import { runAccountingFromEvents } from "./run-accounting.ts";
 
 // ══════════════════════════════════════════════════════════════
 // §1 run 事件投递域（单写者链，自 worker-message-pump 迁入）
@@ -1027,15 +1028,19 @@ export async function interruptRun(
   // [D3] phase 收束账本回收（中断完成路径——中断无终局 coda，此处是该路径的
   // 唯一回收点；resume 后新派发经 notePhaseDispatched lazily 重建，回收只防泄漏）。
   forgetPhaseSettlement(runId);
-  // 中断条目补写（收编场景无内存聚合——callCount 从 record agent-settled 帧数
-  // 推导；usedTokens 事件流不可得，摘要级 0 诚实缺省）。status 'interrupted' =
+  // 中断条目补写（收编场景无内存聚合——callCount 与 usedTokens 均从 record 帧推导：
+  // [§2.1b] `agent-settled.result.usage` 走 Budget 同一加权口径，下界近似；旧行为是
+  // usedTokens 恒 0，展示层把中断 run 显示成零消耗）。status 'interrupted' =
   // 暂停态收敛词（非终局——与 settled 终态条目的 'done' 判别，runtime 读侧三态
   // 投影的消费面）；outcome 缺省（中断非终局，细分语境由 errorCode 承载）。
   if (opts?.appendInterruptedEntry !== undefined) {
     let callCount = 0;
+    let usedTokens = 0;
     try {
       const events = await scanRunEvents(runId, opts.journalDir);
-      callCount = events.filter((e) => e.type === "agent-settled").length;
+      const accounting = runAccountingFromEvents(events);
+      callCount = accounting.callCount;
+      usedTokens = accounting.usedTokens;
     } catch (err) {
       runEventLogger.warn(
         `interruptRun entry callCount derivation failed (runId=${runId}): ${toErrorMessage(err)}`,
@@ -1054,7 +1059,7 @@ export async function interruptRun(
           errorCode: opts.errorCode,
           interruptedAt: now,
           callCount,
-          usedTokens: 0,
+          usedTokens,
         }),
       );
     } catch (err) {

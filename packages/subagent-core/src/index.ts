@@ -430,6 +430,9 @@ export {
   type ResumeRunOptions,
 } from "./orchestration/resume-run.ts";
 
+// [§2.1b] run 会计重建（帧推导单源；壳侧折叠面与 core 重建面共用，避免第二套折算）。
+export { rebuildBudget, runAccountingFromEvents } from "./orchestration/run-accounting.ts";
+
 // [§2.5] D14 args 一致性判定单源（原壳层实现下沉；壳只装配 args + journalDir）。
 export {
   assertResumeArgsMatch,

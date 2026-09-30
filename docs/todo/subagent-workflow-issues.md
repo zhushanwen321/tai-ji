@@ -70,8 +70,20 @@
   - 三态 `isProcessAlive`（`execution/engine/client/pid-file.ts`）→ **`probePidAliveness`**（与 `persistence/alive-store.ts` 的二态同名函数脱钩；两函数语义差异真实，刻意不合并，注释已写明）。
   - core `ModelCatalogEntry`（`orchestration/model-catalog.ts`）→ **`PiRegistryModelEntry`**（与 SDK 引擎协议同名类型区分；engine 侧消费的仍是 SDK 类型，未受影响）。
   - 全仓 `RunState` 零残留；core 236 文件 / 3617 用例绿，扩展 typecheck 绿。
-- 遗留（本条后半，未做）：**budget / errorLogs 重建补齐**——现状 = 壳侧 fold 与 core `resume-run` 重建面把 `budget` 归零、`errorLogs` 置空（四个归零点：`jsonl-run-store` fold、`resume-run.rebuildRunFromRecord`、终态条目补写、中断条目构造）。零介质近路 = 用 v2 终态条目已有的 `usedTokens`/`callCount` seed（`loadAll` 手上已有 settledEntries），顺带修两处硬编码 0；`errorLogs` 无任何持久面，需新增诊断事件（改介质，需 ADR）或明确接受重启即空。
-
+- **budget 重建已补齐**（2026-09-30）：新增 core 单源 `orchestration/run-accounting.ts`
+  （`runAccountingFromEvents` / `rebuildBudget`），四处归零点收敛为同一口径——壳侧 fold
+  （`jsonl-run-store.ts`：条目真值优先，缺席回落帧推导）、终态条目补写（原硬编码
+  `usedTokens: 0`）、core `resume-run` 重建（原 `new Budget(maxTimeMs)`）、中断条目
+  （原 `usedTokens: 0`）。权重走 `Budget.consume` 同一公式，不引第二套折算。
+  - **精度边界（写进代码注释）**：帧推导是**下界近似**——中间失败尝试的消耗不在事件流
+    （`agent-retrying` 不载 usage），且两条「写 settled 帧但不计数」路径会让帧计数略大；
+    要精确需给 `agent-retrying` 加 usage 字段（改介质，ADR 级）。
+  - **errorLogs 明确接受重启即空**：worker `console.*` 捕获不进 record，任何持久面都
+    没有；要恢复只能改介质（新增诊断事件 + ADR）。当前形态是**显式接受的债务**，不是遗漏
+    （GUI 零消费；TUI 仅 run 级诊断面）。
+  - 测试：core 新增 `orchestration/__tests__/run-accounting.test.ts`（6 例：加权口径 /
+    缺 usage 帧 / 非 settled 帧不计 / 条目真值优先 / maxTimeMs 条件式）；core 237 文件
+    与扩展 76 文件全绿。
 ### 2.2 run 生命周期状态判定散布（9 处以上）+ 展示层映射未归并（2026-09-30 核实修正）
 
 - 状态表达位置（登记原列 7 处，实测 9 处以上）：`WorkflowRun.state.status` 两态（聚合根，v1 兼容层）、`WorkflowRunMeta.interruptedAt` 标记、record 事件流 fold 五态（唯一权威）、DoneReason 五因、RunOutcome 四值、shared `WorkflowRunStatus` 第三份字面量副本，外加登记未列的 `shared/workflow.ts` 的 `WorkflowDoneReason` 与 `WorkflowRunOutcome` / `WORKFLOW_RUN_OUTCOME_ALL`、runtime `workflow-extractor.ts:69/:72` 的两份副本、`assembly/types.ts:58` 的 `ExecutionStatus`。映射有单点（doneReasonToRunOutcome）但单点两侧仍是两套词表。**值级一致性断言只有 outcome 轴有**（`packages/runtime/test/workflow-outcome-vocab-parity.test.ts`），status 轴没有。

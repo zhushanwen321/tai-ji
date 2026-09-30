@@ -49,7 +49,6 @@ import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "
 // 全部经 core barrel 消费（生产消费纪律：extensions 源码不深路径 import core）。
 import {
   AgentCall,
-  Budget,
   RUN_EVENT_JOURNAL_SUFFIX,
   STATE_DIR_NAME,
   Trace,
@@ -73,6 +72,7 @@ import {
   type WorkflowRunEvent,
 } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
+import { rebuildBudget, runAccountingFromEvents } from "@zhushanwen/subagent-core";
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // ── [W1 / D1] v2 条目读面（注册定界 + 终态条目抑制）────────────────
@@ -461,6 +461,7 @@ function foldRecordStreamToRun(
   runId: string,
   reg: WorkflowRecordRegisteredEntryData,
   events: readonly WorkflowRunEvent[],
+  settled?: WorkflowRecordSettledEntryData,
 ): WorkflowRun {
   const created = events.find(
     (e): e is Extract<WorkflowRunEvent, { type: "run-created" }> => e.type === "run-created",
@@ -469,6 +470,10 @@ function foldRecordStreamToRun(
     created?.ts ?? (Number.isFinite(reg.startedAt) ? reg.startedAt : Date.now());
   const startedAtIso = new Date(startedAtMs).toISOString();
   const spec = rebuildRunSpecFromEntries(created, reg, resolveSpecBudgetMs(created, events));
+  // [§2.1b] 会计重建：v2 终态条目带活体口径 usedTokens/callCount → 真值优先；条目缺席
+  // 回落 agent-settled.result.usage 的同一加权口径（下界近似，含 usedCost）。
+  // errorLogs 无持久面 → 空数组（明确接受的已知形态，见 core run-accounting.ts 头注）。
+  const budget = rebuildBudget(settled, events);
 
   const drafts = collectRunCallDrafts(events);
 
@@ -488,7 +493,7 @@ function foldRecordStreamToRun(
       spec,
       {
         status: "running",
-        budget: new Budget(),
+        budget,
         calls,
         trace,
         errorLogs: [],
@@ -510,7 +515,7 @@ function foldRecordStreamToRun(
     {
       status: "done",
       reason,
-      budget: new Budget(),
+      budget,
       calls,
       trace,
       errorLogs: [],
@@ -715,7 +720,7 @@ export class JsonlRunStore implements RunStore {
           logger.warn(
             `[subagent-workflow] record store: record stream missing, degraded rebuild for interruption adoption (runId=${runId}, path=${recordPath})`,
           );
-          runs.push(foldRecordStreamToRun(runId, reg, []));
+          runs.push(foldRecordStreamToRun(runId, reg, [], settledEntries.get(runId)));
           continue;
         }
         // 损坏 / 真实 IO 错误：拒绝（穿透 → 宿主 fail-fast），不静默降级。
@@ -731,7 +736,7 @@ export class JsonlRunStore implements RunStore {
         );
         continue;
       }
-      const run = foldRecordStreamToRun(runId, reg, events);
+      const run = foldRecordStreamToRun(runId, reg, events, settledEntries.get(runId));
       runs.push(run);
       // 终态条目幂等补写：record 已终局而主 session 终态条目缺失（终局 coda 的
       // 条目半边写失败 / 旧版本写点形态）→ 补写；条目已在 → 跳过（双重启不重复
@@ -763,7 +768,9 @@ export class JsonlRunStore implements RunStore {
       ...(settledEvent.errorCode !== undefined ? { errorCode: settledEvent.errorCode } : {}),
       settledAt: settledEvent.ts,
       callCount: events.filter((e) => e.type === "agent-settled").length,
-      usedTokens: 0,
+      // [§2.1b] 由 agent-settled.result.usage 推导（core 单源加权口径；此前硬编码 0，
+      // 展示层把补写条目显示成零消耗）
+      usedTokens: runAccountingFromEvents(events).usedTokens,
     });
     try {
       this.pi.appendEntry(WORKFLOW_RECORD_CUSTOM_TYPE, data);

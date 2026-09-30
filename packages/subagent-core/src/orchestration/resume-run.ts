@@ -59,6 +59,7 @@ import { makeHandlers } from "./lifecycle.ts";
 import { forgetRunResumedBudget, noteRunResumedBudget } from "./worker-message-pump.ts";
 import { WORKFLOW_RECORD_CUSTOM_TYPE } from "./workflow-record-entry.ts";
 import { assertResumeArgsMatch } from "./resume-args-guard.ts";
+import { rebuildBudget } from "./run-accounting.ts";
 
 const logger = getLogger("subagents");
 
@@ -950,8 +951,11 @@ function rebuildRunFromRecord(
     {
       status: "running",
       // fresh run 的 Budget 同源（lifecycle.createRunningRun：maxTimeMs=spec.budgetTimeMs）
-      // ——复活聚合形状与新建一致，避免展示/消费面按 maxTimeMs 判定时双形态
-      budget: new Budget(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { maxTimeMs: budgetTimeMs } : {}),
+      // ——复活聚合形状与新建一致，避免展示/消费面按 maxTimeMs 判定时双形态。
+      // [§2.1b] 计数不再归零：帧推导（agent-settled.result.usage 同一加权口径）重建
+      // 已耗 tokens/cost/callCount——下界近似（中间失败尝试不在事件流，见
+      // run-accounting.ts 头注）。
+      budget: rebuildBudget(undefined, events, budgetTimeMs),
       calls,
       trace,
       errorLogs: [],
