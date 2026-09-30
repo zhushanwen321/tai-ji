@@ -37,6 +37,11 @@ import type { ExecutionTraceNode } from "@zhushanwen/subagent-core";
 import type { SubagentRecord } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import {
+  formatRunBadge,
+  runDisplaySignaturePart,
+  runDisplayStateOf,
+} from "../display-state.ts";
+import {
   buildPhaseGroups,
   ELLIPSIS,
   formatActivityLine,
@@ -44,7 +49,6 @@ import {
   formatElapsed,
   formatElapsedSeconds,
   formatPhaseLine,
-  formatStatusBadge,
   statusDotStr,
   type ThemeLike,
 } from "../format.ts";
@@ -233,7 +237,7 @@ export function computeRenderSignature(
     const l = liveProgress.get(n.stepIndex);
     return `${n.stepIndex}:${n.status}:${n.sessionFile ?? "-"}:${l?.totalTokens ?? -1}:${l?.toolCallCount ?? -1}:${l?.elapsedSeconds ?? -1}:${l?.turns ?? -1}:${l?.eventLog.length ?? -1}:${l?.currentActivity ? `${l.currentActivity.type}:${l.currentActivity.label}` : "-"}:${l?.lastError ?? "-"}`;
   });
-  return [displayStatusOf(run), Math.floor(now / SECOND_MS), `${completed}/${traceArr.length}`, budgetPart, errorLogsPart, ...nodeParts].join("|");
+  return [runDisplaySignaturePart(runDisplayStateOf(run)), Math.floor(now / SECOND_MS), `${completed}/${traceArr.length}`, budgetPart, errorLogsPart, ...nodeParts].join("|");
 }
 
 // ── View state ────────────────────────────────────────────────
@@ -706,7 +710,7 @@ function renderHeader(
   const completed = traceArr.filter((n) => n.status === "completed").length;
   const total = traceArr.length;
   const elapsed = formatElapsed(run.meta.startedAt);
-  const headerRight = `${formatStatusBadge(displayStatusOf(run), theme)} · ${completed}/${total} agents · ${elapsed}`;
+  const headerRight = `${formatRunBadge(runDisplayStateOf(run), theme)} · ${completed}/${total} agents · ${elapsed}`;
   const budget = run.state.budget;
   const budgetStr = `${Math.round(budget.usedTokens / BUDGET_TOKENS_DIVISOR)}k/${budget.maxTokens ? `${Math.round(budget.maxTokens / BUDGET_TOKENS_DIVISOR)}k` : "∞"} tok · $${budget.usedCost.toFixed(BUDGET_COST_DECIMALS)}`;
 
@@ -749,7 +753,7 @@ function renderFooter(
       ? "↑↓ agent · ⏎ detail"
       : "↑↓ agent · ⏎ prompt · PgUp/PgDn scroll";
   const actionParts: string[] = [];
-  if (displayStatusOf(run) === "running") {
+  if (runDisplayStateOf(run).abortable) {
     actionParts.push("a abort");
   }
   actionParts.push("s save");

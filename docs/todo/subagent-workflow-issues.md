@@ -90,7 +90,12 @@
 - 状态表达位置（登记原列 7 处，实测 9 处以上）：`WorkflowRun.state.status` 两态（聚合根，v1 兼容层）、`WorkflowRunMeta.interruptedAt` 标记、record 事件流 fold 五态（唯一权威）、DoneReason 五因、RunOutcome 四值、shared `WorkflowRunStatus` 第三份字面量副本，外加登记未列的 `shared/workflow.ts` 的 `WorkflowDoneReason` 与 `WorkflowRunOutcome` / `WORKFLOW_RUN_OUTCOME_ALL`、runtime `workflow-extractor.ts:69/:72` 的两份副本、`assembly/types.ts:58` 的 `ExecutionStatus`。映射有单点（doneReasonToRunOutcome）但单点两侧仍是两套词表。**值级一致性断言只有 outcome 轴有**（`packages/runtime/test/workflow-outcome-vocab-parity.test.ts`），status 轴没有。
 - 展示层同构问题（原 workflow-architecture-backlog G2 并入）：「运行状态 → 展示文案/颜色/图标」映射实测 **7 处 / 4 文件、跨文件零共享**——`interface/format.ts` 内 3 处（:146-161 状态字形 / :451-460 颜色 token / :470-483 徽标文案）+ `interface/views/detail-content.ts:87-95` + `interface/gui-mappers.ts:62-67` 与 `:76-81` + `interface/bg-notify-render.ts:240-264`。唯一的共享是同文件内的 `statusDotStr → statusColorToken`（后者是 private，跨文件无法复用）。
 - gui-mappers 现状：对现行真实输入域（ExecutionStatus 的 running / idle）覆盖正确；潜伏错映射格实测 **5 个**（created / settling / interrupted / active 都落 done；terminal 落 done 但丢失 failed / cancelled / time_limited 区分），入参裸 string 无类型防线。数据流不流入有充分类型证据：list 分支唯一入参是 `ExecutionStatus`，「结构性不流入」成立，一旦有人改传 run 域词表或扩字段，错格立刻活跃。
-- 设计决策点：v1 兼容层退役顺序；内活性状态唯一读口（建议 fold checkpoint 进程内缓存）；DoneReason 是否只活在引擎协议侧；展示映射归并形态（先做入参类型收窄，再做单表归并）；补 status 轴的值级一致性断言（对齐 outcome 轴先例）。
+- 状态：**A 档 + run 域 B 档已落**（2026-09-30）。
+  - A 档（commit 65dfb19f4）：三处可见错误修复（终局徽标补 `done` 分支 / 失败通知改按 outcome 出 ✗ / `budget_limited`·`time_limited` 色档与徽标对齐）；入参收窄——`statusLabel` 吃 `ExecutionTraceNode["status"]`、`mapRunStatus`/`mapRunIcon` 吃 `ExecutionStatus`（死关键词分支退役，保留运行时兜底）。
+  - run 域 B 档（本批）：新增 `interface/display-state.ts`——`RunDisplayState` 单一中间表示 + `runDisplayStateOf`（**不判定状态**，status 直取 core `runSummary`，判定仍 1 个）+ 三张映射（`runToneOf` / `formatRunBadge` / `runDisplaySignaturePart`）。`WorkflowsView` 三处消费点（头部徽标 / footer 的 abort 可用性 / 渲染签名首段）全部切到它上面；签名改为「展示态生命周期面全字段」（新增字段自动进签名，不再依赖 DS8 手工同步表）。
+  - **刻意不并域**：`gui-mappers.ts`（子代理执行状态域）与 `bg-notify-render.ts`（通知域）留在各自域——两域与 run 生命周期无共同输入词汇，强行共用一张表是把两套语义塞进一个枚举。日后若收敛 GUI/renderer 侧（`tray-tone.ts` / `WorkflowTab.vue`），等价窄形态进 `shared/src/workflow.ts` 而不是跨包共享本模块。
+  - 测试：新增 `interface/__tests__/display-state.test.ts`（15 例：三态投影与可中断性 / 色调·徽标逐形态 / 失败族判定 / **与既有 `formatStatusBadge` 同输入同输出**的防漂移对拍 / 签名片段失效性）；扩展 77 文件 936 例全绿。
+- 设计决策点（剩余）：v1 兼容层退役顺序；内活性状态唯一读口（建议 fold checkpoint 进程内缓存）；DoneReason 是否只活在引擎协议侧；展示映射归并形态（先做入参类型收窄，再做单表归并）；补 status 轴的值级一致性断言（对齐 outcome 轴先例）。
 
 ### 2.3 orchestration ↔ execution 双向循环依赖（20 / 6 文件；机器检查已落地 2026-09-30）
 
