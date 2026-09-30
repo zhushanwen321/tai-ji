@@ -19,7 +19,7 @@
 //   ① chat 路径 subagent-service.executeViaEngine（非 pi 分支）；
 //   ② workflow 路径 subprocess-agent-runner.run（route.engine.run 之前，非 pi 分支）。
 
-import { stripThinkingSuffix } from "../../shared/model-ref.ts";
+import { parseModelSelector } from "../../shared/model-ref.ts";
 import type { EnginePort } from "./port.ts";
 import { DEFAULT_ENGINE_ID } from "./registry.ts";
 import { toErrorMessage } from "../../core/error-message.ts";
@@ -182,7 +182,7 @@ export function withCrossEngineHint(
   if (!(err instanceof Error)) return err;
   const marker = err as Error & RefNotFoundMarker;
   if (marker.refNotFound !== true || marker.refInput === undefined) return err;
-  const clean = stripThinkingSuffix(marker.refInput);
+  const { ref: clean } = parseModelSelector(marker.refInput);
 
   let matchedEngineId: string | undefined;
   let matchCount = 0;

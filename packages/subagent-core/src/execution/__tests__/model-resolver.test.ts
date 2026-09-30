@@ -320,7 +320,7 @@ describe("resolveModel — thinkingLevel resolution", () => {
 // lookupModel 容错：剥离 ":thinkingLevel" 后缀（A）
 // ============================================================
 
-describe('resolveModel — strips ":thinkingLevel" suffix from model string (A)', () => {
+describe('resolveModel — 模型串内联 ":thinkingLevel" 后缀（身份剥离 + 档位生效）', () => {
   it('resolves model passed with ":xhigh" suffix', () => {
     const m = makeModel({ id: "ds-pro", provider: "deepseek-router", reasoning: true, thinkingLevelMap: { xhigh: 3 } });
     const reg = makeRegistry([m]);
@@ -356,6 +356,40 @@ describe('resolveModel — strips ":thinkingLevel" suffix from model string (A)'
     const r = resolveModel(undefined, reg, { model: "deepseek-router/ds-pro:xhigh", thinkingLevel: "high" });
     expect(r.model.id).toBe("ds-pro");
     expect(r.thinkingLevel).toBe("high");
+  });
+
+  it('串里的档位真的生效：:low 不等于缺省最高档时按 low 执行（不再被丢弃）', () => {
+    const m = makeModel({ id: "r", provider: "p", reasoning: true, thinkingLevelMap: { low: 1, high: 2, xhigh: 3 } });
+    const reg = makeRegistry([m]);
+    const r = resolveModel(undefined, reg, { model: "p/r:low" });
+    expect(r.thinkingLevel).toBe("low"); // 修复前会取缺省最高档 xhigh
+  });
+
+  it('frontmatter 模型串的档位同样生效（无调用参数时）', () => {
+    const m = makeModel({ id: "r", provider: "p", reasoning: true, thinkingLevelMap: { low: 1, medium: 2, high: 3 } });
+    const reg = makeRegistry([m]);
+    const r = resolveModel({ model: "p/r:medium" } as never, reg);
+    expect(r.thinkingLevel).toBe("medium");
+  });
+
+  it('档位优先级：独立字段 > 模型串后缀（同层内字段更权威）', () => {
+    const m = makeModel({ id: "r", provider: "p", reasoning: true, thinkingLevelMap: { low: 1, high: 2 } });
+    const reg = makeRegistry([m]);
+    const r = resolveModel({ model: "p/r:low", thinkingLevel: "high" } as never, reg);
+    expect(r.thinkingLevel).toBe("high");
+  });
+
+  it('串里的档位该模型不可用 → 抛错（与独立字段同口径，不静默换档）', () => {
+    const m = makeModel({ id: "r", provider: "p", reasoning: true, thinkingLevelMap: { low: 1 } });
+    const reg = makeRegistry([m]);
+    expect(() => resolveModel(undefined, reg, { model: "p/r:xhigh" })).toThrow(/not available for model/);
+  });
+
+  it('调用参数串的档位优先于 frontmatter 档位', () => {
+    const m = makeModel({ id: "r", provider: "p", reasoning: true, thinkingLevelMap: { low: 1, high: 2 } });
+    const reg = makeRegistry([m]);
+    const r = resolveModel({ model: "p/r", thinkingLevel: "high" } as never, reg, { model: "p/r:low" });
+    expect(r.thinkingLevel).toBe("low");
   });
 });
 

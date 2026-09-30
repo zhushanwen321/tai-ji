@@ -77,17 +77,58 @@ export function assertThinkingLevel(level: string | undefined): ThinkingLevel | 
 }
 
 // ============================================================
-// 规则①：strip 合法 thinking 后缀
+// 规则①：模型引用串解析（strip 合法 thinking 后缀 + 切 provider/id，档位随串返回）
 // ============================================================
 
 /**
  * 剥离模型字符串尾部 ":thinkingLevel" 后缀（如 "ds-pro:xhigh" → "ds-pro"）。
  * 仅匹配合法 thinking level（THINKING_ORDER 白名单），避免误剥 "foo:bar" 这类无关冒号。
+ *
+ * 模块私有：对外唯一入口是 parseModelSelector（本函数只返回剥干净的串，单独暴露会
+ * 让调用方拿到半个解析结果、把档位丢掉）。
  */
-export function stripThinkingSuffix(modelStr: string): string {
+function stripThinkingSuffix(modelStr: string): string {
   // 按长度降序拼正则避免短串误匹配（如 "off" 先于 "o"——白名单无单字符，防御性保留）
   const alt = THINKING_ORDER.slice().sort((a, b) => b.length - a.length).join("|");
   return modelStr.replace(new RegExp(`:(${alt})$`), "");
+}
+
+/**
+ * 模型引用串的无损解析（语法单点）。
+ *
+ * 语法：`provider/id[:thinkingLevel]`——`/` 取第一个（id 自身可含 `/`）；`:level` 后缀
+ * 仅在取值落在 THINKING_ORDER 白名单时才不构成 id（`foo:bar` 这类冒号仍属 id）。
+ * 与 stripThinkingSuffix 的差别：本函数**把档位一起返回**，调用方不需要（也不允许）
+ * 自己再切一次——历史上就是因为这个函数只返回剥干净的串，模型串里显式写的档位被
+ * 无声丢弃。
+ */
+export interface ParsedModelSelector {
+  /** 原始输入串（未处理）。 */
+  readonly input: string;
+  /** 剥掉合法档位后缀后的串（身份裁决与 registry 匹配用）。 */
+  readonly ref: string;
+  /** ref 里的 provider（无 `/` 或 `/` 在首位时为空串）。 */
+  readonly provider: string;
+  /** ref 里的 id（无 `/` 时为空串）。 */
+  readonly id: string;
+  /** 串里显式写明的思考档位（仅白名单值时给出）。 */
+  readonly thinkingLevel?: ThinkingLevel;
+}
+
+/** 解析模型引用串（无损；档位随串返回）。 */
+export function parseModelSelector(input: string): ParsedModelSelector {
+  const ref = stripThinkingSuffix(input);
+  const level = ref === input ? undefined : (input.slice(ref.length + 1) as ThinkingLevel);
+  const slashIdx = ref.indexOf("/");
+  const provider = slashIdx > 0 ? ref.slice(0, slashIdx) : "";
+  const id = slashIdx > 0 ? ref.slice(slashIdx + 1) : "";
+  return {
+    input,
+    ref,
+    provider,
+    id,
+    ...(level !== undefined ? { thinkingLevel: level } : {}),
+  };
 }
 
 // ============================================================
@@ -286,10 +327,7 @@ export function assertCanonicalModelRef(
   opts: { source?: string } = {},
 ): ModelRef {
   const prefix = opts.source ? ` (${opts.source})` : "";
-  const clean = stripThinkingSuffix(input);
-  const slashIdx = clean.indexOf("/");
-  const provider = slashIdx > 0 ? clean.slice(0, slashIdx) : "";
-  const id = slashIdx > 0 ? clean.slice(slashIdx + 1) : "";
+  const { provider, id } = parseModelSelector(input);
 
   if (provider.length > 0 && id.length > 0) {
     const exact = source

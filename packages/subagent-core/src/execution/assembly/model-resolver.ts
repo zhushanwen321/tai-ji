@@ -15,6 +15,7 @@ import {
   THINKING_ORDER,
   assertCanonicalModelRef,
   modelRefFromVerified,
+  parseModelSelector,
 } from "../../shared/model-ref";
 import { getLogger } from "../../core/logger.ts";
 
@@ -114,6 +115,14 @@ export interface ResolvedModel {
  * @param paramOverride   调用方显式 override（最高优先级）
  * @param ctxModel        主 agent 当前模型（兜底，直接透传）
  */
+/** 取第一个已定义的值（档位优先级展开用；undefined 视为「未指定」）。 */
+function firstDefined<T>(...values: readonly (T | undefined)[]): T | undefined {
+  for (const value of values) {
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
 export function resolveModel(
   agentConfig: AgentConfig | undefined,
   modelRegistry: ModelRegistryLike,
@@ -122,10 +131,19 @@ export function resolveModel(
 ): ResolvedModel {
   // 1. paramOverride（最高优先级）。显式指定但 lookup/auth 失败 → 直接抛错，
   // 不降级到下层（避免「以为用了 X 实际用 Y」的静默错误）。
+  // 档位候选按优先级：调用参数自带字段 > 模型串内联后缀 > frontmatter 字段 >
+  // frontmatter 模型串后缀——越靠近「这一次调用」越权威；同层内字段比内联后缀权威。
   if (paramOverride?.model) {
     return lookupAndResolve(
       paramOverride.model,
-      paramOverride.thinkingLevel ?? agentConfig?.thinkingLevel,
+      firstDefined(
+        paramOverride.thinkingLevel,
+        parseModelSelector(paramOverride.model).thinkingLevel,
+        agentConfig?.thinkingLevel,
+        agentConfig?.model !== undefined
+          ? parseModelSelector(agentConfig.model).thinkingLevel
+          : undefined,
+      ),
       modelRegistry,
       "paramOverride",
     );
@@ -137,7 +155,11 @@ export function resolveModel(
   if (agentConfig?.model) {
     return lookupAndResolve(
       agentConfig.model,
-      paramOverride?.thinkingLevel ?? agentConfig.thinkingLevel,
+      firstDefined(
+        paramOverride?.thinkingLevel,
+        agentConfig.thinkingLevel,
+        parseModelSelector(agentConfig.model).thinkingLevel,
+      ),
       modelRegistry,
       "agentConfig",
     );
@@ -150,8 +172,13 @@ export function resolveModel(
     modelRefFromVerified(ctxModel, modelRegistry);
     return {
       model: ctxModel,
-      thinkingLevel: paramOverride?.thinkingLevel ?? agentConfig?.thinkingLevel
-        ?? maxThinkingForModel(ctxModel),
+      thinkingLevel: firstDefined(
+        paramOverride?.thinkingLevel,
+        agentConfig?.thinkingLevel,
+        agentConfig?.model !== undefined
+          ? parseModelSelector(agentConfig.model).thinkingLevel
+          : undefined,
+      ) ?? maxThinkingForModel(ctxModel),
     };
   }
 
@@ -175,6 +202,10 @@ export function resolveModel(
  *   - model 非全等（不存在/大小写不符/孪生歧义）→ assertCanonicalModelRef 的问句式报错
  *   - model 全等命中但 auth 未配置 → 提示在 models.json 配置鉴权
  *   - thinkingLevel 显式指定但该模型不可用 → 列出该模型可用档位 + 换档/换模型指引
+ *
+ * 档位来源二态：调用方独立字段（paramOverride/agentConfig.thinkingLevel）与模型串内联
+ * 后缀（`provider/id:level`）——两者都在调用点展开成同一个「显式请求」，缺省推导只在
+ * 两者全缺席时发生（串里的档位不再被丢弃）。
  */
 function lookupAndResolve(
   modelStr: string,
