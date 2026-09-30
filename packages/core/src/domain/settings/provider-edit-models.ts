@@ -11,7 +11,7 @@
  * 接口即测试面（interface is the test surface）：行为矩阵见 provider-edit-models.test.ts。
  */
 import { ref, reactive, watch, type Ref } from 'vue'
-import type { ProviderInfo, SetProviderData } from '@taiji/shared'
+import { PI_THINKING_LEVELS, type ProviderInfo, type SetProviderData } from '@taiji/shared'
 import type { Translate } from './provider-edit-types'
 
 // ── 类型 ──
@@ -91,7 +91,7 @@ export const CONTEXT_OPTIONS = [
  * 思考策略预设 → thinkingLevelMap。thinkingLevelMap 语义是 pi 的**黑名单过滤**，
  * 不是「key = UI 可选档位」的白名单（按白名单心智写预设会多出未列出的默认档）：
  * pi `getSupportedThinkingLevels`（pi-ai dist/models.js:548-558）对 reasoning=true 的
- * 模型遍历 EXTENDED_THINKING_LEVELS（off/minimal/low/medium/high/xhigh/max）逐档判定：
+ * 模型遍历 EXTENDED_THINKING_LEVELS（= shared PI_THINKING_LEVELS 全集 7 值）逐档判定：
  * - value = null → 剔除该档
  * - xhigh / max → 必须显式列出（未列即视为不支持）
  * - 其余档（off/minimal/low/medium/high）→ 默认保留（未列也参与）
@@ -99,11 +99,18 @@ export const CONTEXT_OPTIONS = [
  * value = 发给 pi 的实际 level（如 max 档发 xhigh），不是 key——展示是展示、传递是 value。
  * 预设：all-levels(undefined = pi 默认五档 off~high；xhigh/max 需显式映射，要最高档选 high-max)
  *      / on-off(off+high 两档) / high-max(off+high+max→xhigh 三档)
+ *
+ * 档位集合从 shared PI_THINKING_LEVELS（前端唯一词表来源）派生——不手写档位清单：
+ * 每个预设以「全档置 null」为基底再覆盖要保留的档，pi 新增档位时自动进黑名单，
+ * 不会因漏写 key 而静默变成可用档（黑名单缺项即默认保留，是漏写的真实后果）。
  */
+const allLevelsNull = (): Record<string, string | null> =>
+  Object.fromEntries(PI_THINKING_LEVELS.map((level) => [level, null]))
+
 const THINKING_PRESETS: Record<ThinkingStrategy, Record<string, string | null> | undefined> = {
   'all-levels': undefined,
-  'on-off': { off: 'off', high: 'high', minimal: null, low: null, medium: null },
-  'high-max': { off: 'off', high: 'high', max: 'xhigh', minimal: null, low: null, medium: null },
+  'on-off': { ...allLevelsNull(), off: 'off', high: 'high' },
+  'high-max': { ...allLevelsNull(), off: 'off', high: 'high', max: 'xhigh' },
 }
 
 /** 思考策略 Select 选项（template thinkingStrategies 来源）。
