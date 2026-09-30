@@ -9,9 +9,6 @@
 // ── 协议面（契约类型 SSOT + 帧型 + 方法 + 反向通道 + 错误码 + 版本协商 + schema）──
 export * from "./protocol/index.ts";
 
-// ── 模型引用串语法 + thinking 档位词表（跨 host/壳/CLI/前端 的单点）──
-export * from "./model-ref.ts";
-
 // ── 引擎侧原语（7 模块，impl-plan §2.1 原语迁移处置表）──
 export * from "./schema-emulation.ts";
 export * from "./nesting-guard.ts";
