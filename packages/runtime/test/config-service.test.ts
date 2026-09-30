@@ -571,6 +571,7 @@ describe('M2c: ConfigService 构造器注入 providerCredentialResolver（D3 链
         hasProviderCredential: vi.fn(() => false),
         listCredentialBackedProviderIds,
         resolveProviderCredential: vi.fn(async () => undefined),
+        resolveProviderBaseUrl: vi.fn(() => undefined),
       },
       listCredentialBackedProviderIds,
     }

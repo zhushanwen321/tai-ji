@@ -54,4 +54,19 @@ export interface IProviderCredentialResolver {
    * - 全源未命中 → undefined（无凭据）。
    */
   resolveProviderCredential(providerId: string): Promise<ResolvedProviderCredential | undefined>
+
+  /**
+   * 解析 provider 实际生效的 baseUrl（同步；两级数据源，对齐 pi 实际生效解析序
+   * provider-composer 的 `config.baseUrl ?? model.baseUrl` 覆盖式网关语义）：
+   * ① models.json providers[id].baseUrl（provider 级网关值）——该键经 pi-provider-store
+   *    启动归一化（stripCatalogProviderLevelKeys）后仅在用户显式配网关（extras.gatewayBaseUrl
+   *    标记）时保留，故此级读到的必是用户网关实际值；未配网关的内置 provider 此级无值。
+   * ② 第一级无值时回退内置 catalog（generated/builtin-providers.json）该 provider 的
+   *    provider 级 baseUrl——未配网关的内置 provider，此值即 pi 实际生效值。
+   * ③ 两级皆无值 → undefined（消费方按「无生效 baseUrl」处置，不猜测默认值）。
+   *
+   * 与凭据方法同源收口的理由：消费方（如 TTS 供应商联动的 baseUrl 预填）需要的是
+   * 「provider 实际生效值」，port 文件头已明令新场景不得再自建解析链。
+   */
+  resolveProviderBaseUrl(providerId: string): string | undefined
 }

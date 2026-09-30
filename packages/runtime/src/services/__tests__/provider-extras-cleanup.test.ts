@@ -52,6 +52,7 @@ const stubResolver: IProviderCredentialResolver = {
   hasProviderCredential: () => false,
   listCredentialBackedProviderIds: () => new Set<string>(),
   resolveProviderCredential: async () => undefined,
+  resolveProviderBaseUrl: () => undefined,
 }
 
 function makeSvc(): ConfigService {

@@ -7,8 +7,8 @@
  *   2. models.json providers[id].apiKey（custom 凭据所在）
  *
  * 构造无 IO：全部读取懒发生（hasProviderCredential / listCredentialBackedProviderIds /
- * resolveProviderCredential 被调用时才读盘）——这是组合根装配时序的前提：init 注入先于
- * 任何 findValidDefaultModel 调用时，装配期触发读取不会有「文件尚未就绪」的时序风险。
+ * resolveProviderCredential / resolveProviderBaseUrl 被调用时才读盘）——这是组合根装配时序的前提：
+ * init 注入先于任何 findValidDefaultModel 调用时，装配期触发读取不会有「文件尚未就绪」的时序风险。
  *
  * $ENV_VAR / command 配置值形态（探针 P-cred，设计 §3.6）：
  * - taiji 侧 AuthStorage 不展开配置值（auth-storage.ts:126-128 原样返回 JSON 解析结果，
@@ -25,6 +25,7 @@ import type { IConfigStore } from '../ports/config.js'
 import type { IProviderCredentialResolver, ResolvedProviderCredential, UnsupportedCredentialForm } from '../ports/provider-credential-resolver.js'
 import type { AuthService } from './auth-service.js'
 import type { AuthStorage, Credential } from './auth-storage.js'
+import builtinData from '../../generated/builtin-providers.json'
 
 /** 凭据源标识（与接口返回的 source 同域）。 */
 type CredentialSourceId = 'auth.json' | 'models.json'
@@ -153,6 +154,32 @@ function isUsableApiKey(apiKey: unknown): apiKey is string {
   return typeof apiKey === 'string' && apiKey !== ''
 }
 
+/**
+ * 网关值是否可用（trim 后非空白串）：空白串同视「未设置」（对齐 provider-config-helper
+ * resolveCatalogDisplayFields 的既有口径——空白串不是合法网关，catalog 快照的
+ * `provider.baseUrl: ""` 形态（ambient 类 provider）也不得当生效值返回）。
+ */
+function isUsableBaseUrl(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+/**
+ * 内置 catalog（generated/builtin-providers.json 编译期 import，与 provider-catalog /
+ * provider-config-helper / pi-provider-store 同款先例）该 provider 的 provider 级 baseUrl。
+ * 反序列化边界判型：格式异常（providers 非数组 / 条目缺形）返回 undefined 不抛。
+ */
+function readCatalogProviderBaseUrl(providerId: string): string | undefined {
+  const providers = (builtinData as { providers?: unknown }).providers
+  if (!Array.isArray(providers)) return undefined
+  for (const entry of providers) {
+    if (entry === null || typeof entry !== 'object') continue
+    const record = entry as { id?: unknown; baseUrl?: unknown }
+    if (record.id !== providerId) continue
+    return isUsableBaseUrl(record.baseUrl) ? record.baseUrl : undefined
+  }
+  return undefined
+}
+
 function createAuthJsonSource(deps: ProviderCredentialResolverDeps): CredentialSource {
   return {
     id: 'auth.json',
@@ -199,7 +226,11 @@ export class ProviderCredentialResolver implements IProviderCredentialResolver {
    */
   private readonly sources: readonly CredentialSource[]
 
+  /** resolveProviderBaseUrl 的 models.json 读取通道（与 sources 共享同一份 deps，懒读不缓存）。 */
+  private readonly deps: ProviderCredentialResolverDeps
+
   constructor(deps: ProviderCredentialResolverDeps) {
+    this.deps = deps
     this.sources = [createAuthJsonSource(deps), createModelsJsonSource(deps)]
   }
 
@@ -229,5 +260,16 @@ export class ProviderCredentialResolver implements IProviderCredentialResolver {
       return { key: outcome.key, source: source.id }
     }
     return undefined
+  }
+
+  /**
+   * 两级数据源（语义见 port 接口注释）：① models.json provider 级网关值（strip 归一化后
+   * 仅用户显式配网关时保留，读到即用户网关实际值）→ ② 内置 catalog provider 级 baseUrl
+   * （未配网关的内置 provider 此值即 pi 实际生效值）→ ③ 皆无 undefined。
+   */
+  resolveProviderBaseUrl(providerId: string): string | undefined {
+    const gateway = this.deps.configStore.getProviderConfig(providerId)?.baseUrl
+    if (isUsableBaseUrl(gateway)) return gateway
+    return readCatalogProviderBaseUrl(providerId)
   }
 }

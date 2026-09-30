@@ -319,6 +319,7 @@ describe('M2c 装配序：init 注入先于 findValidDefaultModel 的行为差�
       hasProviderCredential,
       listCredentialBackedProviderIds: () => new Set<string>(),
       resolveProviderCredential: async () => undefined,
+      resolveProviderBaseUrl: () => undefined,
     })
 
     const r = findValidDefaultModel()
