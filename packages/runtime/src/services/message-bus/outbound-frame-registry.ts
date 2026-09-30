@@ -77,7 +77,9 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 // - message.error / message.status / message.stream_error / send.rejected /
 //   message.complete / message.message_start / message.customStart / message.tool_call_update：
 //   短文本控制帧，payload 无无上界字段（dispatcher :236/:323/:348/:365/:375/:420/:438/:846 等全部实证为短文案）。
-// - message.bashStart / message.auto_retry_start|end /
+// - message.bashStart / message.bashAborted（services/session/bash-dispatcher.ts:450，
+//   abortBash 兜底终态帧 msg-pipeline-debloat D4-3，payload 仅 sessionId + timestamp 标量）/
+//   message.auto_retry_start|end /
 //   message.changeSetInvalidated（server.ts:330）/ message.file_changes（diff 文件名列表）：
 //   命令行 / 状态码 / 文件路径级载荷。
 // - message.compactionSummary / message.branchSummary：LLM 生成摘要文本（KB 级）。

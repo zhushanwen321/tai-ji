@@ -3,8 +3,8 @@
  *
  * 四类通知（压缩结果 onComplete / onError、阈值提醒、model_select 跨界与降档两条）从
  * `sendUserMessage(deliverAs:'steer'|'followUp')` 改为 `sendMessage(deliverAs:'nextTurn',
- * triggerTurn:false)`——通知作为 custom role 上下文随下一次 prompt 注入（pi 0.84.4 实证 F13：
- * `_pendingNextTurnMessages` 常驻至被消费、不自起 run），结构上消除「通知自起 run 抢占用户
+ * triggerTurn:false)`——通知作为 custom role 上下文随下一次 prompt 注入（pi 0.84.4 实证，登记
+ * docs/pi-semantics.json#PS-06：`_pendingNextTurnMessages` 常驻至被消费、不自起 run），结构上消除「通知自起 run 抢占用户
  * 消息投递跑道」——故事 C 根因：压缩完成后通知 run 与用户消息同时 prompt()，后到者被 pi 以
  * `Agent is already processing` 拒绝。
  *
@@ -17,7 +17,7 @@
  *   pi-boundary-reliability 附录 B 挂账不变（设计 §1.3 Out）。
  *
  * 已接受代价（设计 D4 四要素）：阈值提醒不再于 agent 空闲时立即生效，改为随用户下一条消息
- * 注入——pi 内建 overflow/threshold 自动压缩兜底在场（F14），无人在场时上下文可能持续增长。
+ * 注入——pi 内建 overflow/threshold 自动压缩兜底在场，无人在场时上下文可能持续增长。
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
