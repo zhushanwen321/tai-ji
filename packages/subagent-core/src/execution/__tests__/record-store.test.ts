@@ -48,8 +48,9 @@ import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-e
 import { SUBAGENT_RECORD_CUSTOM_TYPE, SUBAGENT_RECORD_ENTRY_VERSION } from "../persistence/record-entry.ts";
 import type { StatusFilter } from "../persistence/record-store.ts";
 import { RecordStore } from "../persistence/record-store.ts";
-import { manifestToSubagent, v2PairToRecord } from "../persistence/record-store-rebuild.ts";
+import { manifestToSubagent, stateMarkerFromFold, v2PairToRecord } from "../persistence/record-store-rebuild.ts";
 import type { V2EntryPair } from "../persistence/record-store-rebuild.ts";
+import { foldRecordJournalEvents } from "../persistence/record-events.ts";
 import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
 import { writeLegacyCancelledSidecar, writeLegacyFinalizedSidecar } from "./helpers/legacy-sidecar.ts";
 // [登记 §3.3] v2 两条款条目播种辅助（v1 全量快照写点已随兼容层删除）。
@@ -1764,5 +1765,52 @@ describe("record-created 帧承载绑定侧独有字段（model / thinkingLevel 
     expect(created).not.toHaveProperty("model");
     expect(created).not.toHaveProperty("thinkingLevel");
     expect(created).not.toHaveProperty("worktree");
+  });
+});
+
+// ============================================================
+// 折叠 → 终态收条投影（.state sidecar 退场的桥，① 读侧换源）
+// ============================================================
+
+describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
+  const idleEvent = {
+    type: "record-round-idle" as const,
+    seq: 2,
+    ts: 2000,
+    stopReason: "completed" as const,
+    turns: 1,
+    totalTokens: 10,
+  };
+  const settledEvent = {
+    type: "record-settled" as const,
+    seq: 3,
+    ts: 3000,
+    stopReason: "completed" as const,
+    endedAt: 3000,
+    turns: 1,
+    totalTokens: 10,
+  };
+
+  it("settled 在场 → 终局收条（reason/endedAt 取 settled）", () => {
+    const fold = foldRecordJournalEvents([idleEvent, settledEvent]);
+    expect(stateMarkerFromFold(fold)).toEqual({
+      status: "idle",
+      reason: "completed",
+      endedAt: 3000,
+    });
+  });
+
+  it("仅 round-idle 在场 → 轮终收条（endedAt 取该事件时间）", () => {
+    const fold = foldRecordJournalEvents([idleEvent]);
+    expect(stateMarkerFromFold(fold)).toEqual({
+      status: "idle",
+      reason: "completed",
+      endedAt: 2000,
+    });
+  });
+
+  it("无收条事件 / 无折叠 → undefined（在途中断，与 sidecar 缺席同语义）", () => {
+    expect(stateMarkerFromFold(undefined)).toBeUndefined();
+    expect(stateMarkerFromFold(foldRecordJournalEvents([]))).toBeUndefined();
   });
 });

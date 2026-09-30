@@ -422,6 +422,27 @@ export function readSidecarPayloads(file: string, stamps: FileStamps): SidecarPa
   };
 }
 
+/**
+ * 折叠状态 → 终态收条（`.state` sidecar 退场的桥，① 读侧换源的落点）。
+ *
+ * 语义与 `readStateMarker` 读出的新格式同形（status=idle + reason + endedAt）：
+ *   - `record-settled` 在场 → 终局收条（endedAt 用事件自带时间）；
+ *   - 否则 `record-round-idle` 在场 → 轮终收条（endedAt 用该事件时间；记录仍在世）；
+ *   - 都没有 → undefined（无收条 = 在途中断，与 sidecar 缺席同语义）。
+ *
+ * 纯函数：不做旧格式上行映射（那是 sidecar 存量兼容面，随 sidecar 一起退场）。
+ */
+export function stateMarkerFromFold(fold: RecordJournalFoldState | undefined): StateMarker | undefined {
+  if (fold === undefined) return undefined;
+  if (fold.settled !== undefined) {
+    return { status: "idle", reason: fold.settled.stopReason, endedAt: fold.settled.endedAt };
+  }
+  if (fold.roundIdle !== undefined) {
+    return { status: "idle", reason: fold.roundIdle.stopReason, endedAt: fold.roundIdle.ts };
+  }
+  return undefined;
+}
+
 // ============================================================
 // 身份基底 → light/full 缓存条目 → 重建单规则
 // ============================================================
