@@ -41,7 +41,8 @@ import { RecordStore } from "../persistence/record-store.ts";
 import { getSubagentRecordsDir } from "../assembly/path-encoding.ts";
 import { SubagentService } from "../subagent-service.ts";
 import { endedMessageGuard } from "../assembly/subagent-actions-core.ts";
-import type { ExecutionRecord, SubagentRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { SubagentRecord } from "../assembly/types.ts";
 import { makePi } from "./helpers/pi-mock.ts";
 import { v2Entries } from "./helpers/v2-record-entry.ts";
 
@@ -438,16 +439,25 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       return { record, sessionFile };
     }
 
-    /** dispose 后的 .state 磁盘产物读取（新格式收条）。 */
-    function readDisposedState(sessionFile: string): { status: string; reason?: string; endedAt?: number } {
-      return JSON.parse(fs.readFileSync(`${sessionFile}.state`, "utf-8")) as { status: string; reason?: string; endedAt?: number };
+    /**
+     * dispose 后的收条读取——收条改由事件流承载（③：`.state` 退场）：读最后一条
+     * record-settled 帧，投影成与旧 sidecar 同形的 {status, reason, endedAt}。
+     */
+    function readDisposedState(id: string): { status: string; reason?: string; endedAt?: number } {
+      const file = path.join(getSubagentRecordsDir(agentDir, agentDir), `${id}.events`);
+      const lines = fs.readFileSync(file, "utf-8").trim().split("\n");
+      const settled = lines
+        .map((l) => JSON.parse(l) as { type?: string; stopReason?: string; endedAt?: number })
+        .filter((e) => e.type === "record-settled")
+        .at(-1);
+      return { status: "idle", reason: settled?.stopReason, endedAt: settled?.endedAt };
     }
 
     it("行 1 [chat × parent-shutdown]：.state 收条 status=idle + stopReason=interrupted-by-restart + .alive release", () => {
       const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-chat-shutdown" });
       expect(service.disposeAllRecords("parent-shutdown")).toBe(1);
 
-      const marker = readDisposedState(sessionFile);
+      const marker = readDisposedState(record.id);
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-restart");
       expect(typeof marker.endedAt).toBe("number");
@@ -462,7 +472,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-chat-fork" });
       service.disposeAllRecords("parent-fork");
 
-      const marker = readDisposedState(sessionFile);
+      const marker = readDisposedState(record.id);
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-parent");
       expect(record.status).toBe("idle");
@@ -471,10 +481,10 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     });
 
     it("行 3 [one-shot × parent-shutdown]：stopReason=interrupted-by-restart，重启冷查分流不依赖可重连集", () => {
-      const { sessionFile } = registerActiveRecord({ id: "sa-d8-oneshot-shutdown" });
+      registerActiveRecord({ id: "sa-d8-oneshot-shutdown" });
       service.disposeAllRecords("parent-shutdown");
 
-      const marker = readDisposedState(sessionFile);
+      const marker = readDisposedState("sa-d8-oneshot-shutdown");
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-restart");
       // [U5] 重建单规则：一律 idle（U3）——stopReason 只是展示位，复活资格 = 物理三件套
@@ -484,7 +494,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       const { record, sessionFile } = registerActiveRecord({ id: "sa-d8-oneshot-new" });
       service.disposeAllRecords("parent-new");
 
-      const marker = readDisposedState(sessionFile);
+      const marker = readDisposedState(record.id);
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-parent");
       expect(record.status).toBe("idle");
@@ -505,7 +515,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       expect(record.status).toBe("idle");
       expect(record.closedReason).toBeUndefined();
       expect(record.stopReason).toBe("interrupted-by-restart");
-      const marker = readDisposedState(sessionFile);
+      const marker = readDisposedState(record.id);
       expect(marker.reason).toBe("interrupted-by-restart");
 
       // boot 重认领意愿消亡：[U5/D4 MF-1] 磁盘重建单规则恒 idle + 孤儿恢复恒 idle
