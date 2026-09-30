@@ -7,7 +7,7 @@
 // 设计基线：
 //   - docs/architecture/subagent-record-persistence-consolidation.md §3.3 D7
 //     （record 持久化收敛，写面从 9 处收口为 RecordStore 唯一写入口）
-//   - docs/adr/decisions.md ADR-0078（W1 介质归位：journal 唯一事实源 + 主 session
+//   - docs/adr/decisions.md ADR-0094（W1 介质归位：journal 唯一事实源 + 主 session
 //     每实体注册/终态两条 v2 小条目 + 物化投影；v1 全量快照写点停写，唯一残余 =
 //     v1 实体孤儿纠偏兼容层）
 //
@@ -37,7 +37,7 @@
 //      注册条目写点）。其余文件（含 extension 域）一律违规。
 //   R4 v1 快照投影构造器白名单（W1 新增，subagent-record 族）：toSubagentRecordEntry
 //      调用只许 record-entry.ts（定义）与 record-store.ts（v1 实体孤儿纠偏兼容层
-//      reportSubagentRecord——ADR-0078 失效清单登记面，W4 sunset 统一退役）。
+//      reportSubagentRecord——ADR-0094 失效清单登记面，W4 sunset 统一退役）。
 //      其余文件引用即违规：v1 全量快照（含 eventLog/displayItems 死字节）写点
 //      已停写，新写点一律走 v2 条目构造器。
 //   R5 workflow-record v1 快照载荷形态拒绝（W1 新增，全域无豁免）：workflow-record
@@ -45,7 +45,7 @@
 //      构造器 / snapshot 直传）即违规——含 R3 白名单宿主自身（四宿主的写点必须
 //      全部是 v2 形态，回潮 v1 快照即守卫红）。
 //   R6 entry 载荷死字节拒绝（W1 新增，全域无豁免）：append 条目调用窗口内出现
-//      `eventLog:` / `displayItems:` 字段写形态即违规（ADR-0078：运行态死字节
+//      `eventLog:` / `displayItems:` 字段写形态即违规（ADR-0094：运行态死字节
 //      不进主 session 条目；v1 兼容层的整对象投影不经字段字面量，不误伤）。
 //   R7 事件文件直写拒绝（W1 新增）：appendFileSync/appendFile 调用行起 4 行
 //      窗口内含 `.events` 路径字面量只许 record-events.ts（record 事件文件唯一
@@ -53,7 +53,7 @@
 //      两模块的原语入口，禁止在别处构造 .events 路径直接 append（窗口判定与
 //      R2-R6 同构，覆盖 prettier 拆行形态）。
 //
-// 白名单逐域（D7 ③ + ADR-0078 写面清单）：
+// 白名单逐域（D7 ③ + ADR-0094 写面清单）：
 //   - store 家族：record-store.ts（R1+R2+R4 豁免，唯一写入口本体）+
 //     record-store-rounds.ts（R2 豁免——RecordJournalWriteFace 容器，v2 两条款
 //     写面 + 事件追加注入位的共享写面基础设施）
@@ -117,7 +117,7 @@ export const V1_SNAPSHOT_PROJECTOR_RE = /\btoSubagentRecordEntry\s*\(/;
  *  回潮即红）/ snapshot 直传。 */
 export const WF_V1_PAYLOAD_RE = /\bv:\s*1\b|\btoWorkflowRecordEntryData\s*\(|\bsnapshot\b/;
 
-/** R6 entry 载荷死字节字段写形态（eventLog/displayItems——ADR-0078 停写面）。 */
+/** R6 entry 载荷死字节字段写形态（eventLog/displayItems——ADR-0094 停写面）。 */
 export const ENTRY_DEAD_BYTES_RE = /\beventLog\s*:|\bdisplayItems\s*:/;
 
 /** R7 事件文件直写形态（两段窗口判定）：调用行锚 = appendFile(Sync) 调用；
@@ -149,7 +149,7 @@ const STORE_FILE = "packages/subagent-core/src/execution/persistence/record-stor
 const JOURNAL_FACE_FILE = "packages/subagent-core/src/execution/persistence/record-store-rounds.ts";
 
 /** R4 白名单：v1 快照投影构造器定义 + v1 兼容层纠偏写点（reportSubagentRecord，
- *  ADR-0078 失效清单登记面）。 */
+ *  ADR-0094 失效清单登记面）。 */
 const V1_PROJECTOR_ALLOWED_FILES = new Set([
   "packages/subagent-core/src/execution/persistence/record-entry.ts",
   STORE_FILE,
@@ -296,7 +296,7 @@ function scanWriteLineRules(rel, i, line, lines, flags, violations) {
         `${rel}:${i + 1} [R7] 事件文件直写（appendFile×\`.events\`）出现在唯一写者外——` +
           `run journal 与 record 事件文件的追加原语分别在 run-events.ts / record-events.ts` +
           `（seq 分配权与头行契约单点）。Recovery: 改经两模块的 journal 追加入口` +
-          `（createRunEventJournal / createRecordEventJournal，ADR-0078）。`,
+          `（createRunEventJournal / createRecordEventJournal，ADR-0094）。`,
       );
       return;
     }
@@ -305,7 +305,7 @@ function scanWriteLineRules(rel, i, line, lines, flags, violations) {
   if (V1_SNAPSHOT_PROJECTOR_RE.test(line) && !V1_PROJECTOR_ALLOWED_FILES.has(rel)) {
     violations.push(
       `${rel}:${i + 1} [R4] v1 全量快照投影构造器 toSubagentRecordEntry 出现在登记面外——` +
-        `v1 快照 entry 已停写（ADR-0078），白名单仅 record-entry.ts（定义）与` +
+        `v1 快照 entry 已停写（ADR-0094），白名单仅 record-entry.ts（定义）与` +
         `record-store.ts（v1 实体孤儿纠偏兼容层，W4 sunset 退役）。` +
         `Recovery: 新写点改走 v2 条目构造器（toRegisteredEntryData / toSettledEntryData /` +
         `buildAdoptedSettledEntry）；读侧兼容投影经 record-entry.ts 单源扩展。`,
@@ -347,14 +347,14 @@ function scanWindowRules(rel, i, window, flags, violations) {
         `run 族条目写面只许 lifecycle.ts（收编终态条目补写）、壳 jsonl-run-store.ts` +
         `（loadAll 幂等补写）、terminal-actions.ts（D15 终局编排注册/终态条目）与` +
         `resume-run.ts（D7/裁决点 7 resume 链注册条目）。` +
-        `Recovery: 经 core run 写链（terminal-actions 终局编排 / 收编入口）落条目，勿在消费侧直写（ADR-0078）。`,
+        `Recovery: 经 core run 写链（terminal-actions 终局编排 / 收编入口）落条目，勿在消费侧直写（ADR-0094）。`,
     );
   }
   // R5：workflow-record v1 快照载荷形态（全域拒绝，含四宿主自身）。
   if (hasWorkflowType && WF_V1_PAYLOAD_RE.test(window)) {
     violations.push(
       `${rel}:${i + 1} [R5] workflow-record 写点携带 v1 快照载荷形态（v:1 / snapshot 直传）——` +
-        `v1 全量快照 entry 已停写（ADR-0078）：主 session 每实体只写注册 + 终态两条 v2` +
+        `v1 全量快照 entry 已停写（ADR-0094）：主 session 每实体只写注册 + 终态两条 v2` +
         `小条目（buildWorkflowRecordRegisteredEntryData / buildWorkflowRecordSettledEntryData）。` +
         `Recovery: 运行态数据落 run journal（run-events.ts），条目面改 v2 构造器。`,
     );
@@ -364,7 +364,7 @@ function scanWindowRules(rel, i, window, flags, violations) {
     violations.push(
       `${rel}:${i + 1} [R6] entry 载荷携带 eventLog/displayItems 字段写形态——` +
         `两字段是端到端死字节（读侧全部置空或不进 runtime 契约），W1 起禁入主 session` +
-        `条目（ADR-0078）。Recovery: 详情数据留在子 session 文件与事件流，条目面只写` +
+        `条目（ADR-0094）。Recovery: 详情数据留在子 session 文件与事件流，条目面只写` +
         `身份/终局/摘要字段。`,
     );
   }
@@ -379,14 +379,14 @@ function main() {
     for (const v of violations) console.error(`  ✗ ${v}`);
     console.error("");
     console.error("  权威源：docs/architecture/subagent-record-persistence-consolidation.md §3.3 D7");
-    console.error("          docs/adr/decisions.md ADR-0078（W1 介质归位写面清单）");
+    console.error("          docs/adr/decisions.md ADR-0094（W1 介质归位写面清单）");
     console.error("  一级拦截（模块边界）：eslint no-restricted-imports（subagent-core 块）");
     return 1;
   }
   console.log(
     `[record-write-surface] OK：${files.length} 个源文件（packages/*/src + extensions/**/src，tests 豁免）` +
       ` 写面守卫零命中（R1 七名函数 + R2 subagent-record + R3 workflow-record 白名单 +` +
-      ` R4 v1 投影器 + R5 v1 快照载荷 + R6 死字节 + R7 .events 直写，ADR-0078）`,
+      ` R4 v1 投影器 + R5 v1 快照载荷 + R6 死字节 + R7 .events 直写，ADR-0094）`,
   );
   return 0;
 }

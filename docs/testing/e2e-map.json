@@ -966,7 +966,7 @@
     },
     {
       "id": "E2E-PROP-01",
-      "summary": "集成线传播检查（ADR-0076 / C-proc-30）：目标线 ⊇ main 硬检查 + 兄弟 dev-* 线未传播 commit 软提示——本表登记自含冒烟形态（用法面 exit 2 契约 + --allow-diverged 旁路主链路恒绿）",
+      "summary": "集成线传播检查（ADR-0092 / C-proc-30）：目标线 ⊇ main 硬检查 + 兄弟 dev-* 线未传播 commit 软提示——本表登记自含冒烟形态（用法面 exit 2 契约 + --allow-diverged 旁路主链路恒绿）",
       "scope": [
         "scripts/check-line-propagation.mjs"
       ],
@@ -981,7 +981,7 @@
       "serial": false,
       "run": "node scripts/check-line-propagation.mjs --bogus; test $? -eq 2 && node scripts/check-line-propagation.mjs --target HEAD --allow-diverged",
       "owner": "scripts/",
-      "authority": "docs/adr/decisions.md#ADR-0076",
+      "authority": "docs/adr/decisions.md#ADR-0092",
       "note": "R2 态：真实运行形态 = prerelease / dev-merge skill 前置人工触发（约束 C-proc-30：常态在目标线 worktree 内 --target HEAD 不带旁路；硬检查红 = 目标线落后 main，红灯 block 属合法失败形态），非 pre-commit / 非 CI——集成线门不是逐 commit 门。真实检查的绿红取决于集成线拓扑而非代码正确性（目标线落后 main 即红），不能作为确定性 run；本表 run = 改检查自身时的自含冒烟：①--bogus 走用法错误路径断言 exit 2（退出码契约面）②--allow-diverged 旁路形态走完主链路（ref 解析 + merge-base 硬检查越过 + 兄弟线枚举软提示），exit 0 由设计契约保证（软提示恒不阻塞 exit code，见脚本头注释两级检查约定）。scope 仅脚本自身：传播检查的触发时机是打包/集成事件而非代码 diff，挂接纪律权威源 = docs/constraints.json C-proc-30"
     },
     {
@@ -1007,7 +1007,7 @@
     },
     {
       "id": "E2E-RECORD-01",
-      "summary": "run/record 写面唯一入口 grep 检查（ADR-0078 口径 R1-R7：写函数直调 / 两族 entry 写面白名单 / v1 快照投影构造器与载荷形态拒绝 / 死字节拒绝 / .events 直写拒绝）",
+      "summary": "run/record 写面唯一入口 grep 检查（ADR-0094 口径 R1-R7：写函数直调 / 两族 entry 写面白名单 / v1 快照投影构造器与载荷形态拒绝 / 死字节拒绝 / .events 直写拒绝）",
       "scope": [
         "scripts/check-record-write-surface.mjs",
         "scripts/__tests__/check-record-write-surface.test.mjs"
@@ -1028,7 +1028,7 @@
       "run": "node scripts/check-record-write-surface.mjs",
       "owner": "packages/subagent-core",
       "authority": "docs/adr/decisions.md",
-      "note": "R1 态（CI invariants 固定环节 + pre-commit 按路径触发双接线——SSOT = ci.yml invariants 步与 install-hooks.sh RECORD_WRITE_SURFACE 段，触发面 packages/subagent-core/src、extensions/**/src、脚本自身；单测 scripts/__tests__/check-record-write-surface.test.mjs 同在 CI vitest 轨）。设计基线 = ADR-0078（W1 介质归位：journal 唯一事实源 + 注册/终态两条 v2 条目 + 物化投影；写面检查断言随写点收敛更新为 R1-R7——新写点白名单 = 事件文件双写者（record-events/run-events）+ 三 run 条目宿主（pump/lifecycle/壳 jsonl-run-store）+ store 家族（record-store/rounds face），拒绝对象 = v1 快照投影构造器与载荷形态、eventLog/displayItems 死字节、.events 白名单外直写）；历史基线 = subagent-record-persistence-consolidation §3.3 D7（写面 9 处收敛 RecordStore 唯一写入口）。grep 门是文本级兜底，模块边界一级拦截 = eslint no-restricted-imports（eslint.config.mjs subagent-core 块）——本表登记脚本资产的 coverage 与最小触发面，路径级触发面由 pre-commit/CI 承担"
+      "note": "R1 态（CI invariants 固定环节 + pre-commit 按路径触发双接线——SSOT = ci.yml invariants 步与 install-hooks.sh RECORD_WRITE_SURFACE 段，触发面 packages/subagent-core/src、extensions/**/src、脚本自身；单测 scripts/__tests__/check-record-write-surface.test.mjs 同在 CI vitest 轨）。设计基线 = ADR-0094（W1 介质归位：journal 唯一事实源 + 注册/终态两条 v2 条目 + 物化投影；写面检查断言随写点收敛更新为 R1-R7——新写点白名单 = 事件文件双写者（record-events/run-events）+ 三 run 条目宿主（pump/lifecycle/壳 jsonl-run-store）+ store 家族（record-store/rounds face），拒绝对象 = v1 快照投影构造器与载荷形态、eventLog/displayItems 死字节、.events 白名单外直写）；历史基线 = subagent-record-persistence-consolidation §3.3 D7（写面 9 处收敛 RecordStore 唯一写入口）。grep 门是文本级兜底，模块边界一级拦截 = eslint no-restricted-imports（eslint.config.mjs subagent-core 块）——本表登记脚本资产的 coverage 与最小触发面，路径级触发面由 pre-commit/CI 承担"
     },
     {
       "id": "E2E-THIRDHOST-01",
