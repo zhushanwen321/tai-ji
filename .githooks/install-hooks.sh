@@ -1581,9 +1581,11 @@ ${STAGED_DELETED}"
     # 复用上方 pi-sync 段拼好的 PI_SYNC_TRIGGER_FILES（staged ACMR + deleted D——副本文件
     # 被删除也必须触发，脚本对文件缺失自带 fail 分支）。与 pi-sync 触发面有意部分重叠
     # （lockfile 同为触发文件）但职责不同：pi-sync 守构建派生锚点且 S6 只比 KnownApi，
-    # 本检查守 extensions/pi-rpc/subagent-core 档位词表副本，互不覆盖。不设独立 SKIP_* 开关（R1 后惯例，
+    # 本检查守两个比对面：subagent-core 的 THINKING_ORDER（宿主侧校验词表）与 shared 的
+    # PI_THINKING_LEVELS（前端派生源，core/renderer 从它派生）。llm-shared / pi-rpc 的副本已删除，
+    # 触发面随之摘除。不设独立 SKIP_* 开关（R1 后惯例，
     # 总开关 SKIP_ALL_CHECKS 兜底）。
-    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^extensions/shared/llm-shared/src/resolve\.ts$|^packages/pi-rpc/src/types\.ts$|^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$|^packages/subagent-core/src/shared/model-ref\.ts$"; then
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$|^packages/subagent-core/src/shared/model-ref\.ts$|^packages/shared/src/pi-preset\.ts$"; then
         echo -e "${BLUE}[INFO] thinking 档位词表文件有变更，运行档位词表比对检查...${NC}"
         if [ ! -f "scripts/check-thinking-levels.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-thinking-levels.mjs（D5 机器检查交付物缺失）${NC}"
