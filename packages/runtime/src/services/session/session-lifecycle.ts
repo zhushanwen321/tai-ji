@@ -615,7 +615,6 @@ export class SessionLifecycle implements ISessionRegistry {
 
   /** create 的单次创建体（原 create 全体，行为保持；幂等登记在 create 入口收口）。 */
   private async createNew(cwd?: string, label?: string, options?: CreateOptions): Promise<SessionSummary> {
-    const perfT0 = performance.now()
     const tempId = crypto.randomUUID()
     const sessionCwd = resolveCreateCwd(cwd)
 
@@ -625,7 +624,6 @@ export class SessionLifecycle implements ISessionRegistry {
     }
 
     const { presetId, resolution, allExtPaths, presetClientOptions } = await this.resolveCreateLaunch(sessionCwd, options)
-    console.log(`[perf:landing] rt resolveLaunch +${Math.round(performance.now() - perfT0)}ms`)
     // D8-3（perf W29）：迁移完成前 spawn pi 会读到未迁移配置——gate 等待。
     // gate 恒 resolve（迁移失败已 catch），正常迁移 <10ms 不可感知。
     await migrationGate
@@ -640,7 +638,6 @@ export class SessionLifecycle implements ISessionRegistry {
       env: buildPresetFallbackEnv(resolution),
       ...presetClientOptions,
     })
-    console.log(`[perf:landing] rt pi spawned +${Math.round(performance.now() - perfT0)}ms`)
 
     // 从 pi 获取真实 session ID + U2: 顺带读回生效 model+thinkingLevel（D2 设计）。
     // （getState / piSessionId 空值门禁 / 失败 safeDestroy 清理细节见 readBackCreateState；
@@ -649,7 +646,6 @@ export class SessionLifecycle implements ISessionRegistry {
       model: options?.modelOverride,
       thinkingLevel: options?.thinkingOverride,
     })
-    console.log(`[perf:landing] rt getState readback +${Math.round(performance.now() - perfT0)}ms`)
 
     // 用 pi 的真实 ID 替换临时 ID
     if (id !== tempId) {
@@ -677,7 +673,6 @@ export class SessionLifecycle implements ISessionRegistry {
     const createdSummary = this.svc.toSummary(session)
     // S3-W2：创建入口收敛点（create 路径）——触发插件 didCreateSession 定向投递。
     this.svc.notifySessionCreated(createdSummary)
-    console.log(`[perf:landing] rt create total +${Math.round(performance.now() - perfT0)}ms`)
     return createdSummary
   }
 
