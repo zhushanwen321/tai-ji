@@ -370,7 +370,8 @@ interface RuntimeState {
    * 撤销待收回条目 id 集（dmg-r1-2，撤销意图归宿单一化）：cancel 对 in-flight 条目受理
    * 待收回（kernel reclaim-requested）时登记；意图兑现（cancelled 终态 / delivered 事实
    * 优先）时清除。消费点：cancel 再入（重复完整「clear_queue 收回 + transcript 校验」
-   * 流程，不透传内核 cancelRequested 短路终结）、sweepInFlight（不重投留守）、
+   * 流程，不透传内核 cancelRequested 短路终结）、sweepInFlight（不重投留守；蒸发兑现须
+   * 本轮实际执行过 clear_queue——watchdog / ensureActive 失败轮槽位状态未知只留守）、
    * rebuildEntry（不重建重投）、disposeCleared（收回文本 = 兑现终结）。随 runtime state
    * 存活，dispose 即弃。
    */
@@ -780,6 +781,10 @@ export function createSessionDeliveryRegistry(
       // 永远不会被触发。事件来自活进程时 ensureActive 返回同一实例（幂等，零成本）。
       const client = await clientForAttachedTrigger(sessionId, rt, trigger)
       const primitive = client ? queuePrimitive(client) : null
+      // 本轮「pi 槽位已清空」事实（sweepInFlight 兑现门禁）：primitive 非 null = clear_queue
+      // 必已成功执行（抛错即进 catch 不达 sweep）；watchdog 轮（不解析 client）与
+      // ensureActive 失败轮为 false——槽位状态未知，撤销兑现无前提（dmg-r2-1）
+      const slotCleared = primitive !== null
       if (primitive) {
         // 触发条件②：pi 槽位非空——槽位真值取 clear_queue 返回值（pi 权威、操作时刻；PS-65）
         const cleared = await primitive.clearQueue()
@@ -791,8 +796,9 @@ export function createSessionDeliveryRegistry(
       }
       // 在途未确认扫描（§3.4 pi 崩溃/被回收行 / D5② reattach 判重锚）：不在槽位里（未随
       // clear_queue 收回）的在途条目只有两种事实——已进 transcript（确认送达）或随旧进程
-      // 蒸发（重投）。宽限窗避免与刚受理的投递竞速（updatedAt 新鲜者跳过）。
-      await sweepInFlight(sessionId, rt)
+      // 蒸发（重投）。宽限窗避免与刚受理的投递竞速（updatedAt 新鲜者跳过）；
+      // slotCleared = 本轮是否实际执行过 clear_queue（撤销兑现前提，见 sweepInFlight）
+      await sweepInFlight(sessionId, rt, slotCleared)
     } catch (e) {
       // §3.4 clear_queue 自身失败（pi 卡死）：本轮放弃，下轮触发点重试
       warn(`reconcile(${trigger}) failed (retry at next trigger), sid=`, sessionId, e)
@@ -827,8 +833,13 @@ export function createSessionDeliveryRegistry(
   /** 在途条目宽限窗（ms）：刚受理的投递（出站批在途）不参与扫描。 */
   const IN_FLIGHT_GRACE_MS = 10_000
 
-  /** 在途未确认扫描：有标记条目查 transcript（命中 → delivered；未命中 → 重投）。 */
-  async function sweepInFlight(sessionId: string, rt: SessionRuntime): Promise<void> {
+  /**
+   * 在途未确认扫描：有标记条目查 transcript（命中 → delivered；未命中 → 重投）。
+   * slotCleared = 本轮是否实际执行过 clear_queue（reconcile 传入；watchdog 轮 /
+   * ensureActive 失败轮为 false）——撤销兑现的必要前提：transcript 无迹 + 槽位未确认
+   * 清空 ≠ 文本已离场（可能仍在 pi 槽位稍后被消费），此时只留守（dmg-r2-1）。
+   */
+  async function sweepInFlight(sessionId: string, rt: SessionRuntime, slotCleared: boolean): Promise<void> {
     const aged = rt.handle
       .entriesFull()
       .active.filter((e) => e.state === 'in-flight' && Date.now() - e.updatedAt > IN_FLIGHT_GRACE_MS)
@@ -846,6 +857,7 @@ export function createSessionDeliveryRegistry(
       }
       if (rt.pendingRevoke.has(entry.id)) {
         // 撤销待收回条目（dmg-r1-2）：不重投（重投会清撤销标记复活消息）。
+        if (!slotCleared) continue // 本轮未跑 clear_queue（watchdog / ensureActive 失败）：文本可能仍在槽位稍后被消费，留守待下轮（dmg-r2-1）
         if (texts === null) continue // transcript 读失败：事实不明，留守待下轮
         // 执行到此处 = 槽位已随本轮 clear_queue 清空且 transcript 无迹——文本已不在
         // 任何投递通道（随 pi 重生蒸发）→ 撤销意图兑现：本地终态

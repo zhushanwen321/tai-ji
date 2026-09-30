@@ -829,7 +829,8 @@ describe('S1 死锁复现（D1 申报制）：无标记合批受理即落地 + g
 // 收回、无 transcript 校验，pi 槽位文本随后被消费即假撤销成功）；sweep/requeue 清撤销
 // 标记把待收回条目重投复活。修复 = registry 持 per-session pendingRevoke 意图集：再入
 // cancel 重复完整「收回 + 校验」流程；sweep/rebuild/disposeCleared 查集不重投，文本确认
-// 离场（收回/蒸发）即兑现终态。
+// 离场（收回/蒸发）即兑现终态。蒸发兑现另受 slotCleared 门禁（dmg-r2-1）：仅在本轮
+// 实际执行过 clear_queue 的触发轮（watchdog / ensureActive 失败轮槽位状态未知，留守）。
 
 describe('in-flight 撤销二段式归宿（dmg-r1-2）：意图集持有至兑现', () => {
   const SUBMIT_AND_ACCEPT = async (h: ReturnType<typeof makeHarness>, id: string, content: string) => {
@@ -870,14 +871,59 @@ describe('in-flight 撤销二段式归宿（dmg-r1-2）：意图集持有至兑�
     const first = await h.registry.cancel('s1', id)
     expect(first.cancelled).toBe(false)
 
-    // 30s watchdog 对账：clear_queue 空（槽位无滞留）+ transcript 无迹 = 文本已不在
-    // 任何投递通道 → 撤销意图兑现 cancelled（修复前：sweep 重投复活消息）
+    // settled 对账（clear_queue 实跑的触发轮）：clear_queue 空（槽位无滞留）+ transcript
+    // 无迹 = 文本已不在任何投递通道 → 撤销意图兑现 cancelled（修复前：sweep 重投复活
+    // 消息）。watchdog 轮自 slotCleared 门禁起槽位状态未知只留守不兑现——兑现必须
+    // 发生在槽位确认清空的轮次（见下方两条留守回归用例）
+    await vi.advanceTimersByTimeAsync(10_001) // 越过 in-flight 宽限窗
     h.setCleared({ steering: [], followUp: [] })
-    await vi.advanceTimersByTimeAsync(30_000)
+    h.emitSettled()
     await h.flush()
     expect(h.promptCalls).toHaveLength(1) // 未重投
     expect(h.registry.entries('s1')?.active).toHaveLength(0)
     expect(h.registry.entries('s1')?.tombstones).toMatchObject([{ id, state: 'cancelled' }])
+  })
+
+  it('watchdog 轮（clear_queue 未跑）sweep 只留守不兑现（slotCleared 门禁回归）', async () => {
+    const h = makeHarness()
+    const id = 'u-d2000005-0000-4000-8000-000000000005'
+    await SUBMIT_AND_ACCEPT(h, id, '留守用例')
+
+    // cancel：clear_queue 收回失败 → 意图留守 + 条目留守原态
+    h.client.clearQueue.mockRejectedValueOnce(new Error('pi stuck'))
+    const first = await h.registry.cancel('s1', id)
+    expect(first.cancelled).toBe(false)
+    expect(first.reason).toContain('收回失败')
+
+    // 30s watchdog tick：watchdog 触发不解析 client → clear_queue 整轮不跑，transcript
+    // 无迹 = 事实不明（文本可能仍在 pi 槽位稍后被消费）→ 只留守，不兑现不重投
+    //（修复前：sweep 无前提兑现 → tombstone=cancelled + submitted 出册，文本随后
+    // 被消费即已撤销消息复活为正常 user turn）
+    await vi.advanceTimersByTimeAsync(30_000)
+    await h.flush()
+    expect(h.client.clearQueue).toHaveBeenCalledTimes(1) // 仅 cancel 那次；watchdog 轮未跑
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'in-flight' })
+    expect(h.registry.entries('s1')?.tombstones).toHaveLength(0)
+    expect(h.promptCalls).toHaveLength(1) // 未重投
+  })
+
+  it('ensureActive 失败轮（clear_queue 未跑）sweep 同样留守不兑现（slotCleared 门禁回归）', async () => {
+    const h = makeHarness()
+    const id = 'u-d2000006-0000-4000-8000-000000000006'
+    await SUBMIT_AND_ACCEPT(h, id, 'pi 失联留守')
+
+    h.client.clearQueue.mockRejectedValueOnce(new Error('pi stuck'))
+    expect((await h.registry.cancel('s1', id)).cancelled).toBe(false)
+
+    // 条目老化后 settled 触发，但 ensureActive 失败（pi 已死未恢复）→ client 解析
+    // undefined → clear_queue 整轮不跑，槽位状态未知 → 只留守不兑现
+    await vi.advanceTimersByTimeAsync(10_001)
+    vi.mocked(h.deps.ensureActive).mockRejectedValueOnce(new Error('pi dead'))
+    h.emitSettled()
+    await h.flush()
+    expect(h.registry.entries('s1')?.active[0]).toMatchObject({ id, state: 'in-flight' })
+    expect(h.registry.entries('s1')?.tombstones).toHaveLength(0)
+    expect(h.promptCalls).toHaveLength(1) // 未重投
   })
 
   it('待收回条目随收回兑现：第二次 cancel 收回目标文本 → 撤销成功回草稿', async () => {
