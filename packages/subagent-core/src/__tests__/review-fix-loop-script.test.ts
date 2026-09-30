@@ -738,9 +738,10 @@ describe("review-fix-loop.js 结构化失败终判恢复指引锚点", () => {
   });
 
   it("fail-fast 形态锚点：failFastAgent 包装存在、脚本无 F-1 字面量、无 degraded 可观测面", () => {
-    // failFastAgent 单一声明 + reviewer/fixer 两处消费（声明含 `(`，共 3 次）
+    // failFastAgent 单一声明 + reviewer/fixer/reviewer 解析失败原位重试 三处消费
+    //（声明含 `(`，共 4 次；重试消费点 = 结果无效时的回注重派，2026-09-30 同步 dev-merge-gates）
     expect(WORKFLOW_SOURCE).toContain("function failFastAgent(call, failedLabel)");
-    expect(WORKFLOW_SOURCE.match(/failFastAgent\(/g)?.length).toBe(3);
+    expect(WORKFLOW_SOURCE.match(/failFastAgent\(/g)?.length).toBe(4);
     // F-1 引擎前缀字面量不再内联（引擎侧常量仍被宿主重试分诊消费，与本脚本无契约关系）
     expect(WORKFLOW_SOURCE).not.toContain("Structured output failed deterministically");
     // 弱格式降级可观测面零残留（degraded 三落点已整体拆除）
