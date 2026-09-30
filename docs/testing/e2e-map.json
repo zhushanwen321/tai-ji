@@ -1590,6 +1590,19 @@
    "owner": "packages/subagent-core",
    "authority": "docs/constraints.json",
    "note": "C-state-20 守卫（register §2.6 配套）。双接线 = ci.yml invariants 步 + install-hooks.sh GLOBAL_SLOT_STAGED 段；扫描面限定 subagent 体系三包；注释行豁免（声明文件头部用字面量举例说明机制）。"
+  },
+  {
+   "id": "E2E-PIPE-08",
+   "summary": "thinking 档位词表比对守卫：pi-ai ModelThinkingLevel ↔ llm-shared / pi-rpc 两处历史副本 + SDK model-ref 权威表（--self-test 提取自检）",
+   "scope": ["scripts/check-thinking-levels.mjs", "packages/subagent-engine-sdk/src/model-ref.ts"],
+   "layer": "L1",
+   "assets": [{"kind": "script", "ref": "scripts/check-thinking-levels.mjs"}],
+   "trigger": "on-diff",
+   "serial": false,
+   "run": "node scripts/check-thinking-levels.mjs",
+   "owner": "packages/subagent-engine-sdk",
+   "authority": "docs/CONTEXT.md",
+   "note": "词表单源 = SDK model-ref（T3 比对面，本轮由 subagent-core shared/model-ref.ts 迁入）；pre-commit 按路径触发。"
   }
  ]
 }

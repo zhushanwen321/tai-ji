@@ -18,7 +18,7 @@
  * 守卫项 3 组：
  *   T1 llm-shared THINKING_LEVELS（extensions 侧唯一副本）== pi-ai ModelThinkingLevel
  *   T2 pi-rpc THINKING_LEVELS（被迫独立的协议侧副本，顺带比对——提取与比对逻辑同构）[fail]
- *   T3 subagent-core THINKING_ORDER（packages 侧有序数组副本，ext-simplify-18 §3.4 D6
+ *   T3 SDK model-ref THINKING_ORDER（packages 侧有序数组副本，ext-simplify-18 §3.4 D6
  *      纳入；比对语义 = 成员集合一致性，不判低→高顺序——顺序语义由 subagent-core
  *      自身测试锚定）[fail]
  *
@@ -37,7 +37,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PI_AI = '@earendil-works/pi-ai'
 const LLM_SHARED_RESOLVE = join(ROOT, 'extensions', 'shared', 'llm-shared', 'src', 'resolve.ts')
 const PI_RPC_TYPES = join(ROOT, 'packages', 'pi-rpc', 'src', 'types.ts')
-const SUBAGENT_CORE_MODEL_REF = join(ROOT, 'packages', 'subagent-core', 'src', 'shared', 'model-ref.ts')
+const SUBAGENT_CORE_MODEL_REF = join(ROOT, 'packages', 'subagent-engine-sdk', 'src', 'model-ref.ts')
 const DESIGN_DOC = 'docs/architecture/ext-simplify-17-shared-extraction.md'
 const DESIGN_DOC_18 = 'docs/architecture/ext-simplify-18-shared-adoption.md'
 
@@ -260,20 +260,20 @@ function main() {
   // 由 subagent-core 自身测试锚定，守卫只抓成员漂移。
   {
     if (!existsSync(SUBAGENT_CORE_MODEL_REF)) {
-      fail(`T3 subagent-core model-ref.ts 缺失: ${SUBAGENT_CORE_MODEL_REF}——恢复动作：确认文件未被移动/删除（副本迁移时同步本守卫路径与 ${DESIGN_DOC_18} D6）`)
+      fail(`T3 SDK model-ref.ts 缺失: ${SUBAGENT_CORE_MODEL_REF}——恢复动作：确认文件未被移动/删除（副本迁移时同步本守卫路径与 ${DESIGN_DOC_18} D6）`)
     } else {
       const r = extractConstListMembers(readFileSync(SUBAGENT_CORE_MODEL_REF, 'utf-8'), 'THINKING_ORDER')
       if (r.error) {
-        fail(`T3 subagent-core THINKING_ORDER 提取失败: ${r.error}（${SUBAGENT_CORE_MODEL_REF}）${T3_RECOVERY_SUFFIX}`)
+        fail(`T3 SDK model-ref THINKING_ORDER 提取失败: ${r.error}（${SUBAGENT_CORE_MODEL_REF}）${T3_RECOVERY_SUFFIX}`)
       } else {
-        compareCopy('T3 subagent-core THINKING_ORDER', SUBAGENT_CORE_MODEL_REF, r.values, T3_RECOVERY_SUFFIX)
+        compareCopy('T3 SDK model-ref THINKING_ORDER', SUBAGENT_CORE_MODEL_REF, r.values, T3_RECOVERY_SUFFIX)
       }
     }
   }
 
   // 汇总
   if (failed === 0) {
-    console.log(`✓ thinking-levels 守卫通过（pi-ai ${piAiVersion} 权威源 ↔ llm-shared + pi-rpc + subagent-core 三副本词表一致）`)
+    console.log(`✓ thinking-levels 守卫通过（pi-ai ${piAiVersion} 权威源 ↔ llm-shared + pi-rpc 两副本 + SDK 权威词表一致）`)
     process.exit(0)
   }
   console.error('thinking-levels 守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）')

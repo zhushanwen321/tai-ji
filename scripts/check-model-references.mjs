@@ -52,7 +52,7 @@ const fail = (msg) => {
 }
 const warn = (msg) => console.warn(`  ⚠ ${msg}`)
 
-// ── thinking 档位后缀 strip（与 subagent-core shared/model-ref THINKING_ORDER 同表；
+// ── thinking 档位后缀 strip（与 SDK model-ref THINKING_ORDER 同表；
 //    防漂移 = 启动对账检查，见下方 auditThinkingOrderCopy 段）──
 const THINKING_ORDER = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
@@ -62,30 +62,30 @@ function stripThinkingSuffix(modelStr) {
   return modelStr.replace(new RegExp(`:(${alt})$`), '')
 }
 
-// ── 0b. THINKING_ORDER 副本 vs core 权威表对账（防漂移机器守卫）─────────────
-// 权威源 = 本仓 core 源码（相对脚本定位，不随 --root fixture 走——对账保护的是
+// ── 0b. THINKING_ORDER 副本 vs SDK 权威表对账（防漂移机器守卫）─────────────
+// 权威源 = 本仓 SDK 源码（相对脚本定位，不随 --root fixture 走——对账保护的是
 // 本脚本内副本与权威源的一致性，与被扫资产域无关）。
-const CORE_MODEL_REF_TS = join(__dirname, '..', 'packages', 'subagent-core', 'src', 'shared', 'model-ref.ts')
+const CORE_MODEL_REF_TS = join(__dirname, '..', 'packages', 'subagent-engine-sdk', 'src', 'model-ref.ts')
 
-/** 从 core model-ref.ts 源码提取 THINKING_ORDER 字面量表（窄解析：定位数组字面量后收 "..." 串）。 */
+/** 从 SDK model-ref.ts 源码提取 THINKING_ORDER 字面量表（窄解析：定位数组字面量后收 "..." 串）。 */
 function parseCoreThinkingOrder(source) {
   const m = /THINKING_ORDER\s*=\s*\[([^\]]*)\]/.exec(source)
   if (!m) return null
   return [...m[1].matchAll(/"([^"]+)"/g)].map((s) => s[1])
 }
 
-/** 对账脚本内 THINKING_ORDER 副本 vs core 权威表（逐项按序全等）；不一致 fail 并给恢复动作。 */
+/** 对账脚本内 THINKING_ORDER 副本 vs SDK 权威表（逐项按序全等）；不一致 fail 并给恢复动作。 */
 function auditThinkingOrderCopy() {
   let source
   try {
     source = readFileSync(CORE_MODEL_REF_TS, 'utf-8')
   } catch (e) {
-    fail(`core 权威表不可读: ${CORE_MODEL_REF_TS} — ${e.message}——恢复动作：确认仓库内 packages/subagent-core/src/shared/model-ref.ts 存在后重跑`)
+    fail(`SDK 权威表不可读: ${CORE_MODEL_REF_TS} — ${e.message}——恢复动作：确认仓库内 packages/subagent-engine-sdk/src/model-ref.ts 存在后重跑`)
     return
   }
   const coreOrder = parseCoreThinkingOrder(source)
   if (!coreOrder || coreOrder.length === 0) {
-    fail(`core 权威表解析失败（model-ref.ts 未提取到 THINKING_ORDER 数组字面量）——恢复动作：核对 ${CORE_MODEL_REF_TS} 的 THINKING_ORDER 声明形态（须为 "..." 字符串数组字面量），并同步本脚本的解析正则`)
+    fail(`SDK 权威表解析失败（model-ref.ts 未提取到 THINKING_ORDER 数组字面量）——恢复动作：核对 ${CORE_MODEL_REF_TS} 的 THINKING_ORDER 声明形态（须为 "..." 字符串数组字面量），并同步本脚本的解析正则`)
     return
   }
   const inSync = coreOrder.length === THINKING_ORDER.length && coreOrder.every((v, i) => v === THINKING_ORDER[i])
