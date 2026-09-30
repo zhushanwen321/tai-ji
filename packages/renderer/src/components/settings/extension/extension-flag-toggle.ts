@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { runOptimisticUpdate } from '@taiji/core/foundation/optimistic-update'
 
 /** 单次开关切换的操作面：enabled / autoUpgrade 两个调用方各自注入（语义不同，共用编排）。 */
-export interface ExtensionFlagToggleOps<T> { // oe-exempt:20260930:framework:两组件（ExtensionActions/ExtensionDetail）注入的 ops 参数契约
+interface ExtensionFlagToggleOps<T> { // oe-exempt:20260930:framework:两组件（ExtensionActions/ExtensionDetail）注入的 ops 参数契约
   /** store 侧协议原语 setter（写入并返回旧值——apply 内顺带捕获回滚快照） */
   setFlag: (value: boolean) => boolean
   /** 持久化 RPC（commit；resolve 值透传给 onSuccess） */

@@ -2,9 +2,9 @@
  * SystemPage 集成测试文件骨架单源（system-page-rename-model / system-page-smart-context
  * 两文件的公共样板收敛：vi.mock 注册 + 超时放宽 + 生命周期 + mount 编排一站式 setup）。
  *
- * 消费形态（测试文件头部）：
+ * 消费形态（测试文件头部，sectionPath 为目标 Section 组件的动态 import 表达式）：
  *   const { settingsMock, mountPage, mountSection, pageWrapper } = setupSystemPageTest(
- *     () => import('.../<Section>.vue'),
+ *     () => import(sectionPath),
  *   )
  *
  * import 本模块即完成两类注册（副作用模块形态，须先于任何被 mock 模块加载）：
