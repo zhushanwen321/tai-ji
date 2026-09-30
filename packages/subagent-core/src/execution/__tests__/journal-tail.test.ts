@@ -22,7 +22,7 @@ import {
   type RecordJournalEvent,
 } from "../persistence/record-events.ts";
 import {
-  createJournalDirectoryTailer,
+  createEventDirectoryTailer,
   readJournalTail,
   splitCompleteLines,
   type JournalTailChunk,
@@ -217,7 +217,7 @@ describe("验收⑤：续读拼接 ≡ 全量 fold（fixture 含中部坏行 + �
   });
 });
 
-describe("createJournalDirectoryTailer（周期复查 / offset 续读状态）", () => {
+describe("createEventDirectoryTailer（周期复查 / offset 续读状态）", () => {
   it("rescan 冷启动全量读 + 后续 rescan 增量续读（onEvents 按文件回调）", async () => {
     const recordsDir = path.join(workDir, "records");
     fs.mkdirSync(recordsDir);
@@ -236,7 +236,7 @@ describe("createJournalDirectoryTailer（周期复查 / offset 续读状态）",
       startedAt: 1,
     });
     const seen: Array<{ file: string; count: number }> = [];
-    const tailer = createJournalDirectoryTailer({
+    const tailer = createEventDirectoryTailer({
       dir: recordsDir,
       filter: (name) => name.endsWith(".events"),
       parseLine: parseRecordEventFileLine,
@@ -261,7 +261,7 @@ describe("createJournalDirectoryTailer（周期复查 / offset 续读状态）",
     const recordsDir = path.join(workDir, "records");
     fs.mkdirSync(recordsDir);
     fs.writeFileSync(path.join(recordsDir, "sa-1.json"), "{}");
-    const tailer = createJournalDirectoryTailer({
+    const tailer = createEventDirectoryTailer({
       dir: recordsDir,
       filter: (name) => name.endsWith(".events"),
       parseLine: parseRecordEventFileLine,
@@ -283,7 +283,7 @@ describe("createJournalDirectoryTailer（周期复查 / offset 续读状态）",
     const filePath = path.join(recordsDir, "sa-1.events");
     fs.writeFileSync(filePath, lineOf({ type: "record-created", seq: 1, ts: 1 }));
     const resets: string[] = [];
-    const tailer = createJournalDirectoryTailer({
+    const tailer = createEventDirectoryTailer({
       dir: recordsDir,
       filter: (name) => name.endsWith(".events"),
       parseLine: parseRecordEventFileLine,
@@ -311,7 +311,7 @@ describe("createJournalDirectoryTailer（周期复查 / offset 续读状态）",
       const recordsDir = path.join(workDir, "records");
       fs.mkdirSync(recordsDir);
       const seen: Array<{ file: string; count: number }> = [];
-      const tailer = createJournalDirectoryTailer({
+      const tailer = createEventDirectoryTailer({
         dir: recordsDir,
         filter: (name) => name.endsWith(".events"),
         parseLine: parseRecordEventFileLine,
@@ -372,7 +372,7 @@ describe("createJournalDirectoryTailer（周期复查 / offset 续读状态）",
       startedAt: 1,
     });
     const seen: number[] = [];
-    const tailer = createJournalDirectoryTailer({
+    const tailer = createEventDirectoryTailer({
       dir: recordsDir,
       filter: (name) => name.endsWith(".events"),
       parseLine: parseRecordEventFileLine,

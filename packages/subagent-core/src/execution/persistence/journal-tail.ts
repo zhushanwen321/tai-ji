@@ -10,7 +10,7 @@
 // 1. offset 续读（readJournalTail）：per-file 字节偏移，只推进到完整行边界；
 // 2. 幂等全量重读：文件变短（截断/重建）→ 偏移归零重读——重复行的去重归域
 //    fold（record 域 seq 单调守卫构造性保证；run 域 seq 由 U1 补齐）；
-// 3. watch 目录（createJournalDirectoryTailer）：目录级 fs.watch（不 per-file，
+// 3. watch 目录（createEventDirectoryTailer）：目录级 fs.watch（不 per-file，
 //    D6 裁决）+ 周期复查兜底 fs.watch 静默丢事件（macOS 前科，git-head-watcher
 //    头注明载并以 60s 无条件兜底处理——本层同构，间隔可注入）。
 //
@@ -167,7 +167,7 @@ export interface JournalDirectoryTailerOptions<T> { // oe-exempt:20260929:framew
   retryDelayMs?: number;
 }
 
-export interface JournalDirectoryTailer { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
+export interface EventDirectoryTailer { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 手动触发一次全目录复查（冷启动全量读 / 测试驱动入口；幂等）。 */
   rescan(): void;
   /** 某文件当前续读偏移（字节；未读过 = undefined——诊断/测试面）。 */
@@ -176,7 +176,7 @@ export interface JournalDirectoryTailer { // oe-exempt:20260929:framework:workfl
   dispose(): void;
 }
 
-class DirectoryJournalTailer<T> implements JournalDirectoryTailer {
+class DirectoryJournalTailer<T> implements EventDirectoryTailer {
   /** filename → 字节偏移（只落在完整行边界）。 */
   private readonly offsets = new Map<string, number>();
   private watcher: FSWatcher | undefined;
@@ -307,8 +307,8 @@ class DirectoryJournalTailer<T> implements JournalDirectoryTailer {
  * 冷启动：构造后调用一次 rescan()（或等首个周期复查）从文件头全量读——tail 与
  * 全量读是同一文件同一解析器，只差起点偏移（直播/冷启动同构，D6 语义）。
  */
-export function createJournalDirectoryTailer<T>(
+export function createEventDirectoryTailer<T>(
   options: JournalDirectoryTailerOptions<T>,
-): JournalDirectoryTailer {
+): EventDirectoryTailer {
   return new DirectoryJournalTailer<T>(options);
 }

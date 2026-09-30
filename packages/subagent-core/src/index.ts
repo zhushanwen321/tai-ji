@@ -343,10 +343,10 @@ export {
   applyRecordEvent,
 } from "./execution/persistence/record-events.ts";
 export {
-  createJournalDirectoryTailer,
+  createEventDirectoryTailer,
   readJournalTail,
   splitCompleteLines,
-  type JournalDirectoryTailer,
+  type EventDirectoryTailer,
   type JournalDirectoryTailerOptions,
   type JournalLineParser,
   type JournalTailChunk,

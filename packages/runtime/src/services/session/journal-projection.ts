@@ -39,12 +39,12 @@ import {
   WORKFLOW_RECORD_CUSTOM_TYPE,
   classifySubagentRecordEntryData,
   classifyWorkflowRecordEntryData,
-  createJournalDirectoryTailer,
+  createEventDirectoryTailer,
   foldRecordJournalEvents,
   INITIAL_RECORD_EVENT_FOLD_STATE,
   parseRecordEventFileLine,
   RECORD_EVENTS_SUFFIX,
-  type JournalDirectoryTailer,
+  type EventDirectoryTailer,
   type RecordCreatedEvent,
   type RecordJournalEvent,
   type RecordJournalFoldState,
@@ -659,8 +659,8 @@ export class SessionJournalProjection {
   workflows: Map<string, WorkflowRunRecord> = new Map()
 
   private readonly sessionId: string
-  private readonly recordTailer: JournalDirectoryTailer | undefined
-  private readonly runTailer: JournalDirectoryTailer | undefined
+  private readonly recordTailer: EventDirectoryTailer | undefined
+  private readonly runTailer: EventDirectoryTailer | undefined
   private readonly onProjectionChange: () => void
   private disposed = false
   /** entry 批应用期间的回调抑制（发布归调用方统一执行）。 */
@@ -672,7 +672,7 @@ export class SessionJournalProjection {
     // undefined 直传 = tailer 缺省值（30s，周期复查兜底上界）
     const recheck: number | undefined = opts.recheckIntervalMs
     if (opts.recordsDir !== undefined) {
-      this.recordTailer = createJournalDirectoryTailer({
+      this.recordTailer = createEventDirectoryTailer({
         dir: opts.recordsDir,
         filter: (name) => name.endsWith(RECORD_EVENTS_SUFFIX),
         parseLine: parseRecordEventFileLine,
@@ -686,7 +686,7 @@ export class SessionJournalProjection {
       })
     }
     if (opts.runJournalDir !== undefined) {
-      this.runTailer = createJournalDirectoryTailer({
+      this.runTailer = createEventDirectoryTailer({
         dir: opts.runJournalDir,
         filter: (name) => name.endsWith(RUN_EVENT_JOURNAL_SUFFIX),
         parseLine: parseWorkflowRunEventFileLine,
