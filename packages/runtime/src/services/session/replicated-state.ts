@@ -154,7 +154,8 @@ export function normalizeWireSnapshot<T>(raw: T, semantics: FieldsNullSemantics)
  *
  * 生命周期：构造（可含周期兜底定时器）→ markDirty/refetch/poll 驱动拉取 → dispose()
  * 清理全部定时器（per-session 实例随 session 销毁调用，防定时器泄漏）。
- * dispose 后 markDirty/refetch 为 no-op，get() 仍可读最后快照（纯读无害）。
+ * dispose 后 markDirty/refetch 为 no-op，在途 fetch 的迟到结果静默丢弃（失败不落
+ * warn、不排退避），get() 仍可读最后快照（纯读无害）。
  */
 export class ReplicatedState<T> {
   private readonly config: ReplicatedStateConfig<T>
@@ -250,6 +251,10 @@ export class ReplicatedState<T> {
       const normalized = normalizeWireSnapshot(raw, this.config.fieldsNullSemantics)
       this.applySnapshot(normalized, epochAtStart)
     } catch (e: unknown) {
+      // dispose 后在途 fetch 的迟到失败：静默结束（不落失败 warn、不排退避）——dispose
+      // 语义「实例不再拉取」覆盖在途残余，迟到 warn 在测试环境下会落进 vitest worker
+      // 关闭窗口引发 EnvironmentTeardownError（unhandled rejection → 覆盖率门禁 flake）。
+      if (this.disposed) return
       // 快照失败（含 wire 协议异常）：保留 dirty + 保留上次快照，退避重试。
       // [code-harden RT-4#3] 失败显形：RPC 异常 / wire 归一异常分型 + 尝试序号，替代零日志 catch。
       const kind = e instanceof WireSnapshotSchemaError ? 'wire-schema' : 'rpc'
