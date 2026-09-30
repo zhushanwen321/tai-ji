@@ -13,7 +13,7 @@
 // 变化轴 = 「record 持久化终态/收口写面的编排规则」：写序（D8 v7）、锚分派
 // （pi/zcode 双腿）、CAS 语义、词汇双写投影的选择集中在此文件。
 //
-// [D7 写面约束] 本文件不 import 任何 `.state`/`.alive`/manifest 写函数——
+// [D7 写面约束] 本文件不 import 任何 `.alive`/manifest 写函数——
 // 七名写函数的调用字面只留在 record-store.ts（守卫 R1 与 eslint
 // no-restricted-imports 的白名单物理边界），经 TerminalCtx 注入（ctx 字段名
 // 刻意避开七名：persistFinalized / acquireLease / releaseLease）。
@@ -49,8 +49,6 @@ const logger = getLogger("subagents");
  * check-record-write-surface 扫描而不命中（写面唯一入口语义仍收口在 store 家族）。
  */
 export interface TerminalCtx {
-  /** `.state` cancelled 收条写（writeCancelledState 注入位）。 */
-  /** `.state` settle 收条写（writeSettledState 注入位）。 */
   /** `.alive` 写权声明（writeAliveMarker 注入位）。 */
   acquireLease: (sessionFile: string, marker: { pid: number; id: string; startedAt: number }) => void;
   /** `.alive` 写权释放（removeAliveMarker 注入位）。 */
@@ -81,14 +79,13 @@ export interface TerminalCtx {
 }
 
 /**
- * legacy 终态族的共用写序编排（D8 v7）：`.state` writeSync **先**（persist 失败 →
- * 返回 false，零持久化副作用）→ binding usage 快照 → archive → 终态 manifest 后 →
- * `.alive` 删除（release 出口①）。markFinalized / markCancelled 差异仅在 `.state`
- * persist 注入与 warn 标签，编排规则单源于此。
+ * legacy 终态族的共用写序编排（D8 v7；`.state` 收条随 ③ 退场后的现行形态）：
+ * binding usage 快照 → archive → 终态 manifest → `.alive` 删除（release 出口①）。
+ * markFinalized / markCancelled 差异仅 warn 标签，编排规则单源于此。
  *
- * 失败语义（§3.4）：`.state` 重试耗尽仍未落 → 返回 false，**零持久化副作用**（不
- * archive / 不写 manifest / 不 release 写权声明）——record 留 running 形态（磁盘无
- * 终态位，下次 boot 孤儿恢复终态化承接）；错误已在 state-marker 层 error 级响亮暴露。
+ * 失败语义（§3.4）：binding 快照 best-effort 不阻断主流程；磁盘终态由事件流的
+ * record-settled 帧判定（收条 sidecar 已退场），本编排不再有「先写收条失败即
+ * 整体放弃」的前置失败面，恒返回 true。
  */
 function legacyTerminalWrite(
   record: ExecutionRecord,
@@ -122,20 +119,20 @@ function legacyTerminalWrite(
  *
  * [U2 桥接期] 永久会话模型下终态概念删除，本原语保留旧持久化编排直至 U5 收口动作
  * 接线退役（正常收口归 markSettled、close 收口归 markSettledOut、编排性关闭归新编排）；
- * `.state` 旧格式由 U3 读侧单规则上行映射（finalized → idle + stopReason=reason）。
+ * 磁盘终态读侧 = 事件流折叠单规则（重建一律 idle，stopReason 取折叠收条）。
  *
- * @returns true = 持久化面完成；false = `.state` 未落（record 不应被视作已终态化）。
+ * @returns true = 持久化面完成（收条 sidecar 退场后本编排无前置失败面）。
  * @deprecated U5 退役（归 markSettled / markSettledOut / 编排性关闭新编排承接）。
  */
 export function markFinalizedImpl(record: ExecutionRecord, _closedReason: ClosedReason | undefined, ctx: TerminalCtx): boolean {
-  // closedReason 已随 `.state` 收条退场无处落盘（legacyTerminalWrite 不消费）——参数
+  // closedReason 已随收条 sidecar 退场无处落盘（legacyTerminalWrite 不消费）——参数
   // 保留（调用方签名兼容），U5 退役时随本原语一并删除。
   return legacyTerminalWrite(record, "markFinalized", ctx);
 }
 
 /**
- * 意图原语：取消终态（tombstone）。写序与失败语义同 markFinalized（D8 v7）；区别
- * 仅 `.state` 载荷 = {status:"cancelled", endedAt}（重建判定分支消费精确结束时间）。
+ * 意图原语：取消终态（tombstone）。写序与失败语义同 markFinalized（D8 v7）；差异
+ * 仅 warn 标签与语义定位（收条 sidecar 退场后两者持久化编排完全同形）。
  * 归口写点：cancelBackground 终态写面（record-lifecycle，U2a 迁移）。
  *
  * [U2 桥接期] 新模型下 cancel = 中断当前轮回 idle（不终态化，stopReason=interrupted）
@@ -156,23 +153,21 @@ export function markCancelledImpl(record: ExecutionRecord, ctx: TerminalCtx): bo
 /**
  * 意图原语：磁盘终态位翻回活态（透明重生回边整体收编，D3c 规格）。
  *
- * acquire-first 顺序（单 try 域原子收敛）：写 `.alive` 写权声明（acquire）→ 删
- * `.state` → 删 `.finalized`/`.cancelled` legacy（读侧兼容回退认领旧名，残留未删
- * 则重建仍读出终态），随后 resurrectClosed 内存翻回 + register——
- * 任一步失败**响亮抛错**（禁止 best-effort 吞错续跑：acquire 失败 = 双写风险敞口；
- * acquire-first 顺序保证失败时磁盘保持 closed 可读形态——极端形态下经 legacy
- * 文件名回退仍读出终态，见 catch 文案）。reportTransition（entry 上报）留编排层
- * （纯投递副作用，失败不破坏状态一致性）。
+ * acquire-first 顺序（单 try 域原子收敛）：写 `.alive` 写权声明（acquire）→
+ * resurrectClosed 内存翻回 + register——acquire 失败**响亮抛错**（禁止 best-effort
+ * 吞错续跑：acquire 失败 = 双写风险敞口）。磁盘终态位已随收条 sidecar 退场（③）：
+ * 磁盘终态由事件流折叠判定，重开不再需要清理磁盘终态位，`wasClosed` 的翻回由
+ * record-reopened 帧表达。reportTransition（entry 上报）留编排层（纯投递副作用，
+ * 失败不破坏状态一致性）。
  *
- * 两种接管形态统一（wasClosed 判别）：closed 候选 = 三件套全量；running 候选接管
- * （跨重启磁盘重建）= 跳过删终态位（无 `.state` 可删）**仍 acquire marker**
- * （「接管即声明」——现状此路径不写 marker 的双写窗随归口消灭）。
+ * 两种接管形态统一（wasClosed 判别）：closed 候选与 running 候选（跨重启磁盘重建）
+ * 均 **acquire marker**（「接管即声明」——现状此路径不写 marker 的双写窗随归口消灭）。
  * 中间形态推演（G3 单点论证）见设计 D3c (i)(ii)(iii)：三形态无卡死态、无双写窗。
  *
  * [U7 / §3.2.6 锚分派] zcode 锚不再被「no sessionFile anchor」硬拒：写权声明的
  * 物理对象 = 会话库条目（dbPath 单库共享，双宿主开同一 dataDir 时互斥语义与 pi
  * 同构），声明键 = transcriptRef 派生锚基底（zcodeAnchorBasePath）。zcode 无
- * `.state`/legacy 终态位（settle 不写——无文件锚），wasClosed 删位动作只对 pi 腿。
+ * 文件锚（settle 不写收条 sidecar——无文件锚），legacy 删位动作只对 pi 腿。
  * zcode 的异进程占用探针收编到 acquire 点（cold-lookup 探针面只覆盖 sessionFile
  * 形态——findColdLookupCandidate 对无 sessionFile 候选不探）。
  *
@@ -284,9 +279,8 @@ export function releaseWriteLeaseImpl(record: ExecutionRecord, ctx: TerminalCtx)
  * CAS：仅 running 可收口（对 idle record 重复 settle = 非法迁移，拒绝返回 false
  * + warn 留痕——与 trySettleLegacyClosed 抢锁语义同族）。
  *
- * 写序（D8：`.state` 先 → binding → manifest 后）：
- *   ① `.state` 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState；
- *      U2/U3 窗口期现有读侧对本格式落存在性降级分支，读侧兼容归 U3）；
+ * 写序（D8；`.state` 收条随 ③ 退场后的现行形态）：
+ *   ① 终态停因/时间由 record-settled 事件帧承载（下方 ④，幂等守卫在被调侧）；
  *   ② usage 快照落 binding（§3.2.7 统计口径——binding 快照为基准；含 round 推进）；
  *   ③ manifest 派生投影（settle 非终态 → legacy "running"——session-reader 视角
  *      的活跃成员，§3.2.8 下行映射）。
@@ -310,16 +304,13 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
   record.stopReason = stopReason;
   const settledAt = Date.now();
   // [U7 / §3.2.7 统计口径单基准] settle 快照锚分派（U6-D2 交接收编）：
-  //   - pi：子 session 文件锚（现行——`.state` 收条 + binding 快照）；
-  //   - zcode：transcriptRef 派生锚键承载 binding 快照（`.state` 无文件锚不写，
-  //     上一轮收条经 entry/manifest 投影承载）——zcode 无 pi 文件锚是常态形态
-  //     非异常，不 warn；
+  //   - pi：子 session 文件锚（现行——binding 快照；收条由 record-settled 帧承载）；
+  //   - zcode：transcriptRef 派生锚键承载 binding 快照（zcode 无 pi 文件锚是常态
+  //     形态非异常，不 warn）；
   //   - 双锚皆缺（spawn 窗口期 / 从未开跑）：warn 留痕（现行）。
   const zcodeAnchor = record.sessionFile === undefined ? zcodeRefOf(record) : undefined;
   if (record.sessionFile !== undefined) {
-    // ① `.state` 收条已退场（③）：终态停因/时间由 record-settled 帧承载，读侧取折叠
-    // 或索引收条。此处直接落 binding 快照。
-    // ② binding 快照。[U5 / §3.2.7] epoch 与放弃轮标记同批落盘（cancel/编排性
+    // binding 快照。[U5 / §3.2.7] epoch 与放弃轮标记同批落盘（cancel/编排性
     // 关闭的中断轮 settle 是标记的置位点——gate ②判据跨重启有效是硬要求，丢标记
     // = 中断轮迟到回注防双发失效）。[U7] 写点统一为 merge-or-create：binding
     // 缺失（spawn 回填点 best-effort 写失败的窗口）时以 settle 时点的完整身份域
@@ -332,7 +323,7 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
     // 与重启恢复的读侧单源）。
     persistSettleSnapshot(zcodeAnchorBasePath(zcodeAnchor), record, zcodeAnchor);
   } else {
-    logger.warn("[subagents] markSettled: no sessionFile anchor, .state/binding faces skipped", {
+    logger.warn("[subagents] markSettled: no sessionFile anchor, binding snapshot skipped", {
       detail: { id: record.id },
     });
   }

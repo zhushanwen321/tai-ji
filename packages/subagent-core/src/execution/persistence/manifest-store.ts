@@ -36,7 +36,7 @@ export interface ManifestRecord {
    * 与上方旧 status 三态投影**永久双写**——无版本磁盘 schema 不做破坏性变更；
    * session-reader（独立 npm 包独立进程）直读旧 status 做 identity 富字段投影
    * 与孤儿判定，删字段 = 外部消费方富字段降级。旧 status 只降权威地位不删字段。
-   * 宿主内消费方不读本字段（终态判定走 `.state` 权威，D1）；本字段是词汇收口
+   * 宿主内消费方不读本字段（终态判定走事件流折叠权威，D1）；本字段是词汇收口
    * （全景① ExecutionStatus+ClosedReason）在 manifest 写面的过渡锚。
    */
   executionStatus?: ExecutionStatus;
@@ -59,7 +59,7 @@ export interface ManifestRecord {
    * 此字段（undefined = 死因不可考，读侧守卫归一 undefined）。缺失时 manifest 源重建
    * 的快照丢 closedReason，endedMessageGuard 把 user-close/cancelled 误分流进
    * 「reconnectable/fork-from」分支——本字段是 manifest 源快照三分流的唯一依据
-   * （磁盘 sidecar 源由 .state reason 承载，不经本字段）。
+   * （磁盘重建源的 closedReason 由折叠与 v2 条目承载，不经本字段）。
    */
   closedReason?: ClosedReason;
   /**
@@ -280,10 +280,11 @@ export class ManifestStore {
    * recoverTmpFiles → sweepTmpFiles，名实对齐「静默删除」）。
    *
    * 旧语义（ADR-035 三分支：manifest 已存在删 tmp / tmp 合法且 manifest 缺失
-   * promote / tmp 非法删）已随缓存降级退役——manifest 现为可丢可重建缓存
-   * （权威 = `.state`，重建 = RecordStore.rebuildIndexes，D5），promote 半写 tmp
-   * 只会把陈旧快照复活成「看似权威」的索引，语义失效；统一**静默删除**全部
-   * tmp（含 0 字节/半写形态——D8 停机窗残留由本清扫顺带清理）。
+   * promote / tmp 非法删）已随缓存降级退役——manifest 现为可丢可重建的带水位
+   * 纯索引（权威 = record 事件流折叠，重建 = RecordStore.rebuildIndexes，
+   * [④ 裁决 A]），promote 半写 tmp 只会把陈旧快照复活成「看似权威」的索引，
+   * 语义失效；统一**静默删除**全部 tmp（含 0 字节/半写形态——D8 停机窗残留由
+   * 本清扫顺带清理）。
    *
    * [T5④ / PS-13] per-file 容错保留：单个 tmp 删除失败（ENOENT——并发回收/外部
    * 清理抢先、EACCES 等）只 warn + 跳过该文件，不再中断整轮。promote 退役后

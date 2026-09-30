@@ -257,7 +257,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
     // 快照/收条承载 = transcriptRef 派生锚键；`.state` 无文件锚不写。
     persistSettleSnapshot(zcodeAnchorBasePath(zcodeAnchor), rec, zcodeAnchor);
   } else {
-    logger.warn("[subagents] markRoundIdle: no sessionFile anchor, .state/binding faces skipped", {
+    logger.warn("[subagents] markRoundIdle: no sessionFile anchor, binding snapshot skipped", {
       detail: { id },
     });
   }
