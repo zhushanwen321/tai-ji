@@ -7,8 +7,10 @@
 //   2. 重建窗口前后，session-reader identity 投影的输入字段集（rootSessionId/slug/
 //      task/agentName/model/status/sessionFile/parentRecordId）逐字段一致——双写过渡
 //      字段（executionStatus）在场且不被本包消费（旧 status 三态投影继续生效）；
-//   3. 重建源 = `.state` 权威（closedReason 从终态位派生，旧三态 cancelled 形态
-//      保真——buildRecord 分支 1 → derivedManifestRecord 派生）。
+//   3. 重建源 = 事件流折叠 + identity entry（[③ .state 退场] 后终态位消失）——
+//      身份/富字段逐字段保真；legacy status 不再保真 closed（重建单规则恒 idle +
+//      无 closedReason → derivedManifestRecord 如实投影 legacy "running"，终态语义
+//      由 record-settled 事件帧承载）。
 //
 // 形态同 cross-package-subagent-core.test.ts：subagent-core 真实 tmpdir 产出磁盘
 // 状态，本包零 mock 读同一 tmpdir；不触碰真实数据目录（红线）。
@@ -143,13 +145,15 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     // ── session-reader 视角：重建后 identity 投影不降级 ──
     const after = (await listRecordManifests(agentDir)).find((m) => m.id === 'sa-dw')
     expect(after).toBeDefined()
-    expect(identityView(after!)).toEqual(viewBefore)
+    // 字段集保真（身份/富字段逐字段一致）；仅 legacy status 按 ③ 后重建语义如实
+    // 投影 running（终态权威 = 事件流 record-settled 帧，磁盘重建无 closedReason 载体）。
+    expect(identityView(after!)).toEqual({ ...viewBefore, status: 'running' })
 
-    // 重建源 = `.state` 权威：closedReason 从终态位派生回 manifest（旧三态 closed）
     const rawAfter = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
-    expect(rawAfter.status).toBe('closed')
+    expect(rawAfter.status).toBe('running')
     expect(rawAfter.executionStatus).toBe('idle')
-    expect(rawAfter.closedReason).toBe('gc')
+    // closedReason 无重建载体（`.state` 退场）→ 如实缺席。
+    expect(rawAfter.closedReason).toBeUndefined()
   })
 
   it('惰性通道：查询面（collectRecords）补建的 manifest 同样可被本包读取投影', async () => {

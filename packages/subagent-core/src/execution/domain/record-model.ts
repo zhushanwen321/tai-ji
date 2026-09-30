@@ -4,9 +4,10 @@
 // `execution/assembly/types.ts`）。
 //
 // 本批迁入：`ExecutionRecord`（record 聚合根）、`AgentResult`（record 内嵌的单次
-// agent 调用结果值对象）、两个判定谓词（`isReconnectableFinalReason` /
-// `isValidStopReason`）与两个判别联合守卫（`isPiTranscriptRef` /
-// `isZcodeTranscriptRef`）、`DEFAULT_AGENT_NAME`。
+// agent 调用结果值对象）、判定谓词 `isValidStopReason`、两个判别联合守卫
+// （`isPiTranscriptRef` / `isZcodeTranscriptRef`）、`DEFAULT_AGENT_NAME`。
+// [⑥ 清理] `isReconnectableFinalReason` 随 manifest 重物化族（rematerialize*）退场删除
+// ——唯一消费点已消失，死守卫不留。
 //
 // 依赖方向：只依赖 `./record-types.ts`（同层词汇）与 SDK 契约类型（`Turn` /
 // `ToolCall` / `WorktreeHandle` / `AgentFailureKind` / `AgentUsageTotal`）——**不 import
@@ -27,10 +28,7 @@ import type {
   WorktreeHandle,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import {
-  RECONNECTABLE_FINAL_REASONS,
-  STOP_REASONS,
-} from "./record-types.ts";
+import { STOP_REASONS } from "./record-types.ts";
 import type {
   AbandonedRoundMark,
   ClosedReason,
@@ -40,7 +38,6 @@ import type {
   ExecutionStatus,
   PiTranscriptRef,
   RecordOrigin,
-  ReconnectableFinalReason,
   StopReason,
   TranscriptRef,
   ZcodeTranscriptRef,
@@ -59,18 +56,6 @@ import type {
  * general-purpose 后名实相符。
  */
 export const DEFAULT_AGENT_NAME = "general-purpose";
-
-/**
- * 窄化守卫：closedReason 是否落在可重生集内。
- *
- * @deprecated 复活资格判据已不消费本守卫（资格 = §3.2.3 物理三件套，经
- * markResurrected acquire 锚定）——仅剩 manifest 重物化
- * （rematerializeReconnectableEntryManifests）的非准入消费点。新代码勿再接入；
- * U5 后随 legacy closed 词汇族一并清理。
- */
-export function isReconnectableFinalReason(reason: string | undefined): reason is ReconnectableFinalReason {
-  return (RECONNECTABLE_FINAL_REASONS as readonly string[]).includes(reason ?? "");
-}
 
 /** 窄化守卫：值是否为合法 StopReason 字面量（外部输入防御性解析用）。 */
 export function isValidStopReason(value: string | undefined): value is StopReason {

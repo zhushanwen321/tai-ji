@@ -143,9 +143,7 @@ export class RecordAccess {
    *  mainSessionFile 随调用透传（v2 D3 覆写 merge 数据源：主文件末条 entry 的批域
    *  标记与轮终 result/model；initSession 先赋值后恢复，时序就绪）。
    *  随后跑 entry-born 孤儿恢复（无子文件锚的 register-only record，spawn 窗口期死亡，
-   *  E2E 实测缺口）——主 session 文件经 getMainSessionFile 注入（构造期可空）。
-   *  [M1 Gate B] 末段跑可重连 entry 的 manifest 重物化（闭含 dispose 时 manifest
-   *  fire-and-forget 写被 SIGKILL 竞态吞掉的窗口）。 */
+   *  E2E 实测缺口）——主 session 文件经 getMainSessionFile 注入（构造期可空）。 */
   private recoverOrphanRecords(): void {
     try {
       this.deps.getStore().recoverOrphanRecords(this.deps.getSessionRootId() ?? undefined, this.deps.getMainSessionFile());
@@ -158,12 +156,6 @@ export class RecordAccess {
       this.deps.getStore().recoverEntryOnlyOrphans(this.deps.getMainSessionFile(), this.deps.getSessionRootId() ?? undefined);
     } catch (err) {
       logger.warn("[subagents] entry-only orphan recovery failed", {
-        reason: toErrorMessage(err),
-      });
-    }
-    try {
-    } catch (err) {
-      logger.warn("[subagents] reconnectable entry manifest re-materialization failed", {
         reason: toErrorMessage(err),
       });
     }
@@ -463,9 +455,9 @@ export class RecordAccess {
    * collectRecords 返回的 SubagentRecord 可直接转为可变 ExecutionRecord 供续操作。
    *
    * @param id subagent record id
-   * @param opts.allowReconnect [v8.5 D] message 专属：冷查额外接受「可重连」的 closed 记录
-   *   （死因∈ RECONNECTABLE_FINAL_REASONS，A 档真实死因 sidecar 是唯一准入门），经四重守卫后
-   *   resurrectClosed 回边为 running 并续写原 session 文件。仅 message 开启；close/cancel 维持单向终态语义。
+   * @param opts.allowReconnect [U4 退役保留] 两态万物可续下 idle 全候选（冷查无把门
+   *   语义，见 cold-lookup.coldLookupForAction 注）——参数只为调用方签名兼容保留，值
+   *   不参与判定。
    * @returns 可变 ExecutionRecord（message/close handler 直接操作）
    * @throws Error record 不存在 / 非本 session 所有（含恢复指引）
    * @throws ResurrectDeniedError 命中可重连集但被 worktree/异进程活实例守卫拦截（自带完整行动语言）
