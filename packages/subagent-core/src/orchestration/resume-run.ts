@@ -48,6 +48,7 @@ import {
   parseRecordStreamLine,
   type RunEventLineIssue,
   type WorkflowRunEvent,
+  type WorkflowRunEventInput,
 } from "./run-events.ts";
 import { checkWorkflowScriptSyntax, WORKER_IIFE_HOST_DECLARED_NAMES } from "./script-syntax.ts";
 import { AgentCall } from "./models/agent-call.ts";
@@ -387,29 +388,94 @@ function findLatestRunResumed(
   return undefined;
 }
 
+/** resume 读面的 run-created 帧定位（assertResumeEligibility 拆出）：严格读取 +
+ * created 在场拒绝。缺席 = run 从未启动或流头部截断。 */
+function readResumableStream(
+  runId: string,
+  recordPath: string,
+): { events: WorkflowRunEvent[]; created: Extract<WorkflowRunEvent, { type: "run-created" }> } {
+  const events = readRecordStreamStrict(recordPath, runId);
+  const created = events.find(
+    (e): e is Extract<WorkflowRunEvent, { type: "run-created" }> => e.type === "run-created",
+  );
+  if (created === undefined) {
+    throw new ResumeRejectionError(
+      `Resume rejected: record stream for run ${runId} has no run-created frame (the run never started, ` +
+        "or the stream is truncated at the head). Recovery: verify the runId, or start a new run.",
+    );
+  }
+  return { events, created };
+}
+
+/**
+ * 生效预算三档回落（assertResumeEligibility 拆出，单点勿散）：显式 options 覆盖 >
+ * 最近一条 run-resumed 帧的生效值（跨崩溃存续——上次显式覆盖不因下次无参 resume
+ * 退回创建预算）> run-created 记录的创建预算；三处都没有 = 不限时。本值同时供
+ * D10 预检、首次挂表（adoptResumedRun）、rebuildRunFromRecord 的 spec 与本次
+ * run-resumed 帧消费——不出现第二处折算。旧格式帧（无字段）自然回落 run-created，
+ * 行为不劣化。token 轴与时间轴同构。
+ */
+function effectiveResumeBudget(
+  options: ResumeRunOptions | undefined,
+  lastResumed: Extract<WorkflowRunEvent, { type: "run-resumed" }> | undefined,
+  created: Extract<WorkflowRunEvent, { type: "run-created" }>,
+): { budgetTimeMs: number | undefined; budgetTokens: number | undefined } {
+  return {
+    budgetTimeMs: options?.budgetTimeMs ?? lastResumed?.budgetTimeMs ?? created.budgetTimeMs,
+    budgetTokens: options?.budgetTokens ?? lastResumed?.budgetTokens ?? created.budgetTokens,
+  };
+}
+
+/**
+ * D10 预算预检（assertResumeEligibility 拆出；场景 16：搁置不计，活跃已耗不退）。
+ * 时间轴：已耗活跃时长 ≥ 上限即拒绝。token 轴（与时间轴对齐）：已耗口径 =
+ * runAccountingFromEvents 单源（agent-settled.result.usage 同一加权折算，下界近似
+ * ——中间失败尝试不在事件流）。用下界做拒绝判据方向安全：下界 ≥ 上限 ⟹ 真实消耗
+ * （活体逐尝试累计）必 ≥ 上限，不产生误拒；下界未越界时放行，复活后由重建
+ * Budget.isExceeded 正常路径守卫。返回已耗活跃时长（返回值装配消费）。
+ */
+function assertBudgetNotExhausted(
+  runId: string,
+  events: readonly WorkflowRunEvent[],
+  budgetTimeMs: number | undefined,
+  budgetTokens: number | undefined,
+): number {
+  const activeElapsedMs = computeActiveElapsedMs(events);
+  if (budgetTimeMs !== undefined && budgetTimeMs > 0 && activeElapsedMs >= budgetTimeMs) {
+    throw new ResumeRejectionError(
+      `Resume rejected: run ${runId} has exhausted its time budget (${Math.round(activeElapsedMs / MS_PER_SECOND)}s ` +
+        `active of ${Math.round(budgetTimeMs / MS_PER_SECOND)}s — suspended time is not counted, spent active ` +
+        "time is). Recovery: start a new run, or rerun with a larger budgetTimeMs.",
+    );
+  }
+  if (budgetTokens !== undefined && budgetTokens > 0) {
+    const usedTokens = runAccountingFromEvents(events).usedTokens;
+    if (usedTokens >= budgetTokens) {
+      throw new ResumeRejectionError(
+        `Resume rejected: run ${runId} has exhausted its token budget ` +
+          `(${Math.round(usedTokens)} weighted tokens used of ${Math.round(budgetTokens)} — the count is the ` +
+          "frame-derived lower bound, so the true spend is at least this high). Recovery: start a new run, " +
+          "or rerun with a larger budgetTokens.",
+      );
+    }
+  }
+  return activeElapsedMs;
+}
+
 /**
  * [resumeRunLocked 拆分] 资格校验（段 2）：run-created 帧 / interrupted 生命周期 /
  * D10 预算预检（场景 16：搁置不计，活跃已耗不退）。任一不过即拒绝（异常即返回值）。
  *
- * 预算预检与返回的 budgetTimeMs 均为「生效预算」（三档回落单点，见下方解析）——
- * 继承形态下原预算已耗尽同样拒绝，不把复活窗变成绕过预算的通道。
+ * 预算预检与返回的 budgetTimeMs 均为「生效预算」（三档回落单点，见 effectiveResumeBudget
+ * 解析）——继承形态下原预算已耗尽同样拒绝，不把复活窗变成绕过预算的通道。
  */
 function assertResumeEligibility(
   runId: string,
   recordPath: string,
   options: ResumeRunOptions | undefined,
 ): { events: WorkflowRunEvent[]; created: Extract<WorkflowRunEvent, { type: "run-created" }>; activeElapsedMs: number; budgetTimeMs: number | undefined; budgetTokens: number | undefined } {
-  const events = readRecordStreamStrict(recordPath, runId);
-  const created = events.find(
-    (e): e is Extract<WorkflowRunEvent, { type: "run-created" }> => e.type === "run-created",
-  );
   const reject = (message: string): ResumeRejectionError => new ResumeRejectionError(message);
-  if (created === undefined) {
-    throw reject(
-      `Resume rejected: record stream for run ${runId} has no run-created frame (the run never started, ` +
-        "or the stream is truncated at the head). Recovery: verify the runId, or start a new run.",
-    );
-  }
+  const { events, created } = readResumableStream(runId, recordPath);
   // [§2.5 D14] args 一致性判定（fail-fast 于任何副作用之前）：数据源 = 上面已读到的
   // run-created 事件（无需壳再读文件，也不需要新的端口原语）；absent 不在此拒绝
   //（资格判据归下方权威文案）。
@@ -433,38 +499,9 @@ function assertResumeEligibility(
         "interrupted before resuming.",
     );
   }
-  // 生效预算三档回落（单点，勿散）：显式 options 覆盖 > 最近一条 run-resumed 帧的
-  // 生效值（跨崩溃存续——上次显式覆盖不因下次无参 resume 退回创建预算）> run-created
-  // 记录的创建预算；三处都没有 = 不限时。本值同时供 D10 预检、首次挂表
-  // （adoptResumedRun）、rebuildRunFromRecord 的 spec 与本次 run-resumed 帧消费——
-  // 不出现第二处折算。旧格式帧（无字段）自然回落 run-created，行为不劣化。
   const lastResumed = findLatestRunResumed(events);
-  const budgetTimeMs = options?.budgetTimeMs ?? lastResumed?.budgetTimeMs ?? created.budgetTimeMs;
-  // token 轴三档回落（与 budgetTimeMs 同构：显式覆盖 > 末次 run-resumed > run-created）
-  const budgetTokens = options?.budgetTokens ?? lastResumed?.budgetTokens ?? created.budgetTokens;
-  const activeElapsedMs = computeActiveElapsedMs(events);
-  if (budgetTimeMs !== undefined && budgetTimeMs > 0 && activeElapsedMs >= budgetTimeMs) {
-    throw reject(
-      `Resume rejected: run ${runId} has exhausted its time budget (${Math.round(activeElapsedMs / MS_PER_SECOND)}s ` +
-        `active of ${Math.round(budgetTimeMs / MS_PER_SECOND)}s — suspended time is not counted, spent active ` +
-        "time is). Recovery: start a new run, or rerun with a larger budgetTimeMs.",
-    );
-  }
-  // D10 token 预检（与时间轴对齐：已耗是否已越界）。已耗口径 = runAccountingFromEvents
-  // 单源（agent-settled.result.usage 同一加权折算，下界近似——中间失败尝试不在事件流）。
-  // 用下界做拒绝判据方向安全：下界 ≥ 上限 ⟹ 真实消耗（活体逐尝试累计）必 ≥ 上限，
-  // 不产生误拒；下界未越界时放行，复活后由重建 Budget.isExceeded 正常路径守卫。
-  if (budgetTokens !== undefined && budgetTokens > 0) {
-    const usedTokens = runAccountingFromEvents(events).usedTokens;
-    if (usedTokens >= budgetTokens) {
-      throw reject(
-        `Resume rejected: run ${runId} has exhausted its token budget ` +
-          `(${Math.round(usedTokens)} weighted tokens used of ${Math.round(budgetTokens)} — the count is the ` +
-          "frame-derived lower bound, so the true spend is at least this high). Recovery: start a new run, " +
-          "or rerun with a larger budgetTokens.",
-      );
-    }
-  }
+  const { budgetTimeMs, budgetTokens } = effectiveResumeBudget(options, lastResumed, created);
+  const activeElapsedMs = assertBudgetNotExhausted(runId, events, budgetTimeMs, budgetTokens);
   return { events, created, activeElapsedMs, budgetTimeMs, budgetTokens };
 }
 
@@ -534,6 +571,72 @@ function adoptResumedRun(
   }
 }
 
+/** options.journalDir → dispatch 源 / interrupt 参数的条件 spread 段（absent 不带键）。 */
+function journalDirSpread(
+  options: ResumeRunOptions | undefined,
+): { journalDir: string } | Record<string, never> {
+  return options?.journalDir !== undefined ? { journalDir: options.journalDir } : {};
+}
+
+/**
+ * 段 5 run-resumed 帧载荷组装（resumeRunLocked 拆出）：各条件 spread 段——reason /
+ * host 缺席不落键；本次复活实际生效的预算随帧落盘（跨崩溃存续的数据面）仅 > 0 落
+ * 字段——未设/0/负值不落（与 run-created 同款条件式），读取面按「最近一条
+ * run-resumed 的字段 ?? run-created 的字段」回落。
+ */
+function buildRunResumedPayload(
+  options: ResumeRunOptions | undefined,
+  planSummary: string | undefined,
+  budgetTimeMs: number | undefined,
+  budgetTokens: number | undefined,
+  resumedAt: number,
+): Extract<WorkflowRunEventInput, { type: "run-resumed" }> {
+  return {
+    type: "run-resumed",
+    ...(planSummary !== undefined ? { reason: planSummary } : {}),
+    ...(options?.host !== undefined ? { host: options.host } : {}),
+    ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
+    ...(budgetTokens !== undefined && budgetTokens > 0 ? { budgetTokens } : {}),
+    ts: resumedAt,
+  };
+}
+
+/**
+ * 段 6 接管失败的回滚围栏（resumeRunLocked 拆出）：补偿语义见调用点注释——清 D10
+ * 预算账目 + interruptRun 落 run-interrupted（running → interrupted 表内合法转移、
+ * 幂等）；回滚自身失败（journal IO error）仅 error 留痕。原异常由调用方上抛。
+ */
+async function rollbackFailedAdoption(
+  runId: string,
+  options: ResumeRunOptions | undefined,
+  created: Extract<WorkflowRunEvent, { type: "run-created" }>,
+  err: unknown,
+): Promise<void> {
+  // 回滚清账（D10）：noteRunResumedBudget 在段 6 首行写入（workerHost.start 之前）
+  // ——接管失败即无活体消费该账目，残留会让后续按 runId 的预算折算读到已废弃的
+  // 复活时刻；record 流是权威源，下次成功 resume 会重写覆盖。interruptRun 失败
+  // （record 滞留 running 的僵尸形态）同样无活体，清账无条件先行。
+  forgetRunResumedBudget(runId);
+  try {
+    await interruptRun(runId, {
+      errorCode: "crashed",
+      reason: `resume adoption failed: ${toErrorMessage(err)}`,
+      ...journalDirSpread(options),
+      workflowName: created.workflowName,
+    });
+    logger.error(
+      `[workflow] resume adoption failed, run rolled back to interrupted (runId=${runId}): ${toErrorMessage(err)}`,
+    );
+  } catch (rollbackErr) {
+    logger.error(
+      `[workflow] resume rollback to interrupted failed (runId=${runId}): ${toErrorMessage(rollbackErr)} — ` +
+        "record stays folded as running with no live worker. Recovery: the next session_start crash " +
+        "adoption (recoverCrashedRuns) will re-interrupt this run; inspect the record stream manually " +
+        "if adoption keeps failing.",
+    );
+  }
+}
+
 /** 锁段内的编排主体（resumeRun 持锁后执行；锁释放归调用方 finally）。 */
 async function resumeRunLocked(
   runId: string,
@@ -571,20 +674,10 @@ async function resumeRunLocked(
   appendResumeRegisteredEntry(runId, deps, created, recordPath);
 
   // ── 5. run-resumed 落 record（interrupted → running；不合成任何结果）──
-  const dispatchSource = { runId, ...(options?.journalDir !== undefined ? { journalDir: options.journalDir } : {}) };
+  const dispatchSource = { runId, ...journalDirSpread(options) };
   const resumedAt = now();
   try {
-    await dispatchRunTrigger(dispatchSource, {
-      type: "run-resumed",
-      ...(planSummary !== undefined ? { reason: planSummary } : {}),
-      ...(options?.host !== undefined ? { host: options.host } : {}),
-      // 本次复活实际生效的预算随帧落盘（跨崩溃存续的数据面）：仅 > 0 落字段——
-      // 未设/0/负值不落（与 run-created 同款条件式），读取面按「最近一条
-      // run-resumed 的字段 ?? run-created 的字段」回落
-      ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
-      ...(budgetTokens !== undefined && budgetTokens > 0 ? { budgetTokens } : {}),
-      ts: resumedAt,
-    });
+    await dispatchRunTrigger(dispatchSource, buildRunResumedPayload(options, planSummary, budgetTimeMs, budgetTokens, resumedAt));
   } catch (err) {
     // 让位（表外转移）仅在流被并发篡改时可达（锁段内无并发写者）——资格异常上抛，
     // 状态无损（run-resumed 未落，run 仍 interrupted 可重试）
@@ -600,38 +693,16 @@ async function resumeRunLocked(
   // run-resumed 帧 + 档 1 补收帧已落盘之后执行——接管失败若无补偿，record 流
   // fold=running 而进程内无活体无注册：run 可被 GUI/枚举发现却永不推进，且再次
   // resume 被资格校验以「actively running needs no resume」误拒（与实情相反）。
-  // 回滚 = 清 D10 预算账目 + interruptRun 落 run-interrupted（running → interrupted
-  // 表内合法转移、幂等），run 回到可重试 resume 的暂停态；回滚自身失败（journal IO
-  // error）仅 error 留痕——兜底收敛 = 下次 session_start 的 recoverCrashedRuns 收编。
-  // 原异常照常上抛（调用方报错给用户）。
+  // 回滚（rollbackFailedAdoption）= 清 D10 预算账目 + interruptRun 落
+  // run-interrupted（running → interrupted 表内合法转移、幂等），run 回到可重试
+  // resume 的暂停态；回滚自身失败（journal IO error）仅 error 留痕——兜底收敛 =
+  // 下次 session_start 的 recoverCrashedRuns 收编。原异常照常上抛（调用方报错给用户）。
   try {
     adoptResumedRun(runId, deps, created, recordPath, {
       events, activeElapsedMs, budgetTimeMs, budgetTokens, resumedAt, plan,
     }, now);
   } catch (err) {
-    // 回滚清账（D10）：noteRunResumedBudget 在段 6 首行写入（workerHost.start 之前）
-    // ——接管失败即无活体消费该账目，残留会让后续按 runId 的预算折算读到已废弃的
-    // 复活时刻；record 流是权威源，下次成功 resume 会重写覆盖。interruptRun 失败
-    // （record 滞留 running 的僵尸形态）同样无活体，清账无条件先行。
-    forgetRunResumedBudget(runId);
-    try {
-      await interruptRun(runId, {
-        errorCode: "crashed",
-        reason: `resume adoption failed: ${toErrorMessage(err)}`,
-        ...(options?.journalDir !== undefined ? { journalDir: options.journalDir } : {}),
-        workflowName: created.workflowName,
-      });
-      logger.error(
-        `[workflow] resume adoption failed, run rolled back to interrupted (runId=${runId}): ${toErrorMessage(err)}`,
-      );
-    } catch (rollbackErr) {
-      logger.error(
-        `[workflow] resume rollback to interrupted failed (runId=${runId}): ${toErrorMessage(rollbackErr)} — ` +
-          "record stays folded as running with no live worker. Recovery: the next session_start crash " +
-          "adoption (recoverCrashedRuns) will re-interrupt this run; inspect the record stream manually " +
-          "if adoption keeps failing.",
-      );
-    }
+    await rollbackFailedAdoption(runId, options, created, err);
     throw err;
   }
   return runId;

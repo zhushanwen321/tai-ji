@@ -17,7 +17,7 @@ import type { VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ModelInfo, ProviderId } from '@taiji/shared'
-import { getSettingsStore, __resetSettingsStoreForTesting } from '@taiji/core'
+import { getSettingsStore, provideSettingsStore, createSettingsStore } from '@taiji/core'
 
 import ModelThinkingAggregate from '@/components/panel/ModelThinkingAggregate.vue'
 
@@ -69,7 +69,7 @@ async function click(el: Element): Promise<void> {
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetSettingsStoreForTesting()
+  provideSettingsStore(createSettingsStore())
   getSettingsStore().models.value = MODELS
   document.body.innerHTML = ''
   wrapper = null

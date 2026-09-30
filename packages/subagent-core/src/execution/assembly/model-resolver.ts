@@ -123,6 +123,12 @@ function firstDefined<T>(...values: readonly (T | undefined)[]): T | undefined {
   return undefined;
 }
 
+/** frontmatter 模型串的内联档位后缀（resolveModel 拆出；agentConfig.model 缺席 =
+ * undefined——无内联可解析）。 */
+function inlineThinkingOfAgentConfig(agentConfig: AgentConfig | undefined): string | undefined {
+  return agentConfig?.model !== undefined ? parseModelSelector(agentConfig.model).thinkingLevel : undefined;
+}
+
 export function resolveModel(
   agentConfig: AgentConfig | undefined,
   modelRegistry: ModelRegistryLike,
@@ -140,9 +146,7 @@ export function resolveModel(
         paramOverride.thinkingLevel,
         parseModelSelector(paramOverride.model).thinkingLevel,
         agentConfig?.thinkingLevel,
-        agentConfig?.model !== undefined
-          ? parseModelSelector(agentConfig.model).thinkingLevel
-          : undefined,
+        inlineThinkingOfAgentConfig(agentConfig),
       ),
       modelRegistry,
       "paramOverride",
@@ -175,9 +179,7 @@ export function resolveModel(
       thinkingLevel: firstDefined(
         paramOverride?.thinkingLevel,
         agentConfig?.thinkingLevel,
-        agentConfig?.model !== undefined
-          ? parseModelSelector(agentConfig.model).thinkingLevel
-          : undefined,
+        inlineThinkingOfAgentConfig(agentConfig),
       ) ?? maxThinkingForModel(ctxModel),
     };
   }

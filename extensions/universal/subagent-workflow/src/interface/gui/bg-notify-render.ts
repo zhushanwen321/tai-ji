@@ -213,15 +213,15 @@ function sanitizeAnsiForBg(text: string): string {
  *     - cancelled: `■ default — background subagent cancelled - bg-f6f731-10`
  *   第 2 行（正文）：结果首行 / Error 首行 / cancelled 无第二行
  */
-function renderRecordLines(record: BgNotifyRecord, t: ThemeLike): string[] {
-  // U3 C-outcome：verb 与正文分流只读 outcome——单一权威派生（升级前旧消息重放等
-  // details 缺 outcome 的存量形态经 deriveOutcome(closedReason, error) 兜底，非同构
-  // 重写）。判定先于 patchFile：failed 分支不展示 patch/result（失败轮也会写
-  // patchFile，历史 bug 存档见 deriveOutcome 注释）。
-  const outcome = record.outcome ?? deriveOutcome(record.closedReason, record.error);
-  // [§2.2 通知字形修复] 字形与 verb 同源、只读 outcome：终态 record 的 status 恒为
-  // "closed"（statusGlyph 对 closed 返回 ✓ success），此前失败通知会画绿勾 + "failed"
-  // 文案自相矛盾。running 记录（无 outcome）仍走 statusGlyph。
+/**
+ * 标题行组装（renderRecordLines 拆出）：glyph 与 verb 只读 outcome 分流 + model 段
+ * （空则省略，向后兼容旧 record）。
+ *
+ * [§2.2 通知字形修复] 字形与 verb 同源、只读 outcome：终态 record 的 status 恒为
+ * "closed"（statusGlyph 对 closed 返回 ✓ success），此前失败通知会画绿勾 + "failed"
+ * 文案自相矛盾。running 记录（无 outcome）仍走 statusGlyph。
+ */
+function recordHeadLine(record: BgNotifyRecord, outcome: RecordOutcome, t: ThemeLike): string {
   const glyph =
     outcome === "failed"
       ? { icon: "✗", color: "error" as const }
@@ -234,37 +234,54 @@ function renderRecordLines(record: BgNotifyRecord, t: ThemeLike): string[] {
   const modelPart = record.model
     ? ` ${t.fg("dim", "·")} ${t.fg("accent", truncLine(record.model, MODEL_MAX_WIDTH))}`
     : "";
-  let verb: string;
-  if (outcome === "cancelled") {
-    verb = "cancelled";
-  } else if (outcome === "failed") {
-    verb = "failed";
-  } else {
-    verb = "finished";
-  }
+  const verb = outcome === "cancelled" ? "cancelled" : outcome === "failed" ? "failed" : "finished";
   const idShort = shortId(record.id);
-  const head = `${t.fg(glyph.color, icon)} ${t.bold(agent)}${modelPart}${t.fg("dim", ` — background subagent ${verb} - ${idShort}`)}`;
+  return `${t.fg(glyph.color, icon)} ${t.bold(agent)}${modelPart}${t.fg("dim", ` — background subagent ${verb} - ${idShort}`)}`;
+}
 
+/**
+ * closed 态正文行组装（renderRecordLines 拆出）：cancelled 无正文（空数组）；
+ * failed 显示 Error 首行；其余结果首行 / patch 提示（[MF#1]）。空数组由调用方
+ * 与 head 拼接（单行 = 仅标题）。
+ */
+function closedBodyLines(record: BgNotifyRecord, outcome: RecordOutcome, t: ThemeLike): string[] {
+  if (outcome === "cancelled") return [];
+  if (outcome === "failed") {
+    return [t.fg("dim", truncLine(`Error: ${firstLineSanitized(record.error ?? "")}`, BODY_MAX_WIDTH))];
+  }
+  if (!record.result && !record.patchFile) return [];
+  const lines: string[] = [];
+  if (record.result) {
+    lines.push(t.fg("dim", truncLine(firstLineSanitized(record.result), BODY_MAX_WIDTH)));
+  }
+  // [MF#1] 显示 patch 路径提示（与 LLM content 同源），让用户也能看到改动需 `git apply`。
+  if (record.patchFile) {
+    lines.push(t.fg("dim", truncLine(`patch: ${record.patchFile} (run: git apply)`, BODY_MAX_WIDTH)));
+  }
+  return lines;
+}
+
+/**
+ * 渲染单条 record 为多行文本（纯视觉文本，不含边框/背景——由 BorderedBgBox 包裹）。
+ *
+ * 格式（两行）：
+ *   第 1 行（标题）：✓/✗/■ glyph + agent + model + 状态描述 + shortId
+ *     - done:      `✓ default — background subagent finished - bg-f6f731-10`
+ *     - failed:    `✗ default — background subagent failed - bg-f6f731-10`
+ *     - cancelled: `■ default — background subagent cancelled - bg-f6f731-10`
+ *   第 2 行（正文）：结果首行 / Error 首行 / cancelled 无第二行
+ * （组装拆见 recordHeadLine / closedBodyLines。）
+ */
+function renderRecordLines(record: BgNotifyRecord, t: ThemeLike): string[] {
+  // U3 C-outcome：verb 与正文分流只读 outcome——单一权威派生（升级前旧消息重放等
+  // details 缺 outcome 的存量形态经 deriveOutcome(closedReason, error) 兜底，非同构
+  // 重写）。判定先于 patchFile：failed 分支不展示 patch/result（失败轮也会写
+  // patchFile，历史 bug 存档见 deriveOutcome 注释）。
+  const outcome = record.outcome ?? deriveOutcome(record.closedReason, record.error);
+  const head = recordHeadLine(record, outcome, t);
   switch (record.status) {
-    case "closed": {
-      // U3 C-outcome：cancelled 无正文；failed 显示错误；否则结果/patch（同上，分流只读 outcome）。
-      if (outcome === "cancelled") {
-        return [head];
-      }
-      if (outcome === "failed") {
-        return [head, t.fg("dim", truncLine(`Error: ${firstLineSanitized(record.error ?? "")}`, BODY_MAX_WIDTH))];
-      }
-      if (!record.result && !record.patchFile) return [head];
-      const lines: string[] = [];
-      if (record.result) {
-        lines.push(t.fg("dim", truncLine(firstLineSanitized(record.result), BODY_MAX_WIDTH)));
-      }
-      // [MF#1] 显示 patch 路径提示（与 LLM content 同源），让用户也能看到改动需 `git apply`。
-      if (record.patchFile) {
-        lines.push(t.fg("dim", truncLine(`patch: ${record.patchFile} (run: git apply)`, BODY_MAX_WIDTH)));
-      }
-      return [head, ...lines];
-    }
+    case "closed":
+      return [head, ...closedBodyLines(record, outcome, t)];
     case "running":
     default:
       // v4 B-1: 对话模式轮次完成（旧 idle 折入 running）——仅标题行。

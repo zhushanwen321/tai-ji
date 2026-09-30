@@ -196,13 +196,11 @@ export interface SpawnRunResult extends Omit<CollectedOutcome, "sessionId"> {
  *     分别按「可选」与「Date.now()」回落。补齐它们需要把 record 身份挂上协议（登记见
  *     docs/todo/subagent-workflow-issues.md §2.7 遗留）。
  */
-export function applyIdentityEnvToChildEnv(
+/** 链路定位键写入（applyIdentityEnvToChildEnv 拆出）：root 链 / 深度 / 父 record。
+ * 值源分层见主函数注释——run 参数优先、引擎自身 env 回落（嵌套链贯穿）。 */
+function applyLinkageIdentityKeys(
   childEnv: Record<string, string>,
-  params: Pick<SpawnRunParams, "recordId" | "agentName" | "task" | "cwd" | "sessionRootId"> & {
-    worktree?: boolean;
-    /** [D4] record 身份信封：在场时写 slug / startedAt / mode 三键（缺省不写）。 */
-    identity?: { slug?: string; startedAt?: number; mode?: string };
-  },
+  params: Pick<SpawnRunParams, "recordId" | "cwd" | "sessionRootId">,
   parentEnv: NodeJS.ProcessEnv,
 ): void {
   const key = SUBAGENT_IDENTITY_ENV;
@@ -221,6 +219,19 @@ export function applyIdentityEnvToChildEnv(
   if (parentRecordId !== undefined && parentRecordId !== "") {
     childEnv[key.parentRecordId] = parentRecordId;
   }
+}
+
+/** 身份内容键写入（applyIdentityEnvToChildEnv 拆出）：agent/task 直写 + [D4]
+ * 身份信封三键（slug/startedAt/mode）——信封优先（宿主派发权威值），缺席按既有
+ * 继承/缺省语义回落。 */
+function applyContentIdentityKeys(
+  childEnv: Record<string, string>,
+  params: Pick<SpawnRunParams, "agentName" | "task"> & {
+    identity?: { slug?: string; startedAt?: number; mode?: string };
+  },
+  parentEnv: NodeJS.ProcessEnv,
+): void {
+  const key = SUBAGENT_IDENTITY_ENV;
   childEnv[key.agent] = params.agentName;
   childEnv[key.task] = params.task;
   // [D4] record 身份信封优先（宿主派发的权威值）；缺席时按既有继承/缺省语义回落。
@@ -231,8 +242,21 @@ export function applyIdentityEnvToChildEnv(
   if (Number.isFinite(startedAt) && startedAt > 0) childEnv[key.startedAt] = String(startedAt);
   const mode = identity?.mode ?? parentEnv[key.mode];
   childEnv[key.mode] = mode !== undefined && mode !== "" ? mode : "background";
-  const worktree = params.worktree === true || parentEnv[key.worktree] === "true";
-  if (worktree) childEnv[key.worktree] = "true";
+}
+
+export function applyIdentityEnvToChildEnv(
+  childEnv: Record<string, string>,
+  params: Pick<SpawnRunParams, "recordId" | "agentName" | "task" | "cwd" | "sessionRootId"> & {
+    worktree?: boolean;
+    /** [D4] record 身份信封：在场时写 slug / startedAt / mode 三键（缺省不写）。 */
+    identity?: { slug?: string; startedAt?: number; mode?: string };
+  },
+  parentEnv: NodeJS.ProcessEnv,
+): void {
+  applyLinkageIdentityKeys(childEnv, params, parentEnv);
+  applyContentIdentityKeys(childEnv, params, parentEnv);
+  const worktree = params.worktree === true || parentEnv[SUBAGENT_IDENTITY_ENV.worktree] === "true";
+  if (worktree) childEnv[SUBAGENT_IDENTITY_ENV.worktree] = "true";
 }
 
 /** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + relay 归属键重写）。 */

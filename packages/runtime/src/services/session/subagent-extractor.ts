@@ -244,9 +244,32 @@ function collectV2SubagentPair(entry: unknown, pairs: Map<string, V2SubagentPair
 }
 
 /**
+ * settled 终态条目 → 投影字段块（projectV2SubagentRecord 拆出）：终局统计与结果域
+ * 缺省 undefined、sessionFile 缺省 null（与 legacy 投影同形）、status 按终态条目
+ * 在场性归一（idle / running）。
+ */
+function v2SettledProjection(
+  settled: SubagentRecordSettledEntryData | undefined,
+): Pick<SubagentRecord, 'sessionFile' | 'status' | 'stopReason' | 'turns' | 'totalTokens' | 'model' | 'thinkingLevel' | 'endedAt' | 'error' | 'result'> {
+  return {
+    sessionFile: settled?.sessionFile ?? null,
+    status: settled !== undefined ? 'idle' : 'running',
+    stopReason: settled?.stopReason,
+    turns: settled?.turns,
+    totalTokens: settled?.totalTokens,
+    model: settled?.model,
+    thinkingLevel: settled?.thinkingLevel,
+    endedAt: settled?.endedAt,
+    error: settled?.error,
+    result: settled?.result,
+  }
+}
+
+/**
  * v2 条目对 → SubagentRecord（身份取注册条目，终局取终态条目）。缺注册条目的终态行
  * 不成实体（身份无所出）→ null。v2 契约不承载的字段（closedReason / worktree /
- * patchFile 等）缺席——权威源在 manifest 与子 session 文件。
+ * patchFile 等）缺席——权威源在 manifest 与子 session 文件。（settled 域组装拆见
+ * v2SettledProjection。）
  */
 function projectV2SubagentRecord(id: string, pair: V2SubagentPair): SubagentRecord | null {
   const registered = pair.registered
@@ -256,24 +279,16 @@ function projectV2SubagentRecord(id: string, pair: V2SubagentPair): SubagentReco
   const endedAt = settled?.endedAt
   return {
     subagentId: id,
-    sessionFile: settled?.sessionFile ?? null,
     agent: registered.agent,
     slug: registered.slug,
     task: registered.task,
-    status: settled !== undefined ? 'idle' : 'running',
-    stopReason: settled?.stopReason,
-    turns: settled?.turns,
-    totalTokens: settled?.totalTokens,
-    model: settled?.model,
-    thinkingLevel: settled?.thinkingLevel,
     startedAt,
     endedAt,
     elapsedSeconds: deriveElapsedSeconds(startedAt, endedAt),
-    error: settled?.error,
-    result: settled?.result,
     origin: projectOrigin(registered.origin),
     parentRunId: registered.parentRunId,
     stepIndex: registered.stepIndex,
+    ...v2SettledProjection(settled),
     ...(settled?.engine !== undefined ? { engine: settled.engine } : {}),
     ...(settled?.engineHandle !== undefined ? { engineHandle: settled.engineHandle } : {}),
   }

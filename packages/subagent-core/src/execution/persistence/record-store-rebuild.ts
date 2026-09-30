@@ -253,11 +253,51 @@ export function collectV2EntryPairs(content: string): Map<string, V2EntryPair> {
 }
 
 /**
+ * 引擎域回落（v2PairToRecord 拆出）：settled 条目字段优先，缺终态条目时回落
+ * journal bound 事件（条目契约不承载 engine/engineHandle/sessionFile——引擎定位
+ * 的权威源在运行态 journal）。sessionFile 的 bound 回落拒绝空串（bound 事件
+ * sessionFile 必填但写侧可能落 ""，与 modelOrUndefined 同款归一纪律）。
+ */
+function v2EngineDomain(
+  settled: SubagentRecordSettledEntryData | undefined,
+  bound: RecordBoundEvent | undefined,
+): Pick<SubagentRecord, "engine" | "engineHandle" | "sessionFile"> {
+  const engine = settled?.engine ?? bound?.engine;
+  const engineHandle = settled?.engineHandle ?? bound?.engineHandle;
+  const sessionFile = settled?.sessionFile
+    ?? (bound !== undefined && bound.sessionFile !== "" ? bound.sessionFile : undefined);
+  return {
+    sessionFile,
+    ...(engine !== undefined ? { engine } : {}),
+    ...(engineHandle !== undefined ? { engineHandle } : {}),
+  };
+}
+
+/**
+ * 终端统计域（v2PairToRecord 拆出）：settled 条目的终局统计与结果字段。缺省纪律：
+ * 无终态条目（running 态）turns/totalTokens 归 0，endedAt/result/error 缺席为
+ * undefined，model 经空串归一（见 modelOrUndefined 注释）。
+ */
+function v2SettledOutcome(
+  settled: SubagentRecordSettledEntryData | undefined,
+): Pick<SubagentRecord, "endedAt" | "turns" | "totalTokens" | "model" | "thinkingLevel" | "result" | "error"> {
+  return {
+    endedAt: settled?.endedAt,
+    turns: settled?.turns ?? 0,
+    totalTokens: settled?.totalTokens ?? 0,
+    model: modelOrUndefined(settled?.model),
+    thinkingLevel: settled?.thinkingLevel,
+    result: settled?.result,
+    error: settled?.error,
+  };
+}
+
+/**
  * [登记 §3.3] v2 条目对 → SubagentRecord（entry 面重建）。
  *
  * 身份域取注册条目（缺注册条目的终态行不成实体——身份无所出，返回 null）；终局域取
  * 终态条目；运行态记录（无终态条目）的引擎域回落 journal 的 bound 事件（条目契约
- * 不承载 engine/sessionFile）。
+ * 不承载 engine/sessionFile，回落组装见 v2EngineDomain）。
  *
  * 缺省纪律：v2 条目契约不承载的字段（patchFile / worktree / round / closedReason /
  * batchFinalized / 详情域）一律缺席——与 runtime 投影 projectV2Subagent 同口径，
@@ -281,10 +321,6 @@ export function v2PairToRecord(
     return null;
   }
   const settled = pair.settled;
-  const engine = settled?.engine ?? bound?.engine;
-  const engineHandle = settled?.engineHandle ?? bound?.engineHandle;
-  const sessionFile = settled?.sessionFile
-    ?? (bound !== undefined && bound.sessionFile !== "" ? bound.sessionFile : undefined);
   return {
     id,
     agent: registered.agent,
@@ -301,18 +337,10 @@ export function v2PairToRecord(
     origin: registered.origin,
     parentRunId: registered.parentRunId,
     stepIndex: registered.stepIndex,
-    endedAt: settled?.endedAt,
-    turns: settled?.turns ?? 0,
-    totalTokens: settled?.totalTokens ?? 0,
-    model: modelOrUndefined(settled?.model),
-    thinkingLevel: settled?.thinkingLevel,
+    ...v2SettledOutcome(settled),
     eventLog: [],
     displayItems: [],
-    result: settled?.result,
-    error: settled?.error,
-    sessionFile,
-    ...(engine !== undefined ? { engine } : {}),
-    ...(engineHandle !== undefined ? { engineHandle } : {}),
+    ...v2EngineDomain(settled, bound),
   };
 }
 

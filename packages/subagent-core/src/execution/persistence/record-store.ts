@@ -1308,6 +1308,27 @@ export class RecordStore {
    *
    * 调用点：initSession 的 recoverOrphanRecords 之后（session_start，内存恒空）。
    */
+  /**
+   * entry-only 孤儿候选判定（recoverEntryOnlyOrphans 拆出）：定界与 adoptV2Orphans
+   * 同款（registered ∧ 无非 interrupted 终态条目）+ 排除链——根过滤 / 子文件锚
+   * （磁盘/收编面已判）/ 内存活 record（在途 spawn 不得误杀）/ 防重（同 init 内
+   * 两个恢复入口共用）/ 事件文件在场（归收编入口）。
+   */
+  private isEntryOnlyOrphanCandidate(
+    id: string,
+    st: V2EntryState,
+    rootSessionFilter: string | undefined,
+    anchoredIds: Set<string>,
+  ): boolean {
+    if (!st.registered || isNonInterruptedSettledEvidence(st)) return false;
+    if (rootSessionFilter !== undefined && st.rootSessionId !== rootSessionFilter) return false;
+    if (anchoredIds.has(id)) return false;
+    if (this.records.has(id)) return false;
+    if (this.orphanJudged.has(id)) return false;
+    if (this.eventStreamFace !== undefined && this.eventStreamFace.foldOf(id).lastSeq > 0) return false;
+    return true;
+  }
+
   recoverEntryOnlyOrphans(mainSessionFile: string | undefined, rootSessionFilter?: string): void {
     if (mainSessionFile === undefined) return;
     // [U7 / B-restart] 同 recoverOrphanRecords 的记忆点（两个 initSession 恢复入口
@@ -1329,13 +1350,7 @@ export class RecordStore {
         settledStopReason: pair.settled?.stopReason,
         rootSessionId: pair.registered?.rootSessionId,
       };
-      // 定界与 adoptV2Orphans 同款：registered ∧ 无非 interrupted 终态条目。
-      if (!st.registered || isNonInterruptedSettledEvidence(st)) continue;
-      if (rootSessionFilter !== undefined && st.rootSessionId !== rootSessionFilter) continue;
-      if (anchoredIds.has(id)) continue; // 有子文件锚：磁盘/收编面已判（或 sidecar 已收口）
-      if (this.records.has(id)) continue; // 内存活 record：在途 spawn，不得误杀
-      if (this.orphanJudged.has(id)) continue; // 防重（同 init 内两个恢复入口共用）
-      if (this.eventStreamFace !== undefined && this.eventStreamFace.foldOf(id).lastSeq > 0) continue; // 事件文件在场：归收编入口
+      if (!this.isEntryOnlyOrphanCandidate(id, st, rootSessionFilter, anchoredIds)) continue;
       if (v2PairToRecord(id, pair, this.eventStreamFace?.foldOf(id).bound) === null) {
         // 损坏身份域：纠偏产物会是无身份的幻影终态条目。跳过但必须留痕——静默
         // continue 会把「身份域损坏」伪装成「无孤儿可判」，排障无从下手。

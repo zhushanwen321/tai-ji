@@ -217,6 +217,82 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
  * @throws Error record 终态簿记已冻结（endedAt 已设——复活终态的调用即 bug，
  *         fail-fast，对齐 doFinalizeRoundToIdle A3 断言）。
  */
+/**
+ * ② result 写入规则（markRoundIdleImpl 拆出，D7）：成功轮 = content（chat 空 content
+ * 兜底占位）；失败轮 = 前值保真 ?? 失败摘要 + lastError/error 写失败原因。返回
+ * nextResult（调用方写入 rec.result 并供 journal 摘要锚消费）。
+ */
+function settleRoundResult(rec: ExecutionRecord, outcome: RoundSettlementOutcome): string | undefined {
+  if (outcome.kind === "failed") {
+    rec.lastError = outcome.reason;
+    // [modeless 波1] 失败轮同步写 rec.error（投影/通知 outcome 派生消费——
+    // toNotifyRecord 的 deriveOutcome(closedReason, error) 判 failed；旧 one-shot
+    // 路径经 finalizeFailed → completeLegacyClosed 写 error 的等价承接）。
+    rec.error = outcome.reason;
+    return rec.result ?? `round did not complete: ${outcome.reason}`;
+  }
+  // [modeless 波1] 成功轮统一 chat 占位语义（旧 one-shot 分支
+  // `content || rec.result || "(empty)"` 随 chatMode 消亡）。
+  return outcome.content || "(no output this round)";
+}
+
+/**
+ * ⑪ 轮终磁盘面（markRoundIdleImpl 拆出，[A-lite / U7 统计口径]）：锚分派对齐
+ * markSettled 写法——pi 腿 sessionFile 快照 / zcode 腿 transcriptRef 派生锚键 /
+ * 无锚 warn 留痕。正常轮终后宿主崩溃 → markResurrected 的 revive 水合需 binding
+ * 快照在场（turns/tokens 不归零，U7 目标在最常见形态成立）。`.state` 收条 = 轮收口
+ * idle 形态（U4 翻边后内存面与磁盘面同词——重建单规则「一律 idle」不再有桥接例外）。
+ * best-effort 语义同 markSettled（失败 warn 留痕不抛——内存态已收口，磁盘面滞后由
+ * 下次收口/接管补写）。
+ */
+function persistRoundSettleDiskFace(rec: ExecutionRecord, id: string): void {
+  const zcodeAnchor = rec.sessionFile === undefined ? zcodeRefOf(rec) : undefined;
+  if (rec.sessionFile !== undefined) {
+    // `.state` 轮终收条已退场（③）：轮终停因由 record-round-idle 事件承载，读侧从折叠取。
+    persistSettleSnapshot(rec.sessionFile, rec);
+  } else if (zcodeAnchor !== undefined) {
+    // zcode 腿（无 pi 文件锚是常态形态非异常，不 warn——对齐 markSettled）：
+    // 快照/收条承载 = transcriptRef 派生锚键；`.state` 无文件锚不写。
+    persistSettleSnapshot(zcodeAnchorBasePath(zcodeAnchor), rec, zcodeAnchor);
+  } else {
+    logger.warn("[subagents] markRoundIdle: no sessionFile anchor, binding snapshot skipped", {
+      detail: { id },
+    });
+  }
+}
+
+/**
+ * [W1 / D3 表行 4] record-round-idle 帧载荷组装（markRoundIdleImpl 拆出）：轮终收条
+ * ——stopReason + 轮统计快照 + result 摘要锚 + 失败原因原文；.state 降级为本事件的
+ * 落盘物化投影，D2 sidecar 裁决表 .state 行。摘要锚与 record-settled 同款截断
+ * （summarizeResultForJournal 单源）——承接 v1 轮终 result 显示信号（U8b），本轮
+ * rec.result 已在②定稿。error 原文锚（W1 终态同步 F2-2 裁决）：失败轮承载
+ * outcome.reason——v1 rec.error 显示信号的 journal 承接；成功轮缺席。「轮始清残留
+ * 死因」的投影侧语义由供源分流保证（round-started 后 lastEvent 非 round-idle，
+ * 本值不透传）。
+ */
+function buildRoundIdleEvent(
+  rec: ExecutionRecord,
+  stopReason: StopReason,
+  nextResult: string | undefined,
+  outcome: RoundSettlementOutcome,
+): Extract<RecordJournalEventInput, { type: "record-round-idle" }> {
+  return {
+    type: "record-round-idle",
+    ts: Date.now(),
+    // 轮终时点的累计轮数（[② 读侧换源] ——revive 水合 round 的折叠源，原 binding
+    // round 快照的承载接替；③ increment 已在上方法簿记③完成）。
+    round: rec.round ?? 0,
+    stopReason,
+    turns: rec.turnCount,
+    totalTokens: rec.totalTokens,
+    resultSummary: summarizeResultForJournal(nextResult),
+    error: outcome.kind === "failed" ? outcome.reason : undefined,
+    // 事件流自承载绑定侧独有字段（.record-binding 退场的前置）：轮被弃置的标记。
+    ...(rec.lastAbandonedRound !== undefined ? { lastAbandonedRound: rec.lastAbandonedRound } : {}),
+  };
+}
+
 export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, ctx: RoundsCtx): boolean {
   const rec = ctx.records.get(id);
   if (rec === undefined) {
@@ -246,22 +322,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
     });
     return false;
   }
-  // ② result 写入规则（D7）：成功轮 = content（chat 空 content 兜底占位）；失败轮 =
-  // 前值保真 ?? 失败摘要 + lastError 写失败原因（字段⑨）。
-  let nextResult: string | undefined;
-  if (outcome.kind === "failed") {
-    rec.lastError = outcome.reason;
-    // [modeless 波1] 失败轮同步写 rec.error（投影/通知 outcome 派生消费——
-    // toNotifyRecord 的 deriveOutcome(closedReason, error) 判 failed；旧 one-shot
-    // 路径经 finalizeFailed → completeLegacyClosed 写 error 的等价承接）。
-    rec.error = outcome.reason;
-    nextResult = rec.result ?? `round did not complete: ${outcome.reason}`;
-  } else {
-    // [modeless 波1] 成功轮统一 chat 占位语义（旧 one-shot 分支
-    // `content || rec.result || "(empty)"` 随 chatMode 消亡）。
-    nextResult = outcome.content || "(no output this round)";
-  }
-  rec.result = nextResult;
+  rec.result = settleRoundResult(rec, outcome);
   // ①③④：轮终翻边 idle（[two-state-convergence U4/D3] 收口权威词）+ 轮次推进 +
   // 清残留死因；⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081）。resumable 字段已
   // 退役（[U5/D4]，见方法头⑤）。
@@ -276,25 +337,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   // markSettled「非终态不写 endedAt」先例），收条时间戳只进磁盘面。
   const stopReason: StopReason = outcome.kind === "failed" ? "failed" : "completed";
   rec.stopReason = stopReason;
-  // ⑪ [A-lite / U7 统计口径] 轮终磁盘面（锚分派对齐 markSettled 写法）：
-  // 正常轮终后宿主崩溃 → markResurrected 的 revive 水合需 binding 快照在场
-  //（turns/tokens 不归零，U7 目标在最常见形态成立）。`.state` 收条 = 轮收口 idle
-  // 形态（U4 翻边后内存面与磁盘面同词——重建单规则「一律 idle」不再有桥接例外）。
-  // best-effort 语义同 markSettled（失败 warn 留痕不抛——内存态已收口，磁盘面
-  // 滞后由下次收口/接管补写）。
-  const zcodeAnchor = rec.sessionFile === undefined ? zcodeRefOf(rec) : undefined;
-  if (rec.sessionFile !== undefined) {
-    // `.state` 轮终收条已退场（③）：轮终停因由 record-round-idle 事件承载，读侧从折叠取。
-    persistSettleSnapshot(rec.sessionFile, rec);
-  } else if (zcodeAnchor !== undefined) {
-    // zcode 腿（无 pi 文件锚是常态形态非异常，不 warn——对齐 markSettled）：
-    // 快照/收条承载 = transcriptRef 派生锚键；`.state` 无文件锚不写。
-    persistSettleSnapshot(zcodeAnchorBasePath(zcodeAnchor), rec, zcodeAnchor);
-  } else {
-    logger.warn("[subagents] markRoundIdle: no sessionFile anchor, binding snapshot skipped", {
-      detail: { id },
-    });
-  }
+  persistRoundSettleDiskFace(rec, id);
   // ⑦ `.alive` 保留——无删除动作（D3a 跨轮延续，见方法头）。
   // ⑧ pending 注销发射点②（已接线 SubagentService 装配点；未注入时跳过——纯内存
   // 测试形态 no-op）。第二参数是注销 reason 字面量（notify-host emitPendingUnregister
@@ -303,27 +346,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   // ⑨ entry 上报（best-effort 过程面）→ [W1 / D2 停写写点] reportRecordTransition
   // 不再落 v1 快照 entry，只做引擎域回填感知（record-bound 帧）。
   ctx.reportRecordTransition(rec);
-  // [W1 / D3 表行 4] record-round-idle 帧（轮终收条——stopReason + 轮统计快照 +
-  // result 摘要锚 + 失败原因原文；.state 降级为本事件的落盘物化投影，D2 sidecar
-  // 裁决表 .state 行）。摘要锚与 record-settled 同款截断（summarizeResultForJournal
-  // 单源）——承接 v1 轮终 result 显示信号（U8b），本轮 rec.result 已在②定稿。
-  // error 原文锚（W1 终态同步 F2-2 裁决）：失败轮承载 outcome.reason——v1 rec.error
-  // 显示信号的 journal 承接；成功轮缺席。「轮始清残留死因」的投影侧语义由供源分流
-  // 保证（round-started 后 lastEvent 非 round-idle，本值不透传）。
-  ctx.appendJournalEvent(rec, {
-    type: "record-round-idle",
-    ts: Date.now(),
-    // 轮终时点的累计轮数（[② 读侧换源] ——revive 水合 round 的折叠源，原 binding
-    // round 快照的承载接替；③ increment 已在上方法簿记③完成）。
-    round: rec.round ?? 0,
-    stopReason,
-    turns: rec.turnCount,
-    totalTokens: rec.totalTokens,
-    resultSummary: summarizeResultForJournal(nextResult),
-    error: outcome.kind === "failed" ? outcome.reason : undefined,
-    // 事件流自承载绑定侧独有字段（.record-binding 退场的前置）：轮被弃置的标记。
-    ...(rec.lastAbandonedRound !== undefined ? { lastAbandonedRound: rec.lastAbandonedRound } : {}),
-  });
+  ctx.appendJournalEvent(rec, buildRoundIdleEvent(rec, stopReason, rec.result, outcome));
   // ⑫ [B2] 轮终派生 manifest 投影（session-reader manifest 直读主路径的数据源）：
   // 轮终 record 留内存 idle（U4 翻边），不经任何终态/回收写点——缺本写则 records/
   // 目录长期缺席该 record，外部直读只能落 entry 慢兜底。写的是派生投影（缓存性质，

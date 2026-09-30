@@ -674,6 +674,21 @@ describe("callRenameLLM", () => {
 		const callOpts = vi.mocked(callLLM).mock.calls[0][1] as { reasoning?: unknown };
 		expect(callOpts.reasoning).toBe("high");
 	});
+
+	it("thinkingLevel 为该模型不支持的档位 → warn 留痕 + 不传 reasoning（数据驱动判定，不静默换档）", async () => {
+		loggerMock.warn.mockClear();
+		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
+		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "标题" });
+		// STUB_MODEL（reasoning=true）的 supportedLevels = off/minimal/low/medium/high，
+		// "ultra" 词表外 → reasoningLevel undefined → 不传档位
+		await callRenameLLM(createCtx(), { ...BASE_CONFIG, thinkingLevel: "ultra" }, FINAL_MESSAGE);
+
+		const callOpts = vi.mocked(callLLM).mock.calls[0][1] as { reasoning?: unknown };
+		expect(callOpts.reasoning).toBeUndefined();
+		expect(loggerMock.warn).toHaveBeenCalledWith(
+			expect.stringContaining('thinkingLevel "ultra" is not supported'),
+		);
+	});
 });
 
 // ────────────────────────────────────────────────────

@@ -116,11 +116,41 @@ export type RunEventLineResult =
   | { ok: false; issue: RunEventLineIssue };
 
 /**
+ * 信封字段校验（parseRecordStreamLine 拆出）：type 存在性与词表 / ts 有限数值 /
+ * seq（requireSeq 时必填正整数）/ outcome 词表。合法返回 null，问题以结构化
+ * issue 返回（文案由调用方自持）。
+ *
+ * 信封存在性（type 为非空字符串）与词表成员资格分开报：两侧读面对「type 缺失」
+ * 的文案不同（core 复原为「词表外」、壳为「缺事件信封」），规则同源、文案各异。
+ */
+function envelopeIssueOf(
+  rec: { type?: unknown; ts?: unknown; seq?: unknown; outcome?: unknown },
+  opts: { requireSeq: boolean },
+): RunEventLineIssue | null {
+  if (typeof rec.type !== "string" || rec.type === "") {
+    return { kind: "type-envelope", value: rec.type };
+  }
+  if (!RUN_EVENT_TYPE_SET.has(rec.type)) {
+    return { kind: "type-outside-vocabulary", value: rec.type };
+  }
+  if (typeof rec.ts !== "number" || !Number.isFinite(rec.ts)) {
+    return { kind: "ts-envelope", value: rec.ts };
+  }
+  if (opts.requireSeq && (typeof rec.seq !== "number" || !Number.isSafeInteger(rec.seq) || rec.seq < 1)) {
+    return { kind: "seq-envelope", value: rec.seq };
+  }
+  if (rec.outcome !== undefined && !(ALL_RUN_OUTCOMES as readonly string[]).includes(rec.outcome as string)) {
+    return { kind: "outcome-outside-vocabulary", value: rec.outcome };
+  }
+  return null;
+}
+
+/**
  * record 流单行校验原语（[§3.2] core 恢复读面与壳 strict 读面共用单源）。
  *
  * 规则集（两读面原先各写一份，规则漂移即「同一个坏行一边拒绝一边放行」）：
  *   非对象 → type 落词表 → ts 有限数值 → seq（可选要求）→ outcome 落词表（携带时）
- *   → agent-settled 必须携带 result 全文。
+ *   → agent-settled 必须携带 result 全文。（信封段拆见 envelopeIssueOf。）
  *
  * @param opts.requireSeq true = seq 信封必填且为正整数（core 恢复读面：坏 seq 是截断
  *        证据）；false = 缺省放行（壳兼容档：W1 前存量行无该字段，D7 惰性兼容读）。
@@ -138,23 +168,8 @@ export function parseRecordStreamLine(
   }
   if (typeof parsed !== "object" || parsed === null) return { ok: false, issue: { kind: "not-object" } };
   const rec = parsed as { type?: unknown; ts?: unknown; seq?: unknown; outcome?: unknown; result?: unknown };
-  // 信封存在性（type 为非空字符串）与词表成员资格分开报：两侧读面对「type 缺失」
-  // 的文案不同（core 复原为「词表外」、壳为「缺事件信封」），规则同源、文案各异。
-  if (typeof rec.type !== "string" || rec.type === "") {
-    return { ok: false, issue: { kind: "type-envelope", value: rec.type } };
-  }
-  if (!RUN_EVENT_TYPE_SET.has(rec.type)) {
-    return { ok: false, issue: { kind: "type-outside-vocabulary", value: rec.type } };
-  }
-  if (typeof rec.ts !== "number" || !Number.isFinite(rec.ts)) {
-    return { ok: false, issue: { kind: "ts-envelope", value: rec.ts } };
-  }
-  if (opts.requireSeq && (typeof rec.seq !== "number" || !Number.isSafeInteger(rec.seq) || rec.seq < 1)) {
-    return { ok: false, issue: { kind: "seq-envelope", value: rec.seq } };
-  }
-  if (rec.outcome !== undefined && !(ALL_RUN_OUTCOMES as readonly string[]).includes(rec.outcome as string)) {
-    return { ok: false, issue: { kind: "outcome-outside-vocabulary", value: rec.outcome } };
-  }
+  const issue = envelopeIssueOf(rec, opts);
+  if (issue !== null) return { ok: false, issue };
   if (rec.type === "agent-settled" && rec.result === undefined) {
     return { ok: false, issue: { kind: "agent-settled-missing-result" } };
   }
