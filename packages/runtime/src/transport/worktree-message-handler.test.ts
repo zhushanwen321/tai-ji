@@ -410,7 +410,7 @@ describe('WorktreeMessageHandler worktree.list', () => {
   })
 })
 
-// ── workspace.detect / workspace.detectBare ─────────────────
+// ── workspace.detect ─────────────────
 
 describe('WorktreeMessageHandler workspace.detect', () => {
   it('workspace.detect reply workspace.detected', async () => {
