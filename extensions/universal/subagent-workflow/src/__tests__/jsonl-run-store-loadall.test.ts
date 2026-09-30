@@ -162,7 +162,8 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
 
     // 只有 v2 实体重建（终局 ⟸ journal run-settled）；历史形态零发现
     expect(loaded.map((r) => r.runId)).toEqual(["run-v2-current"]);
-    expect(loaded[0]!.state.status).toBe("done");
+    // [D6(a) 第 3 步] 终局判定源 = 终局记录注册表（聚合不持 status）
+    expect(isRunSettled(loaded[0]!)).toBe(true);
     expect(loaded[0]!.state.reason).toBe("completed");
   });
 
@@ -220,7 +221,8 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
     const loaded = await store.loadAll();
 
     expect(loaded.map((r) => r.runId)).toEqual(["run-pre-dispatch-fail"]);
-    expect(loaded[0]!.state.status).toBe("done");
+    // [D6(a) 第 3 步] 终局判定源 = 终局记录注册表（聚合不持 status）
+    expect(isRunSettled(loaded[0]!)).toBe(true);
     expect(loaded[0]!.state.reason).toBe("failed");
     const call = loaded[0]!.state.calls.get(0);
     expect(call?.result).toMatchObject({ content: "", error: "skill not found: nope" });

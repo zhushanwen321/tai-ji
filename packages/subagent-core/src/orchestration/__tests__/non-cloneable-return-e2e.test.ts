@@ -41,7 +41,7 @@ async function waitForTerminal(
     if (Date.now() > deadline) {
       throw new Error(
         `run ${runId} did not reach a terminal state within ${timeoutMs}ms ` +
-          `(status=${run?.state.status ?? "unknown"}) — hang regression`,
+          `(settled=${run === undefined ? "unknown" : String(isRunSettled(run))}) — hang regression`,
       );
     }
     await new Promise((r) => setTimeout(r, 50));
@@ -91,7 +91,7 @@ describe("[F1] 不可克隆 return → run failed（非悬挂）— e2e", () => 
       };
 
       const runId = await runWorkflow(spec, deps);
-      expect(runs.get(runId)?.state.status).toBe("running");
+      expect(isRunSettled(runs.get(runId)!)).toBe(false);
 
       // 挂起 → 此处超时 throw（修复前行为）；收敛 → done
       const run = await waitForTerminal(runs, runId, 30_000);

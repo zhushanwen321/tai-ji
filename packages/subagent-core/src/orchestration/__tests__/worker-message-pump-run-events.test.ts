@@ -28,6 +28,7 @@ import {
   dispatchRunCreated,
   dispatchRunTrigger,
   finalizeRun,
+  isRunSettled,
   noteRebuiltSettlement,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
@@ -70,7 +71,6 @@ function makeRealRun(runId: string, specOverrides: { scriptPath?: string } = {})
       scriptPath: specOverrides.scriptPath ?? "/tmp/test-wf.js",
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),
@@ -235,7 +235,7 @@ describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
     );
     await flushMicrotasks();
 
-    expect(run.state.status).toBe("running"); // 正常完成不触发终局
+    expect(isRunSettled(run)).toBe(false); // 正常完成不触发终局
     const events = await scanRunEvents("wf-ev-6");
     expect(events.map((e) => e.type)).toEqual(["run-created", "agent-started", "agent-settled"]);
     expect(events[1]).toMatchObject({ taskIndex: 3, agentName: "reviewer", attempt: 1 });
@@ -469,7 +469,7 @@ describe("dispatchAgentCall 重试轨迹（agent-retrying 帧 + 静默反向）"
       await vi.advanceTimersByTimeAsync(2000); // 次退避（BACKOFF 2000ms）→ attempt 3 成功
       await flushMicrotasks(); // agent-settled 投递链落账
 
-      expect(run.state.status).toBe("running"); // call 成功不触发终局
+      expect(isRunSettled(run)).toBe(false); // call 成功不触发终局
       // 静默反向（D7）：重试窗口零终局通知（journal 事件落账 ≠ 通知）
       expect(deps.onRunDone).not.toHaveBeenCalled();
       const events = await scanRunEvents("wf-ev-retry");

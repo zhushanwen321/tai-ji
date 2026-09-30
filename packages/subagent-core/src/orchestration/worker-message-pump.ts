@@ -328,7 +328,7 @@ function remainingTimeBudgetMs(run: WorkflowRun): number | undefined {
  * pending-notification + onRunDone（[D15] 收敛为 terminal-actions.finalizeRun 单写点）。
  */
 async function finalizeTimeBudgetExhausted(run: WorkflowRun, deps: LifecycleDeps): Promise<void> {
-  deps.log?.("debug", "workflow:worker-message-pump", "time budget exhausted on rebuild, transition done", {
+  deps.log?.("debug", "workflow:worker-message-pump", "time budget exhausted on rebuild, finalizing run", {
     runId: run.runId,
     budgetTimeMs: run.spec.budgetTimeMs,
   });
@@ -340,19 +340,18 @@ async function finalizeTimeBudgetExhausted(run: WorkflowRun, deps: LifecycleDeps
  * 重建整个 RunRuntime：新 controller + 新 worker。
  *
  * 调 run.replaceRuntime(newRt)（G5-001）：原子释放旧 runtime（worker.terminate +
- * abort）+ 绑定新 runtime，全程 status==="running" 不变（不变式 I1 不违反）。
+ * abort）+ 绑定新 runtime。
  *
  * handlers 由调用方（lifecycle makeHandlers）构造——它们路由 onMessage/onError/
  * onExit 回本文件的 handle* 函数。handlers 捕获 run + deps 闭包，runtime 重建后
  * 仍有效（run 实例不变，deps 不变）。
  *
- * 前置：run.state.status === "running"（replaceRuntime 要求，G6-001）。
+ * 前置：run 未终局（G6-001——唯一生产调用方 scheduleRebuild 在退避后、本调用前
+ * 同步重检 isRunSettled，无 await 竞窗；终局 run 不可复活由调用方前置承载）。
  *
  * [race-F3] 时间预算重排按剩余墙钟折算（remainingTimeBudgetMs），不再用满额——
  * 否则每次错误重试都重置预算，最坏 6 次重试放大 ~6×。耗尽时的终态转移不在本函数
  * （唯一生产调用方 scheduleRebuild 已前置拦截，见其注释）。
- *
- * @throws status !== "running"（由 replaceRuntime 抛）
  */
 export function rebuildRuntime(
   run: WorkflowRun,
@@ -857,7 +856,7 @@ function dispatchAgentCall(
       // finalizeRun 内含终局让位守卫。
       if (run.state.budget.isExceeded()) {
         run.state.error = run.state.error ?? "Budget exceeded";
-        deps.log?.("debug", "workflow:worker-message-pump", "budget exceeded, transition done", { runId: run.runId });
+        deps.log?.("debug", "workflow:worker-message-pump", "budget exceeded, finalizing run", { runId: run.runId });
         void finalizeRun(run, deps, "budget_limited", { context: "agent call budget done" });
       }
     })
@@ -1008,7 +1007,7 @@ async function handleReturn(
   msg: ReturnMsg,
   deps: LifecycleDeps,
 ): Promise<void> {
-  deps.log?.("debug", "workflow:worker-message-pump", "handleReturn", { runId: run.runId, status: run.state.status });
+  deps.log?.("debug", "workflow:worker-message-pump", "handleReturn", { runId: run.runId });
   // 捕获 worker 诊断日志（P2-2）
   // L9: 追加而非覆盖——保留重试历史的诊断日志（各 worker 实例的 console 输出）
   if (msg.workerLogs && msg.workerLogs.length > 0) {
@@ -1067,7 +1066,7 @@ export async function handleWorkerError(
 
   // 超限 → failed
   run.state.error = err.message;
-  deps.log?.("debug", "workflow:worker-message-pump", "handleWorkerError retries exceeded, transition done", { runId: run.runId, count });
+  deps.log?.("debug", "workflow:worker-message-pump", "handleWorkerError retries exceeded, finalizing run", { runId: run.runId, count });
   await finalizeRun(run, deps, "failed", { context: "handleWorkerError (done,failed)" });
 }
 
@@ -1115,7 +1114,7 @@ export async function handleWorkerExit(
     // [F1] 无终态消息的 exit(0) = worker 静默退出（不可克隆 return 被吞 / 脚本直调
     // process.exit(0) 等）。置 failed 保证 run 必有终态。不重试：rebuild 重跑
     // 脚本对确定性根因（不可克隆 return）无意义，且 belt 路径优先给用户明确归因。
-    deps.log?.("debug", "workflow:worker-message-pump", "worker exited without terminal message, transition done", { runId: run.runId });
+    deps.log?.("debug", "workflow:worker-message-pump", "worker exited without terminal message, finalizing run", { runId: run.runId });
     run.state.error = WORKER_EXITED_WITHOUT_RESULT_MSG;
     await finalizeRun(run, deps, "failed", { context: "handleWorkerExit (done,failed, no terminal message)" });
     return;
@@ -1167,7 +1166,7 @@ export async function handleScriptError(
 
   // 超限 → failed
   run.state.error = `Workflow failed after ${MAX_WORKER_RETRIES} retries: ${errorMsg}`;
-  deps.log?.("debug", "workflow:worker-message-pump", "handleScriptError retries exceeded, transition done", { runId: run.runId, count });
+  deps.log?.("debug", "workflow:worker-message-pump", "handleScriptError retries exceeded, finalizing run", { runId: run.runId, count });
   await finalizeRun(run, deps, "failed", { context: "handleScriptError (done,failed)" });
 }
 
@@ -1242,7 +1241,7 @@ async function handleRebuildStartFailure(
 
   // 耗尽 → 收敛 done,failed（不卡 running）
   run.state.error = `Runtime rebuild failed after ${MAX_WORKER_RETRIES} retries: ${message}`;
-  deps.log?.("debug", "workflow:worker-message-pump", "rebuild retries exhausted, transition done", { runId: run.runId, count });
+  deps.log?.("debug", "workflow:worker-message-pump", "rebuild retries exhausted, finalizing run", { runId: run.runId, count });
   await finalizeRun(run, deps, "failed", { context: "handleRebuildStartFailure (done,failed)" });
 }
 

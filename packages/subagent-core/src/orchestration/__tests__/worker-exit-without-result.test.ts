@@ -153,7 +153,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
 
     await handleWorkerExit(run, 0, makeHandle(), deps, makeHandlers());
 
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(deps.eventBus.emit).not.toHaveBeenCalled();
     expect(deps.appendEntry).not.toHaveBeenCalled();
@@ -167,7 +167,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
 
     await handleWorkerExit(run, 0, makeHandle(false), deps, makeHandlers());
 
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
@@ -200,7 +200,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
       await pending;
 
       // 未超限 → rebuild（workerHost.start 重建），run 保持 running、不判 failed
-      expect(run.state.status).toBe("running");
+      expect(isRunSettled(run)).toBe(false);
       expect(run.meta.workerErrorCount).toBe(1);
       expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
       expect(deps.onRunDone).not.toHaveBeenCalled();
@@ -235,7 +235,7 @@ describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
       // 双事件只处理一次：计数 +1（非 +2）、单次 rebuild、run 保持 running
       expect(run.meta.workerErrorCount).toBe(1);
       expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-      expect(run.state.status).toBe("running");
+      expect(isRunSettled(run)).toBe(false);
       expect(deps.onRunDone).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();

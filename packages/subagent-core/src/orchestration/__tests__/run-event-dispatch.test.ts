@@ -73,7 +73,6 @@ function makeRun(runId: string, opts: { budgetTimeMs?: number } = {}): WorkflowR
       model: "test-model",
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),

@@ -66,7 +66,7 @@ import { WorkflowScriptRegistryImpl } from "@zhushanwen/subagent-core";
 // 管道），session_start / session_shutdown 驱动 attach/detach；测试可注入 fake。
 import { createInFlightReporter, type InFlightReporter } from "./host/inflight-reporter.ts";
 // [W2/V1 D1 第 8 行] 判活类消费面（isScriptRunning）经 core 投影单点
-//（runSummary.status 二值——内部收拢注册表 ∨ 聚合混合判源）。
+//（runSummary.status 三态投影——终局判定源 = 终局记录注册表）。
 import { type RunSettlementRecord } from "./jsonl-run-store.ts";
 import { notifyDone, trackNotifiedRunId } from "./workflow-notify.ts";
 // ═══ 跨域事件注册（handler 体住各自域模块，本 seam 原位调用保注册顺序） ═══

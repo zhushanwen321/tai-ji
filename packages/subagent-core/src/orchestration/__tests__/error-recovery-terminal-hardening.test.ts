@@ -57,7 +57,6 @@ function makeRealRun(runId: string, opts: { budgetTimeMs?: number } = {}): Workf
       budgetTimeMs: opts.budgetTimeMs,
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),
@@ -278,7 +277,7 @@ describe("[OR-6] log 消息消费 + 未知类型 default 留痕", () => {
     await handleWorkerMessage(run, { type: "log", phase: "build", message: "step 1 done" }, deps, makeHandlers());
 
     expect(run.state.errorLogs).toEqual([{ level: "log", message: "step 1 done" }]);
-    expect(run.state.status).toBe("running"); // 不触发终态
+    expect(isRunSettled(run)).toBe(false); // 不触发终态
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(deps.log).toHaveBeenCalledWith("debug", "workflow:worker-message-pump", "worker log", {
       runId: "wf-log-1",
@@ -337,7 +336,7 @@ describe("[OR-6] log 消息消费 + 未知类型 default 留痕", () => {
       runId: "wf-log-3",
       type: "future-unknown-type",
     });
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(deps.store.save).not.toHaveBeenCalled();
   });
 });

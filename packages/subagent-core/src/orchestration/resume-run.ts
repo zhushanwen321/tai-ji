@@ -779,7 +779,6 @@ function rebuildRunFromRecord(
     runId,
     spec,
     {
-      status: "running",
       // fresh run 的 Budget 同源（lifecycle.createRunningRun：maxTimeMs=spec.budgetTimeMs）
       // ——复活聚合形状与新建一致，避免展示/消费面按 maxTimeMs 判定时双形态。
       // [§2.1b] 计数不再归零：帧推导（agent-settled.result.usage 同一加权口径）重建

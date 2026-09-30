@@ -38,7 +38,7 @@ import { doneReasonToRunOutcome } from "../run-events.ts";
 import { Budget } from "../models/budget.ts";
 import { RunRuntime } from "../models/run-runtime.ts";
 import { Trace } from "../models/trace.ts";
-import type { AgentResult, DoneReason, RunStatus } from "../models/types.ts";
+import type { AgentResult, DoneReason } from "../models/types.ts";
 import { WorkflowRun } from "../models/workflow-run.ts";
 import type { LifecycleDeps, WorkerHandlers } from "../models/ports.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
@@ -54,7 +54,7 @@ function findByStep(trace: Trace, stepIndex: number) {
   return trace.toArray().find((n) => n.stepIndex === stepIndex);
 }
 
-/** 构造一个 status="running" 的 mock WorkflowRun，meta 可配置。 */
+/** 构造一个活体（未终局）mock WorkflowRun，meta 可配置。 */
 let runSeq = 0;
 function makeRunningRun(opts: {
   workerErrorCount?: number;
@@ -67,7 +67,6 @@ function makeRunningRun(opts: {
   return {
     runId: `wf-handlers-${++runSeq}`, // [W2/V1] 模块级活体态/注册表按 runId 键控——唯一化防跨测试污染
     state: {
-      status: "running",
       budget: { usedTokens: 50, usedCost: 0.1 },
       // L9: errorLogs 现在用 push 追加——必须是真实数组，不能省略
       errorLogs: [],
@@ -90,11 +89,6 @@ function makeRunningRun(opts: {
     runtime: {
       worker: { postMessage: opts.postMessage ?? vi.fn() },
       receivedTerminalMessage: opts.receivedTerminalMessage,
-    },
-    // transition 副作用——run.state.status 由调用方通过 mock 控制后再次断言
-    transition(this: WorkflowRun, target: RunStatus, reason?: DoneReason): void {
-      this.state.status = target;
-      if (target === "done") this.state.reason = reason;
     },
     replaceRuntime(this: WorkflowRun, rt: NonNullable<WorkflowRun["runtime"]>): void {
       this.runtime = rt;
@@ -167,11 +161,10 @@ async function seedRunCreated(run: WorkflowRun): Promise<void> {
   await dispatchRunCreated(run);
 }
 
-/** [D6(a) 第 1 步] 直改聚合状态的终态 fixture：status/reason 与终局记录注册表条目
- *  同写（换源后 isRunSettled 只认注册表——生产经 dispatch 链 note / 重建点
- *  noteRebuiltSettlement 注入；stale 守卫用例的「已终态」形态由本 helper 构造）。 */
+/** [D6(a) 第 1 步] 终态 fixture：终局事实 = 终局记录注册表条目（换源后
+ *  isRunSettled 只认注册表——生产经 dispatch 链 note / 重建点 noteRebuiltSettlement
+ *  注入；stale 守卫用例的「已终态」形态由本 helper 构造）。 */
 function markRunTerminalDone(run: WorkflowRun, reason: DoneReason = "completed"): void {
-  run.state.status = "done";
   run.state.reason = reason;
   noteRebuiltSettlement(run.runId, {
     outcome: doneReasonToRunOutcome(reason),
@@ -191,7 +184,7 @@ describe("handleWorkerExit", () => {
 
     await handleWorkerExit(run, 0, handle, deps, makeHandlers());
 
-    expect(run.state.status).toBe("running"); // 未改
+    expect(isRunSettled(run)).toBe(false); // 未改
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(deps.eventBus.emit).not.toHaveBeenCalled();
     expect(deps.appendEntry).not.toHaveBeenCalled();
@@ -238,7 +231,7 @@ describe("handleWorkerExit", () => {
     await handleWorkerExit(run, 1, staleHandle, deps, makeHandlers());
 
     // 状态未变，store 未 save
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(deps.store.save).not.toHaveBeenCalled();
   });
 
@@ -293,7 +286,7 @@ describe("handleWorkerError", () => {
 
     expect(run.meta.workerErrorCount).toBe(1);
     // 状态仍 running（重试不改 status）
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     // workerHost.start 被调（rebuildRuntime 内重建 worker）
     expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
   });
@@ -348,7 +341,7 @@ describe("handleScriptError", () => {
     await promise;
 
     expect(run.meta.scriptErrorCount).toBe(2);
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
   });
 
@@ -405,7 +398,7 @@ describe("rebuildRuntime", () => {
     // replaceRuntime 被调（新 runtime 绑定，mock 内仅替换 runtime 字段）
     expect(run.runtime).toBeDefined();
     // status 仍 running（replaceRuntime 不改 status）
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
   });
 
   it("带 budgetTimeMs 时重排 scheduleTimeBudget 计时器", () => {
@@ -488,7 +481,7 @@ describe("race-F3: rebuild 时间预算折算", () => {
     const args = scheduleTimeBudget.mock.calls[0]!;
     expect(args[1]).toBe(1500);
     // run 保持 running（正常 rebuild 路径不受影响）
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
   });
 
   it("重试前预算已耗尽（已耗 > 预算）→ 不 rebuild，直接 done,time_limited", async () => {
@@ -528,7 +521,7 @@ describe("race-F3: rebuild 时间预算折算", () => {
 
     expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
     expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
   });
 
   it("复活 run（spec 带继承预算 + D10 账本）：worker/script 错误重试按剩余活跃预算重排，不被 startedAt 墙钟误判耗尽", async () => {
@@ -549,7 +542,7 @@ describe("race-F3: rebuild 时间预算折算", () => {
       await p;
 
       // 不 time_limited：正常 rebuild + 计时器按剩余活跃预算重排（非满额 60min）
-      expect(run.state.status).toBe("running");
+      expect(isRunSettled(run)).toBe(false);
       expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
       expect(scheduleTimeBudget).toHaveBeenCalledTimes(1);
       const rescheduled = scheduleTimeBudget.mock.calls[0]![1] as number;
@@ -591,7 +584,6 @@ function makeRealRun(runId: string, opts: { budgetTimeMs?: number } = {}): Workf
       budgetTimeMs: opts.budgetTimeMs,
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),

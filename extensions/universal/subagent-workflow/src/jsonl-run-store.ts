@@ -498,7 +498,6 @@ function foldRecordStreamToRun(
       runId,
       spec,
       {
-        status: "running",
         budget,
         calls,
         trace,
@@ -506,10 +505,10 @@ function foldRecordStreamToRun(
       },
       {
         startedAt: startedAtIso,
-        // 中断标记（[D2] 聚合 status 两态、中断态经 meta 投影表达）：末次
-        // run-interrupted 后无 run-resumed 复活 → meta.interruptedAt 置位，
-        // runSummary 投影 'interrupted'（CLI/TUI 不显示僵尸「运行中」；resume
-        // 资格判据在 core fold lifecycle，不受本投影影响）。
+        // 中断标记（[D2] 中断态经 meta 投影表达）：末次 run-interrupted 后无
+        // run-resumed 复活 → meta.interruptedAt 置位，runSummary 投影 'interrupted'
+        //（CLI/TUI 不显示僵尸「运行中」；resume 资格判据在 core fold lifecycle，
+        // 不受本投影影响）。
         ...(interruptedAt !== undefined ? { interruptedAt } : {}),
       },
     );
@@ -519,7 +518,6 @@ function foldRecordStreamToRun(
     runId,
     spec,
     {
-      status: "done",
       reason,
       budget,
       calls,

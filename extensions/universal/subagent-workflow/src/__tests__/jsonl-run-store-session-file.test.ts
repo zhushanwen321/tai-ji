@@ -40,7 +40,7 @@ vi.mock("@zhushanwen/subagent-core/core/logger.ts", () => ({
 
 import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 
-import { Budget } from "@zhushanwen/subagent-core";
+import { Budget, isRunSettled } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import { runSummary } from "@zhushanwen/subagent-core";
@@ -278,7 +278,8 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
     const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
     const restored = await store.loadAll();
-    expect(restored[0]!.state.status).toBe("running");
+    // [D6(a) 第 3 步] 活体判定源 = 终局记录注册表（聚合不持 status）
+    expect(isRunSettled(restored[0]!)).toBe(false);
     for (const call of restored[0]!.state.calls.values()) {
       expect(call.status).toBe("running");
     }
@@ -300,7 +301,8 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
     const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
     const restored = await store.loadAll();
-    expect(restored[0]!.state.status).toBe("running"); // 聚合两态保持
+    // [D6(a) 第 3 步] 活体判定源 = 终局记录注册表（聚合不持 status）
+    expect(isRunSettled(restored[0]!)).toBe(false); // 聚合两态保持
     expect(restored[0]!.meta.interruptedAt).toBe(new Date(1200).toISOString());
     expect(runSummary(restored[0]!).status).toBe("interrupted");
 
@@ -393,7 +395,8 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     store.rebind(mkPi(entriesNew), mkCtx(seedEntries));
 
     const loaded = await store.loadAll();
-    expect(loaded[0]?.state.status).toBe("done");
+    // [D6(a) 第 3 步] 终局判定源 = 终局记录注册表（聚合不持 status）
+    expect(isRunSettled(loaded[0]!)).toBe(true);
     expect(loaded[0]?.state.reason).toBe("completed");
 
     // 补写落新 pi：seed 注册之外恰 1 条终态条目（kind: settled）
@@ -416,7 +419,8 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     const loaded = await store.loadAll();
     expect(loaded).toHaveLength(1);
     expect(loaded[0]!.runId).toBe(runId);
-    expect(loaded[0]!.state.status).toBe("done");
+    // [D6(a) 第 3 步] 终局判定源 = 终局记录注册表（聚合不持 status）
+    expect(isRunSettled(loaded[0]!)).toBe(true);
     expect(loaded[0]!.state.reason).toBe("completed");
     // 终态条目缺失 → 幂等补写恰 1 条（收编条目半边）；载荷与 core finalizeRun 同构
     const settledEntries = entries.filter(
@@ -455,7 +459,8 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath), v2SettledEntry(runId)];
     const storeA = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
     const loaded = await storeA.loadAll();
-    expect(loaded[0]!.state.status).toBe("done");
+    // [D6(a) 第 3 步] 终局判定源 = 终局记录注册表（聚合不持 status）
+    expect(isRunSettled(loaded[0]!)).toBe(true);
     expect(loaded[0]!.state.reason).toBe("failed");
     expect(loaded[0]!.state.error).toBe("boom");
     // 条目已在：不追加（数量不变）
@@ -476,7 +481,8 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
     const loaded = await store.loadAll();
     expect(loaded).toHaveLength(1);
-    expect(loaded[0]!.state.status).toBe("running");
+    // [D6(a) 第 3 步] 活体判定源 = 终局记录注册表（聚合不持 status）
+    expect(isRunSettled(loaded[0]!)).toBe(false);
     expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(1);
   });
 
@@ -504,7 +510,8 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     // 该实体对恢复链与收编扫描全部不可见——degraded running 基线交恢复链收编。
     expect(loaded).toHaveLength(1);
     expect(loaded[0]!.runId).toBe(runId);
-    expect(loaded[0]!.state.status).toBe("running");
+    // [D6(a) 第 3 步] 活体判定源 = 终局记录注册表（聚合不持 status）
+    expect(isRunSettled(loaded[0]!)).toBe(false);
     expect(loggerMock.warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain(runId);
   });
 
@@ -594,7 +601,8 @@ describe("D5 store stale guard：rebind 后窗口内 stale appendEntry 统一 de
       // 读回终态（条目是投影锚：stale 窗口内缺失由下次 loadAll 幂等补写自愈）
       const loaded = await store.loadAll();
       expect(loaded).toHaveLength(1);
-      expect(loaded[0]!.state.status).toBe("done");
+      // [D6(a) 第 3 步] 终局判定源 = 终局记录注册表（聚合不持 status）
+      expect(isRunSettled(loaded[0]!)).toBe(true);
       expect(entriesStale).toHaveLength(0); // stale 条目被丢弃
       // save（no-op）照常 settle
       const run = WorkflowRun.reconstruct(

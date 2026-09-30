@@ -47,7 +47,6 @@ function makeRealRun(runId: string, opts: { budgetTimeMs?: number } = {}): Workf
       budgetTimeMs: opts.budgetTimeMs,
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),
@@ -152,7 +151,7 @@ describe("[OR-2] rebuildRuntime 抛错回灌重试矩阵", () => {
     // 回灌矩阵生效：两次计数（崩溃 + rebuild 失败）
     expect(run.meta.workerErrorCount).toBe(2);
     // rebuild #2 成功 → run 仍 running（旧 worker 已换新，不卡死不误判 failed）
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(deps.workerHost.start).toHaveBeenCalledTimes(2);
     // 未收敛终态：不 save、不注销（直落）
     expect(deps.store.save).not.toHaveBeenCalled();
@@ -264,7 +263,7 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
 
     expect(loggerSpy.mock.calls.filter((c) => String(c[0]).includes(REBUILD_INJECT_ENV))).toHaveLength(0);
     expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
   });
 
   it("env 非法值（非正整数）：不激活 + warn 指明原值（杜绝静默失效，LC-7 同族）", async () => {
@@ -280,7 +279,7 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
 
     // 非法值 → 不注入：rebuild 正常执行
     expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     // 且 warn 留痕指明钩子未激活
     const hookWarns = loggerSpy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(REBUILD_INJECT_ENV));
     expect(hookWarns).toHaveLength(1);
@@ -303,7 +302,7 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
       await advance(1000);
       await p;
       expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-      expect(run.state.status).toBe("running");
+      expect(isRunSettled(run)).toBe(false);
       loggerSpy.mockRestore();
     }
   });
@@ -320,7 +319,7 @@ describe("[P-SD] 重建失败注入钩子（TAIJI_SUBAGENT_TEST_INJECT_REBUILD_F
     await advance(1000);
     await p1;
     expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
 
     // 第 2 次崩溃（新代际 worker）→ rebuild #2（序数 2 ≥ 2）起注入拦截 → 矩阵耗尽收敛
     const p2 = handleWorkerError(run, new Error("worker boom 2"), deps, handlers);

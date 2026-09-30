@@ -10,8 +10,8 @@
 // - running 残留 → run-interrupted 转移事件落 record（[D2] interrupted 暂停态，
 //   非 done,failed——崩溃 ≠ 失败，可 resume）+ in-flight call 内存观测面收口 +
 //   runs Map 注册
-// - 内存观测面不变量：收编后 run.state.status 仍 running（活体写点停更语义——
-//   终局判据归 record fold；「进程内持有重水合 running 聚合」与新语义一致）
+// - 内存观测面不变量：收编后 run 仍非终局（isRunSettled=false——中断非终局，
+//   终局判据归终局记录注册表；「进程内持有未终局聚合」与新语义一致）
 // - hooks 每 running run 恰好一次、参数 {id, reason:"interrupted"}；无 hooks 不炸
 // - onRunRecovered 同步 throw 被围栏捕获（warn 留痕），不中断其余 run 恢复
 // - evict 步：超 MAX_RETAINED_DONE_RUNS 的 done run 被淘汰（最旧优先）
@@ -29,6 +29,7 @@ import {
   recoverCrashedRuns,
 } from "../lifecycle.ts";
 import {
+  isRunSettled,
   noteRebuiltSettlement,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
@@ -166,9 +167,9 @@ describe("recoverCrashedRuns — 三步序列（loadAll→中断收编→evict�
       // 内存观测面：state.error 记录 reason、status 维持 running（活体写点停更——
       // 终局判据归 record fold，重水合聚合保持「未终局」观感）
       expect(running.state.error).toBe("Process killed (kill-9 or crash recovery)");
-      expect(running.state.status).toBe("running");
+      expect(isRunSettled(running)).toBe(false);
       // done run 原样（不进收编判定）
-      expect(done.state.status).toBe("done");
+      expect(isRunSettled(done)).toBe(true);
       expect(done.state.reason).toBe("completed");
       // [D15] v1 尾段删除：收编零 store.save（无覆盖写）
       expect(saves).toHaveLength(0);

@@ -14,7 +14,13 @@
 // 值级断言是可得的等价锚；runtime 同时依赖两者。
 import { describe, expect, it } from 'vitest'
 
-import { runSummary, type WorkflowRun } from '@zhushanwen/subagent-core'
+import {
+  doneReasonToRunOutcome,
+  noteRebuiltSettlement,
+  runSummary,
+  type DoneReason,
+  type WorkflowRun,
+} from '@zhushanwen/subagent-core'
 import type { WorkflowRunStatus } from '@taiji/shared'
 
 /** shared WorkflowRunStatus 词表成员（编译期 satisfies 锚定 shared 类型）。 */
@@ -24,21 +30,29 @@ const SHARED_WORKFLOW_RUN_STATUSES = [
   'done',
 ] as const satisfies readonly WorkflowRunStatus[]
 
-/** 最小 run 形态（runSummary 读 runId/spec/meta/state 四组字段）。 */
+/** 最小 run 形态（runSummary 读 runId/spec/meta/state 与注册表条目）。
+ *  [D6(a) 第 3 步] 终局判定源 = 终局记录注册表：done 形态经 noteRebuiltSettlement
+ *  注入终局事实（生产 = 活体 dispatch 链 note / 壳重建点注入），聚合快照不持 status。 */
 function makeRun(shape: {
   status?: string
   interruptedAt?: string
   reason?: string
 }): WorkflowRun {
+  const runId = `wf-status-parity-${shape.status ?? 'running'}-${shape.interruptedAt ?? 'live'}`
+  if (shape.status === 'done') {
+    noteRebuiltSettlement(runId, {
+      outcome: doneReasonToRunOutcome((shape.reason ?? 'completed') as DoneReason),
+      settledAt: 0,
+    })
+  }
   return {
-    runId: `wf-status-parity-${shape.status ?? 'running'}-${shape.interruptedAt ?? 'live'}`,
+    runId,
     spec: { scriptName: 'status-parity' },
     meta: {
       startedAt: '2026-09-30T00:00:00.000Z',
       ...(shape.interruptedAt !== undefined ? { interruptedAt: shape.interruptedAt } : {}),
     },
     state: {
-      status: shape.status ?? 'running',
       ...(shape.reason !== undefined ? { reason: shape.reason } : {}),
       budget: { usedTokens: 0, maxTokens: 1000, usedCost: 0 },
       trace: { toArray: () => [] },

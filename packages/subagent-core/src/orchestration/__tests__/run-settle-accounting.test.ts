@@ -81,7 +81,6 @@ function makeRun(runId: string): WorkflowRun {
     runId,
     { scriptName: "sig-wf", scriptSource: "agent('x')", args: {}, scriptPath: "/tmp/x.js" },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),

@@ -31,6 +31,7 @@ import { abortRun } from "../lifecycle.ts";
 import { forgetRunResumedBudget, rebuildRuntime } from "../worker-message-pump.ts";
 import {
   interruptRun,
+  isRunSettled,
   resetPhaseSettlementTrackerForTest,
   setRunEventJournalDirForTest,
 } from "../terminal-actions.ts";
@@ -185,7 +186,7 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
     // 聚合重建：回放集（taskIndex 0）done + result 全文；重派集（taskIndex 1）无条目
     const run = runs.get("wf-main");
     expect(run).toBeDefined();
-    expect(run!.state.status).toBe("running");
+    expect(isRunSettled(run!)).toBe(false);
     expect(run!.runtime).toBeDefined();
     expect(run!.spec.scriptSource).toBe(SCRIPT_SOURCE);
     // 锚定恢复：scriptPath 从 run-created 帧逐字恢复（worker 沙箱 _shared 定位来源）
@@ -312,7 +313,7 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
     // 错误重试 → rebuildRuntime：账本可达 → 重排剩余（≈20min），非满额 60min
     budgetSchedules.length = 0;
     rebuild(run, deps);
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
     expect(budgetSchedules).toHaveLength(1);
     const rescheduled = budgetSchedules[0]!.ms;
     expect(rescheduled).toBeGreaterThan(budget - active - 60_000);
@@ -755,7 +756,7 @@ describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => 
     const fresh = makeDeps();
     await expect(resumeRun("wf-adoptfail", fresh.deps, { now: () => T0 + 200_000 }))
       .resolves.toBe("wf-adoptfail");
-    expect(fresh.runs.get("wf-adoptfail")!.state.status).toBe("running");
+    expect(isRunSettled(fresh.runs.get("wf-adoptfail")!)).toBe(false);
     const eventsAfterRetry = await scanEvents("wf-adoptfail");
     expect(eventsAfterRetry.filter((e) => e.type === "run-resumed")).toHaveLength(2);
   });
@@ -812,7 +813,6 @@ describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => 
         budgetTimeMs: 60 * 60_000,
       },
       {
-        status: "running",
         budget: new Budget({ maxTimeMs: 60 * 60_000 }),
         calls: new Map(),
         trace: new Trace(),

@@ -55,7 +55,6 @@ function makeRealRun(runId: string): WorkflowRun {
       scriptPath: "/tmp/test-wf.js",
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),
@@ -141,10 +140,9 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     const ok = await finalizeRun(run, deps, "completed", { context: "test" });
 
     expect(ok).toBe(true);
-    // [W2/V1] 终局断言换源：两态机字段停更（state.status 恒 running），终局经
-    // 六态机 dispatch 链（isRunSettled / 终局记录注册表）判定。
+    // [W2/V1] 终局断言换源：终局经六态机 dispatch 链（isRunSettled / 终局记录
+    // 注册表）判定——[D6(a) 第 3 步] 起聚合快照不再持状态字段。
     expect(isRunSettled(run)).toBe(true);
-    expect(run.state.status).toBe("running");
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
     // 各步恰好一次（终局帧经 no-op journal 防线零写——投递链空转一次）
     expect(deps.store.save).toHaveBeenCalledTimes(1);

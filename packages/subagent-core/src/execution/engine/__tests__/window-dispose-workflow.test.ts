@@ -105,7 +105,6 @@ function makeRealRun(runId: string): WorkflowRun {
       scriptPath: "/tmp/test-wf.js",
     },
     {
-      status: "running",
       budget: new Budget(),
       calls: new Map(),
       trace: new Trace(),

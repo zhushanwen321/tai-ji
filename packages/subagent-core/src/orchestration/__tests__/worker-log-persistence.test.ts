@@ -35,7 +35,7 @@ function makeRun(runId: string): WorkflowRun {
   const run = new WorkflowRun(
     runId,
     { scriptName: "test-wf", scriptSource: "agent('hi')", args: {}, scriptPath: "/tmp/test-wf.js" },
-    { status: "running", budget: new Budget(), calls: new Map(), trace: new Trace(), errorLogs: [] },
+    { budget: new Budget(), calls: new Map(), trace: new Trace(), errorLogs: [] },
     { startedAt: new Date().toISOString() },
   );
   run.assignRuntime(new RunRuntime(

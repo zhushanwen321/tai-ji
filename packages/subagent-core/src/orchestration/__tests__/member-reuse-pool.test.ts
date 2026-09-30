@@ -216,7 +216,6 @@ describe("finalizeRun 绑定清空接线（[D6]：内存释放、零事件）", 
       runId,
       { scriptName: "reuse-it", scriptSource: "agent('hi')", args: {}, scriptPath: "/tmp/reuse-it.js" },
       {
-        status: "running",
         budget: new Budget(),
         calls: new Map(),
         trace: new Trace(),

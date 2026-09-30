@@ -5,8 +5,9 @@
  * 可独立编译测试（D-12 三层架构，AC-1）。
  *
  * 核心内容：
- * - 状态机：RunStatus = "running" | "done"（2 态，一次性生命周期，FR-3）
- * + DoneReason（completed/failed/aborted/budget_limited/time_limited）
+ * - DoneReason（completed/failed/aborted/budget_limited/time_limited）
+ *   （run 生命周期两态机词表已随 [D6(a)] 退役——生命周期判定唯一走
+ *   六态机 dispatchRunTrigger 链与终局记录注册表，聚合不持状态机词表）
  * - AgentCallOpts / AgentResult（单次 agent 调用的输入/输出，宿主面 SSOT 留守本地）
  * + AgentUsage / ToolCallEntry / AgentFailureKind（自 SDK re-export，S4 簇 3 收编）
  * - ExecutionTraceNode / TracePatch / ToolCallEntry / WorkerLogEntry（trace 数据）
@@ -27,18 +28,16 @@ import type {
 // [D1 Class A] 词汇下沉 shared（execution 侧直接 import，不再反向依赖本层）
 export { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 
-// ── 状态机 ────────────────────────────────────────────────────
+// ── 终局原因 ─────────────────────────────────────────────────
 
 /**
- * 状态机：2 态（D-12 / FR-3，一次性生命周期——run 不可挂起）。
+ * 终态原因。done 时必有（WorkflowRun 不变式）。
  *
- * running → done
- *
- * `done` 是唯一终态，具体原因由 DoneReason 区分。
+ * [D6(a)] 原 run 两态机词表（running | done + 转移表）已整体退役：
+ * run 生命周期判定唯一走六态机 dispatchRunTrigger 链（terminal-actions）与
+ * 进程内终局记录注册表（isRunSettled / settledRecordOf），聚合快照不再携带
+ * 状态机词表。
  */
-export type RunStatus = "running" | "done";
-
-/** 终态原因。done 时必有（WorkflowRun 不变式）。 */
 export type DoneReason =
   | "completed"
   | "failed"

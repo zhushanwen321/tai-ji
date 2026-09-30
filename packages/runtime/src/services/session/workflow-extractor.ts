@@ -25,7 +25,7 @@
  * - packages/subagent-core/src/orchestration/run-snapshot.ts（RunSnapshot 格式 + SNAPSHOT_VERSION 权威定义）
  * - extensions/universal/subagent-workflow/src/jsonl-run-store.ts（record store 单模式——v2 条目写点，快照 codec 留壳消费 core）
  * - packages/subagent-core/src/orchestration/models/workflow-run.ts（WorkflowRun 聚合根）
- * - packages/subagent-core/src/orchestration/models/types.ts（RunStatus/DoneReason/AgentResult）
+ * - packages/subagent-core/src/orchestration/models/types.ts（DoneReason/AgentResult；原 run 两态机词表已随 D6(a) 退役）
  */
 
 import { readFileSync } from 'node:fs'

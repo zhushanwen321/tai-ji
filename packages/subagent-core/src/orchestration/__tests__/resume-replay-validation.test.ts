@@ -16,7 +16,7 @@ import {
 import {
   terminateRunningRuns,
 } from "../lifecycle.ts";
-import { setRunEventJournalDirForTest } from "../terminal-actions.ts";
+import { isRunSettled, setRunEventJournalDirForTest } from "../terminal-actions.ts";
 import { createRunEventJournal } from "../run-events.ts";
 import { resolveAgentOpts } from "../agent-opts-resolver.ts";
 import { AgentCall } from "../models/agent-call.ts";
@@ -45,7 +45,6 @@ function makeRunningRun(
       ...(opts.budgetTimeMs !== undefined ? { budgetTimeMs: opts.budgetTimeMs } : {}),
     },
     {
-      status: "running",
       budget: new Budget(opts.budgetTimeMs !== undefined ? { maxTimeMs: opts.budgetTimeMs } : {}),
       calls: new Map(),
       trace: new Trace(),
@@ -327,7 +326,7 @@ describe("D11 terminate 统一中断 — 全部 running run 被动失联转 inte
     await expect(
       resumeRun(runId, deps, { now: () => 1_770_000_100_000 }),
     ).resolves.toBe(runId);
-    expect(runs.get(runId)!.state.status).toBe("running");
+    expect(isRunSettled(runs.get(runId)!)).toBe(false);
   });
 
   it("正常 run：terminate 同样转 interrupted 暂停态（D11 统一，2026-09-29 用户裁决——打断不记失败）", async () => {
@@ -358,7 +357,7 @@ describe("D11 terminate 统一中断 — 全部 running run 被动失联转 inte
     await expect(
       resumeRun(runId, deps, { now: () => 1_770_000_100_000 }),
     ).resolves.toBe(runId);
-    expect(runs.get(runId)!.state.status).toBe("running");
+    expect(isRunSettled(runs.get(runId)!)).toBe(false);
   });
 });
 

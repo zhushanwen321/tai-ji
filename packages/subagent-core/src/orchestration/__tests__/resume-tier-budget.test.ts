@@ -207,7 +207,6 @@ describe("D10 pump 账本消费 — rebuildRuntime 计时器重排按剩余活�
       runId,
       spec,
       {
-        status: "running",
         budget: new Budget({ maxTimeMs: 60 * MIN }),
         calls: new Map(),
         trace: new Trace(),
@@ -259,7 +258,6 @@ describe("D10 pump 账本消费 — rebuildRuntime 计时器重排按剩余活�
       runId,
       spec,
       {
-        status: "running",
         budget: new Budget({ maxTimeMs: 60 * MIN }),
         calls: new Map(),
         trace: new Trace(),

@@ -16,7 +16,7 @@
  * 层归属：Engine（纯投影，零 IO、零依赖）。字段名对齐 pi 版（name = scriptName）。
  */
 
-import type { RunStatus, DoneReason } from "./models/types.ts";
+import type { DoneReason } from "./models/types.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";
 import { runSettledOutcomeToDoneReason, settledRecordOf } from "./terminal-actions.ts";
 
@@ -33,11 +33,12 @@ export interface WorkflowRunSummary {
   /** run 级简短标签（可选，旧持久化 run 缺失）。 */
   slug?: string;
   /**
-   * 投影三态（[D2]）：done（终局）> interrupted（重水合中断标记——聚合 status
-   * 词表保持两态，中断态经 meta.interruptedAt 在投影面表达，与 shared
-   * WorkflowRunStatus 三态同词）> running。
+   * 投影三态（[D2]，与 shared WorkflowRunStatus / 展示层 RunDisplayStatus 同词）：
+   * done（终局）> interrupted（重水合中断标记——经 meta.interruptedAt 在投影面
+   * 表达）> running。[D6(a)] 判定唯一源 = 终局记录注册表 + 中断标记，与聚合
+   * 快照无关（两态机词表已退役）。
    */
-  status: RunStatus | "interrupted";
+  status: "running" | "interrupted" | "done";
   reason?: DoneReason;
   /** ISO 时间戳，run 创建/启动时刻。 */
   startedAt: string;

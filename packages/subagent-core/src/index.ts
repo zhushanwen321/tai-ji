@@ -484,7 +484,6 @@ export type {
   AgentResult,
   DoneReason,
   ExecutionTraceNode,
-  RunStatus,
   ToolCallEntry,
   WorkerLogEntry,
 } from "./orchestration/models/types.ts";

@@ -100,7 +100,6 @@ function makeRunningRealRun(
     runId,
     spec,
     {
-      status: "running",
       budget: new Budget({ maxTokens: 1000 }),
       calls: new Map(),
       trace: new Trace(),
@@ -234,8 +233,8 @@ describe("runWorkflow", () => {
     // run 注册到 deps.runs
     expect(deps.runs.has(runId)).toBe(true);
     const run = deps.runs.get(runId)!;
-    // status 为 running（assignRuntime 已绑定 runtime）
-    expect(run.state.status).toBe("running");
+    // 活体 run（未终局）且 runtime 已绑定
+    expect(isRunSettled(run)).toBe(false);
     expect(run.runtime).toBeDefined();
     // workerHost.start 被调
     expect(deps.workerHost.start).toHaveBeenCalledTimes(1);
@@ -249,7 +248,7 @@ describe("runWorkflow", () => {
     });
   });
 
-  it("创建即 running：构造即 running，runs.set 在 assignRuntime 后（I1 窗口对外不可见）", async () => {
+  it("创建即活体：runs.set 在 assignRuntime 后（绑定窗口对外不可见）", async () => {
     const deps = makeDeps();
     // worker.start 被调时探测 runs 注册状态——证明 runs.set 在 assignRuntime 之后
     let runsSizeAtWorkerStart = -1;
@@ -260,17 +259,16 @@ describe("runWorkflow", () => {
 
     const runId = await runWorkflow(makeSpec(), deps);
 
-    // worker.start 执行时 run 尚未注册（I1 跳过窗口不外泄）
+    // worker.start 执行时 run 尚未注册（绑定窗口不外泄）
     expect(runsSizeAtWorkerStart).toBe(0);
-    // 完成后已注册，且构造即 running + runtime 已注入（I1 成立）
+    // 完成后已注册，runtime 已注入
     expect(deps.runs.has(runId)).toBe(true);
     const run = deps.runs.get(runId)!;
-    expect(run.state.status).toBe("running");
     expect(run.runtime).toBeDefined();
-    // save 落盘的是恢复 I1 后的聚合（status running + runtime 已绑定）
+    // save 落盘的是 runtime 已绑定的聚合
     const savedRun = deps.store.save.mock.calls[0]![0] as WorkflowRun;
     expect(savedRun).toBe(run);
-    expect(savedRun.state.status).toBe("running");
+    expect(savedRun.runtime).toBeDefined();
   });
 
   it("worker.start 抛错 → runWorkflow 拒绝且 runs 无孤儿注册", async () => {
@@ -465,10 +463,10 @@ describe("runWorkflow", () => {
 
     expect(run.runtime?.timeBudgetTimer).toBeUndefined();
 
-    // 无预算 → 不存在到期 abort：推进 10min 后 run 仍 running
+    // 无预算 → 不存在到期 abort：推进 10min 后 run 仍未终局
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
     await flushMicrotasks();
-    expect(run.state.status).toBe("running");
+    expect(isRunSettled(run)).toBe(false);
   });
 
   it("signal 已 abort → fail fast（抛错，不创建 run）", async () => {
@@ -518,7 +516,7 @@ describe("abortRun", () => {
 
     await abortRun("wf-abort-1", deps, "user cancelled");
 
-    // [W2/V1] 终局断言换源（两态机字段停更——state.status 恒 running）
+    // [W2/V1] 终局断言换源（终局经注册表判定——[D6(a)] 聚合不持状态字段）
     expect(isRunSettled(run)).toBe(true);
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "cancelled" });
     expect(run.state.error).toBe("user cancelled");
@@ -764,8 +762,7 @@ describe("terminateRunningRuns", () => {
 // ── evictDoneRunsBeyondCap ────────────────────────────────────
 
 /**
- * 构造可重水合的 WorkflowRun 快照（对齐 crash-recovery.test.ts makeRun 模式——
- * WorkflowRun.reconstruct 与构造同语义：I1 构造期跳过，running 快照合法）。
+ * 构造可重水合的 WorkflowRun 快照（对齐 crash-recovery.test.ts makeRun 模式）。
  *
  * [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态必须同时注入注册表条目
  * （生产 = 壳重建点 noteRebuiltSettlement 把 run-settled 帧事实带进消费面）；
@@ -773,7 +770,8 @@ describe("terminateRunningRuns", () => {
  *
  * @param runId run 标识
  * @param opts.completedAt 完成时刻 ISO 串（缺省=缺失场景，模拟旧格式/异常快照）
- * @param opts.status 状态（默认 done；running 用于白名单验证）
+ * @param opts.status fixture 建模选择器（默认 done；running 用于白名单验证——
+ *   仅决定是否注入注册表条目，聚合快照不持生命周期轴）
  * @param opts.settledAt 注册表排序键覆盖（缺省 = completedAt；用于锁定「排序键 =
  *   注册表 settledAt，meta.completedAt 不参与」的换源语义）
  */
@@ -791,8 +789,7 @@ function makeEvictableRun(
       scriptPath: "/fake/test.js",
     },
     {
-      status,
-      reason: status === "done" ? "completed" : undefined,
+      ...(status === "done" ? { reason: "completed" as const } : {}),
       budget: new Budget({ maxTokens: 1000 }),
       calls: new Map(),
       trace: new Trace(),

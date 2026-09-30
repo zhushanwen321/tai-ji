@@ -89,7 +89,7 @@ function makePumpHarness(runId: string): PumpHarness {
   const run = new WorkflowRun(
     runId,
     { scriptName: "test-wf", scriptSource: "agent('调研 A')", args: {}, scriptPath: "/tmp/test.js" },
-    { status: "running", budget: new Budget({ maxTokens: 100_000 }), calls: new Map(), trace: new Trace(), errorLogs: [] },
+    { budget: new Budget({ maxTokens: 100_000 }), calls: new Map(), trace: new Trace(), errorLogs: [] },
     { startedAt: new Date().toISOString() },
   );
   const postMessage = vi.fn();
@@ -268,7 +268,7 @@ describe("workflowAgentDispatch 未注入回退", () => {
     const run = new WorkflowRun(
       "wf-pump-fallback-1",
       { scriptName: "test-wf", scriptSource: "agent('hi')", args: {}, scriptPath: "/tmp/test.js" },
-      { status: "running", budget: new Budget(), calls: new Map(), trace: new Trace(), errorLogs: [] },
+      { budget: new Budget(), calls: new Map(), trace: new Trace(), errorLogs: [] },
       { startedAt: new Date().toISOString() },
     );
     const runnerRun = vi.fn(async () => ({ content: "legacy", durationMs: 1, error: undefined, toolCalls: [] }));

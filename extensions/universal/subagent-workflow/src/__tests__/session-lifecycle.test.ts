@@ -126,7 +126,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 // [W2/V4 D6] 直落断言消费的 protocol SSOT（customType 常量 + status 映射单点）
 import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 import { STALE_CTX_MARKER, _resetOncePerProcessForTest } from "@zhushanwen/pi-ext-guards";
-import { IDENTITY_CUSTOM_TYPE } from "@zhushanwen/subagent-core";
+import { IDENTITY_CUSTOM_TYPE, isRunSettled, noteRebuiltSettlement } from "@zhushanwen/subagent-core";
 import { ENV_ROOT_CWD, getSubagentRecordsDir, resolvePiSessionScopedDir, STATE_DIR_NAME } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
 // 保留窗口 env 通道仅测试消费，深路径直取（对齐 retention 测试先例）
@@ -218,12 +218,13 @@ function createFakeCtx(
 
 /** 构造可重水合的 WorkflowRun（reconstruct 跳过 I1 校验）。 */
 function makeRun(runId: string, status: "running" | "done"): WorkflowRunType {
-  return WorkflowRun.reconstruct(
+  const run = WorkflowRun.reconstruct(
     runId,
     { scriptSource: "async function execute() {}", args: {}, scriptName: "test", scriptPath: "/fake/test.js" },
     {
-      status,
-      reason: status === "done" ? "completed" : undefined,
+      // [D6(a) 第 3 步] 聚合快照不持生命周期轴：done 形态的终局事实由下方注册表
+      // 条目承载（生产 = 壳重建点 noteRebuiltSettlement 注入）。
+      ...(status === "done" ? { reason: "completed" as const } : {}),
       budget: new Budget({ maxTokens: 1000 }),
       calls: new Map(),
       trace: new Trace(),
@@ -231,6 +232,10 @@ function makeRun(runId: string, status: "running" | "done"): WorkflowRunType {
     },
     { startedAt: new Date().toISOString() },
   );
+  if (status === "done") {
+    noteRebuiltSettlement(runId, { outcome: "done", settledAt: Date.now() });
+  }
+  return run;
 }
 
 /** 构造可控 fake store（注入 deps.createRunStore）。 */
@@ -421,7 +426,7 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
 
     // [D2] 中断非终局：内存观测面 status 维持 running（活体写点停更——终局判据归
     // record fold）；state.error 承载 kill 文本
-    expect(runningRun.state.status).toBe("running");
+    expect(isRunSettled(runningRun)).toBe(false);
     expect(runningRun.state.error).toContain("Process killed");
     // [W2/V4 D6] 注销直落权威面：appendEntry 直接落盘（emit 链在 reload 转换窗
     // 失效——[reload-closeout D4] 定案在恢复链同样适用）。data 形状与 finalizeRun
@@ -942,7 +947,7 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     const second = await setupSessionLifecycle(pi2, createFakeCtx(), mkDeps([runningRun]));
     expect(second.storeHealthy).toBe(true);
     // [D2] 中断收编：内存观测面维持 running（终局判据归 record fold）
-    expect(runningRun.state.status).toBe("running");
+    expect(isRunSettled(runningRun)).toBe(false);
     expect(runningRun.state.error).toContain("crash");
   });
 
@@ -952,7 +957,7 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     const { entries, lazyDeps } = await mountWithLoadAll(async () => [doneRun]);
 
     // 状态不变（仍 done/completed），不重新 transition（completedAt 不变）
-    expect(doneRun.state.status).toBe("done");
+    expect(isRunSettled(doneRun)).toBe(true);
     expect(doneRun.state.reason).toBe("completed");
     expect(doneRun.meta.completedAt).toBe(originalCompletedAt);
 
@@ -1072,7 +1077,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
       const run = first.runs.get(runId);
       // [D2] 中断非终局：loadAll 重建产物 status 维持 running（fold 停在 interrupted
       // 是状态机相——聚合面无终局），无 reason
-      expect(run?.state.status).toBe("running");
+      expect(isRunSettled(run!)).toBe(false);
       expect(run?.state.reason).toBeUndefined();
       expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();
 

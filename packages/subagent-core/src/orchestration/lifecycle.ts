@@ -273,13 +273,12 @@ function assertSignalNotAborted(signal: AbortSignal | undefined): void {
   }
 }
 
-/** 创建 running 态 WorkflowRun（按 spec 上限新建 Budget）。 */
+/** 创建新 run 的 WorkflowRun（按 spec 上限新建 Budget）。 */
 function createRunningRun(runId: string, spec: RunSpec): WorkflowRun {
   return new WorkflowRun(
     runId,
     spec,
     {
-      status: "running",
       budget: new Budget({
         maxTokens: spec.budgetTokens,
         maxTimeMs: spec.budgetTimeMs,
@@ -445,7 +444,7 @@ export async function runWorkflow(
   registerSignalAbortListener(run, runId, deps, signal);
 
   await deps.store.save(run);
-  deps.log?.("debug", "workflow:lifecycle", "run saved", { runId, status: run.state.status });
+  deps.log?.("debug", "workflow:lifecycle", "run saved", { runId });
 
   try {
     await createdDispatch;
@@ -495,7 +494,7 @@ export async function abortRun(
     throw new Error(`Workflow '${runId}' not found`);
   }
 
-  deps.log?.("debug", "workflow:lifecycle", "abortRun", { runId, status: run.state.status, reason, doneReason });
+  deps.log?.("debug", "workflow:lifecycle", "abortRun", { runId, reason, doneReason });
 
   // 已终局 no-op（[W2/V1] → [D6(a) 第 1 步] 判据换源 isRunSettled = 进程内终局记录
   // 注册表；活体终局经 dispatch 链 note、重水合终局经重建点 noteRebuiltSettlement
@@ -509,7 +508,7 @@ export async function abortRun(
   if (reason) {
     run.state.error = reason;
   }
-  // [OR-3] 先广播 abort 再 transition（transition 内 releaseRuntime→terminate，
+  // [OR-3] 先广播 abort 再终局化（finalizeRun 内 releaseRuntime→terminate，
   // terminate 之后广播发不进去）——worker 侧 pending 优雅解阻
   broadcastAbortToWorker(run, reason ?? `Workflow aborted (${doneReason})`);
   // [OR-7] run 终态：移除 signal abort listener（幂等；abort 由 signal 触发时
@@ -736,7 +735,11 @@ export async function recoverCrashedRuns(
   let recovered = 0;
 
   for (const run of loaded) {
-    if (run.state.status === "running") {
+    // 收编候选 = 未终局的重建 run（[D6(a)] 判据换源 isRunSettled——原读聚合
+    // status === "running"，重建 run 的 status 与「流上有无 run-settled 帧」一一
+    // 对应，注册表条目由壳重建点注入，两判据等价；已中断 run 仍进入本分支，由
+    // interruptRun 的表内让位承接双重启幂等）。
+    if (!isRunSettled(run)) {
       run.state.error = reason;
       // 步骤 2：中断收编（[D15] 入口接线——run-interrupted 转移事件 + 中断条目，
       // [D2] interrupted 暂停态非终局；收编不再覆盖任何文件，v1 尾段已删）。
