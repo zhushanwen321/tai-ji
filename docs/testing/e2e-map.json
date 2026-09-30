@@ -1593,10 +1593,12 @@
     },
     {
       "id": "E2E-PIPE-08",
-      "summary": "thinking 档位词表比对守卫：pi-ai ModelThinkingLevel ↔ 入口层词表（core shared/model-ref THINKING_ORDER）单向比对——pi-rpc 与 llm-shared 的副本已删除，比对面只剩入口层这一份",
+      "summary": "thinking 档位词表比对守卫：pi-ai ModelThinkingLevel ↔ 两份职责不同的词表（宿主侧校验用 subagent-core shared/model-ref THINKING_ORDER + 前端派生源 shared pi-preset PI_THINKING_LEVELS）单向比对——pi-rpc 与 llm-shared 的副本已删除；两比对面比对语义均为成员集合一致性（不判序）",
       "scope": [
         "scripts/check-thinking-levels.mjs",
-        "packages/subagent-core/src/shared/model-ref.ts"
+        "scripts/__tests__/check-thinking-levels.test.mjs",
+        "packages/subagent-core/src/shared/model-ref.ts",
+        "packages/shared/src/pi-preset.ts"
       ],
       "layer": "L1",
       "assets": [
@@ -1610,7 +1612,7 @@
       "run": "node scripts/check-thinking-levels.mjs",
       "owner": "packages/subagent-core",
       "authority": "docs/CONTEXT.md",
-      "note": "词表归属 = 入口层（字符串进来的那一层）；pre-commit 按路径触发，--self-test 覆盖提取函数。"
+      "note": "词表归属 = 入口层（字符串进来的那一层）；pre-commit 按路径触发，--self-test 覆盖提取函数。守卫单测（tmp mirror × spawnSync）与守卫脚本同面登记：两比对面各有一例漂移红 + 文件缺失红，shared 面纳入后由该单测证明非恒绿。"
     },
     {
       "id": "E2E-PIPE-09",
