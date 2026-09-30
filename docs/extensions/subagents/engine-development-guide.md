@@ -29,7 +29,7 @@
 | 接管点 | §7——引擎确立 session 身份的时点（create 应答 / 后续形态的装载确认），宿主侧副作用在此复刻 |
 | 降级链族分层 / 族差分级告警 / 瞬态防护 / 宽限窗 / 溢流阀声明 / 探针声明纪律 | §10（本指南定义的可靠性模式名，源自两设计的审查裁决） |
 | 锚换钉 | §10——record 的 sessionRef 被替换为新会话锚（历史连续性就此切断的最差降级形态） |
-| 锚（`ResumeAnchor`） | §5——跨 run 续写的会话定位载体（`sessionRef` + `journalPath?`），经 `run.params.resume` 携带 |
+| 锚（`ResumeAnchor`） | §5——跨 run 续写的会话定位载体（`sessionRef` + `eventsPath?`），经 `run.params.resume` 携带 |
 | 杀链 / 收割 | §2.1/§7——宿主杀进程组终结在途任务的兜底路径；cancel 超窗或 abort 超窗触发，共享进程被收割时在途任务走崩溃路径（连坐） |
 | 门禁续轮 | §7——同一 session 内的自纠重试续轮形态（设计 4，已裁决未实施） |
 | live≡reload | §6/§8——事件 live 流与 journal 重放构造性等价（同 reducer），重开 session 对话流一致 |
@@ -190,7 +190,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 `AgentCallOpts` 引擎面子集 17 字段（1 必填 + 16 可选，`contract-types.ts:336-378`；core 全量 20 字段，其中 model/cwd 改挂 ctx 不双写，engine/timeoutMs/returnMeta 宿主自持不透传，字段裁决注 :323-331）：任务语义（`prompt` 必填、`schema?`、`thinkingLevel?`、`skill?`/`skillPath?`、`agent?`、`appendSystemPrompt?`、`description?`、`scene?`）、轮次预算（`maxTurns?`/`graceTurns?`/`idleTimeoutMs?`——显式 0/负 = 禁用 idle GC）、隔离与权限（`worktree?`/`fork?`/`forkSource?`/`denyTools?`/`permissionMode?`——denyTools/permissionMode 为 SDK 侧可选字段，宿主 AgentCallOpts 不携带、恒未传）。`forkSource`：无此概念的引擎按未知可选字段忽略、行为与不传一致——fork/fork-from 的同步拒发生在宿主能力门 `assertTaskShapeSupported`（steer/conversation 双 unsupported 时拒并附引导 message，`capability-gate.ts:85-94`），不到引擎侧。
 
-**resume 锚形态**：`ResumeAnchor = { sessionRef: Record<string,string>, journalPath? }`（`contract-types.ts:154-159`）；zcode 锚 = `sessionRef {sessionId, dbPath}`，pi 锚 = `{recordId?, sessionFile?}`（`EngineHandleData` 注释 :132）。引擎按锚分派 create/resume（`zcode-engine.ts:297-338` 形态）。锚只在协议层经 `run.params.resume` 携带，形状 = `{ recordId, resume?: ResumeAnchor }`（锚本体在 `params.resume.resume.sessionRef`；`RunContextParams` 无 resume 键）。zcode 判别函数（:1098-1110）读该键做形状收窄 + dbPath 白名单校验；其源码形参名叫 ctx 是引擎内部命名，勿与协议层 `RunContextParams` 混同。
+**resume 锚形态**：`ResumeAnchor = { sessionRef: Record<string,string>, eventsPath? }`（`contract-types.ts:154-159`）；zcode 锚 = `sessionRef {sessionId, dbPath}`，pi 锚 = `{recordId?, sessionFile?}`（`EngineHandleData` 注释 :132）。引擎按锚分派 create/resume（`zcode-engine.ts:297-338` 形态）。锚只在协议层经 `run.params.resume` 携带，形状 = `{ recordId, resume?: ResumeAnchor }`（锚本体在 `params.resume.resume.sessionRef`；`RunContextParams` 无 resume 键）。zcode 判别函数（:1098-1110）读该键做形状收窄 + dbPath 白名单校验；其源码形参名叫 ctx 是引擎内部命名，勿与协议层 `RunContextParams` 混同。
 
 ## 6. 事件族与投影义务
 
@@ -210,7 +210,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 **上游实名对照义务**（教训：taiji SDK 命名 ≠ 引擎上游实名）：SDK `tool_start`/`tool_end`（`contract-types.ts:110-111`）在 zcode bundle 实名是 `tool.updated`（kind=scheduled 的 input 可 omitted/inputRef 变体，kind=result 含 result+duration）——引擎适配层负责实名映射与 args 完整性不假设；zcode 现状不向 `ctx.onEvent` 投影 tool 事件，活性经 `session/event` 非终态非增量帧 → `activity`（`zcode-engine.ts:480-485`，真机探针实证约 1s 一帧）。
 
-**journal 落盘义务**（`subagent-core/src/execution/engine/common/journal-wiring.ts:61-88`，已实现；接线点 = workflow 域两处——`workflow-dispatch.ts:333` + `run-orchestration.ts:650`，chat 域不接 event journal）：先落盘再转发（:67-79）；`activity` 豁免 append——双侧 reducer 对其 no-op，豁免不破坏 live≡reload 重放等价性；seq 由 append 铸造、过滤在 append 前，故无 seq 空洞（:73-74）；close 在 run 终态（成功/失败均达）flush + fsync 一次、不抛（②级尽力而为数据源，:14-16）。
+**journal 落盘义务**（`subagent-core/src/execution/engine/common/event-journal-wiring.ts:61-88`，已实现；接线点 = workflow 域两处——`workflow-dispatch.ts:333` + `run-orchestration.ts:650`，chat 域不接 event journal）：先落盘再转发（:67-79）；`activity` 豁免 append——双侧 reducer 对其 no-op，豁免不破坏 live≡reload 重放等价性；seq 由 append 铸造、过滤在 append 前，故无 seq 空洞（:73-74）；close 在 run 终态（成功/失败均达）flush + fsync 一次、不抛（②级尽力而为数据源，:14-16）。
 
 **投影决策义务**：引擎层新观察到的事件是否向 `ctx.onEvent` 投影须显式声明消费方面——journal/SessionView/workflow trace 三消费方随投影新增面。裁决先例（设计 4，已裁决未实施）：submit_result 工具调用选择不投影——仅在引擎层内部提取，三消费方零新增面。该先例确立的判据：投影有消费方面成本；确需投影时必须同步补 apply-entry-equivalence 的 zcode tool_end 用例。
 
@@ -224,7 +224,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 1.〔契约〕宿主派 run 帧 →〔zcode〕引擎 `runViaAppServer`（`zcode-engine.ts:297-338`）：pre-aborted 短路（:299-303，取消先于启动不建会话）→ 模型解析 → resume 前缀构造（:328）→ 首轮执行 + schema 仿真重试（:334）。
 2.〔zcode〕引擎 → `SessionChannel.runTurn`（`session-channel.ts:749-796`）：`createSession`（:756）→〔契约〕**create 应答即接管点回调**（下文）→ `openTurn` 挂双 timer（:839-869）→ `subscribe`（:762，〔契约〕deliveryKind 必填否则终态事件不达）→ send → 事件流（text/thinking/activity 三回调 → `ctx.onEvent`，journal 落盘仅随 workflow 域接线点——步骤 0）→ 终态 → `readBestEffort`（:774）→〔契约〕**finally 无条件 `closeSession`**（:791-795——终态后循环/续发类机制必须在 close 前发生，见门禁续轮）。
 3.〔zcode〕回引擎层：`parsedAppServerAttempt`（`zcode-engine.ts:1446-1459`，`interrupted` 不在 `isFailedTerminalStatus`、不误判失败——:1440-1445 注释）→〔契约〕schema 校验 → outcome + handle → run 应答。
-4.〔契约〕宿主：run 应答到达即终态（`methods.ts:153`）→ handle 回填（`backfillRoundHandle` 整替语义 + 同值幂等；journal 终态路径 `backfillHandle` 补 journalPath，`journal-wiring.ts:84-86`）。
+4.〔契约〕宿主：run 应答到达即终态（`methods.ts:153`）→ handle 回填（`backfillRoundHandle` 整替语义 + 同值幂等；journal 终态路径 `backfillHandle` 补 eventsPath，`event-journal-wiring.ts:84-86`）。
 
 **resume 轮（现状 cold 形态）**：宿主带 `run.params.resume` 锚 → 引擎读锚（`zcode-engine.ts:322-328`）→ `buildResumeHistoryPrefix`：`channel.resumeSession(anchor.sessionId)`（读通道）取结构化历史 → 24k token 预算裁剪（保尾丢旧，至少保 1 条）→ 拼注入前缀 → **执行仍 create 新 session**（原地 resume 续写会命中上游 -32031 卡死——设计期 bundle 探针结论）→ 新 sessionRef 经 `onHandleReady` 回传 → 宿主同值幂等整替锚。**读通道失败分支（[U3] 2026-09-19）**：读失败即判定锚真失效——resume 走 app-server resident 内存态，resume 结果就是锚活性权威信号（宿主侧 zcode 锚库投影预检查已退役收窄 pi 锚专属——库投影滞后于 create 应答致预检查系统性误判，`conversation-continuation.ts` reviveOrThrow 注），引擎经 `buildResumeUnavailableNoticeSegment`（`zcode-engine.ts:1163`）注入 `[会话延续提示]` 锚失效声明段继续执行——run 不失败、零世代推进（锚失效不走 reopen 降级，round/epoch 不动），模型知情后基于最新消息独立续推。native resume 主路径（同 session 续写、锚稳定、24k 语义收敛）= 设计 3（native resume，已裁决未实施），实施期定型项。
 
@@ -242,7 +242,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 ## 8. 读取与 SessionView 投影义务
 
-**SessionView 契约**（`contract-types.ts:174-182`）：`engineId` / `sessionId?` / `turns: ReplayedTurn[]` / `usage?: AgentUsageTotal` / `source: "native" | "journal" | "outcome-only"`。`source` 是 GUI 降级标记数据源；三级降级链：①引擎原生 `read` → ②宿主 event journal 重放（`handle.journalPath` 自描述定位；重放实现 = SDK `journal-replay.ts`，与宿主 execution-record 共用「双侧 reducer no-op 对 activity」语义，事件流重放 ≡ live 落盘）→ ③outcome-only（只剩终态 content，`sessionRead: "outcome-only"` 引擎的事实标准形态）。
+**SessionView 契约**（`contract-types.ts:174-182`）：`engineId` / `sessionId?` / `turns: ReplayedTurn[]` / `usage?: AgentUsageTotal` / `source: "native" | "journal" | "outcome-only"`。`source` 是 GUI 降级标记数据源；三级降级链：①引擎原生 `read` → ②宿主 event journal 重放（`handle.eventsPath` 自描述定位；重放实现 = SDK `journal-replay.ts`，与宿主 execution-record 共用「双侧 reducer no-op 对 activity」语义，事件流重放 ≡ live 落盘）→ ③outcome-only（只剩终态 content，`sessionRead: "outcome-only"` 引擎的事实标准形态）。
 
 **usage/contextTokens 字段语义边界**（混用后果 = 系统性高估）：
 
@@ -270,7 +270,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 | 落点 | 义务 |
 |---|---|
-| `engines/<id>/shared/`（journal） | 固定分组（SDK `SHARED_POOL_KEY`，路径构造即终值，`journal-wiring.ts:61-66`）；30 天 mtime TTL 回收 = 唯一清理机制（`pool-manager.ts` `cleanupExpiredJournals`）——引擎不得在 journal 目录自建第二套清理 |
+| `engines/<id>/shared/`（journal） | 固定分组（SDK `SHARED_POOL_KEY`，路径构造即终值，`event-journal-wiring.ts:61-66`）；30 天 mtime TTL 回收 = 唯一清理机制（`pool-manager.ts` `cleanupExpiredJournals`）——引擎不得在 journal 目录自建第二套清理 |
 | 会话库隔离模式（zcode 先例） | spawn env 覆写 `ZCODE_SESSION_DB_PATH` + 清空别名键；路径单一来源 `zcodeSessionDbPath()`（`<engineDataDir>/engines/zcode/session-db/db.sqlite`）；与 GUI 引擎库分离（约束 C-ext-20，[zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md)）。隔离条目 TTL sweep 引擎侧（C-data-22：30 天同窗 / 活跃豁免集 / 进程级 24h 节流，`zcode-engine.ts:720-729`） |
 | 新增写入面登记义务 | 引擎新增任何磁盘写入面必须显式登记清理通道，或登记「无清理可接受」判定及理由。先例（设计 4（schemaEnforcement 升级，已裁决未实施）裁决）：`mcp/` 脚本目录——单文件恒覆盖、内容随包版本、无累积增长 → 「无清理通道」判定可接受 |
 
@@ -282,7 +282,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 | 模式 | 完整表述 | 状态与实例锚 |
 |---|---|---|
-| **降级链族分层**（本指南定义：按失败通道给降级形态分层的裁决模式） | 降级通道与主路径共享同一物理 RPC/子通道时，主路径失败则降级的输入前缀/数据必同样缺席——**不得假设「降级后仍可用全量」**。按失败通道逐族定义「降级后还剩什么」；每族给标记值：`degradedReason` 标量字段（设计 3 拟新增）标注最新一次降级的族别，随轮覆写，允许冷重建丢（诊断态非账务数据，丢 = 回无标记态，下轮降级重写） | 已裁决未实施（设计 3 D6：send 门族 → 带历史降级 `cold-resume-with-history`（拟新增）；RPC 族 → 无历史降级 + 锚换钉 `cold-resume-no-history`（拟新增）——历史连续性永久断的最差形态显式暴露）。[U3 2026-09-19] 边界注记：zcode resume 读失败已落地的单级朴素降级（无标记值——`degradedReason` 标注与 `cold-resume-*` 标记值机制均未实施，形态见 §7 读失败分支）不是本模式已实施例；zcode cold 形态每轮新 session 锚整替（§7）是设计内常态，与 D6「降级致锚换钉」的拟新增语义在 zcode 侧已消解。已实现参照：journal `activity` 豁免的「同通道同失败」判别（`journal-wiring.ts:71-79`） |
+| **降级链族分层**（本指南定义：按失败通道给降级形态分层的裁决模式） | 降级通道与主路径共享同一物理 RPC/子通道时，主路径失败则降级的输入前缀/数据必同样缺席——**不得假设「降级后仍可用全量」**。按失败通道逐族定义「降级后还剩什么」；每族给标记值：`degradedReason` 标量字段（设计 3 拟新增）标注最新一次降级的族别，随轮覆写，允许冷重建丢（诊断态非账务数据，丢 = 回无标记态，下轮降级重写） | 已裁决未实施（设计 3 D6：send 门族 → 带历史降级 `cold-resume-with-history`（拟新增）；RPC 族 → 无历史降级 + 锚换钉 `cold-resume-no-history`（拟新增）——历史连续性永久断的最差形态显式暴露）。[U3 2026-09-19] 边界注记：zcode resume 读失败已落地的单级朴素降级（无标记值——`degradedReason` 标注与 `cold-resume-*` 标记值机制均未实施，形态见 §7 读失败分支）不是本模式已实施例；zcode cold 形态每轮新 session 锚整替（§7）是设计内常态，与 D6「降级致锚换钉」的拟新增语义在 zcode 侧已消解。已实现参照：journal `activity` 豁免的「同通道同失败」判别（`event-journal-wiring.ts:71-79`） |
 | **族差分级告警 + 不设连续性计数器**（本指南定义） | 最差形态单次即 error、较轻形态 warn；**不做「连续 N 次升级」计数器**。两段论证：① Worker Thread 多实例下「同进程连续」无全序语义；② 「夹成功即清零」语义空洞（失败-成功-失败与连续失败不可区分）。常态化信号 = 标记/日志持续出现（日志检索判）——感知线已由族差分级 + 标记持续出现承载 | 已裁决未实施（两设计审查各自独立裁决后收敛同型：设计 3 D6 / 设计 4 D8） |
 | **瞬态防护**（本指南定义：幂等 RPC 失败的快速重试前置） | 幂等 RPC 失败先**一次快速重试**再落最差形态；重试限同进程代内（进程代际重建由连接层自动处理，不计入重试预算）——防一次瞬时超时直接触发不可逆降级（如锚换钉永久断历史）。前提 = 操作幂等已核实 | 已裁决未实施（设计 3 D6，前提 resume 幂等已经 bundle 探针核实） |
 | **宽限窗**（本指南定义：异步就绪观察的显式窗口） | 异步注册/就绪观察给显式窗口防竞态误降级：窗口内到达即正常，超窗未到才降级；窗长挂实施期探针定型（量级预期亚秒），禁拍脑袋写死 | 已裁决未实施（设计 4 D8：MCP 工具注册观察窗——subscribe 后至首 send 前） |
@@ -310,11 +310,11 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | §3 capabilities | `protocol/contract-types.ts`（`EngineCapabilities`）+ 两引擎声明点（`zcode-engine.ts` `capabilities()` + 各包 manifest） + `capability-gate.ts` + `chat-rounds.ts` | 新增能力位同批：`EngineCapabilities` 类型 + manifest **CAPABILITY_ENUMS** 词表 + `CONSERVATIVE_CAPABILITIES` 保守值 + gate 判据 + 两引擎两镜像声明（枚举编译校验拦截漏改）；gate 双向判定 | C-ext-20 |
 | §4 错误码 | `subagent-core/.../engine/common/errors.ts` + SDK `protocol/error-codes.ts` | **封闭枚举 + `DEFAULT_RECOVERY_HINTS` Record 全集编译强制** | — |
 | §5 run 载荷 | `protocol/methods.ts`（`RunParams`/`RunContextParams`）+ `contract-types.ts`（`AgentCallOpts`/`ResumeAnchor`） | 帧级 schema（`protocol-schema.test.ts`/`resume-schema.test.ts`） | C-proc-09（relay 身份键）、[zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md) |
-| §6 事件 | `contract-types.ts`（`AgentEvent`）+ `assembly/types.ts`（语义锚定）+ `journal-wiring.ts` | apply-entry-equivalence 等价测试族（投影变更须补用例） | C-proc-13 |
+| §6 事件 | `contract-types.ts`（`AgentEvent`）+ `assembly/types.ts`（语义锚定）+ `event-journal-wiring.ts` | apply-entry-equivalence 等价测试族（投影变更须补用例） | C-proc-13 |
 | §7 生命周期 | `zcode-subagent-cli/src/session-channel.ts` + `zcode-engine.ts` + `constants.ts`（引擎侧）；`assembly/conversation-continuation.ts`（宿主侧） | conformance 套件 | C-proc-09/13、[crash-forensics-and-watchdog.md](../../architecture/crash-forensics-and-watchdog.md) 附录 E |
 | §8 读取投影 | `zcode-subagent-cli/src/reader.ts` + `parser.ts` + `db-path.ts`（`zcodeDbPathAllowlist` 白名单集合）+ `contract-types.ts`（`SessionView`）+ `session-view-service.ts` | — | C-data-20/22 |
 | §9 env/目录 | `packages/shared/src/constants.ts`（`ENV_WHITELIST_PREFIXES`）+ `spawn-env-contract.ts` + `engine/common/data-dir.ts` + `engine/paths.ts` + SDK `spawn.ts`/`env.ts`（引擎侧 spawn/env 契约） | `check_spawn_env_boundary.py`、路径白名单检查、`check_env_whitelist_sync.py` | [env-propagation-boundary.md](../../architecture/env-propagation-boundary.md)、C-proc-09、C-proc-12、C-ext-20、C-data-22 |
-| §10 可靠性模式 | 本指南自定义（模式源 = 设计 3/4 对抗审查裁决，裁决正文暂在仓外，见头部）；已实现参照 `journal-wiring.ts`（`activity` 豁免的「同通道同失败」判别） | — | — |
+| §10 可靠性模式 | 本指南自定义（模式源 = 设计 3/4 对抗审查裁决，裁决正文暂在仓外，见头部）；已实现参照 `event-journal-wiring.ts`（`activity` 豁免的「同通道同失败」判别） | — | — |
 | §11 验收 | `subagent-engine-sdk/src/node-executor.ts`（执行器矩阵）+ [TEST-STRATEGY.md](../../TEST-STRATEGY.md) | `check-vitest-guard.mjs`（测试防线挂载） | [TEST-STRATEGY.md](../../TEST-STRATEGY.md)、docs/testing/ |
 | 投影检查（已建，2026-09-18） | `scripts/check-guide-contract-projection.mjs`——本指南 §3 能力位表 / §4 两层词表 ↔ 源码词表投影 diff（pre-commit 按指南与契约源码路径触发，install-hooks.sh 对应块；先例：CSS token SSOT check） | 投影失同步即拦截（计数 + 集合双向对账） | 根 AGENTS.md 主题索引「更新触发」行 |
 
