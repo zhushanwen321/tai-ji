@@ -197,7 +197,9 @@ export function markerLiteral(bareId: string): string {
  * busy/compacting/bash 三退役值已删：「排队取代拒绝」后投递内核对暂不可收时态只排队
  * 不回拒，运行面只产上述三值。收窄裁决（P7 定案，非 breaking）：plugin-sdk
  * private:true 不发布 npm（词表非外部发布契约面）+ 运行面只看 blocked/rejected 布尔
- * （reason 是诊断/文案面，插件不得依赖精确值做行为分支）+ 仓内零处退役值比较。
+ * （reason 是诊断/文案面，插件不得依赖精确值做行为分支）。词表收窄的传播义务：
+ * 仓内消费方（含插件与测试 mock）不得比较或注入退役值——出现即属收窄未同步清扫，
+ * 须一并删除。
  *
  * 另一语境勿混淆：WS 广播 send.rejected 的 reason（protocol.ts，'busy' | 'compacting'
  * | 'processing'）是 bash 通道 busy 预检的防御反馈词表，不经本类型。

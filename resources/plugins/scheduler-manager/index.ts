@@ -604,14 +604,14 @@ async function handleWrite(
       )
       return
     }
-    // 回执失败：reason 是诊断/文案面，行为分支只看 accepted（E7 词表纪律）
-    const r = receipt.reason
+    // 回执失败：reason 是诊断/文案面，行为分支只看 accepted（E7 词表纪律）。
+    // busy/compacting/bash 退役值已随 SendPromptReason 词表收窄删除（「排队取代拒绝」
+    // 后投递内核对暂不可收时态只排队不回拒）——除 command-missing 外的失败统一走
+    // 通用重试文案。
     const line =
-      r === 'busy' || r === 'compacting' || r === 'bash'
-        ? `会话正在忙，操作未生效（可手敲 /schedule ${sub} ${parsed.id}）`
-        : r === 'command-missing'
-          ? '命令不可用，操作未生效 —— 若持续失败，请到 设置 → 扩展检查 该会话的 scheduler 扩展'
-          : '操作未生效，请重试'
+      receipt.reason === 'command-missing'
+        ? '命令不可用，操作未生效 —— 若持续失败，请到 设置 → 扩展检查 该会话的 scheduler 扩展'
+        : '操作未生效，请重试'
     await setNoticeAndPush(api, sessionId, line)
   } catch (e) {
     const msg = toMessage(e)
@@ -620,7 +620,7 @@ async function handleWrite(
       sessionId,
       wasRecovering
         ? `会话恢复失败：${msg} —— 请从侧栏手动打开该会话后再管理`
-        // 与 busy 分支同形态：错误提示必须携带可执行的恢复动作（手敲子命令重试）
+        // 错误提示必须携带可执行的恢复动作（手敲子命令重试）
         : `操作未生效：${msg}（可手敲 /schedule ${sub} ${parsed.id} 重试）`,
     )
   }

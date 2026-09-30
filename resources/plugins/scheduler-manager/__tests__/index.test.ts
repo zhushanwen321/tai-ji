@@ -3,7 +3,7 @@
  *
  * 构建者白盒 + 使用者黑盒：经 plugin-sdk createMockAgentAPI mock 驱动 activate()
  * 与注册的 command handlers，覆盖八块：
- * ① handleWrite 回执分支矩阵（accepted/busy/compacting/bash/command-missing/其余
+ * ① handleWrite 回执分支矩阵（accepted/command-missing/其余（hook-blocked/error）
  *    + 无效 id + TASK_NOT_FOUND 自愈）
  * ② doRefresh 的 E11 游标失效全量重拉与 E4 恢复两态（terminal vs recovering）
  * ③ 重试预算耗尽态稳定（不重试不清零，外部信号重置预算）
@@ -36,10 +36,11 @@ import type {
 import type { PluginContext } from '../../../../packages/runtime/src/services/plugin-service/plugin-types.js'
 import type { GuiComponent, ScheduledTask, TreeItem } from '../../../../packages/extension-protocol/src/index.ts'
 
-/** sendMessage 回执 reason 词表（与 SDK sendMessage 签名的闭集同源） */
+/** sendMessage 回执 reason 词表（与 SDK sendMessage 签名的闭集同源 = SendPromptReason 三值；
+ *  busy/compacting/bash 退役值已删，运行面不再产出，mock 不得注入） */
 type SendReceipt = {
   accepted: boolean
-  reason?: 'busy' | 'compacting' | 'bash' | 'command-missing' | 'hook-blocked' | 'error'
+  reason?: 'command-missing' | 'hook-blocked' | 'error'
 }
 
 type PluginModule = typeof import('../index.ts')
@@ -405,12 +406,8 @@ describe('handleWrite: 回执分支矩阵', () => {
     })
   }
 
-  it.each([
-    ['busy', '会话正在忙，操作未生效（可手敲 /schedule off aaaabbbb）'],
-    ['compacting', '会话正在忙，操作未生效（可手敲 /schedule off aaaabbbb）'],
-    ['bash', '会话正在忙，操作未生效（可手敲 /schedule off aaaabbbb）'],
-  ] as const)('reason=%s → 忙碌文案 + 命令已发出', async (reason, expected) => {
-    const h = await writeSetup({ accepted: false, reason })
+  it('reason=error → 命令已发出 + 通用重试文案', async () => {
+    const h = await writeSetup({ accepted: false, reason: 'error' })
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
 
     await h.handlers.get('scheduler-manager.toggle')?.({ id: TASK, enabled: false })
@@ -424,7 +421,7 @@ describe('handleWrite: 回执分支矩阵', () => {
         requireCommand: 'schedule',
       },
     ])
-    expect(ansiLines(h.lastTree())).toContain(expected)
+    expect(ansiLines(h.lastTree())).toContain('操作未生效，请重试')
   })
 
   it('reason=command-missing → 扩展检查指引文案', async () => {
@@ -662,7 +659,7 @@ describe('handleOpen: modal 开合链', () => {
 
 describe('onModalClosed / onDidDestroySession: 生命周期', () => {
   const TASK = 'aaaabbbb'
-  const BUSY_LINE = '会话正在忙，操作未生效（可手敲 /schedule off aaaabbbb）'
+  const RETRY_LINE = '操作未生效，请重试'
 
   it('本 modal 关闭清 notice；别的 modal 关闭不清', async () => {
     const h = await setup({
@@ -670,19 +667,19 @@ describe('onModalClosed / onDidDestroySession: 生命周期', () => {
         { sessionFile: SESSION_FILE, entries: [upsertEntry(TASK, true, 'e1')], leafEntryId: 'e1' },
         { sessionFile: SESSION_FILE, entries: [], leafEntryId: 'e1' },
       ],
-      sendMessageReceipt: { accepted: false, reason: 'busy' },
+      sendMessageReceipt: { accepted: false, reason: 'error' },
     })
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
 
-    // 制造行内 notice（忙碌文案）
+    // 制造行内 notice（失败重试文案）
     await h.handlers.get('scheduler-manager.toggle')?.({ id: TASK, enabled: false })
-    expect(ansiLines(h.lastTree())).toContain(BUSY_LINE)
+    expect(ansiLines(h.lastTree())).toContain(RETRY_LINE)
 
     // 别的 modal 关闭：notice 保留（下一轮失效刷新后仍可见）
     h.closeModal('other-plugin.modal')
     h.invalidate('s-1')
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
-    expect(ansiLines(h.lastTree())).toContain(BUSY_LINE)
+    expect(ansiLines(h.lastTree())).toContain(RETRY_LINE)
 
     // 本 modal 关闭：notice 清除（重开首帧干净，树中无 ansi 行）
     h.closeModal('scheduler-manager.panel')
