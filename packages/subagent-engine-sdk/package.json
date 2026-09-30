@@ -74,14 +74,14 @@
       },
       "./server": {
         "import": {
-          "types": "./src/server/index.ts",
-          "default": "./src/server/index.ts"
+          "types": "./dist/server/index.d.ts",
+          "default": "./dist/server/index.js"
         },
         "require": {
           "types": "./dist/server/index.d.cts",
           "default": "./dist/server/index.cjs"
         },
-        "default": "./src/server/index.ts"
+        "default": "./dist/server/index.js"
       }
     }
   },
