@@ -103,18 +103,23 @@
 - 防线现状（2026-09-30 更新）：core 侧的包级值依赖循环检查已落地（`scripts/check-subagent-core-value-cycles.mjs` + 其测试，见 commit 65440e5b1）——「core 内无对应防线」这一条已不成立。剩余工作 = 拆边（终局编排整体入 orchestration，或反向边收窄到端口），属架构排期项。
 - 修法方向：先加 core 版循环依赖机器检查止血，再谈拆边（终局编排整体入 orchestration、execution 只暴露 persistence 端口，或反向边收窄到端口）。
 
-### 2.4 领域核心类型反向依赖应用层目录（反向依赖已断；类型归位待排期）
+### 2.4 领域核心类型反向依赖应用层目录（已修：反向依赖全断 + 领域类型归位两批落地）
 
 - 现状（2026-09-30 更新）：
   - `models/types.ts:23` 的 `WorktreeHandle` 反向依赖**已断**（§2.3 起直连 SDK）。
   - `models/ports.ts:13` 的 `SubagentStream` 反向依赖**已断**（2026-09-30）：新增 shared 最低层结构契约 `src/shared/agent-stream.ts` 的 `AgentStreamSink`（只声明 `onDelta` / `dispose`），编排端口（`ports.ts` AgentRunner）、引擎端口（`engine/port.ts` RunContext.stream）、编排执行器（`execute-agent-call.ts`）与服务层五个透传位置全部改依赖该契约；具体类 `SubagentStream`（应用/UI 层，含 widget 装配）不再是端口的依赖对象，编排层对它零调用（只透传 + 一处 `dispose`）。
   - `ports.ts` 头注「零 infra 依赖（AC-1）」与 `models/types.ts` 头注「D-12 三层架构，AC-1」的引用**仍无权威定义源**（constraints.json 零命中、全史仅自指注释）——要么补成正式约束 + 机器检查，要么删引用（待裁决）。
 - **类型归位第一批已落**（2026-09-30）：新增领域模块 `execution/domain/record-types.ts`（零内部依赖：不 import assembly / orchestration），迁出 record 域的**状态与身份词汇**共 21 个导出——状态词表（`ExecutionStatus` / `RecordOrigin` / `ClosedReason` / `StopReason` / `ExecutionOutcome` / `ProjectedOutcome` / `ExternalState` / `ExecutionMode`）、身份与谱系值对象（`Epoch` / `AbandonedRoundMark` / `PiTranscriptRef` / `ZcodeTranscriptRef` / `TranscriptRef` / `AliveMarker`）、配套常量与错误（`RECONNECTABLE_FINAL_REASONS` / `ReconnectableFinalReason` / `CLOSED_REASONS` / `NEW_STOP_REASONS` / `ROUND_TERMINAL_STOP_REASONS` / `STOP_REASONS` / `ResurrectDeniedError`）。`execution/assembly/types.ts` 保留全部 re-export 与内部导入——消费面（~100 处 import + barrel + 壳）零改动，core 237 文件 / 3623 例与扩展 76 文件全绿，值依赖环守卫仍零环。
-  - 留在 assembly 的下批清单：aggregate `ExecutionRecord` 及其内嵌值对象 `AgentResult`、只读视图 `SubagentRecord`、判定谓词 `isReconnectableFinalReason` / `isValidStopReason`、`DEFAULT_AGENT_NAME`、`ClosedDisplayStatus` 族（后者在 shared）；以及 4 个装配/展示族（`ExecuteOptions` / `ExecutionHandle` / `Subagent*Response` / `SubagentListItem` / `RecordSnapshot` / `SubagentToolDetails`）——它们属应用/接口层，**刻意留在 assembly**，不迁领域。
-- 归位后续步骤（下批）：
-  - `assembly/types.ts`（1076 行 / 约 57 导出）混合四族：record 领域概念 31 个（`ExecutionRecord` 聚合、`ExecutionStatus`/`StopReason`/`ClosedReason`/`ExecutionOutcome`/`Epoch`/`TranscriptRef` 值对象、`SubagentRecord` 只读视图）、应用装配 6 个、引擎协议 re-export 9 个、展示/tool DTO 12 个。归位动作 = 把 31 个拆到领域模块（`execution/domain/` 或等价），`assembly/types.ts` 保留 re-export 过渡（消费面 ~100 处 import 不动），再逐族收尾。
-  - 判断口径（已核实并记录，避免被目录带偏）：类型若是「业务不变量与业务语言的载体、且不依赖任何外部系统形状」→ 领域；若描述「怎么把领域接到外部」（入参/返回值/句柄/渲染单元/条目载荷）→ 应用或接口层。两个边界个例已定态度：`SubagentRecord` 按领域只读视图放领域层（展示层另派生 `SubagentListItem`）；`AgentResult` 按领域内嵌值对象放领域层，引擎侧同名类型已改名区分（§2.1；workflow 侧同名类型仍待区分）。
-  - `ExecutionRecord` 内混装 `controller` / `worktreeHandle` 等运行时技术资源，属「聚合里装了技术资源」，建议单独立项拆分，不并入本次归位。
+  - **类型归位第二批已落**（2026-09-30）：新增 `execution/domain/record-model.ts`，迁出 aggregate `ExecutionRecord`（record 聚合根，约 200 行）、`AgentResult`（内嵌调用结果值对象）、两个判定谓词（`isReconnectableFinalReason` / `isValidStopReason`）、两个判别联合守卫（`isPiTranscriptRef` / `isZcodeTranscriptRef`）与 `DEFAULT_AGENT_NAME`；模块只依赖 `./record-types.ts`（同层）与 SDK 契约类型（`Turn` / `ToolCall` / `WorktreeHandle` / `AgentFailureKind` / `AgentUsageTotal`），**不 import assembly / orchestration**（值依赖环守卫 C-data-26 覆盖）。
+  - **判断修正（有字段证据）**：`SubagentRecord` **留在 assembly**，不迁领域——其字段含 `eventLog: AgentEventLogEntry[]` 与 `displayItems: DisplayItem[]`，是同时携带领域字段与展示载荷的**应用层读模型**；强行迁入会逼出「领域层 import 展示 DTO」的反向依赖。早先「按领域只读视图放领域层」的判断据此更正（口径不变：业务不变量与业务语言 = 领域；怎么把领域接到外部 = 应用/接口）。
+  - 其余刻意留在 assembly 的族不变：装配（`ExecuteOptions` / `ExecutionHandle` / `SessionResolveInput` / `ResolvedSessionContext` / `SubagentsGlobalConfig`）、展示与工具 DTO（`SubagentListItem` / `SubagentToolDetails` / 各 Response / `RecordSnapshot` / `DisplayItem` / `AgentEventLogEntry`）、worktree 错误类与 `PatchResult`。
+  - 测试：core 238 文件（唯一红为 `journal-tail` 的 fs.watch 负载敏感 flake，隔离跑 16/16 绿）、扩展 77 文件 936 例绿，两侧 typecheck 与 eslint 干净。
+
+- 剩余（非阻塞，均为「可选深挖」而非未完成项）：
+  - 收掉 `assembly/types.ts` 的 re-export：需等应用/接口族（装配 / 展示 DTO / 读模型）也各自归位后一次收口——现在收会让 ~100 处消费面 import 全部改路径，收益（路径语义更准）与代价（大范围 diff + 冲突面）不成比例。
+  - `ExecutionRecord` 内混装 `controller` / `worktreeHandle` 等运行时技术资源（「聚合里装了技术资源」）——单独立项拆分，不并入归位。
+  - `AgentResult` 在 workflow 侧另有同名类型（`orchestration/models/types.ts` 的 workflow 调用结果）仍待区分命名（§2.1 只处理了执行侧）。
+- 判断口径（本轮两次搬迁据它决策，避免被目录带偏）：业务不变量与业务语言的载体、且不依赖外部系统形状 → 领域；描述「怎么把领域接到外部」（入参/返回值/句柄/渲染单元/条目载荷）→ 应用或接口层。
 
 ### 2.5 壳层混入领域规则（领域规则部分已修；interface 职责混装属独立议题）
 
