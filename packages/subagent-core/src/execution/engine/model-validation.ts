@@ -20,7 +20,7 @@
 //   ② workflow 路径 subprocess-agent-runner.run（route.engine.run 之前，非 pi 分支）。
 
 import { parseModelSelector } from "../../shared/model-ref.ts";
-import type { EnginePort } from "./port.ts";
+import type { EngineModelSelectorInput, EnginePort } from "./port.ts";
 import { DEFAULT_ENGINE_ID } from "./registry.ts";
 import { toErrorMessage } from "../../core/error-message.ts";
 
@@ -95,29 +95,49 @@ class EngineModelMismatchError extends Error {
 /**
  * 非 pi 引擎的派发同步期 model 校验（两路径统一入口）。
  *
- * - 引擎实现 validateModel：同步裁决（含 undefined = 查引擎缺省模型），返回 canonical
- *   ref 供 record.model 留痕；失败包装为 EngineModelMismatchError（场景 2 文案：
- *   点破 registry 独立 + 目标引擎可用清单 + 按引擎区分的省略语义修正动作）。
- *   canonical ref 允许**无斜杠**形态（引擎原样返回的 ref，契约变更④）——留痕拆分
- *   归 splitEngineModelRef（provider=""/id=ref/整串进 name），不在本入口裁词形。
- * - 引擎未实现 validateModel：返回 modelRef 原样（透传给其 prepare 期校验兜底——
- *   现状语义，未来引擎零强制接入）。
+ * [⑦ 模型引用三元组化] 本入口是 modelRef 裸字符串在 core 内部的**最后一个穿层点**：
+ * 输入侧收边界词形（用户原始串，见 EngineModelSelectorInput），输出侧即解析为
+ * SplitModelRef 三元组——下游（record.model 留痕 / ctxModel 组装）只消费结构体，
+ * 不再各自 normalize + splitEngineModelRef 二次裁词形。
+ *
+ * - 引擎实现 validateModel：同步裁决（含 undefined = 查引擎缺省模型），裁决产物
+ *   （canonical ref）解析为三元组返回；失败包装为 EngineModelMismatchError（场景 2
+ *   文案：点破 registry 独立 + 目标引擎可用清单 + 按引擎区分的省略语义修正动作）。
+ *   裁决产物允许**无斜杠**形态（引擎原样返回的 ref，契约变更④）——拆分归
+ *   splitEngineModelRef 单一权威（provider=""/id=ref/整串进 name），不在调用方裁词形。
+ * - 引擎未实现 validateModel：显式输入原样透传（拆分归一后返回——透传给其 prepare
+ *   期校验兜底的现状语义，未来引擎零强制接入）。
+ * - 裁决产物空白 = 引擎裁决「缺席/CLI 缺省解析」（zcode 空串语义）——回落显式输入
+ *   的归一拆分；双缺席（undefined/空白）返回 undefined = record.model 条件留空
+ *   （R4/D6-② 禁空串哨兵，原 record-access 侧的防御回落语义内聚到本单点）。
  *
  * @param engine   路由解析出的目标引擎
  * @param modelRef 显式 model（调用参数或 agent .md frontmatter；undefined = 引擎缺省语义）
- * @returns canonical ref（引擎裁决后）；未实现校验面时 = modelRef 原样
+ * @returns 裁决产物的三元组（SplitModelRef）；输入与裁决值双缺席时 = undefined
  */
 export function validateModelForEngine(
   engine: EnginePort,
-  modelRef: string | undefined,
-): string | undefined {
-  if (engine.id === DEFAULT_ENGINE_ID) return modelRef; // 防御：pi 不经此入口（走既有三层解析链）
-  if (typeof engine.validateModel !== "function") return modelRef;
+  modelRef: EngineModelSelectorInput,
+): SplitModelRef | undefined {
+  if (engine.id === DEFAULT_ENGINE_ID) return normalizedSplitModelRef(modelRef); // 防御：pi 不经此入口（走既有三层解析链）
+  if (typeof engine.validateModel !== "function") return normalizedSplitModelRef(modelRef);
   try {
-    return engine.validateModel(modelRef).canonicalRef;
+    return (
+      normalizedSplitModelRef(engine.validateModel(modelRef).canonicalRef) ??
+      normalizedSplitModelRef(modelRef)
+    );
   } catch (err) {
     throw buildMismatchError(engine, modelRef, err);
   }
+}
+
+/**
+ * 边界词形 → 三元组的归一入口（trim 空白归一缺席 + splitEngineModelRef 单源拆分）。
+ * 空白串归一缺席与引擎侧缺席判定同口径（resolveZcodeModelRef 的 `trim() || undefined`）。
+ */
+function normalizedSplitModelRef(ref: EngineModelSelectorInput): SplitModelRef | undefined {
+  const trimmed = ref?.trim();
+  return trimmed !== undefined && trimmed !== "" ? splitEngineModelRef(trimmed) : undefined;
 }
 
 /**
@@ -126,7 +146,7 @@ export function validateModelForEngine(
  * （清单重试 / 省略 model 用引擎缺省——pi 的「继承主 agent」语义对非 pi 引擎是错误
  * 指引，此处按引擎缺省表述）。
  */
-function buildMismatchError(engine: EnginePort, modelRef: string | undefined, cause: unknown): EngineModelMismatchError {
+function buildMismatchError(engine: EnginePort, modelRef: EngineModelSelectorInput, cause: unknown): EngineModelMismatchError {
   const ref = modelRef === undefined || modelRef.trim() === "" ? "(engine default)" : modelRef;
   const lines = [
     `model '${ref}' is not available on engine '${engine.id}'.`,

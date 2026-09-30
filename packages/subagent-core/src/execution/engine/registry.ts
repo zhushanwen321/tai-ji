@@ -24,7 +24,7 @@ import { getLogger } from "../../core/logger.ts";
 import type { ModelCatalogEntry } from "@zhushanwen/subagent-engine-sdk";
 
 import type { EngineCapabilities } from "./types.ts";
-import type { EnginePort } from "./port.ts";
+import type { EngineModelSelectorInput, EnginePort } from "./port.ts";
 import type { EngineProcessModel } from "./window-instances.ts";
 import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
@@ -259,7 +259,7 @@ function readOnlyEngineProxy(id: string, descriptor: CliEngineDescriptor): Engin
       ? { listModels: () => engine.listModels!() }
       : {}),
     ...(engine.validateModel !== undefined
-      ? { validateModel: (modelRef: string | undefined) => engine.validateModel!(modelRef) }
+      ? { validateModel: (modelRef: EngineModelSelectorInput) => engine.validateModel!(modelRef) }
       : {}),
     dispose: () => refuse("dispose"),
   };

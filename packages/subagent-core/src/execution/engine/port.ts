@@ -208,8 +208,20 @@ export interface EnginePort {
    *
    * 未实现：model 透传，引擎自身 prepare 期校验兜底（现状语义）；pi 不实现（pi 链走
    * 既有三层解析 + assertCanonicalModelRef 裁决，搬迁是大重构，设计 D2-2 被否②）。
+   *
+   * [⑦ 模型引用三元组化 · 字符串边界裁决] 本成员的 modelRef 参数**刻意保持字符串**，
+   * 是 ModelRef 结构体传导链上保留的两类边界入口之一：
+   *   ① 输入域是**未裁决词形**（用户原始串：alias 短名 / 缺省 provider 形态 / 待剥的
+   *      `:thinking` 后缀）——解析成 {provider, id} 会伪造 provider 空串的三元组、
+   *      丢掉 alias 裁决语义；裁决正是本成员的职责，产物侧才结构体化（裁决产物经
+   *      model-validation.ts validateModelForEngine 收敛为 SplitModelRef 三元组，
+   *      core 内部不再以裸串穿层）。
+   *   ② 跨包镜像面：SDK `@zhushanwen/subagent-engine-sdk` port-contract 的 EnginePort
+   *      同签名镜像 + 协议 validateModel 帧（{modelRef?: string}）同形，签名变更会
+   *      波及引擎包实现（清单外）。
+   * 输入词形统一用 EngineModelSelectorInput 别名表达（契约派生，禁裸 string 重写）。
    */
-  validateModel?(modelRef: string | undefined): { canonicalRef: string };
+  validateModel?(modelRef: EngineModelSelectorInput): { canonicalRef: string };
 
   /**
    * [R1 D6] 可选停机面：释放引擎持有的常驻资源（如 app-server 常驻进程 / 长连接）。
@@ -222,6 +234,14 @@ export interface EnginePort {
    */
   dispose?(): Promise<void>;
 }
+
+/**
+ * [⑦ 模型引用三元组化] 跨引擎边界的模型**词形**（未裁决用户串）：EnginePort.validateModel
+ * 的输入域。本别名是该域的唯一权威定义——内部新代码禁再手写裸 `string | undefined`
+ * 表达同一域（穿层是否越界由类型名可检索：结构体传导见 model-validation.ts
+ * validateModelForEngine；跨包镜像面见 EnginePort.validateModel 注释的边界裁决）。
+ */
+export type EngineModelSelectorInput = string | undefined;
 
 /**
  * [D4] record → 身份信封（宿主侧**唯一构造点**）：引擎把它整封写进任务子进程的

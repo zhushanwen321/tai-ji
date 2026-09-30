@@ -37,7 +37,6 @@ import { createRecord, project, snapshot } from "../persistence/execution-record
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import {
   joinEngineModelRef,
-  splitEngineModelRef,
   validateModelForEngine,
   withCrossEngineHint,
 } from "../engine/model-validation.ts";
@@ -57,13 +56,6 @@ import type { ExecutionRecord } from "../domain/record-model.ts";
 import { type ExecuteOptions, type ExecutionHandle, type RecordSnapshot, type SubagentRecord } from "../assembly/types.ts";
 
 const logger = getLogger("subagents");
-
-/** 空串/空白归一缺席（R4/D6-②）：trim 判空与引擎侧缺席判定同口径
- *  （resolveZcodeModelRef 的 `trim() || undefined`）——写侧留痕链消费。 */
-function normalizeModelRef(ref: string | undefined): string | undefined {
-  const trimmed = ref?.trim();
-  return trimmed !== undefined && trimmed !== "" ? trimmed : undefined;
-}
 
 /** resolveIdentity 的产物——一次确定、写入 record 后不再变。
  *  [R3] 接口本体自壳文件迁入（唯一生产者 resolveIdentity/resolveIdentityForEngine）；
@@ -269,18 +261,13 @@ export class RecordAccess {
     agentConfig: AgentConfig | undefined,
     opts: ExecuteOptions,
   ): ResolvedIdentity {
-    const canonical = validateModelForEngine(engine, engineModel);
-    // record.model 留痕（R4/D6-② 缺席透传）：canonical（引擎裁决 ref）> engineModel
-    // （显式透传）；两者缺席时透传 undefined → record.model 条件留空 = 用户未指定
-    // （引擎走自身缺省解析，如 zcode 的 defaultModelSelection），不再伪造成 fallback
-    // 已选。空串归一为缺席（禁空串哨兵）：上游帧面对「缺席」的既有表达形态含空串
-    // （RemoteEngine validateModel 缺席分支、modelRef 显式空白串），trim 归一与引擎
-    // 侧缺席判定同口径（resolveZcodeModelRef 的 `trim() || undefined`）——写侧归一 +
-    // 读侧水合归一（record-store-rebuild / state-marker）共同保证 record.model 无
-    // 空串复活。拆分单一权威 = splitEngineModelRef（无斜杠 → provider=""/id=ref/
-    // 整串进 name，不再落 "<ref>/" 畸形）。
-    const modelStr = normalizeModelRef(canonical) ?? normalizeModelRef(engineModel);
-    const split = modelStr === undefined ? undefined : splitEngineModelRef(modelStr);
+    // [⑦ 模型引用三元组化] validateModelForEngine 直接返回裁决产物的三元组
+    // （SplitModelRef）：trim 归一缺席、canonical 空白回落显式输入、无斜杠 ref 拆分
+    // （provider=""/id=ref/整串进 name）都已在内聚单点完成——本方法只把结构体投影成
+    // ModelInfo，不再各自 normalize + splitEngineModelRef 二次裁词形。双缺席（用户未
+    // 指定且引擎裁决缺席）→ model undefined = record.model 条件留空（R4/D6-② 禁空串
+    // 哨兵，如实投影「用户未指定」，引擎走自身缺省解析如 zcode 的 defaultModelSelection）。
+    const split = validateModelForEngine(engine, engineModel);
     return {
       agent,
       agentConfig,

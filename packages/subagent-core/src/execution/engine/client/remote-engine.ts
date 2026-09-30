@@ -38,7 +38,7 @@ import type {
   ProbeReport,
   SessionView,
 } from "../types.ts";
-import type { EnginePort, EngineRunResult, RunContext } from "../port.ts";
+import type { EngineModelSelectorInput, EnginePort, EngineRunResult, RunContext } from "../port.ts";
 import type { EngineClient, RunRoute } from "./engine-client.ts";
 
 /** manifest 注册期快照（发现器/注册表读取，构造时注入——同步成员唯一源）。 */
@@ -295,10 +295,12 @@ export class RemoteEngine implements EnginePort {
    *   未命中且 dynamic:false → throw engine_model_unknown（同步拒，record 不创建）；
    *   未命中且 dynamic:true → 放行，返回原样 ref（运行期以引擎为权威
    *   engine_model_mismatch；无斜杠 ref 的 core 侧拆分 = 契约变更④，归 W3）。
-   * modelRef undefined（查引擎缺省）对静态目录恒属未命中：dynamic:true 放行回空串
-   * （缺省模型无静态 canonical 形态，运行期自证）；dynamic:false 同步拒。
+   * modelRef（未裁决词形，EngineModelSelectorInput——字符串边界入口的裁决见
+   * EnginePort.validateModel 注释）undefined（查引擎缺省）对静态目录恒属未命中：
+   * dynamic:true 放行回空串（缺省模型无静态 canonical 形态，运行期自证）；
+   * dynamic:false 同步拒。
    */
-  validateModel(modelRef: string | undefined): { canonicalRef: string } {
+  validateModel(modelRef: EngineModelSelectorInput): { canonicalRef: string } {
     const catalog = this.opts.manifest.modelCatalog;
     if (!catalog || modelRef === undefined || modelRef.trim() === "") {
       if (catalog?.dynamic === false) {
