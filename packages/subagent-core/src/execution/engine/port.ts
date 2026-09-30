@@ -32,6 +32,7 @@ import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
 import type { ModelInfo } from "../assembly/model-resolver.ts";
+import type { ExecutionMode } from "../domain/record-types.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { AgentEvent } from "../assembly/types.ts";
 import type {
@@ -96,6 +97,15 @@ export interface RunContext {
    * 仅旧宿主/独立运行引擎形态可达。
    */
   sessionDir?: string;
+  /**
+   * [D4 record 身份信封] 协议 `run.params.ctx.identity` 的宿主侧值（唯一构造点 =
+   * `identityEnvelopeOf`）——引擎据此写任务子进程身份 env 的 slug / startedAt / mode。
+   */
+  identity?: {
+    slug?: string;
+    startedAt?: number;
+    mode?: string;
+  };
   /**
    * [R4 §3.4 不变量 3] 运行中句柄回填通道：引擎在「session/create 应答到达后」
    * 立即回调（早于 run resolve——stream 引擎的 run 生命周期远长于会话建立）。
@@ -211,4 +221,25 @@ export interface EnginePort {
    * Promise 前完成；grace→SIGKILL 升级序列属异步面（promise 段）。
    */
   dispose?(): Promise<void>;
+}
+
+/**
+ * [D4] record → 身份信封（宿主侧**唯一构造点**）：引擎把它整封写进任务子进程的
+ * 身份 env（SDK `SUBAGENT_IDENTITY_ENV` 的 slug / startedAt / mode）。
+ *
+ * 三处 run 组装点（workflow 派发 / 会话轮 / chat 轮）共用本函数——身份字段的取值
+ * 口径只有一处，避免「某条派发链漏填某个键 → 该链的子代理身份条目缺字段」。
+ * `slug` 空串不上 wire（record 允许空 slug）；`startedAt` / `mode` 是 record 不变式
+ * 字段，恒有值。
+ */
+export function identityEnvelopeOf(record: {
+  slug: string;
+  startedAt: number;
+  mode: ExecutionMode;
+}): RunContext["identity"] {
+  return {
+    ...(record.slug !== "" ? { slug: record.slug } : {}),
+    startedAt: record.startedAt,
+    mode: record.mode,
+  };
 }

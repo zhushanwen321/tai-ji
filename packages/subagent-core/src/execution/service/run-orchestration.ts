@@ -67,6 +67,7 @@ import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
+import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
 import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
@@ -621,6 +622,8 @@ export class RunOrchestration {
     try {
       const runCtx: RunContext = {
         taskId: record.id,
+        // [D4] record 身份信封（引擎写进任务子进程身份 env；构造单点 = identityEnvelopeOf）
+        identity: identityEnvelopeOf(record),
         signal,
         ctxModel: identity.resolved.model,
         onEvent: journal.onEvent,

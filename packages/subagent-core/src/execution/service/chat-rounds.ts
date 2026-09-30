@@ -58,6 +58,7 @@ import { zcodeAnchorBasePath } from "../persistence/state-marker.ts";
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
 import { killRecordChildWithEscalation } from "../engine/host/spawned-children.ts";
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
+import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, EngineRunResult } from "../engine/port.ts";
 // [U3 pi-workflow-run-resource-model] 轮窗口实例解析单点 + 收尾释放原语（U2 在
 // routing.ts「窗口实例状态」段建立，chat 轮窗口与 workflow run 窗口共用）。
@@ -457,6 +458,8 @@ export class ChatRounds {
       this.deps.taskSpecWithModel(opts, record.model),
       {
         taskId: record.id,
+        // [D4] record 身份信封（引擎写进任务子进程身份 env；构造单点 = identityEnvelopeOf）
+        identity: identityEnvelopeOf(record),
         signal,
         ...(stream !== undefined ? { stream } : {}),
         ctxModel: identity.resolved.model,

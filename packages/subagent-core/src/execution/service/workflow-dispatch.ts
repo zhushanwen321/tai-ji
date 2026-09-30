@@ -60,6 +60,7 @@ import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts"
 // [H2 W2 迁移步⑥] mergeRunSignals 提公共 helper（原 SAR 模块内直调）——workflow
 // 派发的 timeout+外部 signal 两源合流。
 import { mergeRunSignals, type MergedRunSignalHandle } from "../engine/common/run-signals.ts";
+import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
 import {
@@ -498,6 +499,8 @@ export class WorkflowDispatch {
 
       const runCtx: RunContext = {
         taskId: record.id,
+        // [D4] record 身份信封（引擎写进任务子进程身份 env；构造单点 = identityEnvelopeOf）
+        identity: identityEnvelopeOf(record),
         signal: runSignal.signal,
         ctxModel: identity.resolved.model,
         onEvent: observedEvent,
