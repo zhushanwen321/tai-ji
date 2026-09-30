@@ -87,6 +87,7 @@ import type {
 import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 // [R6/D-R4-4] 值语义纯量消费常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 
 /**
  * [H1 U2 / 红线②] stale-child 兜底的退出等待窗（ms）：镜像在途子进程活项时，协议
@@ -390,7 +391,7 @@ export class ChatRounds {
     opts: ExecuteOptions,
     identity: ResolvedIdentity,
     signal: AbortSignal | undefined,
-    stream: SubagentStream | undefined,
+    stream: AgentStreamSink | undefined,
     engine: EnginePort,
     resume: ResumeAnchor | undefined,
   ): Promise<EngineRunResult> {

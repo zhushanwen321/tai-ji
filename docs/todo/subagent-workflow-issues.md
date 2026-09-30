@@ -98,10 +98,16 @@
 - 防线现状（2026-09-30 更新）：core 侧的包级值依赖循环检查已落地（`scripts/check-subagent-core-value-cycles.mjs` + 其测试，见 commit 65440e5b1）——「core 内无对应防线」这一条已不成立。剩余工作 = 拆边（终局编排整体入 orchestration，或反向边收窄到端口），属架构排期项。
 - 修法方向：先加 core 版循环依赖机器检查止血，再谈拆边（终局编排整体入 orchestration、execution 只暴露 persistence 端口，或反向边收窄到端口）。
 
-### 2.4 领域核心类型反向依赖应用层目录
+### 2.4 领域核心类型反向依赖应用层目录（反向依赖已断；类型归位待排期）
 
-- `models/ports.ts:13` import `execution/assembly/stream-sink.ts`、`models/types.ts:23` import `execution/assembly/types.ts`——models（领域核心候选）的端口签名依赖 assembly 类型，ports.ts 头部自称「零 infra 依赖（AC-1）」名实不符。
-- record 域聚合核心 execution-record.ts 的全部领域类型（ExecutionRecord/ExecutionStatus/Turn 等 20 个）定义在 assembly/types.ts——`assembly/types.ts` 实为跨域公共类型堆积处，领域概念的权威定义位置错位。
+- 现状（2026-09-30 更新）：
+  - `models/types.ts:23` 的 `WorktreeHandle` 反向依赖**已断**（§2.3 起直连 SDK）。
+  - `models/ports.ts:13` 的 `SubagentStream` 反向依赖**已断**（2026-09-30）：新增 shared 最低层结构契约 `src/shared/agent-stream.ts` 的 `AgentStreamSink`（只声明 `onDelta` / `dispose`），编排端口（`ports.ts` AgentRunner）、引擎端口（`engine/port.ts` RunContext.stream）、编排执行器（`execute-agent-call.ts`）与服务层五个透传位置全部改依赖该契约；具体类 `SubagentStream`（应用/UI 层，含 widget 装配）不再是端口的依赖对象，编排层对它零调用（只透传 + 一处 `dispose`）。
+  - `ports.ts` 头注「零 infra 依赖（AC-1）」与 `models/types.ts` 头注「D-12 三层架构，AC-1」的引用**仍无权威定义源**（constraints.json 零命中、全史仅自指注释）——要么补成正式约束 + 机器检查，要么删引用（待裁决）。
+- 未做（类型归位，属独立排期）：
+  - `assembly/types.ts`（1076 行 / 约 57 导出）混合四族：record 领域概念 31 个（`ExecutionRecord` 聚合、`ExecutionStatus`/`StopReason`/`ClosedReason`/`ExecutionOutcome`/`Epoch`/`TranscriptRef` 值对象、`SubagentRecord` 只读视图）、应用装配 6 个、引擎协议 re-export 9 个、展示/tool DTO 12 个。归位动作 = 把 31 个拆到领域模块（`execution/domain/` 或等价），`assembly/types.ts` 保留 re-export 过渡（消费面 ~100 处 import 不动），再逐族收尾。
+  - 判断口径（已核实并记录，避免被目录带偏）：类型若是「业务不变量与业务语言的载体、且不依赖任何外部系统形状」→ 领域；若描述「怎么把领域接到外部」（入参/返回值/句柄/渲染单元/条目载荷）→ 应用或接口层。两个边界个例已定态度：`SubagentRecord` 按领域只读视图放领域层（展示层另派生 `SubagentListItem`）；`AgentResult` 按领域内嵌值对象放领域层，引擎侧同名类型已改名区分（§2.1；workflow 侧同名类型仍待区分）。
+  - `ExecutionRecord` 内混装 `controller` / `worktreeHandle` 等运行时技术资源，属「聚合里装了技术资源」，建议单独立项拆分，不并入本次归位。
 
 ### 2.5 壳层混入领域规则（领域规则部分已修；interface 职责混装属独立议题）
 

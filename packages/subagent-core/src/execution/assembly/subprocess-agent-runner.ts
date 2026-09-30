@@ -14,7 +14,7 @@
 import type { AgentRunner } from "../../orchestration/models/ports.ts";
 import type { AgentCallOpts, AgentResult } from "../../orchestration/models/types.ts";
 import type { AgentEvent } from "../../shared/agent-event.ts";
-import type { SubagentStream } from "./stream-sink.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { SubagentService } from "../subagent-service.ts";
 
 /**
@@ -59,7 +59,7 @@ export class SubprocessAgentRunner implements AgentRunner {
     opts: AgentCallOpts,
     signal: AbortSignal,
     onEvent?: (event: AgentEvent) => void,
-    stream?: SubagentStream,
+    stream?: AgentStreamSink,
   ): Promise<AgentResult> {
     return this.subagentService.executeWorkflowAgent(
       opts,

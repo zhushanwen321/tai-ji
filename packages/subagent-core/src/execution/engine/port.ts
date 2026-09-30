@@ -32,7 +32,7 @@ import type { ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
 import type { AgentCallOpts } from "../../orchestration/models/types.ts";
 import type { ModelInfo } from "../assembly/model-resolver.ts";
-import type { SubagentStream } from "../assembly/stream-sink.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { AgentEvent } from "../assembly/types.ts";
 import type {
   AgentOutcome,
@@ -76,7 +76,7 @@ export interface RunContext {
    * agentEvent 出口注释）。pi 回填期承载 AgentRunner port 的 stream 透传（行为零变化），
    * 语义上是宿主设施而非引擎专有——未来引擎的 text_delta 同样可走此通道。
    */
-  stream?: SubagentStream;
+  stream?: AgentStreamSink;
   /**
    * [P4 D9①] 引擎 fallback 留痕（probe 失败路由回默认引擎）。路由层（routing.ts）
    * 产出，引擎投影到 outcome.engineFallback（zcode 等无 record 通路的引擎以此留痕；

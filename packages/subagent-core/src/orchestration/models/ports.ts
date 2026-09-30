@@ -10,7 +10,7 @@
  *
  * 层归属：Engine。零 infra 依赖（AC-1）。
  */
-import type { SubagentStream } from "../../execution/assembly/stream-sink.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 import type { AgentEvent } from "../../shared/agent-event.ts";
 import type { WorkerHandle } from "../worker-handle.ts";
 import type { RunSpec } from "./run-spec.ts";
@@ -32,7 +32,7 @@ import type { WorkflowRun } from "./workflow-run.ts";
  * raw JSONL 中间层（executeAndAwait 直接出 AgentEvent）。
  */
 export interface AgentRunner {
-  run(opts: AgentCallOpts, signal: AbortSignal, onEvent?: (event: AgentEvent) => void, stream?: SubagentStream): Promise<AgentResult>;
+  run(opts: AgentCallOpts, signal: AbortSignal, onEvent?: (event: AgentEvent) => void, stream?: AgentStreamSink): Promise<AgentResult>;
 }
 
 // ── Port 2: RunStore ──────────────────────────────────────────

@@ -105,6 +105,7 @@ import type { MemberReviveOutcome } from "./service/workflow-dispatch.ts";
 import { ChatRounds } from "./service/chat-rounds.ts";
 import { RunOrchestration } from "./service/run-orchestration.ts";
 import { WorkflowDispatch } from "./service/workflow-dispatch.ts";
+import type { AgentStreamSink } from "../shared/agent-stream.ts";
 
 const logger = getLogger("subagents");
 
@@ -725,7 +726,7 @@ export class SubagentService {
     opts: ExecuteOptions,
     signal?: AbortSignal,
     onEvent?: (event: AgentEvent) => void,
-    stream?: SubagentStream,
+    stream?: AgentStreamSink,
   ): Promise<WorkflowAgentResult> {
     return this.runOrchestration.executeAndAwait(opts, signal, onEvent, stream);
   }
@@ -738,7 +739,7 @@ export class SubagentService {
     parentRunId: string,
     signal?: AbortSignal,
     onEvent?: (event: AgentEvent) => void,
-    stream?: SubagentStream,
+    stream?: AgentStreamSink,
     stepIndex?: number,
   ): Promise<WorkflowAgentResult> {
     return this.workflowDispatch.executeWorkflowAgent(opts, parentRunId, signal, onEvent, stream, stepIndex);

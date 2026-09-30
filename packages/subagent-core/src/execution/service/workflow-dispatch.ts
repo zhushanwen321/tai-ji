@@ -88,6 +88,7 @@ import {
 } from "../assembly/types.ts";
 // [R6/D-R4-4] 跨两聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 
 const logger = getLogger("subagents");
 
@@ -178,7 +179,7 @@ export interface WorkflowDispatchDeps {
   readonly releaseRoundResources: (
     record: ExecutionRecord,
     holdSlot: boolean,
-    stream: SubagentStream | undefined,
+    stream: AgentStreamSink | undefined,
   ) => void;
   /**
    * [U4 pi-workflow-run-resource-model 决策 7/10] 成员 revive 通道（命中路径的
@@ -242,7 +243,7 @@ export class WorkflowDispatch {
     parentRunId: string,
     signal?: AbortSignal,
     onEvent?: (event: AgentEvent) => void,
-    stream?: SubagentStream,
+    stream?: AgentStreamSink,
     stepIndex?: number,
   ): Promise<WorkflowAgentResult> {
     this.deps.assertReady();
@@ -446,7 +447,7 @@ export class WorkflowDispatch {
     engine: EnginePort,
     signal: AbortSignal | undefined,
     onEvent?: (event: AgentEvent) => void,
-    stream?: SubagentStream,
+    stream?: AgentStreamSink,
     /**
      * [U4 pi-workflow-run-resource-model] 会话形态 resume 键（RunContext.resume 契约
      * 位——recordId 关联键 + 续聊锚点）。现状路径（首次派发）不传，wire 上不出现该键

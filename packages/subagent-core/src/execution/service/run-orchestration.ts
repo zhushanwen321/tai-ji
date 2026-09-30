@@ -107,6 +107,7 @@ import type {
 import { DEFAULT_AGENT_NAME } from "../assembly/types.ts";
 // [R6/D-R4-4] 跨聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
+import type { AgentStreamSink } from "../../shared/agent-stream.ts";
 
 /**
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
@@ -316,7 +317,7 @@ export class RunOrchestration {
     opts: ExecuteOptions,
     signal?: AbortSignal,
     onEvent?: (event: AgentEvent) => void,
-    stream?: SubagentStream,
+    stream?: AgentStreamSink,
   ): Promise<WorkflowAgentResult> {
     this.deps.assertReady();
     // [T4② / PS-4] 与 execute() 同款入口校验（两入口共享 runAndFinalize → armIdleTimer 链）。
@@ -605,7 +606,7 @@ export class RunOrchestration {
     signal: AbortSignal | undefined,
     priority: number,
     onEvent?: (event: AgentEvent) => void,
-    stream?: SubagentStream,
+    stream?: AgentStreamSink,
   ): Promise<AgentResult> {
     const pooled = record.mode === "background";
     let acquired = false;
@@ -789,7 +790,7 @@ export class RunOrchestration {
   releaseRoundResources(
     _record: ExecutionRecord,
     holdSlot: boolean,
-    stream: SubagentStream | undefined,
+    stream: AgentStreamSink | undefined,
   ): void {
     if (holdSlot) this.deps.getPool().release();
     // 清除 streaming widget（subagent 终态，幂等）
