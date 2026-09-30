@@ -1269,24 +1269,24 @@
   },
   {
     "id": "PS-61",
-    "claim": "session_tree 是同进程分支导航，非会话替换形态：navigateTree 换叶子（this.agent.state.messages = sessionContext.messages 原地替换）后 emit session_tree，不 teardown、不失效 runner（runner.invalidate() 调用点全集 = dispose 内 :595 与 reload 内 :2214，两处均不在 tree 路径上），也不触发 session_start / session_shutdown。互补登记替换形态触发词表：真正的会话替换全部形态都发 session_shutdown——new/fork/resume 经 teardownCurrent(reason) emit 后 dispose（agent-session-runtime.js:102-113），quit 经 dispose 直发，reload 在 oldRunner 上显式 emit（agent-session.js:2213）后 invalidate（:2214）；SessionShutdownReason 枚举 = quit|reload|new|resume|fork，无 switchSession 专用成员——ctx.switchSession() 只出现在 stale 文案里，其内部路径即分支导航域（session_tree），不属替换形态。承重：subagent-workflow 的 pi 绑定作废只允许挂在真替换形态上（reload 分支 invalidatePiBinding / 其余经 dispose 收尾）——禁止挂 session_tree（作废后唯一重臂点 initSession 只由 session_start 触发，tree 导航不触发 session_start，作废即本 session 余生 record/notify 的 pi 写入静默 no-op）",
+    "claim": "session_tree 是同进程分支导航，非会话替换形态：navigateTree 换叶子（this.agent.state.messages = sessionContext.messages 原地替换）后 emit session_tree，不 teardown、不失效 runner（runner.invalidate() 调用点全集 = dispose 内 :595 与 reload 内 :2214，两处均不在 tree 路径上），也不触发 session_start / session_shutdown；session_tree 全 dist 唯一发射点 = navigateTree（agent-session.js:2612），与 switchSession 无调用关系。互补登记替换形态触发词表：真正的会话替换全部形态都发 session_shutdown——new/fork/resume 经 teardownCurrent(reason) emit 后 dispose（agent-session-runtime.js:102-113），quit 经 dispose 直发，reload 在 oldRunner 上显式 emit（agent-session.js:2213）后 invalidate（:2214）；switchSession 亦为真替换形态：emitBeforeSwitch(\"resume\") 后 await teardownCurrent(\"resume\")（emit session_shutdown(reason:\"resume\") 后 dispose）→ createRuntime + session_start(reason:\"resume\")（agent-session-runtime.js:128-148），借 reason=\"resume\"（SessionShutdownReason 枚举 = quit|reload|new|resume|fork，无 switchSession 专用成员），入口经 commandContextActions 注入暴露（dist/modes/print-mode.js / dist/modes/interactive/interactive-mode.js / dist/modes/rpc/rpc-mode.js）；agent-session.js:595 的 ctx.switchSession() 字面量是 stale 文案对替换形态的并列列举（newSession/fork/switchSession/reload），非 tree 路径。承重：subagent-workflow 的 pi 绑定作废只允许挂在真替换形态上（reload 分支 invalidatePiBinding / 其余——含 switchSession——经 session_shutdown 非 reload 分支 dispose 收尾）——禁止挂 session_tree（作废后唯一重臂点 initSession 只由 session_start 触发，tree 导航不触发 session_start，作废即本 session 余生 record/notify 的 pi 写入静默 no-op）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/agent-session.js",
         "symbol": "navigateTree 换叶子 + emit session_tree / invalidate 调用点全集",
-        "note": ":2606-2607 this.agent.state.messages = sessionContext.messages 原地换叶子 → :2608-2616 emit {type:\"session_tree\", newLeafId, oldLeafId, ...}；:2214 oldRunner.invalidate()（reload 内）；:595 dispose 内 _extensionRunner.invalidate(stale 文案提及 ctx.switchSession()——易误读为替换形态，实为分支导航 API)"
+        "note": ":2608-2609 this.agent.state.messages = sessionContext.messages 原地换叶子 → :2610-2617 emit {type:\"session_tree\", newLeafId, oldLeafId, ...}（全 dist 唯一发射点，navigateTree 内）；:2213 reload 显式 emit session_shutdown(reason:\"reload\") 后 :2214 oldRunner.invalidate()；:595 dispose 内 _extensionRunner.invalidate(stale 文案将 ctx.switchSession() 与 newSession/fork/reload 并列为替换触发——switchSession 确属替换形态，见 agent-session-runtime 锚，与 tree 导航无关)"
       },
       {
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/agent-session-runtime.js",
         "symbol": "teardownCurrent / dispose 的 session_shutdown 发射与替换链",
-        "note": ":102-113 teardownCurrent(reason) emit session_shutdown 后 dispose；调用点 :136/:278 reason:\"resume\"、:160 reason:\"new\"、:206/:224/:241 reason:\"fork\"；:290-293 dispose 直发 reason:\"quit\"；SessionShutdownReason 枚举 quit|reload|new|resume|fork 见 dist/core/extensions/types.d.ts:480"
+        "note": ":102-113 teardownCurrent(reason) emit session_shutdown 后 dispose；调用点 :136（switchSession 内）/:278（importFromJsonl 内）reason:\"resume\"、:160（newSession 内）reason:\"new\"、:206/:224/:241（fork 内）reason:\"fork\"；:290-293 dispose 直发 reason:\"quit\"；switchSession 本体 :128-148 = emitBeforeSwitch(\"resume\") → teardownCurrent(\"resume\") → createRuntime + session_start(reason:\"resume\")，commandContextActions 注入 dist/modes/print-mode.js:71-72、dist/modes/interactive/interactive-mode.js:1500（经 handleResumeSession :4490/:4507 直调）、dist/modes/rpc/rpc-mode.js:249-250（另有 :477 直调）；SessionShutdownReason 枚举 quit|reload|new|resume|fork 见 dist/core/extensions/types.d.ts:480"
       }
     ],
     "guard": {
       "type": "observe",
-      "note": "消费方：extensions/universal/subagent-workflow/src/workflow-events.ts session_tree handler 注释（不作废依据）与 session_shutdown reload 分支（真替换形态作废机制）；行为证据 = workflow-events.test.ts session_tree 用例（invalidatePiBinding 不被调 + 在途 run 照常 terminate）。pi 升级时重验：session_tree emit 路径是否引入 teardown/invalidate；SessionShutdownReason 是否新增成员；tree 导航是否改为触发 session_start——任一变化即 subagent-workflow 的绑定生命周期判定需重审"
+      "note": "消费方：extensions/universal/subagent-workflow/src/workflow-events.ts session_tree handler 注释（不作废依据）与 session_shutdown reload 分支（真替换形态作废机制）；行为证据 = workflow-events.test.ts session_tree 用例（invalidatePiBinding 不被调 + 在途 run 照常 terminate）。pi 升级时重验：session_tree 发射点是否仍唯一（navigateTree）且未引入 teardown/invalidate；SessionShutdownReason 是否新增成员；switchSession 是否仍走 teardownCurrent(\"resume\") + session_start(reason:\"resume\")（改道即替换触发词表与 workflow-events 注释需重审）；tree 导航是否改为触发 session_start——任一变化即 subagent-workflow 的绑定生命周期判定需重审"
     },
     "verifiedWith": "0.84.4"
   }

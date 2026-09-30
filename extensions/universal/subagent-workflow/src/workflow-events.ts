@@ -485,13 +485,13 @@ export function setupWorkflowDomain(
 
     // [PS-61] tree 导航 = 同进程分支导航，非会话替换：pi 原地换叶子
     //（agent.state.messages = sessionContext.messages）后 emit，不 teardown、不失效
-    // runner——pi 绑定保持有效，此处不作废（与下方 reload 分支的前提不同：真正的
-    // 会话替换形态 quit/new/resume/fork 都发 session_shutdown，reload 另有本文件
-    // :544 显式作废）。禁止在此 invalidatePiBinding：作废后唯一重臂点 initSession
-    // 只由 session_start 触发，tree 导航不触发 session_start，本 session 余生
-    // record/notify 的 pi 写入将静默 no-op。
-    // [HISTORICAL] 曾按「switchSession 是会话替换形态之一」的假前提在此作废绑定，
-    // 撤销依据与触发词表登记见 docs/pi-semantics.json PS-61。
+    // runner——pi 绑定保持有效，此处不作废。替换形态 = new/fork/resume/quit +
+    // switchSession（借 reason="resume"，无专用枚举成员），全部发 session_shutdown；
+    // switchSession 的替换语义由 session_shutdown 非 reload 分支承接，与本 handler
+    // 无交集。reload 另有本文件 :546 显式作废。禁止在此 invalidatePiBinding：作废后
+    // 唯一重臂点 initSession 只由 session_start 触发，tree 导航不触发 session_start，
+    // 本 session 余生 record/notify 的 pi 写入将静默 no-op。
+    // [HISTORICAL] 曾按「switchSession 不发 session_shutdown、其内部路径即 tree 导航域」的假前提在此作废绑定，撤销依据与触发词表登记见 docs/pi-semantics.json PS-61。
     const state = sessionState.get(sessionId);
     if (state) {
       // 一次性生命周期（D-2）：running run 转 done,failed 落盘（helper 内部自过滤
