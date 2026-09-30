@@ -36,10 +36,13 @@ import {
   type RunLifecycleState,
   type WorkflowRunEvent,
 } from "./run-events.ts";
-// [D15] 中断编排入口（run-interrupted 转移事件 + 中断条目补写的统一写点）与
+// [D15] 中断编排入口（run-interrupted 转移事件 + 中断条目补写的统一写点）、
+// foldRunEventsToLifecycleState（[D6(b)] 进程内 fold 检查点缓存的唯一读口——
+// 收编链的 fold 与 dispatch 链共享同一份全量重放结果，不再独立重折）与
 // scanRunEvents（record 读通道——journal 单写者域，证据面一致；ADR-0081 起
 // journal 目录支持 per-call 参数注入，缺省仍模块锚）。
 import {
+  foldRunEventsToLifecycleState,
   interruptRun,
   runEventJournalDirOf,
   scanRunEvents,
@@ -90,8 +93,11 @@ export interface RunProjectionOptions { // oe-exempt:20260929:framework:workflow
 /**
  * record 流 fold：scan 产物逐事件 transition（不传 ctx——run-events.ts fold 契约）。
  *
- * 循环体单源 run-events.ts 的 foldRunEventFrames（与 terminal-actions.foldRunState
- * 共享同一坏帧失效模式：保守停在最近一致态）；本侧只持注册表域的 warn 文案与 logger。
+ * 循环体单源 run-events.ts 的 foldRunEventFrames（与 terminal-actions 的 fold
+ * 读口共享同一坏帧失效模式：保守停在最近一致态）；本侧只持注册表域的 warn 文案
+ * 与 logger。消费面 = projectRunRegistryEvents（纯投影函数，任意 journal 源的
+ * 查询/对账形态，不经进程内缓存）；收编链（adoptInterruptedRun）的 fold 不走
+ * 本函数——经 terminal-actions 共享读口（[D6(b)] 检查点缓存）。
  */
 function foldEvents(events: readonly WorkflowRunEvent[], runId: string): RunLifecycleState {
   return foldRunEventFrames(events, (err, lastType) => {
@@ -304,7 +310,10 @@ export async function adoptInterruptedRun(
   const events = await scanRunEvents(runId, journalDir);
   if (events.length === 0) return "skippedMissing";
   if (opts?.activeRunIds?.has(runId)) return "skippedActive";
-  const state = foldEvents(events, runId);
+  // [D6(b) 唯一读口] fold 经 terminal-actions 共享读口（进程内检查点缓存）：
+  // 收编链的全量重放结果进缓存，紧随的 interruptRun dispatch 链命中缓存直接
+  // transition——同一次收编内同 runId 不再重折第二遍。
+  const state = foldRunEventsToLifecycleState(runId, events);
   const precheck = await precheckAdoption(runId, events, state, opts, journalDir, now);
   if (precheck.skipped !== null) return precheck.skipped;
   // 幂等追加中断转移事件（[D15] 入口；workflowName 取 run-created 帧——中断条目

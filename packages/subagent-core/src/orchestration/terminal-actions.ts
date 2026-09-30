@@ -32,17 +32,19 @@ import type { WorkflowRun } from "./models/workflow-run.ts";
 import {
   doneReasonToRunOutcome,
   finalRunErrorCodeOf,
-  foldRunEventFrames,
+  foldRunEventCheckpoint,
   IllegalTransitionError,
-  INITIAL_RUN_LIFECYCLE_STATE,
+  INITIAL_RUN_EVENT_FOLD,
   RUN_EVENT_TYPES,
   transition,
   type RunErrorCode,
   type RunOutcome,
+  type RunEventFoldCheckpoint,
   type RunLifecycleState,
   type TransitionContext,
   type TransitionResult,
   type TransitionTrigger,
+  type WorkflowRunEvent,
   type WorkflowRunEventInput,
 } from "./run-events.ts";
 // [D1 拆边 Class C 第 3 步] journal 目录解析集群 + record 读面（scanRunEvents）迁
@@ -101,8 +103,20 @@ const JOURNAL_EVENT_TYPES: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
  * 日志读面；args 全文随帧另落 args 字段，设计 §3.1 载荷表 run-created 行「args」）。 */
 const RUN_ARGS_SUMMARY_MAX_CHARS = 256;
 
-/** 本进程内 per-run 活体状态缓存（key = runId；terminal 即删）。 */
-const liveRunStates = new Map<string, RunLifecycleState>();
+/**
+ * 本进程内 per-run 活体 fold 检查点缓存（key = runId；terminal 即删）。
+ *
+ * [D6(b) 内活性状态收敛] 值 = {@link RunEventFoldCheckpoint}（状态机终帧 + seq
+ * 水位 + 投影骨架）：活体判定（run 现在活着吗）的 fold 在进程内只做一次全量重放
+ * （缓存 miss 时），此后经 dispatch 链 transition 单步推进（state + lastSeq 随
+ * 落盘事件精确前进）。骨架半边（created/asks/phases/...）在命中推进时不更新
+ * ——core 内消费面只取 state 半边与水位；骨架投影消费方 = runtime 侧
+ * SessionEventProjection（自持 tailer 检查点，与本缓存不共享）。
+ *
+ * 「同一 run 恒同目录」是单写者纪律的既有声明（RunDispatchSource.journalDir 注释
+ * ——per-run 投递队列按 runId 串行），缓存键 runId 无需并置目录。
+ */
+const liveRunFoldCheckpoints = new Map<string, RunEventFoldCheckpoint>();
 
 /** per-run 投递队列（串行化 dispatchRunTrigger——并发事件链的活体态读取必须串行，
  *  否则前一链 fold/引导挂起中、后链读到空 Map 各自补投造成状态分叉）。entry =
@@ -126,22 +140,68 @@ function enqueueRunDispatch<T>(runId: string, task: () => Promise<T>): Promise<T
  */
 export function setRunEventJournalDirForTest(dir: string | undefined): void {
   setRunEventJournalDirForTestInPersistence(dir);
-  liveRunStates.clear();
+  liveRunFoldCheckpoints.clear();
   settledRunRecords.clear();
 }
 
-/** record 流 fold：scan + 逐事件 transition（不传 ctx——run-events.ts fold 契约；
- *  journalDir = dispatch 源携带的 per-call 目录，缺省模块锚）。 */
-async function foldRunState(runId: string, journalDir?: string): Promise<RunLifecycleState> {
+/**
+ * fold 检查点写入单点（单调守卫 + terminal 删除语义内聚）：
+ * - 单调守卫：盘面快照折出的水位低于内存水位（dispatch 队列内「内存先推进、
+ *   落盘随后」的交错窗口——队列外读点的 scan 快照必然 ≤ 内存已推进 seq）→
+ *   丢弃盘面折出结果、返回内存权威检查点（活体判定宁取更新态，不回退）。
+ * - terminal 折出态不进缓存（terminal 即删语义与 appendTransition 同一族——
+ *   终局后无合法后续投递，检查点不再持有）。
+ */
+function writeRunFoldCheckpoint(runId: string, folded: RunEventFoldCheckpoint): RunEventFoldCheckpoint {
+  const existing = liveRunFoldCheckpoints.get(runId);
+  if (existing !== undefined && existing.lastSeq > folded.lastSeq) return existing;
+  if (folded.state.lifecycle === "terminal") {
+    liveRunFoldCheckpoints.delete(runId);
+  } else {
+    liveRunFoldCheckpoints.set(runId, folded);
+  }
+  return folded;
+}
+
+/** record 流坏链 warn（run 事件流 fold 消费方共用文案）。 */
+function warnBrokenRunEventFrame(runId: string, err: unknown, lastType: string): void {
+  // record 流坏链（历史帧与当前表不兼容）：投影失效模式 = 保守停在最近一致态
+  // （warn 留痕不炸链），与 scan 侧坏行容忍同一精神。
+  runEventLogger.warn(
+    `run-event record fold stopped at a broken frame (runId=${runId}, lastType=${lastType}): ${toErrorMessage(err)}`,
+  );
+}
+
+/**
+ * miss 冷读（dispatch 链内）：scan 全量 + fold 检查点重建 + 进缓存。缓存条目
+ * 存活期间不会走到本函数（命中路径 transition 单步），全量重放在进程内对同一
+ * runId 只发生一次（删除点 = terminal / 测试注入清空，见 writeRunFoldCheckpoint
+ * 与 setRunEventJournalDirForTest）。
+ */
+async function foldRunCheckpointFromDisk(runId: string, journalDir?: string): Promise<RunEventFoldCheckpoint> {
   const { journal } = resolveRunEventJournal(journalDir);
   const events = await journal.scan(runId);
-  return foldRunEventFrames(events, (err, lastType) => {
-    // record 流坏链（历史帧与当前表不兼容）：投影失效模式 = 保守停在最近一致态
-    // （warn 留痕不炸链），与 scan 侧坏行容忍同一精神。
-    runEventLogger.warn(
-      `run-event record fold stopped at a broken frame (runId=${runId}, lastType=${lastType}): ${toErrorMessage(err)}`,
-    );
-  });
+  return writeRunFoldCheckpoint(
+    runId,
+    foldRunEventCheckpoint(events, (err, lastType) => warnBrokenRunEventFrame(runId, err, lastType)),
+  );
+}
+
+/**
+ * [D6(b) 唯一读口] run 事件流 → 生命周期态（进程内 fold 检查点缓存共享面）：
+ * 调用方已持有的事件数组折检查点并写入进程内缓存（单调守卫内聚）——编排域的
+ * 队列外读点（注册表收编链 adoptInterruptedRun）经本函数与 dispatch 链共享同一
+ * 份全量重放结果，同 runId 同进程不再重复 fold；后续 dispatch 链投递命中缓存
+ * 直接 transition。坏帧保守停帧语义与 dispatch 链冷读同款（warn 留痕）。
+ */
+export function foldRunEventsToLifecycleState(
+  runId: string,
+  events: readonly WorkflowRunEvent[],
+): RunLifecycleState {
+  return writeRunFoldCheckpoint(
+    runId,
+    foldRunEventCheckpoint(events, (err, lastType) => warnBrokenRunEventFrame(runId, err, lastType)),
+  ).state;
 }
 
 /**
@@ -227,27 +287,39 @@ function settlementRecordOfTrigger(trigger: TransitionTrigger, next: RunLifecycl
 
 async function appendTransition(
   run: RunDispatchSource,
-  state: RunLifecycleState,
+  checkpoint: RunEventFoldCheckpoint,
   trigger: TransitionTrigger,
   ctx?: TransitionContext,
   journalDir?: string,
 ): Promise<TransitionResult> {
-  const { state: next, outputs } = transition(state, trigger, ctx);
+  const { state: next, outputs } = transition(checkpoint.state, trigger, ctx);
   // 活体态先于 record（内存权威先推进；取证证据随后落盘）。terminal 删条目 =
   // 「终局后停止 append」的第一道守卫（第二道 = 表 terminal × 任意事件 fail-fast）；
   // 投递队列条目同批回收（终局后该 run 无合法后续投递）。[W2/V1] 终局记录同步
   // note 进进程内注册表（isRunSettled / settledRecordOf 的判定与派生源）。
   // interrupted 是暂停态非终局——条目保留（后续 run-resumed/run-settled 仍合法）。
+  // [D6(b)] 检查点缓存随转移同步推进（state 半边；lastSeq 待落盘 seq 回填）。
   if (next.lifecycle === "terminal") {
-    liveRunStates.delete(run.runId);
+    liveRunFoldCheckpoints.delete(run.runId);
     runDispatchQueues.delete(run.runId);
     settledRunRecords.set(run.runId, settlementRecordOfTrigger(trigger, next));
   } else {
-    liveRunStates.set(run.runId, next);
+    liveRunFoldCheckpoints.set(run.runId, { ...checkpoint, state: next });
   }
+  let appendedSeq: number | undefined;
   if (outputs.includes("journal-append")) {
     const { journal } = resolveRunEventJournal(journalDir);
-    await journal.append(run.runId, journalEventOf(trigger, journalDir));
+    // append 返回值契约 = 落盘事件（含分配的 seq，NoopRunEventJournal 防线同形）
+    // ——seq 水位据此精确对齐盘面，miss 冷读重建时 seq 守卫据此去重。
+    const appended = await journal.append(run.runId, journalEventOf(trigger, journalDir));
+    appendedSeq = typeof appended.seq === "number" ? appended.seq : undefined;
+    // terminal 已删条目（entry miss）不回写；旧格式无 seq 帧不推进水位。
+    if (appendedSeq !== undefined) {
+      const entry = liveRunFoldCheckpoints.get(run.runId);
+      if (entry !== undefined && appendedSeq > entry.lastSeq) {
+        liveRunFoldCheckpoints.set(run.runId, { ...entry, lastSeq: appendedSeq });
+      }
+    }
   }
   // [P1b-2] manifest-write 终局投影：manifest（<runId>.json）落 outcome/errorCode
   //（D5-④ 输出动作统一——执行面收口在本函数，persistTerminalProjection）。
@@ -419,9 +491,9 @@ async function dispatchRunTriggerInner(
   trigger: TransitionTrigger,
   ctx?: TransitionContext,
 ): Promise<TransitionResult> {
-  let state = liveRunStates.get(run.runId);
-  if (state === undefined) state = await foldRunState(run.runId, run.journalDir);
-  return appendTransition(run, state, trigger, ctx, run.journalDir);
+  let checkpoint = liveRunFoldCheckpoints.get(run.runId);
+  if (checkpoint === undefined) checkpoint = await foldRunCheckpointFromDisk(run.runId, run.journalDir);
+  return appendTransition(run, checkpoint, trigger, ctx, run.journalDir);
 }
 
 /** 投递失败的分类留痕：Illegal = 并发终局/中断后的预期迟到事件（M12 同语义，debug）；
@@ -450,16 +522,16 @@ function reportDispatchFailure(runId: string, err: unknown): void {
  * 构造性排除双帧。
  */
 export function dispatchRunCreated(run: WorkflowRun): Promise<TransitionResult> {
-  // [W2/V1] 活体态同步 seed（created 基线，条件式）：runWorkflow 返回前
-  // liveRunStates 必命中——isRunSettled 的「miss = 已终局」单向判定由此消除创建
-  // 窗口假阳性（run 刚启动的窗口不会误判已终局）。
+  // [W2/V1] 活体态同步 seed（created 基线检查点，条件式）：runWorkflow 返回前
+  // liveRunFoldCheckpoints 必命中——isRunSettled 的「miss = 已终局」单向判定由此
+  // 消除创建窗口假阳性（run 刚启动的窗口不会误判已终局）。
   // 条件式双守卫（防双帧不变量优先）：
-  // - liveRunStates 已命中（重复发射/活体推进中）→ 不覆写——队列任务从现态
-  //   fold，重复 run-created 保持表外 fail-fast（单终局/单首帧不变量）；
-  // - 终局记录注册表已命中（终局后重复发射）→ 不 seed——队列任务 liveRunStates
-  //   miss → fold record → terminal × run-created 表外 fail-fast。
-  if (!liveRunStates.has(run.runId) && !settledRunRecords.has(run.runId)) {
-    liveRunStates.set(run.runId, INITIAL_RUN_LIFECYCLE_STATE);
+  // - 缓存已命中（重复发射/活体推进中）→ 不覆写——队列任务从现态
+  //   transition，重复 run-created 保持表外 fail-fast（单终局/单首帧不变量）；
+  // - 终局记录注册表已命中（终局后重复发射）→ 不 seed——队列任务缓存 miss →
+  //   fold record → terminal × run-created 表外 fail-fast。
+  if (!liveRunFoldCheckpoints.has(run.runId) && !settledRunRecords.has(run.runId)) {
+    liveRunFoldCheckpoints.set(run.runId, INITIAL_RUN_EVENT_FOLD);
   }
   return dispatchRunTrigger(run, {
     type: "run-created",
