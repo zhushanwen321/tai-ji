@@ -44,7 +44,7 @@ import {
   registerMemberRecord,
   resetMemberReusePoolsForTest,
   type MemberReusePoolIo,
-} from "../member-reuse-pool.ts";
+} from "../../execution/service/member-reuse-pool.ts";
 import type { WorkflowRunEvent } from "../run-events.ts";
 
 import { ModelConfigService } from "../../execution/assembly/model-config-service.ts";

@@ -1207,7 +1207,7 @@
         "packages/subagent-core/src/execution/engine/**",
         "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
         "packages/pi-subagent-cli/src/**",
-        "packages/subagent-core/src/orchestration/member-reuse-pool.ts"
+        "packages/subagent-core/src/execution/service/member-reuse-pool.ts"
       ],
       "layer": "L3",
       "assets": [

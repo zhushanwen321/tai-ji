@@ -23,7 +23,7 @@ import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/ex
 
 import { disposeWorkflowWindowEngineState } from "../execution/engine/routing.ts";
 import { writeRunTerminalManifest } from "../execution/persistence/manifest-store.ts";
-import { clearMemberReusePool, type MemberReusePoolIo } from "./member-reuse-pool.ts";
+import { clearMemberReusePool, type MemberReusePoolIo } from "../execution/service/member-reuse-pool.ts";
 import type { LifecycleDeps } from "./models/ports.ts";
 import type { RunSpec } from "./models/run-spec.ts";
 import type { WorkflowRun } from "./models/workflow-run.ts";

@@ -3105,7 +3105,7 @@
    "scope": [
     "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
     "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts",
-    "packages/subagent-core/src/orchestration/member-reuse-pool.ts"
+    "packages/subagent-core/src/execution/service/member-reuse-pool.ts"
    ],
    "authority": [
     "../packages/subagent-core/src/execution/assembly/subagent-actions-core.ts",

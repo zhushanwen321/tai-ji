@@ -43,13 +43,13 @@ import { assertModelInCatalog } from "../../shared/model-catalog.ts";
 // 供成员复用绑定的 record 读注入面（MemberReusePoolIo 生产装配）——读面仍单源，
 // 写面单写者纪律（唯一写者 = orchestration/terminal-actions）不变。本 import 即
 // D1 拆边 Class C 消掉的那条 execution → orchestration 值边（terminal-actions 侧
-// 保留同名 re-export，其余消费点零改动）。
+// 曾保留同名 re-export 过渡，收尾已删并改直连持久化层）。
 import { scanRunEvents } from "../persistence/run-event-journal.ts";
 // [U4] 成员复用池（决策 4/9/10 的机制本体）。[D1 拆边 Class C 第 4 步] 池本体自
 // orchestration 整体下沉 execution/service（依赖面核查 = 可下沉：值依赖只有
 // core/logger，类型依赖只有 run-events 的 WorkflowRunEvent；无编排状态机语义）——
 // 本 import 即 D1 拆边 Class C 消掉的第四条 execution → orchestration 值边；编排侧
-// 消费面经 orchestration/member-reuse-pool.ts 的同名 re-export 零改动。
+// 消费面直连本模块（过渡期同名 re-export façade 收尾已删）。
 // 池的 record 读经 io 注入（读面单源），无环。
 import {
   lookupMemberRecordId,
@@ -61,7 +61,6 @@ import {
 import { resumeAnchorOf } from "../assembly/conversation-continuation.ts";
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import { updateFromEvent } from "../persistence/execution-record.ts";
-import { EngineError } from "../engine/common/errors.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
@@ -83,7 +82,7 @@ import type { NotifyHost } from "../notify/notify-host.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
 // 本聚合单向 type import（D-R3-2 同款非环形态）。
 import type { ResolvedIdentity } from "./record-access.ts";
-import { createBackgroundStream, type StreamSink, type SubagentStream } from "../assembly/stream-sink.ts";
+import { createBackgroundStream, type StreamSink } from "../assembly/stream-sink.ts";
 // 嵌套深度护栏单点（与 run-orchestration 同源；聚合间零互调不受影响——共同 import
 // 叶子 helper 文件是既有形态，G2 禁的是两聚合互相 import）。
 import { assertNestingDepthWithinLimit } from "../assembly/session-context-resolver.ts";

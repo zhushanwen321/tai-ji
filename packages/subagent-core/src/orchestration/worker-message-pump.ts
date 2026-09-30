@@ -1270,4 +1270,4 @@ const ASK_RETRY_REASON_MAX_CHARS = 160;
 
 // ── [D6] 复用池活体缓存的同步读取面 ─────────────────────────
 
-import { peekMemberRecordId } from "./member-reuse-pool.ts";
+import { peekMemberRecordId } from "../execution/service/member-reuse-pool.ts";

@@ -62,7 +62,6 @@ import { project, settleWorkflowRecord } from "../persistence/execution-record.t
 // [P1b-1] settle 链收口单点（settleOneShotOutcome workflow origin 分支的终态收口
 // 迁入）。[D1 拆边 Class C] 该单点下沉持久化层（记录级原语：CAS + 委托
 // finalizeRecord，零编排语义），上方 import 已直连 persistence。
-import { EngineError } from "../engine/common/errors.ts";
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
 import { wireEventJournal } from "../engine/common/journal-wiring.ts";
 import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts";
@@ -89,7 +88,6 @@ import type { RecordStore } from "../persistence/record-store.ts";
 import type { ResolvedIdentity } from "./record-access.ts";
 // 嵌套深度护栏单点（D-033 共享判据 + MAX_FORK_DEPTH 上限常量同源）。
 import { assertNestingDepthWithinLimit } from "../assembly/session-context-resolver.ts";
-import type { SubagentStream } from "../assembly/stream-sink.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
 // [§3.1.5 binding 载荷单源] 身份域载荷与 settle 全载荷共用同一构造器
 // （identityBindingPayload；差异段由 fullBindingPayload 追加）——两处手写的人肉

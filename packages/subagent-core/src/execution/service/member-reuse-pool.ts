@@ -6,8 +6,8 @@
 // （事件载荷接口按 Class B 先例留原位作类型导入——B1 已裁决「值不能反向依赖编排层」，
 // 类型边编译期擦除）；模块本体是 record 流的 fold + runId 分区内存表，零编排状态机
 // 语义、除 io 注入的 record 读外零 IO / 零时钟依赖，不把状态机语义带进下层。编排侧
-// 消费面（terminal-actions / worker-message-pump / 成员复用池测试）经
-// `orchestration/member-reuse-pool.ts` 的同名 re-export 零改动继续消费。
+// 消费面（terminal-actions / worker-message-pump / 成员复用池测试）直连本模块——
+// 过渡期曾保留同名 re-export façade，收尾已删。
 //
 // [U4 pi-workflow-run-resource-model → D6 绑定消解]（workflow-run-resume-revision）
 // workflow 成员会话 name 键复用绑定的查询辅助：同 run 内同名 agent() 调用 = 同一
@@ -33,8 +33,7 @@
 // record 读通道经 MemberReusePoolIo 注入（生产装配 = terminal-actions 的
 // scanRunEvents——journal 单写者纪律：读侧不自建 journal 实例绕过 no-op 测试防线）。
 // 本模块不 import worker-message-pump / terminal-actions（消费方反向 import 本模块
-// 做收尾清空接线，双向直依赖会成环；编排侧导入面保留在
-// `orchestration/member-reuse-pool.ts` 的同名 re-export 上）。
+// 做收尾清空接线，双向直依赖会成环；编排侧导入面直连本模块）。
 //
 // 层归属：Engine。除 io 注入的 record 读外零 IO / 零时钟依赖（fold 纯函数可独立
 // 测试）。
